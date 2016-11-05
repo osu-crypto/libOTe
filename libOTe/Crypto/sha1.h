@@ -86,37 +86,37 @@ namespace osuCrypto {
     //#define git_SHA1_Init    blk_SHA1_Init
     //#define git_SHA1_Update    blk_SHA1_Update
     //#define git_SHA1_Final    blk_SHA1_Final
-    class SHA2
-    {
-    public:
-        static const u64 HashSize = 512;
-        SHA2() { Reset(); }
+    //class SHA2
+    //{
+    //public:
+    //    static const u64 HashSize = 512;
+    //    SHA2() { Reset(); }
 
-        //u64 mSize;
-        //u32 mH[5];
-        //u32 mW[16];
+    //    //u64 mSize;
+    //    //u32 mH[5];
+    //    //u32 mW[16];
 
-        inline void Reset()
-        {
-            mSha.Restart();
-        }
-        inline void Update(const u8* dataIn, u64 length)
-        {
-            mSha.Update(dataIn, length);
-        }
-        inline void Update(const block& blk)
-        {
-            Update(ByteArray(blk), sizeof(block));
-        }
-        inline void Final(u8* DataOut)
-        {
-            mSha.Final(DataOut);
-        }
+    //    inline void Reset()
+    //    {
+    //        mSha.Restart();
+    //    }
+    //    inline void Update(const u8* dataIn, u64 length)
+    //    {
+    //        mSha.Update(dataIn, length);
+    //    }
+    //    inline void Update(const block& blk)
+    //    {
+    //        Update(ByteArray(blk), sizeof(block));
+    //    }
+    //    inline void Final(u8* DataOut)
+    //    {
+    //        mSha.Final(DataOut);
+    //    }
 
-    private:
-        //void Block(const u32* data);
-        CryptoPP::SHA512 mSha;
+    //private:
+    //    //void Block(const u32* data);
+    //    CryptoPP::SHA512 mSha;
 
-    };
+    //};
 
 }
