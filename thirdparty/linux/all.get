@@ -1,0 +1,13 @@
+sudo yum install bzip2 -Y
+sudo yum install unzip -Y
+sudo yum install gcc-c++ -Y
+sudo yum install m4 -Y
+
+bash boost.get &
+bash cryptopp.get &
+bash miracl.get &
+bash mpir.get &
+bash ntl.get &
+
+wait
+echo "all done!"

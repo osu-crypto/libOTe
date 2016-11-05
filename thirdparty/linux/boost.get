@@ -1,0 +1,13 @@
+wget -c 'http://sourceforge.net/projects/boost/files/boost/1.59.0/boost_1_59_0.tar.bz2/download' -O ./boost_1_59_0.tar.bz2
+tar xfj boost_1_59_0.tar.bz2
+mv boost_1_59_0 boost
+rm  boost_1_59_0.tar.bz2
+
+cd ./boost
+
+./bootstrap.sh
+
+./b2 stage --with-system --with-thread link=static -mt 
+
+mkdir includes
+cp -r boost includes/

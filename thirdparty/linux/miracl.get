@@ -1,0 +1,7 @@
+cat "downloading Miracl"
+
+git clone https://github.com/ladnir/miracl
+
+echo "building Mircal"
+cd miracl/miracl/source/
+bash linux64
