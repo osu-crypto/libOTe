@@ -1,7 +1,6 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
 #include "Common/Defines.h"
-#include "cryptopp/sha.h"
 extern void sha1_compress(uint32_t state[5], const uint8_t block[64]);
 
 namespace osuCrypto {
