@@ -70,7 +70,7 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on an Intel Xeon 
  
 \** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper and their implementation used multiple threads. The number was not specified. When using the libOTe implementation with multiple threads, a timing of 2.6 seconds was obtained.
  
-It should be noted that the libOTe implementation uses the Boost ASIO library to perform more efficient asynchronous network IO. This involves using a background thread to help process network data. As such, this is not a completely fair comparison but we don't expect it to have a large impact. It also appears the Encrypto Group implementation used asynchronous network IO.
+It should be noted that the libOTe implementation uses the Boost ASIO library to perform more efficient asynchronous network IO. This involves using a background thread to help process network data. As such, this is not a completely fair comparison to the Apricot implementation but we don't expect it to have a large impact. It also appears that the Encrypto Group implementation uses asynchronous network IO.
  
 ## Protocol Details
 The 1-out-of-N [OOS16] protocol currently is set to work forn N=2<sup>76</sup> but is capable of supporting arbitrary codes given the generator matrix in text format. See `./libOTe/OT/Tools/Bch511.txt` for an example.
