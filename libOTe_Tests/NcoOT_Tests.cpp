@@ -35,7 +35,7 @@ void KkrtNcoOt_Test_Impl()
     KkrtNcoOtSender sender;
     KkrtNcoOtReceiver recv;
     u64 codeSize, baseCount;
-    sender.getParams(true,128, 40, 128, numOTs, codeSize, baseCount);
+    sender.getParams(false,128, 40, 128, numOTs, codeSize, baseCount);
     
     std::vector<block> baseRecv(baseCount);
     std::vector<std::array<block, 2>> baseSend(baseCount);

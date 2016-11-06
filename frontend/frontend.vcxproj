@@ -79,12 +79,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="CLP.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="miraclTest.cpp" />
     <ClCompile Include="UnitTests.cpp" />
     <ClCompile Include="util.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CLP.h" />
     <ClInclude Include="UnitTests.h" />
     <ClInclude Include="util.h" />
   </ItemGroup>

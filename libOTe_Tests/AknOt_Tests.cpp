@@ -44,10 +44,7 @@ void AknOt_sendRecv1000_Test()
         sendChls[i] = &ep1.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i));
         recvChls[i] = &ep0.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i));
     }
-    //Channel& sChl  = ep1.addChannel("chl0", "chl0");
-    //Channel& rChl  = ep0.addChannel("chl0", "chl0");
-    //Channel& sChl1 = ep1.addChannel("chl1", "chl1");
-    //Channel& rChl1 = ep0.addChannel("chl1", "chl1");
+
 
     AknOtReceiver recv;
     AknOtSender send;
@@ -58,19 +55,6 @@ void AknOt_sendRecv1000_Test()
     PRNG
         sPrng(ZeroBlock),
         rPrng(OneBlock);
-
-
-    //BitVector bv(128);
-    //bv.randomize(sPrng);
-    //std::vector<block> r(128);
-    //std::vector<std::array<block, 2>> s(128);
-
-    //std::atomic<u64>__(0),___(0);
-    //otExtRecv.Extend(bv, r, rPrng, *(Channel*)nullptr, __);
-    //otExtSend.Extend(s, rPrng, *(Channel*)nullptr, ___);
-
-    //if (neq(r[0], s[0][bv[0]]))
-    //    throw UnitTestFail();
 
     std::thread thrd([&]() {
 
@@ -102,13 +86,9 @@ void AknOt_sendRecv1000_Test()
 
     for (u64 i = 0; i < numTHreads; ++i)
     {
-        sendChls[i]->close();// = &ep1.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i));
-        recvChls[i]->close();// = &ep0.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i));
+        sendChls[i]->close();
+        recvChls[i]->close();
     }
-    //sChl.close();
-    //rChl.close();
-    //sChl1.close();
-    //rChl1.close();
 
     ep0.stop();
     ep1.stop();
