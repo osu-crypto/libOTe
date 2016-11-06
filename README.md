@@ -1,5 +1,5 @@
 # libOTe
-A fast and portable C++ library for Oblivious Transfer extension (OTe). The primary design goal of this libary to obtain *high performance* while being *easy to use*.  This library currently implements:
+A fast and portable C++11 library for Oblivious Transfer extension (OTe). The primary design goal of this libary to obtain *high performance* while being *easy to use*.  This library currently implements:
 
 * The semi-honest 1-out-of-2 OT [IKNP03] protocol.
 * The semi-honest 1-out-of-N [[KKRT16]](https://eprint.iacr.org/2016/799) protocol. 
@@ -14,20 +14,21 @@ This library provides several different classes of OT protocols. First is the ba
 
 All implementations are highly optimized using fast SSE instructions and vectorization to obtains optimal performance both in the single and multi-threaded setting. See the **Performance** section for a comparison between protocols and to other libraries. 
 
-The 1-out-of-N [OOS16] protocol currently is set to work forn N=2<sup>76</sup> but is capable of supporting arbitrary codes given the generator matrix in text format. 
 
-The 1-out-of-N  [KKRT16] for arbitrary N is also implemented and slightly faster than [OOS16]. However, [KKRT16] is in the semi-honest setting.
 
-The approximate K-out-of-N OT [RR16] protocol is also implemented. This protocol allows for a rough bound on the value K with a very light weight cut and choose technique. It was introducted for a PSI protocol that builds on a Garbled Bloom Filter.
+#### Lisence
+
+This project has been placed in the public domain. As such, you are unrestricted in how you use it, commercial or otherwise. However, no warranty of fitness is provided. If you found this project helpful, feel free to spread the word and cite us.
+
 
 
 ## Install
 
-The library is *cross platform* and has been tested on both Windows and Linux. The library should work on MAC but it has not been tested. There are two library dependancies including Boost, Miracl. For each, we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advice using the coned repository that we provide.
+The library is *cross platform* and has been tested on both Windows and Linux. The library should work on MAC but it has not been tested. There are two library dependancies including [Boost](http://www.boost.org/), and [Miracl](https://www.miracl.com/index) . For each, we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advice using the coned repository that we provide.
 
 ### Windows
 
-This project was developed using visual studio and contains the associated solution and project files. Before building the solution, the third party libraries [Boost](http://www.boost.org/), and [Miracl](https://www.miracl.com/index) must be obtained. We provide powershell scripts that automate this processes located in the ./thirdparty/win/ directory. Make sure that you have set the execution policy to unrestricted, i.e. run `Set-ExecutionPolicy  Unrestricted` as admin.
+This project was developed using visual studio and contains the associated solution and project files. Before building the solution, the third party libraries [Boost](http://www.boost.org/), and [Miracl](https://www.miracl.com/index) must be obtained. We provide powershell scripts that automate this processes located in the `./thirdparty/win/` directory. Make sure that you have set the execution policy to unrestricted, i.e. run `Set-ExecutionPolicy  Unrestricted` as admin.
 
 By default, these scripts will download the libraries to this folder. However, the visual studio projects will also look form them at `C:\\libs\`.
 
@@ -42,7 +43,7 @@ For the full set of command line options, simply execute the frendend with no ar
 
 ### Linux
 
-Once cloned, the libraries listed above must be built. In Thirdparty/linux there are scripts that will download and build all of the libraries that are listed above. To build the library:
+Once cloned, the libraries listed above must be built. In `./thirdparty/linux` there are scripts that will download and build all of the libraries that are listed above. To build the libOTe and the associated frontend:
 
 `./make `
 
@@ -56,10 +57,10 @@ To see all the command line options, execute the program
 The running time in seconds for computing n=2<sup>24</sup> OTs on an Intel Xeon server. 
 
 
-| *Type*                	| *Security*  	| *Protocol*     	| libOTe 	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) 	| [Apricot](https://github.com/bristolcrypto/apricot)	| OOS	| [Crypto BIU](https://github.com/cryptobiu) 	|
+| *Type*                	| *Security*  	| *Protocol*     	| libOTe 	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) 	| [Apricot](https://github.com/bristolcrypto/apricot)	| OOS16	| [Crypto BIU](https://github.com/cryptobiu) 	|
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
-| 1-out-of-N (N=2<sup>76</sup>) 	| malicious 	| OOS    	    | **11.7**       	| ~              	| ~     	| 24**     	| ~          	|
-| 1-out-of-N (N=2<sup>128</sup>)   | passive   	| KKRT      	| **9.2**        	| ~              	| ~       	| ~       	| ~          	|
+| 1-out-of-N (N=2<sup>76</sup>) 	| malicious 	| OOS16    	    | **11.7**       	| ~              	| ~     	| 24**     	| ~          	|
+| 1-out-of-N (N=2<sup>128</sup>)   | passive   	| KKRT16      	| **9.2**        	| ~              	| ~       	| ~       	| ~          	|
 | 1-out-of-2          	| malicious 	| ALSZ15        	| ~          	    | 93.9*          	| ~       	| ~       	| ~          	|
 | 1-out-of-2           	| malicious   	| KOS15       	| **4.8**        	| ~              	| 7.1     	| ~        	| TODO       	|
 | 1-out-of-2          	| passive   	| IKNP03       	| **4.7**        	| 93.9           	| 6.8     	| ~     	| TODO       	|
@@ -69,6 +70,13 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on an Intel Xeon 
 \** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper and their implementation used multiple threads. The number was not specified. When using the libOTe implementaion with multiple threads, a timing of 2.6 seconds was obtained.
 
 It should be noted that the libOTe implementation uses the Boost ASIO library to perform  more efficient asynchonis network IO. This involves using a background thread to help process network data. As such, this is not a completely fair comparison but we don't expect it to have a large impact.
+
+#### Protocol Details
+The 1-out-of-N [OOS16] protocol currently is set to work forn N=2<sup>76</sup> but is capable of supporting arbitrary codes given the generator matrix in text format. See `./libOTe/OT/Tools/Bch511.txt` for an example.
+
+The 1-out-of-N  [KKRT16] for arbitrary N is also implemented and slightly faster than [OOS16]. However, [KKRT16] is in the semi-honest setting.
+
+The approximate K-out-of-N OT [RR16] protocol is also implemented. This protocol allows for a rough bound on the value K with a very light weight cut and choose technique. It was introducted for a PSI protocol that builds on a Garbled Bloom Filter.
 
 ## Help
 
