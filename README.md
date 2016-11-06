@@ -65,6 +65,8 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on an Intel Xeon 
 | 1-out-of-2           	| malicious   	| KOS15       	| **4.8**        	| ~              	| 7.1     	| ~        	| TODO       	|
 | 1-out-of-2          	| passive   	| IKNP03       	| **4.7**        	| 93.9           	| 6.8     	| ~     	| TODO       	|
 
+as of 11/6/2016.
+
 \* Estmated from running the Encrypto Group implementation for n=2<sup>20</sup>.  Program would crash for n=2<sup>24</sup>.
 
 \** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper and their implementation used multiple threads. The number was not specified. When using the libOTe implementaion with multiple threads, a timing of 2.6 seconds was obtained.
