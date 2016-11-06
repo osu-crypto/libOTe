@@ -54,18 +54,17 @@ To see all the command line options, execute the program
 
 ## Performance
 
-The running time in seconds for computing n=2<sup>24</sup> OTs on an Intel Xeon server. 
+The running time in seconds for computing n=2<sup>24</sup> OTs on an Intel Xeon server as of 11/6/2016.
 
 
 | *Type*                	| *Security*  	| *Protocol*     	| libOTe 	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) 	| [Apricot](https://github.com/bristolcrypto/apricot)	| OOS16	| [Crypto BIU](https://github.com/cryptobiu) 	|
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
 | 1-out-of-N (N=2<sup>76</sup>) 	| malicious 	| OOS16    	    | **11.7**       	| ~              	| ~     	| 24**     	| ~          	|
 | 1-out-of-N (N=2<sup>128</sup>)   | passive   	| KKRT16      	| **9.2**        	| ~              	| ~       	| ~       	| ~          	|
-| 1-out-of-2          	| malicious 	| ALSZ15        	| ~          	    | 93.9*          	| ~       	| ~       	| ~          	|
-| 1-out-of-2           	| malicious   	| KOS15       	| **4.8**        	| ~              	| 7.1     	| ~        	| TODO       	|
+| 1-out-of-2          	| malicious 	| ALSZ15        	| ~          	    | 93.9*          	| ~       	| ~       	| TODO          	|
+| 1-out-of-2           	| malicious   	| KOS15       	| **4.8**        	| ~              	| 7.1     	| ~        	| ~       	|
 | 1-out-of-2          	| passive   	| IKNP03       	| **4.7**        	| 93.9           	| 6.8     	| ~     	| TODO       	|
 
-as of 11/6/2016.
 
 \* Estmated from running the Encrypto Group implementation for n=2<sup>20</sup>.  Program would crash for n=2<sup>24</sup>.
 
@@ -73,7 +72,7 @@ as of 11/6/2016.
 
 It should be noted that the libOTe implementation uses the Boost ASIO library to perform  more efficient asynchonis network IO. This involves using a background thread to help process network data. As such, this is not a completely fair comparison but we don't expect it to have a large impact.
 
-#### Protocol Details
+## Protocol Details
 The 1-out-of-N [OOS16] protocol currently is set to work forn N=2<sup>76</sup> but is capable of supporting arbitrary codes given the generator matrix in text format. See `./libOTe/OT/Tools/Bch511.txt` for an example.
 
 The 1-out-of-N  [KKRT16] for arbitrary N is also implemented and slightly faster than [OOS16]. However, [KKRT16] is in the semi-honest setting.
