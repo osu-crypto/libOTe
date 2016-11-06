@@ -59,7 +59,7 @@ namespace osuCrypto
         u64 numBlocks = numSuperBlocks * superBlkSize;
 
         // a temp that will be used to transpose the sender's matrix
-        std::array<std::array<block, superBlkSize>, 128> t, u, t0;
+        std::array<std::array<block, superBlkSize>, 128> t, u;
         std::array<block, 128> choiceMask;
         block delta = *(block*)mBaseChoiceBits.data();
 

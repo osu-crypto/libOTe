@@ -3,12 +3,12 @@
 #include "OT/Tools/Tools.h"
 #include "Common/Log.h"
 #include "Common/ByteStream.h"
+#include "Crypto/Commit.h"
 
 namespace osuCrypto
 {
-    //#define OTEXT_DEBUG
-
     using namespace std;
+
 
 
 
@@ -45,82 +45,142 @@ namespace osuCrypto
     void IknpOtExtSender::send(
         ArrayView<std::array<block, 2>> messages,
         PRNG& prng,
-        Channel& chl/*,
-        std::atomic<u64>& doneIdx*/)
+        Channel& chl)
     {
-        if (messages.size() == 0) return;
 
-        if (mBaseChoiceBits.size() != gOtExtBaseOtCount)
-            throw std::runtime_error("must set base first");
+        const u8 superBlkSize(8);
+
 
         // round up
-        u64 numOTExt = ((messages.size() + 127) / 128) * 128;
+        u64 numOtExt = roundUpTo(messages.size(), 128);
+        u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
+        u64 numBlocks = numSuperBlocks * superBlkSize;
 
-        SHA1 sha;
-        u8 hashBuff[SHA1::HashSize];
-
-
-        u64 doneIdx = 0;
-        std::array<block, gOtExtBaseOtCount> q;
+        // a temp that will be used to transpose the sender's matrix
+        std::array<std::array<block, superBlkSize>, 128> t, u;
+        std::array<block, 128> choiceMask;
         block delta = *(block*)mBaseChoiceBits.data();
-        ByteStream buff;
-#ifdef OTEXT_DEBUG
-        Log::out << "sender delta " << delta << Log::endl;
-        buff.append(delta);
-        chl.AsyncSendCopy(buff);
-#endif
 
-        // add one for the extra 128 OTs used for the correlation check
-        u64 numBlocks = numOTExt / gOtExtBaseOtCount;
-        for (u64 blkIdx = 0; blkIdx < numBlocks; ++blkIdx)
+        for (u64 i = 0; i < 128; ++i)
+        {
+            if (mBaseChoiceBits[i]) choiceMask[i] = AllOneBlock;
+            else choiceMask[i] = ZeroBlock;
+        }
+
+        std::array<block, 2>* mIter = messages.data();
+
+
+        for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
         {
 
-            chl.recv(buff);
-            assert(buff.size() == sizeof(block) * gOtExtBaseOtCount);
+            block * tIter = (block*)t.data();
+            block * uIter = (block*)u.data();
+            block * cIter = choiceMask.data();
 
-            // u = t0 + t1 + x 
-            auto u = buff.getArrayView<block>();
+            chl.recv(u.data(), superBlkSize * 128 * sizeof(block));
 
-            for (int colIdx = 0; colIdx < gOtExtBaseOtCount; colIdx++)
+            // transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
+            for (u64 colIdx = 0; colIdx < 128; ++colIdx)
             {
-                // a column vector sent by the receiver that hold the correction mask.
-                q[colIdx] = mGens[colIdx].get<block>();
+                // generate the columns using AES-NI in counter mode.
+                mGens[colIdx].mAes.ecbEncCounterMode(mGens[colIdx].mBlockIdx, superBlkSize, tIter);
+                mGens[colIdx].mBlockIdx += superBlkSize;
 
-                if (mBaseChoiceBits[colIdx])
-                {
-                    // now q[i] = t0[i] + Delta[i] * x
-                    q[colIdx] = q[colIdx] ^ u[colIdx];
-                }
+                uIter[0] = uIter[0] & *cIter;
+                uIter[1] = uIter[1] & *cIter;
+                uIter[2] = uIter[2] & *cIter;
+                uIter[3] = uIter[3] & *cIter;
+                uIter[4] = uIter[4] & *cIter;
+                uIter[5] = uIter[5] & *cIter;
+                uIter[6] = uIter[6] & *cIter;
+                uIter[7] = uIter[7] & *cIter;
+
+                tIter[0] = tIter[0] ^ uIter[0];
+                tIter[1] = tIter[1] ^ uIter[1];
+                tIter[2] = tIter[2] ^ uIter[2];
+                tIter[3] = tIter[3] ^ uIter[3];
+                tIter[4] = tIter[4] ^ uIter[4];
+                tIter[5] = tIter[5] ^ uIter[5];
+                tIter[6] = tIter[6] ^ uIter[6];
+                tIter[7] = tIter[7] ^ uIter[7];
+
+                ++cIter;
+                uIter += 8;
+                tIter += 8;
             }
 
-            sse_transpose128(q);
+            // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
+            // each 128 bits wide.
+            sse_transpose128x1024(t);
 
-#ifdef OTEXT_DEBUG
-            buff.setp(0);
-            buff.append((u8*)&q, sizeof(q));
-            chl.AsyncSendCopy(buff);
-#endif
-            u32 stopIdx = (u32)std::min(u64(gOtExtBaseOtCount), messages.size() - doneIdx);
-            u32 blkRowIdx = 0;
-            for (; blkRowIdx < stopIdx; ++blkRowIdx, ++doneIdx)
+
+            std::array<block, 2>* mStart = mIter;
+            std::array<block, 2>* mEnd = std::min(mIter + 128 * superBlkSize, (std::array<block, 2>*)messages.end());
+
+            tIter = (block*)t.data();
+            block* tEnd = (block*)t.data() + 128 * superBlkSize;
+
+            while (mIter != mEnd)
             {
-                auto& msg0 = q[blkRowIdx];
-                auto msg1 = q[blkRowIdx] ^ delta;
+                while (mIter != mEnd && tIter < tEnd)
+                {
+                    (*mIter)[0] = *tIter;
+                    (*mIter)[1] = *tIter ^ delta;
 
+                    tIter += superBlkSize;
+                    mIter += 1;
+                }
+
+                tIter = tIter - 128 * superBlkSize + 1;
+            }
+
+
+#ifdef KOS_DEBUG
+            BitVector choice(128 * superBlkSize);
+            chl.recv(u.data(), superBlkSize * 128 * sizeof(block));
+            chl.recv(choice.data(), sizeof(block) * superBlkSize);
+
+            u64 doneIdx = mStart - messages.data();
+            u64 xx = std::min(i64(128 * superBlkSize), (messages.data() + messages.size()) - mEnd);
+            for (u64 rowIdx = doneIdx,
+                j = 0; j < xx; ++rowIdx, ++j)
+            {
+                if (neq(((block*)u.data())[j], messages[rowIdx][choice[j]]))
+                {
+                    Log::out << rowIdx << Log::endl;
+                    throw std::runtime_error("");
+                }
+            }
+#endif
+        }
+
+        SHA1 sha;
+        u8 hashBuff[20];
+        u64 doneIdx = 0;
+
+
+        u64 bb = (messages.size() + 127) / 128;
+        for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
+        {
+            u64 stop = std::min(messages.size(), doneIdx + 128);
+
+            for (u64 i = 0; doneIdx < stop; ++doneIdx, ++i)
+            {
                 // hash the message without delta
                 sha.Reset();
-                sha.Update((u8*)&msg0, sizeof(block));
+                sha.Update((u8*)&messages[doneIdx][0], sizeof(block));
                 sha.Final(hashBuff);
                 messages[doneIdx][0] = *(block*)hashBuff;
 
                 // hash the message with delta
                 sha.Reset();
-                sha.Update((u8*)&msg1, sizeof(block));
+                sha.Update((u8*)&messages[doneIdx][1], sizeof(block));
                 sha.Final(hashBuff);
                 messages[doneIdx][1] = *(block*)hashBuff;
-
             }
         }
+
+        static_assert(gOtExtBaseOtCount == 128, "expecting 128");
     }
 
 

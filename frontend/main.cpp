@@ -21,6 +21,9 @@ int miraclTestMain();
 #include "OT/TwoChooseOne/KosOtExtSender.h"
 
 
+#include "OT/TwoChooseOne/IknpOtExtReceiver.h"
+#include "OT/TwoChooseOne/IknpOtExtSender.h"
+
 void oos16_test(int i)
 {
     Log::setThreadName("Sender");
@@ -202,7 +205,8 @@ void kos_test(int i)
         BitVector choice(otsPer);
         std::vector<block> msgs(otsPer);
         choice.randomize(prng0);
-        KosOtExtReceiver r;
+        IknpOtExtReceiver r;
+        //KosOtExtReceiver r;
         r.setBaseOts(baseSend);
         auto& chl = *chls[0];
 
@@ -215,7 +219,8 @@ void kos_test(int i)
         Timer time;
         time.setTimePoint("start");
         block encoding1, encoding2;
-        KosOtExtSender s;
+        IknpOtExtSender s;
+        //KosOtExtSender s;
         s.setBaseOts(baseRecv, baseChoice);
         auto& chl = *chls[0];
 
