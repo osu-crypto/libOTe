@@ -64,29 +64,34 @@ namespace osuCrypto
         block seed = prng.get<block>();
         Commit myComm(seed);
         chl.asyncSend(myComm.data(), myComm.size());
-            
+
         PRNG zPrng(ZeroBlock);
         // turn the choice vbitVector into an array of blocks. 
         BitVector choices2(numBlocks * 128);
-        auto choiceBlocks = choices2.getArrayView<block>();
-        choices2.randomize(zPrng);
-        //choices2 = choices;
-        //choices2.resize(numBlocks * 128);
-        //for (u64 i = 0; i < 128; ++i)
-        //{
-        //    choices2[choices.size() + i] = prng.getBit();
-        //}
+        //choices2.randomize(zPrng);
+        choices2 = choices;
+        choices2.resize(numBlocks * 128);
+        for (u64 i = 0; i < 128; ++i)
+        {
+            choices2[choices.size() + i] = prng.getBit();
 
+            //Log::out << "extra " << i << "  " << choices2[choices.size() + i] << Log::endl;
+        }
+
+        auto choiceBlocks = choices2.getArrayView<block>();
         // this will be used as temporary buffers of 128 columns, 
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
         std::array<std::array<block, superBlkSize>, 128> t0;
 
         // the index of the OT that has been completed.
-        u64 doneIdx = 0;
+        //u64 doneIdx = 0;
 
         std::array<block, 128> extraBlocks;
-        u64 extraIdx = 0;
+        block* xIter = extraBlocks.data();
+        //u64 extraIdx = 0;
+
+        block* mIter = messages.data();
 
         // NOTE: We do not transpose a bit-matrix of size numCol * numCol.
         //   Instead we break it down into smaller chunks. We do 128 columns 
@@ -96,12 +101,6 @@ namespace osuCrypto
         //   So that's what we do. 
         for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
         {
-            // compute at what row does the user want us to stop.
-            // The code will still compute the transpose for these
-            // extra rows, but it is thrown away.
-            u64 stopIdx
-                = doneIdx
-                + std::min(u64(128) * superBlkSize, messages.size() - doneIdx);
 
             // this will store the next 128 rows of the matrix u
             std::unique_ptr<ByteStream> uBuff(new ByteStream(128 * superBlkSize * sizeof(block)));
@@ -159,52 +158,70 @@ namespace osuCrypto
 
 
 
-            // This is the index of where we will store the matrix long term.
-            // doneIdx is the starting row. i is the offset into the blocks of 128 bits.
-            // __restrict isn'tIter crucial, it just tells the compiler that this pointer
-            // is unique and it shouldn'tIter worry about pointer aliasing. 
-            auto* __restrict msgIter = messages.data() + doneIdx;
-            block* extraEnd = t0.back().data() + t0.back().size();
+            block* mStart = mIter;
+            block* mEnd = std::min(mIter + 128 * superBlkSize,(block*)messages.end());
 
-            u64 rowIdx = doneIdx;
-            for (u64 j = 0; rowIdx < stopIdx; ++j)
+            // compute how many rows are unused.
+            u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
+
+            // compute the begin and end index of the extra rows that 
+            // we will compute in this iters. These are taken from the 
+            // unused rows what we computed above.
+            block* xEnd = std::min(xIter + unusedCount, extraBlocks.data() + 128);
+
+            tIter = (block*)t0.data();
+            block* tEnd = (block*)t0.data() + 128 * superBlkSize;
+
+            while (mIter != mEnd)
             {
-                // because we transposed 1024 rows, the indexing gets a bit weird. But this
-                // is the location of the next row that we want. Keep in mind that we had long
-                // **contiguous** columns. 
-                block* __restrict t0Iter = ((block*)t0.data()) + j;
-
-                // do the copy!
-                u64 k = 0;
-                for (; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)
+                while (mIter != mEnd && tIter < tEnd)
                 {
-                    *msgIter = *(t0Iter);
+                    (*mIter) = *tIter; 
 
-                    //Log::out << "r mgs[" << (msgIter - messages.data()) << "] " << *msgIter << Log::endl;
-
-                    t0Iter += superBlkSize;
-                    ++msgIter;
+                    tIter += superBlkSize;
+                    mIter += 1;
                 }
 
-                for (; t0Iter < extraEnd && k < 128 && extraIdx < 128; ++k)
-                {
-                    extraBlocks[extraIdx] = *(t0Iter);
-
-                    t0Iter += superBlkSize;
-                    ++extraIdx;
-                }
+                tIter = tIter - 128 * superBlkSize + 1;
             }
 
 
+            if (tIter < (block*)t0.data())
+            {
+                tIter = tIter + 128 * superBlkSize - 1;
+            }
 
-            msgIter = messages.data() + doneIdx;
+            while (xIter != xEnd)
+            {
+                while (xIter != xEnd && tIter < tEnd)
+                {
+                    *xIter = *tIter;
+
+                    tIter += superBlkSize;
+                    xIter += 1;
+                }
+
+                tIter = tIter - 128 * superBlkSize + 1;
+            }
+
+
+#ifdef KOS_DEBUG
+
+            u64 doneIdx = mStart - messages.data();
+            block* msgIter = messages.data() + doneIdx;
             chl.send(msgIter, sizeof(block) * 128 * superBlkSize);
             cIter = choiceBlocks.data() + superBlkSize * superBlkIdx;
             chl.send(cIter, sizeof(block) * superBlkSize);
-
-            doneIdx = stopIdx;
+#endif
+            //doneIdx = stopIdx;
         }
 
+#ifdef KOS_DEBUG
+        chl.send(extraBlocks.data(), sizeof(block) * 128);
+        BitVector cc;
+        cc.copy(choices2, choices.size(), 128);
+        chl.send(cc);
+#endif
 
 
         // do correlation check and hashing
@@ -229,40 +246,44 @@ namespace osuCrypto
 
         SHA1 sha;
         u8 hashBuff[20];
-         
-        doneIdx = (0); 
-        for (u64 blkIdx = 0; blkIdx < numBlocks; ++blkIdx)
+
+        u64 doneIdx = (0);
+        //Log::out << Log::lock;
+
+        for (; doneIdx < messages.size(); ++doneIdx)
         {
-            ;
-            u32 stopIdx = (u32)std::min(u64(128), messages.size() - doneIdx);
 
-            for (u32 blkRowIdx = 0; blkRowIdx < stopIdx; ++blkRowIdx, ++doneIdx)
-            {
+            // and check for correlation
+            chij = commonPrng.get<block>();
 
-                // and check for correlation
-                chij = commonPrng.get<block>();
-                if (choices2[doneIdx]) x = x ^ chij;
+            //Log::out << "recvIdx' " << doneIdx << "   " << messages[doneIdx] << "   " << chij << "  " << (u32)choices2[doneIdx] << Log::endl;
 
-                // multiply over polynomial ring to avoid reduction
-                mul128(messages[doneIdx], chij, ti, ti2);
 
-                t = t ^ ti;
-                t2 = t2 ^ ti2;
+            if (choices2[doneIdx]) x = x ^ chij;
 
-                // hash it
-                sha.Reset();
-                sha.Update((u8*)&messages[doneIdx], sizeof(block));
-                sha.Final(hashBuff);
-                messages[doneIdx] = *(block*)hashBuff;
-            }
+            // multiply over polynomial ring to avoid reduction
+            mul128(messages[doneIdx], chij, ti, ti2);
 
-             
+            t = t ^ ti;
+            t2 = t2 ^ ti2;
+
+            // hash it
+            sha.Reset();
+            sha.Update((u8*)&messages[doneIdx], sizeof(block));
+            sha.Final(hashBuff);
+            messages[doneIdx] = *(block*)hashBuff;
         }
 
+
+
+        u64 xtra = 0;;
         for (block& blk : extraBlocks)
         {
             // and check for correlation
             chij = commonPrng.get<block>();
+
+            //Log::out << "recvIdx' " << xtra++ << "   " << blk << "   " << chij << "  " << (u32)choices2[doneIdx] << Log::endl;
+
             if (choices2[doneIdx++]) x = x ^ chij;
 
             // multiply over polynomial ring to avoid reduction
@@ -271,6 +292,7 @@ namespace osuCrypto
             t = t ^ ti;
             t2 = t2 ^ ti2;
         }
+        //Log::out << Log::unlock;
 
         chl.asyncSend(std::move(correlationData));
 

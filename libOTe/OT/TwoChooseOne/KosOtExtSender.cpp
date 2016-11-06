@@ -7,7 +7,7 @@
 
 namespace osuCrypto
 {
-    //#define OTEXT_DEBUG
+    //#define KOS_DEBUG
 
     using namespace std;
 
@@ -52,16 +52,11 @@ namespace osuCrypto
 
         const u8 superBlkSize(8);
 
-        u64 statSecParm = 40;
 
         // round up
-        u64 numOTExt = ((messages.size() + 127 + statSecParm) / 128) * 128;
-        // we are going to process OTs in blocks of 128 * superblkSize messages.
-        u64 numSuperBlocks = (numOTExt / 128 + superBlkSize - 1) / superBlkSize;
+        u64 numOtExt = roundUpTo(messages.size(), 128);
+        u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
         u64 numBlocks = numSuperBlocks * superBlkSize;
-
-        // the index of the last OT that we have completed.
-        u64 doneIdx = 0;
 
         // a temp that will be used to transpose the sender's matrix
         std::array<std::array<block, superBlkSize>, 128> t, u, t0;
@@ -75,21 +70,17 @@ namespace osuCrypto
         }
 
         std::array<block, 128> extraBlocks;
-        u64 extraIdx = 0;
+        block* xIter = extraBlocks.data();
 
 
         Commit theirSeedComm;
         chl.recv(theirSeedComm.data(), theirSeedComm.size());
 
+        std::array<block, 2>* mIter = messages.data();
+
 
         for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
         {
-            // compute at what row does the user want use to stop.
-            // the code will still compute the transpose for these
-            // extra rows, but it is thrown away.
-            u64 stopIdx
-                = doneIdx
-                + std::min(u64(128) * superBlkSize, messages.size() - doneIdx);
 
             block * tIter = (block*)t.data();
             block * uIter = (block*)u.data();
@@ -132,52 +123,72 @@ namespace osuCrypto
             sse_transpose128x1024(t);
 
 
+            std::array<block, 2>* mStart = mIter;
+            std::array<block, 2>* mEnd = std::min(mIter + 128 * superBlkSize, (std::array<block, 2>*)messages.end());
 
-            // This is the index of where we will store the matrix long term.
-            // doneIdx is the starting row. l is the offset into the blocks of 128 bits.
-            // __restrict isn't crucial, it just tells the compiler that this pointer
-            // is unique and it shouldn't worry about pointer aliasing. 
-            block* __restrict mTIter = (block*)messages.data() + doneIdx;
-            block* extraEnd = t.back().data() + t.back().size();
+            // compute how many rows are unused.
+            u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
 
-            for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
+            // compute the begin and end index of the extra rows that 
+            // we will compute in this iters. These are taken from the 
+            // unused rows what we computed above.
+            block* xEnd = std::min(xIter + unusedCount, extraBlocks.data() + 128);
+
+            tIter = (block*)t.data();
+            block* tEnd = (block*)t.data() + 128 * superBlkSize;
+
+            while (mIter != mEnd)
             {
-                // because we transposed 1024 rows, the indexing gets a bit weird. But this
-                // is the location of the next row that we want. Keep in mind that we had long
-                // **contiguous** columns. 
-                block* __restrict tIter = (((block*)t.data()) + j);
-
-                // do the copy!
-                u64 k = 0;
-                for (; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)
+                while (mIter != mEnd && tIter < tEnd)
                 {
-                    mTIter[0] = *tIter;
-                    mTIter[1] = *tIter ^ delta;
+                    (*mIter)[0] = *tIter;
+                    (*mIter)[1] = *tIter ^ delta;
 
-                    //Log::out << "s mgs[" << (mTIter - (block*)messages.data()) / 2 << "][0] " << *mTIter << Log::endl;
-                    //Log::out << "s mgs[" << (mTIter - (block*)messages.data()) / 2 << "][1] " << mTIter[1] << Log::endl;
-
+                    //u64 tV = tIter - (block*)t.data();
+                    //u64 tIdx = tV / 8 + (tV % 8) * 128;
+                    //Log::out << "midx " << (mIter - messages.data()) << "   tIdx " << tIdx << Log::endl;
 
                     tIter += superBlkSize;
-                    mTIter += 2;
+                    mIter += 1;
                 }
 
-                for (; tIter < extraEnd && k < 128 && extraIdx < 128; ++k)
-                {
-                    extraBlocks[extraIdx] = *(tIter);
-
-                    tIter += superBlkSize;
-                    ++extraIdx;
-                }
+                tIter = tIter - 128 * superBlkSize + 1;
             }
 
 
-            //std::vector<block> choice(superBlkSize);
+            if (tIter < (block*)t.data())
+            {
+                tIter = tIter + 128 * superBlkSize - 1;
+            }
+
+            while (xIter != xEnd)
+            {
+                while (xIter != xEnd && tIter < tEnd)
+                {
+                    *xIter = *tIter;
+
+                    //u64 tV = tIter - (block*)t.data();
+                    //u64 tIdx = tV / 8 + (tV % 8) * 128;
+                    //Log::out << "xidx " << (xIter - extraBlocks.data()) << "   tIdx " << tIdx << Log::endl;
+
+                    tIter += superBlkSize;
+                    xIter += 1;
+                }
+
+                tIter = tIter - 128 * superBlkSize + 1;
+            }
+
+            //Log::out << "blk end " << Log::endl;
+
+#ifdef KOS_DEBUG
             BitVector choice(128 * superBlkSize);
             chl.recv(u.data(), superBlkSize * 128 * sizeof(block));
             chl.recv(choice.data(), sizeof(block) * superBlkSize);
 
-            for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++rowIdx, ++j)
+            u64 doneIdx = mStart - messages.data();
+            u64 xx = std::min(i64(128 * superBlkSize), (messages.data() + messages.size()) - mEnd);
+            for (u64 rowIdx = doneIdx,
+                j = 0; j < xx; ++rowIdx, ++j)
             {
                 if (neq(((block*)u.data())[j], messages[rowIdx][choice[j]]))
                 {
@@ -185,9 +196,32 @@ namespace osuCrypto
                     throw std::runtime_error("");
                 }
             }
-
-            doneIdx = stopIdx;
+#endif
+            //doneIdx = (mEnd - messages.data());
         }
+
+
+#ifdef KOS_DEBUG
+        BitVector choices(128);
+        std::vector<block> xtraBlk(128);
+
+        chl.recv(xtraBlk.data(), 128 * sizeof(block));
+        choices.resize(128);
+        chl.recv(choices);
+
+        for (u64 i = 0; i < 128; ++i)
+        {
+            if (neq(xtraBlk[i] , choices[i] ? extraBlocks[i] ^ delta : extraBlocks[i] ))
+            {
+                Log::out << "extra " << i << Log::endl;
+                Log::out << xtraBlk[i] << "  " << (u32)choices[i] << Log::endl;
+                Log::out << extraBlocks[i] << "  " << (extraBlocks[i] ^ delta) << Log::endl;
+
+                throw std::runtime_error("");
+            }
+        }
+#endif
+
 
         block seed = prng.get<block>();
         chl.asyncSend(&seed, sizeof(block));
@@ -206,42 +240,46 @@ namespace osuCrypto
 
         SHA1 sha;
         u8 hashBuff[20];
-        doneIdx = 0;
-        for (u64 blkIdx = 0; doneIdx <  messages.size(); ++blkIdx)
+        u64 doneIdx = 0;
+        //Log::out << Log::lock;
+
+        for (; doneIdx < messages.size(); ++doneIdx)
         {
+            chii = commonPrng.get<block>();
+            //Log::out << "sendIdx' " << doneIdx << "   " << messages[doneIdx][0] << "   " << chii << Log::endl;
 
-            u32 stopIdx = (u32)std::min(u64(gOtExtBaseOtCount), messages.size() - doneIdx);
+            mul128(messages[doneIdx][0], chii, qi, qi2);
+            q1 = q1  ^ qi;
+            q2 = q2 ^ qi2;
 
-            for (u32 blkRowIdx = 0; blkRowIdx < stopIdx; ++blkRowIdx, ++doneIdx)
-            {
+            // hash the message without delta
+            sha.Reset();
+            sha.Update((u8*)&messages[doneIdx][0], sizeof(block));
+            sha.Final(hashBuff);
+            messages[doneIdx][0] = *(block*)hashBuff;
 
-                chii = commonPrng.get<block>();
-
-                mul128(messages[doneIdx][0], chii, qi, qi2);
-                q1 = q1  ^ qi;
-                q2 = q2 ^ qi2;
-
-                // hash the message without delta
-                sha.Reset();
-                sha.Update((u8*)&messages[doneIdx][0], sizeof(block));
-                sha.Final(hashBuff);
-                messages[doneIdx][0] = *(block*)hashBuff;
-
-                // hash the message with delta
-                sha.Reset();
-                sha.Update((u8*)&messages[doneIdx][1], sizeof(block));
-                sha.Final(hashBuff);
-                messages[doneIdx][1] = *(block*)hashBuff;
-            }
+            // hash the message with delta
+            sha.Reset();
+            sha.Update((u8*)&messages[doneIdx][1], sizeof(block));
+            sha.Final(hashBuff);
+            messages[doneIdx][1] = *(block*)hashBuff;
         }
 
+
+        u64 xtra = 0;
         for (auto& blk : extraBlocks)
         {
             chii = commonPrng.get<block>();
+
+            //Log::out << "sendIdx' " << xtra++ << "   " << blk << "   " << chii << Log::endl;
+
+
             mul128(blk, chii, qi, qi2);
             q1 = q1  ^ qi;
             q2 = q2 ^ qi2;
         }
+
+        //Log::out << Log::unlock;
 
         block t1, t2;
         std::vector<char> data(sizeof(block) * 3);

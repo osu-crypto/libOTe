@@ -17,7 +17,11 @@ int miraclTestMain();
 #include "OT/NChooseOne/Oos/OosNcoOtReceiver.h"
 #include "OT/NChooseOne/Oos/OosNcoOtSender.h"
 
-void test(int i)
+#include "OT/TwoChooseOne/KosOtExtReceiver.h"
+#include "OT/TwoChooseOne/KosOtExtSender.h"
+
+
+void oos16_test(int i)
 {
     Log::setThreadName("Sender");
 
@@ -33,7 +37,7 @@ void test(int i)
     BtIOService ios(0);
     BtEndpoint ep0(ios, "localhost", 1212, i, name);
     std::vector<Channel*> chls(numThreads);
-    
+
     for (u64 k = 0; k < numThreads; ++k)
         chls[k] = &ep0.addChannel(name + ToString(k), name + ToString(k));
 
@@ -81,11 +85,11 @@ void test(int i)
 
         if (i == 0)
         {
-            
-            for (u64 k= 0; k < numThreads; ++k)
+
+            for (u64 k = 0; k < numThreads; ++k)
             {
                 thds[k] = std::thread(
-                    [&,k]()
+                    [&, k]()
                 {
                     OosNcoOtReceiver r(code);
                     r.setBaseOts(baseSend);
@@ -157,30 +161,102 @@ void test(int i)
 }
 
 
+void kos_test(int i)
+{
+    Log::setThreadName("Sender");
+
+    PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
+
+    u64 step = 1024;
+    u64 numOTs = 1 << 20;
+    u64 numThreads = 1;
+
+    u64 otsPer = numOTs / numThreads;
+
+    std::string name = "n";
+    BtIOService ios(0);
+    BtEndpoint ep0(ios, "localhost", 1212, i, name);
+    std::vector<Channel*> chls(numThreads);
+
+    for (u64 k = 0; k < numThreads; ++k)
+        chls[k] = &ep0.addChannel(name + ToString(k), name + ToString(k));
+
+    u64 baseCount = 128;
+
+    std::vector<block> baseRecv(baseCount);
+    std::vector<std::array<block, 2>> baseSend(baseCount);
+    BitVector baseChoice(baseCount);
+    baseChoice.randomize(prng0);
+
+    prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+    for (u64 i = 0; i < baseCount; ++i)
+    {
+        baseRecv[i] = baseSend[i][baseChoice[i]];
+    }
+
+
+
+
+    if (i)
+    {
+        BitVector choice(otsPer);
+        std::vector<block> msgs(otsPer);
+        choice.randomize(prng0);
+        KosOtExtReceiver r;
+        r.setBaseOts(baseSend);
+        auto& chl = *chls[0];
+
+        r.receive(choice, msgs, prng0, chl);
+    }
+    else
+    {
+        std::vector<std::array<block, 2>> msgs(otsPer);
+
+        Timer time;
+        time.setTimePoint("start");
+        block encoding1, encoding2;
+        KosOtExtSender s;
+        s.setBaseOts(baseRecv, baseChoice);
+        auto& chl = *chls[0];
+
+        s.send(msgs, prng0, chl);
+
+        time.setTimePoint("finish");
+        Log::out << time << Log::endl;
+
+    }
+
+
+    for (u64 k = 0; k < numThreads; ++k)
+        chls[k]->close();
+
+    ep0.stop();
+    ios.stop();
+}
 
 int main(int argc, char** argv)
 {
 
     //test();
     //return 0;
-    
+
 
     if (argc == 2)
     {
-        test(0);
+        kos_test(0);
     }
     else if (argc == 3)
     {
-        test(1);
+        kos_test(1);
     }
     else
     {
         auto thrd = std::thread([]() {
 
-            test(0);
+            kos_test(0);
         });
 
-        test(1);
+        kos_test(1);
 
         thrd.join();
     }

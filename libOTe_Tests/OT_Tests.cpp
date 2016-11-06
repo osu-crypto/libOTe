@@ -20,7 +20,6 @@
 #include "Common.h"
 #include <thread>
 #include <vector>
-#include <boost/multiprecision/cpp_int.hpp>
 
 #ifdef GetMessage
 #undef GetMessage
@@ -29,7 +28,6 @@
 #pragma warning(disable: 4800)
 
 using namespace osuCrypto;
-using namespace boost::multiprecision;
 
 void OT_100Receive_Test(BitVector& choiceBits, ArrayView<block> recv, ArrayView<std::array<block, 2>>  sender)
 {
@@ -290,7 +288,7 @@ void KosOtExt_100Receive_Test_Impl()
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
     PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
 
-    u64 numOTs = 200;
+    u64 numOTs = 2000;
 
     std::vector<block> recvMsg(numOTs), baseRecv(128);
     std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
@@ -310,12 +308,17 @@ void KosOtExt_100Receive_Test_Impl()
     KosOtExtSender sender;
     KosOtExtReceiver recv;
 
+
+
     std::thread thrd = std::thread([&]() {
         Log::setThreadName("receiver");
+
+
 
         recv.setBaseOts(baseSend);
         recv.receive(choices, recvMsg, prng0, recvChannel);
     });
+
 
     sender.setBaseOts(baseRecv, baseChoice);
     sender.send(sendMsg, prng1, senderChannel);

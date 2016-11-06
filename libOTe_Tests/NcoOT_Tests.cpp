@@ -17,14 +17,9 @@
 #include "Common.h"
 #include <thread>
 #include <vector>
-#include <boost/multiprecision/cpp_int.hpp>
 
-#ifdef GetMessage
-#undef GetMessage
-#endif
 
 using namespace osuCrypto;
-using namespace boost::multiprecision;
 
 
 
@@ -62,21 +57,6 @@ void KkrtNcoOt_Test_Impl()
 
 
 
-
-    //BitVector t0,t1,q, s = sender.mBaseChoiceBits;
-    //for (u64 i = 0; i < recvMsgs[0].size(); ++i)
-    //{
-    //    t0.append((u8*)&recvMsgs[0][i][0], 8 * sizeof(block));
-    //    t1.append((u8*)&recvMsgs[0][i][1], 8 * sizeof(block));
-    //    q.append((u8*)&sendMsgs[0][i], 8 * sizeof(block));
-    //}
-
-    //auto exp = (t0 & ~s) | (t1 & s);
-
-    //Log::out << Log::endl
-    //    << exp << Log::endl
-    //    << q << Log::endl
-    //    << (q^exp) << Log::endl << Log::endl;
 
     sender.setBaseOts(baseRecv, baseChoice);
     recv.setBaseOts(baseSend);
@@ -248,7 +228,7 @@ void BchCode_Test_Impl()
         if (cw[i] == 0)
         {
             Log::out << cw << Log::endl;
-            Log::out << "expecteding all ones" << Log::endl;
+            Log::out << "expecting all ones" << Log::endl;
             throw UnitTestFail();
         }
     }
