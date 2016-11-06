@@ -61,9 +61,9 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on an Intel Xeon 
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
 | 1-out-of-N (N=2<sup>76</sup>) 	| malicious 	| OOS16    	    | **11.7**       	| ~              	| ~     	| 24**     	| ~          	|
 | 1-out-of-N (N=2<sup>128</sup>)   | passive   	| KKRT16      	| **9.2**        	| ~              	| ~       	| ~       	| ~          	|
-| 1-out-of-2          	| malicious 	| ALSZ15        	| ~          	    | 93.9*          	| ~       	| ~       	| TODO          	|
+| 1-out-of-2          	| malicious 	| ALSZ15        	| ~          	    | 11*          	| ~       	| ~       	| TODO          	|
 | 1-out-of-2           	| malicious   	| KOS15       	| **4.8**        	| ~              	| 7.1     	| ~        	| ~       	|
-| 1-out-of-2          	| passive   	| IKNP03       	| **4.7**        	| 93.9           	| 6.8     	| ~     	| TODO       	|
+| 1-out-of-2          	| passive   	| IKNP03       	| **4.7**        	| 10.8          	| 6.8     	| ~     	| TODO       	|
 
 
 \* Estmated from running the Encrypto Group implementation for n=2<sup>20</sup>.  Program would crash for n=2<sup>24</sup>.
@@ -97,5 +97,7 @@ Contact Peter Rindal rindalp@oregonstate.edu for any assistance on building or r
 
 [RR16]  - Peter Rindal and Mike Rosulek, _Improved Private Set Intersection against Malicious Adversaries_. [eprint/2016/746](https://eprint.iacr.org/2016/746)
 
+
+[ALSZ15]  - Gilad Asharov and Yehuda Lindell and Thomas Schneider and Michael Zohner, _More Efficient Oblivious Transfer Extensions with Security for Malicious Adversaries_. [eprint/2015/061](https://eprint.iacr.org/2015/061)
 
 [NP00]  -    Moni Naor, Benny Pinkas, _Efficient Oblivious Transfer Protocols_. 
