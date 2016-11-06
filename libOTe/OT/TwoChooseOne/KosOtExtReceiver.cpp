@@ -242,36 +242,55 @@ namespace osuCrypto
         block& t = correlationData->getArrayView<block>()[1];
         block& t2 = correlationData->getArrayView<block>()[2];
         x = t = t2 = ZeroBlock;
-        block chij, ti, ti2;
+        block ti, ti2;
 
         SHA1 sha;
         u8 hashBuff[20];
-
         u64 doneIdx = (0);
         //Log::out << Log::lock;
 
-        for (; doneIdx < messages.size(); ++doneIdx)
+        std::array<block, 2> zeroOneBlk{ ZeroBlock, AllOneBlock };
+        std::array<block, 128> challenges;
+
+        std::array<block, 8> expendedChoiceBlk;
+        std::array<std::array<u8, 16>, 8>& expendedChoice = *(std::array<std::array<u8, 16>, 8>*)&expendedChoiceBlk;
+
+        block mask = _mm_set_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+
+        u64 bb = (messages.size() + 127)/ 128;
+        for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
         {
+            commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
 
-            // and check for correlation
-            chij = commonPrng.get<block>();
+            u64 stop = std::min(messages.size(), doneIdx + 128);
 
-            //Log::out << "recvIdx' " << doneIdx << "   " << messages[doneIdx] << "   " << chij << "  " << (u32)choices2[doneIdx] << Log::endl;
+            expendedChoiceBlk[0] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 0);
+            expendedChoiceBlk[1] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 1);
+            expendedChoiceBlk[2] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 2);
+            expendedChoiceBlk[3] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 3);
+            expendedChoiceBlk[4] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 4);
+            expendedChoiceBlk[5] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 5);
+            expendedChoiceBlk[6] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 6);
+            expendedChoiceBlk[7] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 7);
+
+            for (u64 i = 0; doneIdx < stop; ++doneIdx, ++i)
+            {
 
 
-            if (choices2[doneIdx]) x = x ^ chij;
+                x = x ^ (challenges[i] & zeroOneBlk[expendedChoice[i%8][i/8]]);
 
-            // multiply over polynomial ring to avoid reduction
-            mul128(messages[doneIdx], chij, ti, ti2);
+                // multiply over polynomial ring to avoid reduction
+                mul128(messages[doneIdx], challenges[i], ti, ti2);
 
-            t = t ^ ti;
-            t2 = t2 ^ ti2;
+                t = t ^ ti;
+                t2 = t2 ^ ti2;
 
-            // hash it
-            sha.Reset();
-            sha.Update((u8*)&messages[doneIdx], sizeof(block));
-            sha.Final(hashBuff);
-            messages[doneIdx] = *(block*)hashBuff;
+                // hash it
+                sha.Reset();
+                sha.Update((u8*)&messages[doneIdx], sizeof(block));
+                sha.Final(hashBuff);
+                messages[doneIdx] = *(block*)hashBuff;
+            }
         }
 
 
@@ -280,7 +299,7 @@ namespace osuCrypto
         for (block& blk : extraBlocks)
         {
             // and check for correlation
-            chij = commonPrng.get<block>();
+            block chij = commonPrng.get<block>();
 
             //Log::out << "recvIdx' " << xtra++ << "   " << blk << "   " << chij << "  " << (u32)choices2[doneIdx] << Log::endl;
 

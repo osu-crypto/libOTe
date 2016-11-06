@@ -168,7 +168,7 @@ void kos_test(int i)
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
     u64 step = 1024;
-    u64 numOTs = 1 << 20;
+    u64 numOTs = 1 << 24;
     u64 numThreads = 1;
 
     u64 otsPer = numOTs / numThreads;

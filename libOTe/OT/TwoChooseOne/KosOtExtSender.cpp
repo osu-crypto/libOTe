@@ -234,7 +234,7 @@ namespace osuCrypto
 
         PRNG commonPrng(seed ^ theirSeed);
 
-        block  chii, qi, qi2;
+        block  qi, qi2;
         block q2 = ZeroBlock;
         block q1 = ZeroBlock;
 
@@ -242,34 +242,65 @@ namespace osuCrypto
         u8 hashBuff[20];
         u64 doneIdx = 0;
         //Log::out << Log::lock;
+        std::array<block, 2> zeroOneBlk{ ZeroBlock, AllOneBlock };
+        std::array<block, 128> challenges;
 
-        for (; doneIdx < messages.size(); ++doneIdx)
+        u64 bb = (messages.size() + 127) / 128;
+        for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
         {
-            chii = commonPrng.get<block>();
-            //Log::out << "sendIdx' " << doneIdx << "   " << messages[doneIdx][0] << "   " << chii << Log::endl;
+            commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
+            u64 stop = std::min(messages.size(), doneIdx + 128);
 
-            mul128(messages[doneIdx][0], chii, qi, qi2);
-            q1 = q1  ^ qi;
-            q2 = q2 ^ qi2;
+            for (u64 i = 0; doneIdx < stop; ++doneIdx, ++i)
+            {
+                //chii = commonPrng.get<block>();
+                //Log::out << "sendIdx' " << doneIdx << "   " << messages[doneIdx][0] << "   " << chii << Log::endl;
 
-            // hash the message without delta
-            sha.Reset();
-            sha.Update((u8*)&messages[doneIdx][0], sizeof(block));
-            sha.Final(hashBuff);
-            messages[doneIdx][0] = *(block*)hashBuff;
+                mul128(messages[doneIdx][0], challenges[i], qi, qi2);
+                q1 = q1  ^ qi;
+                q2 = q2 ^ qi2;
 
-            // hash the message with delta
-            sha.Reset();
-            sha.Update((u8*)&messages[doneIdx][1], sizeof(block));
-            sha.Final(hashBuff);
-            messages[doneIdx][1] = *(block*)hashBuff;
+                // hash the message without delta
+                sha.Reset();
+                sha.Update((u8*)&messages[doneIdx][0], sizeof(block));
+                sha.Final(hashBuff);
+                messages[doneIdx][0] = *(block*)hashBuff;
+
+                // hash the message with delta
+                sha.Reset();
+                sha.Update((u8*)&messages[doneIdx][1], sizeof(block));
+                sha.Final(hashBuff);
+                messages[doneIdx][1] = *(block*)hashBuff;
+            }
         }
+
+        //for (; doneIdx < messages.size(); ++doneIdx)
+        //{
+        //    chii = commonPrng.get<block>();
+        //    //Log::out << "sendIdx' " << doneIdx << "   " << messages[doneIdx][0] << "   " << chii << Log::endl;
+
+        //    mul128(messages[doneIdx][0], chii, qi, qi2);
+        //    q1 = q1  ^ qi;
+        //    q2 = q2 ^ qi2;
+
+        //    // hash the message without delta
+        //    sha.Reset();
+        //    sha.Update((u8*)&messages[doneIdx][0], sizeof(block));
+        //    sha.Final(hashBuff);
+        //    messages[doneIdx][0] = *(block*)hashBuff;
+
+        //    // hash the message with delta
+        //    sha.Reset();
+        //    sha.Update((u8*)&messages[doneIdx][1], sizeof(block));
+        //    sha.Final(hashBuff);
+        //    messages[doneIdx][1] = *(block*)hashBuff;
+        //}
 
 
         u64 xtra = 0;
         for (auto& blk : extraBlocks)
         {
-            chii = commonPrng.get<block>();
+            block chii = commonPrng.get<block>();
 
             //Log::out << "sendIdx' " << xtra++ << "   " << blk << "   " << chii << Log::endl;
 
