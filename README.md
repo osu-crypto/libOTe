@@ -32,6 +32,8 @@ This project was developed using visual studio and contains the associated solut
  
 By default, these scripts will download the libraries to this folder. However, the visual studio projects will also look form them at `C:\\libs\`.
  
+ IMPORTANT: By default, the build system needs the NASM compiler to be located at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `libOTe/Crypto/asm/sha_win64.asm` from the build system and undefining  `INTEL_ASM_SHA1` on line 28 of `libOTe/Crypto/sha.cpp`.
+
 Once the scripts have finished, visual studio should be able to build the project. The Test Explorer should be able to find all the unit tests and hopefully they all pass. Unit tests can also be run from the command line with the arguments
  
 `frontend.exe -u`
@@ -43,7 +45,11 @@ For the full set of command line options, simply execute the frendend with no ar
  
 ### Linux
  
-Once cloned, the libraries listed above must be built. In `./thirdparty/linux` there are scripts that will download and build all of the libraries that are listed above. To build the libOTe and the associated frontend:
+Once cloned, the libraries listed above must be built. In `./thirdparty/linux` there are scripts that will download and build all of the libraries that are listed above.
+
+ IMPORTANT: By default, the build system needs the NASM compiler to be in the path. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `libOTe/Crypto/asm/sha_lnx.S` from the build system by deleting it or by chaning the .S and undefining  `INTEL_ASM_SHA1` on line 28 of `libOTe/Crypto/sha.cpp`.
+
+To build the libOTe and the associated frontend:
  
 `./make `
  
