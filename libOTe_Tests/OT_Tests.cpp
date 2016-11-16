@@ -40,7 +40,7 @@ void OT_100Receive_Test(BitVector& choiceBits, ArrayView<block> recv, ArrayView<
         //(i, choice, revcBlock);
         const block& senderBlock = sender[i][choice];
 
-        //if (i==0 || i==128 || i==256 || i==384 ||i==512) {
+        //if (i%512==0) {
         //    Log::out << "[" << i << ",0]--" << sender[i][0] << Log::endl;
         //    Log::out << "[" << i << ",1]--" << sender[i][1] << Log::endl;
         //    Log::out << (int)choice << "-- " << recv[i] << Log::endl;
@@ -288,7 +288,7 @@ void KosOtExt_100Receive_Test_Impl()
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
     PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
 
-    u64 numOTs = 2000;
+    u64 numOTs = 20000;
 
     std::vector<block> recvMsg(numOTs), baseRecv(128);
     std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);

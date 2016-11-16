@@ -51,7 +51,7 @@ namespace osuCrypto
     {
 
         const u8 superBlkSize(8);
-
+        #define commStepSize 512
 
         // round up
         u64 numOtExt = roundUpTo(messages.size(), 128);
@@ -59,7 +59,9 @@ namespace osuCrypto
         u64 numBlocks = numSuperBlocks * superBlkSize;
 
         // a temp that will be used to transpose the sender's matrix
-        std::array<std::array<block, superBlkSize>, 128> t, u;
+		std::array<std::array<block, superBlkSize>, 128> t;
+		std::vector<std::array<block, superBlkSize>> u(128 * commStepSize);
+
         std::array<block, 128> choiceMask;
         block delta = *(block*)mBaseChoiceBits.data();
 
@@ -78,17 +80,24 @@ namespace osuCrypto
 
         std::array<block, 2>* mIter = messages.data();
 
+        block * uIter = (block*)u.data() + superBlkSize * 128 * commStepSize;
+        block * uEnd = uIter;
 
         for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
         {
 
             block * tIter = (block*)t.data();
-            block * uIter = (block*)u.data();
             block * cIter = choiceMask.data();
 
-            chl.recv(u.data(), superBlkSize * 128 * sizeof(block));
+			if (uIter == uEnd)
+			{
+				u64 step = std::min(numSuperBlocks - superBlkIdx,(u64) commStepSize);
 
-            // transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
+				chl.recv(u.data(), step * superBlkSize * 128 * sizeof(block));
+				uIter = (block*)u.data();
+			}
+
+			// transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
             for (u64 colIdx = 0; colIdx < 128; ++colIdx)
             {
                 // generate the columns using AES-NI in counter mode.
@@ -221,12 +230,13 @@ namespace osuCrypto
             }
         }
 #endif
-
+        gTimer.setTimePoint("send.transposeDone");
 
         block seed = prng.get<block>();
         chl.asyncSend(&seed, sizeof(block));
         block theirSeed;
         chl.recv(&theirSeed, sizeof(block));
+        gTimer.setTimePoint("send.cncSeed");
 
         if (Commit(theirSeed) != theirSeedComm)
             throw std::runtime_error("bad commit " LOCATION);
@@ -245,56 +255,43 @@ namespace osuCrypto
         std::array<block, 2> zeroOneBlk{ ZeroBlock, AllOneBlock };
         std::array<block, 128> challenges;
 
+        gTimer.setTimePoint("send.checkStart");
+
         u64 bb = (messages.size() + 127) / 128;
         for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
         {
             commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
             u64 stop = std::min(messages.size(), doneIdx + 128);
 
-            for (u64 i = 0; doneIdx < stop; ++doneIdx, ++i)
+            for (u64 i = 0, dd = doneIdx; dd < stop; ++dd, ++i)
             {
                 //chii = commonPrng.get<block>();
-                //Log::out << "sendIdx' " << doneIdx << "   " << messages[doneIdx][0] << "   " << chii << Log::endl;
+                //Log::out << "sendIdx' " << dd << "   " << messages[dd][0] << "   " << chii << Log::endl;
 
-                mul128(messages[doneIdx][0], challenges[i], qi, qi2);
+                mul128(messages[dd][0], challenges[i], qi, qi2);
                 q1 = q1  ^ qi;
                 q2 = q2 ^ qi2;
-
+#ifdef KOS_SHA_HASH
                 // hash the message without delta
                 sha.Reset();
-                sha.Update((u8*)&messages[doneIdx][0], sizeof(block));
+                sha.Update((u8*)&messages[dd][0], sizeof(block));
                 sha.Final(hashBuff);
-                messages[doneIdx][0] = *(block*)hashBuff;
+                messages[dd][0] = *(block*)hashBuff;
 
                 // hash the message with delta
                 sha.Reset();
-                sha.Update((u8*)&messages[doneIdx][1], sizeof(block));
+                sha.Update((u8*)&messages[dd][1], sizeof(block));
                 sha.Final(hashBuff);
-                messages[doneIdx][1] = *(block*)hashBuff;
+                messages[dd][1] = *(block*)hashBuff;
+#endif
             }
+#ifndef KOS_SHA_HASH
+            auto length = 2 *(stop - doneIdx);
+            block* mIter = messages[doneIdx].data();
+            mAesFixedKey.ecbEncBlocks(mIter, length, mIter);
+#endif
+            doneIdx = stop;
         }
-
-        //for (; doneIdx < messages.size(); ++doneIdx)
-        //{
-        //    chii = commonPrng.get<block>();
-        //    //Log::out << "sendIdx' " << doneIdx << "   " << messages[doneIdx][0] << "   " << chii << Log::endl;
-
-        //    mul128(messages[doneIdx][0], chii, qi, qi2);
-        //    q1 = q1  ^ qi;
-        //    q2 = q2 ^ qi2;
-
-        //    // hash the message without delta
-        //    sha.Reset();
-        //    sha.Update((u8*)&messages[doneIdx][0], sizeof(block));
-        //    sha.Final(hashBuff);
-        //    messages[doneIdx][0] = *(block*)hashBuff;
-
-        //    // hash the message with delta
-        //    sha.Reset();
-        //    sha.Update((u8*)&messages[doneIdx][1], sizeof(block));
-        //    sha.Final(hashBuff);
-        //    messages[doneIdx][1] = *(block*)hashBuff;
-        //}
 
 
         u64 xtra = 0;
@@ -302,13 +299,14 @@ namespace osuCrypto
         {
             block chii = commonPrng.get<block>();
 
-            //Log::out << "sendIdx' " << xtra++ << "   " << blk << "   " << chii << Log::endl;
-
 
             mul128(blk, chii, qi, qi2);
             q1 = q1  ^ qi;
             q2 = q2 ^ qi2;
         }
+
+        gTimer.setTimePoint("send.checkSummed");
+
 
         //Log::out << Log::unlock;
 
@@ -316,6 +314,7 @@ namespace osuCrypto
         std::vector<char> data(sizeof(block) * 3);
 
         chl.recv(data.data(), data.size());
+        gTimer.setTimePoint("send.proofReceived");
 
         block& received_x = ((block*)data.data())[0];
         block& received_t = ((block*)data.data())[1];
@@ -338,6 +337,7 @@ namespace osuCrypto
             Log::out << "q  = " << q1 << Log::endl;
             throw std::runtime_error("Exit");;
         }
+        gTimer.setTimePoint("send.done");
 
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");
     }

@@ -54,6 +54,8 @@ namespace osuCrypto
 
 
         static const u64 superBlkSize(8);
+#define commStepSize 512
+
 
         // we are going to process OTs in blocks of 128 * superBlkSize messages.
         u64 numOtExt = roundUpTo(choices.size(), 128);
@@ -93,6 +95,13 @@ namespace osuCrypto
 
         block* mIter = messages.data();
 
+        u64 step = std::min(numSuperBlocks, (u64)commStepSize);
+        std::unique_ptr<ByteStream> uBuff(new ByteStream(step * 128 * superBlkSize * sizeof(block)));
+
+        // get an array of blocks that we will fill. 
+        auto uIter = (block*)uBuff->data();
+        auto uEnd = uIter + step * 128 * superBlkSize;
+
         // NOTE: We do not transpose a bit-matrix of size numCol * numCol.
         //   Instead we break it down into smaller chunks. We do 128 columns 
         //   times 8 * 128 rows at a time, where 8 = superBlkSize. This is done for  
@@ -103,11 +112,6 @@ namespace osuCrypto
         {
 
             // this will store the next 128 rows of the matrix u
-            std::unique_ptr<ByteStream> uBuff(new ByteStream(128 * superBlkSize * sizeof(block)));
-
-            // get an array of blocks that we will fill. 
-            auto uIter = (block*)uBuff->data();
-
 
             block* tIter = (block*)t0.data();
             block* cIter = choiceBlocks.data() + superBlkSize * superBlkIdx;
@@ -148,9 +152,21 @@ namespace osuCrypto
                 tIter += 8;
             }
 
+            if (uIter == uEnd)
+            {
+                // send over u buffer
+                chl.asyncSend(std::move(uBuff));
 
-            // send over u buffer
-            chl.asyncSend(std::move(uBuff));
+                u64 step = std::min(numSuperBlocks - superBlkIdx - 1, (u64)commStepSize);
+
+                if (step)
+                {
+                    uBuff.reset(new ByteStream(step * 128 * superBlkSize * sizeof(block)));
+
+                    uIter = (block*)uBuff->data();
+                    uEnd = uIter + step * 128 * superBlkSize;
+                }
+            }
 
             // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
             // each 128 bits wide.
@@ -159,7 +175,7 @@ namespace osuCrypto
 
 
             block* mStart = mIter;
-            block* mEnd = std::min(mIter + 128 * superBlkSize,(block*)messages.end());
+            block* mEnd = std::min(mIter + 128 * superBlkSize, (block*)messages.end());
 
             // compute how many rows are unused.
             u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
@@ -176,7 +192,7 @@ namespace osuCrypto
             {
                 while (mIter != mEnd && tIter < tEnd)
                 {
-                    (*mIter) = *tIter; 
+                    (*mIter) = *tIter;
 
                     tIter += superBlkSize;
                     mIter += 1;
@@ -222,7 +238,8 @@ namespace osuCrypto
         cc.copy(choices2, choices.size(), 128);
         chl.send(cc);
 #endif
-
+        //Log::out << "uBuff " << (bool)uBuff << "  " << (uEnd - uIter) << Log::endl;
+        gTimer.setTimePoint("recv.transposeDone");
 
         // do correlation check and hashing
         // For the malicious secure OTs, we need a random PRNG that is chosen random 
@@ -233,6 +250,7 @@ namespace osuCrypto
         chl.recv(&theirSeed, sizeof(block));
         chl.asyncSendCopy(&seed, sizeof(block));
         commonPrng.SetSeed(seed ^ theirSeed);
+        gTimer.setTimePoint("recv.cncSeed");
 
         // this buffer will be sent to the other party to prove we used the 
         // same value of r in all of the column vectors...
@@ -257,7 +275,7 @@ namespace osuCrypto
 
         block mask = _mm_set_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
-        u64 bb = (messages.size() + 127)/ 128;
+        u64 bb = (messages.size() + 127) / 128;
         for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
         {
             commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
@@ -272,25 +290,33 @@ namespace osuCrypto
             expendedChoiceBlk[5] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 5);
             expendedChoiceBlk[6] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 6);
             expendedChoiceBlk[7] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 7);
-
-            for (u64 i = 0; doneIdx < stop; ++doneIdx, ++i)
+             
+            for (u64 i = 0, dd = doneIdx; dd < stop; ++dd, ++i)
             {
 
 
-                x = x ^ (challenges[i] & zeroOneBlk[expendedChoice[i%8][i/8]]);
+                x = x ^ (challenges[i] & zeroOneBlk[expendedChoice[i % 8][i / 8]]);
 
                 // multiply over polynomial ring to avoid reduction
-                mul128(messages[doneIdx], challenges[i], ti, ti2);
+                mul128(messages[dd], challenges[i], ti, ti2);
 
                 t = t ^ ti;
                 t2 = t2 ^ ti2;
-
+#ifdef KOS_SHA_HASH
                 // hash it
                 sha.Reset();
-                sha.Update((u8*)&messages[doneIdx], sizeof(block));
+                sha.Update((u8*)&messages[dd], sizeof(block));
                 sha.Final(hashBuff);
-                messages[doneIdx] = *(block*)hashBuff;
+                messages[dd] = *(block*)hashBuff;
+#endif
             }
+#ifndef KOS_SHA_HASH
+
+            auto length = stop - doneIdx;
+            mAesFixedKey.ecbEncBlocks(messages.data() + doneIdx, length, messages.data() + doneIdx);
+#endif
+
+            doneIdx = stop;
         }
 
 
@@ -312,8 +338,11 @@ namespace osuCrypto
             t2 = t2 ^ ti2;
         }
         //Log::out << Log::unlock;
+        gTimer.setTimePoint("recv.checkSummed");
 
-        chl.asyncSend(std::move(correlationData));
+        //chl.asyncSend(std::move(correlationData));
+        chl.send(*correlationData);
+        gTimer.setTimePoint("recv.done");
 
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");
     }

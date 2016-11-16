@@ -323,16 +323,15 @@ void kos_test(int i)
     {
         std::vector<std::array<block, 2>> msgs(numOTs);
 
-        Timer time;
-        time.setTimePoint("start");
+        gTimer.setTimePoint("start");
         block encoding1, encoding2;
         KosOtExtSender s;
         s.setBaseOts(baseRecv, baseChoice);
 
         s.send(msgs, prng0, chl);
 
-        time.setTimePoint("finish");
-        Log::out << time << Log::endl;
+        gTimer.setTimePoint("finish");
+        Log::out << gTimer << Log::endl;
 
     }
 
@@ -484,7 +483,7 @@ int main(int argc, char** argv)
     {
         run_all();
     }
-    else if (cmd.isSet(kos))
+    else if (cmd.isSet(kos) || true)
     {
         if (cmd.hasValue(kos))
         {
