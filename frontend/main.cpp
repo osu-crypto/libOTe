@@ -322,7 +322,7 @@ void kos_test(int i)
     else
     {
         std::vector<std::array<block, 2>> msgs(numOTs);
-
+        gTimer.reset();
         gTimer.setTimePoint("start");
         block encoding1, encoding2;
         KosOtExtSender s;
