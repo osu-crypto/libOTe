@@ -311,9 +311,33 @@ namespace osuCrypto
 #endif
             }
 #ifndef KOS_SHA_HASH
-
+            auto& aesHashTemp = expendedChoiceBlk; 
             auto length = stop - doneIdx;
-            mAesFixedKey.ecbEncBlocks(messages.data() + doneIdx, length, messages.data() + doneIdx);
+            auto steps = length / 8;
+            block* mIter = messages.data() + doneIdx;
+            for (u64 i = 0; i < steps; ++i)
+            {
+                mAesFixedKey.ecbEncBlocks(mIter, 8, aesHashTemp.data());
+                mIter[0] = mIter[0] ^ aesHashTemp[0];
+                mIter[1] = mIter[1] ^ aesHashTemp[1];
+                mIter[2] = mIter[2] ^ aesHashTemp[2];
+                mIter[3] = mIter[3] ^ aesHashTemp[3];
+                mIter[4] = mIter[4] ^ aesHashTemp[4];
+                mIter[5] = mIter[5] ^ aesHashTemp[5];
+                mIter[6] = mIter[6] ^ aesHashTemp[6];
+                mIter[7] = mIter[7] ^ aesHashTemp[7];
+
+                mIter += 8;
+            }
+
+            auto rem = length - steps * 8;
+            mAesFixedKey.ecbEncBlocks(mIter, rem, aesHashTemp.data());
+            for (u64 i = 0; i < rem; ++i)
+            {
+                mIter[i] = mIter[i] ^ aesHashTemp[i];
+            }
+            //auto length = stop - doneIdx;
+            //mAesFixedKey.ecbEncBlocks(messages.data() + doneIdx, length, messages.data() + doneIdx);
 #endif
 
             doneIdx = stop;

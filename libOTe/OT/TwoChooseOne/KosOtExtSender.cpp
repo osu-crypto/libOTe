@@ -254,6 +254,9 @@ namespace osuCrypto
         //Log::out << Log::lock;
         std::array<block, 2> zeroOneBlk{ ZeroBlock, AllOneBlock };
         std::array<block, 128> challenges;
+#ifndef KOS_SHA_HASH
+        std::array<block, 8> aesHashTemp;
+#endif
 
         gTimer.setTimePoint("send.checkStart");
 
@@ -287,8 +290,30 @@ namespace osuCrypto
             }
 #ifndef KOS_SHA_HASH
             auto length = 2 *(stop - doneIdx);
+            auto steps = length / 8;
             block* mIter = messages[doneIdx].data();
-            mAesFixedKey.ecbEncBlocks(mIter, length, mIter);
+            for (u64 i = 0; i < steps; ++i)
+            {
+                mAesFixedKey.ecbEncBlocks(mIter, 8, aesHashTemp.data());
+                mIter[0] = mIter[0] ^ aesHashTemp[0];
+                mIter[1] = mIter[1] ^ aesHashTemp[1];
+                mIter[2] = mIter[2] ^ aesHashTemp[2];
+                mIter[3] = mIter[3] ^ aesHashTemp[3];
+                mIter[4] = mIter[4] ^ aesHashTemp[4];
+                mIter[5] = mIter[5] ^ aesHashTemp[5];
+                mIter[6] = mIter[6] ^ aesHashTemp[6];
+                mIter[7] = mIter[7] ^ aesHashTemp[7];
+
+                mIter += 8;
+            }                     
+
+            auto rem = length - steps * 8;
+            mAesFixedKey.ecbEncBlocks(mIter, rem, aesHashTemp.data());
+            for (u64 i = 0; i < rem; ++i)
+            {
+                mIter[i] = mIter[i] ^ aesHashTemp[i];
+            }
+
 #endif
             doneIdx = stop;
         }
