@@ -22,7 +22,7 @@ All implementations are highly optimized using fast SSE instructions and vectori
 The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel Xeon server (`2 36-cores Intel Xeon CPU E5-2699 v3 @ 2.30GHz and 256GB of RAM`) as of 11/16/2016. All timings shown reflect a "single" thread per party, with the expection that network IO in libOTe is performed in the background by a separate thread. 
  
  
-| *Type*                	| *Security*  	| *Protocol*     	| libOTe (SHA1/AES)	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) (AES-hash) 	| [Apricot](https://github.com/bristolcrypto/apricot) (AES-hash)	| OOS16 (blake2)	| [emp-toolkit](https://github.com/emp-toolkit) (AES-hash)	|
+| *Type*                	| *Security*  	| *Protocol*     	| libOTe (SHA1/AES)	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) (SHA256) 	| [Apricot](https://github.com/bristolcrypto/apricot) (AES-hash)	| OOS16 (blake2)	| [emp-toolkit](https://github.com/emp-toolkit) (AES-hash)	|
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
 | 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **11.7 / 9.2**       	| ~              	| ~     	| 24**     	| ~          	|
 | 1-out-of-N (N=2<sup>128</sup>)| passive| KKRT16      	| **9.2 / 6.7**        	| ~              	| ~       	| ~       	| ~          	|

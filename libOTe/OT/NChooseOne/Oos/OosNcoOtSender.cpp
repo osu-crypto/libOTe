@@ -199,6 +199,7 @@ namespace osuCrypto
             sha1.Final(hashBuff);
             val = toBlock(hashBuff);
 #else
+            //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
             mAesFixedKey.ecbEncFourBlocks(codeword.data(), aesBuff.data());
             codeword[0] = codeword[0] ^ aesBuff[0];
             codeword[1] = codeword[1] ^ aesBuff[1];
@@ -232,6 +233,7 @@ namespace osuCrypto
             sha1.Final(hashBuff);
             val = toBlock(hashBuff);
 #else
+            //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
             mAesFixedKey.ecbEncBlocks(codeword.data(), mT.size()[1], aesBuff.data());
 
             val = ZeroBlock;
