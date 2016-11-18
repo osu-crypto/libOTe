@@ -75,7 +75,7 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
  
 \* Estmated from running the Encrypto Group implementation for n=2<sup>20</sup>.  Program would crash for n=2<sup>24</sup>.
  
-\** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper and their implementation used multiple threads. The number was not specified. When using the libOTe implementation with multiple threads, a timing of 2.6 seconds was obtained.
+\** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper and their implementation used multiple threads. The number was not specified. When using the libOTe implementation with multiple threads, a timing of 2.6 seconds was obtained with the SHA1 hash function.
  
 It should be noted that the libOTe implementation uses the Boost ASIO library to perform more efficient asynchronous network IO. This involves using a background thread to help process network data. As such, this is not a completely fair comparison to the Apricot implementation but we don't expect it to have a large impact. It also appears that the Encrypto Group implementation uses asynchronous network IO.
  
@@ -87,7 +87,7 @@ It should be noted that the libOTe implementation uses the Boost ASIO library to
  * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 1 &  ./ot.exe -r 1 -n 16777216 -o 1`
  * emp-toolkit:  2x 2<sup>23</sup> `./mot 0 1212 & ./mot 1 1212`
 
- 1-out-of-2 semi-honest:
+1-out-of-2 semi-honest:
  * Apricot:  `./ot.x -n 16777216 -p 0 -m a -l 100 -pas & ./ot.x -p 1 -m a -n 16777216 -l 100 -pas`
  * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 0 &  ./ot.exe -r 1 -n 16777216 -o 0`
  * emp-toolkit:  2*2<sup>23</sup> `./shot 0 1212 & ./shot 1 1212`
