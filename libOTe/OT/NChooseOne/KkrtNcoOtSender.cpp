@@ -169,10 +169,20 @@ namespace osuCrypto
                 ^ t1;
         }
 
+#ifdef KKRT_SHA_HASH
         // hash it all to get rid of the correlation.
         sha1.Update((u8*)codeword.data(), sizeof(block) * mT.size()[1]);
         sha1.Final(hashBuff);
         val = toBlock(hashBuff);
+#else
+        std::array<block, 10> aesBuff;
+        mAesFixedKey.ecbEncBlocks(codeword.data(), mT.size()[1], aesBuff.data());
+
+        val = ZeroBlock;
+        for (u64 i = 0; i < mT.size()[1]; ++i)
+            val = val ^ codeword[i] ^ aesBuff[i];
+#endif
+
 
     }
 

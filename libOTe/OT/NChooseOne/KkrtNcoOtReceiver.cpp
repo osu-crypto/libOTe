@@ -149,8 +149,7 @@ namespace osuCrypto
 
     void KkrtNcoOtReceiver::encode(
         u64 otIdx,
-        const ArrayView<block> choice,
-        // Output: the encoding of the codeword
+        const ArrayView<block> choice, 
         block & val)
     {
 #ifndef NDEBUG
@@ -178,6 +177,8 @@ namespace osuCrypto
                 ^ t1Val[i];
         }
 
+#ifdef OOS_SHA_HASH
+
         // now hash it to remove the correlation.
         SHA1  sha1;
         u8 hashBuff[SHA1::HashSize];
@@ -186,7 +187,14 @@ namespace osuCrypto
         sha1.Final(hashBuff);
 
         val = toBlock(hashBuff);
+#else
+        std::array<block, 10> aesBuff;
+        mAesFixedKey.ecbEncBlocks(t0Val, mT0.size()[1], aesBuff.data());
 
+        val = ZeroBlock;
+        for (u64 i = 0; i < mT0.size()[1]; ++i)
+            val = val ^ aesBuff[i] ^ t0Val[i];
+#endif
 #ifndef NDEBUG
         // a debug check to mark this OT as used and ready to send.
         mT0[otIdx][0] = AllOneBlock;

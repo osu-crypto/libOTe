@@ -57,19 +57,20 @@ To see all the command line options, execute the program
  
 `./Release/frontend.exe`
  
+
  
 ## Performance
  
-The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel Xeon server (`2 36-cores Intel Xeon CPU E5-2699 v3 @ 2.30GHz and 256GB of RAM`) as of 11/16/2016. All timings shown reflect a "single" thread per party, with the expection that network IO in libOTe is performed in the background by a separate thread.
+The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel Xeon server (`2 36-cores Intel Xeon CPU E5-2699 v3 @ 2.30GHz and 256GB of RAM`) as of 11/16/2016. All timings shown reflect a "single" thread per party, with the expection that network IO in libOTe is performed in the background by a separate thread. 
  
  
-| *Type*                	| *Security*  	| *Protocol*     	| libOTe 	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) 	| [Apricot](https://github.com/bristolcrypto/apricot)	| OOS16	| [Crypto BIU](https://github.com/cryptobiu) 	|
+| *Type*                	| *Security*  	| *Protocol*     	| libOTe (SHA1/AES-hash)	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) (AES-hash) 	| [Apricot](https://github.com/bristolcrypto/apricot) (AES-hash)	| OOS16 (blake2-hash)	| [emp-toolkit](https://github.com/emp-toolkit) (AES-hash)	|
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
-| 1-out-of-N (N=2<sup>76</sup>) 	| malicious 	| OOS16    	    | **11.7**       	| ~              	| ~     	| 24**     	| ~          	|
-| 1-out-of-N (N=2<sup>128</sup>)   | passive   	| KKRT16      	| **9.2**        	| ~              	| ~       	| ~       	| ~          	|
-| 1-out-of-2          	| malicious 	| ALSZ15        	| ~          	    | 17.3          	| ~       	| ~       	| TODO          	|
-| 1-out-of-2           	| malicious   	| KOS15       	| **0.8**        	| ~              	| 2.0     	| ~        	| ~       	|
-| 1-out-of-2          	| passive   	| IKNP03       	| **0.7**        	| 11.3          	| 1.3     	| ~     	| TODO       	|
+| 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **11.7 / 8.5**       	| ~              	| ~     	| 24**     	| ~          	|
+| 1-out-of-N (N=2<sup>128</sup>)| passive| KKRT16      	| **9.2 / 6.7**        	| ~              	| ~       	| ~       	| ~          	|
+| 1-out-of-2          	| malicious 	| ALSZ15        | ~          	    | 17.3          	| ~       	| ~       	|  141         	|
+| 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  29       	|
+| 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**     	| ~     	|  27      	|
  
  
 \* Estmated from running the Encrypto Group implementation for n=2<sup>20</sup>.  Program would crash for n=2<sup>24</sup>.
@@ -84,10 +85,25 @@ It should be noted that the libOTe implementation uses the Boost ASIO library to
  1-out-of-2 malicious:
  * Apricot: `./ot.x -n 16777216 -p 0 -m a -l 100 & ./ot.x -p 1 -m a -n 16777216 -l 100`
  * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 1 &  ./ot.exe -r 1 -n 16777216 -o 1`
- 1-out-of-2 semi-honest:
- * Apricot: 
- * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 0 &  ./ot.exe -r 1 -n 16777216 -o 0`
+ * emp-toolkit:  2x 2<sup>23</sup> `./mot 0 1212 & ./mot 1 1212`
 
+ 1-out-of-2 semi-honest:
+ * Apricot:  `./ot.x -n 16777216 -p 0 -m a -l 100 -pas & ./ot.x -p 1 -m a -n 16777216 -l 100 -pas`
+ * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 0 &  ./ot.exe -r 1 -n 16777216 -o 0`
+ * emp-toolkit:  2*2<sup>23</sup> `./shot 0 1212 & ./shot 1 1212`
+
+
+ ## Citing
+
+ Spread the word!
+
+```
+@misc{libOTe,
+    author = {Peter Rindal},
+    title = {{libOTe: an efficient, portable, and easy to use Oblivious Transfer Library}},
+    howpublished = {\url{https://github.com/osu-crypto/libOTe}},
+}
+```
 ## Protocol Details
 The 1-out-of-N [OOS16] protocol currently is set to work forn N=2<sup>76</sup> but is capable of supporting arbitrary codes given the generator matrix in text format. See `./libOTe/OT/Tools/Bch511.txt` for an example.
  

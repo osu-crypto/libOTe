@@ -5,7 +5,7 @@
 #include "Common/BitVector.h"
 #include "Crypto/PRNG.h"
 #include "Crypto/Commit.h"
-
+#include "TcoOtDefines.h"
 using namespace std;
 
 namespace osuCrypto
@@ -39,7 +39,7 @@ namespace osuCrypto
         ret->setBaseOts(baseRecvOts);
 
         return std::move(ret);
-    }
+    } 
 
 
     void KosOtExtReceiver::receive(
@@ -52,9 +52,6 @@ namespace osuCrypto
         if (mHasBase == false)
             throw std::runtime_error("rt error at " LOCATION);
 
-
-        static const u64 superBlkSize(8);
-#define commStepSize 512
 
 
         // we are going to process OTs in blocks of 128 * superBlkSize messages.
@@ -74,7 +71,7 @@ namespace osuCrypto
         choices2 = choices;
         choices2.resize(numBlocks * 128);
         for (u64 i = 0; i < 128; ++i)
-        {
+        { 
             choices2[choices.size() + i] = prng.getBit();
 
             //Log::out << "extra " << i << "  " << choices2[choices.size() + i] << Log::endl;

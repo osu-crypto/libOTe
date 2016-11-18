@@ -212,6 +212,28 @@ namespace osuCrypto
             t1Val[1] = t1Val[1] ^ t0Val[1];
             t1Val[2] = t1Val[2] ^ t0Val[2];
             t1Val[3] = t1Val[3] ^ t0Val[3];
+
+#ifdef OOS_SHA_HASH
+            SHA1  sha1;
+            u8 hashBuff[SHA1::HashSize];
+            // now hash it to remove the correlation.
+            sha1.Update((u8*)mT0[otIdx].data(), mT0[otIdx].size() * sizeof(block));
+            sha1.Final(hashBuff);
+            val = toBlock(hashBuff);
+#else
+            mAesFixedKey.ecbEncFourBlocks(t0Val, codeword.data());
+
+            codeword[0] = codeword[0] ^ t0Val[0];
+            codeword[1] = codeword[1] ^ t0Val[1];
+            codeword[2] = codeword[2] ^ t0Val[2];
+            codeword[3] = codeword[3] ^ t0Val[3];
+
+            val = codeword[0] ^ codeword[1];
+            codeword[2] = codeword[2] ^ codeword[3];
+
+            val = val ^ codeword[2];
+#endif
+
         }
         else
         {
@@ -231,15 +253,24 @@ namespace osuCrypto
                     ^ t0Val[i]
                     ^ t1Val[i];
             }
+
+#ifdef OOS_SHA_HASH
+            SHA1  sha1;
+            u8 hashBuff[SHA1::HashSize];
+            // now hash it to remove the correlation.
+            sha1.Update((u8*)mT0[otIdx].data(), mT0[otIdx].size() * sizeof(block));
+            sha1.Final(hashBuff);
+            val = toBlock(hashBuff);
+#else
+            mAesFixedKey.ecbEncBlocks(t0Val, mT0.size()[1], codeword.data());
+
+            val = ZeroBlock;
+            for (u64 i = 0; i < mT0.size()[1]; ++i)
+                val = val ^ codeword[i] ^ t0Val[i];
+#endif
         }
 
-        SHA1  sha1;
-        u8 hashBuff[SHA1::HashSize];
-        // now hash it to remove the correlation.
-        sha1.Update((u8*)mT0[otIdx].data(), mT0[otIdx].size() * sizeof(block));
-        sha1.Final(hashBuff);
 
-        val = toBlock(hashBuff);
 
     }
 

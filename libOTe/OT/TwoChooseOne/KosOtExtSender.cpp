@@ -4,6 +4,8 @@
 #include "Common/Log.h"
 #include "Common/ByteStream.h"
 #include "Crypto/Commit.h"
+#include "TcoOtDefines.h"
+
 
 namespace osuCrypto
 {
@@ -49,18 +51,14 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
-
-        const u8 superBlkSize(8);
-        #define commStepSize 512
-
-        // round up
+        // round up 
         u64 numOtExt = roundUpTo(messages.size(), 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
         u64 numBlocks = numSuperBlocks * superBlkSize;
 
         // a temp that will be used to transpose the sender's matrix
-		std::array<std::array<block, superBlkSize>, 128> t;
-		std::vector<std::array<block, superBlkSize>> u(128 * commStepSize);
+        std::array<std::array<block, superBlkSize>, 128> t;
+        std::vector<std::array<block, superBlkSize>> u(128 * commStepSize);
 
         std::array<block, 128> choiceMask;
         block delta = *(block*)mBaseChoiceBits.data();
@@ -89,15 +87,15 @@ namespace osuCrypto
             block * tIter = (block*)t.data();
             block * cIter = choiceMask.data();
 
-			if (uIter == uEnd)
-			{
-				u64 step = std::min(numSuperBlocks - superBlkIdx,(u64) commStepSize);
+            if (uIter == uEnd)
+            {
+                u64 step = std::min(numSuperBlocks - superBlkIdx,(u64) commStepSize);
 
-				chl.recv(u.data(), step * superBlkSize * 128 * sizeof(block));
-				uIter = (block*)u.data();
-			}
+                chl.recv(u.data(), step * superBlkSize * 128 * sizeof(block));
+                uIter = (block*)u.data();
+            }
 
-			// transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
+            // transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
             for (u64 colIdx = 0; colIdx < 128; ++colIdx)
             {
                 // generate the columns using AES-NI in counter mode.
@@ -288,7 +286,7 @@ namespace osuCrypto
                 messages[dd][1] = *(block*)hashBuff;
 #endif
             }
-#ifndef KOS_SHA_HASH
+#ifndef KOS_SHA_HASH 
             auto length = 2 *(stop - doneIdx);
             auto steps = length / 8;
             block* mIter = messages[doneIdx].data();

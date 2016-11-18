@@ -139,6 +139,7 @@
     <ClInclude Include="OT\Base\naor-pinkas.h" />
     <ClInclude Include="OT\TwoChooseOne\IknpOtExtReceiver.h" />
     <ClInclude Include="OT\TwoChooseOne\IknpOtExtSender.h" />
+    <ClInclude Include="OT\TwoChooseOne\TcoOtDefines.h" />
     <ClInclude Include="OT\TwoChooseOne\LzKosOtExtReceiver.h" />
     <ClInclude Include="OT\TwoChooseOne\LzKosOtExtSender.h" />
     <ClInclude Include="OT\TwoChooseOne\OTExtInterface.h" />

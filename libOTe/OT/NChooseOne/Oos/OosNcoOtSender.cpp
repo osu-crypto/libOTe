@@ -160,9 +160,12 @@ namespace osuCrypto
         std::array<block, 10> codeword;
         mCode.encode(plaintext, codeword);
 
+#ifdef OOS_SHA_HASH
         SHA1  sha1;
         u8 hashBuff[SHA1::HashSize];
-
+#else
+        std::array<block, 10> aesBuff;
+#endif
         // the index of the otIdx'th correction value u = t1 + t0 + c(w)
         // and the associated T value held by the sender.
         auto* corVal = mCorrectionVals.data() + otIdx * mCorrectionVals.size()[1];
@@ -189,6 +192,24 @@ namespace osuCrypto
             codeword[1] = tVal[1] ^ t1;
             codeword[2] = tVal[2] ^ t2;
             codeword[3] = tVal[3] ^ t3;
+
+#ifdef OOS_SHA_HASH
+            // hash it all to get rid of the correlation.
+            sha1.Update((u8*)codeword.data(), sizeof(block) * mT.size()[1]);
+            sha1.Final(hashBuff);
+            val = toBlock(hashBuff);
+#else
+            mAesFixedKey.ecbEncFourBlocks(codeword.data(), aesBuff.data());
+            codeword[0] = codeword[0] ^ aesBuff[0];
+            codeword[1] = codeword[1] ^ aesBuff[1];
+            codeword[2] = codeword[2] ^ aesBuff[2];
+            codeword[3] = codeword[3] ^ aesBuff[3];
+
+            val =         codeword[0] ^ codeword[1];
+            codeword[2] = codeword[2] ^ codeword[3];
+
+            val = val ^ codeword[2];
+#endif
         }
         else
         {
@@ -202,12 +223,19 @@ namespace osuCrypto
                     = tVal[i]
                     ^ t1;
             }
-        }
+#ifdef OOS_SHA_HASH
+            // hash it all to get rid of the correlation.
+            sha1.Update((u8*)codeword.data(), sizeof(block) * mT.size()[1]);
+            sha1.Final(hashBuff);
+            val = toBlock(hashBuff);
+#else
+            mAesFixedKey.ecbEncBlocks(codeword.data(), mT.size()[1], aesBuff.data());
 
-        // hash it all to get rid of the correlation.
-        sha1.Update((u8*)codeword.data(), sizeof(block) * mT.size()[1]);
-        sha1.Final(hashBuff);
-        val = toBlock(hashBuff);
+            val = ZeroBlock;
+            for (u64 i = 0; i < mT.size()[1]; ++i)
+                val = val ^ codeword[i] ^ aesBuff[i];
+#endif
+        }
     }
 
     void OosNcoOtSender::getParams(

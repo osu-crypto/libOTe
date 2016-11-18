@@ -5,6 +5,7 @@
 #include "Common/BitVector.h"
 #include "Crypto/PRNG.h"
 #include "Crypto/Commit.h"
+#include "TcoOtDefines.h"
 
 using namespace std;
 
@@ -52,9 +53,6 @@ namespace osuCrypto
         if (mHasBase == false)
             throw std::runtime_error("rt error at " LOCATION);
 
-
-        static const u64 superBlkSize(8);
-
         // we are going to process OTs in blocks of 128 * superBlkSize messages.
         u64 numOtExt = roundUpTo(choices.size(), 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
@@ -71,6 +69,13 @@ namespace osuCrypto
 
         block* mIter = messages.data();
 
+        u64 step = std::min(numSuperBlocks, (u64)commStepSize);
+        std::unique_ptr<ByteStream> uBuff(new ByteStream(step * 128 * superBlkSize * sizeof(block)));
+
+        // get an array of blocks that we will fill. 
+        auto uIter = (block*)uBuff->data();
+        auto uEnd = uIter + step * 128 * superBlkSize;
+
         // NOTE: We do not transpose a bit-matrix of size numCol * numCol.
         //   Instead we break it down into smaller chunks. We do 128 columns 
         //   times 8 * 128 rows at a time, where 8 = superBlkSize. This is done for  
@@ -81,11 +86,6 @@ namespace osuCrypto
         {
 
             // this will store the next 128 rows of the matrix u
-            std::unique_ptr<ByteStream> uBuff(new ByteStream(128 * superBlkSize * sizeof(block)));
-
-            // get an array of blocks that we will fill. 
-            auto uIter = (block*)uBuff->data();
-
 
             block* tIter = (block*)t0.data();
             block* cIter = choiceBlocks.data() + superBlkSize * superBlkIdx;
@@ -126,9 +126,21 @@ namespace osuCrypto
                 tIter += 8;
             }
 
+            if (uIter == uEnd)
+            {
+                // send over u buffer
+                chl.asyncSend(std::move(uBuff));
 
-            // send over u buffer
-            chl.asyncSend(std::move(uBuff));
+                u64 step = std::min(numSuperBlocks - superBlkIdx - 1, (u64)commStepSize);
+
+                if (step)
+                {
+                    uBuff.reset(new ByteStream(step * 128 * superBlkSize * sizeof(block)));
+
+                    uIter = (block*)uBuff->data();
+                    uEnd = uIter + step * 128 * superBlkSize;
+                }
+            }
 
             // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
             // each 128 bits wide.
@@ -144,7 +156,7 @@ namespace osuCrypto
 
             while (mIter != mEnd)
             {
-                while (mIter != mEnd && tIter < tEnd)
+                while (mIter != mEnd && tIter < tEnd) 
                 {
                     (*mIter) = *tIter;
 
@@ -166,6 +178,10 @@ namespace osuCrypto
         }
 
 
+#ifndef IKNP_SHA_HASH
+        std::array<block, 8> aesHashTemp;
+#endif
+
         SHA1 sha;
         u8 hashBuff[20];
         u64 doneIdx = (0);
@@ -175,6 +191,7 @@ namespace osuCrypto
         {
             u64 stop = std::min(messages.size(), doneIdx + 128);
 
+#ifdef IKNP_SHA_HASH
             for (u64 i = 0; doneIdx < stop; ++doneIdx, ++i)
             {
                 // hash it
@@ -183,6 +200,35 @@ namespace osuCrypto
                 sha.Final(hashBuff);
                 messages[doneIdx] = *(block*)hashBuff;
             }
+#else
+            auto length = stop - doneIdx;
+            auto steps = length / 8;
+            block* mIter = messages.data() + doneIdx;
+            for (u64 i = 0; i < steps; ++i)
+            {
+                mAesFixedKey.ecbEncBlocks(mIter, 8, aesHashTemp.data());
+                mIter[0] = mIter[0] ^ aesHashTemp[0];
+                mIter[1] = mIter[1] ^ aesHashTemp[1];
+                mIter[2] = mIter[2] ^ aesHashTemp[2];
+                mIter[3] = mIter[3] ^ aesHashTemp[3];
+                mIter[4] = mIter[4] ^ aesHashTemp[4];
+                mIter[5] = mIter[5] ^ aesHashTemp[5];
+                mIter[6] = mIter[6] ^ aesHashTemp[6];
+                mIter[7] = mIter[7] ^ aesHashTemp[7];
+
+                mIter += 8;
+            }
+
+            auto rem = length - steps * 8;
+            mAesFixedKey.ecbEncBlocks(mIter, rem, aesHashTemp.data());
+            for (u64 i = 0; i < rem; ++i)
+            {
+                mIter[i] = mIter[i] ^ aesHashTemp[i];
+            }
+
+            doneIdx = stop;
+#endif
+
         }
 
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");
