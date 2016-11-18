@@ -2,10 +2,11 @@
 A fast and portable C++11 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*.  This library currently implements:
  
 * The semi-honest 1-out-of-2 OT [IKNP03] protocol.
-* The semi-honest 1-out-of-N [[KKRT16]](https://eprint.iacr.org/2016/799) protocol. 
-* The malicious secure 1-out-of-2 [[KOS15]](https://eprint.iacr.org/2015/546) protocol.
-* The malicious secure 1-out-of-N [[OOS16]](http://eprint.iacr.org/2016/933) protocol.
-* The malicious secure approximate K-out-of-N [[RR16]](https://eprint.iacr.org/2016/746) protocol.
+* The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799) protocol. 
+* The malicious secure 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546) protocol.
+* The malicious secure 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf) protocol.
+* The malicious secure 1-out-of-N OT[[OOS16]](http://eprint.iacr.org/2016/933) protocol.
+* The malicious secure approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746) protocol.
 * The malicious secure 1-out-of-2 base OT  [NP00] protocol.
  
 ## Introduction
@@ -25,12 +26,13 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
 | 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **11.7 / 8.5**       	| ~              	| ~     	| 24**     	| ~          	|
 | 1-out-of-N (N=2<sup>128</sup>)| passive| KKRT16      	| **9.2 / 6.7**        	| ~              	| ~       	| ~       	| ~          	|
-| 1-out-of-2          	| malicious 	| ALSZ15        | ~          	    | 17.3          	| ~       	| ~       	|  10         	|
+| 1-out-of-2 Delta-OT  	| malicious   	| KOS15       	| **2.1***        	| ~              	| ~     	| ~        	|  ~      	|
+| 1-out-of-2          	| malicious 	| ALSZ15        | ~          	        | 17.3          	| ~       	| ~       	|  10         	|
 | 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  2.9       	|
-| 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**     	| ~     	|  2.7      	|
+| 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**   | ~     	|  2.7      	|
  
  
-\* Estmated from running the Encrypto Group implementation for n=2<sup>20</sup>.  Program would crash for n=2<sup>24</sup>.
+\* Delta-OT does not use the SHA1 or AES hash function.
  
 \** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper and their implementation used multiple threads. The number was not specified. When using the libOTe implementation with multiple threads, a timing of 2.6 seconds was obtained with the SHA1 hash function.
  
@@ -128,8 +130,9 @@ Contact Peter Rindal rindalp@oregonstate.edu for any assistance on building or r
 [KKRT16]  - Vladimir Kolesnikov and Ranjit Kumaresan and Mike Rosulek and Ni Trieu, _Efficient Batched Oblivious PRF with Applications to Private Set Intersection_. [eprint/2016/799](https://eprint.iacr.org/2016/799)
  
 [RR16]  - Peter Rindal and Mike Rosulek, _Improved Private Set Intersection against Malicious Adversaries_. [eprint/2016/746](https://eprint.iacr.org/2016/746)
- 
- 
+
+[BLNNOOSS15]  - Sai Sheshank Burra and Enrique Larraia and Jesper Buus Nielsen and Peter Sebastian Nordholt and Claudio Orlandi and Emmanuela Orsini and Peter Scholl and Nigel P. Smart, _High Performance Multi-Party Computation for Binary Circuits Based on Oblivious Transfe_. [eprint/2015/472](https://eprint.iacr.org/2015/472.pdf)
+
 [ALSZ15]  - Gilad Asharov and Yehuda Lindell and Thomas Schneider and Michael Zohner, _More Efficient Oblivious Transfer Extensions with Security for Malicious Adversaries_. [eprint/2015/061](https://eprint.iacr.org/2015/061)
  
 [NP00]  -    Moni Naor, Benny Pinkas, _Efficient Oblivious Transfer Protocols_. 
