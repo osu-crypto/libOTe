@@ -559,7 +559,7 @@ int main(int argc, char** argv)
             thrd.join();
         }
     }
-    else if (cmd.isSet(dkos)||1)
+    else if (cmd.isSet(dkos))
     {
         if (cmd.hasValue(dkos))
         {

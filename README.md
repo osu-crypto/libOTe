@@ -24,7 +24,7 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
  
 | *Type*                	| *Security*  	| *Protocol*     	| libOTe (SHA1/AES)	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) (AES-hash) 	| [Apricot](https://github.com/bristolcrypto/apricot) (AES-hash)	| OOS16 (blake2)	| [emp-toolkit](https://github.com/emp-toolkit) (AES-hash)	|
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
-| 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **11.7 / 8.5**       	| ~              	| ~     	| 24**     	| ~          	|
+| 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **11.7 / 9.2**       	| ~              	| ~     	| 24**     	| ~          	|
 | 1-out-of-N (N=2<sup>128</sup>)| passive| KKRT16      	| **9.2 / 6.7**        	| ~              	| ~       	| ~       	| ~          	|
 | 1-out-of-2 Delta-OT  	| malicious   	| KOS15       	| **2.1***        	| ~              	| ~     	| ~        	|  ~      	|
 | 1-out-of-2          	| malicious 	| ALSZ15        | ~          	        | 17.3          	| ~       	| ~       	|  10         	|
