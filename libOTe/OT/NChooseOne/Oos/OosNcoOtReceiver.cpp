@@ -232,6 +232,9 @@ namespace osuCrypto
             codeword[2] = codeword[2] ^ codeword[3];
 
             val = val ^ codeword[2];
+
+            mAesFixedKey.ecbEncBlock(val, codeword[0]);
+            val = val ^ codeword[0];
 #endif
 
         }
@@ -267,6 +270,10 @@ namespace osuCrypto
             val = ZeroBlock;
             for (u64 i = 0; i < mT0.size()[1]; ++i)
                 val = val ^ codeword[i] ^ t0Val[i];
+
+
+            mAesFixedKey.ecbEncBlock(val, codeword[0]);
+            val = val ^ codeword[0];
 #endif
         }
 
