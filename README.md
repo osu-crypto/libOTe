@@ -68,9 +68,9 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
 | 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **11.7 / 8.5**       	| ~              	| ~     	| 24**     	| ~          	|
 | 1-out-of-N (N=2<sup>128</sup>)| passive| KKRT16      	| **9.2 / 6.7**        	| ~              	| ~       	| ~       	| ~          	|
-| 1-out-of-2          	| malicious 	| ALSZ15        | ~          	    | 17.3          	| ~       	| ~       	|  141         	|
-| 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  29       	|
-| 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**     	| ~     	|  27      	|
+| 1-out-of-2          	| malicious 	| ALSZ15        | ~          	    | 17.3          	| ~       	| ~       	|  10         	|
+| 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  2.9       	|
+| 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**     	| ~     	|  2.7      	|
  
  
 \* Estmated from running the Encrypto Group implementation for n=2<sup>20</sup>.  Program would crash for n=2<sup>24</sup>.
