@@ -1,13 +1,13 @@
 # libOTe
 A fast and portable C++11 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*.  This library currently implements:
  
-* The semi-honest 1-out-of-2 OT [IKNP03] protocol.
-* The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799) protocol. 
-* The malicious secure 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546) protocol.
-* The malicious secure 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf) protocol.
-* The malicious secure 1-out-of-N OT[[OOS16]](http://eprint.iacr.org/2016/933) protocol.
-* The malicious secure approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746) protocol.
-* The malicious secure 1-out-of-2 base OT  [NP00] protocol.
+* The semi-honest 1-out-of-2 OT [IKNP03].
+* The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
+* The malicious secure 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
+* The malicious secure 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
+* The malicious secure 1-out-of-N OT [[OOS16]](http://eprint.iacr.org/2016/933).
+* The malicious secure approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746).
+* The malicious secure 1-out-of-2 base OT [NP00].
  
 ## Introduction
  
@@ -61,7 +61,7 @@ This project has been placed in the public domain. As such, you are unrestricted
  
 ## Install
  
-The library is *cross platform* and has been tested on both Windows and Linux. The library should work on MAC but it has not been tested. There are two library dependencies including [Boost](http://www.boost.org/), and [Miracl](https://www.miracl.com/index) . For each, we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advise using the coned repository that we provide.
+The library is *cross platform* and has been tested on both Windows and Linux. The library should work on MAC but it has not been tested. There are two library dependencies including [Boost](http://www.boost.org/) (netowrking), and [Miracl](https://www.miracl.com/index) (Base OT). For each, we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advise using the coned repository that we provide.
  
 ### Windows
  
