@@ -9,7 +9,7 @@ using namespace std;
 
 namespace osuCrypto
 {
-    OosNcoOtReceiver::OosNcoOtReceiver(BchCode & code)
+    OosNcoOtReceiver::OosNcoOtReceiver(LinearCode & code)
         :mHasBase(false),
         mCode(code)
     {}
@@ -21,7 +21,7 @@ namespace osuCrypto
 
         mGens.resize(baseRecvOts.size());
 
-        for (int i = 0; i < mGens.size(); i++)
+        for (u64 i = 0; i < mGens.size(); i++)
         {
             mGens[i][0].SetSeed(baseRecvOts[i][0]);
             mGens[i][1].SetSeed(baseRecvOts[i][1]);
@@ -556,7 +556,7 @@ namespace osuCrypto
                         {
                             // now add the i'th row of T0 if the bit is 1.
                             // Otherwise this is a no op. Equiv. to an if(x).
-                            tSumIter[m] = tSumIter[m] ^ *(mT0Iter + m) & mask0;
+                            tSumIter[m] = tSumIter[m] ^ (*(mT0Iter + m) & mask0);
                         }
                     }
                 }

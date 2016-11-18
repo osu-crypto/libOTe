@@ -34,7 +34,7 @@ namespace osuCrypto
         void SetSeed(const block& b);
         const block getSeed() const;
 
-         
+
         template<typename T>
         T get()
         {

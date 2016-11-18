@@ -11,17 +11,14 @@
 #include "boost/lexical_cast.hpp"
 #include <memory>
 #include "Common/Timer.h"
-//#include <mmintrin.h>
-//#include <xmmintrin.h>
+
 #ifdef GetMessage
 #undef GetMessage
 #endif
 
-//#ifdef VISUAL_STUDIO_MEM_LEAK_DETECTOR
-//#pragma comment(lib, "vld.lib")
-//#include <vld.h>
-//#endif
-
+#ifndef _MSC_VER
+#pragma GCC diagnostic ignored "-Wignored-attributes"
+#endif
 
 #ifdef _MSC_VER 
 #define __STR2__(x) #x
@@ -29,12 +26,7 @@
 #define TODO(x) __pragma(message (__FILE__ ":"__STR1__(__LINE__) " Warning:TODO - " #x))
 #define ALIGNED(__Declaration, __alignment) __declspec(align(__alignment)) __Declaration 
 #else
-//#if defined(__llvm__)
 #define TODO(x) 
-//#else
-//#define TODO(x) DO_PRAGMA( message ("Warning:TODO - " #x))
-//#endif
-
 #define ALIGNED(__Declaration, __alignment) __Declaration __attribute__((aligned (16)))
 #endif
 

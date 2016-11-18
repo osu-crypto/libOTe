@@ -5,7 +5,7 @@
 #include "Common/BitVector.h"
 #include "Common/MatrixView.h"
 #include "OT/Base/naor-pinkas.h"
-#include "OT/Tools/BchCode.h"
+#include "OT/Tools/LinearCode.h"
 #include "Network/Channel.h"
 
 #include <array>
@@ -23,12 +23,12 @@ namespace osuCrypto {
     {
     public: 
 
-        OosNcoOtSender(BchCode& code)
+        OosNcoOtSender(LinearCode& code)
             : mCode(code)
         {}
         ~OosNcoOtSender();
 
-        BchCode mCode;
+        LinearCode mCode;
 
         std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;

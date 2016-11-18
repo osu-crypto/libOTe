@@ -15,7 +15,7 @@ namespace osuCrypto
         if (baseOTs.size() != gOtExtBaseOtCount)
             throw std::runtime_error(LOCATION);
 
-        for (int i = 0; i < gOtExtBaseOtCount; i++)
+        for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {
             mGens[i][0].SetSeed(baseOTs[i][0]);
             mGens[i][1].SetSeed(baseOTs[i][1]);
@@ -171,7 +171,7 @@ namespace osuCrypto
 
 
 
-            block* mStart = mIter;
+            //block* mStart = mIter;
             block* mEnd = std::min(mIter + 128 * superBlkSize, (block*)messages.end());
 
             // compute how many rows are unused.
@@ -259,8 +259,11 @@ namespace osuCrypto
         x = t = t2 = ZeroBlock;
         block ti, ti2;
 
+#ifdef KOS_SHA_HASH
         SHA1 sha;
         u8 hashBuff[20];
+#endif
+
         u64 doneIdx = (0);
         //Log::out << Log::lock;
 
@@ -268,7 +271,7 @@ namespace osuCrypto
         std::array<block, 128> challenges;
 
         std::array<block, 8> expendedChoiceBlk;
-        std::array<std::array<u8, 16>, 8>& expendedChoice = *(std::array<std::array<u8, 16>, 8>*)&expendedChoiceBlk;
+        std::array<std::array<u8, 16>, 8>& expendedChoice = *reinterpret_cast<std::array<std::array<u8, 16>, 8>*>(&expendedChoiceBlk);
 
         block mask = _mm_set_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
@@ -333,8 +336,6 @@ namespace osuCrypto
             {
                 mIter[i] = mIter[i] ^ aesHashTemp[i];
             }
-            //auto length = stop - doneIdx;
-            //mAesFixedKey.ecbEncBlocks(messages.data() + doneIdx, length, messages.data() + doneIdx);
 #endif
 
             doneIdx = stop;
@@ -342,13 +343,10 @@ namespace osuCrypto
 
 
 
-        u64 xtra = 0;;
         for (block& blk : extraBlocks)
         {
             // and check for correlation
             block chij = commonPrng.get<block>();
-
-            //Log::out << "recvIdx' " << xtra++ << "   " << blk << "   " << chij << "  " << (u32)choices2[doneIdx] << Log::endl;
 
             if (choices2[doneIdx++]) x = x ^ chij;
 
@@ -358,11 +356,11 @@ namespace osuCrypto
             t = t ^ ti;
             t2 = t2 ^ ti2;
         }
-        //Log::out << Log::unlock;
+
         gTimer.setTimePoint("recv.checkSummed");
 
-        //chl.asyncSend(std::move(correlationData));
-        chl.send(*correlationData);
+        chl.asyncSend(std::move(correlationData));
+        //chl.send(*correlationData);
         gTimer.setTimePoint("recv.done");
 
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");

@@ -7,13 +7,16 @@ using namespace osuCrypto;
 
 #include "OT/TwoChooseOne/KosOtExtReceiver.h"
 #include "OT/TwoChooseOne/KosOtExtSender.h"
+#include "OT/TwoChooseOne/KosDotExtReceiver.h"
+#include "OT/TwoChooseOne/KosDotExtSender.h"
+
 #include "Network/BtChannel.h"
 #include "Network/BtEndpoint.h"
 #include <numeric>
 #include "Common/Log.h"
 int miraclTestMain();
 
-#include "OT/Tools/BchCode.h"
+#include "OT/Tools/LinearCode.h"
 #include "OT/NChooseOne/Oos/OosNcoOtReceiver.h"
 #include "OT/NChooseOne/Oos/OosNcoOtSender.h"
 #include "OT/NChooseOne/KkrtNcoOtReceiver.h"
@@ -72,8 +75,6 @@ void kkrt_test(int i)
 
     std::vector< thread> thds(numThreads);
 
-    SHA1 sha;
-    u8 hashout[20];
     if (i == 0)
     {
 
@@ -87,7 +88,7 @@ void kkrt_test(int i)
                 auto& chl = *chls[k];
 
                 r.init(otsPer);
-                block encoding1, encoding2;
+                block encoding1;
                 for (u64 i = 0; i < otsPer; i += step)
                 {
                     for (u64 j = 0; j < step; ++j)
@@ -109,7 +110,7 @@ void kkrt_test(int i)
     {
         Timer time;
         time.setTimePoint("start");
-        block encoding1, encoding2;
+        block encoding2;
 
         for (u64 k = 0; k < numThreads; ++k)
         {
@@ -174,7 +175,7 @@ void oos_test(int i)
         chls[k] = &ep0.addChannel(name + ToString(k), name + ToString(k));
 
 
-    BchCode code;
+    LinearCode code;
     code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/OT/Tools/bch511.bin");
 
 
@@ -213,7 +214,7 @@ void oos_test(int i)
                 auto& chl = *chls[k];
 
                 r.init(otsPer);
-                block encoding1, encoding2;
+                block encoding1;
                 for (u64 i = 0; i < otsPer; i += step)
                 {
                     for (u64 j = 0; j < step; ++j)
@@ -233,7 +234,7 @@ void oos_test(int i)
     {
         Timer time;
         time.setTimePoint("start");
-        block encoding1, encoding2;
+        block  encoding2;
 
         for (u64 k = 0; k < numThreads; ++k)
         {
@@ -282,7 +283,6 @@ void kos_test(int i)
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
-    u64 step = 1024;
     u64 numOTs = 1 << 24;
 
 
@@ -324,8 +324,72 @@ void kos_test(int i)
         std::vector<std::array<block, 2>> msgs(numOTs);
         gTimer.reset();
         gTimer.setTimePoint("start");
-        block encoding1, encoding2;
         KosOtExtSender s;
+        s.setBaseOts(baseRecv, baseChoice);
+
+        s.send(msgs, prng0, chl);
+
+        gTimer.setTimePoint("finish");
+        Log::out << gTimer << Log::endl;
+
+    }
+
+
+    chl.close();
+
+    ep0.stop();
+    ios.stop();
+}
+
+
+void dkos_test(int i)
+{
+    Log::setThreadName("Sender");
+
+    PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
+
+    u64 numOTs = 1 << 24;
+
+
+    // get up the networking
+    std::string name = "n";
+    BtIOService ios(0);
+    BtEndpoint ep0(ios, "localhost", 1212, i, name);
+    Channel& chl = ep0.addChannel(name, name);
+
+    u64 s = 40;
+    // cheat and compute the base OT in the clear.
+    u64 baseCount = 128 + s;
+    std::vector<block> baseRecv(baseCount);
+    std::vector<std::array<block, 2>> baseSend(baseCount);
+    BitVector baseChoice(baseCount);
+    baseChoice.randomize(prng0);
+
+    prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+    for (u64 i = 0; i < baseCount; ++i)
+    {
+        baseRecv[i] = baseSend[i][baseChoice[i]];
+    }
+
+
+
+
+    if (i)
+    {
+        BitVector choice(numOTs);
+        std::vector<block> msgs(numOTs);
+        choice.randomize(prng0);
+        KosDotExtReceiver r;
+        r.setBaseOts(baseSend);
+
+        r.receive(choice, msgs, prng0, chl);
+    }
+    else
+    {
+        std::vector<std::array<block, 2>> msgs(numOTs);
+        gTimer.reset();
+        gTimer.setTimePoint("start");
+        KosDotExtSender s;
         s.setBaseOts(baseRecv, baseChoice);
 
         s.send(msgs, prng0, chl);
@@ -350,7 +414,6 @@ void iknp_test(int i)
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
-    u64 step = 1024;
     u64 numOTs = 1 << 24;
 
 
@@ -393,7 +456,6 @@ void iknp_test(int i)
 
         Timer time;
         time.setTimePoint("start");
-        block encoding1, encoding2;
         IknpOtExtSender s;
         s.setBaseOts(baseRecv, baseChoice);
 
@@ -468,6 +530,7 @@ void akn_test(int i)
 static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
 kos{ "k", "kos" },
+dkos{ "d", "dkos" },
 kkrt{ "kk", "kkrt" },
 iknp{ "i", "iknp" },
 oos{ "o", "oos" },
@@ -493,6 +556,19 @@ int main(int argc, char** argv)
         {
             auto thrd = std::thread([]() { kos_test(0); });
             kos_test(1);
+            thrd.join();
+        }
+    }
+    else if (cmd.isSet(dkos)||1)
+    {
+        if (cmd.hasValue(dkos))
+        {
+            kos_test(cmd.getInt(dkos));
+        }
+        else
+        {
+            auto thrd = std::thread([]() { dkos_test(0); });
+            dkos_test(1);
             thrd.join();
         }
     }
@@ -556,6 +632,8 @@ int main(int argc, char** argv)
             << "    frontend.exe -oos\n\n"
             << "to run the KOS active secure 1-out-of-2 OT, run\n\n"
             << "    frontend.exe -kos\n\n"
+            << "to run the KOS active secure 1-out-of-2 Delta-OT, run\n\n"
+            << "    frontend.exe -dkos\n\n"
             << "to run the IKNP passive secure 1-out-of-2 OT, run\n\n"
             << "    frontend.exe -iknp\n\n"
             << "to run the RR16 active secure approximate k-out-of-N OT, run\n\n"

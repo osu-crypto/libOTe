@@ -1,4 +1,4 @@
-#include "BchCode.h"
+#include "LinearCode.h"
 #include <fstream>
 #include "Common/BitVector.h"
 #include "Common/Log.h"
@@ -9,15 +9,15 @@
 namespace osuCrypto
 {
 
-    BchCode::BchCode()
+    LinearCode::LinearCode()
     {
     }
 
-    BchCode::~BchCode()
+    LinearCode::~LinearCode()
     {
     }
 
-    BchCode::BchCode(const BchCode &cp)
+    LinearCode::LinearCode(const LinearCode &cp)
         :
         mCodewordBitSize(cp.mCodewordBitSize),
         mG(cp.mG),
@@ -25,7 +25,7 @@ namespace osuCrypto
     {
     }
 
-    void BchCode::loadTxtFile(const std::string & fileName)
+    void LinearCode::loadTxtFile(const std::string & fileName)
     {
         std::ifstream in;
         in.open(fileName, std::ios::in);
@@ -39,7 +39,7 @@ namespace osuCrypto
         loadTxtFile(in);
     }
 
-    void BchCode::loadTxtFile(std::istream & in)
+    void LinearCode::loadTxtFile(std::istream & in)
     {
         u64 numRows, numCols;
         in >> numRows >> numCols;
@@ -88,7 +88,7 @@ namespace osuCrypto
 
         generateMod8Table();
     }
-    void BchCode::loadBinFile(const std::string & fileName)
+    void LinearCode::loadBinFile(const std::string & fileName)
     {
         std::fstream out;
         out.open(fileName, std::ios::in | std::ios::binary);
@@ -96,7 +96,7 @@ namespace osuCrypto
         loadBinFile(out);
 
     }
-    void BchCode::loadBinFile(std::istream & out)
+    void LinearCode::loadBinFile(std::istream & out)
     {
 
         u64 size = 0;
@@ -111,26 +111,14 @@ namespace osuCrypto
         }
 
         mG.resize(size);
-        //mG1.resize(size);
-        //mG2.resize(size / 2);
 
         out.read((char *)mG.data(), mG.size() * sizeof(block));
 
         generateMod8Table();
-        //for (u64 i = 0; i < size; ++i)
-        //{
-        //    mG1[i][0] = ZeroBlock;
-        //    mG1[i][1] = mG[i];
-        //}
-        //for (u64 i = 0; i < size / 2; ++i)
-        //{
-        //    mG2[i][0] = ZeroBlock;
-        //    mG2[i][1] = mG[i];
-        //}
 
     }
 
-    void BchCode::writeBinFile(const std::string & fileName)
+    void LinearCode::writeBinFile(const std::string & fileName)
     {
         std::fstream out;
         out.open(fileName, std::ios::out | std::ios::binary | std::ios::trunc);
@@ -138,7 +126,7 @@ namespace osuCrypto
         writeBinFile(out);
 
     }
-    void BchCode::writeBinFile(std::ostream & out)
+    void LinearCode::writeBinFile(std::ostream & out)
     {
         u64 size = mG.size();
         out.write((const char *)&size, sizeof(u64));
@@ -147,7 +135,18 @@ namespace osuCrypto
         out.write((const char *)mG.data(), mG.size() * sizeof(block));
     }
 
-    void BchCode::generateMod8Table()
+    void LinearCode::random(PRNG & prng, u64 inputSize, u64 outputSize)
+    {
+        mCodewordBitSize = outputSize;
+        mG.resize(inputSize * codewordBlkSize());
+
+        prng.get(mG.data(), mG.size());
+
+        generateMod8Table();
+
+    }
+
+    void LinearCode::generateMod8Table()
     {
 
         mG8.resize(roundUpTo((mG.size() + 7) / 8, 8) * 256);
@@ -165,7 +164,7 @@ namespace osuCrypto
 
             for (u64 gRow = 0; gRow < 8; ++gRow)
             {
-                u64 g8Row = (1 << gRow);
+                u64 g8Row = (u64(1) << gRow);
                 u64 stride = g8Row;
 
                 while (g8Row < 256)
@@ -192,22 +191,22 @@ namespace osuCrypto
         }
     }
 
-    u64 BchCode::plaintextBlkSize() const
+    u64 LinearCode::plaintextBlkSize() const
     {
         return (plaintextBitSize() + 127) / 128;
     }
 
-    u64 BchCode::plaintextBitSize() const
+    u64 LinearCode::plaintextBitSize() const
     {
         return mG.size() / codewordBlkSize();
     }
 
-    u64 BchCode::codewordBlkSize() const
+    u64 LinearCode::codewordBlkSize() const
     {
         return (codewordBitSize() + 127) / 128;
     }
 
-    u64 BchCode::codewordBitSize() const
+    u64 LinearCode::codewordBitSize() const
     {
         return mCodewordBitSize;
     }
@@ -215,7 +214,7 @@ namespace osuCrypto
 
     static std::array<block, 2> sBlockMasks{ { ZeroBlock, AllOneBlock } };
 
-    void BchCode::encode(
+    void LinearCode::encode(
         ArrayView<block> plaintxt,
         ArrayView<block> codeword)
     {
@@ -223,59 +222,97 @@ namespace osuCrypto
         if (plaintxt.size() != plaintextBlkSize() ||
             codeword.size() < codewordBlkSize())
             throw std::runtime_error("");
-
-        if (codewordBlkSize() != 4 || plaintextBitSize() != 76)
-            throw std::runtime_error("generalize this code. a naive version is below but realize this is significantly slower " LOCATION);
-
-        ////A general for loop, slower...
-        //for (u64 i = 0, k = 0; i < cnt; ++i)
-        //{
-        //    for (u64 j = 0; j < codeword.size(); ++j, ++k)
-        //    {
-        //        // sBlock works as an if statment, but its faster...
-        //        codeword[j] = codeword[j] ^ (mG[k] & sBlockMasks[*bitIter++]);
-        //    }
-        //}
 #endif
+
         std::array<block, 8>
             c{ ZeroBlock ,ZeroBlock ,ZeroBlock ,ZeroBlock,ZeroBlock ,ZeroBlock ,ZeroBlock ,ZeroBlock };
 
-        u8* byteView = (u8*)plaintxt.data();
-        u64 kStop = (mG8.size() / 8) * 8,
-            k = 0,
-            i = 0;
 
-        u64 byteStep = 2;
-        u64 codeSize = 4;
+        // highlevel idea: For each byte of the input, we have preprocessed 
+        // the corresponding partial code. That is, we have many sub-codes
+        // each with input size 8. And these subcodes are precomputed
+        // in a lookup table called mG8. Each sub-code takes up 256 * codeSize;
+
+        u64 codeSize = codewordBlkSize();
         u64 rowSize = 256 * codeSize;
-        u64 kStep = rowSize * byteStep;
+        u8* byteView = (u8*)plaintxt.data();
 
-        for (; k < kStop; i += byteStep, k += kStep)
+        if (codeSize == 4)
         {
-            block* g0 = mG8.data() + k + byteView[i] * codeSize;
-            block* g1 = mG8.data() + k + byteView[i + 1] * codeSize + rowSize;
+            u64 kStop = (mG8.size() / 8) * 8,
+                k = 0,
+                i = 0;
 
+            // this case has been optimized and we lookup two sub-codes at a time.
+            u64 byteStep = 2;
+            u64 kStep = rowSize * byteStep;
+            for (; k < kStop; i += byteStep, k += kStep)
+            {
+                block* g0 = mG8.data() + k + byteView[i] * codeSize;
+                block* g1 = mG8.data() + k + byteView[i + 1] * codeSize + rowSize;
 #ifndef NDEBUG
-            if (g1 >= mG8.data() + mG8.size() + 4)throw std::runtime_error("bad indexing");
+                if (g1 >= mG8.data() + mG8.size())throw std::runtime_error("");
+#endif
+                c[0] = c[0] ^ g0[0];
+                c[1] = c[1] ^ g0[1];
+                c[2] = c[2] ^ g0[2];
+                c[3] = c[3] ^ g0[3];
+
+                c[4] = c[4] ^ g1[0];
+                c[5] = c[5] ^ g1[1];
+                c[6] = c[6] ^ g1[2];
+                c[7] = c[7] ^ g1[3];
+            }
+
+            codeword[0] = c[0] ^ c[4];
+            codeword[1] = c[1] ^ c[5];
+            codeword[2] = c[2] ^ c[6];
+            codeword[3] = c[3] ^ c[7];
+
+        }
+        else
+        {
+            u64 rowCount = (plaintextBitSize() + 7) / 8;
+            u64 superRowCount = rowCount / 8;
+
+            for (u64 j = 0; j < codeSize; ++j)
+            {
+                for (u64 i = 0; i < 8; ++i)
+                    c[i] = ZeroBlock;
+
+                for (u64 i = 0; i < superRowCount; ++i)
+                {
+
+                    block* g0 = mG8.data() + j + byteView[i + 0] * codeSize + rowSize * 0;
+                    block* g1 = mG8.data() + j + byteView[i + 1] * codeSize + rowSize * 1;
+                    block* g2 = mG8.data() + j + byteView[i + 2] * codeSize + rowSize * 2;
+                    block* g3 = mG8.data() + j + byteView[i + 3] * codeSize + rowSize * 3;
+                    block* g4 = mG8.data() + j + byteView[i + 4] * codeSize + rowSize * 4;
+                    block* g5 = mG8.data() + j + byteView[i + 5] * codeSize + rowSize * 5;
+                    block* g6 = mG8.data() + j + byteView[i + 6] * codeSize + rowSize * 6;
+                    block* g7 = mG8.data() + j + byteView[i + 7] * codeSize + rowSize * 7;
+#ifndef NDEBUG
+                    if (g7 >= mG8.data() + mG8.size())throw std::runtime_error("");
 #endif
 
+                    c[0] = c[0] ^ *g0;
+                    c[1] = c[1] ^ *g1;
+                    c[2] = c[2] ^ *g2;
+                    c[3] = c[3] ^ *g3;
+                    c[4] = c[4] ^ *g4;
+                    c[5] = c[5] ^ *g5;
+                    c[6] = c[6] ^ *g6;
+                    c[7] = c[7] ^ *g7;
+                }     
 
-            c[0] = c[0] ^ g0[0];
-            c[1] = c[1] ^ g0[1];
-            c[2] = c[2] ^ g0[2];
-            c[3] = c[3] ^ g0[3];
+                codeword[j] = ZeroBlock;
+                for (u64 i = 0; i < 8; ++i)
+                    codeword[j] = codeword[j] ^ c[i];
+            }
+      
 
-            c[4] = c[4] ^ g1[0];
-            c[5] = c[5] ^ g1[1];
-            c[6] = c[6] ^ g1[2];
-            c[7] = c[7] ^ g1[3];
+
         }
-
-        codeword[0] = c[0] ^ c[4];
-        codeword[1] = c[1] ^ c[5];
-        codeword[2] = c[2] ^ c[6];
-        codeword[3] = c[3] ^ c[7];
-
 
 
     }

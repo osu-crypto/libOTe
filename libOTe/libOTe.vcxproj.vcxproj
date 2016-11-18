@@ -77,7 +77,7 @@
     <ClCompile Include="OT\NChooseOne\KkrtNcoOtSender.cpp" />
     <ClCompile Include="OT\NChooseOne\Oos\OosNcoOtReceiver.cpp" />
     <ClCompile Include="OT\NChooseOne\Oos\OosNcoOtSender.cpp" />
-    <ClCompile Include="OT\Tools\BchCode.cpp" />
+    <ClCompile Include="OT\Tools\LinearCode.cpp" />
     <ClCompile Include="Common\BitIterator.cpp" />
     <ClCompile Include="Common\BitVector.cpp" />
     <ClCompile Include="Common\ByteStream.cpp" />
@@ -97,6 +97,8 @@
     <ClCompile Include="OT\Base\naor-pinkas.cpp" />
     <ClCompile Include="OT\TwoChooseOne\IknpOtExtReceiver.cpp" />
     <ClCompile Include="OT\TwoChooseOne\IknpOtExtSender.cpp" />
+    <ClCompile Include="OT\TwoChooseOne\KosDotExtReceiver.cpp" />
+    <ClCompile Include="OT\TwoChooseOne\KosDotExtSender.cpp" />
     <ClCompile Include="OT\TwoChooseOne\KosOtExtReceiver.cpp" />
     <ClCompile Include="OT\TwoChooseOne\KosOtExtSender.cpp" />
     <ClCompile Include="OT\Tools\Tools.cpp" />
@@ -112,7 +114,7 @@
     <ClInclude Include="OT\NChooseOne\Oos\OosDefines.h" />
     <ClInclude Include="OT\NChooseOne\Oos\OosNcoOtSender.h" />
     <ClInclude Include="OT\NChooseOne\Oos\OosNcoOtReceiver.h" />
-    <ClInclude Include="OT\Tools\BchCode.h" />
+    <ClInclude Include="OT\Tools\LinearCode.h" />
     <ClInclude Include="Common\ArrayView.h" />
     <ClInclude Include="Common\BitIterator.h" />
     <ClInclude Include="Common\BitVector.h" />
@@ -139,6 +141,8 @@
     <ClInclude Include="OT\Base\naor-pinkas.h" />
     <ClInclude Include="OT\TwoChooseOne\IknpOtExtReceiver.h" />
     <ClInclude Include="OT\TwoChooseOne\IknpOtExtSender.h" />
+    <ClInclude Include="OT\TwoChooseOne\KosDotExtReceiver.h" />
+    <ClInclude Include="OT\TwoChooseOne\KosDotExtSender.h" />
     <ClInclude Include="OT\TwoChooseOne\TcoOtDefines.h" />
     <ClInclude Include="OT\TwoChooseOne\LzKosOtExtReceiver.h" />
     <ClInclude Include="OT\TwoChooseOne\LzKosOtExtSender.h" />

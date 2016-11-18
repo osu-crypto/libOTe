@@ -22,7 +22,7 @@ namespace osuCrypto
         mBaseChoiceBits = choices;
         mGens.resize(choices.size());
 
-        for (int i = 0; i < baseRecvOts.size(); i++)
+        for (u64 i = 0; i < baseRecvOts.size(); i++)
         {
             mGens[i].SetSeed(baseRecvOts[i]);
         }
@@ -149,8 +149,6 @@ namespace osuCrypto
 
 #endif // !NDEBUG
 
-        SHA1  sha1;
-        u8 hashBuff[SHA1::HashSize];
         std::array<block, 10> codeword;
 
         auto* corVal = mCorrectionVals.data() + otIdx * mCorrectionVals.size()[1];
@@ -170,6 +168,9 @@ namespace osuCrypto
         }
 
 #ifdef KKRT_SHA_HASH
+
+        SHA1  sha1;
+        u8 hashBuff[SHA1::HashSize];
         // hash it all to get rid of the correlation.
         sha1.Update((u8*)codeword.data(), sizeof(block) * mT.size()[1]);
         sha1.Final(hashBuff);

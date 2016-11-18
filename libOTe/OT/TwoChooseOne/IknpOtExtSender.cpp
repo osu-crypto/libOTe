@@ -37,7 +37,7 @@ namespace osuCrypto
 
 
         mBaseChoiceBits = choices;
-        for (int i = 0; i < gOtExtBaseOtCount; i++)
+        for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {
             mGens[i].SetSeed(baseRecvOts[i]);
         }
@@ -52,7 +52,7 @@ namespace osuCrypto
         // round up
         u64 numOtExt = roundUpTo(messages.size(), 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
-        u64 numBlocks = numSuperBlocks * superBlkSize;
+        //u64 numBlocks = numSuperBlocks * superBlkSize;
 
         // a temp that will be used to transpose the sender's matrix
         std::array<std::array<block, superBlkSize>, 128> t;
@@ -122,7 +122,7 @@ namespace osuCrypto
             sse_transpose128x1024(t);
 
 
-            std::array<block, 2>* mStart = mIter;
+            //std::array<block, 2>* mStart = mIter;
             std::array<block, 2>* mEnd = std::min(mIter + 128 * superBlkSize, (std::array<block, 2>*)messages.end());
 
             tIter = (block*)t.data();

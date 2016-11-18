@@ -11,8 +11,8 @@ namespace osuCrypto {
         std::string localName,
         std::string remoteName)
         :mEndpoint(endpoint),
-        mLocalName(localName),
-        mRemoteName(remoteName)
+        mRemoteName(remoteName),
+        mLocalName(localName)
     {
 
     }

@@ -18,7 +18,7 @@ namespace osuCrypto
 
         mGens.resize(baseRecvOts.size());
 
-        for (int i = 0; i < mGens.size(); i++)
+        for (u64 i = 0; i < mGens.size(); i++)
         {
             mGens[i][0].SetSeed(baseRecvOts[i][0]);
             mGens[i][1].SetSeed(baseRecvOts[i][1]);

@@ -24,7 +24,7 @@ namespace osuCrypto
         mBaseChoiceBits = choices;
         mGens.resize(choices.size());
 
-        for (int i = 0; i < baseRecvOts.size(); i++)
+        for (u64 i = 0; i < baseRecvOts.size(); i++)
         {
             mGens[i].SetSeed(baseRecvOts[i]);
         }

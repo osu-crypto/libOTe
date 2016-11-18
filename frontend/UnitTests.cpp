@@ -65,11 +65,12 @@ void OT_all()
 
     run("Transpose_Test_Impl                     ", Transpose_Test_Impl);
     run("KosOtExt_100Receive_Test_Impl           ", KosOtExt_100Receive_Test_Impl);
+    run("KosDotExt_100Receive_Test_Impl          ", KosDotExt_100Receive_Test_Impl);
     run("IknpOtExt_100Receive_Test_Impl          ", IknpOtExt_100Receive_Test_Impl);
     run("AknOt_sendRecv1000_Test                 ", AknOt_sendRecv1000_Test);
     run("KkrtNcoOt_Test                          ", KkrtNcoOt_Test_Impl);
     run("OosNcoOt_Test_Impl                      ", OosNcoOt_Test_Impl);
-    run("BchCode_Test_Impl                       ", BchCode_Test_Impl);
+    run("LinearCode_Test_Impl                       ", LinearCode_Test_Impl);
     run("NaorPinkasOt_Test                       ", NaorPinkasOt_Test_Impl);
 }
 
@@ -88,9 +89,11 @@ void Ecc_all()
 
 void run_all()
 {
+
+
     NetWork_all();
     bitVec_all();
     Ecc_all();
     OT_all();
-    
+    //
 }

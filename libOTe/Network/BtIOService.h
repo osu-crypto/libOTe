@@ -6,7 +6,15 @@
 # endif // defined(_WINSOCKAPI_) && !defined(_WINSOCK2API_)
 
 #include <thread> 
+
+#ifndef _MSC_VER
+#pragma GCC diagnostic push 
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include "boost/asio.hpp"
+#ifndef _MSC_VER
+#pragma GCC diagnostic pop
+#endif
 #include <mutex>
 #include <list> 
 #include <future>

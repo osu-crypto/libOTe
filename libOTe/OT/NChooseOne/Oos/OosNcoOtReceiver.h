@@ -3,7 +3,7 @@
 #include "OT/NChooseOne/NcoOtExt.h"
 #include "Network/Channel.h"
 #include <vector>
-#include "OT/Tools/BchCode.h"
+#include "OT/Tools/LinearCode.h"
 //#include "OT/NChooseOne/KkrtNcoOtReceiver.h"
 #ifdef GetMessage
 #undef GetMessage
@@ -19,15 +19,15 @@ namespace osuCrypto
     public:
 
 
-        OosNcoOtReceiver(BchCode& code);
+        OosNcoOtReceiver(LinearCode& code);
 
         bool hasBaseOts()const override
         {
             return mHasBase;
         }
 
-        BchCode mCode;
         bool mHasBase;
+        LinearCode mCode;
 
         std::vector<std::array<PRNG, 2>> mGens;
         MatrixView<block> mT0;

@@ -16,7 +16,7 @@ namespace osuCrypto
         if (baseOTs.size() != gOtExtBaseOtCount)
             throw std::runtime_error(LOCATION);
 
-        for (int i = 0; i < gOtExtBaseOtCount; i++)
+        for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {
             mGens[i][0].SetSeed(baseOTs[i][0]);
             mGens[i][1].SetSeed(baseOTs[i][1]);
@@ -57,6 +57,10 @@ namespace osuCrypto
         u64 numOtExt = roundUpTo(choices.size(), 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
         u64 numBlocks = numSuperBlocks * superBlkSize;
+
+        BitVector choices2(numBlocks * 128);
+        choices2 = choices;
+        choices2.resize(numBlocks * 128);
 
         auto choiceBlocks = choices.getArrayView<block>();
         // this will be used as temporary buffers of 128 columns, 
@@ -147,7 +151,7 @@ namespace osuCrypto
             sse_transpose128x1024(t0);
 
 
-            block* mStart = mIter;
+            //block* mStart = mIter;
             block* mEnd = std::min(mIter + 128 * superBlkSize, (block*)messages.end());
 
 
@@ -178,12 +182,13 @@ namespace osuCrypto
         }
 
 
-#ifndef IKNP_SHA_HASH
+#ifdef IKNP_SHA_HASH
+        SHA1 sha;
+        u8 hashBuff[20];
+#else
         std::array<block, 8> aesHashTemp;
 #endif
 
-        SHA1 sha;
-        u8 hashBuff[20];
         u64 doneIdx = (0);
 
         u64 bb = (messages.size() + 127) / 128;

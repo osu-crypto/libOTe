@@ -38,7 +38,6 @@ namespace osuCrypto
 
         std::vector<PRNG> cncGens(chls.size());
         u32 px = (u32)(u32(-1) * p);
-        u64 sampleCount(0);
 
         std::atomic<u32> remaining((u32)chls.size());
         std::promise<void> cncGenProm, doneProm;

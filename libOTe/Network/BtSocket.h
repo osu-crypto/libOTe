@@ -7,8 +7,6 @@
 #include <mutex>
 #include <future> 
 
-
-#include "boost/asio.hpp"
 #include "Network/BtIOService.h"
 
 namespace osuCrypto { 

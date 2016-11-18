@@ -24,9 +24,6 @@
     <ClCompile Include="util.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="miraclTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="CLP.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

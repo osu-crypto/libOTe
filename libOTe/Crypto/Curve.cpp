@@ -10,9 +10,9 @@ namespace osuCrypto
     EllipticCurve::EllipticCurve(const Ecc2mParams & params, const block& seed)
         :
         mMiracl(nullptr),
-        mOrder(nullptr),
+        BA(nullptr),
         BB(nullptr),
-        BA(nullptr)
+        mOrder(nullptr)
     {
         setParameters(params);
         setPrng(seed);
@@ -21,9 +21,9 @@ namespace osuCrypto
     EllipticCurve::EllipticCurve(const EccpParams & params, const block & seed)
         :
         mMiracl(nullptr),
-        mOrder(nullptr),
+        BA(nullptr),
         BB(nullptr),
-        BA(nullptr)
+        mOrder(nullptr)
     {
         setParameters(params);
         setPrng(seed);
@@ -68,8 +68,8 @@ namespace osuCrypto
         BA = mirvar(mMiracl, 0);
         BB = mirvar(mMiracl, 0);
 
-        cinstr(mMiracl, BA,(char*)params.a);
-        cinstr(mMiracl, BB,(char*)params.b);
+        cinstr(mMiracl, BA, (char*)params.a);
+        cinstr(mMiracl, BB, (char*)params.b);
 
         mOrder.reset(new EccNumber(*this));
         mOrder->fromHex((char*)params.n);
@@ -78,7 +78,7 @@ namespace osuCrypto
         mFieldPrime->fromHex((char*)params.p);
         //incr(mMiracl, P, 1, mModulus->mVal);
         //*mModulus = *mOrder;
-        
+
 
         ecurve_init(
             mMiracl,
@@ -133,9 +133,9 @@ namespace osuCrypto
 
         mMiracl->IOBASE = 16;
 
-        if(BA) mirkill(BA);
-        if(BB) mirkill(BB);
-    
+        if (BA) mirkill(BA);
+        if (BB) mirkill(BB);
+
         BA = mirvar(mMiracl, 0);
         BB = mirvar(mMiracl, 0);
 
@@ -143,7 +143,7 @@ namespace osuCrypto
         convert(mMiracl, params.BB, BB);
 
         mOrder.reset(new EccNumber(*this));
-        mOrder->fromHex(params.order);
+        mOrder->fromHex((char*)(params.order));
 
 
         ecurve2_init(
@@ -209,8 +209,8 @@ namespace osuCrypto
     EccPoint::EccPoint(
         EllipticCurve & curve)
         :
-        mMem(nullptr),
         mVal(nullptr),
+        mMem(nullptr),
         mCurve(&curve)
 
     {
@@ -221,8 +221,8 @@ namespace osuCrypto
         EllipticCurve & curve,
         const EccPoint & copy)
         :
-        mMem(nullptr),
         mVal(nullptr),
+        mMem(nullptr),
         mCurve(&curve)
     {
         init();
@@ -233,8 +233,8 @@ namespace osuCrypto
     EccPoint::EccPoint(
         const EccPoint & copy)
         :
-        mMem(nullptr),
         mVal(nullptr),
+        mMem(nullptr),
         mCurve(copy.mCurve)
     {
 
@@ -245,8 +245,8 @@ namespace osuCrypto
 
     EccPoint::EccPoint(EccPoint && move)
         :
-        mMem(move.mMem),
         mVal(move.mVal),
+        mMem(move.mMem),
         mCurve(move.mCurve)
     {
         move.mVal = nullptr;
@@ -374,11 +374,11 @@ namespace osuCrypto
 #endif
         if (mCurve->mIsPrimeField)
         {
-            return epoint_comp(mCurve->mMiracl, mVal, cmp.mVal);
+            return static_cast<bool>(epoint_comp(mCurve->mMiracl, mVal, cmp.mVal));
         }
         else
         {
-            return epoint2_comp(mCurve->mMiracl, mVal, cmp.mVal);
+            return static_cast<bool>(epoint2_comp(mCurve->mMiracl, mVal, cmp.mVal));
         }
     }
     bool EccPoint::operator!=(
@@ -389,9 +389,9 @@ namespace osuCrypto
 
     u64 EccPoint::sizeBytes() const
     {
-        return ((mCurve->mIsPrimeField?
-            mCurve->mEccpParams.bitCount : 
-            mCurve->mEcc2mParams.bitCount) 
+        return ((mCurve->mIsPrimeField ?
+            mCurve->mEccpParams.bitCount :
+            mCurve->mEcc2mParams.bitCount)
             + 7) / 8 + 1;
     }
 
@@ -502,7 +502,7 @@ namespace osuCrypto
             prng.get(buff, byteSize);
             buff[byteSize - 1] &= mask;
 
-            bytes_to_big(mCurve->mMiracl, byteSize, (char*)buff, var);
+            bytes_to_big(mCurve->mMiracl, static_cast<int>(byteSize), (char*)buff, var);
             if (mCurve->mIsPrimeField)
             {
                 epoint_set(mCurve->mMiracl, var, var, 0, mVal);
@@ -513,8 +513,8 @@ namespace osuCrypto
             }
             //toBytes(buff2);
             //fromBytes(buff2);
-        } 
-        
+        }
+
         if (point_at_infinity(mVal))
         {
             // if that failed, just get a random point
@@ -715,7 +715,7 @@ namespace osuCrypto
     }
     EccNumber& EccNumber::operator*=(int i)
     {
-        premult(mCurve->mMiracl, mVal,i, mVal);
+        premult(mCurve->mMiracl, mVal, i, mVal);
         reduce();
 
         //toNres();
@@ -748,7 +748,7 @@ namespace osuCrypto
     {
         insign(-1, mVal);
         reduce();
-        
+
         //toNres();
         //nres_negate(mCurve->mMiracl, mVal, mVal);
         return *this;
@@ -852,7 +852,7 @@ namespace osuCrypto
     }
     EccNumber operator+(int i, const EccNumber& b)
     {
-        EccNumber aib = b; 
+        EccNumber aib = b;
         aib += i;
         return aib;
     }
@@ -865,7 +865,7 @@ namespace osuCrypto
 
     EccNumber operator-(const EccNumber& b, int i)
     {
-        EccNumber mbi = b; 
+        EccNumber mbi = b;
         mbi -= i;
         return mbi;
     }
@@ -878,7 +878,7 @@ namespace osuCrypto
     EccNumber operator-(const EccNumber& b1, const EccNumber& b2)
     {
         EccNumber mbb = b1;
-        mbb -= b2; 
+        mbb -= b2;
         return mbb;
     }
 
@@ -890,40 +890,40 @@ namespace osuCrypto
     }
     EccNumber operator*(int i, const EccNumber& b)
     {
-        EccNumber xbb = b; 
+        EccNumber xbb = b;
         xbb *= i;
         return xbb;
     }
     EccNumber operator*(const EccNumber& b1, const EccNumber& b2)
     {
-        EccNumber xbb = b1; 
+        EccNumber xbb = b1;
         xbb *= b2;
         return xbb;
     }
 
     EccNumber operator/(const EccNumber& b1, int i)
     {
-        EccNumber z = b1; 
+        EccNumber z = b1;
         z /= i;
         return z;
     }
 
     EccNumber operator/(int i, const EccNumber& b2)
     {
-        EccNumber z(*b2.mCurve, i); 
+        EccNumber z(*b2.mCurve, i);
         z /= b2;
         return z;
     }
     EccNumber operator/(const EccNumber& b1, const EccNumber& b2)
     {
-        EccNumber z = b1; 
+        EccNumber z = b1;
         z /= b2;
         return z;
     }
 
     u64 EccNumber::sizeBytes() const
     {
-        return ((mCurve->mIsPrimeField ? 
+        return ((mCurve->mIsPrimeField ?
             mCurve->mEccpParams.bitCount :
             mCurve->mEcc2mParams.bitCount)
             + 7) / 8;
@@ -947,7 +947,7 @@ namespace osuCrypto
         bytes_to_big(mCurve->mMiracl, (int)sizeBytes(), (char*)src, mVal);
         //mIsNres = NresState::nonNres;
         //if (b)
-            //Log::out << *this << Log::endl;
+        //Log::out << *this << Log::endl;
 
         //insign(char(src[0]), mVal);
 
@@ -1050,8 +1050,8 @@ namespace osuCrypto
                 throw std::runtime_error(LOCATION);
             }
         }
-            
-        if(*this >= mCurve->getOrder())
+
+        if (*this >= mCurve->getOrder())
         {
             // only computes the remainder. since the params are
             //
@@ -1065,8 +1065,8 @@ namespace osuCrypto
                 n = 1;
             }
 
-            divide(mCurve->mMiracl, 
-                mVal, 
+            divide(mCurve->mMiracl,
+                mVal,
                 mCurve->getOrder().mVal,
                 mCurve->getOrder().mVal);
 
@@ -1109,11 +1109,13 @@ namespace osuCrypto
 
 
 
-            result = ebrick_init(mCurve->mMiracl, &mBrick, 
-                x,y, 
+            result = static_cast<bool>(ebrick_init(
+                mCurve->mMiracl,
+                &mBrick,
+                x, y,
                 mCurve->BA, mCurve->BB,
                 mCurve->getFieldPrime().mVal,
-                8, mCurve->mEccpParams.bitCount);
+                8, mCurve->mEccpParams.bitCount));
 
             mirkill(x);
             mirkill(y);
@@ -1122,8 +1124,19 @@ namespace osuCrypto
         {
 
             //fe2ec2(point)->getxy(x, y);
-            result = ebrick2_init(mCurve->mMiracl, &mBrick2, copy.mVal->X, copy.mVal->Y, mCurve->BA, mCurve->BB,
-                mCurve->mEcc2mParams.m, mCurve->mEcc2mParams.a, mCurve->mEcc2mParams.b, mCurve->mEcc2mParams.c, 8, mCurve->mEcc2mParams.bitCount);
+            result = static_cast<bool>(ebrick2_init(
+                mCurve->mMiracl,
+                &mBrick2,
+                copy.mVal->X,
+                copy.mVal->Y,
+                mCurve->BA,
+                mCurve->BB,
+                mCurve->mEcc2mParams.m,
+                mCurve->mEcc2mParams.a,
+                mCurve->mEcc2mParams.b,
+                mCurve->mEcc2mParams.c,
+                8,
+                mCurve->mEcc2mParams.bitCount));
         }
 
         if (result == 0)

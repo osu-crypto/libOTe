@@ -3,17 +3,16 @@
 #include "Common/Defines.h"
 #include "Common/ArrayView.h"
 #include <string>
-//#include "NTL/matrix.h"
-//#include "NTL/matrix.h"
 namespace osuCrypto
 {
 
-    class BchCode
+    class PRNG;
+    class LinearCode
     {
     public:
-        BchCode();
-        ~BchCode();
-        BchCode(const BchCode& cp);
+        LinearCode();
+        ~LinearCode();
+        LinearCode(const LinearCode& cp);
 
 
         void loadTxtFile(const std::string& fileName);
@@ -27,13 +26,12 @@ namespace osuCrypto
         void writeBinFile(const std::string& fileName);
         void writeBinFile(std::ostream& out);
 
+        void random(PRNG& prng, u64 inputSize, u64 outputSize);
+
         void generateMod8Table();
 
         u64 mCodewordBitSize;
         std::vector<block> mG;
-        //std::vector<std::array<block, 2>> mG1;
-        //std::vector<std::array<block, 4>> mG2;
-        //std::vector<std::array<block, 256>> mG8;
         std::vector<block> mG8;
 
         u64 plaintextBlkSize()const;

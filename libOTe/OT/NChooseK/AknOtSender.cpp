@@ -129,7 +129,7 @@ namespace osuCrypto
 
 
             //Log::out << Log::lock << "send " << end << "  " << px << Log::endl;
-            for (u64 i = start, j = 0; i < end; ++i)
+            for (u64 i = start; i < end; ++i)
             {
                 auto vv = cncGens[t].get<u32>();
                 u8 c = (vv <= px);

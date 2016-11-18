@@ -3,7 +3,7 @@
 #include "OT/TwoChooseOne/OTExtInterface.h"
 
 #include "OT/Tools/Tools.h"
-#include "OT/Tools/BchCode.h"
+#include "OT/Tools/LinearCode.h"
 #include "Network/BtChannel.h"
 #include "Network/BtEndpoint.h"
 #include "Common/Log.h"
@@ -118,7 +118,7 @@ void OosNcoOt_Test_Impl()
     auto &sendChl = ep0.addChannel(name, name);
 
 
-    BchCode code;
+    LinearCode code;
     code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/OT/Tools/bch511.bin");
 
     OosNcoOtSender sender(code);
@@ -199,9 +199,9 @@ void OosNcoOt_Test_Impl()
 }
 
 
-void BchCode_Test_Impl()
+void LinearCode_Test_Impl()
 {
-    BchCode code;
+    LinearCode code;
 
 
     code.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe/OT/Tools/bch511.txt");

@@ -65,10 +65,10 @@ namespace osuCrypto
         "FFFFFFFFFFFFFFFFFFFFFFFF99DEF836146BC9B1B4D22831", // order n (prime)
         "-3", // coefficient a
         "64210519e59c80e70fa7e9ab72243049feb8deecc146b9b1", // coefficient b
-        // X coordinate for 3 generators 
-        "188da80eb03090f67cbf20eb43a18800f4ff0afd82ff1012,F4544EE4AF10068B2F4B84F89C61D62321DFDCE3C64FB8AC,AA7413B7548B2E65DD4803051781E551CEBFD225FECAE3A8",
-        // Y coordinate for 3 generators 
-        "07192b95ffc8da78631011ed6b24cdd573f977a11e794811,98947BC0114D6962864CA0B4327128BAF21D1A5A0B3116E7,A9B71EE5740AC250F28C975C63857AF065F13B683FA83367",
+                                                            // X coordinate for 3 generators 
+                                                            "188da80eb03090f67cbf20eb43a18800f4ff0afd82ff1012,F4544EE4AF10068B2F4B84F89C61D62321DFDCE3C64FB8AC,AA7413B7548B2E65DD4803051781E551CEBFD225FECAE3A8",
+                                                            // Y coordinate for 3 generators 
+                                                            "07192b95ffc8da78631011ed6b24cdd573f977a11e794811,98947BC0114D6962864CA0B4327128BAF21D1A5A0B3116E7,A9B71EE5740AC250F28C975C63857AF065F13B683FA83367",
     };
 
     const EccpParams p224
@@ -90,10 +90,10 @@ namespace osuCrypto
         "80000000000000000000000000000000A6F7CEF517BCE6B2C09318D2E7AE9F68", // order n (prime)
         "2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa984914a144", // coefficient a
         "7b425ed097b425ed097b425ed097b425ed097b425ed097b4260b5e9c7710c864", // coefficient b
-        // generator X
-        "2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaad245a,3f267c73b659f84aff395f3fe0192d49c2fec1b08d9c71bc244f2a77ab5b9213,266ab69088cd09d2f6f774004d15cc5d46e5b8481ad56e30dbe08f18cdf6c4c", 
-        // generator Y
-        "20ae19a1b8a086b4e01edd2c7748d14c923d4d7e6d7c61b229e9c5a27eced3d9,5df0b7dac0994826e3ea1d0bbb5e0bab45537a3929fceb47329c35fd02edfe72,9740583582a16a3d924f6a70da8849d54f9939de3cc7fb6bbb71ef982918eb1" 
+                                                                            // generator X
+                                                                            "2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaad245a,3f267c73b659f84aff395f3fe0192d49c2fec1b08d9c71bc244f2a77ab5b9213,266ab69088cd09d2f6f774004d15cc5d46e5b8481ad56e30dbe08f18cdf6c4c",
+                                                                            // generator Y
+                                                                            "20ae19a1b8a086b4e01edd2c7748d14c923d4d7e6d7c61b229e9c5a27eced3d9,5df0b7dac0994826e3ea1d0bbb5e0bab45537a3929fceb47329c35fd02edfe72,9740583582a16a3d924f6a70da8849d54f9939de3cc7fb6bbb71ef982918eb1"
     };
 
 
@@ -106,13 +106,13 @@ namespace osuCrypto
         u32 bitCount;
         u32 BA;
         u32 BB;
-        char* X;
-        char* Y;
+        const char* X;
+        const char* Y;
         u32 m;
         u32 a;
         u32 b;
         u32 c;
-        char* order;
+        const char* order;
     };
 
 
@@ -238,7 +238,7 @@ namespace osuCrypto
         friend EccNumber operator/(const EccNumber&, const EccNumber&);
 
         u64 sizeBytes() const;
-        void toBytes(u8* dest ) const;
+        void toBytes(u8* dest) const;
         void fromBytes(u8* src);
         void fromHex(char* src);
         void fromDec(char* src);
@@ -285,12 +285,12 @@ namespace osuCrypto
         EccPoint(EccPoint&& move);
 
         ~EccPoint();
-        
+
         EccPoint& operator=(const EccPoint& copy);
         EccPoint& operator+=(const EccPoint& addIn);
         EccPoint& operator-=(const EccPoint& subtractIn);
         EccPoint& operator*=(const EccNumber& multIn);
-        
+
 
         EccPoint operator+(const EccPoint& addIn) const;
         EccPoint operator-(const EccPoint& subtractIn) const;
@@ -350,7 +350,7 @@ namespace osuCrypto
         typedef EccPoint Point;
 
 
-            
+
         EllipticCurve(const Ecc2mParams& params, const block& seed);
         EllipticCurve(const EccpParams& params, const block& seed);
         EllipticCurve() = delete;
@@ -379,7 +379,7 @@ namespace osuCrypto
         //csprng mMrPrng;
         Ecc2mParams mEcc2mParams;
         EccpParams mEccpParams;
-        big BB, BA;
+        big BA, BB;
         std::unique_ptr<EccNumber> mOrder, mFieldPrime;
         std::vector<Point> mG;
 

@@ -17,8 +17,8 @@ namespace osuCrypto {
         out << std::hex;
         u64* data = (u64*)&blk;
 
-        out << std::setw(16) << std::setfill('0') << data[0]
-            << std::setw(16) << std::setfill('0') << data[1];
+        out << std::setw(16) << std::setfill('0') << data[1] 
+            << std::setw(16) << std::setfill('0') << data[0];
 
         out << std::dec << std::setw(0);
 

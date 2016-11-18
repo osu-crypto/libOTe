@@ -28,7 +28,7 @@ void InitDebugPrinting(std::string filePath)
     if (!file->is_open())
         throw UnitTestFail();
 
-    time_t now = time(0);
+    //time_t now = time(0);
 
     std::cout.rdbuf(file->rdbuf());
     std::cerr.rdbuf(file->rdbuf());

@@ -5,7 +5,6 @@
 #include "Common/Defines.h"
 #include <list>
 #include <atomic>
-#include <boost/thread/tss.hpp>
 #include <mutex>
 
 #ifdef _MSC_VER

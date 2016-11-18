@@ -3,7 +3,7 @@
 #include "OT/TwoChooseOne/OTExtInterface.h"
 
 #include "OT/Tools/Tools.h"
-#include "OT/Tools/BchCode.h"
+#include "OT/Tools/LinearCode.h"
 #include "Network/BtChannel.h"
 #include "Network/BtEndpoint.h"
 #include "Common/Log.h"
@@ -13,6 +13,9 @@
 
 #include "OT/TwoChooseOne/KosOtExtReceiver.h"
 #include "OT/TwoChooseOne/KosOtExtSender.h"
+
+#include "OT/TwoChooseOne/KosDotExtReceiver.h"
+#include "OT/TwoChooseOne/KosDotExtSender.h"
 
 #include "OT/NChooseOne/KkrtNcoOtReceiver.h"
 #include "OT/NChooseOne/KkrtNcoOtSender.h"
@@ -25,14 +28,17 @@
 #undef GetMessage
 #endif
 
+#ifdef  _MSC_VER
 #pragma warning(disable: 4800)
+#endif //  _MSC_VER
+
 
 using namespace osuCrypto;
 
 void OT_100Receive_Test(BitVector& choiceBits, ArrayView<block> recv, ArrayView<std::array<block, 2>>  sender)
 {
 
-    for (int i = 0; i < choiceBits.size(); ++i)
+    for (u64 i = 0; i < choiceBits.size(); ++i)
     {
 
         u8 choice = choiceBits[i];
@@ -346,6 +352,85 @@ void KosOtExt_100Receive_Test_Impl()
     //recvNetMg
 }
 
+
+
+
+void KosDotExt_100Receive_Test_Impl()
+{
+    Log::setThreadName("Sender");
+
+    BtIOService ios(0);
+    BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
+    BtEndpoint ep1(ios, "127.0.0.1", 1212, false, "ep");
+    Channel& senderChannel = ep1.addChannel("chl", "chl");
+    Channel& recvChannel = ep0.addChannel("chl", "chl");
+
+    PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
+    PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
+
+    u64 numOTs = 10;
+
+    u64 s = 40;
+
+
+    std::vector<block> recvMsg(numOTs), baseRecv(128 + s);
+    std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128 + s);
+    BitVector choices(numOTs);
+    choices.randomize(prng0);
+    
+    
+    BitVector baseChoice(128 + s);
+    baseChoice.randomize(prng0);
+
+
+    for (u64 i = 0; i < 128 + s; ++i)
+    {
+        baseSend[i][0] = prng0.get<block>();
+        baseSend[i][1] = prng0.get<block>();
+        baseRecv[i] = baseSend[i][baseChoice[i]];
+    }
+
+
+    KosDotExtSender sender;
+    KosDotExtReceiver recv;
+
+    //sender.mmChoices = choices;
+
+    std::thread thrd = std::thread([&]() {
+        Log::setThreadName("receiver");
+
+
+
+        recv.setBaseOts(baseSend);
+        recv.receive(choices, recvMsg, prng0, recvChannel);
+    });
+
+
+    sender.setBaseOts(baseRecv, baseChoice);
+    sender.send(sendMsg, prng1, senderChannel);
+    thrd.join();
+
+    //for (u64 i = 0; i < baseOTs.receiver_outputs.size(); ++i)
+    //{
+    //    Log::out << sender.GetMessage(i, 0) << " " << sender.GetMessage(i, 1) << "\n" << recv.GetMessage(1) << "  " << recv.mChoiceBits[i] << Log::endl;
+    //}
+
+    OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+
+
+    senderChannel.close();
+    recvChannel.close();
+
+
+    ep1.stop();
+    ep0.stop();
+
+    ios.stop();
+
+    //senderNetMgr.Stop();
+    //recvNetMg
+}
 
 
 void IknpOtExt_100Receive_Test_Impl()

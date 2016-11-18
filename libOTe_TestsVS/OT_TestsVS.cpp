@@ -61,6 +61,13 @@ namespace osuCrypto_tests
             KosOtExt_100Receive_Test_Impl();
         }
 
+        TEST_METHOD(KosDot_200Receive_TestVS)
+        {
+            InitDebugPrinting();
+            KosDotExt_100Receive_Test_Impl();
+        }
+
+
 
         TEST_METHOD(Kkrt_200Receive_TestVS)
         {
@@ -79,7 +86,7 @@ namespace osuCrypto_tests
         TEST_METHOD(Bch_200Receive_TestVS)
         {
             InitDebugPrinting();
-            BchCode_Test_Impl();
+            LinearCode_Test_Impl();
         }
 
 

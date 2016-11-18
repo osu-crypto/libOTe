@@ -40,7 +40,7 @@ namespace osuCrypto
 
 
         mBaseChoiceBits = choices;
-        for (int i = 0; i < gOtExtBaseOtCount; i++)
+        for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {
             mGens[i].SetSeed(baseRecvOts[i]);
         }
@@ -54,7 +54,7 @@ namespace osuCrypto
         // round up 
         u64 numOtExt = roundUpTo(messages.size(), 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
-        u64 numBlocks = numSuperBlocks * superBlkSize;
+        //u64 numBlocks = numSuperBlocks * superBlkSize;
 
         // a temp that will be used to transpose the sender's matrix
         std::array<std::array<block, superBlkSize>, 128> t;
@@ -130,7 +130,7 @@ namespace osuCrypto
             sse_transpose128x1024(t);
 
 
-            std::array<block, 2>* mStart = mIter;
+            //std::array<block, 2>* mStart = mIter;
             std::array<block, 2>* mEnd = std::min(mIter + 128 * superBlkSize, (std::array<block, 2>*)messages.end());
 
             // compute how many rows are unused.
@@ -246,15 +246,14 @@ namespace osuCrypto
         block q2 = ZeroBlock;
         block q1 = ZeroBlock;
 
+#ifdef KOS_SHA_HASH
         SHA1 sha;
         u8 hashBuff[20];
-        u64 doneIdx = 0;
-        //Log::out << Log::lock;
-        std::array<block, 2> zeroOneBlk{ ZeroBlock, AllOneBlock };
-        std::array<block, 128> challenges;
-#ifndef KOS_SHA_HASH
+#else
         std::array<block, 8> aesHashTemp;
 #endif
+        u64 doneIdx = 0;
+        std::array<block, 128> challenges;
 
         gTimer.setTimePoint("send.checkStart");
 
@@ -317,7 +316,6 @@ namespace osuCrypto
         }
 
 
-        u64 xtra = 0;
         for (auto& blk : extraBlocks)
         {
             block chii = commonPrng.get<block>();
