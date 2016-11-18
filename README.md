@@ -95,7 +95,7 @@ To see all the command line options, execute the program
 `./Release/frontend.exe`
  
 
- ## Citing
+## Citing
 
  Spread the word!
 
