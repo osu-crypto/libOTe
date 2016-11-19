@@ -49,14 +49,14 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(solutionDir)thirdparty\win\boost\;$(SolutionDir)/libOTe_Tests;$(SolutionDir)/libOTe;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)/cryptoTools;$(solutionDir)thirdparty\win\boost\;$(SolutionDir)/libOTe_Tests;$(SolutionDir)/libOTe;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_WIN32_WINNT=0x0501 ;_MBCS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories);$(SolutionDir)\thirdparty\win\boost\stage\lib;C:/libs/boost\stage\lib;$(OutDir);$(SolutionDir)thirdparty\win\;C:/libs/;C:\Program Files %28x86%29\Visual Leak Detector\lib\Win64</AdditionalLibraryDirectories>
-      <AdditionalDependencies>libOTe.lib;libOTe_Tests.lib;mpir\lib\x64\$(Configuration)\mpir.lib;mpir\lib\x64\$(Configuration)\mpirxx.lib;Miracl\x64\$(Configuration)\miracl.lib;cryptopp\x64\Output\$(Configuration)\cryptlib.lib;NTL\x64\$(Configuration)\NTL.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cryptoTools.lib;libOTe.lib;libOTe_Tests.lib;mpir\lib\x64\$(Configuration)\mpir.lib;mpir\lib\x64\$(Configuration)\mpirxx.lib;Miracl\x64\$(Configuration)\miracl.lib;cryptopp\x64\Output\$(Configuration)\cryptlib.lib;NTL\x64\$(Configuration)\NTL.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -66,7 +66,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(solutionDir)thirdparty\win\boost\;$(SolutionDir)/libOTe_Tests;$(SolutionDir)/libOTe;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)/cryptoTools;$(solutionDir)thirdparty\win\boost\;$(SolutionDir)/libOTe_Tests;$(SolutionDir)/libOTe;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_WIN32_WINNT=0x0501 ;_MBCS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
@@ -75,7 +75,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories);$(SolutionDir)\thirdparty\win\boost\stage\lib;C:/libs/boost\stage\lib;$(OutDir);$(SolutionDir)thirdparty\win\;C:/libs/;C:\Program Files %28x86%29\Visual Leak Detector\lib\Win64</AdditionalLibraryDirectories>
-      <AdditionalDependencies>libOTe.lib;libOTe_Tests.lib;mpir\lib\x64\$(Configuration)\mpir.lib;mpir\lib\x64\$(Configuration)\mpirxx.lib;Miracl\x64\$(Configuration)\miracl.lib;cryptopp\x64\Output\$(Configuration)\cryptlib.lib;NTL\x64\$(Configuration)\NTL.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cryptoTools.lib;libOTe.lib;libOTe_Tests.lib;mpir\lib\x64\$(Configuration)\mpir.lib;mpir\lib\x64\$(Configuration)\mpirxx.lib;Miracl\x64\$(Configuration)\miracl.lib;cryptopp\x64\Output\$(Configuration)\cryptlib.lib;NTL\x64\$(Configuration)\NTL.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

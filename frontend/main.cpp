@@ -5,10 +5,10 @@ using namespace std;
 #include "Common/Defines.h"
 using namespace osuCrypto;
 
-#include "OT/TwoChooseOne/KosOtExtReceiver.h"
-#include "OT/TwoChooseOne/KosOtExtSender.h"
-#include "OT/TwoChooseOne/KosDotExtReceiver.h"
-#include "OT/TwoChooseOne/KosDotExtSender.h"
+#include "TwoChooseOne/KosOtExtReceiver.h"
+#include "TwoChooseOne/KosOtExtSender.h"
+#include "TwoChooseOne/KosDotExtReceiver.h"
+#include "TwoChooseOne/KosDotExtSender.h"
 
 #include "Network/BtChannel.h"
 #include "Network/BtEndpoint.h"
@@ -16,19 +16,19 @@ using namespace osuCrypto;
 #include "Common/Log.h"
 int miraclTestMain();
 
-#include "OT/Tools/LinearCode.h"
-#include "OT/NChooseOne/Oos/OosNcoOtReceiver.h"
-#include "OT/NChooseOne/Oos/OosNcoOtSender.h"
-#include "OT/NChooseOne/KkrtNcoOtReceiver.h"
-#include "OT/NChooseOne/KkrtNcoOtSender.h"
+#include "Tools/LinearCode.h"
+#include "NChooseOne/Oos/OosNcoOtReceiver.h"
+#include "NChooseOne/Oos/OosNcoOtSender.h"
+#include "NChooseOne/KkrtNcoOtReceiver.h"
+#include "NChooseOne/KkrtNcoOtSender.h"
 
-#include "OT/TwoChooseOne/IknpOtExtReceiver.h"
-#include "OT/TwoChooseOne/IknpOtExtSender.h"
+#include "TwoChooseOne/IknpOtExtReceiver.h"
+#include "TwoChooseOne/IknpOtExtSender.h"
 
-#include "OT/NChooseK/AknOtReceiver.h"
-#include "OT/NChooseK/AknOtSender.h"
-#include "OT/TwoChooseOne/LzKosOtExtReceiver.h"
-#include "OT/TwoChooseOne/LzKosOtExtSender.h"
+#include "NChooseK/AknOtReceiver.h"
+#include "NChooseK/AknOtSender.h"
+#include "TwoChooseOne/LzKosOtExtReceiver.h"
+#include "TwoChooseOne/LzKosOtExtSender.h"
 
 #include "CLP.h"
 
@@ -176,7 +176,7 @@ void oos_test(int i)
 
 
     LinearCode code;
-    code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/OT/Tools/bch511.bin");
+    code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
 
 
 

@@ -1,12 +1,12 @@
 #include "OT_Tests.h"
 
-#include "OT/TwoChooseOne/OTExtInterface.h"
+#include "TwoChooseOne/OTExtInterface.h"
 
-#include "OT/Tools/Tools.h"
+#include "Tools/Tools.h"
 #include "Network/BtChannel.h"
 #include "Network/BtEndpoint.h"
 
-#include "OT/Base/naor-pinkas.h"
+#include "Base/naor-pinkas.h"
 #include "Common/Log.h"
 
 #include "Common.h"

@@ -107,7 +107,7 @@ To see all the command line options, execute the program
 }
 ```
 ## Protocol Details
-The 1-out-of-N [OOS16] protocol currently is set to work forn N=2<sup>76</sup> but is capable of supporting arbitrary codes given the generator matrix in text format. See `./libOTe/OT/Tools/Bch511.txt` for an example.
+The 1-out-of-N [OOS16] protocol currently is set to work forn N=2<sup>76</sup> but is capable of supporting arbitrary codes given the generator matrix in text format. See `./libOTe/Tools/Bch511.txt` for an example.
  
 The 1-out-of-N  [KKRT16] for arbitrary N is also implemented and slightly faster than [OOS16]. However, [KKRT16] is in the semi-honest setting.
  

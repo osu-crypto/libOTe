@@ -10,6 +10,52 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Base\naor-pinkas.h" />
+    <ClInclude Include="NChooseK\AknOtReceiver.h" />
+    <ClInclude Include="NChooseK\AknOtSender.h" />
+    <ClInclude Include="NChooseOne\KkrtDefines.h" />
+    <ClInclude Include="NChooseOne\KkrtNcoOtReceiver.h" />
+    <ClInclude Include="NChooseOne\KkrtNcoOtSender.h" />
+    <ClInclude Include="NChooseOne\NcoOtExt.h" />
+    <ClInclude Include="NChooseOne\Oos\OosDefines.h" />
+    <ClInclude Include="NChooseOne\Oos\OosNcoOtReceiver.h" />
+    <ClInclude Include="NChooseOne\Oos\OosNcoOtSender.h" />
+    <ClInclude Include="Tools\LinearCode.h" />
+    <ClInclude Include="Tools\Tools.h" />
+    <ClInclude Include="TwoChooseOne\IknpOtExtReceiver.h" />
+    <ClInclude Include="TwoChooseOne\IknpOtExtSender.h" />
+    <ClInclude Include="TwoChooseOne\KosDotExtReceiver.h" />
+    <ClInclude Include="TwoChooseOne\KosDotExtSender.h" />
+    <ClInclude Include="TwoChooseOne\KosOtExtReceiver.h" />
+    <ClInclude Include="TwoChooseOne\KosOtExtSender.h" />
+    <ClInclude Include="TwoChooseOne\LzKosOtExtReceiver.h" />
+    <ClInclude Include="TwoChooseOne\LzKosOtExtSender.h" />
+    <ClInclude Include="TwoChooseOne\OTExtInterface.h" />
+    <ClInclude Include="TwoChooseOne\TcoOtDefines.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Base\naor-pinkas.cpp" />
+    <ClCompile Include="NChooseK\AknOtReceiver.cpp" />
+    <ClCompile Include="NChooseK\AknOtSender.cpp" />
+    <ClCompile Include="NChooseOne\KkrtNcoOtReceiver.cpp" />
+    <ClCompile Include="NChooseOne\KkrtNcoOtSender.cpp" />
+    <ClCompile Include="NChooseOne\Oos\OosNcoOtReceiver.cpp" />
+    <ClCompile Include="NChooseOne\Oos\OosNcoOtSender.cpp" />
+    <ClCompile Include="Tools\LinearCode.cpp" />
+    <ClCompile Include="Tools\Tools.cpp" />
+    <ClCompile Include="TwoChooseOne\IknpOtExtReceiver.cpp" />
+    <ClCompile Include="TwoChooseOne\IknpOtExtSender.cpp" />
+    <ClCompile Include="TwoChooseOne\KosDotExtReceiver.cpp" />
+    <ClCompile Include="TwoChooseOne\KosDotExtSender.cpp" />
+    <ClCompile Include="TwoChooseOne\KosOtExtReceiver.cpp" />
+    <ClCompile Include="TwoChooseOne\KosOtExtSender.cpp" />
+    <ClCompile Include="TwoChooseOne\LzKosOtExtReceiver.cpp" />
+    <ClCompile Include="TwoChooseOne\LzKosOtExtSender.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Tools\bch511.bin" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{4B3D93AF-B008-452D-B1BC-CACC67C3DC27}</ProjectGuid>
     <RootNamespace>libOTe</RootNamespace>
@@ -50,7 +96,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)thirdparty/win/boost;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)/cryptoTools;$(ProjectDir);$(SolutionDir)thirdparty/win/boost;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
@@ -62,7 +108,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)thirdparty/win/boost;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)/cryptoTools;$(ProjectDir);$(SolutionDir)thirdparty/win/boost;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;NDEBUG</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
@@ -71,95 +117,6 @@
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
   </ItemDefinitionGroup>
-  <ItemGroup>
-    <ClCompile Include="Crypto\sha.cpp" />
-    <ClCompile Include="OT\NChooseOne\KkrtNcoOtReceiver.cpp" />
-    <ClCompile Include="OT\NChooseOne\KkrtNcoOtSender.cpp" />
-    <ClCompile Include="OT\NChooseOne\Oos\OosNcoOtReceiver.cpp" />
-    <ClCompile Include="OT\NChooseOne\Oos\OosNcoOtSender.cpp" />
-    <ClCompile Include="OT\Tools\LinearCode.cpp" />
-    <ClCompile Include="Common\BitIterator.cpp" />
-    <ClCompile Include="Common\BitVector.cpp" />
-    <ClCompile Include="Common\ByteStream.cpp" />
-    <ClCompile Include="Common\Defines.cpp" />
-    <ClCompile Include="Common\Log.cpp" />
-    <ClCompile Include="Common\Timer.cpp" />
-    <ClCompile Include="Crypto\AES.cpp" />
-    <ClCompile Include="Crypto\Curve.cpp" />
-    <ClCompile Include="Crypto\PRNG.cpp" />
-    <ClCompile Include="Network\BtAcceptor.cpp" />
-    <ClCompile Include="Network\BtChannel.cpp" />
-    <ClCompile Include="Network\BtEndpoint.cpp" />
-    <ClCompile Include="Network\BtIOService.cpp" />
-    <ClCompile Include="Network\Channel.cpp" />
-    <ClCompile Include="OT\NChooseK\AknOtReceiver.cpp" />
-    <ClCompile Include="OT\NChooseK\AknOtSender.cpp" />
-    <ClCompile Include="OT\Base\naor-pinkas.cpp" />
-    <ClCompile Include="OT\TwoChooseOne\IknpOtExtReceiver.cpp" />
-    <ClCompile Include="OT\TwoChooseOne\IknpOtExtSender.cpp" />
-    <ClCompile Include="OT\TwoChooseOne\KosDotExtReceiver.cpp" />
-    <ClCompile Include="OT\TwoChooseOne\KosDotExtSender.cpp" />
-    <ClCompile Include="OT\TwoChooseOne\KosOtExtReceiver.cpp" />
-    <ClCompile Include="OT\TwoChooseOne\KosOtExtSender.cpp" />
-    <ClCompile Include="OT\Tools\Tools.cpp" />
-    <ClCompile Include="OT\TwoChooseOne\LzKosOtExtReceiver.cpp" />
-    <ClCompile Include="OT\TwoChooseOne\LzKosOtExtSender.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="Common\MatrixView.h" />
-    <ClInclude Include="OT\NChooseOne\KkrtDefines.h" />
-    <ClInclude Include="OT\NChooseOne\KkrtNcoOtReceiver.h" />
-    <ClInclude Include="OT\NChooseOne\KkrtNcoOtSender.h" />
-    <ClInclude Include="OT\NChooseOne\NcoOtExt.h" />
-    <ClInclude Include="OT\NChooseOne\Oos\OosDefines.h" />
-    <ClInclude Include="OT\NChooseOne\Oos\OosNcoOtSender.h" />
-    <ClInclude Include="OT\NChooseOne\Oos\OosNcoOtReceiver.h" />
-    <ClInclude Include="OT\Tools\LinearCode.h" />
-    <ClInclude Include="Common\ArrayView.h" />
-    <ClInclude Include="Common\BitIterator.h" />
-    <ClInclude Include="Common\BitVector.h" />
-    <ClInclude Include="Common\ByteStream.h" />
-    <ClInclude Include="Common\Defines.h" />
-    <ClInclude Include="Common\Exceptions.h" />
-    <ClInclude Include="Common\Log.h" />
-    <ClInclude Include="Common\mpsc_queue.h" />
-    <ClInclude Include="Common\Timer.h" />
-    <ClInclude Include="Crypto\AES.h" />
-    <ClInclude Include="Crypto\Commit.h" />
-    <ClInclude Include="Crypto\Curve.h" />
-    <ClInclude Include="Crypto\PRNG.h" />
-    <ClInclude Include="Crypto\sha1.h" />
-    <ClInclude Include="Network\BtAcceptor.h" />
-    <ClInclude Include="Network\BtChannel.h" />
-    <ClInclude Include="Network\BtEndpoint.h" />
-    <ClInclude Include="Network\BtIOService.h" />
-    <ClInclude Include="Network\BtSocket.h" />
-    <ClInclude Include="Network\Channel.h" />
-    <ClInclude Include="Network\Endpoint.h" />
-    <ClInclude Include="OT\NChooseK\AknOtReceiver.h" />
-    <ClInclude Include="OT\NChooseK\AknOtSender.h" />
-    <ClInclude Include="OT\Base\naor-pinkas.h" />
-    <ClInclude Include="OT\TwoChooseOne\IknpOtExtReceiver.h" />
-    <ClInclude Include="OT\TwoChooseOne\IknpOtExtSender.h" />
-    <ClInclude Include="OT\TwoChooseOne\KosDotExtReceiver.h" />
-    <ClInclude Include="OT\TwoChooseOne\KosDotExtSender.h" />
-    <ClInclude Include="OT\TwoChooseOne\TcoOtDefines.h" />
-    <ClInclude Include="OT\TwoChooseOne\LzKosOtExtReceiver.h" />
-    <ClInclude Include="OT\TwoChooseOne\LzKosOtExtSender.h" />
-    <ClInclude Include="OT\TwoChooseOne\OTExtInterface.h" />
-    <ClInclude Include="OT\TwoChooseOne\KosOtExtReceiver.h" />
-    <ClInclude Include="OT\TwoChooseOne\KosOtExtSender.h" />
-    <ClInclude Include="OT\Tools\Tools.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="Crypto\asm\sha_win64.asm">
-      <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\NASM\nasm.exe $(SolutionDir)\libOTe\Crypto\asm\sha_win64.asm -f win64 -DWIN_ABI -o $(SolutionDir)\libOTe\x64\$(Configuration)\sha_win64.obj</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\NASM\nasm.exe $(SolutionDir)\libOTe\Crypto\asm\sha_win64.asm -f win64 -DWIN_ABI -o $(SolutionDir)\libOTe\x64\$(Configuration)\sha_win64.obj</Command>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)\libOTe\x64\$(Configuration)\sha_win64.obj</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)\libOTe\x64\$(Configuration)\sha_win64.obj</Outputs>
-    </CustomBuild>
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
