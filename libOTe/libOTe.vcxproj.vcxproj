@@ -56,6 +56,9 @@
   <ItemGroup>
     <None Include="Tools\bch511.bin" />
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="CMakeLists.txt" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{4B3D93AF-B008-452D-B1BC-CACC67C3DC27}</ProjectGuid>
     <RootNamespace>libOTe</RootNamespace>
