@@ -13,8 +13,8 @@ $ExcludeDirs='.git/;thirdparty/;Debug/;Release/;x64/;ipch/;.vs/'
 C:\tools\WinSCP.com  /command `
     "open $RemoteUserName@$RemoteHostName -privatekey=""$PrivateKey"""`
     "call mkdir -p $RemoteWorkingDir"`
-    "synchronize Remote $SolutionDir $RemoteWorkingDir -filemask=""$FileMasks|$ExcludeDirs;"""`
+    "synchronize Remote $SolutionDir $RemoteWorkingDir -filemask=""$FileMasks|$ExcludeDirs;"" -transfer=binary"`
     "call mkdir -p $RemoteWorkingDir/thirdparty/"`
     "call mkdir -p $RemoteWorkingDir/thirdparty/linux/"`
-    "synchronize remote $SolutionDir/thirdparty/linux/ $RemoteWorkingDir/thirdparty/linux/ -filemask=""**.get"""`
+    "synchronize remote $SolutionDir/thirdparty/linux/ $RemoteWorkingDir/thirdparty/linux/ -filemask=""**.get"" -transfer=binary"`
     "exit" 
