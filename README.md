@@ -64,36 +64,53 @@ This project has been placed in the public domain. As such, you are unrestricted
 The library is *cross platform* and has been tested on both Windows and Linux. The library should work on MAC but it has not been tested. There are two library dependencies including [Boost](http://www.boost.org/) (networking), and [Miracl](https://www.miracl.com/index) (Base OT). For each, we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advise using the coned repository that we provide.
  
 ### Windows
- 
-This project was developed using visual studio and contains the associated solution and project files. Before building the solution, the third party libraries [Boost](http://www.boost.org/), and [Miracl](https://www.miracl.com/index) must be obtained. We provide powershell scripts that automate this processes located in the `./thirdparty/win/` directory. Make sure that you have set the execution policy to unrestricted, i.e. run `Set-ExecutionPolicy  Unrestricted` as admin.
- 
-By default, these scripts will download the libraries to this folder. However, the visual studio projects will also look form them at `C:\\libs\`.
- 
- IMPORTANT: By default, the build system needs the NASM compiler to be located at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `libOTe/Crypto/asm/sha_win64.asm` from the build system and undefining  `INTEL_ASM_SHA1` on line 28 of `libOTe/Crypto/sha.cpp`.
 
-Once the scripts have finished, visual studio should be able to build the project. The Test Explorer should be able to find all the unit tests and hopefully they all pass. Unit tests can also be run from the command line with the arguments
+In `Powershell`, this will set up the project 
+
+```
+git clone --recursive https://github.com/osu-crypto/libOTe.git
+cd libOTe/thirdparty/win
+getBoost.ps1; getMiracl.ps1
+cd ../..
+libOTe.sln
+```
+
+Requirements: `Powershell`, Powershell `Set-ExecutionPolicy  Unrestricted`, `Visual Studio 2015`, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`.
+Optional: `nasm` for improved SHA1 performance. 
  
-`frontend.exe -u`
- 
-For the full set of command line options, simply execute the frendend with no arguments.
- 
- 
+Build the solution within visual studio or with `MSBuild`. To see all the command line options, execute the program 
+
+`frontend.exe` 
+  
+If the cryptoTools directory is empty `git submodule update --init --recursive`.
+
+<b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `libOTe/Crypto/asm/sha_win64.asm` from the build system and undefining  `INTEL_ASM_SHA1` on line 28 of `libOTe/Crypto/sha1.cpp`.
+
+
  
  
 ### Linux
  
-Once cloned, the libraries listed above must be built. In `./thirdparty/linux` there are scripts that will download and build all of the libraries that are listed above.
+ In short, this will build the project
 
- IMPORTANT: By default, the build system needs the NASM compiler to be in the path. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `libOTe/Crypto/asm/sha_lnx.S` from the build system by deleting it or by chaning the .S and undefining  `INTEL_ASM_SHA1` on line 28 of `libOTe/Crypto/sha.cpp`.
+```
+git clone --recursive https://github.com/osu-crypto/libOTe.git
+cd libOTe/thirdparty/linux
+bash all.get
+cd ../..
+CMake  -G "Unix Makefiles"
+make
+```
 
-To build the libOTe and the associated frontend:
+Requirements: `CMake`, `Make`, `g++` or similar, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`. Optional: `nasm` for improved SHA1 performance.
+
+The libraries will be placed in `libOTe/lib` and the binary `frontend.exe` will be placed in `libOTe/bin` To see all the command line options, execute the program 
  
-`./make `
+`./bin/frontend.exe`
+
+Note: In the case that miracl or boost is already installed, the steps  `cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt to find them instead. Boost is found with the CMake findBoost package and miracl is found with the `find_library(miracl)` command.
  
-To see all the command line options, execute the program 
- 
-`./Release/frontend.exe`
- 
+ If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
 ## Citing
 
