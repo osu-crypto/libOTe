@@ -6,6 +6,15 @@
 *.user
 *.sln.docstates
 
+CMakeFiles/*
+*/CMakeFiles/*
+*cmake_install.cmake
+
+CMakeCache.txt
+*/CMakeCache.txt
+
+*.a
+ 
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/
@@ -206,3 +215,4 @@ mpsi.VC*
 testout.txt
 online.txt
 offline.txt
+Makefile

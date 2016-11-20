@@ -3,6 +3,11 @@ cmake_minimum_required (VERSION 3.6)
 project("libOTe")
 
 
+set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/bin)
+set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/lib)
+set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/lib)
+
+
 #############################################
 #            Flag and #defines              #
 #############################################
@@ -43,10 +48,11 @@ include_directories(libOTe_Tests)
 #############################################
 #add_subdirectory(frontend)
 file(GLOB_RECURSE SRC_FRONTEND ${CMAKE_SOURCE_DIR}/frontend/*.cpp)
-add_executable(frontend_exe  ${SRC_FRONTEND})
+add_executable(frontend.exe  ${SRC_FRONTEND})
 
 
 #############################################
 #            Link our libraries             #
 #############################################
-target_link_libraries(frontend_exe libOTe_Tests)
+target_link_libraries(frontend.exe libOTe_Tests)
+
