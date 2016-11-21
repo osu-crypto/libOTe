@@ -149,8 +149,6 @@ namespace osuCrypto
     {
 
 #ifndef NDEBUG
-        u64 expectedSize = mGens.size() / (sizeof(block) * 8);
-
         if (plaintext.size() != mCode.plaintextBlkSize())
             throw std::invalid_argument("");
 #endif // !NDEBUG
