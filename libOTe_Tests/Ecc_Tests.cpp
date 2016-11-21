@@ -543,10 +543,27 @@ void Ecc2mPoint_Test()
     }
 
     EccNumber Rc(curve);
-    Rc.fromHex((char*)"769FC4F81A2622436EAACEB85830FB00EA2F2BE8235D30BC9AA06AA2F26092A81F4050F");
+
+    std::string rcStr = "769FC4F81A2622436EAACEB85830FB00EA2F2BE8235D30BC9AA06AA2F26092A81F4050F";
+    std::string pchA = "3A2E668B199FAD952CE14569D8BFC92259E3B04D7F44B4E7AD8C76FBCDCC916697ECF404";
+    std::string pchB = "4DB117E685E3139B176F6A96247FFE476115916F488DF399F3D7C458F849B7DC8174DE2";
+    char *rc_cstr = new char[rcStr.length() + 1];
+    char *pchA_cstr = new char[pchA.length() + 1];
+    char *pchB_cstr = new char[pchB.length() + 1];
+    strcpy(rc_cstr   , rcStr.c_str());
+    strcpy(pchA_cstr, pchA.c_str());
+    strcpy(pchB_cstr, pchB.c_str());
+
+
+    Rc.fromHex(rc_cstr);
     EccPoint pch(curve);
 
-    pch.fromHex((char*)"3A2E668B199FAD952CE14569D8BFC92259E3B04D7F44B4E7AD8C76FBCDCC916697ECF404", "4DB117E685E3139B176F6A96247FFE476115916F488DF399F3D7C458F849B7DC8174DE2");
+    pch.fromHex(pchA_cstr, pchB_cstr);
+
+
+    delete[] rc_cstr;
+    delete[] pchA_cstr;
+    delete[] pchB_cstr;
 
     auto gRc = pch + g * Rc;
     auto gBRc = pch  + gBrick * Rc;
