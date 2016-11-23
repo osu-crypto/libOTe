@@ -550,9 +550,9 @@ void Ecc2mPoint_Test()
     char *rc_cstr = new char[rcStr.length() + 1];
     char *pchA_cstr = new char[pchA.length() + 1];
     char *pchB_cstr = new char[pchB.length() + 1];
-    strcpy(rc_cstr   , rcStr.c_str());
-    strcpy(pchA_cstr, pchA.c_str());
-    strcpy(pchB_cstr, pchB.c_str());
+    memcpy(rc_cstr   , rcStr.c_str(), rcStr.size());
+    memcpy(pchA_cstr, pchA.c_str(), pchA.size());
+    memcpy(pchB_cstr, pchB.c_str(), pchB.size());
 
 
     Rc.fromHex(rc_cstr);

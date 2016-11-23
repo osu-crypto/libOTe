@@ -93,6 +93,13 @@ namespace osuCrypto
         std::fstream out;
         out.open(fileName, std::ios::in | std::ios::binary);
 
+
+        if (in.is_open() == false)
+        {
+            Log::out << "failed to open:\n     " << fileName << Log::endl;
+            throw std::runtime_error("");
+        }
+
         loadBinFile(out);
 
     }
