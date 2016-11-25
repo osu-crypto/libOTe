@@ -155,7 +155,7 @@ namespace osuCrypto
             {
                 if (neq(((block*)u.data())[j], messages[rowIdx][choice[j]]))
                 {
-                    Log::out << rowIdx << Log::endl;
+                    std::cout << rowIdx << std::endl;
                     throw std::runtime_error("");
                 }
             }

@@ -47,7 +47,7 @@ void recverGetLatency(Channel& chl)
     auto recvEnd = mid;
 
     auto rrt = mid - start;
-    Log::out << "latency:   " << std::chrono::duration_cast<std::chrono::milliseconds>(rrt).count() << " ms" << Log::endl;
+    std::cout << "latency:   " << std::chrono::duration_cast<std::chrono::milliseconds>(rrt).count() << " ms" << std::endl;
                  
     Buff oneMbit((1 << 20) / 8);
     for (u64 i = 0; i < tryCount; ++i)
@@ -69,7 +69,7 @@ void recverGetLatency(Channel& chl)
         // MegaBits per second
         auto Mbps = usps / uspGb *  (1 << 10);
 
-        Log::out << "bandwidth: " << Mbps << " Mbps" << Log::endl;
+        std::cout << "bandwidth: " << Mbps << " Mbps" << std::endl;
     }
 
     chl.asyncSend(dummy, 1);

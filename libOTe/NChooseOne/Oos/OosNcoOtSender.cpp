@@ -555,7 +555,7 @@ namespace osuCrypto
 
                 if (neq(tq, cb))
                 {
-                    //Log::out << "bad OOS16 OT check. " << l << "m " << j << Log::endl;
+                    //std::cout << "bad OOS16 OT check. " << l << "m " << j << std::endl;
                     //return;
                     throw std::runtime_error("bad OOS16 OT check. " LOCATION);
                 }

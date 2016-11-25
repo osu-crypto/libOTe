@@ -30,7 +30,7 @@ void AknOt_sendRecv1000_Test()
     //double cncProb (0.1);
 
 
-    Log::setThreadName("Recvr");
+    setThreadName("Recvr");
 
     BtIOService ios(0);
     BtEndpoint  ep0(ios, "127.0.0.1", 1212, true, "ep");
@@ -58,7 +58,7 @@ void AknOt_sendRecv1000_Test()
 
     std::thread thrd([&]() {
 
-        Log::setThreadName("Sender");
+        setThreadName("Sender");
 
         send.init(totalOts, cncThreshold, cncProb,otExtSend, sendChls, sPrng);
     });

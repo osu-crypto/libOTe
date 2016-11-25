@@ -235,9 +235,9 @@ namespace osuCrypto
         {
             if (neq(xtraBlk[i] , choices[i] ? extraBlocks[i] ^ delta : extraBlocks[i] ))
             {
-                Log::out << "extra " << i << Log::endl;
-                Log::out << xtraBlk[i] << "  " << (u32)choices[i] << Log::endl;
-                Log::out << extraBlocks[i] << "  " << (extraBlocks[i] ^ delta) << Log::endl;
+                std::cout << "extra " << i << std::endl;
+                std::cout << xtraBlk[i] << "  " << (u32)choices[i] << std::endl;
+                std::cout << extraBlocks[i] << "  " << (extraBlocks[i] ^ delta) << std::endl;
 
                 throw std::runtime_error("");
             }
@@ -334,25 +334,25 @@ namespace osuCrypto
 
         if (eq(t1[0], received_t[0]) && eq(t2[0], received_t2[0]))
         {
-            //Log::out << "\tCheck passed\n";
+            //std::cout << "\tCheck passed\n";
         }
         else
         {
-            Log::out << "OT Ext Failed Correlation check failed" << Log::endl;
-            Log::out << "rec t = " << received_t[0] << Log::endl;
-            Log::out << "tmp1  = " << t1[0] << Log::endl;
-            Log::out << "q  = " << q1[0] << Log::endl;
+            std::cout << "OT Ext Failed Correlation check failed" << std::endl;
+            std::cout << "rec t = " << received_t[0] << std::endl;
+            std::cout << "tmp1  = " << t1[0] << std::endl;
+            std::cout << "q  = " << q1[0] << std::endl;
             throw std::runtime_error("Exit");;
         }
 
 
         if (eq(t1[1], received_t[1]) && eq(t2[1], received_t2[1]))
         {
-            //Log::out << "\tCheck passed\n";
+            //std::cout << "\tCheck passed\n";
         }
         else
         {
-            Log::out << "2 OT Ext Failed Correlation check failed" << Log::endl;
+            std::cout << "2 OT Ext Failed Correlation check failed" << std::endl;
 
             throw std::runtime_error("Exit");;
         }

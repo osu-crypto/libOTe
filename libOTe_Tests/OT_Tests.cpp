@@ -14,6 +14,9 @@
 #include "TwoChooseOne/KosOtExtReceiver.h"
 #include "TwoChooseOne/KosOtExtSender.h"
 
+#include "TwoChooseOne/LzKosOtExtReceiver.h"
+#include "TwoChooseOne/LzKosOtExtSender.h"
+
 #include "TwoChooseOne/KosDotExtReceiver.h"
 #include "TwoChooseOne/KosDotExtSender.h"
 
@@ -47,9 +50,9 @@ void OT_100Receive_Test(BitVector& choiceBits, ArrayView<block> recv, ArrayView<
         const block& senderBlock = sender[i][choice];
 
         //if (i%512==0) {
-        //    Log::out << "[" << i << ",0]--" << sender[i][0] << Log::endl;
-        //    Log::out << "[" << i << ",1]--" << sender[i][1] << Log::endl;
-        //    Log::out << (int)choice << "-- " << recv[i] << Log::endl;
+        //    std::cout << "[" << i << ",0]--" << sender[i][0] << std::endl;
+        //    std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
+        //    std::cout << (int)choice << "-- " << recv[i] << std::endl;
         //}
         if (neq(revcBlock, senderBlock))
             throw UnitTestFail();
@@ -124,9 +127,9 @@ void BitVector_Append_Test_Impl()
     bv4.append(bv0);
     bv4.append(bv1);
 
-    //Log::out << bv0 << bv1 << Log::endl;
-    //Log::out << bv2 << Log::endl;
-    //Log::out << bv4 << Log::endl;
+    //std::cout << bv0 << bv1 << std::endl;
+    //std::cout << bv2 << std::endl;
+    //std::cout << bv4 << std::endl;
 
     if (bv4 != bv2)
         throw UnitTestFail();
@@ -147,22 +150,22 @@ void BitVector_Copy_Test_Impl()
     c.copy(bb, offset, 128 - offset);
 
 
-    ////Log::out << "bb ";// << bb << Logger::endl;
+    ////std::cout << "bb ";// << bb << Logger::endl;
     //for (u64 i = 0; i < bb.size(); ++i)
     //{
-    //    if (bb[i]) Log::out << "1";
-    //    else Log::out << "0";
+    //    if (bb[i]) std::cout << "1";
+    //    else std::cout << "0";
 
     //}
-    //Log::out << Log::endl;
-    //Log::out << "c   ";
+    //std::cout << std::endl;
+    //std::cout << "c   ";
     //for (u64 i = 0; i < c.size(); ++i)
     //{
-    //    if (c[i]) Log::out << "1";
-    //    else Log::out << "0";
+    //    if (c[i]) std::cout << "1";
+    //    else std::cout << "0";
 
     //}
-    //Log::out << Log::endl;
+    //std::cout << std::endl;
 
     for (u64 i = 0; i < 128 - offset; ++i)
     {
@@ -176,7 +179,7 @@ void printMtx(std::array<block, 128>& data)
 {
     for (auto& d : data)
     {
-        Log::out << d << Log::endl;
+        std::cout << d << std::endl;
     }
 }
 
@@ -204,8 +207,8 @@ void Transpose_Test_Impl()
         {
             if (neq(d, _mm_set_epi64x(0, 0xFF)))
             {
-                Log::out << "expected" << Log::endl;
-                Log::out << _mm_set_epi64x(0xF, 0) << Log::endl << Log::endl;
+                std::cout << "expected" << std::endl;
+                std::cout << _mm_set_epi64x(0xF, 0) << std::endl << std::endl;
 
                 printMtx(data);
 
@@ -235,8 +238,8 @@ void Transpose_Test_Impl()
         {
             if (neq(d, _mm_set_epi64x(0, 0xFF)))
             {
-                Log::out << "expected" << Log::endl;
-                Log::out << _mm_set_epi64x(0xF, 0) << Log::endl << Log::endl;
+                std::cout << "expected" << std::endl;
+                std::cout << _mm_set_epi64x(0xF, 0) << std::endl << std::endl;
 
                 printMtx(data);
 
@@ -283,7 +286,7 @@ void Transpose_Test_Impl()
 
 void KosOtExt_100Receive_Test_Impl()
 {
-    Log::setThreadName("Sender");
+    setThreadName("Sender");
 
     BtIOService ios(0);
     BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
@@ -317,7 +320,7 @@ void KosOtExt_100Receive_Test_Impl()
 
 
     std::thread thrd = std::thread([&]() {
-        Log::setThreadName("receiver");
+        setThreadName("receiver");
 
 
 
@@ -332,7 +335,75 @@ void KosOtExt_100Receive_Test_Impl()
 
     //for (u64 i = 0; i < baseOTs.receiver_outputs.size(); ++i)
     //{
-    //    Log::out << sender.GetMessage(i, 0) << " " << sender.GetMessage(i, 1) << "\n" << recv.GetMessage(1) << "  " << recv.mChoiceBits[i] << Log::endl;
+    //    std::cout << sender.GetMessage(i, 0) << " " << sender.GetMessage(i, 1) << "\n" << recv.GetMessage(1) << "  " << recv.mChoiceBits[i] << std::endl;
+    //}
+
+    OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+
+
+    senderChannel.close();
+    recvChannel.close();
+
+
+    ep1.stop();
+    ep0.stop();
+
+    ios.stop();
+
+    //senderNetMgr.Stop();
+    //recvNetMg
+}
+
+
+
+void LzKosOtExt_100Receive_Test_Impl()
+{
+    setThreadName("Sender");
+
+    BtIOService ios(0);
+    BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
+    BtEndpoint ep1(ios, "127.0.0.1", 1212, false, "ep");
+    Channel& senderChannel = ep1.addChannel("chl", "chl");
+    Channel& recvChannel = ep0.addChannel("chl", "chl");
+
+    PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
+    PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
+
+    u64 numOTs = 200;
+
+    std::vector<block> recvMsg(numOTs), baseRecv(128);
+    std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+    BitVector choices(numOTs), baseChoice(128);
+    choices.randomize(prng0);
+    baseChoice.randomize(prng0);
+
+
+    for (u64 i = 0; i < 128; ++i)
+    {
+        baseSend[i][0] = prng0.get<block>();
+        baseSend[i][1] = prng0.get<block>();
+        baseRecv[i] = baseSend[i][baseChoice[i]];
+    }
+
+
+    LzKosOtExtSender sender;
+    LzKosOtExtReceiver recv;
+
+    std::thread thrd = std::thread([&]() {
+        setThreadName("receiver");
+
+        recv.setBaseOts(baseSend);
+        recv.receive(choices, recvMsg, prng0, recvChannel);
+    });
+
+    sender.setBaseOts(baseRecv, baseChoice);
+    sender.send(sendMsg, prng1, senderChannel);
+    thrd.join();
+
+    //for (u64 i = 0; i < baseOTs.receiver_outputs.size(); ++i)
+    //{
+    //    std::cout << sender.GetMessage(i, 0) << " " << sender.GetMessage(i, 1) << "\n" << recv.GetMessage(1) << "  " << recv.mChoiceBits[i] << std::endl;
     //}
 
     OT_100Receive_Test(choices, recvMsg, sendMsg);
@@ -357,7 +428,7 @@ void KosOtExt_100Receive_Test_Impl()
 
 void KosDotExt_100Receive_Test_Impl()
 {
-    Log::setThreadName("Sender");
+    setThreadName("Sender");
 
     BtIOService ios(0);
     BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
@@ -397,7 +468,7 @@ void KosDotExt_100Receive_Test_Impl()
     //sender.mmChoices = choices;
 
     std::thread thrd = std::thread([&]() {
-        Log::setThreadName("receiver");
+        setThreadName("receiver");
 
 
 
@@ -412,7 +483,7 @@ void KosDotExt_100Receive_Test_Impl()
 
     //for (u64 i = 0; i < baseOTs.receiver_outputs.size(); ++i)
     //{
-    //    Log::out << sender.GetMessage(i, 0) << " " << sender.GetMessage(i, 1) << "\n" << recv.GetMessage(1) << "  " << recv.mChoiceBits[i] << Log::endl;
+    //    std::cout << sender.GetMessage(i, 0) << " " << sender.GetMessage(i, 1) << "\n" << recv.GetMessage(1) << "  " << recv.mChoiceBits[i] << std::endl;
     //}
 
     OT_100Receive_Test(choices, recvMsg, sendMsg);
@@ -435,7 +506,7 @@ void KosDotExt_100Receive_Test_Impl()
 
 void IknpOtExt_100Receive_Test_Impl()
 {
-    Log::setThreadName("Sender");
+    setThreadName("Sender");
 
     BtIOService ios(0);
     BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
@@ -477,7 +548,7 @@ void IknpOtExt_100Receive_Test_Impl()
     //    std::lock_guard<std::mutex> lock(Log::mMtx);
     //    for (u64 i = 0; i < baseOTs.receiver_outputs.size(); ++i)
     //    {
-    //        Log::out << "i  " << baseOTs.receiver_outputs[i] << " " << (int)baseOTs.receiver_inputs[i] << Log::endl;
+    //        std::cout << "i  " << baseOTs.receiver_outputs[i] << " " << (int)baseOTs.receiver_inputs[i] << std::endl;
     //    }
     //}
     sender.setBaseOts(baseRecv, baseChoice);
@@ -486,7 +557,7 @@ void IknpOtExt_100Receive_Test_Impl()
 
     //for (u64 i = 0; i < baseOTs.receiver_outputs.size(); ++i)
     //{
-    //    Log::out << sender.GetMessage(i, 0) << " " << sender.GetMessage(i, 1) << "\n" << recv.GetMessage(1) << "  " << recv.mChoiceBits[i] << Log::endl;
+    //    std::cout << sender.GetMessage(i, 0) << " " << sender.GetMessage(i, 1) << "\n" << recv.GetMessage(1) << "  " << recv.mChoiceBits[i] << std::endl;
     //}
     OT_100Receive_Test(choices, recvMsg, sendMsg);
 

@@ -74,7 +74,7 @@ namespace osuCrypto
         { 
             choices2[choices.size() + i] = prng.getBit();
 
-            //Log::out << "extra " << i << "  " << choices2[choices.size() + i] << Log::endl;
+            //std::cout << "extra " << i << "  " << choices2[choices.size() + i] << std::endl;
         }
 
         auto choiceBlocks = choices2.getArrayView<block>();
@@ -235,7 +235,7 @@ namespace osuCrypto
         cc.copy(choices2, choices.size(), 128);
         chl.send(cc);
 #endif
-        //Log::out << "uBuff " << (bool)uBuff << "  " << (uEnd - uIter) << Log::endl;
+        //std::cout << "uBuff " << (bool)uBuff << "  " << (uEnd - uIter) << std::endl;
         gTimer.setTimePoint("recv.transposeDone");
 
         // do correlation check and hashing
@@ -265,7 +265,7 @@ namespace osuCrypto
 #endif
 
         u64 doneIdx = (0);
-        //Log::out << Log::lock;
+        //std::cout << IoStream::lock;
 
         std::array<block, 2> zeroOneBlk{ ZeroBlock, AllOneBlock };
         std::array<block, 128> challenges;

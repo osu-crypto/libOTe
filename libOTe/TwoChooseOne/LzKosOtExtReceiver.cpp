@@ -75,7 +75,7 @@ namespace osuCrypto
         {
             choices2[choices.size() + i] = prng.getBit();
 
-            //Log::out << "extra " << i << "  " << choices2[choices.size() + i] << Log::endl;
+            //std::cout << "extra " << i << "  " << choices2[choices.size() + i] << std::endl;
         }
 
         auto choiceBlocks = choices2.getArrayView<block>();
@@ -247,7 +247,7 @@ namespace osuCrypto
         SHA1 sha;
         u8 hashBuff[20];
         u64 doneIdx = (0);
-        //Log::out << Log::lock;
+        //std::cout << IoStream::lock;
 
         std::array<block, 2> zeroOneBlk{ ZeroBlock, AllOneBlock };
         std::array<block, 128> challenges;
@@ -304,7 +304,7 @@ namespace osuCrypto
             // and check for correlation
             block chij = commonPrng.get<block>();
 
-            //Log::out << "recvIdx' " << xtra++ << "   " << blk << "   " << chij << "  " << (u32)choices2[doneIdx] << Log::endl;
+            //std::cout << "recvIdx' " << xtra++ << "   " << blk << "   " << chij << "  " << (u32)choices2[doneIdx] << std::endl;
 
             if (choices2[doneIdx++]) x = x ^ chij;
 
@@ -314,7 +314,7 @@ namespace osuCrypto
             t = t ^ ti;
             t2 = t2 ^ ti2;
         }
-        //Log::out << Log::unlock;
+        //std::cout << IoStream::unlock;
 
         chl.asyncSend(std::move(correlationData));
 

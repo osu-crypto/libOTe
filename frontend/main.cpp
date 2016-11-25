@@ -36,7 +36,7 @@ int miraclTestMain();
 
 void kkrt_test(int i)
 {
-    Log::setThreadName("Sender");
+    setThreadName("Sender");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
@@ -142,7 +142,7 @@ void kkrt_test(int i)
             thds[k].join();
 
         time.setTimePoint("finish");
-        Log::out << time << Log::endl;
+        std::cout << time << std::endl;
     }
 
 
@@ -156,7 +156,7 @@ void kkrt_test(int i)
 
 void oos_test(int i)
 {
-    Log::setThreadName("Sender");
+    setThreadName("Sender");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
@@ -265,7 +265,7 @@ void oos_test(int i)
             thds[k].join();
 
         time.setTimePoint("finish");
-        Log::out << time << Log::endl;
+        std::cout << time << std::endl;
     }
 
 
@@ -279,7 +279,7 @@ void oos_test(int i)
 
 void kos_test(int i)
 {
-    Log::setThreadName("Sender");
+    setThreadName("Sender");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
@@ -330,7 +330,7 @@ void kos_test(int i)
         s.send(msgs, prng0, chl);
 
         gTimer.setTimePoint("finish");
-        Log::out << gTimer << Log::endl;
+        std::cout << gTimer << std::endl;
 
     }
 
@@ -344,7 +344,7 @@ void kos_test(int i)
 
 void dkos_test(int i)
 {
-    Log::setThreadName("Sender");
+    setThreadName("Sender");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
@@ -395,7 +395,7 @@ void dkos_test(int i)
         s.send(msgs, prng0, chl);
 
         gTimer.setTimePoint("finish");
-        Log::out << gTimer << Log::endl;
+        std::cout << gTimer << std::endl;
 
     }
 
@@ -410,7 +410,7 @@ void dkos_test(int i)
 
 void iknp_test(int i)
 {
-    Log::setThreadName("Sender");
+    setThreadName("Sender");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
@@ -462,7 +462,7 @@ void iknp_test(int i)
         s.send(msgs, prng0, chl);
 
         time.setTimePoint("finish");
-        Log::out << time << Log::endl;
+        std::cout << time << std::endl;
 
     }
 
@@ -485,7 +485,7 @@ void akn_test(int i)
     double cncProb(0.0999);
 
 
-    Log::setThreadName("Recvr");
+    setThreadName("Recvr");
 
     BtIOService ios(0);
     BtEndpoint  ep0(ios, "127.0.0.1", 1212, i, "ep"); 
@@ -626,7 +626,7 @@ int main(int argc, char** argv)
     }
     else
     {
-        Log::out << "this program takes a runtime argument.\n\nTo run the unit tests, run\n\n"
+        std::cout << "this program takes a runtime argument.\n\nTo run the unit tests, run\n\n"
             << "    frontend.exe -unitTest\n\n"
             << "to run the OOS16 active secure 1-out-of-N OT for N=2^76, run\n\n"
             << "    frontend.exe -oos\n\n"
@@ -643,7 +643,7 @@ int main(int argc, char** argv)
             << "    frontend.exe -iknp 0\n\n"
             << "    frontend.exe -iknp 1\n\n"
             << "These programs are fully networked and try to connect at localhost:1212.\n"
-            << Log::endl;
+            << std::endl;
     }
 
     return 0;

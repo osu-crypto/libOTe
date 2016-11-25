@@ -23,7 +23,7 @@ using namespace osuCrypto;
         void BtNetwork_Connect1_Boost_Test()
         {
 
-            Log::setThreadName("Test_Host");
+            setThreadName("Test_Host");
 
             std::string channelName{ "TestChannel" };
             std::string msg{ "This is the message" };
@@ -32,14 +32,14 @@ using namespace osuCrypto;
             BtIOService ioService(0); 
             auto thrd = std::thread([&]()
             {
-                Log::setThreadName("Test_Client");
+                setThreadName("Test_Client");
 
-                //Log::out << "client ep start" << Log::endl;
+                //std::cout << "client ep start" << std::endl;
                 BtEndpoint endpoint(ioService, "127.0.0.1", 1212, false, "endpoint");
-                //Log::out << "client ep done" << Log::endl;
+                //std::cout << "client ep done" << std::endl;
 
                 Channel& chl = endpoint.addChannel(channelName, channelName);
-                //Log::out << "client chl done" << Log::endl;
+                //std::cout << "client chl done" << std::endl;
 
 
                 std::unique_ptr<ByteStream> srvRecv(new ByteStream());
@@ -56,30 +56,30 @@ using namespace osuCrypto;
 
                 chl.asyncSend(std::move(srvRecv));
 
-                //Log::out << " server closing" << Log::endl;
+                //std::cout << " server closing" << std::endl;
 
                 chl.close();
 
-                //Log::out << " server nm closing" << Log::endl;
+                //std::cout << " server nm closing" << std::endl;
 
                 //netServer.CloseChannel(chl.Name());
                 endpoint.stop();
-                //Log::out << " server closed" << Log::endl;
+                //std::cout << " server closed" << std::endl;
 
             });
 
             //BtIOService ioService;
 
-            //Log::out << "host ep start" << Log::endl;
+            //std::cout << "host ep start" << std::endl;
 
             BtEndpoint endpoint(ioService, "127.0.0.1", 1212, true, "endpoint");
 
-            //Log::out << "host ep done" << Log::endl;
+            //std::cout << "host ep done" << std::endl;
 
             auto& chl = endpoint.addChannel(channelName, channelName);
-            //Log::out << "host chl done" << Log::endl;
+            //std::cout << "host chl done" << std::endl;
 
-            //Log::out << " client channel added" << Log::endl;
+            //std::cout << " client channel added" << std::endl;
 
             chl.asyncSend(msgBuff.begin(), msgBuff.size());
 
@@ -88,13 +88,13 @@ using namespace osuCrypto;
 
             if (clientRecv != msgBuff)
                 throw UnitTestFail();
-            //Log::out << " client closing" << Log::endl;
+            //std::cout << " client closing" << std::endl;
 
 
             chl.close();
             //netClient.CloseChannel(channelName);
             endpoint.stop();
-            //Log::out << " client closed" << Log::endl;
+            //std::cout << " client closed" << std::endl;
 
 
             thrd.join();
@@ -108,7 +108,7 @@ using namespace osuCrypto;
         {
             //InitDebugPrinting();
 
-            Log::setThreadName("Test_Host");
+            setThreadName("Test_Host");
 
             std::string channelName{ "TestChannel" };
             std::string msg{ "This is the message" };
@@ -122,7 +122,7 @@ using namespace osuCrypto;
 
             auto thrd = std::thread([&]()
             {
-                Log::setThreadName("Test_Client");
+                setThreadName("Test_Client");
 
                 BtEndpoint endpoint(ioService, "127.0.0.1", 1212, false, "endpoint");
                 Channel& chl = endpoint.addChannel(channelName, channelName);
@@ -164,7 +164,7 @@ using namespace osuCrypto;
         void BtNetwork_ConnectMany_Boost_Test()
         {
             //InitDebugPrinting();
-            Log::setThreadName("Test_Host");
+            setThreadName("Test_Host");
 
             std::string channelName{ "TestChannel" };
 
@@ -184,7 +184,7 @@ using namespace osuCrypto;
             std::thread serverThrd = std::thread([&]()
             {
                 BtIOService ioService(1);
-                Log::setThreadName("Test_client");
+                setThreadName("Test_client");
 
                 BtEndpoint endpoint(ioService, "127.0.0.1", 1212, false, "endpoint");
 
@@ -194,7 +194,7 @@ using namespace osuCrypto;
                 {
                     threads.emplace_back([i, &buff, &endpoint, messageCount, print, channelName]()
                     {
-                        Log::setThreadName("Test_client_" + std::to_string(i));
+                        setThreadName("Test_client_" + std::to_string(i));
                         auto& chl = endpoint.addChannel(channelName + std::to_string(i), channelName + std::to_string(i));
                         ByteStream mH;
 
@@ -209,7 +209,7 @@ using namespace osuCrypto;
 
                         //std::stringstream ss;
                         //ss << "server" << i << " done\n";
-                        //Log::out << ss.str();
+                        //std::cout << ss.str();
                     });
                 }
 
@@ -220,7 +220,7 @@ using namespace osuCrypto;
 
                 endpoint.stop();
                 ioService.stop();
-                //Log::out << "server done" << Log::endl;
+                //std::cout << "server done" << std::endl;
             });
 
             BtIOService ioService(1);
@@ -233,7 +233,7 @@ using namespace osuCrypto;
             {
                 threads.emplace_back([i, &endpoint, &buff, messageCount, print, channelName]()
                 {
-                    Log::setThreadName("Test_Host_" + std::to_string(i));
+                    setThreadName("Test_Host_" + std::to_string(i));
                     auto& chl = endpoint.addChannel(channelName + std::to_string(i), channelName + std::to_string(i));
                     ByteStream mH(buff);
 
@@ -271,7 +271,7 @@ using namespace osuCrypto;
 
             auto thrd = std::thread([&]() {
                 BtIOService ioService(0);
-                //Log::setThreadName("Net_Cross1_Thread");
+                //setThreadName("Net_Cross1_Thread");
                 BtEndpoint endpoint(ioService, "127.0.0.1", 1212, false, "endpoint");
 
 
@@ -357,13 +357,13 @@ using namespace osuCrypto;
 
             std::vector<std::thread> nodeThreads(nodeCount);
 
-            Log::setThreadName("main");
+            setThreadName("main");
 
             for (u64 i = 0; i < nodeCount; ++i)
             {
                 nodeThreads[i] = std::thread([&, i]() {
 
-                    Log::setThreadName("node" + std::to_string(i));
+                    setThreadName("node" + std::to_string(i));
 
 
                     u32 port;// = basePort + i;
@@ -418,7 +418,7 @@ using namespace osuCrypto;
                         if (msg != expected)
                             throw UnitTestFail();
                     }
-                    //Log::out << Log::lock << "re " << i << Log::endl << Log::unlock;
+                    //std::cout << IoStream::lock << "re " << i << std::endl << IoStream::unlock;
 
                     for (auto chl : channels)
                         chl->close();

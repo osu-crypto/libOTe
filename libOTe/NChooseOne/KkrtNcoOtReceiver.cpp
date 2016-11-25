@@ -241,9 +241,9 @@ namespace osuCrypto
         u64 & inputBlkSize,
         u64 & baseOtCount)
     {
-        if (maliciousSecure) throw std::runtime_error("");
+        //if (maliciousSecure) throw std::runtime_error("");
 
-        baseOtCount = roundUpTo(compSecParm * 4, 128);
+        baseOtCount = roundUpTo(compSecParm * (maliciousSecure? 7 : 4), 128);
         inputBlkSize = baseOtCount / 128;
     }
 

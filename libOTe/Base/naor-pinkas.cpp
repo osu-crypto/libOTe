@@ -102,7 +102,7 @@ namespace osuCrypto
                     pK.emplace_back(curve);
                     pK[j].randomize(prng);
 
-                    //Log::out << "rand? " << pK[j] << Log::endl;
+                    //std::cout << "rand? " << pK[j] << std::endl;
 
                     // using brickexp which has the base of g, compute
                     //
@@ -112,8 +112,8 @@ namespace osuCrypto
                     PK_sigma.emplace_back(curve);
                     PK_sigma[j] = bg * pK[j];
 
-                    //Log::out << "c " << PK_sigma[j] << Log::endl;
-                    //Log::out << "v " << g * pK[j] << Log::endl;
+                    //std::cout << "c " << PK_sigma[j] << std::endl;
+                    //std::cout << "v " << g * pK[j] << std::endl;
                 }
 
 
@@ -146,16 +146,16 @@ namespace osuCrypto
                     PK0.toBytes(iter);
                     iter += fieldElementSize;
 
-                    //Log::out
-                    //    << "for msg " << i << "  (recver)" << Log::endl
-                    //    << "  PK0:        " << PK0->toString() << Log::endl
-                    //    << "  PK_sigma:   " << PK_sigma[j]->toString() << Log::endl
-                    //    << "  choice:     " << choice << Log::endl
-                    //    << "  pC[choice]: " << pC[choice]->toString() << Log::endl;
+                    //std::cout
+                    //    << "for msg " << i << "  (recver)" << std::endl
+                    //    << "  PK0:        " << PK0->toString() << std::endl
+                    //    << "  PK_sigma:   " << PK_sigma[j]->toString() << std::endl
+                    //    << "  choice:     " << choice << std::endl
+                    //    << "  pC[choice]: " << pC[choice]->toString() << std::endl;
 
                 }
 
-                //Log::out << *sendBuff << Log::endl;
+                //std::cout << *sendBuff << std::endl;
 
                 if (--remainingPK0s == 0)
                     PK0Prom.set_value();
@@ -191,10 +191,10 @@ namespace osuCrypto
 
                     messages[i] = *(block*)bs.data();
 
-                    //Log::out
-                    //    << "for msg " << i << ", " << choices[i] << "  (recver)" << Log::endl
-                    //    << "  pDec[i]:    " << gka << Log::endl
-                    //    << "  msg         " << messages[i]  << "  " << ByteStream(buff.data(), buff.size()) << "   " << bs << Log::endl;
+                    //std::cout
+                    //    << "for msg " << i << ", " << choices[i] << "  (recver)" << std::endl
+                    //    << "  pDec[i]:    " << gka << std::endl
+                    //    << "  msg         " << messages[i]  << "  " << ByteStream(buff.data(), buff.size()) << "   " << bs << std::endl;
                 }
 
 
@@ -247,7 +247,7 @@ namespace osuCrypto
         const EccPoint&
             g = curve.getGenerator();
 
-        //Log::out << "send g " << g << Log::endl;
+        //std::cout << "send g " << g << std::endl;
 
         u64 fieldElementSize = g.sizeBytes();// ->fe_byte_size();
 
@@ -264,7 +264,7 @@ namespace osuCrypto
         pC[0].toBytes(sendBuff->data());
 
 
-        //Log::out << "send c[0] " << pC[0] << Log::endl;
+        //std::cout << "send c[0] " << pC[0] << std::endl;
 
         for (u64 u = 1; u < nSndVals; u++)
         {
@@ -276,7 +276,7 @@ namespace osuCrypto
             //pC[u]->set_pow(g.get(), tmp.get());
             pC[u] = g * tmp;// ->set_pow(g.get(), tmp.get());
 
-                            //Log::out << "send c["<< u <<"] " << pC[0] << " = g * " << tmp << Log::endl;
+                            //std::cout << "send c["<< u <<"] " << pC[0] << " = g * " << tmp << std::endl;
 
 
             pC[u].toBytes(sendBuff->data() + u * fieldElementSize);
@@ -337,9 +337,9 @@ namespace osuCrypto
                     pPK0.fromBytes(buff.data() + i * fieldElementSize);
                     //pPK0->import_from_bytes(buff.data() + i * fieldElementSize);
 
-                    //Log::out
-                    //    << "for msg " << i << "  (sender)" << Log::endl
-                    //    << "  pPK0[i]:    " << pPK0 << Log::endl;
+                    //std::cout
+                    //    << "for msg " << i << "  (sender)" << std::endl
+                    //    << "  pPK0[i]:    " << pPK0 << std::endl;
 
 
                     PK0a = pPK0 * alpha2;
@@ -353,18 +353,18 @@ namespace osuCrypto
 
                     messages[i][0] = *(block*)shaBuff;
 
-                    //Log::out
-                    //    << "for msg " << i << ", 0  (sender)" << Log::endl
-                    //    << "  PK0^a:    " << PK0a << Log::endl;
+                    //std::cout
+                    //    << "for msg " << i << ", 0  (sender)" << std::endl
+                    //    << "  PK0^a:    " << PK0a << std::endl;
 
                     for (u64 u = 1; u < nSndVals; u++)
                     {
                         fetmp = c[u] - PK0a;// ->set_div(pC[u], PK0a.get());
                         fetmp.toBytes(hashInBuff.data());
 
-                        //Log::out
-                        //    << "for msg " << i << ", " << u << "  (sender)" << Log::endl
-                        //    << "  c^a/PK0^a:    " << fetmp<< Log::endl;
+                        //std::cout
+                        //    << "for msg " << i << ", " << u << "  (sender)" << std::endl
+                        //    << "  c^a/PK0^a:    " << fetmp<< std::endl;
 
                         sha.Reset();
                         sha.Update((u8*)&i, sizeof(i));

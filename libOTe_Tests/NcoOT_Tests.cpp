@@ -26,7 +26,7 @@ using namespace osuCrypto;
 
 void KkrtNcoOt_Test_Impl()
 {
-    Log::setThreadName("Sender");
+    setThreadName("Sender");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
@@ -103,7 +103,7 @@ void KkrtNcoOt_Test_Impl()
 
 void OosNcoOt_Test_Impl()
 {
-    Log::setThreadName("Sender");
+    setThreadName("Sender");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
@@ -207,12 +207,12 @@ void LinearCode_Test_Impl()
     code.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.txt");
     code.writeBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
     code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
-    //Log::out << code.codewordBitSize() << "  " << code.codewordBlkSize() <<
-    //    "\n  " << code.plaintextBitSize() << "  " << code.plaintextBlkSize() << Log::endl;
+    //std::cout << code.codewordBitSize() << "  " << code.codewordBlkSize() <<
+    //    "\n  " << code.plaintextBitSize() << "  " << code.plaintextBlkSize() << std::endl;
 
 
     //for (u64 i = 0; i < code.mG.size(); ++i)
-    //    Log::out << code.mG[i] << Log::endl;
+    //    std::cout << code.mG[i] << std::endl;
 
     std::vector<block> 
         plainText(code.plaintextBlkSize(), AllOneBlock),
@@ -227,8 +227,8 @@ void LinearCode_Test_Impl()
     {
         if (cw[i] == 0)
         {
-            Log::out << cw << Log::endl;
-            Log::out << "expecting all ones" << Log::endl;
+            std::cout << cw << std::endl;
+            std::cout << "expecting all ones" << std::endl;
             throw UnitTestFail();
         }
     }
@@ -247,8 +247,8 @@ void LinearCode_Test_Impl()
 
     if (cw != expected)
     {
-        Log::out << cw << Log::endl;
-        Log::out << expected << Log::endl;
+        std::cout << cw << std::endl;
+        std::cout << expected << std::endl;
         throw UnitTestFail();
     }
 

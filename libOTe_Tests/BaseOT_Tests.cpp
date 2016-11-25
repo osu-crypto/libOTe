@@ -24,7 +24,7 @@ using namespace osuCrypto;
 
 void NaorPinkasOt_Test_Impl()
 {
-        Log::setThreadName("Sender");
+        setThreadName("Sender");
 
         BtIOService ios(0);
         BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
@@ -45,7 +45,7 @@ void NaorPinkasOt_Test_Impl()
 
 
         std::thread thrd = std::thread([&]() {
-            Log::setThreadName("receiver");
+            setThreadName("receiver");
 
 
             //crypto crpt(128, prng1.getSeed());
@@ -63,7 +63,7 @@ void NaorPinkasOt_Test_Impl()
             //    std::lock_guard<std::mutex> lock(Log::mMtx);
             //    for (u64 i = 0; i < baseOTs.receiver_outputs.size(); ++i)
             //    {
-            //        Log::out << "i  " << baseOTs.sender_inputs[i][0] << " " << baseOTs.sender_inputs[i][1] << Log::endl;
+            //        std::cout << "i  " << baseOTs.sender_inputs[i][0] << " " << baseOTs.sender_inputs[i][1] << std::endl;
             //    }
 
         });
@@ -88,7 +88,7 @@ void NaorPinkasOt_Test_Impl()
         {
             if (neq(recvMsg[i], sendMsg[i][choices[i]]))
             {
-                Log::out << "failed " << i << Log::endl;
+                std::cout << "failed " << i << std::endl;
                 throw UnitTestFail();
             }
         }

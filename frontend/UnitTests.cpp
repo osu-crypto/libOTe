@@ -15,33 +15,30 @@ using namespace osuCrypto;
 
 void run(std::string name, std::function<void(void)> func)
 {
-    Log::out << name;
+    std::cout << name;
 
     auto start = std::chrono::high_resolution_clock::now();
     try
     {
-        func(); Log::out << Log::Color::Green << "  Passed" << Log::ColorDefault;
+        func(); std::cout << Color::Green << "  Passed" << ColorDefault;
     }
     catch (const std::exception& e)
     {
-        Log::out << Log::Color::Red << "Failed - " << e.what() << Log::ColorDefault;
+        std::cout << Color::Red << "Failed - " << e.what() << ColorDefault;
     }
 
     auto end = std::chrono::high_resolution_clock::now();
 
     u64 time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-    Log::out << "   " << time << "ms" << Log::endl;
+    std::cout << "   " << time << "ms" << std::endl;
 
-
-    if (Log::out.mSink != &std::cout)
-        throw std::runtime_error("");
 }
 
 
 void NetWork_all()
 {
-    Log::out << Log::endl;
+    std::cout << std::endl;
     run("BtNetwork_Connect1_Boost_Test        ", BtNetwork_Connect1_Boost_Test);
     run("BtNetwork_OneMegabyteSend_Boost_Test ", BtNetwork_OneMegabyteSend_Boost_Test);
     run("BtNetwork_ConnectMany_Boost_Test     ", BtNetwork_ConnectMany_Boost_Test);
@@ -52,7 +49,7 @@ void NetWork_all()
 
 void bitVec_all()
 {
-    Log::out << Log::endl;
+    std::cout << std::endl;
     run("BitVector_Indexing_Test                 ", BitVector_Indexing_Test_Impl);
     run("BitVector_Parity                        ", BitVector_Parity_Test_Impl);
     run("BitVector_Append_Test                   ", BitVector_Append_Test_Impl);
@@ -61,7 +58,7 @@ void bitVec_all()
 
 void OT_all()
 {
-    Log::out << Log::endl;
+    std::cout << std::endl;
 
     run("Transpose_Test_Impl                     ", Transpose_Test_Impl);
     run("KosOtExt_100Receive_Test_Impl           ", KosOtExt_100Receive_Test_Impl);
@@ -77,7 +74,7 @@ void OT_all()
 
 void Ecc_all()
 {
-    Log::out << Log::endl;
+    std::cout << std::endl;
 
     run("Ecc2mNumber_Test                        ", Ecc2mNumber_Test);
     run("Ecc2mPoint_Test                         ", Ecc2mPoint_Test);

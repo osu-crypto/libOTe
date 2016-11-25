@@ -56,7 +56,7 @@ namespace osuCrypto
             ots.setBaseOts(baseMsg, choices);
 
             //timer.setTimePoint("baseDone");
-            //Log::out << timer;
+            //std::cout << timer;
         }
 
         mMessages.resize(totalOTCount);
@@ -94,14 +94,14 @@ namespace osuCrypto
                 mMessages.begin() + end);
 
             PRNG prng(extSeed);
-            //Log::out << Log::lock << "send 0 " << end << Log::endl;
+            //std::cout << IoStream::lock << "send 0 " << end << std::endl;
             u8 shaBuff[SHA1::HashSize];
 
 
             otExt.send(range, prng, chl);
 
 
-            //Log::out << Log::unlock;
+            //std::cout << IoStream::unlock;
 
             if (--extRemaining)
                 extDoneFuture.get();
@@ -128,7 +128,7 @@ namespace osuCrypto
             u64 bitsRemaining = choiceBuff.size() * 8;
 
 
-            //Log::out << Log::lock << "send " << end << "  " << px << Log::endl;
+            //std::cout << IoStream::lock << "send " << end << "  " << px << std::endl;
             for (u64 i = start; i < end; ++i)
             {
                 auto vv = cncGens[t].get<u32>();
@@ -145,14 +145,14 @@ namespace osuCrypto
                         chl.recv(choiceBuff);
                         bitsRemaining = choiceBuff.size() * 8 - 1;
                         choiceIter = choiceBuff.bitIterBegin();
-                        //Log::out << "   " << i << Log::endl;
+                        //std::cout << "   " << i << std::endl;
 
                     }
 
                     ++sampleCount;
 
                     u8 cc = *choiceIter;
-                    //Log::out << (u32)cc;
+                    //std::cout << (u32)cc;
 
                     if (cc == 0 && dynamic_cast<LzKosOtExtSender*>(&ots))
                     {
@@ -167,7 +167,7 @@ namespace osuCrypto
                     }
 
                     partialSum = partialSum ^ mMessages[i][cc];
-                    //Log::out << mMessages[i][cc] << " " << partialSum << " " << "  " << i << "  " << (u32)cc << "  " << vv << Log::endl;
+                    //std::cout << mMessages[i][cc] << " " << partialSum << " " << "  " << i << "  " << (u32)cc << "  " << vv << std::endl;
 
 
 
@@ -177,7 +177,7 @@ namespace osuCrypto
                 }  
             }
 
-            //Log::out << Log::endl << Log::unlock;
+            //std::cout << std::endl << IoStream::unlock;
 
             std::lock_guard<std::mutex>lock(finalMtx);
             totalOnesCount += onesCount;
@@ -209,8 +209,8 @@ namespace osuCrypto
         if (totalOnesCount > cutAndChooseThreshold ||
             neq(proof, totalSum))
         {
-            Log::out << "cnc failed. total ones Count = " << totalOnesCount << "  and threshold "<< cutAndChooseThreshold  << Log::endl
-                << "my computed block  = " << totalSum << "  vs " << proof  <<Log::endl;
+            std::cout << "cnc failed. total ones Count = " << totalOnesCount << "  and threshold "<< cutAndChooseThreshold  << std::endl
+                << "my computed block  = " << totalSum << "  vs " << proof  <<std::endl;
             throw std::runtime_error("failed cut and choose");
         }
     }

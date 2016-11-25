@@ -65,15 +65,15 @@ namespace osuCrypto
             u8 shaBuff[SHA1::HashSize];
             // do the OT extension for this range of messages.
             PRNG prng(extSeed);
-            //Log::out << Log::lock << "recv 0 "  << end << Log::endl;
+            //std::cout << IoStream::lock << "recv 0 "  << end << std::endl;
             otExt.receive(choices, range, prng, chl);
 
 
             //for (u64 k = 0; k < range.size();++k)
             //{
-            //    Log::out << k << " * " << range[k] << Log::endl;
+            //    std::cout << k << " * " << range[k] << std::endl;
             //}
-            //Log::out << Log::unlock;
+            //std::cout << IoStream::unlock;
 
             // ok, OTs are done. 
             if (t == 0)
@@ -119,7 +119,7 @@ namespace osuCrypto
             u64 expectZerosCount((u64)(mMessages.size() *(1 - oneFrac) / chls.size() * 1.5));
             u64 expectOnesCount((u64)(mMessages.size() * oneFrac / chls.size() * 1.5));
 
-            //Log::out << Log::lock << "recv " << end << "  " << px << Log::endl;
+            //std::cout << IoStream::lock << "recv " << end << "  " << px << std::endl;
 
             // reserve that must space.
             zeroOneLists[0].reserve(expectZerosCount);
@@ -133,7 +133,7 @@ namespace osuCrypto
                 ++choiceIter;
 
                 //if (i < 100)
-                //    Log::out << mMessages[i] << " " << "  " << i << "  " << (u32)cc << Log::endl;
+                //    std::cout << mMessages[i] << " " << "  " << i << "  " << (u32)cc << std::endl;
 
                 // if cc = 1, then this OT message should be opened.
                 auto vv = cncGens[t].get<u32>();
@@ -150,9 +150,9 @@ namespace osuCrypto
                         openChoiceIter = choiceBuff->begin();
                         j = 0;
 
-                        //Log::out <<   "   " << i << Log::endl;
+                        //std::cout <<   "   " << i << std::endl;
                     }
-                    //Log::out << (u32)cc;
+                    //std::cout << (u32)cc;
                     // copy our choice bit into the buffer
                     *openChoiceIter = cc;
                     ++openChoiceIter;
@@ -173,7 +173,7 @@ namespace osuCrypto
                     // keep a running sum of the OT messages that are opened in this thread.
                     partialSum = partialSum ^ mMessages[i];
 
-                    //Log::out << mMessages[i] << " " << partialSum << "  " << i<< "  "<< (u32)cc<< "  " << vv<< Log::endl;
+                    //std::cout << mMessages[i] << " " << partialSum << "  " << i<< "  "<< (u32)cc<< "  " << vv<< std::endl;
                 }
                 else
                 {
@@ -195,11 +195,11 @@ namespace osuCrypto
             {
                 // update the total sum we our share of it
                 std::lock_guard<std::mutex>lock(finalMtx);
-                //Log::out << "local ones " << zeroOneLists[1].size() << Log::endl;
+                //std::cout << "local ones " << zeroOneLists[1].size() << std::endl;
                 totalSum = totalSum ^ partialSum;
             }
 
-            //Log::out << Log::endl << Log::unlock;
+            //std::cout << std::endl << IoStream::unlock;
 
 
             // now move the list list into the shared list. 
@@ -234,7 +234,7 @@ namespace osuCrypto
                     totalOnesCount += threadsZeroOnesList[i][1].size();
 
 
-                //Log::out << "total one " << totalOnesCount << Log::endl;
+                //std::cout << "total one " << totalOnesCount << std::endl;
 
                 mOnes.resize(totalOnesCount);
                 auto iter = mOnes.begin();
@@ -305,7 +305,7 @@ namespace osuCrypto
         for(auto& thrd : thrds)
             thrd.join();
         gTimer.setTimePoint("AknOt.AllDone");
-        //Log::out << timer;
+        //std::cout << timer;
         // all done
     }
 }

@@ -153,7 +153,7 @@ namespace osuCrypto
 
                     //u64 tV = tIter - (block*)t.data();
                     //u64 tIdx = tV / 8 + (tV % 8) * 128;
-                    //Log::out << "midx " << (mIter - messages.data()) << "   tIdx " << tIdx << Log::endl;
+                    //std::cout << "midx " << (mIter - messages.data()) << "   tIdx " << tIdx << std::endl;
 
                     tIter += superBlkSize;
                     mIter += 1;
@@ -176,7 +176,7 @@ namespace osuCrypto
 
                     //u64 tV = tIter - (block*)t.data();
                     //u64 tIdx = tV / 8 + (tV % 8) * 128;
-                    //Log::out << "xidx " << (xIter - extraBlocks.data()) << "   tIdx " << tIdx << Log::endl;
+                    //std::cout << "xidx " << (xIter - extraBlocks.data()) << "   tIdx " << tIdx << std::endl;
 
                     tIter += superBlkSize;
                     xIter += 1;
@@ -185,7 +185,7 @@ namespace osuCrypto
                 tIter = tIter - 128 * superBlkSize + 1;
             }
 
-            //Log::out << "blk end " << Log::endl;
+            //std::cout << "blk end " << std::endl;
 
 #ifdef KOS_DEBUG
             BitVector choice(128 * superBlkSize);
@@ -199,7 +199,7 @@ namespace osuCrypto
             {
                 if (neq(((block*)u.data())[j], messages[rowIdx][choice[j]]))
                 {
-                    Log::out << rowIdx << Log::endl;
+                    std::cout << rowIdx << std::endl;
                     throw std::runtime_error("");
                 }
             }
@@ -220,9 +220,9 @@ namespace osuCrypto
         {
             if (neq(xtraBlk[i] , choices[i] ? extraBlocks[i] ^ delta : extraBlocks[i] ))
             {
-                Log::out << "extra " << i << Log::endl;
-                Log::out << xtraBlk[i] << "  " << (u32)choices[i] << Log::endl;
-                Log::out << extraBlocks[i] << "  " << (extraBlocks[i] ^ delta) << Log::endl;
+                std::cout << "extra " << i << std::endl;
+                std::cout << xtraBlk[i] << "  " << (u32)choices[i] << std::endl;
+                std::cout << extraBlocks[i] << "  " << (extraBlocks[i] ^ delta) << std::endl;
 
                 throw std::runtime_error("");
             }
@@ -266,7 +266,7 @@ namespace osuCrypto
             for (u64 i = 0, dd = doneIdx; dd < stop; ++dd, ++i)
             {
                 //chii = commonPrng.get<block>();
-                //Log::out << "sendIdx' " << dd << "   " << messages[dd][0] << "   " << chii << Log::endl;
+                //std::cout << "sendIdx' " << dd << "   " << messages[dd][0] << "   " << chii << std::endl;
 
                 mul128(messages[dd][0], challenges[i], qi, qi2);
                 q1 = q1  ^ qi;
@@ -329,7 +329,7 @@ namespace osuCrypto
         gTimer.setTimePoint("send.checkSummed");
 
 
-        //Log::out << Log::unlock;
+        //std::cout << IoStream::unlock;
 
         block t1, t2;
         std::vector<char> data(sizeof(block) * 3);
@@ -348,14 +348,14 @@ namespace osuCrypto
 
         if (eq(t1, received_t) && eq(t2, received_t2))
         {
-            //Log::out << "\tCheck passed\n";
+            //std::cout << "\tCheck passed\n";
         }
         else
         {
-            Log::out << "OT Ext Failed Correlation check failed" << Log::endl;
-            Log::out << "rec t = " << received_t << Log::endl;
-            Log::out << "tmp1  = " << t1 << Log::endl;
-            Log::out << "q  = " << q1 << Log::endl;
+            std::cout << "OT Ext Failed Correlation check failed" << std::endl;
+            std::cout << "rec t = " << received_t << std::endl;
+            std::cout << "tmp1  = " << t1 << std::endl;
+            std::cout << "q  = " << q1 << std::endl;
             throw std::runtime_error("Exit");;
         }
         gTimer.setTimePoint("send.done");

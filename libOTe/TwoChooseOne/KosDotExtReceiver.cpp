@@ -81,7 +81,7 @@ namespace osuCrypto
         { 
             choices2[choices.size() + i] = prng.getBit();
 
-            //Log::out << "extra " << i << "  " << choices2[choices.size() + i] << Log::endl;
+            //std::cout << "extra " << i << "  " << choices2[choices.size() + i] << std::endl;
         }
 
         auto choiceBlocks = choices2.getArrayView<block>();
@@ -325,7 +325,7 @@ namespace osuCrypto
                 t[1] = t[1] ^ ti;
                 t2[1] = t2[1] ^ ti2;
 
-                //Log::out << "r m[" << dd << "] " << messages[dd] << " " << messages1[dd] << " " << choices2[dd] << Log::endl;
+                //std::cout << "r m[" << dd << "] " << messages[dd] << " " << messages1[dd] << " " << choices2[dd] << std::endl;
 
                 std::array<block, 2> msg{ messages[dd], messages1[dd] };
                 mCode.encode(msg, ArrayView<block>(&messages[dd], 1));

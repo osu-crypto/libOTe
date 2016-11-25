@@ -12,7 +12,7 @@ std::string SolutionDir = "../../";
 
 void InitDebugPrinting(std::string filePath)
 {
-    Log::out << "changing sink" << Log::endl;
+    std::cout << "changing sink" << std::endl;
 
     if (file == nullptr)
     {

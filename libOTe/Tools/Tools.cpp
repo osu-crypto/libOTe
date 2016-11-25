@@ -152,7 +152,7 @@ namespace osuCrypto {
                 exit(1);
             }
         }
-        Log::out << "\ttranspose with offset " << offset << " ok\n";
+        std::cout << "\ttranspose with offset " << offset << " ok\n";
 #endif
     }
 
@@ -221,9 +221,9 @@ namespace osuCrypto {
         {
 
             temp.assign(inOut[i]);
-            Log::out << temp << Log::endl;
+            std::cout << temp << std::endl;
         }
-        Log::out << Log::endl;
+        std::cout << std::endl;
     }
     
     u8 getBit(array<block, 128>& inOut, u64 i, u64 j)

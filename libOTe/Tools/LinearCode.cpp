@@ -32,7 +32,7 @@ namespace osuCrypto
 
         if (in.is_open() == false)
         {
-            Log::out << "failed to open:\n     " << fileName << Log::endl;
+            std::cout << "failed to open:\n     " << fileName << std::endl;
             throw std::runtime_error(LOCATION);
         }
 
@@ -96,7 +96,7 @@ namespace osuCrypto
 
         if (in.is_open() == false)
         {
-            Log::out << "failed to open:\n     " << fileName << Log::endl;
+            std::cout << "failed to open:\n     " << fileName << std::endl;
             throw std::runtime_error(LOCATION);
         }
 
@@ -113,7 +113,7 @@ namespace osuCrypto
 
         if (mCodewordBitSize == 0)
         {
-            Log::out << "bad code " << Log::endl;
+            std::cout << "bad code " << std::endl;
             throw std::runtime_error(LOCATION);
         }
 

@@ -31,7 +31,7 @@ using namespace osuCrypto;
 
         std::vector<block> plaintext(length);
 
-        //Log::out << encKey.mRoundKey[0] << Log::endl;
+        //std::cout << encKey.mRoundKey[0] << std::endl;
 
         for (u64 i = 0; i < length; ++i)
         {
@@ -45,14 +45,14 @@ using namespace osuCrypto;
                 throw UnitTestFail();
         }
 
-        //Log::out << encKey.mRoundKey[0] << Log::endl;
+        //std::cout << encKey.mRoundKey[0] << std::endl;
 
         encKey.ecbEncBlocks(data.data(), data.size(), cyphertext2.data());
 
 
         for (u64 i = 0; i < length; ++i)
         {
-            //Log::out << i << " " << cyphertext1[i] << " " << cyphertext2[i] << Log::endl;
+            //std::cout << i << " " << cyphertext1[i] << " " << cyphertext2[i] << std::endl;
 
 
             if (neq(cyphertext1[i], cyphertext2[i]))

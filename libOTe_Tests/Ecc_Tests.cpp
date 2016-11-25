@@ -27,14 +27,14 @@ void EccpNumber_Test()
 
     if (one + one != 2)
     {
-        Log::out << one + one << Log::endl;
+        std::cout << one + one << std::endl;
         throw UnitTestFail("1 + 1 != 2");
     }
 
     if (one != one * one)
     {
-        Log::out << one << Log::endl;
-        Log::out << one * one << Log::endl;
+        std::cout << one << std::endl;
+        std::cout << one * one << std::endl;
         throw UnitTestFail("1 != 1* 1");
     }
 
@@ -60,7 +60,7 @@ void EccpNumber_Test()
             // sample Z*_p
             auto mult = (prng.get<u64>() % (mod - 1)) + 1;
 
-            //Log::out << "mult in " << mult << Log::endl;
+            //std::cout << "mult in " << mult << std::endl;
 
             // sample Z_p
             auto add = prng.get<u64>() % mod;
@@ -78,10 +78,10 @@ void EccpNumber_Test()
 
             if (mult_var != mult_expected || mult_var2 != mult_expected)
             {
-                Log::out << i << "  " << j << Log::endl;
-                Log::out << "mult var  " << mult_var << Log::endl;
-                Log::out << "mult var2 " << mult_var << Log::endl;
-                Log::out << "mult exp  " << std::hex << mult_expected << std::dec << Log::endl;
+                std::cout << i << "  " << j << std::endl;
+                std::cout << "mult var  " << mult_var << std::endl;
+                std::cout << "mult var2 " << mult_var << std::endl;
+                std::cout << "mult exp  " << std::hex << mult_expected << std::dec << std::endl;
                 throw UnitTestFail("mod mult error");
             }
         }
@@ -91,24 +91,24 @@ void EccpNumber_Test()
 
         if (add_var != add_expected)
         {
-            Log::out << i << "  " /*<< j*/ << Log::endl;
-            Log::out << "add var  " << add_var << Log::endl;
-            Log::out << "add var2 " << add_var << Log::endl;
-            Log::out << "add exp  " << std::hex << add_expected << std::dec << Log::endl;
+            std::cout << i << "  " /*<< j*/ << std::endl;
+            std::cout << "add var  " << add_var << std::endl;
+            std::cout << "add var2 " << add_var << std::endl;
+            std::cout << "add exp  " << std::hex << add_expected << std::dec << std::endl;
             throw UnitTestFail("mod add error");
         }
 
         if (div_var != one / mult_var)
         {
-            Log::out << "div var  " << div_var << Log::endl;
-            Log::out << "div exp  " << one / mult_var << Log::endl;
+            std::cout << "div var  " << div_var << std::endl;
+            std::cout << "div exp  " << one / mult_var << std::endl;
             throw UnitTestFail("mod div error");
         }
 
         if (sub_var != -add_var)
         {
-            Log::out << "sub var  " << sub_var << Log::endl;
-            Log::out << "sub exp  " << -add_var << Log::endl;
+            std::cout << "sub var  " << sub_var << std::endl;
+            std::cout << "sub exp  " << -add_var << std::endl;
             throw UnitTestFail("mod div error");
         }
 
@@ -117,7 +117,7 @@ void EccpNumber_Test()
 
     if (zero - 1 != mod - 1)
     {
-        Log::out << "-1 = " << zero - 1 << " != " << mod - 1 << Log::endl;
+        std::cout << "-1 = " << zero - 1 << " != " << mod - 1 << std::endl;
         throw UnitTestFail("-1 mod p");
     }
 
@@ -125,7 +125,7 @@ void EccpNumber_Test()
     for (u64 i = 0; i < tryCount; ++i)
     {
         EccNumber var(curve, prng);
-        //Log::out << var << Log::endl;
+        //std::cout << var << std::endl;
 
         //if (var == 22)
         //{
@@ -134,17 +134,17 @@ void EccpNumber_Test()
 
         if (var > (mod-1))
         {
-            Log::out << "bad rand'" << Log::endl;
-            Log::out << "var " << var << Log::endl;
-            Log::out << "mod " << std::hex<< mod << std::dec << Log::endl;
-            Log::out << "odr " << curve.getOrder() << Log::endl;
+            std::cout << "bad rand'" << std::endl;
+            std::cout << "var " << var << std::endl;
+            std::cout << "mod " << std::hex<< mod << std::dec << std::endl;
+            std::cout << "odr " << curve.getOrder() << std::endl;
             throw UnitTestFail("bad rand'");
         }
     }
 
     //if (ok == false)
     //{
-    //    Log::out << "bad rand 22" << Log::endl;
+    //    std::cout << "bad rand 22" << std::endl;
     //    throw UnitTestFail("bad rand 22");
     //}
 
@@ -181,25 +181,25 @@ void EccpPoint_Test()
 
     auto g2 = curve.getGenerators()[1] + curve.getGenerators()[2];
     EccBrick g2Brick(g2);
-    //Log::out << "g            " << g << Log::endl;
+    //std::cout << "g            " << g << std::endl;
 
 
     //for (u64 i = 0; i < 24 * 2; ++i)
     //{
-    //    Log::out << "g^"<< i<<"         " << g  * (one * i)<< Log::endl;
+    //    std::cout << "g^"<< i<<"         " << g  * (one * i)<< std::endl;
     //}
-    //Log::out << "order        " << order << Log::endl;
-    //Log::out << "g^(order-1)  " << g*(order - 1) << Log::endl;
-    //Log::out << "g^order      " << g*order << Log::endl;
-    //Log::out << "g^(1)        " << g*(one) << Log::endl;
-    //Log::out << "g^(order+1)  " << g*(order + 1) << Log::endl;
-    //Log::out << "g^(2)        " << g*(one + one) << Log::endl;
+    //std::cout << "order        " << order << std::endl;
+    //std::cout << "g^(order-1)  " << g*(order - 1) << std::endl;
+    //std::cout << "g^order      " << g*order << std::endl;
+    //std::cout << "g^(1)        " << g*(one) << std::endl;
+    //std::cout << "g^(order+1)  " << g*(order + 1) << std::endl;
+    //std::cout << "g^(2)        " << g*(one + one) << std::endl;
 
     if (g * (curve.getOrder() +1)!= g)
     {
-        Log::out << "g^(n+1) != g" << Log::endl;
-        Log::out << g * (curve.getOrder() + 1) << Log::endl;
-        Log::out << g << Log::endl;
+        std::cout << "g^(n+1) != g" << std::endl;
+        std::cout << g * (curve.getOrder() + 1) << std::endl;
+        std::cout << g << std::endl;
         throw    UnitTestFail("g^(n+1) != g");
     }
 
@@ -225,14 +225,14 @@ void EccpPoint_Test()
     auto gbr2 = g * (b * r);
 
 
-    //Log::out << "mod  " << curve.getOrder() << Log::endl;
-    //Log::out << "a    " << a << Log::endl;
-    //Log::out << "b    " << b << Log::endl;
-    //Log::out << "r    " << r << Log::endl;
-    //Log::out << "abr   " << a_br << Log::endl;
-    //Log::out << "ga  " << ga << Log::endl;
-    //Log::out << "gbr  " << gbr << Log::endl;
-    //Log::out << "gbr2 " << gbr2 << Log::endl;
+    //std::cout << "mod  " << curve.getOrder() << std::endl;
+    //std::cout << "a    " << a << std::endl;
+    //std::cout << "b    " << b << std::endl;
+    //std::cout << "r    " << r << std::endl;
+    //std::cout << "abr   " << a_br << std::endl;
+    //std::cout << "ga  " << ga << std::endl;
+    //std::cout << "gbr  " << gbr << std::endl;
+    //std::cout << "gbr2 " << gbr2 << std::endl;
 
     auto ga_br = ga + gbr;
     auto ga_br2 = ga + gbr2;
@@ -240,10 +240,10 @@ void EccpPoint_Test()
 
     if (ga_br != ga_br2 || ga_br != ga_br3)
     {
-        Log::out << "ga_br != ga_br2" << Log::endl;
-        Log::out << ga_br << Log::endl;
-        Log::out << ga_br2 << Log::endl;
-        Log::out << ga_br3 << Log::endl;
+        std::cout << "ga_br != ga_br2" << std::endl;
+        std::cout << ga_br << std::endl;
+        std::cout << ga_br2 << std::endl;
+        std::cout << ga_br3 << std::endl;
 
         throw UnitTestFail("ga_br != ga_br2");
     }
@@ -254,8 +254,8 @@ void EccpPoint_Test()
 
     if (g != gBOne)
     {
-        Log::out << "g     " << g << Log::endl;
-        Log::out << "gBOne " << gBOne << Log::endl;
+        std::cout << "g     " << g << std::endl;
+        std::cout << "gBOne " << gBOne << std::endl;
 
         throw UnitTestFail("ga != gBa");
     }
@@ -264,8 +264,8 @@ void EccpPoint_Test()
 
     if (ga != gBa)
     {
-        Log::out << "ga  " << ga << Log::endl;
-        Log::out << "gBa " << gBa << Log::endl;
+        std::cout << "ga  " << ga << std::endl;
+        std::cout << "gBa " << gBa << std::endl;
 
         throw UnitTestFail("ga != gBa");
     }
@@ -278,9 +278,9 @@ void EccpPoint_Test()
 
     if (gBa_br != gBa_br2 || gBa_br != ga_br2)
     {
-        Log::out << "gBa_br  " << gBa_br << Log::endl;
-        Log::out << "gBa_br2 " << gBa_br2 << Log::endl;
-        Log::out << "ga_br2  " << ga_br2 << Log::endl;
+        std::cout << "gBa_br  " << gBa_br << std::endl;
+        std::cout << "gBa_br2 " << gBa_br2 << std::endl;
+        std::cout << "ga_br2  " << ga_br2 << std::endl;
 
         throw UnitTestFail("gBa_br != gBa_br2");
     }
@@ -291,8 +291,8 @@ void EccpPoint_Test()
     //
     //if (g2Ba != g2a )
     //{
-    //    Log::out << "g2Ba  " << g2Ba << Log::endl;
-    //    Log::out << "g2a  " << g2a << Log::endl;
+    //    std::cout << "g2Ba  " << g2Ba << std::endl;
+    //    std::cout << "g2a  " << g2a << std::endl;
 
     //    throw UnitTestFail("g2a != g2Ba");
     //}
@@ -314,14 +314,14 @@ void Ecc2mNumber_Test()
 
     if (one + one != 2)
     {
-        Log::out << one + one << Log::endl;
+        std::cout << one + one << std::endl;
         throw UnitTestFail("1 + 1 != 2");
     }
 
     if (one != one * one)
     {
-        Log::out << one << Log::endl;
-        Log::out << one * one << Log::endl;
+        std::cout << one << std::endl;
+        std::cout << one * one << std::endl;
         throw UnitTestFail("1 != 1* 1");
     }
 
@@ -344,9 +344,9 @@ void Ecc2mNumber_Test()
         {
             // sample Z*_p
             auto mult = prng.get<u32>() >> 1;
-            //Log::out << mult_var << " * " << mult << Log::endl;
+            //std::cout << mult_var << " * " << mult << std::endl;
 
-            //Log::out << "mult in " << mult << Log::endl;
+            //std::cout << "mult in " << mult << std::endl;
 
             // sample Z_p
             auto add = prng.get<u32>() >> 1;
@@ -363,9 +363,9 @@ void Ecc2mNumber_Test()
 
             if (mult_var != mult_var2)
             {
-                Log::out << i << "  " << j << Log::endl;
-                Log::out << "mult var  " << mult_var << Log::endl;
-                Log::out << "mult var2 " << mult_var << Log::endl;
+                std::cout << i << "  " << j << std::endl;
+                std::cout << "mult var  " << mult_var << std::endl;
+                std::cout << "mult var2 " << mult_var << std::endl;
                 throw UnitTestFail("mod mult error");
             }
         }
@@ -373,15 +373,15 @@ void Ecc2mNumber_Test()
 
         if (div_var != one / mult_var)
         {
-            Log::out << "div var  " << div_var << Log::endl;
-            Log::out << "div exp  " << one / mult_var << Log::endl;
+            std::cout << "div var  " << div_var << std::endl;
+            std::cout << "div exp  " << one / mult_var << std::endl;
             throw UnitTestFail("mod div error");
         }
 
         if (sub_var != -add_var)
         {
-            Log::out << "sub var  " << sub_var << Log::endl;
-            Log::out << "sub exp  " << -add_var << Log::endl;
+            std::cout << "sub var  " << sub_var << std::endl;
+            std::cout << "sub exp  " << -add_var << std::endl;
             throw UnitTestFail("mod div error");
         }
 
@@ -390,13 +390,13 @@ void Ecc2mNumber_Test()
 
     if (zero - 1 !=  - 1)
     {
-        Log::out << "-1 = " << zero - 1 << Log::endl;
+        std::cout << "-1 = " << zero - 1 << std::endl;
         throw UnitTestFail("-1 mod p");
     }
 
     //if (ok == false)
     //{
-    //    Log::out << "bad rand 22" << Log::endl;
+    //    std::cout << "bad rand 22" << std::endl;
     //    throw UnitTestFail("bad rand 22");
     //}
 
@@ -420,7 +420,7 @@ void Ecc2mNumber_Test()
 
 void Ecc2mPoint_Test()
 {
-
+     
     EllipticCurve curve(k283, ZeroBlock);
     //EllipticCurve curve(p5_INSECURE, ZeroBlock);
     //curve.getMiracl().IOBASE = 10;
@@ -437,25 +437,25 @@ void Ecc2mPoint_Test()
     EccBrick g2Brick(g2);
 
 
-    //Log::out << "g            " << g << Log::endl;
+    //std::cout << "g            " << g << std::endl;
 
 
     //for (u64 i = 0; i < 24 * 2; ++i)
     //{
-    //    Log::out << "g^"<< i<<"         " << g  * (one * i)<< Log::endl;
+    //    std::cout << "g^"<< i<<"         " << g  * (one * i)<< std::endl;
     //}
-    //Log::out << "order        " << order << Log::endl;
-    //Log::out << "g^(order-1)  " << g*(order - 1) << Log::endl;
-    //Log::out << "g^order      " << g*order << Log::endl;
-    //Log::out << "g^(1)        " << g*(one) << Log::endl;
-    //Log::out << "g^(order+1)  " << g*(order + 1) << Log::endl;
-    //Log::out << "g^(2)        " << g*(one + one) << Log::endl;
+    //std::cout << "order        " << order << std::endl;
+    //std::cout << "g^(order-1)  " << g*(order - 1) << std::endl;
+    //std::cout << "g^order      " << g*order << std::endl;
+    //std::cout << "g^(1)        " << g*(one) << std::endl;
+    //std::cout << "g^(order+1)  " << g*(order + 1) << std::endl;
+    //std::cout << "g^(2)        " << g*(one + one) << std::endl;
 
     if (g * (curve.getOrder() + 1) != g)
     {
-        Log::out << "g^(n+1) != g" << Log::endl;
-        Log::out << g * (curve.getOrder() + 1) << Log::endl;
-        Log::out << g << Log::endl;
+        std::cout << "g^(n+1) != g" << std::endl;
+        std::cout << g * (curve.getOrder() + 1) << std::endl;
+        std::cout << g << std::endl;
         throw    UnitTestFail("g^(n+1) != g");
     }
 
@@ -473,23 +473,23 @@ void Ecc2mPoint_Test()
 
     auto a_br = a + b * r;
 
-    //Log::out << a_br << Log::endl;
+    //std::cout << a_br << std::endl;
 
     auto ga = g* a;
-    //Log::out << "ga  " << ga << Log::endl;
+    //std::cout << "ga  " << ga << std::endl;
 
     auto gbr = ((g * b) * r);
     auto gbr2 = g * (b * r);
 
 
-    //Log::out << "mod  " << curve.getOrder() << Log::endl;
-    //Log::out << "a    " << a << Log::endl;
-    //Log::out << "b    " << b << Log::endl;
-    //Log::out << "r    " << r << Log::endl;
-    //Log::out << "abr   " << a_br << Log::endl;
-    //Log::out << "ga  " << ga << Log::endl;
-    //Log::out << "gbr  " << gbr << Log::endl;
-    //Log::out << "gbr2 " << gbr2 << Log::endl;
+    //std::cout << "mod  " << curve.getOrder() << std::endl;
+    //std::cout << "a    " << a << std::endl;
+    //std::cout << "b    " << b << std::endl;
+    //std::cout << "r    " << r << std::endl;
+    //std::cout << "abr   " << a_br << std::endl;
+    //std::cout << "ga  " << ga << std::endl;
+    //std::cout << "gbr  " << gbr << std::endl;
+    //std::cout << "gbr2 " << gbr2 << std::endl;
 
     auto ga_br = ga + gbr;
     auto ga_br2 = ga + gbr2;
@@ -497,10 +497,10 @@ void Ecc2mPoint_Test()
 
     if (ga_br != ga_br2 || ga_br != ga_br3)
     {
-        Log::out << "ga_br != ga_br2" << Log::endl;
-        Log::out << ga_br << Log::endl;
-        Log::out << ga_br2 << Log::endl;
-        Log::out << ga_br3 << Log::endl;
+        std::cout << "ga_br != ga_br2" << std::endl;
+        std::cout << ga_br << std::endl;
+        std::cout << ga_br2 << std::endl;
+        std::cout << ga_br3 << std::endl;
 
         throw UnitTestFail("ga_br != ga_br2");
     }
@@ -511,8 +511,8 @@ void Ecc2mPoint_Test()
 
     if (g != gBOne)
     {
-        Log::out << "g     " << g << Log::endl;
-        Log::out << "gBOne " << gBOne << Log::endl;
+        std::cout << "g     " << g << std::endl;
+        std::cout << "gBOne " << gBOne << std::endl;
 
         throw UnitTestFail("ga != gBa");
     }
@@ -521,8 +521,8 @@ void Ecc2mPoint_Test()
 
     if (ga != gBa)
     {
-        Log::out << "ga  " << ga << Log::endl;
-        Log::out << "gBa " << gBa << Log::endl;
+        std::cout << "ga  " << ga << std::endl;
+        std::cout << "gBa " << gBa << std::endl;
 
         throw UnitTestFail("ga != gBa");
     }
@@ -535,9 +535,9 @@ void Ecc2mPoint_Test()
 
     if (gBa_br != gBa_br2 || gBa_br != ga_br2)
     {
-        Log::out << "gBa_br  " << gBa_br << Log::endl;
-        Log::out << "gBa_br2 " << gBa_br2 << Log::endl;
-        Log::out << "ga_br2  " << ga_br2 << Log::endl;
+        std::cout << "gBa_br  " << gBa_br << std::endl;
+        std::cout << "gBa_br2 " << gBa_br2 << std::endl;
+        std::cout << "ga_br2  " << ga_br2 << std::endl;
 
         throw UnitTestFail("gBa_br != gBa_br2");
     }
@@ -550,15 +550,19 @@ void Ecc2mPoint_Test()
     char *rc_cstr = new char[rcStr.length() + 1];
     char *pchA_cstr = new char[pchA.length() + 1];
     char *pchB_cstr = new char[pchB.length() + 1];
-    memcpy(rc_cstr   , rcStr.c_str(), rcStr.size());
-    memcpy(pchA_cstr, pchA.c_str(), pchA.size());
-    memcpy(pchB_cstr, pchB.c_str(), pchB.size());
+    memcpy(rc_cstr   , rcStr.c_str(), rcStr.size() + 1);
+    memcpy(pchA_cstr, pchA.c_str(), pchA.size() + 1);
+    memcpy(pchB_cstr, pchB.c_str(), pchB.size() + 1);
 
 
     Rc.fromHex(rc_cstr);
+    //   "769FC4F81A2622436EAACEB85830FB00EA2F2BE8235D30BC9AA06AA2F26092A81F4050F");
+    
     EccPoint pch(curve);
 
     pch.fromHex(pchA_cstr, pchB_cstr);
+    //    "3A2E668B199FAD952CE14569D8BFC92259E3B04D7F44B4E7AD8C76FBCDCC916697ECF404", 
+    //    "4DB117E685E3139B176F6A96247FFE476115916F488DF399F3D7C458F849B7DC8174DE2");
 
 
     delete[] rc_cstr;
@@ -569,17 +573,17 @@ void Ecc2mPoint_Test()
     auto gBRc = pch  + gBrick * Rc;
 
 
-    //Log::out << "g     " << g << Log::endl;
-    //Log::out << "Rc     " << Rc << Log::endl;
-    //Log::out << "gBRc  " << gBRc << Log::endl;
+    //std::cout << "g     " << g << std::endl;
+    //std::cout << "Rc     " << Rc << std::endl;
+    //std::cout << "gBRc  " << gBRc << std::endl;
 
     //auto g2a = g2 * a;
     //auto g2Ba = g2Brick * a;    
     
     if (gRc != gRc)
     {
-        Log::out << "gBRc  " << gBRc << Log::endl;
-        Log::out << "gRc  " << gRc << Log::endl;
+        std::cout << "gBRc  " << gBRc << std::endl;
+        std::cout << "gRc  " << gRc << std::endl;
 
         throw UnitTestFail("gBRc != gRc");
     }
