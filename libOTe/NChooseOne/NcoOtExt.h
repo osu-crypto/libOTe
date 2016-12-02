@@ -57,10 +57,10 @@ namespace osuCrypto
             const ArrayView<block> choiceWord,
             block& encoding) = 0;
 
-        virtual void encode(
-            u64 otIdx,
-            const MatrixView<block> choiceWord,
-            ArrayView<block> encoding) = 0;
+        //virtual void encode(
+        //    u64 otIdx,
+        //    const MatrixView<block> choiceWord,
+        //    ArrayView<block> encoding) = 0;
 
 
         virtual void getParams(
