@@ -1,0 +1,68 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.25420.1
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libOTe", "libOTe\libOTe.vcxproj.vcxproj", "{4B3D93AF-B008-452D-B1BC-CACC67C3DC27}"
+	ProjectSection(ProjectDependencies) = postProject
+		{B707F703-490A-447F-9737-C6A70B8D7A61} = {B707F703-490A-447F-9737-C6A70B8D7A61}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libOTe_Tests", "libOTe_Tests\libOTe_Tests.vcxproj.vcxproj", "{08B0C0C5-7884-4AFA-A3BF-771C81D6FCB8}"
+	ProjectSection(ProjectDependencies) = postProject
+		{4B3D93AF-B008-452D-B1BC-CACC67C3DC27} = {4B3D93AF-B008-452D-B1BC-CACC67C3DC27}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libOTe_TestsVS", "libOTe_TestsVS\libOTe_TestsVS.vcxproj", "{65381340-EC08-45B1-928E-74A4C5D46985}"
+	ProjectSection(ProjectDependencies) = postProject
+		{08B0C0C5-7884-4AFA-A3BF-771C81D6FCB8} = {08B0C0C5-7884-4AFA-A3BF-771C81D6FCB8}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "frontend", "frontend\frontend.vcxproj", "{C81DC04B-A0F0-4B77-8DCE-C8190E629467}"
+	ProjectSection(ProjectDependencies) = postProject
+		{4B3D93AF-B008-452D-B1BC-CACC67C3DC27} = {4B3D93AF-B008-452D-B1BC-CACC67C3DC27}
+		{08B0C0C5-7884-4AFA-A3BF-771C81D6FCB8} = {08B0C0C5-7884-4AFA-A3BF-771C81D6FCB8}
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{B9CAB0DB-C7A5-4180-A85A-F532BC550E59}"
+	ProjectSection(SolutionItems) = preProject
+		.gitignore = .gitignore
+		CMakeLists.txt = CMakeLists.txt
+		copySourceToLinux.ps1 = copySourceToLinux.ps1
+		README.md = README.md
+		testout.txt = testout.txt
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cryptoTools", "cryptoTools\cryptoTools.vcxproj", "{B707F703-490A-447F-9737-C6A70B8D7A61}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4B3D93AF-B008-452D-B1BC-CACC67C3DC27}.Debug|x64.ActiveCfg = Debug|x64
+		{4B3D93AF-B008-452D-B1BC-CACC67C3DC27}.Debug|x64.Build.0 = Debug|x64
+		{4B3D93AF-B008-452D-B1BC-CACC67C3DC27}.Release|x64.ActiveCfg = Release|x64
+		{4B3D93AF-B008-452D-B1BC-CACC67C3DC27}.Release|x64.Build.0 = Release|x64
+		{08B0C0C5-7884-4AFA-A3BF-771C81D6FCB8}.Debug|x64.ActiveCfg = Debug|x64
+		{08B0C0C5-7884-4AFA-A3BF-771C81D6FCB8}.Debug|x64.Build.0 = Debug|x64
+		{08B0C0C5-7884-4AFA-A3BF-771C81D6FCB8}.Release|x64.ActiveCfg = Release|x64
+		{08B0C0C5-7884-4AFA-A3BF-771C81D6FCB8}.Release|x64.Build.0 = Release|x64
+		{65381340-EC08-45B1-928E-74A4C5D46985}.Debug|x64.ActiveCfg = Debug|x64
+		{65381340-EC08-45B1-928E-74A4C5D46985}.Debug|x64.Build.0 = Debug|x64
+		{65381340-EC08-45B1-928E-74A4C5D46985}.Release|x64.ActiveCfg = Release|x64
+		{65381340-EC08-45B1-928E-74A4C5D46985}.Release|x64.Build.0 = Release|x64
+		{C81DC04B-A0F0-4B77-8DCE-C8190E629467}.Debug|x64.ActiveCfg = Debug|x64
+		{C81DC04B-A0F0-4B77-8DCE-C8190E629467}.Debug|x64.Build.0 = Debug|x64
+		{C81DC04B-A0F0-4B77-8DCE-C8190E629467}.Release|x64.ActiveCfg = Release|x64
+		{C81DC04B-A0F0-4B77-8DCE-C8190E629467}.Release|x64.Build.0 = Release|x64
+		{B707F703-490A-447F-9737-C6A70B8D7A61}.Debug|x64.ActiveCfg = Debug|x64
+		{B707F703-490A-447F-9737-C6A70B8D7A61}.Debug|x64.Build.0 = Debug|x64
+		{B707F703-490A-447F-9737-C6A70B8D7A61}.Release|x64.ActiveCfg = Release|x64
+		{B707F703-490A-447F-9737-C6A70B8D7A61}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

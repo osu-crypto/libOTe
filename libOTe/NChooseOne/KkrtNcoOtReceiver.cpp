@@ -177,7 +177,7 @@ namespace osuCrypto
                 ^ t1Val[i];
         }
 
-#ifdef OOS_SHA_HASH
+#ifdef KKRT_SHA_HASH
 
         // now hash it to remove the correlation.
         SHA1  sha1;
