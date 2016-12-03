@@ -89,7 +89,7 @@ namespace osuCrypto
 
             if (uIter == uEnd)
             {
-                u64 step = std::min(numSuperBlocks - superBlkIdx,(u64) commStepSize);
+                u64 step = std::min<u64>(numSuperBlocks - superBlkIdx,(u64) commStepSize);
 
                 chl.recv(u.data(), step * superBlkSize * 128 * sizeof(block));
                 uIter = (block*)u.data();
@@ -193,7 +193,7 @@ namespace osuCrypto
             chl.recv(choice.data(), sizeof(block) * superBlkSize);
 
             u64 doneIdx = mStart - messages.data();
-            u64 xx = std::min(i64(128 * superBlkSize), (messages.data() + messages.size()) - mEnd);
+            u64 xx = std::min<u64>(i64(128 * superBlkSize), (messages.data() + messages.size()) - mEnd);
             for (u64 rowIdx = doneIdx,
                 j = 0; j < xx; ++rowIdx, ++j)
             {
@@ -261,7 +261,7 @@ namespace osuCrypto
         for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
         {
             commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
-            u64 stop = std::min(messages.size(), doneIdx + 128);
+            u64 stop = std::min<u64>(messages.size(), doneIdx + 128);
 
             for (u64 i = 0, dd = doneIdx; dd < stop; ++dd, ++i)
             {

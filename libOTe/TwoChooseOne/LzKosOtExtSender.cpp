@@ -123,7 +123,7 @@ namespace osuCrypto
 
 
             //std::array<block, 2>* mStart = mIter;
-            std::array<block, 2>* mEnd = std::min(mIter + 128 * superBlkSize, (std::array<block, 2>*)messages.end());
+            auto mEnd = std::min<std::array<block, 2>*>(mIter + 128 * superBlkSize, (std::array<block, 2>*)messages.end());
 
             // compute how many rows are unused.
             u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
@@ -131,7 +131,7 @@ namespace osuCrypto
             // compute the begin and end index of the extra rows that 
             // we will compute in this iters. These are taken from the 
             // unused rows what we computed above.
-            block* xEnd = std::min(xIter + unusedCount, extraBlocks.data() + 128);
+            auto xEnd = std::min<block*>(xIter + unusedCount, extraBlocks.data() + 128);
 
             tIter = (block*)t.data();
             block* tEnd = (block*)t.data() + 128 * superBlkSize;
@@ -185,7 +185,7 @@ namespace osuCrypto
             chl.recv(choice.data(), sizeof(block) * superBlkSize);
 
             u64 doneIdx = mStart - messages.data();
-            u64 xx = std::min(i64(128 * superBlkSize), (messages.data() + messages.size()) - mEnd);
+            u64 xx = std::min<u64>(i64(128 * superBlkSize), (messages.data() + messages.size()) - mEnd);
             for (u64 rowIdx = doneIdx,
                 j = 0; j < xx; ++rowIdx, ++j)
             {
@@ -246,7 +246,7 @@ namespace osuCrypto
         for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
         {
             commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
-            u64 stop = std::min(messages.size(), doneIdx + 128);
+            u64 stop = std::min<u64>(messages.size(), doneIdx + 128);
 
             for (u64 i = 0; doneIdx < stop; ++doneIdx, ++i)
             {

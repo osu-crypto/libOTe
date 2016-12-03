@@ -115,7 +115,7 @@ namespace osuCrypto
 
             if (uIter == uEnd)
             {
-                u64 step = std::min(numSuperBlocks - superBlkIdx,(u64) commStepSize);
+                u64 step = std::min<u64>(numSuperBlocks - superBlkIdx,(u64) commStepSize);
                 chl.recv(u.data(), step * superBlkSize * mGens.size() * sizeof(block));
                 uIter = (block*)u.data();
             }
@@ -130,7 +130,7 @@ namespace osuCrypto
 
 
 
-                u64 colStop = std::min((colStepIdx + 1) * 128, mGens.size());
+                u64 colStop = std::min<u64>((colStepIdx + 1) * 128, mGens.size());
 
                 // transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
                 for (u64 colIdx = colStepIdx * 128; colIdx < colStop; ++colIdx)
@@ -173,7 +173,7 @@ namespace osuCrypto
 
                 mIter = mIterMaster;
                 //std::array<block, 2>* mStart = mIter;
-                std::array<block, 2>* mEnd = std::min(mIter + 128 * superBlkSize, (std::array<block, 2>*)messages.end());
+                auto mEnd = std::min<std::array<block, 2>*>(mIter + 128 * superBlkSize, messages.end());
 
                 // compute how many rows are unused.
                 u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
@@ -183,7 +183,7 @@ namespace osuCrypto
                 // we will compute in this iters. These are taken from the 
                 // unused rows what we computed above.
                 xIter = xIterMaster;
-                std::array<block,2>* xEnd = std::min(xIter + unusedCount, extraBlocks.data() + 128);
+                auto xEnd = std::min<std::array<block, 2>*>(xIter + unusedCount, extraBlocks.data() + 128);
 
                 tIter = (block*)t.data();
                 block* tEnd = (block*)t.data() + 128 * superBlkSize;
@@ -273,7 +273,7 @@ namespace osuCrypto
         for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
         {
             commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
-            u64 stop = std::min(messages.size(), doneIdx + 128);
+            u64 stop = std::min<u64>(messages.size(), doneIdx + 128);
 
             for (u64 i = 0, dd = doneIdx; dd < stop; ++dd, ++i)
             {

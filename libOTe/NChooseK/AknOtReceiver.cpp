@@ -51,8 +51,8 @@ namespace osuCrypto
         auto routine = [&](u64 t, block extSeed, OtExtReceiver& otExt, Channel& chl)
         {
             // round up to the next 128 to make sure we aren't wasting OTs in the extension...
-            u64 start = std::min(roundUpTo(t *     mMessages.size() / chls.size(), 128), mMessages.size());
-            u64 end = std::min(roundUpTo((t + 1) * mMessages.size() / chls.size(), 128), mMessages.size());
+            u64 start = std::min<u64>(roundUpTo(t *     mMessages.size() / chls.size(), 128), mMessages.size());
+            u64 end = std::min<u64>(roundUpTo((t + 1) * mMessages.size() / chls.size(), 128), mMessages.size());
 
             ArrayView<block> range(
                 mMessages.begin() + start,
@@ -102,7 +102,7 @@ namespace osuCrypto
             block partialSum(ZeroBlock);
 
             // a buffer of choice bits that were sampled. We aare going to seed these is groups of 4096 bits
-            std::unique_ptr<BitVector> choiceBuff(new BitVector(std::min(u64(4096), end - start)));
+            std::unique_ptr<BitVector> choiceBuff(new BitVector(std::min<u64>(u64(4096), end - start)));
 
             // get some iters to make life easy.
             auto openChoiceIter = choiceBuff->begin();
@@ -146,7 +146,7 @@ namespace osuCrypto
                     if (j == choiceBuff->size())
                     {
                         chl.asyncSend(std::move(choiceBuff));
-                        choiceBuff.reset(new BitVector(std::min(u64(4096), end - i)));
+                        choiceBuff.reset(new BitVector(std::min<u64>(u64(4096), end - i)));
                         openChoiceIter = choiceBuff->begin();
                         j = 0;
 

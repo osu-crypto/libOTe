@@ -73,7 +73,7 @@ namespace osuCrypto
 
         block* mIter = messages.data();
 
-        u64 step = std::min(numSuperBlocks, (u64)commStepSize);
+        u64 step = std::min<u64>(numSuperBlocks, (u64)commStepSize);
         std::unique_ptr<ByteStream> uBuff(new ByteStream(step * 128 * superBlkSize * sizeof(block)));
 
         // get an array of blocks that we will fill. 
@@ -135,7 +135,7 @@ namespace osuCrypto
                 // send over u buffer
                 chl.asyncSend(std::move(uBuff));
 
-                u64 step = std::min(numSuperBlocks - superBlkIdx - 1, (u64)commStepSize);
+                u64 step = std::min<u64>(numSuperBlocks - superBlkIdx - 1, (u64)commStepSize);
 
                 if (step)
                 {
@@ -152,7 +152,7 @@ namespace osuCrypto
 
 
             //block* mStart = mIter;
-            block* mEnd = std::min(mIter + 128 * superBlkSize, (block*)messages.end());
+            block* mEnd = std::min<block*>(mIter + 128 * superBlkSize, (block*)messages.end());
 
 
             tIter = (block*)t0.data();
@@ -194,7 +194,7 @@ namespace osuCrypto
         u64 bb = (messages.size() + 127) / 128;
         for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
         {
-            u64 stop = std::min(messages.size(), doneIdx + 128);
+            u64 stop = std::min<u64>(messages.size(), doneIdx + 128);
 
 #ifdef IKNP_SHA_HASH
             for (u64 i = 0; doneIdx < stop; ++doneIdx, ++i)

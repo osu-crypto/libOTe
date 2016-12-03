@@ -92,7 +92,7 @@ namespace osuCrypto
 
         block* mIter = messages.data();
 
-        u64 step = std::min(numSuperBlocks, (u64)commStepSize);
+        u64 step = std::min<u64>(numSuperBlocks, (u64)commStepSize);
         std::unique_ptr<ByteStream> uBuff(new ByteStream(step * 128 * superBlkSize * sizeof(block)));
 
         // get an array of blocks that we will fill. 
@@ -154,7 +154,7 @@ namespace osuCrypto
                 // send over u buffer
                 chl.asyncSend(std::move(uBuff));
 
-                u64 step = std::min(numSuperBlocks - superBlkIdx - 1, (u64)commStepSize);
+                u64 step = std::min<u64>(numSuperBlocks - superBlkIdx - 1, (u64)commStepSize);
 
                 if (step)
                 {
@@ -180,7 +180,7 @@ namespace osuCrypto
             // compute the begin and end index of the extra rows that 
             // we will compute in this iters. These are taken from the 
             // unused rows what we computed above.
-            block* xEnd = std::min(xIter + unusedCount, extraBlocks.data() + 128);
+            block* xEnd = std::min<block*>(xIter + unusedCount, extraBlocks.data() + 128);
 
             tIter = (block*)t0.data();
             block* tEnd = (block*)t0.data() + 128 * superBlkSize;
@@ -280,7 +280,7 @@ namespace osuCrypto
         {
             commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
 
-            u64 stop = std::min(messages.size(), doneIdx + 128);
+            u64 stop = std::min<u64>(messages.size(), doneIdx + 128);
 
             expendedChoiceBlk[0] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 0);
             expendedChoiceBlk[1] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 1);

@@ -86,7 +86,7 @@ namespace osuCrypto
             // extra rows, but it is thrown away.
             u64 stopIdx
                 = doneIdx
-                + std::min(u64(128) * superBlkSize, mT.size()[0] - doneIdx);
+                + std::min<u64>(u64(128) * superBlkSize, mT.size()[0] - doneIdx);
 
             // transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
             for (u64 i = 0; i < numCols / 128; ++i)

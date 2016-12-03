@@ -84,7 +84,7 @@ namespace osuCrypto
             // extra rows, but it is thrown away.
             u64 stopIdx
                 = doneIdx
-                + std::min(u64(128) * superBlkSize, numOtExt - doneIdx);
+                + std::min<u64>(u64(128) * superBlkSize, numOtExt - doneIdx);
 
 
             for (u64 i = 0; i < numCols / 128; ++i)
@@ -459,7 +459,7 @@ namespace osuCrypto
 
             // compute when we should stop of this set.
 
-            u64 stopIdx = std::min(mCorrectionIdx - statSecParam - k, u64(128));
+            u64 stopIdx = std::min<u64>(mCorrectionIdx - statSecParam - k, u64(128));
             k += 128;
 
             // get an integrator to the challenge bit

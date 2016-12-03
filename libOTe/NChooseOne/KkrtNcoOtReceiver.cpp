@@ -70,7 +70,7 @@ namespace osuCrypto
             // extra rows, but it is thrown away.
             u64 stopIdx
                 = doneIdx
-                + std::min(u64(128) * superBlkSize, numOtExt - doneIdx);
+                + std::min<u64>(u64(128) * superBlkSize, numOtExt - doneIdx);
 
 
             for (u64 i = 0; i < numCols / 128; ++i)
