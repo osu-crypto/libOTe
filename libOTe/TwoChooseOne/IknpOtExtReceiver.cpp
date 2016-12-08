@@ -62,7 +62,7 @@ namespace osuCrypto
         choices2 = choices;
         choices2.resize(numBlocks * 128);
 
-        auto choiceBlocks = choices.getArrayView<block>();
+        auto choiceBlocks = choices2.getArrayView<block>();
         // this will be used as temporary buffers of 128 columns, 
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
