@@ -86,6 +86,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CLP.h" />
+    <ClInclude Include="main.h" />
     <ClInclude Include="UnitTests.h" />
     <ClInclude Include="util.h" />
   </ItemGroup>

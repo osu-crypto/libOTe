@@ -23,12 +23,24 @@ endif()
 
 if(NOT ${CMAKE_BUILD_TYPE} STREQUAL "Release")
   message(WARNING "\nConfiguration NOT set to Release. Please call cmake with CMAKE_BUILD_TYPE=Release")
+
+	IF(CMAKE_BUILD_TYPE MATCHES Debug)
+	  #message("Debug build.")
+	ELSEIF(CMAKE_BUILD_TYPE MATCHES Release)
+	  #message("Release build.")
+	ELSEIF(CMAKE_BUILD_TYPE MATCHES RELWITHDEBINFO)
+	  #message("Release with debug info build.")
+	ELSE()
+	  message(ERROR "Unknown build type: ${CMAKE_BUILD_TYPE}  Please use one of Debug, Release, or RELWITHDEBINFO" )
+	ENDIF()
 endif()
 
 # Select flags.
 SET(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
 SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g")
+
+ 
 
 #############################################
 #       Library/includes locations          #

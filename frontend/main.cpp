@@ -31,6 +31,7 @@ int miraclTestMain();
 #include "TwoChooseOne/LzKosOtExtSender.h"
 
 #include "CLP.h"
+#include "main.h"
 
 
 
@@ -181,7 +182,7 @@ void oos_test(int i)
 
 
 
-    u64 ncoinputBlkSize = 1, baseCount = 4 * 128; 
+    u64 ncoinputBlkSize = 1, baseCount = 4 * 128;
     u64 codeSize = (baseCount + 127) / 128;
 
     std::vector<block> baseRecv(baseCount);
@@ -277,65 +278,91 @@ void oos_test(int i)
 }
 
 
-void kos_test(int i)
+void kos_test(int iii)
 {
     setThreadName("Sender");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
-    u64 numOTs = 1 << 24;
+    u64 numOTs = 1 << 20;
 
 
     // get up the networking
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, i, name);
-    Channel& chl = ep0.addChannel(name, name);
+    BtEndpoint ep0(ios, "localhost", 1212, iii, name);
 
+    u64 numThread = 1;
+    std::vector<Channel*> chls(numThread);
+    for (u64 i = 0; i < numThread; ++i)
+        chls[i] = &ep0.addChannel(name + ToString(i), name + ToString(i));
 
     // cheat and compute the base OT in the clear.
     u64 baseCount = 128;
-    std::vector<block> baseRecv(baseCount);
-    std::vector<std::array<block, 2>> baseSend(baseCount);
+    std::vector<std::vector<block>> baseRecv(numThread);
+    std::vector<std::vector<std::array<block, 2>>> baseSend(numThread);
     BitVector baseChoice(baseCount);
     baseChoice.randomize(prng0);
 
-    prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-    for (u64 i = 0; i < baseCount; ++i)
+    for (u64 j = 0; j < numThread; ++j)
     {
-        baseRecv[i] = baseSend[i][baseChoice[i]];
-    }
+        baseSend[j].resize(baseCount);
+        baseRecv[j].resize(baseCount);
+        prng0.get((u8*)baseSend[j].data()->data(), sizeof(block) * 2 * baseSend[j].size());
+        for (u64 i = 0; i < baseCount; ++i)
+        {
+            baseRecv[j][i] = baseSend[j][i][baseChoice[i]];
+        }
+    } 
 
 
+    std::vector<std::thread> thrds(numThread);
+     
+    if (iii)
+    { 
+        for (u64 i = 0; i < numThread; ++i)
+        {
+            thrds[i] = std::thread([&, i]()
+            {
+                PRNG prng(baseSend[i][0][0]);
 
+                BitVector choice(numOTs);
+                std::vector<block> msgs(numOTs);
+                choice.randomize(prng);
+                KosOtExtReceiver r;
+                r.setBaseOts(baseSend[i]);
 
-    if (i)
-    {
-        BitVector choice(numOTs);
-        std::vector<block> msgs(numOTs);
-        choice.randomize(prng0);
-        KosOtExtReceiver r;
-        r.setBaseOts(baseSend);
-
-        r.receive(choice, msgs, prng0, chl);
+                r.receive(choice, msgs, prng, *chls[i]);
+            });
+        }
     }
     else
     {
-        std::vector<std::array<block, 2>> msgs(numOTs);
-        gTimer.reset();
-        gTimer.setTimePoint("start");
-        KosOtExtSender s;
-        s.setBaseOts(baseRecv, baseChoice);
+        for (u64 i = 0; i < numThread; ++i)
+        {
+            thrds[i] = std::thread([&, i]()
+            {
+                PRNG prng(baseRecv[i][0]);
+                std::vector<std::array<block, 2>> msgs(numOTs);
+                gTimer.reset();
+                gTimer.setTimePoint("start");
+                KosOtExtSender s;
+                s.setBaseOts(baseRecv[i], baseChoice);
 
-        s.send(msgs, prng0, chl);
+                s.send(msgs, prng, *chls[i]);
 
-        gTimer.setTimePoint("finish");
-        std::cout << gTimer << std::endl;
-
+                gTimer.setTimePoint("finish");
+                //std::cout << gTimer << std::endl;
+            });
+        }
     }
 
+    for (u64 i = 0; i < numThread; ++i)
+        thrds[i].join();
 
-    chl.close();
+
+    for (u64 i = 0; i < numThread; ++i)
+        chls[i]->close();
 
     ep0.stop();
     ios.stop();
@@ -488,7 +515,7 @@ void akn_test(int i)
     setThreadName("Recvr");
 
     BtIOService ios(0);
-    BtEndpoint  ep0(ios, "127.0.0.1", 1212, i, "ep"); 
+    BtEndpoint  ep0(ios, "127.0.0.1", 1212, i, "ep");
 
     u64 numTHreads(4);
 
@@ -498,7 +525,7 @@ void akn_test(int i)
 
     PRNG prng(ZeroBlock);
 
-    if(i)
+    if (i)
     {
         AknOtSender send;
         LzKosOtExtSender otExtSend;
@@ -546,7 +573,7 @@ int main(int argc, char** argv)
     {
         run_all();
     }
-    else if (cmd.isSet(kos))
+    else if (cmd.isSet(kos) | 1)
     {
         if (cmd.hasValue(kos))
         {
