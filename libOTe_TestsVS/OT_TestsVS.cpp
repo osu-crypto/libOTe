@@ -47,6 +47,12 @@ namespace osuCrypto_tests
             Transpose_Test_Impl();
         }
 
+        TEST_METHOD(TransposeMatrixView_TestVS)
+        {
+            InitDebugPrinting();
+            TransposeMatrixView_Test_Impl();
+        }
+
         TEST_METHOD(Iknp_200Receive_TestVS)
         {
             InitDebugPrinting();

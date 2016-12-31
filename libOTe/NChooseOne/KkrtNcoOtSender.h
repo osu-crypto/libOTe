@@ -55,7 +55,7 @@ namespace osuCrypto {
 
         void recvCorrection(Channel& chl, u64 recvCount) override;
 
-        void check(Channel& chl) override {}
+        void check(Channel& chl, block seed) override {}
     };
 }
 

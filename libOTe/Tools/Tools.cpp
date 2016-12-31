@@ -13,6 +13,12 @@ using std::array;
 
 namespace osuCrypto {
 
+    void pow128(block x, u16 p, block& xp1, block& xp2)
+    {
+
+
+    }
+
     void mul128(block x, block y, block& xy1, block& xy2)
     {
         auto t1 = _mm_clmulepi64_si128(x, y, (int)0x00);
@@ -137,18 +143,18 @@ namespace osuCrypto {
             width /= 2;
         }
 #ifdef TRANSPOSE_DEBUG
-        for (u32 colIdx = 0; colIdx < 128; colIdx++)
+        for (u32 k = 0; k < 128; k++)
         {
             for (u32 blkIdx = 0; blkIdx < 128; blkIdx++)
             {
-                output_ss[blkIdx] << inOut[offset + blkIdx].get_bit(colIdx);
+                output_ss[blkIdx] << inOut[offset + blkIdx].get_bit(k);
             }
         }
-        for (u32 colIdx = 0; colIdx < 128; colIdx++)
+        for (u32 k = 0; k < 128; k++)
         {
-            if (output_ss[colIdx].str().compare(input_ss[colIdx].str()) != 0)
+            if (output_ss[k].str().compare(input_ss[k].str()) != 0)
             {
-                cerr << "String " << colIdx << " failed. offset = " << offset << endl;
+                cerr << "String " << k << " failed. offset = " << offset << endl;
                 exit(1);
             }
         }
@@ -167,9 +173,9 @@ namespace osuCrypto {
     //                  |                  |
     //                  |                  |
     //                  |                  |
-    //  row  16*x, ..., |     # #          |
-    //  row  16*(x+1)   |     # #          |     into  out  column wise
-    //                  |                  |
+    //  row  16*x,      |     #.#          |
+    //       ...,       |     ...          |
+    //  row  16*(x+1)   |     #.#          |     into  out  column wise
     //                  |                  |
     //                  |                  |
     //                   ------------------
@@ -201,7 +207,7 @@ namespace osuCrypto {
         static_assert(sizeof(array<array<u16, 8>, 128>) == sizeof(array<block, 128>), "");
 
         array<array<u16, 8>, 128>& outU16View = *(array<array<u16, 8>, 128>*)&out;
-        
+
 
         for (int j = 0; j < 8; j++)
         {
@@ -210,6 +216,111 @@ namespace osuCrypto {
 
             in[0] = _mm_slli_epi64(in[0], 1);
             in[1] = _mm_slli_epi64(in[1], 1);
+        }
+    }
+
+
+    //  load from square squareIdx, column  y,y+1          (byte index)
+    //                   __________________
+    //                  |                  |
+    //                  |                  |
+    //                  |                  |
+    //                  |                  |
+    //  row  16*x,      |     #.#          |
+    //       ...,       |     ...          |
+    //  row  16*(x+1)   |     #.#          |     into  out  column wise
+    //                  |                  |
+    //                  |                  |
+    //                   ------------------
+    //                    
+    // note: out is a 16x16 bit matrix = 16 rows of 2 bytes each.
+    //       out[0] stores the first column of 16 bytes,
+    //       out[1] stores the second column of 16 bytes.
+    void sse_loadSubSquare(MatrixView<u8>& in, array<block, 2>& out, u64 x, u64 y)
+    {
+        //array<array<u8, 16>, 2>& outByteView = *(array<array<u8, 16>, 2>*)out.data();
+        //for (int l = 0; l < 16; l++)
+        //{
+        //    outByteView[0][l] = in[16 * x + l][2 * y];
+        //    outByteView[1][l] = in[16 * x + l][2 * y + 1];
+        //}
+
+
+        // optimized version of above
+        auto start = in.data() + (16 * x) * in.size()[1] + 2 * y;
+        auto end = start + 16 * in.size()[1];
+        auto dest0 = (u8*)out.data();
+        auto dest1 = (u8*)out.data() + 16;
+        for (auto iter = start; iter < end; iter += in.size()[1])
+        {
+            *dest0++ = *iter;
+            *dest1++ = *(iter + 1);
+        }
+    }
+
+
+    // given a 16x16 sub square, place its transpose into out at 
+    // rows  16*x, ..., 16*(x+1)  in byte  columns y, y+1. 
+    void sse_transposeSubSquare(MatrixView<u16>& out, array<block, 2>& in, u64 x, u64 y)
+    {
+        auto out0 = out.data() + (16 * x + 7) * out.size()[1] + y;
+        auto out1 = out.data() + (16 * x + 15) * out.size()[1] + y;
+        for (int j = 0; j < 8; j++)
+        {
+            //out[16 * x + 7 - j][y] = _mm_movemask_epi8(in[0]);
+            //out[16 * x + 15 - j][y] = _mm_movemask_epi8(in[1]);
+
+            //if (out0 != &out[16 * x + 7 - j][y])
+            //{
+            //    std::cout << "out off " << out0 - &out[16 * x + 7 - j][y] << "  " << j<< std::endl;
+            //    throw std::runtime_error(LOCATION);
+            //}
+
+            *out0 = _mm_movemask_epi8(in[0]);
+            *out1 = _mm_movemask_epi8(in[1]);
+
+            out0 -= out.size()[1];
+            out1 -= out.size()[1];
+
+            in[0] = _mm_slli_epi64(in[0], 1);
+            in[1] = _mm_slli_epi64(in[1], 1);
+        }
+    }
+
+
+
+    void sse_transpose(MatrixView<block> in, MatrixView<block> out)
+    {
+        if (in.size()[0] % 16 != 0)
+            throw std::runtime_error(LOCATION);
+
+
+        u64 bitWidth = in.size()[0];
+        u64 subBlockWidth = bitWidth / 16;
+        u64 subBlockHight = in.size()[1] * 8;
+
+        //if (out.size()[0] != numSquares * bitWidth)
+        //    throw std::runtime_error(LOCATION);
+
+        if (out.size()[1] != (bitWidth + 127) / 128)
+            throw std::runtime_error(LOCATION);
+
+        array<block, 2> a;
+
+        MatrixView<u8> u8InView((u8*)in.data(), in.size()[0], in.size()[1] * sizeof(block), false);
+        MatrixView<u16> u8OutView((u16*)out.data(), out.size()[0], out.size()[1] * sizeof(block) / 2, false);
+
+
+        for (u64 h = 0; h < subBlockHight; ++h)
+        {
+            // we are concerned with the output rows in range [16 * h, 16 * h + 15]
+
+            for (u64 w = 0; w < subBlockWidth; ++w)
+            {
+                // we are concerned with the w'th section of 16 bits for the 16 output rows above.
+                sse_loadSubSquare(u8InView, a, w, h);
+                sse_transposeSubSquare(u8OutView, a, h, w);
+            }
         }
     }
 
@@ -225,7 +336,7 @@ namespace osuCrypto {
         }
         std::cout << std::endl;
     }
-    
+
     u8 getBit(array<block, 128>& inOut, u64 i, u64 j)
     {
         BitVector temp(128);
@@ -236,7 +347,7 @@ namespace osuCrypto {
     }
 
 
-    
+
     void sse_transpose128(array<block, 128>& inOut)
     {
         array<block, 2> a, b;
@@ -272,7 +383,7 @@ namespace osuCrypto {
 
         auto x16 = (x * 16);
 
-        auto i16y2 =  (i * 16) + 2 * y;
+        auto i16y2 = (i * 16) + 2 * y;
         auto i16y21 = (i * 16) + 2 * y + 1;
 
 
@@ -341,14 +452,14 @@ namespace osuCrypto {
         outU16View[x16_7 - 6][i8y] = _mm_movemask_epi8(b6);
         outU16View[x16_7 - 7][i8y] = _mm_movemask_epi8(b7);
 
-       b0 = _mm_slli_epi64(in[1], 0);
-       b1 = _mm_slli_epi64(in[1], 1);
-       b2 = _mm_slli_epi64(in[1], 2);
-       b3 = _mm_slli_epi64(in[1], 3);
-       b4 = _mm_slli_epi64(in[1], 4);
-       b5 = _mm_slli_epi64(in[1], 5);
-       b6 = _mm_slli_epi64(in[1], 6);
-       b7 = _mm_slli_epi64(in[1], 7);
+        b0 = _mm_slli_epi64(in[1], 0);
+        b1 = _mm_slli_epi64(in[1], 1);
+        b2 = _mm_slli_epi64(in[1], 2);
+        b3 = _mm_slli_epi64(in[1], 3);
+        b4 = _mm_slli_epi64(in[1], 4);
+        b5 = _mm_slli_epi64(in[1], 5);
+        b6 = _mm_slli_epi64(in[1], 6);
+        b7 = _mm_slli_epi64(in[1], 7);
 
         outU16View[x16_15 - 0][i8y] = _mm_movemask_epi8(b0);
         outU16View[x16_15 - 1][i8y] = _mm_movemask_epi8(b1);
@@ -387,6 +498,7 @@ namespace osuCrypto {
 
 
     }
+
 }
 
 

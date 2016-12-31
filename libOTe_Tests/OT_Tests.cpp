@@ -256,7 +256,7 @@ void Transpose_Test_Impl()
         prng.get((u8*)data.data(), sizeof(block) * 8 * 128);
 
 
-        std::array<std::array<block,8>, 128> data2 = data;
+        std::array<std::array<block, 8>, 128> data2 = data;
 
         sse_transpose128x1024(data);
 
@@ -275,11 +275,126 @@ void Transpose_Test_Impl()
 
             for (u64 j = 0; j < 128; ++j)
             {
-                if(neq(sub[j],data[j][i]))
+                if (neq(sub[j], data[j][i]))
                     throw UnitTestFail();
             }
         }
 
+    }
+}
+
+void TransposeMatrixView_Test_Impl()
+{
+    {
+
+        PRNG prng(ZeroBlock);
+
+        std::array<block, 128> data;
+        prng.get(data.data(), data.size());
+        std::array<block, 128> data2;
+
+        MatrixView<block> dataView(data.begin(), data.end(), 1);
+        MatrixView<block> data2View(data2.begin(), data2.end(), 1);
+
+        sse_transpose(dataView, data2View);
+
+        sse_transpose128(data);
+
+
+
+
+        for (u64 i = 0; i < 128; ++i)
+        {
+            if (neq(data[i], data2[i]))
+            {
+                std::cout << i <<"\n";
+                printMtx(data);
+                std::cout << "\n";
+                printMtx(data2);
+
+                throw UnitTestFail();
+            }
+        }
+    }
+
+
+    {
+        PRNG prng(ZeroBlock);
+
+        std::array<std::array<block, 8>, 128> data;
+
+        prng.get((u8*)data.data(), sizeof(block) * 8 * 128);
+
+
+        std::array<std::array<block, 8>, 128> data2;
+
+        MatrixView<block> dataView((block*)data.data(), 128, 8, false);
+        MatrixView<block> data2View((block*)data2.data(), 128 * 8, 1, false);
+        sse_transpose(dataView, data2View);
+
+
+        for (u64 i = 0; i < 8; ++i)
+        {
+            std::array<block, 128> data128;
+
+            for (u64 j = 0; j < 128; ++j)
+            {
+                data128[j] = data[j][i];
+            }
+
+            sse_transpose128(data128);
+
+
+            for (u64 j = 0; j < 128; ++j)
+            {
+                if (neq(data128[j], data2View[i * 128 + j][0]))
+                    throw UnitTestFail();
+            }
+        }
+
+    }
+
+
+    {
+        PRNG prng(ZeroBlock);
+
+        //std::array<std::array<std::array<block, 8>, 128>, 2> data;
+
+        MatrixView<block> dataView(208, 8);
+        prng.get((u8*)dataView.data(), sizeof(block) *dataView.size()[0] * dataView.size()[1]);
+
+        MatrixView<block> data2View(1024, 2);
+
+        sse_transpose(dataView, data2View);
+
+        for (u64 b = 0; b < 2; ++b)
+        {
+
+            for (u64 i = 0; i < 8; ++i)
+            {
+                std::array<block, 128> data128;
+
+                for (u64 j = 0; j < 128; ++j)
+                {
+                    if (dataView.size()[0] > 128 * b + j)
+                        data128[j] = dataView[128 * b + j][i];
+                    else
+                        data128[j] = ZeroBlock;
+                }
+
+                sse_transpose128(data128);
+
+                for (u64 j = 0; j < 128; ++j)
+                {
+                    if (neq(data128[j], data2View[i * 128 + j][b]))
+                    {
+                        std::cout << "failed " << i << "  " << j << "  " << b << std::endl; 
+                        std::cout << "exp: " << data128[j] << "\nact: " << data2View[i * 128 + j][b] << std::endl;
+                        throw UnitTestFail();
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -448,8 +563,8 @@ void KosDotExt_100Receive_Test_Impl()
     std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128 + s);
     BitVector choices(numOTs);
     choices.randomize(prng0);
-    
-    
+
+
     BitVector baseChoice(128 + s);
     baseChoice.randomize(prng0);
 

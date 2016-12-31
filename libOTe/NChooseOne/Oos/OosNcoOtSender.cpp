@@ -38,7 +38,7 @@ namespace osuCrypto
 
     std::unique_ptr<NcoOtExtSender> OosNcoOtSender::split()
     {
-        auto* raw = new OosNcoOtSender(mCode);
+        auto* raw = new OosNcoOtSender(mCode, mStatSecParm);
 
         std::vector<block> base(mGens.size());
 
@@ -61,10 +61,9 @@ namespace osuCrypto
     {
         const u8 superBlkSize(8);
 
-        u64 statSecParm = 40;
 
         // round up
-        numOTExt = ((numOTExt + 127 + statSecParm) / 128) * 128;
+        numOTExt = ((numOTExt + 127 + mStatSecParm) / 128) * 128;
 
         // We need two matrices, one for the senders matrix T^i_{b_i} and 
         // one to hold the the correction values. This is sometimes called 
@@ -272,7 +271,7 @@ namespace osuCrypto
 
         // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
         // there c(w) is a pseudo-random code.
-        auto dest = mCorrectionVals.begin() + (mCorrectionIdx * mCorrectionVals.size()[1]);
+        auto dest = mCorrectionVals.begin() + i32(mCorrectionIdx * mCorrectionVals.size()[1]);
         chl.recv(dest,
             recvCount * sizeof(block) * mCorrectionVals.size()[1]);
 
@@ -280,10 +279,8 @@ namespace osuCrypto
         mCorrectionIdx += recvCount;
     }
 
-    void OosNcoOtSender::check(Channel & chl)
+    void OosNcoOtSender::check(Channel & chl, block seed)
     {
-        TODO("Use read seed");
-        block seed = ZeroBlock;
         u64 statSecParam(40);
 
         if (statSecParam % 8) throw std::runtime_error("Must be a multiple of 8. " LOCATION);

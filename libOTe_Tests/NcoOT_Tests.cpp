@@ -121,8 +121,8 @@ void OosNcoOt_Test_Impl()
     LinearCode code;
     code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
 
-    OosNcoOtSender sender(code);
-    OosNcoOtReceiver recv(code);
+    OosNcoOtSender sender(code, 40);
+    OosNcoOtReceiver recv(code, 40);
 
 
     u64 ncoinputBlkSize, baseCount;
@@ -183,9 +183,9 @@ void OosNcoOt_Test_Impl()
                 throw UnitTestFail();
         }
 
-        auto thrd = std::thread([&]() {recv.check(recvChl); });
+        auto thrd = std::thread([&]() {recv.check(recvChl, ZeroBlock); });
 
-        sender.check(sendChl);
+        sender.check(sendChl, ZeroBlock);
 
         thrd.join();
     }

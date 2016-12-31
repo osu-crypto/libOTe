@@ -9,8 +9,9 @@ using namespace std;
 
 namespace osuCrypto
 {
-    OosNcoOtReceiver::OosNcoOtReceiver(LinearCode & code)
+    OosNcoOtReceiver::OosNcoOtReceiver(LinearCode & code, u64 statSecParam)
         :mHasBase(false),
+        mStatSecParam(statSecParam),
         mCode(code)
     {}
     void OosNcoOtReceiver::setBaseOts(ArrayView<std::array<block, 2>> baseRecvOts)
@@ -37,8 +38,8 @@ namespace osuCrypto
 
         const u8 superBlkSize(8);
 
-        TODO("Make the statistical sec param a parameter");
-        u64 statSecParam = 40;
+        //TODO("Make the statistical sec param a parameter");
+        // = 40;
 
         // this will be used as temporary buffers of 128 columns, 
         // each containing 1024 bits. Once transposed, they will be copied
@@ -47,7 +48,7 @@ namespace osuCrypto
         std::array<std::array<block, superBlkSize>, 128> t1;
 
         // round up and add the extra OT used in the check at the end
-        numOtExt = roundUpTo(numOtExt + statSecParam, 128);
+        numOtExt = roundUpTo(numOtExt + mStatSecParam, 128);
 
         // we are going to process OTs in blocks of 128 * superblkSize messages.
         u64 numSuperBlocks = ((numOtExt) / 128 + superBlkSize - 1) / superBlkSize;
@@ -148,7 +149,7 @@ namespace osuCrypto
 
     std::unique_ptr<NcoOtExtReceiver> OosNcoOtReceiver::split()
     {
-        auto* raw = new OosNcoOtReceiver(mCode);
+        auto* raw = new OosNcoOtReceiver(mCode, mStatSecParam);
 
         std::vector<std::array<block, 2>> base(mGens.size());
 
@@ -349,9 +350,8 @@ namespace osuCrypto
         mCorrectionIdx += sendCount;
     }
 
-    void OosNcoOtReceiver::check(Channel & chl)
+    void OosNcoOtReceiver::check(Channel & chl, block wordSeed)
     {
-        block wordSeed = AllOneBlock;
         PRNG prng(wordSeed);
         u64 statSecParam(40);
 

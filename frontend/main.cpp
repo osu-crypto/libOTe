@@ -99,7 +99,7 @@ void kkrt_test(int i)
 
                     r.sendCorrection(chl, step);
                 }
-                r.check(chl);
+                r.check(chl, ZeroBlock);
 
                 chl.close();
             });
@@ -133,7 +133,7 @@ void kkrt_test(int i)
                         s.encode(i + j, choice, encoding2);
                     }
                 }
-                s.check(chl);
+                s.check(chl, ZeroBlock);
                 chl.close();
             });
         }
@@ -210,7 +210,7 @@ void oos_test(int i)
             thds[k] = std::thread(
                 [&, k]()
             {
-                OosNcoOtReceiver r(code);
+                OosNcoOtReceiver r(code, 40);
                 r.setBaseOts(baseSend);
                 auto& chl = *chls[k];
 
@@ -225,7 +225,7 @@ void oos_test(int i)
 
                     r.sendCorrection(chl, step);
                 }
-                r.check(chl);
+                r.check(chl, ZeroBlock);
             });
         }
         for (u64 k = 0; k < numThreads; ++k)
@@ -242,7 +242,7 @@ void oos_test(int i)
             thds[k] = std::thread(
                 [&, k]()
             {
-                OosNcoOtSender s(code);// = sender[k];
+                OosNcoOtSender s(code, 40);// = sender[k];
                 s.setBaseOts(baseRecv, baseChoice);
                 auto& chl = *chls[k];
 
@@ -257,7 +257,7 @@ void oos_test(int i)
                         s.encode(i + j, choice, encoding2);
                     }
                 }
-                s.check(chl);
+                s.check(chl, ZeroBlock);
             });
         }
 

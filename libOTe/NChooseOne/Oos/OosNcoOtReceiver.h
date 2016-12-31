@@ -19,7 +19,7 @@ namespace osuCrypto
     public:
 
 
-        OosNcoOtReceiver(LinearCode& code);
+        OosNcoOtReceiver(LinearCode& code, u64 statSecParam);
 
         bool hasBaseOts()const override
         {
@@ -27,6 +27,7 @@ namespace osuCrypto
         }
 
         bool mHasBase;
+        u64 mStatSecParam;
         LinearCode mCode;
 
         std::vector<std::array<PRNG, 2>> mGens;
@@ -63,7 +64,7 @@ namespace osuCrypto
 
         void sendCorrection(Channel& chl, u64 sendCount) override;
 
-        void check(Channel& chl) override;
+        void check(Channel& chl, block wordSeed) override;
     };
 
 }

@@ -55,7 +55,7 @@ namespace osuCrypto
 
         void sendCorrection(Channel& chl, u64 sendCount) override;
 
-        void check(Channel& chl) override {}
+        void check(Channel& chl, block seed) override {}
     };
 
 }

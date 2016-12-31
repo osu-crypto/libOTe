@@ -23,12 +23,14 @@ namespace osuCrypto {
     {
     public: 
 
-        OosNcoOtSender(LinearCode& code)
-            : mCode(code)
+        OosNcoOtSender(LinearCode& code, u64 statSecParam)
+            : mCode(code),
+            mStatSecParm(statSecParam)
         {}
         ~OosNcoOtSender();
 
         LinearCode mCode;
+        u64 mStatSecParm;
 
         std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;
@@ -66,7 +68,7 @@ namespace osuCrypto {
 
         void recvCorrection(Channel& chl, u64 recvCount) override;
 
-        void check(Channel& chl) override;
+        void check(Channel& chl, block seed) override;
     };
 }
 

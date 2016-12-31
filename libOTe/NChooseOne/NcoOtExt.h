@@ -70,7 +70,7 @@ namespace osuCrypto
 
         virtual void recvCorrection(Channel& chl, u64 recvCount) = 0;
 
-        virtual void check(Channel& chl) = 0;
+        virtual void check(Channel& chl, block seed) = 0;
     };
 
 
@@ -111,7 +111,7 @@ namespace osuCrypto
 
         virtual void sendCorrection(Channel& chl, u64 sendCount) = 0;
 
-        virtual void check(Channel& chl) = 0;
+        virtual void check(Channel& chl, block seed) = 0;
 
     };
 
