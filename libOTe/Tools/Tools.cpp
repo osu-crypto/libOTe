@@ -291,25 +291,32 @@ namespace osuCrypto {
 
     void sse_transpose(MatrixView<block> in, MatrixView<block> out)
     {
-        if (in.size()[0] % 16 != 0)
-            throw std::runtime_error(LOCATION);
+        MatrixView<u8> inn((u8*)in.data(), in.size()[0], in.size()[1] * sizeof(block), false);
+        MatrixView<u8> outt((u8*)out.data(), out.size()[0], out.size()[1] * sizeof(block), false);
 
+        sse_transpose(inn, outt);
+    }
+
+
+
+    void sse_transpose(MatrixView<u8> in, MatrixView<u8> out)
+    {
 
         u64 bitWidth = in.size()[0];
         u64 subBlockWidth = bitWidth / 16;
-        u64 subBlockHight = in.size()[1] * 8;
+        u64 subBlockHight = in.size()[1] / 2;
+        
+        if (in.size()[0] % 16 != 0)
+            throw std::runtime_error(LOCATION);
 
-        //if (out.size()[0] != numSquares * bitWidth)
-        //    throw std::runtime_error(LOCATION);
+        if (in.size()[1] % 2 != 0)
+            throw std::runtime_error(LOCATION);
 
-        if (out.size()[1] != (bitWidth + 127) / 128)
+        if (out.size()[1] < (bitWidth + 7) / 8)
             throw std::runtime_error(LOCATION);
 
         array<block, 2> a;
-
-        MatrixView<u8> u8InView((u8*)in.data(), in.size()[0], in.size()[1] * sizeof(block), false);
-        MatrixView<u16> u8OutView((u16*)out.data(), out.size()[0], out.size()[1] * sizeof(block) / 2, false);
-
+        MatrixView<u16> u16OutView((u16*)out.data(), out.size()[0], out.size()[1] / 2, false);
 
         for (u64 h = 0; h < subBlockHight; ++h)
         {
@@ -318,8 +325,8 @@ namespace osuCrypto {
             for (u64 w = 0; w < subBlockWidth; ++w)
             {
                 // we are concerned with the w'th section of 16 bits for the 16 output rows above.
-                sse_loadSubSquare(u8InView, a, w, h);
-                sse_transposeSubSquare(u8OutView, a, h, w);
+                sse_loadSubSquare(in, a, w, h);
+                sse_transposeSubSquare(u16OutView, a, h, w);
             }
         }
     }
