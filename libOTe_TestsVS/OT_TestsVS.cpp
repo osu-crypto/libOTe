@@ -95,12 +95,19 @@ namespace osuCrypto_tests
         }
 
 
-        TEST_METHOD(Bch_200Receive_TestVS)
+        TEST_METHOD(LinearCode_TestVS)
         {
             InitDebugPrinting();
             LinearCode_Test_Impl();
         }
 
+
+
+        //TEST_METHOD(LinearCode_rand134_TestVS)
+        //{
+        //    InitDebugPrinting();
+        //    LinearCode_rand134_Test_Impl();
+        //}
 
 
 

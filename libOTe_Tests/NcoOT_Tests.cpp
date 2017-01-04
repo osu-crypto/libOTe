@@ -205,6 +205,12 @@ void LinearCode_Test_Impl()
 
 
     code.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.txt");
+
+    auto temp = std::string(SOLUTION_DIR) + "/libOTe/Tools/temp.txt";
+    code.writeTextFile(temp);
+    code.loadTxtFile(temp);
+    std::remove(temp.c_str());
+
     code.writeBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
     code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
     //std::cout << code.codewordBitSize() << "  " << code.codewordBlkSize() <<
@@ -253,5 +259,4 @@ void LinearCode_Test_Impl()
     }
 
 }
-
 

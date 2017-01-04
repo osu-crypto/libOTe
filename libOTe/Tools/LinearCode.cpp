@@ -88,6 +88,36 @@ namespace osuCrypto
 
         generateMod8Table();
     }
+
+    void LinearCode::writeTextFile(const std::string & fileName)
+    {
+        std::fstream out;
+        out.open(fileName, std::ios::out | std::ios::binary | std::ios::trunc);
+
+        writeTextFile(out);
+    }
+
+    void LinearCode::writeTextFile(std::ostream & out)
+    {
+        out << plaintextBitSize() << " " << codewordBitSize() << "\n";
+
+
+        for (u64 row = 0; row < plaintextBitSize(); ++row)
+        {
+            BitIterator iter((u8*)(mG.data() + row * codewordBlkSize()), 0);
+
+            for (u64 col = 0; col < codewordBitSize() - 1; ++col)
+            {
+                out << *iter++ << " ";
+            }
+
+            if (iter.mByte > (u8*)(mG.data() + mG.size()))
+                throw std::runtime_error(LOCATION);
+
+            out << *iter << "\n";
+        }
+    }
+
     void LinearCode::loadBinFile(const std::string & fileName)
     {
         std::fstream in;
@@ -141,6 +171,8 @@ namespace osuCrypto
 
         out.write((const char *)mG.data(), mG.size() * sizeof(block));
     }
+
+
 
     void LinearCode::random(PRNG & prng, u64 inputSize, u64 outputSize)
     {
@@ -213,6 +245,16 @@ namespace osuCrypto
         return (codewordBitSize() + 127) / 128;
     }
 
+    u64 LinearCode::plaintextU8Size() const
+    {
+        return (plaintextBitSize() + 7) / 8;
+    }
+
+    u64 LinearCode::codewordU8Size() const
+    {
+        return (codewordBitSize() + 7) / 8;
+    }
+
     u64 LinearCode::codewordBitSize() const
     {
         return mCodewordBitSize;
@@ -231,6 +273,120 @@ namespace osuCrypto
             throw std::runtime_error("");
 #endif
 
+        //ArrayView<u8> pp((u8*)plaintxt.data(), plaintextU8Size(), false);
+        //ArrayView<u8> cc((u8*)codeword.data(), codewordU8Size(), false);
+        //encode(pp, cc);
+        encode((u8*)plaintxt.data(), (u8*)codeword.data());
+        //
+        //        std::array<block, 8>
+        //            c{ ZeroBlock ,ZeroBlock ,ZeroBlock ,ZeroBlock,ZeroBlock ,ZeroBlock ,ZeroBlock ,ZeroBlock };
+        //
+        //
+        //        // highlevel idea: For each byte of the input, we have preprocessed 
+        //        // the corresponding partial code. That is, we have many sub-codes
+        //        // each with input size 8. And these subcodes are precomputed
+        //        // in a lookup table called mG8. Each sub-code takes up 256 * codeSize;
+        //
+        //        u64 codeSize = codewordBlkSize();
+        //        u64 rowSize = 256 * codeSize;
+        //        u8* byteView = (u8*)plaintxt.data();
+        //
+        //        if (codeSize == 4)
+        //        {
+        //            u64 kStop = (mG8.size() / 8) * 8,
+        //                k = 0,
+        //                i = 0;
+        //
+        //            // this case has been optimized and we lookup two sub-codes at a time.
+        //            u64 byteStep = 2;
+        //            u64 kStep = rowSize * byteStep;
+        //            for (; k < kStop; i += byteStep, k += kStep)
+        //            {
+        //                block* g0 = mG8.data() + k + byteView[i] * codeSize;
+        //                block* g1 = mG8.data() + k + byteView[i + 1] * codeSize + rowSize;
+        //#ifndef NDEBUG
+        //                if (g1 >= mG8.data() + mG8.size())throw std::runtime_error("");
+        //#endif
+        //                c[0] = c[0] ^ g0[0];
+        //                c[1] = c[1] ^ g0[1];
+        //                c[2] = c[2] ^ g0[2];
+        //                c[3] = c[3] ^ g0[3];
+        //
+        //                c[4] = c[4] ^ g1[0];
+        //                c[5] = c[5] ^ g1[1];
+        //                c[6] = c[6] ^ g1[2];
+        //                c[7] = c[7] ^ g1[3];
+        //            }
+        //
+        //            codeword[0] = c[0] ^ c[4];
+        //            codeword[1] = c[1] ^ c[5];
+        //            codeword[2] = c[2] ^ c[6];
+        //            codeword[3] = c[3] ^ c[7];
+        //
+        //        }
+        //        else
+        //        {
+        //            u64 rowCount = (plaintextBitSize() + 7) / 8;
+        //            u64 superRowCount = rowCount / 8;
+        //
+        //            for (u64 j = 0; j < codeSize; ++j)
+        //            {
+        //                for (u64 i = 0; i < 8; ++i)
+        //                    c[i] = ZeroBlock;
+        //
+        //                for (u64 i = 0; i < superRowCount; ++i)
+        //                {
+        //
+        //                    block* g0 = mG8.data() + j + byteView[i + 0] * codeSize + rowSize * 0;
+        //                    block* g1 = mG8.data() + j + byteView[i + 1] * codeSize + rowSize * 1;
+        //                    block* g2 = mG8.data() + j + byteView[i + 2] * codeSize + rowSize * 2;
+        //                    block* g3 = mG8.data() + j + byteView[i + 3] * codeSize + rowSize * 3;
+        //                    block* g4 = mG8.data() + j + byteView[i + 4] * codeSize + rowSize * 4;
+        //                    block* g5 = mG8.data() + j + byteView[i + 5] * codeSize + rowSize * 5;
+        //                    block* g6 = mG8.data() + j + byteView[i + 6] * codeSize + rowSize * 6;
+        //                    block* g7 = mG8.data() + j + byteView[i + 7] * codeSize + rowSize * 7;
+        //#ifndef NDEBUG
+        //                    if (g7 >= mG8.data() + mG8.size())throw std::runtime_error("");
+        //#endif
+        //
+        //                    c[0] = c[0] ^ *g0;
+        //                    c[1] = c[1] ^ *g1;
+        //                    c[2] = c[2] ^ *g2;
+        //                    c[3] = c[3] ^ *g3;
+        //                    c[4] = c[4] ^ *g4;
+        //                    c[5] = c[5] ^ *g5;
+        //                    c[6] = c[6] ^ *g6;
+        //                    c[7] = c[7] ^ *g7;
+        //                }     
+        //
+        //                codeword[j] = ZeroBlock;
+        //                for (u64 i = 0; i < 8; ++i)
+        //                    codeword[j] = codeword[j] ^ c[i];
+        //            }
+        //      
+        //
+        //
+        //        }
+        //
+        //
+    }
+
+
+    void LinearCode::encode(
+        ArrayView<u8> plaintxt,
+        ArrayView<u8> codeword)
+    {
+#ifndef NDEBUG
+        if (plaintxt.size() != plaintextU8Size() ||
+            codeword.size() < codewordU8Size())
+            throw std::runtime_error("");
+#endif
+        encode(plaintxt.data(), codeword.data());
+    }
+
+    void LinearCode::encode(u8 * byteView, u8 * codeword)
+    {
+
         std::array<block, 8>
             c{ ZeroBlock ,ZeroBlock ,ZeroBlock ,ZeroBlock,ZeroBlock ,ZeroBlock ,ZeroBlock ,ZeroBlock };
 
@@ -242,14 +398,15 @@ namespace osuCrypto
 
         u64 codeSize = codewordBlkSize();
         u64 rowSize = 256 * codeSize;
-        u8* byteView = (u8*)plaintxt.data();
 
         if (codeSize == 4)
         {
             u64 kStop = (mG8.size() / 8) * 8,
                 k = 0,
                 i = 0;
-
+#ifndef NDEBUG
+            if (kStop - rowSize + 256 * codeSize > mG8.size())throw std::runtime_error(LOCATION);
+#endif
             // this case has been optimized and we lookup two sub-codes at a time.
             u64 byteStep = 2;
             u64 kStep = rowSize * byteStep;
@@ -257,9 +414,7 @@ namespace osuCrypto
             {
                 block* g0 = mG8.data() + k + byteView[i] * codeSize;
                 block* g1 = mG8.data() + k + byteView[i + 1] * codeSize + rowSize;
-#ifndef NDEBUG
-                if (g1 >= mG8.data() + mG8.size())throw std::runtime_error("");
-#endif
+
                 c[0] = c[0] ^ g0[0];
                 c[1] = c[1] ^ g0[1];
                 c[2] = c[2] ^ g0[2];
@@ -271,21 +426,25 @@ namespace osuCrypto
                 c[7] = c[7] ^ g1[3];
             }
 
-            codeword[0] = c[0] ^ c[4];
-            codeword[1] = c[1] ^ c[5];
-            codeword[2] = c[2] ^ c[6];
-            codeword[3] = c[3] ^ c[7];
+            c[0] = c[0] ^ c[4];
+            c[1] = c[1] ^ c[5];
+            c[2] = c[2] ^ c[6];
+            c[3] = c[3] ^ c[7];
 
+            memcpy(codeword, c.data(), codewordU8Size());
         }
         else
         {
             u64 rowCount = (plaintextBitSize() + 7) / 8;
             u64 superRowCount = rowCount / 8;
 
+#ifndef NDEBUG
+            if (codeSize - 1 + 256 * codeSize + rowSize * 7 > mG8.size())throw std::runtime_error(LOCATION);
+#endif
+
             for (u64 j = 0; j < codeSize; ++j)
             {
-                for (u64 i = 0; i < 8; ++i)
-                    c[i] = ZeroBlock;
+                memset(c.data(), 0, c.size() * sizeof(block));
 
                 for (u64 i = 0; i < superRowCount; ++i)
                 {
@@ -298,9 +457,6 @@ namespace osuCrypto
                     block* g5 = mG8.data() + j + byteView[i + 5] * codeSize + rowSize * 5;
                     block* g6 = mG8.data() + j + byteView[i + 6] * codeSize + rowSize * 6;
                     block* g7 = mG8.data() + j + byteView[i + 7] * codeSize + rowSize * 7;
-#ifndef NDEBUG
-                    if (g7 >= mG8.data() + mG8.size())throw std::runtime_error("");
-#endif
 
                     c[0] = c[0] ^ *g0;
                     c[1] = c[1] ^ *g1;
@@ -310,17 +466,17 @@ namespace osuCrypto
                     c[5] = c[5] ^ *g5;
                     c[6] = c[6] ^ *g6;
                     c[7] = c[7] ^ *g7;
-                }     
+                }
 
-                codeword[j] = ZeroBlock;
-                for (u64 i = 0; i < 8; ++i)
-                    codeword[j] = codeword[j] ^ c[i];
+                for (u64 i = 1; i < 8; ++i)
+                    c[0] = c[0] ^ c[i];
+
+                memcpy(
+                    (codeword + sizeof(block) * j),
+                    c.data(),
+                    std::min(sizeof(block), codewordU8Size() - j * sizeof(block)));
             }
-      
-
-
         }
-
-
     }
+
 }
