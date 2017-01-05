@@ -86,13 +86,10 @@ void Ecc_all()
 
 void run_all()
 {
-    run("BtNetwork_ConnectMany_Boost_Test     ", BtNetwork_ConnectMany_Boost_Test);
-    run("BtNetwork_ManyEndpoints_Test         ", BtNetwork_ManyEndpoints_Test);
 
-
-    //NetWork_all();
-    //bitVec_all();
-    //Ecc_all();
-    //OT_all();
-    //
+    NetWork_all();
+    bitVec_all();
+    Ecc_all();
+    OT_all();
+    
 }
