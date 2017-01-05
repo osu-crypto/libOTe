@@ -1,8 +1,8 @@
 #include "AknOtReceiver.h"
-#include "Common/Log.h"
-#include "Base/naor-pinkas.h"
-#include "Common/Timer.h"
-#include "TwoChooseOne/LzKosOtExtReceiver.h"
+#include "cryptoTools/Common/Log.h"
+#include "libOTe/Base/naor-pinkas.h"
+#include "cryptoTools/Common/Timer.h"
+#include "libOTe/TwoChooseOne/LzKosOtExtReceiver.h"
 
 
 namespace osuCrypto

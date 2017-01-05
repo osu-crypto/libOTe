@@ -1,18 +1,18 @@
 #include "OT_Tests.h"
 
-#include "TwoChooseOne/OTExtInterface.h"
+#include "libOTe/TwoChooseOne/OTExtInterface.h"
 
-#include "Tools/Tools.h"
-#include "Network/BtChannel.h"
-#include "Network/BtEndpoint.h"
+#include "libOTe/Tools/Tools.h"
+#include "cryptoTools/Network/BtChannel.h"
+#include "cryptoTools/Network/BtEndpoint.h"
 
-#include "Base/naor-pinkas.h"
-#include "Common/Log.h"
+#include "libOTe/Base/naor-pinkas.h"
+#include "cryptoTools/Common/Log.h"
 
 #include "Common.h"
 #include <thread>
 #include <vector>
-#include "Common/BitVector.h"
+#include "cryptoTools/Common/BitVector.h"
 
 #ifdef GetMessage
 #undef GetMessage

@@ -1,14 +1,14 @@
 #include "naor-pinkas.h"
-#include "Common/Log.h"
+#include "cryptoTools/Common/Log.h"
 #include <memory>
-#include "Common/Timer.h"
-#include "Crypto/Curve.h"
+#include "cryptoTools/Common/Timer.h"
+#include "cryptoTools/Crypto/Curve.h"
 
 #define PARALLEL
 
-#include "Common/ByteStream.h"
-#include "Common/BitVector.h"
-#include "Crypto/sha1.h"
+#include "cryptoTools/Common/ByteStream.h"
+#include "cryptoTools/Common/BitVector.h"
+#include "cryptoTools/Crypto/sha1.h"
 
 namespace osuCrypto
 {

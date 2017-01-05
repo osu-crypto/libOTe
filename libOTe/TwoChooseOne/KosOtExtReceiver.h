@@ -1,8 +1,8 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
-#include "TwoChooseOne/OTExtInterface.h"
+#include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <array>
-#include "Crypto/PRNG.h"
+#include "cryptoTools/Crypto/PRNG.h"
 
 namespace osuCrypto
 {

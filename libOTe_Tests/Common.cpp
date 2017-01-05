@@ -1,6 +1,6 @@
 //#include "stdafx.h"
 #include "Common.h"
-#include "Common/Log.h"
+#include "cryptoTools/Common/Log.h"
 
 #include <fstream>
 #include <cassert> 

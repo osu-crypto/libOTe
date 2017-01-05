@@ -1,21 +1,21 @@
-#include "Common/Log.h"
+#include "cryptoTools/Common/Log.h"
 #include <functional>
 
-#include "AES_Tests.h"
-#include "AknOt_Tests.h"
-#include "BtChannel_Tests.h"
-#include "BaseOT_Tests.h"
-#include "OT_Tests.h"
-#include "NcoOT_Tests.h"
-#include "AknOt_Tests.h"
-#include "Ecc_Tests.h"
+#include "libOTe_Tests/AES_Tests.h"
+#include "libOTe_Tests/AknOt_Tests.h"
+#include "libOTe_Tests/BtChannel_Tests.h"
+#include "libOTe_Tests/BaseOT_Tests.h"
+#include "libOTe_Tests/OT_Tests.h"
+#include "libOTe_Tests/NcoOT_Tests.h"
+#include "libOTe_Tests/AknOt_Tests.h"
+#include "libOTe_Tests/Ecc_Tests.h"
 
 
 using namespace osuCrypto;
 
 void run(std::string name, std::function<void(void)> func)
 {
-    std::cout << name;
+    std::cout << name << std::flush;
 
     auto start = std::chrono::high_resolution_clock::now();
     try
@@ -86,11 +86,13 @@ void Ecc_all()
 
 void run_all()
 {
+    run("BtNetwork_ConnectMany_Boost_Test     ", BtNetwork_ConnectMany_Boost_Test);
+    run("BtNetwork_ManyEndpoints_Test         ", BtNetwork_ManyEndpoints_Test);
 
 
-    NetWork_all();
-    bitVec_all();
-    Ecc_all();
-    OT_all();
+    //NetWork_all();
+    //bitVec_all();
+    //Ecc_all();
+    //OT_all();
     //
 }

@@ -2,33 +2,33 @@
 
 using namespace std;
 #include "UnitTests.h" 
-#include "Common/Defines.h"
+#include "cryptoTools/Common/Defines.h"
 using namespace osuCrypto;
 
-#include "TwoChooseOne/KosOtExtReceiver.h"
-#include "TwoChooseOne/KosOtExtSender.h"
-#include "TwoChooseOne/KosDotExtReceiver.h"
-#include "TwoChooseOne/KosDotExtSender.h"
+#include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/KosOtExtSender.h"
+#include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
+#include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
-#include "Network/BtChannel.h"
-#include "Network/BtEndpoint.h"
+#include "cryptoTools/Network/BtChannel.h"
+#include "cryptoTools/Network/BtEndpoint.h"
 #include <numeric>
-#include "Common/Log.h"
+#include "cryptoTools/Common/Log.h"
 int miraclTestMain();
 
-#include "Tools/LinearCode.h"
-#include "NChooseOne/Oos/OosNcoOtReceiver.h"
-#include "NChooseOne/Oos/OosNcoOtSender.h"
-#include "NChooseOne/KkrtNcoOtReceiver.h"
-#include "NChooseOne/KkrtNcoOtSender.h"
+#include "libOTe/Tools/LinearCode.h"
+#include "libOTe/NChooseOne/Oos/OosNcoOtReceiver.h"
+#include "libOTe/NChooseOne/Oos/OosNcoOtSender.h"
+#include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
+#include "libOTe/NChooseOne/KkrtNcoOtSender.h"
 
-#include "TwoChooseOne/IknpOtExtReceiver.h"
-#include "TwoChooseOne/IknpOtExtSender.h"
+#include "libOTe/TwoChooseOne/IknpOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/IknpOtExtSender.h"
 
-#include "NChooseK/AknOtReceiver.h"
-#include "NChooseK/AknOtSender.h"
-#include "TwoChooseOne/LzKosOtExtReceiver.h"
-#include "TwoChooseOne/LzKosOtExtSender.h"
+#include "libOTe/NChooseK/AknOtReceiver.h"
+#include "libOTe/NChooseK/AknOtSender.h"
+#include "libOTe/TwoChooseOne/LzKosOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/LzKosOtExtSender.h"
 
 #include "CLP.h"
 #include "main.h"

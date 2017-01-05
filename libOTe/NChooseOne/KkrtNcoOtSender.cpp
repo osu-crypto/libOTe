@@ -1,7 +1,7 @@
 #include "KkrtNcoOtSender.h"
-#include "Network/BtIOService.h"
-#include "Tools/Tools.h"
-#include "Common/Log.h"
+#include "cryptoTools/Network/BtIOService.h"
+#include "libOTe/Tools/Tools.h"
+#include "cryptoTools/Common/Log.h"
 #include "KkrtDefines.h"
 
 namespace osuCrypto

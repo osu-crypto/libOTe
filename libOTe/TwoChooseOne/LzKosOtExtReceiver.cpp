@@ -1,10 +1,10 @@
 #include "LzKosOtExtReceiver.h"
-#include "Tools/Tools.h"
-#include "Common/Log.h"
-#include "Common/ByteStream.h"
-#include "Common/BitVector.h"
-#include "Crypto/PRNG.h"
-#include "Crypto/Commit.h"
+#include "libOTe/Tools/Tools.h"
+#include "cryptoTools/Common/Log.h"
+#include "cryptoTools/Common/ByteStream.h"
+#include "cryptoTools/Common/BitVector.h"
+#include "cryptoTools/Crypto/PRNG.h"
+#include "cryptoTools/Crypto/Commit.h"
 
 using namespace std;
 

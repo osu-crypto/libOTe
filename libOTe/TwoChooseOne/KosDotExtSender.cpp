@@ -1,9 +1,9 @@
 #include "KosDotExtSender.h"
 
-#include "Tools/Tools.h"
-#include "Common/Log.h"
-#include "Common/ByteStream.h"
-#include "Crypto/Commit.h"
+#include "libOTe/Tools/Tools.h"
+#include "cryptoTools/Common/Log.h"
+#include "cryptoTools/Common/ByteStream.h"
+#include "cryptoTools/Crypto/Commit.h"
 #include "TcoOtDefines.h"
 
 

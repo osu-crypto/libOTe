@@ -1,8 +1,8 @@
 #include "OosNcoOtSender.h"
-#include "Tools/Tools.h"
-#include "Common/Log.h"
+#include "libOTe/Tools/Tools.h"
+#include "cryptoTools/Common/Log.h"
 #include "OosDefines.h"
-#include "Common/ByteStream.h"
+#include "cryptoTools/Common/ByteStream.h"
 namespace osuCrypto
 {
 

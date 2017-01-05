@@ -3,14 +3,14 @@
 #include <vector>
 #include <memory>
 
-#include "Common/Defines.h"
-#include "Network/BtIOService.h"
+#include "cryptoTools/Common/Defines.h"
+#include "cryptoTools/Network/BtIOService.h"
 
-#include "Network/BtEndpoint.h"
-#include "Network/Channel.h"
+#include "cryptoTools/Network/BtEndpoint.h"
+#include "cryptoTools/Network/Channel.h"
 
-#include "Common/ByteStream.h"
-#include "Common/Log.h"
+#include "cryptoTools/Common/ByteStream.h"
+#include "cryptoTools/Common/Log.h"
 
 
 #include "BtChannel_Tests.h"

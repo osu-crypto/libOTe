@@ -1,27 +1,27 @@
 #include "OT_Tests.h"
 
-#include "TwoChooseOne/OTExtInterface.h"
+#include "libOTe/TwoChooseOne/OTExtInterface.h"
 
-#include "Tools/Tools.h"
-#include "Tools/LinearCode.h"
-#include "Network/BtChannel.h"
-#include "Network/BtEndpoint.h"
-#include "Common/Log.h"
+#include "libOTe/Tools/Tools.h"
+#include "libOTe/Tools/LinearCode.h"
+#include "cryptoTools/Network/BtChannel.h"
+#include "cryptoTools/Network/BtEndpoint.h"
+#include "cryptoTools/Common/Log.h"
 
-#include "TwoChooseOne/IknpOtExtReceiver.h"
-#include "TwoChooseOne/IknpOtExtSender.h"
+#include "libOTe/TwoChooseOne/IknpOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/IknpOtExtSender.h"
 
-#include "TwoChooseOne/KosOtExtReceiver.h"
-#include "TwoChooseOne/KosOtExtSender.h"
+#include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/KosOtExtSender.h"
 
-#include "TwoChooseOne/LzKosOtExtReceiver.h"
-#include "TwoChooseOne/LzKosOtExtSender.h"
+#include "libOTe/TwoChooseOne/LzKosOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/LzKosOtExtSender.h"
 
-#include "TwoChooseOne/KosDotExtReceiver.h"
-#include "TwoChooseOne/KosDotExtSender.h"
+#include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
+#include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
-#include "NChooseOne/KkrtNcoOtReceiver.h"
-#include "NChooseOne/KkrtNcoOtSender.h"
+#include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
+#include "libOTe/NChooseOne/KkrtNcoOtSender.h"
 
 #include "Common.h"
 #include <thread>

@@ -1,13 +1,13 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
-#include "TwoChooseOne/OTExtInterface.h"
+#include "libOTe/TwoChooseOne/OTExtInterface.h"
 #ifdef GetMessage
 #undef GetMessage
 #endif
 
-#include "Common/Defines.h"
+#include "cryptoTools/Common/Defines.h"
 #include <unordered_map> 
-#include "Crypto/PRNG.h"
+#include "cryptoTools/Crypto/PRNG.h"
 
 using namespace osuCrypto;
 

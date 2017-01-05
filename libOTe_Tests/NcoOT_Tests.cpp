@@ -1,18 +1,18 @@
 #include "OT_Tests.h"
 
-#include "TwoChooseOne/OTExtInterface.h"
+#include "libOTe/TwoChooseOne/OTExtInterface.h"
 
-#include "Tools/Tools.h"
-#include "Tools/LinearCode.h"
-#include "Network/BtChannel.h"
-#include "Network/BtEndpoint.h"
-#include "Common/Log.h"
+#include "libOTe/Tools/Tools.h"
+#include "libOTe/Tools/LinearCode.h"
+#include "cryptoTools/Network/BtChannel.h"
+#include "cryptoTools/Network/BtEndpoint.h"
+#include "cryptoTools/Common/Log.h"
  
-#include "NChooseOne/KkrtNcoOtReceiver.h"
-#include "NChooseOne/KkrtNcoOtSender.h"
+#include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
+#include "libOTe/NChooseOne/KkrtNcoOtSender.h"
 
-#include "NChooseOne/Oos/OosNcoOtReceiver.h"
-#include "NChooseOne/Oos/OosNcoOtSender.h"
+#include "libOTe/NChooseOne/Oos/OosNcoOtReceiver.h"
+#include "libOTe/NChooseOne/Oos/OosNcoOtSender.h"
 
 #include "Common.h"
 #include <thread>

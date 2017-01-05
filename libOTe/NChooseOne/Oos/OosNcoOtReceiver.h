@@ -1,10 +1,10 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
-#include "NChooseOne/NcoOtExt.h"
-#include "Network/Channel.h"
+#include "libOTe/NChooseOne/NcoOtExt.h"
+#include "cryptoTools/Network/Channel.h"
 #include <vector>
-#include "Tools/LinearCode.h"
-//#include "NChooseOne/KkrtNcoOtReceiver.h"
+#include "libOTe/Tools/LinearCode.h"
+//#include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
 #ifdef GetMessage
 #undef GetMessage
 #endif

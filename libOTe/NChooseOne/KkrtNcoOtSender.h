@@ -1,11 +1,11 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use.  
-#include "NChooseOne/NcoOtExt.h"
-#include "Common/BitVector.h"
-#include "Common/MatrixView.h"
-#include "Base/naor-pinkas.h"
+#include "libOTe/NChooseOne/NcoOtExt.h"
+#include "cryptoTools/Common/BitVector.h"
+#include "cryptoTools/Common/MatrixView.h"
+#include "libOTe/Base/naor-pinkas.h"
 
-#include "Network/Channel.h"
+#include "cryptoTools/Network/Channel.h"
 
 #include <array>
 #include <vector>

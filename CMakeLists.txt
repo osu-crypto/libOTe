@@ -59,7 +59,7 @@ set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/thirdparty/linux/boost/")
 #    Build cryptoTools (common utilities)   #
 #############################################
 add_subdirectory(cryptoTools)
-include_directories(cryptoTools)
+#include_directories(cryptoTools)
 
 
 
@@ -67,7 +67,7 @@ include_directories(cryptoTools)
 #               Build libOTe                #
 #############################################
 add_subdirectory(libOTe)
-include_directories(libOTe)
+#include_directories(libOTe)
 
 
 
@@ -75,13 +75,14 @@ include_directories(libOTe)
 #           Build libOTe Tests              #
 #############################################
 add_subdirectory(libOTe_Tests)
-include_directories(libOTe_Tests)
+#include_directories(libOTe_Tests)
 
 
 #############################################
 #              Build Frontend               #
 #############################################
 #add_subdirectory(frontend)
+include_directories(${CMAKE_SOURCE_DIR})
 file(GLOB_RECURSE SRC_FRONTEND ${CMAKE_SOURCE_DIR}/frontend/*.cpp)
 add_executable(frontend.exe  ${SRC_FRONTEND})
 

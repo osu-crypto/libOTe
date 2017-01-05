@@ -1,8 +1,8 @@
 #include "AknOtSender.h"
-#include "Base/naor-pinkas.h"
-#include "Common/Log.h"
-#include "TwoChooseOne/LzKosOtExtSender.h"
-#include "Common/ByteStream.h"
+#include "libOTe/Base/naor-pinkas.h"
+#include "cryptoTools/Common/Log.h"
+#include "libOTe/TwoChooseOne/LzKosOtExtSender.h"
+#include "cryptoTools/Common/ByteStream.h"
 
 namespace osuCrypto
 {

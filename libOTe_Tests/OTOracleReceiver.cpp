@@ -1,7 +1,7 @@
 #include "OTOracleReceiver.h"
-#include "Common/Exceptions.h"
-#include "Common/Log.h"
-#include "Common/BitVector.h"
+#include "cryptoTools/Common/Exceptions.h"
+#include "cryptoTools/Common/Log.h"
+#include "cryptoTools/Common/BitVector.h"
 
 using namespace osuCrypto;
 
