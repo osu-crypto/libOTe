@@ -102,6 +102,14 @@ namespace osuCrypto_tests
         }
 
 
+        TEST_METHOD(LinearCode_repetition_TestVS)
+        {
+            InitDebugPrinting();
+            LinearCode_repetition_Test_Impl();
+        }
+
+
+
 
         //TEST_METHOD(LinearCode_rand134_TestVS)
         //{

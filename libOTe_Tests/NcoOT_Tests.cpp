@@ -17,6 +17,7 @@
 #include "Common.h"
 #include <thread>
 #include <vector>
+#include "NcoOT_Tests.h"
 
 
 using namespace osuCrypto;
@@ -258,5 +259,24 @@ void LinearCode_Test_Impl()
         throw UnitTestFail();
     }
 
+}
+
+void LinearCode_repetition_Test_Impl()
+{
+    LinearCode code;
+    std::stringstream ss;
+    ss << "1 40\n1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1";
+    code.loadTxtFile(ss);
+
+    u8 bit = 1;
+    BitVector dest(40);
+    code.encode(&bit, dest.data());
+
+
+    for (u64 i = 0; i < 40; ++i)
+    {
+        if (dest[i] != 1)
+            throw UnitTestFail();
+    }
 }
 

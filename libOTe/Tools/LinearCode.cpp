@@ -436,7 +436,7 @@ namespace osuCrypto
         else
         {
             u64 rowCount = (plaintextBitSize() + 7) / 8;
-            u64 superRowCount = rowCount / 8;
+            u64 superRowCount = (rowCount + 7) / 8;
 
 #ifndef NDEBUG
             if (codeSize - 1 + 256 * codeSize + rowSize * 7 > mG8.size())throw std::runtime_error(LOCATION);
@@ -474,7 +474,7 @@ namespace osuCrypto
                 memcpy(
                     (codeword + sizeof(block) * j),
                     c.data(),
-                    std::min(sizeof(block), codewordU8Size() - j * sizeof(block)));
+                    std::min<u64>(sizeof(block), codewordU8Size() - j * sizeof(block)));
             }
         }
     }
