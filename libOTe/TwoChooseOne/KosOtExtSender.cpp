@@ -53,7 +53,7 @@ namespace osuCrypto
     {
         // round up 
         u64 numOtExt = roundUpTo(messages.size(), 128);
-        u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
+        u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
         //u64 numBlocks = numSuperBlocks * superBlkSize;
 
         // a temp that will be used to transpose the sender's matrix

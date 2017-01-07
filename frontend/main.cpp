@@ -573,7 +573,7 @@ int main(int argc, char** argv)
     {
         run_all();
     }
-    else if (cmd.isSet(kos) | 1)
+    else if (cmd.isSet(kos))
     {
         if (cmd.hasValue(kos))
         {
