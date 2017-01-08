@@ -3,7 +3,7 @@
  
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/MatrixView.h"
-
+#include <wmmintrin.h>
 namespace osuCrypto {
 
 
