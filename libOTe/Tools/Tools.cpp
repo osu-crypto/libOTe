@@ -13,31 +13,6 @@ using std::array;
 
 namespace osuCrypto {
 
-    void pow128(block x, u16 p, block& xp1, block& xp2)
-    {
-
-
-    }
-
-    void mul128(block x, block y, block& xy1, block& xy2)
-    {
-        auto t1 = _mm_clmulepi64_si128(x, y, (int)0x00);
-        auto t2 = _mm_clmulepi64_si128(x, y, 0x10);
-        auto t3 = _mm_clmulepi64_si128(x, y, 0x01);
-        auto t4 = _mm_clmulepi64_si128(x, y, 0x11);
-
-        t2 = _mm_xor_si128(t2, t3);
-        t3 = _mm_slli_si128(t2, 8);
-        t2 = _mm_srli_si128(t2, 8);
-        t1 = _mm_xor_si128(t1, t3);
-        t4 = _mm_xor_si128(t4, t2);
-
-        xy1 = t1;
-        xy2 = t4;
-    }
-
-
-
     void eklundh_transpose128(array<block, 128>& inOut)
     {
         const static u64 TRANSPOSE_MASKS128[7][2] = {
@@ -218,112 +193,7 @@ namespace osuCrypto {
             in[1] = _mm_slli_epi64(in[1], 1);
         }
     }
-
-
-    ////  load from square squareIdx, column  w,w+1          (byte index)
-    ////                   __________________
-    ////                  |                  |
-    ////                  |                  |
-    ////                  |                  |
-    ////                  |                  |
-    ////  row  16*h,      |     #.#          |
-    ////       ...,       |     ...          |
-    ////  row  16*(h+1)   |     #.#          |     into  u16OutView  column wise
-    ////                  |                  |
-    ////                  |                  |
-    ////                   ------------------
-    ////                    
-    //// note: u16OutView is a 16x16 bit matrix = 16 rows of 2 bytes each.
-    ////       u16OutView[0] stores the first column of 16 bytes,
-    ////       u16OutView[1] stores the second column of 16 bytes.
-    //void sse_loadSubSquare(u8* start, array<block, 2>& a, u64 step)
-    //{
-
-    //    auto dest0 = (u8*)a.data();
-    //    auto dest1 = (u8*)a.data() + 16;
-
-    //    auto src00 = start + 0 *  step;
-    //    auto src01 = start + 1 *  step;
-    //    auto src02 = start + 2 *  step;
-    //    auto src03 = start + 3 *  step;
-    //    auto src04 = start + 4 *  step;
-    //    auto src05 = start + 5 *  step;
-    //    auto src06 = start + 6 *  step;
-    //    auto src07 = start + 7 *  step;
-    //    auto src08 = start + 8 *  step;
-    //    auto src09 = start + 9 *  step;
-    //    auto src10 = start + 10 * step;
-    //    auto src11 = start + 11 * step;
-    //    auto src12 = start + 12 * step;
-    //    auto src13 = start + 13 * step;
-    //    auto src14 = start + 14 * step;
-    //    auto src15 = start + 15 * step;
-
-    //    dest0[0] = src00[0];
-    //    dest1[0] = src00[1];
-    //    dest0[1] = src01[0];
-    //    dest1[1] = src01[1];
-    //    dest0[2] = src02[0];
-    //    dest1[2] = src02[1];
-    //    dest0[3] = src03[0];
-    //    dest1[3] = src03[1];
-    //    dest0[4] = src04[0];
-    //    dest1[4] = src04[1];
-    //    dest0[5] = src05[0];
-    //    dest1[5] = src05[1];
-    //    dest0[6] = src06[0];
-    //    dest1[6] = src06[1];
-    //    dest0[7] = src07[0];
-    //    dest1[7] = src07[1];
-    //    dest0[8] = src08[0];
-    //    dest1[8] = src08[1];
-    //    dest0[9] = src09[0];
-    //    dest1[9] = src09[1];
-    //    dest0[10] = src10[0];
-    //    dest1[10] = src10[1];
-    //    dest0[11] = src11[0];
-    //    dest1[11] = src11[1];
-    //    dest0[12] = src12[0];
-    //    dest1[12] = src12[1];
-    //    dest0[13] = src13[0];
-    //    dest1[13] = src13[1];
-    //    dest0[14] = src14[0];
-    //    dest1[14] = src14[1];
-    //    dest0[15] = src15[0];
-    //    dest1[15] = src15[1];
-
-    //}
-
-
-    //// given a 16x16 sub square, place its transpose into u16OutView at 
-    //// rows  16*h, ..., 16*(h+1)  a byte  columns w, w+1. 
-    //void sse_transposeSubSquare(MatrixView<u16>& out, array<block, 2>& in, u64 x, u64 y)
-    //{
-    //    auto out0 = out.data() + (16 * x + 7) * out.size()[1] + y;
-    //    auto out1 = out.data() + (16 * x + 15) * out.size()[1] + y;
-    //    for (int j = 0; j < 8; j++)
-    //    {
-    //        //u16OutView[16 * h + 7 - j][w] = _mm_movemask_epi8(a[0]);
-    //        //u16OutView[16 * h + 15 - j][w] = _mm_movemask_epi8(a[1]);
-
-    //        //if (out0 != &u16OutView[16 * h + 7 - j][w])
-    //        //{
-    //        //    std::cout << "u16OutView off " << out0 - &u16OutView[16 * h + 7 - j][w] << "  " << j<< std::endl;
-    //        //    throw std::runtime_error(LOCATION);
-    //        //}
-
-    //        *out0 = _mm_movemask_epi8(in[0]);
-    //        *out1 = _mm_movemask_epi8(in[1]);
-
-    //        out0 -= out.size()[1];
-    //        out1 -= out.size()[1];
-
-    //        in[0] = _mm_slli_epi64(in[0], 1);
-    //        in[1] = _mm_slli_epi64(in[1], 1);
-    //    }
-    //}
-
-
+    
 
     void sse_transpose(const MatrixView<block>& in, const MatrixView<block>& out)
     {
@@ -340,14 +210,16 @@ namespace osuCrypto {
         u64 bitWidth = in.size()[0];
         u64 subBlockWidth = bitWidth / 16;
         u64 subBlockHight = in.size()[1] / chunkSize;
+        u64 leftOverHeight = in.size()[1] % chunkSize;
+
 
         if (in.size()[0] % 8 != 0)
             throw std::runtime_error(LOCATION);
 
-        if (in.size()[1] % 8 != 0)
+        if (out.size()[1] < (bitWidth + 7) / 8)
             throw std::runtime_error(LOCATION);
 
-        if (out.size()[1] < (bitWidth + 7) / 8)
+        if (out.size()[0] != in.size()[1] * 8)
             throw std::runtime_error(LOCATION);
 
         array<block, chunkSize> a;
@@ -355,28 +227,28 @@ namespace osuCrypto {
 
         auto step = in.size()[1];
 
-        auto 
-            step01   = step *  1,
-            step02   = step *  2,
-            step03   = step *  3,
-            step04   = step *  4,
-            step05   = step *  5,
-            step06   = step *  6,
-            step07   = step *  7,
-            step08   = step *  8,
-            step09   = step *  9,
-            step10   = step * 10,
-            step11   = step * 11,
-            step12   = step * 12,
-            step13   = step * 13,
-            step14   = step * 14,
-            step15   = step * 15;
+        auto
+            step01 = step * 1,
+            step02 = step * 2,
+            step03 = step * 3,
+            step04 = step * 4,
+            step05 = step * 5,
+            step06 = step * 6,
+            step07 = step * 7,
+            step08 = step * 8,
+            step09 = step * 9,
+            step10 = step * 10,
+            step11 = step * 11,
+            step12 = step * 12,
+            step13 = step * 13,
+            step14 = step * 14,
+            step15 = step * 15;
 
 
         auto extra = (in.size()[0] % 16) ? 8 : 0;
 
         auto wStep = 16 * in.size()[1];
-        auto hStep = chunkSize + extra * in.size()[0];
+        auto hStep = chunkSize;
         auto wBackStep = wStep  * subBlockWidth - chunkSize;
 
         //auto start = in.data();
@@ -392,7 +264,7 @@ namespace osuCrypto {
 
                 auto start = in.data() + h * hStep + w * wStep;
 
-                auto src00 = start ;
+                auto src00 = start;
                 auto src01 = start + step01;
                 auto src02 = start + step02;
                 auto src03 = start + step03;
@@ -410,16 +282,23 @@ namespace osuCrypto {
                 auto src15 = start + step15;
                 //start += wStep;
 
-                dest[0][0] =  src00[0]; dest[1][0] =  src00[1];  dest[2][0]  = src00[2]; dest[3][0]  = src00[3];   dest[4][0] =  src00[4];  dest[5][0] =  src00[5];  dest[6][0]  = src00[6]; dest[7][0]  = src00[7];
-                dest[0][1] =  src01[0]; dest[1][1] =  src01[1];  dest[2][1]  = src01[2]; dest[3][1]  = src01[3];   dest[4][1] =  src01[4];  dest[5][1] =  src01[5];  dest[6][1]  = src01[6]; dest[7][1]  = src01[7];
-                dest[0][2] =  src02[0]; dest[1][2] =  src02[1];  dest[2][2]  = src02[2]; dest[3][2]  = src02[3];   dest[4][2] =  src02[4];  dest[5][2] =  src02[5];  dest[6][2]  = src02[6]; dest[7][2]  = src02[7];
-                dest[0][3] =  src03[0]; dest[1][3] =  src03[1];  dest[2][3]  = src03[2]; dest[3][3]  = src03[3];   dest[4][3] =  src03[4];  dest[5][3] =  src03[5];  dest[6][3]  = src03[6]; dest[7][3]  = src03[7];
-                dest[0][4] =  src04[0]; dest[1][4] =  src04[1];  dest[2][4]  = src04[2]; dest[3][4]  = src04[3];   dest[4][4] =  src04[4];  dest[5][4] =  src04[5];  dest[6][4]  = src04[6]; dest[7][4]  = src04[7];
-                dest[0][5] =  src05[0]; dest[1][5] =  src05[1];  dest[2][5]  = src05[2]; dest[3][5]  = src05[3];   dest[4][5] =  src05[4];  dest[5][5] =  src05[5];  dest[6][5]  = src05[6]; dest[7][5]  = src05[7];
-                dest[0][6] =  src06[0]; dest[1][6] =  src06[1];  dest[2][6]  = src06[2]; dest[3][6]  = src06[3];   dest[4][6] =  src06[4];  dest[5][6] =  src06[5];  dest[6][6]  = src06[6]; dest[7][6]  = src06[7];
-                dest[0][7] =  src07[0]; dest[1][7] =  src07[1];  dest[2][7]  = src07[2]; dest[3][7]  = src07[3];   dest[4][7] =  src07[4];  dest[5][7] =  src07[5];  dest[6][7]  = src07[6]; dest[7][7]  = src07[7];
-                dest[0][8 ] =  src08[0]; dest[1][8] =  src08[1];  dest[2][8]  = src08[2]; dest[3][8]  = src08[3];   dest[4][8] =  src08[4];  dest[5][8] =  src08[5];  dest[6][8]  = src08[6]; dest[7][8]  = src08[7];
-                dest[0][9 ] =  src09[0]; dest[1][9] =  src09[1];  dest[2][9]  = src09[2]; dest[3][9]  = src09[3];   dest[4][9] =  src09[4];  dest[5][9] =  src09[5];  dest[6][9]  = src09[6]; dest[7][9]  = src09[7];
+                //if (&src15[7] >= in.data() + in.size()[0] * in.size()[1])
+                //{
+                //    std::cout << "BAD" << std::endl;
+                //    throw std::runtime_error(LOCATION);
+                //}
+
+
+                dest[0][0] = src00[0]; dest[1][0] = src00[1];  dest[2][0] = src00[2]; dest[3][0] = src00[3];   dest[4][0] = src00[4];  dest[5][0] = src00[5];  dest[6][0] = src00[6]; dest[7][0] = src00[7];
+                dest[0][1] = src01[0]; dest[1][1] = src01[1];  dest[2][1] = src01[2]; dest[3][1] = src01[3];   dest[4][1] = src01[4];  dest[5][1] = src01[5];  dest[6][1] = src01[6]; dest[7][1] = src01[7];
+                dest[0][2] = src02[0]; dest[1][2] = src02[1];  dest[2][2] = src02[2]; dest[3][2] = src02[3];   dest[4][2] = src02[4];  dest[5][2] = src02[5];  dest[6][2] = src02[6]; dest[7][2] = src02[7];
+                dest[0][3] = src03[0]; dest[1][3] = src03[1];  dest[2][3] = src03[2]; dest[3][3] = src03[3];   dest[4][3] = src03[4];  dest[5][3] = src03[5];  dest[6][3] = src03[6]; dest[7][3] = src03[7];
+                dest[0][4] = src04[0]; dest[1][4] = src04[1];  dest[2][4] = src04[2]; dest[3][4] = src04[3];   dest[4][4] = src04[4];  dest[5][4] = src04[5];  dest[6][4] = src04[6]; dest[7][4] = src04[7];
+                dest[0][5] = src05[0]; dest[1][5] = src05[1];  dest[2][5] = src05[2]; dest[3][5] = src05[3];   dest[4][5] = src05[4];  dest[5][5] = src05[5];  dest[6][5] = src05[6]; dest[7][5] = src05[7];
+                dest[0][6] = src06[0]; dest[1][6] = src06[1];  dest[2][6] = src06[2]; dest[3][6] = src06[3];   dest[4][6] = src06[4];  dest[5][6] = src06[5];  dest[6][6] = src06[6]; dest[7][6] = src06[7];
+                dest[0][7] = src07[0]; dest[1][7] = src07[1];  dest[2][7] = src07[2]; dest[3][7] = src07[3];   dest[4][7] = src07[4];  dest[5][7] = src07[5];  dest[6][7] = src07[6]; dest[7][7] = src07[7];
+                dest[0][8] = src08[0]; dest[1][8] = src08[1];  dest[2][8] = src08[2]; dest[3][8] = src08[3];   dest[4][8] = src08[4];  dest[5][8] = src08[5];  dest[6][8] = src08[6]; dest[7][8] = src08[7];
+                dest[0][9] = src09[0]; dest[1][9] = src09[1];  dest[2][9] = src09[2]; dest[3][9] = src09[3];   dest[4][9] = src09[4];  dest[5][9] = src09[5];  dest[6][9] = src09[6]; dest[7][9] = src09[7];
                 dest[0][10] = src10[0]; dest[1][10] = src10[1];  dest[2][10] = src10[2]; dest[3][10] = src10[3];   dest[4][10] = src10[4];  dest[5][10] = src10[5];  dest[6][10] = src10[6]; dest[7][10] = src10[7];
                 dest[0][11] = src11[0]; dest[1][11] = src11[1];  dest[2][11] = src11[2]; dest[3][11] = src11[3];   dest[4][11] = src11[4];  dest[5][11] = src11[5];  dest[6][11] = src11[6]; dest[7][11] = src11[7];
                 dest[0][12] = src12[0]; dest[1][12] = src12[1];  dest[2][12] = src12[2]; dest[3][12] = src12[3];   dest[4][12] = src12[4];  dest[5][12] = src12[5];  dest[6][12] = src12[6]; dest[7][12] = src12[7];
@@ -428,15 +307,15 @@ namespace osuCrypto {
                 dest[0][15] = src15[0]; dest[1][15] = src15[1];  dest[2][15] = src15[2]; dest[3][15] = src15[3];   dest[4][15] = src15[4];  dest[5][15] = src15[5];  dest[6][15] = src15[6]; dest[7][15] = src15[7];
 
 
-                auto out0 = outStart + (chunkSize * 8 * h + 0 * 8) * out.size()[1] + w * 2;
-                auto out1 = outStart + (chunkSize * 8 * h + 1 * 8) * out.size()[1] + w * 2;
-                auto out2 = outStart + (chunkSize * 8 * h + 2 * 8) * out.size()[1] + w * 2;
-                auto out3 = outStart + (chunkSize * 8 * h + 3 * 8) * out.size()[1] + w * 2;
-                auto out4 = outStart + (chunkSize * 8 * h + 4 * 8) * out.size()[1] + w * 2;
-                auto out5 = outStart + (chunkSize * 8 * h + 5 * 8) * out.size()[1] + w * 2;
-                auto out6 = outStart + (chunkSize * 8 * h + 6 * 8) * out.size()[1] + w * 2;
-                auto out7 = outStart + (chunkSize * 8 * h + 7 * 8) * out.size()[1] + w * 2;
-                                 
+                auto out0 = outStart + (chunkSize * h + 0) * 8 * out.size()[1] + w * 2;
+                auto out1 = outStart + (chunkSize * h + 1) * 8 * out.size()[1] + w * 2;
+                auto out2 = outStart + (chunkSize * h + 2) * 8 * out.size()[1] + w * 2;
+                auto out3 = outStart + (chunkSize * h + 3) * 8 * out.size()[1] + w * 2;
+                auto out4 = outStart + (chunkSize * h + 4) * 8 * out.size()[1] + w * 2;
+                auto out5 = outStart + (chunkSize * h + 5) * 8 * out.size()[1] + w * 2;
+                auto out6 = outStart + (chunkSize * h + 6) * 8 * out.size()[1] + w * 2;
+                auto out7 = outStart + (chunkSize * h + 7) * 8 * out.size()[1] + w * 2;
+
                 for (int j = 0; j < 8; j++)
                 {
                     *(u16*)out0 = _mm_movemask_epi8(a[0]);
@@ -470,6 +349,44 @@ namespace osuCrypto {
             }
         }
 
+
+        for (u64 hh = 0; hh < leftOverHeight; ++hh)
+        {
+            for (u64 w = 0; w < subBlockWidth; ++w)
+            {
+
+                auto start = in.data() + subBlockHight * hStep + hh + w * wStep;
+
+                dest[0][0] =  *(start         );
+                dest[0][1] =  *(start + step01);
+                dest[0][2] =  *(start + step02);
+                dest[0][3] =  *(start + step03);
+                dest[0][4] =  *(start + step04);
+                dest[0][5] =  *(start + step05);
+                dest[0][6] =  *(start + step06);
+                dest[0][7] =  *(start + step07);
+                dest[0][8] =  *(start + step08);
+                dest[0][9] =  *(start + step09);
+                dest[0][10] = *(start + step10);
+                dest[0][11] = *(start + step11);
+                dest[0][12] = *(start + step12);
+                dest[0][13] = *(start + step13);
+                dest[0][14] = *(start + step14);
+                dest[0][15] = *(start + step15);
+
+
+                auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.size()[1] + w * 2;
+
+                for (int j = 0; j < 8; j++)
+                {
+                    *(u16*)out0 = _mm_movemask_epi8(a[0]);
+
+                    out0 -= out.size()[1];
+
+                    a[0] = _mm_slli_epi64(a[0], 1);
+                }
+            }
+        }
 
         if (extra)
         {
@@ -534,6 +451,36 @@ namespace osuCrypto {
                     a[5] = _mm_slli_epi64(a[5], 1);
                     a[6] = _mm_slli_epi64(a[6], 1);
                     a[7] = _mm_slli_epi64(a[7], 1);
+                }
+            }
+
+
+            for (u64 hh = 0; hh < leftOverHeight; ++hh)
+            {
+
+                // we are concerned with the output rows a range [16 * h, 16 * h + 15]
+                auto w = subBlockWidth;
+
+                auto start = in.data() + subBlockHight * hStep + hh + w * wStep;
+
+                dest[0][0] = *(start);
+                dest[0][1] = *(start + step01);
+                dest[0][2] = *(start + step02);
+                dest[0][3] = *(start + step03);
+                dest[0][4] = *(start + step04);
+                dest[0][5] = *(start + step05);
+                dest[0][6] = *(start + step06);
+                dest[0][7] = *(start + step07);
+
+                auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.size()[1] + w * 2;
+
+                for (int j = 0; j < 8; j++)
+                {
+                    *out0 = _mm_movemask_epi8(a[0]);
+
+                    out0 -= out.size()[1];
+
+                    a[0] = _mm_slli_epi64(a[0], 1);
                 }
             }
         }

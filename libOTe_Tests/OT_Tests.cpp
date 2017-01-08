@@ -402,8 +402,8 @@ void TransposeMatrixView_Test_Impl()
 
         //std::array<std::array<std::array<block, 8>, 128>, 2> data;
 
-        MatrixView<u8> in(24, 8);
-        MatrixView<u8> in2(32, 8);
+        MatrixView<u8> in(24, 9);
+        MatrixView<u8> in2(32, 9);
 
         prng.get((u8*)in.data(), sizeof(u8) *in.size()[0] * in.size()[1]);
         memset(in2.data(), 0, in2.size()[0] * in2.size()[1]);
@@ -416,8 +416,8 @@ void TransposeMatrixView_Test_Impl()
             }
         }
 
-        MatrixView<u8> out(64, 3);
-        MatrixView<u8> out2(64, 4);
+        MatrixView<u8> out(72, 3);
+        MatrixView<u8> out2(72, 4);
 
         sse_transpose(in, out);
         sse_transpose(in2, out2);
@@ -431,7 +431,7 @@ void TransposeMatrixView_Test_Impl()
                     std::cout << (u32)out[i][j] << " != " << (u32)out2[i][j] << std::endl;
                     throw UnitTestFail();
                 }
-        }
+            }
         }
     }
 }
