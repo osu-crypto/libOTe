@@ -307,7 +307,7 @@ void TransposeMatrixView_Test_Impl()
         {
             if (neq(data[i], data2[i]))
             {
-                std::cout << i <<"\n";
+                std::cout << i << "\n";
                 printMtx(data);
                 std::cout << "\n";
                 printMtx(data2);
@@ -388,12 +388,50 @@ void TransposeMatrixView_Test_Impl()
                 {
                     if (neq(data128[j], data2View[i * 128 + j][b]))
                     {
-                        std::cout << "failed " << i << "  " << j << "  " << b << std::endl; 
+                        std::cout << "failed " << i << "  " << j << "  " << b << std::endl;
                         std::cout << "exp: " << data128[j] << "\nact: " << data2View[i * 128 + j][b] << std::endl;
                         throw UnitTestFail();
                     }
                 }
             }
+        }
+    }
+
+    {
+        PRNG prng(ZeroBlock);
+
+        //std::array<std::array<std::array<block, 8>, 128>, 2> data;
+
+        MatrixView<u8> in(24, 8);
+        MatrixView<u8> in2(32, 8);
+
+        prng.get((u8*)in.data(), sizeof(u8) *in.size()[0] * in.size()[1]);
+        memset(in2.data(), 0, in2.size()[0] * in2.size()[1]);
+
+        for (u64 i = 0; i < in.size()[0]; ++i)
+        {
+            for (u64 j = 0; j < in.size()[1]; ++j)
+            {
+                in2[i][j] = in[i][j];
+            }
+        }
+
+        MatrixView<u8> out(64, 3);
+        MatrixView<u8> out2(64, 4);
+
+        sse_transpose(in, out);
+        sse_transpose(in2, out2);
+
+        for (u64 i = 0; i < out.size()[0]; ++i)
+        {
+            for (u64 j = 0; j < out.size()[1]; ++j)
+            {
+                if (out[i][j] != out2[i][j])
+                {
+                    std::cout << (u32)out[i][j] << " != " << (u32)out2[i][j] << std::endl;
+                    throw UnitTestFail();
+                }
+        }
         }
     }
 }

@@ -18,7 +18,7 @@ namespace osuCrypto {
 
     void sse_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut);
 
-    void sse_transpose(MatrixView<block> in, MatrixView<block> out);
-    void sse_transpose(MatrixView<u8> in, MatrixView<u8> out);
+    void sse_transpose(const MatrixView<block>& in, const MatrixView<block>& out);
+    void sse_transpose(const MatrixView<u8>& in, const MatrixView<u8>& out);
 
 }
