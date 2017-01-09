@@ -193,7 +193,7 @@ namespace osuCrypto {
             in[1] = _mm_slli_epi64(in[1], 1);
         }
     }
-    
+
 
     void sse_transpose(const MatrixView<block>& in, const MatrixView<block>& out)
     {
@@ -205,28 +205,41 @@ namespace osuCrypto {
 
     void sse_transpose(const MatrixView<u8>& in, const MatrixView<u8>& out)
     {
+        // the amount of work that we use to vectorize (hard code do not change)
         static const u64 chunkSize = 8;
 
+        // the number of input columns
         u64 bitWidth = in.size()[0];
+
+        // In the main loop, we tranpose things in subBlocks. This is how many we have.
+        // a subblock is 16 (bits) columns wide and 64 bits tall
         u64 subBlockWidth = bitWidth / 16;
-        u64 subBlockHight = in.size()[1] / chunkSize;
-        u64 leftOverHeight = in.size()[1] % chunkSize;
+        u64 subBlockHight = out.size()[0] / (8 * chunkSize);
+
+        // since we allows arbitrary sized inputs, we have to deal with the left overs
+        u64 leftOverHeight = out.size()[0] % (chunkSize * 8);
+        u64 leftOverWidth = in.size()[0] % 16;
 
 
-        if (in.size()[0] % 8 != 0)
-            throw std::runtime_error(LOCATION);
-
+        // make sure that the output can hold the input.
         if (out.size()[1] < (bitWidth + 7) / 8)
             throw std::runtime_error(LOCATION);
 
-        if (out.size()[0] != in.size()[1] * 8)
+        // we can handle the case that the output should be truncated, but 
+        // not the case that the input is too small. (simple call this function 
+        // with a smaller out.size()[0], since thats "free" to do.)
+        if (out.size()[0] > in.size()[1] * 8)
             throw std::runtime_error(LOCATION);
 
         array<block, chunkSize> a;
         array < array<u8, 16>, chunkSize>& dest = *(array < array<u8, 16>, chunkSize>*)&a;
 
-        auto step = in.size()[1];
 
+        // some useful constants that we will use
+        auto wStep = 16 * in.size()[1];
+        auto eightOutSize1 = 8 * out.size()[1];
+        auto outStart = out.data() + (7) * out.size()[1];
+        auto step = in.size()[1];
         auto
             step01 = step * 1,
             step02 = step * 2,
@@ -245,15 +258,7 @@ namespace osuCrypto {
             step15 = step * 15;
 
 
-        auto extra = (in.size()[0] % 16) ? 8 : 0;
-
-        auto wStep = 16 * in.size()[1];
-        auto hStep = chunkSize;
-        auto wBackStep = wStep  * subBlockWidth - chunkSize;
-
-        //auto start = in.data();
-        auto outStart = out.data() + (7) * out.size()[1];
-
+        // this is the main loop that gets the best performance (highly vectorized).
         for (u64 h = 0; h < subBlockHight; ++h)
         {
             // we are concerned with the output rows a range [16 * h, 16 * h + 15]
@@ -262,7 +267,7 @@ namespace osuCrypto {
             {
                 // we are concerned with the w'th section of 16 bits for the 16 output rows above.
 
-                auto start = in.data() + h * hStep + w * wStep;
+                auto start = in.data() + h * chunkSize + w * wStep;
 
                 auto src00 = start;
                 auto src01 = start + step01;
@@ -280,15 +285,10 @@ namespace osuCrypto {
                 auto src13 = start + step13;
                 auto src14 = start + step14;
                 auto src15 = start + step15;
-                //start += wStep;
 
-                //if (&src15[7] >= in.data() + in.size()[0] * in.size()[1])
-                //{
-                //    std::cout << "BAD" << std::endl;
-                //    throw std::runtime_error(LOCATION); 
-                //}
-
-
+                // perform the transpose on the byte level. We will then use 
+                // sse instrucitions to get it on the bit level. dest is the 
+                // same as a but in a 2D byte view.
                 dest[0][0] = src00[0]; dest[1][0] = src00[1];  dest[2][0] = src00[2]; dest[3][0] = src00[3];   dest[4][0] = src00[4];  dest[5][0] = src00[5];  dest[6][0] = src00[6]; dest[7][0] = src00[7];
                 dest[0][1] = src01[0]; dest[1][1] = src01[1];  dest[2][1] = src01[2]; dest[3][1] = src01[3];   dest[4][1] = src01[4];  dest[5][1] = src01[5];  dest[6][1] = src01[6]; dest[7][1] = src01[7];
                 dest[0][2] = src02[0]; dest[1][2] = src02[1];  dest[2][2] = src02[2]; dest[3][2] = src02[3];   dest[4][2] = src02[4];  dest[5][2] = src02[5];  dest[6][2] = src02[6]; dest[7][2] = src02[7];
@@ -306,18 +306,21 @@ namespace osuCrypto {
                 dest[0][14] = src14[0]; dest[1][14] = src14[1];  dest[2][14] = src14[2]; dest[3][14] = src14[3];   dest[4][14] = src14[4];  dest[5][14] = src14[5];  dest[6][14] = src14[6]; dest[7][14] = src14[7];
                 dest[0][15] = src15[0]; dest[1][15] = src15[1];  dest[2][15] = src15[2]; dest[3][15] = src15[3];   dest[4][15] = src15[4];  dest[5][15] = src15[5];  dest[6][15] = src15[6]; dest[7][15] = src15[7];
 
-
-                auto out0 = outStart + (chunkSize * h + 0) * 8 * out.size()[1] + w * 2;
-                auto out1 = outStart + (chunkSize * h + 1) * 8 * out.size()[1] + w * 2;
-                auto out2 = outStart + (chunkSize * h + 2) * 8 * out.size()[1] + w * 2;
-                auto out3 = outStart + (chunkSize * h + 3) * 8 * out.size()[1] + w * 2;
-                auto out4 = outStart + (chunkSize * h + 4) * 8 * out.size()[1] + w * 2;
-                auto out5 = outStart + (chunkSize * h + 5) * 8 * out.size()[1] + w * 2;
-                auto out6 = outStart + (chunkSize * h + 6) * 8 * out.size()[1] + w * 2;
-                auto out7 = outStart + (chunkSize * h + 7) * 8 * out.size()[1] + w * 2;
+                // get pointers to the output. 
+                auto out0 = outStart + (chunkSize * h + 0) * eightOutSize1 + w * 2;
+                auto out1 = outStart + (chunkSize * h + 1) * eightOutSize1 + w * 2;
+                auto out2 = outStart + (chunkSize * h + 2) * eightOutSize1 + w * 2;
+                auto out3 = outStart + (chunkSize * h + 3) * eightOutSize1 + w * 2;
+                auto out4 = outStart + (chunkSize * h + 4) * eightOutSize1 + w * 2;
+                auto out5 = outStart + (chunkSize * h + 5) * eightOutSize1 + w * 2;
+                auto out6 = outStart + (chunkSize * h + 6) * eightOutSize1 + w * 2;
+                auto out7 = outStart + (chunkSize * h + 7) * eightOutSize1 + w * 2;
 
                 for (int j = 0; j < 8; j++)
                 {
+                    // use the special _mm_movemask_epi8 to perform the final step of that bit-wise tranpose.
+                    // this instruction takes ever 8'th bit (start at idx 7) and moves them into a single
+                    // 16 bit output. Its like shaving off the top bit of each of the 16 bytes.
                     *(u16*)out0 = _mm_movemask_epi8(a[0]);
                     *(u16*)out1 = _mm_movemask_epi8(a[1]);
                     *(u16*)out2 = _mm_movemask_epi8(a[2]);
@@ -327,6 +330,7 @@ namespace osuCrypto {
                     *(u16*)out6 = _mm_movemask_epi8(a[6]);
                     *(u16*)out7 = _mm_movemask_epi8(a[7]);
 
+                    // step each of out 8 pointer over to the next output row.
                     out0 -= out.size()[1];
                     out1 -= out.size()[1];
                     out2 -= out.size()[1];
@@ -336,6 +340,7 @@ namespace osuCrypto {
                     out6 -= out.size()[1];
                     out7 -= out.size()[1];
 
+                    // shift the 128 values so that the top bit is not the next one.
                     a[0] = _mm_slli_epi64(a[0], 1);
                     a[1] = _mm_slli_epi64(a[1], 1);
                     a[2] = _mm_slli_epi64(a[2], 1);
@@ -345,28 +350,42 @@ namespace osuCrypto {
                     a[6] = _mm_slli_epi64(a[6], 1);
                     a[7] = _mm_slli_epi64(a[7], 1);
                 }
-
             }
         }
 
+        // this is a special case there we dont have chunkSize bytes of input column left.
+        // because of this, the vectorized code above does not work and we instead so thing 
+        // one byte as a time.
 
-        for (u64 hh = 0; hh < leftOverHeight; ++hh)
+        // hhEnd denotes how many bytes are left [0,8).
+        auto hhEnd = (leftOverHeight + 7) / 8;
+
+        // the last byte might be only part of a byte, so we also account for this
+        auto lastSkip = (8 - leftOverHeight % 8) % 8;
+        
+        for (u64 hh = 0; hh < hhEnd; ++hh)
         {
+            // compute those parameters that determine if this is the last byte
+            // and that its a partial byte meaning that the last so mant output 
+            // rows  should not be written to. 
+            auto skip = hh == (hhEnd - 1) ? lastSkip : 0;
+            auto rem = 8 - skip;
+
             for (u64 w = 0; w < subBlockWidth; ++w)
             {
 
-                auto start = in.data() + subBlockHight * hStep + hh + w * wStep;
+                auto start = in.data() + subBlockHight * chunkSize + hh + w * wStep;
 
-                dest[0][0] =  *(start         );
-                dest[0][1] =  *(start + step01);
-                dest[0][2] =  *(start + step02);
-                dest[0][3] =  *(start + step03);
-                dest[0][4] =  *(start + step04);
-                dest[0][5] =  *(start + step05);
-                dest[0][6] =  *(start + step06);
-                dest[0][7] =  *(start + step07);
-                dest[0][8] =  *(start + step08);
-                dest[0][9] =  *(start + step09);
+                dest[0][0] = *(start);
+                dest[0][1] = *(start + step01);
+                dest[0][2] = *(start + step02);
+                dest[0][3] = *(start + step03);
+                dest[0][4] = *(start + step04);
+                dest[0][5] = *(start + step05);
+                dest[0][6] = *(start + step06);
+                dest[0][7] = *(start + step07);
+                dest[0][8] = *(start + step08);
+                dest[0][9] = *(start + step09);
                 dest[0][10] = *(start + step10);
                 dest[0][11] = *(start + step11);
                 dest[0][12] = *(start + step12);
@@ -377,7 +396,10 @@ namespace osuCrypto {
 
                 auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.size()[1] + w * 2;
 
-                for (int j = 0; j < 8; j++)
+                out0 -= out.size()[1] * skip;
+                a[0] = _mm_slli_epi64(a[0], skip);
+
+                for (int j = 0; j < rem; j++)
                 {
                     *(u16*)out0 = _mm_movemask_epi8(a[0]);
 
@@ -388,95 +410,150 @@ namespace osuCrypto {
             }
         }
 
-        if (extra)
+        // this is a special case where the input column count was not a multiple of 16. 
+        // For this case, we use 
+        if (leftOverWidth)
         {
             for (u64 h = 0; h < subBlockHight; ++h)
             {
                 // we are concerned with the output rows a range [16 * h, 16 * h + 15]
 
-                auto start = in.data() + h * hStep + subBlockWidth * wStep;
+                auto start = in.data() + h * chunkSize + subBlockWidth * wStep;
 
-                auto src00 = start;
-                auto src01 = start + step01;
-                auto src02 = start + step02;
-                auto src03 = start + step03;
-                auto src04 = start + step04;
-                auto src05 = start + step05;
-                auto src06 = start + step06;
-                auto src07 = start + step07;
+                std::array<u8*, 16> src {
+                    start, start + step01, start + step02, start + step03, start + step04, start + step05,
+                    start + step06, start + step07, start + step08, start + step09, start + step10,
+                    start + step11, start + step12, start + step13, start + step14, start + step15
+                };
 
-                dest[0][00] = src00[0]; dest[1][00] = src00[1];  dest[2][00] = src00[2]; dest[3][00] = src00[3];   dest[4][00] = src00[4];  dest[5][00] = src00[5];  dest[6][00] = src00[6]; dest[7][00] = src00[7];
-                dest[0][01] = src01[0]; dest[1][01] = src01[1];  dest[2][01] = src01[2]; dest[3][01] = src01[3];   dest[4][01] = src01[4];  dest[5][01] = src01[5];  dest[6][01] = src01[6]; dest[7][01] = src01[7];
-                dest[0][02] = src02[0]; dest[1][02] = src02[1];  dest[2][02] = src02[2]; dest[3][02] = src02[3];   dest[4][02] = src02[4];  dest[5][02] = src02[5];  dest[6][02] = src02[6]; dest[7][02] = src02[7];
-                dest[0][03] = src03[0]; dest[1][03] = src03[1];  dest[2][03] = src03[2]; dest[3][03] = src03[3];   dest[4][03] = src03[4];  dest[5][03] = src03[5];  dest[6][03] = src03[6]; dest[7][03] = src03[7];
-                dest[0][04] = src04[0]; dest[1][04] = src04[1];  dest[2][04] = src04[2]; dest[3][04] = src04[3];   dest[4][04] = src04[4];  dest[5][04] = src04[5];  dest[6][04] = src04[6]; dest[7][04] = src04[7];
-                dest[0][05] = src05[0]; dest[1][05] = src05[1];  dest[2][05] = src05[2]; dest[3][05] = src05[3];   dest[4][05] = src05[4];  dest[5][05] = src05[5];  dest[6][05] = src05[6]; dest[7][05] = src05[7];
-                dest[0][06] = src06[0]; dest[1][06] = src06[1];  dest[2][06] = src06[2]; dest[3][06] = src06[3];   dest[4][06] = src06[4];  dest[5][06] = src06[5];  dest[6][06] = src06[6]; dest[7][06] = src06[7];
-                dest[0][07] = src07[0]; dest[1][07] = src07[1];  dest[2][07] = src07[2]; dest[3][07] = src07[3];   dest[4][07] = src07[4];  dest[5][07] = src07[5];  dest[6][07] = src07[6]; dest[7][07] = src07[7];
-
-                auto out0 = outStart + (chunkSize * 8 * h + 0 * 8) * out.size()[1] + subBlockWidth * 2;
-                auto out1 = outStart + (chunkSize * 8 * h + 1 * 8) * out.size()[1] + subBlockWidth * 2;
-                auto out2 = outStart + (chunkSize * 8 * h + 2 * 8) * out.size()[1] + subBlockWidth * 2;
-                auto out3 = outStart + (chunkSize * 8 * h + 3 * 8) * out.size()[1] + subBlockWidth * 2;
-                auto out4 = outStart + (chunkSize * 8 * h + 4 * 8) * out.size()[1] + subBlockWidth * 2;
-                auto out5 = outStart + (chunkSize * 8 * h + 5 * 8) * out.size()[1] + subBlockWidth * 2;
-                auto out6 = outStart + (chunkSize * 8 * h + 6 * 8) * out.size()[1] + subBlockWidth * 2;
-                auto out7 = outStart + (chunkSize * 8 * h + 7 * 8) * out.size()[1] + subBlockWidth * 2;
-
-                for (int j = 0; j < 8; j++)
+                memset(a.data(), 0,sizeof(a));
+                for (u64 i = 0; i < leftOverWidth; ++i)
                 {
-                    *out0 = _mm_movemask_epi8(a[0]);
-                    *out1 = _mm_movemask_epi8(a[1]);
-                    *out2 = _mm_movemask_epi8(a[2]);
-                    *out3 = _mm_movemask_epi8(a[3]);
-                    *out4 = _mm_movemask_epi8(a[4]);
-                    *out5 = _mm_movemask_epi8(a[5]);
-                    *out6 = _mm_movemask_epi8(a[6]);
-                    *out7 = _mm_movemask_epi8(a[7]);
+                    dest[0][i] = src[i][0];
+                    dest[1][i] = src[i][1];
+                    dest[2][i] = src[i][2];
+                    dest[3][i] = src[i][3];
+                    dest[4][i] = src[i][4];
+                    dest[5][i] = src[i][5];
+                    dest[6][i] = src[i][6];
+                    dest[7][i] = src[i][7];
+                }
 
-                    out0 -= out.size()[1];
-                    out1 -= out.size()[1];
-                    out2 -= out.size()[1];
-                    out3 -= out.size()[1];
-                    out4 -= out.size()[1];
-                    out5 -= out.size()[1];
-                    out6 -= out.size()[1];
-                    out7 -= out.size()[1];
+                auto out0 = outStart + (chunkSize * h + 0) * eightOutSize1 + subBlockWidth * 2;
+                auto out1 = outStart + (chunkSize * h + 1) * eightOutSize1 + subBlockWidth * 2;
+                auto out2 = outStart + (chunkSize * h + 2) * eightOutSize1 + subBlockWidth * 2;
+                auto out3 = outStart + (chunkSize * h + 3) * eightOutSize1 + subBlockWidth * 2;
+                auto out4 = outStart + (chunkSize * h + 4) * eightOutSize1 + subBlockWidth * 2;
+                auto out5 = outStart + (chunkSize * h + 5) * eightOutSize1 + subBlockWidth * 2;
+                auto out6 = outStart + (chunkSize * h + 6) * eightOutSize1 + subBlockWidth * 2;
+                auto out7 = outStart + (chunkSize * h + 7) * eightOutSize1 + subBlockWidth * 2;
 
-                    a[0] = _mm_slli_epi64(a[0], 1);
-                    a[1] = _mm_slli_epi64(a[1], 1);
-                    a[2] = _mm_slli_epi64(a[2], 1);
-                    a[3] = _mm_slli_epi64(a[3], 1);
-                    a[4] = _mm_slli_epi64(a[4], 1);
-                    a[5] = _mm_slli_epi64(a[5], 1);
-                    a[6] = _mm_slli_epi64(a[6], 1);
-                    a[7] = _mm_slli_epi64(a[7], 1);
+                if (leftOverWidth <= 8)
+                {
+                    for (int j = 0; j < 8; j++)
+                    {
+                        *out0 = _mm_movemask_epi8(a[0]);
+                        *out1 = _mm_movemask_epi8(a[1]);
+                        *out2 = _mm_movemask_epi8(a[2]);
+                        *out3 = _mm_movemask_epi8(a[3]);
+                        *out4 = _mm_movemask_epi8(a[4]);
+                        *out5 = _mm_movemask_epi8(a[5]);
+                        *out6 = _mm_movemask_epi8(a[6]);
+                        *out7 = _mm_movemask_epi8(a[7]);
+
+                        out0 -= out.size()[1];
+                        out1 -= out.size()[1];
+                        out2 -= out.size()[1];
+                        out3 -= out.size()[1];
+                        out4 -= out.size()[1];
+                        out5 -= out.size()[1];
+                        out6 -= out.size()[1];
+                        out7 -= out.size()[1];
+
+                        a[0] = _mm_slli_epi64(a[0], 1);
+                        a[1] = _mm_slli_epi64(a[1], 1);
+                        a[2] = _mm_slli_epi64(a[2], 1);
+                        a[3] = _mm_slli_epi64(a[3], 1);
+                        a[4] = _mm_slli_epi64(a[4], 1);
+                        a[5] = _mm_slli_epi64(a[5], 1);
+                        a[6] = _mm_slli_epi64(a[6], 1);
+                        a[7] = _mm_slli_epi64(a[7], 1);
+                    }
+                }
+                else
+                {
+                    for (int j = 0; j < 8; j++)
+                    {
+                        *(u16*)out0 = _mm_movemask_epi8(a[0]);
+                        *(u16*)out1 = _mm_movemask_epi8(a[1]);
+                        *(u16*)out2 = _mm_movemask_epi8(a[2]);
+                        *(u16*)out3 = _mm_movemask_epi8(a[3]);
+                        *(u16*)out4 = _mm_movemask_epi8(a[4]);
+                        *(u16*)out5 = _mm_movemask_epi8(a[5]);
+                        *(u16*)out6 = _mm_movemask_epi8(a[6]);
+                        *(u16*)out7 = _mm_movemask_epi8(a[7]);
+
+                        out0 -= out.size()[1];
+                        out1 -= out.size()[1];
+                        out2 -= out.size()[1];
+                        out3 -= out.size()[1];
+                        out4 -= out.size()[1];
+                        out5 -= out.size()[1];
+                        out6 -= out.size()[1];
+                        out7 -= out.size()[1];
+
+                        a[0] = _mm_slli_epi64(a[0], 1);
+                        a[1] = _mm_slli_epi64(a[1], 1);
+                        a[2] = _mm_slli_epi64(a[2], 1);
+                        a[3] = _mm_slli_epi64(a[3], 1);
+                        a[4] = _mm_slli_epi64(a[4], 1);
+                        a[5] = _mm_slli_epi64(a[5], 1);
+                        a[6] = _mm_slli_epi64(a[6], 1);
+                        a[7] = _mm_slli_epi64(a[7], 1);
+                    }
                 }
             }
 
-
-            for (u64 hh = 0; hh < leftOverHeight; ++hh)
+            //auto hhEnd = (leftOverHeight + 7) / 8;
+            //auto lastSkip = (8 - leftOverHeight % 8) % 8;
+            for (u64 hh = 0; hh < hhEnd; ++hh)
             {
+                auto skip = hh == (hhEnd - 1) ? lastSkip : 0;
+                auto rem = 8 - skip;
 
                 // we are concerned with the output rows a range [16 * h, 16 * h + 15]
                 auto w = subBlockWidth;
 
-                auto start = in.data() + subBlockHight * hStep + hh + w * wStep;
+                auto start = in.data() + subBlockHight * chunkSize + hh + w * wStep;
 
-                dest[0][0] = *(start);
-                dest[0][1] = *(start + step01);
-                dest[0][2] = *(start + step02);
-                dest[0][3] = *(start + step03);
-                dest[0][4] = *(start + step04);
-                dest[0][5] = *(start + step05);
-                dest[0][6] = *(start + step06);
-                dest[0][7] = *(start + step07);
+                std::array<u8*, 16> src{
+                    start, start + step01, start + step02, start + step03, start + step04, start + step05,
+                    start + step06, start + step07, start + step08, start + step09, start + step10,
+                    start + step11, start + step12, start + step13, start + step14, start + step15
+                };
+
+
+                a[0] = ZeroBlock; 
+                for (u64 i = 0; i < leftOverWidth; ++i)
+                {
+                    dest[0][i] = src[i][0];
+                }
 
                 auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.size()[1] + w * 2;
 
-                for (int j = 0; j < 8; j++)
+                out0 -= out.size()[1] * skip;
+                a[0] = _mm_slli_epi64(a[0], skip);
+
+                for (int j = 0; j < rem; j++)
                 {
-                    *out0 = _mm_movemask_epi8(a[0]);
+                    if (leftOverWidth > 8)
+                    {
+                        *(u16*)out0 = _mm_movemask_epi8(a[0]);
+                    }
+                    else
+                    {
+                        *out0 = _mm_movemask_epi8(a[0]);
+                    }
 
                     out0 -= out.size()[1];
 
@@ -485,7 +562,6 @@ namespace osuCrypto {
             }
         }
     }
-
 
 
     void print(array<block, 128>& inOut)

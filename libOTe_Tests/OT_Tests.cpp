@@ -285,6 +285,10 @@ void Transpose_Test_Impl()
 
 void TransposeMatrixView_Test_Impl()
 {
+
+
+
+
     {
 
         PRNG prng(ZeroBlock);
@@ -400,9 +404,32 @@ void TransposeMatrixView_Test_Impl()
     {
         PRNG prng(ZeroBlock);
 
+        MatrixView<u8> in(16, 8);
+        prng.get((u8*)in.data(), sizeof(u8) *in.size()[0] * in.size()[1]);
+
+        MatrixView<u8> out(63, 2);
+        sse_transpose(in, out);
+
+
+        MatrixView<u8> out2(64, 2);
+        sse_transpose(in, out2);
+
+        for (u64 i = 0; i < out.size()[0]; ++i)
+        {
+            if (memcmp(out[i].data(), out2[i].data(), out[i].size()))
+            {
+                std::cout << "bad " << i << std::endl;
+                throw UnitTestFail();
+            }
+        }
+    }
+
+    {
+        PRNG prng(ZeroBlock);
+
         //std::array<std::array<std::array<block, 8>, 128>, 2> data;
 
-        MatrixView<u8> in(24, 9);
+        MatrixView<u8> in(25, 9);
         MatrixView<u8> in2(32, 9);
 
         prng.get((u8*)in.data(), sizeof(u8) *in.size()[0] * in.size()[1]);
@@ -416,7 +443,7 @@ void TransposeMatrixView_Test_Impl()
             }
         }
 
-        MatrixView<u8> out(72, 3);
+        MatrixView<u8> out(72, 4);
         MatrixView<u8> out2(72, 4);
 
         sse_transpose(in, out);
