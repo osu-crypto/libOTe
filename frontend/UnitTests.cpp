@@ -59,7 +59,9 @@ void bitVec_all()
 void OT_all()
 {
     std::cout << std::endl;
+    
 
+    run("TransposeMatrixView_Test_Impl           ", TransposeMatrixView_Test_Impl);
     run("Transpose_Test_Impl                     ", Transpose_Test_Impl);
     run("KosOtExt_100Receive_Test_Impl           ", KosOtExt_100Receive_Test_Impl);
     run("KosDotExt_100Receive_Test_Impl          ", KosDotExt_100Receive_Test_Impl);

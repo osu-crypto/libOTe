@@ -364,7 +364,7 @@ void TransposeMatrixView_Test_Impl()
         prng.get((u8*)dataView.data(), sizeof(block) *dataView.size()[0] * dataView.size()[1]);
 
         MatrixView<block> data2View(1024, 2);
-
+        memset(data2View.data(), 0, data2View.size()[0] * data2View.size()[1] * sizeof(block));
         sse_transpose(dataView, data2View);
 
         for (u64 b = 0; b < 2; ++b)

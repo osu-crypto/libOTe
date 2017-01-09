@@ -285,7 +285,7 @@ namespace osuCrypto {
                 //if (&src15[7] >= in.data() + in.size()[0] * in.size()[1])
                 //{
                 //    std::cout << "BAD" << std::endl;
-                //    throw std::runtime_error(LOCATION);
+                //    throw std::runtime_error(LOCATION); 
                 //}
 
 
