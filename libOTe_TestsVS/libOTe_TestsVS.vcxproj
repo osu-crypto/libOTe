@@ -64,7 +64,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories);$(SolutionDir)\thirdparty\win\boost\stage\lib;C:/libs/boost\stage\lib;$(OutDir);$(SolutionDir)thirdparty\win\;C:/libs/</AdditionalLibraryDirectories>
-      <AdditionalDependencies>cryptoTools.lib;libOTe.lib;libOTe_Tests.lib;Miracl\x64\$(Configuration)\miracl.lib;cryptopp\x64\Output\$(Configuration)\cryptlib.lib;NTL\x64\$(Configuration)\NTL.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cryptoTools.lib;libOTe.lib;libOTe_Tests.lib;Miracl\x64\$(Configuration)\miracl.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -85,7 +85,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories);$(SolutionDir)\thirdparty\win\boost\stage\lib;C:/libs/boost\stage\lib;$(OutDir);$(SolutionDir)thirdparty\win\;C:/libs/</AdditionalLibraryDirectories>
-      <AdditionalDependencies>cryptoTools.lib;libOTe.lib;libOTe_Tests.lib;Miracl\x64\$(Configuration)\miracl.lib;cryptopp\x64\Output\$(Configuration)\cryptlib.lib;NTL\x64\$(Configuration)\NTL.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cryptoTools.lib;libOTe.lib;libOTe_Tests.lib;Miracl\x64\$(Configuration)\miracl.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
