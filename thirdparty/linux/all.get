@@ -1,14 +1,11 @@
-#sudo yum install bzip2 -Y
-#sudo yum install unzip -Y
-#sudo yum install gcc-c++ -Y
-#sudo yum install m4 -Y
+#!/bin/bash
 
+set -e
 
 echo " =================== Building Boost ==================="
 bash boost.get  
 
 echo " =================== Building Miracl =================="
 bash miracl.get
-
 
 echo " ====================== all done! ====================="
