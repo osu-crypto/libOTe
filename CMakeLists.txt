@@ -89,7 +89,8 @@ target_link_libraries(frontend.exe libOTe_Tests)
 file(GLOB_RECURSE SOURCES libOTe/*.cpp)
 add_library(OTe SHARED ${SOURCES})
 install(TARGETS OTe DESTINATION lib/${PROJECT_NAME})
+
+file(GLOB_RECURSE HEADERS libOTe/*.cpp)
 install(FILES ${HEADERS} DESTINATION include/${PROJECT_NAME})
 
-# install (TARGETS frontend.exe DESTINATION bin)
-file(GLOB_RECURSE HEADERS libOTe/*.cpp)
+install (TARGETS frontend.exe DESTINATION bin)
