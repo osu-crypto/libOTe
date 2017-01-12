@@ -1,6 +1,11 @@
-cat "downloading Miracl"
+#!/bin/bash 
 
-git clone https://github.com/ladnir/miracl
+set -e
+
+if [ ! -d miracl ]; then
+    echo "downloading Miracl"
+    git clone https://github.com/ladnir/miracl
+fi
 
 echo "building Mircal"
 cd miracl/miracl/source/
