@@ -85,12 +85,20 @@ add_executable(frontend.exe ${SRC_FRONTEND})
 
 target_link_libraries(frontend.exe libOTe_Tests)
 
+#############################################
+#            Install                        #
+#############################################
+
 # install library
 file(GLOB_RECURSE SOURCES libOTe/*.cpp)
-add_library(OTe SHARED ${SOURCES})
+add_library(OTe STATIC ${SOURCES})
 install(TARGETS OTe DESTINATION lib/${PROJECT_NAME})
 
-file(GLOB_RECURSE HEADERS libOTe/*.cpp)
-install(FILES ${HEADERS} DESTINATION include/${PROJECT_NAME})
+# install headers
+install(DIRECTORY libOTe DESTINATION include FILES_MATCHING PATTERN "*.h")
 
+# export cryptoTools headers too
+install(DIRECTORY cryptoTools DESTINATION include FILES_MATCHING PATTERN "*.h")
+
+#install binary
 install (TARGETS frontend.exe DESTINATION bin)
