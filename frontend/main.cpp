@@ -284,7 +284,7 @@ void kos_test(int iii)
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
-    u64 numOTs = 1 << 20;
+    u64 numOTs = 1 << 24;
 
 
     // get up the networking
@@ -352,7 +352,7 @@ void kos_test(int iii)
                 s.send(msgs, prng, *chls[i]);
 
                 gTimer.setTimePoint("finish");
-                //std::cout << gTimer << std::endl;
+                std::cout << gTimer << std::endl;
             });
         }
     }

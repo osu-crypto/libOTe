@@ -619,7 +619,7 @@ void KosDotExt_100Receive_Test_Impl()
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
     PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
 
-    u64 numOTs = 10;
+    u64 numOTs = 1024;
 
     u64 s = 40;
 

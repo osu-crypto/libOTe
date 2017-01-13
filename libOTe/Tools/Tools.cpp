@@ -231,8 +231,13 @@ namespace osuCrypto {
         if (out.size()[0] > in.size()[1] * 8)
             throw std::runtime_error(LOCATION);
 
-        array<block, chunkSize> a;
-        array < array<u8, 16>, chunkSize>& dest = *(array < array<u8, 16>, chunkSize>*)&a;
+        union TempObj
+        {
+            array<block, chunkSize> blks;
+            array < array<u8, 16>, chunkSize> bytes;
+        };
+
+        TempObj t;
 
 
         // some useful constants that we will use
@@ -287,24 +292,24 @@ namespace osuCrypto {
                 auto src15 = start + step15;
 
                 // perform the transpose on the byte level. We will then use 
-                // sse instrucitions to get it on the bit level. dest is the 
+                // sse instrucitions to get it on the bit level. t.bytes is the 
                 // same as a but in a 2D byte view.
-                dest[0][0] = src00[0]; dest[1][0] = src00[1];  dest[2][0] = src00[2]; dest[3][0] = src00[3];   dest[4][0] = src00[4];  dest[5][0] = src00[5];  dest[6][0] = src00[6]; dest[7][0] = src00[7];
-                dest[0][1] = src01[0]; dest[1][1] = src01[1];  dest[2][1] = src01[2]; dest[3][1] = src01[3];   dest[4][1] = src01[4];  dest[5][1] = src01[5];  dest[6][1] = src01[6]; dest[7][1] = src01[7];
-                dest[0][2] = src02[0]; dest[1][2] = src02[1];  dest[2][2] = src02[2]; dest[3][2] = src02[3];   dest[4][2] = src02[4];  dest[5][2] = src02[5];  dest[6][2] = src02[6]; dest[7][2] = src02[7];
-                dest[0][3] = src03[0]; dest[1][3] = src03[1];  dest[2][3] = src03[2]; dest[3][3] = src03[3];   dest[4][3] = src03[4];  dest[5][3] = src03[5];  dest[6][3] = src03[6]; dest[7][3] = src03[7];
-                dest[0][4] = src04[0]; dest[1][4] = src04[1];  dest[2][4] = src04[2]; dest[3][4] = src04[3];   dest[4][4] = src04[4];  dest[5][4] = src04[5];  dest[6][4] = src04[6]; dest[7][4] = src04[7];
-                dest[0][5] = src05[0]; dest[1][5] = src05[1];  dest[2][5] = src05[2]; dest[3][5] = src05[3];   dest[4][5] = src05[4];  dest[5][5] = src05[5];  dest[6][5] = src05[6]; dest[7][5] = src05[7];
-                dest[0][6] = src06[0]; dest[1][6] = src06[1];  dest[2][6] = src06[2]; dest[3][6] = src06[3];   dest[4][6] = src06[4];  dest[5][6] = src06[5];  dest[6][6] = src06[6]; dest[7][6] = src06[7];
-                dest[0][7] = src07[0]; dest[1][7] = src07[1];  dest[2][7] = src07[2]; dest[3][7] = src07[3];   dest[4][7] = src07[4];  dest[5][7] = src07[5];  dest[6][7] = src07[6]; dest[7][7] = src07[7];
-                dest[0][8] = src08[0]; dest[1][8] = src08[1];  dest[2][8] = src08[2]; dest[3][8] = src08[3];   dest[4][8] = src08[4];  dest[5][8] = src08[5];  dest[6][8] = src08[6]; dest[7][8] = src08[7];
-                dest[0][9] = src09[0]; dest[1][9] = src09[1];  dest[2][9] = src09[2]; dest[3][9] = src09[3];   dest[4][9] = src09[4];  dest[5][9] = src09[5];  dest[6][9] = src09[6]; dest[7][9] = src09[7];
-                dest[0][10] = src10[0]; dest[1][10] = src10[1];  dest[2][10] = src10[2]; dest[3][10] = src10[3];   dest[4][10] = src10[4];  dest[5][10] = src10[5];  dest[6][10] = src10[6]; dest[7][10] = src10[7];
-                dest[0][11] = src11[0]; dest[1][11] = src11[1];  dest[2][11] = src11[2]; dest[3][11] = src11[3];   dest[4][11] = src11[4];  dest[5][11] = src11[5];  dest[6][11] = src11[6]; dest[7][11] = src11[7];
-                dest[0][12] = src12[0]; dest[1][12] = src12[1];  dest[2][12] = src12[2]; dest[3][12] = src12[3];   dest[4][12] = src12[4];  dest[5][12] = src12[5];  dest[6][12] = src12[6]; dest[7][12] = src12[7];
-                dest[0][13] = src13[0]; dest[1][13] = src13[1];  dest[2][13] = src13[2]; dest[3][13] = src13[3];   dest[4][13] = src13[4];  dest[5][13] = src13[5];  dest[6][13] = src13[6]; dest[7][13] = src13[7];
-                dest[0][14] = src14[0]; dest[1][14] = src14[1];  dest[2][14] = src14[2]; dest[3][14] = src14[3];   dest[4][14] = src14[4];  dest[5][14] = src14[5];  dest[6][14] = src14[6]; dest[7][14] = src14[7];
-                dest[0][15] = src15[0]; dest[1][15] = src15[1];  dest[2][15] = src15[2]; dest[3][15] = src15[3];   dest[4][15] = src15[4];  dest[5][15] = src15[5];  dest[6][15] = src15[6]; dest[7][15] = src15[7];
+                t.bytes[0][0] = src00[0]; t.bytes[1][0] = src00[1];  t.bytes[2][0] = src00[2]; t.bytes[3][0] = src00[3];   t.bytes[4][0] = src00[4];  t.bytes[5][0] = src00[5];  t.bytes[6][0] = src00[6]; t.bytes[7][0] = src00[7];
+                t.bytes[0][1] = src01[0]; t.bytes[1][1] = src01[1];  t.bytes[2][1] = src01[2]; t.bytes[3][1] = src01[3];   t.bytes[4][1] = src01[4];  t.bytes[5][1] = src01[5];  t.bytes[6][1] = src01[6]; t.bytes[7][1] = src01[7];
+                t.bytes[0][2] = src02[0]; t.bytes[1][2] = src02[1];  t.bytes[2][2] = src02[2]; t.bytes[3][2] = src02[3];   t.bytes[4][2] = src02[4];  t.bytes[5][2] = src02[5];  t.bytes[6][2] = src02[6]; t.bytes[7][2] = src02[7];
+                t.bytes[0][3] = src03[0]; t.bytes[1][3] = src03[1];  t.bytes[2][3] = src03[2]; t.bytes[3][3] = src03[3];   t.bytes[4][3] = src03[4];  t.bytes[5][3] = src03[5];  t.bytes[6][3] = src03[6]; t.bytes[7][3] = src03[7];
+                t.bytes[0][4] = src04[0]; t.bytes[1][4] = src04[1];  t.bytes[2][4] = src04[2]; t.bytes[3][4] = src04[3];   t.bytes[4][4] = src04[4];  t.bytes[5][4] = src04[5];  t.bytes[6][4] = src04[6]; t.bytes[7][4] = src04[7];
+                t.bytes[0][5] = src05[0]; t.bytes[1][5] = src05[1];  t.bytes[2][5] = src05[2]; t.bytes[3][5] = src05[3];   t.bytes[4][5] = src05[4];  t.bytes[5][5] = src05[5];  t.bytes[6][5] = src05[6]; t.bytes[7][5] = src05[7];
+                t.bytes[0][6] = src06[0]; t.bytes[1][6] = src06[1];  t.bytes[2][6] = src06[2]; t.bytes[3][6] = src06[3];   t.bytes[4][6] = src06[4];  t.bytes[5][6] = src06[5];  t.bytes[6][6] = src06[6]; t.bytes[7][6] = src06[7];
+                t.bytes[0][7] = src07[0]; t.bytes[1][7] = src07[1];  t.bytes[2][7] = src07[2]; t.bytes[3][7] = src07[3];   t.bytes[4][7] = src07[4];  t.bytes[5][7] = src07[5];  t.bytes[6][7] = src07[6]; t.bytes[7][7] = src07[7];
+                t.bytes[0][8] = src08[0]; t.bytes[1][8] = src08[1];  t.bytes[2][8] = src08[2]; t.bytes[3][8] = src08[3];   t.bytes[4][8] = src08[4];  t.bytes[5][8] = src08[5];  t.bytes[6][8] = src08[6]; t.bytes[7][8] = src08[7];
+                t.bytes[0][9] = src09[0]; t.bytes[1][9] = src09[1];  t.bytes[2][9] = src09[2]; t.bytes[3][9] = src09[3];   t.bytes[4][9] = src09[4];  t.bytes[5][9] = src09[5];  t.bytes[6][9] = src09[6]; t.bytes[7][9] = src09[7];
+                t.bytes[0][10] = src10[0]; t.bytes[1][10] = src10[1];  t.bytes[2][10] = src10[2]; t.bytes[3][10] = src10[3];   t.bytes[4][10] = src10[4];  t.bytes[5][10] = src10[5];  t.bytes[6][10] = src10[6]; t.bytes[7][10] = src10[7];
+                t.bytes[0][11] = src11[0]; t.bytes[1][11] = src11[1];  t.bytes[2][11] = src11[2]; t.bytes[3][11] = src11[3];   t.bytes[4][11] = src11[4];  t.bytes[5][11] = src11[5];  t.bytes[6][11] = src11[6]; t.bytes[7][11] = src11[7];
+                t.bytes[0][12] = src12[0]; t.bytes[1][12] = src12[1];  t.bytes[2][12] = src12[2]; t.bytes[3][12] = src12[3];   t.bytes[4][12] = src12[4];  t.bytes[5][12] = src12[5];  t.bytes[6][12] = src12[6]; t.bytes[7][12] = src12[7];
+                t.bytes[0][13] = src13[0]; t.bytes[1][13] = src13[1];  t.bytes[2][13] = src13[2]; t.bytes[3][13] = src13[3];   t.bytes[4][13] = src13[4];  t.bytes[5][13] = src13[5];  t.bytes[6][13] = src13[6]; t.bytes[7][13] = src13[7];
+                t.bytes[0][14] = src14[0]; t.bytes[1][14] = src14[1];  t.bytes[2][14] = src14[2]; t.bytes[3][14] = src14[3];   t.bytes[4][14] = src14[4];  t.bytes[5][14] = src14[5];  t.bytes[6][14] = src14[6]; t.bytes[7][14] = src14[7];
+                t.bytes[0][15] = src15[0]; t.bytes[1][15] = src15[1];  t.bytes[2][15] = src15[2]; t.bytes[3][15] = src15[3];   t.bytes[4][15] = src15[4];  t.bytes[5][15] = src15[5];  t.bytes[6][15] = src15[6]; t.bytes[7][15] = src15[7];
 
                 // get pointers to the output. 
                 auto out0 = outStart + (chunkSize * h + 0) * eightOutSize1 + w * 2;
@@ -316,19 +321,19 @@ namespace osuCrypto {
                 auto out6 = outStart + (chunkSize * h + 6) * eightOutSize1 + w * 2;
                 auto out7 = outStart + (chunkSize * h + 7) * eightOutSize1 + w * 2;
 
-                for (int j = 0; j < 8; j++)
+                for (u64 j = 0; j < 8; j++)
                 {
                     // use the special _mm_movemask_epi8 to perform the final step of that bit-wise tranpose.
                     // this instruction takes ever 8'th bit (start at idx 7) and moves them into a single
                     // 16 bit output. Its like shaving off the top bit of each of the 16 bytes.
-                    *(u16*)out0 = _mm_movemask_epi8(a[0]);
-                    *(u16*)out1 = _mm_movemask_epi8(a[1]);
-                    *(u16*)out2 = _mm_movemask_epi8(a[2]);
-                    *(u16*)out3 = _mm_movemask_epi8(a[3]);
-                    *(u16*)out4 = _mm_movemask_epi8(a[4]);
-                    *(u16*)out5 = _mm_movemask_epi8(a[5]);
-                    *(u16*)out6 = _mm_movemask_epi8(a[6]);
-                    *(u16*)out7 = _mm_movemask_epi8(a[7]);
+                    *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
+                    *(u16*)out1 = _mm_movemask_epi8(t.blks[1]);
+                    *(u16*)out2 = _mm_movemask_epi8(t.blks[2]);
+                    *(u16*)out3 = _mm_movemask_epi8(t.blks[3]);
+                    *(u16*)out4 = _mm_movemask_epi8(t.blks[4]);
+                    *(u16*)out5 = _mm_movemask_epi8(t.blks[5]);
+                    *(u16*)out6 = _mm_movemask_epi8(t.blks[6]);
+                    *(u16*)out7 = _mm_movemask_epi8(t.blks[7]);
 
                     // step each of out 8 pointer over to the next output row.
                     out0 -= out.size()[1];
@@ -341,14 +346,14 @@ namespace osuCrypto {
                     out7 -= out.size()[1];
 
                     // shift the 128 values so that the top bit is not the next one.
-                    a[0] = _mm_slli_epi64(a[0], 1);
-                    a[1] = _mm_slli_epi64(a[1], 1);
-                    a[2] = _mm_slli_epi64(a[2], 1);
-                    a[3] = _mm_slli_epi64(a[3], 1);
-                    a[4] = _mm_slli_epi64(a[4], 1);
-                    a[5] = _mm_slli_epi64(a[5], 1);
-                    a[6] = _mm_slli_epi64(a[6], 1);
-                    a[7] = _mm_slli_epi64(a[7], 1);
+                    t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
+                    t.blks[1] = _mm_slli_epi64(t.blks[1], 1);
+                    t.blks[2] = _mm_slli_epi64(t.blks[2], 1);
+                    t.blks[3] = _mm_slli_epi64(t.blks[3], 1);
+                    t.blks[4] = _mm_slli_epi64(t.blks[4], 1);
+                    t.blks[5] = _mm_slli_epi64(t.blks[5], 1);
+                    t.blks[6] = _mm_slli_epi64(t.blks[6], 1);
+                    t.blks[7] = _mm_slli_epi64(t.blks[7], 1);
                 }
             }
         }
@@ -376,36 +381,36 @@ namespace osuCrypto {
 
                 auto start = in.data() + subBlockHight * chunkSize + hh + w * wStep;
 
-                dest[0][0] = *(start);
-                dest[0][1] = *(start + step01);
-                dest[0][2] = *(start + step02);
-                dest[0][3] = *(start + step03);
-                dest[0][4] = *(start + step04);
-                dest[0][5] = *(start + step05);
-                dest[0][6] = *(start + step06);
-                dest[0][7] = *(start + step07);
-                dest[0][8] = *(start + step08);
-                dest[0][9] = *(start + step09);
-                dest[0][10] = *(start + step10);
-                dest[0][11] = *(start + step11);
-                dest[0][12] = *(start + step12);
-                dest[0][13] = *(start + step13);
-                dest[0][14] = *(start + step14);
-                dest[0][15] = *(start + step15);
+                t.bytes[0][0] = *(start);
+                t.bytes[0][1] = *(start + step01);
+                t.bytes[0][2] = *(start + step02);
+                t.bytes[0][3] = *(start + step03);
+                t.bytes[0][4] = *(start + step04);
+                t.bytes[0][5] = *(start + step05);
+                t.bytes[0][6] = *(start + step06);
+                t.bytes[0][7] = *(start + step07);
+                t.bytes[0][8] = *(start + step08);
+                t.bytes[0][9] = *(start + step09);
+                t.bytes[0][10] = *(start + step10);
+                t.bytes[0][11] = *(start + step11);
+                t.bytes[0][12] = *(start + step12);
+                t.bytes[0][13] = *(start + step13);
+                t.bytes[0][14] = *(start + step14);
+                t.bytes[0][15] = *(start + step15);
 
 
                 auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.size()[1] + w * 2;
 
                 out0 -= out.size()[1] * skip;
-                a[0] = _mm_slli_epi64(a[0], skip);
+                t.blks[0] = _mm_slli_epi64(t.blks[0], skip);
 
-                for (int j = 0; j < rem; j++)
+                for (u64 j = 0; j < rem; j++)
                 {
-                    *(u16*)out0 = _mm_movemask_epi8(a[0]);
+                    *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
 
                     out0 -= out.size()[1];
 
-                    a[0] = _mm_slli_epi64(a[0], 1);
+                    t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
                 }
             }
         }
@@ -426,17 +431,17 @@ namespace osuCrypto {
                     start + step11, start + step12, start + step13, start + step14, start + step15
                 };
 
-                memset(a.data(), 0,sizeof(a));
+                memset(t.blks.data(), 0,sizeof(t));
                 for (u64 i = 0; i < leftOverWidth; ++i)
                 {
-                    dest[0][i] = src[i][0];
-                    dest[1][i] = src[i][1];
-                    dest[2][i] = src[i][2];
-                    dest[3][i] = src[i][3];
-                    dest[4][i] = src[i][4];
-                    dest[5][i] = src[i][5];
-                    dest[6][i] = src[i][6];
-                    dest[7][i] = src[i][7];
+                    t.bytes[0][i] = src[i][0];
+                    t.bytes[1][i] = src[i][1];
+                    t.bytes[2][i] = src[i][2];
+                    t.bytes[3][i] = src[i][3];
+                    t.bytes[4][i] = src[i][4];
+                    t.bytes[5][i] = src[i][5];
+                    t.bytes[6][i] = src[i][6];
+                    t.bytes[7][i] = src[i][7];
                 }
 
                 auto out0 = outStart + (chunkSize * h + 0) * eightOutSize1 + subBlockWidth * 2;
@@ -450,16 +455,16 @@ namespace osuCrypto {
 
                 if (leftOverWidth <= 8)
                 {
-                    for (int j = 0; j < 8; j++)
+                    for (u64 j = 0; j < 8; j++)
                     {
-                        *out0 = _mm_movemask_epi8(a[0]);
-                        *out1 = _mm_movemask_epi8(a[1]);
-                        *out2 = _mm_movemask_epi8(a[2]);
-                        *out3 = _mm_movemask_epi8(a[3]);
-                        *out4 = _mm_movemask_epi8(a[4]);
-                        *out5 = _mm_movemask_epi8(a[5]);
-                        *out6 = _mm_movemask_epi8(a[6]);
-                        *out7 = _mm_movemask_epi8(a[7]);
+                        *out0 = _mm_movemask_epi8(t.blks[0]);
+                        *out1 = _mm_movemask_epi8(t.blks[1]);
+                        *out2 = _mm_movemask_epi8(t.blks[2]);
+                        *out3 = _mm_movemask_epi8(t.blks[3]);
+                        *out4 = _mm_movemask_epi8(t.blks[4]);
+                        *out5 = _mm_movemask_epi8(t.blks[5]);
+                        *out6 = _mm_movemask_epi8(t.blks[6]);
+                        *out7 = _mm_movemask_epi8(t.blks[7]);
 
                         out0 -= out.size()[1];
                         out1 -= out.size()[1];
@@ -470,28 +475,28 @@ namespace osuCrypto {
                         out6 -= out.size()[1];
                         out7 -= out.size()[1];
 
-                        a[0] = _mm_slli_epi64(a[0], 1);
-                        a[1] = _mm_slli_epi64(a[1], 1);
-                        a[2] = _mm_slli_epi64(a[2], 1);
-                        a[3] = _mm_slli_epi64(a[3], 1);
-                        a[4] = _mm_slli_epi64(a[4], 1);
-                        a[5] = _mm_slli_epi64(a[5], 1);
-                        a[6] = _mm_slli_epi64(a[6], 1);
-                        a[7] = _mm_slli_epi64(a[7], 1);
+                        t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
+                        t.blks[1] = _mm_slli_epi64(t.blks[1], 1);
+                        t.blks[2] = _mm_slli_epi64(t.blks[2], 1);
+                        t.blks[3] = _mm_slli_epi64(t.blks[3], 1);
+                        t.blks[4] = _mm_slli_epi64(t.blks[4], 1);
+                        t.blks[5] = _mm_slli_epi64(t.blks[5], 1);
+                        t.blks[6] = _mm_slli_epi64(t.blks[6], 1);
+                        t.blks[7] = _mm_slli_epi64(t.blks[7], 1);
                     }
                 }
                 else
                 {
-                    for (int j = 0; j < 8; j++)
+                    for (u64 j = 0; j < 8; j++)
                     {
-                        *(u16*)out0 = _mm_movemask_epi8(a[0]);
-                        *(u16*)out1 = _mm_movemask_epi8(a[1]);
-                        *(u16*)out2 = _mm_movemask_epi8(a[2]);
-                        *(u16*)out3 = _mm_movemask_epi8(a[3]);
-                        *(u16*)out4 = _mm_movemask_epi8(a[4]);
-                        *(u16*)out5 = _mm_movemask_epi8(a[5]);
-                        *(u16*)out6 = _mm_movemask_epi8(a[6]);
-                        *(u16*)out7 = _mm_movemask_epi8(a[7]);
+                        *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
+                        *(u16*)out1 = _mm_movemask_epi8(t.blks[1]);
+                        *(u16*)out2 = _mm_movemask_epi8(t.blks[2]);
+                        *(u16*)out3 = _mm_movemask_epi8(t.blks[3]);
+                        *(u16*)out4 = _mm_movemask_epi8(t.blks[4]);
+                        *(u16*)out5 = _mm_movemask_epi8(t.blks[5]);
+                        *(u16*)out6 = _mm_movemask_epi8(t.blks[6]);
+                        *(u16*)out7 = _mm_movemask_epi8(t.blks[7]);
 
                         out0 -= out.size()[1];
                         out1 -= out.size()[1];
@@ -502,14 +507,14 @@ namespace osuCrypto {
                         out6 -= out.size()[1];
                         out7 -= out.size()[1];
 
-                        a[0] = _mm_slli_epi64(a[0], 1);
-                        a[1] = _mm_slli_epi64(a[1], 1);
-                        a[2] = _mm_slli_epi64(a[2], 1);
-                        a[3] = _mm_slli_epi64(a[3], 1);
-                        a[4] = _mm_slli_epi64(a[4], 1);
-                        a[5] = _mm_slli_epi64(a[5], 1);
-                        a[6] = _mm_slli_epi64(a[6], 1);
-                        a[7] = _mm_slli_epi64(a[7], 1);
+                        t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
+                        t.blks[1] = _mm_slli_epi64(t.blks[1], 1);
+                        t.blks[2] = _mm_slli_epi64(t.blks[2], 1);
+                        t.blks[3] = _mm_slli_epi64(t.blks[3], 1);
+                        t.blks[4] = _mm_slli_epi64(t.blks[4], 1);
+                        t.blks[5] = _mm_slli_epi64(t.blks[5], 1);
+                        t.blks[6] = _mm_slli_epi64(t.blks[6], 1);
+                        t.blks[7] = _mm_slli_epi64(t.blks[7], 1);
                     }
                 }
             }
@@ -533,31 +538,31 @@ namespace osuCrypto {
                 };
 
 
-                a[0] = ZeroBlock; 
+                t.blks[0] = ZeroBlock; 
                 for (u64 i = 0; i < leftOverWidth; ++i)
                 {
-                    dest[0][i] = src[i][0];
+                    t.bytes[0][i] = src[i][0];
                 }
 
                 auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.size()[1] + w * 2;
 
                 out0 -= out.size()[1] * skip;
-                a[0] = _mm_slli_epi64(a[0], skip);
+                t.blks[0] = _mm_slli_epi64(t.blks[0], skip);
 
-                for (int j = 0; j < rem; j++)
+                for (u64 j = 0; j < rem; j++)
                 {
                     if (leftOverWidth > 8)
                     {
-                        *(u16*)out0 = _mm_movemask_epi8(a[0]);
+                        *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
                     }
                     else
                     {
-                        *out0 = _mm_movemask_epi8(a[0]);
+                        *out0 = _mm_movemask_epi8(t.blks[0]);
                     }
 
                     out0 -= out.size()[1];
 
-                    a[0] = _mm_slli_epi64(a[0], 1);
+                    t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
                 }
             }
         }

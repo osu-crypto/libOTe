@@ -46,7 +46,7 @@ namespace osuCrypto
         ret->setBaseOts(baseRecvOts);
 
         return std::move(ret);
-    } 
+    }
 
 
     void KosDotExtReceiver::receive(
@@ -78,7 +78,7 @@ namespace osuCrypto
         choices2 = choices;
         choices2.resize(numBlocks * 128);
         for (u64 i = 0; i < 128; ++i)
-        { 
+        {
             choices2[choices.size() + i] = prng.getBit();
 
             //std::cout << "extra " << i << "  " << choices2[choices.size() + i] << std::endl;
@@ -88,22 +88,26 @@ namespace osuCrypto
         // this will be used as temporary buffers of 128 columns, 
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
-        std::array<std::array<block, superBlkSize>, 128> t0;
+        //std::array<std::array<block, superBlkSize>, 128> t0;
+        MatrixView<u8> t0(mGens.size(), superBlkSize * sizeof(block));
+
+        MatrixView<u8> messageTemp(messages.size() + 128, sizeof(block) * 2);
+        auto mIter = messageTemp.data();
 
         // the index of the OT that has been completed.
         //u64 doneIdx = 0;
 
-        std::array<std::array<block,2>, 128> extraBlocks;
-        auto xIter = extraBlocks.data();
-        auto xIterMaster = xIter;
+        //std::array<std::array<block,2>, 128> extraBlocks;
+        //auto xIter = extraBlocks.data();
+        //auto xIterMaster = xIter;
         //u64 extraIdx = 0;
 
-        std::vector<block> messages1(messages.size());
+        //std::vector<block> messages1(messages.size());
 
-        block* mEnd0 = messages.data() + messages.size();
-        block* mEnd1 = messages1.data() + messages1.size();
-        block* mIter0 = messages.data();
-        block* mIter1 = messages1.data();
+        //block* mEnd0 = messages.data() + messages.size();
+        //block* mEnd1 = messages1.data() + messages1.size();
+        //block* mIter0 = messages.data();
+        //block* mIter1 = messages1.data();
 
         u64 step = std::min<u64>(numSuperBlocks, (u64)commStepSize);
         std::unique_ptr<ByteStream> uBuff(new ByteStream(step * mGens.size() * superBlkSize * sizeof(block)));
@@ -111,13 +115,6 @@ namespace osuCrypto
         // get an array of blocks that we will fill. 
         auto uIter = (block*)uBuff->data();
         auto uEnd = uIter + step * mGens.size() * superBlkSize;
-
-
-        u64 colStepCount = (mGens.size() + 127) / 128;
-
-        // we assume we have the number of columns of between 129 and 256...
-        if (colStepCount != 2)
-            throw std::runtime_error(LOCATION);
 
 
 
@@ -133,126 +130,141 @@ namespace osuCrypto
             // the users next 128 choice bits. This will select what message is receiver.
             block* cIter = choiceBlocks.data() + superBlkSize * superBlkIdx;
 
-            // this will store the next 128 rows of the matrix u
-            for (u64 colStepIdx = 0; colStepIdx < 2; ++colStepIdx)
+
+
+            block* tIter = (block*)t0.data();
+            memset(t0.data(), 0, superBlkSize * 128 * sizeof(block));
+
+
+
+            // transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
+            for (u64 colIdx = 0; colIdx < mGens.size(); ++colIdx)
             {
-
-                block* tIter = (block*)t0.data();
-                memset(t0.data(), 0, superBlkSize * 128 * sizeof(block));
-
-
-                u64 colStop = std::min<u64>((colStepIdx + 1)* 128, mGens.size());
-
-                // transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
-                for (u64 colIdx = colStepIdx * 128; colIdx < colStop; ++colIdx)
-                {
-                    // generate the column indexed by colIdx. This is done with
-                    // AES in counter mode acting as a PRNG. We don't use the normal
-                    // PRNG interface because that would result in a data copy when 
-                    // we move it into the T0,T1 matrices. Instead we do it directly.
-                    mGens[colIdx][0].mAes.ecbEncCounterMode(mGens[colIdx][0].mBlockIdx, superBlkSize, tIter);
-                    mGens[colIdx][1].mAes.ecbEncCounterMode(mGens[colIdx][1].mBlockIdx, superBlkSize, uIter);
+                // generate the column indexed by colIdx. This is done with
+                // AES in counter mode acting as a PRNG. We don't use the normal
+                // PRNG interface because that would result in a data copy when 
+                // we move it into the T0,T1 matrices. Instead we do it directly.
+                mGens[colIdx][0].mAes.ecbEncCounterMode(mGens[colIdx][0].mBlockIdx, superBlkSize, tIter);
+                mGens[colIdx][1].mAes.ecbEncCounterMode(mGens[colIdx][1].mBlockIdx, superBlkSize, uIter);
 
 
-                    // increment the counter mode idx.
-                    mGens[colIdx][0].mBlockIdx += superBlkSize;
-                    mGens[colIdx][1].mBlockIdx += superBlkSize;
+                // increment the counter mode idx.
+                mGens[colIdx][0].mBlockIdx += superBlkSize;
+                mGens[colIdx][1].mBlockIdx += superBlkSize;
 
-                    uIter[0] = uIter[0] ^ cIter[0];
-                    uIter[1] = uIter[1] ^ cIter[1];
-                    uIter[2] = uIter[2] ^ cIter[2];
-                    uIter[3] = uIter[3] ^ cIter[3];
-                    uIter[4] = uIter[4] ^ cIter[4];
-                    uIter[5] = uIter[5] ^ cIter[5];
-                    uIter[6] = uIter[6] ^ cIter[6];
-                    uIter[7] = uIter[7] ^ cIter[7];
+                uIter[0] = uIter[0] ^ cIter[0];
+                uIter[1] = uIter[1] ^ cIter[1];
+                uIter[2] = uIter[2] ^ cIter[2];
+                uIter[3] = uIter[3] ^ cIter[3];
+                uIter[4] = uIter[4] ^ cIter[4];
+                uIter[5] = uIter[5] ^ cIter[5];
+                uIter[6] = uIter[6] ^ cIter[6];
+                uIter[7] = uIter[7] ^ cIter[7];
 
-                    uIter[0] = uIter[0] ^ tIter[0];
-                    uIter[1] = uIter[1] ^ tIter[1];
-                    uIter[2] = uIter[2] ^ tIter[2];
-                    uIter[3] = uIter[3] ^ tIter[3];
-                    uIter[4] = uIter[4] ^ tIter[4];
-                    uIter[5] = uIter[5] ^ tIter[5];
-                    uIter[6] = uIter[6] ^ tIter[6];
-                    uIter[7] = uIter[7] ^ tIter[7];
+                uIter[0] = uIter[0] ^ tIter[0];
+                uIter[1] = uIter[1] ^ tIter[1];
+                uIter[2] = uIter[2] ^ tIter[2];
+                uIter[3] = uIter[3] ^ tIter[3];
+                uIter[4] = uIter[4] ^ tIter[4];
+                uIter[5] = uIter[5] ^ tIter[5];
+                uIter[6] = uIter[6] ^ tIter[6];
+                uIter[7] = uIter[7] ^ tIter[7];
 
-                    uIter += 8;
-                    tIter += 8;
-                }
-
-
-                if (uIter == uEnd)
-                {
-                    // send over u buffer
-                    chl.asyncSend(std::move(uBuff));
-
-                    u64 step = std::min<u64>(numSuperBlocks - superBlkIdx - 1, (u64)commStepSize);
-
-                    if (step)
-                    {
-                        uBuff.reset(new ByteStream(step * mGens.size() * superBlkSize * sizeof(block)));
-                        uIter = (block*)uBuff->data();
-                        uEnd = uIter + step * mGens.size() * superBlkSize;
-                    }
-                }
-
-
-                // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
-                // each 128 bits wide.
-                sse_transpose128x1024(t0);
-
-
-                block* mIter = colStepIdx? mIter1: mIter0;
-                block* mEnd = std::min< block*>(mIter + 128 * superBlkSize, (colStepIdx? mEnd1 : mEnd0));
-
-                // compute how many rows are unused.
-                u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
-
-                // compute the begin and end index of the extra rows that 
-                // we will compute in this iters. These are taken from the 
-                // unused rows what we computed above.
-                xIter = xIterMaster;
-                auto xEnd = std::min<std::array<block,2>*>(xIter + unusedCount, extraBlocks.data() + 128);
-
-                tIter = (block*)t0.data();
-                block* tEnd = (block*)t0.data() + 128 * superBlkSize;
-
-                while (mIter != mEnd)
-                {
-                    while (mIter != mEnd && tIter < tEnd)
-                    {
-                        (*mIter) = *tIter;
-
-                        tIter += superBlkSize;
-                        mIter += 1;
-                    }
-
-                    tIter = tIter - 128 * superBlkSize + 1;
-                }
-
-
-                if (tIter < (block*)t0.data())
-                {
-                    tIter = tIter + 128 * superBlkSize - 1;
-                }
-
-                while (xIter != xEnd)
-                {
-                    while (xIter != xEnd && tIter < tEnd)
-                    {
-                        (*xIter)[colStepIdx] = *tIter;
-
-                        tIter += superBlkSize;
-                        xIter += 1;
-                    }
-
-                    tIter = tIter - 128 * superBlkSize + 1;
-                }
-
-                if (colStepIdx) mIter1 = mIter;
-                else mIter0 = mIter;
+                uIter += 8;
+                tIter += 8;
             }
-            xIterMaster = xIter;
+
+
+            if (uIter == uEnd)
+            {
+                // send over u buffer
+                chl.asyncSend(std::move(uBuff));
+
+                u64 step = std::min<u64>(numSuperBlocks - superBlkIdx - 1, (u64)commStepSize);
+
+                if (step)
+                {
+                    uBuff.reset(new ByteStream(step * mGens.size() * superBlkSize * sizeof(block)));
+                    uIter = (block*)uBuff->data();
+                    uEnd = uIter + step * mGens.size() * superBlkSize;
+                }
+            }
+
+
+
+            auto mCount = std::min<u64>((messageTemp.end() - mIter) / messageTemp.size()[1], 128 * superBlkSize);
+
+            MatrixView<u8> tOut(
+                (u8*)mIter,
+                mCount,
+                messageTemp.size()[1],
+                false);
+
+            mIter += mCount * messageTemp.size()[1];
+
+            // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
+            // each 128 bits wide.
+            sse_transpose(t0, tOut);
+
+
+
+
+            //    // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
+            //    // each 128 bits wide.
+            //    sse_transpose128x1024(t0);
+
+
+            //    block* mIter = colStepIdx? mIter1: mIter0;
+            //    block* mEnd = std::min< block*>(mIter + 128 * superBlkSize, (colStepIdx? mEnd1 : mEnd0));
+
+            //    // compute how many rows are unused.
+            //    u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
+
+            //    // compute the begin and end index of the extra rows that 
+            //    // we will compute in this iters. These are taken from the 
+            //    // unused rows what we computed above.
+            //    xIter = xIterMaster;
+            //    auto xEnd = std::min<std::array<block,2>*>(xIter + unusedCount, extraBlocks.data() + 128);
+
+            //    tIter = (block*)t0.data();
+            //    block* tEnd = (block*)t0.data() + 128 * superBlkSize;
+
+            //    while (mIter != mEnd)
+            //    {
+            //        while (mIter != mEnd && tIter < tEnd)
+            //        {
+            //            (*mIter) = *tIter;
+
+            //            tIter += superBlkSize;
+            //            mIter += 1;
+            //        }
+
+            //        tIter = tIter - 128 * superBlkSize + 1;
+            //    }
+
+
+            //    if (tIter < (block*)t0.data())
+            //    {
+            //        tIter = tIter + 128 * superBlkSize - 1;
+            //    }
+
+            //    while (xIter != xEnd)
+            //    {
+            //        while (xIter != xEnd && tIter < tEnd)
+            //        {
+            //            (*xIter)[colStepIdx] = *tIter;
+
+            //            tIter += superBlkSize;
+            //            xIter += 1;
+            //        }
+
+            //        tIter = tIter - 128 * superBlkSize + 1;
+            //    }
+
+            //    if (colStepIdx) mIter1 = mIter;
+            //    else mIter0 = mIter;
+            //}
+            //xIterMaster = xIter;
         }
 
 
@@ -271,9 +283,9 @@ namespace osuCrypto
 
         // this buffer will be sent to the other party to prove we used the 
         // same value of r in all of the column vectors...
-        std::unique_ptr<ByteStream> correlationData(new ByteStream( 2 * 3 * sizeof(block)));
+        std::unique_ptr<ByteStream> correlationData(new ByteStream(2 * 3 * sizeof(block)));
         correlationData->setp(correlationData->capacity());
-        auto& x = correlationData->getArrayView<std::array<block,2>>()[0];
+        auto& x = correlationData->getArrayView<std::array<block, 2>>()[0];
         auto& t = correlationData->getArrayView<std::array<block, 2>>()[1];
         auto& t2 = correlationData->getArrayView<std::array<block, 2>>()[2];
 
@@ -291,14 +303,17 @@ namespace osuCrypto
 
         block mask = _mm_set_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
+        //std::cout << IoStream::lock;
 
+        auto msg = (std::array<block, 2>*)messageTemp.data();
 
-        u64 bb = (messages.size() + 127) / 128;
+        u64 bb = (messageTemp.size()[0] + 127) / 128;
         for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
         {
             commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
 
-            u64 stop = std::min<u64>(messages.size(), doneIdx + 128);
+            u64 stop0 = std::min<u64>(messages.size(), doneIdx + 128);
+            u64 stop1 = std::min<u64>(messageTemp.size()[0], doneIdx + 128);
 
             expendedChoiceBlk[0] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 0);
             expendedChoiceBlk[1] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 1);
@@ -308,8 +323,9 @@ namespace osuCrypto
             expendedChoiceBlk[5] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 5);
             expendedChoiceBlk[6] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 6);
             expendedChoiceBlk[7] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 7);
-             
-            for (u64 i = 0, dd = doneIdx; dd < stop; ++dd, ++i)
+
+            u64 i = 0;
+            for (u64 dd = doneIdx; dd < stop0; ++dd, ++i)
             {
 
 
@@ -317,46 +333,65 @@ namespace osuCrypto
                 x[1] = x[1] ^ (challenges[i] & zeroOneBlk[expendedChoice[i % 8][i / 8]]);
 
                 // multiply over polynomial ring to avoid reduction
-                mul128(messages[dd], challenges[i], ti, ti2);
+                mul128(msg[dd][0], challenges[i], ti, ti2);
                 t[0] = t[0] ^ ti;
                 t2[0] = t2[0] ^ ti2;
 
-                mul128(messages1[dd], challenges[i], ti, ti2);
+                mul128(msg[dd][1], challenges[i], ti, ti2);
                 t[1] = t[1] ^ ti;
                 t2[1] = t2[1] ^ ti2;
 
-                //std::cout << "r m[" << dd << "] " << messages[dd] << " " << messages1[dd] << " " << choices2[dd] << std::endl;
 
-                std::array<block, 2> msg{ messages[dd], messages1[dd] };
-                mCode.encode(msg, ArrayView<block>(&messages[dd], 1));
+                //std::array<block, 2> msg{ messages[dd], messages1[dd] };
+                mCode.encode(msg[dd], ArrayView<block>(&messages[dd], 1));
+                //std::cout << "r msg[" << dd << "][" << choices2[dd] << "] " << msg[dd][0] << " " << msg[dd][1] << "   " << messages[dd]<< std::endl;
             }
 
-
-            doneIdx = stop;
-        }
-
-
-
-        for (auto& blk : extraBlocks)
-        {
-            // and check for correlation
-            block chij = commonPrng.get<block>();
-
-
-            if (choices2[doneIdx++])
+            for (u64 dd = stop0; dd < stop1; ++dd, ++i)
             {
-                x[0] = x[0] ^ chij;
-                x[1] = x[1] ^ chij;
-            }
-            // multiply over polynomial ring to avoid reduction
-            mul128(blk[0], chij, ti, ti2);
-            t[0] = t[0] ^ ti;
-            t2[0] = t2[0] ^ ti2;
+                auto challenge = commonPrng.get<block>();
 
-            mul128(blk[1], chij, ti, ti2);
-            t[1] = t[1] ^ ti;
-            t2[1] = t2[1] ^ ti2;
+                x[0] = x[0] ^ (challenge & zeroOneBlk[expendedChoice[i % 8][i / 8]]);
+                x[1] = x[1] ^ (challenge & zeroOneBlk[expendedChoice[i % 8][i / 8]]);
+                //std::cout << "r xtra[" << dd << "][" << choices2[dd] << "] " << msg[dd][0] << " " << msg[dd][1] << std::endl;
+
+                // multiply over polynomial ring to avoid reduction
+                mul128(msg[dd][0], challenge, ti, ti2);
+                t[0] = t[0] ^ ti;
+                t2[0] = t2[0] ^ ti2;
+
+                mul128(msg[dd][1], challenge, ti, ti2);
+                t[1] = t[1] ^ ti;
+                t2[1] = t2[1] ^ ti2;
+            }
+
+
+            doneIdx = stop1;
         }
+
+        //std::cout << IoStream::unlock;
+
+
+        //for (auto& blk : extraBlocks)
+        //{
+        //    // and check for correlation
+        //    block chij = commonPrng.get<block>();
+
+
+        //    if (choices2[doneIdx++])
+        //    {
+        //        x[0] = x[0] ^ chij;
+        //        x[1] = x[1] ^ chij;
+        //    }
+        //    // multiply over polynomial ring to avoid reduction
+        //    mul128(blk[0], chij, ti, ti2);
+        //    t[0] = t[0] ^ ti;
+        //    t2[0] = t2[0] ^ ti2;
+
+        //    mul128(blk[1], chij, ti, ti2);
+        //    t[1] = t[1] ^ ti;
+        //    t2[1] = t2[1] ^ ti2;
+        //}
 
         gTimer.setTimePoint("recv.checkSummed");
 
