@@ -26,7 +26,7 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
 | 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **11.7 / 9.2**       	| ~              	| ~     	| 24**     	| ~          	|
 | 1-out-of-N (N=2<sup>128</sup>)| passive| KKRT16      	| **9.2 / 6.7**        	| ~              	| ~       	| ~       	| ~          	|
-| 1-out-of-2 Delta-OT  	| malicious   	| KOS15       	| **2.1***        	| ~              	| ~     	| ~        	|  ~      	|
+| 1-out-of-2 Delta-OT  	| malicious   	| KOS15       	| **1.9***        	| ~              	| ~     	| ~        	|  ~      	|
 | 1-out-of-2          	| malicious 	| ALSZ15        | ~          	        | 17.3          	| ~       	| ~       	|  10         	|
 | 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  2.9       	|
 | 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**   | ~     	|  2.7      	|
