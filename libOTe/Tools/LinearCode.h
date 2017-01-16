@@ -37,7 +37,7 @@ namespace osuCrypto
 
         void generateMod8Table();
 
-        u64 mU8RowCount, mPow2CodeSize;
+        u64 mU8RowCount, mPow2CodeSize, mPlaintextU8Size;
         u64 mCodewordBitSize;
         std::vector<block> mG;
         std::vector<block> mG8;
@@ -62,7 +62,7 @@ namespace osuCrypto
 
         inline u64 plaintextU8Size() const
         {
-            return (plaintextBitSize() + 7) / 8;
+            return mPlaintextU8Size;
         }
 
         inline u64 codewordU8Size() const

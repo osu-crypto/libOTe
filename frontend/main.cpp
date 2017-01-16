@@ -558,7 +558,7 @@ void code()
 {
     PRNG prng(ZeroBlock);
     LinearCode code;
-    code.random(prng, 128, 256 * 4);
+    code.random(prng, 128, 128 * 4);
     u64 n = 1 << 24;
 
     Timer t;

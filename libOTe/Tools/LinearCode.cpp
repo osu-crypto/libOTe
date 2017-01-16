@@ -24,6 +24,7 @@ namespace osuCrypto
         mU8RowCount(cp.mU8RowCount),
         mPow2CodeSize(cp.mPow2CodeSize),
         mCodewordBitSize(cp.mCodewordBitSize),
+        mPlaintextU8Size(cp.mPlaintextU8Size),
         mG(cp.mG),
         mG8(cp.mG8)
     {
@@ -191,6 +192,8 @@ namespace osuCrypto
 
     void LinearCode::generateMod8Table()
     {
+        mPlaintextU8Size = (plaintextBitSize() + 7) / 8;
+
         if (plaintextU8Size() > sLinearCodePlainTextMaxSize)
         {
             std::cout << "The encode function assumes that the plaintext word"
@@ -402,16 +405,15 @@ namespace osuCrypto
         // each with input size 8. And these subcodes are precomputed
         // in a lookup table called mG8. Each sub-code takes up 256 * codeSize;
 
-        u64 codeSize = mPow2CodeSize;
-
-        u64 rowSize = 256 * codeSize;
-        u64 rowSize8 = rowSize * 8;
-        u64 superRowCount = (mU8RowCount + 7) / 8;
+        const u64& codeSize = mPow2CodeSize;
+        const u64 rowSize = 256 * codeSize;
+        const u64 rowSize8 = rowSize * 8;
+        const u64 superRowCount = (mU8RowCount + 7) / 8;
 
         // in some cases below, the input array must be a
         // multiple of 8 in length...
         u8 byteView[sLinearCodePlainTextMaxSize];
-        memcpy(byteView, input, plaintextU8Size());
+        memcpy(byteView, input, mPlaintextU8Size);
 
 
         // create a local to store the partial codeword
