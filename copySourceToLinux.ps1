@@ -5,7 +5,7 @@ $SolutionDir=$PWD
 $RemoteWorkingDir='/scratch/repo/libOTe'
 
 # only files with these extensions will be copied
-$FileMasks='**.cpp;**.c;**.h;makefile,*.bin,*.S,*.sh,*CMake*;*/Tools/*.txt;**.mak;thirdparty/linux/**.get'
+$FileMasks='**.cpp;**.c;**.h;makefile,*.bin,*.S,*.sh,*CMake*;*/Tools/*.txt;**.mak;thirdparty/linux/**.get;*/libOTe_Tests/testData/*.txt'
 
 # everything in these folders will be skipped
 $ExcludeDirs='.git/;thirdparty/;Debug/;Release/;x64/;ipch/;.vs/'

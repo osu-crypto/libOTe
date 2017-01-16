@@ -102,6 +102,12 @@ namespace osuCrypto_tests
         }
 
 
+        TEST_METHOD(LinearCode_subBlock_TestVS)
+        {
+            InitDebugPrinting();
+            LinearCode_subBlock_Test_Impl();
+        }
+
         TEST_METHOD(LinearCode_repetition_TestVS)
         {
             InitDebugPrinting();

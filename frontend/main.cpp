@@ -554,6 +554,28 @@ void akn_test(int i)
     ios.stop();
 }
 
+void code()
+{
+    PRNG prng(ZeroBlock);
+    LinearCode code;
+    code.random(prng, 128, 256 * 4);
+    u64 n = 1 << 24;
+
+    Timer t;
+    t.setTimePoint("start");
+
+    u8* in = new u8[code.plaintextU8Size()];
+    u8* out = new u8[code.codewordU8Size()];
+
+    for (u64 i = 0; i < n; ++i)
+    {
+        code.encode(in, out);
+    }
+
+    t.setTimePoint("end");
+    std::cout << t << std::endl;
+}
+
 static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
 kos{ "k", "kos" },
@@ -565,6 +587,8 @@ akn{ "a", "akn" };
 
 int main(int argc, char** argv)
 {
+    //code();
+    //return 0;
     CLP cmd;
     cmd.parse(argc, argv);
 

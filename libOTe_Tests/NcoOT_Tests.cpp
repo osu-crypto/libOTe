@@ -7,7 +7,7 @@
 #include "cryptoTools/Network/BtChannel.h"
 #include "cryptoTools/Network/BtEndpoint.h"
 #include "cryptoTools/Common/Log.h"
- 
+
 #include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
 #include "libOTe/NChooseOne/KkrtNcoOtSender.h"
 
@@ -36,8 +36,8 @@ void KkrtNcoOt_Test_Impl()
     KkrtNcoOtSender sender;
     KkrtNcoOtReceiver recv;
     u64 codeSize, baseCount;
-    sender.getParams(false,128, 40, 128, numOTs, codeSize, baseCount);
-    
+    sender.getParams(false, 128, 40, 128, numOTs, codeSize, baseCount);
+
     std::vector<block> baseRecv(baseCount);
     std::vector<std::array<block, 2>> baseSend(baseCount);
     BitVector baseChoice(baseCount);
@@ -79,14 +79,14 @@ void KkrtNcoOt_Test_Impl()
             recv.sendCorrection(recvChl, 1);
             sender.recvCorrection(sendChl, 1);
 
-            sender.encode(i, codeword,  encoding2);
+            sender.encode(i, codeword, encoding2);
 
             if (neq(encoding1, encoding2))
                 throw UnitTestFail();
 
             prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
 
-            sender.encode(i, codeword,  encoding2);
+            sender.encode(i, codeword, encoding2);
 
             if (eq(encoding1, encoding2))
                 throw UnitTestFail();
@@ -165,7 +165,7 @@ void OosNcoOt_Test_Impl()
             }
             else
             {
-                recv.encode(i, choice,  encoding1);
+                recv.encode(i, choice, encoding1);
             }
 
             recv.sendCorrection(recvChl, 1);
@@ -221,7 +221,14 @@ void LinearCode_Test_Impl()
     //for (u64 i = 0; i < code.mG.size(); ++i)
     //    std::cout << code.mG[i] << std::endl;
 
-    std::vector<block> 
+    if (code.plaintextBitSize() != 76)
+        throw UnitTestFail("bad input size reported by code");
+
+
+    if (code.codewordBitSize() != 511)
+        throw UnitTestFail("bad out size reported by code");
+
+    std::vector<block>
         plainText(code.plaintextBlkSize(), AllOneBlock),
         codeword(code.codewordBlkSize());
 
@@ -259,6 +266,110 @@ void LinearCode_Test_Impl()
         throw UnitTestFail();
     }
 
+}
+
+void LinearCode_subBlock_Test_Impl()
+{
+    LinearCode code511, code128, code256, code384, code640, code1280;
+
+    code511.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.txt");
+    code128.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe_Tests/testData/code128_BCH511.txt");
+    code256.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe_Tests/testData/code256_BCH511.txt");
+    code384.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe_Tests/testData/code384_BCH511.txt");
+    code640.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe_Tests/testData/code640_BCH511.txt");
+    code1280.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe_Tests/testData/code1280_BCH511.txt");
+
+    BitVector
+        in(code511.plaintextBitSize()),
+        out511(code511.codewordBitSize()),
+        out128(code128.codewordBitSize()),
+        out256(code256.codewordBitSize()),
+        out384(code384.codewordBitSize()),
+        out640(code640.codewordBitSize()),
+        out1280(code1280.codewordBitSize());
+
+
+    PRNG prng(ZeroBlock);
+
+    for (u64 i = 0; i < 10; ++i)
+    {
+
+        in.randomize(prng);
+
+        code511.encode(in.data(), out511.data());
+        code128.encode(in.data(), out128.data());
+        code256.encode(in.data(), out256.data());
+        code384.encode(in.data(), out384.data());
+        code640.encode(in.data(), out640.data());
+        code1280.encode(in.data(), out1280.data());
+
+        BitVector
+            out511_128 = out511,
+            out511_256 = out511,
+            out511_384 = out511,
+            out511_640 = out511,
+            out511_1280;
+
+        u8 zero = 0;
+        out511_640.append(&zero, 1);
+        out511_640.append(out128);
+
+        out511_1280.append(out640);
+        out511_1280.append(out640);
+
+        out511_128.resize(128);
+        out511_256.resize(256);
+        out511_384.resize(384);
+
+        if (out511_128 != out128)
+        {
+            std::cout << "out511 " << out511_128 << std::endl;
+            std::cout << "out128 " << out128 << std::endl;
+            throw UnitTestFail(LOCATION);
+        }
+
+        if (out511_256 != out256)
+        {
+            std::cout << "out511 " << out511_256 << std::endl;
+            std::cout << "out256 " << out256 << std::endl;
+            throw UnitTestFail(LOCATION);
+        }
+
+        if (out511_384 != out384)
+        {
+            std::cout << "out511 " << out511_384 << std::endl;
+            std::cout << "out384 " << out384 << std::endl;
+            throw UnitTestFail(LOCATION);
+        }
+
+        if (out511_640 != out640)
+        {
+            std::cout << "out511 " << out511_640 << std::endl;
+            std::cout << "out640 " << out640 << std::endl;
+
+            for (u64 j = 0; j < 640; ++j)
+            {
+                if (out511_640[j] == out640[j])
+                {
+                    std::cout << " ";
+                }
+                else
+                {
+                    std::cout << "^" << j ;
+                }
+            }
+
+            std::cout << std::endl;
+            throw UnitTestFail(LOCATION);
+        }
+
+        if (out511_1280 != out1280)
+        {
+            std::cout << "out511  " << out511_1280 << std::endl;
+            std::cout << "out1280 " << out1280 << std::endl;
+            throw UnitTestFail(LOCATION);
+        }
+    }
 }
 
 void LinearCode_repetition_Test_Impl()

@@ -10,6 +10,8 @@ namespace osuCrypto
     class LinearCode
     {
     public:
+        static const u16 sLinearCodePlainTextMaxSize;
+
         LinearCode();
         ~LinearCode();
         LinearCode(const LinearCode& cp);
@@ -35,18 +37,39 @@ namespace osuCrypto
 
         void generateMod8Table();
 
+        u64 mU8RowCount, mPow2CodeSize;
         u64 mCodewordBitSize;
         std::vector<block> mG;
         std::vector<block> mG8;
 
-        u64 plaintextBlkSize()const;
-        u64 codewordBlkSize()const;
+        inline u64 codewordBitSize() const
+        {
+            return mCodewordBitSize;
+        }
 
-        u64 plaintextU8Size()const;
-        u64 codewordU8Size()const;
+        inline u64 codewordBlkSize() const
+        {
+            return (codewordBitSize() + 127) / 128;
+        }
+        inline u64 plaintextBitSize() const
+        {
+            return mG.size() / codewordBlkSize();
+        }
+        inline u64 plaintextBlkSize() const
+        {
+            return (plaintextBitSize() + 127) / 128;
+        }
 
-        u64 plaintextBitSize()const;
-        u64 codewordBitSize()const;
+        inline u64 plaintextU8Size() const
+        {
+            return (plaintextBitSize() + 7) / 8;
+        }
+
+        inline u64 codewordU8Size() const
+        {
+            return (codewordBitSize() + 7) / 8;
+        }
+
 
 
         void encode(ArrayView<block> plaintext, ArrayView<block> codeword);

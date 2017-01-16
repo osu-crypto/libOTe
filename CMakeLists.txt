@@ -57,48 +57,33 @@ set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/thirdparty/linux/boost/")
 #    Build cryptoTools (common utilities)   #
 #############################################
 add_subdirectory(cryptoTools)
-#include_directories(cryptoTools)
 
 #############################################
 #               Build libOTe                #
 #############################################
 add_subdirectory(libOTe)
-# include_directories(libOTe)
 
 #############################################
 #           Build libOTe Tests              #
 #############################################
 add_subdirectory(libOTe_Tests)
-#include_directories(libOTe_Tests)
 
 #############################################
 #              Build Frontend               #
 #############################################
-#add_subdirectory(frontend)
 include_directories(${CMAKE_SOURCE_DIR})
 file(GLOB_RECURSE SRC_FRONTEND ${CMAKE_SOURCE_DIR}/frontend/*.cpp)
 add_executable(frontend.exe ${SRC_FRONTEND})
 
 #############################################
+#            Install Frontend               #
+#############################################
+install (TARGETS frontend.exe DESTINATION bin)
+
+#############################################
 #            Link our libraries             #
 #############################################
-
 target_link_libraries(frontend.exe libOTe_Tests)
+# other libs implicitly linked with libOTe_Tests
 
-#############################################
-#            Install                        #
-#############################################
 
-# install library
-file(GLOB_RECURSE SOURCES libOTe/*.cpp)
-add_library(OTe STATIC ${SOURCES})
-install(TARGETS OTe DESTINATION lib/${PROJECT_NAME})
-
-# install headers
-install(DIRECTORY libOTe DESTINATION include FILES_MATCHING PATTERN "*.h")
-
-# export cryptoTools headers too
-install(DIRECTORY cryptoTools DESTINATION include FILES_MATCHING PATTERN "*.h")
-
-#install binary
-install (TARGETS frontend.exe DESTINATION bin)

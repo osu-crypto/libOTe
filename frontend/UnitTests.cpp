@@ -70,6 +70,7 @@ void OT_all()
     run("KkrtNcoOt_Test                          ", KkrtNcoOt_Test_Impl);
     run("OosNcoOt_Test_Impl                      ", OosNcoOt_Test_Impl);
     run("LinearCode_Test_Impl                    ", LinearCode_Test_Impl);
+    run("LinearCode_subBlock_Test_Impl           ", LinearCode_subBlock_Test_Impl);
     run("LinearCode_repetition_Test_Impl         ", LinearCode_repetition_Test_Impl);
     run("NaorPinkasOt_Test                       ", NaorPinkasOt_Test_Impl);
 }
