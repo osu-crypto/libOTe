@@ -57,6 +57,8 @@ set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/thirdparty/linux/boost/")
 #    Build cryptoTools (common utilities)   #
 #############################################
 add_subdirectory(cryptoTools)
+# install cryptoTools headers
+install(DIRECTORY cryptoTools DESTINATION include FILES_MATCHING PATTERN "*.h")
 
 #############################################
 #               Build libOTe                #

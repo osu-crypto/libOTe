@@ -17,4 +17,4 @@ target_link_libraries(libOTe cryptoTools)
 install(TARGETS libOTe DESTINATION lib/${PROJECT_NAME})
 
 # install headers
-install(DIRECTORY libOTe DESTINATION include FILES_MATCHING PATTERN "*.h")
+install(DIRECTORY . DESTINATION include/libOTe FILES_MATCHING PATTERN "*.h")
