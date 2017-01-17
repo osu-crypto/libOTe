@@ -79,8 +79,6 @@ namespace osuCrypto_tests
             KosDotExt_100Receive_Test_Impl();
         }
 
-
-
         TEST_METHOD(Kkrt_200Receive_TestVS)
         {
             InitDebugPrinting();

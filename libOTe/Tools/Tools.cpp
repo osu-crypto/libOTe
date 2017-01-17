@@ -13,6 +13,7 @@ using std::array;
 
 namespace osuCrypto {
 
+
     void eklundh_transpose128(array<block, 128>& inOut)
     {
         const static u64 TRANSPOSE_MASKS128[7][2] = {

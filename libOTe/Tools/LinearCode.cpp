@@ -205,7 +205,7 @@ namespace osuCrypto
         auto singleRowCount = plaintextBitSize();
         auto mod8RowCount = (singleRowCount + 7) / 8;
         auto pipelinedMod8RowCount = roundUpTo(mod8RowCount, 8);
-         
+
         switch (codewordBlkSize())
         {
         case 3:
@@ -436,28 +436,35 @@ namespace osuCrypto
         {
             // this case has been optimized and we lookup 8 sub-codes at a time.
             static const u64 byteStep = 8;
+            block* g0 = mG8.data() + rowSize * 0;// + k + byteView[i + 0] * codeSize + rowSize * 0;
+            block* g1 = mG8.data() + rowSize * 1;// + k + byteView[i + 1] * codeSize + rowSize * 1;
+            block* g2 = mG8.data() + rowSize * 2;// + k + byteView[i + 2] * codeSize + rowSize * 2;
+            block* g3 = mG8.data() + rowSize * 3;// + k + byteView[i + 3] * codeSize + rowSize * 3;
+            block* g4 = mG8.data() + rowSize * 4;// + k + byteView[i + 4] * codeSize + rowSize * 4;
+            block* g5 = mG8.data() + rowSize * 5;// + k + byteView[i + 5] * codeSize + rowSize * 5;
+            block* g6 = mG8.data() + rowSize * 6;// + k + byteView[i + 6] * codeSize + rowSize * 6;
+            block* g7 = mG8.data() + rowSize * 7;// + k + byteView[i + 7] * codeSize + rowSize * 7;
 
-            u64 kStop = (mG8.size() / 8) * 8;
             u64 kStep = rowSize * byteStep;
-            for (u64 k = 0, i = 0; k < kStop; i += byteStep, k += kStep)
+            for (u64 i = 0; i < mPlaintextU8Size; i += byteStep)
             {
-                block* g0 = mG8.data() + k + byteView[i + 0] * codeSize + rowSize * 0;
-                block* g1 = mG8.data() + k + byteView[i + 1] * codeSize + rowSize * 1;
-                block* g2 = mG8.data() + k + byteView[i + 2] * codeSize + rowSize * 2;
-                block* g3 = mG8.data() + k + byteView[i + 3] * codeSize + rowSize * 3;
-                block* g4 = mG8.data() + k + byteView[i + 4] * codeSize + rowSize * 4;
-                block* g5 = mG8.data() + k + byteView[i + 5] * codeSize + rowSize * 5;
-                block* g6 = mG8.data() + k + byteView[i + 6] * codeSize + rowSize * 6;
-                block* g7 = mG8.data() + k + byteView[i + 7] * codeSize + rowSize * 7;
+                c[0] = c[0] ^ g0[byteView[i + 0] * codeSize];
+                c[1] = c[1] ^ g1[byteView[i + 1] * codeSize];
+                c[2] = c[2] ^ g2[byteView[i + 2] * codeSize];
+                c[3] = c[3] ^ g3[byteView[i + 3] * codeSize];
+                c[4] = c[4] ^ g4[byteView[i + 4] * codeSize];
+                c[5] = c[5] ^ g5[byteView[i + 5] * codeSize];
+                c[6] = c[6] ^ g6[byteView[i + 6] * codeSize];
+                c[7] = c[7] ^ g7[byteView[i + 7] * codeSize];
 
-                c[0] = c[0] ^ *g0;
-                c[1] = c[1] ^ *g1;
-                c[2] = c[2] ^ *g2;
-                c[3] = c[3] ^ *g3;
-                c[4] = c[4] ^ *g4;
-                c[5] = c[5] ^ *g5;
-                c[6] = c[6] ^ *g6;
-                c[7] = c[7] ^ *g7;
+                g0 += kStep;
+                g1 += kStep;
+                g2 += kStep;
+                g3 += kStep;
+                g4 += kStep;
+                g5 += kStep;
+                g6 += kStep;
+                g7 += kStep;
             }
 
             c[0] = c[0] ^ c[4];
@@ -847,4 +854,4 @@ namespace osuCrypto
 
     }
 
-    }
+}

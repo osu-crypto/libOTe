@@ -604,7 +604,24 @@ void LzKosOtExt_100Receive_Test_Impl()
 }
 
 
-
+void mul128b(__m128i b, __m128i a, __m128i &c0, __m128i &c1)
+{
+    __m128i t1, t2;
+    c0 = _mm_clmulepi64_si128(a, b, 0x00);
+    c1 = _mm_clmulepi64_si128(a, b, 0x11);
+    t1 = _mm_shuffle_epi32(a, 0xEE);
+    t1 = _mm_xor_si128(a, t1);
+    t2 = _mm_shuffle_epi32(b, 0xEE);
+    t2 = _mm_xor_si128(b, t2);
+    t1 = _mm_clmulepi64_si128(t1, t2, 0x00);
+    t1 = _mm_xor_si128(c0, t1);
+    t1 = _mm_xor_si128(c1, t1);
+    t2 = t1;
+    t1 = _mm_slli_si128(t1, 8);
+    t2 = _mm_srli_si128(t2, 8);
+    c0 = _mm_xor_si128(c0, t1);
+    c1 = _mm_xor_si128(c1, t2);
+}
 
 void KosDotExt_100Receive_Test_Impl()
 {
@@ -619,20 +636,18 @@ void KosDotExt_100Receive_Test_Impl()
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
     PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
 
-    u64 numOTs = 1024;
+    u64 numOTs = 952;
 
     u64 s = 40;
-
 
     std::vector<block> recvMsg(numOTs), baseRecv(128 + s);
     std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128 + s);
     BitVector choices(numOTs);
     choices.randomize(prng0);
-
+    //choices[0] = 1;
 
     BitVector baseChoice(128 + s);
     baseChoice.randomize(prng0);
-
 
     for (u64 i = 0; i < 128 + s; ++i)
     {
