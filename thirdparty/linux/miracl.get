@@ -2,11 +2,15 @@
 
 set -e
 
-if [ ! -d miracl ]; then
+if [ ! -d miracl ]
+then
     echo "downloading Miracl"
     git clone https://github.com/ladnir/miracl
 fi
 
-echo "building Mircal"
-cd miracl/miracl/source/
-bash linux64
+if [ ! -e miracl/miracl/source/libmiracl.a ]
+then
+    echo "building Mircal"
+    cd miracl/miracl/source/
+    bash linux64
+fi
