@@ -587,6 +587,9 @@ akn{ "a", "akn" };
 
 int main(int argc, char** argv)
 {
+    std::vector<u8> data(16);
+    MatrixView<u8> v(data,4);
+
     //code();
     //return 0;
     CLP cmd;

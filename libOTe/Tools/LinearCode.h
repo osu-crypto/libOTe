@@ -72,8 +72,8 @@ namespace osuCrypto
 
 
 
-        void encode(ArrayView<block> plaintext, ArrayView<block> codeword);
-        void encode(ArrayView<u8> plaintext, ArrayView<u8> codeword);
+        void encode(const ArrayView<block>& plaintext,const ArrayView<block>& codeword);
+        void encode(const ArrayView<u8>& plaintext, const ArrayView<u8>& codeword);
         void encode(u8* plaintext, u8* codeword);
 
     };

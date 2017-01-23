@@ -182,7 +182,7 @@ namespace osuCrypto
         // use this for two thing, to store the code word and 
         // to store the zero message from base OT matrix transposed.
         std::array<block, 10> codeword;
-        mCode.encode(choice, codeword);
+        mCode.encode((ArrayView<block>)choice, (ArrayView<block>)codeword);
 
 
 

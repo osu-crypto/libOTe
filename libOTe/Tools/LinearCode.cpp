@@ -23,8 +23,8 @@ namespace osuCrypto
         :
         mU8RowCount(cp.mU8RowCount),
         mPow2CodeSize(cp.mPow2CodeSize),
-        mCodewordBitSize(cp.mCodewordBitSize),
         mPlaintextU8Size(cp.mPlaintextU8Size),
+        mCodewordBitSize(cp.mCodewordBitSize),
         mG(cp.mG),
         mG8(cp.mG8)
     {
@@ -277,8 +277,8 @@ namespace osuCrypto
     static std::array<block, 2> sBlockMasks{ { ZeroBlock, AllOneBlock } };
 
     void LinearCode::encode(
-        ArrayView<block> plaintxt,
-        ArrayView<block> codeword)
+        const ArrayView<block>& plaintxt,
+        const ArrayView<block>& codeword)
     {
 #ifndef NDEBUG
         if (plaintxt.size() != plaintextBlkSize() ||
@@ -386,8 +386,8 @@ namespace osuCrypto
 
 
     void LinearCode::encode(
-        ArrayView<u8> plaintxt,
-        ArrayView<u8> codeword)
+        const ArrayView<u8>& plaintxt,
+        const ArrayView<u8>& codeword)
     {
 #ifndef NDEBUG
         if (plaintxt.size() != plaintextU8Size() ||
