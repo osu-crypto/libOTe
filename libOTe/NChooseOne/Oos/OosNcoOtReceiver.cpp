@@ -218,7 +218,7 @@ namespace osuCrypto
             SHA1  sha1;
             u8 hashBuff[SHA1::HashSize];
             // now hash it to remove the correlation.
-            sha1.Update((u8*)mT0[otIdx].data(), mT0[otIdx].size() * sizeof(block));
+            sha1.Update((u8*)t0Val, mT0.size()[1] * sizeof(block));
             sha1.Final(hashBuff);
             val = toBlock(hashBuff);
 #else
@@ -263,7 +263,7 @@ namespace osuCrypto
             SHA1  sha1;
             u8 hashBuff[SHA1::HashSize];
             // now hash it to remove the correlation.
-            sha1.Update((u8*)mT0[otIdx].data(), mT0[otIdx].size() * sizeof(block));
+            sha1.Update((u8*)t0Val, mT0.size()[1] * sizeof(block));
             sha1.Final(hashBuff);
             val = toBlock(hashBuff);
 #else
