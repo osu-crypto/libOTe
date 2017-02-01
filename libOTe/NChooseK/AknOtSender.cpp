@@ -90,8 +90,8 @@ namespace osuCrypto
             u64 end = std::min<u64>(roundUpTo((t + 1) * mMessages.size() / chls.size(), 128), mMessages.size());
 
             ArrayView<std::array<block, 2>> range(
-                mMessages.begin() + start,
-                mMessages.begin() + end);
+                (mMessages.begin() + start),
+                (mMessages.begin() + end));
 
             PRNG prng(extSeed);
             //std::cout << IoStream::lock << "send 0 " << end << std::endl;

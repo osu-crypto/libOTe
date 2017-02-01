@@ -152,7 +152,7 @@ namespace osuCrypto
 
 
             //block* mStart = mIter;
-            block* mEnd = std::min<block*>(mIter + 128 * superBlkSize, (block*)messages.end());
+            block* mEnd = std::min<block*>(mIter + 128 * superBlkSize, &*messages.end());
 
 
             tIter = (block*)t0.data();

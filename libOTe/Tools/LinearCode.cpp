@@ -240,8 +240,8 @@ namespace osuCrypto
 
         for (u64 i = 0; i < g8.size()[0]; ++i)
         {
-
-            MatrixView<block> g8Block(g8[i].begin(), g8[i].end(), mPow2CodeSize);
+            auto vv = g8[i];
+            MatrixView<block> g8Block(vv.begin(), vv.end(), mPow2CodeSize);
 
             for (u64 gRow = 0; gRow < 8; ++gRow)
             {

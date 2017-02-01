@@ -91,7 +91,7 @@ namespace osuCrypto
         block* xIter = extraBlocks.data();
         //u64 extraIdx = 0;
 
-        block* mIter = messages.data();
+        auto mIter = messages.begin();
 
         // NOTE: We do not transpose a bit-matrix of size numCol * numCol.
         //   Instead we break it down into smaller chunks. We do 128 columns 
@@ -157,12 +157,11 @@ namespace osuCrypto
             sse_transpose128x1024(t0);
 
 
-
-            //block* mStart = mIter;
-            block* mEnd = std::min(mIter + 128 * superBlkSize, (block*)messages.end());
+            //std::array<block, 2>* mStart = mIter;
+            auto mEnd = mIter + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 
             // compute how many rows are unused.
-            u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
+            u64 unusedCount = mIter - mEnd + 128 * superBlkSize;
 
             // compute the begin and end index of the extra rows that 
             // we will compute in this iters. These are taken from the 

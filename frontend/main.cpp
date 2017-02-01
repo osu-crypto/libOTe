@@ -585,10 +585,14 @@ iknp{ "i", "iknp" },
 oos{ "o", "oos" },
 akn{ "a", "akn" };
 
+#include "cryptoTools/gsl/gsl.h"
+
 int main(int argc, char** argv)
 {
     std::vector<u8> data(16);
-    MatrixView<u8> v(data,4);
+    //MatrixView<u8> v(data,4);
+
+    ArrayView<u8> c(data);
 
     //code();
     //return 0;

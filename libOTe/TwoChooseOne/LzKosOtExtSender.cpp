@@ -75,7 +75,7 @@ namespace osuCrypto
         Commit theirSeedComm;
         chl.recv(theirSeedComm.data(), theirSeedComm.size());
 
-        std::array<block, 2>* mIter = messages.data();
+        auto mIter = messages.begin();
 
 
         for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
@@ -123,10 +123,10 @@ namespace osuCrypto
 
 
             //std::array<block, 2>* mStart = mIter;
-            auto mEnd = std::min<std::array<block, 2>*>(mIter + 128 * superBlkSize, (std::array<block, 2>*)messages.end());
+            auto mEnd = mIter + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 
             // compute how many rows are unused.
-            u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
+            u64 unusedCount = mIter - mEnd + 128 * superBlkSize;
 
             // compute the begin and end index of the extra rows that 
             // we will compute in this iters. These are taken from the 

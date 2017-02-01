@@ -538,8 +538,8 @@ namespace osuCrypto
         {
             
             ArrayView<block> word(
-                wSum.begin() + l * mCode.plaintextBlkSize(),
-                wSum.begin() + (l + 1) * mCode.plaintextBlkSize());
+                wSum.data() + l * mCode.plaintextBlkSize(),
+                mCode.plaintextBlkSize());
 
             // encode their l'th linear combination of choice words.
             mCode.encode(word, cw);

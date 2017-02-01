@@ -88,8 +88,8 @@ namespace osuCrypto
         Commit theirSeedComm;
         chl.recv(theirSeedComm.data(), theirSeedComm.size());
 
-        std::array<block, 2>* mIter = messages.data();
-        auto mIterPartial = mIter + messages.size() - 128 * superBlkSize;
+        auto mIter = messages.begin();
+        auto mIterPartial = mIter + messages.size() - std::min<u64>(128 * superBlkSize, messages.size());
 
 
         // set uIter = to the end so that it gets loaded on the first loop.
@@ -152,7 +152,9 @@ namespace osuCrypto
                 auto mCount = std::min<u64>(128 * superBlkSize, messages.end() - mIter);
                 auto xCount = std::min<u64>(128 * superBlkSize - mCount, extraBlocks.data() + extraBlocks.size() - xIter);
 
-                memcpy(mIter, tOut.data(), mCount * sizeof(block) * 2);
+
+                //std::copy(mIter, mIter + mCount, tOut.begin());
+                if(mCount) memcpy(&*mIter, tOut.data(), mCount * sizeof(block) * 2);
                 mIter += mCount;
 
 
@@ -162,12 +164,12 @@ namespace osuCrypto
             else
             {
                 MatrixView<u8> tOut(
-                    (u8*)mIter,
+                    (u8*)&*mIter,
                     128 * superBlkSize,
                     sizeof(block) * 2,
                     false);
 
-                mIter += 128 * superBlkSize;
+                mIter += std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 
                 // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
                 // each 128 bits wide.

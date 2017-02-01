@@ -172,7 +172,7 @@ namespace osuCrypto
 
 
             //block* mStart = mIter;
-            block* mEnd = std::min(mIter + 128 * superBlkSize, (block*)messages.end());
+            block* mEnd = std::min(mIter + 128 * superBlkSize, &*messages.end());
 
             // compute how many rows are unused.
             u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
