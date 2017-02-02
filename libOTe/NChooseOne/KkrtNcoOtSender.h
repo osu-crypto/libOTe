@@ -34,7 +34,7 @@ namespace osuCrypto {
         }
 
         void setBaseOts(
-            ArrayView<block> baseRecvOts,
+            gsl::span<block> baseRecvOts,
             const BitVector& choices) override;
         
         std::unique_ptr<NcoOtExtSender> split() override;
@@ -45,7 +45,7 @@ namespace osuCrypto {
 
         void encode(
             u64 otIdx,
-            const ArrayView<block> codeWord, 
+            const gsl::span<block> codeWord, 
             block& val) override;
 
         void getParams(

@@ -21,7 +21,7 @@ OTOracleSender::~OTOracleSender()
 
 
 void OTOracleSender::send(
-    ArrayView<std::array<block,2>> messages,
+    gsl::span<std::array<block,2>> messages,
     PRNG& prng,
     Channel& chl)
 {

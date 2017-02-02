@@ -11,7 +11,7 @@ using namespace std;
 
 namespace osuCrypto
 {
-    void IknpOtExtReceiver::setBaseOts(ArrayView<std::array<block, 2>> baseOTs)
+    void IknpOtExtReceiver::setBaseOts(gsl::span<std::array<block, 2>> baseOTs)
     {
         if (baseOTs.size() != gOtExtBaseOtCount)
             throw std::runtime_error(LOCATION);
@@ -45,7 +45,7 @@ namespace osuCrypto
 
     void IknpOtExtReceiver::receive(
         const BitVector& choices,
-        ArrayView<block> messages,
+        gsl::span<block> messages,
         PRNG& prng,
         Channel& chl)
     {
@@ -62,7 +62,7 @@ namespace osuCrypto
         choices2 = choices;
         choices2.resize(numBlocks * 128);
 
-        auto choiceBlocks = choices2.getArrayView<block>();
+        auto choiceBlocks = choices2.getSpan<block>();
         // this will be used as temporary buffers of 128 columns, 
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
@@ -71,7 +71,7 @@ namespace osuCrypto
         // the index of the OT that has been completed.
         //u64 doneIdx = 0;
 
-        block* mIter = messages.data();
+        auto mIter = messages.begin();
 
         u64 step = std::min<u64>(numSuperBlocks, (u64)commStepSize);
         std::unique_ptr<ByteStream> uBuff(new ByteStream(step * 128 * superBlkSize * sizeof(block)));
@@ -152,7 +152,8 @@ namespace osuCrypto
 
 
             //block* mStart = mIter;
-            block* mEnd = std::min<block*>(mIter + 128 * superBlkSize, &*messages.end());
+            //block* mEnd = std::min<block*>(mIter + 128 * superBlkSize, &*messages.end());
+            auto mEnd = mIter + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 
 
             tIter = (block*)t0.data();

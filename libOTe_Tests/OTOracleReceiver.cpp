@@ -20,7 +20,7 @@ OTOracleReceiver::~OTOracleReceiver()
 
 void OTOracleReceiver::receive(
     const BitVector& choices,
-    ArrayView<block> messages,
+    gsl::span<block> messages,
     PRNG& prng,
     Channel& chl)
 {

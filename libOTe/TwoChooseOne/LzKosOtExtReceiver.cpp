@@ -10,7 +10,7 @@ using namespace std;
 
 namespace osuCrypto
 {
-    void LzKosOtExtReceiver::setBaseOts(ArrayView<std::array<block, 2>> baseOTs)
+    void LzKosOtExtReceiver::setBaseOts(gsl::span<std::array<block, 2>> baseOTs)
     {
         if (baseOTs.size() != gOtExtBaseOtCount)
             throw std::runtime_error(LOCATION);
@@ -44,7 +44,7 @@ namespace osuCrypto
 
     void LzKosOtExtReceiver::receive(
         const BitVector& choices,
-        ArrayView<block> messages,
+        gsl::span<block> messages,
         PRNG& prng,
         Channel& chl)
     {
@@ -78,7 +78,7 @@ namespace osuCrypto
             //std::cout << "extra " << i << "  " << choices2[choices.size() + i] << std::endl;
         }
 
-        auto choiceBlocks = choices2.getArrayView<block>();
+        auto choiceBlocks = choices2.getSpan<block>();
         // this will be used as temporary buffers of 128 columns, 
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
@@ -237,9 +237,9 @@ namespace osuCrypto
         // same value of r in all of the column vectors...
         std::unique_ptr<ByteStream> correlationData(new ByteStream(3 * sizeof(block)));
         correlationData->setp(correlationData->capacity());
-        block& x = correlationData->getArrayView<block>()[0];
-        block& t = correlationData->getArrayView<block>()[1];
-        block& t2 = correlationData->getArrayView<block>()[2];
+        block& x = correlationData->getSpan<block>()[0];
+        block& t = correlationData->getSpan<block>()[1];
+        block& t2 = correlationData->getSpan<block>()[2];
         x = t = t2 = ZeroBlock;
         block ti, ti2;
 

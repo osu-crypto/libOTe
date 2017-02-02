@@ -41,7 +41,7 @@ namespace osuCrypto
 #endif
 
         void setBaseOts(
-            ArrayView<std::array<block, 2>> baseRecvOts) override;
+            gsl::span<std::array<block, 2>> baseRecvOts) override;
 
 
         void init(u64 numOtExt) override;
@@ -51,7 +51,7 @@ namespace osuCrypto
 
         void encode(
             u64 otIdx,
-            const ArrayView<block> inputword,
+            const gsl::span<block> inputword,
             block& val) override;
 
         void zeroEncode(u64 otIdx) override;

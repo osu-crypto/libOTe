@@ -10,7 +10,7 @@ using namespace std;
 
 namespace osuCrypto
 {
-    void KosOtExtReceiver::setBaseOts(ArrayView<std::array<block, 2>> baseOTs)
+    void KosOtExtReceiver::setBaseOts(gsl::span<std::array<block, 2>> baseOTs)
     {
         if (baseOTs.size() != gOtExtBaseOtCount)
             throw std::runtime_error(LOCATION);
@@ -44,7 +44,7 @@ namespace osuCrypto
 
     void KosOtExtReceiver::receive(
         const BitVector& choices,
-        ArrayView<block> messages,
+        gsl::span<block> messages,
         PRNG& prng,
         Channel& chl)
     {
@@ -77,7 +77,7 @@ namespace osuCrypto
             //std::cout << "extra " << i << "  " << choices2[choices.size() + i] << std::endl;
         }
 
-        auto choiceBlocks = choices2.getArrayView<block>();
+        auto choiceBlocks = choices2.getSpan<block>();
         // this will be used as temporary buffers of 128 columns, 
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
@@ -90,7 +90,7 @@ namespace osuCrypto
         block* xIter = extraBlocks.data();
         //u64 extraIdx = 0;
 
-        block* mIter = messages.data();
+        auto mIter = messages.begin();
 
         u64 step = std::min<u64>(numSuperBlocks, (u64)commStepSize);
         std::unique_ptr<ByteStream> uBuff(new ByteStream(step * 128 * superBlkSize * sizeof(block)));
@@ -169,13 +169,13 @@ namespace osuCrypto
             // each 128 bits wide.
             sse_transpose128x1024(t0);
 
-
+             
 
             //block* mStart = mIter;
-            block* mEnd = std::min(mIter + 128 * superBlkSize, &*messages.end());
+            auto mEnd = mIter + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 
             // compute how many rows are unused.
-            u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
+            u64 unusedCount = mIter - mEnd + 128 * superBlkSize;
 
             // compute the begin and end index of the extra rows that 
             // we will compute in this iters. These are taken from the 
@@ -253,9 +253,9 @@ namespace osuCrypto
         // same value of r in all of the column vectors...
         std::unique_ptr<ByteStream> correlationData(new ByteStream(3 * sizeof(block)));
         correlationData->setp(correlationData->capacity());
-        block& x = correlationData->getArrayView<block>()[0];
-        block& t = correlationData->getArrayView<block>()[1];
-        block& t2 = correlationData->getArrayView<block>()[2];
+        block& x = correlationData->getSpan<block>()[0];
+        block& t = correlationData->getSpan<block>()[1];
+        block& t2 = correlationData->getSpan<block>()[2];
         x = t = t2 = ZeroBlock;
         block ti, ti2;
 

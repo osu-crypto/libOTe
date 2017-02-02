@@ -24,14 +24,14 @@ namespace osuCrypto
         std::array<std::array<PRNG, 2>, gOtExtBaseOtCount> mGens;
 
         void setBaseOts(
-            ArrayView<std::array<block, 2>> baseSendOts)override;
+            gsl::span<std::array<block, 2>> baseSendOts)override;
 
 
         std::unique_ptr<OtExtReceiver> split() override;
 
         void receive(
             const BitVector& choices,
-            ArrayView<block> messages,
+            gsl::span<block> messages,
             PRNG& prng,
             Channel& chl/*,
             std::atomic<u64>& doneIdx*/)override;

@@ -12,7 +12,7 @@ using namespace std;
 
 namespace osuCrypto
 {
-    void KosDotExtReceiver::setBaseOts(ArrayView<std::array<block, 2>> baseOTs)
+    void KosDotExtReceiver::setBaseOts(gsl::span<std::array<block, 2>> baseOTs)
     {
 
         PRNG prng(ZeroBlock);
@@ -51,7 +51,7 @@ namespace osuCrypto
 
     void KosDotExtReceiver::receive(
         const BitVector& choices,
-        ArrayView<block> messages,
+        gsl::span<block> messages,
         PRNG& prng,
         Channel& chl)
     {
@@ -78,7 +78,7 @@ namespace osuCrypto
             choices2[choices.size() + i] = prng.getBit();
         }
 
-        auto choiceBlocks = choices2.getArrayView<block>();
+        auto choiceBlocks = choices2.getSpan<block>();
         // this will be used as temporary buffers of 128 columns, 
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
@@ -204,8 +204,8 @@ namespace osuCrypto
         // same value of r in all of the column vectors...
         std::unique_ptr<ByteStream> correlationData(new ByteStream(2 * 4 * sizeof(block)));
         correlationData->setp(correlationData->capacity());
-        auto& x = correlationData->getArrayView<std::array<block, 4>>()[0];
-        auto& t = correlationData->getArrayView<std::array<block, 4>>()[1];
+        auto& x = correlationData->getSpan<std::array<block, 4>>()[0];
+        auto& t = correlationData->getSpan<std::array<block, 4>>()[1];
 
         x = t = { ZeroBlock,ZeroBlock, ZeroBlock, ZeroBlock };
         block ti1, ti2, ti3,ti4;

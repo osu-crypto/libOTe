@@ -32,7 +32,7 @@ namespace osuCrypto
         return std::move(ret);
     }
 
-    void KosDotExtSender::setBaseOts(ArrayView<block> baseRecvOts, const BitVector & choices)
+    void KosDotExtSender::setBaseOts(gsl::span<block> baseRecvOts, const BitVector & choices)
     {
 
 
@@ -57,7 +57,7 @@ namespace osuCrypto
     }
 
     void KosDotExtSender::send(
-        ArrayView<std::array<block, 2>> messages,
+        gsl::span<std::array<block, 2>> messages,
         PRNG& prng,
         Channel& chl)
     {
@@ -89,7 +89,7 @@ namespace osuCrypto
         chl.recv(theirSeedComm.data(), theirSeedComm.size());
 
         auto mIter = messages.begin();
-        auto mIterPartial = mIter + messages.size() - std::min<u64>(128 * superBlkSize, messages.size());
+        auto mIterPartial = messages.end() - std::min<u64>(128 * superBlkSize, messages.size());
 
 
         // set uIter = to the end so that it gets loaded on the first loop.
@@ -141,7 +141,7 @@ namespace osuCrypto
 
 
 
-            if (mIter > mIterPartial)
+            if (mIter >= mIterPartial)
             {
                 MatrixView<u8> tOut(128 * superBlkSize, sizeof(block) * 2);
 

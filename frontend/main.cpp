@@ -586,16 +586,44 @@ oos{ "o", "oos" },
 akn{ "a", "akn" };
 
 #include "cryptoTools/gsl/gsl.h"
+#include "cryptoTools/Common/ByteStream.h"
+#include "cryptoTools/Common/Matrix.h"
 
 int main(int argc, char** argv)
 {
-    std::vector<u8> data(16);
+    //std::vector<u8> data(16);
     //MatrixView<u8> v(data,4);
+    ByteStream data(16);
+    Matrix<int> mm(7,4);
 
-    ArrayView<u8> c(data);
+     //v(data.data(), 4);
+
+    //gsl::multi_span<int, gsl::dynamic_range, gsl::dynamic_range> vv = mm;
+
+    //MatrixView<int> vv2(mm);
+    //    gsl::as_multi_span(data.begin(), gsl::dim(4), gsl::dim(4));
+
+    auto v = data.getMultiSpan<u16>(4);
+    auto v2 = data.getMultiSpan<u16, 4>();
+
+    auto row = v[0];
+    u8 c = row[0];
+
+    auto p = v.data();
+    
+    auto bb = mm.bounds().stride();
+    auto ba = mm.bounds().size();
+    auto bc = mm.bounds().index_bounds()[0];
+    auto bd = mm.bounds().index_bounds()[1];
+    //mm.bounds().index_bounds
+    std::cout << v.length() << "  " << v2.length() << std::endl;
+    std::cout << v.size() << "  " << v2.size() << std::endl;
+    std::cout << row.size() << "  " << v.rank() << std::endl;
+    //std::cout << row.size() << "  " << bb << std::endl;
+    //ArrayView<u8> c(data);
 
     //code();
-    //return 0;
+    return 0;
     CLP cmd;
     cmd.parse(argc, argv);
 

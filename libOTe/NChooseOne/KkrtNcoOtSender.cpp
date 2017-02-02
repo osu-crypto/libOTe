@@ -9,7 +9,7 @@ namespace osuCrypto
     using namespace std;
 
     void KkrtNcoOtSender::setBaseOts(
-        ArrayView<block> baseRecvOts,
+        gsl::span<block> baseRecvOts,
         const BitVector & choices)
     {
         if (choices.size() != baseRecvOts.size())
@@ -133,7 +133,7 @@ namespace osuCrypto
 
     void KkrtNcoOtSender::encode(
         u64 otIdx,
-        const ArrayView<block> inputword,
+        const gsl::span<block> inputword,
         block& val)
     {
 

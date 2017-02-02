@@ -33,7 +33,7 @@ namespace osuCrypto
         return std::move(ret);
     }
 
-    void KosOtExtSender::setBaseOts(ArrayView<block> baseRecvOts, const BitVector & choices)
+    void KosOtExtSender::setBaseOts(gsl::span<block> baseRecvOts, const BitVector & choices)
     {
         if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
             throw std::runtime_error("not supported/implemented");
@@ -47,7 +47,7 @@ namespace osuCrypto
     }
 
     void KosOtExtSender::send(
-        ArrayView<std::array<block, 2>> messages,
+        gsl::span<std::array<block, 2>> messages,
         PRNG& prng,
         Channel& chl)
     {
@@ -76,7 +76,7 @@ namespace osuCrypto
         Commit theirSeedComm;
         chl.recv(theirSeedComm.data(), theirSeedComm.size());
 
-        std::array<block, 2>* mIter = messages.data();
+        auto mIter = messages.begin();
 
         block * uIter = (block*)u.data() + superBlkSize * 128 * commStepSize;
         block * uEnd = uIter;
@@ -131,10 +131,10 @@ namespace osuCrypto
 
 
             //std::array<block, 2>* mStart = mIter;
-            std::array<block, 2>* mEnd = std::min(mIter + 128 * superBlkSize, &*messages.end());
+            auto mEnd = mIter  + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 
             // compute how many rows are unused.
-            u64 unusedCount = (mIter + 128 * superBlkSize) - mEnd;
+            u64 unusedCount = (mIter - mEnd + 128 * superBlkSize);
 
             // compute the begin and end index of the extra rows that 
             // we will compute in this iters. These are taken from the 

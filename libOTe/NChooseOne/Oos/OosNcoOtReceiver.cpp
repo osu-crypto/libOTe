@@ -14,7 +14,7 @@ namespace osuCrypto
         mStatSecParam(statSecParam),
         mCode(code)
     {}
-    void OosNcoOtReceiver::setBaseOts(ArrayView<std::array<block, 2>> baseRecvOts)
+    void OosNcoOtReceiver::setBaseOts(gsl::span<std::array<block, 2>> baseRecvOts)
     {
 
         if (baseRecvOts.size() % 128 != 0)
@@ -165,7 +165,7 @@ namespace osuCrypto
 
     void OosNcoOtReceiver::encode(
         u64 otIdx,
-        const ArrayView<block> choice,
+        const gsl::span<block> choice,
         // Output: the encoding of the plaintext
         block & val)
     {
@@ -182,7 +182,7 @@ namespace osuCrypto
         // use this for two thing, to store the code word and 
         // to store the zero message from base OT matrix transposed.
         std::array<block, 10> codeword;
-        mCode.encode((ArrayView<block>)choice, (ArrayView<block>)codeword);
+        mCode.encode((gsl::span<block>)choice, (gsl::span<block>)codeword);
 
 
 
@@ -362,8 +362,8 @@ namespace osuCrypto
         std::unique_ptr<ByteStream> tBuff(new Buff(sizeof(block) * statSecParam * mT0.size()[1]));
         
         // get two arrays of block into these buff.
-        auto tSum = tBuff->getArrayView<block>();
-        auto wSum = wBuff->getArrayView<block>();
+        auto tSum = tBuff->getSpan<block>();
+        auto wSum = wBuff->getSpan<block>();
 
         // generate random words.
         prng.get(wSum.data(), wSum.size());

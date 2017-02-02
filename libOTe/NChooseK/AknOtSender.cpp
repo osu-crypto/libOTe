@@ -89,7 +89,7 @@ namespace osuCrypto
             u64 start = std::min<u64>(roundUpTo(t *     mMessages.size() / chls.size(), 128), mMessages.size());
             u64 end = std::min<u64>(roundUpTo((t + 1) * mMessages.size() / chls.size(), 128), mMessages.size());
 
-            ArrayView<std::array<block, 2>> range(
+            gsl::span<std::array<block, 2>> range(
                 (mMessages.begin() + start),
                 (mMessages.begin() + end));
 

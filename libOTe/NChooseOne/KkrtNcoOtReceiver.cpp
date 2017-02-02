@@ -9,7 +9,7 @@ using namespace std;
 namespace osuCrypto
 {
     void KkrtNcoOtReceiver::setBaseOts(
-        ArrayView<std::array<block, 2>> baseRecvOts)
+        gsl::span<std::array<block, 2>> baseRecvOts)
     {
 
 
@@ -149,7 +149,7 @@ namespace osuCrypto
 
     void KkrtNcoOtReceiver::encode(
         u64 otIdx,
-        const ArrayView<block> choice, 
+        const gsl::span<block> choice, 
         block & val)
     {
 #ifndef NDEBUG

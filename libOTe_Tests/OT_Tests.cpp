@@ -38,7 +38,7 @@
 
 using namespace osuCrypto;
 
-void OT_100Receive_Test(BitVector& choiceBits, ArrayView<block> recv, ArrayView<std::array<block, 2>>  sender)
+void OT_100Receive_Test(BitVector& choiceBits, gsl::span<block> recv, gsl::span<std::array<block, 2>>  sender)
 {
 
     for (u64 i = 0; i < choiceBits.size(); ++i)

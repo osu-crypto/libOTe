@@ -11,7 +11,7 @@ namespace osuCrypto
     }
 
     void OosNcoOtSender::setBaseOts(
-        ArrayView<block> baseRecvOts,
+        gsl::span<block> baseRecvOts,
         const BitVector & choices)
     {
         if (choices.size() != baseRecvOts.size())
@@ -143,7 +143,7 @@ namespace osuCrypto
 
     void OosNcoOtSender::encode(
         u64 otIdx,
-        const ArrayView<block> plaintext,
+        const gsl::span<block> plaintext,
         block& val)
     {
 
@@ -537,7 +537,7 @@ namespace osuCrypto
         for (u64 l = 0; l < statSecParam; ++l)
         {
             
-            ArrayView<block> word(
+            gsl::span<block> word(
                 wSum.data() + l * mCode.plaintextBlkSize(),
                 mCode.plaintextBlkSize());
 

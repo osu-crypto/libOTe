@@ -27,12 +27,12 @@ namespace osuCrypto {
         std::unique_ptr<OtExtSender> split() override;
 
         void setBaseOts(
-            ArrayView<block> baseRecvOts,
+            gsl::span<block> baseRecvOts,
             const BitVector& choices) override;
 
 
         void send(
-            ArrayView<std::array<block, 2>> messages,
+            gsl::span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl) override;
     };

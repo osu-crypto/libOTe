@@ -30,7 +30,7 @@ namespace osuCrypto
         return std::move(ret);
     }
 
-    void IknpOtExtSender::setBaseOts(ArrayView<block> baseRecvOts, const BitVector & choices)
+    void IknpOtExtSender::setBaseOts(gsl::span<block> baseRecvOts, const BitVector & choices)
     {
         if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
             throw std::runtime_error("not supported/implemented");
@@ -44,7 +44,7 @@ namespace osuCrypto
     }
 
     void IknpOtExtSender::send(
-        ArrayView<std::array<block, 2>> messages,
+        gsl::span<std::array<block, 2>> messages,
         PRNG& prng,
         Channel& chl)
     {
@@ -67,7 +67,7 @@ namespace osuCrypto
             else choiceMask[i] = ZeroBlock;
         }
 
-        std::array<block, 2>* mIter = messages.data();
+        auto mIter = messages.begin();
 
         block * uIter = (block*)u.data() + superBlkSize * 128 * commStepSize;
         block * uEnd = uIter;
@@ -122,8 +122,7 @@ namespace osuCrypto
             sse_transpose128x1024(t);
 
 
-            //std::array<block, 2>* mStart = mIter;
-            auto mEnd = std::min<std::array<block, 2>*>(mIter + 128 * superBlkSize, &*messages.end());
+            auto mEnd = mIter + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 
             tIter = (block*)t.data();
             block* tEnd = (block*)t.data() + 128 * superBlkSize;

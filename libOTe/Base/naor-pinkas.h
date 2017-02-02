@@ -17,20 +17,20 @@ namespace osuCrypto
 
         void receive(
             const BitVector& choices, 
-            ArrayView<block> messages,
+            gsl::span<block> messages,
             PRNG& prng, 
             Channel& chl, 
             u64 numThreads);
 
         void send(
-            ArrayView<std::array<block, 2>> messages, 
+            gsl::span<std::array<block, 2>> messages, 
             PRNG& prng, 
             Channel& sock, 
             u64 numThreads);
 
         void receive(
             const BitVector& choices,
-            ArrayView<block> messages,
+            gsl::span<block> messages,
             PRNG& prng,
             Channel& chl) override
         {
@@ -38,7 +38,7 @@ namespace osuCrypto
         }
 
         void send(
-            ArrayView<std::array<block, 2>> messages,
+            gsl::span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& sock) override
         {
