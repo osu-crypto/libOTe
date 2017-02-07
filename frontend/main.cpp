@@ -595,12 +595,17 @@ int main(int argc, char** argv)
     //MatrixView<u8> v(data,4);
     ByteStream data(16);
     Matrix<int> mm(7,4);
-
+    sizeof(Matrix<int>);
+    sizeof(MatrixView<int>);
      //v(data.data(), 4);
 
-    //gsl::multi_span<int, gsl::dynamic_range, gsl::dynamic_range> vv = mm;
+    gsl::multi_span<int, gsl::dynamic_range, gsl::dynamic_range> vv = mm.getView();
+    //gsl::multi_span<int, gsl::dynamic_range, gsl::dynamic_range> vv3 = vv;// = mm;
+    //MatrixSpan<int> vv = (MatrixSpan<int>) mm;
+    MatrixSpan<int> dmm = mm;
+    MatrixView<int> vv2(mm, mm.bounds()[1]);
+    //ArrayView<int> gg(mm);
 
-    //MatrixView<int> vv2(mm);
     //    gsl::as_multi_span(data.begin(), gsl::dim(4), gsl::dim(4));
 
     auto v = data.getMultiSpan<u16>(4);
@@ -611,10 +616,7 @@ int main(int argc, char** argv)
 
     auto p = v.data();
     
-    auto bb = mm.bounds().stride();
-    auto ba = mm.bounds().size();
-    auto bc = mm.bounds().index_bounds()[0];
-    auto bd = mm.bounds().index_bounds()[1];
+
     //mm.bounds().index_bounds
     std::cout << v.length() << "  " << v2.length() << std::endl;
     std::cout << v.size() << "  " << v2.size() << std::endl;

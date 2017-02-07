@@ -38,7 +38,7 @@ namespace osuCrypto
         // @ baseRecvOts: The base 1 out of 2 OTs. 
         // @ choices: The select bits that were used in the base OT
         virtual void setBaseOts(
-            gsl::span<block> baseRecvOts,
+            span<block> baseRecvOts,
             const BitVector& choices) = 0;
         
         // Creates a new OT extesion of the same type that can be used
@@ -54,13 +54,13 @@ namespace osuCrypto
         
         virtual void encode(
             u64 otIdx,
-            const gsl::span<block> choiceWord,
+            const span<block> choiceWord,
             block& encoding) = 0;
 
         //virtual void encode(
         //    u64 otIdx,
         //    const MatrixView<block> choiceWord,
-        //    gsl::span<block> encoding) = 0;
+        //    span<block> encoding) = 0;
 
 
         virtual void getParams(
@@ -90,7 +90,7 @@ namespace osuCrypto
         virtual bool hasBaseOts() const = 0;
 
         virtual void setBaseOts(
-            gsl::span<std::array<block, 2>> baseRecvOts) = 0;
+            span<std::array<block, 2>> baseRecvOts) = 0;
 
         virtual std::unique_ptr<NcoOtExtReceiver> split() = 0;
 
@@ -98,7 +98,7 @@ namespace osuCrypto
 
         virtual void encode(
             u64 otIdx,
-            const gsl::span<block> choiceWord,
+            const span<block> choiceWord,
             block& encoding) = 0;
 
         virtual void zeroEncode(u64 otIdx) = 0;

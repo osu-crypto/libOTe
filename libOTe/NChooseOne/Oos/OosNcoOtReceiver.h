@@ -9,6 +9,8 @@
 #undef GetMessage
 #endif
 
+#include "cryptoTools/Common/Matrix.h"
+
 namespace osuCrypto
 {
 
@@ -31,9 +33,9 @@ namespace osuCrypto
         LinearCode mCode;
 
         std::vector<std::array<PRNG, 2>> mGens;
-        MatrixView<block> mT0;
-        MatrixView<block> mT1;
-        MatrixView<block> mW;
+        Matrix<block> mT0;
+        Matrix<block> mT1;
+        Matrix<block> mW;
         u64 mCorrectionIdx;
 
 #ifndef NDEBUG
@@ -41,7 +43,7 @@ namespace osuCrypto
 #endif
 
         void setBaseOts(
-            gsl::span<std::array<block, 2>> baseRecvOts) override;
+            span<std::array<block, 2>> baseRecvOts) override;
 
 
         void init(u64 numOtExt) override;
@@ -51,7 +53,7 @@ namespace osuCrypto
 
         void encode(
             u64 otIdx,
-            const gsl::span<block> inputword,
+            const span<block> inputword,
             block& val) override;
 
         void zeroEncode(u64 otIdx) override;

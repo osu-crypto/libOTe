@@ -11,7 +11,7 @@ using namespace std;
 
 namespace osuCrypto
 {
-    void IknpOtExtReceiver::setBaseOts(gsl::span<std::array<block, 2>> baseOTs)
+    void IknpOtExtReceiver::setBaseOts(span<std::array<block, 2>> baseOTs)
     {
         if (baseOTs.size() != gOtExtBaseOtCount)
             throw std::runtime_error(LOCATION);
@@ -45,7 +45,7 @@ namespace osuCrypto
 
     void IknpOtExtReceiver::receive(
         const BitVector& choices,
-        gsl::span<block> messages,
+        span<block> messages,
         PRNG& prng,
         Channel& chl)
     {

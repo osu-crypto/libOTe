@@ -24,12 +24,12 @@ namespace osuCrypto {
         }
 
         void setBaseOts(
-            gsl::span<block> baseRecvOts,
+            span<block> baseRecvOts,
             const BitVector& choices) override;
 
 
         void send(
-            gsl::span<std::array<block, 2>> messages,
+            span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl/*,
             std::atomic<u64>& doneIdx*/) override;

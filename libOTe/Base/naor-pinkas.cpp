@@ -28,7 +28,7 @@ namespace osuCrypto
 
     void NaorPinkas::receive(
         const BitVector& choices,
-        gsl::span<block> messages,
+        span<block> messages,
         PRNG& prng,
         Channel& socket,
         u64 numThreads)
@@ -218,7 +218,7 @@ namespace osuCrypto
 
 
     void NaorPinkas::send(
-        gsl::span<std::array<block, 2>> messages,
+        span<std::array<block, 2>> messages,
         PRNG & prng,
         Channel& socket,
         u64 numThreads)

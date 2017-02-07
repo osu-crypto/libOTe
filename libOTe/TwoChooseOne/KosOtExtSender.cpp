@@ -33,7 +33,7 @@ namespace osuCrypto
         return std::move(ret);
     }
 
-    void KosOtExtSender::setBaseOts(gsl::span<block> baseRecvOts, const BitVector & choices)
+    void KosOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices)
     {
         if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
             throw std::runtime_error("not supported/implemented");
@@ -47,7 +47,7 @@ namespace osuCrypto
     }
 
     void KosOtExtSender::send(
-        gsl::span<std::array<block, 2>> messages,
+        span<std::array<block, 2>> messages,
         PRNG& prng,
         Channel& chl)
     {

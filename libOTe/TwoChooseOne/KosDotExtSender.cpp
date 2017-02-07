@@ -32,7 +32,7 @@ namespace osuCrypto
         return std::move(ret);
     }
 
-    void KosDotExtSender::setBaseOts(gsl::span<block> baseRecvOts, const BitVector & choices)
+    void KosDotExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices)
     {
 
 
@@ -57,7 +57,7 @@ namespace osuCrypto
     }
 
     void KosDotExtSender::send(
-        gsl::span<std::array<block, 2>> messages,
+        span<std::array<block, 2>> messages,
         PRNG& prng,
         Channel& chl)
     {

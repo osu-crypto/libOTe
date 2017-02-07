@@ -24,7 +24,7 @@ namespace osuCrypto
 
         virtual void receive(
             const BitVector& choices,
-            gsl::span<block> messages,
+            span<block> messages,
             PRNG& prng,
             Channel& chl) = 0;
 
@@ -36,7 +36,7 @@ namespace osuCrypto
         OtSender() {}
 
         virtual void send(
-            gsl::span<std::array<block, 2>> messages,
+            span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl) = 0;
 
@@ -51,7 +51,7 @@ namespace osuCrypto
 
 
         virtual void setBaseOts(
-            gsl::span<std::array<block,2>> baseSendOts) = 0;
+            span<std::array<block,2>> baseSendOts) = 0;
 
         virtual bool hasBaseOts() const = 0; 
         virtual std::unique_ptr<OtExtReceiver> split() = 0;
@@ -65,7 +65,7 @@ namespace osuCrypto
         virtual bool hasBaseOts() const = 0;
 
         virtual void setBaseOts(
-            gsl::span<block> baseRecvOts,
+            span<block> baseRecvOts,
             const BitVector& choices)  = 0;
 
         virtual std::unique_ptr<OtExtSender> split() = 0;
@@ -81,13 +81,13 @@ namespace osuCrypto
 
 
     //    virtual void setBaseOts(
-    //        gsl::span<std::array<block, 2>> baseSendOts,
+    //        span<std::array<block, 2>> baseSendOts,
     //        Channel &chl) = 0;
 
 
     //    template<size_t N>
     //    virtual void receive(
-    //        gsl::span<std::array<MultiBlock<N>, 2>> messages,
+    //        span<std::array<MultiBlock<N>, 2>> messages,
     //        PRNG& prng,
     //        Channel& chl) = 0;
 
@@ -103,7 +103,7 @@ namespace osuCrypto
     //    virtual bool hasBaseOts() const = 0;
 
     //    virtual void setBaseOts(
-    //        gsl::span<block> baseRecvOts,
+    //        span<block> baseRecvOts,
     //        const BitVector& choices,
     //        Channel &chl) = 0;
 
@@ -111,7 +111,7 @@ namespace osuCrypto
 
     //    template<size_t N>
     //    virtual void send(
-    //        gsl::span<MultiBlock<N>> messages,
+    //        span<MultiBlock<N>> messages,
     //        PRNG& prng,
     //        Channel& chl) = 0;
 

@@ -277,8 +277,8 @@ namespace osuCrypto
     static std::array<block, 2> sBlockMasks{ { ZeroBlock, AllOneBlock } };
 
     void LinearCode::encode(
-        const gsl::span<block>& plaintxt,
-        const gsl::span<block>& codeword)
+        const span<block>& plaintxt,
+        const span<block>& codeword)
     {
 #ifndef NDEBUG
         if (plaintxt.size() != plaintextBlkSize() ||
@@ -286,8 +286,8 @@ namespace osuCrypto
             throw std::runtime_error("");
 #endif
 
-        //gsl::span<u8> pp((u8*)plaintxt.data(), plaintextU8Size(), false);
-        //gsl::span<u8> cc((u8*)codeword.data(), codewordU8Size(), false);
+        //span<u8> pp((u8*)plaintxt.data(), plaintextU8Size(), false);
+        //span<u8> cc((u8*)codeword.data(), codewordU8Size(), false);
         //encode(pp, cc);
         encode((u8*)plaintxt.data(), (u8*)codeword.data());
         //
@@ -386,8 +386,8 @@ namespace osuCrypto
 
 
     void LinearCode::encode(
-        const gsl::span<u8>& plaintxt,
-        const gsl::span<u8>& codeword)
+        const span<u8>& plaintxt,
+        const span<u8>& codeword)
     {
 #ifndef NDEBUG
         if (plaintxt.size() != plaintextU8Size() ||

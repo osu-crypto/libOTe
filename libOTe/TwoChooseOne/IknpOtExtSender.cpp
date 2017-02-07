@@ -30,7 +30,7 @@ namespace osuCrypto
         return std::move(ret);
     }
 
-    void IknpOtExtSender::setBaseOts(gsl::span<block> baseRecvOts, const BitVector & choices)
+    void IknpOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices)
     {
         if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
             throw std::runtime_error("not supported/implemented");
@@ -44,7 +44,7 @@ namespace osuCrypto
     }
 
     void IknpOtExtSender::send(
-        gsl::span<std::array<block, 2>> messages,
+        span<std::array<block, 2>> messages,
         PRNG& prng,
         Channel& chl)
     {

@@ -10,7 +10,7 @@ using namespace std;
 
 namespace osuCrypto
 {
-    void KosOtExtReceiver::setBaseOts(gsl::span<std::array<block, 2>> baseOTs)
+    void KosOtExtReceiver::setBaseOts(span<std::array<block, 2>> baseOTs)
     {
         if (baseOTs.size() != gOtExtBaseOtCount)
             throw std::runtime_error(LOCATION);
@@ -44,7 +44,7 @@ namespace osuCrypto
 
     void KosOtExtReceiver::receive(
         const BitVector& choices,
-        gsl::span<block> messages,
+        span<block> messages,
         PRNG& prng,
         Channel& chl)
     {
