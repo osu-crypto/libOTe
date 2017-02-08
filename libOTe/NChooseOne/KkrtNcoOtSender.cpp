@@ -51,7 +51,7 @@ namespace osuCrypto
     }
 
     void KkrtNcoOtSender::init(
-        u64 numOTExt)
+        u64 numOTExt, PRNG& prng, Channel& chl)
     {
         static const u8 superBlkSize(8);
 

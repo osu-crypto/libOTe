@@ -49,7 +49,7 @@ namespace osuCrypto
         // Performs the PRNG expantion and transope operations. 
         // @ numOtExt: denotes the number of OTs that can be used before init
         //      should be called again.
-        virtual void init(u64 numOtExt) = 0;
+        virtual void init(u64 numOtExt, PRNG& prng, Channel& chl) = 0;
 
         
         virtual void encode(
@@ -94,7 +94,7 @@ namespace osuCrypto
 
         virtual std::unique_ptr<NcoOtExtReceiver> split() = 0;
 
-        virtual void init(u64 numOtExt) = 0;
+        virtual void init(u64 numOtExt, PRNG& prng, Channel& chl) = 0;
 
         virtual void encode(
             u64 otIdx,

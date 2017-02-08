@@ -44,7 +44,7 @@ namespace osuCrypto
             ArrayView<std::array<block, 2>> baseRecvOts) override;
 
 
-        void init(u64 numOtExt) override;
+        void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
 
 
         std::unique_ptr<NcoOtExtReceiver> split() override;

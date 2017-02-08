@@ -88,7 +88,7 @@ void kkrt_test(int i)
                 r.setBaseOts(baseSend);
                 auto& chl = *chls[k];
 
-                r.init(otsPer);
+                r.init(otsPer, prng0, chl);
                 block encoding1;
                 for (u64 i = 0; i < otsPer; i += step)
                 {
@@ -122,7 +122,7 @@ void kkrt_test(int i)
                 s.setBaseOts(baseRecv, baseChoice);
                 auto& chl = *chls[k];
 
-                s.init(otsPer);
+                s.init(otsPer, prng0, chl);
                 for (u64 i = 0; i < otsPer; i += step)
                 {
 
@@ -214,7 +214,7 @@ void oos_test(int i)
                 r.setBaseOts(baseSend);
                 auto& chl = *chls[k];
 
-                r.init(otsPer);
+                r.init(otsPer, prng0, chl);
                 block encoding1;
                 for (u64 i = 0; i < otsPer; i += step)
                 {
@@ -246,7 +246,7 @@ void oos_test(int i)
                 s.setBaseOts(baseRecv, baseChoice);
                 auto& chl = *chls[k];
 
-                s.init(otsPer);
+                s.init(otsPer, prng0, chl);
                 for (u64 i = 0; i < otsPer; i += step)
                 {
 

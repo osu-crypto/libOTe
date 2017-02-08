@@ -93,6 +93,12 @@ namespace osuCrypto_tests
         }
 
 
+        TEST_METHOD(Rr17_200Receive_TestVS)
+        {
+            InitDebugPrinting();
+            Rr17NcoOt_Test_Impl();
+        }
+
         TEST_METHOD(LinearCode_TestVS)
         {
             InitDebugPrinting();

@@ -29,7 +29,7 @@ namespace osuCrypto
         }
         mHasBase = true;
     }
-    void OosNcoOtReceiver::init(u64 numOtExt)
+    void OosNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
         u64 doneIdx = 0;
         if (mHasBase == false)

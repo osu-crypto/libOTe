@@ -27,7 +27,7 @@ namespace osuCrypto
     }
 
 
-    void KkrtNcoOtReceiver::init(u64 numOtExt)
+    void KkrtNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
 
         if (mHasBase == false)

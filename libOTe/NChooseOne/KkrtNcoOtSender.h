@@ -40,7 +40,7 @@ namespace osuCrypto {
         std::unique_ptr<NcoOtExtSender> split() override;
 
 
-        void init(u64 numOtExt) override;
+        void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
 
 
         void encode(
