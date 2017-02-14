@@ -1,5 +1,6 @@
 #include "Rr17NcoOtReceiver.h"
 #include "cryptoTools/Common/ByteStream.h"
+#include "cryptoTools/Common/Log.h"
 
 namespace osuCrypto
 {
@@ -41,8 +42,9 @@ namespace osuCrypto
     }
     void Rr17NcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
-        mMessage.resize(mEncodeSize * numOtExt);
+        mMessages.resize(mEncodeSize * numOtExt);
         mChoices.resize(mEncodeSize * numOtExt);
+        //std::cout << "ots = " << log2(mMessages.size()) << std::endl;
 
 #ifndef NDEBUG
         mDebugEncodeFlags = std::move(BitVector(numOtExt));
@@ -51,24 +53,40 @@ namespace osuCrypto
         mChoices.randomize(prng);
         mSendIdx = 0;
 
-        mKos.receive(mChoices, mMessage, prng, chl);
+        mKos.receive(mChoices, mMessages, prng, chl);
 
 
-        Buff buff;
-        chl.recv(buff);
+        auto stepSize = 1 << 24;
+        auto count = (mMessages.size() + stepSize - 1) / stepSize;
+
+        Buff buff(std::min<u64>(mMessages.size(), stepSize) * sizeof(std::array<block, 2>));
         auto view = buff.getArrayView<std::array<block, 2>>();
-
-        if (view.size() != mMessage.size())
-            throw std::runtime_error(LOCATION);
-
         auto choiceIter = mChoices.begin();
 
-        for (u64 i = 0; i < mMessage.size(); ++i)
+        //std::cout << IoStream::lock;
+        for (u64 step = 0; step < count; ++step)
         {
-            mMessage[i] = mMessage[i] ^ view[i][*choiceIter++];
-        }
-    }
 
+            auto curSize = std::min<u64>(stepSize, mMessages.size() - step * stepSize);
+
+            chl.recv(buff.data(), curSize * sizeof(std::array<block, 2>));
+            //std::cout << "recv " << *(block*)buff.data() << " c " << count << " s " << curSize << std::endl;
+            //std::cout << "recv " << ((block*)buff.data())[600 * 2] << " c " << count << " s " << curSize << std::endl;
+
+            for (u64 i = 0, j = step * stepSize; i < curSize; ++i, ++j)
+            {
+                //std::cout << "r kos " << " " << j << " " << mMessages[j] << " " << *choiceIter << std::endl;
+                //std::cout << "r msg " << " " << j << " " << view[i][0] << " " << view[i][1] << std::endl;
+
+                mMessages[j] = mMessages[j] ^ view[i][*choiceIter++];
+                //std::cout << "r Msg " << " " << j << " " << mMessages[j] << " " << *choiceIter << std::endl;
+
+            }
+        }
+        //std::cout << IoStream::unlock;
+
+    }
+     
     void Rr17NcoOtReceiver::encode(
         u64 otIdx, 
         const ArrayView<block> choiceWord, 
@@ -92,8 +110,13 @@ namespace osuCrypto
             *iter = *iter ^ *cIter;
         }
 
+        //encoding = ZeroBlock;
+        //for (u64 i = 0; i < mEncodeSize; ++i)
+        //    encoding = encoding ^ mMessages[otIdx++];
+
+
         SHA1 sha;
-        sha.Update((u8*)(mMessage.data() + otIdx), mEncodeSize * sizeof(block));
+        sha.Update((u8*)(mMessages.data() + otIdx), mEncodeSize * sizeof(block));
 
 
         sha.Update((u8*)choiceWord.data(), mEncodeSize / 8);
@@ -135,7 +158,7 @@ namespace osuCrypto
     void Rr17NcoOtReceiver::sendCorrection(Channel & chl, u64 sendCount)
     {
         auto size = sendCount * mEncodeSize / 8;
-        chl.send(mChoices.data() + mSendIdx, size);
+        chl.asyncSend(mChoices.data() + mSendIdx, size);
         mSendIdx += size;
     }
 

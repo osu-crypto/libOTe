@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.6)
+cmake_minimum_required (VERSION 2.8)
 
 project(libOTe)
 
@@ -20,23 +20,23 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
 endif()
 
 if(NOT ${CMAKE_BUILD_TYPE} STREQUAL "Release")
-  message(WARNING "\nConfiguration NOT set to Release. Please call cmake with CMAKE_BUILD_TYPE=Release")
+  message(WARNING "\nConfiguration NOT set to Release. Please call cmake with -DCMAKE_BUILD_TYPE=Release  instead of ${CMAKE_BUILD_TYPE}")
 
-    IF(CMAKE_BUILD_TYPE MATCHES Debug)
-      #message("Debug build.")
-    ELSEIF(CMAKE_BUILD_TYPE MATCHES Release)
-      #message("Release build.")
-    ELSEIF(CMAKE_BUILD_TYPE MATCHES RELWITHDEBINFO)
-      #message("Release with debug info build.")
-    ELSE()
-      message(ERROR "Unknown build type: ${CMAKE_BUILD_TYPE}  Please use one of Debug, Release, or RELWITHDEBINFO" )
-    ENDIF()
+    if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+      #message(WARNING "Debug build.")
+    elseif("${CMAKE_BUILD_TYPE}" STREQUAL "Release") 
+      #message(WARNING "Release build.")
+    elseif("${CMAKE_BUILD_TYPE}" STREQUAL  "RELWITHDEBINFO")
+      #message(WARNING "RELWITHDEBINFO=Release with debug info build.")
+    else()
+      message(ERROR ": Unknown build type - ${CMAKE_BUILD_TYPE}  Please use one of Debug, Release, or RELWITHDEBINFO\n\n" )
+    endif()
 endif()
 
 # Select flags.
-SET(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
-SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
-SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g")
+SET(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG") 
+SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb -rdynamic")
+SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb -rdynamic")
 
  
 

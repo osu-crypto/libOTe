@@ -69,6 +69,7 @@ void OT_all()
     run("AknOt_sendRecv1000_Test                 ", AknOt_sendRecv1000_Test);
     run("KkrtNcoOt_Test                          ", KkrtNcoOt_Test_Impl);
     run("OosNcoOt_Test_Impl                      ", OosNcoOt_Test_Impl);
+    run("Rr17NcoOt_Test_Impl                     ", Rr17NcoOt_Test_Impl);
     run("LinearCode_Test_Impl                    ", LinearCode_Test_Impl);
     run("LinearCode_subBlock_Test_Impl           ", LinearCode_subBlock_Test_Impl);
     run("LinearCode_repetition_Test_Impl         ", LinearCode_repetition_Test_Impl);

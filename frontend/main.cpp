@@ -584,9 +584,13 @@ kkrt{ "kk", "kkrt" },
 iknp{ "i", "iknp" },
 oos{ "o", "oos" },
 akn{ "a", "akn" };
+#include "signalHandle.h"
+
 
 int main(int argc, char** argv)
 {
+    backtraceHook();
+
     std::vector<u8> data(16);
     MatrixView<u8> v(data,4);
 

@@ -1,5 +1,7 @@
 #include "Rr17NcoOtSender.h"
 #include "cryptoTools/Common/ByteStream.h"
+
+#include "cryptoTools/Common/Log.h"
 namespace osuCrypto
 {
 
@@ -34,6 +36,7 @@ namespace osuCrypto
 
     void Rr17NcoOtSender::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
+
         mMessages.resize(numOtExt * mEncodeSize);
         prng.mAes.ecbEncCounterMode(prng.mBlockIdx, mMessages.size() * 2, (block*)mMessages.data());
         prng.mBlockIdx += mMessages.size() * 2;
@@ -41,18 +44,50 @@ namespace osuCrypto
         mCorrectionIdx = 0;
         mCorrection.resize(mMessages.size());
 
-        std::unique_ptr<Buff> buff(new Buff(mMessages.size() * sizeof(block) * 2));
-        auto view = buff->getArrayView<std::array<block, 2>>();
-
+        u8* buff(new u8[mMessages.size() * sizeof(std::array<block, 2>)]);
+        ArrayView<std::array<block, 2>> view((std::array<block, 2>*)buff, mMessages.size());
+        //std::cout << "ots = " << log2(view.size()) << std::endl;
+        //std::cout << IoStream::lock;
         mKos.send(view, prng, chl);
 
-        for (u64 i = 0; i < mMessages.size(); ++i)
-        {
-            view[i][0] = view[i][0] ^ mMessages[i][0];
-            view[i][1] = view[i][1] ^ mMessages[i][1];
-        }
+        //for (u64 i = 0; i < view.size(); ++i)
+        //{
+        //    std::cout << "s msg " << i << " " << mMessages[i][0] << " " << mMessages[i][1] << std::endl;
+        //    std::cout << "s kos " << i << " " << view[i][0] << " " << view[i][1] << std::endl;
+        //}
 
-        chl.asyncSend(std::move(buff));
+        auto stepSize = 1 << 24;
+        auto count = (mMessages.size() + stepSize - 1) / stepSize;
+
+        for (u64 step = 0; step < count; ++step)
+        {
+
+            auto curSize = std::min<u64>(stepSize, mMessages.size() - step * stepSize);
+
+            //std::cout << "send " << step << " "  << count<< std::endl;
+
+            for (u64 i = 0, j = stepSize * step; i < curSize; ++i, ++j)
+            {
+
+                view[j][0] = view[j][0] ^ mMessages[j][0];
+                view[j][1] = view[j][1] ^ mMessages[j][1];
+                //std::cout << "s view " << j << " " << view[j][0] << " " << view[j][1] << std::endl;
+            }
+
+            if (step == count - 1)
+            {
+                chl.asyncSend(buff + step * stepSize, curSize * sizeof(std::array<block,2>), [buff]() 
+                {
+                    delete[] buff; 
+                });
+            }
+            else
+            {
+                chl.asyncSend(buff + step * stepSize, curSize * sizeof(std::array<block, 2>));
+            }
+        }
+        //std::cout << IoStream::unlock;
+
     }
 
     //static const u8 bitMasks[8]{ 0,1,3,7,15,31,63, 127 };
@@ -97,6 +132,10 @@ namespace osuCrypto
         BitIterator iter((u8*)&choice, 0);
         otIdx *= mEncodeSize;
 
+        //encoding = ZeroBlock;
+        //for (u64 i = 0; i < mEncodeSize; ++i)
+        //    encoding = encoding  ^ mMessages[otIdx++][*iter++];
+
         SHA1 sha;
         u8 buff[SHA1::HashSize];
 
@@ -104,9 +143,7 @@ namespace osuCrypto
             sha.Update(mMessages[otIdx++][*iter++]);
 
         sha.Update((u8*)choiceWord.data(), mEncodeSize / 8);
-
         sha.Final(buff);
-
         encoding = *(block*)buff;
     }
 
@@ -128,7 +165,7 @@ namespace osuCrypto
         if (inputBitCount > 128)
             throw std::runtime_error(LOCATION);
 
-        mEncodeSize = roundUpTo( inputBitCount,8);
+        mEncodeSize = roundUpTo(inputBitCount, 8);
         inputBlkSize = (inputBitCount + 127) / 128;
         baseOtCount = 128;
     }

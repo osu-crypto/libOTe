@@ -134,9 +134,8 @@ void OosNcoOt_Test_Impl()
     OosNcoOtSender sender(code, 40);
     OosNcoOtReceiver recv(code, 40);
 
-
     u64 ncoinputBlkSize, baseCount;
-    sender.getParams(true, 128, 40, 128, numOTs, ncoinputBlkSize, baseCount);
+    sender.getParams(true, 128, 40, 76, numOTs, ncoinputBlkSize, baseCount);
     u64 codeSize = (baseCount + 127) / 128;
 
     std::vector<block> baseRecv(baseCount);
@@ -189,19 +188,46 @@ void OosNcoOt_Test_Impl()
             sender.encode(i, choice, encoding2);
 
             if (!skip && neq(encoding1, encoding2))
+            {
+                sendChl.close();
+                recvChl.close();
+
+                ep0.stop();
+                ep1.stop();
+                ios.stop();
+                std::cout << " = failed " << i << std::endl;
                 throw UnitTestFail();
+            }
 
             prng0.get((u8*)choice.data(), ncoinputBlkSize * sizeof(block));
 
             sender.encode(i, choice, encoding2);
 
             if (!skip && eq(encoding1, encoding2))
+            {
+                sendChl.close();
+                recvChl.close();
+
+                ep0.stop();
+                ep1.stop();
+                ios.stop();
+
+                std::cout << " != failed " << i << std::endl;
+
+
                 throw UnitTestFail();
+            }
         }
 
         thrd = std::thread([&]() {recv.check(recvChl, ZeroBlock); });
+        try {
 
         sender.check(sendChl, ZeroBlock);
+        }
+        catch (...)
+        {
+            std::cout << " check failed " << std::endl;
+        }
 
         thrd.join();
     }
@@ -222,8 +248,8 @@ void Rr17NcoOt_Test_Impl()
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
     PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
 
-    u64 numOTs = 128;
-    u64 inputSize = 120;
+    u64 numOTs = 80;
+    u64 inputSize = 40;
 
     Rr17NcoOtSender sender;
     Rr17NcoOtReceiver recv;

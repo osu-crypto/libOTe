@@ -58,9 +58,6 @@
     <ClCompile Include="TwoChooseOne\LzKosOtExtSender.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Tools\bch511.bin" />
-  </ItemGroup>
-  <ItemGroup>
     <Text Include="CMakeLists.txt" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

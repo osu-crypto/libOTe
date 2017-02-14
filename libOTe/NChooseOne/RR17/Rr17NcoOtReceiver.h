@@ -13,7 +13,7 @@ namespace osuCrypto
 
     public:
         KosOtExtReceiver mKos;
-        std::vector<block> mMessage;
+        std::vector<block> mMessages;
         u64 mEncodeSize, mSendIdx;
         BitVector mChoices;
 
