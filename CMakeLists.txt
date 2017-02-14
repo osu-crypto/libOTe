@@ -48,6 +48,7 @@ SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb -rdynamic")
 set(Miracl_Dirs "${CMAKE_SOURCE_DIR}/thirdparty/linux/miracl/")
 include_directories("${Miracl_Dirs}") 
 link_directories("${Miracl_Dirs}/miracl/source/")
+install(FILES "${Miracl_Dirs}/miracl/source/libmiracl.a" DESTINATION lib)
 
 # default location for Boost
 set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/thirdparty/linux/boost/")
