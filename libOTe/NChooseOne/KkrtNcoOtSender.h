@@ -19,7 +19,8 @@ namespace osuCrypto {
     class KkrtNcoOtSender : public NcoOtExtSender
     {
     public: 
-        std::vector<PRNG> mGens;
+        std::vector<AES> mGens;
+        std::vector<u64> mGensBlkIdx;
         BitVector mBaseChoiceBits;
         std::vector<block> mChoiceBlks;
         MatrixView<block> mT;

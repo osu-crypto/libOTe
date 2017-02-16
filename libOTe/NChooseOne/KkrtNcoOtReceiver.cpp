@@ -17,11 +17,12 @@ namespace osuCrypto
             throw std::runtime_error("rt error at " LOCATION);
 
         mGens.resize(baseRecvOts.size());
+        mGensBlkIdx.resize(baseRecvOts.size(), 0);
 
         for (u64 i = 0; i < mGens.size(); i++)
         {
-            mGens[i][0].SetSeed(baseRecvOts[i][0]);
-            mGens[i][1].SetSeed(baseRecvOts[i][1]);
+            mGens[i][0].setKey(baseRecvOts[i][0]);
+            mGens[i][1].setKey(baseRecvOts[i][1]);
         }
         mHasBase = true;
     }
@@ -82,12 +83,11 @@ namespace osuCrypto
                     // AES in counter mode acting as a PRNG. We don't use the normal
                     // PRNG interface because that would result in a data copy when 
                     // we move it into the T0,T1 matrices. Instead we do it directly.
-                    mGens[colIdx][0].mAes.ecbEncCounterMode(mGens[colIdx][0].mBlockIdx, superBlkSize, ((block*)t0.data() + superBlkSize * tIdx));
-                    mGens[colIdx][1].mAes.ecbEncCounterMode(mGens[colIdx][1].mBlockIdx, superBlkSize, ((block*)t1.data() + superBlkSize * tIdx));
+                    mGens[colIdx][0].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, ((block*)t0.data() + superBlkSize * tIdx));
+                    mGens[colIdx][1].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, ((block*)t1.data() + superBlkSize * tIdx));
 
                     // increment the counter mode idx.
-                    mGens[colIdx][0].mBlockIdx += superBlkSize;
-                    mGens[colIdx][1].mBlockIdx += superBlkSize;
+                    mGensBlkIdx[colIdx] += superBlkSize;
                 }
 
                 // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
@@ -139,8 +139,8 @@ namespace osuCrypto
 
         for (u64 i = 0; i < base.size(); ++i)
         {
-            base[i][0] = mGens[i][0].get<block>();
-            base[i][1] = mGens[i][1].get<block>();
+            mGens[i][0].ecbEncCounterMode(mGensBlkIdx[i], 1, &base[i][0]);
+            mGens[i][1].ecbEncCounterMode(mGensBlkIdx[i], 1, &base[i][1]);
         }
         raw->setBaseOts(base);
 

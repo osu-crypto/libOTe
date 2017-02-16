@@ -59,6 +59,11 @@ namespace osuCrypto
 
         //virtual void encode(
         //    u64 otIdx,
+        //    const u8* choiceWord,
+        //    block& encoding) = 0;
+
+        //virtual void encode(
+        //    u64 otIdx,
         //    const MatrixView<block> choiceWord,
         //    ArrayView<block> encoding) = 0;
 
@@ -100,6 +105,11 @@ namespace osuCrypto
             u64 otIdx,
             const ArrayView<block> choiceWord,
             block& encoding) = 0;
+
+        //virtual void encode(
+        //    u64 otIdx,
+        //    const u8* choiceWord,
+        //    block& encoding) = 0;
 
         virtual void zeroEncode(u64 otIdx) = 0;
 

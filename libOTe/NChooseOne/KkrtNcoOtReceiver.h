@@ -3,6 +3,7 @@
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include "cryptoTools/Network/Channel.h"
 #include <vector>
+#include "cryptoTools/Crypto/AES.h"
 
 #ifdef GetMessage
 #undef GetMessage
@@ -26,7 +27,8 @@ namespace osuCrypto
         }
 
         bool mHasBase;
-        std::vector<std::array<PRNG,2>> mGens;
+        std::vector<std::array<AES, 2>> mGens;
+        std::vector<u64> mGensBlkIdx;
         MatrixView<block> mT0;
         MatrixView<block> mT1;
         u64 mCorrectionIdx;
