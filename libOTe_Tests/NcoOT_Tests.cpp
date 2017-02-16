@@ -34,7 +34,7 @@ void KkrtNcoOt_Test_Impl()
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
     PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
 
-    u64 numOTs = 128;
+    u64 numOTs = 33333;
 
     KkrtNcoOtSender sender;
     KkrtNcoOtReceiver recv;
@@ -95,6 +95,47 @@ void KkrtNcoOt_Test_Impl()
             prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
 
             sender.encode(i, codeword, encoding2);
+
+            if (eq(encoding1, encoding2))
+                throw UnitTestFail();
+        }
+
+    }
+    auto recv2Ptr = recv.split();
+    auto send2Ptr = sender.split();
+
+    auto& recv2 = *recv2Ptr;
+    auto& send2 = *send2Ptr;
+
+    for (size_t j = 0; j < 10; j++)
+    {
+        auto thrd = std::thread([&]() {
+            send2.init(numOTs, prng0, sendChl);
+        });
+
+        recv2.init(numOTs, prng1, recvChl);
+
+        thrd.join();
+
+
+        for (u64 i = 0; i < numOTs; ++i)
+        {
+            prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
+
+            block encoding1, encoding2;
+            recv2.encode(i, codeword, encoding1);
+
+            recv2.sendCorrection(recvChl, 1);
+            send2.recvCorrection(sendChl, 1);
+
+            send2.encode(i, codeword, encoding2);
+
+            if (neq(encoding1, encoding2))
+                throw UnitTestFail();
+
+            prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
+
+            send2.encode(i, codeword, encoding2);
 
             if (eq(encoding1, encoding2))
                 throw UnitTestFail();

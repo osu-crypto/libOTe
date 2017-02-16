@@ -141,6 +141,8 @@ namespace osuCrypto
         {
             mGens[i][0].ecbEncCounterMode(mGensBlkIdx[i], 1, &base[i][0]);
             mGens[i][1].ecbEncCounterMode(mGensBlkIdx[i], 1, &base[i][1]);
+
+            ++mGensBlkIdx[i];
         }
         raw->setBaseOts(base);
 
