@@ -589,6 +589,11 @@ akn{ "a", "akn" };
 
 int main(int argc, char** argv)
 {
+
+    auto bb = std::vector<u64>(22);
+
+    std::sort(bb.begin(), bb.end());
+
     backtraceHook();
 
     std::vector<u8> data(16);

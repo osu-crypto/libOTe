@@ -50,6 +50,9 @@ void NetWork_all()
 void bitVec_all()
 {
     std::cout << std::endl;
+    run("AES                                     ", AES_EncDec_Test);
+
+    std::cout << std::endl;
     run("BitVector_Indexing_Test                 ", BitVector_Indexing_Test_Impl);
     run("BitVector_Parity                        ", BitVector_Parity_Test_Impl);
     run("BitVector_Append_Test                   ", BitVector_Append_Test_Impl);

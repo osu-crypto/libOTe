@@ -23,7 +23,7 @@ using namespace osuCrypto;
         AES encKey(userKey);
         AESDec decKey(userKey);
 
-        u64 length = 100;
+        u64 length = 1<< 20;
 
         std::vector<block> data(length);
         std::vector<block> cyphertext1(length);

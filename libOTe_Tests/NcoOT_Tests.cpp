@@ -34,7 +34,7 @@ void KkrtNcoOt_Test_Impl()
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
     PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
 
-    u64 numOTs = 33333;
+    u64 numOTs = 1030;
 
     KkrtNcoOtSender sender;
     KkrtNcoOtReceiver recv;
