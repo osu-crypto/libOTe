@@ -1,5 +1,5 @@
 #pragma once
-#include "cryptoTools/Common/Defines.h"
+#include <cryptoTools/Common/Defines.h>
 
 //#define KOS_SHA_HASH
 //#define IKNP_SHA_HASH

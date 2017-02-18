@@ -1,10 +1,10 @@
 #include "libOTe/Base/naor-pinkas.h"
 #include "OosNcoOtReceiver.h"
 #include "libOTe/Tools/Tools.h"
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Log.h>
 #include  <mmintrin.h>
 #include "OosDefines.h"
-#include "cryptoTools/Common/ByteStream.h"
+#include <cryptoTools/Common/ByteStream.h>
 using namespace std;
 
 namespace osuCrypto

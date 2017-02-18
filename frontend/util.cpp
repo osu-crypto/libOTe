@@ -1,8 +1,8 @@
 #include "util.h"
 
 using namespace osuCrypto;
-#include "cryptoTools/Common/Log.h"
-#include "cryptoTools/Common/ByteStream.h"
+#include <cryptoTools/Common/Log.h>
+#include <cryptoTools/Common/ByteStream.h>
 #define tryCount 2
 
 void senderGetLatency(Channel& chl)
