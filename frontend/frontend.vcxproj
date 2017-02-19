@@ -84,7 +84,6 @@
     <ClCompile Include="CLP.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="signalHandle.cpp" />
-    <ClCompile Include="temp.cpp" />
     <ClCompile Include="Tutorials\Network.cpp" />
     <ClCompile Include="UnitTests.cpp" />
     <ClCompile Include="util.cpp" />

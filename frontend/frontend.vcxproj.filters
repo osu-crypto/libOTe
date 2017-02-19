@@ -30,9 +30,6 @@
     <ClCompile Include="signalHandle.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="temp.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Tutorials\Network.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
