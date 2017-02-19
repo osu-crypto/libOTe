@@ -4,8 +4,8 @@
 
 
 #include <array>
-#include "cryptoTools/Crypto/PRNG.h"
-#include "cryptoTools/Common/BitVector.h"
+#include <cryptoTools/Crypto/PRNG.h>
+#include <cryptoTools/Common/BitVector.h>
 
 #ifdef GetMessage
 #undef GetMessage

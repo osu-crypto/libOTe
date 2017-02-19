@@ -5,9 +5,9 @@
 #undef GetMessage
 #endif
 
-#include "cryptoTools/Common/Defines.h"
+#include <cryptoTools/Common/Defines.h>
 #include <unordered_map> 
-#include "cryptoTools/Crypto/PRNG.h"
+#include <cryptoTools/Crypto/PRNG.h>
 
 using namespace osuCrypto;
 

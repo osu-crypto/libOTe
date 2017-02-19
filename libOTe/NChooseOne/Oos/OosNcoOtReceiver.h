@@ -1,7 +1,7 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
 #include "libOTe/NChooseOne/NcoOtExt.h"
-#include "cryptoTools/Network/Channel.h"
+#include <cryptoTools/Network/Channel.h>
 #include <vector>
 #include "libOTe/Tools/LinearCode.h"
 //#include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"

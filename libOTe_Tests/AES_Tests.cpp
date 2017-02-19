@@ -5,9 +5,9 @@
 #include <memory>
 
 #include "Common.h"
-#include "cryptoTools/Common/Defines.h"
-#include "cryptoTools/Crypto/AES.h" 
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Defines.h>
+#include <cryptoTools/Crypto/AES.h> 
+#include <cryptoTools/Common/Log.h>
 
 using namespace osuCrypto;
 

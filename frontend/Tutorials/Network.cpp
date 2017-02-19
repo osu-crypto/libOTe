@@ -1,7 +1,7 @@
 #include "Network.h"
-#include "cryptoTools/Common/Defines.h"
-#include "cryptoTools/Network/Channel.h"
-#include "cryptoTools/Network/BtIOService.h"
+#include <cryptoTools/Common/Defines.h>
+#include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Network/BtIOService.h>
 
 
 using namespace osuCrypto;
