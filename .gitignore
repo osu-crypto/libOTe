@@ -216,3 +216,5 @@ testout.txt
 online.txt
 offline.txt
 Makefile
+
+[path to project]/node_modules/
