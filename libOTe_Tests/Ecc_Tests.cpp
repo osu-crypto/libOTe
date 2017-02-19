@@ -5,10 +5,10 @@
 #include <memory>
 
 #include "Common.h"
-#include "cryptoTools/Common/Defines.h"
-#include "cryptoTools/Crypto/Curve.h" 
-#include "cryptoTools/Common/Log.h"
-#include "cryptoTools/Common/ByteStream.h"
+#include <cryptoTools/Common/Defines.h>
+#include <cryptoTools/Crypto/Curve.h> 
+#include <cryptoTools/Common/Log.h>
+#include <cryptoTools/Common/ByteStream.h>
 
 using namespace osuCrypto;
 

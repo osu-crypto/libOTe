@@ -1,3 +1,4 @@
 [submodule "cryptoTools"]
 	path = cryptoTools
-	url = https://github.com/ladnir/cryptoTools.git
+	url = https://github.com/spaceships/cryptoTools.git
+	branch = master

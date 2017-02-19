@@ -3,16 +3,16 @@
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 
 #include "libOTe/Tools/Tools.h"
-#include "cryptoTools/Network/BtChannel.h"
-#include "cryptoTools/Network/BtEndpoint.h"
+#include <cryptoTools/Network/BtChannel.h>
+#include <cryptoTools/Network/BtEndpoint.h>
 
 #include "libOTe/Base/naor-pinkas.h"
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Log.h>
 
 #include "Common.h"
 #include <thread>
 #include <vector>
-#include "cryptoTools/Common/BitVector.h"
+#include <cryptoTools/Common/BitVector.h>
 
 #ifdef GetMessage
 #undef GetMessage

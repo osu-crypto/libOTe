@@ -1,7 +1,7 @@
 #include "libOTe/Base/naor-pinkas.h"
 #include "KkrtNcoOtReceiver.h"
 #include "libOTe/Tools/Tools.h"
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Log.h>
 #include  <mmintrin.h>
 #include "KkrtDefines.h"
 using namespace std;

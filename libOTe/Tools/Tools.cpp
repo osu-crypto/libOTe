@@ -1,13 +1,13 @@
 #include "Tools.h"
-#include "cryptoTools/Common/Defines.h"
+#include <cryptoTools/Common/Defines.h>
 #include <wmmintrin.h>
-#include "cryptoTools/Common/MatrixView.h"
+#include <cryptoTools/Common/MatrixView.h>
 #ifndef _MSC_VER
 #include <x86intrin.h>
 #endif 
 
-#include "cryptoTools/Common/BitVector.h"
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/BitVector.h>
+#include <cryptoTools/Common/Log.h>
 
 using std::array;
 

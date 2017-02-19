@@ -2,7 +2,7 @@
 
 using namespace std;
 #include "UnitTests.h" 
-#include "cryptoTools/Common/Defines.h"
+#include <cryptoTools/Common/Defines.h>
 using namespace osuCrypto;
 
 #include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
@@ -10,10 +10,10 @@ using namespace osuCrypto;
 #include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
-#include "cryptoTools/Network/BtChannel.h"
-#include "cryptoTools/Network/BtEndpoint.h"
+#include <cryptoTools/Network/BtChannel.h>
+#include <cryptoTools/Network/BtEndpoint.h>
 #include <numeric>
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Log.h>
 int miraclTestMain();
 
 #include "libOTe/Tools/LinearCode.h"

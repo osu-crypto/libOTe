@@ -1,7 +1,7 @@
 #include "Rr17NcoOtSender.h"
-#include "cryptoTools/Common/ByteStream.h"
+#include <cryptoTools/Common/ByteStream.h>
 
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Log.h>
 namespace osuCrypto
 {
 
