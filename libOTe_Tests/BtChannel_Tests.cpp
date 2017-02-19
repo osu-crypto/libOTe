@@ -351,7 +351,7 @@ using namespace osuCrypto;
         void BtNetwork_ManyEndpoints_Test()
         {
             u64 nodeCount = 20;
-            u32 basePort = 1712;
+            u32 basePort = 1212;
             std::string ip("127.0.0.1");
             //InitDebugPrinting();
 

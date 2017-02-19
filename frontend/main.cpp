@@ -586,18 +586,87 @@ oos{ "o", "oos" },
 akn{ "a", "akn" };
 #include "signalHandle.h"
 
+#include "cryptoTools/Common/ByteStream.h"
+
+//
+//template<typename, typename T>
+//struct has_resize {
+//    static_assert(
+//        std::integral_constant<T, false>::value,
+//        "Second template parameter needs to be of function type.");
+//};
+//
+//// specialization that does the checking
+//
+//template<typename C, typename Ret, typename... Args>
+//struct has_resize<C, Ret(Args...)> {
+//private:
+//    template<typename T>
+//    static constexpr auto check(T*)
+//        -> typename
+//        std::is_same<
+//        decltype(std::declval<T>().resize(std::declval<Args>()...)),
+//        Ret    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+//        >::type;  // attempt to call it and see if the return type is correct
+//
+//    template<typename>
+//    static constexpr std::false_type check(...);
+//
+//    typedef decltype(check<C>(0)) type;
+//
+//public:
+//    static constexpr bool value = type::value;
+//};
+//
+//
+//template<typename> struct int_ { typedef int type; };
+//
+//template <class Container,
+//    class = std::enable_if_t<
+//        std::is_convertible<typename Container::pointer,
+//            decltype(std::declval<Container>().data())>::value &&
+//        std::is_convertible<typename Container::size_type,
+//            decltype(std::declval<Container>().size())>::value &&
+//        has_resize<Container,void(u64)>::value
+//    > // enable if
+//    //,typename int_<decltype(Container::resize)>::type = 0
+//> // template
+//void recv(Container& c)
+//{
+//    //asyncRecv(c).get();
+//}
+//#include <iostream>
+//#include <utility>
+//#include <type_traits>
+//
+////template<typename C,
+////    typename int_<decltype(C::resize)>::type = 0>
+////    void recv(C&)
+////{
+////
+////}
+////
+////&&
+////std::is_same<int_<decltype(Container::resize)>::type, std::true_type>::value
+//
+//struct foo {
+//    int    memfun1(int a) const { return a; }
+//    double memfun2(double b) const { return b; }
+//};
+//
+
+#include "Tutorials/Network.h"
 
 int main(int argc, char** argv)
 {
+    //networkTutorial();
 
-    auto bb = std::vector<u64>(22);
+    //return 0;
 
-    std::sort(bb.begin(), bb.end());
+
 
     backtraceHook();
 
-    std::vector<u8> data(16);
-    MatrixView<u8> v(data,4);
 
     //code();
     //return 0;

@@ -1,5 +1,5 @@
 
-#ifndef _MSC_VER
+#if !defined _MSC_VER & defined SHOW_BACK_TRACE
 #include <stdio.h>
 #include <signal.h>
 #include <stdio.h>
