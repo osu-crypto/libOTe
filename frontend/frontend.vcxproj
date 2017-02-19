@@ -53,6 +53,7 @@
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_WIN32_WINNT=0x0501 ;_MBCS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories);$(SolutionDir)\thirdparty\win\boost\stage\lib;C:/libs/boost\stage\lib;$(OutDir);$(SolutionDir)thirdparty\win\;C:/libs/;C:\Program Files %28x86%29\Visual Leak Detector\lib\Win64</AdditionalLibraryDirectories>
@@ -70,6 +71,7 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_WIN32_WINNT=0x0501 ;_MBCS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -82,6 +84,8 @@
     <ClCompile Include="CLP.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="signalHandle.cpp" />
+    <ClCompile Include="temp.cpp" />
+    <ClCompile Include="Tutorials\Network.cpp" />
     <ClCompile Include="UnitTests.cpp" />
     <ClCompile Include="util.cpp" />
   </ItemGroup>
@@ -89,6 +93,7 @@
     <ClInclude Include="CLP.h" />
     <ClInclude Include="main.h" />
     <ClInclude Include="signalHandle.h" />
+    <ClInclude Include="Tutorials\Network.h" />
     <ClInclude Include="UnitTests.h" />
     <ClInclude Include="util.h" />
   </ItemGroup>
