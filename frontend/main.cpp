@@ -47,9 +47,10 @@ void kkrt_test(int i)
 
     u64 otsPer = numOTs / numThreads;
 
+    auto rr = i ? BtEndpoint::Server : BtEndpoint::Client;
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, i, name);
+    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
     std::vector<Channel*> chls(numThreads);
 
     for (u64 k = 0; k < numThreads; ++k)
@@ -166,10 +167,11 @@ void oos_test(int i)
     u64 numThreads = 1;
 
     u64 otsPer = numOTs / numThreads;
+    auto rr = i ? BtEndpoint::Server : BtEndpoint::Client;
 
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, i, name);
+    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
     std::vector<Channel*> chls(numThreads);
 
     for (u64 k = 0; k < numThreads; ++k)
@@ -288,9 +290,10 @@ void kos_test(int iii)
 
 
     // get up the networking
+    auto rr = iii ? BtEndpoint::Server : BtEndpoint::Client;
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, iii, name);
+    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
 
     u64 numThread = 1;
     std::vector<Channel*> chls(numThread);
@@ -376,12 +379,13 @@ void dkos_test(int i)
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
     u64 numOTs = 1 << 24;
+    auto rr = i ? BtEndpoint::Server : BtEndpoint::Client;
 
 
     // get up the networking
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, i, name);
+    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
     Channel& chl = ep0.addChannel(name, name);
 
     u64 s = 40;
@@ -443,11 +447,12 @@ void iknp_test(int i)
 
     u64 numOTs = 1 << 24;
 
+    auto rr = i ? BtEndpoint::Server : BtEndpoint::Client;
 
     // get up the networking
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, i, name);
+    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
     Channel& chl = ep0.addChannel(name, name);
 
 
@@ -512,10 +517,11 @@ void akn_test(int i)
     double cncProb(0.0999);
 
 
+    auto rr = i ? BtEndpoint::Server : BtEndpoint::Client;
     setThreadName("Recvr");
 
     BtIOService ios(0);
-    BtEndpoint  ep0(ios, "127.0.0.1", 1212, i, "ep");
+    BtEndpoint  ep0(ios, "127.0.0.1", 1212, rr, "ep");
 
     u64 numTHreads(4);
 
@@ -655,14 +661,8 @@ akn{ "a", "akn" };
 //};
 //
 
-#include "Tutorials/Network.h"
-
 int main(int argc, char** argv)
 {
-    //networkTutorial();
-
-    //return 0;
-
 
 
     backtraceHook();

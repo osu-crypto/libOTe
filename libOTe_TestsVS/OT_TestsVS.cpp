@@ -13,34 +13,6 @@ namespace osuCrypto_tests
     {
     public:
 
-        TEST_METHOD(BitVector_Indexing_TestVS)
-        {
-            InitDebugPrinting();
-            BitVector_Indexing_Test_Impl();
-        }
-
-
-
-        TEST_METHOD(BitVector_Parity_TestVS)
-        {
-            InitDebugPrinting();
-            BitVector_Parity_Test_Impl();
-        }
-
-
-        TEST_METHOD(BitVector_Append_TestVS)
-        {
-            InitDebugPrinting();
-            BitVector_Append_Test_Impl();
-        }
-
-
-        TEST_METHOD(BitVector_Copy_TestVS)
-        {
-            InitDebugPrinting();
-            BitVector_Copy_Test_Impl();
-        }
-
         TEST_METHOD(Transpose_TestVS)
         {
             InitDebugPrinting();

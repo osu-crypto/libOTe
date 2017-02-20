@@ -403,7 +403,7 @@ namespace osuCrypto {
                 auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.size()[1] + w * 2;
 
                 out0 -= out.size()[1] * skip;
-                t.blks[0] = _mm_slli_epi64(t.blks[0], skip);
+                t.blks[0] = _mm_slli_epi64(t.blks[0],int( skip));
 
                 for (u64 j = 0; j < rem; j++)
                 {
@@ -548,7 +548,7 @@ namespace osuCrypto {
                 auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.size()[1] + w * 2;
 
                 out0 -= out.size()[1] * skip;
-                t.blks[0] = _mm_slli_epi64(t.blks[0], skip);
+                t.blks[0] = _mm_slli_epi64(t.blks[0],int( skip));
 
                 for (u64 j = 0; j < rem; j++)
                 {

@@ -95,11 +95,8 @@
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="AES_TestsVS.cpp" />
     <ClCompile Include="AknOT_TestsVS.cpp" />
     <ClCompile Include="BaseOT_TestsVS.cpp" />
-    <ClCompile Include="BtChannel_TestsVS.cpp" />
-    <ClCompile Include="Ecc_TestsVS.cpp" />
     <ClCompile Include="OT_TestsVS.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>

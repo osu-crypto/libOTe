@@ -64,117 +64,6 @@ void OT_100Receive_Test(BitVector& choiceBits, ArrayView<block> recv, ArrayView<
 }
 
 
-
-void BitVector_Indexing_Test_Impl()
-{
-    BitVector bb(128);
-    std::vector<bool>gold(128);
-
-
-    for (u64 i : std::vector<u64>{ { 2,33,34,26,85,33,99,12,126 } })
-    {
-        bb[i] = gold[i] = true;
-    }
-
-
-    for (auto i = 0; i < 128; ++i)
-    {
-        if ((bool)bb[i] != gold[i])
-            throw std::runtime_error("");
-
-        if ((bool)bb[i] != gold[i])
-            throw UnitTestFail();
-    }
-}
-
-void BitVector_Parity_Test_Impl()
-{
-    PRNG prng(ZeroBlock);
-    for (u64 i = 0; i < 1000; ++i)
-    {
-        u8 size = prng.get<u8>();
-        u8 parity = 0;
-
-        BitVector bv(size);
-
-        bv.randomize(prng);
-
-        for (u64 j = 0; j < size; ++j)
-        {
-            parity ^= bv[j];
-        }
-
-        if (parity != bv.parity())
-            throw UnitTestFail();
-    }
-
-}
-
-void BitVector_Append_Test_Impl()
-{
-
-    BitVector bv0(3);
-    BitVector bv1(6);
-    BitVector bv2(9);
-    BitVector bv4;
-
-
-    bv0[0] = 1; bv2[0] = 1;
-    bv0[2] = 1; bv2[2] = 1;
-    bv1[2] = 1; bv2[3 + 2] = 1;
-    bv1[5] = 1; bv2[3 + 5] = 1;
-
-    bv4.append(bv0);
-    bv4.append(bv1);
-
-    //std::cout << bv0 << bv1 << std::endl;
-    //std::cout << bv2 << std::endl;
-    //std::cout << bv4 << std::endl;
-
-    if (bv4 != bv2)
-        throw UnitTestFail();
-}
-
-
-void BitVector_Copy_Test_Impl()
-{
-    u64 offset = 3;
-    BitVector bb(128), c(128 - offset);
-
-
-    for (u64 i : std::vector<u64>{ { 2,33,34,26,85,33,99,12,126 } })
-    {
-        bb[i] = true;
-    }
-
-    c.copy(bb, offset, 128 - offset);
-
-
-    ////std::cout << "bb ";// << bb << Logger::endl;
-    //for (u64 i = 0; i < bb.size(); ++i)
-    //{
-    //    if (bb[i]) std::cout << "1";
-    //    else std::cout << "0";
-
-    //}
-    //std::cout << std::endl;
-    //std::cout << "c   ";
-    //for (u64 i = 0; i < c.size(); ++i)
-    //{
-    //    if (c[i]) std::cout << "1";
-    //    else std::cout << "0";
-
-    //}
-    //std::cout << std::endl;
-
-    for (u64 i = 0; i < 128 - offset; ++i)
-    {
-        if (bb[i + offset] != c[i])
-            throw std::runtime_error("");
-
-    }
-}
-
 void printMtx(std::array<block, 128>& data)
 {
     for (auto& d : data)
@@ -469,8 +358,8 @@ void KosOtExt_100Receive_Test_Impl()
     setThreadName("Sender");
 
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
-    BtEndpoint ep1(ios, "127.0.0.1", 1212, false, "ep");
+    BtEndpoint ep0(ios, "127.0.0.1", 1212, BtEndpoint::Server, "ep");
+    BtEndpoint ep1(ios, "127.0.0.1", 1212, BtEndpoint::Client, "ep");
     Channel& senderChannel = ep1.addChannel("chl", "chl");
     Channel& recvChannel = ep0.addChannel("chl", "chl");
 
@@ -542,8 +431,8 @@ void LzKosOtExt_100Receive_Test_Impl()
     setThreadName("Sender");
 
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
-    BtEndpoint ep1(ios, "127.0.0.1", 1212, false, "ep");
+    BtEndpoint ep0(ios, "127.0.0.1", 1212, BtEndpoint::Server, "ep");
+    BtEndpoint ep1(ios, "127.0.0.1", 1212, BtEndpoint::Client, "ep");
     Channel& senderChannel = ep1.addChannel("chl", "chl");
     Channel& recvChannel = ep0.addChannel("chl", "chl");
 
@@ -628,8 +517,8 @@ void KosDotExt_100Receive_Test_Impl()
     setThreadName("Sender");
 
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
-    BtEndpoint ep1(ios, "127.0.0.1", 1212, false, "ep");
+    BtEndpoint ep0(ios, "127.0.0.1", 1212, BtEndpoint::Server, "ep");
+    BtEndpoint ep1(ios, "127.0.0.1", 1212, BtEndpoint::Client, "ep");
     Channel& senderChannel = ep1.addChannel("chl", "chl");
     Channel& recvChannel = ep0.addChannel("chl", "chl");
 
@@ -704,8 +593,8 @@ void IknpOtExt_100Receive_Test_Impl()
     setThreadName("Sender");
 
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
-    BtEndpoint ep1(ios, "127.0.0.1", 1212, false, "ep");
+    BtEndpoint ep0(ios, "127.0.0.1", 1212, BtEndpoint::Server, "ep");
+    BtEndpoint ep1(ios, "127.0.0.1", 1212, BtEndpoint::Client, "ep");
     Channel& senderChannel = ep1.addChannel("chl", "chl");
     Channel& recvChannel = ep0.addChannel("chl", "chl");
 

@@ -27,8 +27,8 @@ void NaorPinkasOt_Test_Impl()
         setThreadName("Sender");
 
         BtIOService ios(0);
-        BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
-        BtEndpoint ep1(ios, "127.0.0.1", 1212, false, "ep");
+        BtEndpoint ep0(ios, "127.0.0.1", 1212, BtEndpoint::Server, "ep");
+        BtEndpoint ep1(ios, "127.0.0.1", 1212, BtEndpoint::Client, "ep");
         Channel& senderChannel = ep1.addChannel("chl", "chl");
         Channel& recvChannel = ep0.addChannel("chl", "chl");
 

@@ -33,8 +33,8 @@ void AknOt_sendRecv1000_Test()
     setThreadName("Recvr");
 
     BtIOService ios(0);
-    BtEndpoint  ep0(ios, "127.0.0.1", 1212, true, "ep");
-    BtEndpoint  ep1(ios, "127.0.0.1", 1212, false, "ep");
+    BtEndpoint  ep0(ios, "127.0.0.1", 1212, BtEndpoint::Server, "ep");
+    BtEndpoint  ep1(ios, "127.0.0.1", 1212, BtEndpoint::Client, "ep");
     
     u64 numTHreads(4);
 

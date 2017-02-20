@@ -1,14 +1,16 @@
 #include <cryptoTools/Common/Log.h>
 #include <functional>
 
-#include "libOTe_Tests/AES_Tests.h"
+#include "tests_cryptoTools/AES_Tests.h"
+#include "tests_cryptoTools/BtChannel_Tests.h"
+#include "tests_cryptoTools/Ecc_Tests.h"
+#include "tests_cryptoTools/Misc_Tests.h"
+
 #include "libOTe_Tests/AknOt_Tests.h"
-#include "libOTe_Tests/BtChannel_Tests.h"
 #include "libOTe_Tests/BaseOT_Tests.h"
 #include "libOTe_Tests/OT_Tests.h"
 #include "libOTe_Tests/NcoOT_Tests.h"
 #include "libOTe_Tests/AknOt_Tests.h"
-#include "libOTe_Tests/Ecc_Tests.h"
 
 
 using namespace osuCrypto;

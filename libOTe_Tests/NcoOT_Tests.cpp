@@ -54,8 +54,8 @@ void KkrtNcoOt_Test_Impl()
 
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, true, name);
-    BtEndpoint ep1(ios, "localhost", 1212, false, name);
+    BtEndpoint ep0(ios, "localhost", 1212, BtEndpoint::Server, name);
+    BtEndpoint ep1(ios, "localhost", 1212, BtEndpoint::Client, name);
     auto &recvChl = ep1.addChannel(name, name);
     auto &sendChl = ep0.addChannel(name, name);
 
@@ -163,8 +163,8 @@ void OosNcoOt_Test_Impl()
 
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, true, name);
-    BtEndpoint ep1(ios, "localhost", 1212, false, name);
+    BtEndpoint ep0(ios, "localhost", 1212, BtEndpoint::Server, name);
+    BtEndpoint ep1(ios, "localhost", 1212, BtEndpoint::Client, name);
     auto &recvChl = ep1.addChannel(name, name);
     auto &sendChl = ep0.addChannel(name, name);
 
@@ -211,7 +211,7 @@ void OosNcoOt_Test_Impl()
             prng0.get((u8*)choice.data(), ncoinputBlkSize * sizeof(block));
 
 
-            bool skip = prng0.getBit();
+            bool skip = prng0.get<bool>();
 
             block encoding1, encoding2;
             if (skip)
@@ -311,8 +311,8 @@ void Rr17NcoOt_Test_Impl()
 
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, true, name);
-    BtEndpoint ep1(ios, "localhost", 1212, false, name);
+    BtEndpoint ep0(ios, "localhost", 1212, BtEndpoint::Server, name);
+    BtEndpoint ep1(ios, "localhost", 1212, BtEndpoint::Client, name);
     auto &recvChl = ep1.addChannel(name, name);
     auto &sendChl = ep0.addChannel(name, name);
 
