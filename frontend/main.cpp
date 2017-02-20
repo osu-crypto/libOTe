@@ -1,7 +1,7 @@
 #include <iostream>
 
 using namespace std;
-#include "UnitTests.h" 
+#include "UnitTests.h"
 #include <cryptoTools/Common/Defines.h>
 using namespace osuCrypto;
 
@@ -47,7 +47,7 @@ void kkrt_test(int i)
 
     u64 otsPer = numOTs / numThreads;
 
-    auto rr = i ? BtEndpoint::Server : BtEndpoint::Client;
+    auto rr = i ? EpMode::Server : EpMode::Client;
     std::string name = "n";
     BtIOService ios(0);
     BtEndpoint ep0(ios, "localhost", 1212, rr, name);
@@ -167,7 +167,7 @@ void oos_test(int i)
     u64 numThreads = 1;
 
     u64 otsPer = numOTs / numThreads;
-    auto rr = i ? BtEndpoint::Server : BtEndpoint::Client;
+    auto rr = i ? EpMode::Server : EpMode::Client;
 
     std::string name = "n";
     BtIOService ios(0);
@@ -290,7 +290,7 @@ void kos_test(int iii)
 
 
     // get up the networking
-    auto rr = iii ? BtEndpoint::Server : BtEndpoint::Client;
+    auto rr = iii ? EpMode::Server : EpMode::Client;
     std::string name = "n";
     BtIOService ios(0);
     BtEndpoint ep0(ios, "localhost", 1212, rr, name);
@@ -316,13 +316,13 @@ void kos_test(int iii)
         {
             baseRecv[j][i] = baseSend[j][i][baseChoice[i]];
         }
-    } 
+    }
 
 
     std::vector<std::thread> thrds(numThread);
-     
+
     if (iii)
-    { 
+    {
         for (u64 i = 0; i < numThread; ++i)
         {
             thrds[i] = std::thread([&, i]()
@@ -379,7 +379,7 @@ void dkos_test(int i)
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
     u64 numOTs = 1 << 24;
-    auto rr = i ? BtEndpoint::Server : BtEndpoint::Client;
+    auto rr = i ? EpMode::Server : EpMode::Client;
 
 
     // get up the networking
@@ -447,7 +447,7 @@ void iknp_test(int i)
 
     u64 numOTs = 1 << 24;
 
-    auto rr = i ? BtEndpoint::Server : BtEndpoint::Client;
+    auto rr = i ? EpMode::Server : EpMode::Client;
 
     // get up the networking
     std::string name = "n";
@@ -517,7 +517,7 @@ void akn_test(int i)
     double cncProb(0.0999);
 
 
-    auto rr = i ? BtEndpoint::Server : BtEndpoint::Client;
+    auto rr = i ? EpMode::Server : EpMode::Client;
     setThreadName("Recvr");
 
     BtIOService ios(0);

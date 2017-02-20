@@ -33,9 +33,9 @@ void AknOt_sendRecv1000_Test()
     setThreadName("Recvr");
 
     BtIOService ios(0);
-    BtEndpoint  ep0(ios, "127.0.0.1", 1212, BtEndpoint::Server, "ep");
-    BtEndpoint  ep1(ios, "127.0.0.1", 1212, BtEndpoint::Client, "ep");
-    
+    BtEndpoint  ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
+    BtEndpoint  ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+
     u64 numTHreads(4);
 
     std::vector<Channel*> sendChls(numTHreads), recvChls(numTHreads);
@@ -68,7 +68,7 @@ void AknOt_sendRecv1000_Test()
 
     thrd.join();
 
-    
+
     for (u64 i = 0; i < recv.mMessages.size(); ++i)
     {
 
