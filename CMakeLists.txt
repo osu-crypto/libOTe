@@ -53,7 +53,7 @@ endif()
 #############################################
 
 # default location for miracl
-set(Miracl_Dirs "${CMAKE_SOURCE_DIR}/cryptoToolsthirdparty/linux/miracl/")
+set(Miracl_Dirs "${CMAKE_SOURCE_DIR}/cryptoTools/thirdparty/linux/miracl/")
 include_directories("${Miracl_Dirs}") 
 
 # default location for Boost
