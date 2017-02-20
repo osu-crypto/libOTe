@@ -95,10 +95,10 @@ If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
-cd libOTe/thirdparty/linux
+cd libOTe/cryptoTools/thirdparty/linux
 bash all.get
-cd ../..
-CMake  -G "Unix Makefiles"
+cd ../../..
+cmake  -G "Unix Makefiles"
 make
 ```
 

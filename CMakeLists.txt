@@ -53,10 +53,8 @@ endif()
 #############################################
 
 # default location for miracl
-set(Miracl_Dirs "${CMAKE_SOURCE_DIR}/thirdparty/linux/miracl/")
+set(Miracl_Dirs "${CMAKE_SOURCE_DIR}/cryptoToolsthirdparty/linux/miracl/")
 include_directories("${Miracl_Dirs}") 
-link_directories("${Miracl_Dirs}/miracl/source/")
-install(FILES "${Miracl_Dirs}/miracl/source/libmiracl.a" DESTINATION lib)
 
 # default location for Boost
 set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/thirdparty/linux/boost/")
@@ -68,6 +66,10 @@ set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/thirdparty/linux/boost/")
 #############################################
 include_directories(cryptoTools)
 add_subdirectory(cryptoTools)
+
+if(NOT "${miracl_Dir}" MATCHES  "")
+	message(ERROR "no miracl_Dir defined, ${miracl_Dir}" )
+endif()
 
 #############################################
 #               Build libOTe                #
