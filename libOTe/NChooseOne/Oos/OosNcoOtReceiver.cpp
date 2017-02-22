@@ -1,10 +1,10 @@
 #include "libOTe/Base/naor-pinkas.h"
 #include "OosNcoOtReceiver.h"
 #include "libOTe/Tools/Tools.h"
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Log.h>
 #include  <mmintrin.h>
 #include "OosDefines.h"
-#include "cryptoTools/Common/ByteStream.h"
+#include <cryptoTools/Common/ByteStream.h>
 using namespace std;
 
 namespace osuCrypto
@@ -29,7 +29,7 @@ namespace osuCrypto
         }
         mHasBase = true;
     }
-    void OosNcoOtReceiver::init(u64 numOtExt)
+    void OosNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
         u64 doneIdx = 0;
         if (mHasBase == false)

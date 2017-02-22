@@ -4,15 +4,17 @@
 
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/LinearCode.h"
-#include "cryptoTools/Network/BtChannel.h"
-#include "cryptoTools/Network/BtEndpoint.h"
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Network/BtChannel.h>
+#include <cryptoTools/Network/BtEndpoint.h>
+#include <cryptoTools/Common/Log.h>
 
 #include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
 #include "libOTe/NChooseOne/KkrtNcoOtSender.h"
 
 #include "libOTe/NChooseOne/Oos/OosNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Oos/OosNcoOtSender.h"
+#include "libOTe/NChooseOne/RR17/Rr17NcoOtReceiver.h"
+#include "libOTe/NChooseOne/RR17/Rr17NcoOtSender.h"
 
 #include "Common.h"
 #include <thread>
@@ -30,8 +32,9 @@ void KkrtNcoOt_Test_Impl()
     setThreadName("Sender");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
+    PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
 
-    u64 numOTs = 128;
+    u64 numOTs = 1030;
 
     KkrtNcoOtSender sender;
     KkrtNcoOtReceiver recv;
@@ -51,8 +54,8 @@ void KkrtNcoOt_Test_Impl()
 
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, true, name);
-    BtEndpoint ep1(ios, "localhost", 1212, false, name);
+    BtEndpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
+    BtEndpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
     auto &recvChl = ep1.addChannel(name, name);
     auto &sendChl = ep0.addChannel(name, name);
 
@@ -65,9 +68,14 @@ void KkrtNcoOt_Test_Impl()
     std::vector<block> codeword(codeSize), correction(codeSize);
     for (size_t j = 0; j < 10; j++)
     {
-        sender.init(numOTs);
+        auto thrd = std::thread([&]() {
+            sender.init(numOTs, prng0, sendChl);
+        });
 
-        recv.init(numOTs);
+        recv.init(numOTs, prng1, recvChl);
+
+        thrd.join();
+
 
         for (u64 i = 0; i < numOTs; ++i)
         {
@@ -93,6 +101,47 @@ void KkrtNcoOt_Test_Impl()
         }
 
     }
+    auto recv2Ptr = recv.split();
+    auto send2Ptr = sender.split();
+
+    auto& recv2 = *recv2Ptr;
+    auto& send2 = *send2Ptr;
+
+    for (size_t j = 0; j < 10; j++)
+    {
+        auto thrd = std::thread([&]() {
+            send2.init(numOTs, prng0, sendChl);
+        });
+
+        recv2.init(numOTs, prng1, recvChl);
+
+        thrd.join();
+
+
+        for (u64 i = 0; i < numOTs; ++i)
+        {
+            prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
+
+            block encoding1, encoding2;
+            recv2.encode(i, codeword, encoding1);
+
+            recv2.sendCorrection(recvChl, 1);
+            send2.recvCorrection(sendChl, 1);
+
+            send2.encode(i, codeword, encoding2);
+
+            if (neq(encoding1, encoding2))
+                throw UnitTestFail();
+
+            prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
+
+            send2.encode(i, codeword, encoding2);
+
+            if (eq(encoding1, encoding2))
+                throw UnitTestFail();
+        }
+
+    }
 
     sendChl.close();
     recvChl.close();
@@ -107,14 +156,15 @@ void OosNcoOt_Test_Impl()
     setThreadName("Sender");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
+    PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
 
     u64 numOTs = 128 * 8;
 
 
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, true, name);
-    BtEndpoint ep1(ios, "localhost", 1212, false, name);
+    BtEndpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
+    BtEndpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
     auto &recvChl = ep1.addChannel(name, name);
     auto &sendChl = ep0.addChannel(name, name);
 
@@ -125,9 +175,8 @@ void OosNcoOt_Test_Impl()
     OosNcoOtSender sender(code, 40);
     OosNcoOtReceiver recv(code, 40);
 
-
     u64 ncoinputBlkSize, baseCount;
-    sender.getParams(true, 128, 40, 128, numOTs, ncoinputBlkSize, baseCount);
+    sender.getParams(true, 128, 40, 76, numOTs, ncoinputBlkSize, baseCount);
     u64 codeSize = (baseCount + 127) / 128;
 
     std::vector<block> baseRecv(baseCount);
@@ -148,15 +197,21 @@ void OosNcoOt_Test_Impl()
     for (size_t j = 0; j < 2; j++)
     {
 
-        sender.init(numOTs);
-        recv.init(numOTs);
+        auto thrd = std::thread([&]() {
+            sender.init(numOTs, prng0, sendChl);
+        });
+
+        recv.init(numOTs, prng1, recvChl);
+
+        thrd.join();
+
 
         for (u64 i = 0; i < numOTs; ++i)
         {
             prng0.get((u8*)choice.data(), ncoinputBlkSize * sizeof(block));
 
 
-            bool skip = prng0.getBit();
+            bool skip = prng0.get<bool>();
 
             block encoding1, encoding2;
             if (skip)
@@ -174,21 +229,133 @@ void OosNcoOt_Test_Impl()
             sender.encode(i, choice, encoding2);
 
             if (!skip && neq(encoding1, encoding2))
+            {
+                sendChl.close();
+                recvChl.close();
+
+                ep0.stop();
+                ep1.stop();
+                ios.stop();
+                std::cout << " = failed " << i << std::endl;
                 throw UnitTestFail();
+            }
 
             prng0.get((u8*)choice.data(), ncoinputBlkSize * sizeof(block));
 
             sender.encode(i, choice, encoding2);
 
             if (!skip && eq(encoding1, encoding2))
+            {
+                sendChl.close();
+                recvChl.close();
+
+                ep0.stop();
+                ep1.stop();
+                ios.stop();
+
+                std::cout << " != failed " << i << std::endl;
+
+
+                throw UnitTestFail();
+            }
+        }
+
+        thrd = std::thread([&]() {recv.check(recvChl, ZeroBlock); });
+        try {
+
+        sender.check(sendChl, ZeroBlock);
+        }
+        catch (...)
+        {
+            std::cout << " check failed " << std::endl;
+        }
+
+        thrd.join();
+    }
+
+    sendChl.close();
+    recvChl.close();
+
+    ep0.stop();
+    ep1.stop();
+    ios.stop();
+}
+
+void Rr17NcoOt_Test_Impl()
+{
+
+    setThreadName("Sender");
+
+    PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
+    PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
+
+    u64 numOTs = 80;
+    u64 inputSize = 40;
+
+    Rr17NcoOtSender sender;
+    Rr17NcoOtReceiver recv;
+    u64 codeSize, baseCount;
+    sender.getParams(true, 128, 40, inputSize, numOTs, codeSize, baseCount);
+    recv.getParams(true, 128, 40, inputSize, numOTs, codeSize, baseCount);
+
+    std::vector<block> baseRecv(baseCount);
+    std::vector<std::array<block, 2>> baseSend(baseCount);
+    BitVector baseChoice(baseCount);
+    baseChoice.randomize(prng0);
+
+    prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+    for (u64 i = 0; i < baseCount; ++i)
+    {
+        baseRecv[i] = baseSend[i][baseChoice[i]];
+    }
+
+    std::string name = "n";
+    BtIOService ios(0);
+    BtEndpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
+    BtEndpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
+    auto &recvChl = ep1.addChannel(name, name);
+    auto &sendChl = ep0.addChannel(name, name);
+
+
+
+
+    sender.setBaseOts(baseRecv, baseChoice);
+    recv.setBaseOts(baseSend);
+
+    std::vector<block> codeword(codeSize), correction(codeSize);
+    for (size_t j = 0; j < 10; j++)
+    {
+        auto thrd = std::thread([&]() {
+            sender.init(numOTs, prng0, sendChl);
+        });
+
+        recv.init(numOTs, prng1, recvChl);
+
+        thrd.join();
+
+        for (u64 i = 0; i < numOTs; ++i)
+        {
+            prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
+
+            block encoding1, encoding2;
+            recv.encode(i, codeword, encoding1);
+
+            recv.sendCorrection(recvChl, 1);
+            sender.recvCorrection(sendChl, 1);
+
+            sender.encode(i, codeword, encoding2);
+
+            if (neq(encoding1, encoding2))
+                throw UnitTestFail();
+
+            prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
+
+            sender.encode(i, codeword, encoding2);
+
+            if (eq(encoding1, encoding2))
                 throw UnitTestFail();
         }
 
-        auto thrd = std::thread([&]() {recv.check(recvChl, ZeroBlock); });
-
-        sender.check(sendChl, ZeroBlock);
-
-        thrd.join();
     }
 
     sendChl.close();
@@ -355,7 +522,7 @@ void LinearCode_subBlock_Test_Impl()
                 }
                 else
                 {
-                    std::cout << "^" << j ;
+                    std::cout << "^" << j;
                 }
             }
 

@@ -21,6 +21,8 @@
     <ClInclude Include="NChooseOne\Oos\OosDefines.h" />
     <ClInclude Include="NChooseOne\Oos\OosNcoOtReceiver.h" />
     <ClInclude Include="NChooseOne\Oos\OosNcoOtSender.h" />
+    <ClInclude Include="NChooseOne\RR17\Rr17NcoOtReceiver.h" />
+    <ClInclude Include="NChooseOne\RR17\Rr17NcoOtSender.h" />
     <ClInclude Include="Tools\LinearCode.h" />
     <ClInclude Include="Tools\Tools.h" />
     <ClInclude Include="TwoChooseOne\IknpOtExtReceiver.h" />
@@ -42,6 +44,8 @@
     <ClCompile Include="NChooseOne\KkrtNcoOtSender.cpp" />
     <ClCompile Include="NChooseOne\Oos\OosNcoOtReceiver.cpp" />
     <ClCompile Include="NChooseOne\Oos\OosNcoOtSender.cpp" />
+    <ClCompile Include="NChooseOne\RR17\Rr17NcoOtReceiver.cpp" />
+    <ClCompile Include="NChooseOne\RR17\Rr17NcoOtSender.cpp" />
     <ClCompile Include="Tools\LinearCode.cpp" />
     <ClCompile Include="Tools\Tools.cpp" />
     <ClCompile Include="TwoChooseOne\IknpOtExtReceiver.cpp" />
@@ -52,9 +56,6 @@
     <ClCompile Include="TwoChooseOne\KosOtExtSender.cpp" />
     <ClCompile Include="TwoChooseOne\LzKosOtExtReceiver.cpp" />
     <ClCompile Include="TwoChooseOne\LzKosOtExtSender.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="Tools\bch511.bin" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="CMakeLists.txt" />
@@ -99,9 +100,10 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)thirdparty/win/boost;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)/cryptoTools/;$(SolutionDir)thirdparty/win/boost;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -111,9 +113,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)thirdparty/win/boost;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)/cryptoTools/;$(SolutionDir)thirdparty/win/boost;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;NDEBUG</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>

@@ -1,7 +1,7 @@
 #include "KkrtNcoOtSender.h"
-#include "cryptoTools/Network/BtIOService.h"
+#include <cryptoTools/Network/BtIOService.h>
 #include "libOTe/Tools/Tools.h"
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Log.h>
 #include "KkrtDefines.h"
 
 namespace osuCrypto
@@ -21,10 +21,11 @@ namespace osuCrypto
 
         mBaseChoiceBits = choices;
         mGens.resize(choices.size());
+        mGensBlkIdx.resize(choices.size(), 0);
 
         for (u64 i = 0; i < baseRecvOts.size(); i++)
         {
-            mGens[i].SetSeed(baseRecvOts[i]);
+            mGens[i].setKey(baseRecvOts[i]);
         }
 
         mChoiceBlks.resize(choices.size() / (sizeof(block) * 8));
@@ -43,7 +44,8 @@ namespace osuCrypto
         // use some of the OT extension PRNG to new base OTs
         for (u64 i = 0; i < base.size(); ++i)
         {
-            base[i] = mGens[i].get<block>();
+            mGens[i].ecbEncCounterMode(mGensBlkIdx[i]++, 1, &base[i]);
+            //base[i] = mGens[i].get<block>();
         }
         raw->setBaseOts(base, mBaseChoiceBits);
 
@@ -51,7 +53,7 @@ namespace osuCrypto
     }
 
     void KkrtNcoOtSender::init(
-        u64 numOTExt)
+        u64 numOTExt, PRNG& prng, Channel& chl)
     {
         static const u8 superBlkSize(8);
 
@@ -94,8 +96,8 @@ namespace osuCrypto
                 // generate the columns using AES-NI in counter mode.
                 for (u64 tIdx = 0, colIdx = i * 128; tIdx < 128; ++tIdx, ++colIdx)
                 {
-                    mGens[colIdx].mAes.ecbEncCounterMode(mGens[colIdx].mBlockIdx, superBlkSize, ((block*)t.data() + superBlkSize * tIdx));
-                    mGens[colIdx].mBlockIdx += superBlkSize;
+                    mGens[colIdx].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, ((block*)t.data() + superBlkSize * tIdx));
+                    mGensBlkIdx[colIdx] += superBlkSize;
                 }
 
                 // transpose our 128 columns of 1024 bits. We will have 1024 rows, 

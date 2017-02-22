@@ -1,43 +1,51 @@
-cmake_minimum_required (VERSION 3.6)
+cmake_minimum_required (VERSION 2.8)
 
 project(libOTe)
 
-set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/bin)
-set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/lib)
-set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/lib)
+if(hasParent)
+else()
 
-############################################
-#           Flag and #defines              #
-############################################
-add_definitions(-DSOLUTION_DIR=\"${CMAKE_SOURCE_DIR}\")
-set(CMAKE_C_FLAGS "-ffunction-sections -Wall  -maes -msse2 -msse4.1 -mpclmul -Wfatal-errors -pthread")
-set(CMAKE_CXX_FLAGS  "${CMAKE_C_FLAGS}  -std=c++14")
+	############################################
+	#          If top level cmake              #
+	############################################
 
-# Set a default build type for single-configuration
-# CMake generators if no build type is set.
-if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
-   SET(CMAKE_BUILD_TYPE Release)
+	set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/bin)
+	set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/lib)
+	set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/lib)
+
+	############################################
+	#           Flag and #defines              #
+	############################################
+	add_definitions(-DSOLUTION_DIR=\"${CMAKE_SOURCE_DIR}\")
+	set(CMAKE_C_FLAGS "-ffunction-sections -Wall  -maes -msse2 -msse4.1 -mpclmul -Wfatal-errors -pthread")
+	set(CMAKE_CXX_FLAGS  "${CMAKE_C_FLAGS}  -std=c++14")
+
+	# Set a default build type for single-configuration
+	# CMake generators if no build type is set.
+	if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+	   SET(CMAKE_BUILD_TYPE Release)
+	endif()
+
+	if(NOT ${CMAKE_BUILD_TYPE} STREQUAL "Release")
+	  message(WARNING "\nConfiguration NOT set to Release. Please call cmake with -DCMAKE_BUILD_TYPE=Release  instead of ${CMAKE_BUILD_TYPE}")
+
+		if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+		  #message(WARNING "Debug build.")
+		elseif("${CMAKE_BUILD_TYPE}" STREQUAL "Release") 
+		  #message(WARNING "Release build.")
+		elseif("${CMAKE_BUILD_TYPE}" STREQUAL  "RELWITHDEBINFO")
+		  #message(WARNING "RELWITHDEBINFO=Release with debug info build.")
+		else()
+		  message(ERROR ": Unknown build type - ${CMAKE_BUILD_TYPE}  Please use one of Debug, Release, or RELWITHDEBINFO\n\n" )
+		endif()
+	endif()
+
+	# Select flags.
+	SET(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG") 
+	SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb -rdynamic")
+	SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb -rdynamic")
+
 endif()
-
-if(NOT ${CMAKE_BUILD_TYPE} STREQUAL "Release")
-  message(WARNING "\nConfiguration NOT set to Release. Please call cmake with CMAKE_BUILD_TYPE=Release")
-
-    IF(CMAKE_BUILD_TYPE MATCHES Debug)
-      #message("Debug build.")
-    ELSEIF(CMAKE_BUILD_TYPE MATCHES Release)
-      #message("Release build.")
-    ELSEIF(CMAKE_BUILD_TYPE MATCHES RELWITHDEBINFO)
-      #message("Release with debug info build.")
-    ELSE()
-      message(ERROR "Unknown build type: ${CMAKE_BUILD_TYPE}  Please use one of Debug, Release, or RELWITHDEBINFO" )
-    ENDIF()
-endif()
-
-# Select flags.
-SET(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
-SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
-SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g")
-
  
 
 #############################################
@@ -45,18 +53,23 @@ SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g")
 #############################################
 
 # default location for miracl
-set(Miracl_Dirs "${CMAKE_SOURCE_DIR}/thirdparty/linux/miracl/")
+set(Miracl_Dirs "${CMAKE_SOURCE_DIR}/cryptoTools/thirdparty/linux/miracl/")
 include_directories("${Miracl_Dirs}") 
-link_directories("${Miracl_Dirs}/miracl/source/")
 
 # default location for Boost
 set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/thirdparty/linux/boost/")
 
 
+
 #############################################
 #    Build cryptoTools (common utilities)   #
 #############################################
+include_directories(cryptoTools)
 add_subdirectory(cryptoTools)
+
+if(NOT "${miracl_Dir}" MATCHES  "")
+	message(ERROR "no miracl_Dir defined, ${miracl_Dir}" )
+endif()
 
 #############################################
 #               Build libOTe                #
@@ -71,19 +84,20 @@ add_subdirectory(libOTe_Tests)
 #############################################
 #              Build Frontend               #
 #############################################
-include_directories(${CMAKE_SOURCE_DIR})
-file(GLOB_RECURSE SRC_FRONTEND ${CMAKE_SOURCE_DIR}/frontend/*.cpp)
-add_executable(frontend.exe ${SRC_FRONTEND})
+add_subdirectory(frontend)
+#include_directories(${CMAKE_SOURCE_DIR})
+#file(GLOB_RECURSE SRC_FRONTEND ${CMAKE_SOURCE_DIR}/frontend/*.cpp)
+#add_executable(frontend.exe ${SRC_FRONTEND})
 
 #############################################
 #            Install Frontend               #
 #############################################
-install (TARGETS frontend.exe DESTINATION bin)
+#install (TARGETS frontend.exe DESTINATION bin)
 
 #############################################
 #            Link our libraries             #
 #############################################
-target_link_libraries(frontend.exe libOTe_Tests)
-# other libs implicitly linked with libOTe_Tests
+#target_link_libraries(frontend.exe libOTe_Tests tests_cryptoTools)
+# other libs implicitly linked with libOTe_Tests tests_cryptoTools
 
 

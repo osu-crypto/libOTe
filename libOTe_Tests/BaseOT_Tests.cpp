@@ -3,16 +3,16 @@
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 
 #include "libOTe/Tools/Tools.h"
-#include "cryptoTools/Network/BtChannel.h"
-#include "cryptoTools/Network/BtEndpoint.h"
+#include <cryptoTools/Network/BtChannel.h>
+#include <cryptoTools/Network/BtEndpoint.h>
 
 #include "libOTe/Base/naor-pinkas.h"
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Log.h>
 
 #include "Common.h"
 #include <thread>
 #include <vector>
-#include "cryptoTools/Common/BitVector.h"
+#include <cryptoTools/Common/BitVector.h>
 
 #ifdef GetMessage
 #undef GetMessage
@@ -27,20 +27,20 @@ void NaorPinkasOt_Test_Impl()
         setThreadName("Sender");
 
         BtIOService ios(0);
-        BtEndpoint ep0(ios, "127.0.0.1", 1212, true, "ep");
-        BtEndpoint ep1(ios, "127.0.0.1", 1212, false, "ep");
+        BtEndpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
+        BtEndpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
         Channel& senderChannel = ep1.addChannel("chl", "chl");
         Channel& recvChannel = ep0.addChannel("chl", "chl");
 
         PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
         PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
 
-        u64 numOTs = 1;    
+        u64 numOTs = 1;
         std::atomic<u64> sendedDoneIdx(0), recvDoneIdx(0);
         std::vector<block> recvMsg(numOTs);
         std::vector<std::array<block, 2>> sendMsg(numOTs);
         BitVector choices(numOTs);
-        choices.randomize(prng0); 
+        choices.randomize(prng0);
 
 
 
@@ -52,7 +52,7 @@ void NaorPinkasOt_Test_Impl()
 
 
             NaorPinkas baseOTs;// (&crpt);
-            
+
             //baseOTs(recvChannel, OTRole::Sender);
 
             baseOTs.send(sendMsg, prng1, recvChannel, 1);

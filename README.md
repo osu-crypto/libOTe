@@ -1,5 +1,5 @@
 # libOTe
-A fast and portable C++11 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*.  This library currently implements:
+A fast and portable C++14 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*.  This library currently implements:
  
 * The semi-honest 1-out-of-2 OT [IKNP03].
 * The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
@@ -31,37 +31,12 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
 | 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  2.9       	|
 | 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**   | ~     	|  2.7      	|
  
- 
-\* Delta-OT does not use the SHA1 or AES hash function.
- 
-\** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper and their implementation used multiple threads. The number was not specified. When using the libOTe implementation with multiple threads, a timing of 2.6 seconds was obtained with the SHA1 hash function.
- 
-It should be noted that the libOTe implementation uses the Boost ASIO library to perform more efficient asynchronous network IO. This involves using a background thread to help process network data. As such, this is not a completely fair comparison to the Apricot implementation but we don't expect it to have a large impact. It also appears that the Encrypto Group implementation uses asynchronous network IO.
- 
 
- The above timings were obtained with the follwoing options:
-
- 1-out-of-2 malicious:
- * Apricot: `./ot.x -n 16777216 -p 0 -m a -l 100 & ./ot.x -p 1 -m a -n 16777216 -l 100`
- * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 1 &  ./ot.exe -r 1 -n 16777216 -o 1`
- * emp-toolkit:  2x 2<sup>23</sup> `./mot 0 1212 & ./mot 1 1212`
-
-1-out-of-2 semi-honest:
- * Apricot:  `./ot.x -n 16777216 -p 0 -m a -l 100 -pas & ./ot.x -p 1 -m a -n 16777216 -l 100 -pas`
- * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 0 &  ./ot.exe -r 1 -n 16777216 -o 0`
- * emp-toolkit:  2*2<sup>23</sup> `./shot 0 1212 & ./shot 1 1212`
-
-  
-## License
- 
-This project has been placed in the public domain. As such, you are unrestricted in how you use it, commercial or otherwise. However, no warranty of fitness is provided. If you found this project helpful, feel free to spread the word and cite us.
- 
- 
- 
  
 ## Install
  
 The library is *cross platform* and has been tested on both Windows and Linux. The library should work on MAC but it has not been tested. There are two library dependencies including [Boost](http://www.boost.org/) (networking), and [Miracl](https://www.miracl.com/index) (Base OT). For each, we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advise using the coned repository that we provide.
+
  
 ### Windows
 
@@ -95,10 +70,10 @@ If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
-cd libOTe/thirdparty/linux
+cd libOTe/cryptoTools/thirdparty/linux
 bash all.get
-cd ../..
-CMake  -G "Unix Makefiles"
+cd ../../..
+cmake  -G "Unix Makefiles"
 make
 ```
 
@@ -112,7 +87,12 @@ Note: In the case that miracl or boost is already installed, the steps  `cd libO
  
  If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
-## Citing
+
+## Help
+ 
+Contact Peter Rindal rindalp@oregonstate.edu for any assistance on building or running the library.
+
+ ## Citing
 
  Spread the word!
 
@@ -123,6 +103,7 @@ Note: In the case that miracl or boost is already installed, the steps  `cd libO
     howpublished = {\url{https://github.com/osu-crypto/libOTe}},
 }
 ```
+
 ## Protocol Details
 The 1-out-of-N [OOS16] protocol currently is set to work forn N=2<sup>76</sup> but is capable of supporting arbitrary codes given the generator matrix in text format. See `./libOTe/Tools/Bch511.txt` for an example.
  
@@ -130,12 +111,35 @@ The 1-out-of-N  [KKRT16] for arbitrary N is also implemented and slightly faster
  
 The approximate K-out-of-N OT [RR16] protocol is also implemented. This protocol allows for a rough bound on the value K with a very light weight cut and choose technique. It was introduced for a PSI protocol that builds on a Garbled Bloom Filter.
  
-## Help
  
-Contact Peter Rindal rindalp@oregonstate.edu for any assistance on building or running the library.
+\* Delta-OT does not use the SHA1 or AES hash function.
+ 
+\** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper and their implementation used multiple threads. The number was not specified. When using the libOTe implementation with multiple threads, a timing of 2.6 seconds was obtained with the SHA1 hash function.
+ 
+It should be noted that the libOTe implementation uses the Boost ASIO library to perform more efficient asynchronous network IO. This involves using a background thread to help process network data. As such, this is not a completely fair comparison to the Apricot implementation but we don't expect it to have a large impact. It also appears that the Encrypto Group implementation uses asynchronous network IO.
+ 
+
+ The above timings were obtained with the follwoing options:
+
+ 1-out-of-2 malicious:
+ * Apricot: `./ot.x -n 16777216 -p 0 -m a -l 100 & ./ot.x -p 1 -m a -n 16777216 -l 100`
+ * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 1 &  ./ot.exe -r 1 -n 16777216 -o 1`
+ * emp-toolkit:  2x 2<sup>23</sup> `./mot 0 1212 & ./mot 1 1212`
+
+1-out-of-2 semi-honest:
+ * Apricot:  `./ot.x -n 16777216 -p 0 -m a -l 100 -pas & ./ot.x -p 1 -m a -n 16777216 -l 100 -pas`
+ * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 0 &  ./ot.exe -r 1 -n 16777216 -o 0`
+ * emp-toolkit:  2*2<sup>23</sup> `./shot 0 1212 & ./shot 1 1212`
+
+  
+  
+ 
+ ## License
+ 
+This project has been placed in the public domain. As such, you are unrestricted in how you use it, commercial or otherwise. However, no warranty of fitness is provided. If you found this project helpful, feel free to spread the word and cite us.
  
  
- 
+
 ## Citation
  
 [IKNP03] - Yuval Ishai and Joe Kilian and Kobbi Nissim and Erez Petrank, _Extending Oblivious Transfers Efficiently_. 

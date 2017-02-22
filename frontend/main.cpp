@@ -1,8 +1,8 @@
 #include <iostream>
 
 using namespace std;
-#include "UnitTests.h" 
-#include "cryptoTools/Common/Defines.h"
+#include "UnitTests.h"
+#include <cryptoTools/Common/Defines.h>
 using namespace osuCrypto;
 
 #include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
@@ -10,10 +10,10 @@ using namespace osuCrypto;
 #include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
-#include "cryptoTools/Network/BtChannel.h"
-#include "cryptoTools/Network/BtEndpoint.h"
+#include <cryptoTools/Network/BtChannel.h>
+#include <cryptoTools/Network/BtEndpoint.h>
 #include <numeric>
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Log.h>
 int miraclTestMain();
 
 #include "libOTe/Tools/LinearCode.h"
@@ -47,9 +47,10 @@ void kkrt_test(int i)
 
     u64 otsPer = numOTs / numThreads;
 
+    auto rr = i ? EpMode::Server : EpMode::Client;
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, i, name);
+    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
     std::vector<Channel*> chls(numThreads);
 
     for (u64 k = 0; k < numThreads; ++k)
@@ -88,7 +89,7 @@ void kkrt_test(int i)
                 r.setBaseOts(baseSend);
                 auto& chl = *chls[k];
 
-                r.init(otsPer);
+                r.init(otsPer, prng0, chl);
                 block encoding1;
                 for (u64 i = 0; i < otsPer; i += step)
                 {
@@ -122,7 +123,7 @@ void kkrt_test(int i)
                 s.setBaseOts(baseRecv, baseChoice);
                 auto& chl = *chls[k];
 
-                s.init(otsPer);
+                s.init(otsPer, prng0, chl);
                 for (u64 i = 0; i < otsPer; i += step)
                 {
 
@@ -166,10 +167,11 @@ void oos_test(int i)
     u64 numThreads = 1;
 
     u64 otsPer = numOTs / numThreads;
+    auto rr = i ? EpMode::Server : EpMode::Client;
 
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, i, name);
+    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
     std::vector<Channel*> chls(numThreads);
 
     for (u64 k = 0; k < numThreads; ++k)
@@ -214,7 +216,7 @@ void oos_test(int i)
                 r.setBaseOts(baseSend);
                 auto& chl = *chls[k];
 
-                r.init(otsPer);
+                r.init(otsPer, prng0, chl);
                 block encoding1;
                 for (u64 i = 0; i < otsPer; i += step)
                 {
@@ -246,7 +248,7 @@ void oos_test(int i)
                 s.setBaseOts(baseRecv, baseChoice);
                 auto& chl = *chls[k];
 
-                s.init(otsPer);
+                s.init(otsPer, prng0, chl);
                 for (u64 i = 0; i < otsPer; i += step)
                 {
 
@@ -288,9 +290,10 @@ void kos_test(int iii)
 
 
     // get up the networking
+    auto rr = iii ? EpMode::Server : EpMode::Client;
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, iii, name);
+    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
 
     u64 numThread = 1;
     std::vector<Channel*> chls(numThread);
@@ -313,13 +316,13 @@ void kos_test(int iii)
         {
             baseRecv[j][i] = baseSend[j][i][baseChoice[i]];
         }
-    } 
+    }
 
 
     std::vector<std::thread> thrds(numThread);
-     
+
     if (iii)
-    { 
+    {
         for (u64 i = 0; i < numThread; ++i)
         {
             thrds[i] = std::thread([&, i]()
@@ -376,12 +379,13 @@ void dkos_test(int i)
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
 
     u64 numOTs = 1 << 24;
+    auto rr = i ? EpMode::Server : EpMode::Client;
 
 
     // get up the networking
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, i, name);
+    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
     Channel& chl = ep0.addChannel(name, name);
 
     u64 s = 40;
@@ -443,11 +447,12 @@ void iknp_test(int i)
 
     u64 numOTs = 1 << 24;
 
+    auto rr = i ? EpMode::Server : EpMode::Client;
 
     // get up the networking
     std::string name = "n";
     BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, i, name);
+    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
     Channel& chl = ep0.addChannel(name, name);
 
 
@@ -512,10 +517,11 @@ void akn_test(int i)
     double cncProb(0.0999);
 
 
+    auto rr = i ? EpMode::Server : EpMode::Client;
     setThreadName("Recvr");
 
     BtIOService ios(0);
-    BtEndpoint  ep0(ios, "127.0.0.1", 1212, i, "ep");
+    BtEndpoint  ep0(ios, "127.0.0.1", 1212, rr, "ep");
 
     u64 numTHreads(4);
 
@@ -584,6 +590,76 @@ kkrt{ "kk", "kkrt" },
 iknp{ "i", "iknp" },
 oos{ "o", "oos" },
 akn{ "a", "akn" };
+#include "signalHandle.h"
+
+#include <cryptoTools/Common/ByteStream.h>
+
+//
+//template<typename, typename T>
+//struct has_resize {
+//    static_assert(
+//        std::integral_constant<T, false>::value,
+//        "Second template parameter needs to be of function type.");
+//};
+//
+//// specialization that does the checking
+//
+//template<typename C, typename Ret, typename... Args>
+//struct has_resize<C, Ret(Args...)> {
+//private:
+//    template<typename T>
+//    static constexpr auto check(T*)
+//        -> typename
+//        std::is_same<
+//        decltype(std::declval<T>().resize(std::declval<Args>()...)),
+//        Ret    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+//        >::type;  // attempt to call it and see if the return type is correct
+//
+//    template<typename>
+//    static constexpr std::false_type check(...);
+//
+//    typedef decltype(check<C>(0)) type;
+//
+//public:
+//    static constexpr bool value = type::value;
+//};
+//
+//
+//template<typename> struct int_ { typedef int type; };
+//
+//template <class Container,
+//    class = std::enable_if_t<
+//        std::is_convertible<typename Container::pointer,
+//            decltype(std::declval<Container>().data())>::value &&
+//        std::is_convertible<typename Container::size_type,
+//            decltype(std::declval<Container>().size())>::value &&
+//        has_resize<Container,void(u64)>::value
+//    > // enable if
+//    //,typename int_<decltype(Container::resize)>::type = 0
+//> // template
+//void recv(Container& c)
+//{
+//    //asyncRecv(c).get();
+//}
+//#include <iostream>
+//#include <utility>
+//#include <type_traits>
+//
+////template<typename C,
+////    typename int_<decltype(C::resize)>::type = 0>
+////    void recv(C&)
+////{
+////
+////}
+////
+////&&
+////std::is_same<int_<decltype(Container::resize)>::type, std::true_type>::value
+//
+//struct foo {
+//    int    memfun1(int a) const { return a; }
+//    double memfun2(double b) const { return b; }
+//};
+//
 
 #include "cryptoTools/gsl/gsl.h"
 #include "cryptoTools/Common/ByteStream.h"

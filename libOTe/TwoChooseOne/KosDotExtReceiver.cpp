@@ -1,10 +1,10 @@
 #include "KosDotExtReceiver.h"
 #include "libOTe/Tools/Tools.h"
-#include "cryptoTools/Common/Log.h"
-#include "cryptoTools/Common/ByteStream.h"
-#include "cryptoTools/Common/BitVector.h"
-#include "cryptoTools/Crypto/PRNG.h"
-#include "cryptoTools/Crypto/Commit.h"
+#include <cryptoTools/Common/Log.h>
+#include <cryptoTools/Common/ByteStream.h>
+#include <cryptoTools/Common/BitVector.h>
+#include <cryptoTools/Crypto/PRNG.h>
+#include <cryptoTools/Crypto/Commit.h>
 #include "TcoOtDefines.h"
 #include <queue>
 

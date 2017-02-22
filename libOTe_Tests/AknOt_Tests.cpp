@@ -1,8 +1,8 @@
 #include "AknOt_Tests.h"
-#include "cryptoTools/Common/Defines.h"
-#include "cryptoTools/Network/BtIOService.h"
-#include "cryptoTools/Network/BtEndpoint.h"
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Defines.h>
+#include <cryptoTools/Network/BtIOService.h>
+#include <cryptoTools/Network/BtEndpoint.h>
+#include <cryptoTools/Common/Log.h>
 #include "libOTe/NChooseK/AknOtReceiver.h"
 #include "libOTe/NChooseK/AknOtSender.h"
 #include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
@@ -33,9 +33,9 @@ void AknOt_sendRecv1000_Test()
     setThreadName("Recvr");
 
     BtIOService ios(0);
-    BtEndpoint  ep0(ios, "127.0.0.1", 1212, true, "ep");
-    BtEndpoint  ep1(ios, "127.0.0.1", 1212, false, "ep");
-    
+    BtEndpoint  ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
+    BtEndpoint  ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+
     u64 numTHreads(4);
 
     std::vector<Channel*> sendChls(numTHreads), recvChls(numTHreads);
@@ -68,7 +68,7 @@ void AknOt_sendRecv1000_Test()
 
     thrd.join();
 
-    
+
     for (u64 i = 0; i < recv.mMessages.size(); ++i)
     {
 

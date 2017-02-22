@@ -2,11 +2,11 @@
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use.  
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include "libOTe/NChooseOne/KkrtNcoOtSender.h"
-#include "cryptoTools/Common/BitVector.h"
-#include "cryptoTools/Common/MatrixView.h"
+#include <cryptoTools/Common/BitVector.h>
+#include <cryptoTools/Common/MatrixView.h>
 #include "libOTe/Base/naor-pinkas.h"
 #include "libOTe/Tools/LinearCode.h"
-#include "cryptoTools/Network/Channel.h"
+#include <cryptoTools/Network/Channel.h>
 
 #include <array>
 #include <vector>
@@ -53,7 +53,7 @@ namespace osuCrypto {
         std::unique_ptr<NcoOtExtSender> split() override;
 
 
-        void init(u64 numOtExt) override;
+        void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
 
 
         void encode(

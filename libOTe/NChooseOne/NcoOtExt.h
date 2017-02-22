@@ -1,7 +1,7 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
-#include "cryptoTools/Common/MatrixView.h"
+#include <cryptoTools/Common/MatrixView.h>
 #include <array>
 #ifdef GetMessage
 #undef GetMessage
@@ -49,13 +49,18 @@ namespace osuCrypto
         // Performs the PRNG expantion and transope operations. 
         // @ numOtExt: denotes the number of OTs that can be used before init
         //      should be called again.
-        virtual void init(u64 numOtExt) = 0;
+        virtual void init(u64 numOtExt, PRNG& prng, Channel& chl) = 0;
 
         
         virtual void encode(
             u64 otIdx,
             const span<block> choiceWord,
             block& encoding) = 0;
+
+        //virtual void encode(
+        //    u64 otIdx,
+        //    const u8* choiceWord,
+        //    block& encoding) = 0;
 
         //virtual void encode(
         //    u64 otIdx,
@@ -94,12 +99,17 @@ namespace osuCrypto
 
         virtual std::unique_ptr<NcoOtExtReceiver> split() = 0;
 
-        virtual void init(u64 numOtExt) = 0;
+        virtual void init(u64 numOtExt, PRNG& prng, Channel& chl) = 0;
 
         virtual void encode(
             u64 otIdx,
             const span<block> choiceWord,
             block& encoding) = 0;
+
+        //virtual void encode(
+        //    u64 otIdx,
+        //    const u8* choiceWord,
+        //    block& encoding) = 0;
 
         virtual void zeroEncode(u64 otIdx) = 0;
 

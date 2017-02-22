@@ -1,7 +1,7 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
 #include "libOTe/NChooseOne/NcoOtExt.h"
-#include "cryptoTools/Network/Channel.h"
+#include <cryptoTools/Network/Channel.h>
 #include <vector>
 #include "libOTe/Tools/LinearCode.h"
 //#include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
@@ -46,7 +46,7 @@ namespace osuCrypto
             span<std::array<block, 2>> baseRecvOts) override;
 
 
-        void init(u64 numOtExt) override;
+        void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
 
 
         std::unique_ptr<NcoOtExtReceiver> split() override;

@@ -6,7 +6,7 @@
 #undef GetMessage
 #endif
 
-#include "cryptoTools/Crypto/PRNG.h"
+#include <cryptoTools/Crypto/PRNG.h>
 
 namespace osuCrypto
 {

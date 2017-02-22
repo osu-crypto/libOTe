@@ -1,14 +1,16 @@
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Log.h>
 #include <functional>
 
-#include "libOTe_Tests/AES_Tests.h"
+#include "tests_cryptoTools/AES_Tests.h"
+#include "tests_cryptoTools/BtChannel_Tests.h"
+#include "tests_cryptoTools/Ecc_Tests.h"
+#include "tests_cryptoTools/Misc_Tests.h"
+
 #include "libOTe_Tests/AknOt_Tests.h"
-#include "libOTe_Tests/BtChannel_Tests.h"
 #include "libOTe_Tests/BaseOT_Tests.h"
 #include "libOTe_Tests/OT_Tests.h"
 #include "libOTe_Tests/NcoOT_Tests.h"
 #include "libOTe_Tests/AknOt_Tests.h"
-#include "libOTe_Tests/Ecc_Tests.h"
 
 
 using namespace osuCrypto;
@@ -50,6 +52,9 @@ void NetWork_all()
 void bitVec_all()
 {
     std::cout << std::endl;
+    run("AES                                     ", AES_EncDec_Test);
+
+    std::cout << std::endl;
     run("BitVector_Indexing_Test                 ", BitVector_Indexing_Test_Impl);
     run("BitVector_Parity                        ", BitVector_Parity_Test_Impl);
     run("BitVector_Append_Test                   ", BitVector_Append_Test_Impl);
@@ -69,6 +74,7 @@ void OT_all()
     run("AknOt_sendRecv1000_Test                 ", AknOt_sendRecv1000_Test);
     run("KkrtNcoOt_Test                          ", KkrtNcoOt_Test_Impl);
     run("OosNcoOt_Test_Impl                      ", OosNcoOt_Test_Impl);
+    run("Rr17NcoOt_Test_Impl                     ", Rr17NcoOt_Test_Impl);
     run("LinearCode_Test_Impl                    ", LinearCode_Test_Impl);
     run("LinearCode_subBlock_Test_Impl           ", LinearCode_subBlock_Test_Impl);
     run("LinearCode_repetition_Test_Impl         ", LinearCode_repetition_Test_Impl);

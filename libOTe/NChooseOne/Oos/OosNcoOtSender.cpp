@@ -1,8 +1,8 @@
 #include "OosNcoOtSender.h"
 #include "libOTe/Tools/Tools.h"
-#include "cryptoTools/Common/Log.h"
+#include <cryptoTools/Common/Log.h>
 #include "OosDefines.h"
-#include "cryptoTools/Common/ByteStream.h"
+#include <cryptoTools/Common/ByteStream.h>
 namespace osuCrypto
 {
 
@@ -57,7 +57,7 @@ namespace osuCrypto
 
 
     void OosNcoOtSender::init(
-        u64 numOTExt)
+        u64 numOTExt, PRNG& prng, Channel& chl)
     {
         const u8 superBlkSize(8);
 
@@ -253,6 +253,8 @@ namespace osuCrypto
         u64 & inputBlkSize,
         u64 & baseOtCount)
     {
+        if (inputBitCount > mCode.plaintextBitSize())
+            throw std::runtime_error(LOCATION);
 
         inputBlkSize = mCode.plaintextBlkSize();
 
