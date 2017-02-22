@@ -31,11 +31,11 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
 | 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  2.9       	|
 | 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**   | ~     	|  2.7      	|
  
-## License
+
  
-This project has been placed in the public domain. As such, you are unrestricted in how you use it, commercial or otherwise. However, no warranty of fitness is provided. If you found this project helpful, feel free to spread the word and cite us.
+## Install
  
- 
+The library is *cross platform* and has been tested on both Windows and Linux. The library should work on MAC but it has not been tested. There are two library dependencies including [Boost](http://www.boost.org/) (networking), and [Miracl](https://www.miracl.com/index) (Base OT). For each, we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advise using the coned repository that we provide.
 
  
 ### Windows
@@ -134,10 +134,12 @@ It should be noted that the libOTe implementation uses the Boost ASIO library to
   
   
  
-## Install
+ ## License
  
-The library is *cross platform* and has been tested on both Windows and Linux. The library should work on MAC but it has not been tested. There are two library dependencies including [Boost](http://www.boost.org/) (networking), and [Miracl](https://www.miracl.com/index) (Base OT). For each, we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advise using the coned repository that we provide.
+This project has been placed in the public domain. As such, you are unrestricted in how you use it, commercial or otherwise. However, no warranty of fitness is provided. If you found this project helpful, feel free to spread the word and cite us.
  
+ 
+
 ## Citation
  
 [IKNP03] - Yuval Ishai and Joe Kilian and Kobbi Nissim and Erez Petrank, _Extending Oblivious Transfers Efficiently_. 
