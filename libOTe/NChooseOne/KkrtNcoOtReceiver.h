@@ -2,6 +2,7 @@
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Common/Matrix.h>
 #include <vector>
 #include <cryptoTools/Crypto/AES.h>
 
@@ -29,8 +30,8 @@ namespace osuCrypto
         bool mHasBase;
         std::vector<std::array<AES, 2>> mGens;
         std::vector<u64> mGensBlkIdx;
-        MatrixView<block> mT0;
-        MatrixView<block> mT1;
+        Matrix<block> mT0;
+        Matrix<block> mT1;
         u64 mCorrectionIdx;
 
         void setBaseOts(

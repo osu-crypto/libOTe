@@ -413,8 +413,8 @@ namespace osuCrypto
         // This will make the us send all of out input words
         // and the complete T0 matrix. For DEBUG only
 #ifdef OOS_CHECK_DEBUG
-        chl.send(mT0.data(), mT0.size()[0] * mT0.bounds()[1] * sizeof(block));
-        chl.send(mW.data(), mW.size()[0] * mW.bounds()[1] * sizeof(block));
+        chl.send(mT0.data(), mT0.bounds()[0] * mT0.bounds()[1] * sizeof(block));
+        chl.send(mW.data(), mW.bounds()[0] * mW.bounds()[1] * sizeof(block));
 #endif
 
         // this will hold out random x^(l)_i values that we compute from the seed. 

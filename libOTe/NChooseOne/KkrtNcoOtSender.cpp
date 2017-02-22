@@ -63,8 +63,8 @@ namespace osuCrypto
         // We need two matrices, one for the senders matrix T^i_{b_i} and 
         // one to hold the the correction values. This is sometimes called 
         // the u = T0 + T1 + C matrix in the papers.
-        mT = std::move(MatrixView<block>(numOTExt, mGens.size() / 128));
-        mCorrectionVals = std::move(MatrixView<block>(numOTExt, mGens.size() / 128));
+        mT.resize(numOTExt, mGens.size() / 128);
+        mCorrectionVals.resize(numOTExt, mGens.size() / 128);
 
         // The receiver will send us correction values, this is the index of
         // the next one they will send.
@@ -88,7 +88,7 @@ namespace osuCrypto
             // extra rows, but it is thrown away.
             u64 stopIdx
                 = doneIdx
-                + std::min<u64>(u64(128) * superBlkSize, mT.size()[0] - doneIdx);
+                + std::min<u64>(u64(128) * superBlkSize, mT.bounds()[0] - doneIdx);
 
             // transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
             for (u64 i = 0; i < numCols / 128; ++i)
@@ -108,7 +108,7 @@ namespace osuCrypto
                 // doneIdx is the starting row. i is the offset into the blocks of 128 bits.
                 // __restrict isn't crucial, it just tells the compiler that this pointer
                 // is unique and it shouldn't worry about pointer aliasing. 
-                block* __restrict mTIter = mT.data() + doneIdx * mT.size()[1] + i;
+                block* __restrict mTIter = mT.data() + doneIdx * mT.stride() + i;
 
                 for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
                 {
@@ -123,7 +123,7 @@ namespace osuCrypto
                         *mTIter = *tIter;
 
                         tIter += superBlkSize;
-                        mTIter += mT.size()[1];
+                        mTIter += mT.stride();
                     }
                 }
 
@@ -153,13 +153,13 @@ namespace osuCrypto
 
         std::array<block, 10> codeword;
 
-        auto* corVal = mCorrectionVals.data() + otIdx * mCorrectionVals.size()[1];
-        auto* tVal = mT.data() + otIdx * mT.size()[1];
+        auto* corVal = mCorrectionVals.data() + otIdx * mCorrectionVals.stride();
+        auto* tVal = mT.data() + otIdx * mT.stride();
 
 
         // This is the hashing phase. Here we are using pseudo-random codewords.
         // That means we assume inputword is a hash of some sort.
-        for (u64 i = 0; i < mT.size()[1]; ++i)
+        for (u64 i = 0; i < mT.stride(); ++i)
         {
             block t0 = corVal[i] ^ inputword[i];
             block t1 = t0 & mChoiceBlks[i];
@@ -174,15 +174,15 @@ namespace osuCrypto
         SHA1  sha1;
         u8 hashBuff[SHA1::HashSize];
         // hash it all to get rid of the correlation.
-        sha1.Update((u8*)codeword.data(), sizeof(block) * mT.size()[1]);
+        sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
         sha1.Final(hashBuff);
         val = toBlock(hashBuff);
 #else
         std::array<block, 10> aesBuff;
-        mAesFixedKey.ecbEncBlocks(codeword.data(), mT.size()[1], aesBuff.data());
+        mAesFixedKey.ecbEncBlocks(codeword.data(), mT.stride(), aesBuff.data());
 
         val = ZeroBlock;
-        for (u64 i = 0; i < mT.size()[1]; ++i)
+        for (u64 i = 0; i < mT.stride(); ++i)
             val = val ^ codeword[i] ^ aesBuff[i];
 #endif
 
@@ -208,15 +208,15 @@ namespace osuCrypto
     {
 
 #ifndef NDEBUG
-        if (recvCount > mCorrectionVals.size()[0] - mCorrectionIdx)
+        if (recvCount > mCorrectionVals.bounds()[0] - mCorrectionIdx)
             throw std::runtime_error("bad receiver, will overwrite the end of our buffer" LOCATION);
 #endif // !NDEBUG        
 
         // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
         // there c(w) is a pseudo-random code.
-        auto dest = mCorrectionVals.begin() + (mCorrectionIdx * mCorrectionVals.size()[1]);
-        chl.recv(dest,
-            recvCount * sizeof(block) * mCorrectionVals.size()[1]);
+        auto dest = mCorrectionVals.begin() + (mCorrectionIdx * mCorrectionVals.stride());
+        chl.recv(&*dest,
+            recvCount * sizeof(block) * mCorrectionVals.stride());
 
         // update the index of there we should store the next set of correction values.
         mCorrectionIdx += recvCount;

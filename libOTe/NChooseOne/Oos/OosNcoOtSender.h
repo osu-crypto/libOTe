@@ -3,7 +3,7 @@
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include "libOTe/NChooseOne/KkrtNcoOtSender.h"
 #include <cryptoTools/Common/BitVector.h>
-#include <cryptoTools/Common/MatrixView.h>
+#include <cryptoTools/Common/Matrix.h>
 #include "libOTe/Base/naor-pinkas.h"
 #include "libOTe/Tools/LinearCode.h"
 #include <cryptoTools/Network/Channel.h>
@@ -35,7 +35,7 @@ namespace osuCrypto {
         std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;
         std::vector<block> mChoiceBlks;
-        MatrixView<block> mT, mCorrectionVals;
+        Matrix<block> mT, mCorrectionVals;
         u64 mCorrectionIdx;
 
 

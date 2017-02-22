@@ -3,6 +3,7 @@
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Common/ByteStream.h>
+#include <cryptoTools/Common/Matrix.h>
 #include <cryptoTools/Crypto/Commit.h>
 #include "TcoOtDefines.h"
 
@@ -66,7 +67,7 @@ namespace osuCrypto
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
 
         // a temp that will be used to transpose the sender's matrix
-        MatrixView<u8> t(mGens.size(), superBlkSize * sizeof(block));
+        Matrix<u8> t(mGens.size(), superBlkSize * sizeof(block));
         std::vector<std::array<block, superBlkSize>> u(mGens.size()  * commStepSize);
 
         std::vector<block> choiceMask(mBaseChoiceBits.size());
@@ -143,7 +144,7 @@ namespace osuCrypto
 
             if (mIter >= mIterPartial)
             {
-                MatrixView<u8> tOut(128 * superBlkSize, sizeof(block) * 2);
+                Matrix<u8> tOut(128 * superBlkSize, sizeof(block) * 2);
 
                 // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
                 // each 128 bits wide.
@@ -166,8 +167,7 @@ namespace osuCrypto
                 MatrixView<u8> tOut(
                     (u8*)&*mIter,
                     128 * superBlkSize,
-                    sizeof(block) * 2,
-                    false);
+                    sizeof(block) * 2);
 
                 mIter += std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 

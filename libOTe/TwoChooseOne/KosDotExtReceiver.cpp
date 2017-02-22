@@ -3,6 +3,7 @@
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Common/ByteStream.h>
 #include <cryptoTools/Common/BitVector.h>
+#include <cryptoTools/Common/Matrix.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/Commit.h>
 #include "TcoOtDefines.h"
@@ -82,10 +83,10 @@ namespace osuCrypto
         // this will be used as temporary buffers of 128 columns, 
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
-        MatrixView<u8> t0(mGens.size(), superBlkSize * sizeof(block));
+        Matrix<u8> t0(mGens.size(), superBlkSize * sizeof(block));
 
-        MatrixView<u8> messageTemp(messages.size() + 128, sizeof(block) * 2);
-        auto mIter = messageTemp.data();
+        Matrix<u8> messageTemp(messages.size() + 128, sizeof(block) * 2);
+        auto mIter = messageTemp.begin();
 
 
         u64 step = std::min<u64>(numSuperBlocks, (u64)commStepSize);
@@ -171,15 +172,14 @@ namespace osuCrypto
 
 
 
-            auto mCount = std::min<u64>((messageTemp.end() - mIter) / messageTemp.size()[1], 128 * superBlkSize);
+            auto mCount = std::min<u64>((messageTemp.end() - mIter) / messageTemp.stride(), 128 * superBlkSize);
 
             MatrixView<u8> tOut(
-                (u8*)mIter,
+                (u8*)&*mIter,
                 mCount,
-                messageTemp.size()[1],
-                false);
+                messageTemp.stride());
 
-            mIter += mCount * messageTemp.size()[1];
+            mIter += mCount * messageTemp.stride();
 
             // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
             // each 128 bits wide.
@@ -224,14 +224,14 @@ namespace osuCrypto
 
         auto msg = (std::array<block, 2>*)messageTemp.data();
 
-        u64 bb = (messageTemp.size()[0] + 127) / 128;
+        u64 bb = (messageTemp.bounds()[0] + 127) / 128;
         for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
         {
             commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
             commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges2.data());
 
             u64 stop0 = std::min<u64>(messages.size(), doneIdx + 128);
-            u64 stop1 = std::min<u64>(messageTemp.size()[0], doneIdx + 128);
+            u64 stop1 = std::min<u64>(messageTemp.bounds()[0], doneIdx + 128);
 
             expendedChoiceBlk[0] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 0);
             expendedChoiceBlk[1] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 1);

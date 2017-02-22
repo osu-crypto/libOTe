@@ -2,7 +2,7 @@
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use.  
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include <cryptoTools/Common/BitVector.h>
-#include <cryptoTools/Common/MatrixView.h>
+#include <cryptoTools/Common/Matrix.h>
 #include "libOTe/Base/naor-pinkas.h"
 
 #include <cryptoTools/Network/Channel.h>
@@ -23,9 +23,7 @@ namespace osuCrypto {
         std::vector<u64> mGensBlkIdx;
         BitVector mBaseChoiceBits;
         std::vector<block> mChoiceBlks;
-        MatrixView<block> mT;
-        
-        MatrixView<block> mCorrectionVals;
+        Matrix<block> mT, mCorrectionVals;
         u64 mCorrectionIdx;
 
 

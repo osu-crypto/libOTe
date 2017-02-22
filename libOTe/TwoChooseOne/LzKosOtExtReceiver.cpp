@@ -151,7 +151,7 @@ namespace osuCrypto
                 extraBlocks.push_back(t0[blkRowIdx]);
             }
 
-            doneIdx = std::min((u64)dIdx, messages.size());
+            doneIdx = std::min<u64>(dIdx, messages.size());
 
         }
 
@@ -226,7 +226,7 @@ namespace osuCrypto
                 t2 = t2 ^ ti2;
             }
 
-            doneIdx = std::min((u64)dIdx, messages.size());
+            doneIdx = std::min<u64>(dIdx, messages.size());
         }
         chl.asyncSend(std::move(correlationData));
 

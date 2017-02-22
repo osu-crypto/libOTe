@@ -19,7 +19,16 @@ else()
 	add_definitions(-DSOLUTION_DIR=\"${CMAKE_SOURCE_DIR}\")
 	set(CMAKE_C_FLAGS "-ffunction-sections -Wall  -maes -msse2 -msse4.1 -mpclmul -Wfatal-errors -pthread")
 	set(CMAKE_CXX_FLAGS  "${CMAKE_C_FLAGS}  -std=c++14")
-
+	
+	# Select flags.
+	SET(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG") 
+	SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb -rdynamic")
+	SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb -rdynamic")
+	
+	############################################
+	#           Build mode checks              #
+	############################################
+	
 	# Set a default build type for single-configuration
 	# CMake generators if no build type is set.
 	if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
@@ -40,10 +49,6 @@ else()
 		endif()
 	endif()
 
-	# Select flags.
-	SET(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG") 
-	SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb -rdynamic")
-	SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb -rdynamic")
 
 endif()
  
@@ -53,12 +58,15 @@ endif()
 #############################################
 
 # default location for miracl
-set(Miracl_Dirs "${CMAKE_SOURCE_DIR}/cryptoTools/thirdparty/linux/miracl/")
+set(Miracl_Dirs "${CMAKE_HOME_DIRECTORY}/cryptoTools/thirdparty/linux/miracl/")
 include_directories("${Miracl_Dirs}") 
 
-# default location for Boost
-set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/thirdparty/linux/boost/")
+if(NOT "${miracl_Dir}" MATCHES  "")
+	message(ERROR "no miracl_Dir defined, ${miracl_Dir}" )
+endif()
 
+# default location for Boost
+set(BOOST_ROOT "${CMAKE_HOME_DIRECTORY}/cryptoTools/thirdparty/linux/boost/")
 
 
 #############################################
@@ -67,9 +75,6 @@ set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/thirdparty/linux/boost/")
 include_directories(cryptoTools)
 add_subdirectory(cryptoTools)
 
-if(NOT "${miracl_Dir}" MATCHES  "")
-	message(ERROR "no miracl_Dir defined, ${miracl_Dir}" )
-endif()
 
 #############################################
 #               Build libOTe                #

@@ -48,8 +48,8 @@ namespace osuCrypto
 
         // We need two matrices, T0 and T1. These will hold the expanded and transposed
         // rows that we got the using the base OTs as PRNG seed.
-        mT0 = std::move(MatrixView<block>(numOtExt, numCols / 128));
-        mT1 = std::move(MatrixView<block>(numOtExt, numCols / 128));
+        mT0.resize(numOtExt, numCols / 128);
+        mT1.resize(numOtExt, numCols / 128);
 
         // The is the index of the last correction value u = T0 ^ T1 ^ c(w)
         // that was sent to the sender.
@@ -99,8 +99,8 @@ namespace osuCrypto
                 // doneIdx is the starting row. i is the offset into the blocks of 128 bits.
                 // __restrict isn't crucial, it just tells the compiler that this pointer
                 // is unique and it shouldn't worry about pointer aliasing. 
-                block* __restrict mT0Iter = mT0.data() + mT0.size()[1] * doneIdx + i;
-                block* __restrict mT1Iter = mT1.data() + mT1.size()[1] * doneIdx + i;
+                block* __restrict mT0Iter = mT0.data() + mT0.stride() * doneIdx + i;
+                block* __restrict mT1Iter = mT1.data() + mT1.stride() * doneIdx + i;
 
                 for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
                 {
@@ -119,8 +119,8 @@ namespace osuCrypto
                         t0Iter += superBlkSize;
                         t1Iter += superBlkSize;
 
-                        mT0Iter += mT0.size()[1];
-                        mT1Iter += mT0.size()[1];
+                        mT0Iter += mT0.stride();
+                        mT1Iter += mT0.stride();
                     }
                 }
             }
@@ -155,7 +155,7 @@ namespace osuCrypto
         block & val)
     {
 #ifndef NDEBUG
-        if (choice.size() != mT0.size()[1])
+        if (choice.size() != mT0.stride())
             throw std::invalid_argument("");
 
         if (eq(mT0[otIdx][0], ZeroBlock))
@@ -165,11 +165,11 @@ namespace osuCrypto
             throw std::runtime_error("This otIdx has already been encoded");
 #endif // !NDEBUG
 
-        block* t0Val = mT0.data() + mT0.size()[1] * otIdx;
-        block* t1Val = mT1.data() + mT0.size()[1] * otIdx;
+        block* t0Val = mT0.data() + mT0.stride() * otIdx;
+        block* t1Val = mT1.data() + mT0.stride() * otIdx;
 
         // encode the correction value as u = T0 + T1 + c(w), there c(w) is a pseudo-random codeword.
-        for (u64 i = 0; i < mT0.size()[1]; ++i)
+        for (u64 i = 0; i < mT0.stride(); ++i)
         {
             // reuse mT1 as the place we store the correlated value. 
             // this will later get sent to the sender.
@@ -191,10 +191,10 @@ namespace osuCrypto
         val = toBlock(hashBuff);
 #else
         std::array<block, 10> aesBuff;
-        mAesFixedKey.ecbEncBlocks(t0Val, mT0.size()[1], aesBuff.data());
+        mAesFixedKey.ecbEncBlocks(t0Val, mT0.stride(), aesBuff.data());
 
         val = ZeroBlock;
-        for (u64 i = 0; i < mT0.size()[1]; ++i)
+        for (u64 i = 0; i < mT0.stride(); ++i)
             val = val ^ aesBuff[i] ^ t0Val[i];
 #endif
 #ifndef NDEBUG
@@ -214,12 +214,12 @@ namespace osuCrypto
             throw std::runtime_error("This otIdx has already been encoded");
 #endif // !NDEBUG
 
-        block* t0Val = mT0.data() + mT0.size()[1] * otIdx;
-        block* t1Val = mT1.data() + mT0.size()[1] * otIdx;
+        block* t0Val = mT0.data() + mT0.stride() * otIdx;
+        block* t1Val = mT1.data() + mT0.stride() * otIdx;
 
         // This is here in the case that you done want to encode a message.
         // It s more efficient since we don't call SHA.
-        for (u64 i = 0; i < mT0.size()[1]; ++i)
+        for (u64 i = 0; i < mT0.stride(); ++i)
         {
             // reuse mT1 as the place we store the correlated value. 
             // this will later get sent to the sender.
@@ -261,7 +261,7 @@ namespace osuCrypto
         // this is potentially dangerous. We dont have a guarantee that mT1 will still exist when 
         // the network gets around to sending this. Oh well.
         TODO("Make this memory safe");
-        chl.asyncSend(mT1.data() + (mCorrectionIdx * mT1.size()[1]), mT1.size()[1] * sendCount * sizeof(block));
+        chl.asyncSend(mT1.data() + (mCorrectionIdx * mT1.stride()), mT1.stride() * sendCount * sizeof(block));
 
         mCorrectionIdx += sendCount;
     }

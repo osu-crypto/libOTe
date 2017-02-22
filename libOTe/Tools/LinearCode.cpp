@@ -238,7 +238,7 @@ namespace osuCrypto
         MatrixView<block> g8(mG8.begin(), mG8.end(), mPow2CodeSize * 256);
 
 
-        for (u64 i = 0; i < g8.size()[0]; ++i)
+        for (u64 i = 0; i < g8.bounds()[0]; ++i)
         {
             auto vv = g8[i];
             MatrixView<block> g8Block(vv.begin(), vv.end(), mPow2CodeSize);
@@ -252,7 +252,7 @@ namespace osuCrypto
                 {
                     do
                     {
-                        if (i * 8 + gRow < g.size()[0])
+                        if (i * 8 + gRow < g.bounds()[0])
                         {
 
                             for (u64 wordIdx = 0; wordIdx < codewordBlkSize(); ++wordIdx)

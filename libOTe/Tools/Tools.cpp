@@ -198,8 +198,8 @@ namespace osuCrypto {
 
     void sse_transpose(const MatrixView<block>& in, const MatrixView<block>& out)
     {
-        MatrixView<u8> inn((u8*)in.data(), in.size()[0], in.size()[1] * sizeof(block), false);
-        MatrixView<u8> outt((u8*)out.data(), out.size()[0], out.size()[1] * sizeof(block), false);
+        MatrixView<u8> inn((u8*)in.data(), in.bounds()[0], in.stride() * sizeof(block));
+        MatrixView<u8> outt((u8*)out.data(), out.bounds()[0], out.stride() * sizeof(block));
 
         sse_transpose(inn, outt);
     }
@@ -210,26 +210,26 @@ namespace osuCrypto {
         static const u64 chunkSize = 8;
 
         // the number of input columns
-        u64 bitWidth = in.size()[0];
+        u64 bitWidth = in.bounds()[0];
 
         // In the main loop, we tranpose things in subBlocks. This is how many we have.
         // a subblock is 16 (bits) columns wide and 64 bits tall
         u64 subBlockWidth = bitWidth / 16;
-        u64 subBlockHight = out.size()[0] / (8 * chunkSize);
+        u64 subBlockHight = out.bounds()[0] / (8 * chunkSize);
 
         // since we allows arbitrary sized inputs, we have to deal with the left overs
-        u64 leftOverHeight = out.size()[0] % (chunkSize * 8);
-        u64 leftOverWidth = in.size()[0] % 16;
+        u64 leftOverHeight = out.bounds()[0] % (chunkSize * 8);
+        u64 leftOverWidth = in.bounds()[0] % 16;
 
 
         // make sure that the output can hold the input.
-        if (out.size()[1] < (bitWidth + 7) / 8)
+        if (out.stride() < (bitWidth + 7) / 8)
             throw std::runtime_error(LOCATION);
 
         // we can handle the case that the output should be truncated, but 
         // not the case that the input is too small. (simple call this function 
-        // with a smaller out.size()[0], since thats "free" to do.)
-        if (out.size()[0] > in.size()[1] * 8)
+        // with a smaller out.bounds()[0], since thats "free" to do.)
+        if (out.bounds()[0] > in.stride() * 8)
             throw std::runtime_error(LOCATION);
 
         union TempObj
@@ -242,10 +242,10 @@ namespace osuCrypto {
 
 
         // some useful constants that we will use
-        auto wStep = 16 * in.size()[1];
-        auto eightOutSize1 = 8 * out.size()[1];
-        auto outStart = out.data() + (7) * out.size()[1];
-        auto step = in.size()[1];
+        auto wStep = 16 * in.stride();
+        auto eightOutSize1 = 8 * out.stride();
+        auto outStart = out.data() + (7) * out.stride();
+        auto step = in.stride();
         auto
             step01 = step * 1,
             step02 = step * 2,
@@ -337,14 +337,14 @@ namespace osuCrypto {
                     *(u16*)out7 = _mm_movemask_epi8(t.blks[7]);
 
                     // step each of out 8 pointer over to the next output row.
-                    out0 -= out.size()[1];
-                    out1 -= out.size()[1];
-                    out2 -= out.size()[1];
-                    out3 -= out.size()[1];
-                    out4 -= out.size()[1];
-                    out5 -= out.size()[1];
-                    out6 -= out.size()[1];
-                    out7 -= out.size()[1];
+                    out0 -= out.stride();
+                    out1 -= out.stride();
+                    out2 -= out.stride();
+                    out3 -= out.stride();
+                    out4 -= out.stride();
+                    out5 -= out.stride();
+                    out6 -= out.stride();
+                    out7 -= out.stride();
 
                     // shift the 128 values so that the top bit is not the next one.
                     t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
@@ -400,16 +400,16 @@ namespace osuCrypto {
                 t.bytes[0][15] = *(start + step15);
 
 
-                auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.size()[1] + w * 2;
+                auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.stride() + w * 2;
 
-                out0 -= out.size()[1] * skip;
+                out0 -= out.stride() * skip;
                 t.blks[0] = _mm_slli_epi64(t.blks[0],int( skip));
 
                 for (u64 j = 0; j < rem; j++)
                 {
                     *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
 
-                    out0 -= out.size()[1];
+                    out0 -= out.stride();
 
                     t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
                 }
@@ -467,14 +467,14 @@ namespace osuCrypto {
                         *out6 = _mm_movemask_epi8(t.blks[6]);
                         *out7 = _mm_movemask_epi8(t.blks[7]);
 
-                        out0 -= out.size()[1];
-                        out1 -= out.size()[1];
-                        out2 -= out.size()[1];
-                        out3 -= out.size()[1];
-                        out4 -= out.size()[1];
-                        out5 -= out.size()[1];
-                        out6 -= out.size()[1];
-                        out7 -= out.size()[1];
+                        out0 -= out.stride();
+                        out1 -= out.stride();
+                        out2 -= out.stride();
+                        out3 -= out.stride();
+                        out4 -= out.stride();
+                        out5 -= out.stride();
+                        out6 -= out.stride();
+                        out7 -= out.stride();
 
                         t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
                         t.blks[1] = _mm_slli_epi64(t.blks[1], 1);
@@ -499,14 +499,14 @@ namespace osuCrypto {
                         *(u16*)out6 = _mm_movemask_epi8(t.blks[6]);
                         *(u16*)out7 = _mm_movemask_epi8(t.blks[7]);
 
-                        out0 -= out.size()[1];
-                        out1 -= out.size()[1];
-                        out2 -= out.size()[1];
-                        out3 -= out.size()[1];
-                        out4 -= out.size()[1];
-                        out5 -= out.size()[1];
-                        out6 -= out.size()[1];
-                        out7 -= out.size()[1];
+                        out0 -= out.stride();
+                        out1 -= out.stride();
+                        out2 -= out.stride();
+                        out3 -= out.stride();
+                        out4 -= out.stride();
+                        out5 -= out.stride();
+                        out6 -= out.stride();
+                        out7 -= out.stride();
 
                         t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
                         t.blks[1] = _mm_slli_epi64(t.blks[1], 1);
@@ -545,9 +545,9 @@ namespace osuCrypto {
                     t.bytes[0][i] = src[i][0];
                 }
 
-                auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.size()[1] + w * 2;
+                auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.stride() + w * 2;
 
-                out0 -= out.size()[1] * skip;
+                out0 -= out.stride() * skip;
                 t.blks[0] = _mm_slli_epi64(t.blks[0],int( skip));
 
                 for (u64 j = 0; j < rem; j++)
@@ -561,7 +561,7 @@ namespace osuCrypto {
                         *out0 = _mm_movemask_epi8(t.blks[0]);
                     }
 
-                    out0 -= out.size()[1];
+                    out0 -= out.stride();
 
                     t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
                 }

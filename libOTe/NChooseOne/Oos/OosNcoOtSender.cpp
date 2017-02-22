@@ -68,8 +68,8 @@ namespace osuCrypto
         // We need two matrices, one for the senders matrix T^i_{b_i} and 
         // one to hold the the correction values. This is sometimes called 
         // the u = T0 + T1 + C matrix in the papers.
-        mCorrectionVals = std::move(MatrixView<block>(numOTExt, mGens.size() / 128));
-        mT = std::move(MatrixView<block>(numOTExt, mGens.size() / 128));
+        mCorrectionVals.resize(numOTExt, mGens.size() / 128);
+        mT.resize(numOTExt, mGens.size() / 128);
 
         // The receiver will send us correction values, this is the index of
         // the next one they will send.
@@ -94,7 +94,7 @@ namespace osuCrypto
             // extra rows, but it is thrown away.
             u64 stopIdx
                 = doneIdx
-                + std::min<u64>(u64(128) * superBlkSize, mT.size()[0] - doneIdx);
+                + std::min<u64>(u64(128) * superBlkSize, mT.bounds()[0] - doneIdx);
 
             for (u64 i = 0; i < numCols / 128; ++i)
             {
@@ -115,7 +115,7 @@ namespace osuCrypto
                 // doneIdx is the starting row. l is the offset into the blocks of 128 bits.
                 // __restrict isn't crucial, it just tells the compiler that this pointer
                 // is unique and it shouldn't worry about pointer aliasing. 
-                block* __restrict mTIter = mT.data() + doneIdx * mT.size()[1] + i;
+                block* __restrict mTIter = mT.data() + doneIdx * mT.stride() + i;
 
                 for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
                 {
@@ -130,7 +130,7 @@ namespace osuCrypto
                         *mTIter = *tIter;
 
                         tIter += superBlkSize;
-                        mTIter += mT.size()[1];
+                        mTIter += mT.stride();
                     }
                 }
 
@@ -165,13 +165,13 @@ namespace osuCrypto
 #endif
         // the index of the otIdx'th correction value u = t1 + t0 + c(w)
         // and the associated T value held by the sender.
-        auto* corVal = mCorrectionVals.data() + otIdx * mCorrectionVals.size()[1];
-        auto* tVal = mT.data() + otIdx * mT.size()[1];
+        auto* corVal = mCorrectionVals.data() + otIdx * mCorrectionVals.stride();
+        auto* tVal = mT.data() + otIdx * mT.stride();
 
 
         // This is the hashing phase. Here we are using
         //  codewords that we computed above. 
-        if (mT.size()[1] == 4)
+        if (mT.stride() == 4)
         {
             // use vector instructions if we can. You can optimize this
             // for your use case too.
@@ -192,7 +192,7 @@ namespace osuCrypto
 
 #ifdef OOS_SHA_HASH
             // hash it all to get rid of the correlation.
-            sha1.Update((u8*)codeword.data(), sizeof(block) * mT.size()[1]);
+            sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
             sha1.Final(hashBuff);
             val = toBlock(hashBuff);
 #else
@@ -215,7 +215,7 @@ namespace osuCrypto
         else
         {
             // this is the general case. slightly slower...
-            for (u64 i = 0; i < mT.size()[1]; ++i)
+            for (u64 i = 0; i < mT.stride(); ++i)
             {
                 block t0 = corVal[i] ^ codeword[i];
                 block t1 = t0 & mChoiceBlks[i];
@@ -226,15 +226,15 @@ namespace osuCrypto
             }
 #ifdef OOS_SHA_HASH
             // hash it all to get rid of the correlation.
-            sha1.Update((u8*)codeword.data(), sizeof(block) * mT.size()[1]);
+            sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
             sha1.Final(hashBuff);
             val = toBlock(hashBuff);
 #else
             //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
-            mAesFixedKey.ecbEncBlocks(codeword.data(), mT.size()[1], aesBuff.data());
+            mAesFixedKey.ecbEncBlocks(codeword.data(), mT.stride(), aesBuff.data());
 
             val = ZeroBlock;
-            for (u64 i = 0; i < mT.size()[1]; ++i)
+            for (u64 i = 0; i < mT.stride(); ++i)
                 val = val ^ codeword[i] ^ aesBuff[i];
 
 
@@ -265,7 +265,7 @@ namespace osuCrypto
     {
 
 #ifndef NDEBUG
-        if (recvCount > mCorrectionVals.size()[0] - mCorrectionIdx)
+        if (recvCount > mCorrectionVals.bounds()[0] - mCorrectionIdx)
             throw std::runtime_error("bad receiver, will overwrite the end of our buffer" LOCATION);
 
 #endif // !NDEBUG        
@@ -273,9 +273,9 @@ namespace osuCrypto
 
         // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
         // there c(w) is a pseudo-random code.
-        auto dest = mCorrectionVals.begin() + i32(mCorrectionIdx * mCorrectionVals.size()[1]);
-        chl.recv(dest,
-            recvCount * sizeof(block) * mCorrectionVals.size()[1]);
+        auto dest = mCorrectionVals.begin() + i32(mCorrectionIdx * mCorrectionVals.stride());
+        chl.recv(&*dest,
+            recvCount * sizeof(block) * mCorrectionVals.stride());
 
         // update the index of there we should store the next set of correction values.
         mCorrectionIdx += recvCount;
@@ -306,13 +306,13 @@ namespace osuCrypto
         // qSum will hold the summation over all the rows. We need 
         // statSecParam number of them. First initialize them, each 
         // with one of the dummy values that were just send. 
-        std::vector<block> qSum(statSecParam * mT.size()[1]);
+        std::vector<block> qSum(statSecParam * mT.stride());
         for (u64 i = 0; i < statSecParam; ++i)
         {
             // The rows are most likely several blocks wide.
-            for (u64 j = 0; j < mT.size()[1]; ++j)
+            for (u64 j = 0; j < mT.stride(); ++j)
             {
-                qSum[i * mT.size()[1] + j]
+                qSum[i * mT.stride() + j]
                     = (mCorrectionVals[mCorrectionIdx - statSecParam + i][j]
                         & mChoiceBlks[j])
                     ^ mT[mCorrectionIdx - statSecParam + i][j];
@@ -330,7 +330,7 @@ namespace osuCrypto
         auto mW = mWBuff.getMatrixView<block>(mCode.plaintextBlkSize());
 #endif
 
-        u64 codeSize = mT.size()[1];
+        u64 codeSize = mT.stride();
 
         // This is an optimization trick. When iterating over the rows,
         // we want to multiply the x^(l)_i bit with the l'th row. To
@@ -393,7 +393,7 @@ namespace osuCrypto
             // get an integrator to the challenge bit
             u8* xIter = byteView;
 
-            if (mT.size()[1] == 4)
+            if (mT.stride() == 4)
             {
                 //  vvvvvvvvvvvv   OPTIMIZED for codeword size 4   vvvvvvvvvvvv
 
@@ -525,7 +525,7 @@ namespace osuCrypto
             }
         }
 
-        std::vector<block> tSum(statSecParam * mT.size()[1]);
+        std::vector<block> tSum(statSecParam * mT.stride());
         std::vector<block> wSum(statSecParam * mCode.plaintextBlkSize());
 
         // now wait for the receiver's challenge answer.

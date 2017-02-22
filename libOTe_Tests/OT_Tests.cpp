@@ -221,8 +221,8 @@ void TransposeMatrixView_Test_Impl()
 
         std::array<std::array<block, 8>, 128> data2;
 
-        MatrixView<block> dataView((block*)data.data(), 128, 8, false);
-        MatrixView<block> data2View((block*)data2.data(), 128 * 8, 1, false);
+        MatrixView<block> dataView((block*)data.data(), 128, 8);
+        MatrixView<block> data2View((block*)data2.data(), 128 * 8, 1);
         sse_transpose(dataView, data2View);
 
 
@@ -253,11 +253,11 @@ void TransposeMatrixView_Test_Impl()
 
         //std::array<std::array<std::array<block, 8>, 128>, 2> data;
 
-        MatrixView<block> dataView(208, 8);
-        prng.get((u8*)dataView.data(), sizeof(block) *dataView.size()[0] * dataView.size()[1]);
+        Matrix<block> dataView(208, 8);
+        prng.get((u8*)dataView.data(), sizeof(block) *dataView.bounds()[0] * dataView.stride());
 
-        MatrixView<block> data2View(1024, 2);
-        memset(data2View.data(), 0, data2View.size()[0] * data2View.size()[1] * sizeof(block));
+        Matrix<block> data2View(1024, 2);
+        memset(data2View.data(), 0, data2View.bounds()[0] * data2View.stride() * sizeof(block));
         sse_transpose(dataView, data2View);
 
         for (u64 b = 0; b < 2; ++b)
@@ -269,7 +269,7 @@ void TransposeMatrixView_Test_Impl()
 
                 for (u64 j = 0; j < 128; ++j)
                 {
-                    if (dataView.size()[0] > 128 * b + j)
+                    if (dataView.bounds()[0] > 128 * b + j)
                         data128[j] = dataView[128 * b + j][i];
                     else
                         data128[j] = ZeroBlock;
@@ -293,17 +293,17 @@ void TransposeMatrixView_Test_Impl()
     {
         PRNG prng(ZeroBlock);
 
-        MatrixView<u8> in(16, 8);
-        prng.get((u8*)in.data(), sizeof(u8) *in.size()[0] * in.size()[1]);
+        Matrix<u8> in(16, 8);
+        prng.get((u8*)in.data(), sizeof(u8) *in.bounds()[0] * in.stride());
 
-        MatrixView<u8> out(63, 2);
+        Matrix<u8> out(63, 2);
         sse_transpose(in, out);
 
 
-        MatrixView<u8> out2(64, 2);
+        Matrix<u8> out2(64, 2);
         sse_transpose(in, out2);
 
-        for (u64 i = 0; i < out.size()[0]; ++i)
+        for (u64 i = 0; i < out.bounds()[0]; ++i)
         {
             if (memcmp(out[i].data(), out2[i].data(), out[i].size()))
             {
@@ -318,29 +318,29 @@ void TransposeMatrixView_Test_Impl()
 
         //std::array<std::array<std::array<block, 8>, 128>, 2> data;
 
-        MatrixView<u8> in(25, 9);
-        MatrixView<u8> in2(32, 9);
+        Matrix<u8> in(25, 9);
+        Matrix<u8> in2(32, 9);
 
-        prng.get((u8*)in.data(), sizeof(u8) *in.size()[0] * in.size()[1]);
-        memset(in2.data(), 0, in2.size()[0] * in2.size()[1]);
+        prng.get((u8*)in.data(), sizeof(u8) *in.bounds()[0] * in.stride());
+        memset(in2.data(), 0, in2.bounds()[0] * in2.stride());
 
-        for (u64 i = 0; i < in.size()[0]; ++i)
+        for (u64 i = 0; i < in.bounds()[0]; ++i)
         {
-            for (u64 j = 0; j < in.size()[1]; ++j)
+            for (u64 j = 0; j < in.stride(); ++j)
             {
                 in2[i][j] = in[i][j];
             }
         }
 
-        MatrixView<u8> out(72, 4);
-        MatrixView<u8> out2(72, 4);
+        Matrix<u8> out(72, 4);
+        Matrix<u8> out2(72, 4);
 
         sse_transpose(in, out);
         sse_transpose(in2, out2);
 
-        for (u64 i = 0; i < out.size()[0]; ++i)
+        for (u64 i = 0; i < out.bounds()[0]; ++i)
         {
-            for (u64 j = 0; j < out.size()[1]; ++j)
+            for (u64 j = 0; j < out.stride(); ++j)
             {
                 if (out[i][j] != out2[i][j])
                 {
