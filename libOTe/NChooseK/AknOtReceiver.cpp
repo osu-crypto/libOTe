@@ -18,10 +18,10 @@ namespace osuCrypto
     }
 
     void AknOtReceiver::init(u64 totalOTCount, u64 numberOfOnes, double p,
-        OtExtReceiver & ots, std::vector<Channel*>& chls, PRNG & prng)
+        OtExtReceiver & ots, ArrayView<Channel> chls, PRNG & prng)
     {
 
-        auto& chl0 = *chls[0];
+        auto& chl0 = chls[0];
 
         if (ots.hasBaseOts() == false)
         { 
@@ -294,7 +294,7 @@ namespace osuCrypto
             u64 t = i + 1;
 
             // go!
-            thrds[i] = std::thread([&, i ,t , seed]() {routine(t, seed, *parOts[i], *chls[t]); });
+            thrds[i] = std::thread([&, i ,t , seed]() {routine(t, seed, *parOts[i], chls[t]); });
         }
 
         // run  the first set in this thread.

@@ -22,12 +22,12 @@ namespace osuCrypto
         void init(u64 totalOTCount, u64 cutAndChooseThreshold, double p,
             OtExtSender& ots, Channel& chl, PRNG& prng)
         {
-            std::vector<Channel*> chls{ &chl };
+            std::vector<Channel> chls{ chl };
             init(totalOTCount, cutAndChooseThreshold, p, ots, chls, prng);
         }
 
         void init(u64 totalOTCount, u64 cutAndChooseThreshold, double p,
-            OtExtSender& ots, std::vector<Channel*>& chls, PRNG& prng);
+            OtExtSender& ots, ArrayView<Channel> chls, PRNG& prng);
 
         //std::vector<BitVector> mTheirPermutes;
 

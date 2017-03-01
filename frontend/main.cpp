@@ -10,8 +10,8 @@ using namespace osuCrypto;
 #include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
-#include <cryptoTools/Network/BtChannel.h>
-#include <cryptoTools/Network/BtEndpoint.h>
+#include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Network/Endpoint.h>
 #include <numeric>
 #include <cryptoTools/Common/Log.h>
 int miraclTestMain();
@@ -49,12 +49,12 @@ void kkrt_test(int i)
 
     auto rr = i ? EpMode::Server : EpMode::Client;
     std::string name = "n";
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
-    std::vector<Channel*> chls(numThreads);
+    IOService ios(0);
+    Endpoint ep0(ios, "localhost", 1212, rr, name);
+    std::vector<Channel> chls(numThreads);
 
     for (u64 k = 0; k < numThreads; ++k)
-        chls[k] = &ep0.addChannel(name + ToString(k), name + ToString(k));
+        chls[k] = ep0.addChannel(name + ToString(k), name + ToString(k));
 
 
 
@@ -87,7 +87,7 @@ void kkrt_test(int i)
             {
                 KkrtNcoOtReceiver r;
                 r.setBaseOts(baseSend);
-                auto& chl = *chls[k];
+                auto& chl = chls[k];
 
                 r.init(otsPer, prng0, chl);
                 block encoding1;
@@ -121,7 +121,7 @@ void kkrt_test(int i)
             {
                 KkrtNcoOtSender s;
                 s.setBaseOts(baseRecv, baseChoice);
-                auto& chl = *chls[k];
+                auto& chl = chls[k];
 
                 s.init(otsPer, prng0, chl);
                 for (u64 i = 0; i < otsPer; i += step)
@@ -170,12 +170,12 @@ void oos_test(int i)
     auto rr = i ? EpMode::Server : EpMode::Client;
 
     std::string name = "n";
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
-    std::vector<Channel*> chls(numThreads);
+    IOService ios(0);
+    Endpoint ep0(ios, "localhost", 1212, rr, name);
+    std::vector<Channel> chls(numThreads);
 
     for (u64 k = 0; k < numThreads; ++k)
-        chls[k] = &ep0.addChannel(name + ToString(k), name + ToString(k));
+        chls[k] = ep0.addChannel(name + ToString(k), name + ToString(k));
 
 
     LinearCode code;
@@ -214,7 +214,7 @@ void oos_test(int i)
             {
                 OosNcoOtReceiver r(code, 40);
                 r.setBaseOts(baseSend);
-                auto& chl = *chls[k];
+                auto& chl = chls[k];
 
                 r.init(otsPer, prng0, chl);
                 block encoding1;
@@ -246,7 +246,7 @@ void oos_test(int i)
             {
                 OosNcoOtSender s(code, 40);// = sender[k];
                 s.setBaseOts(baseRecv, baseChoice);
-                auto& chl = *chls[k];
+                auto& chl = chls[k];
 
                 s.init(otsPer, prng0, chl);
                 for (u64 i = 0; i < otsPer; i += step)
@@ -273,7 +273,7 @@ void oos_test(int i)
 
 
     for (u64 k = 0; k < numThreads; ++k)
-        chls[k]->close();
+        chls[k].close();
 
     ep0.stop();
     ios.stop();
@@ -292,13 +292,13 @@ void kos_test(int iii)
     // get up the networking
     auto rr = iii ? EpMode::Server : EpMode::Client;
     std::string name = "n";
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
+    IOService ios(0);
+    Endpoint ep0(ios, "localhost", 1212, rr, name);
 
     u64 numThread = 1;
-    std::vector<Channel*> chls(numThread);
+    std::vector<Channel> chls(numThread);
     for (u64 i = 0; i < numThread; ++i)
-        chls[i] = &ep0.addChannel(name + ToString(i), name + ToString(i));
+        chls[i] = ep0.addChannel(name + ToString(i), name + ToString(i));
 
     // cheat and compute the base OT in the clear.
     u64 baseCount = 128;
@@ -335,7 +335,7 @@ void kos_test(int iii)
                 KosOtExtReceiver r;
                 r.setBaseOts(baseSend[i]);
 
-                r.receive(choice, msgs, prng, *chls[i]);
+                r.receive(choice, msgs, prng, chls[i]);
             });
         }
     }
@@ -352,7 +352,7 @@ void kos_test(int iii)
                 KosOtExtSender s;
                 s.setBaseOts(baseRecv[i], baseChoice);
 
-                s.send(msgs, prng, *chls[i]);
+                s.send(msgs, prng, chls[i]);
 
                 gTimer.setTimePoint("finish");
                 std::cout << gTimer << std::endl;
@@ -365,7 +365,7 @@ void kos_test(int iii)
 
 
     for (u64 i = 0; i < numThread; ++i)
-        chls[i]->close();
+        chls[i].close();
 
     ep0.stop();
     ios.stop();
@@ -384,9 +384,9 @@ void dkos_test(int i)
 
     // get up the networking
     std::string name = "n";
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
-    Channel& chl = ep0.addChannel(name, name);
+    IOService ios(0);
+    Endpoint ep0(ios, "localhost", 1212, rr, name);
+    Channel chl = ep0.addChannel(name, name);
 
     u64 s = 40;
     // cheat and compute the base OT in the clear.
@@ -451,9 +451,9 @@ void iknp_test(int i)
 
     // get up the networking
     std::string name = "n";
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, rr, name);
-    Channel& chl = ep0.addChannel(name, name);
+    IOService ios(0);
+    Endpoint ep0(ios, "localhost", 1212, rr, name);
+    Channel chl = ep0.addChannel(name, name);
 
 
     // cheat and compute the base OT in the clear.
@@ -520,14 +520,14 @@ void akn_test(int i)
     auto rr = i ? EpMode::Server : EpMode::Client;
     setThreadName("Recvr");
 
-    BtIOService ios(0);
-    BtEndpoint  ep0(ios, "127.0.0.1", 1212, rr, "ep");
+    IOService ios(0);
+    Endpoint  ep0(ios, "127.0.0.1", 1212, rr, "ep");
 
     u64 numTHreads(4);
 
-    std::vector<Channel*> chls(numTHreads);
+    std::vector<Channel> chls(numTHreads);
     for (u64 i = 0; i < numTHreads; ++i)
-        chls[i] = &ep0.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i));
+        chls[i] = ep0.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i));
 
     PRNG prng(ZeroBlock);
 
@@ -554,7 +554,7 @@ void akn_test(int i)
 
 
     for (u64 i = 0; i < numTHreads; ++i)
-        chls[i]->close();
+        chls[i].close();
 
     ep0.stop();
     ios.stop();
@@ -661,13 +661,60 @@ akn{ "a", "akn" };
 //};
 //
 
+void base()
+{
+
+    IOService ios(0);
+    Endpoint  ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
+    Endpoint  ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+
+    auto chl1 = ep1.addChannel("s");
+    auto chl0 = ep0.addChannel("s");
+
+
+    NaorPinkas send, recv;
+
+
+    auto thrd = std::thread([&]() {
+
+        std::array<std::array<block, 2>, 128> msg;
+        PRNG prng(ZeroBlock);
+
+        for (u64 i = 0; i < 10; ++i)
+            send.send(msg, prng, chl0);
+    });
+
+
+    std::array<block, 128> msg;
+    PRNG prng(ZeroBlock);
+    BitVector choice(128);
+
+    Timer t;
+    t.setTimePoint("s");
+    for (u64 i = 0; i < 10; ++i)
+    {
+
+        recv.receive(choice, msg, prng, chl1);
+        t.setTimePoint("e");
+
+
+    }
+    std::cout << t << std::endl;
+
+
+    thrd.join();
+
+    chl1.close();
+    chl0.close();
+
+}
+
 #include <cryptoTools/gsl/span>
 #include <cryptoTools/Common/ByteStream.h>
 #include <cryptoTools/Common/Matrix.h>
 
 int main(int argc, char** argv)
 {
-
 
     CLP cmd;
     cmd.parse(argc, argv);

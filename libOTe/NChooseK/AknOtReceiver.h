@@ -19,13 +19,15 @@ public:
     void init(u64 totalOTCount, u64 numberOfOnes, double p,
         OtExtReceiver& ots, Channel& chl, PRNG& prng)
     {
-        std::vector<Channel*> chls{ &chl };
+        std::vector<Channel> chls{ chl };
+
         init(totalOTCount, numberOfOnes, p, ots, chls, prng);
+
     }
 
 
     void init(u64 totalOTCount, u64 numberOfOnes, double p,
-        OtExtReceiver& ots, std::vector<Channel*>& chls, PRNG& prng);
+        OtExtReceiver& ots, ArrayView<Channel> chls, PRNG& prng);
 
     std::vector<u64> mOnes, mZeros;
     std::vector<block> mMessages;

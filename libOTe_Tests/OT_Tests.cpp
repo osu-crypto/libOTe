@@ -4,8 +4,8 @@
 
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/LinearCode.h"
-#include <cryptoTools/Network/BtChannel.h>
-#include <cryptoTools/Network/BtEndpoint.h>
+#include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Network/Endpoint.h>
 #include <cryptoTools/Common/Log.h>
 
 #include "libOTe/TwoChooseOne/IknpOtExtReceiver.h"
@@ -357,11 +357,11 @@ void KosOtExt_100Receive_Test_Impl()
 {
     setThreadName("Sender");
 
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-    BtEndpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
-    Channel& senderChannel = ep1.addChannel("chl", "chl");
-    Channel& recvChannel = ep0.addChannel("chl", "chl");
+    IOService ios(0);
+    Endpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
+    Endpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+    Channel senderChannel = ep1.addChannel("chl", "chl");
+    Channel recvChannel = ep0.addChannel("chl", "chl");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
     PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
@@ -430,11 +430,11 @@ void LzKosOtExt_100Receive_Test_Impl()
 {
     setThreadName("Sender");
 
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-    BtEndpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
-    Channel& senderChannel = ep1.addChannel("chl", "chl");
-    Channel& recvChannel = ep0.addChannel("chl", "chl");
+    IOService ios(0);
+    Endpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
+    Endpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+    Channel senderChannel = ep1.addChannel("chl", "chl");
+    Channel recvChannel = ep0.addChannel("chl", "chl");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
     PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
@@ -516,11 +516,11 @@ void KosDotExt_100Receive_Test_Impl()
 {
     setThreadName("Sender");
 
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-    BtEndpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
-    Channel& senderChannel = ep1.addChannel("chl", "chl");
-    Channel& recvChannel = ep0.addChannel("chl", "chl");
+    IOService ios(0);
+    Endpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
+    Endpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+    Channel senderChannel = ep1.addChannel("chl", "chl");
+    Channel recvChannel = ep0.addChannel("chl", "chl");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
     PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
@@ -592,11 +592,11 @@ void IknpOtExt_100Receive_Test_Impl()
 {
     setThreadName("Sender");
 
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-    BtEndpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
-    Channel& senderChannel = ep1.addChannel("chl", "chl");
-    Channel& recvChannel = ep0.addChannel("chl", "chl");
+    IOService ios(0);
+    Endpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
+    Endpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+    Channel senderChannel = ep1.addChannel("chl", "chl");
+    Channel recvChannel = ep0.addChannel("chl", "chl");
 
     PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
     PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));

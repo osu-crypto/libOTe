@@ -17,34 +17,21 @@ namespace osuCrypto
     }
 
 
-    void AknOtSender::init(u64 totalOTCount, u64 cutAndChooseThreshold, double p, OtExtSender & ots, std::vector<Channel*> & chls, PRNG & prng)
+    void AknOtSender::init(
+        u64 totalOTCount, 
+        u64 cutAndChooseThreshold, 
+        double p, 
+        OtExtSender & ots, 
+        ArrayView<Channel>  chls, 
+        PRNG & prng)
     {
 
 
 
-        //if (ots.hasBaseOts() == false)
-        //{
-        //    PvwBaseOT baseOTs(chl, OTRole::Receiver);
-        //    baseOTs.exec_base(prng);
-        //    ots.setBaseOts(baseOTs.receiver_outputs, baseOTs.receiver_inputs);
-        //}
-
-
-        ////std::thread extThread([&]() {
-        //ots.Extend(otMessages, prng, chl);
-        ////});
-
-
-
-        auto& chl0 = *chls[0];
+        auto& chl0 = chls[0];
 
         if (ots.hasBaseOts() == false)
         {
-            //Timer timer;
-            //timer.setTimePoint("base start");
-            //PvwBaseOT base(chl0, OTRole::Receiver);
-            //base.exec_base(prng);
-            //std::array<std::array<block, 2>, gOtExtBaseOtCount> baseMsg;
             std::array<block, gOtExtBaseOtCount> baseMsg;
             BitVector choices(gOtExtBaseOtCount);
             choices.randomize(prng);
@@ -192,7 +179,7 @@ namespace osuCrypto
             {
                 auto  t = i + 1;
 
-                routine(t,seed, *parOts[i], *chls[t]);
+                routine(t,seed, *parOts[i], chls[t]);
             });
         }
 

@@ -1,7 +1,7 @@
 #include "AknOt_Tests.h"
 #include <cryptoTools/Common/Defines.h>
-#include <cryptoTools/Network/BtIOService.h>
-#include <cryptoTools/Network/BtEndpoint.h>
+#include <cryptoTools/Network/IOService.h>
+#include <cryptoTools/Network/Endpoint.h>
 #include <cryptoTools/Common/Log.h>
 #include "libOTe/NChooseK/AknOtReceiver.h"
 #include "libOTe/NChooseK/AknOtSender.h"
@@ -32,17 +32,17 @@ void AknOt_sendRecv1000_Test()
 
     setThreadName("Recvr");
 
-    BtIOService ios(0);
-    BtEndpoint  ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-    BtEndpoint  ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+    IOService ios(0);
+    Endpoint  ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
+    Endpoint  ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
 
     u64 numTHreads(4);
 
-    std::vector<Channel*> sendChls(numTHreads), recvChls(numTHreads);
+    std::vector<Channel> sendChls(numTHreads), recvChls(numTHreads);
     for (u64 i = 0; i < numTHreads; ++i)
     {
-        sendChls[i] = &ep1.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i));
-        recvChls[i] = &ep0.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i));
+        sendChls[i] = std::move(ep1.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i)));
+        recvChls[i] = std::move(ep0.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i)));
     }
 
 
@@ -84,15 +84,15 @@ void AknOt_sendRecv1000_Test()
     if (recv.mOnes.size() > maxOnes)
         throw UnitTestFail();
 
-    for (u64 i = 0; i < numTHreads; ++i)
-    {
-        sendChls[i]->close();
-        recvChls[i]->close();
-    }
+    //for (u64 i = 0; i < numTHreads; ++i)
+    //{
+    //    sendChls[i].close();
+    //    recvChls[i].close();
+    //}
 
-    ep0.stop();
-    ep1.stop();
+    //ep0.stop();
+    //ep1.stop();
 
-    ios.stop();
+    //ios.stop();
 
 }

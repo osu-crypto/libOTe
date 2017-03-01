@@ -4,8 +4,8 @@
 
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/LinearCode.h"
-#include <cryptoTools/Network/BtChannel.h>
-#include <cryptoTools/Network/BtEndpoint.h>
+#include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Network/Endpoint.h>
 #include <cryptoTools/Common/Log.h>
 
 #include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
@@ -53,11 +53,11 @@ void KkrtNcoOt_Test_Impl()
     }
 
     std::string name = "n";
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
-    BtEndpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
-    auto &recvChl = ep1.addChannel(name, name);
-    auto &sendChl = ep0.addChannel(name, name);
+    IOService ios(0);
+    Endpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
+    Endpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
+    auto recvChl = ep1.addChannel(name, name);
+    auto sendChl = ep0.addChannel(name, name);
 
 
 
@@ -162,11 +162,11 @@ void OosNcoOt_Test_Impl()
 
 
     std::string name = "n";
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
-    BtEndpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
-    auto &recvChl = ep1.addChannel(name, name);
-    auto &sendChl = ep0.addChannel(name, name);
+    IOService ios(0);
+    Endpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
+    Endpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
+    auto recvChl = ep1.addChannel(name, name);
+    auto sendChl = ep0.addChannel(name, name);
 
 
     LinearCode code;
@@ -310,11 +310,11 @@ void Rr17NcoOt_Test_Impl()
     }
 
     std::string name = "n";
-    BtIOService ios(0);
-    BtEndpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
-    BtEndpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
-    auto &recvChl = ep1.addChannel(name, name);
-    auto &sendChl = ep0.addChannel(name, name);
+    IOService ios(0);
+    Endpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
+    Endpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
+    auto recvChl = ep1.addChannel(name, name);
+    auto sendChl = ep0.addChannel(name, name);
 
 
 

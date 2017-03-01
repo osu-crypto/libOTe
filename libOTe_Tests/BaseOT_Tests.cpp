@@ -3,8 +3,8 @@
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 
 #include "libOTe/Tools/Tools.h"
-#include <cryptoTools/Network/BtChannel.h>
-#include <cryptoTools/Network/BtEndpoint.h>
+#include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Network/Endpoint.h>
 
 #include "libOTe/Base/naor-pinkas.h"
 #include <cryptoTools/Common/Log.h>
@@ -26,11 +26,11 @@ void NaorPinkasOt_Test_Impl()
 {
         setThreadName("Sender");
 
-        BtIOService ios(0);
-        BtEndpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-        BtEndpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
-        Channel& senderChannel = ep1.addChannel("chl", "chl");
-        Channel& recvChannel = ep0.addChannel("chl", "chl");
+        IOService ios(0);
+        Endpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
+        Endpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+        Channel senderChannel = ep1.addChannel("chl", "chl");
+        Channel recvChannel = ep0.addChannel("chl", "chl");
 
         PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
         PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
