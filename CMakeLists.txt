@@ -17,7 +17,7 @@ else()
 	#           Flag and #defines              #
 	############################################
 	add_definitions(-DSOLUTION_DIR=\"${CMAKE_SOURCE_DIR}\")
-	set(CMAKE_C_FLAGS "-ffunction-sections -Wall  -maes -msse2 -msse4.1 -mpclmul -Wfatal-errors -pthread")
+	set(CMAKE_C_FLAGS "-ffunction-sections -Wall  -maes -msse2 -msse4.1 -mpclmul -Wfatal-errors -pthread -Wno-strict-overflow")
 	set(CMAKE_CXX_FLAGS  "${CMAKE_C_FLAGS}  -std=c++14")
 	
 	# Select flags.

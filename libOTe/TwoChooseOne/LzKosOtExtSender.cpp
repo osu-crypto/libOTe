@@ -85,7 +85,6 @@ namespace osuCrypto
         u64 numBlocks = numOTExt / gOtExtBaseOtCount + 1;
         for (u64 blkIdx = 0; blkIdx < numBlocks; ++blkIdx)
         {
-
             chl.recv(buff);
             assert(buff.size() == sizeof(block) * gOtExtBaseOtCount);
 
