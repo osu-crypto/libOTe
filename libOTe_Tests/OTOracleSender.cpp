@@ -8,35 +8,38 @@
 
 using namespace osuCrypto;
 
-OTOracleSender::OTOracleSender(const block& seed)
-    :mPrng(seed)
+namespace tests_libOTe
 {
-}
-
-OTOracleSender::~OTOracleSender()
-{
-}
-
-
-
-
-void OTOracleSender::send(
-    gsl::span<std::array<block,2>> messages,
-    PRNG& prng,
-    Channel& chl)
-{
-    block test = mPrng.get<block>();
-    chl.asyncSendCopy((u8*)&test, sizeof(block));
-
-    u64 doneIdx = 0;
-
-    for (doneIdx = 0; doneIdx < messages.size(); ++doneIdx)
+    OTOracleSender::OTOracleSender(const block& seed)
+        :mPrng(seed)
     {
-        messages[doneIdx][0] = mPrng.get<block>();
-        messages[doneIdx][1] = mPrng.get<block>(); 
-
-        //std::cout << " idx  " << doneIdx << "   " << messages[doneIdx][0] << "   " << messages[doneIdx][1] << std::endl;
-
     }
-}
 
+    OTOracleSender::~OTOracleSender()
+    {
+    }
+
+
+
+
+    void OTOracleSender::send(
+        gsl::span<std::array<block, 2>> messages,
+        PRNG& prng,
+        Channel& chl)
+    {
+        block test = mPrng.get<block>();
+        chl.asyncSendCopy((u8*)&test, sizeof(block));
+
+        u64 doneIdx = 0;
+
+        for (doneIdx = 0; doneIdx < messages.size(); ++doneIdx)
+        {
+            messages[doneIdx][0] = mPrng.get<block>();
+            messages[doneIdx][1] = mPrng.get<block>();
+
+            //std::cout << " idx  " << doneIdx << "   " << messages[doneIdx][0] << "   " << messages[doneIdx][1] << std::endl;
+
+        }
+    }
+
+}

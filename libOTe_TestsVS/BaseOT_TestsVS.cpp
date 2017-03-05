@@ -6,7 +6,7 @@
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
-namespace osuCrypto_tests
+namespace tests_libOTe
 {
     TEST_CLASS(BaseOT_Tests)
     {

@@ -11,28 +11,31 @@
 
 using namespace osuCrypto;
 
-
-class OTOracleSender :
-    public OtExtSender
+namespace tests_libOTe
 {
-public:
-    OTOracleSender(const block& seed);
-    ~OTOracleSender();
-    PRNG mPrng;
-    bool hasBaseOts() const override { return true; }
 
-    void setBaseOts(
-        gsl::span<block> baseRecvOts,
-        const BitVector& choices) override {};
-
-    std::unique_ptr<OtExtSender> split() override
+    class OTOracleSender :
+        public OtExtSender
     {
-        std::unique_ptr<OtExtSender> ret(new OTOracleSender(mPrng.get<block>()));
-        return std::move(ret);
-    }
+    public:
+        OTOracleSender(const block& seed);
+        ~OTOracleSender();
+        PRNG mPrng;
+        bool hasBaseOts() const override { return true; }
 
-    void send(
-        gsl::span<std::array<block,2>> messages,
-        PRNG& prng,
-        Channel& chl) override;
-};
+        void setBaseOts(
+            gsl::span<block> baseRecvOts,
+            const BitVector& choices) override {};
+
+        std::unique_ptr<OtExtSender> split() override
+        {
+            std::unique_ptr<OtExtSender> ret(new OTOracleSender(mPrng.get<block>()));
+            return std::move(ret);
+        }
+
+        void send(
+            gsl::span<std::array<block, 2>> messages,
+            PRNG& prng,
+            Channel& chl) override;
+    };
+}

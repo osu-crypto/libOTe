@@ -7,31 +7,34 @@
 
 using namespace osuCrypto;
 
-static std::fstream* file = nullptr;
-std::string SolutionDir = "../../";
-
-void InitDebugPrinting(std::string filePath)
+namespace tests_libOTe
 {
-    std::cout << "changing sink" << std::endl;
+    static std::fstream* file = nullptr;
+    std::string SolutionDir = "../../";
 
-    if (file == nullptr)
+    void InitDebugPrinting(std::string filePath)
     {
-        file = new std::fstream;
+        std::cout << "changing sink" << std::endl;
+
+        if (file == nullptr)
+        {
+            file = new std::fstream;
+        }
+        else
+        {
+            file->close();
+        }
+
+        file->open(filePath, std::ios::trunc | std::ofstream::out);
+
+        if (!file->is_open())
+            throw UnitTestFail();
+
+        //time_t now = time(0);
+
+        std::cout.rdbuf(file->rdbuf());
+        std::cerr.rdbuf(file->rdbuf());
+        //Log::SetSink(*file); 
     }
-    else
-    {
-        file->close();
-    }
 
-    file->open(filePath, std::ios::trunc | std::ofstream::out);
-
-    if (!file->is_open())
-        throw UnitTestFail();
-
-    //time_t now = time(0);
-
-    std::cout.rdbuf(file->rdbuf());
-    std::cerr.rdbuf(file->rdbuf());
-    //Log::SetSink(*file); 
 }
-

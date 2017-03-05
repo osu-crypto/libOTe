@@ -7,28 +7,31 @@
 
 using namespace osuCrypto;
 
-class OTOracleReceiver :
-    public OtExtReceiver
+namespace tests_libOTe
 {
-public:
-    OTOracleReceiver(const block& seed);
-    ~OTOracleReceiver();
-    PRNG mPrng;
-
-    bool hasBaseOts() const override { return true; }
-
-    void setBaseOts(
-        gsl::span<std::array<block, 2>> baseSendOts) override {};
-    void receive(
-        const BitVector& choices,
-        gsl::span<block> messages,
-        PRNG& prng,
-        Channel& chl) override;
-
-    std::unique_ptr<OtExtReceiver> split() override
+    class OTOracleReceiver :
+        public OtExtReceiver
     {
-        std::unique_ptr<OtExtReceiver> ret(new OTOracleReceiver(mPrng.get<block>()));
-        return std::move(ret);
-    }
+    public:
+        OTOracleReceiver(const block& seed);
+        ~OTOracleReceiver();
+        PRNG mPrng;
 
-};
+        bool hasBaseOts() const override { return true; }
+
+        void setBaseOts(
+            gsl::span<std::array<block, 2>> baseSendOts) override {};
+        void receive(
+            const BitVector& choices,
+            gsl::span<block> messages,
+            PRNG& prng,
+            Channel& chl) override;
+
+        std::unique_ptr<OtExtReceiver> split() override
+        {
+            std::unique_ptr<OtExtReceiver> ret(new OTOracleReceiver(mPrng.get<block>()));
+            return std::move(ret);
+        }
+
+    };
+}

@@ -1,7 +1,9 @@
 #include <iostream>
 
 using namespace std;
-#include "UnitTests.h"
+#include "tests_cryptoTools/UnitTests.h"
+#include "libOTe_Tests/UnitTests.h"
+
 #include <cryptoTools/Common/Defines.h>
 using namespace osuCrypto;
 
@@ -722,7 +724,8 @@ int main(int argc, char** argv)
 
     if (cmd.isSet(unitTestTag))
     {
-        run_all();
+        tests_cryptoTools::tests_all();
+        tests_libOTe::tests_all();
     }
     else if (cmd.isSet(kos))
     {

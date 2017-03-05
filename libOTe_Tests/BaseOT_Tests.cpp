@@ -21,9 +21,11 @@
 using namespace osuCrypto;
 
 
-
-void NaorPinkasOt_Test_Impl()
+namespace tests_libOTe
 {
+
+    void NaorPinkasOt_Test_Impl()
+    {
         setThreadName("Sender");
 
         IOService ios(0);
@@ -93,5 +95,6 @@ void NaorPinkasOt_Test_Impl()
             }
         }
 
-}
+    }
 
+}

@@ -84,14 +84,12 @@
     <ClCompile Include="CLP.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="signalHandle.cpp" />
-    <ClCompile Include="UnitTests.cpp" />
     <ClCompile Include="util.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CLP.h" />
     <ClInclude Include="main.h" />
     <ClInclude Include="signalHandle.h" />
-    <ClInclude Include="UnitTests.h" />
     <ClInclude Include="util.h" />
   </ItemGroup>
   <ItemGroup>
