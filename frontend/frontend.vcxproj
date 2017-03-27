@@ -49,14 +49,14 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)/cryptoTools/;$(solutionDir)thirdparty\win\boost\;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)/cryptoTools/;$(SolutionDir)/cryptoTools/thirdparty\win\boost\;$(SolutionDir)/cryptoTools/thirdparty\win\;$(SolutionDir)/cryptoTools/thirdparty/win/NTL/include;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_WIN32_WINNT=0x0501 ;_MBCS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories);$(SolutionDir)\thirdparty\win\boost\stage\lib;C:/libs/boost\stage\lib;$(OutDir);$(SolutionDir)thirdparty\win\;C:/libs/;C:\Program Files %28x86%29\Visual Leak Detector\lib\Win64</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories);$(ProjectDir)..\cryptoTools\thirdparty\win\boost\stage\lib;C:/libs/boost\stage\lib;$(OutDir);$(ProjectDir)..\cryptoTools/thirdparty\win\;C:/libs/</AdditionalLibraryDirectories>
       <AdditionalDependencies>tests_cryptoTools.lib;cryptoTools.lib;libOTe.lib;libOTe_Tests.lib;Miracl\x64\$(Configuration)\miracl.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -67,7 +67,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)/cryptoTools/;$(solutionDir)thirdparty\win\boost\;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)/cryptoTools/;$(SolutionDir)/cryptoTools/thirdparty\win\boost\;$(SolutionDir)/cryptoTools/thirdparty\win\;$(SolutionDir)/cryptoTools/thirdparty/win/NTL/include;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_WIN32_WINNT=0x0501 ;_MBCS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
@@ -76,7 +76,7 @@
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories);$(SolutionDir)\thirdparty\win\boost\stage\lib;C:/libs/boost\stage\lib;$(OutDir);$(SolutionDir)thirdparty\win\;C:/libs/;C:\Program Files %28x86%29\Visual Leak Detector\lib\Win64</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories);$(ProjectDir)..\cryptoTools\thirdparty\win\boost\stage\lib;C:/libs/boost\stage\lib;$(OutDir);$(ProjectDir)..\cryptoTools/thirdparty\win\;C:/libs/</AdditionalLibraryDirectories>
       <AdditionalDependencies>tests_cryptoTools.lib;cryptoTools.lib;libOTe.lib;libOTe_Tests.lib;Miracl\x64\$(Configuration)\miracl.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>

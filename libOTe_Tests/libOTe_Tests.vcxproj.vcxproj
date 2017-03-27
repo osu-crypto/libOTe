@@ -48,7 +48,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)/cryptoTools/;$(solutionDir)thirdparty\win\boost\;$(SolutionDir)/libOTe_Tests;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/miracl;$(SolutionDir)thirdparty/win/NTL/include;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..;$(ProjectDir)../cryptoTools/;$(ProjectDir)../cryptoTools/thirdparty\win\boost\;$(ProjectDir)../cryptoTools/thirdparty\win\;$(ProjectDir)../cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/miracl</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_WIN32_WINNT=0x0501;_MBCS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
@@ -62,7 +62,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)/cryptoTools/;$(solutionDir)thirdparty\win\boost\;$(SolutionDir)/libOTe_Tests;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/miracl;$(SolutionDir)thirdparty/win/NTL/include;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..;$(ProjectDir)../cryptoTools/;$(ProjectDir)../cryptoTools/thirdparty\win\boost\;$(ProjectDir)../cryptoTools/thirdparty\win\;$(ProjectDir)../cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/miracl</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_WIN32_WINNT=0x0501;_MBCS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
