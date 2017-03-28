@@ -1,6 +1,6 @@
 $RemoteUserName='rindalp'
 $RemoteHostName='eve.eecs.oregonstate.edu'
-$PrivateKey='C:\tools\privateKey.ppk'
+$PrivateKey='C:/keys/key.ppk'
 $SolutionDir=$PWD
 $RemoteWorkingDir='/scratch/repo/libOTe'
 
