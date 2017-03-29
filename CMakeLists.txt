@@ -54,25 +54,9 @@ endif()
  
 
 #############################################
-#       Library/includes locations          #
-#############################################
-
-# default location for miracl
-set(Miracl_Dirs "${CMAKE_HOME_DIRECTORY}/cryptoTools/thirdparty/linux/miracl/")
-include_directories("${Miracl_Dirs}") 
-
-if(NOT "${miracl_Dir}" MATCHES  "")
-	message(ERROR "no miracl_Dir defined, ${miracl_Dir}" )
-endif()
-
-# default location for Boost
-set(BOOST_ROOT "${CMAKE_HOME_DIRECTORY}/cryptoTools/thirdparty/linux/boost/")
-
-
-#############################################
 #    Build cryptoTools (common utilities)   #
 #############################################
-include_directories(cryptoTools)
+#include_directories(cryptoTools)
 add_subdirectory(cryptoTools)
 
 
@@ -80,29 +64,10 @@ add_subdirectory(cryptoTools)
 #               Build libOTe                #
 #############################################
 add_subdirectory(libOTe)
-
-#############################################
-#           Build libOTe Tests              #
-#############################################
 add_subdirectory(libOTe_Tests)
 
 #############################################
 #              Build Frontend               #
 #############################################
 add_subdirectory(frontend)
-#include_directories(${CMAKE_SOURCE_DIR})
-#file(GLOB_RECURSE SRC_FRONTEND ${CMAKE_SOURCE_DIR}/frontend/*.cpp)
-#add_executable(frontend.exe ${SRC_FRONTEND})
-
-#############################################
-#            Install Frontend               #
-#############################################
-#install (TARGETS frontend.exe DESTINATION bin)
-
-#############################################
-#            Link our libraries             #
-#############################################
-#target_link_libraries(frontend.exe libOTe_Tests tests_cryptoTools)
-# other libs implicitly linked with libOTe_Tests tests_cryptoTools
-
 
