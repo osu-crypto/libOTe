@@ -151,12 +151,13 @@ namespace osuCrypto
 
     void KkrtNcoOtReceiver::encode(
         u64 otIdx,
-        const gsl::span<block> choice, 
-        block & val)
+        const block* choice,
+        u8* dest,
+        u64 destSize)
     {
 #ifndef NDEBUG
-        if (choice.size() != mT0.stride())
-            throw std::invalid_argument("");
+        //if (choice.size() != mT0.stride())
+        //    throw std::invalid_argument("");
 
         if (eq(mT0[otIdx][0], ZeroBlock))
             throw std::runtime_error("uninitialized OT extension");
@@ -187,8 +188,8 @@ namespace osuCrypto
 
         sha1.Update((u8*)mT0[otIdx].data(), mT0[otIdx].size() * sizeof(block));
         sha1.Final(hashBuff);
-
-        val = toBlock(hashBuff);
+        memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
+        //val = toBlock(hashBuff);
 #else
         std::array<block, 10> aesBuff;
         mAesFixedKey.ecbEncBlocks(t0Val, mT0.stride(), aesBuff.data());

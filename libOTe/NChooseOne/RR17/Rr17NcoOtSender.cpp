@@ -116,14 +116,15 @@ namespace osuCrypto
 
     void Rr17NcoOtSender::encode(
         u64 otIdx,
-        const ArrayView<block> choiceWord,
-        block & encoding)
+        const block* choiceWord,
+        u8* dest,
+        u64 destSize)
     {
 
-#ifndef NDEBUG
-        if (choiceWord.size() != 1)
-            throw std::runtime_error(LOCATION);
-#endif
+//#ifndef NDEBUG
+//        if (choiceWord.size() != 1)
+//            throw std::runtime_error(LOCATION);
+//#endif
         //BitVector mCorrections;
 
         block correction = toBlock(mCorrection.data() + otIdx * mEncodeSize / 8);
@@ -142,9 +143,10 @@ namespace osuCrypto
         for (u64 i = 0; i < mEncodeSize; ++i)
             sha.Update(mMessages[otIdx++][*iter++]);
 
-        sha.Update((u8*)choiceWord.data(), mEncodeSize / 8);
+        sha.Update((u8*)choiceWord, mEncodeSize / 8);
         sha.Final(buff);
-        encoding = *(block*)buff;
+        memcpy(dest, buff, std::min<u64>(SHA1::HashSize, destSize));
+        //encoding = *(block*)buff;
     }
 
     void Rr17NcoOtSender::getParams(

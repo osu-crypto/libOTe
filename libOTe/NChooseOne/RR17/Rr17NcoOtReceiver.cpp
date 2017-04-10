@@ -89,8 +89,9 @@ namespace osuCrypto
      
     void Rr17NcoOtReceiver::encode(
         u64 otIdx, 
-        const ArrayView<block> choiceWord, 
-        block & encoding)
+        const block* choiceWord, 
+        u8* dest,
+        u64 destSize)
     {
 #ifndef NDEBUG
         if (mDebugEncodeFlags[otIdx])
@@ -104,7 +105,7 @@ namespace osuCrypto
 
 
         auto iter = mChoices.data() + otIdx / 8;
-        auto cIter = (u8*)choiceWord.data();
+        auto cIter = (u8*)choiceWord;
         for (u64 i = 0; i < mEncodeSize / 8; ++i, ++iter, ++cIter)
         {
             *iter = *iter ^ *cIter;
@@ -119,12 +120,13 @@ namespace osuCrypto
         sha.Update((u8*)(mMessages.data() + otIdx), mEncodeSize * sizeof(block));
 
 
-        sha.Update((u8*)choiceWord.data(), mEncodeSize / 8);
+        sha.Update((u8*)choiceWord, mEncodeSize / 8);
 
         u8 buff[SHA1::HashSize];
         sha.Final(buff);
 
-        encoding = toBlock(buff);
+        memcpy(dest, buff, std::min<u64>(SHA1::HashSize, destSize));
+        //encoding = toBlock(buff);
     }
 
     void Rr17NcoOtReceiver::zeroEncode(u64 otIdx)

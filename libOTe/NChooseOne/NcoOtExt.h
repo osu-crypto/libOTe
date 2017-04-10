@@ -51,11 +51,26 @@ namespace osuCrypto
         //      should be called again.
         virtual void init(u64 numOtExt, PRNG& prng, Channel& chl) = 0;
 
-        
-        virtual void encode(
+        void encode(
             u64 otIdx,
             const span<block> choiceWord,
-            block& encoding) = 0;
+            block& encoding)
+        {
+            encode(otIdx, choiceWord.data(), (u8*)&encoding, sizeof(block));
+        };
+
+        //virtual void encode(
+        //    u64 otIdx,
+        //    const span<block> choiceWord,
+        //    u8* encoding,
+        //    u64 encodingSize) = 0;
+
+
+        virtual void encode(
+            u64 otIdx,
+            const block* choiceWord,
+            u8* encoding,
+            u64 encodingSize) = 0;
 
         //virtual void encode(
         //    u64 otIdx,
@@ -101,11 +116,20 @@ namespace osuCrypto
 
         virtual void init(u64 numOtExt, PRNG& prng, Channel& chl) = 0;
 
-        virtual void encode(
+        void encode(
             u64 otIdx,
             const span<block> choiceWord,
-            block& encoding) = 0;
+            block& encoding)
+        {
+            encode(otIdx, choiceWord.data(), (u8*)&encoding, sizeof(block));
+        };
 
+        virtual void encode(
+            u64 otIdx,
+            const block* choiceWord,
+            u8* dest,
+            u64 destSize) = 0;
+        
         //virtual void encode(
         //    u64 otIdx,
         //    const u8* choiceWord,

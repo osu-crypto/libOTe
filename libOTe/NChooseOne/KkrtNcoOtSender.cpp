@@ -133,22 +133,31 @@ namespace osuCrypto
         }
     }
 
-    void KkrtNcoOtSender::encode(
-        u64 otIdx,
-        const gsl::span<block> inputword,
-        block& val)
+
+//
+//    void KkrtNcoOtSender::encode(
+//        u64 otIdx,
+//        const gsl::span<block> inputword,
+//        u8* dest,
+//        u64 destSize)
+//    {
+//
+//#ifndef NDEBUG
+//        u64 expectedSize = mGens.size() / (sizeof(block) * 8);
+//
+//        if (inputword.size() != expectedSize)
+//            throw std::invalid_argument("Bad input word" LOCATION);
+//#endif // !NDEBUG
+//
+//        encode(otIdx, inputword.data(), dest, destSize);
+//    }
+//
+    void KkrtNcoOtSender::encode(u64 otIdx, const block * inputword, u8 * dest, u64 destSize)
     {
 
 #ifndef NDEBUG
-        u64 expectedSize = mGens.size() / (sizeof(block) * 8);
-
-        if (inputword.size() != expectedSize)
-            throw std::invalid_argument("Bad input word" LOCATION);
-
         if (eq(mCorrectionVals[otIdx][0], ZeroBlock))
             throw std::invalid_argument("appears that we haven't received the receiver's choice yet. " LOCATION);
-
-
 #endif // !NDEBUG
 
         std::array<block, 10> codeword;
@@ -176,18 +185,22 @@ namespace osuCrypto
         // hash it all to get rid of the correlation.
         sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
         sha1.Final(hashBuff);
-        val = toBlock(hashBuff);
+        memcpy(dest, hashBuff, std::min(destSize, SHA1::HashSize));
+        //val = toBlock(hashBuff);
 #else
         std::array<block, 10> aesBuff;
         mAesFixedKey.ecbEncBlocks(codeword.data(), mT.stride(), aesBuff.data());
 
-        val = ZeroBlock;
+        auto val = ZeroBlock;
         for (u64 i = 0; i < mT.stride(); ++i)
             val = val ^ codeword[i] ^ aesBuff[i];
+
+        memcpy(dest, hashBuff, std::min(destSize, sizeof(block)));
 #endif
 
 
     }
+
 
     void KkrtNcoOtSender::getParams(
         bool maliciousSecure,
@@ -200,7 +213,7 @@ namespace osuCrypto
     {
 
         //if (maliciousSecure) throw std::runtime_error("");
-        baseOtCount = roundUpTo(compSecParm * (maliciousSecure? 7 : 4), 128);
+        baseOtCount = roundUpTo(compSecParm * (maliciousSecure ? 7 : 4), 128);
         inputBlkSize = baseOtCount / 128;
     }
 

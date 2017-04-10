@@ -42,10 +42,19 @@ namespace osuCrypto {
         void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
 
 
+
+        using NcoOtExtSender::encode;
+        //void encode(
+        //    u64 otIdx,
+        //    const gsl::span<block> codeWord,
+        //    u8* dest,
+        //    u64 destSize) override;
+
         void encode(
             u64 otIdx,
-            const gsl::span<block> codeWord, 
-            block& val) override;
+            const block* codeWord,
+            u8* dest,
+            u64 destSize) override;
 
         void getParams(
             bool maliciousSecure,

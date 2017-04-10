@@ -51,10 +51,12 @@ namespace osuCrypto
 
         std::unique_ptr<NcoOtExtReceiver> split() override;
 
+        using NcoOtExtReceiver::encode;
         void encode(
             u64 otIdx,
-            const span<block> inputword,
-            block& val) override;
+            const block* inputword,
+            u8* dest,
+            u64 destSize) override;
 
         void zeroEncode(u64 otIdx) override;
 

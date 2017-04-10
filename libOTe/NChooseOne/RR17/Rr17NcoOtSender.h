@@ -39,10 +39,12 @@ namespace osuCrypto
         void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
 
 
+        using NcoOtExtSender::encode;
         void encode(
             u64 otIdx,
-            const ArrayView<block> choiceWord,
-            block& encoding) override;
+            const block* choiceWord,
+            u8* dest, 
+            u64 destSize) override;
 
 
         void getParams(

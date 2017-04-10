@@ -143,19 +143,20 @@ namespace osuCrypto
 
     void OosNcoOtSender::encode(
         u64 otIdx,
-        const span<block> plaintext,
-        block& val)
+        const block* plaintext,
+        u8* dest,
+        u64 destSize)
     {
 
-#ifndef NDEBUG
-        if (plaintext.size() != mCode.plaintextBlkSize())
-            throw std::invalid_argument("");
-#endif // !NDEBUG
+//#ifndef NDEBUG
+//        if (plaintext.size() != mCode.plaintextBlkSize())
+//            throw std::invalid_argument("");
+//#endif // !NDEBUG
 
         // compute the codeword. We assume the
         // the codeword is less that 10 block = 1280 bits.
         std::array<block, 10> codeword;
-        mCode.encode(plaintext, codeword);
+        mCode.encode((u8*)plaintext, (u8*)codeword.data());
 
 #ifdef OOS_SHA_HASH
         SHA1  sha1;
@@ -194,7 +195,8 @@ namespace osuCrypto
             // hash it all to get rid of the correlation.
             sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
             sha1.Final(hashBuff);
-            val = toBlock(hashBuff);
+            memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
+            //val = toBlock(hashBuff);
 #else
             //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
             mAesFixedKey.ecbEncFourBlocks(codeword.data(), aesBuff.data());
@@ -228,7 +230,8 @@ namespace osuCrypto
             // hash it all to get rid of the correlation.
             sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
             sha1.Final(hashBuff);
-            val = toBlock(hashBuff);
+            memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
+            //val = toBlock(hashBuff);
 #else
             //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
             mAesFixedKey.ecbEncBlocks(codeword.data(), mT.stride(), aesBuff.data());

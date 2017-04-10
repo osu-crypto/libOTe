@@ -165,13 +165,13 @@ namespace osuCrypto
 
     void OosNcoOtReceiver::encode(
         u64 otIdx,
-        const span<block> choice,
-        // Output: the encoding of the plaintext
-        block & val)
+        const block* choice,
+        u8* dest,
+        u64 destSize)
     {
 #ifndef NDEBUG
-        if (choice.size() != mCode.plaintextBlkSize())
-            throw std::invalid_argument("");
+        //if (choice.size() != mCode.plaintextBlkSize())
+        //    throw std::invalid_argument("");
 
         if (eq(mT0[otIdx][0], ZeroBlock))
             throw std::runtime_error("uninitialized OT extension");
@@ -182,7 +182,7 @@ namespace osuCrypto
         // use this for two thing, to store the code word and 
         // to store the zero message from base OT matrix transposed.
         std::array<block, 10> codeword;
-        mCode.encode((span<block>)choice, (span<block>)codeword);
+        mCode.encode((u8*)choice, (u8*)codeword.data());
 
 
 
@@ -220,7 +220,9 @@ namespace osuCrypto
             // now hash it to remove the correlation.
             sha1.Update((u8*)t0Val, mT0.bounds()[1] * sizeof(block));
             sha1.Final(hashBuff);
-            val = toBlock(hashBuff);
+            memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
+
+            //val = toBlock(hashBuff);
 #else
             //H(x) = AES_f(H'(x)) + H'(x), where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
             mAesFixedKey.ecbEncFourBlocks(t0Val, codeword.data());
@@ -265,7 +267,8 @@ namespace osuCrypto
             // now hash it to remove the correlation.
             sha1.Update((u8*)t0Val, mT0.bounds()[1] * sizeof(block));
             sha1.Final(hashBuff);
-            val = toBlock(hashBuff);
+            memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
+            //val = toBlock(hashBuff);
 #else
             //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
             mAesFixedKey.ecbEncBlocks(t0Val, mT0.bounds()[1], codeword.data());
@@ -360,7 +363,7 @@ namespace osuCrypto
         // out true choices that were used in the remaining correction values.
         std::unique_ptr<ByteStream> wBuff(new Buff(sizeof(block) * statSecParam * mW.bounds()[1]));
         std::unique_ptr<ByteStream> tBuff(new Buff(sizeof(block) * statSecParam * mT0.bounds()[1]));
-        
+
         // get two arrays of block into these buff.
         auto tSum = tBuff->getSpan<block>();
         auto wSum = wBuff->getSpan<block>();
@@ -376,7 +379,7 @@ namespace osuCrypto
         for (u64 i = 0; i < statSecParam; ++i)
         {
             // the correction value is stored internally
-            encode(mCorrectionIdx + i, words[i], seed);
+            NcoOtExtReceiver::encode(mCorrectionIdx + i, words[i], seed);
 
             // initialize the tSum array with the T0 value used to encode these
             // random words.
