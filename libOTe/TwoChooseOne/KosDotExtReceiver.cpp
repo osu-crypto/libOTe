@@ -16,8 +16,8 @@ namespace osuCrypto
     void KosDotExtReceiver::setBaseOts(gsl::span<std::array<block, 2>> baseOTs)
     {
 
-        PRNG prng(ZeroBlock);
-        mCode.random(prng, baseOTs.size(), 128);
+        //PRNG prng(ZeroBlock);
+        //mCode.random(prng, baseOTs.size(), 128);
 
         mGens.resize(baseOTs.size());
         for (u64 i = 0; i < baseOTs.size(); i++)
@@ -40,7 +40,7 @@ namespace osuCrypto
         }
 
         auto dot = new KosDotExtReceiver();
-        dot->mCode = mCode;
+        //dot->mCode = mCode;
 
         std::unique_ptr<OtExtReceiver> ret(dot);
 
@@ -199,6 +199,9 @@ namespace osuCrypto
         commonPrng.SetSeed(seed ^ theirSeed);
         gTimer.setTimePoint("recv.cncSeed");
 
+        PRNG codePrng(theirSeed);
+        LinearCode code;
+        code.random(codePrng, mGens.size(), 128);
 
         // this buffer will be sent to the other party to prove we used the 
         // same value of r in all of the column vectors...
@@ -254,7 +257,7 @@ namespace osuCrypto
                 t[2] = t[2] ^ ti3;
                 t[3] = t[3] ^ ti4;
 
-                mCode.encode((u8*)msg[dd].data(),(u8*)&messages[dd]);
+                code.encode((u8*)msg[dd].data(),(u8*)&messages[dd]);
             }
 
             for (; dd < stop1; ++dd, ++i)

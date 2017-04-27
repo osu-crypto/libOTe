@@ -18,7 +18,7 @@ namespace osuCrypto
     std::unique_ptr<OtExtSender> KosDotExtSender::split()
     {
         auto dot = new KosDotExtSender();
-        dot->mCode = mCode;
+        //dot->mCode = mCode;
         std::unique_ptr<OtExtSender> ret(dot);
 
         std::vector<block> baseRecvOts(mGens.size());
@@ -37,8 +37,8 @@ namespace osuCrypto
     {
 
 
-        PRNG prng(ZeroBlock);
-        mCode.random(prng, choices.size(), 128);
+        //PRNG prng(ZeroBlock);
+        //mCode.random(prng, choices.size(), 128);
 
         mBaseChoiceBits = choices;
         mGens.resize(choices.size());
@@ -189,6 +189,10 @@ namespace osuCrypto
         if (Commit(theirSeed) != theirSeedComm)
             throw std::runtime_error("bad commit " LOCATION);
 
+        PRNG codePrng(seed);
+        LinearCode code;
+        code.random(codePrng, mBaseChoiceBits.size(), 128);
+
 
         PRNG commonPrng(seed ^ theirSeed);
 
@@ -225,8 +229,8 @@ namespace osuCrypto
 
                 std::array<block, 2> messages1 { messages[dd][0] ^ delta[0], messages[dd][1] ^ delta[1]};
 
-                mCode.encode((u8*)messages[dd].data(), (u8*)&messages[dd][0]);
-                mCode.encode((u8*)messages1.data(), (u8*)&messages[dd][1]);
+                code.encode((u8*)messages[dd].data(), (u8*)&messages[dd][0]);
+                code.encode((u8*)messages1.data(), (u8*)&messages[dd][1]);
             }
 
 

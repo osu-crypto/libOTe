@@ -21,7 +21,7 @@ namespace osuCrypto
             return mHasBase;
         }
 
-        LinearCode mCode;
+        //LinearCode mCode;
         bool mHasBase;
         std::vector<std::array<PRNG, 2>> mGens;
 

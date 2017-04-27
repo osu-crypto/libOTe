@@ -21,7 +21,7 @@ namespace osuCrypto {
         {
             return mBaseChoiceBits.size() > 0;
         }
-        LinearCode mCode;
+        //LinearCode mCode;
         //BitVector mmChoices;
 
         std::unique_ptr<OtExtSender> split() override;
