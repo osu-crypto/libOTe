@@ -36,73 +36,120 @@ namespace tests_libOTe
         PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
         PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
 
+        // The total number that we wish to do
         u64 numOTs = 1030;
 
         KkrtNcoOtSender sender;
         KkrtNcoOtReceiver recv;
-        u64 codeSize, baseCount;
+
+        // the input size that should be provided.
+        u64 codeSize;
+
+        // the number of base OT that need to be done
+        u64 baseCount;
+
+        // get up the parameters and get some information back. 
+        //  1) false = semi-honest
+        //  2) 128 =  computational security param. 
+        //  3) 40  =  statistical security param.
+        //  4) numOTs = number of OTs that we will perform
+        //  5) codeSize = output variable denoting the number of blocks that the input should be.
+        //  6) baseCount = output variable denoting the number of base OTs that should be used.
         sender.getParams(false, 128, 40, 128, numOTs, codeSize, baseCount);
 
+        // Fake some base OTs
         std::vector<block> baseRecv(baseCount);
         std::vector<std::array<block, 2>> baseSend(baseCount);
         BitVector baseChoice(baseCount);
         baseChoice.randomize(prng0);
-
         prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
         for (u64 i = 0; i < baseCount; ++i)
         {
             baseRecv[i] = baseSend[i][baseChoice[i]];
         }
 
+        // set up networking
         std::string name = "n";
-        IOService ios(0);
+        IOService ios;
         Endpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
         Endpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
         auto recvChl = ep1.addChannel(name, name);
         auto sendChl = ep0.addChannel(name, name);
 
 
-
-
+        // set the base OTs
         sender.setBaseOts(baseRecv, baseChoice);
         recv.setBaseOts(baseSend);
 
-        std::vector<block> codeword(codeSize), correction(codeSize);
+        u64 stepSize = 10;
+        Matrix<block> codeword(stepSize, codeSize * sizeof(block));
+        
         for (size_t j = 0; j < 10; j++)
         {
-            auto thrd = std::thread([&]() {
-                sender.init(numOTs, prng0, sendChl);
-            });
-
+            // perform the init on each of the classes. should be performed concurrently
+            auto thrd = std::thread([&]() { sender.init(numOTs, prng0, sendChl); });
             recv.init(numOTs, prng1, recvChl);
-
             thrd.join();
 
+            std::vector<block> encoding1(stepSize), encoding2(stepSize);
 
-            for (u64 i = 0; i < numOTs; ++i)
+            // Get the random OT messages
+            for (u64 i = 0; i < numOTs; i += stepSize)
             {
-                prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
 
-                block encoding1, encoding2;
-                recv.encode(i, codeword, encoding1);
+                // the current version of KKRT is weird in that the input to the encode
+                // function should be a "psuedo-ramdom" codeword of the actual input value.
+                // These codeword can be computed using a PRF or something like SHA.
+                // For this example, we are just going to use completely random bits as the 
+                // codewords. In the real example, each row of this matrix should be a psuedo-ramdom" 
+                // codeword.
+                prng0.get((u8*)codeword.data(), codeword.size());
 
-                recv.sendCorrection(recvChl, 1);
-                sender.recvCorrection(sendChl, 1);
 
-                sender.encode(i, codeword, encoding2);
+                for (u64 k = 0; k < stepSize; ++k)
+                {
 
-                if (neq(encoding1, encoding2))
-                    throw UnitTestFail();
+                    // The receiver MUST encode before the sender. Here we are only calling encode(...) 
+                    // for a single i. But the receiver can also encode many i, but should only make one 
+                    // call to encode for any given value of i.
+                    recv.encode(i + k, codeword[k], encoding1[k]);
+                }
 
-                prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
+                // This call will send to the other party the next "stepSize" corrections to the sender.
+                // If we had made more or less calls to encode above (for contigious i), then we should replace
+                // stepSize with however many calls we made. In an extreme case, the reciever can perform
+                // encode for i \in {0, ..., numOTs - 1}  and then call sendCorrection(recvChl, numOTs).
+                recv.sendCorrection(recvChl, stepSize);
 
-                sender.encode(i, codeword, encoding2);
+                // receive the next stepSize correction values. This allows the sender to now call encode
+                // on the next stepSize OTs.
+                sender.recvCorrection(sendChl, stepSize);
 
-                if (eq(encoding1, encoding2))
-                    throw UnitTestFail();
+                for (u64 k = 0; k < stepSize; ++k)
+                {
+                    // the sender can now call encode(i, ...) for k \in {0, ..., i}. 
+                    // Lets encode the same psuedo-random codeword and then we should expect to
+                    // get the same encoding.
+                    sender.encode(i + k, codeword[k], encoding2[k]);
+
+                    // check that we do in fact get the same value
+                    if (neq(encoding1[k], encoding2[k]))
+                        throw UnitTestFail();
+
+                    // In addition to the sender being able to obtain the same value as the receiver,
+                    // the sender can encode and other codeword. This should result in a different 
+                    // encoding.
+                    prng0.get((u8*)codeword[k].data(), codeSize * sizeof(block));
+
+                    sender.encode(i + k, codeword[k], encoding2[k]);
+
+                    if (eq(encoding1[k], encoding2[k]))
+                        throw UnitTestFail();
+                }
             }
-
         }
+                
+        // Double check that we can call split and perform the same tests.
         auto recv2Ptr = recv.split();
         auto send2Ptr = sender.split();
 
