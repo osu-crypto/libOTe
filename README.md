@@ -15,7 +15,7 @@ This library provides several different classes of OT protocols. First is the ba
  
 All implementations are highly optimized using fast SSE instructions and vectorization to obtain optimal performance both in the single and multi-threaded setting. See the **Performance** section for a comparison between protocols and to other libraries. 
  
-Networking can be performed using both the sockets provided by the library and external socket classes. See `cryptoTools/frontend_cryptoTools/Tutorials/Network.cpp` for an example.
+Networking can be performed using both the sockets provided by the library and external socket classes. See the [networking tutorial](https://github.com/ladnir/cryptoTools/blob/57220fc45252d089a7fd90816144e447a2ce02b8/frontend_cryptoTools/Tutorials/Network.cpp#L264) for an example.
 
 ## Performance
  
