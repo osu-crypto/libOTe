@@ -15,7 +15,7 @@ This library provides several different classes of OT protocols. First is the ba
  
 All implementations are highly optimized using fast SSE instructions and vectorization to obtain optimal performance both in the single and multi-threaded setting. See the **Performance** section for a comparison between protocols and to other libraries. 
  
- 
+Networking can be performed using both the sockets provided by the library and external socket classes. See `cryptoTools/frontend_cryptoTools/Tutorials/Network.cpp` for an example.
 
 ## Performance
  
@@ -35,7 +35,7 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
  
 ## Install
  
-The library is *cross platform* and has been tested on both Windows and Linux. The library should work on MAC but it has not been tested. There are two library dependencies including [Boost](http://www.boost.org/) (networking), and [Miracl](https://www.miracl.com/index) (Base OT). For each, we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advise using the coned repository that we provide.
+The library is *cross platform* and has been tested on both Windows and Linux. The library should work on MAC but it has not been tested. There are two library dependencies including [Boost](http://www.boost.org/) (networking), and [Miracl](https://www.miracl.com/index) (Base OT). For each, we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advise using the cloned repository that we provide.
 
  
 ### Windows
@@ -92,7 +92,7 @@ Note: In the case that miracl or boost is already installed, the steps  `cd libO
  
 Contact Peter Rindal rindalp@oregonstate.edu for any assistance on building or running the library.
 
- ## Citing
+## Citing
 
  Spread the word!
 
