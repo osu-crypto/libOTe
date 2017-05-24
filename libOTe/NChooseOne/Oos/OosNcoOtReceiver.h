@@ -20,7 +20,7 @@ namespace osuCrypto
     public:
 
 
-        OosNcoOtReceiver(LinearCode& code);
+        OosNcoOtReceiver();
 
         bool hasBaseOts()const override
         {

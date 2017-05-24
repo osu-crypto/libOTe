@@ -21,10 +21,11 @@ namespace osuCrypto {
     {
     public: 
 
-        OosNcoOtSender(LinearCode& code)
-            : mCode(code),
+        OosNcoOtSender()
+            : 
             mStatSecParam(0)
         {}
+
         ~OosNcoOtSender();
 
         LinearCode mCode;

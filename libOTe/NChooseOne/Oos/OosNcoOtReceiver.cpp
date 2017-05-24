@@ -1,6 +1,7 @@
 #include "libOTe/Base/naor-pinkas.h"
 #include "OosNcoOtReceiver.h"
 #include "libOTe/Tools/Tools.h"
+#include "libOTe/Tools/bch511.h"
 #include <cryptoTools/Common/Log.h>
 #include  <mmintrin.h>
 #include "OosDefines.h"
@@ -9,11 +10,11 @@ using namespace std;
 
 namespace osuCrypto
 {
-    OosNcoOtReceiver::OosNcoOtReceiver(LinearCode & code)
+    OosNcoOtReceiver::OosNcoOtReceiver()
         :mHasBase(false),
-        mStatSecParam(0),
-        mCode(code)
+        mStatSecParam(0)
     {}
+
     void OosNcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts)
     {
 
@@ -149,8 +150,8 @@ namespace osuCrypto
 
     std::unique_ptr<NcoOtExtReceiver> OosNcoOtReceiver::split()
     {
-        auto* raw = new OosNcoOtReceiver(mCode);
-
+        auto* raw = new OosNcoOtReceiver();
+        raw->mCode = mCode;
         raw->mHasBase = mHasBase;
         raw->mMalicious = mMalicious;
         raw->mStatSecParam = mStatSecParam;
@@ -324,8 +325,12 @@ namespace osuCrypto
         u64 statSecParam,
         u64 inputBitCount)
     {
-        if (inputBitCount > mCode.plaintextBitSize())
+        if (inputBitCount <= 76)
+            mCode.load(bch511_binary, sizeof(bch511_binary));
+        else
             throw std::runtime_error(LOCATION);
+
+
         mInputByteSize = (inputBitCount + 7) / 8;
         mStatSecParam = statSecParam;
         mMalicious = maliciousSecure;

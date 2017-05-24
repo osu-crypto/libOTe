@@ -19,6 +19,7 @@ using namespace osuCrypto;
 int miraclTestMain();
 
 #include "libOTe/Tools/LinearCode.h"
+#include "libOTe/Tools/bch511.h"
 #include "libOTe/NChooseOne/Oos/OosNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Oos/OosNcoOtSender.h"
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
@@ -180,7 +181,7 @@ void oos_test(int i)
 
 
     LinearCode code;
-    code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
+    code.load(bch511_binary, sizeof(bch511_binary));
 
 
 
@@ -199,8 +200,7 @@ void oos_test(int i)
         baseRecv[i] = baseSend[i][baseChoice[i]];
     }
 
-    std::vector<block> choice(ncoinputBlkSize), correction(codeSize);
-    prng0.get((u8*)choice.data(), ncoinputBlkSize * sizeof(block));
+    block choice = prng0.get<block>();
 
     std::vector< thread> thds(numThreads);
 
@@ -213,7 +213,8 @@ void oos_test(int i)
             thds[k] = std::thread(
                 [&, k]()
             {
-                OosNcoOtReceiver r(code);
+                OosNcoOtReceiver r;
+                r.configure(true, 40, 76);
                 r.setBaseOts(baseSend);
                 auto& chl = chls[k];
 
@@ -223,7 +224,7 @@ void oos_test(int i)
                 {
                     for (u64 j = 0; j < step; ++j)
                     {
-                        r.encode(i + j, choice, encoding1);
+                        r.encode(i + j, &choice, &encoding1);
                     }
 
                     r.sendCorrection(chl, step);
@@ -245,7 +246,7 @@ void oos_test(int i)
             thds[k] = std::thread(
                 [&, k]()
             {
-                OosNcoOtSender s(code, 40);// = sender[k];
+                OosNcoOtSender s;// (code);// = sender[k];
                 s.setBaseOts(baseRecv, baseChoice);
                 auto& chl = chls[k];
 
@@ -257,7 +258,7 @@ void oos_test(int i)
 
                     for (u64 j = 0; j < step; ++j)
                     {
-                        s.encode(i + j, choice, encoding2);
+                        s.encode(i + j, &choice, &encoding2);
                     }
                 }
                 s.check(chl, ZeroBlock);

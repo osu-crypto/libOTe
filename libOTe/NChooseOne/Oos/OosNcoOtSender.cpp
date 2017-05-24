@@ -1,5 +1,6 @@
 #include "OosNcoOtSender.h"
 #include "libOTe/Tools/Tools.h"
+#include "libOTe/Tools/bch511.h"
 #include <cryptoTools/Common/Log.h>
 #include "OosDefines.h"
 #include <cryptoTools/Common/ByteStream.h>
@@ -38,8 +39,8 @@ namespace osuCrypto
 
     std::unique_ptr<NcoOtExtSender> OosNcoOtSender::split()
     {
-        auto* raw = new OosNcoOtSender(mCode);
-
+        auto* raw = new OosNcoOtSender();
+        raw->mCode = mCode;
         raw->mInputByteCount = mInputByteCount;
         raw->mStatSecParam = mStatSecParam;
         std::vector<block> base(mGens.size());
@@ -256,8 +257,12 @@ namespace osuCrypto
         u64 statSecParam,
         u64 inputBitCount)
     {
-        if (inputBitCount > mCode.plaintextBitSize())
+        if (inputBitCount <= 76)
+            mCode.load(bch511_binary, sizeof(bch511_binary));
+        else
             throw std::runtime_error(LOCATION);
+
+
 
         mInputByteCount = (inputBitCount + 7) / 8;
         mStatSecParam = statSecParam;

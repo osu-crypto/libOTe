@@ -208,10 +208,10 @@ namespace tests_libOTe
 
 
         LinearCode code;
-        code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
+        code.load(bch511_binary, sizeof(bch511_binary));
 
-        OosNcoOtSender sender(code);
-        OosNcoOtReceiver recv(code);
+        OosNcoOtSender sender;
+        OosNcoOtReceiver recv;
 
         sender.configure(true, 40, 76);
         recv.configure(true, 40, 76);
