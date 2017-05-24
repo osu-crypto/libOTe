@@ -11,7 +11,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{08B0C0C5-7884-4AFA-A3BF-771C81D6FCB8}</ProjectGuid>
+    <ProjectGuid>{294C00B6-949E-4A45-AFA8-45D53590FC11}</ProjectGuid>
     <RootNamespace>libOTe_Tests</RootNamespace>
     <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
     <ProjectName>libOTe_Tests</ProjectName>
@@ -91,6 +91,11 @@
     <ClInclude Include="OTOracleReceiver.h" />
     <ClInclude Include="OTOracleSender.h" />
     <ClInclude Include="OT_Tests.h" />
+    <ClInclude Include="testData\code1280_BCH511.h" />
+    <ClInclude Include="testData\code128_BCH511.h" />
+    <ClInclude Include="testData\code256_BCH511.h" />
+    <ClInclude Include="testData\code384_BCH511.h" />
+    <ClInclude Include="testData\code640_BCH511.h" />
     <ClInclude Include="UnitTests.h" />
   </ItemGroup>
   <ItemGroup>

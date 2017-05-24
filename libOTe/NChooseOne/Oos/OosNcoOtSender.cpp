@@ -43,10 +43,12 @@ namespace osuCrypto
         raw->mCode = mCode;
         raw->mInputByteCount = mInputByteCount;
         raw->mStatSecParam = mStatSecParam;
-        std::vector<block> base(mGens.size());
+        raw->mGens.resize(mGens.size());
+        raw->mMalicious = mMalicious;
 
         if (hasBaseOts())
         {
+            std::vector<block> base(mGens.size());
             // use some of the OT extension PRNG to new base OTs
             for (u64 i = 0; i < base.size(); ++i)
             {

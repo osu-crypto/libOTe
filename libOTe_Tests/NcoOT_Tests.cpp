@@ -22,6 +22,12 @@
 #include "NcoOT_Tests.h"
 #include "libOTe/Tools/bch511.h"
 
+#include "libOTe_Tests/testData/code128_BCH511.h",
+#include "libOTe_Tests/testData/code256_BCH511.h",
+#include "libOTe_Tests/testData/code384_BCH511.h",
+#include "libOTe_Tests/testData/code640_BCH511.h",
+#include "libOTe_Tests/testData/code1280_BCH511.h"
+
 using namespace osuCrypto;
 
 
@@ -78,7 +84,7 @@ namespace tests_libOTe
 
         u64 stepSize = 10;
         std::vector<block> inputs(stepSize);
-        
+
         for (size_t j = 0; j < 10; j++)
         {
             // perform the init on each of the classes. should be performed concurrently
@@ -101,7 +107,7 @@ namespace tests_libOTe
                     // The receiver MUST encode before the sender. Here we are only calling encode(...) 
                     // for a single i. But the receiver can also encode many i, but should only make one 
                     // call to encode for any given value of i.
-                    recv.encode(i + k,&inputs[k], (u8*)&encoding1[k], sizeof(block));
+                    recv.encode(i + k, &inputs[k], (u8*)&encoding1[k], sizeof(block));
                 }
 
                 // This call will send to the other party the next "stepSize" corrections to the sender.
@@ -137,7 +143,7 @@ namespace tests_libOTe
                 }
             }
         }
-                
+
         // Double check that we can call split and perform the same tests.
         auto recv2Ptr = recv.split();
         auto send2Ptr = sender.split();
@@ -377,7 +383,7 @@ namespace tests_libOTe
             for (u64 i = 0; i < numOTs; ++i)
             {
                 block input = prng0.get<block>();
-                
+
                 block encoding1, encoding2;
                 recv.encode(i, &input, &encoding1);
 
@@ -418,7 +424,7 @@ namespace tests_libOTe
 
         // You can also load it from text
         //code.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.txt");
-        
+
         // or binary file
         //code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
 
@@ -479,12 +485,18 @@ namespace tests_libOTe
     {
         LinearCode code511, code128, code256, code384, code640, code1280;
 
-        code511.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.txt");
-        code128.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe_Tests/testData/code128_BCH511.txt");
-        code256.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe_Tests/testData/code256_BCH511.txt");
-        code384.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe_Tests/testData/code384_BCH511.txt");
-        code640.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe_Tests/testData/code640_BCH511.txt");
-        code1280.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe_Tests/testData/code1280_BCH511.txt");
+        code511.load(bch511_binary, sizeof(bch511_binary));
+        code128.load(code128_binary, sizeof(code128_binary));//loadTxtFile("C:/Users/peter/repo/libOTe/libOTe_Tests/testData/code128_BCH511.txt");
+        code256.load(code256_binary, sizeof(code256_binary));//loadTxtFile("C:/Users/peter/repo/libOTe/libOTe_Tests/testData/code256_BCH511.txt");
+        code384.load(code384_binary, sizeof(code384_binary));//loadTxtFile("C:/Users/peter/repo/libOTe/libOTe_Tests/testData/code384_BCH511.txt");
+        code640.load(code640_binary, sizeof(code640_binary));//loadTxtFile("C:/Users/peter/repo/libOTe/libOTe_Tests/testData/code640_BCH511.txt");
+        code1280.load(code1280_binary, sizeof(code1280_binary));//.loadTxtFile("C:/Users/peter/repo/libOTe/libOTe_Tests/testData/code1280_BCH511.txt");
+
+        //code128.writeBinCppFile( "C:/Users/peter/repo/libOTe/libOTe_Tests/testData/code128_BCH511.h", "code128_binary");
+        //code256.writeBinCppFile( "C:/Users/peter/repo/libOTe/libOTe_Tests/testData/code256_BCH511.h", "code256_binary");
+        //code384.writeBinCppFile( "C:/Users/peter/repo/libOTe/libOTe_Tests/testData/code384_BCH511.h", "code384_binary");
+        //code640.writeBinCppFile( "C:/Users/peter/repo/libOTe/libOTe_Tests/testData/code640_BCH511.h", "code640_binary");
+        //code1280.writeBinCppFile("C:/Users/peter/repo/libOTe/libOTe_Tests/testData/code1280_BCH511.h", "code1280_binary");
 
         BitVector
             in(code511.plaintextBitSize()),

@@ -155,6 +155,7 @@ namespace osuCrypto
         raw->mHasBase = mHasBase;
         raw->mMalicious = mMalicious;
         raw->mStatSecParam = mStatSecParam;
+        raw->mGens.resize(mGens.size());
 
         std::vector<std::array<block, 2>> base(mGens.size());
 

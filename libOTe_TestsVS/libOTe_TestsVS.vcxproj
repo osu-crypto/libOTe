@@ -11,7 +11,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{65381340-EC08-45B1-928E-74A4C5D46985}</ProjectGuid>
+    <ProjectGuid>{3EC91167-3C50-4271-988F-0F774FFA8ACC}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>libOTe_TestsVS</RootNamespace>
     <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
@@ -55,7 +55,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(SolutionDir)/cryptoTools;$(solutionDir)thirdparty\win\boost\;$(SolutionDir)/libOTe_Tests;$(SolutionDir)/libOTe;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;$(VCInstallDir)UnitTest\include;%(AdditionalIncludeDirectories);C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)/cryptoTools;$(solutionDir)thirdparty\win\boost\;$(ProjectDir)/../libOTe_Tests;$(SolutionDir)/libOTe;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;$(VCInstallDir)UnitTest\include;%(AdditionalIncludeDirectories);C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_WIN32_WINNT=0x0501;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UseFullPaths>true</UseFullPaths>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
@@ -75,7 +75,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>$(SolutionDir)/cryptoTools;$(solutionDir)thirdparty\win\boost\;$(SolutionDir)/libOTe_Tests;$(SolutionDir)/libOTe;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;$(VCInstallDir)UnitTest\include;%(AdditionalIncludeDirectories);C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)/cryptoTools;$(solutionDir)thirdparty\win\boost\;$(ProjectDir)/../libOTe_Tests;$(SolutionDir)/libOTe;$(SolutionDir)thirdparty\win\;$(SolutionDir)thirdparty/win/NTL/include;$(SolutionDir)thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;$(VCInstallDir)UnitTest\include;%(AdditionalIncludeDirectories);C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>SOLUTION_DIR=R"**($(SolutionDir))**";_WIN32_WINNT=0x0501;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UseFullPaths>true</UseFullPaths>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
