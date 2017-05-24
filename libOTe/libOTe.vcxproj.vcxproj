@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
@@ -14,9 +14,9 @@
     <ClInclude Include="Base\naor-pinkas.h" />
     <ClInclude Include="NChooseK\AknOtReceiver.h" />
     <ClInclude Include="NChooseK\AknOtSender.h" />
-    <ClInclude Include="NChooseOne\KkrtDefines.h" />
-    <ClInclude Include="NChooseOne\KkrtNcoOtReceiver.h" />
-    <ClInclude Include="NChooseOne\KkrtNcoOtSender.h" />
+    <ClInclude Include="NChooseOne\Kkrt\KkrtDefines.h" />
+    <ClInclude Include="NChooseOne\Kkrt\KkrtNcoOtReceiver.h" />
+    <ClInclude Include="NChooseOne\Kkrt\KkrtNcoOtSender.h" />
     <ClInclude Include="NChooseOne\NcoOtExt.h" />
     <ClInclude Include="NChooseOne\Oos\OosDefines.h" />
     <ClInclude Include="NChooseOne\Oos\OosNcoOtReceiver.h" />
@@ -40,12 +40,13 @@
     <ClCompile Include="Base\naor-pinkas.cpp" />
     <ClCompile Include="NChooseK\AknOtReceiver.cpp" />
     <ClCompile Include="NChooseK\AknOtSender.cpp" />
-    <ClCompile Include="NChooseOne\KkrtNcoOtReceiver.cpp" />
-    <ClCompile Include="NChooseOne\KkrtNcoOtSender.cpp" />
+    <ClCompile Include="NChooseOne\Kkrt\KkrtNcoOtReceiver.cpp" />
+    <ClCompile Include="NChooseOne\Kkrt\KkrtNcoOtSender.cpp" />
     <ClCompile Include="NChooseOne\Oos\OosNcoOtReceiver.cpp" />
     <ClCompile Include="NChooseOne\Oos\OosNcoOtSender.cpp" />
     <ClCompile Include="NChooseOne\RR17\Rr17NcoOtReceiver.cpp" />
     <ClCompile Include="NChooseOne\RR17\Rr17NcoOtSender.cpp" />
+    <ClCompile Include="Tools\bch511.h" />
     <ClCompile Include="Tools\LinearCode.cpp" />
     <ClCompile Include="Tools\Tools.cpp" />
     <ClCompile Include="TwoChooseOne\IknpOtExtReceiver.cpp" />
@@ -61,7 +62,7 @@
     <Text Include="CMakeLists.txt" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{4B3D93AF-B008-452D-B1BC-CACC67C3DC27}</ProjectGuid>
+    <ProjectGuid>{D159E2F9-226C-4B19-905E-CC1EA0EB013F}</ProjectGuid>
     <RootNamespace>libOTe</RootNamespace>
     <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
     <ProjectName>libOTe</ProjectName>
@@ -70,13 +71,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>

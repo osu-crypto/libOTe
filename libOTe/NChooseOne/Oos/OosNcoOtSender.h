@@ -1,7 +1,6 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use.  
 #include "libOTe/NChooseOne/NcoOtExt.h"
-#include "libOTe/NChooseOne/KkrtNcoOtSender.h"
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Matrix.h>
 #include "libOTe/Base/naor-pinkas.h"
@@ -19,27 +18,27 @@ namespace osuCrypto {
 
     class OosNcoOtSender 
         : public NcoOtExtSender
-        //: public KkrtNcoOtSender
     {
     public: 
 
-        OosNcoOtSender(LinearCode& code, u64 statSecParam)
+        OosNcoOtSender(LinearCode& code)
             : mCode(code),
-            mStatSecParm(statSecParam)
+            mStatSecParam(0)
         {}
         ~OosNcoOtSender();
 
         LinearCode mCode;
-        u64 mStatSecParm;
+        u64 mStatSecParam;
 
+        bool mMalicious;
         std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;
         std::vector<block> mChoiceBlks;
         Matrix<block> mT, mCorrectionVals;
-        u64 mCorrectionIdx;
+        u64 mCorrectionIdx, mInputByteCount;
 
 
-
+        u64 getBaseOTCount() const override { return mGens.size(); };
 
         bool hasBaseOts() const override
         {
@@ -57,18 +56,14 @@ namespace osuCrypto {
 
 
         using NcoOtExtSender::encode;
-
         void encode(
             u64 otIdx,
-            const block* codeWord,
-            u8* dest,
+            const void* codeWord,
+            void* dest,
             u64 destSize) override;
 
 
-        void getParams(
-            bool maliciousSecure,
-            u64 compSecParm, u64 statSecParam, u64 inputBitCount, u64 inputCount,
-            u64& inputBlkSize, u64& baseOtCount) override;
+        void configure(bool maliciousSecure, u64 statSecParam, u64 inputBitCount) override;
 
         void recvCorrection(Channel& chl, u64 recvCount) override;
 

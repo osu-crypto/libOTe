@@ -20,8 +20,8 @@
 #include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
-#include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
-#include "libOTe/NChooseOne/KkrtNcoOtSender.h"
+#include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
+#include "libOTe/NChooseOne/Kkrt/KkrtNcoOtSender.h"
 
 #include "Common.h"
 #include <thread>

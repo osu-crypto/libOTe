@@ -15,7 +15,7 @@ namespace osuCrypto
         if (choices.size() != baseRecvOts.size())
             throw std::runtime_error("size mismatch");
 
-        if (choices.size() % (sizeof(block) * 8) != 0)
+        if (choices.size() != mGens.size())
             throw std::runtime_error("only multiples of 128 are supported");
 
 
@@ -38,17 +38,24 @@ namespace osuCrypto
     std::unique_ptr<NcoOtExtSender> KkrtNcoOtSender::split()
     {
         auto* raw = new KkrtNcoOtSender();
+        raw->mGens.resize(mGens.size());
+        
+        raw->mInputByteCount = mInputByteCount;
+        raw->mMultiKeyAES = mMultiKeyAES;
 
-        std::vector<block> base(mGens.size());
-
-        // use some of the OT extension PRNG to new base OTs
-        for (u64 i = 0; i < base.size(); ++i)
+        if (hasBaseOts())
         {
-            mGens[i].ecbEncCounterMode(mGensBlkIdx[i]++, 1, &base[i]);
-            //base[i] = mGens[i].get<block>();
-        }
-        raw->setBaseOts(base, mBaseChoiceBits);
 
+            std::vector<block> base(mGens.size());
+
+            // use some of the OT extension PRNG to new base OTs
+            for (u64 i = 0; i < base.size(); ++i)
+            {
+                mGens[i].ecbEncCounterMode(mGensBlkIdx[i]++, 1, &base[i]);
+                //base[i] = mGens[i].get<block>();
+            }
+            raw->setBaseOts(base, mBaseChoiceBits);
+        }
         return std::unique_ptr<NcoOtExtSender>(raw);
     }
 
@@ -56,6 +63,15 @@ namespace osuCrypto
         u64 numOTExt, PRNG& prng, Channel& chl)
     {
         static const u8 superBlkSize(8);
+
+        block seed = prng.get<block>(), theirSeed;
+        SHA1 hasher;
+        hasher.Update(seed);
+        u8 comm[SHA1::HashSize];
+        chl.asyncSend(comm, SHA1::HashSize);
+        auto future = chl.asyncRecv((u8*)&theirSeed, sizeof(block), [&, seed]() {
+            chl.asyncSendCopy(&seed, sizeof(block));
+        });
 
         // round up
         numOTExt = ((numOTExt + 127) / 128) * 128;
@@ -131,28 +147,16 @@ namespace osuCrypto
 
             doneIdx = stopIdx;
         }
+
+        future.get();
+
+        std::array<block, 4> keys;       
+        PRNG(seed ^ theirSeed).get(keys.data(), keys.size());
+        mMultiKeyAES.setKeys(keys);
+
     }
 
-
-//
-//    void KkrtNcoOtSender::encode(
-//        u64 otIdx,
-//        const gsl::span<block> inputword,
-//        u8* dest,
-//        u64 destSize)
-//    {
-//
-//#ifndef NDEBUG
-//        u64 expectedSize = mGens.size() / (sizeof(block) * 8);
-//
-//        if (inputword.size() != expectedSize)
-//            throw std::invalid_argument("Bad input word" LOCATION);
-//#endif // !NDEBUG
-//
-//        encode(otIdx, inputword.data(), dest, destSize);
-//    }
-//
-    void KkrtNcoOtSender::encode(u64 otIdx, const block * inputword, u8 * dest, u64 destSize)
+    void KkrtNcoOtSender::encode(u64 otIdx, const void * input, void * dest, u64 destSize)
     {
 
 #ifndef NDEBUG
@@ -160,7 +164,13 @@ namespace osuCrypto
             throw std::invalid_argument("appears that we haven't received the receiver's choice yet. " LOCATION);
 #endif // !NDEBUG
 
-        std::array<block, 10> codeword;
+        static const int width(4);
+
+        block word = ZeroBlock;
+        memcpy(&word, input, mInputByteCount);
+
+        std::array<block, width> choice{ word ,word ,word ,word }, code;
+        mMultiKeyAES.ecbEncNBlocks(choice.data(), code.data());
 
         auto* corVal = mCorrectionVals.data() + otIdx * mCorrectionVals.stride();
         auto* tVal = mT.data() + otIdx * mT.stride();
@@ -168,32 +178,35 @@ namespace osuCrypto
 
         // This is the hashing phase. Here we are using pseudo-random codewords.
         // That means we assume inputword is a hash of some sort.
-        for (u64 i = 0; i < mT.stride(); ++i)
-        {
-            block t0 = corVal[i] ^ inputword[i];
-            block t1 = t0 & mChoiceBlks[i];
+        OSU_CRYPTO_COMPILER_UNROLL_LOOP_HINT
+            for (u64 i = 0; i < width; ++i)
+            {
+                code[i] = code[i] ^ word;
 
-            codeword[i]
-                = tVal[i]
-                ^ t1;
-        }
+                block t0 = corVal[i] ^ code[i];
+                block t1 = t0 & mChoiceBlks[i];
+
+                code[i]
+                    = tVal[i]
+                    ^ t1;
+            }
 
 #ifdef KKRT_SHA_HASH
 
         SHA1  sha1;
         u8 hashBuff[SHA1::HashSize];
         // hash it all to get rid of the correlation.
-        sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
+        sha1.Update((u8*)code.data(), sizeof(block) * mT.stride());
         sha1.Final(hashBuff);
         memcpy(dest, hashBuff, std::min(destSize, SHA1::HashSize));
         //val = toBlock(hashBuff);
 #else
         std::array<block, 10> aesBuff;
-        mAesFixedKey.ecbEncBlocks(codeword.data(), mT.stride(), aesBuff.data());
+        mAesFixedKey.ecbEncBlocks(code.data(), mT.stride(), aesBuff.data());
 
         auto val = ZeroBlock;
         for (u64 i = 0; i < mT.stride(); ++i)
-            val = val ^ codeword[i] ^ aesBuff[i];
+            val = val ^ code[i] ^ aesBuff[i];
 
         memcpy(dest, hashBuff, std::min(destSize, sizeof(block)));
 #endif
@@ -202,19 +215,22 @@ namespace osuCrypto
     }
 
 
-    void KkrtNcoOtSender::getParams(
+    void KkrtNcoOtSender::configure(
         bool maliciousSecure,
-        u64 compSecParm,
         u64 statSecParam,
-        u64 inputBitCount,
-        u64 inputCount,
-        u64 & inputBlkSize,
-        u64 & baseOtCount)
+        u64 inputBitCount)
     {
 
-        //if (maliciousSecure) throw std::runtime_error("");
-        baseOtCount = roundUpTo(compSecParm * (maliciousSecure ? 7 : 4), 128);
-        inputBlkSize = baseOtCount / 128;
+        if (maliciousSecure) throw std::runtime_error(LOCATION);
+        if (inputBitCount > 128) throw std::runtime_error(LOCATION);
+
+        mInputByteCount = (inputBitCount + 7) / 8;
+        mGens.resize(128 * 4);
+    }
+
+    u64 KkrtNcoOtSender::getBaseOTCount() const
+    {
+        return mGens.size();
     }
 
     void KkrtNcoOtSender::recvCorrection(Channel & chl, u64 recvCount)

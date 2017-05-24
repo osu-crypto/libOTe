@@ -24,8 +24,12 @@ namespace osuCrypto {
         BitVector mBaseChoiceBits;
         std::vector<block> mChoiceBlks;
         Matrix<block> mT, mCorrectionVals;
-        u64 mCorrectionIdx;
+        u64 mCorrectionIdx, mInputByteCount;
+        MultiKeyAES<4> mMultiKeyAES;
 
+        void configure(bool maliciousSecure, u64 statSecParam, u64 inputBitCount) override;
+
+        u64 getBaseOTCount() const override;
 
         bool hasBaseOts() const override
         {
@@ -42,24 +46,13 @@ namespace osuCrypto {
         void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
 
 
-
         using NcoOtExtSender::encode;
-        //void encode(
-        //    u64 otIdx,
-        //    const gsl::span<block> codeWord,
-        //    u8* dest,
-        //    u64 destSize) override;
-
         void encode(
             u64 otIdx,
-            const block* codeWord,
-            u8* dest,
+            const void* choice,
+            void* dest,
             u64 destSize) override;
 
-        void getParams(
-            bool maliciousSecure,
-            u64 compSecParm, u64 statSecParam, u64 inputBitCount, u64 inputCount,
-            u64& inputBlkSize, u64& baseOtCount) override;
 
         void recvCorrection(Channel& chl, u64 recvCount) override;
 

@@ -27,6 +27,7 @@ namespace osuCrypto
         ~Rr17NcoOtReceiver();
 
 
+        u64 getBaseOTCount() const override { return 128; }
         bool hasBaseOts() const override;
 
         void setBaseOts(
@@ -39,17 +40,16 @@ namespace osuCrypto
         using NcoOtExtReceiver::encode;
         void encode(
             u64 otIdx,
-            const block* choiceWord,
-            u8* dest, 
+            const void* choiceWord,
+            void* dest ,
             u64 destSize) override;
 
         void zeroEncode(u64 otIdx) override;
 
 
-        void getParams(
+        void configure(
             bool maliciousSecure,
-            u64 compSecParm, u64 statSecParam, u64 inputBitCount, u64 inputCount,
-            u64& inputBlkSize, u64& baseOtCount) override;
+            u64 statSecParam, u64 inputBitCount) override;
 
         void sendCorrection(Channel& chl, u64 sendCount) override;
 

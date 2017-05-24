@@ -38,17 +38,21 @@ namespace osuCrypto
 
     std::unique_ptr<NcoOtExtSender> OosNcoOtSender::split()
     {
-        auto* raw = new OosNcoOtSender(mCode, mStatSecParm);
+        auto* raw = new OosNcoOtSender(mCode);
 
+        raw->mInputByteCount = mInputByteCount;
+        raw->mStatSecParam = mStatSecParam;
         std::vector<block> base(mGens.size());
 
-        // use some of the OT extension PRNG to new base OTs
-        for (u64 i = 0; i < base.size(); ++i)
+        if (hasBaseOts())
         {
-            base[i] = mGens[i].get<block>();
+            // use some of the OT extension PRNG to new base OTs
+            for (u64 i = 0; i < base.size(); ++i)
+            {
+                base[i] = mGens[i].get<block>();
+            }
+            raw->setBaseOts(base, mBaseChoiceBits);
         }
-        raw->setBaseOts(base, mBaseChoiceBits);
-
         return std::unique_ptr<NcoOtExtSender>(raw);
     }
 
@@ -63,7 +67,7 @@ namespace osuCrypto
 
 
         // round up
-        numOTExt = ((numOTExt + 127 + mStatSecParm) / 128) * 128;
+        numOTExt = ((numOTExt + 127 + mStatSecParam) / 128) * 128;
 
         // We need two matrices, one for the senders matrix T^i_{b_i} and 
         // one to hold the the correction values. This is sometimes called 
@@ -143,18 +147,18 @@ namespace osuCrypto
 
     void OosNcoOtSender::encode(
         u64 otIdx,
-        const block* plaintext,
-        u8* dest,
+        const void* plaintext,
+        void* dest,
         u64 destSize)
     {
 
-//#ifndef NDEBUG
-//        if (plaintext.size() != mCode.plaintextBlkSize())
-//            throw std::invalid_argument("");
-//#endif // !NDEBUG
+        //#ifndef NDEBUG
+        //        if (plaintext.size() != mCode.plaintextBlkSize())
+        //            throw std::invalid_argument("");
+        //#endif // !NDEBUG
 
-        // compute the codeword. We assume the
-        // the codeword is less that 10 block = 1280 bits.
+                // compute the codeword. We assume the
+                // the codeword is less that 10 block = 1280 bits.
         std::array<block, 10> codeword;
         mCode.encode((u8*)plaintext, (u8*)codeword.data());
 
@@ -205,7 +209,7 @@ namespace osuCrypto
             codeword[2] = codeword[2] ^ aesBuff[2];
             codeword[3] = codeword[3] ^ aesBuff[3];
 
-            val =         codeword[0] ^ codeword[1];
+            val = codeword[0] ^ codeword[1];
             codeword[2] = codeword[2] ^ codeword[3];
 
             val = val ^ codeword[2];
@@ -247,21 +251,18 @@ namespace osuCrypto
         }
     }
 
-    void OosNcoOtSender::getParams(
+    void OosNcoOtSender::configure(
         bool maliciousSecure,
-        u64 compSecParm,
         u64 statSecParam,
-        u64 inputBitCount,
-        u64 inputCount,
-        u64 & inputBlkSize,
-        u64 & baseOtCount)
+        u64 inputBitCount)
     {
         if (inputBitCount > mCode.plaintextBitSize())
             throw std::runtime_error(LOCATION);
 
-        inputBlkSize = mCode.plaintextBlkSize();
-
-        baseOtCount = mCode.codewordBlkSize() * 128;
+        mInputByteCount = (inputBitCount + 7) / 8;
+        mStatSecParam = statSecParam;
+        mMalicious = maliciousSecure;
+        mGens.resize(roundUpTo(mCode.codewordBitSize(),128));
     }
 
     void OosNcoOtSender::recvCorrection(Channel & chl, u64 recvCount)
@@ -286,283 +287,286 @@ namespace osuCrypto
 
     void OosNcoOtSender::check(Channel & chl, block seed)
     {
-        u64 statSecParam(40);
-
-        if (statSecParam % 8) throw std::runtime_error("Must be a multiple of 8. " LOCATION);
-
-        // first we need to receive the extra statSecParam number of correction
-        // values. This will just be for random inputs and are used to mask
-        // their true choices that were used in the remaining correction values.
-        recvCorrection(chl, statSecParam);
-
-        // now send them out challenge seed.
-        chl.asyncSend(&seed, sizeof(block));
-
-        // This AES will work as a PRNG, using AES-NI in counter mode.
-        AES aes(seed);
-        // the index of the AES counter.
-        u64 aesIdx(0);
-
-        // the index of the row that we are doing.
-        u64 k = 0;
-
-        // qSum will hold the summation over all the rows. We need 
-        // statSecParam number of them. First initialize them, each 
-        // with one of the dummy values that were just send. 
-        std::vector<block> qSum(statSecParam * mT.stride());
-        for (u64 i = 0; i < statSecParam; ++i)
+        if (mMalicious)
         {
-            // The rows are most likely several blocks wide.
-            for (u64 j = 0; j < mT.stride(); ++j)
+
+
+            if (mStatSecParam % 8) throw std::runtime_error("Must be a multiple of 8. " LOCATION);
+
+            // first we need to receive the extra mStatSecParam number of correction
+            // values. This will just be for random inputs and are used to mask
+            // their true choices that were used in the remaining correction values.
+            recvCorrection(chl, mStatSecParam);
+
+            // now send them out challenge seed.
+            chl.asyncSend(&seed, sizeof(block));
+
+            // This AES will work as a PRNG, using AES-NI in counter mode.
+            AES aes(seed);
+            // the index of the AES counter.
+            u64 aesIdx(0);
+
+            // the index of the row that we are doing.
+            u64 k = 0;
+
+            // qSum will hold the summation over all the rows. We need 
+            // mStatSecParam number of them. First initialize them, each 
+            // with one of the dummy values that were just send. 
+            std::vector<block> qSum(mStatSecParam * mT.stride());
+            for (u64 i = 0; i < mStatSecParam; ++i)
             {
-                qSum[i * mT.stride() + j]
-                    = (mCorrectionVals[mCorrectionIdx - statSecParam + i][j]
-                        & mChoiceBlks[j])
-                    ^ mT[mCorrectionIdx - statSecParam + i][j];
-            }
-        }
-
-        // This will make the receiver send all of their input words
-        // and the complete T0 matrix. For DEBUG only
-#ifdef OOS_CHECK_DEBUG
-        Buff mT0Buff, mWBuff;
-        chl.recv(mT0Buff);
-        chl.recv(mWBuff);
-
-        auto mT0 = mT0Buff.getMatrixView<block>(mCode.codewordBlkSize());
-        auto mW = mWBuff.getMatrixView<block>(mCode.plaintextBlkSize());
-#endif
-
-        u64 codeSize = mT.stride();
-
-        // This is an optimization trick. When iterating over the rows,
-        // we want to multiply the x^(l)_i bit with the l'th row. To
-        // do this we will index using zeroAndQ and & instead of of multiplication.
-        // To make this work, the zeroAndQ[0] will always be 00000.....00000,
-        // and  zeroAndQ[1] will hold the q_i row. This is so much faster than
-        // if(x^(l)_i) qSum[l] = qSum[l] ^ q_i.
-        std::array<std::array<block, 8>, 2> zeroAndQ;
-
-        // set it all to zero initially.
-        memset(zeroAndQ.data(), 0, zeroAndQ.size() * 2 * sizeof(block));
-
-        // make sure that having this allocated on the stack is ok.
-        if (codeSize < zeroAndQ.size()) throw std::runtime_error("Make this bigger. " LOCATION);
-
-
-        // this will hold out random x^(l)_i values that we compute from the seed. 
-        std::vector<block> challengeBuff(statSecParam);
-
-        // since we don't want to do bit shifting, this larger array
-        // will be used to hold each bit of challengeBuff as a whole
-        // byte. See below for how we do this efficiently.
-        std::vector<block> expandedBuff(statSecParam * 8);
-        u8* byteView = (u8*)expandedBuff.data();
-
-        // This will be used to compute expandedBuff
-        block mask = _mm_set_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
-
-        // get raw pointer to this data. faster than normal indexing.
-        auto corIter = mCorrectionVals.data();
-        auto tIter = mT.data();
-
-        // compute the index that we should stop at. We process 128 rows at a time.
-        u64 blkStopIdx = (mCorrectionIdx - statSecParam + 127) / 128;
-        for (u64 blkIdx = 0; blkIdx < blkStopIdx; ++blkIdx)
-        {
-            // generate statSecParam * 128 bits using AES-NI in counter mode.
-            aes.ecbEncCounterMode(aesIdx, statSecParam, challengeBuff.data());
-            aesIdx += statSecParam;
-
-            // now expand each of these bits into its own byte. This is done with the 
-            // right shift instruction _mm_srai_epi16. and then we mask to get only
-            // the bottom bit. Doing the 8 times gets us each bit in its own byte.
-            for (u64 i = 0; i < statSecParam; ++i)
-            {
-                expandedBuff[i * 8 + 0] = mask & _mm_srai_epi16(challengeBuff[i], 0);
-                expandedBuff[i * 8 + 1] = mask & _mm_srai_epi16(challengeBuff[i], 1);
-                expandedBuff[i * 8 + 2] = mask & _mm_srai_epi16(challengeBuff[i], 2);
-                expandedBuff[i * 8 + 3] = mask & _mm_srai_epi16(challengeBuff[i], 3);
-                expandedBuff[i * 8 + 4] = mask & _mm_srai_epi16(challengeBuff[i], 4);
-                expandedBuff[i * 8 + 5] = mask & _mm_srai_epi16(challengeBuff[i], 5);
-                expandedBuff[i * 8 + 6] = mask & _mm_srai_epi16(challengeBuff[i], 6);
-                expandedBuff[i * 8 + 7] = mask & _mm_srai_epi16(challengeBuff[i], 7);
-            }
-
-            // compute when we should stop of this set.
-            u64 stopIdx = std::min<u64>(mCorrectionIdx - statSecParam - k, u64(128));
-            k += 128;
-
-            // get an integrator to the challenge bit
-            u8* xIter = byteView;
-
-            if (mT.stride() == 4)
-            {
-                //  vvvvvvvvvvvv   OPTIMIZED for codeword size 4   vvvvvvvvvvvv
-
-                for (u64 i = 0; i < stopIdx; ++i, corIter += 4, tIter += 4)
+                // The rows are most likely several blocks wide.
+                for (u64 j = 0; j < mT.stride(); ++j)
                 {
+                    qSum[i * mT.stride() + j]
+                        = (mCorrectionVals[mCorrectionIdx - mStatSecParam + i][j]
+                            & mChoiceBlks[j])
+                        ^ mT[mCorrectionIdx - mStatSecParam + i][j];
+                }
+            }
 
-                    // compute q_i = (u_i & choice) ^ T_i
-                    auto q0 = (corIter[0] & mChoiceBlks[0]);
-                    auto q1 = (corIter[1] & mChoiceBlks[1]);
-                    auto q2 = (corIter[2] & mChoiceBlks[2]);
-                    auto q3 = (corIter[3] & mChoiceBlks[3]);
-
-                    // place it in the one location of zeroAndQ. This will
-                    // be used for efficient multiplication of q_i by the bit x^(l)_i
-                    zeroAndQ[1][0] = q0 ^ tIter[0];
-                    zeroAndQ[1][1] = q1 ^ tIter[1];
-                    zeroAndQ[1][2] = q2 ^ tIter[2];
-                    zeroAndQ[1][3] = q3 ^ tIter[3];
-
-                    // This is meant to debug the check. If turned on,
-                    // the receiver will have sent it's T0 and W matrix.
-                    // This will let us identify the row that things go wrong...
+            // This will make the receiver send all of their input words
+            // and the complete T0 matrix. For DEBUG only
 #ifdef OOS_CHECK_DEBUG
-                    u64 kk = k - 128;
-                    std::vector<block> cw(mCode.codewordBlkSize());
-                    mCode.encode(mW[kk], cw);
+            Buff mT0Buff, mWBuff;
+            chl.recv(mT0Buff);
+            chl.recv(mWBuff);
 
-                    for (u64 j = 0; j < 4; ++j)
-                    {
-                        block tq = mT0[kk][j] ^ zeroAndQ[j][1];
-                        block cb = cw[j] & mChoiceBlks[j];
-
-                        if (neq(tq, cb))
-                        {
-                            throw std::runtime_error("");
-                        }
-                    }
+            auto mT0 = mT0Buff.getMatrixView<block>(mCode.codewordBlkSize());
+            auto mW = mWBuff.getMatrixView<block>(mCode.plaintextBlkSize());
 #endif
 
-                    // get a raw pointer into the first summation
-                    auto qSumIter = qSum.data();
+            u64 codeSize = mT.stride();
 
-                    // iterate over the statSecParam of challenges. Process
-                    // two of the value per loop. 
-                    for (u64 j = 0; j < statSecParam / 2; ++j, qSumIter += 8)
-                    {
-                        u8 x0 = *xIter++;
-                        u8 x1 = *xIter++;
+            // This is an optimization trick. When iterating over the rows,
+            // we want to multiply the x^(l)_i bit with the l'th row. To
+            // do this we will index using zeroAndQ and & instead of of multiplication.
+            // To make this work, the zeroAndQ[0] will always be 00000.....00000,
+            // and  zeroAndQ[1] will hold the q_i row. This is so much faster than
+            // if(x^(l)_i) qSum[l] = qSum[l] ^ q_i.
+            std::array<std::array<block, 8>, 2> zeroAndQ;
 
-                        // This is where the bit multiplication of 
-                        // x^(l)_i * q_i happens. Its done with a single 
-                        // array index instruction. If x is zero, then mask
-                        // will hold the all zero string. Otherwise it holds
-                        // the row q_i.
-                        block* mask0 = zeroAndQ[x0].data();
-                        block* mask1 = zeroAndQ[x1].data();
+            // set it all to zero initially.
+            memset(zeroAndQ.data(), 0, zeroAndQ.size() * 2 * sizeof(block));
 
-                        // Xor it in.
-                        qSumIter[0] = qSumIter[0] ^ mask0[0];
-                        qSumIter[1] = qSumIter[1] ^ mask0[1];
-                        qSumIter[2] = qSumIter[2] ^ mask0[2];
-                        qSumIter[3] = qSumIter[3] ^ mask0[3];
-                        qSumIter[4] = qSumIter[4] ^ mask1[0];
-                        qSumIter[5] = qSumIter[5] ^ mask1[1];
-                        qSumIter[6] = qSumIter[6] ^ mask1[2];
-                        qSumIter[7] = qSumIter[7] ^ mask1[3];
-                    }
+            // make sure that having this allocated on the stack is ok.
+            if (codeSize < zeroAndQ.size()) throw std::runtime_error("Make this bigger. " LOCATION);
+
+
+            // this will hold out random x^(l)_i values that we compute from the seed. 
+            std::vector<block> challengeBuff(mStatSecParam);
+
+            // since we don't want to do bit shifting, this larger array
+            // will be used to hold each bit of challengeBuff as a whole
+            // byte. See below for how we do this efficiently.
+            std::vector<block> expandedBuff(mStatSecParam * 8);
+            u8* byteView = (u8*)expandedBuff.data();
+
+            // This will be used to compute expandedBuff
+            block mask = _mm_set_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+
+            // get raw pointer to this data. faster than normal indexing.
+            auto corIter = mCorrectionVals.data();
+            auto tIter = mT.data();
+
+            // compute the index that we should stop at. We process 128 rows at a time.
+            u64 blkStopIdx = (mCorrectionIdx - mStatSecParam + 127) / 128;
+            for (u64 blkIdx = 0; blkIdx < blkStopIdx; ++blkIdx)
+            {
+                // generate mStatSecParam * 128 bits using AES-NI in counter mode.
+                aes.ecbEncCounterMode(aesIdx, mStatSecParam, challengeBuff.data());
+                aesIdx += mStatSecParam;
+
+                // now expand each of these bits into its own byte. This is done with the 
+                // right shift instruction _mm_srai_epi16. and then we mask to get only
+                // the bottom bit. Doing the 8 times gets us each bit in its own byte.
+                for (u64 i = 0; i < mStatSecParam; ++i)
+                {
+                    expandedBuff[i * 8 + 0] = mask & _mm_srai_epi16(challengeBuff[i], 0);
+                    expandedBuff[i * 8 + 1] = mask & _mm_srai_epi16(challengeBuff[i], 1);
+                    expandedBuff[i * 8 + 2] = mask & _mm_srai_epi16(challengeBuff[i], 2);
+                    expandedBuff[i * 8 + 3] = mask & _mm_srai_epi16(challengeBuff[i], 3);
+                    expandedBuff[i * 8 + 4] = mask & _mm_srai_epi16(challengeBuff[i], 4);
+                    expandedBuff[i * 8 + 5] = mask & _mm_srai_epi16(challengeBuff[i], 5);
+                    expandedBuff[i * 8 + 6] = mask & _mm_srai_epi16(challengeBuff[i], 6);
+                    expandedBuff[i * 8 + 7] = mask & _mm_srai_epi16(challengeBuff[i], 7);
                 }
 
-                //  ^^^^^^^^^^^^^   OPTIMIZED for codeword size 4   ^^^^^^^^^^^^^
-            }
-            else
-            {
-                //  vvvvvvvvvvvv       general codeword size        vvvvvvvvvvvv
+                // compute when we should stop of this set.
+                u64 stopIdx = std::min<u64>(mCorrectionIdx - mStatSecParam - k, u64(128));
+                k += 128;
 
-                for (u64 i = 0; i < stopIdx; ++i, corIter += codeSize, tIter += codeSize)
+                // get an integrator to the challenge bit
+                u8* xIter = byteView;
+
+                if (mT.stride() == 4)
                 {
-                    for (u64 m = 0; m < codeSize; ++m)
+                    //  vvvvvvvvvvvv   OPTIMIZED for codeword size 4   vvvvvvvvvvvv
+
+                    for (u64 i = 0; i < stopIdx; ++i, corIter += 4, tIter += 4)
                     {
+
                         // compute q_i = (u_i & choice) ^ T_i
+                        auto q0 = (corIter[0] & mChoiceBlks[0]);
+                        auto q1 = (corIter[1] & mChoiceBlks[1]);
+                        auto q2 = (corIter[2] & mChoiceBlks[2]);
+                        auto q3 = (corIter[3] & mChoiceBlks[3]);
+
                         // place it in the one location of zeroAndQ. This will
                         // be used for efficient multiplication of q_i by the bit x^(l)_i
-                        zeroAndQ[1][m] = (corIter[m] & mChoiceBlks[m]) ^ tIter[m];
-                    }
+                        zeroAndQ[1][0] = q0 ^ tIter[0];
+                        zeroAndQ[1][1] = q1 ^ tIter[1];
+                        zeroAndQ[1][2] = q2 ^ tIter[2];
+                        zeroAndQ[1][3] = q3 ^ tIter[3];
 
-                    // This is meant to debug the check. If turned on,
-                    // the receiver will have sent it's T0 and W matrix.
-                    // This will let us identify the row that things go wrong...
+                        // This is meant to debug the check. If turned on,
+                        // the receiver will have sent it's T0 and W matrix.
+                        // This will let us identify the row that things go wrong...
 #ifdef OOS_CHECK_DEBUG
-                    u64 kk = k - 128;
-                    std::vector<block> cw(mCode.codewordBlkSize());
-                    mCode.encode(mW[kk], cw);
+                        u64 kk = k - 128;
+                        std::vector<block> cw(mCode.codewordBlkSize());
+                        mCode.encode(mW[kk], cw);
 
-                    for (u64 j = 0; j < codeSize; ++j)
-                    {
-                        block tq = mT0[kk][j] ^ zeroAndQ[j][1];
-                        block cb = cw[j] & mChoiceBlks[j];
-
-                        if (neq(tq, cb))
+                        for (u64 j = 0; j < 4; ++j)
                         {
-                            throw std::runtime_error("");
+                            block tq = mT0[kk][j] ^ zeroAndQ[j][1];
+                            block cb = cw[j] & mChoiceBlks[j];
+
+                            if (neq(tq, cb))
+                            {
+                                throw std::runtime_error("");
+                            }
+                        }
+#endif
+
+                        // get a raw pointer into the first summation
+                        auto qSumIter = qSum.data();
+
+                        // iterate over the mStatSecParam of challenges. Process
+                        // two of the value per loop. 
+                        for (u64 j = 0; j < mStatSecParam / 2; ++j, qSumIter += 8)
+                        {
+                            u8 x0 = *xIter++;
+                            u8 x1 = *xIter++;
+
+                            // This is where the bit multiplication of 
+                            // x^(l)_i * q_i happens. Its done with a single 
+                            // array index instruction. If x is zero, then mask
+                            // will hold the all zero string. Otherwise it holds
+                            // the row q_i.
+                            block* mask0 = zeroAndQ[x0].data();
+                            block* mask1 = zeroAndQ[x1].data();
+
+                            // Xor it in.
+                            qSumIter[0] = qSumIter[0] ^ mask0[0];
+                            qSumIter[1] = qSumIter[1] ^ mask0[1];
+                            qSumIter[2] = qSumIter[2] ^ mask0[2];
+                            qSumIter[3] = qSumIter[3] ^ mask0[3];
+                            qSumIter[4] = qSumIter[4] ^ mask1[0];
+                            qSumIter[5] = qSumIter[5] ^ mask1[1];
+                            qSumIter[6] = qSumIter[6] ^ mask1[2];
+                            qSumIter[7] = qSumIter[7] ^ mask1[3];
                         }
                     }
-#endif
-                    // get a raw pointer into the first summation
-                    auto qSumIter = qSum.data();
 
-                    // iterate over the statSecParam of challenges. Process
-                    // two of the value per loop. 
-                    for (u64 j = 0; j < statSecParam; ++j, qSumIter += codeSize)
+                    //  ^^^^^^^^^^^^^   OPTIMIZED for codeword size 4   ^^^^^^^^^^^^^
+                }
+                else
+                {
+                    //  vvvvvvvvvvvv       general codeword size        vvvvvvvvvvvv
+
+                    for (u64 i = 0; i < stopIdx; ++i, corIter += codeSize, tIter += codeSize)
                     {
-
-                        // This is where the bit multiplication of 
-                        // x^(l)_i * q_i happens. Its done with a single 
-                        // array index instruction. If x is zero, then mask
-                        // will hold the all zero string. Otherwise it holds
-                        // the row q_i.
-                        block* mask0 = zeroAndQ[*xIter++].data();
-
                         for (u64 m = 0; m < codeSize; ++m)
                         {
-                            // Xor it in.
-                            qSumIter[m] = qSumIter[m] ^ mask0[m];
+                            // compute q_i = (u_i & choice) ^ T_i
+                            // place it in the one location of zeroAndQ. This will
+                            // be used for efficient multiplication of q_i by the bit x^(l)_i
+                            zeroAndQ[1][m] = (corIter[m] & mChoiceBlks[m]) ^ tIter[m];
                         }
+
+                        // This is meant to debug the check. If turned on,
+                        // the receiver will have sent it's T0 and W matrix.
+                        // This will let us identify the row that things go wrong...
+#ifdef OOS_CHECK_DEBUG
+                        u64 kk = k - 128;
+                        std::vector<block> cw(mCode.codewordBlkSize());
+                        mCode.encode(mW[kk], cw);
+
+                        for (u64 j = 0; j < codeSize; ++j)
+                        {
+                            block tq = mT0[kk][j] ^ zeroAndQ[j][1];
+                            block cb = cw[j] & mChoiceBlks[j];
+
+                            if (neq(tq, cb))
+                            {
+                                throw std::runtime_error("");
+                            }
+                        }
+#endif
+                        // get a raw pointer into the first summation
+                        auto qSumIter = qSum.data();
+
+                        // iterate over the mStatSecParam of challenges. Process
+                        // two of the value per loop. 
+                        for (u64 j = 0; j < mStatSecParam; ++j, qSumIter += codeSize)
+                        {
+
+                            // This is where the bit multiplication of 
+                            // x^(l)_i * q_i happens. Its done with a single 
+                            // array index instruction. If x is zero, then mask
+                            // will hold the all zero string. Otherwise it holds
+                            // the row q_i.
+                            block* mask0 = zeroAndQ[*xIter++].data();
+
+                            for (u64 m = 0; m < codeSize; ++m)
+                            {
+                                // Xor it in.
+                                qSumIter[m] = qSumIter[m] ^ mask0[m];
+                            }
+                        }
+                    }
+
+                    //  ^^^^^^^^^^^^^      general codeword size        ^^^^^^^^^^^^^
+                }
+            }
+
+            std::vector<block> tSum(mStatSecParam * mT.stride());
+            std::vector<block> wSum(mStatSecParam * mCode.plaintextBlkSize());
+
+            // now wait for the receiver's challenge answer.
+            chl.recv(tSum.data(), tSum.size() * sizeof(block));
+            chl.recv(wSum.data(), wSum.size() * sizeof(block));
+
+            // a buffer to store codewords
+            std::vector<block> cw(mCode.codewordBlkSize());
+
+            // check each of the mStatSecParam number of challenges
+            for (u64 l = 0; l < mStatSecParam; ++l)
+            {
+
+                span<block> word(
+                    wSum.data() + l * mCode.plaintextBlkSize(),
+                    mCode.plaintextBlkSize());
+
+                // encode their l'th linear combination of choice words.
+                mCode.encode(word, cw);
+
+                // check that the linear relation holds.
+                for (u64 j = 0; j < cw.size(); ++j)
+                {
+                    block tq = tSum[l * cw.size() + j] ^ qSum[l * cw.size() + j];
+                    block cb = cw[j] & mChoiceBlks[j];
+
+                    if (neq(tq, cb))
+                    {
+                        //std::cout << "bad OOS16 OT check. " << l << "m " << j << std::endl;
+                        //return;
+                        throw std::runtime_error("bad OOS16 OT check. " LOCATION);
                     }
                 }
 
-                //  ^^^^^^^^^^^^^      general codeword size        ^^^^^^^^^^^^^
             }
-        }
-
-        std::vector<block> tSum(statSecParam * mT.stride());
-        std::vector<block> wSum(statSecParam * mCode.plaintextBlkSize());
-
-        // now wait for the receiver's challenge answer.
-        chl.recv(tSum.data(), tSum.size() * sizeof(block));
-        chl.recv(wSum.data(), wSum.size() * sizeof(block));
-
-        // a buffer to store codewords
-        std::vector<block> cw(mCode.codewordBlkSize());
-
-        // check each of the statSecParam number of challenges
-        for (u64 l = 0; l < statSecParam; ++l)
-        {
-            
-            span<block> word(
-                wSum.data() + l * mCode.plaintextBlkSize(),
-                mCode.plaintextBlkSize());
-
-            // encode their l'th linear combination of choice words.
-            mCode.encode(word, cw);
-
-            // check that the linear relation holds.
-            for (u64 j = 0; j < cw.size(); ++j)
-            {
-                block tq = tSum[l * cw.size() + j] ^ qSum[l * cw.size() + j];
-                block cb = cw[j] & mChoiceBlks[j];
-
-                if (neq(tq, cb))
-                {
-                    //std::cout << "bad OOS16 OT check. " << l << "m " << j << std::endl;
-                    //return;
-                    throw std::runtime_error("bad OOS16 OT check. " LOCATION);
-                }
-            }
-
         }
 
     }

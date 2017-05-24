@@ -20,16 +20,19 @@ namespace osuCrypto
     std::unique_ptr<NcoOtExtSender> Rr17NcoOtSender::split()
     {
         auto ret = std::unique_ptr<NcoOtExtSender>(new Rr17NcoOtSender());
-
-        std::vector<block> baseOts(mKos.mBaseChoiceBits.size());
-
-        for (u64 i = 0; i < baseOts.size(); ++i)
+        if (hasBaseOts())
         {
-            baseOts[i] = mKos.mGens[i].get<block>();
-        }
 
-        ret->setBaseOts(baseOts, mKos.mBaseChoiceBits);
-        ((Rr17NcoOtSender*)ret.get())->mEncodeSize = mEncodeSize;
+            std::vector<block> baseOts(mKos.mBaseChoiceBits.size());
+
+            for (u64 i = 0; i < baseOts.size(); ++i)
+            {
+                baseOts[i] = mKos.mGens[i].get<block>();
+            }
+
+            ret->setBaseOts(baseOts, mKos.mBaseChoiceBits);
+        }
+        ((Rr17NcoOtSender*)ret.get())->mInputByteCount = mInputByteCount;
 
         return std::move(ret);
     }
@@ -37,7 +40,7 @@ namespace osuCrypto
     void Rr17NcoOtSender::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
 
-        mMessages.resize(numOtExt * mEncodeSize);
+        mMessages.resize(numOtExt * mInputByteCount * 8);
         prng.mAes.ecbEncCounterMode(prng.mBlockIdx, mMessages.size() * 2, (block*)mMessages.data());
         prng.mBlockIdx += mMessages.size() * 2;
 
@@ -90,34 +93,11 @@ namespace osuCrypto
 
     }
 
-    //static const u8 bitMasks[8]{ 0,1,3,7,15,31,63, 127 };
-
-    //inline block shiftRight(block v, u8 n)
-    //{
-    //    auto v1 = _mm_srli_epi64(v, n);
-    //    auto v2 = _mm_srli_si128(v, 8);
-    //    v2 = _mm_slli_epi64(v2, 64 - (n));
-    //    return _mm_or_si128(v1, v2);
-    //}
-
-    //block loadFromBit(u8* data, u64 bitPosition)
-    //{
-
-    //    data += bitPosition / 8;
-    //    bitPosition = bitPosition % 8;
-
-    //    block ret = toBlock(data);
-    //    shiftRight(ret, bitPosition);
-
-    //    *(u8*)&ret |= data[sizeof(block)] & bitMasks[bitPosition];
-
-    //    return ret;
-    //}
 
     void Rr17NcoOtSender::encode(
         u64 otIdx,
-        const block* choiceWord,
-        u8* dest,
+        const void* input,
+        void* dest,
         u64 destSize)
     {
 
@@ -126,12 +106,13 @@ namespace osuCrypto
 //            throw std::runtime_error(LOCATION);
 //#endif
         //BitVector mCorrections;
-
-        block correction = toBlock(mCorrection.data() + otIdx * mEncodeSize / 8);
-        block choice = choiceWord[0] ^ correction;
+        block correction = toBlock(mCorrection.data() + otIdx * mInputByteCount);
+        block choice = ZeroBlock;
+        memcpy(&choice, input, mInputByteCount);
+        choice = choice ^ correction;
 
         BitIterator iter((u8*)&choice, 0);
-        otIdx *= mEncodeSize;
+        otIdx *= mInputByteCount * 8;
 
         //encoding = ZeroBlock;
         //for (u64 i = 0; i < mEncodeSize; ++i)
@@ -140,41 +121,32 @@ namespace osuCrypto
         SHA1 sha;
         u8 buff[SHA1::HashSize];
 
-        for (u64 i = 0; i < mEncodeSize; ++i)
+        for (u64 i = 0; i < (mInputByteCount*8); ++i)
             sha.Update(mMessages[otIdx++][*iter++]);
 
-        sha.Update((u8*)choiceWord, mEncodeSize / 8);
+        sha.Update((u8*)input, mInputByteCount);
         sha.Final(buff);
         memcpy(dest, buff, std::min<u64>(SHA1::HashSize, destSize));
         //encoding = *(block*)buff;
     }
 
-    void Rr17NcoOtSender::getParams(
+    void Rr17NcoOtSender::configure(
         bool maliciousSecure,
-        u64 compSecParm,
         u64 statSecParam,
-        u64 inputBitCount,
-        u64 inputCount,
-        u64 & inputBlkSize,
-        u64 & baseOtCount)
+        u64 inputBitCount)
     {
         if (maliciousSecure == false)
-            throw std::runtime_error(LOCATION);
-
-        if (compSecParm != 128)
             throw std::runtime_error(LOCATION);
 
         if (inputBitCount > 128)
             throw std::runtime_error(LOCATION);
 
-        mEncodeSize = roundUpTo(inputBitCount, 8);
-        inputBlkSize = (inputBitCount + 127) / 128;
-        baseOtCount = 128;
+        mInputByteCount = (inputBitCount + 7) / 8; 
     }
 
     void Rr17NcoOtSender::recvCorrection(Channel & chl, u64 recvCount)
     {
-        auto size = recvCount * mEncodeSize / 8;
+        auto size = recvCount * mInputByteCount;
         chl.recv(mCorrection.data() + mCorrectionIdx, size);
         mCorrectionIdx += size;
     }

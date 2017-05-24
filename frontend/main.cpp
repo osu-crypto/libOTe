@@ -21,8 +21,8 @@ int miraclTestMain();
 #include "libOTe/Tools/LinearCode.h"
 #include "libOTe/NChooseOne/Oos/OosNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Oos/OosNcoOtSender.h"
-#include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
-#include "libOTe/NChooseOne/KkrtNcoOtSender.h"
+#include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
+#include "libOTe/NChooseOne/Kkrt/KkrtNcoOtSender.h"
 
 #include "libOTe/TwoChooseOne/IknpOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/IknpOtExtSender.h"
@@ -74,8 +74,7 @@ void kkrt_test(int i)
         baseRecv[i] = baseSend[i][baseChoice[i]];
     }
 
-    std::vector<block> choice(ncoinputBlkSize), correction(codeSize);
-    prng0.get((u8*)choice.data(), ncoinputBlkSize * sizeof(block));
+    block choice = prng0.get<block>();// ((u8*)choice.data(), ncoinputBlkSize * sizeof(block));
 
     std::vector< thread> thds(numThreads);
 
@@ -97,7 +96,7 @@ void kkrt_test(int i)
                 {
                     for (u64 j = 0; j < step; ++j)
                     {
-                        r.encode(i + j, choice, encoding1);
+                        r.encode(i + j, &choice, &encoding1);
                     }
 
                     r.sendCorrection(chl, step);
@@ -133,7 +132,7 @@ void kkrt_test(int i)
 
                     for (u64 j = 0; j < step; ++j)
                     {
-                        s.encode(i + j, choice, encoding2);
+                        s.encode(i + j, &choice, &encoding2);
                     }
                 }
                 s.check(chl, ZeroBlock);
@@ -214,7 +213,7 @@ void oos_test(int i)
             thds[k] = std::thread(
                 [&, k]()
             {
-                OosNcoOtReceiver r(code, 40);
+                OosNcoOtReceiver r(code);
                 r.setBaseOts(baseSend);
                 auto& chl = chls[k];
 

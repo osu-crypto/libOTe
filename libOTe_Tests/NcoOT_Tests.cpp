@@ -8,8 +8,8 @@
 #include <cryptoTools/Network/Endpoint.h>
 #include <cryptoTools/Common/Log.h>
 
-#include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
-#include "libOTe/NChooseOne/KkrtNcoOtSender.h"
+#include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
+#include "libOTe/NChooseOne/Kkrt/KkrtNcoOtSender.h"
 
 #include "libOTe/NChooseOne/Oos/OosNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Oos/OosNcoOtSender.h"
@@ -20,7 +20,7 @@
 #include <thread>
 #include <vector>
 #include "NcoOT_Tests.h"
-
+#include "libOTe/Tools/bch511.h"
 
 using namespace osuCrypto;
 
@@ -42,20 +42,15 @@ namespace tests_libOTe
         KkrtNcoOtSender sender;
         KkrtNcoOtReceiver recv;
 
-        // the input size that should be provided.
-        u64 codeSize;
-
-        // the number of base OT that need to be done
-        u64 baseCount;
-
         // get up the parameters and get some information back. 
         //  1) false = semi-honest
-        //  2) 128 =  computational security param. 
-        //  3) 40  =  statistical security param.
-        //  4) numOTs = number of OTs that we will perform
-        //  5) codeSize = output variable denoting the number of blocks that the input should be.
-        //  6) baseCount = output variable denoting the number of base OTs that should be used.
-        sender.getParams(false, 128, 40, 128, numOTs, codeSize, baseCount);
+        //  2) 40  =  statistical security param.
+        //  3) numOTs = number of OTs that we will perform
+        sender.configure(false, 40, 128);
+        recv.configure(false, 40, 128);
+
+        // the number of base OT that need to be done
+        u64 baseCount = sender.getBaseOTCount();
 
         // Fake some base OTs
         std::vector<block> baseRecv(baseCount);
@@ -82,7 +77,7 @@ namespace tests_libOTe
         recv.setBaseOts(baseSend);
 
         u64 stepSize = 10;
-        Matrix<block> codeword(stepSize, codeSize * sizeof(block));
+        std::vector<block> inputs(stepSize);
         
         for (size_t j = 0; j < 10; j++)
         {
@@ -97,13 +92,7 @@ namespace tests_libOTe
             for (u64 i = 0; i < numOTs; i += stepSize)
             {
 
-                // the current version of KKRT is weird in that the input to the encode
-                // function should be a "psuedo-ramdom" codeword of the actual input value.
-                // These codeword can be computed using a PRF or something like SHA.
-                // For this example, we are just going to use completely random bits as the 
-                // codewords. In the real example, each row of this matrix should be a psuedo-ramdom" 
-                // codeword.
-                prng0.get((u8*)codeword.data(), codeword.size());
+                prng0.get(inputs.data(), inputs.size());
 
 
                 for (u64 k = 0; k < stepSize; ++k)
@@ -112,7 +101,7 @@ namespace tests_libOTe
                     // The receiver MUST encode before the sender. Here we are only calling encode(...) 
                     // for a single i. But the receiver can also encode many i, but should only make one 
                     // call to encode for any given value of i.
-                    recv.encode(i + k, codeword[k], encoding1[k]);
+                    recv.encode(i + k,&inputs[k], (u8*)&encoding1[k], sizeof(block));
                 }
 
                 // This call will send to the other party the next "stepSize" corrections to the sender.
@@ -128,9 +117,9 @@ namespace tests_libOTe
                 for (u64 k = 0; k < stepSize; ++k)
                 {
                     // the sender can now call encode(i, ...) for k \in {0, ..., i}. 
-                    // Lets encode the same psuedo-random codeword and then we should expect to
+                    // Lets encode the same input and then we should expect to
                     // get the same encoding.
-                    sender.encode(i + k, codeword[k], encoding2[k]);
+                    sender.encode(i + k, &inputs[k], (u8*)&encoding2[k], sizeof(block));
 
                     // check that we do in fact get the same value
                     if (neq(encoding1[k], encoding2[k]))
@@ -139,9 +128,9 @@ namespace tests_libOTe
                     // In addition to the sender being able to obtain the same value as the receiver,
                     // the sender can encode and other codeword. This should result in a different 
                     // encoding.
-                    prng0.get((u8*)codeword[k].data(), codeSize * sizeof(block));
+                    inputs[k] = prng0.get<block>();
 
-                    sender.encode(i + k, codeword[k], encoding2[k]);
+                    sender.encode(i + k, &inputs[k], (u8*)&encoding2[k], sizeof(block));
 
                     if (eq(encoding1[k], encoding2[k]))
                         throw UnitTestFail();
@@ -169,22 +158,22 @@ namespace tests_libOTe
 
             for (u64 i = 0; i < numOTs; ++i)
             {
-                prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
+                block input = prng0.get<block>();
 
                 block encoding1, encoding2;
-                recv2.encode(i, codeword, encoding1);
+                recv2.encode(i, &input, &encoding1);
 
                 recv2.sendCorrection(recvChl, 1);
                 send2.recvCorrection(sendChl, 1);
 
-                send2.encode(i, codeword, encoding2);
+                send2.encode(i, &input, &encoding2);
 
                 if (neq(encoding1, encoding2))
                     throw UnitTestFail();
 
-                prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
+                input = prng0.get<block>();
 
-                send2.encode(i, codeword, encoding2);
+                send2.encode(i, &input, &encoding2);
 
                 if (eq(encoding1, encoding2))
                     throw UnitTestFail();
@@ -221,11 +210,12 @@ namespace tests_libOTe
         LinearCode code;
         code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
 
-        OosNcoOtSender sender(code, 40);
-        OosNcoOtReceiver recv(code, 40);
+        OosNcoOtSender sender(code);
+        OosNcoOtReceiver recv(code);
 
-        u64 ncoinputBlkSize, baseCount;
-        sender.getParams(true, 128, 40, 76, numOTs, ncoinputBlkSize, baseCount);
+        sender.configure(true, 40, 76);
+        recv.configure(true, 40, 76);
+        u64 baseCount = sender.getBaseOTCount();
         u64 codeSize = (baseCount + 127) / 128;
 
         std::vector<block> baseRecv(baseCount);
@@ -242,7 +232,7 @@ namespace tests_libOTe
         sender.setBaseOts(baseRecv, baseChoice);
         recv.setBaseOts(baseSend);
 
-        std::vector<block> choice(ncoinputBlkSize), correction(codeSize);
+        block input;
         for (size_t j = 0; j < 2; j++)
         {
 
@@ -257,7 +247,7 @@ namespace tests_libOTe
 
             for (u64 i = 0; i < numOTs; ++i)
             {
-                prng0.get((u8*)choice.data(), ncoinputBlkSize * sizeof(block));
+                block input = prng0.get<block>();
 
 
                 bool skip = prng0.get<bool>();
@@ -269,13 +259,13 @@ namespace tests_libOTe
                 }
                 else
                 {
-                    recv.encode(i, choice, encoding1);
+                    recv.encode(i, &input, &encoding1);
                 }
 
                 recv.sendCorrection(recvChl, 1);
                 sender.recvCorrection(sendChl, 1);
 
-                sender.encode(i, choice, encoding2);
+                sender.encode(i, &input, &encoding2);
 
                 if (!skip && neq(encoding1, encoding2))
                 {
@@ -289,9 +279,10 @@ namespace tests_libOTe
                     throw UnitTestFail();
                 }
 
-                prng0.get((u8*)choice.data(), ncoinputBlkSize * sizeof(block));
+                input = prng0.get<block>();
 
-                sender.encode(i, choice, encoding2);
+
+                sender.encode(i, &input, &encoding2);
 
                 if (!skip && eq(encoding1, encoding2))
                 {
@@ -343,9 +334,11 @@ namespace tests_libOTe
 
         Rr17NcoOtSender sender;
         Rr17NcoOtReceiver recv;
-        u64 codeSize, baseCount;
-        sender.getParams(true, 128, 40, inputSize, numOTs, codeSize, baseCount);
-        recv.getParams(true, 128, 40, inputSize, numOTs, codeSize, baseCount);
+        u64  baseCount;
+        sender.configure(true, 40, inputSize);
+        recv.configure(true, 40, inputSize);
+
+        baseCount = sender.getBaseOTCount();
 
         std::vector<block> baseRecv(baseCount);
         std::vector<std::array<block, 2>> baseSend(baseCount);
@@ -371,7 +364,6 @@ namespace tests_libOTe
         sender.setBaseOts(baseRecv, baseChoice);
         recv.setBaseOts(baseSend);
 
-        std::vector<block> codeword(codeSize), correction(codeSize);
         for (size_t j = 0; j < 10; j++)
         {
             auto thrd = std::thread([&]() {
@@ -384,22 +376,22 @@ namespace tests_libOTe
 
             for (u64 i = 0; i < numOTs; ++i)
             {
-                prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
-
+                block input = prng0.get<block>();
+                
                 block encoding1, encoding2;
-                recv.encode(i, codeword, encoding1);
+                recv.encode(i, &input, &encoding1);
 
                 recv.sendCorrection(recvChl, 1);
                 sender.recvCorrection(sendChl, 1);
 
-                sender.encode(i, codeword, encoding2);
+                sender.encode(i, &input, &encoding2);
 
                 if (neq(encoding1, encoding2))
                     throw UnitTestFail();
 
-                prng0.get((u8*)codeword.data(), codeSize * sizeof(block));
+                input = prng0.get<block>();
 
-                sender.encode(i, codeword, encoding2);
+                sender.encode(i, &input, &encoding2);
 
                 if (eq(encoding1, encoding2))
                     throw UnitTestFail();
@@ -421,21 +413,20 @@ namespace tests_libOTe
         LinearCode code;
 
 
-        code.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.txt");
+        // load the data at bch511_binary
+        code.load(bch511_binary, sizeof(bch511_binary));
 
-        auto temp = std::string(SOLUTION_DIR) + "/libOTe/Tools/temp.txt";
-        code.writeTextFile(temp);
-        code.loadTxtFile(temp);
-        std::remove(temp.c_str());
+        // You can also load it from text
+        //code.loadTxtFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.txt");
+        
+        // or binary file
+        //code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
 
-        code.writeBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
-        code.loadBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
-        //std::cout << code.codewordBitSize() << "  " << code.codewordBlkSize() <<
-        //    "\n  " << code.plaintextBitSize() << "  " << code.plaintextBlkSize() << std::endl;
+        // You can also write it in any format
+        //code.writeTextFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.txt");
+        //code.writeBinFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/bch511.bin");
+        //code.writeBinCppFile(std::string(SOLUTION_DIR) + "/libOTe/Tools/new_bch511.h", "bch511");
 
-
-        //for (u64 i = 0; i < code.mG.size(); ++i)
-        //    std::cout << code.mG[i] << std::endl;
 
         if (code.plaintextBitSize() != 76)
             throw UnitTestFail("bad input size reported by code");

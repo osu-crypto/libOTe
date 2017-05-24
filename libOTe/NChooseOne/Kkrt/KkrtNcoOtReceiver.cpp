@@ -12,11 +12,14 @@ namespace osuCrypto
         gsl::span<std::array<block, 2>> baseRecvOts)
     {
 
-
         if (baseRecvOts.size() % 128 != 0)
             throw std::runtime_error("rt error at " LOCATION);
 
-        mGens.resize(baseRecvOts.size());
+        if (baseRecvOts.size()!= mGens.size())
+            throw std::runtime_error("rt error at " LOCATION);
+
+
+        //mGens.resize(baseRecvOts.size());
         mGensBlkIdx.resize(baseRecvOts.size(), 0);
 
         for (u64 i = 0; i < mGens.size(); i++)
@@ -33,6 +36,15 @@ namespace osuCrypto
 
         if (mHasBase == false)
             throw std::runtime_error("rt error at " LOCATION);
+
+        block seed = prng.get<block>();
+        u8 theirComm[SHA1::HashSize];
+        chl.asyncRecv(theirComm, SHA1::HashSize, [&]()
+        {
+            chl.asyncSend(&seed, sizeof(block));
+        });
+
+
 
         static const u64 superBlkSize(8);
 
@@ -128,34 +140,56 @@ namespace osuCrypto
             doneIdx = stopIdx;
         }
 
+        block theirSeed;
+        chl.recv(&theirSeed, sizeof(block));
+
+        
+        std::array<block, 4> keys;
+        PRNG(seed ^ theirSeed).get(keys.data(), keys.size());
+        mMultiKeyAES.setKeys(keys);
     }
 
+
+    u64 KkrtNcoOtReceiver::getBaseOTCount() const
+    {
+        return mGens.size();
+    }
 
     std::unique_ptr<NcoOtExtReceiver> KkrtNcoOtReceiver::split()
     {
         auto* raw = new KkrtNcoOtReceiver();
+        raw->mGens.resize(mGens.size());
 
-        std::vector<std::array<block, 2>> base(mGens.size());
+        raw->mInputByteCount = mInputByteCount;
+        raw->mMultiKeyAES = mMultiKeyAES;
 
-        for (u64 i = 0; i < base.size(); ++i)
+        if (hasBaseOts())
         {
-            mGens[i][0].ecbEncCounterMode(mGensBlkIdx[i], 1, &base[i][0]);
-            mGens[i][1].ecbEncCounterMode(mGensBlkIdx[i], 1, &base[i][1]);
+            std::vector<std::array<block, 2>> base(mGens.size());
 
-            ++mGensBlkIdx[i];
+            for (u64 i = 0; i < base.size(); ++i)
+            {
+                mGens[i][0].ecbEncCounterMode(mGensBlkIdx[i], 1, &base[i][0]);
+                mGens[i][1].ecbEncCounterMode(mGensBlkIdx[i], 1, &base[i][1]);
+
+                ++mGensBlkIdx[i];
+            }
+            raw->setBaseOts(base);
         }
-        raw->setBaseOts(base);
-
         return std::unique_ptr<NcoOtExtReceiver>(raw);
     }
 
     void KkrtNcoOtReceiver::encode(
         u64 otIdx,
-        const block* choice,
-        u8* dest,
+        const void* input,
+        void* dest,
         u64 destSize)
     {
+        static const int width(4);
 #ifndef NDEBUG
+        if (mT0.stride() != width)
+            throw std::runtime_error(LOCATION);
+
         //if (choice.size() != mT0.stride())
         //    throw std::invalid_argument("");
 
@@ -169,16 +203,30 @@ namespace osuCrypto
         block* t0Val = mT0.data() + mT0.stride() * otIdx;
         block* t1Val = mT1.data() + mT0.stride() * otIdx;
 
+        // 128 bit input restriction
+        block word = ZeroBlock;
+        memcpy(&word, input, mInputByteCount);
+
+        // run the input word through AES to get a psuedo-random codeword. Then 
+        // XOR the input with the AES output. 
+        std::array<block, width> choice{ word,word ,word ,word }, code;
+        mMultiKeyAES.ecbEncNBlocks(choice.data(), code.data());
+
         // encode the correction value as u = T0 + T1 + c(w), there c(w) is a pseudo-random codeword.
-        for (u64 i = 0; i < mT0.stride(); ++i)
-        {
-            // reuse mT1 as the place we store the correlated value. 
-            // this will later get sent to the sender.
-            t1Val[i]
-                = choice[i]
-                ^ t0Val[i]
-                ^ t1Val[i];
-        }
+        OSU_CRYPTO_COMPILER_UNROLL_LOOP_HINT
+            for (u64 i = 0; i < width; ++i)
+            {
+                // final code is the output of AES plus the input
+                code[i] = code[i] ^ choice[i];
+
+                // reuse mT1 as the place we store the correlated value. 
+                // this will later get sent to the sender.
+                t1Val[i]
+                    = code[i]
+                    ^ t0Val[i]
+                    ^ t1Val[i];
+            }
+
 
 #ifdef KKRT_SHA_HASH
 
@@ -235,19 +283,18 @@ namespace osuCrypto
 #endif
     }
 
-    void KkrtNcoOtReceiver::getParams(
+    void KkrtNcoOtReceiver::configure(
         bool maliciousSecure,
-        u64 compSecParm,
         u64 statSecParam,
-        u64 inputBitCount,
-        u64 inputCount,
-        u64 & inputBlkSize,
-        u64 & baseOtCount)
+        u64 inputBitCount)
     {
-        //if (maliciousSecure) throw std::runtime_error("");
+        if (maliciousSecure) throw std::runtime_error(LOCATION);
+        if (inputBitCount > 128) throw std::runtime_error("currently only support up to 128 bit KKRT inputs. Can be extended on request" LOCATION);
 
-        baseOtCount = roundUpTo(compSecParm * (maliciousSecure? 7 : 4), 128);
-        inputBlkSize = baseOtCount / 128;
+        mInputByteCount = (inputBitCount + 7) / 8;
+        auto count = 128 * 4;
+        mGens.resize(count);
+
     }
 
     void KkrtNcoOtReceiver::sendCorrection(Channel & chl, u64 sendCount)
