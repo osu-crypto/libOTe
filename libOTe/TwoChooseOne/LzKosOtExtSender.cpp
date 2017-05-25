@@ -89,7 +89,7 @@ namespace osuCrypto
             assert(buff.size() == sizeof(block) * gOtExtBaseOtCount);
 
             // u = t0 + t1 + x 
-            auto u = buff.getspan<block>();
+            auto u = buff.getSpan<block>();
 
             for (u64 colIdx = 0; colIdx < gOtExtBaseOtCount; colIdx++)
             {

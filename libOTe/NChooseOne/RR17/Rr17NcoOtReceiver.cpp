@@ -63,7 +63,7 @@ namespace osuCrypto
         auto count = (mMessages.size() + stepSize - 1) / stepSize;
 
         Buff buff(std::min<u64>(mMessages.size(), stepSize) * sizeof(std::array<block, 2>));
-        auto view = buff.getspan<std::array<block, 2>>();
+        auto view = buff.getSpan<std::array<block, 2>>();
         auto choiceIter = mChoices.begin();
 
         //std::cout << IoStream::lock;

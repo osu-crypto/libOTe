@@ -78,7 +78,7 @@ namespace osuCrypto
         BitVector choices2(numBlocks * 128);
         choices2 = choices;
         choices2.resize(numBlocks * 128);
-        auto choiceBlocks = choices2.getspan<block>();
+        auto choiceBlocks = choices2.getSpan<block>();
 
 #ifdef OTEXT_DEBUG
         ByteStream debugBuff;
@@ -99,7 +99,7 @@ namespace osuCrypto
             uBuff->setp(gOtExtBaseOtCount * sizeof(block));
 
             // get an array of blocks that we will fill. 
-            auto u = uBuff->getspan<block>();
+            auto u = uBuff->getSpan<block>();
 
             for (u64 colIdx = 0; colIdx < gOtExtBaseOtCount; colIdx++)
             {
@@ -170,9 +170,9 @@ namespace osuCrypto
         // same value of r in all of the column vectors...
         std::unique_ptr<ByteStream> correlationData(new ByteStream(3 * sizeof(block)));
         correlationData->setp(correlationData->capacity());
-        block& x = correlationData->getspan<block>()[0];
-        block& t = correlationData->getspan<block>()[1];
-        block& t2 = correlationData->getspan<block>()[2];
+        block& x = correlationData->getSpan<block>()[0];
+        block& t = correlationData->getSpan<block>()[1];
+        block& t2 = correlationData->getSpan<block>()[2];
         x = t = t2 = ZeroBlock;
         block chij, ti, ti2;
 
