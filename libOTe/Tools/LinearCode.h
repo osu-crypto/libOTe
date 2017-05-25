@@ -20,7 +20,7 @@ namespace osuCrypto
         void loadTxtFile(const std::string& fileName);
         void loadTxtFile(std::istream& in);
 
-        void load(const char* data, u64 size);
+        void load(const unsigned char* data, u64 size);
 
         void loadBinFile(const std::string& fileName);
         void loadBinFile(std::istream& in);

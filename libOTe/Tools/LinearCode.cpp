@@ -94,10 +94,10 @@ namespace osuCrypto
         generateMod8Table();
     }
 
-    void LinearCode::load(const char * data, u64 size)
+    void LinearCode::load(const unsigned char * data, u64 size)
     {
         std::stringstream ss(std::stringstream::out | std::stringstream::in | std::stringstream::binary);
-        ss.write(data, size);
+        ss.write((char*)data, size);
         loadBinFile(ss);
     }
 
@@ -185,7 +185,7 @@ namespace osuCrypto
 
         int c = 0;
         out.read((char*)&c, 1);
-        fOut << "static char "<< name << "[] = { 0x" << std::hex << std::setw(2) << std::setfill('0') << c;
+        fOut << "static unsigned char "<< name << "[] = { 0x" << std::hex << std::setw(2) << std::setfill('0') << c;
 
         while (true)
         {

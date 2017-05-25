@@ -396,8 +396,6 @@ namespace tests_libOTe
 
         testNco(sender, numOTs, prng0, sendChl, recv, prng1, recvChl);
 
-        std::cout << "\n\n\n======================================================================\n\n\n" << std::endl;
-
 
         auto sender2 = sender.split();
         auto recv2 = recv.split();
