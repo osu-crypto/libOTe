@@ -31,7 +31,7 @@ namespace osuCrypto
         bool hasBaseOts() const override;
 
         void setBaseOts(
-            ArrayView<std::array<block, 2>> baseRecvOts) override;
+            span<std::array<block, 2>> baseRecvOts) override;
 
         std::unique_ptr<NcoOtExtReceiver> split() override;
 

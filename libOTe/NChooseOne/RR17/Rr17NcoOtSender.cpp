@@ -12,7 +12,7 @@ namespace osuCrypto
     }
 
     void Rr17NcoOtSender::setBaseOts(
-        ArrayView<block> baseRecvOts, const BitVector & choices)
+        span<block> baseRecvOts, const BitVector & choices)
     {
         mKos.setBaseOts(baseRecvOts, choices);
     }
@@ -48,7 +48,7 @@ namespace osuCrypto
         mCorrection.resize(mMessages.size());
 
         u8* buff(new u8[mMessages.size() * sizeof(std::array<block, 2>)]);
-        ArrayView<std::array<block, 2>> view((std::array<block, 2>*)buff, mMessages.size());
+        span<std::array<block, 2>> view((std::array<block, 2>*)buff, mMessages.size());
         //std::cout << "ots = " << log2(view.size()) << std::endl;
         //std::cout << IoStream::lock;
         mKos.send(view, prng, chl);

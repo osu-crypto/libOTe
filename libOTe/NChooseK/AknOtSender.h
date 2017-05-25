@@ -27,7 +27,7 @@ namespace osuCrypto
         }
 
         void init(u64 totalOTCount, u64 cutAndChooseThreshold, double p,
-            OtExtSender& ots, ArrayView<Channel> chls, PRNG& prng);
+            OtExtSender& ots, span<Channel> chls, PRNG& prng);
 
         //std::vector<BitVector> mTheirPermutes;
 

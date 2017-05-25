@@ -32,7 +32,7 @@ namespace osuCrypto
         return std::move(ret);
     }
 
-    void LzKosOtExtSender::setBaseOts(ArrayView<block> baseRecvOts, const BitVector & choices)
+    void LzKosOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices)
     {
         if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
             throw std::runtime_error("not supported/implemented");
@@ -46,7 +46,7 @@ namespace osuCrypto
     }
 
     void LzKosOtExtSender::send(
-        ArrayView<std::array<block, 2>> messages,
+        span<std::array<block, 2>> messages,
         PRNG& prng,
         Channel& chl/*,
                     std::atomic<u64>& doneIdx*/)
@@ -89,7 +89,7 @@ namespace osuCrypto
             assert(buff.size() == sizeof(block) * gOtExtBaseOtCount);
 
             // u = t0 + t1 + x 
-            auto u = buff.getArrayView<block>();
+            auto u = buff.getspan<block>();
 
             for (u64 colIdx = 0; colIdx < gOtExtBaseOtCount; colIdx++)
             {

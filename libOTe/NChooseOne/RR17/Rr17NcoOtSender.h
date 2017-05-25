@@ -27,7 +27,7 @@ namespace osuCrypto
         // @ baseRecvOts: The base 1 out of 2 OTs. 
         // @ choices: The select bits that were used in the base OT
         void setBaseOts(
-            ArrayView<block> baseRecvOts,
+            span<block> baseRecvOts,
             const BitVector& choices) override;
 
         // Creates a new OT extesion of the same type that can be used

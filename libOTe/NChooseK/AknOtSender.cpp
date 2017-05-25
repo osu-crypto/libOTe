@@ -22,7 +22,7 @@ namespace osuCrypto
         u64 cutAndChooseThreshold, 
         double p, 
         OtExtSender & ots, 
-        ArrayView<Channel>  chls, 
+        span<Channel>  chls, 
         PRNG & prng)
     {
 

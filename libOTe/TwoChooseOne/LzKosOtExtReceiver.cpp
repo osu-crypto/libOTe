@@ -10,7 +10,7 @@ using namespace std;
 
 namespace osuCrypto
 {
-    void LzKosOtExtReceiver::setBaseOts(ArrayView<std::array<block, 2>> baseOTs)
+    void LzKosOtExtReceiver::setBaseOts(span<std::array<block, 2>> baseOTs)
     {
         if (baseOTs.size() != gOtExtBaseOtCount)
             throw std::runtime_error(LOCATION);
@@ -44,7 +44,7 @@ namespace osuCrypto
 
     void LzKosOtExtReceiver::receive(
         const BitVector& choices,
-        ArrayView<block> messages,
+        span<block> messages,
         PRNG& prng,
         Channel& chl/*,
                     std::atomic<u64>& doneIdx*/)
@@ -78,7 +78,7 @@ namespace osuCrypto
         BitVector choices2(numBlocks * 128);
         choices2 = choices;
         choices2.resize(numBlocks * 128);
-        auto choiceBlocks = choices2.getArrayView<block>();
+        auto choiceBlocks = choices2.getspan<block>();
 
 #ifdef OTEXT_DEBUG
         ByteStream debugBuff;
@@ -99,7 +99,7 @@ namespace osuCrypto
             uBuff->setp(gOtExtBaseOtCount * sizeof(block));
 
             // get an array of blocks that we will fill. 
-            auto u = uBuff->getArrayView<block>();
+            auto u = uBuff->getspan<block>();
 
             for (u64 colIdx = 0; colIdx < gOtExtBaseOtCount; colIdx++)
             {
@@ -170,9 +170,9 @@ namespace osuCrypto
         // same value of r in all of the column vectors...
         std::unique_ptr<ByteStream> correlationData(new ByteStream(3 * sizeof(block)));
         correlationData->setp(correlationData->capacity());
-        block& x = correlationData->getArrayView<block>()[0];
-        block& t = correlationData->getArrayView<block>()[1];
-        block& t2 = correlationData->getArrayView<block>()[2];
+        block& x = correlationData->getspan<block>()[0];
+        block& t = correlationData->getspan<block>()[1];
+        block& t2 = correlationData->getspan<block>()[2];
         x = t = t2 = ZeroBlock;
         block chij, ti, ti2;
 

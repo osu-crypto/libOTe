@@ -18,7 +18,7 @@ namespace osuCrypto
     {
         return mKos.hasBaseOts();
     }
-    void Rr17NcoOtReceiver::setBaseOts(ArrayView<std::array<block, 2>> baseRecvOts)
+    void Rr17NcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts)
     {
         mKos.setBaseOts(baseRecvOts);
     }
@@ -63,7 +63,7 @@ namespace osuCrypto
         auto count = (mMessages.size() + stepSize - 1) / stepSize;
 
         Buff buff(std::min<u64>(mMessages.size(), stepSize) * sizeof(std::array<block, 2>));
-        auto view = buff.getArrayView<std::array<block, 2>>();
+        auto view = buff.getspan<std::array<block, 2>>();
         auto choiceIter = mChoices.begin();
 
         //std::cout << IoStream::lock;
