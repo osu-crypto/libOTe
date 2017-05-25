@@ -22,10 +22,10 @@
 #include "NcoOT_Tests.h"
 #include "libOTe/Tools/bch511.h"
 
-#include "libOTe_Tests/testData/code128_BCH511.h",
-#include "libOTe_Tests/testData/code256_BCH511.h",
-#include "libOTe_Tests/testData/code384_BCH511.h",
-#include "libOTe_Tests/testData/code640_BCH511.h",
+#include "libOTe_Tests/testData/code128_BCH511.h"
+#include "libOTe_Tests/testData/code256_BCH511.h"
+#include "libOTe_Tests/testData/code384_BCH511.h"
+#include "libOTe_Tests/testData/code640_BCH511.h"
 #include "libOTe_Tests/testData/code1280_BCH511.h"
 
 using namespace osuCrypto;
@@ -35,6 +35,162 @@ using namespace osuCrypto;
 
 namespace tests_libOTe
 {
+
+
+    void testNco(
+        NcoOtExtSender &sender,
+        const u64 &numOTs,
+        PRNG &prng0,
+        Channel &sendChl,
+        NcoOtExtReceiver &recv,
+        PRNG &prng1,
+        Channel &recvChl)
+    {
+
+        u64 stepSize = 33;
+        std::vector<block> inputs(stepSize);
+        setThreadName("Receiver");
+
+        for (size_t j = 0; j < 10; j++)
+        {
+            // perform the init on each of the classes. should be performed concurrently
+            auto thrd = std::thread([&]() {
+                setThreadName("Sender");
+                sender.init(numOTs, prng0, sendChl);
+            });
+            recv.init(numOTs, prng1, recvChl);
+            thrd.join();
+
+            std::vector<block> encoding1(stepSize), encoding2(stepSize);
+
+            // Get the random OT messages
+            for (u64 i = 0; i < numOTs; i += stepSize)
+            {
+                auto curStepSize = std::min<u64>(stepSize, numOTs - i);
+                std::vector<u8> skips(curStepSize);
+
+                prng0.get(inputs.data(), inputs.size());
+                prng0.get((bool*)skips.data(), skips.size());
+
+                for (u64 k = 0; k < curStepSize; ++k)
+                {
+
+                    // The receiver MUST encode before the sender. Here we are only calling encode(...) 
+                    // for a single i. But the receiver can also encode many i, but should only make one 
+                    // call to encode for any given value of i.
+                    if (skips[k])
+                    {
+                        recv.zeroEncode(i + k);
+                    }
+                    else {
+                        recv.encode(i + k, &inputs[k], (u8*)&encoding1[k], sizeof(block));
+                    }
+                }
+
+                // This call will send to the other party the next "curStepSize " corrections to the sender.
+                // If we had made more or less calls to encode above (for contigious i), then we should replace
+                // curStepSize  with however many calls we made. In an extreme case, the reciever can perform
+                // encode for i \in {0, ..., numOTs - 1}  and then call sendCorrection(recvChl, numOTs).
+                recv.sendCorrection(recvChl, curStepSize);
+
+                // receive the next curStepSize  correction values. This allows the sender to now call encode
+                // on the next curStepSize  OTs.
+                sender.recvCorrection(sendChl, curStepSize);
+
+                for (u64 k = 0; k < curStepSize; ++k)
+                {
+                    // the sender can now call encode(i, ...) for k \in {0, ..., i}. 
+                    // Lets encode the same input and then we should expect to
+                    // get the same encoding.
+                    sender.encode(i + k, &inputs[k], (u8*)&encoding2[k], sizeof(block));
+
+                    // check that we do in fact get the same value
+                    if (! skips[k] && neq(encoding1[k], encoding2[k]))
+                        throw UnitTestFail();
+
+                    // In addition to the sender being able to obtain the same value as the receiver,
+                    // the sender can encode and other codeword. This should result in a different 
+                    // encoding.
+                    inputs[k] = prng0.get<block>();
+
+                    sender.encode(i + k, &inputs[k], (u8*)&encoding2[k], sizeof(block));
+
+                    if (eq(encoding1[k], encoding2[k]))
+                        throw UnitTestFail();
+                }
+            }
+        }
+
+
+        //block input;
+        //for (size_t j = 0; j < 2; j++)
+        //{
+
+        //    auto thrd = std::thread([&]() {
+        //        sender.init(numOTs, prng0, sendChl);
+        //    });
+
+        //    recv.init(numOTs, prng1, recvChl);
+
+        //    thrd.join();
+
+
+        //    for (u64 i = 0; i < numOTs; ++i)
+        //    {
+        //        block input = prng0.get<block>();
+
+
+        //        bool skip = prng0.get<bool>();
+
+        //        block encoding1, encoding2;
+        //        if (skip)
+        //        {
+        //            recv.zeroEncode(i);
+        //        }
+        //        else
+        //        {
+        //            recv.encode(i, &input, &encoding1);
+        //        }
+
+        //        recv.sendCorrection(recvChl, 1);
+        //        sender.recvCorrection(sendChl, 1);
+
+        //        sender.encode(i, &input, &encoding2);
+
+        //        if (!skip && neq(encoding1, encoding2))
+        //        {
+        //            std::cout << " = failed " << i << std::endl;
+        //            throw UnitTestFail();
+        //        }
+
+        //        input = prng0.get<block>();
+
+
+        //        sender.encode(i, &input, &encoding2);
+
+        //        if (!skip && eq(encoding1, encoding2))
+        //        {
+        //            std::cout << " != failed " << i << std::endl;
+        //            throw UnitTestFail();
+        //        }
+        //    }
+
+        //    thrd = std::thread([&]() {recv.check(recvChl, ZeroBlock); });
+        //    try {
+
+        //        sender.check(sendChl, ZeroBlock);
+        //    }
+        //    catch (...)
+        //    {
+        //        std::cout << " check failed " << std::endl;
+        //        thrd.join();
+        //        throw;
+        //    }
+
+        //    thrd.join();
+        //}
+    }
+
     void KkrtNcoOt_Test_Impl()
     {
         setThreadName("Sender");
@@ -202,7 +358,7 @@ namespace tests_libOTe
         PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
         PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
 
-        u64 numOTs = 128 * 8;
+        u64 numOTs = 128 * 2;
 
 
         std::string name = "n";
@@ -219,8 +375,8 @@ namespace tests_libOTe
         OosNcoOtSender sender;
         OosNcoOtReceiver recv;
 
-        sender.configure(true, 40, 76);
-        recv.configure(true, 40, 76);
+        sender.configure(true, 40, 50);
+        recv.configure(true, 40, 50);
         u64 baseCount = sender.getBaseOTCount();
         u64 codeSize = (baseCount + 127) / 128;
 
@@ -238,94 +394,18 @@ namespace tests_libOTe
         sender.setBaseOts(baseRecv, baseChoice);
         recv.setBaseOts(baseSend);
 
-        block input;
-        for (size_t j = 0; j < 2; j++)
-        {
+        testNco(sender, numOTs, prng0, sendChl, recv, prng1, recvChl);
 
-            auto thrd = std::thread([&]() {
-                sender.init(numOTs, prng0, sendChl);
-            });
-
-            recv.init(numOTs, prng1, recvChl);
-
-            thrd.join();
+        std::cout << "\n\n\n======================================================================\n\n\n" << std::endl;
 
 
-            for (u64 i = 0; i < numOTs; ++i)
-            {
-                block input = prng0.get<block>();
+        auto sender2 = sender.split();
+        auto recv2 = recv.split();
 
+        testNco(*sender2, numOTs, prng0, sendChl, *recv2, prng1, recvChl);
 
-                bool skip = prng0.get<bool>();
-
-                block encoding1, encoding2;
-                if (skip)
-                {
-                    recv.zeroEncode(i);
-                }
-                else
-                {
-                    recv.encode(i, &input, &encoding1);
-                }
-
-                recv.sendCorrection(recvChl, 1);
-                sender.recvCorrection(sendChl, 1);
-
-                sender.encode(i, &input, &encoding2);
-
-                if (!skip && neq(encoding1, encoding2))
-                {
-                    sendChl.close();
-                    recvChl.close();
-
-                    ep0.stop();
-                    ep1.stop();
-                    ios.stop();
-                    std::cout << " = failed " << i << std::endl;
-                    throw UnitTestFail();
-                }
-
-                input = prng0.get<block>();
-
-
-                sender.encode(i, &input, &encoding2);
-
-                if (!skip && eq(encoding1, encoding2))
-                {
-                    sendChl.close();
-                    recvChl.close();
-
-                    ep0.stop();
-                    ep1.stop();
-                    ios.stop();
-
-                    std::cout << " != failed " << i << std::endl;
-
-
-                    throw UnitTestFail();
-                }
-            }
-
-            thrd = std::thread([&]() {recv.check(recvChl, ZeroBlock); });
-            try {
-
-                sender.check(sendChl, ZeroBlock);
-            }
-            catch (...)
-            {
-                std::cout << " check failed " << std::endl;
-            }
-
-            thrd.join();
-        }
-
-        sendChl.close();
-        recvChl.close();
-
-        ep0.stop();
-        ep1.stop();
-        ios.stop();
     }
+
 
     void Rr17NcoOt_Test_Impl()
     {
@@ -370,47 +450,14 @@ namespace tests_libOTe
         sender.setBaseOts(baseRecv, baseChoice);
         recv.setBaseOts(baseSend);
 
-        for (size_t j = 0; j < 10; j++)
-        {
-            auto thrd = std::thread([&]() {
-                sender.init(numOTs, prng0, sendChl);
-            });
+        testNco(sender, numOTs, prng0, sendChl, recv, prng1, recvChl);
 
-            recv.init(numOTs, prng1, recvChl);
 
-            thrd.join();
+        auto sender2 = sender.split();
+        auto recv2 = recv.split();
 
-            for (u64 i = 0; i < numOTs; ++i)
-            {
-                block input = prng0.get<block>();
+        testNco(*sender2, numOTs, prng0, sendChl, *recv2, prng1, recvChl);
 
-                block encoding1, encoding2;
-                recv.encode(i, &input, &encoding1);
-
-                recv.sendCorrection(recvChl, 1);
-                sender.recvCorrection(sendChl, 1);
-
-                sender.encode(i, &input, &encoding2);
-
-                if (neq(encoding1, encoding2))
-                    throw UnitTestFail();
-
-                input = prng0.get<block>();
-
-                sender.encode(i, &input, &encoding2);
-
-                if (eq(encoding1, encoding2))
-                    throw UnitTestFail();
-            }
-
-        }
-
-        sendChl.close();
-        recvChl.close();
-
-        ep0.stop();
-        ep1.stop();
-        ios.stop();
     }
 
 

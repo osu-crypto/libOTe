@@ -80,6 +80,9 @@ namespace osuCrypto
         // one to hold the the correction values. This is sometimes called 
         // the u = T0 + T1 + C matrix in the papers.
         mT.resize(numOTExt, mGens.size() / 128);
+        //char c;
+        //chl.recv(&c, 1);
+
         mCorrectionVals.resize(numOTExt, mGens.size() / 128);
 
         // The receiver will send us correction values, this is the index of

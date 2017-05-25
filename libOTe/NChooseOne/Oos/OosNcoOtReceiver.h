@@ -30,12 +30,12 @@ namespace osuCrypto
         bool mHasBase, mMalicious;
         u64 mStatSecParam;
         LinearCode mCode;
+        u64 mCorrectionIdx, mInputByteCount;
 
         std::vector<std::array<PRNG, 2>> mGens;
         Matrix<block> mT0;
         Matrix<block> mT1;
         Matrix<block> mW;
-        u64 mCorrectionIdx, mInputByteSize;
 
 #ifndef NDEBUG
         std::vector<u8> mEncodeFlags;

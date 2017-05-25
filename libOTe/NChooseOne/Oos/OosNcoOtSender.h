@@ -23,7 +23,8 @@ namespace osuCrypto {
 
         OosNcoOtSender()
             : 
-            mStatSecParam(0)
+            mStatSecParam(0),
+            mInputByteCount(0)
         {}
 
         ~OosNcoOtSender();

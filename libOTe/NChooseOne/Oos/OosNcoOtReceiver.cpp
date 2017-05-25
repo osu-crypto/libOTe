@@ -6,13 +6,15 @@
 #include  <mmintrin.h>
 #include "OosDefines.h"
 #include <cryptoTools/Common/ByteStream.h>
+#include <cryptoTools/Common/BitVector.h>
 using namespace std;
 
 namespace osuCrypto
 {
     OosNcoOtReceiver::OosNcoOtReceiver()
         :mHasBase(false),
-        mStatSecParam(0)
+        mStatSecParam(0),
+        mInputByteCount(0)
     {}
 
     void OosNcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts)
@@ -36,6 +38,8 @@ namespace osuCrypto
         if (mHasBase == false)
             throw std::runtime_error("rt error at " LOCATION);
 
+        if (mInputByteCount == 0)
+            throw std::runtime_error("configure must be called first" LOCATION);
 
         const u8 superBlkSize(8);
 
@@ -63,6 +67,9 @@ namespace osuCrypto
         // and transposed rows that we got the using the base OTs as PRNG seed. 
         // mW will hold the record of all the words that we encoded. They will 
         // be used in the Check that is done at the end.
+        mW  = Matrix<block>();
+        mT0 = Matrix<block>();
+        mT1 = Matrix<block>();
         mW.resize(numOtExt, mCode.plaintextBlkSize());
         mT0.resize(numOtExt, numCols / 128);
         mT1.resize(numOtExt, numCols / 128);
@@ -70,6 +77,7 @@ namespace osuCrypto
         // An extra debugging check that can be used. Each one
         // gets marked as used, makes use we don't encode twice.
 #ifndef NDEBUG
+        mEncodeFlags = std::vector<u8>();
         mEncodeFlags.resize(numOtExt, 0);
 #endif
 
@@ -115,8 +123,8 @@ namespace osuCrypto
                 // doneIdx is the starting row. i is the offset into the blocks of 128 bits.
                 // __restrict isn't crucial, it just tells the compiler that this pointer
                 // is unique and it shouldn't worry about pointer aliasing. 
-                block* __restrict mT0Iter = mT0.data() + mT0.bounds()[1] * doneIdx + i;
-                block* __restrict mT1Iter = mT1.data() + mT1.bounds()[1] * doneIdx + i;
+                block* __restrict mT0Iter = mT0.data() + mT0.stride() * doneIdx + i;
+                block* __restrict mT1Iter = mT1.data() + mT1.stride() * doneIdx + i;
 
                 for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
                 {
@@ -135,8 +143,8 @@ namespace osuCrypto
                         t0Iter += superBlkSize;
                         t1Iter += superBlkSize;
 
-                        mT0Iter += mT0.bounds()[1];
-                        mT1Iter += mT0.bounds()[1];
+                        mT0Iter += mT0.stride();
+                        mT1Iter += mT0.stride();
                     }
                 }
             }
@@ -151,10 +159,12 @@ namespace osuCrypto
     std::unique_ptr<NcoOtExtReceiver> OosNcoOtReceiver::split()
     {
         auto* raw = new OosNcoOtReceiver();
+
         raw->mCode = mCode;
         raw->mHasBase = mHasBase;
         raw->mMalicious = mMalicious;
         raw->mStatSecParam = mStatSecParam;
+        raw->mInputByteCount = mInputByteCount;
         raw->mGens.resize(mGens.size());
 
         std::vector<std::array<block, 2>> base(mGens.size());
@@ -181,29 +191,35 @@ namespace osuCrypto
 #ifndef NDEBUG
         //if (choice.size() != mCode.plaintextBlkSize())
         //    throw std::invalid_argument("");
+        if (mInputByteCount == 0)
+            throw std::runtime_error("configure must be called first");
 
         if (eq(mT0[otIdx][0], ZeroBlock))
             throw std::runtime_error("uninitialized OT extension");
 
+        if (mEncodeFlags[otIdx])
+            throw std::runtime_error("encode can only be called once per otIdx");
+
         mEncodeFlags[otIdx] = 1;
 #endif // !NDEBUG
+        block* t0Val = mT0.data() + mT0.stride() * otIdx;
+        block* t1Val = mT1.data() + mT0.stride() * otIdx;
+        block* wVal = mW.data() + mW.stride() * otIdx;
+        memcpy(wVal, input, mInputByteCount);
 
         // use this for two thing, to store the code word and 
         // to store the zero message from base OT matrix transposed.
-        std::array<block, 10> codeword;
-        mCode.encode((u8*)input, (u8*)codeword.data());
+        std::array<block, 10> codeword = { ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock };
+        mCode.encode((u8*)wVal, (u8*)codeword.data());
+
+        //std::cout << "encode[" << otIdx << "] = " << BitVector((u8*)wVal, 76).hex() << " ->  " << codeword[0] << std::endl;
 
 
 
-
-        block* t0Val = mT0.data() + mT0.bounds()[1] * otIdx;
-        block* t1Val = mT1.data() + mT0.bounds()[1] * otIdx;
-        block* wVal = mW.data() + mW.bounds()[1] * otIdx;
-        memcpy(wVal, input, mInputByteSize);
 
         // encode the correction value as u = T0 + T1 + c(w), there c(w) is a codeword.
 
-        if (mT0.bounds()[1] == 4)
+        if (mT0.stride() == 4)
         {
 
             // this code here is optimized for codewords of size ~ 128 * 4.
@@ -222,7 +238,7 @@ namespace osuCrypto
             SHA1  sha1;
             u8 hashBuff[SHA1::HashSize];
             // now hash it to remove the correlation.
-            sha1.Update((u8*)t0Val, mT0.bounds()[1] * sizeof(block));
+            sha1.Update((u8*)t0Val, mT0.stride() * sizeof(block));
             sha1.Final(hashBuff);
             memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
 
@@ -249,7 +265,7 @@ namespace osuCrypto
         else
         {
 
-            for (u64 i = 0; i < mT0.bounds()[1]; ++i)
+            for (u64 i = 0; i < mT0.stride(); ++i)
             {
                 // reuse mT1 as the place we store the correlated value. 
                 // this will later get sent to the sender.
@@ -263,16 +279,16 @@ namespace osuCrypto
             SHA1  sha1;
             u8 hashBuff[SHA1::HashSize];
             // now hash it to remove the correlation.
-            sha1.Update((u8*)t0Val, mT0.bounds()[1] * sizeof(block));
+            sha1.Update((u8*)t0Val, mT0.stride() * sizeof(block));
             sha1.Final(hashBuff);
             memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
             //val = toBlock(hashBuff);
 #else
             //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
-            mAesFixedKey.ecbEncBlocks(t0Val, mT0.bounds()[1], codeword.data());
+            mAesFixedKey.ecbEncBlocks(t0Val, mT0.stride(), codeword.data());
 
             val = ZeroBlock;
-            for (u64 i = 0; i < mT0.bounds()[1]; ++i)
+            for (u64 i = 0; i < mT0.stride(); ++i)
                 val = val ^ codeword[i] ^ t0Val[i];
 
 
@@ -285,6 +301,8 @@ namespace osuCrypto
 
     void OosNcoOtReceiver::zeroEncode(u64 otIdx)
     {
+        //std::cout << "encode[" << otIdx <<"] = * " << std::endl;
+
 #ifndef NDEBUG
         if (eq(mT0[otIdx][0], ZeroBlock))
             throw std::runtime_error("uninitialized OT extension");
@@ -292,19 +310,19 @@ namespace osuCrypto
         mEncodeFlags[otIdx] = 1;
 #endif // !NDEBUG
 
-        block* t0Val = mT0.data() + mT0.bounds()[1] * otIdx;
-        block* t1Val = mT1.data() + mT0.bounds()[1] * otIdx;
-        block* wVal = mW.data() + mW.bounds()[1] * otIdx;
+        block* t0Val = mT0.data() + mT0.stride() * otIdx;
+        block* t1Val = mT1.data() + mT0.stride() * otIdx;
+        block* wVal = mW.data() + mW.stride() * otIdx;
 
         // This codeword will be all zero. We assume the zero message is a valid codeword.
-        for (u64 i = 0; i < mW.bounds()[1]; ++i)
+        for (u64 i = 0; i < mW.stride(); ++i)
         {
             wVal[i] = ZeroBlock;
         }
 
         // This is here in the case that you done want to encode a message.
         // It s more efficient since we don't call SHA.
-        for (u64 i = 0; i < mT0.bounds()[1]; ++i)
+        for (u64 i = 0; i < mT0.stride(); ++i)
         {
             // encode the zero message. We assume the zero message is a valid codeword.
             // Also, reuse mT1 as the place we store the correlated value. 
@@ -327,12 +345,16 @@ namespace osuCrypto
         u64 inputBitCount)
     {
         if (inputBitCount <= 76)
+        {
+
+            //mCode.loadTxtFile("C:/Users/peter/repo/libOTe/libOTe/Tools/bch511.txt");
             mCode.load(bch511_binary, sizeof(bch511_binary));
+        }
         else
             throw std::runtime_error(LOCATION);
 
 
-        mInputByteSize = (inputBitCount + 7) / 8;
+        mInputByteCount = (inputBitCount + 7) / 8;
         mStatSecParam = statSecParam;
         mMalicious = maliciousSecure;
         mGens.resize(roundUpTo(mCode.codewordBitSize(), 128));
@@ -353,7 +375,7 @@ namespace osuCrypto
         // this is potentially dangerous. We don't have a guarantee that mT1 will still exist when 
         // the network gets around to sending this. Oh well.
         TODO("Make this memory safe");
-        chl.asyncSend(mT1.data() + (mCorrectionIdx * mT1.bounds()[1]), mT1.bounds()[1] * sendCount * sizeof(block));
+        chl.asyncSend(mT1.data() + (mCorrectionIdx * mT1.stride()), mT1.stride() * sendCount * sizeof(block));
 
         mCorrectionIdx += sendCount;
     }
@@ -362,37 +384,58 @@ namespace osuCrypto
     {
         if (mMalicious)
         {
+            chl.asyncSend(&ZeroBlock, 1);
+
+#ifndef NDEBUG
+            //std::cout << IoStream::lock << "receiver " << std::endl;
+            for (u64 i = 0; i < mCorrectionIdx; ++i)
+            {
+                if (mEncodeFlags[i] == 0)
+                {
+                    throw std::runtime_error("All messages must be encoded before check is called. " LOCATION);
+                }
+                //std::cout << i << " " << (int)mEncodeFlags[i] << " ";
+                //for (u64 j = 0; j < mT1.stride(); ++j)
+                //{
+                //    std::cout << mT1[i][j] << " ";
+                //}
+                //std::cout << std::endl;
+            }
+            //std::cout << IoStream::unlock;
+#endif
 
             PRNG prng(wordSeed);
 
             // first we need to do is the extra statSecParam number of correction
             // values. This will just be for random inputs and are used to mask
             // out true choices that were used in the remaining correction values.
-            std::unique_ptr<ByteStream> wBuff(new Buff(sizeof(block) * mStatSecParam * mW.bounds()[1]));
-            std::unique_ptr<ByteStream> tBuff(new Buff(sizeof(block) * mStatSecParam * mT0.bounds()[1]));
+            std::unique_ptr<ByteStream> wBuff(new Buff(sizeof(block) * mStatSecParam * mW.stride()));
+            std::unique_ptr<ByteStream> tBuff(new Buff(sizeof(block) * mStatSecParam * mT0.stride()));
 
             // get two arrays of block into these buff.
             auto tSum = tBuff->getSpan<block>();
             auto wSum = wBuff->getSpan<block>();
 
-            // generate random words.
-            prng.get(wSum.data(), wSum.size());
 
             // view them as matrix to make life easier.
             MatrixView<block> words(wSum.begin(), wSum.end(), mCode.plaintextBlkSize());
-            block seed;
 
             // encode each random word.
             for (u64 i = 0; i < mStatSecParam; ++i)
             {
+                block _;
+
+                // generate random words.
+                prng.get((u8*)words[i].data(), mInputByteCount);
+
                 // the correction value is stored internally
-                encode(mCorrectionIdx + i, words[i].data(), (u8*)&seed, sizeof(block));
+                encode(mCorrectionIdx + i, words[i].data(), (u8*)&_);
 
                 // initialize the tSum array with the T0 value used to encode these
                 // random words.
-                for (u64 j = 0; j < mT0.bounds()[1]; ++j)
+                for (u64 j = 0; j < mT0.stride(); ++j)
                 {
-                    tSum[i * mT0.bounds()[1] + j] = mT0[mCorrectionIdx + i][j];
+                    tSum[i * mT0.stride() + j] = mT0[mCorrectionIdx + i][j];
                 }
             }
 
@@ -400,6 +443,7 @@ namespace osuCrypto
             sendCorrection(chl, mStatSecParam);
 
             // the sender will now tell us the random challenge seed.
+            block seed;
             chl.recv(&seed, sizeof(block));
 
 
@@ -418,13 +462,23 @@ namespace osuCrypto
             // i.e.  x * block  <==>   block & zeroAndAllOneBlocks[x]
             // This is so much faster than if(x) sum[l] = sum[l] ^ block
             std::array<block, 2> zeroAndAllOneBlocks{ ZeroBlock, AllOneBlock };
-            u64 codeSize = mT0.bounds()[1];
+            u64 codeSize = mT0.stride();
 
-            // This will make the us send all of out input words
+            // This will make the us send all of our input words
             // and the complete T0 matrix. For DEBUG only
 #ifdef OOS_CHECK_DEBUG
-            chl.send(mT0.data(), mT0.bounds()[0] * mT0.bounds()[1] * sizeof(block));
-            chl.send(mW.data(), mW.bounds()[0] * mW.bounds()[1] * sizeof(block));
+            chl.send(mT0.data(), mT0.bounds()[0] * mT0.stride() * sizeof(block));
+            chl.send(mW.data(), mW.bounds()[0] * mW.stride() * sizeof(block));
+            std::vector<std::array<block, 2>> baseOTs(mGens.size());
+            std::vector<u64> mBlockIdxs(mGens.size());
+            for (u64 i = 0; i < baseOTs.size(); ++i)
+            {
+                baseOTs[i][0] = mGens[i][0].getSeed();
+                baseOTs[i][1] = mGens[i][1].getSeed();
+                mBlockIdxs[i] = mGens[i][0].mBlockIdx;
+            }
+            chl.send(baseOTs);
+            chl.send(mBlockIdxs);
 #endif
 
             // this will hold out random x^(l)_i values that we compute from the seed. 
@@ -580,7 +634,7 @@ namespace osuCrypto
                         }
                     }
 
-                    if (mW.bounds()[1] != 1)
+                    if (mW.stride() != 1)
                         throw std::runtime_error("generalize this code vvvvvv " LOCATION);
 
                     xIter = byteView;
