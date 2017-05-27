@@ -68,10 +68,14 @@ namespace osuCrypto
         SHA1 hasher;
         hasher.Update(seed);
         u8 comm[SHA1::HashSize];
+        hasher.Final(comm);
+
+
         chl.asyncSend(comm, SHA1::HashSize);
-        auto future = chl.asyncRecv((u8*)&theirSeed, sizeof(block), [&, seed]() {
-            chl.asyncSendCopy(&seed, sizeof(block));
-        });
+
+
+        auto future = chl.asyncRecv((u8*)&theirSeed, sizeof(block));
+
 
         // round up
         numOTExt = ((numOTExt + 127) / 128) * 128;
@@ -151,7 +155,9 @@ namespace osuCrypto
             doneIdx = stopIdx;
         }
 
+
         future.get();
+        chl.asyncSendCopy(&seed, sizeof(block));
 
         std::array<block, 4> keys;       
         PRNG(seed ^ theirSeed).get(keys.data(), keys.size());
@@ -233,7 +239,10 @@ namespace osuCrypto
 
     u64 KkrtNcoOtSender::getBaseOTCount() const
     {
-        return mGens.size();
+        if (mGens.size())
+            return mGens.size();
+        else
+            throw std::runtime_error("must call configure(...) before getBaseOTCount() " LOCATION);
     }
 
     void KkrtNcoOtSender::recvCorrection(Channel & chl, u64 recvCount)

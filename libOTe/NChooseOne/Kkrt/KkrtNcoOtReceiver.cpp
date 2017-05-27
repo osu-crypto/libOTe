@@ -39,9 +39,10 @@ namespace osuCrypto
 
         block seed = prng.get<block>();
         u8 theirComm[SHA1::HashSize];
-        chl.asyncRecv(theirComm, SHA1::HashSize, [&]()
+
+        auto fu = chl.asyncRecv(theirComm, SHA1::HashSize, [&]()
         {
-            chl.asyncSend(&seed, sizeof(block));
+            chl.asyncSendCopy(&seed, sizeof(block));
         });
 
 
@@ -140,10 +141,20 @@ namespace osuCrypto
             doneIdx = stopIdx;
         }
 
+
+
+        fu.get();
         block theirSeed;
         chl.recv(&theirSeed, sizeof(block));
 
-        
+        SHA1 sha;
+        sha.Update(theirSeed);
+        u8 cc[SHA1::HashSize];
+        sha.Final(cc);
+        if (memcmp(theirComm, cc, SHA1::HashSize))
+            throw std::runtime_error(LOCATION);
+
+
         std::array<block, 4> keys;
         PRNG(seed ^ theirSeed).get(keys.data(), keys.size());
         mMultiKeyAES.setKeys(keys);
@@ -152,7 +163,10 @@ namespace osuCrypto
 
     u64 KkrtNcoOtReceiver::getBaseOTCount() const
     {
-        return mGens.size();
+        if (mGens.size())
+            return mGens.size();
+        else
+            throw std::runtime_error("must call configure(...) before getBaseOTCount() " LOCATION);
     }
 
     std::unique_ptr<NcoOtExtReceiver> KkrtNcoOtReceiver::split()
@@ -239,6 +253,7 @@ namespace osuCrypto
         memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
         //val = toBlock(hashBuff);
 #else
+        s
         std::array<block, 10> aesBuff;
         mAesFixedKey.ecbEncBlocks(t0Val, mT0.stride(), aesBuff.data());
 

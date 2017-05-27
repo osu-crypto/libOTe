@@ -336,7 +336,10 @@ namespace osuCrypto
 
     u64 OosNcoOtReceiver::getBaseOTCount() const
     {
-        return mGens.size();
+        if (mGens.size())
+            return mGens.size();
+        else
+            throw std::runtime_error("must call configure(...) before getBaseOTCount() " LOCATION);
     }
 
     void OosNcoOtReceiver::configure(

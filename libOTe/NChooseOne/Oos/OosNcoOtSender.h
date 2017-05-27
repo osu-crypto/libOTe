@@ -40,7 +40,7 @@ namespace osuCrypto {
         u64 mCorrectionIdx, mInputByteCount;
 
 
-        u64 getBaseOTCount() const override { return mGens.size(); };
+        u64 getBaseOTCount() const override;// { return mGens.size(); };
 
         bool hasBaseOts() const override
         {

@@ -11,6 +11,14 @@ namespace osuCrypto
     {
     }
 
+    u64 OosNcoOtSender::getBaseOTCount() const
+    {
+        if (mGens.size())
+            return mGens.size();
+        else
+            throw std::runtime_error("must call configure(...) before getBaseOTCount() " LOCATION);
+    }
+
     void OosNcoOtSender::setBaseOts(
         span<block> baseRecvOts,
         const BitVector & choices)

@@ -241,7 +241,7 @@ namespace tests_libOTe
         u64 stepSize = 10;
         std::vector<block> inputs(stepSize);
 
-        for (size_t j = 0; j < 10; j++)
+        for (size_t j = 0; j < 2; j++)
         {
             // perform the init on each of the classes. should be performed concurrently
             auto thrd = std::thread([&]() { sender.init(numOTs, prng0, sendChl); });
@@ -307,7 +307,7 @@ namespace tests_libOTe
         auto& recv2 = *recv2Ptr;
         auto& send2 = *send2Ptr;
 
-        for (size_t j = 0; j < 10; j++)
+        for (size_t j = 0; j < 2; j++)
         {
             auto thrd = std::thread([&]() {
                 send2.init(numOTs, prng0, sendChl);
