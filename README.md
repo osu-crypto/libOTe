@@ -44,9 +44,9 @@ In `Powershell`, this will set up the project
 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
-cd libOTe/thirdparty/win
+cd libOTe/cryptoTools/thirdparty/win
 getBoost.ps1; getMiracl.ps1
-cd ../..
+cd ../../..
 libOTe.sln
 ```
 
