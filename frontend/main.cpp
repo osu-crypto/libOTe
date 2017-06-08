@@ -1,6 +1,6 @@
 #include <iostream>
 
-using namespace std;
+//using namespace std;
 #include "tests_cryptoTools/UnitTests.h"
 #include "libOTe_Tests/UnitTests.h"
 
@@ -77,7 +77,7 @@ void kkrt_test(int i)
 
     block choice = prng0.get<block>();// ((u8*)choice.data(), ncoinputBlkSize * sizeof(block));
 
-    std::vector< thread> thds(numThreads);
+    std::vector<std::thread> thds(numThreads);
 
     if (i == 0)
     {
@@ -202,7 +202,7 @@ void oos_test(int i)
 
     block choice = prng0.get<block>();
 
-    std::vector< thread> thds(numThreads);
+    std::vector<std::thread> thds(numThreads);
 
 
     if (i == 0)
