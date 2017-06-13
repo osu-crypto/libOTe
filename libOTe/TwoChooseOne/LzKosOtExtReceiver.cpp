@@ -51,7 +51,7 @@ namespace osuCrypto
     {
         if (choices.size() == 0) return;
 
-        if (mHasBase == false || choices.size() != messages.size())
+        if (mHasBase == false || choices.size() != u64(messages.size()))
             throw std::runtime_error(LOCATION);
 
         // round up

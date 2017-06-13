@@ -23,7 +23,7 @@ namespace osuCrypto
         span<block> baseRecvOts,
         const BitVector & choices)
     {
-        if (choices.size() != baseRecvOts.size())
+        if (choices.size() != u64(baseRecvOts.size()))
             throw std::runtime_error("size mismatch");
 
         if (choices.size() % (sizeof(block) * 8) != 0)
@@ -33,7 +33,7 @@ namespace osuCrypto
         mBaseChoiceBits = choices;
         mGens.resize(choices.size());
 
-        for (u64 i = 0; i < baseRecvOts.size(); i++)
+        for (u64 i = 0; i < u64(baseRecvOts.size()); i++)
         {
             mGens[i].SetSeed(baseRecvOts[i]);
         }
@@ -486,9 +486,9 @@ namespace osuCrypto
 
                         for (u64 j = 0; j < 4; ++j)
                         {
-                            block t = tIter[j];
+                            //block t = tIter[j];
                             auto cor = corIter[j];
-                            block tc = cor & mChoiceBlks[j];
+                            //block tc = cor & mChoiceBlks[j];
 
                             block tq = mT0_DEBUG[kk][j] ^ zeroAndQ[1][j];
                             block cb = cw[j] & mChoiceBlks[j];

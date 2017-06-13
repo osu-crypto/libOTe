@@ -12,10 +12,10 @@ namespace osuCrypto
         gsl::span<block> baseRecvOts,
         const BitVector & choices)
     {
-        if (choices.size() != baseRecvOts.size())
+        if (choices.size() != u64(baseRecvOts.size()))
             throw std::runtime_error("size mismatch");
 
-        if (choices.size() != mGens.size())
+        if (choices.size() != u64(mGens.size()))
             throw std::runtime_error("only multiples of 128 are supported");
 
 
@@ -23,7 +23,7 @@ namespace osuCrypto
         mGens.resize(choices.size());
         mGensBlkIdx.resize(choices.size(), 0);
 
-        for (u64 i = 0; i < baseRecvOts.size(); i++)
+        for (u64 i = 0; i < u64(baseRecvOts.size()); i++)
         {
             mGens[i].setKey(baseRecvOts[i]);
         }

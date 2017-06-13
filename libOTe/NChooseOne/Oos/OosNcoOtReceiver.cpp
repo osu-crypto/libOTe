@@ -20,7 +20,7 @@ namespace osuCrypto
     void OosNcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts)
     {
 
-        if (baseRecvOts.size() != mGens.size())
+        if (u64(baseRecvOts.size()) != u64(mGens.size()))
             throw std::runtime_error("rt error at " LOCATION);
 
         mGens.resize(baseRecvOts.size());

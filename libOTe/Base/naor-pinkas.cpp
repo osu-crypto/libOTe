@@ -331,7 +331,7 @@ namespace osuCrypto
 
                 recvFuture.get();
 
-                for (u64 i = 0; i < messages.size(); i++)
+                for (u64 i = 0; i < u64(messages.size()); i++)
                 {
 
                     pPK0.fromBytes(buff.data() + i * fieldElementSize);

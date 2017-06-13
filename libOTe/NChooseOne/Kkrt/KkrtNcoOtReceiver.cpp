@@ -15,7 +15,7 @@ namespace osuCrypto
         if (baseRecvOts.size() % 128 != 0)
             throw std::runtime_error("rt error at " LOCATION);
 
-        if (baseRecvOts.size()!= mGens.size())
+        if (u64(baseRecvOts.size())!= u64(mGens.size()))
             throw std::runtime_error("rt error at " LOCATION);
 
 
