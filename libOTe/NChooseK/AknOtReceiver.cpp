@@ -24,14 +24,14 @@ namespace osuCrypto
         auto& chl0 = chls[0];
 
         if (ots.hasBaseOts() == false)
-        { 
+        {
             std::array<std::array<block, 2>, gOtExtBaseOtCount> baseMsg;
 
             NaorPinkas base;
             base.send(baseMsg, prng, chl0, 2);
             ots.setBaseOts(baseMsg);
         }
-         
+
         mMessages.resize(totalOTCount);
         mChoices.nChoosek(totalOTCount, numberOfOnes, prng);
 
@@ -75,7 +75,7 @@ namespace osuCrypto
             //}
             //std::cout << IoStream::unlock;
 
-            // ok, OTs are done. 
+            // ok, OTs are done.
             if (t == 0)
             {
                 gTimer.setTimePoint("AknOt.extDone");
@@ -108,7 +108,7 @@ namespace osuCrypto
             auto openChoiceIter = choiceBuff->begin();
             auto choiceIter = mChoices.begin() + start;
 
-            // the index of the current openChoiceIter. 
+            // the index of the current openChoiceIter.
             u64 j = 0;
 
             //create a local list of ones and zero indices.
@@ -202,7 +202,7 @@ namespace osuCrypto
             //std::cout << std::endl << IoStream::unlock;
 
 
-            // now move the list list into the shared list. 
+            // now move the list list into the shared list.
             // We didn't initially do this to prevent false sharing
             threadsZeroOnesList[t][0] = std::move(zeroOneLists[0]);
             threadsZeroOnesList[t][1] = std::move(zeroOneLists[1]);
@@ -211,7 +211,7 @@ namespace osuCrypto
             // now indicate that we are done. If we are last, set the promise.
             u32 d = --remaining;
             if (d == 0)
-                doneProm.set_value(); 
+                doneProm.set_value();
 
 
             if (t == 0)
@@ -248,7 +248,7 @@ namespace osuCrypto
                 std::random_shuffle(mOnes.begin(), mOnes.begin(), prng);
 
             }
-            
+
             if (t == 1 || chls.size() == 1)
             {
                 // now merge and shuffle all the indices for the zero OT messages
@@ -289,7 +289,7 @@ namespace osuCrypto
 
             // create a seed for it.
             block seed = prng.get<block>();
-            
+
             //compute the thread idk t
             u64 t = i + 1;
 
