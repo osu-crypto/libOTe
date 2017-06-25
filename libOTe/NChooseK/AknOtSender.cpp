@@ -18,11 +18,11 @@ namespace osuCrypto
 
 
     void AknOtSender::init(
-        u64 totalOTCount, 
-        u64 cutAndChooseThreshold, 
-        double p, 
-        OtExtSender & ots, 
-        span<Channel>  chls, 
+        u64 totalOTCount,
+        u64 cutAndChooseThreshold,
+        double p,
+        OtExtSender & ots,
+        span<Channel>  chls,
         PRNG & prng)
     {
 
@@ -98,7 +98,7 @@ namespace osuCrypto
             if (t == 0)
             {
                 gTimer.setTimePoint("AknOt.SenderExtDone");
-                chl.asyncSend(&cncRootSeed, sizeof(block));
+                chl.asyncSend((u8*)&cncRootSeed, sizeof(block));
             }
 
             u64 sampleCount(0);
@@ -161,7 +161,7 @@ namespace osuCrypto
                     onesCount += cc;
 
                     ++choiceIter;
-                }  
+                }
             }
 
             //std::cout << std::endl << IoStream::unlock;
@@ -192,7 +192,7 @@ namespace osuCrypto
 
 
         block proof;
-        chl0.recv(&proof, sizeof(block));
+        chl0.recv((u8*)&proof, sizeof(block));
         if (totalOnesCount > cutAndChooseThreshold ||
             neq(proof, totalSum))
         {

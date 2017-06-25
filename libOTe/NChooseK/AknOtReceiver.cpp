@@ -81,7 +81,7 @@ namespace osuCrypto
                 gTimer.setTimePoint("AknOt.extDone");
                 // if thread 0, get the seed that determines the cut and choose.
                 block cncRootSeed;
-                chl.recv(&cncRootSeed, sizeof(block));
+                chl.recv((u8*)&cncRootSeed, sizeof(block));
                 PRNG gg(cncRootSeed);
 
                 gTimer.setTimePoint("AknOt.CncSeedReceived");
@@ -225,7 +225,7 @@ namespace osuCrypto
                 // all other threads have finished.
 
                 // send the other guy the sum of our ot messages as proof.
-                chl0.asyncSendCopy(&totalSum, sizeof(block));
+                chl0.asyncSendCopy((u8*)&totalSum, sizeof(block));
 
 
                 // now merge and shuffle all the indices for the one OT messages

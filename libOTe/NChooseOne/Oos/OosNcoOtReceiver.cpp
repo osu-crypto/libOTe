@@ -46,7 +46,7 @@ namespace osuCrypto
         //TODO("Make the statistical sec param a parameter");
         // = 40;
 
-        // this will be used as temporary buffers of 128 columns, 
+        // this will be used as temporary buffers of 128 columns,
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
         std::array<std::array<block, superBlkSize>, 128> t0;
@@ -63,9 +63,9 @@ namespace osuCrypto
         // that was sent to the sender.
         mCorrectionIdx = 0;
 
-        // We need three matrices, T0, T1, and mW. T1, T0 will hold the expanded 
-        // and transposed rows that we got the using the base OTs as PRNG seed. 
-        // mW will hold the record of all the words that we encoded. They will 
+        // We need three matrices, T0, T1, and mW. T1, T0 will hold the expanded
+        // and transposed rows that we got the using the base OTs as PRNG seed.
+        // mW will hold the record of all the words that we encoded. They will
         // be used in the Check that is done at the end.
         mW  = Matrix<block>();
         mT0 = Matrix<block>();
@@ -82,11 +82,11 @@ namespace osuCrypto
 #endif
 
         // NOTE: We do not transpose a bit-matrix of size numCol * numCol.
-        //   Instead we break it down into smaller chunks. We do 128 columns 
-        //   times 8 * 128 rows at a time, where 8 = superBlkSize. This is done for  
-        //   performance reasons. The reason for 8 is that most CPUs have 8 AES vector  
+        //   Instead we break it down into smaller chunks. We do 128 columns
+        //   times 8 * 128 rows at a time, where 8 = superBlkSize. This is done for
+        //   performance reasons. The reason for 8 is that most CPUs have 8 AES vector
         //   lanes, and so its more efficient to encrypt (aka prng) 8 blocks at a time.
-        //   So that's what we do. 
+        //   So that's what we do.
         for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
         {
             // compute at what row does the user want us to stop.
@@ -104,7 +104,7 @@ namespace osuCrypto
                 {
                     // generate the column indexed by colIdx. This is done with
                     // AES in counter mode acting as a PRNG. We don't use the normal
-                    // PRNG interface because that would result in a data copy when 
+                    // PRNG interface because that would result in a data copy when
                     // we mode it into the T0,T1 matrices. Instead we do it directly.
                     mGens[colIdx][0].mAes.ecbEncCounterMode(mGens[colIdx][0].mBlockIdx, superBlkSize, ((block*)t0.data() + superBlkSize * tIdx));
                     mGens[colIdx][1].mAes.ecbEncCounterMode(mGens[colIdx][1].mBlockIdx, superBlkSize, ((block*)t1.data() + superBlkSize * tIdx));
@@ -114,7 +114,7 @@ namespace osuCrypto
                     mGens[colIdx][1].mBlockIdx += superBlkSize;
                 }
 
-                // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
+                // transpose our 128 columns of 1024 bits. We will have 1024 rows,
                 // each 128 bits wide.
                 sse_transpose128x1024(t0);
                 sse_transpose128x1024(t1);
@@ -122,7 +122,7 @@ namespace osuCrypto
                 // This is the index of where we will store the matrix long term.
                 // doneIdx is the starting row. i is the offset into the blocks of 128 bits.
                 // __restrict isn't crucial, it just tells the compiler that this pointer
-                // is unique and it shouldn't worry about pointer aliasing. 
+                // is unique and it shouldn't worry about pointer aliasing.
                 block* __restrict mT0Iter = mT0.data() + mT0.stride() * doneIdx + i;
                 block* __restrict mT1Iter = mT1.data() + mT1.stride() * doneIdx + i;
 
@@ -130,7 +130,7 @@ namespace osuCrypto
                 {
                     // because we transposed 1024 rows, the indexing gets a bit weird. But this
                     // is the location of the next row that we want. Keep in mind that we had long
-                    // **contiguous** columns. 
+                    // **contiguous** columns.
                     block* __restrict t0Iter = ((block*)t0.data()) + j;
                     block* __restrict t1Iter = ((block*)t1.data()) + j;
 
@@ -207,7 +207,7 @@ namespace osuCrypto
         block* wVal = mW.data() + mW.stride() * otIdx;
         memcpy(wVal, input, mInputByteCount);
 
-        // use this for two thing, to store the code word and 
+        // use this for two thing, to store the code word and
         // to store the zero message from base OT matrix transposed.
         std::array<block, 10> codeword = { ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock };
         mCode.encode((u8*)wVal, (u8*)codeword.data());
@@ -244,7 +244,7 @@ namespace osuCrypto
 
             //val = toBlock(hashBuff);
 #else
-            //H(x) = AES_f(H'(x)) + H'(x), where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
+            //H(x) = AES_f(H'(x)) + H'(x), where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
             mAesFixedKey.ecbEncFourBlocks(t0Val, codeword.data());
 
             codeword[0] = codeword[0] ^ t0Val[0];
@@ -267,7 +267,7 @@ namespace osuCrypto
 
             for (u64 i = 0; i < mT0.stride(); ++i)
             {
-                // reuse mT1 as the place we store the correlated value. 
+                // reuse mT1 as the place we store the correlated value.
                 // this will later get sent to the sender.
                 t1Val[i]
                     = codeword[i]
@@ -284,7 +284,7 @@ namespace osuCrypto
             memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
             //val = toBlock(hashBuff);
 #else
-            //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
+            //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
             mAesFixedKey.ecbEncBlocks(t0Val, mT0.stride(), codeword.data());
 
             val = ZeroBlock;
@@ -325,7 +325,7 @@ namespace osuCrypto
         for (u64 i = 0; i < mT0.stride(); ++i)
         {
             // encode the zero message. We assume the zero message is a valid codeword.
-            // Also, reuse mT1 as the place we store the correlated value. 
+            // Also, reuse mT1 as the place we store the correlated value.
             // this will later get sent to the sender.
             t1Val[i]
                 = t0Val[i]
@@ -375,10 +375,11 @@ namespace osuCrypto
 
 #endif
 
-        // this is potentially dangerous. We don't have a guarantee that mT1 will still exist when 
+        // this is potentially dangerous. We don't have a guarantee that mT1 will still exist when
         // the network gets around to sending this. Oh well.
         TODO("Make this memory safe");
-        chl.asyncSend(mT1.data() + (mCorrectionIdx * mT1.stride()), mT1.stride() * sendCount * sizeof(block));
+        auto dest = mT1.data() + (mCorrectionIdx * mT1.stride());
+        chl.asyncSend((u8*)dest, mT1.stride() * sendCount * sizeof(block));
 
         mCorrectionIdx += sendCount;
     }
@@ -387,7 +388,7 @@ namespace osuCrypto
     {
         if (mMalicious)
         {
-            chl.asyncSend(&ZeroBlock, 1);
+            chl.asyncSend((u8*)&ZeroBlock, 1);
 
 #ifndef NDEBUG
             //std::cout << IoStream::lock << "receiver " << std::endl;
@@ -447,7 +448,7 @@ namespace osuCrypto
 
             // the sender will now tell us the random challenge seed.
             block seed;
-            chl.recv(&seed, sizeof(block));
+            chl.recv((u8*)&seed, sizeof(block));
 
 
             // This AES will work as a PRNG, using AES-NI in counter mode.
@@ -460,7 +461,7 @@ namespace osuCrypto
 
             // This will be used as a fast way to multiply the random challenge bits
             // by the rows. zeroAndAllOneBlocks[0] will always be 00000.....00000,
-            // and  zeroAndAllOneBlocks[1] will hold 111111.....111111. 
+            // and  zeroAndAllOneBlocks[1] will hold 111111.....111111.
             // Multiplication is then just and array index and an & operation.
             // i.e.  x * block  <==>   block & zeroAndAllOneBlocks[x]
             // This is so much faster than if(x) sum[l] = sum[l] ^ block
@@ -484,7 +485,7 @@ namespace osuCrypto
             chl.send(mBlockIdxs);
 #endif
 
-            // this will hold out random x^(l)_i values that we compute from the seed. 
+            // this will hold out random x^(l)_i values that we compute from the seed.
             std::vector<block> challengeBuff(mStatSecParam);
 
             // since we don't want to do bit shifting, this larger array
@@ -509,7 +510,7 @@ namespace osuCrypto
                 aes.ecbEncCounterMode(aesIdx, mStatSecParam, challengeBuff.data());
                 aesIdx += mStatSecParam;
 
-                // now expand each of these bits into its own byte. This is done with the 
+                // now expand each of these bits into its own byte. This is done with the
                 // right shift instruction _mm_srai_epi16. and then we mask to get only
                 // the bottom bit. Doing the 8 times gets us each bit in its own byte.
                 for (u64 i = 0; i < mStatSecParam; ++i)
@@ -586,7 +587,7 @@ namespace osuCrypto
 
                         for (u64 j = 0; j < mStatSecParam / 8; ++j, wSumIter += 8)
                         {
-                            // we processes 8 rows of words at a time. Do the 
+                            // we processes 8 rows of words at a time. Do the
                             // same masking trick.
                             auto wx0 = (*mWIter & zeroAndAllOneBlocks[xIter[0]]);
                             auto wx1 = (*mWIter & zeroAndAllOneBlocks[xIter[1]]);
@@ -649,7 +650,7 @@ namespace osuCrypto
                         for (u64 j = 0; j < mStatSecParam / 8; ++j, wSumIter += 8)
                         {
 
-                            // we processes 8 rows of words at a time. Do the 
+                            // we processes 8 rows of words at a time. Do the
                             // same masking trick.
                             auto wx0 = (*mWIter & zeroAndAllOneBlocks[xIter[0]]);
                             auto wx1 = (*mWIter & zeroAndAllOneBlocks[xIter[1]]);

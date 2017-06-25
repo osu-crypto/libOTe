@@ -42,14 +42,14 @@ namespace osuCrypto
 
         auto fu = chl.asyncRecv(theirComm, SHA1::HashSize, [&]()
         {
-            chl.asyncSendCopy(&seed, sizeof(block));
+            chl.asyncSendCopy((u8*)&seed, sizeof(block));
         });
 
 
 
         static const u64 superBlkSize(8);
 
-        // this will be used as temporary buffers of 128 columns, 
+        // this will be used as temporary buffers of 128 columns,
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
         std::array<std::array<block, superBlkSize>, 128> t0;
@@ -72,11 +72,11 @@ namespace osuCrypto
         u64 doneIdx = 0;
 
         // NOTE: We do not transpose a bit-matrix of size numCol * numCol.
-        //   Instead we break it down into smaller chunks. We do 128 columns 
-        //   times 8 * 128 rows at a time, where 8 = superBlkSize. This is done for  
-        //   performance reasons. The reason for 8 is that most CPUs have 8 AES vector  
+        //   Instead we break it down into smaller chunks. We do 128 columns
+        //   times 8 * 128 rows at a time, where 8 = superBlkSize. This is done for
+        //   performance reasons. The reason for 8 is that most CPUs have 8 AES vector
         //   lanes, and so its more efficient to encrypt (aka prng) 8 blocks at a time.
-        //   So that's what we do. 
+        //   So that's what we do.
         for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
         {
             // compute at what row does the user want us to stop.
@@ -94,7 +94,7 @@ namespace osuCrypto
                 {
                     // generate the column indexed by colIdx. This is done with
                     // AES in counter mode acting as a PRNG. We don't use the normal
-                    // PRNG interface because that would result in a data copy when 
+                    // PRNG interface because that would result in a data copy when
                     // we move it into the T0,T1 matrices. Instead we do it directly.
                     mGens[colIdx][0].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, ((block*)t0.data() + superBlkSize * tIdx));
                     mGens[colIdx][1].ecbEncCounterMode(mGensBlkIdx[colIdx], superBlkSize, ((block*)t1.data() + superBlkSize * tIdx));
@@ -103,7 +103,7 @@ namespace osuCrypto
                     mGensBlkIdx[colIdx] += superBlkSize;
                 }
 
-                // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
+                // transpose our 128 columns of 1024 bits. We will have 1024 rows,
                 // each 128 bits wide.
                 sse_transpose128x1024(t0);
                 sse_transpose128x1024(t1);
@@ -111,7 +111,7 @@ namespace osuCrypto
                 // This is the index of where we will store the matrix long term.
                 // doneIdx is the starting row. i is the offset into the blocks of 128 bits.
                 // __restrict isn't crucial, it just tells the compiler that this pointer
-                // is unique and it shouldn't worry about pointer aliasing. 
+                // is unique and it shouldn't worry about pointer aliasing.
                 block* __restrict mT0Iter = mT0.data() + mT0.stride() * doneIdx + i;
                 block* __restrict mT1Iter = mT1.data() + mT1.stride() * doneIdx + i;
 
@@ -119,7 +119,7 @@ namespace osuCrypto
                 {
                     // because we transposed 1024 rows, the indexing gets a bit weird. But this
                     // is the location of the next row that we want. Keep in mind that we had long
-                    // **contiguous** columns. 
+                    // **contiguous** columns.
                     block* __restrict t0Iter = ((block*)t0.data()) + j;
                     block* __restrict t1Iter = ((block*)t1.data()) + j;
 
@@ -145,7 +145,7 @@ namespace osuCrypto
 
         fu.get();
         block theirSeed;
-        chl.recv(&theirSeed, sizeof(block));
+        chl.recv((u8*)&theirSeed, sizeof(block));
 
         SHA1 sha;
         sha.Update(theirSeed);
@@ -221,8 +221,8 @@ namespace osuCrypto
         block word = ZeroBlock;
         memcpy(&word, input, mInputByteCount);
 
-        // run the input word through AES to get a psuedo-random codeword. Then 
-        // XOR the input with the AES output. 
+        // run the input word through AES to get a psuedo-random codeword. Then
+        // XOR the input with the AES output.
         std::array<block, width> choice{ word,word ,word ,word }, code;
         mMultiKeyAES.ecbEncNBlocks(choice.data(), code.data());
 
@@ -233,7 +233,7 @@ namespace osuCrypto
                 // final code is the output of AES plus the input
                 code[i] = code[i] ^ choice[i];
 
-                // reuse mT1 as the place we store the correlated value. 
+                // reuse mT1 as the place we store the correlated value.
                 // this will later get sent to the sender.
                 t1Val[i]
                     = code[i]
@@ -285,7 +285,7 @@ namespace osuCrypto
         // It s more efficient since we don't call SHA.
         for (u64 i = 0; i < mT0.stride(); ++i)
         {
-            // reuse mT1 as the place we store the correlated value. 
+            // reuse mT1 as the place we store the correlated value.
             // this will later get sent to the sender.
             t1Val[i]
                 = t0Val[i]
@@ -321,10 +321,10 @@ namespace osuCrypto
                 throw std::runtime_error("This send request contains uninitialized OT. Call encode first...");
 #endif
 
-        // this is potentially dangerous. We dont have a guarantee that mT1 will still exist when 
+        // this is potentially dangerous. We dont have a guarantee that mT1 will still exist when
         // the network gets around to sending this. Oh well.
         TODO("Make this memory safe");
-        chl.asyncSend(mT1.data() + (mCorrectionIdx * mT1.stride()), mT1.stride() * sendCount * sizeof(block));
+        chl.asyncSend((u8*)(mT1.data() + (mCorrectionIdx * mT1.stride())), mT1.stride() * sendCount * sizeof(block));
 
         mCorrectionIdx += sendCount;
     }

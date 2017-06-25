@@ -69,12 +69,12 @@ namespace osuCrypto
         SHA1 sha;
         u8 hashBuff[SHA1::HashSize];
 
-        // commit to as seed which will be used to 
+        // commit to as seed which will be used to
         block seed = prng.get<block>();
         Commit myComm(seed);
         chl.asyncSend(myComm.data(), myComm.size());
 
-        // turn the choice vbitVector into an array of blocks. 
+        // turn the choice vbitVector into an array of blocks.
         BitVector choices2(numBlocks * 128);
         choices2 = choices;
         choices2.resize(numBlocks * 128);
@@ -86,7 +86,7 @@ namespace osuCrypto
         block debugDelta; debugBuff.consume(debugDelta);
 
         Log::out << "delta" << Log::endl << debugDelta << Log::endl;
-#endif 
+#endif
 
         std::vector<block> extraBlocks;
         extraBlocks.reserve(256);
@@ -98,13 +98,13 @@ namespace osuCrypto
             std::unique_ptr<ByteStream> uBuff(new ByteStream(gOtExtBaseOtCount * sizeof(block)));
             uBuff->setp(gOtExtBaseOtCount * sizeof(block));
 
-            // get an array of blocks that we will fill. 
+            // get an array of blocks that we will fill.
             auto u = uBuff->getSpan<block>();
 
             for (u64 colIdx = 0; colIdx < gOtExtBaseOtCount; colIdx++)
             {
-                // use the base key material from the base OTs to 
-                // extend the i'th column of t0 and t1    
+                // use the base key material from the base OTs to
+                // extend the i'th column of t0 and t1
                 t0[colIdx] = mGens[colIdx][0].get<block>();
 
                 // This is t1[colIdx]
@@ -122,7 +122,7 @@ namespace osuCrypto
             // transpose t0 in place
             sse_transpose128(t0);
 
-#ifdef OTEXT_DEBUG 
+#ifdef OTEXT_DEBUG
             chl.recv(debugBuff); assert(debugBuff.size() == sizeof(t0));
             block* q = (block*)debugBuff.data();
 #endif
@@ -157,16 +157,16 @@ namespace osuCrypto
 
 
         // do correlation check and hashing
-        // For the malicious secure OTs, we need a random PRNG that is chosen random 
-        // for both parties. So that is what this is. 
+        // For the malicious secure OTs, we need a random PRNG that is chosen random
+        // for both parties. So that is what this is.
         PRNG commonPrng;
         //random_seed_commit(ByteArray(seed), chl, SEED_SIZE, prng.get<block>());
         block theirSeed;
-        chl.recv(&theirSeed, sizeof(block));
-        chl.asyncSendCopy(&seed, sizeof(block));
+        chl.recv((u8*)&theirSeed, sizeof(block));
+        chl.asyncSendCopy((u8*)&seed, sizeof(block));
         commonPrng.SetSeed(seed ^ theirSeed);
 
-        // this buffer will be sent to the other party to prove we used the 
+        // this buffer will be sent to the other party to prove we used the
         // same value of r in all of the column vectors...
         std::unique_ptr<ByteStream> correlationData(new ByteStream(3 * sizeof(block)));
         correlationData->setp(correlationData->capacity());

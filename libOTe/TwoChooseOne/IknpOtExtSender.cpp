@@ -83,9 +83,9 @@ namespace osuCrypto
             {
                 u64 step = std::min<u64>(numSuperBlocks - superBlkIdx, (u64)commStepSize);
 
-                chl.recv(u.data(), step * superBlkSize * 128 * sizeof(block));
+                chl.recv((u8*)u.data(), step * superBlkSize * 128 * sizeof(block));
                 uIter = (block*)u.data();
-            } 
+            }
 
             // transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
             for (u64 colIdx = 0; colIdx < 128; ++colIdx)
@@ -117,7 +117,7 @@ namespace osuCrypto
                 tIter += 8;
             }
 
-            // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
+            // transpose our 128 columns of 1024 bits. We will have 1024 rows,
             // each 128 bits wide.
             sse_transpose128x1024(t);
 

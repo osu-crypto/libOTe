@@ -39,7 +39,7 @@ namespace osuCrypto
     {
         auto* raw = new KkrtNcoOtSender();
         raw->mGens.resize(mGens.size());
-        
+
         raw->mInputByteCount = mInputByteCount;
         raw->mMultiKeyAES = mMultiKeyAES;
 
@@ -80,8 +80,8 @@ namespace osuCrypto
         // round up
         numOTExt = ((numOTExt + 127) / 128) * 128;
 
-        // We need two matrices, one for the senders matrix T^i_{b_i} and 
-        // one to hold the the correction values. This is sometimes called 
+        // We need two matrices, one for the senders matrix T^i_{b_i} and
+        // one to hold the the correction values. This is sometimes called
         // the u = T0 + T1 + C matrix in the papers.
         mT.resize(numOTExt, mGens.size() / 128);
         //char c;
@@ -123,21 +123,21 @@ namespace osuCrypto
                     mGensBlkIdx[colIdx] += superBlkSize;
                 }
 
-                // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
+                // transpose our 128 columns of 1024 bits. We will have 1024 rows,
                 // each 128 bits wide.
                 sse_transpose128x1024(t);
 
                 // This is the index of where we will store the matrix long term.
                 // doneIdx is the starting row. i is the offset into the blocks of 128 bits.
                 // __restrict isn't crucial, it just tells the compiler that this pointer
-                // is unique and it shouldn't worry about pointer aliasing. 
+                // is unique and it shouldn't worry about pointer aliasing.
                 block* __restrict mTIter = mT.data() + doneIdx * mT.stride() + i;
 
                 for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
                 {
                     // because we transposed 1024 rows, the indexing gets a bit weird. But this
                     // is the location of the next row that we want. Keep in mind that we had long
-                    // **contiguous** columns. 
+                    // **contiguous** columns.
                     block* __restrict tIter = (((block*)t.data()) + j);
 
                     // do the copy!
@@ -157,9 +157,9 @@ namespace osuCrypto
 
 
         future.get();
-        chl.asyncSendCopy(&seed, sizeof(block));
+        chl.asyncSendCopy((u8*)&seed, sizeof(block));
 
-        std::array<block, 4> keys;       
+        std::array<block, 4> keys;
         PRNG(seed ^ theirSeed).get(keys.data(), keys.size());
         mMultiKeyAES.setKeys(keys);
 
@@ -251,12 +251,12 @@ namespace osuCrypto
 #ifndef NDEBUG
         if (recvCount > mCorrectionVals.bounds()[0] - mCorrectionIdx)
             throw std::runtime_error("bad receiver, will overwrite the end of our buffer" LOCATION);
-#endif // !NDEBUG        
+#endif // !NDEBUG
 
         // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
         // there c(w) is a pseudo-random code.
         auto dest = mCorrectionVals.begin() + (mCorrectionIdx * mCorrectionVals.stride());
-        chl.recv(&*dest,
+        chl.recv((u8*)&*dest,
             recvCount * sizeof(block) * mCorrectionVals.stride());
 
         // update the index of there we should store the next set of correction values.

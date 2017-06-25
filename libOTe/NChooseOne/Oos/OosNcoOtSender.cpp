@@ -83,8 +83,8 @@ namespace osuCrypto
         // round up
         numOTExt = ((numOTExt + 127 + mStatSecParam) / 128) * 128;
 
-        // We need two matrices, one for the senders matrix T^i_{b_i} and 
-        // one to hold the the correction values. This is sometimes called 
+        // We need two matrices, one for the senders matrix T^i_{b_i} and
+        // one to hold the the correction values. This is sometimes called
         // the u = T0 + T1 + C matrix in the papers.
         mCorrectionVals = Matrix<block>();
         mCorrectionVals.resize(numOTExt, mGens.size() / 128);
@@ -127,21 +127,21 @@ namespace osuCrypto
                     mGens[colIdx].mBlockIdx += superBlkSize;
                 }
 
-                // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
+                // transpose our 128 columns of 1024 bits. We will have 1024 rows,
                 // each 128 bits wide.
                 sse_transpose128x1024(t);
 
                 // This is the index of where we will store the matrix long term.
                 // doneIdx is the starting row. l is the offset into the blocks of 128 bits.
                 // __restrict isn't crucial, it just tells the compiler that this pointer
-                // is unique and it shouldn't worry about pointer aliasing. 
+                // is unique and it shouldn't worry about pointer aliasing.
                 block* __restrict mTIter = mT.data() + doneIdx * mT.stride() + i;
 
                 for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
                 {
                     // because we transposed 1024 rows, the indexing gets a bit weird. But this
                     // is the location of the next row that we want. Keep in mind that we had long
-                    // **contiguous** columns. 
+                    // **contiguous** columns.
                     block* __restrict tIter = (((block*)t.data()) + j);
 
                     // do the copy!
@@ -192,7 +192,7 @@ namespace osuCrypto
 
 
         // This is the hashing phase. Here we are using
-        //  codewords that we computed above. 
+        //  codewords that we computed above.
         if (mT.stride() == 4)
         {
             // use vector instructions if we can. You can optimize this
@@ -219,7 +219,7 @@ namespace osuCrypto
             memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
             //val = toBlock(hashBuff);
 #else
-            //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
+            //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
             mAesFixedKey.ecbEncFourBlocks(codeword.data(), aesBuff.data());
             codeword[0] = codeword[0] ^ aesBuff[0];
             codeword[1] = codeword[1] ^ aesBuff[1];
@@ -254,7 +254,7 @@ namespace osuCrypto
             memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
             //val = toBlock(hashBuff);
 #else
-            //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n. 
+            //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
             mAesFixedKey.ecbEncBlocks(codeword.data(), mT.stride(), aesBuff.data());
 
             val = ZeroBlock;
@@ -296,13 +296,13 @@ namespace osuCrypto
         if (recvCount > mCorrectionVals.bounds()[0] - mCorrectionIdx)
             throw std::runtime_error("bad receiver, will overwrite the end of our buffer" LOCATION);
 
-#endif // !NDEBUG        
+#endif // !NDEBUG
 
 
         // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
         // there c(w) is a pseudo-random code.
         auto dest = mCorrectionVals.begin() + i32(mCorrectionIdx * mCorrectionVals.stride());
-        chl.recv(&*dest,
+        chl.recv((u8*)&*dest,
             recvCount * sizeof(block) * mCorrectionVals.stride());
 
         // update the index of there we should store the next set of correction values.
@@ -314,7 +314,7 @@ namespace osuCrypto
         if (mMalicious)
         {
             char c;
-            chl.recv(&c, 1);
+            chl.recv((u8*)&c, 1);
             //std::cout << IoStream::lock << "sender " << std::endl;;
 
             //for (u64 i = 0; i < mCorrectionIdx; ++i)
@@ -336,7 +336,7 @@ namespace osuCrypto
             recvCorrection(chl, mStatSecParam);
 
             // now send them out challenge seed.
-            chl.asyncSend(&seed, sizeof(block));
+            chl.asyncSend((u8*)&seed, sizeof(block));
 
             // This AES will work as a PRNG, using AES-NI in counter mode.
             AES aes(seed);
@@ -346,9 +346,9 @@ namespace osuCrypto
             // the index of the row that we are doing.
             u64 k = 0;
 
-            // qSum will hold the summation over all the rows. We need 
-            // mStatSecParam number of them. First initialize them, each 
-            // with one of the dummy values that were just send. 
+            // qSum will hold the summation over all the rows. We need
+            // mStatSecParam number of them. First initialize them, each
+            // with one of the dummy values that were just send.
             std::vector<block> qSum(mStatSecParam * mT.stride());
             for (u64 i = 0; i < mStatSecParam; ++i)
             {
@@ -410,7 +410,7 @@ namespace osuCrypto
             if (codeSize < zeroAndQ.size()) throw std::runtime_error("Make this bigger. " LOCATION);
 
 
-            // this will hold out random x^(l)_i values that we compute from the seed. 
+            // this will hold out random x^(l)_i values that we compute from the seed.
             std::vector<block> challengeBuff(mStatSecParam);
 
             // since we don't want to do bit shifting, this larger array
@@ -434,7 +434,7 @@ namespace osuCrypto
                 aes.ecbEncCounterMode(aesIdx, mStatSecParam, challengeBuff.data());
                 aesIdx += mStatSecParam;
 
-                // now expand each of these bits into its own byte. This is done with the 
+                // now expand each of these bits into its own byte. This is done with the
                 // right shift instruction _mm_srai_epi16. and then we mask to get only
                 // the bottom bit. Doing the 8 times gets us each bit in its own byte.
                 for (u64 i = 0; i < mStatSecParam; ++i)
@@ -512,14 +512,14 @@ namespace osuCrypto
                         auto qSumIter = qSum.data();
 
                         // iterate over the mStatSecParam of challenges. Process
-                        // two of the value per loop. 
+                        // two of the value per loop.
                         for (u64 j = 0; j < mStatSecParam / 2; ++j, qSumIter += 8)
                         {
                             u8 x0 = *xIter++;
                             u8 x1 = *xIter++;
 
-                            // This is where the bit multiplication of 
-                            // x^(l)_i * q_i happens. Its done with a single 
+                            // This is where the bit multiplication of
+                            // x^(l)_i * q_i happens. Its done with a single
                             // array index instruction. If x is zero, then mask
                             // will hold the all zero string. Otherwise it holds
                             // the row q_i.
@@ -577,12 +577,12 @@ namespace osuCrypto
                         auto qSumIter = qSum.data();
 
                         // iterate over the mStatSecParam of challenges. Process
-                        // two of the value per loop. 
+                        // two of the value per loop.
                         for (u64 j = 0; j < mStatSecParam; ++j, qSumIter += codeSize)
                         {
 
-                            // This is where the bit multiplication of 
-                            // x^(l)_i * q_i happens. Its done with a single 
+                            // This is where the bit multiplication of
+                            // x^(l)_i * q_i happens. Its done with a single
                             // array index instruction. If x is zero, then mask
                             // will hold the all zero string. Otherwise it holds
                             // the row q_i.
@@ -604,8 +604,8 @@ namespace osuCrypto
             std::vector<block> wSum(mStatSecParam * mCode.plaintextBlkSize());
 
             // now wait for the receiver's challenge answer.
-            chl.recv(tSum.data(), tSum.size() * sizeof(block));
-            chl.recv(wSum.data(), wSum.size() * sizeof(block));
+            chl.recv((u8*)tSum.data(), tSum.size() * sizeof(block));
+            chl.recv((u8*)wSum.data(), wSum.size() * sizeof(block));
 
             // a buffer to store codewords
             std::vector<block> cw(mCode.codewordBlkSize());

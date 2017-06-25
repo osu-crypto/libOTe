@@ -88,7 +88,7 @@ namespace osuCrypto
             chl.recv(buff);
             assert(buff.size() == sizeof(block) * gOtExtBaseOtCount);
 
-            // u = t0 + t1 + x 
+            // u = t0 + t1 + x
             auto u = buff.getSpan<block>();
 
             for (u64 colIdx = 0; colIdx < gOtExtBaseOtCount; colIdx++)
@@ -126,9 +126,9 @@ namespace osuCrypto
         }
 
         block seed = prng.get<block>();
-        chl.asyncSend(&seed, sizeof(block));
+        chl.asyncSend((u8*)&seed, sizeof(block));
         block theirSeed;
-        chl.recv(&theirSeed, sizeof(block));
+        chl.recv((u8*)&theirSeed, sizeof(block));
 
         if (Commit(theirSeed) != theirSeedComm)
             throw std::runtime_error("bad commit " LOCATION);
@@ -214,7 +214,7 @@ namespace osuCrypto
         }
 
         block t1, t2;
-        std::vector<char> data(sizeof(block) * 3);
+        std::vector<u8> data(sizeof(block) * 3);
 
         chl.recv(data.data(), data.size());
 
@@ -222,7 +222,7 @@ namespace osuCrypto
         block& received_t = ((block*)data.data())[1];
         block& received_t2 = ((block*)data.data())[2];
 
-        // check t = x * Delta + q 
+        // check t = x * Delta + q
         mul128(received_x, delta, t1, t2);
         t1 = t1 ^ q1;
         t2 = t2 ^ q2;

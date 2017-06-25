@@ -51,7 +51,7 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
-        // round up 
+        // round up
         u64 numOtExt = roundUpTo(messages.size(), 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
         //u64 numBlocks = numSuperBlocks * superBlkSize;
@@ -91,7 +91,7 @@ namespace osuCrypto
             {
                 u64 step = std::min<u64>(numSuperBlocks - superBlkIdx,(u64) commStepSize);
 
-                chl.recv(u.data(), step * superBlkSize * 128 * sizeof(block));
+                chl.recv((u8*)u.data(), step * superBlkSize * 128 * sizeof(block));
                 uIter = (block*)u.data();
             }
 
@@ -125,7 +125,7 @@ namespace osuCrypto
                 tIter += 8;
             }
 
-            // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
+            // transpose our 128 columns of 1024 bits. We will have 1024 rows,
             // each 128 bits wide.
             sse_transpose128x1024(t);
 
@@ -136,8 +136,8 @@ namespace osuCrypto
             // compute how many rows are unused.
             u64 unusedCount = (mIter - mEnd + 128 * superBlkSize);
 
-            // compute the begin and end index of the extra rows that 
-            // we will compute in this iters. These are taken from the 
+            // compute the begin and end index of the extra rows that
+            // we will compute in this iters. These are taken from the
             // unused rows what we computed above.
             block* xEnd = std::min(xIter + unusedCount, extraBlocks.data() + 128);
 
@@ -231,9 +231,9 @@ namespace osuCrypto
         gTimer.setTimePoint("send.transposeDone");
 
         block seed = prng.get<block>();
-        chl.asyncSend(&seed, sizeof(block));
+        chl.asyncSend((u8*)&seed, sizeof(block));
         block theirSeed;
-        chl.recv(&theirSeed, sizeof(block));
+        chl.recv((u8*)&theirSeed, sizeof(block));
         gTimer.setTimePoint("send.cncSeed");
 
         if (Commit(theirSeed) != theirSeedComm)
@@ -285,7 +285,7 @@ namespace osuCrypto
                 messages[dd][1] = *(block*)hashBuff;
 #endif
             }
-#ifndef KOS_SHA_HASH 
+#ifndef KOS_SHA_HASH
             auto length = 2 *(stop - doneIdx);
             auto steps = length / 8;
             block* mIter = messages[doneIdx].data();
@@ -302,7 +302,7 @@ namespace osuCrypto
                 mIter[7] = mIter[7] ^ aesHashTemp[7];
 
                 mIter += 8;
-            }                     
+            }
 
             auto rem = length - steps * 8;
             mAesFixedKey.ecbEncBlocks(mIter, rem, aesHashTemp.data());
@@ -332,7 +332,7 @@ namespace osuCrypto
         //std::cout << IoStream::unlock;
 
         block t1, t2;
-        std::vector<char> data(sizeof(block) * 3);
+        std::vector<u8> data(sizeof(block) * 3);
 
         chl.recv(data.data(), data.size());
         gTimer.setTimePoint("send.proofReceived");
@@ -341,7 +341,7 @@ namespace osuCrypto
         block& received_t = ((block*)data.data())[1];
         block& received_t2 = ((block*)data.data())[2];
 
-        // check t = x * Delta + q 
+        // check t = x * Delta + q
         mul128(received_x, delta, t1, t2);
         t1 = t1 ^ q1;
         t2 = t2 ^ q2;

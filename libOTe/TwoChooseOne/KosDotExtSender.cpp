@@ -62,7 +62,7 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
-        // round up 
+        // round up
         u64 numOtExt = roundUpTo(messages.size(), 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
 
@@ -103,7 +103,7 @@ namespace osuCrypto
             if (uIter == uEnd)
             {
                 u64 step = std::min<u64>(numSuperBlocks - superBlkIdx, (u64)commStepSize);
-                chl.recv(u.data(), step * superBlkSize * mGens.size() * sizeof(block));
+                chl.recv((u8*)u.data(), step * superBlkSize * mGens.size() * sizeof(block));
                 uIter = (block*)u.data();
             }
 
@@ -146,7 +146,7 @@ namespace osuCrypto
             {
                 Matrix<u8> tOut(128 * superBlkSize, sizeof(block) * 2);
 
-                // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
+                // transpose our 128 columns of 1024 bits. We will have 1024 rows,
                 // each 128 bits wide.
                 sse_transpose(t, tOut);
 
@@ -171,7 +171,7 @@ namespace osuCrypto
 
                 mIter += std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 
-                // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
+                // transpose our 128 columns of 1024 bits. We will have 1024 rows,
                 // each 128 bits wide.
                 sse_transpose(t, tOut);
             }
@@ -181,9 +181,9 @@ namespace osuCrypto
         gTimer.setTimePoint("send.transposeDone");
 
         block seed = prng.get<block>();
-        chl.asyncSend(&seed, sizeof(block));
+        chl.asyncSend((u8*)&seed, sizeof(block));
         block theirSeed;
-        chl.recv(&theirSeed, sizeof(block));
+        chl.recv((u8*)&theirSeed, sizeof(block));
         gTimer.setTimePoint("send.cncSeed");
 
         if (Commit(theirSeed) != theirSeedComm)
@@ -250,20 +250,20 @@ namespace osuCrypto
         gTimer.setTimePoint("send.checkSummed");
 
         block t1, t2, t3, t4;
-        std::vector<char> data(sizeof(block) * 8);
+        std::vector<u8> data(sizeof(block) * 8);
 
         chl.recv(data.data(), data.size());
 
 
         //std::cout << IoStream::unlock;
-        
+
         gTimer.setTimePoint("send.proofReceived");
 
         auto& received_x = ((std::array<block, 4>*)data.data())[0];
         auto& received_t = ((std::array<block, 4>*)data.data())[1];
 
 
-        // check t = x * Delta + q 
+        // check t = x * Delta + q
         mul256(received_x[0], received_x[1], delta[0], delta[1], t1, t2, t3, t4);
         t1 = t1 ^ q1;
         t2 = t2 ^ q2;
