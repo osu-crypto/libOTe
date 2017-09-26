@@ -64,7 +64,6 @@ namespace osuCrypto
         std::vector<u8> cBuff(nSndVals * fieldElementSize);
         auto cRecvFuture = socket.asyncRecv(cBuff.data(), cBuff.size()).share();
 
-
         for (u64 t = 0; t < numThreads; ++t)
         {
             seed = prng.get<block>();
@@ -179,7 +178,7 @@ namespace osuCrypto
 
                 for (u64 i = mStart, j = 0; i < mEnd; ++i, ++j)
                 {
-                    // now compute g ^(a * k) = (g^a)^k 
+                    // now compute g ^(a * k) = (g^a)^k
 
                     gka = bc * pK[j];
                     gka.toBytes(buff.data());
