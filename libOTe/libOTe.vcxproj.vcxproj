@@ -64,8 +64,8 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{D159E2F9-226C-4B19-905E-CC1EA0EB013F}</ProjectGuid>
     <RootNamespace>libOTe</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.14393.0</WindowsTargetPlatformVersion>
     <ProjectName>libOTe</ProjectName>
+    <WindowsTargetPlatformVersion>10.0.15063.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
