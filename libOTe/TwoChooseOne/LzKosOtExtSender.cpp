@@ -3,8 +3,10 @@
 
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Log.h>
-#include <cryptoTools/Common/ByteStream.h>
+
 #include <cryptoTools/Crypto/Commit.h>
+#include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Common/Timer.h>
 
 namespace osuCrypto
 {
@@ -67,10 +69,10 @@ namespace osuCrypto
 
         u64 doneIdx = 0;
         std::array<block, gOtExtBaseOtCount> q;
-        ByteStream buff;
+        std::vector<block> buff;
 #ifdef OTEXT_DEBUG
         Log::out << "sender delta " << delta << Log::endl;
-        buff.append(delta);
+        buff.push_back(delta);
         chl.AsyncSendCopy(buff);
 #endif
 
@@ -86,10 +88,10 @@ namespace osuCrypto
         for (u64 blkIdx = 0; blkIdx < numBlocks; ++blkIdx)
         {
             chl.recv(buff);
-            assert(buff.size() == sizeof(block) * gOtExtBaseOtCount);
+            assert(buff.size() == gOtExtBaseOtCount);
 
             // u = t0 + t1 + x
-            auto u = buff.getSpan<block>();
+            auto u = buff.data();
 
             for (u64 colIdx = 0; colIdx < gOtExtBaseOtCount; colIdx++)
             {
@@ -106,9 +108,7 @@ namespace osuCrypto
             sse_transpose128(q);
 
 #ifdef OTEXT_DEBUG
-            buff.setp(0);
-            buff.append((u8*)&q, sizeof(q));
-            chl.AsyncSendCopy(buff);
+			chl.AsyncSendCopy(q);
 #endif
 
             u32 blkRowIdx = 0;

@@ -5,6 +5,7 @@
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Network/Endpoint.h>
+#include <cryptoTools/Network/IOService.h>
 
 #include "libOTe/Base/naor-pinkas.h"
 #include <cryptoTools/Common/Log.h>

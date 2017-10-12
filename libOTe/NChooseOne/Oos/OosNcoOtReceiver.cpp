@@ -2,10 +2,10 @@
 #include "OosNcoOtReceiver.h"
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/bch511.h"
-#include <cryptoTools/Common/Log.h>
+#include <cryptoTools/Crypto/sha1.h>
 #include  <mmintrin.h>
 #include "OosDefines.h"
-#include <cryptoTools/Common/ByteStream.h>
+
 #include <cryptoTools/Common/BitVector.h>
 using namespace std;
 
@@ -413,12 +413,12 @@ namespace osuCrypto
             // first we need to do is the extra statSecParam number of correction
             // values. This will just be for random inputs and are used to mask
             // out true choices that were used in the remaining correction values.
-            std::unique_ptr<ByteStream> wBuff(new Buff(sizeof(block) * mStatSecParam * mW.stride()));
-            std::unique_ptr<ByteStream> tBuff(new Buff(sizeof(block) * mStatSecParam * mT0.stride()));
+			std::vector<block> wBuff(mStatSecParam * mW.stride());
+			std::vector<block> tBuff(mStatSecParam * mT0.stride());
 
             // get two arrays of block into these buff.
-            auto tSum = tBuff->getSpan<block>();
-            auto wSum = wBuff->getSpan<block>();
+            auto& tSum = tBuff;
+            auto& wSum = wBuff;
 
 
             // view them as matrix to make life easier.

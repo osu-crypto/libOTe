@@ -3,6 +3,7 @@
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Log.h>
 #include "KkrtDefines.h"
+#include <cryptoTools/Crypto/sha1.h>
 
 namespace osuCrypto
 {

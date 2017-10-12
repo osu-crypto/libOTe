@@ -1,10 +1,12 @@
 #include "LzKosOtExtReceiver.h"
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Log.h>
-#include <cryptoTools/Common/ByteStream.h>
+
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/Commit.h>
+#include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Common/Timer.h>
 
 using namespace std;
 
@@ -81,7 +83,7 @@ namespace osuCrypto
         auto choiceBlocks = choices2.getSpan<block>();
 
 #ifdef OTEXT_DEBUG
-        ByteStream debugBuff;
+        std::vector<u8> debugBuff;
         chl.recv(debugBuff);
         block debugDelta; debugBuff.consume(debugDelta);
 
@@ -95,11 +97,9 @@ namespace osuCrypto
         for (u64 blkIdx = 0; blkIdx < numBlocks; ++blkIdx)
         {
             // this will store the next 128 rows of the matrix u
-            std::unique_ptr<ByteStream> uBuff(new ByteStream(gOtExtBaseOtCount * sizeof(block)));
-            uBuff->setp(gOtExtBaseOtCount * sizeof(block));
-
+			std::vector<block> uBuff(gOtExtBaseOtCount);
             // get an array of blocks that we will fill.
-            auto u = uBuff->getSpan<block>();
+            auto u = uBuff.data();
 
             for (u64 colIdx = 0; colIdx < gOtExtBaseOtCount; colIdx++)
             {
@@ -168,11 +168,10 @@ namespace osuCrypto
 
         // this buffer will be sent to the other party to prove we used the
         // same value of r in all of the column vectors...
-        std::unique_ptr<ByteStream> correlationData(new ByteStream(3 * sizeof(block)));
-        correlationData->setp(correlationData->capacity());
-        block& x = correlationData->getSpan<block>()[0];
-        block& t = correlationData->getSpan<block>()[1];
-        block& t2 = correlationData->getSpan<block>()[2];
+        std::vector<block> correlationData(3);
+        block& x = correlationData[0];
+        block& t = correlationData[1];
+        block& t2 =correlationData[2];
         x = t = t2 = ZeroBlock;
         block chij, ti, ti2;
 

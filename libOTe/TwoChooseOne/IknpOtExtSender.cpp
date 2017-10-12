@@ -2,8 +2,9 @@
 
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Log.h>
-#include <cryptoTools/Common/ByteStream.h>
 #include <cryptoTools/Crypto/Commit.h>
+#include <cryptoTools/Network/Channel.h>
+
 #include "TcoOtDefines.h"
 
 namespace osuCrypto

@@ -1,9 +1,10 @@
 #include "AknOtReceiver.h"
 #include <cryptoTools/Common/Log.h>
-#include "libOTe/Base/naor-pinkas.h"
 #include <cryptoTools/Common/Timer.h>
-#include "libOTe/TwoChooseOne/LzKosOtExtReceiver.h"
+#include <cryptoTools/Crypto/sha1.h>
 
+#include "libOTe/Base/naor-pinkas.h"
+#include "libOTe/TwoChooseOne/LzKosOtExtReceiver.h"
 
 namespace osuCrypto
 {
@@ -62,18 +63,11 @@ namespace osuCrypto
             BitVector choices;
             choices.copy(mChoices, start, end - start);
 
-            u8 shaBuff[SHA1::HashSize];
             // do the OT extension for this range of messages.
             PRNG prng(extSeed);
             //std::cout << IoStream::lock << "recv 0 "  << end << std::endl;
             otExt.receive(choices, range, prng, chl);
 
-
-            //for (u64 k = 0; k < range.size();++k)
-            //{
-            //    std::cout << k << " * " << range[k] << std::endl;
-            //}
-            //std::cout << IoStream::unlock;
 
             // ok, OTs are done.
             if (t == 0)
@@ -119,8 +113,6 @@ namespace osuCrypto
             u64 expectZerosCount((u64)(mMessages.size() *(1 - oneFrac) / chls.size() * 1.5));
             u64 expectOnesCount((u64)(mMessages.size() * oneFrac / chls.size() * 1.5));
 
-            //std::cout << IoStream::lock << "recv " << end << "  " << px << std::endl;
-
             // reserve that must space.
             zeroOneLists[0].reserve(expectZerosCount);
             zeroOneLists[1].reserve(expectOnesCount);
@@ -131,9 +123,6 @@ namespace osuCrypto
                 // this is the value of our choice bit at index i
                 const u8 cc = *choiceIter;
                 ++choiceIter;
-
-                //if (i < 100)
-                //    std::cout << mMessages[i] << " " << "  " << i << "  " << (u32)cc << std::endl;
 
                 // if cc = 1, then this OT message should be opened.
                 auto vv = cncGens[t].get<u32>();
@@ -150,9 +139,7 @@ namespace osuCrypto
                         openChoiceIter = choiceBuff->begin();
                         j = 0;
 
-                        //std::cout <<   "   " << i << std::endl;
                     }
-                    //std::cout << (u32)cc;
                     // copy our choice bit into the buffer
                     *openChoiceIter = cc;
                     ++openChoiceIter;
@@ -166,14 +153,12 @@ namespace osuCrypto
 
                         SHA1 sha;
                         sha.Update(mMessages[i]);
-                        sha.Final(shaBuff);
-                        mMessages[i] = *(block*)shaBuff;
+                        sha.Final(mMessages[i]);
                     }
 
                     // keep a running sum of the OT messages that are opened in this thread.
                     partialSum = partialSum ^ mMessages[i];
 
-                    //std::cout << mMessages[i] << " " << partialSum << "  " << i<< "  "<< (u32)cc<< "  " << vv<< std::endl;
                 }
                 else
                 {
@@ -198,9 +183,6 @@ namespace osuCrypto
                 //std::cout << "local ones " << zeroOneLists[1].size() << std::endl;
                 totalSum = totalSum ^ partialSum;
             }
-
-            //std::cout << std::endl << IoStream::unlock;
-
 
             // now move the list list into the shared list.
             // We didn't initially do this to prevent false sharing

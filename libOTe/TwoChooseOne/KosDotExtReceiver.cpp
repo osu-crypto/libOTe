@@ -1,11 +1,13 @@
 #include "KosDotExtReceiver.h"
 #include "libOTe/Tools/Tools.h"
-#include <cryptoTools/Common/Log.h>
-#include <cryptoTools/Common/ByteStream.h>
+
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Matrix.h>
+#include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/Commit.h>
+#include <cryptoTools/Network/Channel.h>
+
 #include "TcoOtDefines.h"
 #include <queue>
 
@@ -90,11 +92,11 @@ namespace osuCrypto
 
 
         u64 step = std::min<u64>(numSuperBlocks, (u64)commStepSize);
-        std::unique_ptr<ByteStream> uBuff(new ByteStream(step * mGens.size() * superBlkSize * sizeof(block)));
+        std::vector<block> uBuff(step * mGens.size() * superBlkSize);
 
         // get an array of blocks that we will fill.
-        auto uIter = (block*)uBuff->data();
-        auto uEnd = uIter + step * mGens.size() * superBlkSize;
+        auto uIter = (block*)uBuff.data();
+        auto uEnd = uIter + uBuff.size();
 
 
 
@@ -164,9 +166,9 @@ namespace osuCrypto
 
                 if (step)
                 {
-                    uBuff.reset(new ByteStream(step * mGens.size() * superBlkSize * sizeof(block)));
-                    uIter = (block*)uBuff->data();
-                    uEnd = uIter + step * mGens.size() * superBlkSize;
+                    uBuff.resize(step * mGens.size() * superBlkSize);
+					auto uIter = (block*)uBuff.data();
+					auto uEnd = uIter + uBuff.size();
                 }
             }
 
@@ -205,10 +207,9 @@ namespace osuCrypto
 
         // this buffer will be sent to the other party to prove we used the
         // same value of r in all of the column vectors...
-        std::unique_ptr<ByteStream> correlationData(new ByteStream(2 * 4 * sizeof(block)));
-        correlationData->setp(correlationData->capacity());
-        auto& x = correlationData->getSpan<std::array<block, 4>>()[0];
-        auto& t = correlationData->getSpan<std::array<block, 4>>()[1];
+        std::vector<std::array<block, 4>> correlationData(2);
+        auto& x = correlationData[0];
+        auto& t = correlationData[1];
 
         x = t = { ZeroBlock,ZeroBlock, ZeroBlock, ZeroBlock };
         block ti1, ti2, ti3,ti4;

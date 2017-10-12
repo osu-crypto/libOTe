@@ -14,7 +14,9 @@ using namespace osuCrypto;
 
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Network/Endpoint.h>
+#include <cryptoTools/Network/IOService.h>
 #include <numeric>
+#include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Common/Log.h>
 int miraclTestMain();
 
@@ -594,7 +596,7 @@ oos{ "o", "oos" },
 akn{ "a", "akn" };
 #include "signalHandle.h"
 
-#include <cryptoTools/Common/ByteStream.h>
+
 
 //
 //template<typename, typename T>
@@ -712,7 +714,7 @@ void base()
 }
 
 #include <cryptoTools/gsl/span>
-#include <cryptoTools/Common/ByteStream.h>
+
 #include <cryptoTools/Common/Matrix.h>
 
 int main(int argc, char** argv)

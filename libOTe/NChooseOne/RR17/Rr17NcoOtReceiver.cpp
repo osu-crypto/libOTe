@@ -1,7 +1,7 @@
 #include "Rr17NcoOtReceiver.h"
-#include <cryptoTools/Common/ByteStream.h>
-#include <cryptoTools/Common/Log.h>
 
+#include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Crypto/sha1.h>
 namespace osuCrypto
 {
 
@@ -62,8 +62,8 @@ namespace osuCrypto
         auto stepSize = 1 << 24;
         auto count = (mMessages.size() + stepSize - 1) / stepSize;
 
-        Buff buff(std::min<u64>(mMessages.size(), stepSize) * sizeof(std::array<block, 2>));
-        auto view = buff.getSpan<std::array<block, 2>>();
+        std::vector<std::array<block, 2>> buff(std::min<u64>(mMessages.size(), stepSize));
+        auto& view = buff;
         auto choiceIter = mChoices.begin();
 
         //std::cout << IoStream::lock;
@@ -72,7 +72,7 @@ namespace osuCrypto
 
             auto curSize = std::min<u64>(stepSize, mMessages.size() - step * stepSize);
 
-            chl.recv(buff.data(), curSize * sizeof(std::array<block, 2>));
+            chl.recv(buff.data(), curSize);
             //std::cout << "recv " << *(block*)buff.data() << " c " << count << " s " << curSize << std::endl;
             //std::cout << "recv " << ((block*)buff.data())[600 * 2] << " c " << count << " s " << curSize << std::endl;
 

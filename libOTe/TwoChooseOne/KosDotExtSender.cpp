@@ -1,10 +1,10 @@
 #include "KosDotExtSender.h"
 
 #include "libOTe/Tools/Tools.h"
-#include <cryptoTools/Common/Log.h>
-#include <cryptoTools/Common/ByteStream.h>
 #include <cryptoTools/Common/Matrix.h>
+#include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/Commit.h>
+#include <cryptoTools/Network/Channel.h>
 #include "TcoOtDefines.h"
 
 
@@ -18,43 +18,25 @@ namespace osuCrypto
     std::unique_ptr<OtExtSender> KosDotExtSender::split()
     {
         auto dot = new KosDotExtSender();
-        //dot->mCode = mCode;
         std::unique_ptr<OtExtSender> ret(dot);
-
         std::vector<block> baseRecvOts(mGens.size());
-
         for (u64 i = 0; i < mGens.size(); ++i)
-        {
             baseRecvOts[i] = mGens[i].get<block>();
-        }
-
         ret->setBaseOts(baseRecvOts, mBaseChoiceBits);
-
         return std::move(ret);
     }
 
     void KosDotExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices)
     {
-
-
-        //PRNG prng(ZeroBlock);
-        //mCode.random(prng, choices.size(), 128);
-
         mBaseChoiceBits = choices;
         mGens.resize(choices.size());
-
         mBaseChoiceBits.resize(roundUpTo(mBaseChoiceBits.size(), 8));
-
         for (u64 i = mBaseChoiceBits.size() - 1; i >= choices.size(); --i)
-        {
             mBaseChoiceBits[i] = 0;
-        }
-        mBaseChoiceBits.resize(choices.size());
 
+		mBaseChoiceBits.resize(choices.size());
         for (u64 i = 0; i < mGens.size(); i++)
-        {
             mGens[i].SetSeed(baseRecvOts[i]);
-        }
     }
 
     void KosDotExtSender::send(

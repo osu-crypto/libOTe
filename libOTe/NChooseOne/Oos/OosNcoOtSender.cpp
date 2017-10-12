@@ -1,9 +1,10 @@
 #include "OosNcoOtSender.h"
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/bch511.h"
-#include <cryptoTools/Common/Log.h>
+#include <cryptoTools/Crypto/sha1.h>
+#include <cryptoTools/Network/Channel.h>
 #include "OosDefines.h"
-#include <cryptoTools/Common/ByteStream.h>
+
 namespace osuCrypto
 {
 

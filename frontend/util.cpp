@@ -2,7 +2,8 @@
 
 using namespace osuCrypto;
 #include <cryptoTools/Common/Log.h>
-#include <cryptoTools/Common/ByteStream.h>
+#include <cryptoTools/Common/Timer.h>
+#include <chrono>
 #define tryCount 2
 
 void senderGetLatency(Channel& chl)
@@ -18,7 +19,7 @@ void senderGetLatency(Channel& chl)
     chl.asyncSend(dummy, 1);
 
 
-    Buff oneMbit((1 << 20) / 8);
+    std::vector<u8> oneMbit((1 << 20) / 8);
     for (u64 i = 0; i < tryCount; ++i)
     {
         chl.recv(dummy, 1);
@@ -49,7 +50,7 @@ void recverGetLatency(Channel& chl)
     auto rrt = mid - start;
     std::cout << "latency:   " << std::chrono::duration_cast<std::chrono::milliseconds>(rrt).count() << " ms" << std::endl;
                  
-    Buff oneMbit((1 << 20) / 8);
+	std::vector<u8> oneMbit((1 << 20) / 8);
     for (u64 i = 0; i < tryCount; ++i)
     {
         recvStart = timer.setTimePoint("");

@@ -6,6 +6,7 @@
 #include "libOTe/Tools/LinearCode.h"
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Network/Endpoint.h>
+#include <cryptoTools/Network/IOService.h>
 #include <cryptoTools/Common/Log.h>
 
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
