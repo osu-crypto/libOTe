@@ -13,7 +13,7 @@ using namespace osuCrypto;
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
 #include <cryptoTools/Network/Channel.h>
-#include <cryptoTools/Network/Session .h>
+#include <cryptoTools/Network/Session.h>
 #include <cryptoTools/Network/IOService.h>
 #include <numeric>
 #include <cryptoTools/Common/Timer.h>
