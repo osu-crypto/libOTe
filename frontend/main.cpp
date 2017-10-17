@@ -13,7 +13,7 @@ using namespace osuCrypto;
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
 #include <cryptoTools/Network/Channel.h>
-#include <cryptoTools/Network/Endpoint.h>
+#include <cryptoTools/Network/Session .h>
 #include <cryptoTools/Network/IOService.h>
 #include <numeric>
 #include <cryptoTools/Common/Timer.h>
@@ -55,7 +55,7 @@ void kkrt_test(int i)
     auto rr = i ? EpMode::Server : EpMode::Client;
     std::string name = "n";
     IOService ios(0);
-    Endpoint ep0(ios, "localhost", 1212, rr, name);
+    Session  ep0(ios, "localhost", 1212, rr, name);
     std::vector<Channel> chls(numThreads);
 
     for (u64 k = 0; k < numThreads; ++k)
@@ -63,8 +63,7 @@ void kkrt_test(int i)
 
 
 
-    u64 ncoinputBlkSize = 1, baseCount = 4 * 128;
-    u64 codeSize = (baseCount + 127) / 128;
+    u64 baseCount = 4 * 128;
 
     std::vector<block> baseRecv(baseCount);
     std::vector<std::array<block, 2>> baseSend(baseCount);
@@ -175,7 +174,7 @@ void oos_test(int i)
 
     std::string name = "n";
     IOService ios(0);
-    Endpoint ep0(ios, "localhost", 1212, rr, name);
+    Session  ep0(ios, "localhost", 1212, rr, name);
     std::vector<Channel> chls(numThreads);
 
     for (u64 k = 0; k < numThreads; ++k)
@@ -188,8 +187,7 @@ void oos_test(int i)
 
 
 
-    u64 ncoinputBlkSize = 1, baseCount = 4 * 128;
-    u64 codeSize = (baseCount + 127) / 128;
+    u64 baseCount = 4 * 128;
 
     std::vector<block> baseRecv(baseCount);
     std::vector<std::array<block, 2>> baseSend(baseCount);
@@ -297,7 +295,7 @@ void kos_test(int iii)
     auto rr = iii ? EpMode::Server : EpMode::Client;
     std::string name = "n";
     IOService ios(0);
-    Endpoint ep0(ios, "localhost", 1212, rr, name);
+    Session  ep0(ios, "localhost", 1212, rr, name);
 
     u64 numThread = 1;
     std::vector<Channel> chls(numThread);
@@ -389,7 +387,7 @@ void dkos_test(int i)
     // get up the networking
     std::string name = "n";
     IOService ios(0);
-    Endpoint ep0(ios, "localhost", 1212, rr, name);
+    Session  ep0(ios, "localhost", 1212, rr, name);
     Channel chl = ep0.addChannel(name, name);
 
     u64 s = 40;
@@ -456,7 +454,7 @@ void iknp_test(int i)
     // get up the networking
     std::string name = "n";
     IOService ios(0);
-    Endpoint ep0(ios, "localhost", 1212, rr, name);
+    Session  ep0(ios, "localhost", 1212, rr, name);
     Channel chl = ep0.addChannel(name, name);
 
 
@@ -525,7 +523,7 @@ void akn_test(int i)
     setThreadName("Recvr");
 
     IOService ios(0);
-    Endpoint  ep0(ios, "127.0.0.1", 1212, rr, "ep");
+    Session   ep0(ios, "127.0.0.1", 1212, rr, "ep");
 
     u64 numTHreads(4);
 
@@ -669,8 +667,8 @@ void base()
 {
 
     IOService ios(0);
-    Endpoint  ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-    Endpoint  ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+    Session   ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
+    Session   ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
 
     auto chl1 = ep1.addChannel("s");
     auto chl0 = ep0.addChannel("s");

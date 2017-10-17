@@ -5,7 +5,7 @@
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/LinearCode.h"
 #include <cryptoTools/Network/Channel.h>
-#include <cryptoTools/Network/Endpoint.h>
+#include <cryptoTools/Network/Session.h>
 #include <cryptoTools/Network/IOService.h>
 #include <cryptoTools/Common/Log.h>
 
@@ -361,8 +361,8 @@ namespace tests_libOTe
         setThreadName("Sender");
 
         IOService ios(0);
-        Endpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-        Endpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+        Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server, "ep");
+        Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client, "ep");
         Channel senderChannel = ep1.addChannel("chl", "chl");
         Channel recvChannel = ep0.addChannel("chl", "chl");
 
@@ -434,8 +434,8 @@ namespace tests_libOTe
         setThreadName("Sender");
 
         IOService ios(0);
-        Endpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-        Endpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+        Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server, "ep");
+        Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client, "ep");
         Channel senderChannel = ep1.addChannel("chl", "chl");
         Channel recvChannel = ep0.addChannel("chl", "chl");
 
@@ -520,8 +520,8 @@ namespace tests_libOTe
         setThreadName("Sender");
 
         IOService ios(0);
-        Endpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-        Endpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+        Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server, "ep");
+        Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client, "ep");
         Channel senderChannel = ep1.addChannel("chl", "chl");
         Channel recvChannel = ep0.addChannel("chl", "chl");
 
@@ -596,8 +596,8 @@ namespace tests_libOTe
         setThreadName("Sender");
 
         IOService ios(0);
-        Endpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-        Endpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+        Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server, "ep");
+        Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client, "ep");
         Channel senderChannel = ep1.addChannel("chl", "chl");
         Channel recvChannel = ep0.addChannel("chl", "chl");
 

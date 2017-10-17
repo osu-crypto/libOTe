@@ -4,7 +4,7 @@
 
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Network/Channel.h>
-#include <cryptoTools/Network/Endpoint.h>
+#include <cryptoTools/Network/Session.h>
 #include <cryptoTools/Network/IOService.h>
 
 #include "libOTe/Base/naor-pinkas.h"
@@ -30,10 +30,10 @@ namespace tests_libOTe
         setThreadName("Sender");
 
         IOService ios(0);
-        Endpoint ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-        Endpoint ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
-        Channel senderChannel = ep1.addChannel("chl", "chl");
-        Channel recvChannel = ep0.addChannel("chl", "chl");
+        Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+        Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+        Channel senderChannel = ep1.addChannel();
+        Channel recvChannel = ep0.addChannel();
 
         PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
         PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));

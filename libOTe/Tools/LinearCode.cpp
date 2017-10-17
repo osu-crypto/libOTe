@@ -4,6 +4,7 @@
 #include <cryptoTools/Common/Log.h>
 #define BITSET
 #include <bitset>
+#include <iomanip>
 
 #include <cryptoTools/Common/MatrixView.h>
 namespace osuCrypto

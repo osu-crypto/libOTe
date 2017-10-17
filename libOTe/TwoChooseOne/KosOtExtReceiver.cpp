@@ -161,8 +161,8 @@ namespace osuCrypto
                 if (step)
                 {
                     uBuff.resize(step * 128 * superBlkSize);
-					auto uIter = (block*)uBuff.data();
-					auto uEnd = uIter + uBuff.size();
+					uIter = (block*)uBuff.data();
+					uEnd = uIter + uBuff.size();
                 }
             }
 

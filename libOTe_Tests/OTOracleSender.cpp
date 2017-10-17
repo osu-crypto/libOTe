@@ -32,7 +32,7 @@ namespace tests_libOTe
 
         u64 doneIdx = 0;
 
-        for (doneIdx = 0; doneIdx < messages.size(); ++doneIdx)
+        for (doneIdx = 0; doneIdx < u64(messages.size()); ++doneIdx)
         {
             messages[doneIdx][0] = mPrng.get<block>();
             messages[doneIdx][1] = mPrng.get<block>();

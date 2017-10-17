@@ -5,7 +5,7 @@
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/LinearCode.h"
 #include <cryptoTools/Network/Channel.h>
-#include <cryptoTools/Network/Endpoint.h>
+#include <cryptoTools/Network/Session.h>
 #include <cryptoTools/Network/IOService.h>
 #include <cryptoTools/Common/Log.h>
 
@@ -229,8 +229,8 @@ namespace tests_libOTe
         // set up networking
         std::string name = "n";
         IOService ios;
-        Endpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
-        Endpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
+        Session ep0(ios, "localhost", 1212, SessionMode::Server, name);
+        Session ep1(ios, "localhost", 1212, SessionMode::Client, name);
         auto recvChl = ep1.addChannel(name, name);
         auto sendChl = ep0.addChannel(name, name);
 
@@ -364,8 +364,8 @@ namespace tests_libOTe
 
         std::string name = "n";
         IOService ios(0);
-        Endpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
-        Endpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
+        Session ep0(ios, "localhost", 1212, SessionMode::Server, name);
+        Session ep1(ios, "localhost", 1212, SessionMode::Client, name);
         auto recvChl = ep1.addChannel(name, name);
         auto sendChl = ep0.addChannel(name, name);
 
@@ -379,7 +379,7 @@ namespace tests_libOTe
         sender.configure(true, 40, 50);
         recv.configure(true, 40, 50);
         u64 baseCount = sender.getBaseOTCount();
-        u64 codeSize = (baseCount + 127) / 128;
+        //u64 codeSize = (baseCount + 127) / 128;
 
         std::vector<block> baseRecv(baseCount);
         std::vector<std::array<block, 2>> baseSend(baseCount);
@@ -438,8 +438,8 @@ namespace tests_libOTe
 
         std::string name = "n";
         IOService ios(0);
-        Endpoint ep0(ios, "localhost", 1212, EpMode::Server, name);
-        Endpoint ep1(ios, "localhost", 1212, EpMode::Client, name);
+        Session ep0(ios, "localhost", 1212, SessionMode::Server, name);
+        Session ep1(ios, "localhost", 1212, SessionMode::Client, name);
         auto recvChl = ep1.addChannel(name, name);
         auto sendChl = ep0.addChannel(name, name);
 

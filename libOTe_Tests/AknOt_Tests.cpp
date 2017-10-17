@@ -1,7 +1,7 @@
 #include "AknOt_Tests.h"
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Network/IOService.h>
-#include <cryptoTools/Network/Endpoint.h>
+#include <cryptoTools/Network/Session.h>
 #include <cryptoTools/Common/Log.h>
 #include "libOTe/NChooseK/AknOtReceiver.h"
 #include "libOTe/NChooseK/AknOtSender.h"
@@ -35,8 +35,8 @@ namespace tests_libOTe
         setThreadName("Recvr");
 
         IOService ios(0);
-        Endpoint  ep0(ios, "127.0.0.1", 1212, EpMode::Server, "ep");
-        Endpoint  ep1(ios, "127.0.0.1", 1212, EpMode::Client, "ep");
+        Session  ep0(ios, "127.0.0.1", 1212, SessionMode::Server, "ep");
+        Session  ep1(ios, "127.0.0.1", 1212, SessionMode::Client, "ep");
 
         u64 numTHreads(4);
 
