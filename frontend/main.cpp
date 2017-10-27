@@ -89,6 +89,7 @@ void kkrt_test(int i)
                 [&, k]()
             {
                 KkrtNcoOtReceiver r;
+				r.configure(false, 40, 128);
                 r.setBaseOts(baseSend);
                 auto& chl = chls[k];
 
@@ -123,6 +124,7 @@ void kkrt_test(int i)
                 [&, k]()
             {
                 KkrtNcoOtSender s;
+				s.configure(false, 40, 128);
                 s.setBaseOts(baseRecv, baseChoice);
                 auto& chl = chls[k];
 
@@ -247,6 +249,7 @@ void oos_test(int i)
                 [&, k]()
             {
                 OosNcoOtSender s;// (code);// = sender[k];
+				s.configure(true, 40, 76);
                 s.setBaseOts(baseRecv, baseChoice);
                 auto& chl = chls[k];
 
@@ -809,8 +812,10 @@ int main(int argc, char** argv)
     {
         std::cout << "this program takes a runtime argument.\n\nTo run the unit tests, run\n\n"
             << "    frontend.exe -unitTest\n\n"
-            << "to run the OOS16 active secure 1-out-of-N OT for N=2^76, run\n\n"
-            << "    frontend.exe -oos\n\n"
+			<< "to run the OOS16 active secure 1-out-of-N OT for N=2^76, run\n\n"
+			<< "    frontend.exe -oos\n\n"
+			<< "to run the KKRT16 passive secure 1-out-of-N OT for N=2^128, run\n\n"
+			<< "    frontend.exe -kkrt\n\n"
             << "to run the KOS active secure 1-out-of-2 OT, run\n\n"
             << "    frontend.exe -kos\n\n"
             << "to run the KOS active secure 1-out-of-2 Delta-OT, run\n\n"
