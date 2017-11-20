@@ -720,6 +720,13 @@ void base()
 
 int main(int argc, char** argv)
 {
+	PRNG pr(ZeroBlock);
+	u64 r = pr.get<u64>();
+	u32 c = pr.get<u64>();
+	u64 c1 = pr.get<u64>();
+	u64 c2 = pr.get<u64>();
+	u64 c3 = 3;
+
 
     CLP cmd;
     cmd.parse(argc, argv);

@@ -199,6 +199,11 @@ namespace osuCrypto
         chl.recv((u8*)&theirSeed, sizeof(block));
         chl.asyncSendCopy((u8*)&seed, sizeof(block));
         commonPrng.SetSeed(seed ^ theirSeed);
+
+		block offset;
+		chl.recv(offset);
+
+
         gTimer.setTimePoint("recv.cncSeed");
 
         PRNG codePrng(theirSeed);
@@ -249,8 +254,9 @@ namespace osuCrypto
             u64 i = 0, dd = doneIdx;
             for (; dd < stop0; ++dd, ++i)
             {
-                x[0] = x[0] ^ (challenges[i] & zeroOneBlk[expendedChoice[i % 8][i / 8]]);
-                x[1] = x[1] ^ (challenges2[i] & zeroOneBlk[expendedChoice[i % 8][i / 8]]);
+				auto maskBlock = zeroOneBlk[expendedChoice[i % 8][i / 8]];
+                x[0] = x[0] ^ (challenges[i] & maskBlock);
+                x[1] = x[1] ^ (challenges2[i] & maskBlock);
 
                 mul256(msg[dd][0],msg[dd][1], challenges[i], challenges2[i], ti1, ti2, ti3, ti4);
                 t[0] = t[0] ^ ti1;
@@ -259,6 +265,8 @@ namespace osuCrypto
                 t[3] = t[3] ^ ti4;
 
                 code.encode((u8*)msg[dd].data(),(u8*)&messages[dd]);
+
+				messages[dd] = messages[dd] ^ (maskBlock & offset);
             }
 
             for (; dd < stop1; ++dd, ++i)

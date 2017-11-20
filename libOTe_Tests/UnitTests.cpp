@@ -15,7 +15,7 @@ namespace tests_libOTe
 
     void run(std::string name, std::function<void(void)> func)
     {
-        std::cout << name << std::flush;
+        std::cout << Color::Blue << name << ColorDefault << std::flush;
 
         auto start = std::chrono::high_resolution_clock::now();
         try
@@ -46,7 +46,8 @@ namespace tests_libOTe
         run("KosOtExt_100Receive_Test_Impl           ", KosOtExt_100Receive_Test_Impl);
         run("KosDotExt_100Receive_Test_Impl          ", KosDotExt_100Receive_Test_Impl);
         run("IknpOtExt_100Receive_Test_Impl          ", IknpOtExt_100Receive_Test_Impl);
-        run("AknOt_sendRecv1000_Test                 ", AknOt_sendRecv1000_Test);
+		run("IknpDotExt_100Receive_Test_Impl         ", IknpDotExt_100Receive_Test_Impl);
+		run("AknOt_sendRecv1000_Test                 ", AknOt_sendRecv1000_Test);
         run("KkrtNcoOt_Test                          ", KkrtNcoOt_Test_Impl);
         run("OosNcoOt_Test_Impl                      ", OosNcoOt_Test_Impl);
         run("Rr17NcoOt_Test_Impl                     ", Rr17NcoOt_Test_Impl);

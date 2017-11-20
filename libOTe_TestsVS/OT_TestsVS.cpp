@@ -51,6 +51,13 @@ namespace tests_libOTe
             KosDotExt_100Receive_Test_Impl();
         }
 
+
+		TEST_METHOD(IknpDot_200Receive_TestVS)
+		{
+			InitDebugPrinting();
+			IknpDotExt_100Receive_Test_Impl();
+		}
+
         TEST_METHOD(Kkrt_200Receive_TestVS)
         {
             InitDebugPrinting();

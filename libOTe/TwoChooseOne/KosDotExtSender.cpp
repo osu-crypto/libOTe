@@ -39,6 +39,11 @@ namespace osuCrypto
             mGens[i].SetSeed(baseRecvOts[i]);
     }
 
+	void KosDotExtSender::setDelta(const block & delta)
+	{
+		mDelta = delta;
+	}
+
     void KosDotExtSender::send(
         span<std::array<block, 2>> messages,
         PRNG& prng,
@@ -164,6 +169,19 @@ namespace osuCrypto
 
         block seed = prng.get<block>();
         chl.asyncSend((u8*)&seed, sizeof(block));
+
+		PRNG codePrng(seed);
+        LinearCode code;
+        code.random(codePrng, mBaseChoiceBits.size(), 128);
+		block curDelta;
+		code.encode((u8*)delta.data(), (u8*)&curDelta);
+
+		if (eq(mDelta, ZeroBlock))
+			mDelta = prng.get<block>();
+
+		block offset = curDelta ^ mDelta;
+		chl.asyncSend(offset);
+
         block theirSeed;
         chl.recv((u8*)&theirSeed, sizeof(block));
         gTimer.setTimePoint("send.cncSeed");
@@ -171,9 +189,6 @@ namespace osuCrypto
         if (Commit(theirSeed) != theirSeedComm)
             throw std::runtime_error("bad commit " LOCATION);
 
-        PRNG codePrng(seed);
-        LinearCode code;
-        code.random(codePrng, mBaseChoiceBits.size(), 128);
 
 
         PRNG commonPrng(seed ^ theirSeed);
@@ -188,6 +203,11 @@ namespace osuCrypto
         gTimer.setTimePoint("send.checkStart");
 
         //std::cout << IoStream::lock;
+		//std::array<block, 2> small{ delta[0], delta[1] };
+		
+
+		
+
 
         u64 xx = 0;
         u64 bb = (messages.size() + 127 + 128) / 128;
@@ -209,10 +229,10 @@ namespace osuCrypto
                 q3 = q3 ^ qi3;
                 q4 = q4 ^ qi4;
 
-                std::array<block, 2> messages1 { messages[dd][0] ^ delta[0], messages[dd][1] ^ delta[1]};
 
                 code.encode((u8*)messages[dd].data(), (u8*)&messages[dd][0]);
-                code.encode((u8*)messages1.data(), (u8*)&messages[dd][1]);
+				messages[dd][1] = messages[dd][0] ^ mDelta;
+                //code.encode((u8*)messages1.data(), (u8*)&messages[dd][1]);
             }
 
 

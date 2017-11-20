@@ -21,6 +21,9 @@
 #include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
+#include "libOTe/TwoChooseOne/IknpDotExtReceiver.h"
+#include "libOTe/TwoChooseOne/IknpDotExtSender.h"
+
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtSender.h"
 
@@ -563,7 +566,8 @@ namespace tests_libOTe
             recv.receive(choices, recvMsg, prng0, recvChannel);
         });
 
-
+		block delta = prng1.get<block>();
+		sender.setDelta(delta);
         sender.setBaseOts(baseRecv, baseChoice);
         sender.send(sendMsg, prng1, senderChannel);
         thrd.join();
@@ -575,6 +579,11 @@ namespace tests_libOTe
 
         OT_100Receive_Test(choices, recvMsg, sendMsg);
 
+		for (auto& s : sendMsg)
+		{
+			if (neq(s[0] ^ delta, s[1]))
+				throw UnitTestFail();
+		}
 
 
         senderChannel.close();
@@ -589,6 +598,87 @@ namespace tests_libOTe
         //senderNetMgr.Stop();
         //recvNetMg
     }
+
+	void IknpDotExt_100Receive_Test_Impl()
+	{
+		setThreadName("Sender");
+
+		IOService ios(0);
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server, "ep");
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client, "ep");
+		Channel senderChannel = ep1.addChannel("chl", "chl");
+		Channel recvChannel = ep0.addChannel("chl", "chl");
+
+		PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
+		PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
+
+		u64 numOTs = 952;
+
+		u64 s = 40;
+
+		std::vector<block> recvMsg(numOTs), baseRecv(128 + s);
+		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128 + s);
+		BitVector choices(numOTs);
+		choices.randomize(prng0);
+		//choices[0] = 1;
+
+		BitVector baseChoice(128 + s);
+		baseChoice.randomize(prng0);
+
+		for (u64 i = 0; i < 128 + s; ++i)
+		{
+			baseSend[i][0] = prng0.get<block>();
+			baseSend[i][1] = prng0.get<block>();
+			baseRecv[i] = baseSend[i][baseChoice[i]];
+		}
+
+
+		IknpDotExtSender sender;
+		IknpDotExtReceiver recv;
+
+		//sender.mmChoices = choices;
+
+		std::thread thrd = std::thread([&]() {
+			setThreadName("receiver");
+
+
+
+			recv.setBaseOts(baseSend);
+			recv.receive(choices, recvMsg, prng0, recvChannel);
+		});
+
+		block delta = prng1.get<block>();
+		sender.setDelta(delta);
+		sender.setBaseOts(baseRecv, baseChoice);
+		sender.send(sendMsg, prng1, senderChannel);
+		thrd.join();
+
+		//for (u64 i = 0; i < baseOTs.receiver_outputs.size(); ++i)
+		//{
+		//    std::cout << sender.GetMessage(i, 0) << " " << sender.GetMessage(i, 1) << "\n" << recv.GetMessage(1) << "  " << recv.mChoiceBits[i] << std::endl;
+		//}
+
+		OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+		for (auto& s : sendMsg)
+		{
+			if (neq(s[0] ^ delta, s[1]))
+				throw UnitTestFail();
+		}
+
+
+		senderChannel.close();
+		recvChannel.close();
+
+
+		ep1.stop();
+		ep0.stop();
+
+		ios.stop();
+
+		//senderNetMgr.Stop();
+		//recvNetMg
+	}
 
 
     void IknpOtExt_100Receive_Test_Impl()

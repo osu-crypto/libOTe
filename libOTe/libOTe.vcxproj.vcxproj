@@ -29,6 +29,8 @@
     <ClInclude Include="NChooseOne\RR17\Rr17NcoOtSender.h" />
     <ClInclude Include="Tools\LinearCode.h" />
     <ClInclude Include="Tools\Tools.h" />
+    <ClInclude Include="TwoChooseOne\IknpDotExtReceiver.h" />
+    <ClInclude Include="TwoChooseOne\IknpDotExtSender.h" />
     <ClInclude Include="TwoChooseOne\IknpOtExtReceiver.h" />
     <ClInclude Include="TwoChooseOne\IknpOtExtSender.h" />
     <ClInclude Include="TwoChooseOne\KosDotExtReceiver.h" />
@@ -53,6 +55,8 @@
     <ClCompile Include="Tools\bch511.h" />
     <ClCompile Include="Tools\LinearCode.cpp" />
     <ClCompile Include="Tools\Tools.cpp" />
+    <ClCompile Include="TwoChooseOne\IknpDotExtReceiver.cpp" />
+    <ClCompile Include="TwoChooseOne\IknpDotExtSender.cpp" />
     <ClCompile Include="TwoChooseOne\IknpOtExtReceiver.cpp" />
     <ClCompile Include="TwoChooseOne\IknpOtExtSender.cpp" />
     <ClCompile Include="TwoChooseOne\KosDotExtReceiver.cpp" />
