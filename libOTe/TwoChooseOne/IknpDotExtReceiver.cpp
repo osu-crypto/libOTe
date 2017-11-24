@@ -63,8 +63,8 @@ namespace osuCrypto
             throw std::runtime_error("rt error at " LOCATION);
 
         // we are going to process OTs in blocks of 128 * superBlkSize messages.
-        u64 numOtExt = roundUpTo(choices.size(), 128);
-        u64 numSuperBlocks = (numOtExt / 128) / superBlkSize;
+        u64 numOtExt = roundUpTo(choices.size(), 128 * superBlkSize);
+        u64 numSuperBlocks = numOtExt / 128 / superBlkSize;
         u64 numBlocks = numSuperBlocks * superBlkSize;
 
         // turn the choice vbitVector into an array of blocks.

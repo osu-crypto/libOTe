@@ -50,8 +50,8 @@ namespace osuCrypto
         Channel& chl)
     {
         // round up
-        u64 numOtExt = roundUpTo(messages.size(), 128);
-        u64 numSuperBlocks = (numOtExt / 128) / superBlkSize;
+        u64 numOtExt = roundUpTo(messages.size(), 128 * superBlkSize);
+        u64 numSuperBlocks = numOtExt / 128 / superBlkSize;
 
         // a temp that will be used to transpose the sender's matrix
         Matrix<u8> t(mGens.size(), superBlkSize * sizeof(block));
