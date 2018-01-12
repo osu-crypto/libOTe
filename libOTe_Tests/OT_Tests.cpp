@@ -614,12 +614,12 @@ namespace tests_libOTe
 
 		//std::default_random_engine gg;
 		//std::exponential_distribution<double> dd(3.5);
-		u64 numTrials = 10;
+		u64 numTrials = 200;
 		for (u64 t = 0; t < numTrials; ++t)
 		{
 
 
-			u64 numOTs = prng0.get<u64>() % (1<< (t + 1)) + 10;
+			u64 numOTs = t + 1;// prng0.get<u64>() % (1 << (t + 1)) + 10;
 
 			u64 s = 40;
 

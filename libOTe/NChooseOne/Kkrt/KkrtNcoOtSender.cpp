@@ -173,13 +173,13 @@ namespace osuCrypto
         if (eq(mCorrectionVals[otIdx][0], ZeroBlock))
             throw std::invalid_argument("appears that we haven't received the receiver's choice yet. " LOCATION);
 #endif // !NDEBUG
-
-        static const int width(4);
+#define KKRT_WIDTH 4
+        //static const int width(4);
 
         block word = ZeroBlock;
         memcpy(&word, input, mInputByteCount);
 
-        std::array<block, width> choice{ word ,word ,word ,word }, code;
+        std::array<block, KKRT_WIDTH> choice{ word ,word ,word ,word }, code;
         mMultiKeyAES.ecbEncNBlocks(choice.data(), code.data());
 
         auto* corVal = mCorrectionVals.data() + otIdx * mCorrectionVals.stride();
@@ -188,8 +188,28 @@ namespace osuCrypto
 
         // This is the hashing phase. Here we are using pseudo-random codewords.
         // That means we assume inputword is a hash of some sort.
+#if KKRT_WIDTH == 4
+		code[0] = code[0] ^ word;
+		code[1] = code[1] ^ word;
+		code[2] = code[2] ^ word;
+		code[3] = code[3] ^ word;
+
+		block t00 = corVal[0] ^ code[0];
+		block t01 = corVal[1] ^ code[1];
+		block t02 = corVal[2] ^ code[2];
+		block t03 = corVal[3] ^ code[3];
+		block t10 = t00 & mChoiceBlks[0];
+		block t11 = t01 & mChoiceBlks[1];
+		block t12 = t02 & mChoiceBlks[2];
+		block t13 = t03 & mChoiceBlks[3];
+
+		code[0] = tVal[0] ^ t10;
+		code[1] = tVal[1] ^ t11;
+		code[2] = tVal[2] ^ t12;
+		code[3] = tVal[3] ^ t13;
+#else
         OSU_CRYPTO_COMPILER_UNROLL_LOOP_HINT
-            for (u64 i = 0; i < width; ++i)
+            for (u64 i = 0; i < KKRT_WIDTH; ++i)
             {
                 code[i] = code[i] ^ word;
 
@@ -200,6 +220,7 @@ namespace osuCrypto
                     = tVal[i]
                     ^ t1;
             }
+#endif
 
 #ifdef KKRT_SHA_HASH
 

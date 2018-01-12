@@ -182,7 +182,6 @@ namespace osuCrypto
 
 #ifdef OOS_SHA_HASH
         SHA1  sha1;
-        u8 hashBuff[SHA1::HashSize];
 #else
         std::array<block, 10> aesBuff;
 #endif
@@ -216,8 +215,7 @@ namespace osuCrypto
 #ifdef OOS_SHA_HASH
             // hash it all to get rid of the correlation.
             sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
-            sha1.Final(hashBuff);
-            memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
+            sha1.Final((u8*)dest, std::min<u64>(SHA1::HashSize, destSize));
             //val = toBlock(hashBuff);
 #else
             //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
@@ -227,13 +225,14 @@ namespace osuCrypto
             codeword[2] = codeword[2] ^ aesBuff[2];
             codeword[3] = codeword[3] ^ aesBuff[3];
 
-            val = codeword[0] ^ codeword[1];
+            block val = codeword[0] ^ codeword[1];
             codeword[2] = codeword[2] ^ codeword[3];
 
             val = val ^ codeword[2];
 
             mAesFixedKey.ecbEncBlock(val, codeword[0]);
             val = val ^ codeword[0];
+			memcpy(dest, &val, std::min<u64>(SHA1::HashSize, destSize));
 #endif
         }
         else
@@ -251,20 +250,19 @@ namespace osuCrypto
 #ifdef OOS_SHA_HASH
             // hash it all to get rid of the correlation.
             sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
-            sha1.Final(hashBuff);
-            memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
-            //val = toBlock(hashBuff);
+			sha1.Final((u8*)dest, std::min<u64>(SHA1::HashSize, destSize));
 #else
             //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
             mAesFixedKey.ecbEncBlocks(codeword.data(), mT.stride(), aesBuff.data());
 
-            val = ZeroBlock;
+            block val = ZeroBlock;
             for (u64 i = 0; i < mT.stride(); ++i)
                 val = val ^ codeword[i] ^ aesBuff[i];
 
 
             mAesFixedKey.ecbEncBlock(val, codeword[0]);
             val = val ^ codeword[0];
+			memcpy(dest, &val, std::min<u64>(SHA1::HashSize, destSize));
 #endif
         }
     }

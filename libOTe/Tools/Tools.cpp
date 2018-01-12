@@ -234,8 +234,10 @@ namespace osuCrypto {
 
         union TempObj
         {
-            array<block, chunkSize> blks;
-            array < array<u8, 16>, chunkSize> bytes;
+            //array<block, chunkSize> blks;
+			block blks[chunkSize];
+			//array < array<u8, 16>, chunkSize> bytes;
+			u8 bytes[chunkSize][16];
         };
 
         TempObj t;
@@ -432,7 +434,7 @@ namespace osuCrypto {
                     start + step11, start + step12, start + step13, start + step14, start + step15
                 };
 
-                memset(t.blks.data(), 0,sizeof(t));
+                memset(t.blks, 0,sizeof(t));
                 for (u64 i = 0; i < leftOverWidth; ++i)
                 {
                     t.bytes[0][i] = src[i][0];
