@@ -50,7 +50,7 @@ cd ../../..
 libOTe.sln
 ```
 
-Requirements: `Powershell`, Powershell `Set-ExecutionPolicy  Unrestricted`, `Visual Studio 2015`, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`.
+Requirements: `Powershell`, Powershell `Set-ExecutionPolicy  Unrestricted`, `Visual Studio 2017`, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`.
 Optional: `nasm` for improved SHA1 performance. 
  
 Build the solution within visual studio or with `MSBuild`. To see all the command line options, execute the program 
@@ -61,10 +61,11 @@ If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
 <b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `libOTe/Crypto/asm/sha_win64.asm` from the build system and undefining  `INTEL_ASM_SHA1` on line 28 of `libOTe/Crypto/sha1.cpp`.
 
+<b>Boost and visual studio 2017:</b>  If boost does not build with visual studio 2017 follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
 
+<b>Miracl and visual studio 2017:</b> If the Miracl script fails to find visual studio 2017, open the script and manually specify the path. 
  
- 
-### Linux
+### Linux / MAC
  
  In short, this will build the project
 
@@ -77,6 +78,7 @@ cmake  -G "Unix Makefiles"
 make
 ```
 
+
 Requirements: `CMake`, `Make`, `g++` or similar, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`. Optional: `nasm` for improved SHA1 performance.
 
 The libraries will be placed in `libOTe/lib` and the binary `frontend.exe` will be placed in `libOTe/bin` To see all the command line options, execute the program 
@@ -86,6 +88,11 @@ The libraries will be placed in `libOTe/lib` and the binary `frontend.exe` will 
 Note: In the case that miracl or boost is already installed, the steps  `cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt to find them instead. Boost is found with the CMake findBoost package and miracl is found with the `find_library(miracl)` command.
  
  If the cryptoTools directory is empty `git submodule update --init --recursive`.
+
+<b>Mac issue:</b> if make reports an error about `nasm: fatal: unrecognised output format 'macho64' - use -hf for a list`, the current version of NASM is out of date. Either update nasm or call 
+```
+export cryptoTools_NO_NASM=true
+``` 
 
 
 ## Help
