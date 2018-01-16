@@ -4,7 +4,7 @@
 #include <cryptoTools/Common/Log.h>
 #include  <mmintrin.h>
 #include "KkrtDefines.h"
-#include <cryptoTools/Crypto/sha1.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 
 using namespace std;
 
@@ -40,9 +40,9 @@ namespace osuCrypto
             throw std::runtime_error("rt error at " LOCATION);
 
         block seed = prng.get<block>();
-        u8 theirComm[SHA1::HashSize];
+        u8 theirComm[RandomOracle::HashSize];
 
-        auto fu = chl.asyncRecv(theirComm, SHA1::HashSize, [&]()
+        auto fu = chl.asyncRecv(theirComm, RandomOracle::HashSize, [&]()
         {
             chl.asyncSendCopy((u8*)&seed, sizeof(block));
         });
@@ -149,11 +149,11 @@ namespace osuCrypto
         block theirSeed;
         chl.recv((u8*)&theirSeed, sizeof(block));
 
-        SHA1 sha;
+        RandomOracle sha;
         sha.Update(theirSeed);
-        u8 cc[SHA1::HashSize];
+        u8 cc[RandomOracle::HashSize];
         sha.Final(cc);
-        if (memcmp(theirComm, cc, SHA1::HashSize))
+        if (memcmp(theirComm, cc, RandomOracle::HashSize))
             throw std::runtime_error(LOCATION);
 
 
@@ -247,13 +247,9 @@ namespace osuCrypto
 #ifdef KKRT_SHA_HASH
 
         // now hash it to remove the correlation.
-        SHA1  sha1;
-        u8 hashBuff[SHA1::HashSize];
-
+        RandomOracle  sha1(destSize);
         sha1.Update((u8*)mT0[otIdx].data(), mT0[otIdx].size() * sizeof(block));
-        sha1.Final(hashBuff);
-        memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
-        //val = toBlock(hashBuff);
+        sha1.Final((u8*)dest);
 #else
         s
         std::array<block, 10> aesBuff;

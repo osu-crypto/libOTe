@@ -163,7 +163,7 @@ namespace osuCrypto
         }
 
 #ifdef IKNP_SHA_HASH
-        SHA1 sha;
+        RandomOracle sha;
         u8 hashBuff[20];
         u64 doneIdx = 0;
 

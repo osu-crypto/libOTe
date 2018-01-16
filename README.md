@@ -22,7 +22,7 @@ Networking can be performed using both the sockets provided by the library and e
 The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel Xeon server (`2 36-cores Intel Xeon CPU E5-2699 v3 @ 2.30GHz and 256GB of RAM`) as of 11/16/2016. All timings shown reflect a "single" thread per party, with the expection that network IO in libOTe is performed in the background by a separate thread. 
  
  
-| *Type*                	| *Security*  	| *Protocol*     	| libOTe (SHA1/AES)	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) (SHA256) 	| [Apricot](https://github.com/bristolcrypto/apricot) (AES-hash)	| OOS16 (blake2)	| [emp-toolkit](https://github.com/emp-toolkit) (AES-hash)	|
+| *Type*                	| *Security*  	| *Protocol*     	| libOTe (RandomOracle/AES)	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) (SHA256) 	| [Apricot](https://github.com/bristolcrypto/apricot) (AES-hash)	| OOS16 (blake2)	| [emp-toolkit](https://github.com/emp-toolkit) (AES-hash)	|
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
 | 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **11.7 / 9.2**       	| ~              	| ~     	| 24**     	| ~          	|
 | 1-out-of-N (N=2<sup>128</sup>)| passive| KKRT16      	| **9.2 / 6.7**        	| ~              	| ~       	| ~       	| ~          	|
@@ -51,7 +51,7 @@ libOTe.sln
 ```
 
 Requirements: `Powershell`, Powershell `Set-ExecutionPolicy  Unrestricted`, `Visual Studio 2017`, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`.
-Optional: `nasm` for improved SHA1 performance. 
+Optional: `nasm` for improved RandomOracle performance. 
  
 Build the solution within visual studio or with `MSBuild`. To see all the command line options, execute the program 
 
@@ -59,7 +59,7 @@ Build the solution within visual studio or with `MSBuild`. To see all the comman
   
 If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
-<b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `libOTe/Crypto/asm/sha_win64.asm` from the build system and undefining  `INTEL_ASM_SHA1` on line 28 of `libOTe/Crypto/sha1.cpp`.
+<b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `libOTe/Crypto/asm/sha_win64.asm` from the build system and undefining  `INTEL_ASM_RandomOracle` on line 28 of `libOTe/Crypto/sha1.cpp`.
 
 <b>Boost and visual studio 2017:</b>  If boost does not build with visual studio 2017 follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
 
@@ -79,7 +79,7 @@ make
 ```
 
 
-Requirements: `CMake`, `Make`, `g++` or similar, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`. Optional: `nasm` for improved SHA1 performance.
+Requirements: `CMake`, `Make`, `g++` or similar, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`. Optional: `nasm` for improved RandomOracle performance.
 
 The libraries will be placed in `libOTe/lib` and the binary `frontend.exe` will be placed in `libOTe/bin` To see all the command line options, execute the program 
  
@@ -119,9 +119,9 @@ The 1-out-of-N  [KKRT16] for arbitrary N is also implemented and slightly faster
 The approximate K-out-of-N OT [RR16] protocol is also implemented. This protocol allows for a rough bound on the value K with a very light weight cut and choose technique. It was introduced for a PSI protocol that builds on a Garbled Bloom Filter.
  
  
-\* Delta-OT does not use the SHA1 or AES hash function.
+\* Delta-OT does not use the RandomOracle or AES hash function.
  
-\** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper and their implementation used multiple threads. The number was not specified. When using the libOTe implementation with multiple threads, a timing of 2.6 seconds was obtained with the SHA1 hash function.
+\** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper and their implementation used multiple threads. The number was not specified. When using the libOTe implementation with multiple threads, a timing of 2.6 seconds was obtained with the RandomOracle hash function.
  
 It should be noted that the libOTe implementation uses the Boost ASIO library to perform more efficient asynchronous network IO. This involves using a background thread to help process network data. As such, this is not a completely fair comparison to the Apricot implementation but we don't expect it to have a large impact. It also appears that the Encrypto Group implementation uses asynchronous network IO.
  

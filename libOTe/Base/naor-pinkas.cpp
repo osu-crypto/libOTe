@@ -4,7 +4,7 @@
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/Curve.h>
-#include <cryptoTools/Crypto/sha1.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Network/Channel.h>
 
 #define PARALLEL
@@ -131,7 +131,7 @@ namespace osuCrypto
 
                 // resuse this space, not the data of PK0...
                 auto& gka = PK0;
-                SHA1 sha;
+                RandomOracle sha(sizeof(block));
 
                 std::vector<u8>buff(fieldElementSize);
                 EccBrick bc(pC[0]);
@@ -218,7 +218,7 @@ namespace osuCrypto
                     c.emplace_back(curve, pC[i]);
 
                 std::vector<u8> hashInBuff(fieldElementSize);
-                SHA1 sha;
+                RandomOracle sha(sizeof(block));
                 recvFuture.get();
 
                 for (u64 i = 0; i < u64(messages.size()); i++)

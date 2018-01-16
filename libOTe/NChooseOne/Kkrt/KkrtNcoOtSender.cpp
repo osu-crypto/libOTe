@@ -3,7 +3,7 @@
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Log.h>
 #include "KkrtDefines.h"
-#include <cryptoTools/Crypto/sha1.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 
 namespace osuCrypto
 {
@@ -66,13 +66,13 @@ namespace osuCrypto
         static const u8 superBlkSize(8);
 
         block seed = prng.get<block>(), theirSeed;
-        SHA1 hasher;
+        RandomOracle hasher;
         hasher.Update(seed);
-        u8 comm[SHA1::HashSize];
+        u8 comm[RandomOracle::HashSize];
         hasher.Final(comm);
 
 
-        chl.asyncSend(comm, SHA1::HashSize);
+        chl.asyncSend(comm, RandomOracle::HashSize);
 
 
         auto future = chl.asyncRecv((u8*)&theirSeed, sizeof(block));
@@ -223,14 +223,10 @@ namespace osuCrypto
 #endif
 
 #ifdef KKRT_SHA_HASH
-
-        SHA1  sha1;
-        u8 hashBuff[SHA1::HashSize];
+        RandomOracle  sha1(destSize);
         // hash it all to get rid of the correlation.
         sha1.Update((u8*)code.data(), sizeof(block) * mT.stride());
-        sha1.Final(hashBuff);
-        memcpy(dest, hashBuff, std::min(destSize, SHA1::HashSize));
-        //val = toBlock(hashBuff);
+        sha1.Final((u8*)dest);
 #else
         std::array<block, 10> aesBuff;
         mAesFixedKey.ecbEncBlocks(code.data(), mT.stride(), aesBuff.data());

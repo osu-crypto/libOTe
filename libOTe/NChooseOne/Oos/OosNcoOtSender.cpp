@@ -1,7 +1,7 @@
 #include "OosNcoOtSender.h"
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/bch511.h"
-#include <cryptoTools/Crypto/sha1.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Network/Channel.h>
 #include "OosDefines.h"
 
@@ -181,7 +181,7 @@ namespace osuCrypto
         mCode.encode((u8*)codeword.data(), (u8*)codeword.data());
 
 #ifdef OOS_SHA_HASH
-        SHA1  sha1;
+        RandomOracle  sha1(destSize);
 #else
         std::array<block, 10> aesBuff;
 #endif
@@ -215,7 +215,7 @@ namespace osuCrypto
 #ifdef OOS_SHA_HASH
             // hash it all to get rid of the correlation.
             sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
-            sha1.Final((u8*)dest, std::min<u64>(SHA1::HashSize, destSize));
+            sha1.Final((u8*)dest);
             //val = toBlock(hashBuff);
 #else
             //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
@@ -232,7 +232,7 @@ namespace osuCrypto
 
             mAesFixedKey.ecbEncBlock(val, codeword[0]);
             val = val ^ codeword[0];
-			memcpy(dest, &val, std::min<u64>(SHA1::HashSize, destSize));
+			memcpy(dest, &val, std::min<u64>(RandomOracle::HashSize, destSize));
 #endif
         }
         else
@@ -250,7 +250,7 @@ namespace osuCrypto
 #ifdef OOS_SHA_HASH
             // hash it all to get rid of the correlation.
             sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
-			sha1.Final((u8*)dest, std::min<u64>(SHA1::HashSize, destSize));
+			sha1.Final((u8*)dest);
 #else
             //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
             mAesFixedKey.ecbEncBlocks(codeword.data(), mT.stride(), aesBuff.data());
@@ -262,7 +262,7 @@ namespace osuCrypto
 
             mAesFixedKey.ecbEncBlock(val, codeword[0]);
             val = val ^ codeword[0];
-			memcpy(dest, &val, std::min<u64>(SHA1::HashSize, destSize));
+			memcpy(dest, &val, std::min<u64>(RandomOracle::HashSize, destSize));
 #endif
         }
     }

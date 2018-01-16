@@ -1,7 +1,7 @@
 #include "AknOtReceiver.h"
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Common/Timer.h>
-#include <cryptoTools/Crypto/sha1.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 
 #include "libOTe/Base/naor-pinkas.h"
 #include "libOTe/TwoChooseOne/LzKosOtExtReceiver.h"
@@ -151,7 +151,7 @@ namespace osuCrypto
                         // LzKosOtExtReceiver, then we need to hash the 0-message now
                         // because it was lazy and didn't ;)
 
-                        SHA1 sha;
+                        RandomOracle sha;
                         sha.Update(mMessages[i]);
                         sha.Final(mMessages[i]);
                     }

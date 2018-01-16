@@ -68,8 +68,8 @@ namespace osuCrypto
         std::array<block, gOtExtBaseOtCount> t0;
 
 
-        SHA1 sha;
-        u8 hashBuff[SHA1::HashSize];
+        RandomOracle sha;
+        u8 hashBuff[RandomOracle::HashSize];
 
         // commit to as seed which will be used to
         block seed = prng.get<block>();

@@ -156,7 +156,7 @@ namespace osuCrypto
         //      point to a value in the range  {0,1}^inputBitsCount. 
         // @ dest: The output buffer which will hold the OT message encoding the inputWord.
         // @ destSize: The number of bytes that should be written to the dest pointer.
-        //      destSize must be no larger than SHA1::HashSize.
+        //      destSize must be no larger than RandomOracle::HashSize.
         virtual void encode(
             u64 otIdx,
             const void* inputWord,

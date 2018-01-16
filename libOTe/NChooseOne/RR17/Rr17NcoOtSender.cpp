@@ -2,7 +2,7 @@
 
 
 #include <cryptoTools/Network/Channel.h>
-#include <cryptoTools/Crypto/sha1.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 namespace osuCrypto
 {
 
@@ -119,15 +119,15 @@ namespace osuCrypto
         //for (u64 i = 0; i < mEncodeSize; ++i)
         //    encoding = encoding  ^ mMessages[otIdx++][*iter++];
 
-        SHA1 sha;
-        u8 buff[SHA1::HashSize];
+        RandomOracle sha;
+        u8 buff[RandomOracle::HashSize];
 
         for (u64 i = 0; i < (mInputByteCount*8); ++i)
             sha.Update(mMessages[otIdx++][*iter++]);
 
         sha.Update((u8*)input, mInputByteCount);
         sha.Final(buff);
-        memcpy(dest, buff, std::min<u64>(SHA1::HashSize, destSize));
+        memcpy(dest, buff, std::min<u64>(RandomOracle::HashSize, destSize));
         //encoding = *(block*)buff;
     }
 

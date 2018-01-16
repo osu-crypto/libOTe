@@ -2,7 +2,7 @@
 #include "OosNcoOtReceiver.h"
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/bch511.h"
-#include <cryptoTools/Crypto/sha1.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 #include  <mmintrin.h>
 #include "OosDefines.h"
 
@@ -235,14 +235,10 @@ namespace osuCrypto
             t1Val[3] = t1Val[3] ^ t0Val[3];
 
 #ifdef OOS_SHA_HASH
-            SHA1  sha1;
-            u8 hashBuff[SHA1::HashSize];
+            RandomOracle  sha1(destSize);
             // now hash it to remove the correlation.
             sha1.Update((u8*)t0Val, mT0.stride() * sizeof(block));
-            sha1.Final(hashBuff);
-            memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
-
-            //val = toBlock(hashBuff);
+            sha1.Final((u8*)dest);
 #else
             //H(x) = AES_f(H'(x)) + H'(x), where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
             mAesFixedKey.ecbEncFourBlocks(t0Val, codeword.data());
@@ -276,12 +272,12 @@ namespace osuCrypto
             }
 
 #ifdef OOS_SHA_HASH
-            SHA1  sha1;
-            u8 hashBuff[SHA1::HashSize];
+            RandomOracle  sha1;
+            u8 hashBuff[RandomOracle::HashSize];
             // now hash it to remove the correlation.
             sha1.Update((u8*)t0Val, mT0.stride() * sizeof(block));
             sha1.Final(hashBuff);
-            memcpy(dest, hashBuff, std::min<u64>(SHA1::HashSize, destSize));
+            memcpy(dest, hashBuff, std::min<u64>(RandomOracle::HashSize, destSize));
             //val = toBlock(hashBuff);
 #else
             //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.

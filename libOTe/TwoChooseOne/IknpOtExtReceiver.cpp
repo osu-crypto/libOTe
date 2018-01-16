@@ -183,7 +183,7 @@ namespace osuCrypto
 
 
 #ifdef IKNP_SHA_HASH
-        SHA1 sha;
+        RandomOracle sha;
         u8 hashBuff[20];
 #else
         std::array<block, 8> aesHashTemp;

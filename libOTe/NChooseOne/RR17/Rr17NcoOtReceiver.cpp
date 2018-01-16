@@ -1,7 +1,7 @@
 #include "Rr17NcoOtReceiver.h"
 
 #include <cryptoTools/Network/Channel.h>
-#include <cryptoTools/Crypto/sha1.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 namespace osuCrypto
 {
 
@@ -119,16 +119,16 @@ namespace osuCrypto
         //    encoding = encoding ^ mMessages[otIdx++];
 
 
-        SHA1 sha;
+        RandomOracle sha;
         sha.Update((u8*)(mMessages.data() + otIdx), mEncodeSize * sizeof(block));
 
 
         sha.Update((u8*)choiceWord, mEncodeSize / 8);
 
-        u8 buff[SHA1::HashSize];
+        u8 buff[RandomOracle::HashSize];
         sha.Final(buff);
 
-        memcpy(dest, buff, std::min<u64>(SHA1::HashSize, destSize));
+        memcpy(dest, buff, std::min<u64>(RandomOracle::HashSize, destSize));
         //encoding = toBlock(buff);
     }
 

@@ -62,8 +62,8 @@ namespace osuCrypto
         u64 numOTExt = ((messages.size() + 127) / 128) * 128;
 
 
-        SHA1 sha;
-        u8 hashBuff[SHA1::HashSize];
+        RandomOracle sha;
+        u8 hashBuff[RandomOracle::HashSize];
 
         block delta = *(block*)mBaseChoiceBits.data();
 

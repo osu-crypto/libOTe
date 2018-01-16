@@ -260,7 +260,7 @@ namespace osuCrypto
         block ti, ti2;
 
 #ifdef KOS_SHA_HASH
-        SHA1 sha;
+        RandomOracle sha;
         u8 hashBuff[20];
 #endif
 
