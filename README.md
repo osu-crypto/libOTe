@@ -2,6 +2,7 @@
 A fast and portable C++14 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*.  This library currently implements:
  
 * The semi-honest 1-out-of-2 OT [IKNP03].
+* The semi-honest 1-out-of-2 Delta-OT [IKNP03],[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
 * The malicious secure 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
 * The malicious secure 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
@@ -24,9 +25,10 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
  
 | *Type*                	| *Security*  	| *Protocol*     	| libOTe (SHA1/AES)	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) (SHA256) 	| [Apricot](https://github.com/bristolcrypto/apricot) (AES-hash)	| OOS16 (blake2)	| [emp-toolkit](https://github.com/emp-toolkit) (AES-hash)	|
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
-| 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **11.7 / 9.2**       	| ~              	| ~     	| 24**     	| ~          	|
+| 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **10.6 / 9.2**       	| ~              	| ~     	| 24**     	| ~          	|
 | 1-out-of-N (N=2<sup>128</sup>)| passive| KKRT16      	| **9.2 / 6.7**        	| ~              	| ~       	| ~       	| ~          	|
 | 1-out-of-2 Delta-OT  	| malicious   	| KOS15       	| **1.9***        	| ~              	| ~     	| ~        	|  ~      	|
+| 1-out-of-2 Delta-OT  	| passive   	| KOS15       	| **1.7***        	| ~              	| ~     	| ~        	|  ~      	|
 | 1-out-of-2          	| malicious 	| ALSZ15        | ~          	        | 17.3          	| ~       	| ~       	|  10         	|
 | 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  2.9       	|
 | 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**   | ~     	|  2.7      	|

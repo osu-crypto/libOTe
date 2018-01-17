@@ -15,7 +15,7 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	############################################
 	#           Flag and #defines              #
 	############################################
-	add_definitions(-DSOLUTION_DIR=\"${CMAKE_SOURCE_DIR}\")
+	add_definitions(-DSOLUTION_DIR='${CMAKE_SOURCE_DIR}')
 	set(CMAKE_C_FLAGS "-ffunction-sections -Wall  -maes -msse2 -msse4.1 -mpclmul -Wfatal-errors -pthread -Wno-strict-overflow  -fPIC -Wno-ignored-attributes")
 	set(CMAKE_CXX_FLAGS  "${CMAKE_C_FLAGS}  -std=c++14")
 	
