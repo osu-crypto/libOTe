@@ -1,5 +1,5 @@
 # libOTe
-A fast and portable C++14 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*.  This library currently implements:
+A fast and portable C++11 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*.  This library currently implements:
  
 * The semi-honest 1-out-of-2 OT [IKNP03].
 * The semi-honest 1-out-of-2 Delta-OT [IKNP03],[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
