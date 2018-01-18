@@ -714,7 +714,6 @@ void base()
 
 }
 
-#include <cryptoTools/gsl/span>
 
 #include <cryptoTools/Common/Matrix.h>
 
