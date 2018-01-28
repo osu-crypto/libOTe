@@ -151,7 +151,7 @@ namespace osuCrypto
                         // LzKosOtExtReceiver, then we need to hash the 0-message now
                         // because it was lazy and didn't ;)
 
-                        RandomOracle sha;
+                        RandomOracle sha(sizeof(block));
                         sha.Update(mMessages[i]);
                         sha.Final(mMessages[i]);
                     }
