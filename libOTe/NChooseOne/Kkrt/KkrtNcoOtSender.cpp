@@ -281,6 +281,30 @@ namespace osuCrypto
         mCorrectionIdx += recvCount;
     }
 
+    u64 KkrtNcoOtSender::recvCorrection(Channel & chl)
+    {
+
+        // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
+        // there c(w) is a pseudo-random code.
+        auto dest = mCorrectionVals.data() + i32(mCorrectionIdx * mCorrectionVals.stride());
+        auto maxReceiveCount = (mCorrectionVals.rows() - mCorrectionIdx) * mCorrectionVals.stride();
+
+        ReceiveAtMost<block> receiver(dest, maxReceiveCount);
+        chl.recv(receiver);
+
+        // check that the number of blocks received is ok.
+        if (receiver.receivedSize() % mCorrectionVals.stride())
+            throw std::runtime_error("An even number of correction blocks were not sent. " LOCATION);
+
+        // compute how many corrections were received.
+        auto numCorrections = receiver.receivedSize() / mCorrectionVals.stride();
+
+        // update the index of there we should store the next set of correction values.
+        mCorrectionIdx += numCorrections;
+
+        return numCorrections;
+    }
+
 
 
 }

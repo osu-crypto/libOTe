@@ -91,6 +91,10 @@ namespace osuCrypto
         // @ recvCount: the number of correction values that should be received.
         virtual void recvCorrection(Channel& chl, u64 recvCount) = 0;
 
+        // An alternative version of the recvCorrection(...) function which dynamically receivers the number of 
+        // corrections based on how many were sent. The return value is the number received. See overload for details.
+        virtual u64 recvCorrection(Channel& chl) = 0;
+
 
         // Some malicious secure OT extensions require an additional step after all corrections have 
         // been received. In this case, this method should be called.

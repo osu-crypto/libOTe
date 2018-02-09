@@ -68,6 +68,7 @@ namespace osuCrypto {
         void configure(bool maliciousSecure, u64 statSecParam, u64 inputBitCount) override;
 
         void recvCorrection(Channel& chl, u64 recvCount) override;
+        u64 recvCorrection(Channel& chl) override;
 
         void check(Channel& chl, block seed) override;
     };

@@ -52,6 +52,7 @@ namespace osuCrypto
         void configure(bool maliciousSecure,u64 statSecParam, u64 inputBitCount) override;
 
         void recvCorrection(Channel& chl, u64 recvCount) override;
+        u64 recvCorrection(Channel& chl) override { throw std::runtime_error("not implemented" LOCATION); }
 
         void check(Channel& chl, block seed) override;
     };

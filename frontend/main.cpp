@@ -556,7 +556,7 @@ void akn_test(int i)
             throw std::runtime_error("");
 
     }
-
+    std::cout << "akn done." << std::endl;
 
     for (u64 i = 0; i < numTHreads; ++i)
         chls[i].close();

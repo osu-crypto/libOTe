@@ -300,12 +300,36 @@ namespace osuCrypto
 
         // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
         // there c(w) is a pseudo-random code.
-        auto dest = mCorrectionVals.begin() + i32(mCorrectionIdx * mCorrectionVals.stride());
-        chl.recv((u8*)&*dest,
-            recvCount * sizeof(block) * mCorrectionVals.stride());
+        auto dest = mCorrectionVals.data() + i32(mCorrectionIdx * mCorrectionVals.stride());
+        chl.recv(dest,
+            recvCount * mCorrectionVals.stride());
 
         // update the index of there we should store the next set of correction values.
         mCorrectionIdx += recvCount;
+    }
+
+    u64 OosNcoOtSender::recvCorrection(Channel & chl)
+    {
+
+        // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
+        // there c(w) is a pseudo-random code.
+        auto dest = mCorrectionVals.data() + i32(mCorrectionIdx * mCorrectionVals.stride());
+        auto maxReceiveCount = (mCorrectionVals.rows() - mCorrectionIdx) * mCorrectionVals.stride();
+
+        ReceiveAtMost<block> reciever(dest, maxReceiveCount);
+        chl.recv(reciever);
+
+        // check that the number of blocks received is ok.
+        if (reciever.receivedSize() % mCorrectionVals.stride())
+            throw std::runtime_error("An even number of correction blocks were not sent. " LOCATION);
+
+        // compute how many corrections were received.
+        auto numCorrections = reciever.receivedSize() / mCorrectionVals.stride();
+
+        // update the index of there we should store the next set of correction values.
+        mCorrectionIdx += numCorrections;
+
+        return numCorrections;
     }
 
     void OosNcoOtSender::check(Channel & chl, block seed)
