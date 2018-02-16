@@ -35,7 +35,7 @@ int miraclTestMain();
 #include "libOTe/TwoChooseOne/LzKosOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/LzKosOtExtSender.h"
 
-#include "CLP.h"
+#include <cryptoTools/Common/CLP.h>
 #include "main.h"
 
 
@@ -726,14 +726,34 @@ int main(int argc, char** argv)
 
     if (cmd.isSet(unitTestTag))
     {
-        tests_cryptoTools::tests_all();
-        tests_libOTe::tests_all();
+
+        auto tests = tests_cryptoTools::Tests;
+        tests += tests_libOTe::Tests;
+//        auto& tests = globalTests;
+        if (cmd.isSet("list"))
+        {
+            tests.list();
+        }
+        else if (cmd.hasValue(unitTestTag))
+        {
+            auto testNums = cmd.getMany<u64>(unitTestTag);
+            for (auto i : testNums)
+                tests.runOne(i);
+        }
+        else
+        {
+            cmd.setDefault("loop", 1);
+            auto loop = cmd.get<u64>("loop");
+
+            for(u64 i =0; i < loop; ++i)
+                tests.runAll();
+        }
     }
     else if (cmd.isSet(kos))
     {
         if (cmd.hasValue(kos))
         {
-            kos_test(cmd.getInt(kos));
+            kos_test(cmd.get<int>(kos));
         }
         else
         {
@@ -746,7 +766,7 @@ int main(int argc, char** argv)
     {
         if (cmd.hasValue(dkos))
         {
-            kos_test(cmd.getInt(dkos));
+            kos_test(cmd.get<int>(dkos));
         }
         else
         {
@@ -759,7 +779,7 @@ int main(int argc, char** argv)
     {
         if (cmd.hasValue(kkrt))
         {
-            kkrt_test(cmd.getInt(kkrt));
+            kkrt_test(cmd.get<int>(kkrt));
         }
         else
         {
@@ -772,7 +792,7 @@ int main(int argc, char** argv)
     {
         if (cmd.hasValue(iknp))
         {
-            iknp_test(cmd.getInt(iknp));
+            iknp_test(cmd.get<int>(iknp));
         }
         else
         {
@@ -785,7 +805,7 @@ int main(int argc, char** argv)
     {
         if (cmd.hasValue(oos))
         {
-            oos_test(cmd.getInt(oos));
+            oos_test(cmd.get<int>(oos));
         }
         else
         {
@@ -798,7 +818,7 @@ int main(int argc, char** argv)
     {
         if (cmd.hasValue(akn))
         {
-            akn_test(cmd.getInt(akn));
+            akn_test(cmd.get<int>(akn));
         }
         else
         {
