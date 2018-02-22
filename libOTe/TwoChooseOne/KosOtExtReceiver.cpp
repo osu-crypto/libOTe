@@ -50,6 +50,7 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
+        setTimePoint("Kos.recv.start");
 
         if (mHasBase == false)
             throw std::runtime_error("rt error at " LOCATION);
@@ -237,7 +238,7 @@ namespace osuCrypto
         chl.send(cc);
 #endif
         //std::cout << "uBuff " << (bool)uBuff << "  " << (uEnd - uIter) << std::endl;
-        gTimer.setTimePoint("recv.transposeDone");
+        setTimePoint("Kos.recv.transposeDone");
 
         // do correlation check and hashing
         // For the malicious secure OTs, we need a random PRNG that is chosen random
@@ -248,7 +249,7 @@ namespace osuCrypto
         chl.recv((u8*)&theirSeed, sizeof(block));
         chl.asyncSendCopy((u8*)&seed, sizeof(block));
         commonPrng.SetSeed(seed ^ theirSeed);
-        gTimer.setTimePoint("recv.cncSeed");
+        setTimePoint("Kos.recv.cncSeed");
 
         // this buffer will be sent to the other party to prove we used the
         // same value of r in all of the column vectors...
@@ -357,11 +358,10 @@ namespace osuCrypto
             t2 = t2 ^ ti2;
         }
 
-        gTimer.setTimePoint("recv.checkSummed");
 
         chl.asyncSend(std::move(correlationData));
-        //chl.send(*correlationData);
-        gTimer.setTimePoint("recv.done");
+
+        setTimePoint("Kos.recv.done");
 
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");
     }

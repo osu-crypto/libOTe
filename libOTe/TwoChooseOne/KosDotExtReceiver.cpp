@@ -58,6 +58,8 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
+        setTimePoint("KosDot.recv.start");
+
 
         if (mHasBase == false)
             throw std::runtime_error("rt error at " LOCATION);
@@ -189,7 +191,7 @@ namespace osuCrypto
         }
 
 
-        gTimer.setTimePoint("recv.transposeDone");
+        setTimePoint("KosDot.recv.transposeDone");
 
         // do correlation check and hashing
         // For the malicious secure OTs, we need a random PRNG that is chosen random
@@ -204,7 +206,7 @@ namespace osuCrypto
 		chl.recv(offset);
 
 
-        gTimer.setTimePoint("recv.cncSeed");
+        setTimePoint("KosDot.recv.cncSeed");
 
         PRNG codePrng(theirSeed);
         LinearCode code;
@@ -289,12 +291,10 @@ namespace osuCrypto
         //std::cout << IoStream::unlock;
 
 
-        gTimer.setTimePoint("recv.checkSummed");
-
 
         chl.asyncSend(std::move(correlationData));
 
-        gTimer.setTimePoint("recv.done");
+        setTimePoint("KosDot.recv.done");
 
 
 

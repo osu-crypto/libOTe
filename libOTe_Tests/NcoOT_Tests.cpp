@@ -107,7 +107,7 @@ namespace tests_libOTe
 
                     // check that we do in fact get the same value
                     if (! skips[k] && neq(encoding1[k], encoding2[k]))
-                        throw UnitTestFail();
+                        throw UnitTestFail("ot[" + ToString(i+k) + "] not equal " LOCATION);
 
                     // In addition to the sender being able to obtain the same value as the receiver,
                     // the sender can encode and other codeword. This should result in a different 
@@ -117,7 +117,7 @@ namespace tests_libOTe
                     sender.encode(i + k, &inputs[k], (u8*)&encoding2[k], sizeof(block));
 
                     if (eq(encoding1[k], encoding2[k]))
-                        throw UnitTestFail();
+                        throw UnitTestFail(LOCATION);
                 }
             }
         }
@@ -161,7 +161,7 @@ namespace tests_libOTe
         //        if (!skip && neq(encoding1, encoding2))
         //        {
         //            std::cout << " = failed " << i << std::endl;
-        //            throw UnitTestFail();
+        //            throw UnitTestFail(LOCATION);
         //        }
 
         //        input = prng0.get<block>();
@@ -172,7 +172,7 @@ namespace tests_libOTe
         //        if (!skip && eq(encoding1, encoding2))
         //        {
         //            std::cout << " != failed " << i << std::endl;
-        //            throw UnitTestFail();
+        //            throw UnitTestFail(LOCATION);
         //        }
         //    }
 
@@ -286,7 +286,7 @@ namespace tests_libOTe
 
                     // check that we do in fact get the same value
                     if (neq(encoding1[k], encoding2[k]))
-                        throw UnitTestFail();
+                        throw UnitTestFail(LOCATION);
 
                     // In addition to the sender being able to obtain the same value as the receiver,
                     // the sender can encode and other codeword. This should result in a different 
@@ -296,7 +296,7 @@ namespace tests_libOTe
                     sender.encode(i + k, &inputs[k], (u8*)&encoding2[k], sizeof(block));
 
                     if (eq(encoding1[k], encoding2[k]))
-                        throw UnitTestFail();
+                        throw UnitTestFail(LOCATION);
                 }
             }
         }
@@ -332,14 +332,14 @@ namespace tests_libOTe
                 send2.encode(i, &input, &encoding2);
 
                 if (neq(encoding1, encoding2))
-                    throw UnitTestFail();
+                    throw UnitTestFail(LOCATION);
 
                 input = prng0.get<block>();
 
                 send2.encode(i, &input, &encoding2);
 
                 if (eq(encoding1, encoding2))
-                    throw UnitTestFail();
+                    throw UnitTestFail(LOCATION);
             }
 
         }
@@ -397,6 +397,9 @@ namespace tests_libOTe
 
         testNco(sender, numOTs, prng0, sendChl, recv, prng1, recvChl);
 
+        auto v = std::async([&] { recv.check(recvChl, ZeroBlock); });
+        sender.check(sendChl,ZeroBlock);
+        v.get();
 
         auto sender2 = sender.split();
         auto recv2 = recv.split();
@@ -502,7 +505,7 @@ namespace tests_libOTe
             {
                 std::cout << cw << std::endl;
                 std::cout << "expecting all ones" << std::endl;
-                throw UnitTestFail();
+                throw UnitTestFail(LOCATION);
             }
         }
 
@@ -522,8 +525,26 @@ namespace tests_libOTe
         {
             std::cout << cw << std::endl;
             std::cout << expected << std::endl;
-            throw UnitTestFail();
+            throw UnitTestFail(LOCATION);
         }
+
+
+        code.encode_bch511((u8*)plainText.data(), (u8*)codeword.data());
+        cw.resize(0);
+        cw.append((u8*)codeword.data(), code.codewordBitSize());
+
+
+        expected = BitVector("1111111111111111111111111111111111111111111111111101111111111101111111111111101000010001110100011100010110011111110010011010001010000111111001101101110101100000100010010101000110011001111101111100100111000101110000101000000011000100011110011100001101100111111001001011010100010010110001010011000011111010101010010010011101001001100001100010100101001100111000010110011110011110001110001011111101010001101000101010110100011000000011010011110101011001100011111111101001101111001111111101000010000011010111100011100");
+
+        if (cw != expected)
+        {
+            std::cout << cw << std::endl;
+            std::cout << expected << std::endl;
+            throw UnitTestFail(LOCATION);
+        }
+
+
+
 
     }
 
@@ -652,7 +673,7 @@ namespace tests_libOTe
         for (u64 i = 0; i < 40; ++i)
         {
             if (dest[i] != 1)
-                throw UnitTestFail();
+                throw UnitTestFail(LOCATION);
         }
     }
 

@@ -26,6 +26,7 @@ namespace osuCrypto
         span<Channel>  chls,
         PRNG & prng)
     {
+        setTimePoint("AknOt.Send.start");
 
 
 
@@ -96,7 +97,7 @@ namespace osuCrypto
 
             if (t == 0)
             {
-                gTimer.setTimePoint("AknOt.SenderExtDone");
+                setTimePoint("AknOt.Send.ExtDone");
                 chl.asyncSend((u8*)&cncRootSeed, sizeof(block));
             }
 
@@ -177,5 +178,8 @@ namespace osuCrypto
                 << "my computed block  = " << totalSum << "  vs " << proof  <<std::endl;
             throw std::runtime_error("failed cut and choose");
         }
+
+        setTimePoint("AknOt.Send.Done");
+
     }
 }

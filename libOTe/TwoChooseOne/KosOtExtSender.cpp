@@ -51,6 +51,8 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
+        setTimePoint("Kos.send.start");
+
         // round up
         u64 numOtExt = roundUpTo(messages.size(), 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
@@ -228,13 +230,13 @@ namespace osuCrypto
             }
         }
 #endif
-        gTimer.setTimePoint("send.transposeDone");
+        setTimePoint("Kos.send.transposeDone");
 
         block seed = prng.get<block>();
         chl.asyncSend((u8*)&seed, sizeof(block));
         block theirSeed;
         chl.recv((u8*)&theirSeed, sizeof(block));
-        gTimer.setTimePoint("send.cncSeed");
+        setTimePoint("Kos.send.cncSeed");
 
         if (Commit(theirSeed) != theirSeedComm)
             throw std::runtime_error("bad commit " LOCATION);
@@ -255,7 +257,7 @@ namespace osuCrypto
         u64 doneIdx = 0;
         std::array<block, 128> challenges;
 
-        gTimer.setTimePoint("send.checkStart");
+        setTimePoint("Kos.send.checkStart");
 
         u64 bb = (messages.size() + 127) / 128;
         for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
@@ -326,7 +328,7 @@ namespace osuCrypto
             q2 = q2 ^ qi2;
         }
 
-        gTimer.setTimePoint("send.checkSummed");
+        setTimePoint("Kos.send.checkSummed");
 
 
         //std::cout << IoStream::unlock;
@@ -335,7 +337,7 @@ namespace osuCrypto
         std::vector<u8> data(sizeof(block) * 3);
 
         chl.recv(data.data(), data.size());
-        gTimer.setTimePoint("send.proofReceived");
+        setTimePoint("Kos.send.proofReceived");
 
         block& received_x = ((block*)data.data())[0];
         block& received_t = ((block*)data.data())[1];
@@ -358,7 +360,7 @@ namespace osuCrypto
             std::cout << "q  = " << q1 << std::endl;
             throw std::runtime_error("Exit");;
         }
-        gTimer.setTimePoint("send.done");
+        setTimePoint("Kos.send.done");
 
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");
     }

@@ -49,6 +49,8 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
+        setTimePoint("IknpDot.send.transposeDone");
+
         // round up
         u64 numOtExt = roundUpTo(messages.size(), 128 * superBlkSize);
         u64 numSuperBlocks = numOtExt / 128 / superBlkSize;
@@ -162,7 +164,7 @@ namespace osuCrypto
 
         }
 
-        gTimer.setTimePoint("send.transposeDone");
+        setTimePoint("IknpDot.send.transposeDone");
 
         block seed = prng.get<block>();
         chl.asyncSend((u8*)&seed, sizeof(block));
@@ -181,7 +183,7 @@ namespace osuCrypto
 
         u64 doneIdx = 0;
 
-        gTimer.setTimePoint("send.checkStart");
+        setTimePoint("IknpDot.send.checkStart");
 
 
 
@@ -201,7 +203,7 @@ namespace osuCrypto
             doneIdx = stop0;
         }
 
-        gTimer.setTimePoint("send.done");
+        setTimePoint("IknpDot.send.done");
 
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");
     }

@@ -5,12 +5,13 @@
 #include <cryptoTools/Crypto/PRNG.h>
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Common/BitVector.h>
+#include <cryptoTools/Common/Timer.h>
 
 
 namespace osuCrypto
 {
 
-class AknOtReceiver
+class AknOtReceiver : public TimerAdapter
 {
 public:
     AknOtReceiver();

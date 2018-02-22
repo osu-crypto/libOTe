@@ -229,7 +229,7 @@ namespace osuCrypto
         mMultiKeyAES.ecbEncNBlocks(choice.data(), code.data());
 
         // encode the correction value as u = T0 + T1 + c(w), there c(w) is a pseudo-random codeword.
-        OSU_CRYPTO_COMPILER_UNROLL_LOOP_HINT
+        
             for (u64 i = 0; i < width; ++i)
             {
                 // final code is the output of AES plus the input

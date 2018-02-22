@@ -30,14 +30,15 @@ namespace osuCrypto {
         ~OosNcoOtSender();
 
         LinearCode mCode;
-        u64 mStatSecParam;
+        i32 mStatSecParam;
 
-        bool mMalicious;
+        bool mMalicious, mIsFinalized = false, mSentCheckSeed = false;
+        block mCheckSeed;
         std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;
         std::vector<block> mChoiceBlks;
         Matrix<block> mT, mCorrectionVals;
-        u64 mCorrectionIdx, mInputByteCount;
+        i32 mCorrectionIdx, mInputByteCount, mPendingCorrections = 0;
 
 
         u64 getBaseOTCount() const override;// { return mGens.size(); };
@@ -52,6 +53,7 @@ namespace osuCrypto {
             const BitVector& choices) override;
 
         std::unique_ptr<NcoOtExtSender> split() override;
+        std::unique_ptr<OosNcoOtSender> oosSplit();
 
 
         void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
@@ -70,7 +72,13 @@ namespace osuCrypto {
         void recvCorrection(Channel& chl, u64 recvCount) override;
         u64 recvCorrection(Channel& chl) override;
 
+        std::future<void> asyncRecvCorrection(Channel& chl, u64 recvCount);
+
         void check(Channel& chl, block seed) override;
+
+
+        void finalize(Channel& chl);
+        void sendCheckSeed(Channel& chl, block seed);
     };
 }
 

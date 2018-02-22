@@ -208,7 +208,7 @@ namespace osuCrypto
 		code[2] = tVal[2] ^ t12;
 		code[3] = tVal[3] ^ t13;
 #else
-        OSU_CRYPTO_COMPILER_UNROLL_LOOP_HINT
+        
             for (u64 i = 0; i < KKRT_WIDTH; ++i)
             {
                 code[i] = code[i] ^ word;

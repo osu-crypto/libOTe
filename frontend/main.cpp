@@ -352,15 +352,15 @@ void kos_test(int iii)
             {
                 PRNG prng(baseRecv[i][0]);
                 std::vector<std::array<block, 2>> msgs(numOTs);
-                gTimer.reset();
-                gTimer.setTimePoint("start");
+                _gTimer.reset();
+                _gTimer.setTimePoint("start");
                 KosOtExtSender s;
                 s.setBaseOts(baseRecv[i], baseChoice);
 
                 s.send(msgs, prng, chls[i]);
 
-                gTimer.setTimePoint("finish");
-                std::cout << gTimer << std::endl;
+                _gTimer.setTimePoint("finish");
+                std::cout << _gTimer << std::endl;
             });
         }
     }
@@ -423,15 +423,15 @@ void dkos_test(int i)
     else
     {
         std::vector<std::array<block, 2>> msgs(numOTs);
-        gTimer.reset();
-        gTimer.setTimePoint("start");
+        _gTimer.reset();
+        _gTimer.setTimePoint("start");
         KosDotExtSender s;
         s.setBaseOts(baseRecv, baseChoice);
 
         s.send(msgs, prng0, chl);
 
-        gTimer.setTimePoint("finish");
-        std::cout << gTimer << std::endl;
+        _gTimer.setTimePoint("finish");
+        std::cout << _gTimer << std::endl;
 
     }
 
@@ -728,7 +728,6 @@ int main(int argc, char** argv)
     {
         auto tests = tests_cryptoTools::Tests;
         tests += tests_libOTe::Tests;
-        //        auto& tests = globalTests;
 
         if (cmd.isSet("list"))
         {
@@ -738,22 +737,12 @@ int main(int argc, char** argv)
         {
             cmd.setDefault("loop", 1);
             auto loop = cmd.get<u64>("loop");
-            for (u64 i = 0; i < loop; ++i)
-            {
-                if (cmd.hasValue(unitTestTag))
-                {
-                    auto testNums = cmd.getMany<u64>(unitTestTag);
-                    for (auto i : testNums)
-                        tests.runOne(i);
-                }
-                else
-                {
 
-                    tests.runAll();
-                }
-            }
+            if (cmd.hasValue(unitTestTag))
+                tests.run(cmd.getMany<u64>(unitTestTag), loop);
+            else
+                tests.runAll(loop);
         }
-
     }
     else if (cmd.isSet(kos))
     {

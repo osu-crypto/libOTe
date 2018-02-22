@@ -444,7 +444,8 @@ namespace osuCrypto
 
         // in some cases below, the input array must be a
         // multiple of 8 in length...
-        u8 byteView[sLinearCodePlainTextMaxSize];
+        u8 _byteView[sLinearCodePlainTextMaxSize];
+        u8* byteView = _byteView;
         memcpy(byteView, input, mPlaintextU8Size);
 
 
@@ -559,12 +560,17 @@ namespace osuCrypto
             // this case has been optimized and we lookup 2 sub-codes at a time.
             static const u64 byteStep = 2;
 
-            u64 kStop = (mG8.size() / 8) * 8;
-            u64 kStep = rowSize * byteStep;
-            for (u64 k = 0, i = 0; k < kStop; i += byteStep, k += kStep)
+            i32 kStop = (mG8.size() / 8) * 8;
+            i32 kStep = rowSize * byteStep;
+
+            block* gg0 = mG8.data();
+            block* gg1 = mG8.data() + rowSize;
+            for (i32 k = 0; k < kStop; byteView += byteStep, k += kStep)
             {
-                block* g0 = mG8.data() + k + byteView[i] * codeSize;
-                block* g1 = mG8.data() + k + byteView[i + 1] * codeSize + rowSize;
+                auto g0 = gg0 + byteView[0] * 4;
+                auto g1 = gg1 + byteView[1] * 4;
+                gg0 += kStep;
+                gg1 += kStep;
 
                 c[0] = c[0] ^ g0[0];
                 c[1] = c[1] ^ g0[1];
@@ -701,189 +707,102 @@ namespace osuCrypto
             break;
         }
         }
+    }
 
-        //        }
-        //        else
-//
-//#elif defined OLD
-//
-//
-//#ifndef NDEBUG
-//        if (codeSize - 1 + 256 * codeSize + rowSize * 7 > mG8.size())throw std::runtime_error(LOCATION);
-//#endif
-//
-//        //std::array<block, 8> c; 
-//        //{ZeroBlock ,ZeroBlock ,ZeroBlock ,ZeroBlock,ZeroBlock ,ZeroBlock ,ZeroBlock ,ZeroBlock };
-//        block c[8];
-//
-//        block* g0 = mG8.data() + rowSize * 0;
-//        block* g1 = mG8.data() + rowSize * 1;
-//        block* g2 = mG8.data() + rowSize * 2;
-//        block* g3 = mG8.data() + rowSize * 3;
-//        block* g4 = mG8.data() + rowSize * 4;
-//        block* g5 = mG8.data() + rowSize * 5;
-//        block* g6 = mG8.data() + rowSize * 6;
-//        block* g7 = mG8.data() + rowSize * 7;
-//
-//        for (u64 j = 0; j < codeSize; ++j)
-//        {
-//            //memset(c.data(), 0, c.size() * sizeof(block));
-//            //memset(c, 0, 8 * sizeof(block));
-//            c[0] = c[0] ^ c[0];
-//            c[1] = c[1] ^ c[1];
-//            c[2] = c[2] ^ c[2];
-//            c[3] = c[3] ^ c[3];
-//            c[4] = c[4] ^ c[4];
-//            c[5] = c[5] ^ c[5];
-//            c[6] = c[6] ^ c[6];
-//            c[7] = c[7] ^ c[7];
-//
-//            auto bv = byteView;
-//
-//            auto gg0 = g0;
-//            auto gg1 = g1;
-//            auto gg2 = g2;
-//            auto gg3 = g3;
-//            auto gg4 = g4;
-//            auto gg5 = g5;
-//            auto gg6 = g6;
-//            auto gg7 = g7;
-//
-//            //rowSize * (i * 8)
-//            for (u64 i = 0; i < superRowCount; ++i, bv += 8)
-//            {
-//
-//                //block* g0 = mG8.data() + j + byteView[i * 8 + 0] * codeSize + rowSize * (i * 8 + 0);
-//                //block* g1 = mG8.data() + j + byteView[i * 8 + 1] * codeSize + rowSize * (i * 8 + 1);
-//                //block* g2 = mG8.data() + j + byteView[i * 8 + 2] * codeSize + rowSize * (i * 8 + 2);
-//                //block* g3 = mG8.data() + j + byteView[i * 8 + 3] * codeSize + rowSize * (i * 8 + 3);
-//                //block* g4 = mG8.data() + j + byteView[i * 8 + 4] * codeSize + rowSize * (i * 8 + 4);
-//                //block* g5 = mG8.data() + j + byteView[i * 8 + 5] * codeSize + rowSize * (i * 8 + 5);
-//                //block* g6 = mG8.data() + j + byteView[i * 8 + 6] * codeSize + rowSize * (i * 8 + 6);
-//                //block* g7 = mG8.data() + j + byteView[i * 8 + 7] * codeSize + rowSize * (i * 8 + 7);
-//
-//                //c[0] = c[0] ^ *g0;
-//                //c[1] = c[1] ^ *g1;
-//                //c[2] = c[2] ^ *g2;
-//                //c[3] = c[3] ^ *g3;
-//                //c[4] = c[4] ^ *g4;
-//                //c[5] = c[5] ^ *g5;
-//                //c[6] = c[6] ^ *g6;
-//                //c[7] = c[7] ^ *g7;
-//
-//                c[0] = c[0] ^ gg0[bv[0] * codeSize];
-//                c[1] = c[1] ^ gg1[bv[1] * codeSize];
-//                c[2] = c[2] ^ gg2[bv[2] * codeSize];
-//                c[3] = c[3] ^ gg3[bv[3] * codeSize];
-//                c[4] = c[4] ^ gg4[bv[4] * codeSize];
-//                c[5] = c[5] ^ gg5[bv[5] * codeSize];
-//                c[6] = c[6] ^ gg6[bv[6] * codeSize];
-//                c[7] = c[7] ^ gg7[bv[7] * codeSize];
-//
-//                gg0 += rowSize8;
-//                gg1 += rowSize8;
-//                gg2 += rowSize8;
-//                gg3 += rowSize8;
-//                gg4 += rowSize8;
-//                gg5 += rowSize8;
-//                gg6 += rowSize8;
-//                gg7 += rowSize8;
-//
-//            }
-//
-//            //for (u64 i = 1; i < 8; ++i)
-//            //    c[0] = c[0] ^ c[i];
-//            c[0] = c[0] ^ c[1];
-//            c[2] = c[2] ^ c[3];
-//            c[4] = c[4] ^ c[5];
-//            c[6] = c[6] ^ c[7];
-//            c[0] = c[0] ^ c[2];
-//            c[4] = c[4] ^ c[6];
-//            c[0] = c[0] ^ c[4];
-//
-//            memcpy(
-//                (codeword + sizeof(block) * j),
-//                c,// .data(),
-//                std::min<u64>(sizeof(block), codewordU8Size() - j * sizeof(block)));
-//
-//            ++g0;
-//            ++g1;
-//            ++g2;
-//            ++g3;
-//            ++g4;
-//            ++g5;
-//            ++g6;
-//            ++g7;
-//        }
-//#else
-//
-//
-//        auto c = mC.data();
-//        for (u64 j = 0; j < codeSize; ++j)
-//        {
-//            auto cc = c + 8 * j;
-// 
-//            cc[0] = cc[0] ^ cc[0];
-//            cc[1] = cc[1] ^ cc[1];
-//            cc[2] = cc[2] ^ cc[2];
-//            cc[3] = cc[3] ^ cc[3];
-//            cc[4] = cc[4] ^ cc[4];
-//            cc[5] = cc[5] ^ cc[5];
-//            cc[6] = cc[6] ^ cc[6];
-//            cc[7] = cc[7] ^ cc[7];
-//        }
-//        //block* c = new block[8 * codeSize]();
-// 
-// 
-//        for (u64 i = 0; i < superRowCount; ++i)
-//        {
-// 
-//            auto cc = c;// .data();
-//            block* g0 = mG8.data() + byteView[i * 8 + 0] * codeSize + rowSize * (i * 8 + 0);
-//            block* g1 = mG8.data() + byteView[i * 8 + 1] * codeSize + rowSize * (i * 8 + 1);
-//            block* g2 = mG8.data() + byteView[i * 8 + 2] * codeSize + rowSize * (i * 8 + 2);
-//            block* g3 = mG8.data() + byteView[i * 8 + 3] * codeSize + rowSize * (i * 8 + 3);
-//            block* g4 = mG8.data() + byteView[i * 8 + 4] * codeSize + rowSize * (i * 8 + 4);
-//            block* g5 = mG8.data() + byteView[i * 8 + 5] * codeSize + rowSize * (i * 8 + 5);
-//            block* g6 = mG8.data() + byteView[i * 8 + 6] * codeSize + rowSize * (i * 8 + 6);
-//            block* g7 = mG8.data() + byteView[i * 8 + 7] * codeSize + rowSize * (i * 8 + 7);
-// 
-//            for (u64 j = 0; j < codeSize; ++j)
-//            {
-//                cc[0] = cc[0] ^ g0[j];
-//                cc[1] = cc[1] ^ g1[j];
-//                cc[2] = cc[2] ^ g2[j];
-//                cc[3] = cc[3] ^ g3[j];
-//                cc[4] = cc[4] ^ g4[j];
-//                cc[5] = cc[5] ^ g5[j];
-//                cc[6] = cc[6] ^ g6[j];
-//                cc[7] = cc[7] ^ g7[j];
-// 
-//                cc += 8;
-//            }
-// 
-// 
-//        }
-//        for (u64 j = 0; j < codeSize; ++j)
-//        {
-//            auto cc = c + 8 * j;
-// 
-//            cc[0] = cc[0] ^ cc[1];
-//            cc[2] = cc[2] ^ cc[3];
-//            cc[4] = cc[4] ^ cc[5];
-//            cc[6] = cc[6] ^ cc[7];
-//            cc[0] = cc[0] ^ cc[2];
-//            cc[4] = cc[4] ^ cc[6];
-//            cc[0] = cc[0] ^ cc[4];
-// 
-//            memcpy(
-//                (codeword + sizeof(block) * j),
-//                cc,
-//                std::min<u64>(sizeof(block), codewordU8Size() - j * sizeof(block)));
-// 
-//        }
-//        //#endif
+    void LinearCode::encode_bch511(u8 * input, u8 * codeword)
+    {
+        Expects(mPlaintextU8Size == 10);
+        Expects(mPow2CodeSize == 4);
 
+        // The size of the bch 511 codewords in 128 bit units.
+        const i32 codeSize = 4;
+
+        // The size of each preprocessed chunk. Each chunk 
+        // is for 8 bits which leads to 2^8=256 preprocessed
+        // codewords for each input byte.
+        const i32 rowSize = 256 * codeSize;
+
+        // create a local to store the partial codeword
+        // and zero it out.
+        block c[8];
+        c[0] = c[0] ^ c[0];
+        c[1] = c[1] ^ c[1];
+        c[2] = c[2] ^ c[2];
+        c[3] = c[3] ^ c[3];
+        c[4] = c[4] ^ c[4];
+        c[5] = c[5] ^ c[5];
+        c[6] = c[6] ^ c[6];
+        c[7] = c[7] ^ c[7];
+
+        block* g0 = mG8.data() + 0 * rowSize + input[0] * codeSize;
+        block* g1 = mG8.data() + 1 * rowSize + input[1] * codeSize;
+        block* g2 = mG8.data() + 2 * rowSize + input[2] * codeSize;
+        block* g3 = mG8.data() + 3 * rowSize + input[3] * codeSize;
+        block* g4 = mG8.data() + 4 * rowSize + input[4] * codeSize;
+        block* g5 = mG8.data() + 5 * rowSize + input[5] * codeSize;
+        block* g6 = mG8.data() + 6 * rowSize + input[6] * codeSize;
+        block* g7 = mG8.data() + 7 * rowSize + input[7] * codeSize;
+        block* g8 = mG8.data() + 8 * rowSize + input[8] * codeSize;
+        block* g9 = mG8.data() + 9 * rowSize + input[9] * codeSize;
+
+
+        c[0] = c[0] ^ g0[0];
+        c[1] = c[1] ^ g0[1];
+        c[2] = c[2] ^ g0[2];
+        c[3] = c[3] ^ g0[3];
+
+        c[4] = c[4] ^ g1[0];
+        c[5] = c[5] ^ g1[1];
+        c[6] = c[6] ^ g1[2];
+        c[7] = c[7] ^ g1[3];
+
+        c[0] = c[0] ^ g2[0];
+        c[1] = c[1] ^ g2[1];
+        c[2] = c[2] ^ g2[2];
+        c[3] = c[3] ^ g2[3];
+
+        c[4] = c[4] ^ g3[0];
+        c[5] = c[5] ^ g3[1];
+        c[6] = c[6] ^ g3[2];
+        c[7] = c[7] ^ g3[3];
+
+        c[0] = c[0] ^ g4[0];
+        c[1] = c[1] ^ g4[1];
+        c[2] = c[2] ^ g4[2];
+        c[3] = c[3] ^ g4[3];
+
+        c[4] = c[4] ^ g5[0];
+        c[5] = c[5] ^ g5[1];
+        c[6] = c[6] ^ g5[2];
+        c[7] = c[7] ^ g5[3];
+
+        c[0] = c[0] ^ g6[0];
+        c[1] = c[1] ^ g6[1];
+        c[2] = c[2] ^ g6[2];
+        c[3] = c[3] ^ g6[3];
+
+        c[4] = c[4] ^ g7[0];
+        c[5] = c[5] ^ g7[1];
+        c[6] = c[6] ^ g7[2];
+        c[7] = c[7] ^ g7[3];
+
+        c[0] = c[0] ^ g8[0];
+        c[1] = c[1] ^ g8[1];
+        c[2] = c[2] ^ g8[2];
+        c[3] = c[3] ^ g8[3];
+
+        c[4] = c[4] ^ g9[0];
+        c[5] = c[5] ^ g9[1];
+        c[6] = c[6] ^ g9[2];
+        c[7] = c[7] ^ g9[3];
+
+
+        c[0] = c[0] ^ c[4];
+        c[1] = c[1] ^ c[5];
+        c[2] = c[2] ^ c[6];
+        c[3] = c[3] ^ c[7];
+
+        memcpy(codeword, c, codewordU8Size());
     }
 
 }

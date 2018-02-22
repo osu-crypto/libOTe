@@ -67,7 +67,7 @@ namespace tests_libOTe
 
         TEST_METHOD(Oos_200Receive_TestVS)
         {
-            InitDebugPrinting();
+            InitDebugPrinting(); 
             OosNcoOt_Test_Impl();
         }
 

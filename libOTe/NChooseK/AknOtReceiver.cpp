@@ -72,13 +72,13 @@ namespace osuCrypto
             // ok, OTs are done.
             if (t == 0)
             {
-                gTimer.setTimePoint("AknOt.extDone");
+                setTimePoint("AknOt.Recv.extDone");
                 // if thread 0, get the seed that determines the cut and choose.
                 block cncRootSeed;
                 chl.recv((u8*)&cncRootSeed, sizeof(block));
                 PRNG gg(cncRootSeed);
 
-                gTimer.setTimePoint("AknOt.CncSeedReceived");
+                setTimePoint("AknOt.Recv.CncSeedReceived");
                 // use this seed to create more PRNGs
                 for (auto& b : cncGens)
                     b.SetSeed(gg.get<block>());
@@ -199,7 +199,7 @@ namespace osuCrypto
             if (t == 0)
             {
                 // if we are thread 0, then wait for all threads to finish.
-                gTimer.setTimePoint("AknOt.cncDone");
+                setTimePoint("AknOt.Recv.RecvcncDone");
 
                 if (d)
                     doneFuture.get();
@@ -286,7 +286,7 @@ namespace osuCrypto
         // join any threads we may have spawned.
         for(auto& thrd : thrds)
             thrd.join();
-        gTimer.setTimePoint("AknOt.AllDone");
+        setTimePoint("AknOt.Recv.AllDone");
         //std::cout << timer;
         // all done
     }

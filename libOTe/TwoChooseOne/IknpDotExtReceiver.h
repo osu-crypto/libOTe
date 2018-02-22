@@ -3,13 +3,14 @@
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <array>
 #include <cryptoTools/Crypto/PRNG.h>
+#include <cryptoTools/Common/Timer.h>
 #include "libOTe/Tools/LinearCode.h"
 
 namespace osuCrypto
 {
 
     class IknpDotExtReceiver :
-        public OtExtReceiver
+        public OtExtReceiver, public TimerAdapter
     {
     public:
         IknpDotExtReceiver()

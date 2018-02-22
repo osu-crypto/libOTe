@@ -58,6 +58,8 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
+        setTimePoint("IknpDot.recv.transposeDone");
+
 
         if (mHasBase == false)
             throw std::runtime_error("rt error at " LOCATION);
@@ -180,7 +182,7 @@ namespace osuCrypto
         }
 
 
-        gTimer.setTimePoint("recv.transposeDone");
+        setTimePoint("IknpDot.recv.transposeDone");
 
         // do correlation check and hashing
         // For the malicious secure OTs, we need a random PRNG that is chosen random
@@ -193,7 +195,7 @@ namespace osuCrypto
 		chl.recv(offset);
 
 
-        gTimer.setTimePoint("recv.cncSeed");
+        setTimePoint("IknpDot.recv.cncSeed");
 
         PRNG codePrng(theirSeed);
         LinearCode code;
@@ -239,7 +241,7 @@ namespace osuCrypto
             doneIdx = stop0;
         }
 
-        gTimer.setTimePoint("recv.done");
+        setTimePoint("IknpDot.recv.done");
 
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");
     }

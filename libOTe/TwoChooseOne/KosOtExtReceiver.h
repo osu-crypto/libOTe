@@ -3,12 +3,14 @@
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <array>
 #include <cryptoTools/Crypto/PRNG.h>
+#include <cryptoTools/Common/Timer.h>
+
 
 namespace osuCrypto
 {
 
     class KosOtExtReceiver :
-        public OtExtReceiver
+        public OtExtReceiver, public TimerAdapter
     {
     public:
         KosOtExtReceiver()

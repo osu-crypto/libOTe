@@ -27,10 +27,16 @@ namespace osuCrypto
             return mHasBase;
         }
 
-        bool mHasBase, mMalicious;
+        bool mHasBase, mMalicious, mIsFinalized = false, mHasCheckSeed = false;
+        block mCheckSeed;
         u64 mStatSecParam;
         LinearCode mCode;
-        u64 mCorrectionIdx, mInputByteCount;
+        u64 mCorrectionIdx, mInputByteCount, mPendingCorrections = 0;
+
+
+        std::vector<block> wBuff;
+        std::vector<block> tBuff;
+
 
         std::vector<std::array<PRNG, 2>> mGens;
         Matrix<block> mT0;
@@ -68,6 +74,11 @@ namespace osuCrypto
         void check(Channel& chl, block wordSeed) override;
 
         std::unique_ptr<NcoOtExtReceiver> split() override;
+        std::unique_ptr<OosNcoOtReceiver> oosSplit();
+
+
+        void finalize(Channel& chl, PRNG& prng);
+        void recvCheckSeed(Channel& chl);
 
     };
 
