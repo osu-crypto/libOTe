@@ -716,7 +716,6 @@ void base()
 
 
 #include <cryptoTools/Common/Matrix.h>
-#include <libOTe/Base/simplestOT/mains.h>
 int main(int argc, char** argv)
 {
 
