@@ -34,7 +34,7 @@ namespace osuCrypto
     }
     void OosNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
-        i32 doneIdx = 0;
+        u64 doneIdx = 0;
         if (mHasBase == false)
             throw std::runtime_error("rt error at " LOCATION);
 
@@ -45,7 +45,6 @@ namespace osuCrypto
 
         //TODO("Make the statistical sec param a parameter");
         // = 40;
-        mIsFinalized = false;
 
         // this will be used as temporary buffers of 128 columns,
         // each containing 1024 bits. Once transposed, they will be copied
@@ -56,12 +55,9 @@ namespace osuCrypto
         // round up and add the extra OT used in the check at the end
         numOtExt = roundUpTo(numOtExt + mStatSecParam, 128);
 
-        if (numOtExt > std::numeric_limits<i32>::max())
-            throw std::runtime_error(LOCATION);
-
         // we are going to process OTs in blocks of 128 * superblkSize messages.
-        i32 numSuperBlocks = ((numOtExt) / 128 + superBlkSize - 1) / superBlkSize;
-        i32 numCols = mGens.size();
+        u64 numSuperBlocks = ((numOtExt) / 128 + superBlkSize - 1) / superBlkSize;
+        u64 numCols = mGens.size();
 
         // The is the index of the last correction value u = T0 ^ T1 ^ c(w)
         // that was sent to the sender.
@@ -71,16 +67,12 @@ namespace osuCrypto
         // and transposed rows that we got the using the base OTs as PRNG seed.
         // mW will hold the record of all the words that we encoded. They will
         // be used in the Check that is done at the end.
-
         mW = Matrix<block>();
-        //mT0 = Matrix<block>();
-        //mT1 = Matrix<block>();
+        mT0 = Matrix<block>();
+        mT1 = Matrix<block>();
         mW.resize(numOtExt, mCode.plaintextBlkSize());
-        //mT0.resize(numOtExt, numCols / 128);
-        //mT1.resize(numOtExt, numCols / 128);
-        //mW.resize(numOtExt, mCode.plaintextBlkSize(), AllocType::Uninitialized);
-        mT0.resize(numOtExt, numCols / 128, AllocType::Uninitialized);
-        mT1.resize(numOtExt, numCols / 128, AllocType::Uninitialized);
+        mT0.resize(numOtExt, numCols / 128);
+        mT1.resize(numOtExt, numCols / 128);
 
         // An extra debugging check that can be used. Each one
         // gets marked as used, makes use we don't encode twice.
@@ -95,20 +87,20 @@ namespace osuCrypto
         //   performance reasons. The reason for 8 is that most CPUs have 8 AES vector
         //   lanes, and so its more efficient to encrypt (aka prng) 8 blocks at a time.
         //   So that's what we do.
-        for (i32 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
+        for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
         {
             // compute at what row does the user want us to stop.
             // The code will still compute the transpose for these
             // extra rows, but it is thrown away.
-            i32 stopIdx
+            u64 stopIdx
                 = doneIdx
-                + std::min<i32>(i32(128) * superBlkSize, numOtExt - doneIdx);
+                + std::min<u64>(u64(128) * superBlkSize, numOtExt - doneIdx);
 
 
-            for (i32 i = 0; i < numCols / 128; ++i)
+            for (u64 i = 0; i < numCols / 128; ++i)
             {
 
-                for (i32 tIdx = 0, colIdx = i * 128; tIdx < 128; ++tIdx, ++colIdx)
+                for (u64 tIdx = 0, colIdx = i * 128; tIdx < 128; ++tIdx, ++colIdx)
                 {
                     // generate the column indexed by colIdx. This is done with
                     // AES in counter mode acting as a PRNG. We don't use the normal
@@ -134,7 +126,7 @@ namespace osuCrypto
                 block* __restrict mT0Iter = mT0.data() + mT0.stride() * doneIdx + i;
                 block* __restrict mT1Iter = mT1.data() + mT1.stride() * doneIdx + i;
 
-                for (i32 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
+                for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
                 {
                     // because we transposed 1024 rows, the indexing gets a bit weird. But this
                     // is the location of the next row that we want. Keep in mind that we had long
@@ -143,7 +135,7 @@ namespace osuCrypto
                     block* __restrict t1Iter = ((block*)t1.data()) + j;
 
                     // do the copy!
-                    for (i32 k = 0; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)
+                    for (u64 k = 0; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)
                     {
                         *mT0Iter = *(t0Iter);
                         *mT1Iter = *(t1Iter);
@@ -166,11 +158,6 @@ namespace osuCrypto
 
     std::unique_ptr<NcoOtExtReceiver> OosNcoOtReceiver::split()
     {
-        return std::move(oosSplit());
-    }
-
-    std::unique_ptr<OosNcoOtReceiver> OosNcoOtReceiver::oosSplit()
-    {
         auto* raw = new OosNcoOtReceiver();
 
         raw->mCode = mCode;
@@ -192,9 +179,8 @@ namespace osuCrypto
             raw->setBaseOts(base);
         }
 
-        return std::unique_ptr<OosNcoOtReceiver>(raw);
+        return std::unique_ptr<NcoOtExtReceiver>(raw);
     }
-
 
     void OosNcoOtReceiver::encode(
         u64 otIdx,
@@ -216,27 +202,25 @@ namespace osuCrypto
 
         mEncodeFlags[otIdx] = 1;
 #endif // !NDEBUG
+        block* t0Val = mT0.data() + mT0.stride() * otIdx;
+        block* t1Val = mT1.data() + mT0.stride() * otIdx;
+        block* wVal = mW.data() + mW.stride() * otIdx;
+        memcpy(wVal, input, mInputByteCount);
+
+        // use this for two thing, to store the code word and
+        // to store the zero message from base OT matrix transposed.
+        std::array<block, 10> codeword = { ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock };
+        mCode.encode((u8*)wVal, (u8*)codeword.data());
 
         //std::cout << "encode[" << otIdx << "] = " << BitVector((u8*)wVal, 76).hex() << " ->  " << codeword[0] << std::endl;
 
 
-
-        
 
 
         // encode the correction value as u = T0 + T1 + c(w), there c(w) is a codeword.
 
         if (mT0.stride() == 4)
         {
-            block* t0Val = mT0.data() + 4 * otIdx;
-            block* t1Val = mT1.data() + 4 * otIdx;
-            block* wVal = mW.data() + mW.stride() * otIdx;
-            memcpy(wVal, input, mInputByteCount);
-
-            // use this for two thing, to store the code word and
-            // to store the zero message from base OT matrix transposed.
-            std::array<block, 4> codeword{ ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock };
-            mCode.encode_bch511((u8*)wVal, (u8*)codeword.data());
 
             // this code here is optimized for codewords of size ~ 128 * 4.
 
@@ -264,8 +248,6 @@ namespace osuCrypto
             codeword[2] = codeword[2] ^ t0Val[2];
             codeword[3] = codeword[3] ^ t0Val[3];
 
-
-            auto& val = codeword[1];
             val = codeword[0] ^ codeword[1];
             codeword[2] = codeword[2] ^ codeword[3];
 
@@ -273,23 +255,11 @@ namespace osuCrypto
 
             mAesFixedKey.ecbEncBlock(val, codeword[0]);
             val = val ^ codeword[0];
-            memcpy(dest, &val, destSize);
 #endif
 
         }
         else
         {
-
-            block* t0Val = mT0.data() + mT0.stride() * otIdx;
-            block* t1Val = mT1.data() + mT0.stride() * otIdx;
-            block* wVal = mW.data() + mW.stride() * otIdx;
-            memcpy(wVal, input, mInputByteCount);
-
-            // use this for two thing, to store the code word and
-            // to store the zero message from base OT matrix transposed.
-            std::array<block, 10> codeword = { ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock };
-            mCode.encode((u8*)wVal, (u8*)codeword.data());
-
 
             for (u64 i = 0; i < mT0.stride(); ++i)
             {
@@ -410,52 +380,11 @@ namespace osuCrypto
         mCorrectionIdx += sendCount;
     }
 
-
-    void OosNcoOtReceiver::asyncFinalize(Channel & chl, PRNG& prng)
-    {
-
-        // first we need to do is the extra statSecParam number of correction
-        // values. This will just be for random inputs and are used to mask
-        // out true choices that were used in the remaining correction values.
-        wBuff.resize(mStatSecParam * mW.stride());
-        tBuff.resize(mStatSecParam * mT0.stride());
-
-
-        // view them as matrix to make life easier.
-        MatrixView<block> words(wBuff.begin(), wBuff.end(), mCode.plaintextBlkSize());
-
-        // encode each random word.
-        for (u64 i = 0; i < mStatSecParam; ++i)
-        {
-            block _;
-
-            // generate random words.
-            prng.get((u8*)words[i].data(), mInputByteCount);
-
-            // the correction value is stored internally
-            encode(mCorrectionIdx + i, words[i].data(), (u8*)&_);
-
-            // initialize the tBuff array with the T0 value used to encode these
-            // random words.
-            for (u64 j = 0; j < mT0.stride(); ++j)
-            {
-                tBuff[i * mT0.stride() + j] = mT0[mCorrectionIdx + i][j];
-            }
-        }
-
-        // now send the internally stored correction values.
-        sendCorrection(chl, mStatSecParam);
-
-        mRecvSeedFutr = chl.asyncRecv(mCheckSeed);
-        mIsFinalized = true;
-    }
-
-
     void OosNcoOtReceiver::check(Channel & chl, block wordSeed)
     {
         if (mMalicious)
         {
-            //chl.asyncSend((u8*)&ZeroBlock, 1);
+            chl.asyncSend((u8*)&ZeroBlock, 1);
 
 #ifndef NDEBUG
             //std::cout << IoStream::lock << "receiver " << std::endl;
@@ -475,19 +404,51 @@ namespace osuCrypto
             //std::cout << IoStream::unlock;
 #endif
 
+            PRNG prng(wordSeed);
+
+            // first we need to do is the extra statSecParam number of correction
+            // values. This will just be for random inputs and are used to mask
+            // out true choices that were used in the remaining correction values.
+            std::vector<block> wBuff(mStatSecParam * mW.stride());
+            std::vector<block> tBuff(mStatSecParam * mT0.stride());
 
             // get two arrays of block into these buff.
-            if (mIsFinalized == false)
+            auto& tSum = tBuff;
+            auto& wSum = wBuff;
+
+
+            // view them as matrix to make life easier.
+            MatrixView<block> words(wSum.begin(), wSum.end(), mCode.plaintextBlkSize());
+
+            // encode each random word.
+            for (u64 i = 0; i < mStatSecParam; ++i)
             {
-                PRNG prng(wordSeed);
-                asyncFinalize(chl, prng);
+                block _;
+
+                // generate random words.
+                prng.get((u8*)words[i].data(), mInputByteCount);
+
+                // the correction value is stored internally
+                encode(mCorrectionIdx + i, words[i].data(), (u8*)&_);
+
+                // initialize the tSum array with the T0 value used to encode these
+                // random words.
+                for (u64 j = 0; j < mT0.stride(); ++j)
+                {
+                    tSum[i * mT0.stride() + j] = mT0[mCorrectionIdx + i][j];
+                }
             }
 
+            // now send the internally stored correction values.
+            sendCorrection(chl, mStatSecParam);
 
-            mRecvSeedFutr.get();
+            // the sender will now tell us the random challenge seed.
+            block seed;
+            chl.recv((u8*)&seed, sizeof(block));
+
 
             // This AES will work as a PRNG, using AES-NI in counter mode.
-            AES aes(mCheckSeed);
+            AES aes(seed);
             // the index of the AES counter.
             u64 aesIdx(0);
 
@@ -537,8 +498,8 @@ namespace osuCrypto
             auto mWIter = mW.data();
 
             // compute the index that we should stop at. We process 128 rows at a time.
-            i32 lStop = (mCorrectionIdx - mStatSecParam + 127) / 128;
-            for (i32 l = 0; l < lStop; ++l)
+            u64 lStop = (mCorrectionIdx - mStatSecParam + 127) / 128;
+            for (u64 l = 0; l < lStop; ++l)
             {
 
                 // generate statSecParam * 128 bits using AES-NI in counter mode.
@@ -548,7 +509,7 @@ namespace osuCrypto
                 // now expand each of these bits into its own byte. This is done with the
                 // right shift instruction _mm_srai_epi16. and then we mask to get only
                 // the bottom bit. Doing the 8 times gets us each bit in its own byte.
-                for (i32 i = 0; i < mStatSecParam; ++i)
+                for (u64 i = 0; i < mStatSecParam; ++i)
                 {
                     expandedBuff[i * 8 + 0] = mask & _mm_srai_epi16(challengeBuff[i], 0);
                     expandedBuff[i * 8 + 1] = mask & _mm_srai_epi16(challengeBuff[i], 1);
@@ -562,7 +523,7 @@ namespace osuCrypto
 
                 // compute when we should stop of this set.
 
-                i32 stopIdx = std::min<i32>(mCorrectionIdx - mStatSecParam - k, i32(128));
+                u64 stopIdx = std::min<u64>(mCorrectionIdx - mStatSecParam - k, u64(128));
                 k += 128;
 
                 // get an integrator to the challenge bit
@@ -570,120 +531,57 @@ namespace osuCrypto
 
                 if (codeSize == 4)
                 {
-                    if (mStatSecParam == 40)
+
+                    //  vvvvvvvvvvvv   OPTIMIZED for codeword size 4   vvvvvvvvvvvv
+                    for (u64 i = 0; i < stopIdx; ++i, mT0Iter += 4)
                     {
+                        // get the index of the first summation.
+                        auto tSumIter = tSum.data();
 
-                        //  vvvvvvvvvvvv   OPTIMIZED for codeword size 4   vvvvvvvvvvvv
-                        for (i32 i = 0; i < stopIdx; ++i, mT0Iter += 4)
+                        // For this row, iterate through all statSecParam challenge
+                        // bits and add the row in if they are set to 1. We process
+                        // two rows at a time.
+                        for (u64 j = 0; j < mStatSecParam / 2; ++j, tSumIter += 8)
                         {
-                            // get the index of the first summation.
-                            auto tBuffIter = tBuff.data();
-
-                            block masks[40];
-                            block* m = masks;
-
+                            // get the challenge bits.
+                            u8 x0 = *xIter++;
+                            u8 x1 = *xIter++;
 
                             // dereference the challenge bits into blocks
                             // of either 000....0000 or 11111....111111
-                            for (i32 j = 0; j < 5; ++j)
-                            {
-                                m[0] = zeroAndAllOneBlocks[xIter[0]];
-                                m[1] = zeroAndAllOneBlocks[xIter[1]];
-                                m[2] = zeroAndAllOneBlocks[xIter[2]];
-                                m[3] = zeroAndAllOneBlocks[xIter[3]];
-                                m[4] = zeroAndAllOneBlocks[xIter[4]];
-                                m[5] = zeroAndAllOneBlocks[xIter[5]];
-                                m[6] = zeroAndAllOneBlocks[xIter[6]];
-                                m[7] = zeroAndAllOneBlocks[xIter[7]];
+                            block mask0 = zeroAndAllOneBlocks[x0];
+                            block mask1 = zeroAndAllOneBlocks[x1];
 
-                                m += 8;
-                                xIter += 8;
-                            }
+                            // now add the i'th row of T0 if the bit is 1.
+                            // Otherwise this is a no op. Equiv. to an if(x).
+                            auto t0x0 = *(mT0Iter + 0) & mask0;
+                            auto t0x1 = *(mT0Iter + 1) & mask0;
+                            auto t0x2 = *(mT0Iter + 2) & mask0;
+                            auto t0x3 = *(mT0Iter + 3) & mask0;
+                            auto t0x4 = *(mT0Iter + 0) & mask1;
+                            auto t0x5 = *(mT0Iter + 1) & mask1;
+                            auto t0x6 = *(mT0Iter + 2) & mask1;
+                            auto t0x7 = *(mT0Iter + 3) & mask1;
 
-                            m = masks;
-                            // For this row, iterate through all statSecParam challenge
-                            // bits and add the row in if they are set to 1. We process
-                            // two rows at a time.
-                            for (i32 j = 0; j < 20; ++j, tBuffIter += 8, m += 2)
-                            {
-
-                                // now add the i'th row of T0 if the bit is 1.
-                                // Otherwise this is a no op. Equiv. to an if(x).
-                                auto t0x0 = *(mT0Iter + 0) & m[0];
-                                auto t0x1 = *(mT0Iter + 1) & m[0];
-                                auto t0x2 = *(mT0Iter + 2) & m[0];
-                                auto t0x3 = *(mT0Iter + 3) & m[0];
-                                auto t0x4 = *(mT0Iter + 0) & m[1];
-                                auto t0x5 = *(mT0Iter + 1) & m[1];
-                                auto t0x6 = *(mT0Iter + 2) & m[1];
-                                auto t0x7 = *(mT0Iter + 3) & m[1];
-
-                                // add them into the running totals.
-                                tBuffIter[0] = tBuffIter[0] ^ t0x0;
-                                tBuffIter[1] = tBuffIter[1] ^ t0x1;
-                                tBuffIter[2] = tBuffIter[2] ^ t0x2;
-                                tBuffIter[3] = tBuffIter[3] ^ t0x3;
-                                tBuffIter[4] = tBuffIter[4] ^ t0x4;
-                                tBuffIter[5] = tBuffIter[5] ^ t0x5;
-                                tBuffIter[6] = tBuffIter[6] ^ t0x6;
-                                tBuffIter[7] = tBuffIter[7] ^ t0x7;
-                            }
-                        }
-
-                    }
-                    else
-                    {
-                        throw std::runtime_error(LOCATION);
-                        for (i32 i = 0; i < stopIdx; ++i, mT0Iter += 4)
-                        {
-                            // get the index of the first summation.
-                            auto tBuffIter = tBuff.data();
-
-                            // For this row, iterate through all statSecParam challenge
-                            // bits and add the row in if they are set to 1. We process
-                            // two rows at a time.
-                            for (i32 j = 0; j < mStatSecParam / 2; ++j, tBuffIter += 8)
-                            {
-                                // get the challenge bits.
-                                u8 x0 = *xIter++;
-                                u8 x1 = *xIter++;
-
-                                // dereference the challenge bits into blocks
-                                // of either 000....0000 or 11111....111111
-                                block mask0 = zeroAndAllOneBlocks[x0];
-                                block mask1 = zeroAndAllOneBlocks[x1];
-
-                                // now add the i'th row of T0 if the bit is 1.
-                                // Otherwise this is a no op. Equiv. to an if(x).
-                                auto t0x0 = *(mT0Iter + 0) & mask0;
-                                auto t0x1 = *(mT0Iter + 1) & mask0;
-                                auto t0x2 = *(mT0Iter + 2) & mask0;
-                                auto t0x3 = *(mT0Iter + 3) & mask0;
-                                auto t0x4 = *(mT0Iter + 0) & mask1;
-                                auto t0x5 = *(mT0Iter + 1) & mask1;
-                                auto t0x6 = *(mT0Iter + 2) & mask1;
-                                auto t0x7 = *(mT0Iter + 3) & mask1;
-
-                                // add them into the running totals.
-                                tBuffIter[0] = tBuffIter[0] ^ t0x0;
-                                tBuffIter[1] = tBuffIter[1] ^ t0x1;
-                                tBuffIter[2] = tBuffIter[2] ^ t0x2;
-                                tBuffIter[3] = tBuffIter[3] ^ t0x3;
-                                tBuffIter[4] = tBuffIter[4] ^ t0x4;
-                                tBuffIter[5] = tBuffIter[5] ^ t0x5;
-                                tBuffIter[6] = tBuffIter[6] ^ t0x6;
-                                tBuffIter[7] = tBuffIter[7] ^ t0x7;
-                            }
+                            // add them into the running totals.
+                            tSumIter[0] = tSumIter[0] ^ t0x0;
+                            tSumIter[1] = tSumIter[1] ^ t0x1;
+                            tSumIter[2] = tSumIter[2] ^ t0x2;
+                            tSumIter[3] = tSumIter[3] ^ t0x3;
+                            tSumIter[4] = tSumIter[4] ^ t0x4;
+                            tSumIter[5] = tSumIter[5] ^ t0x5;
+                            tSumIter[6] = tSumIter[6] ^ t0x6;
+                            tSumIter[7] = tSumIter[7] ^ t0x7;
                         }
                     }
 
                     xIter = byteView;
-                    for (i32 i = 0; i < stopIdx; ++i, ++mWIter)
+                    for (u64 i = 0; i < stopIdx; ++i, ++mWIter)
                     {
                         // now do the same but for the input words.
-                        auto wBuffIter = wBuff.data();
+                        auto wSumIter = wSum.data();
 
-                        for (i32 j = 0; j < mStatSecParam / 8; ++j, wBuffIter += 8)
+                        for (u64 j = 0; j < mStatSecParam / 8; ++j, wSumIter += 8)
                         {
                             // we processes 8 rows of words at a time. Do the
                             // same masking trick.
@@ -697,14 +595,14 @@ namespace osuCrypto
                             auto wx7 = (*mWIter & zeroAndAllOneBlocks[xIter[7]]);
 
                             // add them into the running totals.
-                            wBuffIter[0] = wBuffIter[0] ^ wx0;
-                            wBuffIter[1] = wBuffIter[1] ^ wx1;
-                            wBuffIter[2] = wBuffIter[2] ^ wx2;
-                            wBuffIter[3] = wBuffIter[3] ^ wx3;
-                            wBuffIter[4] = wBuffIter[4] ^ wx4;
-                            wBuffIter[5] = wBuffIter[5] ^ wx5;
-                            wBuffIter[6] = wBuffIter[6] ^ wx6;
-                            wBuffIter[7] = wBuffIter[7] ^ wx7;
+                            wSumIter[0] = wSumIter[0] ^ wx0;
+                            wSumIter[1] = wSumIter[1] ^ wx1;
+                            wSumIter[2] = wSumIter[2] ^ wx2;
+                            wSumIter[3] = wSumIter[3] ^ wx3;
+                            wSumIter[4] = wSumIter[4] ^ wx4;
+                            wSumIter[5] = wSumIter[5] ^ wx5;
+                            wSumIter[6] = wSumIter[6] ^ wx6;
+                            wSumIter[7] = wSumIter[7] ^ wx7;
 
                             xIter += 8;
                         }
@@ -716,22 +614,22 @@ namespace osuCrypto
                 {
                     //  vvvvvvvvvvvv       general codeword size        vvvvvvvvvvvv
 
-                    for (i32 i = 0; i < stopIdx; ++i, mT0Iter += codeSize)
+                    for (u64 i = 0; i < stopIdx; ++i, mT0Iter += codeSize)
                     {
 
-                        auto tBuffIter = tBuff.data();
+                        auto tSumIter = tSum.data();
 
                         // For this row, iterate through all statSecParam challenge
                         // bits and add the row in if they are set to 1. We process
                         // two rows at a time.
-                        for (i32 j = 0; j < mStatSecParam; ++j, tBuffIter += codeSize)
+                        for (u64 j = 0; j < mStatSecParam; ++j, tSumIter += codeSize)
                         {
                             block mask0 = zeroAndAllOneBlocks[*xIter++];
-                            for (i32 m = 0; m < codeSize; ++m)
+                            for (u64 m = 0; m < codeSize; ++m)
                             {
                                 // now add the i'th row of T0 if the bit is 1.
                                 // Otherwise this is a no op. Equiv. to an if(x).
-                                tBuffIter[m] = tBuffIter[m] ^ (*(mT0Iter + m) & mask0);
+                                tSumIter[m] = tSumIter[m] ^ (*(mT0Iter + m) & mask0);
                             }
                         }
                     }
@@ -740,12 +638,12 @@ namespace osuCrypto
                         throw std::runtime_error("generalize this code vvvvvv " LOCATION);
 
                     xIter = byteView;
-                    for (i32 i = 0; i < stopIdx; ++i, ++mWIter)
+                    for (u64 i = 0; i < stopIdx; ++i, ++mWIter)
                     {
-                        auto wBuffIter = wBuff.data();
+                        auto wSumIter = wSum.data();
 
                         // now do the same but for the input words.
-                        for (i32 j = 0; j < mStatSecParam / 8; ++j, wBuffIter += 8)
+                        for (u64 j = 0; j < mStatSecParam / 8; ++j, wSumIter += 8)
                         {
 
                             // we processes 8 rows of words at a time. Do the
@@ -760,14 +658,14 @@ namespace osuCrypto
                             auto wx7 = (*mWIter & zeroAndAllOneBlocks[xIter[7]]);
 
                             // add them into the running totals.
-                            wBuffIter[0] = wBuffIter[0] ^ wx0;
-                            wBuffIter[1] = wBuffIter[1] ^ wx1;
-                            wBuffIter[2] = wBuffIter[2] ^ wx2;
-                            wBuffIter[3] = wBuffIter[3] ^ wx3;
-                            wBuffIter[4] = wBuffIter[4] ^ wx4;
-                            wBuffIter[5] = wBuffIter[5] ^ wx5;
-                            wBuffIter[6] = wBuffIter[6] ^ wx6;
-                            wBuffIter[7] = wBuffIter[7] ^ wx7;
+                            wSumIter[0] = wSumIter[0] ^ wx0;
+                            wSumIter[1] = wSumIter[1] ^ wx1;
+                            wSumIter[2] = wSumIter[2] ^ wx2;
+                            wSumIter[3] = wSumIter[3] ^ wx3;
+                            wSumIter[4] = wSumIter[4] ^ wx4;
+                            wSumIter[5] = wSumIter[5] ^ wx5;
+                            wSumIter[6] = wSumIter[6] ^ wx6;
+                            wSumIter[7] = wSumIter[7] ^ wx7;
 
 
                             xIter += 8;
