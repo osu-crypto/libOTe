@@ -398,7 +398,14 @@ namespace tests_libOTe
         testNco(sender, numOTs, prng0, sendChl, recv, prng1, recvChl);
 
         auto v = std::async([&] { recv.check(recvChl, ZeroBlock); });
-        sender.check(sendChl,ZeroBlock);
+        try {
+            sender.check(sendChl,ZeroBlock);
+
+        }
+        catch (...)
+        {
+            sendChl.mBase->mLog;
+        }
         v.get();
 
         auto sender2 = sender.split();

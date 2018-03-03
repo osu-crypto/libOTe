@@ -86,6 +86,8 @@ namespace osuCrypto
         if (mInputByteCount == 0)
             throw std::runtime_error("configure must be called first" LOCATION);
 
+        mIsFinalized = false;
+
         // round up
         numOTExt = ((numOTExt + 127 + mStatSecParam) / 128) * 128;
 
@@ -313,9 +315,6 @@ namespace osuCrypto
 
 #endif // !NDEBUG
 
-        recvCount += mPendingCorrections;
-        mPendingCorrections = 0;
-
         // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
         // there c(w) is a pseudo-random code.
         auto dest = mCorrectionVals.data() + i32(mCorrectionIdx * mCorrectionVals.stride());
@@ -356,20 +355,110 @@ namespace osuCrypto
         return numCorrections;
     }
 
-    void OosNcoOtSender::finalize(Channel & chl)
+    struct DelayedSend : public details::SendOperation
     {
-        recvCorrection(chl, mStatSecParam);
+        struct Base
+        {
+            std::mutex mMtx;
+            details::size_header_type mSize = 0;
+            std::vector<u8> mData;
+            std::array<boost::asio::mutable_buffer, 2> mBuffers;
+            io_completion_handle mCH;
+            ChannelBase* mChannel = nullptr;
+
+            void asyncPerform(ChannelBase* base, io_completion_handle&& completionHandle)
+            {
+                std::lock_guard<std::mutex> lock(mMtx);
+
+                if (mData.size())
+                {
+                    base->mLog.push("data is here first try.");
+                    base->mHandle->async_send(mBuffers, completionHandle);
+                }
+                else
+                {
+                    base->mLog.push("data not here first try.");
+                    mChannel = base;
+                    mCH = std::move(completionHandle);
+                }
+            }
+
+            void setData(span<u8> d)
+            {
+                std::lock_guard<std::mutex> lock(mMtx);
+                mData.insert(mData.begin(), d.begin(), d.end());
+
+                mSize = mData.size();
+                mBuffers[0] = boost::asio::mutable_buffer(&mSize, sizeof(mSize));
+                mBuffers[1] = boost::asio::mutable_buffer(mData.data(), mData.size());
+
+                if (mChannel)
+                {
+                    mChannel->mLog.push("channel here, sending.");
+                    mChannel->mHandle->async_send(mBuffers, mCH);
+                }
+                else
+                {
+                    mChannel->mLog.push("channel not here.");
+                }
+            }
+        };
+
+        DelayedSend()
+            : mBase(new Base())
+        {}
+        DelayedSend(DelayedSend&&) = default;
+        DelayedSend(const DelayedSend&) = default;
+
+        std::shared_ptr<Base> mBase;
+
+        void asyncPerform(ChannelBase* chl, io_completion_handle&& completionHandle) override
+        {
+            mBase->asyncPerform(chl, std::forward<io_completion_handle>(completionHandle));
+        }
+
+        void setData(span<u8> d)
+        {
+            mBase->setData(d);
+        }
+
+        void cancel(std::string reason) override {}
+    };
+
+
+    void OosNcoOtSender::asyncFinalize(Channel & chl, block seed)
+    {
+        mCheckSeed = seed;
+
+        auto ds_ptr = make_SBO_ptr<details::SendOperation,DelayedSend>();
+        auto ds = ((DelayedSend*)ds_ptr.get())->mBase;
+        chl.mBase->sendEnque(std::move(ds_ptr));
+
+        // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
+        // there c(w) is a pseudo-random code.
+        auto dest = mCorrectionVals.data() + i32(mCorrectionIdx * mCorrectionVals.stride());
+        auto ret = chl.asyncRecv(dest, mStatSecParam * mCorrectionVals.stride(), 
+            [seed, ds] () mutable {
+            ds->setData({ (u8*)&seed, sizeof(block) });
+        });
+
+        // update the index of there we should store the next set of correction values.
+        mCorrectionIdx += mStatSecParam;
+
+        //auto dest = mCorrectionVals.data() + i32(mCorrectionIdx * mCorrectionVals.stride());
+
+        //auto r = chl.asyncRecv(dest, mStatSecParam * mCorrectionVals.stride(), [ds, this] {
+        //    ds->setData({ (u8*)&mCheckSeed, sizeof(block) });
+        //});
+
+
+        //// update the index of there we should store the next set of correction values.
+        //mCorrectionIdx += mStatSecParam;
+
+
         mIsFinalized = true;
     }
 
-    void OosNcoOtSender::sendCheckSeed(Channel & chl, block seed)
-    {
-
-        // now send them out challenge seed.
-        mCheckSeed = seed;
-        chl.asyncSend(mCheckSeed);
-        mSentCheckSeed = true;
-    }
 
 
     void OosNcoOtSender::check(Channel & chl, block seed)
@@ -379,15 +468,9 @@ namespace osuCrypto
 
             if (mStatSecParam % 8) throw std::runtime_error("Must be a multiple of 8. " LOCATION);
 
-
             if (mIsFinalized == false)
             {
-                finalize(chl);
-            }
-    
-            if (mSentCheckSeed == false)
-            {
-                sendCheckSeed(chl, seed);
+                asyncFinalize(chl, seed);
             }
 
             //// This AES will work as a PRNG, using AES-NI in counter mode.

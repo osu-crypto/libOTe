@@ -45,6 +45,7 @@ namespace osuCrypto
 
         //TODO("Make the statistical sec param a parameter");
         // = 40;
+        mIsFinalized = false;
 
         // this will be used as temporary buffers of 128 columns,
         // each containing 1024 bits. Once transposed, they will be copied
@@ -410,7 +411,7 @@ namespace osuCrypto
     }
 
 
-    void OosNcoOtReceiver::finalize(Channel & chl, PRNG& prng)
+    void OosNcoOtReceiver::asyncFinalize(Channel & chl, PRNG& prng)
     {
 
         // first we need to do is the extra statSecParam number of correction
@@ -444,16 +445,12 @@ namespace osuCrypto
 
         // now send the internally stored correction values.
         sendCorrection(chl, mStatSecParam);
+
+        mRecvSeedFutr = chl.asyncRecv(mCheckSeed);
+        mRecvSeedFutr.get();
         mIsFinalized = true;
     }
 
-    void OosNcoOtReceiver::recvCheckSeed(Channel & chl)
-    {
-
-        // the sender will now tell us the random challenge seed.
-        chl.recv(mCheckSeed);
-        mHasCheckSeed = true;
-    }
 
     void OosNcoOtReceiver::check(Channel & chl, block wordSeed)
     {
@@ -484,14 +481,11 @@ namespace osuCrypto
             if (mIsFinalized == false)
             {
                 PRNG prng(wordSeed);
-                finalize(chl, prng);
+                asyncFinalize(chl, prng);
             }
 
-            if (mHasCheckSeed == false)
-            {
-                recvCheckSeed(chl);
-            }
 
+            mRecvSeedFutr.get();
 
             // This AES will work as a PRNG, using AES-NI in counter mode.
             AES aes(mCheckSeed);

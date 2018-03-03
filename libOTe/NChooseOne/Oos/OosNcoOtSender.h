@@ -32,13 +32,13 @@ namespace osuCrypto {
         LinearCode mCode;
         i32 mStatSecParam;
 
-        bool mMalicious, mIsFinalized = false, mSentCheckSeed = false;
+        bool mMalicious, mIsFinalized = false;
         block mCheckSeed;
         std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;
         std::vector<block> mChoiceBlks;
         Matrix<block> mT, mCorrectionVals;
-        i32 mCorrectionIdx, mInputByteCount, mPendingCorrections = 0;
+        i32 mCorrectionIdx, mInputByteCount;
 
 
         u64 getBaseOTCount() const override;// { return mGens.size(); };
@@ -77,8 +77,7 @@ namespace osuCrypto {
         void check(Channel& chl, block seed) override;
 
 
-        void finalize(Channel& chl);
-        void sendCheckSeed(Channel& chl, block seed);
+        void asyncFinalize(Channel& chl, block seed);
     };
 }
 

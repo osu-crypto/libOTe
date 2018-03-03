@@ -352,15 +352,15 @@ void kos_test(int iii)
             {
                 PRNG prng(baseRecv[i][0]);
                 std::vector<std::array<block, 2>> msgs(numOTs);
-                _gTimer.reset();
-                _gTimer.setTimePoint("start");
+                gTimer.reset();
+                gTimer.setTimePoint("start");
                 KosOtExtSender s;
                 s.setBaseOts(baseRecv[i], baseChoice);
 
                 s.send(msgs, prng, chls[i]);
 
-                _gTimer.setTimePoint("finish");
-                std::cout << _gTimer << std::endl;
+                gTimer.setTimePoint("finish");
+                std::cout << gTimer << std::endl;
             });
         }
     }
@@ -423,15 +423,15 @@ void dkos_test(int i)
     else
     {
         std::vector<std::array<block, 2>> msgs(numOTs);
-        _gTimer.reset();
-        _gTimer.setTimePoint("start");
+        gTimer.reset();
+        gTimer.setTimePoint("start");
         KosDotExtSender s;
         s.setBaseOts(baseRecv, baseChoice);
 
         s.send(msgs, prng0, chl);
 
-        _gTimer.setTimePoint("finish");
-        std::cout << _gTimer << std::endl;
+        gTimer.setTimePoint("finish");
+        std::cout << gTimer << std::endl;
 
     }
 
@@ -716,13 +716,16 @@ void base()
 
 
 #include <cryptoTools/Common/Matrix.h>
-
+#include <libOTe/Base/simplestOT/mains.h>
 int main(int argc, char** argv)
 {
 
     CLP cmd;
     cmd.parse(argc, argv);
-
+    
+    //auto a = std::async([] {simple_main_recv(); });
+    //simple_main_sender();
+    //a.get();
 
     if (cmd.isSet(unitTestTag))
     {

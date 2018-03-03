@@ -27,7 +27,8 @@ namespace osuCrypto
             return mHasBase;
         }
 
-        bool mHasBase, mMalicious, mIsFinalized = false, mHasCheckSeed = false;
+        bool mHasBase, mMalicious, mIsFinalized = false;
+        std::future<void> mRecvSeedFutr;
         block mCheckSeed;
         u64 mStatSecParam;
         LinearCode mCode;
@@ -77,8 +78,7 @@ namespace osuCrypto
         std::unique_ptr<OosNcoOtReceiver> oosSplit();
 
 
-        void finalize(Channel& chl, PRNG& prng);
-        void recvCheckSeed(Channel& chl);
+        void asyncFinalize(Channel& chl, PRNG& prng);
 
     };
 
