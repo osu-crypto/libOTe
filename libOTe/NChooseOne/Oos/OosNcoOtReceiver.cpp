@@ -447,7 +447,6 @@ namespace osuCrypto
         sendCorrection(chl, mStatSecParam);
 
         mRecvSeedFutr = chl.asyncRecv(mCheckSeed);
-        mRecvSeedFutr.get();
         mIsFinalized = true;
     }
 
