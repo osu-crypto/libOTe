@@ -9,6 +9,7 @@ A fast and portable C++11 library for Oblivious Transfer extension (OTe). The pr
 * The malicious secure 1-out-of-N OT [[OOS16]](http://eprint.iacr.org/2016/933).
 * The malicious secure approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746).
 * The malicious secure 1-out-of-2 base OT [NP00].
+* The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (unix only).
  
 ## Introduction
  
@@ -27,8 +28,8 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
 |---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
 | 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **10.6 / 9.2**       	| ~              	| ~     	| 24**     	| ~          	|
 | 1-out-of-N (N=2<sup>128</sup>)| passive| KKRT16      	| **9.2 / 6.7**        	| ~              	| ~       	| ~       	| ~          	|
-| 1-out-of-2 Delta-OT  	| malicious   	| KOS15       	| **1.9***        	| ~              	| ~     	| ~        	|  ~      	|
-| 1-out-of-2 Delta-OT  	| passive   	| KOS15       	| **1.7***        	| ~              	| ~     	| ~        	|  ~      	|
+| 1-out-of-2 Delta-OT  	| malicious   	| KOS15       	| **1.9***        		| ~              	| ~     	| ~        	|  ~      	|
+| 1-out-of-2 Delta-OT  	| passive   	| KOS15       	| **1.7***        		| ~              	| ~     	| ~        	|  ~      	|
 | 1-out-of-2          	| malicious 	| ALSZ15        | ~          	        | 17.3          	| ~       	| ~       	|  10         	|
 | 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  2.9       	|
 | 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**   | ~     	|  2.7      	|
