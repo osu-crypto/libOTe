@@ -70,3 +70,4 @@ add_subdirectory(libOTe_Tests)
 #############################################
 add_subdirectory(frontend)
 
+add_subdirectory(SimplestOT)

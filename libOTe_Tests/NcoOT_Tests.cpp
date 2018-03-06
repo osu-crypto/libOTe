@@ -28,6 +28,7 @@
 #include "libOTe_Tests/testData/code384_BCH511.h"
 #include "libOTe_Tests/testData/code640_BCH511.h"
 #include "libOTe_Tests/testData/code1280_BCH511.h"
+#include <cryptoTools/Common/TestCollection.h>
 
 using namespace osuCrypto;
 

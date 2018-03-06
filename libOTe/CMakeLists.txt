@@ -6,7 +6,7 @@ file(GLOB_RECURSE SRCS *.cpp)
 add_library(libOTe STATIC ${SRCS})
 
 target_include_directories(libOTe PUBLIC ${CMAKE_SOURCE_DIR}) 
-target_link_libraries(libOTe cryptoTools)
+target_link_libraries(libOTe cryptoTools SimplestOT)
 
 #############################################
 #            Install                        #

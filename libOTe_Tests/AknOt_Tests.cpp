@@ -10,6 +10,7 @@
 #include "Common.h"
 #include "OTOracleReceiver.h"
 #include "OTOracleSender.h"
+#include <cryptoTools/Common/TestCollection.h>
 using namespace osuCrypto;
 
 namespace tests_libOTe

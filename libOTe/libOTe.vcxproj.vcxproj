@@ -27,6 +27,7 @@
     <ClInclude Include="NChooseOne\Oos\OosNcoOtSender.h" />
     <ClInclude Include="NChooseOne\RR17\Rr17NcoOtReceiver.h" />
     <ClInclude Include="NChooseOne\RR17\Rr17NcoOtSender.h" />
+    <ClInclude Include="Base\SimplestOT.h" />
     <ClInclude Include="Tools\LinearCode.h" />
     <ClInclude Include="Tools\Tools.h" />
     <ClInclude Include="TwoChooseOne\IknpDotExtReceiver.h" />
@@ -52,6 +53,7 @@
     <ClCompile Include="NChooseOne\Oos\OosNcoOtSender.cpp" />
     <ClCompile Include="NChooseOne\RR17\Rr17NcoOtReceiver.cpp" />
     <ClCompile Include="NChooseOne\RR17\Rr17NcoOtSender.cpp" />
+    <ClCompile Include="Base\SimplestOT.cpp" />
     <ClCompile Include="Tools\bch511.h" />
     <ClCompile Include="Tools\LinearCode.cpp" />
     <ClCompile Include="Tools\Tools.cpp" />
@@ -119,7 +121,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(SolutionDir)/cryptoTools/thirdparty/win/NTL/include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(SolutionDir)/cryptoTools/thirdparty/win/NTL/include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -134,7 +136,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;NDEBUG</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -152,7 +154,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;NDEBUG</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>

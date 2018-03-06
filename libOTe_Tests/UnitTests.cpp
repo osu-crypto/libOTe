@@ -32,6 +32,7 @@ namespace tests_libOTe
         tc.add("LinearCode_subBlock_Test_Impl           ", LinearCode_subBlock_Test_Impl);
         tc.add("LinearCode_repetition_Test_Impl         ", LinearCode_repetition_Test_Impl);
         tc.add("NaorPinkasOt_Test                       ", NaorPinkasOt_Test_Impl);
+        tc.add("SimplestOT_Test_Impl                    ", SimplestOT_Test_Impl);
     });
 
 

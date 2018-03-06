@@ -5,4 +5,5 @@
 namespace tests_libOTe
 {
     void NaorPinkasOt_Test_Impl();
+    void SimplestOT_Test_Impl();
 }
