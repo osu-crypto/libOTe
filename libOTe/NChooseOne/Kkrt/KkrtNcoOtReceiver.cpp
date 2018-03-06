@@ -1,4 +1,4 @@
-#include "libOTe/Base/naor-pinkas.h"
+#include "libOTe/Base/BaseOT.h"
 #include "KkrtNcoOtReceiver.h"
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Log.h>

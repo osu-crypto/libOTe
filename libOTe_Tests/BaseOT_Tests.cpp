@@ -7,7 +7,7 @@
 #include <cryptoTools/Network/Session.h>
 #include <cryptoTools/Network/IOService.h>
 
-#include "libOTe/Base/naor-pinkas.h"
+#include "libOTe/Base/BaseOT.h"
 #include "libOTe/Base/SimplestOT.h"
 #include <cryptoTools/Common/Log.h>
 
@@ -27,7 +27,7 @@ using namespace osuCrypto;
 namespace tests_libOTe
 {
 
-    void NaorPinkasOt_Test_Impl()
+    void DefaultBaseOTOt_Test_Impl()
     {
         setThreadName("Sender");
 

@@ -15,6 +15,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Base\BaseOT.h" />
     <ClInclude Include="Base\naor-pinkas.h" />
     <ClInclude Include="NChooseK\AknOtReceiver.h" />
     <ClInclude Include="NChooseK\AknOtSender.h" />

@@ -1,5 +1,5 @@
 #include "AknOtSender.h"
-#include "libOTe/Base/naor-pinkas.h"
+#include "libOTe/Base/BaseOT.h"
 #include "libOTe/TwoChooseOne/LzKosOtExtSender.h"
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Common/Timer.h>
@@ -39,7 +39,7 @@ namespace osuCrypto
             choices.randomize(prng);
 
             //crypto crpto(128, prng.get<block>());
-            NaorPinkas base;
+            DefaultBaseOT base;
             base.receive(choices, baseMsg,prng, chl0, 2);
 
             ots.setBaseOts(baseMsg, choices);

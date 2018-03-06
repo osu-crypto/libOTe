@@ -1,4 +1,4 @@
-#include "libOTe/Base/naor-pinkas.h"
+#include "libOTe/Base/BaseOT.h"
 #include "OosNcoOtReceiver.h"
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/bch511.h"

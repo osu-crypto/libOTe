@@ -3,7 +3,7 @@
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 
-#include "libOTe/Base/naor-pinkas.h"
+#include "libOTe/Base/BaseOT.h"
 #include "libOTe/TwoChooseOne/LzKosOtExtReceiver.h"
 
 namespace osuCrypto
@@ -28,7 +28,7 @@ namespace osuCrypto
         {
             std::array<std::array<block, 2>, gOtExtBaseOtCount> baseMsg;
 
-            NaorPinkas base;
+            DefaultBaseOT base;
             base.send(baseMsg, prng, chl0, 2);
             ots.setBaseOts(baseMsg);
         }

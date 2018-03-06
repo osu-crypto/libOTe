@@ -3,7 +3,7 @@
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Matrix.h>
-#include "libOTe/Base/naor-pinkas.h"
+#include "libOTe/Base/BaseOT.h"
 #include "libOTe/Tools/LinearCode.h"
 #include <cryptoTools/Network/Channel.h>
 

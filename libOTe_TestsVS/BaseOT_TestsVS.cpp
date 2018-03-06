@@ -12,10 +12,10 @@ namespace tests_libOTe
     {
     public:
     
-        TEST_METHOD(NaorPinkasOt_TestVS)
+        TEST_METHOD(DefaultBaseOTOt_TestVS)
         {
             InitDebugPrinting();
-            NaorPinkasOt_Test_Impl();
+            DefaultBaseOTOt_Test_Impl();
         } 
 
     };

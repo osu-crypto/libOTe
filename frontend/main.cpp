@@ -677,7 +677,7 @@ void base()
     auto chl0 = ep0.addChannel("s");
 
 
-    NaorPinkas send, recv;
+    DefaultBaseOT send, recv;
 
 
     auto thrd = std::thread([&]() {
