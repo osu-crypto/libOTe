@@ -27,7 +27,7 @@ using namespace osuCrypto;
 namespace tests_libOTe
 {
 
-    void DefaultBaseOTOt_Test_Impl()
+    void NaorPinkasOt_Test_Impl()
     {
         setThreadName("Sender");
 

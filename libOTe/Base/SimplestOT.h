@@ -22,18 +22,24 @@ namespace osuCrypto
     public:
 
 
-        //void receive(
-        //    const BitVector& choices,
-        //    span<block> messages,
-        //    PRNG& prng,
-        //    Channel& chl,
-        //    u64 numThreads);
+        void receive(
+            const BitVector& choices,
+            span<block> messages,
+            PRNG& prng,
+            Channel& chl,
+            u64 numThreads)
+        {
+            receive(choices, messages, prng, chl);
+        }
 
-        //void send(
-        //    span<std::array<block, 2>> messages,
-        //    PRNG& prng,
-        //    Channel& sock,
-        //    u64 numThreads);
+        void send(
+            span<std::array<block, 2>> messages,
+            PRNG& prng,
+            Channel& chl,
+            u64 numThreads)
+        {
+            send(messages, prng, chl);
+        }
 
         void receive(
             const BitVector& choices,
@@ -44,7 +50,7 @@ namespace osuCrypto
         void send(
             span<std::array<block, 2>> messages,
             PRNG& prng,
-            Channel& sock) override;
+            Channel& chl) override;
     };
 }
 
