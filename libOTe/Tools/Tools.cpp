@@ -210,16 +210,16 @@ namespace osuCrypto {
         static const u64 chunkSize = 8;
 
         // the number of input columns
-        u64 bitWidth = in.bounds()[0];
+        int bitWidth = in.bounds()[0];
 
         // In the main loop, we tranpose things in subBlocks. This is how many we have.
         // a subblock is 16 (bits) columns wide and 64 bits tall
-        u64 subBlockWidth = bitWidth / 16;
-        u64 subBlockHight = out.bounds()[0] / (8 * chunkSize);
+        int subBlockWidth = bitWidth / 16;
+        int subBlockHight = out.bounds()[0] / (8 * chunkSize);
 
         // since we allows arbitrary sized inputs, we have to deal with the left overs
-        u64 leftOverHeight = out.bounds()[0] % (chunkSize * 8);
-        u64 leftOverWidth = in.bounds()[0] % 16;
+        int leftOverHeight = out.bounds()[0] % (chunkSize * 8);
+        int leftOverWidth = in.bounds()[0] % 16;
 
 
         // make sure that the output can hold the input.
@@ -267,11 +267,11 @@ namespace osuCrypto {
 
 
         // this is the main loop that gets the best performance (highly vectorized).
-        for (u64 h = 0; h < subBlockHight; ++h)
+        for (int h = 0; h < subBlockHight; ++h)
         {
             // we are concerned with the output rows a range [16 * h, 16 * h + 15]
 
-            for (u64 w = 0; w < subBlockWidth; ++w)
+            for (int w = 0; w < subBlockWidth; ++w)
             {
                 // we are concerned with the w'th section of 16 bits for the 16 output rows above.
 
@@ -324,7 +324,7 @@ namespace osuCrypto {
                 auto out6 = outStart + (chunkSize * h + 6) * eightOutSize1 + w * 2;
                 auto out7 = outStart + (chunkSize * h + 7) * eightOutSize1 + w * 2;
 
-                for (u64 j = 0; j < 8; j++)
+                for (int j = 0; j < 8; j++)
                 {
                     // use the special _mm_movemask_epi8 to perform the final step of that bit-wise tranpose.
                     // this instruction takes ever 8'th bit (start at idx 7) and moves them into a single
@@ -371,7 +371,7 @@ namespace osuCrypto {
         // the last byte might be only part of a byte, so we also account for this
         auto lastSkip = (8 - leftOverHeight % 8) % 8;
         
-        for (u64 hh = 0; hh < hhEnd; ++hh)
+        for (int hh = 0; hh < hhEnd; ++hh)
         {
             // compute those parameters that determine if this is the last byte
             // and that its a partial byte meaning that the last so mant output 
@@ -379,7 +379,7 @@ namespace osuCrypto {
             auto skip = hh == (hhEnd - 1) ? lastSkip : 0;
             auto rem = 8 - skip;
 
-            for (u64 w = 0; w < subBlockWidth; ++w)
+            for (int w = 0; w < subBlockWidth; ++w)
             {
 
                 auto start = in.data() + subBlockHight * chunkSize + hh + w * wStep;
@@ -407,7 +407,7 @@ namespace osuCrypto {
                 out0 -= out.stride() * skip;
                 t.blks[0] = _mm_slli_epi64(t.blks[0],int( skip));
 
-                for (u64 j = 0; j < rem; j++)
+                for (int j = 0; j < rem; j++)
                 {
                     *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
 
@@ -422,7 +422,7 @@ namespace osuCrypto {
         // For this case, we use 
         if (leftOverWidth)
         {
-            for (u64 h = 0; h < subBlockHight; ++h)
+            for (int h = 0; h < subBlockHight; ++h)
             {
                 // we are concerned with the output rows a range [16 * h, 16 * h + 15]
 
@@ -435,7 +435,7 @@ namespace osuCrypto {
                 };
 
                 memset(t.blks, 0,sizeof(t));
-                for (u64 i = 0; i < leftOverWidth; ++i)
+                for (int i = 0; i < leftOverWidth; ++i)
                 {
                     t.bytes[0][i] = src[i][0];
                     t.bytes[1][i] = src[i][1];
@@ -458,7 +458,7 @@ namespace osuCrypto {
 
                 if (leftOverWidth <= 8)
                 {
-                    for (u64 j = 0; j < 8; j++)
+                    for (int j = 0; j < 8; j++)
                     {
                         *out0 = _mm_movemask_epi8(t.blks[0]);
                         *out1 = _mm_movemask_epi8(t.blks[1]);
@@ -490,7 +490,7 @@ namespace osuCrypto {
                 }
                 else
                 {
-                    for (u64 j = 0; j < 8; j++)
+                    for (int j = 0; j < 8; j++)
                     {
                         *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
                         *(u16*)out1 = _mm_movemask_epi8(t.blks[1]);
@@ -524,7 +524,7 @@ namespace osuCrypto {
 
             //auto hhEnd = (leftOverHeight + 7) / 8;
             //auto lastSkip = (8 - leftOverHeight % 8) % 8;
-            for (u64 hh = 0; hh < hhEnd; ++hh)
+            for (int hh = 0; hh < hhEnd; ++hh)
             {
                 auto skip = hh == (hhEnd - 1) ? lastSkip : 0;
                 auto rem = 8 - skip;
@@ -542,7 +542,7 @@ namespace osuCrypto {
 
 
                 t.blks[0] = ZeroBlock; 
-                for (u64 i = 0; i < leftOverWidth; ++i)
+                for (int i = 0; i < leftOverWidth; ++i)
                 {
                     t.bytes[0][i] = src[i][0];
                 }
@@ -552,7 +552,7 @@ namespace osuCrypto {
                 out0 -= out.stride() * skip;
                 t.blks[0] = _mm_slli_epi64(t.blks[0],int( skip));
 
-                for (u64 j = 0; j < rem; j++)
+                for (int j = 0; j < rem; j++)
                 {
                     if (leftOverWidth > 8)
                     {
