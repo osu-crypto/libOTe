@@ -398,10 +398,12 @@ namespace tests_libOTe
 
         testNco(sender, numOTs, prng0, sendChl, recv, prng1, recvChl);
 
-        auto v = std::async([&] { recv.check(recvChl, ZeroBlock); });
-        try {
-            sender.check(sendChl,ZeroBlock);
+        auto v = std::async([&] { 
+            recv.check(recvChl, toBlock(322334)); 
+        });
 
+        try {
+            sender.check(sendChl,toBlock(324));
         }
         catch (...)
         {

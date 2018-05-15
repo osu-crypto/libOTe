@@ -67,7 +67,17 @@ namespace osuCrypto
 
         void check(Channel& chl, block wordSeed) override;
 
+
+        std::vector<block> mWBuff,mTBuff;
+        void sendFinalization(Channel& chl, block seed);
+
+        block mChallengeSeed = ZeroBlock;
+        void recvChallenge(Channel& chl);
+        void computeProof();
+        void sendProof(Channel& chl);
+
         std::unique_ptr<NcoOtExtReceiver> split() override;
+        std::unique_ptr<OosNcoOtReceiver> oosSplit();
 
     };
 

@@ -52,6 +52,7 @@ namespace osuCrypto {
             const BitVector& choices) override;
 
         std::unique_ptr<NcoOtExtSender> split() override;
+        std::unique_ptr<OosNcoOtSender> oosSplit();
 
 
         void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
@@ -67,10 +68,19 @@ namespace osuCrypto {
 
         void configure(bool maliciousSecure, u64 statSecParam, u64 inputBitCount) override;
 
+        std::future<void> asyncRecvCorrection(Channel& chl, u64 recvCount);
         void recvCorrection(Channel& chl, u64 recvCount) override;
         u64 recvCorrection(Channel& chl) override;
 
         void check(Channel& chl, block seed) override;
+
+
+        void recvFinalization(Channel& chl);
+        block mChallengeSeed =ZeroBlock;
+        void sendChallenge(Channel& chl, block seed);
+        void computeProof();
+        void recvProof(Channel& chl);
+        std::vector<block> qSum;
     };
 }
 
