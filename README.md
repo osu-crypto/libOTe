@@ -117,7 +117,7 @@ and link:
 6) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl/source/libmiracl.a
 
 
-See below for includes and link paths. Note that thirdparty/linux/...  should be replaced tih thirdparty/win/... 
+<b>Note:</b>On windows, `thirdparty/linux/...`  should be replaced with `thirdparty/win/...` 
 
 ## Help
  
