@@ -60,7 +60,6 @@ Build the solution within visual studio or with `MSBuild`. To see all the comman
 
 `frontend.exe` 
 
-See below for includes and link paths. Note that thirdparty/linux/...  whould be replaced tih thirdparty/win/... 
   
 If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
@@ -70,7 +69,7 @@ If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
 <b>Miracl and visual studio 2017:</b> If the Miracl script fails to find visual studio 2017, open the script and manually specify the path. 
  
-### Linux / MAC
+### Linux / Mac
  
  In short, this will build the project
 
@@ -92,6 +91,16 @@ The libraries will be placed in `libOTe/lib` and the binary `frontend.exe` will 
 
 Note: In the case that miracl or boost is already installed, the steps  `cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt to find them instead. Boost is found with the CMake findBoost package and miracl is found with the `find_library(miracl)` command.
  
+ If the cryptoTools directory is empty `git submodule update --init --recursive`.
+
+
+<b>Mac issue:</b> if make reports an error about `nasm: fatal: unrecognised output format 'macho64' - use -hf for a list`, the current version of NASM is out of date. Either update nasm or call 
+```
+export cryptoTools_NO_NASM=true
+``` 
+
+
+### Linking
 
  When using libOTe in an external project, you will need to include the following:
 1) .../libOTe
@@ -108,13 +117,7 @@ and link:
 6) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl/source/libmiracl.a
 
 
- If the cryptoTools directory is empty `git submodule update --init --recursive`.
-
-<b>Mac issue:</b> if make reports an error about `nasm: fatal: unrecognised output format 'macho64' - use -hf for a list`, the current version of NASM is out of date. Either update nasm or call 
-```
-export cryptoTools_NO_NASM=true
-``` 
-
+See below for includes and link paths. Note that thirdparty/linux/...  should be replaced tih thirdparty/win/... 
 
 ## Help
  
