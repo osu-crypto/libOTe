@@ -59,6 +59,8 @@ Optional: `nasm` for improved RandomOracle performance.
 Build the solution within visual studio or with `MSBuild`. To see all the command line options, execute the program 
 
 `frontend.exe` 
+
+See below for includes and link paths. Note that thirdparty/linux/...  whould be replaced tih thirdparty/win/... 
   
 If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
@@ -90,6 +92,22 @@ The libraries will be placed in `libOTe/lib` and the binary `frontend.exe` will 
 
 Note: In the case that miracl or boost is already installed, the steps  `cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt to find them instead. Boost is found with the CMake findBoost package and miracl is found with the `find_library(miracl)` command.
  
+
+ When using libOTe in an external project, you will need to include the following:
+1) .../libOTe
+2) .../libOTe/cryptoTools
+3) .../libOTe/cryptoTools/thirdparty/linux/boost
+4) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl
+
+and link:
+1) .../libOTe/bin/liblibOTe.a
+2) .../libOTe/bin/libcryptoTools.a
+3) .../libOTe/bin/libSimplestOT.a
+4) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_system.a
+5) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_thread.a
+6) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl/source/libmiracl.a
+
+
  If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
 <b>Mac issue:</b> if make reports an error about `nasm: fatal: unrecognised output format 'macho64' - use -hf for a list`, the current version of NASM is out of date. Either update nasm or call 

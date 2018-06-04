@@ -167,7 +167,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;NDEBUG</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>

@@ -239,10 +239,14 @@ namespace osuCrypto
             t1Val[3] = t1Val[3] ^ t0Val[3];
 
 #ifdef OOS_SHA_HASH
-            RandomOracle  sha1(destSize);
+            //RandomOracle  sha1(destSize);
             // now hash it to remove the correlation.
-            sha1.Update((u8*)t0Val, mT0.stride() * sizeof(block));
-            sha1.Final((u8*)dest);
+            //sha1.Update((u8*)t0Val, mT0.stride() * sizeof(block));
+            //sha1.Final((u8*)dest);
+
+            std::array<u32, 5> out{ 0,0,0,0,0 };
+            sha1_compress(out.data(), (u8*)&t0Val[0]);
+            memcpy(dest, out.data(), destSize);
 #else
             //H(x) = AES_f(H'(x)) + H'(x), where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
             mAesFixedKey.ecbEncFourBlocks(t0Val, codeword.data());

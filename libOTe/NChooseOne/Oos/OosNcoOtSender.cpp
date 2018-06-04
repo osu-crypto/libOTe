@@ -184,7 +184,7 @@ namespace osuCrypto
         mCode.encode((u8*)codeword.data(), (u8*)codeword.data());
 
 #ifdef OOS_SHA_HASH
-        RandomOracle  sha1(destSize);
+        //RandomOracle  sha1(destSize);
 #else
         std::array<block, 10> aesBuff;
 #endif
@@ -217,9 +217,14 @@ namespace osuCrypto
 
 #ifdef OOS_SHA_HASH
             // hash it all to get rid of the correlation.
-            sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
-            sha1.Final((u8*)dest);
-            //val = toBlock(hashBuff);
+            //RandomOracle  sha1(destSize);
+            //sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
+            //sha1.Final(dest);
+
+            std::array<u32, 5> out{ 0,0,0,0,0 };
+            sha1_compress(out.data(), (u8*)&codeword[0]);
+            memcpy(dest, out.data(), destSize);
+
 #else
             //H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
             mAesFixedKey.ecbEncFourBlocks(codeword.data(), aesBuff.data());
@@ -252,6 +257,7 @@ namespace osuCrypto
             }
 #ifdef OOS_SHA_HASH
             // hash it all to get rid of the correlation.
+            RandomOracle  sha1(destSize);
             sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
             sha1.Final((u8*)dest);
 #else

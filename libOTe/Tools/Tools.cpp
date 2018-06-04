@@ -223,7 +223,7 @@ namespace osuCrypto {
 
 
         // make sure that the output can hold the input.
-        if (out.stride() < (bitWidth + 7) / 8)
+        if (static_cast<int>(out.stride()) < (bitWidth + 7) / 8)
             throw std::runtime_error(LOCATION);
 
         // we can handle the case that the output should be truncated, but 
