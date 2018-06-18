@@ -149,9 +149,6 @@
     <ClCompile Include="Keccak-simple.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="mains.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="network.c">
       <Filter>Source Files</Filter>
     </ClCompile>

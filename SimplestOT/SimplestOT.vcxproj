@@ -216,7 +216,6 @@
     <ClCompile Include="gfe4x_nsquare.c" />
     <ClCompile Include="gfe4x_pow2523.c" />
     <ClCompile Include="Keccak-simple.c" />
-    <ClCompile Include="mains.cpp" />
     <ClCompile Include="network.c" />
     <ClCompile Include="ot_receiver.c" />
     <ClCompile Include="ot_receiver_test.c" />
