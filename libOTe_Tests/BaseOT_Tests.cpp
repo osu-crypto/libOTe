@@ -108,7 +108,7 @@ namespace tests_libOTe
         {
             if (neq(recvMsg[i], sendMsg[i][choices[i]]))
             {
-                std::cout << "failed " << i << std::endl;
+                std::cout << "failed " << i <<" exp = m["<< int(choices[i]) <<"], act = " << recvMsg[i] <<" true = " << sendMsg[i][0] << ", " << sendMsg[i][1] <<std::endl;
                 throw UnitTestFail();
             }
         }
