@@ -20,7 +20,7 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	set(CMAKE_CXX_FLAGS  "${CMAKE_C_FLAGS}  -std=c++14")
 	
 	# Select flags.
-	SET(CMAKE_CXX_FLAGS_RELEASE "-Ofast -march=native -frename-registers -DNDEBUG") 
+	SET(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native  -DNDEBUG") 
 	SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb -rdynamic")
 	SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb -rdynamic")
 	
