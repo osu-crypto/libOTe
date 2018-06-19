@@ -1,16 +1,33 @@
-dist: trusty
-sudo: false
+sudo: required
+before_install:
+  - sudo apt-get install libao-dev
+  - sudo apt-get install libcurl4-openssl-dev
+  - chmod +x installMPG123.sh
+  - ./installMPG123.sh
+  
+# Enable C++ support
 language: cpp
 
-addons:
-  apt:
-    sources:
-      - ubuntu-toolchain-r-test
-    packages:
-      - g++-5
+# Compiler selection
+compiler:
+  - gcc
+  
+install:
+  - DEPS_DIR="${TRAVIS_BUILD_DIR}/deps"
+  - mkdir ${DEPS_DIR} && cd ${DEPS_DIR}
+  
+  - |
+    if [[ "${TRAVIS_OS_NAME}" == "linux" ]]; then
+      CMAKE_URL="http://www.cmake.org/files/v3.3/cmake-3.3.2-Linux-x86_64.tar.gz"
+      mkdir cmake && travis_retry wget --no-check-certificate --quiet -O - ${CMAKE_URL} | tar --strip-components=1 -xz -C cmake
+      export PATH=${DEPS_DIR}/cmake/bin:${PATH}
+    fi
+  
+  # Go to the Root directory  
+  - cd ..
 
-
+# Build steps
 script:
-  - CXX=/usr/bin/g++-5 export CC=/usr/bin/gcc-5 cmake .
-  - cmake --build . -- -j
-
+  - mkdir build
+  - cd build
+  - ${DEPS_DIR}/cmake/bin/cmake .. && make
