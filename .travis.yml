@@ -6,6 +6,8 @@ script:
   - ls
   - export CXX=/usr/local/clang-5.0.0/bin/clang
   - export CC=/usr/local/clang-5.0.0/bin/clang
-  - export cryptoTools_NO_NASM=1
+  - cd cryptoTools/thirdparty/linux
+  - bash all.get
+  - cd ../../..
   - cmake .
   - cmake --build . -- -j
