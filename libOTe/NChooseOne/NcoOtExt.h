@@ -77,6 +77,15 @@ namespace osuCrypto
             void* encoding,
             u64 encodingSize) = 0;
 
+        // This function allows the user to obtain the random OT messages of their choice
+        // at a given index. 
+        // @ otIdx: denotes the OT index that should be encoded. Each OT index allows
+        //       the receiver to learn a single message.
+        // @ choiceWord: a pointer to the location that contains the choice c\in{0,1}^inputBitsCount
+        //       that should be encoded. The sender can call this function many times for a given
+        //       otIdx. Note that recvCorrection(...) must have been called one or more times
+        //       where the sum of the "recvCount" must be greater than otIdx.
+        // @ encoding: the location that the random OT message should be written to (16 bytes).
         void encode(u64 otIdx,const void* choiceWord,void* encoding)
         { encode(otIdx, choiceWord, encoding, sizeof(block)); }
 

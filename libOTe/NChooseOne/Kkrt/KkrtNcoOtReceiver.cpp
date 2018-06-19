@@ -29,14 +29,13 @@ namespace osuCrypto
             mGens[i][0].setKey(baseRecvOts[i][0]);
             mGens[i][1].setKey(baseRecvOts[i][1]);
         }
-        mHasBase = true;
     }
 
 
     void KkrtNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
 
-        if (mHasBase == false)
+        if (hasBaseOts() == false)
             throw std::runtime_error("rt error at " LOCATION);
 
         block seed = prng.get<block>();
@@ -171,13 +170,12 @@ namespace osuCrypto
             throw std::runtime_error("must call configure(...) before getBaseOTCount() " LOCATION);
     }
 
-    std::unique_ptr<NcoOtExtReceiver> KkrtNcoOtReceiver::split()
+    KkrtNcoOtReceiver KkrtNcoOtReceiver::splitBase()
     {
-        auto* raw = new KkrtNcoOtReceiver();
-        raw->mGens.resize(mGens.size());
-
-        raw->mInputByteCount = mInputByteCount;
-        raw->mMultiKeyAES = mMultiKeyAES;
+        KkrtNcoOtReceiver raw;
+        raw.mGens.resize(mGens.size());
+        raw.mInputByteCount = mInputByteCount;
+        raw.mMultiKeyAES = mMultiKeyAES;
 
         if (hasBaseOts())
         {
@@ -190,10 +188,16 @@ namespace osuCrypto
 
                 ++mGensBlkIdx[i];
             }
-            raw->setBaseOts(base);
+            raw.setBaseOts(base);
         }
-        return std::unique_ptr<NcoOtExtReceiver>(raw);
+        return std::move(raw);
     }
+
+    std::unique_ptr<NcoOtExtReceiver> KkrtNcoOtReceiver::split()
+    {
+        return std::make_unique<KkrtNcoOtReceiver>(std::move(splitBase()));
+    }
+
 
     void KkrtNcoOtReceiver::encode(
         u64 otIdx,
@@ -321,8 +325,9 @@ namespace osuCrypto
 
         // this is potentially dangerous. We dont have a guarantee that mT1 will still exist when
         // the network gets around to sending this. Oh well.
-        TODO("Make this memory safe");
-        chl.asyncSend((u8*)(mT1.data() + (mCorrectionIdx * mT1.stride())), mT1.stride() * sendCount * sizeof(block));
+
+        mHasPendingSendFuture = true;
+        mPendingSendFuture = chl.asyncSendFuture((u8*)(mT1.data() + (mCorrectionIdx * mT1.stride())), mT1.stride() * sendCount * sizeof(block));
 
         mCorrectionIdx += sendCount;
     }

@@ -14,16 +14,22 @@ namespace osuCrypto
 
     using namespace std;
 
-
-    std::unique_ptr<OtExtSender> KosDotExtSender::split()
+    KosDotExtSender KosDotExtSender::splitBase()
     {
-        auto dot = new KosDotExtSender();
-        std::unique_ptr<OtExtSender> ret(dot);
         std::vector<block> baseRecvOts(mGens.size());
         for (u64 i = 0; i < mGens.size(); ++i)
             baseRecvOts[i] = mGens[i].get<block>();
-        ret->setBaseOts(baseRecvOts, mBaseChoiceBits);
-        return std::move(ret);
+
+        return KosDotExtSender(baseRecvOts, mBaseChoiceBits);
+    }
+
+    std::unique_ptr<OtExtSender> KosDotExtSender::split()
+    {
+        std::vector<block> baseRecvOts(mGens.size());
+        for (u64 i = 0; i < mGens.size(); ++i)
+            baseRecvOts[i] = mGens[i].get<block>();
+
+        return std::make_unique<KosDotExtSender>(baseRecvOts, mBaseChoiceBits);
     }
 
     void KosDotExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices)

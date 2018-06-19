@@ -10,20 +10,24 @@
 
 namespace osuCrypto
 {
-    //#define KOS_DEBUG
-
-    using namespace std;
 
 
-    std::unique_ptr<OtExtSender> IknpDotExtSender::split()
+    IknpDotExtSender IknpDotExtSender::splitBase()
     {
-        auto dot = new IknpDotExtSender();
-        std::unique_ptr<OtExtSender> ret(dot);
         std::vector<block> baseRecvOts(mGens.size());
         for (u64 i = 0; i < mGens.size(); ++i)
             baseRecvOts[i] = mGens[i].get<block>();
-        ret->setBaseOts(baseRecvOts, mBaseChoiceBits);
-        return std::move(ret);
+
+        return IknpDotExtSender(baseRecvOts, mBaseChoiceBits);
+    }
+
+    std::unique_ptr<OtExtSender> IknpDotExtSender::split()
+    {
+        std::vector<block> baseRecvOts(mGens.size());
+        for (u64 i = 0; i < mGens.size(); ++i)
+            baseRecvOts[i] = mGens[i].get<block>();
+
+        return std::make_unique<IknpDotExtSender>(baseRecvOts, mBaseChoiceBits);
     }
 
     void IknpDotExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices)

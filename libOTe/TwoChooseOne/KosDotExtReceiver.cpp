@@ -31,6 +31,20 @@ namespace osuCrypto
 
         mHasBase = true;
     }
+
+    KosDotExtReceiver KosDotExtReceiver::splitBase()
+    {
+        std::vector<std::array<block, 2>>baseRecvOts(mGens.size());
+
+        for (u64 i = 0; i < mGens.size(); ++i)
+        {
+            baseRecvOts[i][0] = mGens[i][0].get<block>();
+            baseRecvOts[i][1] = mGens[i][1].get<block>();
+        }
+
+        return KosDotExtReceiver(baseRecvOts);
+    }
+
     std::unique_ptr<OtExtReceiver> KosDotExtReceiver::split()
     {
         std::vector<std::array<block, 2>>baseRecvOts(mGens.size());
@@ -41,14 +55,7 @@ namespace osuCrypto
             baseRecvOts[i][1] = mGens[i][1].get<block>();
         }
 
-        auto dot = new KosDotExtReceiver();
-        //dot->mCode = mCode;
-
-        std::unique_ptr<OtExtReceiver> ret(dot);
-
-        ret->setBaseOts(baseRecvOts);
-
-        return std::move(ret);
+        return std::make_unique<KosDotExtReceiver>(baseRecvOts);
     }
 
 

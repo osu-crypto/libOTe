@@ -13,31 +13,54 @@ namespace osuCrypto
         public OtExtReceiver, public TimerAdapter
     {
     public:
-        IknpDotExtReceiver()
-            :mHasBase(false)
-        {}
+        bool mHasBase = false;
+        std::vector<std::array<PRNG, 2>> mGens;
 
+        IknpDotExtReceiver() = default;
+        IknpDotExtReceiver(const IknpDotExtReceiver&) = delete;
+        IknpDotExtReceiver(IknpDotExtReceiver&&) = default;
+
+        IknpDotExtReceiver(span<std::array<block, 2>> baseSendOts)
+        {
+            setBaseOts(baseSendOts);
+        }
+
+        void operator=(IknpDotExtReceiver&& v)
+        {
+            mHasBase = std::move(v.mHasBase);
+            mGens = std::move(v.mGens);
+            v.mHasBase = false;
+        }
+
+        // returns whether the base OTs have been set. They must be set before
+        // split or receive is called.
         bool hasBaseOts() const override
         {
             return mHasBase;
         }
 
-        //LinearCode mCode;
-        bool mHasBase;
-        std::vector<std::array<PRNG, 2>> mGens;
-
+        // sets the base OTs.
         void setBaseOts(
             span<std::array<block, 2>> baseSendOts)override;
 
+        // returns an independent instance of this extender which can securely be
+        // used concurrently to this current one. The base OTs for the new instance 
+        // are derived from the orginial base OTs.
+        IknpDotExtReceiver splitBase();
 
+        // returns an independent (type eased) instance of this extender which can securely be
+        // used concurrently to this current one. The base OTs for the new instance 
+        // are derived from the orginial base OTs.
         std::unique_ptr<OtExtReceiver> split() override;
 
+        // Performed the specicifed number of random OT extensions where the messages
+        // receivers are indexed by the choices vector that is passed in. The received
+        // values written to the messages parameter. 
         void receive(
             const BitVector& choices,
             span<block> messages,
             PRNG& prng,
-            Channel& chl/*,
-            std::atomic<u64>& doneIdx*/)override;
+            Channel& chl)override;
 
 
     };

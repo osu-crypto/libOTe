@@ -114,12 +114,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="signalHandle.cpp" />
     <ClCompile Include="util.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="main.h" />
-    <ClInclude Include="signalHandle.h" />
     <ClInclude Include="util.h" />
   </ItemGroup>
   <ItemGroup>

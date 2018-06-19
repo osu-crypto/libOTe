@@ -12,30 +12,30 @@ namespace osuCrypto
     using namespace std;
 
 
-
-
-    std::unique_ptr<OtExtSender> IknpOtExtSender::split()
+    IknpOtExtSender IknpOtExtSender::splitBase()
     {
-
-        std::unique_ptr<OtExtSender> ret(new IknpOtExtSender());
-
         std::array<block, gOtExtBaseOtCount> baseRecvOts;
 
         for (u64 i = 0; i < mGens.size(); ++i)
-        {
             baseRecvOts[i] = mGens[i].get<block>();
-        }
 
-        ret->setBaseOts(baseRecvOts, mBaseChoiceBits);
+        return IknpOtExtSender(baseRecvOts, mBaseChoiceBits);
+    }
 
-        return std::move(ret);
+    std::unique_ptr<OtExtSender> IknpOtExtSender::split()
+    {
+        std::array<block, gOtExtBaseOtCount> baseRecvOts;
+
+        for (u64 i = 0; i < mGens.size(); ++i)
+            baseRecvOts[i] = mGens[i].get<block>();
+
+        return std::make_unique<IknpOtExtSender>(baseRecvOts, mBaseChoiceBits);
     }
 
     void IknpOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices)
     {
         if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
             throw std::runtime_error("not supported/implemented");
-
 
         mBaseChoiceBits = choices;
         for (u64 i = 0; i < gOtExtBaseOtCount; i++)

@@ -72,49 +72,4 @@ namespace osuCrypto
     };
 
 
-
-
-    //class SsotExtReceiver
-    //{
-    //public:
-    //    SsotExtReceiver() {}
-
-
-    //    virtual void setBaseOts(
-    //        span<std::array<block, 2>> baseSendOts,
-    //        Channel &chl) = 0;
-
-
-    //    template<size_t N>
-    //    virtual void receive(
-    //        span<std::array<MultiBlock<N>, 2>> messages,
-    //        PRNG& prng,
-    //        Channel& chl) = 0;
-
-    //    virtual bool hasBaseOts() const = 0;
-    //    virtual std::unique_ptr<SsotExtReceiver> split() = 0;
-    //};
-
-    //class SsotExtSender
-    //{
-    //public:
-    //    SsotExtSender() {}
-
-    //    virtual bool hasBaseOts() const = 0;
-
-    //    virtual void setBaseOts(
-    //        span<block> baseRecvOts,
-    //        const BitVector& choices,
-    //        Channel &chl) = 0;
-
-    //    virtual std::unique_ptr<SsotExtSender> split() = 0;
-
-    //    template<size_t N>
-    //    virtual void send(
-    //        span<MultiBlock<N>> messages,
-    //        PRNG& prng,
-    //        Channel& chl) = 0;
-
-    //};
-
 }

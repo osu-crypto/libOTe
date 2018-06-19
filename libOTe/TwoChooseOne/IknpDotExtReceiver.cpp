@@ -11,16 +11,11 @@
 #include "TcoOtDefines.h"
 #include <queue>
 
-using namespace std;
 
 namespace osuCrypto
 {
     void IknpDotExtReceiver::setBaseOts(gsl::span<std::array<block, 2>> baseOTs)
     {
-
-        //PRNG prng(ZeroBlock);
-        //mCode.random(prng, baseOTs.size(), 128);
-
         mGens.resize(baseOTs.size());
         for (u64 i = 0; i <u64(baseOTs.size()); i++)
         {
@@ -28,9 +23,22 @@ namespace osuCrypto
             mGens[i][1].SetSeed(baseOTs[i][1]);
         }
 
-
         mHasBase = true;
     }
+
+    IknpDotExtReceiver IknpDotExtReceiver::splitBase()
+    {
+        std::vector<std::array<block, 2>>baseRecvOts(mGens.size());
+
+        for (u64 i = 0; i < mGens.size(); ++i)
+        {
+            baseRecvOts[i][0] = mGens[i][0].get<block>();
+            baseRecvOts[i][1] = mGens[i][1].get<block>();
+        }
+
+        return IknpDotExtReceiver(baseRecvOts);
+    }
+
     std::unique_ptr<OtExtReceiver> IknpDotExtReceiver::split()
     {
         std::vector<std::array<block, 2>>baseRecvOts(mGens.size());
@@ -41,14 +49,7 @@ namespace osuCrypto
             baseRecvOts[i][1] = mGens[i][1].get<block>();
         }
 
-        auto dot = new IknpDotExtReceiver();
-        //dot->mCode = mCode;
-
-        std::unique_ptr<OtExtReceiver> ret(dot);
-
-        ret->setBaseOts(baseRecvOts);
-
-        return std::move(ret);
+        return std::make_unique<IknpDotExtReceiver>(baseRecvOts);
     }
 
 

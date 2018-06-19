@@ -36,13 +36,12 @@ namespace osuCrypto
         }
     }
 
-    std::unique_ptr<NcoOtExtSender> KkrtNcoOtSender::split()
+    KkrtNcoOtSender KkrtNcoOtSender::splitBase()
     {
-        auto* raw = new KkrtNcoOtSender();
-        raw->mGens.resize(mGens.size());
-
-        raw->mInputByteCount = mInputByteCount;
-        raw->mMultiKeyAES = mMultiKeyAES;
+        KkrtNcoOtSender raw;
+        raw.mGens.resize(mGens.size());
+        raw.mInputByteCount = mInputByteCount;
+        raw.mMultiKeyAES = mMultiKeyAES;
 
         if (hasBaseOts())
         {
@@ -55,9 +54,14 @@ namespace osuCrypto
                 mGens[i].ecbEncCounterMode(mGensBlkIdx[i]++, 1, &base[i]);
                 //base[i] = mGens[i].get<block>();
             }
-            raw->setBaseOts(base, mBaseChoiceBits);
+            raw.setBaseOts(base, mBaseChoiceBits);
         }
-        return std::unique_ptr<NcoOtExtSender>(raw);
+        return std::move(raw); 
+    }
+
+    std::unique_ptr<NcoOtExtSender> KkrtNcoOtSender::split()
+    {
+        return std::make_unique<KkrtNcoOtSender>(std::move(splitBase()));
     }
 
     void KkrtNcoOtSender::init(

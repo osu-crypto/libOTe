@@ -11,22 +11,53 @@ namespace osuCrypto {
     class KosOtExtSender :
         public OtExtSender, public TimerAdapter
     {
-    public: 
+    public:
+
         std::array<PRNG, gOtExtBaseOtCount> mGens;
         BitVector mBaseChoiceBits;
 
+        KosOtExtSender() = default;
+        KosOtExtSender(const KosOtExtSender&) = delete;
+        KosOtExtSender(KosOtExtSender&&) = default;
+
+        KosOtExtSender(
+            span<block> baseRecvOts,
+            const BitVector& choices)
+        {
+            setBaseOts(baseRecvOts, choices);
+        }
+
+        void operator=(KosOtExtSender&& v)
+        {
+            mGens = std::move(v.mGens);
+            mBaseChoiceBits = std::move(v.mBaseChoiceBits);
+        }
+
+        // return true if this instance has valid base OTs. 
         bool hasBaseOts() const override
         {
             return mBaseChoiceBits.size() > 0;
         }
 
+        // Returns a independent instance of this extender which can 
+        // be executed concurrently. The base OTs are derived from the
+        // original base OTs.
+        KosOtExtSender splitBase();
+
+        // Returns a independent (type eased) instance of this extender which can 
+        // be executed concurrently. The base OTs are derived from the
+        // original base OTs.
         std::unique_ptr<OtExtSender> split() override;
 
+        // Sets the base OTs which must be peformed before calling split or send.
+        // See frontend/main.cpp for an example. 
         void setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices) override;
 
-
+        // Takes a destination span of two blocks and performs OT extension
+        // where the destination span is populated (written to) with the random
+        // OT messages that then extension generates. User data is not transmitted. 
         void send(
             span<std::array<block, 2>> messages,
             PRNG& prng,

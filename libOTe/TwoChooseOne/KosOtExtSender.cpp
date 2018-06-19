@@ -9,28 +9,24 @@
 
 namespace osuCrypto
 {
-    //#define KOS_DEBUG
-
-    using namespace std;
 
 
-
+    KosOtExtSender KosOtExtSender::splitBase()
+    {
+        std::array<block, gOtExtBaseOtCount> baseRecvOts;
+        for (u64 i = 0; i < mGens.size(); ++i)
+            baseRecvOts[i] = mGens[i].get<block>();
+        return KosOtExtSender( baseRecvOts, mBaseChoiceBits );
+    }
 
     std::unique_ptr<OtExtSender> KosOtExtSender::split()
     {
-
-        std::unique_ptr<OtExtSender> ret(new KosOtExtSender());
-
         std::array<block, gOtExtBaseOtCount> baseRecvOts;
 
         for (u64 i = 0; i < mGens.size(); ++i)
-        {
             baseRecvOts[i] = mGens[i].get<block>();
-        }
 
-        ret->setBaseOts(baseRecvOts, mBaseChoiceBits);
-
-        return std::move(ret);
+        return std::make_unique<KosOtExtSender>(baseRecvOts, mBaseChoiceBits);
     }
 
     void KosOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices)

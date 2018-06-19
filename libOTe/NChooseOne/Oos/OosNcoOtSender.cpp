@@ -8,10 +8,6 @@
 namespace osuCrypto
 {
 
-    OosNcoOtSender::~OosNcoOtSender()
-    {
-    }
-
     u64 OosNcoOtSender::getBaseOTCount() const
     {
         if (mGens.size())
@@ -46,14 +42,14 @@ namespace osuCrypto
         }
     }
 
-    std::unique_ptr<OosNcoOtSender> OosNcoOtSender::oosSplit()
+    OosNcoOtSender OosNcoOtSender::splitBase()
     {
-        auto* raw = new OosNcoOtSender();
-        raw->mCode = mCode;
-        raw->mInputByteCount = mInputByteCount;
-        raw->mStatSecParam = mStatSecParam;
-        raw->mGens.resize(mGens.size());
-        raw->mMalicious = mMalicious;
+        OosNcoOtSender raw ;
+        raw.mCode = mCode;
+        raw.mInputByteCount = mInputByteCount;
+        raw.mStatSecParam = mStatSecParam;
+        raw.mGens.resize(mGens.size());
+        raw.mMalicious = mMalicious;
         //raw->mChoiceBlks = mChoiceBlks;
 
         if (hasBaseOts())
@@ -64,15 +60,15 @@ namespace osuCrypto
             {
                 base[i] = mGens[i].get<block>();
             }
-            raw->setBaseOts(base, mBaseChoiceBits);
+            raw.setBaseOts(base, mBaseChoiceBits);
         }
-        return std::unique_ptr<OosNcoOtSender>(raw);
+        return std::move(raw);
     }
 
 
     std::unique_ptr<NcoOtExtSender> OosNcoOtSender::split()
     {
-        return std::unique_ptr<NcoOtExtSender>{oosSplit().release()};
+        return std::make_unique<OosNcoOtSender>(std::move(splitBase()));
     }
 
 
@@ -301,7 +297,8 @@ namespace osuCrypto
     {
         // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
         // there c(w) is a pseudo-random code.
-        auto dest = mCorrectionVals.data() + i32(mCorrectionIdx * mCorrectionVals.stride());
+        auto dest = &mCorrectionVals(mCorrectionIdx,0);
+        auto end = &mCorrectionVals(mCorrectionIdx + recvCount - 1, 0);
 
         // update the index of there we should store the next set of correction values.
         mCorrectionIdx += recvCount;

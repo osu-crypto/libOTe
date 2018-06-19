@@ -25,6 +25,22 @@ namespace osuCrypto
 
         mHasBase = true;
     }
+
+
+    IknpOtExtReceiver IknpOtExtReceiver::splitBase()
+    {
+        std::array<std::array<block, 2>, gOtExtBaseOtCount>baseRecvOts;
+
+        for (u64 i = 0; i < mGens.size(); ++i)
+        {
+            baseRecvOts[i][0] = mGens[i][0].get<block>();
+            baseRecvOts[i][1] = mGens[i][1].get<block>();
+        }
+
+        return IknpOtExtReceiver(baseRecvOts);
+    }
+
+
     std::unique_ptr<OtExtReceiver> IknpOtExtReceiver::split()
     {
         std::array<std::array<block, 2>, gOtExtBaseOtCount>baseRecvOts;
@@ -35,11 +51,7 @@ namespace osuCrypto
             baseRecvOts[i][1] = mGens[i][1].get<block>();
         }
 
-        std::unique_ptr<OtExtReceiver> ret(new IknpOtExtReceiver());
-
-        ret->setBaseOts(baseRecvOts);
-
-        return std::move(ret);
+        return std::make_unique<IknpOtExtReceiver>(baseRecvOts);
     }
 
 

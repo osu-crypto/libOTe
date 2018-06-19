@@ -13,31 +13,61 @@ namespace osuCrypto {
         public OtExtSender, public TimerAdapter
     {
     public: 
-
-
 		block mDelta = ZeroBlock;
         std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;
 
+        IknpDotExtSender() = default;
+        IknpDotExtSender(const IknpDotExtSender&) = delete;
+        IknpDotExtSender(IknpDotExtSender&&) = default;
+
+        IknpDotExtSender(
+            span<block> baseRecvOts,
+            const BitVector& choices)
+        {
+            setBaseOts(baseRecvOts, choices);
+        }
+
+        void operator=(IknpDotExtSender&& v)
+        {
+            mGens = std::move(v.mGens);
+            mBaseChoiceBits = std::move(v.mBaseChoiceBits);
+            mDelta = v.mDelta;
+            v.mDelta = ZeroBlock;
+        }
+
+        // return true if this instance has valid base OTs. 
         bool hasBaseOts() const override
         {
             return mBaseChoiceBits.size() > 0;
         }
-        //LinearCode mCode;
-        //BitVector mmChoices;
 
-        std::unique_ptr<OtExtSender> split() override;
-
+        // return true if this instance has valid base OTs. 
         void setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices) override;
 
-		void setDelta(const block& delta);
+        // Returns a independent instance of this extender which can 
+        // be executed concurrently. The base OTs are derived from the
+        // original base OTs.
+        IknpDotExtSender splitBase();
 
+        // Returns a independent (type eased) instance of this extender which can 
+        // be executed concurrently. The base OTs are derived from the
+        // original base OTs.
+        std::unique_ptr<OtExtSender> split() override;
+
+        // Takes a destination span of two blocks and performs OT extension
+        // where the destination span is populated (written to) with the random
+        // OT messages that then extension generates. User data is not transmitted. 
         void send(
             span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl) override;
+
+        // allows the sender to choose the desired difference between the two messaages. If not set
+        // a random delta is chosen when send(...) is called.
+        void setDelta(const block& delta);
     };
 }
 

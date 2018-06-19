@@ -11,11 +11,6 @@ using namespace std;
 
 namespace osuCrypto
 {
-    OosNcoOtReceiver::OosNcoOtReceiver()
-        :mHasBase(false),
-        mStatSecParam(0),
-        mInputByteCount(0)
-    {}
 
     void OosNcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts)
     {
@@ -30,12 +25,12 @@ namespace osuCrypto
             mGens[i][0].SetSeed(baseRecvOts[i][0]);
             mGens[i][1].SetSeed(baseRecvOts[i][1]);
         }
-        mHasBase = true;
     }
+
     void OosNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
         u64 doneIdx = 0;
-        if (mHasBase == false)
+        if (hasBaseOts() == false)
             throw std::runtime_error("rt error at " LOCATION);
 
         if (mInputByteCount == 0)
@@ -156,16 +151,15 @@ namespace osuCrypto
     }
 
 
-    std::unique_ptr<OosNcoOtReceiver> OosNcoOtReceiver::oosSplit()
+    OosNcoOtReceiver OosNcoOtReceiver::splitBase()
     {
-        auto* raw = new OosNcoOtReceiver();
+        OosNcoOtReceiver raw;
 
-        raw->mCode = mCode;
-        raw->mHasBase = mHasBase;
-        raw->mMalicious = mMalicious;
-        raw->mStatSecParam = mStatSecParam;
-        raw->mInputByteCount = mInputByteCount;
-        raw->mGens.resize(mGens.size());
+        raw.mCode = mCode;
+        raw.mMalicious = mMalicious;
+        raw.mStatSecParam = mStatSecParam;
+        raw.mInputByteCount = mInputByteCount;
+        raw.mGens.resize(mGens.size());
 
         std::vector<std::array<block, 2>> base(mGens.size());
 
@@ -176,14 +170,15 @@ namespace osuCrypto
                 base[i][0] = mGens[i][0].get<block>();
                 base[i][1] = mGens[i][1].get<block>();
             }
-            raw->setBaseOts(base);
+            raw.setBaseOts(base);
         }
 
-        return std::unique_ptr<OosNcoOtReceiver>(raw);
+        return std::move(raw);
     }
+
     std::unique_ptr<NcoOtExtReceiver> OosNcoOtReceiver::split()
     {
-        return std::unique_ptr<NcoOtExtReceiver>{ oosSplit().release() };
+        return std::make_unique<OosNcoOtReceiver>(std::move(splitBase()));
     }
 
     void OosNcoOtReceiver::encode(
@@ -358,7 +353,7 @@ namespace osuCrypto
             mCode.load(bch511_binary, sizeof(bch511_binary));
         }
         else
-            throw std::runtime_error(LOCATION);
+            throw std::runtime_error("76 bits is currently the max. larger inputs can be supported on request.... " LOCATION);
 
 
         mInputByteCount = (inputBitCount + 7) / 8;
@@ -381,10 +376,10 @@ namespace osuCrypto
 
         // this is potentially dangerous. We don't have a guarantee that mT1 will still exist when
         // the network gets around to sending this. Oh well.
-        TODO("Make this memory safe");
         auto dest = mT1.data() + (mCorrectionIdx * mT1.stride());
-        chl.asyncSend((u8*)dest, mT1.stride() * sendCount * sizeof(block));
 
+        mHasPendingSendFuture = true;
+        mPendingSendFuture = chl.asyncSendFuture((u8*)dest, mT1.stride() * sendCount * sizeof(block));
         mCorrectionIdx += sendCount;
     }
 
