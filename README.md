@@ -105,7 +105,7 @@ export cryptoTools_NO_NASM=true
 
 ### Linking
 
- When using libOTe in an external project, you will need to include the following:
+ You can either `make install` on linux or link libOTe's source tree. In the latter case, you will need to include the following:
 1) .../libOTe
 2) .../libOTe/cryptoTools
 3) .../libOTe/cryptoTools/thirdparty/linux/boost
@@ -120,7 +120,7 @@ and link:
 6) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl/source/libmiracl.a
 
 
-<b>Note:</b>On windows, `thirdparty/linux/...`  should be replaced with `thirdparty/win/...` 
+<b>Note:</b> On windows the linking paths follow a similar pattern.
 
 ## Help
  
