@@ -452,16 +452,23 @@ int main(int argc, char** argv)
         if (cmd.isSet("list"))
         {
             tests.list();
+            return 0;
         }
         else
         {
             cmd.setDefault("loop", 1);
             auto loop = cmd.get<u64>("loop");
 
+            TestCollection::Result result;
             if (cmd.hasValue(unitTestTag))
-                tests.run(cmd.getMany<u64>(unitTestTag), loop);
+                result = tests.run(cmd.getMany<u64>(unitTestTag), loop);
             else
-                tests.runAll(loop);
+                result = tests.runAll(loop);
+
+            if (result == TestCollection::Result::passed)
+                return 0;
+            else
+                return 1;
         }
     }
 
