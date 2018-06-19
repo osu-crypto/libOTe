@@ -5,11 +5,18 @@ language: cpp
 addons:
   apt:
     sources:
-      -ubuntu-toolchain-r-test
+      - ubuntu-toolchain-r-test
     packages:
-      g++-5
+      - g++-5
 
 
 script:
-  - CXX=/usr/bin/g++-5 CC=/usr/bin/gcc-5 cmake .
+  - git submodule update --init --recursive
+  - export CXX=/usr/bin/g++-5
+  - export CC=/usr/bin/gcc-5
+  - cd cryptoTools/thirdparty/linux
+  - bash all.get
+  - cd ../../..
+  - cmake .
   - cmake --build . -- -j
+
