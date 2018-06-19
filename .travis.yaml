@@ -11,12 +11,6 @@ addons:
 
 
 script:
-  - git submodule update --init --recursive
-  - export CXX=/usr/bin/g++-5
-  - export CC=/usr/bin/gcc-5
-  - cd cryptoTools/thirdparty/linux
-  - bash all.get
-  - cd ../../..
-  - cmake .
+  - CXX=/usr/bin/g++-5 export CC=/usr/bin/gcc-5 cmake .
   - cmake --build . -- -j
 
