@@ -2,10 +2,19 @@ dist: trusty
 sudo: false
 language: cpp
 
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+    packages:
+      - g++-5
+
 script:
+  #- export CXX=/usr/local/clang-5.0.0/bin/clang
+  #- export CC=/usr/local/clang-5.0.0/bin/clang
+  - export CXX=/usr/bin/g++-5 
+  - export CC=/usr/bin/gcc-5
   - ls
-  - export CXX=/usr/local/clang-5.0.0/bin/clang
-  - export CC=/usr/local/clang-5.0.0/bin/clang
   - cd cryptoTools/thirdparty/linux
   - bash all.get
   - cd ../../..
