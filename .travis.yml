@@ -19,5 +19,6 @@ script:
   - bash all.get
   - cd ../../..
   - cmake .
-  - cmake --build . -- -j
+  - cmake --build . -- -j2
+  - ./bin/frontend_libOTe -u
  
