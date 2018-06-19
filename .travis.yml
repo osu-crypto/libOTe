@@ -21,4 +21,9 @@ script:
   - cmake .
   - cmake --build . -- -j2
   - ./bin/frontend_libOTe -u
+  - ./bin/frontend_libOTe -u
+  - ./bin/frontend_libOTe -u
+  - ./bin/frontend_libOTe -u
+  - ./bin/frontend_libOTe -u
+  - ./bin/frontend_libOTe -u
  
