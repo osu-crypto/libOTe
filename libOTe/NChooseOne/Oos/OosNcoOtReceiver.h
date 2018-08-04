@@ -28,7 +28,7 @@ namespace osuCrypto
     {
     public:
 
-        bool mMalicious = false;
+        bool mMalicious = false, mHasBase = false;
         u64 mStatSecParam = 0;
         LinearCode mCode;
         u64 mCorrectionIdx, mInputByteCount = 0;
@@ -59,6 +59,7 @@ namespace osuCrypto
 
         void operator=(OosNcoOtReceiver&& v) {
             mMalicious = v.mMalicious;
+            mHasBase = v.mHasBase;
             mStatSecParam = v.mStatSecParam;
             mCode = std::move(v.mCode);
             mInputByteCount = v.mInputByteCount;
@@ -69,7 +70,7 @@ namespace osuCrypto
             mHasPendingSendFuture = v.mHasPendingSendFuture;
             mPendingSendFuture = std::move(v.mPendingSendFuture);
             v.mHasPendingSendFuture = false;
-
+            v.mHasBase = false;
 #ifndef NDEBUG
             mEncodeFlags = std::move(mEncodeFlags);
 #endif
@@ -97,7 +98,7 @@ namespace osuCrypto
         // split or receive is called.
         bool hasBaseOts() const override
         {
-            return mGens.size();
+            return mHasBase;
         }
 
         // Perform some computation before encode(...) can be called. Note that this

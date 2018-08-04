@@ -84,7 +84,7 @@ namespace osuCrypto
         // Returns whether the base OTs have already been set
         bool hasBaseOts() const override
         {
-            return mGens.size();
+            return mGensBlkIdx.size();
         }
 
         // Sets the base OTs. Note that getBaseOTCount() of OTs should be provided.

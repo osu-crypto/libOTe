@@ -17,14 +17,13 @@ namespace osuCrypto
 
         if (u64(baseRecvOts.size()) != u64(mGens.size()))
             throw std::runtime_error("rt error at " LOCATION);
-
-        mGens.resize(baseRecvOts.size());
-
+        
         for (u64 i = 0; i < mGens.size(); i++)
         {
             mGens[i][0].SetSeed(baseRecvOts[i][0]);
             mGens[i][1].SetSeed(baseRecvOts[i][1]);
         }
+        mHasBase = true;
     }
 
     void OosNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
