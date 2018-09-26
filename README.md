@@ -56,15 +56,13 @@ cd ../../..
 libOTe.sln
 ```
 
-Requirements: `Powershell`, Powershell `Set-ExecutionPolicy  Unrestricted`, `Visual Studio 2017`, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`.
-Optional: `nasm` for improved RandomOracle performance. 
- 
 Build the solution within visual studio or with `MSBuild`. To see all the command line options, execute the program 
 
 `frontend.exe` 
 
-  
-If the cryptoTools directory is empty `git submodule update --init --recursive`.
+<b>Requirements:</b> `Powershell`, Powershell `Set-ExecutionPolicy  Unrestricted`, `Visual Studio 2017`, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`.
+
+<b>Optional:</b> `nasm` for improved RandomOracle performance. 
 
 <b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `libOTe/Crypto/asm/sha_win64.asm` from the build system and undefining  `INTEL_ASM_SHA1` on line 28 of `libOTe/Crypto/sha1.cpp`.
 
@@ -72,6 +70,8 @@ If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
 <b>Miracl and visual studio 2017:</b> If the Miracl script fails to find visual studio 2017, open the script and manually specify the path. 
  
+<b>Empty cryptoTools:</b> If the cryptoTools directory is empty `git submodule update --init --recursive`.
+
 ### Linux / Mac
  
  In short, this will build the project
@@ -91,7 +91,7 @@ The libraries will be placed in `libOTe/lib` and the binary `frontend.exe` will 
 
 <b>Requirements:</b> `CMake`, `Make`, `g++` or similar, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`. Optional: `nasm` for improved RandomOracle performance.
 
-<b>Using Simplest OT:</b> to use the third party library Simplest, call `cmake -DEnableSimplestOT=OFF .`
+<b>Using Simplest OT:</b> to use the third party library SimplestOT, call `cmake -DEnableSimplestOT=OFF .`
 
 <b>Note:</b> In the case that miracl or boost is already installed, the steps  `cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt to find them instead. Boost is found with the CMake findBoost package and miracl is found with the `find_library(miracl)` command.
  
