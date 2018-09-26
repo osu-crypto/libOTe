@@ -64,6 +64,13 @@ add_subdirectory(cryptoTools)
 #############################################
 #               Build libOTe                #
 #############################################
+
+if(EnableSimplestOT)
+	add_subdirectory(SimplestOT)
+else()
+	message(WARNING "Simplest OT will not be built.")
+endif()
+
 add_subdirectory(libOTe)
 add_subdirectory(libOTe_Tests)
 
@@ -73,9 +80,3 @@ add_subdirectory(libOTe_Tests)
 add_subdirectory(frontend)
 
 
-
-if(EnableSimplestOT)
-	add_subdirectory(SimplestOT)
-else()
-	message(WARNING "Simplest OT will not be built.")
-endif()
