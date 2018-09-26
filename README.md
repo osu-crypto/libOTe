@@ -36,6 +36,8 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
 | 1-out-of-2          	| malicious 	| ALSZ15        | ~          	        | 17.3          	| ~       	| ~       	|  10         	|
 | 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  2.9       	|
 | 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**   | ~     	|  2.7      	|
+| 1-out-of-2 Base      	| malicious   	| NP00       	| **963,584**        	| ~              	|~       	| ~        	| ~          	|
+| 1-out-of-2 Base     	| malicious   	| CO15       	| **2,011,136**        	| ~             	| ~		    | ~     	| ~         	|
  
 
  
