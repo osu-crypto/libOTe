@@ -2,6 +2,8 @@ cmake_minimum_required (VERSION 2.8)
 
 project(libOTe)
 
+option(EnableSimplestOT "EnableSimplestOT" OFF)
+
 if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 
 	############################################
@@ -70,4 +72,10 @@ add_subdirectory(libOTe_Tests)
 #############################################
 add_subdirectory(frontend)
 
-add_subdirectory(SimplestOT)
+
+
+if(EnableSimplestOT)
+	add_subdirectory(SimplestOT)
+else()
+	message(WARNING "Simplest OT will not be built.")
+endif()
