@@ -85,23 +85,24 @@ cmake  -G "Unix Makefiles"
 make
 ```
 
-
-Requirements: `CMake`, `Make`, `g++` or similar, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`. Optional: `nasm` for improved RandomOracle performance.
-
 The libraries will be placed in `libOTe/lib` and the binary `frontend.exe` will be placed in `libOTe/bin` To see all the command line options, execute the program 
  
 `./bin/frontend.exe`
 
-Note: In the case that miracl or boost is already installed, the steps  `cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt to find them instead. Boost is found with the CMake findBoost package and miracl is found with the `find_library(miracl)` command.
+<b>Requirements:</b> `CMake`, `Make`, `g++` or similar, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`. Optional: `nasm` for improved RandomOracle performance.
+
+<b>Using Simplest OT:</b> to use the third party library Simplest, call `cmake -DEnableSimplestOT=OFF .`
+
+<b>Note:</b> In the case that miracl or boost is already installed, the steps  `cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt to find them instead. Boost is found with the CMake findBoost package and miracl is found with the `find_library(miracl)` command.
  
- If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
 
 <b>Mac issue:</b> if make reports an error about `nasm: fatal: unrecognised output format 'macho64' - use -hf for a list`, the current version of NASM is out of date. Either update nasm or call 
 ```
 export cryptoTools_NO_NASM=true
-``` 
+```
 
+<b>Empty cryptoTools:</b> If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
 ### Linking
 
@@ -114,7 +115,7 @@ export cryptoTools_NO_NASM=true
 and link:
 1) .../libOTe/bin/liblibOTe.a
 2) .../libOTe/bin/libcryptoTools.a
-3) .../libOTe/bin/libSimplestOT.a
+3) .../libOTe/bin/libSimplestOT.a    <i>(if enabled)</i>
 4) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_system.a
 5) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_thread.a
 6) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl/source/libmiracl.a
