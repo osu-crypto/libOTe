@@ -407,7 +407,7 @@ namespace tests_libOTe
         }
         catch (...)
         {
-            sendChl.mBase->mLog;
+            //sendChl.mBase->mLog;
         }
         v.get();
 
