@@ -43,6 +43,8 @@ TestResult.xml
 [Rr]eleasePS/
 dlldata.c
 
+*.bin
+frontend/My*/
 *_i.c
 *_p.c
 *_i.h

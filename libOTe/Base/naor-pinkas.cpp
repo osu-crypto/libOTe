@@ -3,9 +3,13 @@
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Common/BitVector.h>
-#include <cryptoTools/Crypto/Curve.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Network/Channel.h>
+
+#include <cryptoTools/Crypto/RCurve.h>
+
+
+#include <cryptoTools/Crypto/Curve.h>
 
 #define PARALLEL
 
@@ -14,6 +18,18 @@
 
 namespace osuCrypto
 {
+
+#ifdef USE_RELIC
+    using Curve = REllipticCurve;
+    using Point = REccPoint;
+    using Brick = REccPoint;
+    using Number = REccNumber;
+#else    
+    using Curve = EllipticCurve;
+    using Point = EccPoint;
+    using Brick = EccBrick;
+    using Number = EccNumber;
+#endif
     //static const  u64 minMsgPerThread(16);
 
     NaorPinkas::NaorPinkas()
@@ -37,10 +53,7 @@ namespace osuCrypto
     {
         // should generalize to 1 out of N by changing this. But isn't tested...
         auto nSndVals(2);
-        const auto& params = k233;
-        block seed = prng.get<block>();
-
-        EllipticCurve curve(params, seed);
+        Curve curve;
         auto& g = curve.getGenerator();
         u64 fieldElementSize = g.sizeBytes();
 
@@ -54,10 +67,10 @@ namespace osuCrypto
 
         for (u64 t = 0; t < numThreads; ++t)
         {
-            seed = prng.get<block>();
+            auto seed = prng.get<block>();
 
             thrds[t] = std::thread(
-                [t, numThreads, &messages, seed, params,
+                [t, numThreads, &messages, seed, 
                 &sendBuff, &choices, cRecvFuture, &cBuff,
                 &remainingPK0s, &PK0Prom, nSndVals]()
             {
@@ -66,16 +79,16 @@ namespace osuCrypto
                 auto mEnd = (t + 1) * messages.size() / numThreads;
 
                 PRNG prng(seed);
-                EllipticCurve curve(params, prng.get<block>());
+                Curve curve;
 
                 auto& g = curve.getGenerator();
                 u64 fieldElementSize = g.sizeBytes();
 
-                EccPoint PK0(curve);
-                EccBrick bg(g);
+                Point PK0(curve);
+                Brick bg(g);
 
-                std::vector<EccNumber> pK;
-                std::vector<EccPoint>
+                std::vector<Number> pK;
+                std::vector<Point>
                     PK_sigma,
                     pC;
 
@@ -134,7 +147,7 @@ namespace osuCrypto
                 RandomOracle sha(sizeof(block));
 
                 std::vector<u8>buff(fieldElementSize);
-                EccBrick bc(pC[0]);
+                Brick bc(pC[0]);
 
                 for (u64 i = mStart, j = 0; i < mEnd; ++i, ++j)
                 {
@@ -168,15 +181,14 @@ namespace osuCrypto
     {
         // one out of nSndVals OT.
         u64 nSndVals(2);
-        auto& params = k233;
         std::vector<std::thread> thrds(numThreads);
         auto seed = prng.get<block>();
-        EllipticCurve curve(params, seed);
-        EccNumber alpha(curve, prng), tmp(curve);
-        const EccPoint& g = curve.getGenerator();
+        Curve curve;
+        Number alpha(curve, prng), tmp(curve);
+        const Point& g = curve.getGenerator();
         u64 fieldElementSize = g.sizeBytes();
         std::vector<u8> sendBuff(nSndVals * fieldElementSize);
-        std::vector<EccPoint> pC;
+        std::vector<Point> pC;
         pC.reserve(nSndVals);
 
 
@@ -206,13 +218,13 @@ namespace osuCrypto
 
             thrds[t] = std::thread([
                 t, seed, fieldElementSize, &messages, recvFuture,
-                    numThreads, &buff, &alpha, nSndVals, &pC, &params]()
+                    numThreads, &buff, &alpha, nSndVals, &pC]()
             {
-                EllipticCurve curve(params, seed);
-                EccPoint pPK0(curve), PK0a(curve), fetmp(curve);
-                EccNumber alpha2(curve, alpha);
+                Curve curve;
+                Point pPK0(curve), PK0a(curve), fetmp(curve);
+                Number alpha2(curve, alpha);
 
-                std::vector<EccPoint> c;
+                std::vector<Point> c;
                 c.reserve(nSndVals);
                 for (u64 i = 0; i < nSndVals; ++i)
                     c.emplace_back(curve, pC[i]);
