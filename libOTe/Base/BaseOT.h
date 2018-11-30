@@ -5,7 +5,7 @@
 #include "naor-pinkas.h"
 namespace osuCrypto
 {
-#ifdef ENABLE_SIMPLEST_OT
+#ifdef ENABLE_SIMPLESTOT
     using DefaultBaseOT = SimplestOT;
 #else
     using DefaultBaseOT = NaorPinkas;

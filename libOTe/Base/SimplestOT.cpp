@@ -1,6 +1,6 @@
 #include "SimplestOT.h"
 
-#ifdef ENABLE_SIMPLEST_OT
+#ifdef ENABLE_SIMPLESTOT
 
 
 extern "C"

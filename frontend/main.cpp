@@ -472,7 +472,7 @@ int main(int argc, char** argv)
         }
     }
 
-#ifdef ENABLE_SIMPLEST_OT
+#ifdef ENABLE_SIMPLESTOT
     flagSet |= runIf(baseOT_example<SimplestOT>, cmd, simple);
 #endif
     flagSet |= runIf(baseOT_example<NaorPinkas>, cmd, np);
@@ -500,7 +500,7 @@ int main(int argc, char** argv)
 
         std::cout
             << "Protocols:\n"
-#ifdef ENABLE_SIMPLEST_OT
+#ifdef ENABLE_SIMPLESTOT
             << "  -simplest  : to run the SimplestOT active secure 1-out-of-2 base OT\n"
 #endif
             << "  -np        : to run the NaorPinkas active secure 1-out-of-2 base OT\n"

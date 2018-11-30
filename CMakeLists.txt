@@ -2,7 +2,6 @@ cmake_minimum_required (VERSION 2.8)
 
 project(libOTe)
 
-option(EnableSimplestOT "EnableSimplestOT" OFF)
 
 if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 
@@ -26,6 +25,7 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb -rdynamic")
 	SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb -rdynamic")
 	
+
 	############################################
 	#           Build mode checks              #
 	############################################
@@ -51,8 +51,20 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	endif()
 
 
+
 endif()
  
+ 
+#############################################
+#                CONFIGURE                  #
+#############################################
+
+
+option(ENABLE_SIMPLESTOT "Build the assembly based SimplestOT library" OFF)
+
+message(STATUS "Option: ENABLE_SIMPLESTOT = ${ENABLE_SIMPLESTOT}")
+
+configure_file(libOTe/config.h.in libOTe/config.h)
 
 #############################################
 #    Build cryptoTools (common utilities)   #
@@ -65,11 +77,11 @@ add_subdirectory(cryptoTools)
 #               Build libOTe                #
 #############################################
 
-if(EnableSimplestOT)
+if(ENABLE_SIMPLESTOT)
 	add_subdirectory(SimplestOT)
-else()
-	message(WARNING "Simplest OT will not be built.")
-endif()
+else(ENABLE_SIMPLESTOT)
+	message(WARNING "Simplest OT will not be built. Use cmake -DENABLE_SIMPLESTOT=ON")
+endif(ENABLE_SIMPLESTOT)
 
 add_subdirectory(libOTe)
 add_subdirectory(libOTe_Tests)

@@ -19,7 +19,7 @@
 namespace osuCrypto
 {
 
-#ifdef USE_RELIC
+#ifdef ENABLE_RELIC
     using Curve = REllipticCurve;
     using Point = REccPoint;
     using Brick = REccPoint;
@@ -54,7 +54,7 @@ namespace osuCrypto
         // should generalize to 1 out of N by changing this. But isn't tested...
         auto nSndVals(2);
         Curve curve;
-        auto& g = curve.getGenerator();
+        auto g = curve.getGenerator();
         u64 fieldElementSize = g.sizeBytes();
 
         std::vector<std::thread> thrds(numThreads);
@@ -81,7 +81,7 @@ namespace osuCrypto
                 PRNG prng(seed);
                 Curve curve;
 
-                auto& g = curve.getGenerator();
+                auto g = curve.getGenerator();
                 u64 fieldElementSize = g.sizeBytes();
 
                 Point PK0(curve);
@@ -185,7 +185,7 @@ namespace osuCrypto
         auto seed = prng.get<block>();
         Curve curve;
         Number alpha(curve, prng), tmp(curve);
-        const Point& g = curve.getGenerator();
+        const Point g = curve.getGenerator();
         u64 fieldElementSize = g.sizeBytes();
         std::vector<u8> sendBuff(nSndVals * fieldElementSize);
         std::vector<Point> pC;

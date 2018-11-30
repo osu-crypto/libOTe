@@ -10,8 +10,7 @@ target_include_directories(libOTe PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(libOTe cryptoTools)
 
 
-if(EnableSimplestOT)
-	target_compile_options(libOTe PUBLIC -DENABLE_SIMPLEST_OT)
+if(ENABLE_SIMPLESTOT)
 	target_link_libraries(libOTe SimplestOT)
 endif()
 

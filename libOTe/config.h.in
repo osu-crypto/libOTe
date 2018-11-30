@@ -1,0 +1,7 @@
+#pragma once
+
+
+// build the library with simplest OT enabled
+#cmakedefine ENABLE_SIMPLESTOT @ENABLE_SIMPLESTOT@
+
+

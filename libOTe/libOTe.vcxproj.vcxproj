@@ -76,6 +76,9 @@
   <ItemGroup>
     <Text Include="CMakeLists.txt" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="config.h.in" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{D159E2F9-226C-4B19-905E-CC1EA0EB013F}</ProjectGuid>
     <RootNamespace>libOTe</RootNamespace>

@@ -73,7 +73,7 @@ namespace tests_libOTe
 
     void SimplestOT_Test_Impl()
     {
-#ifdef ENABLE_SIMPLEST_OT
+#ifdef ENABLE_SIMPLESTOT
         setThreadName("Sender");
 
         IOService ios(0);

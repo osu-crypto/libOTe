@@ -2,11 +2,12 @@
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
 
 //#if defined(__linux__) && not defined(NO_SIMPLEST_OT)
-//#define ENABLE_SIMPLEST_OT
+//#define ENABLE_SIMPLESTOT
 //#endif 
 
+#include "libOTe/config.h"
 
-#ifdef ENABLE_SIMPLEST_OT
+#ifdef ENABLE_SIMPLESTOT
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
