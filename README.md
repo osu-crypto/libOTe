@@ -64,9 +64,9 @@ cd ../../..
 libOTe.sln
 ```
 
-This will allow you to build the library with the <b>Miracl</b> library. If Relic or no base OTs are requered, then `getMiracl.ps1` can be skipped. If Relic is used, use the [visual studio port](https://github.com/ladnir/relic) and have CMake install it to `C:\libs`.
+This will allow you to build the library with the <b>Miracl</b> library. If Relic or no base OTs are requered, then `getMiracl.ps1` can be skipped. If Relic is used, use the [visual studio port](https://github.com/ladnir/relic). Use the CMake command `cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64` generate a Visual Studio solution and install it to `C:\libs`.
 
-Build the solution within visual studio or with `MSBuild`. To see all the command line options, execute the program 
+Build the solution within libOTe visual studio or with `MSBuild`. To see all the command line options, execute the program 
 
 `frontend.exe` 
 
@@ -95,7 +95,7 @@ cmake . -DENABLE_MIRACL=ON
 make
 ```
 
-This will allow you to build the library with the <b>Miracl</b> library. Altenatively, if [Relic](https://github.com/relic-toolkit/relic/) is installed you can instead call `cmake . -DENABLE_RELIC=ON`. Finally, if on <b>linux x64</b> the assembly base implementation of [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) can be enabled with `cmake . -DENABLE_SIMPLESTOT=ON`.
+This will allow you to build the library with the <b>Miracl</b> library. Altenatively, if [Relic](https://github.com/relic-toolkit/relic/) is installed (using the `-DMULTI=OPENMP` option) you can instead call `cmake . -DENABLE_RELIC=ON`. Finally, if on <b>linux x64</b> the assembly base implementation of [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) can be enabled with `cmake . -DENABLE_SIMPLESTOT=ON`.
 
 The libraries will be placed in `libOTe/lib` and the binary `frontend.exe` will be placed in `libOTe/bin` To see all the command line options, execute the program 
  
