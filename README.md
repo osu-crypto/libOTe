@@ -66,7 +66,7 @@ libOTe.sln
 
 This will allow you to build the library with the <b>Miracl</b> library. If Relic or no base OTs are requered, then `getMiracl.ps1` can be skipped. If Relic is used, use the [visual studio port](https://github.com/ladnir/relic). Use the CMake command `cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64` generate a Visual Studio solution and install it to `C:\libs`.
 
-Build the solution within libOTe visual studio or with `MSBuild`. To see all the command line options, execute the program 
+Build the libOTe solution within visual studio or with `MSBuild`. To see all the command line options, execute the program 
 
 `frontend.exe` 
 
