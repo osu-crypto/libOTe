@@ -97,7 +97,7 @@ make
 
 This will allow you to build the library with the <b>Miracl</b> library. Altenatively, if [Relic](https://github.com/relic-toolkit/relic/) is installed (using the `-DMULTI=OPENMP` option) you can instead call `cmake . -DENABLE_RELIC=ON`. Finally, if on <b>linux x64</b> the assembly base implementation of [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) can be enabled with `cmake . -DENABLE_SIMPLESTOT=ON`.
 
-The libraries will be placed in `libOTe/lib` and the binary `frontend.exe` will be placed in `libOTe/bin` To see all the command line options, execute the program 
+The libraries will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed in `libOTe/bin` To see all the command line options, execute the program 
  
 `./bin/frontend.exe`
 
@@ -122,7 +122,8 @@ export cryptoTools_NO_NASM=true
 1) .../libOTe
 2) .../libOTe/cryptoTools
 3) .../libOTe/cryptoTools/thirdparty/linux/boost
-4) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl
+4) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl <i>(if enabled)</i>
+5) [Relic includes] <i>(if enabled)</i>
 
 and link:
 1) .../libOTe/bin/liblibOTe.a
@@ -130,7 +131,8 @@ and link:
 3) .../libOTe/bin/libSimplestOT.a    <i>(if enabled)</i>
 4) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_system.a
 5) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_thread.a
-6) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl/source/libmiracl.a
+6) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl/source/libmiracl.a <i>(if enabled)</i>
+7) [Relic binar] <i>(if enabled)</i>
 
 
 <b>Note:</b> On windows the linking paths follow a similar pattern.
