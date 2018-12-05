@@ -26,11 +26,16 @@ namespace osuCrypto
 
         if (ots.hasBaseOts() == false)
         {
+
+#ifdef LIBOTE_HAS_BASE_OT
             std::array<std::array<block, 2>, gOtExtBaseOtCount> baseMsg;
 
             DefaultBaseOT base;
             base.send(baseMsg, prng, chl0, 2);
             ots.setBaseOts(baseMsg);
+#else
+            throw std::runtime_error("Base OTs not set");
+#endif
         }
 
         mMessages.resize(totalOTCount);

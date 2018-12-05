@@ -14,6 +14,8 @@
 #define PARALLEL
 
 
+#if defined ENABLE_RELIC  || ENABLE_MIRACL
+
 #include <memory>
 
 namespace osuCrypto
@@ -263,3 +265,5 @@ namespace osuCrypto
             thrd.join();
     }
 }
+
+#endif

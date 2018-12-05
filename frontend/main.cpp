@@ -54,7 +54,7 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
     Session  ep0(ios, ip, rr);
 
     std::vector<Channel> chls(numThreads);
-    for (u64 k = 0; k < numThreads; ++k)
+    for (int k = 0; k < numThreads; ++k)
         chls[k] = ep0.addChannel();
 
     std::vector<NcoOtReceiver> recvers(numThreads);
@@ -92,7 +92,7 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
 
     // now that we have one valid pair of extenders, we can call split on 
     // them to get more copies which can be used concurrently.
-    for (u64 i = 1; i < numThreads; ++i)
+    for (int i = 1; i < numThreads; ++i)
     {
         recvers[i] = recvers[0].splitBase();
         senders[i] = senders[0].splitBase();
@@ -113,7 +113,7 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
         // messages. However, for efficieny we will do this in steps where
         // we do some computation followed by sending off data. This is more 
         // efficient since data will be sent in the background :).
-        for (u64 i = 0; i < numOTs; )
+        for (int i = 0; i < numOTs; )
         {
             // figure out how many OTs we want to do in this step.
             auto min = std::min<u64>(numOTs - i, step);
@@ -134,7 +134,7 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
                 recvers[k].encode(i, &choice, &otMessage);
                 
                 // do something cool with otMessage
-                otMessage;
+                //otMessage;
             }
 
             // Note that all OTs in this region must be encode. If there are some
@@ -167,7 +167,7 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
         senders[k].init(numOTs, prng, chl);
 
         // Same explanation as above.
-        for (u64 i = 0; i < numOTs; )
+        for (int i = 0; i < numOTs; )
         {
             // Same explanation as above.
             auto min = std::min<u64>(numOTs - i, step);
@@ -226,7 +226,7 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
         thds[k] = std::thread(routine, k);
 
 
-    for (u64 k = 0; k < numThreads; ++k)
+    for (int k = 0; k < numThreads; ++k)
         thds[k].join();
 
     auto e = time.setTimePoint("finish");
@@ -252,7 +252,7 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
 
     // for each thread we need to construct a channel (socket) for it to communicate on.
     std::vector<Channel> chls(numThreads);
-    for (u64 i = 0; i < numThreads; ++i)
+    for (int i = 0; i < numThreads; ++i)
         chls[i] = ep0.addChannel();
 
     // cheat and compute the base OT in the clear.
@@ -332,7 +332,7 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
     for (int i = 0; i < numThreads; ++i)
         thrds[i] = std::thread(routine, i);
 
-    for (u64 i = 0; i < numThreads; ++i)
+    for (int i = 0; i < numThreads; ++i)
         thrds[i].join();
 
     auto e = timer.setTimePoint("finish");
@@ -475,8 +475,9 @@ int main(int argc, char** argv)
 #ifdef ENABLE_SIMPLESTOT
     flagSet |= runIf(baseOT_example<SimplestOT>, cmd, simple);
 #endif
+#ifdef NAOR_PINKAS
     flagSet |= runIf(baseOT_example<NaorPinkas>, cmd, np);
-
+#endif
     flagSet |= runIf(TwoChooseOne_example<IknpOtExtSender, IknpOtExtReceiver>, cmd, iknp);
     flagSet |= runIf(TwoChooseOne_example<IknpDotExtSender, IknpDotExtReceiver>, cmd, diknp);
     flagSet |= runIf(TwoChooseOne_example<KosOtExtSender, KosOtExtReceiver>, cmd, kos);

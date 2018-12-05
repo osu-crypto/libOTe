@@ -34,6 +34,7 @@ namespace osuCrypto
 
         if (ots.hasBaseOts() == false)
         {
+#ifdef LIBOTE_HAS_BASE_OT
             std::array<block, gOtExtBaseOtCount> baseMsg;
             BitVector choices(gOtExtBaseOtCount);
             choices.randomize(prng);
@@ -43,7 +44,9 @@ namespace osuCrypto
             base.receive(choices, baseMsg,prng, chl0, 2);
 
             ots.setBaseOts(baseMsg, choices);
-
+#else
+            throw std::runtime_error("Base OTs not set");
+#endif
             //timer.setTimePoint("baseDone");
             //std::cout << timer;
         }

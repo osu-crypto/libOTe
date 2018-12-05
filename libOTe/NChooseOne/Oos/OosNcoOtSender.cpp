@@ -298,7 +298,6 @@ namespace osuCrypto
         // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
         // there c(w) is a pseudo-random code.
         auto dest = &mCorrectionVals(mCorrectionIdx,0);
-        auto end = &mCorrectionVals(mCorrectionIdx + recvCount - 1, 0);
 
         // update the index of there we should store the next set of correction values.
         mCorrectionIdx += recvCount;

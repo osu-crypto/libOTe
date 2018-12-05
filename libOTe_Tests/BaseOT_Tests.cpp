@@ -29,6 +29,7 @@ namespace tests_libOTe
 
     void NaorPinkasOt_Test_Impl()
     {
+#ifdef NAOR_PINKAS
         setThreadName("Sender");
 
         IOService ios(0);
@@ -68,6 +69,9 @@ namespace tests_libOTe
                 throw UnitTestFail();
             }
         }
+#else
+        throw UnitTestSkipped("NaorPinkas OT not enabled. Requires Relic or Miracl");
+#endif
     }
 
 

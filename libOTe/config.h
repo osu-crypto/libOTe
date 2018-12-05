@@ -2,8 +2,6 @@
 
 
 // build the library with simplest OT enabled
+/* #undef ENABLE_SIMPLESTOT */
 
-#ifndef _MSC_VER
-#define ENABLE_SIMPLESTOT ON
-#endif
 

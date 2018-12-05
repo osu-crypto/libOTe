@@ -6,8 +6,12 @@
 namespace osuCrypto
 {
 #ifdef ENABLE_SIMPLESTOT
+
+#define LIBOTE_HAS_BASE_OT
     using DefaultBaseOT = SimplestOT;
-#else
+#elif (defined ENABLE_RELIC  || ENABLE_MIRACL)
+
+#define LIBOTE_HAS_BASE_OT
     using DefaultBaseOT = NaorPinkas;
 #endif
 }
