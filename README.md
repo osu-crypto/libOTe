@@ -43,20 +43,27 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
  
 ## Install
  
-The library is *cross platform* and has been tested on Windows, Mac and Linux. There are two library dependencies including [Boost](http://www.boost.org/) (networking), and [Miracl](https://www.miracl.com/index) (Base OT). For each, we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advise using the cloned repository that we provide.
+The library is *cross platform* and has been tested on Windows, Mac and Linux. There one mandatory dependency on [Boost](http://www.boost.org/) (networking), and three <b>optional dependencies</b> on
+ * [Miracl](https://www.miracl.com/index)
+ * [Relic](https://github.com/relic-toolkit/relic/) or 
+ * [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
+ for Base OT. Any or all of these dependenies can be enabled. See below. For Boost and Miracl we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advise using the cloned repository that we provide.
 
  
 ### Windows
 
-In `Powershell`, this will set up the project 
+In `Powershell`, this will set up the project (with Miracl)
 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
 cd libOTe/cryptoTools/thirdparty/win
-getBoost.ps1; getMiracl.ps1
+getBoost.ps1 
+getMiracl.ps1  
 cd ../../..
 libOTe.sln
 ```
+
+This will allow you to build the library with the <b>Miracl</b> library. If Relic or no base OTs are requered, then `getMiracl.ps1` can be skipped. If Relic is used, use the [visual studio port](https://github.com/ladnir/relic) and have CMake install it to `C:\libs`.
 
 Build the solution within visual studio or with `MSBuild`. To see all the command line options, execute the program 
 
@@ -64,9 +71,9 @@ Build the solution within visual studio or with `MSBuild`. To see all the comman
 
 <b>Requirements:</b> `Powershell`, Powershell `Set-ExecutionPolicy  Unrestricted`, `Visual Studio 2017`, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`.
 
-<b>Optional:</b> `nasm` for improved RandomOracle performance. 
+<b>Optional:</b> `nasm` for improved SHA1 performance. 
 
-<b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `libOTe/Crypto/asm/sha_win64.asm` from the build system and undefining  `INTEL_ASM_SHA1` on line 28 of `libOTe/Crypto/sha1.cpp`.
+<b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `cryptoTools/Crypto/asm/sha_win64.asm` from the build system and defining `NO_INTEL_ASM_SHA1` in `cryptoTools/Common/config.h`.
 
 <b>Boost and visual studio 2017:</b>  If boost does not build with visual studio 2017 follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
 
@@ -76,16 +83,18 @@ Build the solution within visual studio or with `MSBuild`. To see all the comman
 
 ### Linux / Mac
  
- In short, this will build the project
+ In short, this will build the project (with Miracl)
 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
 cd libOTe/cryptoTools/thirdparty/linux
 bash all.get
 cd ../../..
-cmake  -G "Unix Makefiles"
+cmake . -DENABLE_MIRACL=ON
 make
 ```
+
+This will allow you to build the library with the <b>Miracl</b> library. Altenatively, if [Relic](https://github.com/relic-toolkit/relic/) is installed you can instead call `cmake . -DENABLE_RELIC=ON`. Finally, if on <b>linux x64</b> the assembly base implementation of [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) can be enabled with `cmake . -DENABLE_SIMPLESTOT=ON`.
 
 The libraries will be placed in `libOTe/lib` and the binary `frontend.exe` will be placed in `libOTe/bin` To see all the command line options, execute the program 
  
