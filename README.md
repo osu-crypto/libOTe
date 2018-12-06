@@ -72,7 +72,7 @@ Build the libOTe solution within visual studio or with `MSBuild`. To see all the
 
 <b>Requirements:</b> `Powershell`, Powershell `Set-ExecutionPolicy  Unrestricted`, `Visual Studio 2017`, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`.
 
-<b>Optional:</b> `nasm` for improved SHA1 performance. 
+
 
 <b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `cryptoTools/Crypto/asm/sha_win64.asm` from the build system and defining `NO_INTEL_ASM_SHA1` in `cryptoTools/Common/config.h`.
 
@@ -80,41 +80,38 @@ Build the libOTe solution within visual studio or with `MSBuild`. To see all the
 
 <b>Miracl and visual studio 2017:</b> If the Miracl script fails to find visual studio 2017, open the script and manually specify the path. 
  
-<b>Empty cryptoTools:</b> If the cryptoTools directory is empty `git submodule update --init --recursive`.
+
 
 ### Linux / Mac
  
- In short, this will build the project (with Miracl)
+ In short, this will build the project (without base OTs)
 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
 cd libOTe/cryptoTools/thirdparty/linux
-bash all.get
+bash boost.get
 cd ../../..
-cmake . -DENABLE_MIRACL=ON
 make
 ```
 
-This will allow you to build the library with the <b>Miracl</b> library. Altenatively, if [Relic](https://github.com/relic-toolkit/relic/) is installed (using the `-DMULTI=OPENMP` option) you can instead call `cmake . -DENABLE_RELIC=ON`. Finally, if on <b>linux x64</b> the assembly base implementation of [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) can be enabled with `cmake . -DENABLE_SIMPLESTOT=ON`.
-
-The libraries will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed in `libOTe/bin` To see all the command line options, execute the program 
+This will build the minimum version of the library (wihtout base OTs). The libraries will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed in `libOTe/bin` To see all the command line options, execute the program 
  
 `./bin/frontend.exe`
 
-<b>Requirements:</b> `CMake`, `Make`, `g++` or similar, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`. Optional: `nasm` for improved RandomOracle performance.
 
-<b>Using Simplest OT:</b> to use the third party library SimplestOT, call `cmake -DENABLE_SIMPLESTOT=OFF .`
+Enable Base OTs using:
+ * `cmake .  -DENABLE_MIRACL=ON`: Build the library with integration to the [Miracl](https://www.miracl.com/index) library. Requires building miracl `cd libOTe/cryptoTools/thirdparty/linux; bash miracl.get`.
+ * `cmake .  -DENABLE_RELIC=ON`: Build the library with integration to the [Relic](https://github.com/relic-toolkit/relic/) library. Requires that relic is built with `cmake . -DMULTI=OPENMP` and installed.
+ * `cmake .  -DENABLE_SIMPLESTOT=ON`: Build the library with integration to the [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) library implementing a base OT.
+
+Other Options:
+ * `cmake .  -DENABLE_CIRCUITS=ON`: Build the library with the circuit library enabled.
+ * `cmake .  -DENABLE_NASM=ON`: Build the library with the assembly base SHA1 implementation. Requires the NASM compiler.
+
 
 <b>Note:</b> In the case that miracl or boost is already installed, the steps  `cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt to find them instead. Boost is found with the CMake findBoost package and miracl is found with the `find_library(miracl)` command.
  
 
-
-<b>Mac issue:</b> if make reports an error about `nasm: fatal: unrecognised output format 'macho64' - use -hf for a list`, the current version of NASM is out of date. Either update nasm or call 
-```
-export cryptoTools_NO_NASM=true
-```
-
-<b>Empty cryptoTools:</b> If the cryptoTools directory is empty `git submodule update --init --recursive`.
 
 ### Linking
 

@@ -9,7 +9,7 @@ namespace osuCrypto
 
 #define LIBOTE_HAS_BASE_OT
     using DefaultBaseOT = SimplestOT;
-#elif NAOR_PINKAS
+#elif defined NAOR_PINKAS
 
 #define LIBOTE_HAS_BASE_OT
     using DefaultBaseOT = NaorPinkas;

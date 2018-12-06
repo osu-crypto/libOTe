@@ -79,8 +79,6 @@ add_subdirectory(cryptoTools)
 
 if(ENABLE_SIMPLESTOT)
 	add_subdirectory(SimplestOT)
-else(ENABLE_SIMPLESTOT)
-	message(WARNING "Simplest OT will not be built. Use cmake -DENABLE_SIMPLESTOT=ON")
 endif(ENABLE_SIMPLESTOT)
 
 add_subdirectory(libOTe)

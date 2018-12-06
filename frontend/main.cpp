@@ -497,29 +497,38 @@ int main(int argc, char** argv)
             << "#                  oblivious transfer.                #\n"
             << "#                     Peter Rindal                    #\n"
             << "#######################################################\n" << std::endl;
-
+        
+        bool spEnabled, npEnabled;
+#ifdef ENABLE_SIMPLESTOT
+        spEnabled = true;
+#else 
+        spEnabled = false;
+#endif
+#ifdef NAOR_PINKAS
+        npEnabled = true;
+#else 
+        npEnabled = false;
+#endif
 
         std::cout
             << "Protocols:\n"
-#ifdef ENABLE_SIMPLESTOT
-            << "  -simplest  : to run the SimplestOT active secure 1-out-of-2 base OT\n"
-#endif
-            << "  -np        : to run the NaorPinkas active secure 1-out-of-2 base OT\n"
-            << "  -iknp      : to run the IKNP passive secure 1-out-of-2       OT\n"
-            << "  -diknp     : to run the IKNP passive secure 1-out-of-2 Delta-OT\n"
-            << "  -kos       : to run the KOS  active secure  1-out-of-2       OT\n"
-            << "  -dkos      : to run the KOS  active secure  1-out-of-2 Delta-OT\n"
-            << "  -oos       : to run the OOS  active secure  1-out-of-N OT for N=2^76\n"
-            << "  -kkrt      : to run the KKRT passive secure 1-out-of-N OT for N=2^128\n\n"
+            << Color::Green<< "  -simplest"<<Color::Default<<"  : to run the SimplestOT active secure 1-out-of-2 base OT" << (spEnabled ? "" : "(disabled)") << "\n"
+            << Color::Green<< "  -np      "<<Color::Default<<"  : to run the NaorPinkas active secure 1-out-of-2 base OT" << (npEnabled ? "" : "(disabled)") << "\n"
+            << Color::Green<< "  -iknp    "<<Color::Default<<"  : to run the IKNP passive secure 1-out-of-2       OT\n"
+            << Color::Green<< "  -diknp   "<<Color::Default<<"  : to run the IKNP passive secure 1-out-of-2 Delta-OT\n"
+            << Color::Green<< "  -kos     "<<Color::Default<<"  : to run the KOS  active secure  1-out-of-2       OT\n"
+            << Color::Green<< "  -dkos    "<<Color::Default<<"  : to run the KOS  active secure  1-out-of-2 Delta-OT\n"
+            << Color::Green<< "  -oos     "<<Color::Default<<"  : to run the OOS  active secure  1-out-of-N OT for N=2^76\n"
+            << Color::Green<< "  -kkrt    "<<Color::Default<<"  : to run the KKRT passive secure 1-out-of-N OT for N=2^128\n\n"
 
             << "Other Options:\n"
-            << "  -n         : the number of OTs to perform\n"
-            << "  -r 0/1     : Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network cleint.\n"
-            << "  -ip        : the IP and port of the netowrk server, default = localhost:1212\n"  
-            << "  -t         : the number of threads that should be used\n"
-            << "  -u         : to run the unit tests\n"
-            << "  -u -list   : to list the unit tests\n"
-            << "  -u 1 2 15  : to run the unit tests indexed by {1, 2, 15}.\n"
+            << Color::Green<< "  -n         "<<Color::Default<<": the number of OTs to perform\n"
+            << Color::Green<< "  -r 0/1     "<<Color::Default<<": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network cleint.\n"
+            << Color::Green<< "  -ip        "<<Color::Default<<": the IP and port of the netowrk server, default = localhost:1212\n"  
+            << Color::Green<< "  -t         "<<Color::Default<<": the number of threads that should be used\n"
+            << Color::Green<< "  -u         "<<Color::Default<<": to run the unit tests\n"
+            << Color::Green<< "  -u -list   "<<Color::Default<<": to list the unit tests\n"
+            << Color::Green<< "  -u 1 2 15  "<<Color::Default<<": to run the unit tests indexed by {1, 2, 15}.\n"
             << std::endl;
     }
 
