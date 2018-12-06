@@ -2,7 +2,9 @@
 
 [![Build Status](https://travis-ci.org/osu-crypto/libOTe.svg?branch=master)](https://travis-ci.org/osu-crypto/libOTe)
 
-A fast and portable C++11 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*.  This library currently implements:
+A fast and portable C++11 library for Oblivious Transfer extension (OTe). The 
+primary design goal of this library to obtain *high performance* while being 
+*easy to use*.  This library currently implements:
  
 * The semi-honest 1-out-of-2 OT [IKNP03].
 * The semi-honest 1-out-of-2 Delta-OT [IKNP03],[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
@@ -16,15 +18,25 @@ A fast and portable C++11 library for Oblivious Transfer extension (OTe). The pr
  
 ## Introduction
  
-This library provides several different classes of OT protocols. First is the base OT protocol of Naor Prinkas [NP00]. This protocol bootstraps all the other OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2, 1-out-of-N and ~K-out-of-N, both in the semi-honest and malicious settings.
+This library provides several different classes of OT protocols. First is the 
+base OT protocol of Naor Prinkas [NP00]. This protocol bootstraps all the other
+OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2,
+1-out-of-N and ~K-out-of-N, both in the semi-honest and malicious settings.
  
-All implementations are highly optimized using fast SSE instructions and vectorization to obtain optimal performance both in the single and multi-threaded setting. See the **Performance** section for a comparison between protocols and to other libraries. 
+All implementations are highly optimized using fast SSE instructions and vectorization
+to obtain optimal performance both in the single and multi-threaded setting. See 
+the **Performance** section for a comparison between protocols and to other libraries. 
  
-Networking can be performed using both the sockets provided by the library and external socket classes. See the [networking tutorial](https://github.com/ladnir/cryptoTools/blob/57220fc45252d089a7fd90816144e447a2ce02b8/frontend_cryptoTools/Tutorials/Network.cpp#L264) for an example.
+Networking can be performed using both the sockets provided by the library and 
+external socket classes. See the [networking tutorial](https://github.com/ladnir/cryptoTools/blob/57220fc45252d089a7fd90816144e447a2ce02b8/frontend_cryptoTools/Tutorials/Network.cpp#L264)
+for an example.
 
 ## Performance
  
-The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel Xeon server (`2 36-cores Intel Xeon CPU E5-2699 v3 @ 2.30GHz and 256GB of RAM`) as of 11/16/2016. All timings shown reflect a "single" thread per party, with the expection that network IO in libOTe is performed in the background by a separate thread. 
+The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel 
+Xeon server (`2 36-cores Intel Xeon CPU E5-2699 v3 @ 2.30GHz and 256GB of RAM`)
+as of 11/16/2016. All timings shown reflect a "single" thread per party, with the 
+expection that network IO in libOTe is performed in the background by a separate thread. 
  
  
 | *Type*                	| *Security*  	| *Protocol*     	| libOTe (SHA1/AES)	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) (SHA256) 	| [Apricot](https://github.com/bristolcrypto/apricot) (AES-hash)	| OOS16 (blake2)	| [emp-toolkit](https://github.com/emp-toolkit) (AES-hash)	|
@@ -43,12 +55,12 @@ The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel
  
 ## Install
  
-The library is *cross platform* and has been tested on Windows, Mac and Linux. There one mandatory dependency on [Boost](http://www.boost.org/) (networking), and three <b>optional dependencies</b> on
- * [Miracl](https://www.miracl.com/index)
- * [Relic](https://github.com/relic-toolkit/relic/) or 
- * [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
-
- for Base OT. Any or all of these dependenies can be enabled. See below. For Boost and Miracl we provide a script that automates the download and build steps. The version of Miracl used by this library requires specific configuration and therefore we advise using the cloned repository that we provide.
+The library is *cross platform* and has been tested on Windows, Mac and Linux. 
+There is one mandatory dependency on [Boost](http://www.boost.org/) (networking),
+and three <b>optional dependencies</b> on, [Miracl](https://www.miracl.com/index),
+[Relic](https://github.com/relic-toolkit/relic/) or  
+[SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only) 
+for Base OTs. Any or all of these dependenies can be enabled. See below. 
 
  
 ### Windows
@@ -64,21 +76,32 @@ cd ../../..
 libOTe.sln
 ```
 
-This will allow you to build the library with the <b>Miracl</b> library. If Relic or no base OTs are requered, then `getMiracl.ps1` can be skipped. If Relic is used, use the [visual studio port](https://github.com/ladnir/relic). Use the CMake command `cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64` generate a Visual Studio solution and install it to `C:\libs`.
+This will allow you to build the library with the <b>Miracl</b> library. If Relic or 
+no base OTs are requered, then `getMiracl.ps1` can be skipped. If Relic is used, use
+the [visual studio port](https://github.com/ladnir/relic). Use the CMake command 
+`cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64` 
+generate a Visual Studio solution and install it to `C:\libs`.
 
-Build the libOTe solution within visual studio or with `MSBuild`. To see all the command line options, execute the program 
+Build the libOTe solution within visual studio or with `MSBuild`. To see all the 
+command line options, execute the program 
 
 `frontend.exe` 
 
-<b>Requirements:</b> `Powershell`, Powershell `Set-ExecutionPolicy  Unrestricted`, `Visual Studio 2017`, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`.
+<b>Requirements:</b> `Powershell`, Powershell `Set-ExecutionPolicy  Unrestricted`, 
+`Visual Studio 2017`, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`.
 
 
 
-<b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, or enable the pure c++ implementation. The latter option is done by excluding `cryptoTools/Crypto/asm/sha_win64.asm` from the build system and defining `NO_INTEL_ASM_SHA1` in `cryptoTools/Common/config.h`.
+<b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located
+at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, 
+or enable the pure c++ implementation. The latter option is done by excluding `cryptoTools/Crypto/asm/sha_win64.asm`
+from the build system and defining `NO_INTEL_ASM_SHA1` in `cryptoTools/Common/config.h`.
 
-<b>Boost and visual studio 2017:</b>  If boost does not build with visual studio 2017 follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
+<b>Boost and visual studio 2017:</b>  If boost does not build with visual studio 2017 
+follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
 
-<b>Miracl and visual studio 2017:</b> If the Miracl script fails to find visual studio 2017, open the script and manually specify the path. 
+<b>Miracl and visual studio 2017:</b> If the Miracl script fails to find visual studio 
+2017, open the script and manually specify the path. 
  
 
 
@@ -94,28 +117,42 @@ cd ../../..
 make
 ```
 
-This will build the minimum version of the library (wihtout base OTs). The libraries will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed in `libOTe/bin` To see all the command line options, execute the program 
+This will build the minimum version of the library (wihtout base OTs). The libraries 
+will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed in 
+`libOTe/bin` To see all the command line options, execute the program 
  
 `./bin/frontend.exe`
 
 
 Enable Base OTs using:
- * `cmake .  -DENABLE_MIRACL=ON`: Build the library with integration to the [Miracl](https://www.miracl.com/index) library. Requires building miracl `cd libOTe/cryptoTools/thirdparty/linux; bash miracl.get`.
- * `cmake .  -DENABLE_RELIC=ON`: Build the library with integration to the [Relic](https://github.com/relic-toolkit/relic/) library. Requires that relic is built with `cmake . -DMULTI=OPENMP` and installed.
- * `cmake .  -DENABLE_SIMPLESTOT=ON`: Build the library with integration to the [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) library implementing a base OT.
+ * `cmake .  -DENABLE_MIRACL=ON`: Build the library with integration to the
+     [Miracl](https://www.miracl.com/index) library. Requires building miracl 
+ `   cd libOTe/cryptoTools/thirdparty/linux; bash miracl.get`.
+
+ * `cmake .  -DENABLE_RELIC=ON`: Build the library with integration to the 
+      [Relic](https://github.com/relic-toolkit/relic/) library. Requires that
+      relic is built with `cmake . -DMULTI=OPENMP` and installed.
+ * `cmake .  -DENABLE_SIMPLESTOT=ON`: Build the library with integration to the 
+      [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
+      library implementing a base OT.
 
 Other Options:
  * `cmake .  -DENABLE_CIRCUITS=ON`: Build the library with the circuit library enabled.
  * `cmake .  -DENABLE_NASM=ON`: Build the library with the assembly base SHA1 implementation. Requires the NASM compiler.
 
 
-<b>Note:</b> In the case that miracl or boost is already installed, the steps  `cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt to find them instead. Boost is found with the CMake findBoost package and miracl is found with the `find_library(miracl)` command.
+<b>Note:</b> In the case that miracl or boost is already installed, the steps 
+`cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt 
+to find them instead. Boost is found with the CMake findBoost package and miracl
+is found with the `find_library(miracl)` command.
  
 
 
 ### Linking
 
- You can either `make install` on linux or link libOTe's source tree. In the latter case, you will need to include the following:
+ You can either `make install` on linux or link libOTe's source tree. In the latter 
+ case, you will need to include the following:
+
 1) .../libOTe
 2) .../libOTe/cryptoTools
 3) .../libOTe/cryptoTools/thirdparty/linux/boost
@@ -136,7 +173,8 @@ and link:
 
 ## Help
  
-Contact Peter Rindal rindalp@oregonstate.edu for any assistance on building or running the library.
+Contact Peter Rindal rindalp@oregonstate.edu for any assistance on building 
+or running the library.
 
 ## Citing
 
@@ -151,18 +189,30 @@ Contact Peter Rindal rindalp@oregonstate.edu for any assistance on building or r
 ```
 
 ## Protocol Details
-The 1-out-of-N [OOS16] protocol currently is set to work forn N=2<sup>76</sup> but is capable of supporting arbitrary codes given the generator matrix in text format. See `./libOTe/Tools/Bch511.txt` for an example.
+The 1-out-of-N [OOS16] protocol currently is set to work forn N=2<sup>76</sup>
+but is capable of supporting arbitrary codes given the generator matrix in text 
+format. See `./libOTe/Tools/Bch511.txt` for an example.
  
-The 1-out-of-N  [KKRT16] for arbitrary N is also implemented and slightly faster than [OOS16]. However, [KKRT16] is in the semi-honest setting.
+The 1-out-of-N  [KKRT16] for arbitrary N is also implemented and slightly faster
+than [OOS16]. However, [KKRT16] is in the semi-honest setting.
  
-The approximate K-out-of-N OT [RR16] protocol is also implemented. This protocol allows for a rough bound on the value K with a very light weight cut and choose technique. It was introduced for a PSI protocol that builds on a Garbled Bloom Filter.
+The approximate K-out-of-N OT [RR16] protocol is also implemented. This protocol 
+allows for a rough bound on the value K with a very light weight cut and choose 
+technique. It was introduced for a PSI protocol that builds on a Garbled Bloom Filter.
  
  
 \* Delta-OT does not use the RandomOracle or AES hash function.
  
-\** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper and their implementation used multiple threads. The number was not specified. When using the libOTe implementation with multiple threads, a timing of 2.6 seconds was obtained with the RandomOracle hash function.
+\** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper 
+and their implementation used multiple threads. The number was not specified. When 
+using the libOTe implementation with multiple threads, a timing of 2.6 seconds was 
+obtained with the RandomOracle hash function.
  
-It should be noted that the libOTe implementation uses the Boost ASIO library to perform more efficient asynchronous network IO. This involves using a background thread to help process network data. As such, this is not a completely fair comparison to the Apricot implementation but we don't expect it to have a large impact. It also appears that the Encrypto Group implementation uses asynchronous network IO.
+It should be noted that the libOTe implementation uses the Boost ASIO library to 
+perform more efficient asynchronous network IO. This involves using a background 
+thread to help process network data. As such, this is not a completely fair comparison 
+to the Apricot implementation but we don't expect it to have a large impact. It also 
+appears that the Encrypto Group implementation uses asynchronous network IO.
  
 
  The above timings were obtained with the follwoing options:
@@ -182,7 +232,9 @@ It should be noted that the libOTe implementation uses the Boost ASIO library to
  
  ## License
  
-This project has been placed in the public domain. As such, you are unrestricted in how you use it, commercial or otherwise. However, no warranty of fitness is provided. If you found this project helpful, feel free to spread the word and cite us.
+This project has been placed in the public domain. As such, you are unrestricted in how 
+you use it, commercial or otherwise. However, no warranty of fitness is provided. If you 
+found this project helpful, feel free to spread the word and cite us.
  
  
 
