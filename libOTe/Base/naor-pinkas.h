@@ -5,7 +5,7 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 
-#if defined ENABLE_RELIC  || ENABLE_MIRACL
+#if defined ENABLE_RELIC  || defined ENABLE_MIRACL
 #define NAOR_PINKAS
 
 namespace osuCrypto

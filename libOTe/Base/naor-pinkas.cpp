@@ -14,7 +14,7 @@
 #define PARALLEL
 
 
-#if defined ENABLE_RELIC  || ENABLE_MIRACL
+#ifdef NAOR_PINKAS
 
 #include <memory>
 
