@@ -58,8 +58,8 @@ expection that network IO in libOTe is performed in the background by a separate
 The library is *cross platform* and has been tested on Windows, Mac and Linux. 
 There is one mandatory dependency on [Boost](http://www.boost.org/) (networking),
 and three <b>optional dependencies</b> on, [Miracl](https://www.miracl.com/index),
-[Relic](https://github.com/relic-toolkit/relic/) or  
-[SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only) 
+[Relic](https://github.com/relic-toolkit/relic/) or
+[SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
 for Base OTs. Any or all of these dependenies can be enabled. See below. 
 
  
