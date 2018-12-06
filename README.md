@@ -103,7 +103,7 @@ The libraries will be placed in `libOTe/lib` and the binary `frontend_libOTe` wi
 
 <b>Requirements:</b> `CMake`, `Make`, `g++` or similar, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`. Optional: `nasm` for improved RandomOracle performance.
 
-<b>Using Simplest OT:</b> to use the third party library SimplestOT, call `cmake -DEnableSimplestOT=OFF .`
+<b>Using Simplest OT:</b> to use the third party library SimplestOT, call `cmake -DENABLE_SIMPLESTOT=OFF .`
 
 <b>Note:</b> In the case that miracl or boost is already installed, the steps  `cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt to find them instead. Boost is found with the CMake findBoost package and miracl is found with the `find_library(miracl)` command.
  
