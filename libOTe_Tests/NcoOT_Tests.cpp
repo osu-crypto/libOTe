@@ -108,7 +108,7 @@ namespace tests_libOTe
 
                     // check that we do in fact get the same value
                     if (! skips[k] && neq(encoding1[k], encoding2[k]))
-                        throw UnitTestFail("ot[" + ToString(i+k) + "] not equal " LOCATION);
+                        throw UnitTestFail("ot[" + std::to_string(i+k) + "] not equal " LOCATION);
 
                     // In addition to the sender being able to obtain the same value as the receiver,
                     // the sender can encode and other codeword. This should result in a different 
