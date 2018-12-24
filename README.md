@@ -65,43 +65,47 @@ for Base OTs. Any or all of these dependenies can be enabled. See below.
  
 ### Windows
 
-In `Powershell`, this will set up the project (with Miracl)
+In `Powershell`, this will set up the project
 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
 cd libOTe/cryptoTools/thirdparty/win
 getBoost.ps1 
-getMiracl.ps1  
 cd ../../..
 libOTe.sln
 ```
 
-This will allow you to build the library with the <b>Miracl</b> library. If Relic or 
-no base OTs are requered, then `getMiracl.ps1` can be skipped. If Relic is used, use
-the [visual studio port](https://github.com/ladnir/relic). Use the CMake command 
-`cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64` 
-generate a Visual Studio solution and install it to `C:\libs`.
-
-Build the libOTe solution within visual studio or with `MSBuild`. To see all the 
-command line options, execute the program 
+To see all the command line options, execute the program 
 
 `frontend.exe` 
 
-<b>Requirements:</b> `Powershell`, Powershell `Set-ExecutionPolicy  Unrestricted`, 
-`Visual Studio 2017`, CPU supporting `PCLMUL`, `AES-NI`, and `SSE4.1`.
+Enabling Miracl (for base OTs):
+ * `cd libOTe/cryptoTools/thirdparty/win`
+ * `getMiracl.ps1 ` (If the Miracl script fails to find visual studio 2017,  manually open and build the Miracl solution.)
+ * `cd ../../..`
+ * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_MIRACL`.
+
+Enabling Relic (for faster base OTs):
+ * Clone the Visual Studio port [Relic](https://github.com/ladnir/relic). 
+ * Use the CMake command  `cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64` generate a Visual Studio solution
+ * Optional: Build with gmp/mpir for faster performance. 
+ * Install it to `C:\libs` (build the `INSTALL` VS project).
+ * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_RELIC`.
 
 
 
 <b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located
 at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, 
-or enable the pure c++ implementation. The latter option is done by excluding `cryptoTools/Crypto/asm/sha_win64.asm`
-from the build system and defining `NO_INTEL_ASM_SHA1` in `cryptoTools/Common/config.h`.
+or enable the pure c++ implementation:
+ * Remove  `cryptoTools/Crypto/asm/sha_win64.asm` from the cryptoTools Project.
+ * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to remove `#define ENABLE_NASM`.
+
+Other options:
+ * The implementation of binary circuits in cryptoTools (`BetaCircuit`) can be enabled by edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_CIRCUITS`.
 
 <b>Boost and visual studio 2017:</b>  If boost does not build with visual studio 2017 
 follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
 
-<b>Miracl and visual studio 2017:</b> If the Miracl script fails to find visual studio 
-2017, open the script and manually specify the path. 
  
 
 
@@ -244,7 +248,7 @@ found this project helpful, feel free to spread the word and cite us.
  
 [KOS15]  - Marcel Keller and Emmanuela Orsini and Peter Scholl, _Actively Secure OT Extension with Optimal Overhead_. [eprint/2015/546](https://eprint.iacr.org/2015/546)
  
-[OOS16]  - Michele Orrù and Emmanuela Orsini and Peter Scholl, _Actively Secure 1-out-of-N OT Extension with Application to Private Set Intersection_. [eprint/2016/933](http://eprint.iacr.org/2016/933)
+[OOS16]  - Michele OrrÃ¹ and Emmanuela Orsini and Peter Scholl, _Actively Secure 1-out-of-N OT Extension with Application to Private Set Intersection_. [eprint/2016/933](http://eprint.iacr.org/2016/933)
  
 [KKRT16]  - Vladimir Kolesnikov and Ranjit Kumaresan and Mike Rosulek and Ni Trieu, _Efficient Batched Oblivious PRF with Applications to Private Set Intersection_. [eprint/2016/799](https://eprint.iacr.org/2016/799)
  
