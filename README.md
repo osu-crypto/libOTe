@@ -48,8 +48,8 @@ expection that network IO in libOTe is performed in the background by a separate
 | 1-out-of-2          	| malicious 	| ALSZ15        | ~          	        | 17.3          	| ~       	| ~       	|  10         	|
 | 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  2.9       	|
 | 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**   | ~     	|  2.7      	|
-| 1-out-of-2 Base      	| malicious   	| CO15       	| **963,584/~**        	| ~              	|~       	| ~        	| ~          	|
-| 1-out-of-2 Base     	| malicious   	| NP00       	| **2,011,136/~**        	| ~             	| ~		    | ~     	| ~         	|
+| 1-out-of-2 Base      	| malicious   	| CO15       	| **963/~**        	| ~              	|~       	| ~        	| ~          	|
+| 1-out-of-2 Base     	| malicious   	| NP00       	| **2,011/~**        	| ~             	| ~		    | ~     	| ~         	|
  
 
  
