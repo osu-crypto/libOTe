@@ -79,6 +79,7 @@ namespace tests_libOTe
 
     void SimplestOT_Test_Impl()
     {
+#ifdef ENABLE_SIMPLESTOT
         setThreadName("Sender");
 
         IOService ios(0);
@@ -117,7 +118,9 @@ namespace tests_libOTe
                 throw UnitTestFail();
             }
         }
-
+#else
+        throw UnitTestSkipped("Simplest OT not enabled. Requires Relic or the simplest OT ASM library");
+#endif
     }
 
 

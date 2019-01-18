@@ -393,9 +393,16 @@ void baseOT_example(int role, int totalOTs, int numThreads, std::string ip, std:
         recv.receive(choice, msg, prng, chl0);
 
         auto e = t.setTimePoint("base OT end");
+
+        char c;
+        chl0.send(c);
+        chl0.recv(c);
+
+        auto bytes = chl0.getTotalDataRecv() + chl0.getTotalDataSent() - 2;
+
         auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
-        lout <<"recv " << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+        lout <<"recv " << tag << " n=" << totalOTs << " " << milli << " ms,    " << bytes << " bytes" << std::endl;
     }
     else
     {
@@ -416,11 +423,17 @@ void baseOT_example(int role, int totalOTs, int numThreads, std::string ip, std:
 
         send.send(msg, prng, chl1);
 
-
         auto e = t.setTimePoint("base OT end");
+
+        char c;
+        chl1.send(c);
+        chl1.recv(c);
+
+        auto bytes = chl1.getTotalDataRecv() + chl1.getTotalDataSent() - 2;
+
         auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
-        lout << "send " << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+        lout << "send " << tag << " n=" << totalOTs << " " << milli << " ms,    " << bytes  << " bytes"<< std::endl;
     }
 }
 
@@ -481,6 +494,28 @@ bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
 
     return false;
 }
+
+#ifdef ENABLE_MASNYRINDAL
+bool mrEnabled = true;
+#else
+bool mrEnabled = false;
+#endif
+#ifdef ENABLE_KYBEROT
+bool kyberEnabled = true;
+#else
+bool kyberEnabled = false;
+#endif
+#ifdef ENABLE_SIMPLESTOT
+bool spEnabled = true;
+#else 
+bool spEnabled = false;
+#endif
+#ifdef NAOR_PINKAS
+bool npEnabled = true;
+#else 
+bool npEnabled = false;
+#endif
+
 
 int main(int argc, char** argv)
 {
@@ -555,28 +590,6 @@ int main(int argc, char** argv)
             << "#                  oblivious transfer.                #\n"
             << "#                     Peter Rindal                    #\n"
             << "#######################################################\n" << std::endl;
-
-        bool spEnabled, npEnabled, mrEnabled, kyberEnabled;
-#ifdef ENABLE_MASNYRINDAL
-        mrEnabled = true;
-#else
-        mrEnabled = false;
-#endif
-#ifdef ENABLE_KYBEROT
-        kyberEnabled = true;
-#else
-        kyberEnabled = false;
-#endif
-#ifdef ENABLE_SIMPLESTOT
-        spEnabled = true;
-#else 
-        spEnabled = false;
-#endif
-#ifdef NAOR_PINKAS
-        npEnabled = true;
-#else 
-        npEnabled = false;
-#endif
 
         std::cout
             << "Protocols:\n"

@@ -244,8 +244,8 @@ namespace osuCrypto
     }
 
 #endif
+}
 #endif
 
-}
 
 
