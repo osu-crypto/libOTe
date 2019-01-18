@@ -244,7 +244,7 @@ namespace osuCrypto
         block q2 = ZeroBlock;
         block q1 = ZeroBlock;
 
-#ifdef KOS_SHA_HASH
+#ifdef KOS_RO_HASH
         RandomOracle sha;
         u8 hashBuff[20];
 #else
@@ -269,21 +269,23 @@ namespace osuCrypto
                 mul128(messages[dd][0], challenges[i], qi, qi2);
                 q1 = q1  ^ qi;
                 q2 = q2 ^ qi2;
-#ifdef KOS_SHA_HASH
+#ifdef KOS_RO_HASH
                 // hash the message without delta
                 sha.Reset();
+                sha.Update(dd);
                 sha.Update((u8*)&messages[dd][0], sizeof(block));
                 sha.Final(hashBuff);
                 messages[dd][0] = *(block*)hashBuff;
 
                 // hash the message with delta
                 sha.Reset();
+                sha.Update(dd);
                 sha.Update((u8*)&messages[dd][1], sizeof(block));
                 sha.Final(hashBuff);
                 messages[dd][1] = *(block*)hashBuff;
 #endif
             }
-#ifndef KOS_SHA_HASH
+#ifndef KOS_RO_HASH
             auto length = 2 *(stop - doneIdx);
             auto steps = length / 8;
             block* mIter = messages[doneIdx].data();

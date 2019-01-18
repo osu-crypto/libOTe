@@ -235,6 +235,7 @@ namespace osuCrypto
 #ifdef OOS_SHA_HASH
             RandomOracle  sha1(destSize);
             // now hash it to remove the correlation.
+            sha1.Update(otIdx);
             sha1.Update((u8*)t0Val, mT0.stride() * sizeof(block));
             sha1.Final((u8*)dest);
 

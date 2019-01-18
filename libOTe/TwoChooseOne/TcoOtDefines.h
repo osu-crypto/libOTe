@@ -1,7 +1,7 @@
 #pragma once
 #include <cryptoTools/Common/Defines.h>
 
-//#define KOS_SHA_HASH
+#define KOS_RO_HASH
 //#define IKNP_SHA_HASH
 
 namespace osuCrypto

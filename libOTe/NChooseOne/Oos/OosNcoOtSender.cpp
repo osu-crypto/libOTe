@@ -182,6 +182,7 @@ namespace osuCrypto
 #ifdef OOS_SHA_HASH
         //RandomOracle  sha1(destSize);
 #else
+#error "NOT ALLOWED"
         std::array<block, 10> aesBuff;
 #endif
         // the index of the otIdx'th correction value u = t1 + t0 + c(w)
@@ -214,6 +215,7 @@ namespace osuCrypto
 #ifdef OOS_SHA_HASH
             // hash it all to get rid of the correlation.
             RandomOracle  sha1(destSize);
+            sha1.Update(otIdx);
             sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
             sha1.Final((u8*)dest);
 
