@@ -37,7 +37,7 @@ namespace osuCrypto
             PRNG& prng,
             Channel& chl) override
         {
-            receive(choices, messages, prng, chl, 2);
+            receive(choices, messages, prng, chl, 1);
         }
 
         void send(
@@ -45,7 +45,7 @@ namespace osuCrypto
             PRNG& prng,
             Channel& sock) override
         {
-            send(messages, prng, sock, 2);
+            send(messages, prng, sock, 1);
         }
     };
 

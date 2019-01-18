@@ -270,7 +270,7 @@ namespace osuCrypto
         x = t = t2 = ZeroBlock;
         block ti, ti2;
 
-#ifdef KOS_SHA_HASH
+#ifdef KOS_RO_HASH
         RandomOracle sha;
         u8 hashBuff[20];
 #endif
@@ -313,15 +313,16 @@ namespace osuCrypto
 
                 t = t ^ ti;
                 t2 = t2 ^ ti2;
-#ifdef KOS_SHA_HASH
+#ifdef KOS_RO_HASH
                 // hash it
                 sha.Reset();
+                sha.Update(dd);
                 sha.Update((u8*)&messages[dd], sizeof(block));
                 sha.Final(hashBuff);
                 messages[dd] = *(block*)hashBuff;
 #endif
             }
-#ifndef KOS_SHA_HASH
+#ifndef KOS_RO_HASH
             auto& aesHashTemp = expendedChoiceBlk;
             auto length = stop - doneIdx;
             auto steps = length / 8;

@@ -61,8 +61,10 @@ endif()
 
 
 option(ENABLE_SIMPLESTOT "Build the assembly based SimplestOT library" OFF)
-
 message(STATUS "Option: ENABLE_SIMPLESTOT = ${ENABLE_SIMPLESTOT}")
+
+option(ENABLE_KYBEROT "Build the Kyber (LWE based) library" OFF)
+message(STATUS "Option: ENABLE_KYBEROT    = ${ENABLE_KYBEROT}")
 
 configure_file(libOTe/config.h.in libOTe/config.h)
 
@@ -80,6 +82,10 @@ add_subdirectory(cryptoTools)
 if(ENABLE_SIMPLESTOT)
 	add_subdirectory(SimplestOT)
 endif(ENABLE_SIMPLESTOT)
+
+if(ENABLE_KYBEROT)
+	add_subdirectory(KyberOT)
+endif(ENABLE_KYBEROT)
 
 add_subdirectory(libOTe)
 add_subdirectory(libOTe_Tests)

@@ -34,11 +34,17 @@ int miraclTestMain();
 #include "libOTe/NChooseK/AknOtReceiver.h"
 #include "libOTe/NChooseK/AknOtSender.h"
 
+#include "libOTe/Base/BaseOT.h"
+#include "libOTe/Base/MasnyRindal.h"
+#include "libOTe/Base/MasnyRindalKyber.h"
+
+
+#include "util.h"
 #include <cryptoTools/Common/CLP.h>
 
 
 template<typename NcoOtSender, typename  NcoOtReceiver>
-void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag)
+void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag, std::function<void()> sync)
 {
     const u64 step = 1024;
 
@@ -63,7 +69,7 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
     // all Nco Ot extenders must have configure called first. This determines
     // a variety of parameters such as how many base OTs are required.
     bool maliciousSecure = false;
-    bool statSecParam= 40;
+    bool statSecParam = 40;
     bool inputBitCount = 76; // the kkrt protocol default to 128 but oos can only do 76.
     recvers[0].configure(maliciousSecure, statSecParam, inputBitCount);
     senders[0].configure(maliciousSecure, statSecParam, inputBitCount);
@@ -104,6 +110,10 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
         auto& chl = chls[k];
         PRNG prng(sysRandomSeed());
 
+        // block until all threads are ready (optional)
+        sync();
+
+
         // once configure(...) and setBaseOts(...) are called,
         // we can compute many batches of OTs. First we need to tell
         // the instance how mant OTs we want in this batch. This is done here.
@@ -132,7 +142,7 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
 
                 // retreive the desired message.
                 recvers[k].encode(i, &choice, &otMessage);
-                
+
                 // do something cool with otMessage
                 //otMessage;
             }
@@ -162,6 +172,9 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
     {
         auto& chl = chls[k];
         PRNG prng(sysRandomSeed());
+
+        // block until all threads are ready (optional)
+        sync();
 
         // Same explanation as above.
         senders[k].init(numOTs, prng, chl);
@@ -212,7 +225,7 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
 
     std::vector<std::thread> thds(numThreads);
     std::function<void(int)> routine;
-    
+
     if (role)
         routine = sendRoutine;
     else
@@ -232,13 +245,13 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
     auto e = time.setTimePoint("finish");
     auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
-    if(role)
+    if (role)
         std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
 }
 
 
 template<typename OtExtSender, typename OtExtRecver>
-void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag)
+void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag, std::function<void()> sync)
 {
     if (totalOTs == 0)
         totalOTs = 1 << 20;
@@ -293,6 +306,9 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
         // get a random number generator seeded from the system
         PRNG prng(sysRandomSeed());
 
+        // block until all threads are ready (optional)
+        sync();
+
         if (role)
         {
             // construct the choices that we want.
@@ -345,7 +361,7 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
 
 
 template<typename BaseOT>
-void baseOT_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag)
+void baseOT_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag, std::function<void()> sync)
 {
     IOService ios;
     PRNG prng(sysRandomSeed());
@@ -365,6 +381,11 @@ void baseOT_example(int role, int totalOTs, int numThreads, std::string ip, std:
         BitVector choice(totalOTs);
         choice.randomize(prng);
 
+        chl0.waitForConnection();
+
+        //senderGetLatency(chl0);
+        // block until all threads are ready (optional)
+        sync();
 
         Timer t;
         auto s = t.setTimePoint("base OT start");
@@ -374,7 +395,7 @@ void baseOT_example(int role, int totalOTs, int numThreads, std::string ip, std:
         auto e = t.setTimePoint("base OT end");
         auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
-        std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+        lout <<"recv " << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
     }
     else
     {
@@ -385,7 +406,21 @@ void baseOT_example(int role, int totalOTs, int numThreads, std::string ip, std:
 
         std::vector<std::array<block, 2>> msg(totalOTs);
 
+        // block until all threads are ready (optional)
+        chl1.waitForConnection();
+        //recverGetLatency(chl1);
+        sync();
+
+        Timer t;
+        auto s = t.setTimePoint("base OT start");
+
         send.send(msg, prng, chl1);
+
+
+        auto e = t.setTimePoint("base OT end");
+        auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+
+        lout << "send " << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
     }
 }
 
@@ -400,15 +435,17 @@ iknp{ "i", "iknp" },
 diknp{ "d", "diknp" },
 oos{ "o", "oos" },
 akn{ "a", "akn" },
-np{"np"},
+np{ "np" },
+mr{ "mr" },
+mrk{ "mrk" },
 simple{ "simplest" };
 
-using ProtocolFunc = std::function<void(int, int, int, std::string, std::string)>;
+using ProtocolFunc = std::function<void(int, int, int, std::string, std::string, std::function<void()>)>;
 
 bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
 {
-    auto n = cmd.isSet("nn") 
-        ? (1<< cmd.get<int>("nn"))
+    auto n = cmd.isSet("nn")
+        ? (1 << cmd.get<int>("nn"))
         : cmd.getOr("n", 0);
 
     auto t = cmd.getOr("t", 1);
@@ -418,15 +455,24 @@ bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
     {
         if (cmd.hasValue("r"))
         {
-            protocol(cmd.get<int>("r"), n, t, ip, tag.back());
+            auto sync = []() {};
+            protocol(cmd.get<int>("r"), n, t, ip, tag.back(), sync);
         }
         else
         {
+            std::atomic<i64> count(2 * t);
+            auto sync = [&count](){
+                // spin lock until everyone is ready
+                --count;
+                while (count > 0); 
+            };
+
             auto thrd = std::thread([&] {
-                protocol(0, n, t, ip, tag.back());
+
+                protocol(0, n, t, ip, tag.back(), sync);
             });
 
-            protocol(1, n, t, ip, tag.back());
+            protocol(1, n, t, ip, tag.back(), sync);
             thrd.join();
         }
 
@@ -442,6 +488,12 @@ int main(int argc, char** argv)
     CLP cmd;
     cmd.parse(argc, argv);
     bool flagSet = false;
+
+    if (cmd.isSet("kyber"))
+    {
+        KyberExample();
+        return 0;
+    }
 
     if (cmd.isSet(unitTestTag))
     {
@@ -478,11 +530,17 @@ int main(int argc, char** argv)
 #ifdef NAOR_PINKAS
     flagSet |= runIf(baseOT_example<NaorPinkas>, cmd, np);
 #endif
+#ifdef ENABLE_MASNYRINDAL
+    flagSet |= runIf(baseOT_example<MasnyRindal>, cmd, mr);
+#endif
+#ifdef ENABLE_KYBEROT
+    flagSet |= runIf(baseOT_example<MasnyRindalKyber>, cmd, mrk);
+#endif
     flagSet |= runIf(TwoChooseOne_example<IknpOtExtSender, IknpOtExtReceiver>, cmd, iknp);
     flagSet |= runIf(TwoChooseOne_example<IknpDotExtSender, IknpDotExtReceiver>, cmd, diknp);
     flagSet |= runIf(TwoChooseOne_example<KosOtExtSender, KosOtExtReceiver>, cmd, kos);
     flagSet |= runIf(TwoChooseOne_example<KosDotExtSender, KosDotExtReceiver>, cmd, dkos);
-    
+
     flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
     flagSet |= runIf(NChooseOne_example<OosNcoOtSender, OosNcoOtReceiver>, cmd, oos);
 
@@ -497,8 +555,18 @@ int main(int argc, char** argv)
             << "#                  oblivious transfer.                #\n"
             << "#                     Peter Rindal                    #\n"
             << "#######################################################\n" << std::endl;
-        
-        bool spEnabled, npEnabled;
+
+        bool spEnabled, npEnabled, mrEnabled, kyberEnabled;
+#ifdef ENABLE_MASNYRINDAL
+        mrEnabled = true;
+#else
+        mrEnabled = false;
+#endif
+#ifdef ENABLE_KYBEROT
+        kyberEnabled = true;
+#else
+        kyberEnabled = false;
+#endif
 #ifdef ENABLE_SIMPLESTOT
         spEnabled = true;
 #else 
@@ -512,23 +580,25 @@ int main(int argc, char** argv)
 
         std::cout
             << "Protocols:\n"
-            << Color::Green<< "  -simplest"<<Color::Default<<"  : to run the SimplestOT active secure 1-out-of-2 base OT" << (spEnabled ? "" : "(disabled)") << "\n"
-            << Color::Green<< "  -np      "<<Color::Default<<"  : to run the NaorPinkas active secure 1-out-of-2 base OT" << (npEnabled ? "" : "(disabled)") << "\n"
-            << Color::Green<< "  -iknp    "<<Color::Default<<"  : to run the IKNP passive secure 1-out-of-2       OT\n"
-            << Color::Green<< "  -diknp   "<<Color::Default<<"  : to run the IKNP passive secure 1-out-of-2 Delta-OT\n"
-            << Color::Green<< "  -kos     "<<Color::Default<<"  : to run the KOS  active secure  1-out-of-2       OT\n"
-            << Color::Green<< "  -dkos    "<<Color::Default<<"  : to run the KOS  active secure  1-out-of-2 Delta-OT\n"
-            << Color::Green<< "  -oos     "<<Color::Default<<"  : to run the OOS  active secure  1-out-of-N OT for N=2^76\n"
-            << Color::Green<< "  -kkrt    "<<Color::Default<<"  : to run the KKRT passive secure 1-out-of-N OT for N=2^128\n\n"
+            << Color::Green << "  -mr      " << Color::Default << "  : to run the MasnyRindal active secure 1-out-of-2 base OT" << (mrEnabled ? "" : "(disabled)") << "\n"
+            << Color::Green << "  -mrk     " << Color::Default << "  : to run the MasnyRindal Kyber active secure 1-out-of-2 base OT" << (kyberEnabled ? "" : "(disabled)") << "\n"
+            << Color::Green << "  -simplest" << Color::Default << "  : to run the SimplestOT active secure 1-out-of-2 base OT" << (spEnabled ? "" : "(disabled)") << "\n"
+            << Color::Green << "  -np      " << Color::Default << "  : to run the NaorPinkas active secure 1-out-of-2 base OT" << (npEnabled ? "" : "(disabled)") << "\n"
+            << Color::Green << "  -iknp    " << Color::Default << "  : to run the IKNP passive secure 1-out-of-2       OT\n"
+            << Color::Green << "  -diknp   " << Color::Default << "  : to run the IKNP passive secure 1-out-of-2 Delta-OT\n"
+            << Color::Green << "  -kos     " << Color::Default << "  : to run the KOS  active secure  1-out-of-2       OT\n"
+            << Color::Green << "  -dkos    " << Color::Default << "  : to run the KOS  active secure  1-out-of-2 Delta-OT\n"
+            << Color::Green << "  -oos     " << Color::Default << "  : to run the OOS  active secure  1-out-of-N OT for N=2^76\n"
+            << Color::Green << "  -kkrt    " << Color::Default << "  : to run the KKRT passive secure 1-out-of-N OT for N=2^128\n\n"
 
             << "Other Options:\n"
-            << Color::Green<< "  -n         "<<Color::Default<<": the number of OTs to perform\n"
-            << Color::Green<< "  -r 0/1     "<<Color::Default<<": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network cleint.\n"
-            << Color::Green<< "  -ip        "<<Color::Default<<": the IP and port of the netowrk server, default = localhost:1212\n"  
-            << Color::Green<< "  -t         "<<Color::Default<<": the number of threads that should be used\n"
-            << Color::Green<< "  -u         "<<Color::Default<<": to run the unit tests\n"
-            << Color::Green<< "  -u -list   "<<Color::Default<<": to list the unit tests\n"
-            << Color::Green<< "  -u 1 2 15  "<<Color::Default<<": to run the unit tests indexed by {1, 2, 15}.\n"
+            << Color::Green << "  -n         " << Color::Default << ": the number of OTs to perform\n"
+            << Color::Green << "  -r 0/1     " << Color::Default << ": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network cleint.\n"
+            << Color::Green << "  -ip        " << Color::Default << ": the IP and port of the netowrk server, default = localhost:1212\n"
+            << Color::Green << "  -t         " << Color::Default << ": the number of threads that should be used\n"
+            << Color::Green << "  -u         " << Color::Default << ": to run the unit tests\n"
+            << Color::Green << "  -u -list   " << Color::Default << ": to list the unit tests\n"
+            << Color::Green << "  -u 1 2 15  " << Color::Default << ": to run the unit tests indexed by {1, 2, 15}.\n"
             << std::endl;
     }
 

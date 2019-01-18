@@ -66,6 +66,8 @@ namespace osuCrypto
         std::future<void> PK0Furture(PK0Prom.get_future());
         std::vector<u8> cBuff(nSndVals * fieldElementSize);
         auto cRecvFuture = socket.asyncRecv(cBuff.data(), cBuff.size()).share();
+        block R;
+        auto RFuture = socket.asyncRecv(R).share();
 
         for (u64 t = 0; t < numThreads; ++t)
         {
@@ -74,7 +76,7 @@ namespace osuCrypto
             thrds[t] = std::thread(
                 [t, numThreads, &messages, seed, 
                 &sendBuff, &choices, cRecvFuture, &cBuff,
-                &remainingPK0s, &PK0Prom, nSndVals]()
+                &remainingPK0s, &PK0Prom, nSndVals,&RFuture,&R]()
             {
 
                 auto mStart = t * messages.size() / numThreads;
@@ -151,6 +153,8 @@ namespace osuCrypto
                 std::vector<u8>buff(fieldElementSize);
                 Brick bc(pC[0]);
 
+                RFuture.get();
+
                 for (u64 i = mStart, j = 0; i < mEnd; ++i, ++j)
                 {
                     // now compute g ^(a * k) = (g^a)^k
@@ -160,6 +164,7 @@ namespace osuCrypto
                     sha.Reset();
                     sha.Update((u8*)&i, sizeof(i));
                     sha.Update(buff.data(), buff.size());
+                    sha.Update(R);
                     sha.Final(messages[i]);
                 }
             });
@@ -181,6 +186,7 @@ namespace osuCrypto
         Channel& socket,
         u64 numThreads)
     {
+        block R = prng.get<block>();
         // one out of nSndVals OT.
         u64 nSndVals(2);
         std::vector<std::thread> thrds(numThreads);
@@ -220,7 +226,7 @@ namespace osuCrypto
 
             thrds[t] = std::thread([
                 t, seed, fieldElementSize, &messages, recvFuture,
-                    numThreads, &buff, &alpha, nSndVals, &pC]()
+                    numThreads, &buff, &alpha, nSndVals, &pC,&socket,&R]()
             {
                 Curve curve;
                 Point pPK0(curve), PK0a(curve), fetmp(curve);
@@ -235,6 +241,10 @@ namespace osuCrypto
                 RandomOracle sha(sizeof(block));
                 recvFuture.get();
 
+                if (t == 0)
+                    socket.asyncSendCopy(R);
+                
+
                 for (u64 i = 0; i < u64(messages.size()); i++)
                 {
 
@@ -245,6 +255,7 @@ namespace osuCrypto
                     sha.Reset();
                     sha.Update((u8*)&i, sizeof(i));
                     sha.Update(hashInBuff.data(), hashInBuff.size());
+                    sha.Update(R);
                     sha.Final(messages[i][0]);
 
                     for (u64 u = 1; u < nSndVals; u++)
@@ -255,6 +266,7 @@ namespace osuCrypto
                         sha.Reset();
                         sha.Update((u8*)&i, sizeof(i));
                         sha.Update(hashInBuff.data(), hashInBuff.size());
+                        sha.Update(R);
                         sha.Final(messages[i][u]);
                     }
                 }

@@ -7,12 +7,19 @@
 
 #include "libOTe/config.h"
 
-#ifdef ENABLE_SIMPLESTOT
+
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 
+#if defined(ENABLE_SIMPLESTOT) || defined(ENABLE_RELIC) || defined(ENABLE_MIRACL)
 
+#ifdef ENABLE_SIMPLESTOT
+    // define that its was already enabled meaning we should use the ASM library
+    #define ENABLE_SIMPLEST_ASM_LIB
+#else
+    #define ENABLE_SIMPLESTOT
+#endif
 
 namespace osuCrypto
 {
