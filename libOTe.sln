@@ -54,12 +54,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "testsVS_cryptoTools", "cryp
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SimplestOT", "SimplestOT\SimplestOT.vcxproj", "{904419B6-0A3E-41A8-B27A-CF1BAE7343B6}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KyberOT", "KyberOT\KyberOT.vcxproj", "{CE639ABE-6913-428A-92B0-7C5A6458B983}"
-EndProject
 Global
-	GlobalSection(Performance) = preSolution
-		HasPerformanceSessions = true
-	EndGlobalSection
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug_DLLRT|x64 = Debug_DLLRT|x64
 		Debug_DLLRT|x86 = Debug_DLLRT|x86
@@ -165,20 +160,6 @@ Global
 		{904419B6-0A3E-41A8-B27A-CF1BAE7343B6}.Release|x64.ActiveCfg = Release|x64
 		{904419B6-0A3E-41A8-B27A-CF1BAE7343B6}.Release|x86.ActiveCfg = Release|Win32
 		{904419B6-0A3E-41A8-B27A-CF1BAE7343B6}.Release|x86.Build.0 = Release|Win32
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Debug_DLLRT|x64.ActiveCfg = Debug|x64
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Debug_DLLRT|x64.Build.0 = Debug|x64
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Debug_DLLRT|x86.ActiveCfg = Debug|Win32
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Debug_DLLRT|x86.Build.0 = Debug|Win32
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Debug|x64.ActiveCfg = Debug|x64
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Debug|x86.ActiveCfg = Debug|Win32
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Debug|x86.Build.0 = Debug|Win32
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Release_DLLRT|x64.ActiveCfg = Release|x64
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Release_DLLRT|x64.Build.0 = Release|x64
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Release_DLLRT|x86.ActiveCfg = Release|Win32
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Release_DLLRT|x86.Build.0 = Release|Win32
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Release|x64.ActiveCfg = Release|x64
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Release|x86.ActiveCfg = Release|Win32
-		{CE639ABE-6913-428A-92B0-7C5A6458B983}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

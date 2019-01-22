@@ -1,5 +1,6 @@
 #include "KosOtExtReceiver.h"
 #include "libOTe/Tools/Tools.h"
+#include "libOTe/config.h"
 
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Timer.h>
@@ -72,12 +73,16 @@ namespace osuCrypto
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
         u64 numBlocks = numSuperBlocks * superBlkSize;
 
+
+#ifdef OTE_KOS_FIAT_SHAMIR
+        RandomOracle fs(sizeof(block));
+#else
         // commit to as seed which will be used to
         block seed = prng.get<block>();
         Commit myComm(seed);
         chl.asyncSend(myComm.data(), myComm.size());
+#endif
 
-        PRNG zPrng(ZeroBlock);
         // turn the choice vbitVector into an array of blocks.
         BitVector choices2(numBlocks * 128);
         //choices2.randomize(zPrng);
@@ -164,6 +169,9 @@ namespace osuCrypto
 
             if (uIter == uEnd)
             {
+#ifdef OTE_KOS_FIAT_SHAMIR
+                fs.Update(uBuff.data(), uBuff.size());
+#endif
                 // send over u buffer
                 chl.asyncSend(std::move(uBuff));
 
@@ -250,15 +258,21 @@ namespace osuCrypto
         //std::cout << "uBuff " << (bool)uBuff << "  " << (uEnd - uIter) << std::endl;
         setTimePoint("Kos.recv.transposeDone");
 
+#ifdef OTE_KOS_FIAT_SHAMIR
+        block seed;
+        fs.Final(seed);
+        PRNG commonPrng(seed);
+#else
+        
         // do correlation check and hashing
         // For the malicious secure OTs, we need a random PRNG that is chosen random
         // for both parties. So that is what this is.
-        PRNG commonPrng;
         //random_seed_commit(ByteArray(seed), chl, SEED_SIZE, prng.get<block>());
         block theirSeed;
         chl.recv((u8*)&theirSeed, sizeof(block));
         chl.asyncSendCopy((u8*)&seed, sizeof(block));
-        commonPrng.SetSeed(seed ^ theirSeed);
+        PRNG commonPrng(seed ^ theirSeed);
+#endif
         setTimePoint("Kos.recv.cncSeed");
 
         // this buffer will be sent to the other party to prove we used the
@@ -270,9 +284,11 @@ namespace osuCrypto
         x = t = t2 = ZeroBlock;
         block ti, ti2;
 
-#ifdef KOS_RO_HASH
+#if (OTE_KOS_HASH == OTE_RANDOM_ORACLE)
         RandomOracle sha;
         u8 hashBuff[20];
+#elif (OTE_KOS_HASH != OTE_DAVIE_MEYER_AES)
+#error "OTE_KOS_HASH" must be defined
 #endif
 
         u64 doneIdx = (0);
@@ -313,7 +329,7 @@ namespace osuCrypto
 
                 t = t ^ ti;
                 t2 = t2 ^ ti2;
-#ifdef KOS_RO_HASH
+#if (OTE_KOS_HASH == OTE_RANDOM_ORACLE)
                 // hash it
                 sha.Reset();
                 sha.Update(dd);
@@ -322,7 +338,7 @@ namespace osuCrypto
                 messages[dd] = *(block*)hashBuff;
 #endif
             }
-#ifndef KOS_RO_HASH
+#if (OTE_KOS_HASH == OTE_DAVIE_MEYER_AES)
             auto& aesHashTemp = expendedChoiceBlk;
             auto length = stop - doneIdx;
             auto steps = length / 8;

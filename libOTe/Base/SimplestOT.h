@@ -59,6 +59,10 @@ namespace osuCrypto
             span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl) override;
+
+
+        static void exp(u64 n);
+        static void add(u64 n);
     };
 }
 

@@ -1,11 +1,11 @@
 #include "KosOtExtSender.h"
 
+#include "libOTe/config.h"
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Crypto/Commit.h>
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Common/Timer.h>
 #include "TcoOtDefines.h"
-
 
 namespace osuCrypto
 {
@@ -71,13 +71,17 @@ namespace osuCrypto
         block* xIter = extraBlocks.data();
 
 
-        Commit theirSeedComm;
-        chl.recv(theirSeedComm.data(), theirSeedComm.size());
-
         auto mIter = messages.begin();
 
         block * uIter = (block*)u.data() + superBlkSize * 128 * commStepSize;
         block * uEnd = uIter;
+
+#ifdef OTE_KOS_FIAT_SHAMIR
+        RandomOracle fs(sizeof(block));
+#else
+        Commit theirSeedComm;
+        chl.recv(theirSeedComm.data(), theirSeedComm.size());
+#endif
 
         for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
         {
@@ -88,9 +92,13 @@ namespace osuCrypto
             if (uIter == uEnd)
             {
                 u64 step = std::min<u64>(numSuperBlocks - superBlkIdx,(u64) commStepSize);
+                u64 size = step * superBlkSize * 128 * sizeof(block);
 
-                chl.recv((u8*)u.data(), step * superBlkSize * 128 * sizeof(block));
+                chl.recv((u8*)u.data(), size);
                 uIter = (block*)u.data();
+#ifdef OTE_KOS_FIAT_SHAMIR
+                fs.Update((u8*)u.data(), size);
+#endif
             }
 
             // transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
@@ -227,28 +235,34 @@ namespace osuCrypto
         }
 #endif
         setTimePoint("Kos.send.transposeDone");
-
+#ifdef OTE_KOS_FIAT_SHAMIR
+        block seed;
+        fs.Final(seed);
+        PRNG commonPrng(seed);
+#else
         block seed = prng.get<block>();
         chl.asyncSend((u8*)&seed, sizeof(block));
         block theirSeed;
         chl.recv((u8*)&theirSeed, sizeof(block));
         setTimePoint("Kos.send.cncSeed");
-
         if (Commit(theirSeed) != theirSeedComm)
             throw std::runtime_error("bad commit " LOCATION);
-
-
         PRNG commonPrng(seed ^ theirSeed);
+#endif
+
+
 
         block  qi, qi2;
         block q2 = ZeroBlock;
         block q1 = ZeroBlock;
 
-#ifdef KOS_RO_HASH
+#if (OTE_KOS_HASH == OTE_RANDOM_ORACLE)
         RandomOracle sha;
         u8 hashBuff[20];
-#else
+#elif (OTE_KOS_HASH == OTE_DAVIE_MEYER_AES)
         std::array<block, 8> aesHashTemp;
+#else
+#error "OTE_KOS_HASH" must be defined
 #endif
         u64 doneIdx = 0;
         std::array<block, 128> challenges;
@@ -269,7 +283,7 @@ namespace osuCrypto
                 mul128(messages[dd][0], challenges[i], qi, qi2);
                 q1 = q1  ^ qi;
                 q2 = q2 ^ qi2;
-#ifdef KOS_RO_HASH
+#if (OTE_KOS_HASH == OTE_RANDOM_ORACLE)
                 // hash the message without delta
                 sha.Reset();
                 sha.Update(dd);
@@ -285,7 +299,7 @@ namespace osuCrypto
                 messages[dd][1] = *(block*)hashBuff;
 #endif
             }
-#ifndef KOS_RO_HASH
+#if (OTE_KOS_HASH == OTE_DAVIE_MEYER_AES)
             auto length = 2 *(stop - doneIdx);
             auto steps = length / 8;
             block* mIter = messages[doneIdx].data();
@@ -314,7 +328,6 @@ namespace osuCrypto
 #endif
             doneIdx = stop;
         }
-
 
         for (auto& blk : extraBlocks)
         {

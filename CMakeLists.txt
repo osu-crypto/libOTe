@@ -66,6 +66,20 @@ message(STATUS "Option: ENABLE_SIMPLESTOT = ${ENABLE_SIMPLESTOT}")
 option(ENABLE_KYBEROT "Build the Kyber (LWE based) library" OFF)
 message(STATUS "Option: ENABLE_KYBEROT    = ${ENABLE_KYBEROT}")
 
+
+
+# Choose the arithmetic backend.
+set(OTE_KOS_HASH "OTE_RANDOM_ORACLE" CACHE STRING "Hashing technique for KOS ")
+message(STATUS "Option: KOS hashing (current = ${OTE_KOS_HASH}):\n")
+message(STATUS "      OTE_KOS_HASH=OTE_RANDOM_ORACLE         use the random oracle")
+message(STATUS "      OTE_KOS_HASH=OTE_DAVIE_MEYER_AES       use AES in the Davie Meyer compression function\n")
+
+
+option(OTE_KOS_FIAT_SHAMIR "Build the library withing Fiat Shamir for KOS" OFF)
+message(STATUS "Option: OTE_KOS_FIAT_SHAMIR = ${OTE_KOS_FIAT_SHAMIR}")
+
+
+
 configure_file(libOTe/config.h.in libOTe/config.h)
 
 #############################################

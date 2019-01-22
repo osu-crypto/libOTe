@@ -128,6 +128,7 @@ namespace tests_libOTe
 
     void MasnyRindal_Test_Impl()
     {
+#ifdef ENABLE_MASNYRINDAL
         setThreadName("Sender");
 
         IOService ios(0);
@@ -166,11 +167,14 @@ namespace tests_libOTe
                 throw UnitTestFail();
             }
         }
-
+#else
+throw UnitTestSkipped("MasnyRindal not enabled. Requires Relic.");
+#endif
     }
 
     void MasnyRindalKyber_Test_Impl()
     {
+#ifdef ENABLE_KYBEROT
         setThreadName("Sender");
 
         IOService ios(0);
@@ -209,7 +213,9 @@ namespace tests_libOTe
                 throw UnitTestFail();
             }
         }
-
+#else
+        throw UnitTestSkipped("MasnyRindalKyber OT not enabled. Requires linux and Kyber");
+#endif
     }
 
 }

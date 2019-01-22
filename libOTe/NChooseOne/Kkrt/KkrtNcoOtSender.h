@@ -5,6 +5,7 @@
 #include <cryptoTools/Common/Matrix.h>
 #include "libOTe/Base/BaseOT.h"
 
+#include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Network/Channel.h>
 
 #include <array>
@@ -28,7 +29,7 @@ namespace osuCrypto {
     // values have been received by NcoOtExtSender, encode(i\in [0,...,k-1], ...) can be called. This will
     // give you the corresponding encoding. Finally, after all correction values have been
     // received, check should be called if this is a malicious secure protocol.
-    class KkrtNcoOtSender : public NcoOtExtSender
+    class KkrtNcoOtSender : public NcoOtExtSender, public TimerAdapter
     {
     public: 
         std::vector<AES> mGens;

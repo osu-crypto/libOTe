@@ -42,9 +42,45 @@ int miraclTestMain();
 #include "util.h"
 #include <cryptoTools/Common/CLP.h>
 
+void synchonize(Channel& chl, u64 trials = 2)
+{
+    u8 b;
+    if (chl.getSession().isHost())
+    {
+
+        chl.asyncSend(b);
+
+        for (u64 i = 0; i < trials; ++i)
+        {
+            chl.recv(b);
+            chl.asyncSend(b);
+        }
+        chl.recv(b);
+
+    }
+    else
+    {
+        Timer t;
+
+        chl.recv(b);
+        auto s0 = t.setTimePoint("");
+        for (u64 i = 0; i < trials; ++i)
+        {
+            chl.asyncSend(b);
+            chl.recv(b);
+        }
+        auto s2 = t.setTimePoint("");
+        chl.asyncSendCopy(b);
+
+        auto roundTime = std::chrono::duration_cast<std::chrono::milliseconds>(s2 - s0) / 4;
+        std::this_thread::sleep_for(roundTime);
+    }
+}
+
+
 
 template<typename NcoOtSender, typename  NcoOtReceiver>
-void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag, std::function<void()> sync)
+void NChooseOne_example(int role, int totalOTs, int numThreads, int trials, std::string ip, std::string tag, CLP& cmd)
 {
     const u64 step = 1024;
 
@@ -110,9 +146,8 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
         auto& chl = chls[k];
         PRNG prng(sysRandomSeed());
 
-        // block until all threads are ready (optional)
-        sync();
-
+        // block until all threads are ready (optional)        
+        synchonize(chl);
 
         // once configure(...) and setBaseOts(...) are called,
         // we can compute many batches of OTs. First we need to tell
@@ -173,8 +208,9 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
         auto& chl = chls[k];
         PRNG prng(sysRandomSeed());
 
-        // block until all threads are ready (optional)
-        sync();
+        // block until all threads are ready (optional)        
+        synchonize(chl);
+
 
         // Same explanation as above.
         senders[k].init(numOTs, prng, chl);
@@ -235,6 +271,9 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
     Timer time;
     auto s = time.setTimePoint("start");
 
+    senders[0].setTimer(time);
+    recvers[0].setTimer(time);
+
     for (int k = 0; k < numThreads; ++k)
         thds[k] = std::thread(routine, k);
 
@@ -247,11 +286,15 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
 
     if (role)
         std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+
+
+
+    lout << time << std::endl;
 }
 
 
 template<typename OtExtSender, typename OtExtRecver>
-void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag, std::function<void()> sync)
+void TwoChooseOne_example(int role, int totalOTs, int numThreads, int trials, std::string ip, std::string tag, CLP& cmd)
 {
     if (totalOTs == 0)
         totalOTs = 1 << 20;
@@ -266,7 +309,12 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
     // for each thread we need to construct a channel (socket) for it to communicate on.
     std::vector<Channel> chls(numThreads);
     for (int i = 0; i < numThreads; ++i)
-        chls[i] = ep0.addChannel();
+    {
+        if(role)
+            chls[i] = ep0.addChannel("s", "r");
+        else
+            chls[i] = ep0.addChannel("r", "s");
+    }
 
     // cheat and compute the base OT in the clear.
     u64 baseCount = 128;
@@ -307,7 +355,7 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
         PRNG prng(sysRandomSeed());
 
         // block until all threads are ready (optional)
-        sync();
+        synchonize(chls[i]);
 
         if (role)
         {
@@ -321,6 +369,23 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
 
             // perform  numOTs random OTs, the results will be written to msgs.
             receivers[i].receive(choice, msgs, prng, chls[i]);
+
+
+            // To make then sender chosen instead of random.
+            if (cmd.isSet("send"))
+            {
+                senders[i].setTimePoint("recving.ctxt");
+
+                std::vector<std::array<block, 2>> msgs2(numOTs);
+                chls[i].recv(msgs2);
+
+                for (u64 i = 0; i < msgs.size(); ++i)
+                {
+                    msgs[i] = msgs[i] ^ msgs2[i][choice[i]];
+                }
+                senders[i].setTimePoint("recved.ctxt");
+
+            }
         }
         else
         {
@@ -336,6 +401,28 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
 
             // perform the OTs and write the random OTs to msgs.
             senders[i].send(msgs, prng, chls[i]);
+
+            // To make then sender chosen instead of random.
+            if (cmd.isSet("send"))
+            {
+                senders[i].setTimePoint("sending.ctxt");
+
+                // in a real application you would want to send a different message 
+                // for each OT. Bug here we will just repeat them every 128.
+                std::array<std::array<block,2>, 128> sendData;
+                prng.get(sendData.data(), sendData.size());
+
+                for (u64 i = 0; i < msgs.size(); ++i)
+                {
+                    msgs[i][0] = msgs[i][0] ^ sendData[i % 128][0];
+                    msgs[i][1] = msgs[i][1] ^ sendData[i % 128][1];
+                }
+
+                chls[i].send(msgs);
+
+                senders[i].setTimePoint("sent.ctxt");
+
+            }
         }
     };
 
@@ -343,6 +430,8 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
     Timer timer;
     timer.reset();
     auto s = timer.setTimePoint("start");
+    senders[0].setTimer(timer);
+    receivers[0].setTimer(timer);
 
     std::vector<std::thread> thrds(numThreads);
     for (int i = 0; i < numThreads; ++i)
@@ -354,14 +443,23 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
     auto e = timer.setTimePoint("finish");
     auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
+
+
+    char c;
+    chls[0].send(c);
+    chls[0].recv(c);
+
     if (role)
         std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+
+
+    lout << timer << std::endl;
 }
 
 
 
 template<typename BaseOT>
-void baseOT_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag, std::function<void()> sync)
+void baseOT_example(int role, int totalOTs, int numThreads, int trials, std::string ip, std::string tag, CLP& cmd)
 {
     IOService ios;
     PRNG prng(sysRandomSeed());
@@ -374,66 +472,74 @@ void baseOT_example(int role, int totalOTs, int numThreads, std::string ip, std:
 
     if (role)
     {
-        auto chl0 = Session(ios, ip, SessionMode::Server).addChannel();
+        auto chl = Session(ios, ip, SessionMode::Server).addChannel("s","r");
         BaseOT recv;
 
         std::vector<block> msg(totalOTs);
         BitVector choice(totalOTs);
         choice.randomize(prng);
 
-        chl0.waitForConnection();
+        //chl.waitForConnection();
 
-        //senderGetLatency(chl0);
-        // block until all threads are ready (optional)
-        sync();
 
-        Timer t;
-        auto s = t.setTimePoint("base OT start");
+        for (int tr = 0; tr < trials; ++tr)
+        {
+            chl.resetStats();
 
-        recv.receive(choice, msg, prng, chl0);
+            synchonize(chl);
 
-        auto e = t.setTimePoint("base OT end");
+            Timer t;
+            auto s = t.setTimePoint("base OT start");
 
-        char c;
-        chl0.send(c);
-        chl0.recv(c);
+            recv.receive(choice, msg, prng, chl);
 
-        auto bytes = chl0.getTotalDataRecv() + chl0.getTotalDataSent() - 2;
+            auto e = t.setTimePoint("base OT end");
 
-        auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+            char c;
+            chl.send(c);
+            chl.recv(c);
 
-        lout <<"recv " << tag << " n=" << totalOTs << " " << milli << " ms,    " << bytes << " bytes" << std::endl;
+            auto bytes = chl.getTotalDataRecv() + chl.getTotalDataSent() - 2;
+
+            auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+
+            lout <<"recv " << tag << " n=" << totalOTs << " " << milli << " ms,    " << bytes << " bytes" << std::endl;
+        }
+
     }
     else
     {
 
-        auto chl1 = Session(ios, ip, SessionMode::Client).addChannel();
+        auto chl = Session(ios, ip, SessionMode::Client).addChannel("r","s");
 
         BaseOT send;
 
         std::vector<std::array<block, 2>> msg(totalOTs);
 
-        // block until all threads are ready (optional)
-        chl1.waitForConnection();
-        //recverGetLatency(chl1);
-        sync();
 
-        Timer t;
-        auto s = t.setTimePoint("base OT start");
 
-        send.send(msg, prng, chl1);
+        for (int tr = 0; tr < trials; ++tr)
+        {
+            chl.resetStats();
 
-        auto e = t.setTimePoint("base OT end");
+            synchonize(chl);
 
-        char c;
-        chl1.send(c);
-        chl1.recv(c);
+            Timer t;
+            auto s = t.setTimePoint("base OT start");
 
-        auto bytes = chl1.getTotalDataRecv() + chl1.getTotalDataSent() - 2;
+            send.send(msg, prng, chl);
 
-        auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+            auto e = t.setTimePoint("base OT end");
 
-        lout << "send " << tag << " n=" << totalOTs << " " << milli << " ms,    " << bytes  << " bytes"<< std::endl;
+            char c;
+            chl.send(c);
+            chl.recv(c);
+
+            auto bytes = chl.getTotalDataRecv() + chl.getTotalDataSent() - 2;
+            auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+
+            lout << "send " << tag << " n=" << totalOTs << " " << milli << " ms,    " << bytes << " bytes" << std::endl;
+        }
     }
 }
 
@@ -453,7 +559,7 @@ mr{ "mr" },
 mrk{ "mrk" },
 simple{ "simplest" };
 
-using ProtocolFunc = std::function<void(int, int, int, std::string, std::string, std::function<void()>)>;
+using ProtocolFunc = std::function<void(int, int, int,int, std::string, std::string, CLP&)>;
 
 bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
 {
@@ -462,30 +568,23 @@ bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
         : cmd.getOr("n", 0);
 
     auto t = cmd.getOr("t", 1);
+    auto trials = cmd.getOr("trials", 1);
     auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
 
     if (cmd.isSet(tag))
     {
         if (cmd.hasValue("r"))
         {
-            auto sync = []() {};
-            protocol(cmd.get<int>("r"), n, t, ip, tag.back(), sync);
+            protocol(cmd.get<int>("r"), n, t, trials, ip, tag.back(), cmd);
         }
         else
         {
-            std::atomic<i64> count(2 * t);
-            auto sync = [&count](){
-                // spin lock until everyone is ready
-                --count;
-                while (count > 0); 
-            };
-
             auto thrd = std::thread([&] {
 
-                protocol(0, n, t, ip, tag.back(), sync);
+                protocol(0, n, t, trials, ip, tag.back(), cmd);
             });
 
-            protocol(1, n, t, ip, tag.back(), sync);
+            protocol(1, n, t, trials, ip,tag.back(), cmd);
             thrd.join();
         }
 
@@ -524,9 +623,20 @@ int main(int argc, char** argv)
     cmd.parse(argc, argv);
     bool flagSet = false;
 
-    if (cmd.isSet("kyber"))
+
+    if(cmd.isSet("perf"))
     {
-        KyberExample();
+        auto nn = cmd.getMany<int>("n");
+        Timer t;
+        t.setTimePoint("S");
+        SimplestOT s;
+
+        for (auto n : nn)
+        {
+            s.exp(n);
+            t.setTimePoint("S " +std::to_string(n));
+        }
+        std::cout << t << std::endl;
         return 0;
     }
 

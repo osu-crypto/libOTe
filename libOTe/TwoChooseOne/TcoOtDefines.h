@@ -1,8 +1,9 @@
 #pragma once
 #include <cryptoTools/Common/Defines.h>
 
-#define KOS_RO_HASH
+//#define OTE_KOS_HASH
 //#define IKNP_SHA_HASH
+//#define OTE_KOS_FIAT_SHAMIR
 
 namespace osuCrypto
 { 

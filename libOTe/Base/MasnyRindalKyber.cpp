@@ -1,4 +1,6 @@
 #include "MasnyRindalKyber.h"
+#ifdef ENABLE_KYBEROT
+
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Network/Channel.h>
@@ -75,3 +77,4 @@ namespace osuCrypto
         chl.asyncSend(std::move(ctxts));
     }
 }
+#endif
