@@ -14,7 +14,7 @@ primary design goal of this library to obtain *high performance* while being
 * The malicious secure 1-out-of-N OT [[OOS16]](http://eprint.iacr.org/2016/933).
 * The malicious secure approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746).
 * The malicious secure 1-out-of-2 base OT [NP00].
-* The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (unix only).
+* The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Fast unix only ASM verion disabled by default).
  
 ## Introduction
  
@@ -22,7 +22,7 @@ This library provides several different classes of OT protocols. First is the
 base OT protocol of Naor Prinkas [NP00]. This protocol bootstraps all the other
 OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2,
 1-out-of-N and ~K-out-of-N, both in the semi-honest and malicious settings.
- 
+
 All implementations are highly optimized using fast SSE instructions and vectorization
 to obtain optimal performance both in the single and multi-threaded setting. See 
 the **Performance** section for a comparison between protocols and to other libraries. 
@@ -138,11 +138,12 @@ Enable Base OTs using:
       relic is built with `cmake . -DMULTI=OPENMP` and installed.
  * `cmake .  -DENABLE_SIMPLESTOT=ON`: Build the library with integration to the 
       [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
-      library implementing a base OT.
+      library implementing a base OT. Also works with only relic but is slower.
 
 Other Options:
  * `cmake .  -DENABLE_CIRCUITS=ON`: Build the library with the circuit library enabled.
  * `cmake .  -DENABLE_NASM=ON`: Build the library with the assembly base SHA1 implementation. Requires the NASM compiler.
+ 
 
 
 <b>Note:</b> In the case that miracl or boost is already installed, the steps 

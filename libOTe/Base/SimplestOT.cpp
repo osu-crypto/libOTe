@@ -1,22 +1,131 @@
 #include "SimplestOT.h"
 
 #ifdef ENABLE_SIMPLESTOT
+#ifdef ENABLE_SIMPLEST_ASM_LIB
+    extern "C"
+    {
+    #include "../SimplestOT/ot_sender.h"
+    #include "../SimplestOT/ot_receiver.h"
+    #include "../SimplestOT/ot_config.h"
+    #include "../SimplestOT/cpucycles.h"
+    #include "../SimplestOT/randombytes.h"
+    }
+#else
 
-
-extern "C"
-{
-#include "../SimplestOT/ot_sender.h"
-#include "../SimplestOT/ot_receiver.h"
-#include "../SimplestOT/ot_config.h"
-#include "../SimplestOT/cpucycles.h"
-#include "../SimplestOT/randombytes.h"
-}
+    #ifdef ENABLE_RELIC
+        #include <cryptoTools/Crypto/RCurve.h>
+    #else    
+        #include <cryptoTools/Crypto/Curve.h>
+    #endif
+#endif
 
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Common/BitVector.h>
-
+#include <cryptoTools/Crypto/RandomOracle.h>
 namespace osuCrypto
 {
+
+
+#ifndef ENABLE_SIMPLEST_ASM_LIB
+#ifdef ENABLE_RELIC
+    using Curve = REllipticCurve;
+    using Point = REccPoint;
+    using Brick = REccPoint;
+    using Number = REccNumber;
+#else    
+    using Curve = EllipticCurve;
+    using Point = EccPoint;
+    using Brick = EccBrick;
+    using Number = EccNumber;
+#endif
+
+    void SimplestOT::receive(
+        const BitVector& choices,
+        span<block> msg,
+        PRNG& prng,
+        Channel& chl)
+    {
+        Curve curve;
+        Point g = curve.getGenerator();
+        u64 pointSize = g.sizeBytes();
+        u64 n = msg.size();
+
+        Point A(curve);
+        std::vector<u8> buff(pointSize), hashBuff(pointSize);
+        chl.recv(buff.data(), buff.size());
+        A.fromBytes(buff.data());
+
+        buff.resize(pointSize * n);
+        auto buffIter = buff.data();
+
+        std::vector<Number> b; b.reserve(n);;
+        std::array<Point, 2> B{ curve, curve };
+        for (u64 i = 0; i < n; ++i)
+        {
+            b.emplace_back(curve, prng);
+            B[0] = g * b[i];
+            B[1] = A + B[0];
+
+            B[choices[i]].toBytes(buffIter); buffIter += pointSize;
+        }
+
+        chl.asyncSend(std::move(buff));
+
+        for (u64 i = 0; i < n; ++i)
+        {
+            B[0] = A * b[i];
+            B[0].toBytes(hashBuff.data());
+            RandomOracle ro(sizeof(block));
+            ro.Update(hashBuff.data(), hashBuff.size());
+            ro.Final(msg[i]);
+        }
+    }
+
+
+    void SimplestOT::send(
+        span<std::array<block, 2>> msg,
+        PRNG& prng,
+        Channel& chl)
+    {
+        Curve curve;
+        Point g = curve.getGenerator();
+        u64 pointSize = g.sizeBytes();
+        u64 n = msg.size();
+
+        Number a(curve, prng);
+        Point A = g * a;
+        std::vector<u8> buff(pointSize), hashBuff(pointSize);
+        A.toBytes(buff.data());
+        chl.asyncSend(std::move(buff));
+
+        buff.resize(pointSize * n);
+        chl.recv(buff.data(), buff.size());
+        auto buffIter = buff.data();
+
+        A *= a;
+        Point B(curve), Ba(curve);
+        for (u64 i = 0; i < n; ++i)
+        {
+            B.fromBytes(buffIter); buffIter += pointSize;
+
+            Ba = B * a;
+            Ba.toBytes(hashBuff.data());
+            RandomOracle ro(sizeof(block));
+            ro.Update(hashBuff.data(), hashBuff.size());
+            ro.Final(msg[i][0]);
+
+            Ba -= A;
+            Ba.toBytes(hashBuff.data());
+            ro.Reset();
+            ro.Update(hashBuff.data(), hashBuff.size());
+            ro.Final(msg[i][1]);
+        }
+    }
+
+    void SimplestOT::exp(u64 n) {}
+    void SimplestOT::add(u64 n) {}
+
+#else
     rand_source makeRandSource(PRNG& prng)
     {
         rand_source rand;
@@ -78,6 +187,24 @@ namespace osuCrypto
         }
     }
 
+    void SimplestOT::exp(u64 n) 
+    {
+        PRNG prng(ZeroBlock);
+        rand_source rand;
+        SENDER sender;
+
+        //sender_perf(&sender, rand, n);
+    }
+
+    void SimplestOT::add(u64 n)
+    {
+        PRNG prng(ZeroBlock);
+        rand_source rand;
+        SENDER sender;
+
+        //sender_add(&sender, rand, n);
+    }
+
 
     void SimplestOT::send(
         span<std::array<block, 2>> msg,
@@ -136,8 +263,9 @@ namespace osuCrypto
         }
     }
 
-
+#endif
 }
 #endif
+
 
 
