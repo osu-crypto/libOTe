@@ -15,7 +15,7 @@ using Number = oc::REccNumber;
 
 #include <libOTe/Base/SimplestOT.h>
 //std::chrono::microseconds expTime(100);
-#define MASNY_RINDAL_SIM
+//#define MASNY_RINDAL_SIM
 
 namespace osuCrypto
 {
@@ -60,18 +60,18 @@ namespace osuCrypto
                 auto& rrNot = r[choices[i] ^ 1];
                 auto& rr = r[choices[i]];
 
-                //rrNot.randomize(prng.get<block>());
-                //rrNot.toBytes(hashBuff.data());
+                rrNot.randomize();
+                rrNot.toBytes(hashBuff.data());
                 //lout << "rNot=r"<<(choices[i]^1)<<"  " << rrNot << std::endl;
 
 
                 //ro.Reset();
-                //ro.Update(hashBuff.data(), hashBuff.size());
+                //ro.Update(hashBuff.data(), pointSize);
 
                 //ro.Final<block>(hash);
                 //hPoint.randomize(hash);
                 //lout << "H(rNot) " << hPoint << std::endl;
-                ep_map(hPoint, hashBuff.data(), hashBuff.size());
+                ep_map(hPoint, hashBuff.data(), pointSize);
 
                 sk.emplace_back(curve, prng);
 #ifdef MASNY_RINDAL_SIM
@@ -127,18 +127,22 @@ namespace osuCrypto
             //lout << "g^ab  " << k << std::endl;
 
             k.toBytes(hashBuff.data());
-            auto p = (block*)hashBuff.data();
-            mAesFixedKey.ecbEncBlocks(p, aesBuff.size(), aesBuff.data());
-
-            // TODO("make this secure");
-            messages[i] = ZeroBlock;
-            for (auto& b : aesBuff)
+            if (0)
             {
-                messages[i] = messages[i] ^ *p++ ^ b;
+                auto p = (block*)hashBuff.data();
+                mAesFixedKey.ecbEncBlocks(p, aesBuff.size(), aesBuff.data());
+
+                // TODO("make this secure");
+                messages[i] = ZeroBlock;
+                for (auto& b : aesBuff)
+                    messages[i] = messages[i] ^ *p++ ^ b;
             }
-            //ro.Reset();
-            //ro.Update(hashBuff.data(), pointSize);
-            //ro.Final(messages[i]);
+            else
+            {
+                ro.Reset();
+                ro.Update(hashBuff.data(), pointSize);
+                ro.Final(messages[i]);
+            }
         }
     }
 
@@ -211,7 +215,7 @@ namespace osuCrypto
 
                     //lout << "g^a" << j << "  " << r << std::endl;
 
-                    
+
 #ifndef MASNY_RINDAL_SIM
                     r += pHash;
                     r *= sk;
@@ -220,17 +224,25 @@ namespace osuCrypto
 
                     r.toBytes(hashBuff.data());
                     auto p = (block*)hashBuff.data();
-                    mAesFixedKey.ecbEncBlocks(p, aesBuff.size(), aesBuff.data());
-                    
-                    // TODO("make this secure");
-                    messages[i][j] = ZeroBlock;
-                    for (auto& b : aesBuff)
+
+                    if (0)
                     {
-                        messages[i][j] = messages[i][j] ^ *p++ ^ b;
+                        mAesFixedKey.ecbEncBlocks(p, aesBuff.size(), aesBuff.data());
+
+                        // TODO("make this secure");
+                        messages[i][j] = ZeroBlock;
+                        for (auto& b : aesBuff)
+                        {
+                            messages[i][j] = messages[i][j] ^ *p++ ^ b;
+                        }
                     }
-                    //ro.Reset();
-                    //ro.Update(hashBuff.data(), pointSize);
-                    //ro.Final(messages[i][j]);
+                    else
+                    {
+
+                        ro.Reset();
+                        ro.Update(hashBuff.data(), pointSize);
+                        ro.Final(messages[i][j]);
+                    }
                 }
             }
 
