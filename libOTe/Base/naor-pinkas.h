@@ -18,6 +18,7 @@ namespace osuCrypto
         NaorPinkas();
         ~NaorPinkas(); 
 
+
         void receive(
             const BitVector& choices, 
             span<block> messages,

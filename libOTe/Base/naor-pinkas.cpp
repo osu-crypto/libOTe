@@ -66,6 +66,9 @@ namespace osuCrypto
         std::future<void> PK0Furture(PK0Prom.get_future());
         std::vector<u8> cBuff(nSndVals * fieldElementSize);
         auto cRecvFuture = socket.asyncRecv(cBuff.data(), cBuff.size()).share();
+
+        std::array<u8, RandomOracle::HashSize> comm, comm2;
+        socket.asyncRecv(comm);
         block R;
         auto RFuture = socket.asyncRecv(R).share();
 
@@ -118,7 +121,6 @@ namespace osuCrypto
 
                 cRecvFuture.get();
                 auto pBufIdx = cBuff.begin();
-
                 for (auto u = 0; u < nSndVals; u++)
                 {
                     pC.emplace_back(curve);
@@ -155,6 +157,7 @@ namespace osuCrypto
 
                 RFuture.get();
 
+
                 for (u64 i = mStart, j = 0; i < mEnd; ++i, ++j)
                 {
                     // now compute g ^(a * k) = (g^a)^k
@@ -167,7 +170,7 @@ namespace osuCrypto
                     sha.Update(R);
                     sha.Final(messages[i]);
                 }
-            });
+            }); 
         }
 
         PK0Furture.get();
@@ -176,6 +179,13 @@ namespace osuCrypto
 
         for (auto& thrd : thrds)
             thrd.join();
+
+        //block comm = *(block*)(cBuff.data() + nSndVals * fieldElementSize);
+        RandomOracle ro;
+        ro.Update(R);
+        ro.Final(comm2);
+        if (comm != comm2)
+            throw std::runtime_error("bad commitment " LOCATION);
 
     }
 
@@ -214,6 +224,15 @@ namespace osuCrypto
         }
 
         socket.asyncSend(std::move(sendBuff));
+
+        // sends a commitment to R. This strengthens the security of NP01 to 
+        // make the protocol output uniform strings no matter what.
+        RandomOracle ro;
+        std::vector<u8> comm(RandomOracle::HashSize);
+        ro.Update(R);
+        ro.Final(comm.data());
+        socket.asyncSend(std::move(comm));
+
 
         for (u64 u = 1; u < nSndVals; u++)
             pC[u] = pC[u] * alpha;

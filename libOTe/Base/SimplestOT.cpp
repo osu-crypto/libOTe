@@ -50,10 +50,14 @@ namespace osuCrypto
         u64 pointSize = g.sizeBytes();
         u64 n = msg.size();
 
+        block comm, seed;
         Point A(curve);
-        std::vector<u8> buff(pointSize), hashBuff(pointSize);
+        std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block)), hashBuff(pointSize);
         chl.recv(buff.data(), buff.size());
         A.fromBytes(buff.data());
+
+        if (mUniformOTs)
+            comm = *(block*)(buff.data() + pointSize);
 
         buff.resize(pointSize * n);
         auto buffIter = buff.data();
@@ -70,6 +74,13 @@ namespace osuCrypto
         }
 
         chl.asyncSend(std::move(buff));
+        if (mUniformOTs)
+        {
+            chl.recv(seed);
+            if (neq(comm, mAesFixedKey.ecbEncBlock(seed) ^ seed))
+                throw std::runtime_error("bad decommitment " LOCATION);
+        }
+
 
         for (u64 i = 0; i < n; ++i)
         {
@@ -77,6 +88,7 @@ namespace osuCrypto
             B[0].toBytes(hashBuff.data());
             RandomOracle ro(sizeof(block));
             ro.Update(hashBuff.data(), hashBuff.size());
+            if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i]);
         }
     }
@@ -92,14 +104,30 @@ namespace osuCrypto
         u64 pointSize = g.sizeBytes();
         u64 n = msg.size();
 
+        block seed = prng.get<block>();
         Number a(curve, prng);
         Point A = g * a;
-        std::vector<u8> buff(pointSize), hashBuff(pointSize);
+        std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block)), hashBuff(pointSize);
         A.toBytes(buff.data());
+
+        if (mUniformOTs)
+        {
+            // commit to the seed
+            auto comm = mAesFixedKey.ecbEncBlock(seed) ^ seed;
+            *((block*)(buff.data() + pointSize)) = comm;
+        }
+
         chl.asyncSend(std::move(buff));
 
         buff.resize(pointSize * n);
         chl.recv(buff.data(), buff.size());
+
+        if (mUniformOTs)
+        {
+            // decommit to the seed now that we have their messages.
+            chl.send(seed);
+        }
+
         auto buffIter = buff.data();
 
         A *= a;
@@ -112,12 +140,14 @@ namespace osuCrypto
             Ba.toBytes(hashBuff.data());
             RandomOracle ro(sizeof(block));
             ro.Update(hashBuff.data(), hashBuff.size());
+            if(mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][0]);
 
             Ba -= A;
             Ba.toBytes(hashBuff.data());
             ro.Reset();
             ro.Update(hashBuff.data(), hashBuff.size());
+            if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][1]);
         }
     }

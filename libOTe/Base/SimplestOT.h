@@ -29,6 +29,11 @@ namespace osuCrypto
     {
     public:
 
+        // set this to false if your use of the base OTs can tolerate
+        // the receiver being able to choose the message that they receive.
+        // If unsure leave as true an the strings will be uniform (safest but slower).
+        bool mUniformOTs = true;
+
 
         void receive(
             const BitVector& choices,
