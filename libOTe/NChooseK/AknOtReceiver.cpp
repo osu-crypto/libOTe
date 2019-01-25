@@ -4,7 +4,7 @@
 #include <cryptoTools/Crypto/RandomOracle.h>
 
 #include "libOTe/Base/BaseOT.h"
-#include "libOTe/TwoChooseOne/LzKosOtExtReceiver.h"
+//#include "libOTe/TwoChooseOne/LzKosOtExtReceiver.h"
 
 namespace osuCrypto
 {
@@ -32,7 +32,7 @@ namespace osuCrypto
 
             DefaultBaseOT base;
             base.send(baseMsg, prng, chl0, 2);
-            ots.setBaseOts(baseMsg);
+            ots.setBaseOts(baseMsg, prng, chl0);
 #else
             throw std::runtime_error("Base OTs not set");
 #endif
@@ -150,16 +150,16 @@ namespace osuCrypto
                     ++openChoiceIter;
                     ++j;
 
-                    if (cc == 0 && dynamic_cast<LzKosOtExtReceiver*>(&ots))
-                    {
-                        // if this is a zero message and our OT extension class is
-                        // LzKosOtExtReceiver, then we need to hash the 0-message now
-                        // because it was lazy and didn't ;)
+                    //if (cc == 0 && dynamic_cast<LzKosOtExtReceiver*>(&ots))
+                    //{
+                    //    // if this is a zero message and our OT extension class is
+                    //    // LzKosOtExtReceiver, then we need to hash the 0-message now
+                    //    // because it was lazy and didn't ;)
 
-                        RandomOracle sha(sizeof(block));
-                        sha.Update(mMessages[i]);
-                        sha.Final(mMessages[i]);
-                    }
+                    //    RandomOracle sha(sizeof(block));
+                    //    sha.Update(mMessages[i]);
+                    //    sha.Final(mMessages[i]);
+                    //}
 
                     // keep a running sum of the OT messages that are opened in this thread.
                     partialSum = partialSum ^ mMessages[i];

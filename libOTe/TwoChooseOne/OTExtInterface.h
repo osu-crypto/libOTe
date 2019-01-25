@@ -51,7 +51,9 @@ namespace osuCrypto
 
 
         virtual void setBaseOts(
-            span<std::array<block,2>> baseSendOts) = 0;
+            span<std::array<block,2>> baseSendOts,
+            PRNG& prng,
+            Channel& chl) = 0;
 
         virtual bool hasBaseOts() const = 0; 
         virtual std::unique_ptr<OtExtReceiver> split() = 0;
@@ -66,7 +68,8 @@ namespace osuCrypto
 
         virtual void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices)  = 0;
+            const BitVector& choices,
+            Channel& chl)  = 0;
 
         virtual std::unique_ptr<OtExtSender> split() = 0;
     };

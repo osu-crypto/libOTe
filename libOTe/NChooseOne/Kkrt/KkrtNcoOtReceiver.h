@@ -90,8 +90,16 @@ namespace osuCrypto
         // Sets the base OTs. Note that getBaseOTCount() of OTs should be provided.
         // @ baseSendOts: a std vector like container that which holds a series of both 
         //      2-choose-1 OT messages. The sender should hold one of them.
-        void setBaseOts(gsl::span<std::array<block, 2>> baseRecvOts) override;
+        // @ prng: not used.
+        // @ chl: not used.
+        void setBaseOts(gsl::span<std::array<block, 2>> baseRecvOts, PRNG& prng, Channel& chl) override
+        {
+            setBaseOts(baseRecvOts);
+        }
         
+        // See other setBaseOts(...);
+        void setBaseOts(gsl::span<std::array<block, 2>> baseRecvOts);
+
         // Perform some computation before encode(...) can be called. Note that this
         // can be called several times, with each call creating new OTs to be encoded.
         // @ numOtExt: the number of OTs that should be initialized. for encode(i,...) calls,

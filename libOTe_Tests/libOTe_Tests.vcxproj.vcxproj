@@ -105,8 +105,6 @@
     <ClCompile Include="BaseOT_Tests.cpp" />
     <ClCompile Include="Common.cpp" />
     <ClCompile Include="NcoOT_Tests.cpp" />
-    <ClCompile Include="OTOracleReceiver.cpp" />
-    <ClCompile Include="OTOracleSender.cpp" />
     <ClCompile Include="OT_Tests.cpp" />
     <ClCompile Include="UnitTests.cpp" />
   </ItemGroup>
@@ -115,8 +113,6 @@
     <ClInclude Include="BaseOT_Tests.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="NcoOT_Tests.h" />
-    <ClInclude Include="OTOracleReceiver.h" />
-    <ClInclude Include="OTOracleSender.h" />
     <ClInclude Include="OT_Tests.h" />
     <ClInclude Include="testData\code1280_BCH511.h" />
     <ClInclude Include="testData\code128_BCH511.h" />

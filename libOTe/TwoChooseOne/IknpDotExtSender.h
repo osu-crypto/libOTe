@@ -42,10 +42,17 @@ namespace osuCrypto {
             return mBaseChoiceBits.size() > 0;
         }
 
-        // return true if this instance has valid base OTs. 
+
+        // sets the base OTs.
         void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices) override;
+            const BitVector& choices);
+
+            // sets the base OTs.
+        void setBaseOts(
+            span<block> baseRecvOts,
+            const BitVector& choices,
+            Channel& chl) override {setBaseOts(baseRecvOts, choices);}
 
         // Returns a independent instance of this extender which can 
         // be executed concurrently. The base OTs are derived from the

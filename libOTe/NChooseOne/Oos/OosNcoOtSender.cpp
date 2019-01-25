@@ -18,24 +18,31 @@ namespace osuCrypto
 
     void OosNcoOtSender::setBaseOts(
         span<block> baseRecvOts,
-        const BitVector & choices)
+        const BitVector & choices, Channel& chl)
     {
-        if (choices.size() != u64(baseRecvOts.size()))
+        BitVector delta(choices.size());
+        chl.recv(delta);
+
+        setUniformBaseOts(baseRecvOts, choices ^ delta);
+    }
+
+    void OosNcoOtSender::setUniformBaseOts(span<block> baseRecvOts, const BitVector& uniformChoices)
+    {
+        if (uniformChoices.size() != u64(baseRecvOts.size()))
             throw std::runtime_error("size mismatch");
 
-        if (choices.size() % (sizeof(block) * 8) != 0)
+        if (uniformChoices.size() % (sizeof(block) * 8) != 0)
             throw std::runtime_error("only multiples of 128 are supported");
 
-
-        mBaseChoiceBits = choices;
-        mGens.resize(choices.size());
+        mBaseChoiceBits = uniformChoices;
+        mGens.resize(uniformChoices.size());
 
         for (u64 i = 0; i < u64(baseRecvOts.size()); i++)
         {
             mGens[i].SetSeed(baseRecvOts[i]);
         }
 
-        mChoiceBlks.resize(choices.size() / (sizeof(block) * 8));
+        mChoiceBlks.resize(uniformChoices.size() / (sizeof(block) * 8));
         for (u64 i = 0; i < mChoiceBlks.size(); ++i)
         {
             mChoiceBlks[i] = toBlock(mBaseChoiceBits.data() + (i * sizeof(block)));
@@ -60,7 +67,7 @@ namespace osuCrypto
             {
                 base[i] = mGens[i].get<block>();
             }
-            raw.setBaseOts(base, mBaseChoiceBits);
+            raw.setUniformBaseOts(base, mBaseChoiceBits);
         }
         return std::move(raw);
     }

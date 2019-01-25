@@ -79,10 +79,17 @@ namespace osuCrypto {
         // @ baseRecvOts: a std vector like container that which holds a series of both 
         //      2-choose-1 OT messages. The sender should hold one of them.
         // @ choices: The select bits that were used in the base OT
+        // @ chl: not used.
         void setBaseOts(
             gsl::span<block> baseRecvOts,
-            const BitVector& choices) override;
+            const BitVector& choices, Channel& chl) override {
+            setBaseOts(baseRecvOts, choices);
+        }
         
+        // See other setBaseOts(...).
+        void setBaseOts(
+            gsl::span<block> baseRecvOts,
+            const BitVector& choices);
 
         // Performs the PRNG expantion and transpose operations. This sets the 
         // internal data structures that are needed for the subsequent encode(..)

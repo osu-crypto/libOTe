@@ -9,14 +9,27 @@
 
 namespace osuCrypto
 {
+    KosOtExtSender::KosOtExtSender(SetUniformOts, span<block> baseRecvOts, const BitVector & choices)
+    {
+        setUniformBaseOts(baseRecvOts, choices);
+    }
 
+    void KosOtExtSender::setUniformBaseOts(span<block> baseRecvOts, const BitVector & choices)
+    {
+        mBaseChoiceBits = choices;
+
+        for (u64 i = 0; i < gOtExtBaseOtCount; i++)
+        {
+            mGens[i].SetSeed(baseRecvOts[i]);
+        }
+    }
 
     KosOtExtSender KosOtExtSender::splitBase()
     {
         std::array<block, gOtExtBaseOtCount> baseRecvOts;
         for (u64 i = 0; i < mGens.size(); ++i)
             baseRecvOts[i] = mGens[i].get<block>();
-        return KosOtExtSender( baseRecvOts, mBaseChoiceBits );
+        return KosOtExtSender(SetUniformOts{}, baseRecvOts, mBaseChoiceBits);
     }
 
     std::unique_ptr<OtExtSender> KosOtExtSender::split()
@@ -26,16 +39,20 @@ namespace osuCrypto
         for (u64 i = 0; i < mGens.size(); ++i)
             baseRecvOts[i] = mGens[i].get<block>();
 
-        return std::make_unique<KosOtExtSender>(baseRecvOts, mBaseChoiceBits);
+        return std::make_unique<KosOtExtSender>(SetUniformOts{}, baseRecvOts, mBaseChoiceBits);
     }
 
-    void KosOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices)
+    void KosOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices, Channel& chl)
     {
         if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
             throw std::runtime_error("not supported/implemented");
 
+        BitVector delta(128);
+        chl.recv(delta);
 
         mBaseChoiceBits = choices;
+        mBaseChoiceBits ^= delta;
+
         for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {
             mGens[i].SetSeed(baseRecvOts[i]);

@@ -16,15 +16,12 @@ namespace osuCrypto
         bool mHasBase = false;
         std::array<std::array<PRNG, 2>, gOtExtBaseOtCount> mGens;
 
+        struct SetUniformOts {};
 
         KosOtExtReceiver() = default;
         KosOtExtReceiver(const KosOtExtReceiver&) = delete;
         KosOtExtReceiver(KosOtExtReceiver&&) = default;
-
-        KosOtExtReceiver(span<std::array<block, 2>> baseSendOts)
-        {
-            setBaseOts(baseSendOts);
-        }
+        KosOtExtReceiver(SetUniformOts, span<std::array<block, 2>> baseSendOts);
 
         void operator=(KosOtExtReceiver&& v)
         {
@@ -41,7 +38,10 @@ namespace osuCrypto
         }
 
         // sets the base OTs.
-        void setBaseOts(span<std::array<block, 2>> baseSendOts) override;
+        void setBaseOts(span<std::array<block, 2>> baseSendOts,PRNG& prng, Channel&chl) override;
+
+        void setUniformBaseOts(span<std::array<block, 2>> baseSendOts);
+
 
         // returns an independent instance of this extender which can securely be
         // used concurrently to this current one. The base OTs for the new instance 

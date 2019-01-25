@@ -38,6 +38,30 @@ using namespace osuCrypto;
 namespace tests_libOTe
 {
 
+    void setBaseOts(NcoOtExtSender& sender,
+        NcoOtExtReceiver& recv,
+        Channel& sendChl,
+        Channel& recvChl)
+    {
+        u64 baseCount = sender.getBaseOTCount();
+
+        std::vector<block> baseRecv(baseCount);
+        std::vector<std::array<block, 2>> baseSend(baseCount);
+        BitVector baseChoice(baseCount);
+        PRNG prng0(ZeroBlock);
+        baseChoice.randomize(prng0);
+
+        prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+        for (u64 i = 0; i < baseCount; ++i)
+        {
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+        }
+
+        auto a = std::async([&]() {sender.setBaseOts(baseRecv, baseChoice, sendChl); });
+        recv.setBaseOts(baseSend, prng0, recvChl);
+        a.get();
+    }
+
 
     void testNco(
         NcoOtExtSender &sender,
@@ -48,6 +72,7 @@ namespace tests_libOTe
         PRNG &prng1,
         Channel &recvChl)
     {
+
 
         u64 stepSize = 33;
         std::vector<block> inputs(stepSize);
@@ -123,74 +148,6 @@ namespace tests_libOTe
             }
         }
 
-
-        //block input;
-        //for (size_t j = 0; j < 2; j++)
-        //{
-
-        //    auto thrd = std::thread([&]() {
-        //        sender.init(numOTs, prng0, sendChl);
-        //    });
-
-        //    recv.init(numOTs, prng1, recvChl);
-
-        //    thrd.join();
-
-
-        //    for (u64 i = 0; i < numOTs; ++i)
-        //    {
-        //        block input = prng0.get<block>();
-
-
-        //        bool skip = prng0.get<bool>();
-
-        //        block encoding1, encoding2;
-        //        if (skip)
-        //        {
-        //            recv.zeroEncode(i);
-        //        }
-        //        else
-        //        {
-        //            recv.encode(i, &input, &encoding1);
-        //        }
-
-        //        recv.sendCorrection(recvChl, 1);
-        //        sender.recvCorrection(sendChl, 1);
-
-        //        sender.encode(i, &input, &encoding2);
-
-        //        if (!skip && neq(encoding1, encoding2))
-        //        {
-        //            std::cout << " = failed " << i << std::endl;
-        //            throw UnitTestFail(LOCATION);
-        //        }
-
-        //        input = prng0.get<block>();
-
-
-        //        sender.encode(i, &input, &encoding2);
-
-        //        if (!skip && eq(encoding1, encoding2))
-        //        {
-        //            std::cout << " != failed " << i << std::endl;
-        //            throw UnitTestFail(LOCATION);
-        //        }
-        //    }
-
-        //    thrd = std::thread([&]() {recv.check(recvChl, ZeroBlock); });
-        //    try {
-
-        //        sender.check(sendChl, ZeroBlock);
-        //    }
-        //    catch (...)
-        //    {
-        //        std::cout << " check failed " << std::endl;
-        //        thrd.join();
-        //        throw;
-        //    }
-
-        //    thrd.join();
-        //}
     }
 
     void KkrtNcoOt_Test_Impl()
@@ -371,30 +328,43 @@ namespace tests_libOTe
         auto sendChl = ep0.addChannel(name, name);
 
 
-        LinearCode code;
-        code.load(bch511_binary, sizeof(bch511_binary));
-
         OosNcoOtSender sender;
         OosNcoOtReceiver recv;
 
         sender.configure(true, 40, 50);
         recv.configure(true, 40, 50);
-        u64 baseCount = sender.getBaseOTCount();
-        //u64 codeSize = (baseCount + 127) / 128;
 
-        std::vector<block> baseRecv(baseCount);
-        std::vector<std::array<block, 2>> baseSend(baseCount);
-        BitVector baseChoice(baseCount);
-        baseChoice.randomize(prng0);
-
-        prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-        for (u64 i = 0; i < baseCount; ++i)
+        if (1)
         {
-            baseRecv[i] = baseSend[i][baseChoice[i]];
+            setBaseOts(sender, recv, sendChl, recvChl);
+            //for (u64 i = 0; i < sender.mBaseChoiceBits.size(); ++i)
+            //{
+            //    auto b = sender.mBaseChoiceBits[i];
+            //    if (neq(sender.mGens[i].getSeed(), recv.mGens[i][b].getSeed()))
+            //        throw RTE_LOC;
+            //}
+        }
+        else
+        {
+            u64 baseCount = sender.getBaseOTCount();
+            //u64 codeSize = (baseCount + 127) / 128;
+
+            std::vector<block> baseRecv(baseCount);
+            std::vector<std::array<block, 2>> baseSend(baseCount);
+            BitVector baseChoice(baseCount);
+            baseChoice.randomize(prng0);
+
+            prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+            for (u64 i = 0; i < baseCount; ++i)
+            {
+                baseRecv[i] = baseSend[i][baseChoice[i]];
+            }
+
+            auto a = std::async([&]() {sender.setBaseOts(baseRecv, baseChoice, sendChl); });
+            recv.setBaseOts(baseSend, prng0, recvChl);
+            a.get();
         }
 
-        sender.setBaseOts(baseRecv, baseChoice);
-        recv.setBaseOts(baseSend);
 
         testNco(sender, numOTs, prng0, sendChl, recv, prng1, recvChl);
 
@@ -432,22 +402,9 @@ namespace tests_libOTe
 
         Rr17NcoOtSender sender;
         Rr17NcoOtReceiver recv;
-        u64  baseCount;
+        //u64  baseCount;
         sender.configure(true, 40, inputSize);
         recv.configure(true, 40, inputSize);
-
-        baseCount = sender.getBaseOTCount();
-
-        std::vector<block> baseRecv(baseCount);
-        std::vector<std::array<block, 2>> baseSend(baseCount);
-        BitVector baseChoice(baseCount);
-        baseChoice.randomize(prng0);
-
-        prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-        for (u64 i = 0; i < baseCount; ++i)
-        {
-            baseRecv[i] = baseSend[i][baseChoice[i]];
-        }
 
         std::string name = "n";
         IOService ios(0);
@@ -459,8 +416,7 @@ namespace tests_libOTe
 
 
 
-        sender.setBaseOts(baseRecv, baseChoice);
-        recv.setBaseOts(baseSend);
+        setBaseOts(sender, recv, sendChl, recvChl);
 
         testNco(sender, numOTs, prng0, sendChl, recv, prng1, recvChl);
 

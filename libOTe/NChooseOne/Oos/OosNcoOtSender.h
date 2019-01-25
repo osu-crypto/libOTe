@@ -90,7 +90,7 @@ namespace osuCrypto {
         // @ choices: The select bits that were used in the base OT
         void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices) override;
+            const BitVector& choices, Channel& chl) override;
 
         // Performs the PRNG expantion and transpose operations. This sets the 
         // internal data structures that are needed for the subsequent encode(..)
@@ -140,7 +140,7 @@ namespace osuCrypto {
         // @ chl: the channel that will be used to communicate
         // @ seed: a random seed that will be used in the function
         void check(Channel& chl, block seed) override;
-        
+
 
         // Creates a new OT extesion of the same type that can be used
         // in parallel to the original. Each will be independent and can
@@ -161,6 +161,12 @@ namespace osuCrypto {
         void sendChallenge(Channel& chl, block seed);
         void computeProof();
         void recvProof(Channel& chl);
+
+
+
+        void setUniformBaseOts(
+            span<block> baseRecvOts,
+            const BitVector& choices);
     };
 }
 

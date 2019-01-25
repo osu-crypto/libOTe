@@ -12,15 +12,37 @@ using namespace std;
 
 namespace osuCrypto
 {
-    void KosOtExtReceiver::setBaseOts(span<std::array<block, 2>> baseOTs)
+    KosOtExtReceiver::KosOtExtReceiver(SetUniformOts, span<std::array<block, 2>> baseOTs)
     {
-        if (baseOTs.size() != gOtExtBaseOtCount)
-            throw std::runtime_error(LOCATION);
+        setUniformBaseOts(baseOTs);
+    }
 
+    void KosOtExtReceiver::setUniformBaseOts(span<std::array<block, 2>> baseOTs)
+    {
         for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {
             mGens[i][0].SetSeed(baseOTs[i][0]);
             mGens[i][1].SetSeed(baseOTs[i][1]);
+        }
+
+        mHasBase = true;
+    }
+
+    void KosOtExtReceiver::setBaseOts(span<std::array<block, 2>> baseOTs, PRNG& prng, Channel&chl)
+    {
+        if (baseOTs.size() != gOtExtBaseOtCount)
+            throw std::runtime_error(LOCATION);
+
+        auto rand = prng.get<block>();
+        chl.asyncSendCopy(rand);
+        BitIterator iter((u8*)&rand, 0);
+
+        for (u64 i = 0; i < gOtExtBaseOtCount; i++)
+        {
+            mGens[i][0].SetSeed(baseOTs[i][0 ^ *iter]);
+            mGens[i][1].SetSeed(baseOTs[i][1 ^ *iter]);
+
+            ++iter;
         }
 
 
@@ -37,7 +59,7 @@ namespace osuCrypto
             baseRecvOts[i][1] = mGens[i][1].get<block>();
         }
 
-        return KosOtExtReceiver(baseRecvOts);
+        return KosOtExtReceiver(SetUniformOts{}, baseRecvOts);
     }
 
     std::unique_ptr<OtExtReceiver> KosOtExtReceiver::split()
@@ -50,7 +72,7 @@ namespace osuCrypto
             baseRecvOts[i][1] = mGens[i][1].get<block>();
         }
 
-        return std::make_unique<KosOtExtReceiver>(baseRecvOts);
+        return std::make_unique<KosOtExtReceiver>(SetUniformOts{}, baseRecvOts);
     }
 
 
@@ -172,8 +194,8 @@ namespace osuCrypto
                 if (step)
                 {
                     uBuff.resize(step * 128 * superBlkSize);
-					uIter = (block*)uBuff.data();
-					uEnd = uIter + uBuff.size();
+                    uIter = (block*)uBuff.data();
+                    uEnd = uIter + uBuff.size();
                 }
             }
 
@@ -264,8 +286,8 @@ namespace osuCrypto
         // this buffer will be sent to the other party to prove we used the
         // same value of r in all of the column vectors...
         std::vector<block> correlationData(3);
-        block& x =  correlationData[0];
-        block& t =  correlationData[1];
+        block& x = correlationData[0];
+        block& t = correlationData[1];
         block& t2 = correlationData[2];
         x = t = t2 = ZeroBlock;
         block ti, ti2;

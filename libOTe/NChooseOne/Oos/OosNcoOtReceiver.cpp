@@ -11,8 +11,28 @@ using namespace std;
 
 namespace osuCrypto
 {
+    void OosNcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts, PRNG & prng, Channel & chl)
+    {
+        if (u64(baseRecvOts.size()) != u64(mGens.size()))
+            throw std::runtime_error("rt error at " LOCATION);
 
-    void OosNcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts)
+        BitVector delta(getBaseOTCount());
+        delta.randomize(prng);
+
+        auto iter = delta.begin();
+        for (u64 i = 0; i < mGens.size(); i++)
+        {
+            mGens[i][0].SetSeed(baseRecvOts[i][0 ^ *iter]);
+            mGens[i][1].SetSeed(baseRecvOts[i][1 ^ *iter]);
+            ++iter;
+        }
+
+
+        mHasBase = true;
+        chl.asyncSend(std::move(delta));
+    }
+
+    void OosNcoOtReceiver::setUniformBaseOts(span<std::array<block, 2>> baseRecvOts)
     {
 
         if (u64(baseRecvOts.size()) != u64(mGens.size()))
@@ -169,7 +189,7 @@ namespace osuCrypto
                 base[i][0] = mGens[i][0].get<block>();
                 base[i][1] = mGens[i][1].get<block>();
             }
-            raw.setBaseOts(base);
+            raw.setUniformBaseOts(base);
         }
 
         return std::move(raw);
@@ -187,8 +207,6 @@ namespace osuCrypto
         u64 destSize)
     {
 #ifndef NDEBUG
-        //if (choice.size() != mCode.plaintextBlkSize())
-        //    throw std::invalid_argument("");
         if (mInputByteCount == 0)
             throw std::runtime_error("configure must be called first");
 
@@ -200,6 +218,7 @@ namespace osuCrypto
 
         mEncodeFlags[otIdx] = 1;
 #endif // !NDEBUG
+
         block* t0Val = mT0.data() + mT0.stride() * otIdx;
         block* t1Val = mT1.data() + mT0.stride() * otIdx;
         block* wVal = mW.data() + mW.stride() * otIdx;
@@ -210,13 +229,8 @@ namespace osuCrypto
         std::array<block, 10> codeword = { ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock, ZeroBlock };
         mCode.encode((u8*)wVal, (u8*)codeword.data());
 
-        //std::cout << "encode[" << otIdx << "] = " << BitVector((u8*)wVal, 76).hex() << " ->  " << codeword[0] << std::endl;
-
-
-
 
         // encode the correction value as u = T0 + T1 + c(w), there c(w) is a codeword.
-
         if (mT0.stride() == 4)
         {
 

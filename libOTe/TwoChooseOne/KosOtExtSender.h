@@ -12,6 +12,8 @@ namespace osuCrypto {
         public OtExtSender, public TimerAdapter
     {
     public:
+        struct SetUniformOts {};
+
 
         std::array<PRNG, gOtExtBaseOtCount> mGens;
         BitVector mBaseChoiceBits;
@@ -21,11 +23,9 @@ namespace osuCrypto {
         KosOtExtSender(KosOtExtSender&&) = default;
 
         KosOtExtSender(
+            SetUniformOts,
             span<block> baseRecvOts,
-            const BitVector& choices)
-        {
-            setBaseOts(baseRecvOts, choices);
-        }
+            const BitVector& choices);
 
         void operator=(KosOtExtSender&& v)
         {
@@ -53,7 +53,11 @@ namespace osuCrypto {
         // See frontend/main.cpp for an example. 
         void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices) override;
+            const BitVector& choices, Channel&) override;
+
+        void setUniformBaseOts(
+            span<block> baseRecvOts,
+            const BitVector& choices);
 
         // Takes a destination span of two blocks and performs OT extension
         // where the destination span is populated (written to) with the random

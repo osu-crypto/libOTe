@@ -20,12 +20,17 @@ namespace osuCrypto
 
         //PRNG prng(ZeroBlock);
         //mCode.random(prng, baseOTs.size(), 128);
+        //auto rand = prng.get<block>();
+        //chl.asyncSendCopy(rand);
+        //BitIterator iter((u8*)&rand, 0);
 
         mGens.resize(baseOTs.size());
         for (u64 i = 0; i <u64(baseOTs.size()); i++)
         {
-            mGens[i][0].SetSeed(baseOTs[i][0]);
-            mGens[i][1].SetSeed(baseOTs[i][1]);
+            mGens[i][0].SetSeed(baseOTs[i][0]);// ^ *iter]);
+            mGens[i][1].SetSeed(baseOTs[i][1]);// ^ *iter]);
+
+            //++iter;
         }
 
 

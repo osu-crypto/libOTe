@@ -40,8 +40,15 @@ namespace osuCrypto
         }
 
         // sets the base OTs.
+        void setBaseOts(span<std::array<block, 2>> baseSendOts);
+
+        // sets the base OTs.
         void setBaseOts(
-            span<std::array<block, 2>> baseSendOts)override;
+            span<std::array<block, 2>> baseSendOts,
+            PRNG& prng,
+            Channel& chl)override {
+            setBaseOts(baseSendOts);
+        };
 
         // returns an independent instance of this extender which can securely be
         // used concurrently to this current one. The base OTs for the new instance 

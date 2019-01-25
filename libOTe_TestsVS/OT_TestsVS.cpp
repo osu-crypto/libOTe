@@ -39,11 +39,11 @@ namespace tests_libOTe
             KosOtExt_100Receive_Test_Impl();
         }
 
-        TEST_METHOD(LzKos_200Receive_TestVS)
-        {
-            InitDebugPrinting();
-            LzKosOtExt_100Receive_Test_Impl();
-        }
+        //TEST_METHOD(LzKos_200Receive_TestVS)
+        //{
+        //    InitDebugPrinting();
+        //    LzKosOtExt_100Receive_Test_Impl();
+        //}
 
         TEST_METHOD(KosDot_200Receive_TestVS)
         {

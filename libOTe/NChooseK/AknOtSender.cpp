@@ -1,6 +1,5 @@
 #include "AknOtSender.h"
 #include "libOTe/Base/BaseOT.h"
-#include "libOTe/TwoChooseOne/LzKosOtExtSender.h"
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
@@ -43,7 +42,7 @@ namespace osuCrypto
             DefaultBaseOT base;
             base.receive(choices, baseMsg,prng, chl0, 2);
 
-            ots.setBaseOts(baseMsg, choices);
+            ots.setBaseOts(baseMsg, choices, chl0);
 #else
             throw std::runtime_error("Base OTs not set");
 #endif
@@ -135,15 +134,15 @@ namespace osuCrypto
 
                     ++sampleCount;
                     u8 cc = *choiceIter;
-                    if (cc == 0 && dynamic_cast<LzKosOtExtSender*>(&ots))
-                    {
-                        // if this is a zero message and our OT extension class is
-                        // LzKosOtExtSender, then we need to hash the 0-message now
-                        // because it was lazy and didn't ;)
-                        RandomOracle sha(sizeof(block));
-                        sha.Update(mMessages[i][0]);
-						sha.Final(mMessages[i][0]);
-                    }
+      //              if (cc == 0 && dynamic_cast<LzKosOtExtSender*>(&ots))
+      //              {
+      //                  // if this is a zero message and our OT extension class is
+      //                  // LzKosOtExtSender, then we need to hash the 0-message now
+      //                  // because it was lazy and didn't ;)
+      //                  RandomOracle sha(sizeof(block));
+      //                  sha.Update(mMessages[i][0]);
+						//sha.Final(mMessages[i][0]);
+      //              }
 
                     partialSum = partialSum ^ mMessages[i][cc];
                     onesCount += cc;

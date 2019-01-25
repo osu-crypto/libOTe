@@ -47,9 +47,11 @@ namespace osuCrypto
         // @ baseRecvOts: a std vector like container that which holds a series of both 
         //      2-choose-1 OT messages. The sender should hold one of them.
         // @ choices: The select bits that were used in the base OT
+        // @ chl: the channel that the data will be received over.
         virtual void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices) = 0;
+            const BitVector& choices,
+            Channel& chl) = 0;
         
 
         // Performs the PRNG expantion and transpose operations. This sets the 
@@ -150,7 +152,9 @@ namespace osuCrypto
         // Sets the base OTs. Note that getBaseOTCount() of OTs should be provided.
         // @ baseSendOts: a std vector like container that which holds a series of both 
         //      2-choose-1 OT messages. The sender should hold one of them.
-        virtual void setBaseOts(span<std::array<block, 2>> baseSendOts) = 0;
+        // @ prng: A random number generator used to randomize the base OTs.
+        // @ chl:  A channel that is used to send data over.
+        virtual void setBaseOts(span<std::array<block, 2>> baseSendOts, PRNG& prng, Channel& chl) = 0;
 
 
         // Perform some computation before encode(...) can be called. Note that this

@@ -8,8 +8,6 @@
 #include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosOtExtSender.h"
 #include "Common.h"
-#include "OTOracleReceiver.h"
-#include "OTOracleSender.h"
 #include <cryptoTools/Common/TestCollection.h>
 using namespace osuCrypto;
 
@@ -52,8 +50,8 @@ namespace tests_libOTe
         AknOtReceiver recv;
         AknOtSender send;
 
-        OTOracleReceiver otExtRecv(ZeroBlock);
-        OTOracleSender otExtSend(ZeroBlock);
+        KosOtExtReceiver otExtRecv;
+        KosOtExtSender otExtSend;
 
         PRNG
             sPrng(ZeroBlock),

@@ -18,28 +18,16 @@ namespace osuCrypto
     {
         return mKos.hasBaseOts();
     }
-    void Rr17NcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts)
+    void Rr17NcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts, PRNG& prng, Channel& chl)
     {
-        mKos.setBaseOts(baseRecvOts);
+        mKos.setBaseOts(baseRecvOts, prng, chl);
     }
     std::unique_ptr<NcoOtExtReceiver> Rr17NcoOtReceiver::split()
     {
-        auto ret = std::unique_ptr<NcoOtExtReceiver>(new Rr17NcoOtReceiver());
-
-        if (hasBaseOts())
-        {
-            std::vector<std::array<block, 2>> baseOts(mKos.mGens.size());
-
-            for (u64 i = 0; i < baseOts.size(); ++i)
-            {
-                baseOts[i][0] = mKos.mGens[i][0].get<block>();
-                baseOts[i][1] = mKos.mGens[i][1].get<block>();
-            }
-
-            ret->setBaseOts(baseOts);
-        }
-
-        ((Rr17NcoOtReceiver*)ret.get())->mEncodeSize = mEncodeSize;
+        auto p = new Rr17NcoOtReceiver;
+        auto ret = std::unique_ptr<NcoOtExtReceiver>(p);
+        p->mEncodeSize = mEncodeSize;
+        p->mKos = mKos.splitBase();
 
         return std::move(ret);
     }

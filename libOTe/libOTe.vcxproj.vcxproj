@@ -43,8 +43,6 @@
     <ClInclude Include="TwoChooseOne\KosDotExtSender.h" />
     <ClInclude Include="TwoChooseOne\KosOtExtReceiver.h" />
     <ClInclude Include="TwoChooseOne\KosOtExtSender.h" />
-    <ClInclude Include="TwoChooseOne\LzKosOtExtReceiver.h" />
-    <ClInclude Include="TwoChooseOne\LzKosOtExtSender.h" />
     <ClInclude Include="TwoChooseOne\OTExtInterface.h" />
     <ClInclude Include="TwoChooseOne\TcoOtDefines.h" />
   </ItemGroup>
@@ -70,8 +68,6 @@
     <ClCompile Include="TwoChooseOne\KosDotExtSender.cpp" />
     <ClCompile Include="TwoChooseOne\KosOtExtReceiver.cpp" />
     <ClCompile Include="TwoChooseOne\KosOtExtSender.cpp" />
-    <ClCompile Include="TwoChooseOne\LzKosOtExtReceiver.cpp" />
-    <ClCompile Include="TwoChooseOne\LzKosOtExtSender.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="CMakeLists.txt" />

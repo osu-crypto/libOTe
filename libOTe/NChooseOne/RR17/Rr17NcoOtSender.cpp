@@ -13,27 +13,31 @@ namespace osuCrypto
     }
 
     void Rr17NcoOtSender::setBaseOts(
-        span<block> baseRecvOts, const BitVector & choices)
+        span<block> baseRecvOts, const BitVector & choices, Channel& chl)
     {
-        mKos.setBaseOts(baseRecvOts, choices);
+        mKos.setBaseOts(baseRecvOts, choices, chl);
     }
 
     std::unique_ptr<NcoOtExtSender> Rr17NcoOtSender::split()
     {
-        auto ret = std::unique_ptr<NcoOtExtSender>(new Rr17NcoOtSender());
-        if (hasBaseOts())
-        {
+        auto p = new Rr17NcoOtSender;
+        auto ret = std::unique_ptr<NcoOtExtSender>(p);
+        p->mKos = mKos.splitBase();
+        p->mInputByteCount = mInputByteCount;
 
-            std::vector<block> baseOts(mKos.mBaseChoiceBits.size());
+        //if (hasBaseOts())
+        //{
 
-            for (u64 i = 0; i < baseOts.size(); ++i)
-            {
-                baseOts[i] = mKos.mGens[i].get<block>();
-            }
+        //    std::vector<block> baseOts(mKos.mBaseChoiceBits.size());
 
-            ret->setBaseOts(baseOts, mKos.mBaseChoiceBits);
-        }
-        ((Rr17NcoOtSender*)ret.get())->mInputByteCount = mInputByteCount;
+        //    for (u64 i = 0; i < baseOts.size(); ++i)
+        //    {
+        //        baseOts[i] = mKos.mGens[i].get<block>();
+        //    }
+
+        //    ret->setBaseOts(baseOts, mKos.mBaseChoiceBits);
+        //}
+        //((Rr17NcoOtSender*)ret.get())
 
         return std::move(ret);
     }

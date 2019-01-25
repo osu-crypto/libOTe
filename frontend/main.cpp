@@ -87,8 +87,10 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
     // now that we have (fake) base OTs, we need to set them on the first pair of extenders.
     // In real code you would only have a sender or reciever, not both. But we do 
     // here just showing the example. 
-    recvers[0].setBaseOts(baseSend);
-    senders[0].setBaseOts(baseRecv, baseChoice);
+    if(role)
+        recvers[0].setBaseOts(baseSend, prng0, chls[0]);
+    else
+        senders[0].setBaseOts(baseRecv, baseChoice, chls[0]);
 
     // now that we have one valid pair of extenders, we can call split on 
     // them to get more copies which can be used concurrently.
@@ -276,8 +278,10 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
     // now that we have (fake) base OTs, we need to set them on the first pair of extenders.
     // In real code you would only have a sender or reciever, not both. But we do 
     // here just showing the example. 
-    senders[0].setBaseOts(baseRecv, baseChoice);
-    receivers[0].setBaseOts(baseSend);
+    if(role)
+        receivers[0].setBaseOts(baseSend, prng0, chls[0]);
+    else
+        senders[0].setBaseOts(baseRecv, baseChoice, chls[0]);
 
     // for the rest of the extenders, call split. This securely 
     // creates two sets of extenders that can be used in parallel.
