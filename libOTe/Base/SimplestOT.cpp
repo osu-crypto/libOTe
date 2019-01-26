@@ -219,18 +219,18 @@ namespace osuCrypto
 
     void SimplestOT::exp(u64 n) 
     {
-        PRNG prng(ZeroBlock);
-        rand_source rand;
-        SENDER sender;
+        //PRNG prng(ZeroBlock);
+        //rand_source rand;
+        //SENDER sender;
 
         //sender_perf(&sender, rand, n);
     }
 
     void SimplestOT::add(u64 n)
     {
-        PRNG prng(ZeroBlock);
-        rand_source rand;
-        SENDER sender;
+        //PRNG prng(ZeroBlock);
+        //rand_source rand;
+        //SENDER sender;
 
         //sender_add(&sender, rand, n);
     }

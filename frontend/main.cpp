@@ -36,9 +36,15 @@ int miraclTestMain();
 
 #include <cryptoTools/Common/CLP.h>
 
+enum class Role
+{
+    Sender,
+    Receiver
+};
+
 
 template<typename NcoOtSender, typename  NcoOtReceiver>
-void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag)
+void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag)
 {
     const u64 step = 1024;
 
@@ -48,14 +54,16 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
     auto numOTs = totalOTs / numThreads;
 
 
-    auto rr = role ? SessionMode::Server : SessionMode::Client;
-
+    // get up the networking
+    auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
     IOService ios;
     Session  ep0(ios, ip, rr);
+    PRNG prng(sysRandomSeed());
 
+    // for each thread we need to construct a channel (socket) for it to communicate on.
     std::vector<Channel> chls(numThreads);
-    for (int k = 0; k < numThreads; ++k)
-        chls[k] = ep0.addChannel();
+    for (int i = 0; i < numThreads; ++i)
+        chls[i] = ep0.addChannel();
 
     std::vector<NcoOtReceiver> recvers(numThreads);
     std::vector<NcoOtSender> senders(numThreads);
@@ -68,29 +76,13 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
     recvers[0].configure(maliciousSecure, statSecParam, inputBitCount);
     senders[0].configure(maliciousSecure, statSecParam, inputBitCount);
 
-    auto baseCount = recvers[0].getBaseOTCount();
-
-    // once the number of base OTs is known, we need to perform them.
-    // In this example, we insecurely compute them in the clean. In real code
-    // you would want to use a real base OT to generate the base OT messages.
-    // See baseOT_example(...) for an example on how to compute these.
-    std::vector<block> baseRecv(baseCount);
-    std::vector<std::array<block, 2>> baseSend(baseCount);
-    BitVector baseChoice(baseCount);
-    PRNG prng0(ZeroBlock);
-    baseChoice.randomize(prng0);
-
-    prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-    for (u64 i = 0; i < baseCount; ++i)
-        baseRecv[i] = baseSend[i][baseChoice[i]];
-
-    // now that we have (fake) base OTs, we need to set them on the first pair of extenders.
-    // In real code you would only have a sender or reciever, not both. But we do 
-    // here just showing the example. 
-    if(role)
-        recvers[0].setBaseOts(baseSend, prng0, chls[0]);
+    // Generate new base OTs for the first extender. This will use
+    // the default BaseOT protocol. You can also manually set the
+    // base OTs with setBaseOts(...);
+    if(role == Role::Sender)
+        senders[0].genBaseOts(prng, chls[0]);
     else
-        senders[0].setBaseOts(baseRecv, baseChoice, chls[0]);
+        recvers[0].genBaseOts(prng, chls[0]);
 
     // now that we have one valid pair of extenders, we can call split on 
     // them to get more copies which can be used concurrently.
@@ -215,7 +207,7 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
     std::vector<std::thread> thds(numThreads);
     std::function<void(int)> routine;
     
-    if (role)
+    if (role == Role::Sender)
         routine = sendRoutine;
     else
         routine = recvRoutine;
@@ -234,13 +226,13 @@ void NChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, 
     auto e = time.setTimePoint("finish");
     auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
-    if(role)
+    if(role == Role::Sender)
         std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
 }
 
 
 template<typename OtExtSender, typename OtExtRecver>
-void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag)
+void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag)
 {
     if (totalOTs == 0)
         totalOTs = 1 << 20;
@@ -248,7 +240,7 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
     auto numOTs = totalOTs / numThreads;
 
     // get up the networking
-    auto rr = role ? SessionMode::Server : SessionMode::Client;
+    auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
     IOService ios;
     Session  ep0(ios, ip, rr);
     PRNG prng(sysRandomSeed());
@@ -265,7 +257,7 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
     // Now compute the base OTs, we need to set them on the first pair of extenders.
     // In real code you would only have a sender or reciever, not both. But we do 
     // here just showing the example. 
-    if (role)
+    if (role == Role::Receiver)
         receivers[0].genBaseOts(prng, chls[0]);
     else
         senders[0].genBaseOts(prng, chls[0]);
@@ -284,7 +276,7 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
         // get a random number generator seeded from the system
         PRNG prng(sysRandomSeed());
 
-        if (role)
+        if (role == Role::Receiver)
         {
             // construct the choices that we want.
             BitVector choice(numOTs);
@@ -329,14 +321,14 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
     auto e = timer.setTimePoint("finish");
     auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
-    if (role)
+    if (role == Role::Sender)
         std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
 }
 
 
 
 template<typename BaseOT>
-void baseOT_example(int role, int totalOTs, int numThreads, std::string ip, std::string tag)
+void baseOT_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag)
 {
     IOService ios;
     PRNG prng(sysRandomSeed());
@@ -347,7 +339,7 @@ void baseOT_example(int role, int totalOTs, int numThreads, std::string ip, std:
     if (numThreads > 1)
         std::cout << "multi threading for the base OT example is not implemented.\n" << std::flush;
 
-    if (role)
+    if (role == Role::Receiver)
     {
         auto chl0 = Session(ios, ip, SessionMode::Server).addChannel();
         BaseOT recv;
@@ -394,7 +386,7 @@ akn{ "a", "akn" },
 np{"np"},
 simple{ "simplest" };
 
-using ProtocolFunc = std::function<void(int, int, int, std::string, std::string)>;
+using ProtocolFunc = std::function<void(Role, int, int, std::string, std::string)>;
 
 bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
 {
@@ -409,15 +401,24 @@ bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
     {
         if (cmd.hasValue("r"))
         {
-            protocol(cmd.get<int>("r"), n, t, ip, tag.back());
+            auto role = cmd.get<int>("r") ? Role::Sender : Role::Receiver;
+            protocol(role, n, t, ip, tag.back());
         }
         else
         {
             auto thrd = std::thread([&] {
-                protocol(0, n, t, ip, tag.back());
+                try { protocol(Role::Sender, n, t, ip, tag.back()); }
+                catch (std::exception& e)
+                {
+                    lout << e.what() << std::endl;
+                }
             });
 
-            protocol(1, n, t, ip, tag.back());
+            try { protocol(Role::Receiver, n, t, ip, tag.back()); }
+            catch (std::exception& e)
+            {
+                lout << e.what() << std::endl;
+            }
             thrd.join();
         }
 

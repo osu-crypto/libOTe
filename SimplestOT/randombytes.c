@@ -45,4 +45,5 @@ rand_source default_rand_source()
     rand_source ret;
     ret.get = _impl_default_rand_source; // forward the call to randombytes(...)
     ret.ctx = 0; // no context.
+    return ret;
 }
