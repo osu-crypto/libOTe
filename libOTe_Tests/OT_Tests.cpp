@@ -356,6 +356,41 @@ namespace tests_libOTe
 		}
 	}
 
+    void OtExt_genBaseOts_Test_Impl()
+    {
+#ifdef LIBOTE_HAS_BASE_OT
+        IOService ios(0);
+        Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+        Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+        Channel senderChannel = ep1.addChannel();
+        Channel recvChannel = ep0.addChannel();
+
+        KosOtExtSender sender;
+        KosOtExtReceiver recv;
+
+        auto thrd = std::thread([&]() {
+            PRNG prng(ZeroBlock);
+            recv.genBaseOts(prng, recvChannel);
+        });
+
+        PRNG prng(OneBlock);
+        sender.genBaseOts(prng, senderChannel);
+        thrd.join();
+
+        for (u64 i = 0; i < sender.mGens.size(); ++i)
+        {
+            auto b = sender.mBaseChoiceBits[i];
+            if (neq(sender.mGens[i].getSeed(), recv.mGens[i][b].getSeed()))
+                throw RTE_LOC;
+
+            if (eq(sender.mGens[i].getSeed(), recv.mGens[i][b^1].getSeed()))
+                throw RTE_LOC;
+        }
+#else
+        throw UnitTestSkipped("no base OTs are enabled " LOCATION);
+#endif
+    }
+
 
 	void KosOtExt_100Receive_Test_Impl()
 	{

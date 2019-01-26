@@ -33,6 +33,12 @@ namespace osuCrypto
             v.mHasBase = false;
         }
 
+
+
+        // defaults to requiring 40 more base OTs. This gives 40 bits 
+        // of statistical secuirty.
+        u64 baseOtCount() const override { return gOtExtBaseOtCount + 40; }
+
         // returns whether the base OTs have been set. They must be set before
         // split or receive is called.
         bool hasBaseOts() const override

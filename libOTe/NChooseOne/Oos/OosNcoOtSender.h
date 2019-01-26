@@ -65,6 +65,7 @@ namespace osuCrypto {
             qSum = std::move(v.qSum);
         }
 
+        bool isMalicious() const override { return mMalicious; }
 
         // This function should be called first. It sets a variety of internal parameters such as
         // the number of base OTs that are required.

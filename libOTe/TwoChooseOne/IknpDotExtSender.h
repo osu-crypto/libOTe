@@ -36,6 +36,10 @@ namespace osuCrypto {
             v.mDelta = ZeroBlock;
         }
 
+        // defaults to requiring 40 more base OTs. This gives 40 bits 
+        // of statistical secuirty.
+        u64 baseOtCount() const override { return gOtExtBaseOtCount + 40; }
+
         // return true if this instance has valid base OTs. 
         bool hasBaseOts() const override
         {

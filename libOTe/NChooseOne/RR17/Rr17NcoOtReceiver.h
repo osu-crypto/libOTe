@@ -26,6 +26,7 @@ namespace osuCrypto
         Rr17NcoOtReceiver();
         ~Rr17NcoOtReceiver();
 
+        bool isMalicious() const override { return true; }
 
         u64 getBaseOTCount() const override { return 128; }
         bool hasBaseOts() const override;

@@ -15,6 +15,8 @@ namespace osuCrypto
         std::vector<u8> mCorrection;
         u64 mCorrectionIdx, mInputByteCount;
 
+        bool isMalicious() const override { return true; }
+
 
         u64 getBaseOTCount() const override { return 128; }
 

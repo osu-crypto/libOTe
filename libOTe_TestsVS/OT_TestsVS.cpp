@@ -39,11 +39,11 @@ namespace tests_libOTe
             KosOtExt_100Receive_Test_Impl();
         }
 
-        //TEST_METHOD(LzKos_200Receive_TestVS)
-        //{
-        //    InitDebugPrinting();
-        //    LzKosOtExt_100Receive_Test_Impl();
-        //}
+        TEST_METHOD(OtExt_genBaseOts_TestVS)
+        {
+            InitDebugPrinting();
+            OtExt_genBaseOts_Test_Impl();
+        }
 
         TEST_METHOD(KosDot_200Receive_TestVS)
         {
@@ -64,14 +64,18 @@ namespace tests_libOTe
             KkrtNcoOt_Test_Impl();
         }
 
-
         TEST_METHOD(Oos_200Receive_TestVS)
         {
             InitDebugPrinting(); 
             OosNcoOt_Test_Impl();
         }
 
-
+        TEST_METHOD(NcoOt_genBaseOts_TestVS)
+        {
+            InitDebugPrinting();
+            NcoOt_genBaseOts_Test_Impl();
+        }
+        
         TEST_METHOD(Rr17_200Receive_TestVS)
         {
             InitDebugPrinting();

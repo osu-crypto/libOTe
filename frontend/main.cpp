@@ -251,37 +251,24 @@ void TwoChooseOne_example(int role, int totalOTs, int numThreads, std::string ip
     auto rr = role ? SessionMode::Server : SessionMode::Client;
     IOService ios;
     Session  ep0(ios, ip, rr);
+    PRNG prng(sysRandomSeed());
 
     // for each thread we need to construct a channel (socket) for it to communicate on.
     std::vector<Channel> chls(numThreads);
     for (int i = 0; i < numThreads; ++i)
         chls[i] = ep0.addChannel();
 
-    // cheat and compute the base OT in the clear.
-    u64 baseCount = 128;
-    std::vector<block> baseRecv(baseCount);
-    std::vector<std::array<block, 2>> baseSend(baseCount);
-    BitVector baseChoice(baseCount);
-
-    // insecurely populate the send messages from a fixed seed (ZeroBlock). In real code
-    // you would want to use a real base OT to generate the base OT messages.
-    // See baseOT_example(...) for an example on how to compute these.
-    PRNG prng0(ZeroBlock);
-    baseChoice.randomize(prng0);
-    prng0.get(baseSend.data(), baseSend.size());
-    for (u64 i = 0; i < baseCount; ++i)
-        baseRecv[i] = baseSend[i][baseChoice[i]];
 
     std::vector<OtExtSender> senders(numThreads);
     std::vector<OtExtRecver> receivers(numThreads);
 
-    // now that we have (fake) base OTs, we need to set them on the first pair of extenders.
+    // Now compute the base OTs, we need to set them on the first pair of extenders.
     // In real code you would only have a sender or reciever, not both. But we do 
     // here just showing the example. 
-    if(role)
-        receivers[0].setBaseOts(baseSend, prng0, chls[0]);
+    if (role)
+        receivers[0].genBaseOts(prng, chls[0]);
     else
-        senders[0].setBaseOts(baseRecv, baseChoice, chls[0]);
+        senders[0].genBaseOts(prng, chls[0]);
 
     // for the rest of the extenders, call split. This securely 
     // creates two sets of extenders that can be used in parallel.

@@ -54,15 +54,24 @@ namespace osuCrypto
             span<std::array<block,2>> baseSendOts,
             PRNG& prng,
             Channel& chl) = 0;
+        
+        virtual u64 baseOtCount() const { return gOtExtBaseOtCount; }
 
         virtual bool hasBaseOts() const = 0; 
+        
         virtual std::unique_ptr<OtExtReceiver> split() = 0;
+
+        // use the default base OT class to generate the
+        // base OTs that are required.
+        void genBaseOts(PRNG& prng, Channel& chl);
     };
 
     class OtExtSender : public OtSender
     {
     public:
         OtExtSender() {}
+
+        virtual u64 baseOtCount() const { return gOtExtBaseOtCount; }
 
         virtual bool hasBaseOts() const = 0;
 
@@ -72,6 +81,11 @@ namespace osuCrypto
             Channel& chl)  = 0;
 
         virtual std::unique_ptr<OtExtSender> split() = 0;
+
+
+        // use the default base OT class to generate the
+        // base OTs that are required.
+        void genBaseOts(PRNG& prng, Channel& chl);
     };
 
 

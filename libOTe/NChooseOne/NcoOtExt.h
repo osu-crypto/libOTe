@@ -43,6 +43,13 @@ namespace osuCrypto
         // congifure(...) should be called first.
         virtual u64 getBaseOTCount() const = 0;
 
+        // Returns whether the extension is configured to be malicious.
+        // congifure(...) should be called first.
+        virtual bool isMalicious() const = 0;
+
+
+        void genBaseOts(PRNG& prng, Channel& chl);
+
         // Sets the base OTs. Note that  getBaseOTCount() number of OTs should be provided
         // @ baseRecvOts: a std vector like container that which holds a series of both 
         //      2-choose-1 OT messages. The sender should hold one of them.
@@ -148,6 +155,12 @@ namespace osuCrypto
         // Returns the number of base OTs that should be provided to setBaseOts(...).
         // congifure(...) should be called first.
         virtual u64 getBaseOTCount() const = 0;
+        
+        // Returns whether the extension is configured to be malicious.
+        // congifure(...) should be called first.
+        virtual bool isMalicious() const = 0;
+
+        void genBaseOts(PRNG& prng, Channel& chl);
 
         // Sets the base OTs. Note that getBaseOTCount() of OTs should be provided.
         // @ baseSendOts: a std vector like container that which holds a series of both 

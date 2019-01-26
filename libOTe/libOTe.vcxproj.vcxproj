@@ -52,6 +52,7 @@
     <ClCompile Include="NChooseK\AknOtSender.cpp" />
     <ClCompile Include="NChooseOne\Kkrt\KkrtNcoOtReceiver.cpp" />
     <ClCompile Include="NChooseOne\Kkrt\KkrtNcoOtSender.cpp" />
+    <ClCompile Include="NChooseOne\NcoOtExt.cpp" />
     <ClCompile Include="NChooseOne\Oos\OosNcoOtReceiver.cpp" />
     <ClCompile Include="NChooseOne\Oos\OosNcoOtSender.cpp" />
     <ClCompile Include="NChooseOne\RR17\Rr17NcoOtReceiver.cpp" />
@@ -68,6 +69,7 @@
     <ClCompile Include="TwoChooseOne\KosDotExtSender.cpp" />
     <ClCompile Include="TwoChooseOne\KosOtExtReceiver.cpp" />
     <ClCompile Include="TwoChooseOne\KosOtExtSender.cpp" />
+    <ClCompile Include="TwoChooseOne\OTExtInterface.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="CMakeLists.txt" />

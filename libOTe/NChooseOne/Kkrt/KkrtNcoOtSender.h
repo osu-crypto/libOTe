@@ -56,6 +56,7 @@ namespace osuCrypto {
             mMultiKeyAES = std::move(v.mMultiKeyAES);
         }
 
+        bool isMalicious() const override { return false; }
 
         // This function should be called first. It sets a variety of internal parameters such as
         // the number of base OTs that are required.
