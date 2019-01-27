@@ -6,7 +6,6 @@
 #undef GetMessage
 #endif
 
-
 namespace osuCrypto
 {
     class PRNG;
@@ -22,11 +21,22 @@ namespace osuCrypto
     public:
         OtReceiver() {}
 
+
+        // Receive random strings indexed by choices. The random strings will be written to 
+        // messages.
         virtual void receive(
             const BitVector& choices,
             span<block> messages,
             PRNG& prng,
             Channel& chl) = 0;
+
+        // Receive chosen strings indexed by choices. The chosen strings will be written to 
+        // messages.
+        void receiveChosen(
+            const BitVector& choices,
+            span<block> recvMessages,
+            PRNG& prng,
+            Channel& chl);
 
     };
 
@@ -35,13 +45,20 @@ namespace osuCrypto
     public:
         OtSender() {}
 
+        // send random strings. The random strings will be written to 
+        // messages.
         virtual void send(
             span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl) = 0;
 
-    };
+        // send chosen strings. Thosen strings are read from messages.
+        void sendChosen(
+            span<std::array<block, 2>> messages,
+            PRNG& prng,
+            Channel& chl);
 
+    };
 
 
     class OtExtReceiver : public OtReceiver
@@ -49,16 +66,19 @@ namespace osuCrypto
     public:
         OtExtReceiver() {}
 
-
+        // sets the base OTs that are then used to extend
         virtual void setBaseOts(
             span<std::array<block,2>> baseSendOts,
             PRNG& prng,
             Channel& chl) = 0;
         
+        // the number of base OTs that should be set.
         virtual u64 baseOtCount() const { return gOtExtBaseOtCount; }
 
+        // returns true if the base OTs are currently set.
         virtual bool hasBaseOts() const = 0; 
         
+        // Returns an indpendent copy of this extender.
         virtual std::unique_ptr<OtExtReceiver> split() = 0;
 
         // use the default base OT class to generate the
@@ -71,17 +91,20 @@ namespace osuCrypto
     public:
         OtExtSender() {}
 
+        // the number of base OTs that should be set.
         virtual u64 baseOtCount() const { return gOtExtBaseOtCount; }
 
+        // returns true if the base OTs are currently set.
         virtual bool hasBaseOts() const = 0;
 
+        // sets the base OTs that are then used to extend
         virtual void setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices,
             Channel& chl)  = 0;
 
+        // Returns an indpendent copy of this extender.
         virtual std::unique_ptr<OtExtSender> split() = 0;
-
 
         // use the default base OT class to generate the
         // base OTs that are required.

@@ -429,6 +429,62 @@ namespace tests_libOTe
     }
 
 
+    void NcoOt_chosen_Impl()
+    {
+
+        setThreadName("Sender");
+
+        PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
+        PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
+
+        u64 numOTs = 80;
+        u64 inputSize = 8;
+
+        OosNcoOtSender sender;
+        OosNcoOtReceiver recv;
+        //u64  baseCount;
+        sender.configure(true, 40, inputSize);
+        recv.configure(true, 40, inputSize);
+
+        std::string name = "n";
+        IOService ios(0);
+        Session ep0(ios, "localhost", 1212, SessionMode::Server, name);
+        Session ep1(ios, "localhost", 1212, SessionMode::Client, name);
+        auto recvChl = ep1.addChannel(name, name);
+        auto sendChl = ep0.addChannel(name, name);
+
+        setBaseOts(sender, recv, sendChl, recvChl);
+
+        auto messageCount = 1ull << inputSize;
+        Matrix<block> sendMessage(numOTs, messageCount);
+        std::vector<block> recvMessage(numOTs);
+
+        prng0.get(sendMessage.data(), sendMessage.size());
+
+
+        std::vector<u64> choices(numOTs);
+        for (u64 i = 0; i < choices.size(); ++i)
+        {
+            choices[i] = prng0.get<u8>();
+        }
+
+        auto thrd = std::thread([&]() {
+            recv.receiveChosen(messageCount, recvMessage, choices, prng1, recvChl);
+        });
+
+        sender.sendChosen(sendMessage, prng0, sendChl);
+        thrd.join();
+
+        for (u64 i = 0; i < choices.size(); ++i)
+        {
+            if (neq(recvMessage[i], sendMessage(i, choices[i])))
+                throw UnitTestFail("bad message " LOCATION);
+        }
+
+    }
+
+
+
     void NcoOt_genBaseOts_Test_Impl()
     {
 #ifdef LIBOTE_HAS_BASE_OT

@@ -125,6 +125,13 @@ namespace osuCrypto
         // in parallel to the original. Each will be independent and can
         // securely be used in parallel. 
         virtual std::unique_ptr<NcoOtExtSender> split() = 0;
+
+
+        // Send the chosen messages. The receiver will learn one message per row.
+        // @ messages: the messages that should sent.
+        // @ prng: randomness source
+        // @ chl: the socket that should be communicated over.
+        void sendChosen(MatrixView<block> messages, PRNG& prng, Channel& chl);
     };
 
 
@@ -222,6 +229,14 @@ namespace osuCrypto
         // Allows a single NcoOtExtReceiver to be split into two, with each being 
         // independent of each other.
         virtual std::unique_ptr<NcoOtExtReceiver> split() = 0;
+
+        // Receive the chosen messages specified by the choices. 
+        // @ numMsgsPerOT: The number of choices each OT has. That is, choices[i] < numMsgsPerOT.
+        // @ messages: the location that the received messages should be written to.
+        // @ choices: the choices for which messages should be received.
+        // @ prng: randomness source
+        // @ chl: the socket that should be communicated over.
+        void receiveChosen(u64 numMsgsPerOT, span<block> messages, span<u64> choices, PRNG& prng, Channel& chl);
     };
 
 }

@@ -8,6 +8,7 @@ namespace tests_libOTe
     void OosNcoOt_Test_Impl();
     void Rr17NcoOt_Test_Impl();
     void NcoOt_genBaseOts_Test_Impl();
+    void NcoOt_chosen_Impl();
 
     void LinearCode_Test_Impl();
     void LinearCode_subBlock_Test_Impl();

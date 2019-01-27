@@ -11,6 +11,7 @@ namespace tests_libOTe
     void KosOtExt_100Receive_Test_Impl();
     void KosDotExt_100Receive_Test_Impl();
     void OtExt_genBaseOts_Test_Impl();
+    void OtExt_Chosen_Test_Impl();
         //void LzKosOtExt_100Receive_Test_Impl();
     //void Kos2OtExt_100Receive_Test_Impl();
 	void IknpOtExt_100Receive_Test_Impl();

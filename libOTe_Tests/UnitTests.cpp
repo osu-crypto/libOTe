@@ -22,6 +22,7 @@ namespace tests_libOTe
         tc.add("TransposeMatrixView_Test_Impl           ", TransposeMatrixView_Test_Impl);
         tc.add("Transpose_Test_Impl                     ", Transpose_Test_Impl);
         tc.add("OtExt_genBaseOts_Test_Impl              ", OtExt_genBaseOts_Test_Impl);
+        tc.add("OtExt_Chosen_Test_Impl                  ", OtExt_Chosen_Test_Impl);
         tc.add("KosOtExt_100Receive_Test_Impl           ", KosOtExt_100Receive_Test_Impl);
         tc.add("KosDotExt_100Receive_Test_Impl          ", KosDotExt_100Receive_Test_Impl);
         tc.add("IknpOtExt_100Receive_Test_Impl          ", IknpOtExt_100Receive_Test_Impl);

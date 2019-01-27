@@ -459,10 +459,60 @@ namespace tests_libOTe
 
 		ios.stop();
 
-		//senderNetMgr.Stop();
-		//recvNetMg
 	}
 
+    void OtExt_Chosen_Test_Impl()
+    {
+
+
+        IOService ios(0);
+        Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server, "ep");
+        Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client, "ep");
+        Channel senderChannel = ep1.addChannel("chl", "chl");
+        Channel recvChannel = ep0.addChannel("chl", "chl");
+
+
+        u64 numOTs = 200;
+
+        std::vector<block> recvMsg(numOTs), baseRecv(128);
+        std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+        BitVector choices(numOTs), baseChoice(128);
+        PRNG prng0(ZeroBlock);
+        choices.randomize(prng0);
+        baseChoice.randomize(prng0);
+
+
+        for (u64 i = 0; i < 128; ++i)
+        {
+            baseSend[i][0] = prng0.get<block>();
+            baseSend[i][1] = prng0.get<block>();
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+        }
+
+
+        prng0.get(sendMsg.data(), sendMsg.size());
+
+        KosOtExtSender sender;
+        KosOtExtReceiver recv;
+
+        auto thrd = std::thread([&]() { 
+            PRNG prng1(OneBlock); 
+            recv.setBaseOts(baseSend, prng1, recvChannel);
+            recv.receiveChosen(choices, recvMsg, prng1, recvChannel); 
+        });
+
+        sender.setBaseOts(baseRecv, baseChoice, senderChannel);
+        sender.sendChosen(sendMsg, prng0, senderChannel);
+
+        thrd.join();
+
+
+        for (u64 i = 0; i < numOTs; ++i)
+        {
+            if (neq(recvMsg[i], sendMsg[i][choices[i]]))
+                throw UnitTestFail("bad message " LOCATION);
+        }
+    }
 
 
 	//void LzKosOtExt_100Receive_Test_Impl()

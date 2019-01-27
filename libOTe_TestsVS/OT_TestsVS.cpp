@@ -45,6 +45,12 @@ namespace tests_libOTe
             OtExt_genBaseOts_Test_Impl();
         }
 
+        TEST_METHOD(OtExt_chosen_TestVS)
+        {
+            InitDebugPrinting();
+            OtExt_Chosen_Test_Impl();
+        }
+
         TEST_METHOD(KosDot_200Receive_TestVS)
         {
             InitDebugPrinting();
@@ -75,7 +81,12 @@ namespace tests_libOTe
             InitDebugPrinting();
             NcoOt_genBaseOts_Test_Impl();
         }
-        
+
+        TEST_METHOD(NcoOt_chosen_TestVS)
+        {
+            InitDebugPrinting();
+            NcoOt_chosen_Impl();
+        }
         TEST_METHOD(Rr17_200Receive_TestVS)
         {
             InitDebugPrinting();

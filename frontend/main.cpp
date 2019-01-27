@@ -51,8 +51,9 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
     if (totalOTs == 0)
         totalOTs = 1 << 20;
 
+    bool randomOT = true;
     auto numOTs = totalOTs / numThreads;
-
+    auto numChosenMsgs = 256;
 
     // get up the networking
     auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
@@ -71,7 +72,7 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
     // all Nco Ot extenders must have configure called first. This determines
     // a variety of parameters such as how many base OTs are required.
     bool maliciousSecure = false;
-    bool statSecParam= 40;
+    bool statSecParam = 40;
     bool inputBitCount = 76; // the kkrt protocol default to 128 but oos can only do 76.
     recvers[0].configure(maliciousSecure, statSecParam, inputBitCount);
     senders[0].configure(maliciousSecure, statSecParam, inputBitCount);
@@ -79,7 +80,7 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
     // Generate new base OTs for the first extender. This will use
     // the default BaseOT protocol. You can also manually set the
     // base OTs with setBaseOts(...);
-    if(role == Role::Sender)
+    if (role == Role::Sender)
         senders[0].genBaseOts(prng, chls[0]);
     else
         recvers[0].genBaseOts(prng, chls[0]);
@@ -98,57 +99,73 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
         auto& chl = chls[k];
         PRNG prng(sysRandomSeed());
 
-        // once configure(...) and setBaseOts(...) are called,
-        // we can compute many batches of OTs. First we need to tell
-        // the instance how mant OTs we want in this batch. This is done here.
-        recvers[k].init(numOTs, prng, chl);
-
-        // now we can iterate over the OTs and actaully retreive the desired 
-        // messages. However, for efficieny we will do this in steps where
-        // we do some computation followed by sending off data. This is more 
-        // efficient since data will be sent in the background :).
-        for (int i = 0; i < numOTs; )
+        if (randomOT)
         {
-            // figure out how many OTs we want to do in this step.
-            auto min = std::min<u64>(numOTs - i, step);
+            // once configure(...) and setBaseOts(...) are called,
+            // we can compute many batches of OTs. First we need to tell
+            // the instance how mant OTs we want in this batch. This is done here.
+            recvers[k].init(numOTs, prng, chl);
 
-            // iterate over this step.
-            for (u64 j = 0; j < min; ++j, ++i)
+            // now we can iterate over the OTs and actaully retreive the desired 
+            // messages. However, for efficieny we will do this in steps where
+            // we do some computation followed by sending off data. This is more 
+            // efficient since data will be sent in the background :).
+            for (int i = 0; i < numOTs; )
             {
-                // For the OT index by i, we need to pick which
-                // one of the N OT messages that we want. For this 
-                // example we simply pick a random one. Note only the 
-                // first log2(N) bits of choice is considered. 
-                block choice = prng.get<block>();
+                // figure out how many OTs we want to do in this step.
+                auto min = std::min<u64>(numOTs - i, step);
 
-                // this will hold the (random) OT message of our choice
-                block otMessage;
+                // iterate over this step.
+                for (u64 j = 0; j < min; ++j, ++i)
+                {
+                    // For the OT index by i, we need to pick which
+                    // one of the N OT messages that we want. For this 
+                    // example we simply pick a random one. Note only the 
+                    // first log2(N) bits of choice is considered. 
+                    block choice = prng.get<block>();
 
-                // retreive the desired message.
-                recvers[k].encode(i, &choice, &otMessage);
-                
-                // do something cool with otMessage
-                //otMessage;
+                    // this will hold the (random) OT message of our choice
+                    block otMessage;
+
+                    // retreive the desired message.
+                    recvers[k].encode(i, &choice, &otMessage);
+
+                    // do something cool with otMessage
+                    //otMessage;
+                }
+
+                // Note that all OTs in this region must be encode. If there are some
+                // that you don't actually care about, then you can skip them by calling
+                // 
+                //    recvers[k].zeroEncode(i);
+                //
+
+                // Now that we have gotten out the OT messages for this step, 
+                // we are ready to send over network some information that 
+                // allows the sender to also compute the OT messages. Since we just
+                // encoded "min" OT messages, we will tell the class to send the 
+                // next min "correction" values. 
+                recvers[k].sendCorrection(chl, min);
             }
 
-            // Note that all OTs in this region must be encode. If there are some
-            // that you don't actually care about, then you can skip them by calling
-            // 
-            //    recvers[k].zeroEncode(i);
-            //
+            // once all numOTs have been encoded and had their correction values sent
+            // we must call check. This allows to sender to make sure we did not cheat.
+            // For semi-honest protocols, this can and will be skipped. 
+            recvers[k].check(chl, ZeroBlock);
 
-            // Now that we have gotten out the OT messages for this step, 
-            // we are ready to send over network some information that 
-            // allows the sender to also compute the OT messages. Since we just
-            // encoded "min" OT messages, we will tell the class to send the 
-            // next min "correction" values. 
-            recvers[k].sendCorrection(chl, min);
         }
+        else
+        {
+            std::vector<block>recvMsgs(numOTs);
+            std::vector<u64> choices(numOTs);
 
-        // once all numOTs have been encoded and had their correction values sent
-        // we must call check. This allows to sender to make sure we did not cheat.
-        // For semi-honest protocols, this can and will be skipped. 
-        recvers[k].check(chl, ZeroBlock);
+            // define which messages the receiver should learn.
+            for (u64 i = 0; i < numOTs; ++i)
+                choices[i] = prng.get<u8>();
+
+            // the messages that were learned are written to recvMsgs.
+            recvers[k].receiveChosen(numChosenMsgs, recvMsgs, choices, prng, chl);
+        }
     };
 
     // create a lambda function that performs the computation of a single sender thread.
@@ -157,56 +174,69 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
         auto& chl = chls[k];
         PRNG prng(sysRandomSeed());
 
-        // Same explanation as above.
-        senders[k].init(numOTs, prng, chl);
-
-        // Same explanation as above.
-        for (int i = 0; i < numOTs; )
+        if (randomOT)
         {
+
             // Same explanation as above.
-            auto min = std::min<u64>(numOTs - i, step);
+            senders[k].init(numOTs, prng, chl);
 
-            // unlike for the receiver, before we call encode to get
-            // some desired OT message, we must call recvCorrection(...).
-            // This receivers some information that the receiver had sent 
-            // and allows the sender to compute any OT message that they desired.
-            // Note that the step size must match what the receiver used.
-            // If this is unknown you can use recvCorrection(chl) -> u64
-            // which will tell you how many were sent. 
-            senders[k].recvCorrection(chl, min);
-
-            // we now encode any OT message with index less that i + min.
-            for (u64 j = 0; j < min; ++j, ++i)
+            // Same explanation as above.
+            for (int i = 0; i < numOTs; )
             {
-                // in particular, the sender can retreive many OT messages
-                // at a single index, in this case we chose to retreive 3
-                // but that is arbitrary. 
-                auto choice0 = prng.get<block>();
-                auto choice1 = prng.get<block>();
-                auto choice2 = prng.get<block>();
+                // Same explanation as above.
+                auto min = std::min<u64>(numOTs - i, step);
 
-                // these we hold the actual OT messages. 
-                block
-                    otMessage0,
-                    otMessage1,
-                    otMessage2;
+                // unlike for the receiver, before we call encode to get
+                // some desired OT message, we must call recvCorrection(...).
+                // This receivers some information that the receiver had sent 
+                // and allows the sender to compute any OT message that they desired.
+                // Note that the step size must match what the receiver used.
+                // If this is unknown you can use recvCorrection(chl) -> u64
+                // which will tell you how many were sent. 
+                senders[k].recvCorrection(chl, min);
 
-                // now retreive the messages
-                senders[k].encode(i, &choice0, &otMessage0);
-                senders[k].encode(i, &choice1, &otMessage1);
-                senders[k].encode(i, &choice2, &otMessage2);
+                // we now encode any OT message with index less that i + min.
+                for (u64 j = 0; j < min; ++j, ++i)
+                {
+                    // in particular, the sender can retreive many OT messages
+                    // at a single index, in this case we chose to retreive 3
+                    // but that is arbitrary. 
+                    auto choice0 = prng.get<block>();
+                    auto choice1 = prng.get<block>();
+                    auto choice2 = prng.get<block>();
+
+                    // these we hold the actual OT messages. 
+                    block
+                        otMessage0,
+                        otMessage1,
+                        otMessage2;
+
+                    // now retreive the messages
+                    senders[k].encode(i, &choice0, &otMessage0);
+                    senders[k].encode(i, &choice1, &otMessage1);
+                    senders[k].encode(i, &choice2, &otMessage2);
+                }
             }
-        }
 
-        // This call is required to make sure the receiver did not cheat. 
-        // All corrections must be recieved before this is called. 
-        senders[k].check(chl, ZeroBlock);
+            // This call is required to make sure the receiver did not cheat. 
+            // All corrections must be recieved before this is called. 
+            senders[k].check(chl, ZeroBlock);
+        }
+        else
+        {
+            // populate this with the messages that you want to send.
+            Matrix<block> sendMessages(numOTs, numChosenMsgs);
+            prng.get(sendMessages.data(), sendMessages.size());
+
+            // perform the OTs with the given messages.
+            senders[k].sendChosen(sendMessages, prng, chl);
+        }
     };
 
 
     std::vector<std::thread> thds(numThreads);
     std::function<void(int)> routine;
-    
+
     if (role == Role::Sender)
         routine = sendRoutine;
     else
@@ -226,7 +256,7 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
     auto e = time.setTimePoint("finish");
     auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
-    if(role == Role::Sender)
+    if (role == Role::Sender)
         std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
 }
 
@@ -236,6 +266,8 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 {
     if (totalOTs == 0)
         totalOTs = 1 << 20;
+
+    bool randomOT = true;
 
     auto numOTs = totalOTs / numThreads;
 
@@ -286,8 +318,16 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
             // construct a vector to stored the received messages. 
             std::vector<block> msgs(numOTs);
 
-            // perform  numOTs random OTs, the results will be written to msgs.
-            receivers[i].receive(choice, msgs, prng, chls[i]);
+            if (randomOT)
+            {
+                // perform  numOTs random OTs, the results will be written to msgs.
+                receivers[i].receive(choice, msgs, prng, chls[i]);
+            }
+            else
+            {
+                // perform  numOTs chosen message OTs, the results will be written to msgs.
+                receivers[i].receiveChosen(choice, msgs, prng, chls[i]);
+            }
         }
         else
         {
@@ -301,8 +341,20 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
             //     senders[i].setDelta(some 128 bit delta);
             //
 
-            // perform the OTs and write the random OTs to msgs.
-            senders[i].send(msgs, prng, chls[i]);
+            if (randomOT)
+            {
+                // perform the OTs and write the random OTs to msgs.
+                senders[i].send(msgs, prng, chls[i]);
+            }
+            else
+            {
+                // Populate msgs with something useful...
+                prng.get(msgs.data(), msgs.size());
+
+                // perform the OTs. The receiver will learn one
+                // of the messages stored in msgs.
+                senders[i].send(msgs, prng, chls[i]);
+            }
         }
     };
 
@@ -383,15 +435,15 @@ iknp{ "i", "iknp" },
 diknp{ "d", "diknp" },
 oos{ "o", "oos" },
 akn{ "a", "akn" },
-np{"np"},
+np{ "np" },
 simple{ "simplest" };
 
 using ProtocolFunc = std::function<void(Role, int, int, std::string, std::string)>;
 
 bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
 {
-    auto n = cmd.isSet("nn") 
-        ? (1<< cmd.get<int>("nn"))
+    auto n = cmd.isSet("nn")
+        ? (1 << cmd.get<int>("nn"))
         : cmd.getOr("n", 0);
 
     auto t = cmd.getOr("t", 1);
@@ -474,7 +526,7 @@ int main(int argc, char** argv)
     flagSet |= runIf(TwoChooseOne_example<IknpDotExtSender, IknpDotExtReceiver>, cmd, diknp);
     flagSet |= runIf(TwoChooseOne_example<KosOtExtSender, KosOtExtReceiver>, cmd, kos);
     flagSet |= runIf(TwoChooseOne_example<KosDotExtSender, KosDotExtReceiver>, cmd, dkos);
-    
+
     flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
     flagSet |= runIf(NChooseOne_example<OosNcoOtSender, OosNcoOtReceiver>, cmd, oos);
 
@@ -489,7 +541,7 @@ int main(int argc, char** argv)
             << "#                  oblivious transfer.                #\n"
             << "#                     Peter Rindal                    #\n"
             << "#######################################################\n" << std::endl;
-        
+
         bool spEnabled, npEnabled;
 #ifdef ENABLE_SIMPLESTOT
         spEnabled = true;
@@ -504,23 +556,23 @@ int main(int argc, char** argv)
 
         std::cout
             << "Protocols:\n"
-            << Color::Green<< "  -simplest"<<Color::Default<<"  : to run the SimplestOT active secure 1-out-of-2 base OT" << (spEnabled ? "" : "(disabled)") << "\n"
-            << Color::Green<< "  -np      "<<Color::Default<<"  : to run the NaorPinkas active secure 1-out-of-2 base OT" << (npEnabled ? "" : "(disabled)") << "\n"
-            << Color::Green<< "  -iknp    "<<Color::Default<<"  : to run the IKNP passive secure 1-out-of-2       OT\n"
-            << Color::Green<< "  -diknp   "<<Color::Default<<"  : to run the IKNP passive secure 1-out-of-2 Delta-OT\n"
-            << Color::Green<< "  -kos     "<<Color::Default<<"  : to run the KOS  active secure  1-out-of-2       OT\n"
-            << Color::Green<< "  -dkos    "<<Color::Default<<"  : to run the KOS  active secure  1-out-of-2 Delta-OT\n"
-            << Color::Green<< "  -oos     "<<Color::Default<<"  : to run the OOS  active secure  1-out-of-N OT for N=2^76\n"
-            << Color::Green<< "  -kkrt    "<<Color::Default<<"  : to run the KKRT passive secure 1-out-of-N OT for N=2^128\n\n"
+            << Color::Green << "  -simplest" << Color::Default << "  : to run the SimplestOT active secure 1-out-of-2 base OT" << (spEnabled ? "" : "(disabled)") << "\n"
+            << Color::Green << "  -np      " << Color::Default << "  : to run the NaorPinkas active secure 1-out-of-2 base OT" << (npEnabled ? "" : "(disabled)") << "\n"
+            << Color::Green << "  -iknp    " << Color::Default << "  : to run the IKNP passive secure 1-out-of-2       OT\n"
+            << Color::Green << "  -diknp   " << Color::Default << "  : to run the IKNP passive secure 1-out-of-2 Delta-OT\n"
+            << Color::Green << "  -kos     " << Color::Default << "  : to run the KOS  active secure  1-out-of-2       OT\n"
+            << Color::Green << "  -dkos    " << Color::Default << "  : to run the KOS  active secure  1-out-of-2 Delta-OT\n"
+            << Color::Green << "  -oos     " << Color::Default << "  : to run the OOS  active secure  1-out-of-N OT for N=2^76\n"
+            << Color::Green << "  -kkrt    " << Color::Default << "  : to run the KKRT passive secure 1-out-of-N OT for N=2^128\n\n"
 
             << "Other Options:\n"
-            << Color::Green<< "  -n         "<<Color::Default<<": the number of OTs to perform\n"
-            << Color::Green<< "  -r 0/1     "<<Color::Default<<": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network cleint.\n"
-            << Color::Green<< "  -ip        "<<Color::Default<<": the IP and port of the netowrk server, default = localhost:1212\n"  
-            << Color::Green<< "  -t         "<<Color::Default<<": the number of threads that should be used\n"
-            << Color::Green<< "  -u         "<<Color::Default<<": to run the unit tests\n"
-            << Color::Green<< "  -u -list   "<<Color::Default<<": to list the unit tests\n"
-            << Color::Green<< "  -u 1 2 15  "<<Color::Default<<": to run the unit tests indexed by {1, 2, 15}.\n"
+            << Color::Green << "  -n         " << Color::Default << ": the number of OTs to perform\n"
+            << Color::Green << "  -r 0/1     " << Color::Default << ": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network cleint.\n"
+            << Color::Green << "  -ip        " << Color::Default << ": the IP and port of the netowrk server, default = localhost:1212\n"
+            << Color::Green << "  -t         " << Color::Default << ": the number of threads that should be used\n"
+            << Color::Green << "  -u         " << Color::Default << ": to run the unit tests\n"
+            << Color::Green << "  -u -list   " << Color::Default << ": to list the unit tests\n"
+            << Color::Green << "  -u 1 2 15  " << Color::Default << ": to run the unit tests indexed by {1, 2, 15}.\n"
             << std::endl;
     }
 
