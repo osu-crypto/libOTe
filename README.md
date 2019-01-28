@@ -21,7 +21,7 @@ primary design goal of this library to obtain *high performance* while being
 This library provides several different classes of OT protocols. First is the 
 base OT protocol of Naor Prinkas [NP00]. This protocol bootstraps all the other
 OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2,
-1-out-of-N and ~K-out-of-N, both in the semi-honest and malicious settings.
+1-out-of-N and K-out-of-N, both in the semi-honest and malicious settings.
 
 All implementations are highly optimized using fast SSE instructions and vectorization
 to obtain optimal performance both in the single and multi-threaded setting. See 
@@ -57,7 +57,7 @@ expection that network IO in libOTe is performed in the background by a separate
  
 The library is *cross platform* and has been tested on Windows, Mac and Linux. 
 There is one mandatory dependency on [Boost](http://www.boost.org/) (networking),
-and three <b>optional dependencies</b> on, [Miracl](https://www.miracl.com/index),
+and three **optional dependencies** on, [Miracl](https://www.miracl.com/index),
 [Relic](https://github.com/relic-toolkit/relic/) or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
 for Base OTs. Any or all of these dependenies can be enabled. See below. 
@@ -79,34 +79,28 @@ To see all the command line options, execute the program
 
 `frontend.exe` 
 
-Enabling Miracl (for base OTs):
- * `cd libOTe/cryptoTools/thirdparty/win`
- * `getMiracl.ps1 ` (If the Miracl script fails to find visual studio 2017,  manually open and build the Miracl solution.)
- * `cd ../../..`
- * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_MIRACL`.
+**Boost and visual studio 2017:**  If boost does not build with visual studio 2017 
+follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
 
-Enabling Relic (for faster base OTs):
+**Enabling Relic (for fast base OTs):**
  * Clone the Visual Studio port [Relic](https://github.com/ladnir/relic). 
  * Use the CMake command  `cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64` generate a Visual Studio solution
  * Optional: Build with gmp/mpir for faster performance. 
  * Install it to `C:\libs` (build the `INSTALL` VS project).
  * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_RELIC`.
 
+**Enabling Miracl (for base OTs):**
+ * `cd libOTe/cryptoTools/thirdparty/win`
+ * `getMiracl.ps1 ` (If the Miracl script fails to find visual studio 2017,  manually open and build the Miracl solution.)
+ * `cd ../../..`
+ * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_MIRACL`.
 
-
-<b>IMPORTANT:</b> By default, the build system needs the NASM compiler to be located
+**IMPORTANT:** By default, the build system needs the NASM compiler to be located
 at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, 
 or enable the pure c++ implementation:
  * Remove  `cryptoTools/Crypto/asm/sha_win64.asm` from the cryptoTools Project.
  * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to remove `#define ENABLE_NASM`.
 
-Other options:
- * The implementation of binary circuits in cryptoTools (`BetaCircuit`) can be enabled by edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_CIRCUITS`.
-
-<b>Boost and visual studio 2017:</b>  If boost does not build with visual studio 2017 
-follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
-
- 
 
 
 ### Linux / Mac
@@ -125,10 +119,10 @@ This will build the minimum version of the library (wihtout base OTs). The libra
 will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed in 
 `libOTe/bin` To see all the command line options, execute the program 
  
-`./bin/frontend.exe`
+`./bin/frontend_libOTe`
 
 
-Enable Base OTs using:
+**Enable Base OTs using:**
  * `cmake .  -DENABLE_MIRACL=ON`: Build the library with integration to the
      [Miracl](https://www.miracl.com/index) library. Requires building miracl 
  `   cd libOTe/cryptoTools/thirdparty/linux; bash miracl.get`.
@@ -140,14 +134,14 @@ Enable Base OTs using:
       [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
       library implementing a base OT. Also works with only relic but is slower.
 
-Other Options:
+**Other Options:**
  * `cmake .  -DENABLE_CIRCUITS=ON`: Build the library with the circuit library enabled.
  * `cmake .  -DENABLE_NASM=ON`: Build the library with the assembly base SHA1 implementation. Requires the NASM compiler.
  
 
 
-<b>Note:</b> In the case that miracl or boost is already installed, the steps 
-`cd libOTe/thirdparty/linux; bash all.get` can be skipped and CMake will attempt 
+**Note:** In the case that miracl or boost is already installed, the steps 
+`cd libOTe/cryptoTools/thirdparty/linux; bash boost.get` can be skipped and CMake will attempt 
 to find them instead. Boost is found with the CMake findBoost package and miracl
 is found with the `find_library(miracl)` command.
  
@@ -174,7 +168,7 @@ and link:
 7) [Relic binar] <i>(if enabled)</i>
 
 
-<b>Note:</b> On windows the linking paths follow a similar pattern.
+**Note:** On windows the linking paths follow a similar pattern.
 
 ## Help
  
@@ -230,7 +224,7 @@ appears that the Encrypto Group implementation uses asynchronous network IO.
 1-out-of-2 semi-honest:
  * Apricot:  `./ot.x -n 16777216 -p 0 -m a -l 100 -pas & ./ot.x -p 1 -m a -n 16777216 -l 100 -pas`
  * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 0 &  ./ot.exe -r 1 -n 16777216 -o 0`
- * emp-toolkit:  2*2<sup>23</sup> `./shot 0 1212 & ./shot 1 1212`
+ * emp-toolkit:  2 * 2<sup>23</sup> `./shot 0 1212 & ./shot 1 1212`
 
   
   
