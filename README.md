@@ -13,13 +13,13 @@ primary design goal of this library to obtain *high performance* while being
 * The malicious secure 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The malicious secure 1-out-of-N OT [[OOS16]](http://eprint.iacr.org/2016/933).
 * The malicious secure approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746).
-* The malicious secure 1-out-of-2 base OT [NP00].
-* The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Fast unix only ASM verion disabled by default).
+* The malicious secure 1-out-of-2 base OT [NP01].
+* The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster unix only ASM version disabled by default).
  
 ## Introduction
  
 This library provides several different classes of OT protocols. First is the 
-base OT protocol of Naor Prinkas [NP00]. This protocol bootstraps all the other
+base OT protocol of Naor Prinkas [NP01]. This protocol bootstraps all the other
 OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2,
 1-out-of-N and K-out-of-N, both in the semi-honest and malicious settings.
 
@@ -56,7 +56,7 @@ expection that network IO in libOTe is performed in the background by a separate
 ## Install
  
 The library is *cross platform* and has been tested on Windows, Mac and Linux. 
-There is one mandatory dependency on [Boost](http://www.boost.org/) (networking),
+There is one mandatory dependency on [Boost 1.69](http://www.boost.org/) (networking),
 and three **optional dependencies** on, [Miracl](https://www.miracl.com/index),
 [Relic](https://github.com/relic-toolkit/relic/) or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
