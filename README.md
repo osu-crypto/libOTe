@@ -112,6 +112,7 @@ git clone --recursive https://github.com/osu-crypto/libOTe.git
 cd libOTe/cryptoTools/thirdparty/linux
 bash boost.get
 cd ../../..
+cmake .
 make
 ```
 
