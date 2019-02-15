@@ -19,7 +19,7 @@ primary design goal of this library to obtain *high performance* while being
 ## Introduction
  
 This library provides several different classes of OT protocols. First is the 
-base OT protocol of Naor Prinkas [NP01]. This protocol bootstraps all the other
+base OT protocol of Naor Pinkas [NP01]. This protocol bootstraps all the other
 OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2,
 1-out-of-N and K-out-of-N, both in the semi-honest and malicious settings.
 
@@ -112,6 +112,7 @@ git clone --recursive https://github.com/osu-crypto/libOTe.git
 cd libOTe/cryptoTools/thirdparty/linux
 bash boost.get
 cd ../../..
+cmake .
 make
 ```
 
@@ -249,9 +250,9 @@ found this project helpful, feel free to spread the word and cite us.
  
 [RR16]  - Peter Rindal and Mike Rosulek, _Improved Private Set Intersection against Malicious Adversaries_. [eprint/2016/746](https://eprint.iacr.org/2016/746)
 
-[BLNNOOSS15]  - Sai Sheshank Burra and Enrique Larraia and Jesper Buus Nielsen and Peter Sebastian Nordholt and Claudio Orlandi and Emmanuela Orsini and Peter Scholl and Nigel P. Smart, _High Performance Multi-Party Computation for Binary Circuits Based on Oblivious Transfe_. [eprint/2015/472](https://eprint.iacr.org/2015/472.pdf)
+[BLNNOOSS15]  - Sai Sheshank Burra and Enrique Larraia and Jesper Buus Nielsen and Peter Sebastian Nordholt and Claudio Orlandi and Emmanuela Orsini and Peter Scholl and Nigel P. Smart, _High Performance Multi-Party Computation for Binary Circuits Based on Oblivious Transfer_. [eprint/2015/472](https://eprint.iacr.org/2015/472.pdf)
 
 [ALSZ15]  - Gilad Asharov and Yehuda Lindell and Thomas Schneider and Michael Zohner, _More Efficient Oblivious Transfer Extensions with Security for Malicious Adversaries_. [eprint/2015/061](https://eprint.iacr.org/2015/061)
  
-[NP00]  -    Moni Naor, Benny Pinkas, _Efficient Oblivious Transfer Protocols_. 
+[NP01]  -    Moni Naor, Benny Pinkas, _Efficient Oblivious Transfer Protocols_. 
 
