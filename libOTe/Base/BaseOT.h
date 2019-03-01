@@ -5,7 +5,7 @@
 #include "naor-pinkas.h"
 namespace osuCrypto
 {
-#ifdef ENABLE_SIMPLESTOT
+#ifdef ENABLE_SIMPLEST_ASM_LIB
 
 #define LIBOTE_HAS_BASE_OT
     using DefaultBaseOT = SimplestOT;

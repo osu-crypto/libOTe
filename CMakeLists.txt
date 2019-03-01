@@ -36,21 +36,14 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	   SET(CMAKE_BUILD_TYPE Release)
 	endif()
 
-	if(NOT ${CMAKE_BUILD_TYPE} STREQUAL "Release")
-	  message(WARNING "\nConfiguration NOT set to Release. Please call cmake with -DCMAKE_BUILD_TYPE=Release  instead of ${CMAKE_BUILD_TYPE}")
-
-		if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-		  #message(WARNING "Debug build.")
-		elseif("${CMAKE_BUILD_TYPE}" STREQUAL "Release") 
-		  #message(WARNING "Release build.")
-		elseif("${CMAKE_BUILD_TYPE}" STREQUAL  "RELWITHDEBINFO")
-		  #message(WARNING "RELWITHDEBINFO=Release with debug info build.")
-		else()
-		  message(ERROR ": Unknown build type - ${CMAKE_BUILD_TYPE}  Please use one of Debug, Release, or RELWITHDEBINFO\n\n" )
-		endif()
+	if(    NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Release"
+       AND NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug" 
+       AND NOT "${CMAKE_BUILD_TYPE}" STREQUAL "RELWITHDEBINFO" )
+		  
+        message(FATAL_ERROR ": Unknown build type - ${CMAKE_BUILD_TYPE}  Please use one of Debug, Release, or RELWITHDEBINFO\n\n" )        
 	endif()
 
-
+    message(STATUS "Option: CMAKE_BUILD_TYPE = ${CMAKE_BUILD_TYPE}\n\tRelease\n\tDebug\n\tRELWITHDEBINFO")
 
 endif()
  

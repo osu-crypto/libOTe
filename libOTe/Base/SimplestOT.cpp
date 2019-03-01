@@ -57,7 +57,8 @@ namespace osuCrypto
         A.fromBytes(buff.data());
 
         if (mUniformOTs)
-            comm = *(block*)(buff.data() + pointSize);
+            memcpy(&comm, buff.data() + pointSize, sizeof(block));
+        //comm = *(block*)(buff.data() + pointSize);
 
         buff.resize(pointSize * n);
         auto buffIter = buff.data();
@@ -114,7 +115,7 @@ namespace osuCrypto
         {
             // commit to the seed
             auto comm = mAesFixedKey.ecbEncBlock(seed) ^ seed;
-            *((block*)(buff.data() + pointSize)) = comm;
+            memcpy(buff.data() + pointSize, &comm, sizeof(block));
         }
 
         chl.asyncSend(std::move(buff));

@@ -353,7 +353,7 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 
                 // perform the OTs. The receiver will learn one
                 // of the messages stored in msgs.
-                senders[i].send(msgs, prng, chls[i]);
+                senders[i].sendChosen(msgs, prng, chls[i]);
             }
         }
     };
