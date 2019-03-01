@@ -14,7 +14,7 @@ primary design goal of this library to obtain *high performance* while being
 * The malicious secure 1-out-of-N OT [[OOS16]](http://eprint.iacr.org/2016/933).
 * The malicious secure approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746).
 * The malicious secure 1-out-of-2 base OT [NP01].
-* The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster unix only ASM version disabled by default).
+* The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
  
 ## Introduction
  
@@ -131,9 +131,9 @@ will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed i
  * `cmake .  -DENABLE_RELIC=ON`: Build the library with integration to the 
       [Relic](https://github.com/relic-toolkit/relic/) library. Requires that
       relic is built with `cmake . -DMULTI=OPENMP` and installed.
- * `cmake .  -DENABLE_SIMPLESTOT=ON`: Build the library with integration to the 
+ * **Linux Only**: `cmake .  -DENABLE_SIMPLESTOT=ON`: Build the library with integration to the 
       [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
-      library implementing a base OT. Also works with only relic but is slower.
+       library implementing a base OT. Also works with only relic but is slower.
 
 **Other Options:**
  * `cmake .  -DENABLE_CIRCUITS=ON`: Build the library with the circuit library enabled.
