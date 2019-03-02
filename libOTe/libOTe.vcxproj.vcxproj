@@ -21,6 +21,8 @@
   <ItemGroup>
     <ClInclude Include="Base\BaseOT.h" />
     <ClInclude Include="Base\naor-pinkas.h" />
+    <ClInclude Include="DPF\BgiPirClient.h" />
+    <ClInclude Include="DPF\BgiPirServer.h" />
     <ClInclude Include="NChooseK\AknOtReceiver.h" />
     <ClInclude Include="NChooseK\AknOtSender.h" />
     <ClInclude Include="NChooseOne\Kkrt\KkrtDefines.h" />
@@ -48,6 +50,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Base\naor-pinkas.cpp" />
+    <ClCompile Include="DPF\BgiPirClient.cpp" />
+    <ClCompile Include="DPF\BgiPirServer.cpp" />
     <ClCompile Include="NChooseK\AknOtReceiver.cpp" />
     <ClCompile Include="NChooseK\AknOtSender.cpp" />
     <ClCompile Include="NChooseOne\Kkrt\KkrtNcoOtReceiver.cpp" />

@@ -103,6 +103,7 @@
   <ItemGroup>
     <ClCompile Include="AknOt_Tests.cpp" />
     <ClCompile Include="BaseOT_Tests.cpp" />
+    <ClCompile Include="BgiPirTests.cpp" />
     <ClCompile Include="Common.cpp" />
     <ClCompile Include="NcoOT_Tests.cpp" />
     <ClCompile Include="OT_Tests.cpp" />
@@ -111,6 +112,7 @@
   <ItemGroup>
     <ClInclude Include="AknOt_Tests.h" />
     <ClInclude Include="BaseOT_Tests.h" />
+    <ClInclude Include="BgiPirTests.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="NcoOT_Tests.h" />
     <ClInclude Include="OT_Tests.h" />
