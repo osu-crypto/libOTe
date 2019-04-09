@@ -7,7 +7,7 @@
 namespace osuCrypto
 {
 
-	class BgiPirServer
+	class BgiEvaluator
 	{
 	public:
 		typedef boost::multiprecision::uint128_t uint128_t;
@@ -16,19 +16,18 @@ namespace osuCrypto
 
 		void init(u64 depth, u64 groupByteSize);
 
-		void serve(Channel chan, span<block> data);
-
-		static u8 evalOne(span<u8> idx, span<block> k, span<block> g, block* = nullptr, block* = nullptr, u8* tt = nullptr);
-		static u8 evalOne(uint128_t idx, span<block> k, span<block> g, block* = nullptr, block* = nullptr, u8* tt = nullptr);
-		static block traversePath(u64 depth, uint128_t idx, span<block> k);
+		static block evalOne(span<u8> idx, span<block> k, span<block> g, block* = nullptr, block* = nullptr, u8* tt = nullptr);
+		static block evalOne(uint128_t idx, span<block> k, span<block> g, block* = nullptr, block* = nullptr, u8* tt = nullptr);
+		
+        static block traversePath(u64 depth, uint128_t idx, span<block> k);
 		static block traverseOne(const block &s, const block&k, const osuCrypto::u8 &keep, bool print = false);
-		static block fullDomainNaive(span<block> data, span<block> k, span<block> g);
-		static block fullDomain(span<block> data, span<block> k, span<block> g);
-		//static BitVector BgiPirServer_bv;
+		
+  //      static block fullDomainNaive(span<block> data, span<block> k, span<block> g);
+		//static block fullDomain(span<block> data, span<block> k, span<block> g);
 
 
 
-		struct FullDomainGenerator
+		struct SingleKey
 		{
 			span<block> k, g;
 			u64 kDepth;
@@ -44,7 +43,7 @@ namespace osuCrypto
 				{}
 
 				u64 kIdx, d, dEnd;
-				std::vector<block> expandedS;// (8 * g.size());
+				std::vector<block> expandedS;
 				std::vector<std::pair<u64, span<u8>>> mByteView;
 
 				std::vector<std::array<block, 8>> ss;
@@ -75,15 +74,15 @@ namespace osuCrypto
             void setKey(u64 i, span<block>kg);
             void setKeys(MatrixView<block>kg);
 
-			span<u8> yeild();
+            span<block> yeild();
 
 			std::array<AES, 2> aes;
 
 
 
 
-			u64 mD, mLeafIdx, mGIdx, mBIdx, mNumKeysRound8, mDEnd;
-			Matrix<u8> mBuff;
+			u64 mD, mLeafIdx, mGIdx, mNumKeys, mNumKeysRound8, mDEnd;
+			std::vector<block> mBuff;
 			Matrix<block> mS, mK, mG;
 			Matrix<std::array<block, 2>> mTcw;
 

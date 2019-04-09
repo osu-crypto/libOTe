@@ -9,8 +9,8 @@
 #include "libOTe_Tests/OT_Tests.h"
 #include "libOTe_Tests/NcoOT_Tests.h"
 #include "libOTe_Tests/AknOt_Tests.h"
-#include "libOTe_Tests/BgiPirTests.h"
-
+#include "libOTe_Tests/BgiTests.h"
+#include "libOTe_Tests/BgciksOT_Tests.h"
 using namespace osuCrypto;
 namespace tests_libOTe
 {
@@ -39,12 +39,14 @@ namespace tests_libOTe
         tc.add("SimplestOT_Test_Impl                    ", SimplestOT_Test_Impl);
 
 
-        tc.add("BgiPir_keyGen_128_test                  " , BgiPir_keyGen_128_test);               
-        tc.add("BgiPir_keyGen_test                      " , BgiPir_keyGen_test);                   
-        tc.add("BgiPir_PIR_test                         " , BgiPir_PIR_test);                      
-        tc.add("BgiPir_FullDomain_test                  " , BgiPir_FullDomain_test);               
-        tc.add("BgiPir_FullDomain_iterator_test         " , BgiPir_FullDomain_iterator_test);      
-        tc.add("BgiPir_FullDomain_multikey_test         " , BgiPir_FullDomain_multikey_test);      
+        tc.add("Bgi_keyGen_128_test                  " , Bgi_keyGen_128_test);               
+        tc.add("Bgi_keyGen_test                      " , Bgi_keyGen_test);                   
+        //tc.add("Bgi_PIR_test                         " , Bgi_PIR_test);                      
+        //tc.add("Bgi_FullDomain_test                  " , Bgi_FullDomain_test);               
+        //tc.add("Bgi_FullDomain_iterator_test         " , Bgi_FullDomain_iterator_test);      
+        tc.add("Bgi_FullDomain_multikey_test         " , Bgi_FullDomain_multikey_test);   
+
+        tc.add("BgciksOT_Test                        ", BgciksOT_Test);
 
     });
 

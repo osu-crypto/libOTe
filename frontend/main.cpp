@@ -36,6 +36,7 @@ int miraclTestMain();
 
 #include <cryptoTools/Common/CLP.h>
 
+#include <boost/preprocessor/variadic/size.hpp>
 enum class Role
 {
     Sender,
@@ -493,27 +494,29 @@ int main(int argc, char** argv)
         auto tests = tests_cryptoTools::Tests;
         tests += tests_libOTe::Tests;
 
-        if (cmd.isSet("list"))
-        {
-            tests.list();
-            return 0;
-        }
-        else
-        {
-            cmd.setDefault("loop", 1);
-            auto loop = cmd.get<u64>("loop");
+        tests.runIf(cmd);
 
-            TestCollection::Result result;
-            if (cmd.hasValue(unitTestTag))
-                result = tests.run(cmd.getMany<u64>(unitTestTag), loop);
-            else
-                result = tests.runAll(loop);
+        //if (cmd.isSet("list"))
+        //{
+        //    tests.list();
+        //    return 0;
+        //}
+        //else
+        //{
+        //    cmd.setDefault("loop", 1);
+        //    auto loop = cmd.get<u64>("loop");
 
-            if (result == TestCollection::Result::passed)
-                return 0;
-            else
-                return 1;
-        }
+        //    TestCollection::Result result;
+        //    if (cmd.hasValue(unitTestTag))
+        //        result = tests.run(cmd.getMany<u64>(unitTestTag), loop);
+        //    else
+        //        result = tests.runAll(loop);
+
+        //    if (result == TestCollection::Result::passed)
+        //        return 0;
+        //    else
+        //        return 1;
+        //}
     }
 
 #ifdef ENABLE_SIMPLESTOT

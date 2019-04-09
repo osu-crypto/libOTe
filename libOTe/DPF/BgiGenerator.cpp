@@ -1,4 +1,4 @@
-#include "BgiPirClient.h"
+#include "BgiGenerator.h"
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Common/BitVector.h>
 namespace osuCrypto
@@ -28,7 +28,7 @@ namespace osuCrypto
         return ss(b) + " " + t2(b) + " " + t1(b);
     }
 
-    BgiPirClient::uint128_t BgiPirClient::bytesToUint128_t(const span<u8>& data)
+    BgiGenerator::uint128_t BgiGenerator::bytesToUint128_t(const span<u8>& data)
     {
         if (data.size() > 16)  throw std::runtime_error("inputsize is too large, 128 bit max. " LOCATION);
 
@@ -42,47 +42,47 @@ namespace osuCrypto
         return idx;
     }
 
-    void BgiPirClient::init(u64 depth, u64 groupBlkSize)
+    //void BgiGenerator::init(u64 depth, u64 groupBlkSize)
+    //{
+
+    //    mDatasetSize = u64(1) << depth;
+    //    mKDepth = depth;
+    //    mGroupBlkSize = groupBlkSize;
+    //}
+
+    //block BgiGenerator::query(span<u8> idx, Channel srv0, Channel srv1, block seed)
+    //{
+
+    //    return query(bytesToUint128_t(idx), srv0, srv1, seed);
+    //}
+
+
+    //block BgiGenerator::query(uint128_t idx, Channel srv0, Channel srv1, block seed)
+    //{
+    //    std::vector<block> k0(mKDepth + 1), k1(mKDepth + 1);
+    //    std::vector<block> g0(mGroupBlkSize), g1(mGroupBlkSize);
+
+    //    keyGen(idx, seed, k0, g0, k1, g1);
+    //    srv0.asyncSend(std::move(k0));
+    //    srv0.asyncSend(std::move(g0));
+    //    srv1.asyncSend(std::move(k1));
+    //    srv1.asyncSend(std::move(g1));
+
+    //    block blk0, blk1;
+
+    //    srv0.recv((u8*)&blk0, sizeof(block));
+    //    srv1.recv((u8*)&blk1, sizeof(block));
+
+    //    return blk0 ^ blk1;
+    //}
+
+    void BgiGenerator::keyGen(span<u8> idx, block val, block seed, span<block> k0, span<block> g0, span<block> k1, span<block> g1)
     {
 
-        mDatasetSize = u64(1) << depth;
-        mKDepth = depth;
-        mGroupBlkSize = groupBlkSize;
+        keyGen(bytesToUint128_t(idx), val, seed, k0, g0, k1, g1);
     }
 
-    block BgiPirClient::query(span<u8> idx, Channel srv0, Channel srv1, block seed)
-    {
-
-        return query(bytesToUint128_t(idx), srv0, srv1, seed);
-    }
-
-
-    block BgiPirClient::query(uint128_t idx, Channel srv0, Channel srv1, block seed)
-    {
-        std::vector<block> k0(mKDepth + 1), k1(mKDepth + 1);
-        std::vector<block> g0(mGroupBlkSize), g1(mGroupBlkSize);
-
-        keyGen(idx, seed, k0, g0, k1, g1);
-        srv0.asyncSend(std::move(k0));
-        srv0.asyncSend(std::move(g0));
-        srv1.asyncSend(std::move(k1));
-        srv1.asyncSend(std::move(g1));
-
-        block blk0, blk1;
-
-        srv0.recv((u8*)&blk0, sizeof(block));
-        srv1.recv((u8*)&blk1, sizeof(block));
-
-        return blk0 ^ blk1;
-    }
-
-    void BgiPirClient::keyGen(span<u8> idx, block seed, span<block> k0, span<block> g0, span<block> k1, span<block> g1)
-    {
-
-        keyGen(bytesToUint128_t(idx), seed, k0, g0, k1, g1);
-    }
-
-    void BgiPirClient::keyGen(uint128_t idx, block seed, span<block> k0, span<block> g0, span<block> k1, span<block> g1)
+    void BgiGenerator::keyGen(uint128_t idx, block val, block seed, span<block> k0, span<block> g0, span<block> k1, span<block> g1)
     {
 
         // static const std::array<block, 2> zeroOne{ZeroBlock, OneBlock};
@@ -90,8 +90,8 @@ namespace osuCrypto
         static const block notThreeBlock = toBlock(~0, ~3);
 
         u64 groupSize = g0.size();
-        auto kIdx = idx / (groupSize * 128);
-        u64 gIdx = static_cast<u64>(idx % (groupSize * 128));
+        auto kIdx = idx / (groupSize);
+        u64 gIdx = static_cast<u64>(idx % (groupSize));
 
         u64 kDepth = k0.size() - 1;
         std::array<std::array<block, 2>, 2> si;
@@ -197,18 +197,23 @@ namespace osuCrypto
             gs0[i] = gs0[i] ^ gs1[i];
         }
 
-        u64 byteIdx = gIdx % 16 + 16 * (gIdx / 128);
-        u64 bitIdx = (gIdx % 128) / 16;
-        //std::cout << "cw " << gs0[0] << " " << gs0[1] << std::endl;
+        gs0[gIdx] = gs0[gIdx] ^ val;
 
-        auto u8View = (u8*)gs0;
-        u8View[byteIdx] = u8View[byteIdx] ^ (u8(1) << bitIdx);
+        //u64 byteIdx = gIdx % 16 + 16 * (gIdx / 128);
+        //u64 bitIdx = (gIdx % 128) / 16;
+        ////std::cout << "cw " << gs0[0] << " " << gs0[1] << std::endl;
 
+        //auto gg0 = gs0[0];
+        ////auto gg1 = gs1[0];
 
+        //auto u8View = (u8*)gs0;
+        //u8View[byteIdx] = u8View[byteIdx] ^ (u8(1) << bitIdx);
+
+        //std::cout << "gg " << (gg0 ^ gs0[0]) << std::endl;
         //std::cout << "cw' " << gs0[0] <<  " " << gs0[1] << std::endl;
         //std::cout << "byte " << byteIdx << " bit " << bitIdx << std::endl;
 
-        memcpy(g0.data(), u8View, g0.size() * sizeof(block));
-        memcpy(g1.data(), u8View, g1.size() * sizeof(block));
+        memcpy(g0.data(), gs0, g0.size() * sizeof(block));
+        memcpy(g1.data(), gs0, g1.size() * sizeof(block));
     }
 }
