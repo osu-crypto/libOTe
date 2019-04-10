@@ -1,7 +1,5 @@
-# libOTe 
-<div style="float:right;width:50%;" align="left">
-    <img  align="right" src="icon.PNG" alt="libOTe Logo">
-</div>
+![](https://github.com/osu-crypto/libOTe/blob/bgciks/title.PNG)
+=====
 
 [![Build Status](https://travis-ci.org/osu-crypto/libOTe.svg?branch=master)](https://travis-ci.org/osu-crypto/libOTe)
 
