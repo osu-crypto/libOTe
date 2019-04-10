@@ -31,6 +31,52 @@ Networking can be performed using both the sockets provided by the library and
 external socket classes. See the [networking tutorial](https://github.com/ladnir/cryptoTools/blob/57220fc45252d089a7fd90816144e447a2ce02b8/frontend_cryptoTools/Tutorials/Network.cpp#L264)
 for an example.
 
+## Example Code
+A minimal working example showing how to perform `n` OTs using the IKNP protocol.
+```cpp
+void minimal()
+{
+    // Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
+    IOService ios;
+    Channel senderChl = Session(ios, "localhost:1212", SessionMode::Server).addChannel();
+    Channel recverChl = Session(ios, "localhost:1212", SessionMode::Client).addChannel();
+
+    // The number of OTs.
+    int n = 100;
+
+    // The code to be run by the OT receiver.
+    auto recverThread = std::thread([&]() {
+        PRNG prng(sysRandomSeed());
+        IknpOtExtReceiver recver;
+        recver.genBaseOts(prng, recverChl);
+
+        // Choose which messages should be received.
+        BitVector choices(n);
+        choices[0] = 1;
+        //...
+
+        // Receive the messages
+        std::vector<block> messages(n);
+        recver.receiveChosen(choices, messages, prng, recverChl);
+
+        // messages[i] = sendMessages[i][choices[i]];
+    });
+
+    PRNG prng(sysRandomSeed());
+    IknpOtExtSender sender;
+    sender.genBaseOts(prng, senderChl);
+
+    // Choose which messages should be sent.
+    std::vector<std::array<block, 2>> sendMessages(n);
+    sendMessages[0] = { toBlock(54), toBlock(33) };
+    //...
+
+    // Send the messages.
+    sender.sendChosen(sendMessages, prng, senderChl);
+    recverThread.join();
+}
+```
+
 ## Performance
  
 The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel 
