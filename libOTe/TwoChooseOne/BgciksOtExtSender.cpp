@@ -262,14 +262,18 @@ namespace osuCrypto
         for (u64 i = 0; i < rows; ++i)
         {
             c[i].decode({ t64Ptr, 2 * n64 }, temp2, true);
-            memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
 
-            auto shift = 2;
-            bitShiftXor(cModP1, { , nBlocks}, shift);
+            for (u64 j = 1; j < nScaler; ++j)
+            {
 
+
+
+
+            }
             //reduce()
 
-            //TODO("do a real reduction mod (x^p-1)");
+            TODO("do a real reduction mod (x^p-1)");
+            memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
         }
 
         setTimePoint("sender.expand.decodeReduce");
