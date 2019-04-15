@@ -7,6 +7,7 @@
 
 namespace osuCrypto
 {
+    void bitShiftXor(span<block> dest, span<block> in, u8 bitShift);
 
     class BgciksOtExtSender : public TimerAdapter
     {

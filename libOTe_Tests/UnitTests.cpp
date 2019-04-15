@@ -45,6 +45,7 @@ namespace tests_libOTe
         //tc.add("Bgi_FullDomain_test                  " , Bgi_FullDomain_test);               
         //tc.add("Bgi_FullDomain_iterator_test         " , Bgi_FullDomain_iterator_test);      
         tc.add("Bgi_FullDomain_multikey_test         " , Bgi_FullDomain_multikey_test);   
+        tc.add("bitShift_test                        ", bitShift_test);
 
         tc.add("BgciksOT_Test                        ", BgciksOT_Test);
 

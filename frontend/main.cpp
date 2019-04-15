@@ -481,9 +481,51 @@ bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
     return false;
 }
 
+void minimal()
+{
+    // Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
+    IOService ios;
+    Channel senderChl = Session(ios, "localhost:1212", SessionMode::Server).addChannel();
+    Channel recverChl = Session(ios, "localhost:1212", SessionMode::Client).addChannel();
+
+    // The number of OTs.
+    int n = 100;
+
+    // The code to be run by the OT receiver.
+    auto recverThread = std::thread([&]() {
+        PRNG prng(sysRandomSeed());
+        IknpOtExtReceiver recver;
+        recver.genBaseOts(prng, recverChl);
+
+        // Choose which messages should be received.
+        BitVector choices(n);
+        choices[0] = 1;
+        //...
+
+        // Receive the messages
+        std::vector<block> messages(n);
+        recver.receiveChosen(choices, messages, prng, recverChl);
+
+        // messages[i] = sendMessages[i][choices[i]];
+    });
+
+    PRNG prng(sysRandomSeed());
+    IknpOtExtSender sender;
+    sender.genBaseOts(prng, senderChl);
+
+    // Choose which messages should be sent.
+    std::vector<std::array<block, 2>> sendMessages(n);
+    sendMessages[0] = { toBlock(54), toBlock(33) };
+    //...
+
+    // Send the messages.
+    sender.sendChosen(sendMessages, prng, senderChl);
+    recverThread.join();
+}
+
 int main(int argc, char** argv)
 {
-
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     CLP cmd;
     cmd.parse(argc, argv);
     bool flagSet = false;

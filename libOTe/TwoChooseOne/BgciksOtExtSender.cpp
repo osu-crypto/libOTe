@@ -12,7 +12,7 @@ namespace osuCrypto
 
     void BgciksOtExtSender::genBase(u64 n, Channel & chl)
     {
-        
+
         setTimePoint("sender.gen.start");
 
         mP = nextPrime(n);
@@ -107,7 +107,7 @@ namespace osuCrypto
         setTimePoint("sender.expand.dpf");
 
         if (mN2 % 128) throw RTE_LOC;
-        Matrix<block> rT(128, mN2 / 128);
+        Matrix<block> rT(128, mN2 / 128, AllocType::Uninitialized);
         sse_transpose(r, rT);
         setTimePoint("sender.expand.transpose");
 
@@ -134,10 +134,9 @@ namespace osuCrypto
         }
         //randMulNaive(rT, messages);
 
-        setTimePoint("sender.expand.mul");
 
     }
-    void BgciksOtExtSender::randMulNaive(Matrix<block>& rT, span<std::array<block,2>>& messages)
+    void BgciksOtExtSender::randMulNaive(Matrix<block>& rT, span<std::array<block, 2>>& messages)
     {
 
         std::vector<block> mtxColumn(rT.cols());
@@ -155,12 +154,55 @@ namespace osuCrypto
 
             m1 = m0 ^ mDelta;
         }
+
+        setTimePoint("sender.expand.mul");
+    }
+
+    void bitShiftXor(span<block> dest, span<block> in, u8 bitShift)
+    {
+
+
+        if (bitShift > 127)
+            throw RTE_LOC;
+        if (u64(in.data()) % 16)
+            throw RTE_LOC;
+
+        if (bitShift >= 64)
+        {
+            bitShift -= 64;
+            const int bitShift2 = 64 - bitShift;
+            u8* inPtr = ((u8*)in.data()) + sizeof(u64);
+            for (u64 i = 0; i < dest.size(); ++i, inPtr += sizeof(block))
+            {
+                block
+                    b0 = _mm_loadu_si128((block*)inPtr),
+                    b1 = _mm_load_si128((block*)(inPtr + sizeof(u64)));
+
+                dest[i] = dest[i] ^ (b0 >> bitShift);
+                dest[i] = dest[i] ^ (b1 << bitShift2);
+            }
+        }
+        else
+        {
+            const int bitShift2 = 64 - bitShift;
+            u8* inPtr = (u8*)in.data();
+            for (u64 i = 0; i < dest.size(); ++i, inPtr += sizeof(block))
+            {
+                block
+                    b0 = _mm_load_si128((block*)inPtr),
+                    b1 = _mm_loadu_si128((block*)(inPtr + sizeof(u64)));
+
+                dest[i] = dest[i] ^ (b0 >> bitShift);
+                dest[i] = dest[i] ^ (b1 << bitShift2);
+            }
+        }
     }
 
     void BgciksOtExtSender::randMulQuasiCyclic(Matrix<block>& rT, span<std::array<block, 2>>& messages)
     {
         auto nBlocks = mN / 128;
         auto n2Blocks = mN2 / 128;
+        auto n64 = i64(nBlocks * 2);
 
 
         const u64 rows(128);
@@ -171,48 +213,69 @@ namespace osuCrypto
             throw RTE_LOC;
 
 
-        std::vector<block> a(nBlocks), temp(2 * nBlocks);
+        std::vector<block> a(nBlocks);
         u64* a64ptr = (u64*)a.data();
+
+        bpm::FFTPoly aPoly;
+        bpm::FFTPoly bPoly;
 
         PRNG pubPrng(ZeroBlock);
 
-        Matrix<block> c(rows, 2 * nBlocks);
+        std::vector<bpm::FFTPoly> c(rows);
 
         for (u64 s = 0; s < nScaler; ++s)
         {
             pubPrng.get(a.data(), a.size());
+            aPoly.encode({ a64ptr, n64 });
 
             for (u64 i = 0; i < rows; ++i)
             {
-                auto ci = c[i];
+                //    auto ci = c[i];
 
-                u64* c64ptr = (u64*)((s == 0) ? ci.data() : temp.data());
+                //    u64* c64ptr = (u64*)((s == 0) ? ci.data() : temp.data());
                 u64* b64ptr = (u64*)(rT[i].data() + s * nBlocks);
-                 
 
-                bitpolymul_2_128(c64ptr, a64ptr, b64ptr, nBlocks * 2);
+                //bitpolymul_2_128(c64ptr, a64ptr, b64ptr, nBlocks * 2);
+                bPoly.encode({ b64ptr, n64 });
 
                 if (s)
                 {
-                    for (u64 j = 0; j < temp.size(); ++j)
-                    {
-                        ci[j] = ci[j] ^ temp[j];
-                    }
+                    bPoly.multEq(aPoly);
+                    c[i].addEq(bPoly);
+                }
+                else
+                {
+                    c[i].mult(aPoly, bPoly);
                 }
             }
         }
+        a = {};
 
 
-        Matrix<block>c2(128, nBlocks);
+        setTimePoint("sender.expand.mul");
+
+        Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
+
+        std::vector<u64> temp(c[0].mPoly.size()), temp2(c[0].mPoly.size());
+
+        u64* t64Ptr = temp.data();
         for (u64 i = 0; i < rows; ++i)
         {
+            c[i].decode({ t64Ptr, 2 * n64 }, temp2, true);
+            memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
+
+            auto shift = 2;
+            bitShiftXor(cModP1, { , nBlocks}, shift);
+
             //reduce()
-            auto ci = c[i];
-            memcpy(c2[i].data(), ci.data(), nBlocks * sizeof(block));
+
+            //TODO("do a real reduction mod (x^p-1)");
         }
 
-        Matrix<block> view(mN,1);
-        sse_transpose(MatrixView<block>(c2), MatrixView<block>(view));
+        setTimePoint("sender.expand.decodeReduce");
+
+        Matrix<block> view(mN, 1, AllocType::Uninitialized);
+        sse_transpose(MatrixView<block>(cModP1), MatrixView<block>(view));
 
         for (u64 i = 0; i < messages.size(); ++i)
         {
@@ -220,6 +283,7 @@ namespace osuCrypto
             messages[i][1] = view(i, 0) ^ mDelta;
         }
 
+        setTimePoint("sender.expand.transposeXor");
     }
 }
 

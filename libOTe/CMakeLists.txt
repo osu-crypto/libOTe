@@ -4,7 +4,7 @@ enable_language(ASM)
 
 file(GLOB_RECURSE SRCS *.cpp)
 
-set(SRCS "${SRCS}" "Tools/gf2x/gf_add.S" "Tools/gf2x/gf_mul.S"  "Tools/gf2x/reduce.S")
+set(SRCS "${SRCS}")
 
 #include_directories(${CMAKE_SOURCE_DIR})
 add_library(libOTe STATIC ${SRCS})

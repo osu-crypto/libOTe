@@ -215,7 +215,7 @@ namespace osuCrypto
         //}
 
         if (mN2 % 128) throw RTE_LOC;
-        Matrix<block> rT(128, mN2 / 128);
+        Matrix<block> rT(128, mN2 / 128, AllocType::Uninitialized);
         sse_transpose(r, rT);
         setTimePoint("recver.expand.transpose");
 
@@ -238,7 +238,6 @@ namespace osuCrypto
         default:
             break;
         }
-        setTimePoint("recver.expand.mul");
 
         //auto dest = mul(rMtx, mtx);
         //auto dest2 = convert(messages);
@@ -272,13 +271,14 @@ namespace osuCrypto
             BitIterator iter((u8*)&m, 0);
             mulRand(pubPrng, mtxColumn, rT, iter);
         }
+        setTimePoint("recver.expand.mul");
     }
 
     void BgciksOtExtReceiver::randMulQuasiCyclic(Matrix<block>& rT, span<block>& messages)
     {
         auto nBlocks = mN / 128;
         auto n2Blocks = mN2 / 128;
-
+        auto n64 = i64(nBlocks * 2);
 
         const u64 rows(128);
         if (rT.rows() != rows)
@@ -287,47 +287,65 @@ namespace osuCrypto
             throw RTE_LOC;
 
 
-        std::vector<block> a(nBlocks), temp(2* nBlocks);
+        std::vector<block> a(nBlocks), temp(nBlocks * 2);
         u64* a64ptr = (u64*)a.data();
+
+        bpm::FFTPoly aPoly;
+        bpm::FFTPoly bPoly;
 
         PRNG pubPrng(ZeroBlock);
 
-        Matrix<block> c(rows, 2 * nBlocks);
+        //Matrix<block> c(rows, 2 * nBlocks, AllocType::Uninitialized);
+
+        std::vector<bpm::FFTPoly> c(rows);
 
         for (u64 s = 0; s < nScaler; ++s)
         {
             pubPrng.get(a.data(), a.size());
-        
+            aPoly.encode({ a64ptr, n64 });
+
             for (u64 i = 0; i < rows; ++i)
             {
-                auto ci = c[i];
+                //auto ci = c[i];
 
-                u64* c64ptr = (u64*)((s == 0)? ci.data() : temp.data());
+                //u64* c64ptr = (u64*)((s == 0)? ci.data() : temp.data());
                 u64* b64ptr = (u64*)(rT[i].data() + s * nBlocks);
 
-                bitpolymul_2_128(c64ptr, a64ptr, b64ptr, nBlocks * 2);
+                //bitpolymul_2_128(c64ptr, a64ptr, b64ptr, nBlocks * 2);
+                bPoly.encode({ b64ptr, n64 });
 
                 if (s)
                 {
-                    for (u64 j = 0; j < temp.size(); ++j)
-                    {
-                        ci[j] = ci[j] ^ temp[j];
-                    }
+                    bPoly.multEq(aPoly);
+                    c[i].addEq(bPoly);
+                }
+                else
+                {
+                    c[i].mult(aPoly, bPoly);
                 }
             }
         }
 
+        setTimePoint("recver.expand.mul");
 
-        Matrix<block>c2(128, nBlocks);
+        Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
+        
+        u64* t64Ptr = (u64*)temp.data();
         for (u64 i = 0; i < rows; ++i)
         {
+            c[i].decode({ t64Ptr, 2 * n64 });
+
+
             //reduce()
-            auto ci = c[i];
-            memcpy(c2[i].data(), ci.data(), nBlocks * sizeof(block));
+
+            TODO("do a real reduction mod (x^p-1)");
+            memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
         }
+        setTimePoint("recver.expand.decodeReduce");
 
         MatrixView<block> view(messages.begin(), messages.end(), 1);
-        sse_transpose(c2, view);
+        sse_transpose(cModP1, view);
+        setTimePoint("recver.expand.transposeXor");
 
     }
 }

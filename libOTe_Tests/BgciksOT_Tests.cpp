@@ -5,6 +5,46 @@
 #include <cryptoTools/Network/IOService.h>
 using namespace oc;
 
+
+void bitShift_test(const CLP& cmd)
+{
+
+    u64 n = cmd.getOr("n", 100);
+    u64 t = cmd.getOr("t", 10);
+
+    PRNG prng(ZeroBlock);
+
+    std::vector<block> dest(n), in(n + 1);
+    prng.get(dest.data(), dest.size());
+    prng.get(in.data(), in.size());
+
+    for (u64 i = 0; i < dest.size(); ++i)
+    {
+        u8 bitShift = prng.get<u8>() % 128;
+        BitVector dv((u8*)dest.data(), dest.size() * 128);
+        BitVector iv;
+        iv.append((u8*)in.data(), dest.size() * 128, bitShift);
+
+        dv ^= iv;
+
+        bitShiftXor(dest, in, bitShift);
+
+
+        BitVector dv2((u8*)dest.data(), dest.size() * 128);
+
+        if (dv != dv2)
+        {
+            std::cout << "d2 " << dv2 << std::endl;
+            std::cout << "d  " << dv << std::endl;
+            std::cout << "f  " << (dv2 ^ dv) << std::endl;
+            throw RTE_LOC;
+        }
+
+    }
+
+
+}
+
 void BgciksOT_Test(const CLP& cmd)
 {
     
@@ -38,7 +78,8 @@ void BgciksOT_Test(const CLP& cmd)
         if (neq(messages2[i], messages[i][0]) && neq(messages2[i], messages[i][1]))
         {
             passed = false;
-            std::cout << Color::Red << i<< " "<< messages2[i] << " " << messages[i][0] << " " << messages[i][1] << std::endl << Color::Default;
+            std::cout << Color::Red;
+            std::cout << i << " " << messages2[i] << " " << messages[i][0] << " " << messages[i][1] << std::endl << Color::Default;
         }
     }
 
