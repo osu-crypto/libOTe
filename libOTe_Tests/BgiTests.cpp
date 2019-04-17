@@ -52,7 +52,7 @@ void Bgi_keyGen_test()
 
 	u64 depth = 3;
 	u64 groupBlkSize = 1;
-	u64 domain = (1ull << depth) *  groupBlkSize * 128;
+	u64 domain = (1ull << depth) *  groupBlkSize;
 	PRNG prng(ZeroBlock);
     PRNG::AnyPOD a = prng.get();
     block val = prng.get();
@@ -395,8 +395,8 @@ void Bgi_FullDomain_multikey_test()
                         throw RTE_LOC;
                     }
 
-                    if(!k)
-                        std::cout << Color::Green;
+                    //if(!k)
+                    //    std::cout << Color::Green;
                 }
                 else
                 {
@@ -405,17 +405,17 @@ void Bgi_FullDomain_multikey_test()
                         std::cout << "--------------\n" << i << " " << k << std::endl;
                         std::cout << bits0[k] << " ^ " << bits1[k] << std::endl;
                         std::cout << (bits0[k] ^ bits1[k]) << std::endl;
-                        //throw RTE_LOC;
+                        throw RTE_LOC;
                     }
                 }
 				//if (neq(d0[k][i], bits0[k])) throw std::runtime_error(LOCATION);
 				//if (neq(d1[k][i], bits1[k])) throw std::runtime_error(LOCATION);
 
-                if (!k)
-                {
-                    std::cout << (bits0[k] ^ bits1[k]) << Color::Default << std::endl;
+                //if (!k)
+                //{
+                //    std::cout << (bits0[k] ^ bits1[k]) << Color::Default << std::endl;
 
-                }
+                //}
 			}
 		}
 
