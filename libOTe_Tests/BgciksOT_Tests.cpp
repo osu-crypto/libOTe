@@ -12,15 +12,24 @@ void bitShift_test(const CLP& cmd)
     u64 n = cmd.getOr("n", 100);
     u64 t = cmd.getOr("t", 10);
 
-    PRNG prng(ZeroBlock);
+    PRNG prng(toBlock(cmd.getOr("seed", 0)));
 
     std::vector<block> dest(n), in(n + 1);
     prng.get(dest.data(), dest.size());
     prng.get(in.data(), in.size());
 
+
+
+    //std::cout << "a " << (_mm_slli_epi64(AllOneBlock, 20)) << std::endl;
+    //std::cout << "b " << (_mm_srli_epi64(AllOneBlock, 20)) << std::endl;
+
     for (u64 i = 0; i < dest.size(); ++i)
     {
-        u8 bitShift = prng.get<u8>() % 128;
+        u8 bitShift = prng.get<u8>() % 64;
+
+
+        memset(dest.data(), 0, dest.size() * 16);
+
         BitVector dv((u8*)dest.data(), dest.size() * 128);
         BitVector iv;
         iv.append((u8*)in.data(), dest.size() * 128, bitShift);
@@ -34,6 +43,12 @@ void bitShift_test(const CLP& cmd)
 
         if (dv != dv2)
         {
+            auto b = (bitShift > 64) ? 128 - bitShift : 64 - bitShift;
+
+            std::cout << "\n"<< bitShift<< "\n";
+            std::cout << "   "
+                << std::string(b, ' ')
+                << std::string(bitShift, 'x') <<'\n';
             std::cout << "d2 " << dv2 << std::endl;
             std::cout << "d  " << dv << std::endl;
             std::cout << "f  " << (dv2 ^ dv) << std::endl;

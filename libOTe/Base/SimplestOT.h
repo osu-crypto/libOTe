@@ -14,7 +14,7 @@
 
 #if defined(ENABLE_SIMPLESTOT) || defined(ENABLE_RELIC) || defined(ENABLE_MIRACL)
 
-#ifdef ENABLE_SIMPLESTOT
+#if defined(ENABLE_SIMPLESTOT) && !defined(_MSC_VER)
     // define that its was already enabled meaning we should use the ASM library
     #define ENABLE_SIMPLEST_ASM_LIB
 #else

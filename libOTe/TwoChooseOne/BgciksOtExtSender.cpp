@@ -178,8 +178,8 @@ namespace osuCrypto
                     b0 = _mm_loadu_si128((block*)inPtr),
                     b1 = _mm_load_si128((block*)(inPtr + sizeof(u64)));
 
-                dest[i] = dest[i] ^ (b0 >> bitShift);
-                dest[i] = dest[i] ^ (b1 << bitShift2);
+                dest[i] = dest[i] ^ _mm_srli_epi64(b0, bitShift);
+                dest[i] = dest[i] ^ _mm_slli_epi64(b1, bitShift2);
             }
         }
         else
@@ -192,8 +192,14 @@ namespace osuCrypto
                     b0 = _mm_load_si128((block*)inPtr),
                     b1 = _mm_loadu_si128((block*)(inPtr + sizeof(u64)));
 
-                dest[i] = dest[i] ^ (b0 >> bitShift);
-                dest[i] = dest[i] ^ (b1 << bitShift2);
+                //std::cout << "b0  " << b0 << std::endl;
+                //std::cout << "b0  " << b1 << std::endl;
+
+                //std::cout << "b0' " << (b0 >> bitShift) << std::endl;
+                //std::cout << "b0' " << (b1 << bitShift2) << std::endl;
+
+                dest[i] = dest[i] ^ _mm_srli_epi64(b0, bitShift);
+                dest[i] = dest[i] ^ _mm_slli_epi64(b1, bitShift2);
             }
         }
     }
