@@ -1,4 +1,5 @@
 #include "libOTe/TwoChooseOne/BgciksOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/BgciksOtExtSender.h"
 #include "libOTe/DPF/BgiGenerator.h"
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Common/Log.h>
@@ -287,7 +288,7 @@ namespace osuCrypto
             throw RTE_LOC;
 
 
-        std::vector<block> a(nBlocks), temp(nBlocks * 2);
+        std::vector<block> a(nBlocks);
         u64* a64ptr = (u64*)a.data();
 
         bpm::FFTPoly aPoly;
@@ -329,18 +330,20 @@ namespace osuCrypto
         setTimePoint("recver.expand.mul");
 
         Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
-        
+        std::vector<u64> temp(c[0].mPoly.size() + 2), temp2(c[0].mPoly.size());
+
         u64* t64Ptr = (u64*)temp.data();
+        auto t128Ptr = (block*)temp.data();
         for (u64 i = 0; i < rows; ++i)
         {
-            c[i].decode({ t64Ptr, 2 * n64 });
+            // decode c[i] and store it at t64Ptr
+            c[i].decode({ t64Ptr, 2 * n64 }, temp2, true);
 
-
-            //reduce()
-
-            TODO("do a real reduction mod (x^p-1)");
-            memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
+            // reduce s[i] mod (x^p - 1) and store it at cModP1[i]
+            modp(cModP1[i], { t128Ptr, n64 }, mP);
+            //memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
         }
+
         setTimePoint("recver.expand.decodeReduce");
 
         MatrixView<block> view(messages.begin(), messages.end(), 1);

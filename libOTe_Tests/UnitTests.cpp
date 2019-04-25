@@ -39,16 +39,17 @@ namespace tests_libOTe
         tc.add("SimplestOT_Test_Impl                    ", SimplestOT_Test_Impl);
 
 
-        tc.add("Bgi_keyGen_128_test                  " , Bgi_keyGen_128_test);               
-        tc.add("Bgi_keyGen_test                      " , Bgi_keyGen_test);                   
-        //tc.add("Bgi_PIR_test                         " , Bgi_PIR_test);                      
-        //tc.add("Bgi_FullDomain_test                  " , Bgi_FullDomain_test);               
-        //tc.add("Bgi_FullDomain_iterator_test         " , Bgi_FullDomain_iterator_test);      
-        tc.add("Bgi_FullDomain_multikey_test         " , Bgi_FullDomain_multikey_test);   
-        tc.add("bitShift_test                        ", bitShift_test);
-
-        tc.add("BgciksOT_Test                        ", BgciksOT_Test);
-
+        tc.add("Bgi_keyGen_128_test                     " , Bgi_keyGen_128_test);               
+        tc.add("Bgi_keyGen_test                         " , Bgi_keyGen_test);                   
+        //tc.add("Bgi_PIR_test                            " , Bgi_PIR_test);                      
+        //tc.add("Bgi_FullDomain_test                     " , Bgi_FullDomain_test);               
+        //tc.add("Bgi_FullDomain_iterator_test            " , Bgi_FullDomain_iterator_test);      
+        tc.add("Bgi_FullDomain_multikey_test            " , Bgi_FullDomain_multikey_test);   
+        tc.add("bitShift_test                           ", bitShift_test);
+        tc.add("modp_test                               ", modp_test);
+                                                       
+        tc.add("BgciksOT_Test                           ", BgciksOT_Test);
+                                                       
     });
 
 

@@ -60,6 +60,86 @@ void bitShift_test(const CLP& cmd)
 
 }
 
+void clearBits(span<block> in, u64 idx)
+{
+    auto p = (u8*)in.data() + idx / 8;
+    auto e = (u8*)in.data() + in.size() * 16;
+
+    if (idx & 7) 
+    {
+        *p++ &= (1 << (idx & 7)) - 1;
+    }
+
+    while (p != e)
+        *p++ = 0;
+
+
+    BitVector test((u8*)in.data(), in.size() * 128);
+    for (u64 i = idx; i < test.size(); ++i)
+        if (test[i])
+            throw RTE_LOC;
+}
+
+
+void modp_test(const CLP& cmd)
+{
+    u64 n = cmd.getOr("n", 100);
+    u64 c = cmd.getOr("c", 2);
+    u64 t = cmd.getOr("t", 10);
+
+
+    PRNG prng(toBlock(cmd.getOr("seed", 0)));
+
+    auto iBits = n * c * 128  - prng.get<u64>() % 128;
+    auto nBits = n * 128;
+
+    std::vector<block> dest(n), in((iBits + 127) / 128);
+
+    for (u64 i = 0; i < dest.size(); ++i)
+    {
+        u64 p = nBits;// -(prng.get<u64>() % 128);
+
+        prng.get(in.data(), in.size());
+        clearBits(in, iBits);
+
+        memset(dest.data(), 0, dest.size() * 16);
+
+        BitVector dv((u8*)in.data(), p);
+        BitVector iv;
+
+        for (u64 j = 1; j < c; ++j)
+        {
+            auto rem = std::min<u64>(p, iBits - j * p);
+            iv.resize(0);
+            iv.append((u8*)in.data(), rem, j * p);
+            iv.resize(p, 0);
+
+            dv ^= iv;
+        }
+
+        modp(dest, in, p);
+
+
+        BitVector dv2((u8*)dest.data(), p);
+
+        if (dv != dv2)
+        {
+            //auto b = (bitShift > 64) ? 128 - bitShift : 64 - bitShift;
+
+            std::cout << "\n" << p << "\n";
+            //std::cout << "   "
+            //    << std::string(b, ' ')
+            //    << std::string(bitShift, 'x') << '\n';
+            std::cout << "d2 " << dv2 << std::endl;
+            std::cout << "d  " << dv << std::endl;
+            std::cout << "f  " << (dv2 ^ dv) << std::endl;
+            throw RTE_LOC;
+        }
+
+    }
+
+}
+
 void BgciksOT_Test(const CLP& cmd)
 {
     

@@ -204,6 +204,45 @@ namespace osuCrypto
         }
     }
 
+    void modp(span<block> dest, span<block> in, u64 p)
+    {
+        auto pBlocks = (p + 127) / 128;
+        auto pBytes = (p + 7) / 8;
+
+        if (dest.size() < pBlocks)
+            throw RTE_LOC;
+
+        if (in.size() < pBlocks)
+            throw RTE_LOC;
+
+        auto count = (in.size() * 128 + p - 1) / p;
+
+        memcpy(dest.data(), in.data(), pBytes);
+
+
+        for (u64 i = 1; i < count; ++i)
+        {
+            auto idx = i * p;
+            auto shift = idx & 127;
+
+            auto in_i = span<block>(in.data() + (idx / 128), pBlocks);
+
+            bitShiftXor(dest, in_i, shift);
+        }
+
+        auto offset = (p & 7);
+        if (offset)
+        {
+            u8 mask = (1 << (8 - offset)) - 1;
+            auto idx = p / 8;
+            ((u8*)dest.data())[idx] &= mask;
+        }
+
+        auto rem = dest.size() * 16 - pBytes;
+        if(rem)
+            memset(((u8*)dest.data()) + pBytes, 0, rem);
+    }
+
     void BgciksOtExtSender::randMulQuasiCyclic(Matrix<block>& rT, span<std::array<block, 2>>& messages)
     {
         auto nBlocks = mN / 128;
@@ -262,24 +301,29 @@ namespace osuCrypto
 
         Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
 
-        std::vector<u64> temp(c[0].mPoly.size()), temp2(c[0].mPoly.size());
+        std::vector<u64> temp(c[0].mPoly.size() + 2), temp2(c[0].mPoly.size());
 
-        u64* t64Ptr = temp.data();
+        auto pBlocks = (mP + 127) / 128;
+
+        auto t64Ptr = temp.data();
+        auto t128Ptr = (block*)temp.data();
+
         for (u64 i = 0; i < rows; ++i)
         {
+            // decode c[i] and store it at t64Ptr
             c[i].decode({ t64Ptr, 2 * n64 }, temp2, true);
 
-            for (u64 j = 1; j < nScaler; ++j)
-            {
+            // reduce s[i] mod (x^p - 1) and store it at cModP1[i]
+            modp(cModP1[i], { t128Ptr, n64 }, mP);
 
+            //memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
 
-
-
-            }
+            //u64 shift = 0;
+            //bitShiftXor(
+            //    { (block*)t64Ptr,  pBlocks },
+            //    {(block*)t64Ptr + mP / 128,  pBlocks }, shift);
             //reduce()
-
-            TODO("do a real reduction mod (x^p-1)");
-            memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
+            //TODO("do a real reduction mod (x^p-1)");
         }
 
         setTimePoint("sender.expand.decodeReduce");
