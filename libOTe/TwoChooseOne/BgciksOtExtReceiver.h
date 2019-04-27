@@ -27,7 +27,7 @@ namespace osuCrypto
             Channel & chl);
 
         void randMulNaive(Matrix<block> &rT, span<block> &messages);
-        void randMulQuasiCyclic(Matrix<block> &rT, span<block> &messages);
+        void randMulQuasiCyclic(Matrix<block> &rT, span<block> &messages, BitVector& choices);
         
         u64 mP, mN, mN2, mSizePer;
         std::vector<u64> mS;

@@ -123,7 +123,7 @@ namespace osuCrypto
             k1(numPartitions), g1(numPartitions),
             k2(numPartitions), g2(numPartitions);
 
-        PRNG prng(ZeroBlock);
+        PRNG prng(toBlock(n));
         mS.resize(numPartitions);
         std::vector<u64> S(numPartitions);
         mDelta = prng.get();
@@ -205,15 +205,18 @@ namespace osuCrypto
         //auto rr = convert(r);
         //auto rMtx = transpose(rr);
         //Matrix<u8> mtx(mN2, mN);
-
-        //std::vector<block>r2(mN2);
-        //chl.recv(r2);
-        //for (u64 i = 0; i < r2.size(); ++i)
-        //{
-        //    bool ss = std::find(mS.begin(), mS.end(), i) != mS.end();
-
-        //    std::cout << i <<" " << (r[i] ^ r2[i]) << " " << (ss ? mDelta : ZeroBlock) << std::endl;
-        //}
+        {
+            std::vector<block>r2(mN2);
+            chl.recv(r2);
+            for (u64 i = 0; i < r2.size(); ++i)
+            {
+                bool ss = std::find(mS.begin(), mS.end(), i) != mS.end();
+                auto v0 = r[i] ^ r2[i];
+                auto v1 = (ss ? mDelta : ZeroBlock);
+                if(neq(v0,v1))
+                    std::cout << i << " " << (v0) << " " << v1 << std::endl;
+            }
+        }
 
         if (mN2 % 128) throw RTE_LOC;
         Matrix<block> rT(128, mN2 / 128, AllocType::Uninitialized);
@@ -234,7 +237,7 @@ namespace osuCrypto
             randMulNaive(rT, messages);
             break;
         case osuCrypto::MultType::QuasiCyclic:
-            randMulQuasiCyclic(rT, messages);
+            randMulQuasiCyclic(rT, messages, choices);
             break;
         default:
             break;
@@ -275,9 +278,10 @@ namespace osuCrypto
         setTimePoint("recver.expand.mul");
     }
 
-    void BgciksOtExtReceiver::randMulQuasiCyclic(Matrix<block>& rT, span<block>& messages)
+    void BgciksOtExtReceiver::randMulQuasiCyclic(Matrix<block>& rT, span<block>& messages, BitVector& choices)
     {
         auto nBlocks = mN / 128;
+        auto nBytes = mN / 8;
         auto n2Blocks = mN2 / 128;
         auto n64 = i64(nBlocks * 2);
 
@@ -291,6 +295,14 @@ namespace osuCrypto
         std::vector<block> a(nBlocks);
         u64* a64ptr = (u64*)a.data();
 
+        BitVector sb(mN2);
+        for (u64 i = 0; i < mS.size(); ++i)
+        {
+            sb[mS[i]] = 1;
+        }
+
+
+        bpm::FFTPoly sPoly;
         bpm::FFTPoly aPoly;
         bpm::FFTPoly bPoly;
 
@@ -325,6 +337,19 @@ namespace osuCrypto
                     c[i].mult(aPoly, bPoly);
                 }
             }
+
+            u64* s64ptr = (u64*)(sb.data() + s * nBytes);
+            bPoly.encode({ s64ptr, n64 });
+
+            if (s)
+            {
+                bPoly.multEq(aPoly);
+                sPoly.addEq(bPoly);
+            }
+            else
+            {
+                sPoly.mult(aPoly, bPoly);
+            }
         }
 
         setTimePoint("recver.expand.mul");
@@ -343,6 +368,12 @@ namespace osuCrypto
             modp(cModP1[i], { t128Ptr, n64 }, mP);
             //memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
         }
+
+        choices.resize(0);
+        choices.resize(mN);
+        sPoly.decode({ t64Ptr, 2 * n64 }, temp2, true);
+        modp({ (block*)choices.data(), i64(nBlocks) }, { t128Ptr, n64 }, mP);
+        //memcpy((block*)choices.data(), t64Ptr, nBlocks * sizeof(block));
 
         setTimePoint("recver.expand.decodeReduce");
 

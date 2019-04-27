@@ -3,6 +3,7 @@
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/TwoChooseOne/BgciksOtExtReceiver.h"
 #include "bitpolymul2/bitpolymul.h"
+#include <cryptoTools/Common/Log.h>
 namespace osuCrypto
 {
 
@@ -19,6 +20,7 @@ namespace osuCrypto
         mN = roundUpTo(mP, 128);
         mN2 = nScaler * mN;
 
+        //std::cout << "P " << mP << std::endl;
 
         mSizePer = (mN2 + numPartitions - 1) / numPartitions;
         auto groupSize = 8;
@@ -28,7 +30,7 @@ namespace osuCrypto
             k1(numPartitions), g1(numPartitions),
             k2(numPartitions), g2(numPartitions);
 
-        PRNG prng(ZeroBlock);
+        PRNG prng(toBlock(n));
         std::vector<u64> S(numPartitions);
         mDelta = prng.get();
 
@@ -106,6 +108,9 @@ namespace osuCrypto
 
         setTimePoint("sender.expand.dpf");
 
+        chl.asyncSendCopy(r);
+
+
         if (mN2 % 128) throw RTE_LOC;
         Matrix<block> rT(128, mN2 / 128, AllocType::Uninitialized);
         sse_transpose(r, rT);
@@ -157,9 +162,38 @@ namespace osuCrypto
 
         setTimePoint("sender.expand.mul");
     }
+    namespace
+    {
+        struct format
+        {
+            BitVector& bv;
+            u64 shift;
+            format(BitVector& v0, u64 v1) : bv(v0), shift(v1) {}
+        };
+
+        std::ostream& operator<<(std::ostream& o, format& f)
+        {
+            auto end = f.bv.end();
+            auto cur = f.bv.begin();
+            for (u64 i = 0; i < f.bv.size(); ++i, ++cur)
+            {
+                if (i % 64 == f.shift)
+                    o << std::flush << Color::Blue;
+                if (i % 64 == 0)
+                    o << std::flush << Color::Default;
+
+                o << int(*cur) << std::flush;
+            }
+
+            o << Color::Default;
+
+            return o;
+        }
+    }
 
     void bitShiftXor(span<block> dest, span<block> in, u8 bitShift)
     {
+
 
 
         if (bitShift > 127)
@@ -167,39 +201,95 @@ namespace osuCrypto
         if (u64(in.data()) % 16)
             throw RTE_LOC;
 
+        //BitVector bv0, bv1, inv;
         if (bitShift >= 64)
         {
             bitShift -= 64;
             const int bitShift2 = 64 - bitShift;
             u8* inPtr = ((u8*)in.data()) + sizeof(u64);
-            for (u64 i = 0; i < dest.size(); ++i, inPtr += sizeof(block))
+            //inv.append((u8*)inPtr, in.size() * 128 - 64);
+
+            auto end = std::min<u64>(dest.size(), in.size() -1);
+            for (u64 i = 0; i < end; ++i, inPtr += sizeof(block))
             {
                 block
                     b0 = _mm_loadu_si128((block*)inPtr),
                     b1 = _mm_load_si128((block*)(inPtr + sizeof(u64)));
 
-                dest[i] = dest[i] ^ _mm_srli_epi64(b0, bitShift);
-                dest[i] = dest[i] ^ _mm_slli_epi64(b1, bitShift2);
+                b0 = _mm_srli_epi64(b0, bitShift);
+                b1 = _mm_slli_epi64(b1, bitShift2);
+
+                //bv0.append((u8*)&b0, 128);
+                //bv1.append((u8*)&b1, 128);
+
+                dest[i] = dest[i]  ^ b0  ^ b1;
             }
+
+
+            if (end != dest.size())
+            {
+                u64 b0 = *(u64*)inPtr;
+                b0 = (b0 >> bitShift);
+
+                //bv0.append((u8*)&b0, 64);
+                //bv1.append((u8*)&b1, 64);
+
+
+                *(u64*)(&dest[end]) ^= b0;
+            }
+            //std::cout << " in     " << format(inv, bitShift) << std::endl;
+            //std::cout << " a0     " << format(bv0, 64 - bitShift) << std::endl;
+            //std::cout << " a1     " << format(bv1, 64 - bitShift) << std::endl;
         }
-        else
+        else if(bitShift)
         {
             const int bitShift2 = 64 - bitShift;
             u8* inPtr = (u8*)in.data();
-            for (u64 i = 0; i < dest.size(); ++i, inPtr += sizeof(block))
+
+            auto end = std::min<u64>(dest.size(), in.size() - 1);
+            for (u64 i = 0; i < end; ++i, inPtr += sizeof(block))
             {
                 block
                     b0 = _mm_load_si128((block*)inPtr),
                     b1 = _mm_loadu_si128((block*)(inPtr + sizeof(u64)));
 
-                //std::cout << "b0  " << b0 << std::endl;
-                //std::cout << "b0  " << b1 << std::endl;
+                b0 = _mm_srli_epi64(b0, bitShift);
+                b1 = _mm_slli_epi64(b1, bitShift2);
 
-                //std::cout << "b0' " << (b0 >> bitShift) << std::endl;
-                //std::cout << "b0' " << (b1 << bitShift2) << std::endl;
+                //bv0.append((u8*)&b0, 128);
+                //bv1.append((u8*)&b1, 128);
 
-                dest[i] = dest[i] ^ _mm_srli_epi64(b0, bitShift);
-                dest[i] = dest[i] ^ _mm_slli_epi64(b1, bitShift2);
+                dest[i] = dest[i] ^ b0 ^ b1;
+            }
+
+            if (end != dest.size())
+            {
+                block b0 = _mm_load_si128((block*)inPtr);
+                b0 = _mm_srli_epi64(b0, bitShift);
+
+                //bv0.append((u8*)&b0, 128);
+
+                dest[end] = dest[end] ^ b0;
+
+                u64 b1 = *(u64*)(inPtr + sizeof(u64));
+                b1 = (b1 << bitShift2);
+
+                //bv1.append((u8*)&b1, 64);
+
+                *(u64*)&dest[end] ^= b1;
+            }
+
+
+
+            //std::cout << " b0     " << bv0 << std::endl;
+            //std::cout << " b1     " << bv1 << std::endl;
+        }
+        else
+        {
+            auto end = std::min<u64>(dest.size(), in.size());
+            for (u64 i = 0; i < end; ++i)
+            {
+                dest[i] = dest[i] ^ in[i];
             }
         }
     }
@@ -217,23 +307,40 @@ namespace osuCrypto
 
         auto count = (in.size() * 128 + p - 1) / p;
 
+        //BitVector bv;
+        //bv.append((u8*)in.data(), p);
+        //std::cout << Color::Green << bv << std::endl << Color::Default;
+
         memcpy(dest.data(), in.data(), pBytes);
 
 
         for (u64 i = 1; i < count; ++i)
         {
-            auto idx = i * p;
-            auto shift = idx & 127;
+            auto begin = i * p;
+            auto end = std::min<u64>(i * p + p, in.size() * 128);
 
-            auto in_i = span<block>(in.data() + (idx / 128), pBlocks);
+            auto shift = begin & 127;
+            auto beginBlock = in.data() + (begin / 128);
+            auto endBlock = in.data() + ((end + 127) / 128);
+
+            if (endBlock > in.data() + in.size())
+                throw RTE_LOC;
+
+
+            auto in_i = span<block>(beginBlock, endBlock);
 
             bitShiftXor(dest, in_i, shift);
+
+            //bv.resize(0);
+            //bv.append((u8*)dest.data(), p);
+            //std::cout << Color::Green << bv << std::endl << Color::Default;
         }
+
 
         auto offset = (p & 7);
         if (offset)
         {
-            u8 mask = (1 << (8 - offset)) - 1;
+            u8 mask = (1 << offset) - 1;
             auto idx = p / 8;
             ((u8*)dest.data())[idx] &= mask;
         }
@@ -315,8 +422,8 @@ namespace osuCrypto
 
             // reduce s[i] mod (x^p - 1) and store it at cModP1[i]
             modp(cModP1[i], { t128Ptr, n64 }, mP);
-
             //memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
+
 
             //u64 shift = 0;
             //bitShiftXor(
