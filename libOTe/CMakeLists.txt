@@ -19,7 +19,7 @@ endif()
 
 
 set(bitPolyMulDir "${CMAKE_SOURCE_DIR}/../bitpolymul2/")
-set(bitPolyMulLib "${bitPolyMulDir}/lib/libbitpolymul2.a")
+set(bitPolyMulLib "${bitPolyMulDir}/lib/${CMAKE_BUILD_TYPE}/libbitpolymul2.a")
 
 if(NOT EXISTS "${bitPolyMulDir}")
     message(FATAL_ERROR "failed to find bitpolymul2 at ${bitPolyMulDir}")

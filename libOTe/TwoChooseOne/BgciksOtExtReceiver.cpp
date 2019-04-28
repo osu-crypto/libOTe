@@ -355,14 +355,15 @@ namespace osuCrypto
         setTimePoint("recver.expand.mul");
 
         Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
-        std::vector<u64> temp(c[0].mPoly.size() + 2), temp2(c[0].mPoly.size());
+        std::vector<u64> temp(c[0].mPoly.size() + 2);
+        bpm::FFTPoly::DecodeCache cache;
 
         u64* t64Ptr = (u64*)temp.data();
         auto t128Ptr = (block*)temp.data();
         for (u64 i = 0; i < rows; ++i)
         {
             // decode c[i] and store it at t64Ptr
-            c[i].decode({ t64Ptr, 2 * n64 }, temp2, true);
+            c[i].decode({ t64Ptr, 2 * n64 }, cache, true);
 
             // reduce s[i] mod (x^p - 1) and store it at cModP1[i]
             modp(cModP1[i], { t128Ptr, n64 }, mP);
@@ -371,7 +372,7 @@ namespace osuCrypto
 
         choices.resize(0);
         choices.resize(mN);
-        sPoly.decode({ t64Ptr, 2 * n64 }, temp2, true);
+        sPoly.decode({ t64Ptr, 2 * n64 }, cache, true);
         modp({ (block*)choices.data(), i64(nBlocks) }, { t128Ptr, n64 }, mP);
         //memcpy((block*)choices.data(), t64Ptr, nBlocks * sizeof(block));
 

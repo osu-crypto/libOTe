@@ -31,6 +31,9 @@ int miraclTestMain();
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtSender.h"
 
+#include "libOTe/TwoChooseOne/BgciksOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/BgciksOtExtSender.h"
+
 #include "libOTe/NChooseK/AknOtReceiver.h"
 #include "libOTe/NChooseK/AknOtSender.h"
 
@@ -45,7 +48,7 @@ enum class Role
 
 
 template<typename NcoOtSender, typename  NcoOtReceiver>
-void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag)
+void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP&)
 {
     const u64 step = 1024;
 
@@ -263,7 +266,7 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
 
 
 template<typename OtExtSender, typename OtExtRecver>
-void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag)
+void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP&)
 {
     if (totalOTs == 0)
         totalOTs = 1 << 20;
@@ -379,9 +382,112 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 }
 
 
+//template<typename OtExtSender, typename OtExtRecver>
+void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
+{
+    if (totalOTs == 0)
+        totalOTs = 1 << 20;
+    using OtExtSender = BgciksOtExtSender;
+    using OtExtRecver = BgciksOtExtReceiver;
+
+    auto numOTs = totalOTs / numThreads;
+
+    // get up the networking
+    auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
+    IOService ios;
+    Session  ep0(ios, ip, rr);
+    PRNG prng(sysRandomSeed());
+
+    // for each thread we need to construct a channel (socket) for it to communicate on.
+    std::vector<Channel> chls(numThreads);
+    for (int i = 0; i < numThreads; ++i)
+        chls[i] = ep0.addChannel();
+
+
+    std::vector<OtExtSender> senders(numThreads);
+    std::vector<OtExtRecver> receivers(numThreads);
+
+
+    auto routine = [&](int i)
+    {
+        // get a random number generator seeded from the system
+        PRNG prng(sysRandomSeed());
+
+        if (role == Role::Receiver)
+        {
+            receivers[i].genBase(numOTs, chls[i]);
+
+            // construct the choices that we want.
+            BitVector choice(numOTs);
+            // in this case pick random messages.
+            choice.randomize(prng);
+
+            // construct a vector to stored the received messages. 
+            std::vector<block> msgs(numOTs);
+
+            // perform  numOTs random OTs, the results will be written to msgs.
+            receivers[i].receive(msgs, choice, prng, chls[i]);
+        }
+        else
+        {
+            senders[i].genBase(numOTs, chls[i]);
+
+            // construct a vector to stored the random send messages. 
+            std::vector<std::array<block, 2>> msgs(numOTs);
+
+            // if delta OT is used, then the user can call the following 
+            // to set the desired XOR difference between the zero messages
+            // and the one messages.
+            //
+            //     senders[i].setDelta(some 128 bit delta);
+            //
+
+            // perform the OTs and write the random OTs to msgs.
+            senders[i].send(msgs, prng, chls[i]);
+        }
+    };
+
+
+    
+
+    Timer timer, sendTimer, recvTimer;
+    timer.reset();
+    auto s = timer.setTimePoint("start");
+    sendTimer.setTimePoint("start");
+    recvTimer.setTimePoint("start");
+
+    senders[0].setTimer(sendTimer);
+    receivers[0].setTimer(recvTimer);
+
+    std::vector<std::thread> thrds(numThreads);
+    for (int i = 0; i < numThreads; ++i)
+        thrds[i] = std::thread(routine, i);
+
+    for (int i = 0; i < numThreads; ++i)
+        thrds[i].join();
+
+    auto e = timer.setTimePoint("finish");
+    auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+
+    if (role == Role::Sender)
+        std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+
+    if (cmd.isSet("v"))
+    {
+        if (role == Role::Sender)
+            lout << " **** sender ****\n" << sendTimer << std::endl;
+
+        if(role == Role::Receiver)
+            lout << " **** receiver ****\n" << recvTimer << std::endl;
+    }
+}
+
+
+
+
 
 template<typename BaseOT>
-void baseOT_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag)
+void baseOT_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP&)
 {
     IOService ios;
     PRNG prng(sysRandomSeed());
@@ -433,13 +539,14 @@ kos{ "k", "kos" },
 dkos{ "d", "dkos" },
 kkrt{ "kk", "kkrt" },
 iknp{ "i", "iknp" },
-diknp{ "d", "diknp" },
+diknp{ "diknp" },
 oos{ "o", "oos" },
+bgciks{ "b", "bgciks" },
 akn{ "a", "akn" },
 np{ "np" },
 simple{ "simplest" };
 
-using ProtocolFunc = std::function<void(Role, int, int, std::string, std::string)>;
+using ProtocolFunc = std::function<void(Role, int, int, std::string, std::string, CLP&)>;
 
 bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
 {
@@ -455,19 +562,19 @@ bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
         if (cmd.hasValue("r"))
         {
             auto role = cmd.get<int>("r") ? Role::Sender : Role::Receiver;
-            protocol(role, n, t, ip, tag.back());
+            protocol(role, n, t, ip, tag.back(), cmd);
         }
         else
         {
             auto thrd = std::thread([&] {
-                try { protocol(Role::Sender, n, t, ip, tag.back()); }
+                try { protocol(Role::Sender, n, t, ip, tag.back(), cmd); }
                 catch (std::exception& e)
                 {
                     lout << e.what() << std::endl;
                 }
             });
 
-            try { protocol(Role::Receiver, n, t, ip, tag.back()); }
+            try { protocol(Role::Receiver, n, t, ip, tag.back(), cmd); }
             catch (std::exception& e)
             {
                 lout << e.what() << std::endl;
@@ -525,7 +632,6 @@ void minimal()
 
 int main(int argc, char** argv)
 {
-    std::this_thread::sleep_for(std::chrono::seconds(1));
     CLP cmd;
     cmd.parse(argc, argv);
     bool flagSet = false;
@@ -575,6 +681,9 @@ int main(int argc, char** argv)
     flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
     flagSet |= runIf(NChooseOne_example<OosNcoOtSender, OosNcoOtReceiver>, cmd, oos);
 
+    //<BgciksOtExtSender, BgciksOtExtReceiver>
+    flagSet |= runIf(TwoChooseOneG_example, cmd, bgciks);
+
 
     if (flagSet == false)
     {
@@ -603,12 +712,13 @@ int main(int argc, char** argv)
             << "Protocols:\n"
             << Color::Green << "  -simplest" << Color::Default << "  : to run the SimplestOT active secure 1-out-of-2 base OT" << (spEnabled ? "" : "(disabled)") << "\n"
             << Color::Green << "  -np      " << Color::Default << "  : to run the NaorPinkas active secure 1-out-of-2 base OT" << (npEnabled ? "" : "(disabled)") << "\n"
-            << Color::Green << "  -iknp    " << Color::Default << "  : to run the IKNP passive secure 1-out-of-2       OT\n"
-            << Color::Green << "  -diknp   " << Color::Default << "  : to run the IKNP passive secure 1-out-of-2 Delta-OT\n"
-            << Color::Green << "  -kos     " << Color::Default << "  : to run the KOS  active secure  1-out-of-2       OT\n"
-            << Color::Green << "  -dkos    " << Color::Default << "  : to run the KOS  active secure  1-out-of-2 Delta-OT\n"
-            << Color::Green << "  -oos     " << Color::Default << "  : to run the OOS  active secure  1-out-of-N OT for N=2^76\n"
-            << Color::Green << "  -kkrt    " << Color::Default << "  : to run the KKRT passive secure 1-out-of-N OT for N=2^128\n\n"
+            << Color::Green << "  -iknp    " << Color::Default << "  : to run the IKNP   passive secure 1-out-of-2       OT\n"
+            << Color::Green << "  -diknp   " << Color::Default << "  : to run the IKNP   passive secure 1-out-of-2 Delta-OT\n"
+            << Color::Green << "  -bgciks  " << Color::Default << "  : to run the BGCIKS passive secure 1-out-of-2       OT\n"
+            << Color::Green << "  -kos     " << Color::Default << "  : to run the KOS    active secure  1-out-of-2       OT\n"
+            << Color::Green << "  -dkos    " << Color::Default << "  : to run the KOS    active secure  1-out-of-2 Delta-OT\n"
+            << Color::Green << "  -oos     " << Color::Default << "  : to run the OOS    active secure  1-out-of-N OT for N=2^76\n"
+            << Color::Green << "  -kkrt    " << Color::Default << "  : to run the KKRT   passive secure 1-out-of-N OT for N=2^128\n\n"
 
             << "Other Options:\n"
             << Color::Green << "  -n         " << Color::Default << ": the number of OTs to perform\n"
