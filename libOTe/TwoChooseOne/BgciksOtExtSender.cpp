@@ -457,6 +457,7 @@ namespace osuCrypto
         //sse_transpose(MatrixView<block>(cModP1), MatrixView<block>(view));
 
 
+        std::array<block, 8> hashBuffer;
         std::array<block, 128> tpBuffer;
         auto end = (messages.size() + 127) / 128;
         for (u64 i = 0; i < end; ++i)
@@ -468,13 +469,62 @@ namespace osuCrypto
 
             sse_transpose128(tpBuffer);
 
-            auto end2 = i * tpBuffer.size() + min;
-            for (u64 j = i * tpBuffer.size(), k = 0; j < end2; ++j, ++k)
+
+//#define NO_HASH
+
+
+#ifdef NO_HASH
+            auto end = i * tpBuffer.size() + min;
+            for (u64 j = i * tpBuffer.size(), k = 0; j < end; ++j, ++k)
             {
                 messages[j][0] = tpBuffer[k];
                 messages[j][1] = tpBuffer[k] ^ mDelta;
             }
+#else
+            u64 k = 0;
+            u64 j = i * tpBuffer.size();
+            auto min2 = min & ~7;
+            for (; k < min2; k += 8)
+            {
+                mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
 
+                messages[j + k + 0][0] = tpBuffer[k + 0] ^ hashBuffer[0];
+                messages[j + k + 1][0] = tpBuffer[k + 1] ^ hashBuffer[1];
+                messages[j + k + 2][0] = tpBuffer[k + 2] ^ hashBuffer[2];
+                messages[j + k + 3][0] = tpBuffer[k + 3] ^ hashBuffer[3];
+                messages[j + k + 4][0] = tpBuffer[k + 4] ^ hashBuffer[4];
+                messages[j + k + 5][0] = tpBuffer[k + 5] ^ hashBuffer[5];
+                messages[j + k + 6][0] = tpBuffer[k + 6] ^ hashBuffer[6];
+                messages[j + k + 7][0] = tpBuffer[k + 7] ^ hashBuffer[7];
+
+                tpBuffer[k + 0]= tpBuffer[k + 0] ^ mDelta;
+                tpBuffer[k + 1]= tpBuffer[k + 1] ^ mDelta;
+                tpBuffer[k + 2]= tpBuffer[k + 2] ^ mDelta;
+                tpBuffer[k + 3]= tpBuffer[k + 3] ^ mDelta;
+                tpBuffer[k + 4]= tpBuffer[k + 4] ^ mDelta;
+                tpBuffer[k + 5]= tpBuffer[k + 5] ^ mDelta;
+                tpBuffer[k + 6]= tpBuffer[k + 6] ^ mDelta;
+                tpBuffer[k + 7]= tpBuffer[k + 7] ^ mDelta;
+
+                mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
+
+                messages[j + k + 0][1] = tpBuffer[k + 0] ^ hashBuffer[0];
+                messages[j + k + 1][1] = tpBuffer[k + 1] ^ hashBuffer[1];
+                messages[j + k + 2][1] = tpBuffer[k + 2] ^ hashBuffer[2];
+                messages[j + k + 3][1] = tpBuffer[k + 3] ^ hashBuffer[3];
+                messages[j + k + 4][1] = tpBuffer[k + 4] ^ hashBuffer[4];
+                messages[j + k + 5][1] = tpBuffer[k + 5] ^ hashBuffer[5];
+                messages[j + k + 6][1] = tpBuffer[k + 6] ^ hashBuffer[6];
+                messages[j + k + 7][1] = tpBuffer[k + 7] ^ hashBuffer[7];
+            }
+
+            for (; k < min; ++k)
+            {
+                messages[j + k][0] = mAesFixedKey.ecbEncBlock(tpBuffer[k]) ^ tpBuffer[k];
+                messages[j + k][1] = mAesFixedKey.ecbEncBlock(tpBuffer[k] ^ mDelta) ^ tpBuffer[k] ^ mDelta;
+            }
+
+#endif
             //messages[i][0] = view(i, 0);
             //messages[i][1] = view(i, 0) ^ mDelta;
         }

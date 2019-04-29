@@ -471,8 +471,8 @@ namespace osuCrypto
 
         //MatrixView<block> view(messages.begin(), messages.end(), 1);
         //sse_transpose(cModP1, view);
-
-
+//#define NO_HASH
+        std::array<block, 8> hashBuffer;
         //std::array<block, 128> tpBuffer;
         auto end = messages.size() / 128;
         for (u64 i = 0; i < end; ++i)
@@ -480,10 +480,26 @@ namespace osuCrypto
             u64 j = i * 128;
             auto& tpBuffer = *(std::array<block, 128>*)(messages.data() + j);
 
-            for (u64 j = 0; j < tpBuffer.size(); ++j)
-                tpBuffer[j] = cModP1(j, i);
+            for (u64 k = 0; k < 128; ++k)
+                tpBuffer[k] = cModP1(k, i);
 
             sse_transpose128(tpBuffer);
+
+#ifndef NO_HASH
+            for (u64 k = 0; k < 128; k += 8)
+            {
+                mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
+
+                tpBuffer[k + 0] = tpBuffer[k + 0] ^ hashBuffer[0];
+                tpBuffer[k + 1] = tpBuffer[k + 1] ^ hashBuffer[1];
+                tpBuffer[k + 2] = tpBuffer[k + 2] ^ hashBuffer[2];
+                tpBuffer[k + 3] = tpBuffer[k + 3] ^ hashBuffer[3];
+                tpBuffer[k + 4] = tpBuffer[k + 4] ^ hashBuffer[4];
+                tpBuffer[k + 5] = tpBuffer[k + 5] ^ hashBuffer[5];
+                tpBuffer[k + 6] = tpBuffer[k + 6] ^ hashBuffer[6];
+                tpBuffer[k + 7] = tpBuffer[k + 7] ^ hashBuffer[7];
+            }
+#endif
         }
 
         auto rem = messages.size() % 128;
@@ -496,16 +512,14 @@ namespace osuCrypto
 
             sse_transpose128(tpBuffer);
 
-            memcpy(messages.data() + end * 128, tpBuffer.data(), rem * sizeof(block));
-            ////auto end2 = end * tpBuffer.size() + min;
-            //for (u64 j = end * tpBuffer.size(), k = 0; j < messages.size(); ++j, ++k)
-            //{
-            //    messages[j] = tpBuffer[k];
-            //    messages[j] = tpBuffer[k] ^ mDelta;
-            //}
+#ifndef NO_HASH
+            for (u64 k = 0; k < rem; ++k)
+            {
+                tpBuffer[k] = tpBuffer[k] ^ mAesFixedKey.ecbEncBlock(tpBuffer[k]);
+            }
+#endif
 
-            //messages[i][0] = view(i, 0);
-            //messages[i][1] = view(i, 0) ^ mDelta;
+            memcpy(messages.data() + end * 128, tpBuffer.data(), rem * sizeof(block));
         }
 
         setTimePoint("recver.expand.transposeXor");
