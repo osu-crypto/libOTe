@@ -39,6 +39,9 @@ namespace osuCrypto
 
     };
 
+    Matrix<block> expandTranspose(BgiEvaluator::MultiKey & gen, u64 n);
+
+
     inline u8 parity(block b)
     {
         b = b ^ (b >> 1);

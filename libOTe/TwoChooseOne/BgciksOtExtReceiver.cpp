@@ -183,6 +183,55 @@ namespace osuCrypto
     //    w = r * H
 
 
+    Matrix<block> expandTranspose(BgiEvaluator::MultiKey & gen, u64 n)
+    {
+        Matrix<block> rT(128, n / 128, AllocType::Uninitialized);
+
+        std::array<block, 128> tpBuffer;
+
+        if (n % 128)
+            throw RTE_LOC;
+        if (gen.mNumKeys > tpBuffer.size())
+            throw std::runtime_error("not implemented, generalize the following loop to enable. " LOCATION);
+
+        u64 curBlock = 0;
+
+        for (u64 i = 0, j = 0; i < n;)
+        {
+            auto blocks = gen.yeild();
+            auto blockCount = std::min<u64>(n - i, blocks.size());
+
+            auto min2 = std::min<u64>(tpBuffer.size() - curBlock, blockCount);
+
+            memcpy(tpBuffer.data() + curBlock, blocks.data(), min2 * sizeof(block));
+            curBlock += min2;
+
+            if (curBlock == tpBuffer.size())
+            {
+                sse_transpose128(tpBuffer);
+                curBlock = 0;
+
+                for (u64 k = 0; k < tpBuffer.size(); ++k)
+                {
+                    rT(k, j) = tpBuffer[k];
+                }
+
+                ++j;
+
+                if (min2 != blockCount)
+                {
+                    curBlock = blockCount - min2;
+                    memcpy(tpBuffer.data(), blocks.data() + min2, curBlock * sizeof(block));
+                }
+            }
+
+
+            i += blockCount;
+        }
+
+        return rT;
+    }
+
 
     void BgciksOtExtReceiver::receive(
         span<block> messages,
@@ -193,44 +242,73 @@ namespace osuCrypto
         setTimePoint("recver.expand.start");
 
         // column major matric. mN2 columns and 1 row of 128 bits (128 bit rows)
-        std::vector<block> r(mN2);
+        //std::vector<block> r(mN2);
 
-        for (u64 i = 0; i < r.size();)
-        {
-            auto blocks = mGen.yeild();
-            auto min = std::min<u64>(r.size() - i, blocks.size());
-            memcpy(r.data() + i, blocks.data(), min * sizeof(block));
+        auto rT = expandTranspose(mGen, mN2);
 
-            i += min;
-        }
-        setTimePoint("recver.expand.dpf");
-
-        //auto rr = convert(r);
-        //auto rMtx = transpose(rr);
-        //Matrix<u8> mtx(mN2, mN);
+        //auto n = mN2;
+        //auto& gen = mGen;
         //{
-        //    std::vector<block>r2(mN2);
-        //    chl.recv(r2);
-        //    for (u64 i = 0; i < r2.size(); ++i)
+        //    std::array<block, 128> tpBuffer;
+        //    if (n % 128)
+        //        throw RTE_LOC;
+        //    if (gen.mNumKeys > tpBuffer.size())
+        //        throw std::runtime_error("not implemented, generalize the following loop to enable. " LOCATION);
+
+        //    Matrix<block> rT(128, n / 128, AllocType::Uninitialized);
+        //    u64 curBlock = 0;
+
+        //    for (u64 i = 0, j = 0; i < n;)
         //    {
-        //        bool ss = std::find(mS.begin(), mS.end(), i) != mS.end();
-        //        auto v0 = r[i] ^ r2[i];
-        //        auto v1 = (ss ? mDelta : ZeroBlock);
-        //        if(neq(v0,v1))
-        //            std::cout << i << " " << (v0) << " " << v1 << std::endl;
+        //        auto blocks = gen.yeild();
+        //        auto blockCount = std::min<u64>(n - i, blocks.size());
+
+        //        auto min2 = std::min<u64>(tpBuffer.size() - curBlock, blockCount);
+
+        //        memcpy(tpBuffer.data() + curBlock, blocks.data(), min2 * sizeof(block));
+        //        curBlock += min2;
+
+        //        if (curBlock == tpBuffer.size())
+        //        {
+        //            sse_transpose128(tpBuffer);
+        //            curBlock = 0;
+
+        //            for (u64 k = 0; k < tpBuffer.size(); ++k)
+        //            {
+        //                rT(k, j) = tpBuffer[k];
+        //            }
+
+        //            ++j;
+
+        //            if (min2 != blockCount)
+        //            {
+        //                curBlock = blockCount - min2;
+        //                memcpy(tpBuffer.data(), blocks.data() + min2, curBlock * sizeof(block));
+        //            }
+        //        }
+
+
+        //        i += blockCount;
         //    }
         //}
 
-        if (mN2 % 128) throw RTE_LOC;
-        Matrix<block> rT(128, mN2 / 128, AllocType::Uninitialized);
-        sse_transpose(r, rT);
-        setTimePoint("recver.expand.transpose");
+        setTimePoint("recver.expand.dpf_transpose");
 
-        //for (u64 i = 0; i < r.size(); i += 128)
+
+        //Matrix<block> rT2(128, mN2 / 128, AllocType::Uninitialized);
+        //sse_transpose(r, rT2);
+
+        //for (u64 x = 0; x < rT.rows(); ++x)
         //{
-        //    std::array<block, 128>& view = *(std::array<block, 128>*)(r.data() + i);
-        //    sse_transpose128(view);
+        //    for (u64 y = 0; y < rT.cols(); ++y)
+        //    {
+        //        std::cout << rT(x, y) << " " << rT2(x, y) << std::endl;
+        //    }
+        //    std::cout << std::endl;
         //}
+
+        //setTimePoint("recver.expand.transpose");
+
 
         auto type = MultType::QuasiCyclic;
 
@@ -391,8 +469,45 @@ namespace osuCrypto
 
         setTimePoint("recver.expand.decodeReduce");
 
-        MatrixView<block> view(messages.begin(), messages.end(), 1);
-        sse_transpose(cModP1, view);
+        //MatrixView<block> view(messages.begin(), messages.end(), 1);
+        //sse_transpose(cModP1, view);
+
+
+        //std::array<block, 128> tpBuffer;
+        auto end = messages.size() / 128;
+        for (u64 i = 0; i < end; ++i)
+        {
+            u64 j = i * 128;
+            auto& tpBuffer = *(std::array<block, 128>*)(messages.data() + j);
+
+            for (u64 j = 0; j < tpBuffer.size(); ++j)
+                tpBuffer[j] = cModP1(j, i);
+
+            sse_transpose128(tpBuffer);
+        }
+
+        auto rem = messages.size() % 128;
+        if (rem)
+        {
+            std::array<block, 128> tpBuffer;
+
+            for (u64 j = 0; j < tpBuffer.size(); ++j)
+                tpBuffer[j] = cModP1(j, end);
+
+            sse_transpose128(tpBuffer);
+
+            memcpy(messages.data() + end * 128, tpBuffer.data(), rem * sizeof(block));
+            ////auto end2 = end * tpBuffer.size() + min;
+            //for (u64 j = end * tpBuffer.size(), k = 0; j < messages.size(); ++j, ++k)
+            //{
+            //    messages[j] = tpBuffer[k];
+            //    messages[j] = tpBuffer[k] ^ mDelta;
+            //}
+
+            //messages[i][0] = view(i, 0);
+            //messages[i][1] = view(i, 0) ^ mDelta;
+        }
+
         setTimePoint("recver.expand.transposeXor");
 
     }

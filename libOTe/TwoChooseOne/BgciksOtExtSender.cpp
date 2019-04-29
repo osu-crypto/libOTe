@@ -113,33 +113,27 @@ namespace osuCrypto
     {
         setTimePoint("sender.expand.start");
 
-        std::vector<block> r(mN2);
+        //std::vector<block> r(mN2);
 
-        for (u64 i = 0; i < r.size();)
-        {
-            auto blocks = mGen.yeild();
-            auto min = std::min<u64>(r.size() - i, blocks.size());
-            memcpy(r.data() + i, blocks.data(), min * sizeof(block));
-
-            i += min;
-        }
-
-        setTimePoint("sender.expand.dpf");
-
-        //chl.asyncSendCopy(r);
-
-
-        if (mN2 % 128) throw RTE_LOC;
-        Matrix<block> rT(128, mN2 / 128, AllocType::Uninitialized);
-        sse_transpose(r, rT);
-        setTimePoint("sender.expand.transpose");
-
-        //for (u64 i = 0; i < r.size(); i += 128)
+        //for (u64 i = 0; i < r.size();)
         //{
-        //    std::array<block, 128>& view = *(std::array<block, 128>*)(r.data() + i);
+        //    auto blocks = mGen.yeild();
+        //    auto min = std::min<u64>(r.size() - i, blocks.size());
+        //    memcpy(r.data() + i, blocks.data(), min * sizeof(block));
 
-        //    sse_transpose128(view);
+        //    i += min;
         //}
+
+        //setTimePoint("sender.expand.dpf");
+
+        //if (mN2 % 128) throw RTE_LOC;
+        //Matrix<block> rT(128, mN2 / 128, AllocType::Uninitialized);
+        //sse_transpose(r, rT);
+        //setTimePoint("sender.expand.transpose");
+
+        auto rT = expandTranspose(mGen, mN2);
+
+        setTimePoint("sender.expand.dpf_transpose");
 
 
         auto type = MultType::QuasiCyclic;
@@ -459,13 +453,30 @@ namespace osuCrypto
 
         setTimePoint("sender.expand.decodeReduce");
 
-        Matrix<block> view(mN, 1, AllocType::Uninitialized);
-        sse_transpose(MatrixView<block>(cModP1), MatrixView<block>(view));
+        //Matrix<block> view(mN, 1, AllocType::Uninitialized);
+        //sse_transpose(MatrixView<block>(cModP1), MatrixView<block>(view));
 
-        for (u64 i = 0; i < messages.size(); ++i)
+
+        std::array<block, 128> tpBuffer;
+        auto end = (messages.size() + 127) / 128;
+        for (u64 i = 0; i < end; ++i)
         {
-            messages[i][0] = view(i, 0);
-            messages[i][1] = view(i, 0) ^ mDelta;
+            auto min = std::min<u64>(tpBuffer.size(), messages.size() - i);
+
+            for (u64 j = 0; j < tpBuffer.size(); ++j)
+                tpBuffer[j] = cModP1(j, i);
+
+            sse_transpose128(tpBuffer);
+
+            auto end2 = i * tpBuffer.size() + min;
+            for (u64 j = i * tpBuffer.size(), k = 0; j < end2; ++j, ++k)
+            {
+                messages[j][0] = tpBuffer[k];
+                messages[j][1] = tpBuffer[k] ^ mDelta;
+            }
+
+            //messages[i][0] = view(i, 0);
+            //messages[i][1] = view(i, 0) ^ mDelta;
         }
 
         setTimePoint("sender.expand.transposeXor");
