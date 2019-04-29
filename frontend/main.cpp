@@ -266,7 +266,7 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
 
 
 template<typename OtExtSender, typename OtExtRecver>
-void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP&)
+void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
 {
     if (totalOTs == 0)
         totalOTs = 1 << 20;
@@ -362,10 +362,14 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
         }
     };
 
-
-    Timer timer;
+    Timer timer, sendTimer, recvTimer;
     timer.reset();
     auto s = timer.setTimePoint("start");
+    sendTimer.setTimePoint("start");
+    recvTimer.setTimePoint("start");
+
+    senders[0].setTimer(sendTimer);
+    receivers[0].setTimer(recvTimer);
 
     std::vector<std::thread> thrds(numThreads);
     for (int i = 0; i < numThreads; ++i)
@@ -378,7 +382,17 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
     auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
     if (role == Role::Sender)
-        std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+        lout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+
+
+    if (cmd.isSet("v"))
+    {
+        if (role == Role::Sender)
+            lout << " **** sender ****\n" << sendTimer << std::endl;
+
+        if (role == Role::Receiver)
+            lout << " **** receiver ****\n" << recvTimer << std::endl;
+    }
 }
 
 
@@ -415,7 +429,7 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 
         if (role == Role::Receiver)
         {
-            receivers[i].genBase(numOTs, chls[i]);
+            receivers[i].genBase(numOTs, chls[i], cmd.getOr("s", 4));
 
             // construct the choices that we want.
             BitVector choice(numOTs);
@@ -430,7 +444,7 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
         }
         else
         {
-            senders[i].genBase(numOTs, chls[i]);
+            senders[i].genBase(numOTs, chls[i], cmd.getOr("s", 4));
 
             // construct a vector to stored the random send messages. 
             std::vector<std::array<block, 2>> msgs(numOTs);
@@ -470,7 +484,7 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
     auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
     if (role == Role::Sender)
-        std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+        lout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
 
     if (cmd.isSet("v"))
     {

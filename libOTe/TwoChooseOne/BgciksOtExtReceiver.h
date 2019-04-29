@@ -18,7 +18,7 @@ namespace osuCrypto
     {
     public:
 
-        void genBase(u64 n, Channel & chl);
+        void genBase(u64 n, Channel & chl, u64 scaler = 4, u64 secParam = 80);
 
         void receive(
             span<block> messages,
@@ -29,7 +29,7 @@ namespace osuCrypto
         void randMulNaive(Matrix<block> &rT, span<block> &messages);
         void randMulQuasiCyclic(Matrix<block> &rT, span<block> &messages, BitVector& choices);
         
-        u64 mP, mN, mN2, mSizePer;
+        u64 mP, mN, mN2, mScaler, mSizePer;
         std::vector<u64> mS;
         block mDelta;
 

@@ -16,9 +16,9 @@ namespace osuCrypto
 
         BgiEvaluator::MultiKey mGen;
         block mDelta;
-        u64 mP, mN2, mN, mSizePer;
+        u64 mP, mN2, mN, mNumPartitions, mScaler, mSizePer;
         BitVector mS, mC;
-        void genBase(u64 n, Channel& chl);
+        void genBase(u64 n, Channel& chl, u64 scaler = 4, u64 secParam = 80);
 
         void send(
             span<std::array<block, 2>> messages,

@@ -100,21 +100,24 @@ namespace osuCrypto
     }
 
 
-    // The number of DPF points that will be used.
-    u64 numPartitions = 8;
+    //// The number of DPF points that will be used.
+    //u64 numPartitions = 8;
 
-    // defines n' = nScaler * n
-    u64 nScaler = 4;
+    //// defines n' = nScaler * n
+    //u64 nScaler = 4;
 
-    void BgciksOtExtReceiver::genBase(u64 n, Channel & chl)
+    u64 getPartitions(u64 scaler, u64 p, u64 secParam);
+
+    void BgciksOtExtReceiver::genBase(u64 n, Channel & chl, u64 scaler, u64 secParam)
     {
         setTimePoint("recver.gen.start");
 
         mP = nextPrime(n);
         mN = roundUpTo(mP, 128);
-        mN2 = nScaler * mN;
+        mScaler = scaler;
+        mN2 = scaler * mN;
 
-
+        auto numPartitions = getPartitions(scaler, mP, secParam);
         mSizePer = (mN2 + numPartitions - 1) / numPartitions;
         auto groupSize = 8;
         auto depth = log2ceil((mSizePer + groupSize - 1) / groupSize) + 1;
@@ -205,18 +208,18 @@ namespace osuCrypto
         //auto rr = convert(r);
         //auto rMtx = transpose(rr);
         //Matrix<u8> mtx(mN2, mN);
-        {
-            std::vector<block>r2(mN2);
-            chl.recv(r2);
-            for (u64 i = 0; i < r2.size(); ++i)
-            {
-                bool ss = std::find(mS.begin(), mS.end(), i) != mS.end();
-                auto v0 = r[i] ^ r2[i];
-                auto v1 = (ss ? mDelta : ZeroBlock);
-                if(neq(v0,v1))
-                    std::cout << i << " " << (v0) << " " << v1 << std::endl;
-            }
-        }
+        //{
+        //    std::vector<block>r2(mN2);
+        //    chl.recv(r2);
+        //    for (u64 i = 0; i < r2.size(); ++i)
+        //    {
+        //        bool ss = std::find(mS.begin(), mS.end(), i) != mS.end();
+        //        auto v0 = r[i] ^ r2[i];
+        //        auto v1 = (ss ? mDelta : ZeroBlock);
+        //        if(neq(v0,v1))
+        //            std::cout << i << " " << (v0) << " " << v1 << std::endl;
+        //    }
+        //}
 
         if (mN2 % 128) throw RTE_LOC;
         Matrix<block> rT(128, mN2 / 128, AllocType::Uninitialized);
@@ -312,7 +315,7 @@ namespace osuCrypto
 
         std::vector<bpm::FFTPoly> c(rows);
 
-        for (u64 s = 0; s < nScaler; ++s)
+        for (u64 s = 1; s < mScaler; ++s)
         {
             pubPrng.get(a.data(), a.size());
             aPoly.encode({ a64ptr, n64 });
@@ -327,7 +330,7 @@ namespace osuCrypto
                 //bitpolymul_2_128(c64ptr, a64ptr, b64ptr, nBlocks * 2);
                 bPoly.encode({ b64ptr, n64 });
 
-                if (s)
+                if (s > 1)
                 {
                     bPoly.multEq(aPoly);
                     c[i].addEq(bPoly);
@@ -341,7 +344,7 @@ namespace osuCrypto
             u64* s64ptr = (u64*)(sb.data() + s * nBytes);
             bPoly.encode({ s64ptr, n64 });
 
-            if (s)
+            if (s > 1)
             {
                 bPoly.multEq(aPoly);
                 sPoly.addEq(bPoly);
@@ -365,6 +368,10 @@ namespace osuCrypto
             // decode c[i] and store it at t64Ptr
             c[i].decode({ t64Ptr, 2 * n64 }, cache, true);
 
+            u64* b64ptr = (u64*)rT[i].data();
+            for (u64 j = 0; j < n64; ++j)
+                t64Ptr[j] ^= b64ptr[j];
+
             // reduce s[i] mod (x^p - 1) and store it at cModP1[i]
             modp(cModP1[i], { t128Ptr, n64 }, mP);
             //memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
@@ -373,6 +380,12 @@ namespace osuCrypto
         choices.resize(0);
         choices.resize(mN);
         sPoly.decode({ t64Ptr, 2 * n64 }, cache, true);
+
+
+        u64* b64ptr = (u64*)sb.data();
+        for (u64 j = 0; j < n64; ++j)
+            t64Ptr[j] ^= b64ptr[j];
+
         modp({ (block*)choices.data(), i64(nBlocks) }, { t128Ptr, n64 }, mP);
         //memcpy((block*)choices.data(), t64Ptr, nBlocks * sizeof(block));
 

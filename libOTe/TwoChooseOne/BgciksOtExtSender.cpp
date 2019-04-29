@@ -7,35 +7,53 @@
 namespace osuCrypto
 {
 
-    extern u64 numPartitions;
-    extern u64 nScaler;
+    //extern u64 numPartitions;
+    //extern u64 nScaler;
     u64 nextPrime(u64 n);
 
-    void BgciksOtExtSender::genBase(u64 n, Channel & chl)
+    u64 secLevel(u64 scale, u64 p, u64 points)
     {
+        return std::log2(std::pow(scale*p / (p - 1.0), points)*(scale*p - points + 1));
+    }
+    u64 getPartitions(u64 scaler, u64 p, u64 secParam)
+    {
+        u64 ret = 1;
+        while (secLevel(scaler, p, ret) < secParam)
+            ++ret;
+
+        return ret;
+    }
+
+    void BgciksOtExtSender::genBase(u64 n, Channel & chl, u64 scaler, u64 secParam)
+    {
+
+
+
 
         setTimePoint("sender.gen.start");
 
         mP = nextPrime(n);
         mN = roundUpTo(mP, 128);
-        mN2 = nScaler * mN;
+        mScaler = scaler;
+        mNumPartitions = getPartitions(scaler, mP, secParam);
+        mN2 = scaler * mN;
 
         //std::cout << "P " << mP << std::endl;
 
-        mSizePer = (mN2 + numPartitions - 1) / numPartitions;
+        mSizePer = (mN2 + mNumPartitions - 1) / mNumPartitions;
         auto groupSize = 8;
         auto depth = log2ceil((mSizePer + groupSize - 1) / groupSize) + 1;
 
         std::vector<std::vector<block>>
-            k1(numPartitions), g1(numPartitions),
-            k2(numPartitions), g2(numPartitions);
+            k1(mNumPartitions), g1(mNumPartitions),
+            k2(mNumPartitions), g2(mNumPartitions);
 
         PRNG prng(toBlock(n));
-        std::vector<u64> S(numPartitions);
+        std::vector<u64> S(mNumPartitions);
         mDelta = prng.get();
 
 
-        for (u64 i = 0; i < numPartitions; ++i)
+        for (u64 i = 0; i < mNumPartitions; ++i)
         {
             S[i] = prng.get<u64>() % mSizePer;
 
@@ -108,7 +126,7 @@ namespace osuCrypto
 
         setTimePoint("sender.expand.dpf");
 
-        chl.asyncSendCopy(r);
+        //chl.asyncSendCopy(r);
 
 
         if (mN2 % 128) throw RTE_LOC;
@@ -375,7 +393,7 @@ namespace osuCrypto
 
         std::vector<bpm::FFTPoly> c(rows);
 
-        for (u64 s = 0; s < nScaler; ++s)
+        for (u64 s = 1; s < mScaler; ++s)
         {
             pubPrng.get(a.data(), a.size());
             aPoly.encode({ a64ptr, n64 });
@@ -390,7 +408,7 @@ namespace osuCrypto
                 //bitpolymul_2_128(c64ptr, a64ptr, b64ptr, nBlocks * 2);
                 bPoly.encode({ b64ptr, n64 });
 
-                if (s)
+                if (s>1)
                 {
                     bPoly.multEq(aPoly);
                     c[i].addEq(bPoly);
@@ -421,6 +439,10 @@ namespace osuCrypto
         {
             // decode c[i] and store it at t64Ptr
             c[i].decode({ t64Ptr, 2 * n64 }, cache, true);
+
+            u64* b64ptr = (u64*)rT[i].data();
+            for (u64 j = 0; j < n64; ++j)
+                t64Ptr[j] ^= b64ptr[j];
 
             // reduce s[i] mod (x^p - 1) and store it at cModP1[i]
             modp(cModP1[i], { t128Ptr, n64 }, mP);
