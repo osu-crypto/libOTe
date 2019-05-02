@@ -49,6 +49,7 @@ namespace tests_libOTe
         tc.add("modp_test                               ", modp_test);
                                                        
         tc.add("BgciksOT_Test                           ", BgciksOT_Test);
+        tc.add("BgciksPprf_Test                         ", BgciksPprf_Test);
                                                        
     });
 

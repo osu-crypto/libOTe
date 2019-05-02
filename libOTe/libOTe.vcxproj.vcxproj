@@ -21,6 +21,7 @@
   <ItemGroup>
     <ClInclude Include="Base\BaseOT.h" />
     <ClInclude Include="Base\naor-pinkas.h" />
+    <ClInclude Include="DPF\BgicksPprf.h" />
     <ClInclude Include="DPF\BgiGenerator.h" />
     <ClInclude Include="DPF\BgiEvaluator.h" />
     <ClInclude Include="NChooseK\AknOtReceiver.h" />
@@ -52,6 +53,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Base\naor-pinkas.cpp" />
+    <ClCompile Include="DPF\BgicksPprf.cpp" />
     <ClCompile Include="DPF\BgiGenerator.cpp" />
     <ClCompile Include="DPF\BgiEvaluator.cpp" />
     <ClCompile Include="NChooseK\AknOtReceiver.cpp" />

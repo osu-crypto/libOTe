@@ -1,4 +1,6 @@
 #include "BgciksOT_Tests.h"
+
+#include "libOTe/DPF/BgicksPprf.h"
 #include "libOTe/TwoChooseOne/BgciksOtExtSender.h"
 #include "libOTe/TwoChooseOne/BgciksOtExtReceiver.h"
 #include <cryptoTools/Common/Log.h>
@@ -238,6 +240,70 @@ void BgciksOT_Test(const CLP& cmd)
 
     if (passed == false)
         throw RTE_LOC;
+}
+
+
+
+void BgciksPprf_Test(const CLP& cmd)
+{
+    u64 depth = 3;
+    u64 domain = 1ull << depth;
+    u64 numPoints = 8;
+
+
+    PRNG prng(ZeroBlock);
+
+    IOService ios;
+    Session s0(ios, "localhost:1212", SessionMode::Server);
+    Session s1(ios, "localhost:1212", SessionMode::Client);
+    Channel chl0 = s0.addChannel();
+    Channel chl1 = s1.addChannel();
+
+
+    BgicksMultiPprfSender sender;
+    BgicksMultiPprfReceiver recver;
+
+    sender.configure(domain, numPoints);
+    recver.configure(domain, numPoints);
+
+    auto numOTs = sender.baseOtCount();
+    std::vector<std::array<block, 2>> sendOTs(numOTs);
+    std::vector<block> recvOTs(numOTs);
+    BitVector recvBits(numOTs);
+    recvBits.randomize(prng);
+
+    //recvBits[2] = 1;
+    for (u64 i = 0; i < numOTs; ++i)
+    {
+        //recvBits[i] = 1;
+        recvOTs[i] = sendOTs[i][recvBits[i]];
+    }
+    sender.setBase(sendOTs);
+    recver.setBase(recvOTs, recvBits);
+
+    Matrix<block> sOut(domain, numPoints);
+    Matrix<block> rOut(domain, numPoints);
+    std::vector<u64> points(numPoints);
+
+    sender.expand(chl0, CCBlock, prng, sOut);
+    recver.expand(chl1, points, prng, rOut);
+
+
+    for (u64 j = 0; j < numPoints; ++j)
+    {
+
+        for (u64 i = 0; i < domain; ++i)
+        {
+
+            auto exp = sOut(i, j);
+            if (points[j] == i)
+                exp = exp ^ CCBlock;
+
+            if (neq(exp, rOut(i, j)))
+                std::cout << Color::Red;
+            std::cout << "r[" << j << "][" << i << "] " << exp << " " << rOut(i, j) << std::endl << Color::Default;
+        }
+    }
 }
 
 //void BgciksOT_mul_Test(const CLP& cmd)
