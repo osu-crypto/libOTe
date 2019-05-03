@@ -248,7 +248,7 @@ void BgciksPprf_Test(const CLP& cmd)
 {
     u64 depth = 3;
     u64 domain = 1ull << depth;
-    u64 numPoints = 8;
+    u64 numPoints = 21;
 
 
     PRNG prng(ZeroBlock);
@@ -272,10 +272,10 @@ void BgciksPprf_Test(const CLP& cmd)
     BitVector recvBits(numOTs);
     recvBits.randomize(prng);
 
-    //recvBits[2] = 1;
+    //recvBits[16] = 1;
     for (u64 i = 0; i < numOTs; ++i)
     {
-        //recvBits[i] = 1;
+        //recvBits[i] = 0;
         recvOTs[i] = sendOTs[i][recvBits[i]];
     }
     sender.setBase(sendOTs);
@@ -287,6 +287,7 @@ void BgciksPprf_Test(const CLP& cmd)
 
     sender.expand(chl0, CCBlock, prng, sOut);
     recver.expand(chl1, points, prng, rOut);
+    bool failed = false;
 
 
     for (u64 j = 0; j < numPoints; ++j)
@@ -300,11 +301,21 @@ void BgciksPprf_Test(const CLP& cmd)
                 exp = exp ^ CCBlock;
 
             if (neq(exp, rOut(i, j)))
+            {
+                failed = true;
+
+                if(cmd.isSet("v"))
                 std::cout << Color::Red;
-            std::cout << "r[" << j << "][" << i << "] " << exp << " " << rOut(i, j) << std::endl << Color::Default;
+            }
+            if (cmd.isSet("v"))
+                std::cout << "r[" << j << "][" << i << "] " << exp << " " << rOut(i, j) << std::endl << Color::Default;
         }
     }
+
+    if (failed)
+        throw RTE_LOC;
 }
+
 
 //void BgciksOT_mul_Test(const CLP& cmd)
 //{

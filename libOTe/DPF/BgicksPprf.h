@@ -17,7 +17,7 @@ namespace osuCrypto
         
         std::vector<block> mBuffer;
 
-        std::vector<std::array<block, 2>> mBaseOTs;
+        Matrix<std::array<block, 2>> mBaseOTs;
 
         BgicksMultiPprfSender() = default;
         BgicksMultiPprfSender(const BgicksMultiPprfSender&) = delete;
@@ -54,8 +54,8 @@ namespace osuCrypto
     public:
         u64 mDomain = 0, mDepth = 0,  mPntCount = 0, mPntCount8;
 
-        std::vector<block> mBaseOTs;
-        BitVector mBaseChoices;
+        Matrix<block> mBaseOTs;
+        Matrix<u8> mBaseChoices;
 
 
         BgicksMultiPprfReceiver() = default;
