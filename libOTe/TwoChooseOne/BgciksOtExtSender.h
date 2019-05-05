@@ -19,7 +19,7 @@ namespace osuCrypto
         BgicksMultiPprfSender mGen;
         block mDelta;
         u64 mP, mN2, mN, mNumPartitions, mScaler, mSizePer;
-        BitVector mS, mC;
+        //BitVector mS, mC;
         void genBase(u64 n, Channel& chl, PRNG& prng, u64 scaler = 4, u64 secParam = 80);
 
 		void configure(const osuCrypto::u64& n, const osuCrypto::u64& scaler, const osuCrypto::u64& secParam);

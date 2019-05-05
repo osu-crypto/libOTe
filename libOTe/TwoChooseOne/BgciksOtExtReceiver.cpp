@@ -5,6 +5,7 @@
 #include <cryptoTools/Common/Log.h>
 #include <bitpolymul2/bitpolymul.h>
 #include <libOTe/Base/BaseOT.h>
+
 //#include <bits/stdc++.h> 
 
 namespace osuCrypto
@@ -123,7 +124,7 @@ namespace osuCrypto
 			choice.randomize(prng);
 			std::vector<block> msg(count);
 
-			base.receive(choice, msg, prng, chl);
+			//base.receive(choice, msg, prng, chl);
 			mGen.setBase(msg, choice);
 
 
@@ -134,14 +135,15 @@ namespace osuCrypto
 			auto numPartitions = mS.size();
 			auto groupSize = 8;
 			auto depth = log2ceil((mSizePer + groupSize - 1) / groupSize) + 1;
-					   
+
 			std::vector<std::vector<block>>
 				k1(numPartitions), g1(numPartitions),
 				k2(numPartitions), g2(numPartitions);
 
-			PRNG prng(toBlock(n));
+			PRNG prng2(toBlock(n));
+			mS.resize(numPartitions);
 			std::vector<u64> S(numPartitions);
-			mDelta = prng.get();
+			mDelta = AllOneBlock;// prng2.get();
 
 
 			for (u64 i = 0; i < numPartitions; ++i)
@@ -149,7 +151,7 @@ namespace osuCrypto
 				do
 				{
 
-					S[i] = prng.get<u64>() % mSizePer;
+					S[i] = prng2.get<u64>() % mSizePer;
 
 					mS[i] = S[i] * numPartitions + i;
 
@@ -172,7 +174,7 @@ namespace osuCrypto
 
 	}
 
-	void BgciksOtExtReceiver::configure(const osuCrypto::u64 & n, const osuCrypto::u64 & scaler, const osuCrypto::u64 & secParam)
+	void BgciksOtExtReceiver::configure(const osuCrypto::u64 & n, const osuCrypto::u64& scaler, const osuCrypto::u64& secParam)
 	{
 
 		mP = nextPrime(n);
@@ -279,7 +281,7 @@ namespace osuCrypto
 
 		return rT;
 	}
-
+	
 	void BgciksOtExtReceiver::receive(
 		span<block> messages,
 		BitVector& choices,
@@ -300,6 +302,41 @@ namespace osuCrypto
 		else
 		{
 			rT = expandTranspose(mGenBgi, mN2);
+		}
+
+		{
+			int temp__;
+			Matrix<block> rT2(rT.rows(), rT.cols()), r2(mN2, 1);
+			chl.recv(temp__);
+			chl.recv(rT2.data(), rT2.size());
+			for (u64 i = 0; i < rT.size(); ++i)
+				rT2(i) = rT2(i) ^ rT(i);
+			
+			sse_transpose(MatrixView<block>(rT2), MatrixView<block>(r2));
+
+			//for (u64 j = 0; j < rT.rows(); ++j)
+			//{
+			//	std::cout << "r[" << j << "] ";
+			//	for (u64 i = 0; i < rT.cols(); ++i)
+			//		std::cout << " "<< (rT2(i, j));
+			//	std::cout << std::endl;
+			//}
+
+			std::cout << mGen.mDomain << " " << mGen.mPntCount <<
+				" " << rT.rows() << " " << rT.cols() << std::endl;
+			for (u64 i = 0; i < rT2.cols(); ++i)
+			{
+				for (u64 j = 0; j < 128; ++j)
+				{
+
+					//if (cmd.isSet("v"))
+					std::cout << "r[" << i << "][" << j << "] " << (rT2(j, i)) << " ~ " << rT(j, i) << std::endl << Color::Default;
+				}
+			}
+
+			std::cout << std::endl;
+			for (u64 i = 0; i < mN2; ++i)
+				std::cout << "w[" << i << "] " << r2(i) << std::endl;
 		}
 
 		//auto n = mN2;

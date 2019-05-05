@@ -252,7 +252,7 @@ void BgciksPprf_Test(const CLP& cmd)
 {
     u64 depth = 3;
     u64 domain = 1ull << depth;
-    u64 numPoints = 21;
+    u64 numPoints = 8;
 
 
     PRNG prng(ZeroBlock);
@@ -275,6 +275,9 @@ void BgciksPprf_Test(const CLP& cmd)
     std::vector<block> recvOTs(numOTs);
     BitVector recvBits(numOTs);
     recvBits.randomize(prng);
+
+	//prng.get(sendOTs.data(), sendOTs.size());
+	sendOTs[cmd.getOr("i",0)] = prng.get();
 
     //recvBits[16] = 1;
     for (u64 i = 0; i < numOTs; ++i)
@@ -323,9 +326,9 @@ void BgciksPprf_Test(const CLP& cmd)
 
 void BgciksPprf_trans_Test(const CLP& cmd)
 {
-    u64 depth = 4;
-    u64 domain = 1ull << depth;
-    u64 numPoints = 24;
+    u64 depth = 6;
+	u64 domain = 13;// (1ull << depth) - 7;
+    u64 numPoints = 40;
 
 
     PRNG prng(ZeroBlock);
@@ -370,6 +373,8 @@ void BgciksPprf_trans_Test(const CLP& cmd)
 
 
 
+	std::cout << sender.mDomain << " " << sender.mPntCount <<
+		" " << sOut.rows() << " " << sOut.cols() << std::endl;
     for (u64 i = 0; i < cols; ++i)
     {
         for (u64 j = 0; j < 128; ++j)

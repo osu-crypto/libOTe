@@ -5,9 +5,6 @@
 #include "bitpolymul2/bitpolymul.h"
 #include "cryptoTools/Common/Log.h"
 #include "libOTe/Base/BaseOT.h"
-
-
-
 namespace osuCrypto
 {
 	//extern u64 numPartitions;
@@ -42,28 +39,47 @@ namespace osuCrypto
 
 			std::vector<std::array<block,2>> msg(count);
 
-			base.send(msg, prng, chl);
+			//base.send(msg, prng, chl);
 			mGen.setBase(msg);
+			mDelta = AllOneBlock;
+			mGen.setValue(mDelta);
 
+			for (u64 i = 0; i < mNumPartitions; ++i)
+			{
+				u64 mSi;
+				do
+				{
+					auto si = prng.get<u64>() % mSizePer;
+					mSi = si * mNumPartitions + i;
+				} while (mSi >= mN2);
+			}
 		}
 		else
 		{
-
-			auto groupSize = 8;
-			auto depth = log2ceil((mSizePer + groupSize - 1) / groupSize) + 1;
 
 			std::vector<std::vector<block>>
 				k1(mNumPartitions), g1(mNumPartitions),
 				k2(mNumPartitions), g2(mNumPartitions);
 
-			PRNG prng(toBlock(n));
+
+			auto groupSize = 8;
+			auto depth = log2ceil((mSizePer + groupSize - 1) / groupSize) + 1;
+			PRNG prng2(toBlock(n));
 			std::vector<u64> S(mNumPartitions);
-			mDelta = prng.get();
+			mDelta = AllOneBlock;// prng2.get();
 
 
 			for (u64 i = 0; i < mNumPartitions; ++i)
 			{
-				S[i] = prng.get<u64>() % mSizePer;
+				u64 mSi;
+				do
+				{
+
+					S[i] = prng2.get<u64>() % mSizePer;
+
+					mSi = S[i] * mNumPartitions + i;
+
+				} while (mSi >= mN2);
 
 				k1[i].resize(depth);
 				k2[i].resize(depth);
@@ -103,7 +119,7 @@ namespace osuCrypto
 	//    v_i = w_i + u_i * x
 	//
 	//    ------------------------ -
-	//    u' =   0000001000000000001000000000100000...00000,   u_i = 1 iff i \in S
+	//    u' =   0000001000000000001000000000100000...00000,   u_i = 1 iff i \in S 
 	//
 	//    v' = r + (x . u') = DPF(k0)
 	//       = r + (000000x00000000000x000000000x00000...00000)
@@ -124,6 +140,10 @@ namespace osuCrypto
 	//    r = DPF(k1)
 	//
 	//    w = r * H
+
+
+
+
 
 	void BgciksOtExtSender::send(
 		span<std::array<block, 2>>
@@ -161,6 +181,9 @@ namespace osuCrypto
 		{
 			rT = expandTranspose(mGenBgi, mN2);
 		}
+		int temp;
+		chl.asyncSendCopy(temp);
+		chl.asyncSendCopy(rT);
 
 		setTimePoint("sender.expand.dpf_transpose");
 
@@ -178,9 +201,12 @@ namespace osuCrypto
 			break;
 		}
 		//randMulNaive(rT, messages);
+
+
 	}
 	void BgciksOtExtSender::randMulNaive(Matrix<block> & rT, span<std::array<block, 2>> & messages)
 	{
+
 		std::vector<block> mtxColumn(rT.cols());
 
 		PRNG pubPrng(ZeroBlock);
@@ -230,6 +256,9 @@ namespace osuCrypto
 
 	void bitShiftXor(span<block> dest, span<block> in, u8 bitShift)
 	{
+
+
+
 		if (bitShift > 127)
 			throw RTE_LOC;
 		if (u64(in.data()) % 16)
@@ -259,6 +288,7 @@ namespace osuCrypto
 				dest[i] = dest[i] ^ b0 ^ b1;
 			}
 
+
 			if (end != dest.size())
 			{
 				u64 b0 = *(u64*)inPtr;
@@ -266,6 +296,7 @@ namespace osuCrypto
 
 				//bv0.append((u8*)&b0, 64);
 				//bv1.append((u8*)&b1, 64);
+
 
 				*(u64*)(&dest[end]) ^= b0;
 			}
@@ -311,6 +342,8 @@ namespace osuCrypto
 				*(u64*)& dest[end] ^= b1;
 			}
 
+
+
 			//std::cout << " b0     " << bv0 << std::endl;
 			//std::cout << " b1     " << bv1 << std::endl;
 		}
@@ -343,6 +376,7 @@ namespace osuCrypto
 
 		memcpy(dest.data(), in.data(), pBytes);
 
+
 		for (u64 i = 1; i < count; ++i)
 		{
 			auto begin = i * p;
@@ -355,6 +389,7 @@ namespace osuCrypto
 			if (endBlock > in.data() + in.size())
 				throw RTE_LOC;
 
+
 			auto in_i = span<block>(beginBlock, endBlock);
 
 			bitShiftXor(dest, in_i, shift);
@@ -363,6 +398,7 @@ namespace osuCrypto
 			//bv.append((u8*)dest.data(), p);
 			//std::cout << Color::Green << bv << std::endl << Color::Default;
 		}
+
 
 		auto offset = (p & 7);
 		if (offset)
@@ -383,12 +419,14 @@ namespace osuCrypto
 		auto n2Blocks = mN2 / 128;
 		auto n64 = i64(nBlocks * 2);
 
+
 		const u64 rows(128);
 		if (rT.rows() != rows)
 			throw RTE_LOC;
 
 		if (rT.cols() != n2Blocks)
 			throw RTE_LOC;
+
 
 		std::vector<block> a(nBlocks);
 		u64 * a64ptr = (u64*)a.data();
@@ -428,6 +466,7 @@ namespace osuCrypto
 		}
 		a = {};
 
+
 		setTimePoint("sender.expand.mul");
 
 		Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
@@ -454,6 +493,7 @@ namespace osuCrypto
 			modp(cModP1[i], { t128Ptr, n64 }, mP);
 			//memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
 
+
 			//u64 shift = 0;
 			//bitShiftXor(
 			//    { (block*)t64Ptr,  pBlocks },
@@ -467,6 +507,7 @@ namespace osuCrypto
 		//Matrix<block> view(mN, 1, AllocType::Uninitialized);
 		//sse_transpose(MatrixView<block>(cModP1), MatrixView<block>(view));
 
+
 		std::array<block, 8> hashBuffer;
 		std::array<block, 128> tpBuffer;
 		auto end = (messages.size() + 127) / 128;
@@ -479,7 +520,9 @@ namespace osuCrypto
 
 			sse_transpose128(tpBuffer);
 
+
 			//#define NO_HASH
+
 
 #ifdef NO_HASH
 			auto end = i * tpBuffer.size() + min;
@@ -540,3 +583,4 @@ namespace osuCrypto
 		setTimePoint("sender.expand.transposeXor");
 	}
 }
+
