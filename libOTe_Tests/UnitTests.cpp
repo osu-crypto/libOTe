@@ -50,6 +50,7 @@ namespace tests_libOTe
                                                        
         tc.add("BgciksOT_Test                           ", BgciksOT_Test);
         tc.add("BgciksPprf_Test                         ", BgciksPprf_Test);
+        tc.add("BgciksPprf_trans_Test                   ", BgciksPprf_trans_Test);
                                                        
     });
 

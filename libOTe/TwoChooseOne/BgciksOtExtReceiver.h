@@ -4,9 +4,11 @@
 #include <libOTe/DPF/BgiEvaluator.h>
 #include <cryptoTools/Common/Timer.h>
 #include <libOTe/Tools/Tools.h>
-
+#include <libOTe/DPF/BgicksPprf.h>
 namespace osuCrypto
 {
+
+    extern bool gUseBgicksPprf;
 
     enum class MultType
     {
@@ -18,7 +20,10 @@ namespace osuCrypto
     {
     public:
 
-        void genBase(u64 n, Channel & chl, u64 scaler = 4, u64 secParam = 80);
+        void genBase(u64 n, Channel & chl, PRNG& prng, u64 scaler = 4, u64 secParam = 80);
+
+        void configure(const osuCrypto::u64 &n, const osuCrypto::u64 &scaler, const osuCrypto::u64 &secParam);
+        u64 baseOtCount();
 
         void receive(
             span<block> messages,
@@ -33,8 +38,8 @@ namespace osuCrypto
         std::vector<u64> mS;
         block mDelta;
 
-        BgiEvaluator::MultiKey mGen;
-
+        BgiEvaluator::MultiKey mGenBgi;
+        BgicksMultiPprfReceiver mGen;
 
 
     };

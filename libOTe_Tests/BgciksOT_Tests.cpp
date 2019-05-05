@@ -186,17 +186,21 @@ void BgciksOT_Test(const CLP& cmd)
     Channel chl0 = s0.addChannel();
     Channel chl1 = s1.addChannel();
 
+
+	gUseBgicksPprf = cmd.getOr("fakesetup", false) == false;
+	PRNG prng(toBlock(cmd.getOr("seed", 0)));
+	PRNG prng1(toBlock(cmd.getOr("seed1", 1)));
     Timer timer;
     sender.setTimer(timer);
     recver.setTimer(timer);
 
-    sender.genBase(n, chl0);
-    recver.genBase(n, chl1);
+	auto t = std::thread([&]() {recver.genBase(n, chl1, prng); });
+    sender.genBase(n, chl0, prng1);
+	t.join();
 
     std::vector<block> messages2(n);
     BitVector choice;
     std::vector<std::array<block, 2>> messages(n);
-    PRNG prng(toBlock(cmd.getOr("seed", 0)));
 
     sender.send(messages, prng, chl0);
     recver.receive(messages2, choice, prng, chl1);
@@ -284,9 +288,10 @@ void BgciksPprf_Test(const CLP& cmd)
     Matrix<block> sOut(domain, numPoints);
     Matrix<block> rOut(domain, numPoints);
     std::vector<u64> points(numPoints);
+    recver.getPoints(points);
 
     sender.expand(chl0, CCBlock, prng, sOut);
-    recver.expand(chl1, points, prng, rOut);
+    recver.expand(chl1, prng, rOut);
     bool failed = false;
 
 
@@ -314,6 +319,70 @@ void BgciksPprf_Test(const CLP& cmd)
 
     if (failed)
         throw RTE_LOC;
+}
+
+void BgciksPprf_trans_Test(const CLP& cmd)
+{
+    u64 depth = 4;
+    u64 domain = 1ull << depth;
+    u64 numPoints = 24;
+
+
+    PRNG prng(ZeroBlock);
+
+    IOService ios;
+    Session s0(ios, "localhost:1212", SessionMode::Server);
+    Session s1(ios, "localhost:1212", SessionMode::Client);
+    Channel chl0 = s0.addChannel();
+    Channel chl1 = s1.addChannel();
+
+
+    BgicksMultiPprfSender sender;
+    BgicksMultiPprfReceiver recver;
+
+    sender.configure(domain, numPoints);
+    recver.configure(domain, numPoints);
+
+    auto numOTs = sender.baseOtCount();
+    std::vector<std::array<block, 2>> sendOTs(numOTs);
+    std::vector<block> recvOTs(numOTs);
+    BitVector recvBits(numOTs);
+    recvBits.randomize(prng);
+
+    //recvBits[16] = 1;
+    for (u64 i = 0; i < numOTs; ++i)
+    {
+        //recvBits[i] = 0;
+        recvOTs[i] = sendOTs[i][recvBits[i]];
+    }
+    sender.setBase(sendOTs);
+    recver.setBase(recvOTs, recvBits);
+
+    auto cols = (numPoints * domain +127)/ 128;
+    Matrix<block> sOut(128, cols);
+    Matrix<block> rOut(128, cols);
+    std::vector<u64> points(numPoints);
+    recver.getPoints(points);
+
+    sender.expand(chl0, AllOneBlock, prng, sOut, true);
+    recver.expand(chl1, prng, rOut, true);
+    bool failed = false;
+
+
+
+    for (u64 i = 0; i < cols; ++i)
+    {
+        for (u64 j = 0; j < 128; ++j)
+        {
+
+        //if (cmd.isSet("v"))
+            std::cout << "r[" << i << "][" << j << "] " <<  (sOut(j,i) ^ rOut(j,i)) << " ~ " << rOut(j, i) << std::endl << Color::Default;
+        }
+    }
+
+
+    //if (failed)
+    //    throw RTE_LOC;
 }
 
 

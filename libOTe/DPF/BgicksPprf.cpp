@@ -1,7 +1,7 @@
 #include "BgicksPprf.h"
 
 #include <cryptoTools/Common/Log.h>
-
+#include <libOTe/Tools/Tools.h>
 namespace osuCrypto
 {
     BgicksMultiPprfSender::BgicksMultiPprfSender(u64 domainSize, u64 pointCount)
@@ -72,15 +72,114 @@ namespace osuCrypto
         }
     }
 
-    void BgicksMultiPprfSender::expand(Channel & chl, block value, PRNG & prng, MatrixView<block> output)
+
+	//std::map<u64, std::array<block, 128>> blocks;
+
+    void copyOut(bool transpose, span<std::array<block,8>> lvl, MatrixView<block> output, u64 min, u64 g)
+    {
+
+        if (transpose)
+        {
+
+            if (lvl.size() >= 16)
+            {
+				auto sec = g / 8;
+                auto size = lvl.size() / 16;
+                auto begin = sec * size;
+                auto end = std::min<u64>(begin + size, output.cols());
+
+                for (u64 i = begin, k = 0; i < end; ++i, ++k)
+                {
+					if (lvl.size() < (k + 1) * 16)
+						throw RTE_LOC;
+
+                    auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
+
+					//if (blocks.find(sec) != blocks.end())
+					//{
+					//	std::array<block, 128> io2 = blocks[sec];
+					//	for (u64 j = 0; j < 128; ++j)
+					//		std::cout << "Tin["<< sec<<"][" << j << "]" << io[j] << " " << io2[j] << " " << (io[j] ^ io2[j])<< std::endl;
+					//}
+					//
+					//blocks[sec] = io;
+
+                    sse_transpose128(io);
+
+
+					//for (u64 j = 0; j < 128; ++j)
+					//	std::cout << "Tou[" << sec << "][" << j << "]" << io[j] << std::endl;
+
+                    for (u64 j = 0; j < 128; ++j)
+                        output(j, i) = io[j];
+                }
+
+				memset(lvl.data(), 0, lvl.size() * sizeof(block) * 8);
+            }
+            else
+                throw RTE_LOC;
+        }
+        else
+        {
+            if (min == 8)
+            {
+
+                for (u64 i = 0; i < output.rows(); ++i)
+                {
+                    auto oi = output[i].subspan(g, 8);
+                    auto& ii = lvl[i];
+                    oi[0] = ii[0];
+                    oi[1] = ii[1];
+                    oi[2] = ii[2];
+                    oi[3] = ii[3];
+                    oi[4] = ii[4];
+                    oi[5] = ii[5];
+                    oi[6] = ii[6];
+                    oi[7] = ii[7];
+                }
+            }
+            else
+            {
+                for (u64 i = 0; i < output.rows(); ++i)
+                {
+                    auto oi = output[i].subspan(g, min);
+                    auto& ii = lvl[i];
+                    for (u64 j = 0; j < min; ++j)
+                        oi[j] = ii[j];
+                }
+            }
+        }
+    }
+
+    void BgicksMultiPprfSender::expand(
+        Channel & chl,
+        block value,
+        PRNG & prng,
+        MatrixView<block> output,
+        bool transpose)
     {
         setValue(value);
 
-        if (output.rows() != mDomain)
-            throw RTE_LOC;
 
-        if (output.cols() != mPntCount)
-            throw RTE_LOC;
+        if (transpose)
+        {
+            if (output.rows() != 128)
+                throw RTE_LOC;
+
+            if (output.cols() > (mDomain * mPntCount + 127) / 128)
+                throw RTE_LOC;
+
+			if (mPntCount & 7)
+				throw RTE_LOC;
+        }
+        else
+        {
+            if (output.rows() != mDomain)
+                throw RTE_LOC;
+
+            if (output.cols() != mPntCount)
+                throw RTE_LOC;
+        }
 
 
 
@@ -112,6 +211,7 @@ namespace osuCrypto
         std::array<AES, 2> aes;
         aes[0].setKey(toBlock(3242342));
         aes[1].setKey(toBlock(8993849));
+
 
         for (u64 g = 0; g < mPntCount; g += 8)
         {
@@ -231,34 +331,7 @@ namespace osuCrypto
 
 
             auto lvl = getLevel(mDepth);
-
-            if (min == 8)
-            {
-
-                for (u64 i = 0; i < output.rows(); ++i)
-                {
-                    auto oi = output[i].subspan(g, 8);
-                    auto& ii = lvl[i];
-                    oi[0] = ii[0];
-                    oi[1] = ii[1];
-                    oi[2] = ii[2];
-                    oi[3] = ii[3];
-                    oi[4] = ii[4];
-                    oi[5] = ii[5];
-                    oi[6] = ii[6];
-                    oi[7] = ii[7];
-                }
-            }
-            else
-            {
-                for (u64 i = 0; i < output.rows(); ++i)
-                {
-                    auto oi = output[i].subspan(g, min);
-                    auto& ii = lvl[i];
-                    for (u64 j = 0; j < min; ++j)
-                        oi[j] = ii[j];
-                }
-            }
+            copyOut(transpose, lvl, output, min, g);
         }
 
     }
@@ -268,16 +341,8 @@ namespace osuCrypto
         mValue = value;
     }
 
-    void BgicksMultiPprfReceiver::expand(Channel & chl, span<u64> points, PRNG & prng, MatrixView<block> output)
+    void BgicksMultiPprfReceiver::getPoints(span<u64> points)
     {
-
-        if (output.rows() != mDomain)
-            throw RTE_LOC;
-
-        if (output.cols() != mPntCount)
-            throw RTE_LOC;
-
-
         memset(points.data(), 0, points.size() * sizeof(u64));
         for (u64 i = 0; i < mDepth; ++i)
         {
@@ -288,7 +353,35 @@ namespace osuCrypto
                 points[j] |= u64(1 ^ mBaseChoices[j][i]) << shift;
             }
         }
+    }
 
+    void BgicksMultiPprfReceiver::expand(Channel & chl, PRNG & prng, MatrixView<block> output, bool transpose)
+    {
+
+
+        if (transpose)
+        {
+            if (output.rows() != 128)
+                throw RTE_LOC;
+
+            if (output.cols() > (mDomain * mPntCount + 127) / 128)
+                throw RTE_LOC;
+
+			if (mPntCount & 7)
+				throw RTE_LOC;
+        }
+        else
+        {
+            if (output.rows() != mDomain)
+                throw RTE_LOC;
+
+            if (output.cols() != mPntCount)
+                throw RTE_LOC;
+        }
+
+
+        std::vector<u64> points(mPntCount);
+        getPoints(points);
         //for (u64 j = 0; j < mPntCount; ++j)
         //    std::cout << "point[" << j << "] " << points[j] << std::endl;
 
@@ -386,10 +479,10 @@ namespace osuCrypto
                 auto level1 = getLevel(d + 1);
 
 
-                auto width = level1.size();
                 memset(mySums[0].data(), 0, mySums[0].size() * sizeof(block));
                 memset(mySums[1].data(), 0, mySums[1].size() * sizeof(block));
 
+                auto width = level1.size();
                 for (u64 i = 0; i < width; ++i)
                 {
                     u8 keep = i & 1;
@@ -517,35 +610,36 @@ namespace osuCrypto
             }
 
             auto lvl = getLevel(mDepth);
+            copyOut(transpose, lvl, output, min, g);
 
-            if (min == 8)
-            {
-                for (u64 i = 0; i < output.rows(); ++i)
-                {
-                    auto oi = output[i].subspan(g, 8);
-                    auto& ii = lvl[i];
-                    oi[0] = ii[0];
-                    oi[1] = ii[1];
-                    oi[2] = ii[2];
-                    oi[3] = ii[3];
-                    oi[4] = ii[4];
-                    oi[5] = ii[5];
-                    oi[6] = ii[6];
-                    oi[7] = ii[7];
-                    //memcpy(.data() + g, lvl.data() + i, 8 * sizeof(block));
-                }
-            }
-            else
-            {
-                for (u64 i = 0; i < output.rows(); ++i)
-                {
-                    auto oi = output[i].subspan(g, min);
-                    auto& ii = lvl[i];
-                    for (u64 j = 0; j < min; ++j)
-                        oi[j] = ii[j];
-                }
-            }
-            //printLevel(mDepth);
+            //if (min == 8)
+            //{
+            //    for (u64 i = 0; i < output.rows(); ++i)
+            //    {
+            //        auto oi = output[i].subspan(g, 8);
+            //        auto& ii = lvl[i];
+            //        oi[0] = ii[0];
+            //        oi[1] = ii[1];
+            //        oi[2] = ii[2];
+            //        oi[3] = ii[3];
+            //        oi[4] = ii[4];
+            //        oi[5] = ii[5];
+            //        oi[6] = ii[6];
+            //        oi[7] = ii[7];
+            //        //memcpy(.data() + g, lvl.data() + i, 8 * sizeof(block));
+            //    }
+            //}
+            //else
+            //{
+            //    for (u64 i = 0; i < output.rows(); ++i)
+            //    {
+            //        auto oi = output[i].subspan(g, min);
+            //        auto& ii = lvl[i];
+            //        for (u64 j = 0; j < min; ++j)
+            //            oi[j] = ii[j];
+            //    }
+            //}
+            ////printLevel(mDepth);
 
         }
     }

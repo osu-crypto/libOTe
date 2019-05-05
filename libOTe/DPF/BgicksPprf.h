@@ -1,4 +1,4 @@
-
+#pragma once
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/BitVector.h>
@@ -38,7 +38,7 @@ namespace osuCrypto
         void setBase(span<std::array<block, 2>> baseMessages);
 
         // expand the whole PPRF and store the result in output
-        void expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output);
+        void expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, bool transpose = false);
 
 
         void setValue(block value);
@@ -76,7 +76,9 @@ namespace osuCrypto
         void setBase(span<block> baseMessages, BitVector& choices);
 
 
-        void expand(Channel& chl, span<u64> points, PRNG& prng, MatrixView<block> output);
+        void getPoints(span<u64> points);
+
+        void expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose = false);
 
 
         //void setPoints(span<u64> points);

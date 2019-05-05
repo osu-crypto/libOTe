@@ -429,7 +429,7 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 
         if (role == Role::Receiver)
         {
-            receivers[i].genBase(numOTs, chls[i], cmd.getOr("s", 4));
+            receivers[i].genBase(numOTs, chls[i], prng, cmd.getOr("s", 4));
 
             // construct the choices that we want.
             BitVector choice(numOTs);
@@ -444,7 +444,7 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
         }
         else
         {
-            senders[i].genBase(numOTs, chls[i], cmd.getOr("s", 4));
+            senders[i].genBase(numOTs, chls[i], prng, cmd.getOr("s", 4));
 
             // construct a vector to stored the random send messages. 
             std::vector<std::array<block, 2>> msgs(numOTs);
