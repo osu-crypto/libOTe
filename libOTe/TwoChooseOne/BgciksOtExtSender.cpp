@@ -109,6 +109,9 @@ namespace osuCrypto
 
 		if (gUseBgicksPprf)
 		{
+			//if(mTimer)
+			//	mGen.setTimer(getTimer());
+
 			mGen.configure(mSizePer, mNumPartitions);
 		}
 	}

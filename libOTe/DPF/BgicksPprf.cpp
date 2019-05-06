@@ -162,6 +162,7 @@ namespace osuCrypto
 		bool transpose)
 	{
 		setValue(value);
+		setTimePoint("pprf.send.start");
 
 
 		if (transpose)
@@ -218,6 +219,7 @@ namespace osuCrypto
 
 		for (u64 g = 0; g < mPntCount; g += 8)
 		{
+			
 			auto min = std::min<u64>(8, mPntCount - g);
 
 			prng.get(getLevel(0));
@@ -291,6 +293,7 @@ namespace osuCrypto
 					sums[1][d][j] = sums[1][d][j] ^ mBaseOTs[g + j][d][1];
 				}
 			}
+			setTimePoint("pprf.send.expand-" + std::to_string(g));
 
 
 			auto d = mDepth - 1;
@@ -342,6 +345,9 @@ namespace osuCrypto
 
 			auto lvl = getLevel(mDepth);
 			copyOut(transpose, lvl, output, min, g);
+
+			setTimePoint("pprf.send.copyOut-" + std::to_string(g));
+
 		}
 
 	}
@@ -381,6 +387,7 @@ namespace osuCrypto
 	void BgicksMultiPprfReceiver::expand(Channel & chl, PRNG & prng, MatrixView<block> output, bool transpose)
 	{
 
+		setTimePoint("pprf.recv.start");
 
 		if (transpose)
 		{
@@ -591,6 +598,7 @@ namespace osuCrypto
 				//std::cout << "r[" << (d + 1) << "] " << level1[0] << std::endl;
 			}
 			//printLevel(mDepth);
+			setTimePoint("pprf.recv.expand-" + std::to_string(g));
 
 			int temp;
 			std::vector<std::array<block, 4>> lastOts(min);
@@ -652,6 +660,7 @@ namespace osuCrypto
 
 			auto lvl = getLevel(mDepth);
 			copyOut(transpose, lvl, output, min, g);
+			setTimePoint("pprf.recv.copyOut-" + std::to_string(g));
 
 			//if (min == 8)
 			//{

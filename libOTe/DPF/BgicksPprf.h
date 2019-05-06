@@ -3,12 +3,13 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Matrix.h>
+#include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Network/Channel.h>
 
 namespace osuCrypto
 {
-    class BgicksMultiPprfSender
+    class BgicksMultiPprfSender : public TimerAdapter
     {
     public:
         u64 mDomain = 0, mDepth = 0, mPntCount = 0, mPntCount8;
@@ -49,7 +50,7 @@ namespace osuCrypto
     };
 
 
-    class BgicksMultiPprfReceiver
+    class BgicksMultiPprfReceiver : public TimerAdapter
     {
     public:
         u64 mDomain = 0, mDepth = 0,  mPntCount = 0, mPntCount8;
