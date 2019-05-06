@@ -77,6 +77,7 @@ namespace osuCrypto
 
 
         void getPoints(span<u64> points);
+		void getTransposedPoints(span<u64> points);
 
         void expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose = false);
 

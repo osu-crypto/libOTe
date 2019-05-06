@@ -176,16 +176,21 @@ namespace osuCrypto
 		{
 			rT.resize(128, mN2 / 128);
 			mGen.expand(chl, mDelta, prng, rT, true);
+			setTimePoint("sender.expand.pprf_transpose");
 		}
 		else
 		{
 			rT = expandTranspose(mGenBgi, mN2);
+			setTimePoint("sender.expand.dpf_transpose");
 		}
-		int temp;
-		chl.asyncSendCopy(temp);
-		chl.asyncSendCopy(rT);
 
-		setTimePoint("sender.expand.dpf_transpose");
+		if (0)
+		{
+
+			int temp;
+			chl.asyncSendCopy(temp);
+			chl.asyncSendCopy(rT);
+		}
 
 		auto type = MultType::QuasiCyclic;
 

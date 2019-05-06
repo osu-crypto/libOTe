@@ -277,7 +277,7 @@ void BgciksPprf_Test(const CLP& cmd)
     recvBits.randomize(prng);
 
 	//prng.get(sendOTs.data(), sendOTs.size());
-	sendOTs[cmd.getOr("i",0)] = prng.get();
+	//sendOTs[cmd.getOr("i",0)] = prng.get();
 
     //recvBits[16] = 1;
     for (u64 i = 0; i < numOTs; ++i)
@@ -365,29 +365,49 @@ void BgciksPprf_trans_Test(const CLP& cmd)
     Matrix<block> sOut(128, cols);
     Matrix<block> rOut(128, cols);
     std::vector<u64> points(numPoints);
-    recver.getPoints(points);
+    recver.getTransposedPoints(points);
 
     sender.expand(chl0, AllOneBlock, prng, sOut, true);
     recver.expand(chl1, prng, rOut, true);
     bool failed = false;
 
+	Matrix<block> out(128, cols);
+	Matrix<block> outT(numPoints * domain, 1);
 
-
-	std::cout << sender.mDomain << " " << sender.mPntCount <<
-		" " << sOut.rows() << " " << sOut.cols() << std::endl;
+	if(cmd.getOr("v", 0) > 1)
+		std::cout << sender.mDomain << " " << sender.mPntCount <<
+			" " << sOut.rows() << " " << sOut.cols() << std::endl;
     for (u64 i = 0; i < cols; ++i)
     {
         for (u64 j = 0; j < 128; ++j)
         {
-
-        //if (cmd.isSet("v"))
-            std::cout << "r[" << i << "][" << j << "] " <<  (sOut(j,i) ^ rOut(j,i)) << " ~ " << rOut(j, i) << std::endl << Color::Default;
+			out(j, i) = (sOut(j, i) ^ rOut(j, i));
+			//if (cmd.isSet("v"))
+			//	std::cout << "r[" << i << "][" << j << "] " << out(j,i)  << " ~ " << rOut(j, i) << std::endl << Color::Default;
         }
     }
+	sse_transpose(MatrixView<block>(out), MatrixView<block>(outT));
+	
+	for (u64 i = 0; i < outT.rows(); ++i)
+	{
+		
+		auto f = std::find(points.begin(), points.end(), i) != points.end();
 
+		auto exp = f ? AllOneBlock : ZeroBlock;
 
-    //if (failed)
-    //    throw RTE_LOC;
+		if (neq(outT(i), exp))
+		{
+			failed = true;
+
+			if (cmd.getOr("v", 0) > 1)
+				std::cout << Color::Red;
+		}
+		if (cmd.getOr("v", 0) > 1)
+			std::cout <<i << " " << outT(i) << " " << exp << std::endl << Color::Default;
+	}
+
+    if (failed)
+        throw RTE_LOC;
 }
 
 

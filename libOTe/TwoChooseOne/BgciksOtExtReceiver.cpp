@@ -127,7 +127,18 @@ namespace osuCrypto
 			//base.receive(choice, msg, prng, chl);
 			mGen.setBase(msg, choice);
 
+			mGen.getTransposedPoints(mS);
+			for (u64 i =0; i < mS.size(); ++i)
+			{
+				if (mS[i] >= mN2)
+				{
+					//auto s = mS.size();
+					mS.resize(i);
 
+					//std::cout << "resiz"
+				}
+					//throw std::runtime_error("known issue, (fixable, ask peter). " LOCATION);
+			}
 		}
 		else
 		{
@@ -298,12 +309,15 @@ namespace osuCrypto
 		{
 			rT.resize(128, mN2 / 128);
 			mGen.expand(chl, prng, rT, true);
+			setTimePoint("sender.expand.pprf_transpose");
 		}
 		else
 		{
 			rT = expandTranspose(mGenBgi, mN2);
+			setTimePoint("recver.expand.dpf_transpose");
 		}
 
+		if(0)
 		{
 			int temp__;
 			Matrix<block> rT2(rT.rows(), rT.cols()), r2(mN2, 1);
@@ -385,7 +399,6 @@ namespace osuCrypto
 		//    }
 		//}
 
-		setTimePoint("recver.expand.dpf_transpose");
 
 
 		//Matrix<block> rT2(128, mN2 / 128, AllocType::Uninitialized);

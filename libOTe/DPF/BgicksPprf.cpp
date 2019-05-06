@@ -365,6 +365,19 @@ namespace osuCrypto
 		}
 	}
 
+	void BgicksMultiPprfReceiver::getTransposedPoints(span<u64> points)
+	{
+		getPoints(points);
+
+		for (u64 i = 0; i < points.size(); ++i)
+		{
+			auto j = i / 8;
+			auto k = i % 8;
+			auto base = 8 * (1ull << mDepth) * j;
+			points[i] = points[i] * 8 + base + k;
+		}
+	}
+
 	void BgicksMultiPprfReceiver::expand(Channel & chl, PRNG & prng, MatrixView<block> output, bool transpose)
 	{
 
