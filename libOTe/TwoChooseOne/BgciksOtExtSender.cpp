@@ -174,7 +174,7 @@ namespace osuCrypto
 
 		if (gUseBgicksPprf)
 		{
-			rT.resize(128, mN2 / 128);
+			rT.resize(128, mN2 / 128, AllocType::Uninitialized);
 			mGen.expand(chl, mDelta, prng, rT, true);
 			setTimePoint("sender.expand.pprf_transpose");
 		}

@@ -117,7 +117,7 @@ namespace osuCrypto
 						output(j, i) = io[j];
 				}
 
-				memset(lvl.data(), 0, lvl.size() * sizeof(block) * 8);
+				//memset(lvl.data(), 0, lvl.size() * sizeof(block) * 8);
 			}
 			else
 				throw RTE_LOC;
