@@ -561,7 +561,9 @@ namespace osuCrypto
 		auto end = (messages.size() + 127) / 128;
 		for (u64 i = 0; i < end; ++i)
 		{
-			auto min = std::min<u64>(tpBuffer.size(), messages.size() - i);
+			u64 j = i * tpBuffer.size();
+
+			auto min = std::min<u64>(tpBuffer.size(), messages.size() - j);
 
 			for (u64 j = 0; j < tpBuffer.size(); ++j)
 				tpBuffer[j] = cModP1(j, i);
@@ -574,14 +576,13 @@ namespace osuCrypto
 
 #ifdef NO_HASH
 			auto end = i * tpBuffer.size() + min;
-			for (u64 j = i * tpBuffer.size(), k = 0; j < end; ++j, ++k)
+			for (u64 k = 0; j < end; ++j, ++k)
 			{
 				messages[j][0] = tpBuffer[k];
 				messages[j][1] = tpBuffer[k] ^ mDelta;
 			}
 #else
 			u64 k = 0;
-			u64 j = i * tpBuffer.size();
 			auto min2 = min & ~7;
 			for (; k < min2; k += 8)
 			{
