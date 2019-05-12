@@ -43,486 +43,503 @@ int miraclTestMain();
 #include <boost/preprocessor/variadic/size.hpp>
 enum class Role
 {
-    Sender,
-    Receiver
+	Sender,
+	Receiver
 };
 
 
 template<typename NcoOtSender, typename  NcoOtReceiver>
 void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP&)
 {
-    const u64 step = 1024;
+	const u64 step = 1024;
 
-    if (totalOTs == 0)
-        totalOTs = 1 << 20;
+	if (totalOTs == 0)
+		totalOTs = 1 << 20;
 
-    bool randomOT = true;
-    auto numOTs = totalOTs / numThreads;
-    auto numChosenMsgs = 256;
+	bool randomOT = true;
+	auto numOTs = totalOTs / numThreads;
+	auto numChosenMsgs = 256;
 
-    // get up the networking
-    auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
-    IOService ios;
-    Session  ep0(ios, ip, rr);
-    PRNG prng(sysRandomSeed());
+	// get up the networking
+	auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
+	IOService ios;
+	Session  ep0(ios, ip, rr);
+	PRNG prng(sysRandomSeed());
 
-    // for each thread we need to construct a channel (socket) for it to communicate on.
-    std::vector<Channel> chls(numThreads);
-    for (int i = 0; i < numThreads; ++i)
-        chls[i] = ep0.addChannel();
+	// for each thread we need to construct a channel (socket) for it to communicate on.
+	std::vector<Channel> chls(numThreads);
+	for (int i = 0; i < numThreads; ++i)
+		chls[i] = ep0.addChannel();
 
-    std::vector<NcoOtReceiver> recvers(numThreads);
-    std::vector<NcoOtSender> senders(numThreads);
+	std::vector<NcoOtReceiver> recvers(numThreads);
+	std::vector<NcoOtSender> senders(numThreads);
 
-    // all Nco Ot extenders must have configure called first. This determines
-    // a variety of parameters such as how many base OTs are required.
-    bool maliciousSecure = false;
-    bool statSecParam = 40;
-    bool inputBitCount = 76; // the kkrt protocol default to 128 but oos can only do 76.
-    recvers[0].configure(maliciousSecure, statSecParam, inputBitCount);
-    senders[0].configure(maliciousSecure, statSecParam, inputBitCount);
+	// all Nco Ot extenders must have configure called first. This determines
+	// a variety of parameters such as how many base OTs are required.
+	bool maliciousSecure = false;
+	bool statSecParam = 40;
+	bool inputBitCount = 76; // the kkrt protocol default to 128 but oos can only do 76.
+	recvers[0].configure(maliciousSecure, statSecParam, inputBitCount);
+	senders[0].configure(maliciousSecure, statSecParam, inputBitCount);
 
-    // Generate new base OTs for the first extender. This will use
-    // the default BaseOT protocol. You can also manually set the
-    // base OTs with setBaseOts(...);
-    if (role == Role::Sender)
-        senders[0].genBaseOts(prng, chls[0]);
-    else
-        recvers[0].genBaseOts(prng, chls[0]);
+	// Generate new base OTs for the first extender. This will use
+	// the default BaseOT protocol. You can also manually set the
+	// base OTs with setBaseOts(...);
+	if (role == Role::Sender)
+		senders[0].genBaseOts(prng, chls[0]);
+	else
+		recvers[0].genBaseOts(prng, chls[0]);
 
-    // now that we have one valid pair of extenders, we can call split on 
-    // them to get more copies which can be used concurrently.
-    for (int i = 1; i < numThreads; ++i)
-    {
-        recvers[i] = recvers[0].splitBase();
-        senders[i] = senders[0].splitBase();
-    }
+	// now that we have one valid pair of extenders, we can call split on 
+	// them to get more copies which can be used concurrently.
+	for (int i = 1; i < numThreads; ++i)
+	{
+		recvers[i] = recvers[0].splitBase();
+		senders[i] = senders[0].splitBase();
+	}
 
-    // create a lambda function that performs the computation of a single receiver thread.
-    auto recvRoutine = [&](int k)
-    {
-        auto& chl = chls[k];
-        PRNG prng(sysRandomSeed());
+	// create a lambda function that performs the computation of a single receiver thread.
+	auto recvRoutine = [&](int k)
+	{
+		auto& chl = chls[k];
+		PRNG prng(sysRandomSeed());
 
-        if (randomOT)
-        {
-            // once configure(...) and setBaseOts(...) are called,
-            // we can compute many batches of OTs. First we need to tell
-            // the instance how mant OTs we want in this batch. This is done here.
-            recvers[k].init(numOTs, prng, chl);
+		if (randomOT)
+		{
+			// once configure(...) and setBaseOts(...) are called,
+			// we can compute many batches of OTs. First we need to tell
+			// the instance how mant OTs we want in this batch. This is done here.
+			recvers[k].init(numOTs, prng, chl);
 
-            // now we can iterate over the OTs and actaully retreive the desired 
-            // messages. However, for efficieny we will do this in steps where
-            // we do some computation followed by sending off data. This is more 
-            // efficient since data will be sent in the background :).
-            for (int i = 0; i < numOTs; )
-            {
-                // figure out how many OTs we want to do in this step.
-                auto min = std::min<u64>(numOTs - i, step);
+			// now we can iterate over the OTs and actaully retreive the desired 
+			// messages. However, for efficieny we will do this in steps where
+			// we do some computation followed by sending off data. This is more 
+			// efficient since data will be sent in the background :).
+			for (int i = 0; i < numOTs; )
+			{
+				// figure out how many OTs we want to do in this step.
+				auto min = std::min<u64>(numOTs - i, step);
 
-                // iterate over this step.
-                for (u64 j = 0; j < min; ++j, ++i)
-                {
-                    // For the OT index by i, we need to pick which
-                    // one of the N OT messages that we want. For this 
-                    // example we simply pick a random one. Note only the 
-                    // first log2(N) bits of choice is considered. 
-                    block choice = prng.get<block>();
+				// iterate over this step.
+				for (u64 j = 0; j < min; ++j, ++i)
+				{
+					// For the OT index by i, we need to pick which
+					// one of the N OT messages that we want. For this 
+					// example we simply pick a random one. Note only the 
+					// first log2(N) bits of choice is considered. 
+					block choice = prng.get<block>();
 
-                    // this will hold the (random) OT message of our choice
-                    block otMessage;
+					// this will hold the (random) OT message of our choice
+					block otMessage;
 
-                    // retreive the desired message.
-                    recvers[k].encode(i, &choice, &otMessage);
+					// retreive the desired message.
+					recvers[k].encode(i, &choice, &otMessage);
 
-                    // do something cool with otMessage
-                    //otMessage;
-                }
+					// do something cool with otMessage
+					//otMessage;
+				}
 
-                // Note that all OTs in this region must be encode. If there are some
-                // that you don't actually care about, then you can skip them by calling
-                // 
-                //    recvers[k].zeroEncode(i);
-                //
+				// Note that all OTs in this region must be encode. If there are some
+				// that you don't actually care about, then you can skip them by calling
+				// 
+				//    recvers[k].zeroEncode(i);
+				//
 
-                // Now that we have gotten out the OT messages for this step, 
-                // we are ready to send over network some information that 
-                // allows the sender to also compute the OT messages. Since we just
-                // encoded "min" OT messages, we will tell the class to send the 
-                // next min "correction" values. 
-                recvers[k].sendCorrection(chl, min);
-            }
+				// Now that we have gotten out the OT messages for this step, 
+				// we are ready to send over network some information that 
+				// allows the sender to also compute the OT messages. Since we just
+				// encoded "min" OT messages, we will tell the class to send the 
+				// next min "correction" values. 
+				recvers[k].sendCorrection(chl, min);
+			}
 
-            // once all numOTs have been encoded and had their correction values sent
-            // we must call check. This allows to sender to make sure we did not cheat.
-            // For semi-honest protocols, this can and will be skipped. 
-            recvers[k].check(chl, ZeroBlock);
+			// once all numOTs have been encoded and had their correction values sent
+			// we must call check. This allows to sender to make sure we did not cheat.
+			// For semi-honest protocols, this can and will be skipped. 
+			recvers[k].check(chl, ZeroBlock);
 
-        }
-        else
-        {
-            std::vector<block>recvMsgs(numOTs);
-            std::vector<u64> choices(numOTs);
+		}
+		else
+		{
+			std::vector<block>recvMsgs(numOTs);
+			std::vector<u64> choices(numOTs);
 
-            // define which messages the receiver should learn.
-            for (u64 i = 0; i < numOTs; ++i)
-                choices[i] = prng.get<u8>();
+			// define which messages the receiver should learn.
+			for (u64 i = 0; i < numOTs; ++i)
+				choices[i] = prng.get<u8>();
 
-            // the messages that were learned are written to recvMsgs.
-            recvers[k].receiveChosen(numChosenMsgs, recvMsgs, choices, prng, chl);
-        }
-    };
+			// the messages that were learned are written to recvMsgs.
+			recvers[k].receiveChosen(numChosenMsgs, recvMsgs, choices, prng, chl);
+		}
+	};
 
-    // create a lambda function that performs the computation of a single sender thread.
-    auto sendRoutine = [&](int k)
-    {
-        auto& chl = chls[k];
-        PRNG prng(sysRandomSeed());
+	// create a lambda function that performs the computation of a single sender thread.
+	auto sendRoutine = [&](int k)
+	{
+		auto& chl = chls[k];
+		PRNG prng(sysRandomSeed());
 
-        if (randomOT)
-        {
+		if (randomOT)
+		{
 
-            // Same explanation as above.
-            senders[k].init(numOTs, prng, chl);
+			// Same explanation as above.
+			senders[k].init(numOTs, prng, chl);
 
-            // Same explanation as above.
-            for (int i = 0; i < numOTs; )
-            {
-                // Same explanation as above.
-                auto min = std::min<u64>(numOTs - i, step);
+			// Same explanation as above.
+			for (int i = 0; i < numOTs; )
+			{
+				// Same explanation as above.
+				auto min = std::min<u64>(numOTs - i, step);
 
-                // unlike for the receiver, before we call encode to get
-                // some desired OT message, we must call recvCorrection(...).
-                // This receivers some information that the receiver had sent 
-                // and allows the sender to compute any OT message that they desired.
-                // Note that the step size must match what the receiver used.
-                // If this is unknown you can use recvCorrection(chl) -> u64
-                // which will tell you how many were sent. 
-                senders[k].recvCorrection(chl, min);
+				// unlike for the receiver, before we call encode to get
+				// some desired OT message, we must call recvCorrection(...).
+				// This receivers some information that the receiver had sent 
+				// and allows the sender to compute any OT message that they desired.
+				// Note that the step size must match what the receiver used.
+				// If this is unknown you can use recvCorrection(chl) -> u64
+				// which will tell you how many were sent. 
+				senders[k].recvCorrection(chl, min);
 
-                // we now encode any OT message with index less that i + min.
-                for (u64 j = 0; j < min; ++j, ++i)
-                {
-                    // in particular, the sender can retreive many OT messages
-                    // at a single index, in this case we chose to retreive 3
-                    // but that is arbitrary. 
-                    auto choice0 = prng.get<block>();
-                    auto choice1 = prng.get<block>();
-                    auto choice2 = prng.get<block>();
+				// we now encode any OT message with index less that i + min.
+				for (u64 j = 0; j < min; ++j, ++i)
+				{
+					// in particular, the sender can retreive many OT messages
+					// at a single index, in this case we chose to retreive 3
+					// but that is arbitrary. 
+					auto choice0 = prng.get<block>();
+					auto choice1 = prng.get<block>();
+					auto choice2 = prng.get<block>();
 
-                    // these we hold the actual OT messages. 
-                    block
-                        otMessage0,
-                        otMessage1,
-                        otMessage2;
+					// these we hold the actual OT messages. 
+					block
+						otMessage0,
+						otMessage1,
+						otMessage2;
 
-                    // now retreive the messages
-                    senders[k].encode(i, &choice0, &otMessage0);
-                    senders[k].encode(i, &choice1, &otMessage1);
-                    senders[k].encode(i, &choice2, &otMessage2);
-                }
-            }
+					// now retreive the messages
+					senders[k].encode(i, &choice0, &otMessage0);
+					senders[k].encode(i, &choice1, &otMessage1);
+					senders[k].encode(i, &choice2, &otMessage2);
+				}
+			}
 
-            // This call is required to make sure the receiver did not cheat. 
-            // All corrections must be recieved before this is called. 
-            senders[k].check(chl, ZeroBlock);
-        }
-        else
-        {
-            // populate this with the messages that you want to send.
-            Matrix<block> sendMessages(numOTs, numChosenMsgs);
-            prng.get(sendMessages.data(), sendMessages.size());
+			// This call is required to make sure the receiver did not cheat. 
+			// All corrections must be recieved before this is called. 
+			senders[k].check(chl, ZeroBlock);
+		}
+		else
+		{
+			// populate this with the messages that you want to send.
+			Matrix<block> sendMessages(numOTs, numChosenMsgs);
+			prng.get(sendMessages.data(), sendMessages.size());
 
-            // perform the OTs with the given messages.
-            senders[k].sendChosen(sendMessages, prng, chl);
-        }
-    };
-
-
-    std::vector<std::thread> thds(numThreads);
-    std::function<void(int)> routine;
-
-    if (role == Role::Sender)
-        routine = sendRoutine;
-    else
-        routine = recvRoutine;
+			// perform the OTs with the given messages.
+			senders[k].sendChosen(sendMessages, prng, chl);
+		}
+	};
 
 
-    Timer time;
-    auto s = time.setTimePoint("start");
+	std::vector<std::thread> thds(numThreads);
+	std::function<void(int)> routine;
 
-    for (int k = 0; k < numThreads; ++k)
-        thds[k] = std::thread(routine, k);
+	if (role == Role::Sender)
+		routine = sendRoutine;
+	else
+		routine = recvRoutine;
 
 
-    for (int k = 0; k < numThreads; ++k)
-        thds[k].join();
+	Timer time;
+	auto s = time.setTimePoint("start");
 
-    auto e = time.setTimePoint("finish");
-    auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+	for (int k = 0; k < numThreads; ++k)
+		thds[k] = std::thread(routine, k);
 
-    if (role == Role::Sender)
-        std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+
+	for (int k = 0; k < numThreads; ++k)
+		thds[k].join();
+
+	auto e = time.setTimePoint("finish");
+	auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+
+	if (role == Role::Sender)
+		std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
 }
 
 
 template<typename OtExtSender, typename OtExtRecver>
-void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
+void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP & cmd)
 {
-    if (totalOTs == 0)
-        totalOTs = 1 << 20;
+	if (totalOTs == 0)
+		totalOTs = 1 << 20;
 
-    bool randomOT = true;
+	bool randomOT = true;
 
-    auto numOTs = totalOTs / numThreads;
+	auto numOTs = totalOTs / numThreads;
 
-    // get up the networking
-    auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
-    IOService ios;
-    Session  ep0(ios, ip, rr);
-    PRNG prng(sysRandomSeed());
+	// get up the networking
+	auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
+	IOService ios;
+	Session  ep0(ios, ip, rr);
+	PRNG prng(sysRandomSeed());
 
-    // for each thread we need to construct a channel (socket) for it to communicate on.
-    std::vector<Channel> chls(numThreads);
-    for (int i = 0; i < numThreads; ++i)
-        chls[i] = ep0.addChannel();
-
-
-    std::vector<OtExtSender> senders(numThreads);
-    std::vector<OtExtRecver> receivers(numThreads);
-
-    // Now compute the base OTs, we need to set them on the first pair of extenders.
-    // In real code you would only have a sender or reciever, not both. But we do 
-    // here just showing the example. 
-    if (role == Role::Receiver)
-        receivers[0].genBaseOts(prng, chls[0]);
-    else
-        senders[0].genBaseOts(prng, chls[0]);
-
-    // for the rest of the extenders, call split. This securely 
-    // creates two sets of extenders that can be used in parallel.
-    for (auto i = 1; i < numThreads; ++i)
-    {
-        senders[i] = senders[0].splitBase();
-        receivers[i] = receivers[0].splitBase();
-    }
+	// for each thread we need to construct a channel (socket) for it to communicate on.
+	std::vector<Channel> chls(numThreads);
+	for (int i = 0; i < numThreads; ++i)
+		chls[i] = ep0.addChannel();
 
 
-    auto routine = [&](int i)
-    {
-        // get a random number generator seeded from the system
-        PRNG prng(sysRandomSeed());
+	std::vector<OtExtSender> senders(numThreads);
+	std::vector<OtExtRecver> receivers(numThreads);
 
-        if (role == Role::Receiver)
-        {
-            // construct the choices that we want.
-            BitVector choice(numOTs);
-            // in this case pick random messages.
-            choice.randomize(prng);
+	// Now compute the base OTs, we need to set them on the first pair of extenders.
+	// In real code you would only have a sender or reciever, not both. But we do 
+	// here just showing the example. 
+	if (role == Role::Receiver)
+		receivers[0].genBaseOts(prng, chls[0]);
+	else
+		senders[0].genBaseOts(prng, chls[0]);
 
-            // construct a vector to stored the received messages. 
-            std::vector<block> msgs(numOTs);
+	// for the rest of the extenders, call split. This securely 
+	// creates two sets of extenders that can be used in parallel.
+	for (auto i = 1; i < numThreads; ++i)
+	{
+		senders[i] = senders[0].splitBase();
+		receivers[i] = receivers[0].splitBase();
+	}
 
-            if (randomOT)
-            {
-                // perform  numOTs random OTs, the results will be written to msgs.
-                receivers[i].receive(choice, msgs, prng, chls[i]);
-            }
-            else
-            {
-                // perform  numOTs chosen message OTs, the results will be written to msgs.
-                receivers[i].receiveChosen(choice, msgs, prng, chls[i]);
-            }
-        }
-        else
-        {
-            // construct a vector to stored the random send messages. 
-            std::vector<std::array<block, 2>> msgs(numOTs);
 
-            // if delta OT is used, then the user can call the following 
-            // to set the desired XOR difference between the zero messages
-            // and the one messages.
-            //
-            //     senders[i].setDelta(some 128 bit delta);
-            //
+	auto routine = [&](int i)
+	{
+		// get a random number generator seeded from the system
+		PRNG prng(sysRandomSeed());
 
-            if (randomOT)
-            {
-                // perform the OTs and write the random OTs to msgs.
-                senders[i].send(msgs, prng, chls[i]);
-            }
-            else
-            {
-                // Populate msgs with something useful...
-                prng.get(msgs.data(), msgs.size());
+		if (role == Role::Receiver)
+		{
+			// construct the choices that we want.
+			BitVector choice(numOTs);
+			// in this case pick random messages.
+			choice.randomize(prng);
 
-                // perform the OTs. The receiver will learn one
-                // of the messages stored in msgs.
-                senders[i].sendChosen(msgs, prng, chls[i]);
-            }
-        }
-    };
+			// construct a vector to stored the received messages. 
+			std::vector<block> msgs(numOTs);
 
-    Timer timer, sendTimer, recvTimer;
-    timer.reset();
-    auto s = timer.setTimePoint("start");
-    sendTimer.setTimePoint("start");
-    recvTimer.setTimePoint("start");
+			if (randomOT)
+			{
+				// perform  numOTs random OTs, the results will be written to msgs.
+				receivers[i].receive(choice, msgs, prng, chls[i]);
+			}
+			else
+			{
+				// perform  numOTs chosen message OTs, the results will be written to msgs.
+				receivers[i].receiveChosen(choice, msgs, prng, chls[i]);
+			}
+		}
+		else
+		{
+			// construct a vector to stored the random send messages. 
+			std::vector<std::array<block, 2>> msgs(numOTs);
 
-    senders[0].setTimer(sendTimer);
-    receivers[0].setTimer(recvTimer);
+			// if delta OT is used, then the user can call the following 
+			// to set the desired XOR difference between the zero messages
+			// and the one messages.
+			//
+			//     senders[i].setDelta(some 128 bit delta);
+			//
 
-    std::vector<std::thread> thrds(numThreads);
-    for (int i = 0; i < numThreads; ++i)
-        thrds[i] = std::thread(routine, i);
+			if (randomOT)
+			{
+				// perform the OTs and write the random OTs to msgs.
+				senders[i].send(msgs, prng, chls[i]);
+			}
+			else
+			{
+				// Populate msgs with something useful...
+				prng.get(msgs.data(), msgs.size());
 
-    for (int i = 0; i < numThreads; ++i)
-        thrds[i].join();
+				// perform the OTs. The receiver will learn one
+				// of the messages stored in msgs.
+				senders[i].sendChosen(msgs, prng, chls[i]);
+			}
+		}
+	};
 
-    auto e = timer.setTimePoint("finish");
-    auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+	Timer timer, sendTimer, recvTimer;
+	timer.reset();
+	auto s = timer.setTimePoint("start");
+	sendTimer.setTimePoint("start");
+	recvTimer.setTimePoint("start");
+
+	senders[0].setTimer(sendTimer);
+	receivers[0].setTimer(recvTimer);
+
+	std::vector<std::thread> thrds(numThreads);
+	for (int i = 0; i < numThreads; ++i)
+		thrds[i] = std::thread(routine, i);
+
+	for (int i = 0; i < numThreads; ++i)
+		thrds[i].join();
+
+	auto e = timer.setTimePoint("finish");
+	auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
 	auto com = (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * numThreads;
 
-    if (role == Role::Sender)
-        lout << tag << " n=" << Color::Green << totalOTs << " " << milli << " ms  " << com << " bytes" << std::endl << Color::Default;
+	if (role == Role::Sender)
+		lout << tag << " n=" << Color::Green << totalOTs << " " << milli << " ms  " << com << " bytes" << std::endl << Color::Default;
 
 
-    if (cmd.isSet("v"))
-    {
-        if (role == Role::Sender)
-            lout << " **** sender ****\n" << sendTimer << std::endl;
+	if (cmd.isSet("v"))
+	{
+		if (role == Role::Sender)
+			lout << " **** sender ****\n" << sendTimer << std::endl;
 
-        if (role == Role::Receiver)
-            lout << " **** receiver ****\n" << recvTimer << std::endl;
-    }
+		if (role == Role::Receiver)
+			lout << " **** receiver ****\n" << recvTimer << std::endl;
+	}
 }
 
 
 //template<typename OtExtSender, typename OtExtRecver>
-void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
+void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP & cmd)
 {
-    if (totalOTs == 0)
-        totalOTs = 1 << 20;
-    using OtExtSender = BgciksOtExtSender;
-    using OtExtRecver = BgciksOtExtReceiver;
+	if (totalOTs == 0)
+		totalOTs = 1 << 20;
+	using OtExtSender = BgciksOtExtSender;
+	using OtExtRecver = BgciksOtExtReceiver;
 
-    auto numOTs = totalOTs / numThreads;
+	auto numOTs = totalOTs / numThreads;
 
-    // get up the networking
-    auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
-    IOService ios;
-    Session  ep0(ios, ip, rr);
-    PRNG prng(sysRandomSeed());
+	// get up the networking
+	auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
+	IOService ios;
+	Session  ep0(ios, ip, rr);
+	PRNG prng(sysRandomSeed());
 
-    // for each thread we need to construct a channel (socket) for it to communicate on.
-    std::vector<Channel> chls(numThreads);
-    for (int i = 0; i < numThreads; ++i)
-        chls[i] = ep0.addChannel();
-
-
-    std::vector<OtExtSender> senders(numThreads);
-    std::vector<OtExtRecver> receivers(numThreads);
+	// for each thread we need to construct a channel (socket) for it to communicate on.
+	std::vector<Channel> chls(numThreads);
+	for (int i = 0; i < numThreads; ++i)
+		chls[i] = ep0.addChannel();
 
 
-	std::string typeStr = "none";
-	BgciksBaseType type = BgciksBaseType::None;
+	std::vector<OtExtSender> senders(numThreads);
+	std::vector<OtExtRecver> receivers(numThreads);
+
+
+	auto routine = [&](int i, int s, int sec, BgciksBaseType type)
+	{
+		// get a random number generator seeded from the system
+		PRNG prng(sysRandomSeed());
+
+		if (role == Role::Receiver)
+		{
+			// construct the choices that we want.
+			BitVector choice(numOTs);
+			// in this case pick random messages.
+			choice.randomize(prng);
+
+			// construct a vector to stored the received messages. 
+			std::vector<block> msgs(numOTs);
+
+			receivers[i].genBase(numOTs, chls[i], prng, s, sec, type);
+			// perform  numOTs random OTs, the results will be written to msgs.
+			receivers[i].receive(msgs, choice, prng, chls[i]);
+		}
+		else
+		{
+			std::vector<std::array<block, 2>> msgs(numOTs);
+
+			senders[i].genBase(numOTs, chls[i], prng, s, sec, type);
+			// construct a vector to stored the random send messages. 
+
+			// if delta OT is used, then the user can call the following 
+			// to set the desired XOR difference between the zero messages
+			// and the one messages.
+			//
+			//     senders[i].setDelta(some 128 bit delta);
+			//
+
+			// perform the OTs and write the random OTs to msgs.
+			senders[i].send(msgs, prng, chls[i]);
+		}
+	};
+
+	cmd.setDefault("s", "4");
+	cmd.setDefault("sec", "80");
+	std::vector<int> ss = cmd.getMany<int>("s");
+	std::vector<int> secs = cmd.getMany<int>("sec");
+	std::vector< BgciksBaseType> types;
+
 	if (cmd.isSet("base"))
-	{
-		typeStr = "base";
-		type = BgciksBaseType::Base;
-	}
+		types.push_back(BgciksBaseType::Base);
 	if (cmd.isSet("baseExtend"))
-	{
-		typeStr = "base";
-		type = BgciksBaseType::BaseExtend;
-	}
+		types.push_back(BgciksBaseType::BaseExtend);
 	if (cmd.isSet("extend"))
-	{
-		typeStr = "base";
-		type = BgciksBaseType::Extend;
-	}
-	auto s = cmd.getOr("s", 4);
-	auto sec = cmd.getOr("sec", 80);
-
-    auto routine = [&](int i)
-    {
-        // get a random number generator seeded from the system
-        PRNG prng(sysRandomSeed());
-
-        if (role == Role::Receiver)
-        {
-            // construct the choices that we want.
-            BitVector choice(numOTs);
-            // in this case pick random messages.
-            choice.randomize(prng);
-
-            // construct a vector to stored the received messages. 
-            std::vector<block> msgs(numOTs);
-
-            receivers[i].genBase(numOTs, chls[i], prng, s, sec, type);
-            // perform  numOTs random OTs, the results will be written to msgs.
-            receivers[i].receive(msgs, choice, prng, chls[i]);
-        }
-        else
-        {
-            std::vector<std::array<block, 2>> msgs(numOTs);
-
-            senders[i].genBase(numOTs, chls[i], prng, s, sec, type);
-            // construct a vector to stored the random send messages. 
-
-            // if delta OT is used, then the user can call the following 
-            // to set the desired XOR difference between the zero messages
-            // and the one messages.
-            //
-            //     senders[i].setDelta(some 128 bit delta);
-            //
-			
-            // perform the OTs and write the random OTs to msgs.
-            senders[i].send(msgs, prng, chls[i]);
-        }
-    };
+		types.push_back(BgciksBaseType::Extend);
+	if (types.size() == 0 || cmd.isSet("none"))
+		types.push_back(BgciksBaseType::None);
 
 
-    
+	for (auto s : ss)
+		for (auto sec : secs)
+			for (auto type : types)
+			{
 
-    Timer timer, sendTimer, recvTimer;
-    timer.reset();
-    auto b = timer.setTimePoint("start");
-    sendTimer.setTimePoint("start");
-    recvTimer.setTimePoint("start");
+				chls[0].resetStats();
 
-    senders[0].setTimer(sendTimer);
-    receivers[0].setTimer(recvTimer);
+				Timer timer, sendTimer, recvTimer;
+				timer.reset();
+				auto b = timer.setTimePoint("start");
+				sendTimer.setTimePoint("start");
+				recvTimer.setTimePoint("start");
 
-    std::vector<std::thread> thrds(numThreads);
-    for (int i = 0; i < numThreads; ++i)
-        thrds[i] = std::thread(routine, i);
+				senders[0].setTimer(sendTimer);
+				receivers[0].setTimer(recvTimer);
 
-    for (int i = 0; i < numThreads; ++i)
-        thrds[i].join();
+				std::vector<std::thread> thrds(numThreads);
+				for (int i = 0; i < numThreads; ++i)
+					thrds[i] = std::thread(routine, i);
 
-    auto e = timer.setTimePoint("finish");
-    auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
+				for (int i = 0; i < numThreads; ++i)
+					thrds[i].join();
 
-	auto com = (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * numThreads;
+				auto e = timer.setTimePoint("finish");
+				auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
+
+				auto com = (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * numThreads;
+
+				std::string typeStr = "none";
+				switch (type)
+				{
+				case BgciksBaseType::Base:
+					typeStr = "base";
+					break;
+				case BgciksBaseType::Extend:
+					typeStr = "extend";
+					break;
+				case BgciksBaseType::BaseExtend:
+					typeStr = "baseExtend";
+					break;
+				default:
+					break;
+				}
 
 
-    if (role == Role::Sender)
-        lout << tag << 
-		" n:" <<Color::Green << totalOTs << Color::Default<<
-		" type: " << Color::Green << typeStr << Color::Default <<
-		" sec: " << Color::Green << sec << Color::Default << 
-		"   ||   " << Color::Green << milli << " ms   " << com << " bytes" << std::endl<< Color::Default;
+				if (role == Role::Sender)
+					lout << tag <<
+					" n:" << Color::Green << totalOTs << Color::Default <<
+					" type: " << Color::Green << typeStr << Color::Default <<
+					" sec: " << Color::Green << sec << Color::Default <<
+					"   ||   " << Color::Green << milli << " ms   " << com << " bytes" << std::endl << Color::Default;
 
-    if (cmd.isSet("v"))
-    {
-        if (role == Role::Sender)
-            lout << " **** sender ****\n" << sendTimer << std::endl;
+				if (cmd.isSet("v"))
+				{
+					if (role == Role::Sender)
+						lout << " **** sender ****\n" << sendTimer << std::endl;
 
-        if(role == Role::Receiver)
-            lout << " **** receiver ****\n" << recvTimer << std::endl;
-    }
+					if (role == Role::Receiver)
+						lout << " **** receiver ****\n" << recvTimer << std::endl;
+				}
+			}
 }
 
 
@@ -532,46 +549,46 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 template<typename BaseOT>
 void baseOT_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP&)
 {
-    IOService ios;
-    PRNG prng(sysRandomSeed());
+	IOService ios;
+	PRNG prng(sysRandomSeed());
 
-    if (totalOTs == 0)
-        totalOTs = 128;
+	if (totalOTs == 0)
+		totalOTs = 128;
 
-    if (numThreads > 1)
-        std::cout << "multi threading for the base OT example is not implemented.\n" << std::flush;
+	if (numThreads > 1)
+		std::cout << "multi threading for the base OT example is not implemented.\n" << std::flush;
 
-    if (role == Role::Receiver)
-    {
-        auto chl0 = Session(ios, ip, SessionMode::Server).addChannel();
-        BaseOT recv;
+	if (role == Role::Receiver)
+	{
+		auto chl0 = Session(ios, ip, SessionMode::Server).addChannel();
+		BaseOT recv;
 
-        std::vector<block> msg(totalOTs);
-        BitVector choice(totalOTs);
-        choice.randomize(prng);
+		std::vector<block> msg(totalOTs);
+		BitVector choice(totalOTs);
+		choice.randomize(prng);
 
 
-        Timer t;
-        auto s = t.setTimePoint("base OT start");
+		Timer t;
+		auto s = t.setTimePoint("base OT start");
 
-        recv.receive(choice, msg, prng, chl0);
+		recv.receive(choice, msg, prng, chl0);
 
-        auto e = t.setTimePoint("base OT end");
-        auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+		auto e = t.setTimePoint("base OT end");
+		auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
-        std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
-    }
-    else
-    {
+		std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+	}
+	else
+	{
 
-        auto chl1 = Session(ios, ip, SessionMode::Client).addChannel();
+		auto chl1 = Session(ios, ip, SessionMode::Client).addChannel();
 
-        BaseOT send;
+		BaseOT send;
 
-        std::vector<std::array<block, 2>> msg(totalOTs);
+		std::vector<std::array<block, 2>> msg(totalOTs);
 
-        send.send(msg, prng, chl1);
-    }
+		send.send(msg, prng, chl1);
+	}
 }
 
 
@@ -591,89 +608,89 @@ simple{ "simplest" };
 
 using ProtocolFunc = std::function<void(Role, int, int, std::string, std::string, CLP&)>;
 
-bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
+bool runIf(ProtocolFunc protocol, CLP & cmd, std::vector<std::string> tag)
 {
-    auto n = cmd.isSet("nn")
-        ? (1 << cmd.get<int>("nn"))
-        : cmd.getOr("n", 0);
+	auto n = cmd.isSet("nn")
+		? (1 << cmd.get<int>("nn"))
+		: cmd.getOr("n", 0);
 
-    auto t = cmd.getOr("t", 1);
-    auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
+	auto t = cmd.getOr("t", 1);
+	auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
 
-    if (cmd.isSet(tag))
-    {
-        if (cmd.hasValue("r"))
-        {
-            auto role = cmd.get<int>("r") ? Role::Sender : Role::Receiver;
-            protocol(role, n, t, ip, tag.back(), cmd);
-        }
-        else
-        {
-            auto thrd = std::thread([&] {
-                try { protocol(Role::Sender, n, t, ip, tag.back(), cmd); }
-                catch (std::exception& e)
-                {
-                    lout << e.what() << std::endl;
-                }
-            });
+	if (cmd.isSet(tag))
+	{
+		if (cmd.hasValue("r"))
+		{
+			auto role = cmd.get<int>("r") ? Role::Sender : Role::Receiver;
+			protocol(role, n, t, ip, tag.back(), cmd);
+		}
+		else
+		{
+			auto thrd = std::thread([&] {
+				try { protocol(Role::Sender, n, t, ip, tag.back(), cmd); }
+				catch (std::exception & e)
+				{
+					lout << e.what() << std::endl;
+				}
+				});
 
-            try { protocol(Role::Receiver, n, t, ip, tag.back(), cmd); }
-            catch (std::exception& e)
-            {
-                lout << e.what() << std::endl;
-            }
-            thrd.join();
-        }
+			try { protocol(Role::Receiver, n, t, ip, tag.back(), cmd); }
+			catch (std::exception & e)
+			{
+				lout << e.what() << std::endl;
+			}
+			thrd.join();
+		}
 
-        return true;
-    }
+		return true;
+	}
 
-    return false;
+	return false;
 }
 
 void minimal()
 {
-    // Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
-    IOService ios;
-    Channel senderChl = Session(ios, "localhost:1212", SessionMode::Server).addChannel();
-    Channel recverChl = Session(ios, "localhost:1212", SessionMode::Client).addChannel();
+	// Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
+	IOService ios;
+	Channel senderChl = Session(ios, "localhost:1212", SessionMode::Server).addChannel();
+	Channel recverChl = Session(ios, "localhost:1212", SessionMode::Client).addChannel();
 
-    // The number of OTs.
-    int n = 100;
+	// The number of OTs.
+	int n = 100;
 
-    // The code to be run by the OT receiver.
-    auto recverThread = std::thread([&]() {
-        PRNG prng(sysRandomSeed());
-        IknpOtExtReceiver recver;
-        recver.genBaseOts(prng, recverChl);
+	// The code to be run by the OT receiver.
+	auto recverThread = std::thread([&]() {
+		PRNG prng(sysRandomSeed());
+		IknpOtExtReceiver recver;
+		recver.genBaseOts(prng, recverChl);
 
-        // Choose which messages should be received.
-        BitVector choices(n);
-        choices[0] = 1;
-        //...
+		// Choose which messages should be received.
+		BitVector choices(n);
+		choices[0] = 1;
+		//...
 
-        // Receive the messages
-        std::vector<block> messages(n);
-        recver.receiveChosen(choices, messages, prng, recverChl);
+		// Receive the messages
+		std::vector<block> messages(n);
+		recver.receiveChosen(choices, messages, prng, recverChl);
 
-        // messages[i] = sendMessages[i][choices[i]];
-    });
+		// messages[i] = sendMessages[i][choices[i]];
+		});
 
-    PRNG prng(sysRandomSeed());
-    IknpOtExtSender sender;
-    sender.genBaseOts(prng, senderChl);
+	PRNG prng(sysRandomSeed());
+	IknpOtExtSender sender;
+	sender.genBaseOts(prng, senderChl);
 
-    // Choose which messages should be sent.
-    std::vector<std::array<block, 2>> sendMessages(n);
-    sendMessages[0] = { toBlock(54), toBlock(33) };
-    //...
+	// Choose which messages should be sent.
+	std::vector<std::array<block, 2>> sendMessages(n);
+	sendMessages[0] = { toBlock(54), toBlock(33) };
+	//...
 
-    // Send the messages.
-    sender.sendChosen(sendMessages, prng, senderChl);
-    recverThread.join();
+	// Send the messages.
+	sender.sendChosen(sendMessages, prng, senderChl);
+	recverThread.join();
 }
 
-void getLatency(CLP& cmd)
+void getLatency(CLP & cmd)
 {
 	auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
 
@@ -705,18 +722,18 @@ void getLatency(CLP& cmd)
 
 int main(int argc, char** argv)
 {
-    CLP cmd;
-    cmd.parse(argc, argv);
-    bool flagSet = false;
+	CLP cmd;
+	cmd.parse(argc, argv);
+	bool flagSet = false;
 
-    if (cmd.isSet(unitTestTag))
-    {
-        flagSet = true;
-        auto tests = tests_cryptoTools::Tests;
-        tests += tests_libOTe::Tests;
+	if (cmd.isSet(unitTestTag))
+	{
+		flagSet = true;
+		auto tests = tests_cryptoTools::Tests;
+		tests += tests_libOTe::Tests;
 
-        tests.runIf(cmd);
-    }
+		tests.runIf(cmd);
+	}
 
 	if (cmd.isSet("latency"))
 	{
@@ -725,69 +742,69 @@ int main(int argc, char** argv)
 	}
 
 #ifdef ENABLE_SIMPLESTOT
-    flagSet |= runIf(baseOT_example<SimplestOT>, cmd, simple);
+	flagSet |= runIf(baseOT_example<SimplestOT>, cmd, simple);
 #endif
 #ifdef NAOR_PINKAS
-    flagSet |= runIf(baseOT_example<NaorPinkas>, cmd, np);
+	flagSet |= runIf(baseOT_example<NaorPinkas>, cmd, np);
 #endif
-    flagSet |= runIf(TwoChooseOne_example<IknpOtExtSender, IknpOtExtReceiver>, cmd, iknp);
-    flagSet |= runIf(TwoChooseOne_example<IknpDotExtSender, IknpDotExtReceiver>, cmd, diknp);
-    flagSet |= runIf(TwoChooseOne_example<KosOtExtSender, KosOtExtReceiver>, cmd, kos);
-    flagSet |= runIf(TwoChooseOne_example<KosDotExtSender, KosDotExtReceiver>, cmd, dkos);
+	flagSet |= runIf(TwoChooseOne_example<IknpOtExtSender, IknpOtExtReceiver>, cmd, iknp);
+	flagSet |= runIf(TwoChooseOne_example<IknpDotExtSender, IknpDotExtReceiver>, cmd, diknp);
+	flagSet |= runIf(TwoChooseOne_example<KosOtExtSender, KosOtExtReceiver>, cmd, kos);
+	flagSet |= runIf(TwoChooseOne_example<KosDotExtSender, KosDotExtReceiver>, cmd, dkos);
 
-    flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
-    flagSet |= runIf(NChooseOne_example<OosNcoOtSender, OosNcoOtReceiver>, cmd, oos);
+	flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
+	flagSet |= runIf(NChooseOne_example<OosNcoOtSender, OosNcoOtReceiver>, cmd, oos);
 
-    //<BgciksOtExtSender, BgciksOtExtReceiver>
-    flagSet |= runIf(TwoChooseOneG_example, cmd, bgciks);
+	//<BgciksOtExtSender, BgciksOtExtReceiver>
+	flagSet |= runIf(TwoChooseOneG_example, cmd, bgciks);
 
 
 
-    if (flagSet == false)
-    {
+	if (flagSet == false)
+	{
 
-        std::cout
-            << "#######################################################\n"
-            << "#                      - libOTe -                     #\n"
-            << "#               A library for performing              #\n"
-            << "#                  oblivious transfer.                #\n"
-            << "#                     Peter Rindal                    #\n"
-            << "#######################################################\n" << std::endl;
+		std::cout
+			<< "#######################################################\n"
+			<< "#                      - libOTe -                     #\n"
+			<< "#               A library for performing              #\n"
+			<< "#                  oblivious transfer.                #\n"
+			<< "#                     Peter Rindal                    #\n"
+			<< "#######################################################\n" << std::endl;
 
-        bool spEnabled, npEnabled;
+		bool spEnabled, npEnabled;
 #ifdef ENABLE_SIMPLESTOT
-        spEnabled = true;
+		spEnabled = true;
 #else 
-        spEnabled = false;
+		spEnabled = false;
 #endif
 #ifdef NAOR_PINKAS
-        npEnabled = true;
+		npEnabled = true;
 #else 
-        npEnabled = false;
+		npEnabled = false;
 #endif
 
-        std::cout
-            << "Protocols:\n"
-            << Color::Green << "  -simplest" << Color::Default << "  : to run the SimplestOT active secure 1-out-of-2 base OT" << (spEnabled ? "" : "(disabled)") << "\n"
-            << Color::Green << "  -np      " << Color::Default << "  : to run the NaorPinkas active secure 1-out-of-2 base OT" << (npEnabled ? "" : "(disabled)") << "\n"
-            << Color::Green << "  -iknp    " << Color::Default << "  : to run the IKNP   passive secure 1-out-of-2       OT\n"
-            << Color::Green << "  -diknp   " << Color::Default << "  : to run the IKNP   passive secure 1-out-of-2 Delta-OT\n"
-            << Color::Green << "  -bgciks  " << Color::Default << "  : to run the BGCIKS passive secure 1-out-of-2       OT\n"
-            << Color::Green << "  -kos     " << Color::Default << "  : to run the KOS    active secure  1-out-of-2       OT\n"
-            << Color::Green << "  -dkos    " << Color::Default << "  : to run the KOS    active secure  1-out-of-2 Delta-OT\n"
-            << Color::Green << "  -oos     " << Color::Default << "  : to run the OOS    active secure  1-out-of-N OT for N=2^76\n"
-            << Color::Green << "  -kkrt    " << Color::Default << "  : to run the KKRT   passive secure 1-out-of-N OT for N=2^128\n\n"
+		std::cout
+			<< "Protocols:\n"
+			<< Color::Green << "  -simplest" << Color::Default << "  : to run the SimplestOT active secure 1-out-of-2 base OT" << (spEnabled ? "" : "(disabled)") << "\n"
+			<< Color::Green << "  -np      " << Color::Default << "  : to run the NaorPinkas active secure 1-out-of-2 base OT" << (npEnabled ? "" : "(disabled)") << "\n"
+			<< Color::Green << "  -iknp    " << Color::Default << "  : to run the IKNP   passive secure 1-out-of-2       OT\n"
+			<< Color::Green << "  -diknp   " << Color::Default << "  : to run the IKNP   passive secure 1-out-of-2 Delta-OT\n"
+			<< Color::Green << "  -bgciks  " << Color::Default << "  : to run the BGCIKS passive secure 1-out-of-2       OT\n"
+			<< Color::Green << "  -kos     " << Color::Default << "  : to run the KOS    active secure  1-out-of-2       OT\n"
+			<< Color::Green << "  -dkos    " << Color::Default << "  : to run the KOS    active secure  1-out-of-2 Delta-OT\n"
+			<< Color::Green << "  -oos     " << Color::Default << "  : to run the OOS    active secure  1-out-of-N OT for N=2^76\n"
+			<< Color::Green << "  -kkrt    " << Color::Default << "  : to run the KKRT   passive secure 1-out-of-N OT for N=2^128\n\n"
 
-            << "Other Options:\n"
-            << Color::Green << "  -n         " << Color::Default << ": the number of OTs to perform\n"
-            << Color::Green << "  -r 0/1     " << Color::Default << ": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network cleint.\n"
-            << Color::Green << "  -ip        " << Color::Default << ": the IP and port of the netowrk server, default = localhost:1212\n"
-            << Color::Green << "  -t         " << Color::Default << ": the number of threads that should be used\n"
-            << Color::Green << "  -u         " << Color::Default << ": to run the unit tests\n"
-            << Color::Green << "  -u -list   " << Color::Default << ": to list the unit tests\n"
-            << Color::Green << "  -u 1 2 15  " << Color::Default << ": to run the unit tests indexed by {1, 2, 15}.\n"
-            << std::endl;
-    }
+			<< "Other Options:\n"
+			<< Color::Green << "  -n         " << Color::Default << ": the number of OTs to perform\n"
+			<< Color::Green << "  -r 0/1     " << Color::Default << ": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network cleint.\n"
+			<< Color::Green << "  -ip        " << Color::Default << ": the IP and port of the netowrk server, default = localhost:1212\n"
+			<< Color::Green << "  -t         " << Color::Default << ": the number of threads that should be used\n"
+			<< Color::Green << "  -u         " << Color::Default << ": to run the unit tests\n"
+			<< Color::Green << "  -u -list   " << Color::Default << ": to list the unit tests\n"
+			<< Color::Green << "  -u 1 2 15  " << Color::Default << ": to run the unit tests indexed by {1, 2, 15}.\n"
+			<< std::endl;
+	}
 
-    return 0;
+	return 0;
 }
