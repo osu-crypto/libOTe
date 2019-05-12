@@ -5,7 +5,7 @@
 #include <cryptoTools/Common/Log.h>
 #include <bitpolymul2/bitpolymul.h>
 #include <libOTe/Base/BaseOT.h>
-
+#include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
 //#include <bits/stdc++.h> 
 
 namespace osuCrypto
@@ -110,7 +110,7 @@ namespace osuCrypto
 
 	u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
-	void BgciksOtExtReceiver::genBase(u64 n, Channel & chl, PRNG & prng, u64 scaler, u64 secParam)
+	void BgciksOtExtReceiver::genBase(u64 n, Channel & chl, PRNG & prng, u64 scaler, u64 secParam, BgciksBaseType basetype)
 	{
 		setTimePoint("recver.gen.start");
 		configure(n, scaler, secParam);
@@ -118,15 +118,47 @@ namespace osuCrypto
 		if (gUseBgicksPprf)
 		{
 			auto count = mGen.baseOtCount();
-			DefaultBaseOT base;
-
+			std::vector<block> msg(count);
 			BitVector choice(count);
 			choice.randomize(prng);
-			std::vector<block> msg(count);
 
-			//base.receive(choice, msg, prng, chl);
+			switch (basetype)
+			{
+			case osuCrypto::BgciksBaseType::None:
+				break;
+			case osuCrypto::BgciksBaseType::Base:
+			{
+				DefaultBaseOT base;
+				base.receive(choice, msg, prng, chl);
+				setTimePoint("recver.gen.baseOT");
+				break;
+			}
+			case osuCrypto::BgciksBaseType::BaseExtend:
+			{
+				IknpOtExtReceiver iknp;
+				iknp.genBaseOts(prng, chl);
+				setTimePoint("recver.gen.baseOT");
+				iknp.receive(choice, msg, prng, chl);
+				setTimePoint("recver.gen.baseExtension");
+				break;
+			}
+			case osuCrypto::BgciksBaseType::Extend:
+			{
+				std::array<std::array<block, 2>, 128> baseMsg;
+				IknpOtExtReceiver iknp;
+				iknp.setBaseOts(baseMsg);
+				iknp.receive(choice, msg, prng, chl);
+				setTimePoint("recver.gen.baseExtension");
+				break;
+			}
+			default:
+				break;
+			}
+
+			TODO("comment this out and fix bug");
+			memset(msg.data(), 0, msg.size() * 16);
+
 			mGen.setBase(msg, choice);
-
 			mGen.getTransposedPoints(mS);
 			for (u64 i =0; i < mS.size(); ++i)
 			{

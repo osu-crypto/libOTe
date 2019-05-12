@@ -422,6 +422,26 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
     std::vector<OtExtRecver> receivers(numThreads);
 
 
+	std::string typeStr = "none";
+	BgciksBaseType type = BgciksBaseType::None;
+	if (cmd.isSet("base"))
+	{
+		typeStr = "base";
+		type = BgciksBaseType::Base;
+	}
+	if (cmd.isSet("baseExtend"))
+	{
+		typeStr = "base";
+		type = BgciksBaseType::BaseExtend;
+	}
+	if (cmd.isSet("extend"))
+	{
+		typeStr = "base";
+		type = BgciksBaseType::Extend;
+	}
+	auto s = cmd.getOr("s", 4);
+	auto sec = cmd.getOr("sec", 80);
+
     auto routine = [&](int i)
     {
         // get a random number generator seeded from the system
@@ -429,8 +449,6 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 
         if (role == Role::Receiver)
         {
-            receivers[i].genBase(numOTs, chls[i], prng, cmd.getOr("s", 4));
-
             // construct the choices that we want.
             BitVector choice(numOTs);
             // in this case pick random messages.
@@ -439,15 +457,16 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
             // construct a vector to stored the received messages. 
             std::vector<block> msgs(numOTs);
 
+            receivers[i].genBase(numOTs, chls[i], prng, s, sec, type);
             // perform  numOTs random OTs, the results will be written to msgs.
             receivers[i].receive(msgs, choice, prng, chls[i]);
         }
         else
         {
-            senders[i].genBase(numOTs, chls[i], prng, cmd.getOr("s", 4));
-
-            // construct a vector to stored the random send messages. 
             std::vector<std::array<block, 2>> msgs(numOTs);
+
+            senders[i].genBase(numOTs, chls[i], prng, s, sec, type);
+            // construct a vector to stored the random send messages. 
 
             // if delta OT is used, then the user can call the following 
             // to set the desired XOR difference between the zero messages
@@ -455,7 +474,7 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
             //
             //     senders[i].setDelta(some 128 bit delta);
             //
-
+			
             // perform the OTs and write the random OTs to msgs.
             senders[i].send(msgs, prng, chls[i]);
         }
@@ -466,7 +485,7 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 
     Timer timer, sendTimer, recvTimer;
     timer.reset();
-    auto s = timer.setTimePoint("start");
+    auto b = timer.setTimePoint("start");
     sendTimer.setTimePoint("start");
     recvTimer.setTimePoint("start");
 
@@ -481,10 +500,17 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
         thrds[i].join();
 
     auto e = timer.setTimePoint("finish");
-    auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+    auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
+
+	auto com = (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * numThreads;
+
 
     if (role == Role::Sender)
-        lout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+        lout << tag << 
+		" n:" <<Color::Green << totalOTs << Color::Default<<
+		" type: " << Color::Green << typeStr << Color::Default <<
+		" sec: " << Color::Green << sec << Color::Default << 
+		"   ||   " << Color::Green << milli << " ms   " << com << " bytes" << std::endl<< Color::Default;
 
     if (cmd.isSet("v"))
     {

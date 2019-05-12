@@ -5,6 +5,7 @@
 #include "bitpolymul2/bitpolymul.h"
 #include "cryptoTools/Common/Log.h"
 #include "libOTe/Base/BaseOT.h"
+#include <libOTe/TwoChooseOne/IknpOtExtSender.h>
 namespace osuCrypto
 {
 	//extern u64 numPartitions;
@@ -13,7 +14,8 @@ namespace osuCrypto
 
 	u64 secLevel(u64 scale, u64 p, u64 points)
 	{
-		return std::log2(std::pow(scale * p / (p - 1.0), points) * (scale * p - points + 1));
+		return points * std::log2(scale * p / double(p)) + std::log2(scale * p) / 2;
+		//return std::log2(std::pow(scale * p / (p - 1.0), points) * (scale * p - points + 1));
 	}
 	u64 getPartitions(u64 scaler, u64 p, u64 secParam)
 	{
@@ -24,7 +26,7 @@ namespace osuCrypto
 		return roundUpTo(ret, 8);
 	}
 
-	void BgciksOtExtSender::genBase(u64 n, Channel & chl, PRNG& prng, u64 scaler, u64 secParam)
+	void BgciksOtExtSender::genBase(u64 n, Channel & chl, PRNG& prng, u64 scaler, u64 secParam, BgciksBaseType basetype)
 	{
 		setTimePoint("sender.gen.start");
 
@@ -35,12 +37,50 @@ namespace osuCrypto
 		{
 
 			auto count = mGen.baseOtCount();
-			DefaultBaseOT base;
 
 			std::vector<std::array<block,2>> msg(count);
 
-			//base.send(msg, prng, chl);
+			switch (basetype)
+			{
+			case osuCrypto::BgciksBaseType::None:
+				break;
+			case osuCrypto::BgciksBaseType::Base:
+			{
+				DefaultBaseOT base;
+				base.send(msg, prng, chl);
+				setTimePoint("sender.gen.baseOT");
+				break;
+			}
+			case osuCrypto::BgciksBaseType::BaseExtend:
+			{
+				IknpOtExtSender iknp;
+				iknp.genBaseOts(prng, chl);
+				setTimePoint("sender.gen.baseOT");
+				iknp.send(msg, prng, chl);
+				setTimePoint("sender.gen.baseExtend");
+				break;
+			}
+			case osuCrypto::BgciksBaseType::Extend:
+			{
+				std::array<block, 128> baseMsg;
+				BitVector bv(128);
+				bv.randomize(prng);
+				IknpOtExtSender iknp;
+				iknp.setBaseOts(baseMsg, bv);
+				iknp.send(msg, prng, chl);
+				setTimePoint("sender.gen.baseOT");
+				break;
+			}
+			default:
+				break;
+			}
+
+			TODO("comment this out and fix bug");
+			memset(msg.data(), 0, msg.size() * 32);
+
 			mGen.setBase(msg);
+
+			TODO("fix this");
 			mDelta = AllOneBlock;
 			mGen.setValue(mDelta);
 

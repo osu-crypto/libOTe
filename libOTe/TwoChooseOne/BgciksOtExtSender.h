@@ -5,6 +5,7 @@
 #include <libOTe/DPF/BgiEvaluator.h>
 #include <cryptoTools/Common/Timer.h>
 #include <libOTe/DPF/BgicksPprf.h>
+#include <libOTe/TwoChooseOne/TcoOtDefines.h>
 
 namespace osuCrypto
 {
@@ -20,7 +21,7 @@ namespace osuCrypto
         block mDelta;
         u64 mP, mN2, mN, mNumPartitions, mScaler, mSizePer;
         //BitVector mS, mC;
-        void genBase(u64 n, Channel& chl, PRNG& prng, u64 scaler = 4, u64 secParam = 80);
+        void genBase(u64 n, Channel& chl, PRNG& prng, u64 scaler = 4, u64 secParam = 80, BgciksBaseType base = BgciksBaseType::None);
 
 		void configure(const osuCrypto::u64& n, const osuCrypto::u64& scaler, const osuCrypto::u64& secParam);
 
