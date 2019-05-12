@@ -497,7 +497,7 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 
 				std::vector<std::thread> thrds(numThreads);
 				for (int i = 0; i < numThreads; ++i)
-					thrds[i] = std::thread(routine, i);
+					thrds[i] = std::thread(routine, i, s, sec, type);
 
 				for (int i = 0; i < numThreads; ++i)
 					thrds[i].join();
