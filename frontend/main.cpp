@@ -507,17 +507,17 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 
 				auto com = (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * numThreads;
 
-				std::string typeStr = "none";
+				std::string typeStr = "n ";
 				switch (type)
 				{
 				case BgciksBaseType::Base:
-					typeStr = "base";
+					typeStr = "b ";
 					break;
 				case BgciksBaseType::Extend:
-					typeStr = "extend";
+					typeStr = "e ";
 					break;
 				case BgciksBaseType::BaseExtend:
-					typeStr = "baseExtend";
+					typeStr = "be";
 					break;
 				default:
 					break;
@@ -526,10 +526,13 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 
 				if (role == Role::Sender)
 					lout << tag <<
-					" n:" << Color::Green << totalOTs << Color::Default <<
+					" n:" << Color::Green << std::setw(6) << std::setfill(' ')<<totalOTs << Color::Default <<
 					" type: " << Color::Green << typeStr << Color::Default <<
-					" sec: " << Color::Green << sec << Color::Default <<
-					"   ||   " << Color::Green << milli << " ms   " << com << " bytes" << std::endl << Color::Default;
+					" sec: " << Color::Green << << std::setw(3) << std::setfill(' ') sec << Color::Default <<
+					" s: " << Color::Green << s << Color::Default <<
+					"   ||   " << Color::Green << 
+					std::setw(6) << std::setfill(' ') << milli << " ms   " <<
+					std::setw(6) << std::setfill(' ') << com << " bytes" << std::endl << Color::Default;
 
 				if (cmd.isSet("v"))
 				{
