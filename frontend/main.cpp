@@ -381,8 +381,10 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
     auto e = timer.setTimePoint("finish");
     auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
+	auto com = (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * numThreads;
+
     if (role == Role::Sender)
-        lout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+        lout << tag << " n=" << Color::Green << totalOTs << " " << milli << " ms  " << com << " bytes" << std::endl << Color::Default;
 
 
     if (cmd.isSet("v"))
