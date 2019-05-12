@@ -38,6 +38,7 @@ int miraclTestMain();
 #include "libOTe/NChooseK/AknOtSender.h"
 
 #include <cryptoTools/Common/CLP.h>
+#include "util.h"
 
 #include <boost/preprocessor/variadic/size.hpp>
 enum class Role
@@ -672,6 +673,36 @@ void minimal()
     recverThread.join();
 }
 
+void getLatency(CLP& cmd)
+{
+	auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
+
+	if (cmd.hasValue("r"))
+	{
+		auto mode = cmd.get<int>("r") != 0 ? SessionMode::Server : SessionMode::Client;
+		IOService ios;
+		Session session(ios, ip, mode);
+		auto chl = session.addChannel();
+		if (mode == SessionMode::Server)
+			senderGetLatency(chl);
+		else
+			recverGetLatency(chl);
+	}
+	else
+	{
+		IOService ios;
+		Session s(ios, ip, SessionMode::Server);
+		Session r(ios, ip, SessionMode::Client);
+		auto cs = s.addChannel();
+		auto cr = r.addChannel();
+
+		auto thrd = std::thread([&]() {senderGetLatency(cs); });
+		recverGetLatency(cr);
+
+		thrd.join();
+	}
+}
+
 int main(int argc, char** argv)
 {
     CLP cmd;
@@ -685,29 +716,13 @@ int main(int argc, char** argv)
         tests += tests_libOTe::Tests;
 
         tests.runIf(cmd);
-
-        //if (cmd.isSet("list"))
-        //{
-        //    tests.list();
-        //    return 0;
-        //}
-        //else
-        //{
-        //    cmd.setDefault("loop", 1);
-        //    auto loop = cmd.get<u64>("loop");
-
-        //    TestCollection::Result result;
-        //    if (cmd.hasValue(unitTestTag))
-        //        result = tests.run(cmd.getMany<u64>(unitTestTag), loop);
-        //    else
-        //        result = tests.runAll(loop);
-
-        //    if (result == TestCollection::Result::passed)
-        //        return 0;
-        //    else
-        //        return 1;
-        //}
     }
+
+	if (cmd.isSet("latency"))
+	{
+		getLatency(cmd);
+		flagSet = true;
+	}
 
 #ifdef ENABLE_SIMPLESTOT
     flagSet |= runIf(baseOT_example<SimplestOT>, cmd, simple);
@@ -725,6 +740,7 @@ int main(int argc, char** argv)
 
     //<BgciksOtExtSender, BgciksOtExtReceiver>
     flagSet |= runIf(TwoChooseOneG_example, cmd, bgciks);
+
 
 
     if (flagSet == false)
