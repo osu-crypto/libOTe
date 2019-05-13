@@ -305,8 +305,10 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 	// creates two sets of extenders that can be used in parallel.
 	for (auto i = 1; i < numThreads; ++i)
 	{
-		senders[i] = senders[0].splitBase();
-		receivers[i] = receivers[0].splitBase();
+		if (role == Role::Receiver)
+			receivers[i] = receivers[0].splitBase();
+		else
+			senders[i] = senders[0].splitBase();
 	}
 
 
