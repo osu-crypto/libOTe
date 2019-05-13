@@ -41,11 +41,7 @@ int miraclTestMain();
 #include "util.h"
 
 #include <boost/preprocessor/variadic/size.hpp>
-enum class Role
-{
-	Sender,
-	Receiver
-};
+
 
 
 template<typename NcoOtSender, typename  NcoOtReceiver>
@@ -427,6 +423,8 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 	{
 		// get a random number generator seeded from the system
 		PRNG prng(sysRandomSeed());
+
+		sync(chls[0], role);
 
 		if (role == Role::Receiver)
 		{

@@ -6,6 +6,41 @@ using namespace osuCrypto;
 #include <chrono>
 #define tryCount 2
 
+
+void sync(Channel& chl, Role role)
+{
+	if (role == Role::Receiver)
+	{
+
+		u8 dummy[1];
+		chl.recv(dummy, 1);
+		Timer timer;
+
+
+		auto start = timer.setTimePoint("");
+		chl.asyncSend(dummy, 1);
+		chl.recv(dummy, 1);
+		auto mid = timer.setTimePoint("");
+
+		chl.asyncSend(dummy, 1);
+
+
+		auto rrt = mid - start;
+		auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(rrt).count();
+		if (ms > 4)
+			std::this_thread::sleep_for(rrt / 2);
+
+	}
+	else
+	{
+		u8 dummy[1];
+		chl.asyncSend(dummy, 1);
+		chl.recv(dummy, 1);
+		chl.asyncSend(dummy, 1);
+		chl.recv(dummy, 1);
+	}
+}
+
 void senderGetLatency(Channel& chl)
 {
 

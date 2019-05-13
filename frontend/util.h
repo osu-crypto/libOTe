@@ -7,3 +7,9 @@
 void senderGetLatency(osuCrypto::Channel& chl);
 
 void recverGetLatency(osuCrypto::Channel& chl);
+enum class Role
+{
+	Sender,
+	Receiver
+};
+void sync(osuCrypto::Channel& chl, Role role);
