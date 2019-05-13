@@ -400,14 +400,12 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 
 
 //template<typename OtExtSender, typename OtExtRecver>
-void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP & cmd)
+void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip, std::string tag, CLP & cmd)
 {
-	if (totalOTs == 0)
-		totalOTs = 1 << 20;
+	if (numOTs == 0)
+		numOTs = 1 << 20;
 	using OtExtSender = BgciksOtExtSender;
 	using OtExtRecver = BgciksOtExtReceiver;
-
-	auto numOTs = totalOTs / numThreads;
 
 	// get up the networking
 	auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
@@ -524,7 +522,7 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 
 				if (role == Role::Sender)
 					lout << tag <<
-					" n:" << Color::Green << std::setw(6) << std::setfill(' ')<<totalOTs << Color::Default <<
+					" n:" << Color::Green << std::setw(6) << std::setfill(' ')<<numOTs << Color::Default <<
 					" type: " << Color::Green << typeStr << Color::Default <<
 					" sec: " << Color::Green << std::setw(3) << std::setfill(' ') << sec << Color::Default <<
 					" s: " << Color::Green << s << Color::Default <<

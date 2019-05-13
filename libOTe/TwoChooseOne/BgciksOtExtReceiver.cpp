@@ -368,10 +368,10 @@ namespace osuCrypto
 			setTimePoint("sender.expand.pprf_transpose");
 
 
-			RandomOracle ro(16);
-			ro.Update(rT.data(), rT.size());
-			block b;
-			ro.Final(b);
+			//RandomOracle ro(16);
+			//ro.Update(rT.data(), rT.size());
+			//block b;
+			//ro.Final(b);
 
 			//std::cout << "test " << b << std::endl;
 		}
@@ -529,8 +529,10 @@ namespace osuCrypto
 		setTimePoint("recver.expand.mul");
 	}
 
+
 	void BgciksOtExtReceiver::randMulQuasiCyclic(Matrix<block> & rT, span<block> & messages, BitVector & choices, u64 threads)
 	{
+		setTimePoint("recver.expand.QuasiCyclic");
 		auto nBlocks = mN / 128;
 		auto nBytes = mN / 8;
 		auto n2Blocks = mN2 / 128;
@@ -542,203 +544,143 @@ namespace osuCrypto
 		if (rT.cols() != n2Blocks)
 			throw RTE_LOC;
 
-		std::vector<block> a(nBlocks);
-		using TSpan = std::vector<block>;
-		static_assert(std::is_convertible<
-			TSpan,
-			span<typename TSpan::value_type>
-		>::value, "hmm");
-		auto a64 = spanCast<u64>(a);
-
+		using namespace bpm;
 		//std::cout << (a64.data()) << " " << (a.data()) << std::endl;
-		assert(a64.size() == n64 && a64.data() == (u64*)a.data());
 		//u64 * a64ptr = (u64*)a.data();
-		bpm::FFTPoly aPoly;
 
 		BitVector sb(mN2);
 		for (u64 i = 0; i < mS.size(); ++i)
 		{
 			sb[mS[i]] = 1;
 		}
-		std::vector<bpm::FFTPoly> c(rows);
+		//std::vector<bpm::FFTPoly> c(rows);
+		std::vector<FFTPoly> a(mScaler - 1);
 
+		Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
 
-		std::unique_ptr<ThreadBarrier[]> brs(new ThreadBarrier[mScaler]);
-		for (u64 i = 0; i < mScaler; ++i)
+		if (messages.size() > mN)
+			throw RTE_LOC;
+
+		choices.resize(mN);
+
+		std::array<ThreadBarrier, 2> brs;
+		for (u64 i = 0; i < brs.size(); ++i)
 			brs[i].reset(threads);
+
+		std::vector<std::array<int, 4>> counts(threads);
+
+		setTimePoint("recver.expand.QuasiCyclicSetup");
 
 		auto routine = [&](u64 index)
 		{
+
+			if (index == 0)
+				setTimePoint("recver.expand.routine");
+
+			auto& count = counts[index];
 			auto j = 0;
-			bpm::FFTPoly sPoly;
-			bpm::FFTPoly bPoly;
+			FFTPoly cPoly;
+			FFTPoly bPoly;
+			Matrix<block>tt(1, 2 * nBlocks, AllocType::Uninitialized);
+			//std::vector<block> temp128(2 * nBlocks);
+			auto temp128 = tt[0];
+			FFTPoly::DecodeCache cache;
 
-			//std::vector<block> a(nBlocks);
-			//u64 * a64ptr = (u64*)a.data();
-			//bpm::FFTPoly aPoly;
 
-			for (u64 s = 1; s < mScaler; ++s)
+			for (u64 s = index + 1; s < mScaler; s += threads)
 			{
+				auto a64 = spanCast<u64>(temp128).subspan(n64);
 
+				PRNG pubPrng(toBlock(s));
+
+				//pubPrng.mAes.ecbEncCounterMode(0, nBlocks, temp128.data());
+				pubPrng.get(a64.data(), a64.size());
+				//mAesFixedKey.ecbEncCounterMode(s * nBlocks, nBlocks, temp128.data());
 				if (index == 0)
-				{
-					PRNG pubPrng(toBlock(s));
-					pubPrng.get(a.data(), a.size());
-					aPoly.encode(a64);
-				}
-
-				brs[j++].decrementWait();
-
-				for (u64 i = index; i < rows; i += threads)
-				{
-					auto b64 = spanCast<u64>(rT[i]).subspan(s * n64, n64);
-					u64* b64ptr = (u64*)(rT[i].data() + s * nBlocks);
-					assert(b64ptr == b64.data());
-
-					bPoly.encode(b64);
-
-					if (s > 1)
-					{
-						bPoly.multEq(aPoly);
-						c[i].addEq(bPoly);
-					}
-					else
-					{
-						c[i].mult(aPoly, bPoly);
-					}
-				}
-
-				if (index == 0)
-				{
-					auto s64 = sb.getSpan<u64>().subspan(s * n64, n64);
-					u64* s64ptr = (u64*)(sb.data() + s * nBytes);
-					assert(s64.data() == s64ptr);
-
-					bPoly.encode(s64);
-
-					if (s > 1)
-					{
-						bPoly.multEq(aPoly);
-						sPoly.addEq(bPoly);
-					}
-					else
-					{
-						sPoly.mult(aPoly, bPoly);
-					}
-
-				}
-
+					setTimePoint("recver.expand.rand");
+				a[s - 1].encode(a64);
 			}
 
 
+
+			brs[0].decrementWait();
+
 			if (index == 0)
-				setTimePoint("recver.expand.mul");
+				setTimePoint("recver.expand.randGen");
 
-
-			//Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
-			//std::vector<u64> temp(c[index].mPoly.size() + 2);
-			//bpm::FFTPoly::DecodeCache cache;
-
-			//u64 * t64Ptr = (u64*)temp.data();
-			//auto t128Ptr = (block*)temp.data();
-			//for (u64 i = index; i < rows; i += threads)
-			//{
-			//	// decode c[i] and store it at t64Ptr
-			//	c[i].decode({ t64Ptr, 2 * n64 }, cache, true);
-
-			//	u64* b64ptr = (u64*)rT[i].data();
-			//	for (u64 j = 0; j < n64; ++j)
-			//		t64Ptr[j] ^= b64ptr[j];
-
-			//	// reduce s[i] mod (x^p - 1) and store it at cModP1[i]
-			//	modp(cModP1[i], { t128Ptr, n64 }, mP);
-			//	//memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
-			//}
-
-
-			Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
-			std::vector<u64> temp64(n64 * 2);
-			bpm::FFTPoly::DecodeCache cache;
-
-			auto temp128 = spanCast<block>(temp64);
-
-			//auto t128Ptr = (block*)temp.data();
-			for (u64 i = index; i < rows; i += threads)
+			auto multAddReduce = [this, nBlocks, n64,&count, &a, &bPoly, &cPoly, &temp128, &cache](span<block> b128, span<block> dest)
 			{
-				// decode c[i] and store it at t64Ptr
-				c[i].decode(temp64, cache, true);
+				for (u64 s = 1; s < mScaler; ++s)
+				{
+					auto& aPoly = a[s - 1];
+					auto b64 = spanCast<u64>(b128).subspan(s * n64, n64);
 
-				//u64* b64ptr = (u64*)rT[i].data();
-				auto b128 = rT[i].subspan(0, nBlocks);
+					bPoly.encode(b64);
+					++count[0];
+
+					if (s == 1)
+					{
+						cPoly.mult(aPoly, bPoly);
+					}
+					else
+					{
+						bPoly.multEq(aPoly);
+						cPoly.addEq(bPoly);
+					}
+				}
+
+				// decode c[i] and store it at t64Ptr
+				cPoly.decode(spanCast<u64>(temp128), cache, true);
+
 				for (u64 j = 0; j < nBlocks; ++j)
 					temp128[j] = temp128[j] ^ b128[j];
 
 				// reduce s[i] mod (x^p - 1) and store it at cModP1[i]
-				modp(cModP1[i], temp128, mP);
-				//memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
-			}
+				modp(dest, temp128, mP);
 
-			brs[j++].decrementWait();
+			};
 
-			if (index == 0)
+			for (u64 i = index; i < rows + 1; i += threads)
 			{
-
-				choices.resize(0);
-				choices.resize(mN);
-
-				span<block> c128 = choices.getSpan<block>();
-				span<u64> c64 = choices.getSpan<u64>();
-				assert(c64.size() == n64);
-				assert(c128.size() == nBlocks);
-
-				//sPoly.decode({ temp64.data(), 2 * n64 }, cache, true);
-
-				sPoly.decode(temp64, cache, true);
-
-				auto b128 = sb.getSpan<block>();
-				for (u64 j = 0; j < nBlocks; ++j)
-					temp128[j] = temp128[j] ^ b128[j];
-
-				modp(c128, temp128, mP);
-				//memcpy((block*)choices.data(), t64Ptr, nBlocks * sizeof(block));
+				if (i < rows)
+				{
+					multAddReduce(rT[i], cModP1[i]);
+				}
+				else
+				{
+					span<block> c128 = choices.getSpan<block>();
+					multAddReduce(sb.getSpan<block>(), c128);
+					choices.resize(messages.size());
+				}
 			}
 
 
-
-			//brs[j++].decrementWait();
-
-
-			//if (index == 0)
-			//{
-			//	choices.resize(0);
-			//	choices.resize(mN);
-			//	span<block> b128 = choices.getSpan<block>();
-			//	span<u64> b64 = choices.getSpan<u64>();
-
-			//	sPoly.decode(temp64, cache, true);
-
-			//	for (u64 j = 0; j < n64; ++j)
-			//		temp64[j] ^= b64[j];
-
-			//	//for (u64 j = 0; j < nBlocks; ++j)
-			//	//	temp128[j] = temp128[j] ^ b128[j];
-
-			//	modp(b128, temp128, mP);
-			//}
-
 			if (index == 0)
-				setTimePoint("recver.expand.decodeReduce");
+				setTimePoint("recver.expand.mulAddReduce");
+
+
+			brs[1].decrementWait();
+
+
+
 
 			//MatrixView<block> view(messages.begin(), messages.end(), 1);
 			//sse_transpose(cModP1, view);
 	//#define NO_HASH
 			std::array<block, 8> hashBuffer;
-			//std::array<block, 128> tpBuffer;
-			auto end = messages.size() / 128;
-			for (u64 i = index; i < end; i += threads)
+			auto numBlocks = messages.size() / 128;
+			auto begin = index * numBlocks / threads;
+			auto end = (index +1) * numBlocks / threads;
+			for (u64 i = begin; i < end; ++i)
+
+			//for (u64 i = index; i < numBlocks; i += threads)
 			{
+				++count[3];
 				u64 j = i * 128;
 				auto& tpBuffer = *(std::array<block, 128>*)(messages.data() + j);
+
+				//for (u64 j = 0, k = i; j < tpBuffer.size(); ++j, k += cModP1.cols())
+				//	tpBuffer[j] = cModP1(k);
 
 				for (u64 k = 0; k < 128; ++k)
 					tpBuffer[k] = cModP1(k, i);
@@ -763,12 +705,12 @@ namespace osuCrypto
 			}
 
 			auto rem = messages.size() % 128;
-			if (rem && index == 0)
+			if (rem && index == 0)					
 			{
 				std::array<block, 128> tpBuffer;
 
 				for (u64 j = 0; j < tpBuffer.size(); ++j)
-					tpBuffer[j] = cModP1(j, end);
+					tpBuffer[j] = cModP1(j, numBlocks);
 
 				sse_transpose128(tpBuffer);
 
@@ -779,7 +721,7 @@ namespace osuCrypto
 				}
 #endif
 
-				memcpy(messages.data() + end * 128, tpBuffer.data(), rem * sizeof(block));
+				memcpy(messages.data() + numBlocks * 128, tpBuffer.data(), rem * sizeof(block));
 			}
 
 			if (index == 0)
@@ -794,70 +736,21 @@ namespace osuCrypto
 
 		routine(thrds.size());
 
+		auto totals = counts.back();
 		for (u64 i = 0; i < thrds.size(); ++i)
+		{
 			thrds[i].join();
+			for (u64 j = 0; j < totals.size(); ++j)
+			{
+
+				totals[j] += counts[i][j];
+			}
+		}
+		for (u64 i = 0; i < counts.size(); ++i)
+			lout << "count[" << i << "] " << counts[i][0] << " " << counts[i][1] << " " << counts[i][2] << " " << counts[i][3] << std::endl;
+
+		lout << "total " << totals[0] << " " << totals[1] << " " << totals[2] << " " << totals[3] << std::endl;
 	}
 
 
 }
-//Matrix<u8> convert(span<block> b)
-//{
-//    Matrix<u8> ret(b.size(), 128);
-//    BitIterator iter((u8*)b.data(), 0);
-
-//    for (u64 i = 0; i < ret.size(); ++i)
-//    {
-//        ret(i) = *iter++;
-//    }
-//    return ret;
-//}
-
-
-//Matrix<u8> transpose(const Matrix<u8>& v)
-//{
-//    Matrix<u8> ret(v.cols(), v.rows());
-
-//    for (u64 i = 0; i < v.rows(); ++i)
-//    {
-//        for (u64 j = 0; j < v.cols(); ++j)
-//        {
-//            ret(j, i) = v(i, j);
-//        }
-//    }
-//    return ret;
-//}
-
-
-//void convertCol(Matrix<u8>& dest, u64 j, span<block> b)
-//{
-//    BitIterator iter((u8*)b.data(), 0);
-//    for (u64 i = 0; i < dest.rows(); ++i)
-//    {
-//        dest(i, j) = *iter++;
-//    }
-//}
-
-
-
-//Matrix<u8> mul(const Matrix<u8>& l, const Matrix<u8>& r)
-//{
-//    if (l.cols() != r.rows())
-//        throw RTE_LOC;
-
-//    Matrix<u8> ret(l.rows(), r.cols());
-
-//    for (u64 i = 0; i < ret.rows(); ++i)
-//    {
-//        for (u64 j = 0; j < ret.cols(); ++j)
-//        {
-//            auto& x = ret(i, j);
-//            x = 0;
-//            for (u64 k = 0; k < r.rows(); ++k)
-//            {
-//                x ^= l(i, k) & r(k, j);
-//            }
-//        }
-
-//    }
-//    return ret;
-//}

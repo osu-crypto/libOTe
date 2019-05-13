@@ -483,6 +483,7 @@ namespace osuCrypto
 	
 
 
+
 	void BgciksOtExtSender::randMulQuasiCyclic(Matrix<block> & rT, span<std::array<block, 2>> & messages, u64 threads)
 	{
 		auto nBlocks = mN / 128;
@@ -498,11 +499,12 @@ namespace osuCrypto
 			throw RTE_LOC;
 
 
-		std::vector<block> a(nBlocks);
-		span<u64> a64 = spanCast<u64>(a);
+		using namespace bpm;
+		//std::vector<block> a(nBlocks);
+		//span<u64> a64 = spanCast<u64>(a);
 
-		bpm::FFTPoly aPoly;
-		std::vector<bpm::FFTPoly> c(rows);
+		std::vector<FFTPoly> a(mScaler-1);
+		Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
 
 		std::unique_ptr<ThreadBarrier[]> brs(new ThreadBarrier[mScaler]);
 		for (u64 i = 0; i < mScaler; ++i)
@@ -514,99 +516,74 @@ namespace osuCrypto
 		auto routine = [&](u64 index)
 		{
 			u64 j = 0;
-			bpm::FFTPoly bPoly;
+			FFTPoly bPoly;
+			FFTPoly cPoly;
 
-			//PRNG pubPrng(ZeroBlock);
+			Matrix<block>tt(1, 2 * nBlocks, AllocType::Uninitialized);
+			auto temp128 = tt[0];
+			FFTPoly::DecodeCache cache;
 
 
-			for (u64 s = 1; s < mScaler; ++s)
+			for (u64 s = index + 1; s < mScaler; s += threads)
 			{
-				if (index == 0)
+				auto a64 = spanCast<u64>(temp128).subspan(n64);
+				//mAesFixedKey.ecbEncCounterMode(s * nBlocks, nBlocks, temp128.data());
+
+				PRNG pubPrng(toBlock(s));
+				//pubPrng.mAes.ecbEncCounterMode(0, nBlocks, temp128.data());
+				pubPrng.get(a64.data(), a64.size());
+				a[s - 1].encode(a64);
+			}
+
+			if (index == 0)
+				setTimePoint("recver.expand.randGen");
+
+			brs[j++].decrementWait();
+
+			if (index == 0)
+				setTimePoint("recver.expand.randGenWait");
+
+
+
+			auto multAddReduce = [this, nBlocks, n64, &a, &bPoly, &cPoly, &temp128, &cache](span<block> b128, span<block> dest)
+			{
+				for (u64 s = 1; s < mScaler; ++s)
 				{
-					PRNG pubPrng(toBlock(s));
-					pubPrng.get(a.data(), a.size());
-					aPoly.encode(a64);
-				}
+					auto& aPoly = a[s - 1];
+					auto b64 = spanCast<u64>(b128).subspan(s * n64, n64);
 
-				brs[j++].decrementWait();
-
-				for (u64 i = index; i < rows; i += threads)
-				{
-					//    auto ci = c[i];
-
-					//    u64* c64ptr = (u64*)((s == 0) ? ci.data() : temp.data());
-					//u64* b64ptr = (u64*)(rT[i].data() + s * nBlocks);
-					auto b64 = spanCast<u64>(rT[i]).subspan(s * n64, n64);
-
-					//bitpolymul_2_128(c64ptr, a64ptr, b64ptr, nBlocks * 2);
 					bPoly.encode(b64);
 
-					if (s > 1)
+					if (s == 1)
 					{
-						bPoly.multEq(aPoly);
-						c[i].addEq(bPoly);
+						cPoly.mult(aPoly, bPoly);
 					}
 					else
 					{
-						c[i].mult(aPoly, bPoly);
+						bPoly.multEq(aPoly);
+						cPoly.addEq(bPoly);
 					}
-
-#ifdef DEBUG
-					RandomOracle ro(16);
-					ro.Update(c[i].mPoly.data(), c[i].mPoly.size());
-					block b;
-					ro.Final(b);
-					cc(s, i) = b;
-#endif
-					//lout << "c[" << i << "][" << s << "] " << b << std::endl;
 				}
-			}
-			//a = {};
 
-
-			if (index == 0)
-				setTimePoint("sender.expand.mul");
-
-
-			assert(c[index].mN == n64);
-
-			Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
-			std::vector<u64> temp64(n64 * 2);
-			bpm::FFTPoly::DecodeCache cache;
-			auto pBlocks = (mP + 127) / 128;
-			//span<u64> temp64(temp.begin(), temp.begin() + 2 * n64);
-			span<block> temp128 = spanCast<block>(temp64);
-			//auto t64Ptr = temp.data();
-			//auto t128Ptr = (block*)temp.data();
-
-
-			for (u64 i = index; i < rows; i += threads)
-			{
 				// decode c[i] and store it at t64Ptr
-				c[i].decode(temp64, cache, true);
+				cPoly.decode(spanCast<u64>(temp128), cache, true);
 
-				span<block> b128 = rT[i].subspan(0, nBlocks);
 				for (u64 j = 0; j < nBlocks; ++j)
 					temp128[j] = temp128[j] ^ b128[j];
 
 				// reduce s[i] mod (x^p - 1) and store it at cModP1[i]
-				modp(cModP1[i], temp128, mP);
-				//memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
+				modp(dest, temp128, mP);
 
+			};
 
-				//u64 shift = 0;
-				//bitShiftXor(
-				//    { (block*)t64Ptr,  pBlocks },
-				//    {(block*)t64Ptr + mP / 128,  pBlocks }, shift);
-				//reduce()
-				//TODO("do a real reduction mod (x^p-1)");
+			for (u64 i = index; i < rows; i += threads)
+			{
+				multAddReduce(rT[i], cModP1[i]);
 			}
 
-			if (index == 0)
-				setTimePoint("sender.expand.decodeReduce");
 
-			//Matrix<block> view(mN, 1, AllocType::Uninitialized);
-			//sse_transpose(MatrixView<block>(cModP1), MatrixView<block>(view));
+			if (index == 0)
+				setTimePoint("sender.expand.mulAddReduce");
 
 			brs[j++].decrementWait();
 
@@ -623,8 +600,11 @@ namespace osuCrypto
 
 			std::array<block, 8> hashBuffer;
 			std::array<block, 128> tpBuffer;
-			auto end = (messages.size() + 127) / 128;
-			for (u64 i = index; i < end; i += threads)
+			auto numBlocks = (messages.size() + 127) / 128;
+			auto begin = index * numBlocks / threads;
+			auto end = (index + 1) * numBlocks / threads;
+			for (u64 i = begin; i < end; ++i)
+			//for (u64 i = index; i < numBlocks; i += threads)
 			{
 				u64 j = i * tpBuffer.size();
 
@@ -632,6 +612,9 @@ namespace osuCrypto
 
 				for (u64 j = 0; j < tpBuffer.size(); ++j)
 					tpBuffer[j] = cModP1(j, i);
+
+				//for (u64 j = 0, k = i; j < tpBuffer.size(); ++j, k += cModP1.cols())
+				//	tpBuffer[j] = cModP1(k);
 
 				sse_transpose128(tpBuffer);
 
