@@ -4,6 +4,7 @@
 #include "libOTe/TwoChooseOne/BgciksOtExtReceiver.h"
 #include "bitpolymul2/bitpolymul.h"
 #include "cryptoTools/Common/Log.h"
+#include "cryptoTools/Common/ThreadBarrier.h"
 #include "libOTe/Base/BaseOT.h"
 #include <libOTe/TwoChooseOne/IknpOtExtSender.h>
 namespace osuCrypto
@@ -26,8 +27,12 @@ namespace osuCrypto
 		return roundUpTo(ret, 8);
 	}
 
-	void BgciksOtExtSender::genBase(u64 n, Channel & chl, PRNG& prng, u64 scaler, u64 secParam, BgciksBaseType basetype)
+	void BgciksOtExtSender::genBase(
+		u64 n, Channel& chl, PRNG& prng, 
+		u64 scaler, u64 secParam, 
+		BgciksBaseType basetype, u64 threads )
 	{
+
 		setTimePoint("sender.gen.start");
 
 		configure(n, scaler, secParam);
@@ -46,16 +51,22 @@ namespace osuCrypto
 				break;
 			case osuCrypto::BgciksBaseType::Base:
 			{
-				DefaultBaseOT base;
-				base.send(msg, prng, chl);
+				NaorPinkas base;
+				base.send(msg, prng, chl, threads);
 				setTimePoint("sender.gen.baseOT");
 				break;
 			}
 			case osuCrypto::BgciksBaseType::BaseExtend:
 			{
-				IknpOtExtSender iknp;
-				iknp.genBaseOts(prng, chl);
+				std::array<block, 128> baseMsg;
+
+				BitVector bv(128);
+				bv.randomize(prng);
+				NaorPinkas base;
+				base.receive(bv, baseMsg, prng,chl, threads);
 				setTimePoint("sender.gen.baseOT");
+				IknpOtExtSender iknp;
+				iknp.setBaseOts(baseMsg, bv, chl);
 				iknp.send(msg, prng, chl);
 				setTimePoint("sender.gen.baseExtend");
 				break;
@@ -189,10 +200,17 @@ namespace osuCrypto
 
 
 	void BgciksOtExtSender::send(
-		span<std::array<block, 2>>
-		messages,
+		span<std::array<block, 2>> messages,
 		PRNG & prng,
 		Channel & chl)
+	{
+		send(messages, prng, { &chl,1 });
+	}
+
+	void BgciksOtExtSender::send(
+		span<std::array<block, 2>> messages,
+		PRNG& prng,
+		span<Channel> chls)
 	{
 		setTimePoint("sender.expand.start");
 
@@ -218,7 +236,7 @@ namespace osuCrypto
 		if (gUseBgicksPprf)
 		{
 			rT.resize(128, mN2 / 128, AllocType::Uninitialized);
-			mGen.expand(chl, mDelta, prng, rT, true);
+			mGen.expand(chls, mDelta, prng, rT, true);
 			setTimePoint("sender.expand.pprf_transpose");
 		}
 		else
@@ -227,13 +245,13 @@ namespace osuCrypto
 			setTimePoint("sender.expand.dpf_transpose");
 		}
 
-		if (0)
-		{
+		//if (0)
+		//{
 
-			int temp;
-			chl.asyncSendCopy(temp);
-			chl.asyncSendCopy(rT);
-		}
+		//	int temp;
+		//	chl.asyncSendCopy(temp);
+		//	chl.asyncSendCopy(rT);
+		//}
 
 		auto type = MultType::QuasiCyclic;
 
@@ -243,7 +261,7 @@ namespace osuCrypto
 			randMulNaive(rT, messages);
 			break;
 		case osuCrypto::MultType::QuasiCyclic:
-			randMulQuasiCyclic(rT, messages);
+			randMulQuasiCyclic(rT, messages, chls.size());
 			break;
 		default:
 			break;
@@ -460,8 +478,22 @@ namespace osuCrypto
 		if (rem)
 			memset(((u8*)dest.data()) + pBytes, 0, rem);
 	}
+	
+	template<typename S, typename T>
+	span<S> spanCast(span<T> src)
+	{
+		static_assert(
+			std::is_pod<T>::value &&
+			std::is_pod<S>::value &&
+			((sizeof(T) % sizeof(S) == 0)  ||
+			 (sizeof(S) % sizeof(T) == 0)	), " exp");
 
-	void BgciksOtExtSender::randMulQuasiCyclic(Matrix<block> & rT, span<std::array<block, 2>> & messages)
+		assert(u64(src.data()) % sizeof(S) == 0);
+
+		return span<S>( (S*)src.data(), src.size() * sizeof(T) / sizeof(S) );
+	}
+
+	void BgciksOtExtSender::randMulQuasiCyclic(Matrix<block> & rT, span<std::array<block, 2>> & messages, u64 threads)
 	{
 		auto nBlocks = mN / 128;
 		auto n2Blocks = mN2 / 128;
@@ -477,159 +509,194 @@ namespace osuCrypto
 
 
 		std::vector<block> a(nBlocks);
-		u64 * a64ptr = (u64*)a.data();
+		span<u64> a64 = spanCast<u64,block>(a);
 
 		bpm::FFTPoly aPoly;
-		bpm::FFTPoly bPoly;
-
-		PRNG pubPrng(ZeroBlock);
-
 		std::vector<bpm::FFTPoly> c(rows);
 
-		for (u64 s = 1; s < mScaler; ++s)
+
+		std::unique_ptr<ThreadBarrier[]> brs(new ThreadBarrier[mScaler]);
+		for (u64 i = 0; i < mScaler; ++i)
+			brs[i].reset(threads);
+
+		auto routine = [&](u64 index)
 		{
-			pubPrng.get(a.data(), a.size());
-			aPoly.encode({ a64ptr, n64 });
+			u64 j = 0;
+			bpm::FFTPoly bPoly;
 
-			for (u64 i = 0; i < rows; ++i)
+			//PRNG pubPrng(ZeroBlock);
+
+
+			for (u64 s = 1; s < mScaler; ++s)
 			{
-				//    auto ci = c[i];
-
-				//    u64* c64ptr = (u64*)((s == 0) ? ci.data() : temp.data());
-				u64* b64ptr = (u64*)(rT[i].data() + s * nBlocks);
-
-				//bitpolymul_2_128(c64ptr, a64ptr, b64ptr, nBlocks * 2);
-				bPoly.encode({ b64ptr, n64 });
-
-				if (s > 1)
+				if (index == 0)
 				{
-					bPoly.multEq(aPoly);
-					c[i].addEq(bPoly);
+					PRNG pubPrng(toBlock(s));
+					pubPrng.get(a.data(), a.size());
+					aPoly.encode(a64);
 				}
-				else
+
+				brs[j++].decrementWait();
+
+				for (u64 i = index; i < rows; i += threads)
 				{
-					c[i].mult(aPoly, bPoly);
+					//    auto ci = c[i];
+
+					//    u64* c64ptr = (u64*)((s == 0) ? ci.data() : temp.data());
+					//u64* b64ptr = (u64*)(rT[i].data() + s * nBlocks);
+					auto b64 = spanCast<u64, block>(rT[i]).subspan(s * n64, n64);
+
+					//bitpolymul_2_128(c64ptr, a64ptr, b64ptr, nBlocks * 2);
+					bPoly.encode(b64);
+
+					if (s > 1)
+					{
+						bPoly.multEq(aPoly);
+						c[i].addEq(bPoly);
+					}
+					else
+					{
+						c[i].mult(aPoly, bPoly);
+					}
 				}
 			}
-		}
-		a = {};
+			//a = {};
 
 
-		setTimePoint("sender.expand.mul");
-
-		Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
-
-		std::vector<u64> temp(c[0].mPoly.size() + 2);
-		bpm::FFTPoly::DecodeCache cache;
-
-		auto pBlocks = (mP + 127) / 128;
-
-		auto t64Ptr = temp.data();
-
-		auto t128Ptr = (block*)temp.data();
-
-		for (u64 i = 0; i < rows; ++i)
-		{
-			// decode c[i] and store it at t64Ptr
-			c[i].decode({ t64Ptr, 2 * n64 }, cache, true);
-
-			u64* b64ptr = (u64*)rT[i].data();
-			for (u64 j = 0; j < n64; ++j)
-				t64Ptr[j] ^= b64ptr[j];
-
-			// reduce s[i] mod (x^p - 1) and store it at cModP1[i]
-			modp(cModP1[i], { t128Ptr, n64 }, mP);
-			//memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
+			if (index == 0)
+				setTimePoint("sender.expand.mul");
 
 
-			//u64 shift = 0;
-			//bitShiftXor(
-			//    { (block*)t64Ptr,  pBlocks },
-			//    {(block*)t64Ptr + mP / 128,  pBlocks }, shift);
-			//reduce()
-			//TODO("do a real reduction mod (x^p-1)");
-		}
+			assert(c[index].mN == n64);
 
-		setTimePoint("sender.expand.decodeReduce");
-
-		//Matrix<block> view(mN, 1, AllocType::Uninitialized);
-		//sse_transpose(MatrixView<block>(cModP1), MatrixView<block>(view));
+			Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
+			std::vector<u64> temp64(n64 * 2);
+			bpm::FFTPoly::DecodeCache cache;
+			auto pBlocks = (mP + 127) / 128;
+			//span<u64> temp64(temp.begin(), temp.begin() + 2 * n64);
+			span<block> temp128 = spanCast<block, u64>(temp64);
+			//auto t64Ptr = temp.data();
+			//auto t128Ptr = (block*)temp.data();
 
 
-		std::array<block, 8> hashBuffer;
-		std::array<block, 128> tpBuffer;
-		auto end = (messages.size() + 127) / 128;
-		for (u64 i = 0; i < end; ++i)
-		{
-			u64 j = i * tpBuffer.size();
+			for (u64 i = index; i < rows; i += threads)
+			{
+				// decode c[i] and store it at t64Ptr
+				c[i].decode(temp64, cache, true);
 
-			auto min = std::min<u64>(tpBuffer.size(), messages.size() - j);
+				span<block> b128 = rT[i];
+				for (u64 j = 0; j < nBlocks; ++j)
+					temp128[j] = temp128[j] ^ b128[j];
 
-			for (u64 j = 0; j < tpBuffer.size(); ++j)
-				tpBuffer[j] = cModP1(j, i);
+				// reduce s[i] mod (x^p - 1) and store it at cModP1[i]
+				modp(cModP1[i], temp128, mP);
+				//memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
 
-			sse_transpose128(tpBuffer);
+
+				//u64 shift = 0;
+				//bitShiftXor(
+				//    { (block*)t64Ptr,  pBlocks },
+				//    {(block*)t64Ptr + mP / 128,  pBlocks }, shift);
+				//reduce()
+				//TODO("do a real reduction mod (x^p-1)");
+			}
+
+			if (index == 0)
+				setTimePoint("sender.expand.decodeReduce");
+
+			//Matrix<block> view(mN, 1, AllocType::Uninitialized);
+			//sse_transpose(MatrixView<block>(cModP1), MatrixView<block>(view));
+
+			brs[j++].decrementWait();
 
 
-			//#define NO_HASH
+			std::array<block, 8> hashBuffer;
+			std::array<block, 128> tpBuffer;
+			auto end = (messages.size() + 127) / 128;
+			for (u64 i = index; i < end; i += threads)
+			{
+				u64 j = i * tpBuffer.size();
+
+				auto min = std::min<u64>(tpBuffer.size(), messages.size() - j);
+
+				for (u64 j = 0; j < tpBuffer.size(); ++j)
+					tpBuffer[j] = cModP1(j, i);
+
+				sse_transpose128(tpBuffer);
+
+
+				//#define NO_HASH
 
 
 #ifdef NO_HASH
-			auto end = i * tpBuffer.size() + min;
-			for (u64 k = 0; j < end; ++j, ++k)
-			{
-				messages[j][0] = tpBuffer[k];
-				messages[j][1] = tpBuffer[k] ^ mDelta;
-			}
+				auto end = i * tpBuffer.size() + min;
+				for (u64 k = 0; j < end; ++j, ++k)
+				{
+					messages[j][0] = tpBuffer[k];
+					messages[j][1] = tpBuffer[k] ^ mDelta;
+				}
 #else
-			u64 k = 0;
-			auto min2 = min & ~7;
-			for (; k < min2; k += 8)
-			{
-				mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
+				u64 k = 0;
+				auto min2 = min & ~7;
+				for (; k < min2; k += 8)
+				{
+					mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
 
-				messages[j + k + 0][0] = tpBuffer[k + 0] ^ hashBuffer[0];
-				messages[j + k + 1][0] = tpBuffer[k + 1] ^ hashBuffer[1];
-				messages[j + k + 2][0] = tpBuffer[k + 2] ^ hashBuffer[2];
-				messages[j + k + 3][0] = tpBuffer[k + 3] ^ hashBuffer[3];
-				messages[j + k + 4][0] = tpBuffer[k + 4] ^ hashBuffer[4];
-				messages[j + k + 5][0] = tpBuffer[k + 5] ^ hashBuffer[5];
-				messages[j + k + 6][0] = tpBuffer[k + 6] ^ hashBuffer[6];
-				messages[j + k + 7][0] = tpBuffer[k + 7] ^ hashBuffer[7];
+					messages[j + k + 0][0] = tpBuffer[k + 0] ^ hashBuffer[0];
+					messages[j + k + 1][0] = tpBuffer[k + 1] ^ hashBuffer[1];
+					messages[j + k + 2][0] = tpBuffer[k + 2] ^ hashBuffer[2];
+					messages[j + k + 3][0] = tpBuffer[k + 3] ^ hashBuffer[3];
+					messages[j + k + 4][0] = tpBuffer[k + 4] ^ hashBuffer[4];
+					messages[j + k + 5][0] = tpBuffer[k + 5] ^ hashBuffer[5];
+					messages[j + k + 6][0] = tpBuffer[k + 6] ^ hashBuffer[6];
+					messages[j + k + 7][0] = tpBuffer[k + 7] ^ hashBuffer[7];
 
-				tpBuffer[k + 0] = tpBuffer[k + 0] ^ mDelta;
-				tpBuffer[k + 1] = tpBuffer[k + 1] ^ mDelta;
-				tpBuffer[k + 2] = tpBuffer[k + 2] ^ mDelta;
-				tpBuffer[k + 3] = tpBuffer[k + 3] ^ mDelta;
-				tpBuffer[k + 4] = tpBuffer[k + 4] ^ mDelta;
-				tpBuffer[k + 5] = tpBuffer[k + 5] ^ mDelta;
-				tpBuffer[k + 6] = tpBuffer[k + 6] ^ mDelta;
-				tpBuffer[k + 7] = tpBuffer[k + 7] ^ mDelta;
+					tpBuffer[k + 0] = tpBuffer[k + 0] ^ mDelta;
+					tpBuffer[k + 1] = tpBuffer[k + 1] ^ mDelta;
+					tpBuffer[k + 2] = tpBuffer[k + 2] ^ mDelta;
+					tpBuffer[k + 3] = tpBuffer[k + 3] ^ mDelta;
+					tpBuffer[k + 4] = tpBuffer[k + 4] ^ mDelta;
+					tpBuffer[k + 5] = tpBuffer[k + 5] ^ mDelta;
+					tpBuffer[k + 6] = tpBuffer[k + 6] ^ mDelta;
+					tpBuffer[k + 7] = tpBuffer[k + 7] ^ mDelta;
 
-				mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
+					mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
 
-				messages[j + k + 0][1] = tpBuffer[k + 0] ^ hashBuffer[0];
-				messages[j + k + 1][1] = tpBuffer[k + 1] ^ hashBuffer[1];
-				messages[j + k + 2][1] = tpBuffer[k + 2] ^ hashBuffer[2];
-				messages[j + k + 3][1] = tpBuffer[k + 3] ^ hashBuffer[3];
-				messages[j + k + 4][1] = tpBuffer[k + 4] ^ hashBuffer[4];
-				messages[j + k + 5][1] = tpBuffer[k + 5] ^ hashBuffer[5];
-				messages[j + k + 6][1] = tpBuffer[k + 6] ^ hashBuffer[6];
-				messages[j + k + 7][1] = tpBuffer[k + 7] ^ hashBuffer[7];
-			}
+					messages[j + k + 0][1] = tpBuffer[k + 0] ^ hashBuffer[0];
+					messages[j + k + 1][1] = tpBuffer[k + 1] ^ hashBuffer[1];
+					messages[j + k + 2][1] = tpBuffer[k + 2] ^ hashBuffer[2];
+					messages[j + k + 3][1] = tpBuffer[k + 3] ^ hashBuffer[3];
+					messages[j + k + 4][1] = tpBuffer[k + 4] ^ hashBuffer[4];
+					messages[j + k + 5][1] = tpBuffer[k + 5] ^ hashBuffer[5];
+					messages[j + k + 6][1] = tpBuffer[k + 6] ^ hashBuffer[6];
+					messages[j + k + 7][1] = tpBuffer[k + 7] ^ hashBuffer[7];
+				}
 
-			for (; k < min; ++k)
-			{
-				messages[j + k][0] = mAesFixedKey.ecbEncBlock(tpBuffer[k]) ^ tpBuffer[k];
-				messages[j + k][1] = mAesFixedKey.ecbEncBlock(tpBuffer[k] ^ mDelta) ^ tpBuffer[k] ^ mDelta;
-			}
+				for (; k < min; ++k)
+				{
+					messages[j + k][0] = mAesFixedKey.ecbEncBlock(tpBuffer[k]) ^ tpBuffer[k];
+					messages[j + k][1] = mAesFixedKey.ecbEncBlock(tpBuffer[k] ^ mDelta) ^ tpBuffer[k] ^ mDelta;
+				}
 
 #endif
-			//messages[i][0] = view(i, 0);
-			//messages[i][1] = view(i, 0) ^ mDelta;
-		}
+				//messages[i][0] = view(i, 0);
+				//messages[i][1] = view(i, 0) ^ mDelta;
+			}
 
-		setTimePoint("sender.expand.transposeXor");
+			if(index==0)
+				setTimePoint("sender.expand.transposeXor");
+		};
+
+
+		std::vector<std::thread> thrds(threads - 1);
+		for (u64 i = 0; i < thrds.size(); ++i)
+			thrds[i] = std::thread(routine, i);
+
+		routine(thrds.size());
+
+		for (u64 i = 0; i < thrds.size(); ++i)
+			thrds[i].join();
+
 	}
 }
 

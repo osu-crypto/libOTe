@@ -6,6 +6,7 @@
 #include <bitpolymul2/bitpolymul.h>
 #include <libOTe/Base/BaseOT.h>
 #include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
+#include <cryptoTools/Common/ThreadBarrier.h>
 //#include <bits/stdc++.h> 
 
 namespace osuCrypto
@@ -110,7 +111,14 @@ namespace osuCrypto
 
 	u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
-	void BgciksOtExtReceiver::genBase(u64 n, Channel & chl, PRNG & prng, u64 scaler, u64 secParam, BgciksBaseType basetype)
+	void BgciksOtExtReceiver::genBase(
+		u64 n, 
+		Channel & chl, 
+		PRNG & prng, 
+		u64 scaler, 
+		u64 secParam,
+		BgciksBaseType basetype,
+		u64 threads)
 	{
 		setTimePoint("recver.gen.start");
 		configure(n, scaler, secParam);
@@ -128,16 +136,20 @@ namespace osuCrypto
 				break;
 			case osuCrypto::BgciksBaseType::Base:
 			{
-				DefaultBaseOT base;
-				base.receive(choice, msg, prng, chl);
+				NaorPinkas base;
+				base.receive(choice, msg, prng, chl, threads);
 				setTimePoint("recver.gen.baseOT");
 				break;
 			}
 			case osuCrypto::BgciksBaseType::BaseExtend:
 			{
-				IknpOtExtReceiver iknp;
-				iknp.genBaseOts(prng, chl);
+				NaorPinkas base;
+				std::array<std::array<block, 2>, 128> baseMsg;
+				prng.get(baseMsg.data(), baseMsg.size());
+				base.send(baseMsg, prng, chl, threads);
 				setTimePoint("recver.gen.baseOT");
+				IknpOtExtReceiver iknp;
+				iknp.setBaseOts(baseMsg);
 				iknp.receive(choice, msg, prng, chl);
 				setTimePoint("recver.gen.baseExtension");
 				break;
@@ -160,7 +172,7 @@ namespace osuCrypto
 
 			mGen.setBase(msg, choice);
 			mGen.getTransposedPoints(mS);
-			for (u64 i =0; i < mS.size(); ++i)
+			for (u64 i = 0; i < mS.size(); ++i)
 			{
 				if (mS[i] >= mN2)
 				{
@@ -169,7 +181,7 @@ namespace osuCrypto
 
 					//std::cout << "resiz"
 				}
-					//throw std::runtime_error("known issue, (fixable, ask peter). " LOCATION);
+				//throw std::runtime_error("known issue, (fixable, ask peter). " LOCATION);
 			}
 		}
 		else
@@ -217,7 +229,7 @@ namespace osuCrypto
 
 	}
 
-	void BgciksOtExtReceiver::configure(const osuCrypto::u64 & n, const osuCrypto::u64& scaler, const osuCrypto::u64& secParam)
+	void BgciksOtExtReceiver::configure(const osuCrypto::u64 & n, const osuCrypto::u64 & scaler, const osuCrypto::u64 & secParam)
 	{
 
 		mP = nextPrime(n);
@@ -327,12 +339,20 @@ namespace osuCrypto
 
 		return rT;
 	}
-	
+
 	void BgciksOtExtReceiver::receive(
 		span<block> messages,
-		BitVector& choices,
+		BitVector & choices,
 		PRNG & prng,
 		Channel & chl)
+	{
+		receive(messages, choices, prng, { &chl,1 });
+	}
+	void BgciksOtExtReceiver::receive(
+		span<block> messages,
+		BitVector & choices,
+		PRNG & prng,
+		span<Channel> chls)
 	{
 		setTimePoint("recver.expand.start");
 
@@ -343,8 +363,10 @@ namespace osuCrypto
 		if (gUseBgicksPprf)
 		{
 			rT.resize(128, mN2 / 128, AllocType::Uninitialized);
-			mGen.expand(chl, prng, rT, true);
+			mGen.expand(chls, prng, rT, true);
 			setTimePoint("sender.expand.pprf_transpose");
+
+			std::cout << "test " << rT(0) << " " << rT(1) << std::endl;
 		}
 		else
 		{
@@ -352,41 +374,41 @@ namespace osuCrypto
 			setTimePoint("recver.expand.dpf_transpose");
 		}
 
-		if(0)
-		{
-			int temp__;
-			Matrix<block> rT2(rT.rows(), rT.cols()), r2(mN2, 1);
-			chl.recv(temp__);
-			chl.recv(rT2.data(), rT2.size());
-			for (u64 i = 0; i < rT.size(); ++i)
-				rT2(i) = rT2(i) ^ rT(i);
-			
-			sse_transpose(MatrixView<block>(rT2), MatrixView<block>(r2));
+		//if(0)
+		//{
+		//	int temp__;
+		//	Matrix<block> rT2(rT.rows(), rT.cols()), r2(mN2, 1);
+		//	chls[0].recv(temp__);
+		//	chls[0].recv(rT2.data(), rT2.size());
+		//	for (u64 i = 0; i < rT.size(); ++i)
+		//		rT2(i) = rT2(i) ^ rT(i);
+		//	
+		//	sse_transpose(MatrixView<block>(rT2), MatrixView<block>(r2));
 
-			//for (u64 j = 0; j < rT.rows(); ++j)
-			//{
-			//	std::cout << "r[" << j << "] ";
-			//	for (u64 i = 0; i < rT.cols(); ++i)
-			//		std::cout << " "<< (rT2(i, j));
-			//	std::cout << std::endl;
-			//}
+		//	//for (u64 j = 0; j < rT.rows(); ++j)
+		//	//{
+		//	//	std::cout << "r[" << j << "] ";
+		//	//	for (u64 i = 0; i < rT.cols(); ++i)
+		//	//		std::cout << " "<< (rT2(i, j));
+		//	//	std::cout << std::endl;
+		//	//}
 
-			std::cout << mGen.mDomain << " " << mGen.mPntCount <<
-				" " << rT.rows() << " " << rT.cols() << std::endl;
-			for (u64 i = 0; i < rT2.cols(); ++i)
-			{
-				for (u64 j = 0; j < 128; ++j)
-				{
+		//	std::cout << mGen.mDomain << " " << mGen.mPntCount <<
+		//		" " << rT.rows() << " " << rT.cols() << std::endl;
+		//	for (u64 i = 0; i < rT2.cols(); ++i)
+		//	{
+		//		for (u64 j = 0; j < 128; ++j)
+		//		{
 
-					//if (cmd.isSet("v"))
-					std::cout << "r[" << i << "][" << j << "] " << (rT2(j, i)) << " ~ " << rT(j, i) << std::endl << Color::Default;
-				}
-			}
+		//			//if (cmd.isSet("v"))
+		//			std::cout << "r[" << i << "][" << j << "] " << (rT2(j, i)) << " ~ " << rT(j, i) << std::endl << Color::Default;
+		//		}
+		//	}
 
-			std::cout << std::endl;
-			for (u64 i = 0; i < mN2; ++i)
-				std::cout << "w[" << i << "] " << r2(i) << std::endl;
-		}
+		//	std::cout << std::endl;
+		//	for (u64 i = 0; i < mN2; ++i)
+		//		std::cout << "w[" << i << "] " << r2(i) << std::endl;
+		//}
 
 		//auto n = mN2;
 		//auto& gen = mGen;
@@ -459,7 +481,7 @@ namespace osuCrypto
 			randMulNaive(rT, messages);
 			break;
 		case osuCrypto::MultType::QuasiCyclic:
-			randMulQuasiCyclic(rT, messages, choices);
+			randMulQuasiCyclic(rT, messages, choices, chls.size());
 			break;
 		default:
 			break;
@@ -486,7 +508,7 @@ namespace osuCrypto
 	}
 
 
-	void BgciksOtExtReceiver::randMulNaive(Matrix<block> &rT, span<block> &messages)
+	void BgciksOtExtReceiver::randMulNaive(Matrix<block> & rT, span<block> & messages)
 	{
 		std::vector<block> mtxColumn(rT.cols());
 		PRNG pubPrng(ZeroBlock);
@@ -494,13 +516,13 @@ namespace osuCrypto
 		for (u64 i = 0; i < messages.size(); ++i)
 		{
 			block& m = messages[i];
-			BitIterator iter((u8*)&m, 0);
+			BitIterator iter((u8*)& m, 0);
 			mulRand(pubPrng, mtxColumn, rT, iter);
 		}
 		setTimePoint("recver.expand.mul");
 	}
 
-	void BgciksOtExtReceiver::randMulQuasiCyclic(Matrix<block>& rT, span<block>& messages, BitVector& choices)
+	void BgciksOtExtReceiver::randMulQuasiCyclic(Matrix<block> & rT, span<block> & messages, BitVector & choices, u64 threads)
 	{
 		auto nBlocks = mN / 128;
 		auto nBytes = mN / 8;
@@ -515,157 +537,196 @@ namespace osuCrypto
 
 
 		std::vector<block> a(nBlocks);
-		u64* a64ptr = (u64*)a.data();
+		u64 * a64ptr = (u64*)a.data();
+		bpm::FFTPoly aPoly;
 
 		BitVector sb(mN2);
 		for (u64 i = 0; i < mS.size(); ++i)
 		{
 			sb[mS[i]] = 1;
 		}
-
-
-		bpm::FFTPoly sPoly;
-		bpm::FFTPoly aPoly;
-		bpm::FFTPoly bPoly;
-
-		PRNG pubPrng(ZeroBlock);
-
-		//Matrix<block> c(rows, 2 * nBlocks, AllocType::Uninitialized);
-
 		std::vector<bpm::FFTPoly> c(rows);
 
-		for (u64 s = 1; s < mScaler; ++s)
+
+		std::unique_ptr<ThreadBarrier[]> brs(new ThreadBarrier[mScaler]);
+		for (u64 i = 0; i < mScaler; ++i)
+			brs[i].reset(threads);
+
+		auto routine = [&](u64 index)
 		{
-			pubPrng.get(a.data(), a.size());
-			aPoly.encode({ a64ptr, n64 });
+			auto j = 0;
+			bpm::FFTPoly sPoly;
+			bpm::FFTPoly bPoly;
 
-			for (u64 i = 0; i < rows; ++i)
+			//std::vector<block> a(nBlocks);
+			//u64 * a64ptr = (u64*)a.data();
+			//bpm::FFTPoly aPoly;
+
+			for (u64 s = 1; s < mScaler; ++s)
 			{
-				//auto ci = c[i];
 
-				//u64* c64ptr = (u64*)((s == 0)? ci.data() : temp.data());
-				u64* b64ptr = (u64*)(rT[i].data() + s * nBlocks);
-
-				//bitpolymul_2_128(c64ptr, a64ptr, b64ptr, nBlocks * 2);
-				bPoly.encode({ b64ptr, n64 });
-
-				if (s > 1)
+				if (index == 0)
 				{
-					bPoly.multEq(aPoly);
-					c[i].addEq(bPoly);
+					PRNG pubPrng(toBlock(s));
+					pubPrng.get(a.data(), a.size());
+					aPoly.encode({ a64ptr, n64 });
 				}
-				else
+					
+				brs[j++].decrementWait();
+
+
+				for (u64 i = index; i < rows; i += threads)
 				{
-					c[i].mult(aPoly, bPoly);
+					u64* b64ptr = (u64*)(rT[i].data() + s * nBlocks);
+
+					bPoly.encode({ b64ptr, n64 });
+
+					if (s > 1)
+					{
+						bPoly.multEq(aPoly);
+						c[i].addEq(bPoly);
+					}
+					else
+					{
+						c[i].mult(aPoly, bPoly);
+					}
 				}
+
+				if (index == 0)
+				{
+					u64* s64ptr = (u64*)(sb.data() + s * nBytes);
+					bPoly.encode({ s64ptr, n64 });
+
+					if (s > 1)
+					{
+						bPoly.multEq(aPoly);
+						sPoly.addEq(bPoly);
+					}
+					else
+					{
+						sPoly.mult(aPoly, bPoly);
+					}
+
+				}
+
 			}
 
-			u64* s64ptr = (u64*)(sb.data() + s * nBytes);
-			bPoly.encode({ s64ptr, n64 });
 
-			if (s > 1)
+			if (index == 0)
+				setTimePoint("recver.expand.mul");
+
+			Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
+			std::vector<u64> temp(c[index].mPoly.size() + 2);
+			bpm::FFTPoly::DecodeCache cache;
+
+			u64 * t64Ptr = (u64*)temp.data();
+			auto t128Ptr = (block*)temp.data();
+			for (u64 i = index; i < rows; i += threads)
 			{
-				bPoly.multEq(aPoly);
-				sPoly.addEq(bPoly);
+				// decode c[i] and store it at t64Ptr
+				c[i].decode({ t64Ptr, 2 * n64 }, cache, true);
+
+				u64* b64ptr = (u64*)rT[i].data();
+				for (u64 j = 0; j < n64; ++j)
+					t64Ptr[j] ^= b64ptr[j];
+
+				// reduce s[i] mod (x^p - 1) and store it at cModP1[i]
+				modp(cModP1[i], { t128Ptr, n64 }, mP);
+				//memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
 			}
-			else
+
+			brs[j++].decrementWait();
+
+
+			if (index == 0)
 			{
-				sPoly.mult(aPoly, bPoly);
+
+				choices.resize(0);
+				choices.resize(mN);
+				sPoly.decode({ t64Ptr, 2 * n64 }, cache, true);
+
+
+				u64* b64ptr = (u64*)sb.data();
+				for (u64 j = 0; j < n64; ++j)
+					t64Ptr[j] ^= b64ptr[j];
+
+				modp({ (block*)choices.data(), i64(nBlocks) }, { t128Ptr, n64 }, mP);
+			//memcpy((block*)choices.data(), t64Ptr, nBlocks * sizeof(block));
 			}
-		}
 
-		setTimePoint("recver.expand.mul");
+			if (index == 0)
+				setTimePoint("recver.expand.decodeReduce");
 
-		Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
-		std::vector<u64> temp(c[0].mPoly.size() + 2);
-		bpm::FFTPoly::DecodeCache cache;
+			//MatrixView<block> view(messages.begin(), messages.end(), 1);
+			//sse_transpose(cModP1, view);
+	//#define NO_HASH
+			std::array<block, 8> hashBuffer;
+			//std::array<block, 128> tpBuffer;
+			auto end = messages.size() / 128;
+			for (u64 i = index; i < end; i += threads)
+			{
+				u64 j = i * 128;
+				auto& tpBuffer = *(std::array<block, 128>*)(messages.data() + j);
 
-		u64* t64Ptr = (u64*)temp.data();
-		auto t128Ptr = (block*)temp.data();
-		for (u64 i = 0; i < rows; ++i)
-		{
-			// decode c[i] and store it at t64Ptr
-			c[i].decode({ t64Ptr, 2 * n64 }, cache, true);
+				for (u64 k = 0; k < 128; ++k)
+					tpBuffer[k] = cModP1(k, i);
 
-			u64* b64ptr = (u64*)rT[i].data();
-			for (u64 j = 0; j < n64; ++j)
-				t64Ptr[j] ^= b64ptr[j];
-
-			// reduce s[i] mod (x^p - 1) and store it at cModP1[i]
-			modp(cModP1[i], { t128Ptr, n64 }, mP);
-			//memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
-		}
-
-		choices.resize(0);
-		choices.resize(mN);
-		sPoly.decode({ t64Ptr, 2 * n64 }, cache, true);
-
-
-		u64* b64ptr = (u64*)sb.data();
-		for (u64 j = 0; j < n64; ++j)
-			t64Ptr[j] ^= b64ptr[j];
-
-		modp({ (block*)choices.data(), i64(nBlocks) }, { t128Ptr, n64 }, mP);
-		//memcpy((block*)choices.data(), t64Ptr, nBlocks * sizeof(block));
-
-		setTimePoint("recver.expand.decodeReduce");
-
-		//MatrixView<block> view(messages.begin(), messages.end(), 1);
-		//sse_transpose(cModP1, view);
-//#define NO_HASH
-		std::array<block, 8> hashBuffer;
-		//std::array<block, 128> tpBuffer;
-		auto end = messages.size() / 128;
-		for (u64 i = 0; i < end; ++i)
-		{
-			u64 j = i * 128;
-			auto& tpBuffer = *(std::array<block, 128>*)(messages.data() + j);
-
-			for (u64 k = 0; k < 128; ++k)
-				tpBuffer[k] = cModP1(k, i);
-
-			sse_transpose128(tpBuffer);
+				sse_transpose128(tpBuffer);
 
 #ifndef NO_HASH
-			for (u64 k = 0; k < 128; k += 8)
-			{
-				mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
+				for (u64 k = 0; k < 128; k += 8)
+				{
+					mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
 
-				tpBuffer[k + 0] = tpBuffer[k + 0] ^ hashBuffer[0];
-				tpBuffer[k + 1] = tpBuffer[k + 1] ^ hashBuffer[1];
-				tpBuffer[k + 2] = tpBuffer[k + 2] ^ hashBuffer[2];
-				tpBuffer[k + 3] = tpBuffer[k + 3] ^ hashBuffer[3];
-				tpBuffer[k + 4] = tpBuffer[k + 4] ^ hashBuffer[4];
-				tpBuffer[k + 5] = tpBuffer[k + 5] ^ hashBuffer[5];
-				tpBuffer[k + 6] = tpBuffer[k + 6] ^ hashBuffer[6];
-				tpBuffer[k + 7] = tpBuffer[k + 7] ^ hashBuffer[7];
-			}
+					tpBuffer[k + 0] = tpBuffer[k + 0] ^ hashBuffer[0];
+					tpBuffer[k + 1] = tpBuffer[k + 1] ^ hashBuffer[1];
+					tpBuffer[k + 2] = tpBuffer[k + 2] ^ hashBuffer[2];
+					tpBuffer[k + 3] = tpBuffer[k + 3] ^ hashBuffer[3];
+					tpBuffer[k + 4] = tpBuffer[k + 4] ^ hashBuffer[4];
+					tpBuffer[k + 5] = tpBuffer[k + 5] ^ hashBuffer[5];
+					tpBuffer[k + 6] = tpBuffer[k + 6] ^ hashBuffer[6];
+					tpBuffer[k + 7] = tpBuffer[k + 7] ^ hashBuffer[7];
+				}
 #endif
-		}
+			}
 
-		auto rem = messages.size() % 128;
-		if (rem)
-		{
-			std::array<block, 128> tpBuffer;
+			auto rem = messages.size() % 128;
+			if (rem && index==0)
+			{
+				std::array<block, 128> tpBuffer;
 
-			for (u64 j = 0; j < tpBuffer.size(); ++j)
-				tpBuffer[j] = cModP1(j, end);
+				for (u64 j = 0; j < tpBuffer.size(); ++j)
+					tpBuffer[j] = cModP1(j, end);
 
-			sse_transpose128(tpBuffer);
+				sse_transpose128(tpBuffer);
 
 #ifndef NO_HASH
-			for (u64 k = 0; k < rem; ++k)
-			{
-				tpBuffer[k] = tpBuffer[k] ^ mAesFixedKey.ecbEncBlock(tpBuffer[k]);
-			}
+				for (u64 k = 0; k < rem; ++k)
+				{
+					tpBuffer[k] = tpBuffer[k] ^ mAesFixedKey.ecbEncBlock(tpBuffer[k]);
+				}
 #endif
 
-			memcpy(messages.data() + end * 128, tpBuffer.data(), rem * sizeof(block));
-		}
+				memcpy(messages.data() + end * 128, tpBuffer.data(), rem * sizeof(block));
+			}
 
-		setTimePoint("recver.expand.transposeXor");
+			if (index == 0)
+				setTimePoint("recver.expand.transposeXor");
 
+		};
+
+
+		std::vector<std::thread> thrds(threads - 1);
+		for (u64 i = 0; i < thrds.size(); ++i)
+			thrds[i] = std::thread(routine, i);
+
+		routine(thrds.size());
+
+		for (u64 i = 0; i < thrds.size(); ++i)
+			thrds[i].join();
 	}
+
+
 }
 //Matrix<u8> convert(span<block> b)
 //{

@@ -21,7 +21,10 @@ namespace osuCrypto
     {
     public:
 
-        void genBase(u64 n, Channel & chl, PRNG& prng, u64 scaler = 4, u64 secParam = 80, BgciksBaseType base = BgciksBaseType::None);
+		void genBase(u64 n, Channel& chl, PRNG& prng,
+			u64 scaler = 4, u64 secParam = 80,
+			BgciksBaseType base = BgciksBaseType::None,
+			u64 threads = 1);
 
         void configure(const osuCrypto::u64 &n, const osuCrypto::u64 &scaler, const osuCrypto::u64 &secParam);
         u64 baseOtCount();
@@ -32,8 +35,15 @@ namespace osuCrypto
             PRNG & prng,
             Channel & chl);
 
+
+		void receive(
+			span<block> messages,
+			BitVector& choices,
+			PRNG& prng,
+			span<Channel> chls);
+
         void randMulNaive(Matrix<block> &rT, span<block> &messages);
-        void randMulQuasiCyclic(Matrix<block> &rT, span<block> &messages, BitVector& choices);
+        void randMulQuasiCyclic(Matrix<block> &rT, span<block> &messages, BitVector& choices, u64 threads);
         
         u64 mP, mN, mN2, mScaler, mSizePer;
         std::vector<u64> mS;

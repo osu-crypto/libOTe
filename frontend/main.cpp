@@ -287,6 +287,12 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 	for (int i = 0; i < numThreads; ++i)
 		chls[i] = ep0.addChannel();
 
+	Timer timer, sendTimer, recvTimer;
+	timer.reset();
+	auto s = timer.setTimePoint("start");
+	sendTimer.setTimePoint("start");
+	recvTimer.setTimePoint("start");
+
 
 	std::vector<OtExtSender> senders(numThreads);
 	std::vector<OtExtRecver> receivers(numThreads);
@@ -362,12 +368,6 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 			}
 		}
 	};
-
-	Timer timer, sendTimer, recvTimer;
-	timer.reset();
-	auto s = timer.setTimePoint("start");
-	sendTimer.setTimePoint("start");
-	recvTimer.setTimePoint("start");
 
 	senders[0].setTimer(sendTimer);
 	receivers[0].setTimer(recvTimer);
@@ -528,7 +528,7 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 					lout << tag <<
 					" n:" << Color::Green << std::setw(6) << std::setfill(' ')<<totalOTs << Color::Default <<
 					" type: " << Color::Green << typeStr << Color::Default <<
-					" sec: " << Color::Green << << std::setw(3) << std::setfill(' ') sec << Color::Default <<
+					" sec: " << Color::Green << std::setw(3) << std::setfill(' ') << sec << Color::Default <<
 					" s: " << Color::Green << s << Color::Default <<
 					"   ||   " << Color::Green << 
 					std::setw(6) << std::setfill(' ') << milli << " ms   " <<
@@ -736,6 +736,7 @@ int main(int argc, char** argv)
 		tests += tests_libOTe::Tests;
 
 		tests.runIf(cmd);
+		return 0;
 	}
 
 	if (cmd.isSet("latency"))

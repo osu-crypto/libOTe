@@ -39,7 +39,8 @@ namespace osuCrypto
         void setBase(span<std::array<block, 2>> baseMessages);
 
         // expand the whole PPRF and store the result in output
-        void expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, bool transpose = false);
+		void expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, bool transpose = false);
+		void expand(span<Channel> chls, block value, PRNG& prng, MatrixView<block> output, bool transpose = false);
 
 
         void setValue(block value);
@@ -80,7 +81,8 @@ namespace osuCrypto
         void getPoints(span<u64> points);
 		void getTransposedPoints(span<u64> points);
 
-        void expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose = false);
+		void expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose = false);
+		void expand(span<Channel> chl, PRNG& prng, MatrixView<block> output, bool transpose = false);
 
 
         //void setPoints(span<u64> points);
