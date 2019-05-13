@@ -542,8 +542,12 @@ namespace osuCrypto
 		if (rT.cols() != n2Blocks)
 			throw RTE_LOC;
 
-
 		std::vector<block> a(nBlocks);
+		using TSpan = std::vector<block>;
+		static_assert(std::is_convertible<
+			TSpan,
+			span<typename TSpan::value_type>
+		>::value, "hmm");
 		auto a64 = spanCast<u64>(a);
 
 		//std::cout << (a64.data()) << " " << (a.data()) << std::endl;

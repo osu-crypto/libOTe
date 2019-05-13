@@ -19,7 +19,7 @@ namespace osuCrypto
 	>::value>::type>
 		span<S> spanCast(TSpan& src)
 	{
-		using T = TSpan::value_type;
+		using T = typename TSpan::value_type;
 		static_assert(
 			std::is_pod<T>::value &&
 			std::is_pod<S>::value &&
