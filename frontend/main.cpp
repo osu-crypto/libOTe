@@ -421,11 +421,11 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 		chls[i] = ep0.addChannel();
 
 
-	std::vector<OtExtSender> senders(numThreads);
-	std::vector<OtExtRecver> receivers(numThreads);
+	OtExtSender sender;
+	OtExtRecver receiver;
 
 
-	auto routine = [&](int i, int s, int sec, BgciksBaseType type)
+	auto routine = [&](int s, int sec, BgciksBaseType type)
 	{
 		// get a random number generator seeded from the system
 		PRNG prng(sysRandomSeed());
@@ -440,15 +440,15 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 			// construct a vector to stored the received messages. 
 			std::vector<block> msgs(numOTs);
 
-			receivers[i].genBase(numOTs, chls[i], prng, s, sec, type);
+			receiver.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
 			// perform  numOTs random OTs, the results will be written to msgs.
-			receivers[i].receive(msgs, choice, prng, chls[i]);
+			receiver.receive(msgs, choice, prng, chls);
 		}
 		else
 		{
 			std::vector<std::array<block, 2>> msgs(numOTs);
 
-			senders[i].genBase(numOTs, chls[i], prng, s, sec, type);
+			sender.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
 			// construct a vector to stored the random send messages. 
 
 			// if delta OT is used, then the user can call the following 
@@ -459,7 +459,7 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 			//
 
 			// perform the OTs and write the random OTs to msgs.
-			senders[i].send(msgs, prng, chls[i]);
+			sender.send(msgs, prng, chls);
 		}
 	};
 
@@ -492,20 +492,18 @@ void TwoChooseOneG_example(Role role, int totalOTs, int numThreads, std::string 
 				sendTimer.setTimePoint("start");
 				recvTimer.setTimePoint("start");
 
-				senders[0].setTimer(sendTimer);
-				receivers[0].setTimer(recvTimer);
+				sender.setTimer(sendTimer);
+				receiver.setTimer(recvTimer);
 
-				std::vector<std::thread> thrds(numThreads);
-				for (int i = 0; i < numThreads; ++i)
-					thrds[i] = std::thread(routine, i, s, sec, type);
+				routine(s, sec, type);
 
-				for (int i = 0; i < numThreads; ++i)
-					thrds[i].join();
 
 				auto e = timer.setTimePoint("finish");
 				auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
 
-				auto com = (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * numThreads;
+				u64 com = 0;
+				for(auto &c : chls)
+					com += (c.getTotalDataRecv() + c.getTotalDataSent());
 
 				std::string typeStr = "n ";
 				switch (type)

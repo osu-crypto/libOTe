@@ -512,9 +512,8 @@ namespace osuCrypto
 				chl.recv(ftree);
 #endif
 
-
-				chl.recv(sums[0]);
-				chl.recv(sums[1]);
+				chl.recv(sums[0].data(), sums[0].size());
+				chl.recv(sums[1].data(), sums[1].size());
 
 				//memset(tree.data(), 0, tree.size() * sizeof(std::array<block, 8>));
 
