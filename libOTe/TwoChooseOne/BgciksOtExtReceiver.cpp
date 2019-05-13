@@ -2,6 +2,7 @@
 #include "libOTe/TwoChooseOne/BgciksOtExtSender.h"
 #include "libOTe/DPF/BgiGenerator.h"
 #include <cryptoTools/Crypto/PRNG.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Common/Log.h>
 #include <bitpolymul2/bitpolymul.h>
 #include <libOTe/Base/BaseOT.h>
@@ -112,10 +113,10 @@ namespace osuCrypto
 	u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
 	void BgciksOtExtReceiver::genBase(
-		u64 n, 
-		Channel & chl, 
-		PRNG & prng, 
-		u64 scaler, 
+		u64 n,
+		Channel & chl,
+		PRNG & prng,
+		u64 scaler,
 		u64 secParam,
 		BgciksBaseType basetype,
 		u64 threads)
@@ -366,7 +367,13 @@ namespace osuCrypto
 			mGen.expand(chls, prng, rT, true);
 			setTimePoint("sender.expand.pprf_transpose");
 
-			std::cout << "test " << rT(0) << " " << rT(1) << std::endl;
+
+			RandomOracle ro(16);
+			ro.Update(rT.data(), rT.size());
+			block b;
+			ro.Final(b);
+
+			//std::cout << "test " << b << std::endl;
 		}
 		else
 		{
@@ -537,7 +544,11 @@ namespace osuCrypto
 
 
 		std::vector<block> a(nBlocks);
-		u64 * a64ptr = (u64*)a.data();
+		auto a64 = spanCast<u64>(a);
+
+		//std::cout << (a64.data()) << " " << (a.data()) << std::endl;
+		assert(a64.size() == n64 && a64.data() == (u64*)a.data());
+		//u64 * a64ptr = (u64*)a.data();
 		bpm::FFTPoly aPoly;
 
 		BitVector sb(mN2);
@@ -569,17 +580,18 @@ namespace osuCrypto
 				{
 					PRNG pubPrng(toBlock(s));
 					pubPrng.get(a.data(), a.size());
-					aPoly.encode({ a64ptr, n64 });
+					aPoly.encode(a64);
 				}
-					
-				brs[j++].decrementWait();
 
+				brs[j++].decrementWait();
 
 				for (u64 i = index; i < rows; i += threads)
 				{
+					auto b64 = spanCast<u64>(rT[i]).subspan(s * n64, n64);
 					u64* b64ptr = (u64*)(rT[i].data() + s * nBlocks);
+					assert(b64ptr == b64.data());
 
-					bPoly.encode({ b64ptr, n64 });
+					bPoly.encode(b64);
 
 					if (s > 1)
 					{
@@ -594,8 +606,11 @@ namespace osuCrypto
 
 				if (index == 0)
 				{
+					auto s64 = sb.getSpan<u64>().subspan(s * n64, n64);
 					u64* s64ptr = (u64*)(sb.data() + s * nBytes);
-					bPoly.encode({ s64ptr, n64 });
+					assert(s64.data() == s64ptr);
+
+					bPoly.encode(s64);
 
 					if (s > 1)
 					{
@@ -615,44 +630,97 @@ namespace osuCrypto
 			if (index == 0)
 				setTimePoint("recver.expand.mul");
 
+
+			//Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
+			//std::vector<u64> temp(c[index].mPoly.size() + 2);
+			//bpm::FFTPoly::DecodeCache cache;
+
+			//u64 * t64Ptr = (u64*)temp.data();
+			//auto t128Ptr = (block*)temp.data();
+			//for (u64 i = index; i < rows; i += threads)
+			//{
+			//	// decode c[i] and store it at t64Ptr
+			//	c[i].decode({ t64Ptr, 2 * n64 }, cache, true);
+
+			//	u64* b64ptr = (u64*)rT[i].data();
+			//	for (u64 j = 0; j < n64; ++j)
+			//		t64Ptr[j] ^= b64ptr[j];
+
+			//	// reduce s[i] mod (x^p - 1) and store it at cModP1[i]
+			//	modp(cModP1[i], { t128Ptr, n64 }, mP);
+			//	//memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
+			//}
+
+
 			Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
-			std::vector<u64> temp(c[index].mPoly.size() + 2);
+			std::vector<u64> temp64(n64 * 2);
 			bpm::FFTPoly::DecodeCache cache;
 
-			u64 * t64Ptr = (u64*)temp.data();
-			auto t128Ptr = (block*)temp.data();
+			auto temp128 = spanCast<block>(temp64);
+
+			//auto t128Ptr = (block*)temp.data();
 			for (u64 i = index; i < rows; i += threads)
 			{
 				// decode c[i] and store it at t64Ptr
-				c[i].decode({ t64Ptr, 2 * n64 }, cache, true);
+				c[i].decode(temp64, cache, true);
 
-				u64* b64ptr = (u64*)rT[i].data();
-				for (u64 j = 0; j < n64; ++j)
-					t64Ptr[j] ^= b64ptr[j];
+				//u64* b64ptr = (u64*)rT[i].data();
+				auto b128 = rT[i].subspan(0, nBlocks);
+				for (u64 j = 0; j < nBlocks; ++j)
+					temp128[j] = temp128[j] ^ b128[j];
 
 				// reduce s[i] mod (x^p - 1) and store it at cModP1[i]
-				modp(cModP1[i], { t128Ptr, n64 }, mP);
+				modp(cModP1[i], temp128, mP);
 				//memcpy(cModP1[i].data(), t64Ptr, nBlocks * sizeof(block));
 			}
 
 			brs[j++].decrementWait();
-
 
 			if (index == 0)
 			{
 
 				choices.resize(0);
 				choices.resize(mN);
-				sPoly.decode({ t64Ptr, 2 * n64 }, cache, true);
 
+				span<block> c128 = choices.getSpan<block>();
+				span<u64> c64 = choices.getSpan<u64>();
+				assert(c64.size() == n64);
+				assert(c128.size() == nBlocks);
 
-				u64* b64ptr = (u64*)sb.data();
-				for (u64 j = 0; j < n64; ++j)
-					t64Ptr[j] ^= b64ptr[j];
+				//sPoly.decode({ temp64.data(), 2 * n64 }, cache, true);
 
-				modp({ (block*)choices.data(), i64(nBlocks) }, { t128Ptr, n64 }, mP);
-			//memcpy((block*)choices.data(), t64Ptr, nBlocks * sizeof(block));
+				sPoly.decode(temp64, cache, true);
+
+				auto b128 = sb.getSpan<block>();
+				for (u64 j = 0; j < nBlocks; ++j)
+					temp128[j] = temp128[j] ^ b128[j];
+
+				modp(c128, temp128, mP);
+				//memcpy((block*)choices.data(), t64Ptr, nBlocks * sizeof(block));
 			}
+
+
+
+			//brs[j++].decrementWait();
+
+
+			//if (index == 0)
+			//{
+			//	choices.resize(0);
+			//	choices.resize(mN);
+			//	span<block> b128 = choices.getSpan<block>();
+			//	span<u64> b64 = choices.getSpan<u64>();
+
+			//	sPoly.decode(temp64, cache, true);
+
+			//	for (u64 j = 0; j < n64; ++j)
+			//		temp64[j] ^= b64[j];
+
+			//	//for (u64 j = 0; j < nBlocks; ++j)
+			//	//	temp128[j] = temp128[j] ^ b128[j];
+
+			//	modp(b128, temp128, mP);
+			//}
 
 			if (index == 0)
 				setTimePoint("recver.expand.decodeReduce");
@@ -691,7 +759,7 @@ namespace osuCrypto
 			}
 
 			auto rem = messages.size() % 128;
-			if (rem && index==0)
+			if (rem && index == 0)
 			{
 				std::array<block, 128> tpBuffer;
 

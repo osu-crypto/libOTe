@@ -7,6 +7,8 @@
 #include "cryptoTools/Common/ThreadBarrier.h"
 #include "libOTe/Base/BaseOT.h"
 #include <libOTe/TwoChooseOne/IknpOtExtSender.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
+
 namespace osuCrypto
 {
 	//extern u64 numPartitions;
@@ -479,19 +481,7 @@ namespace osuCrypto
 			memset(((u8*)dest.data()) + pBytes, 0, rem);
 	}
 	
-	template<typename S, typename T>
-	span<S> spanCast(span<T> src)
-	{
-		static_assert(
-			std::is_pod<T>::value &&
-			std::is_pod<S>::value &&
-			((sizeof(T) % sizeof(S) == 0)  ||
-			 (sizeof(S) % sizeof(T) == 0)	), " exp");
 
-		assert(u64(src.data()) % sizeof(S) == 0);
-
-		return span<S>( (S*)src.data(), src.size() * sizeof(T) / sizeof(S) );
-	}
 
 	void BgciksOtExtSender::randMulQuasiCyclic(Matrix<block> & rT, span<std::array<block, 2>> & messages, u64 threads)
 	{
@@ -509,16 +499,18 @@ namespace osuCrypto
 
 
 		std::vector<block> a(nBlocks);
-		span<u64> a64 = spanCast<u64,block>(a);
+		span<u64> a64 = spanCast<u64>(a);
 
 		bpm::FFTPoly aPoly;
 		std::vector<bpm::FFTPoly> c(rows);
-
 
 		std::unique_ptr<ThreadBarrier[]> brs(new ThreadBarrier[mScaler]);
 		for (u64 i = 0; i < mScaler; ++i)
 			brs[i].reset(threads);
 
+#ifdef DEBUG
+		Matrix<block> cc(mScaler, rows);
+#endif
 		auto routine = [&](u64 index)
 		{
 			u64 j = 0;
@@ -544,7 +536,7 @@ namespace osuCrypto
 
 					//    u64* c64ptr = (u64*)((s == 0) ? ci.data() : temp.data());
 					//u64* b64ptr = (u64*)(rT[i].data() + s * nBlocks);
-					auto b64 = spanCast<u64, block>(rT[i]).subspan(s * n64, n64);
+					auto b64 = spanCast<u64>(rT[i]).subspan(s * n64, n64);
 
 					//bitpolymul_2_128(c64ptr, a64ptr, b64ptr, nBlocks * 2);
 					bPoly.encode(b64);
@@ -558,6 +550,15 @@ namespace osuCrypto
 					{
 						c[i].mult(aPoly, bPoly);
 					}
+
+#ifdef DEBUG
+					RandomOracle ro(16);
+					ro.Update(c[i].mPoly.data(), c[i].mPoly.size());
+					block b;
+					ro.Final(b);
+					cc(s, i) = b;
+#endif
+					//lout << "c[" << i << "][" << s << "] " << b << std::endl;
 				}
 			}
 			//a = {};
@@ -574,7 +575,7 @@ namespace osuCrypto
 			bpm::FFTPoly::DecodeCache cache;
 			auto pBlocks = (mP + 127) / 128;
 			//span<u64> temp64(temp.begin(), temp.begin() + 2 * n64);
-			span<block> temp128 = spanCast<block, u64>(temp64);
+			span<block> temp128 = spanCast<block>(temp64);
 			//auto t64Ptr = temp.data();
 			//auto t128Ptr = (block*)temp.data();
 
@@ -584,7 +585,7 @@ namespace osuCrypto
 				// decode c[i] and store it at t64Ptr
 				c[i].decode(temp64, cache, true);
 
-				span<block> b128 = rT[i];
+				span<block> b128 = rT[i].subspan(0, nBlocks);
 				for (u64 j = 0; j < nBlocks; ++j)
 					temp128[j] = temp128[j] ^ b128[j];
 
@@ -609,6 +610,16 @@ namespace osuCrypto
 
 			brs[j++].decrementWait();
 
+#ifdef DEBUG
+			if (index == 0)
+			{
+				RandomOracle ro(16);
+				ro.Update(cc.data(), cc.size());
+				block b;
+				ro.Final(b);
+				std::cout << "cc " << b << std::endl;
+			}
+#endif
 
 			std::array<block, 8> hashBuffer;
 			std::array<block, 128> tpBuffer;

@@ -195,10 +195,11 @@ namespace osuCrypto
 				throw RTE_LOC;
 		}
 
-
+		block seed = prng.get();
 
 		auto routine = [&](u64 index)
 		{
+
 			auto& chl = chls[index];
 
 			std::array<std::vector<std::array<block, 8>>, 2> sums;
@@ -234,8 +235,9 @@ namespace osuCrypto
 			for (u64 g = index * 8; g < mPntCount; g += 8 * chls.size())
 			{
 
+				//lout << "send[" << index << "][" << g << "]" << std::endl;
 				auto min = std::min<u64>(8, mPntCount - g);
-
+				PRNG prng(seed ^ toBlock(g));
 				prng.get(getLevel(0));
 
 				sums[0].resize(mDepth);
@@ -351,6 +353,7 @@ namespace osuCrypto
 				sums[1].resize(mDepth - 1);
 
 				//int temp;
+				//chl.send(g);
 				chl.asyncSend(std::move(sums[0]));
 				chl.asyncSend(std::move(sums[1]));
 				//chl.asyncSend(temp);
@@ -369,6 +372,8 @@ namespace osuCrypto
 		std::vector<std::thread> thrds(chls.size() - 1);
 		for (u64 i = 0; i < thrds.size(); ++i)
 			thrds[i] = std::thread(routine, i);
+			//routine(i);
+
 
 		routine(thrds.size());
 
@@ -417,6 +422,8 @@ namespace osuCrypto
 	{
 
 		setTimePoint("pprf.recv.start");
+
+		//lout << " d " << mDomain << " p " << mPntCount << " do " << mDepth << std::endl;
 
 		if (transpose)
 		{
@@ -511,7 +518,9 @@ namespace osuCrypto
 #ifdef DEBUG_PRINT_PPRF
 				chl.recv(ftree);
 #endif
-
+				//u64 g2;
+				//chl.recv(g2);
+				//lout << "recv["<<index<<"][" << g << "] vs " << g2 << std::endl;
 				chl.recv(sums[0].data(), sums[0].size());
 				chl.recv(sums[1].data(), sums[1].size());
 
@@ -699,6 +708,7 @@ namespace osuCrypto
 		std::vector<std::thread> thrds(chls.size() - 1);
 		for (u64 i = 0; i < thrds.size(); ++i)
 			thrds[i] = std::thread(routine, i);
+			//routine(i);
 
 		routine(thrds.size());
 
