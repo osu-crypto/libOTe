@@ -297,9 +297,24 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 	// In real code you would only have a sender or reciever, not both. But we do 
 	// here just showing the example. 
 	if (role == Role::Receiver)
-		receivers[0].genBaseOts(prng, chls[0]);
+	{
+		NaorPinkas base;
+		std::array<std::array<block, 2>, 128> baseMsg;
+		base.send(baseMsg, prng, chls[0], numThreads);
+		receivers[0].setBaseOts(baseMsg, prng, chls[0]);
+		
+		//receivers[0].genBaseOts(prng, chls[0]);
+	}
 	else
-		senders[0].genBaseOts(prng, chls[0]);
+	{
+
+		NaorPinkas base;
+		BitVector bv(128);
+		std::array<block, 128> baseMsg;
+		bv.randomize(prng);
+		base.receive(bv, baseMsg, prng, chls[0], numThreads);
+		senders[0].setBaseOts(baseMsg, bv,chls[0]);
+	}
 
 	// for the rest of the extenders, call split. This securely 
 	// creates two sets of extenders that can be used in parallel.
