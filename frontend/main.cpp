@@ -431,7 +431,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 	for (int i = 0; i < numThreads; ++i)
 		chls[i] = ep0.addChannel();
 
-
+	bool mal = cmd.isSet("mal");
 	OtExtSender sender;
 	OtExtRecver receiver;
 
@@ -453,7 +453,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			// construct a vector to stored the received messages. 
 			std::vector<block> msgs(numOTs);
 
-			receiver.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
+			receiver.genBase(numOTs, chls[0], prng, s, sec, mal, type, chls.size());
 			// perform  numOTs random OTs, the results will be written to msgs.
 			receiver.receive(msgs, choice, prng, chls);
 		}
@@ -461,7 +461,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 		{
 			std::vector<std::array<block, 2>> msgs(numOTs);
 
-			sender.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
+			sender.genBase(numOTs, chls[0], prng, s, sec,mal, type, chls.size());
 			// construct a vector to stored the random send messages. 
 
 			// if delta OT is used, then the user can call the following 

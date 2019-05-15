@@ -31,13 +31,13 @@ namespace osuCrypto
 
 	void BgciksOtExtSender::genBase(
 		u64 n, Channel& chl, PRNG& prng, 
-		u64 scaler, u64 secParam, 
+		u64 scaler, u64 secParam, bool mal,
 		BgciksBaseType basetype, u64 threads )
 	{
 
 		setTimePoint("sender.gen.start");
 
-		configure(n, scaler, secParam);
+		configure(n, scaler, secParam, mal);
 
 
 		if (gUseBgicksPprf)
@@ -49,16 +49,16 @@ namespace osuCrypto
 
 			switch (basetype)
 			{
-			case osuCrypto::BgciksBaseType::None:
+			case BgciksBaseType::None:
 				break;
-			case osuCrypto::BgciksBaseType::Base:
+			case BgciksBaseType::Base:
 			{
 				NaorPinkas base;
 				base.send(msg, prng, chl, threads);
 				setTimePoint("sender.gen.baseOT");
 				break;
 			}
-			case osuCrypto::BgciksBaseType::BaseExtend:
+			case BgciksBaseType::BaseExtend:
 			{
 				std::array<block, 128> baseMsg;
 
@@ -73,7 +73,7 @@ namespace osuCrypto
 				setTimePoint("sender.gen.baseExtend");
 				break;
 			}
-			case osuCrypto::BgciksBaseType::Extend:
+			case BgciksBaseType::Extend:
 			{
 				std::array<block, 128> baseMsg;
 				BitVector bv(128);
@@ -147,14 +147,14 @@ namespace osuCrypto
 		setTimePoint("sender.gen.done");
 	}
 
-	void BgciksOtExtSender::configure(const osuCrypto::u64& n, const osuCrypto::u64& scaler, const osuCrypto::u64& secParam)
+	void BgciksOtExtSender::configure(const u64& n, const u64& scaler, const u64& secParam, bool mal)
 	{
 		mP = nextPrime(n);
 		mN = roundUpTo(mP, 128);
 		mScaler = scaler;
 		mNumPartitions = getPartitions(scaler, mP, secParam);
 		mN2 = scaler * mN;
-
+		mMal = mal;
 		//std::cout << "P " << mP << std::endl;
 
 		mSizePer = (mN2 + mNumPartitions - 1) / mNumPartitions;
@@ -238,7 +238,7 @@ namespace osuCrypto
 		if (gUseBgicksPprf)
 		{
 			rT.resize(128, mN2 / 128, AllocType::Uninitialized);
-			mGen.expand(chls, mDelta, prng, rT, true);
+			mGen.expand(chls, mDelta, prng, rT, true, mMal);
 			setTimePoint("sender.expand.pprf_transpose");
 		}
 		else
@@ -259,10 +259,10 @@ namespace osuCrypto
 
 		switch (type)
 		{
-		case osuCrypto::MultType::Naive:
+		case MultType::Naive:
 			randMulNaive(rT, messages);
 			break;
-		case osuCrypto::MultType::QuasiCyclic:
+		case MultType::QuasiCyclic:
 			randMulQuasiCyclic(rT, messages, chls.size());
 			break;
 		default:

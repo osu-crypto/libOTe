@@ -22,11 +22,12 @@ namespace osuCrypto
     public:
 
 		void genBase(u64 n, Channel& chl, PRNG& prng,
-			u64 scaler = 4, u64 secParam = 80,
+			u64 scaler = 4, u64 secParam = 80, bool mal = false,
 			BgciksBaseType base = BgciksBaseType::None,
 			u64 threads = 1);
 
-        void configure(const osuCrypto::u64 &n, const osuCrypto::u64 &scaler, const osuCrypto::u64 &secParam);
+        void configure(const osuCrypto::u64 &n, const osuCrypto::u64 &scaler, const osuCrypto::u64 &secParam,
+			bool mal);
         u64 baseOtCount();
 
         void receive(
@@ -47,7 +48,8 @@ namespace osuCrypto
         
         u64 mP, mN, mN2, mScaler, mSizePer;
         std::vector<u64> mS;
-        block mDelta;
+        block mDelta, mSum;
+		bool mMal;
 
         BgiEvaluator::MultiKey mGenBgi;
         BgicksMultiPprfReceiver mGen;

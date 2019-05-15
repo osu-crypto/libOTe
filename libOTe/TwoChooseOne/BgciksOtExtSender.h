@@ -20,12 +20,14 @@ namespace osuCrypto
         BgicksMultiPprfSender mGen;
         block mDelta;
         u64 mP, mN2, mN, mNumPartitions, mScaler, mSizePer;
+		bool mMal;
+
         //BitVector mS, mC;
-		void genBase(u64 n, Channel& chl, PRNG& prng, u64 scaler = 4, u64 secParam = 80, BgciksBaseType base = BgciksBaseType::None,
+		void genBase(u64 n, Channel& chl, PRNG& prng, u64 scaler = 4, u64 secParam = 80, bool mal = false, BgciksBaseType base = BgciksBaseType::None,
 			u64 threads = 1);
 		//void genBase(u64 n, span<Channel> chls, PRNG& prng, u64 scaler = 4, u64 secParam = 80, BgciksBaseType base = BgciksBaseType::None);
 
-		void configure(const osuCrypto::u64& n, const osuCrypto::u64& scaler, const osuCrypto::u64& secParam);
+		void configure(const u64& n, const u64& scaler, const u64& secParam, bool mal);
 
         void send(
             span<std::array<block, 2>> messages,

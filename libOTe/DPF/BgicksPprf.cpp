@@ -1,6 +1,7 @@
 #include "BgicksPprf.h"
 
 #include <cryptoTools/Common/Log.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 #include <libOTe/Tools/Tools.h>
 namespace osuCrypto
 {
@@ -78,7 +79,7 @@ namespace osuCrypto
 
 	//std::map<u64, std::array<block, 128>> blocks;
 
-	void copyOut(bool transpose, span<std::array<block, 8>> lvl, MatrixView<block> output, u64 min, u64 g)
+	block copyOut(bool transpose, span<std::array<block, 8>> lvl, MatrixView<block> output, u64 min, u64 g, bool mal)
 	{
 
 		if (transpose)
@@ -91,33 +92,61 @@ namespace osuCrypto
 				auto begin = sec * size;
 				auto end = std::min<u64>(begin + size, output.cols());
 
-				for (u64 i = begin, k = 0; i < end; ++i, ++k)
+				if (mal)
 				{
-					if (lvl.size() < (k + 1) * 16)
-						throw RTE_LOC;
+					RandomOracle ro(sizeof(block));
+					AES hc(toBlock(g));
+					std::array<block, 128> a, c;
+					AES ha(toBlock(345343)), hb(toBlock(6453323));
+					block aSum0, aSum1, bSum0,bSum1, r0, r1;
+					for (u64 i = begin, k = 0; i < end; ++i, ++k)
+					{
+						auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
 
-					auto & io = *(std::array<block, 128>*)(&lvl[k * 16]);
+						hc.ecbEncCounterMode(i, io.size(), c.data());
+						ro.Update(io.data(), io.size());
+						ha.ecbEncBlocks(io.data(), io.size(), a.data());
+						for (u64 j = 0; j < 128; ++j)
+						{
+							mul128(a[j], c[j], r0, r1);
+							aSum0 = aSum0 ^ r0;
+							aSum1 = aSum1 ^ r1;
+						}
+						hb.ecbEncBlocks(io.data(), io.size(), a.data());
+						for (u64 j = 0; j < 128; ++j)
+						{
+							mul128(a[j], c[j], r0, r1);
+							bSum0 = bSum0 ^ r0;
+							bSum1 = bSum1 ^ r1;
+						}
+						//{
 
-					//if (blocks.find(sec) != blocks.end())
-					//{
-					//	std::array<block, 128> io2 = blocks[sec];
-					//	for (u64 j = 0; j < 128; ++j)
-					//		std::cout << "Tin["<< sec<<"][" << j << "]" << io[j] << " " << io2[j] << " " << (io[j] ^ io2[j])<< std::endl;
-					//}
-					//
-					//blocks[sec] = io;
+						//}
 
-					sse_transpose128(io);
+						sse_transpose128(io);
+						for (u64 j = 0; j < 128; ++j)
+							output(j, i) = io[j];
+					}
+					
+					block cc;
+					ro.Final(cc);
+					return aSum0 ^ aSum1^ bSum0^ bSum1 ^ cc;
+				}
+				else
+				{
 
 
-					//for (u64 j = 0; j < 128; ++j)
-					//	std::cout << "Tou[" << sec << "][" << j << "]" << io[j] << std::endl;
+					for (u64 i = begin, k = 0; i < end; ++i, ++k)
+					{
+						auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
+						sse_transpose128(io);
+						for (u64 j = 0; j < 128; ++j)
+							output(j, i) = io[j];
+					}
 
-					for (u64 j = 0; j < 128; ++j)
-						output(j, i) = io[j];
+					return ZeroBlock;
 				}
 
-				//memset(lvl.data(), 0, lvl.size() * sizeof(block) * 8);
 			}
 			else
 				throw RTE_LOC;
@@ -151,25 +180,29 @@ namespace osuCrypto
 						oi[j] = ii[j];
 				}
 			}
+			return ZeroBlock;
+
 		}
 	}
 
-	void BgicksMultiPprfSender::expand(
+	block BgicksMultiPprfSender::expand(
 		Channel& chl,
 		block value,
 		PRNG& prng,
 		MatrixView<block> output,
-		bool transpose)
+		bool transpose,
+		bool mal)
 	{
-		expand({ &chl, 1 }, value, prng, output, transpose);
+		return expand({ &chl, 1 }, value, prng, output, transpose, mal);
 	}
 
-	void BgicksMultiPprfSender::expand(
+	block BgicksMultiPprfSender::expand(
 		span<Channel> chls,
 		block value,
 		PRNG& prng,
 		MatrixView<block> output,
-		bool transpose)
+		bool transpose, 
+		bool mal)
 	{
 		setValue(value);
 		setTimePoint("pprf.send.start");
@@ -194,6 +227,7 @@ namespace osuCrypto
 			if (output.cols() != mPntCount)
 				throw RTE_LOC;
 		}
+		block ss = ZeroBlock;
 
 		block seed = prng.get();
 
@@ -361,8 +395,8 @@ namespace osuCrypto
 
 
 				auto lvl = getLevel(mDepth);
-				copyOut(transpose, lvl, output, min, g);
-
+				auto s = copyOut(transpose, lvl, output, min, g, mal);
+				ss = ss ^ s;
 				//setTimePoint("pprf.send.copyOut-" + std::to_string(g));
 
 			}
@@ -379,6 +413,8 @@ namespace osuCrypto
 
 		for (u64 i = 0; i < thrds.size(); ++i)
 			thrds[i].join();
+
+		return ss;
 	}
 
 	void BgicksMultiPprfSender::setValue(block value)
@@ -413,12 +449,14 @@ namespace osuCrypto
 		}
 	}
 
-	void BgicksMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose)
+	block BgicksMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose,
+		bool mal)
 	{
-		expand({ &chl, 1 }, prng, output, transpose);
+		return expand({ &chl, 1 }, prng, output, transpose, mal);
 	}
 
-	void BgicksMultiPprfReceiver::expand(span<Channel> chls, PRNG& prng, MatrixView<block> output, bool transpose)
+	block BgicksMultiPprfReceiver::expand(span<Channel> chls, PRNG& prng, MatrixView<block> output, bool transpose,
+		bool mal)
 	{
 
 		setTimePoint("pprf.recv.start");
@@ -451,6 +489,7 @@ namespace osuCrypto
 		//for (u64 j = 0; j < mPntCount; ++j)
 		//    std::cout << "point[" << j << "] " << points[j] << std::endl;
 
+		block ss=ZeroBlock;
 		std::array<AES, 2> aes;
 		aes[0].setKey(toBlock(3242342));
 		aes[1].setKey(toBlock(8993849));
@@ -699,7 +738,8 @@ namespace osuCrypto
 				}
 
 				auto lvl = getLevel(mDepth);
-				copyOut(transpose, lvl, output, min, g);
+				block s = copyOut(transpose, lvl, output, min, g, mal);
+				ss = ss ^ s;
 			}
 		};
 
@@ -714,6 +754,8 @@ namespace osuCrypto
 
 		for (u64 i = 0; i < thrds.size(); ++i)
 			thrds[i].join();
+
+		return ss;
 	}
 
 }

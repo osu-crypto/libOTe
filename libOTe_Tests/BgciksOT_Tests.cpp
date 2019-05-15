@@ -185,7 +185,7 @@ void BgciksOT_Test(const CLP & cmd)
 	u64 threads = cmd.getOr("t", 4);
 	u64 s = cmd.getOr("s", 4);
 	u64 sec = cmd.getOr("sec", 80);
-
+	bool mal = cmd.isSet("mal");
 
 	std::vector<Channel> chls0(threads), chls1(threads);
 
@@ -203,8 +203,8 @@ void BgciksOT_Test(const CLP & cmd)
 	sender.setTimer(timer);
 	recver.setTimer(timer);
 
-	auto t = std::thread([&]() {recver.genBase(n, chls1[0], prng, s, sec, BgciksBaseType::None, threads); });
-	sender.genBase(n, chls0[0], prng1, s, sec, BgciksBaseType::None, threads);
+	auto t = std::thread([&]() {recver.genBase(n, chls1[0], prng, s, sec, mal, BgciksBaseType::None, threads); });
+	sender.genBase(n, chls0[0], prng1, s, sec, mal, BgciksBaseType::None, threads);
 	t.join();
 
 	std::vector<block> messages2(n);
@@ -309,8 +309,8 @@ void BgciksPprf_Test(const CLP & cmd)
 	std::vector<u64> points(numPoints);
 	recver.getPoints(points);
 
-	sender.expand(chls0, CCBlock, prng, sOut);
-	recver.expand(chls1, prng, rOut);
+	sender.expand(chls0, CCBlock, prng, sOut, false, false);
+	recver.expand(chls1, prng, rOut, false, false);
 	bool failed = false;
 
 
@@ -393,8 +393,8 @@ void BgciksPprf_trans_Test(const CLP & cmd)
 	std::vector<u64> points(numPoints);
 	recver.getTransposedPoints(points);
 
-	sender.expand(chls0, AllOneBlock, prng, sOut, true);
-	recver.expand(chls1, prng, rOut, true);
+	sender.expand(chls0, AllOneBlock, prng, sOut, true, true);
+	recver.expand(chls1, prng, rOut, true, true);
 	bool failed = false;
 
 	Matrix<block> out(128, cols);

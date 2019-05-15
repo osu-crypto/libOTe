@@ -118,11 +118,12 @@ namespace osuCrypto
 		PRNG & prng,
 		u64 scaler,
 		u64 secParam,
+		bool mal,
 		BgciksBaseType basetype,
 		u64 threads)
 	{
 		setTimePoint("recver.gen.start");
-		configure(n, scaler, secParam);
+		configure(n, scaler, secParam, mal);
 
 		if (gUseBgicksPprf)
 		{
@@ -230,13 +231,16 @@ namespace osuCrypto
 
 	}
 
-	void BgciksOtExtReceiver::configure(const osuCrypto::u64 & n, const osuCrypto::u64 & scaler, const osuCrypto::u64 & secParam)
+	void BgciksOtExtReceiver::configure(
+		const u64 & n, const u64 & scaler, const u64 & secParam,
+		bool mal)
 	{
 
 		mP = nextPrime(n);
 		mN = roundUpTo(mP, 128);
 		mScaler = scaler;
 		mN2 = scaler * mN;
+		mMal = mal;
 
 		auto numPartitions = getPartitions(scaler, mP, secParam);
 		mS.resize(numPartitions);
@@ -364,7 +368,7 @@ namespace osuCrypto
 		if (gUseBgicksPprf)
 		{
 			rT.resize(128, mN2 / 128, AllocType::Uninitialized);
-			mGen.expand(chls, prng, rT, true);
+			mSum = mGen.expand(chls, prng, rT, true, mMal);
 			setTimePoint("sender.expand.pprf_transpose");
 
 
@@ -567,7 +571,7 @@ namespace osuCrypto
 		for (u64 i = 0; i < brs.size(); ++i)
 			brs[i].reset(threads);
 
-		std::vector<std::array<int, 4>> counts(threads);
+		//std::vector<std::array<int, 4>> counts(threads);
 
 		setTimePoint("recver.expand.QuasiCyclicSetup");
 
@@ -577,7 +581,7 @@ namespace osuCrypto
 			if (index == 0)
 				setTimePoint("recver.expand.routine");
 
-			auto& count = counts[index];
+			//auto& count = counts[index];
 			auto j = 0;
 			FFTPoly cPoly;
 			FFTPoly bPoly;
@@ -608,7 +612,7 @@ namespace osuCrypto
 			if (index == 0)
 				setTimePoint("recver.expand.randGen");
 
-			auto multAddReduce = [this, nBlocks, n64,&count, &a, &bPoly, &cPoly, &temp128, &cache](span<block> b128, span<block> dest)
+			auto multAddReduce = [this, nBlocks, n64, &a, &bPoly, &cPoly, &temp128, &cache](span<block> b128, span<block> dest)
 			{
 				for (u64 s = 1; s < mScaler; ++s)
 				{
@@ -616,7 +620,6 @@ namespace osuCrypto
 					auto b64 = spanCast<u64>(b128).subspan(s * n64, n64);
 
 					bPoly.encode(b64);
-					++count[0];
 
 					if (s == 1)
 					{
@@ -675,7 +678,6 @@ namespace osuCrypto
 
 			//for (u64 i = index; i < numBlocks; i += threads)
 			{
-				++count[3];
 				u64 j = i * 128;
 				auto& tpBuffer = *(std::array<block, 128>*)(messages.data() + j);
 
@@ -736,20 +738,20 @@ namespace osuCrypto
 
 		routine(thrds.size());
 
-		auto totals = counts.back();
+		//auto totals = counts.back();
 		for (u64 i = 0; i < thrds.size(); ++i)
 		{
 			thrds[i].join();
-			for (u64 j = 0; j < totals.size(); ++j)
-			{
+			//for (u64 j = 0; j < totals.size(); ++j)
+			//{
 
-				totals[j] += counts[i][j];
-			}
+			//	totals[j] += counts[i][j];
+			//}
 		}
-		for (u64 i = 0; i < counts.size(); ++i)
-			lout << "count[" << i << "] " << counts[i][0] << " " << counts[i][1] << " " << counts[i][2] << " " << counts[i][3] << std::endl;
+//		for (u64 i = 0; i < counts.size(); ++i)
+//			lout << "count[" << i << "] " << counts[i][0] << " " << counts[i][1] << " " << counts[i][2] << " " << counts[i][3] << std::endl;
 
-		lout << "total " << totals[0] << " " << totals[1] << " " << totals[2] << " " << totals[3] << std::endl;
+//		lout << "total " << totals[0] << " " << totals[1] << " " << totals[2] << " " << totals[3] << std::endl;
 	}
 
 
