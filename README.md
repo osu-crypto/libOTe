@@ -104,7 +104,7 @@ expection that network IO in libOTe is performed in the background by a separate
 The library is *cross platform* and has been tested on Windows, Mac and Linux. 
 There is one mandatory dependency on [Boost 1.69](http://www.boost.org/) (networking),
 and three **optional dependencies** on, [Miracl](https://www.miracl.com/index),
-[Relic](https://github.com/relic-toolkit/relic/) or
+[Relic](https://github.com/ladnir/relic/) or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
 for Base OTs. Any or all of these dependenies can be enabled. See below. 
 
@@ -175,8 +175,8 @@ will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed i
  `   cd libOTe/cryptoTools/thirdparty/linux; bash miracl.get`.
 
  * `cmake .  -DENABLE_RELIC=ON`: Build the library with integration to the 
-      [Relic](https://github.com/relic-toolkit/relic/) library. Requires that
-      relic is built with `cmake . -DMULTI=OPENMP` and installed.
+      [Relic](https://github.com/ladnir/relic/) library. Requires that
+      relic is built with `cmake . -DMULTI=OPENMP` and installed. **Requires an older version of relic found here [Relic](https://github.com/ladnir/relic/)**
  * **Linux Only**: `cmake .  -DENABLE_SIMPLESTOT=ON`: Build the library with integration to the 
       [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
        library implementing a base OT. Also works with only relic but is slower.
