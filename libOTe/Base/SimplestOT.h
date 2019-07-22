@@ -14,12 +14,17 @@
 
 #if defined(ENABLE_SIMPLESTOT) || defined(ENABLE_RELIC) || defined(ENABLE_MIRACL)
 
-#ifdef ENABLE_SIMPLESTOT
-    // define that its was already enabled meaning we should use the ASM library
-    #define ENABLE_SIMPLEST_ASM_LIB
-#else
-    #define ENABLE_SIMPLESTOT
-#endif
+#	if defined(ENABLE_SIMPLESTOT) && !defined(_MSC_VER)
+		// define that its was already enabled meaning we should use the ASM library
+#		define ENABLE_SIMPLEST_ASM_LIB
+#	elif !defined(ENABLE_SIMPLESTOT)
+#		define ENABLE_SIMPLESTOT
+#	endif
+
+
+#	if !defined(ENABLE_SIMPLEST_ASM_LIB) && !defined(ENABLE_RELIC) && !defined(ENABLE_MIRACL)
+#		error "ENABLE_SIMPLESTOT was defined but there is no PK library to implement it."
+#	endif
 
 namespace osuCrypto
 {
