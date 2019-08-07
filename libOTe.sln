@@ -55,9 +55,6 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SimplestOT", "SimplestOT\SimplestOT.vcxproj", "{904419B6-0A3E-41A8-B27A-CF1BAE7343B6}"
 EndProject
 Global
-	GlobalSection(Performance) = preSolution
-		HasPerformanceSessions = true
-	EndGlobalSection
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug_DLLRT|x64 = Debug_DLLRT|x64
 		Debug_DLLRT|x86 = Debug_DLLRT|x86
@@ -70,6 +67,7 @@ Global
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{D159E2F9-226C-4B19-905E-CC1EA0EB013F}.Debug_DLLRT|x64.ActiveCfg = Debug_DLLRT|x64
+		{D159E2F9-226C-4B19-905E-CC1EA0EB013F}.Debug_DLLRT|x64.Build.0 = Debug_DLLRT|x64
 		{D159E2F9-226C-4B19-905E-CC1EA0EB013F}.Debug_DLLRT|x86.ActiveCfg = Debug_DLLRT|x64
 		{D159E2F9-226C-4B19-905E-CC1EA0EB013F}.Debug|x64.ActiveCfg = Debug|x64
 		{D159E2F9-226C-4B19-905E-CC1EA0EB013F}.Debug|x64.Build.0 = Debug|x64
@@ -80,6 +78,7 @@ Global
 		{D159E2F9-226C-4B19-905E-CC1EA0EB013F}.Release|x64.Build.0 = Release|x64
 		{D159E2F9-226C-4B19-905E-CC1EA0EB013F}.Release|x86.ActiveCfg = Release|x64
 		{294C00B6-949E-4A45-AFA8-45D53590FC11}.Debug_DLLRT|x64.ActiveCfg = Debug_DLLRT|x64
+		{294C00B6-949E-4A45-AFA8-45D53590FC11}.Debug_DLLRT|x64.Build.0 = Debug_DLLRT|x64
 		{294C00B6-949E-4A45-AFA8-45D53590FC11}.Debug_DLLRT|x86.ActiveCfg = Debug_DLLRT|x64
 		{294C00B6-949E-4A45-AFA8-45D53590FC11}.Debug|x64.ActiveCfg = Debug|x64
 		{294C00B6-949E-4A45-AFA8-45D53590FC11}.Debug|x64.Build.0 = Debug|x64
@@ -92,14 +91,13 @@ Global
 		{3EC91167-3C50-4271-988F-0F774FFA8ACC}.Debug_DLLRT|x64.ActiveCfg = Debug_DLLRT|x64
 		{3EC91167-3C50-4271-988F-0F774FFA8ACC}.Debug_DLLRT|x86.ActiveCfg = Debug_DLLRT|x64
 		{3EC91167-3C50-4271-988F-0F774FFA8ACC}.Debug|x64.ActiveCfg = Debug|x64
-		{3EC91167-3C50-4271-988F-0F774FFA8ACC}.Debug|x64.Build.0 = Debug|x64
 		{3EC91167-3C50-4271-988F-0F774FFA8ACC}.Debug|x86.ActiveCfg = Debug|x64
 		{3EC91167-3C50-4271-988F-0F774FFA8ACC}.Release_DLLRT|x64.ActiveCfg = Release|x64
 		{3EC91167-3C50-4271-988F-0F774FFA8ACC}.Release_DLLRT|x86.ActiveCfg = Release|x64
 		{3EC91167-3C50-4271-988F-0F774FFA8ACC}.Release|x64.ActiveCfg = Release|x64
-		{3EC91167-3C50-4271-988F-0F774FFA8ACC}.Release|x64.Build.0 = Release|x64
 		{3EC91167-3C50-4271-988F-0F774FFA8ACC}.Release|x86.ActiveCfg = Release|x64
 		{C81DC04B-A0F0-4B77-8DCE-C8190E629467}.Debug_DLLRT|x64.ActiveCfg = Debug_DLLRT|x64
+		{C81DC04B-A0F0-4B77-8DCE-C8190E629467}.Debug_DLLRT|x64.Build.0 = Debug_DLLRT|x64
 		{C81DC04B-A0F0-4B77-8DCE-C8190E629467}.Debug_DLLRT|x86.ActiveCfg = Debug_DLLRT|x64
 		{C81DC04B-A0F0-4B77-8DCE-C8190E629467}.Debug|x64.ActiveCfg = Debug|x64
 		{C81DC04B-A0F0-4B77-8DCE-C8190E629467}.Debug|x64.Build.0 = Debug|x64
@@ -133,6 +131,7 @@ Global
 		{9816C48C-6316-40C7-929C-4B29505C7E0A}.Release|x64.Build.0 = Release|x64
 		{9816C48C-6316-40C7-929C-4B29505C7E0A}.Release|x86.ActiveCfg = Release|x64
 		{10DCA769-B168-4E7F-914E-E8A525333327}.Debug_DLLRT|x64.ActiveCfg = Debug|x64
+		{10DCA769-B168-4E7F-914E-E8A525333327}.Debug_DLLRT|x64.Build.0 = Debug|x64
 		{10DCA769-B168-4E7F-914E-E8A525333327}.Debug_DLLRT|x86.ActiveCfg = Release|x64
 		{10DCA769-B168-4E7F-914E-E8A525333327}.Debug|x64.ActiveCfg = Debug|x64
 		{10DCA769-B168-4E7F-914E-E8A525333327}.Debug|x64.Build.0 = Debug|x64
@@ -145,12 +144,10 @@ Global
 		{E0912377-D59C-4B08-B397-A7209C04B966}.Debug_DLLRT|x64.ActiveCfg = Debug|x64
 		{E0912377-D59C-4B08-B397-A7209C04B966}.Debug_DLLRT|x86.ActiveCfg = Release|x64
 		{E0912377-D59C-4B08-B397-A7209C04B966}.Debug|x64.ActiveCfg = Debug|x64
-		{E0912377-D59C-4B08-B397-A7209C04B966}.Debug|x64.Build.0 = Debug|x64
 		{E0912377-D59C-4B08-B397-A7209C04B966}.Debug|x86.ActiveCfg = Debug|x64
 		{E0912377-D59C-4B08-B397-A7209C04B966}.Release_DLLRT|x64.ActiveCfg = Release_DLLRT|x64
 		{E0912377-D59C-4B08-B397-A7209C04B966}.Release_DLLRT|x86.ActiveCfg = Release_DLLRT|x64
 		{E0912377-D59C-4B08-B397-A7209C04B966}.Release|x64.ActiveCfg = Release|x64
-		{E0912377-D59C-4B08-B397-A7209C04B966}.Release|x64.Build.0 = Release|x64
 		{E0912377-D59C-4B08-B397-A7209C04B966}.Release|x86.ActiveCfg = Release|x64
 		{904419B6-0A3E-41A8-B27A-CF1BAE7343B6}.Debug_DLLRT|x64.ActiveCfg = Debug_DLLRT|x64
 		{904419B6-0A3E-41A8-B27A-CF1BAE7343B6}.Debug_DLLRT|x86.ActiveCfg = Debug_DLLRT|Win32
@@ -169,6 +166,9 @@ Global
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A6D49E45-0C15-4294-9CA8-85737234D96B}
+	EndGlobalSection
+	GlobalSection(Performance) = preSolution
+		HasPerformanceSessions = true
 	EndGlobalSection
 	GlobalSection(Performance) = preSolution
 		HasPerformanceSessions = true

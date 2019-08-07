@@ -129,8 +129,10 @@ namespace osuCrypto
 		{
 			auto count = mGen.baseOtCount();
 			std::vector<block> msg(count);
-			BitVector choice(count);
-			choice.randomize(prng);
+
+			BitVector choice = mGen.sampleChoiceBits(mN2, true, prng);
+            //BitVector choice(count);
+			//choice.randomize(prng);
 
 			switch (basetype)
 			{
@@ -172,16 +174,19 @@ namespace osuCrypto
 			TODO("comment this out and fix bug");
 			memset(msg.data(), 0, msg.size() * 16);
 
-			mGen.setBase(msg, choice);
+			mGen.setBase(msg);
 			mGen.getTransposedPoints(mS);
+
 			for (u64 i = 0; i < mS.size(); ++i)
 			{
 				if (mS[i] >= mN2)
 				{
 					//auto s = mS.size();
-					mS.resize(i);
 
-					//std::cout << "resiz"
+                    for(u64 j = i; j < mS.size(); ++j)
+                        std::cout << Color::Red << "bad " <<j << " "  << mS[j] << " / " << mN2 << std::endl << Color::Default;
+
+
 				}
 				//throw std::runtime_error("known issue, (fixable, ask peter). " LOCATION);
 			}
@@ -225,6 +230,12 @@ namespace osuCrypto
 			mGenBgi.init(k2, g2);
 
 		}
+
+        std::cout << "np " << mS.size() << std::endl;
+        std::cout << "sp " << mSizePer << std::endl;
+        std::cout << "p  " << mP << std::endl;
+        std::cout << "N  " << mN << std::endl;
+        std::cout << "N2 " << mN2 << std::endl;
 
 
 		setTimePoint("recver.gen.done");
@@ -345,6 +356,48 @@ namespace osuCrypto
 		return rT;
 	}
 
+    void BgciksOtExtReceiver::checkRT(span<Channel> chls, Matrix<block>& rT1)
+    {
+        if (rT1.rows() != 128)
+            throw RTE_LOC;
+
+        Matrix<block> rT2(rT1.rows(),rT1.cols(), AllocType::Uninitialized);
+        chls[0].recv(rT2.data(), rT2.size());
+
+        for (auto i = 0; i < rT1.size(); ++i)
+            rT2(i) = rT2(i) ^ rT1(i);
+
+
+        Matrix<block> R(rT1.cols() * 128, 1);
+        MatrixView<block> Rv(R);
+        MatrixView<block> rT2v(rT2);
+        sse_transpose(rT2v, Rv);
+
+        Matrix<block> exp(R.rows(), R.cols(), AllocType::Zeroed);
+        for (u64 i = 0; i < mS.size(); ++i)
+        {
+            exp(mS[i]) = AllOneBlock;
+        }
+
+        for (u64 i = 0; i < R.rows(); ++i)
+        {
+            if (neq(R(i), exp(i)))
+            {
+                std::cout << i << " / " << R.rows() <<" " << R(i) << " " << exp(i) << std::endl;
+                throw RTE_LOC;
+            }
+        }
+        //for (u64 x = 0; x < rT.rows(); ++x)
+        //{
+        //    for (u64 y = 0; y < rT.cols(); ++y)
+        //    {
+        //        std::cout << rT(x, y) << " " << rT2(x, y) << " " << (rT(x,y) ^ rT2(x,y))<< std::endl;
+        //    }
+        //    std::cout << std::endl;
+        //}
+    }
+
+
 	void BgciksOtExtReceiver::receive(
 		span<block> messages,
 		BitVector & choices,
@@ -385,101 +438,10 @@ namespace osuCrypto
 			setTimePoint("recver.expand.dpf_transpose");
 		}
 
-		//if(0)
-		//{
-		//	int temp__;
-		//	Matrix<block> rT2(rT.rows(), rT.cols()), r2(mN2, 1);
-		//	chls[0].recv(temp__);
-		//	chls[0].recv(rT2.data(), rT2.size());
-		//	for (u64 i = 0; i < rT.size(); ++i)
-		//		rT2(i) = rT2(i) ^ rT(i);
-		//	
-		//	sse_transpose(MatrixView<block>(rT2), MatrixView<block>(r2));
-
-		//	//for (u64 j = 0; j < rT.rows(); ++j)
-		//	//{
-		//	//	std::cout << "r[" << j << "] ";
-		//	//	for (u64 i = 0; i < rT.cols(); ++i)
-		//	//		std::cout << " "<< (rT2(i, j));
-		//	//	std::cout << std::endl;
-		//	//}
-
-		//	std::cout << mGen.mDomain << " " << mGen.mPntCount <<
-		//		" " << rT.rows() << " " << rT.cols() << std::endl;
-		//	for (u64 i = 0; i < rT2.cols(); ++i)
-		//	{
-		//		for (u64 j = 0; j < 128; ++j)
-		//		{
-
-		//			//if (cmd.isSet("v"))
-		//			std::cout << "r[" << i << "][" << j << "] " << (rT2(j, i)) << " ~ " << rT(j, i) << std::endl << Color::Default;
-		//		}
-		//	}
-
-		//	std::cout << std::endl;
-		//	for (u64 i = 0; i < mN2; ++i)
-		//		std::cout << "w[" << i << "] " << r2(i) << std::endl;
-		//}
-
-		//auto n = mN2;
-		//auto& gen = mGen;
-		//{
-		//    std::array<block, 128> tpBuffer;
-		//    if (n % 128)
-		//        throw RTE_LOC;
-		//    if (gen.mNumKeys > tpBuffer.size())
-		//        throw std::runtime_error("not implemented, generalize the following loop to enable. " LOCATION);
-
-		//    Matrix<block> rT(128, n / 128, AllocType::Uninitialized);
-		//    u64 curBlock = 0;
-
-		//    for (u64 i = 0, j = 0; i < n;)
-		//    {
-		//        auto blocks = gen.yeild();
-		//        auto blockCount = std::min<u64>(n - i, blocks.size());
-
-		//        auto min2 = std::min<u64>(tpBuffer.size() - curBlock, blockCount);
-
-		//        memcpy(tpBuffer.data() + curBlock, blocks.data(), min2 * sizeof(block));
-		//        curBlock += min2;
-
-		//        if (curBlock == tpBuffer.size())
-		//        {
-		//            sse_transpose128(tpBuffer);
-		//            curBlock = 0;
-
-		//            for (u64 k = 0; k < tpBuffer.size(); ++k)
-		//            {
-		//                rT(k, j) = tpBuffer[k];
-		//            }
-
-		//            ++j;
-
-		//            if (min2 != blockCount)
-		//            {
-		//                curBlock = blockCount - min2;
-		//                memcpy(tpBuffer.data(), blocks.data() + min2, curBlock * sizeof(block));
-		//            }
-		//        }
-
-
-		//        i += blockCount;
-		//    }
-		//}
-
-
-
-		//Matrix<block> rT2(128, mN2 / 128, AllocType::Uninitialized);
-		//sse_transpose(r, rT2);
-
-		//for (u64 x = 0; x < rT.rows(); ++x)
-		//{
-		//    for (u64 y = 0; y < rT.cols(); ++y)
-		//    {
-		//        std::cout << rT(x, y) << " " << rT2(x, y) << std::endl;
-		//    }
-		//    std::cout << std::endl;
-		//}
+        if (mDebug)
+        {
+            checkRT(chls, rT);
+        }
 
 		//setTimePoint("recver.expand.transpose");
 

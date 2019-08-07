@@ -22,6 +22,11 @@ namespace osuCrypto
         u64 mP, mN2, mN, mNumPartitions, mScaler, mSizePer;
 		bool mMal;
 
+        bool mDebug = true;
+        void checkRT(span<Channel> chls, Matrix<block>& rT);
+
+
+
         //BitVector mS, mC;
 		void genBase(u64 n, Channel& chl, PRNG& prng, u64 scaler = 4, u64 secParam = 80, bool mal = false, BgciksBaseType base = BgciksBaseType::None,
 			u64 threads = 1);

@@ -12,9 +12,10 @@ namespace osuCrypto
     class BgicksMultiPprfSender : public TimerAdapter
     {
     public:
-        u64 mDomain = 0, mDepth = 0, mPntCount = 0, mPntCount8;
+        u64 mDomain = 0, mDepth = 0, mPntCount = 0;// , mPntCount8;
         block mValue;
-        
+        bool mPrint = false;
+
         
         std::vector<block> mBuffer;
 
@@ -54,19 +55,21 @@ namespace osuCrypto
     class BgicksMultiPprfReceiver : public TimerAdapter
     {
     public:
-        u64 mDomain = 0, mDepth = 0,  mPntCount = 0, mPntCount8;
+        u64 mDomain = 0, mDepth = 0, mPntCount = 0;//, mPntCount8;
 
         Matrix<block> mBaseOTs;
         Matrix<u8> mBaseChoices;
-
+        bool mPrint = false;
 
         BgicksMultiPprfReceiver() = default;
         BgicksMultiPprfReceiver(const BgicksMultiPprfReceiver&) = delete;
         BgicksMultiPprfReceiver(BgicksMultiPprfReceiver&&) = default;
-        BgicksMultiPprfReceiver(u64 domainSize, u64 pointCount);
+        //BgicksMultiPprfReceiver(u64 domainSize, u64 pointCount);
 
         void configure(u64 domainSize, u64 pointCount);
 
+
+        BitVector sampleChoiceBits(u64 modulus, bool tranposed, PRNG& prng);
 
         // the number of base OTs that should be set.
         u64 baseOtCount() const;
@@ -75,7 +78,7 @@ namespace osuCrypto
         bool hasBaseOts() const;
 
 
-        void setBase(span<block> baseMessages, BitVector& choices);
+        void setBase(span<block> baseMessages);
 
 
         void getPoints(span<u64> points);

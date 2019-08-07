@@ -90,13 +90,19 @@ namespace osuCrypto
 
 			TODO("comment this out and fix bug");
 			memset(msg.data(), 0, msg.size() * 32);
+            //for (u64 i = 0; i < msg.size(); ++i)
+            //{
+            //    msg[i][0] = ZeroBlock;
+            //    msg[i][1] = ZeroBlock;
+            //}
 
 			mGen.setBase(msg);
 
 			TODO("fix this");
 			mDelta = AllOneBlock;
+            //mDelta = prng.get();
 			mGen.setValue(mDelta);
-
+            
 			for (u64 i = 0; i < mNumPartitions; ++i)
 			{
 				u64 mSi;
@@ -144,6 +150,8 @@ namespace osuCrypto
 
 			mGenBgi.init(k1, g1);
 		}
+
+
 		setTimePoint("sender.gen.done");
 	}
 
@@ -198,7 +206,10 @@ namespace osuCrypto
 	//    w = r * H
 
 
-
+    void BgciksOtExtSender::checkRT(span<Channel> chls, Matrix<block>& rT)
+    {
+        chls[0].send(rT.data(), rT.size());
+    }
 
 
 	void BgciksOtExtSender::send(
@@ -209,43 +220,48 @@ namespace osuCrypto
 		send(messages, prng, { &chl,1 });
 	}
 
-	void BgciksOtExtSender::send(
-		span<std::array<block, 2>> messages,
-		PRNG& prng,
-		span<Channel> chls)
-	{
-		setTimePoint("sender.expand.start");
+    void BgciksOtExtSender::send(
+        span<std::array<block, 2>> messages,
+        PRNG& prng,
+        span<Channel> chls)
+    {
+        setTimePoint("sender.expand.start");
 
-		//std::vector<block> r(mN2);
+        //std::vector<block> r(mN2);
 
-		//for (u64 i = 0; i < r.size();)
-		//{
-		//    auto blocks = mGen.yeild();
-		//    auto min = std::min<u64>(r.size() - i, blocks.size());
-		//    memcpy(r.data() + i, blocks.data(), min * sizeof(block));
+        //for (u64 i = 0; i < r.size();)
+        //{
+        //    auto blocks = mGen.yeild();
+        //    auto min = std::min<u64>(r.size() - i, blocks.size());
+        //    memcpy(r.data() + i, blocks.data(), min * sizeof(block));
 
-		//    i += min;
-		//}
+        //    i += min;
+        //}
 
-		//setTimePoint("sender.expand.dpf");
+        //setTimePoint("sender.expand.dpf");
 
-		//if (mN2 % 128) throw RTE_LOC;
-		//Matrix<block> rT(128, mN2 / 128, AllocType::Uninitialized);
-		//sse_transpose(r, rT);
-		//setTimePoint("sender.expand.transpose");
-		Matrix<block> rT;
+        //if (mN2 % 128) throw RTE_LOC;
+        //Matrix<block> rT(128, mN2 / 128, AllocType::Uninitialized);
+        //sse_transpose(r, rT);
+        //setTimePoint("sender.expand.transpose");
+        Matrix<block> rT;
 
-		if (gUseBgicksPprf)
-		{
-			rT.resize(128, mN2 / 128, AllocType::Uninitialized);
-			mGen.expand(chls, mDelta, prng, rT, true, mMal);
-			setTimePoint("sender.expand.pprf_transpose");
-		}
-		else
-		{
-			rT = expandTranspose(mGenBgi, mN2);
-			setTimePoint("sender.expand.dpf_transpose");
-		}
+        if (gUseBgicksPprf)
+        {
+            rT.resize(128, mN2 / 128, AllocType::Uninitialized);
+            mGen.expand(chls, mDelta, prng, rT, true, mMal);
+            setTimePoint("sender.expand.pprf_transpose");
+        }
+        else
+        {
+            rT = expandTranspose(mGenBgi, mN2);
+            setTimePoint("sender.expand.dpf_transpose");
+        }
+
+        if (mDebug)
+        {
+            checkRT(chls, rT);
+        }
 
 		//if (0)
 		//{

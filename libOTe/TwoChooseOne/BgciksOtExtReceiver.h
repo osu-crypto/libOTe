@@ -43,6 +43,8 @@ namespace osuCrypto
 			PRNG& prng,
 			span<Channel> chls);
 
+        void checkRT(span<Channel> chls, Matrix<block> &rT);
+
         void randMulNaive(Matrix<block> &rT, span<block> &messages);
         void randMulQuasiCyclic(Matrix<block> &rT, span<block> &messages, BitVector& choices, u64 threads);
         
@@ -50,6 +52,8 @@ namespace osuCrypto
         std::vector<u64> mS;
         block mDelta, mSum;
 		bool mMal;
+
+        bool mDebug = true;
 
         BgiEvaluator::MultiKey mGenBgi;
         BgicksMultiPprfReceiver mGen;

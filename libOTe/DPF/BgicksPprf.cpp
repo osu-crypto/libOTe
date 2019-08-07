@@ -6,757 +6,990 @@
 namespace osuCrypto
 {
 
-	//#define DEBUG_PRINT_PPRF
+#define DEBUG_PRINT_PPRF
 
-	BgicksMultiPprfSender::BgicksMultiPprfSender(u64 domainSize, u64 pointCount)
-	{
-		configure(domainSize, pointCount);
-	}
-	void BgicksMultiPprfSender::configure(u64 domainSize, u64 pointCount)
-	{
-		mDomain = domainSize;
-		mDepth = log2ceil(mDomain);
-		mPntCount = pointCount;
-		mPntCount8 = roundUpTo(pointCount, 8);
+    BgicksMultiPprfSender::BgicksMultiPprfSender(u64 domainSize, u64 pointCount)
+    {
+        configure(domainSize, pointCount);
+    }
+    void BgicksMultiPprfSender::configure(u64 domainSize, u64 pointCount)
+    {
+        mDomain = domainSize;
+        mDepth = log2ceil(mDomain);
+        mPntCount = pointCount;
+        //mPntCount8 = roundUpTo(pointCount, 8);
 
-		mBaseOTs.resize(0, 0);
-	}
+        mBaseOTs.resize(0, 0);
+    }
 
-	void BgicksMultiPprfReceiver::configure(u64 domainSize, u64 pointCount)
-	{
-		mDomain = domainSize;
-		mDepth = log2ceil(mDomain);
-		mPntCount = pointCount;
-		mPntCount8 = roundUpTo(pointCount, 8);
+    void BgicksMultiPprfReceiver::configure(u64 domainSize, u64 pointCount)
+    {
+        mDomain = domainSize;
+        mDepth = log2ceil(mDomain);
+        mPntCount = pointCount;
+        //mPntCount8 = roundUpTo(pointCount, 8);
 
-		mBaseOTs.resize(0, 0);
-	}
+        mBaseOTs.resize(0, 0);
+    }
 
-	u64 BgicksMultiPprfSender::baseOtCount() const
-	{
-		return mDepth * mPntCount;
-	}
-	u64 BgicksMultiPprfReceiver::baseOtCount() const
-	{
-		return mDepth * mPntCount;
-	}
+    u64 BgicksMultiPprfSender::baseOtCount() const
+    {
+        return mDepth * mPntCount;
+    }
+    u64 BgicksMultiPprfReceiver::baseOtCount() const
+    {
+        return mDepth * mPntCount;
+    }
 
-	bool BgicksMultiPprfSender::hasBaseOts() const
-	{
-		return mBaseOTs.size();
-	}
-	bool BgicksMultiPprfReceiver::hasBaseOts() const
-	{
-		return mBaseOTs.size();
-	}
-	void BgicksMultiPprfSender::setBase(span<std::array<block, 2>> baseMessages)
-	{
-		if (baseOtCount() != baseMessages.size())
-			throw RTE_LOC;
+    bool BgicksMultiPprfSender::hasBaseOts() const
+    {
+        return mBaseOTs.size();
+    }
+    bool BgicksMultiPprfReceiver::hasBaseOts() const
+    {
+        return mBaseOTs.size();
+    }
+    void BgicksMultiPprfSender::setBase(span<std::array<block, 2>> baseMessages)
+    {
+        if (baseOtCount() != baseMessages.size())
+            throw RTE_LOC;
 
-		mBaseOTs.resize(mPntCount, mDepth);
-		memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
-	}
+        mBaseOTs.resize(mPntCount, mDepth);
+        memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
+    }
 
-	void BgicksMultiPprfReceiver::setBase(span<block> baseMessages, BitVector & choices)
-	{
-		if (baseOtCount() != baseMessages.size())
-			throw RTE_LOC;
+    void BgicksMultiPprfReceiver::setBase(span<block> baseMessages)
+    {
+        if (baseOtCount() != baseMessages.size())
+            throw RTE_LOC;
 
-		if (baseOtCount() != choices.size())
-			throw RTE_LOC;
+        mBaseOTs.resize(mPntCount, mDepth);
+        memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
+    }
 
-		mBaseOTs.resize(mPntCount, mDepth);
-		memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
+    // This function copies the leaf values of the GGM tree 
+    // to the output location. There are two modes for this 
+    // funcation. If transpose == false, then each tree is 
+    // copied to a different contiguous regious of the output.
+    // If transpose == true, then trees are interleaved such that .... 
+    // @lvl         - the GGM tree leafs.
+    // @output      - the location that the GGM leafs should be written to. 
+    // @numTrees    - How many trees there are in total.
+    // @tIdx        - the index of the first tree.
+    // @transpose   - do we interleave the output?
+    // @mal         - ...
+    block copyOut(
+        span<std::array<block, 8>> lvl,
+        MatrixView<block> output,
+        u64 totalTrees,
+        u64 tIdx,
+        bool transpose,
+        bool mal)
+    {
 
-		mBaseChoices.resize(mPntCount, mDepth);
-		for (u64 i = 0; i < mBaseChoices.size(); ++i)
-		{
-			mBaseChoices(i) = choices[i];
-		}
-	}
+        if (transpose)
+        {
+            // not having an even (8) number of trees is not supported.
+            if (totalTrees % 8)
+                throw RTE_LOC;
+            if (lvl.size() % 16)
+                throw RTE_LOC;
 
+            // 
+            //auto rowsPer = 16;
+            //auto step = lvl.size() 
 
-	//std::map<u64, std::array<block, 128>> blocks;
+            //auto sectionSize = 
 
-	block copyOut(bool transpose, span<std::array<block, 8>> lvl, MatrixView<block> output, u64 min, u64 g, bool mal)
-	{
+            if (lvl.size() >= 16)
+            {
 
-		if (transpose)
-		{
+                if (mal)
+                {
+                    throw RTE_LOC;
+                    auto section = tIdx / 8;
+                    auto size = lvl.size() / 16;
+                    auto begin = section * size;
+                    auto end = std::min<u64>(begin + size, output.cols());
 
-			if (lvl.size() >= 16)
-			{
-				auto sec = g / 8;
-				auto size = lvl.size() / 16;
-				auto begin = sec * size;
-				auto end = std::min<u64>(begin + size, output.cols());
+                    RandomOracle ro(sizeof(block));
+                    AES hc(toBlock(tIdx));
+                    std::array<block, 128> a, c;
+                    AES ha(toBlock(345343)), hb(toBlock(6453323));
+                    block aSum0, aSum1, bSum0, bSum1, r0, r1;
+                    for (u64 i = begin, k = 0; i < end; ++i, ++k)
+                    {
+                        auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
 
-				if (mal)
-				{
-					RandomOracle ro(sizeof(block));
-					AES hc(toBlock(g));
-					std::array<block, 128> a, c;
-					AES ha(toBlock(345343)), hb(toBlock(6453323));
-					block aSum0, aSum1, bSum0,bSum1, r0, r1;
-					for (u64 i = begin, k = 0; i < end; ++i, ++k)
-					{
-						auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
+                        hc.ecbEncCounterMode(i, io.size(), c.data());
+                        ro.Update(io.data(), io.size());
+                        ha.ecbEncBlocks(io.data(), io.size(), a.data());
+                        for (u64 j = 0; j < 128; ++j)
+                        {
+                            mul128(a[j], c[j], r0, r1);
+                            aSum0 = aSum0 ^ r0;
+                            aSum1 = aSum1 ^ r1;
+                        }
+                        hb.ecbEncBlocks(io.data(), io.size(), a.data());
+                        for (u64 j = 0; j < 128; ++j)
+                        {
+                            mul128(a[j], c[j], r0, r1);
+                            bSum0 = bSum0 ^ r0;
+                            bSum1 = bSum1 ^ r1;
+                        }
+                        //{
 
-						hc.ecbEncCounterMode(i, io.size(), c.data());
-						ro.Update(io.data(), io.size());
-						ha.ecbEncBlocks(io.data(), io.size(), a.data());
-						for (u64 j = 0; j < 128; ++j)
-						{
-							mul128(a[j], c[j], r0, r1);
-							aSum0 = aSum0 ^ r0;
-							aSum1 = aSum1 ^ r1;
-						}
-						hb.ecbEncBlocks(io.data(), io.size(), a.data());
-						for (u64 j = 0; j < 128; ++j)
-						{
-							mul128(a[j], c[j], r0, r1);
-							bSum0 = bSum0 ^ r0;
-							bSum1 = bSum1 ^ r1;
-						}
-						//{
+                        //}
 
-						//}
+                        sse_transpose128(io);
+                        for (u64 j = 0; j < 128; ++j)
+                            output(j, i) = io[j];
+                    }
 
-						sse_transpose128(io);
-						for (u64 j = 0; j < 128; ++j)
-							output(j, i) = io[j];
-					}
-					
-					block cc;
-					ro.Final(cc);
-					return aSum0 ^ aSum1^ bSum0^ bSum1 ^ cc;
-				}
-				else
-				{
+                    block cc;
+                    ro.Final(cc);
+                    return aSum0 ^ aSum1^ bSum0^ bSum1 ^ cc;
+                }
+                else
+                {
+                    auto setIdx = tIdx / 8;
+                    auto blocksPerSet = lvl.size() * 8 / 128;
+                    auto numSets = totalTrees / 8;
 
+                    auto begin = setIdx;
+                    auto step = numSets;
+                    auto end = std::min<u64>(begin + step * blocksPerSet, output.cols());
 
-					for (u64 i = begin, k = 0; i < end; ++i, ++k)
-					{
-						auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
-						sse_transpose128(io);
-						for (u64 j = 0; j < 128; ++j)
-							output(j, i) = io[j];
-					}
+                    for (u64 i = begin, k = 0; i < end; i += step, ++k)
+                    {
+                        auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
+                        sse_transpose128(io);
+                        for (u64 j = 0; j < 128; ++j)
+                            output(j, i) = io[j];
+                    }
 
-					return ZeroBlock;
-				}
+                    return ZeroBlock;
+                }
 
-			}
-			else
-				throw RTE_LOC;
-		}
-		else
-		{
-			if (min == 8)
-			{
+            }
+            else
+                throw RTE_LOC;
+        }
+        else
+        {
+            if (mal)
+                throw RTE_LOC;
 
-				for (u64 i = 0; i < output.rows(); ++i)
-				{
-					auto oi = output[i].subspan(g, 8);
-					auto& ii = lvl[i];
-					oi[0] = ii[0];
-					oi[1] = ii[1];
-					oi[2] = ii[2];
-					oi[3] = ii[3];
-					oi[4] = ii[4];
-					oi[5] = ii[5];
-					oi[6] = ii[6];
-					oi[7] = ii[7];
-				}
-			}
-			else
-			{
-				for (u64 i = 0; i < output.rows(); ++i)
-				{
-					auto oi = output[i].subspan(g, min);
-					auto& ii = lvl[i];
-					for (u64 j = 0; j < min; ++j)
-						oi[j] = ii[j];
-				}
-			}
-			return ZeroBlock;
+            auto curSize = std::min<u64>(totalTrees - tIdx, 8);
+            if (curSize == 8)
+            {
 
-		}
-	}
+                for (u64 i = 0; i < output.rows(); ++i)
+                {
+                    auto oi = output[i].subspan(tIdx, 8);
+                    auto& ii = lvl[i];
+                    oi[0] = ii[0];
+                    oi[1] = ii[1];
+                    oi[2] = ii[2];
+                    oi[3] = ii[3];
+                    oi[4] = ii[4];
+                    oi[5] = ii[5];
+                    oi[6] = ii[6];
+                    oi[7] = ii[7];
+                }
+            }
+            else
+            {
+                for (u64 i = 0; i < output.rows(); ++i)
+                {
+                    auto oi = output[i].subspan(tIdx, curSize);
+                    auto& ii = lvl[i];
+                    for (u64 j = 0; j < curSize; ++j)
+                        oi[j] = ii[j];
+                }
+            }
+            return ZeroBlock;
 
-	block BgicksMultiPprfSender::expand(
-		Channel& chl,
-		block value,
-		PRNG& prng,
-		MatrixView<block> output,
-		bool transpose,
-		bool mal)
-	{
-		return expand({ &chl, 1 }, value, prng, output, transpose, mal);
-	}
+        }
+    }
 
-	block BgicksMultiPprfSender::expand(
-		span<Channel> chls,
-		block value,
-		PRNG& prng,
-		MatrixView<block> output,
-		bool transpose, 
-		bool mal)
-	{
-		setValue(value);
-		setTimePoint("pprf.send.start");
+    u64 transposePoint(u64 point, u64 treeIdx, u64 totalTrees)
+    {
+        //auto totalTrees = points.size();
+        auto numSets = totalTrees / 8;
 
+        auto setIdx = treeIdx / 8;
+        auto subIdx = treeIdx % 8;
 
-		if (transpose)
-		{
-			if (output.rows() != 128)
-				throw RTE_LOC;
-
-			if (output.cols() > (mDomain * mPntCount + 127) / 128)
-				throw RTE_LOC;
-
-			if (mPntCount & 7)
-				throw RTE_LOC;
-		}
-		else
-		{
-			if (output.rows() != mDomain)
-				throw RTE_LOC;
-
-			if (output.cols() != mPntCount)
-				throw RTE_LOC;
-		}
-		block ss = ZeroBlock;
-
-		block seed = prng.get();
-
-		auto routine = [&](u64 index)
-		{
-
-			auto& chl = chls[index];
-
-			std::array<std::vector<std::array<block, 8>>, 2> sums;
-			std::vector<std::array<block, 8>> tree((1ull << (mDepth + 1)));
-
-			auto getLevel = [&](u64 i)
-			{
-				auto size = (1ull << i);
-				auto offset = (size - 1);
-
-				auto b = tree.begin() + offset;
-				auto e = b + size;
-				return span<std::array<block, 8>>(b, e);
-			};
-
-			auto print = [](span<block> b)
-			{
-				std::stringstream ss;
-				if (b.size())
-					ss << b[0];
-				for (u64 i = 1; i < b.size(); ++i)
-				{
-					ss << ", " << b[i];
-				}
-				return ss.str();
-			};
-
-			std::array<AES, 2> aes;
-			aes[0].setKey(toBlock(3242342));
-			aes[1].setKey(toBlock(8993849));
+        auto sectionIdx = point / 16;
+        auto posIdx = point % 16;
 
 
-			for (u64 g = index * 8; g < mPntCount; g += 8 * chls.size())
-			{
+        auto setOffset = setIdx * 128;
+        auto subOffset = subIdx + 8 * posIdx;
+        auto secOffset = sectionIdx * numSets * 128;
 
-				//lout << "send[" << index << "][" << g << "]" << std::endl;
-				auto min = std::min<u64>(8, mPntCount - g);
-				PRNG prng(seed ^ toBlock(g));
-				prng.get(getLevel(0));
+        return setOffset + subOffset + secOffset;
+    }
 
-				sums[0].resize(mDepth);
-				sums[1].resize(mDepth);
+    void transposePoints(span<u64> points)
+    {
 
-				for (u64 d = 0; d < mDepth; ++d)
-				{
-					auto level0 = getLevel(d);
-					auto level1 = getLevel(d + 1);
+        for (u64 i = 0; i < points.size(); ++i)
+        {
+            points[i] = transposePoint(points[i], i, points.size());
+        }
+    }
 
-					auto width = level1.size();
+    void BgicksMultiPprfReceiver::getTransposedPoints(span<u64> points)
+    {
+        if (points.size() % 8)
+            throw RTE_LOC;
 
-					for (u64 i = 0; i < width; ++i)
-					{
-						u8 keep = i & 1;
-						auto i0 = i >> 1;
-						auto& a = aes[keep];
-						auto& sub = level0[i0];
-						auto& sub1 = level1[i];
-						auto& sum = sums[keep][d];
+        getPoints(points);
+        transposePoints(points);
+    }
+
+    u64 getActivePath(const span<u8>& choiceBits)
+    {
+        u64 point = 0;
+        for (u64 i = 0; i < choiceBits.size(); ++i)
+        {
+            auto shift = choiceBits.size() - i - 1;
+
+            point |= u64(1 ^ choiceBits[i]) << shift;
+        }
+        return point;
+    }
+
+    void BgicksMultiPprfReceiver::getPoints(span<u64> points)
+    {
+        memset(points.data(), 0, points.size() * sizeof(u64));
+        for (u64 j = 0; j < mPntCount; ++j)
+        {
+            points[j] = getActivePath(mBaseChoices[j]);
+        }
+    }
 
 
-						// H(x) = AES(k[keep], x) + x;
-						a.ecbEncBlocks(sub.data(), 8, sub1.data());
-						sub1[0] = sub1[0] ^ sub[0];
-						sub1[1] = sub1[1] ^ sub[1];
-						sub1[2] = sub1[2] ^ sub[2];
-						sub1[3] = sub1[3] ^ sub[3];
-						sub1[4] = sub1[4] ^ sub[4];
-						sub1[5] = sub1[5] ^ sub[5];
-						sub1[6] = sub1[6] ^ sub[6];
-						sub1[7] = sub1[7] ^ sub[7];
+    BitVector BgicksMultiPprfReceiver::sampleChoiceBits(u64 modulus, bool transposed, PRNG& prng)
+    {
+        BitVector choices(mPntCount * mDepth);
+        //Matrix<u8> baseChoices(mPntCount, mDepth);
+        mBaseChoices.resize(mPntCount, mDepth);
+        for (u64 i = 0; i < mPntCount; ++i)
+        {
+            auto base = transposePoint(0, i, mPntCount);
+            if (transposed &&  base >= modulus)
+                throw RTE_LOC;
 
-						//if (d == 1 && i == 0)
-						//{
-						//    std::cout << "r[" << (d) << "] = " << sub[2] << " -> r[" << (d + 1) << "] = " << sub1[2] << std::endl;
-						//}
+            u64 idx;
+            do {
+                for (u64 j = 0; j < mDepth; ++j)
+                    mBaseChoices(i, j) = prng.getBit();
 
-						// sum += H(x)
-						sum[0] = sum[0] ^ sub1[0];
-						sum[1] = sum[1] ^ sub1[1];
-						sum[2] = sum[2] ^ sub1[2];
-						sum[3] = sum[3] ^ sub1[3];
-						sum[4] = sum[4] ^ sub1[4];
-						sum[5] = sum[5] ^ sub1[5];
-						sum[6] = sum[6] ^ sub1[6];
-						sum[7] = sum[7] ^ sub1[7];
+                idx = getActivePath(mBaseChoices[i]);
+                
+                if (transposed)
+                    idx = transposePoint(idx, i, mPntCount);
 
-					}
-					//std::cout << "s lvl[" << (d + 1) << "] " << print(getLevel(d + 1)) << std::endl;
-					//std::cout << "sum0 [" << (d + 1) << "] " << print(sums[0][d]) << std::endl;
-					//std::cout << "sum1 [" << (d + 1) << "] " << print(sums[1][d]) << std::endl;
-				}
+            } while (idx >= modulus);
+        }
+
+        for (u64 i = 0; i < mBaseChoices.size(); ++i)
+        {
+            choices[i] = mBaseChoices(i);
+        }
+
+        return choices;
+    }
+
+    block BgicksMultiPprfSender::expand(
+        Channel& chl,
+        block value,
+        PRNG& prng,
+        MatrixView<block> output,
+        bool transpose,
+        bool mal)
+    {
+        return expand({ &chl, 1 }, value, prng, output, transpose, mal);
+    }
+
+    block BgicksMultiPprfSender::expand(
+        span<Channel> chls,
+        block value,
+        PRNG& prng,
+        MatrixView<block> output,
+        bool transpose,
+        bool mal)
+    {
+        setValue(value);
+        setTimePoint("pprf.send.start");
+
+
+        if (transpose)
+        {
+            if (output.rows() != 128)
+                throw RTE_LOC;
+
+            if (output.cols() > (mDomain * mPntCount + 127) / 128)
+                throw RTE_LOC;
+
+            if (mPntCount & 7)
+                throw RTE_LOC;
+        }
+        else
+        {
+            if (output.rows() != mDomain)
+                throw RTE_LOC;
+
+            if (output.cols() != mPntCount)
+                throw RTE_LOC;
+        }
+
+        // ss will hold the malicious check block. Will be 
+        // the ZeroBlock if semi-honest
+        block ss = ZeroBlock;
+        block seed = prng.get();
+
+        // A public PRF/PRG that we will use for deriving the GGM tree.
+        std::array<AES, 2> aes;
+        aes[0].setKey(toBlock(3242342));
+        aes[1].setKey(toBlock(8993849));
+
+        // The function that each thread will run. Each thread will
+        // process 8 GGM trees in parallel.
+        auto routine = [&](u64 threadIdx)
+        {
+            // A local PRNG for this thread.
+            PRNG prng(seed ^ toBlock(threadIdx));
+
+            // get our channel for this thread.
+            auto& chl = chls[threadIdx];
+
+            // mySums will hold the left and right GGM tree sums
+            // for each level. For example sums[0][i][5]  will
+            // hold the sum of the left children for level i of 
+            // the 5th tree. 
+            std::array<std::vector<std::array<block, 8>>, 2> sums;
+
+            // tree will hold the full GGM tree. Not that there are 8 
+            // indepenendent trees that are being processed together. 
+            // The trees are flattenned to that the children of j are
+            // located at 2*j  and 2*j+1. 
+            std::vector<std::array<block, 8>> tree((1ull << (mDepth + 1)));
 
 #ifdef DEBUG_PRINT_PPRF
-				chl.send(tree);
+            chl.asyncSendCopy(mValue);
 #endif
 
-				for (u64 d = 0; d < mDepth - 1; ++d)
-				{
-					//auto idx = d * mPntCount + g;
-					for (u64 j = 0; j < min; ++j)
-					{
+            // Returns the i'th level of the current 8 trees. The 
+            // children of node j on level i are located at 2*j and
+            // 2*j+1  on level i+1. 
+            auto getLevel = [&](u64 i)
+            {
+                auto size = (1ull << i);
+                auto offset = (size - 1);
+
+                auto b = tree.begin() + offset;
+                auto e = b + size;
+                return span<std::array<block, 8>>(b, e);
+            };
+
+            // prints out the contents of b
+            auto print = [](span<block> b)
+            {
+                std::stringstream ss;
+                if (b.size())
+                    ss << b[0];
+                for (u64 i = 1; i < b.size(); ++i)
+                {
+                    ss << ", " << b[i];
+                }
+                return ss.str();
+            };
+
+            // This thread will process 8 trees at a time. It will interlace
+            // thich sets of trees are processed with the other threads. 
+            for (u64 g = threadIdx * 8; g < mPntCount; g += 8 * chls.size())
+            {
+                // The number of real trees for this iteration.
+                auto min = std::min<u64>(8, mPntCount - g);
+
+                // Populate the zero'th level of the GGM tree with random seeds.
+                prng.get(getLevel(0));
+
+                // Allocate space for our sums of each level.
+                sums[0].resize(mDepth);
+                sums[1].resize(mDepth);
+
+                // For each level perform the following.
+                for (u64 d = 0; d < mDepth; ++d)
+                {
+                    // The previous level of the GGM tree.
+                    auto level0 = getLevel(d);
+
+                    // The next level of theGGM tree that we are populating.
+                    auto level1 = getLevel(d + 1);
+
+                    // The total number of children in this level.
+                    auto width = level1.size();
+
+                    // For each child, populate the child by expanding the parent.
+                    for (u64 childIdx = 0; childIdx < width; ++childIdx)
+                    {
+                        // The bit that indicates if we are on the left child (0)
+                        // or on the right child (1).
+                        u8 keep = childIdx & 1;
+
+                        // Index of the parent in the previous level.
+                        auto parentIdx = childIdx >> 1;
+
+                        // The value of the parent.
+                        auto& parent = level0[parentIdx];
+
+                        // The child that we will write in this iteration.
+                        auto& child = level1[childIdx];
+
+                        // The sum that this child node belongs to.
+                        auto& sum = sums[keep][d];
+
+                        // Each parent is expanded into the left and right children 
+                        // using a different AES fixed-key. Therefore our OWF is:
+                        //
+                        //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
+                        //
+                        // where each half defines one of the children.
+                        aes[keep].ecbEncBlocks(parent.data(), 8, child.data());
+                        child[0] = child[0] ^ parent[0];
+                        child[1] = child[1] ^ parent[1];
+                        child[2] = child[2] ^ parent[2];
+                        child[3] = child[3] ^ parent[3];
+                        child[4] = child[4] ^ parent[4];
+                        child[5] = child[5] ^ parent[5];
+                        child[6] = child[6] ^ parent[6];
+                        child[7] = child[7] ^ parent[7];
+
+                        // Update the running sums for this level. We keep 
+                        // a left and right totals for each level.
+                        sum[0] = sum[0] ^ child[0];
+                        sum[1] = sum[1] ^ child[1];
+                        sum[2] = sum[2] ^ child[2];
+                        sum[3] = sum[3] ^ child[3];
+                        sum[4] = sum[4] ^ child[4];
+                        sum[5] = sum[5] ^ child[5];
+                        sum[6] = sum[6] ^ child[6];
+                        sum[7] = sum[7] ^ child[7];
+
+                    }
+                }
+
 #ifdef DEBUG_PRINT_PPRF
-						std::cout << "c[" << g + j << "][" << d << "][0] " << sums[0][d][j] << " " << mBaseOTs[g + j][d][0] << std::endl;;
-						std::cout << "c[" << g + j << "][" << d << "][1] " << sums[1][d][j] << " " << mBaseOTs[g + j][d][1] << std::endl;;
+                // If we are debugging, then send over the full tree 
+                // to make sure its correct on the other side.
+                chl.send(tree);
+#endif
+
+                // For all but the last level, mask the sums with the
+                // OT strings and send them over. 
+                for (u64 d = 0; d < mDepth - 1; ++d)
+                {
+                    for (u64 j = 0; j < min; ++j)
+                    {
+#ifdef DEBUG_PRINT_PPRF
+                        if (mPrint)
+                        {
+                            std::cout << "c[" << g + j << "][" << d << "][0] " << sums[0][d][j] << " " << mBaseOTs[g + j][d][0] << std::endl;;
+                            std::cout << "c[" << g + j << "][" << d << "][1] " << sums[1][d][j] << " " << mBaseOTs[g + j][d][1] << std::endl;;
+                        }
 #endif													  
-						sums[0][d][j] = sums[0][d][j] ^ mBaseOTs[g + j][d][0];
-						sums[1][d][j] = sums[1][d][j] ^ mBaseOTs[g + j][d][1];
-					}
-				}
-				//setTimePoint("pprf.send.expand-" + std::to_string(g));
+                        sums[0][d][j] = sums[0][d][j] ^ mBaseOTs[g + j][d][0];
+                        sums[1][d][j] = sums[1][d][j] ^ mBaseOTs[g + j][d][1];
+                    }
+                }
 
+                // For the last level, we aregoinf to do something special. 
+                // The other party is currently missing both leaf children of 
+                // the active parent. Since this is the last level, we want
+                // the inactive child to just be the normal value but the 
+                // active child should be the correct value XOR the delta.
+                // This will be done by sending the sums and the sums plus 
+                // delta and ensure that they can only decrypt the correct ones.
+                auto d = mDepth - 1;
+                std::vector<std::array<block, 4>> lastOts(min);
+                for (u64 j = 0; j < min; ++j)
+                {
+                    // Construct the sums where we will allow the delta (mValue)
+                    // to either be on the left child or right child depending 
+                    // on which has the active path.
+                    lastOts[j][0] = sums[0][d][j];
+                    lastOts[j][1] = sums[1][d][j] ^ mValue;
+                    lastOts[j][2] = sums[1][d][j];
+                    lastOts[j][3] = sums[0][d][j] ^ mValue;
 
-				auto d = mDepth - 1;
-				std::vector<std::array<block, 4>> lastOts(min);
-				for (u64 j = 0; j < min; ++j)
-				{
-					//auto idx = d * mPntCount + j + g;
-					//u8 bit = permute[idx];
+                    // We are going to expand the 128 bit OT string
+                    // into a 256 bit OT string using AES.
+                    std::array<block, 4> masks, maskIn;
+                    maskIn[0] = mBaseOTs[g + j][d][0];
+                    maskIn[1] = mBaseOTs[g + j][d][0] ^ AllOneBlock;
+                    maskIn[2] = mBaseOTs[g + j][d][1];
+                    maskIn[3] = mBaseOTs[g + j][d][1] ^ AllOneBlock;
+                    mAesFixedKey.ecbEncFourBlocks(maskIn.data(), masks.data());
+                    masks[0] = masks[0] ^ maskIn[0];
+                    masks[1] = masks[1] ^ maskIn[1];
+                    masks[2] = masks[2] ^ maskIn[2];
+                    masks[3] = masks[3] ^ maskIn[3];
 
-					lastOts[j][0] = sums[0][d][j];
-					lastOts[j][1] = sums[1][d][j] ^ mValue;
-					lastOts[j][2] = sums[1][d][j];
-					lastOts[j][3] = sums[0][d][j] ^ mValue;
-
-					std::array<block, 4> masks, maskIn;
-
-					maskIn[0] = mBaseOTs[g + j][d][0];
-					maskIn[1] = mBaseOTs[g + j][d][0] ^ AllOneBlock;
-					maskIn[2] = mBaseOTs[g + j][d][1];
-					maskIn[3] = mBaseOTs[g + j][d][1] ^ AllOneBlock;
-
-					mAesFixedKey.ecbEncFourBlocks(maskIn.data(), masks.data());
-					masks[0] = masks[0] ^ maskIn[0];
-					masks[1] = masks[1] ^ maskIn[1];
-					masks[2] = masks[2] ^ maskIn[2];
-					masks[3] = masks[3] ^ maskIn[3];
-
-					//std::cout << "sum[" << j << "][0] " << lastOts[j][0] << " " << lastOts[j][1] << std::endl;
-					//std::cout << "sum[" << j << "][1] " << lastOts[j][2] << " " << lastOts[j][3] << std::endl;
 #ifdef DEBUG_PRINT_PPRF
-					std::cout << "c[" << g + j << "][" << d << "][0] " << sums[0][d][j] << " " << mBaseOTs[g + j][d][0] << std::endl;;
-					std::cout << "c[" << g + j << "][" << d << "][1] " << sums[1][d][j] << " " << mBaseOTs[g + j][d][1] << std::endl;;
+                    if (mPrint) {
+                        std::cout << "c[" << g + j << "][" << d << "][0] " << sums[0][d][j] << " " << mBaseOTs[g + j][d][0] << std::endl;;
+                        std::cout << "c[" << g + j << "][" << d << "][1] " << sums[1][d][j] << " " << mBaseOTs[g + j][d][1] << std::endl;;
+                    }
 #endif							
-					lastOts[j][0] = lastOts[j][0] ^ masks[0];
-					lastOts[j][1] = lastOts[j][1] ^ masks[1];
-					lastOts[j][2] = lastOts[j][2] ^ masks[2];
-					lastOts[j][3] = lastOts[j][3] ^ masks[3];
-				}
+                    // Add the OT masks to the sums and send them over.
+                    lastOts[j][0] = lastOts[j][0] ^ masks[0];
+                    lastOts[j][1] = lastOts[j][1] ^ masks[1];
+                    lastOts[j][2] = lastOts[j][2] ^ masks[2];
+                    lastOts[j][3] = lastOts[j][3] ^ masks[3];
+                }
 
-				sums[0].resize(mDepth - 1);
-				sums[1].resize(mDepth - 1);
+                // Resize the sums to that they dont include
+                // the unmasked sums on the last level!
+                sums[0].resize(mDepth - 1);
+                sums[1].resize(mDepth - 1);
 
-				//int temp;
-				//chl.send(g);
-				chl.asyncSend(std::move(sums[0]));
-				chl.asyncSend(std::move(sums[1]));
-				//chl.asyncSend(temp);
-				chl.asyncSend(std::move(lastOts));
+                // Send the sums to the other party.
+                chl.asyncSend(std::move(sums[0]));
+                chl.asyncSend(std::move(sums[1]));
 
+                // send the special OT messages for the last level.
+                chl.asyncSend(std::move(lastOts));
 
-				auto lvl = getLevel(mDepth);
-				auto s = copyOut(transpose, lvl, output, min, g, mal);
-				ss = ss ^ s;
-				//setTimePoint("pprf.send.copyOut-" + std::to_string(g));
+                // copy the last level to the output. If desired, this is 
+                // where the tranpose is performed. 
+                auto lvl = getLevel(mDepth);
 
-			}
-		};
-
-
-		std::vector<std::thread> thrds(chls.size() - 1);
-		for (u64 i = 0; i < thrds.size(); ++i)
-			thrds[i] = std::thread(routine, i);
-			//routine(i);
+                // s is a checksum that is used for malicous security. 
+                auto s = copyOut(lvl, output, mPntCount, g, transpose, mal);
+                ss = ss ^ s;
+            }
+        };
 
 
-		routine(thrds.size());
-
-		for (u64 i = 0; i < thrds.size(); ++i)
-			thrds[i].join();
-
-		return ss;
-	}
-
-	void BgicksMultiPprfSender::setValue(block value)
-	{
-		mValue = value;
-	}
-
-	void BgicksMultiPprfReceiver::getPoints(span<u64> points)
-	{
-		memset(points.data(), 0, points.size() * sizeof(u64));
-		for (u64 i = 0; i < mDepth; ++i)
-		{
-			auto shift = mDepth - i - 1;
-			for (u64 j = 0; j < mPntCount; ++j)
-			{
-				//auto idx = i * mPntCount + j;
-				points[j] |= u64(1 ^ mBaseChoices[j][i]) << shift;
-			}
-		}
-	}
-
-	void BgicksMultiPprfReceiver::getTransposedPoints(span<u64> points)
-	{
-		getPoints(points);
-
-		for (u64 i = 0; i < points.size(); ++i)
-		{
-			auto j = i / 8;
-			auto k = i % 8;
-			auto base = 8 * (1ull << mDepth) * j;
-			points[i] = points[i] * 8 + base + k;
-		}
-	}
-
-	block BgicksMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose,
-		bool mal)
-	{
-		return expand({ &chl, 1 }, prng, output, transpose, mal);
-	}
-
-	block BgicksMultiPprfReceiver::expand(span<Channel> chls, PRNG& prng, MatrixView<block> output, bool transpose,
-		bool mal)
-	{
-
-		setTimePoint("pprf.recv.start");
-
-		//lout << " d " << mDomain << " p " << mPntCount << " do " << mDepth << std::endl;
-
-		if (transpose)
-		{
-			if (output.rows() != 128)
-				throw RTE_LOC;
-
-			if (output.cols() > (mDomain * mPntCount + 127) / 128)
-				throw RTE_LOC;
-
-			if (mPntCount & 7)
-				throw RTE_LOC;
-		}
-		else
-		{
-			if (output.rows() != mDomain)
-				throw RTE_LOC;
-
-			if (output.cols() != mPntCount)
-				throw RTE_LOC;
-		}
+        std::vector<std::thread> thrds(chls.size() - 1);
+        for (u64 i = 0; i < thrds.size(); ++i)
+            thrds[i] = std::thread(routine, i);
+        //routine(i);
 
 
-		std::vector<u64> points(mPntCount);
-		getPoints(points);
-		//for (u64 j = 0; j < mPntCount; ++j)
-		//    std::cout << "point[" << j << "] " << points[j] << std::endl;
+        routine(thrds.size());
 
-		block ss=ZeroBlock;
-		std::array<AES, 2> aes;
-		aes[0].setKey(toBlock(3242342));
-		aes[1].setKey(toBlock(8993849));
+        for (u64 i = 0; i < thrds.size(); ++i)
+            thrds[i].join();
 
+        return ss;
+    }
 
-		auto routine = [&](u64 index)
-		{
-			auto& chl = chls[index];
+    void BgicksMultiPprfSender::setValue(block value)
+    {
+        mValue = value;
+    }
 
-			std::array<std::array<block, 8>, 2> mySums;
-			std::vector<std::array<block, 8>> tree(1ull << (mDepth + 1));
+    block BgicksMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose,
+        bool mal)
+    {
+        return expand({ &chl, 1 }, prng, output, transpose, mal);
+    }
+
+    block BgicksMultiPprfReceiver::expand(span<Channel> chls, PRNG& prng, MatrixView<block> output, bool transpose,
+        bool mal)
+    {
+
+        setTimePoint("pprf.recv.start");
+
+        //lout << " d " << mDomain << " p " << mPntCount << " do " << mDepth << std::endl;
+
+        if (transpose)
+        {
+            if (output.rows() != 128)
+                throw RTE_LOC;
+
+            if (output.cols() > (mDomain * mPntCount + 127) / 128)
+                throw RTE_LOC;
+
+            if (mPntCount & 7)
+                throw RTE_LOC;
+        }
+        else
+        {
+            if (output.rows() != mDomain)
+                throw RTE_LOC;
+
+            if (output.cols() != mPntCount)
+                throw RTE_LOC;
+        }
+
+        // The vector holding the indices of the active
+        // leaves. Each index is in [0,mDomain).
+        std::vector<u64> points(mPntCount);
+        getPoints(points);
+
+        // ss will hold the malicious check block. Will be 
+        // the ZeroBlock if semi-honest
+        block ss = ZeroBlock;
+
+        // A public PRF/PRG that we will use for deriving the GGM tree.
+        std::array<AES, 2> aes;
+        aes[0].setKey(toBlock(3242342));
+        aes[1].setKey(toBlock(8993849));
+
+        // The function that each thread will run. Each thread will
+        // process 8 GGM trees in parallel.
+        auto routine = [&](u64 threadIdx)
+        {
+            // get our channel for this thread.
+            auto& chl = chls[threadIdx];
+
+            // mySums will hold the left and right GGM tree sums
+            // for each level. For example mySums[5][0]  will
+            // hold the sum of the left children for the 5th tree. This
+            // sum will be "missing" the children of the active parent.
+            // The sender will give of one of the full somes so we can
+            // compute the missing inactive child.
+            std::array<std::array<block, 8>, 2> mySums;
+
+            // A buffer for receiving the sums from the other party.
+            // These will be masked by the OT strings. 
+            std::array<std::vector<std::array<block, 8>>, 2> theirSums;
+            theirSums[0].resize(mDepth - 1);
+            theirSums[1].resize(mDepth - 1);
+
+            // tree will hold the full GGM tree. Not that there are 8 
+            // indepenendent trees that are being processed together. 
+            // The trees are flattenned to that the children of j are
+            // located at 2*j  and 2*j+1. 
+            std::vector<std::array<block, 8>> tree(1ull << (mDepth + 1));
 #ifdef DEBUG_PRINT_PPRF
-			std::vector<std::array<block, 8>> ftree(1ull << (mDepth + 1));
+            // This will be the full tree and is sent by the reciever to help debug. 
+            std::vector<std::array<block, 8>> ftree(1ull << (mDepth + 1));
+
+            // The delta value on the active path.
+            block deltaValue;
+            chl.recv(deltaValue);
 #endif
 
-			auto getLevel = [&](u64 i, bool f = false)
-			{
-				auto size = (1ull << i);
-				auto offset = (size - 1);
+            // Returns the i'th level of the current 8 trees. The 
+            // children of node j on level i are located at 2*j and
+            // 2*j+1  on level i+1. 
+            auto getLevel = [&](u64 i, bool f = false)
+            {
+                auto size = (1ull << i), offset = (size - 1);
 #ifdef DEBUG_PRINT_PPRF
-				auto b = (f ? ftree.begin() : tree.begin()) + offset;
+                auto b = (f ? ftree.begin() : tree.begin()) + offset;
 #else
-				auto b = tree.begin() + offset;
+                auto b = tree.begin() + offset;
 #endif
-				auto e = b + size;
-				return span<std::array<block, 8>>(b, e);
-			};
+                return span<std::array<block, 8>>(b, b + size);
+            };
 
-			auto printLevel = [&](u64 d)
-			{
+            // prints out the contents of the d'th level.
+            auto printLevel = [&](u64 d)
+            {
 
-				auto level0 = getLevel(d);
-				auto flevel0 = getLevel(d, true);
+                auto level0 = getLevel(d);
+                auto flevel0 = getLevel(d, true);
 
-				std::cout
-					<< "---------------------\nlevel " << d
-					<< "\n---------------------" << std::endl;
+                std::cout
+                    << "---------------------\nlevel " << d
+                    << "\n---------------------" << std::endl;
 
-				std::array<block, 2> sums{ ZeroBlock ,ZeroBlock };
-				for (u64 i = 0; i < level0.size(); ++i)
-				{
-					for (u64 j = 0; j < 8; ++j)
-					{
+                std::array<block, 2> sums{ ZeroBlock ,ZeroBlock };
+                for (u64 i = 0; i < level0.size(); ++i)
+                {
+                    for (u64 j = 0; j < 8; ++j)
+                    {
 
-						if (neq(level0[i][j], flevel0[i][j]))
-							std::cout << Color::Red;
+                        if (neq(level0[i][j], flevel0[i][j]))
+                            std::cout << Color::Red;
 
-						std::cout << "p[" << i << "][" << j << "] "
-							<< level0[i][j] << " " << flevel0[i][j] << std::endl << Color::Default;
+                        std::cout << "p[" << i << "][" << j << "] "
+                            << level0[i][j] << " " << flevel0[i][j] << std::endl << Color::Default;
 
-						if (i == 0 && j == 0)
-							sums[i & 1] = sums[i & 1] ^ flevel0[i][j];
-					}
-				}
+                        if (i == 0 && j == 0)
+                            sums[i & 1] = sums[i & 1] ^ flevel0[i][j];
+                    }
+                }
 
-				std::cout << "sums[0] = " << sums[0] << " " << sums[1] << std::endl;
-			};
+                std::cout << "sums[0] = " << sums[0] << " " << sums[1] << std::endl;
+            };
 
-			std::array<std::vector<std::array<block, 8>>, 2> sums;
-			sums[0].resize(mDepth - 1);
-			sums[1].resize(mDepth - 1);
-
-			for (u64 g = index * 8; g < mPntCount; g += 8 * chls.size())
-			{
+            // This thread will process 8 trees at a time. It will interlace
+            // thich sets of trees are processed with the other threads. 
+            for (u64 g = threadIdx * 8; g < mPntCount; g += 8 * chls.size())
+            {
 #ifdef DEBUG_PRINT_PPRF
-				chl.recv(ftree);
+                chl.recv(ftree);
+                auto l1f = getLevel(1, true);
 #endif
-				//u64 g2;
-				//chl.recv(g2);
-				//lout << "recv["<<index<<"][" << g << "] vs " << g2 << std::endl;
-				chl.recv(sums[0].data(), sums[0].size());
-				chl.recv(sums[1].data(), sums[1].size());
 
-				//memset(tree.data(), 0, tree.size() * sizeof(std::array<block, 8>));
+                // Receive their full set of sums for these 8 trees.
+                chl.recv(theirSums[0].data(), theirSums[0].size());
+                chl.recv(theirSums[1].data(), theirSums[1].size());
+                TODO("Optimize this recv so that if we have fewer than 8 trees then less data is sent..");
 
-				auto l1 = getLevel(1);
-				auto l1f = getLevel(1, true);
-				auto min = std::min<u64>(8, mPntCount - g);
+                // The number of real trees for this iteration.
+                auto min = std::min<u64>(8, mPntCount - g);
+                auto l1 = getLevel(1);
 
-				for (u64 i = 0; i < min; ++i)
-				{
-					int notAi = mBaseChoices[i + g][0];
-					l1[notAi][i] = mBaseOTs[i + g][0] ^ sums[notAi][0][i];
-					l1[notAi ^ 1][i] = ZeroBlock;
-					//auto idxn = i + (notAi^1) * mPntCount8;
-					//l1[idxn] = mBaseOTs[i] ^ sums[notAi^1](i);
+                for (u64 i = 0; i < min; ++i)
+                {
+                    // For the non-active path, set the child of the root node
+                    // as the OT message XOR'ed with the correction sum.
+                    int notAi = mBaseChoices[i + g][0];
+                    l1[notAi][i] = mBaseOTs[i + g][0] ^ theirSums[notAi][0][i];
+                    l1[notAi ^ 1][i] = ZeroBlock;
 
-					//std::cout << "l1[" << notAi << "]["<<i<<"] " << l1[notAi][i] << " = "
-					//    << (mBaseOTs[i+g][0]) << " ^ "
-					//    << sums[notAi][0][i] << " vs " << l1f[notAi][i] << std::endl;
-
-				}
-				//std::cout << std::endl;
-				//Matrix<block> fullTree(mDepth, mDomain);
+                    //auto idxn = i + (notAi^1) * mPntCount8;
+                    //l1[idxn] = mBaseOTs[i] ^ sums[notAi^1](i);
 
 #ifdef DEBUG_PRINT_PPRF
-				printLevel(1);
+                    if (neq(l1[notAi][i], l1f[notAi][i])) {
+                        std::cout << "l1[" << notAi << "][" << i << "] " << l1[notAi][i] << " = "
+                            << (mBaseOTs[i + g][0]) << " ^ "
+                            << theirSums[notAi][0][i] << " vs " << l1f[notAi][i] << std::endl;
+                    }
 #endif
-
-				for (u64 d = 1; d < mDepth; ++d)
-				{
-					auto level0 = getLevel(d);
-					auto level1 = getLevel(d + 1);
-
-
-					memset(mySums[0].data(), 0, mySums[0].size() * sizeof(block));
-					memset(mySums[1].data(), 0, mySums[1].size() * sizeof(block));
-
-					auto width = level1.size();
-					for (u64 i = 0; i < width; ++i)
-					{
-						u8 keep = i & 1;
-						auto i0 = i >> 1;
-						auto& a = aes[keep];
-						auto& sub = level0[i0];
-						auto& sub1 = level1[i];
-
-						auto& sum = mySums[keep];
-
-
-						//auto _td = &level0[i0 + mPntCount8 - 1];
-						//auto _td1 = &level1[i + mPntCount8 - 1];
-
-						// hash the current node td and store the result in td1.
-
-							// H(x) = AES(k[keep], x) + x;
-						a.ecbEncBlocks(sub.data(), 8, sub1.data());
-						sub1[0] = sub1[0] ^ sub[0];
-						sub1[1] = sub1[1] ^ sub[1];
-						sub1[2] = sub1[2] ^ sub[2];
-						sub1[3] = sub1[3] ^ sub[3];
-						sub1[4] = sub1[4] ^ sub[4];
-						sub1[5] = sub1[5] ^ sub[5];
-						sub1[6] = sub1[6] ^ sub[6];
-						sub1[7] = sub1[7] ^ sub[7];
+                }
 
 #ifdef DEBUG_PRINT_PPRF
-						for (u64 i = 0; i < 8; ++i)
-							if (eq(sub[i], ZeroBlock))
-								sub1[i] = ZeroBlock;
+                if (mPrint)
+                    printLevel(1);
 #endif
 
-						// sum += H(x)
-						sum[0] = sum[0] ^ sub1[0];
-						sum[1] = sum[1] ^ sub1[1];
-						sum[2] = sum[2] ^ sub1[2];
-						sum[3] = sum[3] ^ sub1[3];
-						sum[4] = sum[4] ^ sub1[4];
-						sum[5] = sum[5] ^ sub1[5];
-						sum[6] = sum[6] ^ sub1[6];
-						sum[7] = sum[7] ^ sub1[7];
-					}
+                // For all other levels, expand the GGM tree and add in 
+                // the correction along the active path. 
+                for (u64 d = 1; d < mDepth; ++d)
+                {
+                    // The already constructed level. Only missing the
+                    // GGM tree node value along the active path. 
+                    auto level0 = getLevel(d);
 
+                    // The next level that we want to construct. 
+                    auto level1 = getLevel(d + 1);
 
+                    // Zero out the previous sums.
+                    memset(mySums[0].data(), 0, mySums[0].size() * sizeof(block));
+                    memset(mySums[1].data(), 0, mySums[1].size() * sizeof(block));
 
-					if (d != mDepth - 1)
-					{
+                    // We will iterate over each node on this level and
+                    // expand it into it's two children. Note that the
+                    // active node will also be expanded. Later we will just
+                    // overwrite whatever the value was. This is an optimization.
+                    auto width = level1.size();
+                    for (u64 childIdx = 0; childIdx < width; ++childIdx)
+                    {
+                        // The bit that indicates if we are on the left child (0)
+                        // or on the right child (1).
+                        u8 keep = childIdx & 1;
 
-						for (u64 i = 0; i < min; ++i)
-						{
-							auto a = points[i + g] >> (mDepth - 1 - d);
-							auto notAi = (a & 1) ^ 1;
-							auto idx = (a ^ 1);// *mPntCount + i;
-#ifdef DEBUG_PRINT_PPRF
-							auto prev = level1[idx][i];
-#endif
-							//level1[a] = CCBlock;
-							level1[idx][i] =
-								level1[idx][i] ^
-								sums[notAi][d][i] ^
-								mySums[notAi][i] ^
-								mBaseOTs[i + g][d];
-#ifdef DEBUG_PRINT_PPRF
-							std::cout << "up[" << i << "] = level1[" << idx << "][" << i << "] "
-								<< prev << " -> " << level1[idx][i] << " " << a << " " << idx << " ~~ "
-								<< mBaseOTs[i + g][d] << " " << sums[notAi][d][i] << " @ " << (i + g) << " " << d << std::endl;
-#endif
-						}
+                        // Index of the parent in the previous level.
+                        auto parentIdx = childIdx >> 1;
 
-					}
-#ifdef DEBUG_PRINT_PPRF
-					printLevel(d + 1);
-#endif
+                        // The value of the parent.
+                        auto& parent = level0[parentIdx];
 
-					//std::cout << "r[" << (d + 1) << "] " << level1[0] << std::endl;
-				}
-				//printLevel(mDepth);
-				//setTimePoint("pprf.recv.expand-" + std::to_string(g));
+                        // The child that we will write in this iteration.
+                        auto& child = level1[childIdx];
 
-				int temp;
-				std::vector<std::array<block, 4>> lastOts(min);
-				//chl.recv(temp);
-				chl.recv(lastOts);
-
-				auto level = getLevel(mDepth);
-				//auto flevel = getLevel(mDepth, true);
-				auto d = mDepth - 1;
-				for (u64 j = 0; j < min; ++j)
-				{
-
-					auto a = points[j + g];
-					auto notAi = (a & 1) ^ 1;
-					auto idx = (a ^ 1);// *mPntCount + j;
-					auto idx1 = a;// *mPntCount + j;
-
-					//auto idx = i * mPntCount + j;
-
-					//lastOts[j][0] = sums[0](i, j);
-					//lastOts[j][1] = sums[1](i, j);
-					//lastOts[j][3] = sums[0](i, j);
-					//lastOts[j][2] = sums[1](i, j);
-
-					std::array<block, 2> masks, maskIn;
-
-					maskIn[0] = mBaseOTs[j + g][d];
-					maskIn[1] = mBaseOTs[j + g][d] ^ AllOneBlock;
-
-					mAesFixedKey.ecbEncTwoBlocks(maskIn.data(), masks.data());
-					masks[0] = masks[0] ^ maskIn[0];
-					masks[1] = masks[1] ^ maskIn[1];
-
-					auto& ot0 = lastOts[j][2 * notAi + 0];
-					auto& ot1 = lastOts[j][2 * notAi + 1];
-
-					ot0 = ot0 ^ masks[0];
-					ot1 = ot1 ^ masks[1];
+                        // Each parent is expanded into the left and right children 
+                        // using a different AES fixed-key. Therefore our OWF is:
+                        //
+                        //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
+                        //
+                        // where each half defines one of the children.
+                        aes[keep].ecbEncBlocks(parent.data(), 8, child.data());
+                        child[0] = child[0] ^ parent[0];
+                        child[1] = child[1] ^ parent[1];
+                        child[2] = child[2] ^ parent[2];
+                        child[3] = child[3] ^ parent[3];
+                        child[4] = child[4] ^ parent[4];
+                        child[5] = child[5] ^ parent[5];
+                        child[6] = child[6] ^ parent[6];
+                        child[7] = child[7] ^ parent[7];
 
 #ifdef DEBUG_PRINT_PPRF
-					auto prev = level[idx][j];
+                        // For debugging, set the active path to zero.
+                        for (u64 i = 0; i < 8; ++i)
+                            if (eq(parent[i], ZeroBlock))
+                                child[i] = ZeroBlock;
+#endif
+                        // Update the running sums for this level. We keep 
+                        // a left and right totals for each level. Note that
+                        // we are actually XOR in the incorrect value of the 
+                        // children of the active parent (assuming !DEBUG_PRINT_PPRF).
+                        // This is ok since we will later XOR off these incorrect values.
+                        auto& sum = mySums[keep];
+                        sum[0] = sum[0] ^ child[0];
+                        sum[1] = sum[1] ^ child[1];
+                        sum[2] = sum[2] ^ child[2];
+                        sum[3] = sum[3] ^ child[3];
+                        sum[4] = sum[4] ^ child[4];
+                        sum[5] = sum[5] ^ child[5];
+                        sum[6] = sum[6] ^ child[6];
+                        sum[7] = sum[7] ^ child[7];
+                    }
+
+                    // For everything but the last level we have to
+                    // 1) fix our sums so they dont include the incorrect
+                    //    values that are the children of the active parent
+                    // 2) Update the non-active child of the active parent. 
+                    if (d != mDepth - 1)
+                    {
+
+                        for (u64 i = 0; i < min; ++i)
+                        {
+                            // the index of the leaf node that is active.
+                            auto leafIdx = points[i + g];
+
+                            // The index of the active child node.
+                            auto activeChildIdx = leafIdx >> (mDepth - 1 - d);
+
+                            // The index of the active child node sibling.
+                            auto inactiveChildIdx = activeChildIdx ^ 1;
+
+                            // The indicator as to the left or right child is inactive
+                            auto notAi = inactiveChildIdx & 1;
+#ifdef DEBUG_PRINT_PPRF
+                            auto prev = level1[inactiveChildIdx][i];
 #endif
 
-					mySums[notAi][j] = mySums[notAi][j] ^ level[idx][j];
-					mySums[notAi ^ 1][j] = mySums[notAi ^ 1][j] ^ level[idx1][j];
+                            auto& inactiveChild = level1[inactiveChildIdx][i];
 
-					level[idx][j] = ot0 ^ mySums[notAi][j];
-					level[idx1][j] = ot1 ^ mySums[notAi ^ 1][j];
+                            // correct the sum value by XORing off the incorrect
+                            auto correctSum =
+                                inactiveChild ^
+                                theirSums[notAi][d][i];
+
+                            inactiveChild =
+                                correctSum ^
+                                mySums[notAi][i] ^
+                                mBaseOTs[i + g][d];
 
 #ifdef DEBUG_PRINT_PPRF
-					std::cout << "up[" << d << "] = level1[" << (idx / mPntCount8) << "][" << (idx % mPntCount8) << " "
-						<< prev << " -> " << level[idx][j] << " ~~ "
-						<< mBaseOTs[j + g][d] << " " << ot0 << " @ " << (j + g) << " " << d << std::endl;
+                            if (mPrint)
+                                std::cout << "up[" << i << "] = level1[" << inactiveChildIdx << "][" << i << "] "
+                                << prev << " -> " << level1[inactiveChildIdx][i] << " " << activeChildIdx << " " << inactiveChildIdx << " ~~ "
+                                << mBaseOTs[i + g][d] << " " << theirSums[notAi][d][i] << " @ " << (i + g) << " " << d << std::endl;
+
+                            auto fLevel1 = getLevel(d + 1, true);
+                            if (neq(fLevel1[inactiveChildIdx][i], inactiveChild))
+                                throw RTE_LOC;
+#endif
+                        }
+                    }
+#ifdef DEBUG_PRINT_PPRF
+                    if (mPrint)
+                        printLevel(d + 1);
 #endif
 
-					//std::cout << "    " << ot0 << " ^ " << (mySums[notAi][j] ^ flevel[idx]) << std::endl;
-					//std::cout << "    " << (ot0^mySums[notAi][j]) << " ^ " << (flevel[idx]) << std::endl;
-				}
+                }
 
-				auto lvl = getLevel(mDepth);
-				block s = copyOut(transpose, lvl, output, min, g, mal);
-				ss = ss ^ s;
-			}
-		};
+                // Now processes the last level. This one is special 
+                // because we we must XOR in the correction value as 
+                // before but we must also fixed the child value for 
+                // the active child. To do this, we will receive 4 
+                // values. Two for each case (left active or right active).
+                std::vector<std::array<block, 4>> lastOts(min);
+                chl.recv(lastOts);
+
+                auto level = getLevel(mDepth);
+                auto d = mDepth - 1;
+                for (u64 j = 0; j < min; ++j)
+                {
+                    // The index of the child on the active path. 
+                    auto activeChildIdx = points[j + g];
+
+                    // The index of the other (inactive) child.
+                    auto inactiveChildIdx = activeChildIdx ^ 1;
+
+                    // The indicator as to the left or right child is inactive
+                    auto notAi = inactiveChildIdx & 1;
+
+                    std::array<block, 2> masks, maskIn;
+
+                    // We are going to expand the 128 bit OT string
+                    // into a 256 bit OT string using AES.
+                    maskIn[0] = mBaseOTs[j + g][d];
+                    maskIn[1] = mBaseOTs[j + g][d] ^ AllOneBlock;
+                    mAesFixedKey.ecbEncTwoBlocks(maskIn.data(), masks.data());
+                    masks[0] = masks[0] ^ maskIn[0];
+                    masks[1] = masks[1] ^ maskIn[1];
+
+                    // now get the chosen message OT strings by XORing
+                    // the expended (random) OT strings with the lastOts values.
+                    auto& ot0 = lastOts[j][2 * notAi + 0];
+                    auto& ot1 = lastOts[j][2 * notAi + 1];
+                    ot0 = ot0 ^ masks[0];
+                    ot1 = ot1 ^ masks[1];
+
+#ifdef DEBUG_PRINT_PPRF
+                    auto prev = level[inactiveChildIdx][j];
+#endif
+
+                    auto& inactiveChild = level[inactiveChildIdx][j];
+                    auto& activeChild = level[activeChildIdx][j];
+
+                    // Fix the sums we computed previously to not include the
+                    // incorrect child values. 
+                    auto inactiveSum = mySums[notAi][j] ^ inactiveChild;
+                    auto activeSum = mySums[notAi ^ 1][j] ^ activeChild;
+
+                    // Update the inactive and active child to have to correct 
+                    // value by XORing their full sum with out partial sum, which
+                    // gives us exactly the value we are missing.
+                    inactiveChild = ot0 ^ inactiveSum;
+                    activeChild = ot1 ^ activeSum;
+
+#ifdef DEBUG_PRINT_PPRF
+
+
+                    auto fLevel1 = getLevel(d + 1, true);
+                    if (neq(fLevel1[inactiveChildIdx][j], inactiveChild))
+                        throw RTE_LOC;
+                    if (neq(fLevel1[activeChildIdx][j], activeChild ^ deltaValue))
+                        throw RTE_LOC;
+
+                    if (mPrint)
+                        std::cout << "up[" << d << "] = level1[" << (inactiveChildIdx / mPntCount) << "][" << (inactiveChildIdx % mPntCount) << " "
+                        << prev << " -> " << level[inactiveChildIdx][j] << " ~~ "
+                        << mBaseOTs[j + g][d] << " " << ot0 << " @ " << (j + g) << " " << d << std::endl;
+#endif
+                }
+
+                // copy the last level to the output. If desired, this is 
+                // where the tranpose is performed. 
+                auto lvl = getLevel(mDepth);
+
+                // s is a checksum that is used for malicous security. 
+                block s = copyOut(lvl, output, mPntCount, g, transpose, mal);
+                ss = ss ^ s;
+            }
+        };
 
 
 
-		std::vector<std::thread> thrds(chls.size() - 1);
-		for (u64 i = 0; i < thrds.size(); ++i)
-			thrds[i] = std::thread(routine, i);
-			//routine(i);
+        std::vector<std::thread> thrds(chls.size() - 1);
+        for (u64 i = 0; i < thrds.size(); ++i)
+            thrds[i] = std::thread(routine, i);
+        //routine(i);
 
-		routine(thrds.size());
+        routine(thrds.size());
 
-		for (u64 i = 0; i < thrds.size(); ++i)
-			thrds[i].join();
+        for (u64 i = 0; i < thrds.size(); ++i)
+            thrds[i].join();
 
-		return ss;
-	}
+        return ss;
+    }
 
 }
 
