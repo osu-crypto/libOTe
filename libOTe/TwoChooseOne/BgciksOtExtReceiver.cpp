@@ -4,7 +4,7 @@
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Common/Log.h>
-#include <bitpolymul2/bitpolymul.h>
+#include <libOTe/Tools/bitpolymul/bitpolymul.h>
 #include <libOTe/Base/BaseOT.h>
 #include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
 #include <cryptoTools/Common/ThreadBarrier.h>

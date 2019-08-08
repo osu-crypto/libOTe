@@ -11,6 +11,8 @@
 #include "libOTe_Tests/AknOt_Tests.h"
 #include "libOTe_Tests/BgiTests.h"
 #include "libOTe_Tests/BgciksOT_Tests.h"
+#include "libOTe_Tests/bitpolymul_Tests.h"
+
 using namespace osuCrypto;
 namespace tests_libOTe
 {
@@ -41,7 +43,7 @@ namespace tests_libOTe
 
         tc.add("Bgi_keyGen_128_test                     " , Bgi_keyGen_128_test);               
         tc.add("Bgi_keyGen_test                         " , Bgi_keyGen_test);                   
-        //tc.add("Bgi_PIR_test                            " , Bgi_PIR_test);                      
+        tc.add("bitpolymul_test                         " , bitpolymul_test);
         //tc.add("Bgi_FullDomain_test                     " , Bgi_FullDomain_test);               
         //tc.add("Bgi_FullDomain_iterator_test            " , Bgi_FullDomain_iterator_test);      
         tc.add("Bgi_FullDomain_multikey_test            " , Bgi_FullDomain_multikey_test);   

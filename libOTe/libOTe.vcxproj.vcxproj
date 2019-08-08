@@ -36,6 +36,23 @@
     <ClInclude Include="NChooseOne\RR17\Rr17NcoOtReceiver.h" />
     <ClInclude Include="NChooseOne\RR17\Rr17NcoOtSender.h" />
     <ClInclude Include="Base\SimplestOT.h" />
+    <ClInclude Include="Tools\bitpolymul\bc.h" />
+    <ClInclude Include="Tools\bitpolymul\bc_to_gen_code.h" />
+    <ClInclude Include="Tools\bitpolymul\bitmat_prod.h" />
+    <ClInclude Include="Tools\bitpolymul\bitpolymul.h" />
+    <ClInclude Include="Tools\bitpolymul\btfy.h" />
+    <ClInclude Include="Tools\bitpolymul\butterfly_net.h" />
+    <ClInclude Include="Tools\bitpolymul\byte_inline_func.h" />
+    <ClInclude Include="Tools\bitpolymul\bpmDefines.h" />
+    <ClInclude Include="Tools\bitpolymul\encode.h" />
+    <ClInclude Include="Tools\bitpolymul\gf2128_cantor_iso.h" />
+    <ClInclude Include="Tools\bitpolymul\gf264_cantor_iso.h" />
+    <ClInclude Include="Tools\bitpolymul\gfext_aesni.h" />
+    <ClInclude Include="Tools\bitpolymul\ska.h" />
+    <ClInclude Include="Tools\bitpolymul\transpose.h" />
+    <ClInclude Include="Tools\bitpolymul\transpose_bit.h" />
+    <ClInclude Include="Tools\bitpolymul\trunc_btfy_tab.h" />
+    <ClInclude Include="Tools\bitpolymul\trunc_btfy_tab_64.h" />
     <ClInclude Include="Tools\LinearCode.h" />
     <ClInclude Include="Tools\Tools.h" />
     <ClInclude Include="TwoChooseOne\BgciksOtExtReceiver.h" />
@@ -67,6 +84,17 @@
     <ClCompile Include="NChooseOne\RR17\Rr17NcoOtSender.cpp" />
     <ClCompile Include="Base\SimplestOT.cpp" />
     <ClCompile Include="Tools\bch511.h" />
+    <ClCompile Include="Tools\bitpolymul\bc.cpp" />
+    <ClCompile Include="Tools\bitpolymul\bc_to_lch_gen_code.cpp" />
+    <ClCompile Include="Tools\bitpolymul\bc_to_mono_gen_code.cpp" />
+    <ClCompile Include="Tools\bitpolymul\bitpolymul.cpp" />
+    <ClCompile Include="Tools\bitpolymul\btfy.cpp" />
+    <ClCompile Include="Tools\bitpolymul\butterfly_net.cpp" />
+    <ClCompile Include="Tools\bitpolymul\encode.cpp" />
+    <ClCompile Include="Tools\bitpolymul\gf2128_cantor_iso.cpp" />
+    <ClCompile Include="Tools\bitpolymul\gf264_cantor_iso.cpp" />
+    <ClCompile Include="Tools\bitpolymul\trunc_btfy_tab.cpp" />
+    <ClCompile Include="Tools\bitpolymul\trunc_btfy_tab_64.cpp" />
     <ClCompile Include="Tools\LinearCode.cpp" />
     <ClCompile Include="Tools\Tools.cpp" />
     <ClCompile Include="TwoChooseOne\BgciksOtExtReceiver.cpp" />
@@ -91,34 +119,34 @@
     <ProjectGuid>{D159E2F9-226C-4B19-905E-CC1EA0EB013F}</ProjectGuid>
     <RootNamespace>libOTe</RootNamespace>
     <ProjectName>libOTe</ProjectName>
-    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_DLLRT|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_DLLRT|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -148,7 +176,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(SolutionDir)../bitpolymul2/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/NTL/include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/NTL/include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -160,7 +188,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(SolutionDir)../bitpolymul2/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/NTL/include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/NTL/include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -174,7 +202,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(SolutionDir)../bitpolymul2/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -191,7 +219,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(SolutionDir)../bitpolymul2/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;NDEBUG</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>

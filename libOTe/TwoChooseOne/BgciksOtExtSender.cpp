@@ -2,7 +2,7 @@
 #include "libOTe/DPF/BgiGenerator.h"
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/TwoChooseOne/BgciksOtExtReceiver.h"
-#include "bitpolymul2/bitpolymul.h"
+#include <libOTe/Tools/bitpolymul/bitpolymul.h>
 #include "cryptoTools/Common/Log.h"
 #include "cryptoTools/Common/ThreadBarrier.h"
 #include "libOTe/Base/BaseOT.h"
