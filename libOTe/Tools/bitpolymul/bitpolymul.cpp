@@ -305,7 +305,7 @@ namespace bpm
         if (1 == _n_64)
             n_64 = _n_64;
         else {
-            n_64 = 1 << oc::log2ceil(_n_64);
+            n_64 = 1ull << oc::log2ceil(_n_64);
         }
 
         if (256 > n_64) n_64 = 256;
@@ -323,7 +323,7 @@ namespace bpm
 
 
         u64 n_terms = n_64;
-        u64 log_n = __builtin_ctz(n_terms);
+        u64 log_n = __builtin_ctzll(n_terms);
         auto a_fx = bpm::aligned_vector<u64>(2 * n_terms);
         auto b_fx = bpm::aligned_vector<u64>(2 * n_terms);
 
@@ -388,7 +388,7 @@ namespace bpm
 
 
         u64 n_terms = n_64 * 2;
-        u64 log_n = __builtin_ctz(n_terms);
+        u64 log_n = __builtin_ctzll(n_terms);
 
         auto a_fx_ = bpm::aligned_vector<u64>(n_terms);
         auto b_fx_ = bpm::aligned_vector<u64>(n_terms);

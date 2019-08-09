@@ -73,8 +73,8 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
 	// all Nco Ot extenders must have configure called first. This determines
 	// a variety of parameters such as how many base OTs are required.
 	bool maliciousSecure = false;
-	bool statSecParam = 40;
-	bool inputBitCount = 76; // the kkrt protocol default to 128 but oos can only do 76.
+	u64 statSecParam = 40;
+	u64 inputBitCount = 76; // the kkrt protocol default to 128 but oos can only do 76.
 	recvers[0].configure(maliciousSecure, statSecParam, inputBitCount);
 	senders[0].configure(maliciousSecure, statSecParam, inputBitCount);
 

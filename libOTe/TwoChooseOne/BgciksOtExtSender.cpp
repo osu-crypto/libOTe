@@ -17,7 +17,7 @@ namespace osuCrypto
 
 	u64 secLevel(u64 scale, u64 p, u64 points)
 	{
-		return points * std::log2(scale * p / double(p)) + std::log2(scale * p) / 2;
+		return static_cast<u64>(points * std::log2(scale * p / double(p)) + std::log2(scale * p) / 2);
 		//return std::log2(std::pow(scale * p / (p - 1.0), points) * (scale * p - points + 1));
 	}
 	u64 getPartitions(u64 scaler, u64 p, u64 secParam)
@@ -40,8 +40,6 @@ namespace osuCrypto
 		configure(n, scaler, secParam, mal);
 
 
-		if (gUseBgicksPprf)
-		{
 
 			auto count = mGen.baseOtCount();
 
@@ -88,19 +86,10 @@ namespace osuCrypto
 				break;
 			}
 
-			TODO("comment this out and fix bug");
-			memset(msg.data(), 0, msg.size() * 32);
-            //for (u64 i = 0; i < msg.size(); ++i)
-            //{
-            //    msg[i][0] = ZeroBlock;
-            //    msg[i][1] = ZeroBlock;
-            //}
 
 			mGen.setBase(msg);
 
-			TODO("fix this");
-			mDelta = AllOneBlock;
-            //mDelta = prng.get();
+            mDelta = prng.get();
 			mGen.setValue(mDelta);
             
 			for (u64 i = 0; i < mNumPartitions; ++i)
@@ -112,45 +101,6 @@ namespace osuCrypto
 					mSi = si * mNumPartitions + i;
 				} while (mSi >= mN2);
 			}
-		}
-		else
-		{
-
-			std::vector<std::vector<block>>
-				k1(mNumPartitions), g1(mNumPartitions),
-				k2(mNumPartitions), g2(mNumPartitions);
-
-
-			auto groupSize = 8;
-			auto depth = log2ceil((mSizePer + groupSize - 1) / groupSize) + 1;
-			PRNG prng2(toBlock(n));
-			std::vector<u64> S(mNumPartitions);
-			mDelta = AllOneBlock;// prng2.get();
-
-
-			for (u64 i = 0; i < mNumPartitions; ++i)
-			{
-				u64 mSi;
-				do
-				{
-
-					S[i] = prng2.get<u64>() % mSizePer;
-
-					mSi = S[i] * mNumPartitions + i;
-
-				} while (mSi >= mN2);
-
-				k1[i].resize(depth);
-				k2[i].resize(depth);
-				g1[i].resize(groupSize);
-				g2[i].resize(groupSize);
-
-				BgiGenerator::keyGen(S[i], mDelta, toBlock(i), k1[i], g1[i], k2[i], g2[i]);
-			}
-
-			mGenBgi.init(k1, g1);
-		}
-
 
 		setTimePoint("sender.gen.done");
 	}
@@ -168,13 +118,8 @@ namespace osuCrypto
 		mSizePer = (mN2 + mNumPartitions - 1) / mNumPartitions;
 
 
-		if (gUseBgicksPprf)
-		{
-			//if(mTimer)
-			//	mGen.setTimer(getTimer());
 
 			mGen.configure(mSizePer, mNumPartitions);
-		}
 	}
 
 	//sigma = 0   Receiver
@@ -209,9 +154,10 @@ namespace osuCrypto
     void BgciksOtExtSender::checkRT(span<Channel> chls, Matrix<block>& rT)
     {
         chls[0].send(rT.data(), rT.size());
+        chls[0].send(mGen.mValue);
     }
 
-
+     
 	void BgciksOtExtSender::send(
 		span<std::array<block, 2>> messages,
 		PRNG & prng,
@@ -246,18 +192,11 @@ namespace osuCrypto
         //setTimePoint("sender.expand.transpose");
         Matrix<block> rT;
 
-        if (gUseBgicksPprf)
-        {
             rT.resize(128, mN2 / 128, AllocType::Uninitialized);
             mGen.expand(chls, mDelta, prng, rT, true, mMal);
             setTimePoint("sender.expand.pprf_transpose");
-        }
-        else
-        {
-            rT = expandTranspose(mGenBgi, mN2);
-            setTimePoint("sender.expand.dpf_transpose");
-        }
 
+#
         if (mDebug)
         {
             checkRT(chls, rT);
@@ -476,7 +415,7 @@ namespace osuCrypto
 
 			auto in_i = span<block>(beginBlock, endBlock);
 
-			bitShiftXor(dest, in_i, shift);
+			bitShiftXor(dest, in_i, static_cast<u8>(shift));
 
 			//bv.resize(0);
 			//bv.append((u8*)dest.data(), p);

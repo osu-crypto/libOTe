@@ -16,7 +16,7 @@ GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with BitPolyMul.  If not, see <http://www.gnu.org/licenses/>.
 */
-
+ 
 
 #include "libOTe/config.h"
 #ifdef ENABLE_BITPOLYMUL
@@ -277,7 +277,7 @@ for(int i=offset-1-524286;i>=offset-524287;--i)xorEq(poly[i],poly[i+524287]);
 
 }
 }
-static
+
 void bc_to_lch_256_19_17(__m256i* poly, int logn){
 for(int offset=(1<<18);offset<(1<<logn);offset+=(1<<(18+1))){
 for(int i=offset+(1<<18)-1-196608;i>=offset+(1<<18)-262140;--i)xorEq(poly[i],poly[i+196608]);
@@ -303,7 +303,7 @@ for(int i=offset-1-0;i>=offset-65535;--i)xorEq(poly[i],poly[i+65535]);
 
 }
 }
-static
+
 void bc_to_lch_256_16(__m256i* poly, int logn){
 for(int offset=(1<<15);offset<(1<<logn);offset+=(1<<(15+1))){
 for(int i=offset+(1<<15)-1-16384;i>=offset+(1<<15)-24576;--i)xorEq(poly[i],poly[i+16384]);

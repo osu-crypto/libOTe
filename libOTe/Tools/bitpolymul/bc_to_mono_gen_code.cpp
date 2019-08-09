@@ -16,9 +16,11 @@ GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with BitPolyMul.  If not, see <http://www.gnu.org/licenses/>.
 */
-
+ 
 #include "libOTe/config.h"
 #ifdef ENABLE_BITPOLYMUL
+
+//#pragma message("here ------------------------------");
 
 #include "bc_to_gen_code.h"
 namespace bpm{

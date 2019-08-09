@@ -16,7 +16,7 @@ namespace osuCrypto
     {
     public:
 
-        BgiEvaluator::MultiKey mGenBgi;
+        //BgiEvaluator::MultiKey mGenBgi;
         BgicksMultiPprfSender mGen;
         block mDelta;
         u64 mP, mN2, mN, mNumPartitions, mScaler, mSizePer;

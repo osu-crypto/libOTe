@@ -27,29 +27,21 @@ along with BitPolyMul.  If not, see <http://www.gnu.org/licenses/>.
 #include <cryptoTools/Common/Defines.h>
 #include <vector>
 #include <boost/align/aligned_allocator.hpp>
-
+#include "bpmDefines.h"
 
 namespace bpm
 {
-    void bitpolymul_2_128(uint64_t* c, const uint64_t* a, const uint64_t* b, oc::u64 n_64);
 
-    void bitpolymul_2_64(uint64_t* c, const uint64_t* a, const uint64_t* b, oc::u64 n_64);
+
+
+    void bitpolymul_2_128(uint64_t* c, const uint64_t* a, const uint64_t* b, u64 n_64);
+
+    void bitpolymul_2_64(uint64_t* c, const uint64_t* a, const uint64_t* b, u64 n_64);
 
 
 
     void bitpolymul(uint64_t* c, const uint64_t* a, const uint64_t* b, uint64_t n_64);
 
-
-    template <typename T>
-    using aligned_vector = std::vector<T, boost::alignment::aligned_allocator<T, 32>>;
-
-
-    template<typename T>
-    using span = oc::span<T>;
-
-    using u64 = oc::u64;
-    using u32 = oc::u32;
-    using u8 = oc::u8;
 
     class FFTPoly
     {
@@ -88,6 +80,12 @@ namespace bpm
         void decode(span<u64> dest, DecodeCache& cache, bool destructive);
 
     };
+
+    inline std::ostream& operator<<(std::ostream& o, const FFTPoly& p)
+    {
+        o << toStr(p.mPoly);
+        return o;
+    }
 }
 
 #endif

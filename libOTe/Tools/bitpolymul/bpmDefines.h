@@ -7,8 +7,41 @@
 
 namespace bpm
 {
+
     template <typename T>
     using aligned_vector = std::vector<T, boost::alignment::aligned_allocator<T, 32>>;
+
+    template<typename T>
+    using span = oc::span<T>;
+
+    using u64 = oc::u64;
+    using u32 = oc::u32;
+    using u8 = oc::u8;
+
+
+    template<typename T>
+    struct toStr_ {
+        const T& mV;
+        toStr_(const T& v) : mV(v) {}
+
+
+    };
+    template<typename T>
+    inline toStr_<T> toStr(const T& v)
+    {
+        return toStr_<T>(v);
+    }
+    template<typename T>
+    inline std::ostream& operator<<(std::ostream& o, const toStr_<T>& t)
+    {
+        o << "[" <<t.mV.size() << "][";
+        for (const auto& v : t.mV)
+        {
+            o << v << ", ";
+        }
+        o << "]";
+        return o;
+    }
 }
 
 

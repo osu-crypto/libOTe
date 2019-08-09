@@ -196,7 +196,6 @@ void BgciksOT_Test(const CLP & cmd)
     }
 
 
-    gUseBgicksPprf = cmd.getOr("fakesetup", false) == false;
     PRNG prng(toBlock(cmd.getOr("seed", 0)));
     PRNG prng1(toBlock(cmd.getOr("seed1", 1)));
     Timer timer;

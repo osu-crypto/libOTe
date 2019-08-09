@@ -100,10 +100,10 @@ void recverGetLatency(Channel& chl)
         auto uspGb = std::chrono::duration_cast<std::chrono::nanoseconds>(recvEnd - recvStart - rrt / 2).count();
 
         // nanoseconds per second
-        double usps = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds(1)).count();
+        auto usps = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds(1)).count();
 
         // MegaBits per second
-        auto Mbps = usps / uspGb *  (1 << 10);
+        auto Mbps = usps * 1.0 / uspGb *  (1 << 10);
 
         std::cout << "bandwidth: " << Mbps << " Mbps" << std::endl;
     }

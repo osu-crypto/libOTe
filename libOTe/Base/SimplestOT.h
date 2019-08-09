@@ -18,7 +18,9 @@
     // define that its was already enabled meaning we should use the ASM library
     #define ENABLE_SIMPLEST_ASM_LIB
 #else
-    #define ENABLE_SIMPLESTOT
+    #ifndef ENABLE_SIMPLESTOT
+        #define ENABLE_SIMPLESTOT
+    #endif
 #endif
 
 namespace osuCrypto

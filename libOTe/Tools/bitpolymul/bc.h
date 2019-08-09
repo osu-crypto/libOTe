@@ -23,38 +23,37 @@ along with BitPolyMul.  If not, see <http://www.gnu.org/licenses/>.
 #ifdef ENABLE_BITPOLYMUL
 
 #include <stdint.h>
-
+#include "bpmDefines.h"
 
 namespace bpm {
 
 
     typedef uint64_t bc_sto_t;
+    void bc_to_lch_256_30_12(__m256i* poly, int logn);
+    void bc_to_lch_256_19_17(__m256i* poly, int logn);
+    void bc_to_lch_256_16(__m256i* poly, int logn);
+    void bc_to_mono_256_16(__m256i* poly, int logn);
+    void bc_to_mono_256_19_17(__m256i* poly, int logn);
+    void bc_to_mono_256_30_20(__m256i* poly, int logn);
+
+    void bc_to_lch(bc_sto_t* poly, u64 n_terms);
+
+    void bc_to_mono(bc_sto_t* poly, u64 n_terms);
 
 
-    void bc_to_lch(bc_sto_t* poly, unsigned n_terms);
+    void bc_to_lch_128(bc_sto_t* poly, u64 n_terms);
 
-    void bc_to_mono(bc_sto_t* poly, unsigned n_terms);
-
-
-    void bc_to_lch_128(bc_sto_t* poly, unsigned n_terms);
-
-    void bc_to_mono_128(bc_sto_t* poly, unsigned n_terms);
+    void bc_to_mono_128(bc_sto_t* poly, u64 n_terms);
 
 
-    void bc_to_lch_256(bc_sto_t* poly, unsigned n_terms);
+    void bc_to_lch_256(bc_sto_t* poly, u64 n_terms);
 
-    void bc_to_mono_256(bc_sto_t* poly, unsigned n_terms);
-
-
-
-    void bc_to_lch_2(bc_sto_t* poly, unsigned n_terms);
-
-    void bc_to_mono_2(bc_sto_t* poly, unsigned n_terms);
+    void bc_to_mono_256(bc_sto_t* poly, u64 n_terms);
 
 
-    void bc_to_lch_2_unit256(bc_sto_t* poly, unsigned n_terms);
+    void bc_to_lch_2_unit256(bc_sto_t* poly, u64 n_terms);
 
-    void bc_to_mono_2_unit256(bc_sto_t* poly, unsigned n_terms);
+    void bc_to_mono_2_unit256(bc_sto_t* poly, u64 n_terms);
 
 }
 

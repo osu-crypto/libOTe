@@ -6,6 +6,7 @@
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Network/Channel.h>
+#define DEBUG_PRINT_PPRF
 
 namespace osuCrypto
 {
@@ -60,6 +61,7 @@ namespace osuCrypto
         Matrix<block> mBaseOTs;
         Matrix<u8> mBaseChoices;
         bool mPrint = false;
+        block mDebugValue;
 
         BgicksMultiPprfReceiver() = default;
         BgicksMultiPprfReceiver(const BgicksMultiPprfReceiver&) = delete;

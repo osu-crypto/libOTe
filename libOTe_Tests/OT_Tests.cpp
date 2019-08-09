@@ -697,7 +697,7 @@ namespace tests_libOTe
 
 		//std::default_random_engine gg;
 		//std::exponential_distribution<double> dd(3.5);
-		u64 numTrials = 200;
+		u64 numTrials = 4;
 		for (u64 t = 0; t < numTrials; ++t)
 		{
 

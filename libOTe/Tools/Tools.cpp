@@ -210,16 +210,16 @@ namespace osuCrypto {
         static const u64 chunkSize = 8;
 
         // the number of input columns
-        int bitWidth = in.bounds()[0];
+        int bitWidth = static_cast<int>(in.bounds()[0]);
 
         // In the main loop, we tranpose things in subBlocks. This is how many we have.
         // a subblock is 16 (bits) columns wide and 64 bits tall
         int subBlockWidth = bitWidth / 16;
-        int subBlockHight = out.bounds()[0] / (8 * chunkSize);
+        int subBlockHight = static_cast<int>(out.bounds()[0]) / (8 * chunkSize);
 
         // since we allows arbitrary sized inputs, we have to deal with the left overs
-        int leftOverHeight = out.bounds()[0] % (chunkSize * 8);
-        int leftOverWidth = in.bounds()[0] % 16;
+        int leftOverHeight = static_cast<int>(out.bounds()[0]) % (chunkSize * 8);
+        int leftOverWidth = static_cast<int>(in.bounds()[0]) % 16;
 
 
         // make sure that the output can hold the input.

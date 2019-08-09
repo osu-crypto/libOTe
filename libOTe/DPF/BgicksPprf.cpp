@@ -6,7 +6,6 @@
 namespace osuCrypto
 {
 
-#define DEBUG_PRINT_PPRF
 
     BgicksMultiPprfSender::BgicksMultiPprfSender(u64 domainSize, u64 pointCount)
     {
@@ -674,8 +673,8 @@ namespace osuCrypto
             std::vector<std::array<block, 8>> ftree(1ull << (mDepth + 1));
 
             // The delta value on the active path.
-            block deltaValue;
-            chl.recv(deltaValue);
+            //block deltaValue;
+            chl.recv(mDebugValue);
 #endif
 
             // Returns the i'th level of the current 8 trees. The 
@@ -956,7 +955,7 @@ namespace osuCrypto
                     auto fLevel1 = getLevel(d + 1, true);
                     if (neq(fLevel1[inactiveChildIdx][j], inactiveChild))
                         throw RTE_LOC;
-                    if (neq(fLevel1[activeChildIdx][j], activeChild ^ deltaValue))
+                    if (neq(fLevel1[activeChildIdx][j], activeChild ^ mDebugValue))
                         throw RTE_LOC;
 
                     if (mPrint)

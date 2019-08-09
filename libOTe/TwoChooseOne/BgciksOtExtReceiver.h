@@ -9,7 +9,7 @@
 namespace osuCrypto
 {
 
-    extern bool gUseBgicksPprf;
+    //extern bool gUseBgicksPprf;
 
     enum class MultType
     {
@@ -55,13 +55,13 @@ namespace osuCrypto
 
         bool mDebug = true;
 
-        BgiEvaluator::MultiKey mGenBgi;
+        //BgiEvaluator::MultiKey mGenBgi;
         BgicksMultiPprfReceiver mGen;
 
 
     };
 
-    Matrix<block> expandTranspose(BgiEvaluator::MultiKey & gen, u64 n);
+    //Matrix<block> expandTranspose(BgiEvaluator::MultiKey & gen, u64 n);
 
 
     inline u8 parity(block b)

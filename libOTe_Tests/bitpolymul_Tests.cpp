@@ -63,15 +63,16 @@ void bitpolymul_test(const CLP& cmd)
     bm_func1(rPoly2.data(), poly1.data(), poly2.data(), len);
 
     if (32 >= len && cmd.isSet("v")) {
-        printf("poly1 :"); u64_dump(poly1); puts("");
-        printf("poly2 :"); u64_dump(poly2); puts("");
+        std::cout << "poly1  :" << toStr(poly1) << std::endl;
+        std::cout << "poly2  :" << toStr(poly2) << std::endl;
+        std::cout << "rPoly1 :" << toStr(rPoly1) << std::endl;
 
-        printf("rPoly1 :"); u64_dump(rPoly1); puts("");
 
-        if (rPoly1 != rPoly2) {
-            printf("consistency fail: \n");
-            printf("rPoly2 :"); u64_fdump(stdout, rPoly2); puts("");
-        }
+    }
+    if (rPoly1 != rPoly2) {
+        printf("consistency fail: \n");
+        //printf("rPoly2 :"); u64_fdump(stdout, rPoly2); puts("");
+        std::cout << "rPoly2 :" << toStr(rPoly2) << std::endl;
     }
 
 
@@ -119,13 +120,14 @@ void bitpolymul_test(const CLP& cmd)
             if (cmd.isSet("v"))
             {
 
-                printf("consistency fail: %d.\n", int(i));
-                printf("res1:"); u64_fdump(stdout, rPoly1); puts("");
-                printf("res2:"); u64_fdump(stdout, rPoly2); puts("");
+                std::cout << "consistency fail: " << int(i) << "\n"
+                    << "res1:" << toStr(rPoly1) << "\n"
+                    << "res2:" << toStr(rPoly2) << "\n";
 
                 bitpolymul_2_64(rPoly1.data(), poly2.data(), poly1.data(), len);
 
-                printf("res3:"); u64_fdump(stdout, rPoly1); puts("");
+                std::cout
+                    << "res3:" << toStr(rPoly1) << std::endl;
 
                 if (back1 != poly1) printf("back 1 failed");
                 if (back2 != poly2) printf("back 2 failed");
@@ -159,8 +161,8 @@ void bitpolymul_test(const CLP& cmd)
         {
 
             std::cout << "add plain failed." << std::endl;
-            printf("poly_r:"); u64_fdump(stdout, poly_r); puts("");
-            printf("fft_r: "); u64_fdump(stdout, fft_r); puts("");
+            std::cout << "poly_r:" << toStr(poly_r) << std::endl;
+            std::cout << "fft_r: " << toStr(fft_r) << std::endl;
             chk++;
         }
 

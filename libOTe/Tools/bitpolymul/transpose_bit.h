@@ -34,6 +34,7 @@ namespace bpm {
     }
 
 
+    //USED;
     static inline
         void tr_bit_8x8_b4_avx(uint8_t* _r, const uint8_t* m) {
 
