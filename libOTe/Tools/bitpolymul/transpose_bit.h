@@ -14,12 +14,12 @@ Code is borrowed from HOEVEN, LARRIEU, and LECERF.
 
 namespace bpm {
 
-    static uint64_t _tr_bit_mask_4[4] BIT_POLY_ALIGN(32) = { 0x00000000f0f0f0f0ULL,0x00000000f0f0f0f0ULL,0x00000000f0f0f0f0ULL,0x00000000f0f0f0f0ULL };
-    static uint64_t _tr_bit_mask_2[4] BIT_POLY_ALIGN(32) = { 0x0000cccc0000ccccULL,0x0000cccc0000ccccULL,0x0000cccc0000ccccULL,0x0000cccc0000ccccULL };
-    static uint64_t _tr_bit_mask_1[4] BIT_POLY_ALIGN(32) = { 0x00aa00aa00aa00aaULL,0x00aa00aa00aa00aaULL,0x00aa00aa00aa00aaULL,0x00aa00aa00aa00aaULL };
+    alignas(32) const uint64_t _tr_bit_mask_4[4] = { 0x00000000f0f0f0f0ULL,0x00000000f0f0f0f0ULL,0x00000000f0f0f0f0ULL,0x00000000f0f0f0f0ULL };
+    alignas(32) const uint64_t _tr_bit_mask_2[4] = { 0x0000cccc0000ccccULL,0x0000cccc0000ccccULL,0x0000cccc0000ccccULL,0x0000cccc0000ccccULL };
+    alignas(32) const uint64_t _tr_bit_mask_1[4] = { 0x00aa00aa00aa00aaULL,0x00aa00aa00aa00aaULL,0x00aa00aa00aa00aaULL,0x00aa00aa00aa00aaULL };
 
 
-    static inline
+    inline
         __m256i tr_bit_8x8_b4_ymmx1(__m256i n) {
         __m256i a;
 
@@ -35,7 +35,7 @@ namespace bpm {
 
 
     //USED;
-    static inline
+    inline
         void tr_bit_8x8_b4_avx(uint8_t* _r, const uint8_t* m) {
 
         __m256i n = _mm256_load_si256((__m256i*) m);

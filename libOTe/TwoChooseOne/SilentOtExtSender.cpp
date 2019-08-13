@@ -1,8 +1,9 @@
-#include "libOTe/TwoChooseOne/BgciksOtExtSender.h"
-#include "libOTe/DPF/BgiGenerator.h"
+#include "libOTe/TwoChooseOne/SilentOtExtSender.h"
+#ifdef ENABLE_SILENTOT
+
 #include "libOTe/Tools/Tools.h"
-#include "libOTe/TwoChooseOne/BgciksOtExtReceiver.h"
-#include <libOTe/Tools/bitpolymul/bitpolymul.h>
+#include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
+#include <libOTe/Tools/bitpolymul.h>
 #include "cryptoTools/Common/Log.h"
 #include "cryptoTools/Common/ThreadBarrier.h"
 #include "libOTe/Base/BaseOT.h"
@@ -29,10 +30,10 @@ namespace osuCrypto
 		return roundUpTo(ret, 8);
 	}
 
-	void BgciksOtExtSender::genBase(
+	void SilentOtExtSender::genBase(
 		u64 n, Channel& chl, PRNG& prng, 
 		u64 scaler, u64 secParam, bool mal,
-		BgciksBaseType basetype, u64 threads )
+		SilentBaseType basetype, u64 threads )
 	{
 
 		setTimePoint("sender.gen.start");
@@ -47,16 +48,16 @@ namespace osuCrypto
 
 			switch (basetype)
 			{
-			case BgciksBaseType::None:
+			case SilentBaseType::None:
 				break;
-			case BgciksBaseType::Base:
+			case SilentBaseType::Base:
 			{
 				NaorPinkas base;
 				base.send(msg, prng, chl, threads);
 				setTimePoint("sender.gen.baseOT");
 				break;
 			}
-			case BgciksBaseType::BaseExtend:
+			case SilentBaseType::BaseExtend:
 			{
 				std::array<block, 128> baseMsg;
 
@@ -71,7 +72,7 @@ namespace osuCrypto
 				setTimePoint("sender.gen.baseExtend");
 				break;
 			}
-			case BgciksBaseType::Extend:
+			case SilentBaseType::Extend:
 			{
 				std::array<block, 128> baseMsg;
 				BitVector bv(128);
@@ -105,7 +106,7 @@ namespace osuCrypto
 		setTimePoint("sender.gen.done");
 	}
 
-	void BgciksOtExtSender::configure(const u64& n, const u64& scaler, const u64& secParam, bool mal)
+	void SilentOtExtSender::configure(const u64& n, const u64& scaler, const u64& secParam, bool mal)
 	{
 		mP = nextPrime(n);
 		mN = roundUpTo(mP, 128);
@@ -151,14 +152,14 @@ namespace osuCrypto
 	//    w = r * H
 
 
-    void BgciksOtExtSender::checkRT(span<Channel> chls, Matrix<block>& rT)
+    void SilentOtExtSender::checkRT(span<Channel> chls, Matrix<block>& rT)
     {
         chls[0].send(rT.data(), rT.size());
         chls[0].send(mGen.mValue);
     }
 
      
-	void BgciksOtExtSender::send(
+	void SilentOtExtSender::send(
 		span<std::array<block, 2>> messages,
 		PRNG & prng,
 		Channel & chl)
@@ -166,7 +167,7 @@ namespace osuCrypto
 		send(messages, prng, { &chl,1 });
 	}
 
-    void BgciksOtExtSender::send(
+    void SilentOtExtSender::send(
         span<std::array<block, 2>> messages,
         PRNG& prng,
         span<Channel> chls)
@@ -227,14 +228,14 @@ namespace osuCrypto
 
 
 	}
-	void BgciksOtExtSender::randMulNaive(Matrix<block> & rT, span<std::array<block, 2>> & messages)
+	void SilentOtExtSender::randMulNaive(Matrix<block> & rT, span<std::array<block, 2>> & messages)
 	{
 
 		std::vector<block> mtxColumn(rT.cols());
 
 		PRNG pubPrng(ZeroBlock);
 
-		for (u64 i = 0; i < messages.size(); ++i)
+		for (i64 i = 0; i < messages.size(); ++i)
 		{
 			block& m0 = messages[i][0];
 			block& m1 = messages[i][1];
@@ -248,34 +249,33 @@ namespace osuCrypto
 
 		setTimePoint("sender.expand.mul");
 	}
-	namespace
-	{
-		struct format
-		{
-			BitVector& bv;
-			u64 shift;
-			format(BitVector& v0, u64 v1) : bv(v0), shift(v1) {}
-		};
+	//namespace
+	//{
+	//	struct format
+	//	{
+	//		BitVector& bv;
+	//		u64 shift;
+	//		format(BitVector& v0, u64 v1) : bv(v0), shift(v1) {}
+	//	};
 
-		std::ostream& operator<<(std::ostream& o, format& f)
-		{
-			auto end = f.bv.end();
-			auto cur = f.bv.begin();
-			for (u64 i = 0; i < f.bv.size(); ++i, ++cur)
-			{
-				if (i % 64 == f.shift)
-					o << std::flush << Color::Blue;
-				if (i % 64 == 0)
-					o << std::flush << Color::Default;
+	//	std::ostream& operator<<(std::ostream& o, format& f)
+	//	{
+	//		auto cur = f.bv.begin();
+	//		for (u64 i = 0; i < f.bv.size(); ++i, ++cur)
+	//		{
+	//			if (i % 64 == f.shift)
+	//				o << std::flush << Color::Blue;
+	//			if (i % 64 == 0)
+	//				o << std::flush << Color::Default;
 
-				o << int(*cur) << std::flush;
-			}
+	//			o << int(*cur) << std::flush;
+	//		}
 
-			o << Color::Default;
+	//		o << Color::Default;
 
-			return o;
-		}
-	}
+	//		return o;
+	//	}
+	//}
 
 	void bitShiftXor(span<block> dest, span<block> in, u8 bitShift)
 	{
@@ -312,7 +312,7 @@ namespace osuCrypto
 			}
 
 
-			if (end != dest.size())
+			if (end != static_cast<u64>(dest.size()))
 			{
 				u64 b0 = *(u64*)inPtr;
 				b0 = (b0 >> bitShift);
@@ -348,7 +348,7 @@ namespace osuCrypto
 				dest[i] = dest[i] ^ b0 ^ b1;
 			}
 
-			if (end != dest.size())
+			if (end != static_cast<u64>(dest.size()))
 			{
 				block b0 = _mm_load_si128((block*)inPtr);
 				b0 = _mm_srli_epi64(b0, bitShift);
@@ -385,10 +385,10 @@ namespace osuCrypto
 		auto pBlocks = (p + 127) / 128;
 		auto pBytes = (p + 7) / 8;
 
-		if (dest.size() < pBlocks)
+		if (static_cast<u64>(dest.size()) < pBlocks)
 			throw RTE_LOC;
 
-		if (in.size() < pBlocks)
+		if (static_cast<u64>(in.size()) < pBlocks)
 			throw RTE_LOC;
 
 		auto count = (in.size() * 128 + p - 1) / p;
@@ -439,7 +439,7 @@ namespace osuCrypto
 
 
 
-	void BgciksOtExtSender::randMulQuasiCyclic(Matrix<block> & rT, span<std::array<block, 2>> & messages, u64 threads)
+	void SilentOtExtSender::randMulQuasiCyclic(Matrix<block> & rT, span<std::array<block, 2>> & messages, u64 threads)
 	{
 		auto nBlocks = mN / 128;
 		auto n2Blocks = mN2 / 128;
@@ -649,3 +649,4 @@ namespace osuCrypto
 	}
 }
 
+#endif

@@ -17,136 +17,21 @@ You should have received a copy of the GNU Lesser General Public License
 along with BitPolyMul.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "bitpolymul.h"
+#ifdef ENABLE_BITPOLYMUL
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
-#include "bc.h"
-
-#include "butterfly_net.h"
-
-
-
-//#define MAX_TERMS 65536
-
-#include "gfext_aesni.h"
-#include "bpmDefines.h"
-#include <cryptoTools/Common/Defines.h>
 #include <vector>
 
+#include "bitpolymul/bc.h"
+#include "bitpolymul/gfext_aesni.h"
+#include "bitpolymul/bpmDefines.h"
+#include "bitpolymul/btfy.h"
+#include "bitpolymul/encode.h"
+
+#include <cryptoTools/Common/Defines.h>
+
 using namespace oc;
-
-
-//#define LOG2(X) ((u64) (8*sizeof (u64 long long) - __builtin_clzll((X)) - 1))
-
-
-//
-//void bitpolymul_simple(uint64_t* c, const uint64_t* a, const uint64_t* b, u64 _n_64)
-//{
-//    if (0 == _n_64) return;
-//    u64 n_64 = 0;
-//    if (1 == _n_64) n_64 = _n_64;
-//    else {
-//        u64 log_2_n64 = LOG2(_n_64);
-//        u64 log_2_n64_1 = LOG2(_n_64 - 1);
-//        if (log_2_n64 == log_2_n64_1)log_2_n64 += 1;
-//        n_64 = 1 << log_2_n64;
-//    }
-//
-//    //uint64_t a_bc[MAX_TERMS] BIT_POLY_ALIGN(32);
-//    //uint64_t b_bc[MAX_TERMS] BIT_POLY_ALIGN(32);
-//    uint64_t* a_bc = (uint64_t*)aligned_alloc(32, sizeof(uint64_t) * n_64);
-//    if (NULL == a_bc) { printf("alloc fail.\n"); exit(-1); }
-//    uint64_t* b_bc = (uint64_t*)aligned_alloc(32, sizeof(uint64_t) * n_64);
-//    if (NULL == b_bc) { printf("alloc fail.\n"); exit(-1); }
-//
-//#ifdef _PROFILE_SIMPLE_
-//    bm_start(&bm_bc);
-//#endif
-//    memcpy(a_bc, a, sizeof(uint64_t) * _n_64);
-//    for (u64 i = _n_64; i < n_64; i++) a_bc[i] = 0;
-//    bc_to_lch(a_bc, n_64);
-//
-//    memcpy(b_bc, b, sizeof(uint64_t) * _n_64);
-//    for (u64 i = _n_64; i < n_64; i++) b_bc[i] = 0;
-//    bc_to_lch(b_bc, n_64);
-//#ifdef _PROFILE_SIMPLE_
-//    bm_stop(&bm_bc);
-//#endif
-//
-//    u64 n_terms = 2 * n_64;
-//
-//    //uint64_t a_fx[4*MAX_TERMS] BIT_POLY_ALIGN(32) = {0};
-//    //uint64_t b_fx[4*MAX_TERMS] BIT_POLY_ALIGN(32) = {0};
-//    uint64_t* a_fx = (uint64_t*)aligned_alloc(32, sizeof(uint64_t) * 2 * n_terms);
-//    if (NULL == a_fx) { printf("alloc fail.\n"); exit(-1); }
-//    uint64_t* b_fx = (uint64_t*)aligned_alloc(32, sizeof(uint64_t) * 2 * n_terms);
-//    if (NULL == b_fx) { printf("alloc fail.\n"); exit(-1); }
-//
-//    for (u64 i = 0; i < _n_64; i++) {
-//        a_fx[2 * i] = a_bc[i];
-//        a_fx[2 * i + 1] = 0;
-//    }
-//    for (u64 i = _n_64; i < n_64; i++) { a_fx[2 * i] = 0; a_fx[2 * i + 1] = 0; }
-//    for (u64 i = 0; i < _n_64; i++) {
-//        b_fx[2 * i] = b_bc[i];
-//        b_fx[2 * i + 1] = 0;
-//    }
-//    for (u64 i = _n_64; i < n_64; i++) { b_fx[2 * i] = 0; b_fx[2 * i + 1] = 0; }
-//
-//#ifdef _PROFILE_SIMPLE_
-//    bm_start(&bm_butterfly);
-//#endif
-//    butterfly_net_half_inp_clmul(a_fx, n_terms);
-//    butterfly_net_half_inp_clmul(b_fx, n_terms);
-//
-//#ifdef _PROFILE_SIMPLE_
-//    bm_stop(&bm_butterfly);
-//    bm_start(&bm_pointmul);
-//#endif
-//    for (u64 i = 0; i < n_terms; i++) {
-//        gf2ext128_mul_sse((uint8_t*)& a_fx[i * 2], (uint8_t*)& a_fx[i * 2], (uint8_t*)& b_fx[i * 2]);
-//    }
-//
-//#ifdef _PROFILE_SIMPLE_
-//    bm_stop(&bm_pointmul);
-//    bm_start(&bm_ibutterfly);
-//#endif
-//
-//    i_butterfly_net_clmul(a_fx, n_terms);
-//
-//#ifdef _PROFILE_SIMPLE_
-//    bm_stop(&bm_ibutterfly);
-//    bm_start(&bm_ibc);
-//#endif
-//    bc_to_mono_128(a_fx, n_terms);
-//
-//#ifdef _PROFILE_SIMPLE_
-//    bm_stop(&bm_ibc);
-//#endif
-//
-//
-//    c[0] = a_fx[0];
-//    for (u64 i = 1; i < (2 * _n_64); i++) {
-//        c[i] = a_fx[i * 2];
-//        c[i] ^= a_fx[(i - 1) * 2 + 1];
-//    }
-//
-//    free(a_bc);
-//    free(b_bc);
-//    free(a_fx);
-//    free(b_fx);
-//
-//}
-
-
-
-/////////////////////////////////////////////////////////////////////////////////
-
-
-#include "btfy.h"
-#include "encode.h"
-
 
 namespace bpm
 {
@@ -227,19 +112,9 @@ namespace bpm
 
         resize(a.mN);
 
-        auto aPtr = (block*)a.mPoly.data();
-        auto bPtr = (block*)b.mPoly.data();
-        auto cPtr = (block*)mPoly.data();
-
         for (uint64_t i = 0; i < mPoly.size(); i++)
         {
             mPoly[i] = a.mPoly[i] ^ b.mPoly[i];
-            //block cc = _mm_load_si128(aPtr) ^ _mm_load_si128(bPtr);
-            //_mm_store_si128(cPtr, cc);
-
-            //++aPtr;
-            //++bPtr;
-            //++cPtr;
         }
     }
 
@@ -252,7 +127,7 @@ namespace bpm
 
     void FFTPoly::decode(span<u64> dest, DecodeCache& cache, bool destructive)
     {
-        if (dest.size() != 2 * mN)
+        if (static_cast<u64>(dest.size()) != 2 * mN)
             throw RTE_LOC;
 
         if (cache.mTemp.size() < mPoly.size())
@@ -417,8 +292,4 @@ namespace bpm
     }
 
 }
-
-
-
-
-
+#endif

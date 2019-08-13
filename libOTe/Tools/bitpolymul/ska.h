@@ -23,7 +23,7 @@ along with BitPolyMul.  If not, see <http://www.gnu.org/licenses/>.
 
 
 namespace bpm {
-    static inline
+     inline
         unsigned get_s_k_a_cantor(unsigned k, unsigned a) { return (a >> k); }
 }
 #endif

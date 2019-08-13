@@ -1,4 +1,6 @@
 #pragma once
+#include <libOTe/config.h>
+#ifdef ENABLE_SILENTOT
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/BitVector.h>
@@ -95,3 +97,4 @@ namespace osuCrypto
         //void yeild(Channel& chl, PRNG& prng, span<block> output);
     };
 }
+#endif

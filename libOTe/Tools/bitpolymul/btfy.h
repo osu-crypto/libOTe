@@ -23,6 +23,7 @@ along with BitPolyMul.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <stdint.h>
 
+#include "bpmDefines.h"
 
 namespace bpm {
 

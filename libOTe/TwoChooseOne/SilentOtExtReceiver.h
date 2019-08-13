@@ -1,15 +1,16 @@
 #pragma once
+#include <libOTe/config.h>
+#ifdef ENABLE_SILENTOT
+
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Network/Channel.h>
-#include <libOTe/DPF/BgiEvaluator.h>
 #include <cryptoTools/Common/Timer.h>
 #include <libOTe/Tools/Tools.h>
-#include <libOTe/DPF/BgicksPprf.h>
+#include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 namespace osuCrypto
 {
 
-    //extern bool gUseBgicksPprf;
 
     enum class MultType
     {
@@ -17,13 +18,13 @@ namespace osuCrypto
         QuasiCyclic
     };
 
-    class BgciksOtExtReceiver : public TimerAdapter
+    class SilentOtExtReceiver : public TimerAdapter
     {
     public:
 
 		void genBase(u64 n, Channel& chl, PRNG& prng,
 			u64 scaler = 4, u64 secParam = 80, bool mal = false,
-			BgciksBaseType base = BgciksBaseType::None,
+			SilentBaseType base = SilentBaseType::None,
 			u64 threads = 1);
 
         void configure(const osuCrypto::u64 &n, const osuCrypto::u64 &scaler, const osuCrypto::u64 &secParam,
@@ -56,7 +57,7 @@ namespace osuCrypto
         bool mDebug = false;
 
         //BgiEvaluator::MultiKey mGenBgi;
-        BgicksMultiPprfReceiver mGen;
+        SilentMultiPprfReceiver mGen;
 
 
     };
@@ -72,7 +73,14 @@ namespace osuCrypto
         b = b ^ (b >> 8);
         b = b ^ (b >> 16);
         b = b ^ (b >> 32);
-        return (((u64*)&b)[0] ^ ((u64*)&b)[1]) & 1;
+
+        union blocku64
+        {
+            block b;
+            u64 u[2];
+        };
+        auto bb = reinterpret_cast<u64*>(&b);
+        return (bb[0] ^ bb[1]) & 1;
     }
 
     inline void mulRand(PRNG &pubPrng, span<block> mtxColumn, Matrix<block> &rT, BitIterator iter)
@@ -122,7 +130,7 @@ namespace osuCrypto
 
                 }
 
-                for (u64 k = end; k < row.size(); ++k)
+                for (i64 k = end; k < row.size(); ++k)
                     sum[0] = sum[0] ^ (row[k] & mtxColumn[k]);
 
                 sum[0] = sum[0] ^ sum[1];
@@ -137,7 +145,7 @@ namespace osuCrypto
             }
             else
             {
-                for (u64 k = 0; k < row.size(); ++k)
+                for (i64 k = 0; k < row.size(); ++k)
                     sum[0] = sum[0] ^ (row[k] & mtxColumn[k]);
             }
 
@@ -155,3 +163,4 @@ namespace osuCrypto
     }
 
 }
+#endif

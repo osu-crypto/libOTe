@@ -53,9 +53,11 @@ endif()
 #############################################
 
 
-option(ENABLE_SIMPLESTOT "Build the assembly based SimplestOT library" OFF)
+option(ENABLE_SIMPLESTOT "Build the assembly based SimplestOT library." OFF)
+option(ENABLE_SILENTOT   "Build the Slient OT protocol." OFF)
 
 message(STATUS "Option: ENABLE_SIMPLESTOT = ${ENABLE_SIMPLESTOT}")
+message(STATUS "Option: ENABLE_SILENTOT   = ${ENABLE_SILENTOT}")
 
 configure_file(libOTe/config.h.in libOTe/config.h)
 

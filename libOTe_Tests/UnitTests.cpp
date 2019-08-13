@@ -9,8 +9,7 @@
 #include "libOTe_Tests/OT_Tests.h"
 #include "libOTe_Tests/NcoOT_Tests.h"
 #include "libOTe_Tests/AknOt_Tests.h"
-#include "libOTe_Tests/BgiTests.h"
-#include "libOTe_Tests/BgciksOT_Tests.h"
+#include "libOTe_Tests/SilentOT_Tests.h"
 #include "libOTe_Tests/bitpolymul_Tests.h"
 
 using namespace osuCrypto;
@@ -40,19 +39,13 @@ namespace tests_libOTe
         tc.add("NaorPinkasOt_Test                       ", NaorPinkasOt_Test_Impl);
         tc.add("SimplestOT_Test_Impl                    ", SimplestOT_Test_Impl);
 
-
-        tc.add("Bgi_keyGen_128_test                     " , Bgi_keyGen_128_test);               
-        tc.add("Bgi_keyGen_test                         " , Bgi_keyGen_test);                   
-        tc.add("bitpolymul_test                         " , bitpolymul_test);
-        //tc.add("Bgi_FullDomain_test                     " , Bgi_FullDomain_test);               
-        //tc.add("Bgi_FullDomain_iterator_test            " , Bgi_FullDomain_iterator_test);      
-        tc.add("Bgi_FullDomain_multikey_test            " , Bgi_FullDomain_multikey_test);   
         tc.add("bitShift_test                           ", bitShift_test);
         tc.add("modp_test                               ", modp_test);
-                                                       
-        tc.add("BgciksOT_Test                           ", BgciksOT_Test);
-        tc.add("BgciksPprf_Test                         ", BgciksPprf_Test);
-        tc.add("BgciksPprf_trans_Test                   ", BgciksPprf_trans_Test);
+        tc.add("bitpolymul_test                         ", bitpolymul_test);
+
+        tc.add("SilentOT_Test                           ", SilentOT_Test);
+        tc.add("SilentPprf_Test                         ", SilentPprf_Test);
+        tc.add("SilentPprf_trans_Test                   ", SilentPprf_trans_Test);
                                                        
     });
 

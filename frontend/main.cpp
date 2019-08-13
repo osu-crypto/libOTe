@@ -31,15 +31,15 @@ int miraclTestMain();
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtSender.h"
 
-#include "libOTe/TwoChooseOne/BgciksOtExtReceiver.h"
-#include "libOTe/TwoChooseOne/BgciksOtExtSender.h"
+#include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/SilentOtExtSender.h"
 
 #include "libOTe/NChooseK/AknOtReceiver.h"
 #include "libOTe/NChooseK/AknOtSender.h"
 
 #include <cryptoTools/Common/CLP.h>
 #include "util.h"
-
+#include <iomanip>
 #include <boost/preprocessor/variadic/size.hpp>
 
 
@@ -161,7 +161,7 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
 			std::vector<u64> choices(numOTs);
 
 			// define which messages the receiver should learn.
-			for (u64 i = 0; i < numOTs; ++i)
+			for (int i = 0; i < numOTs; ++i)
 				choices[i] = prng.get<u8>();
 
 			// the messages that were learned are written to recvMsgs.
@@ -293,12 +293,13 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 	std::vector<OtExtSender> senders(numThreads);
 	std::vector<OtExtRecver> receivers(numThreads);
 
+#ifdef LIBOTE_HAS_BASE_OT
 	// Now compute the base OTs, we need to set them on the first pair of extenders.
 	// In real code you would only have a sender or reciever, not both. But we do 
 	// here just showing the example. 
 	if (role == Role::Receiver)
 	{
-		NaorPinkas base;
+        DefaultBaseOT base;
 		std::array<std::array<block, 2>, 128> baseMsg;
 		base.send(baseMsg, prng, chls[0], numThreads);
 		receivers[0].setBaseOts(baseMsg, prng, chls[0]);
@@ -308,13 +309,14 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 	else
 	{
 
-		NaorPinkas base;
+        DefaultBaseOT base;
 		BitVector bv(128);
 		std::array<block, 128> baseMsg;
 		bv.randomize(prng);
 		base.receive(bv, baseMsg, prng, chls[0], numThreads);
 		senders[0].setBaseOts(baseMsg, bv,chls[0]);
 	}
+#endif 
 
 	// for the rest of the extenders, call split. This securely 
 	// creates two sets of extenders that can be used in parallel.
@@ -415,10 +417,12 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 //template<typename OtExtSender, typename OtExtRecver>
 void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip, std::string tag, CLP & cmd)
 {
+#ifdef ENABLE_SILENTOT
+
 	if (numOTs == 0)
 		numOTs = 1 << 20;
-	using OtExtSender = BgciksOtExtSender;
-	using OtExtRecver = BgciksOtExtReceiver;
+	using OtExtSender = SilentOtExtSender;
+	using OtExtRecver = SilentOtExtReceiver;
 
 	// get up the networking
 	auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
@@ -436,7 +440,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 	OtExtRecver receiver;
 
 
-	auto routine = [&](int s, int sec, BgciksBaseType type)
+	auto routine = [&](int s, int sec, SilentBaseType type)
 	{
 		// get a random number generator seeded from the system
 		PRNG prng(sysRandomSeed());
@@ -480,16 +484,16 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 	cmd.setDefault("sec", "80");
 	std::vector<int> ss = cmd.getMany<int>("s");
 	std::vector<int> secs = cmd.getMany<int>("sec");
-	std::vector< BgciksBaseType> types;
+	std::vector< SilentBaseType> types;
 
 	if (cmd.isSet("base"))
-		types.push_back(BgciksBaseType::Base);
+		types.push_back(SilentBaseType::Base);
 	if (cmd.isSet("baseExtend"))
-		types.push_back(BgciksBaseType::BaseExtend);
+		types.push_back(SilentBaseType::BaseExtend);
 	if (cmd.isSet("extend"))
-		types.push_back(BgciksBaseType::Extend);
+		types.push_back(SilentBaseType::Extend);
 	if (types.size() == 0 || cmd.isSet("none"))
-		types.push_back(BgciksBaseType::None);
+		types.push_back(SilentBaseType::None);
 
 
 	for (auto s : ss)
@@ -521,13 +525,13 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 				std::string typeStr = "n ";
 				switch (type)
 				{
-				case BgciksBaseType::Base:
+				case SilentBaseType::Base:
 					typeStr = "b ";
 					break;
-				case BgciksBaseType::Extend:
+				case SilentBaseType::Extend:
 					typeStr = "e ";
 					break;
-				case BgciksBaseType::BaseExtend:
+				case SilentBaseType::BaseExtend:
 					typeStr = "be";
 					break;
 				default:
@@ -554,6 +558,8 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 						lout << " **** receiver ****\n" << recvTimer << std::endl;
 				}
 			}
+
+#endif
 }
 
 
@@ -615,7 +621,7 @@ kkrt{ "kk", "kkrt" },
 iknp{ "i", "iknp" },
 diknp{ "diknp" },
 oos{ "o", "oos" },
-bgciks{ "b", "bgciks" },
+Silent{ "s", "Silent" },
 akn{ "a", "akn" },
 np{ "np" },
 simple{ "simplest" };
@@ -734,6 +740,25 @@ void getLatency(CLP & cmd)
 	}
 }
 
+#ifdef ENABLE_SIMPLESTOT
+const bool spEnabled = true;
+#else 
+const bool spEnabled = false;
+#endif
+#ifdef NAOR_PINKAS
+const bool npEnabled = true;
+#else 
+const bool npEnabled = false;
+#endif
+
+#ifdef ENABLE_SILENTOT
+const bool silentEnabled = true;
+#else 
+const bool silentEnabled = false;
+#endif
+
+
+
 int main(int argc, char** argv)
 {
 	CLP cmd;
@@ -770,8 +795,8 @@ int main(int argc, char** argv)
 	flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
 	flagSet |= runIf(NChooseOne_example<OosNcoOtSender, OosNcoOtReceiver>, cmd, oos);
 
-	//<BgciksOtExtSender, BgciksOtExtReceiver>
-	flagSet |= runIf(TwoChooseOneG_example, cmd, bgciks);
+	//<SilentOtExtSender, SilentOtExtReceiver>
+	flagSet |= runIf(TwoChooseOneG_example, cmd, Silent);
 
 
 
@@ -786,17 +811,6 @@ int main(int argc, char** argv)
 			<< "#                     Peter Rindal                    #\n"
 			<< "#######################################################\n" << std::endl;
 
-		bool spEnabled, npEnabled;
-#ifdef ENABLE_SIMPLESTOT
-		spEnabled = true;
-#else 
-		spEnabled = false;
-#endif
-#ifdef NAOR_PINKAS
-		npEnabled = true;
-#else 
-		npEnabled = false;
-#endif
 
 		std::cout
 			<< "Protocols:\n"
@@ -804,7 +818,7 @@ int main(int argc, char** argv)
 			<< Color::Green << "  -np      " << Color::Default << "  : to run the NaorPinkas active secure 1-out-of-2 base OT" << (npEnabled ? "" : "(disabled)") << "\n"
 			<< Color::Green << "  -iknp    " << Color::Default << "  : to run the IKNP   passive secure 1-out-of-2       OT\n"
 			<< Color::Green << "  -diknp   " << Color::Default << "  : to run the IKNP   passive secure 1-out-of-2 Delta-OT\n"
-			<< Color::Green << "  -bgciks  " << Color::Default << "  : to run the BGCIKS passive secure 1-out-of-2       OT\n"
+			<< Color::Green << "  -Silent  " << Color::Default << "  : to run the Silent passive secure 1-out-of-2       OT"<< (silentEnabled ? "" : "(disabled)") <<"\n"
 			<< Color::Green << "  -kos     " << Color::Default << "  : to run the KOS    active secure  1-out-of-2       OT\n"
 			<< Color::Green << "  -dkos    " << Color::Default << "  : to run the KOS    active secure  1-out-of-2 Delta-OT\n"
 			<< Color::Green << "  -oos     " << Color::Default << "  : to run the OOS    active secure  1-out-of-N OT for N=2^76\n"

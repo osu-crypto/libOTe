@@ -387,7 +387,7 @@ namespace tests_libOTe
                 throw RTE_LOC;
         }
 #else
-        throw UnitTestSkipped("no base OTs are enabled " LOCATION);
+        throw UnitTestSkipped("no base OTs are enabled ");
 #endif
     }
 

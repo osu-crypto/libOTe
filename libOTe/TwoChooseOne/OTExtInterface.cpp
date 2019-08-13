@@ -61,7 +61,7 @@ void osuCrypto::OtSender::sendChosen(
     std::vector<std::array<block, 2>> temp(messages.size());
     send(temp, prng, chl);
 
-    for (u64 i = 0; i < messages.size(); ++i)
+    for (u64 i = 0; i < static_cast<u64>(messages.size()); ++i)
     {
         temp[i][0] = temp[i][0] ^ messages[i][0];
         temp[i][1] = temp[i][1] ^ messages[i][1];

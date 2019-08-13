@@ -24,13 +24,14 @@ along with BitPolyMul.  If not, see <http://www.gnu.org/licenses/>.
 #include <stdint.h>
 
 #include "gfext_aesni.h"
-
-#include "byte_inline_func.h"
-
-
 #include "string.h"
 
 #include "bpmDefines.h"
+
+#include "bitmat_prod.h"
+
+#include "gf2128_cantor_iso.h"
+#include "gf264_cantor_iso.h"
 
 /////////////////////////////////////////////////
 ///
@@ -39,25 +40,20 @@ along with BitPolyMul.  If not, see <http://www.gnu.org/licenses/>.
 //////////////////////////////////////////////////////
 
 
-#include "bitmat_prod.h"
-
-#include "gf2128_cantor_iso.h"
-#include "gf264_cantor_iso.h"
-
 namespace bpm {
 
     //USED;
-    static inline
+     inline
         __m128i gf_isomorphism_single_bit(u64 ith_bit)
     {
         return _mm_load_si128((__m128i*) (&gfCantorto2128[ith_bit]));
     }
 
     //USED;
-    static inline
+     inline
         __m128i gf_isomorphism(uint64_t a_in_cantor)
     {
-        uint8_t a_iso[16] BIT_POLY_ALIGN(32);
+        alignas(32) uint8_t a_iso[16];
         bitmatrix_prod_64x128_8R_sse(a_iso, gfCantorto2128_8R, a_in_cantor);
         return _mm_load_si128((__m128i*) a_iso);
     }
@@ -75,7 +71,7 @@ namespace bpm {
     ///////  one layer /////////////////////
 
     //USED;
-    static inline
+     inline
         __m128i butterfly(__m128i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -94,7 +90,7 @@ namespace bpm {
 
 
     //USED;
-    static inline
+     inline
         __m128i butterfly_avx2(__m256i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -112,7 +108,7 @@ namespace bpm {
 
 
     //USED;
-    static inline
+     inline
         __m128i butterfly_avx2_b2(__m256i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -147,7 +143,7 @@ namespace bpm {
 
 
     //USED;
-    static inline
+     inline
         __m128i butterfly_avx2_b4(__m256i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -201,7 +197,7 @@ namespace bpm {
 
 
 
-    static inline
+     inline
         __m128i i_butterfly(__m128i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -219,7 +215,7 @@ namespace bpm {
 
 
 
-    static inline
+     inline
         __m128i i_butterfly_avx2(__m256i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -235,7 +231,7 @@ namespace bpm {
         return a;
     }
 
-    static inline
+     inline
         __m128i i_butterfly_avx2_b2(__m256i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -272,7 +268,7 @@ namespace bpm {
 
 
     //USED;
-    static inline
+     inline
         __m128i i_butterfly_avx2_b4(__m256i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -329,7 +325,7 @@ namespace bpm {
 
 
     //USED;
-    static inline
+     inline
         void __btfy(uint64_t* fx, u64 st_unit_size, u64 offset, u64 n_terms, u64 scalar_a)
     {
 
@@ -402,7 +398,7 @@ namespace bpm {
     }
 
 
-    static inline
+     inline
         void __i_btfy(uint64_t* fx, u64 end_unit_size, u64 offset, u64 n_terms, u64 scalar_a)
     {
         u64 i = 1;
@@ -565,24 +561,24 @@ namespace bpm {
     /////////////////////////////////////////////////////////////
 
 
-
-    static inline
+     
+     inline
         __m128i gf264_isomorphism_single_bit(u64 ith_bit)
     {
         return _mm_load_si128((__m128i*) (&gfCantorto264[ith_bit << 1]));
     }
 
-    static inline
+     inline
         __m128i gf264_isomorphism(uint64_t a_in_cantor)
     {
-        uint8_t a_iso[16] BIT_POLY_ALIGN(32);
+        alignas(32) uint8_t a_iso[16];
         bitmatrix_prod_64x128_8R_sse(a_iso, gfCantorto264_8R, a_in_cantor);
         return _mm_load_si128((__m128i*) a_iso);
     }
 
     ////////////////////////////////
 
-    static inline
+     inline
         __m128i butterfly_64_xmm(__m128i d, __m128i a)
     {
         __m128i r0 = xor128(d, _gf2ext64_mul_hi_sse(d, a));
@@ -590,7 +586,7 @@ namespace bpm {
         return r1;
     }
 
-    static inline
+     inline
         __m128i i_butterfly_64_xmm(__m128i d, __m128i a)
     {
         __m128i r0 = xor128(d, _mm_slli_si128(d, 8));
@@ -598,7 +594,7 @@ namespace bpm {
         return r1;
     }
 
-    static inline
+     inline
         __m128i butterfly_64_u2(__m128i* poly, u64 ska, __m128i extra_a) /// unit = 2>>1
     {
         __m128i a = extra_a;
@@ -608,7 +604,7 @@ namespace bpm {
         return a;
     }
 
-    static inline
+     inline
         __m128i i_butterfly_64_u2(__m128i* poly, u64 ska, __m128i extra_a) /// unit = 2>>1
     {
         __m128i a = extra_a;
@@ -621,7 +617,7 @@ namespace bpm {
     ////////////////////////////
 
 
-    static inline
+     inline
         __m256i butterfly_64_ymm(__m256i d, __m128i a)
     {
         __m128i d0 = _mm256_castsi256_si128(d);
@@ -633,7 +629,7 @@ namespace bpm {
         return r1;
     }
 
-    static inline
+     inline
         __m256i i_butterfly_64_ymm(__m256i d, __m128i a)
     {
         __m128i d0 = _mm256_castsi256_si128(d);
@@ -645,7 +641,7 @@ namespace bpm {
         return r1;
     }
 
-    static inline
+     inline
         __m128i butterfly_64_u4(__m256i* poly, u64 ska, __m128i extra_a) /// unit = 4>>2
     {
         __m128i a = extra_a;
@@ -655,7 +651,7 @@ namespace bpm {
         return a;
     }
 
-    static inline
+     inline
         __m128i i_butterfly_64_u4(__m256i* poly, u64 ska, __m128i extra_a) /// unit = 4>>2
     {
         __m128i a = extra_a;
@@ -669,7 +665,7 @@ namespace bpm {
     //////////////////////////////////////////////////
 
 
-    static inline
+     inline
         __m128i butterfly_64_avx2(__m256i* poly, u64 unit, u64 ska, __m128i extra_a) /// unit >= 8>>2
     {
         __m128i a = extra_a;
@@ -686,7 +682,7 @@ namespace bpm {
     }
 
 
-    static inline
+     inline
         __m128i butterfly_64_avx2_b2(__m256i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -720,7 +716,7 @@ namespace bpm {
     }
 
 
-    static inline
+     inline
         __m128i butterfly_64_avx2_b4(__m256i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -775,7 +771,7 @@ namespace bpm {
 
 
 
-    static inline
+     inline
         __m128i i_butterfly_64_avx2(__m256i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -792,7 +788,7 @@ namespace bpm {
     }
 
 
-    static inline
+     inline
         __m128i i_butterfly_64_avx2_b2(__m256i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;
@@ -828,7 +824,7 @@ namespace bpm {
 
 
 
-    static inline
+     inline
         __m128i i_butterfly_64_avx2_b4(__m256i* poly, u64 unit, u64 ska, __m128i extra_a)
     {
         __m128i a = extra_a;

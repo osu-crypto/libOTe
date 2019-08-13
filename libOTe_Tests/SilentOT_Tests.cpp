@@ -1,16 +1,19 @@
-#include "BgciksOT_Tests.h"
+#include "SilentOT_Tests.h"
 
-#include "libOTe/DPF/BgicksPprf.h"
-#include "libOTe/TwoChooseOne/BgciksOtExtSender.h"
-#include "libOTe/TwoChooseOne/BgciksOtExtReceiver.h"
+#include "libOTe/Tools/SilentPprf.h"
+#include "libOTe/TwoChooseOne/SilentOtExtSender.h"
+#include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
 #include <cryptoTools/Common/Log.h>
+#include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Network/IOService.h>
+#include <cryptoTools/Common/TestCollection.h>
+
 using namespace oc;
 
 
 void bitShift_test(const CLP& cmd)
 {
-
+#ifdef ENABLE_SILENTOT
     //u64 nBits = ;
     u64 n = cmd.getOr("n", 10);// (nBits + 127) / 128;
     u64 t = cmd.getOr("t", 10);
@@ -68,8 +71,9 @@ void bitShift_test(const CLP& cmd)
         }
 
     }
-
-
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
 }
 
 void clearBits(span<block> in, u64 idx)
@@ -93,17 +97,14 @@ void clearBits(span<block> in, u64 idx)
 }
 
 
-void modp_test(const CLP & cmd)
+void modp_test(const CLP& cmd)
 {
-    //u64 n = cmd.getOr("n", 100);
-    //u64 c = cmd.getOr("c", 2);
-    u64 t = cmd.getOr("t", 10);
-
+#ifdef ENABLE_SILENTOT
 
     PRNG prng(toBlock(cmd.getOr("seed", 0)));
 
-    auto iBits = cmd.getOr("c", 1026);
-    auto nBits = cmd.getOr("n", 223);
+    auto iBits = cmd.getOr("c", 1026ull);
+    auto nBits = cmd.getOr("n", 223ull);
 
     auto n = (nBits + 127) / 128;
     auto c = (iBits + nBits - 1) / nBits;
@@ -169,17 +170,21 @@ void modp_test(const CLP & cmd)
 
     }
 
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
 }
 
-void BgciksOT_Test(const CLP & cmd)
+void SilentOT_Test(const CLP& cmd)
 {
+#ifdef ENABLE_SILENTOT
 
     IOService ios;
     Session s0(ios, "localhost:1212", SessionMode::Server);
     Session s1(ios, "localhost:1212", SessionMode::Client);
 
-    BgciksOtExtSender sender;
-    BgciksOtExtReceiver recver;
+    SilentOtExtSender sender;
+    SilentOtExtReceiver recver;
     u64 n = cmd.getOr("n", 1000);
     bool verbose = cmd.getOr("v", 0) > 1;
     u64 threads = cmd.getOr("t", 4);
@@ -202,8 +207,8 @@ void BgciksOT_Test(const CLP & cmd)
     sender.setTimer(timer);
     recver.setTimer(timer);
 
-    auto t = std::thread([&]() {recver.genBase(n, chls1[0], prng, s, sec, mal, BgciksBaseType::None, threads); });
-    sender.genBase(n, chls0[0], prng1, s, sec, mal, BgciksBaseType::None, threads);
+    auto t = std::thread([&]() {recver.genBase(n, chls1[0], prng, s, sec, mal, SilentBaseType::None, threads); });
+    sender.genBase(n, chls0[0], prng1, s, sec, mal, SilentBaseType::None, threads);
     t.join();
 
     std::vector<block> messages2(n);
@@ -216,8 +221,6 @@ void BgciksOT_Test(const CLP & cmd)
     BitVector act(n);
 
     choice.resize(n);
-    auto actHam = 0;
-    auto retHam = 0;
     for (u64 i = 0; i < n; ++i)
     {
         std::array<bool, 2> eqq{ eq(messages2[i], messages[i][0]),eq(messages2[i], messages[i][1]) };
@@ -252,15 +255,21 @@ void BgciksOT_Test(const CLP & cmd)
 
     if (passed == false)
         throw RTE_LOC;
+
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
 }
 
 
 
-void BgciksPprf_Test(const CLP & cmd)
+void SilentPprf_Test(const CLP& cmd)
 {
+#ifdef ENABLE_SILENTOT
+
     u64 depth = cmd.getOr("d", 3);;
     u64 domain = 1ull << depth;
-    auto threads = cmd.getOr("t", 3);
+    auto threads = cmd.getOr("t", 3ull);
     u64 numPoints = cmd.getOr("s", 8);
 
     PRNG prng(ZeroBlock);
@@ -279,8 +288,8 @@ void BgciksPprf_Test(const CLP & cmd)
     }
 
 
-    BgicksMultiPprfSender sender;
-    BgicksMultiPprfReceiver recver;
+    SilentMultiPprfSender sender;
+    SilentMultiPprfReceiver recver;
 
     sender.configure(domain, numPoints);
     recver.configure(domain, numPoints);
@@ -336,16 +345,22 @@ void BgciksPprf_Test(const CLP & cmd)
 
     if (failed)
         throw RTE_LOC;
+
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
 }
 
-void BgciksPprf_trans_Test(const CLP & cmd)
+void SilentPprf_trans_Test(const CLP& cmd)
 {
+#ifdef ENABLE_SILENTOT
+
     //u64 depth = 6;
     //u64 domain = 13;// (1ull << depth) - 7;
     //u64 numPoints = 40;
 
     u64 domain = cmd.getOr("d", 334);
-    auto threads = cmd.getOr("t", 3);
+    auto threads = cmd.getOr("t", 3ull);
     u64 numPoints = cmd.getOr("s", 5) * 8;
     bool mal = cmd.isSet("mal");
 
@@ -365,8 +380,8 @@ void BgciksPprf_trans_Test(const CLP & cmd)
 
 
 
-    BgicksMultiPprfSender sender;
-    BgicksMultiPprfReceiver recver;
+    SilentMultiPprfSender sender;
+    SilentMultiPprfReceiver recver;
 
     sender.configure(domain, numPoints);
     recver.configure(domain, numPoints);
@@ -437,10 +452,8 @@ void BgciksPprf_trans_Test(const CLP & cmd)
 
     if (failed)
         throw RTE_LOC;
+
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
 }
-
-
-//void BgciksOT_mul_Test(const CLP& cmd)
-//{
-//    gf2x_mod_mul()
-//}

@@ -1,8 +1,7 @@
 #include <cryptoTools/Crypto/PRNG.h>
 
-#include "libOTe/Tools/bitpolymul/byte_inline_func.h"
 
-#include "libOTe/Tools/bitpolymul/bitpolymul.h"
+#include "libOTe/Tools/bitpolymul.h"
 
 
 #include "libOTe/Tools/bitpolymul/bpmDefines.h"
@@ -21,7 +20,8 @@ using namespace bpm;
 
 void bitpolymul_test(const CLP& cmd)
 {
-    
+#ifdef ENABLE_SILENTOT
+
 
     uint64_t TEST_RUN = cmd.getOr("t", 4);
     uint64_t len = (1ull << cmd.getOr("n", 12));
@@ -43,7 +43,7 @@ void bitpolymul_test(const CLP& cmd)
         throw RTE_LOC;
     if (u64(rPoly2.data()) % 32)
         throw RTE_LOC;
-    
+
     bool random = true;
     oc::PRNG prng(oc::ZeroBlock);
 
@@ -167,7 +167,11 @@ void bitpolymul_test(const CLP& cmd)
         }
 
     }
-    
+
     if (fail_count || chk)
         throw UnitTestFail(LOCATION);
+
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
 }

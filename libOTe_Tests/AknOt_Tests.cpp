@@ -15,7 +15,7 @@ namespace tests_libOTe
 {
     void AknOt_sendRecv1000_Test()
     {
-
+#ifdef LIBOTE_HAS_BASE_OT
         u64 totalOts(149501);
         u64 minOnes(4028);
         u64 avgOnes(5028);
@@ -57,17 +57,33 @@ namespace tests_libOTe
             sPrng(ZeroBlock),
             rPrng(OneBlock);
 
+        bool failed = false;
         std::thread thrd([&]() {
 
             setThreadName("Sender");
+            try {
 
-            send.init(totalOts, cncThreshold, cncProb, otExtSend, sendChls, sPrng);
+                send.init(totalOts, cncThreshold, cncProb, otExtSend, sendChls, sPrng);
+            }
+            catch (...)
+            {
+                failed = true;
+            }
         });
 
-        recv.init(totalOts, avgOnes, cncProb, otExtRecv, recvChls, rPrng);
+        try {
 
-
+            recv.init(totalOts, avgOnes, cncProb, otExtRecv, recvChls, rPrng);
+        }
+        catch (...)
+        {
+            failed = true;
+        }
         thrd.join();
+
+        if (failed)
+            throw RTE_LOC;
+
 
 
         for (u64 i = 0; i < recv.mMessages.size(); ++i)
@@ -95,6 +111,8 @@ namespace tests_libOTe
         //ep1.stop();
 
         //ios.stop();
-
+#else
+        throw UnitTestSkipped("no base OTs are enabled");
+#endif
     }
 }

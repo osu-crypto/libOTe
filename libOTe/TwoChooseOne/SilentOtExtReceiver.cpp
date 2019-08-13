@@ -1,10 +1,10 @@
-#include "libOTe/TwoChooseOne/BgciksOtExtReceiver.h"
-#include "libOTe/TwoChooseOne/BgciksOtExtSender.h"
-#include "libOTe/DPF/BgiGenerator.h"
+#include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
+#ifdef ENABLE_SILENTOT
+#include "libOTe/TwoChooseOne/SilentOtExtSender.h"
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Common/Log.h>
-#include <libOTe/Tools/bitpolymul/bitpolymul.h>
+#include <libOTe/Tools/bitpolymul.h>
 #include <libOTe/Base/BaseOT.h>
 #include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
 #include <cryptoTools/Common/ThreadBarrier.h>
@@ -112,14 +112,14 @@ namespace osuCrypto
 
     u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
-    void BgciksOtExtReceiver::genBase(
+    void SilentOtExtReceiver::genBase(
         u64 n,
         Channel& chl,
         PRNG& prng,
         u64 scaler,
         u64 secParam,
         bool mal,
-        BgciksBaseType basetype,
+        SilentBaseType basetype,
         u64 threads)
     {
         setTimePoint("recver.gen.start");
@@ -134,16 +134,16 @@ namespace osuCrypto
 
         switch (basetype)
         {
-        case osuCrypto::BgciksBaseType::None:
+        case osuCrypto::SilentBaseType::None:
             break;
-        case osuCrypto::BgciksBaseType::Base:
+        case osuCrypto::SilentBaseType::Base:
         {
             NaorPinkas base;
             base.receive(choice, msg, prng, chl, threads);
             setTimePoint("recver.gen.baseOT");
             break;
         }
-        case osuCrypto::BgciksBaseType::BaseExtend:
+        case osuCrypto::SilentBaseType::BaseExtend:
         {
             NaorPinkas base;
             std::array<std::array<block, 2>, 128> baseMsg;
@@ -156,7 +156,7 @@ namespace osuCrypto
             setTimePoint("recver.gen.baseExtension");
             break;
         }
-        case osuCrypto::BgciksBaseType::Extend:
+        case osuCrypto::SilentBaseType::Extend:
         {
             std::array<std::array<block, 2>, 128> baseMsg;
             IknpOtExtReceiver iknp;
@@ -199,7 +199,7 @@ namespace osuCrypto
 
     }
 
-    void BgciksOtExtReceiver::configure(
+    void SilentOtExtReceiver::configure(
         const u64& n, const u64& scaler, const u64& secParam,
         bool mal)
     {
@@ -220,7 +220,7 @@ namespace osuCrypto
         
     }
 
-    u64 BgciksOtExtReceiver::baseOtCount()
+    u64 SilentOtExtReceiver::baseOtCount()
     {
 
             return mGen.baseOtCount();
@@ -308,7 +308,7 @@ namespace osuCrypto
         return rT;
     }*/
 
-    void BgciksOtExtReceiver::checkRT(span<Channel> chls, Matrix<block>& rT1)
+    void SilentOtExtReceiver::checkRT(span<Channel> chls, Matrix<block>& rT1)
     {
         if (rT1.rows() != 128)
             throw RTE_LOC;
@@ -318,9 +318,9 @@ namespace osuCrypto
         block delta;
         chls[0].recv(delta);
 
-        for (auto i = 0; i < rT1.size(); ++i)
+        for (u64 i = 0; i < rT1.size(); ++i)
             rT2(i) = rT2(i) ^ rT1(i);
-
+         
 
         Matrix<block> R(rT1.cols() * 128, 1);
         MatrixView<block> Rv(R);
@@ -352,7 +352,7 @@ namespace osuCrypto
     }
 
 
-    void BgciksOtExtReceiver::receive(
+    void SilentOtExtReceiver::receive(
         span<block> messages,
         BitVector& choices,
         PRNG& prng,
@@ -360,7 +360,7 @@ namespace osuCrypto
     {
         receive(messages, choices, prng, { &chl,1 });
     }
-    void BgciksOtExtReceiver::receive(
+    void SilentOtExtReceiver::receive(
         span<block> messages,
         BitVector& choices,
         PRNG& prng,
@@ -420,12 +420,12 @@ namespace osuCrypto
     }
 
 
-    void BgciksOtExtReceiver::randMulNaive(Matrix<block>& rT, span<block>& messages)
+    void SilentOtExtReceiver::randMulNaive(Matrix<block>& rT, span<block>& messages)
     {
         std::vector<block> mtxColumn(rT.cols());
         PRNG pubPrng(ZeroBlock);
 
-        for (u64 i = 0; i < messages.size(); ++i)
+        for (i64 i = 0; i < messages.size(); ++i)
         {
             block& m = messages[i];
             BitIterator iter((u8*)& m, 0);
@@ -435,11 +435,10 @@ namespace osuCrypto
     }
 
 
-    void BgciksOtExtReceiver::randMulQuasiCyclic(Matrix<block>& rT, span<block>& messages, BitVector& choices, u64 threads)
+    void SilentOtExtReceiver::randMulQuasiCyclic(Matrix<block>& rT, span<block>& messages, BitVector& choices, u64 threads)
     {
         setTimePoint("recver.expand.QuasiCyclic");
         auto nBlocks = mN / 128;
-        auto nBytes = mN / 8;
         auto n2Blocks = mN2 / 128;
         auto n64 = i64(nBlocks * 2);
 
@@ -463,7 +462,7 @@ namespace osuCrypto
 
         Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
 
-        if (messages.size() > mN)
+        if (static_cast<u64>(messages.size()) > mN)
             throw RTE_LOC;
 
         choices.resize(mN);
@@ -483,7 +482,6 @@ namespace osuCrypto
                 setTimePoint("recver.expand.routine");
 
             //auto& count = counts[index];
-            auto j = 0;
             FFTPoly cPoly;
             FFTPoly bPoly;
             Matrix<block>tt(1, 2 * nBlocks, AllocType::Uninitialized);
@@ -618,7 +616,7 @@ namespace osuCrypto
                 sse_transpose128(tpBuffer);
 
 #ifndef NO_HASH
-                for (u64 k = 0; k < rem; ++k)
+                for (i64 k = 0; k < rem; ++k)
                 {
                     tpBuffer[k] = tpBuffer[k] ^ mAesFixedKey.ecbEncBlock(tpBuffer[k]);
                 }
@@ -657,3 +655,4 @@ namespace osuCrypto
 
 
 }
+#endif

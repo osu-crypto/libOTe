@@ -6,10 +6,10 @@
 
 namespace osuCrypto
 { 
-    static const u64 commStepSize(512);
-    static const u64 superBlkSize(8);
+     const u64 commStepSize(512);
+     const u64 superBlkSize(8);
 
-	enum class BgciksBaseType {None, Base, BaseExtend, Extend};
+	enum class SilentBaseType {None, Base, BaseExtend, Extend};
 
 	template<typename S, typename TSpan,
 		typename enabled = typename std::enable_if<

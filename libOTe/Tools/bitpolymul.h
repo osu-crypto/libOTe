@@ -27,7 +27,7 @@ along with BitPolyMul.  If not, see <http://www.gnu.org/licenses/>.
 #include <cryptoTools/Common/Defines.h>
 #include <vector>
 #include <boost/align/aligned_allocator.hpp>
-#include "bpmDefines.h"
+#include "bitpolymul/bpmDefines.h"
 
 namespace bpm
 {

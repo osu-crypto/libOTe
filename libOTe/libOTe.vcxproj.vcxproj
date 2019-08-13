@@ -21,9 +21,7 @@
   <ItemGroup>
     <ClInclude Include="Base\BaseOT.h" />
     <ClInclude Include="Base\naor-pinkas.h" />
-    <ClInclude Include="DPF\BgicksPprf.h" />
-    <ClInclude Include="DPF\BgiGenerator.h" />
-    <ClInclude Include="DPF\BgiEvaluator.h" />
+    <ClInclude Include="Tools\SilentPprf.h" />
     <ClInclude Include="NChooseK\AknOtReceiver.h" />
     <ClInclude Include="NChooseK\AknOtSender.h" />
     <ClInclude Include="NChooseOne\Kkrt\KkrtDefines.h" />
@@ -39,14 +37,10 @@
     <ClInclude Include="Tools\bitpolymul\bc.h" />
     <ClInclude Include="Tools\bitpolymul\bc_to_gen_code.h" />
     <ClInclude Include="Tools\bitpolymul\bitmat_prod.h" />
-    <ClInclude Include="Tools\bitpolymul\bitpolymul.h" />
+    <ClInclude Include="Tools\bitpolymul.h" />
     <ClInclude Include="Tools\bitpolymul\btfy.h" />
-    <ClInclude Include="Tools\bitpolymul\butterfly_net.h" />
-    <ClInclude Include="Tools\bitpolymul\byte_inline_func.h" />
     <ClInclude Include="Tools\bitpolymul\bpmDefines.h" />
     <ClInclude Include="Tools\bitpolymul\encode.h" />
-    <ClInclude Include="Tools\bitpolymul\gf2128_cantor_iso.h" />
-    <ClInclude Include="Tools\bitpolymul\gf264_cantor_iso.h" />
     <ClInclude Include="Tools\bitpolymul\gfext_aesni.h" />
     <ClInclude Include="Tools\bitpolymul\ska.h" />
     <ClInclude Include="Tools\bitpolymul\transpose.h" />
@@ -55,8 +49,8 @@
     <ClInclude Include="Tools\bitpolymul\trunc_btfy_tab_64.h" />
     <ClInclude Include="Tools\LinearCode.h" />
     <ClInclude Include="Tools\Tools.h" />
-    <ClInclude Include="TwoChooseOne\BgciksOtExtReceiver.h" />
-    <ClInclude Include="TwoChooseOne\BgciksOtExtSender.h" />
+    <ClInclude Include="TwoChooseOne\SilentOtExtReceiver.h" />
+    <ClInclude Include="TwoChooseOne\SilentOtExtSender.h" />
     <ClInclude Include="TwoChooseOne\IknpDotExtReceiver.h" />
     <ClInclude Include="TwoChooseOne\IknpDotExtSender.h" />
     <ClInclude Include="TwoChooseOne\IknpOtExtReceiver.h" />
@@ -70,9 +64,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Base\naor-pinkas.cpp" />
-    <ClCompile Include="DPF\BgicksPprf.cpp" />
-    <ClCompile Include="DPF\BgiGenerator.cpp" />
-    <ClCompile Include="DPF\BgiEvaluator.cpp" />
+    <ClCompile Include="Tools\SilentPprf.cpp" />
     <ClCompile Include="NChooseK\AknOtReceiver.cpp" />
     <ClCompile Include="NChooseK\AknOtSender.cpp" />
     <ClCompile Include="NChooseOne\Kkrt\KkrtNcoOtReceiver.cpp" />
@@ -87,18 +79,15 @@
     <ClCompile Include="Tools\bitpolymul\bc.cpp" />
     <ClCompile Include="Tools\bitpolymul\bc_to_lch_gen_code.cpp" />
     <ClCompile Include="Tools\bitpolymul\bc_to_mono_gen_code.cpp" />
-    <ClCompile Include="Tools\bitpolymul\bitpolymul.cpp" />
+    <ClCompile Include="Tools\bitpolymul.cpp" />
     <ClCompile Include="Tools\bitpolymul\btfy.cpp" />
-    <ClCompile Include="Tools\bitpolymul\butterfly_net.cpp" />
     <ClCompile Include="Tools\bitpolymul\encode.cpp" />
-    <ClCompile Include="Tools\bitpolymul\gf2128_cantor_iso.cpp" />
-    <ClCompile Include="Tools\bitpolymul\gf264_cantor_iso.cpp" />
-    <ClCompile Include="Tools\bitpolymul\trunc_btfy_tab.cpp" />
-    <ClCompile Include="Tools\bitpolymul\trunc_btfy_tab_64.cpp" />
+    <ClCompile Include="Tools\bitpolymul\gf2128_cantor_iso.h" />
+    <ClCompile Include="Tools\bitpolymul\gf264_cantor_iso.h" />
     <ClCompile Include="Tools\LinearCode.cpp" />
     <ClCompile Include="Tools\Tools.cpp" />
-    <ClCompile Include="TwoChooseOne\BgciksOtExtReceiver.cpp" />
-    <ClCompile Include="TwoChooseOne\BgciksOtExtSender.cpp" />
+    <ClCompile Include="TwoChooseOne\SilentOtExtReceiver.cpp" />
+    <ClCompile Include="TwoChooseOne\SilentOtExtSender.cpp" />
     <ClCompile Include="TwoChooseOne\IknpDotExtReceiver.cpp" />
     <ClCompile Include="TwoChooseOne\IknpDotExtSender.cpp" />
     <ClCompile Include="TwoChooseOne\IknpOtExtReceiver.cpp" />

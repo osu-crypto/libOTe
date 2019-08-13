@@ -1,4 +1,5 @@
-#include "BgicksPprf.h"
+#include "SilentPprf.h"
+#ifdef ENABLE_SILENTOT
 
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
@@ -7,11 +8,11 @@ namespace osuCrypto
 {
 
 
-    BgicksMultiPprfSender::BgicksMultiPprfSender(u64 domainSize, u64 pointCount)
+    SilentMultiPprfSender::SilentMultiPprfSender(u64 domainSize, u64 pointCount)
     {
         configure(domainSize, pointCount);
     }
-    void BgicksMultiPprfSender::configure(u64 domainSize, u64 pointCount)
+    void SilentMultiPprfSender::configure(u64 domainSize, u64 pointCount)
     {
         mDomain = domainSize;
         mDepth = log2ceil(mDomain);
@@ -21,7 +22,7 @@ namespace osuCrypto
         mBaseOTs.resize(0, 0);
     }
 
-    void BgicksMultiPprfReceiver::configure(u64 domainSize, u64 pointCount)
+    void SilentMultiPprfReceiver::configure(u64 domainSize, u64 pointCount)
     {
         mDomain = domainSize;
         mDepth = log2ceil(mDomain);
@@ -31,35 +32,35 @@ namespace osuCrypto
         mBaseOTs.resize(0, 0);
     }
 
-    u64 BgicksMultiPprfSender::baseOtCount() const
+    u64 SilentMultiPprfSender::baseOtCount() const
     {
         return mDepth * mPntCount;
     }
-    u64 BgicksMultiPprfReceiver::baseOtCount() const
+    u64 SilentMultiPprfReceiver::baseOtCount() const
     {
         return mDepth * mPntCount;
     }
 
-    bool BgicksMultiPprfSender::hasBaseOts() const
+    bool SilentMultiPprfSender::hasBaseOts() const
     {
         return mBaseOTs.size();
     }
-    bool BgicksMultiPprfReceiver::hasBaseOts() const
+    bool SilentMultiPprfReceiver::hasBaseOts() const
     {
         return mBaseOTs.size();
     }
-    void BgicksMultiPprfSender::setBase(span<std::array<block, 2>> baseMessages)
+    void SilentMultiPprfSender::setBase(span<std::array<block, 2>> baseMessages)
     {
-        if (baseOtCount() != baseMessages.size())
+        if (baseOtCount() != static_cast<u64>(baseMessages.size()))
             throw RTE_LOC;
 
         mBaseOTs.resize(mPntCount, mDepth);
         memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
     }
 
-    void BgicksMultiPprfReceiver::setBase(span<block> baseMessages)
+    void SilentMultiPprfReceiver::setBase(span<block> baseMessages)
     {
-        if (baseOtCount() != baseMessages.size())
+        if (baseOtCount() != static_cast<u64>(baseMessages.size()))
             throw RTE_LOC;
 
         mBaseOTs.resize(mPntCount, mDepth);
@@ -234,13 +235,13 @@ namespace osuCrypto
     void transposePoints(span<u64> points)
     {
 
-        for (u64 i = 0; i < points.size(); ++i)
+        for (i64 i = 0; i < points.size(); ++i)
         {
             points[i] = transposePoint(points[i], i, points.size());
         }
     }
 
-    void BgicksMultiPprfReceiver::getTransposedPoints(span<u64> points)
+    void SilentMultiPprfReceiver::getTransposedPoints(span<u64> points)
     {
         if (points.size() % 8)
             throw RTE_LOC;
@@ -252,7 +253,7 @@ namespace osuCrypto
     u64 getActivePath(const span<u8>& choiceBits)
     {
         u64 point = 0;
-        for (u64 i = 0; i < choiceBits.size(); ++i)
+        for (i64 i = 0; i < choiceBits.size(); ++i)
         {
             auto shift = choiceBits.size() - i - 1;
 
@@ -261,7 +262,7 @@ namespace osuCrypto
         return point;
     }
 
-    void BgicksMultiPprfReceiver::getPoints(span<u64> points)
+    void SilentMultiPprfReceiver::getPoints(span<u64> points)
     {
         memset(points.data(), 0, points.size() * sizeof(u64));
         for (u64 j = 0; j < mPntCount; ++j)
@@ -271,7 +272,7 @@ namespace osuCrypto
     }
 
 
-    BitVector BgicksMultiPprfReceiver::sampleChoiceBits(u64 modulus, bool transposed, PRNG& prng)
+    BitVector SilentMultiPprfReceiver::sampleChoiceBits(u64 modulus, bool transposed, PRNG& prng)
     {
         BitVector choices(mPntCount * mDepth);
         //Matrix<u8> baseChoices(mPntCount, mDepth);
@@ -303,7 +304,7 @@ namespace osuCrypto
         return choices;
     }
 
-    block BgicksMultiPprfSender::expand(
+    block SilentMultiPprfSender::expand(
         Channel& chl,
         block value,
         PRNG& prng,
@@ -314,7 +315,7 @@ namespace osuCrypto
         return expand({ &chl, 1 }, value, prng, output, transpose, mal);
     }
 
-    block BgicksMultiPprfSender::expand(
+    block SilentMultiPprfSender::expand(
         span<Channel> chls,
         block value,
         PRNG& prng,
@@ -396,17 +397,17 @@ namespace osuCrypto
             };
 
             // prints out the contents of b
-            auto print = [](span<block> b)
-            {
-                std::stringstream ss;
-                if (b.size())
-                    ss << b[0];
-                for (u64 i = 1; i < b.size(); ++i)
-                {
-                    ss << ", " << b[i];
-                }
-                return ss.str();
-            };
+            //auto print = [](span<block> b)
+            //{
+            //    std::stringstream ss;
+            //    if (b.size())
+            //        ss << b[0];
+            //    for (i64 i = 1; i < b.size(); ++i)
+            //    {
+            //        ss << ", " << b[i];
+            //    }
+            //    return ss.str();
+            //};
 
             // This thread will process 8 trees at a time. It will interlace
             // thich sets of trees are processed with the other threads. 
@@ -432,7 +433,7 @@ namespace osuCrypto
                     auto level1 = getLevel(d + 1);
 
                     // The total number of children in this level.
-                    auto width = level1.size();
+                    auto width = static_cast<u64>(level1.size());
 
                     // For each child, populate the child by expanding the parent.
                     for (u64 childIdx = 0; childIdx < width; ++childIdx)
@@ -589,18 +590,18 @@ namespace osuCrypto
         return ss;
     }
 
-    void BgicksMultiPprfSender::setValue(block value)
+    void SilentMultiPprfSender::setValue(block value)
     {
         mValue = value;
     }
 
-    block BgicksMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose,
+    block SilentMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose,
         bool mal)
     {
         return expand({ &chl, 1 }, prng, output, transpose, mal);
     }
 
-    block BgicksMultiPprfReceiver::expand(span<Channel> chls, PRNG& prng, MatrixView<block> output, bool transpose,
+    block SilentMultiPprfReceiver::expand(span<Channel> chls, PRNG& prng, MatrixView<block> output, bool transpose,
         bool mal)
     {
 
@@ -691,6 +692,7 @@ namespace osuCrypto
                 return span<std::array<block, 8>>(b, b + size);
             };
 
+#ifdef DEBUG_PRINT_PPRF
             // prints out the contents of the d'th level.
             auto printLevel = [&](u64 d)
             {
@@ -703,7 +705,7 @@ namespace osuCrypto
                     << "\n---------------------" << std::endl;
 
                 std::array<block, 2> sums{ ZeroBlock ,ZeroBlock };
-                for (u64 i = 0; i < level0.size(); ++i)
+                for (i64 i = 0; i < level0.size(); ++i)
                 {
                     for (u64 j = 0; j < 8; ++j)
                     {
@@ -721,6 +723,7 @@ namespace osuCrypto
 
                 std::cout << "sums[0] = " << sums[0] << " " << sums[1] << std::endl;
             };
+#endif
 
             // This thread will process 8 trees at a time. It will interlace
             // thich sets of trees are processed with the other threads. 
@@ -784,7 +787,7 @@ namespace osuCrypto
                     // expand it into it's two children. Note that the
                     // active node will also be expanded. Later we will just
                     // overwrite whatever the value was. This is an optimization.
-                    auto width = level1.size();
+                    auto width = static_cast<u64>(level1.size());
                     for (u64 childIdx = 0; childIdx < width; ++childIdx)
                     {
                         // The bit that indicates if we are on the left child (0)
@@ -992,75 +995,4 @@ namespace osuCrypto
 
 }
 
-//while (leafIdx != mDomain)
-//{
-//    // for the current leaf index, traverse to the leaf.
-//    while (d != mDepth)
-//    {
-
-//        auto level0 = getLevel(d);
-//        auto level1 = getLevel(d + 1);
-
-//        // for our current position, are we going left or right?
-//        auto pIdx = (leafIdx >> (mDepth - 1 - d));
-//        u8 keep = pIdx & 1;
-
-//        auto& a = aes[keep];
-//        auto td = tree[d];
-//        auto td1 = tree[d + 1];
-//        auto sum = &sums[keep](d, 0);
-
-//        auto td_ = level0.subspan(pIdx >>1, mPntCount8);
-//        auto td1_ = level1.subspan(pIdx, mPntCount8);
-
-//        ++d;
-
-//        // hash the current node td and store the result in td1.
-//        for (u64 i = 0; i < mPntCount8; i += 8)
-//        {
-//            auto sub = td.subspan(i, 8);
-//            auto sub1 = td1.subspan(i, 8);
-//            auto sub1_ = td1_.subspan(i, 8);
-
-//            // H(x) = AES(k[keep], x) + x;
-//            a.ecbEncBlocks(sub.data(), 8, td1.data());
-
-
-//            sub1[0] = sub1[0] ^ sub[0];
-//            sub1[1] = sub1[1] ^ sub[1];
-//            sub1[2] = sub1[2] ^ sub[2];
-//            sub1[3] = sub1[3] ^ sub[3];
-//            sub1[4] = sub1[4] ^ sub[4];
-//            sub1[5] = sub1[5] ^ sub[5];
-//            sub1[6] = sub1[6] ^ sub[6];
-//            sub1[7] = sub1[7] ^ sub[7];
-
-//            sub1_[0] = sub1[0];
-//            sub1_[1] = sub1[1];
-//            sub1_[2] = sub1[2];
-//            sub1_[3] = sub1[3];
-//            sub1_[4] = sub1[4];
-//            sub1_[5] = sub1[5];
-//            sub1_[6] = sub1[6];
-//            sub1_[7] = sub1[7];
-//                             
-//            // sum += H(x)
-//            sum[i + 0] = sum[i + 0] ^ sub1[0];
-//            sum[i + 1] = sum[i + 1] ^ sub1[1];
-//            sum[i + 2] = sum[i + 2] ^ sub1[2];
-//            sum[i + 3] = sum[i + 3] ^ sub1[3];
-//            sum[i + 4] = sum[i + 4] ^ sub1[4];
-//            sum[i + 5] = sum[i + 5] ^ sub1[5];
-//            sum[i + 6] = sum[i + 6] ^ sub1[6];
-//            sum[i + 7] = sum[i + 7] ^ sub1[7];
-//        }
-//    }
-
-
-//    auto td1 = &tree(d, 0);
-//    memcpy(output[leafIdx].data(), td1, mPntCount * sizeof(block));
-
-//    u64 shift = (leafIdx + 1) ^ leafIdx;
-//    d -= log2floor(shift) + 1;
-//    ++leafIdx;
-//}
+#endif
