@@ -130,7 +130,7 @@ To see all the command line options, execute the program
 follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
 
 **Enabling Relic (for fast base OTs):**
- * Clone the Visual Studio port [Relic](https://github.com/ladnir/relic) `git clone --branch new_master https://github.com/ladnir/relic.git`. 
+ * Clone the Visual Studio port [Relic](https://github.com/ladnir/relic) `git clone https://github.com/ladnir/relic.git`. 
  * Use the CMake command  `cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64` generate a Visual Studio solution
  * Optional: Build with gmp/mpir for faster performance. 
  * Install it to `C:\libs` (build the `INSTALL` VS project).
