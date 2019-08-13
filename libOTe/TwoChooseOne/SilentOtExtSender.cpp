@@ -52,24 +52,32 @@ namespace osuCrypto
 				break;
 			case SilentBaseType::Base:
 			{
-				NaorPinkas base;
+#ifdef LIBOTE_HAS_BASE_OT
+                DefaultBaseOT base;
 				base.send(msg, prng, chl, threads);
 				setTimePoint("sender.gen.baseOT");
+#else
+                throw std::runtime_error("libOTe does not have base OTs...");
+#endif
 				break;
 			}
 			case SilentBaseType::BaseExtend:
 			{
+#ifdef LIBOTE_HAS_BASE_OT
 				std::array<block, 128> baseMsg;
 
 				BitVector bv(128);
 				bv.randomize(prng);
-				NaorPinkas base;
+                DefaultBaseOT base;
 				base.receive(bv, baseMsg, prng,chl, threads);
 				setTimePoint("sender.gen.baseOT");
 				IknpOtExtSender iknp;
 				iknp.setBaseOts(baseMsg, bv, chl);
 				iknp.send(msg, prng, chl);
 				setTimePoint("sender.gen.baseExtend");
+#else
+                throw std::runtime_error("libOTe does not have base OTs...");
+#endif
 				break;
 			}
 			case SilentBaseType::Extend:
@@ -77,6 +85,7 @@ namespace osuCrypto
 				std::array<block, 128> baseMsg;
 				BitVector bv(128);
 				bv.randomize(prng);
+
 				IknpOtExtSender iknp;
 				iknp.setBaseOts(baseMsg, bv);
 				iknp.send(msg, prng, chl);

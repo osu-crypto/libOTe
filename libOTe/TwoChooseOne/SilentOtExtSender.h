@@ -30,7 +30,7 @@ namespace osuCrypto
 
 
         //BitVector mS, mC;
-		void genBase(u64 n, Channel& chl, PRNG& prng, u64 scaler = 4, u64 secParam = 80, bool mal = false, SilentBaseType base = SilentBaseType::None,
+		void genBase(u64 n, Channel& chl, PRNG& prng, u64 scaler = 4, u64 secParam = 80, bool mal = false, SilentBaseType base = SilentBaseType::BaseExtend,
 			u64 threads = 1);
 		//void genBase(u64 n, span<Channel> chls, PRNG& prng, u64 scaler = 4, u64 secParam = 80, SilentBaseType base = SilentBaseType::None);
 

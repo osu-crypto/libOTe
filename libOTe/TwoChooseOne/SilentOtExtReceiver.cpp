@@ -138,14 +138,19 @@ namespace osuCrypto
             break;
         case osuCrypto::SilentBaseType::Base:
         {
-            NaorPinkas base;
+#ifdef LIBOTE_HAS_BASE_OT
+            DefaultBaseOT base;
             base.receive(choice, msg, prng, chl, threads);
             setTimePoint("recver.gen.baseOT");
             break;
+#else
+            throw std::runtime_error("not base OTs");
+#endif
         }
         case osuCrypto::SilentBaseType::BaseExtend:
         {
-            NaorPinkas base;
+#ifdef LIBOTE_HAS_BASE_OT
+            DefaultBaseOT base;
             std::array<std::array<block, 2>, 128> baseMsg;
             prng.get(baseMsg.data(), baseMsg.size());
             base.send(baseMsg, prng, chl, threads);
@@ -155,6 +160,9 @@ namespace osuCrypto
             iknp.receive(choice, msg, prng, chl);
             setTimePoint("recver.gen.baseExtension");
             break;
+#else
+            throw std::runtime_error("not base OTs");
+#endif
         }
         case osuCrypto::SilentBaseType::Extend:
         {

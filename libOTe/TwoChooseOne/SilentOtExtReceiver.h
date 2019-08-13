@@ -24,7 +24,7 @@ namespace osuCrypto
 
 		void genBase(u64 n, Channel& chl, PRNG& prng,
 			u64 scaler = 4, u64 secParam = 80, bool mal = false,
-			SilentBaseType base = SilentBaseType::None,
+			SilentBaseType base = SilentBaseType::BaseExtend,
 			u64 threads = 1);
 
         void configure(const osuCrypto::u64 &n, const osuCrypto::u64 &scaler, const osuCrypto::u64 &secParam,
