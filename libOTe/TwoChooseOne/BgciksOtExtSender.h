@@ -22,7 +22,7 @@ namespace osuCrypto
         u64 mP, mN2, mN, mNumPartitions, mScaler, mSizePer;
 		bool mMal;
 
-        bool mDebug = true;
+        bool mDebug = false;
         void checkRT(span<Channel> chls, Matrix<block>& rT);
 
 

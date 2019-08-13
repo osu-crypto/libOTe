@@ -6,7 +6,7 @@
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Network/Channel.h>
-#define DEBUG_PRINT_PPRF
+//#define DEBUG_PRINT_PPRF
 
 namespace osuCrypto
 {

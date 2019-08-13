@@ -53,7 +53,7 @@ namespace osuCrypto
         block mDelta, mSum;
 		bool mMal;
 
-        bool mDebug = true;
+        bool mDebug = false;
 
         //BgiEvaluator::MultiKey mGenBgi;
         BgicksMultiPprfReceiver mGen;
