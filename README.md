@@ -1,4 +1,5 @@
-# libOTe
+![](./titleOSU.PNG)
+=====
 
 [![Build Status](https://travis-ci.org/osu-crypto/libOTe.svg?branch=master)](https://travis-ci.org/osu-crypto/libOTe)
 

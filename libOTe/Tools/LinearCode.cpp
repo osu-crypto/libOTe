@@ -560,8 +560,8 @@ namespace osuCrypto
             // this case has been optimized and we lookup 2 sub-codes at a time.
             static const u64 byteStep = 2;
 
-            i32 kStop = (mG8.size() / 8) * 8;
-            i32 kStep = rowSize * byteStep;
+            i32 kStop = static_cast<i32>(mG8.size() / 8) * 8;
+            i32 kStep = static_cast<i32>(rowSize * byteStep);
 
             block* gg0 = mG8.data();
             block* gg1 = mG8.data() + rowSize;

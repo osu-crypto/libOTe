@@ -92,7 +92,7 @@ void osuCrypto::NcoOtExtReceiver::receiveChosen(u64 numMsgsPerOT, span<block> me
 
     init(messages.size(), prng, chl);
 
-    for (u64 i = 0; i < messages.size(); ++i)
+    for (i64 i = 0; i < messages.size(); ++i)
     {
         j = choices[i];
         encode(i, &j, &messages[i]);
@@ -107,7 +107,7 @@ void osuCrypto::NcoOtExtReceiver::receiveChosen(u64 numMsgsPerOT, span<block> me
 
     chl.recv(temp.data(), temp.size());
 
-    for (u64 i = 0; i < messages.size(); ++i)
+    for (i64 i = 0; i < messages.size(); ++i)
     {
         messages[i] = messages[i] ^ temp(i, choices[i]);
     }

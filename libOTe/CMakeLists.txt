@@ -1,8 +1,11 @@
 
 #project(libOTe)
-
+enable_language(ASM)
 
 file(GLOB_RECURSE SRCS *.cpp)
+
+set(SRCS "${SRCS}")
+
 #include_directories(${CMAKE_SOURCE_DIR})
 add_library(libOTe STATIC ${SRCS})
 

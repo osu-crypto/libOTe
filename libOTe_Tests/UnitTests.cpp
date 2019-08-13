@@ -9,7 +9,8 @@
 #include "libOTe_Tests/OT_Tests.h"
 #include "libOTe_Tests/NcoOT_Tests.h"
 #include "libOTe_Tests/AknOt_Tests.h"
-
+#include "libOTe_Tests/SilentOT_Tests.h"
+#include "libOTe_Tests/bitpolymul_Tests.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -37,6 +38,15 @@ namespace tests_libOTe
         tc.add("LinearCode_repetition_Test_Impl         ", LinearCode_repetition_Test_Impl);
         tc.add("NaorPinkasOt_Test                       ", NaorPinkasOt_Test_Impl);
         tc.add("SimplestOT_Test_Impl                    ", SimplestOT_Test_Impl);
+
+        tc.add("bitShift_test                           ", bitShift_test);
+        tc.add("modp_test                               ", modp_test);
+        tc.add("bitpolymul_test                         ", bitpolymul_test);
+
+        tc.add("SilentOT_Test                           ", SilentOT_Test);
+        tc.add("SilentPprf_Test                         ", SilentPprf_Test);
+        tc.add("SilentPprf_trans_Test                   ", SilentPprf_trans_Test);
+                                                       
     });
 
 

@@ -4,4 +4,10 @@
 // build the library with simplest OT enabled
 #cmakedefine ENABLE_SIMPLESTOT @ENABLE_SIMPLESTOT@
 
+// build the library with Silent OT Extension enabled
+#cmakedefine ENABLE_SILENTOT @ENABLE_SILENTOT@
 
+// Silent OT requires bit poly mul
+#ifdef ENABLE_SILENTOT
+	#define ENABLE_BITPOLYMUL ON
+#endif

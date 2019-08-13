@@ -24,19 +24,19 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_DLLRT|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
@@ -103,6 +103,8 @@
   <ItemGroup>
     <ClCompile Include="AknOt_Tests.cpp" />
     <ClCompile Include="BaseOT_Tests.cpp" />
+    <ClCompile Include="SilentOT_Tests.cpp" />
+    <ClCompile Include="bitpolymul_Tests.cpp" />
     <ClCompile Include="Common.cpp" />
     <ClCompile Include="NcoOT_Tests.cpp" />
     <ClCompile Include="OT_Tests.cpp" />
@@ -111,6 +113,8 @@
   <ItemGroup>
     <ClInclude Include="AknOt_Tests.h" />
     <ClInclude Include="BaseOT_Tests.h" />
+    <ClInclude Include="SilentOT_Tests.h" />
+    <ClInclude Include="bitpolymul_Tests.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="NcoOT_Tests.h" />
     <ClInclude Include="OT_Tests.h" />

@@ -38,12 +38,12 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 
 	if(    NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Release"
        AND NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug" 
-       AND NOT "${CMAKE_BUILD_TYPE}" STREQUAL "RELWITHDEBINFO" )
+       AND NOT "${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebInfo" )
 		  
-        message(FATAL_ERROR ": Unknown build type - ${CMAKE_BUILD_TYPE}  Please use one of Debug, Release, or RELWITHDEBINFO\n\n" )        
+        message(FATAL_ERROR ": Unknown build type - \${CMAKE_BUILD_TYPE}=${CMAKE_BUILD_TYPE}.  Please use one of Debug, Release, or RelWithDebInfo. e.g. call\n\tcmake . -DCMAKE_BUILD_TYPE=Release\n" )        
 	endif()
 
-    message(STATUS "Option: CMAKE_BUILD_TYPE = ${CMAKE_BUILD_TYPE}\n\tRelease\n\tDebug\n\tRELWITHDEBINFO")
+    message(STATUS "Option: CMAKE_BUILD_TYPE = ${CMAKE_BUILD_TYPE}\n\tRelease\n\tDebug\n\tRelWithDebInfo")
 
 endif()
  
@@ -53,9 +53,11 @@ endif()
 #############################################
 
 
-option(ENABLE_SIMPLESTOT "Build the assembly based SimplestOT library" OFF)
+option(ENABLE_SIMPLESTOT "Build the assembly based SimplestOT library." OFF)
+option(ENABLE_SILENTOT   "Build the Slient OT protocol." OFF)
 
 message(STATUS "Option: ENABLE_SIMPLESTOT = ${ENABLE_SIMPLESTOT}")
+message(STATUS "Option: ENABLE_SILENTOT   = ${ENABLE_SILENTOT}")
 
 configure_file(libOTe/config.h.in libOTe/config.h)
 

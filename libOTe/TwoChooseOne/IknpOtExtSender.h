@@ -4,12 +4,13 @@
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/PRNG.h>
 
+#include <cryptoTools/Common/Timer.h>
 #include <array>
 
 namespace osuCrypto {
 
     class IknpOtExtSender :
-        public OtExtSender
+        public OtExtSender, public TimerAdapter
     {
     public: 
         std::array<PRNG, gOtExtBaseOtCount> mGens;
