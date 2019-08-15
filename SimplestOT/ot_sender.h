@@ -20,5 +20,9 @@ void sender_genS(SENDER * s, unsigned char * S_pack, rand_source rand);
 
 void sender_keygen(SENDER *, unsigned char *, unsigned char (*)[4][SIMPLEST_OT_HASHBYTES]);
 
+void sender_perf(SENDER* s, rand_source rand, int n);
+void sender_add(SENDER* s, rand_source rand, int n);
+
+
 #endif //ifndef OT_SENDER_H
 

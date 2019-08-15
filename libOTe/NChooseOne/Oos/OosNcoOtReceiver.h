@@ -5,6 +5,7 @@
 #include <vector>
 #include "libOTe/Tools/LinearCode.h"
 //#include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
+#include <cryptoTools/Common/Timer.h>
 #ifdef GetMessage
 #undef GetMessage
 #endif
@@ -24,7 +25,7 @@ namespace osuCrypto
     // encode or zeroEncode for all i less than the sum of the k values. Finally, after
     // all correction values have been sent, check should be called.
     class OosNcoOtReceiver
-        : public NcoOtExtReceiver
+        : public NcoOtExtReceiver, public TimerAdapter
     {
     public:
 

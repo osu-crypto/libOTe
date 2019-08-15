@@ -4,6 +4,8 @@
 
 namespace tests_libOTe
 {
-    void NaorPinkasOt_Test_Impl();
-    void SimplestOT_Test_Impl();
+    void Bot_NaorPinkas_Test();
+    void Bot_Simplest_Test();
+    void Bot_MasnyRindal_Test();
+    void Bot_MasnyRindal_Kyber_Test();
 }

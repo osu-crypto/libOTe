@@ -150,7 +150,7 @@ namespace tests_libOTe
 
     }
 
-    void KkrtNcoOt_Test_Impl()
+    void NcoOt_Kkrt_Test()
     {
         setThreadName("Sender");
 
@@ -310,7 +310,7 @@ namespace tests_libOTe
         ios.stop();
     }
 
-    void OosNcoOt_Test_Impl()
+    void NcoOt_Oos_Test()
     {
         setThreadName("Sender");
 
@@ -389,7 +389,7 @@ namespace tests_libOTe
     }
 
 
-    void Rr17NcoOt_Test_Impl()
+    void NcoOt_Rr17_Test()
     {
 
         setThreadName("Sender");
@@ -429,7 +429,7 @@ namespace tests_libOTe
     }
 
 
-    void NcoOt_chosen_Impl()
+    void NcoOt_chosen()
     {
 
         setThreadName("Sender");
@@ -485,7 +485,7 @@ namespace tests_libOTe
 
 
 
-    void NcoOt_genBaseOts_Test_Impl()
+    void NcoOt_genBaseOts_Test()
     {
 #ifdef LIBOTE_HAS_BASE_OT
         IOService ios(0);
@@ -524,7 +524,7 @@ namespace tests_libOTe
     }
 
 
-    void LinearCode_Test_Impl()
+    void Tools_LinearCode_Test()
     {
         LinearCode code;
 
@@ -609,7 +609,7 @@ namespace tests_libOTe
 
     }
 
-    void LinearCode_subBlock_Test_Impl()
+    void Tools_LinearCode_sub_Test()
     {
         LinearCode code511, code128, code256, code384, code640, code1280;
 
@@ -719,7 +719,7 @@ namespace tests_libOTe
         }
     }
 
-    void LinearCode_repetition_Test_Impl()
+    void Tools_LinearCode_rep_Test()
     {
         LinearCode code;
         std::stringstream ss;

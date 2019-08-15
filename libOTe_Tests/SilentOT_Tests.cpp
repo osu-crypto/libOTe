@@ -11,7 +11,7 @@
 using namespace oc;
 
 
-void bitShift_test(const CLP& cmd)
+void Tools_bitShift_test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
     //u64 nBits = ;
@@ -97,7 +97,7 @@ void clearBits(span<block> in, u64 idx)
 }
 
 
-void modp_test(const CLP& cmd)
+void Tools_modp_test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 
@@ -175,7 +175,7 @@ void modp_test(const CLP& cmd)
 #endif
 }
 
-void SilentOT_Test(const CLP& cmd)
+void OtExt_Silent_Test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 
@@ -263,7 +263,7 @@ void SilentOT_Test(const CLP& cmd)
 
 
 
-void SilentPprf_Test(const CLP& cmd)
+void Tools_Pprf_test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 
@@ -351,7 +351,7 @@ void SilentPprf_Test(const CLP& cmd)
 #endif
 }
 
-void SilentPprf_trans_Test(const CLP& cmd)
+void Tools_Pprf_trans_test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 

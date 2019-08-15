@@ -6,6 +6,7 @@
 #include "libOTe/Base/BaseOT.h"
 #include "libOTe/Tools/LinearCode.h"
 #include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Common/Timer.h>
 
 #include <array>
 #include <vector>
@@ -28,7 +29,7 @@ namespace osuCrypto {
     // give you the corresponding encoding. Finally, after all correction values have been
     // received, check should be called if this is a malicious secure protocol.
     class OosNcoOtSender
-        : public NcoOtExtSender
+        : public NcoOtExtSender, public TimerAdapter
     {
     public:
 

@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Base\BaseOT.h" />
+    <ClInclude Include="Base\MasnyRindalKyber.h" />
     <ClInclude Include="Base\naor-pinkas.h" />
     <ClInclude Include="Tools\SilentPprf.h" />
     <ClInclude Include="NChooseK\AknOtReceiver.h" />
@@ -63,7 +64,10 @@
     <ClInclude Include="TwoChooseOne\TcoOtDefines.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Base\MasnyRindalKyber.cpp" />
     <ClCompile Include="Base\naor-pinkas.cpp" />
+    <ClCompile Include="Base\MasnyRindal.h" />
+    <ClCompile Include="Base\MasnyRindal.cpp" />
     <ClCompile Include="Tools\SilentPprf.cpp" />
     <ClCompile Include="NChooseK\AknOtReceiver.cpp" />
     <ClCompile Include="NChooseK\AknOtSender.cpp" />

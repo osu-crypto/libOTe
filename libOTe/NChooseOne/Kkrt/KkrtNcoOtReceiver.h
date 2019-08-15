@@ -5,6 +5,7 @@
 #include <cryptoTools/Common/Matrix.h>
 #include <vector>
 #include <cryptoTools/Crypto/AES.h>
+#include <cryptoTools/Common/Timer.h>
 
 #ifdef GetMessage
 #undef GetMessage
@@ -22,7 +23,7 @@ namespace osuCrypto
     // be called. sendCorrectio(k) will send the next k correction values. Make sure to call
     // encode or zeroEncode for all i less than the sum of the k values. Finally, after
     // all correction values have been sent, check should be called.
-    class KkrtNcoOtReceiver : public NcoOtExtReceiver
+    class KkrtNcoOtReceiver : public NcoOtExtReceiver, public TimerAdapter
     {
     public:
 

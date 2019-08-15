@@ -17,6 +17,10 @@ if(ENABLE_SIMPLESTOT)
 	target_link_libraries(libOTe SimplestOT)
 endif()
 
+if(ENABLE_KYBEROT)
+	target_link_libraries(libOTe KyberOT)
+endif(ENABLE_KYBEROT)
+
 #############################################
 #            Install                        #
 #############################################

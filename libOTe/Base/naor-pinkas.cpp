@@ -66,6 +66,8 @@ namespace osuCrypto
         std::future<void> PK0Furture(PK0Prom.get_future());
         std::vector<u8> cBuff(nSndVals * fieldElementSize);
         auto cRecvFuture = socket.asyncRecv(cBuff.data(), cBuff.size()).share();
+        block R;
+        auto RFuture = socket.asyncRecv(R).share();
 
         std::array<u8, RandomOracle::HashSize> comm, comm2;
         socket.asyncRecv(comm);

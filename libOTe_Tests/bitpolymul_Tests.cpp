@@ -18,7 +18,7 @@
 using namespace oc;
 using namespace bpm;
 
-void bitpolymul_test(const CLP& cmd)
+void Tools_bitpolymul_test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 

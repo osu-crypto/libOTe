@@ -4,13 +4,13 @@
 
 namespace tests_libOTe
 {
-    void KkrtNcoOt_Test_Impl();
-    void OosNcoOt_Test_Impl();
-    void Rr17NcoOt_Test_Impl();
-    void NcoOt_genBaseOts_Test_Impl();
-    void NcoOt_chosen_Impl();
+    void NcoOt_Kkrt_Test();
+    void NcoOt_Oos_Test();
+    void NcoOt_Rr17_Test();
+    void NcoOt_genBaseOts_Test();
+    void NcoOt_chosen();
 
-    void LinearCode_Test_Impl();
-    void LinearCode_subBlock_Test_Impl();
-    void LinearCode_repetition_Test_Impl();
+    void Tools_LinearCode_Test();
+    void Tools_LinearCode_sub_Test();
+    void Tools_LinearCode_rep_Test();
 }

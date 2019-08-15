@@ -4,17 +4,17 @@
 namespace tests_libOTe
 {
 
-    void Transpose_Test_Impl();
-    void TransposeMatrixView_Test_Impl();
+    void Tools_Transpose_Test();
+    void Tools_Transpose_View_Test();
 
 
-    void KosOtExt_100Receive_Test_Impl();
-    void KosDotExt_100Receive_Test_Impl();
-    void OtExt_genBaseOts_Test_Impl();
-    void OtExt_Chosen_Test_Impl();
-        //void LzKosOtExt_100Receive_Test_Impl();
-    //void Kos2OtExt_100Receive_Test_Impl();
-	void IknpOtExt_100Receive_Test_Impl();
-	void IknpDotExt_100Receive_Test_Impl();
+    void OtExt_Kos_Test();
+    void DotExt_Kos_Test();
+    void OtExt_genBaseOts_Test();
+    void OtExt_Chosen_Test();
+        //void LzOtExt_Kos_Test();
+    //void Kos2OtExt_100Receive_Test();
+	void OtExt_Iknp_Test();
+	void DotExt_Iknp_Test();
 
 }

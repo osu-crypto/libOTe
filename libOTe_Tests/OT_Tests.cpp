@@ -76,7 +76,7 @@ namespace tests_libOTe
 		}
 	}
 
-	void Transpose_Test_Impl()
+	void Tools_Transpose_Test()
 	{
 		{
 
@@ -176,7 +176,7 @@ namespace tests_libOTe
 		}
 	}
 
-	void TransposeMatrixView_Test_Impl()
+	void Tools_Transpose_View_Test()
 	{
 
 
@@ -356,7 +356,7 @@ namespace tests_libOTe
 		}
 	}
 
-    void OtExt_genBaseOts_Test_Impl()
+    void OtExt_genBaseOts_Test()
     {
 #ifdef LIBOTE_HAS_BASE_OT
         IOService ios(0);
@@ -392,7 +392,7 @@ namespace tests_libOTe
     }
 
 
-	void KosOtExt_100Receive_Test_Impl()
+	void OtExt_Kos_Test()
 	{
 		setThreadName("Sender");
 
@@ -461,7 +461,7 @@ namespace tests_libOTe
 
 	}
 
-    void OtExt_Chosen_Test_Impl()
+    void OtExt_Chosen_Test()
     {
 
 
@@ -515,7 +515,7 @@ namespace tests_libOTe
     }
 
 
-	//void LzKosOtExt_100Receive_Test_Impl()
+	//void LzOtExt_Kos_Test()
 	//{
 	//	setThreadName("Sender");
 
@@ -601,7 +601,7 @@ namespace tests_libOTe
 		c1 = _mm_xor_si128(c1, t2);
 	}
 
-	void KosDotExt_100Receive_Test_Impl()
+	void DotExt_Kos_Test()
 	{
 		setThreadName("Sender");
 
@@ -682,7 +682,7 @@ namespace tests_libOTe
 		//recvNetMg
 	}
 
-	void IknpDotExt_100Receive_Test_Impl()
+	void DotExt_Iknp_Test()
 	{
 		setThreadName("Sender");
 
@@ -772,7 +772,7 @@ namespace tests_libOTe
 	}
 
 
-	void IknpOtExt_100Receive_Test_Impl()
+	void OtExt_Iknp_Test()
 	{
 		setThreadName("Sender");
 

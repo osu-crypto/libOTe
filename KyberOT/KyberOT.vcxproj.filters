@@ -1,0 +1,163 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="verify.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="poly.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="polyvec.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PQCgenKAT_kem.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="precomp.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="randombytes.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="reduce.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="indcpa.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kem.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kex.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="fips202.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="fips202x4.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="genmatrix.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cbdref.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="consts.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cpucycles.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="keccak4x\KeccakP-1600-times4-SIMD256.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="KyberOT.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rng.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="speed.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="test_kex.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="test_kyber.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="testvectors.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="verify.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="poly.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="polyvec.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="randombytes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="indcpa.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kex.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ntt.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="params.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cpucycles.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="fips202.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="fips202x4.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="genmatrix.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="api.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cbd.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="keccak4x\align.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="keccak4x\brg_endian.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="keccak4x\KeccakP-1600-times4-SnP.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="keccak4x\SIMD256-config.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="reduce.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rng.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="KyberOT.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="polyvec_pointwise_acc.s" />
+    <None Include="invntt.s" />
+    <None Include="ntt.s" />
+    <None Include="cbdeta4.s" />
+    <None Include="Makefile" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="CMakeList.txt" />
+  </ItemGroup>
+</Project>

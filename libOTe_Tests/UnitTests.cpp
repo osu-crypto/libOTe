@@ -17,35 +17,44 @@ namespace tests_libOTe
 {
     TestCollection Tests([](TestCollection& tc)
     {
-        //void OtExt_genBaseOts_Test_Impl()
+        //void OtExt_genBaseOts_Test()
 
 
-        tc.add("TransposeMatrixView_Test_Impl           ", TransposeMatrixView_Test_Impl);
-        tc.add("Transpose_Test_Impl                     ", Transpose_Test_Impl);
-        tc.add("OtExt_genBaseOts_Test_Impl              ", OtExt_genBaseOts_Test_Impl);
-        tc.add("OtExt_Chosen_Test_Impl                  ", OtExt_Chosen_Test_Impl);
-        tc.add("KosOtExt_100Receive_Test_Impl           ", KosOtExt_100Receive_Test_Impl);
-        tc.add("KosDotExt_100Receive_Test_Impl          ", KosDotExt_100Receive_Test_Impl);
-        tc.add("IknpOtExt_100Receive_Test_Impl          ", IknpOtExt_100Receive_Test_Impl);
-        tc.add("IknpDotExt_100Receive_Test_Impl         ", IknpDotExt_100Receive_Test_Impl);
-        tc.add("AknOt_sendRecv1000_Test                 ", AknOt_sendRecv1000_Test);
-        tc.add("KkrtNcoOt_Test                          ", KkrtNcoOt_Test_Impl);
-        tc.add("OosNcoOt_Test_Impl                      ", OosNcoOt_Test_Impl);
-        tc.add("Rr17NcoOt_Test_Impl                     ", Rr17NcoOt_Test_Impl);
-        tc.add("NcoOt_genBaseOts_Test_Impl              ", NcoOt_genBaseOts_Test_Impl);
-        tc.add("LinearCode_Test_Impl                    ", LinearCode_Test_Impl);
-        tc.add("LinearCode_subBlock_Test_Impl           ", LinearCode_subBlock_Test_Impl);
-        tc.add("LinearCode_repetition_Test_Impl         ", LinearCode_repetition_Test_Impl);
-        tc.add("NaorPinkasOt_Test                       ", NaorPinkasOt_Test_Impl);
-        tc.add("SimplestOT_Test_Impl                    ", SimplestOT_Test_Impl);
+        tc.add("Tools_Transpose_View_Test          ", Tools_Transpose_View_Test);
+        tc.add("Tools_Transpose_Test               ", Tools_Transpose_Test);
+        
+        tc.add("Tools_LinearCode_Test              ", Tools_LinearCode_Test);
+        tc.add("Tools_LinearCode_sub_Test          ", Tools_LinearCode_sub_Test);
+        tc.add("Tools_LinearCode_rep_Test          ", Tools_LinearCode_rep_Test);
 
-        tc.add("bitShift_test                           ", bitShift_test);
-        tc.add("modp_test                               ", modp_test);
-        tc.add("bitpolymul_test                         ", bitpolymul_test);
+        tc.add("Tools_bitShift_test                ", Tools_bitShift_test);
+        tc.add("Tools_modp_test                    ", Tools_modp_test);
+        tc.add("Tools_bitpolymul_test              ", Tools_bitpolymul_test);
 
-        tc.add("SilentOT_Test                           ", SilentOT_Test);
-        tc.add("SilentPprf_Test                         ", SilentPprf_Test);
-        tc.add("SilentPprf_trans_Test                   ", SilentPprf_trans_Test);
+        tc.add("Tools_Pprf_test                    ", Tools_Pprf_test);
+        tc.add("Tools_Pprf_trans_test              ", Tools_Pprf_trans_test);
+
+        tc.add("Bot_NaorPinkas_Test                ", Bot_NaorPinkas_Test);
+        tc.add("Bot_Simplest_Test                  ", Bot_Simplest_Test);
+        tc.add("Bot_MasnyRindal_Test               ", Bot_MasnyRindal_Test);
+        tc.add("Bot_MasnyRindal_Kyber_Test         ", Bot_MasnyRindal_Kyber_Test);
+
+        tc.add("OtExt_genBaseOts_Test              ", OtExt_genBaseOts_Test);
+        tc.add("OtExt_Chosen_Test                  ", OtExt_Chosen_Test);
+        tc.add("OtExt_Iknp_Test                    ", OtExt_Iknp_Test);
+        tc.add("OtExt_Kos_Test                     ", OtExt_Kos_Test);
+        tc.add("OtExt_Silent_Test                  ", OtExt_Silent_Test);
+
+        tc.add("DotExt_Kos_Test                    ", DotExt_Kos_Test);
+        tc.add("DotExt_Iknp_Test                   ", DotExt_Iknp_Test);
+
+        tc.add("NcoOt_Kkrt_Test                    ", NcoOt_Kkrt_Test);
+        tc.add("NcoOt_Oos_Test                     ", NcoOt_Oos_Test);
+        tc.add("NcoOt_Rr17_Test                    ", NcoOt_Rr17_Test);
+        tc.add("NcoOt_genBaseOts_Test              ", NcoOt_genBaseOts_Test);
+
+        tc.add("AknOt_sendRecv1000_Test            ", AknOt_sendRecv1000_Test);
+
                                                        
     });
 

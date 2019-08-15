@@ -57,3 +57,37 @@ void sender_keygen(SENDER * s,
 	ge4x_hash(keys[1][0], s->S_pack, Rs_pack, &P1); // E_2(T - yR^i)
 }
 
+
+void sender_perf(SENDER* s, rand_source rand, int n)
+{
+    //ge25519 S, yS;
+
+    //sc25519_random(&s->y, 0, rand);
+
+    ge4x P0;
+    //ge4x P1;
+    ge4x Rs;
+
+    n = (n + 3) / 4;
+
+    for (int i = 0; i < n; ++i)
+        ge4x_scalarmults(&P0, &Rs, &s->y); // 64yR^i	
+
+}
+
+void sender_add(SENDER* s, rand_source rand, int n)
+{
+    //ge25519 S, yS;
+
+    //sc25519_random(&s->y, 0, rand);
+
+    ge4x P0;
+    ge4x P1;
+    //ge4x Rs;
+
+    n = (n + 3) / 4;
+
+    for (int i = 0; i < n; ++i)
+        ge4x_sub(&P1, &s->yS, &P0); // 64yR^i	
+
+}

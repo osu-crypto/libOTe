@@ -53,11 +53,28 @@ endif()
 #############################################
 
 
-option(ENABLE_SIMPLESTOT "Build the assembly based SimplestOT library." OFF)
-option(ENABLE_SILENTOT   "Build the Slient OT protocol." OFF)
 
+option(ENABLE_SIMPLESTOT "Build the assembly based SimplestOT library" OFF)
 message(STATUS "Option: ENABLE_SIMPLESTOT = ${ENABLE_SIMPLESTOT}")
+
+option(ENABLE_KYBEROT "Build the Kyber (LWE based) library" OFF)
+message(STATUS "Option: ENABLE_KYBEROT    = ${ENABLE_KYBEROT}")
+
+
+
+set(OTE_KOS_HASH "OTE_DAVIE_MEYER_AES" CACHE STRING "Hashing technique for KOS ")
+message(STATUS "Option: KOS hashing (current = ${OTE_KOS_HASH}):\n")
+message(STATUS "      OTE_KOS_HASH=OTE_RANDOM_ORACLE         use the random oracle (slower)")
+message(STATUS "      OTE_KOS_HASH=OTE_DAVIE_MEYER_AES       use AES in the Davie Meyer compression function\n")
+
+
+option(OTE_KOS_FIAT_SHAMIR "Build the library withing Fiat Shamir for KOS" OFF)
+message(STATUS "Option: OTE_KOS_FIAT_SHAMIR = ${OTE_KOS_FIAT_SHAMIR}")
+
+
+option(ENABLE_SILENTOT   "Build the Slient OT protocol." OFF)
 message(STATUS "Option: ENABLE_SILENTOT   = ${ENABLE_SILENTOT}")
+
 
 configure_file(libOTe/config.h.in libOTe/config.h)
 
@@ -75,6 +92,10 @@ add_subdirectory(cryptoTools)
 if(ENABLE_SIMPLESTOT)
 	add_subdirectory(SimplestOT)
 endif(ENABLE_SIMPLESTOT)
+
+if(ENABLE_KYBEROT)
+	add_subdirectory(KyberOT)
+endif(ENABLE_KYBEROT)
 
 add_subdirectory(libOTe)
 add_subdirectory(libOTe_Tests)
