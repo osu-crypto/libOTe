@@ -71,8 +71,6 @@ namespace osuCrypto
 
         std::array<u8, RandomOracle::HashSize> comm, comm2;
         socket.asyncRecv(comm);
-        block R;
-        auto RFuture = socket.asyncRecv(R).share();
 
         for (u64 t = 0; t < numThreads; ++t)
         {
