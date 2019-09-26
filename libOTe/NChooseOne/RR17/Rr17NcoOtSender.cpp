@@ -84,7 +84,8 @@ namespace osuCrypto
 
             if (step == count - 1)
             {
-                chl.asyncSend(buff + step * stepSize, curSize * sizeof(std::array<block,2>), [buff]() 
+                auto chunk = span<u8>(buff + step * stepSize, curSize * sizeof(std::array<block, 2>));
+                chl.asyncSend(std::move(chunk), [buff]() 
                 {
                     delete[] buff; 
                 });

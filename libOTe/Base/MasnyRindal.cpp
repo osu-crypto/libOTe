@@ -35,7 +35,6 @@ namespace osuCrypto
         auto pointSize = g.sizeBytes();
 
         RandomOracle ro(sizeof(block));
-        block hash;
         Point hPoint(curve);
 
         std::vector<u8> hashBuff(roundUpTo(pointSize, 16));
@@ -71,7 +70,7 @@ namespace osuCrypto
                 //ro.Final<block>(hash);
                 //hPoint.randomize(hash);
                 //lout << "H(rNot) " << hPoint << std::endl;
-                ep_map(hPoint, hashBuff.data(), pointSize);
+                ep_map(hPoint, hashBuff.data(), int(pointSize));
 
                 sk.emplace_back(curve, prng);
 #ifdef MASNY_RINDAL_SIM
@@ -177,7 +176,6 @@ namespace osuCrypto
         chl.asyncSend(std::move(buff));
 
         buff.resize(pointSize * 2 * step);
-        block hh;
         Point pHash(curve), r(curve);
 
         for (u64 i = 0; i < n; )
@@ -205,7 +203,7 @@ namespace osuCrypto
                     //ro.Update(buffIters[j ^ 1], pointSize);
                     //ro.Final(hh);
                     //pHash.randomize(hh);
-                    ep_map(pHash, buffIters[j ^ 1], pointSize);
+                    ep_map(pHash, buffIters[j ^ 1], int(pointSize));
 
                     //lout << "*r[" << j << "]  " << r << std::endl;
                     //lout << "s"<<j<<"      " << *(u64*)buffIters[j] << std::endl;

@@ -67,10 +67,10 @@ namespace osuCrypto
         std::vector<u8> cBuff(nSndVals * fieldElementSize);
         auto cRecvFuture = socket.asyncRecv(cBuff.data(), cBuff.size()).share();
         block R;
-        auto RFuture = socket.asyncRecv(R).share();
 
         std::array<u8, RandomOracle::HashSize> comm, comm2;
         socket.asyncRecv(comm);
+        auto RFuture = socket.asyncRecv(R).share();
 
         for (u64 t = 0; t < numThreads; ++t)
         {
