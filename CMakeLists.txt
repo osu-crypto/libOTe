@@ -2,6 +2,7 @@ cmake_minimum_required (VERSION 3.4)
 
 project(libOTe)
 
+set(LIBOTE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 
