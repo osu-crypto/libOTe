@@ -3,8 +3,8 @@
 enable_language(ASM)
 
 file(GLOB_RECURSE SRC_SIMPLE_LIB 
-	${CMAKE_SOURCE_DIR}/SimplestOT/*.c
-	${CMAKE_SOURCE_DIR}/SimplestOT/*.s)
+      ${LIBOTE_SOURCE_DIR}/SimplestOT/*.c
+      ${LIBOTE_SOURCE_DIR}/SimplestOT/*.s)
 
 	
 
