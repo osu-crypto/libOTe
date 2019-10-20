@@ -10,6 +10,13 @@ set(SRCS "${SRCS}")
 add_library(libOTe STATIC ${SRCS})
 
 target_include_directories(libOTe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..) 
+
+target_compile_options(libOTe 
+               PRIVATE -Wall -Wfatal-errors -Wno-strict-overflow -Wno-ignored-attributes -Wno-parentheses
+               PUBLIC -ffunction-sections -maes -msse2 -msse4.1 -mpclmul -pthread)
+
+target_compile_features(libOTe PRIVATE cxx_std_14)
+
 target_link_libraries(libOTe cryptoTools)
 
 
