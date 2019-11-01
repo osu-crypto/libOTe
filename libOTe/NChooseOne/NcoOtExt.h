@@ -28,6 +28,8 @@ namespace osuCrypto
     class NcoOtExtSender
     {
     public:
+        virtual ~NcoOtExtSender() = default;
+
         // This function should be called first. It sets a variety of internal parameters such as
         // the number of base OTs that are required.
         // @ maliciousSecure: Should this extension be malicious secure
@@ -147,6 +149,7 @@ namespace osuCrypto
     class NcoOtExtReceiver
     {
     public:
+        virtual ~NcoOtExtReceiver() = default;
 
         // This function should be called first. It sets a variety of internal parameters such as
         // the number of base OTs that are required.
