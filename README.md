@@ -8,6 +8,7 @@ primary design goal of this library to obtain *high performance* while being
 *easy to use*.  This library currently implements:
  
 * The semi-honest 1-out-of-2 OT [IKNP03].
+* The semi-honest 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf).
 * The semi-honest 1-out-of-2 Delta-OT [IKNP03],[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
 * The malicious secure 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
@@ -16,6 +17,7 @@ primary design goal of this library to obtain *high performance* while being
 * The malicious secure approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746).
 * The malicious secure 1-out-of-2 base OT [NP01].
 * The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
+* The malicious secure 1-out-of-2 base OT [[MR19]](https://eprint.iacr.org/2019/706.pdf) 
  
 ## Introduction
  
