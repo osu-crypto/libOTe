@@ -1,4 +1,6 @@
 #include "AknOtSender.h"
+#ifdef ENABLE_AKN
+
 #include "libOTe/Base/BaseOT.h"
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Common/Timer.h>
@@ -185,3 +187,4 @@ namespace osuCrypto
 
     }
 }
+#endif

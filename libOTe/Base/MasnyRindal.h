@@ -1,21 +1,13 @@
-
-
+#pragma once
 #include "libOTe/config.h"
-
+#ifdef ENABLE_MR
 
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 
-
-#ifdef ENABLE_RELIC
-#define ENABLE_MASNYRINDAL
-#endif
-
 namespace osuCrypto
 {
-
-#ifdef ENABLE_MASNYRINDAL
 
     class MasnyRindal : public OtReceiver, public OtSender
     {
@@ -51,7 +43,6 @@ namespace osuCrypto
             PRNG& prng,
             Channel& chl) override;
     };
-#endif
-
 
 }
+#endif

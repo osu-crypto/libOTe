@@ -1,4 +1,6 @@
 #include "KosDotExtReceiver.h"
+#ifdef ENABLE_DELTA_KOS
+
 #include "libOTe/Tools/Tools.h"
 
 #include <cryptoTools/Common/BitVector.h>
@@ -314,3 +316,4 @@ namespace osuCrypto
     }
 
 }
+#endif

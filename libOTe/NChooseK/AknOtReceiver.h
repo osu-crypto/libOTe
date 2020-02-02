@@ -1,6 +1,8 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
 #include <cryptoTools/Common/Defines.h>
+#include "libOTe/config.h"
+#ifdef ENABLE_AKN
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
@@ -36,3 +38,4 @@ public:
 };
 
 }
+#endif

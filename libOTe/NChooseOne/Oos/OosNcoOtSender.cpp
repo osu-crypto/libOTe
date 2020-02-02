@@ -1,4 +1,5 @@
 #include "OosNcoOtSender.h"
+#ifdef ENABLE_OOS
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/bch511.h"
 #include <cryptoTools/Crypto/RandomOracle.h>
@@ -722,3 +723,4 @@ namespace osuCrypto
 
 
 }
+#endif

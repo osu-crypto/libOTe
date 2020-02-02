@@ -1,5 +1,5 @@
 #include "MasnyRindalKyber.h"
-#ifdef ENABLE_KYBEROT
+#ifdef ENABLE_MR_KYBER
 
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/PRNG.h>

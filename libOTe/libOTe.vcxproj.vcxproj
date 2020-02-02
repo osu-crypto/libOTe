@@ -169,7 +169,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/NTL/include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(ProjectDir)/../bitpolymul2/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/miracl</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -181,7 +181,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/NTL/include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl;C:\Program Files %28x86%29\Visual Leak Detector\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(ProjectDir)/../bitpolymul2/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/miracl</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -195,7 +195,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(ProjectDir)/../bitpolymul2/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/miracl</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -212,7 +212,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/NTL/include;C:/libs/miracl</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)/..;$(ProjectDir)/../cryptoTools/;$(ProjectDir)/../cryptoTools/thirdparty/win/boost;$(ProjectDir)/../SimplestOT/;$(ProjectDir)/../bitpolymul2/;C:\libs\include;$(SolutionDir)/cryptoTools/thirdparty/win/;$(SolutionDir)/cryptoTools/thirdparty/win/miracl;C:/libs/boost;C:/libs/;C:/libs/miracl</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE;SOLUTION_DIR=R"**($(SolutionDir))**";_MBCS;%(PreprocessorDefinitions);_WIN32_WINNT=0x0501;NDEBUG</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>

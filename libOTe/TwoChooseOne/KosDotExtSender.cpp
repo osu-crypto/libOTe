@@ -1,4 +1,5 @@
 #include "KosDotExtSender.h"
+#ifdef ENABLE_DELTA_KOS
 
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Matrix.h>
@@ -308,3 +309,4 @@ namespace osuCrypto
 
 
 }
+#endif

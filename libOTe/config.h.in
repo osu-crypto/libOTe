@@ -1,28 +1,69 @@
 #pragma once
 
-
-#define OTE_RANDOM_ORACLE 1
-#define OTE_DAVIE_MEYER_AES 2
-
-
-// build the library with simplest OT enabled
+// build the library with "simplest" Base OT enabled
 #cmakedefine ENABLE_SIMPLESTOT @ENABLE_SIMPLESTOT@
+
+// build the library with the ASM "simplest" Base OT enabled
+#cmakedefine ENABLE_SIMPLESTOT_ASM @ENABLE_SIMPLESTOT_ASM@
+
+// build the library with Masney Rindal Base OT enabled
+#cmakedefine ENABLE_MR @ENABLE_MR@
+
+// build the library with Masney Rindal Kyber Base OT enabled
+#cmakedefine ENABLE_MR_KYBER @ENABLE_MR_KYBER@
+
+// build the library with Naor Pinkas Base OT enabled
+#cmakedefine ENABLE_NP @ENABLE_NP@
+
+
+
+// build the library with Keller Orse Scholl OT-Ext enabled
+#cmakedefine ENABLE_KOS @ENABLE_KOS@
+
+// build the library with IKNP OT-Ext enabled
+#cmakedefine ENABLE_IKNP @ENABLE_IKNP@
 
 // build the library with Silent OT Extension enabled
 #cmakedefine ENABLE_SILENTOT @ENABLE_SILENTOT@
 
-// Silent OT requires bit poly mul
-#ifdef ENABLE_SILENTOT
-	#define ENABLE_BITPOLYMUL ON
-#endif
-
-// build the library with Kyber OT enabled
-#cmakedefine ENABLE_KYBEROT @ENABLE_KYBEROT@
 
 
-// build the library with simplest OT enabled
+// build the library with KOS Delta-OT-ext enabled
+#cmakedefine ENABLE_DELTA_KOS @ENABLE_DELTA_KOS@
+
+// build the library with IKNP Delta-OT-ext enabled
+#cmakedefine ENABLE_DELTA_IKNP @ENABLE_DELTA_IKNP@
+
+
+
+// build the library with OOS 1-oo-N OT-Ext enabled
+#cmakedefine ENABLE_OOS @ENABLE_OOS@
+
+// build the library with KKRT 1-oo-N OT-Ext enabled
+#cmakedefine ENABLE_KKRT @ENABLE_KKRT@
+
+// build the library with RR 1-oo-N OT-Ext OT-ext enabled
+#cmakedefine ENABLE_RR @ENABLE_RR@
+
+// build the library with RR approx k-oo-N OT-ext enabled
+#cmakedefine ENABLE_AKN @ENABLE_AKN@
+
+
+#define OTE_RANDOM_ORACLE 1
+#define OTE_DAVIE_MEYER_AES 2
+
 #cmakedefine OTE_KOS_HASH @OTE_KOS_HASH@
-
 
 // build the library where KOS is round optimized.
 #cmakedefine OTE_KOS_FIAT_SHAMIR @OTE_KOS_FIAT_SHAMIR@
+
+
+#if defined(ENABLE_SIMPLESTOT_ASM) && defined(_MSC_VER)
+    #undef ENABLE_SIMPLESTOT_ASM
+    #warning "ENABLE_SIMPLESTOT_ASM should not be defined on windows."
+#endif
+#if defined(ENABLE_MR_KYBER) && defined(_MSC_VER)
+    #undef ENABLE_MR_KYBER
+    #warning "ENABLE_MR_KYBER should not be defined on windows."
+#endif
+        

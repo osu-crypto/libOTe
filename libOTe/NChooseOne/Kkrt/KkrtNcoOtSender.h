@@ -1,5 +1,8 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use.  
+#include "libOTe/config.h"
+#ifdef ENABLE_KKRT
+
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Matrix.h>
@@ -148,3 +151,4 @@ namespace osuCrypto {
     };
 }
 
+#endif

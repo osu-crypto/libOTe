@@ -1,4 +1,5 @@
 #include "Rr17NcoOtReceiver.h"
+#ifdef ENABLE_RR
 
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
@@ -151,3 +152,4 @@ namespace osuCrypto
         // no op
     }
 }
+#endif

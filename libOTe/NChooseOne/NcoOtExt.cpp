@@ -5,28 +5,39 @@
 #include "libOTe/TwoChooseOne/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/IknpOtExtReceiver.h"
 #include <cryptoTools/Common/Matrix.h>
+#include <cryptoTools/Common/BitVector.h>
+#include <cryptoTools/Network/Channel.h>
 
 void osuCrypto::NcoOtExtReceiver::genBaseOts(PRNG & prng, Channel & chl)
 {
     auto count = getBaseOTCount();
     std::vector<std::array<block, 2>> msgs(count);
 
-    if (isMalicious())
-    {
-        KosOtExtSender sender;
-        sender.genBaseOts(prng, chl);
-        sender.send(msgs, prng, chl);
-    }
-    else
+#ifdef ENABLE_IKNP
+    if (!isMalicious())
     {
         IknpOtExtSender sender;
         sender.genBaseOts(prng, chl);
         sender.send(msgs, prng, chl);
-    }
+        setBaseOts(msgs, prng, chl);
+}
+#endif
+
+#ifdef ENABLE_KOS
+    KosOtExtSender sender;
+    sender.genBaseOts(prng, chl);
+    sender.send(msgs, prng, chl);
+#elif defined LIBOTE_HAS_BASE_OT
+    DefaultBaseOT base;
+    base.send(msgs, prng, chl);
+    setBaseOts(msgs, prng, chl);
+#else
+    throw std::runtime_error("The libOTe library does not have base OTs. Enable them to call this. " LOCATION);
+#endif
 
     setBaseOts(msgs, prng, chl);
-
 }
+
 
 void osuCrypto::NcoOtExtSender::genBaseOts(PRNG & prng, Channel & chl)
 {
@@ -35,18 +46,28 @@ void osuCrypto::NcoOtExtSender::genBaseOts(PRNG & prng, Channel & chl)
     BitVector bv(count);
     bv.randomize(prng);
 
-    if (isMalicious())
-    {
-        KosOtExtReceiver recver;
-        recver.genBaseOts(prng, chl);
-        recver.receive(bv, msgs, prng, chl);
-    }
-    else
+#ifdef ENABLE_IKNP
+    if (!isMalicious())
     {
         IknpOtExtReceiver recver;
         recver.genBaseOts(prng, chl);
         recver.receive(bv, msgs, prng,  chl);
+        setBaseOts(msgs, bv, chl);
+        return;
     }
+#endif
+    
+#ifdef ENABLE_KOS
+    KosOtExtReceiver recver;
+    recver.genBaseOts(prng, chl);
+    recver.receive(bv, msgs, prng, chl);
+#elif defined LIBOTE_HAS_BASE_OT
+    DefaultBaseOT base;
+    base.receive(bv, msgs, prng, chl);
+    setBaseOts(msgs, bv, chl);
+#else 
+    throw std::runtime_error("The libOTe library does not have base OTs. Enable them to call this. " LOCATION);
+#endif
 
     setBaseOts(msgs, bv, chl);
 }
@@ -57,7 +78,6 @@ void osuCrypto::NcoOtExtSender::sendChosen(MatrixView<block> messages, PRNG & pr
 
     if (hasBaseOts() == false)
         throw std::runtime_error("call configure(...) and genBaseOts(...) first.");
-
     
     init(messages.rows(), prng, chl);
     recvCorrection(chl);
@@ -82,11 +102,15 @@ void osuCrypto::NcoOtExtSender::sendChosen(MatrixView<block> messages, PRNG & pr
     chl.asyncSend(std::move(temp));
 }
 
-void osuCrypto::NcoOtExtReceiver::receiveChosen(u64 numMsgsPerOT, span<block> messages, span<u64> choices, PRNG & prng, Channel & chl)
+void osuCrypto::NcoOtExtReceiver::receiveChosen(
+    u64 numMsgsPerOT, 
+    span<block> messages, 
+    span<u64> choices, PRNG & prng, Channel & chl)
 {
     if (hasBaseOts() == false)
         throw std::runtime_error("call configure(...) and genBaseOts(...) first.");
-
+    
+    // must be at least 128 bits.
     std::array<u64, 2> choice{ 0,0 };
     auto& j = choice[0];
 
@@ -97,10 +121,8 @@ void osuCrypto::NcoOtExtReceiver::receiveChosen(u64 numMsgsPerOT, span<block> me
         j = choices[i];
         encode(i, &j, &messages[i]);
     }
-
     sendCorrection(chl, messages.size());
     Matrix<block> temp(messages.size(), numMsgsPerOT);
-
 
     if (isMalicious())
         check(chl, prng.get<block>());

@@ -31,7 +31,7 @@ namespace tests_libOTe
 
     void Bot_NaorPinkas_Test()
     {
-#ifdef NAOR_PINKAS
+#ifdef ENABLE_NP
         setThreadName("Sender");
 
         IOService ios(0);
@@ -128,7 +128,7 @@ namespace tests_libOTe
 
     void Bot_MasnyRindal_Test()
     {
-#ifdef ENABLE_MASNYRINDAL
+#ifdef ENABLE_MR
         setThreadName("Sender");
 
         IOService ios(0);
@@ -153,7 +153,7 @@ namespace tests_libOTe
             baseOTs.send(sendMsg, prng1, recvChannel);
 
         });
-
+        
         MasnyRindal baseOTs;
         baseOTs.receive(choices, recvMsg, prng0, senderChannel);
 
@@ -174,7 +174,7 @@ throw UnitTestSkipped("MasnyRindal not enabled. Requires Relic.");
 
     void Bot_MasnyRindal_Kyber_Test()
     {
-#ifdef ENABLE_KYBEROT
+#ifdef ENABLE_MR_KYBER
         setThreadName("Sender");
 
         IOService ios(0);

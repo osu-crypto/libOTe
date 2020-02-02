@@ -14,7 +14,7 @@
 #define PARALLEL
 
 
-#ifdef NAOR_PINKAS
+#ifdef ENABLE_NP
 
 #include <memory>
 

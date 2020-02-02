@@ -1,4 +1,7 @@
 #pragma once
+#include "libOTe/config.h"
+#ifdef ENABLE_RR
+
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include "libOTe/TwoChooseOne/KosOtExtSender.h"
 
@@ -62,3 +65,4 @@ namespace osuCrypto
 
 
 }
+#endif

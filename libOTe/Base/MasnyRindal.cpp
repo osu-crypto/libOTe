@@ -1,6 +1,6 @@
 #include "MasnyRindal.h"
 
-#ifdef ENABLE_MASNYRINDAL
+#ifdef ENABLE_MR
 
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Log.h>
@@ -8,14 +8,16 @@
 #include <cryptoTools/Network/Channel.h>
 
 #include <cryptoTools/Crypto/RCurve.h>
+#ifndef ENABLE_RELIC
+#pragma error("ENABLE_RELIC must be defined to build MasnyRindal")
+#endif
+
 using Curve = oc::REllipticCurve;
 using Point = oc::REccPoint;
 using Brick = oc::REccPoint;
 using Number = oc::REccNumber;
 
 #include <libOTe/Base/SimplestOT.h>
-//std::chrono::microseconds expTime(100);
-//#define MASNY_RINDAL_SIM
 
 namespace osuCrypto
 {
@@ -147,7 +149,7 @@ namespace osuCrypto
 
     void MasnyRindal::send(span<std::array<block, 2>> messages, PRNG & prng, Channel & chl)
     {
-        auto n = messages.size();
+        auto n = static_cast<u64>(messages.size());
         
         Curve curve;
         auto g = curve.getGenerator();

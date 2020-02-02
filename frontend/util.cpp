@@ -6,6 +6,38 @@ using namespace osuCrypto;
 #include <chrono>
 #define tryCount 2
 
+#include <cryptoTools/Network/IOService.h>
+#include <cryptoTools/Network/Session.h>
+
+void getLatency(CLP& cmd)
+{
+	auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
+
+	if (cmd.hasValue("r"))
+	{
+		auto mode = cmd.get<int>("r") != 0 ? SessionMode::Server : SessionMode::Client;
+		IOService ios;
+		Session session(ios, ip, mode);
+		auto chl = session.addChannel();
+		if (mode == SessionMode::Server)
+			senderGetLatency(chl);
+		else
+			recverGetLatency(chl);
+	}
+	else
+	{
+		IOService ios;
+		Session s(ios, ip, SessionMode::Server);
+		Session r(ios, ip, SessionMode::Client);
+		auto cs = s.addChannel();
+		auto cr = r.addChannel();
+
+		auto thrd = std::thread([&]() {senderGetLatency(cs); });
+		recverGetLatency(cr);
+
+		thrd.join();
+	}
+}
 
 void sync(Channel& chl, Role role)
 {

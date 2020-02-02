@@ -1,4 +1,5 @@
 #include "KkrtNcoOtSender.h"
+#ifdef ENABLE_KKRT
 #include <cryptoTools/Network/IOService.h>
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Log.h>
@@ -312,3 +313,4 @@ namespace osuCrypto
 
 
 }
+#endif

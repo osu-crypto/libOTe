@@ -13,9 +13,11 @@ using namespace osuCrypto;
 #include <cryptoTools/Network/IOService.h>
 #include <numeric>
 #include <cryptoTools/Common/Timer.h>
+#include <cryptoTools/Common/Matrix.h>
+#include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Log.h>
 int miraclTestMain();
-
+#include <cryptoTools/Crypto/PRNG.h>
 
 #include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosOtExtSender.h"
@@ -41,6 +43,11 @@ int miraclTestMain();
 #include "util.h"
 #include <iomanip>
 #include <boost/preprocessor/variadic/size.hpp>
+
+#include "libOTe/Base/SimplestOT.h"
+#include "libOTe/Base/MasnyRindal.h"
+#include "libOTe/Base/MasnyRindalKyber.h"
+#include "libOTe/Base/naor-pinkas.h"
 
 
 
@@ -624,7 +631,8 @@ oos{ "o", "oos" },
 Silent{ "s", "Silent" },
 akn{ "a", "akn" },
 np{ "np" },
-simple{ "simplest" };
+simple{ "simplest" },
+simpleasm{ "simplest-asm" };
 
 using ProtocolFunc = std::function<void(Role, int, int, std::string, std::string, CLP&)>;
 
@@ -667,7 +675,7 @@ bool runIf(ProtocolFunc protocol, CLP & cmd, std::vector<std::string> tag)
 
 	return false;
 }
-
+#ifdef ENABLE_IKNP
 void minimal()
 {
 	// Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
@@ -709,46 +717,53 @@ void minimal()
 	sender.sendChosen(sendMessages, prng, senderChl);
 	recverThread.join();
 }
-
-void getLatency(CLP & cmd)
-{
-	auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
-
-	if (cmd.hasValue("r"))
-	{
-		auto mode = cmd.get<int>("r") != 0 ? SessionMode::Server : SessionMode::Client;
-		IOService ios;
-		Session session(ios, ip, mode);
-		auto chl = session.addChannel();
-		if (mode == SessionMode::Server)
-			senderGetLatency(chl);
-		else
-			recverGetLatency(chl);
-	}
-	else
-	{
-		IOService ios;
-		Session s(ios, ip, SessionMode::Server);
-		Session r(ios, ip, SessionMode::Client);
-		auto cs = s.addChannel();
-		auto cr = r.addChannel();
-
-		auto thrd = std::thread([&]() {senderGetLatency(cs); });
-		recverGetLatency(cr);
-
-		thrd.join();
-	}
-}
+#endif
 
 #ifdef ENABLE_SIMPLESTOT
 const bool spEnabled = true;
 #else 
 const bool spEnabled = false;
 #endif
-#ifdef NAOR_PINKAS
+#ifdef ENABLE_SIMPLESTOT_ASM
+const bool spaEnabled = true;
+#else 
+const bool spaEnabled = false;
+#endif
+#ifdef ENABLE_IKNP
+const bool iknpEnabled = true;
+#else 
+const bool iknpEnabled = false;
+#endif
+#ifdef ENABLE_DELTA_IKNP
+const bool diknpEnabled = true;
+#else 
+const bool diknpEnabled = false;
+#endif
+#ifdef ENABLE_KOS
+const bool kosEnabled = true;
+#else 
+const bool kosEnabled = false;
+#endif
+#ifdef ENABLE_DELTA_KOS
+const bool dkosEnabled = true;
+#else 
+const bool dkosEnabled = false;
+#endif
+#ifdef ENABLE_NP
 const bool npEnabled = true;
 #else 
 const bool npEnabled = false;
+#endif
+
+#ifdef ENABLE_OOS
+const bool oosEnabled = true;
+#else 
+const bool oosEnabled = false;
+#endif
+#ifdef ENABLE_KKRT
+const bool kkrtEnabled = true;
+#else 
+const bool kkrtEnabled = false;
 #endif
 
 #ifdef ENABLE_SILENTOT
@@ -757,10 +772,10 @@ const bool silentEnabled = true;
 const bool silentEnabled = false;
 #endif
 
-
-
+#include "cryptoTools/Crypto/RandomOracle.h"
 int main(int argc, char** argv)
 {
+
 	CLP cmd;
 	cmd.parse(argc, argv);
 	bool flagSet = false;
@@ -784,18 +799,31 @@ int main(int argc, char** argv)
 #ifdef ENABLE_SIMPLESTOT
 	flagSet |= runIf(baseOT_example<SimplestOT>, cmd, simple);
 #endif
-#ifdef NAOR_PINKAS
+#ifdef ENABLE_SIMPLESTOT_ASM
+	flagSet |= runIf(baseOT_example<AsmSimplestOT>, cmd, simpleasm);
+#endif
+#ifdef ENABLE_NP
 	flagSet |= runIf(baseOT_example<NaorPinkas>, cmd, np);
 #endif
+#ifdef ENABLE_IKNP
 	flagSet |= runIf(TwoChooseOne_example<IknpOtExtSender, IknpOtExtReceiver>, cmd, iknp);
+#endif
+#ifdef ENABLE_DELTA_IKNP
 	flagSet |= runIf(TwoChooseOne_example<IknpDotExtSender, IknpDotExtReceiver>, cmd, diknp);
+#endif
+#ifdef ENABLE_KOS
 	flagSet |= runIf(TwoChooseOne_example<KosOtExtSender, KosOtExtReceiver>, cmd, kos);
+#endif
+#ifdef ENABLE_DELTA_KOS
 	flagSet |= runIf(TwoChooseOne_example<KosDotExtSender, KosDotExtReceiver>, cmd, dkos);
-
+#endif
+#ifdef ENABLE_KKRT
 	flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
+#endif
+#ifdef ENABLE_OOS
 	flagSet |= runIf(NChooseOne_example<OosNcoOtSender, OosNcoOtReceiver>, cmd, oos);
+#endif
 
-	//<SilentOtExtSender, SilentOtExtReceiver>
 	flagSet |= runIf(TwoChooseOneG_example, cmd, Silent);
 
 
@@ -814,24 +842,25 @@ int main(int argc, char** argv)
 
 		std::cout
 			<< "Protocols:\n"
-			<< Color::Green << "  -simplest" << Color::Default << "  : to run the SimplestOT active secure 1-out-of-2 base OT" << (spEnabled ? "" : "(disabled)") << "\n"
-			<< Color::Green << "  -np      " << Color::Default << "  : to run the NaorPinkas active secure 1-out-of-2 base OT" << (npEnabled ? "" : "(disabled)") << "\n"
-			<< Color::Green << "  -iknp    " << Color::Default << "  : to run the IKNP   passive secure 1-out-of-2       OT\n"
-			<< Color::Green << "  -diknp   " << Color::Default << "  : to run the IKNP   passive secure 1-out-of-2 Delta-OT\n"
-			<< Color::Green << "  -Silent  " << Color::Default << "  : to run the Silent passive secure 1-out-of-2       OT"<< (silentEnabled ? "" : "(disabled)") <<"\n"
-			<< Color::Green << "  -kos     " << Color::Default << "  : to run the KOS    active secure  1-out-of-2       OT\n"
-			<< Color::Green << "  -dkos    " << Color::Default << "  : to run the KOS    active secure  1-out-of-2 Delta-OT\n"
-			<< Color::Green << "  -oos     " << Color::Default << "  : to run the OOS    active secure  1-out-of-N OT for N=2^76\n"
-			<< Color::Green << "  -kkrt    " << Color::Default << "  : to run the KKRT   passive secure 1-out-of-N OT for N=2^128\n\n"
+			<< Color::Green << "  -simplest-asm" << Color::Default << "  : to run the ASM-SimplestOT active secure  1-out-of-2  base OT      "  <<Color::Red<< (spaEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -simplest    " << Color::Default << "  : to run the SimplestOT     active secure  1-out-of-2  base OT      "  <<Color::Red<< (spEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -np          " << Color::Default << "  : to run the NaorPinkas     active secure  1-out-of-2  base OT      "  <<Color::Red<< (npEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -iknp        " << Color::Default << "  : to run the IKNP           passive secure 1-out-of-2       OT      "  <<Color::Red<< (iknpEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -diknp       " << Color::Default << "  : to run the IKNP           passive secure 1-out-of-2 Delta-OT      "  <<Color::Red<< (diknpEnabled ? "" : "(disabled)") << "\n"  << Color::Default
+			<< Color::Green << "  -Silent      " << Color::Default << "  : to run the Silent         passive secure 1-out-of-2       OT      "  <<Color::Red<< (silentEnabled ? "" : "(disabled)") <<"\n"  << Color::Default
+			<< Color::Green << "  -kos         " << Color::Default << "  : to run the KOS            active secure  1-out-of-2       OT      "  <<Color::Red<< (kosEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -dkos        " << Color::Default << "  : to run the KOS            active secure  1-out-of-2 Delta-OT      "  <<Color::Red<< (dkosEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -oos         " << Color::Default << "  : to run the OOS            active secure  1-out-of-N OT for N=2^76 "  <<Color::Red<< (oosEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -kkrt        " << Color::Default << "  : to run the KKRT           passive secure 1-out-of-N OT for N=2^128" <<Color::Red<< (kkrtEnabled ? "" : "(disabled)") << "\n\n" << Color::Default
 
 			<< "Other Options:\n"
-			<< Color::Green << "  -n         " << Color::Default << ": the number of OTs to perform\n"
-			<< Color::Green << "  -r 0/1     " << Color::Default << ": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network cleint.\n"
-			<< Color::Green << "  -ip        " << Color::Default << ": the IP and port of the netowrk server, default = localhost:1212\n"
-			<< Color::Green << "  -t         " << Color::Default << ": the number of threads that should be used\n"
-			<< Color::Green << "  -u         " << Color::Default << ": to run the unit tests\n"
-			<< Color::Green << "  -u -list   " << Color::Default << ": to list the unit tests\n"
-			<< Color::Green << "  -u 1 2 15  " << Color::Default << ": to run the unit tests indexed by {1, 2, 15}.\n"
+			<< Color::Green << "  -n           " << Color::Default << ": the number of OTs to perform\n"
+			<< Color::Green << "  -r 0/1       " << Color::Default << ": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network cleint.\n"
+			<< Color::Green << "  -ip          " << Color::Default << ": the IP and port of the netowrk server, default = localhost:1212\n"
+			<< Color::Green << "  -t           " << Color::Default << ": the number of threads that should be used\n"
+			<< Color::Green << "  -u           " << Color::Default << ": to run the unit tests\n"
+			<< Color::Green << "  -u -list     " << Color::Default << ": to list the unit tests\n"
+			<< Color::Green << "  -u 1 2 15    " << Color::Default << ": to run the unit tests indexed by {1, 2, 15}.\n"
 			<< std::endl;
 	}
 

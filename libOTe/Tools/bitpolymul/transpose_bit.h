@@ -6,7 +6,7 @@ Code is borrowed from HOEVEN, LARRIEU, and LECERF.
 */
 
 #include "libOTe/config.h"
-#ifdef ENABLE_BITPOLYMUL
+#ifdef ENABLE_SILENTOT
 
 #include <stdint.h>
 #include <immintrin.h>

@@ -1,12 +1,15 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
-
+#include "libOTe/config.h"
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 
-#if defined ENABLE_RELIC  || defined ENABLE_MIRACL
-#define NAOR_PINKAS
+#ifdef ENABLE_NP
+
+#if !defined ENABLE_RELIC  && !defined ENABLE_MIRACL
+    #error "NaorPinkas requires with Relic or Miracl to be enabled.";
+#endif
 
 namespace osuCrypto
 {

@@ -1,5 +1,7 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
+#include "libOTe/config.h"
+#ifdef ENABLE_KOS
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <array>
 #include <cryptoTools/Crypto/PRNG.h>
@@ -64,3 +66,4 @@ namespace osuCrypto
     };
 
 }
+#endif

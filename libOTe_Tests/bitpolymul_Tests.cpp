@@ -172,6 +172,6 @@ void Tools_bitpolymul_test(const CLP& cmd)
         throw UnitTestFail(LOCATION);
 
 #else
-    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+    throw UnitTestSkipped("ENABLE_SILENTOT is not defined.");
 #endif
 }

@@ -1,4 +1,5 @@
 #include "AknOtReceiver.h"
+#ifdef ENABLE_AKN
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
@@ -296,3 +297,4 @@ namespace osuCrypto
         // all done
     }
 }
+#endif

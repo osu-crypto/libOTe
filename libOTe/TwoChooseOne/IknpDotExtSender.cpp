@@ -1,5 +1,5 @@
 #include "IknpDotExtSender.h"
-
+#ifdef ENABLE_DELTA_IKNP
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Matrix.h>
 #include <cryptoTools/Common/Timer.h>
@@ -214,3 +214,4 @@ namespace osuCrypto
 
 
 }
+#endif

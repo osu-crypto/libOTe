@@ -1,4 +1,5 @@
 #include "KosOtExtSender.h"
+#ifdef ENABLE_KOS
 
 #include "libOTe/config.h"
 #include "libOTe/Tools/Tools.h"
@@ -396,3 +397,4 @@ namespace osuCrypto
 
 
 }
+#endif

@@ -1,5 +1,7 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
+#include "libOTe/config.h"
+#ifdef ENABLE_OOS
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include <cryptoTools/Network/Channel.h>
 #include <vector>
@@ -177,3 +179,4 @@ namespace osuCrypto
     };
 
 }
+#endif

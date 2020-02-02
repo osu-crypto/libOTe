@@ -1,4 +1,5 @@
 #include "IknpDotExtReceiver.h"
+#ifdef ENABLE_DELTA_IKNP
 #include "libOTe/Tools/Tools.h"
 
 #include <cryptoTools/Common/BitVector.h>
@@ -248,3 +249,4 @@ namespace osuCrypto
     }
 
 }
+#endif

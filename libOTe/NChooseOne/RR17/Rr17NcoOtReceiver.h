@@ -1,6 +1,8 @@
 #pragma once
 
-#include <cryptoTools/Common/Defines.h>
+#include "libOTe/config.h"
+#ifdef ENABLE_RR
+
 #include <cryptoTools/Common/Defines.h>
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
@@ -59,3 +61,4 @@ namespace osuCrypto
     };
 
 }
+#endif

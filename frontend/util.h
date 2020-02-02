@@ -3,10 +3,13 @@
 
 
 
+#include <cryptoTools/Common/CLP.h>
 #include <cryptoTools/Network/Channel.h>
 void senderGetLatency(osuCrypto::Channel& chl);
 
 void recverGetLatency(osuCrypto::Channel& chl);
+void getLatency(osuCrypto::CLP& cmd);
+
 enum class Role
 {
 	Sender,

@@ -1,4 +1,5 @@
 #include "libOTe/Base/BaseOT.h"
+#ifdef ENABLE_OOS
 #include "OosNcoOtReceiver.h"
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/bch511.h"
@@ -715,3 +716,4 @@ namespace osuCrypto
         chl.asyncSend(std::move(mWBuff));
     }
 }
+#endif

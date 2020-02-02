@@ -10,12 +10,18 @@
 #include "Common.h"
 #include <cryptoTools/Common/TestCollection.h>
 using namespace osuCrypto;
+#include "libOTe/Base/BaseOT.h"
 
 namespace tests_libOTe
 {
     void AknOt_sendRecv1000_Test()
     {
-#ifdef LIBOTE_HAS_BASE_OT
+#if defined(ENABLE_AKN)
+#ifndef LIBOTE_HAS_BASE_OT
+#pragma error("ENABLE_AKN requires libOTe to have base OTs");
+#endif
+
+
         u64 totalOts(149501);
         u64 minOnes(4028);
         u64 avgOnes(5028);
@@ -84,35 +90,19 @@ namespace tests_libOTe
         if (failed)
             throw RTE_LOC;
 
-
-
         for (u64 i = 0; i < recv.mMessages.size(); ++i)
         {
-
             if (neq(send.mMessages[i][recv.mChoices[i]], recv.mMessages[i]))
                 throw UnitTestFail();
         }
 
         if (recv.mOnes.size() < minOnes)
             throw UnitTestFail();
-
-
-
         if (recv.mOnes.size() > maxOnes)
             throw UnitTestFail();
 
-        //for (u64 i = 0; i < numTHreads; ++i)
-        //{
-        //    sendChls[i].close();
-        //    recvChls[i].close();
-        //}
-
-        //ep0.stop();
-        //ep1.stop();
-
-        //ios.stop();
 #else
-        throw UnitTestSkipped("no base OTs are enabled");
+        throw UnitTestSkipped("no base OTs are enabled or ENABLE_AKN not defined.");
 #endif
     }
 }

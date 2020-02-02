@@ -1,4 +1,6 @@
 #include "IknpOtExtReceiver.h"
+#ifdef ENABLE_IKNP
+
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Log.h>
 
@@ -252,3 +254,4 @@ namespace osuCrypto
     }
 
 }
+#endif

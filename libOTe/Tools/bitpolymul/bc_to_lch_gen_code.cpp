@@ -19,7 +19,7 @@ along with BitPolyMul.  If not, see <http://www.gnu.org/licenses/>.
  
 
 #include "libOTe/config.h"
-#ifdef ENABLE_BITPOLYMUL
+#ifdef ENABLE_SILENTOT
 
 #include "bc_to_gen_code.h"
 namespace bpm {

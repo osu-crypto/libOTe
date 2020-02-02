@@ -1,7 +1,7 @@
 #pragma once
 
 #include "libOTe/config.h"
-#ifdef ENABLE_BITPOLYMUL
+#ifdef ENABLE_SILENTOT
 
 #include <immintrin.h>
 #define x(v1, v2) _mm256_xor_si256(v1,v2)
