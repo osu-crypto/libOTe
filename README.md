@@ -133,7 +133,12 @@ follow [these instructions](https://stackoverflow.com/questions/41464356/build-b
 
 **Enabling Relic (for fast base OTs):**
  * Clone the Visual Studio port [Relic](https://github.com/ladnir/relic) `git clone https://github.com/ladnir/relic.git`. 
- * Use the CMake command  `cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64` generate a Visual Studio solution
+ * Use the CMake commands 
+```
+cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64
+cmake --build .
+cmake --install .
+```` 
  * Optional: Build with gmp/mpir for faster performance. 
  * Install it to `C:\libs` (build the `INSTALL` VS project).
  * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_RELIC`.
