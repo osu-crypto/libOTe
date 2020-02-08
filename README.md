@@ -131,16 +131,15 @@ To see all the command line options, execute the program
 **Boost and visual studio 2017:**  If boost does not build with visual studio 2017 
 follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
 
-**Enabling Relic (for fast base OTs):**
- * Clone the Visual Studio port [Relic](https://github.com/ladnir/relic) `git clone https://github.com/ladnir/relic.git`. 
- * Use the CMake commands 
+**Enabling [Relic](https://github.com/relic-toolkit/relic) (for fast base OTs):**
+ * Build the library:
 ```
-cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64
+git clone https://github.com/ladnir/relic.git
+cd relic
+cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64 -DRUNTIME=MT
 cmake --build .
 cmake --install .
-```` 
- * Optional: Build with gmp/mpir for faster performance. 
- * Install it to `C:\libs` (build the `INSTALL` VS project).
+```
  * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_RELIC`.
 
 **Enabling Miracl (for base OTs):**
@@ -217,11 +216,11 @@ and link:
 1) .../libOTe/bin/liblibOTe.a
 2) .../libOTe/bin/libcryptoTools.a
 3) .../libOTe/bin/libSimplestOT.a    <i>(if enabled)</i>
+3) .../libOTe/bin/libKyberOT.a       <i>(if enabled)</i>
 4) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_system.a
 5) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_thread.a
 6) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl/source/libmiracl.a <i>(if enabled)</i>
-7) [Relic binar] <i>(if enabled)</i>
-
+7) [Relic binary] <i>(if enabled)</i>
 
 **Note:** On windows the linking paths follow a similar pattern.
 
@@ -241,48 +240,6 @@ or running the library.
     howpublished = {\url{https://github.com/osu-crypto/libOTe}},
 }
 ```
-
-## Protocol Details
-The 1-out-of-N [OOS16] protocol currently is set to work forn N=2<sup>76</sup>
-but is capable of supporting arbitrary codes given the generator matrix in text 
-format. See `./libOTe/Tools/Bch511.txt` for an example.
- 
-The 1-out-of-N  [KKRT16] for arbitrary N is also implemented and slightly faster
-than [OOS16]. However, [KKRT16] is in the semi-honest setting.
- 
-The approximate K-out-of-N OT [RR16] protocol is also implemented. This protocol 
-allows for a rough bound on the value K with a very light weight cut and choose 
-technique. It was introduced for a PSI protocol that builds on a Garbled Bloom Filter.
- 
- 
-\* Delta-OT does not use the RandomOracle or AES hash function.
- 
-\** This timing was taken from the [[OOS16]](http://eprint.iacr.org/2016/933) paper 
-and their implementation used multiple threads. The number was not specified. When 
-using the libOTe implementation with multiple threads, a timing of 2.6 seconds was 
-obtained with the RandomOracle hash function.
- 
-It should be noted that the libOTe implementation uses the Boost ASIO library to 
-perform more efficient asynchronous network IO. This involves using a background 
-thread to help process network data. As such, this is not a completely fair comparison 
-to the Apricot implementation but we don't expect it to have a large impact. It also 
-appears that the Encrypto Group implementation uses asynchronous network IO.
- 
-
- The above timings were obtained with the follwoing options:
-
- 1-out-of-2 malicious:
- * Apricot: `./ot.x -n 16777216 -p 0 -m a -l 100 & ./ot.x -p 1 -m a -n 16777216 -l 100`
- * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 1 &  ./ot.exe -r 1 -n 16777216 -o 1`
- * emp-toolkit:  2x 2<sup>23</sup> `./mot 0 1212 & ./mot 1 1212`
-
-1-out-of-2 semi-honest:
- * Apricot:  `./ot.x -n 16777216 -p 0 -m a -l 100 -pas & ./ot.x -p 1 -m a -n 16777216 -l 100 -pas`
- * Encrypto Group: ` ./ot.exe -r 0 -n 16777216 -o 0 &  ./ot.exe -r 1 -n 16777216 -o 0`
- * emp-toolkit:  2 * 2<sup>23</sup> `./shot 0 1212 & ./shot 1 1212`
-
-  
-  
  
  ## License
  
