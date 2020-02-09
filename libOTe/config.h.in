@@ -66,10 +66,10 @@
 
 #if defined(ENABLE_SIMPLESTOT_ASM) && defined(_MSC_VER)
     #undef ENABLE_SIMPLESTOT_ASM
-    #pragma warning "ENABLE_SIMPLESTOT_ASM should not be defined on windows."
+    #pragma message("ENABLE_SIMPLESTOT_ASM should not be defined on windows.")
 #endif
 #if defined(ENABLE_MR_KYBER) && defined(_MSC_VER)
     #undef ENABLE_MR_KYBER
-    #pragma warning "ENABLE_MR_KYBER should not be defined on windows."
+    #pragma message("ENABLE_MR_KYBER should not be defined on windows.")
 #endif
         

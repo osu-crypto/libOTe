@@ -21,11 +21,11 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	#           Flag and #defines              #
 	############################################
 	add_definitions(-DSOLUTION_DIR='${CMAKE_SOURCE_DIR}')
-	set(CMAKE_C_FLAGS "-Wall  -maes -msse2 -msse4.1 -mpclmul -Wfatal-errors -pthread -fPIC -no-pie -Wno-ignored-attributes -Wno-parentheses")
+	set(CMAKE_C_FLAGS "-Wall -march=native -maes -msse2 -msse3 -msse4.1 -mpclmul -Wfatal-errors -pthread -fPIC -no-pie -Wno-ignored-attributes -Wno-parentheses")
 	set(CMAKE_CXX_FLAGS  "${CMAKE_C_FLAGS}  -std=c++14")
 	
 	# Select flags.
-	SET(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native  -DNDEBUG") 
+	SET(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG") 
 	SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb -rdynamic")
 	SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb -rdynamic")
 	

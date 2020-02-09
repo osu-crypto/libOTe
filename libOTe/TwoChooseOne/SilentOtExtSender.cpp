@@ -18,15 +18,25 @@ namespace osuCrypto
 
 	u64 secLevel(u64 scale, u64 p, u64 points)
 	{
-		return static_cast<u64>(points * std::log2(scale * p / double(p)) + std::log2(scale * p) / 2);
+		auto x1 = std::log2(scale * p / double(p));
+		auto x2 = std::log2(scale * p) / 2;
+		return static_cast<u64>(points * x1 + x2);
 		//return std::log2(std::pow(scale * p / (p - 1.0), points) * (scale * p - points + 1));
 	}
 	u64 getPartitions(u64 scaler, u64 p, u64 secParam)
 	{
-		u64 ret = 1;
-		while (secLevel(scaler, p, ret) < secParam)
-			++ret;
+		if (scaler < 2)
+			throw std::runtime_error("scaler must be 2 or greater");
 
+		u64 ret = 1;
+		auto ss = secLevel(scaler, p, ret);
+		while (ss < secParam)
+		{
+			++ret;
+			ss = secLevel(scaler, p, ret);
+			if (ret > 1000)
+				throw std::runtime_error("failed to find silent OT parameters");
+		}
 		return roundUpTo(ret, 8);
 	}
 

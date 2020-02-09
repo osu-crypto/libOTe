@@ -185,7 +185,7 @@ void OtExt_Silent_Test(const CLP& cmd)
 
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
-    u64 n = cmd.getOr("n", 1000);
+    u64 n = cmd.getOr("n", 10000);
     bool verbose = cmd.getOr("v", 0) > 1;
     u64 threads = cmd.getOr("t", 4);
     u64 s = cmd.getOr("s", 4);
