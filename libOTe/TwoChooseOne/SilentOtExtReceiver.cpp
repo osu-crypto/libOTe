@@ -93,7 +93,6 @@ namespace osuCrypto
         return true;
     }
 
-
     u64 nextPrime(u64 n)
     {
         PRNG prng(ZeroBlock);
@@ -103,82 +102,53 @@ namespace osuCrypto
         return n;
     }
 
-
-    //// The number of DPF points that will be used.
-    //u64 numPartitions = 8;
-
-    //// defines n' = nScaler * n
-    //u64 nScaler = 4;
-
     u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
-    void SilentOtExtReceiver::genBase(
-        u64 n,
-        Channel& chl,
+    void SilentOtExtReceiver::setSlientBaseOts(span<block> recvBaseOts)
+    {
+        if (isConfigured() == false)
+            throw std::runtime_error("configure(...) must be called first.");
+
+        if (static_cast<u64>(recvBaseOts.size()) != silentBaseOtCount())
+            throw std::runtime_error("wrong number of silent base OTs");
+
+        mGen.setBase(recvBaseOts);
+        mGen.getTransposedPoints(mS);
+    }
+
+    void SilentOtExtReceiver::genBaseOts(
         PRNG& prng,
-        u64 scaler,
-        u64 secParam,
-        bool mal,
-        SilentBaseType basetype,
-        u64 threads)
+        Channel& chl)
     {
         setTimePoint("recver.gen.start");
-        configure(n, scaler, secParam, mal);
+        mIknpRecver.genBaseOts(prng, chl);
+    }
 
-        auto count = mGen.baseOtCount();
-        std::vector<block> msg(count);
 
-        BitVector choice = mGen.sampleChoiceBits(mN2, true, prng);
-        //BitVector choice(count);
-        //choice.randomize(prng);
+    void SilentOtExtReceiver::genSilentBaseOts(
+        PRNG& prng,
+        Channel& chl)
+    {
+        if (isConfigured() == false)
+            throw std::runtime_error("configure must be called first");
 
-        switch (basetype)
+        BitVector choice = sampleBaseChoiceBits(prng);
+        std::vector<block> msg(choice.size());
+
+        // If we have IKNP base OTs, use them
+        // to extend to get the silent base OTs.
+        if (mIknpRecver.hasBaseOts())
         {
-        case osuCrypto::SilentBaseType::None:
-            break;
-        case osuCrypto::SilentBaseType::Base:
+            mIknpRecver.receive(choice, msg, prng, chl);
+        }
+        else
         {
-#ifdef LIBOTE_HAS_BASE_OT
+            // otherwise just generate the silent 
+            // base OTs directly.
             DefaultBaseOT base;
-            base.receive(choice, msg, prng, chl, threads);
+            base.receive(choice, msg, prng, chl, mNumThreads);
             setTimePoint("recver.gen.baseOT");
-            break;
-#else
-            throw std::runtime_error("not base OTs");
-#endif
         }
-        case osuCrypto::SilentBaseType::BaseExtend:
-        {
-#ifdef LIBOTE_HAS_BASE_OT
-            DefaultBaseOT base;
-            std::array<std::array<block, 2>, 128> baseMsg;
-            prng.get(baseMsg.data(), baseMsg.size());
-            base.send(baseMsg, prng, chl, threads);
-            setTimePoint("recver.gen.baseOT");
-            IknpOtExtReceiver iknp;
-            iknp.setBaseOts(baseMsg);
-            iknp.receive(choice, msg, prng, chl);
-            setTimePoint("recver.gen.baseExtension");
-            break;
-#else
-            throw std::runtime_error("not base OTs");
-#endif
-        }
-        case osuCrypto::SilentBaseType::Extend:
-        {
-            std::array<std::array<block, 2>, 128> baseMsg;
-            IknpOtExtReceiver iknp;
-            iknp.setBaseOts(baseMsg);
-            iknp.receive(choice, msg, prng, chl);
-            setTimePoint("recver.gen.baseExtension");
-            break;
-        }
-        default:
-            break;
-        }
-
-        //TODO("comment this out and fix bug");
-        //memset(msg.data(), 0, msg.size() * 16);
 
         mGen.setBase(msg);
         mGen.getTransposedPoints(mS);
@@ -187,55 +157,97 @@ namespace osuCrypto
         {
             if (mS[i] >= mN2)
             {
-                //auto s = mS.size();
-
                 for (u64 j = i; j < mS.size(); ++j)
+                {
                     std::cout << Color::Red << "bad " << j << " " << mS[j] << " / " << mN2 << std::endl << Color::Default;
-
-
+                    std::terminate();
+                }
             }
-            //throw std::runtime_error("known issue, (fixable, ask peter). " LOCATION);
         }
-        //std::cout << "np " << mS.size() << std::endl;
-        //std::cout << "sp " << mSizePer << std::endl;
-        //std::cout << "p  " << mP << std::endl;
-        //std::cout << "N  " << mN << std::endl;
-        //std::cout << "N2 " << mN2 << std::endl;
-
 
         setTimePoint("recver.gen.done");
+    };
 
+    void SilentOtExtReceiver::genBase(
+        u64 n,
+        Channel& chl,
+        PRNG& prng,
+        u64 scaler,
+        u64 secParam,
+        SilentBaseType basetype,
+        u64 threads)
+    {
+        switch (basetype)
+        {
+        //case SilentBaseType::None:
+        //{
+        //    std::cout << Color::Red << "warning, insecure " LOCATION << std::endl << Color::Default;
+        //    configure(n, scaler, secParam, threads);
+        //    BitVector choices = sampleBaseChoiceBits(prng);
+        //    std::vector<block> msg(choices.size());
+        //    //PRNG prngz(ZeroBlock);
+        //    //auto ss = lout << "recver:\n";
+        //    for (u64 i = 0; i < msg.size(); ++i)
+        //    {
+        //        //std::array<block, 2> tt = prngz.get();
+        //        msg[i] = toBlock(i, choices[i]);
+        //    //    //ss << "msg[" << i << "]["<< int(choices[i])<<"] "
+        //    //    //    << msg[i] << std::endl;
+        //    }
+
+        //    setSlientBaseOts(msg);
+        //    break;
+        //}
+        case SilentBaseType::BaseExtend:
+            // perform 128 normal base OTs
+            genBaseOts(prng, chl);
+        case SilentBaseType::Base:
+            configure(n, scaler, secParam, threads);
+            // do the silent specific OTs, either by extending
+            // the exising base OTs or using a base OT protocol.
+            genSilentBaseOts(prng, chl);
+            break;
+        //case SilentBaseType::Extend:
+        //{
+        //    std::cout << Color::Red << "warning, insecure " LOCATION << std::endl << Color::Default;
+        //    std::vector<std::array<block, 2>> msg(gOtExtBaseOtCount);
+        //    setBaseOts(msg, prng, chl);
+        //    configure(n, scaler, secParam, threads);
+        //    genSilentBaseOts(prng, chl);
+        //    break;
+        //}
+        default:
+            std::cout << "known switch " LOCATION << std::endl;
+            std::terminate();
+            break;
+        }
+    }
+
+    u64 SilentOtExtReceiver::silentBaseOtCount() const
+    {
+        if (isConfigured() == false)
+            throw std::runtime_error("configure must be called first");
+        return mGen.baseOtCount();
     }
 
     void SilentOtExtReceiver::configure(
-        const u64& n, const u64& scaler, const u64& secParam,
-        bool mal)
+        u64 n,
+        u64 scaler,
+        u64 secParam,
+        u64 numThreads)
     {
-
         mP = nextPrime(n);
         mN = roundUpTo(mP, 128);
         mScaler = scaler;
         mN2 = scaler * mN;
-        mMal = mal;
+        mNumThreads = numThreads;
 
         auto numPartitions = getPartitions(scaler, mP, secParam);
         mS.resize(numPartitions);
         mSizePer = (mN2 + numPartitions - 1) / numPartitions;
 
-
-     
-            mGen.configure(mSizePer, mS.size());
-        
+        mGen.configure(mSizePer, mS.size());
     }
-
-    u64 SilentOtExtReceiver::baseOtCount()
-    {
-
-            return mGen.baseOtCount();
-        return 0;
-    }
-
-
 
 
     //sigma = 0   Receiver
@@ -266,55 +278,6 @@ namespace osuCrypto
     //
     //    w = r * H
 
-/*
-    Matrix<block> expandTranspose(BgiEvaluator::MultiKey & gen, u64 n)
-    {
-        Matrix<block> rT(128, n / 128, AllocType::Uninitialized);
-
-        std::array<block, 128> tpBuffer;
-
-        if (n % 128)
-            throw RTE_LOC;
-        if (gen.mNumKeys > tpBuffer.size())
-            throw std::runtime_error("not implemented, generalize the following loop to enable. " LOCATION);
-
-        u64 curBlock = 0;
-
-        for (u64 i = 0, j = 0; i < n;)
-        {
-            auto blocks = gen.yeild();
-            auto blockCount = std::min<u64>(n - i, blocks.size());
-
-            auto min2 = std::min<u64>(tpBuffer.size() - curBlock, blockCount);
-
-            memcpy(tpBuffer.data() + curBlock, blocks.data(), min2 * sizeof(block));
-            curBlock += min2;
-
-            if (curBlock == tpBuffer.size())
-            {
-                sse_transpose128(tpBuffer);
-                curBlock = 0;
-
-                for (u64 k = 0; k < tpBuffer.size(); ++k)
-                {
-                    rT(k, j) = tpBuffer[k];
-                }
-
-                ++j;
-
-                if (min2 != blockCount)
-                {
-                    curBlock = blockCount - min2;
-                    memcpy(tpBuffer.data(), blocks.data() + min2, curBlock * sizeof(block));
-                }
-            }
-
-
-            i += blockCount;
-        }
-
-        return rT;
-    }*/
 
     void SilentOtExtReceiver::checkRT(span<Channel> chls, Matrix<block>& rT1)
     {
@@ -328,7 +291,7 @@ namespace osuCrypto
 
         for (u64 i = 0; i < rT1.size(); ++i)
             rT2(i) = rT2(i) ^ rT1(i);
-         
+
 
         Matrix<block> R(rT1.cols() * 128, 1);
         MatrixView<block> Rv(R);
@@ -345,10 +308,11 @@ namespace osuCrypto
         {
             if (neq(R(i), exp(i)))
             {
-                std::cout << i << " / " << R.rows() << " " << R(i) << " " << exp(i) << std::endl;
+                std::cout << i << " / " << R.rows() << " R= " << R(i) << " exp= " << exp(i) << std::endl;
                 throw RTE_LOC;
             }
         }
+        std::cout << "debug check ok" << std::endl;
         //for (u64 x = 0; x < rT.rows(); ++x)
         //{
         //    for (u64 y = 0; y < rT.cols(); ++y)
@@ -359,72 +323,81 @@ namespace osuCrypto
         //}
     }
 
-
     void SilentOtExtReceiver::receive(
+        const BitVector& choices,
         span<block> messages,
-        BitVector& choices,
         PRNG& prng,
         Channel& chl)
     {
-        receive(messages, choices, prng, { &chl,1 });
+        BitVector randChoice;
+        silentReceive(randChoice, messages, prng, { &chl,1 });
+        randChoice ^= choices;
+        chl.asyncSend(std::move(randChoice));
     }
-    void SilentOtExtReceiver::receive(
-        span<block> messages,
+
+    void SilentOtExtReceiver::silentReceive(
         BitVector& choices,
+        span<block> messages,
+        PRNG& prng,
+        Channel& chl)
+    {
+        silentReceive(choices, messages, prng, { &chl,1 });
+    }
+
+    void SilentOtExtReceiver::silentReceive(
+        BitVector& choices,
+        span<block> messages,
         PRNG& prng,
         span<Channel> chls)
     {
+        if (isConfigured() == false)
+        {
+            // first generate 128 normal base OTs
+            configure(messages.size(), 2, 128, chls.size());
+        }
+
+        if (static_cast<u64>(messages.size()) > mN)
+            throw std::invalid_argument("messages.size() > n");
+
+        if (mGen.hasBaseOts() == false)
+        {
+            // make sure we have IKNP base OTs.
+            if(mIknpRecver.hasBaseOts() == false)
+                genBaseOts(prng, chls[0]);
+
+            genSilentBaseOts(prng, chls[0]);
+        }
+
         setTimePoint("recver.expand.start");
 
-        // column major matric. mN2 columns and 1 row of 128 bits (128 bit rows)
-        //std::vector<block> r(mN2);
+        // column major matrix. mN2 columns and 1 row of 128 bits (128 bit rows)
         Matrix<block> rT;
-
         rT.resize(128, mN2 / 128, AllocType::Uninitialized);
-        mSum = mGen.expand(chls, prng, rT, true, mMal);
-        setTimePoint("sender.expand.pprf_transpose");
 
+        // locally expand the seeds.
+        mSum = mGen.expand(chls, prng, rT, true, false);
+        setTimePoint("sender.expand.pprf_transpose");
 
         if (mDebug)
         {
             checkRT(chls, rT);
         }
 
-        //setTimePoint("recver.expand.transpose");
-
-
+        // do the compression to get the final OTs.
         auto type = MultType::QuasiCyclic;
-
         switch (type)
         {
-        case osuCrypto::MultType::Naive:
+        case MultType::Naive:
             randMulNaive(rT, messages);
             break;
-        case osuCrypto::MultType::QuasiCyclic:
-            randMulQuasiCyclic(rT, messages, choices, chls.size());
+        case MultType::QuasiCyclic:
+            randMulQuasiCyclic(rT, messages, choices, mNumThreads);
             break;
         default:
             break;
         }
 
-        //auto dest = mul(rMtx, mtx);
-        //auto dest2 = convert(messages);
-        //for (u64 i = 0; i < dest.rows(); ++i)
-        //{
-        //    std::cout << i << ":";
-
-        //    for (u64 j = 0; j < dest.cols(); ++j)
-        //    {
-        //        if (dest(i, j) != dest2(j, i))
-        //            std::cout << Color::Red;
-
-        //        std::cout << ", " << int(dest(i, j)) << " " << int(dest2(j, i)) << Color::Default;
-        //    }
-
-        //    std::cout << std::endl;
-        //}
-        //std::cout << std::endl;
-
+        clear();
     }
 
 
@@ -436,7 +409,7 @@ namespace osuCrypto
         for (i64 i = 0; i < messages.size(); ++i)
         {
             block& m = messages[i];
-            BitIterator iter((u8*)& m, 0);
+            BitIterator iter((u8*)&m, 0);
             mulRand(pubPrng, mtxColumn, rT, iter);
         }
         setTimePoint("recver.expand.mul");
@@ -659,6 +632,12 @@ namespace osuCrypto
         //			lout << "count[" << i << "] " << counts[i][0] << " " << counts[i][1] << " " << counts[i][2] << " " << counts[i][3] << std::endl;
 
         //		lout << "total " << totals[0] << " " << totals[1] << " " << totals[2] << " " << totals[3] << std::endl;
+    }
+
+    void SilentOtExtReceiver::clear()
+    {
+        mN = 0;
+        mGen.clear();
     }
 
 

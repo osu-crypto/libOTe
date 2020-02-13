@@ -52,6 +52,7 @@ namespace osuCrypto
         // expand the next output.size() number of outputs and store the result in output.
         //void yeild(Channel& chl, PRNG& prng, span<block> output);
 
+        void clear();
     };
 
 
@@ -91,6 +92,14 @@ namespace osuCrypto
 		block expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose, bool mal);
 		block expand(span<Channel> chl, PRNG& prng, MatrixView<block> output, bool transpose, bool mal);
 
+        void clear()
+        {
+            mBaseOTs.resize(0, 0);
+            mBaseChoices.resize(0, 0);
+            mDomain = 0;
+            mDepth = 0;
+            mPntCount = 0;
+        }
 
         //void setPoints(span<u64> points);
 

@@ -44,6 +44,8 @@ namespace osuCrypto
 
     void Rr17NcoOtSender::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
+        if (hasBaseOts() == false)
+            genBaseOts(prng, chl);
 
         mMessages.resize(numOtExt * mInputByteCount * 8);
         prng.mAes.ecbEncCounterMode(prng.mBlockIdx, mMessages.size() * 2, (block*)mMessages.data());

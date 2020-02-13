@@ -88,6 +88,9 @@ namespace osuCrypto
         if (mInputByteCount == 0)
             throw std::runtime_error("configure must be called first" LOCATION);
 
+        if (hasBaseOts() == false)
+            genBaseOts(prng, chl);
+
         // round up
         numOTExt = ((numOTExt + 127 + mStatSecParam) / 128) * 128;
 

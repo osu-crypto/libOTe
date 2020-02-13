@@ -40,106 +40,129 @@ namespace osuCrypto
 		return roundUpTo(ret, 8);
 	}
 
-	void SilentOtExtSender::genBase(
-		u64 n, Channel& chl, PRNG& prng, 
-		u64 scaler, u64 secParam, bool mal,
-		SilentBaseType basetype, u64 threads )
+	u64 SilentOtExtSender::baseOtCount() const
 	{
+		return mIknpSender.baseOtCount();
+	}
 
-		setTimePoint("sender.gen.start");
+	bool SilentOtExtSender::hasBaseOts() const
+	{
+		return mIknpSender.hasBaseOts();
+	}
 
-		configure(n, scaler, secParam, mal);
+	void SilentOtExtSender::genSilentBaseOts(PRNG& prng, Channel& chl)
+	{
+		if (isConfigured() == false)
+			throw std::runtime_error("configure must be called first");
+
+		std::vector<std::array<block,2>> msg(silentBaseOtCount());
+
+		// If we have IKNP base OTs, use them
+		// to extend to get the silent base OTs.
+		if (mIknpSender.hasBaseOts())
+		{
+			mIknpSender.send(msg, prng, chl);
+		}
+		else
+		{
+			// otherwise just generate the silent 
+			// base OTs directly.
+			DefaultBaseOT base;
+			base.send(msg, prng, chl, mNumThreads);
+			setTimePoint("recver.gen.baseOT");
+		}
+
+		mGen.setBase(msg);
 
 
-
-			auto count = mGen.baseOtCount();
-
-			std::vector<std::array<block,2>> msg(count);
-
-			switch (basetype)
+		for (u64 i = 0; i < mNumPartitions; ++i)
+		{
+			u64 mSi;
+			do
 			{
-			case SilentBaseType::None:
-				break;
-			case SilentBaseType::Base:
-			{
-#ifdef LIBOTE_HAS_BASE_OT
-                DefaultBaseOT base;
-				base.send(msg, prng, chl, threads);
-				setTimePoint("sender.gen.baseOT");
-#else
-                throw std::runtime_error("libOTe does not have base OTs...");
-#endif
-				break;
-			}
-			case SilentBaseType::BaseExtend:
-			{
-#ifdef LIBOTE_HAS_BASE_OT
-				std::array<block, 128> baseMsg;
-
-				BitVector bv(128);
-				bv.randomize(prng);
-                DefaultBaseOT base;
-				base.receive(bv, baseMsg, prng,chl, threads);
-				setTimePoint("sender.gen.baseOT");
-				IknpOtExtSender iknp;
-				iknp.setBaseOts(baseMsg, bv, chl);
-				iknp.send(msg, prng, chl);
-				setTimePoint("sender.gen.baseExtend");
-#else
-                throw std::runtime_error("libOTe does not have base OTs...");
-#endif
-				break;
-			}
-			case SilentBaseType::Extend:
-			{
-				std::array<block, 128> baseMsg;
-				BitVector bv(128);
-				bv.randomize(prng);
-
-				IknpOtExtSender iknp;
-				iknp.setBaseOts(baseMsg, bv);
-				iknp.send(msg, prng, chl);
-				setTimePoint("sender.gen.baseOT");
-				break;
-			}
-			default:
-				break;
-			}
-
-
-			mGen.setBase(msg);
-
-            mDelta = prng.get();
-			mGen.setValue(mDelta);
-            
-			for (u64 i = 0; i < mNumPartitions; ++i)
-			{
-				u64 mSi;
-				do
-				{
-					auto si = prng.get<u64>() % mSizePer;
-					mSi = si * mNumPartitions + i;
-				} while (mSi >= mN2);
-			}
+				auto si = prng.get<u64>() % mSizePer;
+				mSi = si * mNumPartitions + i;
+			} while (mSi >= mN2);
+		}
 
 		setTimePoint("sender.gen.done");
 	}
 
-	void SilentOtExtSender::configure(const u64& n, const u64& scaler, const u64& secParam, bool mal)
+	u64 SilentOtExtSender::silentBaseOtCount() const
+	{
+		if (isConfigured() == false)
+			throw std::runtime_error("configure must be called first");
+
+		return mGen.baseOtCount();
+	}
+
+	void SilentOtExtSender::setSlientBaseOts(
+		span<std::array<block, 2>> sendBaseOts)
+	{
+		mGen.setBase(sendBaseOts);
+	}
+
+	void SilentOtExtSender::genBase(
+		u64 n, Channel& chl, PRNG& prng, 
+		u64 scaler, u64 secParam,
+		SilentBaseType basetype, u64 threads )
+	{
+		switch (basetype)
+		{
+		//case SilentBaseType::None:
+		//{
+		//	std::cout << Color::Red << "warning, insecure " LOCATION << std::endl << Color::Default;
+		//	configure(n, scaler, secParam, threads);
+		//	auto count = silentBaseOtCount();
+		//	std::vector<std::array<block, 2>> msg(count);
+		//	PRNG prngz(ZeroBlock);
+		//	for (u64 i = 0; i < msg.size(); ++i)
+		//	{
+		//		msg[i][0] = toBlock(i, 0);
+		//		msg[i][1] = toBlock(i, 1); 
+		//	}
+		//	setSlientBaseOts(msg);
+		//	break;
+		//}
+		case SilentBaseType::BaseExtend:
+			// perform 128 normal base OTs
+			genBaseOts(prng, chl);
+		case SilentBaseType::Base:
+			configure(n, scaler, secParam, threads);
+			// do the silent specific OTs, either by extending
+			// the exising base OTs or using a base OT protocol.
+			genSilentBaseOts(prng, chl);
+			break;
+		//case SilentBaseType::Extend:
+		//{
+		//	std::cout << Color::Red << "warning, insecure " LOCATION << std::endl << Color::Default;
+		//	std::vector<block> msg(gOtExtBaseOtCount);
+		//	BitVector choice(gOtExtBaseOtCount);
+		//	setBaseOts(msg, choice, chl);
+		//	configure(n, scaler, secParam, threads);
+		//	genSilentBaseOts(prng, chl);
+		//	break;
+		//}
+		default:
+			std::cout << "known switch " LOCATION << std::endl;
+			std::terminate();
+			break;
+		}
+	}
+
+	void SilentOtExtSender::configure(
+		u64 n, u64 scaler, u64 secParam, u64 numThreads)
 	{
 		mP = nextPrime(n);
 		mN = roundUpTo(mP, 128);
 		mScaler = scaler;
 		mNumPartitions = getPartitions(scaler, mP, secParam);
 		mN2 = scaler * mN;
-		mMal = mal;
-		//std::cout << "P " << mP << std::endl;
+		mNumThreads = numThreads;
 
 		mSizePer = (mN2 + mNumPartitions - 1) / mNumPartitions;
 
-
-
-			mGen.configure(mSizePer, mNumPartitions);
+		mGen.configure(mSizePer, mNumPartitions);
 	}
 
 	//sigma = 0   Receiver
@@ -177,58 +200,76 @@ namespace osuCrypto
         chls[0].send(mGen.mValue);
     }
 
-     
+	void SilentOtExtSender::clear()
+	{
+		mN = 0;
+		mGen.clear();
+	}
+
 	void SilentOtExtSender::send(
+		span<std::array<block, 2>> messages,
+		PRNG& prng,
+		Channel& chl)
+	{
+		silentSend(messages, prng, chl);
+		BitVector correction(messages.size());
+		chl.recv(correction);
+		auto iter = correction.begin();
+
+		for (u64 i = 0; i < static_cast<u64>(messages.size()); ++i)
+		{
+			u8 bit = *iter; ++iter;
+			auto temp = messages[i][bit];
+			messages[i][bit] = messages[i][bit ^ 1];
+			messages[i][bit^1] = temp;
+		}
+	}
+     
+	void SilentOtExtSender::silentSend(
 		span<std::array<block, 2>> messages,
 		PRNG & prng,
 		Channel & chl)
 	{
-		send(messages, prng, { &chl,1 });
+		silentSend(messages, prng, { &chl,1 });
 	}
 
-    void SilentOtExtSender::send(
+    void SilentOtExtSender::silentSend(
         span<std::array<block, 2>> messages,
         PRNG& prng,
         span<Channel> chls)
     {
+		if (isConfigured() == false)
+		{
+			// first generate 128 normal base OTs
+			configure(messages.size(), 2, 128, chls.size());
+		}
+
+		if (static_cast<u64>(messages.size()) > mN)
+			throw std::invalid_argument("messages.size() > n");
+
+		if (mGen.hasBaseOts() == false)
+		{
+			// make sure we have IKNP base OTs.
+			if (mIknpSender.hasBaseOts() == false)
+				genBaseOts(prng, chls[0]);
+
+			genSilentBaseOts(prng, chls[0]);
+		}
+
         setTimePoint("sender.expand.start");
 
-        //std::vector<block> r(mN2);
-
-        //for (u64 i = 0; i < r.size();)
-        //{
-        //    auto blocks = mGen.yeild();
-        //    auto min = std::min<u64>(r.size() - i, blocks.size());
-        //    memcpy(r.data() + i, blocks.data(), min * sizeof(block));
-
-        //    i += min;
-        //}
-
-        //setTimePoint("sender.expand.dpf");
-
-        //if (mN2 % 128) throw RTE_LOC;
-        //Matrix<block> rT(128, mN2 / 128, AllocType::Uninitialized);
-        //sse_transpose(r, rT);
-        //setTimePoint("sender.expand.transpose");
         Matrix<block> rT;
+        rT.resize(128, mN2 / 128, AllocType::Uninitialized);
+        
+		block delta = prng.get();
+		mGen.expand(chls, delta, prng, rT, true, false);
+        setTimePoint("sender.expand.pprf_transpose");
 
-            rT.resize(128, mN2 / 128, AllocType::Uninitialized);
-            mGen.expand(chls, mDelta, prng, rT, true, mMal);
-            setTimePoint("sender.expand.pprf_transpose");
 
-#
         if (mDebug)
         {
             checkRT(chls, rT);
         }
-
-		//if (0)
-		//{
-
-		//	int temp;
-		//	chl.asyncSendCopy(temp);
-		//	chl.asyncSendCopy(rT);
-		//}
 
 		auto type = MultType::QuasiCyclic;
 
@@ -245,7 +286,7 @@ namespace osuCrypto
 		}
 		//randMulNaive(rT, messages);
 
-
+		clear();
 	}
 	void SilentOtExtSender::randMulNaive(Matrix<block> & rT, span<std::array<block, 2>> & messages)
 	{
@@ -263,7 +304,7 @@ namespace osuCrypto
 
 			mulRand(pubPrng, mtxColumn, rT, iter);
 
-			m1 = m0 ^ mDelta;
+			m1 = m0 ^ mGen.mValue;
 		}
 
 		setTimePoint("sender.expand.mul");
@@ -601,7 +642,7 @@ namespace osuCrypto
 				for (u64 k = 0; j < end; ++j, ++k)
 				{
 					messages[j][0] = tpBuffer[k];
-					messages[j][1] = tpBuffer[k] ^ mDelta;
+					messages[j][1] = tpBuffer[k] ^ mGen.mValue;
 				}
 #else
 				u64 k = 0;
@@ -619,14 +660,14 @@ namespace osuCrypto
 					messages[j + k + 6][0] = tpBuffer[k + 6] ^ hashBuffer[6];
 					messages[j + k + 7][0] = tpBuffer[k + 7] ^ hashBuffer[7];
 
-					tpBuffer[k + 0] = tpBuffer[k + 0] ^ mDelta;
-					tpBuffer[k + 1] = tpBuffer[k + 1] ^ mDelta;
-					tpBuffer[k + 2] = tpBuffer[k + 2] ^ mDelta;
-					tpBuffer[k + 3] = tpBuffer[k + 3] ^ mDelta;
-					tpBuffer[k + 4] = tpBuffer[k + 4] ^ mDelta;
-					tpBuffer[k + 5] = tpBuffer[k + 5] ^ mDelta;
-					tpBuffer[k + 6] = tpBuffer[k + 6] ^ mDelta;
-					tpBuffer[k + 7] = tpBuffer[k + 7] ^ mDelta;
+					tpBuffer[k + 0] = tpBuffer[k + 0] ^ mGen.mValue;
+					tpBuffer[k + 1] = tpBuffer[k + 1] ^ mGen.mValue;
+					tpBuffer[k + 2] = tpBuffer[k + 2] ^ mGen.mValue;
+					tpBuffer[k + 3] = tpBuffer[k + 3] ^ mGen.mValue;
+					tpBuffer[k + 4] = tpBuffer[k + 4] ^ mGen.mValue;
+					tpBuffer[k + 5] = tpBuffer[k + 5] ^ mGen.mValue;
+					tpBuffer[k + 6] = tpBuffer[k + 6] ^ mGen.mValue;
+					tpBuffer[k + 7] = tpBuffer[k + 7] ^ mGen.mValue;
 
 					mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
 
@@ -643,12 +684,12 @@ namespace osuCrypto
 				for (; k < min; ++k)
 				{
 					messages[j + k][0] = mAesFixedKey.ecbEncBlock(tpBuffer[k]) ^ tpBuffer[k];
-					messages[j + k][1] = mAesFixedKey.ecbEncBlock(tpBuffer[k] ^ mDelta) ^ tpBuffer[k] ^ mDelta;
+					messages[j + k][1] = mAesFixedKey.ecbEncBlock(tpBuffer[k] ^ mGen.mValue) ^ tpBuffer[k] ^ mGen.mValue;
 				}
 
 #endif
 				//messages[i][0] = view(i, 0);
-				//messages[i][1] = view(i, 0) ^ mDelta;
+				//messages[i][1] = view(i, 0) ^ mGen.mValue;
 			}
 
 			if(index==0)

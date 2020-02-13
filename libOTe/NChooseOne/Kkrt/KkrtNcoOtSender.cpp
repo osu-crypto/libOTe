@@ -68,6 +68,11 @@ namespace osuCrypto
     void KkrtNcoOtSender::init(
         u64 numOTExt, PRNG& prng, Channel& chl)
     {
+
+        if (hasBaseOts() == false)
+            genBaseOts(prng, chl);
+
+
         static const u8 superBlkSize(8);
 
         block seed = prng.get<block>(), theirSeed;

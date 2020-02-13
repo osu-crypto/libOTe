@@ -51,7 +51,6 @@ void minimal()
     auto recverThread = std::thread([&]() {
         PRNG prng(sysRandomSeed());
         IknpOtExtReceiver recver;
-        recver.genBaseOts(prng, recverChl);
 
         // Choose which messages should be received.
         BitVector choices(n);
@@ -67,7 +66,6 @@ void minimal()
 
     PRNG prng(sysRandomSeed());
     IknpOtExtSender sender;
-    sender.genBaseOts(prng, senderChl);
 
     // Choose which messages should be sent.
     std::vector<std::array<block, 2>> sendMessages(n);

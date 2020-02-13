@@ -35,9 +35,8 @@ namespace osuCrypto
 
     void KkrtNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
-
         if (hasBaseOts() == false)
-            throw std::runtime_error("rt error at " LOCATION);
+            genBaseOts(prng, chl);
 
         block seed = prng.get<block>();
         u8 theirComm[RandomOracle::HashSize];

@@ -50,11 +50,12 @@ namespace osuCrypto
     void OosNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
         u64 doneIdx = 0;
-        if (hasBaseOts() == false)
-            throw std::runtime_error("rt error at " LOCATION);
 
         if (mInputByteCount == 0)
             throw std::runtime_error("configure must be called first" LOCATION);
+        
+        if (hasBaseOts() == false)
+            genBaseOts(prng, chl);
 
         const u8 superBlkSize(8);
 

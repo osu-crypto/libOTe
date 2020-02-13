@@ -4,6 +4,8 @@
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <libOTe/Tools/Tools.h>
+#define DEBUG_PRINT_PPRF
+
 namespace osuCrypto
 {
 
@@ -55,7 +57,8 @@ namespace osuCrypto
             throw RTE_LOC;
 
         mBaseOTs.resize(mPntCount, mDepth);
-        memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
+        for (u64 i = 0; i < static_cast<u64>(baseMessages.size()); ++i)
+            mBaseOTs(i) = baseMessages[i];
     }
 
     void SilentMultiPprfReceiver::setBase(span<block> baseMessages)
@@ -326,6 +329,7 @@ namespace osuCrypto
         setValue(value);
         setTimePoint("pprf.send.start");
 
+        
 
         if (transpose)
         {
@@ -487,7 +491,7 @@ namespace osuCrypto
 #ifdef DEBUG_PRINT_PPRF
                 // If we are debugging, then send over the full tree 
                 // to make sure its correct on the other side.
-                chl.send(tree);
+                chl.asyncSendCopy(tree);
 #endif
 
                 // For all but the last level, mask the sums with the
@@ -546,6 +550,7 @@ namespace osuCrypto
                         std::cout << "c[" << g + j << "][" << d << "][1] " << sums[1][d][j] << " " << mBaseOTs[g + j][d][1] << std::endl;;
                     }
 #endif							
+
                     // Add the OT masks to the sums and send them over.
                     lastOts[j][0] = lastOts[j][0] ^ masks[0];
                     lastOts[j][1] = lastOts[j][1] ^ masks[1];
@@ -575,12 +580,9 @@ namespace osuCrypto
             }
         };
 
-
         std::vector<std::thread> thrds(chls.size() - 1);
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i] = std::thread(routine, i);
-        //routine(i);
-
 
         routine(thrds.size());
 
@@ -593,6 +595,14 @@ namespace osuCrypto
     void SilentMultiPprfSender::setValue(block value)
     {
         mValue = value;
+    }
+
+    void SilentMultiPprfSender::clear()
+    {
+        mBaseOTs.resize(0, 0);
+        mDomain = 0;
+        mDepth = 0; 
+        mPntCount = 0;
     }
 
     block SilentMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose,
@@ -669,6 +679,7 @@ namespace osuCrypto
             // The trees are flattenned to that the children of j are
             // located at 2*j  and 2*j+1. 
             std::vector<std::array<block, 8>> tree(1ull << (mDepth + 1));
+
 #ifdef DEBUG_PRINT_PPRF
             // This will be the full tree and is sent by the reciever to help debug. 
             std::vector<std::array<block, 8>> ftree(1ull << (mDepth + 1));
@@ -750,7 +761,6 @@ namespace osuCrypto
                     int notAi = mBaseChoices[i + g][0];
                     l1[notAi][i] = mBaseOTs[i + g][0] ^ theirSums[notAi][0][i];
                     l1[notAi ^ 1][i] = ZeroBlock;
-
                     //auto idxn = i + (notAi^1) * mPntCount8;
                     //l1[idxn] = mBaseOTs[i] ^ sums[notAi^1](i);
 
@@ -953,8 +963,6 @@ namespace osuCrypto
                     activeChild = ot1 ^ activeSum;
 
 #ifdef DEBUG_PRINT_PPRF
-
-
                     auto fLevel1 = getLevel(d + 1, true);
                     if (neq(fLevel1[inactiveChildIdx][j], inactiveChild))
                         throw RTE_LOC;

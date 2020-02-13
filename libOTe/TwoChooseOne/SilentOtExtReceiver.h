@@ -8,58 +8,137 @@
 #include <libOTe/Tools/Tools.h>
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
+#include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
+
 namespace osuCrypto
 {
-
-
     enum class MultType
     {
         Naive,
         QuasiCyclic
     };
 
-    class SilentOtExtReceiver : public TimerAdapter
+    // For more documentation see SilentOtExtSender.
+    class SilentOtExtReceiver : public OtExtReceiver, public TimerAdapter
     {
     public:
 
-		void genBase(u64 n, Channel& chl, PRNG& prng,
-			u64 scaler = 4, u64 secParam = 80, bool mal = false,
-			SilentBaseType base = SilentBaseType::BaseExtend,
-			u64 threads = 1);
+        u64 mP, mN = 0, mN2, mScaler, mSizePer;
+        std::vector<u64> mS;
+        block mDelta, mSum;
+        SilentBaseType mBaseType;
+        bool mDebug = false;
+        u64 mNumThreads;
+        IknpOtExtReceiver mIknpRecver;
+        SilentMultiPprfReceiver mGen;
 
-        void configure(const osuCrypto::u64 &n, const osuCrypto::u64 &scaler, const osuCrypto::u64 &secParam,
-			bool mal);
-        u64 baseOtCount();
+        // sets the Iknp base OTs that are then used to extend
+        void setBaseOts(
+            span<std::array<block, 2>> baseSendOts,
+            PRNG& prng,
+            Channel& chl) override {
+            mIknpRecver.setBaseOts(baseSendOts, prng, chl);
+        }
 
+        // return the number of base OTs IKNP needs
+        u64 baseOtCount() const override {
+            return mIknpRecver.baseOtCount();
+        }
+
+        // returns true if the IKNP base OTs are currently set.
+        bool hasBaseOts() const override { 
+            return mIknpRecver.hasBaseOts(); 
+        };
+
+        // Returns an indpendent copy of this extender.
+        virtual std::unique_ptr<OtExtReceiver> split() { 
+            throw std::runtime_error("not implemented"); };
+
+        // Generate the IKNP base OTs
+        void genBaseOts(PRNG& prng, Channel& chl) override;
+
+        // Generate the silent base OTs. If the Iknp 
+        // base OTs are set then we do an IKNP extend,
+        // otherwise we perform a base OT protocol to
+        // generate the needed OTs.
+        void genSilentBaseOts(PRNG& prng, Channel& chl);
+        
+        // configure the silent OT extension. This sets
+        // the parameters and figures out how many base OT
+        // will be needed. These can then be ganerated for
+        // a different OT extension or using a base OT protocol.
+        void configure(
+            u64 n, 
+            u64 scaler = 2, 
+            u64 secParam = 128,
+            u64 numThreads = 1);
+
+        // return true if this instance has been configured.
+        bool isConfigured() const { return mN > 0; }
+
+        // Returns how many base OTs the silent OT extension
+        // protocol will needs.
+        u64 silentBaseOtCount() const;
+
+        // The silent base OTs must have specially set base OTs.
+        // This returns the choice bits that should be used.
+        // Call this is you want to use a specific base OT protocol
+        // and then pass the OT messages back using setSlientBaseOts(...).
+        BitVector sampleBaseChoiceBits(PRNG& prng) {
+            if (isConfigured() == false)
+                throw std::runtime_error("configure(...) must be called first");
+            return mGen.sampleChoiceBits(mN2, true, prng);
+        }
+
+        // Set the externally generated base OTs. This choice
+        // bits must be the one return by sampleBaseChoiceBits(...).
+        void setSlientBaseOts(span<block> recvBaseOts);
+
+        // An "all-in-one" function that generates the silent 
+        // base OTs under various parameters. 
+        void genBase(u64 n, Channel& chl, PRNG& prng,
+            u64 scaler = 2, u64 secParam = 80,
+            SilentBaseType base = SilentBaseType::BaseExtend,
+            u64 threads = 1);
+
+        // The default API for OT ext allows the 
+        // caller to choose the choice bits. But
+        // silent OT picks the choice bits at random.
+        // To meet the original API we add communicatio
+        // and correct the random choice bits to the 
+        // provided ones... Use silentReceive(...) for 
+        // the silent OT API.
         void receive(
+            const BitVector& choices,
             span<block> messages,
+            PRNG& prng,
+            Channel& chl) override;
+
+        // Perform the actual OT extension. If silent
+        // base OTs have been generated or set, then
+        // this function is non-interactive. Otherwise
+        // the silent base OTs will automaticly be performed.
+        void silentReceive(
             BitVector& choices,
+            span<block> messages,
             PRNG & prng,
             Channel & chl);
 
-
-		void receive(
+        // A parallel version of the other silentReceive(...)
+        // function.
+		void silentReceive(
+            BitVector& choices,
 			span<block> messages,
-			BitVector& choices,
 			PRNG& prng,
 			span<Channel> chls);
 
-        void checkRT(span<Channel> chls, Matrix<block> &rT);
+        // internal.
 
+        void checkRT(span<Channel> chls, Matrix<block> &rT);
         void randMulNaive(Matrix<block> &rT, span<block> &messages);
         void randMulQuasiCyclic(Matrix<block> &rT, span<block> &messages, BitVector& choices, u64 threads);
         
-        u64 mP, mN, mN2, mScaler, mSizePer;
-        std::vector<u64> mS;
-        block mDelta, mSum;
-		bool mMal;
-
-        bool mDebug = false;
-
-        //BgiEvaluator::MultiKey mGenBgi;
-        SilentMultiPprfReceiver mGen;
-
-
+        void clear();
     };
 
     //Matrix<block> expandTranspose(BgiEvaluator::MultiKey & gen, u64 n);

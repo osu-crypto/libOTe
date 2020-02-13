@@ -50,6 +50,9 @@ namespace osuCrypto
         Channel& chl)
     {
 
+        if (hasBaseOts() == false)
+            genBaseOts(prng, chl);
+
         // round up
         u64 numOtExt = roundUpTo(messages.size(), 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;

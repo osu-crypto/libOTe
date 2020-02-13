@@ -87,7 +87,7 @@ void clearBits(span<block> in, u64 idx)
     }
 
     while (p != e)
-        * p++ = 0;
+        *p++ = 0;
 
 
     BitVector test((u8*)in.data(), in.size() * 128);
@@ -183,14 +183,14 @@ void OtExt_Silent_Test(const CLP& cmd)
     Session s0(ios, "localhost:1212", SessionMode::Server);
     Session s1(ios, "localhost:1212", SessionMode::Client);
 
-    SilentOtExtSender sender;
-    SilentOtExtReceiver recver;
+
+
     u64 n = cmd.getOr("n", 10000);
     bool verbose = cmd.getOr("v", 0) > 1;
     u64 threads = cmd.getOr("t", 4);
     u64 s = cmd.getOr("s", 4);
     u64 sec = cmd.getOr("sec", 80);
-    bool mal = cmd.isSet("mal");
+    //bool mal = cmd.isSet("mal");
 
     std::vector<Channel> chls0(threads), chls1(threads);
 
@@ -200,23 +200,50 @@ void OtExt_Silent_Test(const CLP& cmd)
         chls1[i] = s1.addChannel();
     }
 
-
     PRNG prng(toBlock(cmd.getOr("seed", 0)));
     PRNG prng1(toBlock(cmd.getOr("seed1", 1)));
+
+
+    SilentOtExtSender sender;
+    SilentOtExtReceiver recver;
+
     Timer timer;
     sender.setTimer(timer);
     recver.setTimer(timer);
 
-    auto t = std::thread([&]() {recver.genBase(n, chls1[0], prng, s, sec, mal, SilentBaseType::None, threads); });
-    sender.genBase(n, chls0[0], prng1, s, sec, mal, SilentBaseType::None, threads);
-    t.join();
+    //sender.mDebug = true;
+    //recver.mDebug = true;
+    //recver.mGen.mPrint = false;
+
+    // fake base OTs.
+    {
+        recver.configure(n, s, sec, threads);
+        BitVector choices = recver.sampleBaseChoiceBits(prng);
+        std::vector<block> msg(choices.size());
+        for (u64 i = 0; i < msg.size(); ++i)
+            msg[i] = toBlock(i, choices[i]);
+        recver.setSlientBaseOts(msg);
+    }
+
+    {
+        sender.configure(n, s, sec, threads);
+        auto count = sender.silentBaseOtCount();
+        std::vector<std::array<block, 2>> msg(count);
+        PRNG prngz(ZeroBlock);
+        for (u64 i = 0; i < msg.size(); ++i)
+        {
+        	msg[i][0] = toBlock(i, 0);
+        	msg[i][1] = toBlock(i, 1); 
+        }
+        sender.setSlientBaseOts(msg);
+    }
 
     std::vector<block> messages2(n);
     BitVector choice;
     std::vector<std::array<block, 2>> messages(n);
 
-    sender.send(messages, prng, chls0);
-    recver.receive(messages2, choice, prng, chls1);
+    sender.silentSend(messages, prng, chls0);
+    recver.silentReceive(choice, messages2, prng, chls1);
     bool passed = true;
     BitVector act(n);
 
@@ -255,6 +282,7 @@ void OtExt_Silent_Test(const CLP& cmd)
 
     if (passed == false)
         throw RTE_LOC;
+    
 
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");

@@ -442,7 +442,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 	for (int i = 0; i < numThreads; ++i)
 		chls[i] = ep0.addChannel();
 
-	bool mal = cmd.isSet("mal");
+	//bool mal = cmd.isSet("mal");
 	OtExtSender sender;
 	OtExtRecver receiver;
 
@@ -464,15 +464,15 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			// construct a vector to stored the received messages. 
 			std::vector<block> msgs(numOTs);
 
-			receiver.genBase(numOTs, chls[0], prng, s, sec, mal, type, chls.size());
+			receiver.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
 			// perform  numOTs random OTs, the results will be written to msgs.
-			receiver.receive(msgs, choice, prng, chls);
+			receiver.silentReceive(choice, msgs, prng, chls);
 		}
 		else
 		{
 			std::vector<std::array<block, 2>> msgs(numOTs);
 
-			sender.genBase(numOTs, chls[0], prng, s, sec,mal, type, chls.size());
+			sender.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
 			// construct a vector to stored the random send messages. 
 
 			// if delta OT is used, then the user can call the following 
@@ -483,7 +483,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			//
 
 			// perform the OTs and write the random OTs to msgs.
-			sender.send(msgs, prng, chls);
+			sender.silentSend(msgs, prng, chls);
 		}
 	};
 
@@ -497,10 +497,10 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 		types.push_back(SilentBaseType::Base);
 	if (cmd.isSet("baseExtend"))
 		types.push_back(SilentBaseType::BaseExtend);
-	if (cmd.isSet("extend"))
-		types.push_back(SilentBaseType::Extend);
-	if (types.size() == 0 || cmd.isSet("none"))
-		types.push_back(SilentBaseType::None);
+	//if (cmd.isSet("extend"))
+	//	types.push_back(SilentBaseType::Extend);
+	//if (types.size() == 0 || cmd.isSet("none"))
+	//	types.push_back(SilentBaseType::None);
 
 
 	for (auto s : ss)
@@ -535,9 +535,9 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 				case SilentBaseType::Base:
 					typeStr = "b ";
 					break;
-				case SilentBaseType::Extend:
-					typeStr = "e ";
-					break;
+				//case SilentBaseType::Extend:
+				//	typeStr = "e ";
+				//	break;
 				case SilentBaseType::BaseExtend:
 					typeStr = "be";
 					break;
@@ -690,7 +690,6 @@ void minimal()
 	auto recverThread = std::thread([&]() {
 		PRNG prng(sysRandomSeed());
 		IknpOtExtReceiver recver;
-		recver.genBaseOts(prng, recverChl);
 
 		// Choose which messages should be received.
 		BitVector choices(n);
@@ -706,7 +705,6 @@ void minimal()
 
 	PRNG prng(sysRandomSeed());
 	IknpOtExtSender sender;
-	sender.genBaseOts(prng, senderChl);
 
 	// Choose which messages should be sent.
 	std::vector<std::array<block, 2>> sendMessages(n);

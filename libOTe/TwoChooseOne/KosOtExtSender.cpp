@@ -65,6 +65,9 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
+        if (hasBaseOts() == false)
+            genBaseOts(prng, chl);
+
         setTimePoint("Kos.send.start");
 
         // round up

@@ -63,9 +63,8 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
-
-        if (mHasBase == false)
-            throw std::runtime_error("rt error at " LOCATION);
+        if (hasBaseOts() == false)
+            genBaseOts(prng, chl);
 
         // we are going to process OTs in blocks of 128 * superBlkSize messages.
         u64 numOtExt = roundUpTo(choices.size(), 128);

@@ -34,6 +34,9 @@ namespace osuCrypto
     }
     void Rr17NcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {
+        if (hasBaseOts() == false)
+            genBaseOts(prng, chl);
+
         mMessages.resize(mEncodeSize * numOtExt);
         mChoices.resize(mEncodeSize * numOtExt);
         //std::cout << "ots = " << log2(mMessages.size()) << std::endl;
