@@ -4,7 +4,7 @@
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <libOTe/Tools/Tools.h>
-#define DEBUG_PRINT_PPRF
+//#define DEBUG_PRINT_PPRF
 
 namespace osuCrypto
 {
