@@ -20,6 +20,7 @@ void osuCrypto::NcoOtExtReceiver::genBaseOts(PRNG & prng, Channel & chl)
         sender.genBaseOts(prng, chl);
         sender.send(msgs, prng, chl);
         setBaseOts(msgs, prng, chl);
+        return;
 }
 #endif
 
