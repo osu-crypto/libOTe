@@ -35,6 +35,7 @@ namespace osuCrypto
         u64 mStatSecParam = 0;
         LinearCode mCode;
         u64 mCorrectionIdx, mInputByteCount = 0;
+        block mChallengeSeed = ZeroBlock;
 
         std::vector<std::array<PRNG, 2>> mGens;
         Matrix<block> mT0;
@@ -169,8 +170,6 @@ namespace osuCrypto
 
         std::vector<block> mWBuff, mTBuff;
         void sendFinalization(Channel& chl, block seed);
-
-        block mChallengeSeed = ZeroBlock;
         void recvChallenge(Channel& chl);
         void computeProof();
         void sendProof(Channel& chl);
