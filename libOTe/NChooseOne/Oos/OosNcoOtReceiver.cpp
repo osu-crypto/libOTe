@@ -78,6 +78,7 @@ namespace osuCrypto
         // The is the index of the last correction value u = T0 ^ T1 ^ c(w)
         // that was sent to the sender.
         mCorrectionIdx = 0;
+        mChallengeSeed = ZeroBlock;
 
         // We need three matrices, T0, T1, and mW. T1, T0 will hold the expanded
         // and transposed rows that we got the using the base OTs as PRNG seed.
