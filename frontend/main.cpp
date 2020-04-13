@@ -853,7 +853,7 @@ int main(int argc, char** argv)
 
 			<< "Other Options:\n"
 			<< Color::Green << "  -n           " << Color::Default << ": the number of OTs to perform\n"
-			<< Color::Green << "  -r 0/1       " << Color::Default << ": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network cleint.\n"
+			<< Color::Green << "  -r 0/1       " << Color::Default << ": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network client.\n"
 			<< Color::Green << "  -ip          " << Color::Default << ": the IP and port of the netowrk server, default = localhost:1212\n"
 			<< Color::Green << "  -t           " << Color::Default << ": the number of threads that should be used\n"
 			<< Color::Green << "  -u           " << Color::Default << ": to run the unit tests\n"
