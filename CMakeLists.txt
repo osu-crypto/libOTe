@@ -21,8 +21,9 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	#           Flag and #defines              #
 	############################################
 	add_definitions(-DSOLUTION_DIR='${CMAKE_SOURCE_DIR}')
-	set(CMAKE_C_FLAGS "-Wall -march=native -maes -msse2 -msse3 -msse4.1 -mpclmul -Wfatal-errors -pthread -fPIC -no-pie -Wno-ignored-attributes -Wno-parentheses")
-	set(CMAKE_CXX_FLAGS  "${CMAKE_C_FLAGS}  -std=c++14")
+	set(COMMON_FLAGS "-Wall -march=native -maes -msse2 -msse3 -msse4.1 -mpclmul -Wfatal-errors -pthread -fPIC -no-pie -Wno-ignored-attributes -Wno-parentheses")
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COMMON_FLAGS}")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COMMON_FLAGS} -std=c++14")
 	
 	# Select flags.
 	SET(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG") 
@@ -156,6 +157,9 @@ endif()
 
 
 configure_file(libOTe/config.h.in libOTe/config.h)
+
+# Support out-of-source builds.
+include_directories(${CMAKE_BINARY_DIR})
 
 
 #############################################
