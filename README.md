@@ -224,7 +224,7 @@ and link:
 
 ## Help
  
-Contact Peter Rindal rindalp@oregonstate.edu for any assistance on building 
+Contact Peter Rindal peterrindal@gmail.com for any assistance on building 
 or running the library.
 
 ## Citing
