@@ -233,7 +233,7 @@ namespace osuCrypto
         }
     }
 
-    inline     void sse_transpose(span<block> s, Matrix<block>& r)
+    inline     void sse_transpose(span<block> s, MatrixView<block> r)
     {
         MatrixView<u8> ss((u8*)s.data(), s.size(), sizeof(block));
         MatrixView<u8> rr((u8*)r.data(), r.rows(), r.cols() * sizeof(block));

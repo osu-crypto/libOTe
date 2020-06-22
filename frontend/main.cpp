@@ -717,6 +717,25 @@ void minimal()
 }
 #endif
 
+
+//
+// Created by Erik Buchholz on 27.02.20.
+//
+#include <string.h>
+#include <stdio.h>
+#include <cryptoTools/Common/Defines.h>
+#include <cryptoTools/Network/IOService.h>
+#include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Network/Session.h>
+#include <cryptoTools/Common/Log.h>
+#include <cryptoTools/Crypto/PRNG.h>
+#include <libOTe/NChooseOne/Oos/OosNcoOtReceiver.h>
+#include <libOTe/NChooseOne/Oos/OosNcoOtSender.h>
+
+#define LINE "------------------------------------------------------"
+#define TOTALOTS 10
+#define SETSIZE 2<<10
+
 #ifdef ENABLE_SIMPLESTOT
 const bool spEnabled = true;
 #else 
@@ -773,7 +792,7 @@ const bool silentEnabled = false;
 #include "cryptoTools/Crypto/RandomOracle.h"
 int main(int argc, char** argv)
 {
-
+	
 	CLP cmd;
 	cmd.parse(argc, argv);
 	bool flagSet = false;

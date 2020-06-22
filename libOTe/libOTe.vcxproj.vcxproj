@@ -62,6 +62,7 @@
     <ClInclude Include="TwoChooseOne\KosOtExtSender.h" />
     <ClInclude Include="TwoChooseOne\OTExtInterface.h" />
     <ClInclude Include="TwoChooseOne\TcoOtDefines.h" />
+    <ClInclude Include="version.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Base\MasnyRindalKyber.cpp" />
