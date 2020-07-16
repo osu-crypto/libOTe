@@ -21,13 +21,14 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	#           Flag and #defines              #
 	############################################
 	add_definitions(-DSOLUTION_DIR='${CMAKE_SOURCE_DIR}')
-	set(COMMON_FLAGS "-Wall -march=native -Wfatal-errors -pthread -fPIC -no-pie ")
+	set(COMMON_FLAGS "-Wall -march=native -Wfatal-errors ")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COMMON_FLAGS}")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COMMON_FLAGS} -std=c++14")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COMMON_FLAGS}")
 	
 	# -Wno-ignored-attributes -Wno-parentheses
 	# -maes -msse2 -msse3 -msse4.1 -mpclmul  
-	# 
+	# -std=c++14
+	# -fPIC -no-pie 
 
 	# Select flags.
 	SET(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG") 

@@ -8,7 +8,8 @@ file(GLOB_RECURSE SRC_SIMPLE_LIB
 
 add_library(SimplestOT STATIC ${SRC_SIMPLE_LIB})
 target_link_libraries(SimplestOT PUBLIC cryptoTools)
-
+#target_compile_options(SimplestOT PUBLIC -fPIC -no-pie)
+target_link_options(SimplestOT PUBLIC -fPIC -no-pie)
 
 #############################################
 #            Install                        #
