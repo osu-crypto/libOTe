@@ -1,9 +1,12 @@
 #include "Tools.h"
 #include <cryptoTools/Common/Defines.h>
-#include <wmmintrin.h>
 #include <cryptoTools/Common/MatrixView.h>
 #ifndef _MSC_VER
 #include <x86intrin.h>
+#endif
+
+#ifdef OC_ENABLE_SSE2
+#include <wmmintrin.h>
 #endif 
 
 #include <cryptoTools/Common/BitVector.h>
@@ -12,6 +15,29 @@
 using std::array;
 
 namespace osuCrypto {
+
+
+    void print(array<block, 128>& inOut)
+    {
+        BitVector temp(128);
+
+        for (u64 i = 0; i < 128; ++i)
+        {
+
+            temp.assign(inOut[i]);
+            std::cout << temp << std::endl;
+        }
+        std::cout << std::endl;
+    }
+
+    u8 getBit(array<block, 128>& inOut, u64 i, u64 j)
+    {
+        BitVector temp(128);
+        temp.assign(inOut[i]);
+
+        return temp[j];
+
+    }
 
 
     void eklundh_transpose128(array<block, 128>& inOut)
@@ -140,6 +166,24 @@ namespace osuCrypto {
 
 
 
+    void eklundh_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
+    {
+
+
+        for (u64 i = 0; i < 8; ++i)
+        {
+            std::array<block, 128> sub;
+            for (u64 j = 0; j < 128; ++j)
+                sub[j] = inOut[j][i];
+
+            eklundh_transpose128(sub);
+
+            for (u64 j = 0; j < 128; ++j)
+                inOut[j][i] = sub[j];
+        }
+
+    }
+
 
 
 
@@ -187,24 +231,24 @@ namespace osuCrypto {
 
         for (int j = 0; j < 8; j++)
         {
-            outU16View[16 * x + 7 - j][y] = _mm_movemask_epi8(in[0]);
-            outU16View[16 * x + 15 - j][y] = _mm_movemask_epi8(in[1]);
+            outU16View[16 * x + 7 - j][y] = in[0].movemask_epi8();
+            outU16View[16 * x + 15 - j][y] = in[1].movemask_epi8();
 
-            in[0] = _mm_slli_epi64(in[0], 1);
-            in[1] = _mm_slli_epi64(in[1], 1);
+            in[0] = (in[0] << 1);
+            in[1] = (in[1] << 1);
         }
     }
 
 
-    void sse_transpose(const MatrixView<block>& in, const MatrixView<block>& out)
+    void transpose(const MatrixView<block>& in, const MatrixView<block>& out)
     {
         MatrixView<u8> inn((u8*)in.data(), in.bounds()[0], in.stride() * sizeof(block));
         MatrixView<u8> outt((u8*)out.data(), out.bounds()[0], out.stride() * sizeof(block));
 
-        sse_transpose(inn, outt);
+        transpose(inn, outt);
     }
 
-    void sse_transpose(const MatrixView<u8>& in, const MatrixView<u8>& out)
+    void transpose(const MatrixView<u8>& in, const MatrixView<u8>& out)
     {
         // the amount of work that we use to vectorize (hard code do not change)
         static const u64 chunkSize = 8;
@@ -326,17 +370,17 @@ namespace osuCrypto {
 
                 for (int j = 0; j < 8; j++)
                 {
-                    // use the special _mm_movemask_epi8 to perform the final step of that bit-wise tranpose.
+                    // use the special movemask_epi8 to perform the final step of that bit-wise tranpose.
                     // this instruction takes ever 8'th bit (start at idx 7) and moves them into a single
                     // 16 bit output. Its like shaving off the top bit of each of the 16 bytes.
-                    *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
-                    *(u16*)out1 = _mm_movemask_epi8(t.blks[1]);
-                    *(u16*)out2 = _mm_movemask_epi8(t.blks[2]);
-                    *(u16*)out3 = _mm_movemask_epi8(t.blks[3]);
-                    *(u16*)out4 = _mm_movemask_epi8(t.blks[4]);
-                    *(u16*)out5 = _mm_movemask_epi8(t.blks[5]);
-                    *(u16*)out6 = _mm_movemask_epi8(t.blks[6]);
-                    *(u16*)out7 = _mm_movemask_epi8(t.blks[7]);
+                    *(u16*)out0 = t.blks[0].movemask_epi8();
+                    *(u16*)out1 = t.blks[1].movemask_epi8();
+                    *(u16*)out2 = t.blks[2].movemask_epi8();
+                    *(u16*)out3 = t.blks[3].movemask_epi8();
+                    *(u16*)out4 = t.blks[4].movemask_epi8();
+                    *(u16*)out5 = t.blks[5].movemask_epi8();
+                    *(u16*)out6 = t.blks[6].movemask_epi8();
+                    *(u16*)out7 = t.blks[7].movemask_epi8();
 
                     // step each of out 8 pointer over to the next output row.
                     out0 -= out.stride();
@@ -348,15 +392,15 @@ namespace osuCrypto {
                     out6 -= out.stride();
                     out7 -= out.stride();
 
-                    // shift the 128 values so that the top bit is not the next one.
-                    t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
-                    t.blks[1] = _mm_slli_epi64(t.blks[1], 1);
-                    t.blks[2] = _mm_slli_epi64(t.blks[2], 1);
-                    t.blks[3] = _mm_slli_epi64(t.blks[3], 1);
-                    t.blks[4] = _mm_slli_epi64(t.blks[4], 1);
-                    t.blks[5] = _mm_slli_epi64(t.blks[5], 1);
-                    t.blks[6] = _mm_slli_epi64(t.blks[6], 1);
-                    t.blks[7] = _mm_slli_epi64(t.blks[7], 1);
+                    // shift the 128 values so that the top bit is now the next one.
+                    t.blks[0] = (t.blks[0] << 1);
+                    t.blks[1] = (t.blks[1] << 1);
+                    t.blks[2] = (t.blks[2] << 1);
+                    t.blks[3] = (t.blks[3] << 1);
+                    t.blks[4] = (t.blks[4] << 1);
+                    t.blks[5] = (t.blks[5] << 1);
+                    t.blks[6] = (t.blks[6] << 1);
+                    t.blks[7] = (t.blks[7] << 1);
                 }
             }
         }
@@ -405,15 +449,15 @@ namespace osuCrypto {
                 auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.stride() + w * 2;
 
                 out0 -= out.stride() * skip;
-                t.blks[0] = _mm_slli_epi64(t.blks[0],int( skip));
+                t.blks[0] = (t.blks[0] << int( skip));
 
                 for (int j = 0; j < rem; j++)
                 {
-                    *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
+                    *(u16*)out0 = t.blks[0].movemask_epi8();
 
                     out0 -= out.stride();
 
-                    t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
+                    t.blks[0] = (t.blks[0] << 1);
                 }
             }
         }
@@ -460,14 +504,14 @@ namespace osuCrypto {
                 {
                     for (int j = 0; j < 8; j++)
                     {
-                        *out0 = _mm_movemask_epi8(t.blks[0]);
-                        *out1 = _mm_movemask_epi8(t.blks[1]);
-                        *out2 = _mm_movemask_epi8(t.blks[2]);
-                        *out3 = _mm_movemask_epi8(t.blks[3]);
-                        *out4 = _mm_movemask_epi8(t.blks[4]);
-                        *out5 = _mm_movemask_epi8(t.blks[5]);
-                        *out6 = _mm_movemask_epi8(t.blks[6]);
-                        *out7 = _mm_movemask_epi8(t.blks[7]);
+                        *out0 = t.blks[0].movemask_epi8();
+                        *out1 = t.blks[1].movemask_epi8();
+                        *out2 = t.blks[2].movemask_epi8();
+                        *out3 = t.blks[3].movemask_epi8();
+                        *out4 = t.blks[4].movemask_epi8();
+                        *out5 = t.blks[5].movemask_epi8();
+                        *out6 = t.blks[6].movemask_epi8();
+                        *out7 = t.blks[7].movemask_epi8();
 
                         out0 -= out.stride();
                         out1 -= out.stride();
@@ -478,28 +522,28 @@ namespace osuCrypto {
                         out6 -= out.stride();
                         out7 -= out.stride();
 
-                        t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
-                        t.blks[1] = _mm_slli_epi64(t.blks[1], 1);
-                        t.blks[2] = _mm_slli_epi64(t.blks[2], 1);
-                        t.blks[3] = _mm_slli_epi64(t.blks[3], 1);
-                        t.blks[4] = _mm_slli_epi64(t.blks[4], 1);
-                        t.blks[5] = _mm_slli_epi64(t.blks[5], 1);
-                        t.blks[6] = _mm_slli_epi64(t.blks[6], 1);
-                        t.blks[7] = _mm_slli_epi64(t.blks[7], 1);
+                        t.blks[0] = (t.blks[0] << 1);
+                        t.blks[1] = (t.blks[1] << 1);
+                        t.blks[2] = (t.blks[2] << 1);
+                        t.blks[3] = (t.blks[3] << 1);
+                        t.blks[4] = (t.blks[4] << 1);
+                        t.blks[5] = (t.blks[5] << 1);
+                        t.blks[6] = (t.blks[6] << 1);
+                        t.blks[7] = (t.blks[7] << 1);
                     }
                 }
                 else
                 {
                     for (int j = 0; j < 8; j++)
                     {
-                        *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
-                        *(u16*)out1 = _mm_movemask_epi8(t.blks[1]);
-                        *(u16*)out2 = _mm_movemask_epi8(t.blks[2]);
-                        *(u16*)out3 = _mm_movemask_epi8(t.blks[3]);
-                        *(u16*)out4 = _mm_movemask_epi8(t.blks[4]);
-                        *(u16*)out5 = _mm_movemask_epi8(t.blks[5]);
-                        *(u16*)out6 = _mm_movemask_epi8(t.blks[6]);
-                        *(u16*)out7 = _mm_movemask_epi8(t.blks[7]);
+                        *(u16*)out0 = t.blks[0].movemask_epi8();
+                        *(u16*)out1 = t.blks[1].movemask_epi8();
+                        *(u16*)out2 = t.blks[2].movemask_epi8();
+                        *(u16*)out3 = t.blks[3].movemask_epi8();
+                        *(u16*)out4 = t.blks[4].movemask_epi8();
+                        *(u16*)out5 = t.blks[5].movemask_epi8();
+                        *(u16*)out6 = t.blks[6].movemask_epi8();
+                        *(u16*)out7 = t.blks[7].movemask_epi8();
 
                         out0 -= out.stride();
                         out1 -= out.stride();
@@ -510,14 +554,14 @@ namespace osuCrypto {
                         out6 -= out.stride();
                         out7 -= out.stride();
 
-                        t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
-                        t.blks[1] = _mm_slli_epi64(t.blks[1], 1);
-                        t.blks[2] = _mm_slli_epi64(t.blks[2], 1);
-                        t.blks[3] = _mm_slli_epi64(t.blks[3], 1);
-                        t.blks[4] = _mm_slli_epi64(t.blks[4], 1);
-                        t.blks[5] = _mm_slli_epi64(t.blks[5], 1);
-                        t.blks[6] = _mm_slli_epi64(t.blks[6], 1);
-                        t.blks[7] = _mm_slli_epi64(t.blks[7], 1);
+                        t.blks[0] = (t.blks[0] << 1);
+                        t.blks[1] = (t.blks[1] << 1);
+                        t.blks[2] = (t.blks[2] << 1);
+                        t.blks[3] = (t.blks[3] << 1);
+                        t.blks[4] = (t.blks[4] << 1);
+                        t.blks[5] = (t.blks[5] << 1);
+                        t.blks[6] = (t.blks[6] << 1);
+                        t.blks[7] = (t.blks[7] << 1);
                     }
                 }
             }
@@ -550,49 +594,27 @@ namespace osuCrypto {
                 auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.stride() + w * 2;
 
                 out0 -= out.stride() * skip;
-                t.blks[0] = _mm_slli_epi64(t.blks[0],int( skip));
+                t.blks[0] = (t.blks[0] << int( skip));
 
                 for (int j = 0; j < rem; j++)
                 {
                     if (leftOverWidth > 8)
                     {
-                        *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
+                        *(u16*)out0 = t.blks[0].movemask_epi8();
                     }
                     else
                     {
-                        *out0 = _mm_movemask_epi8(t.blks[0]);
+                        *out0 = t.blks[0].movemask_epi8();
                     }
 
                     out0 -= out.stride();
 
-                    t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
+                    t.blks[0] = (t.blks[0] << 1);
                 }
             }
         }
     }
 
-
-    void print(array<block, 128>& inOut)
-    {
-        BitVector temp(128);
-
-        for (u64 i = 0; i < 128; ++i)
-        {
-
-            temp.assign(inOut[i]);
-            std::cout << temp << std::endl;
-        }
-        std::cout << std::endl;
-    }
-
-    u8 getBit(array<block, 128>& inOut, u64 i, u64 j)
-    {
-        BitVector temp(128);
-        temp.assign(inOut[i]);
-
-        return temp[j];
-
-    }
 
 
 
@@ -682,41 +704,41 @@ namespace osuCrypto {
         auto x16_7 = x * 16 + 7;
         auto x16_15 = x * 16 + 15;
 
-        block b0 = _mm_slli_epi64(in[0], 0);
-        block b1 = _mm_slli_epi64(in[0], 1);
-        block b2 = _mm_slli_epi64(in[0], 2);
-        block b3 = _mm_slli_epi64(in[0], 3);
-        block b4 = _mm_slli_epi64(in[0], 4);
-        block b5 = _mm_slli_epi64(in[0], 5);
-        block b6 = _mm_slli_epi64(in[0], 6);
-        block b7 = _mm_slli_epi64(in[0], 7);
+        block b0 = (in[0] << 0);
+        block b1 = (in[0] << 1);
+        block b2 = (in[0] << 2);
+        block b3 = (in[0] << 3);
+        block b4 = (in[0] << 4);
+        block b5 = (in[0] << 5);
+        block b6 = (in[0] << 6);
+        block b7 = (in[0] << 7);
 
-        outU16View[x16_7 - 0][i8y] = _mm_movemask_epi8(b0);
-        outU16View[x16_7 - 1][i8y] = _mm_movemask_epi8(b1);
-        outU16View[x16_7 - 2][i8y] = _mm_movemask_epi8(b2);
-        outU16View[x16_7 - 3][i8y] = _mm_movemask_epi8(b3);
-        outU16View[x16_7 - 4][i8y] = _mm_movemask_epi8(b4);
-        outU16View[x16_7 - 5][i8y] = _mm_movemask_epi8(b5);
-        outU16View[x16_7 - 6][i8y] = _mm_movemask_epi8(b6);
-        outU16View[x16_7 - 7][i8y] = _mm_movemask_epi8(b7);
+        outU16View[x16_7 - 0][i8y] = b0.movemask_epi8();
+        outU16View[x16_7 - 1][i8y] = b1.movemask_epi8();
+        outU16View[x16_7 - 2][i8y] = b2.movemask_epi8();
+        outU16View[x16_7 - 3][i8y] = b3.movemask_epi8();
+        outU16View[x16_7 - 4][i8y] = b4.movemask_epi8();
+        outU16View[x16_7 - 5][i8y] = b5.movemask_epi8();
+        outU16View[x16_7 - 6][i8y] = b6.movemask_epi8();
+        outU16View[x16_7 - 7][i8y] = b7.movemask_epi8();
 
-        b0 = _mm_slli_epi64(in[1], 0);
-        b1 = _mm_slli_epi64(in[1], 1);
-        b2 = _mm_slli_epi64(in[1], 2);
-        b3 = _mm_slli_epi64(in[1], 3);
-        b4 = _mm_slli_epi64(in[1], 4);
-        b5 = _mm_slli_epi64(in[1], 5);
-        b6 = _mm_slli_epi64(in[1], 6);
-        b7 = _mm_slli_epi64(in[1], 7);
+        b0 = (in[1] << 0);
+        b1 = (in[1] << 1);
+        b2 = (in[1] << 2);
+        b3 = (in[1] << 3);
+        b4 = (in[1] << 4);
+        b5 = (in[1] << 5);
+        b6 = (in[1] << 6);
+        b7 = (in[1] << 7);
 
-        outU16View[x16_15 - 0][i8y] = _mm_movemask_epi8(b0);
-        outU16View[x16_15 - 1][i8y] = _mm_movemask_epi8(b1);
-        outU16View[x16_15 - 2][i8y] = _mm_movemask_epi8(b2);
-        outU16View[x16_15 - 3][i8y] = _mm_movemask_epi8(b3);
-        outU16View[x16_15 - 4][i8y] = _mm_movemask_epi8(b4);
-        outU16View[x16_15 - 5][i8y] = _mm_movemask_epi8(b5);
-        outU16View[x16_15 - 6][i8y] = _mm_movemask_epi8(b6);
-        outU16View[x16_15 - 7][i8y] = _mm_movemask_epi8(b7);
+        outU16View[x16_15 - 0][i8y] = b0.movemask_epi8();
+        outU16View[x16_15 - 1][i8y] = b1.movemask_epi8();
+        outU16View[x16_15 - 2][i8y] = b2.movemask_epi8();
+        outU16View[x16_15 - 3][i8y] = b3.movemask_epi8();
+        outU16View[x16_15 - 4][i8y] = b4.movemask_epi8();
+        outU16View[x16_15 - 5][i8y] = b5.movemask_epi8();
+        outU16View[x16_15 - 6][i8y] = b6.movemask_epi8();
+        outU16View[x16_15 - 7][i8y] = b7.movemask_epi8();
 
     }
 
@@ -746,6 +768,7 @@ namespace osuCrypto {
 
 
     }
+//#endif
 
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
 #include <cryptoTools/Common/Defines.h>
+#include <cryptoTools/Network/Channel.h>
 #include <array>
 #ifdef GetMessage
 #undef GetMessage
@@ -38,6 +39,13 @@ namespace osuCrypto
             PRNG& prng,
             Channel& chl);
 
+
+        void receiveCorrelated(
+            const BitVector& choices,
+            span<block> recvMessages,
+            PRNG& prng,
+            Channel& chl);
+
     };
 
     class OtSender
@@ -57,6 +65,23 @@ namespace osuCrypto
             span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl);
+
+        template<typename CorrelationFunc>
+        void sendCorrelated(span<block> messages, const CorrelationFunc& corFunc, PRNG& prng, Channel& chl)
+        {
+
+            std::vector<std::array<block, 2>> temp(messages.size());
+            std::vector<block> temp2(messages.size());
+            send(temp, prng, chl);
+
+            for (u64 i = 0; i < static_cast<u64>(messages.size()); ++i)
+            {
+                messages[i] = temp[i][0];
+                temp2[i] = temp[i][1] ^ corFunc(temp[i][0], i);
+            }
+
+            chl.asyncSend(std::move(temp2));
+        }
 
     };
 

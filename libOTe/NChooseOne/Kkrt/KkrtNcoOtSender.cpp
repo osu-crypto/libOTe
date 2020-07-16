@@ -136,7 +136,7 @@ namespace osuCrypto
 
                 // transpose our 128 columns of 1024 bits. We will have 1024 rows,
                 // each 128 bits wide.
-                sse_transpose128x1024(t);
+                transpose128x1024(t);
 
                 // This is the index of where we will store the matrix long term.
                 // doneIdx is the starting row. i is the offset into the blocks of 128 bits.

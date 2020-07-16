@@ -144,7 +144,7 @@ namespace osuCrypto
 
                         //}
 
-                        sse_transpose128(io);
+                        transpose128(io);
                         for (u64 j = 0; j < 128; ++j)
                             output(j, i) = io[j];
                     }
@@ -166,7 +166,7 @@ namespace osuCrypto
                     for (u64 i = begin, k = 0; i < end; i += step, ++k)
                     {
                         auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
-                        sse_transpose128(io);
+                        transpose128(io);
                         for (u64 j = 0; j < 128; ++j)
                             output(j, i) = io[j];
                     }

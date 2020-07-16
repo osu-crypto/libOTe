@@ -6,8 +6,6 @@ file(GLOB_RECURSE SRC_SIMPLE_LIB
 	${CMAKE_SOURCE_DIR}/SimplestOT/*.c
 	${CMAKE_SOURCE_DIR}/SimplestOT/*.s)
 
-	
-
 add_library(SimplestOT STATIC ${SRC_SIMPLE_LIB})
 target_link_libraries(SimplestOT PUBLIC cryptoTools)
 

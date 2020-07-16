@@ -86,14 +86,14 @@ namespace tests_libOTe
 			std::array<block, 128> data;
 			memset((u8*)data.data(), 0, sizeof(data));
 
-			data[0] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[1] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[2] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[3] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[4] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[5] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[6] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[7] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[0] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[1] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[2] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[3] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[4] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[5] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[6] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[7] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
 
 			//printMtx(data);
 			eklundh_transpose128(data);
@@ -101,10 +101,10 @@ namespace tests_libOTe
 
 			for (auto& d : data)
 			{
-				if (neq(d, _mm_set_epi64x(0, 0xFF)))
+				if (neq(d, block(0, 0xFF)))
 				{
 					std::cout << "expected" << std::endl;
-					std::cout << _mm_set_epi64x(0xF, 0) << std::endl << std::endl;
+					std::cout << block(0xF, 0) << std::endl << std::endl;
 
 					printMtx(data);
 
@@ -118,24 +118,24 @@ namespace tests_libOTe
 			std::array<block, 128> data;
 			memset((u8*)data.data(), 0, sizeof(data));
 
-			data[0] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[1] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[2] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[3] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[4] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[5] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[6] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[7] = _mm_set_epi64x(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[0] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[1] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[2] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[3] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[4] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[5] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[6] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[7] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
 
-			sse_transpose128(data);
+			transpose128(data);
 
 
 			for (auto& d : data)
 			{
-				if (neq(d, _mm_set_epi64x(0, 0xFF)))
+				if (neq(d, block(0, 0xFF)))
 				{
 					std::cout << "expected" << std::endl;
-					std::cout << _mm_set_epi64x(0xF, 0) << std::endl << std::endl;
+					std::cout << block(0xF, 0) << std::endl << std::endl;
 
 					printMtx(data);
 
@@ -154,7 +154,7 @@ namespace tests_libOTe
 
 			std::array<std::array<block, 8>, 128> data2 = data;
 
-			sse_transpose128x1024(data);
+			transpose128x1024(data);
 
 
 			for (u64 i = 0; i < 8; ++i)
@@ -167,7 +167,7 @@ namespace tests_libOTe
 					sub[j] = data2[j][i];
 				}
 
-				sse_transpose128(sub);
+				transpose128(sub);
 
 				for (u64 j = 0; j < 128; ++j)
 				{
@@ -196,9 +196,9 @@ namespace tests_libOTe
 			MatrixView<block> dataView(data.begin(), data.end(), 1);
 			MatrixView<block> data2View(data2.begin(), data2.end(), 1);
 
-			sse_transpose(dataView, data2View);
+			transpose(dataView, data2View);
 
-			sse_transpose128(data);
+			transpose128(data);
 
 
 
@@ -230,7 +230,7 @@ namespace tests_libOTe
 
 			MatrixView<block> dataView((block*)data.data(), 128, 8);
 			MatrixView<block> data2View((block*)data2.data(), 128 * 8, 1);
-			sse_transpose(dataView, data2View);
+			transpose(dataView, data2View);
 
 
 			for (u64 i = 0; i < 8; ++i)
@@ -242,7 +242,7 @@ namespace tests_libOTe
 					data128[j] = data[j][i];
 				}
 
-				sse_transpose128(data128);
+				transpose128(data128);
 
 
 				for (u64 j = 0; j < 128; ++j)
@@ -265,7 +265,7 @@ namespace tests_libOTe
 
 			Matrix<block> data2View(1024, 2);
 			memset(data2View.data(), 0, data2View.bounds()[0] * data2View.stride() * sizeof(block));
-			sse_transpose(dataView, data2View);
+			transpose(dataView, data2View);
 
 			for (u64 b = 0; b < 2; ++b)
 			{
@@ -282,7 +282,7 @@ namespace tests_libOTe
 							data128[j] = ZeroBlock;
 					}
 
-					sse_transpose128(data128);
+					transpose128(data128);
 
 					for (u64 j = 0; j < 128; ++j)
 					{
@@ -304,11 +304,11 @@ namespace tests_libOTe
 			prng.get((u8*)in.data(), sizeof(u8) *in.bounds()[0] * in.stride());
 
 			Matrix<u8> out(63, 2);
-			sse_transpose(in, out);
+			transpose(in, out);
 
 
 			Matrix<u8> out2(64, 2);
-			sse_transpose(in, out2);
+			transpose(in, out2);
 
 			for (u64 i = 0; i < out.bounds()[0]; ++i)
 			{
@@ -342,8 +342,8 @@ namespace tests_libOTe
 			Matrix<u8> out(72, 4);
 			Matrix<u8> out2(72, 4);
 
-			sse_transpose(in, out);
-			sse_transpose(in2, out2);
+			transpose(in, out);
+			transpose(in2, out2);
 
 			for (u64 i = 0; i < out.bounds()[0]; ++i)
 			{
@@ -406,8 +406,8 @@ namespace tests_libOTe
 		Channel senderChannel = ep1.addChannel();
 		Channel recvChannel   = ep0.addChannel();
 
-		PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-		PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
+		PRNG prng0(block(4253465, 3434565));
+		PRNG prng1(block(42532335, 334565));
 
 		u64 numOTs = 20000;
 
@@ -497,24 +497,24 @@ namespace tests_libOTe
     }
 
 
-	void mul128b(__m128i b, __m128i a, __m128i &c0, __m128i &c1)
-	{
-		__m128i t1, t2;
-		c0 = _mm_clmulepi64_si128(a, b, 0x00);
-		c1 = _mm_clmulepi64_si128(a, b, 0x11);
-		t1 = _mm_shuffle_epi32(a, 0xEE);
-		t1 = _mm_xor_si128(a, t1);
-		t2 = _mm_shuffle_epi32(b, 0xEE);
-		t2 = _mm_xor_si128(b, t2);
-		t1 = _mm_clmulepi64_si128(t1, t2, 0x00);
-		t1 = _mm_xor_si128(c0, t1);
-		t1 = _mm_xor_si128(c1, t1);
-		t2 = t1;
-		t1 = _mm_slli_si128(t1, 8);
-		t2 = _mm_srli_si128(t2, 8);
-		c0 = _mm_xor_si128(c0, t1);
-		c1 = _mm_xor_si128(c1, t2);
-	}
+	//void mul128b(__m128i b, __m128i a, __m128i &c0, __m128i &c1)
+	//{
+	//	__m128i t1, t2;
+	//	c0 = _mm_clmulepi64_si128(a, b, 0x00);
+	//	c1 = _mm_clmulepi64_si128(a, b, 0x11);
+	//	t1 = _mm_shuffle_epi32(a, 0xEE);
+	//	t1 = _mm_xor_si128(a, t1);
+	//	t2 = _mm_shuffle_epi32(b, 0xEE);
+	//	t2 = _mm_xor_si128(b, t2);
+	//	t1 = _mm_clmulepi64_si128(t1, t2, 0x00);
+	//	t1 = _mm_xor_si128(c0, t1);
+	//	t1 = _mm_xor_si128(c1, t1);
+	//	t2 = t1;
+	//	t1 = _mm_slli_si128(t1, 8);
+	//	t2 = _mm_srli_si128(t2, 8);
+	//	c0 = _mm_xor_si128(c0, t1);
+	//	c1 = _mm_xor_si128(c1, t2);
+	//}
 
 	void DotExt_Kos_Test()
 	{
@@ -528,8 +528,8 @@ namespace tests_libOTe
 		Channel senderChannel = ep1.addChannel();
 		Channel recvChannel   = ep0.addChannel();
 
-		PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-		PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
+		PRNG prng0(block(4253465, 3434565));
+		PRNG prng1(block(42532335, 334565));
 
 		u64 numOTs = 952;
 		u64 s = 40;
@@ -582,7 +582,7 @@ namespace tests_libOTe
 
 	void DotExt_Iknp_Test()
 	{
-#ifdef ENABLE_IKNP
+#ifdef ENABLE_DELTA_IKNP
 
 		setThreadName("Sender");
 
@@ -592,8 +592,8 @@ namespace tests_libOTe
 		Channel senderChannel = ep1.addChannel();
 		Channel recvChannel   = ep0.addChannel();
 
-		PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-		PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
+		PRNG prng0(block(4253465, 3434565));
+		PRNG prng1(block(42532335, 334565));
 
 		u64 numTrials = 4;
 		for (u64 t = 0; t < numTrials; ++t)
@@ -660,8 +660,8 @@ namespace tests_libOTe
 		Channel senderChannel = ep1.addChannel();
 		Channel recvChannel   = ep0.addChannel();
 
-		PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-		PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
+		PRNG prng0(block(4253465, 3434565));
+		PRNG prng1(block(42532335, 334565));
 
 		u64 numOTs = 200;
 

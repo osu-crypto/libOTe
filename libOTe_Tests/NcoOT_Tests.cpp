@@ -156,9 +156,9 @@ namespace tests_libOTe
     {
 #ifdef ENABLE_KKRT
         setThreadName("Sender");
-
-        PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-        PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
+        
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
         // The total number that we wish to do
         u64 numOTs = 1030;
@@ -313,8 +313,8 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
 #ifdef ENABLE_OOS
         setThreadName("Sender");
 
-        PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-        PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
         u64 numOTs = 128 * 16;
 
@@ -384,8 +384,9 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
 #ifdef ENABLE_RR
         setThreadName("Sender");
 
-        PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-        PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
+
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
         u64 numOTs = 80;
         u64 inputSize = 40;
@@ -421,8 +422,8 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
 #ifdef ENABLE_OOS
         setThreadName("Sender");
 
-        PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-        PRNG prng1(_mm_set_epi32(4253465, 3434565, 234435, 23987025));
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
         u64 numOTs = 80;
         u64 inputSize = 8;

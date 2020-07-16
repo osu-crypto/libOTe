@@ -296,7 +296,7 @@ namespace osuCrypto
         Matrix<block> R(rT1.cols() * 128, 1);
         MatrixView<block> Rv(R);
         MatrixView<block> rT2v(rT2);
-        sse_transpose(rT2v, Rv);
+        transpose(rT2v, Rv);
 
         Matrix<block> exp(R.rows(), R.cols(), AllocType::Zeroed);
         for (u64 i = 0; i < mS.size(); ++i)
@@ -548,7 +548,7 @@ namespace osuCrypto
 
 
             //MatrixView<block> view(messages.begin(), messages.end(), 1);
-            //sse_transpose(cModP1, view);
+            //transpose(cModP1, view);
     //#define NO_HASH
             std::array<block, 8> hashBuffer;
             auto numBlocks = messages.size() / 128;
@@ -567,7 +567,7 @@ namespace osuCrypto
                 for (u64 k = 0; k < 128; ++k)
                     tpBuffer[k] = cModP1(k, i);
 
-                sse_transpose128(tpBuffer);
+                transpose128(tpBuffer);
 
 #ifndef NO_HASH
                 for (u64 k = 0; k < 128; k += 8)
@@ -594,7 +594,7 @@ namespace osuCrypto
                 for (u64 j = 0; j < tpBuffer.size(); ++j)
                     tpBuffer[j] = cModP1(j, numBlocks);
 
-                sse_transpose128(tpBuffer);
+                transpose128(tpBuffer);
 
 #ifndef NO_HASH
                 for (i64 k = 0; k < rem; ++k)

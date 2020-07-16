@@ -200,7 +200,7 @@ namespace osuCrypto
 
             // transpose our 128 columns of 1024 bits. We will have 1024 rows,
             // each 128 bits wide.
-            sse_transpose(t0, tOut);
+            transpose(t0, tOut);
         }
 
 
@@ -242,7 +242,7 @@ namespace osuCrypto
         std::array<block, 8> expendedChoiceBlk;
         std::array<std::array<u8, 16>, 8>& expendedChoice = *reinterpret_cast<std::array<std::array<u8, 16>, 8>*>(&expendedChoiceBlk);
 
-        block mask = _mm_set_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+        block mask = block(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
         //std::cout << IoStream::lock;
 
@@ -257,14 +257,14 @@ namespace osuCrypto
             u64 stop0 = std::min<u64>(messages.size(), doneIdx + 128);
             u64 stop1 = std::min<u64>(messageTemp.bounds()[0], doneIdx + 128);
 
-            expendedChoiceBlk[0] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 0);
-            expendedChoiceBlk[1] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 1);
-            expendedChoiceBlk[2] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 2);
-            expendedChoiceBlk[3] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 3);
-            expendedChoiceBlk[4] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 4);
-            expendedChoiceBlk[5] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 5);
-            expendedChoiceBlk[6] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 6);
-            expendedChoiceBlk[7] = mask & _mm_srai_epi16(choiceBlocks[blockIdx], 7);
+            expendedChoiceBlk[0] = mask & choiceBlocks[blockIdx].srai_epi16(0);
+            expendedChoiceBlk[1] = mask & choiceBlocks[blockIdx].srai_epi16(1);
+            expendedChoiceBlk[2] = mask & choiceBlocks[blockIdx].srai_epi16(2);
+            expendedChoiceBlk[3] = mask & choiceBlocks[blockIdx].srai_epi16(3);
+            expendedChoiceBlk[4] = mask & choiceBlocks[blockIdx].srai_epi16(4);
+            expendedChoiceBlk[5] = mask & choiceBlocks[blockIdx].srai_epi16(5);
+            expendedChoiceBlk[6] = mask & choiceBlocks[blockIdx].srai_epi16(6);
+            expendedChoiceBlk[7] = mask & choiceBlocks[blockIdx].srai_epi16(7);
 
             u64 i = 0, dd = doneIdx;
             for (; dd < stop0; ++dd, ++i)

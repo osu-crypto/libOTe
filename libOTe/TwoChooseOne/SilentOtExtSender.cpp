@@ -359,11 +359,11 @@ namespace osuCrypto
 			for (u64 i = 0; i < end; ++i, inPtr += sizeof(block))
 			{
 				block
-					b0 = _mm_loadu_si128((block*)inPtr),
-					b1 = _mm_load_si128((block*)(inPtr + sizeof(u64)));
+					b0 = toBlock(inPtr),
+					b1 = toBlock(inPtr + sizeof(u64));
 
-				b0 = _mm_srli_epi64(b0, bitShift);
-				b1 = _mm_slli_epi64(b1, bitShift2);
+				b0 = (b0 >> bitShift);
+				b1 = (b1 << bitShift2);
 
 				//bv0.append((u8*)&b0, 128);
 				//bv1.append((u8*)&b1, 128);
@@ -396,11 +396,11 @@ namespace osuCrypto
 			for (u64 i = 0; i < end; ++i, inPtr += sizeof(block))
 			{
 				block
-					b0 = _mm_load_si128((block*)inPtr),
-					b1 = _mm_loadu_si128((block*)(inPtr + sizeof(u64)));
+					b0 = toBlock(inPtr),
+					b1 = toBlock(inPtr + sizeof(u64));
 
-				b0 = _mm_srli_epi64(b0, bitShift);
-				b1 = _mm_slli_epi64(b1, bitShift2);
+				b0 = (b0 >> bitShift);
+				b1 = (b1 << bitShift2);
 
 				//bv0.append((u8*)&b0, 128);
 				//bv1.append((u8*)&b1, 128);
@@ -410,8 +410,8 @@ namespace osuCrypto
 
 			if (end != static_cast<u64>(dest.size()))
 			{
-				block b0 = _mm_load_si128((block*)inPtr);
-				b0 = _mm_srli_epi64(b0, bitShift);
+				block b0 = toBlock(inPtr);
+				b0 = (b0 >> bitShift);
 
 				//bv0.append((u8*)&b0, 128);
 
@@ -631,7 +631,7 @@ namespace osuCrypto
 				//for (u64 j = 0, k = i; j < tpBuffer.size(); ++j, k += cModP1.cols())
 				//	tpBuffer[j] = cModP1(k);
 
-				sse_transpose128(tpBuffer);
+				transpose128(tpBuffer);
 
 
 				//#define NO_HASH

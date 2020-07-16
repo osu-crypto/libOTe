@@ -1,18 +1,19 @@
 #pragma once
-
 #include "libOTe/version.h"
+
+#define LIBOTE_VERSION (LIBOTE_VERSION_MAJOR * 10000 + LIBOTE_VERSION_MINOR * 100 + LIBOTE_VERSION_PATCH)
 
 // build the library with "simplest" Base OT enabled
 #define ENABLE_SIMPLESTOT ON
 
 // build the library with the ASM "simplest" Base OT enabled
-/* #undef ENABLE_SIMPLESTOT_ASM */
+#define ENABLE_SIMPLESTOT_ASM ON
 
 // build the library with Masney Rindal Base OT enabled
 #define ENABLE_MR ON
 
 // build the library with Masney Rindal Kyber Base OT enabled
-/* #undef ENABLE_MR_KYBER */
+#define ENABLE_MR_KYBER ON
 
 // build the library with Naor Pinkas Base OT enabled
 #define ENABLE_NP ON
@@ -62,10 +63,10 @@
 
 #if defined(ENABLE_SIMPLESTOT_ASM) && defined(_MSC_VER)
     #undef ENABLE_SIMPLESTOT_ASM
-    #pragma warning "ENABLE_SIMPLESTOT_ASM should not be defined on windows."
+    #pragma message("ENABLE_SIMPLESTOT_ASM should not be defined on windows.")
 #endif
 #if defined(ENABLE_MR_KYBER) && defined(_MSC_VER)
     #undef ENABLE_MR_KYBER
-    #pragma warning "ENABLE_MR_KYBER should not be defined on windows."
+    #pragma message("ENABLE_MR_KYBER should not be defined on windows.")
 #endif
         

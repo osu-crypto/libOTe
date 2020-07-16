@@ -458,7 +458,7 @@ void Tools_Pprf_trans_test(const CLP& cmd)
             //	std::cout << "r[" << i << "][" << j << "] " << out(j,i)  << " ~ " << rOut(j, i) << std::endl << Color::Default;
         }
     }
-    sse_transpose(MatrixView<block>(out), MatrixView<block>(outT));
+    transpose(MatrixView<block>(out), MatrixView<block>(outT));
 
     for (u64 i = 0; i < outT.rows(); ++i)
     {

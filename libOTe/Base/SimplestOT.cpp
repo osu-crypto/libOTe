@@ -38,7 +38,7 @@ namespace osuCrypto
         u64 pointSize = g.sizeBytes();
         u64 n = msg.size();
 
-        block comm, seed;
+        block comm = oc::ZeroBlock, seed;
         Point A(curve);
         std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block)), hashBuff(pointSize);
         chl.recv(buff.data(), buff.size());

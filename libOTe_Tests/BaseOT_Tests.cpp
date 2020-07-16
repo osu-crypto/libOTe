@@ -40,8 +40,8 @@ namespace tests_libOTe
         Channel senderChannel = ep1.addChannel();
         Channel recvChannel = ep0.addChannel();
 
-        PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-        PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
         u64 numOTs = 50;
         std::vector<block> recvMsg(numOTs);
@@ -88,8 +88,8 @@ namespace tests_libOTe
         Channel senderChannel = ep1.addChannel();
         Channel recvChannel = ep0.addChannel();
 
-        PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-        PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
         u64 numOTs = 50;
         std::vector<block> recvMsg(numOTs);
@@ -137,8 +137,8 @@ namespace tests_libOTe
         Channel senderChannel = ep1.addChannel();
         Channel recvChannel = ep0.addChannel();
 
-        PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-        PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
         u64 numOTs = 50;
         std::vector<block> recvMsg(numOTs);
@@ -183,8 +183,8 @@ throw UnitTestSkipped("MasnyRindal not enabled. Requires Relic.");
         Channel senderChannel = ep1.addChannel();
         Channel recvChannel = ep0.addChannel();
 
-        PRNG prng0(_mm_set_epi32(4253465, 3434565, 234435, 23987045));
-        PRNG prng1(_mm_set_epi32(4253233465, 334565, 0, 235));
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(4253233465, 334565));
 
         u64 numOTs = 50;
         std::vector<block> recvMsg(numOTs);

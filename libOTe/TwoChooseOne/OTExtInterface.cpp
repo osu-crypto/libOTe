@@ -53,6 +53,21 @@ void osuCrypto::OtReceiver::receiveChosen(
     }
 }
 
+void osuCrypto::OtReceiver::receiveCorrelated(const BitVector& choices, span<block> recvMessages, PRNG& prng, Channel& chl)
+{
+    receive(choices, recvMessages, prng, chl);
+    std::vector<block> temp(recvMessages.size());
+    chl.recv(temp.data(), temp.size());
+    auto iter = choices.begin();
+    
+    for (u64 i = 0; i < temp.size(); ++i)
+    {
+        recvMessages[i] = recvMessages[i] ^ (zeroAndAllOne[*iter] & temp[i]);
+        ++iter;
+    }
+
+}
+
 void osuCrypto::OtSender::sendChosen(
     span<std::array<block, 2>> messages, 
     PRNG & prng, 

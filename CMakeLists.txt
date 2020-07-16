@@ -21,10 +21,14 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	#           Flag and #defines              #
 	############################################
 	add_definitions(-DSOLUTION_DIR='${CMAKE_SOURCE_DIR}')
-	set(COMMON_FLAGS "-Wall -march=native -maes -msse2 -msse3 -msse4.1 -mpclmul -Wfatal-errors -pthread -fPIC -no-pie -Wno-ignored-attributes -Wno-parentheses")
+	set(COMMON_FLAGS "-Wall -march=native -Wfatal-errors -pthread -fPIC -no-pie ")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COMMON_FLAGS}")
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COMMON_FLAGS} -std=c++14")
 	
+	# -Wno-ignored-attributes -Wno-parentheses
+	# -maes -msse2 -msse3 -msse4.1 -mpclmul  
+	# 
+
 	# Select flags.
 	SET(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG") 
 	SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb -rdynamic")
@@ -154,6 +158,10 @@ if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_NP) AND
    message(FATAL_ERROR "ENABLE_SIMPLESTOT and ENABLE_MR requires ENABLE_MIRACL or ENABLE_RELIC")
 endif()
 
+if(ENABLE_SSE)
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} $   -maes -msse2 -msse3 -msse4.1 -mpclmul  ")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -maes -msse2 -msse3 -msse4.1 -mpclmul  ")
+endif()
 
 
 configure_file(libOTe/config.h.in libOTe/config.h)

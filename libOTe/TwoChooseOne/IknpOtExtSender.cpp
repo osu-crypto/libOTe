@@ -123,7 +123,7 @@ namespace osuCrypto
 
             // transpose our 128 columns of 1024 bits. We will have 1024 rows,
             // each 128 bits wide.
-            sse_transpose128x1024(t);
+            transpose128x1024(t);
 
 
             auto mEnd = mIter + std::min<u64>(128 * superBlkSize, messages.end() - mIter);

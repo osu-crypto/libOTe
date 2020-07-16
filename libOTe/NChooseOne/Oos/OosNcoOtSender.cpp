@@ -140,7 +140,7 @@ namespace osuCrypto
 
                 // transpose our 128 columns of 1024 bits. We will have 1024 rows,
                 // each 128 bits wide.
-                sse_transpose128x1024(t);
+                transpose128x1024(t);
 
                 // This is the index of where we will store the matrix long term.
                 // doneIdx is the starting row. l is the offset into the blocks of 128 bits.
@@ -501,7 +501,7 @@ namespace osuCrypto
         u8* byteView = (u8*)expandedBuff.data();
 
         // This will be used to compute expandedBuff
-        block mask = _mm_set_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+        block mask = block(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
         // get raw pointer to this data. faster than normal indexing.
         auto corIter = mCorrectionVals.data();
@@ -520,14 +520,14 @@ namespace osuCrypto
             // the bottom bit. Doing the 8 times gets us each bit in its own byte.
             for (u64 i = 0; i < mStatSecParam; ++i)
             {
-                expandedBuff[i * 8 + 0] = mask & _mm_srai_epi16(challengeBuff[i], 0);
-                expandedBuff[i * 8 + 1] = mask & _mm_srai_epi16(challengeBuff[i], 1);
-                expandedBuff[i * 8 + 2] = mask & _mm_srai_epi16(challengeBuff[i], 2);
-                expandedBuff[i * 8 + 3] = mask & _mm_srai_epi16(challengeBuff[i], 3);
-                expandedBuff[i * 8 + 4] = mask & _mm_srai_epi16(challengeBuff[i], 4);
-                expandedBuff[i * 8 + 5] = mask & _mm_srai_epi16(challengeBuff[i], 5);
-                expandedBuff[i * 8 + 6] = mask & _mm_srai_epi16(challengeBuff[i], 6);
-                expandedBuff[i * 8 + 7] = mask & _mm_srai_epi16(challengeBuff[i], 7);
+                expandedBuff[i * 8 + 0] = mask & challengeBuff[i].srai_epi16(0);
+                expandedBuff[i * 8 + 1] = mask & challengeBuff[i].srai_epi16(1);
+                expandedBuff[i * 8 + 2] = mask & challengeBuff[i].srai_epi16(2);
+                expandedBuff[i * 8 + 3] = mask & challengeBuff[i].srai_epi16(3);
+                expandedBuff[i * 8 + 4] = mask & challengeBuff[i].srai_epi16(4);
+                expandedBuff[i * 8 + 5] = mask & challengeBuff[i].srai_epi16(5);
+                expandedBuff[i * 8 + 6] = mask & challengeBuff[i].srai_epi16(6);
+                expandedBuff[i * 8 + 7] = mask & challengeBuff[i].srai_epi16(7);
             }
 
             // compute when we should stop of this set.

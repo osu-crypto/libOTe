@@ -233,12 +233,12 @@ namespace osuCrypto
         }
     }
 
-    inline     void sse_transpose(span<block> s, MatrixView<block> r)
+    inline     void transpose(span<block> s, MatrixView<block> r)
     {
         MatrixView<u8> ss((u8*)s.data(), s.size(), sizeof(block));
         MatrixView<u8> rr((u8*)r.data(), r.rows(), r.cols() * sizeof(block));
 
-        sse_transpose(ss, rr);
+        transpose(ss, rr);
     }
 
 }

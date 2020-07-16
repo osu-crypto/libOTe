@@ -138,7 +138,7 @@ namespace osuCrypto
 
                 // transpose our 128 columns of 1024 bits. We will have 1024 rows,
                 // each 128 bits wide.
-                sse_transpose(t, tOut);
+                transpose(t, tOut);
 
                 auto mCount = std::min<u64>(128 * superBlkSize, messages.end() - mIter);
                 auto xCount = std::min<u64>(128 * superBlkSize - mCount, extraBlocks.data() + extraBlocks.size() - xIter);
@@ -163,7 +163,7 @@ namespace osuCrypto
 
                 // transpose our 128 columns of 1024 bits. We will have 1024 rows,
                 // each 128 bits wide.
-                sse_transpose(t, tOut);
+                transpose(t, tOut);
             }
 
         }
