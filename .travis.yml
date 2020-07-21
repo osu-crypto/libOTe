@@ -1,4 +1,4 @@
-dist: bionic
+dist: trusty
 sudo: false
 language: cpp
 
@@ -7,13 +7,15 @@ addons:
     sources:
       - ubuntu-toolchain-r-test
     packages:
-      - g++-5
-
+      - gcc-6
+      - g++-6
+      - cmake
+      
 script:
   #- export CXX=/usr/local/clang-5.0.0/bin/clang
   #- export CC=/usr/local/clang-5.0.0/bin/clang
-  - export CXX=/usr/bin/g++-5 
-  - export CC=/usr/bin/gcc-5
+  - export CXX=/usr/bin/g++-6 
+  - export CC=/usr/bin/gcc-6
   - ls
   - cd cryptoTools/thirdparty/linux
   - bash all.get
