@@ -180,8 +180,8 @@ will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed i
  `   cd libOTe/cryptoTools/thirdparty/linux; bash miracl.get`.
 
  * `cmake .  -DENABLE_RELIC=ON`: Build the library with integration to the 
-      [Relic](https://github.com/ladnir/relic/) library. Requires that
-      relic is built with `cmake . -DMULTI=OPENMP` and installed. **Requires an older version of relic found here [Relic](https://github.com/ladnir/relic/)**
+      [Relic](https://github.com/relic-toolkit/relic) library. Requires that
+      relic is built with `cmake . -DMULTI=OPENMP` and installed. 
  * **Linux Only**: `cmake .  -DENABLE_SIMPLESTOT=ON`: Build the library with integration to the 
       [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
        library implementing a base OT. Also works with only relic but is slower.
