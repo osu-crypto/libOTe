@@ -518,7 +518,7 @@ namespace tests_libOTe
 
 	void DotExt_Kos_Test()
 	{
-#if defined(ENABLE_KOS)
+#if defined(ENABLE_DELTA_KOS)
 
 		setThreadName("Sender");
 
