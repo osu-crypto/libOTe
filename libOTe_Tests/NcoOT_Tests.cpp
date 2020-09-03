@@ -477,7 +477,7 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
 
     void NcoOt_genBaseOts_Test()
     {
-#ifdef LIBOTE_HAS_BASE_OT
+#if defined(LIBOTE_HAS_BASE_OT) && defined(ENABLE_OOS)
         IOService ios(0);
         Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
         Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
@@ -509,7 +509,7 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
                 throw RTE_LOC;
         }
 #else
-        throw UnitTestSkipped("no base OTs are enabled ");
+        throw UnitTestSkipped("no base OTs are enabled or ENABLE_OOS is not defined");
 #endif
     }
 
