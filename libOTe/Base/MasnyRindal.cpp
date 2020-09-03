@@ -9,7 +9,7 @@
 
 #include <cryptoTools/Crypto/RCurve.h>
 #ifndef ENABLE_RELIC
-#pragma error("ENABLE_RELIC must be defined to build MasnyRindal")
+static_assert(0, "ENABLE_RELIC must be defined to build MasnyRindal");
 #endif
 
 using Curve = oc::REllipticCurve;
