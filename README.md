@@ -3,7 +3,7 @@
 
 <!-- [![Build Status](https://travis-ci.org/osu-crypto/libOTe.svg?branch=master)](https://travis-ci.org/osu-crypto/libOTe) -->
 
-A fast and portable C++11 library for Oblivious Transfer extension (OTe). The 
+A fast and portable C++14 library for Oblivious Transfer extension (OTe). The 
 primary design goal of this library to obtain *high performance* while being 
 *easy to use*.  This library currently implements:
  
