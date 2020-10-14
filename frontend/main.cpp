@@ -324,23 +324,23 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 		senders[0].setBaseOts(baseMsg, bv,chls[0]);
 	}
 #else
-	//std::cout << "warning, base ots are not enabled. Fake base OTs will be used. " << std::endl;
-	//PRNG commonPRNG(oc::ZeroBlock);
-	//std::array<std::array<block, 2>, 128> sendMsgs;
-	//commonPRNG.get(sendMsgs.data(), sendMsgs.size());
-	//if (role == Role::Receiver)
-	//{
-	//	receivers[0].setBaseOts(sendMsgs, prng, chls[0]);
-	//}
-	//else
-	//{
-	//	BitVector bv(128);
-	//	bv.randomize(commonPRNG);
-	//	std::array<block, 128> recvMsgs;
-	//	for (u64 i = 0; i < 128; ++i)
-	//		recvMsgs[i] = sendMsgs[i][bv[i]];
-	//	senders[0].setBaseOts(recvMsgs, bv, chls[0]);
-	//}
+	std::cout << "warning, base ots are not enabled. Fake base OTs will be used. " << std::endl;
+	PRNG commonPRNG(oc::ZeroBlock);
+	std::array<std::array<block, 2>, 128> sendMsgs;
+	commonPRNG.get(sendMsgs.data(), sendMsgs.size());
+	if (role == Role::Receiver)
+	{
+		receivers[0].setBaseOts(sendMsgs, prng, chls[0]);
+	}
+	else
+	{
+		BitVector bv(128);
+		bv.randomize(commonPRNG);
+		std::array<block, 128> recvMsgs;
+		for (u64 i = 0; i < 128; ++i)
+			recvMsgs[i] = sendMsgs[i][bv[i]];
+		senders[0].setBaseOts(recvMsgs, bv, chls[0]);
+	}
 #endif 
 
 	// for the rest of the extenders, call split. This securely 
