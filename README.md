@@ -161,7 +161,7 @@ where `ENABLE_XXX` should be replaced by `ENABLE_IKNP, ENABLE_KOS, ...` dependin
  * `cmake .  -DENABLE_RELIC=ON`: Build the library with integration to the 
       [Relic](https://github.com/relic-toolkit/relic) library. Requires that
       relic is built with `cmake . -DMULTI=PTHREAD` and installed. 
- * **Linux Only**: `cmake .  -DENABLE_SIMPLESTOT=ON`: Build the library with integration to the 
+ * **Linux Only**: `cmake .  -DENABLE_SIMPLESTOT_ASM=ON`: Build the library with integration to the 
       [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
        library implementing a base OT. Also works with only relic but is slower.
 
