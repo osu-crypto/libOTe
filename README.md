@@ -163,7 +163,7 @@ where `ENABLE_XXX` should be replaced by `ENABLE_IKNP, ENABLE_KOS, ...` dependin
       relic is built with `cmake . -DMULTI=PTHREAD` and installed. 
  * **Linux Only**: `cmake .  -DENABLE_SIMPLESTOT_ASM=ON`: Build the library with integration to the 
       [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
-       library implementing a base OT. Also works with only relic but is slower.
+       library implementing a base OT.
 
 **Other Options:** Several other compile time options exists. See the output of `cmake .` for a complete list.
 
