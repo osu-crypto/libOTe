@@ -121,16 +121,15 @@ getBoost.ps1
 cd ../../..
 libOTe.sln
 ```
+Not all protocols will be built by default. Which protocol are built is controlled by the `libOTe/config.h` file. Manually edit this file to enable the desired protocol.
 
-To see all the command line options, execute the program 
-
-`frontend.exe` 
+To see all the command line options, execute the program `frontend.exe`.
 
 **Boost and visual studio 2017:**  If boost does not build with visual studio 2017 
 follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
 
-**Enabling [Relic](https://github.com/relic-toolkit/relic) (for fast base OTs):**
- * Build the library:
+**Enabling [Relic](https://github.com/relic-toolkit/relic) (for base OTs):**
+ * Build the library in the folder next libOTe (i.e. share the same parent directory):
 ```
 git clone https://github.com/ladnir/relic.git
 cd relic
@@ -138,47 +137,27 @@ cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PL
 cmake --build .
 cmake --install .
 ```
- * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_RELIC`.
-
-**Enabling Miracl (for base OTs):**
- * `cd libOTe/cryptoTools/thirdparty/win`
- * `getMiracl.ps1 ` (If the Miracl script fails to find visual studio 2017,  manually open and build the Miracl solution.)
- * `cd ../../..`
- * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_MIRACL`.
-
-**IMPORTANT:** By default, the build system needs the NASM compiler to be located
-at `C:\NASM\nasm.exe`. In the event that it isn't, there are two options, install it, 
-or enable the pure c++ implementation:
- * Remove  `cryptoTools/Crypto/asm/sha_win64.asm` from the cryptoTools Project.
- * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to remove `#define ENABLE_NASM`.
-
-
+ * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_RELIC ON`.
 
 ### Linux / Mac
  
- In short, this will build the project (without base OTs)
+ In short, this will build the project 
 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
 cd libOTe/cryptoTools/thirdparty/linux
 bash boost.get
 cd ../../..
-cmake .
+cmake . -DENABLE_XXX=ON
 make
 ```
-
-This will build the minimum version of the library (wihtout base OTs). The libraries 
-will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed in 
+where `ENABLE_XXX` should be replaced by `ENABLE_IKNP, ENABLE_KOS, ...` depending on which protocol(s) should be enabled. See the output of `cmake .` for a complete list. You will also need to enable one one of the base OT protocols (see below). The libraries will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed in 
 `libOTe/bin` To see all the command line options, execute the program 
  
 `./bin/frontend_libOTe`
 
 
 **Enable Base OTs using:**
- * `cmake .  -DENABLE_MIRACL=ON`: Build the library with integration to the
-     [Miracl](https://github.com/miracl/MIRACL) library. Requires building miracl 
- `   cd libOTe/cryptoTools/thirdparty/linux; bash miracl.get`.
-
  * `cmake .  -DENABLE_RELIC=ON`: Build the library with integration to the 
       [Relic](https://github.com/relic-toolkit/relic) library. Requires that
       relic is built with `cmake . -DMULTI=PTHREAD` and installed. 
@@ -186,16 +165,13 @@ will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed i
       [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
        library implementing a base OT. Also works with only relic but is slower.
 
-**Other Options:**
- * `cmake .  -DENABLE_CIRCUITS=ON`: Build the library with the circuit library enabled.
- * `cmake .  -DENABLE_NASM=ON`: Build the library with the assembly base SHA1 implementation. Requires the NASM compiler.
- 
+**Other Options:** Several other compile time options exists. See the output of `cmake .` for a complete list.
 
 
-**Note:** In the case that miracl or boost is already installed, the steps 
+**Note:** In the case boost is already installed, the steps 
 `cd libOTe/cryptoTools/thirdparty/linux; bash boost.get` can be skipped and CMake will attempt 
 to find them instead. Boost is found with the CMake findBoost package and miracl
-is found with the `find_library(miracl)` command.
+is found with the `find_library(miracl)` command. If there is a version mismatch then you will still need to run the provided boost build script.
  
 
 
