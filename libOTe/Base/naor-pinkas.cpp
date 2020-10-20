@@ -264,7 +264,10 @@ namespace osuCrypto
                     socket.asyncSendCopy(R);
                 
 
-                for (u64 i = 0; i < u64(messages.size()); i++)
+                auto mStart = t * messages.size() / numThreads;
+                auto mEnd = (t + 1) * messages.size() / numThreads;
+
+                for (u64 i = mStart; i < mEnd; i++)
                 {
 
                     pPK0.fromBytes(buff.data() + i * fieldElementSize);
