@@ -9,6 +9,9 @@
 // build the library with the ASM "simplest" Base OT enabled
 #define ENABLE_SIMPLESTOT_ASM ON
 
+// build the library with POPF Base OT enabled
+#define ENABLE_POPF ON
+
 // build the library with Masney Rindal Base OT enabled
 #define ENABLE_MR ON
 

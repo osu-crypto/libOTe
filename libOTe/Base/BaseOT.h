@@ -18,6 +18,9 @@ namespace osuCrypto
 #elif defined ENABLE_SIMPLESTOT
 #define LIBOTE_HAS_BASE_OT
     using DefaultBaseOT = SimplestOT;
+#elif defined ENABLE_POPF
+#define LIBOTE_HAS_BASE_OT
+    using DefaultBaseOT = PopfOT;
 #elif defined ENABLE_NP
 #define LIBOTE_HAS_BASE_OT
     using DefaultBaseOT = NaorPinkas;

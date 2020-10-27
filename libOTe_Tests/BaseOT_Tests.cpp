@@ -9,6 +9,7 @@
 
 #include "libOTe/Base/BaseOT.h"
 #include "libOTe/Base/SimplestOT.h"
+#include "libOTe/Base/PopfOT.h"
 #include "libOTe/Base/MasnyRindal.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
 #include <cryptoTools/Common/Log.h>
@@ -123,7 +124,51 @@ namespace tests_libOTe
 #endif
     }
 
+    void Bot_PopfOT_Test()
+    {
+#ifdef ENABLE_POPF
+        setThreadName("Sender");
 
+        IOService ios(0);
+        Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+        Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+        Channel senderChannel = ep1.addChannel();
+        Channel recvChannel = ep0.addChannel();
+
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
+
+        u64 numOTs = 50;
+        std::vector<block> recvMsg(numOTs);
+        std::vector<std::array<block, 2>> sendMsg(numOTs);
+        BitVector choices(numOTs);
+        choices.randomize(prng0);
+
+
+        std::thread thrd = std::thread([&]() {
+            setThreadName("receiver");
+            PopfOT baseOTs;
+            baseOTs.send(sendMsg, prng1, recvChannel);
+
+        });
+
+        PopfOT baseOTs;
+        baseOTs.receive(choices, recvMsg, prng0, senderChannel);
+
+        thrd.join();
+
+        for (u64 i = 0; i < numOTs; ++i)
+        {
+            if (neq(recvMsg[i], sendMsg[i][choices[i]]))
+            {
+                std::cout << "failed " << i <<" exp = m["<< int(choices[i]) <<"], act = " << recvMsg[i] <<" true = " << sendMsg[i][0] << ", " << sendMsg[i][1] <<std::endl;
+                throw UnitTestFail();
+            }
+        }
+#else
+        throw UnitTestSkipped("POPF OT not enabled. Requires Relic.");
+#endif
+    }
 
 
     void Bot_MasnyRindal_Test()

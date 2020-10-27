@@ -68,6 +68,7 @@ add_subdirectory(cryptoTools)
 if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_SIMPLESTOT     ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_SIMPLESTOT_ASM ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
+	set(ENABLE_POPF           ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_MR             ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_MR_KYBER       ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_NP             ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
@@ -85,6 +86,7 @@ endif()
 
 option(ENABLE_SIMPLESTOT     "Build the SimplestOT base OT" OFF)
 option(ENABLE_SIMPLESTOT_ASM "Build the assembly based SimplestOT library" OFF)
+option(ENABLE_POPF           "Build the PopfOT base OT" OFF)
 option(ENABLE_MR             "Build the MasnyRindal base OT" OFF)
 option(ENABLE_MR_KYBER       "Build the Kyber (LWE based) library and MR-Kyber base OT" OFF)
 option(ENABLE_NP             "Build the NaorPinkas base OT" OFF)
@@ -112,6 +114,7 @@ message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF\n\n")
 message(STATUS "Base OT protocols\n=======================================================")
 message(STATUS "Option: ENABLE_SIMPLESTOT     = ${ENABLE_SIMPLESTOT}")
 message(STATUS "Option: ENABLE_SIMPLESTOT_ASM = ${ENABLE_SIMPLESTOT_ASM}")
+message(STATUS "Option: ENABLE_POPF           = ${ENABLE_POPF}")
 message(STATUS "Option: ENABLE_MR             = ${ENABLE_MR}")
 message(STATUS "Option: ENABLE_MR_KYBER       = ${ENABLE_MR_KYBER}")
 message(STATUS "Option: ENABLE_NP             = ${ENABLE_NP}\n\n")
@@ -144,19 +147,20 @@ message(STATUS "Option: OTE_KOS_FIAT_SHAMIR   = ${OTE_KOS_FIAT_SHAMIR}\n\n")
 if( NOT ENABLE_ALL_OT AND
 	NOT ENABLE_SIMPLESTOT AND 
 	NOT ENABLE_SIMPLESTOT_ASM AND 
+	NOT ENABLE_POPF AND
 	NOT ENABLE_MR AND 
 	NOT ENABLE_MR_KYBER AND 
 	NOT ENABLE_NP)
 	message(WARNING "NO Base OT enabled.")
 endif()
 
-if ((ENABLE_ALL_OT OR ENABLE_MR) AND NOT (ENABLE_MIRACL OR ENABLE_RELIC))
-   message(FATAL_ERROR "ENABLE_ALL_OT and ENABLE_MR requires ENABLE_MIRACL or ENABLE_RELIC")
+if ((ENABLE_ALL_OT OR ENABLE_MR OR ENABLE_POPF) AND NOT (ENABLE_MIRACL OR ENABLE_RELIC))
+   message(FATAL_ERROR "ENABLE_ALL_OT, ENABLE_MR, and ENABLE_POPF require ENABLE_MIRACL or ENABLE_RELIC")
 endif()
 
-if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_NP) AND
+if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_POPF OR ENABLE_NP) AND
    NOT (ENABLE_MIRACL OR ENABLE_RELIC))
-   message(FATAL_ERROR "ENABLE_SIMPLESTOT and ENABLE_MR requires ENABLE_MIRACL or ENABLE_RELIC")
+   message(FATAL_ERROR "ENABLE_SIMPLESTOT, ENABLE_MR, ENABLE_POPF requires ENABLE_MIRACL or ENABLE_RELIC")
 endif()
 
 if(ENABLE_SSE)

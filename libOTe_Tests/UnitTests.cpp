@@ -36,6 +36,7 @@ namespace tests_libOTe
 
         tc.add("Bot_NaorPinkas_Test                ", Bot_NaorPinkas_Test);
         tc.add("Bot_Simplest_Test                  ", Bot_Simplest_Test);
+        tc.add("Bot_PopfOT_Test                    ", Bot_PopfOT_Test);
         tc.add("Bot_MasnyRindal_Test               ", Bot_MasnyRindal_Test);
         tc.add("Bot_MasnyRindal_Kyber_Test         ", Bot_MasnyRindal_Kyber_Test);
 
