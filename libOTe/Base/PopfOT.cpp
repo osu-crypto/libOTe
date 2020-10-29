@@ -42,6 +42,7 @@ namespace osuCrypto
     {
         Curve curve;
         Point g = curve.getGenerator();
+        Point gprime = curve.getGenerator();
         u64 pointSize = g.sizeBytes();
         u64 n = choices.size();
 
@@ -54,9 +55,10 @@ namespace osuCrypto
         std::vector<u8> pointBuff(pointSize);
         std::vector<u8> hashBuff(roundUpTo(pointSize, 16));
         std::vector<Number> sk; sk.reserve(n);
+        std::vector<u8> curveChoice; curveChoice.reserve(n);
 
-        std::vector<u8> recvBuff(pointSize);
-        chl.asyncRecv(recvBuff.data(), pointSize);
+        std::vector<u8> recvBuff(2*pointSize);
+        chl.asyncRecv(recvBuff.data(), 2*pointSize);
 
         std::vector<u8> sendBuff(n * popfSize);
         auto sendBuffIter = sendBuff.data();
@@ -64,8 +66,15 @@ namespace osuCrypto
         Point B(curve);
         for (u64 i = 0; i < n; ++i)
         {
+            curveChoice.emplace_back(prng.getBit());
             sk.emplace_back(curve, prng);
-            B = g * sk[i];
+            if (curveChoice[i] == 0)
+            {
+                B = g * sk[i];
+            } else
+            {
+                B = gprime * sk[i];
+            }
 
             B.toBytes(pointBuff.data());
             auto p = (Rijndael256Enc::Block*)pointBuff.data();
@@ -76,11 +85,20 @@ namespace osuCrypto
         chl.asyncSend(std::move(sendBuff));
 
         RandomOracle ro(sizeof(block));
+        auto recvBuffIter = recvBuff.data();
         Point A(curve);
-        A.fromBytes(recvBuff.data());
+        A.fromBytes(recvBuffIter); recvBuffIter += pointSize;
+        Point Aprime(curve);
+        Aprime.fromBytes(recvBuffIter);
         for (u64 i = 0; i < n; ++i)
         {
-            B = A * sk[i];
+            if (curveChoice[i] == 0)
+            {
+                B = A * sk[i];
+            } else
+            {
+                B = Aprime * sk[i];
+            }
             B.toBytes(hashBuff.data());
             RandomOracle ro(sizeof(block));
             ro.Update(hashBuff.data(), hashBuff.size());
@@ -95,6 +113,7 @@ namespace osuCrypto
     {
         Curve curve;
         Point g = curve.getGenerator();
+        Point gprime = curve.getGenerator();
         u64 pointSize = g.sizeBytes();
         u64 n = static_cast<u64>(msg.size());
         RandomOracle ro(sizeof(block));
@@ -105,15 +124,18 @@ namespace osuCrypto
 
         auto aesBlocks = (pointSize + 31) / 32;
         auto popfSize = aesBlocks * sizeof(Rijndael256Enc::Block);
-        std::vector<u8> pointBuff(pointSize);
+        std::vector<u8> sendBuff(2*pointSize);
         std::vector<u8> popfBuff(popfSize);
         std::vector<u8> hashBuff(roundUpTo(pointSize, 16));
 
         Number sk(curve, prng);
+        auto sendBuffIter = sendBuff.data();
         Point A = g * sk;
-        A.toBytes(pointBuff.data());
+        Point Aprime = gprime * sk;
+        A.toBytes(sendBuffIter); sendBuffIter += pointSize;
+        Aprime.toBytes(sendBuffIter);
 
-        chl.asyncSend(std::move(pointBuff));
+        chl.asyncSend(std::move(sendBuff));
 
         std::vector<u8> recvBuff(n * popfSize);
         chl.recv(recvBuff.data(), recvBuff.size());
@@ -132,6 +154,7 @@ namespace osuCrypto
             Bo.fromBytes(popfBuff.data());
             buffIter += popfSize;
 
+            // We don't need to check which curve we're on since we use the same secret for both.
             Bz *= sk;
             Bz.toBytes(hashBuff.data());
             RandomOracle ro(sizeof(block));
