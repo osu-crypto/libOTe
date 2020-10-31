@@ -46,6 +46,7 @@ int miraclTestMain();
 
 #include "libOTe/Base/SimplestOT.h"
 #include "libOTe/Base/PopfOT.h"
+#include "libOTe/Base/EKEPopf.h"
 #include "libOTe/Base/MasnyRindal.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
 #include "libOTe/Base/naor-pinkas.h"
@@ -575,7 +576,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 
 
 template<typename BaseOT>
-void baseOT_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP&)
+void baseOT_example_from_ot(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP&, BaseOT ot)
 {
 	IOService ios;
 	PRNG prng(sysRandomSeed());
@@ -589,7 +590,7 @@ void baseOT_example(Role role, int totalOTs, int numThreads, std::string ip, std
 	if (role == Role::Receiver)
 	{
 		auto chl0 = Session(ios, ip, SessionMode::Server).addChannel();
-		BaseOT recv;
+		BaseOT recv = ot;
 
 		std::vector<block> msg(totalOTs);
 		BitVector choice(totalOTs);
@@ -611,12 +612,18 @@ void baseOT_example(Role role, int totalOTs, int numThreads, std::string ip, std
 
 		auto chl1 = Session(ios, ip, SessionMode::Client).addChannel();
 
-		BaseOT send;
+		BaseOT send = ot;
 
 		std::vector<std::array<block, 2>> msg(totalOTs);
 
 		send.send(msg, prng, chl1);
 	}
+}
+
+template<typename BaseOT>
+void baseOT_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp)
+{
+    return baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, BaseOT());
 }
 
 
@@ -833,8 +840,13 @@ int main(int argc, char** argv)
 	flagSet |= runIf(baseOT_example<AsmSimplestOT>, cmd, simpleasm);
 #endif
 #ifdef ENABLE_POPF
-	// flagSet |= runIf(baseOT_example<PopfOT<EKEPopf>>, cmd, popfot);
-	flagSet |= runIf(baseOT_example<PopfOT>, cmd, popfot);
+    // TODO: Multiple POPFs
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepEKEPopf factory;
+		const char* domain = "POPF OT example";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, PopfOT<DomainSepEKEPopf>(factory));
+	}, cmd, popfot);
 #endif
 #ifdef ENABLE_MR
 	flagSet |= runIf(baseOT_example<MasnyRindal>, cmd, mr);

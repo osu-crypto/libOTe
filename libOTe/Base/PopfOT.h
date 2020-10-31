@@ -2,67 +2,79 @@
 #include "libOTe/config.h"
 #ifdef ENABLE_POPF
 
-// #include "Popf.h"
+#include <type_traits>
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RCurve.h>
 #include <cryptoTools/Crypto/Rijndael256.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 
+#include <cryptoTools/Crypto/RCurve.h>
+#ifndef ENABLE_RELIC
+static_assert(0, "ENABLE_RELIC must be defined to build PopfOT");
+#endif
 
 namespace osuCrypto
 {
+    // Static polymorphism isn't strictly speaking necessary here, as send and receive could just
+    // call the functions anyway. But it provides a declaration of what's needed for a Popf.
 
-    template <class T, class U>
+    template<class Derived>
+    struct PopfTraits;
+
+    template<class Derived>
     class Popf
     {
     public:
-        Popf() {}
-        virtual u64 sizeBytes() const = 0;
-        virtual void toBytes(u8* dest) const = 0;
-        virtual void fromBytes(u8* src) = 0;
-        virtual T eval(U x) = 0;
-        virtual void program(U x, T y) = 0; // Maybe make this static and return a popf object? Or make a factory class?
-        virtual ~Popf() = default;
+        typedef typename PopfTraits<Derived>::PopfFunc PopfFunc;
+        typedef typename PopfTraits<Derived>::PopfIn PopfIn;
+        typedef typename PopfTraits<Derived>::PopfOut PopfOut;
+
+        PopfOut eval(PopfFunc f, PopfIn x) const { return derived().eval(f, x); }
+        PopfFunc program(PopfIn x, PopfOut y) const { return derived().program(x, y); }
+
+        // Static polymorphism boilerplate.
+        Derived& derived() { return *static_cast<Derived*>(this); }
+        const Derived& derived() const { return *static_cast<const Derived*>(this); }
     };
 
-    class EKEPopf : public Popf<oc::REccPoint,bool>
+    template<class Derived>
+    struct RODomainSeparatedPopfTraits;
+
+    template<class Derived>
+    class RODomainSeparatedPopf: public RandomOracle
     {
-        public:
-            EKEPopf()
-            {
-                IC[0].setKey({toBlock(0,0),toBlock(0,0)});
-                IC[1].setKey({toBlock(0,0),toBlock(1ull)});
-                ICinv[0].setKey({toBlock(0,0),toBlock(0,0)});
-                ICinv[1].setKey({toBlock(0,0),toBlock(1ull)});
+        typedef RandomOracle Base;
 
-                oc::REccPoint point;
-                popfBuff.resize(sizeBytes());
-            }
-            u64 sizeBytes() const { return sizeof(Block256); }
-            void toBytes(u8* dest) const;
-            void fromBytes(u8* src);
-            oc::REccPoint eval(bool x);
-            void program(bool x, oc::REccPoint y);
-        private:
-            std::array<Rijndael256Enc, 2> IC;
-            std::array<Rijndael256Dec, 2> ICinv;
-            std::vector<u8> popfBuff;
+    protected:
+        using RandomOracle::Final;
+        using RandomOracle::outputLength;
+
+    public:
+        using Base::Base;
+        using Base::operator=;
+
+        typedef typename RODomainSeparatedPopfTraits<Derived>::ConstructedPopf ConstructedPopf;
+
+        ConstructedPopf construct() { return derived().construct(); }
+
+        // Static polymorphism boilerplate.
+        Derived& derived() { return *static_cast<Derived*>(this); }
+        const Derived& derived() const { return *static_cast<const Derived*>(this); }
     };
 
-    // class MRPopf : public Popf<oc::REccPoint,bool>
-    // {
-
-    // };
-
-    // template<class T>
+    // The Popf's PopfFunc must be plain old data, PopfIn must be convertible from an integer, and
+    // PopfOut must be a Block256.
+    template<typename DerivedDSPopf>
     class PopfOT : public OtReceiver, public OtSender
     {
     public:
-        // PopfOT()
-        // {
-        //     popf = new EKEPopf();
-        // }
+        typedef RODomainSeparatedPopf<DerivedDSPopf> PopfFactory;
+
+        PopfOT(const PopfFactory& p) : popfFactory(p) {}
+        PopfOT(PopfFactory&& p) : popfFactory(p) {}
+
         void receive(
             const BitVector& choices,
             span<block> messages,
@@ -93,14 +105,25 @@ namespace osuCrypto
             PRNG& prng,
             Channel& chl) override;
 
-        // ~PopfOT()
-        // {
-        //     delete popf;
-        // }
+        static_assert(std::is_pod<typename PopfFactory::ConstructedPopf::PopfFunc>::value,
+                      "Popf function must be Plain Old Data");
+        static_assert(std::is_same<typename PopfFactory::ConstructedPopf::PopfOut, Block256>::value,
+                      "Popf must be programmable on 256-bit blocks");
 
-        private:
-            // Popf<oc::REccPoint, bool>* popf;
+    private:
+        PopfFactory popfFactory;
+
+        using Curve = oc::REllipticCurve;
+        using Point = oc::REccPoint;
+        using Brick = oc::REccPoint;
+        using Number = oc::REccNumber;
+
+        void blockToCurve(Point& p, Block256 b);
+        Block256 curveToBlock(const Point& p);
     };
 
 }
+
+#include "PopfOT_impl.h"
+
 #endif

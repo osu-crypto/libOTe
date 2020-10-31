@@ -22,7 +22,7 @@ namespace tests_libOTe
 
         tc.add("Tools_Transpose_View_Test          ", Tools_Transpose_View_Test);
         tc.add("Tools_Transpose_Test               ", Tools_Transpose_Test);
-        
+
         tc.add("Tools_LinearCode_Test              ", Tools_LinearCode_Test);
         tc.add("Tools_LinearCode_sub_Test          ", Tools_LinearCode_sub_Test);
         tc.add("Tools_LinearCode_rep_Test          ", Tools_LinearCode_rep_Test);
@@ -56,7 +56,7 @@ namespace tests_libOTe
 
         tc.add("AknOt_sendRecv1000_Test            ", AknOt_sendRecv1000_Test);
 
-                                                       
+
     });
 
 
