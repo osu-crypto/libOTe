@@ -9,6 +9,7 @@
 
 #include "libOTe/Base/BaseOT.h"
 #include "libOTe/Base/SimplestOT.h"
+// #include "libOTe/Base/Popf.h"
 #include "libOTe/Base/PopfOT.h"
 #include "libOTe/Base/MasnyRindal.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
@@ -124,6 +125,7 @@ namespace tests_libOTe
 #endif
     }
 
+//    template<class T>
     void Bot_PopfOT_Test()
     {
 #ifdef ENABLE_POPF
@@ -147,11 +149,13 @@ namespace tests_libOTe
 
         std::thread thrd = std::thread([&]() {
             setThreadName("receiver");
+            // PopfOT<EKEPopf> baseOTs;
             PopfOT baseOTs;
             baseOTs.send(sendMsg, prng1, recvChannel);
 
         });
 
+        // PopfOT<EKEPopf> baseOTs;
         PopfOT baseOTs;
         baseOTs.receive(choices, recvMsg, prng0, senderChannel);
 
@@ -165,6 +169,7 @@ namespace tests_libOTe
                 throw UnitTestFail();
             }
         }
+    
 #else
         throw UnitTestSkipped("POPF OT not enabled. Requires Relic.");
 #endif

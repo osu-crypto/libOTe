@@ -1,20 +1,8 @@
-// Everyone knows two curves Curve25519 and its twist.
-// Everyone knows base points for the two curves P for the curve and P` for the twist.
-
-// Sender gives two points A = aP and A` = a`P` to the receiver (Elligator paper suggests a = a`. Is it secure?)
-
-// The receiver generates a list of choice bits {c_i}, a list of private keys {b_i}, and a curve choice {P_i} 
-// The receiver gives {B_i = IC(c_i, x-coord(b_iP_i))} to the sender.
-// The receiver outputs H(b_iA_i) as its output from the OT where A_i is either A or A` corresponding to P_i.
-
-// The sender computes B_{i0} = IC^-1(0,B_i) and B_{i1} = IC^-1(1,B_i) and checks which curve each is on.
-// The sender then outputs a_{i0}B_{i0} and a_{i1}B_{i1} where the a_{ic} chosen corresponds to which curve the B_{ic} is on. 
-
-
 #include "PopfOT.h"
 
 #ifdef ENABLE_POPF
 
+// #include "Popf.h"
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
@@ -33,7 +21,45 @@ using Number = oc::REccNumber;
 
 namespace osuCrypto
 {
+    
+    // UNSAFE, TO FIX LATER
+    void EKEPopf::toBytes(u8* dest) const
+    {
+        // Copy or move? I'm not sure which to do here.
+        // So I'll do neither for the moment.
+        memcpy(dest, popfBuff.data(), size);
+    }
 
+    // UNSAFE, TO FIX LATER
+    void EKEPopf::fromBytes(u8* src)
+    {
+        // Copy or move? I'm not sure which to do here.
+        // So I'll do neither for the moment.
+        memcpy(popfBuff.data(), src, size);
+    }
+
+    Point EKEPopf::eval(bool x)
+    {
+        std::vector<u8> buff(size);
+        Point y;
+
+        Rijndael256Enc::Block* p = (Rijndael256Enc::Block*)popfBuff.data();
+        ICinv[x].decBlocks(p, aesBlocks, (Rijndael256Enc::Block*)buff.data());
+        y.fromBytes(buff.data());
+        return y;
+    }
+
+    void EKEPopf::program(bool x, Point y)
+    {
+        std::vector<u8> pointBuff(y.sizeBytes());
+
+        y.toBytes(pointBuff.data());
+        Rijndael256Enc::Block* p = (Rijndael256Enc::Block*)pointBuff.data();
+        IC[x].encBlocks(p, aesBlocks, (Rijndael256Enc::Block*)popfBuff.data());
+    }
+
+    // template<class T>
+    // void PopfOT<T>::receive(
     void PopfOT::receive(
         const BitVector & choices,
         span<block> messages,
@@ -46,12 +72,8 @@ namespace osuCrypto
         u64 pointSize = g.sizeBytes();
         u64 n = choices.size();
 
-        std::array<Rijndael256Enc, 2> IC;
-        IC[0].setKey({toBlock(0,0),toBlock(0,0)});
-        IC[1].setKey({toBlock(0,0),toBlock(1ull)});
-
-        auto aesBlocks = (pointSize + 31) / 32;
-        auto popfSize = aesBlocks * sizeof(Rijndael256Enc::Block);
+        EKEPopf popf;
+        u64 popfSize = popf.sizeBytes();
         std::vector<u8> pointBuff(pointSize);
         std::vector<u8> hashBuff(roundUpTo(pointSize, 16));
         std::vector<Number> sk; sk.reserve(n);
@@ -76,9 +98,9 @@ namespace osuCrypto
                 B = gprime * sk[i];
             }
 
+            popf.program(choices[i], B);
+            popf.toBytes(sendBuffIter);
             B.toBytes(pointBuff.data());
-            auto p = (Rijndael256Enc::Block*)pointBuff.data();
-            IC[choices[i]].encBlocks(p, aesBlocks, (Rijndael256Enc::Block*)sendBuffIter);
             sendBuffIter += popfSize;
         }
 
@@ -106,6 +128,8 @@ namespace osuCrypto
         }
     }
 
+    // template<class T>
+    // void PopfOT<T>::send(
     void PopfOT::send(
         span<std::array<block, 2>> msg,
         PRNG& prng,
@@ -118,14 +142,9 @@ namespace osuCrypto
         u64 n = static_cast<u64>(msg.size());
         RandomOracle ro(sizeof(block));
 
-        std::array<Rijndael256Dec, 2> ICinv;
-        ICinv[0].setKey({toBlock(0,0),toBlock(0,0)});
-        ICinv[1].setKey({toBlock(0,0),toBlock(1ull)});
-
-        auto aesBlocks = (pointSize + 31) / 32;
-        auto popfSize = aesBlocks * sizeof(Rijndael256Enc::Block);
+        EKEPopf popf;
+        auto popfSize = popf.sizeBytes();
         std::vector<u8> sendBuff(2*pointSize);
-        std::vector<u8> popfBuff(popfSize);
         std::vector<u8> hashBuff(roundUpTo(pointSize, 16));
 
         Number sk(curve, prng);
@@ -145,13 +164,9 @@ namespace osuCrypto
         Point Bz(curve), Bo(curve);
         for (u64 i = 0; i < n; ++i)
         {
-            auto phi = (Rijndael256Enc::Block*)buffIter;
-            // Bz = POPF.Eval(0,phi);
-            ICinv[0].decBlocks(phi, aesBlocks, (Rijndael256Enc::Block*)popfBuff.data());
-            Bz.fromBytes(popfBuff.data()); // Hope this isn't destructive.
-            // Bo = pPOPF.Eval(1,phi);
-            ICinv[1].decBlocks(phi, aesBlocks, (Rijndael256Enc::Block*)popfBuff.data());
-            Bo.fromBytes(popfBuff.data());
+            popf.fromBytes(buffIter);
+            Bz = popf.eval(0);
+            Bo = popf.eval(1);
             buffIter += popfSize;
 
             // We don't need to check which curve we're on since we use the same secret for both.

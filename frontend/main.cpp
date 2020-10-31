@@ -833,6 +833,7 @@ int main(int argc, char** argv)
 	flagSet |= runIf(baseOT_example<AsmSimplestOT>, cmd, simpleasm);
 #endif
 #ifdef ENABLE_POPF
+	// flagSet |= runIf(baseOT_example<PopfOT<EKEPopf>>, cmd, popfot);
 	flagSet |= runIf(baseOT_example<PopfOT>, cmd, popfot);
 #endif
 #ifdef ENABLE_MR
