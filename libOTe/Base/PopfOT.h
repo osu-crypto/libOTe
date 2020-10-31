@@ -17,60 +17,42 @@ static_assert(0, "ENABLE_RELIC must be defined to build PopfOT");
 
 namespace osuCrypto
 {
-    // Static polymorphism isn't strictly speaking necessary here, as send and receive could just
-    // call the functions anyway. But it provides a declaration of what's needed for a Popf.
-
-    template<class Derived>
-    struct PopfTraits;
-
-    template<class Derived>
+    // C++ doesn't have traits, so it's hard to declare what a Popf should do. But Popf classes
+    // should looks something like this:
+    /*
     class Popf
     {
     public:
-        typedef typename PopfTraits<Derived>::PopfFunc PopfFunc;
-        typedef typename PopfTraits<Derived>::PopfIn PopfIn;
-        typedef typename PopfTraits<Derived>::PopfOut PopfOut;
+        typedef ... PopfFunc;
+        typedef ... PopfIn;
+        typedef ... PopfOut;
 
-        PopfOut eval(PopfFunc f, PopfIn x) const { return derived().eval(f, x); }
-        PopfFunc program(PopfIn x, PopfOut y) const { return derived().program(x, y); }
-
-        // Static polymorphism boilerplate.
-        Derived& derived() { return *static_cast<Derived*>(this); }
-        const Derived& derived() const { return *static_cast<const Derived*>(this); }
+        PopfOut eval(PopfFunc f, PopfIn x) const;
+        PopfFunc program(PopfIn x, PopfOut y) const;
     };
+    */
 
-    template<class Derived>
-    struct RODomainSeparatedPopfTraits;
-
-    template<class Derived>
+    // A factory to create a Popf from a RO should look something like this:
+    /*
     class RODomainSeparatedPopf: public RandomOracle
     {
-        typedef RandomOracle Base;
-
-    protected:
         using RandomOracle::Final;
         using RandomOracle::outputLength;
 
     public:
-        using Base::Base;
-        using Base::operator=;
+        typedef ... ConstructedPopf;
 
-        typedef typename RODomainSeparatedPopfTraits<Derived>::ConstructedPopf ConstructedPopf;
-
-        ConstructedPopf construct() { return derived().construct(); }
-
-        // Static polymorphism boilerplate.
-        Derived& derived() { return *static_cast<Derived*>(this); }
-        const Derived& derived() const { return *static_cast<const Derived*>(this); }
+        ConstructedPopf construct();
     };
+    */
 
     // The Popf's PopfFunc must be plain old data, PopfIn must be convertible from an integer, and
     // PopfOut must be a Block256.
-    template<typename DerivedDSPopf>
+    template<typename DSPopf>
     class PopfOT : public OtReceiver, public OtSender
     {
     public:
-        typedef RODomainSeparatedPopf<DerivedDSPopf> PopfFactory;
+        typedef DSPopf PopfFactory;
 
         PopfOT(const PopfFactory& p) : popfFactory(p) {}
         PopfOT(PopfFactory&& p) : popfFactory(p) {}

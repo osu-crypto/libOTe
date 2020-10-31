@@ -10,20 +10,13 @@
 
 namespace osuCrypto
 {
-    class EKEPopf;
-    class DomainSepEKEPopf;
-
-    template<>
-    struct PopfTraits<EKEPopf>
+    class EKEPopf
     {
+    public:
         typedef Block256 PopfFunc;
         typedef bool PopfIn; // TODO: Make this more general.
         typedef Block256 PopfOut;
-    };
 
-    class EKEPopf : public Popf<EKEPopf>
-    {
-    public:
         EKEPopf(const RandomOracle& ro_) : ro(ro_) {}
         EKEPopf(RandomOracle&& ro_) : ro(ro_) {}
 
@@ -53,22 +46,15 @@ namespace osuCrypto
         RandomOracle ro;
     };
 
-    template<>
-    struct RODomainSeparatedPopfTraits<DomainSepEKEPopf>
+    class DomainSepEKEPopf: public RandomOracle
     {
-        typedef EKEPopf ConstructedPopf;
-    };
-
-    class DomainSepEKEPopf: public RODomainSeparatedPopf<DomainSepEKEPopf>
-    {
-        typedef RODomainSeparatedPopf<DomainSepEKEPopf> Base;
+        using RandomOracle::Final;
+        using RandomOracle::outputLength;
 
     public:
-        using Base::operator=;
-
+        typedef EKEPopf ConstructedPopf;
         const static size_t hashLength = sizeof(Block256);
-
-        DomainSepEKEPopf() : Base(hashLength) {}
+        DomainSepEKEPopf() : RandomOracle(hashLength) {}
 
         ConstructedPopf construct()
         {

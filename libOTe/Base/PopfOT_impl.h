@@ -7,8 +7,8 @@
 
 namespace osuCrypto
 {
-    template<typename DerivedDSPopf>
-    void PopfOT<DerivedDSPopf>::blockToCurve(Point& p, Block256 b)
+    template<typename DSPopf>
+    void PopfOT<DSPopf>::blockToCurve(Point& p, Block256 b)
     {
         unsigned char buf[sizeof(Block256) + 1];
         buf[0] = 2;
@@ -16,16 +16,16 @@ namespace osuCrypto
         p.fromBytes(buf);
     }
 
-    template<typename DerivedDSPopf>
-    Block256 PopfOT<DerivedDSPopf>::curveToBlock(const Point& p)
+    template<typename DSPopf>
+    Block256 PopfOT<DSPopf>::curveToBlock(const Point& p)
     {
         unsigned char buf[sizeof(Block256) + 1];
         p.toBytes(buf);
         return Block256(&buf[1]);
     }
 
-    template<typename DerivedDSPopf>
-    void PopfOT<DerivedDSPopf>::receive(
+    template<typename DSPopf>
+    void PopfOT<DSPopf>::receive(
         const BitVector & choices,
         span<block> messages,
         PRNG & prng,
@@ -91,8 +91,8 @@ namespace osuCrypto
         }
     }
 
-    template<typename DerivedDSPopf>
-    void PopfOT<DerivedDSPopf>::send(
+    template<typename DSPopf>
+    void PopfOT<DSPopf>::send(
         span<std::array<block, 2>> msg,
         PRNG& prng,
         Channel& chl)
