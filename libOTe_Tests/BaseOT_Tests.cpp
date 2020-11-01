@@ -9,9 +9,9 @@
 
 #include "libOTe/Base/BaseOT.h"
 #include "libOTe/Base/SimplestOT.h"
-// #include "libOTe/Base/Popf.h"
 #include "libOTe/Base/PopfOT.h"
 #include "libOTe/Base/EKEPopf.h"
+#include "libOTe/Base/MRPopf.h"
 #include "libOTe/Base/MasnyRindal.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
 #include <cryptoTools/Common/Log.h>
@@ -148,17 +148,20 @@ namespace tests_libOTe
         choices.randomize(prng0);
 
         DomainSepEKEPopf popfFactory;
+        // DomainSepMRPopf popfFactory;
         const char* test_domain = "Bot_PopfOT_Test()";
         popfFactory.Update(test_domain, std::strlen(test_domain));
 
         std::thread thrd = std::thread([&]() {
             setThreadName("receiver");
             PopfOT<DomainSepEKEPopf> baseOTs(popfFactory);
+            // PopfOT<DomainSepMRPopf> baseOTs(popfFactory);
             baseOTs.send(sendMsg, prng1, recvChannel);
 
         });
 
         PopfOT<DomainSepEKEPopf> baseOTs(popfFactory);
+        // PopfOT<DomainSepMRPopf> baseOTs(popfFactory);
         baseOTs.receive(choices, recvMsg, prng0, senderChannel);
 
         thrd.join();
