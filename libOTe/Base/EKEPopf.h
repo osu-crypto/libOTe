@@ -2,9 +2,7 @@
 #include "libOTe/config.h"
 #ifdef ENABLE_POPF
 
-#include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Common/Defines.h>
-#include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/Rijndael256.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 
@@ -31,13 +29,13 @@ namespace osuCrypto
             return program(x, y);
         }
 
-    private:
         PopfFunc program(PopfIn x, PopfOut y) const
         {
             Rijndael256Enc ic(getKey(x));
             return ic.encBlock(y);
         }
-        
+
+    private:
         Block256 getKey(PopfIn x) const
         {
             Block256 key;

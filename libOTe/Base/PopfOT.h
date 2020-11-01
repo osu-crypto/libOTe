@@ -28,7 +28,8 @@ namespace osuCrypto
         typedef ... PopfOut;
 
         PopfOut eval(PopfFunc f, PopfIn x) const;
-        PopfFunc program(PopfIn x, PopfOut y (, PRNG& prng)) const;
+        PopfFunc program(PopfIn x, PopfOut y, PRNG& prng) const;
+        PopfFunc program(PopfIn x, PopfOut y) const; // If program is possible without prng.
     };
     */
 
