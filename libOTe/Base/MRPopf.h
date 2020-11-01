@@ -35,12 +35,12 @@ namespace osuCrypto
         PopfFunc program(PopfIn x, PopfOut y, PRNG& prng) const
         {
             PopfFunc r;
+            prng.get(r[1-x].data(),32);
+
             Block256 mask;
             RandomOracle roMask = ro;
-            roMask.Update(y);
+            roMask.Update(r[1-x]);
             roMask.Final(mask);
-
-            prng.get(r[1-x].data(),32);
 
             r[x] = y;
             r[x][0] = r[x][0] ^ mask[0];
