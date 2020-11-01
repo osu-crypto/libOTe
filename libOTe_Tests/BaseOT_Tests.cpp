@@ -12,6 +12,7 @@
 #include "libOTe/Base/PopfOT.h"
 #include "libOTe/Base/EKEPopf.h"
 #include "libOTe/Base/MRPopf.h"
+#include "libOTe/Base/FeistelPopf.h"
 #include "libOTe/Base/MasnyRindal.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
 #include <cryptoTools/Common/Log.h>
@@ -126,7 +127,7 @@ namespace tests_libOTe
 #endif
     }
 
-    // TODO: Template for multiple POPFs.
+    template<typename DSPopf>
     void Bot_PopfOT_Test()
     {
 #ifdef ENABLE_POPF
@@ -147,21 +148,18 @@ namespace tests_libOTe
         BitVector choices(numOTs);
         choices.randomize(prng0);
 
-        DomainSepEKEPopf popfFactory;
-        // DomainSepMRPopf popfFactory;
+        DSPopf popfFactory;
         const char* test_domain = "Bot_PopfOT_Test()";
         popfFactory.Update(test_domain, std::strlen(test_domain));
 
         std::thread thrd = std::thread([&]() {
             setThreadName("receiver");
-            PopfOT<DomainSepEKEPopf> baseOTs(popfFactory);
-            // PopfOT<DomainSepMRPopf> baseOTs(popfFactory);
+            PopfOT<DSPopf> baseOTs(popfFactory);
             baseOTs.send(sendMsg, prng1, recvChannel);
 
         });
 
-        PopfOT<DomainSepEKEPopf> baseOTs(popfFactory);
-        // PopfOT<DomainSepMRPopf> baseOTs(popfFactory);
+        PopfOT<DSPopf> baseOTs(popfFactory);
         baseOTs.receive(choices, recvMsg, prng0, senderChannel);
 
         thrd.join();
@@ -179,6 +177,10 @@ namespace tests_libOTe
         throw UnitTestSkipped("POPF OT not enabled. Requires Relic.");
 #endif
     }
+
+    template void Bot_PopfOT_Test<DomainSepEKEPopf>();
+    template void Bot_PopfOT_Test<DomainSepFeistelPopf>();
+    template void Bot_PopfOT_Test<DomainSepMRPopf>();
 
 
     void Bot_MasnyRindal_Test()

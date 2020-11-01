@@ -59,7 +59,7 @@ namespace osuCrypto
             h.Final(hOut);
 
             for (int i = 0; i < 2; i++)
-                f.t[i] ^= hOut[i];
+                f.t[i] = f.t[i] ^ hOut[i];
         }
 
         void xorHPrime(PopfFunc &f, RandomOracle hPrime) const
@@ -70,7 +70,7 @@ namespace osuCrypto
             hPrime.Final(hPrimeOut);
 
             for (int i = 0; i < 3; i++)
-                f.s[i] ^= hPrimeOut[i];
+                f.s[i] = f.s[i] ^ hPrimeOut[i];
         }
 
         RandomOracle ro;

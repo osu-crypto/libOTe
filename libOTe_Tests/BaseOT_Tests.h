@@ -6,7 +6,9 @@ namespace tests_libOTe
 {
     void Bot_NaorPinkas_Test();
     void Bot_Simplest_Test();
-    void Bot_PopfOT_Test();
     void Bot_MasnyRindal_Test();
     void Bot_MasnyRindal_Kyber_Test();
+
+    template<typename DSPopf>
+    void Bot_PopfOT_Test();
 }

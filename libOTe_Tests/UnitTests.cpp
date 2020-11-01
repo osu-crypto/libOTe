@@ -11,6 +11,9 @@
 #include "libOTe_Tests/AknOt_Tests.h"
 #include "libOTe_Tests/SilentOT_Tests.h"
 #include "libOTe_Tests/bitpolymul_Tests.h"
+#include "libOTe/Base/EKEPopf.h"
+#include "libOTe/Base/MRPopf.h"
+#include "libOTe/Base/FeistelPopf.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -36,7 +39,9 @@ namespace tests_libOTe
 
         tc.add("Bot_NaorPinkas_Test                ", Bot_NaorPinkas_Test);
         tc.add("Bot_Simplest_Test                  ", Bot_Simplest_Test);
-        tc.add("Bot_PopfOT_Test                    ", Bot_PopfOT_Test);
+        tc.add("Bot_PopfOT_Test (EKE)              ", Bot_PopfOT_Test<DomainSepEKEPopf>);
+        tc.add("Bot_PopfOT_Test (Feistel)          ", Bot_PopfOT_Test<DomainSepFeistelPopf>);
+        tc.add("Bot_PopfOT_Test (MasnyRindal)      ", Bot_PopfOT_Test<DomainSepMRPopf>);
         tc.add("Bot_MasnyRindal_Test               ", Bot_MasnyRindal_Test);
         tc.add("Bot_MasnyRindal_Kyber_Test         ", Bot_MasnyRindal_Kyber_Test);
 

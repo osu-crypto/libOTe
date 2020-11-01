@@ -3,6 +3,7 @@
 #ifdef ENABLE_POPF
 
 #include <cryptoTools/Common/Defines.h>
+#include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/Rijndael256.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 

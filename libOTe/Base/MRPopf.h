@@ -45,7 +45,7 @@ namespace osuCrypto
             r[x] = y;
             r[x][0] = r[x][0] ^ mask[0];
             r[x][1] = r[x][1] ^ mask[1];
-            
+
             return r;
         }
 
