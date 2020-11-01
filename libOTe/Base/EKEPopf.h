@@ -26,13 +26,18 @@ namespace osuCrypto
             return ic.decBlock(f);
         }
 
+        PopfFunc program(PopfIn x, PopfOut y, PRNG& prng) const
+        {
+            return program(x, y);
+        }
+
+    private:
         PopfFunc program(PopfIn x, PopfOut y) const
         {
             Rijndael256Enc ic(getKey(x));
             return ic.encBlock(y);
         }
-
-    private:
+        
         Block256 getKey(PopfIn x) const
         {
             Block256 key;

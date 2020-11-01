@@ -63,7 +63,7 @@ namespace osuCrypto
                 B = gprime * sk[i];
             }
 
-            sendBuff[i] = popf.program(choices[i], curveToBlock(B));
+            sendBuff[i] = popf.program(choices[i], curveToBlock(B), prng);
         }
 
         chl.asyncSend(std::move(sendBuff));
