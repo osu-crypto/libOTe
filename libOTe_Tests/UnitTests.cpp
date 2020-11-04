@@ -43,6 +43,7 @@ namespace tests_libOTe
         tc.add("Bot_PopfOT_Test (Feistel)          ", Bot_PopfOT_Test<DomainSepFeistelPopf>);
         tc.add("Bot_PopfOT_Test (MasnyRindal)      ", Bot_PopfOT_Test<DomainSepMRPopf>);
         tc.add("Bot_MasnyRindal_Test               ", Bot_MasnyRindal_Test);
+        tc.add("Bot_MasnyRindal_Test (No reuse)    ", Bot_MasnyRindal_Basic_Test);
         tc.add("Bot_MasnyRindal_Kyber_Test         ", Bot_MasnyRindal_Kyber_Test);
 
         tc.add("OtExt_genBaseOts_Test              ", OtExt_genBaseOts_Test);

@@ -47,7 +47,9 @@ int miraclTestMain();
 #include "libOTe/Base/SimplestOT.h"
 #include "libOTe/Base/PopfOT.h"
 #include "libOTe/Base/EKEPopf.h"
+#include "libOTe/Base/FeistelPopf.h"
 #include "libOTe/Base/MasnyRindal.h"
+#include "libOTe/Base/MasnyRindalBasic.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
 #include "libOTe/Base/naor-pinkas.h"
 
@@ -638,6 +640,7 @@ diknp{ "diknp" },
 oos{ "o", "oos" },
 popfot{ "p", "popfot" },
 mr{ "mr" },
+mrb{ "mrb" },
 Silent{ "s", "Silent" },
 akn{ "a", "akn" },
 np{ "np" },
@@ -850,6 +853,7 @@ int main(int argc, char** argv)
 #endif
 #ifdef ENABLE_MR
 	flagSet |= runIf(baseOT_example<MasnyRindal>, cmd, mr);
+	flagSet |= runIf(baseOT_example<MasnyRindalBasic>, cmd, mrb);
 #endif
 #ifdef ENABLE_NP
 	flagSet |= runIf(baseOT_example<NaorPinkas>, cmd, np);
@@ -895,6 +899,7 @@ int main(int argc, char** argv)
 			<< Color::Green << "  -simplest    " << Color::Default << "  : to run the SimplestOT     active secure  1-out-of-2  base OT      "  <<Color::Red<< (spEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
 			<< Color::Green << "  -popfot      " << Color::Default << "  : to run the PopfOT         active secure  1-out-of-2  base OT      "  <<Color::Red<< (popfotEnabled ? "" : "(disabled)") << "\n"<< Color::Default
 			<< Color::Green << "  -mr          " << Color::Default << "  : to run the MasnyRindal    active secure  1-out-of-2  base OT      "  <<Color::Red<< (mrEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -mrb         " << Color::Default << "  : to run the MasnyRindal base OT without reusing the sender message "  <<Color::Red<< (mrEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
 			<< Color::Green << "  -np          " << Color::Default << "  : to run the NaorPinkas     active secure  1-out-of-2  base OT      "  <<Color::Red<< (npEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
 			<< Color::Green << "  -iknp        " << Color::Default << "  : to run the IKNP           passive secure 1-out-of-2       OT      "  <<Color::Red<< (iknpEnabled ? "" : "(disabled)") << "\n"  << Color::Default
 			<< Color::Green << "  -diknp       " << Color::Default << "  : to run the IKNP           passive secure 1-out-of-2 Delta-OT      "  <<Color::Red<< (diknpEnabled ? "" : "(disabled)") << "\n" << Color::Default
