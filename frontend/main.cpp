@@ -589,6 +589,8 @@ void baseOT_example_from_ot(Role role, int totalOTs, int numThreads, std::string
 	if (numThreads > 1)
 		std::cout << "multi threading for the base OT example is not implemented.\n" << std::flush;
 
+	Timer t;
+	Timer::timeUnit s;
 	if (role == Role::Receiver)
 	{
 		auto chl0 = Session(ios, ip, SessionMode::Server).addChannel();
@@ -599,15 +601,9 @@ void baseOT_example_from_ot(Role role, int totalOTs, int numThreads, std::string
 		choice.randomize(prng);
 
 
-		Timer t;
-		auto s = t.setTimePoint("base OT start");
+		s = t.setTimePoint("base OT start");
 
 		recv.receive(choice, msg, prng, chl0);
-
-		auto e = t.setTimePoint("base OT end");
-		auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
-
-		std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
 	}
 	else
 	{
@@ -618,8 +614,16 @@ void baseOT_example_from_ot(Role role, int totalOTs, int numThreads, std::string
 
 		std::vector<std::array<block, 2>> msg(totalOTs);
 
+		s = t.setTimePoint("base OT start");
+
 		send.send(msg, prng, chl1);
 	}
+
+	auto e = t.setTimePoint("base OT end");
+	auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+
+	std::cout << tag << (role == Role::Receiver ? " (receiver)" : " (sender)")
+		<< " n=" << totalOTs << " " << milli << " ms" << std::endl;
 }
 
 template<typename BaseOT>

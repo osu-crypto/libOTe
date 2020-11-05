@@ -33,7 +33,7 @@ namespace osuCrypto
         Point g = curve.getGenerator();
         u64 pointSize = g.sizeBytes();
         u64 n = messages.size();
-        
+
         Point hPoint(curve);
         std::vector<u8> sendBuff(2 * n * pointSize), recvBuff(n * pointSize), hashBuff(roundUpTo(pointSize, 16));
 
@@ -76,7 +76,7 @@ namespace osuCrypto
         Point g = curve.getGenerator();
         u64 pointSize = g.sizeBytes();
         u64 n = messages.size();
-        
+
         Point hPoint(curve);
         std::vector<u8> sendBuff(n * pointSize), recvBuff(2 * n * pointSize), hashBuff(roundUpTo(pointSize, 16));
 
@@ -96,7 +96,7 @@ namespace osuCrypto
         auto recvBuffIter = recvBuff.data();
         for (u64 i = 0; i < n; ++i)
         {
-            
+
             std::array<Point, 2> r{ curve, curve };
             r[0].fromBytes(recvBuffIter); recvBuffIter += pointSize;
             r[1].fromBytes(recvBuffIter); recvBuffIter += pointSize;
