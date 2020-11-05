@@ -8,20 +8,19 @@
 namespace osuCrypto
 {
     template<typename DSPopf>
-    void PopfOT<DSPopf>::blockToCurve(Point& p, Block256 b)
+    auto PopfOT<DSPopf>::blockToCurve(Block256 b) -> Monty25519
     {
-        unsigned char buf[sizeof(Block256) + 1];
-        buf[0] = 2;
-        memcpy(&buf[1], b.data(), sizeof(b));
-        p.fromBytes(buf);
+        static_assert(Monty25519::size == sizeof(Block256));
+        return Monty25519(b.data());
     }
 
     template<typename DSPopf>
-    Block256 PopfOT<DSPopf>::curveToBlock(const Point& p)
+    Block256 PopfOT<DSPopf>::curveToBlock(Monty25519 p, PRNG& prng)
     {
-        unsigned char buf[sizeof(Block256) + 1];
-        p.toBytes(buf);
-        return Block256(&buf[1]);
+        p.data[Monty25519::size - 1] ^= prng.getBit() << 7;
+
+        static_assert(Monty25519::size == sizeof(Block256));
+        return Block256(p.data);
     }
 
     template<typename DSPopf>
@@ -31,21 +30,16 @@ namespace osuCrypto
         PRNG & prng,
         Channel & chl)
     {
-        Curve curve;
-        Point g = curve.getGenerator();
-        Point gprime = curve.getGenerator();
-        assert(g.sizeBytes() == sizeof(Block256) + 1);
         u64 n = choices.size();
 
-        std::vector<Number> sk; sk.reserve(n);
+        std::vector<Scalar25519> sk; sk.reserve(n);
         std::vector<u8> curveChoice; curveChoice.reserve(n);
 
-        std::array<Block256, 2> recvBuff;
-        auto recvDone = chl.asyncRecv(recvBuff);
+        Monty25519 A[2];
+        auto recvDone = chl.asyncRecv(A, 2);
 
         std::vector<typename PopfFactory::ConstructedPopf::PopfFunc> sendBuff(n);
 
-        Point B(curve);
         for (u64 i = 0; i < n; ++i)
         {
             auto factory = popfFactory;
@@ -53,40 +47,24 @@ namespace osuCrypto
             auto popf = factory.construct();
 
             curveChoice.emplace_back(prng.getBit());
-            sk.emplace_back(curve, prng);
-            if (curveChoice[i] == 0)
-            {
-                B = g * sk[i];
-            }
-            else
-            {
-                B = gprime * sk[i];
-            }
+            sk.emplace_back(prng, false);
+            Monty25519 g = (curveChoice[i] == 0) ?
+                Monty25519::wholeGroupGenerator : Monty25519::wholeTwistGroupGenerator;
+            Monty25519 B = g * sk[i]; // TODO: This clamps sk[i], and so leaks a few bits.
 
-            sendBuff[i] = popf.program(choices[i], curveToBlock(B), prng);
+            sendBuff[i] = popf.program(choices[i], curveToBlock(B, prng), prng);
         }
 
         chl.asyncSend(std::move(sendBuff));
 
         recvDone.wait();
 
-        Point A(curve);
-        Point Aprime(curve);
-        blockToCurve(A, recvBuff[0]);
-        blockToCurve(Aprime, recvBuff[1]);
         for (u64 i = 0; i < n; ++i)
         {
-            if (curveChoice[i] == 0)
-            {
-                B = A * sk[i];
-            }
-            else
-            {
-                B = Aprime * sk[i];
-            }
+            Monty25519 B = A[curveChoice[i]] * sk[i];
 
             RandomOracle ro(sizeof(block));
-            ro.Update(curveToBlock(B).data(), sizeof(Block256));
+            ro.Update(B);
             ro.Final(messages[i]);
         }
     }
@@ -97,42 +75,38 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
-        Curve curve;
-        Point g = curve.getGenerator();
-        Point gprime = curve.getGenerator();
-        assert(g.sizeBytes() == sizeof(Block256) + 1);
         u64 n = static_cast<u64>(msg.size());
 
-        Number sk(curve, prng);
-        Point A = g * sk;
-        Point Aprime = gprime * sk;
-        std::array<Block256, 2> sendBuff = {curveToBlock(A), curveToBlock(Aprime)};
+        Scalar25519 sk(prng);
+        Monty25519 A[2] = {
+            Monty25519::wholeGroupGenerator * sk, Monty25519::wholeTwistGroupGenerator * sk};
 
-        chl.asyncSend(sendBuff);
+        chl.asyncSend(A, 2);
 
         std::vector<typename PopfFactory::ConstructedPopf::PopfFunc> recvBuff(n);
         chl.recv(recvBuff.data(), recvBuff.size());
 
 
-        Point Bz(curve), Bo(curve);
+        Monty25519 Bz, Bo;
         for (u64 i = 0; i < n; ++i)
         {
             auto factory = popfFactory;
             factory.Update(i);
             auto popf = factory.construct();
 
-            blockToCurve(Bz, popf.eval(recvBuff[i], 0));
-            blockToCurve(Bo, popf.eval(recvBuff[i], 1));
+            Bz = blockToCurve(popf.eval(recvBuff[i], 0));
+            Bo = blockToCurve(popf.eval(recvBuff[i], 1));
 
             // We don't need to check which curve we're on since we use the same secret for both.
             Bz *= sk;
+            Bo *= sk;
+
             RandomOracle ro(sizeof(block));
-            ro.Update(curveToBlock(Bz).data(), sizeof(Block256));
+            ro.Update(Bz);
             ro.Final(msg[i][0]);
 
-            Bo *= sk;
             ro.Reset();
-            ro.Update(curveToBlock(Bo).data(), sizeof(Block256));
+            ro.Update(Bo);
             ro.Final(msg[i][1]);
         }
     }

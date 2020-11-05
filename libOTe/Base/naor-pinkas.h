@@ -1,5 +1,5 @@
 #pragma once
-// This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
+// This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use.
 #include "libOTe/config.h"
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Common/Defines.h>
@@ -19,20 +19,20 @@ namespace osuCrypto
     public:
 
         NaorPinkas();
-        ~NaorPinkas(); 
+        ~NaorPinkas();
 
 
         void receive(
-            const BitVector& choices, 
+            const BitVector& choices,
             span<block> messages,
-            PRNG& prng, 
-            Channel& chl, 
+            PRNG& prng,
+            Channel& chl,
             u64 numThreads);
 
         void send(
-            span<std::array<block, 2>> messages, 
-            PRNG& prng, 
-            Channel& sock, 
+            span<std::array<block, 2>> messages,
+            PRNG& prng,
+            Channel& sock,
             u64 numThreads);
 
         void receive(

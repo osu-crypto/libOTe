@@ -10,9 +10,9 @@
 #include <cryptoTools/Crypto/Rijndael256.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 
-#include <cryptoTools/Crypto/RCurve.h>
-#ifndef ENABLE_RELIC
-static_assert(0, "ENABLE_RELIC must be defined to build PopfOT");
+#include <cryptoTools/Crypto/SodiumCurve.h>
+#ifndef ENABLE_SODIUM
+static_assert(0, "ENABLE_SODIUM must be defined to build MasnyRindal");
 #endif
 
 namespace osuCrypto
@@ -96,13 +96,11 @@ namespace osuCrypto
     private:
         PopfFactory popfFactory;
 
-        using Curve = oc::REllipticCurve;
-        using Point = oc::REccPoint;
-        using Brick = oc::REccPoint;
-        using Number = oc::REccNumber;
+        using Monty25519 = Sodium::Monty25519;
+        using Scalar25519 = Sodium::Scalar25519;
 
-        void blockToCurve(Point& p, Block256 b);
-        Block256 curveToBlock(const Point& p);
+        Monty25519 blockToCurve(Block256 b);
+        Block256 curveToBlock(Monty25519 p, PRNG& prng);
     };
 
 }

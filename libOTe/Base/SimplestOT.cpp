@@ -6,59 +6,41 @@
 #include <cryptoTools/Crypto/RandomOracle.h>
 
 #ifdef ENABLE_SIMPLESTOT
-#ifdef ENABLE_RELIC
-    #include <cryptoTools/Crypto/RCurve.h>
-#else    
-    #include <cryptoTools/Crypto/Curve.h>
-#endif
+#include <cryptoTools/Crypto/SodiumCurve.h>
 
 namespace osuCrypto
 {
-
-#ifdef ENABLE_RELIC
-    using Curve = REllipticCurve;
-    using Point = REccPoint;
-    using Brick = REccPoint;
-    using Number = REccNumber;
-#else    
-    using Curve = EllipticCurve;
-    using Point = EccPoint;
-    using Brick = EccBrick;
-    using Number = EccNumber;
-#endif
-
     void SimplestOT::receive(
         const BitVector& choices,
         span<block> msg,
         PRNG& prng,
         Channel& chl)
     {
-        Curve curve;
-        Point g = curve.getGenerator();
-        u64 pointSize = g.sizeBytes();
+        using namespace Sodium;
+
         u64 n = msg.size();
 
-        block comm = oc::ZeroBlock, seed;
-        Point A(curve);
-        std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block)), hashBuff(pointSize);
-        chl.recv(buff.data(), buff.size());
-        A.fromBytes(buff.data());
+        unsigned char recvBuff[Rist25519::size + sizeof(block)];
+        chl.recv(recvBuff, Rist25519::size + mUniformOTs * sizeof(block));
+
+        block comm, seed;
+        Rist25519 A;
+        memcpy(A.data, recvBuff, Rist25519::size);
 
         if (mUniformOTs)
-            memcpy(&comm, buff.data() + pointSize, sizeof(block));
+            memcpy(&comm, recvBuff + Rist25519::size, sizeof(block));
 
-        buff.resize(pointSize * n);
-        auto buffIter = buff.data();
+        std::vector<Rist25519> buff(n);
 
-        std::vector<Number> b; b.reserve(n);;
-        std::array<Point, 2> B{ curve, curve };
+        std::vector<Prime25519> b; b.reserve(n);
+        std::array<Rist25519, 2> B;
         for (u64 i = 0; i < n; ++i)
         {
-            b.emplace_back(curve, prng);
-            B[0] = g * b[i];
+            b.emplace_back(prng);
+            B[0] = Rist25519::mulGenerator(b[i]);
             B[1] = A + B[0];
 
-            B[choices[i]].toBytes(buffIter); buffIter += pointSize;
+            buff[i] = B[choices[i]];
         }
 
         chl.asyncSend(std::move(buff));
@@ -72,9 +54,8 @@ namespace osuCrypto
         for (u64 i = 0; i < n; ++i)
         {
             B[0] = A * b[i];
-            B[0].toBytes(hashBuff.data());
             RandomOracle ro(sizeof(block));
-            ro.Update(hashBuff.data(), hashBuff.size());
+            ro.Update(B[0]);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i]);
         }
@@ -85,27 +66,28 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
-        Curve curve;
-        Point g = curve.getGenerator();
-        u64 pointSize = g.sizeBytes();
+        using namespace Sodium;
+
         u64 n = msg.size();
 
+        unsigned char sendBuff[Rist25519::size + sizeof(block)];
+
         block seed = prng.get<block>();
-        Number a(curve, prng);
-        Point A = g * a;
-        std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block)), hashBuff(pointSize);
-        A.toBytes(buff.data());
+        Prime25519 a(prng);
+        Rist25519 A = Rist25519::mulGenerator(a);
+
+        memcpy(sendBuff, A.data, Rist25519::size);
 
         if (mUniformOTs)
         {
             // commit to the seed
             auto comm = mAesFixedKey.ecbEncBlock(seed) ^ seed;
-            memcpy(buff.data() + pointSize, &comm, sizeof(block));
+            memcpy(sendBuff + Rist25519::size, &comm, sizeof(block));
         }
 
-        chl.asyncSend(std::move(buff));
+        chl.asyncSend(sendBuff, Rist25519::size + mUniformOTs * sizeof(block));
 
-        buff.resize(pointSize * n);
+        std::vector<Rist25519> buff(n);
         chl.recv(buff.data(), buff.size());
 
         if (mUniformOTs)
@@ -114,25 +96,21 @@ namespace osuCrypto
             chl.send(seed);
         }
 
-        auto buffIter = buff.data();
-
         A *= a;
-        Point B(curve), Ba(curve);
+        Rist25519 B, Ba;
         for (u64 i = 0; i < n; ++i)
         {
-            B.fromBytes(buffIter); buffIter += pointSize;
+            B = buff[i];
 
             Ba = B * a;
-            Ba.toBytes(hashBuff.data());
             RandomOracle ro(sizeof(block));
-            ro.Update(hashBuff.data(), hashBuff.size());
+            ro.Update(Ba);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][0]);
 
             Ba -= A;
-            Ba.toBytes(hashBuff.data());
             ro.Reset();
-            ro.Update(hashBuff.data(), hashBuff.size());
+            ro.Update(Ba);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][1]);
         }
@@ -188,7 +166,7 @@ namespace osuCrypto
 
             for (u32 j = 0; j < min; j++)
                 cs[j] = choices[i + j];
-            
+
             receiver_rsgen(&receiver, Rs_pack, cs, rand);
             chl.asyncSendCopy(Rs_pack, sizeof(Rs_pack));
             receiver_keygen(&receiver, keys);
@@ -228,7 +206,3 @@ namespace osuCrypto
     }
 }
 #endif
-
-
-
-

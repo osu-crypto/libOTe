@@ -7,15 +7,10 @@
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Network/Channel.h>
 
-#include <cryptoTools/Crypto/RCurve.h>
-#ifndef ENABLE_RELIC
-static_assert(0, "ENABLE_RELIC must be defined to build MasnyRindal");
+#include <cryptoTools/Crypto/SodiumCurve.h>
+#ifndef ENABLE_SODIUM
+static_assert(0, "ENABLE_SODIUM must be defined to build MasnyRindal");
 #endif
-
-using Curve = oc::REllipticCurve;
-using Point = oc::REccPoint;
-using Brick = oc::REccPoint;
-using Number = oc::REccNumber;
 
 #include <libOTe/Base/SimplestOT.h>
 
@@ -29,94 +24,85 @@ namespace osuCrypto
         PRNG & prng,
         Channel & chl)
     {
-        Curve curve;
-        Point g = curve.getGenerator();
-        u64 pointSize = g.sizeBytes();
+        using namespace Sodium;
+
         u64 n = messages.size();
 
-        Point hPoint(curve);
-        std::vector<u8> sendBuff(2 * n * pointSize), recvBuff(n * pointSize), hashBuff(roundUpTo(pointSize, 16));
+        Rist25519 hPoint;
+        std::vector<Rist25519> sendBuff(2 * n), recvBuff(n);
 
-        std::vector<Number> sk; sk.reserve(n);
-        std::array<Point, 2> B{ curve, curve };
-        auto sendBuffIter = sendBuff.data();
+        std::vector<Prime25519> sk; sk.reserve(n);
+        std::array<Rist25519, 2> B;
         for (u64 i = 0; i < n; ++i)
         {
-            sk.emplace_back(curve, prng);
-            B[choices[i]] = g * sk[i];
-            B[1 - choices[i]].randomize();
-            B[1 - choices[i]].toBytes(hashBuff.data());
+            sk.emplace_back(prng);
+            B[choices[i]] = Rist25519::mulGenerator(sk[i]);
+            B[1 - choices[i]] = Rist25519(prng);
 
-            ep_map(hPoint, hashBuff.data(), int(pointSize));
+            RandomOracle ro(Rist25519::fromHashLength); // TODO: Ought to do domain separation.
+            ro.Update(B[1 - choices[i]]);
+            hPoint = Rist25519::fromHash(ro);
+
             B[choices[i]] -= hPoint;
 
-            B[0].toBytes(sendBuffIter); sendBuffIter += pointSize;
-            B[1].toBytes(sendBuffIter); sendBuffIter += pointSize;
+            sendBuff[2 * i] = B[0];
+            sendBuff[2 * i + 1] = B[1];
         }
 
         chl.asyncSend(std::move(sendBuff));
         chl.recv(recvBuff.data(), recvBuff.size());
-        auto recvBuffIter = recvBuff.data();
         for (u64 i = 0; i < n; ++i)
         {
-            Point A(curve);
-            A.fromBytes(recvBuffIter); recvBuffIter += pointSize;
+            Rist25519 A = recvBuff[i];
 
             B[0] = A * sk[i];
-            B[0].toBytes(hashBuff.data());
             RandomOracle ro(sizeof(block));
-            ro.Update(hashBuff.data(), hashBuff.size());
+            ro.Update(B[0]);
             ro.Final(messages[i]);
         }
     }
 
     void MasnyRindalBasic::send(span<std::array<block, 2>> messages, PRNG & prng, Channel & chl)
     {
-        Curve curve;
-        Point g = curve.getGenerator();
-        u64 pointSize = g.sizeBytes();
+        using namespace Sodium;
+
         u64 n = messages.size();
 
-        Point hPoint(curve);
-        std::vector<u8> sendBuff(n * pointSize), recvBuff(2 * n * pointSize), hashBuff(roundUpTo(pointSize, 16));
+        Rist25519 hPoint[2];
+        std::vector<Rist25519> sendBuff(n), recvBuff(2 * n);
 
-        std::vector<Number> sk; sk.reserve(n);
-        std::array<Point, 2> B{ curve, curve };
-        auto sendBuffIter = sendBuff.data();
+        std::vector<Prime25519> sk;
         for (u64 i = 0; i < n; ++i)
         {
-            sk.emplace_back(curve, prng);
-            Point A = g * sk[i];
-            A.toBytes(sendBuffIter); sendBuffIter += pointSize;
+            sk.emplace_back(prng);
+            sendBuff[i] = Rist25519::mulGenerator(sk[i]);
         }
         chl.asyncSend(std::move(sendBuff));
 
-        Point Ba(curve);
+        Rist25519 Ba;
         chl.recv(recvBuff.data(), recvBuff.size());
-        auto recvBuffIter = recvBuff.data();
         for (u64 i = 0; i < n; ++i)
         {
+            std::array<Rist25519, 2> r;
+            r[0] = recvBuff[2 * i];
+            r[1] = recvBuff[2 * i + 1];
 
-            std::array<Point, 2> r{ curve, curve };
-            r[0].fromBytes(recvBuffIter); recvBuffIter += pointSize;
-            r[1].fromBytes(recvBuffIter); recvBuffIter += pointSize;
+            RandomOracle ro(Rist25519::fromHashLength); // TODO: Ought to do domain separation.
+            ro.Update(r[1]);
+            hPoint[0] = Rist25519::fromHash(ro);
 
-            r[1].toBytes(hashBuff.data());
-            ep_map(hPoint, hashBuff.data(), int(pointSize));
+            ro.Reset();
+            ro.Update(r[0]);
+            hPoint[1] = Rist25519::fromHash(ro);
 
-            Ba = (r[0] + hPoint) * sk[i];
-            Ba.toBytes(hashBuff.data());
-            RandomOracle ro(sizeof(block));
-            ro.Update(hashBuff.data(), hashBuff.size());
+            Ba = (r[0] + hPoint[0]) * sk[i];
+            ro.Reset(sizeof(block));
+            ro.Update(Ba);
             ro.Final(messages[i][0]);
             ro.Reset();
 
-            r[0].toBytes(hashBuff.data());
-            ep_map(hPoint, hashBuff.data(), int(pointSize));
-
-            Ba = (r[1] + hPoint) * sk[i];
-            Ba.toBytes(hashBuff.data());
-            ro.Update(hashBuff.data(), hashBuff.size());
+            Ba = (r[1] + hPoint[1]) * sk[i];
+            ro.Update(Ba);
             ro.Final(messages[i][1]);
         }
     }
