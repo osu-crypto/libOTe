@@ -75,6 +75,7 @@ namespace osuCrypto
             B[0].toBytes(hashBuff.data());
             RandomOracle ro(sizeof(block));
             ro.Update(hashBuff.data(), hashBuff.size());
+            ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i]);
         }
@@ -126,6 +127,7 @@ namespace osuCrypto
             Ba.toBytes(hashBuff.data());
             RandomOracle ro(sizeof(block));
             ro.Update(hashBuff.data(), hashBuff.size());
+            ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][0]);
 
@@ -133,6 +135,7 @@ namespace osuCrypto
             Ba.toBytes(hashBuff.data());
             ro.Reset();
             ro.Update(hashBuff.data(), hashBuff.size());
+            ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][1]);
         }
