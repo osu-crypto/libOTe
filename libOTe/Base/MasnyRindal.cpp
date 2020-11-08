@@ -44,7 +44,6 @@ namespace osuCrypto
 
             for (u64 k = 0; k < curStep; ++k, ++i)
             {
-
                 auto& rrNot = sendBuff[2 * k + (choices[i] ^ 1)];
                 auto& rr = sendBuff[2 * k + choices[i]];
 
@@ -54,17 +53,9 @@ namespace osuCrypto
                 hPoint = Rist25519::fromHash(ro);
 
                 sk.emplace_back(prng);
-#ifdef MASNY_RINDAL_SIM
-#else
                 rr = Rist25519::mulGenerator(sk[i]);
                 rr -= hPoint;
-#endif
             }
-
-#ifdef MASNY_RINDAL_SIM
-            SimplestOT::exp(curStep);
-            SimplestOT::add(curStep);
-#endif
 
             chl.asyncSend(std::move(sendBuff));
         }
@@ -73,19 +64,14 @@ namespace osuCrypto
         Rist25519 k;
         fu.get();
 
-#ifdef MASNY_RINDAL_SIM
-        SimplestOT::exp(n);
-#endif
-
         for (u64 i = 0; i < n; ++i)
         {
             k = Mb;
-#ifndef MASNY_RINDAL_SIM
             k *= sk[i];
-#endif
 
             ro.Reset(sizeof(block));
             ro.Update(k);
+            ro.Update(i);
             ro.Final(messages[i]);
         }
     }
@@ -99,12 +85,7 @@ namespace osuCrypto
         RandomOracle ro;
 
         Prime25519 sk(prng);
-        Rist25519 Mb;
-#ifdef MASNY_RINDAL_SIM
-        SimplestOT::exp(1);
-#else
-        Mb = Rist25519::mulGenerator(sk);
-#endif
+        Rist25519 Mb = Rist25519::mulGenerator(sk);
 
         chl.asyncSend(Mb);
 
@@ -126,23 +107,16 @@ namespace osuCrypto
                     ro.Update(buff[2 * k + (j ^ 1)]);
                     pHash = Rist25519::fromHash(ro);
 
-#ifndef MASNY_RINDAL_SIM
                     r += pHash;
                     r *= sk;
-#endif
 
                     ro.Reset(sizeof(block));
                     ro.Update(r);
+                    ro.Update(i);
                     ro.Final(messages[i][j]);
                 }
             }
-
-#ifdef MASNY_RINDAL_SIM
-            SimplestOT::add(2 * curStep);
-            SimplestOT::exp(2 * curStep);
-#endif
         }
-
     }
 }
 #endif

@@ -56,6 +56,7 @@ namespace osuCrypto
             B[0] = A * b[i];
             RandomOracle ro(sizeof(block));
             ro.Update(B[0]);
+            ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i]);
         }
@@ -105,12 +106,14 @@ namespace osuCrypto
             Ba = B * a;
             RandomOracle ro(sizeof(block));
             ro.Update(Ba);
+            ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][0]);
 
             Ba -= A;
             ro.Reset();
             ro.Update(Ba);
+            ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][1]);
         }

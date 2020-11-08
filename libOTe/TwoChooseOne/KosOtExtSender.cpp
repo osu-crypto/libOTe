@@ -27,6 +27,9 @@ namespace osuCrypto
 
     KosOtExtSender KosOtExtSender::splitBase()
     {
+        if (!hasBaseOts())
+            throw std::runtime_error("base OTs have not been set. " LOCATION);
+
         std::array<block, gOtExtBaseOtCount> baseRecvOts;
         for (u64 i = 0; i < mGens.size(); ++i)
             baseRecvOts[i] = mGens[i].get<block>();

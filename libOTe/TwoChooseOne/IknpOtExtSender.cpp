@@ -16,6 +16,9 @@ namespace osuCrypto
     {
         std::array<block, gOtExtBaseOtCount> baseRecvOts;
 
+        if (!hasBaseOts())
+            throw std::runtime_error("base OTs have not been set. " LOCATION);
+
         for (u64 i = 0; i < mGens.size(); ++i)
             baseRecvOts[i] = mGens[i].get<block>();
 
