@@ -65,6 +65,7 @@ namespace osuCrypto
 
             RandomOracle ro(sizeof(block));
             ro.Update(B);
+            ro.Update(i);
             ro.Final(messages[i]);
         }
     }
@@ -103,10 +104,12 @@ namespace osuCrypto
 
             RandomOracle ro(sizeof(block));
             ro.Update(Bz);
+            ro.Update(i);
             ro.Final(msg[i][0]);
 
             ro.Reset();
             ro.Update(Bo);
+            ro.Update(i);
             ro.Final(msg[i][1]);
         }
     }
