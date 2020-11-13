@@ -684,35 +684,36 @@ bool runIf(ProtocolFunc protocol, CLP & cmd, std::vector<std::string> tag,
 	auto t = cmd.getOr("t", 1);
 	auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
 
-	if (cmd.isSet(tag) && cmd.isSet(tag2))
-	{
-		if (cmd.hasValue("r"))
-		{
-			auto role = cmd.get<int>("r") ? Role::Sender : Role::Receiver;
-			protocol(role, n, t, ip, tag.back(), cmd);
-		}
-		else
-		{
-			auto thrd = std::thread([&] {
-				try { protocol(Role::Sender, n, t, ip, tag.back(), cmd); }
-				catch (std::exception & e)
-				{
-					lout << e.what() << std::endl;
-				}
-				});
+	if (!cmd.isSet(tag))
+		return false;
 
-			try { protocol(Role::Receiver, n, t, ip, tag.back(), cmd); }
+	if (!tag2.empty() && !cmd.isSet(tag2))
+		return false;
+
+	if (cmd.hasValue("r"))
+	{
+		auto role = cmd.get<int>("r") ? Role::Sender : Role::Receiver;
+		protocol(role, n, t, ip, tag.back(), cmd);
+	}
+	else
+	{
+		auto thrd = std::thread([&] {
+			try { protocol(Role::Sender, n, t, ip, tag.back(), cmd); }
 			catch (std::exception & e)
 			{
 				lout << e.what() << std::endl;
 			}
-			thrd.join();
-		}
+			});
 
-		return true;
+		try { protocol(Role::Receiver, n, t, ip, tag.back(), cmd); }
+		catch (std::exception & e)
+		{
+			lout << e.what() << std::endl;
+		}
+		thrd.join();
 	}
 
-	return false;
+	return true;
 }
 #ifdef ENABLE_IKNP
 void minimal()
