@@ -47,6 +47,7 @@ int miraclTestMain();
 #include "libOTe/Base/SimplestOT.h"
 #include "libOTe/Base/PopfOT.h"
 #include "libOTe/Base/EKEPopf.h"
+#include "libOTe/Base/MRPopf.h"
 #include "libOTe/Base/FeistelPopf.h"
 #include "libOTe/Base/MasnyRindal.h"
 #include "libOTe/Base/MasnyRindalBasic.h"
@@ -673,7 +674,8 @@ simpleasm{ "simplest-asm" };
 
 using ProtocolFunc = std::function<void(Role, int, int, std::string, std::string, CLP&)>;
 
-bool runIf(ProtocolFunc protocol, CLP & cmd, std::vector<std::string> tag)
+bool runIf(ProtocolFunc protocol, CLP & cmd, std::vector<std::string> tag,
+           std::vector<std::string> tag2 = std::vector<std::string>())
 {
 	auto n = cmd.isSet("nn")
 		? (1 << cmd.get<int>("nn"))
@@ -682,7 +684,7 @@ bool runIf(ProtocolFunc protocol, CLP & cmd, std::vector<std::string> tag)
 	auto t = cmd.getOr("t", 1);
 	auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
 
-	if (cmd.isSet(tag))
+	if (cmd.isSet(tag) && cmd.isSet(tag2))
 	{
 		if (cmd.hasValue("r"))
 		{
@@ -867,13 +869,26 @@ int main(int argc, char** argv)
 	flagSet |= runIf(baseOT_example<AsmSimplestOT>, cmd, simpleasm);
 #endif
 #ifdef ENABLE_POPF
-    // TODO: Multiple POPFs
 	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
 		DomainSepEKEPopf factory;
-		const char* domain = "POPF OT example";
+		const char* domain = "EKE POPF OT example";
 		factory.Update(domain, std::strlen(domain));
 		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, PopfOT<DomainSepEKEPopf>(factory));
-	}, cmd, popfot);
+	}, cmd, popfot, {"eke"});
+
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepMRPopf factory;
+		const char* domain = "MR POPF OT example";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, PopfOT<DomainSepMRPopf>(factory));
+	}, cmd, popfot, {"mrPopf"});
+
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepFeistelPopf factory;
+		const char* domain = "Feistel POPF OT example";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, PopfOT<DomainSepFeistelPopf>(factory));
+	}, cmd, popfot, {"feistel"});
 #endif
 #ifdef ENABLE_MR
 	flagSet |= runIf(baseOT_example<MasnyRindal>, cmd, mr);
@@ -932,6 +947,11 @@ int main(int argc, char** argv)
 			<< Color::Green << "  -dkos        " << Color::Default << "  : to run the KOS            active secure  1-out-of-2 Delta-OT      "  <<Color::Red<< (dkosEnabled ? "" : "(disabled)") << "\n"  << Color::Default
 			<< Color::Green << "  -oos         " << Color::Default << "  : to run the OOS            active secure  1-out-of-N OT for N=2^76 "  <<Color::Red<< (oosEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
 			<< Color::Green << "  -kkrt        " << Color::Default << "  : to run the KKRT           passive secure 1-out-of-N OT for N=2^128" <<Color::Red<< (kkrtEnabled ? "" : "(disabled)") << "\n\n" << Color::Default
+
+			<< "POPF Options:\n"
+			<< Color::Green << "  -eke         " << Color::Default << "  : to run the EKE POPF                                                 "  << "\n"<< Color::Default
+			<< Color::Green << "  -mrPopf      " << Color::Default << "  : to run the MasnyRindal POPF                                         "  << "\n"<< Color::Default
+			<< Color::Green << "  -feistel     " << Color::Default << "  : to run the Feistel POPF                                             "  << "\n"<< Color::Default
 
 			<< "Other Options:\n"
 			<< Color::Green << "  -n           " << Color::Default << ": the number of OTs to perform\n"
