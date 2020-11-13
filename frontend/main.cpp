@@ -951,7 +951,7 @@ int main(int argc, char** argv)
 			<< "POPF Options:\n"
 			<< Color::Green << "  -eke         " << Color::Default << "  : to run the EKE POPF                                                 "  << "\n"<< Color::Default
 			<< Color::Green << "  -mrPopf      " << Color::Default << "  : to run the MasnyRindal POPF                                         "  << "\n"<< Color::Default
-			<< Color::Green << "  -feistel     " << Color::Default << "  : to run the Feistel POPF                                             "  << "\n"<< Color::Default
+			<< Color::Green << "  -feistel     " << Color::Default << "  : to run the Feistel POPF                                             "  << "\n\n"<< Color::Default
 
 			<< "Other Options:\n"
 			<< Color::Green << "  -n           " << Color::Default << ": the number of OTs to perform\n"
