@@ -612,6 +612,7 @@ void baseOT_example_from_ot(Role role, int totalOTs, int numThreads, std::string
 	if (role == Role::Receiver)
 	{
 		auto chl0 = Session(ios, ip, SessionMode::Server).addChannel();
+		chl0.waitForConnection();
 		BaseOT recv = ot;
 
 		std::vector<block> msg(totalOTs);
@@ -627,6 +628,7 @@ void baseOT_example_from_ot(Role role, int totalOTs, int numThreads, std::string
 	{
 
 		auto chl1 = Session(ios, ip, SessionMode::Client).addChannel();
+		chl1.waitForConnection();
 
 		BaseOT send = ot;
 
