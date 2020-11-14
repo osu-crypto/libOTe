@@ -45,10 +45,14 @@ int miraclTestMain();
 #include <boost/preprocessor/variadic/size.hpp>
 
 #include "libOTe/Base/SimplestOT.h"
-#include "libOTe/Base/PopfOT.h"
+#include "libOTe/Base/MoellerPopfOT.h"
+#include "libOTe/Base/RistrettoPopfOT.h"
 #include "libOTe/Base/EKEPopf.h"
 #include "libOTe/Base/MRPopf.h"
 #include "libOTe/Base/FeistelPopf.h"
+#include "libOTe/Base/FeistelMulPopf.h"
+#include "libOTe/Base/FeistelRistPopf.h"
+#include "libOTe/Base/FeistelMulRistPopf.h"
 #include "libOTe/Base/MasnyRindal.h"
 #include "libOTe/Base/MasnyRindalBasic.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
@@ -663,7 +667,8 @@ kkrt{ "kk", "kkrt" },
 iknp{ "i", "iknp" },
 diknp{ "diknp" },
 oos{ "o", "oos" },
-popfot{ "p", "popfot" },
+moellerpopf{ "p", "moellerpopf" },
+ristrettopopf{ "r", "ristrettopopf" },
 mr{ "mr" },
 mrb{ "mrb" },
 Silent{ "s", "Silent" },
@@ -874,22 +879,43 @@ int main(int argc, char** argv)
 		DomainSepEKEPopf factory;
 		const char* domain = "EKE POPF OT example";
 		factory.Update(domain, std::strlen(domain));
-		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, PopfOT<DomainSepEKEPopf>(factory));
-	}, cmd, popfot, {"eke"});
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, MoellerPopfOT<DomainSepEKEPopf>(factory));
+	}, cmd, moellerpopf, {"eke"});
 
 	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
 		DomainSepMRPopf factory;
 		const char* domain = "MR POPF OT example";
 		factory.Update(domain, std::strlen(domain));
-		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, PopfOT<DomainSepMRPopf>(factory));
-	}, cmd, popfot, {"mrPopf"});
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, MoellerPopfOT<DomainSepMRPopf>(factory));
+	}, cmd, moellerpopf, {"mrPopf"});
 
 	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
 		DomainSepFeistelPopf factory;
 		const char* domain = "Feistel POPF OT example";
 		factory.Update(domain, std::strlen(domain));
-		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, PopfOT<DomainSepFeistelPopf>(factory));
-	}, cmd, popfot, {"feistel"});
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, MoellerPopfOT<DomainSepFeistelPopf>(factory));
+	}, cmd, moellerpopf, {"feistel"});
+
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepFeistelMulPopf factory;
+		const char* domain = "Feistel With Multiplication POPF OT example";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, MoellerPopfOT<DomainSepFeistelMulPopf>(factory));
+	}, cmd, moellerpopf, {"feistelMul"});
+
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepFeistelRistPopf factory;
+		const char* domain = "Feistel POPF OT example (Risretto)";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, RistrettoPopfOT<DomainSepFeistelRistPopf>(factory));
+	}, cmd, ristrettopopf, {"feistel"});
+
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepFeistelMulRistPopf factory;
+		const char* domain = "Feistel With Multiplication POPF OT example (Risretto)";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, RistrettoPopfOT<DomainSepFeistelMulRistPopf>(factory));
+	}, cmd, ristrettopopf, {"feistelMul"});
 #endif
 #ifdef ENABLE_MR
 	flagSet |= runIf(baseOT_example<MasnyRindal>, cmd, mr);
@@ -935,24 +961,26 @@ int main(int argc, char** argv)
 
 		std::cout
 			<< "Protocols:\n"
-			<< Color::Green << "  -simplest-asm" << Color::Default << "  : to run the ASM-SimplestOT active secure  1-out-of-2  base OT      "  <<Color::Red<< (spaEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
-			<< Color::Green << "  -simplest    " << Color::Default << "  : to run the SimplestOT     active secure  1-out-of-2  base OT      "  <<Color::Red<< (spEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
-			<< Color::Green << "  -popfot      " << Color::Default << "  : to run the PopfOT         active secure  1-out-of-2  base OT      "  <<Color::Red<< (popfotEnabled ? "" : "(disabled)") << "\n"<< Color::Default
-			<< Color::Green << "  -mr          " << Color::Default << "  : to run the MasnyRindal    active secure  1-out-of-2  base OT      "  <<Color::Red<< (mrEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
-			<< Color::Green << "  -mrb         " << Color::Default << "  : to run the MasnyRindal base OT without reusing the sender message "  <<Color::Red<< (mrEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
-			<< Color::Green << "  -np          " << Color::Default << "  : to run the NaorPinkas     active secure  1-out-of-2  base OT      "  <<Color::Red<< (npEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
-			<< Color::Green << "  -iknp        " << Color::Default << "  : to run the IKNP           passive secure 1-out-of-2       OT      "  <<Color::Red<< (iknpEnabled ? "" : "(disabled)") << "\n"  << Color::Default
-			<< Color::Green << "  -diknp       " << Color::Default << "  : to run the IKNP           passive secure 1-out-of-2 Delta-OT      "  <<Color::Red<< (diknpEnabled ? "" : "(disabled)") << "\n" << Color::Default
-			<< Color::Green << "  -Silent      " << Color::Default << "  : to run the Silent         passive secure 1-out-of-2       OT      "  <<Color::Red<< (silentEnabled ? "" : "(disabled)") <<"\n" << Color::Default
-			<< Color::Green << "  -kos         " << Color::Default << "  : to run the KOS            active secure  1-out-of-2       OT      "  <<Color::Red<< (kosEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
-			<< Color::Green << "  -dkos        " << Color::Default << "  : to run the KOS            active secure  1-out-of-2 Delta-OT      "  <<Color::Red<< (dkosEnabled ? "" : "(disabled)") << "\n"  << Color::Default
-			<< Color::Green << "  -oos         " << Color::Default << "  : to run the OOS            active secure  1-out-of-N OT for N=2^76 "  <<Color::Red<< (oosEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
-			<< Color::Green << "  -kkrt        " << Color::Default << "  : to run the KKRT           passive secure 1-out-of-N OT for N=2^128" <<Color::Red<< (kkrtEnabled ? "" : "(disabled)") << "\n\n" << Color::Default
+			<< Color::Green << "  -simplest-asm " << Color::Default << "  : to run the ASM-SimplestOT  active secure  1-out-of-2  base OT      "  <<Color::Red<< (spaEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -simplest     " << Color::Default << "  : to run the SimplestOT      active secure  1-out-of-2  base OT      "  <<Color::Red<< (spEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -moellerpopf  " << Color::Default << "  : to run the MoellerPopfOT   active secure  1-out-of-2  base OT      "  <<Color::Red<< (popfotEnabled ? "" : "(disabled)") << "\n"<< Color::Default
+			<< Color::Green << "  -ristrettopopf" << Color::Default << "  : to run the RistrettoPopfOT active secure  1-out-of-2  base OT      "  <<Color::Red<< (popfotEnabled ? "" : "(disabled)") << "\n"<< Color::Default
+			<< Color::Green << "  -mr           " << Color::Default << "  : to run the MasnyRindal     active secure  1-out-of-2  base OT      "  <<Color::Red<< (mrEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -mrb          " << Color::Default << "  : to run the MasnyRindal base OT without reusing the sender message "  <<Color::Red<< (mrEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -np           " << Color::Default << "  : to run the NaorPinkas      active secure  1-out-of-2  base OT      "  <<Color::Red<< (npEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -iknp         " << Color::Default << "  : to run the IKNP            passive secure 1-out-of-2       OT      "  <<Color::Red<< (iknpEnabled ? "" : "(disabled)") << "\n"  << Color::Default
+			<< Color::Green << "  -diknp        " << Color::Default << "  : to run the IKNP            passive secure 1-out-of-2 Delta-OT      "  <<Color::Red<< (diknpEnabled ? "" : "(disabled)") << "\n" << Color::Default
+			<< Color::Green << "  -Silent       " << Color::Default << "  : to run the Silent          passive secure 1-out-of-2       OT      "  <<Color::Red<< (silentEnabled ? "" : "(disabled)") <<"\n" << Color::Default
+			<< Color::Green << "  -kos          " << Color::Default << "  : to run the KOS             active secure  1-out-of-2       OT      "  <<Color::Red<< (kosEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -dkos         " << Color::Default << "  : to run the KOS             active secure  1-out-of-2 Delta-OT      "  <<Color::Red<< (dkosEnabled ? "" : "(disabled)") << "\n"  << Color::Default
+			<< Color::Green << "  -oos          " << Color::Default << "  : to run the OOS             active secure  1-out-of-N OT for N=2^76 "  <<Color::Red<< (oosEnabled ? "" : "(disabled)") << "\n"	  << Color::Default
+			<< Color::Green << "  -kkrt         " << Color::Default << "  : to run the KKRT            passive secure 1-out-of-N OT for N=2^128" <<Color::Red<< (kkrtEnabled ? "" : "(disabled)") << "\n\n" << Color::Default
 
 			<< "POPF Options:\n"
-			<< Color::Green << "  -eke         " << Color::Default << "  : to run the EKE POPF                                                 "  << "\n"<< Color::Default
-			<< Color::Green << "  -mrPopf      " << Color::Default << "  : to run the MasnyRindal POPF                                         "  << "\n"<< Color::Default
-			<< Color::Green << "  -feistel     " << Color::Default << "  : to run the Feistel POPF                                             "  << "\n\n"<< Color::Default
+			<< Color::Green << "  -eke         " << Color::Default << "  : to run the EKE POPF (Moeller only)                                  "  << "\n"<< Color::Default
+			<< Color::Green << "  -mrPopf      " << Color::Default << "  : to run the MasnyRindal POPF (Moeller only)                          "  << "\n"<< Color::Default
+			<< Color::Green << "  -feistel     " << Color::Default << "  : to run the Feistel POPF                                             "  << "\n"<< Color::Default
+			<< Color::Green << "  -feistelMul  " << Color::Default << "  : to run the Feistel With Multiplication POPF                         "  << "\n\n"<< Color::Default
 
 			<< "Other Options:\n"
 			<< Color::Green << "  -n           " << Color::Default << ": the number of OTs to perform\n"

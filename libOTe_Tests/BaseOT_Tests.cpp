@@ -9,10 +9,14 @@
 
 #include "libOTe/Base/BaseOT.h"
 #include "libOTe/Base/SimplestOT.h"
-#include "libOTe/Base/PopfOT.h"
+#include "libOTe/Base/MoellerPopfOT.h"
+#include "libOTe/Base/RistrettoPopfOT.h"
 #include "libOTe/Base/EKEPopf.h"
 #include "libOTe/Base/MRPopf.h"
 #include "libOTe/Base/FeistelPopf.h"
+#include "libOTe/Base/FeistelMulPopf.h"
+#include "libOTe/Base/FeistelRistPopf.h"
+#include "libOTe/Base/FeistelMulRistPopf.h"
 #include "libOTe/Base/MasnyRindal.h"
 #include "libOTe/Base/MasnyRindalBasic.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
@@ -128,7 +132,7 @@ namespace tests_libOTe
 #endif
     }
 
-    template<typename DSPopf>
+    template<template<typename> class PopfOT, typename DSPopf>
     void Bot_PopfOT_Test()
     {
 #ifdef ENABLE_POPF
@@ -179,9 +183,12 @@ namespace tests_libOTe
 #endif
     }
 
-    template void Bot_PopfOT_Test<DomainSepEKEPopf>();
-    template void Bot_PopfOT_Test<DomainSepFeistelPopf>();
-    template void Bot_PopfOT_Test<DomainSepMRPopf>();
+    template void Bot_PopfOT_Test<MoellerPopfOT, DomainSepEKEPopf>();
+    template void Bot_PopfOT_Test<MoellerPopfOT, DomainSepMRPopf>();
+    template void Bot_PopfOT_Test<MoellerPopfOT, DomainSepFeistelPopf>();
+    template void Bot_PopfOT_Test<MoellerPopfOT, DomainSepFeistelMulPopf>();
+    template void Bot_PopfOT_Test<RistrettoPopfOT, DomainSepFeistelRistPopf>();
+    template void Bot_PopfOT_Test<RistrettoPopfOT, DomainSepFeistelMulRistPopf>();
 
 
     void Bot_MasnyRindal_Test()

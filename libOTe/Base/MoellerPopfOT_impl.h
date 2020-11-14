@@ -8,14 +8,14 @@
 namespace osuCrypto
 {
     template<typename DSPopf>
-    auto PopfOT<DSPopf>::blockToCurve(Block256 b) -> Monty25519
+    auto MoellerPopfOT<DSPopf>::blockToCurve(Block256 b) -> Monty25519
     {
         static_assert(Monty25519::size == sizeof(Block256));
         return Monty25519(b.data());
     }
 
     template<typename DSPopf>
-    Block256 PopfOT<DSPopf>::curveToBlock(Monty25519 p, PRNG& prng)
+    Block256 MoellerPopfOT<DSPopf>::curveToBlock(Monty25519 p, PRNG& prng)
     {
         p.data[Monty25519::size - 1] ^= prng.getBit() << 7;
 
@@ -24,7 +24,7 @@ namespace osuCrypto
     }
 
     template<typename DSPopf>
-    void PopfOT<DSPopf>::receive(
+    void MoellerPopfOT<DSPopf>::receive(
         const BitVector & choices,
         span<block> messages,
         PRNG & prng,
@@ -66,12 +66,13 @@ namespace osuCrypto
             RandomOracle ro(sizeof(block));
             ro.Update(B);
             ro.Update(i);
+            ro.Update((bool) choices[i]);
             ro.Final(messages[i]);
         }
     }
 
     template<typename DSPopf>
-    void PopfOT<DSPopf>::send(
+    void MoellerPopfOT<DSPopf>::send(
         span<std::array<block, 2>> msg,
         PRNG& prng,
         Channel& chl)
@@ -105,11 +106,13 @@ namespace osuCrypto
             RandomOracle ro(sizeof(block));
             ro.Update(Bz);
             ro.Update(i);
+            ro.Update((bool) 0);
             ro.Final(msg[i][0]);
 
             ro.Reset();
             ro.Update(Bo);
             ro.Update(i);
+            ro.Update((bool) 1);
             ro.Final(msg[i][1]);
         }
     }
