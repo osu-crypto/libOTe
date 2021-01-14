@@ -164,8 +164,10 @@ namespace osuCrypto
                     gka = bc * pK[j];
                     gka.toBytes(buff.data());
 
+
+                    auto nounce = i * nSndVals + choices[i];
                     sha.Reset();
-                    sha.Update((u8*)&i, sizeof(i));
+                    sha.Update((u8*)&nounce, sizeof(nounce));
                     sha.Update(buff.data(), buff.size());
                     sha.Update(R);
                     sha.Final(messages[i]);
@@ -274,8 +276,10 @@ namespace osuCrypto
                     PK0a = pPK0 * alpha2;
                     PK0a.toBytes(hashInBuff.data());
 
+
+                    auto nounce = i * nSndVals;
                     sha.Reset();
-                    sha.Update((u8*)&i, sizeof(i));
+                    sha.Update((u8*)&nounce, sizeof(nounce));
                     sha.Update(hashInBuff.data(), hashInBuff.size());
                     sha.Update(R);
                     sha.Final(messages[i][0]);
@@ -285,8 +289,9 @@ namespace osuCrypto
                         fetmp = c[u] - PK0a;
                         fetmp.toBytes(hashInBuff.data());
 
+                        ++nounce;
                         sha.Reset();
-                        sha.Update((u8*)&i, sizeof(i));
+                        sha.Update((u8*)&nounce, sizeof(nounce));
                         sha.Update(hashInBuff.data(), hashInBuff.size());
                         sha.Update(R);
                         sha.Final(messages[i][u]);
