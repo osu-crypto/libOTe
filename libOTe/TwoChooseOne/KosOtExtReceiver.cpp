@@ -12,6 +12,7 @@
 
 #include "TcoOtDefines.h"
 using namespace std;
+//#define KOS_DEBUG
 
 namespace osuCrypto
 {
@@ -93,11 +94,11 @@ namespace osuCrypto
             genBaseOts(prng, chl);
 
         setTimePoint("Kos.recv.start");
-
+        
 
         // we are going to process OTs in blocks of 128 * superBlkSize messages.
-        u64 numOtExt = roundUpTo(choices.size(), 128);
-        u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
+        u64 numOtExt = roundUpTo(choices.size()+128, 128);
+        u64 numSuperBlocks = (numOtExt / 128 + superBlkSize-1) / superBlkSize;
         u64 numBlocks = numSuperBlocks * superBlkSize;
 
 
@@ -112,28 +113,21 @@ namespace osuCrypto
 
         // turn the choice vbitVector into an array of blocks.
         BitVector choices2(numBlocks * 128);
-        //choices2.randomize(zPrng);
+        assert(choices2.size() >= choices.size() + 128);
         choices2 = choices;
         choices2.resize(numBlocks * 128);
-        for (u64 i = 0; i < 128; ++i)
-        {
-            choices2[choices.size() + i] = prng.getBit();
-
-            //std::cout << "extra " << i << "  " << choices2[choices.size() + i] << std::endl;
-        }
 
         auto choiceBlocks = choices2.getSpan<block>();
+        *(--choiceBlocks.end()) = prng.get();
+
         // this will be used as temporary buffers of 128 columns,
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
         std::array<std::array<block, superBlkSize>, 128> t0;
+        span<block> t0v((block*)t0.data(), superBlkSize * 128);
 
-        // the index of the OT that has been completed.
-        //u64 doneIdx = 0;
 
         std::array<block, 128> extraBlocks;
-        block* xIter = extraBlocks.data();
-        //u64 extraIdx = 0;
 
         auto mIter = messages.begin();
 
@@ -144,7 +138,11 @@ namespace osuCrypto
         auto uIter = (block*)uBuff.data();
         auto uEnd = uIter + uBuff.size();
 
-        // NOTE: We do not transpose a bit-matrix of size numCol * numCol.
+#ifdef KOS_DEBUG
+        auto mStart = mIter;
+#endif
+
+        // NOTE: We do not transpose a bit-matrix of size numRow * numCol.
         //   Instead we break it down into smaller chunks. We do 128 columns
         //   times 8 * 128 rows at a time, where 8 = superBlkSize. This is done for
         //   performance reasons. The reason for 8 is that most CPUs have 8 AES vector
@@ -152,12 +150,9 @@ namespace osuCrypto
         //   So that's what we do.
         for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
         {
-
             // this will store the next 128 rows of the matrix u
-
             block* tIter = (block*)t0.data();
             block* cIter = choiceBlocks.data() + superBlkSize * superBlkIdx;
-
 
             for (u64 colIdx = 0; colIdx < 128; ++colIdx)
             {
@@ -199,6 +194,8 @@ namespace osuCrypto
 #ifdef OTE_KOS_FIAT_SHAMIR
                 fs.Update(uBuff.data(), uBuff.size());
 #endif
+                //std::cout << "send u " << std::endl;
+
                 // send over u buffer
                 chl.asyncSend(std::move(uBuff));
 
@@ -218,16 +215,7 @@ namespace osuCrypto
 
 
 
-            //block* mStart = mIter;
             auto mEnd = mIter + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
-
-            // compute how many rows are unused.
-            u64 unusedCount = mIter - mEnd + 128 * superBlkSize;
-
-            // compute the begin and end index of the extra rows that
-            // we will compute in this iters. These are taken from the
-            // unused rows what we computed above.
-            block* xEnd = std::min<block*>(xIter + unusedCount, extraBlocks.data() + 128);
 
             tIter = (block*)t0.data();
             block* tEnd = (block*)t0.data() + 128 * superBlkSize;
@@ -245,41 +233,26 @@ namespace osuCrypto
                 tIter = tIter - 128 * superBlkSize + 1;
             }
 
-
-            if (tIter < (block*)t0.data())
-            {
-                tIter = tIter + 128 * superBlkSize - 1;
-            }
-
-            while (xIter != xEnd)
-            {
-                while (xIter != xEnd && tIter < tEnd)
-                {
-                    *xIter = *tIter;
-
-                    tIter += superBlkSize;
-                    xIter += 1;
-                }
-
-                tIter = tIter - 128 * superBlkSize + 1;
-            }
-
-
 #ifdef KOS_DEBUG
+            if ((superBlkIdx + 1) % commStepSize == 0)
+            {
+                span<block> msgs(mStart, mEnd);
+                mStart = mEnd;
 
-            u64 doneIdx = mStart - messages.data();
-            block* msgIter = messages.data() + doneIdx;
-            chl.send(msgIter, sizeof(block) * 128 * superBlkSize);
-            cIter = choiceBlocks.data() + superBlkSize * superBlkIdx;
-            chl.send(cIter, sizeof(block) * superBlkSize);
+                chl.send(msgs);
+                chl.send(cIter, superBlkSize);
+            }
 #endif
-            //doneIdx = stopIdx;
         }
 
+        for (u64 i = 0; i < 128; ++i)
+            extraBlocks[i] = t0[i][superBlkSize - 1];
+
+
 #ifdef KOS_DEBUG
-        chl.send(extraBlocks.data(), sizeof(block) * 128);
+        chl.send((u8*)extraBlocks.data(), sizeof(block) * 128);
         BitVector cc;
-        cc.copy(choices2, choices.size(), 128);
+        cc.copy(choices2, choices2.size()-128, 128);
         chl.send(cc);
 #endif
         //std::cout << "uBuff " << (bool)uBuff << "  " << (uEnd - uIter) << std::endl;
@@ -397,7 +370,7 @@ namespace osuCrypto
         }
 
 
-
+        doneIdx = choices2.size() - 128;
         for (block& blk : extraBlocks)
         {
             // and check for correlation

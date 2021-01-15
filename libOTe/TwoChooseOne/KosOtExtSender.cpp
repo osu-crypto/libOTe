@@ -1,6 +1,6 @@
 #include "KosOtExtSender.h"
 #ifdef ENABLE_KOS
-
+//#define KOS_DEBUG
 #include "libOTe/config.h"
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Crypto/Commit.h>
@@ -74,13 +74,15 @@ namespace osuCrypto
         setTimePoint("Kos.send.start");
 
         // round up
-        u64 numOtExt = roundUpTo(messages.size(), 128);
-        u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
+        u64 numOtExt = roundUpTo(messages.size() + 128, 128);
+        u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
         //u64 numBlocks = numSuperBlocks * superBlkSize;
 
         // a temp that will be used to transpose the sender's matrix
         std::array<std::array<block, superBlkSize>, 128> t;
         std::vector<std::array<block, superBlkSize>> u(128 * commStepSize);
+
+        span<block> tv((block*)t.data(), superBlkSize * 128);
 
         std::array<block, 128> choiceMask;
         block delta = *(block*)mBaseChoiceBits.data();
@@ -92,14 +94,21 @@ namespace osuCrypto
         }
 
         std::array<block, 128> extraBlocks;
-        block* xIter = extraBlocks.data();
 
 
+        // The next OT message to be computed
         auto mIter = messages.begin();
 
+        // Our current location of u.
+        // The end iter of u. When uIter == uEnd, we need to
+        // receive the next part of the OT matrix.
         block * uIter = (block*)u.data() + superBlkSize * 128 * commStepSize;
         block * uEnd = uIter;
 
+
+        // The other party either need to commit
+        // to a random value or we will generate 
+        // it via Fiat Shamir.
 #ifdef OTE_KOS_FIAT_SHAMIR
         RandomOracle fs(sizeof(block));
 #else
@@ -107,17 +116,27 @@ namespace osuCrypto
         chl.recv(theirSeedComm.data(), theirSeedComm.size());
 #endif
 
+#ifdef KOS_DEBUG
+        auto mStart = mIter;
+#endif
+
         for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
         {
-
+            // We will generate of the matrix to fill
+            // up t. Then we will transpose t.
             block * tIter = (block*)t.data();
+
+            // cIter is the current choice bit, expanded out to be 128 bits.
             block * cIter = choiceMask.data();
 
+            // check if we have run out of the u matrix
+            // to consume. If so, receive some more.
             if (uIter == uEnd)
             {
                 u64 step = std::min<u64>(numSuperBlocks - superBlkIdx,(u64) commStepSize);
                 u64 size = step * superBlkSize * 128 * sizeof(block);
 
+                //std::cout << "recv u " << std::endl;
                 chl.recv((u8*)u.data(), size);
                 uIter = (block*)u.data();
 #ifdef OTE_KOS_FIAT_SHAMIR
@@ -164,26 +183,25 @@ namespace osuCrypto
             auto mEnd = mIter  + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 
             // compute how many rows are unused.
-            u64 unusedCount = (mIter - mEnd + 128 * superBlkSize);
+            //u64 unusedCount = (mIter - mEnd + 128 * superBlkSize);
 
             // compute the begin and end index of the extra rows that
             // we will compute in this iters. These are taken from the
             // unused rows what we computed above.
-            block* xEnd = std::min(xIter + unusedCount, extraBlocks.data() + 128);
+            //block* xEnd = std::min(xIter + unusedCount, extraBlocks.data() + 128);
 
             tIter = (block*)t.data();
             block* tEnd = (block*)t.data() + 128 * superBlkSize;
 
+            // Due to us transposing 1024 rows, the OT messages
+            // are interleaved within t. we have to step 8 rows
+            // of t to get to the next message.
             while (mIter != mEnd)
             {
                 while (mIter != mEnd && tIter < tEnd)
                 {
                     (*mIter)[0] = *tIter;
                     (*mIter)[1] = *tIter ^ delta;
-
-                    //u64 tV = tIter - (block*)t.data();
-                    //u64 tIdx = tV / 8 + (tV % 8) * 128;
-                    //std::cout << "midx " << (mIter - messages.data()) << "   tIdx " << tIdx << std::endl;
 
                     tIter += superBlkSize;
                     mIter += 1;
@@ -192,60 +210,42 @@ namespace osuCrypto
                 tIter = tIter - 128 * superBlkSize + 1;
             }
 
-
-            if (tIter < (block*)t.data())
-            {
-                tIter = tIter + 128 * superBlkSize - 1;
-            }
-
-            while (xIter != xEnd)
-            {
-                while (xIter != xEnd && tIter < tEnd)
-                {
-                    *xIter = *tIter;
-
-                    //u64 tV = tIter - (block*)t.data();
-                    //u64 tIdx = tV / 8 + (tV % 8) * 128;
-                    //std::cout << "xidx " << (xIter - extraBlocks.data()) << "   tIdx " << tIdx << std::endl;
-
-                    tIter += superBlkSize;
-                    xIter += 1;
-                }
-
-                tIter = tIter - 128 * superBlkSize + 1;
-            }
-
-            //std::cout << "blk end " << std::endl;
-
 #ifdef KOS_DEBUG
-            BitVector choice(128 * superBlkSize);
-            chl.recv(u.data(), superBlkSize * 128 * sizeof(block));
-            chl.recv(choice.data(), sizeof(block) * superBlkSize);
-
-            u64 doneIdx = mStart - messages.data();
-            u64 xx = std::min<u64>(i64(128 * superBlkSize), (messages.data() + messages.size()) - mEnd);
-            for (u64 rowIdx = doneIdx,
-                j = 0; j < xx; ++rowIdx, ++j)
+            if ((superBlkIdx + 1) % commStepSize == 0)
             {
-                if (neq(((block*)u.data())[j], messages[rowIdx][choice[j]]))
+                auto nn = 128 * superBlkSize * commStepSize;
+                BitVector choice(nn);
+
+                std::vector<block> temp(nn);
+                chl.recv(temp);
+                chl.recv(choice);
+
+                u64 begin = mStart - messages.begin();
+                auto mm = std::min<u64>(nn, messages.size() - begin);
+                for (u64 j = 0; j < mm; ++j)
                 {
-                    std::cout << rowIdx << std::endl;
-                    throw std::runtime_error("");
+                    auto rowIdx = j + begin;
+                    auto v = temp[j];
+                    if (neq(v, messages[rowIdx][choice[j]]))
+                    {
+                        std::cout << rowIdx << std::endl;
+                        throw std::runtime_error("");
+                    }
                 }
             }
 #endif
-            //doneIdx = (mEnd - messages.data());
         }
 
+        for (u64 i = 0; i < 128; ++i)
+            extraBlocks[i] = t[i][superBlkSize - 1];
 
 #ifdef KOS_DEBUG
         BitVector choices(128);
         std::vector<block> xtraBlk(128);
-
-        chl.recv(xtraBlk.data(), 128 * sizeof(block));
-        choices.resize(128);
+        chl.recv(xtraBlk);
         chl.recv(choices);
 
+        bool failed = false;
         for (u64 i = 0; i < 128; ++i)
         {
             if (neq(xtraBlk[i] , choices[i] ? extraBlocks[i] ^ delta : extraBlocks[i] ))
@@ -254,9 +254,11 @@ namespace osuCrypto
                 std::cout << xtraBlk[i] << "  " << (u32)choices[i] << std::endl;
                 std::cout << extraBlocks[i] << "  " << (extraBlocks[i] ^ delta) << std::endl;
 
-                throw std::runtime_error("");
+                failed = true;
             }
         }
+        if(failed)
+            throw std::runtime_error("");
 #endif
         setTimePoint("Kos.send.transposeDone");
 #ifdef OTE_KOS_FIAT_SHAMIR
@@ -399,8 +401,8 @@ namespace osuCrypto
         setTimePoint("Kos.send.done");
 
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");
+        }
+
+
     }
-
-
-}
 #endif
