@@ -165,10 +165,9 @@ if(ENABLE_SSE)
 endif()
 
 
-configure_file(libOTe/config.h.in libOTe/config.h)
-
+configure_file(libOTe/config.h.in ${CMAKE_CURRENT_SOURCE_DIR}/config.h)
 # Support out-of-source builds.
-include_directories(${CMAKE_BINARY_DIR})
+# include_directories(${CMAKE_BINARY_DIR})
 
 
 #############################################
