@@ -188,7 +188,7 @@ void OtExt_Silent_Test(const CLP& cmd)
     u64 n = cmd.getOr("n", 10000);
     bool verbose = cmd.getOr("v", 0) > 1;
     u64 threads = cmd.getOr("t", 4);
-    u64 s = cmd.getOr("s", 4);
+    u64 s = cmd.getOr("s", 2);
     u64 sec = cmd.getOr("sec", 80);
     //bool mal = cmd.isSet("mal");
 
@@ -211,8 +211,10 @@ void OtExt_Silent_Test(const CLP& cmd)
     sender.setTimer(timer);
     recver.setTimer(timer);
 
-    //sender.mDebug = true;
-    //recver.mDebug = true;
+    sender.mDebug = true;
+    recver.mDebug = true;
+    //sender.mMultType = MultType::QuasiCyclic;
+    //recver.mMultType = MultType::QuasiCyclic;
     //recver.mGen.mPrint = false;
 
     // fake base OTs.
@@ -315,7 +317,7 @@ void Tools_Pprf_test(const CLP& cmd)
         chls1[i] = s1.addChannel();
     }
 
-
+    auto format = PprfOutputFormat::Plain;
     SilentMultiPprfSender sender;
     SilentMultiPprfReceiver recver;
 
@@ -325,7 +327,7 @@ void Tools_Pprf_test(const CLP& cmd)
     auto numOTs = sender.baseOtCount();
     std::vector<std::array<block, 2>> sendOTs(numOTs);
     std::vector<block> recvOTs(numOTs);
-    BitVector recvBits = recver.sampleChoiceBits(domain, false, prng);
+    BitVector recvBits = recver.sampleChoiceBits(domain, format, prng);
 
     //prng.get(sendOTs.data(), sendOTs.size());
     //sendOTs[cmd.getOr("i",0)] = prng.get();
@@ -342,10 +344,10 @@ void Tools_Pprf_test(const CLP& cmd)
     Matrix<block> sOut(domain, numPoints);
     Matrix<block> rOut(domain, numPoints);
     std::vector<u64> points(numPoints);
-    recver.getPoints(points);
+    recver.getPoints(points, format);
 
-    sender.expand(chls0, CCBlock, prng, sOut, false, false);
-    recver.expand(chls1, prng, rOut, false, false);
+    sender.expand(chls0, CCBlock, prng, sOut, format, false);
+    recver.expand(chls1, prng, rOut, format, false);
     bool failed = false;
 
 
@@ -407,7 +409,7 @@ void Tools_Pprf_trans_test(const CLP& cmd)
 
 
 
-
+    auto format = PprfOutputFormat::InterleavedTransposed;
     SilentMultiPprfSender sender;
     SilentMultiPprfReceiver recver;
 
@@ -417,7 +419,7 @@ void Tools_Pprf_trans_test(const CLP& cmd)
     auto numOTs = sender.baseOtCount();
     std::vector<std::array<block, 2>> sendOTs(numOTs);
     std::vector<block> recvOTs(numOTs);
-    BitVector recvBits = recver.sampleChoiceBits(domain * numPoints, true, prng);
+    BitVector recvBits = recver.sampleChoiceBits(domain * numPoints, format, prng);
     //recvBits.randomize(prng);
 
     //recvBits[16] = 1;
@@ -432,14 +434,15 @@ void Tools_Pprf_trans_test(const CLP& cmd)
     auto cols = (numPoints * domain + 127) / 128;
     Matrix<block> sOut(128, cols);
     Matrix<block> rOut(128, cols);
+
     std::vector<u64> points(numPoints);
-    recver.getTransposedPoints(points);
+    recver.getPoints(points, format);
 
 
 
 
-    sender.expand(chls0, AllOneBlock, prng, sOut, true, mal);
-    recver.expand(chls1, prng, rOut, true, mal);
+    sender.expand(chls0, AllOneBlock, prng, sOut, format, mal);
+    recver.expand(chls1, prng, rOut, format, mal);
     bool failed = false;
 
     Matrix<block> out(128, cols);
@@ -480,6 +483,101 @@ void Tools_Pprf_trans_test(const CLP& cmd)
 
     if (failed)
         throw RTE_LOC;
+
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+}
+
+
+void Tools_Pprf_inter_test(const CLP& cmd)
+{
+#ifdef ENABLE_SILENTOT
+
+    //u64 depth = 6;
+    //u64 domain = 13;// (1ull << depth) - 7;
+    //u64 numPoints = 40;
+
+    u64 domain = cmd.getOr("d", 334);
+    auto threads = cmd.getOr("t", 3ull);
+    u64 numPoints = cmd.getOr("s", 5) * 8;
+    bool mal = cmd.isSet("mal");
+
+    PRNG prng(ZeroBlock);
+
+    IOService ios;
+    Session s0(ios, "localhost:1212", SessionMode::Server);
+    Session s1(ios, "localhost:1212", SessionMode::Client);
+
+    std::vector<Channel> chls0(threads), chls1(threads);
+    for (u64 i = 0; i < threads; ++i)
+    {
+        chls0[i] = s0.addChannel();
+        chls1[i] = s1.addChannel();
+    }
+
+
+
+    auto format = PprfOutputFormat::Interleaved;
+    SilentMultiPprfSender sender;
+    SilentMultiPprfReceiver recver;
+
+    sender.configure(domain, numPoints);
+    recver.configure(domain, numPoints);
+
+    auto numOTs = sender.baseOtCount();
+    std::vector<std::array<block, 2>> sendOTs(numOTs);
+    std::vector<block> recvOTs(numOTs);
+    BitVector recvBits = recver.sampleChoiceBits(domain * numPoints, format, prng);
+    //recvBits.randomize(prng);
+
+    //recvBits[16] = 1;
+    for (u64 i = 0; i < numOTs; ++i)
+    {
+        //recvBits[i] = 0;
+        recvOTs[i] = sendOTs[i][recvBits[i]];
+    }
+    sender.setBase(sendOTs);
+    recver.setBase(recvOTs);
+
+    auto cols = (numPoints * domain + 127) / 128;
+    Matrix<block> sOut2(numPoints * domain, 1);
+    Matrix<block> rOut2(numPoints * domain, 1);
+    std::vector<u64> points(numPoints);
+    recver.getPoints(points, format);
+
+
+    sender.expand(chls0, AllOneBlock, prng, sOut2, format, mal);
+    recver.expand(chls1, prng, rOut2, format, mal);
+
+    for (u64 i = 0; i < rOut2.rows(); ++i)
+    {
+        sOut2(i) = (sOut2(i) ^ rOut2(i));
+    }
+
+
+    bool failed = false;
+    for (u64 i = 0; i < sOut2.rows(); ++i)
+    {
+
+        auto f = std::find(points.begin(), points.end(), i) != points.end();
+
+        auto exp = f ? AllOneBlock : ZeroBlock;
+
+        if (neq(sOut2(i), exp))
+        {
+            failed = true;
+
+            if (cmd.getOr("v", 0) > 1)
+                std::cout << Color::Red;
+        }
+        if (cmd.getOr("v", 0) > 1)
+            std::cout << i << " " << sOut2(i) << " " << exp << std::endl << Color::Default;
+    }
+
+    if (failed)
+        throw RTE_LOC;
+
 
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");

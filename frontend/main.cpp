@@ -483,6 +483,10 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			// construct a vector to stored the received messages. 
 			std::vector<block> msgs(numOTs);
 
+			receiver.configure(numOTs, s, sec, chls.size());
+
+			//sync(chls[0], role);
+
 			receiver.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
 			// perform  numOTs random OTs, the results will be written to msgs.
 			receiver.silentReceive(choice, msgs, prng, chls);
@@ -490,6 +494,9 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 		else
 		{
 			std::vector<std::array<block, 2>> msgs(numOTs);
+			sender.configure(numOTs, s, sec, chls.size());
+
+			//sync(chls[0], role);
 
 			sender.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
 			// construct a vector to stored the random send messages. 
@@ -506,15 +513,22 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 		}
 	};
 
-	cmd.setDefault("s", "4");
+	cmd.setDefault("s", "2");
 	cmd.setDefault("sec", "80");
+	auto mulType = (MultType)cmd.getOr("multType", (int)MultType::ldpc);
 	std::vector<int> ss = cmd.getMany<int>("s");
 	std::vector<int> secs = cmd.getMany<int>("sec");
 	std::vector< SilentBaseType> types;
 
+	receiver.mMultType = mulType;
+	sender.mMultType = mulType;
+
+
 	if (cmd.isSet("base"))
 		types.push_back(SilentBaseType::Base);
-	if (cmd.isSet("baseExtend"))
+	else if (cmd.isSet("baseExtend"))
+		types.push_back(SilentBaseType::BaseExtend);
+	else
 		types.push_back(SilentBaseType::BaseExtend);
 	//if (cmd.isSet("extend"))
 	//	types.push_back(SilentBaseType::Extend);

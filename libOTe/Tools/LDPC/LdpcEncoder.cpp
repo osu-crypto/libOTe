@@ -25,7 +25,6 @@ namespace osuCrypto
         mM = H.rows();
         mGap = gap;
 
-        mH = H;
 
         mA = H.subMatrix(0, 0, r0, c0);
         mB = H.subMatrix(0, c0, r0, gap);
@@ -33,6 +32,8 @@ namespace osuCrypto
         mD = H.subMatrix(r0, 0, gap, c0);
         mE = H.subMatrix(r0, c0, gap, gap);
         mF = H.subMatrix(r0, c1, gap, H.rows() - gap);
+        mH = std::move(H);
+
         mCInv.init(mC);
 
         if (mGap)

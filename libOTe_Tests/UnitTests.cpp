@@ -33,6 +33,7 @@ namespace tests_libOTe
 
         tc.add("Tools_Pprf_test                    ", Tools_Pprf_test);
         tc.add("Tools_Pprf_trans_test              ", Tools_Pprf_trans_test);
+        tc.add("Tools_Pprf_inter_test              ", Tools_Pprf_inter_test);
 
         tc.add("Bot_NaorPinkas_Test                ", Bot_NaorPinkas_Test);
         tc.add("Bot_Simplest_Test                  ", Bot_Simplest_Test);

@@ -3,6 +3,7 @@
 
 void Tools_Pprf_test(const oc::CLP& cmd);
 void Tools_Pprf_trans_test(const oc::CLP& cmd);
+void Tools_Pprf_inter_test(const oc::CLP& cmd);
 void OtExt_Silent_Test(const oc::CLP& cmd);
 
 void Tools_bitShift_test(const oc::CLP& cmd);

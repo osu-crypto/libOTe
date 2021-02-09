@@ -54,7 +54,7 @@ namespace osuCrypto
                 for (u64 j = 0; j < row.size() - 1; ++j)
                 {
                     auto col = row[j];
-                    x[col] ^= x[i];
+                    x[col] = x[col] ^ x[i];
                 }
             }
         }
@@ -96,8 +96,10 @@ namespace osuCrypto
         {
             if (mGap)
                 throw std::runtime_error(LOCATION);
+            assert(c.size() == mN);
+
             auto k = mN - mM;
-            span<u8> pp(c.subspan(k, mM));
+            span<T> pp(c.subspan(k, mM));
 
             mCInv.cirTransMult(pp);
 
@@ -105,7 +107,7 @@ namespace osuCrypto
             {
                 for (auto row : mA.col(i))
                 {
-                    c[i] ^= pp[row];
+                    c[i] = c[i] ^ pp[row];
                 }
             }
         }

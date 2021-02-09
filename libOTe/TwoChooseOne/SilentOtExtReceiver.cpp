@@ -8,6 +8,7 @@
 #include <libOTe/Base/BaseOT.h>
 #include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
 #include <cryptoTools/Common/ThreadBarrier.h>
+#include <libOTe/Tools/LDPC/LdpcSampler.h>
 //#include <bits/stdc++.h> 
 
 namespace osuCrypto
@@ -112,8 +113,10 @@ namespace osuCrypto
         if (static_cast<u64>(recvBaseOts.size()) != silentBaseOtCount())
             throw std::runtime_error("wrong number of silent base OTs");
 
+
+
         mGen.setBase(recvBaseOts);
-        mGen.getTransposedPoints(mS);
+        mGen.getPoints(mS, getPprfFormat());
     }
 
     void SilentOtExtReceiver::genBaseOts(
@@ -151,7 +154,7 @@ namespace osuCrypto
         }
 
         mGen.setBase(msg);
-        mGen.getTransposedPoints(mS);
+        mGen.getPoints(mS, getPprfFormat());
 
         for (u64 i = 0; i < mS.size(); ++i)
         {
@@ -179,25 +182,25 @@ namespace osuCrypto
     {
         switch (basetype)
         {
-        //case SilentBaseType::None:
-        //{
-        //    std::cout << Color::Red << "warning, insecure " LOCATION << std::endl << Color::Default;
-        //    configure(n, scaler, secParam, threads);
-        //    BitVector choices = sampleBaseChoiceBits(prng);
-        //    std::vector<block> msg(choices.size());
-        //    //PRNG prngz(ZeroBlock);
-        //    //auto ss = lout << "recver:\n";
-        //    for (u64 i = 0; i < msg.size(); ++i)
-        //    {
-        //        //std::array<block, 2> tt = prngz.get();
-        //        msg[i] = toBlock(i, choices[i]);
-        //    //    //ss << "msg[" << i << "]["<< int(choices[i])<<"] "
-        //    //    //    << msg[i] << std::endl;
-        //    }
+            //case SilentBaseType::None:
+            //{
+            //    std::cout << Color::Red << "warning, insecure " LOCATION << std::endl << Color::Default;
+            //    configure(n, scaler, secParam, threads);
+            //    BitVector choices = sampleBaseChoiceBits(prng);
+            //    std::vector<block> msg(choices.size());
+            //    //PRNG prngz(ZeroBlock);
+            //    //auto ss = lout << "recver:\n";
+            //    for (u64 i = 0; i < msg.size(); ++i)
+            //    {
+            //        //std::array<block, 2> tt = prngz.get();
+            //        msg[i] = toBlock(i, choices[i]);
+            //    //    //ss << "msg[" << i << "]["<< int(choices[i])<<"] "
+            //    //    //    << msg[i] << std::endl;
+            //    }
 
-        //    setSlientBaseOts(msg);
-        //    break;
-        //}
+            //    setSlientBaseOts(msg);
+            //    break;
+            //}
         case SilentBaseType::BaseExtend:
             // perform 128 normal base OTs
             genBaseOts(prng, chl);
@@ -207,15 +210,15 @@ namespace osuCrypto
             // the exising base OTs or using a base OT protocol.
             genSilentBaseOts(prng, chl);
             break;
-        //case SilentBaseType::Extend:
-        //{
-        //    std::cout << Color::Red << "warning, insecure " LOCATION << std::endl << Color::Default;
-        //    std::vector<std::array<block, 2>> msg(gOtExtBaseOtCount);
-        //    setBaseOts(msg, prng, chl);
-        //    configure(n, scaler, secParam, threads);
-        //    genSilentBaseOts(prng, chl);
-        //    break;
-        //}
+            //case SilentBaseType::Extend:
+            //{
+            //    std::cout << Color::Red << "warning, insecure " LOCATION << std::endl << Color::Default;
+            //    std::vector<std::array<block, 2>> msg(gOtExtBaseOtCount);
+            //    setBaseOts(msg, prng, chl);
+            //    configure(n, scaler, secParam, threads);
+            //    genSilentBaseOts(prng, chl);
+            //    break;
+            //}
         default:
             std::cout << "known switch " LOCATION << std::endl;
             std::terminate();
@@ -231,18 +234,53 @@ namespace osuCrypto
     }
 
     void SilentOtExtReceiver::configure(
-        u64 n,
+        u64 numOTs,
         u64 scaler,
         u64 secParam,
         u64 numThreads)
     {
-        mP = nextPrime(n);
-        mN = roundUpTo(mP, 128);
-        mScaler = scaler;
-        mN2 = scaler * mN;
         mNumThreads = numThreads;
+        mScaler = scaler;
+        u64 numPartitions;
+        if (mMultType == MultType::ldpc)
+        {
+            assert(scaler == 2);
+            u64 nn = numOTs * scaler;
+            auto mm = numOTs;
+            auto kk = nn - mm;
 
-        auto numPartitions = getPartitions(scaler, mP, secParam);
+            u64 colWeight = 5;
+            u64 diags = 5;
+            u64 gap = 32;
+            u64 diagWeight = 5;
+            std::vector<double> db{ 5,31 };
+            PRNG pp(oc::ZeroBlock);
+            
+            if (mLdpcEncoder.mH.cols() != nn)
+            {
+                setTimePoint("config.begin");
+                auto mH = sampleTriangularBand(mm, nn, colWeight, gap, diagWeight, diags, 0, db, true, true, pp);
+                setTimePoint("config.sample");
+                mLdpcEncoder.init(std::move(mH), 0);
+                setTimePoint("config.init");
+            }
+
+            mP = 0;
+            mN = kk;
+            mN2 = nn;
+            numPartitions = getPartitions(scaler, mN, secParam);
+
+        }
+        else
+        {
+
+            mP = nextPrime(numOTs);
+            mN = roundUpTo(mP, 128);
+            numPartitions = getPartitions(scaler, mP, secParam);
+            mN2 = scaler * mN;
+        }
+
+
         mS.resize(numPartitions);
         mSizePer = (mN2 + numPartitions - 1) / numPartitions;
 
@@ -281,8 +319,6 @@ namespace osuCrypto
 
     void SilentOtExtReceiver::checkRT(span<Channel> chls, Matrix<block>& rT1)
     {
-        if (rT1.rows() != 128)
-            throw RTE_LOC;
 
         Matrix<block> rT2(rT1.rows(), rT1.cols(), AllocType::Uninitialized);
         chls[0].recv(rT2.data(), rT2.size());
@@ -293,10 +329,24 @@ namespace osuCrypto
             rT2(i) = rT2(i) ^ rT1(i);
 
 
-        Matrix<block> R(rT1.cols() * 128, 1);
-        MatrixView<block> Rv(R);
-        MatrixView<block> rT2v(rT2);
-        transpose(rT2v, Rv);
+        Matrix<block> R;
+
+        if (mMultType == MultType::ldpc)
+        {
+            if (rT1.cols() != 1)
+                throw RTE_LOC;
+            R = rT2;
+        }
+        else
+        {
+            if (rT1.rows() != 128)
+                throw RTE_LOC;
+
+            R.resize(rT1.cols() * 128, 1);
+            MatrixView<block> Rv(R);
+            MatrixView<block> rT2v(rT2);
+            transpose(rT2v, Rv);
+        }
 
         Matrix<block> exp(R.rows(), R.cols(), AllocType::Zeroed);
         for (u64 i = 0; i < mS.size(); ++i)
@@ -304,14 +354,19 @@ namespace osuCrypto
             exp(mS[i]) = delta;
         }
 
+        bool failed = false;
         for (u64 i = 0; i < R.rows(); ++i)
         {
             if (neq(R(i), exp(i)))
             {
                 std::cout << i << " / " << R.rows() << " R= " << R(i) << " exp= " << exp(i) << std::endl;
-                throw RTE_LOC;
+                failed = true;
             }
         }
+
+        if(failed)
+            throw RTE_LOC;
+
         std::cout << "debug check ok" << std::endl;
         //for (u64 x = 0; x < rT.rows(); ++x)
         //{
@@ -321,6 +376,8 @@ namespace osuCrypto
         //    }
         //    std::cout << std::endl;
         //}
+        setTimePoint("recver.expand.checkRT");
+
     }
 
     void SilentOtExtReceiver::receive(
@@ -362,7 +419,7 @@ namespace osuCrypto
         if (mGen.hasBaseOts() == false)
         {
             // make sure we have IKNP base OTs.
-            if(mIknpRecver.hasBaseOts() == false)
+            if (mIknpRecver.hasBaseOts() == false)
                 genBaseOts(prng, chls[0]);
 
             genSilentBaseOts(prng, chls[0]);
@@ -371,27 +428,46 @@ namespace osuCrypto
         setTimePoint("recver.expand.start");
 
         // column major matrix. mN2 columns and 1 row of 128 bits (128 bit rows)
-        Matrix<block> rT;
-        rT.resize(128, mN2 / 128, AllocType::Uninitialized);
-
-        // locally expand the seeds.
-        mSum = mGen.expand(chls, prng, rT, true, false);
-        setTimePoint("sender.expand.pprf_transpose");
-
-        if (mDebug)
-        {
-            checkRT(chls, rT);
-        }
 
         // do the compression to get the final OTs.
-        auto type = MultType::QuasiCyclic;
-        switch (type)
+        switch (mMultType)
         {
         case MultType::Naive:
-            randMulNaive(rT, messages);
-            break;
         case MultType::QuasiCyclic:
-            randMulQuasiCyclic(rT, messages, choices, mNumThreads);
+
+            rT.resize(128, mN2 / 128, AllocType::Uninitialized);
+
+            // locally expand the seeds.
+            mSum = mGen.expand(chls, prng, rT, PprfOutputFormat::InterleavedTransposed, false);
+            setTimePoint("recver.expand.pprf_transpose");
+
+            if (mDebug)
+            {
+                checkRT(chls, rT);
+            }
+
+            if (mMultType == MultType::Naive)
+                randMulNaive(rT, messages);
+            else
+                randMulQuasiCyclic(rT, messages, choices, mNumThreads);
+
+
+            break;
+        case MultType::ldpc:
+
+
+
+            rT.resize(mN2, 1, AllocType::Uninitialized);
+            mSum = mGen.expand(chls, prng, rT, PprfOutputFormat::Interleaved, false);
+            setTimePoint("recver.expand.pprf_transpose");
+
+            if (mDebug)
+            {
+                checkRT(chls, rT);
+
+            }
+
+            ldpcMult(rT, messages, choices);
             break;
         default:
             break;
@@ -415,6 +491,102 @@ namespace osuCrypto
         setTimePoint("recver.expand.mul");
     }
 
+    void SilentOtExtReceiver::ldpcMult(Matrix<block>& rT, span<block>& messages, BitVector& choices)
+    {
+        setTimePoint("recver.expand.ldpc.mult");
+        bool seperate = false;
+        if (seperate)
+
+        {
+
+            mLdpcEncoder.cirTransEncode(span<block>(rT));
+            setTimePoint("recver.expand.ldpc.cirTransEncode");
+            std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
+
+            setTimePoint("recver.expand.ldpc.mCopy");
+
+            std::vector<u8> cc(rT.size());
+            std::vector<u64> points(mGen.mPntCount);
+            mGen.getPoints(points, getPprfFormat());
+            for (auto p : points)
+            {
+                cc[p] = 1;
+            }
+
+            mLdpcEncoder.cirTransEncode<u8>(cc);
+            setTimePoint("recver.expand.ldpc.cirTransEncodeBits");
+
+            choices.resize(messages.size());
+            auto iter = choices.begin();
+            for (u64 i = 0; i < messages.size(); ++i)
+            {
+                *iter = cc[i];
+                ++iter;
+            }
+            setTimePoint("recver.expand.ldpc.bitCopy");
+        }
+        else
+        {
+            block mask = OneBlock ^ AllOneBlock;
+            for (u64 i = 0; i < rT.size(); ++i)
+            {
+                rT(i) = rT(i) & mask;
+            }
+            std::vector<u64> points(mGen.mPntCount);
+            mGen.getPoints(points, getPprfFormat());
+            for (auto p : points)
+            {
+                rT(p) = rT(p) | OneBlock;
+            }
+            setTimePoint("recver.expand.ldpc.mask");
+
+            mLdpcEncoder.cirTransEncode(span<block>(rT));
+            setTimePoint("recver.expand.ldpc.cirTransEncode");
+            //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
+            choices.resize(messages.size());
+            auto iter = choices.begin();
+            for (u64 i = 0; i < messages.size(); ++i)
+            {
+                messages[i] = rT(i) & mask;
+                //*iter = _mm_testc_si128(rT(i), OneBlock);
+                *iter = (rT(i) & OneBlock) == OneBlock;
+                ++iter;
+            }
+
+
+
+
+            setTimePoint("recver.expand.ldpc.mCopy");
+        }
+
+
+        std::array<block, 8> hashBuffer;
+        auto nn = messages.size() / 8 * 8;
+        auto rem = messages.size() - nn;
+        auto iter = messages.data();
+        auto end = iter + nn;
+        for (; iter != end; iter += 8)
+        {
+            mAesFixedKey.ecbEnc8Blocks(iter, hashBuffer.data());
+
+            iter[0] = iter[0] ^ hashBuffer[0];
+            iter[1] = iter[1] ^ hashBuffer[1];
+            iter[2] = iter[2] ^ hashBuffer[2];
+            iter[3] = iter[3] ^ hashBuffer[3];
+            iter[4] = iter[4] ^ hashBuffer[4];
+            iter[5] = iter[5] ^ hashBuffer[5];
+            iter[6] = iter[6] ^ hashBuffer[6];
+            iter[7] = iter[7] ^ hashBuffer[7];
+        }
+
+        for (u64 i = 0; i < rem; ++i, ++iter)
+        {
+            auto h = mAesFixedKey.ecbEncBlock(*iter);
+            *iter = *iter ^ h;
+        }
+        setTimePoint("recver.expand.ldpc.hash");
+
+    }
 
     void SilentOtExtReceiver::randMulQuasiCyclic(Matrix<block>& rT, span<block>& messages, BitVector& choices, u64 threads)
     {
@@ -454,13 +626,13 @@ namespace osuCrypto
 
         //std::vector<std::array<int, 4>> counts(threads);
 
-        setTimePoint("recver.expand.QuasiCyclicSetup");
+        setTimePoint("recver.expand.qc.Setup");
 
         auto routine = [&](u64 index)
         {
 
             if (index == 0)
-                setTimePoint("recver.expand.routine");
+                setTimePoint("recver.expand.qc.routine");
 
             //auto& count = counts[index];
             FFTPoly cPoly;
@@ -481,7 +653,7 @@ namespace osuCrypto
                 pubPrng.get(a64.data(), a64.size());
                 //mAesFixedKey.ecbEncCounterMode(s * nBlocks, nBlocks, temp128.data());
                 if (index == 0)
-                    setTimePoint("recver.expand.rand");
+                    setTimePoint("recver.expand.qc.rand");
                 a[s - 1].encode(a64);
             }
 
@@ -490,7 +662,7 @@ namespace osuCrypto
             brs[0].decrementWait();
 
             if (index == 0)
-                setTimePoint("recver.expand.randGen");
+                setTimePoint("recver.expand.qc.randGen");
 
             auto multAddReduce = [this, nBlocks, n64, &a, &bPoly, &cPoly, &temp128, &cache](span<block> b128, span<block> dest)
             {
@@ -539,7 +711,7 @@ namespace osuCrypto
 
 
             if (index == 0)
-                setTimePoint("recver.expand.mulAddReduce");
+                setTimePoint("recver.expand.qc.mulAddReduce");
 
 
             brs[1].decrementWait();
@@ -607,7 +779,7 @@ namespace osuCrypto
             }
 
             if (index == 0)
-                setTimePoint("recver.expand.transposeXor");
+                setTimePoint("recver.expand.qc.transposeXor");
 
         };
 

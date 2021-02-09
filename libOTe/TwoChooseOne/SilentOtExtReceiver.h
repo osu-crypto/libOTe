@@ -9,14 +9,11 @@
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
+#include <libOTe/Tools/LDPC/LdpcEncoder.h>
 
 namespace osuCrypto
 {
-    enum class MultType
-    {
-        Naive,
-        QuasiCyclic
-    };
+
 
     // For more documentation see SilentOtExtSender.
     class SilentOtExtReceiver : public OtExtReceiver, public TimerAdapter
@@ -31,6 +28,11 @@ namespace osuCrypto
         u64 mNumThreads;
         IknpOtExtReceiver mIknpRecver;
         SilentMultiPprfReceiver mGen;
+
+        MultType mMultType = MultType::ldpc;
+        Matrix<block> rT;
+
+        LdpcEncoder mLdpcEncoder;
 
         // sets the Iknp base OTs that are then used to extend
         void setBaseOts(
@@ -87,7 +89,8 @@ namespace osuCrypto
         BitVector sampleBaseChoiceBits(PRNG& prng) {
             if (isConfigured() == false)
                 throw std::runtime_error("configure(...) must be called first");
-            return mGen.sampleChoiceBits(mN2, true, prng);
+
+            return mGen.sampleChoiceBits(mN2, getPprfFormat(), prng);
         }
 
         // Set the externally generated base OTs. This choice
@@ -136,8 +139,26 @@ namespace osuCrypto
 
         void checkRT(span<Channel> chls, Matrix<block> &rT);
         void randMulNaive(Matrix<block> &rT, span<block> &messages);
-        void randMulQuasiCyclic(Matrix<block> &rT, span<block> &messages, BitVector& choices, u64 threads);
+        void randMulQuasiCyclic(Matrix<block>& rT, span<block>& messages, BitVector& choices, u64 threads);
+        void ldpcMult(Matrix<block> &rT, span<block> &messages, BitVector& choices);
         
+        PprfOutputFormat getPprfFormat()
+        {
+            switch (mMultType)
+            {
+            case osuCrypto::MultType::Naive:
+            case osuCrypto::MultType::QuasiCyclic:
+                return PprfOutputFormat::InterleavedTransposed;
+                break;
+            case osuCrypto::MultType::ldpc:
+                return PprfOutputFormat::Interleaved;
+                break;
+            default:
+                throw RTE_LOC;
+                break;
+            }
+        }
+
         void clear();
     };
 
