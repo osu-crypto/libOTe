@@ -59,7 +59,7 @@
 
 // build the library where KOS is round optimized.
 /* #undef OTE_KOS_FIAT_SHAMIR */
-
+#define OTE_KOS_FIAT_SHAMIR ON
 
 #if defined(ENABLE_SIMPLESTOT_ASM) && defined(_MSC_VER)
     #undef ENABLE_SIMPLESTOT_ASM

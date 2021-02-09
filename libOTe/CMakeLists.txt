@@ -1,6 +1,6 @@
 enable_language(ASM)
 
-file(GLOB_RECURSE SRCS *.cpp)
+file(GLOB_RECURSE SRCS *.cpp *.c)
 
 set(SRCS "${SRCS}")
 
@@ -9,7 +9,7 @@ add_library(libOTe STATIC ${SRCS})
 target_include_directories(libOTe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..) 
 target_link_libraries(libOTe cryptoTools)
 
-if(ENABLE_SSE)
+if(ENABLE_SSE AND NOT MSVC)
     target_compile_options(libOTe PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)
 endif()
 

@@ -49,6 +49,7 @@ int miraclTestMain();
 #include "libOTe/Base/MasnyRindalKyber.h"
 #include "libOTe/Base/naor-pinkas.h"
 
+#include "libOTe/Tools/LDPC/Test.h"
 
 
 template<typename NcoOtSender, typename  NcoOtReceiver>
@@ -814,6 +815,12 @@ int main(int argc, char** argv)
 	CLP cmd;
 	cmd.parse(argc, argv);
 	bool flagSet = false;
+
+	if (cmd.isSet("ldpc"))
+	{
+		ldpcMain(cmd);
+		return 0;
+	}
 
 	if (cmd.isSet(unitTestTag))
 	{

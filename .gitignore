@@ -17,6 +17,9 @@ CMakeCache.txt
 *.a
 *.args.json
 
+lib/
+CMakeSettings.json
+
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/
