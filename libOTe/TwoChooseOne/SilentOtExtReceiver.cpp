@@ -252,24 +252,29 @@ namespace osuCrypto
         if (mMultType == MultType::ldpc)
         {
             assert(scaler == 2);
-            u64 nn = numOTs * scaler;
-            auto mm = numOTs;
+            auto mm = nextPrime(numOTs + 1) - 1;
+            //auto mm = numOTs;// nextPrime(numOTs) - 1;
+            u64 nn = mm * scaler;
             auto kk = nn - mm;
 
             u64 colWeight = 5;
             u64 diags = 5;
             u64 gap = 32;
-            u64 diagWeight = 5;
-            std::vector<double> db{ 5,31 };
+            u64 gapWeight = 5;
+            std::vector<u64> db{ 5,31 };
             PRNG pp(oc::ZeroBlock);
             
-            if (mLdpcEncoder.mH.cols() != nn)
+            if (mZpsDiagEncoder.cols() != nn)
             {
                 setTimePoint("config.begin");
-                auto mH = sampleTriangularBand(mm, nn, colWeight, gap, diagWeight, diags, 0, db, true, true, pp);
-                setTimePoint("config.sample");
-                mLdpcEncoder.init(std::move(mH), 0);
-                setTimePoint("config.init");
+                mZpsDiagEncoder.mL.init(mm, colWeight);
+                setTimePoint("config.Left");
+                mZpsDiagEncoder.mR.init(mm, gap, gapWeight, db, true, pp);
+                setTimePoint("config.Right");
+                //auto mH = sampleTriangularBand(mm, nn, colWeight, gap, gapWeight, diags, 0, db, true, true, pp);
+                //setTimePoint("config.sample");
+                //mLdpcEncoder.init(std::move(mH), 0);
+                //setTimePoint("config.init");
             }
 
             mP = 0;
@@ -289,7 +294,7 @@ namespace osuCrypto
 
 
         mS.resize(numPartitions);
-        mSizePer = (mN2 + numPartitions - 1) / numPartitions;
+        mSizePer = roundUpTo((mN2 + numPartitions - 1) / numPartitions, 8);
 
         mGen.configure(mSizePer, mS.size());
     }
@@ -461,10 +466,12 @@ namespace osuCrypto
 
             break;
         case MultType::ldpc:
+        {
 
+            auto size = mGen.mDomain * mGen.mPntCount;
+            assert(size >= mN2);
+            rT.resize(size, 1, AllocType::Uninitialized);
 
-
-            rT.resize(mN2, 1, AllocType::Uninitialized);
             mSum = mGen.expand(chls, prng, rT, PprfOutputFormat::Interleaved, false);
             setTimePoint("recver.expand.pprf_transpose");
 
@@ -475,6 +482,7 @@ namespace osuCrypto
             }
 
             ldpcMult(rT, messages, choices);
+        }
             break;
         default:
             break;
@@ -500,13 +508,22 @@ namespace osuCrypto
 
     void SilentOtExtReceiver::ldpcMult(Matrix<block>& rT, span<block>& messages, BitVector& choices)
     {
+
+        assert(rT.rows() >= mN2);
+        assert(rT.cols() == 1);
+
+        rT.resize(mN2, 1);
+
         setTimePoint("recver.expand.ldpc.mult");
         bool seperate = false;
         if (seperate)
 
         {
 
-            mLdpcEncoder.cirTransEncode(span<block>(rT));
+            if (mLdpcEncoder.mH.rows())
+                mLdpcEncoder.cirTransEncode(span<block>(rT));
+            else
+                mZpsDiagEncoder.cirTransEncode(span<block>(rT));
             setTimePoint("recver.expand.ldpc.cirTransEncode");
             std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
 
@@ -520,7 +537,10 @@ namespace osuCrypto
                 cc[p] = 1;
             }
 
-            mLdpcEncoder.cirTransEncode<u8>(cc);
+            if (mLdpcEncoder.mH.rows())
+                mLdpcEncoder.cirTransEncode<u8>(cc);
+            else
+                mZpsDiagEncoder.cirTransEncode<u8>(cc);
             setTimePoint("recver.expand.ldpc.cirTransEncodeBits");
 
             choices.resize(messages.size());
@@ -547,7 +567,10 @@ namespace osuCrypto
             }
             setTimePoint("recver.expand.ldpc.mask");
 
-            mLdpcEncoder.cirTransEncode(span<block>(rT));
+            if (mLdpcEncoder.mH.rows())
+                mLdpcEncoder.cirTransEncode(span<block>(rT));
+            else
+                mZpsDiagEncoder.cirTransEncode(span<block>(rT));
             setTimePoint("recver.expand.ldpc.cirTransEncode");
             //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
             choices.resize(messages.size());

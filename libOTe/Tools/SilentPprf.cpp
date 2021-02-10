@@ -840,7 +840,7 @@ namespace osuCrypto
                 // Receive their full set of sums for these 8 trees.
                 chl.recv(theirSums[0].data(), theirSums[0].size());
                 chl.recv(theirSums[1].data(), theirSums[1].size());
-                TODO("Optimize this recv so that if we have fewer than 8 trees then less data is sent..");
+                //TODO("Optimize this recv so that if we have fewer than 8 trees then less data is sent..");
 
                 // The number of real trees for this iteration.
                 auto min = std::min<u64>(8, mPntCount - g);

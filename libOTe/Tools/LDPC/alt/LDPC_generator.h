@@ -34,8 +34,8 @@ public:
 	std::vector<int>& get_check_node(int id){
 		return check_nodes[id];
 	}
-	int get_code_len() const{ return data_nodes.size(); }
-	int get_check_len() const{ return check_nodes.size(); }
+	int get_code_len() const{ return (int)data_nodes.size(); }
+	int get_check_len() const{ return (int)check_nodes.size(); }
 };
 
 //binary matrix, to present parity matrix
@@ -123,21 +123,27 @@ public:
 	}
 	std::unique_ptr<Tanner_graph> as_Tanner_graph() override
 	{
-		auto ret = std::make_unique<Tanner_graph>(mH->cols(), mH->rows());
+		auto ret = std::make_unique<Tanner_graph>((int)mH->cols(), (int)mH->rows());
 
 		for (auto i = 0ull; i < mH->rows(); ++i)
 		{
-			ret->check_nodes[i].insert(
-				ret->check_nodes[i].begin(),
-				mH->mRows[i].begin(),
-				mH->mRows[i].end());
+			//ret->check_nodes[i].insert(
+			//	ret->check_nodes[i].begin(),
+			//	mH->mRows[i].begin(),
+			//	mH->mRows[i].end());
+
+			for (auto cc : mH->mRows[i])
+				ret->check_nodes[i].push_back((int)cc);
 		}
 		for (auto i = 0ull; i < mH->cols(); ++i)
 		{
-			ret->data_nodes[i].insert(
-				ret->data_nodes[i].begin(),
-				mH->mCols[i].begin(),
-				mH->mCols[i].end());
+			//ret->data_nodes[i].insert(
+			//	ret->data_nodes[i].begin(),
+			//	mH->mCols[i].begin(),
+			//	mH->mCols[i].end());
+
+			for (auto cc : mH->mCols[i])
+				ret->data_nodes[i].push_back((int)cc);
 		}
 		return ret;
 	}

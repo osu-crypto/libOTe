@@ -96,7 +96,7 @@ namespace osuCrypto
         d = minDist(outPath, nt, false);
 
         std::remove(outPath.c_str());
-        return d;
+        return (int)d;
     }
 
 
@@ -269,7 +269,7 @@ namespace osuCrypto
         assert(mtx.rows() < mtx.cols());
 
         u64 percision = 2;
-        u64 p = std::pow(10, percision);
+        u64 p = (u64)std::pow(10, percision);
 
 
         std::mutex mut;
@@ -427,7 +427,7 @@ namespace osuCrypto
         assert(mtx.rows() < mtx.cols());
 
         u64 percision = 2;
-        u64 p = pow(10, percision);
+        u64 p = (u64) pow(10, percision);
 
         for (u64 weight = 2; weight < mtx.rows(); ++weight)
         {
@@ -817,7 +817,7 @@ namespace osuCrypto
         //return;
 
         u64 rows = cmd.getOr("m", 20);
-        u64 cols = rows * cmd.getOr("e", 2.0);
+        u64 cols = static_cast<u64>(rows * cmd.getOr("e", 2.0));
         u64 weight = cmd.getOr("w", 4);
         auto gaps = cmd.getManyOr<u64>("g", { 0 });
 

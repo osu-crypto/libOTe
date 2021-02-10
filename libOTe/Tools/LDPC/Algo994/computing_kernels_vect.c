@@ -45,9 +45,9 @@ int popcount_32(int32_t x);
 int popcount_64(int64_t x)
 {
 #ifdef _MSC_VER
-    return __popcnt64(x);
+    return (int)__popcnt64(x);
 #else
-    return __builtin_popcountl(x);
+    return (int)__builtin_popcountl(x);
 #endif
 }
 

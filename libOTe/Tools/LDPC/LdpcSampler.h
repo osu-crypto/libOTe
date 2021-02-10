@@ -372,7 +372,7 @@ namespace osuCrypto
     inline void sampleTriangularBand(
         u64 rows, u64 cols, 
         u64 weight, u64 gap,
-        u64 dWeight, u64 diag, u64 dDiag, std::vector<double> doubleBand, bool trim, bool extend,
+        u64 dWeight, u64 diag, u64 dDiag, std::vector<u64> doubleBand, bool trim, bool extend,
         oc::PRNG& prng, std::vector<Point>& points)
     {
         auto dHeight = gap + 1;
@@ -515,7 +515,7 @@ namespace osuCrypto
     inline SparseMtx sampleTriangularBand(
         u64 rows, u64 cols,
         u64 weight, u64 gap,
-        u64 dWeight, u64 diag, u64 dDiag, std::vector<double> doubleBand,
+        u64 dWeight, u64 diag, u64 dDiag, std::vector<u64> doubleBand,
         bool trim, bool extend,
         oc::PRNG& prng)
     {
@@ -649,7 +649,7 @@ namespace osuCrypto
     {
         assert(density > 0);
 
-        u64 t = ~u64{ 0 } *density;
+        u64 t = static_cast<u64>(~u64{ 0 } *density);
 
         for (u64 i = 0; i < rows; ++i)
         {

@@ -24,7 +24,7 @@ namespace osuCrypto
         {
 
 
-            u64 cols = rows * cmd.getOr("e", 2.0);
+            u64 cols = static_cast<u64>(rows * cmd.getOr("e", 2.0));
             u64 colWeight = cmd.getOr("cw", 5);
             u64 colGroups = cmd.getOr("cg", colWeight);
             u64 dWeight = cmd.getOr("dw", 3);
@@ -40,7 +40,7 @@ namespace osuCrypto
 
             alg994 = cmd.getOr("algo", ALG_SAVED);
             num_saved_generators = cmd.getOr("numGen", 5);
-            num_cores = nt;
+            num_cores = (int)nt;
             num_permutations = cmd.getOr("numPerm", 10);
             print_matrices = 0;
 
@@ -133,7 +133,7 @@ namespace osuCrypto
                 u64 d;
 
                 if (cmd.isSet("ex"))
-                    d = minDist(H.dense(), true).first;
+                    d = (u64) minDist(H.dense(), true).first;
                 else
                     d = minDist(outPath, nt, false);
                 dd.push_back(d);

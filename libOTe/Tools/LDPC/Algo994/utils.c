@@ -23,6 +23,7 @@
    Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 
 */
+#define _CRT_SECURE_NO_WARNINGS
 
 
 #include <stdio.h>
@@ -261,7 +262,7 @@ char nextCharNoSpace(FILE* fp)
 // ============================================================================
 int read_char_matrix( char * fileName, char ** mat, int * k, int * n ) {
   FILE       * fp;
-  int        filledMatrix, iretval, cc;
+  int        filledMatrix, iretval;
   char       c, * pcretval;
   enum { MAX_LINE_LENGTH = 10240 };
   char       myLine[ MAX_LINE_LENGTH ];

@@ -73,7 +73,7 @@ bool LDPC_encoder::init(LDPC_generator* generator, int& actual_msg_len){
 		for (int i = 0; i < code_len; i++){
 			printf("encoder init: %d/%d checks\n", i, check_len);
 			auto& data_node = graph->get_data_node(i);
-			int degree = data_node.size();
+			int degree = (int)data_node.size();
 			if (degree == 0)continue;
 			else if (degree != 1){
 				//first: choose the best one
@@ -81,7 +81,7 @@ bool LDPC_encoder::init(LDPC_generator* generator, int& actual_msg_len){
 				int smallest_check = 0;
 				for (auto it : data_node){
 					int _size;
-					if ((_size = graph->get_check_node(it).size()) < smallest_degree){
+					if ((_size = (int)graph->get_check_node(it).size()) < smallest_degree){
 						smallest_degree = _size;
 						smallest_check = it;
 					}
@@ -137,7 +137,7 @@ bool LDPC_encoder::init(LDPC_generator* generator, int& actual_msg_len){
 			}
 		}
 
-		actual_msg_len = code_len - parities.size();
+		actual_msg_len =(int)(code_len - parities.size());
 		//save_parities_to("parities.txt");
 		return true;
 	}
@@ -189,7 +189,7 @@ bool LDPC_encoder::init(LDPC_generator* generator, int& actual_msg_len){
 void LDPC_encoder::encode(const bit_array_t& bitarr,bit_array_t& dest){
 	assert(dest.size() == code_len);
 	dest.clear();
-	int size = parity_nodes.size();
+	int size = (int)parity_nodes.size();
 	for (int i = 0, it = 0; i < code_len; i++){
 		if (it < size && parity_nodes[it] == i)it++;
 		else if (i - it < bitarr.size()){
@@ -197,9 +197,9 @@ void LDPC_encoder::encode(const bit_array_t& bitarr,bit_array_t& dest){
 		}
 	}
 
-	for (int i = parities.size() - 1; i >= 0;i--){
+	for (int i = (int)parities.size() - 1; i >= 0;i--){
 		auto& parity = parities[i];
-		for (int i = parity.size() - 1; i > 0; i--)
+		for (int i = (int)parity.size() - 1; i > 0; i--)
 			dest.Xor(parity[0], dest[parity[i]]);
 	}
 }

@@ -399,7 +399,6 @@ namespace osuCrypto
                 // 
 
 
-                using ZpDiagEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagBandEncoder>;
 
                 ZpDiagEncoder enc;
                 enc.mL.init(rows, colWeight);
@@ -620,7 +619,7 @@ namespace osuCrypto
 
 
         auto mCur = c;
-        enc.cirTransEncode(mCur);
+        enc.cirTransEncode<u8>(mCur);
         mCur.resize(k);
 
 

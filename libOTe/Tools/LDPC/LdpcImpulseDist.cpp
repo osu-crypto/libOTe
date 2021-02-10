@@ -1,4 +1,6 @@
 
+
+#define _CRT_SECURE_NO_WARNINGS
 #include "LdpcImpulseDist.h"
 #include "LdpcDecoder.h"
 #include "Util.h"
@@ -456,13 +458,13 @@ namespace osuCrypto
                         if (verbose)
                             std::cout << " w=" << w << std::flush;
 
-                        minWeight = w;
+                        minWeight = (u32) w;
                         minCW.clear();
                         minCW.insert(minCW.end(), codeword.begin(), codeword.end());
 
                         if (timeout > 0)
                         {
-                            u64 nn = (i + 1) * timeout;
+                            u64 nn = static_cast<u64>((i + 1) * timeout);
                             nextTimeoutIdx = std::max(nextTimeoutIdx, nn);
                         }
                     }
@@ -634,7 +636,7 @@ namespace osuCrypto
 
         u64 diag = cmd.getOr("diag", 0);
         u64 dDiag = cmd.getOr("dDiag", 0);
-        auto doubleBand = cmd.getMany<double>("db");
+        auto doubleBand = cmd.getMany<u64>("db");
         bool trim = cmd.isSet("trim");
         bool extend = cmd.isSet("extend");
 
@@ -659,7 +661,7 @@ namespace osuCrypto
         auto trueDist = cmd.isSet("true");
         alg994 = cmd.getOr("algo994", ALG_SAVED);
         num_saved_generators = cmd.getOr("numGen", 5);
-        num_cores = nt;
+        num_cores = (int)nt;
         num_permutations = cmd.getOr("numPerm", 10);
         print_matrices = 0;
 
@@ -732,7 +734,7 @@ namespace osuCrypto
 
         for (auto rows : rowVec)
         {
-            u64 cols = rows * e;
+            u64 cols = static_cast<u64>(rows * e);
 
             std::vector<u64> dd;
 

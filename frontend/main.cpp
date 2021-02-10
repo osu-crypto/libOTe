@@ -465,11 +465,14 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 	OtExtSender sender;
 	OtExtRecver receiver;
 
+	bool fakeBase = cmd.isSet("fakeBase");
+
 
 	auto routine = [&](int s, int sec, SilentBaseType type)
 	{
 		// get a random number generator seeded from the system
 		PRNG prng(sysRandomSeed());
+		PRNG pp(ZeroBlock);
 
 		sync(chls[0], role);
 
@@ -486,8 +489,20 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			receiver.configure(numOTs, s, sec, chls.size());
 
 			//sync(chls[0], role);
-
-			receiver.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
+			if (fakeBase)
+			{
+				auto bits = receiver.sampleBaseChoiceBits(prng);
+				std::vector<std::array<block, 2>> baseSendMsgs(bits.size());
+				std::vector<block> baseRecvMsgs(bits.size());
+				pp.get(baseSendMsgs.data(), baseSendMsgs.size());
+				for (u64 i = 0; i < bits.size(); ++i)
+					baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
+				receiver.setSlientBaseOts(baseRecvMsgs);
+			}
+			else
+			{
+				receiver.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
+			}
 			// perform  numOTs random OTs, the results will be written to msgs.
 			receiver.silentReceive(choice, msgs, prng, chls);
 		}
@@ -497,8 +512,17 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			sender.configure(numOTs, s, sec, chls.size());
 
 			//sync(chls[0], role);
-
-			sender.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
+			if (fakeBase)
+			{
+				auto count = sender.silentBaseOtCount();
+				std::vector<std::array<block, 2>> baseSendMsgs(count);
+				pp.get(baseSendMsgs.data(), baseSendMsgs.size());
+				sender.setSlientBaseOts(baseSendMsgs);
+			}
+			else
+			{
+				sender.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
+			}
 			// construct a vector to stored the random send messages. 
 
 			// if delta OT is used, then the user can call the following 

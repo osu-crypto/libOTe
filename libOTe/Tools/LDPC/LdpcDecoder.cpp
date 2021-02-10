@@ -782,7 +782,7 @@ namespace osuCrypto {
     void tests::LdpcDecode_pb_test(const oc::CLP& cmd)
     {
         u64 rows = cmd.getOr("r", 40);
-        u64 cols = rows * cmd.getOr("e", 2.0);
+        u64 cols = static_cast<u64>(rows * cmd.getOr("e", 2.0));
         u64 colWeight = cmd.getOr("cw", 3);
         u64 dWeight = cmd.getOr("dw", 3);
         u64 gap = cmd.getOr("g", 2);
@@ -815,7 +815,7 @@ namespace osuCrypto {
             if (cols < 35)
                 d = minDist(H.dense(), false).second.size();
 
-            LDPC_bp_decoder DD(cols, rows);
+            LDPC_bp_decoder DD((int)cols, (int)rows);
             DD.init(H);
             D.init(H);
             std::vector<u8> m(k), m2, code(cols);

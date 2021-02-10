@@ -41,10 +41,10 @@ public:
 	//soft-decision decoder for BSC
 	std::vector<oc::u8> logbpDecode(oc::span<oc::u8> codeword, oc::u64 maxIter = 1000)
 	{
-		bit_array_t c(codeword.size());
+		bit_array_t c((int)codeword.size());
 		for (auto i = 0ull; i < codeword.size(); ++i)
 		{
-			c.set(i, codeword[i]);
+			c.set(int(i), codeword[i]);
 		}
 
 		auto b = decode_BSC(c, 0.9, int(maxIter));
@@ -52,7 +52,11 @@ public:
 		{
 			std::vector<oc::u8> ret(codeword.size());
 			for (auto i = 0ull; i < codeword.size(); ++i)
-				ret[i] = c[i];
+			{
+
+				oc::u8 v = (oc::u8)c[(int)i];
+				ret[i] = v;
+			}
 			return ret;
 		}
 

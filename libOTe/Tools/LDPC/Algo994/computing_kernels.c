@@ -122,14 +122,14 @@ static int count_ones_in_uint32_with_precomputing( uint32_t a ) {
 // ============================================================================
 int compute_distance_of_uint32_vector_with_precomputing(
     uint32_t * vec, int n ) {
-  int  dist, i;
+  int  dist;
 
   dist = 0;
 
 #ifdef USE_VECTORIZATION
   dist = compute_distance_of_uint32_vector_with_precomputing_vect( vec, n );
 #else // USE_VECTORIZATION
-  for( i = 0; i < n; i++ ) {
+  for(int i = 0; i < n; i++ ) {
     dist += count_ones_in_uint32_with_precomputing( vec[ i ] );
   }
 #endif // USE_VECTORIZATION
@@ -148,12 +148,11 @@ void copy_uint32_vector( int n, uint32_t * targetVec, uint32_t * sourceVec ) {
 // ============================================================================
 void add_uint32_vector_to_vector( int n, uint32_t * targetVec,
     uint32_t * sourceVec ) {
-  int  i;
 
 #ifdef USE_VECTORIZATION
   add_uint32_vector_to_vector_vect( n, targetVec, sourceVec );
 #else // USE_VECTORIZATION
-  for( i = 0; i < n; i++ ) {
+  for(int i = 0; i < n; i++ ) {
     targetVec[ i ] ^= sourceVec[ i ];
   }
 
@@ -329,7 +328,6 @@ int add_every_row_to_uint32_vector_and_compute_distance( int k, int n,
   __m128i * vecAdditionVec_128 = NULL;
 
   int chunks_128 = n / VECT_SIZE;
-  int retAlign;
 
   minDist = 0;
 
@@ -538,7 +536,7 @@ int add_every_row_to_two_int_vectors_and_compute_distance( int k, int n,
 // This routine is employed when computing combinations based on combinations
 // with fewer elements.
 //
-  uint32_t  * ptrGamma, c1, c2, ge;
+  uint32_t  c1, c2;
   int       i, j, minDist, dist, dist1, dist2;
 
   //// printf( "add_every_row_to_two_int_vectors_and_compute_.... k: %d\n",
@@ -559,7 +557,6 @@ int add_every_row_to_two_int_vectors_and_compute_distance( int k, int n,
 
   int chunks_128 = n / VECT_SIZE;
   int * ptr2;
-  int retAlign;
 
   minDist = 0;
 
@@ -782,9 +779,9 @@ int add_every_row_to_two_int_vectors_and_compute_distance( int k, int n,
   for( i = 0; i < k; i++ ) {
     dist1 = 0;
     dist2 = 0;
-    ptrGamma = & gammaMatrices[ rowStride * i + 0 ];
+    uint32_t* ptrGamma = & gammaMatrices[ rowStride * i + 0 ];
     for( j = 0; j < n; j++ ) {
-      ge = * ptrGamma;
+      int ge = * ptrGamma;
       c1 = vecAddition1[ j ] ^ ge;
       dist1 += count_ones_in_uint32_with_precomputing( c1 );
       c2 = vecAddition2[ j ] ^ ge;

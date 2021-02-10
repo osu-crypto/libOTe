@@ -320,7 +320,7 @@ namespace osuCrypto
                     if (row > mY)
                         --row;
 
-                    pp[i] ^= m[row];
+                    pp[i] = pp[i] ^ m[row];
 
                     v[j] = mod(v[j] + j + 1);
                 }
@@ -418,14 +418,14 @@ namespace osuCrypto
                             goto restart;
                         }
                     }
-                    mRandColumns(i, j) = r;
+                    mRandColumns(i, j) = static_cast<u8>(r);
 
                     u64 rr = r + i + 1;
                     auto& rowSize = mRandRows(rr, gap);
 
                     assert(rowSize != gap);
 
-                    mRandRows(rr, rowSize) = r;
+                    mRandRows(rr, rowSize) = static_cast<u8>(r);
                     ++rowSize;
                 }
             }
@@ -442,26 +442,26 @@ namespace osuCrypto
             assert(mExtend);
             // solves for x such that y = M x, ie x := H^-1 y 
 
-            auto H = getMatrix();
+            //auto H = getMatrix();
 
-            auto assertFind = [&](u64 i, u64 x)
-            {
-                auto row = H.row(i);
-                assert(std::find(row.begin(), row.end(), x) != row.end());
-            };
+            //auto assertFind = [&](u64 i, u64 x)
+            //{
+            //    auto row = H.row(i);
+            //    assert(std::find(row.begin(), row.end(), x) != row.end());
+            //};
 
             for (u64 i = 0; i < mRows; ++i)
             {
                 auto rowSize = mRandRows(i, mGap);
                 auto row = &mRandRows(i, 0);
                 x[i] = y[i];
-                assertFind(i, i);
+                //assertFind(i, i);
 
                 for (u64 j = 0; j < rowSize; ++j)
                 {
                     auto col = i - row[j] - 1;
                     assert(col < i);
-                    assertFind(i, col);
+                    //assertFind(i, col);
                     x[i] = x[i] ^ x[col];
 
                 }
@@ -471,7 +471,7 @@ namespace osuCrypto
                     auto p = i - mOffsets[j] - mGap;
                     if (p >= mRows)
                         break;
-                    assertFind(i, p);
+                    //assertFind(i, p);
 
                     x[i] = x[i] ^ x[p];
                 }
@@ -485,32 +485,32 @@ namespace osuCrypto
 
             // solves for x such that y = M x, ie x := H^-1 y 
             assert(cols() == x.size());
-            auto H = getMatrix();
+            //auto H = getMatrix();
 
-            auto assertFind = [&](u64 i, u64 x)
-            {
-                auto row = H.row(i);
-                assert(std::find(row.begin(), row.end(), x) != row.end());
-            };
+            //auto assertFind = [&](u64 i, u64 x)
+            //{
+            //    auto row = H.row(i);
+            //    assert(std::find(row.begin(), row.end(), x) != row.end());
+            //};
 
             for (u64 i = mRows - 1; i != ~u64(0); --i)
             {
 
                 auto rowSize = mRandRows(i, mGap);
                 auto row = &mRandRows(i, 0);
-                assertFind(i, i);
-                std::set<u64> rrr;
-                assert(rrr.insert(i).second);
+                //assertFind(i, i);
+                //std::set<u64> rrr;
+                //assert(rrr.insert(i).second);
 
 
                 for (u64 j = 0; j < rowSize; ++j)
                 {
                     auto col = i - row[j] - 1;
                     assert(col < i);
-                    assertFind(i, col);
+                    //assertFind(i, col);
                     x[col] = x[col] ^ x[i];
 
-                    assert(rrr.insert(col).second);
+                    //assert(rrr.insert(col).second);
                 }
 
                 for (u64 j = 0; j < mOffsets.size(); ++j)
@@ -518,17 +518,17 @@ namespace osuCrypto
                     auto p = i - mOffsets[j] - mGap;
                     if (p >= mRows)
                         break;
-                    assertFind(i, p);
+                    //assertFind(i, p);
 
                     x[p] = x[p] ^ x[i];
-                    assert(rrr.insert(p).second);
+                    //assert(rrr.insert(p).second);
                 }
 
-                auto row2 = H.row(i);
-                for (auto c : row2)
-                {
-                    assert(rrr.find(c) != rrr.end());
-                }
+                //auto row2 = H.row(i);
+                //for (auto c : row2)
+                //{
+                //    assert(rrr.find(c) != rrr.end());
+                //}
                 //assert(rrr.size() == row.size() - 1);
             }
 
@@ -558,17 +558,17 @@ namespace osuCrypto
         {
             auto rr = mRandColumns.rows();
             auto ww = mRandColumns.cols();
-            std::set<std::pair<u64, u64>> set;
+            //std::set<std::pair<u64, u64>> set;
             for (u64 i = 0; i < rr; ++i)
             {
                 points.push_back({ i, i + colOffset });
 
-                assert(set.insert({ i, i + colOffset }).second);
+                //assert(set.insert({ i, i + colOffset }).second);
 
                 for (u64 j = 0; j < ww; ++j)
                 {
                     points.push_back({ mRandColumns(i,j) + i + 1 , i + colOffset });
-                    assert(set.insert({ mRandColumns(i,j) + i + 1, i + colOffset }).second);
+                    //assert(set.insert({ mRandColumns(i,j) + i + 1, i + colOffset }).second);
                 }
 
 
@@ -581,7 +581,7 @@ namespace osuCrypto
 
                     points.push_back({ p, i + colOffset });
 
-                    assert(set.insert({ p, i + colOffset }).second);
+                    //assert(set.insert({ p, i + colOffset }).second);
 
                 }
             }
@@ -591,7 +591,7 @@ namespace osuCrypto
                 for (u64 i = rr; i < cols(); ++i)
                 {
                     points.push_back({ i, i + colOffset });
-                    assert(set.insert({ i, i + colOffset }).second);
+                    //assert(set.insert({ i, i + colOffset }).second);
                 }
             }
         }
@@ -689,6 +689,7 @@ namespace osuCrypto
             return SparseMtx(rows(), cols(), points);
         }
     };
+    using ZpDiagEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagBandEncoder>;
 
     namespace tests
     {

@@ -150,7 +150,7 @@ int compute_distance_of_matrix(char* inputMatrix, int kInput, int nInput) {
         fprintf(stderr, "Error reading file 'config.in'.\n\n\n");
         exit(-1);
     }
-
+    return info;
 
 }
 

@@ -10,7 +10,7 @@
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/IknpOtExtSender.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
-#define NO_HASH
+//#define NO_HASH
 
 namespace osuCrypto
 {
@@ -65,6 +65,7 @@ namespace osuCrypto
         u64 mP, mN2, mN = 0, mNumPartitions, mScaler, mSizePer, mNumThreads;
         IknpOtExtSender mIknpSender;
         MultType mMultType = MultType::ldpc;
+        ZpDiagEncoder mZpsDiagEncoder;
         LdpcEncoder mLdpcEncoder;
         Matrix<block> rT;
 

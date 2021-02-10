@@ -45,7 +45,7 @@ bool LDPC_bp_decoder::init(LDPC_generator* gen){
 	int *p = new int[code_len + 1];
 	p[0] = 0;
 	for (int i = 0; i < code_len; i++){
-		total += g->get_data_node(i).size();
+		total += (int)g->get_data_node(i).size();
 		p[i + 1] = total;
 	}
 	check_to_data = new int* [code_len - msg_len];
@@ -66,7 +66,7 @@ bool LDPC_bp_decoder::init(LDPC_generator* gen){
 	for (int i = 0; i < code_len; i++){
 		data_to_check[i] = data_to_check_mem + p[i];
 		auto& nodes = g->get_data_node(i);
-		data_degree[i] = nodes.size();
+		data_degree[i] = (int)nodes.size();
 		for (int j = 0; j < data_degree[i]; j++){
 			data_to_check[i][j] = p[i] + j;
 		}
@@ -79,7 +79,7 @@ bool LDPC_bp_decoder::init(LDPC_generator* gen){
 	check_to_data_id[0] = check_to_data_id_mem;
 	for (int i = 0; i < check_len; i++){
 		auto& nodes = g->get_check_node(i);
-		total2 += nodes.size();
+		total2 += (int)nodes.size();
 		if (i != check_len - 1){
 			p2[i + 1] = total2;
 			check_to_data[i + 1] = check_to_data_mem + total2;
@@ -87,11 +87,11 @@ bool LDPC_bp_decoder::init(LDPC_generator* gen){
 		}
 		else assert(total2 == total);
 
-		check_degree[i] = nodes.size();
+		check_degree[i] = (int)nodes.size();
 		for (int j = 0; j < check_degree[i]; j++){
 			check_to_data_id[i][j] = nodes[j];
 			auto& n2 = g->get_data_node(nodes[j]);
-			int id = std::find(n2.begin(), n2.end(), i) - n2.begin();
+			int id = (int)(std::find(n2.begin(), n2.end(), i) - n2.begin());
 			check_to_data[i][j] = data_to_check[nodes[j]][id];
 		}
 	}

@@ -159,25 +159,32 @@ namespace osuCrypto
         if (mMultType == MultType::ldpc)
         {
             assert(scaler == 2);
-            u64 nn = numOTs * scaler;
-            auto mm = numOTs;
+            auto mm = nextPrime(numOTs+1) - 1;
+            //auto mm = numOTs;// nextPrime(numOTs) - 1;
+            u64 nn = mm * scaler;
             auto kk = nn - mm;
 
             u64 colWeight = 5;
             u64 diags = 5;
             u64 gap = 32;
-            u64 diagWeight = 5;
-            std::vector<double> db{ 5,31 };
+            u64 gapWeight = 5;
+            std::vector<u64> db{ 5,31 };
             PRNG pp(oc::ZeroBlock);
 
-            if (mLdpcEncoder.mH.cols() != nn)
+            if (mZpsDiagEncoder.cols() != nn)
             {
                 setTimePoint("config.begin");
-                auto mH = sampleTriangularBand(mm, nn, colWeight, gap, diagWeight, diags, 0, db, true, true, pp);
-                setTimePoint("config.sample");
-                mLdpcEncoder.init(std::move(mH), 0);
-                setTimePoint("config.init");
+                mZpsDiagEncoder.mL.init(mm, colWeight);
+                setTimePoint("config.Left");
+                mZpsDiagEncoder.mR.init(mm, gap, gapWeight, db, true, pp);
+                setTimePoint("config.Right");
+                
+                //auto mH = sampleTriangularBand(mm, nn, colWeight, gap, gapWeight, diags, 0, db, true, true, pp);
+                //setTimePoint("config.sample");
+                //mLdpcEncoder.init(std::move(mH), 0);
+                //setTimePoint("config.init");
             }
+
 
             mP = 0;
             mN = kk;
@@ -196,7 +203,7 @@ namespace osuCrypto
 
         mNumThreads = numThreads;
 
-        mSizePer = (mN2 + mNumPartitions - 1) / mNumPartitions;
+        mSizePer = roundUpTo((mN2 + mNumPartitions - 1) / mNumPartitions, 8);
 
         mGen.configure(mSizePer, mNumPartitions);
     }
@@ -323,8 +330,10 @@ namespace osuCrypto
 
             break;
         case MultType::ldpc:
-
-            rT.resize(mN2, 1, AllocType::Uninitialized);
+        {
+            auto size = mGen.mDomain * mGen.mPntCount;
+            assert(size >= mN2);
+            rT.resize(size, 1, AllocType::Uninitialized);
 
             mGen.expand(chls, delta, prng, rT, PprfOutputFormat::Interleaved, false);
             setTimePoint("sender.expand.pprf_transpose");
@@ -335,6 +344,8 @@ namespace osuCrypto
             }
 
             ldpcMult(rT, messages, chls.size());
+            break;
+        }
         default:
             break;
         }
@@ -553,13 +564,21 @@ namespace osuCrypto
 
     void SilentOtExtSender::ldpcMult(Matrix<block>& rT, span<std::array<block, 2>>& messages, u64 threads)
     {
+        assert(rT.rows() >= mN2);
+        assert(rT.cols() == 1);
+
+        rT.resize(mN2, 1);
 
         bool seperate = false;
         if (seperate)
         {
 
             setTimePoint("recver.expand.ldpc.begin");
-            mLdpcEncoder.cirTransEncode(span<block>(rT));
+
+            if(mLdpcEncoder.mH.rows())
+                mLdpcEncoder.cirTransEncode(span<block>(rT));
+            else
+                mZpsDiagEncoder.cirTransEncode(span<block>(rT));
             setTimePoint("recver.expand.ldpc.cirTransEncode");
             //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
             for (u64 i = 0; i < messages.size(); ++i)
@@ -579,8 +598,10 @@ namespace osuCrypto
             }
             setTimePoint("recver.expand.ldpc.mask");
             
-
-            mLdpcEncoder.cirTransEncode(span<block>(rT));
+            if (mLdpcEncoder.mH.rows())
+                mLdpcEncoder.cirTransEncode(span<block>(rT));
+            else
+                mZpsDiagEncoder.cirTransEncode(span<block>(rT));
             setTimePoint("recver.expand.ldpc.cirTransEncode");
             //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
             auto d = mGen.mValue & mask;
