@@ -199,6 +199,60 @@ namespace osuCrypto
     }
 
 
+
+    void LdpcZpStarEncoder::init(u64 rows, u64 weight)
+    {
+        assert(isPrime(rows + 1));
+        assert(weight);
+        assert(weight <= rows);
+
+        mRows = rows;
+        mWeight = weight;
+
+        mP = mRows + 1;
+        mY = mP / 2;
+    }
+
+    std::vector<u64> LdpcZpStarEncoder::getVals()
+    {
+
+        std::vector<u64> v(mWeight);
+        for (u64 i = 0; i < mWeight; ++i)
+            v[i] = mod(i + 1 + mY);
+        return v;
+    }
+
+    void LdpcZpStarEncoder::encode(span<u8> pp, span<const u8> m)
+    {
+        auto cols = mRows;
+        assert(pp.size() == mRows);
+        assert(m.size() == cols);
+
+        // pp = A * m
+
+        auto v = getVals();
+
+        for (u64 i = 0; i < cols; ++i)
+        {
+            for (u64 j = 0; j < mWeight; ++j)
+            {
+                auto row = v[j];
+
+                assert(row != mY);
+                assert(row < mP);
+
+                if (row > mY)
+                    --row;
+
+                pp[row] ^= m[i];
+
+                v[j] = mod(v[j] + j + 1);
+            }
+        }
+    }
+
+
+
     void tests::LdpcEncoder_diagonalSolver_test()
     {
         u64 n = 10;
@@ -665,56 +719,134 @@ namespace osuCrypto
     }
 
 
-
-    void LdpcZpStarEncoder::init(u64 rows, u64 weight)
+    void tests::LdpcComposit_ZpDiagRep_encode_test()
     {
-        assert(isPrime(rows + 1));
-        assert(weight);
-        assert(weight <= rows);
 
-        mRows = rows;
-        mWeight = weight;
+        u64 rows = nextPrime(100) - 1;
+        u64 colWeight = 5;
+        u64 gap = 16;
+        u64 gapWeight = 5;
+        std::vector<u64> lowerDiags{ 5, 31 };
+        u64 period = 23;
 
-        mP = mRows + 1;
-        mY = mP / 2;
+        PRNG prng(ZeroBlock);
+
+        ZpDiagRepEncoder enc;
+        enc.mL.init(rows, colWeight);
+        enc.mR.init(rows, gap, gapWeight, period, lowerDiags, true, prng);
+
+        auto H = enc.getMatrix();
+        std::cout << H << std::endl;
+
+
+        LdpcEncoder enc2;
+        enc2.init(H, 0);
+
+
+        auto cols = enc.cols();
+        auto k = cols - rows;
+        std::vector<u8> m(k), c(cols), c2(cols);
+
+        for (auto& mm : m)
+            mm = prng.getBit();
+
+
+        enc.encode<u8>(c, m);
+
+        enc2.encode(c2, m);
+
+        auto ss = H.mult(c);
+
+        //for (auto sss : ss)
+        //    std::cout << int(sss) << " ";
+        //std::cout << std::endl;
+        if (ss != std::vector<u8>(H.rows(), 0))
+            throw RTE_LOC;
+        if (c2 != c)
+            throw RTE_LOC;
+
     }
-
-    std::vector<u64> LdpcZpStarEncoder::getVals()
+    void tests::LdpcComposit_ZpDiagRep_Trans_test()
     {
+        u64 rows = nextPrime(100) - 1;
+        u64 colWeight = 5;
+        u64 gap = 8;
+        u64 gapWeight = 5;
+        u64 period = 23;
+        std::vector<u64> lowerDiags{ 5, 31 };
 
-        std::vector<u64> v(mWeight);
-        for (u64 i = 0; i < mWeight; ++i)
-            v[i] = mod(i + 1 + mY);
-        return v;
-    }
+        PRNG prng(ZeroBlock);
 
-    void LdpcZpStarEncoder::encode(span<u8> pp, span<const u8> m)
-    {
-        auto cols = mRows;
-        assert(pp.size() == mRows);
-        assert(m.size() == cols);
+        ZpDiagRepEncoder enc;
+        enc.mL.init(rows, colWeight);
+        enc.mR.init(rows, gap, gapWeight, period, lowerDiags, true, prng);
 
-        // pp = A * m
+        auto H = enc.getMatrix();
 
-        auto v = getVals();
+        auto G = computeGen(H.dense()).transpose();
 
-        for (u64 i = 0; i < cols; ++i)
+
+        LdpcEncoder enc2;
+        enc2.init(H, 0);
+
+
+        auto cols = enc.cols();
+        auto k = cols - rows;
+
+        std::vector<u8> c(cols);
+
+        for (auto& cc : c)
+            cc = prng.getBit();
+        //std::cout << "\n";
+
+        auto mOld = c;
+        enc2.cirTransEncode<u8>(mOld);
+        mOld.resize(k);
+
+
+        auto mCur = c;
+        enc.cirTransEncode<u8>(mCur);
+        mCur.resize(k);
+
+
+
+        auto Gt = computeGen(H.dense()).transpose();
+        //std::cout << H << std::endl;
+        std::vector<u8> mMan(k);
+
+        //auto m = c * Gt;
+        assert(Gt.cols() == k);
+        assert(Gt.rows() == cols);
+        for (u64 i = 0; i < k; ++i)
         {
-            for (u64 j = 0; j < mWeight; ++j)
+            for (u64 j = 0; j < cols; ++j)
             {
-                auto row = v[j];
-
-                assert(row != mY);
-                assert(row < mP);
-
-                if (row > mY)
-                    --row;
-
-                pp[row] ^= m[i];
-
-                v[j] = mod(v[j] + j + 1);
+                if (Gt(j, i))
+                    mMan[i] ^= c[j];
             }
         }
-    }
 
+        if (mMan != mCur || mOld != mCur)
+        {
+
+            std::cout << "mCur ";
+            for (u64 i = 0; i < mCur.size(); ++i)
+                std::cout << int(mCur[i]) << " ";
+            std::cout << std::endl;
+
+            std::cout << "mOld ";
+            for (u64 i = 0; i < mOld.size(); ++i)
+                std::cout << int(mOld[i]) << " ";
+            std::cout << std::endl;
+
+            std::cout << "mMan ";
+            for (u64 i = 0; i < mMan.size(); ++i)
+                std::cout << int(mMan[i]) << " ";
+            std::cout << std::endl;
+
+            throw std::runtime_error(LOCATION);
+        }
+
+
+    }
 }

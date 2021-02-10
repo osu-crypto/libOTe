@@ -220,7 +220,7 @@ namespace osuCrypto
 
         void encode(span<u8> c, span<const u8> m);
 
-        
+
 
         template<typename T>
         void cirTransEncode(span<T> c)
@@ -420,12 +420,12 @@ namespace osuCrypto
                     }
                     mRandColumns(i, j) = static_cast<u8>(r);
 
-                    u64 rr = r + i + 1;
-                    auto& rowSize = mRandRows(rr, gap);
+                    u64 row = r + i + 1;
+                    auto& rowSize = mRandRows(row, gap);
 
                     assert(rowSize != gap);
 
-                    mRandRows(rr, rowSize) = static_cast<u8>(r);
+                    mRandRows(row, rowSize) = static_cast<u8>(r);
                     ++rowSize;
                 }
             }
@@ -518,32 +518,11 @@ namespace osuCrypto
                     auto p = i - mOffsets[j] - mGap;
                     if (p >= mRows)
                         break;
-                    //assertFind(i, p);
 
                     x[p] = x[p] ^ x[i];
                     //assert(rrr.insert(p).second);
                 }
-
-                //auto row2 = H.row(i);
-                //for (auto c : row2)
-                //{
-                //    assert(rrr.find(c) != rrr.end());
-                //}
-                //assert(rrr.size() == row.size() - 1);
             }
-
-            //assert(mC);
-            //assert(mC->cols() == x.size());
-            //for (u64 i = mC->rows() - 1; i != ~u64(0); --i)
-            //{
-            //    auto row = mC->row(i);
-            //    assert(row[row.size() - 1] == i);
-            //    for (u64 j = 0; j < row.size() - 1; ++j)
-            //    {
-            //        auto col = row[j];
-            //        x[col] = x[col] ^ x[i];
-            //    }
-            //}
         }
 
         template<typename T>
@@ -553,12 +532,11 @@ namespace osuCrypto
             cirTransEncode(x);
         }
 
-
         void getPoints(std::vector<Point>& points, u64 colOffset)
         {
             auto rr = mRandColumns.rows();
             auto ww = mRandColumns.cols();
-            //std::set<std::pair<u64, u64>> set;
+
             for (u64 i = 0; i < rr; ++i)
             {
                 points.push_back({ i, i + colOffset });
@@ -604,6 +582,289 @@ namespace osuCrypto
         }
 
     };
+
+
+
+    class LdpcDiagRepeaterEncoder
+    {
+    public:
+        u64 mGap, mCols, mRows;
+        u64 mGapWeight, mPeriod;
+        std::vector<u64> mOffsets;
+        Matrix<u8> mRandColumns;
+        Matrix<u64> mRandRows;
+        bool mExtend;
+
+        void init(
+            u64 rows,
+            u64 gap,
+            u64 gapWeight,
+            u64 period,
+            std::vector<u64> lowerBandOffsets,
+            bool extend,
+            PRNG& prng)
+        {
+            assert(gap < rows);
+            assert(gapWeight >= 1);
+            assert(gapWeight - 1 <= gap);
+
+            assert(gap < 255);
+
+            mRows = rows;
+            mGap = gap;
+            mGapWeight = gapWeight;
+            mOffsets = lowerBandOffsets;
+            mExtend = extend;
+            mPeriod = period;
+
+            if (extend)
+                mCols = rows;
+            else
+                mCols = rows - mGap;
+
+            mRandColumns.resize(period, mGapWeight - 1, AllocType::Uninitialized);
+            mRandRows.resize(period, gap + 1);
+
+            auto rr = mRandColumns.rows();
+            auto ww = mRandColumns.cols();
+            for (u64 i = 0; i < rr; ++i)
+            {
+                for (i64 j = 0; j < ww; ++j)
+                {
+                restart:
+
+                    auto r = prng.get<u8>() % mGap;// +(i + 1);
+                    for (u64 k = 0; k < j; ++k)
+                    {
+                        if (r == mRandColumns(i, k))
+                        {
+                            goto restart;
+                        }
+                    }
+                    mRandColumns(i, j) = static_cast<u8>(r);
+
+                    u64 row = (r + i + 1) % rr;
+                    auto& rowSize = mRandRows(row, gap);
+
+                    assert(rowSize != gap);
+
+                    mRandRows(row, rowSize) = static_cast<u8>(r);
+                    ++rowSize;
+                }
+            }
+        }
+
+        u64 cols() {
+            return mCols;
+        }
+
+        void encode(span<u8> x, span<const u8> y)
+        {
+            assert(mExtend);
+            // solves for x such that y = M x, ie x := H^-1 y 
+
+            //auto H = getMatrix();
+
+            //auto assertFind = [&](u64 i, u64 x)
+            //{
+            //    auto row = H.row(i);
+            //    assert(std::find(row.begin(), row.end(), x) != row.end());
+            //};
+
+            for (u64 i = 0; i < mRows; ++i)
+            {
+                auto rowSize = mRandRows(i % mPeriod, mGap);
+                auto row = &mRandRows(i % mPeriod, 0);
+
+                std::set<std::pair<u64, u64>> rrow;
+
+                x[i] = y[i];
+                //assertFind(i, i);
+                //assert(rrow.insert({ i,i }).second);
+
+                for (u64 j = 0; j < rowSize; ++j)
+                {
+                    auto col = i - row[j] - 1;
+
+                    if (col >= mRows)
+                        break;
+
+                    x[i] = x[i] ^ x[col];
+
+                    //assertFind(i, col);
+                    //assert(rrow.insert({ i,col }).second);
+
+                }
+
+                for (u64 j = 0; j < mOffsets.size(); ++j)
+                {
+                    auto p = i - mOffsets[j] - mGap;
+                    if (p >= mRows)
+                        break;
+
+                    x[i] = x[i] ^ x[p];
+                    //assertFind(i, p);
+                    //assert(rrow.insert({ i,p }).second);
+                }
+
+
+                //assert(rrow.size() == H.mRows[i].size());
+                //for (u64 j = 0; j < H.mRows[i].size(); ++j)
+                //    assert(rrow.find({ i,H.mRows[i][j] }) != rrow.end());
+            }
+        }
+
+        template<typename T>
+        void cirTransEncode(span<T> x)
+        {
+            assert(mExtend);
+
+            // solves for x such that y = M x, ie x := H^-1 y 
+            assert(cols() == x.size());
+            //auto H = getMatrix();
+
+            //auto assertFind = [&](u64 i, u64 x)
+            //{
+            //    auto row = H.row(i);
+            //    assert(std::find(row.begin(), row.end(), x) != row.end());
+            //};
+            constexpr int FIXED_OFFSET_SIZE = 2;
+            if (mOffsets.size() != FIXED_OFFSET_SIZE)
+                throw RTE_LOC;
+
+            auto offsets = mOffsets;
+            auto randRows = mRandRows;
+
+            auto randRowSize = mRandRows.rows();
+            u64 randRowIdx = (mRows - 1) % mPeriod;
+
+            for (u64 i = mRows - 1, k = 0; k < randRows.rows(); ++k, --i)
+            {
+                auto r = i % mPeriod;
+                auto rowSize = mRandRows(r, mGap);
+                for (u64 j = 0; j < rowSize; ++j)
+                {
+                    randRows(r, j) = i - randRows(r, j) - 1;
+                }
+
+            }
+
+            for (u64 j = 0; j < offsets.size(); ++j)
+            {
+                offsets[j] = mRows - 1 - offsets[j] - mGap;
+            }
+
+            for (u64 i = mRows - 1; i != ~u64(0); --i)
+            {
+
+                auto rowSize = randRows(randRowIdx, mGap);
+                auto row2 = &randRows(randRowIdx, 0);
+
+                if (randRowIdx == 0)
+                    randRowIdx = randRowSize-1;
+                else
+                    --randRowIdx;
+                //assertFind(i, i);
+                //std::set<u64> rrr;
+                //assert(rrr.insert(i).second);
+
+
+                for (u64 j = 0; j < rowSize; ++j)
+                {
+                    auto& col = row2[j];
+                    assert(col == i - row[j] - 1);
+
+                    if (col >= mRows)
+                        break;
+
+                    //assertFind(i, col);
+                    x[col] = x[col] ^ x[i];
+
+
+                    col -= mPeriod;
+                }
+
+                for (u64 j = 0; j < FIXED_OFFSET_SIZE; ++j)
+                {
+                    auto& col = offsets[j];
+
+                    if (col >= mRows)
+                        break;
+
+
+                    assert(i - mOffsets[j] - mGap == col);
+
+
+
+                    x[col] = x[col] ^ x[i];
+                    --col;
+
+                    //assert(rrr.insert(p).second);
+                }
+            }
+        }
+
+        template<typename T>
+        void cirTransEncode(span<T> x, span<const T> y)
+        {
+            std::memcpy(x.data(), y.data(), y.size() * sizeof(T));
+            cirTransEncode(x);
+        }
+
+        void getPoints(std::vector<Point>& points, u64 colOffset)
+        {
+            auto rr = mRows;
+            auto ww = mRandColumns.cols();
+
+            for (u64 i = 0; i < rr; ++i)
+            {
+                points.push_back({ i, i + colOffset });
+
+                //assert(set.insert({ i, i + colOffset }).second);
+
+                for (u64 j = 0; j < ww; ++j)
+                {
+
+                    auto row = mRandColumns(i % mPeriod, j) + i + 1;
+                    if(row < mRows)
+                        points.push_back({  row, i + colOffset });
+                    //assert(set.insert({ mRandColumns(i,j) + i + 1, i + colOffset }).second);
+                }
+
+
+                for (u64 j = 0; j < mOffsets.size(); ++j)
+                {
+
+                    auto p = mOffsets[j] + mGap + i;
+                    if (p >= mRows)
+                        break;
+
+                    points.push_back({ p, i + colOffset });
+
+                    //assert(set.insert({ p, i + colOffset }).second);
+
+                }
+            }
+
+            if (mExtend)
+            {
+                for (u64 i = rr; i < cols(); ++i)
+                {
+                    points.push_back({ i, i + colOffset });
+                    //assert(set.insert({ i, i + colOffset }).second);
+                }
+            }
+        }
+
+        SparseMtx getMatrix()
+        {
+            std::vector<Point> points;
+            getPoints(points, 0);
+            return SparseMtx(mRows, cols(), points);
+        }
+
+    };
+
     //LdpcDiagBandEncoder;
     //    LdpcZpStarEncoder;
     template<typename LEncoder, typename REncoder>
@@ -660,7 +921,7 @@ namespace osuCrypto
             //    std::cout << int(pp[i]) << " ";
             //std::cout << std::endl;
 
-            mL.cirTransEncode<T>(c.subspan(0,k), pp);
+            mL.cirTransEncode<T>(c.subspan(0, k), pp);
 
             //std::cout << "m  ";
             //for (u64 i = 0; i < m.size(); ++i)
@@ -690,6 +951,7 @@ namespace osuCrypto
         }
     };
     using ZpDiagEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagBandEncoder>;
+    using ZpDiagRepEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagRepeaterEncoder>;
 
     namespace tests
     {
@@ -704,6 +966,10 @@ namespace osuCrypto
         void LdpcDiagBandEncoder_encode_test();
         void LdpcComposit_ZpDiagBand_encode_test();
         void LdpcComposit_ZpDiagBand_Trans_test();
+
+
+        void LdpcComposit_ZpDiagRep_encode_test();
+        void LdpcComposit_ZpDiagRep_Trans_test();
     }
 
 }

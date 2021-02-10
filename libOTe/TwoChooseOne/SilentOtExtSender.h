@@ -65,7 +65,7 @@ namespace osuCrypto
         u64 mP, mN2, mN = 0, mNumPartitions, mScaler, mSizePer, mNumThreads;
         IknpOtExtSender mIknpSender;
         MultType mMultType = MultType::ldpc;
-        ZpDiagEncoder mZpsDiagEncoder;
+        ZpDiagRepEncoder mZpsDiagEncoder;
         LdpcEncoder mLdpcEncoder;
         Matrix<block> rT;
 

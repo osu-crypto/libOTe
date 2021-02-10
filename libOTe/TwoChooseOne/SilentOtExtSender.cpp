@@ -70,7 +70,7 @@ namespace osuCrypto
             // base OTs directly.
             DefaultBaseOT base;
             base.send(msg, prng, chl, mNumThreads);
-            setTimePoint("recver.gen.baseOT");
+            setTimePoint("sender.gen.baseOT");
         }
 
         mGen.setBase(msg);
@@ -168,6 +168,7 @@ namespace osuCrypto
             u64 diags = 5;
             u64 gap = 32;
             u64 gapWeight = 5;
+            u64 period = 1001;
             std::vector<u64> db{ 5,31 };
             PRNG pp(oc::ZeroBlock);
 
@@ -176,13 +177,14 @@ namespace osuCrypto
                 setTimePoint("config.begin");
                 mZpsDiagEncoder.mL.init(mm, colWeight);
                 setTimePoint("config.Left");
-                mZpsDiagEncoder.mR.init(mm, gap, gapWeight, db, true, pp);
+                mZpsDiagEncoder.mR.init(mm, gap, gapWeight, period, db, true, pp);
                 setTimePoint("config.Right");
                 
                 //auto mH = sampleTriangularBand(mm, nn, colWeight, gap, gapWeight, diags, 0, db, true, true, pp);
                 //setTimePoint("config.sample");
                 //mLdpcEncoder.init(std::move(mH), 0);
                 //setTimePoint("config.init");
+
             }
 
 
@@ -569,58 +571,73 @@ namespace osuCrypto
 
         rT.resize(mN2, 1);
 
-        bool seperate = false;
-        if (seperate)
-        {
 
-            setTimePoint("recver.expand.ldpc.begin");
+        block mask = OneBlock ^ AllOneBlock;
+        //auto m8 = rT.size() / 8 * 8;
+        //for (u64 i = 0; i < m8;  i += 8)
+        //{
+        //    auto r = &rT(i);
 
-            if(mLdpcEncoder.mH.rows())
-                mLdpcEncoder.cirTransEncode(span<block>(rT));
-            else
-                mZpsDiagEncoder.cirTransEncode(span<block>(rT));
-            setTimePoint("recver.expand.ldpc.cirTransEncode");
-            //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-            for (u64 i = 0; i < messages.size(); ++i)
-            {
-                messages[i][0] = rT(i);
-                messages[i][1] = rT(i) ^ mGen.mValue;
-            }
-            setTimePoint("recver.expand.ldpc.copy");
-        }
-        else
-        {
+        //    r[0] = r[0] & mask;
+        //    r[1] = r[1] & mask;
+        //    r[2] = r[2] & mask;
+        //    r[3] = r[3] & mask;
+        //    r[4] = r[4] & mask;
+        //    r[5] = r[5] & mask;
+        //    r[6] = r[6] & mask;
+        //    r[7] = r[7] & mask;
+        //}
 
-            block mask = OneBlock ^ AllOneBlock;
-            for (u64 i = 0; i < rT.size(); ++i)
-            {
-                rT(i) = rT(i) & mask;
-            }
-            setTimePoint("recver.expand.ldpc.mask");
+        //for (u64 i = m8; i < rT.size(); ++i)
+        //{
+        //    rT(i) = rT(i) & mask;
+        //}
+        //setTimePoint("sender.expand.ldpc.mask");
             
-            if (mLdpcEncoder.mH.rows())
-                mLdpcEncoder.cirTransEncode(span<block>(rT));
-            else
-                mZpsDiagEncoder.cirTransEncode(span<block>(rT));
-            setTimePoint("recver.expand.ldpc.cirTransEncode");
-            //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-            auto d = mGen.mValue & mask;
-            for (u64 i = 0; i < messages.size(); ++i)
-            {
-                messages[i][0] = rT(i);
-                messages[i][1] = rT(i) ^ d;
-            }
-            setTimePoint("recver.expand.ldpc.mCopy");
-        }
+        if (mLdpcEncoder.mH.rows())
+            mLdpcEncoder.cirTransEncode(span<block>(rT));
+        else
+            mZpsDiagEncoder.cirTransEncode(span<block>(rT));
+        setTimePoint("sender.expand.ldpc.cirTransEncode");
+        //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
+        auto d = mGen.mValue & mask;
 
-
+        auto n8 = messages.size() / 8 * 8;
         block hashBuffer[8];
-        auto nn = messages.size() * 2 / 8 * 8;
-        auto rem = messages.size() * 2 - nn;
-        auto iter = messages.data()->data();
-        auto end = iter + nn;
-        for (; iter != end; iter += 8)
+
+        for (u64 i = 0; i < n8; i += 8)
         {
+            auto m = &messages[i];
+            auto r = &rT(i);
+
+            r[0] = r[0] & mask;
+            r[1] = r[1] & mask;
+            r[2] = r[2] & mask;
+            r[3] = r[3] & mask;
+            r[4] = r[4] & mask;
+            r[5] = r[5] & mask;
+            r[6] = r[6] & mask;
+            r[7] = r[7] & mask;
+
+            m[0][0] = r[0];
+            m[1][0] = r[1];
+            m[2][0] = r[2];
+            m[3][0] = r[3];
+            m[4][0] = r[4];
+            m[5][0] = r[5];
+            m[6][0] = r[6];
+            m[7][0] = r[7];
+
+            m[0][1] = r[0] ^ d;
+            m[1][1] = r[1] ^ d;
+            m[2][1] = r[2] ^ d;
+            m[3][1] = r[3] ^ d;
+            m[4][1] = r[4] ^ d;
+            m[5][1] = r[5] ^ d;
+            m[6][1] = r[6] ^ d;
+            m[7][1] = r[7] ^ d;
+
+            auto iter = (block*)m;
             mAesFixedKey.ecbEnc8Blocks(iter, hashBuffer);
 
             iter[0] = iter[0] ^ hashBuffer[0];
@@ -631,15 +648,33 @@ namespace osuCrypto
             iter[5] = iter[5] ^ hashBuffer[5];
             iter[6] = iter[6] ^ hashBuffer[6];
             iter[7] = iter[7] ^ hashBuffer[7];
-        }
 
-        for (u64 i = 0; i < rem; ++i, ++iter)
-        {
-            auto h = mAesFixedKey.ecbEncBlock(*iter);
-            *iter = *iter ^ h;
+            iter += 8;
+            mAesFixedKey.ecbEnc8Blocks(iter, hashBuffer);
+
+            iter[0] = iter[0] ^ hashBuffer[0];
+            iter[1] = iter[1] ^ hashBuffer[1];
+            iter[2] = iter[2] ^ hashBuffer[2];
+            iter[3] = iter[3] ^ hashBuffer[3];
+            iter[4] = iter[4] ^ hashBuffer[4];
+            iter[5] = iter[5] ^ hashBuffer[5];
+            iter[6] = iter[6] ^ hashBuffer[6];
+            iter[7] = iter[7] ^ hashBuffer[7];
+
         }
-        
-        setTimePoint("recver.expand.ldpc.hash");
+        for (u64 i = n8; i < messages.size(); ++i)
+        {
+            messages[i][0] = rT(i);
+            messages[i][1] = rT(i) ^ d;
+
+
+            auto h = mAesFixedKey.ecbEncBlock(messages[i][0]);
+            messages[i][0] = messages[i][0] ^ h; 
+            h = mAesFixedKey.ecbEncBlock(messages[i][1]);
+            messages[i][1] = messages[i][1] ^ h;
+
+        }
+        setTimePoint("sender.expand.ldpc.mHash");
 
     }
 
@@ -696,12 +731,12 @@ namespace osuCrypto
             }
 
             if (index == 0)
-                setTimePoint("recver.expand.qc.randGen");
+                setTimePoint("sender.expand.qc.randGen");
 
             brs[j++].decrementWait();
 
             if (index == 0)
-                setTimePoint("recver.expand.qc.randGenWait");
+                setTimePoint("sender.expand.qc.randGenWait");
 
 
 
