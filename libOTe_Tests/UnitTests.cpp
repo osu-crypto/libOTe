@@ -40,6 +40,7 @@ namespace tests_libOTe
         tc.add("LdpcZpStarEncoder_encode_Trans_test        ", tests::LdpcZpStarEncoder_encode_Trans_test);
         tc.add("LdpcDiagBandEncoder_encode_test            ", tests::LdpcDiagBandEncoder_encode_test);
         tc.add("LdpcComposit_ZpDiagBand_encode_test        ", tests::LdpcComposit_ZpDiagBand_encode_test);
+        tc.add("LdpcComposit_ZpDiagBand_Trans_test         ", tests::LdpcComposit_ZpDiagBand_Trans_test);
         
                                                            
         tc.add("Tools_Pprf_test                            ", Tools_Pprf_test);

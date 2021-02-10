@@ -43,8 +43,8 @@ namespace osuCrypto
             diagOffsets.resize(diag);
             //std::set<u64> s;
 
-            //for (u64 i = 0; i < diag; ++i)
-            //    diagOffsets[i]= rows / 2;
+            for (u64 i = 0; i < diag; ++i)
+                diagOffsets[i]= rows / 2;
 
             //while (s.size() != diag)
             //    s.insert(prng.get<u64>() % rows);

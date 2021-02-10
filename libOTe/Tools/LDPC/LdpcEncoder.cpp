@@ -7,6 +7,8 @@
 namespace osuCrypto
 {
 
+    u64 nextPrime(u64 n);
+
     bool LdpcEncoder::init(SparseMtx H, u64 gap)
     {
 
@@ -96,22 +98,6 @@ namespace osuCrypto
 
         // pp = C^-1 pp 
         mCInv.mult(pp, pp);
-    }
-
-    void DiagInverter::mult(span<const u8> y, span<u8> x)
-    {
-        // solves for x such that y = M x, ie x := H^-1 y 
-        assert(mC);
-        assert(mC->rows() == y.size());
-        assert(mC->cols() == x.size());
-        for (u64 i = 0; i < mC->rows(); ++i)
-        {
-            auto row = mC->row(i);
-            x[i] = y[i];
-            for (u64 j = 0; j < row.size() - 1; ++j)
-                x[i] ^= x[row[j]];
-
-        }
     }
 
     void DiagInverter::mult(const SparseMtx& y, SparseMtx& x)
@@ -317,7 +303,7 @@ namespace osuCrypto
     void tests::LdpcEncoder_encode_g0_test()
     {
 
-        u64 rows = 16;
+        u64 rows = 17;
         u64 cols = rows * 2;
         u64 colWeight = 4;
 
@@ -337,10 +323,18 @@ namespace osuCrypto
             //std::cout << " +====================" << std::endl;
             while (b)
             {
+                //H = sampleTriangularBand(
+                //    rows, cols,
+                //    colWeight, 0,
+                //    1, false, prng);
+                // 
+                // 
+
+
                 H = sampleTriangularBand(
                     rows, cols,
-                    colWeight, 0,
-                    1, false, prng);
+                    colWeight, 8,
+                    colWeight, colWeight, 0, { 5,31 }, true, true, prng);
                 //H = sampleTriangular(rows, cols, colWeight, gap, prng);
                 b = !E.init(H, 0);
             }
@@ -369,42 +363,66 @@ namespace osuCrypto
 
     void tests::LdpcEncoder_encode_Trans_g0_test()
     {
-        u64 rows = 151;
-        u64 cols = rows * 2;
-        u64 colWeight = 4;
+        //u64 rows = 70;
+        //u64 colWeight = 4;
 
+        u64 rows = nextPrime(100) - 1;
+        u64 colWeight = 5;
+        u64 gap = 8;
+        u64 gapWeight = 5;
+        std::vector<u64> lowerDiags{ 5, 31 };
+
+        u64 cols = rows * 2;
         auto k = cols - rows;
 
-        oc::PRNG prng(block(0, 2));
+        oc::PRNG prng(ZeroBlock);
 
         SparseMtx H;
         LdpcEncoder E;
 
-        for (u64 i = 0; i < 10; ++i)
+        for (u64 i = 0; i < 1; ++i)
         {
             bool b = true;
             //std::cout << " +====================" << std::endl;
             while (b)
             {
-                H = sampleTriangularBand(
-                    rows, cols,
-                    colWeight, 0,
-                    1, false, prng);
+                //H = sampleTriangularBand(
+                //    rows, cols,
+                //    colWeight, 0,
+                //    1, false, prng);
+
+
+                //H = sampleTriangularBand(
+                //    rows, cols,
+                //    colWeight, 8,
+                //    colWeight, colWeight, 0, { 5,31 }, true, true, prng);
+                // 
+
+
+                using ZpDiagEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagBandEncoder>;
+
+                ZpDiagEncoder enc;
+                enc.mL.init(rows, colWeight);
+                enc.mR.init(rows, gap, gapWeight, lowerDiags, true, prng);
+
+                H = enc.getMatrix();
+                
                 //H = sampleTriangular(rows, cols, colWeight, gap, prng);
                 b = !E.init(H, 0);
             }
-
-            auto Gt = computeGen(H.dense()).transpose();
-            //std::cout << H << std::endl;
 
             std::vector<u8> c(cols), m(k);
 
             for (auto& cc : c)
                 cc = prng.getBit();
 
-            auto c2 = c;
-            E.cirTransEncode<u8>(c2);
+            auto m2 = c;
+            E.cirTransEncode<u8>(m2);
+            m2.resize(k);
 
+
+            auto Gt = computeGen(H.dense()).transpose();
+            //std::cout << H << std::endl;
 
             //auto m = c * Gt;
             assert(Gt.cols() == k);
@@ -414,12 +432,12 @@ namespace osuCrypto
                 for (u64 j = 0; j < cols; ++j)
                 {
                     if (Gt(j, i))
-                        m[i] ^= c2[j];
+                        m[i] ^= c[j];
                 }
             }
+            //m = computeGen(H.dense()).sparse() * c;
 
-            c.resize(k);
-            if (m != c)
+            if (m != m2)
             {
                 throw std::runtime_error(LOCATION);
             }
@@ -427,7 +445,6 @@ namespace osuCrypto
         }
 
     }
-    u64 nextPrime(u64 n);
 
     void tests::LdpcZpStarEncoder_encode_test()
     {
@@ -549,12 +566,102 @@ namespace osuCrypto
 
         enc.encode<u8>(c, m);
 
+        enc2.encode(c2, m);
+
         auto ss = H.mult(c);
 
         //for (auto sss : ss)
         //    std::cout << int(sss) << " ";
         //std::cout << std::endl;
-        assert(ss == std::vector<u8>(H.rows(), 0));
+        if (ss != std::vector<u8>(H.rows(), 0))
+            throw RTE_LOC;
+        if (c2 != c)
+            throw RTE_LOC;
+
+    }
+
+    void tests::LdpcComposit_ZpDiagBand_Trans_test()
+    {
+
+        u64 rows = nextPrime(100) - 1;
+        u64 colWeight = 5;
+        u64 gap = 8;
+        u64 gapWeight = 5;
+        std::vector<u64> lowerDiags{ 5, 31 };
+
+        using ZpDiagEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagBandEncoder>;
+        PRNG prng(ZeroBlock);
+
+        ZpDiagEncoder enc;
+        enc.mL.init(rows, colWeight);
+        enc.mR.init(rows, gap, gapWeight, lowerDiags, true, prng);
+
+        auto H = enc.getMatrix();
+
+        auto G = computeGen(H.dense()).transpose();
+
+
+        LdpcEncoder enc2;
+        enc2.init(H, 0);
+
+
+        auto cols = enc.cols();
+        auto k = cols - rows;
+
+        std::vector<u8> c(cols);
+
+        for (auto& cc : c)
+            cc = prng.getBit();
+        //std::cout << "\n";
+
+        auto mOld = c;
+        enc2.cirTransEncode<u8>(mOld);
+        mOld.resize(k);
+
+
+        auto mCur = c;
+        enc.cirTransEncode(mCur);
+        mCur.resize(k);
+
+
+
+        auto Gt = computeGen(H.dense()).transpose();
+        //std::cout << H << std::endl;
+        std::vector<u8> mMan(k);
+
+        //auto m = c * Gt;
+        assert(Gt.cols() == k);
+        assert(Gt.rows() == cols);
+        for (u64 i = 0; i < k; ++i)
+        {
+            for (u64 j = 0; j < cols; ++j)
+            {
+                if (Gt(j, i))
+                    mMan[i] ^= c[j];
+            }
+        }
+
+        if (mMan != mCur || mOld != mCur)
+        {
+
+            std::cout << "mCur ";
+            for (u64 i = 0; i < mCur.size(); ++i)
+                std::cout << int(mCur[i]) << " ";
+            std::cout << std::endl;
+
+            std::cout << "mOld ";
+            for (u64 i = 0; i < mOld.size(); ++i)
+                std::cout << int(mOld[i]) << " ";
+            std::cout << std::endl;
+
+            std::cout << "mMan ";
+            for (u64 i = 0; i < mMan.size(); ++i)
+                std::cout << int(mMan[i]) << " ";
+            std::cout << std::endl;
+
+            throw std::runtime_error(LOCATION);
+        }
+
 
     }
 
@@ -573,7 +680,7 @@ namespace osuCrypto
         mY = mP / 2;
     }
 
-    inline std::vector<u64> LdpcZpStarEncoder::getVals()
+    std::vector<u64> LdpcZpStarEncoder::getVals()
     {
 
         std::vector<u64> v(mWeight);
@@ -582,7 +689,7 @@ namespace osuCrypto
         return v;
     }
 
-    inline void LdpcZpStarEncoder::encode(span<u8> pp, span<const u8> m)
+    void LdpcZpStarEncoder::encode(span<u8> pp, span<const u8> m)
     {
         auto cols = mRows;
         assert(pp.size() == mRows);

@@ -39,16 +39,131 @@ namespace osuCrypto
         }
 
 
+        std::vector<SparseMtx> getSteps()
+        {
+            std::vector<SparseMtx> steps;
+
+            u64 n = mC->cols();
+            u64 nn = mC->cols() * 2;
+
+            for (u64 i = 0; i < mC->rows(); ++i)
+            {
+                auto row = mC->row(i);
+                std::vector<Point> points;
+
+                points.push_back({ i, n + i });
+                assert(row[row.size() - 1] == i);
+                for (u64 j = 0; j < row.size() - 1; ++j)
+                {
+                    points.push_back({ i,row[j] });
+                }
+
+
+                for (u64 j = 0; j < i; ++j)
+                {
+                    points.push_back({ j,j });
+                }
+
+                for (u64 j = 0; j < n; ++j)
+                {
+                    points.push_back({ n + j, n + j });
+                }
+                steps.emplace_back(nn, nn, points);
+
+            }
+
+            return steps;
+        }
+
         // computes x = mC^-1 * y
-        void mult(span<const u8> y, span<u8> x);
+        void mult(span<const u8> y, span<u8> x)
+        {
+            // solves for x such that y = M x, ie x := H^-1 y 
+            assert(mC);
+            assert(mC->rows() == y.size());
+            assert(mC->cols() == x.size());
+
+            //u64 n = mC->cols();
+            //u64 nn = mC->cols() * 2;
+
+            //std::vector<u8> xx(n);
+
+            //std::vector<u8> combined;
+            //combined.insert(combined.end(), xx.begin(), xx.end());
+            //combined.insert(combined.end(), y.begin(), y.end());
+
+            //auto steps = getSteps();
+
+            for (u64 i = 0; i < mC->rows(); ++i)
+            {
+                auto row = mC->row(i);
+                x[i] = y[i];
+
+                assert(row[row.size() - 1] == i);
+                for (u64 j = 0; j < row.size() - 1; ++j)
+                {
+                    x[i] ^= x[row[j]];
+                }
+
+
+                //combined = steps[i] * combined;
+                //std::cout << "x  ";
+                //for (u64 j = 0; j < n; ++j)
+                //    std::cout << int(xx[j]) << " ";
+
+                //std::cout << "\nx' ";
+                //for (u64 j = 0; j < n; ++j)
+                //    std::cout << int(combined[j]) << " ";
+                //std::cout << "\ny  ";
+                //for (u64 j = 0; j < n; ++j)
+                //    std::cout << int(y[j]) << " ";
+
+                //std::cout << "\ny' ";
+                //for (u64 j = 0; j < n; ++j)
+                //    std::cout << int(combined[j+n]) << " ";
+                //std::cout << std::endl;
+
+                //for (u64 j = 0; j < n; ++j)
+                //{
+                //    assert(xx[j] == combined[j]);
+                //    assert(y[j] == combined[j+n]);
+                //}
+            }
+
+            //std::copy(xx.begin(), xx.end(), x.begin());
+        }
+
+
+        //void cirTransMult(span<u8> x, span<u8> y)
+        //{
+        //    // solves for x such that y = M x, ie x := H^-1 y 
+        //    assert(mC);
+        //    assert(mC->cols() == x.size());
+
+
+        //    for (u64 i = mC->rows() - 1; i != ~u64(0); --i)
+        //    {
+        //        auto row = mC->row(i);
+        //        assert(row[row.size() - 1] == i);
+        //        for (u64 j = 0; j < row.size() - 1; ++j)
+        //        {
+        //            auto col = row[j];
+        //            assert(col < i);
+
+        //            x[col] = x[col] ^ x[i];
+        //        }
+
+        //    }
+        //}
 
 
         template<typename T>
-        void cirTransMult(span<T> x)
+        void cirTransMult(span<T> x, span<T> y)
         {
             // solves for x such that y = M x, ie x := H^-1 y 
             assert(mC);
             assert(mC->cols() == x.size());
+
             for (u64 i = mC->rows() - 1; i != ~u64(0); --i)
             {
                 auto row = mC->row(i);
@@ -56,22 +171,11 @@ namespace osuCrypto
                 for (u64 j = 0; j < row.size() - 1; ++j)
                 {
                     auto col = row[j];
+                    assert(col < i);
+
                     x[col] = x[col] ^ x[i];
                 }
             }
-        }
-
-
-        template<typename T>
-        void cirTransMult(span<T> x, span<const T> y)
-        {
-            // solves for x such that y = M x, ie x := H^-1 y 
-            assert(mC);
-            assert(mC->cols() == x.size());
-            assert(mC->cols() == y.size());
-
-            std::memcpy(x.data(), y.data(), x.size() * sizeof(T));
-            cirTransMult<T>(x);
         }
 
 
@@ -79,6 +183,16 @@ namespace osuCrypto
         void mult(const SparseMtx& y, SparseMtx& x);
 
     };
+
+    //inline int fff(u8 x)
+    //{
+    //    return x;
+    //}
+
+    //inline int fff(block x)
+    //{
+    //    return 0;
+    //}
 
     class LdpcEncoder
     {
@@ -106,6 +220,8 @@ namespace osuCrypto
 
         void encode(span<u8> c, span<const u8> m);
 
+        
+
         template<typename T>
         void cirTransEncode(span<T> c)
         {
@@ -115,8 +231,19 @@ namespace osuCrypto
 
             auto k = mN - mM;
             span<T> pp(c.subspan(k, mM));
+            span<T> mm(c.subspan(0, k));
 
-            mCInv.cirTransMult(pp);
+            //std::cout << "P  ";
+            //for (u64 i = 0; i < pp.size(); ++i)
+            //    std::cout << fff(pp[i]) << " ";
+            //std::cout << std::endl;
+
+            mCInv.cirTransMult(pp, mm);
+
+            //std::cout << "P' ";
+            //for (u64 i = 0; i < pp.size(); ++i)
+            //    std::cout << fff(pp[i]) << " ";
+            //std::cout << std::endl;
 
             for (u64 i = 0; i < k; ++i)
             {
@@ -124,7 +251,14 @@ namespace osuCrypto
                 {
                     c[i] = c[i] ^ pp[row];
                 }
+
+
             }
+
+            //std::cout << "m  ";
+            //for (u64 i = 0; i < k; ++i)
+            //    std::cout << fff(c[i]) << " ";
+            //std::cout << std::endl;
         }
 
     };
@@ -359,11 +493,15 @@ namespace osuCrypto
                 assert(std::find(row.begin(), row.end(), x) != row.end());
             };
 
-            s           for (u64 i = mRows - 1; i != ~u64(0); ++i)
+            for (u64 i = mRows - 1; i != ~u64(0); --i)
             {
+
                 auto rowSize = mRandRows(i, mGap);
                 auto row = &mRandRows(i, 0);
                 assertFind(i, i);
+                std::set<u64> rrr;
+                assert(rrr.insert(i).second);
+
 
                 for (u64 j = 0; j < rowSize; ++j)
                 {
@@ -372,6 +510,7 @@ namespace osuCrypto
                     assertFind(i, col);
                     x[col] = x[col] ^ x[i];
 
+                    assert(rrr.insert(col).second);
                 }
 
                 for (u64 j = 0; j < mOffsets.size(); ++j)
@@ -382,8 +521,29 @@ namespace osuCrypto
                     assertFind(i, p);
 
                     x[p] = x[p] ^ x[i];
+                    assert(rrr.insert(p).second);
                 }
+
+                auto row2 = H.row(i);
+                for (auto c : row2)
+                {
+                    assert(rrr.find(c) != rrr.end());
+                }
+                //assert(rrr.size() == row.size() - 1);
             }
+
+            //assert(mC);
+            //assert(mC->cols() == x.size());
+            //for (u64 i = mC->rows() - 1; i != ~u64(0); --i)
+            //{
+            //    auto row = mC->row(i);
+            //    assert(row[row.size() - 1] == i);
+            //    for (u64 j = 0; j < row.size() - 1; ++j)
+            //    {
+            //        auto col = row[j];
+            //        x[col] = x[col] ^ x[i];
+            //    }
+            //}
         }
 
         template<typename T>
@@ -480,24 +640,33 @@ namespace osuCrypto
         }
 
         template<typename T>
-        void cirTransEncode(span<T> m, span<T> c)
+        void cirTransEncode(span<T> c)
         {
+            auto k = cols() - rows();
             assert(c.size() == cols());
-            assert(m.size() == mR.cols());
+            //assert(m.size() == k);
 
-            auto k = mN - mM;
-            span<T> pp(c.subspan(k, mM));
+            span<T> pp(c.subspan(k, rows()));
 
-            mR.cirTransMult(pp);
+            //std::cout << "P  ";
+            //for (u64 i = 0; i < pp.size(); ++i)
+            //    std::cout << int(pp[i]) << " ";
+            //std::cout << std::endl;
 
-            for (u64 i = 0; i < k; ++i)
-            {
-                m[i] = c[i];
-                for (auto row : mA.col(i))
-                {
-                    m[i] = m[i] ^ pp[row];
-                }
-            }
+            mR.cirTransEncode(pp);
+
+            //std::cout << "P' ";
+            //for (u64 i = 0; i < pp.size(); ++i)
+            //    std::cout << int(pp[i]) << " ";
+            //std::cout << std::endl;
+
+            mL.cirTransEncode<T>(c.subspan(0,k), pp);
+
+            //std::cout << "m  ";
+            //for (u64 i = 0; i < m.size(); ++i)
+            //    std::cout << int(m[i]) << " ";
+            //std::cout << std::endl;
+
         }
 
         u64 cols() {
@@ -533,6 +702,7 @@ namespace osuCrypto
 
         void LdpcDiagBandEncoder_encode_test();
         void LdpcComposit_ZpDiagBand_encode_test();
+        void LdpcComposit_ZpDiagBand_Trans_test();
     }
 
 }
