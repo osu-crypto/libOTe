@@ -428,11 +428,12 @@ namespace osuCrypto
             // the 5th tree. 
             std::array<std::vector<std::array<block, 8>>, 2> sums;
 
+            auto dd = mDepth + (oFormat == PprfOutputFormat::Interleaved ? 0 : 1);
             // tree will hold the full GGM tree. Note that there are 8 
             // indepenendent trees that are being processed together. 
             // The trees are flattenned to that the children of j are
             // located at 2*j  and 2*j+1. 
-            std::vector<std::array<block, 8>> tree((1ull << (mDepth + 1)));
+            std::vector<std::array<block, 8>> tree((1ull << (dd)));
 
 #ifdef DEBUG_PRINT_PPRF
             chl.asyncSendCopy(mValue);
@@ -753,11 +754,13 @@ namespace osuCrypto
             theirSums[0].resize(mDepth - 1);
             theirSums[1].resize(mDepth - 1);
 
+            auto dd = mDepth + (oFormat == PprfOutputFormat::Interleaved ? 0 : 1);
             // tree will hold the full GGM tree. Not that there are 8 
             // indepenendent trees that are being processed together. 
             // The trees are flattenned to that the children of j are
             // located at 2*j  and 2*j+1. 
-            std::vector<std::array<block, 8>> tree(1ull << (mDepth + 1));
+            std::vector<std::array<block, 8>> tree(1ull << (dd));
+            //std::vector<std::array<block, 8>> stack(mDepth);
 
 #ifdef DEBUG_PRINT_PPRF
             // This will be the full tree and is sent by the reciever to help debug. 
@@ -833,18 +836,6 @@ namespace osuCrypto
                 chl.recv(ftree);
                 auto l1f = getLevel(1, true);
 #endif
-
-
-
-
-
-
-
-
-
-
-
-
 
                 // Receive their full set of sums for these 8 trees.
                 chl.recv(theirSums[0].data(), theirSums[0].size());

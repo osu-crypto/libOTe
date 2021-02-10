@@ -427,4 +427,188 @@ namespace osuCrypto
         }
 
     }
+    u64 nextPrime(u64 n);
+
+    void tests::LdpcZpStarEncoder_encode_test()
+    {
+        u64 rows = nextPrime(100) - 1;
+        u64 weight = 5;
+
+        LdpcZpStarEncoder zz;
+        zz.init(rows, weight);
+
+        std::vector<u8> m(rows), pp(rows);
+
+        PRNG prng(ZeroBlock);
+
+        for (u64 i = 0; i < rows; ++i)
+            m[i] = prng.getBit();
+
+        zz.encode(pp, m);
+
+        auto p2 = zz.getMatrix().mult(m);
+
+        if (p2 != pp)
+        {
+            throw RTE_LOC;
+        }
+
+    }
+
+
+
+    void tests::LdpcZpStarEncoder_encode_Trans_test()
+    {
+        u64 rows = nextPrime(100) - 1;
+        u64 weight = 5;
+
+        LdpcZpStarEncoder zz;
+        zz.init(rows, weight);
+
+        std::vector<u8> m(rows), pp(rows);
+
+        PRNG prng(ZeroBlock);
+
+        for (u64 i = 0; i < rows; ++i)
+            m[i] = prng.getBit();
+
+        zz.cirTransEncode<u8>(pp, m);
+
+        auto p2 = zz.getMatrix().dense().transpose().sparse().mult(m);
+
+        if (p2 != pp)
+        {
+            throw RTE_LOC;
+        }
+
+    }
+
+    void tests::LdpcDiagBandEncoder_encode_test()
+    {
+
+        u64 rows = nextPrime(100) - 1;
+        u64 weight = 5;
+        u64 gap = 16;
+        std::vector<u64> lowerDiags{ 5, 31 };
+        PRNG prng(ZeroBlock);
+
+        LdpcDiagBandEncoder zz;
+        zz.init(rows, gap, weight, lowerDiags, true, prng);
+
+        std::vector<u8> m(rows), pp(rows);
+
+
+        //std::cout << zz.getMatrix() << std::endl;
+
+        for (u64 i = 0; i < rows; ++i)
+            m[i] = prng.getBit();
+
+        zz.encode(pp, m);
+
+        auto m2 = zz.getMatrix().mult(pp);
+
+        if (m2 != m)
+        {
+            throw RTE_LOC;
+        }
+
+    }
+
+    void tests::LdpcComposit_ZpDiagBand_encode_test()
+    {
+
+        u64 rows = nextPrime(100) - 1;
+        u64 colWeight = 5;
+        u64 gap = 16;
+        u64 gapWeight = 5;
+        std::vector<u64> lowerDiags{ 5, 31 };
+
+        using ZpDiagEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagBandEncoder>;
+        PRNG prng(ZeroBlock);
+
+        ZpDiagEncoder enc;
+        enc.mL.init(rows, colWeight);
+        enc.mR.init(rows, gap, gapWeight, lowerDiags, true, prng);
+
+        auto H = enc.getMatrix();
+
+        auto G = computeGen(H.dense()).transpose();
+
+
+        LdpcEncoder enc2;
+        enc2.init(H, 0);
+
+
+        auto cols = enc.cols();
+        auto k=  cols - rows;
+        std::vector<u8> m(k), c(cols), c2(cols);
+
+        for (auto& mm : m)
+            mm = prng.getBit();
+
+
+        enc.encode<u8>(c, m);
+
+        auto ss = H.mult(c);
+
+        //for (auto sss : ss)
+        //    std::cout << int(sss) << " ";
+        //std::cout << std::endl;
+        assert(ss == std::vector<u8>(H.rows(), 0));
+
+    }
+
+
+
+    void LdpcZpStarEncoder::init(u64 rows, u64 weight)
+    {
+        assert(isPrime(rows + 1));
+        assert(weight);
+        assert(weight <= rows);
+
+        mRows = rows;
+        mWeight = weight;
+
+        mP = mRows + 1;
+        mY = mP / 2;
+    }
+
+    inline std::vector<u64> LdpcZpStarEncoder::getVals()
+    {
+
+        std::vector<u64> v(mWeight);
+        for (u64 i = 0; i < mWeight; ++i)
+            v[i] = mod(i + 1 + mY);
+        return v;
+    }
+
+    inline void LdpcZpStarEncoder::encode(span<u8> pp, span<const u8> m)
+    {
+        auto cols = mRows;
+        assert(pp.size() == mRows);
+        assert(m.size() == cols);
+
+        // pp = A * m
+
+        auto v = getVals();
+
+        for (u64 i = 0; i < cols; ++i)
+        {
+            for (u64 j = 0; j < mWeight; ++j)
+            {
+                auto row = v[j];
+
+                assert(row != mY);
+                assert(row < mP);
+
+                if (row > mY)
+                    --row;
+
+                pp[row] ^= m[i];
+
+                v[j] = mod(v[j] + j + 1);
+            }
+        }
+    }
+
 }

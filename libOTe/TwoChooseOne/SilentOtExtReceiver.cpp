@@ -94,6 +94,13 @@ namespace osuCrypto
         return true;
     }
 
+    bool isPrime(u64 n)
+    {
+        PRNG prng(ZeroBlock);
+        return isPrime(n, prng);
+    }
+
+
     u64 nextPrime(u64 n)
     {
         PRNG prng(ZeroBlock);

@@ -7,9 +7,9 @@
 #include "LdpcSampler.h"
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Crypto/PRNG.h"
-
+#include "libOTe/Tools/LDPC/LdpcEncoder.h"
 extern "C" {
-    #include "libOTe/Tools/LDPC/Algo994/data_defs.h"
+#include "libOTe/Tools/LDPC/Algo994/data_defs.h"
 }
 
 #include <thread>
@@ -716,7 +716,7 @@ namespace osuCrypto
             if (trim)
                 label << " -trim ";
 
-            if(extend)
+            if (extend)
                 label << " -extend ";
 
         }
@@ -728,7 +728,7 @@ namespace osuCrypto
         }
 
         if (log.is_open())
-            log<< "\n" << label.str() << std::endl;
+            log << "\n" << label.str() << std::endl;
 
         for (auto rows : rowVec)
         {
@@ -769,7 +769,6 @@ namespace osuCrypto
                         rows, cols,
                         colWeight, gap,
                         dWeight, diag, dDiag, doubleBand, trim, extend, prng);
-
 
                 //std::cout << H << std::endl;
 
@@ -864,7 +863,7 @@ namespace osuCrypto
 
             {
                 std::cout << oc::Color::Green << "\r" << rows << ": ";
-                std::cout << min << " " << avg << " " << max << " ~ "<< oc::Color::Default ;
+                std::cout << min << " " << avg << " " << max << " ~ " << oc::Color::Default;
                 for (auto d : dd)
                     std::cout << d << " ";
 
