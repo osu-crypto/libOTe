@@ -259,10 +259,10 @@ namespace osuCrypto
 
             u64 colWeight = 5;
             u64 diags = 5;
-            u64 gap = 32;
+            u64 gap = 16;
             u64 gapWeight = 5;
             std::vector<u64> db{ 5,31 };
-            u64 period = 1001;
+            u64 period = 101;
             PRNG pp(oc::ZeroBlock);
             
             if (mZpsDiagEncoder.cols() != nn)

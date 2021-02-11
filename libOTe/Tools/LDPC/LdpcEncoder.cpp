@@ -212,6 +212,8 @@ namespace osuCrypto
 
         mP = mRows + 1;
         mY = mP / 2;
+        mIdx0 = idxToZp(0);
+
     }
 
     std::vector<u64> LdpcZpStarEncoder::getVals()
@@ -793,12 +795,34 @@ namespace osuCrypto
         tt.setTimePoint("computeGen");
 
 
+        auto cols = enc.cols();
+        auto k = cols - rows;
+
+        {
+            std::vector<u8> pp1(rows), pp2, m1(k), m2;
+
+            for (auto& p : pp1)
+                p = prng.getBit();
+            for (auto& mm : m1)
+                mm = prng.getBit();
+
+            pp2 = pp1;
+            m2 = m1;
+
+            enc.mL.cirTransEncode<u8>(pp1, m1);
+            enc.mL.optCirTransEncode<u8>(pp2, m2);
+
+            if (pp1 != pp2)
+                throw RTE_LOC;
+            if (m1 != m2)
+                throw RTE_LOC;
+        }
+
+
         LdpcEncoder enc2;
         enc2.init(H, 0);
 
 
-        auto cols = enc.cols();
-        auto k = cols - rows;
 
         std::vector<u8> c(cols);
 
