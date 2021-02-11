@@ -557,7 +557,23 @@ namespace osuCrypto
         else
         {
             block mask = OneBlock ^ AllOneBlock;
-            for (u64 i = 0; i < rT.size(); ++i)
+            auto m8 = rT.size() / 8 * 8;
+            auto r = &rT(0);
+
+            for (u64 i = 0; i < m8; i += 8)
+            {
+                r[0] = r[0] & mask;
+                r[1] = r[1] & mask;
+                r[2] = r[2] & mask;
+                r[3] = r[3] & mask;
+                r[4] = r[4] & mask;
+                r[5] = r[5] & mask;
+                r[6] = r[6] & mask;
+                r[7] = r[7] & mask;
+                r += 8;
+            }
+
+            for (u64 i = m8; i < rT.size(); ++i)
             {
                 rT(i) = rT(i) & mask;
             }
@@ -580,11 +596,10 @@ namespace osuCrypto
             std::array<block, 8> hashBuffer;
 
             auto n8 = messages.size() / 8 * 8;
+            auto m = &messages[0];
+            r = &rT(0);
             for (u64 i = 0; i < n8; i += 8)
             {
-                auto m = &messages[i];
-                auto r = &rT(i);
-
                 m[0] = r[0] & mask;
                 m[1] = r[1] & mask;
                 m[2] = r[2] & mask;
@@ -593,7 +608,6 @@ namespace osuCrypto
                 m[5] = r[5] & mask;
                 m[6] = r[6] & mask;
                 m[7] = r[7] & mask;
-
 
                 mAesFixedKey.ecbEnc8Blocks(m, hashBuffer.data());
 
@@ -625,6 +639,9 @@ namespace osuCrypto
                     (b5 << 5) ^
                     (b6 << 6) ^
                     (b7 << 7);
+
+                m += 8;
+                r += 8;
             }
 
             iter = iter + n8;

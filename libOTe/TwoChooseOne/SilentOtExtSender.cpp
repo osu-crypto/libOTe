@@ -573,27 +573,7 @@ namespace osuCrypto
 
 
         block mask = OneBlock ^ AllOneBlock;
-        //auto m8 = rT.size() / 8 * 8;
-        //for (u64 i = 0; i < m8;  i += 8)
-        //{
-        //    auto r = &rT(i);
 
-        //    r[0] = r[0] & mask;
-        //    r[1] = r[1] & mask;
-        //    r[2] = r[2] & mask;
-        //    r[3] = r[3] & mask;
-        //    r[4] = r[4] & mask;
-        //    r[5] = r[5] & mask;
-        //    r[6] = r[6] & mask;
-        //    r[7] = r[7] & mask;
-        //}
-
-        //for (u64 i = m8; i < rT.size(); ++i)
-        //{
-        //    rT(i) = rT(i) & mask;
-        //}
-        //setTimePoint("sender.expand.ldpc.mask");
-            
         if (mLdpcEncoder.mH.rows())
             mLdpcEncoder.cirTransEncode(span<block>(rT));
         else
@@ -605,10 +585,11 @@ namespace osuCrypto
         auto n8 = messages.size() / 8 * 8;
         block hashBuffer[8];
 
+        auto m = &messages[0];
+        auto r = &rT(0);
+
         for (u64 i = 0; i < n8; i += 8)
         {
-            auto m = &messages[i];
-            auto r = &rT(i);
 
             r[0] = r[0] & mask;
             r[1] = r[1] & mask;
@@ -661,6 +642,9 @@ namespace osuCrypto
             iter[6] = iter[6] ^ hashBuffer[6];
             iter[7] = iter[7] ^ hashBuffer[7];
 
+
+            m += 8;
+            r += 8;
         }
         for (u64 i = n8; i < messages.size(); ++i)
         {

@@ -2,6 +2,7 @@
 //#include <eigen/dense>
 #include <set>
 #include "cryptoTools/Crypto/PRNG.h"
+#include "cryptoTools/Common/Timer.h"
 #include "LdpcSampler.h"
 
 namespace osuCrypto
@@ -736,7 +737,7 @@ namespace osuCrypto
         enc.mR.init(rows, gap, gapWeight, period, lowerDiags, true, prng);
 
         auto H = enc.getMatrix();
-        std::cout << H << std::endl;
+        //std::cout << H << std::endl;
 
 
         LdpcEncoder enc2;
@@ -768,7 +769,10 @@ namespace osuCrypto
     }
     void tests::LdpcComposit_ZpDiagRep_Trans_test()
     {
+        Timer tt;
+        tt.setTimePoint("");
         u64 rows = nextPrime(100) - 1;
+        tt.setTimePoint("prime");
         u64 colWeight = 5;
         u64 gap = 8;
         u64 gapWeight = 5;
@@ -780,10 +784,13 @@ namespace osuCrypto
         ZpDiagRepEncoder enc;
         enc.mL.init(rows, colWeight);
         enc.mR.init(rows, gap, gapWeight, period, lowerDiags, true, prng);
+        tt.setTimePoint("init");
 
         auto H = enc.getMatrix();
+        tt.setTimePoint("getMatrix");
 
         auto G = computeGen(H.dense()).transpose();
+        tt.setTimePoint("computeGen");
 
 
         LdpcEncoder enc2;
@@ -798,16 +805,19 @@ namespace osuCrypto
         for (auto& cc : c)
             cc = prng.getBit();
         //std::cout << "\n";
+        tt.setTimePoint("init2");
 
         auto mOld = c;
         enc2.cirTransEncode<u8>(mOld);
         mOld.resize(k);
+        tt.setTimePoint("encode1");
 
 
         auto mCur = c;
         enc.cirTransEncode<u8>(mCur);
         mCur.resize(k);
 
+        tt.setTimePoint("encode2");
 
 
         auto Gt = computeGen(H.dense()).transpose();
@@ -825,6 +835,8 @@ namespace osuCrypto
                     mMan[i] ^= c[j];
             }
         }
+        tt.setTimePoint("Gt");
+        //std::cout << tt << std::endl;
 
         if (mMan != mCur || mOld != mCur)
         {

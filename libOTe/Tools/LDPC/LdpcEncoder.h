@@ -761,7 +761,7 @@ namespace osuCrypto
                 auto row2 = &randRows(randRowIdx, 0);
 
                 if (randRowIdx == 0)
-                    randRowIdx = randRowSize-1;
+                    randRowIdx = randRowSize - 1;
                 else
                     --randRowIdx;
                 //assertFind(i, i);
@@ -772,7 +772,7 @@ namespace osuCrypto
                 for (u64 j = 0; j < rowSize; ++j)
                 {
                     auto& col = row2[j];
-                    assert(col == i - row[j] - 1);
+                    //assert(col == i - row[j] - 1);
 
                     if (col >= mRows)
                         break;
@@ -826,8 +826,8 @@ namespace osuCrypto
                 {
 
                     auto row = mRandColumns(i % mPeriod, j) + i + 1;
-                    if(row < mRows)
-                        points.push_back({  row, i + colOffset });
+                    if (row < mRows)
+                        points.push_back({ row, i + colOffset });
                     //assert(set.insert({ mRandColumns(i,j) + i + 1, i + colOffset }).second);
                 }
 
@@ -921,8 +921,185 @@ namespace osuCrypto
             //    std::cout << int(pp[i]) << " ";
             //std::cout << std::endl;
 
-            mL.cirTransEncode<T>(c.subspan(0, k), pp);
+            //mL.cirTransEncode<T>(c.subspan(0, k), pp);
+            //if(0)
+            {
+                auto m = pp;
+                auto pp = c.subspan(0, k);
+                //auto v = mL.getVals();
+                auto vv = mL.getVals();
+                auto y = mL.mY;
+                if (mL.mWeight != 5)
+                    throw RTE_LOC;
 
+                struct Rec
+                {
+                    u64 end;
+                    u64 pos = 0;
+                    bool isY = false;
+                };
+
+                std::vector<Rec> recs; recs.reserve(mL.mWeight);
+                auto p = mL.mP;
+                assert(isPrime(p));
+
+                auto ZpToIdx = [&](u64 x)
+                {
+                    assert(x != 0 && x < p);
+                    if (x >= p - y)
+                        x = x - (p - y);
+                    else
+                        x = x + y - 1;
+
+                    assert(x < mL.mRows);
+                    return x;
+                };
+                auto idxToZp = [&](u64 x)
+                {
+                    auto z = x + (p - y);
+                    if (z >= p)
+                        z -= p - 1;
+                    assert(z != 0 && z < p);
+                    return z;
+                };
+
+                auto idx0 = idxToZp(0);
+                auto getNextEnd = [&](u64 j) -> Rec
+                {
+                    bool yy;
+                    u64 diff, z = idxToZp(vv[j]);
+                    auto idx = vv[j];
+
+                    auto slope = (j + 1);
+                    u64 e2, mod;
+
+                    if (z < idx0)
+                    {
+                        diff = (idx0 - z);
+                        yy = true;
+                    }
+                    else
+                    {
+                        assert(z < p);
+                        assert(z >= idx0);
+                        diff = p - z;
+                        yy = false;
+                    }
+                    e2 = (diff + slope - 1) / slope;
+
+                    assert(z + e2 * slope >=  (yy ? idx0 : p));
+                    assert(z + (e2 - 1) * slope < (yy ? idx0 : p));
+                    return { e2, j, yy };
+                };
+
+
+                for (u64 j = mL.mWeight - 1; j < mL.mWeight; --j)
+                {
+                    vv[j] = ZpToIdx(j + 1);
+
+                    auto rec = getNextEnd(j);
+                    recs.push_back(rec);
+
+                    auto s = recs.size();
+                    if (s > 1)
+                        assert(recs[s - 2].end < recs[s - 1].end);
+                }
+
+                auto e = recs.front().end;
+                auto vPtr = vv.data();
+                auto pPtr = pp.data();
+                for (u64 i = 0; i < mL.mRows;)
+                {
+
+                    while (i != e)
+                    {
+                        //auto row0 = v[0];
+                        //auto row1 = v[1];
+                        //auto row2 = v[2];
+                        //auto row3 = v[3];
+                        //auto row4 = v[4];
+
+
+
+                        //row0 -= (row0 > y);
+                        //row1 -= (row1 > y);
+                        //row2 -= (row2 > y);
+                        //row3 -= (row3 > y);
+                        //row4 -= (row4 > y);
+                        //if (row > mL.mY)
+                        //    --row;
+                        //assert( == row0);
+                        //assert( == row1);
+                        //assert( == row2);
+                        //assert( == row3);
+                        //assert( == row4);
+
+                        auto v0 = m[vPtr[0]];
+                        auto v1 = m[vPtr[1]];
+                        auto v2 = m[vPtr[2]];
+                        auto v3 = m[vPtr[3]];
+                        auto v4 = m[vPtr[4]];
+
+                        *pPtr = *pPtr ^ v0 ^ v1 ^ v2 ^ v3 ^ v4;;
+                        ++pPtr;
+                        //v[0] = mL.mod(v[0] + 1);
+                        //v[1] = mL.mod(v[1] + 2);
+                        //v[2] = mL.mod(v[2] + 3);
+                        //v[3] = mL.mod(v[3] + 4);
+                        //v[4] = mL.mod(v[4] + 5);
+
+
+                        vPtr[0] += 1;
+                        vPtr[1] += 2;
+                        vPtr[2] += 3;
+                        vPtr[3] += 4;
+                        vPtr[4] += 5;
+
+                        ++i;
+                    }
+
+                    if (i < mL.mRows)
+                    {
+                        assert(recs[0].end == e);
+
+                        while (recs[0].end == e)
+                        {
+
+                            auto rec = recs[0];
+                            recs.erase(recs.begin());
+                            auto j = rec.pos;
+                            auto slope = j + 1;
+
+                            auto z = idxToZp(vv[j]);
+
+                            if (rec.isY)
+                            {
+                                assert(z >= idx0);
+                                assert(vv[j] >= mL.mRows);
+                                vv[j] -= mL.mRows;
+                                assert(vv[j] < mL.mRows);
+                            }
+                            else
+                            {
+                                --vv[j];
+                            }
+
+                            rec = getNextEnd(j);
+                            auto next = vv[j] + slope * rec.end;
+                            rec.end += i;
+
+                            auto iter = recs.begin();
+                            while (iter != recs.end() && iter->end < rec.end)
+                                ++iter;
+
+                            recs.insert(iter, rec);
+                        }
+
+
+                        e = recs[0].end;
+                    }
+                }
+            }
             //std::cout << "m  ";
             //for (u64 i = 0; i < m.size(); ++i)
             //    std::cout << int(m[i]) << " ";
