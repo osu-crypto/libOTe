@@ -17,8 +17,16 @@ namespace osuCrypto
     }
 
 
-    int minDist(std::string path, u64 numTHreads, bool verbose = false);
-    int minDist2(const DenseMtx& mtx, u64 numTHreads, bool verbose = false);
+    int minDist(std::string path, u64 numTHreads, bool verbose);
+    int minDist2(const DenseMtx& mtx, u64 numTHreads, bool verbose);
+    //inline int minDist(std::string path, u64 numTHreads)
+    //{
+    //    return minDist(path, numTHreads, false);
+    //}
+    //inline int minDist2(const DenseMtx& mtx, u64 numTHreads)
+    //{
+    //    return minDist2(mtx, numTHreads, false);
+    //}
 
     void ithCombination(u64 index, u64 n, std::vector<u64>& set);
     std::vector<u64> ithCombination(u64 index, u64 n, u64 k);

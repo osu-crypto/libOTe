@@ -1,6 +1,7 @@
 #pragma once
 #include "Mtx.h"
 #include "cryptoTools/Crypto/PRNG.h"
+#include <numeric>
 
 namespace osuCrypto
 {
@@ -282,12 +283,20 @@ namespace osuCrypto
 
     }
 
+    class LdpcS1Encoder
+    {
+    public:
+    };
+
     class LdpcZpStarEncoder
     {
     public:
         u64 mRows, mWeight;
         u64 mP, mY, mIdx0;
+        std::vector<u64> mRandStarts;
         void init(u64 rows, u64 weight);
+        //void init(u64 rows, u64 weight, PRNG& randStartPrng);
+
 
         u64 mod(u64 x)
         {
@@ -631,6 +640,11 @@ namespace osuCrypto
             return mCols;
         }
 
+
+        u64 rows() {
+            return mRows;
+        }
+
         void encode(span<u8> x, span<const u8> y)
         {
             assert(mExtend);
@@ -809,7 +823,7 @@ namespace osuCrypto
             mGapWeight = gapWeight;
             mOffsets = lowerBandOffsets;
             mExtend = extend;
-            mPeriod = period;
+            mPeriod = std::min(period, rows);
 
             if (extend)
                 mCols = rows;
@@ -850,6 +864,11 @@ namespace osuCrypto
 
         u64 cols() {
             return mCols;
+        }
+
+        u64 rows()
+        {
+            return mRows;
         }
 
         void encode(span<u8> x, span<const u8> y)
@@ -1032,7 +1051,7 @@ namespace osuCrypto
 
         void getPoints(std::vector<Point>& points, u64 colOffset)
         {
-            auto rr = mRows;
+            auto rr = mCols;
             auto ww = mRandColumns.cols();
 
             for (u64 i = 0; i < rr; ++i)
@@ -1067,7 +1086,7 @@ namespace osuCrypto
 
             if (mExtend)
             {
-                for (u64 i = rr; i < cols(); ++i)
+                for (u64 i = rr; i < mRows; ++i)
                 {
                     points.push_back({ i, i + colOffset });
                     //assert(set.insert({ i, i + colOffset }).second);
@@ -1125,7 +1144,7 @@ namespace osuCrypto
             auto k = cols() - rows();
             assert(c.size() == cols());
             //assert(m.size() == k);
-
+            gTimer.setTimePoint("encode_begin");
             span<T> pp(c.subspan(k, rows()));
 
             //std::cout << "P  ";
@@ -1135,12 +1154,14 @@ namespace osuCrypto
 
             mR.cirTransEncode(pp);
 
+            gTimer.setTimePoint("diag");
             //std::cout << "P' ";
             //for (u64 i = 0; i < pp.size(); ++i)
             //    std::cout << int(pp[i]) << " ";
             //std::cout << std::endl;
 
-            mL.optCirTransEncode<T>(c.subspan(0, k), pp);
+            mL.template optCirTransEncode<T>(c.subspan(0, k), pp);
+            gTimer.setTimePoint("zp");
             //if(0)
 
             //std::cout << "m  ";
@@ -1155,7 +1176,7 @@ namespace osuCrypto
         }
 
         u64 rows() {
-            return mR.cols();
+            return mR.rows();
         }
         void getPoints(std::vector<Point>& points)
         {

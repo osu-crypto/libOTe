@@ -9,6 +9,7 @@
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/IknpOtExtSender.h>
+#include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 //#define NO_HASH
 
@@ -63,7 +64,9 @@ namespace osuCrypto
 
         SilentMultiPprfSender mGen;
         u64 mP, mN2, mN = 0, mNumPartitions, mScaler, mSizePer, mNumThreads;
+#ifdef ENABLE_IKNP
         IknpOtExtSender mIknpSender;
+#endif
         MultType mMultType = MultType::ldpc;
         ZpDiagRepEncoder mZpsDiagEncoder;
         LdpcEncoder mLdpcEncoder;
@@ -85,7 +88,11 @@ namespace osuCrypto
             const BitVector& choices,
             Channel& chl) override
         {
+#ifdef ENABLE_IKNP
             mIknpSender.setBaseOts(baseRecvOts, choices, chl);
+#else
+            throw std::runtime_error("IKNP must be enabled");
+#endif
         }
 
         // Returns an indpendent copy of this extender.
@@ -98,7 +105,11 @@ namespace osuCrypto
         // IKNP base OTs that are required.
         void genBaseOts(PRNG& prng, Channel& chl) override
         {
+#ifdef ENABLE_IKNP
             mIknpSender.genBaseOts(prng, chl);
+#else
+            throw std::runtime_error("IKNP must be enabled");
+#endif
         }
 
         // Perform OT extension of random OT messages but

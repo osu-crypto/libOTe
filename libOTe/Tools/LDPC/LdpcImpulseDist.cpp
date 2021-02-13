@@ -10,6 +10,7 @@
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
+#include "libOTe/Tools/Tools.h"
 extern "C" {
 #include "libOTe/Tools/LDPC/Algo994/data_defs.h"
 }
@@ -639,13 +640,20 @@ namespace osuCrypto
         auto doubleBand = cmd.getMany<u64>("db");
         bool trim = cmd.isSet("trim");
         bool extend = cmd.isSet("extend");
-
+        u64 period = cmd.getOr("period", 100);
+        bool zp = cmd.isSet("zp");
+        bool randY = cmd.isSet("randY");
+        bool printYs = cmd.isSet("py");
         bool hm = cmd.isSet("hm");
 
         std::string logPath = cmd.getOr<std::string>("log", "");
 
         double timeout = cmd.getOr("to", 0.0);
         // estimator parameters
+
+        slopes_ = cmd.getManyOr<i64>("slope", {});
+        ys_ = cmd.getManyOr<i64>("ys", {});
+        yr_ = cmd.getManyOr<double>("yr", {});
         u64 Nd = cmd.getOr("Nd", 10);
         u64 Ng = cmd.getOr("Ng", 50);
         u64 iter = cmd.getOr("iter", 10);
@@ -721,6 +729,11 @@ namespace osuCrypto
             if (extend)
                 label << " -extend ";
 
+            label << " -period " << period;
+            if(zp)
+                label << " -zp ";
+
+
         }
 
         std::ofstream log;
@@ -734,7 +747,19 @@ namespace osuCrypto
 
         for (auto rows : rowVec)
         {
+
+            if (zp)
+            {
+                if (isPrime(rows + 1) == false)
+                    rows = nextPrime(rows + 1) - 1;
+
+            }
             u64 cols = static_cast<u64>(rows * e);
+
+            if (uniform && trim)
+            {
+                cols -= gap;
+            }
 
             std::vector<u64> dd;
 
@@ -756,23 +781,28 @@ namespace osuCrypto
                 {
                     if (cmd.isSet("cw"))
                     {
+
+
                         H = sampleFixedColWeight(rows, cols, colWeight, prng, true);
                     }
                     else
                         H = sampleUniformSystematic(rows, cols, prng);
                 }
-                else if (cmd.isSet("lb"))
-                    H = sampleTriangularLongBand(
-                        rows, cols,
-                        colWeight, gap,
-                        dWeight, diag, doubleBand.size(), prng);
+                else if (zp)
+                {
+                    ZpDiagRepEncoder enc;
+                    enc.mL.init(rows, colWeight);
+                    enc.mR.init(rows, gap, dWeight, period, doubleBand, false, prng);
+
+                    H = enc.getMatrix();
+                }
                 else
+                {
                     H = sampleTriangularBand(
                         rows, cols,
                         colWeight, gap,
-                        dWeight, diag, dDiag, doubleBand, trim, extend, prng);
-
-                //std::cout << H << std::endl;
+                        dWeight, diag, dDiag, doubleBand, trim, extend, randY, prng);
+                }
 
                 //impulseDist(5, 5000);
                 //oc::Timer timer;
@@ -843,6 +873,14 @@ namespace osuCrypto
                 else if (!cmd.isSet("silent"))
                 {
                     std::cout << dd.back() << " " << std::flush;
+
+                    if (printYs)
+                    {
+                        std::cout << "~ ";
+                        for (auto y : lastYs_ )
+                            std::cout << y << " ";
+                        std::cout << std::endl;
+                    }
                 }
                 //std::cout << timer << std::endl;;
 

@@ -13,102 +13,7 @@
 
 namespace osuCrypto
 {
-    //bool gUseBgicksPprf(true);
 
-    //using namespace std;
-
-    // Utility function to do modular exponentiation. 
-    // It returns (x^y) % p 
-    u64 power(u64 x, u64 y, u64 p)
-    {
-        u64 res = 1;      // Initialize result 
-        x = x % p;  // Update x if it is more than or 
-                    // equal to p 
-        while (y > 0)
-        {
-            // If y is odd, multiply x with result 
-            if (y & 1)
-                res = (res * x) % p;
-
-            // y must be even now 
-            y = y >> 1; // y = y/2 
-            x = (x * x) % p;
-        }
-        return res;
-    }
-
-    // This function is called for all k trials. It returns 
-    // false if n is composite and returns false if n is 
-    // probably prime. 
-    // d is an odd number such that  d*2<sup>r</sup> = n-1 
-    // for some r >= 1 
-    bool millerTest(u64 d, PRNG& prng, u64 n)
-    {
-        // Pick a random number in [2..n-2] 
-        // Corner cases make sure that n > 4 
-        u64 a = 2 + prng.get<u64>() % (n - 4);
-
-        // Compute a^d % n 
-        u64 x = power(a, d, n);
-
-        if (x == 1 || x == n - 1)
-            return true;
-
-        // Keep squaring x while one of the following doesn't 
-        // happen 
-        // (i)   d does not reach n-1 
-        // (ii)  (x^2) % n is not 1 
-        // (iii) (x^2) % n is not n-1 
-        while (d != n - 1)
-        {
-            x = (x * x) % n;
-            d *= 2;
-
-            if (x == 1)     return false;
-            if (x == n - 1) return true;
-        }
-
-        // Return composite 
-        return false;
-    }
-
-    // It returns false if n is composite and returns true if n 
-    // is probably prime.  k is an input parameter that determines 
-    // accuracy level. Higher value of k indicates more accuracy. 
-    bool isPrime(u64 n, PRNG& prng, u64 k = 20)
-    {
-        // Corner cases 
-        if (n <= 1 || n == 4)  return false;
-        if (n <= 3) return true;
-
-        // Find r such that n = 2^d * r + 1 for some r >= 1 
-        u64 d = n - 1;
-        while (d % 2 == 0)
-            d /= 2;
-
-        // Iterate given nber of 'k' times 
-        for (u64 i = 0; i < k; i++)
-            if (!millerTest(d, prng, n))
-                return false;
-
-        return true;
-    }
-
-    bool isPrime(u64 n)
-    {
-        PRNG prng(ZeroBlock);
-        return isPrime(n, prng);
-    }
-
-
-    u64 nextPrime(u64 n)
-    {
-        PRNG prng(ZeroBlock);
-
-        while (isPrime(n, prng) == false)
-            ++n;
-        return n;
-    }
 
     u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
@@ -131,7 +36,12 @@ namespace osuCrypto
         Channel& chl)
     {
         setTimePoint("recver.gen.start");
+#ifdef ENABLE_IKNP
         mIknpRecver.genBaseOts(prng, chl);
+#else
+        throw std::runtime_error("IKNP must be enabled");
+#endif
+
     }
 
 
@@ -147,19 +57,21 @@ namespace osuCrypto
 
         // If we have IKNP base OTs, use them
         // to extend to get the silent base OTs.
-        if (mIknpRecver.hasBaseOts())
-        {
-            mIknpRecver.receive(choice, msg, prng, chl);
-        }
-        else
-        {
-            // otherwise just generate the silent 
-            // base OTs directly.
-            DefaultBaseOT base;
-            base.receive(choice, msg, prng, chl, mNumThreads);
-            setTimePoint("recver.gen.baseOT");
-        }
 
+#if defined(ENABLE_IKNP) || defined(LIBOTE_HAS_BASE_OT)
+
+    #ifdef ENABLE_IKNP
+        mIknpRecver.receive(choice, msg, prng, chl);
+    #else
+        // otherwise just generate the silent 
+        // base OTs directly.
+        DefaultBaseOT base;
+        base.receive(choice, msg, prng, chl, mNumThreads);
+        setTimePoint("recver.gen.baseOT");
+    #endif
+#else
+        throw std::runtime_error("IKNP or base OTs must be enabled");
+#endif
         mGen.setBase(msg);
         mGen.getPoints(mS, getPprfFormat());
 
@@ -262,7 +174,7 @@ namespace osuCrypto
             u64 gap = 16;
             u64 gapWeight = 5;
             std::vector<u64> db{ 5,31 };
-            u64 period = 101;
+            u64 period = 256;
             PRNG pp(oc::ZeroBlock);
             
             if (mZpsDiagEncoder.cols() != nn)
@@ -421,6 +333,9 @@ namespace osuCrypto
         PRNG& prng,
         span<Channel> chls)
     {
+
+        gTimer.setTimePoint("recver.ot.enter");
+
         if (isConfigured() == false)
         {
             // first generate 128 normal base OTs
@@ -433,13 +348,11 @@ namespace osuCrypto
         if (mGen.hasBaseOts() == false)
         {
             // make sure we have IKNP base OTs.
-            if (mIknpRecver.hasBaseOts() == false)
-                genBaseOts(prng, chls[0]);
-
             genSilentBaseOts(prng, chls[0]);
         }
 
         setTimePoint("recver.expand.start");
+        gTimer.setTimePoint("recver.expand.start");
 
         // column major matrix. mN2 columns and 1 row of 128 bits (128 bit rows)
 
@@ -476,6 +389,7 @@ namespace osuCrypto
 
             mSum = mGen.expand(chls, prng, rT, PprfOutputFormat::Interleaved, false);
             setTimePoint("recver.expand.pprf_transpose");
+            gTimer.setTimePoint("recver.expand.pprf_transpose");
 
             if (mDebug)
             {

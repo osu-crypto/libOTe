@@ -12,6 +12,8 @@ extern "C" {
 namespace osuCrypto
 {
 
+    std::vector<i64> slopes_, ys_, lastYs_;
+    std::vector<double> yr_;
 
 
     void sampleExp(oc::CLP& cmd)

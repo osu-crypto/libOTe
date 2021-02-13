@@ -65,6 +65,10 @@ namespace osuCrypto {
     //    c1 = _mm_xor_si128(c1, c4);
     //    c2 = _mm_xor_si128(c2, c5);
     //}
+    class PRNG;
+    bool isPrime(u64 n, PRNG& prng, u64 k = 20);
+    bool isPrime(u64 n);
+    u64 nextPrime(u64 n);
 
 
     void print(std::array<block, 128>& inOut);

@@ -7,6 +7,11 @@ set(SRCS "${SRCS}")
 add_library(libOTe STATIC ${SRCS})
 
 target_include_directories(libOTe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..) 
+
+
+find_package(OpenMP REQUIRED)
+target_link_libraries(libOTe OpenMP::OpenMP_CXX)
+
 target_link_libraries(libOTe cryptoTools)
 
 if(ENABLE_SSE AND NOT MSVC)

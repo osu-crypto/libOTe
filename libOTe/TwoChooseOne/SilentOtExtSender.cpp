@@ -15,7 +15,6 @@ namespace osuCrypto
 {
     //extern u64 numPartitions;
     //extern u64 nScaler;
-    u64 nextPrime(u64 n);
 
     u64 secLevel(u64 scale, u64 p, u64 points)
     {
@@ -43,12 +42,21 @@ namespace osuCrypto
 
     u64 SilentOtExtSender::baseOtCount() const
     {
+#ifdef ENABLE_IKNP
         return mIknpSender.baseOtCount();
+#else
+        throw std::runtime_error("IKNP must be enabled");
+#endif
     }
 
     bool SilentOtExtSender::hasBaseOts() const
     {
+#ifdef ENABLE_IKNP
         return mIknpSender.hasBaseOts();
+#else
+        throw std::runtime_error("IKNP must be enabled");
+#endif
+
     }
 
     void SilentOtExtSender::genSilentBaseOts(PRNG& prng, Channel& chl)
@@ -60,18 +68,20 @@ namespace osuCrypto
 
         // If we have IKNP base OTs, use them
         // to extend to get the silent base OTs.
-        if (mIknpSender.hasBaseOts())
-        {
-            mIknpSender.send(msg, prng, chl);
-        }
-        else
-        {
-            // otherwise just generate the silent 
-            // base OTs directly.
-            DefaultBaseOT base;
-            base.send(msg, prng, chl, mNumThreads);
-            setTimePoint("sender.gen.baseOT");
-        }
+#if defined(ENABLE_IKNP) || defined(LIBOTE_HAS_BASE_OT)
+
+    #ifdef ENABLE_IKNP
+        mIknpSender.send(msg, prng, chl);
+    #else
+        // otherwise just generate the silent 
+        // base OTs directly.
+        DefaultBaseOT base;
+        base.send(msg, prng, chl, mNumThreads);
+        setTimePoint("sender.gen.baseOT");
+#endif
+#else
+        throw std::runtime_error("IKNP or base OTs must be enabled");
+#endif
 
         mGen.setBase(msg);
 
@@ -168,7 +178,7 @@ namespace osuCrypto
             u64 diags = 5;
             u64 gap = 16;
             u64 gapWeight = 5;
-            u64 period = 101;
+            u64 period = 256;
             std::vector<u64> db{ 5,31 };
             PRNG pp(oc::ZeroBlock);
 
@@ -286,6 +296,9 @@ namespace osuCrypto
         PRNG& prng,
         span<Channel> chls)
     {
+        gTimer.setTimePoint("sender.ot.enter");
+
+
         if (isConfigured() == false)
         {
             // first generate 128 normal base OTs
@@ -297,14 +310,11 @@ namespace osuCrypto
 
         if (mGen.hasBaseOts() == false)
         {
-            // make sure we have IKNP base OTs.
-            if (mIknpSender.hasBaseOts() == false)
-                genBaseOts(prng, chls[0]);
-
             genSilentBaseOts(prng, chls[0]);
         }
 
         setTimePoint("sender.expand.start");
+        gTimer.setTimePoint("sender.expand.start");
 
         //auto type = MultType::QuasiCyclic;
         block delta = prng.get();
@@ -318,6 +328,7 @@ namespace osuCrypto
 
             mGen.expand(chls, delta, prng, rT, PprfOutputFormat::InterleavedTransposed, false);
             setTimePoint("sender.expand.pprf_transpose");
+            gTimer.setTimePoint("sender.expand.pprf_transpose");
 
 
             if (mDebug)
@@ -339,6 +350,7 @@ namespace osuCrypto
 
             mGen.expand(chls, delta, prng, rT, PprfOutputFormat::Interleaved, false);
             setTimePoint("sender.expand.pprf_transpose");
+            gTimer.setTimePoint("sender.expand.pprf_transpose");
 
             if (mDebug)
             {

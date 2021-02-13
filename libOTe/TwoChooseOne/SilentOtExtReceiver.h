@@ -8,6 +8,7 @@
 #include <libOTe/Tools/Tools.h>
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
+#include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 
@@ -26,7 +27,10 @@ namespace osuCrypto
         SilentBaseType mBaseType;
         bool mDebug = false;
         u64 mNumThreads;
+
+#ifdef ENABLE_IKNP
         IknpOtExtReceiver mIknpRecver;
+#endif
         SilentMultiPprfReceiver mGen;
 
         MultType mMultType = MultType::ldpc;
@@ -40,17 +44,29 @@ namespace osuCrypto
             span<std::array<block, 2>> baseSendOts,
             PRNG& prng,
             Channel& chl) override {
+#ifdef ENABLE_IKNP
             mIknpRecver.setBaseOts(baseSendOts, prng, chl);
+#else
+            throw std::runtime_error("IKNP must be enabled");
+#endif
         }
 
         // return the number of base OTs IKNP needs
         u64 baseOtCount() const override {
+#ifdef ENABLE_IKNP
             return mIknpRecver.baseOtCount();
+#else
+            throw std::runtime_error("IKNP must be enabled");
+#endif
         }
 
         // returns true if the IKNP base OTs are currently set.
-        bool hasBaseOts() const override { 
+        bool hasBaseOts() const override {
+#ifdef ENABLE_IKNP
             return mIknpRecver.hasBaseOts(); 
+#else
+            throw std::runtime_error("IKNP must be enabled");
+#endif
         };
 
         // Returns an indpendent copy of this extender.

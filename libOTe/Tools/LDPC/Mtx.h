@@ -139,7 +139,7 @@ namespace osuCrypto
 
                 if (points[i].mRow >= rows)
                 {
-                    std::cout << "row out of bounts " << points[i].mRow << " " << rows << std::endl;
+                    std::cout << "row out of bounds " << points[i].mRow << " " << rows << std::endl;
                     abort();
                 }
                 if (points[i].mCol >= cols)

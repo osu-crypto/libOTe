@@ -4,11 +4,9 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Common/Timer.h"
 #include "LdpcSampler.h"
-
+#include "libOTe/Tools/Tools.h"
 namespace osuCrypto
 {
-
-    u64 nextPrime(u64 n);
 
     bool LdpcEncoder::init(SparseMtx H, u64 gap)
     {
@@ -216,6 +214,34 @@ namespace osuCrypto
 
     }
 
+    //void LdpcZpStarEncoder::init(u64 rows, u64 weight, PRNG& prng)
+    //{
+    //    init(rows, weight);
+    //    struct Collision
+    //    {
+    //        u64 j0, j1;
+    //        u64 alt;
+    //    };
+
+    //    std::vector<Collision> collisions;
+    //    mRandStarts.reserve(mWeight);
+    //    std::set<u64> set;
+    //    while (set.size() != mWeight)
+    //    {
+    //        auto v = prng.get<u64>() % rows + 1;
+    //        if (set.insert(v).second)
+    //        {
+    //            mRandStarts.push_back(v);
+
+    //            for (u64 i = 0; i < mRandStarts.size() - 1; ++i)
+    //            {
+    //                auto a = i + 1;
+    //                //auto
+    //            }
+    //        }
+    //    }
+    //}
+
     std::vector<u64> LdpcZpStarEncoder::getVals()
     {
 
@@ -391,7 +417,7 @@ namespace osuCrypto
                 H = sampleTriangularBand(
                     rows, cols,
                     colWeight, 8,
-                    colWeight, colWeight, 0, { 5,31 }, true, true, prng);
+                    colWeight, colWeight, 0, { 5,31 }, true, true,true, prng);
                 //H = sampleTriangular(rows, cols, colWeight, gap, prng);
                 b = !E.init(H, 0);
             }
@@ -476,8 +502,8 @@ namespace osuCrypto
             E.cirTransEncode<u8>(m2);
             m2.resize(k);
 
-
-            auto Gt = computeGen(H.dense()).transpose();
+            auto HD = H.dense();
+            auto Gt = computeGen(HD).transpose();
             //std::cout << H << std::endl;
 
             //auto m = c * Gt;
@@ -604,8 +630,8 @@ namespace osuCrypto
         enc.mR.init(rows, gap, gapWeight, lowerDiags, true, prng);
 
         auto H = enc.getMatrix();
-
-        auto G = computeGen(H.dense()).transpose();
+        auto HD = H.dense();
+        auto G = computeGen(HD).transpose();
 
 
         LdpcEncoder enc2;
@@ -653,8 +679,8 @@ namespace osuCrypto
         enc.mR.init(rows, gap, gapWeight, lowerDiags, true, prng);
 
         auto H = enc.getMatrix();
-
-        auto G = computeGen(H.dense()).transpose();
+        auto HD = H.dense();
+        auto Gt = computeGen(HD).transpose();
 
 
         LdpcEncoder enc2;
@@ -681,7 +707,6 @@ namespace osuCrypto
 
 
 
-        auto Gt = computeGen(H.dense()).transpose();
         //std::cout << H << std::endl;
         std::vector<u8> mMan(k);
 
@@ -791,7 +816,8 @@ namespace osuCrypto
         auto H = enc.getMatrix();
         tt.setTimePoint("getMatrix");
 
-        auto G = computeGen(H.dense()).transpose();
+        auto HD = H.dense();
+        auto Gt = computeGen(HD).transpose();
         tt.setTimePoint("computeGen");
 
 
@@ -844,7 +870,6 @@ namespace osuCrypto
         tt.setTimePoint("encode2");
 
 
-        auto Gt = computeGen(H.dense()).transpose();
         //std::cout << H << std::endl;
         std::vector<u8> mMan(k);
 

@@ -467,6 +467,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 
 	bool fakeBase = cmd.isSet("fakeBase");
 
+	gTimer.setTimePoint("begin");
 
 	auto routine = [&](int s, int sec, SilentBaseType type)
 	{
@@ -478,15 +479,20 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 
 		if (role == Role::Receiver)
 		{
+			gTimer.setTimePoint("recver.thrd.begin");
+
 			// construct the choices that we want.
 			BitVector choice(numOTs);
-			// in this case pick random messages.
-			choice.randomize(prng);
+			gTimer.setTimePoint("recver.msg.alloc0");
 
 			// construct a vector to stored the received messages. 
-			std::vector<block> msgs(numOTs);
+			//std::vector<block> msgs(numOTs);
+			std::unique_ptr<block[]> backing(new block[numOTs]);
+			span<block> msgs(backing.get(), numOTs);
+			gTimer.setTimePoint("recver.msg.alloc1");
 
 			receiver.configure(numOTs, s, sec, chls.size());
+			gTimer.setTimePoint("recver.config");
 
 			//sync(chls[0], role);
 			if (fakeBase)
@@ -503,13 +509,22 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			{
 				receiver.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
 			}
+
+			gTimer.setTimePoint("recver.genBase");
+
 			// perform  numOTs random OTs, the results will be written to msgs.
 			receiver.silentReceive(choice, msgs, prng, chls);
 		}
 		else
 		{
-			std::vector<std::array<block, 2>> msgs(numOTs);
+			gTimer.setTimePoint("sender.thrd.begin");
+
+			//std::vector<std::array<block, 2>> msgs(numOTs);
+			std::unique_ptr<std::array<block,2>[]> backing(new std::array<block, 2>[numOTs]);
+			span<std::array<block, 2>> msgs(backing.get(), numOTs);
+			gTimer.setTimePoint("sender.msg.alloc");
 			sender.configure(numOTs, s, sec, chls.size());
+			gTimer.setTimePoint("sender.config");
 
 			//sync(chls[0], role);
 			if (fakeBase)
@@ -523,6 +538,8 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			{
 				sender.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
 			}
+			gTimer.setTimePoint("sender.genBase");
+
 			// construct a vector to stored the random send messages. 
 
 			// if delta OT is used, then the user can call the following 
@@ -534,6 +551,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 
 			// perform the OTs and write the random OTs to msgs.
 			sender.silentSend(msgs, prng, chls);
+
 		}
 	};
 
@@ -601,18 +619,22 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 				default:
 					break;
 				}
-
-
 				if (role == Role::Sender)
-					lout << tag <<
-					" n:" << Color::Green << std::setw(6) << std::setfill(' ')<<numOTs << Color::Default <<
-					" type: " << Color::Green << typeStr << Color::Default <<
-					" sec: " << Color::Green << std::setw(3) << std::setfill(' ') << sec << Color::Default <<
-					" s: " << Color::Green << s << Color::Default <<
-					"   ||   " << Color::Green << 
-					std::setw(6) << std::setfill(' ') << milli << " ms   " <<
-					std::setw(6) << std::setfill(' ') << com << " bytes" << std::endl << Color::Default;
+				{
 
+					lout << tag <<
+						" n:" << Color::Green << std::setw(6) << std::setfill(' ') << numOTs << Color::Default <<
+						" type: " << Color::Green << typeStr << Color::Default <<
+						" sec: " << Color::Green << std::setw(3) << std::setfill(' ') << sec << Color::Default <<
+						" s: " << Color::Green << s << Color::Default <<
+						"   ||   " << Color::Green <<
+						std::setw(6) << std::setfill(' ') << milli << " ms   " <<
+						std::setw(6) << std::setfill(' ') << com << " bytes" << std::endl << Color::Default;
+
+					if (cmd.getOr("v", 0) > 1)
+						lout << gTimer << std::endl;
+
+				}
 				if (cmd.isSet("v"))
 				{
 					if (role == Role::Sender)
@@ -621,6 +643,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 					if (role == Role::Receiver)
 						lout << " **** receiver ****\n" << recvTimer << std::endl;
 				}
+
 			}
 
 #endif
