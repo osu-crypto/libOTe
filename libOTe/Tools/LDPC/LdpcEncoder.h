@@ -337,7 +337,7 @@ namespace osuCrypto
         }
 
         template<typename T>
-        void cirTransEncode(span<T> pp, span<const T> m)
+        void cirTransEncode(span<T> ppp, span<const T> mm)
         {
             auto cols = mRows;
             assert(pp.size() == mRows);
@@ -347,7 +347,8 @@ namespace osuCrypto
 
             auto v = mYs;
 
-
+            T* __restrict pp = ppp.data();
+            const T* __restrict m = mm.data();
 
 
             for (u64 i = 0; i < cols; )
@@ -455,7 +456,7 @@ namespace osuCrypto
 
 
         template<typename T>
-        void cirTransEncode2(span<T> pp0, span<T> pp1, span<const T> m0, span<const T> m1)
+        void cirTransEncode2(span<T> ppp0, span<T> ppp1, span<const T> mm0, span<const T> mm1)
         {
             auto cols = mRows;
             //assert(pp.size() == mRows);
@@ -466,7 +467,10 @@ namespace osuCrypto
             auto v = mYs;
 
 
-
+            T* __restrict pp0 = ppp0.data();
+            T* __restrict pp1 = ppp1.data();
+            const T* __restrict m0 = mm0.data();
+            const T* __restrict m1 = mm1.data();
 
             for (u64 i = 0; i < cols; )
             {
@@ -1362,11 +1366,11 @@ namespace osuCrypto
                 + mGap + 10;
 
             u64 i = mRows - 1;
-            auto osCol0 = &x[offsets[0]];
-            auto osCol1 = &x[offsets[1]];
+            T* __restrict  osCol0 = &x[offsets[0]];
+            T* __restrict  osCol1 = &x[offsets[1]];
 
-            auto xi = &x[i];
-            auto xPtr = x.data();
+            T* __restrict  xi = &x[i];
+            T* __restrict  xPtr = x.data();
             for (; i != mainEnd; --i)
             {
 
@@ -1441,6 +1445,7 @@ namespace osuCrypto
         template<typename T>
         void cirTransEncode2(span<T> x0, span<T> x1)
         {
+
             assert(mExtend);
 
             // solves for x such that y = M x, ie x := H^-1 y 
@@ -1480,15 +1485,15 @@ namespace osuCrypto
                 + mGap + 10;
 
             u64 i = mRows - 1;
-            auto osCol00 = &x0[offsets[0]];
-            auto osCol10 = &x0[offsets[1]];
-            auto osCol01 = &x1[offsets[0]];
-            auto osCol11 = &x1[offsets[1]];
+            T* __restrict osCol00 = &x0[offsets[0]];
+            T* __restrict osCol10 = &x0[offsets[1]];
+            T* __restrict osCol01 = &x1[offsets[0]];
+            T* __restrict osCol11 = &x1[offsets[1]];
 
-            auto xi0 = &x0[i];
-            auto xi1 = &x1[i];
-            auto xPtr0 = x0.data();
-            auto xPtr1 = x1.data();
+            T* __restrict xi0 = &x0[i];
+            T* __restrict xi1 = &x1[i];
+            T* __restrict xPtr0 = x0.data();
+            T* __restrict xPtr1 = x1.data();
             for (; i != mainEnd; --i)
             {
 
