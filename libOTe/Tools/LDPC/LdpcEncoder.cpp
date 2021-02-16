@@ -582,6 +582,61 @@ namespace osuCrypto
 
     }
 
+
+    void tests::LdpcS1Encoder_encode_test()
+    {
+        u64 rows = 100;
+        u64 weight = 5;
+
+        LdpcS1Encoder zz;
+        zz.init(rows, weight);
+
+        std::vector<u8> m(rows), pp(rows);
+
+        PRNG prng(ZeroBlock);
+
+        for (u64 i = 0; i < rows; ++i)
+            m[i] = prng.getBit();
+
+        zz.encode(pp, m);
+
+        auto p2 = zz.getMatrix().mult(m);
+
+        if (p2 != pp)
+        {
+            throw RTE_LOC;
+        }
+
+    }
+
+
+
+    void tests::LdpcS1Encoder_encode_Trans_test()
+    {
+        u64 rows = 100;
+        u64 weight = 5;
+
+        LdpcS1Encoder zz;
+        zz.init(rows, weight);
+
+        std::vector<u8> m(rows), pp(rows);
+
+        PRNG prng(ZeroBlock);
+
+        for (u64 i = 0; i < rows; ++i)
+            m[i] = prng.getBit();
+
+        zz.cirTransEncode<u8>(pp, m);
+
+        auto p2 = zz.getMatrix().dense().transpose().sparse().mult(m);
+
+        if (p2 != pp)
+        {
+            throw RTE_LOC;
+        }
+
+    }
+
     void tests::LdpcDiagBandEncoder_encode_test()
     {
 
@@ -909,5 +964,23 @@ namespace osuCrypto
         }
 
 
+    }
+    void LdpcS1Encoder::init(u64 rows, std::vector<double> rs)
+    {
+        mRows = rows;
+        mWeight = rs.size();
+        assert(mWeight > 4);
+
+        mRs = rs;
+        mYs.resize(rs.size());
+        std::set<u64> s;
+        for (u64 i = 0; i < mWeight; ++i)
+        {
+            mYs[i] = nextPrime(rows * rs[i]) % rows;
+            if (s.insert(mYs[i]).second == false)
+            {
+                throw std::runtime_error("these ratios resulted in a collitions. " LOCATION);
+            }
+        }
     }
 }

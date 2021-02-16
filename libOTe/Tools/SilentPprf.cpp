@@ -344,10 +344,9 @@ namespace osuCrypto
         block value,
         PRNG& prng,
         MatrixView<block> output,
-        PprfOutputFormat oFormat,
-        bool mal, span<std::pair<u64, u64>> indices)
+        PprfOutputFormat oFormat, bool mal)
     {
-        return expand({ &chl, 1 }, value, prng, output, oFormat, mal, indices);
+        return expand({ &chl, 1 }, value, prng, output, oFormat, mal);
     }
 
     block SilentMultiPprfSender::expand(
@@ -355,8 +354,20 @@ namespace osuCrypto
         block value,
         PRNG& prng,
         MatrixView<block> output,
-        PprfOutputFormat oFormat,
-        bool mal, span<std::pair<u64, u64>> indices)
+        PprfOutputFormat oFormat, 
+        bool mal)
+    {
+        std::vector<block> vv(mPntCount, value);
+
+        return expand(chls, vv, prng, output, oFormat, mal);
+    }
+
+    block SilentMultiPprfSender::expand(
+        span<Channel> chls,
+        span<block> value,
+        PRNG& prng,
+        MatrixView<block> output,
+        PprfOutputFormat oFormat, bool mal)
     {
         setValue(value);
         setTimePoint("pprf.send.start");
@@ -603,9 +614,9 @@ namespace osuCrypto
                     // to either be on the left child or right child depending 
                     // on which has the active path.
                     lastOts[j][0] = sums[0][d][j];
-                    lastOts[j][1] = sums[1][d][j] ^ mValue;
+                    lastOts[j][1] = sums[1][d][j] ^ mValue[g+j];
                     lastOts[j][2] = sums[1][d][j];
-                    lastOts[j][3] = sums[0][d][j] ^ mValue;
+                    lastOts[j][3] = sums[0][d][j] ^ mValue[g + j];
 
                     // We are going to expand the 128 bit OT string
                     // into a 256 bit OT string using AES.
@@ -669,9 +680,13 @@ namespace osuCrypto
         return ss;
     }
 
-    void SilentMultiPprfSender::setValue(block value)
+    void SilentMultiPprfSender::setValue(span<block> value)
     {
-        mValue = value;
+        if (value.size() != mPntCount)
+            throw RTE_LOC;
+
+        mValue.resize(mPntCount);
+        std::copy(value.begin(), value.end(), mValue.begin());
     }
 
     void SilentMultiPprfSender::clear()

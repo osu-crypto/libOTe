@@ -283,9 +283,351 @@ namespace osuCrypto
 
     }
 
+
+
     class LdpcS1Encoder
     {
     public:
+
+        u64 mRows, mWeight;
+        std::vector<u64> mYs;
+        std::vector<double> mRs;
+        void init(u64 rows, std::vector<double> rs);
+        void init(u64 rows, u64 weight)
+        {
+            switch (weight)
+            {
+            case 5:
+                init(rows, { {0, 0.231511, 0.289389, 0.4919, 0.877814} });
+                break;
+            case 11:
+                init(rows, { {0, 0.12214352, 0.231511, 0.25483572, 0.319389, 0.41342, 0.4919,0.53252, 0.734232, 0.877814, 0.9412} });
+                break;
+            default:
+                // no preset parameters
+                throw RTE_LOC;
+            }
+        }
+
+
+
+        void encode(span<u8> pp, span<const u8> m)
+        {
+            auto cols = mRows;
+            assert(pp.size() == mRows);
+            assert(m.size() == cols);
+
+            // pp = pp + A * m
+
+            auto v = mYs;
+
+            for (u64 i = 0; i < cols; ++i)
+            {
+                for (u64 j = 0; j < mWeight; ++j)
+                {
+                    auto row = v[j];
+
+                    pp[row] ^= m[i];
+
+                    ++v[j];
+                    if (v[j] == mRows)
+                        v[j] = 0;
+                }
+            }
+        }
+
+        template<typename T>
+        void cirTransEncode(span<T> pp, span<const T> m)
+        {
+            auto cols = mRows;
+            assert(pp.size() == mRows);
+            assert(m.size() == cols);
+
+            // pp = pp + m * A
+
+            auto v = mYs;
+
+
+
+
+            for (u64 i = 0; i < cols; )
+            {
+                auto end = cols;
+                for (u64 j = 0; j < mWeight; ++j)
+                {
+                    if (v[j] == mRows)
+                        v[j] = 0;
+
+                    auto jEnd = cols - v[j] + i;
+                    end = std::min<u64>(end, jEnd);
+                }
+                switch (mWeight)
+                {
+                case 5:
+                    while (i != end)
+                    {
+                        auto& r0 = v[0];
+                        auto& r1 = v[1];
+                        auto& r2 = v[2];
+                        auto& r3 = v[3];
+                        auto& r4 = v[4];
+
+                        pp[i] = pp[i]
+                            ^ m[r0]
+                            ^ m[r1]
+                            ^ m[r2]
+                            ^ m[r3]
+                            ^ m[r4];
+
+                        ++r0;
+                        ++r1;
+                        ++r2;
+                        ++r3;
+                        ++r4;
+                        ++i;
+                    }
+                    break;
+                case 11:
+                    while (i != end)
+                    {
+                        auto& r0 = v[0];
+                        auto& r1 = v[1];
+                        auto& r2 = v[2];
+                        auto& r3 = v[3];
+                        auto& r4 = v[4];
+                        auto& r5 = v[5];
+                        auto& r6 = v[6];
+                        auto& r7 = v[7];
+                        auto& r8 = v[8];
+                        auto& r9 = v[9];
+                        auto& r10 = v[10];
+
+                        pp[i] = pp[i]
+                            ^ m[r0]
+                            ^ m[r1]
+                            ^ m[r2]
+                            ^ m[r3]
+                            ^ m[r4]
+                            ^ m[r5]
+                            ^ m[r6]
+                            ^ m[r7]
+                            ^ m[r8]
+                            ^ m[r9]
+                            ^ m[r10]
+                            ;
+
+
+                        ++r0;
+                        ++r1;
+                        ++r2;
+                        ++r3;
+                        ++r4;
+                        ++r5;
+                        ++r6;
+                        ++r7;
+                        ++r8;
+                        ++r9;
+                        ++r10;
+                        ++i;
+                    }
+
+                    break;
+                default:
+                    while (i != end)
+                    {
+                        for (u64 j = 0; j < mWeight; ++j)
+                        {
+                            auto row = v[j];
+
+                            pp[i] = pp[i] ^ m[row];
+
+
+                            ++v[j];
+                        }
+
+                        ++i;
+                    }
+                    break;
+                }
+
+            }
+        }
+
+
+        template<typename T>
+        void cirTransEncode2(span<T> pp0, span<T> pp1, span<const T> m0, span<const T> m1)
+        {
+            auto cols = mRows;
+            //assert(pp.size() == mRows);
+            //assert(m.size() == cols);
+
+            // pp = pp + m * A
+
+            auto v = mYs;
+
+
+
+
+            for (u64 i = 0; i < cols; )
+            {
+                auto end = cols;
+                for (u64 j = 0; j < mWeight; ++j)
+                {
+                    if (v[j] == mRows)
+                        v[j] = 0;
+
+                    auto jEnd = cols - v[j] + i;
+                    end = std::min<u64>(end, jEnd);
+                }
+                switch (mWeight)
+                {
+                case 5:
+                    while (i != end)
+                    {
+                        auto& r0 = v[0];
+                        auto& r1 = v[1];
+                        auto& r2 = v[2];
+                        auto& r3 = v[3];
+                        auto& r4 = v[4];
+
+                        pp0[i] = pp0[i]
+                            ^ m0[r0]
+                            ^ m0[r1]
+                            ^ m0[r2]
+                            ^ m0[r3]
+                            ^ m0[r4];
+
+                        pp1[i] = pp1[i]
+                            ^ m1[r0]
+                            ^ m1[r1]
+                            ^ m1[r2]
+                            ^ m1[r3]
+                            ^ m1[r4];
+
+                        ++r0;
+                        ++r1;
+                        ++r2;
+                        ++r3;
+                        ++r4;
+                        ++i;
+                    }
+                    break;
+                case 11:
+                    while (i != end)
+                    {
+                        auto& r0 = v[0];
+                        auto& r1 = v[1];
+                        auto& r2 = v[2];
+                        auto& r3 = v[3];
+                        auto& r4 = v[4];
+                        auto& r5 = v[5];
+                        auto& r6 = v[6];
+                        auto& r7 = v[7];
+                        auto& r8 = v[8];
+                        auto& r9 = v[9];
+                        auto& r10 = v[10];
+
+                        pp0[i] = pp0[i]
+                            ^ m0[r0]
+                            ^ m0[r1]
+                            ^ m0[r2]
+                            ^ m0[r3]
+                            ^ m0[r4]
+                            ^ m0[r5]
+                            ^ m0[r6]
+                            ^ m0[r7]
+                            ^ m0[r8]
+                            ^ m0[r9]
+                            ^ m0[r10]
+                            ;
+
+                        pp1[i] = pp1[i]
+                            ^ m1[r0]
+                            ^ m1[r1]
+                            ^ m1[r2]
+                            ^ m1[r3]
+                            ^ m1[r4]
+                            ^ m1[r5]
+                            ^ m1[r6]
+                            ^ m1[r7]
+                            ^ m1[r8]
+                            ^ m1[r9]
+                            ^ m1[r10]
+                            ;
+
+                        ++r0;
+                        ++r1;
+                        ++r2;
+                        ++r3;
+                        ++r4;
+                        ++r5;
+                        ++r6;
+                        ++r7;
+                        ++r8;
+                        ++r9;
+                        ++r10;
+                        ++i;
+                    }
+
+                    break;
+                default:
+                    while (i != end)
+                    {
+                        for (u64 j = 0; j < mWeight; ++j)
+                        {
+                            auto row = v[j];
+
+                            pp0[i] = pp0[i] ^ m0[row];
+                            pp1[i] = pp1[i] ^ m1[row];
+
+
+                            ++v[j];
+                        }
+
+                        ++i;
+                    }
+                    break;
+                }
+
+            }
+        }
+
+
+        u64 cols() {
+            return mRows;
+        }
+
+        u64 rows() {
+            return mRows;
+        }
+
+        void getPoints(std::vector<Point>& points)
+        {
+            auto cols = mRows;
+            auto v = mYs;
+
+            for (u64 i = 0; i < cols; ++i)
+            {
+                for (u64 j = 0; j < mWeight; ++j)
+                {
+                    auto row = v[j];
+
+                    points.push_back({ row, i });
+
+                    ++v[j];
+                    if (v[j] == mRows)
+                        v[j] = 0;
+                }
+            }
+        }
+
+        SparseMtx getMatrix()
+        {
+            std::vector<Point> points;
+            getPoints(points);
+            return SparseMtx(mRows, mRows, points);
+        }
+
     };
 
     class LdpcZpStarEncoder
@@ -733,6 +1075,58 @@ namespace osuCrypto
             }
         }
 
+
+        template<typename T>
+        void cirTransEncode2(span<T> x0, span<T> x1)
+        {
+            assert(mExtend);
+
+            // solves for x such that y = M x, ie x := H^-1 y 
+            assert(cols() == x0.size());
+            assert(cols() == x1.size());
+            //auto H = getMatrix();
+
+            //auto assertFind = [&](u64 i, u64 x)
+            //{
+            //    auto row = H.row(i);
+            //    assert(std::find(row.begin(), row.end(), x) != row.end());
+            //};
+
+            for (u64 i = mRows - 1; i != ~u64(0); --i)
+            {
+
+                auto rowSize = mRandRows(i, mGap);
+                auto row = &mRandRows(i, 0);
+                //assertFind(i, i);
+                //std::set<u64> rrr;
+                //assert(rrr.insert(i).second);
+
+
+                for (u64 j = 0; j < rowSize; ++j)
+                {
+                    auto col = i - row[j] - 1;
+                    assert(col < i);
+                    //assertFind(i, col);
+                    x0[col] = x0[col] ^ x0[i];
+                    x1[col] = x1[col] ^ x1[i];
+
+                    //assert(rrr.insert(col).second);
+                }
+
+                for (u64 j = 0; j < mOffsets.size(); ++j)
+                {
+                    auto p = i - mOffsets[j] - mGap;
+                    if (p >= mRows)
+                        break;
+
+                    x0[p] = x0[p] ^ x0[i];
+                    x0[p] = x0[p] ^ x0[i];
+                    //assert(rrr.insert(p).second);
+                }
+            }
+        }
+
+
         template<typename T>
         void cirTransEncode(span<T> x, span<const T> y)
         {
@@ -1042,6 +1436,138 @@ namespace osuCrypto
             }
         }
 
+
+
+        template<typename T>
+        void cirTransEncode2(span<T> x0, span<T> x1)
+        {
+            assert(mExtend);
+
+            // solves for x such that y = M x, ie x := H^-1 y 
+            assert(cols() == x0.size());
+            assert(cols() == x1.size());
+
+
+            constexpr int FIXED_OFFSET_SIZE = 2;
+            if (mOffsets.size() != FIXED_OFFSET_SIZE)
+                throw RTE_LOC;
+
+            auto offsets = mOffsets;
+            auto randRows = mRandRows;
+
+            auto randRowSize = mRandRows.rows();
+            u64 randRowIdx = (mRows - 1) % mPeriod;
+
+            for (u64 i = mRows - 1, k = 0; k < randRows.rows(); ++k, --i)
+            {
+                auto r = i % mPeriod;
+                auto rowSize = mRandRows(r, mGap);
+                for (u64 j = 0; j < rowSize; ++j)
+                {
+                    randRows(r, j) = i - randRows(r, j) - 1;
+                }
+
+            }
+
+            for (u64 j = 0; j < offsets.size(); ++j)
+            {
+                offsets[j] = mRows - 1 - offsets[j] - mGap;
+            }
+
+
+            auto mainEnd =
+                *std::max_element(mOffsets.begin(), mOffsets.end())
+                + mGap + 10;
+
+            u64 i = mRows - 1;
+            auto osCol00 = &x0[offsets[0]];
+            auto osCol10 = &x0[offsets[1]];
+            auto osCol01 = &x1[offsets[0]];
+            auto osCol11 = &x1[offsets[1]];
+
+            auto xi0 = &x0[i];
+            auto xi1 = &x1[i];
+            auto xPtr0 = x0.data();
+            auto xPtr1 = x1.data();
+            for (; i != mainEnd; --i)
+            {
+
+                auto rowSize = randRows(randRowIdx, mGap);
+                auto row2 = &randRows(randRowIdx, 0);
+
+                if (randRowIdx == 0)
+                    randRowIdx = randRowSize - 1;
+                else
+                    --randRowIdx;
+
+                for (u64 j = 0; j < rowSize; ++j)
+                {
+                    auto& col = row2[j];
+                    auto& cx0 = xPtr0[col];
+                    auto& cx1 = xPtr1[col];
+
+                    cx0 = cx0 ^ *xi0;
+                    cx1 = cx1 ^ *xi1;
+                    col -= mPeriod;
+                }
+                *osCol00 = *osCol00 ^ *xi0;
+                *osCol10 = *osCol10 ^ *xi0;
+                *osCol01 = *osCol01 ^ *xi1;
+                *osCol11 = *osCol11 ^ *xi1;
+
+
+                --osCol00;
+                --osCol10;
+                --xi0;
+                --osCol01;
+                --osCol11;
+                --xi1;
+            }
+            offsets[0] = osCol00 - x0.data();
+            offsets[1] = osCol10 - x0.data();
+
+            //for (u64 j = 0; j < FIXED_OFFSET_SIZE; ++j)
+
+
+            for (; i != ~u64(0); --i)
+            {
+
+                auto rowSize = randRows(randRowIdx, mGap);
+                auto row2 = &randRows(randRowIdx, 0);
+
+                if (randRowIdx == 0)
+                    randRowIdx = randRowSize - 1;
+                else
+                    --randRowIdx;
+
+                for (u64 j = 0; j < rowSize; ++j)
+                {
+                    auto& col = row2[j];
+                    if (col >= mRows)
+                        break;
+
+                    x0[col] = x0[col] ^ x0[i];
+                    x1[col] = x1[col] ^ x1[i];
+
+                    col -= mPeriod;
+                }
+
+                for (u64 j = 0; j < FIXED_OFFSET_SIZE; ++j)
+                {
+                    auto& col = offsets[j];
+
+                    if (col >= mRows)
+                        break;
+                    assert(i - mOffsets[j] - mGap == col);
+
+                    x0[col] = x0[col] ^ x0[i];
+                    x1[col] = x1[col] ^ x1[i];
+                    --col;
+                }
+            }
+        }
+
+
         template<typename T>
         void cirTransEncode(span<T> x, span<const T> y)
         {
@@ -1106,7 +1632,7 @@ namespace osuCrypto
     //LdpcDiagBandEncoder;
     //    LdpcZpStarEncoder;
     template<typename LEncoder, typename REncoder>
-    class LdpcCompositEncoder
+    class LdpcCompositEncoder : public TimerAdapter
     {
     public:
 
@@ -1144,7 +1670,7 @@ namespace osuCrypto
             auto k = cols() - rows();
             assert(c.size() == cols());
             //assert(m.size() == k);
-            gTimer.setTimePoint("encode_begin");
+            setTimePoint("encode_begin");
             span<T> pp(c.subspan(k, rows()));
 
             //std::cout << "P  ";
@@ -1154,14 +1680,14 @@ namespace osuCrypto
 
             mR.cirTransEncode(pp);
 
-            gTimer.setTimePoint("diag");
+            setTimePoint("diag");
             //std::cout << "P' ";
             //for (u64 i = 0; i < pp.size(); ++i)
             //    std::cout << int(pp[i]) << " ";
             //std::cout << std::endl;
 
-            mL.template optCirTransEncode<T>(c.subspan(0, k), pp);
-            gTimer.setTimePoint("zp");
+            mL.template cirTransEncode<T>(c.subspan(0, k), pp);
+            setTimePoint("zp");
             //if(0)
 
             //std::cout << "m  ";
@@ -1170,6 +1696,42 @@ namespace osuCrypto
             //std::cout << std::endl;
 
         }
+
+
+        template<typename T>
+        void cirTransEncode2(span<T> c0, span<T> c1)
+        {
+            auto k = cols() - rows();
+            assert(c0.size() == cols());
+            //assert(m.size() == k);
+            setTimePoint("encode_begin");
+            span<T> pp0(c0.subspan(k, rows()));
+            span<T> pp1(c1.subspan(k, rows()));
+
+            //std::cout << "P  ";
+            //for (u64 i = 0; i < pp.size(); ++i)
+            //    std::cout << int(pp[i]) << " ";
+            //std::cout << std::endl;
+
+            mR.cirTransEncode2(pp0, pp1);
+
+            setTimePoint("diag");
+            //std::cout << "P' ";
+            //for (u64 i = 0; i < pp.size(); ++i)
+            //    std::cout << int(pp[i]) << " ";
+            //std::cout << std::endl;
+
+            mL.template cirTransEncode2<T>(c0.subspan(0, k), c1.subspan(0, k), pp0, pp1);
+            setTimePoint("zp");
+            //if(0)
+
+            //std::cout << "m  ";
+            //for (u64 i = 0; i < m.size(); ++i)
+            //    std::cout << int(m[i]) << " ";
+            //std::cout << std::endl;
+
+        }
+
 
         u64 cols() {
             return mL.cols() + mR.cols();
@@ -1193,6 +1755,7 @@ namespace osuCrypto
     };
     using ZpDiagEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagBandEncoder>;
     using ZpDiagRepEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagRepeaterEncoder>;
+    using S1DiagRepEncoder = LdpcCompositEncoder<LdpcS1Encoder, LdpcDiagRepeaterEncoder>;
 
     namespace tests
     {
@@ -1203,6 +1766,9 @@ namespace osuCrypto
         void LdpcEncoder_encode_Trans_g0_test();
         void LdpcZpStarEncoder_encode_test();
         void LdpcZpStarEncoder_encode_Trans_test();
+
+        void LdpcS1Encoder_encode_test();
+        void LdpcS1Encoder_encode_Trans_test();
 
         void LdpcDiagBandEncoder_encode_test();
         void LdpcComposit_ZpDiagBand_encode_test();

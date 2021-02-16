@@ -35,6 +35,8 @@ int miraclTestMain();
 
 #include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/SilentOtExtSender.h"
+#include "libOTe/Vole/SilentVoleReceiver.h"
+#include "libOTe/Vole/SilentVoleSender.h"
 
 #include "libOTe/NChooseK/AknOtReceiver.h"
 #include "libOTe/NChooseK/AknOtSender.h"
@@ -471,10 +473,15 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 
 	auto routine = [&](int s, int sec, SilentBaseType type)
 	{
+
+		Timer timer;
+		u64 milli;
+
 		// get a random number generator seeded from the system
 		PRNG prng(sysRandomSeed());
 		PRNG pp(ZeroBlock);
 
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		sync(chls[0], role);
 
 		if (role == Role::Receiver)
@@ -494,6 +501,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			receiver.configure(numOTs, s, sec, chls.size());
 			gTimer.setTimePoint("recver.config");
 
+			auto b = timer.setTimePoint("start");
 			//sync(chls[0], role);
 			if (fakeBase)
 			{
@@ -514,6 +522,9 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 
 			// perform  numOTs random OTs, the results will be written to msgs.
 			receiver.silentReceive(choice, msgs, prng, chls);
+
+			auto e = timer.setTimePoint("finish");
+			milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
 		}
 		else
 		{
@@ -526,6 +537,8 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			sender.configure(numOTs, s, sec, chls.size());
 			gTimer.setTimePoint("sender.config");
 
+
+			auto b = timer.setTimePoint("start");
 			//sync(chls[0], role);
 			if (fakeBase)
 			{
@@ -552,14 +565,19 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			// perform the OTs and write the random OTs to msgs.
 			sender.silentSend(msgs, prng, chls);
 
+			auto e = timer.setTimePoint("finish");
+			milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
+
 		}
+		return milli;
 	};
 
 	cmd.setDefault("s", "2");
-	cmd.setDefault("sec", "80");
+	cmd.setDefault("sec", "128");
 	auto mulType = (MultType)cmd.getOr("multType", (int)MultType::ldpc);
 	std::vector<int> ss = cmd.getMany<int>("s");
 	std::vector<int> secs = cmd.getMany<int>("sec");
+	u64 trials = cmd.getOr("trials", 1);
 	std::vector< SilentBaseType> types;
 
 	receiver.mMultType = mulType;
@@ -582,66 +600,66 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 		for (auto sec : secs)
 			for (auto type : types)
 			{
-
-				chls[0].resetStats();
-
-				Timer timer, sendTimer, recvTimer;
-				timer.reset();
-				auto b = timer.setTimePoint("start");
-				sendTimer.setTimePoint("start");
-				recvTimer.setTimePoint("start");
-
-				sender.setTimer(sendTimer);
-				receiver.setTimer(recvTimer);
-
-				routine(s, sec, type);
-
-
-				auto e = timer.setTimePoint("finish");
-				auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
-
-				u64 com = 0;
-				for(auto &c : chls)
-					com += (c.getTotalDataRecv() + c.getTotalDataSent());
-
-				std::string typeStr = "n ";
-				switch (type)
-				{
-				case SilentBaseType::Base:
-					typeStr = "b ";
-					break;
-				//case SilentBaseType::Extend:
-				//	typeStr = "e ";
-				//	break;
-				case SilentBaseType::BaseExtend:
-					typeStr = "be";
-					break;
-				default:
-					break;
-				}
-				if (role == Role::Sender)
+				for (u64 tt = 0; tt < trials; ++tt)
 				{
 
-					lout << tag <<
-						" n:" << Color::Green << std::setw(6) << std::setfill(' ') << numOTs << Color::Default <<
-						" type: " << Color::Green << typeStr << Color::Default <<
-						" sec: " << Color::Green << std::setw(3) << std::setfill(' ') << sec << Color::Default <<
-						" s: " << Color::Green << s << Color::Default <<
-						"   ||   " << Color::Green <<
-						std::setw(6) << std::setfill(' ') << milli << " ms   " <<
-						std::setw(6) << std::setfill(' ') << com << " bytes" << std::endl << Color::Default;
+					chls[0].resetStats();
 
-					if (cmd.getOr("v", 0) > 1)
-						lout << gTimer << std::endl;
+					Timer sendTimer, recvTimer;
+					
+					sendTimer.setTimePoint("start");
+					recvTimer.setTimePoint("start");
 
-				}
-				if (cmd.isSet("v"))
-				{
+					sender.setTimer(sendTimer);
+					receiver.setTimer(recvTimer);
+
+					auto milli = routine(s, sec, type);
+
+
+
+					u64 com = 0;
+					for (auto& c : chls)
+						com += (c.getTotalDataRecv() + c.getTotalDataSent());
+
+					std::string typeStr = "n ";
+					switch (type)
+					{
+					case SilentBaseType::Base:
+						typeStr = "b ";
+						break;
+						//case SilentBaseType::Extend:
+						//	typeStr = "e ";
+						//	break;
+					case SilentBaseType::BaseExtend:
+						typeStr = "be";
+						break;
+					default:
+						break;
+					}
 					if (role == Role::Sender)
-						lout << " **** sender ****\n" << sendTimer << std::endl;
+					{
 
-					if (role == Role::Receiver)
-						lout << " **** receiver ****\n" << recvTimer << std::endl;
+						lout << tag <<
+							" n:" << Color::Green << std::setw(6) << std::setfill(' ') << numOTs << Color::Default <<
+							" type: " << Color::Green << typeStr << Color::Default <<
+							" sec: " << Color::Green << std::setw(3) << std::setfill(' ') << sec << Color::Default <<
+							" s: " << Color::Green << s << Color::Default <<
+							"   ||   " << Color::Green <<
+							std::setw(6) << std::setfill(' ') << milli << " ms   " <<
+							std::setw(6) << std::setfill(' ') << com << " bytes" << std::endl << Color::Default;
+
+						if (cmd.getOr("v", 0) > 1)
+							lout << gTimer << std::endl;
+
+					}
+					if (cmd.isSet("v"))
+					{
+						if (role == Role::Sender)
+							lout << " **** sender ****\n" << sendTimer << std::endl;
+
+						if (role == Role::Receiver)
+							lout << " **** receiver ****\n" << recvTimer << std::endl;
+					}
 				}
 
 			}
@@ -649,6 +667,226 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 #endif
 }
 
+
+
+//template<typename OtExtSender, typename OtExtRecver>
+void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
+{
+#ifdef ENABLE_SILENTOT
+
+	if (numOTs == 0)
+		numOTs = 1 << 20;
+	using OtExtSender = SilentVoleSender;
+	using OtExtRecver = SilentVoleReceiver;
+
+	// get up the networking
+	auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
+	IOService ios;
+	Session  ep0(ios, ip, rr);
+	PRNG prng(sysRandomSeed());
+
+	// for each thread we need to construct a channel (socket) for it to communicate on.
+	std::vector<Channel> chls(numThreads);
+	for (int i = 0; i < numThreads; ++i)
+		chls[i] = ep0.addChannel();
+
+	//bool mal = cmd.isSet("mal");
+	OtExtSender sender;
+	OtExtRecver receiver;
+
+	bool fakeBase = cmd.isSet("fakeBase");
+
+	gTimer.setTimePoint("begin");
+
+	auto routine = [&](int s, int sec, SilentBaseType type)
+	{
+
+		Timer timer;
+		u64 milli;
+
+		// get a random number generator seeded from the system
+		PRNG prng(sysRandomSeed());
+		PRNG pp(ZeroBlock);
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		sync(chls[0], role);
+
+		if (role == Role::Receiver)
+		{
+			gTimer.setTimePoint("recver.thrd.begin");
+
+			std::vector<block> choice(numOTs);
+			gTimer.setTimePoint("recver.msg.alloc0");
+
+			// construct a vector to stored the received messages. 
+			//std::vector<block> msgs(numOTs);
+			std::unique_ptr<block[]> backing(new block[numOTs]);
+			span<block> msgs(backing.get(), numOTs);
+			gTimer.setTimePoint("recver.msg.alloc1");
+
+			receiver.configure(numOTs, s, sec, chls.size());
+			gTimer.setTimePoint("recver.config");
+
+			auto b = timer.setTimePoint("start");
+			//sync(chls[0], role);
+			if (fakeBase)
+			{
+				auto bits = receiver.sampleBaseChoiceBits(prng);
+				std::vector<std::array<block, 2>> baseSendMsgs(bits.size());
+				std::vector<block> baseRecvMsgs(bits.size());
+				pp.get(baseSendMsgs.data(), baseSendMsgs.size());
+				for (u64 i = 0; i < bits.size(); ++i)
+					baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
+				receiver.setSlientBaseOts(baseRecvMsgs);
+			}
+			else
+			{
+				receiver.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
+			}
+
+			gTimer.setTimePoint("recver.genBase");
+
+			// perform  numOTs random OTs, the results will be written to msgs.
+			receiver.silentReceive(choice, msgs, prng, chls);
+
+			auto e = timer.setTimePoint("finish");
+			milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
+		}
+		else
+		{
+			gTimer.setTimePoint("sender.thrd.begin");
+
+			//std::vector<std::array<block, 2>> msgs(numOTs);
+			std::unique_ptr<block[]> backing(new block[numOTs]);
+			span<block> msgs(backing.get(), numOTs);
+			gTimer.setTimePoint("sender.msg.alloc");
+			sender.configure(numOTs, s, sec, chls.size());
+			gTimer.setTimePoint("sender.config");
+			block delta = prng.get();
+
+			auto b = timer.setTimePoint("start");
+			//sync(chls[0], role);
+			if (fakeBase)
+			{
+				auto count = sender.silentBaseOtCount();
+				std::vector<std::array<block, 2>> baseSendMsgs(count);
+				pp.get(baseSendMsgs.data(), baseSendMsgs.size());
+				sender.setSlientBaseOts(baseSendMsgs);
+			}
+			else
+			{
+				sender.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
+			}
+			gTimer.setTimePoint("sender.genBase");
+
+			// construct a vector to stored the random send messages. 
+
+			// if delta OT is used, then the user can call the following 
+			// to set the desired XOR difference between the zero messages
+			// and the one messages.
+			//
+			//     senders[i].setDelta(some 128 bit delta);
+			//
+
+			// perform the OTs and write the random OTs to msgs.
+			sender.silentSend(delta, msgs, prng, chls);
+
+			auto e = timer.setTimePoint("finish");
+			milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
+
+		}
+		return milli;
+	};
+
+	cmd.setDefault("s", "2");
+	cmd.setDefault("sec", "128");
+	std::vector<int> ss = cmd.getMany<int>("s");
+	std::vector<int> secs = cmd.getMany<int>("sec");
+	u64 trials = cmd.getOr("trials", 1);
+	std::vector< SilentBaseType> types;
+
+	if (cmd.isSet("base"))
+		types.push_back(SilentBaseType::Base);
+	else if (cmd.isSet("baseExtend"))
+		types.push_back(SilentBaseType::BaseExtend);
+	else
+		types.push_back(SilentBaseType::BaseExtend);
+	//if (cmd.isSet("extend"))
+	//	types.push_back(SilentBaseType::Extend);
+	//if (types.size() == 0 || cmd.isSet("none"))
+	//	types.push_back(SilentBaseType::None);
+
+
+	for (auto s : ss)
+		for (auto sec : secs)
+			for (auto type : types)
+			{
+				for (u64 tt = 0; tt < trials; ++tt)
+				{
+
+					chls[0].resetStats();
+
+					Timer sendTimer, recvTimer;
+
+					sendTimer.setTimePoint("start");
+					recvTimer.setTimePoint("start");
+
+					sender.setTimer(sendTimer);
+					receiver.setTimer(recvTimer);
+
+					auto milli = routine(s, sec, type);
+
+
+
+					u64 com = 0;
+					for (auto& c : chls)
+						com += (c.getTotalDataRecv() + c.getTotalDataSent());
+
+					std::string typeStr = "n ";
+					switch (type)
+					{
+					case SilentBaseType::Base:
+						typeStr = "b ";
+						break;
+						//case SilentBaseType::Extend:
+						//	typeStr = "e ";
+						//	break;
+					case SilentBaseType::BaseExtend:
+						typeStr = "be";
+						break;
+					default:
+						break;
+					}
+					if (role == Role::Sender)
+					{
+
+						lout << tag <<
+							" n:" << Color::Green << std::setw(6) << std::setfill(' ') << numOTs << Color::Default <<
+							" type: " << Color::Green << typeStr << Color::Default <<
+							" sec: " << Color::Green << std::setw(3) << std::setfill(' ') << sec << Color::Default <<
+							" s: " << Color::Green << s << Color::Default <<
+							"   ||   " << Color::Green <<
+							std::setw(6) << std::setfill(' ') << milli << " ms   " <<
+							std::setw(6) << std::setfill(' ') << com << " bytes" << std::endl << Color::Default;
+
+						if (cmd.getOr("v", 0) > 1)
+							lout << gTimer << std::endl;
+
+					}
+					if (cmd.isSet("v"))
+					{
+						if (role == Role::Sender)
+							lout << " **** sender ****\n" << sendTimer << std::endl;
+
+						if (role == Role::Receiver)
+							lout << " **** receiver ****\n" << recvTimer << std::endl;
+					}
+				}
+
+			}
+
+#endif
+}
 
 
 
@@ -709,6 +947,7 @@ iknp{ "i", "iknp" },
 diknp{ "diknp" },
 oos{ "o", "oos" },
 Silent{ "s", "Silent" },
+vole{"vole"},
 akn{ "a", "akn" },
 np{ "np" },
 simple{ "simplest" },
@@ -928,6 +1167,7 @@ int main(int argc, char** argv)
 #endif
 
 	flagSet |= runIf(TwoChooseOneG_example, cmd, Silent);
+	flagSet |= runIf(Vole_example, cmd, vole);
 
 
 

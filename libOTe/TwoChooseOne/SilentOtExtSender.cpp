@@ -174,11 +174,16 @@ namespace osuCrypto
             u64 nn = mm * scaler;
             auto kk = nn - mm;
 
-            u64 colWeight = 5;
-            u64 diags = 5;
-            u64 gap = 16;
-            u64 gapWeight = 5;
-            u64 period = 256;
+            //u64 colWeight = 5;
+            //u64 diags = 5;
+            //u64 gap = 16;
+            //u64 gapWeight = 5;
+            //u64 period = 256;
+            u64 colWeight = 11;
+            u64 diags = 11;
+            u64 gap = 32;
+            u64 gapWeight = 11;
+            u64 period = 512;
             std::vector<u64> db{ 5,31 };
             PRNG pp(oc::ZeroBlock);
 
@@ -252,7 +257,7 @@ namespace osuCrypto
     void SilentOtExtSender::checkRT(span<Channel> chls, Matrix<block>& rT)
     {
         chls[0].send(rT.data(), rT.size());
-        chls[0].send(mGen.mValue);
+        chls[0].send(mDelta);
 
         setTimePoint("sender.expand.checkRT");
 
@@ -317,7 +322,7 @@ namespace osuCrypto
         gTimer.setTimePoint("sender.expand.start");
 
         //auto type = MultType::QuasiCyclic;
-        block delta = prng.get();
+        mDelta = prng.get();
 
         switch (mMultType)
         {
@@ -326,7 +331,7 @@ namespace osuCrypto
 
             rT.resize(128, mN2 / 128, AllocType::Uninitialized);
 
-            mGen.expand(chls, delta, prng, rT, PprfOutputFormat::InterleavedTransposed, false);
+            mGen.expand(chls, mDelta, prng, rT, PprfOutputFormat::InterleavedTransposed, false);
             setTimePoint("sender.expand.pprf_transpose");
             gTimer.setTimePoint("sender.expand.pprf_transpose");
 
@@ -348,7 +353,7 @@ namespace osuCrypto
             assert(size >= mN2);
             rT.resize(size, 1, AllocType::Uninitialized);
 
-            mGen.expand(chls, delta, prng, rT, PprfOutputFormat::Interleaved, false);
+            mGen.expand(chls, mDelta, prng, rT, PprfOutputFormat::Interleaved, false);
             setTimePoint("sender.expand.pprf_transpose");
             gTimer.setTimePoint("sender.expand.pprf_transpose");
 
@@ -383,7 +388,7 @@ namespace osuCrypto
 
             mulRand(pubPrng, mtxColumn, rT, iter);
 
-            m1 = m0 ^ mGen.mValue;
+            m1 = m0 ^ mDelta;
         }
 
         setTimePoint("sender.expand.mul");
@@ -589,10 +594,13 @@ namespace osuCrypto
         if (mLdpcEncoder.mH.rows())
             mLdpcEncoder.cirTransEncode(span<block>(rT));
         else
+        {
+            mZpsDiagEncoder.setTimer(getTimer());
             mZpsDiagEncoder.cirTransEncode(span<block>(rT));
+        }
         setTimePoint("sender.expand.ldpc.cirTransEncode");
         //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-        auto d = mGen.mValue & mask;
+        auto d = mDelta & mask;
 
         auto n8 = messages.size() / 8 * 8;
         block hashBuffer[8];
@@ -818,7 +826,7 @@ namespace osuCrypto
                 for (u64 k = 0; j < end; ++j, ++k)
                 {
                     messages[j][0] = tpBuffer[k];
-                    messages[j][1] = tpBuffer[k] ^ mGen.mValue;
+                    messages[j][1] = tpBuffer[k] ^ mDelta;
                 }
 #else
                 u64 k = 0;
@@ -836,14 +844,14 @@ namespace osuCrypto
                     messages[j + k + 6][0] = tpBuffer[k + 6] ^ hashBuffer[6];
                     messages[j + k + 7][0] = tpBuffer[k + 7] ^ hashBuffer[7];
 
-                    tpBuffer[k + 0] = tpBuffer[k + 0] ^ mGen.mValue;
-                    tpBuffer[k + 1] = tpBuffer[k + 1] ^ mGen.mValue;
-                    tpBuffer[k + 2] = tpBuffer[k + 2] ^ mGen.mValue;
-                    tpBuffer[k + 3] = tpBuffer[k + 3] ^ mGen.mValue;
-                    tpBuffer[k + 4] = tpBuffer[k + 4] ^ mGen.mValue;
-                    tpBuffer[k + 5] = tpBuffer[k + 5] ^ mGen.mValue;
-                    tpBuffer[k + 6] = tpBuffer[k + 6] ^ mGen.mValue;
-                    tpBuffer[k + 7] = tpBuffer[k + 7] ^ mGen.mValue;
+                    tpBuffer[k + 0] = tpBuffer[k + 0] ^ mDelta;
+                    tpBuffer[k + 1] = tpBuffer[k + 1] ^ mDelta;
+                    tpBuffer[k + 2] = tpBuffer[k + 2] ^ mDelta;
+                    tpBuffer[k + 3] = tpBuffer[k + 3] ^ mDelta;
+                    tpBuffer[k + 4] = tpBuffer[k + 4] ^ mDelta;
+                    tpBuffer[k + 5] = tpBuffer[k + 5] ^ mDelta;
+                    tpBuffer[k + 6] = tpBuffer[k + 6] ^ mDelta;
+                    tpBuffer[k + 7] = tpBuffer[k + 7] ^ mDelta;
 
                     mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
 
@@ -860,7 +868,7 @@ namespace osuCrypto
                 for (; k < min; ++k)
                 {
                     messages[j + k][0] = mAesFixedKey.ecbEncBlock(tpBuffer[k]) ^ tpBuffer[k];
-                    messages[j + k][1] = mAesFixedKey.ecbEncBlock(tpBuffer[k] ^ mGen.mValue) ^ tpBuffer[k] ^ mGen.mValue;
+                    messages[j + k][1] = mAesFixedKey.ecbEncBlock(tpBuffer[k] ^ mDelta) ^ tpBuffer[k] ^ mDelta;
                 }
 
 #endif

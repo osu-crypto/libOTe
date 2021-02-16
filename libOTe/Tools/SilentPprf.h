@@ -24,7 +24,7 @@ namespace osuCrypto
     {
     public:
         u64 mDomain = 0, mDepth = 0, mPntCount = 0;// , mPntCount8;
-        block mValue;
+        std::vector<block> mValue;
         bool mPrint = false;
 
         
@@ -51,11 +51,13 @@ namespace osuCrypto
         void setBase(span<std::array<block, 2>> baseMessages);
 
         // expand the whole PPRF and store the result in output
-        block expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal, span<std::pair<u64, u64>> indices = {});
-		block expand(span<Channel> chls, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal, span<std::pair<u64, u64>> indices = {});
+        block expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
+        block expand(span<Channel> chls, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
+
+        block expand(span<Channel> chls, span<block> value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
 
 
-        void setValue(block value);
+        void setValue(span<block> value);
 
         // expand the next output.size() number of outputs and store the result in output.
         //void yeild(Channel& chl, PRNG& prng, span<block> output);

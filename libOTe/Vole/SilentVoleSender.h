@@ -9,6 +9,7 @@
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/IknpOtExtSender.h>
+#include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 //#define NO_HASH
@@ -16,49 +17,7 @@
 namespace osuCrypto
 {
 
-    // Silent OT works a bit different than normal OT extension
-    // This stems from that fact that is needs many base OTs which are
-    // of chosen message and choosen choice. Normal OT extension 
-    // requires about 128 random OTs. 
-    // 
-    // This is further complicated by the fact that that silent OT
-    // naturally samples the choice bits at random while normal OT
-    // lets you choose them. Due to this we give two interfaces.
-    //
-    // The first satisfies the original OT extension interface. That is
-    // you can call genBaseOts(...) or setBaseOts(...) just as before
-    // and interanlly the implementation will transform these into
-    // the required base OTs. You can also directly call send(...) or receive(...)
-    // just as before and the receiver can specify the OT messages
-    // that they wish to receive. However, using this interface results 
-    // in slightly more communication and rounds than are strickly required.
-    //
-    // The second interface in the "native" silent OT interface.
-    // The simplest way to use this interface is to call silentSend(...)
-    // and silentReceive(...). This internally will perform all of the 
-    // base OTs and output the random OT messages and random OT
-    // choice bits. 
-    //
-    // In particular, 128 base OTs will be performed using the DefaultBaseOT
-    // protocol and then these will be extended using IKNP into ~400
-    // chosen message OTs which silent OT will then expend into the
-    // final OTs. If desired, the caller can actually compute the 
-    // base OTs manually. First they must call configure(...) and then
-    // silentBaseOtCount() will return the desired number of base OTs.
-    // On the receiver side they should use the choice bits returned
-    // by sampleBaseChoiceBits(). The base OTs can then be passed back
-    // using the setSilentBaseOts(...). silentSend(...) and silentReceive(...)
-    // can then be called which results in one message being sent
-    // from the sender to the receiver. 
-    //
-    // Also note that genSilentBaseOts(...) can be called which generates 
-    // them. This has two behaviors. If the normal base OTs have previously
-    // been set, i.e. the normal OT Ext interface, then and IKNP OT extension
-    // is performed to generated the needed ~400 base OTs. If they have not
-    // been set then the ~400 base OTs are computed directly using the 
-    // DefaultBaseOT protocol. This is much more computationally expensive 
-    // but requires fewer rounds than IKNP. 
-    class SilentOtExtSender : public OtExtSender, public TimerAdapter
+    class SilentVoleSender : public TimerAdapter
     {
     public:
 
@@ -66,28 +25,28 @@ namespace osuCrypto
         u64 mP, mN2, mN = 0, mNumPartitions, mScaler, mSizePer, mNumThreads;
 #ifdef ENABLE_IKNP
         IknpOtExtSender mIknpSender;
+        IknpOtExtReceiver mIknpRecver;
 #endif
-        MultType mMultType = MultType::ldpc;
+        //MultType mMultType = MultType::ldpc;
         S1DiagRepEncoder mZpsDiagEncoder;
-        LdpcEncoder mLdpcEncoder;
+        //LdpcEncoder mLdpcEncoder;
         Matrix<block> rT;
-        block mDelta;
 
         /////////////////////////////////////////////////////
         // The standard OT extension interface
         /////////////////////////////////////////////////////
 
         // the number of IKNP base OTs that should be set.
-        u64 baseOtCount() const override;
+        u64 baseOtCount() const;
 
         // returns true if the IKNP base OTs are currently set.
-        bool hasBaseOts() const override;
+        bool hasBaseOts() const;
 
         // sets the IKNP base OTs that are then used to extend
         void setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices,
-            Channel& chl) override
+            Channel& chl)
         {
 #ifdef ENABLE_IKNP
             mIknpSender.setBaseOts(baseRecvOts, choices, chl);
@@ -97,14 +56,14 @@ namespace osuCrypto
         }
 
         // Returns an indpendent copy of this extender.
-        std::unique_ptr<OtExtSender> split() override
+        std::unique_ptr<OtExtSender> split()
         {
             throw std::runtime_error("not impl");
         }
 
         // use the default base OT class to generate the
         // IKNP base OTs that are required.
-        void genBaseOts(PRNG& prng, Channel& chl) override
+        void genBaseOts(PRNG& prng, Channel& chl)
         {
 #ifdef ENABLE_IKNP
             mIknpSender.genBaseOts(prng, chl);
@@ -112,13 +71,6 @@ namespace osuCrypto
             throw std::runtime_error("IKNP must be enabled");
 #endif
         }
-
-        // Perform OT extension of random OT messages but
-        // allow the receiver to specify the choice bits.
-        void send(
-            span<std::array<block, 2>> messages,
-            PRNG& prng,
-            Channel& chl) override;
 
 
         /////////////////////////////////////////////////////
@@ -165,33 +117,31 @@ namespace osuCrypto
         // which OT message they receiver. Instead
         // the protocol picks them at random. Use the 
         // send(...) interface for the normal behavior.
-        void silentSend(
-            span<std::array<block, 2>> messages,
-            PRNG& prng,
-            Channel& chl);
+        //void silentSend(
+        //    span<std::array<block, 2>> messages,
+        //    PRNG& prng,
+        //    Channel& chl);
 
         // A parallel exection version of the other
         // silentSend(...) function. 
 		void silentSend(
-			span<std::array<block, 2>> messages,
+            block delta,
+            span<block> messages,
 			PRNG& prng,
 			span<Channel> chls);
 
 
         // interal functions
 
-        void randMulNaive(Matrix<block>& rT, span<std::array<block, 2>>& messages);
-        void randMulQuasiCyclic(Matrix<block>& rT, span<std::array<block, 2>>& messages, u64 threads);
-        void ldpcMult(Matrix<block>& rT, span<std::array<block, 2>>& messages, u64 threads);
+        void ldpcMult(
+            block delta,
+            Matrix<block>& rT, span<block>& messages, u64 threads);
 
         bool mDebug = false;
         void checkRT(span<Channel> chls, Matrix<block>& rT);
 
         void clear();
     };
-
-    void bitShiftXor(span<block> dest, span<block> in, u8 bitShift);
-    void modp(span<block> dest, span<block> in, u64 p);
 
 }
 

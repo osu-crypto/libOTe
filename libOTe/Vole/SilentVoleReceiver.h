@@ -10,6 +10,7 @@
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
+#include <libOTe/TwoChooseOne/IknpOtExtSender.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 
 namespace osuCrypto
@@ -17,7 +18,7 @@ namespace osuCrypto
 
 
     // For more documentation see SilentOtExtSender.
-    class SilentOtExtReceiver : public OtExtReceiver, public TimerAdapter
+    class SilentVoleReceiver : public TimerAdapter
     {
     public:
 
@@ -30,20 +31,19 @@ namespace osuCrypto
 
 #ifdef ENABLE_IKNP
         IknpOtExtReceiver mIknpRecver;
+        IknpOtExtSender mIknpSender;
 #endif
         SilentMultiPprfReceiver mGen;
 
-        MultType mMultType = MultType::ldpc;
         Matrix<block> rT;
 
-        LdpcEncoder mLdpcEncoder;
         S1DiagRepEncoder mZpsDiagEncoder;
 
         // sets the Iknp base OTs that are then used to extend
         void setBaseOts(
             span<std::array<block, 2>> baseSendOts,
             PRNG& prng,
-            Channel& chl) override {
+            Channel& chl) {
 #ifdef ENABLE_IKNP
             mIknpRecver.setBaseOts(baseSendOts, prng, chl);
 #else
@@ -52,7 +52,7 @@ namespace osuCrypto
         }
 
         // return the number of base OTs IKNP needs
-        u64 baseOtCount() const override {
+        u64 baseOtCount() const {
 #ifdef ENABLE_IKNP
             return mIknpRecver.baseOtCount();
 #else
@@ -61,7 +61,7 @@ namespace osuCrypto
         }
 
         // returns true if the IKNP base OTs are currently set.
-        bool hasBaseOts() const override {
+        bool hasBaseOts() const {
 #ifdef ENABLE_IKNP
             return mIknpRecver.hasBaseOts(); 
 #else
@@ -74,7 +74,7 @@ namespace osuCrypto
             throw std::runtime_error("not implemented"); };
 
         // Generate the IKNP base OTs
-        void genBaseOts(PRNG& prng, Channel& chl) override;
+        void genBaseOts(PRNG& prng, Channel& chl) ;
 
         // Generate the silent base OTs. If the Iknp 
         // base OTs are set then we do an IKNP extend,
@@ -121,25 +121,12 @@ namespace osuCrypto
             SilentBaseType base = SilentBaseType::BaseExtend,
             u64 threads = 1);
 
-        // The default API for OT ext allows the 
-        // caller to choose the choice bits. But
-        // silent OT picks the choice bits at random.
-        // To meet the original API we add communicatio
-        // and correct the random choice bits to the 
-        // provided ones... Use silentReceive(...) for 
-        // the silent OT API.
-        void receive(
-            const BitVector& choices,
-            span<block> messages,
-            PRNG& prng,
-            Channel& chl) override;
-
         // Perform the actual OT extension. If silent
         // base OTs have been generated or set, then
         // this function is non-interactive. Otherwise
         // the silent base OTs will automaticly be performed.
         void silentReceive(
-            BitVector& choices,
+            span<block> choices,
             span<block> messages,
             PRNG & prng,
             Channel & chl);
@@ -147,7 +134,7 @@ namespace osuCrypto
         // A parallel version of the other silentReceive(...)
         // function.
 		void silentReceive(
-            BitVector& choices,
+            span<block> choices,
 			span<block> messages,
 			PRNG& prng,
 			span<Channel> chls);
@@ -155,129 +142,30 @@ namespace osuCrypto
         // internal.
 
         void checkRT(span<Channel> chls, Matrix<block> &rT);
-        void randMulNaive(Matrix<block> &rT, span<block> &messages);
-        void randMulQuasiCyclic(Matrix<block>& rT, span<block>& messages, BitVector& choices, u64 threads);
-        void ldpcMult(Matrix<block> &rT, span<block> &messages, BitVector& choices);
+        void ldpcMult(Matrix<block> &rT, span<block> &messages, 
+            span<block> y, span<block>& choices);
         
         PprfOutputFormat getPprfFormat()
         {
-            switch (mMultType)
+                return PprfOutputFormat::Interleaved;
+            /*switch (mMultType)
             {
             case osuCrypto::MultType::Naive:
             case osuCrypto::MultType::QuasiCyclic:
                 return PprfOutputFormat::InterleavedTransposed;
                 break;
             case osuCrypto::MultType::ldpc:
-                return PprfOutputFormat::Interleaved;
                 break;
             default:
                 throw RTE_LOC;
                 break;
-            }
+            }*/
         }
 
         void clear();
     };
 
     //Matrix<block> expandTranspose(BgiEvaluator::MultiKey & gen, u64 n);
-
-
-    inline u8 parity(block b)
-    {
-        b = b ^ (b >> 1);
-        b = b ^ (b >> 2);
-        b = b ^ (b >> 4);
-        b = b ^ (b >> 8);
-        b = b ^ (b >> 16);
-        b = b ^ (b >> 32);
-
-        union blocku64
-        {
-            block b;
-            u64 u[2];
-        };
-        auto bb = reinterpret_cast<u64*>(&b);
-        return (bb[0] ^ bb[1]) & 1;
-    }
-
-    inline void mulRand(PRNG &pubPrng, span<block> mtxColumn, Matrix<block> &rT, BitIterator iter)
-    {
-        pubPrng.get(mtxColumn.data(), mtxColumn.size());
-
-        //convertCol(mtx, i, mtxColumn);
-        std::array<block, 8> sum, t;
-        auto end = (rT.cols() / 8) * 8;
-
-        for (u64 j = 0; j < 128; ++j)
-        {
-            auto row = rT[j];
-
-            sum[0] = sum[0] ^ sum[0];
-            sum[1] = sum[1] ^ sum[1];
-            sum[2] = sum[2] ^ sum[2];
-            sum[3] = sum[3] ^ sum[3];
-            sum[4] = sum[4] ^ sum[4];
-            sum[5] = sum[5] ^ sum[5];
-            sum[6] = sum[6] ^ sum[6];
-            sum[7] = sum[7] ^ sum[7];
-
-            if (true)
-            {
-
-                for (u64 k = 0; k < end; k += 8)
-                {
-                    t[0] = row[k + 0] & mtxColumn[k + 0];
-                    t[1] = row[k + 1] & mtxColumn[k + 1];
-                    t[2] = row[k + 2] & mtxColumn[k + 2];
-                    t[3] = row[k + 3] & mtxColumn[k + 3];
-                    t[4] = row[k + 4] & mtxColumn[k + 4];
-                    t[5] = row[k + 5] & mtxColumn[k + 5];
-                    t[6] = row[k + 6] & mtxColumn[k + 6];
-                    t[7] = row[k + 7] & mtxColumn[k + 7];
-
-
-                    sum[0] = sum[0] ^ t[0];
-                    sum[1] = sum[1] ^ t[1];
-                    sum[2] = sum[2] ^ t[2];
-                    sum[3] = sum[3] ^ t[3];
-                    sum[4] = sum[4] ^ t[4];
-                    sum[5] = sum[5] ^ t[5];
-                    sum[6] = sum[6] ^ t[6];
-                    sum[7] = sum[7] ^ t[7];
-
-                }
-
-                for (i64 k = end; k < row.size(); ++k)
-                    sum[0] = sum[0] ^ (row[k] & mtxColumn[k]);
-
-                sum[0] = sum[0] ^ sum[1];
-                sum[2] = sum[2] ^ sum[3];
-                sum[4] = sum[4] ^ sum[5];
-                sum[6] = sum[6] ^ sum[7];
-
-                sum[0] = sum[0] ^ sum[2];
-                sum[4] = sum[4] ^ sum[6];
-
-                sum[0] = sum[0] ^ sum[4];
-            }
-            else
-            {
-                for (i64 k = 0; k < row.size(); ++k)
-                    sum[0] = sum[0] ^ (row[k] & mtxColumn[k]);
-            }
-
-            *iter = parity(sum[0]);
-            ++iter;
-        }
-    }
-
-    inline     void transpose(span<block> s, MatrixView<block> r)
-    {
-        MatrixView<u8> ss((u8*)s.data(), s.size(), sizeof(block));
-        MatrixView<u8> rr((u8*)r.data(), r.rows(), r.cols() * sizeof(block));
-
-        transpose(ss, rr);
-    }
 
 }
 #endif
