@@ -340,8 +340,8 @@ namespace osuCrypto
         void cirTransEncode(span<T> ppp, span<const T> mm)
         {
             auto cols = mRows;
-            assert(pp.size() == mRows);
-            assert(m.size() == cols);
+            assert(ppp.size() == mRows);
+            assert(mm.size() == cols);
 
             // pp = pp + m * A
 
@@ -362,77 +362,178 @@ namespace osuCrypto
                     auto jEnd = cols - v[j] + i;
                     end = std::min<u64>(end, jEnd);
                 }
+
+                T* __restrict P = &pp[i];
+                T* __restrict PE = &pp[end];
+
+
                 switch (mWeight)
                 {
                 case 5:
-                    while (i != end)
+                {
+
+                    //while (i != end)
+                    //{
+                    //    auto& r0 = v[0];
+                    //    auto& r1 = v[1];
+                    //    auto& r2 = v[2];
+                    //    auto& r3 = v[3];
+                    //    auto& r4 = v[4];
+
+                    //    pp[i] = pp[i]
+                    //        ^ m[r0]
+                    //        ^ m[r1]
+                    //        ^ m[r2]
+                    //        ^ m[r3]
+                    //        ^ m[r4];
+
+                    //    ++r0;
+                    //    ++r1;
+                    //    ++r2;
+                    //    ++r3;
+                    //    ++r4;
+                    //    ++i;
+                    //}
+
+
+                    const T* __restrict M0 = &m[v[0]];
+                    const T* __restrict M1 = &m[v[1]];
+                    const T* __restrict M2 = &m[v[2]];
+                    const T* __restrict M3 = &m[v[3]];
+                    const T* __restrict M4 = &m[v[4]];
+
+                    v[0] += end - i;
+                    v[1] += end - i;
+                    v[2] += end - i;
+                    v[3] += end - i;
+                    v[4] += end - i;
+                    i = end;
+
+                    while (P != PE)
                     {
-                        auto& r0 = v[0];
-                        auto& r1 = v[1];
-                        auto& r2 = v[2];
-                        auto& r3 = v[3];
-                        auto& r4 = v[4];
-
-                        pp[i] = pp[i]
-                            ^ m[r0]
-                            ^ m[r1]
-                            ^ m[r2]
-                            ^ m[r3]
-                            ^ m[r4];
-
-                        ++r0;
-                        ++r1;
-                        ++r2;
-                        ++r3;
-                        ++r4;
-                        ++i;
-                    }
-                    break;
-                case 11:
-                    while (i != end)
-                    {
-                        auto& r0 = v[0];
-                        auto& r1 = v[1];
-                        auto& r2 = v[2];
-                        auto& r3 = v[3];
-                        auto& r4 = v[4];
-                        auto& r5 = v[5];
-                        auto& r6 = v[6];
-                        auto& r7 = v[7];
-                        auto& r8 = v[8];
-                        auto& r9 = v[9];
-                        auto& r10 = v[10];
-
-                        pp[i] = pp[i]
-                            ^ m[r0]
-                            ^ m[r1]
-                            ^ m[r2]
-                            ^ m[r3]
-                            ^ m[r4]
-                            ^ m[r5]
-                            ^ m[r6]
-                            ^ m[r7]
-                            ^ m[r8]
-                            ^ m[r9]
-                            ^ m[r10]
+                        *P = *P
+                            ^ *M0
+                            ^ *M1
+                            ^ *M2
+                            ^ *M3
+                            ^ *M4
                             ;
 
+                        ++M0;
+                        ++M1;
+                        ++M2;
+                        ++M3;
+                        ++M4;
+                        ++P;
+                    }
 
-                        ++r0;
-                        ++r1;
-                        ++r2;
-                        ++r3;
-                        ++r4;
-                        ++r5;
-                        ++r6;
-                        ++r7;
-                        ++r8;
-                        ++r9;
-                        ++r10;
-                        ++i;
+
+                    break;
+                }
+                case 11:
+                {
+
+                    //while (i != end)
+                    //{
+                    //    auto& r0 = v[0];
+                    //    auto& r1 = v[1];
+                    //    auto& r2 = v[2];
+                    //    auto& r3 = v[3];
+                    //    auto& r4 = v[4];
+                    //    auto& r5 = v[5];
+                    //    auto& r6 = v[6];
+                    //    auto& r7 = v[7];
+                    //    auto& r8 = v[8];
+                    //    auto& r9 = v[9];
+                    //    auto& r10 = v[10];
+
+                    //    pp[i] = pp[i]
+                    //        ^ m[r0]
+                    //        ^ m[r1]
+                    //        ^ m[r2]
+                    //        ^ m[r3]
+                    //        ^ m[r4]
+                    //        ^ m[r5]
+                    //        ^ m[r6]
+                    //        ^ m[r7]
+                    //        ^ m[r8]
+                    //        ^ m[r9]
+                    //        ^ m[r10]
+                    //        ;
+
+
+                    //    ++r0;
+                    //    ++r1;
+                    //    ++r2;
+                    //    ++r3;
+                    //    ++r4;
+                    //    ++r5;
+                    //    ++r6;
+                    //    ++r7;
+                    //    ++r8;
+                    //    ++r9;
+                    //    ++r10;
+                    //    ++i;
+                    //}
+
+                    const T* __restrict M0 =  &m[v[0]];
+                    const T* __restrict M1 =  &m[v[1]];
+                    const T* __restrict M2 =  &m[v[2]];
+                    const T* __restrict M3 =  &m[v[3]];
+                    const T* __restrict M4 =  &m[v[4]];
+                    const T* __restrict M5 =  &m[v[5]];
+                    const T* __restrict M6 =  &m[v[6]];
+                    const T* __restrict M7 =  &m[v[7]];
+                    const T* __restrict M8 =  &m[v[8]];
+                    const T* __restrict M9 =  &m[v[9]];
+                    const T* __restrict M10 = &m[v[10]];
+
+                    v[0]  += end - i;
+                    v[1]  += end - i;
+                    v[2]  += end - i;
+                    v[3]  += end - i;
+                    v[4]  += end - i;
+                    v[5]  += end - i;
+                    v[6]  += end - i;
+                    v[7]  += end - i;
+                    v[8]  += end - i;
+                    v[9]  += end - i;
+                    v[10] += end - i;
+                    i = end;
+
+
+                    while (P != PE)
+                    {
+                        *P = *P
+                            ^ *M0
+                            ^ *M1
+                            ^ *M2
+                            ^ *M3
+                            ^ *M4
+                            ^ *M5
+                            ^ *M6
+                            ^ *M7
+                            ^ *M8
+                            ^ *M9
+                            ^ *M10
+                            ;
+
+                        ++M0;
+                        ++M1;
+                        ++M2;
+                        ++M3;
+                        ++M4;
+                        ++M5;
+                        ++M6;
+                        ++M7;
+                        ++M8;
+                        ++M9;
+                        ++M10;
+                        ++P;
                     }
 
                     break;
+                }
                 default:
                     while (i != end)
                     {

@@ -806,9 +806,9 @@ namespace osuCrypto
     {
 
         u64 rows = nextPrime(100) - 1;
-        u64 colWeight = 5;
-        u64 gap = 16;
-        u64 gapWeight = 5;
+        u64 colWeight = 11;
+        u64 gap = 32;
+        u64 gapWeight = 11;
         std::vector<u64> lowerDiags{ 5, 31 };
         u64 period = 23;
 

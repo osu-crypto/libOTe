@@ -1037,6 +1037,36 @@ void minimal()
 #endif
 
 
+void encodeBench(CLP& cmd)
+{
+	u64 mm = cmd.getOr("r", 100000);
+	u64 w = cmd.getOr("w", 11);
+
+	u64 colWeight = w;
+	u64 diags = w;
+	u64 gap = 32;
+	u64 gapWeight = w;
+	u64 period = 512;
+	std::vector<u64> db{ 5,31 };
+	PRNG pp(oc::ZeroBlock);
+	u64 trials = cmd.getOr("t", 10);
+
+	S1DiagRepEncoder mZpsDiagEncoder;
+	mZpsDiagEncoder.mL.init(mm, colWeight);
+	mZpsDiagEncoder.mR.init(mm, gap, gapWeight, period, db, true, pp);
+
+
+	std::vector<block> x(mZpsDiagEncoder.cols());
+	Timer timer;
+	mZpsDiagEncoder.setTimer(timer);
+
+
+	for(u64 i =0; i < trials; ++i)
+		mZpsDiagEncoder.cirTransEncode<block>(x);
+		
+	std::cout << timer << std::endl;
+}
+
 //
 // Created by Erik Buchholz on 27.02.20.
 //
@@ -1115,6 +1145,12 @@ int main(int argc, char** argv)
 	CLP cmd;
 	cmd.parse(argc, argv);
 	bool flagSet = false;
+
+	if (cmd.isSet("encode"))
+	{
+		encodeBench(cmd);
+		return 0;
+	}
 
 	if (cmd.isSet("ldpc"))
 	{
