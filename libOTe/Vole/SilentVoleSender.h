@@ -28,7 +28,7 @@ namespace osuCrypto
         IknpOtExtReceiver mIknpRecver;
 #endif
         //MultType mMultType = MultType::ldpc;
-        S1DiagRepEncoder mZpsDiagEncoder;
+        S1DiagRegRepEncoder mEncoder;
         //LdpcEncoder mLdpcEncoder;
         Matrix<block> rT;
 

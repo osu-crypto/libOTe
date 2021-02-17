@@ -50,7 +50,7 @@ namespace osuCrypto
             for (u64 i = 0; i < mC->rows(); ++i)
             {
                 auto row = mC->row(i);
-                std::vector<Point> points;
+                PointList points(nn,nn);
 
                 points.push_back({ i, n + i });
                 assert(row[row.size() - 1] == i);
@@ -706,7 +706,7 @@ namespace osuCrypto
             return mRows;
         }
 
-        void getPoints(std::vector<Point>& points)
+        void getPoints(PointList& points)
         {
             auto cols = mRows;
             auto v = mYs;
@@ -728,7 +728,7 @@ namespace osuCrypto
 
         SparseMtx getMatrix()
         {
-            std::vector<Point> points;
+            PointList points(mRows, mRows);
             getPoints(points);
             return SparseMtx(mRows, mRows, points);
         }
@@ -982,7 +982,7 @@ namespace osuCrypto
             return mRows;
         }
 
-        void getPoints(std::vector<Point>& points)
+        void getPoints(PointList& points)
         {
             auto cols = mRows;
             auto v = getVals();
@@ -1008,7 +1008,7 @@ namespace osuCrypto
 
         SparseMtx getMatrix()
         {
-            std::vector<Point> points;
+            PointList points(mRows, mRows);
             getPoints(points);
             return SparseMtx(mRows, mRows, points);
         }
@@ -1239,7 +1239,7 @@ namespace osuCrypto
             cirTransEncode(x);
         }
 
-        void getPoints(std::vector<Point>& points, u64 colOffset)
+        void getPoints(PointList& points, u64 colOffset)
         {
             auto rr = mRandColumns.rows();
             auto ww = mRandColumns.cols();
@@ -1283,7 +1283,7 @@ namespace osuCrypto
 
         SparseMtx getMatrix()
         {
-            std::vector<Point> points;
+            PointList points(mRows, cols());
             getPoints(points, 0);
             return SparseMtx(mRows, cols(), points);
         }
@@ -1681,7 +1681,7 @@ namespace osuCrypto
             cirTransEncode(x);
         }
 
-        void getPoints(std::vector<Point>& points, u64 colOffset)
+        void getPoints(PointList& points, u64 colOffset)
         {
             auto rr = mCols;
             auto ww = mRandColumns.cols();
@@ -1728,7 +1728,7 @@ namespace osuCrypto
 
         SparseMtx getMatrix()
         {
-            std::vector<Point> points;
+            PointList points(mRows, cols());
             getPoints(points, 0);
             return SparseMtx(mRows, cols(), points);
         }
@@ -1748,43 +1748,99 @@ namespace osuCrypto
     {
     public:
 
+        enum Code
+        {
+            Weight5 = 5,
+            Weight11 = 11,
+        };
+
         static constexpr  std::array<std::array<u8, 4>, 16> diagMtx_g16_w5_seed1_t36
         { {
-        {{ 0, 1, 5, 12}},
-        {{ 2, 10, 11, 12}},
-        {{ 1, 4, 5, 13}},
-        {{ 3, 4, 9, 12}},
-        {{ 2, 3, 4, 8}},
-        {{ 8, 10, 13, 14}},
-        {{ 0, 3, 6, 7}},
-        {{ 0, 6, 9, 14}},
-        {{ 7, 13, 14, 15}},
-        {{ 2, 7, 11, 13}},
-        {{ 2, 3, 14, 15}},
-        {{ 1, 5, 9, 15}},
-        {{ 5, 8, 9, 11}},
-        {{ 4, 8, 10, 11}},
-        {{ 1, 6, 7, 12}},
-        {{ 0, 6, 10, 15}},
+            {{ 0, 1, 5, 12}},
+            {{ 2, 10, 11, 12}},
+            {{ 1, 4, 5, 13}},
+            {{ 3, 4, 9, 12}},
+            {{ 2, 3, 4, 8}},
+            {{ 8, 10, 13, 14}},
+            {{ 0, 3, 6, 7}},
+            {{ 0, 6, 9, 14}},
+            {{ 7, 13, 14, 15}},
+            {{ 2, 7, 11, 13}},
+            {{ 2, 3, 14, 15}},
+            {{ 1, 5, 9, 15}},
+            {{ 5, 8, 9, 11}},
+            {{ 4, 8, 10, 11}},
+            {{ 1, 6, 7, 12}},
+            {{ 0, 6, 10, 15}},
+        } };
+
+
+        static constexpr  std::array<std::array<u8, 10>, 32> diagMtx_g32_w11_seed2_t36
+        { {
+            { { 7, 8, 9, 13, 17, 18, 21, 23, 25, 26}},
+            { { 0, 1, 2, 3, 8, 12, 14, 15, 19, 21} },
+            { { 1, 2, 4, 7, 10, 13, 15, 19, 24, 25} },
+            { { 7, 9, 13, 17, 19, 25, 27, 29, 30, 31} },
+            { { 1, 8, 13, 14, 19, 22, 24, 29, 30, 31} },
+            { { 4, 9, 17, 18, 19, 20, 22, 23, 27, 28} },
+            { { 5, 6, 9, 11, 12, 18, 19, 24, 29, 31} },
+            { { 3, 5, 13, 16, 19, 20, 21, 25, 26, 28} },
+            { { 3, 7, 22, 25, 26, 27, 28, 29, 30, 31} },
+            { { 5, 13, 18, 23, 25, 26, 27, 29, 30, 31} },
+            { { 0, 2, 5, 7, 9, 11, 13, 15, 16, 17} },
+            { { 2, 6, 8, 10, 14, 16, 18, 20, 22, 23} },
+            { { 5, 11, 20, 22, 24, 27, 28, 29, 30, 31} },
+            { { 0, 2, 6, 7, 10, 14, 17, 21, 26, 27} },
+            { { 4, 7, 9, 10, 16, 20, 22, 23, 27, 28} },
+            { { 0, 1, 3, 6, 8, 9, 11, 12, 15, 16} },
+            { { 0, 1, 3, 7, 9, 14, 15, 17, 23, 24} },
+            { { 1, 3, 4, 6, 8, 12, 20, 21, 22, 25} },
+            { { 3, 4, 6, 11, 14, 16, 18, 21, 22, 28} },
+            { { 1, 2, 8, 11, 12, 15, 21, 23, 25, 27} },
+            { { 3, 8, 9, 10, 14, 21, 23, 24, 30, 31} },
+            { { 3, 6, 10, 11, 13, 15, 17, 18, 21, 26} },
+            { { 0, 4, 6, 8, 11, 15, 24, 25, 28, 29} },
+            { { 0, 4, 5, 12, 15, 20, 22, 24, 28, 31} },
+            { { 1, 2, 16, 18, 19, 21, 25, 28, 29, 30} },
+            { { 1, 2, 4, 5, 9, 15, 20, 26, 29, 30} },
+            { { 0, 1, 2, 3, 5, 6, 10, 16, 17, 20} },
+            { { 4, 5, 18, 20, 23, 24, 28, 29, 30, 31} },
+            { { 10, 11, 12, 13, 16, 19, 26, 27, 30, 31} },
+            { { 0, 12, 13, 14, 17, 18, 23, 24, 26, 27} },
+            { { 7, 8, 10, 11, 12, 14, 16, 17, 22, 26} },
+            { { 0, 2, 4, 5, 6, 7, 10, 12, 14, 19} },
         } };
 
         static constexpr std::array<u8, 2> mOffsets{ {5,31} };
 
-        static constexpr u64 mGap = 16;
+        u64 mGap;
 
         u64 mRows, mCols;
+        Code mCode;
         //std::vector<u64> mOffsets;
         bool mExtend;
 
         void init(
             u64 rows,
-            u64 gap,
+            Code c,
             bool extend)
         {
-            if (gap != mGap)
+            switch (c)
+            {
+            case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight5:
+                mGap = 16;
+                break;
+            case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight11:
+                mGap = 32;
+                break;
+            default:
                 throw RTE_LOC;
+                break;
+            }
 
             assert(mGap < rows);
+
+            mCode = c;
 
             mRows = rows;
             mExtend = extend;
@@ -1814,13 +1870,26 @@ namespace osuCrypto
 
 
                 x[i] = y[i];
-
-                for (u64 j = 0; j < 4; ++j)
+                if (mCode == Code::Weight5)
                 {
-                    auto col = i - 16 + diagMtx_g16_w5_seed1_t36[i & 15][j];
+                    for (u64 j = 0; j < 4; ++j)
+                    {
+                        auto col = i - 16 + diagMtx_g16_w5_seed1_t36[i & 15][j];
 
-                    if (col < mRows)
-                        x[i] = x[i] ^ x[col];
+                        if (col < mRows)
+                            x[i] = x[i] ^ x[col];
+                    }
+                }
+
+                if (mCode == Code::Weight11)
+                {
+                    for (u64 j = 0; j < 10; ++j)
+                    {
+                        auto col = i - 32 + diagMtx_g32_w11_seed2_t36[i & 31][j];
+
+                        if (col < mRows)
+                            x[i] = x[i] ^ x[col];
+                    }
                 }
 
                 for (u64 j = 0; j < mOffsets.size(); ++j)
@@ -1857,50 +1926,126 @@ namespace osuCrypto
             }
 
             u64 i = mRows - 1;
-
-            auto mainEnd =
-                roundUpTo(
-                    *std::max_element(mOffsets.begin(), mOffsets.end())
-                    + mGap,
-                    16);
-
-            T* __restrict xi = &x[i];
-            T* __restrict xx = xi - 16;
-
             T* __restrict ofCol0 = &x[offsets[0]];
             T* __restrict ofCol1 = &x[offsets[1]];
+            T* __restrict xi = &x[i];
 
-            for (; i > mainEnd;)
+            switch (mCode)
             {
-                for (u64 jj = 0; jj < 16; ++jj)
+            case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight5:
+            {
+
+                auto mainEnd =
+                    roundUpTo(
+                        *std::max_element(mOffsets.begin(), mOffsets.end())
+                        + mGap,
+                        16);
+
+                T* __restrict xx = xi - 16;
+
+                for (; i > mainEnd;)
                 {
+                    for (u64 jj = 0; jj < 16; ++jj)
+                    {
 
-                    auto col0 = diagMtx_g16_w5_seed1_t36[i & 15][0];
-                    auto col1 = diagMtx_g16_w5_seed1_t36[i & 15][1];
-                    auto col2 = diagMtx_g16_w5_seed1_t36[i & 15][2];
-                    auto col3 = diagMtx_g16_w5_seed1_t36[i & 15][3];
+                        auto col0 = diagMtx_g16_w5_seed1_t36[i & 15][0];
+                        auto col1 = diagMtx_g16_w5_seed1_t36[i & 15][1];
+                        auto col2 = diagMtx_g16_w5_seed1_t36[i & 15][2];
+                        auto col3 = diagMtx_g16_w5_seed1_t36[i & 15][3];
 
-                    T* __restrict xc0 = xx + col0;
-                    T* __restrict xc1 = xx + col1;
-                    T* __restrict xc2 = xx + col2;
-                    T* __restrict xc3 = xx + col3;
+                        T* __restrict xc0 = xx + col0;
+                        T* __restrict xc1 = xx + col1;
+                        T* __restrict xc2 = xx + col2;
+                        T* __restrict xc3 = xx + col3;
 
-                    *xc0 = *xc0 ^ *xi;
-                    *xc1 = *xc1 ^ *xi;
-                    *xc2 = *xc2 ^ *xi;
-                    *xc3 = *xc3 ^ *xi;
+                        *xc0 = *xc0 ^ *xi;
+                        *xc1 = *xc1 ^ *xi;
+                        *xc2 = *xc2 ^ *xi;
+                        *xc3 = *xc3 ^ *xi;
 
-                    *ofCol0 = *ofCol0 ^ *xi;
-                    *ofCol1 = *ofCol1 ^ *xi;
+                        *ofCol0 = *ofCol0 ^ *xi;
+                        *ofCol1 = *ofCol1 ^ *xi;
 
 
-                    --ofCol0;
-                    --ofCol1;
+                        --ofCol0;
+                        --ofCol1;
 
-                    --xx;
-                    --xi;
-                    --i;
+                        --xx;
+                        --xi;
+                        --i;
+                    }
                 }
+
+                break;
+            }
+            case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight11:
+            {
+
+
+                auto mainEnd =
+                    roundUpTo(
+                        *std::max_element(mOffsets.begin(), mOffsets.end())
+                        + mGap,
+                        32);
+
+                T* __restrict xx = xi - 32;
+
+                for (; i > mainEnd;)
+                {
+                    for (u64 jj = 0; jj < 32; ++jj)
+                    {
+
+                        auto col0 = diagMtx_g32_w11_seed2_t36[i & 31][0];
+                        auto col1 = diagMtx_g32_w11_seed2_t36[i & 31][1];
+                        auto col2 = diagMtx_g32_w11_seed2_t36[i & 31][2];
+                        auto col3 = diagMtx_g32_w11_seed2_t36[i & 31][3];
+                        auto col4 = diagMtx_g32_w11_seed2_t36[i & 31][4];
+                        auto col5 = diagMtx_g32_w11_seed2_t36[i & 31][5];
+                        auto col6 = diagMtx_g32_w11_seed2_t36[i & 31][6];
+                        auto col7 = diagMtx_g32_w11_seed2_t36[i & 31][7];
+                        auto col8 = diagMtx_g32_w11_seed2_t36[i & 31][8];
+                        auto col9 = diagMtx_g32_w11_seed2_t36[i & 31][9];
+
+                        T* __restrict xc0 = xx + col0;
+                        T* __restrict xc1 = xx + col1;
+                        T* __restrict xc2 = xx + col2;
+                        T* __restrict xc3 = xx + col3;
+                        T* __restrict xc4 = xx + col4;
+                        T* __restrict xc5 = xx + col5;
+                        T* __restrict xc6 = xx + col6;
+                        T* __restrict xc7 = xx + col7;
+                        T* __restrict xc8 = xx + col8;
+                        T* __restrict xc9 = xx + col9;
+
+                        *xc0 = *xc0 ^ *xi;
+                        *xc1 = *xc1 ^ *xi;
+                        *xc2 = *xc2 ^ *xi;
+                        *xc3 = *xc3 ^ *xi;
+                        *xc4 = *xc4 ^ *xi;
+                        *xc5 = *xc5 ^ *xi;
+                        *xc6 = *xc6 ^ *xi;
+                        *xc7 = *xc7 ^ *xi;
+                        *xc8 = *xc8 ^ *xi;
+                        *xc9 = *xc9 ^ *xi;
+
+                        *ofCol0 = *ofCol0 ^ *xi;
+                        *ofCol1 = *ofCol1 ^ *xi;
+
+
+                        --ofCol0;
+                        --ofCol1;
+
+                        --xx;
+                        --xi;
+                        --i;
+                    }
+                }
+
+                break;
+            }
+            default:
+                throw RTE_LOC;
+                break;
             }
 
             offsets[0] = ofCol0 - x.data();
@@ -1908,12 +2053,29 @@ namespace osuCrypto
 
             for (; i != ~u64(0); --i)
             {
-                for (u64 j = 0; j < 4; ++j)
+
+                switch (mCode)
                 {
-                    //auto& col = row2[j];
-                    auto col = diagMtx_g16_w5_seed1_t36[i & 15][j] + i - 16;
-                    if (col < mRows)
-                        x[col] = x[col] ^ x[i];
+                case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight5:
+
+                    for (u64 j = 0; j < 4; ++j)
+                    {
+                        auto col = diagMtx_g16_w5_seed1_t36[i & 15][j] + i - 16;
+                        if (col < mRows)
+                            x[col] = x[col] ^ x[i];
+                    }
+                    break;
+                case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight11:
+
+                    for (u64 j = 0; j < 10; ++j)
+                    {
+                        auto col = diagMtx_g32_w11_seed2_t36[i & 31][j] + i - 32;
+                        if (col < mRows)
+                            x[col] = x[col] ^ x[i];
+                    }
+                    break;
+                default:
+                    break;
                 }
 
                 for (u64 j = 0; j < FIXED_OFFSET_SIZE; ++j)
@@ -1930,10 +2092,259 @@ namespace osuCrypto
             }
         }
 
-        void getPoints(std::vector<Point>& points, u64 colOffset)
+
+
+        template<typename T>
+        void cirTransEncode2(span<T> x0, span<T> x1)
+        {
+            assert(mExtend);
+
+            // solves for x such that y = M x, ie x := H^-1 y 
+            assert(cols() == x0.size());
+            assert(cols() == x1.size());
+
+
+            constexpr int FIXED_OFFSET_SIZE = 2;
+            if (mOffsets.size() != FIXED_OFFSET_SIZE)
+                throw RTE_LOC;
+
+            std::vector<u64> offsets(mOffsets.size());
+            for (u64 j = 0; j < offsets.size(); ++j)
+            {
+                offsets[j] = mRows - 1 - mOffsets[j] - mGap;
+            }
+
+            u64 i = mRows - 1;
+            T* __restrict ofCol00 = &x0[offsets[0]];
+            T* __restrict ofCol10 = &x0[offsets[1]];
+            T* __restrict ofCol01 = &x1[offsets[0]];
+            T* __restrict ofCol11 = &x1[offsets[1]];
+            T* __restrict xi0 = &x0[i];
+            T* __restrict xi1 = &x1[i];
+
+            switch (mCode)
+            {
+            case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight5:
+            {
+
+                auto mainEnd =
+                    roundUpTo(
+                        *std::max_element(mOffsets.begin(), mOffsets.end())
+                        + mGap,
+                        16);
+
+                T* __restrict xx0 = xi0 - 16;
+                T* __restrict xx1 = xi1 - 16;
+
+                for (; i > mainEnd;)
+                {
+                    for (u64 jj = 0; jj < 16; ++jj)
+                    {
+
+                        auto col0 = diagMtx_g16_w5_seed1_t36[i & 15][0];
+                        auto col1 = diagMtx_g16_w5_seed1_t36[i & 15][1];
+                        auto col2 = diagMtx_g16_w5_seed1_t36[i & 15][2];
+                        auto col3 = diagMtx_g16_w5_seed1_t36[i & 15][3];
+
+                        T* __restrict xc00 = xx0 + col0;
+                        T* __restrict xc10 = xx0 + col1;
+                        T* __restrict xc20 = xx0 + col2;
+                        T* __restrict xc30 = xx0 + col3;
+                        T* __restrict xc01 = xx1 + col0;
+                        T* __restrict xc11 = xx1 + col1;
+                        T* __restrict xc21 = xx1 + col2;
+                        T* __restrict xc31 = xx1 + col3;
+
+                        *xc00 = *xc00 ^ *xi0;
+                        *xc10 = *xc10 ^ *xi0;
+                        *xc20 = *xc20 ^ *xi0;
+                        *xc30 = *xc30 ^ *xi0;
+
+                        *xc01 = *xc01 ^ *xi1;
+                        *xc11 = *xc11 ^ *xi1;
+                        *xc21 = *xc21 ^ *xi1;
+                        *xc31 = *xc31 ^ *xi1;
+
+                        *ofCol00 = *ofCol00 ^ *xi0;
+                        *ofCol10 = *ofCol10 ^ *xi0;
+                        *ofCol01 = *ofCol01 ^ *xi1;
+                        *ofCol11 = *ofCol11 ^ *xi1;
+
+
+                        --ofCol00;
+                        --ofCol10;
+                        --ofCol01;
+                        --ofCol11;
+
+                        --xx0;
+                        --xx1;
+                        --xi0;
+                        --xi1;
+                        --i;
+                    }
+                }
+
+                break;
+            }
+            case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight11:
+            {
+
+
+                auto mainEnd =
+                    roundUpTo(
+                        *std::max_element(mOffsets.begin(), mOffsets.end())
+                        + mGap,
+                        32);
+
+                T* __restrict xx0 = xi0 - 32;
+                T* __restrict xx1 = xi1 - 32;
+
+                for (; i > mainEnd;)
+                {
+                    for (u64 jj = 0; jj < 32; ++jj)
+                    {
+
+                        auto col0 = diagMtx_g32_w11_seed2_t36[i & 31][0];
+                        auto col1 = diagMtx_g32_w11_seed2_t36[i & 31][1];
+                        auto col2 = diagMtx_g32_w11_seed2_t36[i & 31][2];
+                        auto col3 = diagMtx_g32_w11_seed2_t36[i & 31][3];
+                        auto col4 = diagMtx_g32_w11_seed2_t36[i & 31][4];
+                        auto col5 = diagMtx_g32_w11_seed2_t36[i & 31][5];
+                        auto col6 = diagMtx_g32_w11_seed2_t36[i & 31][6];
+                        auto col7 = diagMtx_g32_w11_seed2_t36[i & 31][7];
+                        auto col8 = diagMtx_g32_w11_seed2_t36[i & 31][8];
+                        auto col9 = diagMtx_g32_w11_seed2_t36[i & 31][9];
+
+                        T* __restrict xc00 = xx0 + col0;
+                        T* __restrict xc10 = xx0 + col1;
+                        T* __restrict xc20 = xx0 + col2;
+                        T* __restrict xc30 = xx0 + col3;
+                        T* __restrict xc40 = xx0 + col4;
+                        T* __restrict xc50 = xx0 + col5;
+                        T* __restrict xc60 = xx0 + col6;
+                        T* __restrict xc70 = xx0 + col7;
+                        T* __restrict xc80 = xx0 + col8;
+                        T* __restrict xc90 = xx0 + col9;
+
+                        T* __restrict xc01 = xx1 + col0;
+                        T* __restrict xc11 = xx1 + col1;
+                        T* __restrict xc21 = xx1 + col2;
+                        T* __restrict xc31 = xx1 + col3;
+                        T* __restrict xc41 = xx1 + col4;
+                        T* __restrict xc51 = xx1 + col5;
+                        T* __restrict xc61 = xx1 + col6;
+                        T* __restrict xc71 = xx1 + col7;
+                        T* __restrict xc81 = xx1 + col8;
+                        T* __restrict xc91 = xx1 + col9;
+
+                        *xc00 = *xc00 ^ *xi0;
+                        *xc10 = *xc10 ^ *xi0;
+                        *xc20 = *xc20 ^ *xi0;
+                        *xc30 = *xc30 ^ *xi0;
+                        *xc40 = *xc40 ^ *xi0;
+                        *xc50 = *xc50 ^ *xi0;
+                        *xc60 = *xc60 ^ *xi0;
+                        *xc70 = *xc70 ^ *xi0;
+                        *xc80 = *xc80 ^ *xi0;
+                        *xc90 = *xc90 ^ *xi0;
+
+                        *xc01 = *xc01 ^ *xi1;
+                        *xc11 = *xc11 ^ *xi1;
+                        *xc21 = *xc21 ^ *xi1;
+                        *xc31 = *xc31 ^ *xi1;
+                        *xc41 = *xc41 ^ *xi1;
+                        *xc51 = *xc51 ^ *xi1;
+                        *xc61 = *xc61 ^ *xi1;
+                        *xc71 = *xc71 ^ *xi1;
+                        *xc81 = *xc81 ^ *xi1;
+                        *xc91 = *xc91 ^ *xi1;
+
+                        *ofCol00 = *ofCol00 ^ *xi0;
+                        *ofCol10 = *ofCol10 ^ *xi0;
+
+                        *ofCol01 = *ofCol01 ^ *xi1;
+                        *ofCol11 = *ofCol11 ^ *xi1;
+
+
+                        --ofCol00;
+                        --ofCol10;
+                        --ofCol01;
+                        --ofCol11;
+
+                        --xx0;
+                        --xx1;
+
+                        --xi0;
+                        --xi1;
+                        --i;
+                    }
+                }
+
+                break;
+            }
+            default:
+                throw RTE_LOC;
+                break;
+            }
+
+            offsets[0] = ofCol00 - x0.data();
+            offsets[1] = ofCol10 - x0.data();
+
+            for (; i != ~u64(0); --i)
+            {
+
+                switch (mCode)
+                {
+                case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight5:
+
+                    for (u64 j = 0; j < 4; ++j)
+                    {
+                        auto col = diagMtx_g16_w5_seed1_t36[i & 15][j] + i - 16;
+                        if (col < mRows)
+                        {
+                            x0[col] = x0[col] ^ x0[i];
+                            x1[col] = x1[col] ^ x1[i];
+                        }
+                    }
+                    break;
+                case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight11:
+
+                    for (u64 j = 0; j < 10; ++j)
+                    {
+                        auto col = diagMtx_g32_w11_seed2_t36[i & 31][j] + i - 32;
+                        if (col < mRows)
+                        {
+                            x0[col] = x0[col] ^ x0[i];
+                            x1[col] = x1[col] ^ x1[i];
+                        }
+                    }
+                    break;
+                default:
+                    break;
+                }
+
+                for (u64 j = 0; j < FIXED_OFFSET_SIZE; ++j)
+                {
+                    auto& col = offsets[j];
+
+                    if (col >= mRows)
+                        break;
+                    assert(i - mOffsets[j] - mGap == col);
+
+                    x0[col] = x0[col] ^ x0[i];
+                    x1[col] = x1[col] ^ x1[i];
+                    --col;
+                }
+            }
+        }
+
+
+
+
+
+        void getPoints(PointList& points, u64 colOffset)
         {
             auto rr = mRows;
-            auto ww = 4;
 
             for (u64 i = 0; i < rr; ++i)
             {
@@ -1941,16 +2352,39 @@ namespace osuCrypto
 
                 //assert(set.insert({ i, i + colOffset }).second);
 
-                for (u64 j = 0; j < ww; ++j)
+                switch (mCode)
                 {
-                    //auto row = diagMtx_g16_w5_seed1_t36[i & 15].data();
+                case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight5:
 
-                    auto col = i - 16 + diagMtx_g16_w5_seed1_t36[i & 15][j];
-                    //throw RTE_LOC;
-                    if (col < mRows)
-                        points.push_back({ i, col + colOffset });
+                    for (u64 j = 0; j < 4; ++j)
+                    {
+                        //auto row = diagMtx_g16_w5_seed1_t36[i & 15].data();
 
-                    //assert(set.insert({ mRandColumns(i,j) + i + 1, i + colOffset }).second);
+                        auto col = i - 16 + diagMtx_g16_w5_seed1_t36[i & 15][j];
+                        //throw RTE_LOC;
+                        if (col < mRows)
+                            points.push_back({ i, col + colOffset });
+
+                        //assert(set.insert({ mRandColumns(i,j) + i + 1, i + colOffset }).second);
+                    }
+
+                    break;
+                case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight11:
+                    for (u64 j = 0; j < 10; ++j)
+                    {
+                        //auto row = diagMtx_g16_w5_seed1_t36[i & 15].data();
+
+                        auto col = i - 32 + diagMtx_g32_w11_seed2_t36[i & 31][j];
+                        //throw RTE_LOC;
+                        if (col < mRows)
+                            points.push_back({ i, col + colOffset });
+
+                        //assert(set.insert({ mRandColumns(i,j) + i + 1, i + colOffset }).second);
+                    }
+
+                    break;
+                default:
+                    break;
                 }
 
 
@@ -1978,7 +2412,7 @@ namespace osuCrypto
 
         SparseMtx getMatrix()
         {
-            std::vector<Point> points;
+            PointList points(mRows, cols());
             getPoints(points, 0);
             return SparseMtx(mRows, cols(), points);
         }
@@ -2099,7 +2533,7 @@ namespace osuCrypto
         u64 rows() {
             return mR.rows();
         }
-        void getPoints(std::vector<Point>& points)
+        void getPoints(PointList& points)
         {
             mL.getPoints(points);
             mR.getPoints(points, mL.cols());
@@ -2107,7 +2541,7 @@ namespace osuCrypto
 
         SparseMtx getMatrix()
         {
-            std::vector<Point> points;
+            PointList points(rows(), cols());
             getPoints(points);
             return SparseMtx(rows(), cols(), points);
         }

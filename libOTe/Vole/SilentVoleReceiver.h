@@ -37,7 +37,7 @@ namespace osuCrypto
 
         Matrix<block> rT;
 
-        S1DiagRepEncoder mZpsDiagEncoder;
+        S1DiagRegRepEncoder mEncoder;
 
         // sets the Iknp base OTs that are then used to extend
         void setBaseOts(

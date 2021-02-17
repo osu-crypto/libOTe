@@ -1043,6 +1043,13 @@ void encodeBench(CLP& cmd)
 	u64 mm = cmd.getOr("r", 100000);
 	u64 w = cmd.getOr("w", 5);
 	auto gap = cmd.getOr("g", 16);
+	LdpcDiagRegRepeaterEncoder::Code code;
+	if (w == 11)
+		code = LdpcDiagRegRepeaterEncoder::Weight11;
+	else if (w == 5)
+		code = LdpcDiagRegRepeaterEncoder::Weight5;
+	else
+		throw RTE_LOC;
 
 	u64 colWeight = w;
 	u64 diags = w;
@@ -1072,7 +1079,7 @@ void encodeBench(CLP& cmd)
 
 	S1DiagRegRepEncoder enc2;
 	enc2.mL.init(mm, colWeight);
-	enc2.mR.init(mm, gap, true);
+	enc2.mR.init(mm, code, true);
 	enc2.setTimer(timer);
 	timer.setTimePoint("_____________________");
 	for (u64 i = 0; i < trials; ++i)

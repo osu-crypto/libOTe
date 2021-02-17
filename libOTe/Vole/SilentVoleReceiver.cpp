@@ -137,37 +137,25 @@ namespace osuCrypto
         //if (mMultType == MultType::ldpc)
         {
             assert(scaler == 2);
-            auto mm = nextPrime(numOTs + 1) - 1;
+            auto mm = numOTs;
             //auto mm = numOTs;// nextPrime(numOTs) - 1;
             u64 nn = mm * scaler;
             auto kk = nn - mm;
 
-            u64 colWeight = 5;
-            u64 diags = 5;
-            u64 gap = 16;
-            u64 gapWeight = 5;
-            u64 period = 256;
 
+            //auto code = LdpcDiagRegRepeaterEncoder::Weight11;
             //u64 colWeight = 11;
-            //u64 diags = 11;
-            //u64 gap = 32;
-            //u64 gapWeight = 11;
-            //u64 period = 512;
-            std::vector<u64> db{ 5,31 };
-            PRNG pp(oc::ZeroBlock);
 
-            if (mZpsDiagEncoder.cols() != nn)
+            auto code = LdpcDiagRegRepeaterEncoder::Weight5;
+            u64 colWeight = 5;
+
+            if (mEncoder.cols() != nn)
             {
                 setTimePoint("config.begin");
-                mZpsDiagEncoder.mL.init(mm, colWeight);
+                mEncoder.mL.init(mm, colWeight);
                 setTimePoint("config.Left");
-                mZpsDiagEncoder.mR.init(mm, gap, gapWeight, period, db, true, pp);
+                mEncoder.mR.init(mm, code, true);
                 setTimePoint("config.Right");
-
-
-                //auto mH = sampleTriangularBand(mm, nn, colWeight, gap, gapWeight, diags, 0, db, true, true, pp);
-                //setTimePoint("config.sample");
-                //mLdpcEncoder.init(std::move(mH), 0);
             }
 
             mP = 0;
@@ -353,77 +341,6 @@ namespace osuCrypto
 
         rT.resize(mN2, 1);
 
-        struct block256
-        {
-            block256() = default;
-            block256(const block256&) = default;
-            block256(const __m256i& dd) : d(dd) {};
-
-            __m256i d;
-            block256 operator^(const block256& b) const
-            {
-                return _mm256_xor_si256(d, b.d);
-            }
-        };
-
-
-        if (0)
-        {
-            std::unique_ptr<block256[]> backing(new block256[rT.size()]);
-            span<std::array<block, 2>> bb((std::array<block, 2>*)backing.get(), rT.size());
-            span<block256> aa(backing.get(), rT.size());
-
-            auto r8 = rT.size() / 8 * 8;
-
-            auto rPtr = rT.data();
-            for (u64 i = 0; i < r8; i+= 8)
-            {
-                bb[i + 0][0] = rPtr[i + 0];
-                bb[i + 1][0] = rPtr[i + 1];
-                bb[i + 2][0] = rPtr[i + 2];
-                bb[i + 3][0] = rPtr[i + 3];
-                bb[i + 4][0] = rPtr[i + 4];
-                bb[i + 5][0] = rPtr[i + 5];
-                bb[i + 6][0] = rPtr[i + 6];
-                bb[i + 7][0] = rPtr[i + 7];
-                bb[i + 0][1] = ZeroBlock;
-                bb[i + 1][1] = ZeroBlock;
-                bb[i + 2][1] = ZeroBlock;
-                bb[i + 3][1] = ZeroBlock;
-                bb[i + 4][1] = ZeroBlock;
-                bb[i + 5][1] = ZeroBlock;
-                bb[i + 6][1] = ZeroBlock;
-                bb[i + 7][1] = ZeroBlock;
-            }
-            
-            for (u64 i = r8; i < rT.size(); ++i)
-            {
-                bb[i][0] = rT(i);
-                bb[i][1] = ZeroBlock;
-            }
-
-            std::vector<u64> points(mGen.mPntCount);
-            mGen.getPoints(points, PprfOutputFormat::Interleaved);
-            for (u64 i = 0; i < points.size(); ++i)
-            {
-                auto pnt = points[i];
-                bb[pnt][1] = y[i];
-            }
-            setTimePoint("recver.expand.msgCpy");
-
-            mZpsDiagEncoder.cirTransEncode(aa);
-            setTimePoint("recver.expand.cirTransEncode");
-
-            for (u64 i = 0; i < messages.size(); ++i)
-            {
-                messages[i] = bb[i][0];
-                choices[i] = bb[i][1];
-            }
-            setTimePoint("recver.expand.msgCpy");
-
-        }
-        else
-        {
             Matrix<block> rT2(rT.size(), 1, AllocType::Zeroed);
 
             std::vector<u64> points(mGen.mPntCount);
@@ -434,15 +351,14 @@ namespace osuCrypto
                 rT2(pnt) = rT2(pnt) ^ y[i];
             }
 
-            mZpsDiagEncoder.setTimer(getTimer());
-            mZpsDiagEncoder.cirTransEncode2(span<block>(rT), span<block>(rT2));
+            mEncoder.setTimer(getTimer());
+            mEncoder.cirTransEncode2(span<block>(rT), span<block>(rT2));
             setTimePoint("recver.expand.cirTransEncode.a");
 
             std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
             setTimePoint("recver.expand.msgCpy");
             std::memcpy(choices.data(), rT2.data(), choices.size() * sizeof(block));
             setTimePoint("recver.expand.chcCpy");
-        }
 
     }
 

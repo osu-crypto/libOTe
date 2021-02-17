@@ -174,25 +174,19 @@ namespace osuCrypto
             u64 nn = mm * scaler;
             auto kk = nn - mm;
 
-            u64 colWeight = 5;
-            u64 diags = 5;
-            u64 gap = 16;
-            u64 gapWeight = 5;
-            //u64 period = 256;
+            //auto code = LdpcDiagRegRepeaterEncoder::Weight11;
             //u64 colWeight = 11;
-            //u64 diags = 11;
-            //u64 gap = 32;
-            //u64 gapWeight = 11;
-            //u64 period = 512;
-            //std::vector<u64> db{ 5,31 };
-            //PRNG pp(oc::ZeroBlock);
+
+            auto code = LdpcDiagRegRepeaterEncoder::Weight5;
+            u64 colWeight = 5;
+
 
             if (mEncoder.cols() != nn)
             {
                 setTimePoint("config.begin");
                 mEncoder.mL.init(mm, colWeight);
                 setTimePoint("config.Left");
-                mEncoder.mR.init(mm, gap, true);
+                mEncoder.mR.init(mm, code, true);
                 setTimePoint("config.Right");
                 
                 //auto mH = sampleTriangularBand(mm, nn, colWeight, gap, gapWeight, diags, 0, db, true, true, pp);

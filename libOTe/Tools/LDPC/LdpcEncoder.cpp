@@ -858,13 +858,14 @@ namespace osuCrypto
 
         u64 rows = nextPrime(100) - 1;
         u64 colWeight = 5;
+        LdpcDiagRegRepeaterEncoder::Code code = LdpcDiagRegRepeaterEncoder::Weight11;
 
         PRNG prng(ZeroBlock);
         using Encoder = LdpcCompositEncoder<LdpcS1Encoder, LdpcDiagRegRepeaterEncoder>;
 
         Encoder enc;
         enc.mL.init(rows, colWeight);
-        enc.mR.init(rows, 16, true);
+        enc.mR.init(rows, code, true);
 
         auto H = enc.getMatrix();
         std::cout << H << std::endl;
@@ -904,16 +905,15 @@ namespace osuCrypto
 
         u64 rows = 1043;
         u64 colWeight = 5;
-        u64 gap = 16;
-        u64 gapWeight = 5;
-        std::vector<u64> lowerDiags{ 5, 31 };
+        LdpcDiagRegRepeaterEncoder::Code code = LdpcDiagRegRepeaterEncoder::Weight11;
+        
 
         using Encoder = LdpcCompositEncoder<LdpcS1Encoder, LdpcDiagRegRepeaterEncoder>;
         PRNG prng(ZeroBlock);
 
         Encoder enc;
         enc.mL.init(rows, colWeight);
-        enc.mR.init(rows,gap, true);
+        enc.mR.init(rows, code, true);
 
         auto H = enc.getMatrix();
         auto HD = H.dense();
