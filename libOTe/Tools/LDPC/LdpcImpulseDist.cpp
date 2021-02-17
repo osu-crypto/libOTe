@@ -640,11 +640,12 @@ namespace osuCrypto
         auto doubleBand = cmd.getMany<u64>("db");
         bool trim = cmd.isSet("trim");
         bool extend = cmd.isSet("extend");
-        u64 period = cmd.getOr("period", 100);
+        u64 period = cmd.getOr("period", 0);
         bool zp = cmd.isSet("zp");
         bool randY = cmd.isSet("randY");
         bool printYs = cmd.isSet("py");
         bool hm = cmd.isSet("hm");
+        bool reg = cmd.isSet("reg");
 
         std::string logPath = cmd.getOr<std::string>("log", "");
 
@@ -662,6 +663,8 @@ namespace osuCrypto
         bool rand = cmd.isSet("rand");
         u64 n = cmd.getOr("rand", 100);
         ListDecoder listDecoder = (ListDecoder)cmd.getOr("ld", 1);
+
+        printDiag = cmd.isSet("printDiag");
 
         auto algo = (BPAlgo)cmd.getOr("bp", 2);
 
@@ -733,6 +736,8 @@ namespace osuCrypto
             if(zp)
                 label << " -zp ";
 
+            if (reg)
+                label << " -reg";
 
         }
 
@@ -796,12 +801,22 @@ namespace osuCrypto
 
                     H = enc.getMatrix();
                 }
+                if (reg)
+                {
+                    H = sampleRegTriangularBand(
+                        rows, cols,
+                        colWeight, gap,
+                        dWeight, diag, dDiag, period,
+                        doubleBand, trim, extend, randY, prng);
+                    //std::cout << H << std::endl;
+                }
                 else
                 {
                     H = sampleTriangularBand(
                         rows, cols,
                         colWeight, gap,
-                        dWeight, diag, dDiag, doubleBand, trim, extend, randY, prng);
+                        dWeight, diag, dDiag, period,
+                        doubleBand, trim, extend, randY, prng);
                 }
 
                 //impulseDist(5, 5000);

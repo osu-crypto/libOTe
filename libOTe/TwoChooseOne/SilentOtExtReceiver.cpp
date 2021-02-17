@@ -60,15 +60,15 @@ namespace osuCrypto
 
 #if defined(ENABLE_IKNP) || defined(LIBOTE_HAS_BASE_OT)
 
-    #ifdef ENABLE_IKNP
+#ifdef ENABLE_IKNP
         mIknpRecver.receive(choice, msg, prng, chl);
-    #else
-        // otherwise just generate the silent 
-        // base OTs directly.
+#else
+    // otherwise just generate the silent 
+    // base OTs directly.
         DefaultBaseOT base;
         base.receive(choice, msg, prng, chl, mNumThreads);
         setTimePoint("recver.gen.baseOT");
-    #endif
+#endif
 #else
         throw std::runtime_error("IKNP or base OTs must be enabled");
 #endif
@@ -164,7 +164,7 @@ namespace osuCrypto
         if (mMultType == MultType::ldpc)
         {
             assert(scaler == 2);
-            auto mm = nextPrime(numOTs + 1) - 1;
+            auto mm = numOTs;
             //auto mm = numOTs;// nextPrime(numOTs) - 1;
             u64 nn = mm * scaler;
             auto kk = nn - mm;
@@ -175,20 +175,20 @@ namespace osuCrypto
             //u64 gapWeight = 5;
             //u64 period = 256;
 
-            u64 colWeight = 11;
-            u64 diags = 11;
-            u64 gap = 32;
-            u64 gapWeight = 11;
-            u64 period = 512;
-            std::vector<u64> db{ 5,31 };
+            u64 colWeight = 5;
+            u64 diags = 5;
+            u64 gap = 16;
+            u64 gapWeight = 5;
+            //u64 period = 512;
+            //std::vector<u64> db{ 5,31 };
             PRNG pp(oc::ZeroBlock);
-            
-            if (mZpsDiagEncoder.cols() != nn)
+
+            if (mEncoder.cols() != nn)
             {
                 setTimePoint("config.begin");
-                mZpsDiagEncoder.mL.init(mm, colWeight);
+                mEncoder.mL.init(mm, colWeight);
                 setTimePoint("config.Left");
-                mZpsDiagEncoder.mR.init(mm, gap, gapWeight, period, db, true, pp);
+                mEncoder.mR.init(mm, gap, true);
                 setTimePoint("config.Right");
 
 
@@ -296,7 +296,7 @@ namespace osuCrypto
             }
         }
 
-        if(failed)
+        if (failed)
             throw RTE_LOC;
 
         std::cout << "debug check ok" << std::endl;
@@ -405,7 +405,7 @@ namespace osuCrypto
 
             ldpcMult(rT, messages, choices);
         }
-            break;
+        break;
         default:
             break;
         }
@@ -437,153 +437,112 @@ namespace osuCrypto
         rT.resize(mN2, 1);
 
         setTimePoint("recver.expand.ldpc.mult");
-        bool seperate = false;
-        if (seperate)
 
+        block mask = OneBlock ^ AllOneBlock;
+        auto m8 = rT.size() / 8 * 8;
+        auto r = &rT(0);
+
+        for (u64 i = 0; i < m8; i += 8)
         {
-
-            if (mLdpcEncoder.mH.rows())
-                mLdpcEncoder.cirTransEncode(span<block>(rT));
-            else
-                mZpsDiagEncoder.cirTransEncode(span<block>(rT));
-            setTimePoint("recver.expand.ldpc.cirTransEncode");
-            std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-
-            setTimePoint("recver.expand.ldpc.mCopy");
-
-            std::vector<u8> cc(rT.size());
-            std::vector<u64> points(mGen.mPntCount);
-            mGen.getPoints(points, getPprfFormat());
-            for (auto p : points)
-            {
-                cc[p] = 1;
-            }
-
-            if (mLdpcEncoder.mH.rows())
-                mLdpcEncoder.cirTransEncode<u8>(cc);
-            else
-                mZpsDiagEncoder.cirTransEncode<u8>(cc);
-            setTimePoint("recver.expand.ldpc.cirTransEncodeBits");
-
-            choices.resize(messages.size());
-            auto iter = choices.begin();
-            for (u64 i = 0; i < messages.size(); ++i)
-            {
-                *iter = cc[i];
-                ++iter;
-            }
-            setTimePoint("recver.expand.ldpc.bitCopy");
+            r[0] = r[0] & mask;
+            r[1] = r[1] & mask;
+            r[2] = r[2] & mask;
+            r[3] = r[3] & mask;
+            r[4] = r[4] & mask;
+            r[5] = r[5] & mask;
+            r[6] = r[6] & mask;
+            r[7] = r[7] & mask;
+            r += 8;
         }
-        else
+
+        for (u64 i = m8; i < rT.size(); ++i)
         {
-            block mask = OneBlock ^ AllOneBlock;
-            auto m8 = rT.size() / 8 * 8;
-            auto r = &rT(0);
-
-            for (u64 i = 0; i < m8; i += 8)
-            {
-                r[0] = r[0] & mask;
-                r[1] = r[1] & mask;
-                r[2] = r[2] & mask;
-                r[3] = r[3] & mask;
-                r[4] = r[4] & mask;
-                r[5] = r[5] & mask;
-                r[6] = r[6] & mask;
-                r[7] = r[7] & mask;
-                r += 8;
-            }
-
-            for (u64 i = m8; i < rT.size(); ++i)
-            {
-                rT(i) = rT(i) & mask;
-            }
-            std::vector<u64> points(mGen.mPntCount);
-            mGen.getPoints(points, getPprfFormat());
-            for (auto p : points)
-            {
-                rT(p) = rT(p) | OneBlock;
-            }
-            setTimePoint("recver.expand.ldpc.mask");
-
-            if (mLdpcEncoder.mH.rows())
-                mLdpcEncoder.cirTransEncode(span<block>(rT));
-            else
-            {
-                mZpsDiagEncoder.setTimer(getTimer());
-                mZpsDiagEncoder.cirTransEncode(span<block>(rT));
-            }
-            setTimePoint("recver.expand.ldpc.cirTransEncode");
-            //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-            choices.resize(messages.size());
-            auto iter = choices.begin();
-            std::array<block, 8> hashBuffer;
-
-            auto n8 = messages.size() / 8 * 8;
-            auto m = &messages[0];
-            r = &rT(0);
-            for (u64 i = 0; i < n8; i += 8)
-            {
-                m[0] = r[0] & mask;
-                m[1] = r[1] & mask;
-                m[2] = r[2] & mask;
-                m[3] = r[3] & mask;
-                m[4] = r[4] & mask;
-                m[5] = r[5] & mask;
-                m[6] = r[6] & mask;
-                m[7] = r[7] & mask;
-
-                mAesFixedKey.ecbEnc8Blocks(m, hashBuffer.data());
-
-                m[0] = m[0] ^ hashBuffer[0];
-                m[1] = m[1] ^ hashBuffer[1];
-                m[2] = m[2] ^ hashBuffer[2];
-                m[3] = m[3] ^ hashBuffer[3];
-                m[4] = m[4] ^ hashBuffer[4];
-                m[5] = m[5] ^ hashBuffer[5];
-                m[6] = m[6] ^ hashBuffer[6];
-                m[7] = m[7] ^ hashBuffer[7];
-
-
-                u32 b0 = _mm_testc_si128(r[0], OneBlock);
-                u32 b1 = _mm_testc_si128(r[1], OneBlock);
-                u32 b2 = _mm_testc_si128(r[2], OneBlock);
-                u32 b3 = _mm_testc_si128(r[3], OneBlock);
-                u32 b4 = _mm_testc_si128(r[4], OneBlock);
-                u32 b5 = _mm_testc_si128(r[5], OneBlock);
-                u32 b6 = _mm_testc_si128(r[6], OneBlock);
-                u32 b7 = _mm_testc_si128(r[7], OneBlock);
-
-                choices.data()[i / 8] =
-                    b0 ^
-                    (b1 << 1) ^
-                    (b2 << 2) ^
-                    (b3 << 3) ^
-                    (b4 << 4) ^
-                    (b5 << 5) ^
-                    (b6 << 6) ^
-                    (b7 << 7);
-
-                m += 8;
-                r += 8;
-            }
-
-            iter = iter + n8;
-            for (u64 i = n8; i < messages.size(); ++i)
-            {
-                auto m = &messages[i];
-                auto r = &rT(i);
-
-                m[0] = r[0] & mask;
-
-                auto h = mAesFixedKey.ecbEncBlock(m[0]);
-                m[0] = m[0] ^ h;
-
-                *iter = _mm_testc_si128(r[0], OneBlock);
-                ++iter;
-            }
-
-            setTimePoint("recver.expand.ldpc.mCopy");
+            rT(i) = rT(i) & mask;
         }
+        std::vector<u64> points(mGen.mPntCount);
+        mGen.getPoints(points, getPprfFormat());
+        for (auto p : points)
+        {
+            rT(p) = rT(p) | OneBlock;
+        }
+        setTimePoint("recver.expand.ldpc.mask");
+
+        
+        mEncoder.setTimer(getTimer());
+        mEncoder.cirTransEncode(span<block>(rT));
+        
+        setTimePoint("recver.expand.ldpc.cirTransEncode");
+        //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
+        choices.resize(messages.size());
+        auto iter = choices.begin();
+        std::array<block, 8> hashBuffer;
+
+        auto n8 = messages.size() / 8 * 8;
+        auto m = &messages[0];
+        r = &rT(0);
+        for (u64 i = 0; i < n8; i += 8)
+        {
+            m[0] = r[0] & mask;
+            m[1] = r[1] & mask;
+            m[2] = r[2] & mask;
+            m[3] = r[3] & mask;
+            m[4] = r[4] & mask;
+            m[5] = r[5] & mask;
+            m[6] = r[6] & mask;
+            m[7] = r[7] & mask;
+
+            mAesFixedKey.ecbEnc8Blocks(m, hashBuffer.data());
+
+            m[0] = m[0] ^ hashBuffer[0];
+            m[1] = m[1] ^ hashBuffer[1];
+            m[2] = m[2] ^ hashBuffer[2];
+            m[3] = m[3] ^ hashBuffer[3];
+            m[4] = m[4] ^ hashBuffer[4];
+            m[5] = m[5] ^ hashBuffer[5];
+            m[6] = m[6] ^ hashBuffer[6];
+            m[7] = m[7] ^ hashBuffer[7];
+
+
+            u32 b0 = _mm_testc_si128(r[0], OneBlock);
+            u32 b1 = _mm_testc_si128(r[1], OneBlock);
+            u32 b2 = _mm_testc_si128(r[2], OneBlock);
+            u32 b3 = _mm_testc_si128(r[3], OneBlock);
+            u32 b4 = _mm_testc_si128(r[4], OneBlock);
+            u32 b5 = _mm_testc_si128(r[5], OneBlock);
+            u32 b6 = _mm_testc_si128(r[6], OneBlock);
+            u32 b7 = _mm_testc_si128(r[7], OneBlock);
+
+            choices.data()[i / 8] =
+                b0 ^
+                (b1 << 1) ^
+                (b2 << 2) ^
+                (b3 << 3) ^
+                (b4 << 4) ^
+                (b5 << 5) ^
+                (b6 << 6) ^
+                (b7 << 7);
+
+            m += 8;
+            r += 8;
+        }
+
+        iter = iter + n8;
+        for (u64 i = n8; i < messages.size(); ++i)
+        {
+            auto m = &messages[i];
+            auto r = &rT(i);
+
+            m[0] = r[0] & mask;
+
+            auto h = mAesFixedKey.ecbEncBlock(m[0]);
+            m[0] = m[0] ^ h;
+
+            *iter = _mm_testc_si128(r[0], OneBlock);
+            ++iter;
+        }
+
+        setTimePoint("recver.expand.ldpc.mCopy");
+
 
 
         //auto nn = messages.size() / 8 * 8;

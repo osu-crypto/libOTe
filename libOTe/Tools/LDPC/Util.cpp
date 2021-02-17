@@ -540,6 +540,7 @@ namespace osuCrypto
     }
 
 
+
     DenseMtx computeGen(DenseMtx H, std::vector<std::pair<u64, u64>>& colSwaps)
     {
         assert(H.rows() < H.cols());

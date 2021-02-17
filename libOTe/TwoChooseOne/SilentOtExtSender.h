@@ -68,8 +68,8 @@ namespace osuCrypto
         IknpOtExtSender mIknpSender;
 #endif
         MultType mMultType = MultType::ldpc;
-        S1DiagRepEncoder mZpsDiagEncoder;
-        LdpcEncoder mLdpcEncoder;
+        S1DiagRegRepEncoder mEncoder;
+        //LdpcEncoder mLdpcEncoder;
         Matrix<block> rT;
         block mDelta;
 

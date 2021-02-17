@@ -20,6 +20,60 @@ namespace osuCrypto
         u64 mRow, mCol;
     };
 
+    struct PointList
+    {
+        PointList(u64 r, u64 c)
+            : mRows(r), mCols(c)
+        {}
+
+        using iterator = std::vector<Point>::iterator;
+
+        u64 mRows, mCols;
+        std::vector<Point> mPoints;
+#ifndef NDEBUG
+        std::set<std::pair<u64, u64>> ss;
+#endif
+        void push_back(const Point& p)
+        {
+
+            if (p.mRow >= mRows)
+            {
+                std::cout << "row out of bounds " << p.mRow << " / " << mRows << std::endl;
+                throw RTE_LOC;
+            }
+
+            if (p.mCol >= mCols)
+            {
+                std::cout << "col out of bounds " << p.mCol << " / " << mCols << std::endl;
+                throw RTE_LOC;
+            }
+#ifndef NDEBUG
+            if (ss.insert({ p.mRow , p.mCol }).second == false)
+            {
+                std::cout << "duplicate (" << p.mRow << ", " << p.mCol << ") "<< std::endl;
+                throw RTE_LOC;
+            }
+#endif
+
+            mPoints.push_back(p);
+        }
+
+
+        operator span<Point>()
+        {
+            return mPoints;
+        }
+
+        iterator begin()
+        {
+            return mPoints.begin();
+        }
+        iterator end()
+        {
+            return mPoints.end();
+        }
+
+    };
     class DenseMtx;
 
     class SparseMtx

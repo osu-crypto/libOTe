@@ -36,8 +36,8 @@ namespace osuCrypto
         MultType mMultType = MultType::ldpc;
         Matrix<block> rT;
 
-        LdpcEncoder mLdpcEncoder;
-        S1DiagRepEncoder mZpsDiagEncoder;
+        //LdpcEncoder mLdpcEncoder;
+        S1DiagRegRepEncoder mEncoder;
 
         // sets the Iknp base OTs that are then used to extend
         void setBaseOts(

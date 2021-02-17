@@ -169,30 +169,30 @@ namespace osuCrypto
         if (mMultType == MultType::ldpc)
         {
             assert(scaler == 2);
-            auto mm = nextPrime(numOTs+1) - 1;
+            auto mm = numOTs;
             //auto mm = numOTs;// nextPrime(numOTs) - 1;
             u64 nn = mm * scaler;
             auto kk = nn - mm;
 
-            //u64 colWeight = 5;
-            //u64 diags = 5;
-            //u64 gap = 16;
-            //u64 gapWeight = 5;
+            u64 colWeight = 5;
+            u64 diags = 5;
+            u64 gap = 16;
+            u64 gapWeight = 5;
             //u64 period = 256;
-            u64 colWeight = 11;
-            u64 diags = 11;
-            u64 gap = 32;
-            u64 gapWeight = 11;
-            u64 period = 512;
-            std::vector<u64> db{ 5,31 };
-            PRNG pp(oc::ZeroBlock);
+            //u64 colWeight = 11;
+            //u64 diags = 11;
+            //u64 gap = 32;
+            //u64 gapWeight = 11;
+            //u64 period = 512;
+            //std::vector<u64> db{ 5,31 };
+            //PRNG pp(oc::ZeroBlock);
 
-            if (mZpsDiagEncoder.cols() != nn)
+            if (mEncoder.cols() != nn)
             {
                 setTimePoint("config.begin");
-                mZpsDiagEncoder.mL.init(mm, colWeight);
+                mEncoder.mL.init(mm, colWeight);
                 setTimePoint("config.Left");
-                mZpsDiagEncoder.mR.init(mm, gap, gapWeight, period, db, true, pp);
+                mEncoder.mR.init(mm, gap, true);
                 setTimePoint("config.Right");
                 
                 //auto mH = sampleTriangularBand(mm, nn, colWeight, gap, gapWeight, diags, 0, db, true, true, pp);
@@ -591,12 +591,12 @@ namespace osuCrypto
 
         block mask = OneBlock ^ AllOneBlock;
 
-        if (mLdpcEncoder.mH.rows())
-            mLdpcEncoder.cirTransEncode(span<block>(rT));
-        else
+        //if (mLdpcEncoder.mH.rows())
+        //    mLdpcEncoder.cirTransEncode(span<block>(rT));
+        //else
         {
-            mZpsDiagEncoder.setTimer(getTimer());
-            mZpsDiagEncoder.cirTransEncode(span<block>(rT));
+            mEncoder.setTimer(getTimer());
+            mEncoder.cirTransEncode(span<block>(rT));
         }
         setTimePoint("sender.expand.ldpc.cirTransEncode");
         //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));

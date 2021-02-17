@@ -476,28 +476,28 @@ namespace osuCrypto
                     //    ++i;
                     //}
 
-                    const T* __restrict M0 =  &m[v[0]];
-                    const T* __restrict M1 =  &m[v[1]];
-                    const T* __restrict M2 =  &m[v[2]];
-                    const T* __restrict M3 =  &m[v[3]];
-                    const T* __restrict M4 =  &m[v[4]];
-                    const T* __restrict M5 =  &m[v[5]];
-                    const T* __restrict M6 =  &m[v[6]];
-                    const T* __restrict M7 =  &m[v[7]];
-                    const T* __restrict M8 =  &m[v[8]];
-                    const T* __restrict M9 =  &m[v[9]];
+                    const T* __restrict M0 = &m[v[0]];
+                    const T* __restrict M1 = &m[v[1]];
+                    const T* __restrict M2 = &m[v[2]];
+                    const T* __restrict M3 = &m[v[3]];
+                    const T* __restrict M4 = &m[v[4]];
+                    const T* __restrict M5 = &m[v[5]];
+                    const T* __restrict M6 = &m[v[6]];
+                    const T* __restrict M7 = &m[v[7]];
+                    const T* __restrict M8 = &m[v[8]];
+                    const T* __restrict M9 = &m[v[9]];
                     const T* __restrict M10 = &m[v[10]];
 
-                    v[0]  += end - i;
-                    v[1]  += end - i;
-                    v[2]  += end - i;
-                    v[3]  += end - i;
-                    v[4]  += end - i;
-                    v[5]  += end - i;
-                    v[6]  += end - i;
-                    v[7]  += end - i;
-                    v[8]  += end - i;
-                    v[9]  += end - i;
+                    v[0] += end - i;
+                    v[1] += end - i;
+                    v[2] += end - i;
+                    v[3] += end - i;
+                    v[4] += end - i;
+                    v[5] += end - i;
+                    v[6] += end - i;
+                    v[7] += end - i;
+                    v[8] += end - i;
+                    v[9] += end - i;
                     v[10] += end - i;
                     i = end;
 
@@ -1735,6 +1735,259 @@ namespace osuCrypto
 
     };
 
+
+
+
+
+
+
+
+
+
+    class LdpcDiagRegRepeaterEncoder
+    {
+    public:
+
+        static constexpr  std::array<std::array<u8, 4>, 16> diagMtx_g16_w5_seed1_t36
+        { {
+        {{ 0, 1, 5, 12}},
+        {{ 2, 10, 11, 12}},
+        {{ 1, 4, 5, 13}},
+        {{ 3, 4, 9, 12}},
+        {{ 2, 3, 4, 8}},
+        {{ 8, 10, 13, 14}},
+        {{ 0, 3, 6, 7}},
+        {{ 0, 6, 9, 14}},
+        {{ 7, 13, 14, 15}},
+        {{ 2, 7, 11, 13}},
+        {{ 2, 3, 14, 15}},
+        {{ 1, 5, 9, 15}},
+        {{ 5, 8, 9, 11}},
+        {{ 4, 8, 10, 11}},
+        {{ 1, 6, 7, 12}},
+        {{ 0, 6, 10, 15}},
+        } };
+
+        static constexpr std::array<u8, 2> mOffsets{ {5,31} };
+
+        static constexpr u64 mGap = 16;
+
+        u64 mRows, mCols;
+        //std::vector<u64> mOffsets;
+        bool mExtend;
+
+        void init(
+            u64 rows,
+            u64 gap,
+            bool extend)
+        {
+            if (gap != mGap)
+                throw RTE_LOC;
+
+            assert(mGap < rows);
+
+            mRows = rows;
+            mExtend = extend;
+
+            if (extend)
+                mCols = rows;
+            else
+                mCols = rows - mGap;
+        }
+
+        u64 cols() {
+            return mCols;
+        }
+
+        u64 rows()
+        {
+            return mRows;
+        }
+
+        void encode(span<u8> x, span<const u8> y)
+        {
+            assert(mExtend);
+
+            for (u64 i = 0; i < mRows; ++i)
+            {
+                //auto rowSize = mRandRows(i % mPeriod, mGap);
+
+
+                x[i] = y[i];
+
+                for (u64 j = 0; j < 4; ++j)
+                {
+                    auto col = i - 16 + diagMtx_g16_w5_seed1_t36[i & 15][j];
+
+                    if (col < mRows)
+                        x[i] = x[i] ^ x[col];
+                }
+
+                for (u64 j = 0; j < mOffsets.size(); ++j)
+                {
+                    auto p = i - mOffsets[j] - mGap;
+                    if (p >= mRows)
+                        break;
+
+                    x[i] = x[i] ^ x[p];
+                }
+
+            }
+        }
+
+
+
+        template<typename T>
+        void cirTransEncode(span<T> x)
+        {
+            assert(mExtend);
+
+            // solves for x such that y = M x, ie x := H^-1 y 
+            assert(cols() == x.size());
+
+
+            constexpr int FIXED_OFFSET_SIZE = 2;
+            if (mOffsets.size() != FIXED_OFFSET_SIZE)
+                throw RTE_LOC;
+
+            std::vector<u64> offsets(mOffsets.size());
+            for (u64 j = 0; j < offsets.size(); ++j)
+            {
+                offsets[j] = mRows - 1 - mOffsets[j] - mGap;
+            }
+
+            u64 i = mRows - 1;
+
+            auto mainEnd =
+                roundUpTo(
+                    *std::max_element(mOffsets.begin(), mOffsets.end())
+                    + mGap,
+                    16);
+
+            T* __restrict xi = &x[i];
+            T* __restrict xx = xi - 16;
+
+            T* __restrict ofCol0 = &x[offsets[0]];
+            T* __restrict ofCol1 = &x[offsets[1]];
+
+            for (; i > mainEnd;)
+            {
+                for (u64 jj = 0; jj < 16; ++jj)
+                {
+
+                    auto col0 = diagMtx_g16_w5_seed1_t36[i & 15][0];
+                    auto col1 = diagMtx_g16_w5_seed1_t36[i & 15][1];
+                    auto col2 = diagMtx_g16_w5_seed1_t36[i & 15][2];
+                    auto col3 = diagMtx_g16_w5_seed1_t36[i & 15][3];
+
+                    T* __restrict xc0 = xx + col0;
+                    T* __restrict xc1 = xx + col1;
+                    T* __restrict xc2 = xx + col2;
+                    T* __restrict xc3 = xx + col3;
+
+                    *xc0 = *xc0 ^ *xi;
+                    *xc1 = *xc1 ^ *xi;
+                    *xc2 = *xc2 ^ *xi;
+                    *xc3 = *xc3 ^ *xi;
+
+                    *ofCol0 = *ofCol0 ^ *xi;
+                    *ofCol1 = *ofCol1 ^ *xi;
+
+
+                    --ofCol0;
+                    --ofCol1;
+
+                    --xx;
+                    --xi;
+                    --i;
+                }
+            }
+
+            offsets[0] = ofCol0 - x.data();
+            offsets[1] = ofCol1 - x.data();
+
+            for (; i != ~u64(0); --i)
+            {
+                for (u64 j = 0; j < 4; ++j)
+                {
+                    //auto& col = row2[j];
+                    auto col = diagMtx_g16_w5_seed1_t36[i & 15][j] + i - 16;
+                    if (col < mRows)
+                        x[col] = x[col] ^ x[i];
+                }
+
+                for (u64 j = 0; j < FIXED_OFFSET_SIZE; ++j)
+                {
+                    auto& col = offsets[j];
+
+                    if (col >= mRows)
+                        break;
+                    assert(i - mOffsets[j] - mGap == col);
+
+                    x[col] = x[col] ^ x[i];
+                    --col;
+                }
+            }
+        }
+
+        void getPoints(std::vector<Point>& points, u64 colOffset)
+        {
+            auto rr = mRows;
+            auto ww = 4;
+
+            for (u64 i = 0; i < rr; ++i)
+            {
+                points.push_back({ i, i + colOffset });
+
+                //assert(set.insert({ i, i + colOffset }).second);
+
+                for (u64 j = 0; j < ww; ++j)
+                {
+                    //auto row = diagMtx_g16_w5_seed1_t36[i & 15].data();
+
+                    auto col = i - 16 + diagMtx_g16_w5_seed1_t36[i & 15][j];
+                    //throw RTE_LOC;
+                    if (col < mRows)
+                        points.push_back({ i, col + colOffset });
+
+                    //assert(set.insert({ mRandColumns(i,j) + i + 1, i + colOffset }).second);
+                }
+
+
+                for (u64 j = 0; j < mOffsets.size(); ++j)
+                {
+
+                    auto col = i - mOffsets[j] - mGap;
+                    if (col < mRows)
+                        points.push_back({ i, col + colOffset });
+
+                    //assert(set.insert({ p, i + colOffset }).second);
+
+                }
+            }
+
+            if (mExtend)
+            {
+                for (u64 i = rr; i < mRows; ++i)
+                {
+                    points.push_back({ i, i + colOffset });
+                    //assert(set.insert({ i, i + colOffset }).second);
+                }
+            }
+        }
+
+        SparseMtx getMatrix()
+        {
+            std::vector<Point> points;
+            getPoints(points, 0);
+            return SparseMtx(mRows, cols(), points);
+        }
+
+    };
+
+
+
+
     //LdpcDiagBandEncoder;
     //    LdpcZpStarEncoder;
     template<typename LEncoder, typename REncoder>
@@ -1862,6 +2115,7 @@ namespace osuCrypto
     using ZpDiagEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagBandEncoder>;
     using ZpDiagRepEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagRepeaterEncoder>;
     using S1DiagRepEncoder = LdpcCompositEncoder<LdpcS1Encoder, LdpcDiagRepeaterEncoder>;
+    using S1DiagRegRepEncoder = LdpcCompositEncoder<LdpcS1Encoder, LdpcDiagRegRepeaterEncoder>;
 
     namespace tests
     {
@@ -1870,6 +2124,7 @@ namespace osuCrypto
         void LdpcEncoder_encode_test();
         void LdpcEncoder_encode_g0_test();
         void LdpcEncoder_encode_Trans_g0_test();
+
         void LdpcZpStarEncoder_encode_test();
         void LdpcZpStarEncoder_encode_Trans_test();
 
@@ -1877,8 +2132,13 @@ namespace osuCrypto
         void LdpcS1Encoder_encode_Trans_test();
 
         void LdpcDiagBandEncoder_encode_test();
+
         void LdpcComposit_ZpDiagBand_encode_test();
         void LdpcComposit_ZpDiagBand_Trans_test();
+
+
+        void LdpcComposit_RegRepDiagBand_encode_test();
+        void LdpcComposit_RegRepDiagBand_Trans_test();
 
 
         void LdpcComposit_ZpDiagRep_encode_test();

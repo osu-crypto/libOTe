@@ -8,6 +8,7 @@
 namespace osuCrypto
 {
 
+
     bool LdpcEncoder::init(SparseMtx H, u64 gap)
     {
 
@@ -417,7 +418,7 @@ namespace osuCrypto
                 H = sampleTriangularBand(
                     rows, cols,
                     colWeight, 8,
-                    colWeight, colWeight, 0, { 5,31 }, true, true,true, prng);
+                    colWeight, colWeight, 0,0, { 5,31 }, true, true,true, prng);
                 //H = sampleTriangular(rows, cols, colWeight, gap, prng);
                 b = !E.init(H, 0);
             }
@@ -849,6 +850,140 @@ namespace osuCrypto
             throw RTE_LOC;
 
     }
+
+
+
+    void tests::LdpcComposit_RegRepDiagBand_encode_test()
+    {
+
+        u64 rows = nextPrime(100) - 1;
+        u64 colWeight = 5;
+
+        PRNG prng(ZeroBlock);
+        using Encoder = LdpcCompositEncoder<LdpcS1Encoder, LdpcDiagRegRepeaterEncoder>;
+
+        Encoder enc;
+        enc.mL.init(rows, colWeight);
+        enc.mR.init(rows, 16, true);
+
+        auto H = enc.getMatrix();
+        std::cout << H << std::endl;
+
+
+        LdpcEncoder enc2;
+        enc2.init(H, 0);
+
+
+        auto cols = enc.cols();
+        auto k = cols - rows;
+        std::vector<u8> m(k), c(cols), c2(cols);
+
+        for (auto& mm : m)
+            mm = prng.getBit();
+
+
+        enc.encode<u8>(c, m);
+
+        enc2.encode(c2, m);
+
+        auto ss = H.mult(c);
+
+        //for (auto sss : ss)
+        //    std::cout << int(sss) << " ";
+        //std::cout << std::endl;
+        if (ss != std::vector<u8>(H.rows(), 0))
+            throw RTE_LOC;
+        if (c2 != c)
+            throw RTE_LOC;
+
+    }
+
+
+    void tests::LdpcComposit_RegRepDiagBand_Trans_test()
+    {
+
+        u64 rows = 1043;
+        u64 colWeight = 5;
+        u64 gap = 16;
+        u64 gapWeight = 5;
+        std::vector<u64> lowerDiags{ 5, 31 };
+
+        using Encoder = LdpcCompositEncoder<LdpcS1Encoder, LdpcDiagRegRepeaterEncoder>;
+        PRNG prng(ZeroBlock);
+
+        Encoder enc;
+        enc.mL.init(rows, colWeight);
+        enc.mR.init(rows,gap, true);
+
+        auto H = enc.getMatrix();
+        auto HD = H.dense();
+        auto Gt = computeGen(HD).transpose();
+
+
+        LdpcEncoder enc2;
+        enc2.init(H, 0);
+
+
+        auto cols = enc.cols();
+        auto k = cols - rows;
+
+        std::vector<u8> c(cols);
+
+        for (auto& cc : c)
+            cc = prng.getBit();
+        //std::cout << "\n";
+
+        auto mOld = c;
+        enc2.cirTransEncode<u8>(mOld);
+        mOld.resize(k);
+
+
+        auto mCur = c;
+        enc.cirTransEncode<u8>(mCur);
+        mCur.resize(k);
+
+
+
+        ////std::cout << H << std::endl;
+        //std::vector<u8> mMan(k);
+
+        ////auto m = c * Gt;
+        //assert(Gt.cols() == k);
+        //assert(Gt.rows() == cols);
+        //for (u64 i = 0; i < k; ++i)
+        //{
+        //    for (u64 j = 0; j < cols; ++j)
+        //    {
+        //        if (Gt(j, i))
+        //            mMan[i] ^= c[j];
+        //    }
+        //}
+
+        //if (mMan != mCur || mOld != mCur)
+        //{
+
+        //    std::cout << "mCur ";
+        //    for (u64 i = 0; i < mCur.size(); ++i)
+        //        std::cout << int(mCur[i]) << " ";
+        //    std::cout << std::endl;
+
+        //    std::cout << "mOld ";
+        //    for (u64 i = 0; i < mOld.size(); ++i)
+        //        std::cout << int(mOld[i]) << " ";
+        //    std::cout << std::endl;
+
+        //    std::cout << "mMan ";
+        //    for (u64 i = 0; i < mMan.size(); ++i)
+        //        std::cout << int(mMan[i]) << " ";
+        //    std::cout << std::endl;
+
+        //    throw std::runtime_error(LOCATION);
+        //}
+
+
+    }
+
+
     void tests::LdpcComposit_ZpDiagRep_Trans_test()
     {
         Timer tt;

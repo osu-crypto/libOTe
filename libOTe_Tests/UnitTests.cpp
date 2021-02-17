@@ -48,7 +48,10 @@ namespace tests_libOTe
 
         tc.add("LdpcComposit_ZpDiagRep_encode_test         ", tests::LdpcComposit_ZpDiagRep_encode_test);
         tc.add("LdpcComposit_ZpDiagRep_Trans_test          ", tests::LdpcComposit_ZpDiagRep_Trans_test);
-        
+
+        tc.add("LdpcComposit_RegRepDiagBand_encode_test    ", tests::LdpcComposit_RegRepDiagBand_encode_test);
+        tc.add("LdpcComposit_RegRepDiagBand_Trans_test     ", tests::LdpcComposit_RegRepDiagBand_Trans_test);
+
         
         tc.add("Tools_Pprf_test                            ", Tools_Pprf_test);
         tc.add("Tools_Pprf_trans_test                      ", Tools_Pprf_trans_test);
