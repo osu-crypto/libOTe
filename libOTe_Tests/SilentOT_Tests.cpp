@@ -293,6 +293,127 @@ void OtExt_Silent_Test(const CLP& cmd)
 
 
 
+void OtExt_Silent_noHash_Test(const CLP& cmd)
+{
+#ifdef ENABLE_SILENTOT
+
+    IOService ios;
+    Session s0(ios, "localhost:1212", SessionMode::Server);
+    Session s1(ios, "localhost:1212", SessionMode::Client);
+
+
+
+    u64 n = cmd.getOr("n", 10000);
+    bool verbose = cmd.getOr("v", 0) > 1;
+    u64 threads = cmd.getOr("t", 4);
+    u64 s = cmd.getOr("s", 2);
+    u64 sec = cmd.getOr("sec", 80);
+    //bool mal = cmd.isSet("mal");
+
+    std::vector<Channel> chls0(threads), chls1(threads);
+
+    for (u64 i = 0; i < threads; ++i)
+    {
+        chls0[i] = s0.addChannel();
+        chls1[i] = s1.addChannel();
+    }
+
+    PRNG prng(toBlock(cmd.getOr("seed", 0)));
+    PRNG prng1(toBlock(cmd.getOr("seed1", 1)));
+
+
+    SilentOtExtSender sender;
+    SilentOtExtReceiver recver;
+
+    Timer timer;
+    sender.setTimer(timer);
+    recver.setTimer(timer);
+
+    sender.mDebug = true;
+    recver.mDebug = true;
+    //sender.mMultType = MultType::QuasiCyclic;
+    //recver.mMultType = MultType::QuasiCyclic;
+    //recver.mGen.mPrint = false;
+
+    block delta = prng.get();
+    // fake base OTs.
+    {
+        recver.configure(n, s, sec, threads, true);
+        BitVector choices = recver.sampleBaseChoiceBits(prng);
+        std::vector<block> msg(choices.size());
+        for (u64 i = 0; i < msg.size(); ++i)
+            msg[i] = toBlock(i, choices[i]);
+        recver.setSlientBaseOts(msg);
+    }
+
+    {
+        sender.configure(n, s, sec, threads, delta);
+        auto count = sender.silentBaseOtCount();
+        std::vector<std::array<block, 2>> msg(count);
+        PRNG prngz(ZeroBlock);
+        for (u64 i = 0; i < msg.size(); ++i)
+        {
+            msg[i][0] = toBlock(i, 0);
+            msg[i][1] = toBlock(i, 1);
+        }
+        sender.setSlientBaseOts(msg);
+    }
+
+    std::vector<block> messages2(n);
+    BitVector choice;
+    std::vector<block> messages(n);
+
+    sender.silentSend(MatrixView<block>(messages.data(), n,1), prng, chls0);
+    recver.silentReceive(choice, messages2, prng, chls1);
+    bool passed = true;
+    BitVector act(n);
+
+    choice.resize(n);
+    for (u64 i = 0; i < n; ++i)
+    {
+        std::array<bool, 2> eqq{ 
+            eq(messages2[i], messages[i]),
+            eq(messages2[i], messages[i] ^ delta) 
+        };
+        if (eqq[choice[i]] == false || eqq[choice[i] ^ 1] == true)
+        {
+            passed = false;
+            if (verbose)
+                std::cout << Color::Pink;
+        }
+        if (eqq[0] == false && eqq[1] == false)
+        {
+            passed = false;
+            if (verbose)
+                std::cout << Color::Red;
+        }
+
+        if (verbose)
+            std::cout << i << " " << messages2[i] << " " << messages[i] << " " << (messages[i]^delta) << " " << int(choice[i]) << std::endl << Color::Default;
+
+        if (eq(messages2[i], messages[i]))
+            act[i] = 1;
+    }
+
+    if (verbose)
+    {
+        std::cout << "act ham " << act.hammingWeight() << " " << act.size() << std::endl;
+        std::cout << "ret ham " << choice.hammingWeight() << " " << choice.size() << std::endl;
+    }
+
+    if (cmd.isSet("v"))
+        std::cout << timer << std::endl;
+
+    if (passed == false)
+        throw RTE_LOC;
+
+
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+}
+
+
 void Tools_Pprf_test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT

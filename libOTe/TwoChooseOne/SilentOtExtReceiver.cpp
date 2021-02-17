@@ -156,8 +156,11 @@ namespace osuCrypto
         u64 numOTs,
         u64 scaler,
         u64 secParam,
-        u64 numThreads)
+        u64 numThreads,
+        bool deltaOT)
     {
+        mHash = !deltaOT;
+
         mNumThreads = numThreads;
         mScaler = scaler;
         u64 numPartitions;
@@ -339,7 +342,7 @@ namespace osuCrypto
         if (isConfigured() == false)
         {
             // first generate 128 normal base OTs
-            configure(messages.size(), 2, 128, chls.size());
+            configure(messages.size(), 2, 128, chls.size(), false);
         }
 
         if (static_cast<u64>(messages.size()) > mN)
@@ -428,131 +431,140 @@ namespace osuCrypto
         assert(rT.rows() >= mN2);
         assert(rT.cols() == 1);
 
+        setTimePoint("recver.expand.ldpc.mult");
         rT.resize(mN2, 1);
 
-        setTimePoint("recver.expand.ldpc.mult");
-
-        block mask = OneBlock ^ AllOneBlock;
-        auto m8 = rT.size() / 8 * 8;
-        auto r = &rT(0);
-
-        for (u64 i = 0; i < m8; i += 8)
-        {
-            r[0] = r[0] & mask;
-            r[1] = r[1] & mask;
-            r[2] = r[2] & mask;
-            r[3] = r[3] & mask;
-            r[4] = r[4] & mask;
-            r[5] = r[5] & mask;
-            r[6] = r[6] & mask;
-            r[7] = r[7] & mask;
-            r += 8;
-        }
-
-        for (u64 i = m8; i < rT.size(); ++i)
-        {
-            rT(i) = rT(i) & mask;
-        }
         std::vector<u64> points(mGen.mPntCount);
         mGen.getPoints(points, getPprfFormat());
-        for (auto p : points)
-        {
-            rT(p) = rT(p) | OneBlock;
-        }
-        setTimePoint("recver.expand.ldpc.mask");
-
-        
         mEncoder.setTimer(getTimer());
-        mEncoder.cirTransEncode(span<block>(rT));
-        
-        setTimePoint("recver.expand.ldpc.cirTransEncode");
-        //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
         choices.resize(messages.size());
-        auto iter = choices.begin();
-        std::array<block, 8> hashBuffer;
+        auto cIter = choices.begin();
 
-        auto n8 = messages.size() / 8 * 8;
-        auto m = &messages[0];
-        r = &rT(0);
-        for (u64 i = 0; i < n8; i += 8)
+
+        if (mHash)
         {
-            m[0] = r[0] & mask;
-            m[1] = r[1] & mask;
-            m[2] = r[2] & mask;
-            m[3] = r[3] & mask;
-            m[4] = r[4] & mask;
-            m[5] = r[5] & mask;
-            m[6] = r[6] & mask;
-            m[7] = r[7] & mask;
+            block mask = OneBlock ^ AllOneBlock;
+            auto m8 = rT.size() / 8 * 8;
+            auto r = &rT(0);
 
-            mAesFixedKey.ecbEnc8Blocks(m, hashBuffer.data());
+            for (u64 i = 0; i < m8; i += 8)
+            {
+                r[0] = r[0] & mask;
+                r[1] = r[1] & mask;
+                r[2] = r[2] & mask;
+                r[3] = r[3] & mask;
+                r[4] = r[4] & mask;
+                r[5] = r[5] & mask;
+                r[6] = r[6] & mask;
+                r[7] = r[7] & mask;
+                r += 8;
+            }
 
-            m[0] = m[0] ^ hashBuffer[0];
-            m[1] = m[1] ^ hashBuffer[1];
-            m[2] = m[2] ^ hashBuffer[2];
-            m[3] = m[3] ^ hashBuffer[3];
-            m[4] = m[4] ^ hashBuffer[4];
-            m[5] = m[5] ^ hashBuffer[5];
-            m[6] = m[6] ^ hashBuffer[6];
-            m[7] = m[7] ^ hashBuffer[7];
+            for (u64 i = m8; i < rT.size(); ++i)
+            {
+                rT(i) = rT(i) & mask;
+            }
+
+            for (auto p : points)
+            {
+                rT(p) = rT(p) | OneBlock;
+            }
+            setTimePoint("recver.expand.ldpc.mask");
+
+            mEncoder.cirTransEncode(span<block>(rT));
+
+            setTimePoint("recver.expand.ldpc.cirTransEncode");
+            //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
+            std::array<block, 8> hashBuffer;
+
+            auto n8 = messages.size() / 8 * 8;
+            auto m = &messages[0];
+            r = &rT(0);
+            for (u64 i = 0; i < n8; i += 8)
+            {
+                m[0] = r[0] & mask;
+                m[1] = r[1] & mask;
+                m[2] = r[2] & mask;
+                m[3] = r[3] & mask;
+                m[4] = r[4] & mask;
+                m[5] = r[5] & mask;
+                m[6] = r[6] & mask;
+                m[7] = r[7] & mask;
+
+                mAesFixedKey.ecbEnc8Blocks(m, hashBuffer.data());
+
+                m[0] = m[0] ^ hashBuffer[0];
+                m[1] = m[1] ^ hashBuffer[1];
+                m[2] = m[2] ^ hashBuffer[2];
+                m[3] = m[3] ^ hashBuffer[3];
+                m[4] = m[4] ^ hashBuffer[4];
+                m[5] = m[5] ^ hashBuffer[5];
+                m[6] = m[6] ^ hashBuffer[6];
+                m[7] = m[7] ^ hashBuffer[7];
 
 
-            u32 b0 = _mm_testc_si128(r[0], OneBlock);
-            u32 b1 = _mm_testc_si128(r[1], OneBlock);
-            u32 b2 = _mm_testc_si128(r[2], OneBlock);
-            u32 b3 = _mm_testc_si128(r[3], OneBlock);
-            u32 b4 = _mm_testc_si128(r[4], OneBlock);
-            u32 b5 = _mm_testc_si128(r[5], OneBlock);
-            u32 b6 = _mm_testc_si128(r[6], OneBlock);
-            u32 b7 = _mm_testc_si128(r[7], OneBlock);
+                u32 b0 = _mm_testc_si128(r[0], OneBlock);
+                u32 b1 = _mm_testc_si128(r[1], OneBlock);
+                u32 b2 = _mm_testc_si128(r[2], OneBlock);
+                u32 b3 = _mm_testc_si128(r[3], OneBlock);
+                u32 b4 = _mm_testc_si128(r[4], OneBlock);
+                u32 b5 = _mm_testc_si128(r[5], OneBlock);
+                u32 b6 = _mm_testc_si128(r[6], OneBlock);
+                u32 b7 = _mm_testc_si128(r[7], OneBlock);
 
-            choices.data()[i / 8] =
-                b0 ^
-                (b1 << 1) ^
-                (b2 << 2) ^
-                (b3 << 3) ^
-                (b4 << 4) ^
-                (b5 << 5) ^
-                (b6 << 6) ^
-                (b7 << 7);
+                choices.data()[i / 8] =
+                    b0 ^
+                    (b1 << 1) ^
+                    (b2 << 2) ^
+                    (b3 << 3) ^
+                    (b4 << 4) ^
+                    (b5 << 5) ^
+                    (b6 << 6) ^
+                    (b7 << 7);
 
-            m += 8;
-            r += 8;
+                m += 8;
+                r += 8;
+            }
+
+            cIter = cIter + n8;
+            for (u64 i = n8; i < messages.size(); ++i)
+            {
+                auto m = &messages[i];
+                auto r = &rT(i);
+
+                m[0] = r[0] & mask;
+
+                auto h = mAesFixedKey.ecbEncBlock(m[0]);
+                m[0] = m[0] ^ h;
+
+                *cIter = _mm_testc_si128(r[0], OneBlock);
+                ++cIter;
+            }
+
+            setTimePoint("recver.expand.ldpc.mCopyHash");
+
         }
-
-        iter = iter + n8;
-        for (u64 i = n8; i < messages.size(); ++i)
+        else
         {
-            auto m = &messages[i];
-            auto r = &rT(i);
+            std::unique_ptr<u8[]> cc(new u8[rT.size()]());
+            for (auto p : points)
+            {
+                if (cc[p] != 0)
+                    throw RTE_LOC;
+                cc[p] = 1;
+            }
+            mEncoder.cirTransEncode2<block, u8>(
+                span<block>(rT), 
+                span<u8>(cc.get(), rT.size()));
 
-            m[0] = r[0] & mask;
-
-            auto h = mAesFixedKey.ecbEncBlock(m[0]);
-            m[0] = m[0] ^ h;
-
-            *iter = _mm_testc_si128(r[0], OneBlock);
-            ++iter;
+            std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
+            //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
+            for (u64 i = 0; i < choices.size(); ++i)
+            {
+                *cIter = cc[i];
+                ++cIter;
+            }
         }
-
-        setTimePoint("recver.expand.ldpc.mCopy");
-
-
-
-        //auto nn = messages.size() / 8 * 8;
-        //auto rem = messages.size() - nn;
-        //auto iter = messages.data();
-        //auto end = iter + nn;
-        //for (; iter != end; iter += 8)
-        //{
-        //}
-
-        //for (u64 i = 0; i < rem; ++i, ++iter)
-        //{
-        //    auto h = mAesFixedKey.ecbEncBlock(*iter);
-        //    *iter = *iter ^ h;
-        //}
-        setTimePoint("recver.expand.ldpc.hash");
 
     }
 

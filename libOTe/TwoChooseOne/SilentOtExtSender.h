@@ -69,9 +69,11 @@ namespace osuCrypto
 #endif
         MultType mMultType = MultType::ldpc;
         S1DiagRegRepEncoder mEncoder;
+        bool mHash = false;
         //LdpcEncoder mLdpcEncoder;
         Matrix<block> rT;
-        block mDelta;
+        block mDelta = ZeroBlock;
+
 
         /////////////////////////////////////////////////////
         // The standard OT extension interface
@@ -139,7 +141,8 @@ namespace osuCrypto
             u64 n,
             u64 scaler = 2,
             u64 secParam = 128,
-            u64 numThreads = 1);
+            u64 numThreads = 1,
+            block delta = ZeroBlock);
 
         // return true if this instance has been configured.
         bool isConfigured() const { return mN > 0; }
@@ -172,17 +175,23 @@ namespace osuCrypto
 
         // A parallel exection version of the other
         // silentSend(...) function. 
+
+        void silentSend(
+            span<std::array<block, 2>> messages,
+            PRNG& prng,
+            span<Channel> chls);
+
 		void silentSend(
-			span<std::array<block, 2>> messages,
+			MatrixView<block> messages,
 			PRNG& prng,
 			span<Channel> chls);
 
 
         // interal functions
 
-        void randMulNaive(Matrix<block>& rT, span<std::array<block, 2>>& messages);
-        void randMulQuasiCyclic(Matrix<block>& rT, span<std::array<block, 2>>& messages, u64 threads);
-        void ldpcMult(Matrix<block>& rT, span<std::array<block, 2>>& messages, u64 threads);
+        void randMulNaive(Matrix<block>& rT, MatrixView<block>& messages);
+        void randMulQuasiCyclic(Matrix<block>& rT, MatrixView<block>& messages, u64 threads);
+        void ldpcMult(Matrix<block>& rT, MatrixView<block>& messages, u64 threads);
 
         bool mDebug = false;
         void checkRT(span<Channel> chls, Matrix<block>& rT);

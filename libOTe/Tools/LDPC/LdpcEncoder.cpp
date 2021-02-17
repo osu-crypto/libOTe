@@ -803,53 +803,53 @@ namespace osuCrypto
     }
 
 
-    void tests::LdpcComposit_ZpDiagRep_encode_test()
-    {
+    //void tests::LdpcComposit_ZpDiagRep_encode_test()
+    //{
 
-        u64 rows = nextPrime(100) - 1;
-        u64 colWeight = 11;
-        u64 gap = 32;
-        u64 gapWeight = 11;
-        std::vector<u64> lowerDiags{ 5, 31 };
-        u64 period = 23;
+    //    u64 rows = nextPrime(100) - 1;
+    //    u64 colWeight = 11;
+    //    u64 gap = 32;
+    //    u64 gapWeight = 11;
+    //    std::vector<u64> lowerDiags{ 5, 31 };
+    //    u64 period = 23;
 
-        PRNG prng(ZeroBlock);
+    //    PRNG prng(ZeroBlock);
 
-        ZpDiagRepEncoder enc;
-        enc.mL.init(rows, colWeight);
-        enc.mR.init(rows, gap, gapWeight, period, lowerDiags, true, prng);
+    //    ZpDiagRepEncoder enc;
+    //    enc.mL.init(rows, colWeight);
+    //    enc.mR.init(rows, gap, gapWeight, period, lowerDiags, true, prng);
 
-        auto H = enc.getMatrix();
-        //std::cout << H << std::endl;
-
-
-        LdpcEncoder enc2;
-        enc2.init(H, 0);
+    //    auto H = enc.getMatrix();
+    //    //std::cout << H << std::endl;
 
 
-        auto cols = enc.cols();
-        auto k = cols - rows;
-        std::vector<u8> m(k), c(cols), c2(cols);
-
-        for (auto& mm : m)
-            mm = prng.getBit();
+    //    LdpcEncoder enc2;
+    //    enc2.init(H, 0);
 
 
-        enc.encode<u8>(c, m);
+    //    auto cols = enc.cols();
+    //    auto k = cols - rows;
+    //    std::vector<u8> m(k), c(cols), c2(cols);
 
-        enc2.encode(c2, m);
+    //    for (auto& mm : m)
+    //        mm = prng.getBit();
 
-        auto ss = H.mult(c);
 
-        //for (auto sss : ss)
-        //    std::cout << int(sss) << " ";
-        //std::cout << std::endl;
-        if (ss != std::vector<u8>(H.rows(), 0))
-            throw RTE_LOC;
-        if (c2 != c)
-            throw RTE_LOC;
+    //    enc.encode<u8>(c, m);
 
-    }
+    //    enc2.encode(c2, m);
+
+    //    auto ss = H.mult(c);
+
+    //    //for (auto sss : ss)
+    //    //    std::cout << int(sss) << " ";
+    //    //std::cout << std::endl;
+    //    if (ss != std::vector<u8>(H.rows(), 0))
+    //        throw RTE_LOC;
+    //    if (c2 != c)
+    //        throw RTE_LOC;
+
+    //}
 
 
 
@@ -868,7 +868,7 @@ namespace osuCrypto
         enc.mR.init(rows, code, true);
 
         auto H = enc.getMatrix();
-        std::cout << H << std::endl;
+        //std::cout << H << std::endl;
 
 
         LdpcEncoder enc2;
@@ -984,122 +984,122 @@ namespace osuCrypto
     }
 
 
-    void tests::LdpcComposit_ZpDiagRep_Trans_test()
-    {
-        Timer tt;
-        tt.setTimePoint("");
-        u64 rows = nextPrime(100) - 1;
-        tt.setTimePoint("prime");
-        u64 colWeight = 5;
-        u64 gap = 8;
-        u64 gapWeight = 5;
-        u64 period = 23;
-        std::vector<u64> lowerDiags{ 5, 31 };
+    //void tests::LdpcComposit_ZpDiagRep_Trans_test()
+    //{
+    //    Timer tt;
+    //    tt.setTimePoint("");
+    //    u64 rows = nextPrime(100) - 1;
+    //    tt.setTimePoint("prime");
+    //    u64 colWeight = 5;
+    //    u64 gap = 8;
+    //    u64 gapWeight = 5;
+    //    u64 period = 23;
+    //    std::vector<u64> lowerDiags{ 5, 31 };
 
-        PRNG prng(ZeroBlock);
+    //    PRNG prng(ZeroBlock);
 
-        ZpDiagRepEncoder enc;
-        enc.mL.init(rows, colWeight);
-        enc.mR.init(rows, gap, gapWeight, period, lowerDiags, true, prng);
-        tt.setTimePoint("init");
+    //    ZpDiagRepEncoder enc;
+    //    enc.mL.init(rows, colWeight);
+    //    enc.mR.init(rows, gap, gapWeight, period, lowerDiags, true, prng);
+    //    tt.setTimePoint("init");
 
-        auto H = enc.getMatrix();
-        tt.setTimePoint("getMatrix");
+    //    auto H = enc.getMatrix();
+    //    tt.setTimePoint("getMatrix");
 
-        auto HD = H.dense();
-        auto Gt = computeGen(HD).transpose();
-        tt.setTimePoint("computeGen");
-
-
-        auto cols = enc.cols();
-        auto k = cols - rows;
-
-        {
-            std::vector<u8> pp1(rows), pp2, m1(k), m2;
-
-            for (auto& p : pp1)
-                p = prng.getBit();
-            for (auto& mm : m1)
-                mm = prng.getBit();
-
-            pp2 = pp1;
-            m2 = m1;
-
-            enc.mL.cirTransEncode<u8>(pp1, m1);
-            enc.mL.optCirTransEncode<u8>(pp2, m2);
-
-            if (pp1 != pp2)
-                throw RTE_LOC;
-            if (m1 != m2)
-                throw RTE_LOC;
-        }
+    //    auto HD = H.dense();
+    //    auto Gt = computeGen(HD).transpose();
+    //    tt.setTimePoint("computeGen");
 
 
-        LdpcEncoder enc2;
-        enc2.init(H, 0);
+    //    auto cols = enc.cols();
+    //    auto k = cols - rows;
+
+    //    {
+    //        std::vector<u8> pp1(rows), pp2, m1(k), m2;
+
+    //        for (auto& p : pp1)
+    //            p = prng.getBit();
+    //        for (auto& mm : m1)
+    //            mm = prng.getBit();
+
+    //        pp2 = pp1;
+    //        m2 = m1;
+
+    //        enc.mL.cirTransEncode<u8>(pp1, m1);
+    //        enc.mL.optCirTransEncode<u8>(pp2, m2);
+
+    //        if (pp1 != pp2)
+    //            throw RTE_LOC;
+    //        if (m1 != m2)
+    //            throw RTE_LOC;
+    //    }
+
+
+    //    LdpcEncoder enc2;
+    //    enc2.init(H, 0);
 
 
 
-        std::vector<u8> c(cols);
+    //    std::vector<u8> c(cols);
 
-        for (auto& cc : c)
-            cc = prng.getBit();
-        //std::cout << "\n";
-        tt.setTimePoint("init2");
+    //    for (auto& cc : c)
+    //        cc = prng.getBit();
+    //    //std::cout << "\n";
+    //    tt.setTimePoint("init2");
 
-        auto mOld = c;
-        enc2.cirTransEncode<u8>(mOld);
-        mOld.resize(k);
-        tt.setTimePoint("encode1");
-
-
-        auto mCur = c;
-        enc.cirTransEncode<u8>(mCur);
-        mCur.resize(k);
-
-        tt.setTimePoint("encode2");
+    //    auto mOld = c;
+    //    enc2.cirTransEncode<u8>(mOld);
+    //    mOld.resize(k);
+    //    tt.setTimePoint("encode1");
 
 
-        //std::cout << H << std::endl;
-        std::vector<u8> mMan(k);
+    //    auto mCur = c;
+    //    enc.cirTransEncode<u8>(mCur);
+    //    mCur.resize(k);
 
-        //auto m = c * Gt;
-        assert(Gt.cols() == k);
-        assert(Gt.rows() == cols);
-        for (u64 i = 0; i < k; ++i)
-        {
-            for (u64 j = 0; j < cols; ++j)
-            {
-                if (Gt(j, i))
-                    mMan[i] ^= c[j];
-            }
-        }
-        tt.setTimePoint("Gt");
-        //std::cout << tt << std::endl;
-
-        if (mMan != mCur || mOld != mCur)
-        {
-
-            std::cout << "mCur ";
-            for (u64 i = 0; i < mCur.size(); ++i)
-                std::cout << int(mCur[i]) << " ";
-            std::cout << std::endl;
-
-            std::cout << "mOld ";
-            for (u64 i = 0; i < mOld.size(); ++i)
-                std::cout << int(mOld[i]) << " ";
-            std::cout << std::endl;
-
-            std::cout << "mMan ";
-            for (u64 i = 0; i < mMan.size(); ++i)
-                std::cout << int(mMan[i]) << " ";
-            std::cout << std::endl;
-
-            throw std::runtime_error(LOCATION);
-        }
+    //    tt.setTimePoint("encode2");
 
 
-    }
+    //    //std::cout << H << std::endl;
+    //    std::vector<u8> mMan(k);
+
+    //    //auto m = c * Gt;
+    //    assert(Gt.cols() == k);
+    //    assert(Gt.rows() == cols);
+    //    for (u64 i = 0; i < k; ++i)
+    //    {
+    //        for (u64 j = 0; j < cols; ++j)
+    //        {
+    //            if (Gt(j, i))
+    //                mMan[i] ^= c[j];
+    //        }
+    //    }
+    //    tt.setTimePoint("Gt");
+    //    //std::cout << tt << std::endl;
+
+    //    if (mMan != mCur || mOld != mCur)
+    //    {
+
+    //        std::cout << "mCur ";
+    //        for (u64 i = 0; i < mCur.size(); ++i)
+    //            std::cout << int(mCur[i]) << " ";
+    //        std::cout << std::endl;
+
+    //        std::cout << "mOld ";
+    //        for (u64 i = 0; i < mOld.size(); ++i)
+    //            std::cout << int(mOld[i]) << " ";
+    //        std::cout << std::endl;
+
+    //        std::cout << "mMan ";
+    //        for (u64 i = 0; i < mMan.size(); ++i)
+    //            std::cout << int(mMan[i]) << " ";
+    //        std::cout << std::endl;
+
+    //        throw std::runtime_error(LOCATION);
+    //    }
+
+
+    //}
     void LdpcS1Encoder::init(u64 rows, std::vector<double> rs)
     {
         mRows = rows;

@@ -46,8 +46,8 @@ namespace tests_libOTe
         tc.add("LdpcComposit_ZpDiagBand_encode_test        ", tests::LdpcComposit_ZpDiagBand_encode_test);
         tc.add("LdpcComposit_ZpDiagBand_Trans_test         ", tests::LdpcComposit_ZpDiagBand_Trans_test);
 
-        tc.add("LdpcComposit_ZpDiagRep_encode_test         ", tests::LdpcComposit_ZpDiagRep_encode_test);
-        tc.add("LdpcComposit_ZpDiagRep_Trans_test          ", tests::LdpcComposit_ZpDiagRep_Trans_test);
+        //tc.add("LdpcComposit_ZpDiagRep_encode_test         ", tests::LdpcComposit_ZpDiagRep_encode_test);
+        //tc.add("LdpcComposit_ZpDiagRep_Trans_test          ", tests::LdpcComposit_ZpDiagRep_Trans_test);
 
         tc.add("LdpcComposit_RegRepDiagBand_encode_test    ", tests::LdpcComposit_RegRepDiagBand_encode_test);
         tc.add("LdpcComposit_RegRepDiagBand_Trans_test     ", tests::LdpcComposit_RegRepDiagBand_Trans_test);
@@ -67,6 +67,7 @@ namespace tests_libOTe
         tc.add("OtExt_Iknp_Test                            ", OtExt_Iknp_Test);
         tc.add("OtExt_Kos_Test                             ", OtExt_Kos_Test);
         tc.add("OtExt_Silent_Test                          ", OtExt_Silent_Test);
+        tc.add("OtExt_Silent_noHash_Test                   ", OtExt_Silent_noHash_Test);
 
         tc.add("NoisyVole_test                             ", NoisyVole_test);
         tc.add("SilentVole_test                            ", SilentVole_test);

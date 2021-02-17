@@ -125,7 +125,7 @@ namespace osuCrypto
         //if (mMultType == MultType::ldpc)
         {
             assert(scaler == 2);
-            auto mm =numOTs;
+            auto mm = numOTs;
             //auto mm = numOTs;// nextPrime(numOTs) - 1;
             u64 nn = mm * scaler;
             auto kk = nn - mm;

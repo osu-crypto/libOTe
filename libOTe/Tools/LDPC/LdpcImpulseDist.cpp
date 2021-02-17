@@ -641,7 +641,7 @@ namespace osuCrypto
         bool trim = cmd.isSet("trim");
         bool extend = cmd.isSet("extend");
         u64 period = cmd.getOr("period", 0);
-        bool zp = cmd.isSet("zp");
+        //bool zp = cmd.isSet("zp");
         bool randY = cmd.isSet("randY");
         bool printYs = cmd.isSet("py");
         bool hm = cmd.isSet("hm");
@@ -733,8 +733,8 @@ namespace osuCrypto
                 label << " -extend ";
 
             label << " -period " << period;
-            if(zp)
-                label << " -zp ";
+            //if(zp)
+            //    label << " -zp ";
 
             if (reg)
                 label << " -reg";
@@ -753,12 +753,12 @@ namespace osuCrypto
         for (auto rows : rowVec)
         {
 
-            if (zp)
-            {
-                if (isPrime(rows + 1) == false)
-                    rows = nextPrime(rows + 1) - 1;
+            //if (zp)
+            //{
+            //    if (isPrime(rows + 1) == false)
+            //        rows = nextPrime(rows + 1) - 1;
 
-            }
+            //}
             u64 cols = static_cast<u64>(rows * e);
 
             if (uniform && trim)
@@ -793,15 +793,15 @@ namespace osuCrypto
                     else
                         H = sampleUniformSystematic(rows, cols, prng);
                 }
-                else if (zp)
-                {
-                    ZpDiagRepEncoder enc;
-                    enc.mL.init(rows, colWeight);
-                    enc.mR.init(rows, gap, dWeight, period, doubleBand, false, prng);
+                //else if (zp)
+                //{
+                //    ZpDiagRepEncoder enc;
+                //    enc.mL.init(rows, colWeight);
+                //    enc.mR.init(rows, gap, dWeight, period, doubleBand, false, prng);
 
-                    H = enc.getMatrix();
-                }
-                if (reg)
+                //    H = enc.getMatrix();
+                //}
+                else if (reg)
                 {
                     H = sampleRegTriangularBand(
                         rows, cols,

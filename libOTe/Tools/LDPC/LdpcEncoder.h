@@ -556,8 +556,10 @@ namespace osuCrypto
         }
 
 
-        template<typename T>
-        void cirTransEncode2(span<T> ppp0, span<T> ppp1, span<const T> mm0, span<const T> mm1)
+        template<typename T0, typename T1>
+        void cirTransEncode2(
+            span<T0> ppp0, span<T1> ppp1,
+            span<const T0> mm0, span<const T1> mm1)
         {
             auto cols = mRows;
             //assert(pp.size() == mRows);
@@ -568,10 +570,10 @@ namespace osuCrypto
             auto v = mYs;
 
 
-            T* __restrict pp0 = ppp0.data();
-            T* __restrict pp1 = ppp1.data();
-            const T* __restrict m0 = mm0.data();
-            const T* __restrict m1 = mm1.data();
+            T0* __restrict pp0 = ppp0.data();
+            T1* __restrict pp1 = ppp1.data();
+            const T0* __restrict m0 = mm0.data();
+            const T1* __restrict m1 = mm1.data();
 
             for (u64 i = 0; i < cols; )
             {
@@ -2094,8 +2096,8 @@ namespace osuCrypto
 
 
 
-        template<typename T>
-        void cirTransEncode2(span<T> x0, span<T> x1)
+        template<typename T0,typename T1>
+        void cirTransEncode2(span<T0> x0, span<T1> x1)
         {
             assert(mExtend);
 
@@ -2115,12 +2117,12 @@ namespace osuCrypto
             }
 
             u64 i = mRows - 1;
-            T* __restrict ofCol00 = &x0[offsets[0]];
-            T* __restrict ofCol10 = &x0[offsets[1]];
-            T* __restrict ofCol01 = &x1[offsets[0]];
-            T* __restrict ofCol11 = &x1[offsets[1]];
-            T* __restrict xi0 = &x0[i];
-            T* __restrict xi1 = &x1[i];
+            T0* __restrict ofCol00 = &x0[offsets[0]];
+            T0* __restrict ofCol10 = &x0[offsets[1]];
+            T1* __restrict ofCol01 = &x1[offsets[0]];
+            T1* __restrict ofCol11 = &x1[offsets[1]];
+            T0* __restrict xi0 = &x0[i];
+            T1* __restrict xi1 = &x1[i];
 
             switch (mCode)
             {
@@ -2133,8 +2135,8 @@ namespace osuCrypto
                         + mGap,
                         16);
 
-                T* __restrict xx0 = xi0 - 16;
-                T* __restrict xx1 = xi1 - 16;
+                T0* __restrict xx0 = xi0 - 16;
+                T1* __restrict xx1 = xi1 - 16;
 
                 for (; i > mainEnd;)
                 {
@@ -2146,14 +2148,14 @@ namespace osuCrypto
                         auto col2 = diagMtx_g16_w5_seed1_t36[i & 15][2];
                         auto col3 = diagMtx_g16_w5_seed1_t36[i & 15][3];
 
-                        T* __restrict xc00 = xx0 + col0;
-                        T* __restrict xc10 = xx0 + col1;
-                        T* __restrict xc20 = xx0 + col2;
-                        T* __restrict xc30 = xx0 + col3;
-                        T* __restrict xc01 = xx1 + col0;
-                        T* __restrict xc11 = xx1 + col1;
-                        T* __restrict xc21 = xx1 + col2;
-                        T* __restrict xc31 = xx1 + col3;
+                        T0* __restrict xc00 = xx0 + col0;
+                        T0* __restrict xc10 = xx0 + col1;
+                        T0* __restrict xc20 = xx0 + col2;
+                        T0* __restrict xc30 = xx0 + col3;
+                        T1* __restrict xc01 = xx1 + col0;
+                        T1* __restrict xc11 = xx1 + col1;
+                        T1* __restrict xc21 = xx1 + col2;
+                        T1* __restrict xc31 = xx1 + col3;
 
                         *xc00 = *xc00 ^ *xi0;
                         *xc10 = *xc10 ^ *xi0;
@@ -2196,8 +2198,8 @@ namespace osuCrypto
                         + mGap,
                         32);
 
-                T* __restrict xx0 = xi0 - 32;
-                T* __restrict xx1 = xi1 - 32;
+                T0* __restrict xx0 = xi0 - 32;
+                T1* __restrict xx1 = xi1 - 32;
 
                 for (; i > mainEnd;)
                 {
@@ -2215,27 +2217,27 @@ namespace osuCrypto
                         auto col8 = diagMtx_g32_w11_seed2_t36[i & 31][8];
                         auto col9 = diagMtx_g32_w11_seed2_t36[i & 31][9];
 
-                        T* __restrict xc00 = xx0 + col0;
-                        T* __restrict xc10 = xx0 + col1;
-                        T* __restrict xc20 = xx0 + col2;
-                        T* __restrict xc30 = xx0 + col3;
-                        T* __restrict xc40 = xx0 + col4;
-                        T* __restrict xc50 = xx0 + col5;
-                        T* __restrict xc60 = xx0 + col6;
-                        T* __restrict xc70 = xx0 + col7;
-                        T* __restrict xc80 = xx0 + col8;
-                        T* __restrict xc90 = xx0 + col9;
+                        T0* __restrict xc00 = xx0 + col0;
+                        T0* __restrict xc10 = xx0 + col1;
+                        T0* __restrict xc20 = xx0 + col2;
+                        T0* __restrict xc30 = xx0 + col3;
+                        T0* __restrict xc40 = xx0 + col4;
+                        T0* __restrict xc50 = xx0 + col5;
+                        T0* __restrict xc60 = xx0 + col6;
+                        T0* __restrict xc70 = xx0 + col7;
+                        T0* __restrict xc80 = xx0 + col8;
+                        T0* __restrict xc90 = xx0 + col9;
 
-                        T* __restrict xc01 = xx1 + col0;
-                        T* __restrict xc11 = xx1 + col1;
-                        T* __restrict xc21 = xx1 + col2;
-                        T* __restrict xc31 = xx1 + col3;
-                        T* __restrict xc41 = xx1 + col4;
-                        T* __restrict xc51 = xx1 + col5;
-                        T* __restrict xc61 = xx1 + col6;
-                        T* __restrict xc71 = xx1 + col7;
-                        T* __restrict xc81 = xx1 + col8;
-                        T* __restrict xc91 = xx1 + col9;
+                        T1* __restrict xc01 = xx1 + col0;
+                        T1* __restrict xc11 = xx1 + col1;
+                        T1* __restrict xc21 = xx1 + col2;
+                        T1* __restrict xc31 = xx1 + col3;
+                        T1* __restrict xc41 = xx1 + col4;
+                        T1* __restrict xc51 = xx1 + col5;
+                        T1* __restrict xc61 = xx1 + col6;
+                        T1* __restrict xc71 = xx1 + col7;
+                        T1* __restrict xc81 = xx1 + col8;
+                        T1* __restrict xc91 = xx1 + col9;
 
                         *xc00 = *xc00 ^ *xi0;
                         *xc10 = *xc10 ^ *xi0;
@@ -2491,22 +2493,22 @@ namespace osuCrypto
         }
 
 
-        template<typename T>
-        void cirTransEncode2(span<T> c0, span<T> c1)
+        template<typename T0, typename T1>
+        void cirTransEncode2(span<T0> c0, span<T1> c1)
         {
             auto k = cols() - rows();
             assert(c0.size() == cols());
             //assert(m.size() == k);
             setTimePoint("encode_begin");
-            span<T> pp0(c0.subspan(k, rows()));
-            span<T> pp1(c1.subspan(k, rows()));
+            span<T0> pp0(c0.subspan(k, rows()));
+            span<T1> pp1(c1.subspan(k, rows()));
 
             //std::cout << "P  ";
             //for (u64 i = 0; i < pp.size(); ++i)
             //    std::cout << int(pp[i]) << " ";
             //std::cout << std::endl;
 
-            mR.cirTransEncode2(pp0, pp1);
+            mR.cirTransEncode2<T0,T1>(pp0, pp1);
 
             setTimePoint("diag");
             //std::cout << "P' ";
@@ -2514,7 +2516,7 @@ namespace osuCrypto
             //    std::cout << int(pp[i]) << " ";
             //std::cout << std::endl;
 
-            mL.template cirTransEncode2<T>(c0.subspan(0, k), c1.subspan(0, k), pp0, pp1);
+            mL.template cirTransEncode2<T0,T1>(c0.subspan(0, k), c1.subspan(0, k), pp0, pp1);
             setTimePoint("zp");
             //if(0)
 
@@ -2547,7 +2549,7 @@ namespace osuCrypto
         }
     };
     using ZpDiagEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagBandEncoder>;
-    using ZpDiagRepEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagRepeaterEncoder>;
+    //using ZpDiagRepEncoder = LdpcCompositEncoder<LdpcZpStarEncoder, LdpcDiagRepeaterEncoder>;
     using S1DiagRepEncoder = LdpcCompositEncoder<LdpcS1Encoder, LdpcDiagRepeaterEncoder>;
     using S1DiagRegRepEncoder = LdpcCompositEncoder<LdpcS1Encoder, LdpcDiagRegRepeaterEncoder>;
 
@@ -2575,8 +2577,8 @@ namespace osuCrypto
         void LdpcComposit_RegRepDiagBand_Trans_test();
 
 
-        void LdpcComposit_ZpDiagRep_encode_test();
-        void LdpcComposit_ZpDiagRep_Trans_test();
+        //void LdpcComposit_ZpDiagRep_encode_test();
+        //void LdpcComposit_ZpDiagRep_Trans_test();
     }
 
 }

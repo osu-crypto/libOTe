@@ -27,7 +27,7 @@ namespace osuCrypto
         SilentBaseType mBaseType;
         bool mDebug = false;
         u64 mNumThreads;
-
+        bool mHash = false;
 #ifdef ENABLE_IKNP
         IknpOtExtReceiver mIknpRecver;
 #endif
@@ -90,7 +90,8 @@ namespace osuCrypto
             u64 n, 
             u64 scaler = 2, 
             u64 secParam = 128,
-            u64 numThreads = 1);
+            u64 numThreads = 1,
+            bool deltaOT = false);
 
         // return true if this instance has been configured.
         bool isConfigured() const { return mN > 0; }
