@@ -467,6 +467,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 	//bool mal = cmd.isSet("mal");
 	OtExtSender sender;
 	OtExtRecver receiver;
+	bool deltaOT = cmd.isSet("noHash");
 
 	bool fakeBase = cmd.isSet("fakeBase");
 
@@ -499,7 +500,8 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			span<block> msgs(backing.get(), numOTs);
 			gTimer.setTimePoint("recver.msg.alloc1");
 
-			receiver.configure(numOTs, s, sec, chls.size());
+
+			receiver.configure(numOTs, s, sec, chls.size(), deltaOT);
 			gTimer.setTimePoint("recver.config");
 
 			auto b = timer.setTimePoint("start");
@@ -532,10 +534,13 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 			gTimer.setTimePoint("sender.thrd.begin");
 
 			//std::vector<std::array<block, 2>> msgs(numOTs);
-			std::unique_ptr<std::array<block,2>[]> backing(new std::array<block, 2>[numOTs]);
-			span<std::array<block, 2>> msgs(backing.get(), numOTs);
+			std::unique_ptr<block[]> backing(new block[deltaOT ? numOTs : numOTs * 2]);
+			MatrixView<block> msgs(backing.get(), numOTs, deltaOT ? 1 : 2);
 			gTimer.setTimePoint("sender.msg.alloc");
-			sender.configure(numOTs, s, sec, chls.size());
+
+			block delta = deltaOT ? prng.get<block>() : ZeroBlock;
+
+			sender.configure(numOTs, s, sec, chls.size(), delta);
 			gTimer.setTimePoint("sender.config");
 
 

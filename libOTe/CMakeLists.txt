@@ -14,6 +14,10 @@ target_link_libraries(libOTe OpenMP::OpenMP_CXX)
 
 target_link_libraries(libOTe cryptoTools)
 
+if(MSVC)
+    target_compile_options(libOTe PRIVATE -openmp:experimental)
+endif()
+
 if(ENABLE_SSE AND NOT MSVC)
     target_compile_options(libOTe PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)
 endif()

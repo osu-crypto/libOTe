@@ -177,11 +177,11 @@ namespace osuCrypto
             u64 nn = mm * scaler;
             auto kk = nn - mm;
 
-            //auto code = LdpcDiagRegRepeaterEncoder::Weight11;
-            //u64 colWeight = 11;
+            auto code = LdpcDiagRegRepeaterEncoder::Weight11;
+            u64 colWeight = 11;
 
-            auto code = LdpcDiagRegRepeaterEncoder::Weight5;
-            u64 colWeight = 5;
+            //auto code = LdpcDiagRegRepeaterEncoder::Weight5;
+            //u64 colWeight = 5;
 
 
             if (mEncoder.cols() != nn)

@@ -39,7 +39,7 @@ namespace osuCrypto
     {
         char* inputMatrix;
         int   info, k, n, dist;
-
+        num_cores = numTHreads;
 
         // Read input matrix.
         info = read_char_matrix((char*)path.c_str(), &inputMatrix, &k, &n);

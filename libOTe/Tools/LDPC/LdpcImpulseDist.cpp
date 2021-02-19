@@ -670,7 +670,7 @@ namespace osuCrypto
 
         // algo994 parameters
         auto trueDist = cmd.isSet("true");
-        alg994 = cmd.getOr("algo994", ALG_SAVED);
+        alg994 = cmd.getOr("algo994", ALG_SAVED_UNROLLED);
         num_saved_generators = cmd.getOr("numGen", 5);
         num_cores = (int)nt;
         num_permutations = cmd.getOr("numPerm", 10);
