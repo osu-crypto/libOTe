@@ -52,6 +52,7 @@ int miraclTestMain();
 #include "libOTe/Base/naor-pinkas.h"
 
 #include "libOTe/Tools/LDPC/Test.h"
+#include "libOTe/Tools/LDPC/Graph.h"
 #include "libOTe/Tools/LDPC/LdpcSampler.h"
 
 
@@ -1172,6 +1173,13 @@ int main(int argc, char** argv)
 	CLP cmd;
 	cmd.parse(argc, argv);
 	bool flagSet = false;
+
+	if (cmd.isSet("triang"))
+	{
+		ldpc(cmd);
+		return 0;
+	}
+
 
 	if (cmd.isSet("encode"))
 	{

@@ -25,7 +25,7 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 
 
 	else()
-		set(COMMON_FLAGS "-Wall -march=native -Wfatal-errors ")
+		set(COMMON_FLAGS "-Wall -march=native -Wfatal-errors -std=c++17")
 		SET(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG") 
 		SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb -rdynamic")
 		SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb -rdynamic")

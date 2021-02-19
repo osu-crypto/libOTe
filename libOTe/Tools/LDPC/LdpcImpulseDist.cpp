@@ -646,6 +646,7 @@ namespace osuCrypto
         bool printYs = cmd.isSet("py");
         bool hm = cmd.isSet("hm");
         bool reg = cmd.isSet("reg");
+        bool noCheck = cmd.isSet("noCheck");
 
         std::string logPath = cmd.getOr<std::string>("log", "");
 
@@ -788,7 +789,7 @@ namespace osuCrypto
                     {
 
 
-                        H = sampleFixedColWeight(rows, cols, colWeight, prng, true);
+                        H = sampleFixedColWeight(rows, cols, colWeight, prng, !noCheck);
                     }
                     else
                         H = sampleUniformSystematic(rows, cols, prng);

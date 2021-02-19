@@ -9,6 +9,10 @@ namespace osuCrypto
 {
 
 
+
+    constexpr  std::array<std::array<u8, 4>, 16> LdpcDiagRegRepeaterEncoder::diagMtx_g16_w5_seed1_t36;
+    constexpr  std::array<std::array<u8, 10>, 32> LdpcDiagRegRepeaterEncoder::diagMtx_g32_w11_seed2_t36;
+
     bool LdpcEncoder::init(SparseMtx H, u64 gap)
     {
 

@@ -168,17 +168,27 @@ namespace osuCrypto
 
         if (checked)
         {
+            u64 i = 1;
             SparseMtx H(rows, cols, points);
 
             auto D = H.dense();
             auto g = computeGen(D);
 
-            if (g.rows() == 0)
+            while(g.rows() == 0)
             {
-                return sampleFixedColWeight(rows, cols, w, prng, checked);
+                ++i;
+                points.mPoints.clear();
+                sampleFixedColWeight(rows, cols, w, false, false, prng, points);
+
+                H = SparseMtx(rows, cols, points);
+                D = H.dense();
+                g = computeGen(D);
             }
-            else
-                return H;
+
+            //std::cout << "("<<i<<") " ;
+
+
+            return H;
         }
         else
             return SparseMtx(rows, cols, points);

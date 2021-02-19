@@ -1,6 +1,7 @@
 #pragma once
 #include "Mtx.h"
 #include "cryptoTools/Crypto/PRNG.h"
+#include "cryptoTools/Common/Timer.h"
 #include <numeric>
 
 namespace osuCrypto
@@ -2473,7 +2474,7 @@ namespace osuCrypto
             //    std::cout << int(pp[i]) << " ";
             //std::cout << std::endl;
 
-            mR.cirTransEncode(pp);
+            mR.template cirTransEncode<T>(pp);
 
             setTimePoint("diag");
             //std::cout << "P' ";
@@ -2508,7 +2509,7 @@ namespace osuCrypto
             //    std::cout << int(pp[i]) << " ";
             //std::cout << std::endl;
 
-            mR.cirTransEncode2<T0,T1>(pp0, pp1);
+            mR.template cirTransEncode2<T0,T1>(pp0, pp1);
 
             setTimePoint("diag");
             //std::cout << "P' ";
