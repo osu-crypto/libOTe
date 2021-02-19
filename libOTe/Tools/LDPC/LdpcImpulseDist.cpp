@@ -626,6 +626,9 @@ namespace osuCrypto
         //u64 cols = rows * e;
         u64 trial = cmd.getOr("trials", 1);
         u64 tStart = cmd.getOr("tStart", 0);
+
+        auto tSet = cmd.getManyOr<u64>("tSet", {});
+
         u64 seed = cmd.getOr("seed", 0);
         bool verbose = cmd.isSet("v");
 
@@ -700,9 +703,21 @@ namespace osuCrypto
             if (timeout)
                 label << " -to " << timeout;
         }
-        label << " -nt " << nt << " -trials " << trial;
-        if (tStart)
-            label << " -tStart " << tStart;
+        label << " -nt " << nt;
+
+        if (tSet.size())
+        {
+            label << " -tSet ";
+            for (auto t : tSet)
+                label << t << " ";
+
+        }
+        else
+        {
+            label << " -trials " << trial;
+            if (tStart)
+                label << " -tStart " << tStart;
+        }
 
         label << " -seed " << seed;
 
@@ -751,6 +766,12 @@ namespace osuCrypto
         if (log.is_open())
             log << "\n" << label.str() << std::endl;
 
+        if (tSet.size() == 0)
+        {
+            for (u64 i = tStart; i < trial; ++i)
+                tSet.push_back(i);
+        }
+
         for (auto rows : rowVec)
         {
 
@@ -778,7 +799,7 @@ namespace osuCrypto
             if (log.is_open())
                 log << rows << ": ";
 
-            for (u64 i = tStart; i < trial; ++i)
+            for (auto i : tSet)
             {
                 oc::PRNG prng(block(seed, i));
 
@@ -895,6 +916,11 @@ namespace osuCrypto
                         std::cout << "~ ";
                         for (auto y : lastYs_ )
                             std::cout << y << " ";
+
+                        std::cout << "~ ";
+                        for (auto y : yr_)
+                            std::cout << y << " ";
+
                         std::cout << std::endl;
                     }
                 }
@@ -905,7 +931,7 @@ namespace osuCrypto
             if (log.is_open())
                 log << std::endl;
 
-            auto tt = trial - tStart;
+            auto tt = tSet.size();
             auto min = *std::min_element(dd.begin(), dd.end());
             auto max = *std::max_element(dd.begin(), dd.end());
             auto avg = std::accumulate(dd.begin(), dd.end(), 0ull) / double(tt);

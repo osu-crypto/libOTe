@@ -7,6 +7,8 @@
 #include "cryptoTools/Common/BitVector.h"
 #include "Util.h"
 #include "libOTe/Tools/Tools.h"
+#include <random>
+
 namespace osuCrypto
 {
 
@@ -48,6 +50,23 @@ namespace osuCrypto
 
         if (diag)
         {
+            if (randY)
+            {
+                yr_.clear();
+                std::uniform_real_distribution<> dist(0, 1);
+                yr_.push_back(0);
+                //s.insert(0);
+
+                while (yr_.size() != diag)
+                {
+                    auto v = dist(prng);
+                    yr_.push_back(v);
+                }
+
+                std::sort(yr_.begin(), yr_.end());
+                //diagOffsets.insert(diagOffsets.end(), s.begin(), s.end());
+            }
+
             if (yr_.size())
             {
                 if (yr_.size() < diag)
@@ -55,11 +74,23 @@ namespace osuCrypto
                     std::cout << "yr.size() < diag" << std::endl;
                     throw RTE_LOC;
                 }
-                diagOffsets.resize(diag);
-                for (u64 i = 0; i < diag; ++i)
+                std::set<u64> ss;
+                //ss.insert(0);
+                //diagOffsets.resize(diag);
+
+                for (u64 i = 0; ss.size() < diag; ++i)
                 {
-                    diagOffsets[i] = nextPrime(rows * yr_[i]);
+                    auto p = u64(rows * yr_[i]) % rows;
+                    while (ss.insert(p).second == false)
+                        p = u64(p + 1) % rows;
                 }
+
+                //for (u64 i = 0; i < diag; ++i)
+                //{
+                //}
+                diagOffsets.clear();
+                for (auto s : ss)
+                    diagOffsets.push_back(s);
             }
             else if (ys_.size())
             {
@@ -70,22 +101,6 @@ namespace osuCrypto
                 diagOffsets = ys_;
                 diagOffsets.resize(diag);
 
-            }
-            else if (randY)
-            {
-                std::set<u64> s;
-                diagOffsets.push_back(0);
-                s.insert(0);
-
-                while (s.size() != diag)
-                {
-                    auto v = prng.get<u64>() % rows;
-                    if (s.insert(v).second)
-                        diagOffsets.push_back(v);
-                }
-
-                std::sort(diagOffsets.begin(), diagOffsets.end());
-                //diagOffsets.insert(diagOffsets.end(), s.begin(), s.end());
             }
             else
             {
