@@ -423,7 +423,7 @@ namespace osuCrypto
                 H = sampleTriangularBand(
                     rows, cols,
                     colWeight, 8,
-                    colWeight, colWeight, 0,0, { 5,31 }, true, true,true, prng);
+                    colWeight, colWeight, 0,0, { 5,31 }, true, true,true, prng, prng);
                 //H = sampleTriangular(rows, cols, colWeight, gap, prng);
                 b = !E.init(H, 0);
             }

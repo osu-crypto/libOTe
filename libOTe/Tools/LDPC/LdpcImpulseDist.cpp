@@ -650,6 +650,7 @@ namespace osuCrypto
         bool hm = cmd.isSet("hm");
         bool reg = cmd.isSet("reg");
         bool noCheck = cmd.isSet("noCheck");
+        auto lSeed = cmd.getManyOr<u64>("lSeed", {});
 
         std::string logPath = cmd.getOr<std::string>("log", "");
 
@@ -799,9 +800,20 @@ namespace osuCrypto
             if (log.is_open())
                 log << rows << ": ";
 
+            auto lIter = lSeed.begin();
             for (auto i : tSet)
             {
-                oc::PRNG prng(block(seed, i));
+                oc::PRNG lPrng, rPrng(block(seed, i));
+                
+                if (lIter != lSeed.end())
+                {
+                    lPrng.SetSeed(block(3, *lIter++));
+
+                    if (lIter == lSeed.end())
+                        lIter = lSeed.begin();
+                }
+                else
+                    lPrng.SetSeed(block(seed, i));
 
 
                 if (uniform)
@@ -810,10 +822,10 @@ namespace osuCrypto
                     {
 
 
-                        H = sampleFixedColWeight(rows, cols, colWeight, prng, !noCheck);
+                        H = sampleFixedColWeight(rows, cols, colWeight, rPrng, !noCheck);
                     }
                     else
-                        H = sampleUniformSystematic(rows, cols, prng);
+                        H = sampleUniformSystematic(rows, cols, rPrng);
                 }
                 //else if (zp)
                 //{
@@ -829,7 +841,7 @@ namespace osuCrypto
                         rows, cols,
                         colWeight, gap,
                         dWeight, diag, dDiag, period,
-                        doubleBand, trim, extend, randY, prng);
+                        doubleBand, trim, extend, randY, rPrng);
                     //std::cout << H << std::endl;
                 }
                 else
@@ -838,7 +850,7 @@ namespace osuCrypto
                         rows, cols,
                         colWeight, gap,
                         dWeight, diag, dDiag, period,
-                        doubleBand, trim, extend, randY, prng);
+                        doubleBand, trim, extend, randY, lPrng,rPrng);
                 }
 
                 //impulseDist(5, 5000);
@@ -859,7 +871,7 @@ namespace osuCrypto
                 }
 
                 if (log.is_open())
-                    log << " " << dd.back();
+                    log << " " << dd.back() << std::flush;
 
                 if (verbose)
                 {

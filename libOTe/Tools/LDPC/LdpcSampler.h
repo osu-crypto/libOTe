@@ -401,7 +401,7 @@ namespace osuCrypto
         u64 dWeight, u64 diag, u64 dDiag, u64 period,
         std::vector<u64> doubleBand,
         bool trim, bool extend, bool randY,
-        oc::PRNG& prng, PointList& points)
+        oc::PRNG& lPrng, PRNG& rPrng, PointList& points)
     {
         auto dHeight = gap + 1;
 
@@ -421,7 +421,7 @@ namespace osuCrypto
         //auto b = trim ? cols - rows + gap : cols - rows;
         auto b = cols - rows;
 
-        auto diagOffset = sampleFixedColWeight(rows, b, weight, diag, randY, prng, points);
+        auto diagOffset = sampleFixedColWeight(rows, b, weight, diag, randY, lPrng, points);
 
         u64 ii = trim ? 0 : rows - gap;
         u64 e = trim ? rows - gap : rows;
@@ -462,7 +462,7 @@ namespace osuCrypto
   
                 assert(ww < dHeight);
 
-                s = sampleCol(1, dHeight, ww, false, prng);
+                s = sampleCol(1, dHeight, ww, false, rPrng);
 
                 for (auto db : doubleBand)
                 {
@@ -507,7 +507,7 @@ namespace osuCrypto
                 }
                 assert(ww < dHeight);
 
-                auto s = sampleCol(ii + 1, ii + dHeight, ww, false, prng);
+                auto s = sampleCol(ii + 1, ii + dHeight, ww, false, rPrng);
 
                 points.push_back({ ii % rows, b + i });
                 for (auto ss : s)
@@ -530,7 +530,7 @@ namespace osuCrypto
         PointList points(rows, cols);
         sampleTriangularBand(rows, cols, weight,
             gap, dWeight, diag, 0, 0,
-            {}, false, false, false, prng, points);
+            {}, false, false, false, prng, prng, points);
 
         return SparseMtx(rows, cols, points);
     }
@@ -544,14 +544,15 @@ namespace osuCrypto
         u64 weight, u64 gap,
         u64 dWeight, u64 diag, u64 dDiag, u64 period, std::vector<u64> doubleBand,
         bool trim, bool extend, bool randY,
-        oc::PRNG& prng)
+        oc::PRNG& lPrng,
+        oc::PRNG& rPrng)
     {
         PointList points(rows, cols);
         sampleTriangularBand(
             rows, cols,
             weight, gap,
             dWeight, diag, dDiag, period, doubleBand, trim, extend, randY,
-            prng, points);
+            lPrng, rPrng, points);
 
         auto cc = (trim && !extend) ? cols - gap : cols;
 
