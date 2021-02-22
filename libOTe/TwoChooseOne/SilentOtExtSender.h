@@ -69,7 +69,7 @@ namespace osuCrypto
 #endif
         MultType mMultType = MultType::slv5;
         S1DiagRegRepEncoder mEncoder;
-        bool mHash = false;
+        bool mHash = false, mCopy = true;
         //LdpcEncoder mLdpcEncoder;
         Matrix<block> rT;
         block mDelta = ZeroBlock;

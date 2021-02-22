@@ -690,10 +690,12 @@ namespace osuCrypto
         }
         else
         {
-            if (mm.cols() != 1)
-                throw RTE_LOC;
-
-            memcpy(mm.data(), rT.data(), mm.size() * sizeof(block));
+            if (mCopy)
+            {
+                if (mm.cols() != 1)
+                    throw RTE_LOC;
+                memcpy(mm.data(), rT.data(), mm.size() * sizeof(block));
+            }
             setTimePoint("sender.expand.ldpc.copy");
         }
     }

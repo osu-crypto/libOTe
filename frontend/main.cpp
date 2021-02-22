@@ -479,8 +479,8 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 
     numOTs = numOTs / numThreads;
 
-    using OtExtSender = SilentOtExtSender;
-    using OtExtRecver = SilentOtExtReceiver;
+    //using OtExtSender = SilentOtExtSender;
+    //using OtExtRecver = SilentOtExtReceiver;
 
     // get up the networking
     auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
@@ -494,11 +494,14 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
         chls[i] = ep0.addChannel();
 
     //bool mal = cmd.isSet("mal");
-    OtExtSender sender;
-    OtExtRecver receiver;
+    SilentOtExtSender sender;
+    SilentOtExtReceiver receiver;
     bool deltaOT = cmd.isSet("noHash");
 
     bool fakeBase = cmd.isSet("fakeBase");
+
+    sender.mCopy = !cmd.isSet("noCopy");
+    receiver.mCopy = !cmd.isSet("noCopy");
 
     gTimer.setTimePoint("begin");
 
@@ -506,9 +509,10 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
     {
         Timer timer;
         u64 milli;
-
         try {
 
+            if (i != 0)
+                throw RTE_LOC;
 
             // get a random number generator seeded from the system
             PRNG prng(sysRandomSeed());

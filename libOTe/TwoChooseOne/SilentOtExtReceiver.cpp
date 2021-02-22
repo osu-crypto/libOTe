@@ -543,7 +543,14 @@ namespace osuCrypto
         }
         else
         {
-            std::unique_ptr<u8[]> cc(new u8[rT.size()]());
+
+            if(mChoiceSpan.size() != rT.size())
+            {
+                mChoicePtr.reset((new u8[rT.size()]()));
+                mChoiceSpan = span<u8>(mChoicePtr.get() , rT.size());
+            }
+
+            auto cc = mChoicePtr.get();
             for (auto p : points)
             {
                 if (cc[p] != 0)
@@ -552,18 +559,21 @@ namespace osuCrypto
             }
             mEncoder.cirTransEncode2<block, u8>(
                 span<block>(rT), 
-                span<u8>(cc.get(), rT.size()));
+                mChoiceSpan);
             setTimePoint("recver.expand.ldpc.cirTransEncode");
 
-            std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-            setTimePoint("recver.expand.ldpc.copy");
-            //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-            for (u64 i = 0; i < choices.size(); ++i)
+            if (mCopy)
             {
-                *cIter = cc[i];
-                ++cIter;
+                std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
+                setTimePoint("recver.expand.ldpc.copy");
+                std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
+                for (u64 i = 0; i < choices.size(); ++i)
+                {
+                    *cIter = cc[i];
+                    ++cIter;
+                }
+                setTimePoint("recver.expand.ldpc.copyBits");
             }
-            setTimePoint("recver.expand.ldpc.copyBits");
 
         }
 

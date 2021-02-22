@@ -27,7 +27,10 @@ namespace osuCrypto
         SilentBaseType mBaseType;
         bool mDebug = false;
         u64 mNumThreads;
-        bool mHash = false;
+        bool mHash = false, mCopy = true;
+        std::unique_ptr<u8[]> mChoicePtr;
+        span<u8> mChoiceSpan;
+
 #ifdef ENABLE_IKNP
         IknpOtExtReceiver mIknpRecver;
 #endif
