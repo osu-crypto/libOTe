@@ -694,6 +694,7 @@ namespace osuCrypto
                 throw RTE_LOC;
 
             memcpy(mm.data(), rT.data(), mm.size() * sizeof(block));
+            setTimePoint("sender.expand.ldpc.copy");
         }
     }
 

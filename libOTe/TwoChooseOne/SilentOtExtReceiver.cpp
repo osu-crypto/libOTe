@@ -555,12 +555,15 @@ namespace osuCrypto
                 span<u8>(cc.get(), rT.size()));
 
             std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
+            setTimePoint("recver.expand.ldpc.copy");
             //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
             for (u64 i = 0; i < choices.size(); ++i)
             {
                 *cIter = cc[i];
                 ++cIter;
             }
+            setTimePoint("recver.expand.ldpc.copyBits");
+
         }
 
     }
