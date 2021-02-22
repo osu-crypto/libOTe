@@ -19,6 +19,7 @@ namespace osuCrypto {
     public: 
         std::array<PRNG, gOtExtBaseOtCount> mGens;
         BitVector mBaseChoiceBits;
+        bool mHash = true;
 
         IknpOtExtSender() = default;
         IknpOtExtSender(const IknpOtExtSender&) = delete;

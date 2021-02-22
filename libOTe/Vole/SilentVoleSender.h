@@ -27,7 +27,7 @@ namespace osuCrypto
         IknpOtExtSender mIknpSender;
         IknpOtExtReceiver mIknpRecver;
 #endif
-        //MultType mMultType = MultType::ldpc;
+        MultType mMultType = MultType::slv5;
         S1DiagRegRepEncoder mEncoder;
         //LdpcEncoder mLdpcEncoder;
         Matrix<block> rT;
@@ -67,6 +67,7 @@ namespace osuCrypto
         {
 #ifdef ENABLE_IKNP
             mIknpSender.genBaseOts(prng, chl);
+            mIknpRecver.genBaseOts(mIknpSender, prng, chl);
 #else
             throw std::runtime_error("IKNP must be enabled");
 #endif

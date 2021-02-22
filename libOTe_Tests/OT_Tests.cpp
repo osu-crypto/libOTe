@@ -19,8 +19,6 @@
 #include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
-#include "libOTe/TwoChooseOne/IknpDotExtReceiver.h"
-#include "libOTe/TwoChooseOne/IknpDotExtSender.h"
 
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtSender.h"
@@ -582,7 +580,7 @@ namespace tests_libOTe
 
 	void DotExt_Iknp_Test()
 	{
-#ifdef ENABLE_DELTA_IKNP
+#ifdef ENABLE_IKNP
 
 		setThreadName("Sender");
 
@@ -599,25 +597,27 @@ namespace tests_libOTe
 		for (u64 t = 0; t < numTrials; ++t)
 		{
 			u64 numOTs = 4234;
-			u64 s = 40;
 
-			std::vector<block> recvMsg(numOTs), baseRecv(128 + s);
-			std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128 + s);
+			std::vector<block> recvMsg(numOTs), baseRecv(128);
+			std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
 			BitVector choices(numOTs);
 			choices.randomize(prng0);
 
-			BitVector baseChoice(128 + s);
+			BitVector baseChoice(128);
 			baseChoice.randomize(prng0);
 
-			for (u64 i = 0; i < 128 + s; ++i)
+			for (u64 i = 0; i < 128; ++i)
 			{
 				baseSend[i][0] = prng0.get<block>();
 				baseSend[i][1] = prng0.get<block>();
 				baseRecv[i] = baseSend[i][baseChoice[i]];
 			}
 
-			IknpDotExtSender sender;
-			IknpDotExtReceiver recv;
+			IknpOtExtSender sender;
+			IknpOtExtReceiver recv;
+
+			sender.mHash = false;
+			recv.mHash = false;
 
 			std::thread thrd = std::thread([&]() {
 				setThreadName("receiver");
@@ -625,8 +625,8 @@ namespace tests_libOTe
 				recv.receive(choices, recvMsg, prng0, recvChannel);
 			});
 
-			block delta = prng1.get<block>();
-			sender.setDelta(delta);
+			block delta = baseChoice.getArrayView<block>()[0];
+			//sender.setDelta(delta);
 			sender.setBaseOts(baseRecv, baseChoice);
 			sender.send(sendMsg, prng1, senderChannel);
 			thrd.join();
@@ -636,7 +636,7 @@ namespace tests_libOTe
 			for (auto& s : sendMsg)
 			{
 				if (neq(s[0] ^ delta, s[1]))
-					throw UnitTestFail();
+					throw UnitTestFail(LOCATION);
 			}
 		}
 

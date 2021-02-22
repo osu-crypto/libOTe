@@ -121,30 +121,30 @@ namespace osuCrypto
         u64 numOTs, u64 scaler, u64 secParam, u64 numThreads)
     {
         mScaler = scaler;
+        u64 extra = 0;
 
         //if (mMultType == MultType::ldpc)
         {
             assert(scaler == 2);
             auto mm = numOTs;
-            //auto mm = numOTs;// nextPrime(numOTs) - 1;
             u64 nn = mm * scaler;
             auto kk = nn - mm;
 
-            //auto code = LdpcDiagRegRepeaterEncoder::Weight11;
-            //u64 colWeight = 11;
+            auto code = mMultType == MultType::slv11 ?
+                LdpcDiagRegRepeaterEncoder::Weight11 :
+                LdpcDiagRegRepeaterEncoder::Weight5
+                ;
+            u64 colWeight = (u64)code;
 
-            auto code = LdpcDiagRegRepeaterEncoder::Weight5;
-            u64 colWeight = 5;
 
-            if (mEncoder.cols() != nn)
-            {
-                setTimePoint("config.begin");
-                mEncoder.mL.init(mm, colWeight);
-                setTimePoint("config.Left");
-                mEncoder.mR.init(mm, code, true);
-                setTimePoint("config.Right");
+            setTimePoint("config.begin");
+            mEncoder.mL.init(mm, colWeight);
+            setTimePoint("config.Left");
+            mEncoder.mR.init(mm, code, true);
+            setTimePoint("config.Right");
                 
-            }
+            
+            extra = mEncoder.mR.mGap;
 
             mP = 0;
             mN = kk;
@@ -157,7 +157,7 @@ namespace osuCrypto
 
         mSizePer = roundUpTo((mN2 + mNumPartitions - 1) / mNumPartitions, 8);
 
-        mGen.configure(mSizePer, mNumPartitions);
+        mGen.configure(mSizePer, mNumPartitions, extra);
     }
 
     //sigma = 0   Receiver
@@ -235,13 +235,20 @@ namespace osuCrypto
             genSilentBaseOts(prng, chls[0]);
         }
 
-        setTimePoint("sender.expand.start");
-        gTimer.setTimePoint("sender.expand.start");
+        setTimePoint("sender.iknp.start");
+        gTimer.setTimePoint("sender.iknp.base2");
 
         std::vector<block> beta(mGen.mPntCount);
 
+        if (mIknpRecver.hasBaseOts() == false)
+        {
+            mIknpRecver.genBaseOts(mIknpSender, prng, chls[0]);
+            setTimePoint("sender.iknp.gen");
+        }
+
         NoisyVoleSender nv;
         nv.send(delta, beta, prng, mIknpRecver, chls[0]);
+        gTimer.setTimePoint("sender.expand.start");
 
         {
             auto size = mGen.mDomain * mGen.mPntCount;

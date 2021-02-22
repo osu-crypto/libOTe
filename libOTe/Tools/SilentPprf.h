@@ -23,7 +23,7 @@ namespace osuCrypto
     class SilentMultiPprfSender : public TimerAdapter
     {
     public:
-        u64 mDomain = 0, mDepth = 0, mPntCount = 0;// , mPntCount8;
+        u64 mDomain = 0, mDepth = 0, mPntCount = 0, mExtra = 0;// , mPntCount8;
         std::vector<block> mValue;
         bool mPrint = false;
 
@@ -36,9 +36,9 @@ namespace osuCrypto
         SilentMultiPprfSender(const SilentMultiPprfSender&) = delete;
         SilentMultiPprfSender(SilentMultiPprfSender&&) = default;
 
-        SilentMultiPprfSender(u64 domainSize, u64 pointCount);
+        SilentMultiPprfSender(u64 domainSize, u64 pointCount, u64 extra);
 
-        void configure(u64 domainSize, u64 pointCount);
+        void configure(u64 domainSize, u64 pointCount,u64 extra);
 
         
         // the number of base OTs that should be set.
@@ -69,7 +69,7 @@ namespace osuCrypto
     class SilentMultiPprfReceiver : public TimerAdapter
     {
     public:
-        u64 mDomain = 0, mDepth = 0, mPntCount = 0;//, mPntCount8;
+        u64 mDomain = 0, mDepth = 0, mPntCount = 0, mExtra = 0;//, mPntCount8;
 
         Matrix<block> mBaseOTs;
         Matrix<u8> mBaseChoices;
@@ -81,7 +81,7 @@ namespace osuCrypto
         SilentMultiPprfReceiver(SilentMultiPprfReceiver&&) = default;
         //SilentMultiPprfReceiver(u64 domainSize, u64 pointCount);
 
-        void configure(u64 domainSize, u64 pointCount);
+        void configure(u64 domainSize, u64 pointCount, u64 extra);
 
 
         BitVector sampleChoiceBits(u64 modulus, PprfOutputFormat format, PRNG& prng);

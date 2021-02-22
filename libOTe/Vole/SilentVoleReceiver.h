@@ -28,6 +28,7 @@ namespace osuCrypto
         SilentBaseType mBaseType;
         bool mDebug = false;
         u64 mNumThreads;
+        MultType mMultType = MultType::slv5;
 
 #ifdef ENABLE_IKNP
         IknpOtExtReceiver mIknpRecver;

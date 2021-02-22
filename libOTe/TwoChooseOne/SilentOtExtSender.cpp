@@ -169,6 +169,7 @@ namespace osuCrypto
         mHash = delta == ZeroBlock;
         mDelta = delta;
         mScaler = scaler;
+        u64 extra = 0;
 
         if (mMultType == MultType::slv5 || mMultType == MultType::slv11)
         {
@@ -191,7 +192,7 @@ namespace osuCrypto
             mEncoder.mR.init(mm, code, true);
             setTimePoint("config.Right");
 
-
+            extra = mEncoder.mR.mGap;
             mP = 0;
             mN = kk;
             mN2 = nn;
@@ -211,7 +212,7 @@ namespace osuCrypto
 
         mSizePer = roundUpTo((mN2 + mNumPartitions - 1) / mNumPartitions, 8);
 
-        mGen.configure(mSizePer, mNumPartitions);
+        mGen.configure(mSizePer, mNumPartitions, extra);
     }
 
     //sigma = 0   Receiver

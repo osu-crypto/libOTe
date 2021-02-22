@@ -10,25 +10,28 @@ namespace osuCrypto
 {
 
 
-    SilentMultiPprfSender::SilentMultiPprfSender(u64 domainSize, u64 pointCount)
+    SilentMultiPprfSender::SilentMultiPprfSender(u64 domainSize, u64 pointCount, u64 extra)
     {
-        configure(domainSize, pointCount);
+        configure(domainSize, pointCount, extra);
     }
-    void SilentMultiPprfSender::configure(u64 domainSize, u64 pointCount)
+    void SilentMultiPprfSender::configure(u64 domainSize, u64 pointCount, u64 extra)
     {
         mDomain = domainSize;
         mDepth = log2ceil(mDomain);
         mPntCount = pointCount;
+        mExtra = extra;
         //mPntCount8 = roundUpTo(pointCount, 8);
 
         mBaseOTs.resize(0, 0);
     }
 
-    void SilentMultiPprfReceiver::configure(u64 domainSize, u64 pointCount)
+    void SilentMultiPprfReceiver::configure(u64 domainSize, u64 pointCount, u64 extra)
     {
         mDomain = domainSize;
         mDepth = log2ceil(mDomain);
         mPntCount = pointCount;
+        mExtra = extra;
+
         //mPntCount8 = roundUpTo(pointCount, 8);
 
         mBaseOTs.resize(0, 0);
@@ -36,11 +39,11 @@ namespace osuCrypto
 
     u64 SilentMultiPprfSender::baseOtCount() const
     {
-        return mDepth * mPntCount;
+        return mDepth * mPntCount + mExtra;
     }
     u64 SilentMultiPprfReceiver::baseOtCount() const
     {
-        return mDepth * mPntCount;
+        return mDepth * mPntCount + mExtra;
     }
 
     bool SilentMultiPprfSender::hasBaseOts() const
@@ -57,7 +60,7 @@ namespace osuCrypto
             throw RTE_LOC;
 
         mBaseOTs.resize(mPntCount, mDepth);
-        for (u64 i = 0; i < static_cast<u64>(baseMessages.size()); ++i)
+        for (u64 i = 0; i < static_cast<u64>(mBaseOTs.size()); ++i)
             mBaseOTs(i) = baseMessages[i];
     }
 
@@ -67,7 +70,7 @@ namespace osuCrypto
             throw RTE_LOC;
 
         mBaseOTs.resize(mPntCount, mDepth);
-        memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
+        memcpy(mBaseOTs.data(), baseMessages.data(), mBaseOTs.size() * sizeof(block));
     }
 
     // This function copies the leaf values of the GGM tree 
@@ -262,6 +265,7 @@ namespace osuCrypto
         switch (format)
         {
         case PprfOutputFormat::Plain:
+
             memset(points.data(), 0, points.size() * sizeof(u64));
             for (u64 j = 0; j < mPntCount; ++j)
             {
@@ -277,7 +281,7 @@ namespace osuCrypto
 
             getPoints(points, PprfOutputFormat::Plain);
             interleavedPoints(points, mDomain, format);
-            break;
+            
             break;
         default:
             throw RTE_LOC;
@@ -288,7 +292,7 @@ namespace osuCrypto
 
     BitVector SilentMultiPprfReceiver::sampleChoiceBits(u64 modulus, PprfOutputFormat format, PRNG& prng)
     {
-        BitVector choices(mPntCount * mDepth);
+        BitVector choices(mPntCount * mDepth + mExtra);
 
         mBaseChoices.resize(mPntCount, mDepth);
         for (u64 i = 0; i < mPntCount; ++i)

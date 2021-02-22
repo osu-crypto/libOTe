@@ -85,7 +85,7 @@ namespace osuCrypto
 
     };
 
-
+    class OtExtSender;
     class OtExtReceiver : public OtReceiver
     {
     public:
@@ -109,6 +109,8 @@ namespace osuCrypto
         // use the default base OT class to generate the
         // base OTs that are required.
         virtual void genBaseOts(PRNG& prng, Channel& chl);
+
+        virtual void genBaseOts(OtSender& sender, PRNG& prng, Channel& chl);
     };
 
     class OtExtSender : public OtSender
@@ -134,6 +136,7 @@ namespace osuCrypto
         // use the default base OT class to generate the
         // base OTs that are required.
         virtual void genBaseOts(PRNG& prng, Channel& chl);
+        virtual void genBaseOts(OtReceiver& recver, PRNG& prng, Channel& chl);
     };
 
 

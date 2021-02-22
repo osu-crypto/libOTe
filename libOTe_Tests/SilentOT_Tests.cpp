@@ -442,8 +442,8 @@ void Tools_Pprf_test(const CLP& cmd)
     SilentMultiPprfSender sender;
     SilentMultiPprfReceiver recver;
 
-    sender.configure(domain, numPoints);
-    recver.configure(domain, numPoints);
+    sender.configure(domain, numPoints, 0);
+    recver.configure(domain, numPoints, 0);
 
     auto numOTs = sender.baseOtCount();
     std::vector<std::array<block, 2>> sendOTs(numOTs);
@@ -534,8 +534,8 @@ void Tools_Pprf_trans_test(const CLP& cmd)
     SilentMultiPprfSender sender;
     SilentMultiPprfReceiver recver;
 
-    sender.configure(domain, numPoints);
-    recver.configure(domain, numPoints);
+    sender.configure(domain, numPoints, 0);
+    recver.configure(domain, numPoints, 0);
 
     auto numOTs = sender.baseOtCount();
     std::vector<std::array<block, 2>> sendOTs(numOTs);
@@ -643,8 +643,8 @@ void Tools_Pprf_inter_test(const CLP& cmd)
     SilentMultiPprfSender sender;
     SilentMultiPprfReceiver recver;
 
-    sender.configure(domain, numPoints);
-    recver.configure(domain, numPoints);
+    sender.configure(domain, numPoints, 33);
+    recver.configure(domain, numPoints, 33);
 
     auto numOTs = sender.baseOtCount();
     std::vector<std::array<block, 2>> sendOTs(numOTs);

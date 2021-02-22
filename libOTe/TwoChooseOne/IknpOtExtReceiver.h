@@ -15,7 +15,7 @@ namespace osuCrypto
         public OtExtReceiver, public TimerAdapter
     {
     public:
-        bool mHasBase = false;
+        bool mHasBase = false, mHash = true;
         std::array<std::array<PRNG, 2>, gOtExtBaseOtCount> mGens;
 
 

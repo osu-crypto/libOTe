@@ -25,8 +25,6 @@ int miraclTestMain();
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 #include "libOTe/TwoChooseOne/IknpOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/IknpOtExtSender.h"
-#include "libOTe/TwoChooseOne/IknpDotExtReceiver.h"
-#include "libOTe/TwoChooseOne/IknpDotExtSender.h"
 
 #include "libOTe/NChooseOne/Oos/OosNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Oos/OosNcoOtSender.h"
@@ -273,6 +271,18 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
 		std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
 }
 
+void noHash(IknpOtExtSender&s,IknpOtExtReceiver&r)
+{
+	s.mHash = false;
+	r.mHash = false;
+}
+
+
+template<typename Sender, typename Receiver>
+void noHash(Sender&, Receiver&)
+{
+	throw std::runtime_error("This protocol does not support noHash");
+}
 
 template<typename OtExtSender, typename OtExtRecver>
 void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP & cmd)
@@ -329,7 +339,8 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 		senders[0].setBaseOts(baseMsg, bv,chls[0]);
 	}
 #else
-	std::cout << "warning, base ots are not enabled. Fake base OTs will be used. " << std::endl;
+	if(!cmd.isSet("fakeBase"))
+		std::cout << "warning, base ots are not enabled. Fake base OTs will be used. " << std::endl;
 	PRNG commonPRNG(oc::ZeroBlock);
 	std::array<std::array<block, 2>, 128> sendMsgs;
 	commonPRNG.get(sendMsgs.data(), sendMsgs.size());
@@ -358,6 +369,9 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
 			senders[i] = senders[0].splitBase();
 	}
 
+	if (cmd.isSet("noHash"))
+		for (auto i = 0; i < numThreads; ++i)
+			noHash(senders[i], receivers[i]);
 
 	auto routine = [&](int i)
 	{
@@ -484,7 +498,6 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 		PRNG prng(sysRandomSeed());
 		PRNG pp(ZeroBlock);
 
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		sync(chls[0], role);
 
 		if (role == Role::Receiver)
@@ -715,7 +728,6 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
 		PRNG prng(sysRandomSeed());
 		PRNG pp(ZeroBlock);
 
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		sync(chls[0], role);
 
 		if (role == Role::Receiver)
@@ -738,13 +750,10 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
 			//sync(chls[0], role);
 			if (fakeBase)
 			{
-				auto bits = receiver.sampleBaseChoiceBits(prng);
-				std::vector<std::array<block, 2>> baseSendMsgs(bits.size());
-				std::vector<block> baseRecvMsgs(bits.size());
+				auto nn = receiver.baseOtCount();
+				std::vector<std::array<block, 2>> baseSendMsgs(nn);
 				pp.get(baseSendMsgs.data(), baseSendMsgs.size());
-				for (u64 i = 0; i < bits.size(); ++i)
-					baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
-				receiver.setSlientBaseOts(baseRecvMsgs);
+				receiver.setBaseOts(baseSendMsgs, prng, chls[0]);
 			}
 			else
 			{
@@ -775,10 +784,14 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
 			//sync(chls[0], role);
 			if (fakeBase)
 			{
-				auto count = sender.silentBaseOtCount();
-				std::vector<std::array<block, 2>> baseSendMsgs(count);
+				auto nn = receiver.baseOtCount();
+				BitVector bits(nn); bits.randomize(prng);
+				std::vector<std::array<block, 2>> baseSendMsgs(nn);
+				std::vector<block> baseRecvMsgs(nn);
 				pp.get(baseSendMsgs.data(), baseSendMsgs.size());
-				sender.setSlientBaseOts(baseSendMsgs);
+				for (u64 i = 0; i < nn; ++i)
+					baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
+				sender.setBaseOts(baseRecvMsgs, bits, chls[0]);
 			}
 			else
 			{
@@ -1247,9 +1260,6 @@ int main(int argc, char** argv)
 #endif
 #ifdef ENABLE_IKNP
 	flagSet |= runIf(TwoChooseOne_example<IknpOtExtSender, IknpOtExtReceiver>, cmd, iknp);
-#endif
-#ifdef ENABLE_DELTA_IKNP
-	flagSet |= runIf(TwoChooseOne_example<IknpDotExtSender, IknpDotExtReceiver>, cmd, diknp);
 #endif
 #ifdef ENABLE_KOS
 	flagSet |= runIf(TwoChooseOne_example<KosOtExtSender, KosOtExtReceiver>, cmd, kos);

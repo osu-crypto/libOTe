@@ -39,6 +39,7 @@ namespace osuCrypto
         setTimePoint("recver.gen.start");
 #ifdef ENABLE_IKNP
         mIknpRecver.genBaseOts(prng, chl);
+        mIknpSender.genBaseOts(mIknpRecver, prng, chl);
 #else
         throw std::runtime_error("IKNP must be enabled");
 #endif
@@ -134,29 +135,29 @@ namespace osuCrypto
         mNumThreads = numThreads;
         mScaler = scaler;
         u64 numPartitions;
-        //if (mMultType == MultType::ldpc)
+        u64 extra = 0;
+
         {
             assert(scaler == 2);
             auto mm = numOTs;
-            //auto mm = numOTs;// nextPrime(numOTs) - 1;
             u64 nn = mm * scaler;
             auto kk = nn - mm;
 
 
-            //auto code = LdpcDiagRegRepeaterEncoder::Weight11;
-            //u64 colWeight = 11;
+            auto code = mMultType == MultType::slv11 ?
+                LdpcDiagRegRepeaterEncoder::Weight11 :
+                LdpcDiagRegRepeaterEncoder::Weight5
+                ;
+            u64 colWeight = (u64)code;
 
-            auto code = LdpcDiagRegRepeaterEncoder::Weight5;
-            u64 colWeight = 5;
 
-            if (mEncoder.cols() != nn)
-            {
-                setTimePoint("config.begin");
-                mEncoder.mL.init(mm, colWeight);
-                setTimePoint("config.Left");
-                mEncoder.mR.init(mm, code, true);
-                setTimePoint("config.Right");
-            }
+            setTimePoint("config.begin");
+            mEncoder.mL.init(mm, colWeight);
+            setTimePoint("config.Left");
+            mEncoder.mR.init(mm, code, true);
+            setTimePoint("config.Right");
+            
+            extra = mEncoder.mR.mGap;
 
             mP = 0;
             mN = kk;
@@ -168,7 +169,7 @@ namespace osuCrypto
         mS.resize(numPartitions);
         mSizePer = roundUpTo((mN2 + numPartitions - 1) / numPartitions, 8);
 
-        mGen.configure(mSizePer, mS.size());
+        mGen.configure(mSizePer, mS.size(),extra);
     }
 
 
@@ -287,8 +288,8 @@ namespace osuCrypto
             genSilentBaseOts(prng, chls[0]);
         }
 
-        setTimePoint("recver.expand.start");
-        gTimer.setTimePoint("recver.expand.start");
+        setTimePoint("recver.iknp.base2");
+        gTimer.setTimePoint("recver.iknp.base2");
 
         // column major matrix. mN2 columns and 1 row of 128 bits (128 bit rows)
 
@@ -303,9 +304,15 @@ namespace osuCrypto
         std::vector<block> y(mGen.mPntCount), c(mGen.mPntCount);
         prng.get<block>(y);
 
+        if (mIknpSender.hasBaseOts() == false)
+            mIknpSender.genBaseOts(mIknpRecver, prng, chls[0]);
+
         NoisyVoleReceiver nv;
         nv.receive(y, c, prng, mIknpSender, chls[0]);
 
+
+        setTimePoint("recver.expand.start");
+        gTimer.setTimePoint("recver.expand.start");
 
         mSum = mGen.expand(chls, prng, rT, PprfOutputFormat::Interleaved, false);
 

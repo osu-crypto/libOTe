@@ -166,6 +166,7 @@ namespace osuCrypto
         mNumThreads = numThreads;
         mScaler = scaler;
         u64 numPartitions;
+        u64 extra = 0;
 
         if (mMultType == MultType::slv5 || mMultType == MultType::slv11)
         {
@@ -187,6 +188,7 @@ namespace osuCrypto
             setTimePoint("config.Left");
             mEncoder.mR.init(mm, code, true);
             setTimePoint("config.Right");
+            extra = mEncoder.mR.mGap;
 
             mP = 0;
             mN = kk;
@@ -207,7 +209,7 @@ namespace osuCrypto
         mS.resize(numPartitions);
         mSizePer = roundUpTo((mN2 + numPartitions - 1) / numPartitions, 8);
 
-        mGen.configure(mSizePer, mS.size());
+        mGen.configure(mSizePer, mS.size(), extra);
     }
 
 
