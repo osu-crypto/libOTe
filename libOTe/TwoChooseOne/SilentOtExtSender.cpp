@@ -139,7 +139,8 @@ namespace osuCrypto
             // perform 128 normal base OTs
             genBaseOts(prng, chl);
         case SilentBaseType::Base:
-            configure(n, scaler, secParam, threads);
+            if (isConfigured() == false)
+                configure(n, scaler, secParam, threads);
             // do the silent specific OTs, either by extending
             // the exising base OTs or using a base OT protocol.
             genSilentBaseOts(prng, chl);
@@ -169,35 +170,26 @@ namespace osuCrypto
         mDelta = delta;
         mScaler = scaler;
 
-        if (mMultType == MultType::ldpc)
+        if (mMultType == MultType::slv5 || mMultType == MultType::slv11)
         {
             assert(scaler == 2);
             auto mm = numOTs;
-            //auto mm = numOTs;// nextPrime(numOTs) - 1;
+
             u64 nn = mm * scaler;
             auto kk = nn - mm;
 
-            auto code = LdpcDiagRegRepeaterEncoder::Weight11;
-            u64 colWeight = 11;
+            auto code = mMultType == MultType::slv11 ?
+                LdpcDiagRegRepeaterEncoder::Weight11 :
+                LdpcDiagRegRepeaterEncoder::Weight5
+                ;
+            u64 colWeight = (u64)code;
 
-            //auto code = LdpcDiagRegRepeaterEncoder::Weight5;
-            //u64 colWeight = 5;
 
-
-            if (mEncoder.cols() != nn)
-            {
-                setTimePoint("config.begin");
-                mEncoder.mL.init(mm, colWeight);
-                setTimePoint("config.Left");
-                mEncoder.mR.init(mm, code, true);
-                setTimePoint("config.Right");
-
-                //auto mH = sampleTriangularBand(mm, nn, colWeight, gap, gapWeight, diags, 0, db, true, true, pp);
-                //setTimePoint("config.sample");
-                //mLdpcEncoder.init(std::move(mH), 0);
-                //setTimePoint("config.init");
-
-            }
+            setTimePoint("config.begin");
+            mEncoder.mL.init(mm, colWeight);
+            setTimePoint("config.Left");
+            mEncoder.mR.init(mm, code, true);
+            setTimePoint("config.Right");
 
 
             mP = 0;
@@ -359,7 +351,8 @@ namespace osuCrypto
                 randMulQuasiCyclic(rT, messages, chls.size());
 
             break;
-        case MultType::ldpc:
+        case MultType::slv11:
+        case MultType::slv5:
         {
             auto size = mGen.mDomain * mGen.mPntCount;
             assert(size >= mN2);

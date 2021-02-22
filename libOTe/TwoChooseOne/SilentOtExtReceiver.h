@@ -33,7 +33,7 @@ namespace osuCrypto
 #endif
         SilentMultiPprfReceiver mGen;
 
-        MultType mMultType = MultType::ldpc;
+        MultType mMultType = MultType::slv5;
         Matrix<block> rT;
 
         //LdpcEncoder mLdpcEncoder;
@@ -168,7 +168,8 @@ namespace osuCrypto
             case osuCrypto::MultType::QuasiCyclic:
                 return PprfOutputFormat::InterleavedTransposed;
                 break;
-            case osuCrypto::MultType::ldpc:
+            case osuCrypto::MultType::slv5:
+            case osuCrypto::MultType::slv11:
                 return PprfOutputFormat::Interleaved;
                 break;
             default:

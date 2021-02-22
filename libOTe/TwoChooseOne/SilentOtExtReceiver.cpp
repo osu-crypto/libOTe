@@ -124,7 +124,9 @@ namespace osuCrypto
             // perform 128 normal base OTs
             genBaseOts(prng, chl);
         case SilentBaseType::Base:
-            configure(n, scaler, secParam, threads);
+
+            if(isConfigured() == false)
+                configure(n, scaler, secParam, threads);
             // do the silent specific OTs, either by extending
             // the exising base OTs or using a base OT protocol.
             genSilentBaseOts(prng, chl);
@@ -164,35 +166,27 @@ namespace osuCrypto
         mNumThreads = numThreads;
         mScaler = scaler;
         u64 numPartitions;
-        if (mMultType == MultType::ldpc)
+
+        if (mMultType == MultType::slv5 || mMultType == MultType::slv11)
         {
             assert(scaler == 2);
             auto mm = numOTs;
-            //auto mm = numOTs;// nextPrime(numOTs) - 1;
+
             u64 nn = mm * scaler;
             auto kk = nn - mm;
 
-            auto code = LdpcDiagRegRepeaterEncoder::Weight11;
-            u64 colWeight = 11;
-
-            //auto code = LdpcDiagRegRepeaterEncoder::Weight5;
-            //u64 colWeight = 5;
-
-            PRNG pp(oc::ZeroBlock);
-
-            if (mEncoder.cols() != nn)
-            {
-                setTimePoint("config.begin");
-                mEncoder.mL.init(mm, colWeight);
-                setTimePoint("config.Left");
-                mEncoder.mR.init(mm, code, true);
-                setTimePoint("config.Right");
+            auto code = mMultType == MultType::slv11 ?
+                LdpcDiagRegRepeaterEncoder::Weight11 :
+                LdpcDiagRegRepeaterEncoder::Weight5
+                ;
+            u64 colWeight = (u64)code;
 
 
-                //auto mH = sampleTriangularBand(mm, nn, colWeight, gap, gapWeight, diags, 0, db, true, true, pp);
-                //setTimePoint("config.sample");
-                //mLdpcEncoder.init(std::move(mH), 0);
-            }
+            setTimePoint("config.begin");
+            mEncoder.mL.init(mm, colWeight);
+            setTimePoint("config.Left");
+            mEncoder.mR.init(mm, code, true);
+            setTimePoint("config.Right");
 
             mP = 0;
             mN = kk;
@@ -260,7 +254,7 @@ namespace osuCrypto
 
         Matrix<block> R;
 
-        if (mMultType == MultType::ldpc)
+        if (mMultType == MultType::slv11 || mMultType == MultType::slv5)
         {
             if (rT1.cols() != 1)
                 throw RTE_LOC;
@@ -383,7 +377,8 @@ namespace osuCrypto
 
 
             break;
-        case MultType::ldpc:
+        case MultType::slv11:
+        case MultType::slv5:
         {
 
             auto size = mGen.mDomain * mGen.mPntCount;

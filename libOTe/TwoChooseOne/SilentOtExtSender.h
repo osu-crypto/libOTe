@@ -67,7 +67,7 @@ namespace osuCrypto
 #ifdef ENABLE_IKNP
         IknpOtExtSender mIknpSender;
 #endif
-        MultType mMultType = MultType::ldpc;
+        MultType mMultType = MultType::slv5;
         S1DiagRegRepEncoder mEncoder;
         bool mHash = false;
         //LdpcEncoder mLdpcEncoder;

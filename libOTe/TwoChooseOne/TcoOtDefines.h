@@ -16,7 +16,8 @@ namespace osuCrypto
 	{
 		Naive = 0,
 		QuasiCyclic = 1,
-		ldpc = 2
+		slv5 = 2,
+		slv11 = 3
 	};
 
 	template<typename S, typename TSpan,
