@@ -553,9 +553,11 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
                 sync(chls[i], role);
 
                 auto b = timer.setTimePoint("start");
+                receiver.setTimePoint("start");
                 // perform  numOTs random OTs, the results will be written to msgs.
                 receiver.silentReceive(choice, msgs, prng, chls[i]);
 
+                receiver.setTimePoint("finish");
                 auto e = timer.setTimePoint("finish");
                 milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
             }
@@ -598,10 +600,12 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
                 //
                 sync(chls[i], role);
 
+                sender.setTimePoint("start");
                 auto b = timer.setTimePoint("start");
                 // perform the OTs and write the random OTs to msgs.
                 sender.silentSend(msgs, prng, { &chls[i], 1 });
 
+                sender.setTimePoint("finish");
                 auto e = timer.setTimePoint("finish");
                 milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
 
