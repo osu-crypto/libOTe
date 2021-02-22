@@ -553,6 +553,7 @@ namespace osuCrypto
             mEncoder.cirTransEncode2<block, u8>(
                 span<block>(rT), 
                 span<u8>(cc.get(), rT.size()));
+            setTimePoint("recver.expand.ldpc.cirTransEncode");
 
             std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
             setTimePoint("recver.expand.ldpc.copy");
