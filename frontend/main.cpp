@@ -514,7 +514,6 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
             PRNG prng(sysRandomSeed());
             PRNG pp(ZeroBlock);
 
-            sync(chls[i], role);
 
             if (role == Role::Receiver)
             {
@@ -551,6 +550,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
                 }
 
                 gTimer.setTimePoint("recver.genBase");
+                sync(chls[i], role);
 
                 auto b = timer.setTimePoint("start");
                 // perform  numOTs random OTs, the results will be written to msgs.
@@ -596,6 +596,7 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
                 //
                 //     senders[i].setDelta(some 128 bit delta);
                 //
+                sync(chls[i], role);
 
                 auto b = timer.setTimePoint("start");
                 // perform the OTs and write the random OTs to msgs.
