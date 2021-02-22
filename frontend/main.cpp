@@ -378,7 +378,7 @@ void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string i
         PRNG prng(sysRandomSeed());
 
         // construct a vector to stored the random send messages. 
-        std::vector<std::array<block, 2>> sMsgs(numOTs * (role ==Role::Sender));
+        std::vector<std::array<block, 2>> sMsgs(numOTs * (role == Role::Sender));
 
         // construct the choices that we want.
         BitVector choice(numOTs);
@@ -476,6 +476,9 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 
     if (numOTs == 0)
         numOTs = 1 << 20;
+
+    numOTs = numOTs / numThreads;
+
     using OtExtSender = SilentOtExtSender;
     using OtExtRecver = SilentOtExtReceiver;
 
@@ -499,105 +502,117 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
 
     gTimer.setTimePoint("begin");
 
-    auto routine = [&](int s, int sec, SilentBaseType type)
+    auto routine = [&](int i, int s, int sec, SilentBaseType type)
     {
-
         Timer timer;
         u64 milli;
 
-        // get a random number generator seeded from the system
-        PRNG prng(sysRandomSeed());
-        PRNG pp(ZeroBlock);
-
-        sync(chls[0], role);
-
-        if (role == Role::Receiver)
-        {
-            gTimer.setTimePoint("recver.thrd.begin");
-
-            // construct the choices that we want.
-            BitVector choice(numOTs);
-            gTimer.setTimePoint("recver.msg.alloc0");
-
-            // construct a vector to stored the received messages. 
-            //std::vector<block> msgs(numOTs);
-            std::unique_ptr<block[]> backing(new block[numOTs]);
-            span<block> msgs(backing.get(), numOTs);
-            gTimer.setTimePoint("recver.msg.alloc1");
+        try {
 
 
-            receiver.configure(numOTs, s, sec, chls.size(), deltaOT);
-            gTimer.setTimePoint("recver.config");
+            // get a random number generator seeded from the system
+            PRNG prng(sysRandomSeed());
+            PRNG pp(ZeroBlock);
 
-            auto b = timer.setTimePoint("start");
-            //sync(chls[0], role);
-            if (fakeBase)
+            sync(chls[i], role);
+
+            if (role == Role::Receiver)
             {
-                auto bits = receiver.sampleBaseChoiceBits(prng);
-                std::vector<std::array<block, 2>> baseSendMsgs(bits.size());
-                std::vector<block> baseRecvMsgs(bits.size());
-                pp.get(baseSendMsgs.data(), baseSendMsgs.size());
-                for (u64 i = 0; i < bits.size(); ++i)
-                    baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
-                receiver.setSlientBaseOts(baseRecvMsgs);
+                gTimer.setTimePoint("recver.thrd.begin");
+
+                // construct the choices that we want.
+                BitVector choice(numOTs);
+                gTimer.setTimePoint("recver.msg.alloc0");
+
+                // construct a vector to stored the received messages. 
+                //std::vector<block> msgs(numOTs);
+                std::unique_ptr<block[]> backing(new block[numOTs]);
+                span<block> msgs(backing.get(), numOTs);
+                gTimer.setTimePoint("recver.msg.alloc1");
+
+
+                receiver.configure(numOTs, s, sec, 1, deltaOT);
+                gTimer.setTimePoint("recver.config");
+
+                //sync(chls[0], role);
+                if (fakeBase)
+                {
+                    auto bits = receiver.sampleBaseChoiceBits(prng);
+                    std::vector<std::array<block, 2>> baseSendMsgs(bits.size());
+                    std::vector<block> baseRecvMsgs(bits.size());
+                    pp.get(baseSendMsgs.data(), baseSendMsgs.size());
+                    for (u64 i = 0; i < bits.size(); ++i)
+                        baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
+                    receiver.setSlientBaseOts(baseRecvMsgs);
+                }
+                else
+                {
+                    receiver.genBase(numOTs, chls[i], prng, s, sec, type, 1);
+                }
+
+                gTimer.setTimePoint("recver.genBase");
+
+                auto b = timer.setTimePoint("start");
+                // perform  numOTs random OTs, the results will be written to msgs.
+                receiver.silentReceive(choice, msgs, prng, chls[i]);
+
+                auto e = timer.setTimePoint("finish");
+                milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
             }
             else
             {
-                receiver.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
+                gTimer.setTimePoint("sender.thrd.begin");
+
+                //std::vector<std::array<block, 2>> msgs(numOTs);
+                std::unique_ptr<block[]> backing(new block[deltaOT ? numOTs : numOTs * 2]);
+                MatrixView<block> msgs(backing.get(), numOTs, deltaOT ? 1 : 2);
+                gTimer.setTimePoint("sender.msg.alloc");
+
+                block delta = deltaOT ? prng.get<block>() : ZeroBlock;
+
+                sender.configure(numOTs, s, sec, 1, delta);
+                gTimer.setTimePoint("sender.config");
+
+
+                //sync(chls[0], role);
+                if (fakeBase)
+                {
+                    auto count = sender.silentBaseOtCount();
+                    std::vector<std::array<block, 2>> baseSendMsgs(count);
+                    pp.get(baseSendMsgs.data(), baseSendMsgs.size());
+                    sender.setSlientBaseOts(baseSendMsgs);
+                }
+                else
+                {
+                    sender.genBase(numOTs, chls[i], prng, s, sec, type, 1);
+                }
+                gTimer.setTimePoint("sender.genBase");
+
+                // construct a vector to stored the random send messages. 
+
+                // if delta OT is used, then the user can call the following 
+                // to set the desired XOR difference between the zero messages
+                // and the one messages.
+                //
+                //     senders[i].setDelta(some 128 bit delta);
+                //
+
+                auto b = timer.setTimePoint("start");
+                // perform the OTs and write the random OTs to msgs.
+                sender.silentSend(msgs, prng, { &chls[i], 1 });
+
+                auto e = timer.setTimePoint("finish");
+                milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
+
             }
-
-            gTimer.setTimePoint("recver.genBase");
-
-            // perform  numOTs random OTs, the results will be written to msgs.
-            receiver.silentReceive(choice, msgs, prng, chls);
-
-            auto e = timer.setTimePoint("finish");
-            milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
         }
-        else
+        catch (std::exception& e)
         {
-            gTimer.setTimePoint("sender.thrd.begin");
-
-            //std::vector<std::array<block, 2>> msgs(numOTs);
-            std::unique_ptr<block[]> backing(new block[deltaOT ? numOTs : numOTs * 2]);
-            MatrixView<block> msgs(backing.get(), numOTs, deltaOT ? 1 : 2);
-            gTimer.setTimePoint("sender.msg.alloc");
-
-            block delta = deltaOT ? prng.get<block>() : ZeroBlock;
-
-            sender.configure(numOTs, s, sec, chls.size(), delta);
-            gTimer.setTimePoint("sender.config");
-
-
-            auto b = timer.setTimePoint("start");
-            //sync(chls[0], role);
-            if (fakeBase)
-            {
-                auto count = sender.silentBaseOtCount();
-                std::vector<std::array<block, 2>> baseSendMsgs(count);
-                pp.get(baseSendMsgs.data(), baseSendMsgs.size());
-                sender.setSlientBaseOts(baseSendMsgs);
-            }
-            else
-            {
-                sender.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
-            }
-            gTimer.setTimePoint("sender.genBase");
-
-            // construct a vector to stored the random send messages. 
-
-            // if delta OT is used, then the user can call the following 
-            // to set the desired XOR difference between the zero messages
-            // and the one messages.
-            //
-            //     senders[i].setDelta(some 128 bit delta);
-            //
-
-            // perform the OTs and write the random OTs to msgs.
-            sender.silentSend(msgs, prng, chls);
-
-            auto e = timer.setTimePoint("finish");
-            milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
+            std::cout << e.what() << std::endl;
+        }
+        catch (...)
+        {
+            std::cout << "unkowm exception" << std::endl;
 
         }
         return milli;
@@ -644,9 +659,15 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
                     sender.setTimer(sendTimer);
                     receiver.setTimer(recvTimer);
 
-                    auto milli = routine(s, sec, type);
 
+                    std::vector<std::thread> thrds;
+                    for (u64 i = 1; i < numThreads; ++i)
+                        thrds.emplace_back(routine, i, s, sec, type);
 
+                    auto milli = routine(0, s, sec, type);
+
+                    for (auto& tt : thrds)
+                        tt.join();
 
                     u64 com = 0;
                     for (auto& c : chls)
