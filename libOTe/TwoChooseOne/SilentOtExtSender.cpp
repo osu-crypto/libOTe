@@ -300,6 +300,7 @@ namespace osuCrypto
         span<Channel> chls)
     {
         gTimer.setTimePoint("sender.ot.enter");
+        setTimePoint("sender.expand.enter");
 
 
         if (isConfigured() == false)
