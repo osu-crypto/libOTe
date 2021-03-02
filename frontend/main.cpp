@@ -125,25 +125,26 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
             {
                 // figure out how many OTs we want to do in this step.
                 auto min = std::min<u64>(numOTs - i, step);
+                i += min;
 
-                // iterate over this step.
-                for (u64 j = 0; j < min; ++j, ++i)
-                {
-                    // For the OT index by i, we need to pick which
-                    // one of the N OT messages that we want. For this 
-                    // example we simply pick a random one. Note only the 
-                    // first log2(N) bits of choice is considered. 
-                    block choice = prng.get<block>();
+                //// iterate over this step.
+                //for (u64 j = 0; j < min; ++j, ++i)
+                //{
+                //    // For the OT index by i, we need to pick which
+                //    // one of the N OT messages that we want. For this 
+                //    // example we simply pick a random one. Note only the 
+                //    // first log2(N) bits of choice is considered. 
+                //    block choice = prng.get<block>();
 
-                    // this will hold the (random) OT message of our choice
-                    block otMessage;
+                //    // this will hold the (random) OT message of our choice
+                //    block otMessage;
 
-                    // retreive the desired message.
-                    recvers[k].encode(i, &choice, &otMessage);
+                //    // retreive the desired message.
+                //    recvers[k].encode(i, &choice, &otMessage);
 
-                    // do something cool with otMessage
-                    //otMessage;
-                }
+                //    // do something cool with otMessage
+                //    //otMessage;
+                //}
 
                 // Note that all OTs in this region must be encode. If there are some
                 // that you don't actually care about, then you can skip them by calling
@@ -187,7 +188,6 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
 
         if (randomOT)
         {
-
             // Same explanation as above.
             senders[k].init(numOTs, prng, chl);
 
@@ -205,28 +205,28 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
                 // If this is unknown you can use recvCorrection(chl) -> u64
                 // which will tell you how many were sent. 
                 senders[k].recvCorrection(chl, min);
+                i += min;
+                //// we now encode any OT message with index less that i + min.
+                //for (u64 j = 0; j < min; ++j, ++i)
+                //{
+                //    // in particular, the sender can retreive many OT messages
+                //    // at a single index, in this case we chose to retreive 3
+                //    // but that is arbitrary. 
+                //    auto choice0 = prng.get<block>();
+                //    auto choice1 = prng.get<block>();
+                //    auto choice2 = prng.get<block>();
 
-                // we now encode any OT message with index less that i + min.
-                for (u64 j = 0; j < min; ++j, ++i)
-                {
-                    // in particular, the sender can retreive many OT messages
-                    // at a single index, in this case we chose to retreive 3
-                    // but that is arbitrary. 
-                    auto choice0 = prng.get<block>();
-                    auto choice1 = prng.get<block>();
-                    auto choice2 = prng.get<block>();
+                //    // these we hold the actual OT messages. 
+                //    block
+                //        otMessage0,
+                //        otMessage1,
+                //        otMessage2;
 
-                    // these we hold the actual OT messages. 
-                    block
-                        otMessage0,
-                        otMessage1,
-                        otMessage2;
-
-                    // now retreive the messages
-                    senders[k].encode(i, &choice0, &otMessage0);
-                    senders[k].encode(i, &choice1, &otMessage1);
-                    senders[k].encode(i, &choice2, &otMessage2);
-                }
+                //    // now retreive the messages
+                //    senders[k].encode(i, &choice0, &otMessage0);
+                //    senders[k].encode(i, &choice1, &otMessage1);
+                //    senders[k].encode(i, &choice2, &otMessage2);
+                //}
             }
 
             // This call is required to make sure the receiver did not cheat. 
@@ -268,7 +268,7 @@ void NChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip,
     auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
     if (role == Role::Sender)
-        std::cout << tag << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+        std::cout << tag << " n=" << totalOTs << " " << milli << " ms  " << (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * chls.size() << std::endl;
 }
 
 void noHash(IknpOtExtSender& s, IknpOtExtReceiver& r)
@@ -540,13 +540,10 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
                 //sync(chls[0], role);
                 if (fakeBase)
                 {
-                    auto bits = receiver.sampleBaseChoiceBits(prng);
-                    std::vector<std::array<block, 2>> baseSendMsgs(bits.size());
-                    std::vector<block> baseRecvMsgs(bits.size());
+                    auto nn = receiver.baseOtCount();
+                    std::vector<std::array<block, 2>> baseSendMsgs(nn);
                     pp.get(baseSendMsgs.data(), baseSendMsgs.size());
-                    for (u64 i = 0; i < bits.size(); ++i)
-                        baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
-                    receiver.setSlientBaseOts(baseRecvMsgs);
+                    receiver.setBaseOts(baseSendMsgs, prng, chls[0]);
                 }
                 else
                 {
@@ -583,10 +580,15 @@ void TwoChooseOneG_example(Role role, int numOTs, int numThreads, std::string ip
                 //sync(chls[0], role);
                 if (fakeBase)
                 {
-                    auto count = sender.silentBaseOtCount();
-                    std::vector<std::array<block, 2>> baseSendMsgs(count);
+                    auto nn = sender.baseOtCount();
+                    BitVector bits(nn);
+                    bits.randomize(prng);
+                    std::vector<std::array<block, 2>> baseSendMsgs(bits.size());
+                    std::vector<block> baseRecvMsgs(bits.size());
                     pp.get(baseSendMsgs.data(), baseSendMsgs.size());
-                    sender.setSlientBaseOts(baseSendMsgs);
+                    for (u64 i = 0; i < bits.size(); ++i)
+                        baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
+                    sender.setBaseOts(baseRecvMsgs, bits, chls[0]);
                 }
                 else
                 {
@@ -755,6 +757,9 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
     OtExtSender sender;
     OtExtRecver receiver;
 
+    sender.mCopy = !cmd.isSet("noCopy");
+    receiver.mCopy = !cmd.isSet("noCopy");
+
     bool fakeBase = cmd.isSet("fakeBase");
 
     gTimer.setTimePoint("begin");
@@ -769,7 +774,6 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
         PRNG prng(sysRandomSeed());
         PRNG pp(ZeroBlock);
 
-        sync(chls[0], role);
 
         if (role == Role::Receiver)
         {
@@ -787,7 +791,6 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
             receiver.configure(numOTs, s, sec, chls.size());
             gTimer.setTimePoint("recver.config");
 
-            auto b = timer.setTimePoint("start");
             //sync(chls[0], role);
             if (fakeBase)
             {
@@ -800,11 +803,14 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
             {
                 receiver.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
             }
-
+            sync(chls[0], role);
+            auto b = timer.setTimePoint("start");
+            receiver.setTimePoint("start");
             gTimer.setTimePoint("recver.genBase");
 
             // perform  numOTs random OTs, the results will be written to msgs.
             receiver.silentReceive(choice, msgs, prng, chls);
+            receiver.setTimePoint("finish");
 
             auto e = timer.setTimePoint("finish");
             milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
@@ -838,6 +844,9 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
             {
                 sender.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
             }
+            sync(chls[0], role);
+
+            sender.setTimePoint("start");
             gTimer.setTimePoint("sender.genBase");
 
             // construct a vector to stored the random send messages. 
@@ -851,6 +860,7 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
 
             // perform the OTs and write the random OTs to msgs.
             sender.silentSend(delta, msgs, prng, chls);
+            sender.setTimePoint("finish");
 
             auto e = timer.setTimePoint("finish");
             milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
@@ -864,7 +874,11 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
     std::vector<int> ss = cmd.getMany<int>("s");
     std::vector<int> secs = cmd.getMany<int>("sec");
     u64 trials = cmd.getOr("trials", 1);
+    auto mulType = (MultType)cmd.getOr("multType", (int)MultType::slv5);
     std::vector< SilentBaseType> types;
+
+    receiver.mMultType = mulType;
+    sender.mMultType = mulType;
 
     if (cmd.isSet("base"))
         types.push_back(SilentBaseType::Base);

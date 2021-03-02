@@ -2,6 +2,7 @@
 cmake_minimum_required (VERSION 2.8)
 
 project(libOTe)
+set(libOTe_VERSION 1.2.0)
 
 
 if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
@@ -12,11 +13,7 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	if(${CMAKE_VERSION} VERSION_LESS "3.12.0") 
 		message("Please consider updating CMake to 3.12+")
 	endif()
-
-	set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/bin)
-	set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/lib)
-	set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/lib)
-
+	
 	############################################
 	#           Flag and #defines              #
 	############################################

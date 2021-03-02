@@ -62,15 +62,15 @@ namespace osuCrypto
 
 #if defined(ENABLE_IKNP) || defined(LIBOTE_HAS_BASE_OT)
 
-    #ifdef ENABLE_IKNP
+#ifdef ENABLE_IKNP
         mIknpRecver.receive(choice, msg, prng, chl);
-    #else
-        // otherwise just generate the silent 
-        // base OTs directly.
+#else
+    // otherwise just generate the silent 
+    // base OTs directly.
         DefaultBaseOT base;
         base.receive(choice, msg, prng, chl, mNumThreads);
         setTimePoint("recver.gen.baseOT");
-    #endif
+#endif
 #else
         throw std::runtime_error("IKNP or base OTs must be enabled");
 #endif
@@ -156,7 +156,7 @@ namespace osuCrypto
             setTimePoint("config.Left");
             mEncoder.mR.init(mm, code, true);
             setTimePoint("config.Right");
-            
+
             extra = mEncoder.mR.mGap;
 
             mP = 0;
@@ -169,7 +169,7 @@ namespace osuCrypto
         mS.resize(numPartitions);
         mSizePer = roundUpTo((mN2 + numPartitions - 1) / numPartitions, 8);
 
-        mGen.configure(mSizePer, mS.size(),extra);
+        mGen.configure(mSizePer, mS.size(), extra);
     }
 
 
@@ -239,7 +239,7 @@ namespace osuCrypto
             }
         }
 
-        if(failed)
+        if (failed)
             throw RTE_LOC;
 
         std::cout << "debug check ok" << std::endl;
@@ -318,7 +318,7 @@ namespace osuCrypto
 
         std::vector<u64> points(mGen.mPntCount);
         mGen.getPoints(points, PprfOutputFormat::Interleaved);
-        for (u64 i =0; i < points.size(); ++i)
+        for (u64 i = 0; i < points.size(); ++i)
         {
             auto pnt = points[i];
             rT(pnt) = rT(pnt) ^ c[i];
@@ -348,24 +348,29 @@ namespace osuCrypto
 
         rT.resize(mN2, 1);
 
-            Matrix<block> rT2(rT.size(), 1, AllocType::Zeroed);
+        rT2.resize(0, 0);
+        rT2.resize(rT.size(), 1, AllocType::Zeroed);
+        setTimePoint("recver.expand.zero");
 
-            std::vector<u64> points(mGen.mPntCount);
-            mGen.getPoints(points, PprfOutputFormat::Interleaved);
-            for (u64 i = 0; i < points.size(); ++i)
-            {
-                auto pnt = points[i];
-                rT2(pnt) = rT2(pnt) ^ y[i];
-            }
+        std::vector<u64> points(mGen.mPntCount);
+        mGen.getPoints(points, PprfOutputFormat::Interleaved);
+        for (u64 i = 0; i < points.size(); ++i)
+        {
+            auto pnt = points[i];
+            rT2(pnt) = rT2(pnt) ^ y[i];
+        }
 
-            mEncoder.setTimer(getTimer());
-            mEncoder.cirTransEncode2(span<block>(rT), span<block>(rT2));
-            setTimePoint("recver.expand.cirTransEncode.a");
+        mEncoder.setTimer(getTimer());
+        mEncoder.cirTransEncode2(span<block>(rT), span<block>(rT2));
+        setTimePoint("recver.expand.cirTransEncode.a");
 
+        if (mCopy)
+        {
             std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
             setTimePoint("recver.expand.msgCpy");
             std::memcpy(choices.data(), rT2.data(), choices.size() * sizeof(block));
             setTimePoint("recver.expand.chcCpy");
+        }
 
     }
 

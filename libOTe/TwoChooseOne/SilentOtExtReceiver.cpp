@@ -549,6 +549,10 @@ namespace osuCrypto
                 mChoicePtr.reset((new u8[rT.size()]()));
                 mChoiceSpan = span<u8>(mChoicePtr.get() , rT.size());
             }
+            else
+            {
+                std::memset(mChoicePtr.get(), 0, rT.size());
+            }
 
             auto cc = mChoicePtr.get();
             for (auto p : points)

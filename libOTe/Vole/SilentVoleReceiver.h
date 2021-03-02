@@ -26,7 +26,7 @@ namespace osuCrypto
         std::vector<u64> mS;
         block mDelta, mSum;
         SilentBaseType mBaseType;
-        bool mDebug = false;
+        bool mDebug = false, mCopy = true;
         u64 mNumThreads;
         MultType mMultType = MultType::slv5;
 
@@ -36,7 +36,7 @@ namespace osuCrypto
 #endif
         SilentMultiPprfReceiver mGen;
 
-        Matrix<block> rT;
+        Matrix<block> rT, rT2;
 
         S1DiagRegRepEncoder mEncoder;
 

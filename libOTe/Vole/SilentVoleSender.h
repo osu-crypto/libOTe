@@ -23,6 +23,7 @@ namespace osuCrypto
 
         SilentMultiPprfSender mGen;
         u64 mP, mN2, mN = 0, mNumPartitions, mScaler, mSizePer, mNumThreads;
+        bool mCopy = true;
 #ifdef ENABLE_IKNP
         IknpOtExtSender mIknpSender;
         IknpOtExtReceiver mIknpRecver;

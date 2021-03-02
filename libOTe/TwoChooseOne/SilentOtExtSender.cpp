@@ -66,6 +66,7 @@ namespace osuCrypto
 
         std::vector<std::array<block, 2>> msg(silentBaseOtCount());
 
+
         // If we have IKNP base OTs, use them
         // to extend to get the silent base OTs.
 #if defined(ENABLE_IKNP) || defined(LIBOTE_HAS_BASE_OT)
@@ -211,7 +212,7 @@ namespace osuCrypto
         mNumThreads = numThreads;
 
         mSizePer = roundUpTo((mN2 + mNumPartitions - 1) / mNumPartitions, 8);
-
+        
         mGen.configure(mSizePer, mNumPartitions, extra);
     }
 

@@ -8,6 +8,7 @@
 #include "libOTe/Tools/LinearCode.h"
 //#include "libOTe/NChooseOne/KkrtNcoOtReceiver.h"
 #include <cryptoTools/Common/Timer.h>
+#include <future>
 #ifdef GetMessage
 #undef GetMessage
 #endif

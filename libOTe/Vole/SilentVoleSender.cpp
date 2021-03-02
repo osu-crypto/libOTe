@@ -143,7 +143,6 @@ namespace osuCrypto
             mEncoder.mR.init(mm, code, true);
             setTimePoint("config.Right");
                 
-            
             extra = mEncoder.mR.mGap;
 
             mP = 0;
@@ -287,9 +286,12 @@ namespace osuCrypto
         mEncoder.cirTransEncode(span<block>(rT));
         setTimePoint("sender.expand.ldpc.cirTransEncode");
 
-        std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-        setTimePoint("sender.expand.ldpc.msgCpy");
+        if (mCopy)
+        {
+            std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
 
+            setTimePoint("sender.expand.ldpc.msgCpy");
+        }
         //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
 
 
