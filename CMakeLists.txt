@@ -160,10 +160,9 @@ if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_NP) AND
    message(FATAL_ERROR "ENABLE_SIMPLESTOT and ENABLE_MR requires ENABLE_MIRACL or ENABLE_RELIC")
 endif() 
 
-configure_file(libOTe/config.h.in libOTe/config.h)
-
+configure_file(libOTe/config.h.in ${CMAKE_CURRENT_SOURCE_DIR}/libOTe/config.h)
 # Support out-of-source builds.
-include_directories(${CMAKE_BINARY_DIR})
+# include_directories(${CMAKE_BINARY_DIR})
 
 
 #############################################
