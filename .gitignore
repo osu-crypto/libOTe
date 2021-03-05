@@ -13,9 +13,12 @@ CMakeFiles/*
 
 CMakeCache.txt
 */CMakeCache.txt
+CMakeSettings.json
 
 *.a
 *.args.json
+libOTe/config.h
+frontend/frontend_libOTe
 
 # Build results
 [Dd]ebug/
