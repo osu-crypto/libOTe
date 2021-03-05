@@ -6,8 +6,8 @@ set(SRCS "${SRCS}")
 
 add_library(libOTe STATIC ${SRCS})
 
-target_include_directories(libOTe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..) 
 target_include_directories(libOTe PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/..")
+target_include_directories(libOTe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..) 
 
 
 find_package(OpenMP REQUIRED)
