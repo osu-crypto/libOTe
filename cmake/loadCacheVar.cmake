@@ -9,7 +9,7 @@ if(MSVC)
 
     set(libOTe_BIN_DIR "${CMAKE_CURRENT_LIST_DIR}/../out/build/x64-${CONFIG_NAME}")
 else()
-    message(FATAL_ERROR "not impl")
+    set(libOTe_BIN_DIR "${CMAKE_CURRENT_LIST_DIR}/../out/build/linux")
 endif()
 
 LOAD_CACHE("${libOTe_BIN_DIR}/" INCLUDE_INTERNALS 
