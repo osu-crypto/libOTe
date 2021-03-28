@@ -757,9 +757,6 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
     OtExtSender sender;
     OtExtRecver receiver;
 
-    sender.mCopy = !cmd.isSet("noCopy");
-    receiver.mCopy = !cmd.isSet("noCopy");
-
     bool fakeBase = cmd.isSet("fakeBase");
 
     gTimer.setTimePoint("begin");
@@ -788,7 +785,7 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
             span<block> msgs(backing.get(), numOTs);
             gTimer.setTimePoint("recver.msg.alloc1");
 
-            receiver.configure(numOTs, s, sec, chls.size());
+            receiver.configure(numOTs, sec);
             gTimer.setTimePoint("recver.config");
 
             //sync(chls[0], role);
@@ -797,11 +794,11 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
                 auto nn = receiver.baseOtCount();
                 std::vector<std::array<block, 2>> baseSendMsgs(nn);
                 pp.get(baseSendMsgs.data(), baseSendMsgs.size());
-                receiver.setBaseOts(baseSendMsgs, prng, chls[0]);
+                receiver.setBaseOts(baseSendMsgs);
             }
             else
             {
-                receiver.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
+                receiver.genSilentBaseOts(prng, chls[0]);
             }
             sync(chls[0], role);
             auto b = timer.setTimePoint("start");
@@ -809,7 +806,7 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
             gTimer.setTimePoint("recver.genBase");
 
             // perform  numOTs random OTs, the results will be written to msgs.
-            receiver.silentReceive(choice, msgs, prng, chls);
+            receiver.silentReceive(choice, msgs, prng, chls[0]);
             receiver.setTimePoint("finish");
 
             auto e = timer.setTimePoint("finish");
@@ -823,7 +820,7 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
             std::unique_ptr<block[]> backing(new block[numOTs]);
             span<block> msgs(backing.get(), numOTs);
             gTimer.setTimePoint("sender.msg.alloc");
-            sender.configure(numOTs, s, sec, chls.size());
+            sender.configure(numOTs, sec);
             gTimer.setTimePoint("sender.config");
             block delta = prng.get();
 
@@ -842,7 +839,7 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
             }
             else
             {
-                sender.genBase(numOTs, chls[0], prng, s, sec, type, chls.size());
+                sender.genSilentBaseOts(prng, chls[0]);
             }
             sync(chls[0], role);
 
@@ -859,7 +856,7 @@ void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::st
             //
 
             // perform the OTs and write the random OTs to msgs.
-            sender.silentSend(delta, msgs, prng, chls);
+            sender.silentSend(delta, msgs, prng, chls[0]);
             sender.setTimePoint("finish");
 
             auto e = timer.setTimePoint("finish");

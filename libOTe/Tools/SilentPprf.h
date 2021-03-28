@@ -54,6 +54,11 @@ namespace osuCrypto
         block expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
         block expand(span<Channel> chls, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
 
+        block expand(Channel& chls, span<block> value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal)
+        {
+            MatrixView<block> o(output.data(), output.size(), 1);
+            return expand({ &chls, 1 }, value, prng, o, oFormat, mal);
+        }
         block expand(span<Channel> chls, span<block> value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
 
 
@@ -99,7 +104,12 @@ namespace osuCrypto
         void getPoints(span<u64> points, PprfOutputFormat format);
 		//void getInterleavedPoints(span<u64> points);
 
-		block expand(Channel& chl, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
+        block expand(Channel& chl, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal)
+        {
+            MatrixView<block> o(output.data(), output.size(), 1);
+            return expand(chl, prng, o, oFormat, mal);
+        }
+        block expand(Channel& chl, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
 		block expand(span<Channel> chl, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
 
         void clear()

@@ -71,6 +71,7 @@ namespace tests_libOTe
 
         tc.add("NoisyVole_test                             ", NoisyVole_test);
         tc.add("SilentVole_test                            ", SilentVole_test);
+        tc.add("SilentVole_small_test                      ", SilentVole_small_test);
 
         tc.add("DotExt_Kos_Test                            ", DotExt_Kos_Test);
         tc.add("DotExt_Iknp_Test                           ", DotExt_Iknp_Test);

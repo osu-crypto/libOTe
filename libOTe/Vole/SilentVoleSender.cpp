@@ -47,36 +47,9 @@ namespace osuCrypto
 
         std::vector<std::array<block, 2>> msg(silentBaseOtCount());
 
-        // If we have IKNP base OTs, use them
-        // to extend to get the silent base OTs.
-#if defined(ENABLE_IKNP) || defined(LIBOTE_HAS_BASE_OT)
-
-    #ifdef ENABLE_IKNP
         mIknpSender.send(msg, prng, chl);
-    #else
-        // otherwise just generate the silent 
-        // base OTs directly.
-        DefaultBaseOT base;
-        base.send(msg, prng, chl, mNumThreads);
-        setTimePoint("sender.gen.baseOT");
-#endif
-#else
-        throw std::runtime_error("IKNP or base OTs must be enabled");
-#endif
 
-        mGen.setBase(msg);
-
-
-        for (u64 i = 0; i < mNumPartitions; ++i)
-        {
-            u64 mSi;
-            do
-            {
-                auto si = prng.get<u64>() % mSizePer;
-                mSi = si * mNumPartitions + i;
-            } while (mSi >= mN2);
-        }
-
+        setSilentBaseOts(msg);
         setTimePoint("sender.gen.done");
     }
 
@@ -85,78 +58,58 @@ namespace osuCrypto
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
 
-        return mGen.baseOtCount();
+        if (mIknpRecver.hasBaseOts())
+            return mGen.baseOtCount();
+        else
+            return mGen.baseOtCount() + mIknpRecver.baseOtCount();
     }
 
-    void SilentVoleSender::setSlientBaseOts(
+    void SilentVoleSender::setSilentBaseOts(
         span<std::array<block, 2>> sendBaseOts)
     {
-        mGen.setBase(sendBaseOts);
-    }
+        if (sendBaseOts.size() != silentBaseOtCount())
+            throw RTE_LOC;
 
-    void SilentVoleSender::genBase(
-        u64 n, Channel& chl, PRNG& prng,
-        u64 scaler, u64 secParam,
-        SilentBaseType basetype, u64 threads)
-    {
-        switch (basetype)
+        if (mIknpRecver.hasBaseOts())
+            mGen.setBase(sendBaseOts);
+        else
         {
-        case SilentBaseType::BaseExtend:
-            // perform 128 normal base OTs
-            genBaseOts(prng, chl);
-        case SilentBaseType::Base:
-            configure(n, scaler, secParam, threads);
-            // do the silent specific OTs, either by extending
-            // the exising base OTs or using a base OT protocol.
-            genSilentBaseOts(prng, chl);
-            break;
-        default:
-            std::cout << "known switch " LOCATION << std::endl;
-            std::terminate();
-            break;
+            auto m0 = sendBaseOts.subspan(0, mGen.baseOtCount());
+            auto m1 = sendBaseOts.subspan(mGen.baseOtCount());
+            mGen.setBase(m0);
+            mIknpRecver.setBaseOts(m1);
         }
     }
 
     void SilentVoleSender::configure(
-        u64 numOTs, u64 scaler, u64 secParam, u64 numThreads)
+        u64 numOTs, u64 secParam)
     {
-        mScaler = scaler;
-        u64 extra = 0;
+        mRequestedNumOTs = numOTs;
 
-        //if (mMultType == MultType::ldpc)
-        {
-            assert(scaler == 2);
-            auto mm = numOTs;
-            u64 nn = mm * scaler;
-            auto kk = nn - mm;
+        mNumPartitions = getPartitions(mScaler, numOTs, secParam);
+        mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
+        auto nn = roundUpTo(mSizePer * mNumPartitions, mScaler);
+        auto mm = nn / mScaler;
 
-            auto code = mMultType == MultType::slv11 ?
-                LdpcDiagRegRepeaterEncoder::Weight11 :
-                LdpcDiagRegRepeaterEncoder::Weight5
-                ;
-            u64 colWeight = (u64)code;
+        mN = mm;
+        mN2 = nn;
 
+        auto code = mMultType == MultType::slv11 ?
+            LdpcDiagRegRepeaterEncoder::Weight11 :
+            LdpcDiagRegRepeaterEncoder::Weight5
+            ;
+        u64 colWeight = (u64)code;
 
-            setTimePoint("config.begin");
-            mEncoder.mL.init(mm, colWeight);
-            setTimePoint("config.Left");
-            mEncoder.mR.init(mm, code, true);
-            setTimePoint("config.Right");
-                
-            extra = mEncoder.mR.mGap;
-
-            mP = 0;
-            mN = kk;
-            mN2 = nn;
-            mNumPartitions = getPartitions(scaler, mN, secParam);
-
-        }
-
-        mNumThreads = numThreads;
-
-        mSizePer = roundUpTo((mN2 + mNumPartitions - 1) / mNumPartitions, 8);
+        setTimePoint("config.begin");
+        mEncoder.mL.init(mm, colWeight);
+        setTimePoint("config.Left");
+        mEncoder.mR.init(mm, code, true);
+        setTimePoint("config.Right");
+        auto extra = mEncoder.mR.mGap;
 
         mGen.configure(mSizePer, mNumPartitions, extra);
+
+        mState = State::Configured;
     }
 
     //sigma = 0   Receiver
@@ -188,34 +141,38 @@ namespace osuCrypto
     //    w = r * H
 
 
-    void SilentVoleSender::checkRT(span<Channel> chls, Matrix<block>& rT)
+    void SilentVoleSender::checkRT(Channel& chl) const
     {
-        chls[0].send(rT.data(), rT.size());
-        chls[0].send(mGen.mValue);
-
-        setTimePoint("sender.expand.checkRT");
-
+        chl.send(mB);
+        chl.send(mGen.mValue);
     }
 
     void SilentVoleSender::clear()
     {
-        mN = 0;
+        mBacking = {};
+        mBackingSize = 0;
         mGen.clear();
     }
 
-    //void SilentVoleSender::silentSend(
-    //    span<std::array<block, 2>> messages,
-    //    PRNG& prng,
-    //    Channel& chl)
-    //{
-    //    silentSend(messages, prng, { &chl,1 });
-    //}
-
     void SilentVoleSender::silentSend(
         block delta,
-        span<block> messages,
+        span<block> b,
         PRNG& prng,
-        span<Channel> chls)
+        Channel& chl)
+    {
+        silentSendInplace(delta, b.size(), prng, chl);
+
+        std::memcpy(b.data(), mB.data(), b.size() * sizeof(block));
+        clear();
+
+        setTimePoint("sender.expand.ldpc.msgCpy");
+    }
+
+    void SilentVoleSender::silentSendInplace(
+        block delta,
+        u64 n,
+        PRNG& prng,
+        Channel& chl)
     {
         gTimer.setTimePoint("sender.ot.enter");
 
@@ -223,79 +180,59 @@ namespace osuCrypto
         if (isConfigured() == false)
         {
             // first generate 128 normal base OTs
-            configure(messages.size(), 2, 128, chls.size());
+            configure(n, 128);
         }
 
-        if (static_cast<u64>(messages.size()) > mN)
-            throw std::invalid_argument("messages.size() > n");
+        if (mRequestedNumOTs != n)
+            throw std::invalid_argument("n does not match the requested number of OTs via configure(...). " LOCATION);
 
         if (mGen.hasBaseOts() == false)
         {
-            genSilentBaseOts(prng, chls[0]);
+            genSilentBaseOts(prng, chl);
         }
 
         setTimePoint("sender.iknp.start");
         gTimer.setTimePoint("sender.iknp.base2");
 
-        std::vector<block> beta(mGen.mPntCount);
 
         if (mIknpRecver.hasBaseOts() == false)
         {
-            mIknpRecver.genBaseOts(mIknpSender, prng, chls[0]);
+            mIknpRecver.genBaseOts(mIknpSender, prng, chl);
             setTimePoint("sender.iknp.gen");
         }
 
         NoisyVoleSender nv;
-        nv.send(delta, beta, prng, mIknpRecver, chls[0]);
+        std::vector<block> beta(mGen.mPntCount);
+        nv.send(delta, beta, prng, mIknpRecver, chl);
         gTimer.setTimePoint("sender.expand.start");
 
+
+        if (mBackingSize < mN2)
         {
-            auto size = mGen.mDomain * mGen.mPntCount;
-            assert(size >= mN2);
-            rT.resize(size, 1, AllocType::Uninitialized);
+            mBackingSize = mN2;
+            mBacking.reset(new block[mBackingSize]);
+        }
+        mB = span<block>(mBacking.get(), mN2);
 
-            mGen.expand(chls, beta, prng, rT, PprfOutputFormat::Interleaved, false);
-            setTimePoint("sender.expand.pprf_transpose");
-            gTimer.setTimePoint("sender.expand.pprf_transpose");
+        mGen.expand(chl, beta, prng, mB, PprfOutputFormat::Interleaved, false);
+        setTimePoint("sender.expand.pprf_transpose");
+        gTimer.setTimePoint("sender.expand.pprf_transpose");
 
-            if (mDebug)
-            {
-                checkRT(chls, rT);
-            }
-
-            ldpcMult(delta, rT, messages, chls.size());
+        if (mDebug)
+        {
+            checkRT(chl);
+            setTimePoint("sender.expand.checkRT");
         }
 
-        clear();
-    }
+        if (mTimer)
+            mEncoder.setTimer(getTimer());
 
-
-    void SilentVoleSender::ldpcMult(
-        block delta,
-        Matrix<block>& rT, span<block>& messages, u64 threads)
-    {
-        assert(rT.rows() >= mN2);
-        assert(rT.cols() == 1);
-
-        rT.resize(mN2, 1);
-
-
-        block mask = OneBlock ^ AllOneBlock;
-
-        mEncoder.setTimer(getTimer());
-        mEncoder.cirTransEncode(span<block>(rT));
+        mEncoder.cirTransEncode(mB);
         setTimePoint("sender.expand.ldpc.cirTransEncode");
 
-        if (mCopy)
-        {
-            std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-
-            setTimePoint("sender.expand.ldpc.msgCpy");
-        }
-        //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-
-
+        mState = State::Default;
     }
+
 
 }
 

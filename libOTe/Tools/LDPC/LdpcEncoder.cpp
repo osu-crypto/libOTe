@@ -1116,7 +1116,7 @@ namespace osuCrypto
         std::set<u64> s;
         for (u64 i = 0; i < mWeight; ++i)
         {
-            mYs[i] = nextPrime(rows * rs[i]) % rows;
+            mYs[i] = u64(rows * rs[i]) % rows;
             if (s.insert(mYs[i]).second == false)
             {
                 throw std::runtime_error("these ratios resulted in a collitions. " LOCATION);

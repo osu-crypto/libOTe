@@ -20,18 +20,39 @@ namespace osuCrypto
     class SilentVoleSender : public TimerAdapter
     {
     public:
+        static constexpr u64 mScaler = 2;
+
+        enum class State
+        {
+            Default,
+            Configured,
+            HasBase
+        };
+
+
+        State mState = State::Default;
 
         SilentMultiPprfSender mGen;
-        u64 mP, mN2, mN = 0, mNumPartitions, mScaler, mSizePer, mNumThreads;
-        bool mCopy = true;
+
+        u64 mRequestedNumOTs = 0;
+        u64 mN2 = 0;
+        u64 mN = 0;
+        u64 mNumPartitions;
+        u64 mSizePer;
+        u64 mNumThreads;
+
 #ifdef ENABLE_IKNP
         IknpOtExtSender mIknpSender;
         IknpOtExtReceiver mIknpRecver;
 #endif
         MultType mMultType = MultType::slv5;
         S1DiagRegRepEncoder mEncoder;
-        //LdpcEncoder mLdpcEncoder;
-        Matrix<block> rT;
+
+
+        span<block> mB;
+
+        u64 mBackingSize = 0;
+        std::unique_ptr<block> mBacking;
 
         /////////////////////////////////////////////////////
         // The standard OT extension interface
@@ -56,7 +77,7 @@ namespace osuCrypto
 #endif
         }
 
-        // Returns an indpendent copy of this extender.
+        // Returns an independent copy of this extender.
         std::unique_ptr<OtExtSender> split()
         {
             throw std::runtime_error("not impl");
@@ -66,12 +87,7 @@ namespace osuCrypto
         // IKNP base OTs that are required.
         void genBaseOts(PRNG& prng, Channel& chl)
         {
-#ifdef ENABLE_IKNP
             mIknpSender.genBaseOts(prng, chl);
-            mIknpRecver.genBaseOts(mIknpSender, prng, chl);
-#else
-            throw std::runtime_error("IKNP must be enabled");
-#endif
         }
 
 
@@ -89,14 +105,12 @@ namespace osuCrypto
         // the parameters and figures out how many base OT
         // will be needed. These can then be ganerated for
         // a different OT extension or using a base OT protocol.
-		void configure(
+        void configure(
             u64 n,
-            u64 scaler = 2,
-            u64 secParam = 128,
-            u64 numThreads = 1);
+            u64 secParam = 128);
 
         // return true if this instance has been configured.
-        bool isConfigured() const { return mN > 0; }
+        bool isConfigured() const { return mState != State::Default; }
 
         // Returns how many base OTs the silent OT extension
         // protocol will needs.
@@ -104,43 +118,32 @@ namespace osuCrypto
 
         // Set the externally generated base OTs. This choice
         // bits must be the one return by sampleBaseChoiceBits(...).
-        void setSlientBaseOts(span<std::array<block,2>> sendBaseOts);
-
-        // This is an "all-in-one" function that generates the base
-        // OTs in various ways.
-        void genBase(
-            u64 n, Channel& chl, PRNG& prng,
-            u64 scaler = 2, u64 secParam = 128,
-            SilentBaseType base = SilentBaseType::BaseExtend,
-            u64 threads = 1);
+        void setSilentBaseOts(span<std::array<block, 2>> sendBaseOts);
 
         // The native OT extension interface of silent
         // OT. The receiver does not get to specify 
         // which OT message they receiver. Instead
         // the protocol picks them at random. Use the 
         // send(...) interface for the normal behavior.
-        //void silentSend(
-        //    span<std::array<block, 2>> messages,
-        //    PRNG& prng,
-        //    Channel& chl);
-
-        // A parallel exection version of the other
-        // silentSend(...) function. 
-		void silentSend(
+        void silentSend(
             block delta,
-            span<block> messages,
-			PRNG& prng,
-			span<Channel> chls);
+            span<block> b,
+            PRNG& prng,
+            Channel& chls);
 
-
-        // interal functions
-
-        void ldpcMult(
+        // The native OT extension interface of silent
+        // OT. The receiver does not get to specify 
+        // which OT message they receiver. Instead
+        // the protocol picks them at random. Use the 
+        // send(...) interface for the normal behavior.
+        void silentSendInplace(
             block delta,
-            Matrix<block>& rT, span<block>& messages, u64 threads);
+            u64 n,
+            PRNG& prng,
+            Channel& chls);
 
         bool mDebug = false;
-        void checkRT(span<Channel> chls, Matrix<block>& rT);
+        void checkRT(Channel& chl) const;
 
         void clear();
     };

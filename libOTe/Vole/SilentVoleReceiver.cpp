@@ -26,10 +26,34 @@ namespace osuCrypto
         if (static_cast<u64>(recvBaseOts.size()) != silentBaseOtCount())
             throw std::runtime_error("wrong number of silent base OTs");
 
+        auto ss = mGen.baseOtCount();
+        if (mIknpSender.hasBaseOts() == false)
+        {
+            span<block> mm = recvBaseOts.subspan(ss);
+            mIknpSender.setBaseOts(mm, mIknpSendBaseChoice);
+        }
 
-
-        mGen.setBase(recvBaseOts);
+        mGen.setBase(recvBaseOts.subspan(0,ss));
         mGen.getPoints(mS, getPprfFormat());
+
+        mState = State::HasBase;
+    }
+
+    BitVector SilentVoleReceiver::sampleBaseChoiceBits(PRNG& prng) {
+
+        if (isConfigured() == false)
+            throw std::runtime_error("configure(...) must be called first");
+
+        auto choice = mGen.sampleChoiceBits(mN2, getPprfFormat(), prng);
+
+        if (mIknpSender.hasBaseOts() == false)
+        {
+            mIknpSendBaseChoice.resize(mIknpSender.baseOtCount());
+            mIknpSendBaseChoice.randomize(prng);
+            choice.append(mIknpSendBaseChoice);
+        }
+
+        return choice;
     }
 
     void SilentVoleReceiver::genBaseOts(
@@ -39,11 +63,10 @@ namespace osuCrypto
         setTimePoint("recver.gen.start");
 #ifdef ENABLE_IKNP
         mIknpRecver.genBaseOts(prng, chl);
-        mIknpSender.genBaseOts(mIknpRecver, prng, chl);
+        //mIknpSender.genBaseOts(mIknpRecver, prng, chl);
 #else
         throw std::runtime_error("IKNP must be enabled");
 #endif
-
     }
 
 
@@ -57,121 +80,57 @@ namespace osuCrypto
         BitVector choice = sampleBaseChoiceBits(prng);
         std::vector<block> msg(choice.size());
 
-        // If we have IKNP base OTs, use them
-        // to extend to get the silent base OTs.
-
-#if defined(ENABLE_IKNP) || defined(LIBOTE_HAS_BASE_OT)
-
-#ifdef ENABLE_IKNP
         mIknpRecver.receive(choice, msg, prng, chl);
-#else
-    // otherwise just generate the silent 
-    // base OTs directly.
-        DefaultBaseOT base;
-        base.receive(choice, msg, prng, chl, mNumThreads);
-        setTimePoint("recver.gen.baseOT");
-#endif
-#else
-        throw std::runtime_error("IKNP or base OTs must be enabled");
-#endif
-        mGen.setBase(msg);
-        mGen.getPoints(mS, getPprfFormat());
 
-        for (u64 i = 0; i < mS.size(); ++i)
-        {
-            if (mS[i] >= mN2)
-            {
-                for (u64 j = i; j < mS.size(); ++j)
-                {
-                    std::cout << Color::Red << "bad " << j << " " << mS[j] << " / " << mN2 << std::endl << Color::Default;
-                    std::terminate();
-                }
-            }
-        }
+        setSlientBaseOts(msg);
 
         setTimePoint("recver.gen.done");
     };
-
-    void SilentVoleReceiver::genBase(
-        u64 n,
-        Channel& chl,
-        PRNG& prng,
-        u64 scaler,
-        u64 secParam,
-        SilentBaseType basetype,
-        u64 threads)
-    {
-        switch (basetype)
-        {
-        case SilentBaseType::BaseExtend:
-            // perform 128 normal base OTs
-            genBaseOts(prng, chl);
-        case SilentBaseType::Base:
-            configure(n, scaler, secParam, threads);
-            // do the silent specific OTs, either by extending
-            // the exising base OTs or using a base OT protocol.
-            genSilentBaseOts(prng, chl);
-            break;
-        default:
-            std::cout << "known switch " LOCATION << std::endl;
-            std::terminate();
-            break;
-        }
-    }
 
     u64 SilentVoleReceiver::silentBaseOtCount() const
     {
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
-        return mGen.baseOtCount();
+        if(mIknpSender.hasBaseOts())
+            return mGen.baseOtCount();
+        else
+            return mGen.baseOtCount() + mIknpSender.baseOtCount();
+
     }
 
     void SilentVoleReceiver::configure(
         u64 numOTs,
-        u64 scaler,
-        u64 secParam,
-        u64 numThreads)
+        u64 secParam)
     {
-        mNumThreads = numThreads;
-        mScaler = scaler;
-        u64 numPartitions;
-        u64 extra = 0;
+        mState = State::Configured;
+        mRequestedNumOTs = numOTs;
 
-        {
-            assert(scaler == 2);
-            auto mm = numOTs;
-            u64 nn = mm * scaler;
-            auto kk = nn - mm;
+        auto numPartitions = getPartitions(mScaler, numOTs, secParam);
+        mSizePer = roundUpTo((numOTs * mScaler + numPartitions - 1) / numPartitions, 8);
+        auto nn = mSizePer * numPartitions;
+        auto mm = nn / mScaler;
 
+        mN = mm;
+        mN2 = nn;
+        lout << mN << " " << mN2 << " " << numPartitions << " " << mSizePer << std::endl;
 
-            auto code = mMultType == MultType::slv11 ?
-                LdpcDiagRegRepeaterEncoder::Weight11 :
-                LdpcDiagRegRepeaterEncoder::Weight5
-                ;
-            u64 colWeight = (u64)code;
+        auto code = mMultType == MultType::slv11 ?
+            LdpcDiagRegRepeaterEncoder::Weight11 :
+            LdpcDiagRegRepeaterEncoder::Weight5;
 
+        u64 colWeight = (u64)code;
 
-            setTimePoint("config.begin");
-            mEncoder.mL.init(mm, colWeight);
-            setTimePoint("config.Left");
-            mEncoder.mR.init(mm, code, true);
-            setTimePoint("config.Right");
-
-            extra = mEncoder.mR.mGap;
-
-            mP = 0;
-            mN = kk;
-            mN2 = nn;
-            numPartitions = getPartitions(scaler, mN, secParam);
-        }
-
+        setTimePoint("config.begin");
+        mEncoder.mL.init(mm, colWeight);
+        setTimePoint("config.Left");
+        mEncoder.mR.init(mm, code, true);
+        setTimePoint("config.Right");
 
         mS.resize(numPartitions);
-        mSizePer = roundUpTo((mN2 + numPartitions - 1) / numPartitions, 8);
 
+        auto extra = mEncoder.mR.mGap;
         mGen.configure(mSizePer, mS.size(), extra);
     }
-
 
     //sigma = 0   Receiver
     //
@@ -200,41 +159,44 @@ namespace osuCrypto
     //    r = DPF(k1)
     //
     //    w = r * H
-
-
-    void SilentVoleReceiver::checkRT(span<Channel> chls, Matrix<block>& rT1)
+    void SilentVoleReceiver::checkRT(Channel& chl) const
     {
 
-        Matrix<block> rT2(rT1.rows(), rT1.cols(), AllocType::Uninitialized);
-        chls[0].recv(rT2.data(), rT2.size());
-        block delta;
-        chls[0].recv(delta);
+        //Matrix<block> rT2(rT1.rows(), rT1.cols(), AllocType::Uninitialized);
+        std::vector<block> mB(mA.size());
+        chl.recv(mB.data(), mB.size());
 
-        for (u64 i = 0; i < rT1.size(); ++i)
-            rT2(i) = rT2(i) ^ rT1(i);
-
-
-        Matrix<block> R;
-
-        {
-            if (rT1.cols() != 1)
-                throw RTE_LOC;
-            R = rT2;
-        }
+        std::vector<block> beta(mS.size());
+        chl.recv(beta);
 
 
-        Matrix<block> exp(R.rows(), R.cols(), AllocType::Zeroed);
+        auto cDelta = mB;
+        for (u64 i = 0; i < cDelta.size(); ++i)
+            cDelta[i] = cDelta[i] ^ mA[i];
+
+        //Matrix<block> R;
+
+        //{
+        //    if (rT1.cols() != 1)
+        //        throw RTE_LOC;
+        //    R = rT2;
+        //}
+
+
+        std::vector<block> exp(mN2);
         for (u64 i = 0; i < mS.size(); ++i)
         {
-            exp(mS[i]) = delta;
+            exp[mS[i]] = beta[i];
         }
 
         bool failed = false;
-        for (u64 i = 0; i < R.rows(); ++i)
+        for (u64 i = 0; i < mN2; ++i)
         {
-            if (neq(R(i), exp(i)))
+            if (neq(cDelta[i], exp[i]))
             {
-                std::cout << i << " / " << R.rows() << " R= " << R(i) << " exp= " << exp(i) << std::endl;
+                std::cout << i << " / " << mN2 << 
+                    " cd = " << cDelta[i] << 
+                    " exp= " << exp[i] << std::endl;
                 failed = true;
             }
         }
@@ -243,141 +205,133 @@ namespace osuCrypto
             throw RTE_LOC;
 
         std::cout << "debug check ok" << std::endl;
-        //for (u64 x = 0; x < rT.rows(); ++x)
-        //{
-        //    for (u64 y = 0; y < rT.cols(); ++y)
-        //    {
-        //        std::cout << rT(x, y) << " " << rT2(x, y) << " " << (rT(x,y) ^ rT2(x,y))<< std::endl;
-        //    }
-        //    std::cout << std::endl;
-        //}
-        setTimePoint("recver.expand.checkRT");
 
     }
 
     void SilentVoleReceiver::silentReceive(
-        span<block> choices,
-        span<block> messages,
+        span<block> c,
+        span<block> b,
         PRNG& prng,
         Channel& chl)
     {
-        silentReceive(choices, messages, prng, { &chl,1 });
+        if (c.size() != b.size())
+            throw RTE_LOC;
+
+        silentReceiveInplace(c.size(), prng, chl);
+
+        std::memcpy(c.data(), mC.data(), c.size() * sizeof(block));
+        std::memcpy(b.data(), mA.data(), b.size() * sizeof(block));
+        clear();
     }
 
-    void SilentVoleReceiver::silentReceive(
-        span<block> choices,
-        span<block> messages,
+    void SilentVoleReceiver::silentReceiveInplace(
+        u64 n,
         PRNG& prng,
-        span<Channel> chls)
+        Channel& chl)
     {
-
         gTimer.setTimePoint("recver.ot.enter");
 
         if (isConfigured() == false)
         {
             // first generate 128 normal base OTs
-            configure(messages.size(), 2, 128, chls.size());
+            configure(n);
         }
 
-        if (static_cast<u64>(messages.size()) > mN)
-            throw std::invalid_argument("messages.size() > n");
+        if (mRequestedNumOTs != n)
+            throw std::invalid_argument("n does not match the requested number of OTs via configure(...). " LOCATION);
 
-        if (mGen.hasBaseOts() == false)
+        if (hasSilentBaseOts() == false)
         {
             // make sure we have IKNP base OTs.
-            genSilentBaseOts(prng, chls[0]);
+            genSilentBaseOts(prng, chl);
         }
+
+        if (mIknpSender.hasBaseOts() == false)
+            throw RTE_LOC;
 
         setTimePoint("recver.iknp.base2");
         gTimer.setTimePoint("recver.iknp.base2");
 
-        // column major matrix. mN2 columns and 1 row of 128 bits (128 bit rows)
+        // allocate mA
+        if (mBackingSize < mN2)
+        {
+            mBackingSize = mN2;
+            mBacking.reset(new block[mBackingSize]);
+        }
+        mA = span<block>(mBacking.get(), mN2);
 
-        // do the compression to get the final OTs.
-
-        auto size = mGen.mDomain * mGen.mPntCount;
-        assert(size >= mN2);
-        rT.resize(size, 1, AllocType::Uninitialized);
-
-
-
+        // sample the values of the noisy coordinate of c
+        // and perform a noicy vole to get x+y = mD * c
         std::vector<block> y(mGen.mPntCount), c(mGen.mPntCount);
         prng.get<block>(y);
-
-        if (mIknpSender.hasBaseOts() == false)
-            mIknpSender.genBaseOts(mIknpRecver, prng, chls[0]);
-
         NoisyVoleReceiver nv;
-        nv.receive(y, c, prng, mIknpSender, chls[0]);
-
+        nv.receive(y, c, prng, mIknpSender, chl);
 
         setTimePoint("recver.expand.start");
         gTimer.setTimePoint("recver.expand.start");
 
-        mSum = mGen.expand(chls, prng, rT, PprfOutputFormat::Interleaved, false);
+        // expand the seeds into mA
+        mGen.expand(chl, prng, mA, PprfOutputFormat::Interleaved, false);
 
+        if (mDebug)
+        {
+            checkRT(chl);
+            setTimePoint("recver.expand.checkRT");
+        }
+
+
+        // correct A by adding in the c values of the noisy coordinates.
         std::vector<u64> points(mGen.mPntCount);
         mGen.getPoints(points, PprfOutputFormat::Interleaved);
         for (u64 i = 0; i < points.size(); ++i)
         {
             auto pnt = points[i];
-            rT(pnt) = rT(pnt) ^ c[i];
+            mA(pnt) = mA(pnt) ^ c[i];
         }
 
         setTimePoint("recver.expand.pprf_transpose");
         gTimer.setTimePoint("recver.expand.pprf_transpose");
 
-        if (mDebug)
+
+        // allocate the space for mC
+        if (mC.capacity() >= mN2)
         {
-            checkRT(chls, rT);
+            mC.resize(mN2);
+            memset(mC.data(), 0, mC.size() * sizeof(block));
+        }
+        else
+        {
+            mC = std::vector<block>(mN2);
         }
 
-        ldpcMult(rT, messages, y, choices);
-
-        clear();
-    }
-
-    void SilentVoleReceiver::ldpcMult(
-        Matrix<block>& rT, span<block>& messages,
-        span<block> y,
-        span<block>& choices)
-    {
-
-        assert(rT.rows() >= mN2);
-        assert(rT.cols() == 1);
-
-        rT.resize(mN2, 1);
-
-        rT2.resize(0, 0);
-        rT2.resize(rT.size(), 1, AllocType::Zeroed);
         setTimePoint("recver.expand.zero");
 
-        std::vector<u64> points(mGen.mPntCount);
-        mGen.getPoints(points, PprfOutputFormat::Interleaved);
+        // populate the noicy coordinates of mC
         for (u64 i = 0; i < points.size(); ++i)
         {
             auto pnt = points[i];
-            rT2(pnt) = rT2(pnt) ^ y[i];
+            mC[pnt] = mC[pnt] ^ y[i];
         }
 
-        mEncoder.setTimer(getTimer());
-        mEncoder.cirTransEncode2(span<block>(rT), span<block>(rT2));
+        if (mTimer)
+            mEncoder.setTimer(getTimer());
+
+        // compress both mA and mC in place.
+        mEncoder.cirTransEncode2<block, block>(mA, mC);
         setTimePoint("recver.expand.cirTransEncode.a");
 
-        if (mCopy)
-        {
-            std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-            setTimePoint("recver.expand.msgCpy");
-            std::memcpy(choices.data(), rT2.data(), choices.size() * sizeof(block));
-            setTimePoint("recver.expand.chcCpy");
-        }
-
+        // make the protocol as done and that
+        // mA,mC are ready to be consumed.
+        mState = State::Default;
     }
-
 
     void SilentVoleReceiver::clear()
     {
-        mN = 0;
+        mS = {};
+        mA = {};
+        mC = {};
+        mBacking = {};
+        mBackingSize = 0;
         mGen.clear();
     }
 

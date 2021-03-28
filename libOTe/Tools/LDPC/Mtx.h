@@ -19,13 +19,23 @@ namespace osuCrypto
     {
         u64 mRow, mCol;
     };
+    class SparseMtx;
 
     struct PointList
     {
+        PointList(const PointList&) = default;
+        PointList(PointList&&) = default;
+
         PointList(u64 r, u64 c)
             : mRows(r), mCols(c)
         {}
 
+        PointList(u64 r, u64 c, span<const Point> pp)
+            : mRows(r), mCols(c)
+        {
+            for (auto p : pp)
+                push_back(p);
+        }
         using iterator = std::vector<Point>::iterator;
 
         u64 mRows, mCols;
@@ -50,7 +60,7 @@ namespace osuCrypto
 #ifndef NDEBUG
             if (ss.insert({ p.mRow , p.mCol }).second == false)
             {
-                std::cout << "duplicate (" << p.mRow << ", " << p.mCol << ") "<< std::endl;
+                std::cout << "duplicate (" << p.mRow << ", " << p.mCol << ") " << std::endl;
                 throw RTE_LOC;
             }
 #endif
@@ -75,6 +85,83 @@ namespace osuCrypto
 
     };
     class DenseMtx;
+
+    template<typename T>
+    class Vec
+    {
+    public:
+        std::vector<T> mData;
+
+        Vec() = default;
+        Vec(const Vec&) = default;
+        Vec(Vec&&) = default;
+        Vec& operator=(const Vec&) = default;
+        Vec& operator=(Vec&&) = default;
+
+
+        Vec(u64 size)
+            :
+            mData(size) {}
+
+        void resize(u64 size)
+        {
+            mData.resize(size);
+        }
+
+        u64 size() const
+        {
+            return mData.size();
+        }
+
+        Vec subVec(u64 offset, u64 size)
+        {
+            Vec v;
+            v.mData.insert(v.mData.end(), mData.begin() + offset, mData.begin() + offset + size);
+            return v;
+        }
+
+
+        Vec operator+(const Vec& o) const
+        {
+            if (size() != o.size())
+                throw RTE_LOC;
+
+            Vec v = o;
+            for (u64 i = 0; i < size(); ++i)
+                v.mData[i] = v.mData[i] ^ mData[i];
+
+            return v;
+        }
+
+        T& operator[](u64 i)
+        {
+            return mData[i];
+        }
+        const T& operator[](u64 i)const
+        {
+            return mData[i];
+        }
+
+        bool operator==(const Vec<T>& o) const
+        {
+            return mData == o.mData;
+        }
+        bool operator!=(const Vec<T>& o) const
+        {
+            return mData != o.mData;
+        }
+    };
+
+    template<typename T> 
+    std::ostream& operator<<(std::ostream& o, const Vec<T>& v)
+    {
+        for (u64 i = 0; i < v.size(); ++i)
+        {
+            o << (v[i].as<u64>()[0] &1) << " ";
+        }
+
+        return o;
+    }
 
     class SparseMtx
     {
@@ -130,6 +217,11 @@ namespace osuCrypto
         SparseMtx& operator=(SparseMtx&&) = default;
 
 
+        SparseMtx(PointList& list)
+        {
+            init(list);
+        }
+
         SparseMtx(u64 rows, u64 cols, span<Point> points)
         {
             init(rows, cols, points);
@@ -141,6 +233,12 @@ namespace osuCrypto
         std::vector<Col> mCols;
 
 
+
+        operator PointList() const
+        {
+            return PointList(mRows.size(), mCols.size(), points());
+        }
+
         u64 rows() const { return mRows.size(); }
         u64 cols() const { return mCols.size(); }
 
@@ -149,6 +247,14 @@ namespace osuCrypto
 
         ConstRow row(u64 i) const { return mRows[i]; }
         ConstCol col(u64 i) const { return mCols[i]; }
+
+        bool operator()(u64 i, u64 j) const
+        {
+            if (i >= mRows.size() || j >= mCols.size())
+                throw RTE_LOC;
+            auto iter = std::find(mRows[i].begin(), mRows[i].end(), j);
+            return iter != mRows[i].end();
+        }
 
         block hash() const
         {
@@ -169,6 +275,12 @@ namespace osuCrypto
             ro.Final<block>(b);
             return b;
         }
+
+        void init(PointList& list)
+        {
+            init(list.mRows, list.mCols, list.mPoints);
+        }
+
 
         void init(u64 rows, u64 cols, span<Point> points)
         {
@@ -198,7 +310,7 @@ namespace osuCrypto
                 }
                 if (points[i].mCol >= cols)
                 {
-                    std::cout << "col out of bounts " << points[i].mCol << " " << cols << std::endl;
+                    std::cout << "col out of bounds " << points[i].mCol << " " << cols << std::endl;
                     abort();
                 }
 #endif
@@ -256,6 +368,21 @@ namespace osuCrypto
             }
         }
 
+        template<typename IdxType>
+        SparseMtx getCols(span<const IdxType> idx) const
+        {
+            PointList pnts(mRows.size(), idx.size());
+            for (u64 i = 0; i < idx.size(); ++i)
+            {
+                for (auto r : mCols[idx[i]])
+                {
+                    pnts.push_back({ r,i });
+                }
+            }
+            return pnts;
+        }
+
+
         bool isSet(u64 row, u64 col)
         {
             assert(row < rows());
@@ -298,6 +425,22 @@ namespace osuCrypto
             return true;
         }
 
+
+        SparseMtx vConcat(const SparseMtx& o) const
+        {
+            if (cols() != o.cols())
+                throw RTE_LOC;
+
+            PointList pPnts = *this;
+            pPnts.mRows += o.rows();
+            for (auto p : o.points())
+            {
+                pPnts.push_back({ p.mRow + rows(), p.mCol });
+            }
+
+            return pPnts;
+        }
+        
         SparseMtx subMatrix(u64 row, u64 col, u64 rowCount, u64 colCount)
         {
             if (rowCount == 0 || colCount == 0)
@@ -409,6 +552,14 @@ namespace osuCrypto
             std::vector<u8> y(rows());
             multAdd(x, y);
             return y;
+        }        
+        
+        template<typename T>
+        Vec<T> mult(const Vec<T>& x) const
+        {
+            Vec<T> y(rows());
+            multAdd(x, y);
+            return y;
         }
 
 
@@ -429,7 +580,30 @@ namespace osuCrypto
             }
         }
 
+
+        template<typename T>
+        void multAdd(const Vec<T>& x, Vec<T>& y) const
+        {
+            assert(cols() == x.size());
+            assert(y.size() == rows());
+            for (u64 i = 0; i < rows(); ++i)
+            {
+                for (auto c : row(i))
+                {
+                    assert(c < cols());
+                    y[i] = y[i] ^ x[c];
+                }
+            }
+        }
+
+
         std::vector<u8> operator*(span<const u8> x) const
+        {
+            return mult(x);
+        }
+
+        template<typename T> 
+        Vec<T> operator*(const Vec<T>& x) const
         {
             return mult(x);
         }
@@ -578,6 +752,10 @@ namespace osuCrypto
                 mDataCol.size() == X.mDataCol.size() &&
                 mDataCol == X.mDataCol;
         }
+        bool operator!=(const SparseMtx& X) const
+        {
+            return !(*this == X);
+        }
 
 
         SparseMtx add(const SparseMtx& p) const
@@ -610,7 +788,7 @@ namespace osuCrypto
                 {
                     if (*b0 < *b1)
                         r.mDataCol.push_back(*b0++);
-                    else if (*b0 > * b1)
+                    else if (*b0 > *b1)
                         r.mDataCol.push_back(*b1++);
                     else
                     {
@@ -648,7 +826,7 @@ namespace osuCrypto
                 {
                     if (*b0 < *b1)
                         r.mDataRow.push_back(*b0++);
-                    else if (*b0 > * b1)
+                    else if (*b0 > *b1)
                         r.mDataRow.push_back(*b1++);
                     else
                     {
@@ -828,7 +1006,7 @@ namespace osuCrypto
         DenseMtx selectColumns(span<u64> perm)
         {
             DenseMtx r(rows(), perm.size());
-    
+
             for (u64 i = 0; i < perm.size(); ++i)
             {
                 auto d = r.col(i);
@@ -936,7 +1114,7 @@ namespace osuCrypto
 
         DenseMtx upperTriangular() const
         {
-            auto & mtx = *this;
+            auto& mtx = *this;
             auto rows = mtx.rows();
             auto cols = mtx.cols();
 
@@ -1331,7 +1509,7 @@ namespace osuCrypto
         }
         iterator find(u64 i)
         {
-            auto iter = std::find(mData.begin(), mData.end(),i);
+            auto iter = std::find(mData.begin(), mData.end(), i);
             return iter;
         }
         //iterator lowerBound(u64 i)
@@ -1788,7 +1966,7 @@ namespace osuCrypto
             std::vector<Point> points;
             for (u64 i = 0; i < rows(); ++i)
             {
-                for(auto j : row(i))
+                for (auto j : row(i))
                     points.push_back({ i,j });
             }
 

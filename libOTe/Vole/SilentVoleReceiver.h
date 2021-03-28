@@ -21,32 +21,72 @@ namespace osuCrypto
     class SilentVoleReceiver : public TimerAdapter
     {
     public:
+        static constexpr u64 mScaler = 2;
 
-        u64 mP, mN = 0, mN2, mScaler, mSizePer;
+        enum class State
+        {
+            Default,
+            Configured,
+            HasBase
+        };
+
+        // The current state of the protocol
+        State mState = State::Default;
+
+        // The number of OTs the user requested.
+        u64 mRequestedNumOTs = 0;
+
+        // The number of OTs actually produced (at least the number requested).
+        u64 mN = 0;
+        
+        // The length of the noisy vectors (2 * mN for the silver codes).
+        u64 mN2;
+        
+        // We perform regular LPN, so this is the
+        // size of the each chunk. 
+        u64 mSizePer;
+
+        // The noisy coordinates.
         std::vector<u64> mS;
-        block mDelta, mSum;
+
+        // What type of Base OTs should be performed.
         SilentBaseType mBaseType;
-        bool mDebug = false, mCopy = true;
-        u64 mNumThreads;
+
+        // The matrix multiplication type which compresses 
+        // the sparse vector.
         MultType mMultType = MultType::slv5;
+
+        // The silver encoder.
+        S1DiagRegRepEncoder mEncoder;
+
+        // The multi-point punctured PRF for generating
+        // the sparse vectors.
+        SilentMultiPprfReceiver mGen;
+
+        // The internal buffers for holding the expanded vectors.
+        // mA + mB = mC * mD
+        span<block> mA;
+
+        std::vector<block> mC;
+
+        u64 mBackingSize = 0;
+        std::unique_ptr<block> mBacking;
+
+        bool mDebug = false;
+
+        BitVector mIknpSendBaseChoice;
 
 #ifdef ENABLE_IKNP
         IknpOtExtReceiver mIknpRecver;
         IknpOtExtSender mIknpSender;
 #endif
-        SilentMultiPprfReceiver mGen;
-
-        Matrix<block> rT, rT2;
-
-        S1DiagRegRepEncoder mEncoder;
 
         // sets the Iknp base OTs that are then used to extend
         void setBaseOts(
-            span<std::array<block, 2>> baseSendOts,
-            PRNG& prng,
-            Channel& chl) {
+            span<std::array<block, 2>> baseSendOts) 
+        {
 #ifdef ENABLE_IKNP
-            mIknpRecver.setBaseOts(baseSendOts, prng, chl);
+            mIknpRecver.setBaseOts(baseSendOts);
 #else
             throw std::runtime_error("IKNP must be enabled");
 #endif
@@ -70,9 +110,10 @@ namespace osuCrypto
 #endif
         };
 
-        // Returns an indpendent copy of this extender.
-        virtual std::unique_ptr<OtExtReceiver> split() { 
-            throw std::runtime_error("not implemented"); };
+        // returns true if the silent base OTs are set.
+        bool hasSilentBaseOts() const {
+            return mGen.hasBaseOts();
+        };
 
         // Generate the IKNP base OTs
         void genBaseOts(PRNG& prng, Channel& chl) ;
@@ -89,12 +130,10 @@ namespace osuCrypto
         // a different OT extension or using a base OT protocol.
         void configure(
             u64 n, 
-            u64 scaler = 2, 
-            u64 secParam = 128,
-            u64 numThreads = 1);
+            u64 secParam = 128);
 
         // return true if this instance has been configured.
-        bool isConfigured() const { return mN > 0; }
+        bool isConfigured() const { return mState != State::Default; }
 
         // Returns how many base OTs the silent OT extension
         // protocol will needs.
@@ -104,69 +143,42 @@ namespace osuCrypto
         // This returns the choice bits that should be used.
         // Call this is you want to use a specific base OT protocol
         // and then pass the OT messages back using setSlientBaseOts(...).
-        BitVector sampleBaseChoiceBits(PRNG& prng) {
-            if (isConfigured() == false)
-                throw std::runtime_error("configure(...) must be called first");
-
-            return mGen.sampleChoiceBits(mN2, getPprfFormat(), prng);
-        }
+        BitVector sampleBaseChoiceBits(PRNG& prng);
 
         // Set the externally generated base OTs. This choice
         // bits must be the one return by sampleBaseChoiceBits(...).
         void setSlientBaseOts(span<block> recvBaseOts);
 
-        // An "all-in-one" function that generates the silent 
-        // base OTs under various parameters. 
-        void genBase(u64 n, Channel& chl, PRNG& prng,
-            u64 scaler = 2, u64 secParam = 80,
-            SilentBaseType base = SilentBaseType::BaseExtend,
-            u64 threads = 1);
+        // Perform the actual OT extension. If silent
+        // base OTs have been generated or set, then
+        // this function is non-interactive. Otherwise
+        // the silent base OTs will automatically be performed.
+        void silentReceive(
+            span<block> c,
+            span<block> a,
+            PRNG & prng,
+            Channel & chl);
 
         // Perform the actual OT extension. If silent
         // base OTs have been generated or set, then
         // this function is non-interactive. Otherwise
-        // the silent base OTs will automaticly be performed.
-        void silentReceive(
-            span<block> choices,
-            span<block> messages,
-            PRNG & prng,
-            Channel & chl);
+        // the silent base OTs will automatically be performed.
+        void silentReceiveInplace(
+            u64 n,
+            PRNG& prng,
+            Channel& chl);
 
-        // A parallel version of the other silentReceive(...)
-        // function.
-		void silentReceive(
-            span<block> choices,
-			span<block> messages,
-			PRNG& prng,
-			span<Channel> chls);
+
 
         // internal.
+        void checkRT(Channel& chls) const;
 
-        void checkRT(span<Channel> chls, Matrix<block> &rT);
-        void ldpcMult(Matrix<block> &rT, span<block> &messages, 
-            span<block> y, span<block>& choices);
-        
         PprfOutputFormat getPprfFormat()
         {
-                return PprfOutputFormat::Interleaved;
-            /*switch (mMultType)
-            {
-            case osuCrypto::MultType::Naive:
-            case osuCrypto::MultType::QuasiCyclic:
-                return PprfOutputFormat::InterleavedTransposed;
-                break;
-            case osuCrypto::MultType::ldpc:
-                break;
-            default:
-                throw RTE_LOC;
-                break;
-            }*/
+            return PprfOutputFormat::Interleaved;
         }
 
         void clear();
     };
-
-    //Matrix<block> expandTranspose(BgiEvaluator::MultiKey & gen, u64 n);
-
 }
 #endif
