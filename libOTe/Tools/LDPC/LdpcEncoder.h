@@ -1765,6 +1765,30 @@ namespace osuCrypto
             Weight11 = 11,
         };
 
+        static u64 gap(Code c)
+        {
+            switch (c)
+            {
+            case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight5:
+                return 16;
+                break;
+            case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight11:
+                return 32;
+                break;
+            default:
+                throw RTE_LOC;
+                break;
+            }
+        }
+
+        static u64 weight(Code c)
+        {
+            return (u64)c;
+        }
+
+
+
+
         static constexpr  std::array<std::array<u8, 4>, 16> diagMtx_g16_w5_seed1_t36
         { {
             {{ 0, 1, 5, 12}},
@@ -1836,18 +1860,7 @@ namespace osuCrypto
             Code c,
             bool extend)
         {
-            switch (c)
-            {
-            case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight5:
-                mGap = 16;
-                break;
-            case osuCrypto::LdpcDiagRegRepeaterEncoder::Weight11:
-                mGap = 32;
-                break;
-            default:
-                throw RTE_LOC;
-                break;
-            }
+            mGap = gap(c);
 
             assert(mGap < rows);
 

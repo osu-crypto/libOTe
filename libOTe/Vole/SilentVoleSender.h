@@ -40,6 +40,8 @@ namespace osuCrypto
         u64 mNumPartitions;
         u64 mSizePer;
         u64 mNumThreads;
+        //u64 mGapOts = 0;
+        std::vector<std::array<block, 2>> mGapOts;
 
 #ifdef ENABLE_IKNP
         IknpOtExtSender mIknpSender;
@@ -143,7 +145,7 @@ namespace osuCrypto
             Channel& chls);
 
         bool mDebug = false;
-        void checkRT(Channel& chl) const;
+        void checkRT(Channel& chl, span<block> beta) const;
 
         void clear();
     };

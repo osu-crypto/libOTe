@@ -10,40 +10,36 @@ namespace osuCrypto
 {
 
 
-    SilentMultiPprfSender::SilentMultiPprfSender(u64 domainSize, u64 pointCount, u64 extra)
+    SilentMultiPprfSender::SilentMultiPprfSender(u64 domainSize, u64 pointCount)
     {
-        configure(domainSize, pointCount, extra);
+        configure(domainSize, pointCount);
     }
-    void SilentMultiPprfSender::configure(u64 domainSize, u64 pointCount, u64 extra)
+    void SilentMultiPprfSender::configure(u64 domainSize, u64 pointCount)
     {
         mDomain = domainSize;
         mDepth = log2ceil(mDomain);
         mPntCount = pointCount;
-        mExtra = extra;
         //mPntCount8 = roundUpTo(pointCount, 8);
 
         mBaseOTs.resize(0, 0);
     }
 
-    void SilentMultiPprfReceiver::configure(u64 domainSize, u64 pointCount, u64 extra)
+    void SilentMultiPprfReceiver::configure(u64 domainSize, u64 pointCount)
     {
         mDomain = domainSize;
         mDepth = log2ceil(mDomain);
         mPntCount = pointCount;
-        mExtra = extra;
-
-        //mPntCount8 = roundUpTo(pointCount, 8);
 
         mBaseOTs.resize(0, 0);
     }
 
     u64 SilentMultiPprfSender::baseOtCount() const
     {
-        return mDepth * mPntCount + mExtra;
+        return mDepth * mPntCount;
     }
     u64 SilentMultiPprfReceiver::baseOtCount() const
     {
-        return mDepth * mPntCount + mExtra;
+        return mDepth * mPntCount;
     }
 
     bool SilentMultiPprfSender::hasBaseOts() const
@@ -276,6 +272,8 @@ namespace osuCrypto
         case PprfOutputFormat::InterleavedTransposed:
         case PprfOutputFormat::Interleaved:
 
+            if (points.size() != mPntCount)
+                throw RTE_LOC;
             if (points.size() % 8)
                 throw RTE_LOC;
 
@@ -292,7 +290,7 @@ namespace osuCrypto
 
     BitVector SilentMultiPprfReceiver::sampleChoiceBits(u64 modulus, PprfOutputFormat format, PRNG& prng)
     {
-        BitVector choices(mPntCount * mDepth + mExtra);
+        BitVector choices(mPntCount * mDepth);
 
         mBaseChoices.resize(mPntCount, mDepth);
         for (u64 i = 0; i < mPntCount; ++i)

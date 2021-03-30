@@ -165,6 +165,7 @@ namespace osuCrypto
             mEncoder.mR.init(mN, code, true);
             setTimePoint("config.Right");
 
+            throw RTE_LOC;
             extra = mEncoder.mR.mGap;
         }
         else
@@ -178,7 +179,7 @@ namespace osuCrypto
             mN = mN2 / scaler;
         }
 
-        mGen.configure(mSizePer, mNumPartitions, extra);
+        mGen.configure(mSizePer, mNumPartitions);
     }
 
     void SilentOtExtSender::checkRT(Channel& chl)

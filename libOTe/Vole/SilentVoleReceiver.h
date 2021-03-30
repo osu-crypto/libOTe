@@ -40,11 +40,13 @@ namespace osuCrypto
         u64 mN = 0;
         
         // The length of the noisy vectors (2 * mN for the silver codes).
-        u64 mN2;
+        u64 mN2 = 0;
         
         // We perform regular LPN, so this is the
         // size of the each chunk. 
-        u64 mSizePer;
+        u64 mSizePer = 0;
+
+        u64 mNumParitions = 0;
 
         // The noisy coordinates.
         std::vector<u64> mS;
@@ -69,12 +71,15 @@ namespace osuCrypto
 
         std::vector<block> mC;
 
+
+        std::vector<block> mGapOts;
+
         u64 mBackingSize = 0;
         std::unique_ptr<block[]> mBacking;
 
         bool mDebug = false;
 
-        BitVector mIknpSendBaseChoice;
+        BitVector mIknpSendBaseChoice, mGapBaseChoice;
 
 #ifdef ENABLE_IKNP
         IknpOtExtReceiver mIknpRecver;

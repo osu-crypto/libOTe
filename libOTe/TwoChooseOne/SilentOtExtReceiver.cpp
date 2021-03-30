@@ -161,6 +161,8 @@ namespace osuCrypto
             mEncoder.mR.init(mN, code, true);
             setTimePoint("config.Right");
 
+
+            throw RTE_LOC;
             extra = mEncoder.mR.mGap;
         }
         else
@@ -173,7 +175,7 @@ namespace osuCrypto
         }
 
         mS.resize(numPartitions);
-        mGen.configure(mSizePer, mS.size(), extra);
+        mGen.configure(mSizePer, mS.size());
     }
 
 

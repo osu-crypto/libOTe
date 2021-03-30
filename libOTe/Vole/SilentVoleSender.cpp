@@ -59,9 +59,9 @@ namespace osuCrypto
             throw std::runtime_error("configure must be called first");
 
         if (mIknpRecver.hasBaseOts())
-            return mGen.baseOtCount();
+            return mGen.baseOtCount() + mGapOts.size();
         else
-            return mGen.baseOtCount() + mIknpRecver.baseOtCount();
+            return mGen.baseOtCount() + mGapOts.size() + mIknpRecver.baseOtCount();
     }
 
     void SilentVoleSender::setSilentBaseOts(
@@ -70,15 +70,15 @@ namespace osuCrypto
         if (sendBaseOts.size() != silentBaseOtCount())
             throw RTE_LOC;
 
-        if (mIknpRecver.hasBaseOts())
-            mGen.setBase(sendBaseOts);
-        else
-        {
-            auto m0 = sendBaseOts.subspan(0, mGen.baseOtCount());
-            auto m1 = sendBaseOts.subspan(mGen.baseOtCount());
-            mGen.setBase(m0);
-            mIknpRecver.setBaseOts(m1);
-        }
+        auto genOt = sendBaseOts.subspan(0, mGen.baseOtCount());
+        auto gapOt = sendBaseOts.subspan(genOt.size(), mGapOts.size());
+        auto iknpOt = sendBaseOts.subspan(genOt.size() + gapOt.size());
+
+        mGen.setBase(genOt);
+        std::copy(gapOt.begin(), gapOt.end(), mGapOts.begin());
+
+        if(iknpOt.size())
+            mIknpRecver.setBaseOts(iknpOt);
     }
 
     void SilentVoleSender::configure(
@@ -86,29 +86,27 @@ namespace osuCrypto
     {
         mRequestedNumOTs = numOTs;
 
-        mNumPartitions = getPartitions(mScaler, numOTs, secParam);
-        mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
-        auto nn = roundUpTo(mSizePer * mNumPartitions, mScaler);
-        auto mm = nn / mScaler;
-
-        mN = mm;
-        mN2 = nn;
-
         auto code = mMultType == MultType::slv11 ?
             LdpcDiagRegRepeaterEncoder::Weight11 :
-            LdpcDiagRegRepeaterEncoder::Weight5
-            ;
-        u64 colWeight = (u64)code;
+            LdpcDiagRegRepeaterEncoder::Weight5;
 
-        setTimePoint("config.begin");
-        mEncoder.mL.init(mm, colWeight);
-        setTimePoint("config.Left");
-        mEncoder.mR.init(mm, code, true);
-        setTimePoint("config.Right");
-        auto extra = mEncoder.mR.mGap;
+        auto gap = LdpcDiagRegRepeaterEncoder::gap(code);
+        u64 colWeight = LdpcDiagRegRepeaterEncoder::weight(code);
+        mGapOts.resize(gap);
 
-        mGen.configure(mSizePer, mNumPartitions, extra);
+        mNumPartitions = getPartitions(mScaler, numOTs, secParam);
+        mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
+        mN2 = mSizePer * mNumPartitions + gap;
+        mN = mN2 / mScaler;
 
+        if (mN2 % mScaler)
+            throw RTE_LOC;
+
+        mEncoder.mL.init(mN, colWeight);
+        mEncoder.mR.init(mN, code, true);
+
+        mGen.configure(mSizePer, mNumPartitions);
+        
         mState = State::Configured;
     }
 
@@ -141,14 +139,16 @@ namespace osuCrypto
     //    w = r * H
 
 
-    void SilentVoleSender::checkRT(Channel& chl) const
+    void SilentVoleSender::checkRT(Channel& chl, span<block> beta) const
     {
         chl.send(mB);
-        chl.send(mGen.mValue);
+        chl.send(beta);
+
     }
 
     void SilentVoleSender::clear()
     {
+        mB = {};
         mBacking = {};
         mBackingSize = 0;
         mGen.clear();
@@ -188,6 +188,7 @@ namespace osuCrypto
 
         if (mGen.hasBaseOts() == false)
         {
+            // recvs data
             genSilentBaseOts(prng, chl);
         }
 
@@ -201,12 +202,15 @@ namespace osuCrypto
             setTimePoint("sender.iknp.gen");
         }
 
-        NoisyVoleSender nv;
-        std::vector<block> beta(mGen.mPntCount);
-        nv.send(delta, beta, prng, mIknpRecver, chl);
-        gTimer.setTimePoint("sender.expand.start");
+        // compute the correlation for the noisy coordinates.
+        std::vector<block> beta(mNumPartitions + mGapOts.size());
+        {
+            NoisyVoleSender nv;
+            //recvs data
+            nv.send(delta, beta, prng, mIknpRecver, chl);
+        }
 
-
+        // allocate B
         if (mBackingSize < mN2)
         {
             mBackingSize = mN2;
@@ -214,13 +218,29 @@ namespace osuCrypto
         }
         mB = span<block>(mBacking.get(), mN2);
 
-        mGen.expand(chl, beta, prng, mB, PprfOutputFormat::Interleaved, false);
+        // derandomize the random OTs for the gap 
+        // to have the desired correlation.
+        std::vector<block> gapVals(mGapOts.size());
+        for (u64 i = mNumPartitions * mSizePer, j = 0; i < mN2; ++i, ++j)
+        {
+            auto v = mGapOts[j][0] ^ beta[mNumPartitions + j];
+            gapVals[j] = AES(mGapOts[j][1]).ecbEncBlock(ZeroBlock) ^ v;
+            mB[i] = mGapOts[j][0];
+            //std::cout << "jj " << j << " " <<i << " " << mGapOts[j][0] << " " << v << " " << beta[mNumPartitions + j] << std::endl;
+        }
+        chl.send(std::move(gapVals));
+
+
+        // sends data
+        auto bb = span<block>(beta.data(), mNumPartitions);
+        auto mbb = mB.subspan(0, mNumPartitions * mSizePer);
+        mGen.expand(chl, bb, prng, mbb, PprfOutputFormat::Interleaved, false);
         setTimePoint("sender.expand.pprf_transpose");
         gTimer.setTimePoint("sender.expand.pprf_transpose");
 
         if (mDebug)
         {
-            checkRT(chl);
+            checkRT(chl, beta);
             setTimePoint("sender.expand.checkRT");
         }
 

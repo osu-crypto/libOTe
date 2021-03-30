@@ -77,8 +77,8 @@ void SilentVole_test(const oc::CLP& cmd)
     recv.setTimer(timer);
     send.setTimer(timer);
 
-    recv.mDebug = true;
-    send.mDebug = true;
+    //recv.mDebug = true;
+    //send.mDebug = true;
 
     IOService ios;
     auto chl1 = Session(ios, "localhost:1212", SessionMode::Server).addChannel();
