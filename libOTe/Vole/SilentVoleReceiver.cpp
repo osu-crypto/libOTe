@@ -112,7 +112,6 @@ namespace osuCrypto
 
         mN = mm;
         mN2 = nn;
-        lout << mN << " " << mN2 << " " << numPartitions << " " << mSizePer << std::endl;
 
         auto code = mMultType == MultType::slv11 ?
             LdpcDiagRegRepeaterEncoder::Weight11 :
@@ -319,6 +318,10 @@ namespace osuCrypto
         // compress both mA and mC in place.
         mEncoder.cirTransEncode2<block, block>(mA, mC);
         setTimePoint("recver.expand.cirTransEncode.a");
+
+        // resize the buffers down to only contain the real elements.
+        mA = span<block>(mBacking.get(), mRequestedNumOTs);
+        mC.resize(mRequestedNumOTs);
 
         // make the protocol as done and that
         // mA,mC are ready to be consumed.

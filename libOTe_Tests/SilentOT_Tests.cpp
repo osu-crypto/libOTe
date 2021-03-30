@@ -175,7 +175,173 @@ void Tools_modp_test(const CLP& cmd)
 #endif
 }
 
-void OtExt_Silent_Test(const CLP& cmd)
+
+namespace {
+    void fakeBase(u64 n,
+        u64 s,
+        u64 threads,
+        PRNG& prng,
+        SilentOtExtReceiver& recver, SilentOtExtSender& sender)
+    {
+
+        // fake base OTs.
+        {
+            recver.configure(n, s, 128, threads);
+            BitVector choices = recver.sampleBaseChoiceBits(prng);
+            std::vector<block> msg(choices.size());
+            for (u64 i = 0; i < msg.size(); ++i)
+                msg[i] = toBlock(i, choices[i]);
+            recver.setSlientBaseOts(msg);
+        }
+
+        {
+            sender.configure(n, s, 128, threads);
+            auto count = sender.silentBaseOtCount();
+            std::vector<std::array<block, 2>> msg(count);
+            PRNG prngz(ZeroBlock);
+            for (u64 i = 0; i < msg.size(); ++i)
+            {
+                msg[i][0] = toBlock(i, 0);
+                msg[i][1] = toBlock(i, 1);
+            }
+            sender.setSlientBaseOts(msg);
+        }
+    }
+}
+
+namespace
+{
+
+    void checkRandom(
+        span<block> messages, span<std::array<block, 2>>messages2,
+        BitVector& choice, u64 n,
+        bool verbose)
+    {
+
+        if (messages.size() != n)
+            throw RTE_LOC;
+        if (messages2.size() != n)
+            throw RTE_LOC;
+        if (choice.size() != n)
+            throw RTE_LOC;
+        bool passed = true;
+
+        for (u64 i = 0; i < n; ++i)
+        {
+            block m1 = messages[i];
+            block m2a = messages2[i][0];
+            block m2b = (messages2[i][1]);
+            u8 c = choice[i];
+
+
+            std::array<bool, 2> eqq{
+                eq(m1, m2a),
+                eq(m1, m2b)
+            };
+            if (eqq[c] == false || eqq[c ^ 1] == true)
+            {
+                passed = false;
+                if (verbose)
+                    std::cout << Color::Pink;
+            }
+            if (eqq[0] == false && eqq[1] == false)
+            {
+                passed = false;
+                if (verbose)
+                    std::cout << Color::Red;
+            }
+        }
+
+        if (passed == false)
+            throw RTE_LOC;
+    }
+
+
+    template<typename Choice>
+    void checkCorrelated(
+        span<block> Ar, span<block> Bs,
+        Choice& choice, block delta, u64 n,
+        bool verbose,
+        ChoiceBitPacking packing)
+    {
+
+        if (Ar.size() != n)
+            throw RTE_LOC;
+        if (Bs.size() != n)
+            throw RTE_LOC;
+        if (packing == ChoiceBitPacking::False &&
+            choice.size() != n)
+            throw RTE_LOC;
+        bool passed = true;
+        bool first = true;
+        block mask = AllOneBlock ^ OneBlock;
+
+
+        for (u64 i = 0; i < n; ++i)
+        {
+            block m1 = Ar[i];
+            block m2a = Bs[i];
+            block m2b = (Bs[i] ^ delta);
+            u8 c, c2;
+
+            if (packing == ChoiceBitPacking::True)
+            {
+                c = u8((m1 & OneBlock) == OneBlock) & 1;
+                m1 = m1 & mask;
+                m2a = m2a & mask;
+                m2b = m2b & mask;
+
+                if (choice.size())
+                {
+                    c2 = choice[i];
+
+                    if (c2 != c)
+                        throw RTE_LOC;
+                }
+            }
+            else
+            {
+                c = choice[i];
+            }
+
+            std::array<bool, 2> eqq{
+                eq(m1, m2a),
+                eq(m1, m2b)
+            };
+
+            bool good = true;
+            if (eqq[c] == false || eqq[c ^ 1] == true)
+            {
+                good = passed = false;
+                //if (verbose)
+                    std::cout << Color::Pink;
+            }
+            if (eqq[0] == false && eqq[1] == false)
+            {
+                good = passed = false;
+                //if (verbose)
+                    std::cout << Color::Red;
+            }
+
+            if (!good /*&& first*/)
+            {
+                //first = false;
+                std::cout << i <<  " m " << mask << std::endl;
+                std::cout << "r " << m1 << " " << int(c) << std::endl;
+                std::cout << "s " << m2a << " " << m2b << std::endl;
+                std::cout << "d " << (m1^m2a) << " " << (m1^m2b) << std::endl;
+            }
+
+            std::cout << Color::Default;
+        }
+
+        if (passed == false)
+            throw RTE_LOC;
+    }
+}
+
+
+void OtExt_Silent_random_Test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 
@@ -184,107 +350,30 @@ void OtExt_Silent_Test(const CLP& cmd)
     Session s1(ios, "localhost:1212", SessionMode::Client);
 
 
-
     u64 n = cmd.getOr("n", 10000);
     bool verbose = cmd.getOr("v", 0) > 1;
     u64 threads = cmd.getOr("t", 4);
     u64 s = cmd.getOr("s", 2);
-    u64 sec = cmd.getOr("sec", 80);
-    //bool mal = cmd.isSet("mal");
 
-    std::vector<Channel> chls0(threads), chls1(threads);
-
-    for (u64 i = 0; i < threads; ++i)
-    {
-        chls0[i] = s0.addChannel();
-        chls1[i] = s1.addChannel();
-    }
-
+    Channel chl0 = s0.addChannel();
+    Channel chl1 = s1.addChannel();
     PRNG prng(toBlock(cmd.getOr("seed", 0)));
     PRNG prng1(toBlock(cmd.getOr("seed1", 1)));
 
 
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
-
-    Timer timer;
-    sender.setTimer(timer);
-    recver.setTimer(timer);
-
-    sender.mDebug = true;
-    recver.mDebug = true;
-    //sender.mMultType = MultType::QuasiCyclic;
-    //recver.mMultType = MultType::QuasiCyclic;
-    //recver.mGen.mPrint = false;
-
-    // fake base OTs.
-    {
-        recver.configure(n, s, sec, threads);
-        BitVector choices = recver.sampleBaseChoiceBits(prng);
-        std::vector<block> msg(choices.size());
-        for (u64 i = 0; i < msg.size(); ++i)
-            msg[i] = toBlock(i, choices[i]);
-        recver.setSlientBaseOts(msg);
-    }
-
-    {
-        sender.configure(n, s, sec, threads);
-        auto count = sender.silentBaseOtCount();
-        std::vector<std::array<block, 2>> msg(count);
-        PRNG prngz(ZeroBlock);
-        for (u64 i = 0; i < msg.size(); ++i)
-        {
-        	msg[i][0] = toBlock(i, 0);
-        	msg[i][1] = toBlock(i, 1); 
-        }
-        sender.setSlientBaseOts(msg);
-    }
+    fakeBase(n, s, threads,prng, recver, sender);
 
     std::vector<block> messages2(n);
-    BitVector choice;
+    BitVector choice(n);
     std::vector<std::array<block, 2>> messages(n);
+    auto type = OTType::Random;
 
-    sender.silentSend(messages, prng, chls0);
-    recver.silentReceive(choice, messages2, prng, chls1);
-    bool passed = true;
-    BitVector act(n);
+    sender.silentSend(messages, prng, chl0);
+    recver.silentReceive(choice, messages2, prng, chl1, type);
 
-    choice.resize(n);
-    for (u64 i = 0; i < n; ++i)
-    {
-        std::array<bool, 2> eqq{ eq(messages2[i], messages[i][0]),eq(messages2[i], messages[i][1]) };
-        if (eqq[choice[i]] == false || eqq[choice[i] ^ 1] == true)
-        {
-            passed = false;
-            if (verbose)
-                std::cout << Color::Pink;
-        }
-        if (eqq[0] == false && eqq[1] == false)
-        {
-            passed = false;
-            if (verbose)
-                std::cout << Color::Red;
-        }
-
-        if (verbose)
-            std::cout << i << " " << messages2[i] << " " << messages[i][0] << " " << messages[i][1] << " " << int(choice[i]) << std::endl << Color::Default;
-
-        if (eq(messages2[i], messages[i][1]))
-            act[i] = 1;
-    }
-
-    if (verbose)
-    {
-        std::cout << "act ham " << act.hammingWeight() << " " << act.size() << std::endl;
-        std::cout << "ret ham " << choice.hammingWeight() << " " << choice.size() << std::endl;
-    }
-
-    if (cmd.isSet("v"))
-        std::cout << timer << std::endl;
-
-    if (passed == false)
-        throw RTE_LOC;
-    
+    checkRandom(messages2, messages, choice, n, verbose);
 
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
@@ -292,8 +381,7 @@ void OtExt_Silent_Test(const CLP& cmd)
 }
 
 
-
-void OtExt_Silent_noHash_Test(const CLP& cmd)
+void OtExt_Silent_correlated_Test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 
@@ -301,22 +389,56 @@ void OtExt_Silent_noHash_Test(const CLP& cmd)
     Session s0(ios, "localhost:1212", SessionMode::Server);
     Session s1(ios, "localhost:1212", SessionMode::Client);
 
+    u64 n = cmd.getOr("n", 10000);
+    bool verbose = cmd.getOr("v", 0) > 1;
+    u64 threads = cmd.getOr("t", 4);
+    u64 s = cmd.getOr("s", 2);
 
+    Channel chl0 = s0.addChannel();
+    Channel chl1 = s1.addChannel();
+    PRNG prng(toBlock(cmd.getOr("seed", 0)));
+    PRNG prng1(toBlock(cmd.getOr("seed1", 1)));
+
+
+    SilentOtExtSender sender;
+    SilentOtExtReceiver recver;
+    fakeBase(n, s, threads, prng, recver, sender);
+
+    block delta = prng.get();
+
+    std::vector<block> messages2(n);
+    BitVector choice(n);
+    std::vector<block> messages(n);
+    auto type = OTType::Correlated;
+
+    sender.silentSend(delta, messages, prng, chl0);
+    recver.silentReceive(choice, messages2, prng, chl1, type);
+    
+    checkCorrelated(
+        messages, messages2, choice, delta, 
+        n, verbose, ChoiceBitPacking::False);
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+}
+
+
+
+void OtExt_Silent_inplace_Test(const CLP& cmd)
+{
+#ifdef ENABLE_SILENTOT
+
+    IOService ios;
+    Session s0(ios, "localhost:1212", SessionMode::Server);
+    Session s1(ios, "localhost:1212", SessionMode::Client);
 
     u64 n = cmd.getOr("n", 10000);
     bool verbose = cmd.getOr("v", 0) > 1;
     u64 threads = cmd.getOr("t", 4);
     u64 s = cmd.getOr("s", 2);
-    u64 sec = cmd.getOr("sec", 80);
-    //bool mal = cmd.isSet("mal");
 
-    std::vector<Channel> chls0(threads), chls1(threads);
-
-    for (u64 i = 0; i < threads; ++i)
-    {
-        chls0[i] = s0.addChannel();
-        chls1[i] = s1.addChannel();
-    }
+    Channel chl0 = s0.addChannel();
+    Channel chl1 = s1.addChannel();
 
     PRNG prng(toBlock(cmd.getOr("seed", 0)));
     PRNG prng1(toBlock(cmd.getOr("seed1", 1)));
@@ -324,89 +446,136 @@ void OtExt_Silent_noHash_Test(const CLP& cmd)
 
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
-
-    Timer timer;
-    sender.setTimer(timer);
-    recver.setTimer(timer);
-
-    sender.mDebug = true;
-    recver.mDebug = true;
-    //sender.mMultType = MultType::QuasiCyclic;
-    //recver.mMultType = MultType::QuasiCyclic;
-    //recver.mGen.mPrint = false;
+    fakeBase(n, s, threads, prng, recver, sender);
 
     block delta = prng.get();
-    // fake base OTs.
+
+    auto type = OTType::Correlated;
+
     {
-        recver.configure(n, s, sec, threads, true);
-        BitVector choices = recver.sampleBaseChoiceBits(prng);
-        std::vector<block> msg(choices.size());
-        for (u64 i = 0; i < msg.size(); ++i)
-            msg[i] = toBlock(i, choices[i]);
-        recver.setSlientBaseOts(msg);
+        sender.silentSendInplace(delta, n, prng, chl0);
+        recver.silentReceiveInplace(n, prng, chl1);
+        auto& messages = recver.mA;
+        auto& messages2 = sender.mB;
+        auto& choice = recver.mC;
+        checkCorrelated(messages, messages2, choice, delta,
+            n, verbose, ChoiceBitPacking::False);
     }
 
     {
-        sender.configure(n, s, sec, threads, delta);
-        auto count = sender.silentBaseOtCount();
-        std::vector<std::array<block, 2>> msg(count);
-        PRNG prngz(ZeroBlock);
-        for (u64 i = 0; i < msg.size(); ++i)
-        {
-            msg[i][0] = toBlock(i, 0);
-            msg[i][1] = toBlock(i, 1);
-        }
-        sender.setSlientBaseOts(msg);
+        sender.silentSendInplace(delta, n, prng, chl0);
+        recver.silentReceiveInplace(n, prng, chl1, ChoiceBitPacking::True);
+
+        auto& messages = recver.mA;
+        auto& messages2 = sender.mB;
+        auto& choice = recver.mC;
+        block mask = AllOneBlock ^ OneBlock;
+        checkCorrelated(messages, messages2, choice, delta, 
+            n, verbose, ChoiceBitPacking::True);
+
     }
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+}
 
-    std::vector<block> messages2(n);
-    BitVector choice;
-    std::vector<block> messages(n);
+void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
+{
+#ifdef ENABLE_SILENTOT
 
-    sender.silentSend(MatrixView<block>(messages.data(), n,1), prng, chls0);
-    recver.silentReceive(choice, messages2, prng, chls1);
-    bool passed = true;
-    BitVector act(n);
 
-    choice.resize(n);
-    for (u64 i = 0; i < n; ++i)
+    IOService ios;
+    Session s0(ios, "localhost:1212", SessionMode::Server);
+    Session s1(ios, "localhost:1212", SessionMode::Client);
+
+    std::vector<u64> nn = cmd.getManyOr<u64>("n", 
+        { 12, 134,433 , 4234,54366});
+
+    bool verbose = cmd.getOr("v", 0) > 1;
+    u64 threads = cmd.getOr("t", 4);
+    u64 s = cmd.getOr("s", 2);
+
+    Channel chl0 = s0.addChannel();
+    Channel chl1 = s1.addChannel();
+
+    PRNG prng(toBlock(cmd.getOr("seed", 0)));
+    PRNG prng1(toBlock(cmd.getOr("seed1", 1)));
+
+    SilentOtExtSender sender;
+    SilentOtExtReceiver recver;
+
+    block delta = prng.get();
+    auto type = OTType::Correlated;
+
+    for(auto n : nn)
     {
-        std::array<bool, 2> eqq{ 
-            eq(messages2[i], messages[i]),
-            eq(messages2[i], messages[i] ^ delta) 
-        };
-        if (eqq[choice[i]] == false || eqq[choice[i] ^ 1] == true)
-        {
-            passed = false;
-            if (verbose)
-                std::cout << Color::Pink;
-        }
-        if (eqq[0] == false && eqq[1] == false)
-        {
-            passed = false;
-            if (verbose)
-                std::cout << Color::Red;
-        }
+        fakeBase(n, s, threads, prng, recver, sender);
 
-        if (verbose)
-            std::cout << i << " " << messages2[i] << " " << messages[i] << " " << (messages[i]^delta) << " " << int(choice[i]) << std::endl << Color::Default;
+        sender.silentSendInplace(delta, n, prng, chl0);
+        recver.silentReceiveInplace(n, prng, chl1);
 
-        if (eq(messages2[i], messages[i]))
-            act[i] = 1;
+        checkCorrelated(sender.mB, recver.mA, recver.mC, delta, 
+            n, verbose, ChoiceBitPacking::False);
     }
 
-    if (verbose)
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+}
+
+
+void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
+{
+#ifdef ENABLE_SILENTOT
+
+
+    IOService ios;
+    Session s0(ios, "localhost:1212", SessionMode::Server);
+    Session s1(ios, "localhost:1212", SessionMode::Client);
+
+    std::vector<u64> nn = cmd.getManyOr<u64>("n",
+        { 12,/* 134, 600,*/ 4234, 14366 });//
+
+    bool verbose = cmd.getOr("v", 0) > 1;
+    u64 threads = cmd.getOr("t", 4);
+    u64 s = cmd.getOr("s", 2);
+
+    Channel chl0 = s0.addChannel();
+    Channel chl1 = s1.addChannel();
+
+    PRNG prng(toBlock(cmd.getOr("seed", 0)));
+    PRNG prng1(toBlock(cmd.getOr("seed1", 1)));
+
+    SilentOtExtSender sender;
+    SilentOtExtReceiver recver;
+
+    sender.mMultType = MultType::QuasiCyclic;
+    recver.mMultType = MultType::QuasiCyclic;
+
+    //sender.mDebug = true;
+    //recver.mDebug = true;
+
+    block delta = prng.get();
+    auto type = OTType::Correlated;
+
+    for (auto n : nn)
     {
-        std::cout << "act ham " << act.hammingWeight() << " " << act.size() << std::endl;
-        std::cout << "ret ham " << choice.hammingWeight() << " " << choice.size() << std::endl;
+        fakeBase(n, s, threads, prng, recver, sender);
+
+        std::vector<std::array<block, 2>> msg2(n);
+        std::vector<block> msg1(n);
+        BitVector choice(n);
+
+        sender.silentSend(msg2, prng, chl0);
+        recver.silentReceive(choice, msg1, prng, chl1);
+        checkRandom(msg1, msg2, choice, n, verbose);
+
+        auto type = ChoiceBitPacking::False;
+        sender.silentSendInplace(delta, n, prng, chl0);
+        recver.silentReceiveInplace(n, prng, chl1, type);
+        checkCorrelated(recver.mA, sender.mB, recver.mC, delta, n, verbose, type);
+
     }
-
-    if (cmd.isSet("v"))
-        std::cout << timer << std::endl;
-
-    if (passed == false)
-        throw RTE_LOC;
-
 
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");

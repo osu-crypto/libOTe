@@ -20,6 +20,16 @@ namespace osuCrypto
         InterleavedTransposed
     };
 
+    enum class OTType
+    {
+        Random, Correlated
+    };
+
+    enum class ChoiceBitPacking
+    {
+        False, True
+    };
+
     class SilentMultiPprfSender : public TimerAdapter
     {
     public:
@@ -51,6 +61,13 @@ namespace osuCrypto
         void setBase(span<std::array<block, 2>> baseMessages);
 
         // expand the whole PPRF and store the result in output
+        block expand(Channel& chl, block value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal)
+        {
+            MatrixView<block> o(output.data(), output.size(), 1);
+            return expand(chl, value, prng, o, oFormat, mal);
+        }
+
+
         block expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
         block expand(span<Channel> chls, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
 

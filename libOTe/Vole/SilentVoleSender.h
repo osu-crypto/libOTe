@@ -52,7 +52,7 @@ namespace osuCrypto
         span<block> mB;
 
         u64 mBackingSize = 0;
-        std::unique_ptr<block> mBacking;
+        std::unique_ptr<block[]> mBacking;
 
         /////////////////////////////////////////////////////
         // The standard OT extension interface

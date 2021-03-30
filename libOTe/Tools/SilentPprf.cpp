@@ -392,8 +392,8 @@ namespace osuCrypto
             if (output.rows() != 128)
                 throw RTE_LOC;
 
-            if (output.cols() > (mDomain * mPntCount + 127) / 128)
-                throw RTE_LOC;
+            //if (output.cols() > (mDomain * mPntCount + 127) / 128)
+            //    throw RTE_LOC;
 
             if (mPntCount & 7)
                 throw RTE_LOC;
@@ -731,8 +731,8 @@ namespace osuCrypto
             if (output.rows() != 128)
                 throw RTE_LOC;
 
-            if (output.cols() > (mDomain * mPntCount + 127) / 128)
-                throw RTE_LOC;
+            //if (output.cols() > (mDomain * mPntCount + 127) / 128)
+            //    throw RTE_LOC;
 
             if (mPntCount & 7)
                 throw RTE_LOC;

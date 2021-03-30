@@ -17,6 +17,38 @@ namespace osuCrypto
 
     u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
+
+
+    // sets the Iknp base OTs that are then used to extend
+    void SilentOtExtReceiver::setBaseOts(
+        span<std::array<block, 2>> baseSendOts,
+        PRNG& prng,
+        Channel& chl) {
+#ifdef ENABLE_IKNP
+        mIknpRecver.setBaseOts(baseSendOts, prng, chl);
+#else
+        throw std::runtime_error("IKNP must be enabled");
+#endif
+    }
+
+    // return the number of base OTs IKNP needs
+    u64 SilentOtExtReceiver::baseOtCount() const {
+#ifdef ENABLE_IKNP
+        return mIknpRecver.baseOtCount();
+#else
+        throw std::runtime_error("IKNP must be enabled");
+#endif
+    }
+
+    // returns true if the IKNP base OTs are currently set.
+    bool SilentOtExtReceiver::hasBaseOts() const {
+#ifdef ENABLE_IKNP
+        return mIknpRecver.hasBaseOts();
+#else
+        throw std::runtime_error("IKNP must be enabled");
+#endif
+    };
+
     void SilentOtExtReceiver::setSlientBaseOts(span<block> recvBaseOts)
     {
         if (isConfigured() == false)
@@ -24,8 +56,6 @@ namespace osuCrypto
 
         if (static_cast<u64>(recvBaseOts.size()) != silentBaseOtCount())
             throw std::runtime_error("wrong number of silent base OTs");
-
-
 
         mGen.setBase(recvBaseOts);
         mGen.getPoints(mS, getPprfFormat());
@@ -90,63 +120,6 @@ namespace osuCrypto
         setTimePoint("recver.gen.done");
     };
 
-    void SilentOtExtReceiver::genBase(
-        u64 n,
-        Channel& chl,
-        PRNG& prng,
-        u64 scaler,
-        u64 secParam,
-        SilentBaseType basetype,
-        u64 threads)
-    {
-        switch (basetype)
-        {
-            //case SilentBaseType::None:
-            //{
-            //    std::cout << Color::Red << "warning, insecure " LOCATION << std::endl << Color::Default;
-            //    configure(n, scaler, secParam, threads);
-            //    BitVector choices = sampleBaseChoiceBits(prng);
-            //    std::vector<block> msg(choices.size());
-            //    //PRNG prngz(ZeroBlock);
-            //    //auto ss = lout << "recver:\n";
-            //    for (u64 i = 0; i < msg.size(); ++i)
-            //    {
-            //        //std::array<block, 2> tt = prngz.get();
-            //        msg[i] = toBlock(i, choices[i]);
-            //    //    //ss << "msg[" << i << "]["<< int(choices[i])<<"] "
-            //    //    //    << msg[i] << std::endl;
-            //    }
-
-            //    setSlientBaseOts(msg);
-            //    break;
-            //}
-        case SilentBaseType::BaseExtend:
-            // perform 128 normal base OTs
-            genBaseOts(prng, chl);
-        case SilentBaseType::Base:
-
-            if(isConfigured() == false)
-                configure(n, scaler, secParam, threads);
-            // do the silent specific OTs, either by extending
-            // the exising base OTs or using a base OT protocol.
-            genSilentBaseOts(prng, chl);
-            break;
-            //case SilentBaseType::Extend:
-            //{
-            //    std::cout << Color::Red << "warning, insecure " LOCATION << std::endl << Color::Default;
-            //    std::vector<std::array<block, 2>> msg(gOtExtBaseOtCount);
-            //    setBaseOts(msg, prng, chl);
-            //    configure(n, scaler, secParam, threads);
-            //    genSilentBaseOts(prng, chl);
-            //    break;
-            //}
-        default:
-            std::cout << "known switch " LOCATION << std::endl;
-            std::terminate();
-            break;
-        }
-    }
-
     u64 SilentOtExtReceiver::silentBaseOtCount() const
     {
         if (isConfigured() == false)
@@ -158,11 +131,9 @@ namespace osuCrypto
         u64 numOTs,
         u64 scaler,
         u64 secParam,
-        u64 numThreads,
-        bool deltaOT)
+        u64 numThreads)
     {
-        mHash = !deltaOT;
-
+        mRequestedNumOts = numOTs;
         mNumThreads = numThreads;
         mScaler = scaler;
         u64 numPartitions;
@@ -170,45 +141,38 @@ namespace osuCrypto
 
         if (mMultType == MultType::slv5 || mMultType == MultType::slv11)
         {
-            assert(scaler == 2);
-            auto mm = numOTs;
+            if (scaler != 2)
+                throw std::runtime_error("only scaler = 2 is supported for slv. " LOCATION);
 
-            u64 nn = mm * scaler;
-            auto kk = nn - mm;
+            numPartitions = getPartitions(mScaler, numOTs, secParam);
+            mSizePer = roundUpTo((numOTs * mScaler + numPartitions - 1) / numPartitions, 8);
+            mN2 = roundUpTo(mSizePer * numPartitions, mScaler);
+            mN = mN2 / mScaler;
+            mP = 0;
 
             auto code = mMultType == MultType::slv11 ?
                 LdpcDiagRegRepeaterEncoder::Weight11 :
-                LdpcDiagRegRepeaterEncoder::Weight5
-                ;
+                LdpcDiagRegRepeaterEncoder::Weight5;
             u64 colWeight = (u64)code;
 
-
             setTimePoint("config.begin");
-            mEncoder.mL.init(mm, colWeight);
+            mEncoder.mL.init(mN, colWeight);
             setTimePoint("config.Left");
-            mEncoder.mR.init(mm, code, true);
+            mEncoder.mR.init(mN, code, true);
             setTimePoint("config.Right");
+
             extra = mEncoder.mR.mGap;
-
-            mP = 0;
-            mN = kk;
-            mN2 = nn;
-            numPartitions = getPartitions(scaler, mN, secParam);
-
         }
         else
         {
-
-            mP = nextPrime(numOTs);
-            mN = roundUpTo(mP, 128);
+            mP = nextPrime(std::max<u64>(numOTs, 128 * 128));
             numPartitions = getPartitions(scaler, mP, secParam);
-            mN2 = scaler * mN;
+            mSizePer = roundUpTo((mP * scaler + numPartitions - 1) / numPartitions, 8);
+            mN2 = mSizePer * numPartitions;
+            mN = mN2 / scaler;
         }
 
-
         mS.resize(numPartitions);
-        mSizePer = roundUpTo((mN2 + numPartitions - 1) / numPartitions, 8);
-
         mGen.configure(mSizePer, mS.size(), extra);
     }
 
@@ -242,13 +206,13 @@ namespace osuCrypto
     //    w = r * H
 
 
-    void SilentOtExtReceiver::checkRT(span<Channel> chls, Matrix<block>& rT1)
+    void SilentOtExtReceiver::checkRT(Channel& chl, MatrixView<block> rT1)
     {
 
         Matrix<block> rT2(rT1.rows(), rT1.cols(), AllocType::Uninitialized);
-        chls[0].recv(rT2.data(), rT2.size());
+        chl.recv(rT2.data(), rT2.size());
         block delta;
-        chls[0].recv(delta);
+        chl.recv(delta);
 
         for (u64 i = 0; i < rT1.size(); ++i)
             rT2(i) = rT2(i) ^ rT1(i);
@@ -293,14 +257,7 @@ namespace osuCrypto
             throw RTE_LOC;
 
         std::cout << "debug check ok" << std::endl;
-        //for (u64 x = 0; x < rT.rows(); ++x)
-        //{
-        //    for (u64 y = 0; y < rT.cols(); ++y)
-        //    {
-        //        std::cout << rT(x, y) << " " << rT2(x, y) << " " << (rT(x,y) ^ rT2(x,y))<< std::endl;
-        //    }
-        //    std::cout << std::endl;
-        //}
+        
         setTimePoint("recver.expand.checkRT");
 
     }
@@ -312,7 +269,7 @@ namespace osuCrypto
         Channel& chl)
     {
         BitVector randChoice;
-        silentReceive(randChoice, messages, prng, { &chl,1 });
+        silentReceive(randChoice, messages, prng, chl, OTType::Random);
         randChoice ^= choices;
         chl.asyncSend(std::move(randChoice));
     }
@@ -321,16 +278,45 @@ namespace osuCrypto
         BitVector& choices,
         span<block> messages,
         PRNG& prng,
-        Channel& chl)
+        Channel& chl,
+        OTType type)
     {
-        silentReceive(choices, messages, prng, { &chl,1 });
+        if (choices.size() != messages.size())
+            throw RTE_LOC;
+
+        auto packing = type == OTType::Random ?
+            ChoiceBitPacking::True :
+            ChoiceBitPacking::False;
+
+        silentReceiveInplace(messages.size(), prng, chl, packing);
+
+        if (type == OTType::Random)
+        {
+            hash(choices, messages, packing);
+        }
+        else
+        {
+            std::memcpy(messages.data(), mA.data(), messages.size() * sizeof(block));
+            setTimePoint("recver.expand.ldpc.copy");
+
+            auto cIter = choices.begin();
+            for (u64 i = 0; i < choices.size(); ++i)
+            {
+                *cIter = mC[i];
+                ++cIter;
+            }
+            setTimePoint("recver.expand.ldpc.copyBits");
+        }
+
+
+        clear();
     }
 
-    void SilentOtExtReceiver::silentReceive(
-        BitVector& choices,
-        span<block> messages,
+    void SilentOtExtReceiver::silentReceiveInplace(
+        u64 n,
         PRNG& prng,
-        span<Channel> chls)
+        Channel& chl,
+        ChoiceBitPacking type)
     {
 
         gTimer.setTimePoint("recver.ot.enter");
@@ -338,16 +324,16 @@ namespace osuCrypto
         if (isConfigured() == false)
         {
             // first generate 128 normal base OTs
-            configure(messages.size(), 2, 128, chls.size(), false);
+            configure(n, mScaler);
         }
 
-        if (static_cast<u64>(messages.size()) > mN)
+        if (n != mRequestedNumOts)
             throw std::invalid_argument("messages.size() > n");
 
         if (mGen.hasBaseOts() == false)
         {
             // make sure we have IKNP base OTs.
-            genSilentBaseOts(prng, chls[0]);
+            genSilentBaseOts(prng, chl);
         }
 
         setTimePoint("recver.expand.start");
@@ -355,130 +341,89 @@ namespace osuCrypto
 
         // column major matrix. mN2 columns and 1 row of 128 bits (128 bit rows)
 
+
+        if (mBackingSize < mN2)
+        {
+            mBackingSize = mN2;
+            mBacking.reset(new block[mBackingSize]);
+        }
+        mA = span<block>(mBacking.get(), mN2);
+
         // do the compression to get the final OTs.
         switch (mMultType)
         {
-        case MultType::Naive:
         case MultType::QuasiCyclic:
-
-            rT.resize(128, mN2 / 128, AllocType::Uninitialized);
+        {
+            MatrixView<block> rT(mA.data(), 128, mN2 / 128);
 
             // locally expand the seeds.
-            mSum = mGen.expand(chls, prng, rT, PprfOutputFormat::InterleavedTransposed, false);
+            mGen.expand(chl, prng, rT, PprfOutputFormat::InterleavedTransposed, false);
             setTimePoint("recver.expand.pprf_transpose");
 
             if (mDebug)
             {
-                checkRT(chls, rT);
+                checkRT(chl, rT);
             }
 
-            if (mMultType == MultType::Naive)
-                randMulNaive(rT, messages);
-            else
-                randMulQuasiCyclic(rT, messages, choices, mNumThreads);
+            randMulQuasiCyclic(type);
 
 
             break;
+        }
         case MultType::slv11:
         case MultType::slv5:
         {
-
-            auto size = mGen.mDomain * mGen.mPntCount;
-            assert(size >= mN2);
-            rT.resize(size, 1, AllocType::Uninitialized);
-
-            mSum = mGen.expand(chls, prng, rT, PprfOutputFormat::Interleaved, false);
+            mGen.expand(chl, prng, mA, PprfOutputFormat::Interleaved, false);
             setTimePoint("recver.expand.pprf_transpose");
             gTimer.setTimePoint("recver.expand.pprf_transpose");
 
             if (mDebug)
             {
-                checkRT(chls, rT);
-
+                MatrixView<block> rT(mA.data(), mN2, 1);
+                checkRT(chl, rT);
             }
 
-            ldpcMult(rT, messages, choices);
+            ldpcMult(type);
         }
         break;
         default:
             break;
         }
 
-        clear();
-    }
+        mA = span<block>(mBacking.get(), mRequestedNumOts);
 
-
-    void SilentOtExtReceiver::randMulNaive(Matrix<block>& rT, span<block>& messages)
-    {
-        std::vector<block> mtxColumn(rT.cols());
-        PRNG pubPrng(ZeroBlock);
-
-        for (i64 i = 0; i < messages.size(); ++i)
+        if (mChoicePtr)
         {
-            block& m = messages[i];
-            BitIterator iter((u8*)&m, 0);
-            mulRand(pubPrng, mtxColumn, rT, iter);
+            mC = span<u8>(mChoicePtr.get(), mRequestedNumOts);
         }
-        setTimePoint("recver.expand.mul");
     }
 
-    void SilentOtExtReceiver::ldpcMult(Matrix<block>& rT, span<block>& messages, BitVector& choices)
+
+    void SilentOtExtReceiver::hash(
+        BitVector& choices,
+        span<block> messages,
+        ChoiceBitPacking type)
     {
+        if (choices.size() != mRequestedNumOts)
+            throw RTE_LOC;
+        if (messages.size() != mRequestedNumOts)
+            throw RTE_LOC;
 
-        assert(rT.rows() >= mN2);
-        assert(rT.cols() == 1);
-
-        setTimePoint("recver.expand.ldpc.mult");
-        rT.resize(mN2, 1);
-
-        std::vector<u64> points(mGen.mPntCount);
-        mGen.getPoints(points, getPprfFormat());
-        mEncoder.setTimer(getTimer());
-        choices.resize(messages.size());
         auto cIter = choices.begin();
+        std::array<block, 8> hashBuffer;
 
+        auto n8 = mRequestedNumOts / 8 * 8;
+        auto m = &messages[0];
+        auto r = &mA[0];
 
-        if (mHash)
+        if (type == ChoiceBitPacking::True)
         {
+
             block mask = OneBlock ^ AllOneBlock;
-            auto m8 = rT.size() / 8 * 8;
-            auto r = &rT(0);
 
-            for (u64 i = 0; i < m8; i += 8)
-            {
-                r[0] = r[0] & mask;
-                r[1] = r[1] & mask;
-                r[2] = r[2] & mask;
-                r[3] = r[3] & mask;
-                r[4] = r[4] & mask;
-                r[5] = r[5] & mask;
-                r[6] = r[6] & mask;
-                r[7] = r[7] & mask;
-                r += 8;
-            }
-
-            for (u64 i = m8; i < rT.size(); ++i)
-            {
-                rT(i) = rT(i) & mask;
-            }
-
-            for (auto p : points)
-            {
-                rT(p) = rT(p) | OneBlock;
-            }
-            setTimePoint("recver.expand.ldpc.mask");
-
-            mEncoder.cirTransEncode(span<block>(rT));
-
-            setTimePoint("recver.expand.ldpc.cirTransEncode");
-            //std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-            std::array<block, 8> hashBuffer;
-
-            auto n8 = messages.size() / 8 * 8;
-            auto m = &messages[0];
-            r = &rT(0);
             for (u64 i = 0; i < n8; i += 8)
             {
+                // mask of the choice bit which is stored in the LSB
                 m[0] = r[0] & mask;
                 m[1] = r[1] & mask;
                 m[2] = r[2] & mask;
@@ -489,7 +434,6 @@ namespace osuCrypto
                 m[7] = r[7] & mask;
 
                 mAesFixedKey.ecbEnc8Blocks(m, hashBuffer.data());
-
                 m[0] = m[0] ^ hashBuffer[0];
                 m[1] = m[1] ^ hashBuffer[1];
                 m[2] = m[2] ^ hashBuffer[2];
@@ -500,6 +444,7 @@ namespace osuCrypto
                 m[7] = m[7] ^ hashBuffer[7];
 
 
+                // extract the choice bit from the LSB of r
                 u32 b0 = _mm_testc_si128(r[0], OneBlock);
                 u32 b1 = _mm_testc_si128(r[1], OneBlock);
                 u32 b2 = _mm_testc_si128(r[2], OneBlock);
@@ -509,6 +454,7 @@ namespace osuCrypto
                 u32 b6 = _mm_testc_si128(r[6], OneBlock);
                 u32 b7 = _mm_testc_si128(r[7], OneBlock);
 
+                // pack the choice bits.
                 choices.data()[i / 8] =
                     b0 ^
                     (b1 << 1) ^
@@ -527,8 +473,7 @@ namespace osuCrypto
             for (u64 i = n8; i < messages.size(); ++i)
             {
                 auto m = &messages[i];
-                auto r = &rT(i);
-
+                auto r = &mA[i];
                 m[0] = r[0] & mask;
 
                 auto h = mAesFixedKey.ecbEncBlock(m[0]);
@@ -537,122 +482,120 @@ namespace osuCrypto
                 *cIter = _mm_testc_si128(r[0], OneBlock);
                 ++cIter;
             }
+        }
+        else
+        {
+            // not implemented.
+            throw RTE_LOC;
+        }
+        setTimePoint("recver.expand.ldpc.mCopyHash");
 
-            setTimePoint("recver.expand.ldpc.mCopyHash");
+    }
+
+    void SilentOtExtReceiver::ldpcMult(ChoiceBitPacking packing)// )
+    {
+
+        setTimePoint("recver.expand.ldpc.mult");
+        std::vector<u64> points(mGen.mPntCount);
+        mGen.getPoints(points, getPprfFormat());
+        if (mTimer)
+            mEncoder.setTimer(getTimer());
+
+        if (packing == ChoiceBitPacking::True)
+        {
+            // zero out the lsb of mA. We will store mC there.
+            block mask = OneBlock ^ AllOneBlock;
+            auto m8 = mN2 / 8 * 8;
+            auto r = mA.data();
+            for (u64 i = 0; i < m8; i += 8)
+            {
+                r[0] = r[0] & mask;
+                r[1] = r[1] & mask;
+                r[2] = r[2] & mask;
+                r[3] = r[3] & mask;
+                r[4] = r[4] & mask;
+                r[5] = r[5] & mask;
+                r[6] = r[6] & mask;
+                r[7] = r[7] & mask;
+                r += 8;
+            }
+            for (u64 i = m8; i < mN2; ++i)
+            {
+                mA[i] = mA[i] & mask;
+            }
+
+            // set the lsb of mA to be mC.
+            for (auto p : points)
+                mA[p] = mA[p] | OneBlock;
+            setTimePoint("recver.expand.ldpc.mask");
+
+            // encode both mA and mC (which is the lsb of mA)
+            mEncoder.cirTransEncode(mA);
+            setTimePoint("recver.expand.ldpc.cirTransEncode");
 
         }
         else
         {
-
-            if(mChoiceSpan.size() != rT.size())
+            // allocate and initialize mC
+            if (mChoiceSpanSize < mN2)
             {
-                mChoicePtr.reset((new u8[rT.size()]()));
-                mChoiceSpan = span<u8>(mChoicePtr.get() , rT.size());
+                mChoiceSpanSize = mN2;
+                mChoicePtr.reset((new u8[mN2]()));
             }
             else
-            {
-                std::memset(mChoicePtr.get(), 0, rT.size());
-            }
-
+                std::memset(mChoicePtr.get(), 0, mN2);
+            mC = span<u8>(mChoicePtr.get(), mN2);
             auto cc = mChoicePtr.get();
             for (auto p : points)
-            {
-                if (cc[p] != 0)
-                    throw RTE_LOC;
                 cc[p] = 1;
-            }
-            mEncoder.cirTransEncode2<block, u8>(
-                span<block>(rT), 
-                mChoiceSpan);
+
+            // encode both the mA and mC vectors in place.
+            mEncoder.cirTransEncode2<block, u8>(mA, mC);
             setTimePoint("recver.expand.ldpc.cirTransEncode");
-
-            if (mCopy)
-            {
-                std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-                setTimePoint("recver.expand.ldpc.copy");
-                std::memcpy(messages.data(), rT.data(), messages.size() * sizeof(block));
-                for (u64 i = 0; i < choices.size(); ++i)
-                {
-                    *cIter = cc[i];
-                    ++cIter;
-                }
-                setTimePoint("recver.expand.ldpc.copyBits");
-            }
-
         }
-
     }
 
-    void SilentOtExtReceiver::randMulQuasiCyclic(Matrix<block>& rT, span<block>& messages, BitVector& choices, u64 threads)
+    void SilentOtExtReceiver::randMulQuasiCyclic(ChoiceBitPacking packing)
     {
-        setTimePoint("recver.expand.QuasiCyclic");
-        auto nBlocks = mN / 128;
-        auto n2Blocks = mN2 / 128;
-        auto n64 = i64(nBlocks * 2);
-
-        const u64 rows(128);
-        if (rT.rows() != rows)
-            throw RTE_LOC;
-        if (rT.cols() != n2Blocks)
-            throw RTE_LOC;
-
         using namespace bpm;
-        //std::cout << (a64.data()) << " " << (a.data()) << std::endl;
-        //u64 * a64ptr = (u64*)a.data();
+        setTimePoint("recver.expand.QuasiCyclic");
+        const u64 rows(128);
+        auto nBlocks = mN / rows;
+        auto n2Blocks = mN2 / rows;
+        auto n64 = i64(nBlocks * 2);
+        MatrixView<block> rT(mA.data(), rows, n2Blocks);
 
-        BitVector sb(mN2);
-        for (u64 i = 0; i < mS.size(); ++i)
-        {
-            sb[mS[i]] = 1;
-        }
-        //std::vector<bpm::FFTPoly> c(rows);
         std::vector<FFTPoly> a(mScaler - 1);
-
         Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
-
-        if (static_cast<u64>(messages.size()) > mN)
-            throw RTE_LOC;
-
-        choices.resize(mN);
 
         std::array<ThreadBarrier, 2> brs;
         for (u64 i = 0; i < brs.size(); ++i)
-            brs[i].reset(threads);
-
-        //std::vector<std::array<int, 4>> counts(threads);
+            brs[i].reset(mNumThreads);
 
         setTimePoint("recver.expand.qc.Setup");
 
         auto routine = [&](u64 index)
         {
-
             if (index == 0)
                 setTimePoint("recver.expand.qc.routine");
 
-            //auto& count = counts[index];
             FFTPoly cPoly;
             FFTPoly bPoly;
             Matrix<block>tt(1, 2 * nBlocks, AllocType::Uninitialized);
-            //std::vector<block> temp128(2 * nBlocks);
             auto temp128 = tt[0];
             FFTPoly::DecodeCache cache;
 
-
-            for (u64 s = index + 1; s < mScaler; s += threads)
+            for (u64 s = index + 1; s < mScaler; s += mNumThreads)
             {
                 auto a64 = spanCast<u64>(temp128).subspan(n64);
 
                 PRNG pubPrng(toBlock(s));
-
-                //pubPrng.mAes.ecbEncCounterMode(0, nBlocks, temp128.data());
                 pubPrng.get(a64.data(), a64.size());
-                //mAesFixedKey.ecbEncCounterMode(s * nBlocks, nBlocks, temp128.data());
+
                 if (index == 0)
                     setTimePoint("recver.expand.qc.rand");
                 a[s - 1].encode(a64);
             }
-
-
 
             brs[0].decrementWait();
 
@@ -665,7 +608,6 @@ namespace osuCrypto
                 {
                     auto& aPoly = a[s - 1];
                     auto b64 = spanCast<u64>(b128).subspan(s * n64, n64);
-
                     bPoly.encode(b64);
 
                     if (s == 1)
@@ -687,73 +629,80 @@ namespace osuCrypto
 
                 // reduce s[i] mod (x^p - 1) and store it at cModP1[i]
                 modp(dest, temp128, mP);
-
             };
 
-            for (u64 i = index; i < rows + 1; i += threads)
+            auto stop = packing == ChoiceBitPacking::True ?
+                rows :
+                rows + 1;
+
+            for (u64 i = index; i < stop; i += mNumThreads)
             {
-                if (i < rows)
+
+                bool computeCVec =
+                    (i == 0 && packing == ChoiceBitPacking::True) ||
+                    (i == rows);
+
+                if (computeCVec)
+                {
+                    // the choice vector
+                    BitVector sb(mN2);
+                    for (u64 i = 0; i < mS.size(); ++i)
+                        sb[mS[i]] = 1;
+
+                    if (packing == ChoiceBitPacking::True)
+                    {
+                        // make the LSB of mA be the choice bit.
+                        multAddReduce(sb.getSpan<block>(), cModP1[i]);
+                    }
+                    else
+                    {
+                        std::vector<block> c128(nBlocks);
+                        multAddReduce(sb.getSpan<block>(), c128);
+
+                        if (mChoiceSpanSize < mRequestedNumOts)
+                        {
+                            mChoiceSpanSize = mRequestedNumOts;
+                            mChoicePtr.reset(new u8[mChoiceSpanSize]);
+                        }
+
+                        BitIterator iter((u8*)c128.data());
+                        mC = span<u8>(mChoicePtr.get(), mRequestedNumOts);
+                        for (u64 j = 0; j < mRequestedNumOts; ++j)
+                        {
+                            mC[j] = *iter;
+                            ++iter;
+                        }
+                    }
+
+                }
+                else 
                 {
                     multAddReduce(rT[i], cModP1[i]);
                 }
-                else
-                {
-                    span<block> c128 = choices.getSpan<block>();
-                    multAddReduce(sb.getSpan<block>(), c128);
-                    choices.resize(messages.size());
-                }
             }
-
 
             if (index == 0)
                 setTimePoint("recver.expand.qc.mulAddReduce");
 
-
             brs[1].decrementWait();
 
+            // transpose and copy into the mA vector.
 
-
-
-            //MatrixView<block> view(messages.begin(), messages.end(), 1);
-            //transpose(cModP1, view);
-    //#define NO_HASH
-            std::array<block, 8> hashBuffer;
-            auto numBlocks = messages.size() / 128;
-            auto begin = index * numBlocks / threads;
-            auto end = (index + 1) * numBlocks / threads;
+            auto numBlocks = mRequestedNumOts / 128;
+            auto begin = index * numBlocks / mNumThreads;
+            auto end = (index + 1) * numBlocks / mNumThreads;
             for (u64 i = begin; i < end; ++i)
-
-                //for (u64 i = index; i < numBlocks; i += threads)
             {
                 u64 j = i * 128;
-                auto& tpBuffer = *(std::array<block, 128>*)(messages.data() + j);
-
-                //for (u64 j = 0, k = i; j < tpBuffer.size(); ++j, k += cModP1.cols())
-                //	tpBuffer[j] = cModP1(k);
+                auto& tpBuffer = *(std::array<block, 128>*)(mA.data() + j);
 
                 for (u64 k = 0; k < 128; ++k)
                     tpBuffer[k] = cModP1(k, i);
 
                 transpose128(tpBuffer);
-
-#ifndef NO_HASH
-                for (u64 k = 0; k < 128; k += 8)
-                {
-                    mAesFixedKey.ecbEncBlocks(tpBuffer.data() + k, hashBuffer.size(), hashBuffer.data());
-
-                    tpBuffer[k + 0] = tpBuffer[k + 0] ^ hashBuffer[0];
-                    tpBuffer[k + 1] = tpBuffer[k + 1] ^ hashBuffer[1];
-                    tpBuffer[k + 2] = tpBuffer[k + 2] ^ hashBuffer[2];
-                    tpBuffer[k + 3] = tpBuffer[k + 3] ^ hashBuffer[3];
-                    tpBuffer[k + 4] = tpBuffer[k + 4] ^ hashBuffer[4];
-                    tpBuffer[k + 5] = tpBuffer[k + 5] ^ hashBuffer[5];
-                    tpBuffer[k + 6] = tpBuffer[k + 6] ^ hashBuffer[6];
-                    tpBuffer[k + 7] = tpBuffer[k + 7] ^ hashBuffer[7];
-                }
-#endif
             }
 
-            auto rem = messages.size() % 128;
+            auto rem = mRequestedNumOts % 128;
             if (rem && index == 0)
             {
                 std::array<block, 128> tpBuffer;
@@ -763,48 +712,43 @@ namespace osuCrypto
 
                 transpose128(tpBuffer);
 
-#ifndef NO_HASH
-                for (i64 k = 0; k < rem; ++k)
-                {
-                    tpBuffer[k] = tpBuffer[k] ^ mAesFixedKey.ecbEncBlock(tpBuffer[k]);
-                }
-#endif
-
-                memcpy(messages.data() + numBlocks * 128, tpBuffer.data(), rem * sizeof(block));
+                memcpy(mA.data() + numBlocks * 128, tpBuffer.data(), rem * sizeof(block));
             }
 
             if (index == 0)
                 setTimePoint("recver.expand.qc.transposeXor");
-
         };
 
 
-        std::vector<std::thread> thrds(threads - 1);
+        std::vector<std::thread> thrds(mNumThreads - 1);
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i] = std::thread(routine, i);
 
         routine(thrds.size());
 
-        //auto totals = counts.back();
         for (u64 i = 0; i < thrds.size(); ++i)
-        {
             thrds[i].join();
-            //for (u64 j = 0; j < totals.size(); ++j)
-            //{
 
-            //	totals[j] += counts[i][j];
-            //}
-        }
-        //		for (u64 i = 0; i < counts.size(); ++i)
-        //			lout << "count[" << i << "] " << counts[i][0] << " " << counts[i][1] << " " << counts[i][2] << " " << counts[i][3] << std::endl;
-
-        //		lout << "total " << totals[0] << " " << totals[1] << " " << totals[2] << " " << totals[3] << std::endl;
     }
 
     void SilentOtExtReceiver::clear()
     {
         mN = 0;
+        mN2 = 0;
+        mRequestedNumOts = 0;
+        mSizePer = 0;
+
+        mC = {};
+        mChoicePtr = {};
+        mChoiceSpanSize = 0;
+
+        mA = {};
+        mBacking = {};
+        mBackingSize = {};
+
         mGen.clear();
+
+        mS = {};
     }
 
 

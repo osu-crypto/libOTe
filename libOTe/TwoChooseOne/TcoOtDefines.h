@@ -14,7 +14,6 @@ namespace osuCrypto
 
 	enum class MultType
 	{
-		Naive = 0,
 		QuasiCyclic = 1,
 		slv5 = 2,
 		slv11 = 3

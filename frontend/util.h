@@ -4,15 +4,132 @@
 
 
 #include <cryptoTools/Common/CLP.h>
+#include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Network/Channel.h>
-void senderGetLatency(osuCrypto::Channel& chl);
+#include "libOTe/config.h"
+#include <functional>
+#include <string>
 
-void recverGetLatency(osuCrypto::Channel& chl);
-void getLatency(osuCrypto::CLP& cmd);
 
-enum class Role
+namespace osuCrypto
 {
-	Sender,
-	Receiver
-};
-void sync(osuCrypto::Channel& chl, Role role);
+
+    void senderGetLatency(Channel& chl);
+
+    void recverGetLatency(Channel& chl);
+    void getLatency(CLP& cmd);
+
+    enum class Role
+    {
+        Sender,
+        Receiver
+    };
+
+    void sync(Channel& chl, Role role);
+
+
+
+    using ProtocolFunc = std::function<void(Role, int, int, std::string, std::string, CLP&)>;
+
+    inline bool runIf(ProtocolFunc protocol, CLP& cmd, std::vector<std::string> tag)
+    {
+        auto n = cmd.isSet("nn")
+            ? (1 << cmd.get<int>("nn"))
+            : cmd.getOr("n", 0);
+
+        auto t = cmd.getOr("t", 1);
+        auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
+
+        if (cmd.isSet(tag))
+        {
+            if (cmd.hasValue("r"))
+            {
+                auto role = cmd.get<int>("r") ? Role::Sender : Role::Receiver;
+                protocol(role, n, t, ip, tag.back(), cmd);
+            }
+            else
+            {
+                auto thrd = std::thread([&] {
+                    try { protocol(Role::Sender, n, t, ip, tag.back(), cmd); }
+                    catch (std::exception& e)
+                    {
+                        lout << e.what() << std::endl;
+                    }
+                    });
+
+                try { protocol(Role::Receiver, n, t, ip, tag.back(), cmd); }
+                catch (std::exception& e)
+                {
+                    lout << e.what() << std::endl;
+                }
+                thrd.join();
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+
+
+
+#define LINE "------------------------------------------------------"
+#define TOTALOTS 10
+#define SETSIZE 2<<10
+
+#ifdef ENABLE_SIMPLESTOT
+    const bool spEnabled = true;
+#else 
+    const bool spEnabled = false;
+#endif
+#ifdef ENABLE_SIMPLESTOT_ASM
+    const bool spaEnabled = true;
+#else 
+    const bool spaEnabled = false;
+#endif
+#ifdef ENABLE_IKNP
+    const bool iknpEnabled = true;
+#else 
+    const bool iknpEnabled = false;
+#endif
+#ifdef ENABLE_DELTA_IKNP
+    const bool diknpEnabled = true;
+#else 
+    const bool diknpEnabled = false;
+#endif
+#ifdef ENABLE_KOS
+    const bool kosEnabled = true;
+#else 
+    const bool kosEnabled = false;
+#endif
+#ifdef ENABLE_DELTA_KOS
+    const bool dkosEnabled = true;
+#else 
+    const bool dkosEnabled = false;
+#endif
+#ifdef ENABLE_NP
+    const bool npEnabled = true;
+#else 
+    const bool npEnabled = false;
+#endif
+
+#ifdef ENABLE_OOS
+    const bool oosEnabled = true;
+#else 
+    const bool oosEnabled = false;
+#endif
+#ifdef ENABLE_KKRT
+    const bool kkrtEnabled = true;
+#else 
+    const bool kkrtEnabled = false;
+#endif
+
+#ifdef ENABLE_SILENTOT
+    const bool silentEnabled = true;
+#else 
+    const bool silentEnabled = false;
+#endif
+
+
+}

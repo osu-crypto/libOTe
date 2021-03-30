@@ -70,7 +70,7 @@ namespace osuCrypto
         std::vector<block> mC;
 
         u64 mBackingSize = 0;
-        std::unique_ptr<block> mBacking;
+        std::unique_ptr<block[]> mBacking;
 
         bool mDebug = false;
 

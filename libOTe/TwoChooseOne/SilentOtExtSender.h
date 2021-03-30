@@ -18,16 +18,16 @@ namespace osuCrypto
 
     // Silent OT works a bit different than normal OT extension
     // This stems from that fact that is needs many base OTs which are
-    // of chosen message and choosen choice. Normal OT extension 
+    // of chosen message and chosen choice. Normal OT extension 
     // requires about 128 random OTs. 
     // 
-    // This is further complicated by the fact that that silent OT
+    // This is further complicated by the fact that silent OT
     // naturally samples the choice bits at random while normal OT
     // lets you choose them. Due to this we give two interfaces.
     //
     // The first satisfies the original OT extension interface. That is
     // you can call genBaseOts(...) or setBaseOts(...) just as before
-    // and interanlly the implementation will transform these into
+    // and internally the implementation will transform these into
     // the required base OTs. You can also directly call send(...) or receive(...)
     // just as before and the receiver can specify the OT messages
     // that they wish to receive. However, using this interface results 
@@ -62,17 +62,60 @@ namespace osuCrypto
     {
     public:
 
-        SilentMultiPprfSender mGen;
-        u64 mP, mN2, mN = 0, mNumPartitions, mScaler, mSizePer, mNumThreads;
+
+        // the number of OTs being requested.
+        u64 mRequestNumOts = 0;
+
+        // The prime for QuasiCycic encoding
+        u64 mP = 0;
+
+        // The sparse vector size, this will be mN * mScaler.
+        u64 mN2 = 0;
+        
+        // The dense vector size, this will be at least as big as mRequestedNumOts.
+        u64 mN = 0;
+        
+        // The number of regular section of the sparse vector.
+        u64 mNumPartitions = 0;
+        
+        // The size of each regular section of the sparse vector.
+        u64 mSizePer = 0;
+        
+        // The scaling factor that the sparse vector will be compressed by.
+        u64 mScaler = 2;
+
+        // The B vector in the relation A + B = C * delta
+        span<block> mB;
+
+        // The delta scaler in the relation A + B = C * delta
+        block mDelta;
+
+        u64 mNumThreads = 1;
+
 #ifdef ENABLE_IKNP
+        // Iknp instance used to generate the base OTs.
         IknpOtExtSender mIknpSender;
 #endif
+
+        // The ggm tree thats used to generate the sparse vectors.
+        SilentMultiPprfSender mGen;
+
+        // The type of compress we will use to generate the
+        // dense vectors from the sparse vectors.
         MultType mMultType = MultType::slv5;
+
+        // The Silver encoder for MultType::slv5, MultType::slv11
         S1DiagRegRepEncoder mEncoder;
-        bool mHash = false, mCopy = true;
-        //LdpcEncoder mLdpcEncoder;
-        Matrix<block> rT;
-        block mDelta = ZeroBlock;
+
+
+        // The memory backing mB
+        std::unique_ptr<block[]> mBacking;
+
+        // The size of the memory backing mB
+        u64 mBackingSize = 0;
+
+        // A flag that helps debug
+        bool mDebug = false;
 
 
         /////////////////////////////////////////////////////
@@ -89,31 +132,14 @@ namespace osuCrypto
         void setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices,
-            Channel& chl) override
-        {
-#ifdef ENABLE_IKNP
-            mIknpSender.setBaseOts(baseRecvOts, choices, chl);
-#else
-            throw std::runtime_error("IKNP must be enabled");
-#endif
-        }
+            Channel& chl) override;
 
-        // Returns an indpendent copy of this extender.
-        std::unique_ptr<OtExtSender> split() override
-        {
-            throw std::runtime_error("not impl");
-        }
+        // Returns an independent copy of this extender.
+        std::unique_ptr<OtExtSender> split() override;
 
         // use the default base OT class to generate the
         // IKNP base OTs that are required.
-        void genBaseOts(PRNG& prng, Channel& chl) override
-        {
-#ifdef ENABLE_IKNP
-            mIknpSender.genBaseOts(prng, chl);
-#else
-            throw std::runtime_error("IKNP must be enabled");
-#endif
-        }
+        void genBaseOts(PRNG& prng, Channel& chl) override;
 
         // Perform OT extension of random OT messages but
         // allow the receiver to specify the choice bits.
@@ -126,6 +152,12 @@ namespace osuCrypto
         /////////////////////////////////////////////////////
         // The native silent OT extension interface
         /////////////////////////////////////////////////////
+
+
+        bool hasSilentBaseOts() const
+        {
+            return mGen.hasBaseOts();
+        }
 
         // Generate the silent base OTs. If the Iknp 
         // base OTs are set then we do an IKNP extend,
@@ -141,8 +173,7 @@ namespace osuCrypto
             u64 n,
             u64 scaler = 2,
             u64 secParam = 128,
-            u64 numThreads = 1,
-            block delta = ZeroBlock);
+            u64 numThreads = 1);
 
         // return true if this instance has been configured.
         bool isConfigured() const { return mN > 0; }
@@ -155,46 +186,44 @@ namespace osuCrypto
         // bits must be the one return by sampleBaseChoiceBits(...).
         void setSlientBaseOts(span<std::array<block,2>> sendBaseOts);
 
-        // This is an "all-in-one" function that generates the base
-        // OTs in various ways.
-        void genBase(
-            u64 n, Channel& chl, PRNG& prng,
-            u64 scaler = 2, u64 secParam = 128,
-            SilentBaseType base = SilentBaseType::BaseExtend,
-            u64 threads = 1);
 
-        // The native OT extension interface of silent
-        // OT. The receiver does not get to specify 
-        // which OT message they receiver. Instead
-        // the protocol picks them at random. Use the 
-        // send(...) interface for the normal behavior.
+        // Runs the silent random OT protocol and outputs b.
+        // Then this will generate random OTs, where c is a random 
+        // bit vector and a[i] = b[i][c[i]].
         void silentSend(
-            span<std::array<block, 2>> messages,
+            span<std::array<block, 2>> b,
             PRNG& prng,
             Channel& chl);
 
-        // A parallel exection version of the other
-        // silentSend(...) function. 
-
-        void silentSend(
-            span<std::array<block, 2>> messages,
-            PRNG& prng,
-            span<Channel> chls);
-
+        // Runs the silent correlated OT protocol and outputs b.
+        // The protocol takes as input the desired delta value.
+        // The outputs will have the relation:
+        //      a[i] = b[i] + c[i] * delta.
 		void silentSend(
-			MatrixView<block> messages,
+            block d,
+			span<block> b,
 			PRNG& prng,
-			span<Channel> chls);
+			Channel& chls);
 
+        // Runs the silent correlated OT protocol and store
+        // the b vector internally as mB. The protocol takes 
+        // as input the desired delta value. The outputs will 
+        // have the relation:
+        //     a[i] = b[i] + c[i] * delta.
+        void silentSendInplace(
+            block d,
+            u64 n,
+            PRNG& prng,
+            Channel& chls);
 
         // interal functions
+        void randMulQuasiCyclic();
+        void ldpcMult();
 
-        void randMulNaive(Matrix<block>& rT, MatrixView<block>& messages);
-        void randMulQuasiCyclic(Matrix<block>& rT, MatrixView<block>& messages, u64 threads);
-        void ldpcMult(Matrix<block>& rT, MatrixView<block>& messages, u64 threads);
 
-        bool mDebug = false;
-        void checkRT(span<Channel> chls, Matrix<block>& rT);
+        void hash(span<std::array<block, 2>> messages, ChoiceBitPacking type);
+
+        void checkRT(Channel& chls);
 
         void clear();
     };

@@ -230,6 +230,8 @@ namespace osuCrypto
         mEncoder.cirTransEncode(mB);
         setTimePoint("sender.expand.ldpc.cirTransEncode");
 
+        mB = span<block>(mBacking.get(), mRequestedNumOTs);
+
         mState = State::Default;
     }
 
