@@ -422,7 +422,7 @@ namespace osuCrypto
         {
             MatrixView<block> rT(mB.data(), 128, mN2 / 128);
 
-            mGen.expand(chl, mDelta, prng, rT, PprfOutputFormat::InterleavedTransposed, false);
+            mGen.expand(chl, mDelta, prng, rT, PprfOutputFormat::InterleavedTransposed, false, mNumThreads);
             setTimePoint("sender.expand.pprf_transpose");
             gTimer.setTimePoint("sender.expand.pprf_transpose");
 
@@ -450,7 +450,7 @@ namespace osuCrypto
             chl.send(std::move(gapVals));
 
 
-            mGen.expand(chl, mDelta, prng, mB.subspan(0,main), PprfOutputFormat::Interleaved, false);
+            mGen.expand(chl, mDelta, prng, mB.subspan(0,main), PprfOutputFormat::Interleaved, false, mNumThreads);
             setTimePoint("sender.expand.pprf_transpose");
             gTimer.setTimePoint("sender.expand.pprf_transpose");
 

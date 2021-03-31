@@ -308,7 +308,7 @@ namespace osuCrypto
         setTimePoint("recver.expand.start");
 
         // expand the seeds into mA
-        mGen.expand(chl, prng, mA.subspan(0, mNumPartitions*mSizePer), PprfOutputFormat::Interleaved, false);
+        mGen.expand(chl, prng, mA.subspan(0, mNumPartitions*mSizePer), PprfOutputFormat::Interleaved, false, mNumThreads);
 
         if (mDebug)
         {

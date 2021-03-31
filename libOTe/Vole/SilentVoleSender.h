@@ -37,9 +37,9 @@ namespace osuCrypto
         u64 mRequestedNumOTs = 0;
         u64 mN2 = 0;
         u64 mN = 0;
-        u64 mNumPartitions;
-        u64 mSizePer;
-        u64 mNumThreads;
+        u64 mNumPartitions = 0;
+        u64 mSizePer = 0;
+        u64 mNumThreads = 1;
         //u64 mGapOts = 0;
         std::vector<std::array<block, 2>> mGapOts;
 

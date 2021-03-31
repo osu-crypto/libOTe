@@ -61,22 +61,22 @@ namespace osuCrypto
         void setBase(span<std::array<block, 2>> baseMessages);
 
         // expand the whole PPRF and store the result in output
-        block expand(Channel& chl, block value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal)
+        block expand(Channel& chl, block value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads)
         {
             MatrixView<block> o(output.data(), output.size(), 1);
-            return expand(chl, value, prng, o, oFormat, mal);
+            return expand(chl, value, prng, o, oFormat, mal, numThreads);
         }
 
 
-        block expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
-        block expand(span<Channel> chls, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
+        block expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads);
+        //block expand(span<Channel> chls, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
 
-        block expand(Channel& chls, span<block> value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal)
+        block expand(Channel& chls, span<block> value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads)
         {
             MatrixView<block> o(output.data(), output.size(), 1);
-            return expand({ &chls, 1 }, value, prng, o, oFormat, mal);
+            return expand(chls, value, prng, o, oFormat, mal, numThreads);
         }
-        block expand(span<Channel> chls, span<block> value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
+        block expand(Channel& chl, span<block> value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads);
 
 
         void setValue(span<block> value);
@@ -121,13 +121,13 @@ namespace osuCrypto
         void getPoints(span<u64> points, PprfOutputFormat format);
 		//void getInterleavedPoints(span<u64> points);
 
-        block expand(Channel& chl, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal)
+        block expand(Channel& chl, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads)
         {
             MatrixView<block> o(output.data(), output.size(), 1);
-            return expand(chl, prng, o, oFormat, mal);
+            return expand(chl, prng, o, oFormat, mal, numThreads);
         }
-        block expand(Channel& chl, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
-		block expand(span<Channel> chl, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
+        block expand(Channel& chl, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads);
+		//block expand(Channel& chl, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
 
         void clear()
         {

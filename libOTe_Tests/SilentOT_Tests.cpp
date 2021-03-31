@@ -638,13 +638,9 @@ void Tools_Pprf_test(const CLP& cmd)
     Session s1(ios, "localhost:1212", SessionMode::Client);
 
 
-    std::vector<Channel> chls0(threads), chls1(threads);
+    auto chl0 = s0.addChannel();
+    auto chl1 = s1.addChannel();
 
-    for (u64 i = 0; i < threads; ++i)
-    {
-        chls0[i] = s0.addChannel();
-        chls1[i] = s1.addChannel();
-    }
 
     auto format = PprfOutputFormat::Plain;
     SilentMultiPprfSender sender;
@@ -675,8 +671,8 @@ void Tools_Pprf_test(const CLP& cmd)
     std::vector<u64> points(numPoints);
     recver.getPoints(points, format);
 
-    sender.expand(chls0, CCBlock, prng, sOut, format, false);
-    recver.expand(chls1, prng, rOut, format, false);
+    sender.expand(chl0, CCBlock, prng, sOut, format, false, threads);
+    recver.expand(chl1, prng, rOut, format, false, threads);
     bool failed = false;
 
 
@@ -729,12 +725,9 @@ void Tools_Pprf_trans_test(const CLP& cmd)
     Session s0(ios, "localhost:1212", SessionMode::Server);
     Session s1(ios, "localhost:1212", SessionMode::Client);
 
-    std::vector<Channel> chls0(threads), chls1(threads);
-    for (u64 i = 0; i < threads; ++i)
-    {
-        chls0[i] = s0.addChannel();
-        chls1[i] = s1.addChannel();
-    }
+
+    auto chl0 = s0.addChannel();
+    auto chl1 = s1.addChannel();
 
 
 
@@ -770,8 +763,8 @@ void Tools_Pprf_trans_test(const CLP& cmd)
 
 
 
-    sender.expand(chls0, AllOneBlock, prng, sOut, format, mal);
-    recver.expand(chls1, prng, rOut, format, mal);
+    sender.expand(chl0, AllOneBlock, prng, sOut, format, mal, threads);
+    recver.expand(chl1, prng, rOut, format, mal, threads);
     bool failed = false;
 
     Matrix<block> out(128, cols);
@@ -838,12 +831,9 @@ void Tools_Pprf_inter_test(const CLP& cmd)
     Session s0(ios, "localhost:1212", SessionMode::Server);
     Session s1(ios, "localhost:1212", SessionMode::Client);
 
-    std::vector<Channel> chls0(threads), chls1(threads);
-    for (u64 i = 0; i < threads; ++i)
-    {
-        chls0[i] = s0.addChannel();
-        chls1[i] = s1.addChannel();
-    }
+
+    auto chl0 = s0.addChannel();
+    auto chl1 = s1.addChannel();
 
 
 
@@ -876,8 +866,8 @@ void Tools_Pprf_inter_test(const CLP& cmd)
     recver.getPoints(points, format);
 
 
-    sender.expand(chls0, AllOneBlock, prng, sOut2, format, mal);
-    recver.expand(chls1, prng, rOut2, format, mal);
+    sender.expand(chl0, AllOneBlock, prng, sOut2, format, mal, threads);
+    recver.expand(chl1, prng, rOut2, format, mal, threads);
 
     for (u64 i = 0; i < rOut2.rows(); ++i)
     {

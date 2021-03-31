@@ -395,7 +395,7 @@ namespace osuCrypto
             MatrixView<block> rT(mA.data(), 128, mN2 / 128);
 
             // locally expand the seeds.
-            mGen.expand(chl, prng, rT, PprfOutputFormat::InterleavedTransposed, false);
+            mGen.expand(chl, prng, rT, PprfOutputFormat::InterleavedTransposed, false, mNumThreads);
             setTimePoint("recver.expand.pprf_transpose");
 
             if (mDebug)
@@ -425,7 +425,7 @@ namespace osuCrypto
             }
 
 
-            mGen.expand(chl, prng, mA.subspan(0, main), PprfOutputFormat::Interleaved, false);
+            mGen.expand(chl, prng, mA.subspan(0, main), PprfOutputFormat::Interleaved, false, mNumThreads);
             setTimePoint("recver.expand.pprf_transpose");
             gTimer.setTimePoint("recver.expand.pprf_transpose");
 

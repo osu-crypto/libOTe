@@ -77,6 +77,8 @@ namespace osuCrypto
         u64 mBackingSize = 0;
         std::unique_ptr<block[]> mBacking;
 
+        u64 mNumThreads = 1;
+
         bool mDebug = false;
 
         BitVector mIknpSendBaseChoice, mGapBaseChoice;

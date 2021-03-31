@@ -258,7 +258,7 @@ namespace osuCrypto
         // sends data
         auto bb = span<block>(beta.data(), mNumPartitions);
         auto mbb = mB.subspan(0, mNumPartitions * mSizePer);
-        mGen.expand(chl, bb, prng, mbb, PprfOutputFormat::Interleaved, false);
+        mGen.expand(chl, bb, prng, mbb, PprfOutputFormat::Interleaved, false, mNumThreads);
         setTimePoint("sender.expand.pprf_transpose");
         gTimer.setTimePoint("sender.expand.pprf_transpose");
 
