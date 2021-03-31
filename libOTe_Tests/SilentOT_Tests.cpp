@@ -183,6 +183,15 @@ namespace {
         PRNG& prng,
         SilentOtExtReceiver& recver, SilentOtExtSender& sender)
     {
+        sender.configure(n, s, 128, threads);
+        auto count = sender.silentBaseOtCount();
+        std::vector<std::array<block, 2>> msg2(count);
+        for (u64 i = 0; i < msg2.size(); ++i)
+        {
+            msg2[i][0] = prng.get();
+            msg2[i][1] = prng.get();
+        }
+        sender.setSilentBaseOts(msg2);
 
         // fake base OTs.
         {
@@ -190,21 +199,8 @@ namespace {
             BitVector choices = recver.sampleBaseChoiceBits(prng);
             std::vector<block> msg(choices.size());
             for (u64 i = 0; i < msg.size(); ++i)
-                msg[i] = toBlock(i, choices[i]);
-            recver.setSlientBaseOts(msg);
-        }
-
-        {
-            sender.configure(n, s, 128, threads);
-            auto count = sender.silentBaseOtCount();
-            std::vector<std::array<block, 2>> msg(count);
-            PRNG prngz(ZeroBlock);
-            for (u64 i = 0; i < msg.size(); ++i)
-            {
-                msg[i][0] = toBlock(i, 0);
-                msg[i][1] = toBlock(i, 1);
-            }
-            sender.setSlientBaseOts(msg);
+                msg[i] = msg2[i][choices[i]];
+            recver.setSilentBaseOts(msg);
         }
     }
 }
@@ -446,13 +442,13 @@ void OtExt_Silent_inplace_Test(const CLP& cmd)
 
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
-    fakeBase(n, s, threads, prng, recver, sender);
 
     block delta = prng.get();
 
     auto type = OTType::Correlated;
 
     {
+        fakeBase(n, s, threads, prng, recver, sender);
         sender.silentSendInplace(delta, n, prng, chl0);
         recver.silentReceiveInplace(n, prng, chl1);
         auto& messages = recver.mA;
@@ -463,13 +459,13 @@ void OtExt_Silent_inplace_Test(const CLP& cmd)
     }
 
     {
+        fakeBase(n, s, threads, prng, recver, sender);
         sender.silentSendInplace(delta, n, prng, chl0);
         recver.silentReceiveInplace(n, prng, chl1, ChoiceBitPacking::True);
 
         auto& messages = recver.mA;
         auto& messages2 = sender.mB;
         auto& choice = recver.mC;
-        block mask = AllOneBlock ^ OneBlock;
         checkCorrelated(messages, messages2, choice, delta, 
             n, verbose, ChoiceBitPacking::True);
 
@@ -560,17 +556,18 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
 
     for (auto n : nn)
     {
-        fakeBase(n, s, threads, prng, recver, sender);
 
         std::vector<std::array<block, 2>> msg2(n);
         std::vector<block> msg1(n);
         BitVector choice(n);
 
+        fakeBase(n, s, threads, prng, recver, sender);
         sender.silentSend(msg2, prng, chl0);
         recver.silentReceive(choice, msg1, prng, chl1);
         checkRandom(msg1, msg2, choice, n, verbose);
 
         auto type = ChoiceBitPacking::False;
+        fakeBase(n, s, threads, prng, recver, sender);
         sender.silentSendInplace(delta, n, prng, chl0);
         recver.silentReceiveInplace(n, prng, chl1, type);
         checkCorrelated(recver.mA, sender.mB, recver.mC, delta, n, verbose, type);

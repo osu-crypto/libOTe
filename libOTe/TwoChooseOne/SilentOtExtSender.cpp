@@ -116,7 +116,7 @@ namespace osuCrypto
         throw std::runtime_error("IKNP or base OTs must be enabled");
 #endif
 
-        mGen.setBase(msg);
+        setSilentBaseOts(msg);
 
         setTimePoint("sender.gen.done");
     }
@@ -126,57 +126,89 @@ namespace osuCrypto
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
 
-        return mGen.baseOtCount();
+        return mGen.baseOtCount() + mGapOts.size();
     }
 
-    void SilentOtExtSender::setSlientBaseOts(
+    void SilentOtExtSender::setSilentBaseOts(
         span<std::array<block, 2>> sendBaseOts)
     {
-        mGen.setBase(sendBaseOts);
+        auto genOt = sendBaseOts.subspan(0, mGen.baseOtCount());
+        auto gapOt = sendBaseOts.subspan(genOt.size());
+        mGen.setBase(genOt);
+        std::copy(gapOt.begin(), gapOt.end(), mGapOts.begin());
+    }
+
+    void SilverConfigure(
+        u64 numOTs, u64 secParam,
+        MultType mMultType,
+        u64& mRequestedNumOTs,
+        u64& mNumPartitions,
+        u64& mSizePer,
+        u64& mN2,
+        u64& mN,
+        u64& gap,
+        S1DiagRegRepEncoder& mEncoder);
+
+    void QuasiCyclicConfigure(
+        u64 numOTs, u64 secParam,
+        u64 scaler,
+        MultType mMultType,
+        u64& mRequestedNumOTs,
+        u64& mNumPartitions,
+        u64& mSizePer,
+        u64& mN2,
+        u64& mN,
+        u64& mP,
+        u64& mScaler)
+
+    {
+        mRequestedNumOTs = numOTs;
+        mP = nextPrime(std::max<u64>(numOTs, 128 * 128));
+        mNumPartitions = getPartitions(scaler, mP, secParam);
+        auto ss = (mP * scaler + mNumPartitions - 1) / mNumPartitions;
+        mSizePer = roundUpTo(ss, 8);
+        mN2 = mSizePer * mNumPartitions;
+        mN = mN2 / scaler;
+        mScaler = scaler;
     }
 
     void SilentOtExtSender::configure(
         u64 numOTs, u64 scaler, u64 secParam, u64 numThreads)
     {
-        mRequestNumOts = numOTs;
-        mScaler = scaler;
         mNumThreads = numThreads;
-        u64 extra = 0;
 
         if (mMultType == MultType::slv5 || mMultType == MultType::slv11)
         {
             if (scaler != 2)
                 throw std::runtime_error("only scaler = 2 is supported for slv. " LOCATION);
 
-            mNumPartitions = getPartitions(mScaler, numOTs, secParam);
-            mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
-            mN2 = roundUpTo(mSizePer * mNumPartitions, mScaler);
-            mN = mN2 / mScaler;
-            mP = 0;
+            u64 gap;
+            SilverConfigure(numOTs, secParam,
+                mMultType,
+                mRequestNumOts,
+                mNumPartitions,
+                mSizePer,
+                mN2,
+                mN,
+                gap,
+                mEncoder);
 
-            auto code = mMultType == MultType::slv11 ?
-                LdpcDiagRegRepeaterEncoder::Weight11 :
-                LdpcDiagRegRepeaterEncoder::Weight5;
-            u64 colWeight = (u64)code;
+            mGapOts.resize(gap);
 
-            setTimePoint("config.begin");
-            mEncoder.mL.init(mN, colWeight);
-            setTimePoint("config.Left");
-            mEncoder.mR.init(mN, code, true);
-            setTimePoint("config.Right");
-
-            throw RTE_LOC;
-            extra = mEncoder.mR.mGap;
         }
         else
         {
+            QuasiCyclicConfigure(numOTs, secParam, scaler,
+                mMultType,
+                mRequestNumOts,
+                mNumPartitions,
+                mSizePer,
+                mN2,
+                mN,
+                mP,
+                mScaler);
 
-            mP = nextPrime(std::max<u64>(numOTs, 128 * 128));
-            mNumPartitions = getPartitions(scaler, mP, secParam);
-            auto ss = (mP * scaler + mNumPartitions - 1) / mNumPartitions;
-            mSizePer = roundUpTo(ss, 8);
-            mN2 = mSizePer * mNumPartitions;
-            mN = mN2 / scaler;
+            mGapOts.resize(0);
         }
 
         mGen.configure(mSizePer, mNumPartitions);
@@ -205,6 +237,8 @@ namespace osuCrypto
         mB = {};
 
         mDelta = block(0,0);
+
+        mGapOts = {};
 
         mGen.clear();
     }
@@ -402,7 +436,21 @@ namespace osuCrypto
         case MultType::slv11:
         case MultType::slv5:
         {
-            mGen.expand(chl, mDelta, prng, mB, PprfOutputFormat::Interleaved, false);
+            // derandomize the random OTs for the gap 
+            // to have the desired correlation.
+            std::vector<block> gapVals(mGapOts.size());
+            auto main = mNumPartitions * mSizePer;
+            for (u64 i = main, j = 0; i < mN2; ++i, ++j)
+            {
+                auto v = mGapOts[j][0] ^ mDelta;
+                gapVals[j] = AES(mGapOts[j][1]).ecbEncBlock(ZeroBlock) ^ v;
+                mB[i] = mGapOts[j][0];
+                //std::cout << "jj " << j << " " <<i << " " << mGapOts[j][0] << " " << v << " " << beta[mNumPartitions + j] << std::endl;
+            }
+            chl.send(std::move(gapVals));
+
+
+            mGen.expand(chl, mDelta, prng, mB.subspan(0,main), PprfOutputFormat::Interleaved, false);
             setTimePoint("sender.expand.pprf_transpose");
             gTimer.setTimePoint("sender.expand.pprf_transpose");
 

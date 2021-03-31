@@ -49,7 +49,7 @@ namespace osuCrypto
 #endif
     };
 
-    void SilentOtExtReceiver::setSlientBaseOts(span<block> recvBaseOts)
+    void SilentOtExtReceiver::setSilentBaseOts(span<block> recvBaseOts)
     {
         if (isConfigured() == false)
             throw std::runtime_error("configure(...) must be called first.");
@@ -57,8 +57,21 @@ namespace osuCrypto
         if (static_cast<u64>(recvBaseOts.size()) != silentBaseOtCount())
             throw std::runtime_error("wrong number of silent base OTs");
 
-        mGen.setBase(recvBaseOts);
+        auto genOts = recvBaseOts.subspan(0, mGen.baseOtCount());
+        auto gapOts = recvBaseOts.subspan(genOts.size());
+
+        mGen.setBase(genOts);
         mGen.getPoints(mS, getPprfFormat());
+        std::copy(gapOts.begin(), gapOts.end(), mGapOts.begin());
+
+        auto main = mNumPartitions * mSizePer;
+        for (u64 i = 0; i < mGapBaseChoice.size(); ++i)
+        {
+            if (mGapBaseChoice[i])
+            {
+                mS.push_back(main + i);
+            }
+        }
     }
 
     void SilentOtExtReceiver::genBaseOts(
@@ -72,6 +85,22 @@ namespace osuCrypto
         throw std::runtime_error("IKNP must be enabled");
 #endif
 
+    }
+
+    BitVector SilentOtExtReceiver::sampleBaseChoiceBits(PRNG& prng) {
+        if (isConfigured() == false)
+            throw std::runtime_error("configure(...) must be called first");
+
+        auto choice = mGen.sampleChoiceBits(mN2, getPprfFormat(), prng);
+
+        if (mGapOts.size())
+        {
+            mGapBaseChoice.resize(mGapOts.size());
+            mGapBaseChoice.randomize(prng);
+            choice.append(mGapBaseChoice);
+        }
+
+        return choice;
     }
 
 
@@ -102,20 +131,7 @@ namespace osuCrypto
 #else
         throw std::runtime_error("IKNP or base OTs must be enabled");
 #endif
-        mGen.setBase(msg);
-        mGen.getPoints(mS, getPprfFormat());
-
-        for (u64 i = 0; i < mS.size(); ++i)
-        {
-            if (mS[i] >= mN2)
-            {
-                for (u64 j = i; j < mS.size(); ++j)
-                {
-                    std::cout << Color::Red << "bad " << j << " " << mS[j] << " / " << mN2 << std::endl << Color::Default;
-                    std::terminate();
-                }
-            }
-        }
+        setSilentBaseOts(msg);
 
         setTimePoint("recver.gen.done");
     };
@@ -124,8 +140,32 @@ namespace osuCrypto
     {
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
-        return mGen.baseOtCount();
+        return mGen.baseOtCount() + mGapOts.size();
     }
+
+
+    void SilverConfigure(
+        u64 numOTs, u64 secParam,
+        MultType mMultType,
+        u64& mRequestedNumOTs,
+        u64& mNumPartitions,
+        u64& mSizePer,
+        u64& mN2,
+        u64& mN,
+        u64& gap,
+        S1DiagRegRepEncoder& mEncoder);
+
+    void QuasiCyclicConfigure(
+        u64 numOTs, u64 secParam,
+        u64 scaler,
+        MultType mMultType,
+        u64& mRequestedNumOTs,
+        u64& mNumPartitions,
+        u64& mSizePer,
+        u64& mN2,
+        u64& mN,
+        u64& mP,
+        u64& mScaler);
 
     void SilentOtExtReceiver::configure(
         u64 numOTs,
@@ -133,48 +173,43 @@ namespace osuCrypto
         u64 secParam,
         u64 numThreads)
     {
-        mRequestedNumOts = numOTs;
         mNumThreads = numThreads;
-        mScaler = scaler;
-        u64 numPartitions;
-        u64 extra = 0;
 
         if (mMultType == MultType::slv5 || mMultType == MultType::slv11)
         {
             if (scaler != 2)
                 throw std::runtime_error("only scaler = 2 is supported for slv. " LOCATION);
 
-            numPartitions = getPartitions(mScaler, numOTs, secParam);
-            mSizePer = roundUpTo((numOTs * mScaler + numPartitions - 1) / numPartitions, 8);
-            mN2 = roundUpTo(mSizePer * numPartitions, mScaler);
-            mN = mN2 / mScaler;
-            mP = 0;
+            u64 gap;
+            SilverConfigure(numOTs, secParam,
+                mMultType,
+                mRequestedNumOts,
+                mNumPartitions,
+                mSizePer,
+                mN2,
+                mN,
+                gap,
+                mEncoder);
 
-            auto code = mMultType == MultType::slv11 ?
-                LdpcDiagRegRepeaterEncoder::Weight11 :
-                LdpcDiagRegRepeaterEncoder::Weight5;
-            u64 colWeight = (u64)code;
+            mGapOts.resize(gap);
 
-            setTimePoint("config.begin");
-            mEncoder.mL.init(mN, colWeight);
-            setTimePoint("config.Left");
-            mEncoder.mR.init(mN, code, true);
-            setTimePoint("config.Right");
-
-
-            throw RTE_LOC;
-            extra = mEncoder.mR.mGap;
         }
         else
         {
-            mP = nextPrime(std::max<u64>(numOTs, 128 * 128));
-            numPartitions = getPartitions(scaler, mP, secParam);
-            mSizePer = roundUpTo((mP * scaler + numPartitions - 1) / numPartitions, 8);
-            mN2 = mSizePer * numPartitions;
-            mN = mN2 / scaler;
+            QuasiCyclicConfigure(numOTs, secParam, scaler,
+                mMultType,
+                mRequestedNumOts,
+                mNumPartitions,
+                mSizePer,
+                mN2,
+                mN,
+                mP,
+                mScaler);
+
+            mGapOts.resize(0);
         }
 
-        mS.resize(numPartitions);
+        mS.resize(mNumPartitions);
         mGen.configure(mSizePer, mS.size());
     }
 
@@ -334,7 +369,7 @@ namespace osuCrypto
 
         if (mGen.hasBaseOts() == false)
         {
-            // make sure we have IKNP base OTs.
+            // recvs data
             genSilentBaseOts(prng, chl);
         }
 
@@ -350,6 +385,7 @@ namespace osuCrypto
             mBacking.reset(new block[mBackingSize]);
         }
         mA = span<block>(mBacking.get(), mN2);
+        mC = {};
 
         // do the compression to get the final OTs.
         switch (mMultType)
@@ -375,7 +411,21 @@ namespace osuCrypto
         case MultType::slv11:
         case MultType::slv5:
         {
-            mGen.expand(chl, prng, mA, PprfOutputFormat::Interleaved, false);
+            // derandomize the random OTs for the gap 
+            // to have the desired correlation.
+            std::vector<block> gapVals(mGapOts.size());
+            chl.recv(gapVals.data(), gapVals.size());
+            auto main = mNumPartitions * mSizePer;
+            for (u64 i = main, j = 0; i < mN2; ++i, ++j)
+            {
+                if (mGapBaseChoice[j])
+                    mA[i] = AES(mGapOts[j]).ecbEncBlock(ZeroBlock) ^ gapVals[j];
+                else
+                    mA[i] = mGapOts[j];
+            }
+
+
+            mGen.expand(chl, prng, mA.subspan(0, main), PprfOutputFormat::Interleaved, false);
             setTimePoint("recver.expand.pprf_transpose");
             gTimer.setTimePoint("recver.expand.pprf_transpose");
 
@@ -394,7 +444,7 @@ namespace osuCrypto
 
         mA = span<block>(mBacking.get(), mRequestedNumOts);
 
-        if (mChoicePtr)
+        if (mC.size())
         {
             mC = span<u8>(mChoicePtr.get(), mRequestedNumOts);
         }
@@ -498,8 +548,7 @@ namespace osuCrypto
     {
 
         setTimePoint("recver.expand.ldpc.mult");
-        std::vector<u64> points(mGen.mPntCount);
-        mGen.getPoints(points, getPprfFormat());
+
         if (mTimer)
             mEncoder.setTimer(getTimer());
 
@@ -527,7 +576,7 @@ namespace osuCrypto
             }
 
             // set the lsb of mA to be mC.
-            for (auto p : points)
+            for (auto p : mS)
                 mA[p] = mA[p] | OneBlock;
             setTimePoint("recver.expand.ldpc.mask");
 
@@ -548,7 +597,7 @@ namespace osuCrypto
                 std::memset(mChoicePtr.get(), 0, mN2);
             mC = span<u8>(mChoicePtr.get(), mN2);
             auto cc = mChoicePtr.get();
-            for (auto p : points)
+            for (auto p : mS)
                 cc[p] = 1;
 
             // encode both the mA and mC vectors in place.
@@ -749,6 +798,8 @@ namespace osuCrypto
         mBackingSize = {};
 
         mGen.clear();
+        
+        mGapOts = {};
 
         mS = {};
     }

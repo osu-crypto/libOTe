@@ -679,6 +679,8 @@ namespace osuCrypto
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i].join();
 
+        mBaseOTs = {};
+
         return ss;
     }
 
@@ -1130,7 +1132,6 @@ namespace osuCrypto
 
                 timer.setTimePoint("recv.expandLast");
 
-
                 // copy the last level to the output. If desired, this is 
                 // where the tranpose is performed. 
                 auto lvl = getLevel(mDepth, g);
@@ -1138,21 +1139,21 @@ namespace osuCrypto
                 // s is a checksum that is used for malicous security. 
                 block s = copyOut(lvl, output, mPntCount, g, oFormat, mal);
                 ss = ss ^ s;
-                    }
-                };
-
-
+            }
+        };
 
         std::vector<std::thread> thrds(chls.size() - 1);
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i] = std::thread(routine, i);
-        //routine(i);
 
         routine(thrds.size());
 
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i].join();
 
+
+        mBaseOTs = {};
+        mBaseChoices = {};
 
         return ss;
     }

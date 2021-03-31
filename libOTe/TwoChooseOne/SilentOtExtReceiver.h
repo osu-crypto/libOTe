@@ -38,6 +38,8 @@ namespace osuCrypto
         // The size of each regular section of the sparse vector.
         u64 mSizePer = 0;
 
+        u64 mNumPartitions = 0;
+
         // The indices of the noisy locations in the sparse vector.
         std::vector<u64> mS;
 
@@ -70,6 +72,10 @@ namespace osuCrypto
         // Iknp instance used to generate the base OTs.
         IknpOtExtReceiver mIknpRecver;
 #endif
+
+        std::vector<block> mGapOts;
+
+        BitVector mGapBaseChoice;
 
         // The ggm tree thats used to generate the sparse vectors.
         SilentMultiPprfReceiver mGen;
@@ -157,17 +163,12 @@ namespace osuCrypto
         // The silent base OTs must have specially set base OTs.
         // This returns the choice bits that should be used.
         // Call this is you want to use a specific base OT protocol
-        // and then pass the OT messages back using setSlientBaseOts(...).
-        BitVector sampleBaseChoiceBits(PRNG& prng) {
-            if (isConfigured() == false)
-                throw std::runtime_error("configure(...) must be called first");
-
-            return mGen.sampleChoiceBits(mN2, getPprfFormat(), prng);
-        }
+        // and then pass the OT messages back using setSilentBaseOts(...).
+        BitVector sampleBaseChoiceBits(PRNG& prng);
 
         // Set the externally generated base OTs. This choice
         // bits must be the one return by sampleBaseChoiceBits(...).
-        void setSlientBaseOts(span<block> recvBaseOts);
+        void setSilentBaseOts(span<block> recvBaseOts);
 
 
         // Runs the silent OT protocol and outputs c, a.

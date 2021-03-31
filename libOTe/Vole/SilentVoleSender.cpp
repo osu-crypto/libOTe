@@ -81,18 +81,26 @@ namespace osuCrypto
             mIknpRecver.setBaseOts(iknpOt);
     }
 
-    void SilentVoleSender::configure(
-        u64 numOTs, u64 secParam)
+    void SilverConfigure(
+        u64 numOTs, u64 secParam,
+        MultType mMultType,
+        u64& mRequestedNumOTs,
+        u64& mNumPartitions,
+        u64& mSizePer,
+        u64& mN2,
+        u64& mN,
+        u64& gap,
+        S1DiagRegRepEncoder& mEncoder)
     {
         mRequestedNumOTs = numOTs;
+        auto mScaler = 2;
 
         auto code = mMultType == MultType::slv11 ?
             LdpcDiagRegRepeaterEncoder::Weight11 :
             LdpcDiagRegRepeaterEncoder::Weight5;
 
-        auto gap = LdpcDiagRegRepeaterEncoder::gap(code);
+        gap = LdpcDiagRegRepeaterEncoder::gap(code);
         u64 colWeight = LdpcDiagRegRepeaterEncoder::weight(code);
-        mGapOts.resize(gap);
 
         mNumPartitions = getPartitions(mScaler, numOTs, secParam);
         mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
@@ -104,7 +112,23 @@ namespace osuCrypto
 
         mEncoder.mL.init(mN, colWeight);
         mEncoder.mR.init(mN, code, true);
+    }
 
+    void SilentVoleSender::configure(
+        u64 numOTs, u64 secParam)
+    {
+        u64 gap;
+        SilverConfigure(numOTs, secParam,
+            mMultType,
+            mRequestedNumOTs,
+            mNumPartitions,
+            mSizePer, 
+            mN2, 
+            mN, 
+            gap, 
+            mEncoder);
+
+        mGapOts.resize(gap);
         mGen.configure(mSizePer, mNumPartitions);
         
         mState = State::Configured;

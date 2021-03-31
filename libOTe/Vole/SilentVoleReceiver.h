@@ -46,7 +46,7 @@ namespace osuCrypto
         // size of the each chunk. 
         u64 mSizePer = 0;
 
-        u64 mNumParitions = 0;
+        u64 mNumPartitions = 0;
 
         // The noisy coordinates.
         std::vector<u64> mS;
@@ -147,12 +147,12 @@ namespace osuCrypto
         // The silent base OTs must have specially set base OTs.
         // This returns the choice bits that should be used.
         // Call this is you want to use a specific base OT protocol
-        // and then pass the OT messages back using setSlientBaseOts(...).
+        // and then pass the OT messages back using setSilentBaseOts(...).
         BitVector sampleBaseChoiceBits(PRNG& prng);
 
         // Set the externally generated base OTs. This choice
         // bits must be the one return by sampleBaseChoiceBits(...).
-        void setSlientBaseOts(span<block> recvBaseOts);
+        void setSilentBaseOts(span<block> recvBaseOts);
 
         // Perform the actual OT extension. If silent
         // base OTs have been generated or set, then

@@ -18,7 +18,7 @@ namespace osuCrypto
 
     u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
-    void SilentVoleReceiver::setSlientBaseOts(span<block> recvBaseOts)
+    void SilentVoleReceiver::setSilentBaseOts(span<block> recvBaseOts)
     {
         if (isConfigured() == false)
             throw std::runtime_error("configure(...) must be called first.");
@@ -36,10 +36,10 @@ namespace osuCrypto
         if (iknpOts.size())
             mIknpSender.setBaseOts(iknpOts, mIknpSendBaseChoice);
 
-        mS.resize(mNumParitions);
+        mS.resize(mNumPartitions);
         mGen.getPoints(mS, getPprfFormat());
 
-        auto j = mNumParitions * mSizePer;
+        auto j = mNumPartitions * mSizePer;
         auto ss = mS.size();
         for (u64 i = 0; i < gapOts.size(); ++i)
         {
@@ -99,7 +99,7 @@ namespace osuCrypto
 
         mIknpRecver.receive(choice, msg, prng, chl);
 
-        setSlientBaseOts(msg);
+        setSilentBaseOts(msg);
 
         setTimePoint("recver.gen.done");
     };
@@ -115,33 +115,35 @@ namespace osuCrypto
 
     }
 
+    void SilverConfigure(
+        u64 numOTs, u64 secParam,
+        MultType mMultType,
+        u64& mRequestedNumOTs,
+        u64& mNumPartitions,
+        u64& mSizePer,
+        u64& mN2,
+        u64& mN,
+        u64& gap,
+        S1DiagRegRepEncoder& mEncoder);
+
     void SilentVoleReceiver::configure(
         u64 numOTs,
         u64 secParam)
     {
         mState = State::Configured;
-        mRequestedNumOTs = numOTs;
-
-        auto code = mMultType == MultType::slv11 ?
-            LdpcDiagRegRepeaterEncoder::Weight11 :
-            LdpcDiagRegRepeaterEncoder::Weight5;
-
-        u64 gap = LdpcDiagRegRepeaterEncoder::gap(code);
-        u64 colWeight = LdpcDiagRegRepeaterEncoder::weight(code);
-
-        mNumParitions = getPartitions(mScaler, numOTs, secParam);
-        mSizePer = roundUpTo((numOTs * mScaler + mNumParitions - 1) / mNumParitions, 8);
-        mN2 = mSizePer * mNumParitions + gap;
-        mN = mN2 / mScaler;
-
-        if (mN2 % mScaler)
-            throw RTE_LOC;
-
-        mEncoder.mL.init(mN, colWeight);
-        mEncoder.mR.init(mN, code, true);
+        u64 gap;
+        SilverConfigure(numOTs, secParam,
+            mMultType,
+            mRequestedNumOTs,
+            mNumPartitions,
+            mSizePer,
+            mN2,
+            mN,
+            gap,
+            mEncoder);
 
         mGapOts.resize(gap);
-        mGen.configure(mSizePer, mNumParitions);
+        mGen.configure(mSizePer, mNumPartitions);
     }
 
     //sigma = 0   Receiver
@@ -184,14 +186,14 @@ namespace osuCrypto
             cDelta[i] = cDelta[i] ^ mA[i];
 
         std::vector<block> exp(mN2);
-        for (u64 i = 0; i < mNumParitions; ++i)
+        for (u64 i = 0; i < mNumPartitions; ++i)
         {
             auto j = mS[i];
             exp[j] = beta[i];
         }
 
-        auto iter = mS.begin() + mNumParitions;
-        for (u64 i = 0,j = mNumParitions* mSizePer; i < mGapOts.size(); ++i,++j)
+        auto iter = mS.begin() + mNumPartitions;
+        for (u64 i = 0,j = mNumPartitions* mSizePer; i < mGapOts.size(); ++i,++j)
         {
             if (mGapBaseChoice[i])
             {
@@ -199,7 +201,7 @@ namespace osuCrypto
                     throw RTE_LOC;
                 ++iter;
 
-                exp[j] = beta[mNumParitions+i];
+                exp[j] = beta[mNumPartitions+i];
             }
         }
 
@@ -306,7 +308,7 @@ namespace osuCrypto
         setTimePoint("recver.expand.start");
 
         // expand the seeds into mA
-        mGen.expand(chl, prng, mA.subspan(0, mNumParitions*mSizePer), PprfOutputFormat::Interleaved, false);
+        mGen.expand(chl, prng, mA.subspan(0, mNumPartitions*mSizePer), PprfOutputFormat::Interleaved, false);
 
         if (mDebug)
         {
@@ -333,18 +335,18 @@ namespace osuCrypto
 
         // populate the noisy coordinates of mC and 
         // update mA to be a secret share of mC * delta
-        for (u64 i = 0; i < mNumParitions; ++i)
+        for (u64 i = 0; i < mNumPartitions; ++i)
         {
             auto pnt = mS[i];
             mC[pnt] = y[i];
             mA[pnt] = mA[pnt] ^ c[i];
         }
-        for (u64 i = 0, j = mNumParitions * mSizePer; i < mGapOts.size(); ++i, ++j)
+        for (u64 i = 0, j = mNumPartitions * mSizePer; i < mGapOts.size(); ++i, ++j)
         {
             if (mGapBaseChoice[i])
             {
-                mC[j] = mC[j] ^ y[mNumParitions + i];
-                mA[j] = mA[j] ^ c[mNumParitions + i];
+                mC[j] = mC[j] ^ y[mNumPartitions + i];
+                mA[j] = mA[j] ^ c[mNumPartitions + i];
             }
         }
 
