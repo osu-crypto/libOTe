@@ -10,13 +10,45 @@
 
 using namespace oc;
 
+
+
+namespace {
+    void fakeBase(u64 n,
+        u64 threads,
+        PRNG& prng,
+        SilentVoleReceiver& recver, SilentVoleSender& sender)
+    {
+        sender.configure(n, 128);
+        auto count = sender.silentBaseOtCount();
+        std::vector<std::array<block, 2>> msg2(count);
+        for (u64 i = 0; i < msg2.size(); ++i)
+        {
+            msg2[i][0] = prng.get();
+            msg2[i][1] = prng.get();
+        }
+        sender.setSilentBaseOts(msg2);
+
+        // fake base OTs.
+        {
+            recver.configure(n,128);
+            BitVector choices = recver.sampleBaseChoiceBits(prng);
+            std::vector<block> msg(choices.size());
+            for (u64 i = 0; i < msg.size(); ++i)
+                msg[i] = msg2[i][choices[i]];
+            recver.setSilentBaseOts(msg);
+        }
+    }
+
+}
+
 void NoisyVole_test(const oc::CLP& cmd)
 {
     Timer timer;
     timer.setTimePoint("start");
-    u64 n = cmd.getOr("n", 100);
+    u64 n = cmd.getOr("n", 123);
     block seed = block(0, cmd.getOr("seed", 0));  
     PRNG prng(seed);
+    auto threads = 1;
 
     block x = prng.get();
     std::vector<block> y(n), z0(n), z1(n);
@@ -64,9 +96,10 @@ void SilentVole_test(const oc::CLP& cmd)
 {
     Timer timer;
     timer.setTimePoint("start");
-    u64 n = cmd.getOr("n", 1000);
+    u64 n = cmd.getOr("n", 102043);
     block seed = block(0, cmd.getOr("seed", 0));
     PRNG prng(seed);
+    u64 threads = 1;
 
     block x = prng.get();
     std::vector<block> c(n), z0(n), z1(n);
@@ -86,6 +119,7 @@ void SilentVole_test(const oc::CLP& cmd)
     timer.setTimePoint("net");
 
     timer.setTimePoint("ot");
+    fakeBase(n, threads, prng, recv, send);
 
     // c * x = z + m
 
@@ -108,11 +142,66 @@ void SilentVole_test(const oc::CLP& cmd)
 
 }
 
-void SilentVole_small_test(const oc::CLP& cmd)
+void SilentVole_paramSweep_test(const oc::CLP& cmd)
 {
 
     Timer timer;
     timer.setTimePoint("start");
+    block seed = block(0, cmd.getOr("seed", 0));
+    PRNG prng(seed);
+
+    block x = prng.get();
+    u64 threads = 0;
+
+    IOService ios;
+    auto chl1 = Session(ios, "localhost:1212", SessionMode::Server).addChannel();
+    auto chl0 = Session(ios, "localhost:1212", SessionMode::Client).addChannel();
+    timer.setTimePoint("net");
+
+    timer.setTimePoint("ot");
+
+    //recv.mDebug = true;
+    //send.mDebug = true;
+
+    SilentVoleReceiver recv;
+    SilentVoleSender send;
+    // c * x = z + m
+
+    //for (u64 n = 5000; n < 10000; ++n)
+    for(auto n : {12, 123,465,1642,4356,34254,93425})
+    {
+        std::vector<block> c(n), z0(n), z1(n);
+
+        fakeBase(n, threads, prng, recv, send);
+
+        recv.setTimer(timer);
+        send.setTimer(timer);
+        std::thread thrd = std::thread([&]() {
+            recv.silentReceive(c, z0, prng, chl0);
+            timer.setTimePoint("recv");
+            });
+        send.silentSend(x, z1, prng, chl1);
+        timer.setTimePoint("send");
+        thrd.join();
+        for (u64 i = 0; i < n; ++i)
+        {
+            if (c[i].gf128Mul(x) != (z0[i] ^ z1[i]))
+            {
+                throw RTE_LOC;
+            }
+        }
+        timer.setTimePoint("done");
+    }
+}
+
+
+
+void SilentVole_baseOT_test(const oc::CLP& cmd)
+{
+
+    Timer timer;
+    timer.setTimePoint("start");
+    u64 n = 123;
     block seed = block(0, cmd.getOr("seed", 0));
     PRNG prng(seed);
 
@@ -134,7 +223,6 @@ void SilentVole_small_test(const oc::CLP& cmd)
     // c * x = z + m
 
     //for (u64 n = 5000; n < 10000; ++n)
-    for(auto n : {12, 123,465,1642,4356,34254,93425})
     {
         std::vector<block> c(n), z0(n), z1(n);
 
@@ -158,4 +246,3 @@ void SilentVole_small_test(const oc::CLP& cmd)
         timer.setTimePoint("done");
     }
 }
-

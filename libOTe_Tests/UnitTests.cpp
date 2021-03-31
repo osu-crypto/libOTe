@@ -71,10 +71,12 @@ namespace tests_libOTe
         tc.add("OtExt_Silent_inplace_Test                  ", OtExt_Silent_inplace_Test);
         tc.add("OtExt_Silent_paramSweep_Test               ", OtExt_Silent_paramSweep_Test);
         tc.add("OtExt_Silent_QuasiCyclic_Test              ", OtExt_Silent_QuasiCyclic_Test);
+        tc.add("OtExt_Silent_baseOT_Test                   ", OtExt_Silent_baseOT_Test);
 
         tc.add("NoisyVole_test                             ", NoisyVole_test);
         tc.add("SilentVole_test                            ", SilentVole_test);
-        tc.add("SilentVole_small_test                      ", SilentVole_small_test);
+        tc.add("SilentVole_paramSweep_test                 ", SilentVole_paramSweep_test);
+        tc.add("SilentVole_baseOT_test                     ", SilentVole_baseOT_test);
 
         tc.add("DotExt_Kos_Test                            ", DotExt_Kos_Test);
         tc.add("DotExt_Iknp_Test                           ", DotExt_Iknp_Test);

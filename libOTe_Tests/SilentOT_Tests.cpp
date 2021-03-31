@@ -203,10 +203,7 @@ namespace {
             recver.setSilentBaseOts(msg);
         }
     }
-}
 
-namespace
-{
 
     void checkRandom(
         span<block> messages, span<std::array<block, 2>>messages2,
@@ -523,8 +520,6 @@ void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
 void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
-
-
     IOService ios;
     Session s0(ios, "localhost:1212", SessionMode::Server);
     Session s1(ios, "localhost:1212", SessionMode::Client);
@@ -574,6 +569,53 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
 
     }
 
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+}
+
+void OtExt_Silent_baseOT_Test(const oc::CLP& cmd)
+{
+
+#ifdef ENABLE_SILENTOT
+    IOService ios;
+    Session s0(ios, "localhost:1212", SessionMode::Server);
+    Session s1(ios, "localhost:1212", SessionMode::Client);
+
+    u64 n = 123;//
+
+    bool verbose = cmd.getOr("v", 0) > 1;
+    u64 threads = cmd.getOr("t", 4);
+    u64 s = cmd.getOr("s", 2);
+
+    Channel chl0 = s0.addChannel();
+    Channel chl1 = s1.addChannel();
+
+    PRNG prng(toBlock(cmd.getOr("seed", 0)));
+    PRNG prng1(toBlock(cmd.getOr("seed1", 1)));
+
+    SilentOtExtSender sender;
+    SilentOtExtReceiver recver;
+
+    sender.mMultType = MultType::QuasiCyclic;
+    recver.mMultType = MultType::QuasiCyclic;
+
+
+    block delta = prng.get();
+    auto type = OTType::Correlated;
+
+    std::vector<std::array<block, 2>> msg2(n);
+    std::vector<block> msg1(n);
+    BitVector choice(n);
+
+    auto thrd = std::thread([&] {
+        sender.silentSend(msg2, prng, chl0);
+        });
+    recver.silentReceive(choice, msg1, prng, chl1);
+
+    thrd.join();
+
+    checkRandom(msg1, msg2, choice, n, verbose);
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif
