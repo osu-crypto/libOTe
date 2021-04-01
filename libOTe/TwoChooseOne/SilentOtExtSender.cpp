@@ -196,7 +196,7 @@ namespace osuCrypto
     }
 
     void SilentOtExtSender::configure(
-        u64 numOTs, u64 scaler, u64 secParam, u64 numThreads, SilentSecType malType)
+        u64 numOTs, u64 scaler, u64 numThreads, SilentSecType malType)
     {
         mMalType = malType;
         mNumThreads = numThreads;
@@ -207,7 +207,7 @@ namespace osuCrypto
                 throw std::runtime_error("only scaler = 2 is supported for slv. " LOCATION);
 
             u64 gap;
-            SilverConfigure(numOTs, secParam,
+            SilverConfigure(numOTs, 128,
                 mMultType,
                 mRequestNumOts,
                 mNumPartitions,
@@ -222,7 +222,7 @@ namespace osuCrypto
         }
         else
         {
-            QuasiCyclicConfigure(numOTs, secParam, scaler,
+            QuasiCyclicConfigure(numOTs, 128, scaler,
                 mMultType,
                 mRequestNumOts,
                 mNumPartitions,
@@ -418,7 +418,7 @@ namespace osuCrypto
 
         if (isConfigured() == false)
         {
-            configure(n, mScaler, 128, mNumThreads, mMalType);
+            configure(n, mScaler, mNumThreads, mMalType);
         }
 
         if (n != mRequestNumOts)
@@ -480,7 +480,7 @@ namespace osuCrypto
 
 
             if (mMalType == SilentSecType::Malicious)
-                malCheck(chl, prng);
+                ferretMalCheck(chl, prng);
 
             setTimePoint("sender.expand.pprf_transpose");
             gTimer.setTimePoint("sender.expand.pprf_transpose");
@@ -500,7 +500,7 @@ namespace osuCrypto
     }
 
 
-    void SilentOtExtSender::malCheck(Channel& chl, PRNG& prng)
+    void SilentOtExtSender::ferretMalCheck(Channel& chl, PRNG& prng)
     {
         block X;
         chl.recv(X);
@@ -520,13 +520,14 @@ namespace osuCrypto
         }
 
         block mySum = sum0.gf128Reduce(sum1);
+        block deltaShare;
 
         NoisyVoleReceiver recver;
-        recver.receive({ &mDelta,1 }, { &mDeltaShare,1 }, prng, mMalCheckOts, chl);
+        recver.receive({ &mDelta,1 }, { &deltaShare,1 }, prng, mMalCheckOts, chl);
 
         std::array<u8, 32> myHash;
         RandomOracle ro(32);
-        ro.Update(mySum ^ mDeltaShare);
+        ro.Update(mySum ^ deltaShare);
         ro.Final(myHash);
 
         chl.send(myHash);

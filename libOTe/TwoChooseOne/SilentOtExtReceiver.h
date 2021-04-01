@@ -62,23 +62,37 @@ namespace osuCrypto
         // The memory backing mA
         std::unique_ptr<block[]> mBacking;
 
-        block mDeltaShare;
-
         // The size of the memory backing mA
         u64 mBackingSize = 0;
 
 #ifdef ENABLE_KOS
         // Kos instance used to generate the base OTs.
         KosOtExtReceiver mKosRecver;
-
-        //KosOtExtSender mKosSender;
 #endif
 
-        std::vector<block> mGapOts, mMalCheckOts;
+        // The OTs recv msgs which will be used to flood the
+        // last gap bits of the noisy vector for the slv code.
+        std::vector<block> mGapOts;
 
-        BitVector mGapBaseChoice, mMalCheckChoice;
+        // The OTs recv msgs which will be used to create the 
+        // secret share of xa * delta as described in ferret.
+        std::vector<block> mMalCheckOts;
 
-        block mMalCheckSeed = ZeroBlock, mMalCheckX = ZeroBlock;
+        // The OTs choice bits which will be used to flood the
+        // last gap bits of the noisy vector for the slv code.
+        BitVector mGapBaseChoice;
+
+        // The OTs choice bits which will be used to create the 
+        // secret share of xa * delta as described in ferret.
+        BitVector mMalCheckChoice;
+
+        // The seed used to generate the malicious check coefficients
+        // for the ferret protocol.
+        block mMalCheckSeed = ZeroBlock;
+
+        // The summation of the malicious check coefficients which
+        // correspond to the mS indicces.
+        block mMalCheckX = ZeroBlock;
 
         // The ggm tree thats used to generate the sparse vectors.
         SilentMultiPprfReceiver mGen;
@@ -87,7 +101,7 @@ namespace osuCrypto
         // dense vectors from the sparse vectors.
         MultType mMultType = MultType::slv5;
 
-
+        // The flag which controls whether the malicious check is performed.
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
         // The Silver encoder for MultType::slv5, MultType::slv11
@@ -151,11 +165,14 @@ namespace osuCrypto
         // the parameters and figures out how many base OT
         // will be needed. These can then be ganerated for
         // a different OT extension or using a base OT protocol.
+        // @n        [in] - the number of OTs.
+        // @scaler   [in] - the compression factor.
+        // @nThreads [in] - the number of threads.
+        // @mal      [in] - whether the malicious check is performed.
         void configure(
             u64 n, 
             u64 scaler = 2, 
-            u64 secParam = 128,
-            u64 numThreads = 1,
+            u64 nThreads = 1,
             SilentSecType mal = SilentSecType::SemiHonest);
 
         // return true if this instance has been configured.
@@ -182,6 +199,11 @@ namespace osuCrypto
         // and a[i] = H(b[i] + c[i] * delta).
         // If type ==OTType::Correlated, then 
         // a[i] = b[i] + c[i] * delta.
+        // @ c   [out] - the random choice bits.
+        // @ a   [out] - the correlated/random ot message.
+        // @prng  [in] - randomness source.
+        // @chl   [in] - the comm channel
+        // @type  [in] - whether random or correlated OTs are produced.
         void silentReceive(
             BitVector& c,
             span<block> a,
@@ -195,6 +217,10 @@ namespace osuCrypto
         // If type = ChoiceBitPacking::True, then mC will not 
         // be generated. Instead the least significant bit of mA
         // will hold the choice bits. 
+        // @n     [in] - the number of OTs.
+        // @prng  [in] - randomness source.
+        // @chl   [in] - the comm channel
+        // @type  [in] - whether the choice bit should be the lsb.
         void silentReceiveInplace(
             u64 n,
             PRNG& prng,
@@ -211,10 +237,21 @@ namespace osuCrypto
 
         // internal.
 
-        void malCheck(Channel& chl, PRNG& prng);
+        // Runs the malicious consistency check as described 
+        // by the ferret paper. We only run the batch check and
+        // not the cuckoo hashing part.
+        void ferretMalCheck(Channel& chl, PRNG& prng);
+
+        // a debugging check on the sparse vector. Insecure to use.
         void checkRT(Channel& chl, MatrixView<block> rT);
+
+        // the QuasiCyclic compression routine.
         void randMulQuasiCyclic(ChoiceBitPacking packing);
+
+        // the Silver compress routine.
         void ldpcMult(ChoiceBitPacking packing);     
+
+
         PprfOutputFormat getPprfFormat()
         {
             switch (mMultType)

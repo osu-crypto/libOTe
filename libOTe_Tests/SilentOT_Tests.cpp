@@ -183,7 +183,7 @@ namespace {
         PRNG& prng,
         SilentOtExtReceiver& recver, SilentOtExtSender& sender)
     {
-        sender.configure(n, s, 128, threads);
+        sender.configure(n, s, threads);
         auto count = sender.silentBaseOtCount();
         std::vector<std::array<block, 2>> msg2(count);
         for (u64 i = 0; i < msg2.size(); ++i)
@@ -195,7 +195,7 @@ namespace {
 
         // fake base OTs.
         {
-            recver.configure(n, s, 128, threads);
+            recver.configure(n, s, threads);
             BitVector choices = recver.sampleBaseChoiceBits(prng);
             std::vector<block> msg(choices.size());
             for (u64 i = 0; i < msg.size(); ++i)

@@ -215,7 +215,6 @@ namespace osuCrypto
     void SilentOtExtReceiver::configure(
         u64 numOTs,
         u64 scaler,
-        u64 secParam,
         u64 numThreads,
         SilentSecType malType)
     {
@@ -228,7 +227,7 @@ namespace osuCrypto
                 throw std::runtime_error("only scaler = 2 is supported for slv. " LOCATION);
 
             u64 gap;
-            SilverConfigure(numOTs, secParam,
+            SilverConfigure(numOTs, 128,
                 mMultType,
                 mRequestedNumOts,
                 mNumPartitions,
@@ -243,7 +242,7 @@ namespace osuCrypto
         }
         else
         {
-            QuasiCyclicConfigure(numOTs, secParam, scaler,
+            QuasiCyclicConfigure(numOTs, 128, scaler,
                 mMultType,
                 mRequestedNumOts,
                 mNumPartitions,
@@ -409,7 +408,7 @@ namespace osuCrypto
         if (isConfigured() == false)
         {
             // first generate 128 normal base OTs
-            configure(n, mScaler, 128, mNumThreads, mMalType);
+            configure(n, mScaler, mNumThreads, mMalType);
         }
 
         if (n != mRequestedNumOts)
@@ -477,7 +476,7 @@ namespace osuCrypto
             
 
             if(mMalType == SilentSecType::Malicious)
-                malCheck(chl, prng);
+                ferretMalCheck(chl, prng);
 
 
             if (mDebug)
@@ -502,7 +501,7 @@ namespace osuCrypto
     }
 
 
-    void SilentOtExtReceiver::malCheck(Channel& chl, PRNG& prng)
+    void SilentOtExtReceiver::ferretMalCheck(Channel& chl, PRNG& prng)
     {
         chl.asyncSendCopy(mMalCheckSeed);
 
@@ -522,13 +521,14 @@ namespace osuCrypto
             xx = xx.gf128Mul(mMalCheckSeed);
         }
         block mySum = sum0.gf128Reduce(sum1);
+        block deltaShare;
 
         NoisyVoleSender sender;
-        sender.send(mMalCheckX, { &mDeltaShare,1 }, prng, mMalCheckOts, chl);
+        sender.send(mMalCheckX, { &deltaShare,1 }, prng, mMalCheckOts, chl);
 
         std::array<u8, 32> theirHash, myHash;
         RandomOracle ro(32);
-        ro.Update(mySum ^ mDeltaShare);
+        ro.Update(mySum ^ deltaShare);
         ro.Final(myHash);
 
         chl.recv(theirHash);

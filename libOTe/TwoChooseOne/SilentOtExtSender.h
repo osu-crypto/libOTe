@@ -92,11 +92,11 @@ namespace osuCrypto
         // The delta scaler in the relation A + B = C * delta
         block mDelta;
 
-        block mDeltaShare;
-
+        // The number of threads that should be used (when applicable).
         u64 mNumThreads = 1;
 
 #ifdef ENABLE_KOS
+        // Kos instance used to generate the base OTs.
         KosOtExtSender mKosSender;
 #endif
 
@@ -107,12 +107,19 @@ namespace osuCrypto
         // dense vectors from the sparse vectors.
         MultType mMultType = MultType::slv5;
 
-        SilentSecType mMalType =SilentSecType::SemiHonest;
+        // The flag which controls whether the malicious check is performed.
+        SilentSecType mMalType = SilentSecType::SemiHonest;
 
         // The Silver encoder for MultType::slv5, MultType::slv11
         S1DiagRegRepEncoder mEncoder;
 
-        std::vector<std::array<block, 2>> mGapOts, mMalCheckOts;
+        // The OTs send msgs which will be used to flood the
+        // last gap bits of the noisy vector for the slv code.
+        std::vector<std::array<block, 2>> mGapOts;
+
+        // The OTs send msgs which will be used to create the 
+        // secret share of xa * delta as described in ferret.
+        std::vector<std::array<block, 2>> mMalCheckOts;
 
         // The memory backing mB
         std::unique_ptr<block[]> mBacking;
@@ -179,10 +186,13 @@ namespace osuCrypto
         // the parameters and figures out how many base OT
         // will be needed. These can then be ganerated for
         // a different OT extension or using a base OT protocol.
+        // @n        [in] - the number of OTs.
+        // @scaler   [in] - the compression factor.
+        // @nThreads [in] - the number of threads.
+        // @mal      [in] - whether the malicious check is performed.
 		void configure(
             u64 n,
             u64 scaler = 2,
-            u64 secParam = 128,
             u64 numThreads = 1,
             SilentSecType malType = SilentSecType::SemiHonest);
 
@@ -201,6 +211,9 @@ namespace osuCrypto
         // Runs the silent random OT protocol and outputs b.
         // Then this will generate random OTs, where c is a random 
         // bit vector and a[i] = b[i][c[i]].
+        // @ b   [out] - the random ot message.
+        // @prng  [in] - randomness source.
+        // @chl   [in] - the comm channel
         void silentSend(
             span<std::array<block, 2>> b,
             PRNG& prng,
@@ -210,34 +223,51 @@ namespace osuCrypto
         // The protocol takes as input the desired delta value.
         // The outputs will have the relation:
         //      a[i] = b[i] + c[i] * delta.
+        // @ d    [in] - the delta used in the correlated OT
+        // @ b   [out] - the correlated ot message.
+        // @prng  [in] - randomness source.
+        // @chl   [in] - the comm channel
 		void silentSend(
             block d,
 			span<block> b,
 			PRNG& prng,
-			Channel& chls);
+			Channel& chl);
 
         // Runs the silent correlated OT protocol and store
         // the b vector internally as mB. The protocol takes 
         // as input the desired delta value. The outputs will 
         // have the relation:
         //     a[i] = b[i] + c[i] * delta.
+        // @ d    [in] - the delta used in the correlated OT
+        // @ n    [in] - the number of correlated ot message.
+        // @prng  [in] - randomness source.
+        // @chl   [in] - the comm channel
         void silentSendInplace(
             block d,
             u64 n,
             PRNG& prng,
-            Channel& chls);
+            Channel& chl);
 
-        // interal functions
+        // internal functions
+
+
+        // Runs the malicious consistency check as described 
+        // by the ferret paper. We only run the batch check and
+        // not the cuckoo hashing part.
+        void ferretMalCheck(Channel& chl, PRNG& prng);
+
+        // the QuasiCyclic compression routine.
         void randMulQuasiCyclic();
+
+        // the Silver compress routine.
         void ldpcMult();
-
-
-        void malCheck(Channel& chl, PRNG& prng);
 
         void hash(span<std::array<block, 2>> messages, ChoiceBitPacking type);
 
+        // a debugging check on the sparse vector. Insecure to use.
         void checkRT(Channel& chls);
 
+        // clears the internal buffers.
         void clear();
     };
 
