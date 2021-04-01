@@ -9,6 +9,8 @@
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/IknpOtExtSender.h>
+#include <libOTe/TwoChooseOne/KosOtExtSender.h>
+#include <libOTe/TwoChooseOne/KosOtExtReceiver.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 //#define NO_HASH
@@ -90,11 +92,12 @@ namespace osuCrypto
         // The delta scaler in the relation A + B = C * delta
         block mDelta;
 
+        block mDeltaShare;
+
         u64 mNumThreads = 1;
 
-#ifdef ENABLE_IKNP
-        // Iknp instance used to generate the base OTs.
-        IknpOtExtSender mIknpSender;
+#ifdef ENABLE_KOS
+        KosOtExtSender mKosSender;
 #endif
 
         // The ggm tree thats used to generate the sparse vectors.
@@ -104,10 +107,12 @@ namespace osuCrypto
         // dense vectors from the sparse vectors.
         MultType mMultType = MultType::slv5;
 
+        SilentSecType mMalType =SilentSecType::SemiHonest;
+
         // The Silver encoder for MultType::slv5, MultType::slv11
         S1DiagRegRepEncoder mEncoder;
 
-        std::vector<std::array<block, 2>> mGapOts;
+        std::vector<std::array<block, 2>> mGapOts, mMalCheckOts;
 
         // The memory backing mB
         std::unique_ptr<block[]> mBacking;
@@ -128,6 +133,10 @@ namespace osuCrypto
 
         // returns true if the IKNP base OTs are currently set.
         bool hasBaseOts() const override;
+
+        void setBaseOts(
+            span<block> baseRecvOts,
+            const BitVector& choices);
 
         // sets the IKNP base OTs that are then used to extend
         void setBaseOts(
@@ -174,7 +183,8 @@ namespace osuCrypto
             u64 n,
             u64 scaler = 2,
             u64 secParam = 128,
-            u64 numThreads = 1);
+            u64 numThreads = 1,
+            SilentSecType malType = SilentSecType::SemiHonest);
 
         // return true if this instance has been configured.
         bool isConfigured() const { return mN > 0; }
@@ -221,6 +231,8 @@ namespace osuCrypto
         void randMulQuasiCyclic();
         void ldpcMult();
 
+
+        void malCheck(Channel& chl, PRNG& prng);
 
         void hash(span<std::array<block, 2>> messages, ChoiceBitPacking type);
 

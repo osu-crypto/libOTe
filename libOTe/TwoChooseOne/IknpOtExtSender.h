@@ -17,7 +17,7 @@ namespace osuCrypto {
         public OtExtSender, public TimerAdapter
     {
     public: 
-        std::array<PRNG, gOtExtBaseOtCount> mGens;
+        std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;
         bool mHash = true;
 

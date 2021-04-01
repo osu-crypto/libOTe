@@ -17,7 +17,7 @@ namespace osuCrypto
     {
     public:
         bool mHasBase = false, mHash = true;
-        std::array<std::array<PRNG, 2>, gOtExtBaseOtCount> mGens;
+        std::vector<std::array<PRNG, 2>> mGens;
 
 
         IknpOtExtReceiver() = default;

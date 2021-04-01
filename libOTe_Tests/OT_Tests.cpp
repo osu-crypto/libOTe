@@ -442,6 +442,112 @@ namespace tests_libOTe
 #endif
 	}
 
+
+
+	void OtExt_Kos_fs_Test()
+	{
+#if defined(ENABLE_KOS)
+		setThreadName("Sender");
+
+		IOService ios;
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel = ep0.addChannel();
+
+		PRNG prng0(block(4253465, 3434565));
+		PRNG prng1(block(42532335, 334565));
+
+		u64 numOTs = 20000;
+
+		std::vector<block> recvMsg(numOTs), baseRecv(128);
+		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+		BitVector choices(numOTs), baseChoice(128);
+		choices.randomize(prng0);
+		baseChoice.randomize(prng0);
+
+		for (u64 i = 0; i < 128; ++i)
+		{
+			baseSend[i][0] = prng0.get<block>();
+			baseSend[i][1] = prng0.get<block>();
+			baseRecv[i] = baseSend[i][baseChoice[i]];
+		}
+
+		KosOtExtSender sender;
+		KosOtExtReceiver recv;
+
+		sender.mFiatShamir = true;
+		recv.mFiatShamir = true;
+
+		std::thread thrd = std::thread([&]() {
+			setThreadName("receiver");
+
+			recv.setBaseOts(baseSend, prng0, recvChannel);
+			recv.receive(choices, recvMsg, prng0, recvChannel);
+			});
+
+		sender.setBaseOts(baseRecv, baseChoice, senderChannel);
+		sender.send(sendMsg, prng1, senderChannel);
+		thrd.join();
+
+		OT_100Receive_Test(choices, recvMsg, sendMsg);
+#else
+		throw UnitTestSkipped("ENALBE_KOS is not defined.");
+#endif
+	}
+
+	void OtExt_Kos_ro_Test()
+	{
+#if defined(ENABLE_KOS)
+		setThreadName("Sender");
+
+		IOService ios;
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel = ep0.addChannel();
+
+		PRNG prng0(block(4253465, 3434565));
+		PRNG prng1(block(42532335, 334565));
+
+		u64 numOTs = 20000;
+
+		std::vector<block> recvMsg(numOTs), baseRecv(128);
+		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+		BitVector choices(numOTs), baseChoice(128);
+		choices.randomize(prng0);
+		baseChoice.randomize(prng0);
+
+		for (u64 i = 0; i < 128; ++i)
+		{
+			baseSend[i][0] = prng0.get<block>();
+			baseSend[i][1] = prng0.get<block>();
+			baseRecv[i] = baseSend[i][baseChoice[i]];
+		}
+
+		KosOtExtSender sender;
+		KosOtExtReceiver recv;
+
+		sender.mHashType = KosOtExtSender::HashType::RandomOracle;
+		recv.mHashType = KosOtExtReceiver::HashType::RandomOracle;
+
+		std::thread thrd = std::thread([&]() {
+			setThreadName("receiver");
+
+			recv.setBaseOts(baseSend, prng0, recvChannel);
+			recv.receive(choices, recvMsg, prng0, recvChannel);
+			});
+
+		sender.setBaseOts(baseRecv, baseChoice, senderChannel);
+		sender.send(sendMsg, prng1, senderChannel);
+		thrd.join();
+
+		OT_100Receive_Test(choices, recvMsg, sendMsg);
+#else
+		throw UnitTestSkipped("ENALBE_KOS is not defined.");
+#endif
+	}
+
     void OtExt_Chosen_Test()
     {
 #if defined(ENABLE_KOS)

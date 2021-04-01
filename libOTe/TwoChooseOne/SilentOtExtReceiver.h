@@ -9,7 +9,8 @@
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
-#include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
+#include <libOTe/TwoChooseOne/KosOtExtReceiver.h>
+#include <libOTe/TwoChooseOne/KosOtExtSender.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 
 namespace osuCrypto
@@ -43,9 +44,6 @@ namespace osuCrypto
         // The indices of the noisy locations in the sparse vector.
         std::vector<u64> mS;
 
-        // The delta that will be used in the relation A + B = C * delta
-        block mDelta;
-
         // The A vector in the relation A + B = C * delta
         span<block> mA;
 
@@ -53,7 +51,7 @@ namespace osuCrypto
         span<u8> mC;
 
         // The number of threads that should be used (when applicable).
-        u64 mNumThreads;
+        u64 mNumThreads = 1;
 
         // The memory backing mC
         std::unique_ptr<u8[]> mChoicePtr;
@@ -64,18 +62,23 @@ namespace osuCrypto
         // The memory backing mA
         std::unique_ptr<block[]> mBacking;
 
+        block mDeltaShare;
+
         // The size of the memory backing mA
         u64 mBackingSize = 0;
 
-#ifdef ENABLE_IKNP
+#ifdef ENABLE_KOS
+        // Kos instance used to generate the base OTs.
+        KosOtExtReceiver mKosRecver;
 
-        // Iknp instance used to generate the base OTs.
-        IknpOtExtReceiver mIknpRecver;
+        //KosOtExtSender mKosSender;
 #endif
 
-        std::vector<block> mGapOts;
+        std::vector<block> mGapOts, mMalCheckOts;
 
-        BitVector mGapBaseChoice;
+        BitVector mGapBaseChoice, mMalCheckChoice;
+
+        block mMalCheckSeed = ZeroBlock, mMalCheckX = ZeroBlock;
 
         // The ggm tree thats used to generate the sparse vectors.
         SilentMultiPprfReceiver mGen;
@@ -83,6 +86,9 @@ namespace osuCrypto
         // The type of compress we will use to generate the
         // dense vectors from the sparse vectors.
         MultType mMultType = MultType::slv5;
+
+
+        SilentSecType mMalType = SilentSecType::SemiHonest;
 
         // The Silver encoder for MultType::slv5, MultType::slv11
         S1DiagRegRepEncoder mEncoder;
@@ -94,11 +100,15 @@ namespace osuCrypto
         // The standard OT extension interface
         /////////////////////////////////////////////////////
 
-        // sets the Iknp base OTs that are then used to extend
+        // sets the Kos base OTs that are then used to extend
         void setBaseOts(
             span<std::array<block, 2>> baseSendOts,
             PRNG& prng,
             Channel& chl) override;
+
+        // sets the Kos base OTs that are then used to extend
+        void setBaseOts(
+            span<std::array<block, 2>> baseSendOts);
 
         // return the number of base OTs IKNP needs
         u64 baseOtCount() const override;
@@ -110,13 +120,7 @@ namespace osuCrypto
         void genBaseOts(PRNG& prng, Channel& chl) override;
 
         // Returns an indpendent copy of this extender.
-        std::unique_ptr<OtExtReceiver> split() override {
-
-            auto ptr = new SilentOtExtReceiver;
-            auto ret = std::unique_ptr<OtExtReceiver>(ptr);
-            ptr->mIknpRecver = mIknpRecver.splitBase();
-            return ret;
-        };
+        std::unique_ptr<OtExtReceiver> split() override;
 
 
         // The default API for OT ext allows the 
@@ -151,7 +155,8 @@ namespace osuCrypto
             u64 n, 
             u64 scaler = 2, 
             u64 secParam = 128,
-            u64 numThreads = 1);
+            u64 numThreads = 1,
+            SilentSecType mal = SilentSecType::SemiHonest);
 
         // return true if this instance has been configured.
         bool isConfigured() const { return mN > 0; }
@@ -205,6 +210,8 @@ namespace osuCrypto
             ChoiceBitPacking type);
 
         // internal.
+
+        void malCheck(Channel& chl, PRNG& prng);
         void checkRT(Channel& chl, MatrixView<block> rT);
         void randMulQuasiCyclic(ChoiceBitPacking packing);
         void ldpcMult(ChoiceBitPacking packing);     

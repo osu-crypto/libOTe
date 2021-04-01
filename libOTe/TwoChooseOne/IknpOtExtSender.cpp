@@ -40,6 +40,8 @@ namespace osuCrypto
         if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
             throw std::runtime_error("not supported/implemented");
 
+        mGens.resize(gOtExtBaseOtCount);
+
         mBaseChoiceBits = choices;
         for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {

@@ -80,13 +80,12 @@ namespace osuCrypto
     // @tIdx        - the index of the first tree.
     // @oFormat     - do we interleave the output?
     // @mal         - ...
-    block copyOut(
+    void copyOut(
         span<std::array<block, 8>> lvl,
         MatrixView<block> output,
         u64 totalTrees,
         u64 tIdx,
-        PprfOutputFormat oFormat,
-        bool mal)
+        PprfOutputFormat oFormat)
     {
 
         if (oFormat == PprfOutputFormat::InterleavedTransposed)
@@ -130,27 +129,13 @@ namespace osuCrypto
             }
             else
             {
-                //assert(output.cols() == 1);
-                //auto end = std::min<u64>(begin + step * blocksPerSet, output.rows()/128);
-                ////std::memcpy(&output(begin * 128), lvl.data(), 128 * sizeof(block) * (end - begin));
-                //for (u64 i = begin, k = 0; i < end; i += step, ++k)
-                //{
-                //    auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
-                //    auto& dst = *(std::array<block, 128>*)(&output(i * 128));
-                //    memcpy(&dst, &io, sizeof(block) * 128);
-                //    //dst = io;
-                //    //for (u64 j = 0; j < 128; ++j)
-                //    //    output(j + i * 128) = io[j];
-                //}
+                // no op
             }
 
-            return ZeroBlock;
 
         }
         else if (oFormat == PprfOutputFormat::Plain)
         {
-            if (mal)
-                throw RTE_LOC;
 
             auto curSize = std::min<u64>(totalTrees - tIdx, 8);
             if (curSize == 8)
@@ -180,12 +165,11 @@ namespace osuCrypto
                         oi[j] = ii[j];
                 }
             }
-            return ZeroBlock;
 
         }
         else if (oFormat == PprfOutputFormat::Interleaved)
         {
-            return ZeroBlock;
+            // no op
         }
         else
             throw RTE_LOC;
@@ -351,26 +335,24 @@ namespace osuCrypto
     //    return expand({ &chl, 1 }, value, prng, output, oFormat, mal);
     //}
 
-    block SilentMultiPprfSender::expand(
+    void SilentMultiPprfSender::expand(
         Channel& chls,
         block value,
         PRNG& prng,
         MatrixView<block> output,
         PprfOutputFormat oFormat,
-        bool mal,
         u64 numThreads)
     {
         std::vector<block> vv(mPntCount, value);
-
-        return expand(chls, vv, prng, output, oFormat, mal, numThreads);
+        expand(chls, vv, prng, output, oFormat, numThreads);
     }
 
-    block SilentMultiPprfSender::expand(
+    void SilentMultiPprfSender::expand(
         Channel& chl,
         span<block> value,
         PRNG& prng,
         MatrixView<block> output,
-        PprfOutputFormat oFormat, bool mal,
+        PprfOutputFormat oFormat, 
         u64 numThreads)
     {
         setValue(value);
@@ -420,7 +402,6 @@ namespace osuCrypto
 
         // ss will hold the malicious check block. Will be 
         // the ZeroBlock if semi-honest
-        block ss = ZeroBlock;
         block seed = prng.get();
 
         // A public PRF/PRG that we will use for deriving the GGM tree.
@@ -681,8 +662,7 @@ namespace osuCrypto
                 auto lvl = getLevel(mDepth, g);
 
                 // s is a checksum that is used for malicous security. 
-                auto s = copyOut(lvl, output, mPntCount, g, oFormat, mal);
-                ss = ss ^ s;
+                copyOut(lvl, output, mPntCount, g, oFormat);
             }
         };
 
@@ -699,8 +679,6 @@ namespace osuCrypto
 
 
         mBaseOTs = {};
-
-        return ss;
     }
 
     void SilentMultiPprfSender::setValue(span<block> value)
@@ -720,17 +698,9 @@ namespace osuCrypto
         mPntCount = 0;
     }
 
-    //block SilentMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output,
-    //    PprfOutputFormat oFormat,
-    //    bool mal, u64 numThreads)
-    //{
-    //    return expand(chl, prng, output, oFormat, mal, numThreads);
-    //}
-
-
-    block SilentMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output,
+    void SilentMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output,
         PprfOutputFormat oFormat,
-        bool mal, u64 numThreads)
+        u64 numThreads)
     {
 
         setTimePoint("pprf.recv.start");
@@ -781,15 +751,13 @@ namespace osuCrypto
         std::vector<u64> points(mPntCount);
         getPoints(points, PprfOutputFormat::Plain);
 
-        // ss will hold the malicious check block. Will be 
-        // the ZeroBlock if semi-honest
-        block ss = ZeroBlock;
-
         // A public PRF/PRG that we will use for deriving the GGM tree.
         std::array<AES, 2> aes;
         aes[0].setKey(toBlock(3242342));
         aes[1].setKey(toBlock(8993849));
         Timer& timer = gTimer;
+        block X = prng.get();
+
 
         std::mutex recvMtx;
 
@@ -1162,8 +1130,7 @@ namespace osuCrypto
                 auto lvl = getLevel(mDepth, g);
 
                 // s is a checksum that is used for malicous security. 
-                block s = copyOut(lvl, output, mPntCount, g, oFormat, mal);
-                ss = ss ^ s;
+                copyOut(lvl, output, mPntCount, g, oFormat);
             }
         };
 
@@ -1176,11 +1143,8 @@ namespace osuCrypto
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i].join();
 
-
         mBaseOTs = {};
         mBaseChoices = {};
-
-        return ss;
     }
 
 }

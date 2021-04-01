@@ -10,6 +10,7 @@
 #include <libOTe/TwoChooseOne/IknpOtExtSender.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include "libOTe/Tools/LDPC/LdpcSampler.h"
+#include "libOTe/Vole/NoisyVoleReceiver.h"
 
 namespace osuCrypto
 {
@@ -44,8 +45,16 @@ namespace osuCrypto
         const BitVector& choices,
         Channel& chl)
     {
-#ifdef ENABLE_IKNP
-        mIknpSender.setBaseOts(baseRecvOts, choices, chl);
+        setBaseOts(baseRecvOts, choices);
+    }
+
+    // sets the IKNP base OTs that are then used to extend
+    void SilentOtExtSender::setBaseOts(
+        span<block> baseRecvOts,
+        const BitVector& choices)
+    {
+#ifdef ENABLE_KOS
+        mKosSender.setUniformBaseOts(baseRecvOts, choices);
 #else
         throw std::runtime_error("IKNP must be enabled");
 #endif
@@ -56,7 +65,7 @@ namespace osuCrypto
     {
         auto ptr = new SilentOtExtSender;
         auto ret = std::unique_ptr<OtExtSender>(ptr);
-        ptr->mIknpSender = mIknpSender.splitBase();
+        ptr->mKosSender = mKosSender.splitBase();
         return ret;
     }
 
@@ -64,8 +73,8 @@ namespace osuCrypto
     // IKNP base OTs that are required.
     void SilentOtExtSender::genBaseOts(PRNG& prng, Channel& chl)
     {
-#ifdef ENABLE_IKNP
-        mIknpSender.genBaseOts(prng, chl);
+#ifdef ENABLE_KOS
+        mKosSender.genBaseOts(prng, chl);
 #else
         throw std::runtime_error("IKNP must be enabled");
 #endif
@@ -74,8 +83,8 @@ namespace osuCrypto
 
     u64 SilentOtExtSender::baseOtCount() const
     {
-#ifdef ENABLE_IKNP
-        return mIknpSender.baseOtCount();
+#ifdef ENABLE_KOS
+        return mKosSender.baseOtCount();
 #else
         throw std::runtime_error("IKNP must be enabled");
 #endif
@@ -83,8 +92,8 @@ namespace osuCrypto
 
     bool SilentOtExtSender::hasBaseOts() const
     {
-#ifdef ENABLE_IKNP
-        return mIknpSender.hasBaseOts();
+#ifdef ENABLE_KOS
+        return mKosSender.hasBaseOts();
 #else
         throw std::runtime_error("IKNP must be enabled");
 #endif
@@ -101,10 +110,11 @@ namespace osuCrypto
 
         // If we have IKNP base OTs, use them
         // to extend to get the silent base OTs.
-#if defined(ENABLE_IKNP) || defined(LIBOTE_HAS_BASE_OT)
+#if defined(ENABLE_KOS) || defined(LIBOTE_HAS_BASE_OT)
 
-#ifdef ENABLE_IKNP
-        mIknpSender.send(msg, prng, chl);
+#ifdef ENABLE_KOS
+        mKosSender.mFiatShamir = true;
+        mKosSender.send(msg, prng, chl);
 #else
     // otherwise just generate the silent 
     // base OTs directly.
@@ -126,16 +136,29 @@ namespace osuCrypto
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
 
-        return mGen.baseOtCount() + mGapOts.size();
+        auto n = mGen.baseOtCount() + mGapOts.size();
+
+        if (mMalType == SilentSecType::Malicious)
+            n += 128;
+
+        return n;
     }
 
     void SilentOtExtSender::setSilentBaseOts(
         span<std::array<block, 2>> sendBaseOts)
     {
+
+        if (sendBaseOts.size() != silentBaseOtCount())
+            throw RTE_LOC;
+
         auto genOt = sendBaseOts.subspan(0, mGen.baseOtCount());
-        auto gapOt = sendBaseOts.subspan(genOt.size());
+        auto gapOt = sendBaseOts.subspan(genOt.size(), mGapOts.size());
+        auto malOt = sendBaseOts.subspan(genOt.size() + gapOt.size());
+        mMalCheckOts.resize((mMalType == SilentSecType::Malicious) * 128);
+
         mGen.setBase(genOt);
         std::copy(gapOt.begin(), gapOt.end(), mGapOts.begin());
+        std::copy(malOt.begin(), malOt.end(), mMalCheckOts.begin());
     }
 
     void SilverConfigure(
@@ -173,8 +196,9 @@ namespace osuCrypto
     }
 
     void SilentOtExtSender::configure(
-        u64 numOTs, u64 scaler, u64 secParam, u64 numThreads)
+        u64 numOTs, u64 scaler, u64 secParam, u64 numThreads, SilentSecType malType)
     {
+        mMalType = malType;
         mNumThreads = numThreads;
 
         if (mMultType == MultType::slv5 || mMultType == MultType::slv11)
@@ -210,6 +234,8 @@ namespace osuCrypto
 
             mGapOts.resize(0);
         }
+
+
 
         mGen.configure(mSizePer, mNumPartitions);
     }
@@ -392,7 +418,7 @@ namespace osuCrypto
 
         if (isConfigured() == false)
         {
-            configure(n, mScaler, 128, mNumThreads);
+            configure(n, mScaler, 128, mNumThreads, mMalType);
         }
 
         if (n != mRequestNumOts)
@@ -422,7 +448,7 @@ namespace osuCrypto
         {
             MatrixView<block> rT(mB.data(), 128, mN2 / 128);
 
-            mGen.expand(chl, mDelta, prng, rT, PprfOutputFormat::InterleavedTransposed, false, mNumThreads);
+            mGen.expand(chl, mDelta, prng, rT, PprfOutputFormat::InterleavedTransposed, mNumThreads);
             setTimePoint("sender.expand.pprf_transpose");
             gTimer.setTimePoint("sender.expand.pprf_transpose");
 
@@ -450,7 +476,12 @@ namespace osuCrypto
             chl.send(std::move(gapVals));
 
 
-            mGen.expand(chl, mDelta, prng, mB.subspan(0,main), PprfOutputFormat::Interleaved, false, mNumThreads);
+            mGen.expand(chl, mDelta, prng, mB.subspan(0,main), PprfOutputFormat::Interleaved, mNumThreads);
+
+
+            if (mMalType == SilentSecType::Malicious)
+                malCheck(chl, prng);
+
             setTimePoint("sender.expand.pprf_transpose");
             gTimer.setTimePoint("sender.expand.pprf_transpose");
 
@@ -466,6 +497,40 @@ namespace osuCrypto
         }
 
         mB = span<block>(mBacking.get(), mRequestNumOts);
+    }
+
+
+    void SilentOtExtSender::malCheck(Channel& chl, PRNG& prng)
+    {
+        block X;
+        chl.recv(X);
+
+        auto xx = X;
+        block sum0 = ZeroBlock;
+        block sum1 = ZeroBlock;
+        for (u64 i = 0; i < mB.size(); ++i)
+        {
+            block low, high;
+            xx.gf128Mul(mB[i], low, high);
+            sum0 = sum0 ^ low;
+            sum1 = sum1 ^ high;
+            //mySum = mySum ^ xx.gf128Mul(mB[i]);
+
+            xx = xx.gf128Mul(X);
+        }
+
+        block mySum = sum0.gf128Reduce(sum1);
+
+        NoisyVoleReceiver recver;
+        recver.receive({ &mDelta,1 }, { &mDeltaShare,1 }, prng, mMalCheckOts, chl);
+
+        std::array<u8, 32> myHash;
+        RandomOracle ro(32);
+        ro.Update(mySum ^ mDeltaShare);
+        ro.Final(myHash);
+
+        chl.send(myHash);
+
     }
 
     void bitShiftXor(span<block> dest, span<block> in, u8 bitShift)

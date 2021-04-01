@@ -30,6 +30,13 @@ namespace osuCrypto
         False, True
     };
 
+    enum class SilentSecType
+    {
+        SemiHonest,
+        Malicious,
+        //MaliciousFS
+    };
+
     class SilentMultiPprfSender : public TimerAdapter
     {
     public:
@@ -61,28 +68,25 @@ namespace osuCrypto
         void setBase(span<std::array<block, 2>> baseMessages);
 
         // expand the whole PPRF and store the result in output
-        block expand(Channel& chl, block value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads)
+        void expand(Channel& chl, block value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, u64 numThreads)
         {
             MatrixView<block> o(output.data(), output.size(), 1);
-            return expand(chl, value, prng, o, oFormat, mal, numThreads);
+            expand(chl, value, prng, o, oFormat, numThreads);
         }
 
 
-        block expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads);
-        //block expand(span<Channel> chls, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
+        void expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, u64 numThreads);
 
-        block expand(Channel& chls, span<block> value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads)
+        void expand(Channel& chls, span<block> value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, u64 numThreads)
         {
             MatrixView<block> o(output.data(), output.size(), 1);
-            return expand(chls, value, prng, o, oFormat, mal, numThreads);
+            expand(chls, value, prng, o, oFormat, numThreads);
         }
-        block expand(Channel& chl, span<block> value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads);
+        void expand(Channel& chl, span<block> value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, u64 numThreads);
 
 
         void setValue(span<block> value);
 
-        // expand the next output.size() number of outputs and store the result in output.
-        //void yeild(Channel& chl, PRNG& prng, span<block> output);
 
         void clear();
     };
@@ -119,15 +123,13 @@ namespace osuCrypto
 
 
         void getPoints(span<u64> points, PprfOutputFormat format);
-		//void getInterleavedPoints(span<u64> points);
 
-        block expand(Channel& chl, PRNG& prng, span<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads)
+        void expand(Channel& chl, PRNG& prng, span<block> output, PprfOutputFormat oFormat, u64 numThreads)
         {
             MatrixView<block> o(output.data(), output.size(), 1);
-            return expand(chl, prng, o, oFormat, mal, numThreads);
+            return expand(chl, prng, o, oFormat, numThreads);
         }
-        block expand(Channel& chl, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal, u64 numThreads);
-		//block expand(Channel& chl, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, bool mal);
+        void expand(Channel& chl, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, u64 numThreads);
 
         void clear()
         {

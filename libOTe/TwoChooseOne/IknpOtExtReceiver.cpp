@@ -18,12 +18,13 @@ namespace osuCrypto
         if (baseOTs.size() != gOtExtBaseOtCount)
             throw std::runtime_error(LOCATION);
 
+
+        mGens.resize(gOtExtBaseOtCount);
         for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {
             mGens[i][0].SetSeed(baseOTs[i][0]);
             mGens[i][1].SetSeed(baseOTs[i][1]);
         }
-
 
         mHasBase = true;
     }

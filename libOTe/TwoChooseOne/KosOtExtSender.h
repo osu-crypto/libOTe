@@ -17,8 +17,17 @@ namespace osuCrypto {
         struct SetUniformOts {};
 
 
-        std::array<PRNG, gOtExtBaseOtCount> mGens;
+        std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;
+
+        enum class HashType
+        {
+            RandomOracle,
+            AesHash
+        };
+        HashType mHashType = HashType::AesHash;
+        bool mFiatShamir = false;
+
 
         KosOtExtSender() = default;
         KosOtExtSender(const KosOtExtSender&) = delete;
@@ -68,6 +77,10 @@ namespace osuCrypto {
             span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl) override;
+
+
+
+        void hash(span<std::array<block, 2>> messages, Channel& chl, block seed, std::array<block, 128>& extraBlocks, block delta);
     };
 }
 

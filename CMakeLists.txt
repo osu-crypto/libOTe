@@ -131,12 +131,6 @@ message(STATUS "Option: ENABLE_OOS            = ${ENABLE_OOS}")
 message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}")
 message(STATUS "Option: ENABLE_RR             = ${ENABLE_RR}\n\n")
 
-message(STATUS "Other libOTe options\n=======================================================")
-message(STATUS "Option: OTE_KOS_HASH          = ${OTE_KOS_HASH}")
-message(STATUS "      OTE_RANDOM_ORACLE         use the random oracle (slower)")
-message(STATUS "      OTE_DAVIE_MEYER_AES       use AES in the Davie Meyer compression function\n")
-message(STATUS "Option: OTE_KOS_FIAT_SHAMIR   = ${OTE_KOS_FIAT_SHAMIR}\n\n")
-
 
 #############################################
 #               Config Checks               #

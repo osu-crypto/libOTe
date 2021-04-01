@@ -307,22 +307,22 @@ namespace {
             {
                 good = passed = false;
                 //if (verbose)
-                    std::cout << Color::Pink;
+                std::cout << Color::Pink;
             }
             if (eqq[0] == false && eqq[1] == false)
             {
                 good = passed = false;
                 //if (verbose)
-                    std::cout << Color::Red;
+                std::cout << Color::Red;
             }
 
             if (!good /*&& first*/)
             {
                 //first = false;
-                std::cout << i <<  " m " << mask << std::endl;
+                std::cout << i << " m " << mask << std::endl;
                 std::cout << "r " << m1 << " " << int(c) << std::endl;
                 std::cout << "s " << m2a << " " << m2b << std::endl;
-                std::cout << "d " << (m1^m2a) << " " << (m1^m2b) << std::endl;
+                std::cout << "d " << (m1 ^ m2a) << " " << (m1 ^ m2b) << std::endl;
             }
 
             std::cout << Color::Default;
@@ -356,16 +356,18 @@ void OtExt_Silent_random_Test(const CLP& cmd)
 
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
-    fakeBase(n, s, threads,prng, recver, sender);
+    fakeBase(n, s, threads, prng, recver, sender);
 
     std::vector<block> messages2(n);
     BitVector choice(n);
     std::vector<std::array<block, 2>> messages(n);
     auto type = OTType::Random;
 
-    sender.silentSend(messages, prng, chl0);
+    auto thrd = std::thread([&] {
+        sender.silentSend(messages, prng, chl0); });
     recver.silentReceive(choice, messages2, prng, chl1, type);
 
+    thrd.join();
     checkRandom(messages2, messages, choice, n, verbose);
 
 #else
@@ -406,9 +408,9 @@ void OtExt_Silent_correlated_Test(const CLP& cmd)
 
     sender.silentSend(delta, messages, prng, chl0);
     recver.silentReceive(choice, messages2, prng, chl1, type);
-    
+
     checkCorrelated(
-        messages, messages2, choice, delta, 
+        messages, messages2, choice, delta,
         n, verbose, ChoiceBitPacking::False);
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
@@ -463,14 +465,14 @@ void OtExt_Silent_inplace_Test(const CLP& cmd)
         auto& messages = recver.mA;
         auto& messages2 = sender.mB;
         auto& choice = recver.mC;
-        checkCorrelated(messages, messages2, choice, delta, 
+        checkCorrelated(messages, messages2, choice, delta,
             n, verbose, ChoiceBitPacking::True);
 
     }
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif
-}
+    }
 
 void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
 {
@@ -481,8 +483,8 @@ void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
     Session s0(ios, "localhost:1212", SessionMode::Server);
     Session s1(ios, "localhost:1212", SessionMode::Client);
 
-    std::vector<u64> nn = cmd.getManyOr<u64>("n", 
-        { 12, 134,433 , 4234,54366});
+    std::vector<u64> nn = cmd.getManyOr<u64>("n",
+        { 12, 134,433 , 4234,54366 });
 
     bool verbose = cmd.getOr("v", 0) > 1;
     u64 threads = cmd.getOr("t", 4);
@@ -500,21 +502,21 @@ void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
     block delta = prng.get();
     auto type = OTType::Correlated;
 
-    for(auto n : nn)
+    for (auto n : nn)
     {
         fakeBase(n, s, threads, prng, recver, sender);
 
         sender.silentSendInplace(delta, n, prng, chl0);
         recver.silentReceiveInplace(n, prng, chl1);
 
-        checkCorrelated(sender.mB, recver.mA, recver.mC, delta, 
+        checkCorrelated(sender.mB, recver.mA, recver.mC, delta,
             n, verbose, ChoiceBitPacking::False);
     }
 
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif
-}
+    }
 
 
 void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
@@ -572,7 +574,7 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif
-}
+    }
 
 void OtExt_Silent_baseOT_Test(const oc::CLP& cmd)
 {
@@ -597,10 +599,6 @@ void OtExt_Silent_baseOT_Test(const oc::CLP& cmd)
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
 
-    sender.mMultType = MultType::QuasiCyclic;
-    recver.mMultType = MultType::QuasiCyclic;
-
-
     block delta = prng.get();
     auto type = OTType::Correlated;
 
@@ -621,6 +619,50 @@ void OtExt_Silent_baseOT_Test(const oc::CLP& cmd)
 #endif
 }
 
+
+
+void OtExt_Silent_mal_Test(const oc::CLP& cmd)
+{
+
+#ifdef ENABLE_SILENTOT
+    IOService ios;
+    Session s0(ios, "localhost:1212", SessionMode::Server);
+    Session s1(ios, "localhost:1212", SessionMode::Client);
+
+    u64 n = 12093;//
+
+    bool verbose = cmd.getOr("v", 0) > 1;
+    u64 threads = cmd.getOr("t", 4);
+    u64 s = cmd.getOr("s", 2);
+
+    Channel chl0 = s0.addChannel();
+    Channel chl1 = s1.addChannel();
+
+    PRNG prng(toBlock(cmd.getOr("seed", 0)));
+    PRNG prng1(toBlock(cmd.getOr("seed1", 1)));
+
+    SilentOtExtSender sender;
+    SilentOtExtReceiver recver;
+
+    sender.mMalType = SilentSecType::Malicious;
+    recver.mMalType = SilentSecType::Malicious;
+
+    std::vector<std::array<block, 2>> msg2(n);
+    std::vector<block> msg1(n);
+    BitVector choice(n);
+
+    auto thrd = std::thread([&] {
+        sender.silentSend(msg2, prng, chl0);
+        });
+    recver.silentReceive(choice, msg1, prng, chl1);
+
+    thrd.join();
+
+    checkRandom(msg1, msg2, choice, n, verbose);
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+}
 
 void Tools_Pprf_test(const CLP& cmd)
 {
@@ -671,8 +713,8 @@ void Tools_Pprf_test(const CLP& cmd)
     std::vector<u64> points(numPoints);
     recver.getPoints(points, format);
 
-    sender.expand(chl0, CCBlock, prng, sOut, format, false, threads);
-    recver.expand(chl1, prng, rOut, format, false, threads);
+    sender.expand(chl0, CCBlock, prng, sOut, format, threads);
+    recver.expand(chl1, prng, rOut, format, threads);
     bool failed = false;
 
 
@@ -763,8 +805,8 @@ void Tools_Pprf_trans_test(const CLP& cmd)
 
 
 
-    sender.expand(chl0, AllOneBlock, prng, sOut, format, mal, threads);
-    recver.expand(chl1, prng, rOut, format, mal, threads);
+    sender.expand(chl0, AllOneBlock, prng, sOut, format, threads);
+    recver.expand(chl1, prng, rOut, format, threads);
     bool failed = false;
 
     Matrix<block> out(128, cols);
@@ -866,8 +908,8 @@ void Tools_Pprf_inter_test(const CLP& cmd)
     recver.getPoints(points, format);
 
 
-    sender.expand(chl0, AllOneBlock, prng, sOut2, format, mal, threads);
-    recver.expand(chl1, prng, rOut2, format, mal, threads);
+    sender.expand(chl0, AllOneBlock, prng, sOut2, format, threads);
+    recver.expand(chl1, prng, rOut2, format, threads);
 
     for (u64 i = 0; i < rOut2.rows(); ++i)
     {
