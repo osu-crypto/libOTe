@@ -72,8 +72,8 @@ namespace osuCrypto
         mGen.getPoints(mS, getPprfFormat());
 
         auto j = mNumPartitions * mSizePer;
-        auto ss = mS.size();
-        for (u64 i = 0; i < gapOts.size(); ++i)
+
+        for (u64 i = 0; i < (u64)gapOts.size(); ++i)
         {
             if (mGapBaseChoice[i])
             {
@@ -455,9 +455,9 @@ namespace osuCrypto
         block xx = mMalCheckSeed;
         block sum0 = ZeroBlock;
         block sum1 = ZeroBlock;
-        block theirSum = ZeroBlock;
 
-        for (u64 i = 0; i < mA.size(); ++i)
+
+        for (u64 i = 0; i < (u64)mA.size(); ++i)
         {
             block low, high;
             xx.gf128Mul(mA[i], low, high);

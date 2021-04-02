@@ -256,7 +256,7 @@ namespace osuCrypto
         case PprfOutputFormat::InterleavedTransposed:
         case PprfOutputFormat::Interleaved:
 
-            if (points.size() != mPntCount)
+            if ((u64)points.size() != mPntCount)
                 throw RTE_LOC;
             if (points.size() % 8)
                 throw RTE_LOC;
@@ -683,7 +683,7 @@ namespace osuCrypto
 
     void SilentMultiPprfSender::setValue(span<block> value)
     {
-        if (value.size() != mPntCount)
+        if ((u64)value.size() != mPntCount)
             throw RTE_LOC;
 
         mValue.resize(mPntCount);
@@ -756,7 +756,7 @@ namespace osuCrypto
         aes[0].setKey(toBlock(3242342));
         aes[1].setKey(toBlock(8993849));
         Timer& timer = gTimer;
-        block X = prng.get();
+        //block X = prng.get();
 
 
         std::mutex recvMtx;

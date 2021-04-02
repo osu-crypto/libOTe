@@ -13,11 +13,14 @@
 #include <deque>
 #include "LdpcSampler.h"
 
+#ifdef ENABLE_ALGO994
 extern "C" {
 #include "libOTe/Tools/LDPC/Algo994/utils.h"
 #include "libOTe/Tools/LDPC/Algo994/generations.h"
 #include "libOTe/Tools/LDPC/Algo994/data_defs.h"
 }
+#endif
+
 #include <fstream>
 
 namespace osuCrypto
@@ -28,15 +31,18 @@ namespace osuCrypto
 
     //using Mtx = Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic>;
 
-
+#ifdef ENABLE_ALGO994
     int alg994 = ALG_SAVED_UNROLLED;
     int num_saved_generators =  5;
     int num_cores = 4;
     int num_permutations = 5;
     int print_matrices = 0;
+#endif
 
     int minDist(std::string path, u64 numTHreads, bool verbose)
     {
+#ifdef ENABLE_ALGO994
+
         char* inputMatrix;
         int   info, k, n, dist;
         num_cores = numTHreads;
@@ -70,6 +76,9 @@ namespace osuCrypto
         free(inputMatrix);
 
         return dist;
+#else
+        throw std::runtime_error("also 994 not enabled. " LOCATION);
+#endif
     }
 
     int minDist2(const DenseMtx& mtx, u64 nt, bool verbose)
@@ -293,9 +302,9 @@ namespace osuCrypto
         u64 dd = mtx.mData.cols();
 #define ASSUME_DD_1
 #ifdef ASSUME_DD_1
-        assert(dd == 1);
+        if (dd != 1)
+            throw RTE_LOC;
 #endif
-
         for (u64 weight = 2; weight < mtx.rows(); ++weight)
         {
             auto total = choose(mtx.cols(), weight);
@@ -318,7 +327,7 @@ namespace osuCrypto
                     auto begin = i * total / numThreads;
                     auto end = (i + 1) * total / numThreads;
                     auto iter = NChooseK(mtx.cols(), weight, begin, end);
-                    u64& mI = iter.mI;
+                    //u64& mI = iter.mI;
                     std::vector<u64> set;
 #ifdef ASSUME_DD_1
                     block sum;

@@ -55,7 +55,7 @@ namespace osuCrypto
 
                 points.push_back({ i, n + i });
                 assert(row[row.size() - 1] == i);
-                for (u64 j = 0; j < row.size() - 1; ++j)
+                for (u64 j = 0; j < (u64)row.size() - 1; ++j)
                 {
                     points.push_back({ i,row[j] });
                 }
@@ -102,7 +102,7 @@ namespace osuCrypto
                 x[i] = y[i];
 
                 assert(row[row.size() - 1] == i);
-                for (u64 j = 0; j < row.size() - 1; ++j)
+                for (u64 j = 0; j < (u64)row.size() - 1; ++j)
                 {
                     x[i] ^= x[row[j]];
                 }
@@ -170,7 +170,7 @@ namespace osuCrypto
             {
                 auto row = mC->row(i);
                 assert(row[row.size() - 1] == i);
-                for (u64 j = 0; j < row.size() - 1; ++j)
+                for (u64 j = 0; j < (u64)row.size() - 1; ++j)
                 {
                     auto col = row[j];
                     assert(col < i);
@@ -1067,7 +1067,7 @@ namespace osuCrypto
             auto ww = mRandColumns.cols();
             for (u64 i = 0; i < rr; ++i)
             {
-                for (i64 j = 0; j < ww; ++j)
+                for (u64 j = 0; j < (u64)ww; ++j)
                 {
                 restart:
 
@@ -1347,7 +1347,7 @@ namespace osuCrypto
             auto ww = mRandColumns.cols();
             for (u64 i = 0; i < rr; ++i)
             {
-                for (i64 j = 0; j < ww; ++j)
+                for (u64 j = 0; j < ww; ++j)
                 {
                 restart:
 

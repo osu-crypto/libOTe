@@ -28,7 +28,7 @@ namespace osuCrypto
 
         std::vector<block> buffer(z.size());
 
-        for (u64 ii = 0; ii < otMsg.size(); ++ii)
+        for (u64 ii = 0; ii < (u64)otMsg.size(); ++ii)
         {
             PRNG p0(otMsg[ii][0]);
             PRNG p1(otMsg[ii][1]);
@@ -36,7 +36,7 @@ namespace osuCrypto
             p0.get<block>(buffer);
             //if (ii < 2)
             //    std::cout << "zero" << ii << " ";
-            for (u64 j = 0; j < y.size(); ++j)
+            for (u64 j = 0; j < (u64)y.size(); ++j)
             {
                 // zj -= m0[i][j]
                 z[j] = z[j] ^ buffer[j];
@@ -61,7 +61,7 @@ namespace osuCrypto
             //if (ii < 2)
             //    std::cout << "one" << ii << "  ";
 
-            for (u64 j = 0; j < y.size(); ++j)
+            for (u64 j = 0; j < (u64)y.size(); ++j)
             { 
                 //if (ii < 2 && j < 2)
                 //    std::cout << buffer[j] << " ";

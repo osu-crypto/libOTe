@@ -5,7 +5,7 @@
 #include "libOTe/Base/MasnyRindalKyber.h"
 #include "libOTe/Base/naor-pinkas.h"
 
-
+#include "cryptoTools/Common/BitVector.h"
 
 namespace osuCrypto
 {

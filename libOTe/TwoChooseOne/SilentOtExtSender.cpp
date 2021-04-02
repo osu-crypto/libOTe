@@ -148,7 +148,7 @@ namespace osuCrypto
         span<std::array<block, 2>> sendBaseOts)
     {
 
-        if (sendBaseOts.size() != silentBaseOtCount())
+        if ((u64)sendBaseOts.size() != silentBaseOtCount())
             throw RTE_LOC;
 
         auto genOt = sendBaseOts.subspan(0, mGen.baseOtCount());
@@ -311,7 +311,7 @@ namespace osuCrypto
             block mask = OneBlock ^ AllOneBlock;
             auto d = mDelta & mask;
 
-            auto n8 = messages.size() / 8 * 8;
+            auto n8 = (u64)messages.size() / 8 * 8;
             block hashBuffer[8];
 
             std::array<block, 2>* m = messages.data();
@@ -374,7 +374,7 @@ namespace osuCrypto
                 m += 8;
                 r += 8;
             }
-            for (u64 i = n8; i < messages.size(); ++i)
+            for (u64 i = n8; i < (u64)messages.size(); ++i)
             {
                 messages[i][0] = (mB[i]) & mask;
                 messages[i][1] = (mB[i] ^ d) & mask;
@@ -508,7 +508,7 @@ namespace osuCrypto
         auto xx = X;
         block sum0 = ZeroBlock;
         block sum1 = ZeroBlock;
-        for (u64 i = 0; i < mB.size(); ++i)
+        for (u64 i = 0; i < (u64)mB.size(); ++i)
         {
             block low, high;
             xx.gf128Mul(mB[i], low, high);
@@ -759,7 +759,7 @@ namespace osuCrypto
 
             brs[j++].decrementWait();
 
-            std::array<block, 8> hashBuffer;
+
             std::array<block, 128> tpBuffer;
             auto numBlocks = (mRequestNumOts + 127) / 128;
             auto begin = index * numBlocks / mNumThreads;

@@ -194,8 +194,11 @@ namespace osuCrypto
             }
             raw.setUniformBaseOts(base);
         }
-
+#ifdef OC_NO_MOVE_ELISION 
         return std::move(raw);
+#else
+        return raw;
+#endif
     }
 
     std::unique_ptr<NcoOtExtReceiver> OosNcoOtReceiver::split()

@@ -305,7 +305,7 @@ namespace osuCrypto
 
         RandomOracle sha;
         u8 hashBuff[20];
-        std::array<block, 8> aesHashTemp;
+
 
         u64 doneIdx = 0;
         std::array<block, 128> challenges;

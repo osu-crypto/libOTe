@@ -132,7 +132,7 @@ namespace osuCrypto
                     if (r < 0)
                         r += rows;
 
-                    if (r >= rows || r < 0)
+                    if (r >= i64(rows) || r < 0)
                     {
                         //std::cout << i << " " << r << " " << rows << std::endl;
                         throw RTE_LOC;
@@ -212,7 +212,7 @@ namespace osuCrypto
     template<typename Iter>
     inline void shuffle(Iter begin, Iter end, oc::PRNG& prng)
     {
-        auto n = end - begin;
+        u64 n = u64(end - begin);
 
         for (u64 i = 0; i < n; ++i)
         {

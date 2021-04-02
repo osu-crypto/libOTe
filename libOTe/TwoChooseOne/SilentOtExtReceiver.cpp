@@ -365,7 +365,7 @@ namespace osuCrypto
         Channel& chl,
         OTType type)
     {
-        if (choices.size() != messages.size())
+        if (choices.size() != (u64)messages.size())
             throw RTE_LOC;
 
         auto packing = type == OTType::Random ?
@@ -509,7 +509,7 @@ namespace osuCrypto
         block sum0 = ZeroBlock;
         block sum1 = ZeroBlock;
 
-        for (u64 i = 0; i < mA.size(); ++i)
+        for (u64 i = 0; i < (u64)mA.size(); ++i)
         {
             block low, high;
             xx.gf128Mul(mA[i], low, high);
@@ -544,7 +544,7 @@ namespace osuCrypto
     {
         if (choices.size() != mRequestedNumOts)
             throw RTE_LOC;
-        if (messages.size() != mRequestedNumOts)
+        if ((u64)messages.size() != mRequestedNumOts)
             throw RTE_LOC;
 
         auto cIter = choices.begin();
@@ -608,7 +608,7 @@ namespace osuCrypto
             }
 
             cIter = cIter + n8;
-            for (u64 i = n8; i < messages.size(); ++i)
+            for (u64 i = n8; i < (u64)messages.size(); ++i)
             {
                 auto m = &messages[i];
                 auto r = &mA[i];

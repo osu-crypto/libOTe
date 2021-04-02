@@ -10,7 +10,7 @@
 namespace osuCrypto
 {
 
-    void Silent_example(Role role, int numOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
+    void Silent_example(Role role, u64 numOTs, u64 numThreads, std::string ip, std::string tag, CLP& cmd)
     {
 #ifdef ENABLE_SILENTOT
 
@@ -28,16 +28,16 @@ namespace osuCrypto
 
         // for each thread we need to construct a channel (socket) for it to communicate on.
         std::vector<Channel> chls(numThreads);
-        for (int i = 0; i < numThreads; ++i)
+        for (u64 i = 0; i < numThreads; ++i)
             chls[i] = ep0.addChannel();
 
         //bool mal = cmd.isSet("mal");
         SilentOtExtSender sender;
         SilentOtExtReceiver receiver;
 
-        auto otType = cmd.isSet("noHash") ?
-            OTType::Correlated :
-            OTType::Random;
+        //auto otType = cmd.isSet("noHash") ?
+        //    OTType::Correlated :
+        //    OTType::Random;
 
         bool fakeBase = cmd.isSet("fakeBase");
 
@@ -46,7 +46,7 @@ namespace osuCrypto
         auto routine = [&](int i, int s, SilentBaseType type)
         {
             Timer timer;
-            u64 milli;
+            u64 milli=0;
             try {
 
                 if (i != 0)

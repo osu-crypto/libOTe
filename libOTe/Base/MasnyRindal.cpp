@@ -152,7 +152,6 @@ namespace osuCrypto
                     r *= sk;
 
                     r.toBytes(hashBuff.data());
-                    auto p = (block*)hashBuff.data();
 
                     ro.Reset();
                     ro.Update(hashBuff.data(), pointSize);

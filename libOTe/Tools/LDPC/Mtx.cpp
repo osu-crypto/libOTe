@@ -200,7 +200,7 @@ namespace osuCrypto
         //std::cout << M10 << std::endl;
         //std::cout << M11 << std::endl;
 
-
+#ifndef NDEBUG
         u64 cc =
             M00.mDataCol.size() +
             M01.mDataCol.size() +
@@ -211,7 +211,7 @@ namespace osuCrypto
             M01.mDataRow.size() +
             M10.mDataRow.size() +
             M11.mDataRow.size();
-
+#endif
 
 
         assert(cc == M.mDataCol.size());

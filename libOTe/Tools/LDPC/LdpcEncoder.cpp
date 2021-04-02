@@ -291,7 +291,7 @@ namespace osuCrypto
     void tests::LdpcEncoder_diagonalSolver_test()
     {
         u64 n = 10;
-        u64 m = n;
+        //u64 m = n;
         u64 w = 4;
         u64 t = 10;
 

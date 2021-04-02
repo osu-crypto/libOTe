@@ -77,7 +77,7 @@ namespace osuCrypto
     void SilentVoleSender::setSilentBaseOts(
         span<std::array<block, 2>> sendBaseOts)
     {
-        if (sendBaseOts.size() != silentBaseOtCount())
+        if ((u64)sendBaseOts.size() != silentBaseOtCount())
             throw RTE_LOC;
 
         auto genOt = sendBaseOts.subspan(0, mGen.baseOtCount());
@@ -314,7 +314,7 @@ namespace osuCrypto
         auto xx = X;
         block sum0 = ZeroBlock;
         block sum1 = ZeroBlock;
-        for (u64 i = 0; i < mB.size(); ++i)
+        for (u64 i = 0; i < (u64)mB.size(); ++i)
         {
             block low, high;
             xx.gf128Mul(mB[i], low, high);

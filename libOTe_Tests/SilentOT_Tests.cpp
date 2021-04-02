@@ -216,9 +216,9 @@ namespace {
         bool verbose)
     {
 
-        if (messages.size() != n)
+        if (messages.usize() != n)
             throw RTE_LOC;
-        if (messages2.size() != n)
+        if (messages2.usize() != n)
             throw RTE_LOC;
         if (choice.size() != n)
             throw RTE_LOC;
@@ -263,15 +263,15 @@ namespace {
         ChoiceBitPacking packing)
     {
 
-        if (Ar.size() != n)
+        if (Ar.usize() != n)
             throw RTE_LOC;
-        if (Bs.size() != n)
+        if (Bs.usize() != n)
             throw RTE_LOC;
         if (packing == ChoiceBitPacking::False &&
-            choice.size() != n)
+            (u64)choice.size() != n)
             throw RTE_LOC;
         bool passed = true;
-        bool first = true;
+        //bool first = true;
         block mask = AllOneBlock ^ OneBlock;
 
 
@@ -362,11 +362,11 @@ void OtExt_Silent_random_Test(const CLP& cmd)
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
     fakeBase(n, s, threads, prng, recver, sender);
+    auto type = OTType::Random;
 
     std::vector<block> messages2(n);
     BitVector choice(n);
     std::vector<std::array<block, 2>> messages(n);
-    auto type = OTType::Random;
 
     auto thrd = std::thread([&] {
         sender.silentSend(messages, prng, chl0); });
@@ -449,7 +449,7 @@ void OtExt_Silent_inplace_Test(const CLP& cmd)
 
     block delta = prng.get();
 
-    auto type = OTType::Correlated;
+    //auto type = OTType::Correlated;
 
     {
         fakeBase(n, s, threads, prng, recver, sender);
@@ -505,7 +505,7 @@ void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
     SilentOtExtReceiver recver;
 
     block delta = prng.get();
-    auto type = OTType::Correlated;
+    //auto type = OTType::Correlated;
 
     for (auto n : nn)
     {
@@ -554,7 +554,7 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
     //recver.mDebug = true;
 
     block delta = prng.get();
-    auto type = OTType::Correlated;
+    //auto type = OTType::Correlated;
 
     for (auto n : nn)
     {
@@ -592,8 +592,8 @@ void OtExt_Silent_baseOT_Test(const oc::CLP& cmd)
     u64 n = 123;//
 
     bool verbose = cmd.getOr("v", 0) > 1;
-    u64 threads = cmd.getOr("t", 4);
-    u64 s = cmd.getOr("s", 2);
+    //u64 threads = cmd.getOr("t", 4);
+    //u64 s = cmd.getOr("s", 2);
 
     Channel chl0 = s0.addChannel();
     Channel chl1 = s1.addChannel();
@@ -604,8 +604,8 @@ void OtExt_Silent_baseOT_Test(const oc::CLP& cmd)
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
 
-    block delta = prng.get();
-    auto type = OTType::Correlated;
+    //block delta = prng.get();
+    //auto type = OTType::Correlated;
 
     std::vector<std::array<block, 2>> msg2(n);
     std::vector<block> msg1(n);
@@ -637,8 +637,8 @@ void OtExt_Silent_mal_Test(const oc::CLP& cmd)
     u64 n = 12093;//
 
     bool verbose = cmd.getOr("v", 0) > 1;
-    u64 threads = cmd.getOr("t", 4);
-    u64 s = cmd.getOr("s", 2);
+    //u64 threads = cmd.getOr("t", 4);
+    //u64 s = cmd.getOr("s", 2);
 
     Channel chl0 = s0.addChannel();
     Channel chl1 = s1.addChannel();
@@ -764,7 +764,7 @@ void Tools_Pprf_trans_test(const CLP& cmd)
     u64 domain = cmd.getOr("d", 334);
     auto threads = cmd.getOr("t", 3ull);
     u64 numPoints = cmd.getOr("s", 5) * 8;
-    bool mal = cmd.isSet("mal");
+    //bool mal = cmd.isSet("mal");
 
     PRNG prng(ZeroBlock);
 
@@ -870,7 +870,7 @@ void Tools_Pprf_inter_test(const CLP& cmd)
     u64 domain = cmd.getOr("d", 334);
     auto threads = cmd.getOr("t", 3ull);
     u64 numPoints = cmd.getOr("s", 5) * 8;
-    bool mal = cmd.isSet("mal");
+    //bool mal = cmd.isSet("mal");
 
     PRNG prng(ZeroBlock);
 
@@ -906,7 +906,7 @@ void Tools_Pprf_inter_test(const CLP& cmd)
     sender.setBase(sendOTs);
     recver.setBase(recvOTs);
 
-    auto cols = (numPoints * domain + 127) / 128;
+    //auto cols = (numPoints * domain + 127) / 128;
     Matrix<block> sOut2(numPoints * domain, 1);
     Matrix<block> rOut2(numPoints * domain, 1);
     std::vector<u64> points(numPoints);

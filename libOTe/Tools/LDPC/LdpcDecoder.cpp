@@ -8,8 +8,12 @@
 #include <numeric>      // std::iota
 #include <algorithm> 
 #include <iomanip>
+
+#ifdef ALT_ENCODER
 #include "libOTe/Tools/LDPC/alt/LDPC_generator.h"
 #include "libOTe/Tools/LDPC/alt/LDPC_decoder.h"
+#endif
+
 #include "LdpcImpulseDist.h"
 namespace osuCrypto {
 
@@ -35,7 +39,7 @@ namespace osuCrypto {
     std::vector<u8> LdpcDecoder::bpDecode(span<u8> codeword, u64 maxIter)
     {
         auto n = mH.cols();
-        auto m = mH.rows();
+
 
         assert(codeword.size() == n);
 
@@ -189,122 +193,11 @@ namespace osuCrypto {
     }
 
 
-    //std::vector<u8> LdpcDecoder::logbpDecode(span<u8> codeword, u64 maxIter)
-    //{
-
-    //    auto n = mH.cols();
-    //    auto m = mH.rows();
-
-    //    assert(codeword.size() == n);
-
-    //    std::array<double, 2> wVal{
-    //        {mP, 1 - mP }
-    //    };
-
-    //    // #1
-    //    for (u64 i = 0; i < n; ++i)
-    //    {
-    //        assert(codeword[i] < 2);
-    //        mW[i] = wVal[codeword[i]];
-    //    }
-
-    //    return logbpDecode(mW, maxIter);
-    //}
-
-
-    //std::vector<u8> LdpcDecoder::logbpDecode(span<double> codeword, u64 maxIter)
-    //{
-    //    auto n = mH.cols();
-    //    auto m = mH.rows();
-
-    //    std::fill(mR.begin(), mR.end(), nan);
-    //    std::fill(mM.begin(), mM.end(), nan);
-
-    //    // #1
-    //    for (u64 i = 0; i < n; ++i)
-    //    {
-    //        auto cc = codeword[i];
-    //        mW[i] = LLR(codeword[i]);
-    //        for (auto j : mH.mCols[i])
-    //        {
-    //            mR(j, i) = mW[i];
-    //        }
-    //    }
-    //    std::vector<double> vals(n);
-    //    std::vector<u8> c(n);
-    //    std::vector<bool> signs(n);
-    //    for (u64 ii = 0; ii < maxIter; ii++)
-    //    {
-    //        // #2
-    //        for (u64 j = 0; j < m; ++j)
-    //        {
-    //            double total = 0;
-    //            bool sign = false;
-    //            u64 i = 0;
-    //            for (u64 k : mH.mRows[j])
-    //            {
-    //                auto rjk = mR(j, k);
-    //                assert(rjk != nan);
-    //                auto t = std::tanh(rjk * 0.5);
-
-    //                vals[k] = std::log(std::abs(t));
-    //                total += vals[k];
-
-    //                signs[k] = t >= 0;
-    //                sign ^= signs[k];
-
-    //                ++i;
-    //            }
-    //            i = 0;
-    //            for (u64 k : mH.mRows[j])
-    //            {
-    //                auto e = exp(total - vals[k]);
-    //                auto s = ((sign ^ signs[k]) ? -1 : 1);
-    //                mM(j, k) = -atanh(e * s);
-
-    //                ++i;
-    //            }
-    //        }
-    //        mL.resize(c.size());
-
-    //        // i indexes a column, [1,...,n]
-    //        for (u64 i = 0; i < n; ++i)
-    //        {
-    //            mL[i] = mW[i];
-    //            for (u64 k : mH.mCols[i])
-    //            {
-    //                assert(mM(k, i) != nan);
-    //                mL[i] += mM(k, i);
-    //            }
-    //            for (u64 k : mH.mCols[i])
-    //            {
-    //                mR(k, i) = mL[i] - mM(k, i);
-    //            }
-
-    //            c[i] = (mL[i] >= 0) ? 0 : 1;
-    //        }
-
-    //        if (check(c))
-    //        {
-    //            c.resize(n - m);
-    //            //for (u64 i = 0; i < n; ++i)
-    //            //    std::cout << i << " ll " << mL[i] << std::endl;
-
-    //            return c;
-    //        }
-    //    }
-
-    //    return {};
-    //}
-
-
-
-
     std::vector<u8> LdpcDecoder::logbpDecode2(span<u8> codeword, u64 maxIter)
     {
 
         auto n = mH.cols();
-        auto m = mH.rows();
+        //auto m = mH.rows();
 
         assert(codeword.size() == n);
 
@@ -467,7 +360,7 @@ namespace osuCrypto {
         //std::vector<uint8_t> LdpcCode::decode(std::vector<double> llr_vec, auto max_iter, bool min_sum) {
 
         auto _N = mH.cols();
-        auto _M = mH.rows();
+        //auto _M = mH.rows();
         //std::vector<double> llr_vec(_N);
         std::array<double, 3> wVal{
             {std::log(mP / (1 - mP)),
@@ -500,22 +393,22 @@ namespace osuCrypto {
 
         std::vector<std::vector<double> > forward_msg(_M);
         std::vector<std::vector<double> > back_msg(_M);
-        for (auto r = 0; r < _M; ++r) {
+        for (u64 r = 0; r < _M; ++r) {
             forward_msg[r].resize(mH.row(r).size());
             back_msg[r].resize(mH.row(r).size());
         }
         auto maxLL = 20.0;
 
-        for (auto iter = 0; iter < maxIter; ++iter) {
+        for (u64 iter = 0; iter < maxIter; ++iter) {
 
-            for (auto r = 0; r < _M; ++r) {
+            for (u64 r = 0; r < _M; ++r) {
 
-                for (auto c1 = 0; c1 < mH.row(r).size(); ++c1) {
+                for (u64 c1 = 0; c1 < (u64)mH.row(r).size(); ++c1) {
                     double tmp = 1;
                     if (min_sum)
                         tmp = maxLL;
 
-                    for (auto c2 = 0; c2 < mH.row(r).size(); ++c2) {
+                    for (u64 c2 = 0; c2 < (u64)mH.row(r).size(); ++c2) {
                         if (c1 == c2)
                             continue;
 
@@ -549,15 +442,15 @@ namespace osuCrypto {
 
             mL = mW;
 
-            for (auto r = 0; r < _M; ++r) {
+            for (u64 r = 0; r < _M; ++r) {
 
-                for (auto i = 0; i < mH.row(r).size(); ++i) {
+                for (u64 i = 0; i < (u64)mH.row(r).size(); ++i) {
                     auto c = mH.row(r)[i];
                     mL[c] += back_msg[r][i];
                 }
             }
 
-            for (auto c = 0; c < _N; ++c) {
+            for (u64 c = 0; c < _N; ++c) {
                 decoded_cw[c] = mL[c] > 0 ? 0 : 1;
             }
 
@@ -689,7 +582,7 @@ namespace osuCrypto {
 
     bool LdpcDecoder::check(const span<u8>& data) {
 
-        bool isCW = true;
+        //bool isCW = true;
         // j indexes a row, [1,...,m]
         for (u64 j = 0; j < mH.rows(); ++j)
         {
@@ -810,13 +703,15 @@ namespace osuCrypto {
 
             //std::cout << "samples " << tries << std::endl;
 
-            u64 d;
+            //u64 d;
 
-            if (cols < 35)
-                d = minDist(H.dense(), false).second.size();
+            //if (cols < 35)
+            //    d = minDist(H.dense(), false).second.size();
 
+#ifdef ALT_ENCODER
             LDPC_bp_decoder DD((int)cols, (int)rows);
             DD.init(H);
+#endif
             D.init(H);
             std::vector<u8> m(k), m2, code(cols);
 

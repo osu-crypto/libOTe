@@ -152,8 +152,8 @@ namespace osuCrypto
         }
     };
 
-    template<typename T> 
-    std::ostream& operator<<(std::ostream& o, const Vec<T>& v)
+    //template<typename T> 
+    inline std::ostream& operator<<(std::ostream& o, const Vec<block>& v)
     {
         for (u64 i = 0; i < v.size(); ++i)
         {
@@ -292,7 +292,7 @@ namespace osuCrypto
             std::set<std::pair<u64, u64>> set;
 #endif // !NDEBUG
 
-            for (u64 i = 0; i < points.size(); ++i)
+            for (u64 i = 0; i < u64(points.size()); ++i)
             {
 #ifdef INSERT_DEBUG
                 auto s = set.insert({ points[i].mRow , points[i].mCol });
@@ -339,7 +339,7 @@ namespace osuCrypto
                 colSizes[i] = 0;
             }
 
-            for (u64 i = 0; i < points.size(); ++i)
+            for (u64 i = 0; i < u64(points.size()); ++i)
             {
                 auto r = points[i].mRow;
                 auto c = points[i].mCol;
@@ -358,14 +358,15 @@ namespace osuCrypto
                 std::sort(col(i).begin(), col(i).end());
             }
 
-
-            for (u64 i = 0; i < points.size(); ++i)
+#ifndef NDEBUG
+            for (u64 i = 0; i < u64(points.size()); ++i)
             {
                 auto row = mRows[points[i].mRow];
                 auto col = mCols[points[i].mCol];
                 assert(std::find(row.begin(), row.end(), points[i].mCol) != row.end());
                 assert(std::find(col.begin(), col.end(), points[i].mRow) != col.end());
             }
+#endif
         }
 
         template<typename IdxType>
@@ -469,12 +470,13 @@ namespace osuCrypto
                 rowIters[ii][0] = iter;
                 rowIters[ii][1] = end;
 
+#ifndef NDEBUG
                 for (auto c : span<u64>(iter, end))
                 {
                     assert(c < cols());
                     assert(c - col < colCount);
                 }
-
+#endif
                 total += end - iter;
             }
 
@@ -489,11 +491,13 @@ namespace osuCrypto
                 colIters[ii][1] = end;
 
 
+#ifndef NDEBUG
                 for (auto r : span<u64>(iter, end))
                 {
                     assert(r < rows());
                     assert(r - row < rowCount);
                 }
+#endif
             }
 
             R.mDataRow.resize(total);
@@ -505,7 +509,7 @@ namespace osuCrypto
             auto iter = R.mDataRow.begin();
             for (u64 i = 0; i < rowIters.size(); ++i)
             {
-                auto size = std::distance(rowIters[i][0], rowIters[i][1]);
+                u64 size = (u64)std::distance(rowIters[i][0], rowIters[i][1]);
 
                 //std::transform(rowIters[i][0], rowIters[i][1], iter, [&](const auto& src) {return src - col; });
 
@@ -524,7 +528,7 @@ namespace osuCrypto
             iter = R.mDataCol.begin();
             for (u64 i = 0; i < colIters.size(); ++i)
             {
-                auto size = std::distance(colIters[i][0], colIters[i][1]);
+                auto size = (u64)std::distance(colIters[i][0], colIters[i][1]);
                 //std::transform(colIters[i][0], colIters[i][1], iter, [&](const auto& src) {return src - row; });
 
                 for (u64 j = 0; j < size; ++j)
@@ -880,7 +884,7 @@ namespace osuCrypto
             auto row = H.row(i);
             for (u64 j = 0, jj = 0; j < H.cols(); ++j)
             {
-                if (jj != row.size() && j == row[jj])
+                if (jj != (u64)row.size() && j == row[jj])
                 {
                     if (&o == &std::cout)
                         o << oc::Color::Green << "1 " << oc::Color::Default;
@@ -1007,7 +1011,7 @@ namespace osuCrypto
         {
             DenseMtx r(rows(), perm.size());
 
-            for (u64 i = 0; i < perm.size(); ++i)
+            for (u64 i = 0; i < (u64)perm.size(); ++i)
             {
                 auto d = r.col(i);
                 auto s = col(perm[i]);
@@ -1463,8 +1467,8 @@ namespace osuCrypto
 
         void operator ^=(const VecSortSet& o)
         {
-            auto i0 = 0;
-            auto i1 = 0;
+            u64 i0 = 0;
+            u64 i1 = 0;
 
             while (i0 != size() && i1 != o.size())
             {
@@ -1621,8 +1625,8 @@ namespace osuCrypto
 
         void operator ^=(const VecSortSet& o)
         {
-            auto i0 = 0;
-            auto i1 = 0;
+            u64 i0 = 0;
+            u64 i1 = 0;
 
             while (i0 != size() && i1 != o.size())
             {
@@ -1697,15 +1701,12 @@ namespace osuCrypto
             resize(m.rows(), m.cols());
             for (u64 i = 0; i < rows(); ++i)
             {
-                auto r = m.row(i);
                 row(i).clear();
-                //row(i).insert(r.begin(), r.end());
             }
             for (u64 i = 0; i < cols(); ++i)
             {
                 auto c = m.col(i);
                 col(i).clear();
-                //col(i).insert(c.begin(), c.end());
             }
 
             for (u64 i = 0; i < rows(); ++i)
@@ -1802,7 +1803,7 @@ namespace osuCrypto
             mCols.emplace_back();
             mCols.back().insert(col.begin(), col.end());
 
-            for (u64 i = 0; i < col.size(); ++i)
+            for (u64 i = 0; i < (u64)col.size(); ++i)
             {
                 mRows[col[i]].insert(c);
             }
@@ -1819,7 +1820,7 @@ namespace osuCrypto
             mRows.emplace_back();
             mRows.back().insert(row.begin(), row.end());
 
-            for (u64 i = 0; i < row.size(); ++i)
+            for (u64 i = 0; i < (u64)row.size(); ++i)
             {
                 mCols[row[i]].insert(r);
             }
@@ -1827,8 +1828,8 @@ namespace osuCrypto
         void rowAdd(u64 r0, u64 r1)
         {
 
-            auto i0 = 0;
-            auto i1 = 0;
+            u64 i0 = 0;
+            u64 i1 = 0;
             auto& rr0 = row(r0);
             auto& rr1 = row(r1);
 
@@ -1875,8 +1876,8 @@ namespace osuCrypto
             if (r0 == r1)
                 return;
 
-            auto col0 = 0;
-            auto col1 = 0;
+            u64 col0 = 0;
+            u64 col1 = 0;
 
             auto& rr0 = mRows[r0];
             auto& rr1 = mRows[r1];
@@ -1903,6 +1904,9 @@ namespace osuCrypto
                     ++col0;
                 }
             }
+
+
+
 
             while (col0 != rr0.size())
             {
@@ -1935,7 +1939,8 @@ namespace osuCrypto
             {
                 for (auto j : mRows[i])
                 {
-                    assert(mCols[j].find(i) != mCols[j].end());
+                    if (mCols[j].find(i) == mCols[j].end())
+                        throw RTE_LOC;
                 }
             }
 
@@ -1943,17 +1948,16 @@ namespace osuCrypto
             {
                 for (auto j : mCols[i])
                 {
-                    assert(mRows[j].find(i) != mRows[j].end());
+                    if(mRows[j].find(i) == mRows[j].end())
+                        throw RTE_LOC;
                 }
             }
         }
-
-
         DynSparseMtx selectColumns(span<u64> perm)const
         {
             DynSparseMtx r;
             r.mRows.resize(rows());
-            for (u64 i = 0; i < perm.size(); ++i)
+            for (u64 i = 0; i < (u64)perm.size(); ++i)
             {
                 r.pushBackCol(col(perm[i]));
             }

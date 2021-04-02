@@ -1,5 +1,10 @@
 
 cmake_minimum_required (VERSION 2.8)
+if (POLICY CMP0048)
+  cmake_policy(SET CMP0048 NEW)
+endif (POLICY CMP0048)
+
+project(cryptoTools VERSION 1.3.0)
 
 project(libOTe)
 set(libOTe_VERSION 1.2.0)
@@ -22,10 +27,11 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 
 
 	else()
-		set(COMMON_FLAGS "-Wall -march=native -Wfatal-errors -std=c++17")
+		set(COMMON_FLAGS "-Wall -march=native -Wfatal-errors")
 		SET(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG") 
 		SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb -rdynamic")
 		SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb -rdynamic")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -std=c++17")
 	endif()
 
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COMMON_FLAGS}")
@@ -155,9 +161,8 @@ if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_NP) AND
 endif() 
 
 configure_file(libOTe/config.h.in libOTe/config.h)
-
 # Support out-of-source builds.
-include_directories(${CMAKE_BINARY_DIR})
+# include_directories(${CMAKE_BINARY_DIR})
 
 
 #############################################

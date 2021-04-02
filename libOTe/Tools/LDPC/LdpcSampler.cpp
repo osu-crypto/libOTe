@@ -4,10 +4,11 @@
 #include "libOTe/Tools/LDPC/Util.h"
 #include <thread>
 
+#ifdef ENABLE_ALGO994
 extern "C" {
 #include "libOTe/Tools/LDPC/Algo994/data_defs.h"
 }
-
+#endif
 
 namespace osuCrypto
 {
@@ -31,7 +32,7 @@ namespace osuCrypto
         for (u64 c = 0; c < cols; ++c)
         {
             std::set<u64> s;
-            auto remCols = cols - c;
+            //auto remCols = cols - c;
 
             for (u64 j = 0; j < gap; ++j)
             {
@@ -108,7 +109,7 @@ namespace osuCrypto
                 std::cout << "{{ ";
                 bool first = true;
 
-                for (u64 j = 0; j < H.row(i).size(); ++j)
+                for (u64 j = 0; j < (u64)H.row(i).size(); ++j)
                 {
                     if (!first)
                         std::cout << ", ";
@@ -116,7 +117,7 @@ namespace osuCrypto
                     first = false;
                 }
 
-                for (u64 j = 0; j < H.row(i + cols).size(); ++j)
+                for (u64 j = 0; j < (u64)H.row(i + cols).size(); ++j)
                 {
                     if (!first)
                         std::cout << ", ";
@@ -143,12 +144,12 @@ namespace osuCrypto
         bool trim, bool extend, bool randY,
         oc::PRNG& prng, PointList& points)
     {
-        auto dHeight = gap + 1;
+        //auto dHeight =;
 
         assert(extend == false || trim == true);
         assert(gap < rows);
         assert(dWeight > 0);
-        assert(dWeight <= dHeight);
+        assert(dWeight <= gap + 1);
 
         if (trim == false)
             throw RTE_LOC;
@@ -226,7 +227,7 @@ namespace osuCrypto
 
             u64 cols = static_cast<u64>(rows * cmd.getOr("e", 2.0));
             u64 colWeight = cmd.getOr("cw", 5);
-            u64 colGroups = cmd.getOr("cg", colWeight);
+            //u64 colGroups = cmd.getOr("cg", colWeight);
             u64 dWeight = cmd.getOr("dw", 3);
             u64 gap = cmd.getOr("g", 12);
             u64 tt = cmd.getOr("t", 1);
@@ -238,17 +239,19 @@ namespace osuCrypto
 
             bool uniform = cmd.isSet("u");
 
+#ifdef ENABLE_ALGO994
             alg994 = cmd.getOr("algo", ALG_SAVED);
             num_saved_generators = cmd.getOr("numGen", 5);
             num_cores = (int)nt;
             num_permutations = cmd.getOr("numPerm", 10);
             print_matrices = 0;
+#endif
 
 
             std::string outPath = cmd.getOr<std::string>("o", "temp.txt");
             bool noEncode = cmd.isSet("ne");
 
-            auto k = cols - rows;
+            //auto k = cols - rows;
             //assert(gap >= dWeight);
 
             SparseMtx H;

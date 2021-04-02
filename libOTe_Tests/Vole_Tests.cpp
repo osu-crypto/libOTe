@@ -48,7 +48,6 @@ void Vole_Noisy_test(const oc::CLP& cmd)
     u64 n = cmd.getOr("n", 123);
     block seed = block(0, cmd.getOr("seed", 0));  
     PRNG prng(seed);
-    auto threads = 1;
 
     block x = prng.get();
     std::vector<block> y(n), z0(n), z1(n);
@@ -168,7 +167,7 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
     // c * x = z + m
 
     //for (u64 n = 5000; n < 10000; ++n)
-    for(auto n : {12, 123,465,1642,4356,34254,93425})
+    for(u64 n : {12, 123,465,1642,4356,34254,93425})
     {
         std::vector<block> c(n), z0(n), z1(n);
 

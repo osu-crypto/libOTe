@@ -11,9 +11,12 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "libOTe/Tools/Tools.h"
+
+#ifdef ENABLE_ALGO994
 extern "C" {
 #include "libOTe/Tools/LDPC/Algo994/data_defs.h"
 }
+#endif
 
 #include <thread>
 #include <fstream>
@@ -302,7 +305,7 @@ namespace osuCrypto
                 abort();
             }
 
-            auto gap = dSet.size();
+            //auto gap = dSet.size();
 
             while (dSet.size() < Nd)
             {
@@ -502,7 +505,7 @@ namespace osuCrypto
     {
         assert(Nd < 32);
         auto n = mH.cols();
-        auto m = mH.rows();
+        //auto m = mH.rows();
 
         LdpcDecoder D;
         D.init(mH);
@@ -675,11 +678,14 @@ namespace osuCrypto
 
         // algo994 parameters
         auto trueDist = cmd.isSet("true");
+
+#ifdef ENABLE_ALGO994                        
         alg994 = cmd.getOr("algo994", ALG_SAVED_UNROLLED);
         num_saved_generators = cmd.getOr("numGen", 5);
         num_cores = (int)nt;
         num_permutations = cmd.getOr("numPerm", 10);
         print_matrices = 0;
+#endif
 
         SparseMtx H;
         LdpcDecoder D;

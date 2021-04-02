@@ -70,7 +70,11 @@ namespace osuCrypto
             }
             raw.setUniformBaseOts(base, mBaseChoiceBits);
         }
-        return std::move(raw);
+#ifdef OC_NO_MOVE_ELISION
+            return std::move(raw);
+#else
+            return raw;
+#endif
     }
 
 
