@@ -1,17 +1,5 @@
 include("${CMAKE_CURRENT_LIST_DIR}/libOTeFindBuildDir.cmake")
 
-if(MSVC)
-    set(CONFIG_NAME "${CMAKE_BUILD_TYPE}")
-    if("${CONFIG_NAME}" STREQUAL "RelWithDebInfo" )
-        set(CONFIG_NAME "Release")
-	endif()
-
-
-    set(libOTe_BIN_DIR "${CMAKE_CURRENT_LIST_DIR}/../out/build/x64-${CONFIG_NAME}")
-else()
-    message(FATAL_ERROR "not impl")
-endif()
-
 find_library(
     cryptoTools_LIB
     NAMES cryptoTools
@@ -72,7 +60,7 @@ if(ENABLE_MR_KYBER)
 
 	find_library(
 	    KyberOT_LIB
-	    NAMES KyberOT
+	    NAMES KyberOT)
 
     if(NOT KyberOT_LIB)
       	message(FATAL_ERROR "Failed to find libKyberOT.a at: ${libOTe_BIN_DIR}/")
@@ -103,6 +91,8 @@ list(APPEND libOTe_LIB
     "${cryptoTools_LIB}"
     "${Boost_LIBRARIES}"
     "${WOLFSSL_LIB}"
+    "${RLC_LIBRARY}"
+    )
     
     
 list(APPEND libOTe_TESTS_LIB 
