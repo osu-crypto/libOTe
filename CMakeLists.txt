@@ -169,13 +169,13 @@ configure_file(libOTe/config.h.in libOTe/config.h)
 #               Build libOTe                #
 #############################################
 
-if(ENABLE_SIMPLESTOT_ASM)
+if(ENABLE_SIMPLESTOT_ASM AND (NOT MSVC))
 	add_subdirectory(SimplestOT)
-endif(ENABLE_SIMPLESTOT_ASM)
+endif()
 
-if(ENABLE_MR_KYBER)
+if(ENABLE_MR_KYBER AND (NOT MSVC))
 	add_subdirectory(KyberOT)
-endif(ENABLE_MR_KYBER)
+endif()
 
 add_subdirectory(libOTe)
 add_subdirectory(libOTe_Tests)

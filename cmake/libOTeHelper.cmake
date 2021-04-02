@@ -36,7 +36,7 @@ endif()
 
 
 
-if(ENABLE_SIMPLESTOT_ASM)
+if(ENABLE_SIMPLESTOT_ASM AND (NOT MSVC))
 
 	find_library(
 	    SimplestOT_LIB
@@ -51,7 +51,7 @@ endif()
 
 
 
-if(ENABLE_MR_KYBER)
+if(ENABLE_MR_KYBER AND (NOT MSVC))
 
 	find_library(
 	    KyberOT_LIB
