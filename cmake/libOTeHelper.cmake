@@ -45,12 +45,7 @@ if(ENABLE_SIMPLESTOT_ASM)
 
     if(NOT SimplestOT_LIB)
       	message(FATAL_ERROR "Failed to find libSimplestOT.a at: ${libOTe_BIN_DIR}")
-  	else()
-      	#message(STATUS "Found libSimplestOT.a at: ${libOTe_Dirs}/lib/")  	
     endif()
-  
-    
-    set(libOTe_LIB "${libOTe_LIB} ${SimplestOT}")
 
 endif()
 
@@ -64,11 +59,7 @@ if(ENABLE_MR_KYBER)
 
     if(NOT KyberOT_LIB)
       	message(FATAL_ERROR "Failed to find libKyberOT.a at: ${libOTe_BIN_DIR}/")
-  	else()
-      	#message(STATUS "Found libKyberOT.a at: ${libOTe_Dirs}/lib/")  	
-    endif()
-    
-    set(libOTe_LIB "${libOTe_LIB} ${libOTe_BIN_DIR}")
+    endif()   
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/../cryptoTools/cmake/cryptoToolsDepHelper.cmake")
@@ -92,6 +83,8 @@ list(APPEND libOTe_LIB
     "${Boost_LIBRARIES}"
     "${WOLFSSL_LIB}"
     "${RLC_LIBRARY}"
+    "${SimplestOT_LIB}"
+    "${KyberOT_LIB}"
     )
     
     
