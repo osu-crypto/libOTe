@@ -19,6 +19,7 @@ namespace osuCrypto
     {
         mBaseChoiceBits = choices;
 
+        mGens.resize(gOtExtBaseOtCount);
         for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {
             mGens[i].SetSeed(baseRecvOts[i]);

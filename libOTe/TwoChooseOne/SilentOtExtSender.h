@@ -13,7 +13,6 @@
 #include <libOTe/TwoChooseOne/KosOtExtReceiver.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
-//#define NO_HASH
 
 namespace osuCrypto
 {
@@ -271,8 +270,6 @@ namespace osuCrypto
         void clear();
     };
 
-    void bitShiftXor(span<block> dest, span<block> in, u8 bitShift);
-    void modp(span<block> dest, span<block> in, u64 p);
 
 }
 

@@ -8,8 +8,8 @@
 #include <cryptoTools/Common/Timer.h>
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
-#include <libOTe/TwoChooseOne/IknpOtExtSender.h>
-#include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
+#include <libOTe/TwoChooseOne/KosOtExtSender.h>
+#include <libOTe/TwoChooseOne/KosOtExtReceiver.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 //#define NO_HASH
@@ -40,12 +40,15 @@ namespace osuCrypto
         u64 mNumPartitions = 0;
         u64 mSizePer = 0;
         u64 mNumThreads = 1;
-        //u64 mGapOts = 0;
         std::vector<std::array<block, 2>> mGapOts;
 
-#ifdef ENABLE_IKNP
-        IknpOtExtSender mIknpSender;
-        IknpOtExtReceiver mIknpRecver;
+        block mDelta;
+
+        SilentSecType mMalType = SilentSecType::SemiHonest;
+
+#ifdef ENABLE_KOS
+        KosOtExtSender mKosSender;
+        KosOtExtReceiver mKosRecver;
 #endif
         MultType mMultType = MultType::slv5;
         S1DiagRegRepEncoder mEncoder;
@@ -69,27 +72,13 @@ namespace osuCrypto
         // sets the IKNP base OTs that are then used to extend
         void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices,
-            Channel& chl)
-        {
-#ifdef ENABLE_IKNP
-            mIknpSender.setBaseOts(baseRecvOts, choices, chl);
-#else
-            throw std::runtime_error("IKNP must be enabled");
-#endif
-        }
-
-        // Returns an independent copy of this extender.
-        std::unique_ptr<OtExtSender> split()
-        {
-            throw std::runtime_error("not impl");
-        }
+            const BitVector& choices);
 
         // use the default base OT class to generate the
         // IKNP base OTs that are required.
         void genBaseOts(PRNG& prng, Channel& chl)
         {
-            mIknpSender.genBaseOts(prng, chl);
+            mKosSender.genBaseOts(prng, chl);
         }
 
 
@@ -145,7 +134,10 @@ namespace osuCrypto
             Channel& chls);
 
         bool mDebug = false;
+
         void checkRT(Channel& chl, span<block> beta) const;
+
+        void ferretMalCheck(Channel& chl, block deltaShare);
 
         void clear();
     };

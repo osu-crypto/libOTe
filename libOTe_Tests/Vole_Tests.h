@@ -1,7 +1,8 @@
 #pragma once
 #include <cryptoTools/Common/CLP.h>
 
-void NoisyVole_test(const oc::CLP& cmd); 
-void SilentVole_test(const oc::CLP& cmd); 
-void SilentVole_paramSweep_test(const oc::CLP& cmd); 
-void SilentVole_baseOT_test(const oc::CLP& cmd);
+void Vole_Noisy_test(const oc::CLP& cmd);
+void Vole_Silent_test(const oc::CLP& cmd);
+void Vole_Silent_paramSweep_test(const oc::CLP& cmd);
+void Vole_Silent_baseOT_test(const oc::CLP& cmd);
+void Vole_Silent_mal_test(const oc::CLP& cmd);

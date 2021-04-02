@@ -692,6 +692,9 @@ namespace osuCrypto
         }
     }
 
+    void bitShiftXor(span<block> dest, span<block> in, u8 bitShift);
+    void modp(span<block> dest, span<block> in, u64 p);
+
     void SilentOtExtReceiver::randMulQuasiCyclic(ChoiceBitPacking packing)
     {
         using namespace bpm;

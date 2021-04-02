@@ -9,7 +9,12 @@
 #include <cryptoTools/Common/TestCollection.h>
 
 using namespace oc;
+namespace osuCrypto
+{
 
+    void bitShiftXor(span<block> dest, span<block> in, u8 bitShift);
+    void modp(span<block> dest, span<block> in, u64 p);
+}
 
 void Tools_bitShift_test(const CLP& cmd)
 {

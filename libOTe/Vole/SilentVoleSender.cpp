@@ -15,16 +15,13 @@
 
 namespace osuCrypto
 {
-    //extern u64 numPartitions;
-    //extern u64 nScaler;
-
     u64 secLevel(u64 scale, u64 p, u64 points);
     u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
     u64 SilentVoleSender::baseOtCount() const
     {
-#ifdef ENABLE_IKNP
-        return mIknpSender.baseOtCount();
+#ifdef ENABLE_KOS
+        return mKosSender.baseOtCount();
 #else
         throw std::runtime_error("IKNP must be enabled");
 #endif
@@ -32,13 +29,25 @@ namespace osuCrypto
 
     bool SilentVoleSender::hasBaseOts() const
     {
-#ifdef ENABLE_IKNP
-        return mIknpSender.hasBaseOts();
+#ifdef ENABLE_KOS
+        return mKosSender.hasBaseOts();
 #else
         throw std::runtime_error("IKNP must be enabled");
 #endif
-
     }
+
+    // sets the IKNP base OTs that are then used to extend
+    void SilentVoleSender::setBaseOts(
+        span<block> baseRecvOts,
+        const BitVector& choices)
+    {
+#ifdef ENABLE_KOS
+        mKosSender.setUniformBaseOts(baseRecvOts, choices);
+#else
+        throw std::runtime_error("IKNP must be enabled");
+#endif
+    }
+
 
     void SilentVoleSender::genSilentBaseOts(PRNG& prng, Channel& chl)
     {
@@ -47,7 +56,8 @@ namespace osuCrypto
 
         std::vector<std::array<block, 2>> msg(silentBaseOtCount());
 
-        mIknpSender.send(msg, prng, chl);
+        mKosSender.mFiatShamir = true;
+        mKosSender.send(msg, prng, chl);
 
         setSilentBaseOts(msg);
         setTimePoint("sender.gen.done");
@@ -58,10 +68,10 @@ namespace osuCrypto
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
 
-        if (mIknpRecver.hasBaseOts())
+        if (mKosRecver.hasBaseOts())
             return mGen.baseOtCount() + mGapOts.size();
         else
-            return mGen.baseOtCount() + mGapOts.size() + mIknpRecver.baseOtCount();
+            return mGen.baseOtCount() + mGapOts.size() + mKosRecver.baseOtCount();
     }
 
     void SilentVoleSender::setSilentBaseOts(
@@ -78,7 +88,7 @@ namespace osuCrypto
         std::copy(gapOt.begin(), gapOt.end(), mGapOts.begin());
 
         if(iknpOt.size())
-            mIknpRecver.setBaseOts(iknpOt);
+            mKosRecver.setUniformBaseOts(iknpOt);
     }
 
     void SilverConfigure(
@@ -216,22 +226,33 @@ namespace osuCrypto
             genSilentBaseOts(prng, chl);
         }
 
+        mDelta = delta;
+
         setTimePoint("sender.iknp.start");
         gTimer.setTimePoint("sender.iknp.base2");
 
 
-        if (mIknpRecver.hasBaseOts() == false)
-        {
-            mIknpRecver.genBaseOts(mIknpSender, prng, chl);
-            setTimePoint("sender.iknp.gen");
-        }
+        if (mKosRecver.hasBaseOts() == false)
+            throw RTE_LOC;
 
         // compute the correlation for the noisy coordinates.
         std::vector<block> beta(mNumPartitions + mGapOts.size());
+        block deltaShare;
         {
+            if (mMalType == SilentSecType::Malicious)
+                beta.emplace_back();
+
+            mKosRecver.mFiatShamir = true;
             NoisyVoleSender nv;
             //recvs data
-            nv.send(delta, beta, prng, mIknpRecver, chl);
+            nv.send(delta, beta, prng, mKosRecver, chl);
+
+
+            if (mMalType == SilentSecType::Malicious)
+            {
+                deltaShare = beta.back();
+                beta.pop_back();
+            }
         }
 
         // allocate B
@@ -250,7 +271,6 @@ namespace osuCrypto
             auto v = mGapOts[j][0] ^ beta[mNumPartitions + j];
             gapVals[j] = AES(mGapOts[j][1]).ecbEncBlock(ZeroBlock) ^ v;
             mB[i] = mGapOts[j][0];
-            //std::cout << "jj " << j << " " <<i << " " << mGapOts[j][0] << " " << v << " " << beta[mNumPartitions + j] << std::endl;
         }
         chl.send(std::move(gapVals));
 
@@ -268,6 +288,13 @@ namespace osuCrypto
             setTimePoint("sender.expand.checkRT");
         }
 
+
+        if (mMalType == SilentSecType::Malicious)
+        {
+            ferretMalCheck(chl, deltaShare);
+        }
+
+
         if (mTimer)
             mEncoder.setTimer(getTimer());
 
@@ -279,7 +306,33 @@ namespace osuCrypto
         mState = State::Default;
     }
 
+    void SilentVoleSender::ferretMalCheck(Channel& chl, block deltaShare)
+    {
+        block X;
+        chl.recv(X);
 
+        auto xx = X;
+        block sum0 = ZeroBlock;
+        block sum1 = ZeroBlock;
+        for (u64 i = 0; i < mB.size(); ++i)
+        {
+            block low, high;
+            xx.gf128Mul(mB[i], low, high);
+            sum0 = sum0 ^ low;
+            sum1 = sum1 ^ high;
+
+            xx = xx.gf128Mul(X);
+        }
+
+        block mySum = sum0.gf128Reduce(sum1);
+
+        std::array<u8, 32> myHash;
+        RandomOracle ro(32);
+        ro.Update(mySum ^ deltaShare);
+        ro.Final(myHash);
+
+        chl.send(myHash);
+    }
 }
 
 #endif

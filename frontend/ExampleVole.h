@@ -111,7 +111,7 @@ namespace osuCrypto
                     pp.get(baseSendMsgs.data(), baseSendMsgs.size());
                     for (u64 i = 0; i < nn; ++i)
                         baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
-                    sender.setBaseOts(baseRecvMsgs, bits, chls[0]);
+                    sender.setBaseOts(baseRecvMsgs, bits);
                 }
                 else
                 {

@@ -41,7 +41,7 @@ namespace {
 
 }
 
-void NoisyVole_test(const oc::CLP& cmd)
+void Vole_Noisy_test(const oc::CLP& cmd)
 {
     Timer timer;
     timer.setTimePoint("start");
@@ -92,7 +92,7 @@ void NoisyVole_test(const oc::CLP& cmd)
 
 }
 
-void SilentVole_test(const oc::CLP& cmd)
+void Vole_Silent_test(const oc::CLP& cmd)
 {
     Timer timer;
     timer.setTimePoint("start");
@@ -142,7 +142,7 @@ void SilentVole_test(const oc::CLP& cmd)
 
 }
 
-void SilentVole_paramSweep_test(const oc::CLP& cmd)
+void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
 {
 
     Timer timer;
@@ -196,7 +196,7 @@ void SilentVole_paramSweep_test(const oc::CLP& cmd)
 
 
 
-void SilentVole_baseOT_test(const oc::CLP& cmd)
+void Vole_Silent_baseOT_test(const oc::CLP& cmd)
 {
 
     Timer timer;
@@ -220,6 +220,62 @@ void SilentVole_baseOT_test(const oc::CLP& cmd)
 
     SilentVoleReceiver recv;
     SilentVoleSender send;
+    // c * x = z + m
+
+    //for (u64 n = 5000; n < 10000; ++n)
+    {
+        std::vector<block> c(n), z0(n), z1(n);
+
+
+        recv.setTimer(timer);
+        send.setTimer(timer);
+        std::thread thrd = std::thread([&]() {
+            recv.silentReceive(c, z0, prng, chl0);
+            timer.setTimePoint("recv");
+            });
+        send.silentSend(x, z1, prng, chl1);
+        timer.setTimePoint("send");
+        thrd.join();
+        for (u64 i = 0; i < n; ++i)
+        {
+            if (c[i].gf128Mul(x) != (z0[i] ^ z1[i]))
+            {
+                throw RTE_LOC;
+            }
+        }
+        timer.setTimePoint("done");
+    }
+}
+
+
+
+void Vole_Silent_mal_test(const oc::CLP& cmd)
+{
+
+    Timer timer;
+    timer.setTimePoint("start");
+    u64 n = 12343;
+    block seed = block(0, cmd.getOr("seed", 0));
+    PRNG prng(seed);
+
+    block x = prng.get();
+
+
+    IOService ios;
+    auto chl1 = Session(ios, "localhost:1212", SessionMode::Server).addChannel();
+    auto chl0 = Session(ios, "localhost:1212", SessionMode::Client).addChannel();
+    timer.setTimePoint("net");
+
+    timer.setTimePoint("ot");
+
+    //recv.mDebug = true;
+    //send.mDebug = true;
+
+    SilentVoleReceiver recv;
+    SilentVoleSender send;
+
+    send.mMalType = SilentSecType::Malicious;
+    recv.mMalType = SilentSecType::Malicious;
     // c * x = z + m
 
     //for (u64 n = 5000; n < 10000; ++n)

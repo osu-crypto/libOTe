@@ -9,8 +9,8 @@
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
-#include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
-#include <libOTe/TwoChooseOne/IknpOtExtSender.h>
+#include <libOTe/TwoChooseOne/KosOtExtReceiver.h>
+#include <libOTe/TwoChooseOne/KosOtExtSender.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 
 namespace osuCrypto
@@ -83,39 +83,24 @@ namespace osuCrypto
 
         BitVector mIknpSendBaseChoice, mGapBaseChoice;
 
-#ifdef ENABLE_IKNP
-        IknpOtExtReceiver mIknpRecver;
-        IknpOtExtSender mIknpSender;
+        SilentSecType mMalType  = SilentSecType::SemiHonest;
+
+        block mMalCheckSeed, mMalCheckX;
+
+#ifdef ENABLE_KOS
+        KosOtExtReceiver mKosRecver;
+        KosOtExtSender mKosSender;
 #endif
 
         // sets the Iknp base OTs that are then used to extend
         void setBaseOts(
-            span<std::array<block, 2>> baseSendOts) 
-        {
-#ifdef ENABLE_IKNP
-            mIknpRecver.setBaseOts(baseSendOts);
-#else
-            throw std::runtime_error("IKNP must be enabled");
-#endif
-        }
+            span<std::array<block, 2>> baseSendOts);
 
         // return the number of base OTs IKNP needs
-        u64 baseOtCount() const {
-#ifdef ENABLE_IKNP
-            return mIknpRecver.baseOtCount();
-#else
-            throw std::runtime_error("IKNP must be enabled");
-#endif
-        }
+        u64 baseOtCount() const;
 
         // returns true if the IKNP base OTs are currently set.
-        bool hasBaseOts() const {
-#ifdef ENABLE_IKNP
-            return mIknpRecver.hasBaseOts(); 
-#else
-            throw std::runtime_error("IKNP must be enabled");
-#endif
-        };
+        bool hasBaseOts() const;
 
         // returns true if the silent base OTs are set.
         bool hasSilentBaseOts() const {
@@ -179,6 +164,11 @@ namespace osuCrypto
 
         // internal.
         void checkRT(Channel& chls) const;
+
+        void ferretMalCheck(
+            Channel& chl, 
+            block deltaShare,
+            span<block> y);
 
         PprfOutputFormat getPprfFormat()
         {
