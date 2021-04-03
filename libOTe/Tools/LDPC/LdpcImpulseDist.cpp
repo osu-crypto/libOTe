@@ -624,7 +624,7 @@ namespace osuCrypto
     void tests::LdpcDecode_impulse_test(const oc::CLP& cmd)
     {
         // general parameter
-        auto rowVec = cmd.getManyOr<u64>("r", { {50} });
+        auto rowVec = cmd.getManyOr<u64>("r", { 50 });
         double e = cmd.getOr("e", 2.0);
         //u64 cols = rows * e;
         u64 trial = cmd.getOr("trials", 1);

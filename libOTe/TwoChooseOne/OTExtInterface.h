@@ -20,8 +20,8 @@ namespace osuCrypto
     class OtReceiver
     {
     public:
-        OtReceiver() {}
-
+        OtReceiver() = default;
+        virtual ~OtReceiver() = default;
 
         // Receive random strings indexed by choices. The random strings will be written to 
         // messages.
@@ -52,6 +52,7 @@ namespace osuCrypto
     {
     public:
         OtSender() {}
+        virtual ~OtSender() = default;
 
         // send random strings. The random strings will be written to 
         // messages.
@@ -90,7 +91,7 @@ namespace osuCrypto
     {
     public:
         OtExtReceiver() {}
-
+        
         // sets the base OTs that are then used to extend
         virtual void setBaseOts(
             span<std::array<block,2>> baseSendOts,

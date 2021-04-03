@@ -956,7 +956,7 @@ namespace osuCrypto
                         }
 
                         rec = getNextEnd(vv[j], j, slope);
-                        auto next = vv[j] + slope * rec.end;
+                        //auto next = vv[j] + slope * rec.end;
                         rec.end += i;
 
                         auto iter = recs.begin();

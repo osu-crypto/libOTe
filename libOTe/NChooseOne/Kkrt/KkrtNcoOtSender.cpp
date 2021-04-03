@@ -66,7 +66,7 @@ namespace osuCrypto
 
     std::unique_ptr<NcoOtExtSender> KkrtNcoOtSender::split()
     {
-        return std::make_unique<KkrtNcoOtSender>(std::move(splitBase()));
+        return std::make_unique<KkrtNcoOtSender>((splitBase()));
     }
 
     void KkrtNcoOtSender::init(

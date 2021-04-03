@@ -77,7 +77,7 @@ namespace osuCrypto
             v.mHasPendingSendFuture = false;
             v.mHasBase = false;
 #ifndef NDEBUG
-            mEncodeFlags = std::move(mEncodeFlags);
+            mEncodeFlags = std::move(v.mEncodeFlags);
 #endif
         }
 

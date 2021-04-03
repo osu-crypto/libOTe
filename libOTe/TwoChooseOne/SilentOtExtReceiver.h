@@ -110,6 +110,8 @@ namespace osuCrypto
         // A flag that helps debug
         bool mDebug = false;
 
+        virtual ~SilentOtExtReceiver() = default;
+
         /////////////////////////////////////////////////////
         // The standard OT extension interface
         /////////////////////////////////////////////////////

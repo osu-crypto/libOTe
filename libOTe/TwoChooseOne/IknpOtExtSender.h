@@ -31,6 +31,7 @@ namespace osuCrypto {
         {
             setBaseOts(baseRecvOts, choices);
         }
+        virtual ~IknpOtExtSender() = default;
 
         void operator=(IknpOtExtSender&&v) 
         {

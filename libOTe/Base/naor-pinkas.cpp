@@ -202,7 +202,7 @@ namespace osuCrypto
         // one out of nSndVals OT.
         u64 nSndVals(2);
         std::vector<std::thread> thrds(numThreads);
-        auto seed = prng.get<block>();
+        //auto seed = prng.get<block>();
         Curve curve;
         Number alpha(curve, prng), tmp(curve);
         const Point g = curve.getGenerator();
@@ -246,7 +246,7 @@ namespace osuCrypto
         {
 
             thrds[t] = std::thread([
-                t, seed, fieldElementSize, &messages, recvFuture,
+                t, fieldElementSize, &messages, recvFuture,
                     numThreads, &buff, &alpha, nSndVals, &pC,&socket,&R]()
             {
                 Curve curve;

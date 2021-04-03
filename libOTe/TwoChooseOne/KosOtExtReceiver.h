@@ -41,6 +41,8 @@ namespace osuCrypto
             v.mHasBase = false;
         }
 
+        virtual ~KosOtExtReceiver() = default;
+
         // returns whether the base OTs have been set. They must be set before
         // split or receive is called.
         bool hasBaseOts() const override

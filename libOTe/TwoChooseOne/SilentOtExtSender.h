@@ -130,6 +130,8 @@ namespace osuCrypto
         bool mDebug = false;
 
 
+        virtual ~SilentOtExtSender() = default;
+
         /////////////////////////////////////////////////////
         // The standard OT extension interface
         /////////////////////////////////////////////////////

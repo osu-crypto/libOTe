@@ -159,7 +159,7 @@ namespace osuCrypto
 
         for (u64 i = 0; i < parOts.size(); ++i)
         {
-            parOts[i] = std::move(ots.split());
+            parOts[i] = (ots.split());
             auto seed = prng.get<block>();
             parThrds[i] = std::thread([&,seed, i]()
             {

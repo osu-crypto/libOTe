@@ -286,11 +286,12 @@ namespace osuCrypto
         std::vector<std::thread> thrds(numThreads);
         for (u64 i = 0; i < thrds.size(); ++i)
         {
-            thrds[i] = std::thread([&mut, &queue, i]() {
+            thrds[i] = std::thread([&queue]() {
 
                 while (true)
                 {
-                    std::function<void()> fn = queue.pop();
+                    std::function<void()> fn =queue.pop();
+                    
                     if (!fn)
                         return;
                     fn();

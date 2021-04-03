@@ -80,7 +80,7 @@ namespace osuCrypto
 
     std::unique_ptr<NcoOtExtSender> OosNcoOtSender::split()
     {
-        return std::make_unique<OosNcoOtSender>(std::move(splitBase()));
+        return std::make_unique<OosNcoOtSender>((splitBase()));
     }
 
 

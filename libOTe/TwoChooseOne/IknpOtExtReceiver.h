@@ -29,6 +29,8 @@ namespace osuCrypto
             setBaseOts(baseSendOts);
         }
 
+        virtual ~IknpOtExtReceiver() = default;
+
         void operator=(IknpOtExtReceiver&& v)
         {
             mHasBase = std::move(v.mHasBase);

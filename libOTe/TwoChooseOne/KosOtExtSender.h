@@ -38,6 +38,8 @@ namespace osuCrypto {
             span<block> baseRecvOts,
             const BitVector& choices);
 
+        virtual ~KosOtExtSender() = default;
+
         void operator=(KosOtExtSender&& v)
         {
             mGens = std::move(v.mGens);

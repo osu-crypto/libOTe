@@ -1705,7 +1705,7 @@ namespace osuCrypto
             }
             for (u64 i = 0; i < cols(); ++i)
             {
-                auto c = m.col(i);
+                //auto c = m.col(i);
                 col(i).clear();
             }
 

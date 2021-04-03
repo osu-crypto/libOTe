@@ -203,7 +203,7 @@ namespace osuCrypto
 
     std::unique_ptr<NcoOtExtReceiver> OosNcoOtReceiver::split()
     {
-        return std::make_unique<OosNcoOtReceiver>(std::move(splitBase()));
+        return std::make_unique<OosNcoOtReceiver>((splitBase()));
     }
 
     void OosNcoOtReceiver::encode(
