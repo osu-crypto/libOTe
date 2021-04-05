@@ -941,11 +941,9 @@ namespace osuCrypto
                         auto j = rec.pos;
                         auto slope = weights[j] + 1;
 
-                        auto z = idxToZp(vv[j]);
-
                         if (rec.isY)
                         {
-                            assert(z >= mIdx0);
+                            assert(idxToZp(vv[j]) >= mIdx0);
                             assert(vv[j] >= mRows);
                             vv[j] -= mRows;
                             assert(vv[j] < mRows);
