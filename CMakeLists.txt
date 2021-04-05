@@ -108,10 +108,18 @@ option(ENABLE_RR             "Build the RR 1-oo-N OT-Ext protocol." OFF)
 
 option(ENABLE_AKN            "Build the RR ~k-oo-N OT-Ext protocol." OFF)
 
-option(OTE_KOS_FIAT_SHAMIR "Build the library withing Fiat Shamir for KOS" OFF)
 
-set(OTE_KOS_HASH "OTE_DAVIE_MEYER_AES" CACHE STRING "Hashing technique for KOS")
-set_property(CACHE OTE_KOS_HASH PROPERTY STRINGS OTE_RANDOM_ORACLE OTE_DAVIE_MEYER_AES)
+if(NOT LINUX)
+	if(ENABLE_SIMPLESTOT_ASM)
+		message("ENABLE_SIMPLESTOT_ASM only supported on Linux")
+		set(ENABLE_SIMPLESTOT_ASM OFF)
+	endif()
+	if(ENABLE_MR_KYBER)
+		message("ENABLE_MR_KYBER only supported on Linux")
+		set(ENABLE_MR_KYBER OFF)
+	endif()
+
+endif()
 
 message(STATUS "General Options\n=======================================================")
 message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF\n\n")
@@ -160,9 +168,9 @@ if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_NP) AND
    message(FATAL_ERROR "ENABLE_SIMPLESTOT and ENABLE_MR requires ENABLE_MIRACL or ENABLE_RELIC")
 endif() 
 
+
+file(REMOVE ${CMAKE_CURRENT_LIST_DIR}/libOTe/config.h)
 configure_file(libOTe/config.h.in libOTe/config.h)
-# Support out-of-source builds.
-# include_directories(${CMAKE_BINARY_DIR})
 
 
 #############################################
