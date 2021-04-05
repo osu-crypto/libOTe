@@ -106,10 +106,11 @@ namespace osuCrypto
         RandomOracle fs(sizeof(block));
         block seed;
 
+        Commit myComm;
         if (mFiatShamir == false)
         {
             seed = prng.get<block>();
-            Commit myComm(seed);
+            myComm = Commit(seed);
             chl.asyncSend(myComm.data(), myComm.size());
         }
 
