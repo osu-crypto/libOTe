@@ -87,6 +87,7 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_KKRT           ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_RR             ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_AKN            ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
+	set(ENABLE_SILENT_VOLE    ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	unset(ENABLE_ALL_OT CACHE)
 endif()
 
@@ -108,15 +109,17 @@ option(ENABLE_RR             "Build the RR 1-oo-N OT-Ext protocol." OFF)
 
 option(ENABLE_AKN            "Build the RR ~k-oo-N OT-Ext protocol." OFF)
 
+option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
+
 
 if(NOT LINUX)
 	if(ENABLE_SIMPLESTOT_ASM)
 		message("ENABLE_SIMPLESTOT_ASM only supported on Linux")
-		set(ENABLE_SIMPLESTOT_ASM OFF)
+		set(ENABLE_SIMPLESTOT_ASM OFF CACHE BOOL "" FORCE)
 	endif()
 	if(ENABLE_MR_KYBER)
 		message("ENABLE_MR_KYBER only supported on Linux")
-		set(ENABLE_MR_KYBER OFF)
+		set(ENABLE_MR_KYBER OFF  CACHE BOOL "" FORCE)
 	endif()
 
 endif()
@@ -144,6 +147,9 @@ message(STATUS "1-out-of-N OT Extension protocols\n=============================
 message(STATUS "Option: ENABLE_OOS            = ${ENABLE_OOS}")
 message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}")
 message(STATUS "Option: ENABLE_RR             = ${ENABLE_RR}\n\n")
+
+message(STATUS "Vole protocols\n=======================================================")
+message(STATUS "Option: ENABLE_SILENT_VOLE    = ${ENABLE_SILENT_VOLE}\n\n")
 
 
 #############################################

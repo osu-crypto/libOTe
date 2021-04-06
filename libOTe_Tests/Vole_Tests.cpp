@@ -7,10 +7,12 @@
 #include "cryptoTools/Network/IOService.h"
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Timer.h"
+#include "cryptoTools/Common/TestCollection.h"
 
 using namespace oc;
 
-
+#include <libOTe/config.h>
+#ifdef ENABLE_SILENT_VOLE
 
 namespace {
     void fakeBase(u64 n,
@@ -301,3 +303,23 @@ void Vole_Silent_mal_test(const oc::CLP& cmd)
         timer.setTimePoint("done");
     }
 }
+
+#else
+
+
+namespace {
+    void throwDisabled()
+    {
+        throw UnitTestSkipped(
+            "ENABLE_SILENT_VOLE not defined. "
+        );
+    }
+}
+
+void Vole_Noisy_test(const oc::CLP& cmd) {throwDisabled();}
+void Vole_Silent_test(const oc::CLP& cmd){throwDisabled();}
+void Vole_Silent_paramSweep_test(const oc::CLP& cmd){throwDisabled();}
+void Vole_Silent_baseOT_test(const oc::CLP& cmd){throwDisabled();}
+void Vole_Silent_mal_test(const oc::CLP& cmd){throwDisabled();}
+
+#endif

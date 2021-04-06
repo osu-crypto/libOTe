@@ -1,5 +1,5 @@
 #include "libOTe/Vole/SilentVoleReceiver.h"
-#ifdef ENABLE_SILENTOT
+#ifdef ENABLE_SILENT_VOLE
 #include "libOTe/Vole/SilentVoleSender.h"
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RandomOracle.h>

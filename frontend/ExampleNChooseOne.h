@@ -6,7 +6,7 @@
 #include "libOTe/NChooseOne/Oos/OosNcoOtSender.h"
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtSender.h"
-
+#include "cryptoTools/Common/Matrix.h"
 
 namespace osuCrypto
 {

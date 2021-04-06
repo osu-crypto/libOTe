@@ -1,5 +1,5 @@
 #include "libOTe/Vole/SilentVoleSender.h"
-#ifdef ENABLE_SILENTOT
+#ifdef ENABLE_SILENT_VOLE
 
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"

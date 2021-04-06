@@ -1,5 +1,7 @@
 #pragma once
 
+#include <libOTe/config.h>
+#ifdef ENABLE_SILENT_VOLE
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Network/Channel.h"
@@ -23,3 +25,4 @@ namespace osuCrypto
 
 
 }
+#endif

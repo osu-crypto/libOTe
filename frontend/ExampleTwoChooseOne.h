@@ -15,12 +15,13 @@
 namespace osuCrypto
 {
 
+#ifdef ENABLE_IKNP
     void noHash(IknpOtExtSender& s, IknpOtExtReceiver& r)
     {
         s.mHash = false;
         r.mHash = false;
     }
-
+#endif
 
     template<typename Sender, typename Receiver>
     void noHash(Sender&, Receiver&)
