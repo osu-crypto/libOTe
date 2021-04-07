@@ -100,29 +100,7 @@ namespace osuCrypto
         u64& mN2,
         u64& mN,
         u64& gap,
-        S1DiagRegRepEncoder& mEncoder)
-    {
-        mRequestedNumOTs = numOTs;
-        auto mScaler = 2;
-
-        auto code = mMultType == MultType::slv11 ?
-            LdpcDiagRegRepeaterEncoder::Weight11 :
-            LdpcDiagRegRepeaterEncoder::Weight5;
-
-        gap = LdpcDiagRegRepeaterEncoder::gap(code);
-        u64 colWeight = LdpcDiagRegRepeaterEncoder::weight(code);
-
-        mNumPartitions = getPartitions(mScaler, numOTs, secParam);
-        mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
-        mN2 = mSizePer * mNumPartitions + gap;
-        mN = mN2 / mScaler;
-
-        if (mN2 % mScaler)
-            throw RTE_LOC;
-
-        mEncoder.mL.init(mN, colWeight);
-        mEncoder.mR.init(mN, code, true);
-    }
+        S1DiagRegRepEncoder& mEncoder);
 
     void SilentVoleSender::configure(
         u64 numOTs, u64 secParam)

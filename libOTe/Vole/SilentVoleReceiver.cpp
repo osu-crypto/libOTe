@@ -179,6 +179,7 @@ namespace osuCrypto
         mGen.configure(mSizePer, mNumPartitions);
     }
 
+
     //sigma = 0   Receiver
     //
     //    u_i is the choice bit

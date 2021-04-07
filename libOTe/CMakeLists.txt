@@ -12,7 +12,7 @@ target_include_directories(libOTe PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/..;${CMAKE
 target_link_libraries(libOTe cryptoTools)
 
 if(MSVC)
-    target_compile_options(libOTe PRIVATE -openmp:experimental)
+    #target_compile_options(libOTe PRIVATE -openmp:experimental)
 else()
 
     if(ENABLE_SSE)

@@ -1,6 +1,6 @@
 #include "NoisyVoleReceiver.h"
 
-#ifdef ENABLE_SILENT_VOLE
+#if defined(ENABLE_SILENT_VOLE) || defined(ENABLE_SILENTOT)
 #include "cryptoTools/Common/BitIterator.h"
 #include "cryptoTools/Common/Matrix.h"
 
