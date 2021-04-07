@@ -64,13 +64,14 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/../cryptoTools/cmake/cryptoToolsDepHelper.cmake")
 
+list(APPEND cryptoTools_INC 
+    "${libOTe_BIN_DIR}/cryptoTools"
+    "${CMAKE_CURRENT_LIST_DIR}/../cryptoTools"
+)
 list(APPEND libOTe_INC 
     "${libOTe_BIN_DIR}"
-    "${libOTe_BIN_DIR}/cryptoTools"
     "${CMAKE_CURRENT_LIST_DIR}/.."
-    "${CMAKE_CURRENT_LIST_DIR}/../cryptoTools"
-    "${libOTe_BIN_DIR}"
-    "${libOTe_BIN_DIR}/cryptoTools"
+    "${cryptoTools_INC}"
     "${Boost_INCLUDE_DIR}"
     "${WOLFSSL_LIB_INCLUDE_DIRS}"
     "${RLC_INCLUDE_DIR}")
