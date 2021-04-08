@@ -110,6 +110,7 @@ and **optional dependency** on
 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
+cd libOTe
 python build.py setup boost relic
 python build.py -DENABLE_RELIC=ON -DENABLE_ALL_OT=ON
 ```
