@@ -55,7 +55,8 @@ if(ENABLE_MR_KYBER AND (NOT MSVC))
 
 	find_library(
 	    KyberOT_LIB
-	    NAMES KyberOT)
+	    NAMES KyberOT
+	    HINTS "${libOTe_BIN_DIR}/KyberOT")
 
     if(NOT KyberOT_LIB)
       	message(FATAL_ERROR "Failed to find libKyberOT.a at: ${libOTe_BIN_DIR}/")
