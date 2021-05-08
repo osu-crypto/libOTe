@@ -18,8 +18,8 @@ namespace osuCrypto
 #if defined(ENABLE_SIMPLESTOT)
 //#if defined(_MSC_VER)
 //#    error "asm base simplest OT and windows is incompatible."
-#if !(defined(ENABLE_RELIC) || defined(ENABLE_MIRACL))
-#    error "Non-asm base Simplest OT requires Relic or Miracl"
+#if !defined(ENABLE_SODIUM)
+#    error "Non-asm base Simplest OT requires libsodium"
 #endif
 
     class SimplestOT : public OtReceiver, public OtSender

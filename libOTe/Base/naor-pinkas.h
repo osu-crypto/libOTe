@@ -7,8 +7,8 @@
 
 #ifdef ENABLE_NP
 
-#if !defined ENABLE_RELIC  && !defined ENABLE_MIRACL
-    #error "NaorPinkas requires with Relic or Miracl to be enabled.";
+#if !defined ENABLE_SODIUM
+    #error "NaorPinkas requires libsodium to be enabled.";
 #endif
 
 namespace osuCrypto
