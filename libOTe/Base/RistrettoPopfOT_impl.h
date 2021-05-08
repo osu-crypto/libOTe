@@ -78,7 +78,6 @@ namespace osuCrypto
             Bz = popf.eval(recvBuff[i], 0);
             Bo = popf.eval(recvBuff[i], 1);
 
-            // We don't need to check which curve we're on since we use the same secret for both.
             Bz *= sk;
             Bo *= sk;
 
