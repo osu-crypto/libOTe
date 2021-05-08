@@ -306,7 +306,7 @@ namespace osuCrypto
 
 
 
-    static std::array<block, 2> sBlockMasks{ { ZeroBlock, AllOneBlock } };
+    //static std::array<block, 2> sBlockMasks{ { ZeroBlock, AllOneBlock } };
 
     void LinearCode::encode(
         const span<block>& plaintxt,

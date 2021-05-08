@@ -28,6 +28,8 @@ namespace osuCrypto
             setBaseOts(baseSendOts);
         }
 
+        virtual ~KosDotExtReceiver() = default;
+
         void operator=(KosDotExtReceiver&& v)
         {
             mHasBase = std::move(v.mHasBase);

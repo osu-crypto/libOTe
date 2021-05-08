@@ -38,8 +38,11 @@ namespace osuCrypto
         //    ret->setBaseOts(baseOts, mKos.mBaseChoiceBits);
         //}
         //((Rr17NcoOtSender*)ret.get())
-
+#ifdef OC_NO_MOVE_ELISION 
         return std::move(ret);
+#else
+        return ret;
+#endif
     }
 
     void Rr17NcoOtSender::init(u64 numOtExt, PRNG& prng, Channel& chl)

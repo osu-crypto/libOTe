@@ -29,7 +29,6 @@ namespace osuCrypto
         mDomain = domainSize;
         mDepth = log2ceil(mDomain);
         mPntCount = pointCount;
-        //mPntCount8 = roundUpTo(pointCount, 8);
 
         mBaseOTs.resize(0, 0);
     }
@@ -57,7 +56,7 @@ namespace osuCrypto
             throw RTE_LOC;
 
         mBaseOTs.resize(mPntCount, mDepth);
-        for (u64 i = 0; i < static_cast<u64>(baseMessages.size()); ++i)
+        for (u64 i = 0; i < static_cast<u64>(mBaseOTs.size()); ++i)
             mBaseOTs(i) = baseMessages[i];
     }
 
@@ -67,30 +66,29 @@ namespace osuCrypto
             throw RTE_LOC;
 
         mBaseOTs.resize(mPntCount, mDepth);
-        memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
+        memcpy(mBaseOTs.data(), baseMessages.data(), mBaseOTs.size() * sizeof(block));
     }
 
     // This function copies the leaf values of the GGM tree 
     // to the output location. There are two modes for this 
-    // funcation. If transpose == false, then each tree is 
+    // funcation. If interleaved == false, then each tree is 
     // copied to a different contiguous regious of the output.
-    // If transpose == true, then trees are interleaved such that .... 
+    // If interleaved == true, then trees are interleaved such that .... 
     // @lvl         - the GGM tree leafs.
     // @output      - the location that the GGM leafs should be written to. 
     // @numTrees    - How many trees there are in total.
     // @tIdx        - the index of the first tree.
-    // @transpose   - do we interleave the output?
+    // @oFormat     - do we interleave the output?
     // @mal         - ...
-    block copyOut(
+    void copyOut(
         span<std::array<block, 8>> lvl,
         MatrixView<block> output,
         u64 totalTrees,
         u64 tIdx,
-        bool transpose,
-        bool mal)
+        PprfOutputFormat oFormat)
     {
 
-        if (transpose)
+        if (oFormat == PprfOutputFormat::InterleavedTransposed)
         {
             // not having an even (8) number of trees is not supported.
             if (totalTrees % 8)
@@ -104,84 +102,40 @@ namespace osuCrypto
 
             //auto sectionSize = 
 
-            if (lvl.size() >= 16)
+            if (lvl.size() < 16)
+                throw RTE_LOC;
+
+
+            auto setIdx = tIdx / 8;
+            auto blocksPerSet = lvl.size() * 8 / 128;
+
+
+
+            auto numSets = totalTrees / 8;
+            auto begin = setIdx;
+            auto step = numSets;
+
+            if (oFormat == PprfOutputFormat::InterleavedTransposed)
             {
+                auto end = std::min<u64>(begin + step * blocksPerSet, output.cols());
 
-                if (mal)
+                for (u64 i = begin, k = 0; i < end; i += step, ++k)
                 {
-                    throw RTE_LOC;
-                    auto section = tIdx / 8;
-                    auto size = lvl.size() / 16;
-                    auto begin = section * size;
-                    auto end = std::min<u64>(begin + size, output.cols());
-
-                    RandomOracle ro(sizeof(block));
-                    AES hc(toBlock(tIdx));
-                    std::array<block, 128> a, c;
-                    AES ha(toBlock(345343)), hb(toBlock(6453323));
-                    block aSum0, aSum1, bSum0, bSum1, r0, r1;
-                    for (u64 i = begin, k = 0; i < end; ++i, ++k)
-                    {
-                        auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
-
-                        hc.ecbEncCounterMode(i, io.size(), c.data());
-                        ro.Update(io.data(), io.size());
-                        ha.ecbEncBlocks(io.data(), io.size(), a.data());
-                        for (u64 j = 0; j < 128; ++j)
-                        {
-                            mul128(a[j], c[j], r0, r1);
-                            aSum0 = aSum0 ^ r0;
-                            aSum1 = aSum1 ^ r1;
-                        }
-                        hb.ecbEncBlocks(io.data(), io.size(), a.data());
-                        for (u64 j = 0; j < 128; ++j)
-                        {
-                            mul128(a[j], c[j], r0, r1);
-                            bSum0 = bSum0 ^ r0;
-                            bSum1 = bSum1 ^ r1;
-                        }
-                        //{
-
-                        //}
-
-                        transpose128(io);
-                        for (u64 j = 0; j < 128; ++j)
-                            output(j, i) = io[j];
-                    }
-
-                    block cc;
-                    ro.Final(cc);
-                    return aSum0 ^ aSum1^ bSum0^ bSum1 ^ cc;
+                    auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
+                    transpose128(io);
+                    for (u64 j = 0; j < 128; ++j)
+                        output(j, i) = io[j];
                 }
-                else
-                {
-                    auto setIdx = tIdx / 8;
-                    auto blocksPerSet = lvl.size() * 8 / 128;
-                    auto numSets = totalTrees / 8;
-
-                    auto begin = setIdx;
-                    auto step = numSets;
-                    auto end = std::min<u64>(begin + step * blocksPerSet, output.cols());
-
-                    for (u64 i = begin, k = 0; i < end; i += step, ++k)
-                    {
-                        auto& io = *(std::array<block, 128>*)(&lvl[k * 16]);
-                        transpose128(io);
-                        for (u64 j = 0; j < 128; ++j)
-                            output(j, i) = io[j];
-                    }
-
-                    return ZeroBlock;
-                }
-
             }
             else
-                throw RTE_LOC;
+            {
+                // no op
+            }
+
+
         }
-        else
+        else if (oFormat == PprfOutputFormat::Plain)
         {
-            if (mal)
-                throw RTE_LOC;
 
             auto curSize = std::min<u64>(totalTrees - tIdx, 8);
             if (curSize == 8)
@@ -211,46 +165,66 @@ namespace osuCrypto
                         oi[j] = ii[j];
                 }
             }
-            return ZeroBlock;
 
         }
+        else if (oFormat == PprfOutputFormat::Interleaved)
+        {
+            // no op
+        }
+        else
+            throw RTE_LOC;
     }
 
-    u64 transposePoint(u64 point, u64 treeIdx, u64 totalTrees)
+    u64 interleavedPoint(u64 point, u64 treeIdx, u64 totalTrees, u64 domain, PprfOutputFormat format)
     {
+
+
+        switch (format)
+        {
+        case osuCrypto::PprfOutputFormat::Interleaved:
+        {
+
+            if (domain <= point)
+                return ~u64(0);
+
+            auto subTree = treeIdx % 8;
+            auto forest = treeIdx / 8;
+
+            return (forest * domain + point) * 8 + subTree;
+        }
+        break;
+        case osuCrypto::PprfOutputFormat::InterleavedTransposed:
+        {
+            auto numSets = totalTrees / 8;
+
+            auto setIdx = treeIdx / 8;
+            auto subIdx = treeIdx % 8;
+
+            auto sectionIdx = point / 16;
+            auto posIdx = point % 16;
+
+
+            auto setOffset = setIdx * 128;
+            auto subOffset = subIdx + 8 * posIdx;
+            auto secOffset = sectionIdx * numSets * 128;
+
+            return setOffset + subOffset + secOffset;
+        }
+        default:
+            throw RTE_LOC;
+            break;
+        }
         //auto totalTrees = points.size();
-        auto numSets = totalTrees / 8;
 
-        auto setIdx = treeIdx / 8;
-        auto subIdx = treeIdx % 8;
-
-        auto sectionIdx = point / 16;
-        auto posIdx = point % 16;
-
-
-        auto setOffset = setIdx * 128;
-        auto subOffset = subIdx + 8 * posIdx;
-        auto secOffset = sectionIdx * numSets * 128;
-
-        return setOffset + subOffset + secOffset;
     }
 
-    void transposePoints(span<u64> points)
+    void interleavedPoints(span<u64> points, u64 domain, PprfOutputFormat format)
     {
 
         for (i64 i = 0; i < points.size(); ++i)
         {
-            points[i] = transposePoint(points[i], i, points.size());
+            points[i] = interleavedPoint(points[i], i, points.size(), domain, format);
         }
-    }
-
-    void SilentMultiPprfReceiver::getTransposedPoints(span<u64> points)
-    {
-        if (points.size() % 8)
-            throw RTE_LOC;
-
-        getPoints(points);
-        transposePoints(points);
     }
 
     u64 getActivePath(const span<u8>& choiceBits)
@@ -265,38 +239,82 @@ namespace osuCrypto
         return point;
     }
 
-    void SilentMultiPprfReceiver::getPoints(span<u64> points)
+    void SilentMultiPprfReceiver::getPoints(span<u64> points, PprfOutputFormat format)
     {
-        memset(points.data(), 0, points.size() * sizeof(u64));
-        for (u64 j = 0; j < mPntCount; ++j)
+
+        switch (format)
         {
-            points[j] = getActivePath(mBaseChoices[j]);
+        case PprfOutputFormat::Plain:
+
+            memset(points.data(), 0, points.size() * sizeof(u64));
+            for (u64 j = 0; j < mPntCount; ++j)
+            {
+                points[j] = getActivePath(mBaseChoices[j]);
+            }
+
+            break;
+        case PprfOutputFormat::InterleavedTransposed:
+        case PprfOutputFormat::Interleaved:
+
+            if ((u64)points.size() != mPntCount)
+                throw RTE_LOC;
+            if (points.size() % 8)
+                throw RTE_LOC;
+
+            getPoints(points, PprfOutputFormat::Plain);
+            interleavedPoints(points, mDomain, format);
+
+            break;
+        default:
+            throw RTE_LOC;
+            break;
         }
     }
 
 
-    BitVector SilentMultiPprfReceiver::sampleChoiceBits(u64 modulus, bool transposed, PRNG& prng)
+    BitVector SilentMultiPprfReceiver::sampleChoiceBits(u64 modulus, PprfOutputFormat format, PRNG& prng)
     {
         BitVector choices(mPntCount * mDepth);
-        //Matrix<u8> baseChoices(mPntCount, mDepth);
+
         mBaseChoices.resize(mPntCount, mDepth);
         for (u64 i = 0; i < mPntCount; ++i)
         {
-            auto base = transposePoint(0, i, mPntCount);
-            if (transposed &&  base >= modulus)
-                throw RTE_LOC;
-
             u64 idx;
-            do {
-                for (u64 j = 0; j < mDepth; ++j)
-                    mBaseChoices(i, j) = prng.getBit();
+            switch (format)
+            {
+            case osuCrypto::PprfOutputFormat::Plain:
+                do {
+                    for (u64 j = 0; j < mDepth; ++j)
+                        mBaseChoices(i, j) = prng.getBit();
+                    idx = getActivePath(mBaseChoices[i]);
+                } while (idx >= modulus);
 
-                idx = getActivePath(mBaseChoices[i]);
-                
-                if (transposed)
-                    idx = transposePoint(idx, i, mPntCount);
+                break;
+            case osuCrypto::PprfOutputFormat::Interleaved:
+            case osuCrypto::PprfOutputFormat::InterleavedTransposed:
 
-            } while (idx >= modulus);
+                // make sure that atleast the first element of this tree
+                // is within the modulus.
+                idx = interleavedPoint(0, i, mPntCount, mDomain, format);
+                if (idx >= modulus)
+                    throw RTE_LOC;
+
+
+                do {
+                    for (u64 j = 0; j < mDepth; ++j)
+                        mBaseChoices(i, j) = prng.getBit();
+                    idx = getActivePath(mBaseChoices[i]);
+
+                    idx = interleavedPoint(idx, i, mPntCount, mDomain, format);
+                } while (idx >= modulus);
+
+
+                break;
+            default:
+                throw RTE_LOC;
+                break;
+            }
+
         }
 
         for (u64 i = 0; i < mBaseChoices.size(); ++i)
@@ -307,42 +325,43 @@ namespace osuCrypto
         return choices;
     }
 
-    block SilentMultiPprfSender::expand(
-        Channel& chl,
+    //block SilentMultiPprfSender::expand(
+    //    Channel& chl,
+    //    block value,
+    //    PRNG& prng,
+    //    MatrixView<block> output,
+    //    PprfOutputFormat oFormat, bool mal)
+    //{
+    //    return expand({ &chl, 1 }, value, prng, output, oFormat, mal);
+    //}
+
+    void SilentMultiPprfSender::expand(
+        Channel& chls,
         block value,
         PRNG& prng,
         MatrixView<block> output,
-        bool transpose,
-        bool mal)
+        PprfOutputFormat oFormat,
+        u64 numThreads)
     {
-        return expand({ &chl, 1 }, value, prng, output, transpose, mal);
+        std::vector<block> vv(mPntCount, value);
+        expand(chls, vv, prng, output, oFormat, numThreads);
     }
 
-    block SilentMultiPprfSender::expand(
-        span<Channel> chls,
-        block value,
+    void SilentMultiPprfSender::expand(
+        Channel& chl,
+        span<block> value,
         PRNG& prng,
         MatrixView<block> output,
-        bool transpose,
-        bool mal)
+        PprfOutputFormat oFormat, 
+        u64 numThreads)
     {
         setValue(value);
         setTimePoint("pprf.send.start");
+        gTimer.setTimePoint("send.enter");
 
-        
 
-        if (transpose)
-        {
-            if (output.rows() != 128)
-                throw RTE_LOC;
 
-            if (output.cols() > (mDomain * mPntCount + 127) / 128)
-                throw RTE_LOC;
-
-            if (mPntCount & 7)
-                throw RTE_LOC;
-        }
-        else
+        if (oFormat == PprfOutputFormat::Plain)
         {
             if (output.rows() != mDomain)
                 throw RTE_LOC;
@@ -350,16 +369,63 @@ namespace osuCrypto
             if (output.cols() != mPntCount)
                 throw RTE_LOC;
         }
+        else if (oFormat == PprfOutputFormat::InterleavedTransposed)
+        {
+            if (output.rows() != 128)
+                throw RTE_LOC;
+
+            //if (output.cols() > (mDomain * mPntCount + 127) / 128)
+            //    throw RTE_LOC;
+
+            if (mPntCount & 7)
+                throw RTE_LOC;
+        }
+        else if (oFormat == PprfOutputFormat::Interleaved)
+        {
+            if (output.cols() != 1)
+                throw RTE_LOC;
+            if (mDomain & 1)
+                throw RTE_LOC;
+
+            auto rows = output.rows();
+            if (rows > (mDomain * mPntCount) ||
+                rows / 128 != (mDomain * mPntCount) / 128)
+                throw RTE_LOC;
+            if (mPntCount & 7)
+                throw RTE_LOC;
+        }
+        else
+        {
+            throw RTE_LOC;
+        }
+
 
         // ss will hold the malicious check block. Will be 
         // the ZeroBlock if semi-honest
-        block ss = ZeroBlock;
         block seed = prng.get();
 
         // A public PRF/PRG that we will use for deriving the GGM tree.
         std::array<AES, 2> aes;
         aes[0].setKey(toBlock(3242342));
         aes[1].setKey(toBlock(8993849));
+
+        struct TreeGrp
+        {
+            u64 g;
+            std::array<std::vector<std::array<block, 8>>, 2> sums;
+            std::vector<std::array<block, 4>> lastOts;
+        };
+        std::mutex sendMtx;
+
+        //auto& chl = chls[0];
+        auto sendOne = [&](TreeGrp& tg)
+        {
+            std::lock_guard<std::mutex> lock(sendMtx);
+            chl.asyncSendCopy(tg.g);
+            chl.asyncSend(std::move(tg.sums[0]));
+            chl.asyncSend(std::move(tg.sums[1]));
+            chl.asyncSend(std::move(tg.lastOts));
+        };
 
         // The function that each thread will run. Each thread will
         // process 8 GGM trees in parallel.
@@ -369,19 +435,24 @@ namespace osuCrypto
             PRNG prng(seed ^ toBlock(threadIdx));
 
             // get our channel for this thread.
-            auto& chl = chls[threadIdx];
+            //auto& chl = chls[threadIdx];
+
+            TreeGrp treeGrp;
 
             // mySums will hold the left and right GGM tree sums
             // for each level. For example sums[0][i][5]  will
             // hold the sum of the left children for level i of 
             // the 5th tree. 
-            std::array<std::vector<std::array<block, 8>>, 2> sums;
+            std::array<std::vector<std::array<block, 8>>, 2>& sums = treeGrp.sums;
 
-            // tree will hold the full GGM tree. Not that there are 8 
+            auto dd = mDepth + (oFormat == PprfOutputFormat::Interleaved ? 0 : 1);
+            // tree will hold the full GGM tree. Note that there are 8 
             // indepenendent trees that are being processed together. 
             // The trees are flattenned to that the children of j are
             // located at 2*j  and 2*j+1. 
-            std::vector<std::array<block, 8>> tree((1ull << (mDepth + 1)));
+            //std::vector<std::array<block, 8>> tree((1ull << (dd)));
+            std::unique_ptr<block[]> uPtr(new block[8 * (1ull << (dd))]);
+            span<std::array<block, 8>> tree((std::array<block, 8>*)uPtr.get(), 1ull << (dd));
 
 #ifdef DEBUG_PRINT_PPRF
             chl.asyncSendCopy(mValue);
@@ -390,11 +461,20 @@ namespace osuCrypto
             // Returns the i'th level of the current 8 trees. The 
             // children of node j on level i are located at 2*j and
             // 2*j+1  on level i+1. 
-            auto getLevel = [&](u64 i)
+            auto getLevel = [&](u64 i, u64 g)
             {
+
+                if (oFormat == PprfOutputFormat::Interleaved && i == mDepth)
+                {
+                    auto b = (std::array<block, 8>*)output.data();
+                    auto forest = g / 8;
+                    assert(g % 8 == 0);
+                    b += forest * mDomain;
+                    return span<std::array<block, 8>>(b, mDomain);
+                }
+
                 auto size = (1ull << i);
                 auto offset = (size - 1);
-
                 auto b = tree.begin() + offset;
                 auto e = b + size;
                 return span<std::array<block, 8>>(b, e);
@@ -415,13 +495,16 @@ namespace osuCrypto
 
             // This thread will process 8 trees at a time. It will interlace
             // thich sets of trees are processed with the other threads. 
-            for (u64 g = threadIdx * 8; g < mPntCount; g += 8 * chls.size())
+            for (u64 g = threadIdx * 8; g < mPntCount; g += 8 * numThreads)
             {
+                treeGrp.g = g;
+
                 // The number of real trees for this iteration.
                 auto min = std::min<u64>(8, mPntCount - g);
+                gTimer.setTimePoint("send.start" + std::to_string(g));
 
                 // Populate the zero'th level of the GGM tree with random seeds.
-                prng.get(getLevel(0));
+                prng.get(getLevel(0, g));
 
                 // Allocate space for our sums of each level.
                 sums[0].resize(mDepth);
@@ -431,62 +514,63 @@ namespace osuCrypto
                 for (u64 d = 0; d < mDepth; ++d)
                 {
                     // The previous level of the GGM tree.
-                    auto level0 = getLevel(d);
+                    auto level0 = getLevel(d, g);
 
                     // The next level of theGGM tree that we are populating.
-                    auto level1 = getLevel(d + 1);
+                    auto level1 = getLevel(d + 1, g);
 
                     // The total number of children in this level.
                     auto width = static_cast<u64>(level1.size());
 
                     // For each child, populate the child by expanding the parent.
-                    for (u64 childIdx = 0; childIdx < width; ++childIdx)
+                    for (u64 childIdx = 0; childIdx < width; )
                     {
-                        // The bit that indicates if we are on the left child (0)
-                        // or on the right child (1).
-                        u8 keep = childIdx & 1;
-
                         // Index of the parent in the previous level.
                         auto parentIdx = childIdx >> 1;
 
                         // The value of the parent.
                         auto& parent = level0[parentIdx];
 
-                        // The child that we will write in this iteration.
-                        auto& child = level1[childIdx];
+                        // The bit that indicates if we are on the left child (0)
+                        // or on the right child (1).
+                        for (u64 keep = 0; keep < 2; ++keep, ++childIdx)
+                        {
+                            // The child that we will write in this iteration.
+                            auto& child = level1[childIdx];
 
-                        // The sum that this child node belongs to.
-                        auto& sum = sums[keep][d];
+                            // The sum that this child node belongs to.
+                            auto& sum = sums[keep][d];
 
-                        // Each parent is expanded into the left and right children 
-                        // using a different AES fixed-key. Therefore our OWF is:
-                        //
-                        //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
-                        //
-                        // where each half defines one of the children.
-                        aes[keep].ecbEncBlocks(parent.data(), 8, child.data());
-                        child[0] = child[0] ^ parent[0];
-                        child[1] = child[1] ^ parent[1];
-                        child[2] = child[2] ^ parent[2];
-                        child[3] = child[3] ^ parent[3];
-                        child[4] = child[4] ^ parent[4];
-                        child[5] = child[5] ^ parent[5];
-                        child[6] = child[6] ^ parent[6];
-                        child[7] = child[7] ^ parent[7];
+                            // Each parent is expanded into the left and right children 
+                            // using a different AES fixed-key. Therefore our OWF is:
+                            //
+                            //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
+                            //
+                            // where each half defines one of the children.
+                            aes[keep].ecbEnc8Blocks(parent.data(), child.data());
+                            child[0] = child[0] ^ parent[0];
+                            child[1] = child[1] ^ parent[1];
+                            child[2] = child[2] ^ parent[2];
+                            child[3] = child[3] ^ parent[3];
+                            child[4] = child[4] ^ parent[4];
+                            child[5] = child[5] ^ parent[5];
+                            child[6] = child[6] ^ parent[6];
+                            child[7] = child[7] ^ parent[7];
 
-                        // Update the running sums for this level. We keep 
-                        // a left and right totals for each level.
-                        sum[0] = sum[0] ^ child[0];
-                        sum[1] = sum[1] ^ child[1];
-                        sum[2] = sum[2] ^ child[2];
-                        sum[3] = sum[3] ^ child[3];
-                        sum[4] = sum[4] ^ child[4];
-                        sum[5] = sum[5] ^ child[5];
-                        sum[6] = sum[6] ^ child[6];
-                        sum[7] = sum[7] ^ child[7];
-
+                            // Update the running sums for this level. We keep 
+                            // a left and right totals for each level.
+                            sum[0] = sum[0] ^ child[0];
+                            sum[1] = sum[1] ^ child[1];
+                            sum[2] = sum[2] ^ child[2];
+                            sum[3] = sum[3] ^ child[3];
+                            sum[4] = sum[4] ^ child[4];
+                            sum[5] = sum[5] ^ child[5];
+                            sum[6] = sum[6] ^ child[6];
+                            sum[7] = sum[7] ^ child[7];
+                        }
                     }
                 }
+
 
 #ifdef DEBUG_PRINT_PPRF
                 // If we are debugging, then send over the full tree 
@@ -512,7 +596,7 @@ namespace osuCrypto
                     }
                 }
 
-                // For the last level, we aregoinf to do something special. 
+                // For the last level, we are going to do something special. 
                 // The other party is currently missing both leaf children of 
                 // the active parent. Since this is the last level, we want
                 // the inactive child to just be the normal value but the 
@@ -520,16 +604,17 @@ namespace osuCrypto
                 // This will be done by sending the sums and the sums plus 
                 // delta and ensure that they can only decrypt the correct ones.
                 auto d = mDepth - 1;
-                std::vector<std::array<block, 4>> lastOts(min);
+                std::vector<std::array<block, 4>>& lastOts = treeGrp.lastOts;
+                lastOts.resize(min);
                 for (u64 j = 0; j < min; ++j)
                 {
                     // Construct the sums where we will allow the delta (mValue)
                     // to either be on the left child or right child depending 
                     // on which has the active path.
                     lastOts[j][0] = sums[0][d][j];
-                    lastOts[j][1] = sums[1][d][j] ^ mValue;
+                    lastOts[j][1] = sums[1][d][j] ^ mValue[g + j];
                     lastOts[j][2] = sums[1][d][j];
-                    lastOts[j][3] = sums[0][d][j] ^ mValue;
+                    lastOts[j][3] = sums[0][d][j] ^ mValue[g + j];
 
                     // We are going to expand the 128 bit OT string
                     // into a 256 bit OT string using AES.
@@ -564,23 +649,24 @@ namespace osuCrypto
                 sums[1].resize(mDepth - 1);
 
                 // Send the sums to the other party.
-                chl.asyncSend(std::move(sums[0]));
-                chl.asyncSend(std::move(sums[1]));
+                sendOne(treeGrp);
+                //chl.asyncSend(std::move(sums[0]));
+                //chl.asyncSend(std::move(sums[1]));
 
-                // send the special OT messages for the last level.
-                chl.asyncSend(std::move(lastOts));
+                //// send the special OT messages for the last level.
+                //chl.asyncSend(std::move(lastOts));
+                gTimer.setTimePoint("send.expand_send");
 
                 // copy the last level to the output. If desired, this is 
                 // where the tranpose is performed. 
-                auto lvl = getLevel(mDepth);
+                auto lvl = getLevel(mDepth, g);
 
                 // s is a checksum that is used for malicous security. 
-                auto s = copyOut(lvl, output, mPntCount, g, transpose, mal);
-                ss = ss ^ s;
+                copyOut(lvl, output, mPntCount, g, oFormat);
             }
         };
 
-        std::vector<std::thread> thrds(chls.size() - 1);
+        std::vector<std::thread> thrds(numThreads-1);
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i] = std::thread(routine, i);
 
@@ -589,48 +675,39 @@ namespace osuCrypto
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i].join();
 
-        return ss;
+
+
+
+        mBaseOTs = {};
     }
 
-    void SilentMultiPprfSender::setValue(block value)
+    void SilentMultiPprfSender::setValue(span<block> value)
     {
-        mValue = value;
+        if ((u64)value.size() != mPntCount)
+            throw RTE_LOC;
+
+        mValue.resize(mPntCount);
+        std::copy(value.begin(), value.end(), mValue.begin());
     }
 
     void SilentMultiPprfSender::clear()
     {
         mBaseOTs.resize(0, 0);
         mDomain = 0;
-        mDepth = 0; 
+        mDepth = 0;
         mPntCount = 0;
     }
 
-    block SilentMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose,
-        bool mal)
-    {
-        return expand({ &chl, 1 }, prng, output, transpose, mal);
-    }
-
-    block SilentMultiPprfReceiver::expand(span<Channel> chls, PRNG& prng, MatrixView<block> output, bool transpose,
-        bool mal)
+    void SilentMultiPprfReceiver::expand(Channel& chl, PRNG& prng, MatrixView<block> output,
+        PprfOutputFormat oFormat,
+        u64 numThreads)
     {
 
         setTimePoint("pprf.recv.start");
 
         //lout << " d " << mDomain << " p " << mPntCount << " do " << mDepth << std::endl;
 
-        if (transpose)
-        {
-            if (output.rows() != 128)
-                throw RTE_LOC;
-
-            if (output.cols() > (mDomain * mPntCount + 127) / 128)
-                throw RTE_LOC;
-
-            if (mPntCount & 7)
-                throw RTE_LOC;
-        }
-        else
+        if (oFormat == PprfOutputFormat::Plain)
         {
             if (output.rows() != mDomain)
                 throw RTE_LOC;
@@ -638,27 +715,59 @@ namespace osuCrypto
             if (output.cols() != mPntCount)
                 throw RTE_LOC;
         }
+        else if (oFormat == PprfOutputFormat::InterleavedTransposed)
+        {
+            if (output.rows() != 128)
+                throw RTE_LOC;
+
+            //if (output.cols() > (mDomain * mPntCount + 127) / 128)
+            //    throw RTE_LOC;
+
+            if (mPntCount & 7)
+                throw RTE_LOC;
+        }
+        else if (oFormat == PprfOutputFormat::Interleaved)
+        {
+            if (output.cols() != 1)
+                throw RTE_LOC;
+            if (mDomain & 1)
+                throw RTE_LOC;
+            auto rows = output.rows();
+            if (rows > (mDomain * mPntCount) ||
+                rows / 128 != (mDomain * mPntCount) / 128)
+                throw RTE_LOC;
+            if (mPntCount & 7)
+                throw RTE_LOC;
+        }
+        else
+        {
+            throw RTE_LOC;
+        }
+
+        gTimer.setTimePoint("recv.enter");
 
         // The vector holding the indices of the active
         // leaves. Each index is in [0,mDomain).
         std::vector<u64> points(mPntCount);
-        getPoints(points);
-
-        // ss will hold the malicious check block. Will be 
-        // the ZeroBlock if semi-honest
-        block ss = ZeroBlock;
+        getPoints(points, PprfOutputFormat::Plain);
 
         // A public PRF/PRG that we will use for deriving the GGM tree.
         std::array<AES, 2> aes;
         aes[0].setKey(toBlock(3242342));
         aes[1].setKey(toBlock(8993849));
+        Timer& timer = gTimer;
+        //block X = prng.get();
+
+
+        std::mutex recvMtx;
 
         // The function that each thread will run. Each thread will
         // process 8 GGM trees in parallel.
         auto routine = [&](u64 threadIdx)
         {
             // get our channel for this thread.
-            auto& chl = chls[threadIdx];
+            //auto& chl = chls[threadIdx];
+            gTimer.setTimePoint("recv.routine");
 
             // mySums will hold the left and right GGM tree sums
             // for each level. For example mySums[5][0]  will
@@ -674,11 +783,18 @@ namespace osuCrypto
             theirSums[0].resize(mDepth - 1);
             theirSums[1].resize(mDepth - 1);
 
+            auto dd = mDepth + (oFormat == PprfOutputFormat::Interleaved ? 0 : 1);
             // tree will hold the full GGM tree. Not that there are 8 
             // indepenendent trees that are being processed together. 
             // The trees are flattenned to that the children of j are
             // located at 2*j  and 2*j+1. 
-            std::vector<std::array<block, 8>> tree(1ull << (mDepth + 1));
+            //std::vector<std::array<block, 8>> tree(1ull << (dd));
+            std::unique_ptr<block[]> uPtr(new block[8 * (1ull << (dd))]);
+            span<std::array<block, 8>> tree((std::array<block, 8>*)uPtr.get(), 1ull << (dd));
+
+            gTimer.setTimePoint("recv.alloc");
+
+            //std::vector<std::array<block, 8>> stack(mDepth);
 
 #ifdef DEBUG_PRINT_PPRF
             // This will be the full tree and is sent by the reciever to help debug. 
@@ -692,12 +808,22 @@ namespace osuCrypto
             // Returns the i'th level of the current 8 trees. The 
             // children of node j on level i are located at 2*j and
             // 2*j+1  on level i+1. 
-            auto getLevel = [&](u64 i, bool f = false)
+            auto getLevel = [&](u64 i, u64 g, bool f = false)
             {
                 auto size = (1ull << i), offset = (size - 1);
 #ifdef DEBUG_PRINT_PPRF
                 auto b = (f ? ftree.begin() : tree.begin()) + offset;
 #else
+                if (oFormat == PprfOutputFormat::Interleaved && i == mDepth)
+                {
+                    auto b = (std::array<block, 8>*)output.data();
+                    auto forest = g / 8;
+                    assert(g % 8 == 0);
+                    b += forest * mDomain;
+                    auto zone = span<std::array<block, 8>>(b, mDomain);
+                    return zone;
+                }
+
                 auto b = tree.begin() + offset;
 #endif
                 return span<std::array<block, 8>>(b, b + size);
@@ -736,25 +862,37 @@ namespace osuCrypto
             };
 #endif
 
+
+            // The number of real trees for this iteration.
+            std::vector<std::array<block, 4>> lastOts(8);
             // This thread will process 8 trees at a time. It will interlace
             // thich sets of trees are processed with the other threads. 
-            for (u64 g = threadIdx * 8; g < mPntCount; g += 8 * chls.size())
+            for (u64 gg = threadIdx * 8; gg < mPntCount; gg += 8 * numThreads)
             {
 #ifdef DEBUG_PRINT_PPRF
                 chl.recv(ftree);
                 auto l1f = getLevel(1, true);
 #endif
+                //timer.setTimePoint("recv.start" + std::to_string(g));
 
                 // Receive their full set of sums for these 8 trees.
-                chl.recv(theirSums[0].data(), theirSums[0].size());
-                chl.recv(theirSums[1].data(), theirSums[1].size());
-                TODO("Optimize this recv so that if we have fewer than 8 trees then less data is sent..");
+                u64 g;
+                {
+                    std::lock_guard<std::mutex> lock(recvMtx);
+                    chl.recv(g);
+                    chl.recv(theirSums[0].data(), theirSums[0].size());
+                    chl.recv(theirSums[1].data(), theirSums[1].size());
+                    chl.recv(lastOts.data(), lastOts.size());
+                }
+                //TODO("Optimize this recv so that if we have fewer than 8 trees then less data is sent..");
 
-                // The number of real trees for this iteration.
-                auto min = std::min<u64>(8, mPntCount - g);
-                auto l1 = getLevel(1);
 
-                for (u64 i = 0; i < min; ++i)
+                timer.setTimePoint("recv.recv");
+
+
+                auto l1 = getLevel(1, g);
+
+                for (u64 i = 0; i < 8; ++i)
                 {
                     // For the non-active path, set the child of the root node
                     // as the OT message XOR'ed with the correction sum.
@@ -784,10 +922,10 @@ namespace osuCrypto
                 {
                     // The already constructed level. Only missing the
                     // GGM tree node value along the active path. 
-                    auto level0 = getLevel(d);
+                    auto level0 = getLevel(d, g);
 
                     // The next level that we want to construct. 
-                    auto level1 = getLevel(d + 1);
+                    auto level1 = getLevel(d + 1, g);
 
                     // Zero out the previous sums.
                     memset(mySums[0].data(), 0, mySums[0].size() * sizeof(block));
@@ -798,57 +936,65 @@ namespace osuCrypto
                     // active node will also be expanded. Later we will just
                     // overwrite whatever the value was. This is an optimization.
                     auto width = static_cast<u64>(level1.size());
-                    for (u64 childIdx = 0; childIdx < width; ++childIdx)
+                    for (u64 childIdx = 0; childIdx < width; )
                     {
-                        // The bit that indicates if we are on the left child (0)
-                        // or on the right child (1).
-                        u8 keep = childIdx & 1;
 
                         // Index of the parent in the previous level.
                         auto parentIdx = childIdx >> 1;
 
                         // The value of the parent.
-                        auto& parent = level0[parentIdx];
+                        auto parent = level0[parentIdx];
 
-                        // The child that we will write in this iteration.
-                        auto& child = level1[childIdx];
+                        for (u64 keep = 0; keep < 2; ++keep, ++childIdx)
+                        {
 
-                        // Each parent is expanded into the left and right children 
-                        // using a different AES fixed-key. Therefore our OWF is:
-                        //
-                        //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
-                        //
-                        // where each half defines one of the children.
-                        aes[keep].ecbEncBlocks(parent.data(), 8, child.data());
-                        child[0] = child[0] ^ parent[0];
-                        child[1] = child[1] ^ parent[1];
-                        child[2] = child[2] ^ parent[2];
-                        child[3] = child[3] ^ parent[3];
-                        child[4] = child[4] ^ parent[4];
-                        child[5] = child[5] ^ parent[5];
-                        child[6] = child[6] ^ parent[6];
-                        child[7] = child[7] ^ parent[7];
+                            //// The bit that indicates if we are on the left child (0)
+                            //// or on the right child (1).
+                            //u8 keep = childIdx & 1;
+
+
+                            // The child that we will write in this iteration.
+                            auto& child = level1[childIdx];
+
+                            // Each parent is expanded into the left and right children 
+                            // using a different AES fixed-key. Therefore our OWF is:
+                            //
+                            //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
+                            //
+                            // where each half defines one of the children.
+                            aes[keep].ecbEnc8Blocks(parent.data(), child.data());
+                            child[0] = child[0] ^ parent[0];
+                            child[1] = child[1] ^ parent[1];
+                            child[2] = child[2] ^ parent[2];
+                            child[3] = child[3] ^ parent[3];
+                            child[4] = child[4] ^ parent[4];
+                            child[5] = child[5] ^ parent[5];
+                            child[6] = child[6] ^ parent[6];
+                            child[7] = child[7] ^ parent[7];
+
+
 
 #ifdef DEBUG_PRINT_PPRF
-                        // For debugging, set the active path to zero.
-                        for (u64 i = 0; i < 8; ++i)
-                            if (eq(parent[i], ZeroBlock))
-                                child[i] = ZeroBlock;
+                            // For debugging, set the active path to zero.
+                            for (u64 i = 0; i < 8; ++i)
+                                if (eq(parent[i], ZeroBlock))
+                                    child[i] = ZeroBlock;
 #endif
-                        // Update the running sums for this level. We keep 
-                        // a left and right totals for each level. Note that
-                        // we are actually XOR in the incorrect value of the 
-                        // children of the active parent (assuming !DEBUG_PRINT_PPRF).
-                        // This is ok since we will later XOR off these incorrect values.
-                        auto& sum = mySums[keep];
-                        sum[0] = sum[0] ^ child[0];
-                        sum[1] = sum[1] ^ child[1];
-                        sum[2] = sum[2] ^ child[2];
-                        sum[3] = sum[3] ^ child[3];
-                        sum[4] = sum[4] ^ child[4];
-                        sum[5] = sum[5] ^ child[5];
-                        sum[6] = sum[6] ^ child[6];
-                        sum[7] = sum[7] ^ child[7];
+                            // Update the running sums for this level. We keep 
+                            // a left and right totals for each level. Note that
+                            // we are actually XOR in the incorrect value of the 
+                            // children of the active parent (assuming !DEBUG_PRINT_PPRF).
+                            // This is ok since we will later XOR off these incorrect values.
+                            auto& sum = mySums[keep];
+                            sum[0] = sum[0] ^ child[0];
+                            sum[1] = sum[1] ^ child[1];
+                            sum[2] = sum[2] ^ child[2];
+                            sum[3] = sum[3] ^ child[3];
+                            sum[4] = sum[4] ^ child[4];
+                            sum[5] = sum[5] ^ child[5];
+                            sum[6] = sum[6] ^ child[6];
+                            sum[7] = sum[7] ^ child[7];
+                        }
                     }
 
                     // For everything but the last level we have to
@@ -858,7 +1004,7 @@ namespace osuCrypto
                     if (d != mDepth - 1)
                     {
 
-                        for (u64 i = 0; i < min; ++i)
+                        for (u64 i = 0; i < 8; ++i)
                         {
                             // the index of the leaf node that is active.
                             auto leafIdx = points[i + g];
@@ -906,17 +1052,18 @@ namespace osuCrypto
 
                 }
 
+                timer.setTimePoint("recv.expanded");
+
                 // Now processes the last level. This one is special 
                 // because we we must XOR in the correction value as 
                 // before but we must also fixed the child value for 
                 // the active child. To do this, we will receive 4 
                 // values. Two for each case (left active or right active).
-                std::vector<std::array<block, 4>> lastOts(min);
-                chl.recv(lastOts);
+                timer.setTimePoint("recv.recvLast");
 
-                auto level = getLevel(mDepth);
+                auto level = getLevel(mDepth, g);
                 auto d = mDepth - 1;
-                for (u64 j = 0; j < min; ++j)
+                for (u64 j = 0; j < 8; ++j)
                 {
                     // The index of the child on the active path. 
                     auto activeChildIdx = points[j + g];
@@ -976,29 +1123,28 @@ namespace osuCrypto
 #endif
                 }
 
+                timer.setTimePoint("recv.expandLast");
+
                 // copy the last level to the output. If desired, this is 
                 // where the tranpose is performed. 
-                auto lvl = getLevel(mDepth);
+                auto lvl = getLevel(mDepth, g);
 
                 // s is a checksum that is used for malicous security. 
-                block s = copyOut(lvl, output, mPntCount, g, transpose, mal);
-                ss = ss ^ s;
+                copyOut(lvl, output, mPntCount, g, oFormat);
             }
         };
 
-
-
-        std::vector<std::thread> thrds(chls.size() - 1);
+        std::vector<std::thread> thrds(numThreads -1);
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i] = std::thread(routine, i);
-        //routine(i);
 
         routine(thrds.size());
 
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i].join();
 
-        return ss;
+        mBaseOTs = {};
+        mBaseChoices = {};
     }
 
 }

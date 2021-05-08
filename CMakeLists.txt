@@ -1,7 +1,13 @@
 
 cmake_minimum_required (VERSION 2.8)
+if (POLICY CMP0048)
+  cmake_policy(SET CMP0048 NEW)
+endif (POLICY CMP0048)
+
+project(cryptoTools VERSION 1.3.0)
 
 project(libOTe)
+set(libOTe_VERSION 1.2.0)
 
 
 if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
@@ -13,15 +19,21 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 		message("Please consider updating CMake to 3.12+")
 	endif()
 
-	set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/bin)
-	set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/lib)
-	set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_HOME_DIRECTORY}/lib)
-
 	############################################
 	#           Flag and #defines              #
 	############################################
 	add_definitions(-DSOLUTION_DIR='${CMAKE_SOURCE_DIR}')
-	set(COMMON_FLAGS "-Wall -march=native -Wfatal-errors ")
+	if(MSVC)
+
+
+	else()
+		set(COMMON_FLAGS "-Wall -march=native -Wfatal-errors")
+		SET(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG")
+		SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb")
+		SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -std=c++17")
+	endif()
+
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COMMON_FLAGS}")
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COMMON_FLAGS}")
 
@@ -29,11 +41,6 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	# -maes -msse2 -msse3 -msse4.1 -mpclmul
 	# -std=c++14
 	# -fPIC -no-pie
-
-	# Select flags.
-	SET(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG")
-	SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb -rdynamic")
-	SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb -rdynamic")
 
 
 	############################################
@@ -133,12 +140,6 @@ message(STATUS "Option: ENABLE_OOS            = ${ENABLE_OOS}")
 message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}")
 message(STATUS "Option: ENABLE_RR             = ${ENABLE_RR}\n\n")
 
-message(STATUS "Other libOTe options\n=======================================================")
-message(STATUS "Option: OTE_KOS_HASH          = ${OTE_KOS_HASH}")
-message(STATUS "      OTE_RANDOM_ORACLE         use the random oracle (slower)")
-message(STATUS "      OTE_DAVIE_MEYER_AES       use AES in the Davie Meyer compression function\n")
-message(STATUS "Option: OTE_KOS_FIAT_SHAMIR   = ${OTE_KOS_FIAT_SHAMIR}\n\n")
-
 
 #############################################
 #               Config Checks               #
@@ -154,38 +155,30 @@ if( NOT ENABLE_ALL_OT AND
 	message(WARNING "NO Base OT enabled.")
 endif()
 
-if ((ENABLE_ALL_OT OR ENABLE_MR OR ENABLE_POPF) AND NOT (ENABLE_MIRACL OR ENABLE_RELIC))
+if ((ENABLE_ALL_OT OR ENABLE_MR OR ENABLE_POPF) AND NOT ENABLE_RELIC)
     message(FATAL_ERROR "ENABLE_ALL_OT, ENABLE_MR, and ENABLE_POPF require ENABLE_SODIUM")
 endif()
 
-if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_POPF OR ENABLE_NP) AND
-   NOT (ENABLE_MIRACL OR ENABLE_RELIC))
+if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_POPF OR ENABLE_NP) AND NOT ENABLE_RELIC)
    message(FATAL_ERROR "ENABLE_SIMPLESTOT, ENABLE_MR, ENABLE_POPF requires ENABLE_SODIUM")
 endif()
 
-if(ENABLE_SSE)
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} $   -maes -msse2 -msse3 -msse4.1 -mpclmul  ")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -maes -msse2 -msse3 -msse4.1 -mpclmul  ")
-endif()
-
-
 configure_file(libOTe/config.h.in libOTe/config.h)
-
 # Support out-of-source builds.
-include_directories(${CMAKE_BINARY_DIR})
+# include_directories(${CMAKE_BINARY_DIR})
 
 
 #############################################
 #               Build libOTe                #
 #############################################
 
-if(ENABLE_SIMPLESTOT_ASM)
+if(ENABLE_SIMPLESTOT_ASM AND (NOT MSVC))
 	add_subdirectory(SimplestOT)
-endif(ENABLE_SIMPLESTOT_ASM)
+endif()
 
-if(ENABLE_MR_KYBER)
+if(ENABLE_MR_KYBER AND (NOT MSVC))
 	add_subdirectory(KyberOT)
-endif(ENABLE_MR_KYBER)
+endif()
 
 add_subdirectory(libOTe)
 add_subdirectory(libOTe_Tests)

@@ -128,8 +128,10 @@ namespace osuCrypto
                     // now compute g ^(a * k) = (g^a)^k
                     gka = pC[0] * pK[j];
 
+
+                    auto nounce = i * nSndVals + choices[i];
                     sha.Reset();
-                    sha.Update((u8*)&i, sizeof(i));
+                    sha.Update((u8*)&nounce, sizeof(nounce));
                     sha.Update(gka);
                     sha.Update(R);
                     sha.Final(messages[i]);
@@ -166,7 +168,7 @@ namespace osuCrypto
         // one out of nSndVals OT.
         u64 nSndVals(2);
         std::vector<std::thread> thrds(numThreads);
-        auto seed = prng.get<block>();
+        //auto seed = prng.get<block>();
         Prime25519 alpha(prng);
         u64 pointSize = Rist25519::size;
         std::vector<Rist25519> pC;
@@ -199,7 +201,7 @@ namespace osuCrypto
         {
 
             thrds[t] = std::thread([
-                t, seed, pointSize, &messages, recvFuture,
+                t, pointSize, &messages, recvFuture,
                     numThreads, &buff, &alpha, nSndVals, &pC,&socket,&R]()
             {
                 Rist25519 pPK0, PK0a, fetmp;
@@ -226,8 +228,10 @@ namespace osuCrypto
                     pPK0 = buff[i];
                     PK0a = pPK0 * alpha2;
 
+
+                    auto nounce = i * nSndVals;
                     sha.Reset();
-                    sha.Update((u8*)&i, sizeof(i));
+                    sha.Update((u8*)&nounce, sizeof(nounce));
                     sha.Update(PK0a);
                     sha.Update(R);
                     sha.Final(messages[i][0]);
@@ -236,8 +240,9 @@ namespace osuCrypto
                     {
                         fetmp = c[u] - PK0a;
 
+                        ++nounce;
                         sha.Reset();
-                        sha.Update((u8*)&i, sizeof(i));
+                        sha.Update((u8*)&nounce, sizeof(nounce));
                         sha.Update(fetmp);
                         sha.Update(R);
                         sha.Final(messages[i][u]);

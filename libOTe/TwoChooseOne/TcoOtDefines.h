@@ -12,6 +12,13 @@ namespace osuCrypto
 
 	enum class SilentBaseType {Base, BaseExtend};
 
+	enum class MultType
+	{
+		QuasiCyclic = 1,
+		slv5 = 2,
+		slv11 = 3
+	};
+
 	template<typename S, typename TSpan,
 		typename enabled = typename std::enable_if<
 		std::is_convertible<

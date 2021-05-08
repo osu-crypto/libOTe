@@ -57,12 +57,16 @@ namespace osuCrypto
             }
             raw.setBaseOts(base, mBaseChoiceBits);
         }
-        return std::move(raw); 
+#ifdef OC_NO_MOVE_ELISION 
+        return std::move(raw);
+#else
+        return raw;
+#endif
     }
 
     std::unique_ptr<NcoOtExtSender> KkrtNcoOtSender::split()
     {
-        return std::make_unique<KkrtNcoOtSender>(std::move(splitBase()));
+        return std::make_unique<KkrtNcoOtSender>((splitBase()));
     }
 
     void KkrtNcoOtSender::init(

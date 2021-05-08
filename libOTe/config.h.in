@@ -55,15 +55,6 @@
 #cmakedefine ENABLE_AKN @ENABLE_AKN@
 
 
-#define OTE_RANDOM_ORACLE 1
-#define OTE_DAVIE_MEYER_AES 2
-
-#cmakedefine OTE_KOS_HASH @OTE_KOS_HASH@
-
-// build the library where KOS is round optimized.
-#cmakedefine OTE_KOS_FIAT_SHAMIR @OTE_KOS_FIAT_SHAMIR@
-
-
 #if defined(ENABLE_SIMPLESTOT_ASM) && defined(_MSC_VER)
     #undef ENABLE_SIMPLESTOT_ASM
     #pragma message("ENABLE_SIMPLESTOT_ASM should not be defined on windows.")

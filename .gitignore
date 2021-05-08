@@ -6,6 +6,7 @@
 *.user
 *.sln.docstates
 *.vs
+.vscode/
 
 CMakeFiles/*
 */CMakeFiles/*
@@ -13,9 +14,15 @@ CMakeFiles/*
 
 CMakeCache.txt
 */CMakeCache.txt
+CMakeSettings.json
 
 *.a
 *.args.json
+libOTe/config.h
+frontend/frontend_libOTe
+
+lib/
+CMakeSettings.json
 
 # Build results
 [Dd]ebug/

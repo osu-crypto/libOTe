@@ -1,6 +1,6 @@
 #include "KosOtExtSender.h"
 #ifdef ENABLE_KOS
-
+//#define KOS_DEBUG
 #include "libOTe/config.h"
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Crypto/Commit.h>
@@ -10,15 +10,16 @@
 
 namespace osuCrypto
 {
-    KosOtExtSender::KosOtExtSender(SetUniformOts, span<block> baseRecvOts, const BitVector & choices)
+    KosOtExtSender::KosOtExtSender(SetUniformOts, span<block> baseRecvOts, const BitVector& choices)
     {
         setUniformBaseOts(baseRecvOts, choices);
     }
 
-    void KosOtExtSender::setUniformBaseOts(span<block> baseRecvOts, const BitVector & choices)
+    void KosOtExtSender::setUniformBaseOts(span<block> baseRecvOts, const BitVector& choices)
     {
         mBaseChoiceBits = choices;
 
+        mGens.resize(gOtExtBaseOtCount);
         for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {
             mGens[i].SetSeed(baseRecvOts[i]);
@@ -46,7 +47,7 @@ namespace osuCrypto
         return std::make_unique<KosOtExtSender>(SetUniformOts{}, baseRecvOts, mBaseChoiceBits);
     }
 
-    void KosOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector & choices, Channel& chl)
+    void KosOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector& choices, Channel& chl)
     {
         if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
             throw std::runtime_error("not supported/implemented");
@@ -57,6 +58,7 @@ namespace osuCrypto
         mBaseChoiceBits = choices;
         mBaseChoiceBits ^= delta;
 
+        mGens.resize(gOtExtBaseOtCount);
         for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {
             mGens[i].SetSeed(baseRecvOts[i]);
@@ -74,13 +76,15 @@ namespace osuCrypto
         setTimePoint("Kos.send.start");
 
         // round up
-        u64 numOtExt = roundUpTo(messages.size(), 128);
-        u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
+        u64 numOtExt = roundUpTo(messages.size() + 128, 128);
+        u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
         //u64 numBlocks = numSuperBlocks * superBlkSize;
 
         // a temp that will be used to transpose the sender's matrix
         std::array<std::array<block, superBlkSize>, 128> t;
         std::vector<std::array<block, superBlkSize>> u(128 * commStepSize);
+
+        span<block> tv((block*)t.data(), superBlkSize * 128);
 
         std::array<block, 128> choiceMask;
         block delta = *(block*)mBaseChoiceBits.data();
@@ -92,37 +96,54 @@ namespace osuCrypto
         }
 
         std::array<block, 128> extraBlocks;
-        block* xIter = extraBlocks.data();
 
 
+        // The next OT message to be computed
         auto mIter = messages.begin();
 
-        block * uIter = (block*)u.data() + superBlkSize * 128 * commStepSize;
-        block * uEnd = uIter;
+        // Our current location of u.
+        // The end iter of u. When uIter == uEnd, we need to
+        // receive the next part of the OT matrix.
+        block* uIter = (block*)u.data() + superBlkSize * 128 * commStepSize;
+        block* uEnd = uIter;
 
-#ifdef OTE_KOS_FIAT_SHAMIR
+
+        // The other party either need to commit
+        // to a random value or we will generate 
+        // it via Fiat Shamir.
         RandomOracle fs(sizeof(block));
-#else
+
         Commit theirSeedComm;
-        chl.recv(theirSeedComm.data(), theirSeedComm.size());
+        if(mFiatShamir == false)
+            chl.recv(theirSeedComm.data(), theirSeedComm.size());
+
+
+#ifdef KOS_DEBUG
+        auto mStart = mIter;
 #endif
 
         for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
         {
+            // We will generate of the matrix to fill
+            // up t. Then we will transpose t.
+            block* tIter = (block*)t.data();
 
-            block * tIter = (block*)t.data();
-            block * cIter = choiceMask.data();
+            // cIter is the current choice bit, expanded out to be 128 bits.
+            block* cIter = choiceMask.data();
 
+            // check if we have run out of the u matrix
+            // to consume. If so, receive some more.
             if (uIter == uEnd)
             {
-                u64 step = std::min<u64>(numSuperBlocks - superBlkIdx,(u64) commStepSize);
+                u64 step = std::min<u64>(numSuperBlocks - superBlkIdx, (u64)commStepSize);
                 u64 size = step * superBlkSize * 128 * sizeof(block);
 
+                //std::cout << "recv u " << std::endl;
                 chl.recv((u8*)u.data(), size);
                 uIter = (block*)u.data();
-#ifdef OTE_KOS_FIAT_SHAMIR
-                fs.Update((u8*)u.data(), size);
-#endif
+
+                if (mFiatShamir)
+                    fs.Update((u8*)u.data(), size);
             }
 
             // transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
@@ -161,29 +182,28 @@ namespace osuCrypto
 
 
             //std::array<block, 2>* mStart = mIter;
-            auto mEnd = mIter  + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
+            auto mEnd = mIter + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 
             // compute how many rows are unused.
-            u64 unusedCount = (mIter - mEnd + 128 * superBlkSize);
+            //u64 unusedCount = (mIter - mEnd + 128 * superBlkSize);
 
             // compute the begin and end index of the extra rows that
             // we will compute in this iters. These are taken from the
             // unused rows what we computed above.
-            block* xEnd = std::min(xIter + unusedCount, extraBlocks.data() + 128);
+            //block* xEnd = std::min(xIter + unusedCount, extraBlocks.data() + 128);
 
             tIter = (block*)t.data();
             block* tEnd = (block*)t.data() + 128 * superBlkSize;
 
+            // Due to us transposing 1024 rows, the OT messages
+            // are interleaved within t. we have to step 8 rows
+            // of t to get to the next message.
             while (mIter != mEnd)
             {
                 while (mIter != mEnd && tIter < tEnd)
                 {
                     (*mIter)[0] = *tIter;
                     (*mIter)[1] = *tIter ^ delta;
-
-                    //u64 tV = tIter - (block*)t.data();
-                    //u64 tIdx = tV / 8 + (tV % 8) * 128;
-                    //std::cout << "midx " << (mIter - messages.data()) << "   tIdx " << tIdx << std::endl;
 
                     tIter += superBlkSize;
                     mIter += 1;
@@ -192,102 +212,101 @@ namespace osuCrypto
                 tIter = tIter - 128 * superBlkSize + 1;
             }
 
-
-            if (tIter < (block*)t.data())
-            {
-                tIter = tIter + 128 * superBlkSize - 1;
-            }
-
-            while (xIter != xEnd)
-            {
-                while (xIter != xEnd && tIter < tEnd)
-                {
-                    *xIter = *tIter;
-
-                    //u64 tV = tIter - (block*)t.data();
-                    //u64 tIdx = tV / 8 + (tV % 8) * 128;
-                    //std::cout << "xidx " << (xIter - extraBlocks.data()) << "   tIdx " << tIdx << std::endl;
-
-                    tIter += superBlkSize;
-                    xIter += 1;
-                }
-
-                tIter = tIter - 128 * superBlkSize + 1;
-            }
-
-            //std::cout << "blk end " << std::endl;
-
 #ifdef KOS_DEBUG
-            BitVector choice(128 * superBlkSize);
-            chl.recv(u.data(), superBlkSize * 128 * sizeof(block));
-            chl.recv(choice.data(), sizeof(block) * superBlkSize);
-
-            u64 doneIdx = mStart - messages.data();
-            u64 xx = std::min<u64>(i64(128 * superBlkSize), (messages.data() + messages.size()) - mEnd);
-            for (u64 rowIdx = doneIdx,
-                j = 0; j < xx; ++rowIdx, ++j)
+            if ((superBlkIdx + 1) % commStepSize == 0)
             {
-                if (neq(((block*)u.data())[j], messages[rowIdx][choice[j]]))
+                auto nn = 128 * superBlkSize * commStepSize;
+                BitVector choice(nn);
+
+                std::vector<block> temp(nn);
+                chl.recv(temp);
+                chl.recv(choice);
+
+                u64 begin = mStart - messages.begin();
+                auto mm = std::min<u64>(nn, messages.size() - begin);
+                for (u64 j = 0; j < mm; ++j)
                 {
-                    std::cout << rowIdx << std::endl;
-                    throw std::runtime_error("");
+                    auto rowIdx = j + begin;
+                    auto v = temp[j];
+                    if (neq(v, messages[rowIdx][choice[j]]))
+                    {
+                        std::cout << rowIdx << std::endl;
+                        throw std::runtime_error("");
+                    }
                 }
             }
 #endif
-            //doneIdx = (mEnd - messages.data());
         }
 
+        for (u64 i = 0; i < 128; ++i)
+            extraBlocks[i] = t[i][superBlkSize - 1];
 
 #ifdef KOS_DEBUG
         BitVector choices(128);
         std::vector<block> xtraBlk(128);
-
-        chl.recv(xtraBlk.data(), 128 * sizeof(block));
-        choices.resize(128);
+        chl.recv(xtraBlk);
         chl.recv(choices);
 
+        bool failed = false;
         for (u64 i = 0; i < 128; ++i)
         {
-            if (neq(xtraBlk[i] , choices[i] ? extraBlocks[i] ^ delta : extraBlocks[i] ))
+            if (neq(xtraBlk[i], choices[i] ? extraBlocks[i] ^ delta : extraBlocks[i]))
             {
                 std::cout << "extra " << i << std::endl;
                 std::cout << xtraBlk[i] << "  " << (u32)choices[i] << std::endl;
                 std::cout << extraBlocks[i] << "  " << (extraBlocks[i] ^ delta) << std::endl;
 
-                throw std::runtime_error("");
+                failed = true;
             }
         }
+        if (failed)
+            throw std::runtime_error("");
 #endif
         setTimePoint("Kos.send.transposeDone");
-#ifdef OTE_KOS_FIAT_SHAMIR
+
         block seed;
-        fs.Final(seed);
+
+        if (mFiatShamir)
+        {
+            fs.Final(seed);
+        }
+        else
+        {
+            seed = prng.get<block>();
+            chl.asyncSend((u8*)&seed, sizeof(block));
+            block theirSeed;
+            chl.recv((u8*)&theirSeed, sizeof(block));
+            setTimePoint("Kos.send.cncSeed");
+            if (Commit(theirSeed) != theirSeedComm)
+                throw std::runtime_error("bad commit " LOCATION);
+            seed = seed ^ theirSeed;
+            //PRNG commonPrng(seed ^ theirSeed);
+        }
+
+
+        hash(messages, chl, seed, extraBlocks, delta);
+
+    }
+
+
+    void KosOtExtSender::hash(
+        span<std::array<block, 2>> messages,
+        Channel& chl, 
+        block seed, 
+        std::array<block, 128>& extraBlocks,
+        block delta)
+    {
+
         PRNG commonPrng(seed);
-#else
-        block seed = prng.get<block>();
-        chl.asyncSend((u8*)&seed, sizeof(block));
-        block theirSeed;
-        chl.recv((u8*)&theirSeed, sizeof(block));
-        setTimePoint("Kos.send.cncSeed");
-        if (Commit(theirSeed) != theirSeedComm)
-            throw std::runtime_error("bad commit " LOCATION);
-        PRNG commonPrng(seed ^ theirSeed);
-#endif
-
-
 
         block  qi, qi2;
         block q2 = ZeroBlock;
         block q1 = ZeroBlock;
 
-#if (OTE_KOS_HASH == OTE_RANDOM_ORACLE)
         RandomOracle sha;
         u8 hashBuff[20];
-#elif (OTE_KOS_HASH == OTE_DAVIE_MEYER_AES)
-        std::array<block, 8> aesHashTemp;
-#else
-#error "OTE_KOS_HASH" must be defined
-#endif
+
+
         u64 doneIdx = 0;
         std::array<block, 128> challenges;
 
@@ -298,58 +317,38 @@ namespace osuCrypto
         {
             commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
             u64 stop = std::min<u64>(messages.size(), doneIdx + 128);
-
             for (u64 i = 0, dd = doneIdx; dd < stop; ++dd, ++i)
             {
-                //chii = commonPrng.get<block>();
-                //std::cout << "sendIdx' " << dd << "   " << messages[dd][0] << "   " << chii << std::endl;
-
                 mul128(messages[dd][0], challenges[i], qi, qi2);
-                q1 = q1  ^ qi;
+                q1 = q1 ^ qi;
                 q2 = q2 ^ qi2;
-#if (OTE_KOS_HASH == OTE_RANDOM_ORACLE)
-                // hash the message without delta
-                sha.Reset();
-                sha.Update(dd);
-                sha.Update((u8*)&messages[dd][0], sizeof(block));
-                sha.Final(hashBuff);
-                messages[dd][0] = *(block*)hashBuff;
-
-                // hash the message with delta
-                sha.Reset();
-                sha.Update(dd);
-                sha.Update((u8*)&messages[dd][1], sizeof(block));
-                sha.Final(hashBuff);
-                messages[dd][1] = *(block*)hashBuff;
-#endif
             }
-#if (OTE_KOS_HASH == OTE_DAVIE_MEYER_AES)
-            auto length = 2 *(stop - doneIdx);
-            auto steps = length / 8;
-            block* mIter = messages[doneIdx].data();
-            for (u64 i = 0; i < steps; ++i)
+
+            if (mHashType == HashType::RandomOracle)
             {
-                mAesFixedKey.ecbEncBlocks(mIter, 8, aesHashTemp.data());
-                mIter[0] = mIter[0] ^ aesHashTemp[0];
-                mIter[1] = mIter[1] ^ aesHashTemp[1];
-                mIter[2] = mIter[2] ^ aesHashTemp[2];
-                mIter[3] = mIter[3] ^ aesHashTemp[3];
-                mIter[4] = mIter[4] ^ aesHashTemp[4];
-                mIter[5] = mIter[5] ^ aesHashTemp[5];
-                mIter[6] = mIter[6] ^ aesHashTemp[6];
-                mIter[7] = mIter[7] ^ aesHashTemp[7];
+                for (u64 i = 0, dd = doneIdx; dd < stop; ++dd, ++i)
+                {
+                    // hash the message without delta
+                    sha.Reset();
+                    sha.Update(dd);
+                    sha.Update((u8*)&messages[dd][0], sizeof(block));
+                    sha.Final(hashBuff);
+                    messages[dd][0] = *(block*)hashBuff;
 
-                mIter += 8;
+                    // hash the message with delta
+                    sha.Reset();
+                    sha.Update(dd);
+                    sha.Update((u8*)&messages[dd][1], sizeof(block));
+                    sha.Final(hashBuff);
+                    messages[dd][1] = *(block*)hashBuff;
+                }
             }
-
-            auto rem = length - steps * 8;
-            mAesFixedKey.ecbEncBlocks(mIter, rem, aesHashTemp.data());
-            for (u64 i = 0; i < rem; ++i)
+            else
             {
-                mIter[i] = mIter[i] ^ aesHashTemp[i];
+                span<block> hh(messages[doneIdx].data(), 2 * (stop - doneIdx));
+                mAesFixedKey.hashBlocks(hh, hh);
             }
 
-#endif
             doneIdx = stop;
         }
 
@@ -358,9 +357,8 @@ namespace osuCrypto
         {
             block chii = commonPrng.get<block>();
 
-
             mul128(blk, chii, qi, qi2);
-            q1 = q1  ^ qi;
+            q1 = q1 ^ qi;
             q2 = q2 ^ qi2;
         }
 
@@ -369,31 +367,30 @@ namespace osuCrypto
 
         //std::cout << IoStream::unlock;
 
-        block t1, t2;
-        std::vector<u8> data(sizeof(block) * 3);
+        std::vector<u8> data(sizeof(block) * 2);
 
         chl.recv(data.data(), data.size());
         setTimePoint("Kos.send.proofReceived");
 
         block& received_x = ((block*)data.data())[0];
         block& received_t = ((block*)data.data())[1];
-        block& received_t2 = ((block*)data.data())[2];
+        //block& received_t2 = ((block*)data.data())[2];
+
+        auto q = q1.gf128Reduce(q2);
 
         // check t = x * Delta + q
-        mul128(received_x, delta, t1, t2);
-        t1 = t1 ^ q1;
-        t2 = t2 ^ q2;
+        auto t = received_x.gf128Mul(delta) ^ q;
 
-        if (eq(t1, received_t) && eq(t2, received_t2))
+        if (eq(t, received_t))
         {
             //std::cout << "\tCheck passed\n";
         }
         else
         {
             std::cout << "OT Ext Failed Correlation check failed" << std::endl;
-            std::cout << "rec t = " << received_t << std::endl;
-            std::cout << "tmp1  = " << t1 << std::endl;
-            std::cout << "q  = " << q1 << std::endl;
+            //std::cout << "rec t = " << received_t << std::endl;
+            //std::cout << "tmp1  = " << t1 << std::endl;
+            //std::cout << "q  = " << q1 << std::endl;
             throw std::runtime_error("Exit");;
         }
         setTimePoint("Kos.send.done");
@@ -403,4 +400,5 @@ namespace osuCrypto
 
 
 }
+
 #endif
