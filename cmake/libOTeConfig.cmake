@@ -15,12 +15,12 @@ find_library(
     libOTe_LIB
     NAMES libOTe
     HINTS "${libOTe_BIN_DIR}")
-	
+
 find_library(
     cryptoTools_LIB
     NAMES cryptoTools
     HINTS "${libOTe_BIN_DIR}")
-     
+
 
 if(NOT libOTe_LIB OR NOT cryptoTools_LIB)
     message(FATAL_ERROR "failed to fine libOTe & cryptoTools at ${libOTe_BIN_DIR}")
@@ -38,7 +38,7 @@ if(${ENABLE_SIMPLESTOT_ASM})
     if(NOT SimplestOT_LIB)
       	message(FATAL_ERROR "Failed to find libSimplestOT.a at: ${libOTe_Dirs}/lib/")
   	else()
-      	message(STATUS "Found libSimplestOT.a at: ${libOTe_Dirs}/lib/")  	
+      	message(STATUS "Found libSimplestOT.a at: ${libOTe_Dirs}/lib/")
     endif()
 
 	target_link_libraries(libPSI ${SimplestOT_LIB})
@@ -57,7 +57,7 @@ if(${ENABLE_MR_KYBER})
     if(NOT KyberOT_LIB)
       	message(FATAL_ERROR "Failed to find libKyberOT.a at: ${libOTe_Dirs}/lib/")
   	else()
-      	message(STATUS "Found libKyberOT.a at: ${libOTe_Dirs}/lib/")  	
+      	message(STATUS "Found libKyberOT.a at: ${libOTe_Dirs}/lib/")
     endif()
 
 	target_link_libraries(libPSI ${KyberOT_LIB})
@@ -75,7 +75,7 @@ if(NOT BOOST_ROOT OR NOT EXISTS "${BOOST_ROOT}")
     if(MSVC)
         set(BOOST_ROOT_local "${CMAKE_CURRENT_SOURCE_DIR}/../../libOTe/cryptoTools/thirdparty/win/boost/")
         set(BOOST_ROOT_install "c:/libs/boost/")
-            
+
         if(EXISTS "${BOOST_ROOT_local}")
             set(BOOST_ROOT "${BOOST_ROOT_local}")
         else()
@@ -110,54 +110,6 @@ if(NOT Boost_FOUND)
     findBoost()
 endif()
 
- 
-#############################################
-#                 Link Miracl               #
-#############################################
-
-
-if (ENABLE_MIRACL)
-
-    find_library(
-      MIRACL_LIB 
-      NAMES miracl  
-      HINTS "${Miracl_Dirs}/miracl/source/")
-  
-    # if we cant fint it, throw an error
-    if(NOT MIRACL_LIB)
-      Message(${MIRACL_LIB})
-      message(FATAL_ERROR "Failed to find miracl at " ${Miracl_Dirs})
-    else()
-      message("Miracl at  ${MIRACL_LIB}")
-    endif()
-    
-    target_link_libraries(libPSI  ${MIRACL_LIB} )
-
-endif()
-
-
-    
-
-
-## Relic
-###########################################################################
-
-
-if (ENABLE_RELIC)
-  find_package(Relic REQUIRED)
-
-  if (NOT Relic_FOUND)
-    message(FATAL_ERROR "Failed to find Relic")
-  endif (NOT Relic_FOUND)
-  
-  message(STATUS "Relic_LIB:  ${RELIC_LIBRARIES} ${RLC_LIBRARY}")
-  message(STATUS "Relic_inc:  ${RELIC_INCLUDE_DIR} ${RLC_INCLUDE_DIR}\n")
-
-  target_include_directories(libPSI PUBLIC ${RELIC_INCLUDE_DIR} ${RLC_INCLUDE_DIR}) 
-  target_link_libraries(libPSI ${RELIC_LIBRARIES} ${RLC_LIBRARY})
-
-
-endif (ENABLE_RELIC)
 
 ## WolfSSL
 ###########################################################################

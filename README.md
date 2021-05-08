@@ -104,8 +104,7 @@ expection that network IO in libOTe is performed in the background by a separate
  
 The library is *cross platform* and has been tested on Windows, Mac and Linux. 
 There is one mandatory dependency on [Boost 1.69](http://www.boost.org/) (networking),
-and three **optional dependencies** on, [Miracl](https://www.miracl.com/),
-[Relic](https://github.com/relic-toolkit/relic) or
+and two **optional dependencies** on [libsodium](https://doc.libsodium.org/) or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
 for Base OTs. Any or all of these dependenies can be enabled. See below. 
 
@@ -128,17 +127,6 @@ To see all the command line options, execute the program `frontend.exe`.
 **Boost and visual studio 2017:**  If boost does not build with visual studio 2017 
 follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
 
-**Enabling [Relic](https://github.com/relic-toolkit/relic) (for base OTs):**
- * Build the library in the folder next libOTe (i.e. share the same parent directory):
-```
-git clone https://github.com/ladnir/relic.git
-cd relic
-cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64 -DRUNTIME=MT
-cmake --build .
-cmake --install .
-```
- * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_RELIC ON`.
-
 ### Linux / Mac
  
  In short, this will build the project 
@@ -158,9 +146,8 @@ where `ENABLE_XXX` should be replaced by `ENABLE_IKNP, ENABLE_KOS, ...` dependin
 
 
 **Enable Base OTs using:**
- * `cmake .  -DENABLE_RELIC=ON`: Build the library with integration to the 
-      [Relic](https://github.com/relic-toolkit/relic) library. Requires that
-      relic is built with `cmake . -DMULTI=PTHREAD` and installed. 
+ * `cmake .  -DENABLE_SODIUM=ON`: Build the library with integration to the 
+      [libsodium](https://doc.libsodium.org/) library.
  * **Linux Only**: `cmake .  -DENABLE_SIMPLESTOT_ASM=ON`: Build the library with integration to the 
       [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
        library implementing a base OT.
@@ -170,8 +157,8 @@ where `ENABLE_XXX` should be replaced by `ENABLE_IKNP, ENABLE_KOS, ...` dependin
 
 **Note:** In the case boost is already installed, the steps 
 `cd libOTe/cryptoTools/thirdparty/linux; bash boost.get` can be skipped and CMake will attempt 
-to find them instead. Boost is found with the CMake findBoost package and miracl
-is found with the `find_library(miracl)` command. If there is a version mismatch then you will still need to run the provided boost build script.
+to find them instead. Boost is found with the CMake findBoost package and libsodium
+is found with the `pkg_check_modules(libsodium)` command. If there is a version mismatch then you will still need to run the provided boost build script.
  
 
 
@@ -183,8 +170,6 @@ is found with the `find_library(miracl)` command. If there is a version mismatch
 1) .../libOTe
 2) .../libOTe/cryptoTools
 3) .../libOTe/cryptoTools/thirdparty/linux/boost
-4) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl <i>(if enabled)</i>
-5) [Relic includes] <i>(if enabled)</i>
 
 and link:
 1) .../libOTe/bin/liblibOTe.a
@@ -193,8 +178,6 @@ and link:
 3) .../libOTe/bin/libKyberOT.a       <i>(if enabled)</i>
 4) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_system.a
 5) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_thread.a
-6) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl/source/libmiracl.a <i>(if enabled)</i>
-7) [Relic binary] <i>(if enabled)</i>
 
 **Note:** On windows the linking paths follow a similar pattern.
 
