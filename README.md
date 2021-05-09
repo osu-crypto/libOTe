@@ -106,7 +106,9 @@ The library is *cross platform* and has been tested on Windows, Mac and Linux.
 There is one mandatory dependency on [Boost 1.69](http://www.boost.org/) (networking),
 and two **optional dependencies** on [libsodium](https://doc.libsodium.org/) or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
-for Base OTs. Any or all of these dependenies can be enabled. See below. 
+for Base OTs.
+The Moeller POPF Base OTs additionally require the `noclamp` option for Montgomery curves, which is currently only in a [fork](https://github.com/osu-crypto/libsodium) of libsodium.
+Any or all of these dependenies can be enabled. See below. 
 
  
 ### Windows
@@ -146,8 +148,11 @@ where `ENABLE_XXX` should be replaced by `ENABLE_IKNP, ENABLE_KOS, ...` dependin
 
 
 **Enable Base OTs using:**
- * `cmake .  -DENABLE_SODIUM=ON`: Build the library with integration to the 
-      [libsodium](https://doc.libsodium.org/) library.
+ * `cmake . -DENABLE_SODIUM=ON`: Build the library with integration to the 
+      [libsodium](https://doc.libsodium.org/) library. If libsodium is installed in a prefix, rather than globally, tell cmake where to look for it with
+```
+PKG_CONFIG_PATH=/path/to/folder_containing_libsodium.pc cmake . -DENABLE_SODIUM=ON
+```
  * **Linux Only**: `cmake .  -DENABLE_SIMPLESTOT_ASM=ON`: Build the library with integration to the 
       [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
        library implementing a base OT.

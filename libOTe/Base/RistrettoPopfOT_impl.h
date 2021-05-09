@@ -1,4 +1,4 @@
-#ifdef ENABLE_POPF
+#ifdef ENABLE_POPF_RISTRETTO
 
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Log.h>
@@ -95,6 +95,5 @@ namespace osuCrypto
         }
     }
 }
+
 #endif
-
-

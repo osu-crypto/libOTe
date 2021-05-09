@@ -1,6 +1,6 @@
 #pragma once
 #include "libOTe/config.h"
-#ifdef ENABLE_POPF
+#ifdef ENABLE_POPF_MOELLER
 
 #include <type_traits>
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
@@ -12,6 +12,9 @@
 #include <cryptoTools/Crypto/SodiumCurve.h>
 #ifndef ENABLE_SODIUM
 static_assert(0, "ENABLE_SODIUM must be defined to build MasnyRindal");
+#endif
+#ifndef SODIUM_MONTGOMERY
+static_assert(0, "SODIUM_MONTGOMERY must be defined to build MasnyRindal");
 #endif
 
 namespace osuCrypto
@@ -105,5 +108,14 @@ namespace osuCrypto
 }
 
 #include "MoellerPopfOT_impl.h"
+
+#else
+
+// Allow unit tests to use MoellerPopfOT as a template argument.
+namespace osuCrypto
+{
+    template<typename DSPopf>
+    class MoellerPopfOT;
+}
 
 #endif

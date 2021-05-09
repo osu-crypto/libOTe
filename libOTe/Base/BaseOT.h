@@ -6,23 +6,22 @@
 #include "MasnyRindal.h"
 namespace osuCrypto
 {
-#ifdef ENABLE_SIMPLESTOT_ASM
 #define LIBOTE_HAS_BASE_OT
+#ifdef ENABLE_SIMPLESTOT_ASM
     using DefaultBaseOT = AsmSimplestOT;
 #elif defined ENABLE_MR
-#define LIBOTE_HAS_BASE_OT
     using DefaultBaseOT = MasnyRindal;
 #elif defined ENABLE_NP_KYBER
-#define LIBOTE_HAS_BASE_OT
     using DefaultBaseOT = MasnyRindalKyber;
 #elif defined ENABLE_SIMPLESTOT
-#define LIBOTE_HAS_BASE_OT
     using DefaultBaseOT = SimplestOT;
-#elif defined ENABLE_POPF
-#define LIBOTE_HAS_BASE_OT
-    using DefaultBaseOT = PopfOT;
+#elif defined ENABLE_POPF_MOELLER
+    using DefaultBaseOT = MoellerPopfOT<DomainSepEKEPopf>;
+#elif defined ENABLE_POPF_RISTRETTO
+    using DefaultBaseOT = RistrettoPopfOT<DomainSepFeistelMulRistPopf>;
 #elif defined ENABLE_NP
-#define LIBOTE_HAS_BASE_OT
     using DefaultBaseOT = NaorPinkas;
+#else
+#undef LIBOTE_HAS_BASE_OT
 #endif
 }

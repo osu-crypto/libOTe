@@ -75,7 +75,8 @@ add_subdirectory(cryptoTools)
 if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_SIMPLESTOT     ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_SIMPLESTOT_ASM ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
-	set(ENABLE_POPF           ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
+	set(ENABLE_POPF_RISTRETTO ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
+	set(ENABLE_POPF_MOELLER   ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_MR             ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_MR_KYBER       ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_NP             ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
@@ -93,7 +94,8 @@ endif()
 
 option(ENABLE_SIMPLESTOT     "Build the SimplestOT base OT" OFF)
 option(ENABLE_SIMPLESTOT_ASM "Build the assembly based SimplestOT library" OFF)
-option(ENABLE_POPF           "Build the PopfOT base OT" OFF)
+option(ENABLE_POPF_RISTRETTO "Build the PopfOT base OT using Ristretto KA" OFF)
+option(ENABLE_POPF_MOELLER   "Build the PopfOT base OT using Moeller KA" OFF)
 option(ENABLE_MR             "Build the MasnyRindal base OT" OFF)
 option(ENABLE_MR_KYBER       "Build the Kyber (LWE based) library and MR-Kyber base OT" OFF)
 option(ENABLE_NP             "Build the NaorPinkas base OT" OFF)
@@ -121,7 +123,8 @@ message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF\n\n")
 message(STATUS "Base OT protocols\n=======================================================")
 message(STATUS "Option: ENABLE_SIMPLESTOT     = ${ENABLE_SIMPLESTOT}")
 message(STATUS "Option: ENABLE_SIMPLESTOT_ASM = ${ENABLE_SIMPLESTOT_ASM}")
-message(STATUS "Option: ENABLE_POPF           = ${ENABLE_POPF}")
+message(STATUS "Option: ENABLE_POPF_RISTRETTO = ${ENABLE_POPF_RISTRETTO}")
+message(STATUS "Option: ENABLE_POPF_MOELLER   = ${ENABLE_POPF_MOELLER}")
 message(STATUS "Option: ENABLE_MR             = ${ENABLE_MR}")
 message(STATUS "Option: ENABLE_MR_KYBER       = ${ENABLE_MR_KYBER}")
 message(STATUS "Option: ENABLE_NP             = ${ENABLE_NP}\n\n")
@@ -148,19 +151,25 @@ message(STATUS "Option: ENABLE_RR             = ${ENABLE_RR}\n\n")
 if( NOT ENABLE_ALL_OT AND
 	NOT ENABLE_SIMPLESTOT AND
 	NOT ENABLE_SIMPLESTOT_ASM AND
-	NOT ENABLE_POPF AND
+	NOT ENABLE_POPF_RISTRETTO AND
+	NOT ENABLE_POPF_MOELLER AND
 	NOT ENABLE_MR AND
 	NOT ENABLE_MR_KYBER AND
 	NOT ENABLE_NP)
 	message(WARNING "NO Base OT enabled.")
 endif()
 
-if ((ENABLE_ALL_OT OR ENABLE_MR OR ENABLE_POPF) AND NOT ENABLE_SODIUM)
-    message(FATAL_ERROR "ENABLE_ALL_OT, ENABLE_MR, and ENABLE_POPF require ENABLE_SODIUM")
+if ((ENABLE_ALL_OT OR
+     ENABLE_SIMPLESTOT OR
+     ENABLE_NP OR
+     ENABLE_MR OR
+     ENABLE_POPF_RISTRETTO OR
+     ENABLE_POPF_MOELLER) AND NOT ENABLE_SODIUM)
+    message(FATAL_ERROR "ENABLE_ALL_OT, ENABLE_SIMPLESTOT, ENABLE_NP, ENABLE_MR, ENABLE_POPF_RISTRETTO, and ENABLE_POPF_MOELLER require ENABLE_SODIUM")
 endif()
 
-if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_POPF OR ENABLE_NP) AND NOT ENABLE_SODIUM)
-   message(FATAL_ERROR "ENABLE_SIMPLESTOT, ENABLE_MR, ENABLE_POPF requires ENABLE_SODIUM")
+if (ENABLE_POPF_MOELLER AND NOT SODIUM_MONTGOMERY)
+    message(FATAL_ERROR "ENABLE_POPF_MOELLER requires libsodium to support Montgomery curve noclamp operations")
 endif()
 
 configure_file(libOTe/config.h.in libOTe/config.h)

@@ -132,10 +132,10 @@ namespace tests_libOTe
 #endif
     }
 
-    template<template<typename> class PopfOT, typename DSPopf>
-    void Bot_PopfOT_Test()
+    template<template<typename> class PopfOT, typename DSPopf,
+             size_t Sfinae = sizeof(PopfOT<DSPopf>)>
+    static void Bot_PopfOT_Test_impl()
     {
-#ifdef ENABLE_POPF
         setThreadName("Sender");
 
         IOService ios(0);
@@ -177,10 +177,17 @@ namespace tests_libOTe
                 throw UnitTestFail();
             }
         }
+    }
 
-#else
+    template<template<typename> class PopfOT, typename DSPopf, typename... Args>
+    static void Bot_PopfOT_Test_impl(Args... args)
+    {
         throw UnitTestSkipped("POPF OT not enabled. Requires libsodium.");
-#endif
+    }
+
+    template<template<typename> class PopfOT, typename DSPopf>
+    void Bot_PopfOT_Test() {
+        Bot_PopfOT_Test_impl<PopfOT, DSPopf>();
     }
 
     template void Bot_PopfOT_Test<MoellerPopfOT, DomainSepEKEPopf>();

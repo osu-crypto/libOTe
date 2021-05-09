@@ -1,6 +1,6 @@
 #pragma once
 #include "libOTe/config.h"
-#ifdef ENABLE_POPF
+#ifdef ENABLE_POPF_RISTRETTO
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
@@ -88,6 +88,14 @@ namespace osuCrypto
             return FeistelMulRistPopf(*this);
         }
     };
+}
+
+#else
+
+// Allow unit tests to use DomainSepFeistelMulRistPopf as a template argument.
+namespace osuCrypto
+{
+    class DomainSepFeistelMulRistPopf;
 }
 
 #endif

@@ -90,10 +90,15 @@ namespace osuCrypto
 #else
     const bool spaEnabled = false;
 #endif
-#ifdef ENABLE_POPF
-    const bool popfotEnabled = true;
+#ifdef ENABLE_POPF_RISTRETTO
+    const bool popfotRistrettoEnabled = true;
 #else
-    const bool popfotEnabled = false;
+    const bool popfotRistrettoEnabled = false;
+#endif
+#ifdef ENABLE_POPF_MOELLER
+    const bool popfotMoellerEnabled = true;
+#else
+    const bool popfotMoellerEnabled = false;
 #endif
 #ifdef ENABLE_MR
     const bool mrEnabled = true;

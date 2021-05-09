@@ -6,12 +6,14 @@
 #include "cryptoTools/Network/Session.h"
 #include "cryptoTools/Network/IOService.h"
 #include "cryptoTools/Common/BitVector.h"
+#include "cryptoTools/Common/TestCollection.h"
 #include "cryptoTools/Common/Timer.h"
 
 using namespace oc;
 
 
 
+#ifdef ENABLE_SILENTOT
 namespace {
     void fakeBase(u64 n,
         u64 threads,
@@ -40,6 +42,7 @@ namespace {
     }
 
 }
+#endif
 
 void Vole_Noisy_test(const oc::CLP& cmd)
 {
@@ -93,6 +96,7 @@ void Vole_Noisy_test(const oc::CLP& cmd)
 
 void Vole_Silent_test(const oc::CLP& cmd)
 {
+#ifdef ENABLE_SILENTOT
     Timer timer;
     timer.setTimePoint("start");
     u64 n = cmd.getOr("n", 102043);
@@ -137,13 +141,15 @@ void Vole_Silent_test(const oc::CLP& cmd)
         }
     }
     timer.setTimePoint("done");
-
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
 
 }
 
 void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
 {
-
+#ifdef ENABLE_SILENTOT
     Timer timer;
     timer.setTimePoint("start");
     block seed = block(0, cmd.getOr("seed", 0));
@@ -191,13 +197,16 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
         }
         timer.setTimePoint("done");
     }
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
 }
 
 
 
 void Vole_Silent_baseOT_test(const oc::CLP& cmd)
 {
-
+#ifdef ENABLE_SILENTOT
     Timer timer;
     timer.setTimePoint("start");
     u64 n = 123;
@@ -244,13 +253,16 @@ void Vole_Silent_baseOT_test(const oc::CLP& cmd)
         }
         timer.setTimePoint("done");
     }
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
 }
 
 
 
 void Vole_Silent_mal_test(const oc::CLP& cmd)
 {
-
+#ifdef ENABLE_SILENTOT
     Timer timer;
     timer.setTimePoint("start");
     u64 n = 12343;
@@ -300,4 +312,7 @@ void Vole_Silent_mal_test(const oc::CLP& cmd)
         }
         timer.setTimePoint("done");
     }
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
 }

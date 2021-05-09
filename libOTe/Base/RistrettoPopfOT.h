@@ -1,6 +1,6 @@
 #pragma once
 #include "libOTe/config.h"
-#ifdef ENABLE_POPF
+#ifdef ENABLE_POPF_RISTRETTO
 
 #include <type_traits>
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
@@ -72,5 +72,14 @@ namespace osuCrypto
 }
 
 #include "RistrettoPopfOT_impl.h"
+
+#else
+
+// Allow unit tests to use RistrettoPopfOT as a template argument.
+namespace osuCrypto
+{
+    template<typename DSPopf>
+    class RistrettoPopfOT;
+}
 
 #endif

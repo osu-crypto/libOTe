@@ -181,6 +181,7 @@ void Tools_modp_test(const CLP& cmd)
 }
 
 
+#ifdef ENABLE_SILENTOT
 namespace {
     void fakeBase(u64 n,
         u64 s,
@@ -337,6 +338,7 @@ namespace {
             throw RTE_LOC;
     }
 }
+#endif
 
 
 void OtExt_Silent_random_Test(const CLP& cmd)

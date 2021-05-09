@@ -1,4 +1,4 @@
-#ifdef ENABLE_POPF
+#ifdef ENABLE_POPF_MOELLER
 
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Log.h>
@@ -50,7 +50,7 @@ namespace osuCrypto
             sk.emplace_back(prng, false);
             Monty25519 g = (curveChoice[i] == 0) ?
                 Monty25519::wholeGroupGenerator : Monty25519::wholeTwistGroupGenerator;
-            Monty25519 B = g * sk[i]; // TODO: This clamps sk[i], and so leaks a few bits.
+            Monty25519 B = g * sk[i];
 
             sendBuff[i] = popf.program(choices[i], curveToBlock(B, prng), prng);
         }
