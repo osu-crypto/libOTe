@@ -27,6 +27,7 @@ namespace osuCrypto
     public:
         typedef DSPopf PopfFactory;
 
+        RistrettoPopfOT() = default;
         RistrettoPopfOT(const PopfFactory& p) : popfFactory(p) {}
         RistrettoPopfOT(PopfFactory&& p) : popfFactory(p) {}
 

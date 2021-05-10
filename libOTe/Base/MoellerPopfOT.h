@@ -57,6 +57,7 @@ namespace osuCrypto
     public:
         typedef DSPopf PopfFactory;
 
+        MoellerPopfOT() = default;
         MoellerPopfOT(const PopfFactory& p) : popfFactory(p) {}
         MoellerPopfOT(PopfFactory&& p) : popfFactory(p) {}
 

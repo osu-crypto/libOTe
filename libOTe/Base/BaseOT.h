@@ -4,6 +4,11 @@
 #include "SimplestOT.h"
 #include "naor-pinkas.h"
 #include "MasnyRindal.h"
+#include "MoellerPopfOT.h"
+#include "RistrettoPopfOT.h"
+#include "EKEPopf.h"
+#include "FeistelMulRistPopf.h"
+
 namespace osuCrypto
 {
 #define LIBOTE_HAS_BASE_OT
