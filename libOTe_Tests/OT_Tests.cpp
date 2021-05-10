@@ -1,7 +1,7 @@
 #include "OT_Tests.h"
 
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
-
+#include "libOTe/Base/BaseOT.h"
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/LinearCode.h"
 #include <cryptoTools/Network/Channel.h>
@@ -438,7 +438,7 @@ namespace tests_libOTe
 
 		OT_100Receive_Test(choices, recvMsg, sendMsg);
 #else
-		throw UnitTestSkipped("ENALBE_KOS is not defined.");
+		throw UnitTestSkipped("ENABLE_KOS is not defined.");
 #endif
 	}
 
@@ -492,7 +492,7 @@ namespace tests_libOTe
 
 		OT_100Receive_Test(choices, recvMsg, sendMsg);
 #else
-		throw UnitTestSkipped("ENALBE_KOS is not defined.");
+		throw UnitTestSkipped("ENABLE_KOS is not defined.");
 #endif
 	}
 
@@ -544,7 +544,7 @@ namespace tests_libOTe
 
 		OT_100Receive_Test(choices, recvMsg, sendMsg);
 #else
-		throw UnitTestSkipped("ENALBE_KOS is not defined.");
+		throw UnitTestSkipped("ENABLE_KOS is not defined.");
 #endif
 	}
 
@@ -566,37 +566,37 @@ namespace tests_libOTe
         PRNG prng0(ZeroBlock);
         choices.randomize(prng0);
         baseChoice.randomize(prng0);
-		
+
         for (u64 i = 0; i < 128; ++i)
         {
             baseSend[i][0] = prng0.get<block>();
             baseSend[i][1] = prng0.get<block>();
             baseRecv[i] = baseSend[i][baseChoice[i]];
         }
-		
+
         prng0.get(sendMsg.data(), sendMsg.size());
 
         KosOtExtSender sender;
         KosOtExtReceiver recv;
 
-        auto thrd = std::thread([&]() { 
-            PRNG prng1(OneBlock); 
+        auto thrd = std::thread([&]() {
+            PRNG prng1(OneBlock);
             recv.setBaseOts(baseSend, prng1, recvChannel);
-            recv.receiveChosen(choices, recvMsg, prng1, recvChannel); 
+            recv.receiveChosen(choices, recvMsg, prng1, recvChannel);
         });
 
         sender.setBaseOts(baseRecv, baseChoice, senderChannel);
         sender.sendChosen(sendMsg, prng0, senderChannel);
 
         thrd.join();
-		
+
         for (u64 i = 0; i < numOTs; ++i)
         {
             if (neq(recvMsg[i], sendMsg[i][choices[i]]))
                 throw UnitTestFail("bad message " LOCATION);
         }
 #else
-	throw UnitTestSkipped("ENALBE_KOS is not defined.");
+	throw UnitTestSkipped("ENABLE_KOS is not defined.");
 #endif
     }
 
@@ -680,7 +680,7 @@ namespace tests_libOTe
 		recvChannel.close();
 
 #else
-		throw UnitTestSkipped("ENALBE_KOS is not defined.");
+		throw UnitTestSkipped("ENABLE_DELTA_KOS is not defined.");
 #endif
 	}
 
