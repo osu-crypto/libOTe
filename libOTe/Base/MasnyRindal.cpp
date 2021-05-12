@@ -61,7 +61,7 @@ namespace osuCrypto
                 auto& rrNot = r[choices[i] ^ 1];
                 auto& rr = r[choices[i]];
 
-                rrNot.randomize();
+                rrNot.randomize(prng);
                 rrNot.toBytes(hashBuff.data());
 
                 ep_map(hPoint, hashBuff.data(), int(pointSize));
@@ -110,7 +110,7 @@ namespace osuCrypto
         auto g = curve.getGenerator();
         RandomOracle ro(sizeof(block));
         auto pointSize = g.sizeBytes();
-
+        //std::cout << g << std::endl;
 
         Number sk(curve, prng);
 
@@ -133,7 +133,6 @@ namespace osuCrypto
             auto buffSize = curStep * pointSize * 2;
             chl.recv(buff.data(), buffSize);
             auto buffIter = buff.data();
-
 
             for (u64 k = 0; k < curStep; ++k, ++i)
             {
