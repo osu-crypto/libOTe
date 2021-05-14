@@ -47,14 +47,12 @@ namespace osuCrypto
         std::vector<std::thread> thrds(numThreads);
         std::vector<u8> sendBuff(messages.size() * pointSize);
         std::atomic<u32> remainingPK0s((u32)numThreads);
-        std::promise<void> PK0Prom;
-        std::future<void> PK0Furture(PK0Prom.get_future());
         std::vector<Rist25519> pC(nSndVals);
         auto cRecvFuture = socket.asyncRecv(pC.data(), pC.size()).share();
         block R;
 
         std::array<u8, RandomOracle::HashSize> comm, comm2;
-        socket.asyncRecv(comm);
+        auto commFuture = socket.asyncRecv(comm);
         auto RFuture = socket.asyncRecv(R).share();
 
         for (u64 t = 0; t < numThreads; ++t)
@@ -64,7 +62,7 @@ namespace osuCrypto
             thrds[t] = std::thread(
                 [t, numThreads, &messages, seed,
                 &sendBuff, &choices, cRecvFuture, &pC,
-                &remainingPK0s, &PK0Prom, nSndVals,&RFuture,&R]()
+                &remainingPK0s, &socket, nSndVals,&RFuture,&R]()
             {
 
                 auto mStart = t * messages.size() / numThreads;
@@ -114,7 +112,7 @@ namespace osuCrypto
                 }
 
                 if (--remainingPK0s == 0)
-                    PK0Prom.set_value();
+                    socket.asyncSend(std::move(sendBuff));
 
                 // resuse this space, not the data of PK0...
                 auto& gka = PK0;
@@ -139,14 +137,10 @@ namespace osuCrypto
             });
         }
 
-        PK0Furture.get();
-
-        socket.asyncSend(std::move(sendBuff));
-
         for (auto& thrd : thrds)
             thrd.join();
 
-        //block comm = *(block*)(cBuff.data() + nSndVals * pointSize);
+        commFuture.get();
         RandomOracle ro;
         ro.Update(R);
         ro.Final(comm2);
@@ -178,6 +172,7 @@ namespace osuCrypto
         pC.emplace_back(Rist25519::mulGenerator(alpha));
 
         for (u64 u = 1; u < nSndVals; u++)
+            // TODO: Faster to use hash to curve?
             pC.emplace_back(Rist25519::mulGenerator(Prime25519(prng)));
 
         socket.asyncSend(pC);
@@ -188,7 +183,7 @@ namespace osuCrypto
         std::vector<u8> comm(RandomOracle::HashSize);
         ro.Update(R);
         ro.Final(comm.data());
-        socket.asyncSend(std::move(comm));
+        socket.send(comm);
 
 
         for (u64 u = 1; u < nSndVals; u++)
