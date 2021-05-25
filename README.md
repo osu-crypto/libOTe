@@ -3,7 +3,7 @@
 
 <!-- [![Build Status](https://travis-ci.org/osu-crypto/libOTe.svg?branch=master)](https://travis-ci.org/osu-crypto/libOTe) -->
 
-A fast and portable C++14 library for Oblivious Transfer extension (OTe). The 
+A fast and portable C++17 library for Oblivious Transfer extension (OTe). The 
 primary design goal of this library to obtain *high performance* while being 
 *easy to use*.  This library currently implements:
  
@@ -22,7 +22,7 @@ primary design goal of this library to obtain *high performance* while being
 ## Introduction
  
 This library provides several different classes of OT protocols. First is the 
-base OT protocol of Naor Pinkas [NP01]. This protocol bootstraps all the other
+base OT protocol of [NP01, CO15, MR19]. These protocol bootstraps all the other
 OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2,
 1-out-of-N and K-out-of-N, both in the semi-honest and malicious settings.
 
@@ -100,91 +100,50 @@ expection that network IO in libOTe is performed in the background by a separate
  
 
  
-## Install
+## Build
  
 The library is *cross platform* and has been tested on Windows, Mac and Linux. 
-There is one mandatory dependency on [Boost 1.69](http://www.boost.org/) (networking),
+There is one mandatory dependency on [Boost 1.75](http://www.boost.org/) (networking),
 and two **optional dependencies** on [libsodium](https://doc.libsodium.org/) or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
 for Base OTs.
 The Moeller POPF Base OTs additionally require the `noclamp` option for Montgomery curves, which is currently only in a [fork](https://github.com/osu-crypto/libsodium) of libsodium.
-Any or all of these dependenies can be enabled. See below. 
-
+CMake and Python 3 are also required to build and visual studio 2019 is assumed on windows.
  
-### Windows
-
-In `Powershell`, this will set up the project
 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
-cd libOTe/cryptoTools/thirdparty/win
-getBoost.ps1 
-cd ../../..
-libOTe.sln
+cd libOTe
+python build.py setup boost
+python build.py -DENABLE_SODIUM=ON -DENABLE_ALL_OT=ON
 ```
-Not all protocols will be built by default. Which protocol are built is controlled by the `libOTe/config.h` file. Manually edit this file to enable the desired protocol.
+It is possible to build only the protocol(s) that are desired via cmake command. In addition, if boost is already installed, then `boost` can be ommitted from `python build.py setup boost`.
 
-To see all the command line options, execute the program `frontend.exe`.
-
-**Boost and visual studio 2017:**  If boost does not build with visual studio 2017 
-follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
-
-### Linux / Mac
- 
- In short, this will build the project 
-
+See the output of `python build.py` or `cmake .` for available compile options. For example, 
 ```
-git clone --recursive https://github.com/osu-crypto/libOTe.git
-cd libOTe/cryptoTools/thirdparty/linux
-bash boost.get
-cd ../../..
-cmake . -DENABLE_XXX=ON
-make
+python build.py -DENABLE_IKNP=ON
 ```
-where `ENABLE_XXX` should be replaced by `ENABLE_IKNP, ENABLE_KOS, ...` depending on which protocol(s) should be enabled. See the output of `cmake .` for a complete list. You will also need to enable one one of the base OT protocols (see below). The libraries will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed in 
-`libOTe/bin` To see all the command line options, execute the program 
- 
-`./bin/frontend_libOTe`
+will only build the [iknp04] protocol.
 
+The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
 
-**Enable Base OTs using:**
- * `cmake . -DENABLE_SODIUM=ON`: Build the library with integration to the 
-      [libsodium](https://doc.libsodium.org/) library. If libsodium is installed in a prefix, rather than globally, tell cmake where to look for it with
+**Enabling/Disabling [libsodium](https://doc.libsodium.org/) (for base OTs):**
+ * libsodium can be disabled by using the build commands
+```
+python build.py setup boost
+python build.py -DENABLE_IKNP=ON
+```
+This will disable many/all of the supported base OT protocols. In addition, you will need to manually enable the specific protocols you desire, eg as above.
+In the other direction, when enabling libsodium, if libsodium is installed in a prefix rather than globally tell cmake where to look for it with
 ```
 PKG_CONFIG_PATH=/path/to/folder_containing_libsodium.pc cmake . -DENABLE_SODIUM=ON
 ```
- * **Linux Only**: `cmake .  -DENABLE_SIMPLESTOT_ASM=ON`: Build the library with integration to the 
-      [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
-       library implementing a base OT.
 
-**Other Options:** Several other compile time options exists. See the output of `cmake .` for a complete list.
-
-
-**Note:** In the case boost is already installed, the steps 
-`cd libOTe/cryptoTools/thirdparty/linux; bash boost.get` can be skipped and CMake will attempt 
-to find them instead. Boost is found with the CMake findBoost package and libsodium
-is found with the `pkg_check_modules(libsodium)` command. If there is a version mismatch then you will still need to run the provided boost build script.
- 
-
+Installing libOTe is only partially supported. 
 
 ### Linking
 
- You can either `make install` on linux or link libOTe's source tree. In the latter 
- case, you will need to include the following:
-
-1) .../libOTe
-2) .../libOTe/cryptoTools
-3) .../libOTe/cryptoTools/thirdparty/linux/boost
-
-and link:
-1) .../libOTe/bin/liblibOTe.a
-2) .../libOTe/bin/libcryptoTools.a
-3) .../libOTe/bin/libSimplestOT.a    <i>(if enabled)</i>
-3) .../libOTe/bin/libKyberOT.a       <i>(if enabled)</i>
-4) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_system.a
-5) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_thread.a
-
-**Note:** On windows the linking paths follow a similar pattern.
+The helper scripts `cmake/loadCacheCar.cmake, cmake/libOTeHeler.cmake` can be used to find all dependencies when *not* installing libOTe. See [libPSI](https://github.com/osu-crypto/libPSI/blob/8f6d99106b18126b19b55c4fdc43402209a50d02/CMakeLists.txt#L123) for an example. In addition, the libOTe build script/cmake will output many of the dependency while the remaining will be located in the build directory.
 
 ## Help
  

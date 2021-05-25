@@ -4,10 +4,10 @@ if (POLICY CMP0048)
   cmake_policy(SET CMP0048 NEW)
 endif (POLICY CMP0048)
 
-project(cryptoTools VERSION 1.3.0)
+project(cryptoTools VERSION 1.7.0)
 
 project(libOTe)
-set(libOTe_VERSION 1.2.0)
+set(libOTe_VERSION 1.3.0)
 
 
 if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
@@ -57,7 +57,7 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
        AND NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug"
        AND NOT "${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebInfo" )
 
-        message(FATAL_ERROR ": Unknown build type - \${CMAKE_BUILD_TYPE}=${CMAKE_BUILD_TYPE}.  Please use one of Debug, Release, or RelWithDebInfo. e.g. call\n\tcmake . -DCMAKE_BUILD_TYPE=Release\n" )
+        message(WARNING ": Unknown build type - \${CMAKE_BUILD_TYPE}=${CMAKE_BUILD_TYPE}.  Please use one of Debug, Release, or RelWithDebInfo. e.g. call\n\tcmake . -DCMAKE_BUILD_TYPE=Release\n" )
 	endif()
 endif()
 
@@ -89,6 +89,7 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_KKRT           ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_RR             ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	set(ENABLE_AKN            ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
+	set(ENABLE_SILENT_VOLE    ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 	unset(ENABLE_ALL_OT CACHE)
 endif()
 
@@ -112,10 +113,20 @@ option(ENABLE_RR             "Build the RR 1-oo-N OT-Ext protocol." OFF)
 
 option(ENABLE_AKN            "Build the RR ~k-oo-N OT-Ext protocol." OFF)
 
-option(OTE_KOS_FIAT_SHAMIR "Build the library withing Fiat Shamir for KOS" OFF)
+option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
 
-set(OTE_KOS_HASH "OTE_DAVIE_MEYER_AES" CACHE STRING "Hashing technique for KOS")
-set_property(CACHE OTE_KOS_HASH PROPERTY STRINGS OTE_RANDOM_ORACLE OTE_DAVIE_MEYER_AES)
+
+if(NOT UNIX OR APPLE OR MSVC)
+	if(ENABLE_SIMPLESTOT_ASM)
+		message("ENABLE_SIMPLESTOT_ASM only supported on Linux")
+		set(ENABLE_SIMPLESTOT_ASM OFF CACHE BOOL "" FORCE)
+	endif()
+	if(ENABLE_MR_KYBER)
+		message("ENABLE_MR_KYBER only supported on Linux")
+		set(ENABLE_MR_KYBER OFF  CACHE BOOL "" FORCE)
+	endif()
+
+endif()
 
 message(STATUS "General Options\n=======================================================")
 message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF\n\n")
@@ -142,6 +153,9 @@ message(STATUS "1-out-of-N OT Extension protocols\n=============================
 message(STATUS "Option: ENABLE_OOS            = ${ENABLE_OOS}")
 message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}")
 message(STATUS "Option: ENABLE_RR             = ${ENABLE_RR}\n\n")
+
+message(STATUS "Vole protocols\n=======================================================")
+message(STATUS "Option: ENABLE_SILENT_VOLE    = ${ENABLE_SILENT_VOLE}\n\n")
 
 
 #############################################
@@ -172,9 +186,9 @@ if (ENABLE_POPF_MOELLER AND NOT SODIUM_MONTGOMERY)
     message(FATAL_ERROR "ENABLE_POPF_MOELLER requires libsodium to support Montgomery curve noclamp operations")
 endif()
 
+
+file(REMOVE ${CMAKE_CURRENT_LIST_DIR}/libOTe/config.h)
 configure_file(libOTe/config.h.in libOTe/config.h)
-# Support out-of-source builds.
-# include_directories(${CMAKE_BINARY_DIR})
 
 
 #############################################

@@ -57,6 +57,9 @@
 // build the library with RR approx k-oo-N OT-ext enabled
 #cmakedefine ENABLE_AKN @ENABLE_AKN@
 
+// build the library with silent vole enabled
+#cmakedefine ENABLE_SILENT_VOLE @ENABLE_SILENT_VOLE@
+
 
 #if defined(ENABLE_SIMPLESTOT_ASM) && defined(_MSC_VER)
     #undef ENABLE_SIMPLESTOT_ASM

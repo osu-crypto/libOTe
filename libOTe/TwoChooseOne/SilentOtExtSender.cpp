@@ -1,16 +1,7 @@
 #include "libOTe/TwoChooseOne/SilentOtExtSender.h"
-#ifdef ENABLE_SILENTOT
+#include "libOTe/Tools/LDPC/LdpcEncoder.h"
 
-#include "libOTe/Tools/Tools.h"
-#include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
-#include <libOTe/Tools/bitpolymul.h>
-#include "cryptoTools/Common/Log.h"
-#include "cryptoTools/Common/ThreadBarrier.h"
-#include "libOTe/Base/BaseOT.h"
-#include <libOTe/TwoChooseOne/IknpOtExtSender.h>
-#include <cryptoTools/Crypto/RandomOracle.h>
-#include "libOTe/Tools/LDPC/LdpcSampler.h"
-#include "libOTe/Vole/NoisyVoleReceiver.h"
+#if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE) 
 
 namespace osuCrypto
 {
@@ -38,6 +29,56 @@ namespace osuCrypto
         return roundUpTo(ret, 8);
     }
 
+
+    void SilverConfigure(
+        u64 numOTs, u64 secParam,
+        MultType mMultType,
+        u64& mRequestedNumOTs,
+        u64& mNumPartitions,
+        u64& mSizePer,
+        u64& mN2,
+        u64& mN,
+        u64& gap,
+        S1DiagRegRepEncoder& mEncoder)
+    {
+        mRequestedNumOTs = numOTs;
+        auto mScaler = 2;
+
+        auto code = mMultType == MultType::slv11 ?
+            LdpcDiagRegRepeaterEncoder::Weight11 :
+            LdpcDiagRegRepeaterEncoder::Weight5;
+
+        gap = LdpcDiagRegRepeaterEncoder::gap(code);
+        u64 colWeight = LdpcDiagRegRepeaterEncoder::weight(code);
+
+        mNumPartitions = getPartitions(mScaler, numOTs, secParam);
+        mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
+        mN2 = mSizePer * mNumPartitions + gap;
+        mN = mN2 / mScaler;
+
+        if (mN2 % mScaler)
+            throw RTE_LOC;
+
+        mEncoder.mL.init(mN, colWeight);
+        mEncoder.mR.init(mN, code, true);
+    }
+}
+#endif
+
+#ifdef ENABLE_SILENTOT
+
+#include "libOTe/Tools/Tools.h"
+#include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
+#include <libOTe/Tools/bitpolymul.h>
+#include "cryptoTools/Common/Log.h"
+#include "cryptoTools/Common/ThreadBarrier.h"
+#include "libOTe/Base/BaseOT.h"
+#include <libOTe/TwoChooseOne/IknpOtExtSender.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
+#include "libOTe/Vole/NoisyVoleReceiver.h"
+
+namespace osuCrypto
+{
 
     // sets the IKNP base OTs that are then used to extend
     void SilentOtExtSender::setBaseOts(
@@ -160,18 +201,6 @@ namespace osuCrypto
         std::copy(gapOt.begin(), gapOt.end(), mGapOts.begin());
         std::copy(malOt.begin(), malOt.end(), mMalCheckOts.begin());
     }
-
-    void SilverConfigure(
-        u64 numOTs, u64 secParam,
-        MultType mMultType,
-        u64& mRequestedNumOTs,
-        u64& mNumPartitions,
-        u64& mSizePer,
-        u64& mN2,
-        u64& mN,
-        u64& gap,
-        S1DiagRegRepEncoder& mEncoder);
-
     void QuasiCyclicConfigure(
         u64 numOTs, u64 secParam,
         u64 scaler,

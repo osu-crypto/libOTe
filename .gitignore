@@ -21,6 +21,9 @@ CMakeSettings.json
 libOTe/config.h
 frontend/frontend_libOTe
 
+.DS_Store
+*/.DS_Store
+
 lib/
 CMakeSettings.json
 

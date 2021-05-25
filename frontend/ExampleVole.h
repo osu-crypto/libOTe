@@ -11,7 +11,7 @@ namespace osuCrypto
     //template<typename OtExtSender, typename OtExtRecver>
     void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
     {
-#ifdef ENABLE_SILENTOT
+#ifdef ENABLE_SILENT_VOLE
 
         if (numOTs == 0)
             numOTs = 1 << 20;

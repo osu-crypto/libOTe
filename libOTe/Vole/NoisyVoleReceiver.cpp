@@ -1,4 +1,6 @@
 #include "NoisyVoleReceiver.h"
+
+#if defined(ENABLE_SILENT_VOLE) || defined(ENABLE_SILENTOT)
 #include "cryptoTools/Common/BitIterator.h"
 #include "cryptoTools/Common/Matrix.h"
 
@@ -78,3 +80,4 @@ namespace osuCrypto
         chl.asyncSend(std::move(msg));
     }
 }
+#endif

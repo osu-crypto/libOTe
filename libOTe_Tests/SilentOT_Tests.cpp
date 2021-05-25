@@ -183,6 +183,9 @@ void Tools_modp_test(const CLP& cmd)
 
 #ifdef ENABLE_SILENTOT
 namespace {
+
+#ifdef ENABLE_SILENTOT
+
     void fakeBase(u64 n,
         u64 s,
         u64 threads,
@@ -209,7 +212,6 @@ namespace {
             recver.setSilentBaseOts(msg);
         }
     }
-
 
     void checkRandom(
         span<block> messages, span<std::array<block, 2>>messages2,
@@ -337,6 +339,8 @@ namespace {
         if (passed == false)
             throw RTE_LOC;
     }
+
+#endif
 }
 #endif
 

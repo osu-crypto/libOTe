@@ -1,4 +1,6 @@
 #include "NoisyVoleSender.h"
+
+#if defined(ENABLE_SILENT_VOLE) || defined(ENABLE_SILENTOT)
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Matrix.h"
 
@@ -79,3 +81,4 @@ namespace osuCrypto
     }
 
 }
+#endif

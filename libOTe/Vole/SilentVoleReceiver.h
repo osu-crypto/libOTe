@@ -1,6 +1,6 @@
 #pragma once
 #include <libOTe/config.h>
-#ifdef ENABLE_SILENTOT
+#ifdef ENABLE_SILENT_VOLE
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Network/Channel.h>
