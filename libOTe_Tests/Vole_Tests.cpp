@@ -14,17 +14,6 @@ using namespace oc;
 #include <libOTe/config.h>
 
 
-
-
-namespace {
-    void throwDisabled()
-    {
-        throw UnitTestSkipped(
-            "ENABLE_SILENT_VOLE not defined. "
-        );
-    }
-}
-
 #if defined(ENABLE_SILENT_VOLE) || defined(ENABLE_SILENTOT)
 
 void Vole_Noisy_test(const oc::CLP& cmd)
@@ -78,7 +67,12 @@ void Vole_Noisy_test(const oc::CLP& cmd)
 }
 
 #else 
-void Vole_Noisy_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Noisy_test(const oc::CLP& cmd)
+    {
+        throw UnitTestSkipped(
+            "ENABLE_SILENT_VOLE not defined. "
+        );
+    }
 #endif
 
 #ifdef ENABLE_SILENT_VOLE
@@ -324,6 +318,16 @@ void Vole_Silent_mal_test(const oc::CLP& cmd)
 }
 
 #else
+
+namespace {
+    void throwDisabled()
+    {
+        throw UnitTestSkipped(
+            "ENABLE_SILENT_VOLE not defined. "
+        );
+    }
+}
+
 
 void Vole_Silent_test(const oc::CLP& cmd){throwDisabled();}
 void Vole_Silent_paramSweep_test(const oc::CLP& cmd){throwDisabled();}

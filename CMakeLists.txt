@@ -112,7 +112,7 @@ option(ENABLE_AKN            "Build the RR ~k-oo-N OT-Ext protocol." OFF)
 option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
 
 
-if(NOT UNIX)
+if(NOT UNIX OR APPLE OR MSVC)
 	if(ENABLE_SIMPLESTOT_ASM)
 		message("ENABLE_SIMPLESTOT_ASM only supported on Linux")
 		set(ENABLE_SIMPLESTOT_ASM OFF CACHE BOOL "" FORCE)
