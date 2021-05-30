@@ -81,7 +81,7 @@ namespace tests_libOTe
             }
         }
 #else
-        throw UnitTestSkipped("NaorPinkas OT not enabled. Requires libsodium");
+        throw UnitTestSkipped("NaorPinkas OT not enabled. Requires Relic or Miracl");
 #endif
     }
 
@@ -128,7 +128,7 @@ namespace tests_libOTe
             }
         }
 #else
-        throw UnitTestSkipped("Simplest OT not enabled. Requires libsodium or the simplest OT ASM library");
+        throw UnitTestSkipped("Simplest OT not enabled. Requires Relic or the simplest OT ASM library");
 #endif
     }
 
@@ -240,7 +240,7 @@ namespace tests_libOTe
             }
         }
 #else
-throw UnitTestSkipped("MasnyRindal not enabled. Requires libsodium.");
+throw UnitTestSkipped("MasnyRindal not enabled. Requires Relic.");
 #endif
     }
 
@@ -286,7 +286,7 @@ throw UnitTestSkipped("MasnyRindal not enabled. Requires libsodium.");
             }
         }
 #else
-throw UnitTestSkipped("MasnyRindal not enabled. Requires libsodium.");
+throw UnitTestSkipped("MasnyRindal not enabled. Requires Relic.");
 #endif
     }
 

@@ -111,6 +111,54 @@ if(NOT Boost_FOUND)
 endif()
 
 
+#############################################
+#                 Link Miracl               #
+#############################################
+
+
+if (ENABLE_MIRACL)
+
+    find_library(
+      MIRACL_LIB
+      NAMES miracl
+      HINTS "${Miracl_Dirs}/miracl/source/")
+
+    # if we cant find it, throw an error
+    if(NOT MIRACL_LIB)
+      Message(${MIRACL_LIB})
+      message(FATAL_ERROR "Failed to find miracl at " ${Miracl_Dirs})
+    else()
+      message("Miracl at  ${MIRACL_LIB}")
+    endif()
+
+    target_link_libraries(libPSI  ${MIRACL_LIB} )
+
+endif()
+
+
+
+
+
+## Relic
+###########################################################################
+
+
+if (ENABLE_RELIC)
+  find_package(Relic REQUIRED)
+
+  if (NOT Relic_FOUND)
+    message(FATAL_ERROR "Failed to find Relic")
+  endif (NOT Relic_FOUND)
+
+  message(STATUS "Relic_LIB:  ${RELIC_LIBRARIES} ${RLC_LIBRARY}")
+  message(STATUS "Relic_inc:  ${RELIC_INCLUDE_DIR} ${RLC_INCLUDE_DIR}\n")
+
+  target_include_directories(libPSI PUBLIC ${RELIC_INCLUDE_DIR} ${RLC_INCLUDE_DIR})
+  target_link_libraries(libPSI ${RELIC_LIBRARIES} ${RLC_LIBRARY})
+
+
+endif (ENABLE_RELIC)
+
 ## WolfSSL
 ###########################################################################
 

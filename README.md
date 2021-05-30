@@ -104,7 +104,8 @@ expection that network IO in libOTe is performed in the background by a separate
  
 The library is *cross platform* and has been tested on Windows, Mac and Linux. 
 There is one mandatory dependency on [Boost 1.75](http://www.boost.org/) (networking),
-and two **optional dependencies** on [libsodium](https://doc.libsodium.org/) or
+and three **optional dependencies** on [libsodium](https://doc.libsodium.org/),
+[Relic](https://github.com/relic-toolkit/relic), or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
 for Base OTs.
 The Moeller POPF Base OTs additionally require the `noclamp` option for Montgomery curves, which is currently only in a [fork](https://github.com/osu-crypto/libsodium) of libsodium.
@@ -114,10 +115,10 @@ CMake and Python 3 are also required to build and visual studio 2019 is assumed 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
 cd libOTe
-python build.py setup boost
-python build.py -DENABLE_SODIUM=ON -DENABLE_ALL_OT=ON
+python build.py setup boost relic
+python build.py -DENABLE_RELIC=ON -DENABLE_SODIUM=ON -DENABLE_ALL_OT=ON
 ```
-It is possible to build only the protocol(s) that are desired via cmake command. In addition, if boost is already installed, then `boost` can be ommitted from `python build.py setup boost`.
+It is possible to build only the protocol(s) that are desired via cmake command. In addition, if boost and/or relic are already installed, then `boost` or `relic` can be ommitted from `python build.py setup boost relic`.
 
 See the output of `python build.py` or `cmake .` for available compile options. For example, 
 ```
@@ -127,17 +128,22 @@ will only build the [iknp04] protocol.
 
 The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
 
-**Enabling/Disabling [libsodium](https://doc.libsodium.org/) (for base OTs):**
- * libsodium can be disabled by using the build commands
+**Enabling/Disabling [Relic](https://github.com/relic-toolkit/relic) (for base OTs):**
+ * Relic can be disabled by using the build commands
 ```
 python build.py setup boost
-python build.py -DENABLE_IKNP=ON
+python build.py -DENABLE_SODIUM=ON -DENABLE_IKNP=ON
 ```
-This will disable many/all of the supported base OT protocols. In addition, you will need to manually enable the specific protocols you desire, eg as above.
+
+**Enabling/Disabling [libsodium](https://doc.libsodium.org/) (for base OTs):**
+ * libsodium can similarly be disabled by not passing `-DENABLE_SODIUM=ON`.
 In the other direction, when enabling libsodium, if libsodium is installed in a prefix rather than globally tell cmake where to look for it with
 ```
 PKG_CONFIG_PATH=/path/to/folder_containing_libsodium.pc cmake . -DENABLE_SODIUM=ON
 ```
+
+Disabling one/both of these libraries will disable many/all of the supported base OT protocols.
+In addition, you will need to manually enable the specific protocols you desire, eg `-DENABLE_IKNP=ON` as above.
 
 Installing libOTe is only partially supported. 
 
