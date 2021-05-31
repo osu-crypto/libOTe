@@ -17,7 +17,7 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
-        using namespace default_curve;
+        using namespace DefaultCurve;
         Curve curve;
 
         u64 n = msg.size();
@@ -69,7 +69,7 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
-        using namespace default_curve;
+        using namespace DefaultCurve;
         Curve curve;
 
         u64 n = msg.size();

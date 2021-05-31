@@ -11,7 +11,7 @@ namespace osuCrypto
 {
     class FeistelMulRistPopf
     {
-        using Point = default_curve::Point;
+        using Point = DefaultCurve::Point;
 
     public:
         struct PopfFunc
@@ -80,7 +80,7 @@ namespace osuCrypto
 
     public:
         typedef FeistelMulRistPopf ConstructedPopf;
-        const static size_t hashLength = default_curve::Point::fromHashLength;
+        const static size_t hashLength = DefaultCurve::Point::fromHashLength;
         DomainSepFeistelMulRistPopf() : RandomOracle(hashLength) {}
 
         ConstructedPopf construct()

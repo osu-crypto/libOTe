@@ -36,7 +36,7 @@ namespace osuCrypto
         Channel& socket,
         u64 numThreads)
     {
-        using namespace default_curve;
+        using namespace DefaultCurve;
         Curve curve;
 
         // should generalize to 1 out of N by changing this. But isn't tested...
@@ -153,7 +153,7 @@ namespace osuCrypto
         Channel& socket,
         u64 numThreads)
     {
-        using namespace default_curve;
+        using namespace DefaultCurve;
         Curve curve;
 
         block R = prng.get<block>();

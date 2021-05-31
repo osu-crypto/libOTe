@@ -14,7 +14,7 @@
 namespace osuCrypto
 {
     // Declare aliases for the default elliptic curve implementation.
-    namespace default_curve
+    namespace DefaultCurve
     {
 #if defined(ENABLE_SODIUM)
         using Point = Sodium::Rist25519;

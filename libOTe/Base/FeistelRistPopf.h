@@ -11,7 +11,7 @@ namespace osuCrypto
 {
     class FeistelRistPopf
     {
-        using Point = default_curve::Point;
+        using Point = DefaultCurve::Point;
         friend class DomainSepFeistelRistPopf;
 
         const static size_t hashLength =
@@ -91,7 +91,7 @@ namespace osuCrypto
     {
         using RandomOracle::Final;
         using RandomOracle::outputLength;
-        using Point = default_curve::Point;
+        using Point = DefaultCurve::Point;
 
     public:
         typedef FeistelRistPopf ConstructedPopf;

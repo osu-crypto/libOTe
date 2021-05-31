@@ -24,7 +24,7 @@ namespace osuCrypto
         PRNG & prng,
         Channel & chl)
     {
-        using namespace default_curve;
+        using namespace DefaultCurve;
         Curve curve;
 
         auto n = choices.size();
@@ -80,7 +80,7 @@ namespace osuCrypto
 
     void MasnyRindal::send(span<std::array<block, 2>> messages, PRNG & prng, Channel & chl)
     {
-        using namespace default_curve;
+        using namespace DefaultCurve;
         Curve curve;
 
         auto n = static_cast<u64>(messages.size());

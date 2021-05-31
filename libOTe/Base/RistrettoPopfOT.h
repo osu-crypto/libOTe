@@ -21,9 +21,9 @@ namespace osuCrypto
     template<typename DSPopf>
     class RistrettoPopfOT : public OtReceiver, public OtSender
     {
-        using Curve = default_curve::Curve;
-        using Point = default_curve::Point;
-        using Number = default_curve::Number;
+        using Curve = DefaultCurve::Curve;
+        using Point = DefaultCurve::Point;
+        using Number = DefaultCurve::Number;
 
     public:
         typedef DSPopf PopfFactory;
