@@ -111,34 +111,6 @@ if(NOT Boost_FOUND)
 endif()
 
 
-#############################################
-#                 Link Miracl               #
-#############################################
-
-
-if (ENABLE_MIRACL)
-
-    find_library(
-      MIRACL_LIB
-      NAMES miracl
-      HINTS "${Miracl_Dirs}/miracl/source/")
-
-    # if we cant find it, throw an error
-    if(NOT MIRACL_LIB)
-      Message(${MIRACL_LIB})
-      message(FATAL_ERROR "Failed to find miracl at " ${Miracl_Dirs})
-    else()
-      message("Miracl at  ${MIRACL_LIB}")
-    endif()
-
-    target_link_libraries(libPSI  ${MIRACL_LIB} )
-
-endif()
-
-
-
-
-
 ## Relic
 ###########################################################################
 

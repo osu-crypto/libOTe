@@ -11,8 +11,6 @@
 #include <cryptoTools/Crypto/SodiumCurve.h>
 #elif defined(ENABLE_RELIC)
 #include <cryptoTools/Crypto/RCurve.h>
-#elif defined(ENABLE_MIRACL)
-#include <cryptoTools/Crypto/Curve.h>
 #endif
 
 namespace osuCrypto
@@ -26,10 +24,6 @@ namespace osuCrypto
         using Curve = REllipticCurve;
         using Point = REccPoint;
         using Number = REccNumber;
-#elif defined(ENABLE_MIRACL)
-        using Curve = EllipticCurve;
-        using Point = EccPoint;
-        using Number = EccNumber;
 #endif
     }
 
@@ -44,17 +38,9 @@ namespace osuCrypto
 #ifndef ENABLE_SODIUM
         Curve curve;
 #endif
-#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
         const auto pointSize = Point::size;
         Point A;
         std::array<Point, 2> B;
-#else
-        Point g = curve.getGenerator();
-
-        const auto pointSize = g.sizeBytes();
-        Point A(curve);
-        std::array<Point, 2> B{ curve, curve };
-#endif
 
         block comm = oc::ZeroBlock, seed;
         std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block));
@@ -72,13 +58,8 @@ namespace osuCrypto
         std::vector<Number> b; b.reserve(n);
         for (u64 i = 0; i < n; ++i)
         {
-#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
             b.emplace_back(prng);
             B[0] = Point::mulGenerator(b[i]);
-#else
-            b.emplace_back(curve, prng);
-            B[0] = g * b[i];
-#endif
             B[1] = A + B[0];
 
             B[choices[i]].toBytes(&buff[pointSize * i]);
@@ -118,19 +99,10 @@ namespace osuCrypto
 #ifndef ENABLE_SODIUM
         Curve curve;
 #endif
-#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
         const auto pointSize = Point::size;
         Number a(prng);
         Point A = Point::mulGenerator(a);
         Point B;
-#else
-        Point g = curve.getGenerator();
-
-        const auto pointSize = g.sizeBytes();
-        Number a(curve, prng);
-        Point A = g * a;
-        Point B(curve);
-#endif
 
         std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block)), hashBuff(pointSize);
         A.toBytes(buff.data());

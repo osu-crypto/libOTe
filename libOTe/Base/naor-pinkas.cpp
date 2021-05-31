@@ -10,8 +10,6 @@
 #include <cryptoTools/Crypto/SodiumCurve.h>
 #elif defined(ENABLE_RELIC)
 #include <cryptoTools/Crypto/RCurve.h>
-#elif defined(ENABLE_MIRACL)
-#include <cryptoTools/Crypto/Curve.h>
 #endif
 
 #define PARALLEL
@@ -27,18 +25,11 @@ namespace osuCrypto
     {
 #if defined(ENABLE_SODIUM)
         using Point = Sodium::Rist25519;
-        using Brick = Point;
         using Number = Sodium::Prime25519;
 #elif defined(ENABLE_RELIC)
         using Curve = REllipticCurve;
         using Point = REccPoint;
-        using Brick = Point;
         using Number = REccNumber;
-#elif defined(ENABLE_MIRACL)
-        using Curve = EllipticCurve;
-        using Point = EccPoint;
-        using Brick = EccBrick;
-        using Number = EccNumber;
 #endif
     }
 
@@ -68,11 +59,7 @@ namespace osuCrypto
 #ifndef ENABLE_SODIUM
         Curve curve;
 #endif
-#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
         const auto pointSize = Point::size;
-#else
-        const auto pointSize = curve.getGenerator().sizeBytes;
-#endif
 
         std::vector<std::thread> thrds(numThreads);
         std::vector<u8> sendBuff(messages.size() * pointSize);
@@ -104,10 +91,6 @@ namespace osuCrypto
 #ifndef ENABLE_SODIUM
                 Curve curve;
 #endif
-#if !(defined(ENABLE_SODIUM) || defined(ENABLE_RELIC))
-                Point g = curve.getGenerator();
-                Brick bg(g);
-#endif
 
                 std::vector<Number> pK;
                 std::vector<Point>
@@ -120,30 +103,14 @@ namespace osuCrypto
 
                 for (u64 i = mStart, j = 0; i < mEnd; ++i, ++j)
                 {
-#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
                     pK.emplace_back(prng);
                     PK_sigma.emplace_back(Point::mulGenerator(pK[j]));
-#else
-                    // get a random value from Z_p
-                    pK.emplace_back(curve, prng);
-
-                    // using brickexp which has the base of g, compute
-                    //
-                    //      PK_sigma[i] = g ^ pK[i]
-                    //
-                    // where pK[i] is just a random number in Z_p
-                    PK_sigma.emplace_back(bg * pK[j]);
-#endif
                 }
 
                 cRecvFuture.get();
                 for (auto u = 0; u < nSndVals; u++)
                 {
-#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
                     pC.emplace_back();
-#else
-                    pC.emplace_back(curve);
-#endif
                     pC[u].fromBytes(&cBuff[pointSize * u]);
                 }
 
@@ -164,10 +131,8 @@ namespace osuCrypto
                 RandomOracle ro(sizeof(block));
 
                 std::vector<u8> hashBuff(pointSize);
-                Brick bc(pC[0]);
 
                 RFuture.get();
-
 
                 for (u64 i = mStart, j = 0; i < mEnd; ++i, ++j)
                 {
@@ -220,17 +185,9 @@ namespace osuCrypto
 #ifndef ENABLE_SODIUM
         Curve curve;
 #endif
-#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
         const auto pointSize = Point::size;
         Number alpha(prng);
         pC.emplace_back(Point::mulGenerator(alpha));
-#else
-        const Point g = curve.getGenerator();
-
-        const auto pointSize = g.sizeBytes();
-        Number alpha(curve, prng);
-        pC.emplace_back(g * alpha);
-#endif
 
         std::vector<u8> sendBuff(nSndVals * pointSize);
         pC[0].toBytes(sendBuff.data());
@@ -238,11 +195,7 @@ namespace osuCrypto
         for (u64 u = 1; u < nSndVals; u++)
         {
             // TODO: Faster to use hash to curve to randomize?
-#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
             pC.emplace_back(Point::mulGenerator(Number(prng)));
-#else
-            pC.emplace_back(g * Number(curve, prng));
-#endif
             pC[u].toBytes(&sendBuff[pointSize * u]);
         }
 
@@ -273,19 +226,9 @@ namespace osuCrypto
 #ifndef ENABLE_SODIUM
                 Curve curve;
 #endif
-#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
                 Point pPK0;
                 const Number& alpha2 = alpha;
                 const std::vector<Point>& c = pC;
-#else
-                Point pPK0(curve);
-                Number alpha2(curve, alpha);
-
-                std::vector<Point> c;
-                c.reserve(nSndVals);
-                for (u64 i = 0; i < nSndVals; ++i)
-                    c.emplace_back(curve, pC[i]);
-#endif
 
 #ifndef ENABLE_SODIUM
                 std::vector<u8> hashInBuff(pointSize);
