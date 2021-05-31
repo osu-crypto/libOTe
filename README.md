@@ -18,6 +18,7 @@ primary design goal of this library to obtain *high performance* while being
 * The malicious secure 1-out-of-2 base OT [NP01].
 * The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
 * The malicious secure 1-out-of-2 base OT [[MR19]](https://eprint.iacr.org/2019/706.pdf) 
+* Several malicious secure batched 1-out-of-2 base OTs from [[MRR21]](https://eprint.iacr.org/2021/682)
  
 ## Introduction
  
@@ -137,7 +138,7 @@ python build.py -DENABLE_SODIUM=ON -DENABLE_IKNP=ON
 
 **Enabling/Disabling [libsodium](https://doc.libsodium.org/) (for base OTs):**
  * libsodium can similarly be disabled by not passing `-DENABLE_SODIUM=ON`.
-In the other direction, when enabling libsodium, if libsodium is installed in a prefix rather than globally tell cmake where to look for it with
+In the other direction, when enabling libsodium, if libsodium is installed in a prefix rather than globally, tell cmake where to look for it with
 ```
 PKG_CONFIG_PATH=/path/to/folder_containing_libsodium.pc cmake . -DENABLE_SODIUM=ON
 ```
