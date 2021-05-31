@@ -18,32 +18,31 @@ namespace osuCrypto
         Channel& chl)
     {
         using namespace default_curve;
+        Curve curve;
 
         u64 n = msg.size();
 
-        Curve curve;
-        const auto pointSize = Point::size;
-        Point A;
-        std::array<Point, 2> B;
+        u8 recvBuff[Point::size + sizeof(block)];
+        chl.recv(recvBuff, Point::size + mUniformOTs * sizeof(block));
 
-        block comm = oc::ZeroBlock, seed;
-        std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block));
-        chl.recv(buff.data(), buff.size());
-        A.fromBytes(buff.data());
+        block comm, seed;
+        Point A;
+        A.fromBytes(recvBuff);
 
         if (mUniformOTs)
-            memcpy(&comm, &buff[pointSize], sizeof(block));
+            memcpy(&comm, recvBuff + Point::size, sizeof(block));
 
-        buff.resize(pointSize * n);
+        std::vector<u8> buff(Point::size * n);
 
         std::vector<Number> b; b.reserve(n);
+        std::array<Point, 2> B;
         for (u64 i = 0; i < n; ++i)
         {
             b.emplace_back(prng);
             B[0] = Point::mulGenerator(b[i]);
             B[1] = A + B[0];
 
-            B[choices[i]].toBytes(&buff[pointSize * i]);
+            B[choices[i]].toBytes(&buff[Point::size * i]);
         }
 
         chl.asyncSend(std::move(buff));
@@ -71,17 +70,16 @@ namespace osuCrypto
         Channel& chl)
     {
         using namespace default_curve;
+        Curve curve;
 
         u64 n = msg.size();
 
-        Curve curve;
-        const auto pointSize = Point::size;
         Number a(prng);
         Point A = Point::mulGenerator(a);
         Point B;
 
-        std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block));
-        A.toBytes(buff.data());
+        u8 sendBuff[Point::size + sizeof(block)];
+        A.toBytes(sendBuff);
 
         block seed;
         if (mUniformOTs)
@@ -89,12 +87,12 @@ namespace osuCrypto
             // commit to the seed
             seed = prng.get<block>();
             auto comm = mAesFixedKey.ecbEncBlock(seed) ^ seed;
-            memcpy(&buff[pointSize], &comm, sizeof(block));
+            memcpy(sendBuff + Point::size, &comm, sizeof(block));
         }
 
-        chl.asyncSend(std::move(buff));
+        chl.asyncSend(sendBuff, Point::size + mUniformOTs * sizeof(block));
 
-        buff.resize(pointSize * n);
+        std::vector<u8> buff(Point::size * n);
         chl.recv(buff.data(), buff.size());
 
         if (mUniformOTs)
@@ -106,7 +104,7 @@ namespace osuCrypto
         A *= a;
         for (u64 i = 0; i < n; ++i)
         {
-            B.fromBytes(&buff[pointSize * i]);
+            B.fromBytes(&buff[Point::size * i]);
 
             B *= a;
             RandomOracle ro(sizeof(block));

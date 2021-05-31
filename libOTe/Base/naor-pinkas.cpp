@@ -37,10 +37,10 @@ namespace osuCrypto
         u64 numThreads)
     {
         using namespace default_curve;
-
-        const auto nSndVals(2);
-
         Curve curve;
+
+        // should generalize to 1 out of N by changing this. But isn't tested...
+        const auto nSndVals(2);
         const auto pointSize = Point::size;
 
         std::vector<std::thread> thrds(numThreads);
@@ -60,7 +60,7 @@ namespace osuCrypto
             auto seed = prng.get<block>();
 
             thrds[t] = std::thread(
-                [t, numThreads, &messages, seed, pointSize,
+                [t, numThreads, &messages, seed,
                 &sendBuff, &choices, cRecvFuture, &cBuff,
                 &remainingPK0s, &socket, nSndVals,&RFuture,&R]()
             {
@@ -83,7 +83,14 @@ namespace osuCrypto
 
                 for (u64 i = mStart, j = 0; i < mEnd; ++i, ++j)
                 {
+                    // get a random value from Z_p
                     pK.emplace_back(prng);
+
+                    // compute
+                    //
+                    //      PK_sigma[i] = g ^ pK[i]
+                    //
+                    // where pK[i] is just a random number in Z_p
                     PK_sigma.emplace_back(Point::mulGenerator(pK[j]));
                 }
 
@@ -147,6 +154,7 @@ namespace osuCrypto
         u64 numThreads)
     {
         using namespace default_curve;
+        Curve curve;
 
         block R = prng.get<block>();
         // one out of nSndVals OT.
@@ -154,12 +162,11 @@ namespace osuCrypto
         std::vector<std::thread> thrds(numThreads);
         //auto seed = prng.get<block>();
 
+        Number alpha(prng);
+        const auto pointSize = Point::size;
         std::vector<Point> pC;
         pC.reserve(nSndVals);
 
-        Curve curve;
-        const auto pointSize = Point::size;
-        Number alpha(prng);
         pC.emplace_back(Point::mulGenerator(alpha));
 
         std::vector<u8> sendBuff(nSndVals * pointSize);
@@ -198,8 +205,6 @@ namespace osuCrypto
             {
                 Curve curve;
                 Point pPK0;
-                const Number& alpha2 = alpha;
-                const std::vector<Point>& c = pC;
 
                 RandomOracle ro(sizeof(block));
                 recvFuture.get();
@@ -215,7 +220,7 @@ namespace osuCrypto
                 {
 
                     pPK0.fromBytes(&buff[pointSize * i]);
-                    pPK0 *= alpha2;
+                    pPK0 *= alpha;
 
 
                     auto nounce = i * nSndVals;
@@ -227,7 +232,7 @@ namespace osuCrypto
 
                     for (u64 u = 1; u < nSndVals; u++)
                     {
-                        Point fetmp = c[u] - pPK0;
+                        Point fetmp = pC[u] - pPK0;
 
                         ++nounce;
                         ro.Reset();

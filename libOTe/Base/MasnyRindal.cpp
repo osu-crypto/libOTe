@@ -25,38 +25,37 @@ namespace osuCrypto
         Channel & chl)
     {
         using namespace default_curve;
+        Curve curve;
 
         auto n = choices.size();
-        const auto pointSize = Point::size;
-
-        Curve curve;
-        std::vector<Number> sk; sk.reserve(n);
-
-        std::vector<u8> recvBuff(pointSize);
-        auto fu = chl.asyncRecv(recvBuff.data(), pointSize);
 
         Point rrNot, rr, hPoint;
+
+        std::vector<Number> sk; sk.reserve(n);
+
+        u8 recvBuff[Point::size];
+        auto fu = chl.asyncRecv(recvBuff, Point::size);
 
         for (u64 i = 0; i < n;)
         {
             auto curStep = std::min<u64>(n - i, step);
 
-            std::vector<u8> sendBuff(pointSize * 2 * curStep);
+            std::vector<u8> sendBuff(Point::size * 2 * curStep);
 
             for (u64 k = 0; k < curStep; ++k, ++i)
             {
                 rrNot.randomize(prng);
 
-                u8* rrNotPtr = &sendBuff[pointSize * (2 * k + (choices[i] ^ 1))];
+                u8* rrNotPtr = &sendBuff[Point::size * (2 * k + (choices[i] ^ 1))];
                 rrNot.toBytes(rrNotPtr);
 
                 // TODO: Ought to do domain separation.
-                hPoint.fromHash(rrNotPtr, pointSize);
+                hPoint.fromHash(rrNotPtr, Point::size);
 
                 sk.emplace_back(prng);
                 rr = Point::mulGenerator(sk[i]);
                 rr -= hPoint;
-                rr.toBytes(&sendBuff[pointSize * (2 * k + choices[i])]);
+                rr.toBytes(&sendBuff[Point::size * (2 * k + choices[i])]);
             }
 
             chl.asyncSend(std::move(sendBuff));
@@ -65,7 +64,7 @@ namespace osuCrypto
 
         Point Mb, k;
         fu.get();
-        Mb.fromBytes(recvBuff.data());
+        Mb.fromBytes(recvBuff);
 
         for (u64 i = 0; i < n; ++i)
         {
@@ -82,37 +81,36 @@ namespace osuCrypto
     void MasnyRindal::send(span<std::array<block, 2>> messages, PRNG & prng, Channel & chl)
     {
         using namespace default_curve;
+        Curve curve;
 
         auto n = static_cast<u64>(messages.size());
-        auto pointSize = Point::size;
 
         RandomOracle ro;
 
-        std::vector<u8> buff(pointSize);
-        Curve curve;
+        u8 sendBuff[Point::size];
 
         Number sk(prng);
         Point Mb = Point::mulGenerator(sk);
-        Mb.toBytes(buff.data());
-        chl.asyncSend(std::move(buff));
+        Mb.toBytes(sendBuff);
+        chl.asyncSend(sendBuff, Point::size);
 
-        buff.resize(pointSize * 2 * step);
+        u8 buff[Point::size * 2 * step];
         Point pHash, r;
 
         for (u64 i = 0; i < n; )
         {
             auto curStep = std::min<u64>(n - i, step);
-            auto buffSize = curStep * pointSize * 2;
-            chl.recv(buff.data(), buffSize);
+            auto buffSize = curStep * Point::size * 2;
+            chl.recv(buff, buffSize);
 
             for (u64 k = 0; k < curStep; ++k, ++i)
             {
                 for (u64 j = 0; j < 2; ++j)
                 {
-                    r.fromBytes(&buff[pointSize * (2 * k + j)]);
+                    r.fromBytes(&buff[Point::size * (2 * k + j)]);
 
                     // TODO: Ought to do domain separation.
-                    pHash.fromHash(&buff[pointSize * (2 * k + (j ^ 1))], int(pointSize));
+                    pHash.fromHash(&buff[Point::size * (2 * k + (j ^ 1))], Point::size);
 
                     r += pHash;
                     r *= sk;
