@@ -583,14 +583,14 @@ namespace osuCrypto
 
 
                 // extract the choice bit from the LSB of r
-                u32 b0 = _mm_testc_si128(r[0], OneBlock);
-                u32 b1 = _mm_testc_si128(r[1], OneBlock);
-                u32 b2 = _mm_testc_si128(r[2], OneBlock);
-                u32 b3 = _mm_testc_si128(r[3], OneBlock);
-                u32 b4 = _mm_testc_si128(r[4], OneBlock);
-                u32 b5 = _mm_testc_si128(r[5], OneBlock);
-                u32 b6 = _mm_testc_si128(r[6], OneBlock);
-                u32 b7 = _mm_testc_si128(r[7], OneBlock);
+                u32 b0 = r[0].testc(OneBlock);
+                u32 b1 = r[1].testc(OneBlock);
+                u32 b2 = r[2].testc(OneBlock);
+                u32 b3 = r[3].testc(OneBlock);
+                u32 b4 = r[4].testc(OneBlock);
+                u32 b5 = r[5].testc(OneBlock);
+                u32 b6 = r[6].testc(OneBlock);
+                u32 b7 = r[7].testc(OneBlock);
 
                 // pack the choice bits.
                 choices.data()[i / 8] =
@@ -617,7 +617,7 @@ namespace osuCrypto
                 auto h = mAesFixedKey.ecbEncBlock(m[0]);
                 m[0] = m[0] ^ h;
 
-                *cIter = _mm_testc_si128(r[0], OneBlock);
+                *cIter = r[0].testc(OneBlock);
                 ++cIter;
             }
         }
