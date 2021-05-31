@@ -81,7 +81,7 @@ namespace tests_libOTe
             }
         }
 #else
-        throw UnitTestSkipped("NaorPinkas OT not enabled. Requires Relic or Miracl");
+        throw UnitTestSkipped("NaorPinkas OT not enabled. Requires libsodium, Relic, or Miracl");
 #endif
     }
 
@@ -128,7 +128,7 @@ namespace tests_libOTe
             }
         }
 #else
-        throw UnitTestSkipped("Simplest OT not enabled. Requires Relic or the simplest OT ASM library");
+        throw UnitTestSkipped("Simplest OT not enabled. Requires libsodium, Relic, Miracl, or the simplest OT ASM library");
 #endif
     }
 
@@ -240,13 +240,13 @@ namespace tests_libOTe
             }
         }
 #else
-throw UnitTestSkipped("MasnyRindal not enabled. Requires Relic.");
+        throw UnitTestSkipped("MasnyRindal not enabled. Requires libsodium or Relic.");
 #endif
     }
 
     void Bot_MasnyRindal_Basic_Test()
     {
-#ifdef ENABLE_MR
+#if defined(ENABLE_MR) && defined(ENABLE_SODIUM)
         setThreadName("Sender");
 
         IOService ios(0);
@@ -286,7 +286,7 @@ throw UnitTestSkipped("MasnyRindal not enabled. Requires Relic.");
             }
         }
 #else
-throw UnitTestSkipped("MasnyRindal not enabled. Requires Relic.");
+        throw UnitTestSkipped("MasnyRindalBasic not enabled. Requires libsodium.");
 #endif
     }
 

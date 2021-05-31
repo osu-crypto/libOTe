@@ -6,7 +6,13 @@
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Network/Channel.h>
 
+#if defined(ENABLE_SODIUM)
 #include <cryptoTools/Crypto/SodiumCurve.h>
+#elif defined(ENABLE_RELIC)
+#include <cryptoTools/Crypto/RCurve.h>
+#elif defined(ENABLE_MIRACL)
+#include <cryptoTools/Crypto/Curve.h>
+#endif
 
 #define PARALLEL
 
@@ -17,6 +23,25 @@
 
 namespace osuCrypto
 {
+    namespace
+    {
+#if defined(ENABLE_SODIUM)
+        using Point = Sodium::Rist25519;
+        using Brick = Point;
+        using Number = Sodium::Prime25519;
+#elif defined(ENABLE_RELIC)
+        using Curve = REllipticCurve;
+        using Point = REccPoint;
+        using Brick = Point;
+        using Number = REccNumber;
+#elif defined(ENABLE_MIRACL)
+        using Curve = EllipticCurve;
+        using Point = EccPoint;
+        using Brick = EccBrick;
+        using Number = EccNumber;
+#endif
+    }
+
     //static const  u64 minMsgPerThread(16);
 
     NaorPinkas::NaorPinkas()
@@ -38,17 +63,23 @@ namespace osuCrypto
         Channel& socket,
         u64 numThreads)
     {
-        using namespace Sodium;
-
-        // should generalize to 1 out of N by changing this. But isn't tested...
         auto nSndVals(2);
-        u64 pointSize = Rist25519::size;
+
+#ifndef ENABLE_SODIUM
+        Curve curve;
+#endif
+#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
+        const auto pointSize = Point::size;
+#else
+        const auto pointSize = curve.getGenerator().sizeBytes;
+#endif
 
         std::vector<std::thread> thrds(numThreads);
         std::vector<u8> sendBuff(messages.size() * pointSize);
         std::atomic<u32> remainingPK0s((u32)numThreads);
-        std::vector<Rist25519> pC(nSndVals);
-        auto cRecvFuture = socket.asyncRecv(pC.data(), pC.size()).share();
+
+        std::vector<u8> cBuff(nSndVals * pointSize);
+        auto cRecvFuture = socket.asyncRecv(cBuff.data(), cBuff.size()).share();
         block R;
 
         std::array<u8, RandomOracle::HashSize> comm, comm2;
@@ -60,8 +91,8 @@ namespace osuCrypto
             auto seed = prng.get<block>();
 
             thrds[t] = std::thread(
-                [t, numThreads, &messages, seed,
-                &sendBuff, &choices, cRecvFuture, &pC,
+                [t, numThreads, &messages, seed, pointSize,
+                &sendBuff, &choices, cRecvFuture, &cBuff,
                 &remainingPK0s, &socket, nSndVals,&RFuture,&R]()
             {
 
@@ -70,53 +101,70 @@ namespace osuCrypto
 
                 PRNG prng(seed);
 
-                u64 pointSize = Rist25519::size;
+#ifndef ENABLE_SODIUM
+                Curve curve;
+#endif
+#if !(defined(ENABLE_SODIUM) || defined(ENABLE_RELIC))
+                Point g = curve.getGenerator();
+                Brick bg(g);
+#endif
 
-                Rist25519 PK0;
-
-                std::vector<Prime25519> pK;
-                std::vector<Rist25519> PK_sigma;
+                std::vector<Number> pK;
+                std::vector<Point>
+                    PK_sigma,
+                    pC;
 
                 pK.reserve(mEnd - mStart);
                 PK_sigma.reserve(mEnd - mStart);
+                pC.reserve(nSndVals);
 
                 for (u64 i = mStart, j = 0; i < mEnd; ++i, ++j)
                 {
-                    // get a random value from Z_p
+#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
                     pK.emplace_back(prng);
+                    PK_sigma.emplace_back(Point::mulGenerator(pK[j]));
+#else
+                    // get a random value from Z_p
+                    pK.emplace_back(curve, prng);
 
                     // using brickexp which has the base of g, compute
                     //
                     //      PK_sigma[i] = g ^ pK[i]
                     //
                     // where pK[i] is just a random number in Z_p
-                    PK_sigma.emplace_back(Rist25519::mulGenerator(pK[j]));
+                    PK_sigma.emplace_back(bg * pK[j]);
+#endif
                 }
 
                 cRecvFuture.get();
-
-                auto iter = sendBuff.data() + mStart * pointSize;
+                for (auto u = 0; u < nSndVals; u++)
+                {
+#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
+                    pC.emplace_back();
+#else
+                    pC.emplace_back(curve);
+#endif
+                    pC[u].fromBytes(&cBuff[pointSize * u]);
+                }
 
                 for (u64 i = mStart, j = 0; i < mEnd; ++i, ++j)
                 {
                     u8 choice = choices[i];
+                    Point PK0 = std::move(PK_sigma[j]);
                     if (choice != 0) {
-                        PK0 = pC[choice] - PK_sigma[j];
-                    }
-                    else {
-                        PK0 = PK_sigma[j];
+                        PK0 = pC[choice] - PK0;
                     }
 
-                    memcpy(iter, PK0.data, pointSize);
-                    iter += pointSize;
+                    PK0.toBytes(&sendBuff[pointSize * i]);
                 }
 
                 if (--remainingPK0s == 0)
                     socket.asyncSend(std::move(sendBuff));
 
-                // resuse this space, not the data of PK0...
-                auto& gka = PK0;
-                RandomOracle sha(sizeof(block));
+                RandomOracle ro(sizeof(block));
+
+                std::vector<u8> hashBuff(pointSize);
+                Brick bc(pC[0]);
 
                 RFuture.get();
 
@@ -124,15 +172,19 @@ namespace osuCrypto
                 for (u64 i = mStart, j = 0; i < mEnd; ++i, ++j)
                 {
                     // now compute g ^(a * k) = (g^a)^k
-                    gka = pC[0] * pK[j];
-
+                    Point gka = pC[0] * pK[j];
 
                     auto nounce = i * nSndVals + choices[i];
-                    sha.Reset();
-                    sha.Update((u8*)&nounce, sizeof(nounce));
-                    sha.Update(gka);
-                    sha.Update(R);
-                    sha.Final(messages[i]);
+                    ro.Reset();
+                    ro.Update((u8*)&nounce, sizeof(nounce));
+#ifdef ENABLE_SODIUM
+                    ro.Update(gka);
+#else
+                    gka.toBytes(hashBuff.data());
+                    ro.Update(hashBuff.data(), hashBuff.size());
+#endif
+                    ro.Update(R);
+                    ro.Final(messages[i]);
                 }
             });
         }
@@ -156,26 +208,45 @@ namespace osuCrypto
         Channel& socket,
         u64 numThreads)
     {
-        using namespace Sodium;
-
         block R = prng.get<block>();
         // one out of nSndVals OT.
         u64 nSndVals(2);
         std::vector<std::thread> thrds(numThreads);
         //auto seed = prng.get<block>();
-        Prime25519 alpha(prng);
-        u64 pointSize = Rist25519::size;
-        std::vector<Rist25519> pC;
+
+        std::vector<Point> pC;
         pC.reserve(nSndVals);
 
+#ifndef ENABLE_SODIUM
+        Curve curve;
+#endif
+#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
+        const auto pointSize = Point::size;
+        Number alpha(prng);
+        pC.emplace_back(Point::mulGenerator(alpha));
+#else
+        const Point g = curve.getGenerator();
 
-        pC.emplace_back(Rist25519::mulGenerator(alpha));
+        const auto pointSize = g.sizeBytes();
+        Number alpha(curve, prng);
+        pC.emplace_back(g * alpha);
+#endif
+
+        std::vector<u8> sendBuff(nSndVals * pointSize);
+        pC[0].toBytes(sendBuff.data());
 
         for (u64 u = 1; u < nSndVals; u++)
-            // TODO: Faster to use hash to curve?
-            pC.emplace_back(Rist25519::mulGenerator(Prime25519(prng)));
+        {
+            // TODO: Faster to use hash to curve to randomize?
+#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
+            pC.emplace_back(Point::mulGenerator(Number(prng)));
+#else
+            pC.emplace_back(g * Number(curve, prng));
+#endif
+            pC[u].toBytes(&sendBuff[pointSize * u]);
+        }
 
-        socket.asyncSend(pC);
+        socket.asyncSend(std::move(sendBuff));
 
         // sends a commitment to R. This strengthens the security of NP01 to
         // make the protocol output uniform strings no matter what.
@@ -187,9 +258,9 @@ namespace osuCrypto
 
 
         for (u64 u = 1; u < nSndVals; u++)
-            pC[u] = pC[u] * alpha;
+            pC[u] *= alpha;
 
-        std::vector<Rist25519> buff(messages.size());
+        std::vector<u8> buff(pointSize * messages.size());
         auto recvFuture = socket.asyncRecv(buff.data(), buff.size()).share();
 
         for (u64 t = 0; t < numThreads; ++t)
@@ -199,15 +270,28 @@ namespace osuCrypto
                 t, pointSize, &messages, recvFuture,
                     numThreads, &buff, &alpha, nSndVals, &pC,&socket,&R]()
             {
-                Rist25519 pPK0, PK0a, fetmp;
-                Prime25519 alpha2(alpha);
+#ifndef ENABLE_SODIUM
+                Curve curve;
+#endif
+#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
+                Point pPK0;
+                const Number& alpha2 = alpha;
+                const std::vector<Point>& c = pC;
+#else
+                Point pPK0(curve);
+                Number alpha2(curve, alpha);
 
-                std::vector<Rist25519> c;
+                std::vector<Point> c;
                 c.reserve(nSndVals);
                 for (u64 i = 0; i < nSndVals; ++i)
-                    c.emplace_back(pC[i]);
+                    c.emplace_back(curve, pC[i]);
+#endif
 
-                RandomOracle sha(sizeof(block));
+#ifndef ENABLE_SODIUM
+                std::vector<u8> hashInBuff(pointSize);
+#endif
+
+                RandomOracle ro(sizeof(block));
                 recvFuture.get();
 
                 if (t == 0)
@@ -220,27 +304,37 @@ namespace osuCrypto
                 for (u64 i = mStart; i < mEnd; i++)
                 {
 
-                    pPK0 = buff[i];
-                    PK0a = pPK0 * alpha2;
+                    pPK0.fromBytes(&buff[pointSize * i]);
+                    pPK0 *= alpha2;
 
 
                     auto nounce = i * nSndVals;
-                    sha.Reset();
-                    sha.Update((u8*)&nounce, sizeof(nounce));
-                    sha.Update(PK0a);
-                    sha.Update(R);
-                    sha.Final(messages[i][0]);
+                    ro.Reset();
+                    ro.Update((u8*)&nounce, sizeof(nounce));
+#ifdef ENABLE_SODIUM
+                    ro.Update(pPK0);
+#else
+                    pPK0.toBytes(hashInBuff.data());
+                    ro.Update(hashInBuff.data(), hashInBuff.size());
+#endif
+                    ro.Update(R);
+                    ro.Final(messages[i][0]);
 
                     for (u64 u = 1; u < nSndVals; u++)
                     {
-                        fetmp = c[u] - PK0a;
+                        Point fetmp = c[u] - pPK0;
 
                         ++nounce;
-                        sha.Reset();
-                        sha.Update((u8*)&nounce, sizeof(nounce));
-                        sha.Update(fetmp);
-                        sha.Update(R);
-                        sha.Final(messages[i][u]);
+                        ro.Reset();
+                        ro.Update((u8*)&nounce, sizeof(nounce));
+#ifdef ENABLE_SODIUM
+                        ro.Update(fetmp);
+#else
+                        fetmp.toBytes(hashInBuff.data());
+                        ro.Update(hashInBuff.data(), hashInBuff.size());
+#endif
+                        ro.Update(R);
+                        ro.Final(messages[i][u]);
                     }
                 }
             });

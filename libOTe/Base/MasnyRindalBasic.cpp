@@ -1,6 +1,6 @@
 #include "MasnyRindalBasic.h"
 
-#ifdef ENABLE_MR
+#if defined(ENABLE_MR) && defined(ENABLE_SODIUM)
 
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Log.h>
@@ -9,7 +9,7 @@
 
 #include <cryptoTools/Crypto/SodiumCurve.h>
 #ifndef ENABLE_SODIUM
-static_assert(0, "ENABLE_SODIUM must be defined to build MasnyRindal");
+static_assert(0, "ENABLE_SODIUM must be defined to build MasnyRindalBasic");
 #endif
 
 #include <libOTe/Base/SimplestOT.h>

@@ -1,9 +1,9 @@
 #pragma once
 #include "libOTe/config.h"
-#ifdef ENABLE_MR
+#include <cryptoTools/Common/Defines.h>
+#if defined(ENABLE_MR) && defined(ENABLE_SODIUM)
 
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
-#include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 
 namespace osuCrypto

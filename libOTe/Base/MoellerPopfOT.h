@@ -12,10 +12,10 @@
 
 #include <cryptoTools/Crypto/SodiumCurve.h>
 #ifndef ENABLE_SODIUM
-static_assert(0, "ENABLE_SODIUM must be defined to build MasnyRindal");
+static_assert(0, "ENABLE_SODIUM must be defined to build MoellerPopfOT");
 #endif
 #ifndef SODIUM_MONTGOMERY
-static_assert(0, "SODIUM_MONTGOMERY must be defined to build MasnyRindal");
+static_assert(0, "SODIUM_MONTGOMERY must be defined to build MoellerPopfOT");
 #endif
 
 namespace osuCrypto

@@ -188,7 +188,9 @@ int main(int argc, char** argv)
 
 #ifdef ENABLE_MR
     flagSet |= runIf(baseOT_example<MasnyRindal>, cmd, mr);
+#ifdef ENABLE_SODIUM
     flagSet |= runIf(baseOT_example<MasnyRindalBasic>, cmd, mrb);
+#endif
 #endif
 
 #ifdef ENABLE_NP

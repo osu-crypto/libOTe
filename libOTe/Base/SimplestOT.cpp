@@ -6,41 +6,82 @@
 #include <cryptoTools/Crypto/RandomOracle.h>
 
 #ifdef ENABLE_SIMPLESTOT
+
+#if defined(ENABLE_SODIUM)
 #include <cryptoTools/Crypto/SodiumCurve.h>
+#elif defined(ENABLE_RELIC)
+#include <cryptoTools/Crypto/RCurve.h>
+#elif defined(ENABLE_MIRACL)
+#include <cryptoTools/Crypto/Curve.h>
+#endif
 
 namespace osuCrypto
 {
+    namespace
+    {
+#if defined(ENABLE_SODIUM)
+        using Point = Sodium::Rist25519;
+        using Number = Sodium::Prime25519;
+#elif defined(ENABLE_RELIC)
+        using Curve = REllipticCurve;
+        using Point = REccPoint;
+        using Number = REccNumber;
+#elif defined(ENABLE_MIRACL)
+        using Curve = EllipticCurve;
+        using Point = EccPoint;
+        using Number = EccNumber;
+#endif
+    }
+
     void SimplestOT::receive(
         const BitVector& choices,
         span<block> msg,
         PRNG& prng,
         Channel& chl)
     {
-        using namespace Sodium;
-
         u64 n = msg.size();
 
-        unsigned char recvBuff[Rist25519::size + sizeof(block)];
-        chl.recv(recvBuff, Rist25519::size + mUniformOTs * sizeof(block));
+#ifndef ENABLE_SODIUM
+        Curve curve;
+#endif
+#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
+        const auto pointSize = Point::size;
+        Point A;
+        std::array<Point, 2> B;
+#else
+        Point g = curve.getGenerator();
 
-        block comm, seed;
-        Rist25519 A;
-        memcpy(A.data, recvBuff, Rist25519::size);
+        const auto pointSize = g.sizeBytes();
+        Point A(curve);
+        std::array<Point, 2> B{ curve, curve };
+#endif
+
+        block comm = oc::ZeroBlock, seed;
+        std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block));
+#ifndef ENABLE_SODIUM
+        std::vector<u8> hashBuff(pointSize);
+#endif
+        chl.recv(buff.data(), buff.size());
+        A.fromBytes(buff.data());
 
         if (mUniformOTs)
-            memcpy(&comm, recvBuff + Rist25519::size, sizeof(block));
+            memcpy(&comm, &buff[pointSize], sizeof(block));
 
-        std::vector<Rist25519> buff(n);
+        buff.resize(pointSize * n);
 
-        std::vector<Prime25519> b; b.reserve(n);
-        std::array<Rist25519, 2> B;
+        std::vector<Number> b; b.reserve(n);
         for (u64 i = 0; i < n; ++i)
         {
+#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
             b.emplace_back(prng);
-            B[0] = Rist25519::mulGenerator(b[i]);
+            B[0] = Point::mulGenerator(b[i]);
+#else
+            b.emplace_back(curve, prng);
+            B[0] = g * b[i];
+#endif
             B[1] = A + B[0];
 
-            buff[i] = B[choices[i]];
+            B[choices[i]].toBytes(&buff[pointSize * i]);
         }
 
         chl.asyncSend(std::move(buff));
@@ -55,7 +96,12 @@ namespace osuCrypto
         {
             B[0] = A * b[i];
             RandomOracle ro(sizeof(block));
+#ifdef ENABLE_SODIUM
             ro.Update(B[0]);
+#else
+            B[0].toBytes(hashBuff.data());
+            ro.Update(hashBuff.data(), hashBuff.size());
+#endif
             ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i]);
@@ -67,28 +113,40 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
-        using namespace Sodium;
-
         u64 n = msg.size();
 
-        unsigned char sendBuff[Rist25519::size + sizeof(block)];
+#ifndef ENABLE_SODIUM
+        Curve curve;
+#endif
+#if defined(ENABLE_SODIUM) || defined(ENABLE_RELIC)
+        const auto pointSize = Point::size;
+        Number a(prng);
+        Point A = Point::mulGenerator(a);
+        Point B;
+#else
+        Point g = curve.getGenerator();
 
-        block seed = prng.get<block>();
-        Prime25519 a(prng);
-        Rist25519 A = Rist25519::mulGenerator(a);
+        const auto pointSize = g.sizeBytes();
+        Number a(curve, prng);
+        Point A = g * a;
+        Point B(curve);
+#endif
 
-        memcpy(sendBuff, A.data, Rist25519::size);
+        std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block)), hashBuff(pointSize);
+        A.toBytes(buff.data());
 
+        block seed;
         if (mUniformOTs)
         {
             // commit to the seed
+            seed = prng.get<block>();
             auto comm = mAesFixedKey.ecbEncBlock(seed) ^ seed;
-            memcpy(sendBuff + Rist25519::size, &comm, sizeof(block));
+            memcpy(&buff[pointSize], &comm, sizeof(block));
         }
 
-        chl.asyncSend(sendBuff, Rist25519::size + mUniformOTs * sizeof(block));
+        chl.asyncSend(std::move(buff));
 
-        std::vector<Rist25519> buff(n);
+        buff.resize(pointSize * n);
         chl.recv(buff.data(), buff.size());
 
         if (mUniformOTs)
@@ -98,21 +156,30 @@ namespace osuCrypto
         }
 
         A *= a;
-        Rist25519 B, Ba;
         for (u64 i = 0; i < n; ++i)
         {
-            B = buff[i];
+            B.fromBytes(&buff[pointSize * i]);
 
-            Ba = B * a;
+            B *= a;
             RandomOracle ro(sizeof(block));
-            ro.Update(Ba);
+#ifdef ENABLE_SODIUM
+            ro.Update(B);
+#else
+            B.toBytes(hashBuff.data());
+            ro.Update(hashBuff.data(), hashBuff.size());
+#endif
             ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][0]);
 
-            Ba -= A;
+            B -= A;
             ro.Reset();
-            ro.Update(Ba);
+#ifdef ENABLE_SODIUM
+            ro.Update(B);
+#else
+            B.toBytes(hashBuff.data());
+            ro.Update(hashBuff.data(), hashBuff.size());
+#endif
             ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][1]);
