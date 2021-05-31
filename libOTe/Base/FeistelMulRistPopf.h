@@ -5,22 +5,23 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
+#include "DefaultCurve.h"
 
 namespace osuCrypto
 {
     class FeistelMulRistPopf
     {
-        using Rist25519 = Sodium::Rist25519;
+        using Point = default_curve::Point;
 
     public:
         struct PopfFunc
         {
-            Rist25519 t;
-            Block256 s;
+            unsigned char t[Point::size];
+            unsigned char s[Point::size];
         };
 
         typedef bool PopfIn;
-        typedef Rist25519 PopfOut;
+        typedef Point PopfOut;
 
         FeistelMulRistPopf(const RandomOracle& ro_) : ro(ro_) {}
         FeistelMulRistPopf(RandomOracle&& ro_) : ro(ro_) {}
@@ -28,46 +29,45 @@ namespace osuCrypto
         PopfOut eval(PopfFunc f, PopfIn x) const
         {
             mulXor(f, x);
-            addH(f, x, false);
 
-            return f.t;
+            Point t;
+            t.fromBytes(f.t);
+            addH(t, f.s, x, false);
+
+            return t;
         }
 
         PopfFunc program(PopfIn x, PopfOut y, PRNG& prng) const
         {
             PopfFunc f;
-            f.t = y;
-            prng.get(&f.s, 1);
+            prng.get(f.s, Point::size);
 
-            addH(f, x, true);
+            addH(y, f.s, x, true);
+            y.toBytes(f.t);
             mulXor(f, x);
 
             return f;
         }
 
     private:
-        void addH(PopfFunc &f, PopfIn x, bool negate) const
+        void addH(Point& t, const unsigned char s[], PopfIn x, bool negate) const
         {
             RandomOracle h = ro;
             h.Update(x);
-            h.Update((unsigned char) 0);
-            h.Update(f.s);
-            Rist25519 v = Rist25519::fromHash(h);
+            h.Update(s, Point::size);
+            Point v = Point::fromHash(h);
 
             if (negate)
-                f.t -= v;
+                t -= v;
             else
-                f.t += v;
+                t += v;
         }
 
         void mulXor(PopfFunc &f, PopfIn x) const
         {
-            uint64_t mask64 = -(uint64_t) x;
-            block mask(mask64, mask64);
-
-            Block256 iotaT(f.t.data);
-            for (int i = 0; i < 2; i++)
-                f.s[i] = f.s[i] ^ (mask & iotaT[i]);
+            unsigned char mask = -(unsigned char) x;
+            for (size_t i = 0; i < Point::size; i++)
+                f.s[i] ^= mask & f.t[i];
         }
 
         RandomOracle ro;
@@ -80,7 +80,7 @@ namespace osuCrypto
 
     public:
         typedef FeistelMulRistPopf ConstructedPopf;
-        const static size_t hashLength = Sodium::Rist25519::fromHashLength;
+        const static size_t hashLength = default_curve::Point::fromHashLength;
         DomainSepFeistelMulRistPopf() : RandomOracle(hashLength) {}
 
         ConstructedPopf construct()

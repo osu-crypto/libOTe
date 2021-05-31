@@ -7,23 +7,23 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RCurve.h>
-#include <cryptoTools/Crypto/Rijndael256.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 
-#include <cryptoTools/Crypto/SodiumCurve.h>
-#ifndef ENABLE_SODIUM
-static_assert(0, "ENABLE_SODIUM must be defined to build RistrettoPopfOT");
+#if !(defined(ENABLE_SODIUM) || defined(ENABLE_RELIC))
+static_assert(0, "ENABLE_SODIUM or ENABLE_RELIC must be defined to build RistrettoPopfOT");
 #endif
+#include "DefaultCurve.h"
 
 namespace osuCrypto
 {
     // The Popf's PopfFunc must be plain old data, PopfIn must be convertible from an integer, and
-    // PopfOut must be a Rist25519.
+    // PopfOut must be a DefaultCurve::Point.
     template<typename DSPopf>
     class RistrettoPopfOT : public OtReceiver, public OtSender
     {
-        using Rist25519 = Sodium::Rist25519;
-        using Prime25519 = Sodium::Prime25519;
+        using Curve = default_curve::Curve;
+        using Point = default_curve::Point;
+        using Number = default_curve::Number;
 
     public:
         typedef DSPopf PopfFactory;
@@ -64,8 +64,8 @@ namespace osuCrypto
 
         static_assert(std::is_pod<typename PopfFactory::ConstructedPopf::PopfFunc>::value,
                       "Popf function must be Plain Old Data");
-        static_assert(std::is_same<typename PopfFactory::ConstructedPopf::PopfOut, Rist25519>::value,
-                      "Popf must be programmable on 256-bit blocks");
+        static_assert(std::is_same<typename PopfFactory::ConstructedPopf::PopfOut, Point>::value,
+                      "Popf must be programmable on elliptic curve points");
 
     private:
         PopfFactory popfFactory;

@@ -2,7 +2,6 @@
 
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Log.h>
-#include <cryptoTools/Crypto/Rijndael256.h>
 #include <cryptoTools/Network/Channel.h>
 
 namespace osuCrypto
@@ -14,12 +13,13 @@ namespace osuCrypto
         PRNG & prng,
         Channel & chl)
     {
+        Curve curve;
+
         u64 n = choices.size();
+        std::vector<Number> sk; sk.reserve(n);
 
-        std::vector<Prime25519> sk; sk.reserve(n);
-
-        Rist25519 A;
-        auto recvDone = chl.asyncRecv(&A, 1);
+        unsigned char recvBuff[Point::size];
+        auto recvDone = chl.asyncRecv(recvBuff, Point::size);
 
         std::vector<typename PopfFactory::ConstructedPopf::PopfFunc> sendBuff(n);
 
@@ -30,18 +30,20 @@ namespace osuCrypto
             auto popf = factory.construct();
 
             sk.emplace_back(prng);
-            Rist25519 B = Rist25519::mulGenerator(sk[i]);
+            Point B = Point::mulGenerator(sk[i]);
 
-            sendBuff[i] = popf.program(choices[i], B, prng);
+            sendBuff[i] = popf.program(choices[i], std::move(B), prng);
         }
 
         chl.asyncSend(std::move(sendBuff));
 
         recvDone.wait();
+        Point A;
+        A.fromBytes(recvBuff);
 
         for (u64 i = 0; i < n; ++i)
         {
-            Rist25519 B = A * sk[i];
+            Point B = A * sk[i];
 
             RandomOracle ro(sizeof(block));
             ro.Update(B);
@@ -57,26 +59,28 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
+        Curve curve;
+
         u64 n = static_cast<u64>(msg.size());
 
-        Prime25519 sk(prng);
-        Rist25519 A = Rist25519::mulGenerator(sk);
+        Number sk(prng);
+        Point A = Point::mulGenerator(sk);
 
-        chl.asyncSend(&A, 1);
+        unsigned char sendBuff[Point::size];
+        A.toBytes(sendBuff);
+        chl.asyncSend(sendBuff, Point::size);
 
         std::vector<typename PopfFactory::ConstructedPopf::PopfFunc> recvBuff(n);
         chl.recv(recvBuff.data(), recvBuff.size());
 
-
-        Rist25519 Bz, Bo;
         for (u64 i = 0; i < n; ++i)
         {
             auto factory = popfFactory;
             factory.Update(i);
             auto popf = factory.construct();
 
-            Bz = popf.eval(recvBuff[i], 0);
-            Bo = popf.eval(recvBuff[i], 1);
+            Point Bz = popf.eval(recvBuff[i], 0);
+            Point Bo = popf.eval(recvBuff[i], 1);
 
             Bz *= sk;
             Bo *= sk;

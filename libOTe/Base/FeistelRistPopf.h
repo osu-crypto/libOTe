@@ -5,22 +5,27 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
+#include "DefaultCurve.h"
 
 namespace osuCrypto
 {
     class FeistelRistPopf
     {
-        using Rist25519 = Sodium::Rist25519;
+        using Point = default_curve::Point;
+        friend class DomainSepFeistelRistPopf;
+
+        const static size_t hashLength =
+            Point::fromHashLength >= sizeof(block[3]) ? Point::fromHashLength : sizeof(block[3]);
 
     public:
         struct PopfFunc
         {
-            Rist25519 t;
+            unsigned char t[Point::size];
             block s[3];
         };
 
         typedef bool PopfIn;
-        typedef Rist25519 PopfOut;
+        typedef Point PopfOut;
 
         FeistelRistPopf(const RandomOracle& ro_) : ro(ro_) {}
         FeistelRistPopf(RandomOracle&& ro_) : ro(ro_) {}
@@ -29,11 +34,13 @@ namespace osuCrypto
         {
             RandomOracle h = ro;
             h.Update(x);
-
             xorHPrime(f, h);
-            addH(f, h, false);
 
-            return f.t;
+            Point t;
+            t.fromBytes(f.t);
+            addH(t, f.s, h, false);
+
+            return t;
         }
 
         PopfFunc program(PopfIn x, PopfOut y, PRNG& prng) const
@@ -42,35 +49,36 @@ namespace osuCrypto
             h.Update(x);
 
             PopfFunc f;
-            f.t = y;
             prng.get(f.s, 3);
 
-            addH(f, h, true);
+            addH(y, f.s, h, true);
+            y.toBytes(f.t);
             xorHPrime(f, h);
 
             return f;
         }
 
     private:
-        void addH(PopfFunc &f, RandomOracle h, bool negate) const
+        void addH(Point& t, const block s[], RandomOracle h, bool negate) const
         {
+            unsigned char hOut[hashLength];
             h.Update((unsigned char) 0);
-            h.Update(f.s);
-            Rist25519 v = Rist25519::fromHash(h);
+            h.Update(s, 3);
+            h.Final(hOut);
 
+            Point v = Point::fromHash(hOut);
             if (negate)
-                f.t -= v;
+                t -= v;
             else
-                f.t += v;
+                t += v;
         }
 
         void xorHPrime(PopfFunc &f, RandomOracle hPrime) const
         {
-            // Last block is unused.
-            block hPrimeOut[4];
+            block hPrimeOut[divCeil(hashLength, sizeof(block))];
             hPrime.Update((unsigned char) 1);
-            hPrime.Update(f.t);
-            hPrime.Final(hPrimeOut);
+            hPrime.Update(f.t, Point::size);
+            hPrime.Final((unsigned char*) &hPrimeOut);
 
             for (int i = 0; i < 3; i++)
                 f.s[i] = f.s[i] ^ hPrimeOut[i];
@@ -83,10 +91,11 @@ namespace osuCrypto
     {
         using RandomOracle::Final;
         using RandomOracle::outputLength;
+        using Point = default_curve::Point;
 
     public:
         typedef FeistelRistPopf ConstructedPopf;
-        const static size_t hashLength = Sodium::Rist25519::fromHashLength;
+        const static size_t hashLength = FeistelRistPopf::hashLength;
         DomainSepFeistelRistPopf() : RandomOracle(hashLength) {}
 
         ConstructedPopf construct()
