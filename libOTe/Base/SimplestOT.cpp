@@ -1,43 +1,27 @@
 #include "SimplestOT.h"
 
-
+#include <tuple>
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 
 #ifdef ENABLE_SIMPLESTOT
 
-#if defined(ENABLE_SODIUM)
-#include <cryptoTools/Crypto/SodiumCurve.h>
-#elif defined(ENABLE_RELIC)
-#include <cryptoTools/Crypto/RCurve.h>
-#endif
+#include "DefaultCurve.h"
 
 namespace osuCrypto
 {
-    namespace
-    {
-#if defined(ENABLE_SODIUM)
-        using Point = Sodium::Rist25519;
-        using Number = Sodium::Prime25519;
-#elif defined(ENABLE_RELIC)
-        using Curve = REllipticCurve;
-        using Point = REccPoint;
-        using Number = REccNumber;
-#endif
-    }
-
     void SimplestOT::receive(
         const BitVector& choices,
         span<block> msg,
         PRNG& prng,
         Channel& chl)
     {
+        using namespace default_curve;
+
         u64 n = msg.size();
 
-#ifndef ENABLE_SODIUM
         Curve curve;
-#endif
         const auto pointSize = Point::size;
         Point A;
         std::array<Point, 2> B;
@@ -94,11 +78,11 @@ namespace osuCrypto
         PRNG& prng,
         Channel& chl)
     {
+        using namespace default_curve;
+
         u64 n = msg.size();
 
-#ifndef ENABLE_SODIUM
         Curve curve;
-#endif
         const auto pointSize = Point::size;
         Number a(prng);
         Point A = Point::mulGenerator(a);

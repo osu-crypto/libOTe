@@ -6,12 +6,9 @@
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Network/Channel.h>
+#include "DefaultCurve.h"
 
-#if defined(ENABLE_SODIUM)
-#include <cryptoTools/Crypto/SodiumCurve.h>
-#elif defined(ENABLE_RELIC)
-#include <cryptoTools/Crypto/RCurve.h>
-#else
+#if !(defined(ENABLE_SODIUM) || defined(ENABLE_RELIC))
 static_assert(0, "ENABLE_SODIUM or ENABLE_RELIC must be defined to build MasnyRindal");
 #endif
 
@@ -19,18 +16,6 @@ static_assert(0, "ENABLE_SODIUM or ENABLE_RELIC must be defined to build MasnyRi
 
 namespace osuCrypto
 {
-    namespace
-    {
-#if defined(ENABLE_SODIUM)
-        using Point = Sodium::Rist25519;
-        using Number = Sodium::Prime25519;
-#elif defined(ENABLE_RELIC)
-        using Curve = REllipticCurve;
-        using Point = REccPoint;
-        using Number = REccNumber;
-#endif
-    }
-
     const u64 step = 16;
 
     void MasnyRindal::receive(
@@ -39,13 +24,13 @@ namespace osuCrypto
         PRNG & prng,
         Channel & chl)
     {
+        using namespace default_curve;
+
         auto n = choices.size();
         const auto pointSize = Point::size;
 
-#ifndef ENABLE_SODIUM
         Curve curve;
         std::vector<u8> hashBuff(roundUpTo(pointSize, 16));
-#endif
         std::vector<Number> sk; sk.reserve(n);
 
         std::vector<u8> recvBuff(pointSize);
@@ -112,16 +97,16 @@ namespace osuCrypto
 
     void MasnyRindal::send(span<std::array<block, 2>> messages, PRNG & prng, Channel & chl)
     {
+        using namespace default_curve;
+
         auto n = static_cast<u64>(messages.size());
         auto pointSize = Point::size;
 
         RandomOracle ro;
 
         std::vector<u8> buff(pointSize);
-#ifndef ENABLE_SODIUM
         Curve curve;
         std::vector<u8> hashBuff(roundUpTo(pointSize, 16));
-#endif
 
         Number sk(prng);
         Point Mb = Point::mulGenerator(sk);

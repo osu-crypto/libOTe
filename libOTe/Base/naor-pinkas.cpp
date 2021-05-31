@@ -5,15 +5,9 @@
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Network/Channel.h>
-
-#if defined(ENABLE_SODIUM)
-#include <cryptoTools/Crypto/SodiumCurve.h>
-#elif defined(ENABLE_RELIC)
-#include <cryptoTools/Crypto/RCurve.h>
-#endif
+#include "DefaultCurve.h"
 
 #define PARALLEL
-
 
 #ifdef ENABLE_NP
 
@@ -21,18 +15,6 @@
 
 namespace osuCrypto
 {
-    namespace
-    {
-#if defined(ENABLE_SODIUM)
-        using Point = Sodium::Rist25519;
-        using Number = Sodium::Prime25519;
-#elif defined(ENABLE_RELIC)
-        using Curve = REllipticCurve;
-        using Point = REccPoint;
-        using Number = REccNumber;
-#endif
-    }
-
     //static const  u64 minMsgPerThread(16);
 
     NaorPinkas::NaorPinkas()
@@ -54,11 +36,11 @@ namespace osuCrypto
         Channel& socket,
         u64 numThreads)
     {
-        auto nSndVals(2);
+        using namespace default_curve;
 
-#ifndef ENABLE_SODIUM
+        const auto nSndVals(2);
+
         Curve curve;
-#endif
         const auto pointSize = Point::size;
 
         std::vector<std::thread> thrds(numThreads);
@@ -88,9 +70,7 @@ namespace osuCrypto
 
                 PRNG prng(seed);
 
-#ifndef ENABLE_SODIUM
                 Curve curve;
-#endif
 
                 std::vector<Number> pK;
                 std::vector<Point>
@@ -173,6 +153,8 @@ namespace osuCrypto
         Channel& socket,
         u64 numThreads)
     {
+        using namespace default_curve;
+
         block R = prng.get<block>();
         // one out of nSndVals OT.
         u64 nSndVals(2);
@@ -182,9 +164,7 @@ namespace osuCrypto
         std::vector<Point> pC;
         pC.reserve(nSndVals);
 
-#ifndef ENABLE_SODIUM
         Curve curve;
-#endif
         const auto pointSize = Point::size;
         Number alpha(prng);
         pC.emplace_back(Point::mulGenerator(alpha));
@@ -223,9 +203,7 @@ namespace osuCrypto
                 t, pointSize, &messages, recvFuture,
                     numThreads, &buff, &alpha, nSndVals, &pC,&socket,&R]()
             {
-#ifndef ENABLE_SODIUM
                 Curve curve;
-#endif
                 Point pPK0;
                 const Number& alpha2 = alpha;
                 const std::vector<Point>& c = pC;
