@@ -10,7 +10,6 @@
 #include "libOTe/Base/FeistelRistPopf.h"
 #include "libOTe/Base/FeistelMulRistPopf.h"
 #include "libOTe/Base/MasnyRindal.h"
-#include "libOTe/Base/MasnyRindalBasic.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
 #include "libOTe/Base/naor-pinkas.h"
 
