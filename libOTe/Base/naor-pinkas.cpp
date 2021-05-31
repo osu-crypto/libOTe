@@ -110,8 +110,6 @@ namespace osuCrypto
 
                 RandomOracle ro(sizeof(block));
 
-                std::vector<u8> hashBuff(pointSize);
-
                 RFuture.get();
 
                 for (u64 i = mStart, j = 0; i < mEnd; ++i, ++j)
@@ -122,12 +120,7 @@ namespace osuCrypto
                     auto nounce = i * nSndVals + choices[i];
                     ro.Reset();
                     ro.Update((u8*)&nounce, sizeof(nounce));
-#ifdef ENABLE_SODIUM
                     ro.Update(gka);
-#else
-                    gka.toBytes(hashBuff.data());
-                    ro.Update(hashBuff.data(), hashBuff.size());
-#endif
                     ro.Update(R);
                     ro.Final(messages[i]);
                 }
@@ -208,10 +201,6 @@ namespace osuCrypto
                 const Number& alpha2 = alpha;
                 const std::vector<Point>& c = pC;
 
-#ifndef ENABLE_SODIUM
-                std::vector<u8> hashInBuff(pointSize);
-#endif
-
                 RandomOracle ro(sizeof(block));
                 recvFuture.get();
 
@@ -232,12 +221,7 @@ namespace osuCrypto
                     auto nounce = i * nSndVals;
                     ro.Reset();
                     ro.Update((u8*)&nounce, sizeof(nounce));
-#ifdef ENABLE_SODIUM
                     ro.Update(pPK0);
-#else
-                    pPK0.toBytes(hashInBuff.data());
-                    ro.Update(hashInBuff.data(), hashInBuff.size());
-#endif
                     ro.Update(R);
                     ro.Final(messages[i][0]);
 
@@ -248,12 +232,7 @@ namespace osuCrypto
                         ++nounce;
                         ro.Reset();
                         ro.Update((u8*)&nounce, sizeof(nounce));
-#ifdef ENABLE_SODIUM
                         ro.Update(fetmp);
-#else
-                        fetmp.toBytes(hashInBuff.data());
-                        ro.Update(hashInBuff.data(), hashInBuff.size());
-#endif
                         ro.Update(R);
                         ro.Final(messages[i][u]);
                     }

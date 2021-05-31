@@ -28,9 +28,6 @@ namespace osuCrypto
 
         block comm = oc::ZeroBlock, seed;
         std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block));
-#ifndef ENABLE_SODIUM
-        std::vector<u8> hashBuff(pointSize);
-#endif
         chl.recv(buff.data(), buff.size());
         A.fromBytes(buff.data());
 
@@ -61,12 +58,7 @@ namespace osuCrypto
         {
             B[0] = A * b[i];
             RandomOracle ro(sizeof(block));
-#ifdef ENABLE_SODIUM
             ro.Update(B[0]);
-#else
-            B[0].toBytes(hashBuff.data());
-            ro.Update(hashBuff.data(), hashBuff.size());
-#endif
             ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i]);
@@ -88,7 +80,7 @@ namespace osuCrypto
         Point A = Point::mulGenerator(a);
         Point B;
 
-        std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block)), hashBuff(pointSize);
+        std::vector<u8> buff(pointSize + mUniformOTs * sizeof(block));
         A.toBytes(buff.data());
 
         block seed;
@@ -118,24 +110,14 @@ namespace osuCrypto
 
             B *= a;
             RandomOracle ro(sizeof(block));
-#ifdef ENABLE_SODIUM
             ro.Update(B);
-#else
-            B.toBytes(hashBuff.data());
-            ro.Update(hashBuff.data(), hashBuff.size());
-#endif
             ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][0]);
 
             B -= A;
             ro.Reset();
-#ifdef ENABLE_SODIUM
             ro.Update(B);
-#else
-            B.toBytes(hashBuff.data());
-            ro.Update(hashBuff.data(), hashBuff.size());
-#endif
             ro.Update(i);
             if (mUniformOTs) ro.Update(seed);
             ro.Final(msg[i][1]);
