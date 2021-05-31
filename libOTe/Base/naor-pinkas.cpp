@@ -187,7 +187,7 @@ namespace osuCrypto
         std::vector<u8> comm(RandomOracle::HashSize);
         ro.Update(R);
         ro.Final(comm.data());
-        socket.send(comm);
+        socket.asyncSend(std::move(comm));
 
 
         for (u64 u = 1; u < nSndVals; u++)
