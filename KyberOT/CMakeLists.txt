@@ -8,14 +8,16 @@ SET(SRCS  kem.c poly.c polyvec.c polyvec_pointwise_acc.s fips202.c reduce.c cbde
 
 add_library(KyberOT STATIC ${SRCS})
 
-target_include_directories(KyberOT PUBLIC ${CMAKE_SOURCE_DIR}) 
+target_include_directories(KyberOT PUBLIC 
+                    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
+                    $<INSTALL_INTERFACE:include/KyberOT>) 
 
 #############################################
 #            Install                        #
 #############################################
 
 # install library
-install(TARGETS KyberOT DESTINATION lib)
+#install(TARGETS KyberOT DESTINATION lib)
 
 # install headers
-install(DIRECTORY . DESTINATION include/KyberOT FILES_MATCHING PATTERN "*.h")
+#install(DIRECTORY . DESTINATION include/KyberOT FILES_MATCHING PATTERN "*.h")

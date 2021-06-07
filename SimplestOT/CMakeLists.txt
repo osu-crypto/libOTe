@@ -16,7 +16,7 @@ target_link_options(SimplestOT PUBLIC -fPIC -no-pie)
 #############################################
 
 # install library
-install(TARGETS SimplestOT DESTINATION lib)
+#install(TARGETS SimplestOT DESTINATION lib)
 
 # install headers
-install(DIRECTORY . DESTINATION include/SimplestOT FILES_MATCHING PATTERN "*.h")
+#install(DIRECTORY . DESTINATION include/SimplestOT FILES_MATCHING PATTERN "*.h")
