@@ -45,6 +45,7 @@ jobs:
         with:
             submodules: recursive
       - uses: seanmiddleditch/gha-setup-ninja@v3
+      - uses: ilammy/msvc-dev-cmd@v1
 
       # Runs a set of commands using the runners shell
       - name: build test
