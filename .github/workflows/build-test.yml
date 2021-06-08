@@ -30,8 +30,14 @@ jobs:
         run: |
           git submodule update
           ls
+          echo "\n"
           ls cryptoTools
           echo "\n"
+          cd cryptoTools
+          echo "\n"
+          ls
+          echo "\n"
+          cd ..
           python --version
           python3 build.py --setup --relic --boost
           python3 build.py  -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON
