@@ -182,7 +182,7 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
     // c * x = z + m
 
     //for (u64 n = 5000; n < 10000; ++n)
-    for(u64 n : {12, 123,465,1642,4356,34254,93425})
+    for(u64 n : {12,/* 123,465,*/1642,/*4356,34254,*/93425})
     {
         std::vector<block> c(n), z0(n), z1(n);
 

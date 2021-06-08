@@ -316,7 +316,7 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
         PRNG prng0(block(4253465, 3434565));
         PRNG prng1(block(42532335, 334565));
 
-        u64 numOTs = 128 * 16;
+        u64 numOTs = 128 ;
 
         IOService ios(0);
         Session ep0(ios, "localhost", 1212, SessionMode::Server);

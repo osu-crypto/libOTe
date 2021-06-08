@@ -493,7 +493,7 @@ void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
     Session s1(ios, "localhost:1212", SessionMode::Client);
 
     std::vector<u64> nn = cmd.getManyOr<u64>("n",
-        { 12, 134,433 , 4234,54366 });
+        { 12, /*134,*/433 , /*4234,*/54366 });
 
     bool verbose = cmd.getOr("v", 0) > 1;
     u64 threads = cmd.getOr("t", 4);
@@ -536,7 +536,7 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
     Session s1(ios, "localhost:1212", SessionMode::Client);
 
     std::vector<u64> nn = cmd.getManyOr<u64>("n",
-        { 12,/* 134, 600,*/ 4234, 14366 });//
+        { 12,/* 134, 600,*/ 4234/*, 14366 */});//
 
     bool verbose = cmd.getOr("v", 0) > 1;
     u64 threads = cmd.getOr("t", 4);
