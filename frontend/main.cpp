@@ -118,8 +118,8 @@ int main(int argc, char** argv)
         auto tests = tests_cryptoTools::Tests;
         tests += tests_libOTe::Tests;
 
-        tests.runIf(cmd);
-        return 0;
+        auto r = tests.runIf(cmd);
+        return r == TestCollection::Result::passed ? 0 : -1;
     }
 
     if (cmd.isSet("latency"))
