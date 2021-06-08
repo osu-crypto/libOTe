@@ -29,5 +29,6 @@ jobs:
       - name: Run a multi-line script
         run: |
           git submodule update
+          ls
           python3 build.py --setup --relic --boost
           python3 build.py  -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON
