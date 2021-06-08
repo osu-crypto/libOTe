@@ -1,7 +1,7 @@
 ![](./titleOSU.PNG)
 =====
 
-<!-- [![Build Status](https://travis-ci.org/osu-crypto/libOTe.svg?branch=master)](https://travis-ci.org/osu-crypto/libOTe) -->
+[![Build Status](https://travis-ci.org/osu-crypto/libOTe.svg?branch=master)](https://travis-ci.org/osu-crypto/libOTe)
 
 A fast and portable C++17 library for Oblivious Transfer extension (OTe). The 
 primary design goal of this library to obtain *high performance* while being 
