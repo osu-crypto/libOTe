@@ -908,7 +908,7 @@ namespace osuCrypto
     void tests::LdpcComposit_RegRepDiagBand_Trans_test()
     {
 
-        u64 rows = 1043;
+        u64 rows = 234;
         u64 colWeight = 5;
         LdpcDiagRegRepeaterEncoder::Code code = LdpcDiagRegRepeaterEncoder::Weight11;
         
