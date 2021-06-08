@@ -78,66 +78,65 @@ void minimal()
 }
 ```
 
-## Performance
- 
-The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel 
-Xeon server (`2 36-cores Intel Xeon CPU E5-2699 v3 @ 2.30GHz and 256GB of RAM`)
-as of 11/16/2016. All timings shown reflect a "single" thread per party, with the 
-expection that network IO in libOTe is performed in the background by a separate thread. 
- 
- 
-| *Type*                	| *Security*  	| *Protocol*     	| libOTe (SHA1/AES)	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) (SHA256) 	| [Apricot](https://github.com/bristolcrypto/apricot) (AES-hash)	| OOS16 (blake2)	| [emp-toolkit](https://github.com/emp-toolkit) (AES-hash)	|
-|---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
-| 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **10.6 / 9.2**       	| ~              	| ~     	| 24**     	| ~          	|
-| 1-out-of-N (N=2<sup>128</sup>)| passive| KKRT16      	| **9.2 / 6.7**        	| ~              	| ~       	| ~       	| ~          	|
-| 1-out-of-2 Delta-OT  	| malicious   	| KOS15       	| **1.9***        		| ~              	| ~     	| ~        	|  ~      	|
-| 1-out-of-2 Delta-OT  	| passive   	| KOS15       	| **1.7***        		| ~              	| ~     	| ~        	|  ~      	|
-| 1-out-of-2          	| malicious 	| ALSZ15        | ~          	        | 17.3          	| ~       	| ~       	|  10         	|
-| 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  2.9       	|
-| 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**   | ~     	|  2.7      	|
-| 1-out-of-2 Base      	| malicious   	| CO15       	| **1,592/~**        	| ~              	|~       	| ~        	| ~          	|
-| 1-out-of-2 Base     	| malicious   	| NP00       	| **12,876/~**        	| ~             	| ~		    | ~     	| ~         	|
- 
 
- 
 ## Build
  
 The library is *cross platform* and has been tested on Windows, Mac and Linux. 
 There is one mandatory dependency on [Boost 1.75](http://www.boost.org/) (networking),
 and **optional dependency** on
-[Relic](https://github.com/relic-toolkit/relic). CMake and Python 3 are also required to build and visual studio 2019 is assumed on windows.
+[Relic](https://github.com/relic-toolkit/relic). CMake 3.15+ is required and the build script assumes python 3.
  
 
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
 cd libOTe
-python build.py setup boost relic
-python build.py -DENABLE_RELIC=ON -DENABLE_ALL_OT=ON
+python build.py --setup --boost --relic
+python build.py -- -D ENABLE_RELIC=ON -D ENABLE_ALL_OT=ON
 ```
 It is possible to build only the protocol(s) that are desired via cmake command. In addition, if boost and or relic are already installed, then `boost` or `relic` can be ommitted from `python build.py setup boost relic`.
 
 See the output of `python build.py` or `cmake .` for available compile options. For example, 
 ```
-python build.py -DENABLE_IKNP=ON
+python build.py -- -D ENABLE_IKNP=ON
 ```
-will only build the [iknp04] protocol.
+will only build the [iknp04] protocol. Argument after the `--` are forwarded to cmake.
 
 The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
 
 **Enabling/Disabling [Relic](https://github.com/relic-toolkit/relic) (for base OTs):**
- * Relic can be disabled by using the build commands
+ * The library can be built without Relic as
 ```
-python build.py setup boost
-python build.py -DENABLE_IKNP=ON
+python build.py --setup --boost
+python build.py -- -D ENABLE_IKNP=ON -D ENABLE_RELIC=OFF
 ```
 This will disable many/all of the supported base OT protocols. In addition, you will need to manually enable the specific protocols you desire, eg as above.
  
 
-Installing libOTe is only partially supported. 
+## Install
 
-### Linking
+libOTe can be installed and linked the same way as other cmake projects. By default the dependancies are not installed. To install then, run the following
+```
+python build.py --setup --boost --relic --install
+```
+You can also provide an install location by specifying `--install=path/to/installation`. Otherwise the system default is used.
 
-The helper scripts `cmake/loadCacheCar.cmake, cmake/libOTeHeler.cmake` can be used to find all dependencies when *not* installing libOTe. See [libPSI](https://github.com/osu-crypto/libPSI/blob/8f6d99106b18126b19b55c4fdc43402209a50d02/CMakeLists.txt#L123) for an example. In addition, the libOTe build script/cmake will output many of the dependency while the remaining will be located in the build directory.
+The main library is similarly installed as
+```
+python build.py --install 
+```
+
+By default, sudo is not used. If installation requires sudo access, then add `--sudo` to the `build.py` script arguments. See `python build.py --help` for full details.
+
+
+## Linking
+libOTe can be linked via cmake as
+```
+find_package(libOTe REQUIRED)
+target_link_libraries(myProject oc::libOTe)
+```
+Other exposed targets are `oc::cryptoTools, oc::tests_cryptoTools, oc::libOTe_Tests`. In addition, cmake variables `libOTe_LIB, libOTe_INC, ENABLE_XXX` will be defined, where `XXX` is one of the libOTe options.
+
+To ensure that cmake can find libOTe, you can either install libOTe or build it locally and include libOTe in the `CMAKE_PREFIX_PATH` variable or provide its location as a cmake `HINTS`, i.e. `find_package(libOTe HINTS path/to/libOTe)`.
 
 ## Help
  
@@ -158,9 +157,30 @@ or running the library.
  
  ## License
  
-This project has been placed in the public domain. As such, you are unrestricted in how 
+This project has been placed in the public domain and/or MIT license. As such, you are unrestricted in how 
 you use it, commercial or otherwise. However, no warranty of fitness is provided. If you 
 found this project helpful, feel free to spread the word and cite us.
+ ## Performance
+ 
+The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel 
+Xeon server (`2 36-cores Intel Xeon CPU E5-2699 v3 @ 2.30GHz and 256GB of RAM`)
+as of 11/16/2016. All timings shown reflect a "single" thread per party, with the 
+expection that network IO in libOTe is performed in the background by a separate thread. 
+ 
+ 
+| *Type*                	| *Security*  	| *Protocol*     	| libOTe (SHA1/AES)	| [Encrypto Group](https://github.com/encryptogroup/OTExtension) (SHA256) 	| [Apricot](https://github.com/bristolcrypto/apricot) (AES-hash)	| OOS16 (blake2)	| [emp-toolkit](https://github.com/emp-toolkit) (AES-hash)	|
+|---------------------	|-----------	|--------------	|----------------	|----------------	|---------	|---------	|------------	|
+| 1-out-of-N (N=2<sup>76</sup>) | malicious | OOS16    	| **10.6 / 9.2**       	| ~              	| ~     	| 24**     	| ~          	|
+| 1-out-of-N (N=2<sup>128</sup>)| passive| KKRT16      	| **9.2 / 6.7**        	| ~              	| ~       	| ~       	| ~          	|
+| 1-out-of-2 Delta-OT  	| malicious   	| KOS15       	| **1.9***        		| ~              	| ~     	| ~        	|  ~      	|
+| 1-out-of-2 Delta-OT  	| passive   	| KOS15       	| **1.7***        		| ~              	| ~     	| ~        	|  ~      	|
+| 1-out-of-2          	| malicious 	| ALSZ15        | ~          	        | 17.3          	| ~       	| ~       	|  10         	|
+| 1-out-of-2           	| malicious   	| KOS15       	| **3.9 / 0.7**        	| ~              	| 1.1     	| ~        	|  2.9       	|
+| 1-out-of-2          	| passive   	| IKNP03       	| **3.7 / 0.6**        	| 11.3          	| **0.6**   | ~     	|  2.7      	|
+| 1-out-of-2 Base      	| malicious   	| CO15       	| **1,592/~**        	| ~              	|~       	| ~        	| ~          	|
+| 1-out-of-2 Base     	| malicious   	| NP00       	| **12,876/~**        	| ~             	| ~		    | ~     	| ~         	|
+ 
+
  
  
 
