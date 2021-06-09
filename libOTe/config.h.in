@@ -9,6 +9,12 @@
 // build the library with the ASM "simplest" Base OT enabled
 #cmakedefine ENABLE_SIMPLESTOT_ASM @ENABLE_SIMPLESTOT_ASM@
 
+// build the library with POPF Base OT using Ristretto KA enabled
+#cmakedefine ENABLE_POPF_RISTRETTO @ENABLE_POPF_RISTRETTO@
+
+// build the library with POPF Base OT using Moeller KA enabled
+#cmakedefine ENABLE_POPF_MOELLER @ENABLE_POPF_MOELLER@
+
 // build the library with Masney Rindal Base OT enabled
 #cmakedefine ENABLE_MR @ENABLE_MR@
 

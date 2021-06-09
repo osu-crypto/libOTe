@@ -181,6 +181,7 @@ void Tools_modp_test(const CLP& cmd)
 }
 
 
+#ifdef ENABLE_SILENTOT
 namespace {
 
 #ifdef ENABLE_SILENTOT
@@ -341,6 +342,7 @@ namespace {
 
 #endif
 }
+#endif
 
 
 void OtExt_Silent_random_Test(const CLP& cmd)

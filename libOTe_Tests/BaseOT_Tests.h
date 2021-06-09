@@ -8,4 +8,7 @@ namespace tests_libOTe
     void Bot_Simplest_Test();
     void Bot_MasnyRindal_Test();
     void Bot_MasnyRindal_Kyber_Test();
+
+    template<template<typename> class PopfOT, typename DSPopf>
+    void Bot_PopfOT_Test();
 }

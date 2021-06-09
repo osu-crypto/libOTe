@@ -1,6 +1,6 @@
 #pragma once
 
-
+#include "libOTe/Base/BaseOT.h"
 #include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosOtExtSender.h"
 #include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
@@ -58,8 +58,8 @@ namespace osuCrypto
 
 #ifdef LIBOTE_HAS_BASE_OT
         // Now compute the base OTs, we need to set them on the first pair of extenders.
-        // In real code you would only have a sender or reciever, not both. But we do 
-        // here just showing the example. 
+        // In real code you would only have a sender or reciever, not both. But we do
+        // here just showing the example.
         if (role == Role::Receiver)
         {
             DefaultBaseOT base;
@@ -98,9 +98,9 @@ namespace osuCrypto
                 recvMsgs[i] = sendMsgs[i][bv[i]];
             senders[0].setBaseOts(recvMsgs, bv, chls[0]);
         }
-#endif 
+#endif
 
-        // for the rest of the extenders, call split. This securely 
+        // for the rest of the extenders, call split. This securely
         // creates two sets of extenders that can be used in parallel.
         for (auto i = 1; i < numThreads; ++i)
         {
@@ -122,7 +122,7 @@ namespace osuCrypto
             // get a random number generator seeded from the system
             PRNG prng(sysRandomSeed());
 
-            // construct a vector to stored the random send messages. 
+            // construct a vector to stored the random send messages.
             std::vector<std::array<block, 2>> sMsgs(numOTs * (role == Role::Sender));
 
             // construct the choices that we want.
@@ -130,7 +130,7 @@ namespace osuCrypto
             // in this case pick random messages.
             choice.randomize(prng);
 
-            // construct a vector to stored the received messages. 
+            // construct a vector to stored the received messages.
             std::vector<block> rMsgs(numOTs * (role != Role::Sender));
 
             for (u64 tt = 0; tt < trials; ++tt)
@@ -156,7 +156,7 @@ namespace osuCrypto
                 else
                 {
 
-                    // if delta OT is used, then the user can call the following 
+                    // if delta OT is used, then the user can call the following
                     // to set the desired XOR difference between the zero messages
                     // and the one messages.
                     //

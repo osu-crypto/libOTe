@@ -18,6 +18,7 @@ primary design goal of this library to obtain *high performance* while being
 * The malicious secure 1-out-of-2 base OT [NP01].
 * The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
 * The malicious secure 1-out-of-2 base OT [[MR19]](https://eprint.iacr.org/2019/706.pdf) 
+* Several malicious secure batched 1-out-of-2 base OTs from [[MRR21]](https://eprint.iacr.org/2021/682)
  
 ## Introduction
  
@@ -83,8 +84,12 @@ void minimal()
  
 The library is *cross platform* and has been tested on Windows, Mac and Linux. 
 There is one mandatory dependency on [Boost 1.75](http://www.boost.org/) (networking),
-and **optional dependency** on
-[Relic](https://github.com/relic-toolkit/relic). CMake 3.15+ is required and the build script assumes python 3.
+and three **optional dependencies** on [libsodium](https://doc.libsodium.org/),
+[Relic](https://github.com/relic-toolkit/relic), or
+[SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
+for Base OTs.
+The Moeller POPF Base OTs additionally require the `noclamp` option for Montgomery curves, which is currently only in a [fork](https://github.com/osu-crypto/libsodium) of libsodium.
+CMake 3.15+ is required and the build script assumes python 3.
  
 
 ```
@@ -93,7 +98,7 @@ cd libOTe
 python build.py --setup --boost --relic
 python build.py -- -D ENABLE_RELIC=ON -D ENABLE_ALL_OT=ON
 ```
-It is possible to build only the protocol(s) that are desired via cmake command. In addition, if boost and or relic are already installed, then `boost` or `relic` can be ommitted from `python build.py setup boost relic`.
+It is possible to build only the protocol(s) that are desired via cmake command. In addition, if boost and/or relic are already installed, then `boost` or `relic` can be ommitted from `python build.py setup boost relic`.
 
 See the output of `python build.py` or `cmake .` for available compile options. For example, 
 ```
@@ -109,8 +114,14 @@ The main executable with examples is `frontend` and is located in the build dire
 python build.py --setup --boost
 python build.py -- -D ENABLE_IKNP=ON -D ENABLE_RELIC=OFF
 ```
-This will disable many/all of the supported base OT protocols. In addition, you will need to manually enable the specific protocols you desire, eg as above.
- 
+**Enabling/Disabling [libsodium](https://doc.libsodium.org/) (for base OTs):**
+ * libsodium can similarly be disabled by not passing `-DENABLE_SODIUM=ON`.
+In the other direction, when enabling libsodium, if libsodium is installed in a prefix rather than globally, tell cmake where to look for it with
+```
+PKG_CONFIG_PATH=/path/to/folder_containing_libsodium.pc cmake . -DENABLE_SODIUM=ON
+```
+Disabling one/both of these libraries will disable many/all of the supported base OT protocols.
+In addition, you will need to manually enable the specific protocols you desire, eg `-DENABLE_IKNP=ON` as above.
 
 ## Install
 

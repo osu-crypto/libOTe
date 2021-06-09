@@ -6,16 +6,11 @@
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Network/Channel.h>
+#include "DefaultCurve.h"
 
-#include <cryptoTools/Crypto/RCurve.h>
-#ifndef ENABLE_RELIC
-static_assert(0, "ENABLE_RELIC must be defined to build MasnyRindal");
+#if !(defined(ENABLE_SODIUM) || defined(ENABLE_RELIC))
+static_assert(0, "ENABLE_SODIUM or ENABLE_RELIC must be defined to build MasnyRindal");
 #endif
-
-using Curve = oc::REllipticCurve;
-using Point = oc::REccPoint;
-using Brick = oc::REccPoint;
-using Number = oc::REccNumber;
 
 #include <libOTe/Base/SimplestOT.h>
 
@@ -29,74 +24,55 @@ namespace osuCrypto
         PRNG & prng,
         Channel & chl)
     {
+        using namespace DefaultCurve;
+        Curve curve;
 
         auto n = choices.size();
-        Curve curve;
-        std::array<Point, 2> r{ curve, curve };
-        auto g = curve.getGenerator();
-        auto pointSize = g.sizeBytes();
 
-        RandomOracle ro(sizeof(block));
-        Point hPoint(curve);
+        Point rrNot, rr, hPoint;
 
-        std::vector<u8> hashBuff(roundUpTo(pointSize, 16));
-        std::vector<block> aesBuff((pointSize + 15) / 16);
         std::vector<Number> sk; sk.reserve(n);
 
-
-        std::vector<u8> recvBuff(pointSize);
-        auto fu = chl.asyncRecv(recvBuff.data(), pointSize);
+        u8 recvBuff[Point::size];
+        auto fu = chl.asyncRecv(recvBuff, Point::size);
 
         for (u64 i = 0; i < n;)
         {
             auto curStep = std::min<u64>(n - i, step);
 
-            std::vector<u8> sendBuff(pointSize * 2 * curStep);
-            auto sendBuffIter = sendBuff.data();
-
+            std::vector<u8> sendBuff(Point::size * 2 * curStep);
 
             for (u64 k = 0; k < curStep; ++k, ++i)
             {
-
-                auto& rrNot = r[choices[i] ^ 1];
-                auto& rr = r[choices[i]];
-
                 rrNot.randomize(prng);
-                rrNot.toBytes(hashBuff.data());
 
-                ep_map(hPoint, hashBuff.data(), int(pointSize));
+                u8* rrNotPtr = &sendBuff[Point::size * (2 * k + (choices[i] ^ 1))];
+                rrNot.toBytes(rrNotPtr);
 
-                sk.emplace_back(curve, prng);
+                // TODO: Ought to do domain separation.
+                hPoint.fromHash(rrNotPtr, Point::size);
 
-                rr = g * sk[i];
+                sk.emplace_back(prng);
+                rr = Point::mulGenerator(sk[i]);
                 rr -= hPoint;
-
-                r[0].toBytes(sendBuffIter); sendBuffIter += pointSize;
-                r[1].toBytes(sendBuffIter); sendBuffIter += pointSize;
+                rr.toBytes(&sendBuff[Point::size * (2 * k + choices[i])]);
             }
-
-            if (sendBuffIter != sendBuff.data() + sendBuff.size())
-                throw RTE_LOC;
 
             chl.asyncSend(std::move(sendBuff));
         }
 
 
-        Point Mb(curve), k(curve);
+        Point Mb, k;
         fu.get();
-        Mb.fromBytes(recvBuff.data());
+        Mb.fromBytes(recvBuff);
 
         for (u64 i = 0; i < n; ++i)
         {
             k = Mb;
             k *= sk[i];
 
-            //lout << "g^ab  " << k << std::endl;
-
-            k.toBytes(hashBuff.data());
-
-            ro.Reset();
-            ro.Update(hashBuff.data(), pointSize);
+            RandomOracle ro(sizeof(block));
+            ro.Update(k);
             ro.Update(i);
             ro.Final(messages[i]);
         }
@@ -104,65 +80,48 @@ namespace osuCrypto
 
     void MasnyRindal::send(span<std::array<block, 2>> messages, PRNG & prng, Channel & chl)
     {
-        auto n = static_cast<u64>(messages.size());
-        
+        using namespace DefaultCurve;
         Curve curve;
-        auto g = curve.getGenerator();
-        RandomOracle ro(sizeof(block));
-        auto pointSize = g.sizeBytes();
-        //std::cout << g << std::endl;
 
-        Number sk(curve, prng);
+        auto n = static_cast<u64>(messages.size());
 
-        Point Mb = g;
-        Mb *= sk;
+        RandomOracle ro;
 
-        std::vector<u8> buff(pointSize), hashBuff(roundUpTo(pointSize, 16));
-        std::vector<block> aesBuff((pointSize + 15) / 16);
+        u8 sendBuff[Point::size];
 
-        Mb.toBytes(buff.data());
-        chl.asyncSend(std::move(buff));
+        Number sk(prng);
+        Point Mb = Point::mulGenerator(sk);
+        Mb.toBytes(sendBuff);
+        chl.asyncSend(sendBuff, Point::size);
 
-        buff.resize(pointSize * 2 * step);
-        Point pHash(curve), r(curve);
+        u8 buff[Point::size * 2 * step];
+        Point pHash, r;
 
         for (u64 i = 0; i < n; )
         {
             auto curStep = std::min<u64>(n - i, step);
-
-            auto buffSize = curStep * pointSize * 2;
-            chl.recv(buff.data(), buffSize);
-            auto buffIter = buff.data();
+            auto buffSize = curStep * Point::size * 2;
+            chl.recv(buff, buffSize);
 
             for (u64 k = 0; k < curStep; ++k, ++i)
             {
-                std::array<u8*, 2> buffIters{
-                    buffIter,
-                    buffIter + pointSize
-                };
-                buffIter += pointSize * 2;
-
                 for (u64 j = 0; j < 2; ++j)
                 {
-                    r.fromBytes(buffIters[j]);
-                    ep_map(pHash, buffIters[j ^ 1], int(pointSize));
+                    r.fromBytes(&buff[Point::size * (2 * k + j)]);
+
+                    // TODO: Ought to do domain separation.
+                    pHash.fromHash(&buff[Point::size * (2 * k + (j ^ 1))], Point::size);
 
                     r += pHash;
                     r *= sk;
 
-                    r.toBytes(hashBuff.data());
-
-                    ro.Reset();
-                    ro.Update(hashBuff.data(), pointSize);
+                    ro.Reset(sizeof(block));
+                    ro.Update(r);
                     ro.Update(i);
                     ro.Final(messages[i][j]);
                 }
             }
-
-            if (buffIter != buff.data() + buffSize)
-                throw RTE_LOC;
         }
-
     }
 }
 #endif

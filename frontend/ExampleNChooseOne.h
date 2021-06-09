@@ -1,7 +1,7 @@
 #pragma once
 
 
-
+#include "cryptoTools/Common/Matrix.h"
 #include "libOTe/NChooseOne/Oos/OosNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Oos/OosNcoOtSender.h"
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
@@ -57,7 +57,7 @@ namespace osuCrypto
         else
             recvers[0].genBaseOts(prng, chls[0]);
 
-        // now that we have one valid pair of extenders, we can call split on 
+        // now that we have one valid pair of extenders, we can call split on
         // them to get more copies which can be used concurrently.
         for (int i = 1; i < numThreads; ++i)
         {
@@ -78,9 +78,9 @@ namespace osuCrypto
                 // the instance how mant OTs we want in this batch. This is done here.
                 recvers[k].init(numOTs, prng, chl);
 
-                // now we can iterate over the OTs and actaully retreive the desired 
+                // now we can iterate over the OTs and actaully retreive the desired
                 // messages. However, for efficieny we will do this in steps where
-                // we do some computation followed by sending off data. This is more 
+                // we do some computation followed by sending off data. This is more
                 // efficient since data will be sent in the background :).
                 for (int i = 0; i < numOTs; )
                 {
@@ -92,9 +92,9 @@ namespace osuCrypto
                     //for (u64 j = 0; j < min; ++j, ++i)
                     //{
                     //    // For the OT index by i, we need to pick which
-                    //    // one of the N OT messages that we want. For this 
-                    //    // example we simply pick a random one. Note only the 
-                    //    // first log2(N) bits of choice is considered. 
+                    //    // one of the N OT messages that we want. For this
+                    //    // example we simply pick a random one. Note only the
+                    //    // first log2(N) bits of choice is considered.
                     //    block choice = prng.get<block>();
 
                     //    // this will hold the (random) OT message of our choice
@@ -109,21 +109,21 @@ namespace osuCrypto
 
                     // Note that all OTs in this region must be encode. If there are some
                     // that you don't actually care about, then you can skip them by calling
-                    // 
+                    //
                     //    recvers[k].zeroEncode(i);
                     //
 
-                    // Now that we have gotten out the OT messages for this step, 
-                    // we are ready to send over network some information that 
+                    // Now that we have gotten out the OT messages for this step,
+                    // we are ready to send over network some information that
                     // allows the sender to also compute the OT messages. Since we just
-                    // encoded "min" OT messages, we will tell the class to send the 
-                    // next min "correction" values. 
+                    // encoded "min" OT messages, we will tell the class to send the
+                    // next min "correction" values.
                     recvers[k].sendCorrection(chl, min);
                 }
 
                 // once all numOTs have been encoded and had their correction values sent
                 // we must call check. This allows to sender to make sure we did not cheat.
-                // For semi-honest protocols, this can and will be skipped. 
+                // For semi-honest protocols, this can and will be skipped.
                 recvers[k].check(chl, ZeroBlock);
 
             }
@@ -160,11 +160,11 @@ namespace osuCrypto
 
                     // unlike for the receiver, before we call encode to get
                     // some desired OT message, we must call recvCorrection(...).
-                    // This receivers some information that the receiver had sent 
+                    // This receivers some information that the receiver had sent
                     // and allows the sender to compute any OT message that they desired.
                     // Note that the step size must match what the receiver used.
                     // If this is unknown you can use recvCorrection(chl) -> u64
-                    // which will tell you how many were sent. 
+                    // which will tell you how many were sent.
                     senders[k].recvCorrection(chl, min);
                     i += min;
                     //// we now encode any OT message with index less that i + min.
@@ -172,12 +172,12 @@ namespace osuCrypto
                     //{
                     //    // in particular, the sender can retreive many OT messages
                     //    // at a single index, in this case we chose to retreive 3
-                    //    // but that is arbitrary. 
+                    //    // but that is arbitrary.
                     //    auto choice0 = prng.get<block>();
                     //    auto choice1 = prng.get<block>();
                     //    auto choice2 = prng.get<block>();
 
-                    //    // these we hold the actual OT messages. 
+                    //    // these we hold the actual OT messages.
                     //    block
                     //        otMessage0,
                     //        otMessage1,
@@ -190,8 +190,8 @@ namespace osuCrypto
                     //}
                 }
 
-                // This call is required to make sure the receiver did not cheat. 
-                // All corrections must be recieved before this is called. 
+                // This call is required to make sure the receiver did not cheat.
+                // All corrections must be recieved before this is called.
                 senders[k].check(chl, ZeroBlock);
             }
             else

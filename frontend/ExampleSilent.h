@@ -204,7 +204,7 @@ namespace osuCrypto
 
                     std::vector<std::thread> thrds;
                     for (u64 i = 1; i < numThreads; ++i)
-                        thrds.emplace_back(routine, i, s, type);
+                        thrds.emplace_back(routine, (int)i, (int)s, type);
 
                     auto milli = routine(0, s, type);
 
