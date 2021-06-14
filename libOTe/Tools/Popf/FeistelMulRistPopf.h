@@ -1,11 +1,12 @@
 #pragma once
 #include "libOTe/config.h"
-#ifdef ENABLE_POPF_RISTRETTO
+#ifdef ENABLE_MRR
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
-#include "DefaultCurve.h"
+
+#include "libOTe/Tools/DefaultCurve.h"
 
 namespace osuCrypto
 {

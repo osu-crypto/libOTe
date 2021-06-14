@@ -1,6 +1,6 @@
 #pragma once
 #include "libOTe/config.h"
-#if defined(ENABLE_POPF_RISTRETTO) || defined(ENABLE_POPF_MOELLER)
+#if defined(ENABLE_MRR) || defined(ENABLE_MRR_TWIST)
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>

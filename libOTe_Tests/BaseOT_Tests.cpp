@@ -9,14 +9,17 @@
 
 #include "libOTe/Base/BaseOT.h"
 #include "libOTe/Base/SimplestOT.h"
-#include "libOTe/Base/MoellerPopfOT.h"
-#include "libOTe/Base/RistrettoPopfOT.h"
-#include "libOTe/Base/EKEPopf.h"
-#include "libOTe/Base/MRPopf.h"
-#include "libOTe/Base/FeistelPopf.h"
-#include "libOTe/Base/FeistelMulPopf.h"
-#include "libOTe/Base/FeistelRistPopf.h"
-#include "libOTe/Base/FeistelMulRistPopf.h"
+
+#include "libOTe/Base/McRosRoyTwist.h"
+#include "libOTe/Base/McRosRoy.h"
+
+#include "libOTe/Tools/Popf/EKEPopf.h"
+#include "libOTe/Tools/Popf/MRPopf.h"
+#include "libOTe/Tools/Popf/FeistelPopf.h"
+#include "libOTe/Tools/Popf/FeistelMulPopf.h"
+#include "libOTe/Tools/Popf/FeistelRistPopf.h"
+#include "libOTe/Tools/Popf/FeistelMulRistPopf.h"
+
 #include "libOTe/Base/MasnyRindal.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
 #include <cryptoTools/Common/Log.h>
@@ -26,6 +29,7 @@
 #include <vector>
 #include <cryptoTools/Common/TestCollection.h>
 #include <cryptoTools/Common/BitVector.h>
+#include "BaseOT_Tests.h"
 
 #ifdef GetMessage
 #undef GetMessage
@@ -184,18 +188,36 @@ namespace tests_libOTe
         throw UnitTestSkipped("POPF OT not enabled. Requires libsodium.");
     }
 
-    template<template<typename> class PopfOT, typename DSPopf>
-    void Bot_PopfOT_Test() {
-        Bot_PopfOT_Test_impl<PopfOT, DSPopf>();
+
+    void Bot_McQuoidRR_Moeller_EKE_Test()
+    {
+        Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepEKEPopf>();
     }
 
-    template void Bot_PopfOT_Test<MoellerPopfOT, DomainSepEKEPopf>();
-    template void Bot_PopfOT_Test<MoellerPopfOT, DomainSepMRPopf>();
-    template void Bot_PopfOT_Test<MoellerPopfOT, DomainSepFeistelPopf>();
-    template void Bot_PopfOT_Test<MoellerPopfOT, DomainSepFeistelMulPopf>();
-    template void Bot_PopfOT_Test<RistrettoPopfOT, DomainSepFeistelRistPopf>();
-    template void Bot_PopfOT_Test<RistrettoPopfOT, DomainSepFeistelMulRistPopf>();
+    void Bot_McQuoidRR_Moeller_MR_Test()
+    {
+        Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepMRPopf>();
+    }
 
+    void Bot_McQuoidRR_Moeller_F_Test()
+    {
+        Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepFeistelPopf>();
+    }
+
+    void Bot_McQuoidRR_Moeller_FM_Test()
+    {
+        Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepFeistelMulPopf>();
+    }
+
+    void Bot_McQuoidRR_Ristrestto_F_Test()
+    {
+        Bot_PopfOT_Test_impl<details::McRosRoy, DomainSepFeistelRistPopf>();
+    }
+
+    void Bot_McQuoidRR_Ristrestto_FM_Test()
+    {
+        Bot_PopfOT_Test_impl<details::McRosRoy, DomainSepFeistelMulRistPopf>();
+    }
 
     void Bot_MasnyRindal_Test()
     {

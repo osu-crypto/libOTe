@@ -140,49 +140,49 @@ int main(int argc, char** argv)
     flagSet |= runIf(baseOT_example<AsmSimplestOT>, cmd, simpleasm);
 #endif
 
-#ifdef ENABLE_POPF_MOELLER
+#ifdef ENABLE_MRR_TWIST
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
         DomainSepEKEPopf factory;
         const char* domain = "EKE POPF OT example";
         factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, MoellerPopfOT<DomainSepEKEPopf>(factory));
+        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwist(factory));
     }, cmd, moellerpopf, {"eke"});
 
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
         DomainSepMRPopf factory;
         const char* domain = "MR POPF OT example";
         factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, MoellerPopfOT<DomainSepMRPopf>(factory));
+        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistMR(factory));
     }, cmd, moellerpopf, {"mrPopf"});
 
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
         DomainSepFeistelPopf factory;
         const char* domain = "Feistel POPF OT example";
         factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, MoellerPopfOT<DomainSepFeistelPopf>(factory));
+        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistFeistel(factory));
     }, cmd, moellerpopf, {"feistel"});
 
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
         DomainSepFeistelMulPopf factory;
         const char* domain = "Feistel With Multiplication POPF OT example";
         factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, MoellerPopfOT<DomainSepFeistelMulPopf>(factory));
+        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistMul(factory));
     }, cmd, moellerpopf, {"feistelMul"});
 #endif
 
-#ifdef ENABLE_POPF_RISTRETTO
+#ifdef ENABLE_MRR
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
         DomainSepFeistelRistPopf factory;
         const char* domain = "Feistel POPF OT example (Risretto)";
         factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, RistrettoPopfOT<DomainSepFeistelRistPopf>(factory));
+        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoy(factory));
     }, cmd, ristrettopopf, {"feistel"});
 
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
         DomainSepFeistelMulRistPopf factory;
         const char* domain = "Feistel With Multiplication POPF OT example (Risretto)";
         factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, RistrettoPopfOT<DomainSepFeistelMulRistPopf>(factory));
+        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyMul(factory));
     }, cmd, ristrettopopf, {"feistelMul"});
 #endif
 
@@ -235,8 +235,8 @@ int main(int argc, char** argv)
             << "Protocols:\n"
             << Color::Green << "  -simplest-asm " << Color::Default << "  : to run the ASM-SimplestOT  active secure  1-out-of-2  base OT      " << Color::Red << (spaEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
             << Color::Green << "  -simplest     " << Color::Default << "  : to run the SimplestOT      active secure  1-out-of-2  base OT      " << Color::Red << (spEnabled ? "" : "(disabled)")              << "\n"   << Color::Default
-            << Color::Green << "  -moellerpopf  " << Color::Default << "  : to run the MoellerPopfOT   active secure  1-out-of-2  base OT      " << Color::Red << (popfotMoellerEnabled ? "" : "(disabled)")   << "\n"   << Color::Default
-            << Color::Green << "  -ristrettopopf" << Color::Default << "  : to run the RistrettoPopfOT active secure  1-out-of-2  base OT      " << Color::Red << (popfotRistrettoEnabled ? "" : "(disabled)") << "\n"   << Color::Default
+            << Color::Green << "  -moellerpopf  " << Color::Default << "  : to run the McRosRoyTwist   active secure  1-out-of-2  base OT      " << Color::Red << (popfotMoellerEnabled ? "" : "(disabled)")   << "\n"   << Color::Default
+            << Color::Green << "  -ristrettopopf" << Color::Default << "  : to run the McRosRoy active secure  1-out-of-2  base OT      " << Color::Red << (popfotRistrettoEnabled ? "" : "(disabled)") << "\n"   << Color::Default
             << Color::Green << "  -mr           " << Color::Default << "  : to run the MasnyRindal     active secure  1-out-of-2  base OT      " << Color::Red << (mrEnabled ? "" : "(disabled)")              << "\n"   << Color::Default
             << Color::Green << "  -np           " << Color::Default << "  : to run the NaorPinkas      active secure  1-out-of-2  base OT      " << Color::Red << (npEnabled ? "" : "(disabled)")              << "\n"   << Color::Default
             << Color::Green << "  -iknp         " << Color::Default << "  : to run the IKNP            passive secure 1-out-of-2       OT      " << Color::Red << (iknpEnabled ? "" : "(disabled)")            << "\n"   << Color::Default

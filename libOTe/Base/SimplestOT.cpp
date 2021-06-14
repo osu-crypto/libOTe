@@ -7,7 +7,7 @@
 
 #ifdef ENABLE_SIMPLESTOT
 
-#include "DefaultCurve.h"
+#include "libOTe/Tools/DefaultCurve.h"
 
 namespace osuCrypto
 {

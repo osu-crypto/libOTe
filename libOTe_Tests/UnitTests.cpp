@@ -11,14 +11,6 @@
 #include "libOTe_Tests/AknOt_Tests.h"
 #include "libOTe_Tests/SilentOT_Tests.h"
 #include "libOTe_Tests/bitpolymul_Tests.h"
-#include "libOTe/Base/MoellerPopfOT.h"
-#include "libOTe/Base/RistrettoPopfOT.h"
-#include "libOTe/Base/EKEPopf.h"
-#include "libOTe/Base/MRPopf.h"
-#include "libOTe/Base/FeistelPopf.h"
-#include "libOTe/Base/FeistelMulPopf.h"
-#include "libOTe/Base/FeistelRistPopf.h"
-#include "libOTe/Base/FeistelMulRistPopf.h"
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "libOTe_Tests/Vole_Tests.h"
 
@@ -67,12 +59,14 @@ namespace tests_libOTe
 
         tc.add("Bot_NaorPinkas_Test                     ", Bot_NaorPinkas_Test);
         tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
-        tc.add("Bot_PopfOT_Test (Moeller, EKE)          ", Bot_PopfOT_Test<MoellerPopfOT,DomainSepEKEPopf>);
-        tc.add("Bot_PopfOT_Test (Moeller, MasnyRindal)  ", Bot_PopfOT_Test<MoellerPopfOT,DomainSepMRPopf>);
-        tc.add("Bot_PopfOT_Test (Moeller, Feistel)      ", Bot_PopfOT_Test<MoellerPopfOT,DomainSepFeistelPopf>);
-        tc.add("Bot_PopfOT_Test (Moeller, FeistelMul)   ", Bot_PopfOT_Test<MoellerPopfOT,DomainSepFeistelMulPopf>);
-        tc.add("Bot_PopfOT_Test (Ristretto, Feistel)    ", Bot_PopfOT_Test<RistrettoPopfOT,DomainSepFeistelRistPopf>);
-        tc.add("Bot_PopfOT_Test (Ristretto, FeistelMul) ", Bot_PopfOT_Test<RistrettoPopfOT,DomainSepFeistelMulRistPopf>);
+
+        tc.add("Bot_McQuoidRR_Moeller_EKE_Test          ", Bot_McQuoidRR_Moeller_EKE_Test);
+        tc.add("Bot_McQuoidRR_Moeller_MR_Test           ", Bot_McQuoidRR_Moeller_MR_Test);
+        tc.add("Bot_McQuoidRR_Moeller_F_Test            ", Bot_McQuoidRR_Moeller_F_Test);
+        tc.add("Bot_McQuoidRR_Moeller_FM_Test           ", Bot_McQuoidRR_Moeller_FM_Test);
+        tc.add("Bot_McQuoidRR_Ristrestto_F_Test         ", Bot_McQuoidRR_Ristrestto_F_Test);
+        tc.add("Bot_McQuoidRR_Ristrestto_FM_Test        ", Bot_McQuoidRR_Ristrestto_FM_Test);
+
         tc.add("Bot_MasnyRindal_Test                    ", Bot_MasnyRindal_Test);
         tc.add("Bot_MasnyRindal_Kyber_Test              ", Bot_MasnyRindal_Kyber_Test);
 

@@ -17,8 +17,15 @@ if(DEFINED ENABLE_ALL_OT)
 	else()
 		set(oc_BB OFF)
 	endif()
-	set(ENABLE_POPF_RISTRETTO ${oc_BB} CACHE BOOL "" FORCE)
-	set(ENABLE_POPF_MOELLER   ${oc_BB} CACHE BOOL "" FORCE)
+	set(ENABLE_MRR ${oc_BB} CACHE BOOL "" FORCE)
+
+	# requires sodium 
+	if(${ENABLE_SODIUM} AND SODIUM_MONTGOMERY)
+		set(oc_BB ${ENABLE_ALL_OT})
+	else()
+		set(oc_BB OFF)
+	endif()
+	set(ENABLE_MRR_TWIST   ${oc_BB} CACHE BOOL "" FORCE)
 
 
 	# requires linux 
@@ -47,8 +54,8 @@ endif()
 
 option(ENABLE_SIMPLESTOT     "Build the SimplestOT base OT" OFF)
 option(ENABLE_SIMPLESTOT_ASM "Build the assembly based SimplestOT library" OFF)
-option(ENABLE_POPF_RISTRETTO "Build the PopfOT base OT using Ristretto KA" OFF)
-option(ENABLE_POPF_MOELLER   "Build the PopfOT base OT using Moeller KA" OFF)
+option(ENABLE_MRR            "Build the McQuoidRosulekRoy 20 PopfOT base OT using Ristretto KA" OFF)
+option(ENABLE_MRR_TWIST      "Build the McQuoidRosulekRoy 21 PopfOT base OT using Moeller KA" OFF)
 option(ENABLE_MR             "Build the MasnyRindal base OT" OFF)
 option(ENABLE_MR_KYBER       "Build the Kyber (LWE based) library and MR-Kyber base OT" OFF)
 option(ENABLE_NP             "Build the NaorPinkas base OT" OFF)
@@ -73,8 +80,8 @@ message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF\n\n")
 message(STATUS "Base OT protocols\n=======================================================")
 message(STATUS "Option: ENABLE_SIMPLESTOT     = ${ENABLE_SIMPLESTOT}")
 message(STATUS "Option: ENABLE_SIMPLESTOT_ASM = ${ENABLE_SIMPLESTOT_ASM}")
-message(STATUS "Option: ENABLE_POPF_RISTRETTO = ${ENABLE_POPF_RISTRETTO}")
-message(STATUS "Option: ENABLE_POPF_MOELLER   = ${ENABLE_POPF_MOELLER}")
+message(STATUS "Option: ENABLE_MRR            = ${ENABLE_MRR}")
+message(STATUS "Option: ENABLE_MRR_TWIST      = ${ENABLE_MRR_TWIST}")
 message(STATUS "Option: ENABLE_MR             = ${ENABLE_MR}")
 message(STATUS "Option: ENABLE_MR_KYBER       = ${ENABLE_MR_KYBER}")
 message(STATUS "Option: ENABLE_NP             = ${ENABLE_NP}\n\n")
@@ -113,22 +120,22 @@ endif()
 
 if( NOT ENABLE_SIMPLESTOT AND
 	NOT ENABLE_SIMPLESTOT_ASM AND
-	NOT ENABLE_POPF_RISTRETTO AND
-	NOT ENABLE_POPF_MOELLER AND
+	NOT ENABLE_MRR AND
+	NOT ENABLE_MRR_TWIST AND
 	NOT ENABLE_MR AND
 	NOT ENABLE_MR_KYBER AND
 	NOT ENABLE_NP)
 	message(WARNING "NO Base OT enabled.")
 endif()
 
-if (ENABLE_POPF_MOELLER AND NOT ENABLE_SODIUM)
-	message(FATAL_ERROR "ENABLE_POPF_MOELLER requires ENABLE_SODIUM")
+if (ENABLE_MRR_TWIST AND NOT ENABLE_SODIUM)
+	message(FATAL_ERROR "ENABLE_MRR_TWIST requires ENABLE_SODIUM")
 endif()
 
-if (ENABLE_POPF_MOELLER AND NOT SODIUM_MONTGOMERY)
-	message(FATAL_ERROR "ENABLE_POPF_MOELLER requires libsodium to support Montgomery curve noclamp operations")
+if (ENABLE_MRR_TWIST AND NOT SODIUM_MONTGOMERY)
+	message(FATAL_ERROR "ENABLE_MRR_TWIST requires libsodium to support Montgomery curve noclamp operations. get sodium from https://github.com/osu-crypto/libsodium to enable.")
 endif()
 
-if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_NP OR ENABLE_POPF_RISTRETTO) AND NOT (ENABLE_SODIUM OR ENABLE_RELIC))
-	message(FATAL_ERROR "ENABLE_SIMPLESTOT, ENABLE_MR, ENABLE_NP, and ENABLE_POPF_RISTRETTO require ENABLE_SODIUM or ENABLE_RELIC")
+if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_NP OR ENABLE_MRR) AND NOT (ENABLE_SODIUM OR ENABLE_RELIC))
+	message(FATAL_ERROR "ENABLE_SIMPLESTOT, ENABLE_MR, ENABLE_NP, and ENABLE_MRR require ENABLE_SODIUM or ENABLE_RELIC")
 endif()

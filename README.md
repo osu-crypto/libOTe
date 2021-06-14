@@ -9,6 +9,7 @@ primary design goal of this library to obtain *high performance* while being
  
 * The semi-honest 1-out-of-2 OT [IKNP03].
 * The semi-honest 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf).
+* The semi-honest 1-out-of-2 Silent OT [CRR21].
 * The semi-honest 1-out-of-2 Delta-OT [IKNP03],[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
 * The malicious secure 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
@@ -23,7 +24,7 @@ primary design goal of this library to obtain *high performance* while being
 ## Introduction
  
 This library provides several different classes of OT protocols. First is the 
-base OT protocol of [NP01, CO15, MR19]. These protocol bootstraps all the other
+base OT protocol of [NP01, CO15, MR19, MRR21]. These protocol bootstraps all the other
 OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2,
 1-out-of-N and K-out-of-N, both in the semi-honest and malicious settings.
 
@@ -98,7 +99,7 @@ cd libOTe
 python build.py --setup --boost --relic
 python build.py -- -D ENABLE_RELIC=ON -D ENABLE_ALL_OT=ON
 ```
-It is possible to build only the protocol(s) that are desired via cmake command. In addition, if boost and/or relic are already installed, then `boost` or `relic` can be ommitted from `python build.py setup boost relic`.
+It is possible to build only the protocol(s) that are desired via cmake command. In addition, if boost and/or relic are already installed, then `--boost` or `--relic` can be ommitted from `python build.py --setup --boost --relic`.
 
 See the output of `python build.py` or `cmake .` for available compile options. For example, 
 ```
@@ -115,10 +116,11 @@ python build.py --setup --boost
 python build.py -- -D ENABLE_IKNP=ON -D ENABLE_RELIC=OFF
 ```
 **Enabling/Disabling [libsodium](https://doc.libsodium.org/) (for base OTs):**
- * libsodium can similarly be disabled by not passing `-DENABLE_SODIUM=ON`.
+ * libsodium can similarly be enabled by passing `-DENABLE_SODIUM=ON`.
 In the other direction, when enabling libsodium, if libsodium is installed in a prefix rather than globally, tell cmake where to look for it with
 ```
-PKG_CONFIG_PATH=/path/to/folder_containing_libsodium.pc cmake . -DENABLE_SODIUM=ON
+PKG_CONFIG_PATH=/path/to/folder_containing_libsodium.pc 
+python build.py -- -D ENABLE_SODIUM=ON
 ```
 Disabling one/both of these libraries will disable many/all of the supported base OT protocols.
 In addition, you will need to manually enable the specific protocols you desire, eg `-DENABLE_IKNP=ON` as above.
@@ -171,6 +173,7 @@ or running the library.
 This project has been placed in the public domain and/or MIT license. As such, you are unrestricted in how 
 you use it, commercial or otherwise. However, no warranty of fitness is provided. If you 
 found this project helpful, feel free to spread the word and cite us.
+
  ## Performance
  
 The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel 
@@ -192,11 +195,11 @@ expection that network IO in libOTe is performed in the background by a separate
 | 1-out-of-2 Base     	| malicious   	| NP00       	| **12,876/~**        	| ~             	| ~		    | ~     	| ~         	|
  
 
- 
- 
 
 ## Citation
  
+[NP01]   -    Moni Naor, Benny Pinkas, _Efficient Oblivious Transfer Protocols_. 
+
 [IKNP03] - Yuval Ishai and Joe Kilian and Kobbi Nissim and Erez Petrank, _Extending Oblivious Transfers Efficiently_. 
  
 [KOS15]  - Marcel Keller and Emmanuela Orsini and Peter Scholl, _Actively Secure OT Extension with Optimal Overhead_. [eprint/2015/546](https://eprint.iacr.org/2015/546)
@@ -210,6 +213,7 @@ expection that network IO in libOTe is performed in the background by a separate
 [BLNNOOSS15]  - Sai Sheshank Burra and Enrique Larraia and Jesper Buus Nielsen and Peter Sebastian Nordholt and Claudio Orlandi and Emmanuela Orsini and Peter Scholl and Nigel P. Smart, _High Performance Multi-Party Computation for Binary Circuits Based on Oblivious Transfer_. [eprint/2015/472](https://eprint.iacr.org/2015/472.pdf)
 
 [ALSZ15]  - Gilad Asharov and Yehuda Lindell and Thomas Schneider and Michael Zohner, _More Efficient Oblivious Transfer Extensions with Security for Malicious Adversaries_. [eprint/2015/061](https://eprint.iacr.org/2015/061)
- 
-[NP01]  -    Moni Naor, Benny Pinkas, _Efficient Oblivious Transfer Protocols_. 
+
+[CRR21] - Geoffroy Couteau ,Srinivasan Raghuraman and Peter Rindal, _Silver: Silent VOLE and Oblivious Transfer from Hardness of Decoding Structured LDPC Codes_.
+
 

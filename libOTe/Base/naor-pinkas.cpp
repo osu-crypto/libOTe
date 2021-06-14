@@ -5,7 +5,7 @@
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <cryptoTools/Network/Channel.h>
-#include "DefaultCurve.h"
+#include "libOTe/Tools/DefaultCurve.h"
 
 #define PARALLEL
 
