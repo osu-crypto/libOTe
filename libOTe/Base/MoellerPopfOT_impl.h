@@ -10,7 +10,7 @@ namespace osuCrypto
     template<typename DSPopf>
     auto MoellerPopfOT<DSPopf>::blockToCurve(Block256 b) -> Monty25519
     {
-        static_assert(Monty25519::size == sizeof(Block256));
+        static_assert(Monty25519::size == sizeof(Block256),"");
         return Monty25519(b.data());
     }
 
@@ -19,7 +19,7 @@ namespace osuCrypto
     {
         p.data[Monty25519::size - 1] ^= prng.getBit() << 7;
 
-        static_assert(Monty25519::size == sizeof(Block256));
+        static_assert(Monty25519::size == sizeof(Block256),"");
         return Block256(p.data);
     }
 
