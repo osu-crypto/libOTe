@@ -7,10 +7,10 @@ A fast and portable C++17 library for Oblivious Transfer extension (OTe). The
 primary design goal of this library to obtain *high performance* while being 
 *easy to use*.  This library currently implements:
  
-* The semi-honest 1-out-of-2 OT [IKNP03].
+* The semi-honest 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf).
 * The semi-honest 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf).
 * The semi-honest 1-out-of-2 Silent OT [CRR21].
-* The semi-honest 1-out-of-2 Delta-OT [IKNP03],[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
+* The semi-honest 1-out-of-2 Delta-OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
 * The malicious secure 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
 * The malicious secure 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
@@ -26,15 +26,110 @@ primary design goal of this library to obtain *high performance* while being
 This library provides several different classes of OT protocols. First is the 
 base OT protocol of [NP01, CO15, MR19, MRR21]. These protocol bootstraps all the other
 OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2,
-1-out-of-N and K-out-of-N, both in the semi-honest and malicious settings.
+1-out-of-N and K-out-of-N, both in the semi-honest and malicious settings. See The `frontend` or `libOTe_Tests` folder for examples.
 
 All implementations are highly optimized using fast SSE instructions and vectorization
 to obtain optimal performance both in the single and multi-threaded setting. See 
 the **Performance** section for a comparison between protocols and to other libraries. 
  
-Networking can be performed using both the sockets provided by the library and 
-external socket classes. See the [networking tutorial](https://github.com/ladnir/cryptoTools/blob/57220fc45252d089a7fd90816144e447a2ce02b8/frontend_cryptoTools/Tutorials/Network.cpp#L264)
-for an example.
+Networking can be performed using both the sockets provided by the library and
+external socket classes. See the [networking tutorial](https://github.com/ladnir/cryptoTools/blob/57220fc45252d089a7fd90816144e447a2ce02b8/frontend_cryptoTools/Tutorials/Network.cpp#L264) for an example.
+
+
+## Build
+ 
+The library is *cross platform* and has been tested on Windows, Mac and Linux. 
+There is one mandatory dependency on [Boost 1.75](http://www.boost.org/) (networking),
+and three **optional dependencies** on [libsodium](https://doc.libsodium.org/),
+[Relic](https://github.com/relic-toolkit/relic), or
+[SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
+for Base OTs.
+CMake 3.15+ is required and the build script assumes python 3.
+ 
+The library can be built as
+```
+git clone --recursive https://github.com/osu-crypto/libOTe.git
+cd libOTe
+python build.py --setup --boost --relic
+python build.py -- -D ENABLE_RELIC=ON -D ENABLE_ALL_OT=ON
+```
+The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
+
+### Build Options
+LibOTe can be built with various only the selected protocols enabled. `-D ENABLE_ALL_OT=ON` will enable all available protocols depending on platform/dependancies. The `ON`/`OFF` options include
+
+**Malicious base OT:**
+ * `ENABLE_SIMPLESTOT` the SimplestOT [[CO15]](https://eprint.iacr.org/2015/267.pdf) protocol (relic or sodium).
+ * `ENABLE_SIMPLESTOT_ASM` the SimplestOT base OT protocol [[CO15]](https://eprint.iacr.org/2015/267.pdf) protocol (linux assembly).
+ * `ENABLE_MRR` the McQuoid Rosulek Roy [[MRR20]](https://eprint.iacr.org/2020/1043) protocol (relic or sodium).
+ * `ENABLE_MRR_TWIST` the McQuoid Rosulek Roy [[MRR21]](https://eprint.iacr.org/2021/682) protocol  (sodium fork).
+ * `ENABLE_MR` the Masny Rindal [[MR19]](https://eprint.iacr.org/2019/706.pdf) protocol (relic or sodium).
+ * `ENABLE_MR_KYBER` the Masny Rindal [[MR19]](https://eprint.iacr.org/2019/706.pdf) protocol  (Kyber fork).
+ * `ENABLE_NP` the Naor Pinkas [NP01] base OT (relic or sodium).
+
+**1-out-of-2 OT Extension:**
+ * `ENABLE_IKNP` the Ishai et al [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf) semi-honest protocol.
+ * `ENABLE_KOS` the Keller et al [[KOS15]](https://eprint.iacr.org/2015/546) malicious protocol.
+ * `ENABLE_DELTA_KOS` the Burra et al [[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf),[[KOS15]](https://eprint.iacr.org/2015/546) malicious Delta-OT protocol.
+ * `ENABLE_SILENTOT` the Couteau et al [CRR21],[[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf) semi-honest/malicious protocol.
+
+ **Vole:**
+ * `ENABLE_SILENT_VOLE` the Couteau et al [CRR21] semi-honest/malicious protocol.
+
+ Addiition options can be set for cryptoTools. See the cmake output.
+
+### Dependancies
+
+Dependancies can be managed via the `build.py` script or or installed via an external tool. If an external tool is used install to system location or set  `-D CMAKE_PREFIX_PATH=path/to/install`.
+
+**Boost**
+The library requires boost and can be fetched as
+```
+python build.py --setup --boost
+```
+
+**Enabling/Disabling [Relic](https://github.com/relic-toolkit/relic) (for base OTs):**
+ The library can be built with Relic as
+```
+python build.py --setup --relic
+python build.py -- -D ENABLE_RELIC=ON
+```
+Relic can be disabled by removing `--relic` from the setup and setting `-D ENABLE_RELIC=OFF`.
+
+**Enabling/Disabling [libsodium](https://github.com/osu-crypto/libsodium) (for base OTs):**
+  The library can be built with libsodium as
+```
+python build.py --setup --sodium
+python build.py -- -D ENABLE_SODIUM=ON
+```
+libsodium can be disabled by removing `--sodium` from the setup and setting `-D ENABLE_SODIUM=OFF`. The McQuoid Rosulek Roy 2021 Base OTs uses a twisted curve which additionally require the `noclamp` option for Montgomery curves and is currently only in a [fork](https://github.com/osu-crypto/libsodium) of libsodium. If you prefer the stable libsodium, then install it and add `-D SODIUM_MONTGOMERY=OFF` as a cmake argument to libOTe.
+
+## Install
+
+libOTe can be installed and linked the same way as other cmake projects. By default the dependancies are not installed. To install all dependancies, run the following
+```
+python build.py --setup --boost --relic --sodium --install
+```
+You can also selectively install the dependancies. The install location can be specifying as `--install=path/to/installation`. Otherwise the system default is used.
+
+The main library is similarly installed as
+```
+python build.py --install 
+```
+
+By default, sudo is not used. If installation requires sudo access, then add `--sudo` to the `build.py` script arguments. See `python build.py --help` for full details.
+
+
+## Linking
+libOTe can be linked via cmake as
+```
+find_package(libOTe REQUIRED)
+target_link_libraries(myProject oc::libOTe)
+```
+Other exposed targets are `oc::cryptoTools, oc::tests_cryptoTools, oc::libOTe_Tests`. In addition, cmake variables `libOTe_LIB, libOTe_INC, ENABLE_XXX` will be defined, where `XXX` is one of the libOTe options.
+
+To ensure that cmake can find libOTe, you can either install libOTe or build it locally and set `-D CMAKE_PREFIX_PATH=path/to/libOTe` or provide its location as a cmake `HINTS`, i.e. `find_package(libOTe HINTS path/to/libOTe)`.
+
 
 ## Example Code
 A minimal working example showing how to perform `n` OTs using the IKNP protocol.
@@ -79,77 +174,6 @@ void minimal()
     recverThread.join();
 }
 ```
-
-
-## Build
- 
-The library is *cross platform* and has been tested on Windows, Mac and Linux. 
-There is one mandatory dependency on [Boost 1.75](http://www.boost.org/) (networking),
-and three **optional dependencies** on [libsodium](https://doc.libsodium.org/),
-[Relic](https://github.com/relic-toolkit/relic), or
-[SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
-for Base OTs.
-The Moeller POPF Base OTs additionally require the `noclamp` option for Montgomery curves, which is currently only in a [fork](https://github.com/osu-crypto/libsodium) of libsodium.
-CMake 3.15+ is required and the build script assumes python 3.
- 
-
-```
-git clone --recursive https://github.com/osu-crypto/libOTe.git
-cd libOTe
-python build.py --setup --boost --relic
-python build.py -- -D ENABLE_RELIC=ON -D ENABLE_ALL_OT=ON
-```
-It is possible to build only the protocol(s) that are desired via cmake command. In addition, if boost and/or relic are already installed, then `--boost` or `--relic` can be ommitted from `python build.py --setup --boost --relic`.
-
-See the output of `python build.py` or `cmake .` for available compile options. For example, 
-```
-python build.py -- -D ENABLE_IKNP=ON
-```
-will only build the [iknp04] protocol. Argument after the `--` are forwarded to cmake.
-
-The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
-
-**Enabling/Disabling [Relic](https://github.com/relic-toolkit/relic) (for base OTs):**
- * The library can be built without Relic as
-```
-python build.py --setup --boost
-python build.py -- -D ENABLE_IKNP=ON -D ENABLE_RELIC=OFF
-```
-**Enabling/Disabling [libsodium](https://doc.libsodium.org/) (for base OTs):**
- * libsodium can similarly be enabled by passing `-DENABLE_SODIUM=ON`.
-In the other direction, when enabling libsodium, if libsodium is installed in a prefix rather than globally, tell cmake where to look for it with
-```
-PKG_CONFIG_PATH=/path/to/folder_containing_libsodium.pc 
-python build.py -- -D ENABLE_SODIUM=ON
-```
-Disabling one/both of these libraries will disable many/all of the supported base OT protocols.
-In addition, you will need to manually enable the specific protocols you desire, eg `-DENABLE_IKNP=ON` as above.
-
-## Install
-
-libOTe can be installed and linked the same way as other cmake projects. By default the dependancies are not installed. To install then, run the following
-```
-python build.py --setup --boost --relic --install
-```
-You can also provide an install location by specifying `--install=path/to/installation`. Otherwise the system default is used.
-
-The main library is similarly installed as
-```
-python build.py --install 
-```
-
-By default, sudo is not used. If installation requires sudo access, then add `--sudo` to the `build.py` script arguments. See `python build.py --help` for full details.
-
-
-## Linking
-libOTe can be linked via cmake as
-```
-find_package(libOTe REQUIRED)
-target_link_libraries(myProject oc::libOTe)
-```
-Other exposed targets are `oc::cryptoTools, oc::tests_cryptoTools, oc::libOTe_Tests`. In addition, cmake variables `libOTe_LIB, libOTe_INC, ENABLE_XXX` will be defined, where `XXX` is one of the libOTe options.
-
-To ensure that cmake can find libOTe, you can either install libOTe or build it locally and include libOTe in the `CMAKE_PREFIX_PATH` variable or provide its location as a cmake `HINTS`, i.e. `find_package(libOTe HINTS path/to/libOTe)`.
 
 ## Help
  

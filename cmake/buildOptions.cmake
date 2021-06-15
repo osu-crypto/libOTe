@@ -92,8 +92,7 @@ message(STATUS "Option: ENABLE_IKNP           = ${ENABLE_IKNP}")
 message(STATUS "Option: ENABLE_SILENTOT       = ${ENABLE_SILENTOT}\n\n")
 
 message(STATUS "1-out-of-2 Delta-OT Extension protocols\n=======================================================")
-message(STATUS "Option: ENABLE_DELTA_KOS      = ${ENABLE_DELTA_KOS}")
-message(STATUS "Option: ENABLE_DELTA_IKNP     = ${ENABLE_DELTA_IKNP}\n\n")
+message(STATUS "Option: ENABLE_DELTA_KOS      = ${ENABLE_DELTA_KOS}\n\n")
 
 message(STATUS "1-out-of-N OT Extension protocols\n=======================================================")
 message(STATUS "Option: ENABLE_OOS            = ${ENABLE_OOS}")
