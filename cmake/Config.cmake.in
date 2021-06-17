@@ -15,7 +15,7 @@ set(ENABLE_KKRT           @ENABLE_KKRT@)
 set(ENABLE_RR             @ENABLE_RR@)
 set(ENABLE_AKN            @ENABLE_AKN@)
 set(ENABLE_SILENT_VOLE    @ENABLE_SILENT_VOLE@)
-find_package(cryptoTools REQUIRED HINTS "${CMAKE_CURRENT_LIST_DIR}")
+find_package(cryptoTools REQUIRED HINTS "${CMAKE_CURRENT_LIST_DIR}/..")
 
 
 include("${CMAKE_CURRENT_LIST_DIR}/libOTeTargets.cmake")
