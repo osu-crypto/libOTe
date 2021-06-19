@@ -5,5 +5,5 @@ import sys
 
 if __name__ == "__main__":
 	
-	cryptoTools.build.main()
+	cryptoTools.build.main("libOTe")
 	
