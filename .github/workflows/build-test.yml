@@ -27,12 +27,59 @@ jobs:
             submodules: recursive
 
       # Runs a set of commands using the runners shell
-      - name: build test
-        run: |
-          python3 build.py --setup --relic --boost --par=4
-          python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON 
-          ./out/build/linux/frontend/frontend_libOTe -u
+      - name: build boost
+        run:  python3 build.py --setup --boost --par=4
+
+      - name: build relic
+        run:  python3 build.py --setup --relic --par=4
           
+      - name: build libOTe
+        run:  python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON 
+
+      - name: unit tests
+        run:  ./out/build/linux/frontend/frontend_libOTe -u
+       
+
+      - name: find source tree
+        run: |
+            cd tests/cmakeTests
+            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -D CMAKE_PREFIX_PATH=../../
+            cmake --build out/
+            ./out/main
+            rm -rf out/
+            cd ../..
+            
+      - name: hint test
+        run: |
+            cd tests/cmakeTests
+            cmake -S . -B out/  -D LIBOTE_HINT=../..
+            cmake --build out/
+            ./out/main
+            rm -rf out/
+            cd ../..
+
+      - name: install prefix test
+        run: |
+            python3 build.py --setup --install=~/install
+            python3 build.py --install=~/install
+            cd tests/cmakeTests
+            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
+            cmake --build out/
+            ./out/main
+            rm -rf out/
+            cd ../..
+            
+
+      - name: install test
+        run: |
+            python3 build.py --setup --install --sudo
+            python3 build.py --install --sudo
+            cd tests/cmakeTests
+            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release
+            cmake --build out/
+            ./out/main
+            rm -rf out/
+            cd ../..
 
   build-windows:
     # The type of runner that the job will run on
@@ -48,12 +95,49 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
 
       # Runs a set of commands using the runners shell
-      - name: build test
-        run: |
-          python3 build.py --setup --relic --boost --par=4
-          python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON  -G Ninja
-          ./out/build/x64-Release/frontend/frontend_libOTe.exe -u
+      - name: build boost
+        run: python3 build.py --setup --boost --par=4
+
+      - name: build relic
+        run: python3 build.py --setup --relic --par=4
+        
+      - name: build libOTe
+        run:  python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON  -G Ninja
+
+        
+      - name: unit test
+        run:  ./out/build/x64-Release/frontend/frontend_libOTe.exe -u
           
+      - name: find source tree
+        run: |
+            cd tests/cmakeTests
+            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -D CMAKE_PREFIX_PATH=../../
+            cmake --build out/ --config Release
+            ./out/Release/main.exe
+            rm -rf out/
+            cd ../..
+            
+      - name: hint test
+        run: |
+            python3 build.py --setup 
+            python3 build.py
+            cd tests/cmakeTests
+            cmake -S . -B out/  -D LIBOTE_HINT=../..
+            cmake --build out/ --config Release
+            ./out/Release/main.exe
+            rm -rf out/
+            cd ../..
+
+      - name: install prefix test
+        run: |
+            python3 build.py --setup --install=~/install 
+            python3 build.py --install=~/install 
+            cd tests/cmakeTests
+            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
+            cmake --build out/ --config Release
+            ./out/Release/main.exe
+            rm -rf out/
+            cd ../..
   #build-macOS:
   #  # The type of runner that the job will run on
   #  runs-on: macos-11.0

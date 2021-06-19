@@ -1,7 +1,7 @@
 
 #project(libOTe_Tests)
 
-file(GLOB_RECURSE SRCS *.cpp) 
+file(GLOB SRCS *.cpp) 
 add_library(libOTe_Tests STATIC ${SRCS})
 
 target_link_libraries(libOTe_Tests libOTe)
