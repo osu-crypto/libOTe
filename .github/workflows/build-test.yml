@@ -114,7 +114,7 @@ jobs:
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -D CMAKE_PREFIX_PATH=../../
             cmake --build out/ --config Release
             ./out/Release/main.exe
-            rm -rf out/
+            rm -r -fo out/
             cd ../..
             
       - name: hint test
@@ -125,7 +125,7 @@ jobs:
             cmake -S . -B out/  -D LIBOTE_HINT=../..
             cmake --build out/ --config Release
             ./out/Release/main.exe
-            rm -rf out/
+            rm -r -fo out/
             cd ../..
 
       - name: install prefix test
@@ -136,7 +136,7 @@ jobs:
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
             cmake --build out/ --config Release
             ./out/Release/main.exe
-            rm -rf out/
+            rm -r -fo out/
             cd ../..
   #build-macOS:
   #  # The type of runner that the job will run on
