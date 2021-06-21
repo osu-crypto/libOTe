@@ -19,11 +19,6 @@ namespace osuCrypto
     void ldpcMain(oc::CLP& cmd)
     {
 
-        //return relaxedSolver();
-
-        if (cmd.isSet("print"))
-            return printGen(cmd);
-
         if (cmd.isSet("sample"))
             return sampleExp(cmd);
 

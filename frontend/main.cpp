@@ -24,7 +24,7 @@ using namespace osuCrypto;
 #include "ExampleNChooseOne.h"
 #include "ExampleSilent.h"
 #include "ExampleVole.h"
-
+#include "libOTe/Tools/LDPC/Test.h"
 
 static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
@@ -110,11 +110,11 @@ int main(int argc, char** argv)
     //    return 0;
     //}
 
-    //if (cmd.isSet("ldpc"))
-    //{
-    //    ldpcMain(cmd);
-    //    return 0;
-    //}
+    if (cmd.isSet("ldpc"))
+    {
+        ldpcMain(cmd);
+        return 0;
+    }
 
     if (cmd.isSet(unitTestTag))
     {

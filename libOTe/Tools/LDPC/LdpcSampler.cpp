@@ -98,6 +98,7 @@ namespace osuCrypto
         if (printDiag)
         {
 
+            //std::vector<std::vector<u64>> hh;
             SparseMtx H(rows, cols, points);
             std::cout << H << std::endl << std::endl;
 
@@ -108,20 +109,31 @@ namespace osuCrypto
             {
                 std::cout << "{{ ";
                 bool first = true;
+                //hh.emplace_back();
 
                 for (u64 j = 0; j < (u64)H.row(i).size(); ++j)
                 {
+                    auto c = H.row(i)[j];
+                    c = (c + cols - 1 - i) % cols;
+
                     if (!first)
                         std::cout << ", ";
-                    std::cout << H.row(i)[j];
+                    std::cout << c;
+
+                    //hh[i].push_back(H.row(i)[j]);
                     first = false;
                 }
 
                 for (u64 j = 0; j < (u64)H.row(i + cols).size(); ++j)
                 {
+
+                    auto c = H.row(i+cols)[j];
+                    c = (c + cols - 1 - i) % cols;
+
                     if (!first)
                         std::cout << ", ";
-                    std::cout << H.row(i + cols)[j];
+                    std::cout << c;
+                    //hh[i].push_back(H.row(i+cols)[j]);
                     first = false;
                 }
 
@@ -131,6 +143,26 @@ namespace osuCrypto
             }
             std::cout << "}}"<< std::endl;
 
+
+            //{
+            //    u64 rowIdx = 0;
+            //    for (auto row : hh)
+            //    {
+            //        std::set<u64> s;
+            //        std::cout << "(";
+            //        for (auto c : row)
+            //        {
+            //            std::cout << int(c) << " ";
+            //            s.insert();
+            //        }
+            //        std::cout << std::endl << "{";
+
+            //        for (auto c : s)
+            //            std::cout << c << " ";
+            //        std::cout << std::endl;
+            //        ++rowIdx;
+            //    }
+            //}
         }
     }
 
