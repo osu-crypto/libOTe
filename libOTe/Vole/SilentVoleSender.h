@@ -51,7 +51,7 @@ namespace osuCrypto
         KosOtExtReceiver mKosRecver;
 #endif
         MultType mMultType = MultType::slv5;
-        S1DiagRegRepEncoder mEncoder;
+        SilverEncoder mEncoder;
 
 
         span<block> mB;

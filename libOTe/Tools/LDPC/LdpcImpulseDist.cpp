@@ -176,8 +176,8 @@ namespace osuCrypto
             weights.resize(n);
 
             //auto p = 0.9999;
-            auto llr0 = encodeLLR(0.501, 0);
-            auto llr1 = encodeLLR(0.999, 1);
+            auto llr0 = LdpcDecoder::encodeLLR(0.501, 0);
+            auto llr1 = LdpcDecoder::encodeLLR(0.999, 1);
             //auto lr0 = encodeLR(0.501, 0);
             //auto lr1 = encodeLR(0.9999999, 1);
 
@@ -338,7 +338,7 @@ namespace osuCrypto
             for (u64 i = m; i < n; ++i)
             {
                 auto col = permute[i];
-                codeword[col] = decodeLLR(D.mL[col]);
+                codeword[col] = LdpcDecoder::decodeLLR(D.mL[col]);
 
 
                 if (codeword[col])
@@ -621,7 +621,7 @@ namespace osuCrypto
         return ss.str();
     }
 
-    void tests::LdpcDecode_impulse_test(const oc::CLP& cmd)
+    void LdpcDecode_impulse(const oc::CLP& cmd)
     {
         // general parameter
         // the number of rows of H, "m"
@@ -930,19 +930,19 @@ namespace osuCrypto
                 else if (silver)
                 {
 
-                    S1DiagRegRepEncoder enc;
-                    LdpcDiagRegRepeaterEncoder::Code code;
+                    SilverEncoder enc;
+                    SilverCode code;
                     if (colWeight == 5)
-                        code = LdpcDiagRegRepeaterEncoder::Code::Weight5;
+                        code = SilverCode::Weight5;
                     else if (colWeight == 11)
-                        code = LdpcDiagRegRepeaterEncoder::Code::Weight11;
+                        code = SilverCode::Weight11;
                     else
                     {
                         std::cout << "-slv can only be used with -cw 5 or -cw 11" << std::endl;
                         throw RTE_LOC;
                     }
 
-                    enc.mL.init(rows, colWeight);
+                    enc.mL.init(rows, code);
                     enc.mR.init(rows, code, extend);
                     H = enc.getMatrix();
                 }

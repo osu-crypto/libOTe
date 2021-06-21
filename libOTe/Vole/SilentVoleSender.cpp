@@ -100,7 +100,7 @@ namespace osuCrypto
         u64& mN2,
         u64& mN,
         u64& gap,
-        S1DiagRegRepEncoder& mEncoder);
+        SilverEncoder& mEncoder);
 
     void SilentVoleSender::configure(
         u64 numOTs, u64 secParam)

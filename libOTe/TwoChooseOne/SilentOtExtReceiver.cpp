@@ -198,7 +198,7 @@ namespace osuCrypto
         u64& mN2,
         u64& mN,
         u64& gap,
-        S1DiagRegRepEncoder& mEncoder);
+        SilverEncoder& mEncoder);
 
     void QuasiCyclicConfigure(
         u64 numOTs, u64 secParam,

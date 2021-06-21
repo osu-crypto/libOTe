@@ -59,7 +59,7 @@ namespace osuCrypto
         MultType mMultType = MultType::slv5;
 
         // The silver encoder.
-        S1DiagRegRepEncoder mEncoder;
+        SilverEncoder mEncoder;
 
         // The multi-point punctured PRF for generating
         // the sparse vectors.

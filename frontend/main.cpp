@@ -24,7 +24,7 @@ using namespace osuCrypto;
 #include "ExampleNChooseOne.h"
 #include "ExampleSilent.h"
 #include "ExampleVole.h"
-#include "libOTe/Tools/LDPC/Test.h"
+#include "libOTe/Tools/LDPC/LdpcImpulseDist.h"
 
 static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
@@ -112,7 +112,7 @@ int main(int argc, char** argv)
 
     if (cmd.isSet("ldpc"))
     {
-        ldpcMain(cmd);
+        LdpcDecode_impulse(cmd);
         return 0;
     }
 

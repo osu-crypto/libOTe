@@ -5,14 +5,9 @@
 #include "LdpcSampler.h"
 #include "Util.h"
 #include <cmath>
-#include <numeric>      // std::iota
+#include <numeric>     
 #include <algorithm> 
 #include <iomanip>
-
-#ifdef ALT_ENCODER
-#include "libOTe/Tools/LDPC/alt/LDPC_generator.h"
-#include "libOTe/Tools/LDPC/alt/LDPC_decoder.h"
-#endif
 
 #include "LdpcImpulseDist.h"
 namespace osuCrypto {
@@ -44,8 +39,6 @@ namespace osuCrypto {
         assert(codeword.size() == n);
 
         std::array<double, 2> wVal{ { mP / (1 - mP), (1 - mP) / mP} };
-        //std::fill(mR.begin(), mR.end(), nan);
-        //std::fill(mM.begin(), mM.end(), nan);
 
         // #1
         for (u64 i = 0; i < n; ++i)
@@ -255,30 +248,6 @@ namespace osuCrypto {
 
                     mM(j, k) = (s ^ ss) ? vv : -vv;
                 }
-
-                //for (u64 i : mH.mRows[j])
-                //{
-                //    // \Pi_{k in Nj \ {i} }  (r_k^j + 1)/(r_k^j - 1)
-                //    double v = 0;
-                //    double s = 1;
-
-                //    for (u64 k : mH.mRows[j])
-                //    {
-                //        if (k != i)
-                //        {
-                //            v += phi(abs(mR(j, k)));
-                //            s *= sgn(mR(j, k));
-                //        }
-                //    }
-
-                //    // m_j^i 
-                //    auto mm = s * phi(v);
-                //    //assert(mM(j, i) == mm);
-                //    if (std::abs(mM(j, i) - mm) > 0.001)
-                //    {
-                //        std::cout << mM(j, i) << " == " << mm << " " << j << " " << i << std::endl;
-                //    }
-                //}
             }
 
             // i indexes a column, [1,...,n]
@@ -296,50 +265,7 @@ namespace osuCrypto {
                 }
 
                 c[i] = (mL[i] >= 0) ? 0 : 1;
-
-                //// j indexes a row, [1,...,m]
-                //for (u64 j : mH.mCols[i])
-                //{
-                //    // r_i^j = w_i * Pi_{k in Ni \ {j} } m_k^i
-                //    auto vv = mW[i];
-
-                //    // j indexes a row, [1,...,m]
-                //    for (u64 k : mH.mCols[i])
-                //    {
-                //        if (k != j)
-                //        {
-                //            vv += mM(k, i);
-                //        }
-                //    }
-
-                //    assert(mR(j, i) - vv < 0.00001);
-                //}
             }
-
-            //std::vector<double> LL(c.size());
-            // i indexes a column, [1,...,n]
-            //for (u64 i = 0; i < n; ++i)
-            //{
-            //    //log L(ci | wi, m^i)
-            //    mL[i] = mW[i];
-
-            //    // k indexes a row, [1,...,m]
-            //    for (u64 k : mH.mCols[i])
-            //    {
-            //        assert(mM(k, i) != nan);
-            //        mL[i] += mM(k, i);
-            //    }
-
-            //    c[i] = (mL[i] >= 0) ? 0 : 1;
-
-            //}
-
-            //if (ii % 1000 == 0)
-            //{
-            //    for (auto L : LL)
-            //        std::cout << L << " ";
-            //    std::cout << std::endl;
-            //}
 
             if (check(c))
             {
@@ -356,12 +282,7 @@ namespace osuCrypto {
 
     std::vector<u8> LdpcDecoder::altDecode(span<u8> codeword, bool minSum, u64 maxIter)
     {
-
-        //std::vector<uint8_t> LdpcCode::decode(std::vector<double> llr_vec, auto max_iter, bool min_sum) {
-
         auto _N = mH.cols();
-        //auto _M = mH.rows();
-        //std::vector<double> llr_vec(_N);
         std::array<double, 3> wVal{
             {std::log(mP / (1 - mP)),
             std::log((1 - mP) / mP)
@@ -461,7 +382,6 @@ namespace osuCrypto {
 
         } // Iteration loop end
 
-
         return {};
 
         //}
@@ -541,13 +461,7 @@ namespace osuCrypto {
                     {
                         if (k != j)
                         {
-                            //auto mr = mM.rows();
-                            //assert(j < mR.rows());
-                            //assert(i < mR.cols());
-                            //assert(i < mM.rows());
-                            //assert(k < mM.cols());
                             assert(mM(k, i) != nan);
-
                             mR(j, i) += mM(k, i);
                         }
                     }
@@ -582,7 +496,6 @@ namespace osuCrypto {
 
     bool LdpcDecoder::check(const span<u8>& data) {
 
-        //bool isCW = true;
         // j indexes a row, [1,...,m]
         for (u64 j = 0; j < mH.rows(); ++j)
         {
@@ -601,76 +514,7 @@ namespace osuCrypto {
         }
         return true;
 
-        //for (int i = 0; i < mH.rows(); i++) {
-        //    auto check_node = check_to_data_id[i];
-        //    bool res = false;
-        //    for (int j = 0; j < check_degree[i]; j++)
-        //        res ^= data[check_node[j]];
-        //    if (res)return false;
-        //}
-        //return true;
     }
-
-
-    //bool LdpcDecoder::decode2(span<u8> data, u64 iterations)
-    //{
-    //    auto code_len = mH.cols();
-    //    auto msg_len = mK;
-    //    //first: initialze
-    //    //bool* data_nodes_bin = (bool*)data_nodes;
-    //    //bool* messages_bin = (bool*)messages;
-    //    std::vector<u8> data_nodes_bin(code_len);
-    //    std::vector<u8> messages_bin(msg_len);
-    //    auto& data_to_check = mH.mRows;
-    //    auto& check_to_data = mH.mCols;
-
-    //    std::vector<u64> data_degree(mH.rows()), check_degree(mH.cols());
-    //    for (u64 i = 0; i < data_degree.size(); ++i)
-    //        data_degree[i] = mH.mRows[i].size();
-    //    for (u64 i = 0; i < check_degree.size(); ++i)
-    //        check_degree[i] = mH.mCols[i].size();
-
-    //    for (int i = 0; i < code_len; i++) {
-    //        data_nodes_bin[i] = data[i];
-    //        auto data_node = data_to_check[i];
-    //        for (int j = 0; j < data_degree[i]; j++)
-    //            messages_bin[data_node[j]] = data_nodes_bin[i];
-    //    }
-    //    //second: bp
-    //    for (int iter = 0; iter < iterations; iter++) {
-    //        for (int i = 0; i < code_len - msg_len; i++) {
-    //            bool msg_sum = false;
-    //            auto check_node = check_to_data[i];
-    //            for (int j = 0; j < check_degree[i]; j++) {
-    //                msg_sum ^= messages_bin[check_node[j]];
-    //            }
-    //            for (int j = 0; j < check_degree[i]; j++) {
-    //                messages_bin[check_node[j]] = msg_sum ^ messages_bin[check_node[j]];
-    //            }
-    //        }
-    //        for (int i = 0; i < code_len; i++) {
-    //            auto data_node = data_to_check[i];
-    //            int pos = 0, neg = 0;
-    //            for (int j = 0; j < data_degree[i]; j++) {
-    //                if (messages_bin[data_node[j]])pos++;
-    //                else neg++;
-    //            }
-
-    //            int t = pos - neg + (data_nodes_bin[i] ? 1 : -1);
-    //            for (int j = 0; j < data_degree[i]; j++) {
-    //                int tt = messages_bin[data_node[j]] ? (t - 1) : (t + 1);
-    //                messages_bin[data_node[j]] = (tt == 0) ? data_nodes_bin[i] : (tt > 0);
-    //            }
-    //            data[i] = t == 0 ? data_nodes_bin[i] : t > 0;
-    //        }
-    //        //check
-    //        if (check(data)) {
-    //            return true;
-    //        }
-    //    }
-
-    //    return false;
-    //}
 
     void tests::LdpcDecode_pb_test(const oc::CLP& cmd)
     {
@@ -701,17 +545,6 @@ namespace osuCrypto {
                 ++tries;
             }
 
-            //std::cout << "samples " << tries << std::endl;
-
-            //u64 d;
-
-            //if (cols < 35)
-            //    d = minDist(H.dense(), false).second.size();
-
-#ifdef ALT_ENCODER
-            LDPC_bp_decoder DD((int)cols, (int)rows);
-            DD.init(H);
-#endif
             D.init(H);
             std::vector<u8> m(k), m2, code(cols);
 
@@ -733,8 +566,6 @@ namespace osuCrypto {
                 }
 
                 u64 e = 0;
-                //auto m2 = D.logbpDecode(c);
-                //auto m3 = DD.logbpDecode(c);
                 m2 = D.logbpDecode2(c);
 
 
@@ -742,7 +573,6 @@ namespace osuCrypto {
                 {
                     ++e;
                     min = std::min<u64>(min, ease);
-                    //std::cout << "logbpDecode2 failed " << ease << std::endl;
                 }
                 m2 = D.altDecode(c, false);
 
@@ -750,7 +580,6 @@ namespace osuCrypto {
                 {
                     ++e;
                     min = std::min<u64>(min, ease);
-                    //std::cout << "altDecode 0 failed " << ease << std::endl;
                 }
 
 
@@ -760,24 +589,9 @@ namespace osuCrypto {
                 {
                     min = std::min<u64>(min, ease);
                     ++e;
-                    //std::cout << "altDecode 1 failed " << ease << std::endl;
                 }
                 if (e == ee)
                     break;
-                //if (m2 != m && !logBP)
-                //    logBP = ease;
-
-                //auto m3 = D.bpDecode(c);
-                //if (m3 != m && !BP)
-                //    BP = ease;
-
-                //auto m4 = D.minSumDecode(c);
-                //if (m4 != m && !minSum)
-                //    minSum = ease;
-
-                //if (logBP && BP && minSum)
-                //    break;
-
                 ++ease;
             }
             if (ease < 4 || min < 4)
