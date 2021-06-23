@@ -36,7 +36,8 @@ if __name__ == "__main__":
     par = cryptoTools.build.getParallel(mainArgs)
 
     bitpolymul = "--bitpolymul" in mainArgs
-    if bitpolymul:
+    setup = "--setup" in mainArgs
+    if setup and bitpolymul:
         Setup(install, prefix, par)
-    else:
-        cryptoTools.build.main("libOTe")
+
+    cryptoTools.build.main("libOTe")
