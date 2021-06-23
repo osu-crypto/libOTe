@@ -709,7 +709,8 @@ namespace osuCrypto
 
     void SilentOtExtSender::randMulQuasiCyclic()
     {
-        using namespace bpm;
+#ifdef ENABLE_BITPOLYMUL
+
         const u64 rows(128);
         auto nBlocks = mN / rows;
         auto n2Blocks = mN2 / rows;
@@ -819,6 +820,11 @@ namespace osuCrypto
 
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i].join();
+
+#else
+    std::cout << "bit poly mul is not enabled. Please recompile with ENABLE_BITPOLYMUL defined. " LOCATION << std::endl;
+    throw RTE_LOC;
+#endif
 
     }
 }

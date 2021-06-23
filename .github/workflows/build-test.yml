@@ -29,12 +29,15 @@ jobs:
       # Runs a set of commands using the runners shell
       - name: build boost
         run:  python3 build.py --setup --boost --par=4
-
+        
       - name: build relic
         run:  python3 build.py --setup --relic --par=4
+
+      - name: build bitpolymul
+        run:  python3 build.py --setup --bitpolymul --par=4
           
       - name: build libOTe
-        run:  python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON 
+        run:  python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON -DENABLE_BITPOLYMUL=ON -DENABLE_CIRCUIT=ON
 
       - name: unit tests
         run:  ./out/build/linux/frontend/frontend_libOTe -u
@@ -101,7 +104,7 @@ jobs:
         run:  python3 build.py --setup --relic --par=4
           
       - name: build libOTe
-        run:  python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON 
+        run:  python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON -D ENABLE_SSE=OFF
 
       - name: unit tests
         run:  ./out/build/linux/frontend/frontend_libOTe -u

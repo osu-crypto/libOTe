@@ -771,7 +771,7 @@ namespace osuCrypto
 						throw RTE_LOC;
 				}
 
-				if (col.size() != expSize)
+				if (col.usize() != expSize)
 					throw RTE_LOC;
 
 				++d1;

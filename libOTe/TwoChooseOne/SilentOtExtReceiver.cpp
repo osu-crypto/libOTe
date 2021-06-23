@@ -697,7 +697,7 @@ namespace osuCrypto
 
     void SilentOtExtReceiver::randMulQuasiCyclic(ChoiceBitPacking packing)
     {
-        using namespace bpm;
+#ifdef ENABLE_BITPOLYMUL
         setTimePoint("recver.expand.QuasiCyclic");
         const u64 rows(128);
         auto nBlocks = mN / rows;
@@ -868,7 +868,11 @@ namespace osuCrypto
 
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i].join();
+#else
 
+        std::cout << "bit poly mul is not enabled. Please recompile with ENABLE_BITPOLYMUL defined. " LOCATION << std::endl;
+        throw RTE_LOC;
+#endif
     }
 
     void SilentOtExtReceiver::clear()

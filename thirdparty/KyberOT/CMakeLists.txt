@@ -8,9 +8,14 @@ SET(SRCS  kem.c poly.c polyvec.c polyvec_pointwise_acc.s fips202.c reduce.c cbde
 
 add_library(KyberOT STATIC ${SRCS})
 
+
+# make projects that include libOTe use this as an include folder
 target_include_directories(KyberOT PUBLIC 
-                    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
-                    $<INSTALL_INTERFACE:include/KyberOT>) 
+                    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
+                    $<INSTALL_INTERFACE:include>) 
+target_include_directories(KyberOT PUBLIC 
+                    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+                    $<INSTALL_INTERFACE:include>) 
 
 #############################################
 #            Install                        #
