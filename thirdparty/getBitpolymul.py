@@ -13,7 +13,7 @@ def get(install, prefix, par):
         os.system("git clone https://github.com/ladnir/bitpolymul.git")
 
     os.chdir(cwd + "/bitpolymul")
-    os.system("git checkout fd8ddf4ad91d2db9ef0f3b6abca227c1fe8cfa04")
+    os.system("git checkout 325e8704ba9243faeb0bed9aa97a64196d659055")
 
     buildDir = cwd + "/bitpolymul/build"
         
