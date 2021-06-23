@@ -9,8 +9,13 @@ if(NOT DEFINED OC_THIRDPARTY_HINT)
     else()
         set(OC_THIRDPARTY_HINT "${CMAKE_CURRENT_LIST_DIR}/../cryptoTools/thirdparty/unix/")
     endif()
-    #message(STATUS "\n\n setting OC_THIRDPARTY_HINT=${OC_THIRDPARTY_HINT}")
-
+endif()
+if(NOT DEFINED LIBOTE_THIRDPARTY_HINT)
+    if(MSVC)
+        set(LIBOTE_THIRDPARTY_HINT "${CMAKE_CURRENT_LIST_DIR}/../thirdparty/win/")
+    else()
+        set(LIBOTE_THIRDPARTY_HINT "${CMAKE_CURRENT_LIST_DIR}/../thirdparty/unix/")
+    endif()
 endif()
 
 
