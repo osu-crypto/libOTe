@@ -39,17 +39,16 @@ namespace osuCrypto
         u64& mN2,
         u64& mN,
         u64& gap,
-        S1DiagRegRepEncoder& mEncoder)
+        SilverEncoder& mEncoder)
     {
         mRequestedNumOTs = numOTs;
         auto mScaler = 2;
 
         auto code = mMultType == MultType::slv11 ?
-            LdpcDiagRegRepeaterEncoder::Weight11 :
-            LdpcDiagRegRepeaterEncoder::Weight5;
+            SilverCode::Weight11 :
+            SilverCode::Weight5;
 
-        gap = LdpcDiagRegRepeaterEncoder::gap(code);
-        u64 colWeight = LdpcDiagRegRepeaterEncoder::weight(code);
+        gap = SilverCode::gap(code);
 
         mNumPartitions = getPartitions(mScaler, numOTs, secParam);
         mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
@@ -59,7 +58,7 @@ namespace osuCrypto
         if (mN2 % mScaler)
             throw RTE_LOC;
 
-        mEncoder.mL.init(mN, colWeight);
+        mEncoder.mL.init(mN, code);
         mEncoder.mR.init(mN, code, true);
     }
 }
@@ -710,7 +709,8 @@ namespace osuCrypto
 
     void SilentOtExtSender::randMulQuasiCyclic()
     {
-        using namespace bpm;
+#ifdef ENABLE_BITPOLYMUL
+
         const u64 rows(128);
         auto nBlocks = mN / rows;
         auto n2Blocks = mN2 / rows;
@@ -820,6 +820,11 @@ namespace osuCrypto
 
         for (u64 i = 0; i < thrds.size(); ++i)
             thrds[i].join();
+
+#else
+    std::cout << "bit poly mul is not enabled. Please recompile with ENABLE_BITPOLYMUL defined. " LOCATION << std::endl;
+    throw RTE_LOC;
+#endif
 
     }
 }

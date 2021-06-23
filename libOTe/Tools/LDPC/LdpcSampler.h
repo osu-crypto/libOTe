@@ -737,5 +737,4 @@ namespace osuCrypto
 
 
 
-    void sampleExp(oc::CLP& cmd);
 }

@@ -107,10 +107,12 @@ namespace osuCrypto
 			Block256 curveToBlock(Monty25519 p, PRNG& prng);
 		};
 	}
-
+	//DomainSepEKEPopf requires SSE
+#ifdef ENABLE_SSE
 	// The McQuoid Rosulek Roy OT protocol over the main and twisted curve 
 	// with the EKE Popf impl. See https://eprint.iacr.org/2021/682
 	using McRosRoyTwist = details::McRosRoyTwist<DomainSepEKEPopf>;
+#endif
 
 	// The McQuoid Rosulek Roy OT protocol over the main and twisted curve 
 	// with the Feistel Popf impl. See https://eprint.iacr.org/2021/682

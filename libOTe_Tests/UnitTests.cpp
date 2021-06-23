@@ -12,6 +12,7 @@
 #include "libOTe_Tests/SilentOT_Tests.h"
 #include "libOTe_Tests/bitpolymul_Tests.h"
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
+#include "libOTe/Tools/LDPC/LdpcDecoder.h"
 #include "libOTe_Tests/Vole_Tests.h"
 
 using namespace osuCrypto;
@@ -32,22 +33,21 @@ namespace tests_libOTe
         tc.add("Tools_bitShift_test                     ", Tools_bitShift_test);
         tc.add("Tools_modp_test                         ", Tools_modp_test);
         tc.add("Tools_bitpolymul_test                   ", Tools_bitpolymul_test);
-
+                                              
+        tc.add("LdpcDecode_pb_test                      ", tests::LdpcDecode_pb_test);
+        
+        tc.add("ldpc_Mtx_make_test                      ", tests::Mtx_make_test);
+        tc.add("ldpc_Mtx_add_test                       ", tests::Mtx_add_test);
+        tc.add("ldpc_Mtx_mult_test                      ", tests::Mtx_mult_test);
+        tc.add("ldpc_Mtx_invert_test                    ", tests::Mtx_invert_test);
+        tc.add("ldpc_Mtx_block_test                     ", tests::Mtx_block_test);
 
         tc.add("LdpcEncoder_diagonalSolver_test         ", tests::LdpcEncoder_diagonalSolver_test);
         tc.add("LdpcEncoder_encode_test                 ", tests::LdpcEncoder_encode_test);
         tc.add("LdpcEncoder_encode_g0_test              ", tests::LdpcEncoder_encode_g0_test);
-        tc.add("LdpcEncoder_encode_Trans_g0_test        ", tests::LdpcEncoder_encode_Trans_g0_test);
-        tc.add("LdpcZpStarEncoder_encode_test           ", tests::LdpcZpStarEncoder_encode_test);
-        tc.add("LdpcZpStarEncoder_encode_Trans_test     ", tests::LdpcZpStarEncoder_encode_Trans_test);
         tc.add("LdpcS1Encoder_encode_test               ", tests::LdpcS1Encoder_encode_test);
         tc.add("LdpcS1Encoder_encode_Trans_test         ", tests::LdpcS1Encoder_encode_Trans_test);
-        tc.add("LdpcDiagBandEncoder_encode_test         ", tests::LdpcDiagBandEncoder_encode_test);
-        tc.add("LdpcComposit_ZpDiagBand_encode_test     ", tests::LdpcComposit_ZpDiagBand_encode_test);
-        tc.add("LdpcComposit_ZpDiagBand_Trans_test      ", tests::LdpcComposit_ZpDiagBand_Trans_test);
 
-        //tc.add("LdpcComposit_ZpDiagRep_encode_test      ", tests::LdpcComposit_ZpDiagRep_encode_test);
-        //tc.add("LdpcComposit_ZpDiagRep_Trans_test       ", tests::LdpcComposit_ZpDiagRep_Trans_test);
 
         tc.add("LdpcComposit_RegRepDiagBand_encode_test ", tests::LdpcComposit_RegRepDiagBand_encode_test);
         tc.add("LdpcComposit_RegRepDiagBand_Trans_test  ", tests::LdpcComposit_RegRepDiagBand_Trans_test);

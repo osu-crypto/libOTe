@@ -105,7 +105,7 @@ namespace osuCrypto
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
         // The Silver encoder for MultType::slv5, MultType::slv11
-        S1DiagRegRepEncoder mEncoder;
+        SilverEncoder mEncoder;
         
         // A flag that helps debug
         bool mDebug = false;

@@ -24,7 +24,7 @@ using namespace osuCrypto;
 #include "ExampleNChooseOne.h"
 #include "ExampleSilent.h"
 #include "ExampleVole.h"
-
+#include "libOTe/Tools/LDPC/LdpcImpulseDist.h"
 
 static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
@@ -110,11 +110,11 @@ int main(int argc, char** argv)
     //    return 0;
     //}
 
-    //if (cmd.isSet("ldpc"))
-    //{
-    //    ldpcMain(cmd);
-    //    return 0;
-    //}
+    if (cmd.isSet("ldpc"))
+    {
+        LdpcDecode_impulse(cmd);
+        return 0;
+    }
 
     if (cmd.isSet(unitTestTag))
     {
@@ -141,12 +141,14 @@ int main(int argc, char** argv)
 #endif
 
 #ifdef ENABLE_MRR_TWIST
+#ifdef ENABLE_SSE
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
         DomainSepEKEPopf factory;
         const char* domain = "EKE POPF OT example";
         factory.Update(domain, std::strlen(domain));
         baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwist(factory));
     }, cmd, moellerpopf, {"eke"});
+#endif
 
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
         DomainSepMRPopf factory;

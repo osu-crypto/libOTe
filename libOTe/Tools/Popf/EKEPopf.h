@@ -1,6 +1,6 @@
 #pragma once
 #include "libOTe/config.h"
-#if defined(ENABLE_MRR) || defined(ENABLE_MRR_TWIST)
+#if defined(ENABLE_MRR_TWIST) && defined(ENABLE_SSE)
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
@@ -49,7 +49,6 @@ namespace osuCrypto
 
         RandomOracle ro;
     };
-
     class DomainSepEKEPopf: public RandomOracle
     {
         using RandomOracle::Final;
@@ -65,14 +64,8 @@ namespace osuCrypto
             return EKEPopf(*this);
         }
     };
+
 }
 
-#else
-
-// Allow unit tests to use DomainSepEKEPopf as a template argument.
-namespace osuCrypto
-{
-    class DomainSepEKEPopf;
-}
 
 #endif

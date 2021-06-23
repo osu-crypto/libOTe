@@ -127,11 +127,11 @@ namespace osuCrypto
 #ifdef ENABLE_SIMPLESTOT_ASM
 extern "C"
 {
-    #include "../SimplestOT/ot_sender.h"
-    #include "../SimplestOT/ot_receiver.h"
-    #include "../SimplestOT/ot_config.h"
-    #include "../SimplestOT/cpucycles.h"
-    #include "../SimplestOT/randombytes.h"
+    #include "SimplestOT/ot_sender.h"
+    #include "SimplestOT/ot_receiver.h"
+    #include "SimplestOT/ot_config.h"
+    #include "SimplestOT/cpucycles.h"
+    #include "SimplestOT/randombytes.h"
 }
 namespace osuCrypto
 {

@@ -532,7 +532,7 @@ void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
 
 void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
 {
-#ifdef ENABLE_SILENTOT
+#if defined(ENABLE_SILENTOT) && defined(ENABLE_BITPOLYMUL)
     IOService ios;
     Session s0(ios, "localhost:1212", SessionMode::Server);
     Session s1(ios, "localhost:1212", SessionMode::Client);
@@ -583,7 +583,7 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
     }
 
 #else
-    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+    throw UnitTestSkipped("ENABLE_SILENTOT or ENABLE_BITPOLYMUL are not defined.");
 #endif
     }
 

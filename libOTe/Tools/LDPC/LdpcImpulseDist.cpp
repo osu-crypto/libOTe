@@ -176,8 +176,8 @@ namespace osuCrypto
             weights.resize(n);
 
             //auto p = 0.9999;
-            auto llr0 = encodeLLR(0.501, 0);
-            auto llr1 = encodeLLR(0.999, 1);
+            auto llr0 = LdpcDecoder::encodeLLR(0.501, 0);
+            auto llr1 = LdpcDecoder::encodeLLR(0.999, 1);
             //auto lr0 = encodeLR(0.501, 0);
             //auto lr1 = encodeLR(0.9999999, 1);
 
@@ -338,7 +338,7 @@ namespace osuCrypto
             for (u64 i = m; i < n; ++i)
             {
                 auto col = permute[i];
-                codeword[col] = decodeLLR(D.mL[col]);
+                codeword[col] = LdpcDecoder::decodeLLR(D.mL[col]);
 
 
                 if (codeword[col])
@@ -621,64 +621,156 @@ namespace osuCrypto
         return ss.str();
     }
 
-    void tests::LdpcDecode_impulse_test(const oc::CLP& cmd)
+    void LdpcDecode_impulse(const oc::CLP& cmd)
     {
         // general parameter
+        // the number of rows of H, "m"
         auto rowVec = cmd.getManyOr<u64>("r", { 50 });
+
+        // the expansion ratio, e="n/m"
         double e = cmd.getOr("e", 2.0);
-        //u64 cols = rows * e;
+        
+        // the number of trials.
         u64 trial = cmd.getOr("trials", 1);
+
+        // which trial to start at.
         u64 tStart = cmd.getOr("tStart", 0);
 
+        // a specific set of trials to run.
         auto tSet = cmd.getManyOr<u64>("tSet", {});
 
+        // the need used to generate the samples
         u64 seed = cmd.getOr("seed", 0);
-        bool verbose = cmd.isSet("v");
 
-        // TZ+ parameters
-        u64 colWeight = cmd.getOr("cw", 5);
-        u64 dWeight = cmd.getOr("dw", 2);
-        u64 gap = cmd.getOr("g", 1);
-        bool uniform = cmd.isSet("u");
-
-        u64 diag = cmd.getOr("diag", 0);
-        u64 dDiag = cmd.getOr("dDiag", 0);
-        auto doubleBand = cmd.getMany<u64>("db");
-        bool trim = cmd.isSet("trim");
-        bool extend = cmd.isSet("extend");
-        u64 period = cmd.getOr("period", 0);
-        //bool zp = cmd.isSet("zp");
-        bool randY = cmd.isSet("randY");
-        bool printYs = cmd.isSet("py");
-        bool hm = cmd.isSet("hm");
-        bool reg = cmd.isSet("reg");
-        bool noCheck = cmd.isSet("noCheck");
+        // the seed(s) to generate the left half. One for each trial.
         auto lSeed = cmd.getManyOr<u64>("lSeed", {});
 
+        // verbose flag.
+        bool verbose = cmd.isSet("v");
+
+        // the number of threads
+        u64 nt = cmd.getOr("nt", cmd.isSet("nt") ? std::thread::hardware_concurrency() : 1);
+
+        // A flag to just test the uniform matrix.
+        bool uniform = cmd.isSet("u");
+
+
+        // silver parameters
+        // ================================
+
+        // use the silver preset for the given column weight.
+        bool silver = cmd.isSet("slv");
+
+        // The column weight for the left half
+        u64 colWeight = cmd.getOr("cw", 5);
+
+        // the column weight for the right half. Counts the
+        // main diagonal.
+        u64 dWeight = cmd.getOr("dw", 2);
+
+        // The size of the gap.
+        u64 gap = cmd.getOr("g", 1);
+
+        // the number of diagonals on the left half.
+        u64 diag = cmd.getOr("diag", 0);
+
+        // the number of diagonals on the right half.
+        u64 dDiag = cmd.getOr("dDiag", 0);
+
+        // the extra diagonal bands below the main diagonal (right half)
+        // The values denote how far below the diagonal they should be.
+        // requires -trim
+        auto doubleBand = cmd.getMany<u64>("db");
+
+        // delete the first g columns of the right half
+        bool trim = cmd.isSet("trim");
+
+        // extend the right half to be square.
+        bool extend = cmd.isSet("extend");
+
+        // how often the right half should repeat.
+        u64 period = cmd.getOr("period", 0);
+
+        // a flag to randomly sample the position of the left diagonals.
+        // requires -diag > 0.
+        bool randY = cmd.isSet("randY");
+
+        // the slopes of the left diagonals, default 1.
+        // requires -diag > 0.
+        slopes_ = cmd.getManyOr<i64>("slope", {});
+
+        // the fixed indexes of the left diagononals
+        // requires -diag > 0.
+        ys_ = cmd.getManyOr<i64>("ys", {});
+
+        // the fractional positions of the left diagononals.
+        // requires -diag > 0.
+        yr_ = cmd.getManyOr<double>("yr", {});
+
+        // print the factional positions of the left diagonals.
+        bool printYs = cmd.isSet("py");
+
+        // sample the right half to be regular (the same number of 
+        // ones in the rows as the columns).
+        bool reg = cmd.isSet("reg");
+
+        // print the heat map for where we found minimum codewords
+        bool hm = cmd.isSet("hm");
+
+        // when sample, dont check that H corresponds to a value
+        // LDPC code
+        bool noCheck = cmd.isSet("noCheck");
+
+        // the path to the log file.
         std::string logPath = cmd.getOr<std::string>("log", "");
 
+        // the amount of "time" that can pass in the impluse technique
+        // without finding a new minimum. the value denote the faction 
+        // of the total number of impluses which should be performed.
         double timeout = cmd.getOr("to", 0.0);
-        // estimator parameters
 
-        slopes_ = cmd.getManyOr<i64>("slope", {});
-        ys_ = cmd.getManyOr<i64>("ys", {});
-        yr_ = cmd.getManyOr<double>("yr", {});
+
+        // estimator parameters
+        // ==============================
+
+        // the weight of the noise impulse.
+        u64 w = cmd.getOr("w", 1);
+
+        // once partial gaussian elemination is performed,
+        // we will consider all codewords which have the 
+        // next Nd out-of Ng bits set to one. e.g. if we have
+        // Nd=2, Ng=4, the the codewords
+        // 
+        // xx...xx 1100 0000...
+        // xx...xx 1010 0000...
+        // ...
+        // xx...xx 0011 0000...
+        //
+        // will be tried where the x bits are solved for.
+
         u64 Nd = cmd.getOr("Nd", 10);
         u64 Ng = cmd.getOr("Ng", 50);
+
+        // the number of BD iterations that should be performed.
         u64 iter = cmd.getOr("iter", 10);
-        u64 nt = cmd.getOr("nt", cmd.isSet("nt") ? std::thread::hardware_concurrency() : 1);
-        u64 w = cmd.getOr("w", 1);
+
+        // should random noise impulses of the given weight be tried.
         bool rand = cmd.isSet("rand");
+
+        // how many random noise impulse should be tried.
         u64 n = cmd.getOr("rand", 100);
+
+        // the type of list decoder.
         ListDecoder listDecoder = (ListDecoder)cmd.getOr("ld", 1);
 
+        // print the regular diagonal so it can be used to generate a 
+        // actual code, e.g. diagMtx_g32_w11_seed2_t36.
         printDiag = cmd.isSet("printDiag");
 
         auto algo = (BPAlgo)cmd.getOr("bp", 2);
 
         // algo994 parameters
         auto trueDist = cmd.isSet("true");
-
 #ifdef ENABLE_ALGO994                        
         alg994 = cmd.getOr("algo994", ALG_SAVED_UNROLLED);
         num_saved_generators = cmd.getOr("numGen", 5);
@@ -697,6 +789,8 @@ namespace osuCrypto
         if (e != 2)
             label << "-ldpc -e " << e << " ";
 
+        if (silver)
+            label << " -slv ";
 
         label << "-r ";
         for (auto rows : rowVec)
@@ -833,14 +927,25 @@ namespace osuCrypto
                     else
                         H = sampleUniformSystematic(rows, cols, rPrng);
                 }
-                //else if (zp)
-                //{
-                //    ZpDiagRepEncoder enc;
-                //    enc.mL.init(rows, colWeight);
-                //    enc.mR.init(rows, gap, dWeight, period, doubleBand, false, prng);
+                else if (silver)
+                {
 
-                //    H = enc.getMatrix();
-                //}
+                    SilverEncoder enc;
+                    SilverCode code;
+                    if (colWeight == 5)
+                        code = SilverCode::Weight5;
+                    else if (colWeight == 11)
+                        code = SilverCode::Weight11;
+                    else
+                    {
+                        std::cout << "-slv can only be used with -cw 5 or -cw 11" << std::endl;
+                        throw RTE_LOC;
+                    }
+
+                    enc.mL.init(rows, code);
+                    enc.mR.init(rows, code, extend);
+                    H = enc.getMatrix();
+                }
                 else if (reg)
                 {
                     H = sampleRegTriangularBand(
@@ -865,6 +970,9 @@ namespace osuCrypto
 
                 //timer.setTimePoint("e");
 
+                if(verbose)
+                    std::cout << "\n" << H << std::endl;
+
                 if (trueDist)
                 {
                     auto d = minDist2(H.dense(), nt, false);
@@ -883,7 +991,6 @@ namespace osuCrypto
                 {
                     std::cout << dd.back();
 
-                    std::cout << "\n" << H << std::endl;
                     for (auto c : minCW)
                     {
                         if (c)

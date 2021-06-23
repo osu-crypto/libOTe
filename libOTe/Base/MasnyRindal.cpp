@@ -73,7 +73,7 @@ namespace osuCrypto
 
             RandomOracle ro(sizeof(block));
             ro.Update(k);
-            ro.Update(i);
+            ro.Update(i * 2 + choices[i]);
             ro.Final(messages[i]);
         }
     }
@@ -117,7 +117,7 @@ namespace osuCrypto
 
                     ro.Reset(sizeof(block));
                     ro.Update(r);
-                    ro.Update(i);
+                    ro.Update(i * 2 + j);
                     ro.Final(messages[i][j]);
                 }
             }

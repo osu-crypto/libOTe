@@ -38,11 +38,13 @@ write_basic_package_version_file(
   COMPATIBILITY AnyNewerVersion
 )
 
+configure_file("${CMAKE_CURRENT_LIST_DIR}/libOTeDepHelper.cmake" "libOTeDepHelper.cmake" COPYONLY)
+
 # install the configuration file
 install(FILES
           "${CMAKE_CURRENT_BINARY_DIR}/libOTeConfig.cmake"
           "${CMAKE_CURRENT_BINARY_DIR}/libOTeConfigVersion.cmake"
-          #"${CMAKE_CURRENT_BINARY_DIR}/libOTeDepHelper.cmake"
+          "${CMAKE_CURRENT_BINARY_DIR}/libOTeDepHelper.cmake"
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/libOTe
 )
 
@@ -79,11 +81,18 @@ install(
     DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../libOTe/ 
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/libOTe 
     FILES_MATCHING PATTERN "*.h")
+
+#install config header
+install(
+    DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libOTe"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/"
+    FILES_MATCHING PATTERN "*.h")
+
+# install test headers
 install(
     DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../libOTe_Tests/ 
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/libOTe_Tests 
     FILES_MATCHING PATTERN "*.h")
-
 
 # install config
 install(EXPORT libOTeTargets

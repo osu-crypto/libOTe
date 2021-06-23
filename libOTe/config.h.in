@@ -3,6 +3,9 @@
 
 #define LIBOTE_VERSION (LIBOTE_VERSION_MAJOR * 10000 + LIBOTE_VERSION_MINOR * 100 + LIBOTE_VERSION_PATCH)
 
+// build the library bit poly mul integration
+#cmakedefine ENABLE_BITPOLYMUL @ENABLE_BITPOLYMUL@
+
 // build the library with "simplest" Base OT enabled
 #cmakedefine ENABLE_SIMPLESTOT @ENABLE_SIMPLESTOT@
 

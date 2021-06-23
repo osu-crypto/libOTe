@@ -110,7 +110,7 @@ namespace osuCrypto
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
         // The Silver encoder for MultType::slv5, MultType::slv11
-        S1DiagRegRepEncoder mEncoder;
+        SilverEncoder mEncoder;
 
         // The OTs send msgs which will be used to flood the
         // last gap bits of the noisy vector for the slv code.

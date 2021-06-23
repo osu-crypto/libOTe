@@ -4,7 +4,6 @@
 #include "libOTe/Tools/bitpolymul.h"
 
 
-#include "libOTe/Tools/bitpolymul/bpmDefines.h"
 #include <cryptoTools/Common/CLP.h>
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Common/TestCollection.h>
@@ -15,18 +14,41 @@
 #define bm_func2 bitpolymul_2_128
 
 
+template<typename T>
+struct toStr_ {
+    const T& mV;
+    toStr_(const T& v) : mV(v) {}
+
+
+};
+template<typename T>
+inline toStr_<T> toStr(const T& v)
+{
+    return toStr_<T>(v);
+}
+template<typename T>
+inline std::ostream& operator<<(std::ostream& o, const toStr_<T>& t)
+{
+    o << "[" << t.mV.size() << "][";
+    for (const auto& v : t.mV)
+    {
+        o << v << ", ";
+    }
+    o << "]";
+    return o;
+}
 using namespace oc;
-using namespace bpm;
 
 void Tools_bitpolymul_test(const CLP& cmd)
 {
-#ifdef ENABLE_SILENTOT
+#ifdef ENABLE_BITPOLYMUL
+    using namespace bpm;
 
 
     uint64_t TEST_RUN = cmd.getOr("t", 4);
     uint64_t len = (1ull << cmd.getOr("n", 12));
 
-    bpm::aligned_vector<uint64_t>
+    aligned_vector<uint64_t>
         poly1(len),
         poly2(len),
         poly3(len),
@@ -76,7 +98,7 @@ void Tools_bitpolymul_test(const CLP& cmd)
     }
 
 
-    bpm::FFTPoly fft1, fft2, fft3, fft_12, fft_13;
+    FFTPoly fft1, fft2, fft3, fft_12, fft_13;
     auto vecAdd = [](std::vector<oc::u64> a, std::vector<oc::u64>& b)
     {
         for (oc::u64 i = 0; i < a.size(); ++i)
@@ -151,7 +173,7 @@ void Tools_bitpolymul_test(const CLP& cmd)
         fft_12.decode(poly_12, false);
         fft_13.decode(poly_13, false);
 
-        bpm::FFTPoly fft_12_13;
+        FFTPoly fft_12_13;
         fft_12_13.add(fft_13, fft_12);
 
         auto poly_r = vecAdd(poly_12, poly_13);

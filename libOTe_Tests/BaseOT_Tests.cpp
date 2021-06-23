@@ -135,8 +135,8 @@ namespace tests_libOTe
 #endif
     }
 
-    template<template<typename> class PopfOT, typename DSPopf,
-             size_t Sfinae = sizeof(PopfOT<DSPopf>)>
+
+    template<template<typename> class PopfOT, typename DSPopf>
     static void Bot_PopfOT_Test_impl()
     {
         setThreadName("Sender");
@@ -181,18 +181,19 @@ namespace tests_libOTe
             }
         }
     }
-
-    template<template<typename> class PopfOT, typename DSPopf, typename... Args>
-    static void Bot_PopfOT_Test_impl(Args... args)
-    {
-        throw UnitTestSkipped("POPF OT not enabled. Requires libsodium.");
-    }
-
-
+#if defined(ENABLE_MRR_TWIST) && defined(ENABLE_SSE)
     void Bot_McQuoidRR_Moeller_EKE_Test()
     {
         Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepEKEPopf>();
     }
+#else 
+    void Bot_McQuoidRR_Moeller_EKE_Test()
+    {
+        throw UnitTestSkipped("McQuoid Rosulek Roy not enabled (ENABLE_MRR_TWIST, ENABLE_SSE). Requires libsodium and SSE.");
+    }
+#endif
+
+#ifdef ENABLE_MRR_TWIST
 
     void Bot_McQuoidRR_Moeller_MR_Test()
     {
@@ -208,7 +209,24 @@ namespace tests_libOTe
     {
         Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepFeistelMulPopf>();
     }
+#else 
+    void Bot_McQuoidRR_Moeller_MR_Test()
+    {
+        throw UnitTestSkipped("McQuoid Rosulek Roy not enabled (ENABLE_MRR_TWIST). Requires libsodium.");
+    }
 
+    void Bot_McQuoidRR_Moeller_F_Test()
+    {
+        throw UnitTestSkipped("McQuoid Rosulek Roy not enabled (ENABLE_MRR_TWIST). Requires libsodium.");
+    }
+
+    void Bot_McQuoidRR_Moeller_FM_Test()
+    {
+        throw UnitTestSkipped("McQuoid Rosulek Roy not enabled (ENABLE_MRR_TWIST). Requires libsodium.");
+    }
+#endif
+
+#ifdef ENABLE_MRR
     void Bot_McQuoidRR_Ristrestto_F_Test()
     {
         Bot_PopfOT_Test_impl<details::McRosRoy, DomainSepFeistelRistPopf>();
@@ -218,6 +236,18 @@ namespace tests_libOTe
     {
         Bot_PopfOT_Test_impl<details::McRosRoy, DomainSepFeistelMulRistPopf>();
     }
+#else
+
+    void Bot_McQuoidRR_Ristrestto_F_Test()
+    {
+        throw UnitTestSkipped("McQuoid Rosulek Roy not enabled (ENABLE_MRR). Requires libsodium or Relic.");
+    }
+
+    void Bot_McQuoidRR_Ristrestto_FM_Test()
+    {
+        throw UnitTestSkipped("McQuoid Rosulek Roy not enabled (ENABLE_MRR). Requires libsodium or Relic.");
+    }
+#endif
 
     void Bot_MasnyRindal_Test()
     {

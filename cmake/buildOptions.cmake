@@ -12,7 +12,7 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_NP          ${oc_BB} CACHE BOOL "" FORCE)
 	
 	# requires sodium 
-	if(${ENABLE_SODIUM})
+	if(${ENABLE_SODIUM} OR ${ENABLE_RELIC})
 		set(oc_BB ${ENABLE_ALL_OT})
 	else()
 		set(oc_BB OFF)
@@ -52,6 +52,7 @@ if(DEFINED ENABLE_ALL_OT)
 	unset(ENABLE_ALL_OT CACHE)
 endif()
 
+option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" OFF)
 option(ENABLE_SIMPLESTOT     "Build the SimplestOT base OT" OFF)
 option(ENABLE_SIMPLESTOT_ASM "Build the assembly based SimplestOT library" OFF)
 option(ENABLE_MRR            "Build the McQuoidRosulekRoy 20 PopfOT base OT using Ristretto KA" OFF)
@@ -75,7 +76,8 @@ option(ENABLE_AKN            "Build the RR ~k-oo-N OT-Ext protocol." OFF)
 option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
 
 message(STATUS "General Options\n=======================================================")
-message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF\n\n")
+message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF")
+message(STATUS "Option: ENABLE_BITPOLYMUL     = ${ENABLE_BITPOLYMUL}\n\n")
 
 message(STATUS "Base OT protocols\n=======================================================")
 message(STATUS "Option: ENABLE_SIMPLESTOT     = ${ENABLE_SIMPLESTOT}")
