@@ -193,7 +193,7 @@ namespace osuCrypto
         
         // returns the submatrix starting at (row, col) and of 
         // the given size.
-        SparseMtx subMatrix(u64 row, u64 col, u64 rowCount, u64 colCount);
+        SparseMtx subMatrix(u64 row, u64 col, u64 rowCount, u64 colCount) const;
 
         // return the dense representation of this matix.
         DenseMtx dense() const;
@@ -202,7 +202,21 @@ namespace osuCrypto
         std::vector<u8> mult(span<const u8> x) const;
 
         // multiply this matrix by x and add (xor) the result to y.
-        void multAdd(span<const u8> x, span<u8> y) const;
+        template<typename ConstVec, typename Vec>
+        void multAdd(const ConstVec& x, Vec& y) const
+        {
+            assert(cols() == x.size());
+            assert(y.size() == rows());
+            for (u64 i = 0; i < rows(); ++i)
+            {
+                for (auto c : row(i))
+                {
+                    assert(c < cols());
+                    y[i] = y[i] ^ x[c];
+                }
+            }
+        }
+
 
         std::vector<u8> operator*(span<const u8> x) const { return mult(x); }
 

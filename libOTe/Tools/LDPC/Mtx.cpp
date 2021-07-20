@@ -212,7 +212,7 @@ namespace osuCrypto
         return pPnts;
     }
 
-    SparseMtx SparseMtx::subMatrix(u64 row, u64 col, u64 rowCount, u64 colCount)
+    SparseMtx SparseMtx::subMatrix(u64 row, u64 col, u64 rowCount, u64 colCount)const
     {
         if (rowCount == 0 || colCount == 0)
             return {};
@@ -343,19 +343,19 @@ namespace osuCrypto
 
     // multiply this matrix by x and add (xor) the result to y.
 
-    void SparseMtx::multAdd(span<const u8> x, span<u8> y) const
-    {
-        assert(cols() == x.size());
-        assert(y.size() == rows());
-        for (u64 i = 0; i < rows(); ++i)
-        {
-            for (auto c : row(i))
-            {
-                assert(c < cols());
-                y[i] ^= x[c];
-            }
-        }
-    }
+    //void SparseMtx::multAdd(span<const u8> x, span<u8> y) const
+    //{
+    //    assert(cols() == x.size());
+    //    assert(y.size() == rows());
+    //    for (u64 i = 0; i < rows(); ++i)
+    //    {
+    //        for (auto c : row(i))
+    //        {
+    //            assert(c < cols());
+    //            y[i] ^= x[c];
+    //        }
+    //    }
+    //}
 
     // multiply this sparse matrix with y.
 
@@ -522,10 +522,21 @@ namespace osuCrypto
 
     bool SparseMtx::operator==(const SparseMtx& X) const
     {
-        return rows() == X.rows() &&
+        auto eq = rows() == X.rows() &&
             cols() == X.cols() &&
-            mDataCol.size() == X.mDataCol.size() &&
+            mDataCol.size() == X.mDataCol.size() && 
             mDataCol == X.mDataCol;
+
+        if(eq)
+        {
+            for (u64 i = 0; i < cols(); ++i)
+                if (col(i).size() != X.col(i).size())
+                    return false;
+
+            return true;
+        }
+        else
+            return false;
     }
 
     bool SparseMtx::operator!=(const SparseMtx& X) const
