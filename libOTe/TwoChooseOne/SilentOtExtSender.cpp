@@ -501,7 +501,7 @@ namespace osuCrypto
                 mB[i] = mGapOts[j][0];
                 //std::cout << "jj " << j << " " <<i << " " << mGapOts[j][0] << " " << v << " " << beta[mNumPartitions + j] << std::endl;
             }
-            chl.send(std::move(gapVals));
+            chl.asyncSend(std::move(gapVals));
 
 
             mGen.expand(chl, mDelta, prng, mB.subspan(0,main), PprfOutputFormat::Interleaved, mNumThreads);
