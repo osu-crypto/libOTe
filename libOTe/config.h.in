@@ -38,6 +38,9 @@
 // build the library with Silent OT Extension enabled
 #cmakedefine ENABLE_SILENTOT @ENABLE_SILENTOT@
 
+// build the library with SoftSpokenOT enabled
+#cmakedefine ENABLE_SOFTSPOKEN_OT @ENABLE_SOFTSPOKEN_OT@
+
 
 
 // build the library with KOS Delta-OT-ext enabled

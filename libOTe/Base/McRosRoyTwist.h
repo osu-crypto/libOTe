@@ -5,6 +5,7 @@
 #include <type_traits>
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Common/Defines.h>
+#include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RCurve.h>
 #include <cryptoTools/Crypto/Rijndael256.h>
