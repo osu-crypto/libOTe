@@ -12,7 +12,7 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	############################################
 	#          If top level cmake              #
 	############################################
-	
+
 	############################################
 	#           Flag and #defines              #
 	############################################
@@ -21,7 +21,7 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 
 		# optionally add the following to CMAKE_PREFIX_PATH
 		if(NOT DEFINED CMAKE_PREFIX_PATH AND NOT DEFINED NO_OC_DEFAULT_PREFIX)
-			set(CMAKE_PREFIX_PATH 
+			set(CMAKE_PREFIX_PATH
 				"c:/libs"
 				"${CMAKE_CURRENT_LIST_DIR}/..;"
 				)
@@ -34,10 +34,11 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 		SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb")
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -std=c++17")
 	endif()
+	set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COMMON_FLAGS}")
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COMMON_FLAGS}")
-	
+
 
 	############################################
 	#           Build mode checks              #

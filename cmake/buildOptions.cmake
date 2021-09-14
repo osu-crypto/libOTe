@@ -10,8 +10,8 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_SIMPLESTOT  ${oc_BB} CACHE BOOL "" FORCE)
 	set(ENABLE_MR          ${oc_BB} CACHE BOOL "" FORCE)
 	set(ENABLE_NP          ${oc_BB} CACHE BOOL "" FORCE)
-	
-	# requires sodium 
+
+	# requires sodium
 	if(${ENABLE_SODIUM} OR ${ENABLE_RELIC})
 		set(oc_BB ${ENABLE_ALL_OT})
 	else()
@@ -19,7 +19,7 @@ if(DEFINED ENABLE_ALL_OT)
 	endif()
 	set(ENABLE_MRR ${oc_BB} CACHE BOOL "" FORCE)
 
-	# requires sodium 
+	# requires sodium
 	if(${ENABLE_SODIUM} AND SODIUM_MONTGOMERY)
 		set(oc_BB ${ENABLE_ALL_OT})
 	else()
@@ -28,7 +28,7 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_MRR_TWIST   ${oc_BB} CACHE BOOL "" FORCE)
 
 
-	# requires linux 
+	# requires linux
 	if(UNIX AND NOT(APPLE OR MSVC))
 		set(oc_BB ${ENABLE_ALL_OT})
 	else()
