@@ -66,7 +66,15 @@ namespace osuCrypto {
         // See frontend/main.cpp for an example. 
         void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices, Channel&) override;
+            const BitVector& choices, Channel&);
+
+        void setBaseOts(
+            span<block> baseRecvOts,
+            const BitVector& choices,
+            PRNG& prng, Channel& chl) override
+        {
+            return setBaseOts(baseRecvOts, choices, chl);
+        }
 
         void setUniformBaseOts(
             span<block> baseRecvOts,

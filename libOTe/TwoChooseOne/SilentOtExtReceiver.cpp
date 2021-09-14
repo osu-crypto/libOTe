@@ -273,7 +273,7 @@ namespace osuCrypto
     //       = r + (000000x00000000000x000000000x00000...00000)
     //
     //    u = u' * H             bit-vector * H. Mapping n'->n bits
-    //    v = v' * H		   block-vector * H. Mapping n'->n block
+    //    v = v' * H           block-vector * H. Mapping n'->n block
     //
     //sigma = 1   Sender
     //
@@ -683,6 +683,7 @@ namespace osuCrypto
                 std::memset(mChoicePtr.get(), 0, mN2);
             mC = span<u8>(mChoicePtr.get(), mN2);
             auto cc = mChoicePtr.get();
+            // TODO: Consider making this constant time.
             for (auto p : mS)
                 cc[p] = 1;
 
@@ -839,7 +840,7 @@ namespace osuCrypto
                 for (u64 k = 0; k < 128; ++k)
                     tpBuffer[k] = cModP1(k, i);
 
-                transpose128(tpBuffer);
+                transpose128(tpBuffer.data());
             }
 
             auto rem = mRequestedNumOts % 128;
@@ -850,7 +851,7 @@ namespace osuCrypto
                 for (u64 j = 0; j < tpBuffer.size(); ++j)
                     tpBuffer[j] = cModP1(j, numBlocks);
 
-                transpose128(tpBuffer);
+                transpose128(tpBuffer.data());
 
                 memcpy(mA.data() + numBlocks * 128, tpBuffer.data(), rem * sizeof(block));
             }

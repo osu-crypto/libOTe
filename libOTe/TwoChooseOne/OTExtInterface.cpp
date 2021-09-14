@@ -40,7 +40,7 @@ void osuCrypto::OtExtSender::genBaseOts(OtReceiver& base, PRNG& prng, Channel& c
     BitVector bv(count);
     bv.randomize(prng);
     base.receive(bv, msgs, prng, chl);
-    setBaseOts(msgs, bv, chl);
+    setBaseOts(msgs, bv, prng, chl);
 }
 
 

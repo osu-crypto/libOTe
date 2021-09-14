@@ -150,7 +150,16 @@ namespace osuCrypto
         void setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices,
-            Channel& chl) override;
+            Channel& chl);
+
+        void setBaseOts(
+            span<block> baseRecvOts,
+            const BitVector& choices,
+            PRNG& prng,
+            Channel& chl) override
+        {
+            setBaseOts(baseRecvOts, choices, chl);
+        }
 
         // Returns an independent copy of this extender.
         std::unique_ptr<OtExtSender> split() override;
@@ -191,7 +200,7 @@ namespace osuCrypto
         // @scaler   [in] - the compression factor.
         // @nThreads [in] - the number of threads.
         // @mal      [in] - whether the malicious check is performed.
-		void configure(
+        void configure(
             u64 n,
             u64 scaler = 2,
             u64 numThreads = 1,
@@ -228,11 +237,11 @@ namespace osuCrypto
         // @ b   [out] - the correlated ot message.
         // @prng  [in] - randomness source.
         // @chl   [in] - the comm channel
-		void silentSend(
+        void silentSend(
             block d,
-			span<block> b,
-			PRNG& prng,
-			Channel& chl);
+            span<block> b,
+            PRNG& prng,
+            Channel& chl);
 
         // Runs the silent correlated OT protocol and store
         // the b vector internally as mB. The protocol takes 

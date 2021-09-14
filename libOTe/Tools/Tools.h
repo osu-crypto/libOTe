@@ -74,18 +74,18 @@ namespace osuCrypto {
     void print(std::array<block, 128>& inOut);
     u8 getBit(std::array<block, 128>& inOut, u64 i, u64 j);
 
-    void eklundh_transpose128(std::array<block, 128>& inOut);
+    void eklundh_transpose128(block* inOut);
     void eklundh_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut);
 
 #ifdef OC_ENABLE_SSE2
-    void sse_transpose128(std::array<block, 128>& inOut);
+    void sse_transpose128(block* inOut);
     void sse_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut);
 #endif
     void transpose(const MatrixView<block>& in, const MatrixView<block>& out);
     void transpose(const MatrixView<u8>& in, const MatrixView<u8>& out);
 
 
-    inline void transpose128(std::array<block, 128>& inOut)
+    inline void transpose128(block* inOut)
     {
 #ifdef OC_ENABLE_SSE2
         sse_transpose128(inOut);

@@ -801,7 +801,7 @@ namespace osuCrypto
                 for (u64 k = 0; k < tpBuffer.size(); ++k)
                     tpBuffer[k] = cModP1(k, i);
 
-                transpose128(tpBuffer);
+                transpose128(tpBuffer.data());
 
                 auto end = i * tpBuffer.size() + min;
                 for (u64 k = 0; j < end; ++j, ++k)

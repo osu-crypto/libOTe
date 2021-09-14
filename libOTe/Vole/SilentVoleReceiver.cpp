@@ -192,7 +192,7 @@ namespace osuCrypto
     //       = r + (000000x00000000000x000000000x00000...00000)
     //
     //    u = u' * H             bit-vector * H. Mapping n'->n bits
-    //    v = v' * H		   block-vector * H. Mapping n'->n block
+    //    v = v' * H           block-vector * H. Mapping n'->n block
     //
     //sigma = 1   Sender
     //

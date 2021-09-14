@@ -41,15 +41,15 @@ namespace osuCrypto
         for (u64 i = mBaseChoiceBits.size() - 1; i >= choices.size(); --i)
             mBaseChoiceBits[i] = 0;
 
-		mBaseChoiceBits.resize(choices.size());
+        mBaseChoiceBits.resize(choices.size());
         for (u64 i = 0; i < mGens.size(); i++)
             mGens[i].SetSeed(baseRecvOts[i]);
     }
 
-	void KosDotExtSender::setDelta(const block & delta)
-	{
-		mDelta = delta;
-	}
+    void KosDotExtSender::setDelta(const block & delta)
+    {
+        mDelta = delta;
+    }
 
     void KosDotExtSender::send(
         span<std::array<block, 2>> messages,
@@ -182,17 +182,17 @@ namespace osuCrypto
         block seed = prng.get<block>();
         chl.asyncSend((u8*)&seed, sizeof(block));
 
-		PRNG codePrng(seed);
+        PRNG codePrng(seed);
         LinearCode code;
         code.random(codePrng, mBaseChoiceBits.size(), 128);
-		block curDelta;
-		code.encode((u8*)delta.data(), (u8*)&curDelta);
+        block curDelta;
+        code.encode((u8*)delta.data(), (u8*)&curDelta);
 
-		if (eq(mDelta, ZeroBlock))
-			mDelta = prng.get<block>();
+        if (eq(mDelta, ZeroBlock))
+            mDelta = prng.get<block>();
 
-		block offset = curDelta ^ mDelta;
-		chl.asyncSend(offset);
+        block offset = curDelta ^ mDelta;
+        chl.asyncSend(offset);
 
         block theirSeed;
         chl.recv((u8*)&theirSeed, sizeof(block));
@@ -215,10 +215,10 @@ namespace osuCrypto
         setTimePoint("KosDot.send.checkStart");
 
         //std::cout << IoStream::lock;
-		//std::array<block, 2> small{ delta[0], delta[1] };
-		
+        //std::array<block, 2> small{ delta[0], delta[1] };
 
-		
+
+
 
 
         u64 xx = 0;
@@ -243,7 +243,7 @@ namespace osuCrypto
 
 
                 code.encode((u8*)messages[dd].data(), (u8*)&messages[dd][0]);
-				messages[dd][1] = messages[dd][0] ^ mDelta;
+                messages[dd][1] = messages[dd][0] ^ mDelta;
                 //code.encode((u8*)messages1.data(), (u8*)&messages[dd][1]);
             }
 

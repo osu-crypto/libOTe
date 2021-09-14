@@ -16,7 +16,11 @@ namespace tests_libOTe
     void OtExt_Chosen_Test();
         //void LzOtExt_Kos_Test();
     //void Kos2OtExt_100Receive_Test();
-	void OtExt_Iknp_Test();
-	void DotExt_Iknp_Test();
+    void OtExt_Iknp_Test();
+    void DotExt_Iknp_Test();
+
+    void SoftSpokenSmallVole_Test();
+    void DotExt_SoftSpokenSemiHonest_Test();
+    void OtExt_SoftSpokenSemiHonest21_Test();
 
 }

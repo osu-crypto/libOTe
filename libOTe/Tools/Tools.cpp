@@ -137,7 +137,7 @@ namespace osuCrypto {
     }
 
 
-    void eklundh_transpose128(array<block, 128>& inOut)
+    void eklundh_transpose128(block* inOut)
     {
         const static u64 TRANSPOSE_MASKS128[7][2] = {
             { 0x0000000000000000, 0xFFFFFFFFFFFFFFFF },
@@ -273,7 +273,7 @@ namespace osuCrypto {
             for (u64 j = 0; j < 128; ++j)
                 sub[j] = inOut[j][i];
 
-            eklundh_transpose128(sub);
+            eklundh_transpose128(sub.data());
 
             for (u64 j = 0; j < 128; ++j)
                 inOut[j][i] = sub[j];
@@ -300,13 +300,13 @@ namespace osuCrypto {
     // note: u16OutView is a 16x16 bit matrix = 16 rows of 2 bytes each.
     //       u16OutView[0] stores the first column of 16 bytes,
     //       u16OutView[1] stores the second column of 16 bytes.
-    void sse_loadSubSquare(array<block, 128>& in, array<block, 2>& out, u64 x, u64 y)
+    void sse_loadSubSquare(block* in, array<block, 2>& out, u64 x, u64 y)
     {
         static_assert(sizeof(array<array<u8, 16>, 2>) == sizeof(array<block, 2>), "");
         static_assert(sizeof(array<array<u8, 16>, 128>) == sizeof(array<block, 128>), "");
 
         array<array<u8, 16>, 2>& outByteView = *(array<array<u8, 16>, 2>*)&out;
-        array<array<u8, 16>, 128>& inByteView = *(array<array<u8, 16>, 128>*)&in;
+        array<u8, 16>* inByteView = (array<u8, 16>*)in;
 
         for (int l = 0; l < 16; l++)
         {
@@ -319,11 +319,11 @@ namespace osuCrypto {
 
     // given a 16x16 sub square, place its transpose into u16OutView at 
     // rows  16*h, ..., 16 *(h+1)  a byte  columns w, w+1. 
-    void sse_transposeSubSquare(array<block, 128>& out, array<block, 2>& in, u64 x, u64 y)
+    void sse_transposeSubSquare(block* out, array<block, 2>& in, u64 x, u64 y)
     {
         static_assert(sizeof(array<array<u16, 8>, 128>) == sizeof(array<block, 128>), "");
 
-        array<array<u16, 8>, 128>& outU16View = *(array<array<u16, 8>, 128>*)&out;
+        array<u16, 8>* outU16View = (array<u16, 8>*)out;
 
 
         for (int j = 0; j < 8; j++)
@@ -376,9 +376,9 @@ namespace osuCrypto {
         union TempObj
         {
             //array<block, chunkSize> blks;
-			block blks[chunkSize];
-			//array < array<u8, 16>, chunkSize> bytes;
-			u8 bytes[chunkSize][16];
+            block blks[chunkSize];
+            //array < array<u8, 16>, chunkSize> bytes;
+            u8 bytes[chunkSize][16];
         };
 
         TempObj t;
@@ -715,7 +715,7 @@ namespace osuCrypto {
 
 
 
-    void sse_transpose128(array<block, 128>& inOut)
+    void sse_transpose128(block* inOut)
     {
         array<block, 2> a, b;
 

@@ -94,7 +94,15 @@ namespace osuCrypto {
         // @ choices: The select bits that were used in the base OT
         void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices, Channel& chl) override;
+            const BitVector& choices, Channel& chl);
+
+        void setBaseOts(
+            span<block> baseRecvOts,
+            const BitVector& choices,
+            PRNG& prng, Channel& chl) override
+        {
+            setBaseOts(baseRecvOts, choices, chl);
+        }
 
         // Performs the PRNG expantion and transpose operations. This sets the 
         // internal data structures that are needed for the subsequent encode(..)

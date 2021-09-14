@@ -125,6 +125,11 @@ namespace osuCrypto
 #else
     const bool dkosEnabled = false;
 #endif
+#ifdef ENABLE_DELTA_KOS
+    const bool softSpokenEnabled = true;
+#else
+    const bool softSpokenEnabled = false;
+#endif
 #ifdef ENABLE_NP
     const bool npEnabled = true;
 #else

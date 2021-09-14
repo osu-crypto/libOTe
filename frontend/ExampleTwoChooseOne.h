@@ -12,6 +12,12 @@
 #include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/SilentOtExtSender.h"
 
+#include "libOTe/TwoChooseOne/SoftSpokenOT/DotSemiHonest.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/DotMaliciousLeaky.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/DotMalicious.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/TwoOneSemiHonest.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/TwoOneMalicious.h"
+
 namespace osuCrypto
 {
 
@@ -29,8 +35,8 @@ namespace osuCrypto
         throw std::runtime_error("This protocol does not support noHash");
     }
 
-    template<typename OtExtSender, typename OtExtRecver>
-    void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
+    template<typename OtExtSender, typename OtExtRecver, typename ...Params>
+    void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& cmd, Params&&... params)
     {
         if (totalOTs == 0)
             totalOTs = 1 << 20;
@@ -53,8 +59,22 @@ namespace osuCrypto
 
 
 
-        std::vector<OtExtSender> senders(numThreads);
-        std::vector<OtExtRecver> receivers(numThreads);
+        std::vector<OtExtSender> senders;
+        std::vector<OtExtRecver> receivers;
+        senders.reserve(numThreads);
+        receivers.reserve(numThreads);
+
+        size_t nBaseOTs;
+        if (role == Role::Receiver)
+        {
+            receivers.emplace_back(std::forward<Params>(params)...);
+            nBaseOTs = receivers[0].baseOtCount();
+        }
+        else
+        {
+            senders.emplace_back(std::forward<Params>(params)...);
+            nBaseOTs = senders[0].baseOtCount();
+        }
 
 #ifdef LIBOTE_HAS_BASE_OT
         // Now compute the base OTs, we need to set them on the first pair of extenders.
@@ -62,8 +82,9 @@ namespace osuCrypto
         // here just showing the example.
         if (role == Role::Receiver)
         {
+            receivers.emplace_back(std::forward<Params>(params)...);
             DefaultBaseOT base;
-            std::array<std::array<block, 2>, 128> baseMsg;
+            std::vector<std::array<block, 2>> baseMsg(nBaseOTs);
             base.send(baseMsg, prng, chls[0], numThreads);
             receivers[0].setBaseOts(baseMsg, prng, chls[0]);
 
@@ -73,17 +94,17 @@ namespace osuCrypto
         {
 
             DefaultBaseOT base;
-            BitVector bv(128);
-            std::array<block, 128> baseMsg;
+            BitVector bv(nBaseOTs);
+            std::vector<block> baseMsg(nBaseOTs);
             bv.randomize(prng);
             base.receive(bv, baseMsg, prng, chls[0], numThreads);
-            senders[0].setBaseOts(baseMsg, bv, chls[0]);
+            senders[0].setBaseOts(baseMsg, bv, prng, chls[0]);
         }
 #else
         if (!cmd.isSet("fakeBase"))
             std::cout << "warning, base ots are not enabled. Fake base OTs will be used. " << std::endl;
         PRNG commonPRNG(oc::ZeroBlock);
-        std::array<std::array<block, 2>, 128> sendMsgs;
+        std::vector<std::array<block, 2>> sendMsgs(nBaseOTs);
         commonPRNG.get(sendMsgs.data(), sendMsgs.size());
         if (role == Role::Receiver)
         {
@@ -91,12 +112,12 @@ namespace osuCrypto
         }
         else
         {
-            BitVector bv(128);
+            BitVector bv(nBaseOTs);
             bv.randomize(commonPRNG);
-            std::array<block, 128> recvMsgs;
-            for (u64 i = 0; i < 128; ++i)
+            std::vector<block> recvMsgs(nBaseOTs);
+            for (u64 i = 0; i < nBaseOTs; ++i)
                 recvMsgs[i] = sendMsgs[i][bv[i]];
-            senders[0].setBaseOts(recvMsgs, bv, chls[0]);
+            senders[0].setBaseOts(recvMsgs, bv, prng, chls[0]);
         }
 #endif
 
@@ -105,9 +126,9 @@ namespace osuCrypto
         for (auto i = 1; i < numThreads; ++i)
         {
             if (role == Role::Receiver)
-                receivers[i] = receivers[0].splitBase();
+                receivers.push_back(receivers[0].splitBase());
             else
-                senders[i] = senders[0].splitBase();
+                senders.push_back(senders[0].splitBase());
         }
 
         if (cmd.isSet("noHash"))
@@ -200,8 +221,10 @@ namespace osuCrypto
 
         };
 
-        senders[0].setTimer(sendTimer);
-        receivers[0].setTimer(recvTimer);
+        if (role == Role::Receiver)
+            receivers[0].setTimer(recvTimer);
+        else
+            senders[0].setTimer(sendTimer);
 
         std::vector<std::thread> thrds(numThreads);
         for (int i = 0; i < numThreads; ++i)

@@ -33,9 +33,9 @@ namespace tests_libOTe
         tc.add("Tools_bitShift_test                     ", Tools_bitShift_test);
         tc.add("Tools_modp_test                         ", Tools_modp_test);
         tc.add("Tools_bitpolymul_test                   ", Tools_bitpolymul_test);
-                                              
+
         tc.add("LdpcDecode_pb_test                      ", tests::LdpcDecode_pb_test);
-        
+
         tc.add("ldpc_Mtx_make_test                      ", tests::Mtx_make_test);
         tc.add("ldpc_Mtx_add_test                       ", tests::Mtx_add_test);
         tc.add("ldpc_Mtx_mult_test                      ", tests::Mtx_mult_test);
@@ -91,7 +91,11 @@ namespace tests_libOTe
         tc.add("Vole_Silent_mal_test                    ", Vole_Silent_mal_test);
 
         tc.add("DotExt_Kos_Test                         ", DotExt_Kos_Test);
-        tc.add("DotExt_Iknp_Test                        ", DotExt_Iknp_Test);
+        tc.add("DotExt_Kos_Test                         ", DotExt_Kos_Test);
+
+        tc.add("SoftSpokenSmallVole_Test                ", SoftSpokenSmallVole_Test);
+        tc.add("DotExt_SoftSpokenSemiHonest_Test        ", DotExt_SoftSpokenSemiHonest_Test);
+        tc.add("OtExt_SoftSpokenSemiHonest21_Test       ", OtExt_SoftSpokenSemiHonest21_Test);
 
         tc.add("NcoOt_Kkrt_Test                         ", NcoOt_Kkrt_Test);
         tc.add("NcoOt_Oos_Test                          ", NcoOt_Oos_Test);

@@ -53,7 +53,7 @@ void osuCrypto::NcoOtExtSender::genBaseOts(PRNG & prng, Channel & chl)
         IknpOtExtReceiver recver;
         recver.genBaseOts(prng, chl);
         recver.receive(bv, msgs, prng,  chl);
-        setBaseOts(msgs, bv, chl);
+        setBaseOts(msgs, bv, prng, chl);
         return;
     }
 #endif
@@ -70,7 +70,7 @@ void osuCrypto::NcoOtExtSender::genBaseOts(PRNG & prng, Channel & chl)
     throw std::runtime_error("The libOTe library does not have base OTs. Enable them to call this. " LOCATION);
 #endif
 
-    setBaseOts(msgs, bv, chl);
+    setBaseOts(msgs, bv, prng, chl);
 }
 
 void osuCrypto::NcoOtExtSender::sendChosen(MatrixView<block> messages, PRNG & prng, Channel & chl)

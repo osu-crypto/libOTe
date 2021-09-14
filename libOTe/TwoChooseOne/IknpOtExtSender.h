@@ -67,6 +67,7 @@ namespace osuCrypto {
         void setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices,
+            PRNG& prng,
             Channel& chl) override {setBaseOts(baseRecvOts, choices);}
 
         // Takes a destination span of two blocks and performs OT extension

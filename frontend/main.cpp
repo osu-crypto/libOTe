@@ -30,6 +30,8 @@ static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
 kos{ "k", "kos" },
 dkos{ "d", "dkos" },
+ssdelta{ "ssd", "ssdelta" },
+sshonest{ "ss", "sshonest" },
 kkrt{ "kk", "kkrt" },
 iknp{ "i", "iknp" },
 diknp{ "diknp" },
@@ -208,6 +210,20 @@ int main(int argc, char** argv)
     flagSet |= runIf(TwoChooseOne_example<KosDotExtSender, KosDotExtReceiver>, cmd, dkos);
 #endif
 
+#ifdef ENABLE_SOFTSPOKEN_OT
+    const size_t defaultFieldBits = 2;
+
+    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+        TwoChooseOne_example<SoftSpokenOT::DotSemiHonestSender, SoftSpokenOT::DotSemiHonestReceiver>(
+            role, totalOTs, numThreads, ip, tag, clp, cmd.getOr("f", defaultFieldBits));
+    }, cmd, ssdelta);
+
+    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+        TwoChooseOne_example<SoftSpokenOT::TwoOneSemiHonestSender, SoftSpokenOT::TwoOneSemiHonestReceiver>(
+            role, totalOTs, numThreads, ip, tag, clp, cmd.getOr("f", defaultFieldBits));
+    }, cmd, sshonest);
+#endif
+
 #ifdef ENABLE_KKRT
     flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
 #endif
@@ -246,6 +262,8 @@ int main(int argc, char** argv)
             << Color::Green << "  -Silent       " << Color::Default << "  : to run the Silent          passive secure 1-out-of-2       OT      " << Color::Red << (silentEnabled ? "" : "(disabled)")          << "\n"   << Color::Default
             << Color::Green << "  -kos          " << Color::Default << "  : to run the KOS             active secure  1-out-of-2       OT      " << Color::Red << (kosEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
             << Color::Green << "  -dkos         " << Color::Default << "  : to run the KOS             active secure  1-out-of-2 Delta-OT      " << Color::Red << (dkosEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
+            << Color::Green << "  -ssdelta      " << Color::Default << "  : to run the SoftSpoken      passive secure 1-out-of-2 Delta-OT      " << Color::Red << (softSpokenEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
+            << Color::Green << "  -sshonest     " << Color::Default << "  : to run the SoftSpoken      passive secure 1-out-of-2       OT      " << Color::Red << (softSpokenEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
             << Color::Green << "  -oos          " << Color::Default << "  : to run the OOS             active secure  1-out-of-N OT for N=2^76 " << Color::Red << (oosEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
             << Color::Green << "  -kkrt         " << Color::Default << "  : to run the KKRT            passive secure 1-out-of-N OT for N=2^128" << Color::Red << (kkrtEnabled ? "" : "(disabled)")            << "\n\n" << Color::Default
 
@@ -254,6 +272,9 @@ int main(int argc, char** argv)
             << Color::Green << "  -mrPopf       " << Color::Default << "  : to run the MasnyRindal POPF (Moeller only)                          " << "\n"<< Color::Default
             << Color::Green << "  -feistel      " << Color::Default << "  : to run the Feistel POPF                                             " << "\n"<< Color::Default
             << Color::Green << "  -feistelMul   " << Color::Default << "  : to run the Feistel With Multiplication POPF                         " << "\n\n"<< Color::Default
+
+            << "SoftSpokenOT options:\n"
+            << Color::Green << "  -f            " << Color::Default << "  : the number of bits in the finite field (aka the depth of the PPRF). " << "\n\n"<< Color::Default
 
             << "Other Options:\n"
             << Color::Green << "  -n            " << Color::Default << ": the number of OTs to perform\n"

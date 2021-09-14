@@ -8,7 +8,7 @@
 
 namespace osuCrypto
 {
-	const u64 commStepSize(512);
+	const u64 commStepSize(512); // TODO: try increasing this for optimization.
 	const u64 superBlkShift(3);
 	const u64 superBlkSize(1 << superBlkShift);
 
