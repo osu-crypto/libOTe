@@ -123,15 +123,19 @@ public:
 	{
 		size_t numInstancesArray[] = { (size_t) instParams.size()... };
 		size_t numInstances = numInstancesArray[0];
+#ifndef NDEBUG
 		for (size_t n : numInstancesArray)
 			if (n != numInstances)
 				throw RTE_LOC;
+#endif
 
 		size_t numChunks = divCeil(numInstances, Derived::chunkSize);
+#ifndef NDEBUG
 		size_t numChunksArray[] = { (size_t) chunkParams.size()... };
 		for (size_t n : numChunksArray)
 			if (n != numChunks)
 				throw RTE_LOC;
+#endif
 
 		return std::pair<size_t, size_t>(numInstances, numChunks);
 	}

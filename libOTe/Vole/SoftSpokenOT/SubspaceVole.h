@@ -135,8 +135,10 @@ public:
 	{
 		// To avoid needing a queue, this assumes that all messages are used up before more are
 		// read.
+#ifndef NDEBUG
 		if (messages.size() != readIndex)
 			throw RTE_LOC;
+#endif
 		clear();
 
 		size_t currentEnd = messages.size();
@@ -153,8 +155,10 @@ public:
 	// Get a message from the receive buffer that is blocks blocks long.
 	span<block> getMessage(size_t blocks)
 	{
+#ifndef NDEBUG
 		if (readIndex + blocks > messages.size())
 			throw RTE_LOC;
+#endif
 
 		auto output = gsl::make_span(messages).subspan(readIndex, blocks);
 		readIndex += blocks;

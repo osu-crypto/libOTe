@@ -111,10 +111,12 @@ public:
 
 	void generate(size_t blockIdx, span<block> outU, span<block> outV) const
 	{
+#ifndef NDEBUG
 		if ((size_t) outU.size() != uPadded())
 			throw RTE_LOC;
 		if ((size_t) outV.size() != vPadded())
 			throw RTE_LOC;
+#endif
 
 		return generate(blockIdx, outU.data(), outV.data());
 	}
@@ -191,10 +193,12 @@ public:
 
 	void sharedFunctionXor(span<const block> u, span<block> product)
 	{
+#ifndef NDEBUG
 		if ((size_t) u.size() != numVoles)
 			throw RTE_LOC;
 		if ((size_t) product.size() != wPadded())
 			throw RTE_LOC;
+#endif
 		sharedFunctionXor(u.data(), product.data());
 	}
 
@@ -208,8 +212,10 @@ public:
 
 	void generate(size_t blockIdx, span<block> outW) const
 	{
+#ifndef NDEBUG
 		if ((size_t) outW.size() != wPadded())
 			throw RTE_LOC;
+#endif
 
 		return generate(blockIdx, outW.data());
 	}

@@ -30,10 +30,12 @@ public:
 
 	void encodeXor(span<const block> message, span<block> codeWord) const
 	{
+#ifndef NDEBUG
 		if ((size_t) message.size() != dimension())
 			throw RTE_LOC;
 		if ((size_t) codeWord.size() != length())
 			throw RTE_LOC;
+#endif
 		encodeXor(message.data(), codeWord.data());
 	}
 
@@ -51,10 +53,12 @@ public:
 
 	void encode(span<const block> message, span<block> codeWord) const
 	{
+#ifndef NDEBUG
 		if ((size_t) message.size() != dimension())
 			throw RTE_LOC;
 		if ((size_t) codeWord.size() != length())
 			throw RTE_LOC;
+#endif
 		encode(message.data(), codeWord.data());
 	}
 
@@ -69,12 +73,14 @@ public:
 
 	void encodeSyndrome(span<const block> syndrome, span<block> word) const
 	{
+#ifndef NDEBUG
 		const size_t len = length();
 		const size_t codim = len - dimension();
 		if ((size_t) syndrome.size() != codim)
 			throw RTE_LOC;
 		if ((size_t) word.size() != len)
 			throw RTE_LOC;
+#endif
 		encodeSyndrome(syndrome.data(), word.data());
 	}
 
@@ -92,10 +98,12 @@ public:
 		const size_t len = length();
 		const size_t dim = dimension();
 		const size_t codim = len - dim;
+#ifndef NDEBUG
 		if ((size_t) message.size() != dim)
 			throw RTE_LOC;
 		if ((size_t) wordInSyndromeOut.size() != len)
 			throw RTE_LOC;
+#endif
 		decodeInPlace(wordInSyndromeOut.data(), message.data());
 		return wordInSyndromeOut.subspan(0, codim);
 	}
