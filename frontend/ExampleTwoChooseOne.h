@@ -76,48 +76,57 @@ namespace osuCrypto
             nBaseOTs = senders[0].baseOtCount();
         }
 
-#ifdef LIBOTE_HAS_BASE_OT
-        // Now compute the base OTs, we need to set them on the first pair of extenders.
-        // In real code you would only have a sender or reciever, not both. But we do
-        // here just showing the example.
-        if (role == Role::Receiver)
-        {
-            receivers.emplace_back(std::forward<Params>(params)...);
-            DefaultBaseOT base;
-            std::vector<std::array<block, 2>> baseMsg(nBaseOTs);
-            base.send(baseMsg, prng, chls[0], numThreads);
-            receivers[0].setBaseOts(baseMsg, prng, chls[0]);
-
-            //receivers[0].genBaseOts(prng, chls[0]);
-        }
-        else
-        {
-
-            DefaultBaseOT base;
-            BitVector bv(nBaseOTs);
-            std::vector<block> baseMsg(nBaseOTs);
-            bv.randomize(prng);
-            base.receive(bv, baseMsg, prng, chls[0], numThreads);
-            senders[0].setBaseOts(baseMsg, bv, prng, chls[0]);
-        }
-#else
+#ifndef LIBOTE_HAS_BASE_OT
         if (!cmd.isSet("fakeBase"))
             std::cout << "warning, base ots are not enabled. Fake base OTs will be used. " << std::endl;
-        PRNG commonPRNG(oc::ZeroBlock);
-        std::vector<std::array<block, 2>> sendMsgs(nBaseOTs);
-        commonPRNG.get(sendMsgs.data(), sendMsgs.size());
-        if (role == Role::Receiver)
+#else
+        if (cmd.isSet("fakeBase"))
+#endif
         {
-            receivers[0].setBaseOts(sendMsgs, prng, chls[0]);
+
+            PRNG commonPRNG(oc::ZeroBlock);
+            std::vector<std::array<block, 2>> sendMsgs(nBaseOTs);
+            commonPRNG.get(sendMsgs.data(), sendMsgs.size());
+            if (role == Role::Receiver)
+            {
+                receivers[0].setBaseOts(sendMsgs, prng, chls[0]);
+            }
+            else
+            {
+                BitVector bv(nBaseOTs);
+                bv.randomize(commonPRNG);
+                std::vector<block> recvMsgs(nBaseOTs);
+                for (u64 i = 0; i < nBaseOTs; ++i)
+                    recvMsgs[i] = sendMsgs[i][bv[i]];
+                senders[0].setBaseOts(recvMsgs, bv, prng, chls[0]);
+            }
         }
+#ifdef LIBOTE_HAS_BASE_OT
         else
         {
-            BitVector bv(nBaseOTs);
-            bv.randomize(commonPRNG);
-            std::vector<block> recvMsgs(nBaseOTs);
-            for (u64 i = 0; i < nBaseOTs; ++i)
-                recvMsgs[i] = sendMsgs[i][bv[i]];
-            senders[0].setBaseOts(recvMsgs, bv, prng, chls[0]);
+            // Now compute the base OTs, we need to set them on the first pair of extenders.
+            // In real code you would only have a sender or reciever, not both. But we do
+            // here just showing the example.
+            if (role == Role::Receiver)
+            {
+                receivers.emplace_back(std::forward<Params>(params)...);
+                DefaultBaseOT base;
+                std::vector<std::array<block, 2>> baseMsg(nBaseOTs);
+                base.send(baseMsg, prng, chls[0], numThreads);
+                receivers[0].setBaseOts(baseMsg, prng, chls[0]);
+
+                //receivers[0].genBaseOts(prng, chls[0]);
+            }
+            else
+            {
+
+                DefaultBaseOT base;
+                BitVector bv(nBaseOTs);
+                std::vector<block> baseMsg(nBaseOTs);
+                bv.randomize(prng);
+                base.receive(bv, baseMsg, prng, chls[0], numThreads);
+                senders[0].setBaseOts(baseMsg, bv, prng, chls[0]);
+            }
         }
 #endif
 
