@@ -262,18 +262,20 @@ struct SmallFieldVoleBase::call_member_func<fieldBitsConst, Return (Class::*)(Pa
 
 SmallFieldVoleSender::SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_) :
 	SmallFieldVoleBase(fieldBits_, numVoles_),
+	numVolesPadded(computeNumVolesPadded(fieldBits_, numVoles_)),
 	generatePtr(selectGenerateImpl(fieldBits))
 {
-	seeds.reset(new block[numVolesPadded() * fieldSize()]);
-	std::fill_n(seeds.get(), numVolesPadded() * fieldSize(), toBlock(0UL));
+	seeds.reset(new block[numVolesPadded * fieldSize()]);
+	std::fill_n(seeds.get(), numVolesPadded * fieldSize(), toBlock(0UL));
 }
 
 SmallFieldVoleReceiver::SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_) :
 	SmallFieldVoleBase(fieldBits_, numVoles_),
+	numVolesPadded(computeNumVolesPadded(fieldBits_, numVoles_)),
 	generatePtr(selectGenerateImpl(fieldBits))
 {
-	seeds.reset(new block[numVolesPadded() * (fieldSize() - 1)]);
-	std::fill_n(seeds.get(), numVolesPadded() * (fieldSize() - 1), toBlock(0UL));
+	seeds.reset(new block[numVolesPadded * (fieldSize() - 1)]);
+	std::fill_n(seeds.get(), numVolesPadded * (fieldSize() - 1), toBlock(0UL));
 }
 
 SmallFieldVoleSender::SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_, span<const block> seeds_) :

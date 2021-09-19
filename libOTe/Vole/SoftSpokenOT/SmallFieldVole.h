@@ -69,6 +69,13 @@ private:
 class SmallFieldVoleSender : public SmallFieldVoleBase
 {
 public:
+	// Instead of special casing the last few VOLEs when the number of AES calls wouldn't be a
+	// multiple of superBlkSize, just pad the seeds and output. The output must be sized for
+	// numVolesPadded VOLEs, rather than numVoles, and the extra output values will be garbage. This
+	// wastes a few AES calls, but saving them wouldn't have helped much because you still have to
+	// pay for the AES latency.
+	const size_t numVolesPadded;
+
 	SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_);
 
 	// seeds must be the OT messages from numVoles instances of 2**fieldBits - 1 of 2**fieldBits OT,
@@ -80,26 +87,13 @@ public:
 	SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_,
 		Channel& chl, PRNG& prng, span<const std::array<block, 2>> baseMessages, size_t numThreads);
 
-	// Instead of special casing last few VOLEs when the number of AES calls wouldn't be a multiple
-	// of superBlkSize, just pad the seeds and output. The output must be sized for numVolesPadded()
-	// VOLEs, rather than numVoles, and the extra output values will be garbage. This wastes a few
-	// AES calls, but saving them wouldn't have helped much because you still have to pay for the
-	// AES latency.
-	size_t numVolesPadded() const
-	{
-		if (fieldBits <= superBlkShift) // >= 1 VOLEs per superblock.
-			return roundUpTo(numVoles, superBlkSize / fieldSize());
-		else // > 1 super block per VOLE.
-			return numVoles;
-	}
-
 	// The number of useful blocks in u, v.
 	size_t uSize() const { return numVoles; }
 	size_t vSize() const { return fieldBits * numVoles; }
 
 	// ... plus the number of padding blocks at the end where garbage may be written.
-	size_t uPadded() const { return numVolesPadded(); }
-	size_t vPadded() const { return fieldBits * numVolesPadded(); }
+	size_t uPadded() const { return numVolesPadded; }
+	size_t vPadded() const { return fieldBits * numVolesPadded; }
 
 
 	// outV outputs the values for v, i.e. xor_x x * PRG(seed[x]). outU gives the values for u (the
@@ -119,6 +113,14 @@ public:
 #endif
 
 		return generate(blockIdx, outU.data(), outV.data());
+	}
+
+	static size_t computeNumVolesPadded(size_t fieldBits, size_t numVoles)
+	{
+		if (fieldBits <= superBlkShift) // >= 1 VOLEs per superblock.
+			return roundUpTo(numVoles, superBlkSize >> fieldBits);
+		else // > 1 super block per VOLE.
+			return numVoles;
 	}
 
 private:
@@ -142,6 +144,10 @@ public:
 	BitVector delta;
 	std::unique_ptr<u8[]> deltaUnpacked; // Each bit of delta becomes a byte, either 0 or 0xff.
 
+	// Same as for SmallFieldVoleSender, except that the AES operations are performed in differently
+	// sized chunks for the receiver.
+	const size_t numVolesPadded;
+
 	SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_);
 	SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_, BitVector delta_);
 
@@ -159,25 +165,11 @@ public:
 	SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_,
 		Channel& chl, PRNG& prng, span<const block> baseMessages, BitVector choices, size_t numThreads);
 
-	// Same as for SmallFieldVoleSender, except that the AES operations are performed in differently
-	// sized chunks for the receiver.
-	size_t numVolesPadded() const
-	{
-		size_t volesPadded;
-		if (fieldBits <= superBlkShift) // >= 1 VOLEs per superblock.
-			volesPadded = roundUpTo(numVoles, divNearest(superBlkSize, fieldSize() - 1));
-		else // > 1 super block per VOLE.
-			volesPadded = numVoles;
-
-		// Padding for sharedFunctionXor.
-		return std::max(volesPadded, roundUpTo(numVoles, 4));
-	}
-
 	// The number of useful blocks in w.
 	size_t wSize() const { return fieldBits * numVoles; }
 
 	// wSize plus the number of padding blocks at the end where garbage may be written.
-	size_t wPadded() const { return fieldBits * numVolesPadded(); }
+	size_t wPadded() const { return fieldBits * numVolesPadded; }
 
 	// The VOLE outputs secret shares shares of u cdot Delta, where u is in GF(2)^numVoles, Delta is
 	// in GF(2^fieldBits)^numVoles, and cdot represents the componentwise product. This computes the
@@ -229,6 +221,18 @@ public:
 #endif
 
 		return generate(blockIdx, outW.data(), correction.data());
+	}
+
+	static size_t computeNumVolesPadded(size_t fieldBits, size_t numVoles)
+	{
+		size_t volesPadded;
+		if (fieldBits <= superBlkShift) // >= 1 VOLEs per superblock.
+			volesPadded = roundUpTo(numVoles, divNearest(superBlkSize, (1 << fieldBits) - 1));
+		else // > 1 super block per VOLE.
+			volesPadded = numVoles;
+
+		// Padding for sharedFunctionXor.
+		return std::max(volesPadded, roundUpTo(numVoles, 4));
 	}
 
 private:
