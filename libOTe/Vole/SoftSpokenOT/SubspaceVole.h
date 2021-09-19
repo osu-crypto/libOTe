@@ -3,7 +3,7 @@
 #ifdef ENABLE_SOFTSPOKEN_OT
 
 #include <type_traits>
-#include <vector>
+#include <boost/container/vector.hpp>
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Network/Channel.h>
 #include "libOTe/Tools/GenericLinearCode.h"
@@ -35,7 +35,8 @@ class SubspaceVoleSender : public SubspaceVoleBase<Code>
 public:
 	SmallFieldVoleSender vole;
 
-	std::vector<block> messages;
+	// Use boost's vector implementation because it allows resizing without initialization.
+	boost::container::vector<block> messages;
 
 	using Base = SubspaceVoleBase<Code>;
 	using Base::code;
@@ -66,7 +67,7 @@ public:
 	span<block> extendMessages(size_t blocks)
 	{
 		size_t currentEnd = messages.size();
-		messages.resize(currentEnd + blocks);
+		messages.resize(currentEnd + blocks, boost::container::default_init_t{});
 		return gsl::make_span(messages).subspan(currentEnd);
 	}
 
@@ -115,7 +116,8 @@ public:
 	SmallFieldVoleReceiver vole;
 	std::unique_ptr<block[]> correctionU;
 
-	std::vector<block> messages;
+	// Use boost's vector implementation because it allows resizing without initialization.
+	boost::container::vector<block> messages;
 	size_t readIndex = 0;
 
 	using Base = SubspaceVoleBase<Code>;
@@ -142,7 +144,7 @@ public:
 		clear();
 
 		size_t currentEnd = messages.size();
-		messages.resize(currentEnd + blocks);
+		messages.resize(currentEnd + blocks, boost::container::default_init_t{});
 		chl.recv(&messages[currentEnd], blocks);
 	}
 
