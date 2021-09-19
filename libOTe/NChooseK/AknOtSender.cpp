@@ -36,7 +36,7 @@ namespace osuCrypto
         if (ots.hasBaseOts() == false)
         {
 #ifdef LIBOTE_HAS_BASE_OT
-            std::array<block, gOtExtBaseOtCount> baseMsg;
+            AlignedBlockArray<gOtExtBaseOtCount> baseMsg;
             BitVector choices(gOtExtBaseOtCount);
             choices.randomize(prng);
 

@@ -29,7 +29,7 @@ namespace osuCrypto
         {
 
 #ifdef LIBOTE_HAS_BASE_OT
-            std::array<std::array<block, 2>, gOtExtBaseOtCount> baseMsg;
+            AlignedBlockArray<gOtExtBaseOtCount, std::array<block, 2>> baseMsg;
 
             DefaultBaseOT base;
             base.send(baseMsg, prng, chl0, 2);

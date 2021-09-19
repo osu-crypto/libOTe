@@ -488,8 +488,7 @@ namespace osuCrypto
             // indepenendent trees that are being processed together.
             // The trees are flattenned to that the children of j are
             // located at 2*j+1 and 2*j+2.
-            //std::vector<std::array<block, 8>> tree((1ull << (dd)));
-            std::unique_ptr<block[]> uPtr(new block[8 * (1ull << (dd))]);
+            AlignedBlockPtr uPtr = allocAlignedBlockArray(8 * (1ull << (dd)));
             span<std::array<block, 8>> tree((std::array<block, 8>*)uPtr.get(), 1ull << (dd));
 
 #ifdef DEBUG_PRINT_PPRF
@@ -839,8 +838,7 @@ namespace osuCrypto
             // indepenendent trees that are being processed together.
             // The trees are flattenned to that the children of j are
             // located at 2*j  and 2*j+1.
-            //std::vector<std::array<block, 8>> tree(1ull << (dd));
-            std::unique_ptr<block[]> uPtr(new block[8 * (1ull << (dd))]);
+            AlignedBlockPtr uPtr = allocAlignedBlockArray(8 * (1ull << (dd)));
             span<std::array<block, 8>> tree((std::array<block, 8>*)uPtr.get(), 1ull << (dd));
 
             gTimer.setTimePoint("recv.alloc");

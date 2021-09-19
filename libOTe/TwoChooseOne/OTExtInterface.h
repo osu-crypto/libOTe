@@ -24,7 +24,8 @@ namespace osuCrypto
         virtual ~OtReceiver() = default;
 
         // Receive random strings indexed by choices. The random strings will be written to
-        // messages.
+        // messages. messages must have the same alignment as an AlignedBlockPtr, i.e. 32
+        // bytes with avx or 16 bytes without avx.
         virtual void receive(
             const BitVector& choices,
             span<block> messages,
@@ -32,14 +33,14 @@ namespace osuCrypto
             Channel& chl) = 0;
 
         // Receive chosen strings indexed by choices. The chosen strings will be written to
-        // messages.
+        // messages. The same alignment restriction applies.
         void receiveChosen(
             const BitVector& choices,
             span<block> recvMessages,
             PRNG& prng,
             Channel& chl);
 
-
+        // The same alignment restriction applies.
         void receiveCorrelated(
             const BitVector& choices,
             span<block> recvMessages,
@@ -55,25 +56,27 @@ namespace osuCrypto
         virtual ~OtSender() = default;
 
         // send random strings. The random strings will be written to
-        // messages.
+        // messages, which must be aligned like an AlignedBlockPtr.
         virtual void send(
             span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl) = 0;
 
-        // send chosen strings. Thosen strings are read from messages.
+        // send chosen strings. Thosen strings are read from messages. No extra
+        // alignment is required.
         void sendChosen(
             span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl);
 
+        // No extra alignment is required.
         template<typename CorrelationFunc>
         void sendCorrelated(span<block> messages, const CorrelationFunc& corFunc, PRNG& prng, Channel& chl)
         {
 
-            std::vector<std::array<block, 2>> temp(messages.size());
+            auto temp = allocAlignedBlockArray<std::array<block, 2>>(messages.size());
             std::vector<block> temp2(messages.size());
-            send(temp, prng, chl);
+            send(span<std::array<block, 2>>(temp.get(), messages.size()), prng, chl);
 
             for (u64 i = 0; i < static_cast<u64>(messages.size()); ++i)
             {

@@ -11,7 +11,7 @@ namespace osuCrypto
         setTimePoint("recvOT");
 
         BitVector bv((u8*)&x, 128);
-        std::array<block, 128> otMsg;
+        AlignedBlockArray<128> otMsg;
         ot.receive(bv, otMsg, prng, chl);
 
         return send(x, z, prng, otMsg, chl);

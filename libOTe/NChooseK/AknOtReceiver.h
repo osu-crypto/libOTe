@@ -33,7 +33,7 @@ public:
         OtExtReceiver& ots, span<Channel> chls, PRNG& prng);
 
     std::vector<u64> mOnes, mZeros;
-    std::vector<block> mMessages;
+    std::vector<block, AlignedBlockAllocator> mMessages;
     BitVector mChoices;
 };
 

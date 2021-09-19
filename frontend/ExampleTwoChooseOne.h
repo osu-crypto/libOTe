@@ -111,7 +111,7 @@ namespace osuCrypto
             {
                 receivers.emplace_back(std::forward<Params>(params)...);
                 DefaultBaseOT base;
-                std::vector<std::array<block, 2>> baseMsg(nBaseOTs);
+                std::vector<std::array<block, 2>, AlignedBlockAllocator2> baseMsg(nBaseOTs);
                 base.send(baseMsg, prng, chls[0], numThreads);
                 receivers[0].setBaseOts(baseMsg, prng, chls[0]);
 
@@ -122,7 +122,7 @@ namespace osuCrypto
 
                 DefaultBaseOT base;
                 BitVector bv(nBaseOTs);
-                std::vector<block> baseMsg(nBaseOTs);
+                std::vector<block, AlignedBlockAllocator> baseMsg(nBaseOTs);
                 bv.randomize(prng);
                 base.receive(bv, baseMsg, prng, chls[0], numThreads);
                 senders[0].setBaseOts(baseMsg, bv, prng, chls[0]);
@@ -153,7 +153,7 @@ namespace osuCrypto
             PRNG prng(sysRandomSeed());
 
             // construct a vector to stored the random send messages.
-            std::vector<std::array<block, 2>> sMsgs(numOTs * (role == Role::Sender));
+            auto sMsgs = allocAlignedBlockArray<std::array<block, 2>>(numOTs * (role == Role::Sender));
 
             // construct the choices that we want.
             BitVector choice(numOTs);
@@ -161,7 +161,7 @@ namespace osuCrypto
             choice.randomize(prng);
 
             // construct a vector to stored the received messages.
-            std::vector<block> rMsgs(numOTs * (role != Role::Sender));
+            auto rMsgs = allocAlignedBlockArray(numOTs * (role != Role::Sender));
 
             for (u64 tt = 0; tt < trials; ++tt)
             {
@@ -175,12 +175,12 @@ namespace osuCrypto
                     if (randomOT)
                     {
                         // perform  numOTs random OTs, the results will be written to msgs.
-                        receivers[i].receive(choice, rMsgs, prng, chls[i]);
+                        receivers[i].receive(choice, span(rMsgs.get(), numOTs), prng, chls[i]);
                     }
                     else
                     {
                         // perform  numOTs chosen message OTs, the results will be written to msgs.
-                        receivers[i].receiveChosen(choice, rMsgs, prng, chls[i]);
+                        receivers[i].receiveChosen(choice, span(rMsgs.get(), numOTs), prng, chls[i]);
                     }
                 }
                 else
@@ -196,16 +196,16 @@ namespace osuCrypto
                     if (randomOT)
                     {
                         // perform the OTs and write the random OTs to msgs.
-                        senders[i].send(sMsgs, prng, chls[i]);
+                        senders[i].send(span(sMsgs.get(), numOTs), prng, chls[i]);
                     }
                     else
                     {
                         // Populate msgs with something useful...
-                        prng.get(sMsgs.data(), sMsgs.size());
+                        prng.get(sMsgs.get(), numOTs);
 
                         // perform the OTs. The receiver will learn one
                         // of the messages stored in msgs.
-                        senders[i].sendChosen(sMsgs, prng, chls[i]);
+                        senders[i].sendChosen(span(sMsgs.get(), numOTs), prng, chls[i]);
                     }
                 }
 

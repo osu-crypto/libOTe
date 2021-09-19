@@ -12,7 +12,7 @@ namespace osuCrypto
     {
         setTimePoint("recvOT");
 
-        std::array<std::array<block, 2>, 128> otMsg;
+        AlignedBlockArray<128, std::array<block, 2>> otMsg;
         ot.send(otMsg, prng, chl);
 
         return receive(y, z, prng, otMsg, chl);

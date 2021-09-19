@@ -69,7 +69,7 @@ void minimal()
         //...
 
         // Receive the messages
-        std::vector<block> messages(n);
+        std::vector<block, AlignedBlockAllocator> messages(n);
         recver.receiveChosen(choices, messages, prng, recverChl);
 
         // messages[i] = sendMessages[i][choices[i]];

@@ -6,6 +6,7 @@ namespace tests_libOTe
 
     void Tools_Transpose_Test();
     void Tools_Transpose_View_Test();
+    void Tools_Transpose_Bench();
 
 
     void OtExt_Kos_Test();

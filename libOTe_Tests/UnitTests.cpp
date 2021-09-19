@@ -23,8 +23,9 @@ namespace tests_libOTe
         //void OtExt_genBaseOts_Test()
 
 
-        tc.add("Tools_Transpose_View_Test               ", Tools_Transpose_View_Test);
         tc.add("Tools_Transpose_Test                    ", Tools_Transpose_Test);
+        tc.add("Tools_Transpose_View_Test               ", Tools_Transpose_View_Test);
+        tc.add("Tools_Transpose_Bench                   ", Tools_Transpose_Bench);
 
         tc.add("Tools_LinearCode_Test                   ", Tools_LinearCode_Test);
         tc.add("Tools_LinearCode_sub_Test               ", Tools_LinearCode_sub_Test);

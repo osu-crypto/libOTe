@@ -15,6 +15,19 @@ namespace osuCrypto
 
 // TODO: Parallelization should probably be implemented here somewhere.
 
+// Helper for some template meta-programming.
+template<typename T>
+struct TupleOfUniquePtrs {};
+
+template<typename... InstParams>
+struct TupleOfUniquePtrs<std::tuple<InstParams...>>
+{
+	typedef std::tuple<std::unique_ptr<typename std::remove_const<InstParams>::type[]...>> type;
+};
+
+template<typename Ptr>
+struct ChunkerAlloc;
+
 // Required definitions inside any class inheriting from Chunker:
 /*
 // Number of instances that are done at once.
@@ -56,11 +69,15 @@ void recvBuffer(Channel& chl, size_t batchSize);
 */
 
 // The InstParams lists the parameter types of each instance. Once wrapped in span<>, these become
-// parameters of runBatch. InstParams is wrapped in a tuple<>, to encode a variadic in a type.
+// parameters of runBatch. InstParams is wrapped in a tuple<> to get T, to encode a variadic in a
+// type. InstParamPtrs (encoded into a tuple as C) is a list of smart pointers that will be used to
+// store temporaries of type InstParams[]... (with any const removed), and each such smart pointer
+// must specialize ChunkerAlloc.
 
 template<
 	typename Derived,
 	typename T,
+	typename C = typename TupleOfUniquePtrs<T>::type,
 	typename I = std::make_index_sequence<std::tuple_size<T>::value>
 >
 class Chunker {};
@@ -69,11 +86,13 @@ class Chunker {};
 template<
 	typename Derived,
 	typename... InstParams,
+	typename... InstParamPtrs,
 	size_t... InstIndices
 >
 class Chunker<
 	Derived,
 	std::tuple<InstParams...>,
+	std::tuple<InstParamPtrs...>,
 	std::integer_sequence<size_t, InstIndices...>>
 {
 protected:
@@ -173,25 +192,24 @@ public:
 	void initTemporaryStorage()
 	{
 		const size_t minInstances = Derived::chunkSize + static_cast<Derived*>(this)->paddingSize();
-		tempStorage = std::make_tuple(
-			std::make_unique<typename std::remove_const<InstParams>::type[]>(minInstances)...);
+		tempStorage = std::make_tuple(ChunkerAlloc<InstParamPtrs>::alloc(minInstances)...);
 	}
 
-	std::tuple<std::unique_ptr<typename std::remove_const<InstParams>::type[]>...> tempStorage;
+	std::tuple<InstParamPtrs...> tempStorage;
 };
 
 // Sender refers to who will be sending messages, not to the OT sender. In fact, the OT receiver
 // will be the party sending messages in an IKNP-style OT extension.
 
-template<typename Derived, typename T>
+template<typename Derived, typename T, typename C = typename TupleOfUniquePtrs<T>::type>
 class ChunkedSender {};
 
-template<typename Derived, typename... InstParams>
-class ChunkedSender<Derived, std::tuple<InstParams...>> :
-	public Chunker<Derived, std::tuple<InstParams...>>
+template<typename Derived, typename... InstParams, typename C>
+class ChunkedSender<Derived, std::tuple<InstParams...>, C> :
+	public Chunker<Derived, std::tuple<InstParams...>, C>
 {
 protected:
-	using Base = Chunker<Derived, std::tuple<InstParams...>>;
+	using Base = Chunker<Derived, std::tuple<InstParams...>, C>;
 	using Base::checkSpanLengths;
 
 	ChunkedSender(Derived* this_) : Base(this_) {}
@@ -252,15 +270,15 @@ public:
 	}
 };
 
-template<typename Derived, typename T>
+template<typename Derived, typename T, typename C = typename TupleOfUniquePtrs<T>::type>
 class ChunkedReceiver {};
 
-template<typename Derived, typename... InstParams>
-class ChunkedReceiver<Derived, std::tuple<InstParams...>> :
-	public Chunker<Derived, std::tuple<InstParams...>>
+template<typename Derived, typename... InstParams, typename C>
+class ChunkedReceiver<Derived, std::tuple<InstParams...>, C> :
+	public Chunker<Derived, std::tuple<InstParams...>, C>
 {
 protected:
-	using Base = Chunker<Derived, std::tuple<InstParams...>>;
+	using Base = Chunker<Derived, std::tuple<InstParams...>, C>;
 	using Base::checkSpanLengths;
 
 	ChunkedReceiver(Derived* this_) : Base(this_) {}
@@ -306,6 +324,27 @@ public:
 				std::forward<ChunkParams>(chunkParams[nChunk])...,
 				std::forward<GlobalParams>(globalParams)...);
 		}
+	}
+};
+
+template<typename Ptr>
+struct ChunkerAlloc {};
+
+template<typename T>
+struct ChunkerAlloc<std::unique_ptr<T[]>>
+{
+	static std::unique_ptr<T[]> alloc(size_t n)
+	{
+		return std::unique_ptr<T[]>(new T[n]);
+	}
+};
+
+template<typename T>
+struct ChunkerAlloc<AlignedBlockPtrT<T>>
+{
+	static AlignedBlockPtrT<T> alloc(size_t n)
+	{
+		return allocAlignedBlockArray<T>(n);
 	}
 };
 

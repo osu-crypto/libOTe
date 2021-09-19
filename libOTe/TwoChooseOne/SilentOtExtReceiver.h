@@ -60,7 +60,7 @@ namespace osuCrypto
         u64 mChoiceSpanSize = 0;
 
         // The memory backing mA
-        std::unique_ptr<block[]> mBacking;
+        AlignedBlockPtr mBacking;
 
         // The size of the memory backing mA
         u64 mBackingSize = 0;

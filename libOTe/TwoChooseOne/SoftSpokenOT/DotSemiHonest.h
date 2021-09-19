@@ -23,7 +23,11 @@ namespace SoftSpokenOT
 class DotSemiHonestSender :
 	public OtExtSender,
 	public TimerAdapter,
-	private ChunkedReceiver<DotSemiHonestSender, std::tuple<std::array<block, 2>>>
+	private ChunkedReceiver<
+		DotSemiHonestSender,
+		std::tuple<std::array<block, 2>>,
+		std::tuple<AlignedBlockPtrT<std::array<block, 2>>>
+	>
 {
 public:
 	// Present once base OTs have finished.
@@ -93,7 +97,8 @@ public:
 	// and output the msg_0s. msg_1 will be msg_0 ^ delta. The output is not bitsliced, i.e. it is
 	// transposed from what the SubspaceVole outputs. outW must have length wPadded() (which may be
 	// greater than 128). The extra blocks are treated as padding and may be overwritten, either
-	// with unneeded extra VOLE bits or padding from the VOLE.
+	// with unneeded extra VOLE bits or padding from the VOLE. Also, outW must be given the
+	// alignment of an AlignedBlockArray.
 	void generateRandom(size_t blockIdx, span<block> outW)
 	{
 		vole->generateRandom(blockIdx, outW);
@@ -107,7 +112,11 @@ public:
 	}
 
 protected:
-	using ChunkerBase = ChunkedReceiver<DotSemiHonestSender, std::tuple<std::array<block, 2>>>;
+	using ChunkerBase = ChunkedReceiver<
+		DotSemiHonestSender,
+		std::tuple<std::array<block, 2>>,
+		std::tuple<AlignedBlockPtrT<std::array<block, 2>>>
+	>;
 	friend ChunkerBase;
 	friend ChunkerBase::Base;
 
@@ -122,7 +131,7 @@ protected:
 class DotSemiHonestReceiver :
 	public OtExtReceiver,
 	public TimerAdapter,
-	private ChunkedSender<DotSemiHonestReceiver, std::tuple<block>>
+	private ChunkedSender<DotSemiHonestReceiver, std::tuple<block>, std::tuple<AlignedBlockPtr>>
 {
 public:
 	// Present once base OTs have finished.
@@ -183,7 +192,7 @@ public:
 	// choice bits (packed into a 128 bit block) and the chosen messages. The output is not
 	// bitsliced, i.e. it is transposed from what the SubspaceVole outputs. outV must have length
 	// vPadded() (which may be greater than 128). The extra blocks are treated as padding and may be
-	// overwritten.
+	// overwritten. Also, outW must be given the alignment of an AlignedBlockArray.
 	void generateRandom(size_t blockIdx, block& randomU, span<block> outV)
 	{
 		vole->generateRandom(blockIdx, span<block>(&randomU, 1), outV);
@@ -197,7 +206,11 @@ public:
 	}
 
 protected:
-	using ChunkerBase = ChunkedSender<DotSemiHonestReceiver, std::tuple<block>>;
+	using ChunkerBase = ChunkedSender<
+		DotSemiHonestReceiver,
+		std::tuple<block>,
+		std::tuple<AlignedBlockPtr>
+	>;
 	friend ChunkerBase;
 	friend ChunkerBase::Base;
 

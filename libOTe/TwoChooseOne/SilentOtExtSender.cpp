@@ -145,7 +145,7 @@ namespace osuCrypto
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
 
-        std::vector<std::array<block, 2>> msg(silentBaseOtCount());
+        std::vector<std::array<block, 2>, AlignedBlockAllocator2> msg(silentBaseOtCount());
 
 
         // If we have IKNP base OTs, use them
@@ -789,7 +789,7 @@ namespace osuCrypto
             brs[j++].decrementWait();
 
 
-            std::array<block, 128> tpBuffer;
+            AlignedBlockArray<128> tpBuffer;
             auto numBlocks = (mRequestNumOts + 127) / 128;
             auto begin = index * numBlocks / mNumThreads;
             auto end = (index + 1) * numBlocks / mNumThreads;

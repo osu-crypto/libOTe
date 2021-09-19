@@ -38,14 +38,14 @@ namespace osuCrypto
             chl0.waitForConnection();
             BaseOT recv = ot;
 
-            std::vector<block> msg(totalOTs);
+            auto msg = allocAlignedBlockArray(totalOTs);
             BitVector choice(totalOTs);
             choice.randomize(prng);
 
 
             s = t.setTimePoint("base OT start");
 
-            recv.receive(choice, msg, prng, chl0);
+            recv.receive(choice, span(msg.get(), totalOTs), prng, chl0);
         }
         else
         {
@@ -55,11 +55,11 @@ namespace osuCrypto
 
             BaseOT send = ot;
 
-            std::vector<std::array<block, 2>> msg(totalOTs);
+            auto msg = allocAlignedBlockArray<std::array<block, 2>>(totalOTs);
 
             s = t.setTimePoint("base OT start");
 
-            send.send(msg, prng, chl1);
+            send.send(span(msg.get(), totalOTs), prng, chl1);
         }
 
         auto e = t.setTimePoint("base OT end");

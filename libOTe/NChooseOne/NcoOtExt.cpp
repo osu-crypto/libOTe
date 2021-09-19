@@ -11,7 +11,7 @@
 void osuCrypto::NcoOtExtReceiver::genBaseOts(PRNG & prng, Channel & chl)
 {
     auto count = getBaseOTCount();
-    std::vector<std::array<block, 2>> msgs(count);
+    std::vector<std::array<block, 2>, AlignedBlockAllocator2> msgs(count);
 
 #ifdef ENABLE_IKNP
     if (!isMalicious())
@@ -43,7 +43,7 @@ void osuCrypto::NcoOtExtReceiver::genBaseOts(PRNG & prng, Channel & chl)
 void osuCrypto::NcoOtExtSender::genBaseOts(PRNG & prng, Channel & chl)
 {
     auto count = getBaseOTCount();
-    std::vector<block> msgs(count);
+    std::vector<block, AlignedBlockAllocator> msgs(count);
     BitVector bv(count);
     bv.randomize(prng);
 

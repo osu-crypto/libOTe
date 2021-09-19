@@ -10,7 +10,7 @@
 #include <libOTe/Tools/LDPC/LdpcSampler.h>
 
 #include <libOTe/Vole/NoisyVoleSender.h>
-//#include <bits/stdc++.h> 
+//#include <bits/stdc++.h>
 
 namespace osuCrypto
 {
@@ -153,7 +153,7 @@ namespace osuCrypto
             throw std::runtime_error("configure must be called first");
 
         BitVector choice = sampleBaseChoiceBits(prng);
-        std::vector<block> msg(choice.size());
+        std::vector<block, AlignedBlockAllocator> msg(choice.size());
 
         // If we have IKNP base OTs, use them
         // to extend to get the silent base OTs.
@@ -164,7 +164,7 @@ namespace osuCrypto
         mKosRecver.mFiatShamir = true;
         mKosRecver.receive(choice, msg, prng, chl);
 #else
-    // otherwise just generate the silent 
+    // otherwise just generate the silent
     // base OTs directly.
         DefaultBaseOT base;
         base.receive(choice, msg, prng, chl, mNumThreads);
@@ -182,9 +182,9 @@ namespace osuCrypto
     {
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
-        return 
-            mGen.baseOtCount() + 
-            mGapOts.size() + 
+        return
+            mGen.baseOtCount() +
+            mGapOts.size() +
             (mMalType == SilentSecType::Malicious) * 128;
     }
 
@@ -267,7 +267,7 @@ namespace osuCrypto
     //    v_i = w_i + u_i * x
     //
     //    ------------------------ -
-    //    u' =   0000001000000000001000000000100000...00000,   u_i = 1 iff i \in S 
+    //    u' =   0000001000000000001000000000100000...00000,   u_i = 1 iff i \in S
     //
     //    v' = r + (x . u') = DPF(k0)
     //       = r + (000000x00000000000x000000000x00000...00000)
@@ -427,7 +427,7 @@ namespace osuCrypto
         if (mBackingSize < mN2)
         {
             mBackingSize = mN2;
-            mBacking.reset(new block[mBackingSize]);
+            mBacking = allocAlignedBlockArray(mBackingSize);
         }
         mA = span<block>(mBacking.get(), mN2);
         mC = {};
@@ -456,7 +456,7 @@ namespace osuCrypto
         case MultType::slv11:
         case MultType::slv5:
         {
-            // derandomize the random OTs for the gap 
+            // derandomize the random OTs for the gap
             // to have the desired correlation.
             std::vector<block> gapVals(mGapOts.size());
             chl.recv(gapVals.data(), gapVals.size());
@@ -473,7 +473,7 @@ namespace osuCrypto
             mGen.expand(chl, prng, mA.subspan(0, main), PprfOutputFormat::Interleaved, mNumThreads);
             setTimePoint("recver.expand.pprf_transpose");
             gTimer.setTimePoint("recver.expand.pprf_transpose");
-            
+
 
             if(mMalType == SilentSecType::Malicious)
                 ferretMalCheck(chl, prng);
@@ -846,7 +846,7 @@ namespace osuCrypto
             auto rem = mRequestedNumOts % 128;
             if (rem && index == 0)
             {
-                std::array<block, 128> tpBuffer;
+                AlignedBlockArray<128> tpBuffer;
 
                 for (u64 j = 0; j < tpBuffer.size(); ++j)
                     tpBuffer[j] = cModP1(j, numBlocks);

@@ -35,7 +35,7 @@ namespace osuCrypto
 
         //std::vector<BitVector> mTheirPermutes;
 
-        std::vector<std::array<block, 2>> mMessages;
+        std::vector<std::array<block, 2>, AlignedBlockAllocator2> mMessages;
 
         BitVector mSampled;
         //u64 mTotalOTCount, mCutAndChooseThreshold;

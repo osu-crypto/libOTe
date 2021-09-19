@@ -15,7 +15,11 @@ namespace SoftSpokenOT
 
 class TwoOneSemiHonestSender :
 	public DotSemiHonestSender,
-	private ChunkedReceiver<TwoOneSemiHonestSender, std::tuple<std::array<block, 2>>>
+	private ChunkedReceiver<
+		TwoOneSemiHonestSender,
+		std::tuple<std::array<block, 2>>,
+		std::tuple<AlignedBlockPtrT<std::array<block, 2>>>
+	>
 {
 public:
 	using Base = DotSemiHonestSender;
@@ -43,7 +47,8 @@ public:
 	// Perform up to 128 random OTs (assuming that the messages have been received from the
 	// receiver), and output the message pairs. Set numUsed to be < 128 if you don't neeed all of
 	// the messages. The number of blocks in messages (2 * messages.size()) must be at least
-	// wPadded(), as there might be some padding.
+	// wPadded(), as there might be some padding. Also, messages must be given the alignment of an
+	// AlignedBlockArray.
 	void generateRandom(size_t blockIdx, size_t numUsed, span<std::array<block, 2>> messages)
 	{
 		block* messagesPtr = (block*) messages.data();
@@ -63,14 +68,18 @@ public:
 	TRY_FORCEINLINE void processChunk(size_t numUsed, span<std::array<block, 2>> messages);
 
 protected:
-	using ChunkerBase = ChunkedReceiver<TwoOneSemiHonestSender, std::tuple<std::array<block, 2>>>;
+	using ChunkerBase = ChunkedReceiver<
+		TwoOneSemiHonestSender,
+		std::tuple<std::array<block, 2>>,
+		std::tuple<AlignedBlockPtrT<std::array<block, 2>>>
+	>;
 	friend ChunkerBase;
 	friend ChunkerBase::Base;
 };
 
 class TwoOneSemiHonestReceiver :
 	public DotSemiHonestReceiver,
-	private ChunkedSender<TwoOneSemiHonestReceiver, std::tuple<block>>
+	private ChunkedSender<TwoOneSemiHonestReceiver, std::tuple<block>, std::tuple<AlignedBlockPtr>>
 {
 public:
 	using Base = DotSemiHonestReceiver;
@@ -98,7 +107,7 @@ public:
 	// Perform 128 random OTs (saving the messages up to send to the sender), and output the choice
 	// bits (packed into a 128 bit block) and the chosen messages. Set numUsed to be < 128 if you
 	// don't neeed all of the messages. messages.size() must be at least vPadded(), as there might
-	// be some padding.
+	// be some padding. Also, messages must be given the alignment of an AlignedBlockArray.
 	void generateRandom(size_t blockIdx, size_t numUsed, block& choicesOut, span<block> messages)
 	{
 		Base::generateRandom(blockIdx, choicesOut, messages);
@@ -114,7 +123,11 @@ public:
 	TRY_FORCEINLINE void processChunk(size_t numUsed, span<block> messages, block chioces);
 
 protected:
-	using ChunkerBase = ChunkedSender<TwoOneSemiHonestReceiver, std::tuple<block>>;
+	using ChunkerBase = ChunkedSender<
+		TwoOneSemiHonestReceiver,
+		std::tuple<block>,
+		std::tuple<AlignedBlockPtr>
+	>;
 	friend ChunkerBase;
 	friend ChunkerBase::Base;
 };

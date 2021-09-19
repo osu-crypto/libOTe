@@ -105,7 +105,7 @@ namespace tests_libOTe
 				if (neq(d, block(0, 0xFF)))
 				{
 					std::cout << "expected" << std::endl;
-					std::cout << block(0xF, 0) << std::endl << std::endl;
+					std::cout << block(0, 0xFF) << std::endl << std::endl;
 
 					printMtx(data);
 
@@ -113,6 +113,8 @@ namespace tests_libOTe
 				}
 			}
 		}
+
+#ifdef OC_ENABLE_SSE2
 		{
 
 
@@ -128,7 +130,7 @@ namespace tests_libOTe
 			data[6] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
 			data[7] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
 
-			transpose128(data.data());
+			sse_transpose128(data.data());
 
 
 			for (auto& d : data)
@@ -136,7 +138,7 @@ namespace tests_libOTe
 				if (neq(d, block(0, 0xFF)))
 				{
 					std::cout << "expected" << std::endl;
-					std::cout << block(0xF, 0) << std::endl << std::endl;
+					std::cout << block(0, 0xFF) << std::endl << std::endl;
 
 					printMtx(data);
 
@@ -144,6 +146,41 @@ namespace tests_libOTe
 				}
 			}
 		}
+#endif
+
+#ifdef OC_ENABLE_AVX2
+		{
+
+
+			AlignedBlockArray<128> data;
+			memset((u8*)data.data(), 0, sizeof(data));
+
+			data[0] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[1] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[2] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[3] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[4] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[5] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[6] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[7] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+
+			avx_transpose128(data.data());
+
+
+			for (auto& d : data)
+			{
+				if (neq(d, block(0, 0xFF)))
+				{
+					std::cout << "expected" << std::endl;
+					std::cout << block(0, 0xFF) << std::endl << std::endl;
+
+					printMtx(data);
+
+					throw UnitTestFail();
+				}
+			}
+		}
+#endif
 
 		{
 			PRNG prng(ZeroBlock);
@@ -161,7 +198,7 @@ namespace tests_libOTe
 			for (u64 i = 0; i < 8; ++i)
 			{
 
-				std::array<block, 128> sub;
+				AlignedBlockArray<128> sub;
 
 				for (u64 j = 0; j < 128; ++j)
 				{
@@ -180,6 +217,25 @@ namespace tests_libOTe
 		}
 	}
 
+	void Tools_Transpose_Bench()
+	{
+		PRNG prng(ZeroBlock);
+		AlignedBlockArray<128> data;
+		prng.get(data.data(), data.size());
+
+		u64 highAtEnd = data[127].as<u64>()[1];
+
+		for (u64 i = 0; i < 1000000; ++i)
+		{
+			transpose128(data.data());
+			data[0] += block::allSame((u64) 1);
+		}
+
+		// Add a check just to make sure this doesn't get compiled out.
+		if (data[127].as<u64>()[1] != highAtEnd)
+			throw UnitTestFail();
+	}
+
 	void Tools_Transpose_View_Test()
 	{
 
@@ -190,7 +246,7 @@ namespace tests_libOTe
 
 			PRNG prng(ZeroBlock);
 
-			std::array<block, 128> data;
+			AlignedBlockArray<128> data;
 			prng.get(data.data(), data.size());
 			std::array<block, 128> data2;
 
@@ -236,7 +292,7 @@ namespace tests_libOTe
 
 			for (u64 i = 0; i < 8; ++i)
 			{
-				std::array<block, 128> data128;
+				AlignedBlockArray<128> data128;
 
 				for (u64 j = 0; j < 128; ++j)
 				{
@@ -273,7 +329,7 @@ namespace tests_libOTe
 
 				for (u64 i = 0; i < 8; ++i)
 				{
-					std::array<block, 128> data128;
+					AlignedBlockArray<128> data128;
 
 					for (u64 j = 0; j < 128; ++j)
 					{
@@ -956,8 +1012,8 @@ namespace tests_libOTe
 			if (nBaseOTs != recv.baseOtCount())
 				throw UnitTestFail(LOCATION);
 
-			std::vector<block> recvMsg(numOTs), baseRecv(nBaseOTs);
-			std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(nBaseOTs);
+			std::vector<block> baseRecv(nBaseOTs);
+			std::vector<std::array<block, 2>> baseSend(nBaseOTs);
 			BitVector choices(numOTs), baseChoice(nBaseOTs);
 			choices.randomize(prng0);
 			baseChoice.randomize(prng0);
@@ -968,6 +1024,8 @@ namespace tests_libOTe
 				baseRecv[i] = baseSend[i][baseChoice[i]];
 			}
 
+			std::vector<block, AlignedBlockAllocator> recvMsg(numOTs);
+			std::vector<std::array<block, 2>, AlignedBlockAllocator2> sendMsg(numOTs);
 			std::thread thrd = std::thread([&]() {
 				recv.setBaseOts(baseSend, prng0, recvChannel);
 				recv.receive(choices, recvMsg, prng0, recvChannel);
@@ -1015,8 +1073,8 @@ namespace tests_libOTe
 			if (nBaseOTs != recv.baseOtCount())
 				throw UnitTestFail(LOCATION);
 
-			std::vector<block> recvMsg(numOTs), baseRecv(nBaseOTs);
-			std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(nBaseOTs);
+			std::vector<block> baseRecv(nBaseOTs);
+			std::vector<std::array<block, 2>> baseSend(nBaseOTs);
 			BitVector choices(numOTs), baseChoice(nBaseOTs);
 			choices.randomize(prng0);
 			baseChoice.randomize(prng0);
@@ -1027,6 +1085,8 @@ namespace tests_libOTe
 				baseRecv[i] = baseSend[i][baseChoice[i]];
 			}
 
+			std::vector<block, AlignedBlockAllocator> recvMsg(numOTs);
+			std::vector<std::array<block, 2>, AlignedBlockAllocator2> sendMsg(numOTs);
 			std::thread thrd = std::thread([&]() {
 				recv.setBaseOts(baseSend, prng0, recvChannel);
 				recv.receive(choices, recvMsg, prng0, recvChannel);
