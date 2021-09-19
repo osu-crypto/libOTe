@@ -48,7 +48,8 @@ template<> TRY_FORCEINLINE void xorReduce<0, 0>(block* BOOST_RESTRICT inOut, siz
 // computing it. However, it's just a few XORs, and the compiler will likely optimize it out anyway.
 static TRY_FORCEINLINE void xorReducePath(
 	size_t fieldBits, size_t fieldSize, size_t superBlk, block (*BOOST_RESTRICT path)[superBlkSize],
-	block* BOOST_RESTRICT outU, block* BOOST_RESTRICT outVW, bool isReceiver)
+	block* BOOST_RESTRICT outU, block* BOOST_RESTRICT outVW, bool isReceiver,
+	bool correctionPresent = false)
 {
 	// Reduce up the combining tree, continuing for as many nodes just got completed.
 	// However, the root is skipped, in case it might have a different size.
@@ -71,8 +72,12 @@ static TRY_FORCEINLINE void xorReducePath(
 		size_t depthRemaining = 1 + (fieldBits - 1) % superBlkShift;
 		xorReduce<superBlkShift>(path[treeDepth], depthRemaining);
 
-		for (size_t j = 0; j < depthRemaining; ++j)
-			outVW[treeDepth * superBlkShift + j] = path[treeDepth][j + 1];
+		if (correctionPresent)
+			for (size_t j = 0; j < depthRemaining; ++j)
+				outVW[treeDepth * superBlkShift + j] ^= path[treeDepth][j + 1];
+		else
+			for (size_t j = 0; j < depthRemaining; ++j)
+				outVW[treeDepth * superBlkShift + j] = path[treeDepth][j + 1];
 		if (!isReceiver)
 			*outU = path[treeDepth][0];
 	}
@@ -141,7 +146,7 @@ TRY_FORCEINLINE void SmallFieldVoleSender::generateImpl(
 
 template<size_t fieldBitsConst>
 TRY_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
-	size_t blockIdx, block* BOOST_RESTRICT outW) const
+	size_t blockIdx, block* BOOST_RESTRICT outW, const block* BOOST_RESTRICT correction) const
 {
 	// Allow the compiler to hardcode fieldBits based on the template parameter.
 	const size_t fieldBits = fieldBitsConst > 0 ? fieldBitsConst : this->fieldBits;
@@ -151,6 +156,9 @@ TRY_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
 
 	block* BOOST_RESTRICT seeds = this->seeds.get();
 	block blockIdxBlock = toBlock(blockIdx);
+
+	bool correctionPresent = (correction != nullptr);
+	const u8* BOOST_RESTRICT deltaPtr = deltaUnpacked.get();
 
 	if (fieldBits <= superBlkShift)
 	{
@@ -170,7 +178,8 @@ TRY_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
 		constexpr size_t aesPerSuperBlk = aesPerVole * volePerSuperBlk;
 		constexpr size_t fieldsPerSuperBlk = volePerSuperBlk << fieldBits_;
 
-		for (size_t nVole = 0; nVole < numVoles; nVole += volePerSuperBlk)
+		for (size_t nVole = 0; nVole < numVoles; nVole += volePerSuperBlk,
+		     correction += volePerSuperBlk, deltaPtr += fieldBits * volePerSuperBlk)
 		{
 			block input[aesPerSuperBlk], hashes[aesPerSuperBlk], xorHashes[fieldsPerSuperBlk];
 			for (size_t i = 0; i < aesPerSuperBlk; ++i, ++seeds)
@@ -186,19 +195,30 @@ TRY_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
 			}
 
 			xorReduce<fieldBits_, fieldsPerSuperBlk>(xorHashes, fieldBits);
-			for (size_t i = 0; i < volePerSuperBlk; ++i)
-				for (size_t j = 0; j < fieldBits; ++j, ++outW)
-					*outW = xorHashes[i * fieldSize + j + 1];
+			if (correctionPresent)
+				for (size_t i = 0; i < volePerSuperBlk; ++i)
+					for (size_t j = 0; j < fieldBits; ++j, ++outW)
+						*outW = xorHashes[i * fieldSize + j + 1] ^
+							correction[i] & block::allSame(deltaPtr[i * fieldBits + j]);
+			else
+				for (size_t i = 0; i < volePerSuperBlk; ++i)
+					for (size_t j = 0; j < fieldBits; ++j, ++outW)
+						*outW = xorHashes[i * fieldSize + j + 1];
 		}
 	}
 	else
 	{
 		// > 1 super block per VOLE. Do blocks of 8, or 7 at the start because the zeroth seed in a
 		// VOLE is unknown.
-		for (size_t nVole = 0; nVole < numVoles; ++nVole, outW += fieldBits)
+		for (size_t nVole = 0; nVole < numVoles; ++nVole, outW += fieldBits, deltaPtr += fieldBits)
 		{
 			block path[divCeil(fieldBitsMax, superBlkShift)][superBlkSize];
-			memset(outW, 0, fieldBits * sizeof(block));
+			if (correctionPresent)
+				for (size_t i = 0; i < fieldBits; ++i)
+					outW[i] = correction[nVole] & block::allSame(deltaPtr[i]);
+			else
+				for (size_t i = 0; i < fieldBits; ++i)
+					outW[i] = toBlock(0UL);
 
 			block input0[superBlkSize -  1];
 			for (size_t i = 0; i < superBlkSize - 1; ++i, ++seeds)
@@ -221,7 +241,8 @@ TRY_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
 					input[i] = blockIdxBlock ^ *seeds;
 				mAesFixedKey.hashBlocks<superBlkSize>(input, path[0]);
 
-				xorReducePath(fieldBits, fieldSize, superBlk, path, nullptr, outW, true);
+				xorReducePath(fieldBits, fieldSize, superBlk, path, nullptr, outW,
+				              true, correctionPresent);
 			}
 		}
 	}

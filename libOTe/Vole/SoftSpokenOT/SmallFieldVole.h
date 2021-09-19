@@ -163,10 +163,14 @@ public:
 	// sized chunks for the receiver.
 	size_t numVolesPadded() const
 	{
+		size_t volesPadded;
 		if (fieldBits <= superBlkShift) // >= 1 VOLEs per superblock.
-			return roundUpTo(numVoles, divNearest(superBlkSize, fieldSize() - 1));
+			volesPadded = roundUpTo(numVoles, divNearest(superBlkSize, fieldSize() - 1));
 		else // > 1 super block per VOLE.
-			return numVoles;
+			volesPadded = numVoles;
+
+		// Padding for sharedFunctionXor.
+		return std::max(volesPadded, roundUpTo(numVoles, 4));
 	}
 
 	// The number of useful blocks in w.
@@ -178,16 +182,19 @@ public:
 	// The VOLE outputs secret shares shares of u cdot Delta, where u is in GF(2)^numVoles, Delta is
 	// in GF(2^fieldBits)^numVoles, and cdot represents the componentwise product. This computes the
 	// cdot Delta operation (i.e. the secret shared function) on 128 vectors at once. The output is
-	// XORed into product.
+	// XORed into product, which must be padded to length wPadded().
 	void sharedFunctionXor(const block* u, block* product)
 	{
-		for (size_t nVole = 0; nVole < numVoles; ++nVole)
+		for (size_t nVole = 0; nVole < numVoles; nVole += 4)
 		{
-			block uBlock = u[nVole];
-			// TODO: Try unrolling.
+			block uBlock[4];
+			for (size_t i = 0; i < 4; ++i)
+				uBlock[i] = u[nVole + i];
+
 			for (size_t bit = 0; bit < fieldBits; ++bit)
-				product[nVole * fieldBits + bit] ^=
-					uBlock & block::allSame(deltaUnpacked[nVole * fieldBits + bit]);
+				for (size_t i = 0; i < 4; ++i)
+					product[(nVole + i) * fieldBits + bit] ^=
+						uBlock[i] & block::allSame(deltaUnpacked[(nVole + i) * fieldBits + bit]);
 		}
 	}
 
@@ -204,27 +211,33 @@ public:
 
 	// TODO: Same, but on values in GF(2^fieldBits)^numVoles instead of GF(2)^numVoles.
 
-	// outW outputs the values for w, i.e. xor_x x * PRG(seed[x]).
-	void generate(size_t blockIdx, block* outW) const
+	// outW outputs the values for w, i.e. xor_x x * PRG(seed[x]). If correction is passed, its
+	// effect is the same as running sharedFunctionXor(correction, outW) after this function.
+	void generate(size_t blockIdx, block* outW, const block* correction = nullptr) const
 	{
-		generatePtr(*this, blockIdx, outW);
+		generatePtr(*this, blockIdx, outW, correction);
 	}
 
-	void generate(size_t blockIdx, span<block> outW) const
+	void generate(
+		size_t blockIdx, span<block> outW, span<const block> correction = span<block>()) const
 	{
 #ifndef NDEBUG
 		if ((size_t) outW.size() != wPadded())
 			throw RTE_LOC;
+		if ((size_t) correction.size() != numVoles)
+			throw RTE_LOC;
 #endif
 
-		return generate(blockIdx, outW.data());
+		return generate(blockIdx, outW.data(), correction.data());
 	}
 
 private:
-	void (*const generatePtr)(const SmallFieldVoleReceiver&, size_t, block* BOOST_RESTRICT);
+	void (*const generatePtr)(const SmallFieldVoleReceiver&,
+		size_t, block* BOOST_RESTRICT, const block* BOOST_RESTRICT);
 
 	template<size_t fieldBitsConst>
-	TRY_FORCEINLINE void generateImpl(size_t blockIdx, block* BOOST_RESTRICT outW) const;
+	TRY_FORCEINLINE void generateImpl(
+		size_t blockIdx, block* BOOST_RESTRICT outW, const block* BOOST_RESTRICT correction) const;
 
 	template<size_t fieldBitsConst, typename T, T Func>
 	friend struct call_member_func;

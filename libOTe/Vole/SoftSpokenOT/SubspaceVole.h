@@ -185,20 +185,18 @@ public:
 	{
 		span<block> syndrome = getMessage(code().codimension());
 
-		vole.generate(blockIdx, outW);
 		// TODO: at least for some codes this is kind of a nop, so maybe could avoid a copy.
 		code().encodeSyndrome(syndrome, correctionUSpan());
-		vole.sharedFunctionXor(correctionUSpan(), outW);
+		vole.generate(blockIdx, outW, correctionUSpan());
 	}
 
 	void generateChosen(size_t blockIdx, span<block> outW)
 	{
 		span<block> correctionU = getMessage(code().length());
-
-		vole.generate(blockIdx, outW);
-		vole.sharedFunctionXor(correctionU, outW);
+		vole.generate(blockIdx, outW, correctionU);
 	}
 
+	// product must be padded to length wPadded().
 	void sharedFunctionXor(span<const block> u, span<block> product)
 	{
 		code().encode(u, correctionUSpan());
