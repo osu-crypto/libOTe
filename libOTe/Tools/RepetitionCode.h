@@ -7,11 +7,11 @@
 namespace osuCrypto
 {
 
-struct ReplicationCode : public GenericLinearCode<ReplicationCode>
+struct RepetitionCode : public GenericLinearCode<RepetitionCode>
 {
 	size_t n;
 
-	ReplicationCode(size_t n_) : GenericLinearCode<ReplicationCode>(this), n(n_) {}
+	RepetitionCode(size_t n_) : GenericLinearCode<RepetitionCode>(this), n(n_) {}
 
 	size_t dimension() const { return 1; }
 	size_t length() const { return n; }

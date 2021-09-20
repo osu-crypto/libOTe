@@ -13,9 +13,9 @@ namespace osuCrypto
 namespace SoftSpokenOT
 {
 
-// Classes for Sec. 3.1 and 3.2 of SoftSpokenOT paper. Silent, so malicious security is easy.
-// Outputs vectors u, v to sender and Delta, w to receiver such that: w - v = u cdot Delta, where
-// cdot means componentwise product. u is a vector over GF(2), but Delta, v, and w are vectors over
+// Classes for Sect. 3.1 of SoftSpokenOT paper. Silent, so malicious security is easy. Outputs
+// vectors u, v to sender and Delta, w to receiver such that: w - v = u cdot Delta, where cdot means
+// componentwise product. u is a vector over GF(2), but Delta, v, and w are vectors over
 // GF(2^fieldBits). Really, it outputs 128 of these (u, v)s and Ws at a time, packed into blocks.
 // Delta, v, and w have fieldBits blocks for every block of u, to represent the larger finite field.
 // The bits of the finite field are stored in little endian order.

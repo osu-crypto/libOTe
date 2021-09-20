@@ -8,7 +8,7 @@
 #include <cryptoTools/Network/Channel.h>
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include "libOTe/Tools/Chunker.h"
-#include "libOTe/Tools/ReplicationCode.h"
+#include "libOTe/Tools/RepetitionCode.h"
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Vole/SoftSpokenOT/SmallFieldVole.h"
 #include "libOTe/Vole/SoftSpokenOT/SubspaceVole.h"
@@ -31,7 +31,7 @@ class DotSemiHonestSender :
 {
 public:
 	// Present once base OTs have finished.
-	boost::optional<SubspaceVoleReceiver<ReplicationCode>> vole;
+	boost::optional<SubspaceVoleReceiver<RepetitionCode>> vole;
 
 	size_t fieldBitsThenBlockIdx; // fieldBits before initialization, blockIdx after.
 	size_t numThreads;
@@ -135,7 +135,7 @@ class DotSemiHonestReceiver :
 {
 public:
 	// Present once base OTs have finished.
-	boost::optional<SubspaceVoleSender<ReplicationCode>> vole;
+	boost::optional<SubspaceVoleSender<RepetitionCode>> vole;
 
 	size_t fieldBitsThenBlockIdx; // fieldBits before initialization, blockIdx after.
 	size_t numThreads;

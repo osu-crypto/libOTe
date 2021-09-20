@@ -22,7 +22,7 @@ void DotSemiHonestSender::setBaseOts(
 	const size_t numVoles = divCeil(gOtExtBaseOtCount, fieldBits());
 	vole.emplace(
 		SmallFieldVoleReceiver(fieldBits(), numVoles, chl, prng, baseRecvOts, choices, numThreads),
-		ReplicationCode(numVoles)
+		RepetitionCode(numVoles)
 	);
 
 	fieldBitsThenBlockIdx = 0;
@@ -36,7 +36,7 @@ void DotSemiHonestReceiver::setBaseOts(
 	const size_t numVoles = divCeil(gOtExtBaseOtCount, fieldBits());
 	vole.emplace(
 		SmallFieldVoleSender(fieldBits(), numVoles, chl, prng, baseSendOts, numThreads),
-		ReplicationCode(numVoles)
+		RepetitionCode(numVoles)
 	);
 
 	fieldBitsThenBlockIdx = 0;
