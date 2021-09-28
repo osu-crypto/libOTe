@@ -193,10 +193,22 @@ public:
 	SubspaceVoleMaliciousSender(SmallFieldVoleSender vole_, Code code_) :
 		Sender(std::move(vole_), std::move(code_)),
 		hashU(new block[Sender::uSize()]),
-		hashV(new block[Sender::vSize()])
+		hashV(new block[vPadded()])
 	{
 		std::fill_n(hashU.get(), Sender::uSize(), block(0));
-		std::fill_n(hashV.get(), Sender::vSize(), block(0));
+		std::fill_n(hashV.get(), vPadded(), block(0));
+	}
+
+	size_t vPadded() const { return roundUpTo(Sender::vPadded(), 4); }
+
+	void generateRandom(size_t blockIdx, span<block> randomU, span<block> outV)
+	{
+		Sender::generateRandom(blockIdx, randomU, outV.subspan(0, Sender::vPadded()));
+	}
+
+	void generateChosen(size_t blockIdx, span<const block> chosenU, span<block> outV)
+	{
+		Sender::generateChosen(blockIdx, chosenU, outV.subspan(0, Sender::vPadded()));
 	}
 
 	void recvChallenge(Channel& chl)
@@ -209,10 +221,12 @@ public:
 
 	void hash(span<const block> u, span<const block> v)
 	{
-		for (size_t i = 0; i < Sender::uSize(); ++i)
+		for (size_t i = 0; i < code().dimension(); ++i)
 			updateHash(hashU[i], u[i]);
-		for (size_t i = 0; i < Sender::vSize(); ++i)
-			updateHash(hashV[i], v[i]);
+		for (size_t i = 0; i < Sender::vSize(); i += 4)
+			// Unrolled for ILP.
+			for (size_t j = 0; j < 4; ++j)
+				updateHash(hashV[i + j], v[i + j]);
 	}
 
 	void sendResponse(Channel& chl)
@@ -225,9 +239,10 @@ public:
 
 		size_t rows = finalHashRows(fieldBits);
 		size_t bytesPerHash = divCeil(rows * fieldBits, 8);
-		size_t numHashes = Sender::uSize() + numVoles;
+		size_t dim = code().dimension();
+		size_t numHashes = dim + numVoles;
 		std::vector<u64> finalHashes(fieldBits * numHashes);
-		for (size_t i = 0; i < Sender::uSize(); ++i)
+		for (size_t i = 0; i < dim; ++i)
 			getFinalHashSubfield(
 				finalHashKey, reduceU64(hashU[i]), &finalHashes[i * fieldBits], fieldBits);
 
@@ -239,7 +254,7 @@ public:
 
 			getFinalHash(
 				finalHashKey, reducedHashes,
-				&finalHashes[(Sender::uSize() + i) * fieldBits], fieldBits);
+				&finalHashes[(dim + i) * fieldBits], fieldBits);
 		}
 
 		std::vector<u8> finalHashesPacked(bytesPerHash * numHashes);
@@ -266,9 +281,21 @@ public:
 
 	SubspaceVoleMaliciousReceiver(SmallFieldVoleReceiver vole_, Code code_) :
 		Receiver(std::move(vole_), std::move(code_)),
-		hashW(new block[Receiver::wSize()])
+		hashW(new block[wPadded()])
 	{
-		std::fill_n(hashW.get(), Receiver::wSize(), block(0));
+		std::fill_n(hashW.get(), wPadded(), block(0));
+	}
+
+	size_t wPadded() const { return roundUpTo(Receiver::wPadded(), 4); }
+
+	void generateRandom(size_t blockIdx, span<block> outW)
+	{
+		Receiver::generateRandom(blockIdx, outW.subspan(0, Receiver::wPadded()));
+	}
+
+	void generateChosen(size_t blockIdx, span<block> outW)
+	{
+		Receiver::generateChosen(blockIdx, outW.subspan(0, Receiver::wPadded()));
 	}
 
 	void sendChallenge(PRNG& prng, Channel& chl)
@@ -281,8 +308,10 @@ public:
 
 	void hash(span<const block> w)
 	{
-		for (size_t i = 0; i < Receiver::wSize(); ++i)
-			updateHash(hashW[i], w[i]);
+		for (size_t i = 0; i < Receiver::wSize(); i += 4)
+			// Unrolled for ILP.
+			for (size_t j = 0; j < 4; ++j)
+				updateHash(hashW[i + j], w[i + j]);
 	}
 
 	void checkResponse(Channel& chl)
