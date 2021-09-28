@@ -152,9 +152,6 @@ template void DotMaliciousLeakyReceiver::receiveImpl(
 template void DotMaliciousLeakySender::sendImpl(
 	span<std::array<block, 2>> messages, PRNG& prng, Channel& chl,
 	TwoOneMaliciousSender::Hasher& hasher);
-template void DotMaliciousLeakyReceiver::receiveImpl(
-	const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl,
-	TwoOneMaliciousReceiver::Hasher& hasher);
 
 }
 }

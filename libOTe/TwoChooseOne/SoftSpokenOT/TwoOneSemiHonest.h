@@ -53,18 +53,53 @@ public:
 	{
 		block* messagesPtr = (block*) messages.data();
 		Base::generateRandom(blockIdx, span<block>(messagesPtr, wPadded()));
-		xorAndHashMessages(numUsed, delta(), messagesPtr, messagesPtr);
+		xorAndHashMessages(numUsed, delta(), messagesPtr, messagesPtr, mAesFixedKey);
 	}
 
 	void generateChosen(size_t blockIdx, size_t numUsed, span<std::array<block, 2>> messages)
 	{
 		block* messagesPtr = (block*) messages.data();
 		Base::generateChosen(blockIdx, span<block>(messagesPtr, wPadded()));
-		xorAndHashMessages(numUsed, delta(), messagesPtr, messagesPtr);
+		xorAndHashMessages(numUsed, delta(), messagesPtr, messagesPtr, mAesFixedKey);
 	}
 
+	// messagesOut and messagesIn must either be equal or non-overlapping.
+	template<typename Enc>
 	static void xorAndHashMessages(
-		size_t numUsed, block deltaBlock, block* messagesOut, const block* messagesIn);
+		size_t numUsed, block deltaBlock, block* messagesOut, const block* messagesIn, Enc& enc)
+	{
+		// Loop backwards, similarly to DotSemiHonest.
+		size_t i = numUsed;
+		while (i >= superBlkSize / 2)
+		{
+			i -= superBlkSize / 2;
+
+			// Temporary array, so I (and the compiler) don't have to worry so much about aliasing.
+			block superBlk[superBlkSize];
+			for (size_t j = 0; j < superBlkSize / 2; ++j)
+			{
+				superBlk[2*j] = messagesIn[i + j];
+				superBlk[2*j + 1] = messagesIn[i + j] ^ deltaBlock;
+			}
+
+			enc.template hashBlocks<superBlkSize>(superBlk, messagesOut + 2*i);
+		}
+
+		// Finish up. The more straightforward while (i--) unfortunately gives a (spurious AFAICT)
+		// compiler warning about undefined behavior at iteration 0xfffffffffffffff, so use a for loop.
+		size_t remainingIters = i;
+		for (size_t j = 0; j < remainingIters; ++j)
+		{
+			i = remainingIters - j - 1;
+
+			block msgs[2];
+			msgs[0] = messagesIn[i];
+			msgs[1] = msgs[0] ^ deltaBlock;
+			enc.template hashBlocks<2>(msgs, messagesOut + 2*i);
+		}
+
+		// Note: probably need a stronger hash for malicious secure version.
+	}
 
 	TRY_FORCEINLINE void processChunk(
 		size_t nChunk, size_t numUsed, span<std::array<block, 2>> messages);
