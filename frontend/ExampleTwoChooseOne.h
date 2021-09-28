@@ -213,6 +213,7 @@ namespace osuCrypto
                 auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
 
                 auto com = (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * numThreads;
+                chls[0].resetStats();
 
                 if (role == Role::Sender && i == 0)
                     lout << tag << " n=" << Color::Green << totalOTs << " " << milli << " ms  " << com << " bytes" << std::endl << Color::Default;
