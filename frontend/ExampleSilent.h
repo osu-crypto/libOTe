@@ -191,10 +191,29 @@ namespace osuCrypto
         //if (types.size() == 0 || cmd.isSet("none"))
         //	types.push_back(SilentBaseType::None);
 
+        const char* roleStr = (role == Role::Sender) ? "Sender" : "Receiver";
 
+        u64 totalMilli = 0;
+        u64 totalCom = 0;
         for (auto s : ss)
             for (auto type : types)
             {
+                std::string typeStr = "n ";
+                switch (type)
+                {
+                case SilentBaseType::Base:
+                    typeStr = "b ";
+                    break;
+                    //case SilentBaseType::Extend:
+                    //	typeStr = "e ";
+                    //	break;
+                case SilentBaseType::BaseExtend:
+                    typeStr = "be";
+                    break;
+                default:
+                    break;
+                }
+
                 for (u64 tt = 0; tt < trials; ++tt)
                 {
 
@@ -214,6 +233,7 @@ namespace osuCrypto
                         thrds.emplace_back(routine, (int)i, (int)s, type);
 
                     auto milli = routine(0, s, type);
+                    totalMilli += milli;
 
                     for (auto& tt : thrds)
                         tt.join();
@@ -221,38 +241,20 @@ namespace osuCrypto
                     u64 com = 0;
                     for (auto& c : chls)
                         com += (c.getTotalDataRecv() + c.getTotalDataSent());
+                    totalCom += com;
 
-                    std::string typeStr = "n ";
-                    switch (type)
-                    {
-                    case SilentBaseType::Base:
-                        typeStr = "b ";
-                        break;
-                        //case SilentBaseType::Extend:
-                        //	typeStr = "e ";
-                        //	break;
-                    case SilentBaseType::BaseExtend:
-                        typeStr = "be";
-                        break;
-                    default:
-                        break;
-                    }
-                    if (role == Role::Sender)
-                    {
+                    lout << tag << " (" << roleStr << ")" <<
+                        " n:" << Color::Green << std::setw(6) << std::setfill(' ') << numOTs << Color::Default <<
+                        " type: " << Color::Green << typeStr << Color::Default <<
+                        " sec: " << Color::Green << std::setw(3) << std::setfill(' ') << sec << Color::Default <<
+                        " s: " << Color::Green << s << Color::Default <<
+                        "   ||   " << Color::Green <<
+                        std::setw(6) << std::setfill(' ') << milli << " ms   " <<
+                        std::setw(6) << std::setfill(' ') << com << " bytes" << std::endl << Color::Default;
 
-                        lout << tag <<
-                            " n:" << Color::Green << std::setw(6) << std::setfill(' ') << numOTs << Color::Default <<
-                            " type: " << Color::Green << typeStr << Color::Default <<
-                            " sec: " << Color::Green << std::setw(3) << std::setfill(' ') << sec << Color::Default <<
-                            " s: " << Color::Green << s << Color::Default <<
-                            "   ||   " << Color::Green <<
-                            std::setw(6) << std::setfill(' ') << milli << " ms   " <<
-                            std::setw(6) << std::setfill(' ') << com << " bytes" << std::endl << Color::Default;
+                    if (cmd.getOr("v", 0) > 1)
+                        lout << gTimer << std::endl;
 
-                        if (cmd.getOr("v", 0) > 1)
-                            lout << gTimer << std::endl;
-
-                    }
                     if (cmd.isSet("v"))
                     {
                         if (role == Role::Sender)
@@ -262,6 +264,17 @@ namespace osuCrypto
                             lout << " **** receiver ****\n" << recvTimer << std::endl;
                     }
                 }
+
+                i64 avgMilli = lround((double) totalMilli / trials);
+                i64 avgCom = lround((double) totalCom / trials);
+                lout << tag << " (" << roleStr << ") average:" <<
+                    " n:" << Color::Green << std::setw(6) << std::setfill(' ') << numOTs << Color::Default <<
+                    " type: " << Color::Green << typeStr << Color::Default <<
+                    " sec: " << Color::Green << std::setw(3) << std::setfill(' ') << sec << Color::Default <<
+                    " s: " << Color::Green << s << Color::Default <<
+                    "   ||   " << Color::Green <<
+                    std::setw(6) << std::setfill(' ') << avgMilli << " ms   " <<
+                    std::setw(6) << std::setfill(' ') << avgCom << " bytes" << std::endl << Color::Default;
 
             }
 

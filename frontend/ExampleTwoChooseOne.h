@@ -135,6 +135,10 @@ namespace osuCrypto
             // construct a vector to stored the received messages.
             auto rMsgs = allocAlignedBlockArray(numOTs * (role != Role::Sender));
 
+            const char* roleStr = (role == Role::Sender) ? "Sender" : "Receiver";
+
+            u64 totalMilli = 0;
+            u64 totalCom = 0;
             for (u64 tt = 0; tt < trials; ++tt)
             {
 
@@ -212,13 +216,24 @@ namespace osuCrypto
 
                 auto e = timer.setTimePoint("finish");
                 auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+                totalMilli += milli;
 
                 auto com = (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * numThreads;
+                totalCom += com;
                 chls[0].resetStats();
 
-                if (role == Role::Sender && i == 0)
-                    lout << tag << " n=" << Color::Green << totalOTs << " " << milli << " ms  " << com << " bytes" << std::endl << Color::Default;
+                if (i == 0)
+                {
+                    lout << tag << " (" << roleStr << ") n=" << Color::Green << totalOTs << " " << milli << " ms  " << com << " bytes" << std::endl << Color::Default;
+                }
 
+            }
+
+            if (i == 0)
+            {
+                i64 avgMilli = lround((double) totalMilli / trials);
+                i64 avgCom = lround((double) totalCom / trials);
+                lout << tag << " (" << roleStr << ") average: n=" << Color::Green << totalOTs << " " << avgMilli << " ms  " << avgCom << " bytes" << std::endl << Color::Default;
             }
 
             if (cmd.isSet("v") && role == Role::Sender && i == 0)
