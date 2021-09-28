@@ -89,12 +89,16 @@ namespace osuCrypto
 
                     auto b = timer.setTimePoint("start");
                     receiver.setTimePoint("start");
+                    if (!fakeBase)
+                        receiver.genBaseOts(prng, chls[i]);
                     // perform  numOTs random OTs, the results will be written to msgs.
                     receiver.silentReceiveInplace(numOTs, prng, chls[i]);
 
                     receiver.setTimePoint("finish");
                     auto e = timer.setTimePoint("finish");
                     milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
+
+                    receiver.clear();
                 }
                 else
                 {
@@ -139,6 +143,8 @@ namespace osuCrypto
 
                     sender.setTimePoint("start");
                     auto b = timer.setTimePoint("start");
+                    if (!fakeBase)
+                        sender.genBaseOts(prng, chls[i]);
                     // perform the OTs and write the random OTs to msgs.
                     sender.silentSendInplace(delta, numOTs, prng, chls[i]);
 
@@ -146,6 +152,7 @@ namespace osuCrypto
                     auto e = timer.setTimePoint("finish");
                     milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
 
+                    sender.clear();
                 }
             }
             catch (std::exception& e)

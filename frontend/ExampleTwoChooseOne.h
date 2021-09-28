@@ -101,34 +101,6 @@ namespace osuCrypto
                 senders[0].setBaseOts(recvMsgs, bv, prng, chls[0]);
             }
         }
-#ifdef LIBOTE_HAS_BASE_OT
-        else
-        {
-            // Now compute the base OTs, we need to set them on the first pair of extenders.
-            // In real code you would only have a sender or reciever, not both. But we do
-            // here just showing the example.
-            if (role == Role::Receiver)
-            {
-                receivers.emplace_back(std::forward<Params>(params)...);
-                DefaultBaseOT base;
-                std::vector<std::array<block, 2>, AlignedBlockAllocator2> baseMsg(nBaseOTs);
-                base.send(baseMsg, prng, chls[0], numThreads);
-                receivers[0].setBaseOts(baseMsg, prng, chls[0]);
-
-                //receivers[0].genBaseOts(prng, chls[0]);
-            }
-            else
-            {
-
-                DefaultBaseOT base;
-                BitVector bv(nBaseOTs);
-                std::vector<block, AlignedBlockAllocator> baseMsg(nBaseOTs);
-                bv.randomize(prng);
-                base.receive(bv, baseMsg, prng, chls[0], numThreads);
-                senders[0].setBaseOts(baseMsg, bv, prng, chls[0]);
-            }
-        }
-#endif
 
         // for the rest of the extenders, call split. This securely
         // creates two sets of extenders that can be used in parallel.
@@ -168,6 +140,35 @@ namespace osuCrypto
 
                 timer.reset();
                 auto s = timer.setTimePoint("start");
+
+#ifdef LIBOTE_HAS_BASE_OT
+                if (!cmd.isSet("fakeBase"))
+                {
+                    // Now compute the base OTs, we need to set them on the first pair of extenders.
+                    // In real code you would only have a sender or reciever, not both. But we do
+                    // here just showing the example.
+                    if (role == Role::Receiver)
+                    {
+                        receivers.emplace_back(std::forward<Params>(params)...);
+                        DefaultBaseOT base;
+                        std::vector<std::array<block, 2>, AlignedBlockAllocator2> baseMsg(nBaseOTs);
+                        base.send(baseMsg, prng, chls[0], numThreads);
+                        receivers[0].setBaseOts(baseMsg, prng, chls[0]);
+
+                        //receivers[0].genBaseOts(prng, chls[0]);
+                    }
+                    else
+                    {
+
+                        DefaultBaseOT base;
+                        BitVector bv(nBaseOTs);
+                        std::vector<block, AlignedBlockAllocator> baseMsg(nBaseOTs);
+                        bv.randomize(prng);
+                        base.receive(bv, baseMsg, prng, chls[0], numThreads);
+                        senders[0].setBaseOts(baseMsg, bv, prng, chls[0]);
+                    }
+                }
+#endif
 
                 if (role == Role::Receiver)
                 {
