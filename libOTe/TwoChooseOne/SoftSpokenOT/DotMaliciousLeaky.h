@@ -72,9 +72,15 @@ public:
 		hasher.initTemporaryStorage();
 	}
 
-	void send(span<std::array<block, 2>> messages, PRNG& prng, Channel& chl) override;
+	void send(span<std::array<block, 2>> messages, PRNG& prng, Channel& chl) override
+	{
+		sendImpl(messages, prng, chl, hasher);
+	}
 
 	// Low level functions.
+
+	template<typename Hasher1>
+	void sendImpl(span<std::array<block, 2>> messages, PRNG& prng, Channel& chl, Hasher1& hasher);
 
 	TRY_FORCEINLINE void processChunk(
 		size_t nChunk, size_t numUsed, span<block> messages);
@@ -156,9 +162,16 @@ public:
 		hasher.initTemporaryStorage();
 	}
 
-	void receive(const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl) override;
+	void receive(const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl) override
+	{
+		receiveImpl(choices, messages, prng, chl, hasher);
+	}
 
 	// Low level functions.
+
+	template<typename Hasher1>
+	void receiveImpl(
+		const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl, Hasher1& hasher);
 
 	TRY_FORCEINLINE void processChunk(
 		size_t nChunk, size_t numUsed, span<block> messages, block choices);

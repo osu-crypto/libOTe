@@ -53,17 +53,18 @@ public:
 	{
 		block* messagesPtr = (block*) messages.data();
 		Base::generateRandom(blockIdx, span<block>(messagesPtr, wPadded()));
-		xorAndHashMessages(numUsed, messagesPtr);
+		xorAndHashMessages(numUsed, delta(), messagesPtr, messagesPtr);
 	}
 
 	void generateChosen(size_t blockIdx, size_t numUsed, span<std::array<block, 2>> messages)
 	{
 		block* messagesPtr = (block*) messages.data();
 		Base::generateChosen(blockIdx, span<block>(messagesPtr, wPadded()));
-		xorAndHashMessages(numUsed, messagesPtr);
+		xorAndHashMessages(numUsed, delta(), messagesPtr, messagesPtr);
 	}
 
-	void xorAndHashMessages(size_t numUsed, block* messages) const;
+	static void xorAndHashMessages(
+		size_t numUsed, block deltaBlock, block* messagesOut, const block* messagesIn);
 
 	TRY_FORCEINLINE void processChunk(
 		size_t nChunk, size_t numUsed, span<std::array<block, 2>> messages);

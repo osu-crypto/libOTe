@@ -6,10 +6,10 @@ namespace osuCrypto
 namespace SoftSpokenOT
 {
 
-void TwoOneSemiHonestSender::xorAndHashMessages(size_t numUsed, block* messages) const
+// messagesOut and messagesIn must either be equal or non-overlapping.
+void TwoOneSemiHonestSender::xorAndHashMessages(
+	size_t numUsed, block deltaBlock, block* messagesOut, const block* messagesIn)
 {
-	block deltaBlock = delta();
-
 	// Loop backwards, similarly to DotSemiHonest.
 	size_t i = numUsed;
 	while (i >= superBlkSize / 2)
@@ -20,11 +20,11 @@ void TwoOneSemiHonestSender::xorAndHashMessages(size_t numUsed, block* messages)
 		block superBlk[superBlkSize];
 		for (size_t j = 0; j < superBlkSize / 2; ++j)
 		{
-			superBlk[2*j] = messages[i + j];
-			superBlk[2*j + 1] = messages[i + j] ^ deltaBlock;
+			superBlk[2*j] = messagesIn[i + j];
+			superBlk[2*j + 1] = messagesIn[i + j] ^ deltaBlock;
 		}
 
-		mAesFixedKey.hashBlocks<superBlkSize>(superBlk, messages + 2*i);
+		mAesFixedKey.hashBlocks<superBlkSize>(superBlk, messagesOut + 2*i);
 	}
 
 	// Finish up. The more straightforward while (i--) unfortunately gives a (spurious AFAICT)
@@ -35,9 +35,9 @@ void TwoOneSemiHonestSender::xorAndHashMessages(size_t numUsed, block* messages)
 		i = remainingIters - j - 1;
 
 		block msgs[2];
-		msgs[0] = messages[i];
+		msgs[0] = messagesIn[i];
 		msgs[1] = msgs[0] ^ deltaBlock;
-		mAesFixedKey.hashBlocks<2>(msgs, messages + 2*i);
+		mAesFixedKey.hashBlocks<2>(msgs, messagesOut + 2*i);
 	}
 
 	// Note: probably need a stronger hash for malicious secure version.

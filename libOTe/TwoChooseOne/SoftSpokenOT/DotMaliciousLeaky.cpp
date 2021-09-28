@@ -1,12 +1,16 @@
 #include "DotMaliciousLeaky.h"
 #ifdef ENABLE_SOFTSPOKEN_OT
 
+#include "TwoOneMalicious.h"
+
 namespace osuCrypto
 {
 namespace SoftSpokenOT
 {
 
-void DotMaliciousLeakySender::send(span<std::array<block, 2>> messages, PRNG& prng, Channel& chl)
+template<typename Hasher1>
+void DotMaliciousLeakySender::sendImpl(
+	span<std::array<block, 2>> messages, PRNG& prng, Channel& chl, Hasher1& hasher)
 {
 	if (!hasBaseOts())
 		genBaseOts(prng, chl);
@@ -58,8 +62,9 @@ void DotMaliciousLeakySender::Hasher::processChunk(
 	parent->xorMessages(numUsed, (block*) messages.data(), inputW);
 }
 
-void DotMaliciousLeakyReceiver::receive(
-	const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl)
+template<typename Hasher1>
+void DotMaliciousLeakyReceiver::receiveImpl(
+	const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl, Hasher1& hasher)
 {
 	if (!hasBaseOts())
 		genBaseOts(prng, chl);
@@ -102,10 +107,10 @@ void DotMaliciousLeakyReceiver::receive(
 
 	vole->recvChallenge(chl);
 
-	hasher.runBatch<block>(
+	hasher.template runBatch<block>(
 		chl, messages.subspan(0, messagesFullChunks * 128),
 		span<block>(choices.blocks(), messagesFullChunks), this, scratch);
-	hasher.runBatch<block>(
+	hasher.template runBatch<block>(
 		chl, messages.subspan(messagesFullChunks * 128),
 		span<block>(extraChoices, messages.size() % 128 != 0), this, extraV.get());
 
@@ -137,6 +142,19 @@ void DotMaliciousLeakyReceiver::Hasher::processChunk(
 	if (messages.data() != inputV)
 		memcpy(messages.data(), inputV, numUsed * sizeof(block));
 }
+
+template void DotMaliciousLeakySender::sendImpl(
+	span<std::array<block, 2>> messages, PRNG& prng, Channel& chl,
+	DotMaliciousLeakySender::Hasher& hasher);
+template void DotMaliciousLeakyReceiver::receiveImpl(
+	const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl,
+	DotMaliciousLeakyReceiver::Hasher& hasher);
+template void DotMaliciousLeakySender::sendImpl(
+	span<std::array<block, 2>> messages, PRNG& prng, Channel& chl,
+	TwoOneMaliciousSender::Hasher& hasher);
+template void DotMaliciousLeakyReceiver::receiveImpl(
+	const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl,
+	TwoOneMaliciousReceiver::Hasher& hasher);
 
 }
 }
