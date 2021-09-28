@@ -175,22 +175,11 @@ public:
 	// in GF(2^fieldBits)^numVoles, and cdot represents the componentwise product. This computes the
 	// cdot Delta operation (i.e. the secret shared function) on 128 vectors at once. The output is
 	// XORed into product, which must be padded to length wPadded().
-	void sharedFunctionXor(const block* u, block* product)
-	{
-		for (size_t nVole = 0; nVole < numVoles; nVole += 4)
-		{
-			block uBlock[4];
-			for (size_t i = 0; i < 4; ++i)
-				uBlock[i] = u[nVole + i];
+	template<typename T>
+	inline void sharedFunctionXor(const T* u, T* product);
 
-			for (size_t bit = 0; bit < fieldBits; ++bit)
-				for (size_t i = 0; i < 4; ++i)
-					product[(nVole + i) * fieldBits + bit] ^=
-						uBlock[i] & block::allSame(deltaUnpacked[(nVole + i) * fieldBits + bit]);
-		}
-	}
-
-	void sharedFunctionXor(span<const block> u, span<block> product)
+	template<typename T>
+	void sharedFunctionXor(span<const T> u, span<T> product)
 	{
 #ifndef NDEBUG
 		if ((size_t) u.size() != numVoles)
@@ -201,7 +190,18 @@ public:
 		sharedFunctionXor(u.data(), product.data());
 	}
 
-	// TODO: Same, but on values in GF(2^fieldBits)^numVoles instead of GF(2)^numVoles.
+	// Same, but on values in GF(2^fieldBits)^numVoles instead of GF(2)^numVoles. modulus is the
+	// modulus of the GF(2^fieldBits) field being used.
+	template<typename T>
+	inline void sharedFunctionXorGF(const T* BOOST_RESTRICT u, T* BOOST_RESTRICT product, u64 modulus);
+
+	// Helper for above. See below class for specialization on block.
+	template<typename T>
+	inline static T allSame(u8 in)
+	{
+		// Use sign extension.
+		return (typename std::make_signed<T>::type) (i8) in;
+	}
 
 	// outW outputs the values for w, i.e. xor_x x * PRG(seed[x]). If correction is passed, its
 	// effect is the same as running sharedFunctionXor(correction, outW) after this function.
@@ -216,7 +216,7 @@ public:
 #ifndef NDEBUG
 		if ((size_t) outW.size() != wPadded())
 			throw RTE_LOC;
-		if ((size_t) correction.size() != numVoles)
+		if (correction.data() && (size_t) correction.size() != numVoles)
 			throw RTE_LOC;
 #endif
 
@@ -249,6 +249,57 @@ private:
 	// Select specialized implementation of generate.
 	static decltype(generatePtr) selectGenerateImpl(size_t fieldBits);
 };
+
+template<> inline block SmallFieldVoleReceiver::allSame<block>(u8 in)
+{
+	return block::allSame(in);
+}
+
+template<typename T>
+void SmallFieldVoleReceiver::sharedFunctionXor(const T* u, T* product)
+{
+	for (size_t nVole = 0; nVole < numVoles; nVole += 4)
+	{
+		T uBlock[4];
+		for (size_t i = 0; i < 4; ++i)
+			uBlock[i] = u[nVole + i];
+
+		for (size_t bit = 0; bit < fieldBits; ++bit)
+			for (size_t i = 0; i < 4; ++i)
+				product[(nVole + i) * fieldBits + bit] ^=
+					uBlock[i] & allSame<T>(deltaUnpacked[(nVole + i) * fieldBits + bit]);
+	}
+}
+
+template<typename T>
+void SmallFieldVoleReceiver::sharedFunctionXorGF(
+	const T* BOOST_RESTRICT u, T* BOOST_RESTRICT product, u64 modulus)
+{
+	for (size_t nVole = 0; nVole < numVoles; nVole += 4)
+	{
+		T products[4][2 * SmallFieldVoleBase::fieldBitsMax - 1] = {0};
+
+		// Don't both with fast multiplication for now.
+		for (size_t bitU = 0; bitU < fieldBits; ++bitU)
+			for (size_t bitD = 0; bitD < fieldBits; ++bitD)
+				for (size_t i = 0; i < 4; ++i)
+					products[i][bitU + bitD] ^= u[(nVole + i) * fieldBits + bitU] &
+						allSame<T>(deltaUnpacked[(nVole + i) * fieldBits + bitD]);
+
+		// Apply modular reduction to put the result in GF(2^fieldBits). Again, don't bother with
+		// fast techinques.
+		for (size_t j = 2 * fieldBits - 2; j >= fieldBits; --j)
+			for (size_t k = 1; k <= fieldBits; ++k)
+				if ((modulus >> (fieldBits - k)) & 1)
+					for (size_t i = 0; i < 4; ++i)
+						products[i][j - k] ^= products[i][j];
+
+		// XOR out
+		for (size_t j = 0; j < fieldBits; ++j)
+			for (size_t i = 0; i < 4; ++i)
+				product[(nVole + i) * fieldBits + j] ^= products[i][j];
+	}
+}
 
 namespace tests
 {

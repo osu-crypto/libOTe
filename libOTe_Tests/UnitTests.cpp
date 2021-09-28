@@ -97,6 +97,7 @@ namespace tests_libOTe
         tc.add("SoftSpokenSmallVole_Test                ", SoftSpokenSmallVole_Test);
         tc.add("DotExt_SoftSpokenSemiHonest_Test        ", DotExt_SoftSpokenSemiHonest_Test);
         tc.add("OtExt_SoftSpokenSemiHonest21_Test       ", OtExt_SoftSpokenSemiHonest21_Test);
+        tc.add("DotExt_SoftSpokenSemiHonest_Test        ", DotExt_SoftSpokenMaliciousLeaky_Test);
 
         tc.add("NcoOt_Kkrt_Test                         ", NcoOt_Kkrt_Test);
         tc.add("NcoOt_Oos_Test                          ", NcoOt_Oos_Test);

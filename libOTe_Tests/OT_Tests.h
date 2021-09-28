@@ -23,5 +23,6 @@ namespace tests_libOTe
     void SoftSpokenSmallVole_Test();
     void DotExt_SoftSpokenSemiHonest_Test();
     void OtExt_SoftSpokenSemiHonest21_Test();
+    void DotExt_SoftSpokenMaliciousLeaky_Test();
 
 }

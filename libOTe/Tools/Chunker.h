@@ -31,7 +31,11 @@ struct ChunkerAlloc;
 // Required definitions inside any class inheriting from Chunker:
 /*
 // Number of instances that are done at once.
-static const size_t chunkSize;
+size_t chunkSize() const;
+
+// Number of instances worth of extra data that it should be allowed to read/write, above the
+// chunkSize instances that are actually used.
+size_t paddingSize() const;
 
 // All spans will have the same size: chunkSize + paddingSize. numUsed is the number (<=
 // chunkSize) of instances that will actually be used, out of the chunkSize instances.
@@ -39,12 +43,8 @@ static const size_t chunkSize;
 // the whole batch. This doesn't have to be defined for all template parameter. The template
 // parameters just illustrate the class of functions that are be allowed.
 template<typename... ChunkParams, typename... GlobalParams>
-void processChunk(size_t numUsed, span<InstParams>... instParams,
+void processChunk(size_t chunkIdx, size_t numUsed, span<InstParams>... instParams,
                   ChunkParams... chunkParams, GlobalParams... globalParams);
-
-// Number of instances worth of extra data that it should be allowed to read/write, above the
-// chunkSize instances that are actually used.
-size_t paddingSize() const;
 */
 
 // For ChunkedSender
@@ -105,7 +105,7 @@ public:
 	// Use temporaries to make processChunk work on a partial chunk.
 	template<typename... ChunkParams, typename... GlobalParams>
 	TRY_FORCEINLINE void processPartialChunk(
-		size_t numUsed, size_t minInstances, span<InstParams>... instParams,
+		size_t chunkIdx, size_t numUsed, size_t minInstances, span<InstParams>... instParams,
 		ChunkParams... chunkParams, GlobalParams&&... globalParams)
 	{
 		// Copy the data into the temporaries. tuple_transform requires a non-void return type.
@@ -115,7 +115,8 @@ public:
 			std::make_tuple(instParams.data()...), tempStorage);
 
 		static_cast<Derived*>(this)->processChunk(
-			numUsed, span<InstParams>(std::get<InstIndices>(tempStorage).get(), minInstances)...,
+			chunkIdx, numUsed,
+			span<InstParams>(std::get<InstIndices>(tempStorage).get(), minInstances)...,
 			std::forward<ChunkParams>(chunkParams)...,
 			std::forward<GlobalParams>(globalParams)...);
 
@@ -148,7 +149,8 @@ public:
 				throw RTE_LOC;
 #endif
 
-		size_t numChunks = divCeil(numInstances, Derived::chunkSize);
+		const size_t chunkSize = static_cast<const Derived*>(this)->chunkSize();
+		size_t numChunks = divCeil(numInstances, chunkSize);
 #ifndef NDEBUG
 		size_t numChunksArray[] = { (size_t) chunkParams.size()... };
 		for (size_t n : numChunksArray)
@@ -166,23 +168,25 @@ public:
 	{
 		size_t numInstances = checkSpanLengths(instParams..., chunkParams...).first;
 
-		const size_t minInstances = Derived::chunkSize + static_cast<Derived*>(this)->paddingSize();
+		const size_t chunkSize = static_cast<const Derived*>(this)->chunkSize();
+		const size_t minInstances = chunkSize + static_cast<Derived*>(this)->paddingSize();
 
 		// The bulk of the instances can work directly on the input / output data.
 		size_t nChunk = 0;
 		size_t nInstance = 0;
-		for (; nInstance + minInstances <= numInstances; ++nChunk, nInstance += Derived::chunkSize)
+		for (; nInstance + minInstances <= numInstances; ++nChunk, nInstance += chunkSize)
 			static_cast<Derived*>(this)->processChunk(
-				Derived::chunkSize, span<InstParams>(instParams.data() + nInstance, minInstances)...,
+				nChunk, chunkSize,
+				span<InstParams>(instParams.data() + nInstance, minInstances)...,
 				std::forward<ChunkParams>(chunkParams[nChunk])...,
 				std::forward<GlobalParams>(globalParams)...);
 
 		// The last few (probably only 1) need an intermediate buffer.
-		for (; nInstance < numInstances; ++nChunk, nInstance += Derived::chunkSize)
+		for (; nInstance < numInstances; ++nChunk, nInstance += chunkSize)
 		{
-			size_t numUsed = std::min(numInstances - nInstance, Derived::chunkSize);
+			size_t numUsed = std::min(numInstances - nInstance, chunkSize);
 			processPartialChunk<ChunkParams...>(
-				numUsed, minInstances,
+				nChunk, numUsed, minInstances,
 				span<InstParams>(instParams.data() + nInstance, minInstances)...,
 				std::forward<ChunkParams>(chunkParams[nChunk])...,
 				std::forward<GlobalParams>(globalParams)...);
@@ -191,7 +195,8 @@ public:
 
 	void initTemporaryStorage()
 	{
-		const size_t minInstances = Derived::chunkSize + static_cast<Derived*>(this)->paddingSize();
+		const size_t chunkSize = static_cast<const Derived*>(this)->chunkSize();
+		const size_t minInstances = chunkSize + static_cast<Derived*>(this)->paddingSize();
 		tempStorage = std::make_tuple(ChunkerAlloc<InstParamPtrs>::alloc(minInstances)...);
 	}
 
@@ -224,7 +229,8 @@ public:
 		size_t numInstances = nums.first;
 		size_t numChunks = nums.second;
 
-		const size_t minInstances = Derived::chunkSize + static_cast<Derived*>(this)->paddingSize();
+		const size_t chunkSize = static_cast<const Derived*>(this)->chunkSize();
+		const size_t minInstances = chunkSize + static_cast<Derived*>(this)->paddingSize();
 		static_cast<Derived*>(this)->reserveSendBuffer(std::min(numChunks, Derived::commSize));
 
 		size_t nChunk = 0;
@@ -232,12 +238,13 @@ public:
 		while (nInstance + minInstances <= numInstances)
 		{
 			static_cast<Derived*>(this)->processChunk(
-				Derived::chunkSize, span<InstParams>(instParams.data() + nInstance, minInstances)...,
+				nChunk, chunkSize,
+				span<InstParams>(instParams.data() + nInstance, minInstances)...,
 				std::forward<ChunkParams>(chunkParams[nChunk])...,
 				std::forward<GlobalParams>(globalParams)...);
 
 			++nChunk;
-			nInstance += Derived::chunkSize;
+			nInstance += chunkSize;
 			if (nInstance + minInstances > numInstances)
 				break;
 
@@ -249,7 +256,7 @@ public:
 			}
 		}
 
-		for (; nInstance < numInstances; ++nChunk, nInstance += Derived::chunkSize)
+		for (; nInstance < numInstances; ++nChunk, nInstance += chunkSize)
 		{
 			if (nChunk % Derived::commSize == 0)
 			{
@@ -258,9 +265,9 @@ public:
 					reserveSendBuffer(std::min(numChunks - nChunk, Derived::commSize));
 			}
 
-			size_t numUsed = std::min(numInstances - nInstance, Derived::chunkSize);
+			size_t numUsed = std::min(numInstances - nInstance, chunkSize);
 			Base::template processPartialChunk<ChunkParams...>(
-				numUsed, minInstances,
+				nChunk, numUsed, minInstances,
 				span<InstParams>(instParams.data() + nInstance, minInstances)...,
 				std::forward<ChunkParams>(chunkParams[nChunk])...,
 				std::forward<GlobalParams>(globalParams)...);
@@ -293,33 +300,35 @@ public:
 		size_t numInstances = nums.first;
 		size_t numChunks = nums.second;
 
-		const size_t minInstances = Derived::chunkSize + static_cast<Derived*>(this)->paddingSize();
+		const size_t chunkSize = static_cast<const Derived*>(this)->chunkSize();
+		const size_t minInstances = chunkSize + static_cast<Derived*>(this)->paddingSize();
 
 		// The bulk of the instances can work directly on the input / output data.
 		size_t nChunk = 0;
 		size_t nInstance = 0;
-		for (; nInstance + minInstances <= numInstances; ++nChunk, nInstance += Derived::chunkSize)
+		for (; nInstance + minInstances <= numInstances; ++nChunk, nInstance += chunkSize)
 		{
 			if (nChunk % Derived::commSize == 0)
 				static_cast<Derived*>(this)->
 					recvBuffer(chl, std::min(numChunks - nChunk, Derived::commSize));
 
 			static_cast<Derived*>(this)->processChunk(
-				Derived::chunkSize, span<InstParams>(instParams.data() + nInstance, minInstances)...,
+				nChunk, chunkSize,
+				span<InstParams>(instParams.data() + nInstance, minInstances)...,
 				std::forward<ChunkParams>(chunkParams[nChunk])...,
 				std::forward<GlobalParams>(globalParams)...);
 		}
 
 		// The last few (probably only 1) need an intermediate buffer.
-		for (; nInstance < numInstances; ++nChunk, nInstance += Derived::chunkSize)
+		for (; nInstance < numInstances; ++nChunk, nInstance += chunkSize)
 		{
 			if (nChunk % Derived::commSize == 0)
 				static_cast<Derived*>(this)->
 					recvBuffer(chl, std::min(numChunks - nChunk, Derived::commSize));
 
-			size_t numUsed = std::min(numInstances - nInstance, Derived::chunkSize);
+			size_t numUsed = std::min(numInstances - nInstance, chunkSize);
 			Base::template processPartialChunk<ChunkParams...>(
-				numUsed, minInstances,
+				nChunk, numUsed, minInstances,
 				span<InstParams>(instParams.data() + nInstance, minInstances)...,
 				std::forward<ChunkParams>(chunkParams[nChunk])...,
 				std::forward<GlobalParams>(globalParams)...);

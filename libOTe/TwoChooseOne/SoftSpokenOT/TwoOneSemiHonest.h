@@ -56,7 +56,7 @@ public:
 		xorAndHashMessages(numUsed, messagesPtr);
 	}
 
-	void generateChosen(size_t blockIdx, size_t numUsed, span<std::array<block, 2>, 128> messages)
+	void generateChosen(size_t blockIdx, size_t numUsed, span<std::array<block, 2>> messages)
 	{
 		block* messagesPtr = (block*) messages.data();
 		Base::generateChosen(blockIdx, span<block>(messagesPtr, wPadded()));
@@ -65,7 +65,8 @@ public:
 
 	void xorAndHashMessages(size_t numUsed, block* messages) const;
 
-	TRY_FORCEINLINE void processChunk(size_t numUsed, span<std::array<block, 2>> messages);
+	TRY_FORCEINLINE void processChunk(
+		size_t nChunk, size_t numUsed, span<std::array<block, 2>> messages);
 
 protected:
 	using ChunkerBase = ChunkedReceiver<
@@ -120,7 +121,8 @@ public:
 		mAesFixedKey.hashBlocks(messages.data(), numUsed, messages.data());
 	}
 
-	TRY_FORCEINLINE void processChunk(size_t numUsed, span<block> messages, block chioces);
+	TRY_FORCEINLINE void processChunk(
+		size_t nChunk, size_t numUsed, span<block> messages, block chioces);
 
 protected:
 	using ChunkerBase = ChunkedSender<

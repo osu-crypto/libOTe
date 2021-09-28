@@ -51,7 +51,8 @@ void TwoOneSemiHonestSender::send(span<std::array<block, 2>> messages, PRNG& prn
 	ChunkerBase::runBatch(chl, messages);
 }
 
-void TwoOneSemiHonestSender::processChunk(size_t numUsed, span<std::array<block, 2>> messages)
+void TwoOneSemiHonestSender::processChunk(
+	size_t nChunk, size_t numUsed, span<std::array<block, 2>> messages)
 {
 	size_t blockIdx = fieldBitsThenBlockIdx++;
 	generateChosen(blockIdx, numUsed, messages);
@@ -67,7 +68,8 @@ void TwoOneSemiHonestReceiver::receive(
 	ChunkerBase::runBatch<block>(chl, messages, span<block>(choices.blocks(), numBlocks));
 }
 
-void TwoOneSemiHonestReceiver::processChunk(size_t numUsed, span<block> messages, block chioces)
+void TwoOneSemiHonestReceiver::processChunk(
+	size_t nChunk, size_t numUsed, span<block> messages, block chioces)
 {
 	size_t blockIdx = fieldBitsThenBlockIdx++;
 	generateChosen(blockIdx, numUsed, chioces, messages);

@@ -20,23 +20,24 @@ namespace SoftSpokenOT
 
 // Builds a Delta OT out of SubspaceVole.
 
-class DotSemiHonestSender :
+template<typename SubspaceVole = SubspaceVoleReceiver<RepetitionCode>>
+class DotSemiHonestSenderWithVole :
 	public OtExtSender,
 	public TimerAdapter,
 	private ChunkedReceiver<
-		DotSemiHonestSender,
+		DotSemiHonestSenderWithVole<SubspaceVole>,
 		std::tuple<std::array<block, 2>>,
 		std::tuple<AlignedBlockPtrT<std::array<block, 2>>>
 	>
 {
 public:
 	// Present once base OTs have finished.
-	boost::optional<SubspaceVoleReceiver<RepetitionCode>> vole;
+	boost::optional<SubspaceVole> vole;
 
 	size_t fieldBitsThenBlockIdx; // fieldBits before initialization, blockIdx after.
 	size_t numThreads;
 
-	DotSemiHonestSender(size_t fieldBits, size_t numThreads_ = 1) :
+	DotSemiHonestSenderWithVole(size_t fieldBits, size_t numThreads_ = 1) :
 		ChunkerBase(this),
 		fieldBitsThenBlockIdx(fieldBits),
 		numThreads(numThreads_)
@@ -71,14 +72,14 @@ public:
 		return vole.has_value();
 	}
 
-	DotSemiHonestSender splitBase()
+	DotSemiHonestSenderWithVole splitBase()
 	{
 		throw RTE_LOC; // TODO: unimplemented.
 	}
 
 	std::unique_ptr<OtExtSender> split() override
 	{
-		return std::make_unique<DotSemiHonestSender>(splitBase());
+		return std::make_unique<DotSemiHonestSenderWithVole>(splitBase());
 	}
 
 	void setBaseOts(
@@ -111,36 +112,44 @@ public:
 		transpose128(outW.data());
 	}
 
+	void xorMessages(size_t numUsed, block* messagesOut, const block* messagesIn) const;
+
 protected:
 	using ChunkerBase = ChunkedReceiver<
-		DotSemiHonestSender,
+		DotSemiHonestSenderWithVole<SubspaceVole>,
 		std::tuple<std::array<block, 2>>,
 		std::tuple<AlignedBlockPtrT<std::array<block, 2>>>
 	>;
 	friend ChunkerBase;
-	friend ChunkerBase::Base;
+	friend typename ChunkerBase::Base;
 
-	static const size_t chunkSize = 128;
 	static const size_t commSize = commStepSize * superBlkSize; // picked to match the other OTs.
-	size_t paddingSize() const { return std::max(wPadded(), 2 * chunkSize) - 2 * chunkSize; }
+	size_t chunkSize() const { return 128; }
+	size_t paddingSize() const { return std::max(divCeil(wPadded(), 2), chunkSize()) - chunkSize(); }
 
 	void recvBuffer(Channel& chl, size_t batchSize) { vole->recv(chl, 0, batchSize); }
-	TRY_FORCEINLINE void processChunk(size_t numUsed, span<std::array<block, 2>> messages);
+	TRY_FORCEINLINE void processChunk(
+		size_t nChunk, size_t numUsed, span<std::array<block, 2>> messages);
 };
 
-class DotSemiHonestReceiver :
+template<typename SubspaceVole = SubspaceVoleSender<RepetitionCode>>
+class DotSemiHonestReceiverWithVole :
 	public OtExtReceiver,
 	public TimerAdapter,
-	private ChunkedSender<DotSemiHonestReceiver, std::tuple<block>, std::tuple<AlignedBlockPtr>>
+	private ChunkedSender<
+		DotSemiHonestReceiverWithVole<SubspaceVole>,
+		std::tuple<block>,
+		std::tuple<AlignedBlockPtr>
+	>
 {
 public:
 	// Present once base OTs have finished.
-	boost::optional<SubspaceVoleSender<RepetitionCode>> vole;
+	boost::optional<SubspaceVole> vole;
 
 	size_t fieldBitsThenBlockIdx; // fieldBits before initialization, blockIdx after.
 	size_t numThreads;
 
-	DotSemiHonestReceiver(size_t fieldBits, size_t numThreads_ = 1) :
+	DotSemiHonestReceiverWithVole(size_t fieldBits, size_t numThreads_ = 1) :
 		ChunkerBase(this),
 		fieldBitsThenBlockIdx(fieldBits),
 		numThreads(numThreads_)
@@ -168,14 +177,14 @@ public:
 		return vole.has_value();
 	}
 
-	DotSemiHonestReceiver splitBase()
+	DotSemiHonestReceiverWithVole splitBase()
 	{
 		throw RTE_LOC; // TODO: unimplemented.
 	}
 
 	std::unique_ptr<OtExtReceiver> split() override
 	{
-		return std::make_unique<DotSemiHonestReceiver>(splitBase());
+		return std::make_unique<DotSemiHonestReceiverWithVole>(splitBase());
 	}
 
 	void setBaseOts(
@@ -207,21 +216,25 @@ public:
 
 protected:
 	using ChunkerBase = ChunkedSender<
-		DotSemiHonestReceiver,
+		DotSemiHonestReceiverWithVole<SubspaceVole>,
 		std::tuple<block>,
 		std::tuple<AlignedBlockPtr>
 	>;
 	friend ChunkerBase;
-	friend ChunkerBase::Base;
+	friend typename ChunkerBase::Base;
 
-	static const size_t chunkSize = 128;
 	static const size_t commSize = commStepSize * superBlkSize; // picked to match the other OTs.
-	size_t paddingSize() const { return vPadded() - chunkSize; }
+	size_t chunkSize() const { return 128; }
+	size_t paddingSize() const { return vPadded() - chunkSize(); }
 
 	void reserveSendBuffer(size_t batchSize) { vole->reserveMessages(0, batchSize); }
 	void sendBuffer(Channel& chl) { vole->send(chl); }
-	TRY_FORCEINLINE void processChunk(size_t numUsed, span<block> messages, block chioces);
+	TRY_FORCEINLINE void processChunk(
+		size_t nChunk, size_t numUsed, span<block> messages, block chioces);
 };
+
+using DotSemiHonestSender = DotSemiHonestSenderWithVole<>;
+using DotSemiHonestReceiver = DotSemiHonestReceiverWithVole<>;
 
 }
 }

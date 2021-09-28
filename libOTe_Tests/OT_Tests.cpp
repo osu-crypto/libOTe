@@ -21,6 +21,7 @@
 
 #include "libOTe/TwoChooseOne/SoftSpokenOT/DotSemiHonest.h"
 #include "libOTe/TwoChooseOne/SoftSpokenOT/TwoOneSemiHonest.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/DotMaliciousLeaky.h"
 
 
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
@@ -965,7 +966,7 @@ namespace tests_libOTe
 				std::cout << "\nOutputs:\n";
 
 			std::vector<block> shouldEqualV = w;
-			recv.sharedFunctionXor(u, shouldEqualV);
+			recv.sharedFunctionXor(span<const block>(u), span<block>(shouldEqualV));
 			for (size_t i = 0; i < recv.wSize(); ++i)
 			{
 				if (print)
@@ -1097,6 +1098,67 @@ namespace tests_libOTe
 			thrd.join();
 
 			OT_100Receive_Test(choices, recvMsg, sendMsg);
+		}
+
+#else
+		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
+#endif
+	}
+
+	void DotExt_SoftSpokenMaliciousLeaky_Test()
+	{
+#ifdef ENABLE_SOFTSPOKEN_OT
+		setThreadName("Sender");
+
+		IOService ios;
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel   = ep0.addChannel();
+
+		PRNG prng0(block(4234335, 3445235));
+		PRNG prng1(block(42348345, 989835));
+
+		u64 numOTs = 9733;
+
+		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
+		{
+			SoftSpokenOT::DotMaliciousLeakySender sender(fieldBits);
+			SoftSpokenOT::DotMaliciousLeakyReceiver recv(fieldBits);
+
+			const size_t nBaseOTs = sender.baseOtCount();
+			if (nBaseOTs != recv.baseOtCount())
+				throw UnitTestFail(LOCATION);
+
+			std::vector<block> baseRecv(nBaseOTs);
+			std::vector<std::array<block, 2>> baseSend(nBaseOTs);
+			BitVector choices(numOTs), baseChoice(nBaseOTs);
+			choices.randomize(prng0);
+			baseChoice.randomize(prng0);
+
+			prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+			for (u64 i = 0; i < nBaseOTs; ++i)
+			{
+				baseRecv[i] = baseSend[i][baseChoice[i]];
+			}
+
+			std::vector<block, AlignedBlockAllocator> recvMsg(numOTs);
+			std::vector<std::array<block, 2>, AlignedBlockAllocator2> sendMsg(numOTs);
+			std::thread thrd = std::thread([&]() {
+				recv.setBaseOts(baseSend, prng0, recvChannel);
+				recv.receive(choices, recvMsg, prng0, recvChannel);
+			});
+
+			sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
+			sender.send(sendMsg, prng1, senderChannel);
+			thrd.join();
+
+			OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+			const block delta = sender.delta();
+			for (auto& s : sendMsg)
+				if (neq(s[0] ^ delta, s[1]))
+					throw UnitTestFail(LOCATION);
 		}
 
 #else
