@@ -141,6 +141,7 @@ namespace osuCrypto
             u64 totalCom = 0;
             for (u64 tt = 0; tt < trials; ++tt)
             {
+                sync(chls[i], role);
 
                 timer.reset();
                 auto s = timer.setTimePoint("start");
@@ -156,10 +157,8 @@ namespace osuCrypto
                         receivers.emplace_back(std::forward<Params>(params)...);
                         DefaultBaseOT base;
                         std::vector<std::array<block, 2>, AlignedBlockAllocator2> baseMsg(nBaseOTs);
-                        base.send(baseMsg, prng, chls[0], numThreads);
-                        receivers[0].setBaseOts(baseMsg, prng, chls[0]);
-
-                        //receivers[0].genBaseOts(prng, chls[0]);
+                        base.send(baseMsg, prng, chls[i], numThreads);
+                        receivers[i].setBaseOts(baseMsg, prng, chls[i]);
                     }
                     else
                     {
@@ -168,8 +167,8 @@ namespace osuCrypto
                         BitVector bv(nBaseOTs);
                         std::vector<block, AlignedBlockAllocator> baseMsg(nBaseOTs);
                         bv.randomize(prng);
-                        base.receive(bv, baseMsg, prng, chls[0], numThreads);
-                        senders[0].setBaseOts(baseMsg, bv, prng, chls[0]);
+                        base.receive(bv, baseMsg, prng, chls[i], numThreads);
+                        senders[i].setBaseOts(baseMsg, bv, prng, chls[i]);
                     }
                 }
 #endif
