@@ -85,7 +85,8 @@ public:
 	// Uses a PPRF to implement the 2**fieldBits - 1 of 2**fieldBits OTs out of 1 of 2 base OTs. The
 	// messages of the base OTs must be in baseMessages.
 	SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_,
-		Channel& chl, PRNG& prng, span<const std::array<block, 2>> baseMessages, size_t numThreads);
+		Channel& chl, PRNG& prng, span<const std::array<block, 2>> baseMessages, size_t numThreads,
+		bool malicious);
 
 	// The number of useful blocks in u, v.
 	size_t uSize() const { return numVoles; }
@@ -163,7 +164,8 @@ public:
 	// messages and choice bits (which must be uniformly random) of the base OTs must be in
 	// baseMessages and choices.
 	SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_,
-		Channel& chl, PRNG& prng, span<const block> baseMessages, BitVector choices, size_t numThreads);
+		Channel& chl, PRNG& prng, span<const block> baseMessages, BitVector choices,
+		size_t numThreads, bool malicious);
 
 	// The number of useful blocks in w.
 	size_t wSize() const { return fieldBits * numVoles; }

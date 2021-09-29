@@ -86,7 +86,10 @@ public:
 		span<block> baseRecvOts,
 		const BitVector& choices,
 		PRNG& prng,
-		Channel& chl) override;
+		Channel& chl) override
+	{
+		setBaseOts(baseRecvOts, choices, prng, chl, false);
+	}
 
 	virtual void initTemporaryStorage() { ChunkerBase::initTemporaryStorage(); }
 
@@ -115,6 +118,13 @@ public:
 	void xorMessages(size_t numUsed, block* messagesOut, const block* messagesIn) const;
 
 protected:
+	void setBaseOts(
+		span<block> baseRecvOts,
+		const BitVector& choices,
+		PRNG& prng,
+		Channel& chl,
+		bool malicious);
+
 	using ChunkerBase = ChunkedReceiver<
 		DotSemiHonestSenderWithVole<SubspaceVole>,
 		std::tuple<std::array<block, 2>>,
@@ -187,9 +197,10 @@ public:
 		return std::make_unique<DotSemiHonestReceiverWithVole>(splitBase());
 	}
 
-	void setBaseOts(
-		span<std::array<block, 2>> baseSendOts,
-		PRNG& prng, Channel& chl) override;
+	void setBaseOts(span<std::array<block, 2>> baseSendOts, PRNG& prng, Channel& chl) override
+	{
+		setBaseOts(baseSendOts, prng, chl, false);
+	}
 
 	virtual void initTemporaryStorage() { ChunkerBase::initTemporaryStorage(); }
 
@@ -215,6 +226,10 @@ public:
 	}
 
 protected:
+	void setBaseOts(
+		span<std::array<block, 2>> baseSendOts,
+		PRNG& prng, Channel& chl, bool malicious);
+
 	using ChunkerBase = ChunkedSender<
 		DotSemiHonestReceiverWithVole<SubspaceVole>,
 		std::tuple<block>,

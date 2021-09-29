@@ -4,6 +4,7 @@
 #include <cryptoTools/Common/Matrix.h>
 #include <cryptoTools/Common/TestCollection.h>
 #include <cryptoTools/Crypto/AES.h>
+#include <cryptoTools/Crypto/Blake2.h>
 #include "libOTe/Tools/SilentPprf.h"
 
 #include <boost/log/core.hpp> // For BOOST_LOG_UNREACHABLE()
@@ -308,8 +309,8 @@ SmallFieldVoleReceiver::SmallFieldVoleReceiver(size_t fieldBits_, size_t numVole
 	gsl::copy(seeds_, span<block>(seeds.get(), numSeeds));
 }
 
-SmallFieldVoleSender::SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_,
-	Channel& chl, PRNG& prng, span<const std::array<block, 2>> baseMessages, size_t numThreads) :
+SmallFieldVoleSender::SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_, Channel& chl,
+	PRNG& prng, span<const std::array<block, 2>> baseMessages, size_t numThreads, bool malicious) :
 	SmallFieldVoleSender(fieldBits_, numVoles_)
 {
 	SilentMultiPprfSender pprf(fieldSize(), numVoles);
@@ -317,11 +318,41 @@ SmallFieldVoleSender::SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_,
 
 	MatrixView<block> seedView(seeds.get(), numVoles, fieldSize());
 	pprf.expand(chl, span<const block>(), prng, seedView, PprfOutputFormat::BlockTransposed, numThreads);
+
+	// Prove consistency
+	if (malicious)
+	{
+		std::vector<std::array<block, 2>> corrections(numVoles, {block::allSame(0)});
+		std::vector<std::array<block, 2>> hashes(numVoles, {block::allSame(0)});
+		for (size_t row = 0; row < numVoles; ++row)
+		{
+			Blake2 hasher(2 * sizeof(block));
+
+			for (size_t col = 0; col < fieldSize(); ++col)
+			{
+				Blake2 prg(3 * sizeof(block));
+				std::array<block, 3> prgOut;
+				prg.Update(seeds[row * fieldSize() + col]);
+				prg.Final(prgOut);
+
+				for (int i = 0; i < 2; ++i)
+					corrections[row][i] ^= prgOut[i];
+				hasher.Update(&prgOut[0], 2);
+				seeds[row * fieldSize() + col] = prgOut[2];
+			}
+
+			// TODO: probably fine to hash together, not separately.
+			hasher.Final(hashes[row]);
+		}
+
+		chl.asyncSend(std::move(corrections));
+		chl.asyncSend(std::move(hashes));
+	}
 }
 
 // The choice bits (as expected by SilentMultiPprfReceiver) store the locations of the complements
-// of the active paths (because they tell which messages were transfer, not which ones weren't), in
-// big endian. We want delta, which is the locations of the active paths, in big endian.
+// of the active paths (because they tell which messages were transferred, not which ones weren't),
+// in big endian. We want delta, which is the locations of the active paths, in little endian.
 static BitVector choicesToDelta(const BitVector& choices, size_t fieldBits, size_t numVoles)
 {
 	if ((size_t) choices.size() != numVoles * fieldBits)
@@ -334,8 +365,9 @@ static BitVector choicesToDelta(const BitVector& choices, size_t fieldBits, size
 	return delta;
 }
 
-SmallFieldVoleReceiver::SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_,
-	Channel& chl, PRNG& prng, span<const block> baseMessages, BitVector choices, size_t numThreads) :
+SmallFieldVoleReceiver::SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_, Channel& chl,
+	PRNG& prng, span<const block> baseMessages, BitVector choices, size_t numThreads,
+	bool malicious) :
 	SmallFieldVoleReceiver(fieldBits_, numVoles_, choicesToDelta(choices, fieldBits_, numVoles_))
 {
 	SilentMultiPprfReceiver pprf;
@@ -351,6 +383,66 @@ SmallFieldVoleReceiver::SmallFieldVoleReceiver(size_t fieldBits_, size_t numVole
 
 	Matrix<block> seedsFull(numVoles, fieldSize());
 	pprf.expand(chl, prng, seedsFull, PprfOutputFormat::BlockTransposed, false, numThreads);
+
+	// Check consistency
+	if (malicious)
+	{
+		std::vector<std::array<block, 2>> totals(numVoles, {block::allSame(0)});
+		std::vector<std::array<block, 2>> entryHashes(numVoles * fieldSize(), {block::allSame(0)});
+		block* seedMatrix = seedsFull.data();
+		for (size_t row = 0; row < numVoles; ++row)
+		{
+
+			for (size_t col = 0; col < fieldSize(); ++col)
+			{
+				Blake2 prg(3 * sizeof(block));
+				std::array<block, 3> prgOut;
+				prg.Update(seedMatrix[row * fieldSize() + col]);
+				prg.Final(prgOut);
+
+				for (int i = 0; i < 2; ++i)
+				{
+					totals[row][i] ^= prgOut[i];
+					entryHashes[row * fieldSize() + col][i] = prgOut[i];
+				}
+				seedMatrix[row * fieldSize() + col] = prgOut[2];
+			}
+		}
+
+		std::vector<std::array<block, 2>> corrections(numVoles, {block::allSame(0)});
+		std::vector<std::array<block, 2>> hashes(numVoles, {block::allSame(0)});
+		chl.recv(&corrections[0], corrections.size());
+		chl.recv(&hashes[0], hashes.size());
+
+		int eq = 1;
+		for (size_t row = 0; row < numVoles; ++row)
+		{
+			for (int i = 0; i < 2; ++i)
+				corrections[row][i] ^= totals[row][i];
+
+			size_t rowDelta = 0;
+			for (size_t bit = 0; bit < fieldBits; ++bit)
+				rowDelta |= (size_t) delta[row * fieldBits + bit] << bit;
+
+			for (size_t col = 0; col < fieldSize(); ++col)
+			{
+				block isUnknownSeed = block::allSame(col == rowDelta);
+				for (int i = 0; i < 2; ++i)
+					entryHashes[row * fieldSize() + col][i] ^= isUnknownSeed & corrections[row][i];
+			}
+
+			Blake2 hasher(2 * sizeof(block));
+			std::array<block, 2> hash;
+			for (size_t col = 0; col < fieldSize(); ++col)
+				hasher.Update(entryHashes[row * fieldSize() + col]);
+			hasher.Final(hash);
+
+			for (int i = 0; i < 2; ++i)
+				eq &= (hash[i] == hashes[row][i]);
+		}
+		if (!eq)
+			throw std::runtime_error("PPRF failed consistency check.");
+	}
 
 	// Reorder seeds to handle the (Delta ^) part, moving the unknown seeds to column 0. This
 	// effectively makes it compute w = sum_x (Delta ^ x) * r_x instead of v = sum_x x * r_x.

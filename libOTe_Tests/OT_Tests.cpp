@@ -887,100 +887,103 @@ namespace tests_libOTe
 
 		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
 		{
-			const size_t nBaseOTs = SmallFieldVoleBase::numBaseOTsNeeded(fieldBits, numVoles);
-
-			std::vector<std::array<block, 2>> baseSend(nBaseOTs);
-			std::vector<block> baseRecv(nBaseOTs);
-			BitVector baseChoice(nBaseOTs);
-			baseChoice.randomize(prng0);
-
-			prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-			for (u64 i = 0; i < nBaseOTs; ++i)
-				baseRecv[i] = baseSend[i][baseChoice[i]];
-
-			std::vector<block> u, v, w;
-			size_t senderUSize, senderVSize;
-			std::unique_ptr<block[]> senderSeeds;
-			std::thread thrd = std::thread([&]() {
-				SmallFieldVoleSender sender(fieldBits, numVoles, senderChannel, prng1, baseSend, 1);
-				u.resize(sender.uPadded());
-				v.resize(sender.vPadded());
-				sender.generate(0, u, v);
-
-				senderUSize = sender.uSize();
-				senderVSize = sender.vSize();
-				senderSeeds = std::move(sender.seeds);
-			});
-
-			SmallFieldVoleReceiver recv(fieldBits, numVoles, recvChannel, prng0, baseRecv, baseChoice, 1);
-			BitVector delta = recv.delta;
-			w.resize(recv.wPadded());
-			recv.generate(0, w);
-			thrd.join();
-
-			if (senderVSize != recv.wSize())
-				throw UnitTestFail(LOCATION);
-			if (senderUSize > u.size())
-				throw UnitTestFail(LOCATION);
-			if (senderVSize > v.size() || recv.wSize() > w.size())
-				throw UnitTestFail(LOCATION);
-			u.resize(numVoles);
-
-			if (print)
+			for (int malicious = 0; malicious < 2; ++malicious)
 			{
-				std::cout << "Delta:\n";
-				for (size_t i = 0; i < delta.sizeBlocks(); ++i)
-					std::cout << delta.blocks()[i] << ", ";
+				const size_t nBaseOTs = SmallFieldVoleBase::numBaseOTsNeeded(fieldBits, numVoles);
 
-				std::cout << "\nSeeds:\n";
-			}
+				std::vector<std::array<block, 2>> baseSend(nBaseOTs);
+				std::vector<block> baseRecv(nBaseOTs);
+				BitVector baseChoice(nBaseOTs);
+				baseChoice.randomize(prng0);
 
-			size_t fieldSize = recv.fieldSize();
-			for (size_t i = 0; i < numVoles; ++i)
-			{
-				size_t deltaI = 0;
-				for (size_t j = 0; j < fieldBits; ++j)
-					deltaI += (size_t) delta[i * fieldBits + j] << j;
+				prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+				for (u64 i = 0; i < nBaseOTs; ++i)
+					baseRecv[i] = baseSend[i][baseChoice[i]];
+
+				std::vector<block> u, v, w;
+				size_t senderUSize, senderVSize;
+				std::unique_ptr<block[]> senderSeeds;
+				std::future<void> thrd = std::async([&]() {
+					SmallFieldVoleSender sender(fieldBits, numVoles, senderChannel, prng1, baseSend, 1, malicious);
+					u.resize(sender.uPadded());
+					v.resize(sender.vPadded());
+					sender.generate(0, u, v);
+
+					senderUSize = sender.uSize();
+					senderVSize = sender.vSize();
+					senderSeeds = std::move(sender.seeds);
+				});
+
+				SmallFieldVoleReceiver recv(fieldBits, numVoles, recvChannel, prng0, baseRecv, baseChoice, 1, malicious);
+				BitVector delta = recv.delta;
+				w.resize(recv.wPadded());
+				recv.generate(0, w);
+				thrd.wait();
+
+				if (senderVSize != recv.wSize())
+					throw UnitTestFail(LOCATION);
+				if (senderUSize > u.size())
+					throw UnitTestFail(LOCATION);
+				if (senderVSize > v.size() || recv.wSize() > w.size())
+					throw UnitTestFail(LOCATION);
+				u.resize(numVoles);
 
 				if (print)
 				{
-					for (size_t j = 0; j < fieldSize; ++j)
-						std::cout << j << ": " << senderSeeds[i * fieldSize + j] << '\n';
-					for (size_t j = 1; j < fieldSize; ++j)
-						std::cout << j << ": " << recv.seeds[i * (fieldSize - 1) + j - 1] << '\n';
+					std::cout << "Delta:\n";
+					for (size_t i = 0; i < delta.sizeBlocks(); ++i)
+						std::cout << delta.blocks()[i] << ", ";
+
+					std::cout << "\nSeeds:\n";
 				}
 
-				for (size_t j = 0; j < fieldSize; ++j)
+				size_t fieldSize = recv.fieldSize();
+				for (size_t i = 0; i < numVoles; ++i)
 				{
-					if (j == deltaI)
-						// Punctured point.
-						continue;
+					size_t deltaI = 0;
+					for (size_t j = 0; j < fieldBits; ++j)
+						deltaI += (size_t) delta[i * fieldBits + j] << j;
 
-					block senderSeed = senderSeeds[i * fieldSize + j];
-					block recvSeed = recv.seeds[i * (fieldSize - 1) + (j ^ deltaI) - 1];
-					if (senderSeed != recvSeed)
+					if (print)
+					{
+						for (size_t j = 0; j < fieldSize; ++j)
+							std::cout << j << ": " << senderSeeds[i * fieldSize + j] << '\n';
+						for (size_t j = 1; j < fieldSize; ++j)
+							std::cout << j << ": " << recv.seeds[i * (fieldSize - 1) + j - 1] << '\n';
+					}
+
+					for (size_t j = 0; j < fieldSize; ++j)
+					{
+						if (j == deltaI)
+							// Punctured point.
+							continue;
+
+						block senderSeed = senderSeeds[i * fieldSize + j];
+						block recvSeed = recv.seeds[i * (fieldSize - 1) + (j ^ deltaI) - 1];
+						if (senderSeed != recvSeed)
+							throw UnitTestFail(LOCATION);
+					}
+				}
+
+				if (print)
+					std::cout << "\nOutputs:\n";
+
+				std::vector<block> shouldEqualV = w;
+				recv.sharedFunctionXor(span<const block>(u), span<block>(shouldEqualV));
+				for (size_t i = 0; i < recv.wSize(); ++i)
+				{
+					if (print)
+					{
+						std::cout << u[i] << '\n';
+						std::cout << v[i] << '\n';
+						std::cout << shouldEqualV[i] << '\n';
+						std::cout << w[i] << '\n';
+					}
+					if (v[i] != shouldEqualV[i])
+						throw UnitTestFail(LOCATION);
+					if (v[i] != (w[i] ^ (block::allSame((bool) delta[i]) & u[i / fieldBits])))
 						throw UnitTestFail(LOCATION);
 				}
-			}
-
-			if (print)
-				std::cout << "\nOutputs:\n";
-
-			std::vector<block> shouldEqualV = w;
-			recv.sharedFunctionXor(span<const block>(u), span<block>(shouldEqualV));
-			for (size_t i = 0; i < recv.wSize(); ++i)
-			{
-				if (print)
-				{
-					std::cout << u[i] << '\n';
-					std::cout << v[i] << '\n';
-					std::cout << shouldEqualV[i] << '\n';
-					std::cout << w[i] << '\n';
-				}
-				if (v[i] != shouldEqualV[i])
-					throw UnitTestFail(LOCATION);
-				if (v[i] != (w[i] ^ (block::allSame((bool) delta[i]) & u[i / fieldBits])))
-					throw UnitTestFail(LOCATION);
 			}
 		}
 

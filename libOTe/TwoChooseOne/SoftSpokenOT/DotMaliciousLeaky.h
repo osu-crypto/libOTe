@@ -65,6 +65,15 @@ public:
 		return std::make_unique<DotMaliciousLeakySender>(splitBase());
 	}
 
+	void setBaseOts(
+		span<block> baseRecvOts,
+		const BitVector& choices,
+		PRNG& prng,
+		Channel& chl) override
+	{
+		Base::setBaseOts(baseRecvOts, choices, prng, chl, true);
+	}
+
 	virtual void initTemporaryStorage()
 	{
 		ChunkerBase::initTemporaryStorage();
@@ -153,6 +162,11 @@ public:
 	std::unique_ptr<OtExtReceiver> split() override
 	{
 		return std::make_unique<DotMaliciousLeakyReceiver>(splitBase());
+	}
+
+	void setBaseOts(span<std::array<block, 2>> baseSendOts, PRNG& prng, Channel& chl) override
+	{
+		Base::setBaseOts(baseSendOts, prng, chl, true);
 	}
 
 	virtual void initTemporaryStorage()

@@ -18,11 +18,13 @@ void DotSemiHonestSenderWithVole<SubspaceVole>::setBaseOts(
 	span<block> baseRecvOts,
 	const BitVector& choices,
 	PRNG& prng,
-	Channel& chl)
+	Channel& chl,
+	bool malicious)
 {
 	const size_t numVoles = divCeil(gOtExtBaseOtCount, fieldBits());
 	vole.emplace(
-		SmallFieldVoleReceiver(fieldBits(), numVoles, chl, prng, baseRecvOts, choices, numThreads),
+		SmallFieldVoleReceiver(
+			fieldBits(), numVoles, chl, prng, baseRecvOts, choices, numThreads, malicious),
 		RepetitionCode(numVoles)
 	);
 
@@ -33,11 +35,11 @@ void DotSemiHonestSenderWithVole<SubspaceVole>::setBaseOts(
 template<typename SubspaceVole>
 void DotSemiHonestReceiverWithVole<SubspaceVole>::setBaseOts(
 	span<std::array<block, 2>> baseSendOts,
-	PRNG& prng, Channel& chl)
+	PRNG& prng, Channel& chl, bool malicious)
 {
 	const size_t numVoles = divCeil(gOtExtBaseOtCount, fieldBits());
 	vole.emplace(
-		SmallFieldVoleSender(fieldBits(), numVoles, chl, prng, baseSendOts, numThreads),
+		SmallFieldVoleSender(fieldBits(), numVoles, chl, prng, baseSendOts, numThreads, malicious),
 		RepetitionCode(numVoles)
 	);
 
