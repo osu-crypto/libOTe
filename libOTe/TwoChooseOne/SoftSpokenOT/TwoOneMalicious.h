@@ -17,18 +17,24 @@ namespace SoftSpokenOT
 template<size_t blocksPerTweak>
 struct TwoOneRTCR
 {
-	u64 hashKey;
+	block hashKey;
 	block hashKeyX2;
 	const AES* aes;
+
+	static constexpr std::uint32_t mod = 0b10000111;
 
 	u64 tweak = 0;
 
 	TwoOneRTCR() = default;
-	TwoOneRTCR(u64 hashKey_, const AES* aes_ = &mAesFixedKey) :
+	TwoOneRTCR(block hashKey_, const AES* aes_ = &mAesFixedKey) :
 		hashKey(hashKey_),
-		hashKeyX2(hashKey >> 63, hashKey << 1),
 		aes(aes_)
-	{}
+	{
+		block wordsRotated = _mm_shuffle_epi32(hashKey, 0b10010011);
+		block mask(std::array<u32, 4>{mod, 1, 1, 1});
+		hashKeyX2 = _mm_slli_epi32(hashKey, 1);
+		hashKeyX2 ^= block(_mm_srai_epi32(wordsRotated, 31)) & mask;
+	}
 
 	template<size_t numBlocks>
 	void hashBlocks(const block* plaintext, block* ciphertext)
@@ -41,12 +47,19 @@ struct TwoOneRTCR
 		for (size_t i = 0; i < numBlocks / blocksPerTweak; ++i)
 		{
 			if (i % 4 == 0)
+			{
 				// Go backwards so that it works well with everything else going backwards.
-				tweakMul = _mm_clmulepi64_si128(toBlock(tweak - 1 - i), toBlock(hashKey), 0x00);
+				u64 curTweak = tweak - 1 - i;
+				block mulL = _mm_clmulepi64_si128(toBlock(curTweak), hashKey, 0x00);
+				block mulH = _mm_clmulepi64_si128(toBlock(curTweak), hashKey, 0x10);
+
+				block mulRed = _mm_clmulepi64_si128(mulH, toBlock((u64) mod), 0x01);
+				tweakMul = mulL ^ _mm_slli_si128(mulH, 8) ^ mulRed;
+			}
 
 			block curTweakMul = tweakMul;
 			if (((tweak - 1 - i) & 1) == 0)
-				curTweakMul ^= toBlock(hashKey);
+				curTweakMul ^= hashKey;
 			if (((tweak - 1 - i) & 2) == 0)
 				curTweakMul ^= hashKeyX2;
 
@@ -112,7 +125,7 @@ public:
 
 	void send(span<std::array<block, 2>> messages, PRNG& prng, Channel& chl) override
 	{
-		u64 hashKey = prng.get<u64>();
+		block hashKey = prng.get<block>();
 		hasher.rtcr = TwoOneRTCR<2>(hashKey, &mAesFixedKey);
 		sendImpl(messages, prng, chl, hasher);
 		chl.asyncSend(hashKey);
@@ -141,7 +154,7 @@ public:
 	{
 		Base::receive(choices, messages, prng, chl);
 
-		u64 hashKey;
+		block hashKey;
 		chl.recv(&hashKey, 1);
 		TwoOneRTCR<1> rtcr(hashKey, &mAesFixedKey);
 
