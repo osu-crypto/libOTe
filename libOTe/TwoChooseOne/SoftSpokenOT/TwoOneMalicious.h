@@ -17,55 +17,67 @@ namespace SoftSpokenOT
 template<size_t blocksPerTweak>
 struct TwoOneRTCR
 {
-	block hashKey;
-	block hashKeyX2;
+	block hashKeys[64];
 	const AES* aes;
 
 	static constexpr std::uint32_t mod = 0b10000111;
 
+	static block mul2(block x)
+	{
+		block wordsRotated = _mm_shuffle_epi32(x, 0b10010011);
+		block mask(std::array<u32, 4>{mod, 1, 1, 1});
+		block output = _mm_slli_epi32(x, 1);
+		output ^= block(_mm_srai_epi32(wordsRotated, 31)) & mask;
+		return output;
+	}
+
 	u64 tweak = 0;
+	block tweakMul = block(0ul);
 
 	TwoOneRTCR() = default;
-	TwoOneRTCR(block hashKey_, const AES* aes_ = &mAesFixedKey) :
-		hashKey(hashKey_),
+	TwoOneRTCR(block hashKey, const AES* aes_ = &mAesFixedKey) :
 		aes(aes_)
 	{
-		block wordsRotated = _mm_shuffle_epi32(hashKey, 0b10010011);
-		block mask(std::array<u32, 4>{mod, 1, 1, 1});
-		hashKeyX2 = _mm_slli_epi32(hashKey, 1);
-		hashKeyX2 ^= block(_mm_srai_epi32(wordsRotated, 31)) & mask;
+		hashKeys[0] = hashKey;
+		for (size_t i = 0; i < 63; ++i)
+			hashKeys[i + 1] = mul2(hashKeys[i]);
+
+		// Now hashKeys[i] = 2**i * hashKey
+
+		for (size_t i = 0; i < 63; ++i)
+			hashKeys[i + 1] ^= hashKeys[i];
+
+		// Now hashKeys[i] = 2**i * hashKey + 2**(i - 1) * hashKey + ... + hashKey.
 	}
 
 	template<size_t numBlocks>
 	void hashBlocks(const block* plaintext, block* ciphertext)
 	{
 		static_assert(numBlocks % blocksPerTweak == 0, "can't partially use tweak");
-		tweak += roundUpTo(numBlocks / blocksPerTweak, 4);
+		u64 tweakIncrease = numBlocks / blocksPerTweak;
 
-		block tweakMul;
+		// Assumes that tweak is always divisible by tweakIncrease (i.e. that the tweaks are
+		// naturally aligned).
+
 		block tmp[numBlocks];
+		#ifdef __GNUC__
+		#pragma GCC unroll 16
+		#endif
 		for (size_t i = 0; i < numBlocks / blocksPerTweak; ++i)
 		{
-			if (i % 4 == 0)
+			for (size_t j = 0; j < blocksPerTweak; ++j)
 			{
 				// Go backwards so that it works well with everything else going backwards.
-				u64 curTweak = tweak - 1 - i;
-				block mulL = _mm_clmulepi64_si128(toBlock(curTweak), hashKey, 0x00);
-				block mulH = _mm_clmulepi64_si128(toBlock(curTweak), hashKey, 0x10);
-
-				block mulRed = _mm_clmulepi64_si128(mulH, toBlock((u64) mod), 0x01);
-				tweakMul = mulL ^ _mm_slli_si128(mulH, 8) ^ mulRed;
+				size_t idx = numBlocks - 1 - (i * blocksPerTweak + j);
+				tmp[idx] = tweakMul ^ plaintext[idx];
 			}
 
-			block curTweakMul = tweakMul;
-			if (((tweak - 1 - i) & 1) == 0)
-				curTweakMul ^= hashKey;
-			if (((tweak - 1 - i) & 2) == 0)
-				curTweakMul ^= hashKeyX2;
-
-			for (size_t j = 0; j < blocksPerTweak; ++j)
-				tmp[i * blocksPerTweak + j] = curTweakMul ^ plaintext[i * blocksPerTweak + j];
+			if (i < numBlocks / blocksPerTweak - 1)
+				tweakMul ^= hashKeys[log2floor(i ^ (i + 1))];
 		}
+
+		tweak += tweakIncrease;
+		tweakMul ^= hashKeys[log2floor((tweak - 1) ^ tweak)];
 
 		aes->hashBlocks<numBlocks>(tmp, ciphertext);
 	}
