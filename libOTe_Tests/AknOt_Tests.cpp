@@ -48,8 +48,8 @@ namespace tests_libOTe
         std::vector<Channel> sendChls(numTHreads), recvChls(numTHreads);
         for (u64 i = 0; i < numTHreads; ++i)
         {
-            sendChls[i] = std::move(ep1.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i)));
-            recvChls[i] = std::move(ep0.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i)));
+            sendChls[i] = (ep1.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i)));
+            recvChls[i] = (ep0.addChannel("chl" + std::to_string(i), "chl" + std::to_string(i)));
         }
 
 

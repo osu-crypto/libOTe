@@ -3,11 +3,20 @@
 
 #define LIBOTE_VERSION (LIBOTE_VERSION_MAJOR * 10000 + LIBOTE_VERSION_MINOR * 100 + LIBOTE_VERSION_PATCH)
 
+// build the library bit poly mul integration
+#cmakedefine ENABLE_BITPOLYMUL @ENABLE_BITPOLYMUL@
+
 // build the library with "simplest" Base OT enabled
 #cmakedefine ENABLE_SIMPLESTOT @ENABLE_SIMPLESTOT@
 
 // build the library with the ASM "simplest" Base OT enabled
 #cmakedefine ENABLE_SIMPLESTOT_ASM @ENABLE_SIMPLESTOT_ASM@
+
+// build the library with POPF Base OT using Ristretto KA enabled
+#cmakedefine ENABLE_MRR @ENABLE_MRR@
+
+// build the library with POPF Base OT using Moeller KA enabled
+#cmakedefine ENABLE_MRR_TWIST @ENABLE_MRR_TWIST@
 
 // build the library with Masney Rindal Base OT enabled
 #cmakedefine ENABLE_MR @ENABLE_MR@
@@ -50,15 +59,6 @@
 
 // build the library with RR approx k-oo-N OT-ext enabled
 #cmakedefine ENABLE_AKN @ENABLE_AKN@
-
-
-#define OTE_RANDOM_ORACLE 1
-#define OTE_DAVIE_MEYER_AES 2
-
-#cmakedefine OTE_KOS_HASH @OTE_KOS_HASH@
-
-// build the library where KOS is round optimized.
-#cmakedefine OTE_KOS_FIAT_SHAMIR @OTE_KOS_FIAT_SHAMIR@
 
 
 #if defined(ENABLE_SIMPLESTOT_ASM) && defined(_MSC_VER)

@@ -29,6 +29,7 @@ namespace osuCrypto {
         {
             setBaseOts(baseRecvOts, choices);
         }
+        virtual ~KosDotExtSender() = default;
 
         void operator=(KosDotExtSender&& v)
         {

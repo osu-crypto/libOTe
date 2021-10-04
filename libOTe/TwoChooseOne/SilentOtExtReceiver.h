@@ -8,54 +8,142 @@
 #include <libOTe/Tools/Tools.h>
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
-#include <libOTe/TwoChooseOne/IknpOtExtReceiver.h>
+#include <libOTe/TwoChooseOne/OTExtInterface.h>
+#include <libOTe/TwoChooseOne/KosOtExtReceiver.h>
+#include <libOTe/TwoChooseOne/KosOtExtSender.h>
 
 namespace osuCrypto
 {
-    enum class MultType
-    {
-        Naive,
-        QuasiCyclic
-    };
+
 
     // For more documentation see SilentOtExtSender.
     class SilentOtExtReceiver : public OtExtReceiver, public TimerAdapter
     {
     public:
+        // The prime for QuasiCycic encoding
+        u64 mP = 0;
 
-        u64 mP, mN = 0, mN2, mScaler, mSizePer;
+        // the number of OTs being requested.
+        u64 mRequestedNumOts = 0;
+
+        // The dense vector size, this will be at least as big as mRequestedNumOts.
+        u64 mN = 0;
+
+        // The sparse vector size, this will be mN * mScaler.
+        u64 mN2 = 0;
+
+        // The scaling factor that the sparse vector will be compressed by.
+        u64 mScaler = 2;
+
+        // The size of each regular section of the sparse vector.
+        u64 mSizePer = 0;
+
+        u64 mNumPartitions = 0;
+
+        // The indices of the noisy locations in the sparse vector.
         std::vector<u64> mS;
-        block mDelta, mSum;
-        SilentBaseType mBaseType;
-        bool mDebug = false;
-        u64 mNumThreads;
-        IknpOtExtReceiver mIknpRecver;
+
+        // The A vector in the relation A + B = C * delta
+        span<block> mA;
+
+        // The C vector in the relation A + B = C * delta
+        span<u8> mC;
+
+        // The number of threads that should be used (when applicable).
+        u64 mNumThreads = 1;
+
+        // The memory backing mC
+        std::unique_ptr<u8[]> mChoicePtr;
+
+        // The size of the memory backing mC
+        u64 mChoiceSpanSize = 0;
+
+        // The memory backing mA
+        std::unique_ptr<block[]> mBacking;
+
+        // The size of the memory backing mA
+        u64 mBackingSize = 0;
+
+#ifdef ENABLE_KOS
+        // Kos instance used to generate the base OTs.
+        KosOtExtReceiver mKosRecver;
+#endif
+
+        // The OTs recv msgs which will be used to create the 
+        // secret share of xa * delta as described in ferret.
+        std::vector<block> mMalCheckOts;
+
+        // The OTs choice bits which will be used to create the 
+        // secret share of xa * delta as described in ferret.
+        BitVector mMalCheckChoice;
+
+        // The seed used to generate the malicious check coefficients
+        // for the ferret protocol.
+        block mMalCheckSeed = ZeroBlock;
+
+        // The summation of the malicious check coefficients which
+        // correspond to the mS indicces.
+        block mMalCheckX = ZeroBlock;
+
+        // The ggm tree thats used to generate the sparse vectors.
         SilentMultiPprfReceiver mGen;
 
-        // sets the Iknp base OTs that are then used to extend
+        // The type of compress we will use to generate the
+        // dense vectors from the sparse vectors.
+        MultType mMultType = MultType::QuasiCyclic;
+
+        // The flag which controls whether the malicious check is performed.
+        SilentSecType mMalType = SilentSecType::SemiHonest;
+
+        // A flag that helps debug
+        bool mDebug = false;
+
+        virtual ~SilentOtExtReceiver() = default;
+
+        /////////////////////////////////////////////////////
+        // The standard OT extension interface
+        /////////////////////////////////////////////////////
+
+        // sets the Kos base OTs that are then used to extend
         void setBaseOts(
             span<std::array<block, 2>> baseSendOts,
             PRNG& prng,
-            Channel& chl) override {
-            mIknpRecver.setBaseOts(baseSendOts, prng, chl);
-        }
+            Channel& chl) override;
+
+        // sets the Kos base OTs that are then used to extend
+        void setBaseOts(
+            span<std::array<block, 2>> baseSendOts);
 
         // return the number of base OTs IKNP needs
-        u64 baseOtCount() const override {
-            return mIknpRecver.baseOtCount();
-        }
+        u64 baseOtCount() const override;
 
         // returns true if the IKNP base OTs are currently set.
-        bool hasBaseOts() const override { 
-            return mIknpRecver.hasBaseOts(); 
-        };
-
-        // Returns an indpendent copy of this extender.
-        virtual std::unique_ptr<OtExtReceiver> split() { 
-            throw std::runtime_error("not implemented"); };
+        bool hasBaseOts() const override;
 
         // Generate the IKNP base OTs
         void genBaseOts(PRNG& prng, Channel& chl) override;
+
+        // Returns an indpendent copy of this extender.
+        std::unique_ptr<OtExtReceiver> split() override;
+
+
+        // The default API for OT ext allows the 
+        // caller to choose the choice bits. But
+        // silent OT picks the choice bits at random.
+        // To meet the original API we add communication
+        // and correct the random choice bits to the 
+        // provided ones... Use silentReceive(...) for 
+        // the silent OT API.
+        void receive(
+            const BitVector& choices,
+            span<block> messages,
+            PRNG& prng,
+            Channel& chl) override;
+
+        /////////////////////////////////////////////////////
+        // The native silent OT extension interface
+        /////////////////////////////////////////////////////
+
 
         // Generate the silent base OTs. If the Iknp 
         // base OTs are set then we do an IKNP extend,
@@ -67,11 +155,15 @@ namespace osuCrypto
         // the parameters and figures out how many base OT
         // will be needed. These can then be ganerated for
         // a different OT extension or using a base OT protocol.
+        // @n        [in] - the number of OTs.
+        // @scaler   [in] - the compression factor.
+        // @nThreads [in] - the number of threads.
+        // @mal      [in] - whether the malicious check is performed.
         void configure(
             u64 n, 
             u64 scaler = 2, 
-            u64 secParam = 128,
-            u64 numThreads = 1);
+            u64 nThreads = 1,
+            SilentSecType mal = SilentSecType::SemiHonest);
 
         // return true if this instance has been configured.
         bool isConfigured() const { return mN > 0; }
@@ -83,66 +175,85 @@ namespace osuCrypto
         // The silent base OTs must have specially set base OTs.
         // This returns the choice bits that should be used.
         // Call this is you want to use a specific base OT protocol
-        // and then pass the OT messages back using setSlientBaseOts(...).
-        BitVector sampleBaseChoiceBits(PRNG& prng) {
-            if (isConfigured() == false)
-                throw std::runtime_error("configure(...) must be called first");
-            return mGen.sampleChoiceBits(mN2, true, prng);
-        }
+        // and then pass the OT messages back using setSilentBaseOts(...).
+        BitVector sampleBaseChoiceBits(PRNG& prng);
 
         // Set the externally generated base OTs. This choice
         // bits must be the one return by sampleBaseChoiceBits(...).
-        void setSlientBaseOts(span<block> recvBaseOts);
+        void setSilentBaseOts(span<block> recvBaseOts);
 
-        // An "all-in-one" function that generates the silent 
-        // base OTs under various parameters. 
-        void genBase(u64 n, Channel& chl, PRNG& prng,
-            u64 scaler = 2, u64 secParam = 80,
-            SilentBaseType base = SilentBaseType::BaseExtend,
-            u64 threads = 1);
 
-        // The default API for OT ext allows the 
-        // caller to choose the choice bits. But
-        // silent OT picks the choice bits at random.
-        // To meet the original API we add communicatio
-        // and correct the random choice bits to the 
-        // provided ones... Use silentReceive(...) for 
-        // the silent OT API.
-        void receive(
-            const BitVector& choices,
-            span<block> messages,
-            PRNG& prng,
-            Channel& chl) override;
-
-        // Perform the actual OT extension. If silent
-        // base OTs have been generated or set, then
-        // this function is non-interactive. Otherwise
-        // the silent base OTs will automaticly be performed.
+        // Runs the silent OT protocol and outputs c, a.
+        // If type == OTType::random, then this will generate
+        // random OTs, where c is a random bit vector
+        // and a[i] = H(b[i] + c[i] * delta).
+        // If type ==OTType::Correlated, then 
+        // a[i] = b[i] + c[i] * delta.
+        // @ c   [out] - the random choice bits.
+        // @ a   [out] - the correlated/random ot message.
+        // @prng  [in] - randomness source.
+        // @chl   [in] - the comm channel
+        // @type  [in] - whether random or correlated OTs are produced.
         void silentReceive(
+            BitVector& c,
+            span<block> a,
+            PRNG& prng,
+            Channel& chl,
+            OTType type = OTType::Random);
+
+        // Runs the silent OT protocol and store the a,c
+        // vectors internally as mA, mC. Hashing is not applied
+        // and therefore we have mA + mB = mC * delta.
+        // If type = ChoiceBitPacking::True, then mC will not 
+        // be generated. Instead the least significant bit of mA
+        // will hold the choice bits. 
+        // @n     [in] - the number of OTs.
+        // @prng  [in] - randomness source.
+        // @chl   [in] - the comm channel
+        // @type  [in] - whether the choice bit should be the lsb.
+        void silentReceiveInplace(
+            u64 n,
+            PRNG& prng,
+            Channel& chls,
+            ChoiceBitPacking type = ChoiceBitPacking::False);
+
+
+        // hash the internal vectors and store the results
+        // in choices, messages.
+        void hash(
             BitVector& choices,
             span<block> messages,
-            PRNG & prng,
-            Channel & chl);
-
-        // A parallel version of the other silentReceive(...)
-        // function.
-		void silentReceive(
-            BitVector& choices,
-			span<block> messages,
-			PRNG& prng,
-			span<Channel> chls);
+            ChoiceBitPacking type);
 
         // internal.
 
-        void checkRT(span<Channel> chls, Matrix<block> &rT);
-        void randMulNaive(Matrix<block> &rT, span<block> &messages);
-        void randMulQuasiCyclic(Matrix<block> &rT, span<block> &messages, BitVector& choices, u64 threads);
-        
+        // Runs the malicious consistency check as described 
+        // by the ferret paper. We only run the batch check and
+        // not the cuckoo hashing part.
+        void ferretMalCheck(Channel& chl, PRNG& prng);
+
+        // a debugging check on the sparse vector. Insecure to use.
+        void checkRT(Channel& chl, MatrixView<block> rT);
+
+        // the QuasiCyclic compression routine.
+        void randMulQuasiCyclic(ChoiceBitPacking packing);
+
+        PprfOutputFormat getPprfFormat()
+        {
+            switch (mMultType)
+            {
+            case osuCrypto::MultType::QuasiCyclic:
+                return PprfOutputFormat::InterleavedTransposed;
+                break;
+            default:
+                throw RTE_LOC;
+                break;
+            }
+        }
+
+        // clears the internal buffers.
         void clear();
     };
-
-    //Matrix<block> expandTranspose(BgiEvaluator::MultiKey & gen, u64 n);
-
 
     inline u8 parity(block b)
     {
@@ -160,77 +271,6 @@ namespace osuCrypto
         };
         auto bb = reinterpret_cast<u64*>(&b);
         return (bb[0] ^ bb[1]) & 1;
-    }
-
-    inline void mulRand(PRNG &pubPrng, span<block> mtxColumn, Matrix<block> &rT, BitIterator iter)
-    {
-        pubPrng.get(mtxColumn.data(), mtxColumn.size());
-
-        //convertCol(mtx, i, mtxColumn);
-        std::array<block, 8> sum, t;
-        auto end = (rT.cols() / 8) * 8;
-
-        for (u64 j = 0; j < 128; ++j)
-        {
-            auto row = rT[j];
-
-            sum[0] = sum[0] ^ sum[0];
-            sum[1] = sum[1] ^ sum[1];
-            sum[2] = sum[2] ^ sum[2];
-            sum[3] = sum[3] ^ sum[3];
-            sum[4] = sum[4] ^ sum[4];
-            sum[5] = sum[5] ^ sum[5];
-            sum[6] = sum[6] ^ sum[6];
-            sum[7] = sum[7] ^ sum[7];
-
-            if (true)
-            {
-
-                for (u64 k = 0; k < end; k += 8)
-                {
-                    t[0] = row[k + 0] & mtxColumn[k + 0];
-                    t[1] = row[k + 1] & mtxColumn[k + 1];
-                    t[2] = row[k + 2] & mtxColumn[k + 2];
-                    t[3] = row[k + 3] & mtxColumn[k + 3];
-                    t[4] = row[k + 4] & mtxColumn[k + 4];
-                    t[5] = row[k + 5] & mtxColumn[k + 5];
-                    t[6] = row[k + 6] & mtxColumn[k + 6];
-                    t[7] = row[k + 7] & mtxColumn[k + 7];
-
-
-                    sum[0] = sum[0] ^ t[0];
-                    sum[1] = sum[1] ^ t[1];
-                    sum[2] = sum[2] ^ t[2];
-                    sum[3] = sum[3] ^ t[3];
-                    sum[4] = sum[4] ^ t[4];
-                    sum[5] = sum[5] ^ t[5];
-                    sum[6] = sum[6] ^ t[6];
-                    sum[7] = sum[7] ^ t[7];
-
-                }
-
-                for (i64 k = end; k < row.size(); ++k)
-                    sum[0] = sum[0] ^ (row[k] & mtxColumn[k]);
-
-                sum[0] = sum[0] ^ sum[1];
-                sum[2] = sum[2] ^ sum[3];
-                sum[4] = sum[4] ^ sum[5];
-                sum[6] = sum[6] ^ sum[7];
-
-                sum[0] = sum[0] ^ sum[2];
-                sum[4] = sum[4] ^ sum[6];
-
-                sum[0] = sum[0] ^ sum[4];
-            }
-            else
-            {
-                for (i64 k = 0; k < row.size(); ++k)
-                    sum[0] = sum[0] ^ (row[k] & mtxColumn[k]);
-            }
-
-            *iter = parity(sum[0]);
-            ++iter;
-        }
     }
 
     inline     void transpose(span<block> s, MatrixView<block> r)

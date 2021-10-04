@@ -1,15 +1,15 @@
 ![](./titleOSU.PNG)
 =====
 
-<!-- [![Build Status](https://travis-ci.org/osu-crypto/libOTe.svg?branch=master)](https://travis-ci.org/osu-crypto/libOTe) -->
+![Build Status](https://github.com/osu-crypto/libOTe/actions/workflows/build-test.yml/badge.svg)
 
-A fast and portable C++14 library for Oblivious Transfer extension (OTe). The 
+A fast and portable C++17 library for Oblivious Transfer extension (OTe). The 
 primary design goal of this library to obtain *high performance* while being 
 *easy to use*.  This library currently implements:
  
-* The semi-honest 1-out-of-2 OT [IKNP03].
+* The semi-honest 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf).
 * The semi-honest 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf).
-* The semi-honest 1-out-of-2 Delta-OT [IKNP03],[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
+* The semi-honest 1-out-of-2 Delta-OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
 * The malicious secure 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
 * The malicious secure 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
@@ -18,21 +18,117 @@ primary design goal of this library to obtain *high performance* while being
 * The malicious secure 1-out-of-2 base OT [NP01].
 * The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
 * The malicious secure 1-out-of-2 base OT [[MR19]](https://eprint.iacr.org/2019/706.pdf) 
+* Several malicious secure batched 1-out-of-2 base OTs from [[MRR21]](https://eprint.iacr.org/2021/682)
  
 ## Introduction
  
 This library provides several different classes of OT protocols. First is the 
-base OT protocol of Naor Pinkas [NP01]. This protocol bootstraps all the other
+base OT protocol of [NP01, CO15, MR19, MRR21]. These protocol bootstraps all the other
 OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2,
-1-out-of-N and K-out-of-N, both in the semi-honest and malicious settings.
+1-out-of-N and K-out-of-N, both in the semi-honest and malicious settings. See The `frontend` or `libOTe_Tests` folder for examples.
 
 All implementations are highly optimized using fast SSE instructions and vectorization
 to obtain optimal performance both in the single and multi-threaded setting. See 
 the **Performance** section for a comparison between protocols and to other libraries. 
  
-Networking can be performed using both the sockets provided by the library and 
-external socket classes. See the [networking tutorial](https://github.com/ladnir/cryptoTools/blob/57220fc45252d089a7fd90816144e447a2ce02b8/frontend_cryptoTools/Tutorials/Network.cpp#L264)
-for an example.
+Networking can be performed using both the sockets provided by the library and
+external socket classes. See the [networking tutorial](https://github.com/ladnir/cryptoTools/blob/57220fc45252d089a7fd90816144e447a2ce02b8/frontend_cryptoTools/Tutorials/Network.cpp#L264) for an example.
+
+
+## Build
+ 
+The library is *cross platform* and has been tested on Windows, Mac and Linux. 
+There is one mandatory dependency on [Boost 1.75](http://www.boost.org/) (networking),
+and three **optional dependencies** on [libsodium](https://doc.libsodium.org/),
+[Relic](https://github.com/relic-toolkit/relic), or
+[SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
+for Base OTs.
+CMake 3.15+ is required and the build script assumes python 3.
+ 
+The library can be built as
+```
+git clone --recursive https://github.com/osu-crypto/libOTe.git
+cd libOTe
+python build.py --setup --boost --relic
+python build.py -- -D ENABLE_RELIC=ON -D ENABLE_ALL_OT=ON
+```
+The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
+
+### Build Options
+LibOTe can be built with various only the selected protocols enabled. `-D ENABLE_ALL_OT=ON` will enable all available protocols depending on platform/dependancies. The `ON`/`OFF` options include
+
+**Malicious base OT:**
+ * `ENABLE_SIMPLESTOT` the SimplestOT [[CO15]](https://eprint.iacr.org/2015/267.pdf) protocol (relic or sodium).
+ * `ENABLE_SIMPLESTOT_ASM` the SimplestOT base OT protocol [[CO15]](https://eprint.iacr.org/2015/267.pdf) protocol (linux assembly).
+ * `ENABLE_MRR` the McQuoid Rosulek Roy [[MRR20]](https://eprint.iacr.org/2020/1043) protocol (relic or sodium).
+ * `ENABLE_MRR_TWIST` the McQuoid Rosulek Roy [[MRR21]](https://eprint.iacr.org/2021/682) protocol  (sodium fork).
+ * `ENABLE_MR` the Masny Rindal [[MR19]](https://eprint.iacr.org/2019/706.pdf) protocol (relic or sodium).
+ * `ENABLE_MR_KYBER` the Masny Rindal [[MR19]](https://eprint.iacr.org/2019/706.pdf) protocol  (Kyber fork).
+ * `ENABLE_NP` the Naor Pinkas [NP01] base OT (relic or sodium).
+
+**1-out-of-2 OT Extension:**
+ * `ENABLE_IKNP` the Ishai et al [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf) semi-honest protocol.
+ * `ENABLE_KOS` the Keller et al [[KOS15]](https://eprint.iacr.org/2015/546) malicious protocol.
+ * `ENABLE_DELTA_KOS` the Burra et al [[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf),[[KOS15]](https://eprint.iacr.org/2015/546) malicious Delta-OT protocol.
+ * `ENABLE_SILENTOT` the Couteau et al [CRR21],[[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf) semi-honest/malicious protocol.
+
+ **Vole:**
+ * `ENABLE_SILENT_VOLE` the Couteau et al [CRR21] semi-honest/malicious protocol.
+
+ Addiition options can be set for cryptoTools. See the cmake output.
+
+### Dependancies
+
+Dependancies can be managed via the `build.py` script or or installed via an external tool. If an external tool is used install to system location or set  `-D CMAKE_PREFIX_PATH=path/to/install`.
+
+**Boost**
+The library requires boost and can be fetched as
+```
+python build.py --setup --boost
+```
+
+**Enabling/Disabling [Relic](https://github.com/relic-toolkit/relic) (for base OTs):**
+ The library can be built with Relic as
+```
+python build.py --setup --relic
+python build.py -- -D ENABLE_RELIC=ON
+```
+Relic can be disabled by removing `--relic` from the setup and setting `-D ENABLE_RELIC=OFF`.
+
+**Enabling/Disabling [libsodium](https://github.com/osu-crypto/libsodium) (for base OTs):**
+  The library can be built with libsodium as
+```
+python build.py --setup --sodium
+python build.py -- -D ENABLE_SODIUM=ON
+```
+libsodium can be disabled by removing `--sodium` from the setup and setting `-D ENABLE_SODIUM=OFF`. The McQuoid Rosulek Roy 2021 Base OTs uses a twisted curve which additionally require the `noclamp` option for Montgomery curves and is currently only in a [fork](https://github.com/osu-crypto/libsodium) of libsodium. If you prefer the stable libsodium, then install it and add `-D SODIUM_MONTGOMERY=OFF` as a cmake argument to libOTe.
+
+## Install
+
+libOTe can be installed and linked the same way as other cmake projects. By default the dependancies are not installed. To install all dependancies, run the following
+```
+python build.py --setup --boost --relic --sodium --install
+```
+You can also selectively install the dependancies. The install location can be specifying as `--install=path/to/installation`. Otherwise the system default is used.
+
+The main library is similarly installed as
+```
+python build.py --install 
+```
+
+By default, sudo is not used. If installation requires sudo access, then add `--sudo` to the `build.py` script arguments. See `python build.py --help` for full details.
+
+
+## Linking
+libOTe can be linked via cmake as
+```
+find_package(libOTe REQUIRED)
+target_link_libraries(myProject oc::libOTe)
+```
+Other exposed targets are `oc::cryptoTools, oc::tests_cryptoTools, oc::libOTe_Tests`. In addition, cmake variables `libOTe_LIB, libOTe_INC, ENABLE_XXX` will be defined, where `XXX` is one of the libOTe options.
+
+To ensure that cmake can find libOTe, you can either install libOTe or build it locally and set `-D CMAKE_PREFIX_PATH=path/to/libOTe` or provide its location as a cmake `HINTS`, i.e. `find_package(libOTe HINTS path/to/libOTe)`.
+
 
 ## Example Code
 A minimal working example showing how to perform `n` OTs using the IKNP protocol.
@@ -78,7 +174,30 @@ void minimal()
 }
 ```
 
-## Performance
+## Help
+ 
+Contact Peter Rindal peterrindal@gmail.com for any assistance on building 
+or running the library.
+
+## Citing
+
+ Spread the word!
+
+```
+@misc{libOTe,
+    author = {Peter Rindal},
+    title = {{libOTe: an efficient, portable, and easy to use Oblivious Transfer Library}},
+    howpublished = {\url{https://github.com/osu-crypto/libOTe}},
+}
+```
+ 
+ ## License
+ 
+This project has been placed in the public domain and/or MIT license. As such, you are unrestricted in how 
+you use it, commercial or otherwise. However, no warranty of fitness is provided. If you 
+found this project helpful, feel free to spread the word and cite us.
+
+ ## Performance
  
 The running time in seconds for computing n=2<sup>24</sup> OTs on a single Intel 
 Xeon server (`2 36-cores Intel Xeon CPU E5-2699 v3 @ 2.30GHz and 256GB of RAM`)
@@ -99,132 +218,11 @@ expection that network IO in libOTe is performed in the background by a separate
 | 1-out-of-2 Base     	| malicious   	| NP00       	| **12,876/~**        	| ~             	| ~		    | ~     	| ~         	|
  
 
- 
-## Install
- 
-The library is *cross platform* and has been tested on Windows, Mac and Linux. 
-There is one mandatory dependency on [Boost 1.69](http://www.boost.org/) (networking),
-and three **optional dependencies** on, [Miracl](https://www.miracl.com/),
-[Relic](https://github.com/relic-toolkit/relic) or
-[SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
-for Base OTs. Any or all of these dependenies can be enabled. See below. 
-
- 
-### Windows
-
-In `Powershell`, this will set up the project
-
-```
-git clone --recursive https://github.com/osu-crypto/libOTe.git
-cd libOTe/cryptoTools/thirdparty/win
-getBoost.ps1 
-cd ../../..
-libOTe.sln
-```
-Not all protocols will be built by default. Which protocol are built is controlled by the `libOTe/config.h` file. Manually edit this file to enable the desired protocol.
-
-To see all the command line options, execute the program `frontend.exe`.
-
-**Boost and visual studio 2017:**  If boost does not build with visual studio 2017 
-follow [these instructions](https://stackoverflow.com/questions/41464356/build-boost-with-msvc-14-1-vs2017-rc). 
-
-**Enabling [Relic](https://github.com/relic-toolkit/relic) (for base OTs):**
- * Build the library in the folder next libOTe (i.e. share the same parent directory):
-```
-git clone https://github.com/ladnir/relic.git
-cd relic
-cmake . -DMULTI=OPENMP -DCMAKE_INSTALL_PREFIX:PATH=C:\libs  -DCMAKE_GENERATOR_PLATFORM=x64 -DRUNTIME=MT
-cmake --build .
-cmake --install .
-```
- * Edit the config file [libOTe/cryptoTools/cryptoTools/Common/config.h](https://github.com/ladnir/cryptoTools/blob/master/cryptoTools/Common/config.h) to include `#define ENABLE_RELIC ON`.
-
-### Linux / Mac
- 
- In short, this will build the project 
-
-```
-git clone --recursive https://github.com/osu-crypto/libOTe.git
-cd libOTe/cryptoTools/thirdparty/linux
-bash boost.get
-cd ../../..
-cmake . -DENABLE_XXX=ON
-make
-```
-where `ENABLE_XXX` should be replaced by `ENABLE_IKNP, ENABLE_KOS, ...` depending on which protocol(s) should be enabled. See the output of `cmake .` for a complete list. You will also need to enable one one of the base OT protocols (see below). The libraries will be placed in `libOTe/lib` and the binary `frontend_libOTe` will be placed in 
-`libOTe/bin` To see all the command line options, execute the program 
- 
-`./bin/frontend_libOTe`
-
-
-**Enable Base OTs using:**
- * `cmake .  -DENABLE_RELIC=ON`: Build the library with integration to the 
-      [Relic](https://github.com/relic-toolkit/relic) library. Requires that
-      relic is built with `cmake . -DMULTI=PTHREAD` and installed. 
- * **Linux Only**: `cmake .  -DENABLE_SIMPLESTOT_ASM=ON`: Build the library with integration to the 
-      [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) 
-       library implementing a base OT.
-
-**Other Options:** Several other compile time options exists. See the output of `cmake .` for a complete list.
-
-
-**Note:** In the case boost is already installed, the steps 
-`cd libOTe/cryptoTools/thirdparty/linux; bash boost.get` can be skipped and CMake will attempt 
-to find them instead. Boost is found with the CMake findBoost package and miracl
-is found with the `find_library(miracl)` command. If there is a version mismatch then you will still need to run the provided boost build script.
- 
-
-
-### Linking
-
- You can either `make install` on linux or link libOTe's source tree. In the latter 
- case, you will need to include the following:
-
-1) .../libOTe
-2) .../libOTe/cryptoTools
-3) .../libOTe/cryptoTools/thirdparty/linux/boost
-4) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl <i>(if enabled)</i>
-5) [Relic includes] <i>(if enabled)</i>
-
-and link:
-1) .../libOTe/bin/liblibOTe.a
-2) .../libOTe/bin/libcryptoTools.a
-3) .../libOTe/bin/libSimplestOT.a    <i>(if enabled)</i>
-3) .../libOTe/bin/libKyberOT.a       <i>(if enabled)</i>
-4) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_system.a
-5) .../libOTe/cryptoTools/thirdparty/linux/boost/stage/lib/libboost_thread.a
-6) .../libOTe/cryptoTools/thirdparty/linux/miracl/miracl/source/libmiracl.a <i>(if enabled)</i>
-7) [Relic binary] <i>(if enabled)</i>
-
-**Note:** On windows the linking paths follow a similar pattern.
-
-## Help
- 
-Contact Peter Rindal peterrindal@gmail.com for any assistance on building 
-or running the library.
-
-## Citing
-
- Spread the word!
-
-```
-@misc{libOTe,
-    author = {Peter Rindal},
-    title = {{libOTe: an efficient, portable, and easy to use Oblivious Transfer Library}},
-    howpublished = {\url{https://github.com/osu-crypto/libOTe}},
-}
-```
- 
- ## License
- 
-This project has been placed in the public domain. As such, you are unrestricted in how 
-you use it, commercial or otherwise. However, no warranty of fitness is provided. If you 
-found this project helpful, feel free to spread the word and cite us.
- 
- 
 
 ## Citation
  
+[NP01]   -    Moni Naor, Benny Pinkas, _Efficient Oblivious Transfer Protocols_. 
+
 [IKNP03] - Yuval Ishai and Joe Kilian and Kobbi Nissim and Erez Petrank, _Extending Oblivious Transfers Efficiently_. 
  
 [KOS15]  - Marcel Keller and Emmanuela Orsini and Peter Scholl, _Actively Secure OT Extension with Optimal Overhead_. [eprint/2015/546](https://eprint.iacr.org/2015/546)
@@ -238,6 +236,6 @@ found this project helpful, feel free to spread the word and cite us.
 [BLNNOOSS15]  - Sai Sheshank Burra and Enrique Larraia and Jesper Buus Nielsen and Peter Sebastian Nordholt and Claudio Orlandi and Emmanuela Orsini and Peter Scholl and Nigel P. Smart, _High Performance Multi-Party Computation for Binary Circuits Based on Oblivious Transfer_. [eprint/2015/472](https://eprint.iacr.org/2015/472.pdf)
 
 [ALSZ15]  - Gilad Asharov and Yehuda Lindell and Thomas Schneider and Michael Zohner, _More Efficient Oblivious Transfer Extensions with Security for Malicious Adversaries_. [eprint/2015/061](https://eprint.iacr.org/2015/061)
- 
-[NP01]  -    Moni Naor, Benny Pinkas, _Efficient Oblivious Transfer Protocols_. 
+
+
 

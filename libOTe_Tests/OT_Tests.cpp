@@ -1,7 +1,7 @@
 #include "OT_Tests.h"
 
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
-
+#include "libOTe/Base/BaseOT.h"
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/LinearCode.h"
 #include <cryptoTools/Network/Channel.h>
@@ -19,8 +19,6 @@
 #include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
-#include "libOTe/TwoChooseOne/IknpDotExtReceiver.h"
-#include "libOTe/TwoChooseOne/IknpDotExtSender.h"
 
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtSender.h"
@@ -440,7 +438,113 @@ namespace tests_libOTe
 
 		OT_100Receive_Test(choices, recvMsg, sendMsg);
 #else
-		throw UnitTestSkipped("ENALBE_KOS is not defined.");
+		throw UnitTestSkipped("ENABLE_KOS is not defined.");
+#endif
+	}
+
+
+
+	void OtExt_Kos_fs_Test()
+	{
+#if defined(ENABLE_KOS)
+		setThreadName("Sender");
+
+		IOService ios;
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel = ep0.addChannel();
+
+		PRNG prng0(block(4253465, 3434565));
+		PRNG prng1(block(42532335, 334565));
+
+		u64 numOTs = 20000;
+
+		std::vector<block> recvMsg(numOTs), baseRecv(128);
+		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+		BitVector choices(numOTs), baseChoice(128);
+		choices.randomize(prng0);
+		baseChoice.randomize(prng0);
+
+		for (u64 i = 0; i < 128; ++i)
+		{
+			baseSend[i][0] = prng0.get<block>();
+			baseSend[i][1] = prng0.get<block>();
+			baseRecv[i] = baseSend[i][baseChoice[i]];
+		}
+
+		KosOtExtSender sender;
+		KosOtExtReceiver recv;
+
+		sender.mFiatShamir = true;
+		recv.mFiatShamir = true;
+
+		std::thread thrd = std::thread([&]() {
+			setThreadName("receiver");
+
+			recv.setBaseOts(baseSend, prng0, recvChannel);
+			recv.receive(choices, recvMsg, prng0, recvChannel);
+			});
+
+		sender.setBaseOts(baseRecv, baseChoice, senderChannel);
+		sender.send(sendMsg, prng1, senderChannel);
+		thrd.join();
+
+		OT_100Receive_Test(choices, recvMsg, sendMsg);
+#else
+		throw UnitTestSkipped("ENABLE_KOS is not defined.");
+#endif
+	}
+
+	void OtExt_Kos_ro_Test()
+	{
+#if defined(ENABLE_KOS)
+		setThreadName("Sender");
+
+		IOService ios;
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel = ep0.addChannel();
+
+		PRNG prng0(block(4253465, 3434565));
+		PRNG prng1(block(42532335, 334565));
+
+		u64 numOTs = 20000;
+
+		std::vector<block> recvMsg(numOTs), baseRecv(128);
+		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+		BitVector choices(numOTs), baseChoice(128);
+		choices.randomize(prng0);
+		baseChoice.randomize(prng0);
+
+		for (u64 i = 0; i < 128; ++i)
+		{
+			baseSend[i][0] = prng0.get<block>();
+			baseSend[i][1] = prng0.get<block>();
+			baseRecv[i] = baseSend[i][baseChoice[i]];
+		}
+
+		KosOtExtSender sender;
+		KosOtExtReceiver recv;
+
+		sender.mHashType = KosOtExtSender::HashType::RandomOracle;
+		recv.mHashType = KosOtExtReceiver::HashType::RandomOracle;
+
+		std::thread thrd = std::thread([&]() {
+			setThreadName("receiver");
+
+			recv.setBaseOts(baseSend, prng0, recvChannel);
+			recv.receive(choices, recvMsg, prng0, recvChannel);
+			});
+
+		sender.setBaseOts(baseRecv, baseChoice, senderChannel);
+		sender.send(sendMsg, prng1, senderChannel);
+		thrd.join();
+
+		OT_100Receive_Test(choices, recvMsg, sendMsg);
+#else
+		throw UnitTestSkipped("ENABLE_KOS is not defined.");
 #endif
 	}
 
@@ -462,37 +566,37 @@ namespace tests_libOTe
         PRNG prng0(ZeroBlock);
         choices.randomize(prng0);
         baseChoice.randomize(prng0);
-		
+
         for (u64 i = 0; i < 128; ++i)
         {
             baseSend[i][0] = prng0.get<block>();
             baseSend[i][1] = prng0.get<block>();
             baseRecv[i] = baseSend[i][baseChoice[i]];
         }
-		
+
         prng0.get(sendMsg.data(), sendMsg.size());
 
         KosOtExtSender sender;
         KosOtExtReceiver recv;
 
-        auto thrd = std::thread([&]() { 
-            PRNG prng1(OneBlock); 
+        auto thrd = std::thread([&]() {
+            PRNG prng1(OneBlock);
             recv.setBaseOts(baseSend, prng1, recvChannel);
-            recv.receiveChosen(choices, recvMsg, prng1, recvChannel); 
+            recv.receiveChosen(choices, recvMsg, prng1, recvChannel);
         });
 
         sender.setBaseOts(baseRecv, baseChoice, senderChannel);
         sender.sendChosen(sendMsg, prng0, senderChannel);
 
         thrd.join();
-		
+
         for (u64 i = 0; i < numOTs; ++i)
         {
             if (neq(recvMsg[i], sendMsg[i][choices[i]]))
                 throw UnitTestFail("bad message " LOCATION);
         }
 #else
-	throw UnitTestSkipped("ENALBE_KOS is not defined.");
+	throw UnitTestSkipped("ENABLE_KOS is not defined.");
 #endif
     }
 
@@ -576,13 +680,13 @@ namespace tests_libOTe
 		recvChannel.close();
 
 #else
-		throw UnitTestSkipped("ENALBE_KOS is not defined.");
+		throw UnitTestSkipped("ENABLE_DELTA_KOS is not defined.");
 #endif
 	}
 
 	void DotExt_Iknp_Test()
 	{
-#ifdef ENABLE_DELTA_IKNP
+#ifdef ENABLE_IKNP
 
 		setThreadName("Sender");
 
@@ -599,25 +703,27 @@ namespace tests_libOTe
 		for (u64 t = 0; t < numTrials; ++t)
 		{
 			u64 numOTs = 4234;
-			u64 s = 40;
 
-			std::vector<block> recvMsg(numOTs), baseRecv(128 + s);
-			std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128 + s);
+			std::vector<block> recvMsg(numOTs), baseRecv(128);
+			std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
 			BitVector choices(numOTs);
 			choices.randomize(prng0);
 
-			BitVector baseChoice(128 + s);
+			BitVector baseChoice(128);
 			baseChoice.randomize(prng0);
 
-			for (u64 i = 0; i < 128 + s; ++i)
+			for (u64 i = 0; i < 128; ++i)
 			{
 				baseSend[i][0] = prng0.get<block>();
 				baseSend[i][1] = prng0.get<block>();
 				baseRecv[i] = baseSend[i][baseChoice[i]];
 			}
 
-			IknpDotExtSender sender;
-			IknpDotExtReceiver recv;
+			IknpOtExtSender sender;
+			IknpOtExtReceiver recv;
+
+			sender.mHash = false;
+			recv.mHash = false;
 
 			std::thread thrd = std::thread([&]() {
 				setThreadName("receiver");
@@ -625,8 +731,8 @@ namespace tests_libOTe
 				recv.receive(choices, recvMsg, prng0, recvChannel);
 			});
 
-			block delta = prng1.get<block>();
-			sender.setDelta(delta);
+			block delta = baseChoice.getArrayView<block>()[0];
+			//sender.setDelta(delta);
 			sender.setBaseOts(baseRecv, baseChoice);
 			sender.send(sendMsg, prng1, senderChannel);
 			thrd.join();
@@ -636,7 +742,7 @@ namespace tests_libOTe
 			for (auto& s : sendMsg)
 			{
 				if (neq(s[0] ^ delta, s[1]))
-					throw UnitTestFail();
+					throw UnitTestFail(LOCATION);
 			}
 		}
 

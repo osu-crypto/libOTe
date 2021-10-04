@@ -30,7 +30,11 @@ namespace osuCrypto
         p->mEncodeSize = mEncodeSize;
         p->mKos = mKos.splitBase();
 
+#ifdef OC_NO_MOVE_ELISION 
         return std::move(ret);
+#else
+        return ret;
+#endif
     }
     void Rr17NcoOtReceiver::init(u64 numOtExt, PRNG& prng, Channel& chl)
     {

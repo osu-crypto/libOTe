@@ -1,6 +1,7 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
 #include "libOTe/config.h"
+
 #ifdef ENABLE_IKNP
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Network/Channel.h>
@@ -15,8 +16,8 @@ namespace osuCrypto
         public OtExtReceiver, public TimerAdapter
     {
     public:
-        bool mHasBase = false;
-        std::array<std::array<PRNG, 2>, gOtExtBaseOtCount> mGens;
+        bool mHasBase = false, mHash = true;
+        std::vector<std::array<PRNG, 2>> mGens;
 
 
         IknpOtExtReceiver() = default;
@@ -27,6 +28,8 @@ namespace osuCrypto
         {
             setBaseOts(baseSendOts);
         }
+
+        virtual ~IknpOtExtReceiver() = default;
 
         void operator=(IknpOtExtReceiver&& v)
         {

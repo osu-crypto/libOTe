@@ -161,7 +161,7 @@ namespace tests_libOTe
         PRNG prng1(block(42532335, 334565));
 
         // The total number that we wish to do
-        u64 numOTs = 1030;
+        u64 numOTs = 128;
 
         KkrtNcoOtSender sender;
         KkrtNcoOtReceiver recv;
@@ -217,10 +217,9 @@ namespace tests_libOTe
 
                 prng0.get(inputs.data(), inputs.size());
 
-
-                for (u64 k = 0; k < stepSize; ++k)
+                auto ss = std::min<u64>(stepSize, numOTs - i);
+                for (u64 k = 0; k < ss; ++k)
                 {
-
                     // The receiver MUST encode before the sender. Here we are only calling encode(...) 
                     // for a single i. But the receiver can also encode many i, but should only make one 
                     // call to encode for any given value of i.
@@ -231,14 +230,15 @@ namespace tests_libOTe
                 // If we had made more or less calls to encode above (for contigious i), then we should replace
                 // stepSize with however many calls we made. In an extreme case, the reciever can perform
                 // encode for i \in {0, ..., numOTs - 1}  and then call sendCorrection(recvChl, numOTs).
-                recv.sendCorrection(recvChl, stepSize);
+                recv.sendCorrection(recvChl, ss);
 
                 // receive the next stepSize correction values. This allows the sender to now call encode
                 // on the next stepSize OTs.
-                sender.recvCorrection(sendChl, stepSize);
+                sender.recvCorrection(sendChl, ss);
 
-                for (u64 k = 0; k < stepSize; ++k)
+                for (u64 k = 0; k < ss; ++k)
                 {
+   
                     // the sender can now call encode(i, ...) for k \in {0, ..., i}. 
                     // Lets encode the same input and then we should expect to
                     // get the same encoding.
@@ -316,7 +316,7 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
         PRNG prng0(block(4253465, 3434565));
         PRNG prng1(block(42532335, 334565));
 
-        u64 numOTs = 128 * 16;
+        u64 numOTs = 128 ;
 
         IOService ios(0);
         Session ep0(ios, "localhost", 1212, SessionMode::Server);

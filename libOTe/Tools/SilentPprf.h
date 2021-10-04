@@ -12,11 +12,36 @@
 
 namespace osuCrypto
 {
+
+    enum class PprfOutputFormat
+    {
+        Plain,
+        Interleaved,
+        InterleavedTransposed
+    };
+
+    enum class OTType
+    {
+        Random, Correlated
+    };
+
+    enum class ChoiceBitPacking
+    {
+        False, True
+    };
+
+    enum class SilentSecType
+    {
+        SemiHonest,
+        Malicious,
+        //MaliciousFS
+    };
+
     class SilentMultiPprfSender : public TimerAdapter
     {
     public:
         u64 mDomain = 0, mDepth = 0, mPntCount = 0;// , mPntCount8;
-        block mValue;
+        std::vector<block> mValue;
         bool mPrint = false;
 
         
@@ -43,14 +68,25 @@ namespace osuCrypto
         void setBase(span<std::array<block, 2>> baseMessages);
 
         // expand the whole PPRF and store the result in output
-		block expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, bool transpose, bool mal);
-		block expand(span<Channel> chls, block value, PRNG& prng, MatrixView<block> output, bool transpose, bool mal);
+        void expand(Channel& chl, block value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, u64 numThreads)
+        {
+            MatrixView<block> o(output.data(), output.size(), 1);
+            expand(chl, value, prng, o, oFormat, numThreads);
+        }
 
 
-        void setValue(block value);
+        void expand(Channel& chl, block value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, u64 numThreads);
 
-        // expand the next output.size() number of outputs and store the result in output.
-        //void yeild(Channel& chl, PRNG& prng, span<block> output);
+        void expand(Channel& chls, span<block> value, PRNG& prng, span<block> output, PprfOutputFormat oFormat, u64 numThreads)
+        {
+            MatrixView<block> o(output.data(), output.size(), 1);
+            expand(chls, value, prng, o, oFormat, numThreads);
+        }
+        void expand(Channel& chl, span<block> value, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, u64 numThreads);
+
+
+        void setValue(span<block> value);
+
 
         void clear();
     };
@@ -59,7 +95,7 @@ namespace osuCrypto
     class SilentMultiPprfReceiver : public TimerAdapter
     {
     public:
-        u64 mDomain = 0, mDepth = 0, mPntCount = 0;//, mPntCount8;
+        u64 mDomain = 0, mDepth = 0, mPntCount = 0;
 
         Matrix<block> mBaseOTs;
         Matrix<u8> mBaseChoices;
@@ -74,7 +110,7 @@ namespace osuCrypto
         void configure(u64 domainSize, u64 pointCount);
 
 
-        BitVector sampleChoiceBits(u64 modulus, bool tranposed, PRNG& prng);
+        BitVector sampleChoiceBits(u64 modulus, PprfOutputFormat format, PRNG& prng);
 
         // the number of base OTs that should be set.
         u64 baseOtCount() const;
@@ -86,11 +122,14 @@ namespace osuCrypto
         void setBase(span<block> baseMessages);
 
 
-        void getPoints(span<u64> points);
-		void getTransposedPoints(span<u64> points);
+        void getPoints(span<u64> points, PprfOutputFormat format);
 
-		block expand(Channel& chl, PRNG& prng, MatrixView<block> output, bool transpose, bool mal);
-		block expand(span<Channel> chl, PRNG& prng, MatrixView<block> output, bool transpose, bool mal);
+        void expand(Channel& chl, PRNG& prng, span<block> output, PprfOutputFormat oFormat, u64 numThreads)
+        {
+            MatrixView<block> o(output.data(), output.size(), 1);
+            return expand(chl, prng, o, oFormat, numThreads);
+        }
+        void expand(Channel& chl, PRNG& prng, MatrixView<block> output, PprfOutputFormat oFormat, u64 numThreads);
 
         void clear()
         {
