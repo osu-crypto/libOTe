@@ -257,7 +257,7 @@ jobs:
 
       - name: install prefix test
         run: |
-            python3 build.py --setup --relic --boost --install=~/install 
+            python3 build.py --setup --relic --boost --bitpolymul --install=~/install 
             python3 build.py --install=~/install 
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
