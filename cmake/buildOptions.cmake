@@ -37,18 +37,23 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_SIMPLESTOT_ASM ${oc_BB}						CACHE BOOL "" FORCE)
 	set(ENABLE_MR_KYBER       ${oc_BB}						CACHE BOOL "" FORCE)
 
+	# requires sse
+	if(ENABLE_SSE)
+		set(oc_BB ${ENABLE_ALL_OT})
+	else()
+		set(oc_BB OFF)
+	endif()
+	set(ENABLE_SILENTOT    ${oc_BB}						CACHE BOOL "" FORCE)
 
 	# general
 	set(ENABLE_KOS            ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_IKNP           ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
-	set(ENABLE_SILENTOT       ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_DELTA_KOS      ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_DELTA_IKNP     ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_OOS            ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_KKRT           ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_RR             ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_AKN            ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
-	set(ENABLE_SILENT_VOLE    ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	unset(ENABLE_ALL_OT CACHE)
 endif()
 
@@ -75,8 +80,16 @@ option(ENABLE_AKN            "Build the RR ~k-oo-N OT-Ext protocol." OFF)
 set(ENABLE_BITPOLYMUL ${ENABLE_SILENTOT})
 
 
+#option(FETCH_BITPOLYMUL		"download and build bitpolymul" OFF))
+EVAL(FETCH_BITPOLYMUL_IMPL 
+	(DEFINED FETCH_BITPOLYMUL AND FETCH_BITPOLYMUL) OR
+	((NOT DEFINED FETCH_BITPOLYMUL) AND (FETCH_AUTO AND ENABLE_BITPOLYMUL)))
+
+
 message(STATUS "General Options\n=======================================================")
-message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF")
+
+message(STATUS "Option: FETCH_BITPOLYMUL      = ${FETCH_BITPOLYMUL_IMPL}")
+message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF\n\n")
 
 message(STATUS "Base OT protocols\n=======================================================")
 message(STATUS "Option: ENABLE_SIMPLESTOT     = ${ENABLE_SIMPLESTOT}")

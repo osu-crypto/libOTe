@@ -39,12 +39,14 @@ write_basic_package_version_file(
 )
 
 configure_file("${CMAKE_CURRENT_LIST_DIR}/libOTeDepHelper.cmake" "libOTeDepHelper.cmake" COPYONLY)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/libOTePreample.cmake" "libOTePreample.cmake" COPYONLY)
 
 # install the configuration file
 install(FILES
           "${CMAKE_CURRENT_BINARY_DIR}/libOTeConfig.cmake"
           "${CMAKE_CURRENT_BINARY_DIR}/libOTeConfigVersion.cmake"
           "${CMAKE_CURRENT_BINARY_DIR}/libOTeDepHelper.cmake"
+          "${CMAKE_CURRENT_BINARY_DIR}/libOTePreample.cmake"
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/libOTe
 )
 

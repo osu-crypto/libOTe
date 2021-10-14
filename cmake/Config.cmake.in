@@ -23,11 +23,3 @@ include("${CMAKE_CURRENT_LIST_DIR}/libOTeDepHelper.cmake")
 
 
 include("${CMAKE_CURRENT_LIST_DIR}/libOTeTargets.cmake")
-
-OC_getAllLinkedLibraries(oc::libOTe libOTe_LIBRARIES libOTe_INCLUDE_DIRS)
-OC_getAllLinkedLibraries(oc::libOTe_Tests libOTe_Tests_LIBRARIES libOTe_Tests_INCLUDE_DIRS)
-
-set(libOTe_LIB ${libOTe_LIBRARIES})
-set(libOTe_INC ${libOTe_INCLUDE_DIRS})
-set(libOTe_Tests_LIB ${libOTe_Tests_LIBRARIES})
-set(libOTe_Tests_INC ${libOTe_Tests_INCLUDE_DIRS})

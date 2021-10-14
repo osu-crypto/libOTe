@@ -6,7 +6,7 @@ name: CI
 on:
   # Triggers the workflow on push or pull request events but only for the master branch
   push:
-    branches: [ master, ci ]
+    branches: [ master, stage ]
   pull_request: {}
 
   # Allows you to run this workflow manually from the Actions tab
@@ -37,7 +37,7 @@ jobs:
         run:  python3 build.py --setup --bitpolymul --par=4
           
       - name: build libOTe
-        run:  python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON  -DENABLE_CIRCUIT=ON
+        run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON  -DENABLE_CIRCUIT=ON -DENABLE_BITPOLYMUL=ON
 
       - name: unit tests
         run:  ./out/build/linux/frontend/frontend_libOTe -u
@@ -88,7 +88,7 @@ jobs:
         run:  python3 build.py --setup --sodium --par=4
         
       - name: build libOTe
-        run:  python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_SODIUM=ON -DENABLE_RELIC=OFF
+        run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -D ENABLE_SODIUM=ON -DENABLE_RELIC=OFF
 
       - name: unit tests
         run:  ./out/build/linux/frontend/frontend_libOTe -u
@@ -156,11 +156,10 @@ jobs:
           
       - name: build libOTe
         run:  |
-            python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON  -D ENABLE_SSE=OFF
-            python3 build.py --par=4 -- -D ENABLE_SILENTOT=OFF
+            python3 build.py --par=4 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON  -D ENABLE_SSE=OFF
 
       - name: unit tests
-        run:  ./out/build/linux/frontend/frontend_libOTe -u
+        run:  ./out/build/osx/frontend/frontend_libOTe -u
        
 
       - name: find source tree
@@ -220,16 +219,13 @@ jobs:
 
       # Runs a set of commands using the runners shell
       - name: build boost
-        run: python3 build.py --setup --boost --par=4
+        run: python3 build.py --setup --boost --par=4 -G Ninja
 
       - name: build relic
-        run: python3 build.py --setup --relic --par=4
+        run: python3 build.py --setup --relic --par=4 -G Ninja
         
-      - name: build bitpolymul
-        run:  python3 build.py --setup --bitpolymul --par=4
-
       - name: build libOTe
-        run:  python3 build.py --par=4 -- -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON   -G Ninja
+        run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON   -G Ninja
 
         
       - name: unit test
@@ -257,8 +253,7 @@ jobs:
 
       - name: install prefix test
         run: |
-            python3 build.py --setup --relic --boost --bitpolymul --install=~/install 
-            python3 build.py --install=~/install 
+            python3 build.py --relic --boost --bitpolymul --install=~/install
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
             cmake --build out/ --config Release

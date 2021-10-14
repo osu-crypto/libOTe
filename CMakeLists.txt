@@ -63,6 +63,7 @@ endif()
 #############################################
 #    Build cryptoTools (common utilities)   #
 #############################################
+include(cmake/libOTePreample.cmake)
 add_subdirectory(cryptoTools)
 
 

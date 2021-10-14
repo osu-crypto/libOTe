@@ -39,14 +39,13 @@ namespace osuCrypto
 #include "cryptoTools/Common/Log.h"
 #include "cryptoTools/Common/ThreadBarrier.h"
 #include "libOTe/Base/BaseOT.h"
-#include <libOTe/TwoChooseOne/IknpOtExtSender.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include "libOTe/Vole/NoisyVoleReceiver.h"
 
 namespace osuCrypto
 {
 
-    // sets the IKNP base OTs that are then used to extend
+    // sets the KOS base OTs that are then used to extend
     void SilentOtExtSender::setBaseOts(
         span<block> baseRecvOts,
         const BitVector& choices,
@@ -55,7 +54,7 @@ namespace osuCrypto
         setBaseOts(baseRecvOts, choices);
     }
 
-    // sets the IKNP base OTs that are then used to extend
+    // sets the KOS base OTs that are then used to extend
     void SilentOtExtSender::setBaseOts(
         span<block> baseRecvOts,
         const BitVector& choices)
@@ -63,27 +62,32 @@ namespace osuCrypto
 #ifdef ENABLE_KOS
         mKosSender.setUniformBaseOts(baseRecvOts, choices);
 #else
-        throw std::runtime_error("IKNP must be enabled");
+        throw std::runtime_error("KOS must be enabled");
 #endif
     }
 
     // Returns an independent copy of this extender.
     std::unique_ptr<OtExtSender> SilentOtExtSender::split()
     {
+
+#ifdef ENABLE_KOS
         auto ptr = new SilentOtExtSender;
         auto ret = std::unique_ptr<OtExtSender>(ptr);
         ptr->mKosSender = mKosSender.splitBase();
         return ret;
+#else
+        throw std::runtime_error("KOS must be enabled");
+#endif
     }
 
     // use the default base OT class to generate the
-    // IKNP base OTs that are required.
+    // KOS base OTs that are required.
     void SilentOtExtSender::genBaseOts(PRNG& prng, Channel& chl)
     {
 #ifdef ENABLE_KOS
         mKosSender.genBaseOts(prng, chl);
 #else
-        throw std::runtime_error("IKNP must be enabled");
+        throw std::runtime_error("KOS must be enabled");
 #endif
     }
 
@@ -93,7 +97,7 @@ namespace osuCrypto
 #ifdef ENABLE_KOS
         return mKosSender.baseOtCount();
 #else
-        throw std::runtime_error("IKNP must be enabled");
+        throw std::runtime_error("KOS must be enabled");
 #endif
     }
 
@@ -102,7 +106,7 @@ namespace osuCrypto
 #ifdef ENABLE_KOS
         return mKosSender.hasBaseOts();
 #else
-        throw std::runtime_error("IKNP must be enabled");
+        throw std::runtime_error("KOS must be enabled");
 #endif
 
     }
@@ -115,7 +119,7 @@ namespace osuCrypto
         std::vector<std::array<block, 2>> msg(silentBaseOtCount());
 
 
-        // If we have IKNP base OTs, use them
+        // If we have KOS base OTs, use them
         // to extend to get the silent base OTs.
 #if defined(ENABLE_KOS) || defined(LIBOTE_HAS_BASE_OT)
 
@@ -130,7 +134,7 @@ namespace osuCrypto
         setTimePoint("sender.gen.baseOT");
 #endif
 #else
-        throw std::runtime_error("IKNP or base OTs must be enabled");
+        throw std::runtime_error("KOS or base OTs must be enabled");
 #endif
 
         setSilentBaseOts(msg);

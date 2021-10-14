@@ -19,7 +19,7 @@ namespace osuCrypto
 
 
 
-    // sets the Iknp base OTs that are then used to extend
+    // sets the KOS base OTs that are then used to extend
     void SilentOtExtReceiver::setBaseOts(
         span<std::array<block, 2>> baseSendOts,
         PRNG& prng,
@@ -28,7 +28,7 @@ namespace osuCrypto
         setBaseOts(baseSendOts);
     }
 
-    // sets the Iknp base OTs that are then used to extend
+    // sets the KOS base OTs that are then used to extend
     void SilentOtExtReceiver::setBaseOts(
         span<std::array<block, 2>> baseSendOts) {
 #ifdef ENABLE_KOS
@@ -39,7 +39,7 @@ namespace osuCrypto
     }
 
 
-    // return the number of base OTs IKNP needs
+    // return the number of base OTs KOS needs
     u64 SilentOtExtReceiver::baseOtCount() const {
 #ifdef ENABLE_KOS
         return mKosRecver.baseOtCount();
@@ -48,12 +48,12 @@ namespace osuCrypto
 #endif
     }
 
-    // returns true if the IKNP base OTs are currently set.
+    // returns true if the KOS base OTs are currently set.
     bool SilentOtExtReceiver::hasBaseOts() const {
 #ifdef ENABLE_KOS
         return mKosRecver.hasBaseOts();
 #else
-        throw std::runtime_error("IKNP must be enabled");
+        throw std::runtime_error("KOS must be enabled");
 #endif
     };
 
@@ -89,10 +89,14 @@ namespace osuCrypto
     // Returns an indpendent copy of this extender.
     std::unique_ptr<OtExtReceiver> SilentOtExtReceiver::split() {
 
+#ifdef ENABLE_KOS
         auto ptr = new SilentOtExtReceiver;
         auto ret = std::unique_ptr<OtExtReceiver>(ptr);
         ptr->mKosRecver = mKosRecver.splitBase();
         return ret;
+#else
+        throw std::runtime_error("KOS must be enabled");
+#endif
     };
 
 
@@ -137,7 +141,7 @@ namespace osuCrypto
         BitVector choice = sampleBaseChoiceBits(prng);
         std::vector<block> msg(choice.size());
 
-        // If we have IKNP base OTs, use them
+        // If we have KOS base OTs, use them
         // to extend to get the silent base OTs.
 
 #if defined(ENABLE_KOS) || defined(LIBOTE_HAS_BASE_OT)
@@ -153,7 +157,7 @@ namespace osuCrypto
         setTimePoint("recver.gen.baseOT");
 #endif
 #else
-        throw std::runtime_error("IKNP or base OTs must be enabled");
+        throw std::runtime_error("KOS or base OTs must be enabled");
 #endif
         setSilentBaseOts(msg);
 
