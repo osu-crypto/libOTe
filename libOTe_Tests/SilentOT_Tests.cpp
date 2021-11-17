@@ -219,9 +219,9 @@ namespace {
         bool verbose)
     {
 
-        if (messages.usize() != n)
+        if (messages.size() != n)
             throw RTE_LOC;
-        if (messages2.usize() != n)
+        if (messages2.size() != n)
             throw RTE_LOC;
         if (choice.size() != n)
             throw RTE_LOC;
@@ -266,9 +266,9 @@ namespace {
         ChoiceBitPacking packing)
     {
 
-        if (Ar.usize() != n)
+        if (Ar.size() != n)
             throw RTE_LOC;
-        if (Bs.usize() != n)
+        if (Bs.size() != n)
             throw RTE_LOC;
         if (packing == ChoiceBitPacking::False &&
             (u64)choice.size() != n)

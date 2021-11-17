@@ -711,8 +711,8 @@ namespace osuCrypto
 
     void LinearCode::encode_bch511(u8 * input, u8 * codeword)
     {
-        Expects(mPlaintextU8Size == 10);
-        Expects(mPow2CodeSize == 4);
+        assert(mPlaintextU8Size == 10);
+        assert(mPow2CodeSize == 4);
 
         // The size of the bch 511 codewords in 128 bit units.
         const i32 codeSize = 4;

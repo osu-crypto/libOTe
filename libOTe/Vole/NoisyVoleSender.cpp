@@ -31,7 +31,7 @@ namespace osuCrypto
 
         auto xIter = BitIterator((u8*)&x);
 
-        for (u64 i = 0; i < otMsg.usize(); ++i, ++xIter)
+        for (u64 i = 0; i < otMsg.size(); ++i, ++xIter)
         {
             PRNG pi(otMsg[i]);
             pi.get<block>(buffer);
@@ -43,7 +43,7 @@ namespace osuCrypto
                 //if (i < 2)
                 //    std::cout << "One" << i << "  ";
 
-                for (u64 j = 0; j < z.usize(); ++j)
+                for (u64 j = 0; j < z.size(); ++j)
                 {
 
                     //if (i < 2 && j < 2)
