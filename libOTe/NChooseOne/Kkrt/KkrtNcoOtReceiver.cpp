@@ -12,7 +12,7 @@ using namespace std;
 namespace osuCrypto
 {
     void KkrtNcoOtReceiver::setBaseOts(
-        gsl::span<std::array<block, 2>> baseRecvOts)
+        span<std::array<block, 2>> baseRecvOts)
     {
 
         if (baseRecvOts.size() % 128 != 0)

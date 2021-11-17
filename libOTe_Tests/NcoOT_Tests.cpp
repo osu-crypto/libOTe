@@ -544,7 +544,7 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
         std::vector<block>
             plainText(code.plaintextBlkSize(), AllOneBlock),
             codeword(code.codewordBlkSize());
-		//gsl::span<u8>ss(plainText);
+		//span<u8>ss(plainText);
         code.encode(plainText, codeword);
 
         BitVector cw((u8*)codeword.data(), code.codewordBitSize());

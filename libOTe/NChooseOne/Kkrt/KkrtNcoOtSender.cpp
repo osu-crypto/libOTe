@@ -11,7 +11,7 @@ namespace osuCrypto
     using namespace std;
 
     void KkrtNcoOtSender::setBaseOts(
-        gsl::span<block> baseRecvOts,
+        span<block> baseRecvOts,
         const BitVector & choices)
     {
         if (choices.size() != u64(baseRecvOts.size()))

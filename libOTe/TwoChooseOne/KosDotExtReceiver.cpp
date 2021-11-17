@@ -17,7 +17,7 @@ using namespace std;
 
 namespace osuCrypto
 {
-    void KosDotExtReceiver::setBaseOts(gsl::span<std::array<block, 2>> baseOTs)
+    void KosDotExtReceiver::setBaseOts(span<std::array<block, 2>> baseOTs)
     {
 
         //PRNG prng(ZeroBlock);
@@ -68,7 +68,7 @@ namespace osuCrypto
 
     void KosDotExtReceiver::receive(
         const BitVector& choices,
-        gsl::span<block> messages,
+        span<block> messages,
         PRNG& prng,
         Channel& chl)
     {
