@@ -153,7 +153,7 @@ randombytes_init(unsigned char *entropy_input,
 }
 
 int
-randombytes(unsigned char *x, unsigned long long xlen)
+randombytes_kyber(unsigned char *x, unsigned long long xlen)
 {
     unsigned char   block[16];
     int             i = 0;

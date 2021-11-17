@@ -50,7 +50,7 @@ int test_invalid_sk_a()
     crypto_kem_enc(sendb, key_b, pk);
 
     //Replace secret key with random values
-    randombytes(sk_a, KYBER_SECRETKEYBYTES);
+    randombytes_kyber(sk_a, KYBER_SECRETKEYBYTES);
 
   
     //Alice uses Bobs response to get her secre key
@@ -75,7 +75,7 @@ int test_invalid_ciphertext()
 
   for(i=0; i<NTESTS; i++)
   {
-    randombytes((unsigned char *)&pos, sizeof(size_t));
+    randombytes_kyber((unsigned char *)&pos, sizeof(size_t));
 
     //Alice generates a public key
     crypto_kem_keypair(pk, sk_a);

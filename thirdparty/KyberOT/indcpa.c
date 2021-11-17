@@ -78,7 +78,7 @@ void indcpa_keypair(unsigned char *pk,
   unsigned char *noiseseed = buf+KYBER_SYMBYTES;
   int i;
 
-  randombytes(buf, KYBER_SYMBYTES);
+  randombytes_kyber(buf, KYBER_SYMBYTES);
   sha3_512(buf, buf, KYBER_SYMBYTES);
 
   genmatrix(a, publicseed, 0);

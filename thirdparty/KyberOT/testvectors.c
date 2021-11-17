@@ -39,7 +39,7 @@ static void surf(void)
   }
 }
 
-void randombytes(unsigned char *x,unsigned long long xlen)
+void randombytes_kyber(unsigned char *x,unsigned long long xlen)
 {
   while (xlen > 0) {
     if (!outleft) {

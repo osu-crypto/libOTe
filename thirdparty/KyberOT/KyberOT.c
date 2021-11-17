@@ -49,7 +49,7 @@ void KyberReceiverMessage(KyberOTRecver* recver, KyberOtRecvPKs* pks)
     indcpa_keypair(pk, recver->secretKey);
 
     // sample random public key for the one we dont want.
-    randombytes(seed, 32);
+    randombytes_kyber(seed, 32);
     randomPK(pks->keys[1 ^ recver->b], seed, &pk[PKlengthsmall]);
 
     //compute H(r_{not b})
@@ -66,7 +66,7 @@ void KyberSenderMessage(KyberOTCtxt* ctxt, KyberOTPtxt* ptxt, KyberOtRecvPKs* re
     unsigned char coins[Coinslength];
     //compute ct_i=Enc(pk_i, sot_i) and sample coins
     //random coins
-    randombytes(coins, Coinslength);
+    randombytes_kyber(coins, Coinslength);
     //compute pk0
     pkHash(h, recvPks->keys[1], recvPks->keys[0] + PKlengthsmall);
     //pk_0=r_0+h(r_1)
@@ -74,7 +74,7 @@ void KyberSenderMessage(KyberOTCtxt* ctxt, KyberOTPtxt* ptxt, KyberOtRecvPKs* re
     //enc
     indcpa_enc(ctxt->sm[0], ptxt->sot[0], pk, coins);
     //random coins
-    randombytes(coins, Coinslength);
+    randombytes_kyber(coins, Coinslength);
     //compute pk1
     pkHash(h, recvPks->keys[0], recvPks->keys[0] + PKlengthsmall);
     //pk_1=r_1+h(r_0)
@@ -99,12 +99,12 @@ int KyberExample()				//main-Funktion
     KyberOtRecvPKs pks;
     //random choice bit
 
-    randombytes(&recver.b, 1);
+    randombytes_kyber(&recver.b, 1);
     recver.b &= 1;
 
     //sample random OT strings
-    randombytes(ptxt.sot[0], OTlength);
-    randombytes(ptxt.sot[1], OTlength);
+    randombytes_kyber(ptxt.sot[0], OTlength);
+    randombytes_kyber(ptxt.sot[1], OTlength);
 
     //get receivers message and secret coins
     KyberReceiverMessage(&recver, &pks);
