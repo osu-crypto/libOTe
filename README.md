@@ -50,7 +50,7 @@ The library can be built as
 git clone --recursive https://github.com/osu-crypto/libOTe.git
 cd libOTe
 python build.py --setup --boost --relic
-python build.py -- -D ENABLE_RELIC=ON -D ENABLE_ALL_OT=ON
+python build.py -D ENABLE_RELIC=ON -D ENABLE_ALL_OT=ON
 ```
 The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
 
@@ -91,7 +91,7 @@ python build.py --setup --boost
  The library can be built with Relic as
 ```
 python build.py --setup --relic
-python build.py -- -D ENABLE_RELIC=ON
+python build.py -D ENABLE_RELIC=ON
 ```
 Relic can be disabled by removing `--relic` from the setup and setting `-D ENABLE_RELIC=OFF`.
 
@@ -99,7 +99,7 @@ Relic can be disabled by removing `--relic` from the setup and setting `-D ENABL
   The library can be built with libsodium as
 ```
 python build.py --setup --sodium
-python build.py -- -D ENABLE_SODIUM=ON
+python build.py -D ENABLE_SODIUM=ON
 ```
 libsodium can be disabled by removing `--sodium` from the setup and setting `-D ENABLE_SODIUM=OFF`. The McQuoid Rosulek Roy 2021 Base OTs uses a twisted curve which additionally require the `noclamp` option for Montgomery curves and is currently only in a [fork](https://github.com/osu-crypto/libsodium) of libsodium. If you prefer the stable libsodium, then install it and add `-D SODIUM_MONTGOMERY=OFF` as a cmake argument to libOTe.
 
