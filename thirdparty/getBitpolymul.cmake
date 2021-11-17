@@ -37,7 +37,7 @@ endif()
 
 install(CODE "
     execute_process(
-        COMMAND ${SUDO} \${CMAKE_COMMAND} --install \"${BUILD_DIR}\" ${CONFIG}  --prefix \"${CMAKE_INSTALL_PREFIX}\"
+        COMMAND ${SUDO} \${CMAKE_COMMAND} --install \"${BUILD_DIR}\" ${CONFIG}  --prefix \${CMAKE_INSTALL_PREFIX}
         WORKING_DIRECTORY ${CLONE_DIR}
         RESULT_VARIABLE RESULT
         COMMAND_ECHO STDOUT
