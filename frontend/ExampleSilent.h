@@ -47,6 +47,8 @@ namespace osuCrypto
         {
             Timer timer;
             u64 milli=0;
+            u64 milliStartup=0;
+            u64 comStartup=0;
             try {
 
                 if (i != 0)
@@ -91,6 +93,12 @@ namespace osuCrypto
                     receiver.setTimePoint("start");
                     if (!fakeBase)
                         receiver.genBaseOts(prng, chls[i]);
+                    receiver.genSilentBaseOts(prng, chls[i]);
+
+                    auto Startup = timer.setTimePoint("Startup");
+                    milliStartup = std::chrono::duration_cast<std::chrono::milliseconds>(Startup - b).count();
+                    comStartup = chls[0].getTotalDataSent() * numThreads;
+
                     // perform  numOTs random OTs, the results will be written to msgs.
                     receiver.silentReceiveInplace(numOTs, prng, chls[i]);
 
@@ -145,6 +153,12 @@ namespace osuCrypto
                     auto b = timer.setTimePoint("start");
                     if (!fakeBase)
                         sender.genBaseOts(prng, chls[i]);
+                    sender.genSilentBaseOts(prng, chls[i]);
+
+                    auto Startup = timer.setTimePoint("Startup");
+                    milliStartup = std::chrono::duration_cast<std::chrono::milliseconds>(Startup - b).count();
+                    comStartup = chls[0].getTotalDataSent() * numThreads;
+
                     // perform the OTs and write the random OTs to msgs.
                     sender.silentSendInplace(delta, numOTs, prng, chls[i]);
 
@@ -164,7 +178,7 @@ namespace osuCrypto
                 std::cout << "unknown exception" << std::endl;
 
             }
-            return milli;
+            return std::tuple<i64,i64,i64>(milli, milliStartup, comStartup);
         };
 
         cmd.setDefault("s", "2");
@@ -195,6 +209,8 @@ namespace osuCrypto
 
         u64 totalMilli = 0;
         u64 totalCom = 0;
+        u64 totalStartupMilli = 0;
+        u64 totalStartupCom = 0;
         for (auto s : ss)
             for (auto type : types)
             {
@@ -232,15 +248,20 @@ namespace osuCrypto
                     for (u64 i = 1; i < numThreads; ++i)
                         thrds.emplace_back(routine, (int)i, (int)s, type);
 
-                    auto milli = routine(0, s, type);
+                    auto result = routine(0, s, type);
+                    auto milli = std::get<0>(result);
+                    auto milliStartup = std::get<1>(result);
+                    auto comStartup = std::get<2>(result);
                     totalMilli += milli;
+                    totalStartupMilli += milliStartup;
+                    totalStartupCom += comStartup;
 
                     for (auto& tt : thrds)
                         tt.join();
 
                     u64 com = 0;
                     for (auto& c : chls)
-                        com += (c.getTotalDataRecv() + c.getTotalDataSent());
+                        com += c.getTotalDataSent();
                     totalCom += com;
 
                     lout << tag << " (" << roleStr << ")" <<
@@ -267,6 +288,8 @@ namespace osuCrypto
 
                 i64 avgMilli = lround((double) totalMilli / trials);
                 i64 avgCom = lround((double) totalCom / trials);
+                i64 avgStartupMilli = lround((double) totalStartupMilli / trials);
+                i64 avgStartupCom = lround((double) totalStartupCom / trials);
                 lout << tag << " (" << roleStr << ") average:" <<
                     " n:" << Color::Green << std::setw(6) << std::setfill(' ') << numOTs << Color::Default <<
                     " type: " << Color::Green << typeStr << Color::Default <<
@@ -274,7 +297,10 @@ namespace osuCrypto
                     " s: " << Color::Green << s << Color::Default <<
                     "   ||   " << Color::Green <<
                     std::setw(6) << std::setfill(' ') << avgMilli << " ms   " <<
-                    std::setw(6) << std::setfill(' ') << avgCom << " bytes" << std::endl << Color::Default;
+                    std::setw(6) << std::setfill(' ') << avgCom << " bytes" <<
+                    "   Startup   " << Color::Green <<
+                    std::setw(6) << std::setfill(' ') << avgStartupMilli << " ms   " <<
+                    std::setw(6) << std::setfill(' ') << avgStartupCom << " bytes" << std::endl << Color::Default;
 
             }
 

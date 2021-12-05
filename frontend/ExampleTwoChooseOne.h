@@ -139,6 +139,8 @@ namespace osuCrypto
 
             u64 totalMilli = 0;
             u64 totalCom = 0;
+            u64 totalStartupMilli = 0;
+            u64 totalStartupCom = 0;
             for (u64 tt = 0; tt < trials; ++tt)
             {
                 sync(chls[i], role);
@@ -172,6 +174,13 @@ namespace osuCrypto
                     }
                 }
 #endif
+
+                auto Startup = timer.setTimePoint("Startup");
+                auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(Startup - s).count();
+                totalStartupMilli += milli;
+
+                auto com = chls[0].getTotalDataSent() * numThreads;
+                totalStartupCom += com;
 
                 if (role == Role::Receiver)
                 {
@@ -214,10 +223,10 @@ namespace osuCrypto
                 }
 
                 auto e = timer.setTimePoint("finish");
-                auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+                milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
                 totalMilli += milli;
 
-                auto com = (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * numThreads;
+                com = chls[0].getTotalDataSent() * numThreads;
                 totalCom += com;
                 chls[0].resetStats();
 
@@ -232,7 +241,9 @@ namespace osuCrypto
             {
                 i64 avgMilli = lround((double) totalMilli / trials);
                 i64 avgCom = lround((double) totalCom / trials);
-                lout << tag << " (" << roleStr << ") average: n=" << Color::Green << totalOTs << " " << avgMilli << " ms  " << avgCom << " bytes" << std::endl << Color::Default;
+                i64 avgStartupMilli = lround((double) totalStartupMilli / trials);
+                i64 avgStartupCom = lround((double) totalStartupCom / trials);
+                lout << tag << " (" << roleStr << ") average: n=" << Color::Green << totalOTs << " " << avgMilli << " ms  " << avgCom << " bytes, Startup " << avgStartupMilli << " ms  " << avgStartupCom << " bytes" << std::endl << Color::Default;
             }
 
             if (cmd.isSet("v") && role == Role::Sender && i == 0)
