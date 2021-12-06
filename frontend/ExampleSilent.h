@@ -88,6 +88,7 @@ namespace osuCrypto
 
                     gTimer.setTimePoint("recver.genBase");
                     sync(chls[i], role);
+                    chls[i].resetStats();
 
                     auto b = timer.setTimePoint("start");
                     receiver.setTimePoint("start");
@@ -97,7 +98,7 @@ namespace osuCrypto
 
                     auto Startup = timer.setTimePoint("Startup");
                     milliStartup = std::chrono::duration_cast<std::chrono::milliseconds>(Startup - b).count();
-                    comStartup = chls[0].getTotalDataSent() * numThreads;
+                    comStartup = chls[0].getTotalDataRecv() * numThreads;
 
                     // perform  numOTs random OTs, the results will be written to msgs.
                     receiver.silentReceiveInplace(numOTs, prng, chls[i]);
@@ -148,6 +149,7 @@ namespace osuCrypto
                     //     senders[i].setDelta(some 128 bit delta);
                     //
                     sync(chls[i], role);
+                    chls[i].resetStats();
 
                     sender.setTimePoint("start");
                     auto b = timer.setTimePoint("start");
@@ -157,7 +159,7 @@ namespace osuCrypto
 
                     auto Startup = timer.setTimePoint("Startup");
                     milliStartup = std::chrono::duration_cast<std::chrono::milliseconds>(Startup - b).count();
-                    comStartup = chls[0].getTotalDataSent() * numThreads;
+                    comStartup = chls[0].getTotalDataRecv() * numThreads;
 
                     // perform the OTs and write the random OTs to msgs.
                     sender.silentSendInplace(delta, numOTs, prng, chls[i]);
@@ -233,8 +235,6 @@ namespace osuCrypto
                 for (u64 tt = 0; tt < trials; ++tt)
                 {
 
-                    chls[0].resetStats();
-
                     Timer sendTimer, recvTimer;
 
                     sendTimer.setTimePoint("start");
@@ -261,7 +261,7 @@ namespace osuCrypto
 
                     u64 com = 0;
                     for (auto& c : chls)
-                        com += c.getTotalDataSent();
+                        com += c.getTotalDataRecv();
                     totalCom += com;
 
                     lout << tag << " (" << roleStr << ")" <<

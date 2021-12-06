@@ -144,6 +144,7 @@ namespace osuCrypto
             for (u64 tt = 0; tt < trials; ++tt)
             {
                 sync(chls[i], role);
+                chls[0].resetStats();
 
                 timer.reset();
                 auto s = timer.setTimePoint("start");
@@ -179,7 +180,7 @@ namespace osuCrypto
                 auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(Startup - s).count();
                 totalStartupMilli += milli;
 
-                auto com = chls[0].getTotalDataSent() * numThreads;
+                auto com = chls[0].getTotalDataRecv() * numThreads;
                 totalStartupCom += com;
 
                 if (role == Role::Receiver)
@@ -226,7 +227,7 @@ namespace osuCrypto
                 milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
                 totalMilli += milli;
 
-                com = chls[0].getTotalDataSent() * numThreads;
+                com = chls[0].getTotalDataRecv() * numThreads;
                 totalCom += com;
                 chls[0].resetStats();
 
