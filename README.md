@@ -20,6 +20,8 @@ primary design goal of this library to obtain *high performance* while being
 * The malicious secure 1-out-of-2 base OT [[MR19]](https://eprint.iacr.org/2019/706.pdf) 
 * Several malicious secure batched 1-out-of-2 base OTs from [[MRR21]](https://eprint.iacr.org/2021/682)
  
+ Silver is currently not contained in this repository. Contact me for details.
+ 
 ## Introduction
  
 This library provides several different classes of OT protocols. First is the 
