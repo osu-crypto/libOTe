@@ -126,7 +126,7 @@ public:
 	SubspaceVoleReceiver(SmallFieldVoleReceiver vole_, Code code_) :
 		Base(std::move(code_)),
 		vole(std::move(vole_)),
-		correctionU(new block[code().length()])
+		correctionU(new block[uPadded()])
 	{
 		if (vole.numVoles != code().length())
 			throw RTE_LOC;
@@ -138,14 +138,14 @@ public:
 		// To avoid needing a queue, this assumes that all messages are used up before more are
 		// read.
 #ifndef NDEBUG
-		if (messages.size() != readIndex)
+		if (!messages.empty() && messages.size() != readIndex + uPadded() - uSize())
 			throw RTE_LOC;
 #endif
 		clear();
 
-		size_t currentEnd = messages.size();
-		messages.resize(currentEnd + blocks, boost::container::default_init_t{});
-		chl.recv(&messages[currentEnd], blocks);
+		//size_t currentEnd = messages.size();
+		messages.resize(blocks + uPadded() - uSize(), boost::container::default_init_t{});
+		chl.recv(&messages[0], blocks);
 	}
 
 	// Receive exactly enough blocks for the given numbers of random and chosen u subspace VOLEs.
@@ -154,17 +154,23 @@ public:
 		recv(chl, code().codimension() * random + code().length() * chosen);
 	}
 
-	// Get a message from the receive buffer that is blocks blocks long.
-	span<block> getMessage(size_t blocks)
+	// Get a message from the receive buffer that is blocks blocks long, with paddedLen extra blocks
+	// on the end that should be ignored.
+	span<block> getMessage(size_t blocks, size_t paddedLen)
 	{
 #ifndef NDEBUG
-		if (readIndex + blocks > messages.size())
+		if (readIndex + paddedLen > messages.size())
 			throw RTE_LOC;
 #endif
 
-		auto output = gsl::make_span(messages).subspan(readIndex, blocks);
+		auto output = gsl::make_span(messages).subspan(readIndex, paddedLen);
 		readIndex += blocks;
 		return output;
+	}
+
+	span<block> getMessage(size_t blocks)
+	{
+		return getMessage(blocks, blocks);
 	}
 
 	void clear()
@@ -175,11 +181,13 @@ public:
 
 	span<block> correctionUSpan() const
 	{
-		return span<block>(correctionU.get(), code().length());
+		return span<block>(correctionU.get(), wPadded());
 	}
 
 	size_t wSize() const { return vole.wSize(); }
 	size_t wPadded() const { return vole.wPadded(); }
+	size_t uSize() const { return vole.uSize(); }
+	size_t uPadded() const { return vole.uPadded(); }
 
 	void generateRandom(size_t blockIdx, span<block> outW)
 	{
@@ -192,7 +200,7 @@ public:
 
 	void generateChosen(size_t blockIdx, span<block> outW)
 	{
-		span<block> correctionU = getMessage(code().length());
+		span<block> correctionU = getMessage(uSize(), uPadded());
 		vole.generate(blockIdx, outW, correctionU);
 	}
 

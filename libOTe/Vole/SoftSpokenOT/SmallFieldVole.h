@@ -173,6 +173,12 @@ public:
 	// wSize plus the number of padding blocks at the end where garbage may be written.
 	size_t wPadded() const { return fieldBits * numVolesPadded; }
 
+	// The size of the u correction.
+	size_t uSize() const { return numVoles; }
+
+	// The u correction must also be padded, according to uPadded(), as garbage values may be read.
+	size_t uPadded() const { return numVolesPadded; }
+
 	// The VOLE outputs secret shares shares of u cdot Delta, where u is in GF(2)^numVoles, Delta is
 	// in GF(2^fieldBits)^numVoles, and cdot represents the componentwise product. This computes the
 	// cdot Delta operation (i.e. the secret shared function) on 128 vectors at once. The output is
@@ -218,7 +224,7 @@ public:
 #ifndef NDEBUG
 		if ((size_t) outW.size() != wPadded())
 			throw RTE_LOC;
-		if (correction.data() && (size_t) correction.size() != numVoles)
+		if (correction.data() && (size_t) correction.size() != uPadded())
 			throw RTE_LOC;
 #endif
 

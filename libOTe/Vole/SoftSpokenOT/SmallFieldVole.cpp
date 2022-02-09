@@ -197,18 +197,10 @@ TRY_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
 
 			xorReduce<fieldBits_, fieldsPerSuperBlk>(xorHashes, fieldBits);
 			if (correctionPresent)
-			{
-				if (numVoles - nVole >= volePerSuperBlk)
-					for (size_t i = 0; i < volePerSuperBlk; ++i)
-						for (size_t j = 0; j < fieldBits; ++j, ++outW)
-							*outW = xorHashes[i * fieldSize + j + 1] ^
-								correction[i] & block::allSame(deltaPtr[i * fieldBits + j]);
-				else
-					for (size_t i = 0; i < numVoles - nVole; ++i)
-						for (size_t j = 0; j < fieldBits; ++j, ++outW)
-							*outW = xorHashes[i * fieldSize + j + 1] ^
-								correction[i] & block::allSame(deltaPtr[i * fieldBits + j]);
-			}
+				for (size_t i = 0; i < volePerSuperBlk; ++i)
+					for (size_t j = 0; j < fieldBits; ++j, ++outW)
+						*outW = xorHashes[i * fieldSize + j + 1] ^
+							correction[i] & block::allSame(deltaPtr[i * fieldBits + j]);
 			else
 				for (size_t i = 0; i < volePerSuperBlk; ++i)
 					for (size_t j = 0; j < fieldBits; ++j, ++outW)
@@ -302,7 +294,7 @@ SmallFieldVoleReceiver::SmallFieldVoleReceiver(size_t fieldBits_, size_t numVole
 	if ((size_t) delta_.size() != numBaseOTs())
 		throw RTE_LOC;
 	delta = std::move(delta_);
-	deltaUnpacked.reset(new u8[delta.size()]);
+	deltaUnpacked.reset(new u8[wPadded()]);
 	for (size_t i = 0; i < delta.size(); ++i)
 		deltaUnpacked[i] = -(u8) delta[i];
 }
