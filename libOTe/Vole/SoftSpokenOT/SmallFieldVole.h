@@ -250,6 +250,11 @@ private:
 
 	// Select specialized implementation of generate.
 	static decltype(generatePtr) selectGenerateImpl(size_t fieldBits);
+
+	template<typename T>
+	TRY_FORCEINLINE void sharedFunctionXorGFImpl(
+		const T* BOOST_RESTRICT u, T* BOOST_RESTRICT product, u64 modulus,
+		size_t nVole, size_t chunk);
 };
 
 template<> inline block SmallFieldVoleReceiver::allSame<block>(u8 in)
@@ -274,33 +279,41 @@ void SmallFieldVoleReceiver::sharedFunctionXor(const T* u, T* product)
 }
 
 template<typename T>
+TRY_FORCEINLINE void SmallFieldVoleReceiver::sharedFunctionXorGFImpl(
+	const T* BOOST_RESTRICT u, T* BOOST_RESTRICT product, u64 modulus, size_t nVole, size_t step)
+{
+	T products[4][2 * SmallFieldVoleBase::fieldBitsMax - 1] = {0};
+
+	// Don't bother with fast multiplication for now.
+	for (size_t bitU = 0; bitU < fieldBits; ++bitU)
+		for (size_t bitD = 0; bitD < fieldBits; ++bitD)
+			for (size_t i = 0; i < step; ++i)
+				products[i][bitU + bitD] ^= u[(nVole + i) * fieldBits + bitU] &
+					allSame<T>(deltaUnpacked[(nVole + i) * fieldBits + bitD]);
+
+	// Apply modular reduction to put the result in GF(2^fieldBits). Again, don't bother with
+	// fast techinques.
+	for (size_t j = 2 * fieldBits - 2; j >= fieldBits; --j)
+		for (size_t k = 1; k <= fieldBits; ++k)
+			if ((modulus >> (fieldBits - k)) & 1)
+				for (size_t i = 0; i < step; ++i)
+					products[i][j - k] ^= products[i][j];
+
+	// XOR out
+	for (size_t j = 0; j < fieldBits; ++j)
+		for (size_t i = 0; i < step; ++i)
+			product[(nVole + i) * fieldBits + j] ^= products[i][j];
+}
+
+template<typename T>
 void SmallFieldVoleReceiver::sharedFunctionXorGF(
 	const T* BOOST_RESTRICT u, T* BOOST_RESTRICT product, u64 modulus)
 {
-	for (size_t nVole = 0; nVole < numVoles; nVole += 4)
-	{
-		T products[4][2 * SmallFieldVoleBase::fieldBitsMax - 1] = {0};
-
-		// Don't both with fast multiplication for now.
-		for (size_t bitU = 0; bitU < fieldBits; ++bitU)
-			for (size_t bitD = 0; bitD < fieldBits; ++bitD)
-				for (size_t i = 0; i < 4; ++i)
-					products[i][bitU + bitD] ^= u[(nVole + i) * fieldBits + bitU] &
-						allSame<T>(deltaUnpacked[(nVole + i) * fieldBits + bitD]);
-
-		// Apply modular reduction to put the result in GF(2^fieldBits). Again, don't bother with
-		// fast techinques.
-		for (size_t j = 2 * fieldBits - 2; j >= fieldBits; --j)
-			for (size_t k = 1; k <= fieldBits; ++k)
-				if ((modulus >> (fieldBits - k)) & 1)
-					for (size_t i = 0; i < 4; ++i)
-						products[i][j - k] ^= products[i][j];
-
-		// XOR out
-		for (size_t j = 0; j < fieldBits; ++j)
-			for (size_t i = 0; i < 4; ++i)
-				product[(nVole + i) * fieldBits + j] ^= products[i][j];
-	}
+	size_t nVole;
+	for (nVole = 0; nVole + 4 <= numVoles; nVole += 4)
+		sharedFunctionXorGFImpl(u, product, modulus, nVole, 4);
+	for (; nVole < numVoles; ++nVole)
+		sharedFunctionXorGFImpl(u, product, modulus, nVole, 1);
 }
 
 namespace tests

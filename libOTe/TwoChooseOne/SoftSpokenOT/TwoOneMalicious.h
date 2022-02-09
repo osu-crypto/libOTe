@@ -60,6 +60,7 @@ struct TwoOneRTCR
 		// naturally aligned).
 
 		block tmp[numBlocks];
+		block tweakMulLocal = tweakMul; // Avoid aliasing concerns.
 		#ifdef __GNUC__
 		#pragma GCC unroll 16
 		#endif
@@ -69,15 +70,15 @@ struct TwoOneRTCR
 			{
 				// Go backwards so that it works well with everything else going backwards.
 				size_t idx = numBlocks - 1 - (i * blocksPerTweak + j);
-				tmp[idx] = tweakMul ^ plaintext[idx];
+				tmp[idx] = tweakMulLocal ^ plaintext[idx];
 			}
 
 			if (i < numBlocks / blocksPerTweak - 1)
-				tweakMul ^= hashKeys[log2floor(i ^ (i + 1))];
+				tweakMulLocal ^= hashKeys[log2floor(i ^ (i + 1))];
 		}
 
 		tweak += tweakIncrease;
-		tweakMul ^= hashKeys[log2floor((tweak - 1) ^ tweak)];
+		tweakMul = tweakMulLocal ^ hashKeys[log2floor((tweak - 1) ^ tweak)];
 
 		aes->hashBlocks<numBlocks>(tmp, ciphertext);
 	}
@@ -140,7 +141,7 @@ public:
 		block hashKey = prng.get<block>();
 		hasher.rtcr = TwoOneRTCR<2>(hashKey, &mAesFixedKey);
 		sendImpl(messages, prng, chl, hasher);
-		chl.asyncSend(hashKey);
+		chl.asyncSendCopy(hashKey);
 	}
 };
 

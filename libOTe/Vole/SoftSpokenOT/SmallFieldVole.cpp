@@ -197,10 +197,18 @@ TRY_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
 
 			xorReduce<fieldBits_, fieldsPerSuperBlk>(xorHashes, fieldBits);
 			if (correctionPresent)
-				for (size_t i = 0; i < volePerSuperBlk; ++i)
-					for (size_t j = 0; j < fieldBits; ++j, ++outW)
-						*outW = xorHashes[i * fieldSize + j + 1] ^
-							correction[i] & block::allSame(deltaPtr[i * fieldBits + j]);
+			{
+				if (numVoles - nVole >= volePerSuperBlk)
+					for (size_t i = 0; i < volePerSuperBlk; ++i)
+						for (size_t j = 0; j < fieldBits; ++j, ++outW)
+							*outW = xorHashes[i * fieldSize + j + 1] ^
+								correction[i] & block::allSame(deltaPtr[i * fieldBits + j]);
+				else
+					for (size_t i = 0; i < numVoles - nVole; ++i)
+						for (size_t j = 0; j < fieldBits; ++j, ++outW)
+							*outW = xorHashes[i * fieldSize + j + 1] ^
+								correction[i] & block::allSame(deltaPtr[i * fieldBits + j]);
+			}
 			else
 				for (size_t i = 0; i < volePerSuperBlk; ++i)
 					for (size_t j = 0; j < fieldBits; ++j, ++outW)

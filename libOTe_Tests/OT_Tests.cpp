@@ -64,11 +64,13 @@ namespace tests_libOTe
 			//    std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
 			//    std::cout << (int)choice << "-- " << recv[i] << std::endl;
 			//}
-			if (neq(revcBlock, senderBlock))
+			if (neq(revcBlock, senderBlock) || eq(revcBlock, sender[i][1 ^ choice]))
+			{
+				std::cout << "\n[" << i << ",0]--" << sender[i][0] << std::endl;
+				std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
+				std::cout << (int)choice << "-- " << recv[i] << std::endl;
 				throw UnitTestFail();
-
-			if (eq(revcBlock, sender[i][1 ^ choice]))
-				throw UnitTestFail();
+			}
 		}
 
 	}
