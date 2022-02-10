@@ -18,12 +18,36 @@ namespace osuCrypto
 namespace SoftSpokenOT
 {
 
+struct AESRekeyManager
+{
+	AESStream mAESs;
+
+	// Maximum number of times an AES key can be used on secret data before being replaced. This is
+	// a computation / security tradeoff.
+	static constexpr size_t maxAESKeyUsage = 1024;
+	size_t aesKeyUseCount = 0;
+
+	// Prepare for using AES n times.
+	const AES& useAES(size_t n)
+	{
+		aesKeyUseCount += n;
+		if (aesKeyUseCount > maxAESKeyUsage)
+		{
+			aesKeyUseCount = 0;
+			mAESs.next();
+		}
+
+		return mAESs.get();
+	}
+};
+
 // Builds a Delta OT out of SubspaceVole.
 
 template<typename SubspaceVole = SubspaceVoleReceiver<RepetitionCode>>
 class DotSemiHonestSenderWithVole :
 	public OtExtSender,
 	public TimerAdapter,
+	public AESRekeyManager,
 	private ChunkedReceiver<
 		DotSemiHonestSenderWithVole<SubspaceVole>,
 		std::tuple<std::array<block, 2>>,
@@ -103,15 +127,15 @@ public:
 	// greater than 128). The extra blocks are treated as padding and may be overwritten, either
 	// with unneeded extra VOLE bits or padding from the VOLE. Also, outW must be given the
 	// alignment of an AlignedBlockArray.
-	void generateRandom(size_t blockIdx, span<block> outW)
+	void generateRandom(size_t blockIdx, const AES& aes, span<block> outW)
 	{
-		vole->generateRandom(blockIdx, outW);
+		vole->generateRandom(blockIdx, aes, outW);
 		transpose128(outW.data());
 	}
 
-	void generateChosen(size_t blockIdx, span<block> outW)
+	void generateChosen(size_t blockIdx, const AES& aes, span<block> outW)
 	{
-		vole->generateChosen(blockIdx, outW);
+		vole->generateChosen(blockIdx, aes, outW);
 		transpose128(outW.data());
 	}
 
@@ -146,6 +170,7 @@ template<typename SubspaceVole = SubspaceVoleSender<RepetitionCode>>
 class DotSemiHonestReceiverWithVole :
 	public OtExtReceiver,
 	public TimerAdapter,
+	public AESRekeyManager,
 	private ChunkedSender<
 		DotSemiHonestReceiverWithVole<SubspaceVole>,
 		std::tuple<block>,
@@ -213,15 +238,15 @@ public:
 	// bitsliced, i.e. it is transposed from what the SubspaceVole outputs. outV must have length
 	// vPadded() (which may be greater than 128). The extra blocks are treated as padding and may be
 	// overwritten. Also, outW must be given the alignment of an AlignedBlockArray.
-	void generateRandom(size_t blockIdx, block& randomU, span<block> outV)
+	void generateRandom(size_t blockIdx, const AES& aes, block& randomU, span<block> outV)
 	{
-		vole->generateRandom(blockIdx, span<block>(&randomU, 1), outV);
+		vole->generateRandom(blockIdx, aes, span<block>(&randomU, 1), outV);
 		transpose128(outV.data());
 	}
 
-	void generateChosen(size_t blockIdx, block chosenU, span<block> outV)
+	void generateChosen(size_t blockIdx, const AES& aes, block chosenU, span<block> outV)
 	{
-		vole->generateChosen(blockIdx, span<block>(&chosenU, 1), outV);
+		vole->generateChosen(blockIdx, aes, span<block>(&chosenU, 1), outV);
 		transpose128(outV.data());
 	}
 

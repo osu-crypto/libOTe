@@ -18,7 +18,9 @@ void TwoOneSemiHonestSender::processChunk(
 	size_t nChunk, size_t numUsed, span<std::array<block, 2>> messages)
 {
 	size_t blockIdx = fieldBitsThenBlockIdx++;
-	generateChosen(blockIdx, numUsed, messages);
+	// secret usages = 1 per VOLE and 1 per message. However, only 1 or the other is secret, so only
+	// need to increment by max(numVoles, 128) = 128.
+	generateChosen(blockIdx, useAES(128), numUsed, messages);
 }
 
 void TwoOneSemiHonestReceiver::receive(
@@ -35,7 +37,7 @@ void TwoOneSemiHonestReceiver::processChunk(
 	size_t nChunk, size_t numUsed, span<block> messages, block chioces)
 {
 	size_t blockIdx = fieldBitsThenBlockIdx++;
-	generateChosen(blockIdx, numUsed, chioces, messages);
+	generateChosen(blockIdx, useAES(128), numUsed, chioces, messages);
 }
 
 }

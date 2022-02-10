@@ -64,6 +64,10 @@ public:
 	// Universal hash key.
 	u64 hashKey;
 
+	// Maximum number of times a hash key can be used before being replaced.
+	static constexpr size_t maxHashKeyUsage = 1024 * 1024;
+	size_t hashKeyUseCount = 0;
+
 	// inHalf == 0 => input in low 64 bits. High 64 bits of output should be ignored.
 	template <int inHalf>
 	static block mulA64(block in)
@@ -92,12 +96,30 @@ public:
 	void setupHash()
 	{
 		hashKey = hashKeyPrng.get<u64>();
+		hashKeyUseCount = 0;
 
 		block hashKeyBlock = toBlock(hashKey);
 		// Might be possible to make this more efficient since it is the Frobenious automorphism.
 		block hashKeySq = reduce(_mm_clmulepi64_si128(hashKeyBlock, hashKeyBlock, 0x00));
 		block hashKeySqA64 = mulA64<0>(hashKeySq);
 		hashKeySqAndA64 = _mm_unpacklo_epi64(hashKeySq, hashKeySqA64);
+	}
+
+	bool rekeyCheck()
+	{
+		if (++hashKeyUseCount < maxHashKeyUsage)
+			return false;
+		setupHash();
+		return true;
+	}
+
+	void addSubtotalAfterRekey(block* hashes, block* subtotals, size_t count)
+	{
+		for (size_t i = 0; i < count; ++i)
+		{
+			subtotals[i] ^= hashes[i];
+			hashes[i] = block::allSame(0);
+		}
 	}
 
 	TRY_FORCEINLINE void mulHash(block& hash) const
@@ -109,10 +131,10 @@ public:
 
 	TRY_FORCEINLINE void updateHash(block& hash, block in) const
 	{
-		mulHash(hash);
 		block inMul = _mm_clmulepi64_si128(in, toBlock(hashKey), 0x00);
 		block inHigh = _mm_srli_si128(in, 8);
 		hash ^= inMul ^ inHigh;
+		mulHash(hash);
 	}
 
 	static size_t finalHashRows(size_t fieldBits)
@@ -154,7 +176,7 @@ public:
 		{
 			u64 outputRowNoPopcnt[2 * SmallFieldVoleBase::fieldBitsMax - 1] = {0};
 
-			// Don't both with fast multiplication for now.
+			// Don't bother with fast multiplication for now.
 			for (int j = 0; j < (int) fieldBits; ++j)
 				for (int k = 0; k < (int) fieldBits; ++k)
 					outputRowNoPopcnt[j + k] ^= finalHashKey[j * rows + i] & x[k];
@@ -185,7 +207,9 @@ class SubspaceVoleMaliciousSender : public SubspaceVoleSender<Code>, public Subs
 {
 public:
 	std::unique_ptr<block[]> hashU;
+	std::unique_ptr<block[]> subtotalU;
 	std::unique_ptr<block[]> hashV;
+	std::unique_ptr<block[]> subtotalV;
 
 	using Sender = SubspaceVoleSender<Code>;
 	using Sender::code;
@@ -193,22 +217,23 @@ public:
 	SubspaceVoleMaliciousSender(SmallFieldVoleSender vole_, Code code_) :
 		Sender(std::move(vole_), std::move(code_)),
 		hashU(new block[Sender::uSize()]),
-		hashV(new block[vPadded()])
+		subtotalU(new block[Sender::uSize()]),
+		hashV(new block[vPadded()]),
+		subtotalV(new block[vPadded()])
 	{
-		std::fill_n(hashU.get(), Sender::uSize(), block(0));
-		std::fill_n(hashV.get(), vPadded(), block(0));
+		clearHashes();
 	}
 
 	size_t vPadded() const { return roundUpTo(Sender::vPadded(), 4); }
 
-	void generateRandom(size_t blockIdx, span<block> randomU, span<block> outV)
+	void generateRandom(size_t blockIdx, const AES& aes, span<block> randomU, span<block> outV)
 	{
-		Sender::generateRandom(blockIdx, randomU, outV.subspan(0, Sender::vPadded()));
+		Sender::generateRandom(blockIdx, aes, randomU, outV.subspan(0, Sender::vPadded()));
 	}
 
-	void generateChosen(size_t blockIdx, span<const block> chosenU, span<block> outV)
+	void generateChosen(size_t blockIdx, const AES& aes, span<const block> chosenU, span<block> outV)
 	{
-		Sender::generateChosen(blockIdx, chosenU, outV.subspan(0, Sender::vPadded()));
+		Sender::generateChosen(blockIdx, aes, chosenU, outV.subspan(0, Sender::vPadded()));
 	}
 
 	void recvChallenge(Channel& chl)
@@ -227,6 +252,25 @@ public:
 			// Unrolled for ILP.
 			for (size_t j = 0; j < 4; ++j)
 				updateHash(hashV[i + j], v[i + j]);
+
+		if (rekeyCheck())
+			addSubtotalAfterRekey();
+	}
+
+	using SubspaceVoleMaliciousBase::addSubtotalAfterRekey;
+
+	void addSubtotalAfterRekey()
+	{
+		addSubtotalAfterRekey(hashU.get(), subtotalU.get(), code().dimension());
+		addSubtotalAfterRekey(hashV.get(), subtotalV.get(), Sender::vSize());
+	}
+
+	void clearHashes()
+	{
+		std::fill_n(hashU.get(), Sender::uSize(), block::allSame(0));
+		std::fill_n(subtotalU.get(), Sender::uSize(), block::allSame(0));
+		std::fill_n(hashV.get(), vPadded(), block::allSame(0));
+		std::fill_n(subtotalV.get(), vPadded(), block::allSame(0));
 	}
 
 	void sendResponse(Channel& chl)
@@ -237,6 +281,8 @@ public:
 		u64 finalHashKey[64]; // Non-tight upper bound on size.
 		getFinalHashKey(finalHashKey, fieldBits);
 
+		addSubtotalAfterRekey();
+
 		size_t rows = finalHashRows(fieldBits);
 		size_t bytesPerHash = divCeil(rows * fieldBits, 8);
 		size_t dim = code().dimension();
@@ -244,18 +290,20 @@ public:
 		std::vector<u64> finalHashes(fieldBits * numHashes);
 		for (size_t i = 0; i < dim; ++i)
 			getFinalHashSubfield(
-				finalHashKey, reduceU64(hashU[i]), &finalHashes[i * fieldBits], fieldBits);
+				finalHashKey, reduceU64(subtotalU[i]), &finalHashes[i * fieldBits], fieldBits);
 
 		for (size_t i = 0; i < numVoles; ++i)
 		{
 			u64 reducedHashes[SmallFieldVoleBase::fieldBitsMax];
 			for (size_t j = 0; j < fieldBits; ++j)
-				reducedHashes[j] = reduceU64(hashV[i * fieldBits + j]);
+				reducedHashes[j] = reduceU64(subtotalV[i * fieldBits + j]);
 
 			getFinalHash(
 				finalHashKey, reducedHashes,
 				&finalHashes[(dim + i) * fieldBits], fieldBits);
 		}
+
+		clearHashes();
 
 		std::vector<u8> finalHashesPacked(bytesPerHash * numHashes);
 		for (size_t i = 0; i < numHashes; ++i)
@@ -275,33 +323,35 @@ class SubspaceVoleMaliciousReceiver : public SubspaceVoleReceiver<Code>, public 
 {
 public:
 	std::unique_ptr<block[]> hashW;
+	std::unique_ptr<block[]> subtotalW;
 
 	using Receiver = SubspaceVoleReceiver<Code>;
 	using Receiver::code;
 
 	SubspaceVoleMaliciousReceiver(SmallFieldVoleReceiver vole_, Code code_) :
 		Receiver(std::move(vole_), std::move(code_)),
-		hashW(new block[wPadded()])
+		hashW(new block[wPadded()]),
+		subtotalW(new block[wPadded()])
 	{
-		std::fill_n(hashW.get(), wPadded(), block(0));
+		clearHashes();
 	}
 
 	size_t wPadded() const { return roundUpTo(Receiver::wPadded(), 4); }
 
-	void generateRandom(size_t blockIdx, span<block> outW)
+	void generateRandom(size_t blockIdx, const AES& aes, span<block> outW)
 	{
-		Receiver::generateRandom(blockIdx, outW.subspan(0, Receiver::wPadded()));
+		Receiver::generateRandom(blockIdx, aes, outW.subspan(0, Receiver::wPadded()));
 	}
 
-	void generateChosen(size_t blockIdx, span<block> outW)
+	void generateChosen(size_t blockIdx, const AES& aes, span<block> outW)
 	{
-		Receiver::generateChosen(blockIdx, outW.subspan(0, Receiver::wPadded()));
+		Receiver::generateChosen(blockIdx, aes, outW.subspan(0, Receiver::wPadded()));
 	}
 
 	void sendChallenge(PRNG& prng, Channel& chl)
 	{
 		block seed = prng.get<block>();
-		chl.send(&seed, 1);
+		chl.asyncSendCopy(&seed, 1);
 		hashKeyPrng.SetSeed(seed);
 		setupHash();
 	}
@@ -312,6 +362,22 @@ public:
 			// Unrolled for ILP.
 			for (size_t j = 0; j < 4; ++j)
 				updateHash(hashW[i + j], w[i + j]);
+
+		if (rekeyCheck())
+			addSubtotalAfterRekey();
+	}
+
+	using SubspaceVoleMaliciousBase::addSubtotalAfterRekey;
+
+	void addSubtotalAfterRekey()
+	{
+		addSubtotalAfterRekey(hashW.get(), subtotalW.get(), Receiver::wSize());
+	}
+
+	void clearHashes()
+	{
+		std::fill_n(hashW.get(), wPadded(), block::allSame(0));
+		std::fill_n(subtotalW.get(), wPadded(), block::allSame(0));
 	}
 
 	void checkResponse(Channel& chl)
@@ -322,15 +388,19 @@ public:
 		u64 finalHashKey[64]; // Non-tight upper bound on size.
 		getFinalHashKey(finalHashKey, fieldBits);
 
+		addSubtotalAfterRekey();
+
 		std::unique_ptr<u64[]> finalHashW(new u64[roundUpTo(numVoles, 4) * fieldBits]);
 		for (size_t i = 0; i < numVoles; ++i)
 		{
 			u64 reducedHashes[SmallFieldVoleBase::fieldBitsMax];
 			for (size_t j = 0; j < fieldBits; ++j)
-				reducedHashes[j] = reduceU64(hashW[i * fieldBits + j]);
+				reducedHashes[j] = reduceU64(subtotalW[i * fieldBits + j]);
 
 			getFinalHash(finalHashKey, reducedHashes, &finalHashW[i * fieldBits], fieldBits);
 		}
+
+		clearHashes();
 
 		size_t rows = finalHashRows(fieldBits);
 		size_t bytesPerHash = divCeil(rows * fieldBits, 8);

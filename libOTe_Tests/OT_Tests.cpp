@@ -909,7 +909,7 @@ namespace tests_libOTe
 					SmallFieldVoleSender sender(fieldBits, numVoles, senderChannel, prng1, baseSend, 1, malicious);
 					u.resize(sender.uPadded());
 					v.resize(sender.vPadded());
-					sender.generate(0, u, v);
+					sender.generate(0, mAesFixedKey, u, v);
 
 					senderUSize = sender.uSize();
 					senderVSize = sender.vSize();
@@ -919,7 +919,7 @@ namespace tests_libOTe
 				SmallFieldVoleReceiver recv(fieldBits, numVoles, recvChannel, prng0, baseRecv, baseChoice, 1, malicious);
 				BitVector delta = recv.delta;
 				w.resize(recv.wPadded());
-				recv.generate(0, w);
+				recv.generate(0, mAesFixedKey, w);
 				thrd.wait();
 
 				if (senderVSize != recv.wSize())
@@ -1033,14 +1033,14 @@ namespace tests_libOTe
 
 			std::vector<block, AlignedBlockAllocator> recvMsg(numOTs);
 			std::vector<std::array<block, 2>, AlignedBlockAllocator2> sendMsg(numOTs);
-			std::thread thrd = std::thread([&]() {
+			std::future<void> thrd = std::async([&]() {
 				recv.setBaseOts(baseSend, prng0, recvChannel);
 				recv.receive(choices, recvMsg, prng0, recvChannel);
 			});
 
 			sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
 			sender.send(sendMsg, prng1, senderChannel);
-			thrd.join();
+			thrd.wait();
 
 			OT_100Receive_Test(choices, recvMsg, sendMsg);
 
@@ -1094,14 +1094,14 @@ namespace tests_libOTe
 
 			std::vector<block, AlignedBlockAllocator> recvMsg(numOTs);
 			std::vector<std::array<block, 2>, AlignedBlockAllocator2> sendMsg(numOTs);
-			std::thread thrd = std::thread([&]() {
+			std::future<void> thrd = std::async([&]() {
 				recv.setBaseOts(baseSend, prng0, recvChannel);
 				recv.receive(choices, recvMsg, prng0, recvChannel);
 			});
 
 			sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
 			sender.send(sendMsg, prng1, senderChannel);
-			thrd.join();
+			thrd.wait();
 
 			OT_100Receive_Test(choices, recvMsg, sendMsg);
 		}
@@ -1150,14 +1150,14 @@ namespace tests_libOTe
 
 			std::vector<block, AlignedBlockAllocator> recvMsg(numOTs);
 			std::vector<std::array<block, 2>, AlignedBlockAllocator2> sendMsg(numOTs);
-			std::thread thrd = std::thread([&]() {
+			std::future<void> thrd = std::async([&]() {
 				recv.setBaseOts(baseSend, prng0, recvChannel);
 				recv.receive(choices, recvMsg, prng0, recvChannel);
 			});
 
 			sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
 			sender.send(sendMsg, prng1, senderChannel);
-			thrd.join();
+			thrd.wait();
 
 			OT_100Receive_Test(choices, recvMsg, sendMsg);
 

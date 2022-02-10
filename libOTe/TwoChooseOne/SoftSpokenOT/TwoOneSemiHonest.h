@@ -49,18 +49,20 @@ public:
 	// the messages. The number of blocks in messages (2 * messages.size()) must be at least
 	// wPadded(), as there might be some padding. Also, messages must be given the alignment of an
 	// AlignedBlockArray.
-	void generateRandom(size_t blockIdx, size_t numUsed, span<std::array<block, 2>> messages)
+	void generateRandom(size_t blockIdx, const AES& aes, size_t numUsed,
+	                    span<std::array<block, 2>> messages)
 	{
 		block* messagesPtr = (block*) messages.data();
-		Base::generateRandom(blockIdx, span<block>(messagesPtr, wPadded()));
-		xorAndHashMessages(numUsed, delta(), messagesPtr, messagesPtr, mAesFixedKey);
+		Base::generateRandom(blockIdx, aes, span<block>(messagesPtr, wPadded()));
+		xorAndHashMessages(numUsed, delta(), messagesPtr, messagesPtr, aes);
 	}
 
-	void generateChosen(size_t blockIdx, size_t numUsed, span<std::array<block, 2>> messages)
+	void generateChosen(size_t blockIdx, const AES& aes, size_t numUsed,
+	                    span<std::array<block, 2>> messages)
 	{
 		block* messagesPtr = (block*) messages.data();
-		Base::generateChosen(blockIdx, span<block>(messagesPtr, wPadded()));
-		xorAndHashMessages(numUsed, delta(), messagesPtr, messagesPtr, mAesFixedKey);
+		Base::generateChosen(blockIdx, aes, span<block>(messagesPtr, wPadded()));
+		xorAndHashMessages(numUsed, delta(), messagesPtr, messagesPtr, aes);
 	}
 
 	// messagesOut and messagesIn must either be equal or non-overlapping.
@@ -145,16 +147,18 @@ public:
 	// bits (packed into a 128 bit block) and the chosen messages. Set numUsed to be < 128 if you
 	// don't neeed all of the messages. messages.size() must be at least vPadded(), as there might
 	// be some padding. Also, messages must be given the alignment of an AlignedBlockArray.
-	void generateRandom(size_t blockIdx, size_t numUsed, block& choicesOut, span<block> messages)
+	void generateRandom(size_t blockIdx, const AES& aes, size_t numUsed,
+	                    block& choicesOut, span<block> messages)
 	{
-		Base::generateRandom(blockIdx, choicesOut, messages);
-		mAesFixedKey.hashBlocks(messages.data(), numUsed, messages.data());
+		Base::generateRandom(blockIdx, aes, choicesOut, messages);
+		aes.hashBlocks(messages.data(), numUsed, messages.data());
 	}
 
-	void generateChosen(size_t blockIdx, size_t numUsed, block choicesIn, span<block> messages)
+	void generateChosen(size_t blockIdx, const AES& aes, size_t numUsed,
+	                    block choicesIn, span<block> messages)
 	{
-		Base::generateChosen(blockIdx, choicesIn, messages);
-		mAesFixedKey.hashBlocks(messages.data(), numUsed, messages.data());
+		Base::generateChosen(blockIdx, aes, choicesIn, messages);
+		aes.hashBlocks(messages.data(), numUsed, messages.data());
 	}
 
 	TRY_FORCEINLINE void processChunk(

@@ -15,10 +15,9 @@ namespace SoftSpokenOT
 // Hash DotMaliciousLeaky to get a random OT.
 
 template<size_t blocksPerTweak>
-struct TwoOneRTCR
+struct TwoOneRTCR : AESRekeyManager
 {
 	block hashKeys[64];
-	const AES* aes;
 
 	static constexpr std::uint32_t mod = 0b10000111;
 
@@ -35,9 +34,14 @@ struct TwoOneRTCR
 	block tweakMul = block(0ul);
 
 	TwoOneRTCR() = default;
-	TwoOneRTCR(block hashKey, const AES* aes_ = &mAesFixedKey) :
-		aes(aes_)
+	TwoOneRTCR(block hashKey, block seed)
 	{
+		setKey(hashKey, seed);
+	}
+
+	void setKey(block hashKey, block seed)
+	{
+		mAESs.setSeed(seed);
 		hashKeys[0] = hashKey;
 		for (size_t i = 0; i < 63; ++i)
 			hashKeys[i + 1] = mul2(hashKeys[i]);
@@ -80,7 +84,7 @@ struct TwoOneRTCR
 		tweak += tweakIncrease;
 		tweakMul = tweakMulLocal ^ hashKeys[log2floor((tweak - 1) ^ tweak)];
 
-		aes->hashBlocks<numBlocks>(tmp, ciphertext);
+		mAESs.get().hashBlocks<numBlocks>(tmp, ciphertext);
 	}
 };
 
@@ -138,10 +142,10 @@ public:
 
 	void send(span<std::array<block, 2>> messages, PRNG& prng, Channel& chl) override
 	{
-		block hashKey = prng.get<block>();
-		hasher.rtcr = TwoOneRTCR<2>(hashKey, &mAesFixedKey);
+		std::array<block, 2> keyAndSeed = prng.get();
+		hasher.rtcr.setKey(keyAndSeed[0], keyAndSeed[1]);
 		sendImpl(messages, prng, chl, hasher);
-		chl.asyncSendCopy(hashKey);
+		chl.asyncSendCopy(keyAndSeed);
 	}
 };
 
@@ -157,7 +161,6 @@ public:
 	{
 		throw RTE_LOC; // TODO: unimplemented.
 	}
-
 	std::unique_ptr<OtExtReceiver> split() override
 	{
 		return std::make_unique<TwoOneMaliciousReceiver>(splitBase());
@@ -167,13 +170,14 @@ public:
 	{
 		Base::receive(choices, messages, prng, chl);
 
-		block hashKey;
-		chl.recv(&hashKey, 1);
-		TwoOneRTCR<1> rtcr(hashKey, &mAesFixedKey);
+		std::array<block, 2> keyAndSeed = prng.get();
+		chl.recv(&keyAndSeed, 1);
+		TwoOneRTCR<1> rtcr(keyAndSeed[0], keyAndSeed[1]);
 
 		size_t i;
 		for (i = 0; i + 128 <= (size_t) messages.size(); i += 128)
 		{
+			rtcr.useAES(128);
 			for (size_t j = 0; j < 128; j += superBlkSize)
 			{
 				size_t idx = i + 128 - superBlkSize - j; // Go backwards to match the sender.
@@ -183,6 +187,7 @@ public:
 
 		// Finish up
 		size_t remaining = messages.size() - i;
+		rtcr.useAES(remaining);
 		for (i = 0; i + superBlkSize <= remaining; i += superBlkSize)
 		{
 			size_t idx = messages.size() - superBlkSize - i;
@@ -210,6 +215,8 @@ void TwoOneMaliciousSender::Hasher::processChunk(
 	span<std::array<block, 2>> messages,
 	DotMaliciousLeakySender* parent, block* inputW)
 {
+	rtcr.useAES(128);
+
 	TwoOneMaliciousSender* parent_ = static_cast<TwoOneMaliciousSender*>(parent);
 	inputW += nChunk * parent_->chunkSize();
 	parent_->vole->hash(span<const block>(inputW, parent_->wPadded()));

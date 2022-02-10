@@ -21,6 +21,10 @@ void DotSemiHonestSenderWithVole<SubspaceVole>::setBaseOts(
 	Channel& chl,
 	bool malicious)
 {
+	block seed;
+	chl.recv(&seed, 1);
+	mAESs.setSeed(seed);
+
 	const size_t numVoles = divCeil(gOtExtBaseOtCount, fieldBits());
 	vole.emplace(
 		SmallFieldVoleReceiver(
@@ -37,6 +41,10 @@ void DotSemiHonestReceiverWithVole<SubspaceVole>::setBaseOts(
 	span<std::array<block, 2>> baseSendOts,
 	PRNG& prng, Channel& chl, bool malicious)
 {
+	block seed = prng.get<block>();
+	chl.asyncSendCopy(&seed, 1);
+	mAESs.setSeed(seed);
+
 	const size_t numVoles = divCeil(gOtExtBaseOtCount, fieldBits());
 	vole.emplace(
 		SmallFieldVoleSender(fieldBits(), numVoles, chl, prng, baseSendOts, numThreads, malicious),
@@ -64,7 +72,9 @@ void DotSemiHonestSenderWithVole<SubspaceVole>::processChunk(
 	size_t blockIdx = fieldBitsThenBlockIdx++;
 
 	block* messagesPtr = (block*) messages.data();
-	generateChosen(blockIdx, span<block>(messagesPtr, wPadded()));
+
+	// Only 1 AES evaluation per VOLE is on a secret seed.
+	generateChosen(blockIdx, useAES(vole->vole.numVoles), span<block>(messagesPtr, wPadded()));
 	xorMessages(numUsed, messagesPtr, messagesPtr);
 }
 
@@ -122,7 +132,9 @@ void DotSemiHonestReceiverWithVole<SubspaceVole>::processChunk(
 	size_t nChunk, size_t numUsed, span<block> messages, block choices)
 {
 	size_t blockIdx = fieldBitsThenBlockIdx++;
-	generateChosen(blockIdx, choices, messages);
+
+	// Only 1 AES evaluation per VOLE is on a secret seed.
+	generateChosen(blockIdx, useAES(vole->vole.numVoles), choices, messages);
 }
 
 template class DotSemiHonestSenderWithVole<SubspaceVoleReceiver<RepetitionCode>>;

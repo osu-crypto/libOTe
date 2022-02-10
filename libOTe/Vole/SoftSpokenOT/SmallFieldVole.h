@@ -99,12 +99,12 @@ public:
 
 	// outV outputs the values for v, i.e. xor_x x * PRG(seed[x]). outU gives the values for u (the
 	// xor of all PRG evaluations).
-	void generate(size_t blockIdx, block* outU, block* outV) const
+	void generate(size_t blockIdx, const AES& aes, block* outU, block* outV) const
 	{
-		generatePtr(*this, blockIdx, outU, outV);
+		generatePtr(*this, blockIdx, aes, outU, outV);
 	}
 
-	void generate(size_t blockIdx, span<block> outU, span<block> outV) const
+	void generate(size_t blockIdx, const AES& aes, span<block> outU, span<block> outV) const
 	{
 #ifndef NDEBUG
 		if ((size_t) outU.size() != uPadded())
@@ -113,7 +113,7 @@ public:
 			throw RTE_LOC;
 #endif
 
-		return generate(blockIdx, outU.data(), outV.data());
+		return generate(blockIdx, aes, outU.data(), outV.data());
 	}
 
 	static size_t computeNumVolesPadded(size_t fieldBits, size_t numVoles)
@@ -126,10 +126,10 @@ public:
 
 private:
 	void (*const generatePtr)(const SmallFieldVoleSender&,
-		size_t, block* BOOST_RESTRICT, block* BOOST_RESTRICT);
+		size_t, const AES&, block* BOOST_RESTRICT, block* BOOST_RESTRICT);
 
 	template<size_t fieldBitsConst>
-	TRY_FORCEINLINE void generateImpl(size_t blockIdx,
+	TRY_FORCEINLINE void generateImpl(size_t blockIdx, const AES& aes,
 		block* BOOST_RESTRICT outV, block* BOOST_RESTRICT outU) const;
 
 	template<size_t fieldBitsConst, typename T, T Func>
@@ -213,13 +213,14 @@ public:
 
 	// outW outputs the values for w, i.e. xor_x x * PRG(seed[x]). If correction is passed, its
 	// effect is the same as running sharedFunctionXor(correction, outW) after this function.
-	void generate(size_t blockIdx, block* outW, const block* correction = nullptr) const
+	void generate(size_t blockIdx, const AES& aes,
+	              block* outW, const block* correction = nullptr) const
 	{
-		generatePtr(*this, blockIdx, outW, correction);
+		generatePtr(*this, blockIdx, aes, outW, correction);
 	}
 
-	void generate(
-		size_t blockIdx, span<block> outW, span<const block> correction = span<block>()) const
+	void generate(size_t blockIdx, const AES& aes,
+	              span<block> outW, span<const block> correction = span<block>()) const
 	{
 #ifndef NDEBUG
 		if ((size_t) outW.size() != wPadded())
@@ -228,7 +229,7 @@ public:
 			throw RTE_LOC;
 #endif
 
-		return generate(blockIdx, outW.data(), correction.data());
+		return generate(blockIdx, aes, outW.data(), correction.data());
 	}
 
 	static size_t computeNumVolesPadded(size_t fieldBits, size_t numVoles)
@@ -245,11 +246,11 @@ public:
 
 private:
 	void (*const generatePtr)(const SmallFieldVoleReceiver&,
-		size_t, block* BOOST_RESTRICT, const block* BOOST_RESTRICT);
+		size_t, const AES&, block* BOOST_RESTRICT, const block* BOOST_RESTRICT);
 
 	template<size_t fieldBitsConst>
-	TRY_FORCEINLINE void generateImpl(
-		size_t blockIdx, block* BOOST_RESTRICT outW, const block* BOOST_RESTRICT correction) const;
+	TRY_FORCEINLINE void generateImpl(size_t blockIdx, const AES& aes,
+		block* BOOST_RESTRICT outW, const block* BOOST_RESTRICT correction) const;
 
 	template<size_t fieldBitsConst, typename T, T Func>
 	friend struct call_member_func;

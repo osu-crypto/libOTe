@@ -86,22 +86,22 @@ public:
 	size_t uPadded() const { return code().dimension(); }
 	size_t vPadded() const { return vole.vPadded(); }
 
-	void generateRandom(size_t blockIdx, span<block> randomU, span<block> outV)
+	void generateRandom(size_t blockIdx, const AES& aes, span<block> randomU, span<block> outV)
 	{
 		span<block> tmpU = extendMessages(vole.uPadded());
 
-		vole.generate(blockIdx, tmpU, outV);
+		vole.generate(blockIdx, aes, tmpU, outV);
 		span<block> syndrome = code().decodeInPlace(tmpU.subspan(0, code().length()), randomU);
 
 		// Remove padding
 		messages.resize(messages.size() - (vole.uPadded() - syndrome.size()));
 	}
 
-	void generateChosen(size_t blockIdx, span<const block> chosenU, span<block> outV)
+	void generateChosen(size_t blockIdx, const AES& aes, span<const block> chosenU, span<block> outV)
 	{
 		span<block> correction = extendMessages(vole.uPadded());
 
-		vole.generate(blockIdx, correction, outV);
+		vole.generate(blockIdx, aes, correction, outV);
 		code().encodeXor(chosenU, correction.subspan(0, code().length()));
 
 		// Remove padding
@@ -189,19 +189,19 @@ public:
 	size_t uSize() const { return vole.uSize(); }
 	size_t uPadded() const { return vole.uPadded(); }
 
-	void generateRandom(size_t blockIdx, span<block> outW)
+	void generateRandom(size_t blockIdx, const AES& aes, span<block> outW)
 	{
 		span<block> syndrome = getMessage(code().codimension());
 
 		// TODO: at least for some codes this is kind of a nop, so maybe could avoid a copy.
 		code().encodeSyndrome(syndrome, correctionUSpan());
-		vole.generate(blockIdx, outW, correctionUSpan());
+		vole.generate(blockIdx, aes, outW, correctionUSpan());
 	}
 
-	void generateChosen(size_t blockIdx, span<block> outW)
+	void generateChosen(size_t blockIdx, const AES& aes, span<block> outW)
 	{
 		span<block> correctionU = getMessage(uSize(), uPadded());
-		vole.generate(blockIdx, outW, correctionU);
+		vole.generate(blockIdx, aes, outW, correctionU);
 	}
 
 	// product must be padded to length wPadded().

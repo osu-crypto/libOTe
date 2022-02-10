@@ -86,7 +86,7 @@ static TRY_FORCEINLINE void xorReducePath(
 
 template<size_t fieldBitsConst>
 TRY_FORCEINLINE void SmallFieldVoleSender::generateImpl(
-	size_t blockIdx, block* BOOST_RESTRICT outU, block* BOOST_RESTRICT outV) const
+	size_t blockIdx, const AES& aes, block* BOOST_RESTRICT outU, block* BOOST_RESTRICT outV) const
 {
 	// Allow the compiler to hardcode fieldBits based on the template parameter.
 	const size_t fieldBits = fieldBitsConst > 0 ? fieldBitsConst : this->fieldBits;
@@ -110,7 +110,7 @@ TRY_FORCEINLINE void SmallFieldVoleSender::generateImpl(
 			block input[superBlkSize], hashes[superBlkSize];
 			for (size_t i = 0; i < superBlkSize; ++i, ++seeds)
 				input[i] = blockIdxBlock ^ *seeds;
-			mAesFixedKey.hashBlocks<superBlkSize>(input, hashes);
+			aes.hashBlocks<superBlkSize>(input, hashes);
 
 			xorReduce<superBlkShift>(hashes, fieldBits);
 			for (size_t i = 0; i < volePerSuperBlk; ++i, ++outU)
@@ -138,7 +138,7 @@ TRY_FORCEINLINE void SmallFieldVoleSender::generateImpl(
 				block input[superBlkSize];
 				for (size_t i = 0; i < superBlkSize; ++i, ++superBlk, ++seeds)
 					input[i] = blockIdxBlock ^ *seeds;
-				mAesFixedKey.hashBlocks<superBlkSize>(input, path[0]);
+				aes.hashBlocks<superBlkSize>(input, path[0]);
 				xorReducePath(fieldBits, fieldSize, superBlk, path, outU, outV, false);
 			}
 		}
@@ -147,7 +147,8 @@ TRY_FORCEINLINE void SmallFieldVoleSender::generateImpl(
 
 template<size_t fieldBitsConst>
 TRY_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
-	size_t blockIdx, block* BOOST_RESTRICT outW, const block* BOOST_RESTRICT correction) const
+	size_t blockIdx, const AES& aes,
+	block* BOOST_RESTRICT outW, const block* BOOST_RESTRICT correction) const
 {
 	// Allow the compiler to hardcode fieldBits based on the template parameter.
 	const size_t fieldBits = fieldBitsConst > 0 ? fieldBitsConst : this->fieldBits;
@@ -185,7 +186,7 @@ TRY_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
 			block input[aesPerSuperBlk], hashes[aesPerSuperBlk], xorHashes[fieldsPerSuperBlk];
 			for (size_t i = 0; i < aesPerSuperBlk; ++i, ++seeds)
 				input[i] = blockIdxBlock ^ *seeds;
-			mAesFixedKey.hashBlocks<aesPerSuperBlk>(input, hashes);
+			aes.hashBlocks<aesPerSuperBlk>(input, hashes);
 
 			// Intersperse the hashes with zeros, because the zeroth seed for each VOLE is unknown.
 			for (size_t i = 0; i < volePerSuperBlk; ++i)
@@ -224,7 +225,7 @@ TRY_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
 			block input0[superBlkSize -  1];
 			for (size_t i = 0; i < superBlkSize - 1; ++i, ++seeds)
 				input0[i] = blockIdxBlock ^ *seeds;
-			mAesFixedKey.hashBlocks<superBlkSize - 1>(input0, &path[0][1]);
+			aes.hashBlocks<superBlkSize - 1>(input0, &path[0][1]);
 
 			// The zeroth seed is unknown, so set the corresponding path element to zero.
 			path[0][0] = toBlock(0UL);
@@ -240,7 +241,7 @@ TRY_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
 				block input[superBlkSize];
 				for (size_t i = 0; i < superBlkSize; ++i, ++superBlk, ++seeds)
 					input[i] = blockIdxBlock ^ *seeds;
-				mAesFixedKey.hashBlocks<superBlkSize>(input, path[0]);
+				aes.hashBlocks<superBlkSize>(input, path[0]);
 
 				xorReducePath(fieldBits, fieldSize, superBlk, path, nullptr, outW,
 				              true, correctionPresent);

@@ -47,7 +47,7 @@ void DotMaliciousLeakySender::sendImpl(
 void DotMaliciousLeakySender::processChunk(size_t nChunk, size_t numUsed, span<block> messages)
 {
 	size_t blockIdx = fieldBitsThenBlockIdx++;
-	vole->generateChosen(blockIdx, messages.subspan(0, wPadded()));
+	vole->generateChosen(blockIdx, useAES(vole->vole.numVoles), messages.subspan(0, wPadded()));
 }
 
 void DotMaliciousLeakySender::Hasher::processChunk(
@@ -127,7 +127,9 @@ void DotMaliciousLeakyReceiver::processChunk(
 	size_t nChunk, size_t numUsed, span<block> messages, block choices)
 {
 	size_t blockIdx = fieldBitsThenBlockIdx++;
-	vole->generateChosen(blockIdx, span<block>(&choices, 1), messages.subspan(0, vPadded()));
+	vole->generateChosen(
+		blockIdx, useAES(vole->vole.numVoles),
+		span<block>(&choices, 1), messages.subspan(0, vPadded()));
 }
 
 void DotMaliciousLeakyReceiver::Hasher::processChunk(
