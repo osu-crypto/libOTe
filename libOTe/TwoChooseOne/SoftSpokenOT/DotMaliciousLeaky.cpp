@@ -33,6 +33,7 @@ void DotMaliciousLeakySender::sendImpl(
 	ChunkerBase::runBatch(chl, span<block>(extraW.get(), numExtra * chunkSize()));
 
 	vole->sendChallenge(prng, chl);
+	hasher.send(prng, chl);
 
 	hasher.runBatch(chl, messages.subspan(0, messagesFullChunks * 128), this, scratch);
 	hasher.runBatch(chl, messages.subspan(messagesFullChunks * 128), this, extraW.get());
@@ -106,6 +107,7 @@ void DotMaliciousLeakyReceiver::receiveImpl(
 		span<block>(extraChoices, numExtra));
 
 	vole->recvChallenge(chl);
+	hasher.recv(chl);
 
 	hasher.template runBatch<block>(
 		chl, messages.subspan(0, messagesFullChunks * 128),
@@ -132,19 +134,6 @@ void DotMaliciousLeakyReceiver::processChunk(
 		span<block>(&choices, 1), messages.subspan(0, vPadded()));
 }
 
-void DotMaliciousLeakyReceiver::Hasher::processChunk(
-	size_t nChunk, size_t numUsed,
-	span<block> messages, block choices,
-	DotMaliciousLeakyReceiver* parent, block* inputV)
-{
-	inputV += nChunk * parent->chunkSize();
-	parent->vole->hash(span<block>(&choices, 1), span<const block>(inputV, parent->vPadded()));
-
-	transpose128(inputV);
-	if (messages.data() != inputV)
-		memcpy(messages.data(), inputV, numUsed * sizeof(block));
-}
-
 template void DotMaliciousLeakySender::sendImpl(
 	span<std::array<block, 2>> messages, PRNG& prng, Channel& chl,
 	DotMaliciousLeakySender::Hasher& hasher);
@@ -154,6 +143,9 @@ template void DotMaliciousLeakyReceiver::receiveImpl(
 template void DotMaliciousLeakySender::sendImpl(
 	span<std::array<block, 2>> messages, PRNG& prng, Channel& chl,
 	TwoOneMaliciousSender::Hasher& hasher);
+template void DotMaliciousLeakyReceiver::receiveImpl(
+	const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl,
+	TwoOneMaliciousReceiver::Hasher& hasher);
 
 }
 }

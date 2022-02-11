@@ -40,6 +40,7 @@ public:
 
 		Hasher() : ChunkerBase(this) {}
 
+		void send(PRNG& prng, Channel& chl) {}
 		size_t chunkSize() const { return 128; }
 		size_t paddingSize() const { return 0; }
 		TRY_FORCEINLINE void processChunk(
@@ -139,6 +140,7 @@ public:
 
 		Hasher() : ChunkerBase(this) {}
 
+		void recv(Channel& chl) {}
 		size_t chunkSize() const { return 128; }
 		size_t paddingSize() const { return 0; }
 		TRY_FORCEINLINE void processChunk(
@@ -206,6 +208,19 @@ protected:
 	size_t chunkSize() const { return roundUpTo(vSize(), 2); }
 	size_t paddingSize() const { return vPadded() - chunkSize(); }
 };
+
+void DotMaliciousLeakyReceiver::Hasher::processChunk(
+	size_t nChunk, size_t numUsed,
+	span<block> messages, block choices,
+	DotMaliciousLeakyReceiver* parent, block* inputV)
+{
+	inputV += nChunk * parent->chunkSize();
+	parent->vole->hash(span<block>(&choices, 1), span<const block>(inputV, parent->vPadded()));
+
+	transpose128(inputV);
+	if (messages.data() != inputV)
+		memcpy(messages.data(), inputV, numUsed * sizeof(block));
+}
 
 }
 }

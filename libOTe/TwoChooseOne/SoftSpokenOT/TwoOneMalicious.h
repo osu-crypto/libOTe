@@ -111,6 +111,13 @@ public:
 
 		Hasher() : ChunkerBase(this) {}
 
+		void send(PRNG& prng, Channel& chl)
+		{
+			std::array<block, 2> keyAndSeed = prng.get();
+			rtcr.setKey(keyAndSeed[0], keyAndSeed[1]);
+			chl.asyncSendCopy(keyAndSeed);
+		}
+
 		size_t chunkSize() const { return 128; }
 		size_t paddingSize() const { return 0; }
 		TRY_FORCEINLINE void processChunk(
@@ -142,10 +149,7 @@ public:
 
 	void send(span<std::array<block, 2>> messages, PRNG& prng, Channel& chl) override
 	{
-		std::array<block, 2> keyAndSeed = prng.get();
-		hasher.rtcr.setKey(keyAndSeed[0], keyAndSeed[1]);
 		sendImpl(messages, prng, chl, hasher);
-		chl.asyncSendCopy(keyAndSeed);
 	}
 };
 
@@ -153,6 +157,41 @@ class TwoOneMaliciousReceiver : public DotMaliciousLeakyReceiver
 {
 public:
 	using Base = DotMaliciousLeakyReceiver;
+
+	struct Hasher :
+		public Chunker<
+			Hasher,
+			std::tuple<block>,
+			std::tuple<AlignedBlockPtr>
+		>
+	{
+		using ChunkerBase = Chunker<
+			Hasher,
+			std::tuple<block>,
+			std::tuple<AlignedBlockPtr>
+		>;
+		friend ChunkerBase;
+
+		TwoOneRTCR<1> rtcr;
+
+		Hasher() : ChunkerBase(this) {}
+
+		void recv(Channel& chl)
+		{
+			std::array<block, 2> keyAndSeed;
+			chl.recv(&keyAndSeed, 1);
+			rtcr.setKey(keyAndSeed[0], keyAndSeed[1]);
+		}
+
+		size_t chunkSize() const { return 128; }
+		size_t paddingSize() const { return 0; }
+		TRY_FORCEINLINE void processChunk(
+			size_t nChunk, size_t numUsed,
+			span<block> messages, block choices,
+			DotMaliciousLeakyReceiver* parent, block* inputV);
+	};
+
+	Hasher hasher;
 
 	TwoOneMaliciousReceiver(size_t fieldBits, size_t numThreads_ = 1) :
 		Base(fieldBits, numThreads_) {}
@@ -166,47 +205,15 @@ public:
 		return std::make_unique<TwoOneMaliciousReceiver>(splitBase());
 	}
 
+	virtual void initTemporaryStorage()
+	{
+		Base::initTemporaryStorage();
+		hasher.initTemporaryStorage();
+	}
+
 	void receive(const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl) override
 	{
-		Base::receive(choices, messages, prng, chl);
-
-		std::array<block, 2> keyAndSeed = prng.get();
-		chl.recv(&keyAndSeed, 1);
-		TwoOneRTCR<1> rtcr(keyAndSeed[0], keyAndSeed[1]);
-
-		size_t i;
-		for (i = 0; i + 128 <= (size_t) messages.size(); i += 128)
-		{
-			rtcr.useAES(128);
-			for (size_t j = 0; j < 128; j += superBlkSize)
-			{
-				size_t idx = i + 128 - superBlkSize - j; // Go backwards to match the sender.
-				rtcr.hashBlocks<superBlkSize>(messages.data() + idx, messages.data() + idx);
-			}
-		}
-
-		// Finish up
-		size_t remaining = messages.size() - i;
-		rtcr.useAES(remaining);
-		for (i = 0; i + superBlkSize <= remaining; i += superBlkSize)
-		{
-			size_t idx = messages.size() - superBlkSize - i;
-			rtcr.hashBlocks<superBlkSize>(messages.data() + idx, messages.data() + idx);
-		}
-
-		// Other side hashes in blocks of superBlkSize / 2.
-		if (i + superBlkSize / 2 <= remaining)
-		{
-			size_t idx = messages.size() - (superBlkSize / 2) - i;
-			rtcr.hashBlocks<superBlkSize / 2>(messages.data() + idx, messages.data() + idx);
-			i += superBlkSize / 2;
-		}
-
-		for (; i < remaining; ++i)
-		{
-			size_t idx = messages.size() - 1 - i;
-			rtcr.hashBlocks<1>(messages.data() + idx, messages.data() + idx);
-		}
+		Base::receiveImpl(choices, messages, prng, chl, hasher);
 	}
 };
 
@@ -224,6 +231,42 @@ void TwoOneMaliciousSender::Hasher::processChunk(
 	transpose128(inputW);
 	TwoOneSemiHonestSender::xorAndHashMessages(
 		numUsed, parent_->delta(), (block*) messages.data(), inputW, rtcr);
+}
+
+void TwoOneMaliciousReceiver::Hasher::processChunk(
+	size_t nChunk, size_t numUsed,
+	span<block> messages, block choices,
+	DotMaliciousLeakyReceiver* parent, block* inputV)
+{
+	DotMaliciousLeakyReceiver::Hasher parentHasher;
+	parentHasher.processChunk(
+		nChunk, numUsed, span<block>(inputV, messages.size()), choices, parent, inputV);
+
+	rtcr.useAES(numUsed);
+	block* messagesOut = messages.data();
+
+	// Go backwards to match the sender.
+	size_t i = numUsed;
+	while (i >= superBlkSize)
+	{
+		i -= superBlkSize;
+		rtcr.template hashBlocks<superBlkSize>(inputV + i, messagesOut + i);
+	}
+
+	// Finish up. Other side hashes in blocks of superBlkSize / 2.
+	if (i >= superBlkSize / 2)
+	{
+		i -= superBlkSize / 2;
+		rtcr.hashBlocks<superBlkSize / 2>(inputV + i, messagesOut + i);
+
+	}
+
+	size_t remainingIters = i;
+	for (size_t j = 0; j < remainingIters; ++j)
+	{
+		i = remainingIters - j - 1;
+		rtcr.hashBlocks<1>(inputV + i, messagesOut + i);
+	}
 }
 
 }

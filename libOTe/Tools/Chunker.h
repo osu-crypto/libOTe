@@ -41,7 +41,7 @@ size_t paddingSize() const;
 // chunkSize) of instances that will actually be used, out of the chunkSize instances.
 // chunkParams are parameters that are given once per chunk, and globalParams are given once for
 // the whole batch. This doesn't have to be defined for all template parameter. The template
-// parameters just illustrate the class of functions that are be allowed.
+// parameters just illustrate the class of functions that are allowed.
 template<typename... ChunkParams, typename... GlobalParams>
 void processChunk(size_t chunkIdx, size_t numUsed, span<InstParams>... instParams,
                   ChunkParams... chunkParams, GlobalParams... globalParams);
