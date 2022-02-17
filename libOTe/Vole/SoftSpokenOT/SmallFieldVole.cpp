@@ -441,6 +441,9 @@ SmallFieldVoleReceiver::SmallFieldVoleReceiver(size_t fieldBits_, size_t numVole
 			for (int i = 0; i < 2; ++i)
 				eq &= (hash[i] == hashes[row][i]);
 		}
+
+		// TODO: Should delay abort until the VOLE consistency check, to stop the two events from
+		// being distinguished.
 		if (!eq)
 			throw std::runtime_error("PPRF failed consistency check.");
 	}
