@@ -65,7 +65,7 @@ void osuCrypto::NcoOtExtSender::genBaseOts(PRNG & prng, Channel & chl)
 #elif defined LIBOTE_HAS_BASE_OT
     DefaultBaseOT base;
     base.receive(bv, msgs, prng, chl);
-    setBaseOts(msgs, bv, chl);
+    setBaseOts(msgs, bv, prng, chl);
 #else 
     throw std::runtime_error("The libOTe library does not have base OTs. Enable them to call this. " LOCATION);
 #endif
