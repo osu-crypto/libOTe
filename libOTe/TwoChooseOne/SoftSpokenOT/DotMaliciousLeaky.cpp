@@ -94,10 +94,12 @@ void DotMaliciousLeakyReceiver::receiveImpl(
 		memcpy(extraChoicesU64, choices.blocks() + messagesFullChunks, sizeof(block));
 
 	int bit64 = bit % 64;
+	int word = bit / 64;
 	u64 mask = ((u64) 1 << bit64) - 1;
-	extraChoicesU64[bit / 2] = (mask & extraChoicesU64[bit / 2]) | (sacrificialChoices << bit64);
+	extraChoicesU64[word] &= mask;
+	extraChoicesU64[word] |= sacrificialChoices << bit64;
 	// Shift twice so that it becomes zero if bit64 = 0 (shift by 64 is undefined).
-	extraChoicesU64[bit / 2 + 1] = sacrificialChoices >> (63 - bit64) >> 1;
+	extraChoicesU64[word + 1] = sacrificialChoices >> (63 - bit64) >> 1;
 
 	block extraChoices[2] = {toBlock(0ul), toBlock(0ul)};
 	memcpy(extraChoices, extraChoicesU64, 2 * sizeof(block));

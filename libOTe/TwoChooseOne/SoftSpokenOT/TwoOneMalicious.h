@@ -238,9 +238,10 @@ void TwoOneMaliciousReceiver::Hasher::processChunk(
 	span<block> messages, block choices,
 	DotMaliciousLeakyReceiver* parent, block* inputV)
 {
-	DotMaliciousLeakyReceiver::Hasher parentHasher;
-	parentHasher.processChunk(
-		nChunk, numUsed, span<block>(inputV, messages.size()), choices, parent, inputV);
+	TwoOneMaliciousReceiver* parent_ = static_cast<TwoOneMaliciousReceiver*>(parent);
+	inputV += nChunk * parent_->chunkSize();
+	parent_->vole->hash(span<block>(&choices, 1), span<const block>(inputV, parent_->vPadded()));
+	transpose128(inputV);
 
 	rtcr.useAES(numUsed);
 	block* messagesOut = messages.data();
