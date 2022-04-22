@@ -86,26 +86,25 @@ namespace osuCrypto
                 {
                     // figure out how many OTs we want to do in this step.
                     auto min = std::min<u64>(numOTs - i, step);
-                    i += min;
 
-                    //// iterate over this step.
-                    //for (u64 j = 0; j < min; ++j, ++i)
-                    //{
-                    //    // For the OT index by i, we need to pick which
-                    //    // one of the N OT messages that we want. For this
-                    //    // example we simply pick a random one. Note only the
-                    //    // first log2(N) bits of choice is considered.
-                    //    block choice = prng.get<block>();
+                    // iterate over this step.
+                    for (u64 j = 0; j < min; ++j, ++i)
+                    {
+                        // For the OT index by i, we need to pick which
+                        // one of the N OT messages that we want. For this
+                        // example we simply pick a random one. Note only the
+                        // first log2(N) bits of choice is considered.
+                        block choice = prng.get<block>();
 
-                    //    // this will hold the (random) OT message of our choice
-                    //    block otMessage;
+                        // this will hold the (random) OT message of our choice
+                        block otMessage;
 
-                    //    // retreive the desired message.
-                    //    recvers[k].encode(i, &choice, &otMessage);
+                        // retreive the desired message.
+                        recvers[k].encode(i, &choice, &otMessage);
 
-                    //    // do something cool with otMessage
-                    //    //otMessage;
-                    //}
+                        // do something cool with otMessage
+                        //otMessage;
+                    }
 
                     // Note that all OTs in this region must be encode. If there are some
                     // that you don't actually care about, then you can skip them by calling
