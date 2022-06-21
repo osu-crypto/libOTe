@@ -19,6 +19,11 @@
 #include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
+#include "libOTe/TwoChooseOne/SoftSpokenOT/DotSemiHonest.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/TwoOneSemiHonest.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/DotMaliciousLeaky.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/TwoOneMalicious.h"
+
 
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtSender.h"
@@ -59,11 +64,13 @@ namespace tests_libOTe
 			//    std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
 			//    std::cout << (int)choice << "-- " << recv[i] << std::endl;
 			//}
-			if (neq(revcBlock, senderBlock))
+			if (neq(revcBlock, senderBlock) || eq(revcBlock, sender[i][1 ^ choice]))
+			{
+				std::cout << "\n[" << i << ",0]--" << sender[i][0] << std::endl;
+				std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
+				std::cout << (int)choice << "-- " << recv[i] << std::endl;
 				throw UnitTestFail();
-
-			if (eq(revcBlock, sender[i][1 ^ choice]))
-				throw UnitTestFail();
+			}
 		}
 
 	}
@@ -94,7 +101,7 @@ namespace tests_libOTe
 			data[7] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
 
 			//printMtx(data);
-			eklundh_transpose128(data);
+			eklundh_transpose128(data.data());
 
 
 			for (auto& d : data)
@@ -102,7 +109,7 @@ namespace tests_libOTe
 				if (neq(d, block(0, 0xFF)))
 				{
 					std::cout << "expected" << std::endl;
-					std::cout << block(0xF, 0) << std::endl << std::endl;
+					std::cout << block(0, 0xFF) << std::endl << std::endl;
 
 					printMtx(data);
 
@@ -110,6 +117,8 @@ namespace tests_libOTe
 				}
 			}
 		}
+
+#ifdef OC_ENABLE_SSE2
 		{
 
 
@@ -125,7 +134,7 @@ namespace tests_libOTe
 			data[6] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
 			data[7] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
 
-			transpose128(data);
+			sse_transpose128(data.data());
 
 
 			for (auto& d : data)
@@ -133,7 +142,7 @@ namespace tests_libOTe
 				if (neq(d, block(0, 0xFF)))
 				{
 					std::cout << "expected" << std::endl;
-					std::cout << block(0xF, 0) << std::endl << std::endl;
+					std::cout << block(0, 0xFF) << std::endl << std::endl;
 
 					printMtx(data);
 
@@ -141,6 +150,41 @@ namespace tests_libOTe
 				}
 			}
 		}
+#endif
+
+#ifdef OC_ENABLE_AVX2
+		{
+
+
+			AlignedArray<block, 128> data;
+			memset((u8*)data.data(), 0, sizeof(data));
+
+			data[0] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[1] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[2] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[3] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[4] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[5] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[6] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+			data[7] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+
+			avx_transpose128(data.data());
+
+
+			for (auto& d : data)
+			{
+				if (neq(d, block(0, 0xFF)))
+				{
+					std::cout << "expected" << std::endl;
+					std::cout << block(0, 0xFF) << std::endl << std::endl;
+
+					printMtx(data);
+
+					throw UnitTestFail();
+				}
+			}
+		}
+#endif
 
 		{
 			PRNG prng(ZeroBlock);
@@ -158,14 +202,14 @@ namespace tests_libOTe
 			for (u64 i = 0; i < 8; ++i)
 			{
 
-				std::array<block, 128> sub;
+				AlignedArray<block, 128> sub;
 
 				for (u64 j = 0; j < 128; ++j)
 				{
 					sub[j] = data2[j][i];
 				}
 
-				transpose128(sub);
+				transpose128(sub.data());
 
 				for (u64 j = 0; j < 128; ++j)
 				{
@@ -175,6 +219,25 @@ namespace tests_libOTe
 			}
 
 		}
+	}
+
+	void Tools_Transpose_Bench()
+	{
+		PRNG prng(ZeroBlock);
+		AlignedArray<block, 128> data;
+		prng.get(data.data(), data.size());
+
+		u64 highAtEnd = data[127].as<u64>()[1];
+
+		for (u64 i = 0; i < 1000000; ++i)
+		{
+			transpose128(data.data());
+			data[0] += block::allSame((u64) 1);
+		}
+
+		// Add a check just to make sure this doesn't get compiled out.
+		if (data[127].as<u64>()[1] != highAtEnd)
+			throw UnitTestFail();
 	}
 
 	void Tools_Transpose_View_Test()
@@ -187,7 +250,7 @@ namespace tests_libOTe
 
 			PRNG prng(ZeroBlock);
 
-			std::array<block, 128> data;
+			AlignedArray<block, 128> data;
 			prng.get(data.data(), data.size());
 			std::array<block, 128> data2;
 
@@ -196,7 +259,7 @@ namespace tests_libOTe
 
 			transpose(dataView, data2View);
 
-			transpose128(data);
+			transpose128(data.data());
 
 
 
@@ -233,14 +296,14 @@ namespace tests_libOTe
 
 			for (u64 i = 0; i < 8; ++i)
 			{
-				std::array<block, 128> data128;
+				AlignedArray<block, 128> data128;
 
 				for (u64 j = 0; j < 128; ++j)
 				{
 					data128[j] = data[j][i];
 				}
 
-				transpose128(data128);
+				transpose128(data128.data());
 
 
 				for (u64 j = 0; j < 128; ++j)
@@ -270,7 +333,7 @@ namespace tests_libOTe
 
 				for (u64 i = 0; i < 8; ++i)
 				{
-					std::array<block, 128> data128;
+					AlignedArray<block, 128> data128;
 
 					for (u64 j = 0; j < 128; ++j)
 					{
@@ -280,7 +343,7 @@ namespace tests_libOTe
 							data128[j] = ZeroBlock;
 					}
 
-					transpose128(data128);
+					transpose128(data128.data());
 
 					for (u64 j = 0; j < 128; ++j)
 					{
@@ -803,6 +866,367 @@ namespace tests_libOTe
 	}
 
 
+	void SoftSpokenSmallVole_Test()
+	{
+#ifdef ENABLE_SOFTSPOKEN_OT
+		using namespace SoftSpokenOT;
+		tests::xorReduction();
+
+		const bool print = false;
+
+		setThreadName("Receiver");
+
+		IOService ios;
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel   = ep0.addChannel();
+
+		PRNG prng0(block(4234385, 3445235));
+		PRNG prng1(block(42348395, 989835));
+
+		u64 numVoles = 128;
+
+		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
+		{
+			for (int malicious = 0; malicious < 2; ++malicious)
+			{
+				const size_t nBaseOTs = SmallFieldVoleBase::numBaseOTsNeeded(fieldBits, numVoles);
+
+				std::vector<std::array<block, 2>> baseSend(nBaseOTs);
+				std::vector<block> baseRecv(nBaseOTs);
+				BitVector baseChoice(nBaseOTs);
+				baseChoice.randomize(prng0);
+
+				prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+				for (u64 i = 0; i < nBaseOTs; ++i)
+					baseRecv[i] = baseSend[i][baseChoice[i]];
+
+				std::vector<block> u, v, w;
+				size_t senderUSize, senderVSize;
+				AlignedUnVector<block> senderSeeds;
+				std::future<void> thrd = std::async([&]() {
+					SmallFieldVoleSender sender(fieldBits, numVoles, senderChannel, prng1, baseSend, 1, malicious);
+					u.resize(sender.uPadded());
+					v.resize(sender.vPadded());
+					sender.generate(0, mAesFixedKey, u, v);
+
+					senderUSize = sender.uSize();
+					senderVSize = sender.vSize();
+					senderSeeds = std::move(sender.mSeeds);
+				});
+
+				SmallFieldVoleReceiver recv(fieldBits, numVoles, recvChannel, prng0, baseRecv, baseChoice, 1, malicious);
+				BitVector delta = recv.delta;
+				w.resize(recv.wPadded());
+				recv.generate(0, mAesFixedKey, w);
+				thrd.wait();
+
+				if (senderVSize != recv.wSize())
+					throw UnitTestFail(LOCATION);
+				if (senderUSize > u.size())
+					throw UnitTestFail(LOCATION);
+				if (senderVSize > v.size() || recv.wSize() > w.size())
+					throw UnitTestFail(LOCATION);
+				u.resize(numVoles);
+
+				if (print)
+				{
+					std::cout << "Delta:\n";
+					for (size_t i = 0; i < delta.sizeBlocks(); ++i)
+						std::cout << delta.blocks()[i] << ", ";
+
+					std::cout << "\nSeeds:\n";
+				}
+
+				size_t fieldSize = recv.fieldSize();
+				for (size_t i = 0; i < numVoles; ++i)
+				{
+					size_t deltaI = 0;
+					for (size_t j = 0; j < fieldBits; ++j)
+						deltaI += (size_t) delta[i * fieldBits + j] << j;
+
+					if (print)
+					{
+						for (size_t j = 0; j < fieldSize; ++j)
+							std::cout << j << ": " << senderSeeds[i * fieldSize + j] << '\n';
+						for (size_t j = 1; j < fieldSize; ++j)
+							std::cout << j << ": " << recv.mSeeds[i * (fieldSize - 1) + j - 1] << '\n';
+					}
+
+					for (size_t j = 0; j < fieldSize; ++j)
+					{
+						if (j == deltaI)
+							// Punctured point.
+							continue;
+
+						block senderSeed = senderSeeds[i * fieldSize + j];
+						block recvSeed = recv.mSeeds[i * (fieldSize - 1) + (j ^ deltaI) - 1];
+						if (senderSeed != recvSeed)
+							throw UnitTestFail(LOCATION);
+					}
+				}
+
+				if (print)
+					std::cout << "\nOutputs:\n";
+
+				std::vector<block> shouldEqualV = w;
+				recv.sharedFunctionXor(span<const block>(u), span<block>(shouldEqualV));
+				for (size_t i = 0; i < recv.wSize(); ++i)
+				{
+					if (print)
+					{
+						std::cout << u[i] << '\n';
+						std::cout << v[i] << '\n';
+						std::cout << shouldEqualV[i] << '\n';
+						std::cout << w[i] << '\n';
+					}
+					if (v[i] != shouldEqualV[i])
+						throw UnitTestFail(LOCATION);
+					if (v[i] != (w[i] ^ (block::allSame((bool) delta[i]) & u[i / fieldBits])))
+						throw UnitTestFail(LOCATION);
+				}
+			}
+		}
+
+#else
+		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
+#endif
+	}
+
+	void DotExt_SoftSpokenSemiHonest_Test()
+	{
+#ifdef ENABLE_SOFTSPOKEN_OT
+		setThreadName("Sender");
+
+		IOService ios;
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel   = ep0.addChannel();
+
+		PRNG prng0(block(4234335, 3445235));
+		PRNG prng1(block(42348345, 989835));
+
+		u64 numOTs = 9733;
+
+		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
+		{
+			SoftSpokenOT::DotSemiHonestSender sender(fieldBits);
+			SoftSpokenOT::DotSemiHonestReceiver recv(fieldBits);
+
+			const size_t nBaseOTs = sender.baseOtCount();
+			if (nBaseOTs != recv.baseOtCount())
+				throw UnitTestFail(LOCATION);
+
+			std::vector<block> baseRecv(nBaseOTs);
+			std::vector<std::array<block, 2>> baseSend(nBaseOTs);
+			BitVector choices(numOTs), baseChoice(nBaseOTs);
+			choices.randomize(prng0);
+			baseChoice.randomize(prng0);
+
+			prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+			for (u64 i = 0; i < nBaseOTs; ++i)
+			{
+				baseRecv[i] = baseSend[i][baseChoice[i]];
+			}
+
+			AlignedUnVector<block> recvMsg(numOTs);
+			AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
+			std::future<void> thrd = std::async([&]() {
+				recv.setBaseOts(baseSend, prng0, recvChannel);
+				recv.receive(choices, recvMsg, prng0, recvChannel);
+			});
+
+			sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
+			sender.send(sendMsg, prng1, senderChannel);
+			thrd.wait();
+
+			OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+			const block delta = sender.delta();
+			for (auto& s : sendMsg)
+				if (neq(s[0] ^ delta, s[1]))
+					throw UnitTestFail(LOCATION);
+		}
+
+#else
+		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
+#endif
+	}
+
+	void OtExt_SoftSpokenSemiHonest21_Test()
+	{
+#ifdef ENABLE_SOFTSPOKEN_OT
+		setThreadName("Sender");
+
+		IOService ios;
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel   = ep0.addChannel();
+
+		PRNG prng0(block(4234335, 3445235));
+		PRNG prng1(block(42348345, 989835));
+
+		u64 numOTs = 9733;
+
+		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
+		{
+			SoftSpokenOT::TwoOneSemiHonestSender sender(fieldBits);
+			SoftSpokenOT::TwoOneSemiHonestReceiver recv(fieldBits);
+
+			size_t nBaseOTs = sender.baseOtCount();
+			if (nBaseOTs != recv.baseOtCount())
+				throw UnitTestFail(LOCATION);
+
+			std::vector<block> baseRecv(nBaseOTs);
+			std::vector<std::array<block, 2>> baseSend(nBaseOTs);
+			BitVector choices(numOTs), baseChoice(nBaseOTs);
+			choices.randomize(prng0);
+			baseChoice.randomize(prng0);
+
+			prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+			for (u64 i = 0; i < nBaseOTs; ++i)
+			{
+				baseRecv[i] = baseSend[i][baseChoice[i]];
+			}
+
+			AlignedUnVector<block> recvMsg(numOTs);
+			AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
+			std::future<void> thrd = std::async([&]() {
+				recv.setBaseOts(baseSend, prng0, recvChannel);
+				recv.receive(choices, recvMsg, prng0, recvChannel);
+			});
+
+			sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
+			sender.send(sendMsg, prng1, senderChannel);
+			thrd.wait();
+
+			OT_100Receive_Test(choices, recvMsg, sendMsg);
+		}
+
+#else
+		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
+#endif
+	}
+
+	void DotExt_SoftSpokenMaliciousLeaky_Test()
+	{
+#ifdef ENABLE_SOFTSPOKEN_OT
+		setThreadName("Sender");
+
+		IOService ios;
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel   = ep0.addChannel();
+
+		PRNG prng0(block(4234335, 3445235));
+		PRNG prng1(block(42348345, 989835));
+
+		u64 numOTs = 9733;
+
+		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
+		{
+			SoftSpokenOT::DotMaliciousLeakySender sender(fieldBits);
+			SoftSpokenOT::DotMaliciousLeakyReceiver recv(fieldBits);
+
+			const size_t nBaseOTs = sender.baseOtCount();
+			if (nBaseOTs != recv.baseOtCount())
+				throw UnitTestFail(LOCATION);
+
+			std::vector<block> baseRecv(nBaseOTs);
+			std::vector<std::array<block, 2>> baseSend(nBaseOTs);
+			BitVector choices(numOTs), baseChoice(nBaseOTs);
+			choices.randomize(prng0);
+			baseChoice.randomize(prng0);
+
+			prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+			for (u64 i = 0; i < nBaseOTs; ++i)
+			{
+				baseRecv[i] = baseSend[i][baseChoice[i]];
+			}
+
+			AlignedUnVector<block> recvMsg(numOTs);
+			AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
+			std::future<void> thrd = std::async([&]() {
+				recv.setBaseOts(baseSend, prng0, recvChannel);
+				recv.receive(choices, recvMsg, prng0, recvChannel);
+			});
+
+			sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
+			sender.send(sendMsg, prng1, senderChannel);
+			thrd.wait();
+
+			OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+			const block delta = sender.delta();
+			for (auto& s : sendMsg)
+				if (neq(s[0] ^ delta, s[1]))
+					throw UnitTestFail(LOCATION);
+		}
+
+#else
+		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
+#endif
+	}
+
+	void OtExt_SoftSpokenMalicious21_Test()
+	{
+#ifdef ENABLE_SOFTSPOKEN_OT
+		setThreadName("Sender");
+
+		IOService ios;
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel   = ep0.addChannel();
+
+		PRNG prng0(block(4234335, 3445235));
+		PRNG prng1(block(42348345, 989835));
+
+		u64 numOTs = 9733;
+
+		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
+		{
+			SoftSpokenOT::TwoOneMaliciousSender sender(fieldBits);
+			SoftSpokenOT::TwoOneMaliciousReceiver recv(fieldBits);
+
+			size_t nBaseOTs = sender.baseOtCount();
+			if (nBaseOTs != recv.baseOtCount())
+				throw UnitTestFail(LOCATION);
+
+			std::vector<block> baseRecv(nBaseOTs);
+			std::vector<std::array<block, 2>> baseSend(nBaseOTs);
+			BitVector choices(numOTs), baseChoice(nBaseOTs);
+			choices.randomize(prng0);
+			baseChoice.randomize(prng0);
+
+			prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+			for (u64 i = 0; i < nBaseOTs; ++i)
+			{
+				baseRecv[i] = baseSend[i][baseChoice[i]];
+			}
+
+			AlignedUnVector<block> recvMsg(numOTs);
+			AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
+			std::thread thrd = std::thread([&]() {
+				recv.setBaseOts(baseSend, prng0, recvChannel);
+				recv.receive(choices, recvMsg, prng0, recvChannel);
+			});
+
+			sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
+			sender.send(sendMsg, prng1, senderChannel);
+			thrd.join();
+
+			OT_100Receive_Test(choices, recvMsg, sendMsg);
+		}
+
+#else
+		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
+#endif
+	}
 
 
 

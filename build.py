@@ -2,9 +2,14 @@ import os
 import sys
 import cryptoTools.build
 
+import thirdparty.getBitpolymul as getBitpolymul
 
 def replace(argv, find, rep):
     return cryptoTools.build.replace(argv, find, rep)
+
+    os.chdir(dir_path)
+
+
 
 
 if __name__ == "__main__":

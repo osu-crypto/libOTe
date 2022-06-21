@@ -8,12 +8,12 @@ add_library(libOTe STATIC ${SRCS})
 
 
 # make projects that include libOTe use this as an include folder
-target_include_directories(libOTe PUBLIC 
+target_include_directories(libOTe PUBLIC
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
-                    $<INSTALL_INTERFACE:include>) 
-target_include_directories(libOTe PUBLIC 
+                    $<INSTALL_INTERFACE:include>)
+target_include_directories(libOTe PUBLIC
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
-                    $<INSTALL_INTERFACE:include>) 
+                    $<INSTALL_INTERFACE:include>)
 
 
 target_link_libraries(libOTe cryptoTools)
@@ -24,6 +24,9 @@ else()
 
     if(ENABLE_SSE)
         target_compile_options(libOTe PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)
+    endif()
+    if(ENABLE_AVX)
+        target_compile_options(libOTe PRIVATE -mavx2)
     endif()
 endif()
 if (ENABLE_BITPOLYMUL)

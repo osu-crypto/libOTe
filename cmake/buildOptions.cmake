@@ -10,8 +10,8 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_SIMPLESTOT  ${oc_BB} CACHE BOOL "" FORCE)
 	set(ENABLE_MR          ${oc_BB} CACHE BOOL "" FORCE)
 	set(ENABLE_NP          ${oc_BB} CACHE BOOL "" FORCE)
-	
-	# requires sodium 
+
+	# requires sodium
 	if(${ENABLE_SODIUM} OR ${ENABLE_RELIC})
 		set(oc_BB ${ENABLE_ALL_OT})
 	else()
@@ -19,7 +19,7 @@ if(DEFINED ENABLE_ALL_OT)
 	endif()
 	set(ENABLE_MRR ${oc_BB} CACHE BOOL "" FORCE)
 
-	# requires sodium 
+	# requires sodium
 	if(${ENABLE_SODIUM} AND SODIUM_MONTGOMERY)
 		set(oc_BB ${ENABLE_ALL_OT})
 	else()
@@ -28,7 +28,7 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_MRR_TWIST   ${oc_BB} CACHE BOOL "" FORCE)
 
 
-	# requires linux 
+	# requires linux
 	if(UNIX AND NOT(APPLE OR MSVC))
 		set(oc_BB ${ENABLE_ALL_OT})
 	else()
@@ -48,15 +48,19 @@ if(DEFINED ENABLE_ALL_OT)
 	# general
 	set(ENABLE_KOS            ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_IKNP           ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
+	set(ENABLE_SILENTOT       ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
+	set(ENABLE_SOFTSPOKEN_OT  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_DELTA_KOS      ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_DELTA_IKNP     ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_OOS            ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_KKRT           ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_RR             ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_AKN            ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
+	set(ENABLE_SILENT_VOLE    ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	unset(ENABLE_ALL_OT CACHE)
 endif()
 
+option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" OFF)
 option(ENABLE_SIMPLESTOT     "Build the SimplestOT base OT" OFF)
 option(ENABLE_SIMPLESTOT_ASM "Build the assembly based SimplestOT library" OFF)
 option(ENABLE_MRR            "Build the McQuoidRosulekRoy 20 PopfOT base OT using Ristretto KA" OFF)
@@ -68,6 +72,7 @@ option(ENABLE_NP             "Build the NaorPinkas base OT" OFF)
 option(ENABLE_KOS            "Build the KOS OT-Ext protocol." OFF)
 option(ENABLE_IKNP           "Build the IKNP OT-Ext protocol." OFF)
 option(ENABLE_SILENTOT       "Build the Slient OT protocol." OFF)
+option(ENABLE_SOFTSPOKEN_OT  "Build the SoftSpokenOT protocol." OFF)
 option(ENABLE_DELTA_KOS      "Build the KOS Delta-OT-Ext protocol." OFF)
 option(ENABLE_DELTA_IKNP     "Build the IKNP Delta-OT-Ext protocol." OFF)
 
@@ -104,6 +109,7 @@ message(STATUS "1-out-of-2 OT Extension protocols\n=============================
 message(STATUS "Option: ENABLE_KOS            = ${ENABLE_KOS}")
 message(STATUS "Option: ENABLE_IKNP           = ${ENABLE_IKNP}")
 message(STATUS "Option: ENABLE_SILENTOT       = ${ENABLE_SILENTOT}\n\n")
+message(STATUS "Option: ENABLE_SOFTSPOKEN_OT  = ${ENABLE_SOFTSPOKEN_OT}\n\n")
 
 message(STATUS "1-out-of-2 Delta-OT Extension protocols\n=======================================================")
 message(STATUS "Option: ENABLE_DELTA_KOS      = ${ENABLE_DELTA_KOS}\n\n")

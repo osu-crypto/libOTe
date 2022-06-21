@@ -38,7 +38,7 @@ namespace osuCrypto
             chl0.waitForConnection();
             BaseOT recv = ot;
 
-            std::vector<block> msg(totalOTs);
+            AlignedVector<block> msg(totalOTs);
             BitVector choice(totalOTs);
             choice.randomize(prng);
 
@@ -55,7 +55,7 @@ namespace osuCrypto
 
             BaseOT send = ot;
 
-            std::vector<std::array<block, 2>> msg(totalOTs);
+            AlignedVector<std::array<block, 2>> msg(totalOTs);
 
             s = t.setTimePoint("base OT start");
 

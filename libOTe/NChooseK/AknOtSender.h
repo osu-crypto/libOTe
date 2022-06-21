@@ -2,6 +2,7 @@
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
 #include <cryptoTools/Common/Defines.h>
 #include "libOTe/config.h"
+#include <cryptoTools/Common/Aligned.h>
 
 #ifdef ENABLE_AKN
 #include <cryptoTools/Network/Channel.h>
@@ -35,7 +36,7 @@ namespace osuCrypto
 
         //std::vector<BitVector> mTheirPermutes;
 
-        std::vector<std::array<block, 2>> mMessages;
+        AlignedVector<std::array<block, 2>> mMessages;
 
         BitVector mSampled;
         //u64 mTotalOTCount, mCutAndChooseThreshold;

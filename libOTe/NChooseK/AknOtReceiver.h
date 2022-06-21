@@ -2,6 +2,7 @@
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
 #include <cryptoTools/Common/Defines.h>
 #include "libOTe/config.h"
+#include <cryptoTools/Common/Aligned.h>
 #ifdef ENABLE_AKN
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Crypto/PRNG.h>
@@ -33,7 +34,7 @@ public:
         OtExtReceiver& ots, span<Channel> chls, PRNG& prng);
 
     std::vector<u64> mOnes, mZeros;
-    std::vector<block> mMessages;
+    AlignedVector<block> mMessages;
     BitVector mChoices;
 };
 

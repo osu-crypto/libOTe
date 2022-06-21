@@ -66,9 +66,9 @@ namespace osuCrypto
         // are derived from the orginial base OTs.
         std::unique_ptr<OtExtReceiver> split() override;
 
-        // Performed the specicifed number of random OT extensions where the messages
+        // Performed the specicifed number of random OT extensions where the mMessages
         // receivers are indexed by the choices vector that is passed in. The received
-        // values written to the messages parameter. 
+        // values written to the mMessages parameter. 
         void receive(
             const BitVector& choices,
             span<block> messages,

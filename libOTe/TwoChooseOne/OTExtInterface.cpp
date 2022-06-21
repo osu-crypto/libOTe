@@ -1,6 +1,7 @@
 #include "OTExtInterface.h"
 #include "libOTe/Base/BaseOT.h"
 #include <cryptoTools/Common/BitVector.h>
+#include <cryptoTools/Common/Aligned.h>
 #include <vector>
 #include <cryptoTools/Network/Channel.h>
 
@@ -17,7 +18,7 @@ void osuCrypto::OtExtReceiver::genBaseOts(PRNG & prng, Channel & chl)
 void osuCrypto::OtExtReceiver::genBaseOts(OtSender& base, PRNG& prng, Channel& chl)
 {
     auto count = baseOtCount();
-    std::vector<std::array<block, 2>> msgs(count);
+    AlignedUnVector<std::array<block, 2>>msgs(count);
     base.send(msgs, prng, chl);
     setBaseOts(msgs, prng, chl);
 }
@@ -36,18 +37,18 @@ void osuCrypto::OtExtSender::genBaseOts(PRNG & prng, Channel & chl)
 void osuCrypto::OtExtSender::genBaseOts(OtReceiver& base, PRNG& prng, Channel& chl)
 {
     auto count = baseOtCount();
-    std::vector<block> msgs(count);
+    AlignedUnVector<block>msgs(count);
     BitVector bv(count);
     bv.randomize(prng);
     base.receive(bv, msgs, prng, chl);
-    setBaseOts(msgs, bv, chl);
+    setBaseOts(msgs, bv, prng, chl);
 }
 
 
 void osuCrypto::OtReceiver::receiveChosen(
-    const BitVector & choices, 
+    const BitVector & choices,
     span<block> recvMessages,
-    PRNG & prng, 
+    PRNG & prng,
     Channel & chl)
 {
     receive(choices, recvMessages, prng, chl);
@@ -67,7 +68,7 @@ void osuCrypto::OtReceiver::receiveCorrelated(const BitVector& choices, span<blo
     std::vector<block> temp(recvMessages.size());
     chl.recv(temp.data(), temp.size());
     auto iter = choices.begin();
-    
+
     for (u64 i = 0; i < temp.size(); ++i)
     {
         recvMessages[i] = recvMessages[i] ^ (zeroAndAllOne[*iter] & temp[i]);
@@ -77,11 +78,11 @@ void osuCrypto::OtReceiver::receiveCorrelated(const BitVector& choices, span<blo
 }
 
 void osuCrypto::OtSender::sendChosen(
-    span<std::array<block, 2>> messages, 
-    PRNG & prng, 
+    span<std::array<block, 2>> messages,
+    PRNG & prng,
     Channel & chl)
 {
-    std::vector<std::array<block, 2>> temp(messages.size());
+    AlignedUnVector<std::array<block, 2>> temp(messages.size());
     send(temp, prng, chl);
 
     for (u64 i = 0; i < static_cast<u64>(messages.size()); ++i)

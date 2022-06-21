@@ -76,8 +76,8 @@ namespace osuCrypto
             genBaseOts(prng, chl);
 
         setTimePoint("KosDot.recv.start");
-        
-        // we are going to process OTs in blocks of 128 * superBlkSize messages.
+
+        // we are going to process OTs in blocks of 128 * superBlkSize mMessages.
         u64 numOtExt = roundUpTo(choices.size(), 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize) / superBlkSize;
         u64 numBlocks = numSuperBlocks * superBlkSize;
@@ -182,8 +182,8 @@ namespace osuCrypto
                 if (step)
                 {
                     uBuff.resize(step * mGens.size() * superBlkSize);
-					uIter = (block*)uBuff.data();
-					uEnd = uIter + uBuff.size();
+                    uIter = (block*)uBuff.data();
+                    uEnd = uIter + uBuff.size();
                 }
             }
 
@@ -215,8 +215,8 @@ namespace osuCrypto
         chl.asyncSendCopy((u8*)&seed, sizeof(block));
         commonPrng.SetSeed(seed ^ theirSeed);
 
-		block offset;
-		chl.recv(offset);
+        block offset;
+        chl.recv(offset);
 
 
         setTimePoint("KosDot.recv.cncSeed");
@@ -269,7 +269,7 @@ namespace osuCrypto
             u64 i = 0, dd = doneIdx;
             for (; dd < stop0; ++dd, ++i)
             {
-				auto maskBlock = zeroOneBlk[expendedChoice[i % 8][i / 8]];
+                auto maskBlock = zeroOneBlk[expendedChoice[i % 8][i / 8]];
                 x[0] = x[0] ^ (challenges[i] & maskBlock);
                 x[1] = x[1] ^ (challenges2[i] & maskBlock);
 
@@ -281,7 +281,7 @@ namespace osuCrypto
 
                 code.encode((u8*)msg[dd].data(),(u8*)&messages[dd]);
 
-				messages[dd] = messages[dd] ^ (maskBlock & offset);
+                messages[dd] = messages[dd] ^ (maskBlock & offset);
             }
 
             for (; dd < stop1; ++dd, ++i)

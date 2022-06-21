@@ -3,6 +3,7 @@
 #if defined(ENABLE_SILENT_VOLE) || defined(ENABLE_SILENTOT)
 #include "cryptoTools/Common/BitIterator.h"
 #include "cryptoTools/Common/Matrix.h"
+#include "cryptoTools/Common/Aligned.h"
 
 
 namespace osuCrypto
@@ -12,7 +13,7 @@ namespace osuCrypto
     {
         setTimePoint("recvOT");
 
-        std::array<std::array<block, 2>, 128> otMsg;
+        AlignedArray<std::array < block, 2>, 128> otMsg;
         ot.send(otMsg, prng, chl);
 
         return receive(y, z, prng, otMsg, chl);

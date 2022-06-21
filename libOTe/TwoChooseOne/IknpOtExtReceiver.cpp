@@ -70,7 +70,7 @@ namespace osuCrypto
         if (hasBaseOts() == false)
             genBaseOts(prng, chl);
 
-        // we are going to process OTs in blocks of 128 * superBlkSize messages.
+        // we are going to process OTs in blocks of 128 * superBlkSize mMessages.
         u64 numOtExt = roundUpTo(choices.size(), 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
         u64 numBlocks = numSuperBlocks * superBlkSize;
@@ -168,7 +168,7 @@ namespace osuCrypto
 
 
             //block* mStart = mIter;
-            //block* mEnd = std::min<block*>(mIter + 128 * superBlkSize, &*messages.end());
+            //block* mEnd = std::min<block*>(mIter + 128 * superBlkSize, &*mMessages.end());
             auto mEnd = mIter + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
 
 

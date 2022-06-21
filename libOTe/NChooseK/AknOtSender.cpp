@@ -36,7 +36,7 @@ namespace osuCrypto
         if (ots.hasBaseOts() == false)
         {
 #ifdef LIBOTE_HAS_BASE_OT
-            std::array<block, gOtExtBaseOtCount> baseMsg;
+            AlignedArray<block, gOtExtBaseOtCount> baseMsg;
             BitVector choices(gOtExtBaseOtCount);
             choices.randomize(prng);
 
@@ -44,7 +44,7 @@ namespace osuCrypto
             DefaultBaseOT base;
             base.receive(choices, baseMsg,prng, chl0, 2);
 
-            ots.setBaseOts(baseMsg, choices, chl0);
+            ots.setBaseOts(baseMsg, choices, prng, chl0);
 #else
             throw std::runtime_error("Base OTs not set");
 #endif
@@ -113,7 +113,7 @@ namespace osuCrypto
 
             std::vector<u8> choiceBuff;
             chl.recv(choiceBuff);
-			auto choiceIter = BitIterator(choiceBuff.data(), 0);
+            auto choiceIter = BitIterator(choiceBuff.data(), 0);
             u64 bitsRemaining = choiceBuff.size() * 8;
 
             for (u64 i = start; i < end; ++i)
@@ -131,7 +131,7 @@ namespace osuCrypto
                     {
                         chl.recv(choiceBuff);
                         bitsRemaining = choiceBuff.size() * 8 - 1;
-						choiceIter = BitIterator(choiceBuff.data(), 0);
+                        choiceIter = BitIterator(choiceBuff.data(), 0);
                     }
 
                     ++sampleCount;
@@ -143,7 +143,7 @@ namespace osuCrypto
       //                  // because it was lazy and didn't ;)
       //                  RandomOracle sha(sizeof(block));
       //                  sha.Update(mMessages[i][0]);
-						//sha.Final(mMessages[i][0]);
+                        //sha.Final(mMessages[i][0]);
       //              }
 
                     partialSum = partialSum ^ mMessages[i][cc];

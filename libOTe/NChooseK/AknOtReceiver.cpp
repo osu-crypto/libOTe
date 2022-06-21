@@ -29,7 +29,7 @@ namespace osuCrypto
         {
 
 #ifdef LIBOTE_HAS_BASE_OT
-            std::array<std::array<block, 2>, gOtExtBaseOtCount> baseMsg;
+            AlignedArray<std::array<block, 2>, gOtExtBaseOtCount> baseMsg;
 
             DefaultBaseOT base;
             base.send(baseMsg, prng, chl0, 2);
@@ -69,7 +69,7 @@ namespace osuCrypto
             BitVector choices;
             choices.copy(mChoices, start, end - start);
 
-            // do the OT extension for this range of messages.
+            // do the OT extension for this range of mMessages.
             PRNG prng(extSeed);
             //std::cout << IoStream::lock << "recv 0 "  << end << std::endl;
             otExt.receive(choices, range, prng, chl);
@@ -98,7 +98,7 @@ namespace osuCrypto
                 cncGenFuture.get();
             }
 
-            // a local to core the XOR of our OT messages that are in this range
+            // a local to core the XOR of our OT mMessages that are in this range
             block partialSum(ZeroBlock);
 
             // a buffer of choice bits that were sampled. We aare going to seed these is groups of 4096 bits
@@ -162,7 +162,7 @@ namespace osuCrypto
                     //    sha.Final(mMessages[i]);
                     //}
 
-                    // keep a running sum of the OT messages that are opened in this thread.
+                    // keep a running sum of the OT mMessages that are opened in this thread.
                     partialSum = partialSum ^ mMessages[i];
 
                 }
@@ -212,11 +212,11 @@ namespace osuCrypto
 
                 // all other threads have finished.
 
-                // send the other guy the sum of our ot messages as proof.
+                // send the other guy the sum of our ot mMessages as proof.
                 chl0.asyncSendCopy((u8*)&totalSum, sizeof(block));
 
 
-                // now merge and shuffle all the indices for the one OT messages
+                // now merge and shuffle all the indices for the one OT mMessages
                 u64 totalOnesCount(0);
                 for (u64 i = 0; i < threadsZeroOnesList.size(); ++i)
                     totalOnesCount += threadsZeroOnesList[i][1].size();
@@ -239,7 +239,7 @@ namespace osuCrypto
 
             if (t == 1 || chls.size() == 1)
             {
-                // now merge and shuffle all the indices for the zero OT messages
+                // now merge and shuffle all the indices for the zero OT mMessages
                 // the second thread will do this is there are more than on thread.
 
                 if (d)

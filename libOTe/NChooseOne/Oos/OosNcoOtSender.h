@@ -90,11 +90,19 @@ namespace osuCrypto {
 
         // Sets the base OTs. Note that  getBaseOTCount() number of OTs should be provided
         // @ baseRecvOts: a std vector like container that which holds a series of both 
-        //      2-choose-1 OT messages. The sender should hold one of them.
+        //      2-choose-1 OT mMessages. The sender should hold one of them.
         // @ choices: The select bits that were used in the base OT
         void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices, Channel& chl) override;
+            const BitVector& choices, Channel& chl);
+
+        void setBaseOts(
+            span<block> baseRecvOts,
+            const BitVector& choices,
+            PRNG& prng, Channel& chl) override
+        {
+            setBaseOts(baseRecvOts, choices, chl);
+        }
 
         // Performs the PRNG expantion and transpose operations. This sets the 
         // internal data structures that are needed for the subsequent encode(..)
@@ -105,7 +113,7 @@ namespace osuCrypto {
         void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
 
 
-        // This function allows the user to obtain the random OT messages of their choice
+        // This function allows the user to obtain the random OT mMessages of their choice
         // at a given index. 
         // @ otIdx: denotes the OT index that should be encoded. Each OT index allows
         //       the receiver to learn a single message.

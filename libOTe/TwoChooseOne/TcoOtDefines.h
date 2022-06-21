@@ -1,14 +1,16 @@
 #pragma once
 #include <cryptoTools/Common/Defines.h>
+#include <cassert>
 
 //#define OTE_KOS_HASH
 //#define IKNP_SHA_HASH
 //#define OTE_KOS_FIAT_SHAMIR
 
 namespace osuCrypto
-{ 
-     const u64 commStepSize(512);
-     const u64 superBlkSize(8);
+{
+	const u64 commStepSize(512); // TODO: try increasing this for optimization.
+	const u64 superBlkShift(3);
+	const u64 superBlkSize(1 << superBlkShift);
 
 	enum class SilentBaseType {Base, BaseExtend};
 

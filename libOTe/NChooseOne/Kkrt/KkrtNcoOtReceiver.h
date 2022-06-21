@@ -94,7 +94,7 @@ namespace osuCrypto
 
         // Sets the base OTs. Note that getBaseOTCount() of OTs should be provided.
         // @ baseSendOts: a std vector like container that which holds a series of both 
-        //      2-choose-1 OT messages. The sender should hold one of them.
+        //      2-choose-1 OT mMessages. The sender should hold one of them.
         // @ prng: not used.
         // @ chl: not used.
         void setBaseOts(span<std::array<block, 2>> baseRecvOts, PRNG& prng, Channel& chl) override

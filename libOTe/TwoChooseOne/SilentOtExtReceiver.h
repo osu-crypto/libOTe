@@ -5,6 +5,7 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Common/Timer.h>
+#include <cryptoTools/Common/Aligned.h>
 #include <libOTe/Tools/Tools.h>
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
@@ -44,25 +45,13 @@ namespace osuCrypto
         std::vector<u64> mS;
 
         // The A vector in the relation A + B = C * delta
-        span<block> mA;
+        AlignedUnVector<block> mA;
 
         // The C vector in the relation A + B = C * delta
-        span<u8> mC;
+        AlignedUnVector<u8> mC;
 
         // The number of threads that should be used (when applicable).
         u64 mNumThreads = 1;
-
-        // The memory backing mC
-        std::unique_ptr<u8[]> mChoicePtr;
-
-        // The size of the memory backing mC
-        u64 mChoiceSpanSize = 0;
-
-        // The memory backing mA
-        std::unique_ptr<block[]> mBacking;
-
-        // The size of the memory backing mA
-        u64 mBackingSize = 0;
 
 #ifdef ENABLE_KOS
         // Kos instance used to generate the base OTs.
@@ -175,7 +164,7 @@ namespace osuCrypto
         // The silent base OTs must have specially set base OTs.
         // This returns the choice bits that should be used.
         // Call this is you want to use a specific base OT protocol
-        // and then pass the OT messages back using setSilentBaseOts(...).
+        // and then pass the OT mMessages back using setSilentBaseOts(...).
         BitVector sampleBaseChoiceBits(PRNG& prng);
 
         // Set the externally generated base OTs. This choice
@@ -219,7 +208,7 @@ namespace osuCrypto
 
 
         // hash the internal vectors and store the results
-        // in choices, messages.
+        // in choices, mMessages.
         void hash(
             BitVector& choices,
             span<block> messages,

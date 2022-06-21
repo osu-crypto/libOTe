@@ -195,7 +195,7 @@ namespace osuCrypto
             tIter = (block*)t.data();
             block* tEnd = (block*)t.data() + 128 * superBlkSize;
 
-            // Due to us transposing 1024 rows, the OT messages
+            // Due to us transposing 1024 rows, the OT mMessages
             // are interleaved within t. we have to step 8 rows
             // of t to get to the next message.
             while (mIter != mEnd)

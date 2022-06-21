@@ -98,7 +98,7 @@ namespace osuCrypto
         setTimePoint("Kos.recv.start");
 
 
-        // we are going to process OTs in blocks of 128 * superBlkSize messages.
+        // we are going to process OTs in blocks of 128 * superBlkSize mMessages.
         u64 numOtExt = roundUpTo(choices.size() + 128, 128);
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
         u64 numBlocks = numSuperBlocks * superBlkSize;

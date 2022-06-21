@@ -11,6 +11,7 @@
 #include "libOTe_Tests/AknOt_Tests.h"
 #include "libOTe_Tests/SilentOT_Tests.h"
 #include "libOTe_Tests/bitpolymul_Tests.h"
+#include "libOTe_Tests/Vole_Tests.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -20,8 +21,9 @@ namespace tests_libOTe
         //void OtExt_genBaseOts_Test()
 
 
-        tc.add("Tools_Transpose_View_Test               ", Tools_Transpose_View_Test);
         tc.add("Tools_Transpose_Test                    ", Tools_Transpose_Test);
+        tc.add("Tools_Transpose_View_Test               ", Tools_Transpose_View_Test);
+        tc.add("Tools_Transpose_Bench                   ", Tools_Transpose_Bench);
 
         tc.add("Tools_LinearCode_Test                   ", Tools_LinearCode_Test);
         tc.add("Tools_LinearCode_sub_Test               ", Tools_LinearCode_sub_Test);
@@ -65,6 +67,12 @@ namespace tests_libOTe
 
         tc.add("DotExt_Kos_Test                         ", DotExt_Kos_Test);
         tc.add("DotExt_Iknp_Test                        ", DotExt_Iknp_Test);
+
+        tc.add("SoftSpokenSmallVole_Test                ", SoftSpokenSmallVole_Test);
+        tc.add("DotExt_SoftSpokenSemiHonest_Test        ", DotExt_SoftSpokenSemiHonest_Test);
+        tc.add("OtExt_SoftSpokenSemiHonest21_Test       ", OtExt_SoftSpokenSemiHonest21_Test);
+        tc.add("DotExt_SoftSpokenMaliciousLeaky_Test    ", DotExt_SoftSpokenMaliciousLeaky_Test);
+        tc.add("OtExt_SoftSpokenMalicious21_Test        ", OtExt_SoftSpokenMalicious21_Test);
 
         tc.add("NcoOt_Kkrt_Test                         ", NcoOt_Kkrt_Test);
         tc.add("NcoOt_Oos_Test                          ", NcoOt_Oos_Test);

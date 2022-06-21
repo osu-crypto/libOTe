@@ -71,7 +71,7 @@ namespace osuCrypto
         // round up and add the extra OT used in the check at the end
         numOtExt = roundUpTo(numOtExt + mStatSecParam, 128);
 
-        // we are going to process OTs in blocks of 128 * superblkSize messages.
+        // we are going to process OTs in blocks of 128 * superblkSize mMessages.
         u64 numSuperBlocks = ((numOtExt) / 128 + superBlkSize - 1) / superBlkSize;
         u64 numCols = mGens.size();
 

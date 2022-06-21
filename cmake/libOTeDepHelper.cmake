@@ -4,6 +4,7 @@ cmake_policy(SET CMP0045 NEW)
 cmake_policy(SET CMP0074 NEW)
 
 
+set(LIBOTE_INSOURCE_FIND_DEPS (EXISTS ${CMAKE_CURRENT_LIST_DIR}/libOTeFindBuildDir.cmake))
 
 set(PUSHED_CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH})
 set(CMAKE_PREFIX_PATH "${OC_THIRDPARTY_HINT};${CMAKE_PREFIX_PATH}")
@@ -15,16 +16,16 @@ set(CMAKE_PREFIX_PATH "${OC_THIRDPARTY_HINT};${CMAKE_PREFIX_PATH}")
 macro(FIND_BITPOLYMUL)
     if(FETCH_BITPOLYMUL_IMPL)
         set(BITPOLYMUL_DP NO_DEFAULT_PATH PATHS ${OC_THIRDPARTY_HINT})
-    else()
+        else()
         unset(BITPOLYMUL_DP)
-    endif()
+        endif()
     
     find_package(bitpolymul ${BITPOLYMUL_DP} ${ARGN})
     if(TARGET bitpolymul)
         set(BITPOLYMUL_FOUND ON)
     else()
         set(BITPOLYMUL_FOUND OFF)
-    endif()
+endif()
 endmacro()
 
 if(FETCH_BITPOLYMUL_IMPL)

@@ -4,6 +4,7 @@
 #include "tests_cryptoTools/UnitTests.h"
 #include "libOTe_Tests/UnitTests.h"
 #include <cryptoTools/Common/Defines.h>
+#include "cryptoTools/Crypto/RandomOracle.h"
 
 using namespace osuCrypto;
 
@@ -28,6 +29,10 @@ static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
 kos{ "k", "kos" },
 dkos{ "d", "dkos" },
+ssdelta{ "ssd", "ssdelta" },
+sshonest{ "ss", "sshonest" },
+smleakydelta{ "smld", "smleakydelta" },
+smalicious{ "sm", "smalicious" },
 kkrt{ "kk", "kkrt" },
 iknp{ "i", "iknp" },
 diknp{ "diknp" },
@@ -59,27 +64,27 @@ void minimal()
         PRNG prng(sysRandomSeed());
         IknpOtExtReceiver recver;
 
-        // Choose which messages should be received.
+        // Choose which mMessages should be received.
         BitVector choices(n);
         choices[0] = 1;
         //...
 
-        // Receive the messages
-        std::vector<block> messages(n);
+        // Receive the mMessages
+        AlignedVector<block> messages(n);
         recver.receiveChosen(choices, messages, prng, recverChl);
 
-        // messages[i] = sendMessages[i][choices[i]];
+        // mMessages[i] = sendMessages[i][choices[i]];
         });
 
     PRNG prng(sysRandomSeed());
     IknpOtExtSender sender;
 
-    // Choose which messages should be sent.
+    // Choose which mMessages should be sent.
     std::vector<std::array<block, 2>> sendMessages(n);
     sendMessages[0] = { toBlock(54), toBlock(33) };
     //...
 
-    // Send the messages.
+    // Send the mMessages.
     sender.sendChosen(sendMessages, prng, senderChl);
     recverThread.join();
 }
@@ -87,7 +92,6 @@ void minimal()
 
 
 
-#include "cryptoTools/Crypto/RandomOracle.h"
 int main(int argc, char** argv)
 {
 
@@ -200,6 +204,29 @@ int main(int argc, char** argv)
     flagSet |= runIf(TwoChooseOne_example<KosDotExtSender, KosDotExtReceiver>, cmd, dkos);
 #endif
 
+#ifdef ENABLE_SOFTSPOKEN_OT
+
+    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+        TwoChooseOne_example<SoftSpokenOT::DotSemiHonestSender, SoftSpokenOT::DotSemiHonestReceiver>(
+            role, totalOTs, numThreads, ip, tag, clp);
+    }, cmd, ssdelta);
+
+    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+        TwoChooseOne_example<SoftSpokenOT::TwoOneSemiHonestSender, SoftSpokenOT::TwoOneSemiHonestReceiver>(
+            role, totalOTs, numThreads, ip, tag, clp);
+    }, cmd, sshonest);
+
+    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+        TwoChooseOne_example<SoftSpokenOT::DotMaliciousLeakySender, SoftSpokenOT::DotMaliciousLeakyReceiver>(
+            role, totalOTs, numThreads, ip, tag, clp);
+    }, cmd, smleakydelta);
+
+    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+        TwoChooseOne_example<SoftSpokenOT::TwoOneMaliciousSender, SoftSpokenOT::TwoOneMaliciousReceiver>(
+            role, totalOTs, numThreads, ip, tag, clp);
+    }, cmd, smalicious);
+#endif
+
 #ifdef ENABLE_KKRT
     flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
 #endif
@@ -226,25 +253,32 @@ int main(int argc, char** argv)
 
         std::cout
             << "Protocols:\n"
-            << Color::Green << "  -simplest-asm " << Color::Default << "  : to run the ASM-SimplestOT  active secure  1-out-of-2  base OT      " << Color::Red << (spaEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
-            << Color::Green << "  -simplest     " << Color::Default << "  : to run the SimplestOT      active secure  1-out-of-2  base OT      " << Color::Red << (spEnabled ? "" : "(disabled)")              << "\n"   << Color::Default
-            << Color::Green << "  -moellerpopf  " << Color::Default << "  : to run the McRosRoyTwist   active secure  1-out-of-2  base OT      " << Color::Red << (popfotMoellerEnabled ? "" : "(disabled)")   << "\n"   << Color::Default
-            << Color::Green << "  -ristrettopopf" << Color::Default << "  : to run the McRosRoy active secure  1-out-of-2  base OT      " << Color::Red << (popfotRistrettoEnabled ? "" : "(disabled)") << "\n"   << Color::Default
-            << Color::Green << "  -mr           " << Color::Default << "  : to run the MasnyRindal     active secure  1-out-of-2  base OT      " << Color::Red << (mrEnabled ? "" : "(disabled)")              << "\n"   << Color::Default
-            << Color::Green << "  -np           " << Color::Default << "  : to run the NaorPinkas      active secure  1-out-of-2  base OT      " << Color::Red << (npEnabled ? "" : "(disabled)")              << "\n"   << Color::Default
-            << Color::Green << "  -iknp         " << Color::Default << "  : to run the IKNP            passive secure 1-out-of-2       OT      " << Color::Red << (iknpEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
-            << Color::Green << "  -diknp        " << Color::Default << "  : to run the IKNP            passive secure 1-out-of-2 Delta-OT      " << Color::Red << (diknpEnabled ? "" : "(disabled)")           << "\n"   << Color::Default
-            << Color::Green << "  -Silent       " << Color::Default << "  : to run the Silent          passive secure 1-out-of-2       OT      " << Color::Red << (silentEnabled ? "" : "(disabled)")          << "\n"   << Color::Default
-            << Color::Green << "  -kos          " << Color::Default << "  : to run the KOS             active secure  1-out-of-2       OT      " << Color::Red << (kosEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
-            << Color::Green << "  -dkos         " << Color::Default << "  : to run the KOS             active secure  1-out-of-2 Delta-OT      " << Color::Red << (dkosEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
-            << Color::Green << "  -oos          " << Color::Default << "  : to run the OOS             active secure  1-out-of-N OT for N=2^76 " << Color::Red << (oosEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
-            << Color::Green << "  -kkrt         " << Color::Default << "  : to run the KKRT            passive secure 1-out-of-N OT for N=2^128" << Color::Red << (kkrtEnabled ? "" : "(disabled)")            << "\n\n" << Color::Default
+            << Color::Green << "  -simplest-asm " << Color::Default << "  : to run the ASM-SimplestOT  active secure       1-out-of-2  base OT      " << Color::Red << (spaEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
+            << Color::Green << "  -simplest     " << Color::Default << "  : to run the SimplestOT      active secure       1-out-of-2  base OT      " << Color::Red << (spEnabled ? "" : "(disabled)")              << "\n"   << Color::Default
+            << Color::Green << "  -moellerpopf  " << Color::Default << "  : to run the McRosRoyTwist   active secure       1-out-of-2  base OT      " << Color::Red << (popfotMoellerEnabled ? "" : "(disabled)")   << "\n"   << Color::Default
+            << Color::Green << "  -ristrettopopf" << Color::Default << "  : to run the McRosRoy        active secure       1-out-of-2  base OT      " << Color::Red << (popfotRistrettoEnabled ? "" : "(disabled)") << "\n"   << Color::Default
+            << Color::Green << "  -mr           " << Color::Default << "  : to run the MasnyRindal     active secure       1-out-of-2  base OT      " << Color::Red << (mrEnabled ? "" : "(disabled)")              << "\n"   << Color::Default
+            << Color::Green << "  -np           " << Color::Default << "  : to run the NaorPinkas      active secure       1-out-of-2  base OT      " << Color::Red << (npEnabled ? "" : "(disabled)")              << "\n"   << Color::Default
+            << Color::Green << "  -iknp         " << Color::Default << "  : to run the IKNP            passive secure      1-out-of-2       OT      " << Color::Red << (iknpEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
+            << Color::Green << "  -diknp        " << Color::Default << "  : to run the IKNP            passive secure      1-out-of-2 Delta-OT      " << Color::Red << (diknpEnabled ? "" : "(disabled)")           << "\n"   << Color::Default
+            << Color::Green << "  -Silent       " << Color::Default << "  : to run the Silent          passive secure      1-out-of-2       OT      " << Color::Red << (silentEnabled ? "" : "(disabled)")          << "\n"   << Color::Default
+            << Color::Green << "  -kos          " << Color::Default << "  : to run the KOS             active secure       1-out-of-2       OT      " << Color::Red << (kosEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
+            << Color::Green << "  -dkos         " << Color::Default << "  : to run the KOS             active secure       1-out-of-2 Delta-OT      " << Color::Red << (dkosEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
+            << Color::Green << "  -ssdelta      " << Color::Default << "  : to run the SoftSpoken      passive secure      1-out-of-2 Delta-OT      " << Color::Red << (softSpokenEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
+            << Color::Green << "  -sshonest     " << Color::Default << "  : to run the SoftSpoken      passive secure      1-out-of-2       OT      " << Color::Red << (softSpokenEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
+            << Color::Green << "  -smleakydelta " << Color::Default << "  : to run the SoftSpoken      active secure leaky 1-out-of-2 Delta-OT      " << Color::Red << (softSpokenEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
+            << Color::Green << "  -smalicious   " << Color::Default << "  : to run the SoftSpoken      active secure       1-out-of-2       OT      " << Color::Red << (softSpokenEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
+            << Color::Green << "  -oos          " << Color::Default << "  : to run the OOS             active secure       1-out-of-N OT for N=2^76 " << Color::Red << (oosEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
+            << Color::Green << "  -kkrt         " << Color::Default << "  : to run the KKRT            passive secure      1-out-of-N OT for N=2^128" << Color::Red << (kkrtEnabled ? "" : "(disabled)")            << "\n\n" << Color::Default
 
             << "POPF Options:\n"
             << Color::Green << "  -eke          " << Color::Default << "  : to run the EKE POPF (Moeller only)                                  " << "\n"<< Color::Default
             << Color::Green << "  -mrPopf       " << Color::Default << "  : to run the MasnyRindal POPF (Moeller only)                          " << "\n"<< Color::Default
             << Color::Green << "  -feistel      " << Color::Default << "  : to run the Feistel POPF                                             " << "\n"<< Color::Default
             << Color::Green << "  -feistelMul   " << Color::Default << "  : to run the Feistel With Multiplication POPF                         " << "\n\n"<< Color::Default
+
+            << "SoftSpokenOT options:\n"
+            << Color::Green << "  -f            " << Color::Default << "  : the number of bits in the finite field (aka the depth of the PPRF). " << "\n\n"<< Color::Default
 
             << "Other Options:\n"
             << Color::Green << "  -n            " << Color::Default << ": the number of OTs to perform\n"

@@ -1,13 +1,8 @@
 ![](./titleOSU.PNG)
 =====
 
-![Build Status](https://github.com/osu-crypto/libOTe/actions/workflows/build-test.yml/badge.svg)
-
-A fast and portable C++17 library for Oblivious Transfer extension (OTe). The 
-primary design goal of this library to obtain *high performance* while being 
-*easy to use*.  This library currently implements:
- 
-* The semi-honest 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf).
+![Build Status](https: //github.com/osu-crypto/libOTe/actions/workflows/build-test.yml/badge.svg)
+A fast and portable C++17 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*. This library currently implements: * The semi-honest 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf).
 * The semi-honest 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf).
 * The semi-honest 1-out-of-2 Delta-OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
@@ -19,8 +14,9 @@ primary design goal of this library to obtain *high performance* while being
 * The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
 * The malicious secure 1-out-of-2 base OT [[MR19]](https://eprint.iacr.org/2019/706.pdf) 
 * Several malicious secure batched 1-out-of-2 base OTs from [[MRR21]](https://eprint.iacr.org/2021/682)
- 
- Silver is currently not contained in this repository. Contact me for details.
+* 
+
+ Silver is currently not contained in this repository. Contact Peter Rindal for details.
  
 ## Introduction
  
@@ -156,7 +152,7 @@ void minimal()
         //...
 
         // Receive the messages
-        std::vector<block> messages(n);
+        std::vector<block, AlignedBlockAllocator> messages(n);
         recver.receiveChosen(choices, messages, prng, recverChl);
 
         // messages[i] = sendMessages[i][choices[i]];
@@ -187,7 +183,7 @@ or running the library.
 
 ```
 @misc{libOTe,
-    author = {Peter Rindal},
+    author = {Peter Rindal, Lance Roy},
     title = {{libOTe: an efficient, portable, and easy to use Oblivious Transfer Library}},
     howpublished = {\url{https://github.com/osu-crypto/libOTe}},
 }
@@ -239,5 +235,4 @@ expection that network IO in libOTe is performed in the background by a separate
 
 [ALSZ15]  - Gilad Asharov and Yehuda Lindell and Thomas Schneider and Michael Zohner, _More Efficient Oblivious Transfer Extensions with Security for Malicious Adversaries_. [eprint/2015/061](https://eprint.iacr.org/2015/061)
 
-
-
+[Roy22] - Lawrence Roy, SoftSpokenOT: Communication--Computation Tradeoffs in OT Extension. [eprint/2022/192](https://eprint.iacr.org/2022/192)

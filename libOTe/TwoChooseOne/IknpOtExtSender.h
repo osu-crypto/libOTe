@@ -67,11 +67,12 @@ namespace osuCrypto {
         void setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices,
+            PRNG& prng,
             Channel& chl) override {setBaseOts(baseRecvOts, choices);}
 
         // Takes a destination span of two blocks and performs OT extension
         // where the destination span is populated (written to) with the random
-        // OT messages that then extension generates. User data is not transmitted. 
+        // OT mMessages that then extension generates. User data is not transmitted. 
         void send(
             span<std::array<block, 2>> messages,
             PRNG& prng,

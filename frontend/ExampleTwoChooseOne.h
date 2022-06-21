@@ -12,6 +12,12 @@
 #include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/SilentOtExtSender.h"
 
+#include "libOTe/TwoChooseOne/SoftSpokenOT/DotSemiHonest.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/DotMaliciousLeaky.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/DotMalicious.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/TwoOneSemiHonest.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/TwoOneMalicious.h"
+
 namespace osuCrypto
 {
 
@@ -53,61 +59,57 @@ namespace osuCrypto
 
 
 
-        std::vector<OtExtSender> senders(numThreads);
-        std::vector<OtExtRecver> receivers(numThreads);
+        std::vector<OtExtSender> senders;
+        std::vector<OtExtRecver> receivers;
+        senders.reserve(numThreads);
+        receivers.reserve(numThreads);
 
-#ifdef LIBOTE_HAS_BASE_OT
-        // Now compute the base OTs, we need to set them on the first pair of extenders.
-        // In real code you would only have a sender or reciever, not both. But we do
-        // here just showing the example.
+        size_t nBaseOTs;
         if (role == Role::Receiver)
         {
-            DefaultBaseOT base;
-            std::array<std::array<block, 2>, 128> baseMsg;
-            base.send(baseMsg, prng, chls[0], numThreads);
-            receivers[0].setBaseOts(baseMsg, prng, chls[0]);
-
-            //receivers[0].genBaseOts(prng, chls[0]);
+            receivers.emplace_back();
+            nBaseOTs = receivers[0].baseOtCount();
         }
         else
         {
-
-            DefaultBaseOT base;
-            BitVector bv(128);
-            std::array<block, 128> baseMsg;
-            bv.randomize(prng);
-            base.receive(bv, baseMsg, prng, chls[0], numThreads);
-            senders[0].setBaseOts(baseMsg, bv, chls[0]);
+            senders.emplace_back();
+            nBaseOTs = senders[0].baseOtCount();
         }
-#else
+
+#ifndef LIBOTE_HAS_BASE_OT
         if (!cmd.isSet("fakeBase"))
             std::cout << "warning, base ots are not enabled. Fake base OTs will be used. " << std::endl;
-        PRNG commonPRNG(oc::ZeroBlock);
-        std::array<std::array<block, 2>, 128> sendMsgs;
-        commonPRNG.get(sendMsgs.data(), sendMsgs.size());
-        if (role == Role::Receiver)
-        {
-            receivers[0].setBaseOts(sendMsgs, prng, chls[0]);
-        }
-        else
-        {
-            BitVector bv(128);
-            bv.randomize(commonPRNG);
-            std::array<block, 128> recvMsgs;
-            for (u64 i = 0; i < 128; ++i)
-                recvMsgs[i] = sendMsgs[i][bv[i]];
-            senders[0].setBaseOts(recvMsgs, bv, chls[0]);
-        }
+#else
+        if (cmd.isSet("fakeBase"))
 #endif
+        {
+
+            PRNG commonPRNG(oc::ZeroBlock);
+            std::vector<std::array<block, 2>> sendMsgs(nBaseOTs);
+            commonPRNG.get(sendMsgs.data(), sendMsgs.size());
+            if (role == Role::Receiver)
+            {
+                receivers[0].setBaseOts(sendMsgs, prng, chls[0]);
+            }
+            else
+            {
+                BitVector bv(nBaseOTs);
+                bv.randomize(commonPRNG);
+                std::vector<block> recvMsgs(nBaseOTs);
+                for (u64 i = 0; i < nBaseOTs; ++i)
+                    recvMsgs[i] = sendMsgs[i][bv[i]];
+                senders[0].setBaseOts(recvMsgs, bv, prng, chls[0]);
+            }
+        }
 
         // for the rest of the extenders, call split. This securely
         // creates two sets of extenders that can be used in parallel.
         for (auto i = 1; i < numThreads; ++i)
         {
             if (role == Role::Receiver)
-                receivers[i] = receivers[0].splitBase();
+                receivers.push_back(receivers[0].splitBase());
             else
-                senders[i] = senders[0].splitBase();
+                senders.push_back(senders[0].splitBase());
         }
 
         if (cmd.isSet("noHash"))
@@ -122,22 +124,64 @@ namespace osuCrypto
             // get a random number generator seeded from the system
             PRNG prng(sysRandomSeed());
 
-            // construct a vector to stored the random send messages.
-            std::vector<std::array<block, 2>> sMsgs(numOTs * (role == Role::Sender));
+            // construct a vector to stored the random send mMessages.
+            auto sMsgs = AlignedUnVector<std::array<block, 2>>(numOTs * (role == Role::Sender));
 
             // construct the choices that we want.
             BitVector choice(numOTs);
-            // in this case pick random messages.
+            // in this case pick random mMessages.
             choice.randomize(prng);
 
-            // construct a vector to stored the received messages.
-            std::vector<block> rMsgs(numOTs * (role != Role::Sender));
+            // construct a vector to stored the received mMessages.
+            auto rMsgs = AlignedUnVector<block>(numOTs * (role != Role::Sender));
 
+            const char* roleStr = (role == Role::Sender) ? "Sender" : "Receiver";
+
+            u64 totalMilli = 0;
+            u64 totalCom = 0;
+            u64 totalStartupMilli = 0;
+            u64 totalStartupCom = 0;
             for (u64 tt = 0; tt < trials; ++tt)
             {
+                sync(chls[i], role);
+                chls[0].resetStats();
 
                 timer.reset();
                 auto s = timer.setTimePoint("start");
+
+#ifdef LIBOTE_HAS_BASE_OT
+                if (!cmd.isSet("fakeBase"))
+                {
+                    // Now compute the base OTs, we need to set them on the first pair of extenders.
+                    // In real code you would only have a sender or reciever, not both. But we do
+                    // here just showing the example.
+                    if (role == Role::Receiver)
+                    {
+                        receivers.emplace_back();
+                        DefaultBaseOT base;
+                        AlignedVector<std::array<block, 2>> baseMsg(nBaseOTs);
+                        base.send(baseMsg, prng, chls[i], numThreads);
+                        receivers[i].setBaseOts(baseMsg, prng, chls[i]);
+                    }
+                    else
+                    {
+
+                        DefaultBaseOT base;
+                        BitVector bv(nBaseOTs);
+                        AlignedVector<block> baseMsg(nBaseOTs);
+                        bv.randomize(prng);
+                        base.receive(bv, baseMsg, prng, chls[i], numThreads);
+                        senders[i].setBaseOts(baseMsg, bv, prng, chls[i]);
+                    }
+                }
+#endif
+
+                auto Startup = timer.setTimePoint("Startup");
+                auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(Startup - s).count();
+                totalStartupMilli += milli;
+
+                auto com = chls[0].getTotalDataRecv() * numThreads;
+                totalStartupCom += com;
 
                 if (role == Role::Receiver)
                 {
@@ -157,8 +201,8 @@ namespace osuCrypto
                 {
 
                     // if delta OT is used, then the user can call the following
-                    // to set the desired XOR difference between the zero messages
-                    // and the one messages.
+                    // to set the desired XOR difference between the zero mMessages
+                    // and the one mMessages.
                     //
                     //     senders[i].setDelta(some 128 bit delta);
                     //
@@ -174,19 +218,33 @@ namespace osuCrypto
                         prng.get(sMsgs.data(), sMsgs.size());
 
                         // perform the OTs. The receiver will learn one
-                        // of the messages stored in msgs.
+                        // of the mMessages stored in msgs.
                         senders[i].sendChosen(sMsgs, prng, chls[i]);
                     }
                 }
 
                 auto e = timer.setTimePoint("finish");
-                auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+                milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+                totalMilli += milli;
 
-                auto com = (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent()) * numThreads;
+                com = chls[0].getTotalDataRecv() * numThreads;
+                totalCom += com;
+                chls[0].resetStats();
 
-                if (role == Role::Sender && i == 0)
-                    lout << tag << " n=" << Color::Green << totalOTs << " " << milli << " ms  " << com << " bytes" << std::endl << Color::Default;
+                if (i == 0)
+                {
+                    lout << tag << " (" << roleStr << ") n=" << Color::Green << totalOTs << " " << milli << " ms  " << com << " bytes" << std::endl << Color::Default;
+                }
 
+            }
+
+            if (i == 0)
+            {
+                i64 avgMilli = lround((double) totalMilli / trials);
+                i64 avgCom = lround((double) totalCom / trials);
+                i64 avgStartupMilli = lround((double) totalStartupMilli / trials);
+                i64 avgStartupCom = lround((double) totalStartupCom / trials);
+                lout << tag << " (" << roleStr << ") average: n=" << Color::Green << totalOTs << " " << avgMilli << " ms  " << avgCom << " bytes, Startup " << avgStartupMilli << " ms  " << avgStartupCom << " bytes" << std::endl << Color::Default;
             }
 
             if (cmd.isSet("v") && role == Role::Sender && i == 0)
@@ -200,8 +258,10 @@ namespace osuCrypto
 
         };
 
-        senders[0].setTimer(sendTimer);
-        receivers[0].setTimer(recvTimer);
+        if (role == Role::Receiver)
+            receivers[0].setTimer(recvTimer);
+        else
+            senders[0].setTimer(sendTimer);
 
         std::vector<std::thread> thrds(numThreads);
         for (int i = 0; i < numThreads; ++i)

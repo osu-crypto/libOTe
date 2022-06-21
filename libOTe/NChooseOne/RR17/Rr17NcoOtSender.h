@@ -34,7 +34,16 @@ namespace osuCrypto
         void setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices,
-            Channel& chl) override;
+            Channel& chl);
+
+        void setBaseOts(
+            span<block> baseRecvOts,
+            const BitVector& choices,
+            PRNG& prng,
+            Channel& chl) override
+        {
+            setBaseOts(baseRecvOts, choices, chl);
+        }
 
         // Creates a new OT extesion of the same type that can be used
         // in parallel to the original. Each will be independent and can

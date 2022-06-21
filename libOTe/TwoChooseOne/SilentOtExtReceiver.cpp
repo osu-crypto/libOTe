@@ -19,7 +19,7 @@ namespace osuCrypto
 
 
 
-    // sets the KOS base OTs that are then used to extend
+    // sets the Iknp base OTs that are then used to extend
     void SilentOtExtReceiver::setBaseOts(
         span<std::array<block, 2>> baseSendOts,
         PRNG& prng,
@@ -28,7 +28,7 @@ namespace osuCrypto
         setBaseOts(baseSendOts);
     }
 
-    // sets the KOS base OTs that are then used to extend
+    // sets the Iknp base OTs that are then used to extend
     void SilentOtExtReceiver::setBaseOts(
         span<std::array<block, 2>> baseSendOts) {
 #ifdef ENABLE_KOS
@@ -39,7 +39,7 @@ namespace osuCrypto
     }
 
 
-    // return the number of base OTs KOS needs
+    // return the number of base OTs IKNP needs
     u64 SilentOtExtReceiver::baseOtCount() const {
 #ifdef ENABLE_KOS
         return mKosRecver.baseOtCount();
@@ -48,12 +48,12 @@ namespace osuCrypto
 #endif
     }
 
-    // returns true if the KOS base OTs are currently set.
+    // returns true if the IKNP base OTs are currently set.
     bool SilentOtExtReceiver::hasBaseOts() const {
 #ifdef ENABLE_KOS
         return mKosRecver.hasBaseOts();
 #else
-        throw std::runtime_error("KOS must be enabled");
+        throw std::runtime_error("IKNP must be enabled");
 #endif
     };
 
@@ -69,6 +69,7 @@ namespace osuCrypto
         auto malOts = recvBaseOts.subspan(genOts.size());
 
         mGen.setBase(genOts);
+        //std::copy(gapOts.begin(), gapOts.end(), mGapOts.begin());
         std::copy(malOts.begin(), malOts.end(), mMalCheckOts.begin());
 
     }
@@ -86,6 +87,8 @@ namespace osuCrypto
 #endif
 
     }
+
+
     // Returns an indpendent copy of this extender.
     std::unique_ptr<OtExtReceiver> SilentOtExtReceiver::split() {
 
@@ -139,7 +142,7 @@ namespace osuCrypto
             throw std::runtime_error("configure must be called first");
 
         BitVector choice = sampleBaseChoiceBits(prng);
-        std::vector<block> msg(choice.size());
+        AlignedUnVector<block> msg(choice.size());
 
         // If we have KOS base OTs, use them
         // to extend to get the silent base OTs.
@@ -150,14 +153,14 @@ namespace osuCrypto
         mKosRecver.mFiatShamir = true;
         mKosRecver.receive(choice, msg, prng, chl);
 #else
-    // otherwise just generate the silent 
+    // otherwise just generate the silent
     // base OTs directly.
         DefaultBaseOT base;
         base.receive(choice, msg, prng, chl, mNumThreads);
         setTimePoint("recver.gen.baseOT");
 #endif
 #else
-        throw std::runtime_error("KOS or base OTs must be enabled");
+        throw std::runtime_error("IKNP or base OTs must be enabled");
 #endif
         setSilentBaseOts(msg);
 
@@ -168,8 +171,8 @@ namespace osuCrypto
     {
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
-        return 
-            mGen.baseOtCount() + 
+        return
+            mGen.baseOtCount() +
             (mMalType == SilentSecType::Malicious) * 128;
     }
 
@@ -219,13 +222,13 @@ namespace osuCrypto
     //    v_i = w_i + u_i * x
     //
     //    ------------------------ -
-    //    u' =   0000001000000000001000000000100000...00000,   u_i = 1 iff i \in S 
+    //    u' =   0000001000000000001000000000100000...00000,   u_i = 1 iff i \in S
     //
     //    v' = r + (x . u') = DPF(k0)
     //       = r + (000000x00000000000x000000000x00000...00000)
     //
     //    u = u' * H             bit-vector * H. Mapping n'->n bits
-    //    v = v' * H		   block-vector * H. Mapping n'->n block
+    //    v = v' * H           block-vector * H. Mapping n'->n block
     //
     //sigma = 1   Sender
     //
@@ -369,12 +372,8 @@ namespace osuCrypto
         gTimer.setTimePoint("recver.expand.start");
 
 
-        if (mBackingSize < mN2)
-        {
-            mBackingSize = mN2;
-            mBacking.reset(new block[mBackingSize]);
-        }
-        mA = span<block>(mBacking.get(), mN2);
+        mA.resize(0);
+        mA.resize(mN2);
         mC = {};
 
         // do the compression to get the final OTs.
@@ -384,7 +383,7 @@ namespace osuCrypto
         {
             MatrixView<block> rT(mA.data(), 128, mN2 / 128);
 
-            // locally expand the seeds.
+            // locally expand the mSeeds.
             mGen.expand(chl, prng, rT, PprfOutputFormat::InterleavedTransposed, mNumThreads);
             setTimePoint("recver.expand.pprf_transpose");
 
@@ -402,11 +401,12 @@ namespace osuCrypto
             break;
         }
 
-        mA = span<block>(mBacking.get(), mRequestedNumOts);
+
+        mA.resize(mRequestedNumOts);
 
         if (mC.size())
         {
-            mC = span<u8>(mChoicePtr.get(), mRequestedNumOts);
+            mC.resize(mRequestedNumOts);
         }
     }
 
@@ -647,14 +647,16 @@ namespace osuCrypto
                         std::vector<block> c128(nBlocks);
                         multAddReduce(sb.getSpan<block>(), c128);
 
-                        if (mChoiceSpanSize < mRequestedNumOts)
-                        {
-                            mChoiceSpanSize = mRequestedNumOts;
-                            mChoicePtr.reset(new u8[mChoiceSpanSize]);
-                        }
+                        mC.resize(0);
+                        mC.resize(mRequestedNumOts);
+                        //if (mC.size() < mRequestedNumOts)
+                        //{
+                        //    //mChoiceSpanSize = mRequestedNumOts;
+                        //    //mChoicePtr.reset(new u8[mChoiceSpanSize]);
+                        //}
 
                         BitIterator iter((u8*)c128.data());
-                        mC = span<u8>(mChoicePtr.get(), mRequestedNumOts);
+                        //mC = span<u8>(mChoicePtr.get(), mRequestedNumOts);
                         for (u64 j = 0; j < mRequestedNumOts; ++j)
                         {
                             mC[j] = *iter;
@@ -687,18 +689,18 @@ namespace osuCrypto
                 for (u64 k = 0; k < 128; ++k)
                     tpBuffer[k] = cModP1(k, i);
 
-                transpose128(tpBuffer);
+                transpose128(tpBuffer.data());
             }
 
             auto rem = mRequestedNumOts % 128;
             if (rem && index == 0)
             {
-                std::array<block, 128> tpBuffer;
+                AlignedArray<block, 128> tpBuffer;
 
                 for (u64 j = 0; j < tpBuffer.size(); ++j)
                     tpBuffer[j] = cModP1(j, numBlocks);
 
-                transpose128(tpBuffer);
+                transpose128(tpBuffer.data());
 
                 memcpy(mA.data() + numBlocks * 128, tpBuffer.data(), rem * sizeof(block));
             }
@@ -731,13 +733,7 @@ namespace osuCrypto
         mSizePer = 0;
 
         mC = {};
-        mChoicePtr = {};
-        mChoiceSpanSize = 0;
-
         mA = {};
-        mBacking = {};
-        mBackingSize = {};
-
         mGen.clear();
 
         mS = {};

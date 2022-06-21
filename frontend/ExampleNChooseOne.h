@@ -79,19 +79,20 @@ namespace osuCrypto
                 recvers[k].init(numOTs, prng, chl);
 
                 // now we can iterate over the OTs and actaully retreive the desired
-                // messages. However, for efficieny we will do this in steps where
+                // mMessages. However, for efficieny we will do this in steps where
                 // we do some computation followed by sending off data. This is more
                 // efficient since data will be sent in the background :).
                 for (int i = 0; i < numOTs; )
                 {
                     // figure out how many OTs we want to do in this step.
                     auto min = std::min<u64>(numOTs - i, step);
+                    i += min;
 
                     // iterate over this step.
                     for (u64 j = 0; j < min; ++j, ++i)
                     {
                         // For the OT index by i, we need to pick which
-                        // one of the N OT messages that we want. For this
+                        // one of the N OT mMessages that we want. For this
                         // example we simply pick a random one. Note only the
                         // first log2(N) bits of choice is considered.
                         block choice = prng.get<block>();
@@ -112,10 +113,10 @@ namespace osuCrypto
                     //    recvers[k].zeroEncode(i);
                     //
 
-                    // Now that we have gotten out the OT messages for this step,
+                    // Now that we have gotten out the OT mMessages for this step,
                     // we are ready to send over network some information that
-                    // allows the sender to also compute the OT messages. Since we just
-                    // encoded "min" OT messages, we will tell the class to send the
+                    // allows the sender to also compute the OT mMessages. Since we just
+                    // encoded "min" OT mMessages, we will tell the class to send the
                     // next min "correction" values.
                     recvers[k].sendCorrection(chl, min);
                 }
@@ -131,11 +132,11 @@ namespace osuCrypto
                 std::vector<block>recvMsgs(numOTs);
                 std::vector<u64> choices(numOTs);
 
-                // define which messages the receiver should learn.
+                // define which mMessages the receiver should learn.
                 for (int i = 0; i < numOTs; ++i)
                     choices[i] = prng.get<u8>();
 
-                // the messages that were learned are written to recvMsgs.
+                // the mMessages that were learned are written to recvMsgs.
                 recvers[k].receiveChosen(numChosenMsgs, recvMsgs, choices, prng, chl);
             }
         };
@@ -169,20 +170,20 @@ namespace osuCrypto
                     //// we now encode any OT message with index less that i + min.
                     //for (u64 j = 0; j < min; ++j, ++i)
                     //{
-                    //    // in particular, the sender can retreive many OT messages
+                    //    // in particular, the sender can retreive many OT mMessages
                     //    // at a single index, in this case we chose to retreive 3
                     //    // but that is arbitrary.
                     //    auto choice0 = prng.get<block>();
                     //    auto choice1 = prng.get<block>();
                     //    auto choice2 = prng.get<block>();
 
-                    //    // these we hold the actual OT messages.
+                    //    // these we hold the actual OT mMessages.
                     //    block
                     //        otMessage0,
                     //        otMessage1,
                     //        otMessage2;
 
-                    //    // now retreive the messages
+                    //    // now retreive the mMessages
                     //    senders[k].encode(i, &choice0, &otMessage0);
                     //    senders[k].encode(i, &choice1, &otMessage1);
                     //    senders[k].encode(i, &choice2, &otMessage2);
@@ -195,11 +196,11 @@ namespace osuCrypto
             }
             else
             {
-                // populate this with the messages that you want to send.
+                // populate this with the mMessages that you want to send.
                 Matrix<block> sendMessages(numOTs, numChosenMsgs);
                 prng.get(sendMessages.data(), sendMessages.size());
 
-                // perform the OTs with the given messages.
+                // perform the OTs with the given mMessages.
                 senders[k].sendChosen(sendMessages, prng, chl);
             }
         };

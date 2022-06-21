@@ -56,7 +56,7 @@ namespace osuCrypto
         std::array<std::array<block, superBlkSize>, 128> t0;
         std::array<std::array<block, superBlkSize>, 128> t1;
 
-        // we are going to process OTs in blocks of 128 * superblkSize messages.
+        // we are going to process OTs in blocks of 128 * superblkSize mMessages.
         u64 numSuperBlocks = ((numOtExt + 127) / 128 + superBlkSize - 1) / superBlkSize;
         u64 numCols = mGens.size();
 

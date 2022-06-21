@@ -1,6 +1,7 @@
 #pragma once
-// This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
+// This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use.
 #include <cryptoTools/Common/Defines.h>
+#include <cryptoTools/Common/Aligned.h>
 #include <cryptoTools/Network/Channel.h>
 #include <array>
 #ifdef GetMessage
@@ -14,32 +15,33 @@ namespace osuCrypto
     class BitVector;
 
     // The hard coded number of base OT that is expected by the OT Extension implementations.
-    // This can be changed if the code is adequately adapted. 
+    // This can be changed if the code is adequately adapted.
     const u64 gOtExtBaseOtCount(128);
-    
+
     class OtReceiver
     {
     public:
         OtReceiver() = default;
         virtual ~OtReceiver() = default;
 
-        // Receive random strings indexed by choices. The random strings will be written to 
-        // messages.
+        // Receive random strings indexed by choices. The random strings will be written to
+        // mMessages. mMessages must have the same alignment as an AlignedBlockPtr, i.e. 32
+        // bytes with avx or 16 bytes without avx.
         virtual void receive(
             const BitVector& choices,
             span<block> messages,
             PRNG& prng,
             Channel& chl) = 0;
 
-        // Receive chosen strings indexed by choices. The chosen strings will be written to 
-        // messages.
+        // Receive chosen strings indexed by choices. The chosen strings will be written to
+        // mMessages. The same alignment restriction applies.
         void receiveChosen(
             const BitVector& choices,
             span<block> recvMessages,
             PRNG& prng,
             Channel& chl);
 
-
+        // The same alignment restriction applies.
         void receiveCorrelated(
             const BitVector& choices,
             span<block> recvMessages,
@@ -54,25 +56,29 @@ namespace osuCrypto
         OtSender() {}
         virtual ~OtSender() = default;
 
-        // send random strings. The random strings will be written to 
-        // messages.
+        // send random strings. The random strings will be written to
+        // mMessages, which must be aligned like an AlignedBlockPtr.
         virtual void send(
             span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl) = 0;
 
-        // send chosen strings. Thosen strings are read from messages.
+        // send chosen strings. Thosen strings are read from mMessages. No extra
+        // alignment is required.
         void sendChosen(
             span<std::array<block, 2>> messages,
             PRNG& prng,
             Channel& chl);
 
+        // No extra alignment is required.
         template<typename CorrelationFunc>
         void sendCorrelated(span<block> messages, const CorrelationFunc& corFunc, PRNG& prng, Channel& chl)
         {
 
-            std::vector<std::array<block, 2>> temp(messages.size());
-            std::vector<block> temp2(messages.size());
+            AlignedUnVector<std::array<block, 2>> 
+                temp(messages.size()),
+                temp2(messages.size());
+
             send(temp, prng, chl);
 
             for (u64 i = 0; i < static_cast<u64>(messages.size()); ++i)
@@ -97,13 +103,13 @@ namespace osuCrypto
             span<std::array<block,2>> baseSendOts,
             PRNG& prng,
             Channel& chl) = 0;
-        
+
         // the number of base OTs that should be set.
         virtual u64 baseOtCount() const { return gOtExtBaseOtCount; }
 
         // returns true if the base OTs are currently set.
-        virtual bool hasBaseOts() const = 0; 
-        
+        virtual bool hasBaseOts() const = 0;
+
         // Returns an indpendent copy of this extender.
         virtual std::unique_ptr<OtExtReceiver> split() = 0;
 
@@ -129,7 +135,8 @@ namespace osuCrypto
         virtual void setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices,
-            Channel& chl)  = 0;
+            PRNG& prng,
+            Channel& chl) = 0;
 
         // Returns an indpendent copy of this extender.
         virtual std::unique_ptr<OtExtSender> split() = 0;

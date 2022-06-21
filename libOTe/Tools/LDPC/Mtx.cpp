@@ -1539,7 +1539,6 @@ namespace osuCrypto
         assert(I == DenseMtx::Identity(n1));
 
     }
-
     
 
 }

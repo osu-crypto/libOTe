@@ -108,7 +108,7 @@ namespace osuCrypto
         // the next one they will send.
         mCorrectionIdx = 0;
 
-        // we are going to process OTs in blocks of 128 * superblkSize messages.
+        // we are going to process OTs in blocks of 128 * superblkSize mMessages.
         u64 numSuperBlocks = (numOTExt / 128 + superBlkSize - 1) / superBlkSize;
 
         // the index of the last OT that we have completed.

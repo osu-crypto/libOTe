@@ -116,7 +116,7 @@ namespace osuCrypto
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
 
-        std::vector<std::array<block, 2>> msg(silentBaseOtCount());
+        AlignedVector<std::array<block, 2>> msg(silentBaseOtCount());
 
 
         // If we have KOS base OTs, use them
@@ -220,7 +220,6 @@ namespace osuCrypto
         chl.asyncSendCopy(mDelta);
 
         setTimePoint("sender.expand.checkRT");
-
     }
 
     void SilentOtExtSender::clear()
@@ -232,9 +231,7 @@ namespace osuCrypto
         mNumPartitions = 0;
         mP = 0;
 
-        mBacking = {};
-        mBackingSize = 0;
-        mB = {};
+        mB.clear();
 
         mDelta = block(0,0);
 
@@ -407,12 +404,14 @@ namespace osuCrypto
         mDelta = d;
 
         // allocate b
-        if (mBackingSize < mN2)
-        {
-            mBackingSize = mN2;
-            mBacking.reset(new block[mBackingSize]);
-        }
-        mB = span<block>(mBacking.get(), mN2);
+        //if (mBackingSize < mN2)
+        //{
+        //    mBackingSize = mN2;
+        //    mBacking.reset(new block[mBackingSize]);
+        //}
+
+        mB.resize(0);
+        mB.resize(mN2);
 
         switch (mMultType)
         {
@@ -436,7 +435,7 @@ namespace osuCrypto
             break;
         }
 
-        mB = span<block>(mBacking.get(), mRequestNumOts);
+        mB.resize(mRequestNumOts);
     }
 
 
@@ -690,7 +689,7 @@ namespace osuCrypto
             brs[j++].decrementWait();
 
 
-            std::array<block, 128> tpBuffer;
+            AlignedArray<block, 128> tpBuffer;
             auto numBlocks = (mRequestNumOts + 127) / 128;
             auto begin = index * numBlocks / mNumThreads;
             auto end = (index + 1) * numBlocks / mNumThreads;
@@ -702,7 +701,7 @@ namespace osuCrypto
                 for (u64 k = 0; k < tpBuffer.size(); ++k)
                     tpBuffer[k] = cModP1(k, i);
 
-                transpose128(tpBuffer);
+                transpose128(tpBuffer.data());
 
                 auto end = i * tpBuffer.size() + min;
                 for (u64 k = 0; j < end; ++j, ++k)

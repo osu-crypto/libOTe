@@ -29,14 +29,14 @@ namespace osuCrypto
     // you can call genBaseOts(...) or setBaseOts(...) just as before
     // and internally the implementation will transform these into
     // the required base OTs. You can also directly call send(...) or receive(...)
-    // just as before and the receiver can specify the OT messages
+    // just as before and the receiver can specify the OT mMessages
     // that they wish to receive. However, using this interface results 
     // in slightly more communication and rounds than are strickly required.
     //
     // The second interface in the "native" silent OT interface.
     // The simplest way to use this interface is to call silentSend(...)
     // and silentReceive(...). This internally will perform all of the 
-    // base OTs and output the random OT messages and random OT
+    // base OTs and output the random OT mMessages and random OT
     // choice bits. 
     //
     // In particular, 128 base OTs will be performed using the DefaultBaseOT
@@ -85,7 +85,7 @@ namespace osuCrypto
         u64 mScaler = 2;
 
         // The B vector in the relation A + B = C * delta
-        span<block> mB;
+        AlignedUnVector<block> mB;
 
         // The delta scaler in the relation A + B = C * delta
         block mDelta;
@@ -113,10 +113,10 @@ namespace osuCrypto
         std::vector<std::array<block, 2>> mMalCheckOts;
 
         // The memory backing mB
-        std::unique_ptr<block[]> mBacking;
+        //AlignedUnVector<block> mBacking;
 
         // The size of the memory backing mB
-        u64 mBackingSize = 0;
+        //u64 mBackingSize = 0;
 
         // A flag that helps debug
         bool mDebug = false;
@@ -142,7 +142,16 @@ namespace osuCrypto
         void setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices,
-            Channel& chl) override;
+            Channel& chl);
+
+        void setBaseOts(
+            span<block> baseRecvOts,
+            const BitVector& choices,
+            PRNG& prng,
+            Channel& chl) override
+        {
+            setBaseOts(baseRecvOts, choices, chl);
+        }
 
         // Returns an independent copy of this extender.
         std::unique_ptr<OtExtSender> split() override;
@@ -151,7 +160,7 @@ namespace osuCrypto
         // IKNP base OTs that are required.
         void genBaseOts(PRNG& prng, Channel& chl) override;
 
-        // Perform OT extension of random OT messages but
+        // Perform OT extension of random OT mMessages but
         // allow the receiver to specify the choice bits.
         void send(
             span<std::array<block, 2>> messages,
@@ -183,7 +192,7 @@ namespace osuCrypto
         // @scaler   [in] - the compression factor.
         // @nThreads [in] - the number of threads.
         // @mal      [in] - whether the malicious check is performed.
-		void configure(
+        void configure(
             u64 n,
             u64 scaler = 2,
             u64 numThreads = 1,
@@ -220,12 +229,12 @@ namespace osuCrypto
         // @ b   [out] - the correlated ot message.
         // @prng  [in] - randomness source.
         // @chl   [in] - the comm channel
-		void silentSend(
+        void silentSend(
             block d,
-			span<block> b,
-			PRNG& prng,
-			Channel& chl);
-
+            span<block> b,
+            PRNG& prng,
+            Channel& chl);
+        
         // Runs the silent correlated OT protocol and store
         // the b vector internally as mB. The protocol takes 
         // as input the desired delta value. The outputs will 
@@ -242,7 +251,6 @@ namespace osuCrypto
             Channel& chl);
 
         // internal functions
-
 
         // Runs the malicious consistency check as described 
         // by the ferret paper. We only run the batch check and
