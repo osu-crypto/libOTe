@@ -120,10 +120,18 @@ namespace osuCrypto
 
 				size_t chunkSize() const { return 128; }
 				size_t paddingSize() const { return 0; }
+
+				DotMaliciousLeakySender* mParent = nullptr;
+				block* mInputW = nullptr;
+				void setParams(DotMaliciousLeakySender* p, block* w)
+				{
+					mParent = p;
+					mInputW = w;
+				}
+
 				OC_FORCEINLINE void processChunk(
 					size_t nChunk, size_t numUsed,
-					span<std::array<block, 2>> messages,
-					DotMaliciousLeakySender* parent, block* inputW);
+					span<std::array<block, 2>> messages);
 			};
 
 			Hasher hasher;
@@ -219,13 +227,13 @@ namespace osuCrypto
 
 		void TwoOneMaliciousSender::Hasher::processChunk(
 			size_t nChunk, size_t numUsed,
-			span<std::array<block, 2>> messages,
-			DotMaliciousLeakySender* parent, block* inputW)
+			span<std::array<block, 2>> messages)
 		{
 			rtcr.useAES(128);
 
-			TwoOneMaliciousSender* parent_ = static_cast<TwoOneMaliciousSender*>(parent);
-			inputW += nChunk * parent_->chunkSize();
+			TwoOneMaliciousSender* parent_ = static_cast<TwoOneMaliciousSender*>(mParent);
+			
+			auto inputW = mInputW + nChunk * parent_->chunkSize();
 			parent_->mVole->hash(span<const block>(inputW, parent_->wPadded()));
 
 			transpose128(inputW);

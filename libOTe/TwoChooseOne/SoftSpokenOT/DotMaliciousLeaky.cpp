@@ -17,6 +17,7 @@ namespace osuCrypto
 
 			size_t nChunks = divCeil(messages.size() + 64, 128);
 			size_t messagesFullChunks = messages.size() / 128;
+			size_t numExtra = nChunks - messagesFullChunks; // Always 1 or 2
 
 			block* scratch = (block*)messages.data();
 			AlignedUnVector<block> scratchBacking;
@@ -25,18 +26,19 @@ namespace osuCrypto
 				scratchBacking.resize(messagesFullChunks * chunkSize() + paddingSize());
 				scratch = scratchBacking.data();
 			}
-
 			ChunkerBase::runBatch(chl, span<block>(scratch, messagesFullChunks * chunkSize()));
 
 			// Extra blocks
-			size_t numExtra = nChunks - messagesFullChunks; // Always 1 or 2
 			ChunkerBase::runBatch(chl, mExtraW.subspan(0, numExtra * chunkSize()));
 
 			mVole->sendChallenge(prng, chl);
 			hasher.send(prng, chl);
 
-			hasher.runBatch(chl, messages.subspan(0, messagesFullChunks * 128), this, scratch);
-			hasher.runBatch(chl, messages.subspan(messagesFullChunks * 128), this, mExtraW.data());
+			hasher.setGlobalParams(this, scratch);
+			hasher.runBatch2(chl, messages.subspan(0, messagesFullChunks * 128));
+			//hasher.runBatch(chl, messages.subspan(messagesFullChunks * 128), this, mExtraW.data());
+			hasher.setGlobalParams(this, mExtraW.data());
+			hasher.runBatch2(chl, messages.subspan(messagesFullChunks * 128));
 
 			// Hash the last extra block if there was one with no used mMessages in it at all.
 			if (numExtra == 2 || messages.size() % 128 == 0)
@@ -53,14 +55,13 @@ namespace osuCrypto
 
 		void DotMaliciousLeakySender::Hasher::processChunk(
 			size_t nChunk, size_t numUsed,
-			span<std::array<block, 2>> messages,
-			DotMaliciousLeakySender* parent, block* inputW)
+			span<std::array<block, 2>> messages)
 		{
-			inputW += nChunk * parent->chunkSize();
-			parent->mVole->hash(span<const block>(inputW, parent->wPadded()));
+			auto inputW = mInputW + nChunk * mParent->chunkSize();
+			mParent->mVole->hash(span<const block>(inputW, mParent->wPadded()));
 
 			transpose128(inputW);
-			parent->xorMessages(numUsed, (block*)messages.data(), inputW);
+			mParent->xorMessages(numUsed, (block*)messages.data(), inputW);
 		}
 
 		template<typename Hasher1>

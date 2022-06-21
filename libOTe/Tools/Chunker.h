@@ -163,6 +163,23 @@ namespace osuCrypto
 			int operator()(const T& in, U* out) const { std::copy_n(in.data(), n, out); return 0; }
 		};
 
+		std::pair<size_t, size_t>
+			checkSpanLengths(span<InstParams>... instParams) const
+		{
+			size_t numInstancesArray[] = { (size_t)instParams.size()... };
+			size_t numInstances = numInstancesArray[0];
+#ifndef NDEBUG
+			for (size_t n : numInstancesArray)
+				if (n != numInstances)
+					throw RTE_LOC;
+#endif
+
+			const size_t chunkSize = static_cast<const Derived*>(this)->chunkSize();
+			size_t numChunks = divCeil(numInstances, chunkSize);
+			return std::pair<size_t, size_t>(numInstances, numChunks);
+		}
+
+
 		template<typename... ChunkParams>
 		std::pair<size_t, size_t>
 			checkSpanLengths(span<InstParams>... instParams, span<ChunkParams>... chunkParams) const
@@ -218,6 +235,44 @@ namespace osuCrypto
 					std::forward<GlobalParams>(globalParams)...);
 			}
 		}
+
+		template<typename... GlobalParams>
+		OC_FORCEINLINE void setGlobalParams(GlobalParams&&... globalParams)
+		{
+			static_cast<Derived*>(this)->setParams(
+				std::forward<GlobalParams>(globalParams)...);
+		}
+
+		template<typename... ChunkParams>
+		OC_FORCEINLINE void runBatch2(
+			Channel& chl, span<InstParams>... instParams,
+			span<ChunkParams>... chunkParams)
+		{
+			size_t numInstances = checkSpanLengths(instParams..., chunkParams...).first;
+
+			const size_t chunkSize = static_cast<const Derived*>(this)->chunkSize();
+			const size_t minInstances = chunkSize + static_cast<Derived*>(this)->paddingSize();
+
+			// The bulk of the instances can work directly on the input / output data.
+			size_t nChunk = 0;
+			size_t nInstance = 0;
+			for (; nInstance + minInstances <= numInstances; ++nChunk, nInstance += chunkSize)
+				static_cast<Derived*>(this)->processChunk(
+					nChunk, chunkSize,
+					span<InstParams>(instParams.data() + nInstance, minInstances)...,
+					std::forward<ChunkParams>(chunkParams[nChunk])...);
+
+			// The last few (probably only 1) need an intermediate buffer.
+			for (; nInstance < numInstances; ++nChunk, nInstance += chunkSize)
+			{
+				size_t numUsed = std::min(numInstances - nInstance, chunkSize);
+				processPartialChunk<ChunkParams...>(
+					nChunk, numUsed, minInstances,
+					span<InstParams>(instParams.data() + nInstance, minInstances)...,
+					std::forward<ChunkParams>(chunkParams[nChunk])...);
+			}
+		}
+
 
 		void initTemporaryStorage()
 		{

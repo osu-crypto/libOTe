@@ -43,10 +43,20 @@ namespace osuCrypto
 				void send(PRNG& prng, Channel& chl) {}
 				size_t chunkSize() const { return 128; }
 				size_t paddingSize() const { return 0; }
+
+
+				DotMaliciousLeakySender* mParent = nullptr;
+				block* mInputW = nullptr;
+				void setParams(
+					DotMaliciousLeakySender* parent_, block* inputW_)
+				{
+					mParent = parent_;
+					mInputW = inputW_;
+				}
+
 				OC_FORCEINLINE void processChunk(
 					size_t nChunk, size_t numUsed,
-					span<std::array<block, 2>> messages,
-					DotMaliciousLeakySender* parent, block* inputW);
+					span<std::array<block, 2>> messages);
 			};
 
 			Hasher mHasher;
