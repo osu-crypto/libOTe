@@ -12,11 +12,10 @@
 #include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/SilentOtExtSender.h"
 
-#include "libOTe/TwoChooseOne/SoftSpokenOT/DotSemiHonest.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/DotMaliciousLeaky.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/DotMalicious.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/TwoOneSemiHonest.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/TwoOneMalicious.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalLeakyDotExt.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShDotExt.h"
 
 namespace osuCrypto
 {
@@ -34,6 +33,33 @@ namespace osuCrypto
     {
         throw std::runtime_error("This protocol does not support noHash");
     }
+
+
+    template<typename T>
+    T construct(CLP& cmd);
+
+    //template<typename T>
+    //typename std::enable_if<
+    //    std::is_same<T, SoftSpokenShOtSender>::value ||
+    //    std::is_same<T, SoftSpokenShOtReceiver>::value ||
+    //    std::is_same<T, SoftSpokenShDotSender>::value ||
+    //    std::is_same<T, SoftSpokenShDotReceiver>::value ||
+    //    std::is_same<T, SoftSpokenMalOtSender>::value ||
+    //    std::is_same<T, SoftSpokenMalOtReceiver>::value ||
+    //    std::is_same<T, SoftSpokenMalLeakyDotSender>::value ||
+    //    std::is_same<T, SoftSpokenMalLeakyDotReceiver>::value,
+    //T>::type
+    //    construct(CLP& cmd)
+    //{
+    //    return T{ cmd.getOr("f", 2) };
+    //}
+
+    template<typename T>
+    T construct(CLP& cmd)
+    {
+        return T{};
+    }
+
 
     template<typename OtExtSender, typename OtExtRecver>
     void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
@@ -67,12 +93,12 @@ namespace osuCrypto
         size_t nBaseOTs;
         if (role == Role::Receiver)
         {
-            receivers.emplace_back();
+            receivers.emplace_back(construct<OtExtRecver>(cmd));
             nBaseOTs = receivers[0].baseOtCount();
         }
         else
         {
-            senders.emplace_back();
+            senders.emplace_back(construct<OtExtSender>(cmd));
             nBaseOTs = senders[0].baseOtCount();
         }
 

@@ -14,9 +14,6 @@
 
 namespace osuCrypto
 {
-	namespace SoftSpokenOT
-	{
-
 		struct AESRekeyManager
 		{
 			AESStream mAESs;
@@ -43,12 +40,12 @@ namespace osuCrypto
 		// Builds a Delta OT out of SubspaceVole.
 
 		template<typename SubspaceVole = SubspaceVoleReceiver<RepetitionCode>>
-		class DotSemiHonestSenderWithVole :
+		class SoftSpokenShDotSenderWithVole :
 			public OtExtSender,
 			public TimerAdapter,
 			public AESRekeyManager,
 			private ChunkedReceiver<
-			DotSemiHonestSenderWithVole<SubspaceVole>,
+			SoftSpokenShDotSenderWithVole<SubspaceVole>,
 			std::tuple<std::array<block, 2>>,
 			std::tuple<AlignedUnVector<std::array<block, 2>>>
 			>
@@ -60,7 +57,7 @@ namespace osuCrypto
 			size_t mFieldBitsThenBlockIdx; // mFieldBits before initialization, blockIdx after.
 			size_t mNumThreads;
 
-			DotSemiHonestSenderWithVole(size_t fieldBits = 2, size_t numThreads_ = 1) :
+			SoftSpokenShDotSenderWithVole(size_t fieldBits = 2, size_t numThreads_ = 1) :
 				ChunkerBase(this),
 				mFieldBitsThenBlockIdx(fieldBits),
 				mNumThreads(numThreads_)
@@ -95,14 +92,14 @@ namespace osuCrypto
 				return mVole.get() != nullptr;
 			}
 
-			DotSemiHonestSenderWithVole splitBase()
+			SoftSpokenShDotSenderWithVole splitBase()
 			{
 				throw RTE_LOC; // TODO: unimplemented.
 			}
 
 			std::unique_ptr<OtExtSender> split() override
 			{
-				return std::make_unique<DotSemiHonestSenderWithVole>(splitBase());
+				return std::make_unique<SoftSpokenShDotSenderWithVole>(splitBase());
 			}
 
 			void setBaseOts(
@@ -149,7 +146,7 @@ namespace osuCrypto
 				bool malicious);
 
 			using ChunkerBase = ChunkedReceiver<
-				DotSemiHonestSenderWithVole<SubspaceVole>,
+				SoftSpokenShDotSenderWithVole<SubspaceVole>,
 				std::tuple<std::array<block, 2>>,
 				std::tuple<AlignedUnVector<std::array<block, 2>>>
 			>;
@@ -166,12 +163,12 @@ namespace osuCrypto
 		};
 
 		template<typename SubspaceVole = SubspaceVoleSender<RepetitionCode>>
-		class DotSemiHonestReceiverWithVole :
+		class SoftSpokenShDotReceiverWithVole :
 			public OtExtReceiver,
 			public TimerAdapter,
 			public AESRekeyManager,
 			private ChunkedSender<
-			DotSemiHonestReceiverWithVole<SubspaceVole>,
+			SoftSpokenShDotReceiverWithVole<SubspaceVole>,
 			std::tuple<block>,
 			std::tuple<AlignedUnVector<block>>
 			>
@@ -183,7 +180,7 @@ namespace osuCrypto
 			size_t mFieldBitsThenBlockIdx; // mFieldBits before initialization, blockIdx after.
 			size_t mNumThreads;
 
-			DotSemiHonestReceiverWithVole(size_t fieldBits = 2, size_t numThreads_ = 1) :
+			SoftSpokenShDotReceiverWithVole(size_t fieldBits = 2, size_t numThreads_ = 1) :
 				ChunkerBase(this),
 				mFieldBitsThenBlockIdx(fieldBits),
 				mNumThreads(numThreads_)
@@ -211,14 +208,14 @@ namespace osuCrypto
 				return mVole.get() != nullptr;
 			}
 
-			DotSemiHonestReceiverWithVole splitBase()
+			SoftSpokenShDotReceiverWithVole splitBase()
 			{
 				throw RTE_LOC; // TODO: unimplemented.
 			}
 
 			std::unique_ptr<OtExtReceiver> split() override
 			{
-				return std::make_unique<DotSemiHonestReceiverWithVole>(splitBase());
+				return std::make_unique<SoftSpokenShDotReceiverWithVole>(splitBase());
 			}
 
 			void setBaseOts(span<std::array<block, 2>> baseSendOts, PRNG& prng, Channel& chl) override
@@ -255,7 +252,7 @@ namespace osuCrypto
 				PRNG& prng, Channel& chl, bool malicious);
 
 			using ChunkerBase = ChunkedSender<
-				DotSemiHonestReceiverWithVole<SubspaceVole>,
+				SoftSpokenShDotReceiverWithVole<SubspaceVole>,
 				std::tuple<block>,
 				std::tuple<AlignedUnVector<block>>
 			>;
@@ -272,9 +269,8 @@ namespace osuCrypto
 				size_t nChunk, size_t numUsed, span<block> messages, block chioces);
 		};
 
-		using DotSemiHonestSender = DotSemiHonestSenderWithVole<>;
-		using DotSemiHonestReceiver = DotSemiHonestReceiverWithVole<>;
 
-	}
+	using SoftSpokenShDotSender = SoftSpokenShDotSenderWithVole<>;
+	using SoftSpokenShDotReceiver = SoftSpokenShDotReceiverWithVole<>;
 }
 #endif

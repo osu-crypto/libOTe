@@ -207,22 +207,22 @@ int main(int argc, char** argv)
 #ifdef ENABLE_SOFTSPOKEN_OT
 
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        TwoChooseOne_example<SoftSpokenOT::DotSemiHonestSender, SoftSpokenOT::DotSemiHonestReceiver>(
+        TwoChooseOne_example<SoftSpokenShDotSender, SoftSpokenShDotReceiver>(
             role, totalOTs, numThreads, ip, tag, clp);
     }, cmd, ssdelta);
 
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        TwoChooseOne_example<SoftSpokenOT::TwoOneSemiHonestSender, SoftSpokenOT::TwoOneSemiHonestReceiver>(
+        TwoChooseOne_example<SoftSpokenShOtSender, SoftSpokenShOtReceiver>(
             role, totalOTs, numThreads, ip, tag, clp);
     }, cmd, sshonest);
 
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        TwoChooseOne_example<SoftSpokenOT::DotMaliciousLeakySender, SoftSpokenOT::DotMaliciousLeakyReceiver>(
+        TwoChooseOne_example<SoftSpokenMalLeakyDotSender, SoftSpokenMalLeakyDotReceiver>(
             role, totalOTs, numThreads, ip, tag, clp);
     }, cmd, smleakydelta);
 
     flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        TwoChooseOne_example<SoftSpokenOT::TwoOneMaliciousSender, SoftSpokenOT::TwoOneMaliciousReceiver>(
+        TwoChooseOne_example<SoftSpokenMalOtSender, SoftSpokenMalOtReceiver>(
             role, totalOTs, numThreads, ip, tag, clp);
     }, cmd, smalicious);
 #endif

@@ -19,10 +19,10 @@
 #include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 
-#include "libOTe/TwoChooseOne/SoftSpokenOT/DotSemiHonest.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/TwoOneSemiHonest.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/DotMaliciousLeaky.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/TwoOneMalicious.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalLeakyDotExt.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShDotExt.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
 
 
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
@@ -869,7 +869,6 @@ namespace tests_libOTe
 	void SoftSpokenSmallVole_Test()
 	{
 #ifdef ENABLE_SOFTSPOKEN_OT
-		using namespace SoftSpokenOT;
 		tests::xorReduction();
 
 		const bool print = false;
@@ -1012,8 +1011,9 @@ namespace tests_libOTe
 
 		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
 		{
-			SoftSpokenOT::DotSemiHonestSender sender(fieldBits);
-			SoftSpokenOT::DotSemiHonestReceiver recv(fieldBits);
+			
+			SoftSpokenShDotSender sender(fieldBits);
+			SoftSpokenShDotReceiver recv(fieldBits);
 
 			const size_t nBaseOTs = sender.baseOtCount();
 			if (nBaseOTs != recv.baseOtCount())
@@ -1073,8 +1073,8 @@ namespace tests_libOTe
 
 		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
 		{
-			SoftSpokenOT::TwoOneSemiHonestSender sender(fieldBits);
-			SoftSpokenOT::TwoOneSemiHonestReceiver recv(fieldBits);
+			SoftSpokenShOtSender sender(fieldBits);
+			SoftSpokenShOtReceiver recv(fieldBits);
 
 			size_t nBaseOTs = sender.baseOtCount();
 			if (nBaseOTs != recv.baseOtCount())
@@ -1129,8 +1129,10 @@ namespace tests_libOTe
 
 		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
 		{
-			SoftSpokenOT::DotMaliciousLeakySender sender(fieldBits);
-			SoftSpokenOT::DotMaliciousLeakyReceiver recv(fieldBits);
+			
+			
+			SoftSpokenMalLeakyDotSender sender(fieldBits);
+			SoftSpokenMalLeakyDotReceiver recv(fieldBits);
 
 			const size_t nBaseOTs = sender.baseOtCount();
 			if (nBaseOTs != recv.baseOtCount())
@@ -1190,8 +1192,9 @@ namespace tests_libOTe
 
 		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
 		{
-			SoftSpokenOT::TwoOneMaliciousSender sender(fieldBits);
-			SoftSpokenOT::TwoOneMaliciousReceiver recv(fieldBits);
+			
+			SoftSpokenMalOtSender sender(fieldBits);
+			SoftSpokenMalOtReceiver recv(fieldBits);
 
 			size_t nBaseOTs = sender.baseOtCount();
 			if (nBaseOTs != recv.baseOtCount())

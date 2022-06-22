@@ -104,31 +104,6 @@ namespace osuCrypto
 		using InstanceParams = std::tuple<InstParams...>;
 
 		// Use temporaries to make processChunk work on a partial chunk.
-		template<typename... ChunkParams, typename... GlobalParams>
-		OC_FORCEINLINE void processPartialChunk_(
-			size_t chunkIdx, size_t numUsed, size_t minInstances, span<InstParams>... instParams,
-			ChunkParams... chunkParams, GlobalParams&&... globalParams)
-		{
-			// Copy the data into the temporaries. tuple_transform requires a non-void return type.
-			using boost::mp11::tuple_transform;
-			tuple_transform(
-				[=](auto in, const auto& out) { std::copy_n(in, numUsed, out.data()); return 0; },
-				std::make_tuple(instParams.data()...), tempStorage);
-
-			static_cast<Derived*>(this)->processChunk(
-				chunkIdx, numUsed,
-				span<InstParams>(std::get<InstIndices>(tempStorage).data(), minInstances)...,
-				std::forward<ChunkParams>(chunkParams)...,
-				std::forward<GlobalParams>(globalParams)...);
-
-			// And copy it back out again. The compiler should hopefully be smart enough to remove
-			// the first copy if processChunk is write only. (TODO: check).
-			tuple_transform(CopyOutFunc{ numUsed }, tempStorage,
-				std::make_tuple(instParams.data()...));
-		}
-
-
-		// Use temporaries to make processChunk work on a partial chunk.
 		template<typename... GlobalParams>
 		OC_FORCEINLINE void processPartialChunk(
 			size_t chunkIdx, size_t numUsed, size_t minInstances, span<InstParams>... instParams,
@@ -163,22 +138,8 @@ namespace osuCrypto
 			int operator()(const T& in, U* out) const { std::copy_n(in.data(), n, out); return 0; }
 		};
 
-		std::pair<size_t, size_t>
-			checkSpanLengths(span<InstParams>... instParams) const
-		{
-			size_t numInstancesArray[] = { (size_t)instParams.size()... };
-			size_t numInstances = numInstancesArray[0];
-#ifndef NDEBUG
-			for (size_t n : numInstancesArray)
-				if (n != numInstances)
-					throw RTE_LOC;
-#endif
-
-			const size_t chunkSize = static_cast<const Derived*>(this)->chunkSize();
-			size_t numChunks = divCeil(numInstances, chunkSize);
-			return std::pair<size_t, size_t>(numInstances, numChunks);
-		}
-
+		//template<typename... ChunkParams>
+		//void checkChunkParams(span<ChunkParams>... chunkParams) const;
 
 		template<typename... ChunkParams>
 		std::pair<size_t, size_t>
@@ -194,47 +155,45 @@ namespace osuCrypto
 
 			const size_t chunkSize = static_cast<const Derived*>(this)->chunkSize();
 			size_t numChunks = divCeil(numInstances, chunkSize);
-#ifndef NDEBUG
-			size_t numChunksArray[] = { (size_t)chunkParams.size()... };
-			for (size_t n : numChunksArray)
-				if (n != numChunks)
-					throw RTE_LOC;
-#endif
 
+			//checkChunkParams(chunkParams...);
+			//for (size_t n : { (size_t)chunkParams.size()... })
+			//	if (n != numChunks)
+			//		throw RTE_LOC;
 			return std::pair<size_t, size_t>(numInstances, numChunks);
 		}
 
-		template<typename... ChunkParams, typename... GlobalParams>
-		OC_FORCEINLINE void runBatch(
-			Channel& chl, span<InstParams>... instParams,
-			span<ChunkParams>... chunkParams, GlobalParams&&... globalParams)
-		{
-			size_t numInstances = checkSpanLengths(instParams..., chunkParams...).first;
+		//template<typename... ChunkParams, typename... GlobalParams>
+		//OC_FORCEINLINE void runBatch(
+		//	Channel& chl, span<InstParams>... instParams,
+		//	span<ChunkParams>... chunkParams, GlobalParams&&... globalParams)
+		//{
+		//	size_t numInstances = checkSpanLengths(instParams..., chunkParams...).first;
 
-			const size_t chunkSize = static_cast<const Derived*>(this)->chunkSize();
-			const size_t minInstances = chunkSize + static_cast<Derived*>(this)->paddingSize();
+		//	const size_t chunkSize = static_cast<const Derived*>(this)->chunkSize();
+		//	const size_t minInstances = chunkSize + static_cast<Derived*>(this)->paddingSize();
 
-			// The bulk of the instances can work directly on the input / output data.
-			size_t nChunk = 0;
-			size_t nInstance = 0;
-			for (; nInstance + minInstances <= numInstances; ++nChunk, nInstance += chunkSize)
-				static_cast<Derived*>(this)->processChunk(
-					nChunk, chunkSize,
-					span<InstParams>(instParams.data() + nInstance, minInstances)...,
-					std::forward<ChunkParams>(chunkParams[nChunk])...,
-					std::forward<GlobalParams>(globalParams)...);
+		//	// The bulk of the instances can work directly on the input / output data.
+		//	size_t nChunk = 0;
+		//	size_t nInstance = 0;
+		//	for (; nInstance + minInstances <= numInstances; ++nChunk, nInstance += chunkSize)
+		//		static_cast<Derived*>(this)->processChunk(
+		//			nChunk, chunkSize,
+		//			span<InstParams>(instParams.data() + nInstance, minInstances)...,
+		//			std::forward<ChunkParams>(chunkParams[nChunk])...,
+		//			std::forward<GlobalParams>(globalParams)...);
 
-			// The last few (probably only 1) need an intermediate buffer.
-			for (; nInstance < numInstances; ++nChunk, nInstance += chunkSize)
-			{
-				size_t numUsed = std::min(numInstances - nInstance, chunkSize);
-				processPartialChunk<ChunkParams...>(
-					nChunk, numUsed, minInstances,
-					span<InstParams>(instParams.data() + nInstance, minInstances)...,
-					std::forward<ChunkParams>(chunkParams[nChunk])...,
-					std::forward<GlobalParams>(globalParams)...);
-			}
-		}
+		//	// The last few (probably only 1) need an intermediate buffer.
+		//	for (; nInstance < numInstances; ++nChunk, nInstance += chunkSize)
+		//	{
+		//		size_t numUsed = std::min(numInstances - nInstance, chunkSize);
+		//		processPartialChunk<ChunkParams...>(
+		//			nChunk, numUsed, minInstances,
+		//			span<InstParams>(instParams.data() + nInstance, minInstances)...,
+		//			std::forward<ChunkParams>(chunkParams[nChunk])...,
+		//			std::forward<GlobalParams>(globalParams)...);
+		//	}
+		//}
 
 		template<typename... GlobalParams>
 		OC_FORCEINLINE void setGlobalParams(GlobalParams&&... globalParams)
@@ -245,8 +204,7 @@ namespace osuCrypto
 
 		template<typename... ChunkParams>
 		OC_FORCEINLINE void runBatch2(
-			Channel& chl, span<InstParams>... instParams,
-			span<ChunkParams>... chunkParams)
+			Channel& chl, span<InstParams>... instParams, span<ChunkParams>... chunkParams)
 		{
 			size_t numInstances = checkSpanLengths(instParams..., chunkParams...).first;
 
@@ -283,6 +241,24 @@ namespace osuCrypto
 
 		std::tuple<InstParamPtrs...> tempStorage;
 	};
+
+
+//	template<
+//		typename Derived,
+//		typename T,
+//		typename C,
+//		typename I
+//	>
+//	template<typename... ChunkParams>
+//	void Chunker<Derived,T,C,I>::checkChunkParams(span<ChunkParams>... chunkParams) const
+//	{
+//#ifndef NDEBUG
+//		size_t numChunksArray[] = { (size_t)chunkParams.size()... };
+//		for (size_t n : numChunksArray)
+//			if (n != numChunks)
+//				throw RTE_LOC;
+//#endif
+//	}
 
 	// Sender refers to who will be sending mMessages, not to the OT sender. In fact, the OT receiver
 	// will be the party sending mMessages in an IKNP-style OT extension.

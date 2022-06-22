@@ -3,12 +3,12 @@
   "configurePresets": [
     {
       "name": "linux",
-      "displayName": "Linux Debug",
+      "displayName": "Linux",
       "description": "Target the Windows Subsystem for Linux (WSL) or a remote Linux system.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/out/build/${presetName}",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_BUILD_TYPE": "Release",
         "FETCH_AUTO": true,
         "VERBOSE_FETCH": true,
         "ENABLE_RELIC": true,

@@ -4,13 +4,11 @@
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Network/Channel.h>
-#include "DotMaliciousLeaky.h"
-#include "TwoOneSemiHonest.h"
+#include "SoftSpokenMalLeakyDotExt.h"
+#include "SoftSpokenShOtExt.h"
 
 namespace osuCrypto
 {
-	namespace SoftSpokenOT
-	{
 
 		// Hash DotMaliciousLeaky to get a random OT.
 
@@ -88,10 +86,10 @@ namespace osuCrypto
 			}
 		};
 
-		class TwoOneMaliciousSender : public DotMaliciousLeakySender
+		class SoftSpokenMalOtSender : public SoftSpokenMalLeakyDotSender
 		{
 		public:
-			using Base = DotMaliciousLeakySender;
+			using Base = SoftSpokenMalLeakyDotSender;
 
 			struct Hasher :
 				public Chunker<
@@ -121,9 +119,9 @@ namespace osuCrypto
 				size_t chunkSize() const { return 128; }
 				size_t paddingSize() const { return 0; }
 
-				DotMaliciousLeakySender* mParent = nullptr;
+				SoftSpokenMalLeakyDotSender* mParent = nullptr;
 				block* mInputW = nullptr;
-				void setParams(DotMaliciousLeakySender* p, block* w)
+				void setParams(SoftSpokenMalLeakyDotSender* p, block* w)
 				{
 					mParent = p;
 					mInputW = w;
@@ -136,17 +134,17 @@ namespace osuCrypto
 
 			Hasher hasher;
 
-			TwoOneMaliciousSender(size_t fieldBits = 2, size_t numThreads_ = 1) :
+			SoftSpokenMalOtSender(size_t fieldBits = 2, size_t numThreads_ = 1) :
 				Base(fieldBits, numThreads_) {}
 
-			TwoOneMaliciousSender splitBase()
+			SoftSpokenMalOtSender splitBase()
 			{
 				throw RTE_LOC; // TODO: unimplemented.
 			}
 
 			std::unique_ptr<OtExtSender> split() override
 			{
-				return std::make_unique<TwoOneMaliciousSender>(splitBase());
+				return std::make_unique<SoftSpokenMalOtSender>(splitBase());
 			}
 
 			virtual void initTemporaryStorage()
@@ -161,10 +159,10 @@ namespace osuCrypto
 			}
 		};
 
-		class TwoOneMaliciousReceiver : public DotMaliciousLeakyReceiver
+		class SoftSpokenMalOtReceiver : public SoftSpokenMalLeakyDotReceiver
 		{
 		public:
-			using Base = DotMaliciousLeakyReceiver;
+			using Base = SoftSpokenMalLeakyDotReceiver;
 
 			struct Hasher :
 				public Chunker<
@@ -193,24 +191,33 @@ namespace osuCrypto
 
 				size_t chunkSize() const { return 128; }
 				size_t paddingSize() const { return 0; }
+
+				SoftSpokenMalLeakyDotReceiver* mParent = nullptr;
+				block* mInputV = nullptr;
+
+				void setParams(SoftSpokenMalLeakyDotReceiver* parent, block* inputV)
+				{
+					mParent = parent;
+					mInputV = inputV;
+				}
+
 				OC_FORCEINLINE void processChunk(
 					size_t nChunk, size_t numUsed,
-					span<block> messages, block choices,
-					DotMaliciousLeakyReceiver* parent, block* inputV);
+					span<block> messages, block choices);
 			};
 
 			Hasher hasher;
 
-			TwoOneMaliciousReceiver(size_t fieldBits = 2, size_t numThreads_ = 1) :
+			SoftSpokenMalOtReceiver(size_t fieldBits = 2, size_t numThreads_ = 1) :
 				Base(fieldBits, numThreads_) {}
 
-			TwoOneMaliciousReceiver splitBase()
+			SoftSpokenMalOtReceiver splitBase()
 			{
 				throw RTE_LOC; // TODO: unimplemented.
 			}
 			std::unique_ptr<OtExtReceiver> split() override
 			{
-				return std::make_unique<TwoOneMaliciousReceiver>(splitBase());
+				return std::make_unique<SoftSpokenMalOtReceiver>(splitBase());
 			}
 
 			virtual void initTemporaryStorage()
@@ -225,29 +232,28 @@ namespace osuCrypto
 			}
 		};
 
-		void TwoOneMaliciousSender::Hasher::processChunk(
+		void SoftSpokenMalOtSender::Hasher::processChunk(
 			size_t nChunk, size_t numUsed,
 			span<std::array<block, 2>> messages)
 		{
 			rtcr.useAES(128);
 
-			TwoOneMaliciousSender* parent_ = static_cast<TwoOneMaliciousSender*>(mParent);
+			SoftSpokenMalOtSender* parent_ = static_cast<SoftSpokenMalOtSender*>(mParent);
 			
 			auto inputW = mInputW + nChunk * parent_->chunkSize();
 			parent_->mVole->hash(span<const block>(inputW, parent_->wPadded()));
 
 			transpose128(inputW);
-			TwoOneSemiHonestSender::xorAndHashMessages(
+			SoftSpokenShOtSender::xorAndHashMessages(
 				numUsed, parent_->delta(), (block*)messages.data(), inputW, rtcr);
 		}
 
-		void TwoOneMaliciousReceiver::Hasher::processChunk(
+		void SoftSpokenMalOtReceiver::Hasher::processChunk(
 			size_t nChunk, size_t numUsed,
-			span<block> messages, block choices,
-			DotMaliciousLeakyReceiver* parent, block* inputV)
+			span<block> messages, block choices)
 		{
-			TwoOneMaliciousReceiver* parent_ = static_cast<TwoOneMaliciousReceiver*>(parent);
-			inputV += nChunk * parent_->chunkSize();
+			SoftSpokenMalOtReceiver* parent_ = static_cast<SoftSpokenMalOtReceiver*>(mParent);
+			auto inputV = mInputV + nChunk * parent_->chunkSize();
 			parent_->mVole->hash(span<block>(&choices, 1), span<const block>(inputV, parent_->vPadded()));
 			transpose128(inputV);
 
@@ -278,6 +284,5 @@ namespace osuCrypto
 			}
 		}
 
-	}
 }
 #endif
