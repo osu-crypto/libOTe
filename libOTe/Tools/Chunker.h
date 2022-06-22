@@ -9,7 +9,6 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/Aligned.h>
 #include <cryptoTools/Network/Channel.h>
-#include <boost/mp11/tuple.hpp>
 
 namespace osuCrypto
 {
@@ -26,6 +25,7 @@ namespace osuCrypto
 		typedef std::tuple<AlignedUnVector<typename std::remove_const<InstParams>::type...>> type;
 	};
 
+	
 	template<typename Ptr>
 	struct ChunkerAlloc;
 
@@ -75,6 +75,7 @@ namespace osuCrypto
 	// store temporaries of type InstParams[]... (with any const removed), and each such smart pointer
 	// must specialize ChunkerAlloc.
 
+
 	template<
 		typename Derived,
 		typename T,
@@ -103,14 +104,38 @@ namespace osuCrypto
 	public:
 		using InstanceParams = std::tuple<InstParams...>;
 
+
+		template<
+			typename F,
+			std::size_t I = 0, typename Tuple, typename... Tuples>
+			static inline typename std::enable_if<I == std::tuple_size<Tuple>::value, void>::type
+			tuple_transform(F&& f,
+				Tuple& t0,
+				Tuples&... ts)
+		{ }
+
+		template<
+			typename F,
+			std::size_t I = 0, typename Tuple, typename... Tuples>
+			static inline typename std::enable_if< (I < std::tuple_size<Tuple>::value), void>::type
+			tuple_transform(F&& f,
+				Tuple& t0,
+				Tuples&... ts)
+		{
+			//static_assert(std::tuple_size<Tuple>::value == std::tuple_size<Tuples>::value..., "");
+			f(std::get<I>(t0), std::get<I>(ts)...);
+			tuple_transform<F, I + 1, Tuple, Tuples...>(std::forward<F>(f), t0, ts...);
+		}
+
 		// Use temporaries to make processChunk work on a partial chunk.
 		template<typename... GlobalParams>
 		OC_FORCEINLINE void processPartialChunk(
 			size_t chunkIdx, size_t numUsed, size_t minInstances, span<InstParams>... instParams,
 			GlobalParams&&... globalParams)
 		{
+			static_assert(0 < std::tuple_size<decltype(tempStorage)>::value, "");
 			// Copy the data into the temporaries. tuple_transform requires a non-void return type.
-			using boost::mp11::tuple_transform;
+			//using boost::mp11::tuple_transform;
 			tuple_transform(
 				[=](auto in, const auto& out) { std::copy_n(in, numUsed, out.data()); return 0; },
 				std::make_tuple(instParams.data()...), tempStorage);
@@ -137,9 +162,6 @@ namespace osuCrypto
 			template<typename T, typename U>
 			int operator()(const T& in, U* out) const { std::copy_n(in.data(), n, out); return 0; }
 		};
-
-		//template<typename... ChunkParams>
-		//void checkChunkParams(span<ChunkParams>... chunkParams) const;
 
 		template<typename... ChunkParams>
 		std::pair<size_t, size_t>
