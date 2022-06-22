@@ -7,13 +7,22 @@
 #include <cryptoTools/Crypto/Blake2.h>
 #include "libOTe/Tools/SilentPprf.h"
 
-#include <boost/log/core.hpp> // For BOOST_LOG_UNREACHABLE()
+//#include <boost/log/core.hpp> // For BOOST_LOG_UNREACHABLE()
+//
+//#ifdef BOOST_LOG_UNREACHABLE
+//#define UNREACHABLE() BOOST_LOG_UNREACHABLE()
+//#else
+//#define UNREACHABLE()
+//#endif
 
-#ifdef BOOST_LOG_UNREACHABLE
-#define UNREACHABLE() BOOST_LOG_UNREACHABLE()
+#if defined(__GNUC__) || defined(__clang__)
+#       define UNREACHABLE() __builtin_unreachable()
+#elif defined(_MSC_VER)
+#   define UNREACHABLE() __assume(0)
 #else
-#define UNREACHABLE()
+#	define UNREACHABLE()
 #endif
+
 
 namespace osuCrypto
 {

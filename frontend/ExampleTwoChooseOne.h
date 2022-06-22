@@ -34,32 +34,33 @@ namespace osuCrypto
         throw std::runtime_error("This protocol does not support noHash");
     }
 
+    // soft spoken takes an extra parameter as input what determines
+    // the computation/communication trade-off.
+    template<typename T>
+    using is_SoftSpoken = typename std::conditional<
+        std::is_same<T, SoftSpokenShOtSender>::value ||
+        std::is_same<T, SoftSpokenShOtReceiver>::value ||
+        std::is_same<T, SoftSpokenShDotSender>::value ||
+        std::is_same<T, SoftSpokenShDotReceiver>::value ||
+        std::is_same<T, SoftSpokenMalOtSender>::value ||
+        std::is_same<T, SoftSpokenMalOtReceiver>::value ||
+        std::is_same<T, SoftSpokenMalLeakyDotSender>::value ||
+        std::is_same<T, SoftSpokenMalLeakyDotReceiver>::value,
+        std::true_type, std::false_type>::type;
 
     template<typename T>
-    T construct(CLP& cmd);
-
-    //template<typename T>
-    //typename std::enable_if<
-    //    std::is_same<T, SoftSpokenShOtSender>::value ||
-    //    std::is_same<T, SoftSpokenShOtReceiver>::value ||
-    //    std::is_same<T, SoftSpokenShDotSender>::value ||
-    //    std::is_same<T, SoftSpokenShDotReceiver>::value ||
-    //    std::is_same<T, SoftSpokenMalOtSender>::value ||
-    //    std::is_same<T, SoftSpokenMalOtReceiver>::value ||
-    //    std::is_same<T, SoftSpokenMalLeakyDotSender>::value ||
-    //    std::is_same<T, SoftSpokenMalLeakyDotReceiver>::value,
-    //T>::type
-    //    construct(CLP& cmd)
-    //{
-    //    return T{ cmd.getOr("f", 2) };
-    //}
+    typename std::enable_if<is_SoftSpoken<T>::value,T>::type
+        construct(CLP& cmd)
+    {
+        return T( cmd.getOr("f", 2) );
+    }
 
     template<typename T>
-    T construct(CLP& cmd)
+    typename std::enable_if<!is_SoftSpoken<T>::value, T>::type
+         construct(CLP& cmd)
     {
         return T{};
     }
-
 
     template<typename OtExtSender, typename OtExtRecver>
     void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
