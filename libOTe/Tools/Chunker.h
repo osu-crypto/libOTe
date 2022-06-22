@@ -225,7 +225,7 @@ namespace osuCrypto
 		}
 
 		template<typename... ChunkParams>
-		OC_FORCEINLINE void runBatch2(
+		OC_FORCEINLINE void runBatch(
 			Channel& chl, span<InstParams>... instParams, span<ChunkParams>... chunkParams)
 		{
 			size_t numInstances = checkSpanLengths(instParams..., chunkParams...).first;

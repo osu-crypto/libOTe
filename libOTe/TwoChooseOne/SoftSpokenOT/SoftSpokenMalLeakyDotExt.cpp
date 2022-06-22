@@ -33,10 +33,10 @@ namespace osuCrypto
 		hasher.send(prng, chl);
 
 		hasher.setGlobalParams(this, scratch);
-		hasher.runBatch2(chl, messages.subspan(0, messagesFullChunks * 128));
+		hasher.runBatch(chl, messages.subspan(0, messagesFullChunks * 128));
 		//hasher.runBatch(chl, messages.subspan(messagesFullChunks * 128), this, mExtraW.data());
 		hasher.setGlobalParams(this, mExtraW.data());
-		hasher.runBatch2(chl, messages.subspan(messagesFullChunks * 128));
+		hasher.runBatch(chl, messages.subspan(messagesFullChunks * 128));
 
 		// Hash the last extra block if there was one with no used mMessages in it at all.
 		if (numExtra == 2 || messages.size() % 128 == 0)
@@ -111,12 +111,12 @@ namespace osuCrypto
 		hasher.recv(chl);
 
 		hasher.setGlobalParams(this, scratch);
-		hasher.template runBatch2<block>(
+		hasher.template runBatch<block>(
 			chl, messages.subspan(0, messagesFullChunks * 128),
 			span<block>(choices.blocks(), messagesFullChunks));
 
 		hasher.setGlobalParams(this, mExtraV.data());
-		hasher.template runBatch2<block>(
+		hasher.template runBatch<block>(
 			chl, messages.subspan(messagesFullChunks * 128),
 			span<block>(extraChoices, messages.size() % 128 != 0));
 
