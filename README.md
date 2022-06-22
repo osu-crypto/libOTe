@@ -4,16 +4,18 @@
 ![Build Status](https: //github.com/osu-crypto/libOTe/actions/workflows/build-test.yml/badge.svg)
 A fast and portable C++17 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*. This library currently implements: * The semi-honest 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf).
 * The semi-honest 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf).
-* The semi-honest 1-out-of-2 Delta-OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
+* The semi-honest 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
+* The semi-honest 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
 * The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
-* The malicious secure 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
-* The malicious secure 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
-* The malicious secure 1-out-of-N OT [[OOS16]](http://eprint.iacr.org/2016/933).
-* The malicious secure approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746).
-* The malicious secure 1-out-of-2 base OT [NP01].
-* The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
-* The malicious secure 1-out-of-2 base OT [[MR19]](https://eprint.iacr.org/2019/706.pdf) 
-* Several malicious secure batched 1-out-of-2 base OTs from [[MRR21]](https://eprint.iacr.org/2021/682)
+* The malicious 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
+* The malicious 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
+* The malicious 1-out-of-N OT [[OOS16]](http://eprint.iacr.org/2016/933).
+* The semi-honest 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
+* The malicious approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746).
+* The malicious 1-out-of-2 base OT [NP01].
+* The malicious 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
+* The malicious 1-out-of-2 base OT [[MR19]](https://eprint.iacr.org/2019/706.pdf) 
+* The malicious batched 1-out-of-2 base OTs from [[MRR21]](https://eprint.iacr.org/2021/682)
 * 
 
  Silver is currently not contained in this repository. Contact Peter Rindal for details.
@@ -47,8 +49,7 @@ The library can be built as
 ```
 git clone --recursive https://github.com/osu-crypto/libOTe.git
 cd libOTe
-python build.py --setup --boost --relic
-python build.py -D ENABLE_RELIC=ON -D ENABLE_ALL_OT=ON
+python build.py --boost --relic -D ENABLE_ALL_OT=ON
 ```
 The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
 
@@ -69,6 +70,7 @@ LibOTe can be built with various only the selected protocols enabled. `-D ENABLE
  * `ENABLE_KOS` the Keller et al [[KOS15]](https://eprint.iacr.org/2015/546) malicious protocol.
  * `ENABLE_DELTA_KOS` the Burra et al [[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf),[[KOS15]](https://eprint.iacr.org/2015/546) malicious Delta-OT protocol.
  * `ENABLE_SILENTOT` the Couteau et al [CRR21],[[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf) semi-honest/malicious protocol.
+ * `ENABLE_SOFTSPOKEN_OT` the Roy [[Roy22]](https://eprint.iacr.org/2022/192) malicious/semi-honest protocols.
 
  **Vole:**
  * `ENABLE_SILENT_VOLE` the Couteau et al [CRR21] semi-honest/malicious protocol.
@@ -77,7 +79,7 @@ LibOTe can be built with various only the selected protocols enabled. `-D ENABLE
 
 ### Dependancies
 
-Dependancies can be managed via the `build.py` script or or installed via an external tool. If an external tool is used install to system location or set  `-D CMAKE_PREFIX_PATH=path/to/install`.
+Dependancies can be managed via the `build.py` script or installed via an external tool. If an external tool is used install to system location or set  `-D CMAKE_PREFIX_PATH=path/to/install`.
 
 **Boost**
 The library requires boost and can be fetched as
@@ -183,7 +185,7 @@ or running the library.
 
 ```
 @misc{libOTe,
-    author = {Peter Rindal, Lance Roy},
+    author = {Peter Rindal, Lawrence Roy},
     title = {{libOTe: an efficient, portable, and easy to use Oblivious Transfer Library}},
     howpublished = {\url{https://github.com/osu-crypto/libOTe}},
 }
