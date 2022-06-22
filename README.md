@@ -1,14 +1,14 @@
 ![](./titleOSU.PNG)
 =====
 
-![Build Status](https: //github.com/osu-crypto/libOTe/actions/workflows/build-test.yml/badge.svg)
-A fast and portable C++17 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*. This library currently implements: * The semi-honest 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf).
+![Build Status](https://github.com/osu-crypto/libOTe/actions/workflows/build-test.yml/badge.svg)
+A fast and portable C++17 library for Oblivious Transfer extension (OTe). The primary design goal of this library to obtain *high performance* while being *easy to use*. This library currently implements: 
+    
+* The semi-honest 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf).
 * The semi-honest 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf).
-* The semi-honest 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The semi-honest 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
 * The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
 * The malicious 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
-* The malicious 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The malicious 1-out-of-N OT [[OOS16]](http://eprint.iacr.org/2016/933).
 * The malicious 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
 * The malicious approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746).
@@ -16,7 +16,7 @@ A fast and portable C++17 library for Oblivious Transfer extension (OTe). The pr
 * The malicious 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
 * The malicious 1-out-of-2 base OT [[MR19]](https://eprint.iacr.org/2019/706.pdf) 
 * The malicious batched 1-out-of-2 base OTs from [[MRR21]](https://eprint.iacr.org/2021/682)
-* 
+*
 
  Silver is currently not contained in this repository. Contact Peter Rindal for details.
  
