@@ -10,7 +10,7 @@ A fast and portable C++17 library for Oblivious Transfer extension (OTe). The pr
 * The malicious 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
 * The malicious 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The malicious 1-out-of-N OT [[OOS16]](http://eprint.iacr.org/2016/933).
-* The semi-honest 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
+* The malicious 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
 * The malicious approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746).
 * The malicious 1-out-of-2 base OT [NP01].
 * The malicious 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
