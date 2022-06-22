@@ -1,6 +1,6 @@
 #pragma once
 // This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
-
+#include "cryptoTools/Common/CLP.h"
 namespace tests_libOTe
 {
 
@@ -20,10 +20,10 @@ namespace tests_libOTe
     void OtExt_Iknp_Test();
     void DotExt_Iknp_Test();
 
-    void SoftSpokenSmallVole_Test();
-    void DotExt_SoftSpokenSemiHonest_Test();
-    void OtExt_SoftSpokenSemiHonest21_Test();
-    void DotExt_SoftSpokenMaliciousLeaky_Test();
-    void OtExt_SoftSpokenMalicious21_Test();
+    void SoftSpokenSmallVole_Test(const oc::CLP& cmd);
+    void DotExt_SoftSpokenSemiHonest_Test(const oc::CLP& cmd);
+    void OtExt_SoftSpokenSemiHonest21_Test(const oc::CLP& cmd);
+    void DotExt_SoftSpokenMaliciousLeaky_Test(const oc::CLP& cmd);
+    void OtExt_SoftSpokenMalicious21_Test(const oc::CLP& cmd);
 
 }

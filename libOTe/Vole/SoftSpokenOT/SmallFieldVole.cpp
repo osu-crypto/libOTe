@@ -422,7 +422,7 @@ namespace osuCrypto
 			chl.recv(&corrections[0], corrections.size());
 			chl.recv(&hashes[0], hashes.size());
 
-			int eq = 1;
+			bool eq = true;
 			for (size_t row = 0; row < mNumVoles; ++row)
 			{
 				for (int i = 0; i < 2; ++i)
