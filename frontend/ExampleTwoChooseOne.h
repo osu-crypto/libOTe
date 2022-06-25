@@ -34,6 +34,7 @@ namespace osuCrypto
         throw std::runtime_error("This protocol does not support noHash");
     }
 
+#ifdef ENABLE_SOFTSPOKEN_OT
     // soft spoken takes an extra parameter as input what determines
     // the computation/communication trade-off.
     template<typename T>
@@ -47,6 +48,10 @@ namespace osuCrypto
         std::is_same<T, SoftSpokenMalLeakyDotSender>::value ||
         std::is_same<T, SoftSpokenMalLeakyDotReceiver>::value,
         std::true_type, std::false_type>::type;
+#else
+    template<typename T>
+    using is_SoftSpoken = std::false_type;
+#endif
 
     template<typename T>
     typename std::enable_if<is_SoftSpoken<T>::value,T>::type
