@@ -25,7 +25,7 @@ namespace osuCrypto
 		typedef std::tuple<AlignedUnVector<typename std::remove_const<InstParams>::type...>> type;
 	};
 
-	
+
 	template<typename Ptr>
 	struct ChunkerAlloc;
 
@@ -75,6 +75,35 @@ namespace osuCrypto
 	// store temporaries of type InstParams[]... (with any const removed), and each such smart pointer
 	// must specialize ChunkerAlloc.
 
+	template<
+		std::size_t I = 0,
+		typename F,
+		typename Tuple, typename... Tuples>
+		inline typename std::enable_if<I == std::tuple_size<typename std::remove_reference<Tuple>::type>::value, void>::type
+		tuple_transform(
+			F&& f,
+			Tuple&& t0,
+			Tuples&&... ts)
+	{ }
+
+	template<
+		std::size_t I = 0,
+		typename F,
+		typename Tuple, typename... Tuples>
+		inline typename std::enable_if< (I < std::tuple_size<typename std::remove_reference<Tuple>::type>::value), void>::type
+		tuple_transform(
+			F&& f,
+			Tuple&& t0,
+			Tuples&&... ts)
+	{
+		//static_assert(std::tuple_size<Tuple>::value == std::tuple_size<Tuples>::value..., "");
+		f(std::get<I>(t0), std::get<I>(ts)...);
+
+		tuple_transform<I + 1, F, Tuple, Tuples...>(
+			std::forward<F>(f),
+			std::forward<Tuple>(t0),
+			std::forward<Tuples>(ts)...);
+	}
 
 	template<
 		typename Derived,
@@ -105,27 +134,6 @@ namespace osuCrypto
 		using InstanceParams = std::tuple<InstParams...>;
 
 
-		template<
-			typename F,
-			std::size_t I = 0, typename Tuple, typename... Tuples>
-			static inline typename std::enable_if<I == std::tuple_size<Tuple>::value, void>::type
-			tuple_transform(F&& f,
-				Tuple& t0,
-				Tuples&... ts)
-		{ }
-
-		template<
-			typename F,
-			std::size_t I = 0, typename Tuple, typename... Tuples>
-			static inline typename std::enable_if< (I < std::tuple_size<Tuple>::value), void>::type
-			tuple_transform(F&& f,
-				Tuple& t0,
-				Tuples&... ts)
-		{
-			//static_assert(std::tuple_size<Tuple>::value == std::tuple_size<Tuples>::value..., "");
-			f(std::get<I>(t0), std::get<I>(ts)...);
-			tuple_transform<F, I + 1, Tuple, Tuples...>(std::forward<F>(f), t0, ts...);
-		}
 
 		// Use temporaries to make processChunk work on a partial chunk.
 		template<typename... GlobalParams>
@@ -265,25 +273,25 @@ namespace osuCrypto
 	};
 
 
-//	template<
-//		typename Derived,
-//		typename T,
-//		typename C,
-//		typename I
-//	>
-//	template<typename... ChunkParams>
-//	void Chunker<Derived,T,C,I>::checkChunkParams(span<ChunkParams>... chunkParams) const
-//	{
-//#ifndef NDEBUG
-//		size_t numChunksArray[] = { (size_t)chunkParams.size()... };
-//		for (size_t n : numChunksArray)
-//			if (n != numChunks)
-//				throw RTE_LOC;
-//#endif
-//	}
+	//	template<
+	//		typename Derived,
+	//		typename T,
+	//		typename C,
+	//		typename I
+	//	>
+	//	template<typename... ChunkParams>
+	//	void Chunker<Derived,T,C,I>::checkChunkParams(span<ChunkParams>... chunkParams) const
+	//	{
+	//#ifndef NDEBUG
+	//		size_t numChunksArray[] = { (size_t)chunkParams.size()... };
+	//		for (size_t n : numChunksArray)
+	//			if (n != numChunks)
+	//				throw RTE_LOC;
+	//#endif
+	//	}
 
-	// Sender refers to who will be sending mMessages, not to the OT sender. In fact, the OT receiver
-	// will be the party sending mMessages in an IKNP-style OT extension.
+		// Sender refers to who will be sending mMessages, not to the OT sender. In fact, the OT receiver
+		// will be the party sending mMessages in an IKNP-style OT extension.
 
 	template<typename Derived, typename T, typename C = typename TupleOfUniquePtrs<T>::type>
 	class ChunkedSender {};
