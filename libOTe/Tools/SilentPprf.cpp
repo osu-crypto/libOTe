@@ -560,7 +560,7 @@ namespace osuCrypto
                             //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
                             //
                             // where each half defines one of the children.
-                            aes[keep].ecbEnc8Blocks(parent.data(), child.data());
+                            aes[keep].ecbEncBlocks<8>(parent.data(), child.data());
                             child[0] = child[0] ^ parent[0];
                             child[1] = child[1] ^ parent[1];
                             child[2] = child[2] ^ parent[2];
@@ -640,11 +640,7 @@ namespace osuCrypto
                         maskIn[1] = mBaseOTs[g + j][d][0] ^ AllOneBlock;
                         maskIn[2] = mBaseOTs[g + j][d][1];
                         maskIn[3] = mBaseOTs[g + j][d][1] ^ AllOneBlock;
-                        mAesFixedKey.ecbEncFourBlocks(maskIn.data(), masks.data());
-                        masks[0] = masks[0] ^ maskIn[0];
-                        masks[1] = masks[1] ^ maskIn[1];
-                        masks[2] = masks[2] ^ maskIn[2];
-                        masks[3] = masks[3] ^ maskIn[3];
+                        mAesFixedKey.hashBlocks<4>(maskIn.data(), masks.data());
 
 #ifdef DEBUG_PRINT_PPRF
                         if (mPrint) {
@@ -989,15 +985,7 @@ namespace osuCrypto
                             //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
                             //
                             // where each half defines one of the children.
-                            aes[keep].ecbEnc8Blocks(parent.data(), child.data());
-                            child[0] = child[0] ^ parent[0];
-                            child[1] = child[1] ^ parent[1];
-                            child[2] = child[2] ^ parent[2];
-                            child[3] = child[3] ^ parent[3];
-                            child[4] = child[4] ^ parent[4];
-                            child[5] = child[5] ^ parent[5];
-                            child[6] = child[6] ^ parent[6];
-                            child[7] = child[7] ^ parent[7];
+                            aes[keep].hashBlocks<8>(parent.data(), child.data());
 
 
 
@@ -1114,9 +1102,7 @@ namespace osuCrypto
                         // into a 256 bit OT string using AES.
                         maskIn[0] = mBaseOTs[j + g][d];
                         maskIn[1] = mBaseOTs[j + g][d] ^ AllOneBlock;
-                        mAesFixedKey.ecbEncTwoBlocks(maskIn.data(), masks.data());
-                        masks[0] = masks[0] ^ maskIn[0];
-                        masks[1] = masks[1] ^ maskIn[1];
+                        mAesFixedKey.hashBlocks<2>(maskIn.data(), masks.data());
 
                         // now get the chosen message OT strings by XORing
                         // the expended (random) OT strings with the lastOts values.

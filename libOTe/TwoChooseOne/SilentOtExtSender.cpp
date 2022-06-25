@@ -317,28 +317,10 @@ namespace osuCrypto
                 m[7][1] = r[7] ^ d;
 
                 auto iter = (block*)m;
-                mAesFixedKey.ecbEnc8Blocks(iter, hashBuffer);
-
-                iter[0] = iter[0] ^ hashBuffer[0];
-                iter[1] = iter[1] ^ hashBuffer[1];
-                iter[2] = iter[2] ^ hashBuffer[2];
-                iter[3] = iter[3] ^ hashBuffer[3];
-                iter[4] = iter[4] ^ hashBuffer[4];
-                iter[5] = iter[5] ^ hashBuffer[5];
-                iter[6] = iter[6] ^ hashBuffer[6];
-                iter[7] = iter[7] ^ hashBuffer[7];
+                mAesFixedKey.hashBlocks<8>(iter, hashBuffer);
 
                 iter += 8;
-                mAesFixedKey.ecbEnc8Blocks(iter, hashBuffer);
-
-                iter[0] = iter[0] ^ hashBuffer[0];
-                iter[1] = iter[1] ^ hashBuffer[1];
-                iter[2] = iter[2] ^ hashBuffer[2];
-                iter[3] = iter[3] ^ hashBuffer[3];
-                iter[4] = iter[4] ^ hashBuffer[4];
-                iter[5] = iter[5] ^ hashBuffer[5];
-                iter[6] = iter[6] ^ hashBuffer[6];
-                iter[7] = iter[7] ^ hashBuffer[7];
+                mAesFixedKey.hashBlocks<8>(iter, hashBuffer);
 
                 m += 8;
                 r += 8;

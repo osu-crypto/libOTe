@@ -355,7 +355,10 @@ namespace osuCrypto
             else
             {
                 span<block> hh(messages.data() + doneIdx, stop - doneIdx);
-                mAesFixedKey.hashBlocks(hh, hh);
+                mAesFixedKey.TmmoHashBlocks(hh, hh, [tweak = doneIdx]() mutable {
+                    return block(tweak++);
+                    });
+
             }
 
             doneIdx = stop;

@@ -8,6 +8,7 @@
 #include <cryptoTools/Common/Timer.h>
 #include "TcoOtDefines.h"
 
+
 namespace osuCrypto
 {
     KosOtExtSender::KosOtExtSender(SetUniformOts, span<block> baseRecvOts, const BitVector& choices)
@@ -306,7 +307,6 @@ namespace osuCrypto
         RandomOracle sha;
         u8 hashBuff[20];
 
-
         u64 doneIdx = 0;
         std::array<block, 128> challenges;
 
@@ -345,8 +345,10 @@ namespace osuCrypto
             }
             else
             {
-                span<block> hh(messages[doneIdx].data(), 2 * (stop - doneIdx));
-                mAesFixedKey.hashBlocks(hh, hh);
+                span<block> hh(&messages[doneIdx][0], 2 * (stop - doneIdx));
+                mAesFixedKey.TmmoHashBlocks(hh, hh, [tweak = doneIdx * 2]() mutable {
+                    return block(tweak++ >> 1);
+                });
             }
 
             doneIdx = stop;

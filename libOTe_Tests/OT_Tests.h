@@ -20,7 +20,7 @@ namespace tests_libOTe
     void OtExt_Iknp_Test();
     void DotExt_Iknp_Test();
 
-    void SoftSpokenSmallVole_Test(const oc::CLP& cmd);
+    void Vole_SoftSpokenSmall_Test(const oc::CLP& cmd);
     void DotExt_SoftSpokenSemiHonest_Test(const oc::CLP& cmd);
     void OtExt_SoftSpokenSemiHonest21_Test(const oc::CLP& cmd);
     void DotExt_SoftSpokenMaliciousLeaky_Test(const oc::CLP& cmd);

@@ -55,7 +55,7 @@ namespace tests_libOTe
 		{
 
 			u8 choice = choiceBits[i];
-			const block & revcBlock = recv[i];
+			const block& revcBlock = recv[i];
 			//(i, choice, revcBlock);
 			const block& senderBlock = sender[i][choice];
 
@@ -229,10 +229,10 @@ namespace tests_libOTe
 
 		u64 highAtEnd = data[127].as<u64>()[1];
 
-		for (u64 i = 0; i < 1000000; ++i)
+		for (u64 i = 0; i < 10000; ++i)
 		{
 			transpose128(data.data());
-			data[0] += block::allSame((u64) 1);
+			data[0] += block::allSame((u64)1);
 		}
 
 		// Add a check just to make sure this doesn't get compiled out.
@@ -322,7 +322,7 @@ namespace tests_libOTe
 			//std::array<std::array<std::array<block, 8>, 128>, 2> data;
 
 			Matrix<block> dataView(208, 8);
-			prng.get((u8*)dataView.data(), sizeof(block) *dataView.bounds()[0] * dataView.stride());
+			prng.get((u8*)dataView.data(), sizeof(block) * dataView.bounds()[0] * dataView.stride());
 
 			Matrix<block> data2View(1024, 2);
 			memset(data2View.data(), 0, data2View.bounds()[0] * data2View.stride() * sizeof(block));
@@ -362,7 +362,7 @@ namespace tests_libOTe
 			PRNG prng(ZeroBlock);
 
 			Matrix<u8> in(16, 8);
-			prng.get((u8*)in.data(), sizeof(u8) *in.bounds()[0] * in.stride());
+			prng.get((u8*)in.data(), sizeof(u8) * in.bounds()[0] * in.stride());
 
 			Matrix<u8> out(63, 2);
 			transpose(in, out);
@@ -389,7 +389,7 @@ namespace tests_libOTe
 			Matrix<u8> in(25, 9);
 			Matrix<u8> in2(32, 9);
 
-			prng.get((u8*)in.data(), sizeof(u8) *in.bounds()[0] * in.stride());
+			prng.get((u8*)in.data(), sizeof(u8) * in.bounds()[0] * in.stride());
 			memset(in2.data(), 0, in2.bounds()[0] * in2.stride());
 
 			for (u64 i = 0; i < in.bounds()[0]; ++i)
@@ -420,40 +420,40 @@ namespace tests_libOTe
 		}
 	}
 
-    void OtExt_genBaseOts_Test()
-    {
+	void OtExt_genBaseOts_Test()
+	{
 #if defined(LIBOTE_HAS_BASE_OT) && defined(ENABLE_KOS)
-        IOService ios(0);
-        Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-        Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-        Channel senderChannel = ep1.addChannel();
-        Channel recvChannel = ep0.addChannel();
+		IOService ios(0);
+		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel = ep0.addChannel();
 
-        KosOtExtSender sender;
-        KosOtExtReceiver recv;
+		KosOtExtSender sender;
+		KosOtExtReceiver recv;
 
-        auto thrd = std::thread([&]() {
-            PRNG prng(ZeroBlock);
-            recv.genBaseOts(prng, recvChannel);
-        });
+		auto thrd = std::thread([&]() {
+			PRNG prng(ZeroBlock);
+			recv.genBaseOts(prng, recvChannel);
+			});
 
-        PRNG prng(OneBlock);
-        sender.genBaseOts(prng, senderChannel);
-        thrd.join();
+		PRNG prng(OneBlock);
+		sender.genBaseOts(prng, senderChannel);
+		thrd.join();
 
-        for (u64 i = 0; i < sender.mGens.size(); ++i)
-        {
-            auto b = sender.mBaseChoiceBits[i];
-            if (neq(sender.mGens[i].getSeed(), recv.mGens[i][b].getSeed()))
-                throw RTE_LOC;
+		for (u64 i = 0; i < sender.mGens.size(); ++i)
+		{
+			auto b = sender.mBaseChoiceBits[i];
+			if (neq(sender.mGens[i].getSeed(), recv.mGens[i][b].getSeed()))
+				throw RTE_LOC;
 
-            if (eq(sender.mGens[i].getSeed(), recv.mGens[i][b^1].getSeed()))
-                throw RTE_LOC;
-        }
+			if (eq(sender.mGens[i].getSeed(), recv.mGens[i][b ^ 1].getSeed()))
+				throw RTE_LOC;
+		}
 #else
-        throw UnitTestSkipped("LibOTe has no BaseOTs or ENABLE_KOS not define  ");
+		throw UnitTestSkipped("LibOTe has no BaseOTs or ENABLE_KOS not define  ");
 #endif
-    }
+	}
 
 
 	void OtExt_Kos_Test()
@@ -465,7 +465,7 @@ namespace tests_libOTe
 		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
 		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
 		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel   = ep0.addChannel();
+		Channel recvChannel = ep0.addChannel();
 
 		PRNG prng0(block(4253465, 3434565));
 		PRNG prng1(block(42532335, 334565));
@@ -493,7 +493,7 @@ namespace tests_libOTe
 
 			recv.setBaseOts(baseSend, prng0, recvChannel);
 			recv.receive(choices, recvMsg, prng0, recvChannel);
-		});
+			});
 
 		sender.setBaseOts(baseRecv, baseChoice, senderChannel);
 		sender.send(sendMsg, prng1, senderChannel);
@@ -611,57 +611,57 @@ namespace tests_libOTe
 #endif
 	}
 
-    void OtExt_Chosen_Test()
-    {
+	void OtExt_Chosen_Test()
+	{
 #if defined(ENABLE_KOS)
 
-        IOService ios;
-        Session ep0(ios, "127.0.0.1:1212", SessionMode::Server);
-        Session ep1(ios, "127.0.0.1:1212", SessionMode::Client);
-        Channel senderChannel = ep1.addChannel();
-        Channel recvChannel	  = ep0.addChannel();
+		IOService ios;
+		Session ep0(ios, "127.0.0.1:1212", SessionMode::Server);
+		Session ep1(ios, "127.0.0.1:1212", SessionMode::Client);
+		Channel senderChannel = ep1.addChannel();
+		Channel recvChannel = ep0.addChannel();
 
-        u64 numOTs = 200;
+		u64 numOTs = 200;
 
-        std::vector<block> recvMsg(numOTs), baseRecv(128);
-        std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
-        BitVector choices(numOTs), baseChoice(128);
-        PRNG prng0(ZeroBlock);
-        choices.randomize(prng0);
-        baseChoice.randomize(prng0);
+		std::vector<block> recvMsg(numOTs), baseRecv(128);
+		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+		BitVector choices(numOTs), baseChoice(128);
+		PRNG prng0(ZeroBlock);
+		choices.randomize(prng0);
+		baseChoice.randomize(prng0);
 
-        for (u64 i = 0; i < 128; ++i)
-        {
-            baseSend[i][0] = prng0.get<block>();
-            baseSend[i][1] = prng0.get<block>();
-            baseRecv[i] = baseSend[i][baseChoice[i]];
-        }
+		for (u64 i = 0; i < 128; ++i)
+		{
+			baseSend[i][0] = prng0.get<block>();
+			baseSend[i][1] = prng0.get<block>();
+			baseRecv[i] = baseSend[i][baseChoice[i]];
+		}
 
-        prng0.get(sendMsg.data(), sendMsg.size());
+		prng0.get(sendMsg.data(), sendMsg.size());
 
-        KosOtExtSender sender;
-        KosOtExtReceiver recv;
+		KosOtExtSender sender;
+		KosOtExtReceiver recv;
 
-        auto thrd = std::thread([&]() {
-            PRNG prng1(OneBlock);
-            recv.setBaseOts(baseSend, prng1, recvChannel);
-            recv.receiveChosen(choices, recvMsg, prng1, recvChannel);
-        });
+		auto thrd = std::thread([&]() {
+			PRNG prng1(OneBlock);
+			recv.setBaseOts(baseSend, prng1, recvChannel);
+			recv.receiveChosen(choices, recvMsg, prng1, recvChannel);
+			});
 
-        sender.setBaseOts(baseRecv, baseChoice, senderChannel);
-        sender.sendChosen(sendMsg, prng0, senderChannel);
+		sender.setBaseOts(baseRecv, baseChoice, senderChannel);
+		sender.sendChosen(sendMsg, prng0, senderChannel);
 
-        thrd.join();
+		thrd.join();
 
-        for (u64 i = 0; i < numOTs; ++i)
-        {
-            if (neq(recvMsg[i], sendMsg[i][choices[i]]))
-                throw UnitTestFail("bad message " LOCATION);
-        }
+		for (u64 i = 0; i < numOTs; ++i)
+		{
+			if (neq(recvMsg[i], sendMsg[i][choices[i]]))
+				throw UnitTestFail("bad message " LOCATION);
+		}
 #else
-	throw UnitTestSkipped("ENABLE_KOS is not defined.");
+		throw UnitTestSkipped("ENABLE_KOS is not defined.");
 #endif
-    }
+	}
 
 
 	//void mul128b(__m128i b, __m128i a, __m128i &c0, __m128i &c1)
@@ -693,7 +693,7 @@ namespace tests_libOTe
 		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
 		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
 		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel   = ep0.addChannel();
+		Channel recvChannel = ep0.addChannel();
 
 		PRNG prng0(block(4253465, 3434565));
 		PRNG prng1(block(42532335, 334565));
@@ -722,7 +722,7 @@ namespace tests_libOTe
 			setThreadName("receiver");
 			recv.setBaseOts(baseSend);
 			recv.receive(choices, recvMsg, prng0, recvChannel);
-		});
+			});
 
 		block delta = prng1.get<block>();
 		sender.setDelta(delta);
@@ -757,7 +757,7 @@ namespace tests_libOTe
 		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
 		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
 		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel   = ep0.addChannel();
+		Channel recvChannel = ep0.addChannel();
 
 		PRNG prng0(block(4253465, 3434565));
 		PRNG prng1(block(42532335, 334565));
@@ -792,7 +792,7 @@ namespace tests_libOTe
 				setThreadName("receiver");
 				recv.setBaseOts(baseSend);
 				recv.receive(choices, recvMsg, prng0, recvChannel);
-			});
+				});
 
 			block delta = baseChoice.getArrayView<block>()[0];
 			//sender.setDelta(delta);
@@ -827,7 +827,7 @@ namespace tests_libOTe
 		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
 		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
 		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel   = ep0.addChannel();
+		Channel recvChannel = ep0.addChannel();
 
 		PRNG prng0(block(4253465, 3434565));
 		PRNG prng1(block(42532335, 334565));
@@ -852,7 +852,7 @@ namespace tests_libOTe
 		std::thread thrd = std::thread([&]() {
 			recv.setBaseOts(baseSend);
 			recv.receive(choices, recvMsg, prng0, recvChannel);
-		});
+			});
 
 		sender.setBaseOts(baseRecv, baseChoice);
 		sender.send(sendMsg, prng1, senderChannel);
@@ -866,7 +866,7 @@ namespace tests_libOTe
 	}
 
 
-	void SoftSpokenSmallVole_Test(const oc::CLP& cmd)
+	void Vole_SoftSpokenSmall_Test(const oc::CLP& cmd)
 	{
 #ifdef ENABLE_SOFTSPOKEN_OT
 		tests::xorReduction();
@@ -879,14 +879,14 @@ namespace tests_libOTe
 		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
 		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
 		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel   = ep0.addChannel();
+		Channel recvChannel = ep0.addChannel();
 
 		PRNG prng0(block(4234385, 3445235));
 		PRNG prng1(block(42348395, 989835));
 
 		u64 numVoles = cmd.getOr("n", 128);
 
-		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
+		for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
 		{
 			for (int malicious = 0; malicious < 2; ++malicious)
 			{
@@ -913,7 +913,7 @@ namespace tests_libOTe
 					senderUSize = sender.uSize();
 					senderVSize = sender.vSize();
 					senderSeeds = std::move(sender.mSeeds);
-				});
+					});
 
 				SmallFieldVoleReceiver recv(fieldBits, numVoles, recvChannel, prng0, baseRecv, baseChoice, 1, malicious);
 				BitVector delta = recv.delta;
@@ -943,7 +943,7 @@ namespace tests_libOTe
 				{
 					size_t deltaI = 0;
 					for (size_t j = 0; j < fieldBits; ++j)
-						deltaI += (size_t) delta[i * fieldBits + j] << j;
+						deltaI += (size_t)delta[i * fieldBits + j] << j;
 
 					if (print)
 					{
@@ -982,7 +982,7 @@ namespace tests_libOTe
 					}
 					if (v[i] != shouldEqualV[i])
 						throw UnitTestFail(LOCATION);
-					if (v[i] != (w[i] ^ (block::allSame((bool) delta[i]) & u[i / fieldBits])))
+					if (v[i] != (w[i] ^ (block::allSame((bool)delta[i]) & u[i / fieldBits])))
 						throw UnitTestFail(LOCATION);
 				}
 			}
@@ -1011,47 +1011,47 @@ namespace tests_libOTe
 		for (auto numOTs : nnumOTs)
 		{
 
-		for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
-		{
-
-			SoftSpokenShDotSender sender(fieldBits);
-			SoftSpokenShDotReceiver recv(fieldBits);
-
-			const size_t nBaseOTs = sender.baseOtCount();
-			if (nBaseOTs != recv.baseOtCount())
-				throw UnitTestFail(LOCATION);
-
-			std::vector<block> baseRecv(nBaseOTs);
-			std::vector<std::array<block, 2>> baseSend(nBaseOTs);
-			BitVector choices(numOTs), baseChoice(nBaseOTs);
-			choices.randomize(prng0);
-			baseChoice.randomize(prng0);
-
-			prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-			for (u64 i = 0; i < nBaseOTs; ++i)
+			for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
 			{
-				baseRecv[i] = baseSend[i][baseChoice[i]];
-			}
 
-			AlignedUnVector<block> recvMsg(numOTs);
-			AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
-			std::future<void> thrd = std::async([&]() {
-				recv.setBaseOts(baseSend, prng0, recvChannel);
-				recv.receive(choices, recvMsg, prng0, recvChannel);
-				});
+				SoftSpokenShDotSender sender(fieldBits);
+				SoftSpokenShDotReceiver recv(fieldBits);
 
-			sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
-			sender.send(sendMsg, prng1, senderChannel);
-			thrd.wait();
-
-			OT_100Receive_Test(choices, recvMsg, sendMsg);
-
-			const block delta = sender.delta();
-			for (auto& s : sendMsg)
-				if (neq(s[0] ^ delta, s[1]))
+				const size_t nBaseOTs = sender.baseOtCount();
+				if (nBaseOTs != recv.baseOtCount())
 					throw UnitTestFail(LOCATION);
+
+				std::vector<block> baseRecv(nBaseOTs);
+				std::vector<std::array<block, 2>> baseSend(nBaseOTs);
+				BitVector choices(numOTs), baseChoice(nBaseOTs);
+				choices.randomize(prng0);
+				baseChoice.randomize(prng0);
+
+				prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+				for (u64 i = 0; i < nBaseOTs; ++i)
+				{
+					baseRecv[i] = baseSend[i][baseChoice[i]];
+				}
+
+				AlignedUnVector<block> recvMsg(numOTs);
+				AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
+				std::future<void> thrd = std::async([&]() {
+					recv.setBaseOts(baseSend, prng0, recvChannel);
+					recv.receive(choices, recvMsg, prng0, recvChannel);
+					});
+
+				sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
+				sender.send(sendMsg, prng1, senderChannel);
+				thrd.wait();
+
+				OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+				const block delta = sender.delta();
+				for (auto& s : sendMsg)
+					if (neq(s[0] ^ delta, s[1]))
+						throw UnitTestFail(LOCATION);
+			}
 		}
-	}
 #else
 		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
 #endif
@@ -1066,7 +1066,7 @@ namespace tests_libOTe
 		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
 		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
 		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel   = ep0.addChannel();
+		Channel recvChannel = ep0.addChannel();
 
 		PRNG prng0(block(4234335, 3445235));
 		PRNG prng1(block(42348345, 989835));
@@ -1075,7 +1075,7 @@ namespace tests_libOTe
 		for (auto numOTs : nnumOTs)
 		{
 
-			for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
+			for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
 			{
 				SoftSpokenShOtSender sender(fieldBits);
 				SoftSpokenShOtReceiver recv(fieldBits);
@@ -1124,7 +1124,7 @@ namespace tests_libOTe
 		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
 		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
 		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel   = ep0.addChannel();
+		Channel recvChannel = ep0.addChannel();
 
 		PRNG prng0(block(4234335, 3445235));
 		PRNG prng1(block(42348345, 989835));
@@ -1133,7 +1133,7 @@ namespace tests_libOTe
 		for (auto numOTs : nnumOTs)
 		{
 
-			for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
+			for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
 			{
 
 
@@ -1189,7 +1189,7 @@ namespace tests_libOTe
 		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
 		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
 		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel   = ep0.addChannel();
+		Channel recvChannel = ep0.addChannel();
 
 		PRNG prng0(block(4234335, 3445235));
 		PRNG prng1(block(42348345, 989835));
@@ -1198,7 +1198,7 @@ namespace tests_libOTe
 		for (auto numOTs : nnumOTs)
 		{
 
-			for (size_t fieldBits = 1; fieldBits <= 11; ++fieldBits)
+			for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
 			{
 
 				SoftSpokenMalOtSender sender(fieldBits);

@@ -481,15 +481,7 @@ namespace osuCrypto
                 m[6] = r[6] & mask;
                 m[7] = r[7] & mask;
 
-                mAesFixedKey.ecbEnc8Blocks(m, hashBuffer.data());
-                m[0] = m[0] ^ hashBuffer[0];
-                m[1] = m[1] ^ hashBuffer[1];
-                m[2] = m[2] ^ hashBuffer[2];
-                m[3] = m[3] ^ hashBuffer[3];
-                m[4] = m[4] ^ hashBuffer[4];
-                m[5] = m[5] ^ hashBuffer[5];
-                m[6] = m[6] ^ hashBuffer[6];
-                m[7] = m[7] ^ hashBuffer[7];
+                mAesFixedKey.hashBlocks<8>(m, hashBuffer.data());
 
 
                 // extract the choice bit from the LSB of r
