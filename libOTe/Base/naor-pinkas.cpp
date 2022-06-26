@@ -40,8 +40,8 @@ namespace osuCrypto
         Curve curve;
 
         // should generalize to 1 out of N by changing this. But isn't tested...
-        const auto nSndVals(2);
-        const auto pointSize = Point::size;
+        static const auto nSndVals(2);
+        static const auto pointSize = Point::size;
 
         std::vector<std::thread> thrds(numThreads);
         std::vector<u8> sendBuff(messages.size() * pointSize);
@@ -60,9 +60,9 @@ namespace osuCrypto
             auto seed = prng.get<block>();
 
             thrds[t] = std::thread(
-                [t, numThreads, &messages, seed, pointSize,
+                [t, numThreads, &messages, seed,
                 &sendBuff, &choices, cRecvFuture, &cBuff,
-                &remainingPK0s, &socket, nSndVals,&RFuture,&R]()
+                &remainingPK0s, &socket, &RFuture,&R]()
             {
 
                 auto mStart = t * messages.size() / numThreads;
@@ -163,7 +163,7 @@ namespace osuCrypto
         //auto seed = prng.get<block>();
 
         Number alpha(prng);
-        const auto pointSize = Point::size;
+        static const auto pointSize = Point::size;
         std::vector<Point> pC;
         pC.reserve(nSndVals);
 
@@ -200,7 +200,7 @@ namespace osuCrypto
         {
 
             thrds[t] = std::thread([
-                t, pointSize, &messages, recvFuture,
+                t, &messages, recvFuture,
                     numThreads, &buff, &alpha, nSndVals, &pC,&socket,&R]()
             {
                 Curve curve;

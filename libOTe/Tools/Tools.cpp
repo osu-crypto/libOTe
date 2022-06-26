@@ -16,6 +16,7 @@
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Log.h>
 #include "libOTe/Tools/Tools.h"
+#include "cryptoTools/Common/Aligned.h"
 using std::array;
 
 namespace osuCrypto {
@@ -287,7 +288,6 @@ namespace osuCrypto {
 
 
 
-#ifdef OC_ENABLE_SSE2
     //  load          column  w,w+1          (byte index)
     //                   __________________
     //                  |                  |
@@ -869,7 +869,6 @@ namespace osuCrypto {
 
 
     }
-#endif
 
 #ifdef OC_ENABLE_AVX2
     // Templates are used for loop unrolling.
@@ -1018,6 +1017,23 @@ namespace osuCrypto {
     void avx_transpose128(block* inOut)
     {
         avx_transpose((__m256i*) inOut);
+    }
+
+    // input is 128 rows off 8 blocks each.
+    void avx_transpose128x1024(block* inOut)
+    {
+        AlignedArray<block, 128 * 8> buff;
+        for (u64 i = 0; i < 8; ++i)
+        {
+            for (u64 j = 0; j < 128; ++j)
+            {
+                buff[128 * i + j] = inOut[i + 128 * j];
+            }
+
+            avx_transpose128(&buff[128 * i]);
+        }
+
+        memcpy(inOut, buff.data(), 1024 * sizeof(block));
     }
 #endif
 }

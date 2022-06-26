@@ -71,11 +71,11 @@ namespace osuCrypto
 		static block mulA64(block in)
 		{
 			block mod = toBlock(gf64mod);
-			block mul = _mm_clmulepi64_si128(in, mod, inHalf != 0);
+			block mul = in.clmulepi64_si128<inHalf != 0>(mod);
 
 			// Output can include 4 bits in the high half. Multiply again (producing an 8 bit result) to
 			// reduce these into the low 64 bits.
-			block reduced = _mm_clmulepi64_si128(mul, mod, 0x01);
+			block reduced = mul.clmulepi64_si128<0x01>(mod);
 			return mul ^ reduced;
 		}
 
@@ -88,7 +88,8 @@ namespace osuCrypto
 
 		static u64 reduceU64(block in)
 		{
-			return _mm_extract_epi64(reduce(in), 0);
+			return reduce(in).as<u64>()[0];
+			//return _mm_extract_epi64(reduce(in), 0);
 		}
 
 		void setupHash()
@@ -98,9 +99,10 @@ namespace osuCrypto
 
 			block hashKeyBlock = toBlock(hashKey);
 			// Might be possible to make this more efficient since it is the Frobenious automorphism.
-			block hashKeySq = reduce(_mm_clmulepi64_si128(hashKeyBlock, hashKeyBlock, 0x00));
+			block hashKeySq = reduce(hashKeyBlock.clmulepi64_si128<0x00>(hashKeyBlock));
 			block hashKeySqA64 = mulA64<0>(hashKeySq);
-			hashKeySqAndA64 = _mm_unpacklo_epi64(hashKeySq, hashKeySqA64);
+			//hashKeySqAndA64 = _mm_unpacklo_epi64(hashKeySq, hashKeySqA64);
+			hashKeySqAndA64 = hashKeySq.unpacklo_epi64(hashKeySqA64);
 		}
 
 		bool rekeyCheck()
@@ -122,15 +124,15 @@ namespace osuCrypto
 
 		OC_FORCEINLINE void mulHash(block& hash) const
 		{
-			block hashMul0 = _mm_clmulepi64_si128(hash, hashKeySqAndA64, 0x00);
-			block hashMul1 = _mm_clmulepi64_si128(hash, hashKeySqAndA64, 0x11);
+			block hashMul0 = hash.clmulepi64_si128<0x00>(hashKeySqAndA64);
+			block hashMul1 = hash.clmulepi64_si128<0x11>(hashKeySqAndA64);
 			hash = hashMul0 ^ hashMul1;
 		}
 
 		OC_FORCEINLINE void updateHash(block& hash, block in) const
 		{
-			block inMul = _mm_clmulepi64_si128(in, toBlock(hashKey), 0x00);
-			block inHigh = _mm_srli_si128(in, 8);
+			block inMul = in.clmulepi64_si128<0x00>(toBlock(hashKey));
+			block inHigh = in.srli_si128<8>();
 			hash ^= inMul ^ inHigh;
 			mulHash(hash);
 		}

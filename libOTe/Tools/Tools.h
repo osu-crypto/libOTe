@@ -3,6 +3,7 @@
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/MatrixView.h>
+#include <cassert>
 namespace osuCrypto {
 
 
@@ -79,6 +80,7 @@ namespace osuCrypto {
 
 #ifdef OC_ENABLE_AVX2
     void avx_transpose128(block* inOut);
+    void avx_transpose128x1024(block* inOut);
 #endif
 #ifdef OC_ENABLE_SSE2
     void sse_transpose128(block* inOut);
@@ -93,8 +95,10 @@ namespace osuCrypto {
     inline void transpose128(block* inOut)
     {
 #if defined(OC_ENABLE_AVX2)
+        assert((u64)inOut % 32 == 0);
         avx_transpose128(inOut);
 #elif defined(OC_ENABLE_SSE2)
+        assert((u64)inOut % 16 == 0);
         sse_transpose128(inOut);
 #else
         eklundh_transpose128(inOut);
@@ -104,7 +108,11 @@ namespace osuCrypto {
 
     inline void transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
     {
-#ifdef OC_ENABLE_SSE2
+
+#if defined(OC_ENABLE_AVX2)
+        assert((u64)&inOut % 32 == 0);
+        avx_transpose128x1024(inOut[0].data());
+#elif defined(OC_ENABLE_SSE2)
         sse_transpose128x1024(inOut);
 #else
         eklundh_transpose128x1024(inOut);
