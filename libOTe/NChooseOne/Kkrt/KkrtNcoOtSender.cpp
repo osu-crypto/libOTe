@@ -115,7 +115,7 @@ namespace osuCrypto
         u64 doneIdx = 0;
 
         // a temp that will be used to transpose the sender's matrix
-        std::array<std::array<block, superBlkSize>, 128> t;
+        AlignedArray<std::array<block, superBlkSize>, 128> t;
 
         u64 numCols = mGens.size();
 

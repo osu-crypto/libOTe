@@ -126,16 +126,16 @@ namespace osuCrypto
         // this will be used as temporary buffers of 128 columns,
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
-        std::array<std::array<block, superBlkSize>, 128> t0;
+        AlignedArray<std::array<block, superBlkSize>, 128> t0;
         span<block> t0v((block*)t0.data(), superBlkSize * 128);
 
 
-        std::array<block, 128> extraBlocks;
+        AlignedArray<block, 128> extraBlocks;
 
         auto mIter = messages.begin();
 
         u64 step = std::min<u64>(numSuperBlocks, (u64)commStepSize);
-        std::vector<block> uBuff(step * 128 * superBlkSize);
+        AlignedUnVector<block> uBuff(step * 128 * superBlkSize);
 
         // get an array of blocks that we will fill.
         auto uIter = (block*)uBuff.data();

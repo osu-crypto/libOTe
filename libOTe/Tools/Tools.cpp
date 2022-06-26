@@ -1025,15 +1025,33 @@ namespace osuCrypto {
         AlignedArray<block, 128 * 8> buff;
         for (u64 i = 0; i < 8; ++i)
         {
+
+
+            //AlignedArray<block, 128> sub;
+            auto sub = &buff[128 * i];
             for (u64 j = 0; j < 128; ++j)
             {
-                buff[128 * i + j] = inOut[i + 128 * j];
+                sub[j] = inOut[j * 8 + i];
             }
+
+            //for (u64 j = 0; j < 128; ++j)
+            //{
+            //    buff[128 * i + j] = inOut[i + j * 8];
+            //}
 
             avx_transpose128(&buff[128 * i]);
         }
 
-        memcpy(inOut, buff.data(), 1024 * sizeof(block));
+        for (u64 i = 0; i < 8; ++i)
+        {
+            //AlignedArray<block, 128> sub;
+            auto sub = &buff[128 * i];
+            for (u64 j = 0; j < 128; ++j)
+            {
+                inOut[j * 8 + i] = sub[j];
+            }
+        }
+
     }
 #endif
 }

@@ -189,21 +189,11 @@ namespace osuCrypto
                     // here just showing the example.
                     if (role == Role::Receiver)
                     {
-                        receivers.emplace_back();
-                        DefaultBaseOT base;
-                        AlignedVector<std::array<block, 2>> baseMsg(nBaseOTs);
-                        base.send(baseMsg, prng, chls[i], numThreads);
-                        receivers[i].setBaseOts(baseMsg, prng, chls[i]);
+                        receivers[i].genBaseOts(prng, chls[i]);
                     }
                     else
                     {
-
-                        DefaultBaseOT base;
-                        BitVector bv(nBaseOTs);
-                        AlignedVector<block> baseMsg(nBaseOTs);
-                        bv.randomize(prng);
-                        base.receive(bv, baseMsg, prng, chls[i], numThreads);
-                        senders[i].setBaseOts(baseMsg, bv, prng, chls[i]);
+                        senders[i].genBaseOts(prng, chls[i]);
                     }
                 }
 #endif

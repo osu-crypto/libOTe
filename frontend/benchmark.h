@@ -1,4 +1,8 @@
+#pragma once
 #include "cryptoTools/Common/CLP.h"
+#include "cryptoTools/Common/Aligned.h"
+#include <chrono>
+#include "libOTe/Tools/Tools.h"
 
 namespace osuCrypto
 {
@@ -81,4 +85,71 @@ namespace osuCrypto
     //    std::cout << timer << std::endl;
     //}
 
+
+
+    inline void transpose(const CLP& cmd)
+    {
+        u64 trials = cmd.getOr("trials", 1ull << 18);
+
+        {
+
+
+            AlignedArray<block, 128> data;
+
+            Timer timer;
+            auto start0 = timer.setTimePoint("b");
+
+            for (u64 i = 0; i < trials; ++i)
+            {
+                avx_transpose128(data.data());
+            }
+
+            auto end0 = timer.setTimePoint("b");
+
+
+            for (u64 i = 0; i < trials; ++i)
+            {
+                sse_transpose128(data.data());
+            }
+
+            auto end1 = timer.setTimePoint("b");
+
+            std::cout << "avx " << std::chrono::duration_cast<std::chrono::milliseconds>(end0 - start0).count() << std::endl;
+            std::cout << "sse " << std::chrono::duration_cast<std::chrono::milliseconds>(end1 - end0).count() << std::endl;
+        }
+
+        {
+            AlignedArray<block, 1024> data;
+
+            Timer timer;
+            auto start1 = timer.setTimePoint("b");
+
+            for (u64 i = 0; i < trials * 8; ++i)
+            {
+                avx_transpose128(data.data());
+            }
+
+
+            auto start0 = timer.setTimePoint("b");
+
+            for (u64 i = 0; i < trials; ++i)
+            {
+                avx_transpose128x1024(data.data());
+            }
+
+            auto end0 = timer.setTimePoint("b");
+
+
+            for (u64 i = 0; i < trials; ++i)
+            {
+                sse_transpose128x1024(*(std::array<std::array<block, 8>, 128>*)data.data());
+            }
+
+            auto end1 = timer.setTimePoint("b");
+
+            std::cout << "avx " << std::chrono::duration_cast<std::chrono::milliseconds>(start0 - start1).count() << std::endl;
+            std::cout << "avx " << std::chrono::duration_cast<std::chrono::milliseconds>(end0 - start0).count() << std::endl;
+            std::cout << "sse " << std::chrono::duration_cast<std::chrono::milliseconds>(end1 - end0).count() << std::endl;
+        }
+    }
 }

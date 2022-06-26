@@ -214,7 +214,12 @@ namespace tests_libOTe
 				for (u64 j = 0; j < 128; ++j)
 				{
 					if (neq(sub[j], data[j][i]))
+					{
+						std::cout << "chunk " << j << " row " << i << std::endl;
+						std::cout << "exp " << data[j][i] << std::endl;
+						std::cout << "act " << sub[j] << std::endl;
 						throw UnitTestFail();
+					}
 				}
 			}
 
@@ -767,8 +772,8 @@ namespace tests_libOTe
 		{
 			u64 numOTs = 4234;
 
-			std::vector<block> recvMsg(numOTs), baseRecv(128);
-			std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+			AlignedUnVector<block> recvMsg(numOTs), baseRecv(128);
+			AlignedUnVector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
 			BitVector choices(numOTs);
 			choices.randomize(prng0);
 

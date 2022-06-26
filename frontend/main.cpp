@@ -19,6 +19,7 @@ using namespace osuCrypto;
 
 #include <iomanip>
 #include "util.h"
+#include "benchmark.h"
 
 #include "ExampleBase.h"
 #include "ExampleTwoChooseOne.h"
@@ -127,6 +128,15 @@ int main(int argc, char** argv)
         getLatency(cmd);
         flagSet = true;
     }
+
+
+    if (cmd.isSet("transpose"))
+    {
+        transpose(cmd);
+        flagSet = true;
+    }
+
+
 
 #ifdef ENABLE_SIMPLESTOT
     flagSet |= runIf(baseOT_example<SimplestOT>, cmd, simple);
