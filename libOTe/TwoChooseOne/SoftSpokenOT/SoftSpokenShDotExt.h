@@ -155,7 +155,7 @@ namespace osuCrypto
 
 			static const size_t commSize = commStepSize * superBlkSize; // picked to match the other OTs.
 			size_t chunkSize() const { return 128; }
-			size_t paddingSize() const { return std::max(divCeil(wPadded(), 2), chunkSize()) - chunkSize(); }
+			size_t paddingSize() const { return std::max<u64>(divCeil(wPadded(), 2), chunkSize()) - chunkSize(); }
 
 			void recvBuffer(Channel& chl, size_t batchSize) { mVole->recv(chl, 0, batchSize); }
 			OC_FORCEINLINE void processChunk(

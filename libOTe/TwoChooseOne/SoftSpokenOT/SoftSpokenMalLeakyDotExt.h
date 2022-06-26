@@ -116,8 +116,8 @@ namespace osuCrypto
 		friend ChunkerBase;
 		friend ChunkerBase::Base;
 
-		size_t chunkSize() const { return std::max(roundUpTo(wSize(), 2), (size_t)2 * 128); }
-		size_t paddingSize() const { return std::max(chunkSize(), wPadded()) - chunkSize(); }
+		size_t chunkSize() const { return std::max<u64>(roundUpTo(wSize(), 2), (size_t)2 * 128); }
+		size_t paddingSize() const { return std::max<u64>(chunkSize(), wPadded()) - chunkSize(); }
 	};
 
 	class SoftSpokenMalLeakyDotReceiver :
