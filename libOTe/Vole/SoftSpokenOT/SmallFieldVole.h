@@ -240,7 +240,7 @@ namespace osuCrypto
 				volesPadded = numVoles;
 
 			// Padding for sharedFunctionXor.
-			return std::max(volesPadded, roundUpTo(numVoles, 4));
+			return std::max<u64>(volesPadded, roundUpTo(numVoles, 4));
 		}
 
 	private:
