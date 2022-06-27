@@ -17,9 +17,11 @@ namespace osuCrypto {
         public OtExtSender, public TimerAdapter
     {
     public: 
-        std::vector<PRNG> mGens;
+        //std::vector<PRNG> mGens;
+        MultiKeyAES<gOtExtBaseOtCount> mGens;
         BitVector mBaseChoiceBits;
         bool mHash = true;
+        u64 mPrngIdx = 0;
 
         IknpOtExtSender() = default;
         IknpOtExtSender(const IknpOtExtSender&) = delete;
@@ -35,8 +37,10 @@ namespace osuCrypto {
 
         void operator=(IknpOtExtSender&&v) 
         {
+            mPrngIdx = std::exchange(v.mPrngIdx, 0);
             mGens = std::move(v.mGens);
             mBaseChoiceBits = std::move(v.mBaseChoiceBits);
+            mHash = v.mHash;
         }
 
 

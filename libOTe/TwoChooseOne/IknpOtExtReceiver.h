@@ -17,8 +17,9 @@ namespace osuCrypto
     {
     public:
         bool mHasBase = false, mHash = true;
-        std::vector<std::array<PRNG, 2>> mGens;
-
+        //std::vector<std::array<PRNG, 2>> mGens;
+        AlignedArray<MultiKeyAES<gOtExtBaseOtCount>,2> mGens;
+        u64 mPrngIdx = 0;
 
         IknpOtExtReceiver() = default;
         IknpOtExtReceiver(const IknpOtExtReceiver&) = delete;
@@ -33,9 +34,10 @@ namespace osuCrypto
 
         void operator=(IknpOtExtReceiver&& v)
         {
-            mHasBase = std::move(v.mHasBase);
+            mHasBase = std::exchange(v.mHasBase, false);
+            mPrngIdx = std::exchange(v.mPrngIdx, 0);
+            mHash = v.mHash;
             mGens = std::move(v.mGens);
-            v.mHasBase = false;
         }
 
         // returns whether the base OTs have been set. They must be set before

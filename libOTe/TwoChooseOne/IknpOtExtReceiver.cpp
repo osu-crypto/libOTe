@@ -8,8 +8,7 @@
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/Commit.h>
 #include "TcoOtDefines.h"
-
-using namespace std;
+#include <iomanip>
 
 namespace osuCrypto
 {
@@ -18,12 +17,13 @@ namespace osuCrypto
         if (baseOTs.size() != gOtExtBaseOtCount)
             throw std::runtime_error(LOCATION);
 
-
-        mGens.resize(gOtExtBaseOtCount);
-        for (u64 i = 0; i < gOtExtBaseOtCount; i++)
+        for (u64 j = 0; j < 2; ++j)
         {
-            mGens[i][0].SetSeed(baseOTs[i][0]);
-            mGens[i][1].SetSeed(baseOTs[i][1]);
+            block buff[gOtExtBaseOtCount];
+            for (u64 i = 0; i < gOtExtBaseOtCount; i++)
+                buff[i] = baseOTs[i][j];
+
+            mGens[j].setKeys(buff);
         }
 
         mHasBase = true;
@@ -32,16 +32,21 @@ namespace osuCrypto
 
     IknpOtExtReceiver IknpOtExtReceiver::splitBase()
     {
-        std::array<std::array<block, 2>, gOtExtBaseOtCount>baseRecvOts;
+        std::array<std::array<block, 2>, gOtExtBaseOtCount> baseRecvOts;
 
         if (!hasBaseOts())
             throw std::runtime_error("base OTs have not been set. " LOCATION);
 
-        for (u64 i = 0; i < mGens.size(); ++i)
+        for (u64 j = 0; j < 2; ++j)
         {
-            baseRecvOts[i][0] = mGens[i][0].get<block>();
-            baseRecvOts[i][1] = mGens[i][1].get<block>();
+            block buff[gOtExtBaseOtCount];
+            mGens[j].ecbEncCounterMode(mPrngIdx, buff);
+            for (u64 i = 0; i < gOtExtBaseOtCount; ++i)
+            {
+                baseRecvOts[i][j] = buff[i];
+            }
         }
+        ++mPrngIdx;
 
         return IknpOtExtReceiver(baseRecvOts);
     }
@@ -49,15 +54,7 @@ namespace osuCrypto
 
     std::unique_ptr<OtExtReceiver> IknpOtExtReceiver::split()
     {
-        std::array<std::array<block, 2>, gOtExtBaseOtCount>baseRecvOts;
-
-        for (u64 i = 0; i < mGens.size(); ++i)
-        {
-            baseRecvOts[i][0] = mGens[i][0].get<block>();
-            baseRecvOts[i][1] = mGens[i][1].get<block>();
-        }
-
-        return std::make_unique<IknpOtExtReceiver>(baseRecvOts);
+        return std::make_unique<IknpOtExtReceiver>(splitBase());
     }
 
 
@@ -72,8 +69,8 @@ namespace osuCrypto
 
         // we are going to process OTs in blocks of 128 * superBlkSize mMessages.
         u64 numOtExt = roundUpTo(choices.size(), 128);
-        u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
-        u64 numBlocks = numSuperBlocks * superBlkSize;
+        u64 numSuperBlocks = (numOtExt / 128);
+        u64 numBlocks = numSuperBlocks;
 
         BitVector choices2(numBlocks * 128);
         choices2 = choices;
@@ -83,15 +80,16 @@ namespace osuCrypto
         // this will be used as temporary buffers of 128 columns, 
         // each containing 1024 bits. Once transposed, they will be copied
         // into the T1, T0 buffers for long term storage.
-        AlignedArray<std::array<block, superBlkSize>, 128> t0;
+        AlignedArray<block, 128> t0;
 
         // the index of the OT that has been completed.
         //u64 doneIdx = 0;
-
+        static const auto superBlkSize = 1;
+        static const auto commStepSize = 512 * 8;
         auto mIter = messages.begin();
 
         u64 step = std::min<u64>(numSuperBlocks, (u64)commStepSize);
-        AlignedUnVector<block> uBuff(step * 128 * superBlkSize);
+        AlignedUnVector<block> uBuff(step * 128);
 
         // get an array of blocks that we will fill. 
         auto uIter = (block*)uBuff.data();
@@ -109,30 +107,22 @@ namespace osuCrypto
             // this will store the next 128 rows of the matrix u
 
             block* tIter = (block*)t0.data();
-            block* cIter = choiceBlocks.data() + superBlkSize * superBlkIdx;
+            block* cIter = choiceBlocks.data() + superBlkIdx;
 
+            mGens[0].ecbEncCounterMode(mPrngIdx, tIter);
+            mGens[1].ecbEncCounterMode(mPrngIdx, uIter);
+            ++mPrngIdx;
 
-            for (u64 colIdx = 0; colIdx < 128; ++colIdx)
+            for (u64 colIdx = 0; colIdx < 128 / 8; ++colIdx)
             {
-                // generate the column indexed by colIdx. This is done with
-                // AES in counter mode acting as a PRNG. We don'tIter use the normal
-                // PRNG interface because that would result in a data copy when 
-                // we move it into the T0,T1 matrices. Instead we do it directly.
-                mGens[colIdx][0].mAes.ecbEncCounterMode(mGens[colIdx][0].mBlockIdx, superBlkSize, tIter);
-                mGens[colIdx][1].mAes.ecbEncCounterMode(mGens[colIdx][1].mBlockIdx, superBlkSize, uIter);
-
-                // increment the counter mode idx.
-                mGens[colIdx][0].mBlockIdx += superBlkSize;
-                mGens[colIdx][1].mBlockIdx += superBlkSize;
-
                 uIter[0] = uIter[0] ^ cIter[0];
-                uIter[1] = uIter[1] ^ cIter[1];
-                uIter[2] = uIter[2] ^ cIter[2];
-                uIter[3] = uIter[3] ^ cIter[3];
-                uIter[4] = uIter[4] ^ cIter[4];
-                uIter[5] = uIter[5] ^ cIter[5];
-                uIter[6] = uIter[6] ^ cIter[6];
-                uIter[7] = uIter[7] ^ cIter[7];
+                uIter[1] = uIter[1] ^ cIter[0];
+                uIter[2] = uIter[2] ^ cIter[0];
+                uIter[3] = uIter[3] ^ cIter[0];
+                uIter[4] = uIter[4] ^ cIter[0];
+                uIter[5] = uIter[5] ^ cIter[0];
+                uIter[6] = uIter[6] ^ cIter[0];
+                uIter[7] = uIter[7] ^ cIter[0];
 
                 uIter[0] = uIter[0] ^ tIter[0];
                 uIter[1] = uIter[1] ^ tIter[1];
@@ -147,6 +137,41 @@ namespace osuCrypto
                 tIter += 8;
             }
 
+            //for (u64 colIdx = 0; colIdx < 128; ++colIdx)
+            //{
+            //    // generate the column indexed by colIdx. This is done with
+            //    // AES in counter mode acting as a PRNG. We don'tIter use the normal
+            //    // PRNG interface because that would result in a data copy when 
+            //    // we move it into the T0,T1 matrices. Instead we do it directly.
+            //    mGens[colIdx][0].mAes.ecbEncCounterMode(mGens[colIdx][0].mBlockIdx, superBlkSize, tIter);
+            //    mGens[colIdx][1].mAes.ecbEncCounterMode(mGens[colIdx][1].mBlockIdx, superBlkSize, uIter);
+
+            //    // increment the counter mode idx.
+            //    mGens[colIdx][0].mBlockIdx += superBlkSize;
+            //    mGens[colIdx][1].mBlockIdx += superBlkSize;
+
+            //    uIter[0] = uIter[0] ^ cIter[0];
+            //    uIter[1] = uIter[1] ^ cIter[1];
+            //    uIter[2] = uIter[2] ^ cIter[2];
+            //    uIter[3] = uIter[3] ^ cIter[3];
+            //    uIter[4] = uIter[4] ^ cIter[4];
+            //    uIter[5] = uIter[5] ^ cIter[5];
+            //    uIter[6] = uIter[6] ^ cIter[6];
+            //    uIter[7] = uIter[7] ^ cIter[7];
+
+            //    uIter[0] = uIter[0] ^ tIter[0];
+            //    uIter[1] = uIter[1] ^ tIter[1];
+            //    uIter[2] = uIter[2] ^ tIter[2];
+            //    uIter[3] = uIter[3] ^ tIter[3];
+            //    uIter[4] = uIter[4] ^ tIter[4];
+            //    uIter[5] = uIter[5] ^ tIter[5];
+            //    uIter[6] = uIter[6] ^ tIter[6];
+            //    uIter[7] = uIter[7] ^ tIter[7];
+
+            //    uIter += 8;
+            //    tIter += 8;
+            //}
+
             if (uIter == uEnd)
             {
                 // send over u buffer
@@ -156,7 +181,7 @@ namespace osuCrypto
 
                 if (step)
                 {
-                    uBuff.resize(step * 128 * superBlkSize);
+                    uBuff.resize(step * 128);
                     uIter = (block*)uBuff.data();
                     uEnd = uIter + uBuff.size();
                 }
@@ -164,7 +189,7 @@ namespace osuCrypto
 
             // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
             // each 128 bits wide.
-            transpose128x1024(t0);
+            transpose128(t0.data());
 
 
             //block* mStart = mIter;
@@ -175,18 +200,8 @@ namespace osuCrypto
             tIter = (block*)t0.data();
             block* tEnd = (block*)t0.data() + 128 * superBlkSize;
 
-            while (mIter != mEnd)
-            {
-                while (mIter != mEnd && tIter < tEnd) 
-                {
-                    (*mIter) = *tIter;
-
-                    tIter += superBlkSize;
-                    mIter += 1;
-                }
-
-                tIter = tIter - 128 * superBlkSize + 1;
-            }
+            memcpy(mIter, tIter, (mEnd - mIter) * sizeof(block));
+            mIter = mEnd;
 
 #ifdef IKNP_DEBUG
             u64 doneIdx = mStart - messages.data();
@@ -204,10 +219,6 @@ namespace osuCrypto
 #ifdef IKNP_SHA_HASH
             RandomOracle sha;
             u8 hashBuff[20];
-#else
-            std::array<block, 8> aesHashTemp;
-#endif
-
             u64 doneIdx = (0);
 
             u64 bb = (messages.size() + 127) / 128;
@@ -215,7 +226,6 @@ namespace osuCrypto
             {
                 u64 stop = std::min<u64>(messages.size(), doneIdx + 128);
 
-#ifdef IKNP_SHA_HASH
                 for (u64 i = 0; doneIdx < stop; ++doneIdx, ++i)
                 {
                     // hash it
@@ -224,36 +234,11 @@ namespace osuCrypto
                     sha.Final(hashBuff);
                     messages[doneIdx] = *(block*)hashBuff;
                 }
+            }
 #else
-                auto length = stop - doneIdx;
-                auto steps = length / 8;
-                block* mIter = messages.data() + doneIdx;
-                for (u64 i = 0; i < steps; ++i)
-                {
-                    mAesFixedKey.ecbEncBlocks(mIter, 8, aesHashTemp.data());
-                    mIter[0] = mIter[0] ^ aesHashTemp[0];
-                    mIter[1] = mIter[1] ^ aesHashTemp[1];
-                    mIter[2] = mIter[2] ^ aesHashTemp[2];
-                    mIter[3] = mIter[3] ^ aesHashTemp[3];
-                    mIter[4] = mIter[4] ^ aesHashTemp[4];
-                    mIter[5] = mIter[5] ^ aesHashTemp[5];
-                    mIter[6] = mIter[6] ^ aesHashTemp[6];
-                    mIter[7] = mIter[7] ^ aesHashTemp[7];
-
-                    mIter += 8;
-                }
-
-                auto rem = length - steps * 8;
-                mAesFixedKey.ecbEncBlocks(mIter, rem, aesHashTemp.data());
-                for (u64 i = 0; i < rem; ++i)
-                {
-                    mIter[i] = mIter[i] ^ aesHashTemp[i];
-                }
-
-                doneIdx = stop;
+            mAesFixedKey.hashBlocks(messages.data(), messages.size(), messages.data());
 #endif
 
-            }
         }
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");
     }
