@@ -232,7 +232,7 @@ namespace tests_libOTe
 		AlignedArray<block, 128> data;
 		prng.get(data.data(), data.size());
 
-		u64 highAtEnd = data[127].as<u64>()[1];
+		u64 highAtEnd = data[127].get<u64>()[1];
 
 		for (u64 i = 0; i < 10000; ++i)
 		{
@@ -241,7 +241,7 @@ namespace tests_libOTe
 		}
 
 		// Add a check just to make sure this doesn't get compiled out.
-		if (data[127].as<u64>()[1] != highAtEnd)
+		if (data[127].get<u64>()[1] != highAtEnd)
 			throw UnitTestFail();
 	}
 

@@ -88,7 +88,7 @@ namespace osuCrypto
 
 		static u64 reduceU64(block in)
 		{
-			return reduce(in).as<u64>()[0];
+			return reduce(in).get<u64>(0);
 			//return _mm_extract_epi64(reduce(in), 0);
 		}
 
