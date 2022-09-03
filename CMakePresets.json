@@ -34,6 +34,7 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "FETCH_AUTO": true,
         "VERBOSE_FETCH": true,
+        "ENABLE_BOOST": true,
         "ENABLE_RELIC": true,
         "ENABLE_ALL_OT": true,
         "ENABLE_SSE": true,
