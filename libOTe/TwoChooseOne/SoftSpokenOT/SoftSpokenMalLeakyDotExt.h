@@ -23,7 +23,7 @@ namespace osuCrypto
 		AlignedUnVector<block> mExtraW;
 
 		struct Hasher :
-			public Chunker<
+			private Chunker<
 			Hasher,
 			std::tuple<std::array<block, 2>>,
 			std::tuple<AlignedUnVector<std::array<block, 2>>>
@@ -35,6 +35,7 @@ namespace osuCrypto
 				std::tuple<AlignedUnVector<std::array<block, 2>>>
 			>;
 			friend ChunkerBase;
+			friend SoftSpokenMalLeakyDotSender;
 
 			Hasher() : ChunkerBase(this) {}
 
@@ -133,7 +134,7 @@ namespace osuCrypto
 		AlignedUnVector<block> mExtraV;
 
 		struct Hasher :
-			public Chunker<
+			private Chunker<
 			Hasher,
 			std::tuple<block>,
 			std::tuple<AlignedUnVector<block>>
@@ -145,6 +146,7 @@ namespace osuCrypto
 				std::tuple<AlignedUnVector<block>>
 			>;
 			friend ChunkerBase;
+			friend SoftSpokenMalLeakyDotReceiver;
 
 			Hasher() : ChunkerBase(this) {}
 

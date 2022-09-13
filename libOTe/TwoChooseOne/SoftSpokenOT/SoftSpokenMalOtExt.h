@@ -92,7 +92,7 @@ namespace osuCrypto
 			using Base = SoftSpokenMalLeakyDotSender;
 
 			struct Hasher :
-				public Chunker<
+				private Chunker<
 				Hasher,
 				std::tuple<std::array<block, 2>>,
 				std::tuple<AlignedUnVector<std::array<block, 2>>>
@@ -104,6 +104,8 @@ namespace osuCrypto
 					std::tuple<AlignedUnVector<std::array<block, 2>>>
 				>;
 				friend ChunkerBase;
+				friend SoftSpokenMalLeakyDotSender;
+				friend SoftSpokenMalOtSender;
 
 				TwoOneRTCR<2> rtcr;
 
@@ -165,7 +167,7 @@ namespace osuCrypto
 			using Base = SoftSpokenMalLeakyDotReceiver;
 
 			struct Hasher :
-				public Chunker<
+				private Chunker<
 				Hasher,
 				std::tuple<block>,
 				std::tuple<AlignedUnVector<block>>
@@ -177,6 +179,8 @@ namespace osuCrypto
 					std::tuple<AlignedUnVector<block>>
 				>;
 				friend ChunkerBase;
+				friend SoftSpokenMalLeakyDotReceiver;
+				friend SoftSpokenMalOtReceiver;
 
 				TwoOneRTCR<1> rtcr;
 
