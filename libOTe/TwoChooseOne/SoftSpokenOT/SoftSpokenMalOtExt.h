@@ -82,7 +82,7 @@ namespace osuCrypto
 				tweak += tweakIncrease;
 				tweakMul = tweakMulLocal ^ hashKeys[log2floor((tweak - 1) ^ tweak)];
 
-				mAESs.get().hashBlocks<numBlocks>(tmp, ciphertext);
+				mAESs.get().template hashBlocks<numBlocks>(tmp, ciphertext);
 			}
 		};
 
@@ -289,7 +289,7 @@ namespace osuCrypto
 			if (i >= superBlkSize / 2)
 			{
 				i -= superBlkSize / 2;
-				rtcr.hashBlocks<superBlkSize / 2>(inputV + i, messagesOut + i);
+				rtcr.template hashBlocks<superBlkSize / 2>(inputV + i, messagesOut + i);
 
 			}
 
@@ -297,7 +297,7 @@ namespace osuCrypto
 			for (size_t j = 0; j < remainingIters; ++j)
 			{
 				i = remainingIters - j - 1;
-				rtcr.hashBlocks<1>(inputV + i, messagesOut + i);
+				rtcr.template hashBlocks<1>(inputV + i, messagesOut + i);
 			}
 		}
 
