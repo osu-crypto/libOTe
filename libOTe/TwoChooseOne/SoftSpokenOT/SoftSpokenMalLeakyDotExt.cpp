@@ -51,7 +51,7 @@ namespace osuCrypto
 		mVole->generateChosen(blockIdx, useAES(mVole->mVole.mNumVoles), messages.subspan(0, wPadded()));
 	}
 
-	void SoftSpokenMalLeakyDotSender::Hasher::processChunk(
+	void details::SoftSpokenMalLeakyDotSenderHasher::processChunk(
 		size_t nChunk, size_t numUsed,
 		span<std::array<block, 2>> messages)
 	{
@@ -140,16 +140,16 @@ namespace osuCrypto
 
 	template void SoftSpokenMalLeakyDotSender::sendImpl(
 		span<std::array<block, 2>> messages, PRNG& prng, Channel& chl,
-		SoftSpokenMalLeakyDotSender::Hasher& hasher);
+		details::SoftSpokenMalLeakyDotSenderHasher& hasher);
 	template void SoftSpokenMalLeakyDotReceiver::receiveImpl(
 		const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl,
-		SoftSpokenMalLeakyDotReceiver::Hasher& hasher);
+		details::SoftSpokenMalLeakyDotReceiverHasher& hasher);
 	template void SoftSpokenMalLeakyDotSender::sendImpl(
 		span<std::array<block, 2>> messages, PRNG& prng, Channel& chl,
-		SoftSpokenMalOtSender::Hasher& hasher);
+		details::SoftSpokenMalOtSenderHasher& hasher);
 	template void SoftSpokenMalLeakyDotReceiver::receiveImpl(
 		const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl,
-		SoftSpokenMalOtReceiver::Hasher& hasher);
+		details::SoftSpokenMalOtReceiverHasher& hasher);
 
 }
 

@@ -86,20 +86,21 @@ namespace osuCrypto
 			}
 		};
 
-		class SoftSpokenMalOtSender : public SoftSpokenMalLeakyDotSender
-		{
-		public:
-			using Base = SoftSpokenMalLeakyDotSender;
 
-			struct Hasher :
-				private Chunker<
-				Hasher,
+		class SoftSpokenMalOtSender;
+		class SoftSpokenMalOtReceiver;
+		namespace details
+		{
+
+			struct SoftSpokenMalOtSenderHasher :
+				public Chunker<
+				SoftSpokenMalOtSenderHasher,
 				std::tuple<std::array<block, 2>>,
 				std::tuple<AlignedUnVector<std::array<block, 2>>>
 				>
 			{
 				using ChunkerBase = Chunker<
-					Hasher,
+					SoftSpokenMalOtSenderHasher,
 					std::tuple<std::array<block, 2>>,
 					std::tuple<AlignedUnVector<std::array<block, 2>>>
 				>;
@@ -109,7 +110,7 @@ namespace osuCrypto
 
 				TwoOneRTCR<2> rtcr;
 
-				Hasher() : ChunkerBase(this) {}
+				SoftSpokenMalOtSenderHasher() : ChunkerBase(this) {}
 
 				void send(PRNG& prng, Channel& chl)
 				{
@@ -134,6 +135,60 @@ namespace osuCrypto
 					span<std::array<block, 2>> messages);
 			};
 
+
+			struct SoftSpokenMalOtReceiverHasher :
+				public Chunker<
+				SoftSpokenMalOtReceiverHasher,
+				std::tuple<block>,
+				std::tuple<AlignedUnVector<block>>
+				>
+			{
+				using ChunkerBase = Chunker<
+					SoftSpokenMalOtReceiverHasher,
+					std::tuple<block>,
+					std::tuple<AlignedUnVector<block>>
+				>;
+				friend ChunkerBase;
+				friend SoftSpokenMalLeakyDotReceiver;
+				friend SoftSpokenMalOtReceiver;
+
+				TwoOneRTCR<1> rtcr;
+
+				SoftSpokenMalOtReceiverHasher() : ChunkerBase(this) {}
+
+				void recv(Channel& chl)
+				{
+					std::array<block, 2> keyAndSeed;
+					chl.recv(&keyAndSeed, 1);
+					rtcr.setKey(keyAndSeed[0], keyAndSeed[1]);
+				}
+
+				size_t chunkSize() const { return 128; }
+				size_t paddingSize() const { return 0; }
+
+				SoftSpokenMalLeakyDotReceiver* mParent = nullptr;
+				block* mInputV = nullptr;
+
+				void setParams(SoftSpokenMalLeakyDotReceiver* parent, block* inputV)
+				{
+					mParent = parent;
+					mInputV = inputV;
+				}
+
+				OC_FORCEINLINE void processChunk(
+					size_t nChunk, size_t numUsed,
+					span<block> messages, block choices);
+			};
+
+		}
+
+		class SoftSpokenMalOtSender : public SoftSpokenMalLeakyDotSender
+		{
+		public:
+			using Base = SoftSpokenMalLeakyDotSender;
+
+			using Hasher = details::SoftSpokenMalOtSenderHasher;
+			friend Hasher;
 			Hasher hasher;
 
 			SoftSpokenMalOtSender(size_t fieldBits = 2, size_t numThreads_ = 1) :
@@ -166,50 +221,8 @@ namespace osuCrypto
 		public:
 			using Base = SoftSpokenMalLeakyDotReceiver;
 
-			struct Hasher :
-				private Chunker<
-				Hasher,
-				std::tuple<block>,
-				std::tuple<AlignedUnVector<block>>
-				>
-			{
-				using ChunkerBase = Chunker<
-					Hasher,
-					std::tuple<block>,
-					std::tuple<AlignedUnVector<block>>
-				>;
-				friend ChunkerBase;
-				friend SoftSpokenMalLeakyDotReceiver;
-				friend SoftSpokenMalOtReceiver;
-
-				TwoOneRTCR<1> rtcr;
-
-				Hasher() : ChunkerBase(this) {}
-
-				void recv(Channel& chl)
-				{
-					std::array<block, 2> keyAndSeed;
-					chl.recv(&keyAndSeed, 1);
-					rtcr.setKey(keyAndSeed[0], keyAndSeed[1]);
-				}
-
-				size_t chunkSize() const { return 128; }
-				size_t paddingSize() const { return 0; }
-
-				SoftSpokenMalLeakyDotReceiver* mParent = nullptr;
-				block* mInputV = nullptr;
-
-				void setParams(SoftSpokenMalLeakyDotReceiver* parent, block* inputV)
-				{
-					mParent = parent;
-					mInputV = inputV;
-				}
-
-				OC_FORCEINLINE void processChunk(
-					size_t nChunk, size_t numUsed,
-					span<block> messages, block choices);
-			};
-
+			using Hasher = details::SoftSpokenMalOtReceiverHasher;
+			friend Hasher;
 			Hasher hasher;
 
 			SoftSpokenMalOtReceiver(size_t fieldBits = 2, size_t numThreads_ = 1) :
@@ -236,7 +249,7 @@ namespace osuCrypto
 			}
 		};
 
-		void SoftSpokenMalOtSender::Hasher::processChunk(
+		void details::SoftSpokenMalOtSenderHasher::processChunk(
 			size_t nChunk, size_t numUsed,
 			span<std::array<block, 2>> messages)
 		{
@@ -252,7 +265,7 @@ namespace osuCrypto
 				numUsed, parent_->delta(), (block*)messages.data(), inputW, rtcr);
 		}
 
-		void SoftSpokenMalOtReceiver::Hasher::processChunk(
+		void details::SoftSpokenMalOtReceiverHasher::processChunk(
 			size_t nChunk, size_t numUsed,
 			span<block> messages, block choices)
 		{

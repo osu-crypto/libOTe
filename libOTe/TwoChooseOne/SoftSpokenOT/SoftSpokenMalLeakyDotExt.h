@@ -10,34 +10,28 @@ namespace osuCrypto
 
 	// Uses SubspaceVoleMalicious as a Delta OT.
 
-	class SoftSpokenMalLeakyDotSender :
-		public SoftSpokenShDotSenderWithVole<SubspaceVoleMaliciousReceiver<RepetitionCode>>,
-		private ChunkedReceiver<
-		SoftSpokenMalLeakyDotSender,
-		std::tuple<block>
-		>
+
+	class SoftSpokenMalLeakyDotSender;
+	class SoftSpokenMalLeakyDotReceiver;
+	namespace details
 	{
-	public:
-		using Base = SoftSpokenShDotSenderWithVole<SubspaceVoleMaliciousReceiver<RepetitionCode>>;
 
-		AlignedUnVector<block> mExtraW;
-
-		struct Hasher :
+		struct SoftSpokenMalLeakyDotSenderHasher :
 			private Chunker<
-			Hasher,
+			SoftSpokenMalLeakyDotSenderHasher,
 			std::tuple<std::array<block, 2>>,
 			std::tuple<AlignedUnVector<std::array<block, 2>>>
 			>
 		{
 			using ChunkerBase = Chunker<
-				Hasher,
+				SoftSpokenMalLeakyDotSenderHasher,
 				std::tuple<std::array<block, 2>>,
 				std::tuple<AlignedUnVector<std::array<block, 2>>>
 			>;
 			friend ChunkerBase;
 			friend SoftSpokenMalLeakyDotSender;
 
-			Hasher() : ChunkerBase(this) {}
+			SoftSpokenMalLeakyDotSenderHasher() : ChunkerBase(this) {}
 
 			void send(PRNG& prng, Channel& chl) {}
 			size_t chunkSize() const { return 128; }
@@ -58,6 +52,56 @@ namespace osuCrypto
 				span<std::array<block, 2>> messages);
 		};
 
+
+		struct SoftSpokenMalLeakyDotReceiverHasher :
+			private Chunker<
+			SoftSpokenMalLeakyDotReceiverHasher,
+			std::tuple<block>,
+			std::tuple<AlignedUnVector<block>>
+			>
+		{
+			using ChunkerBase = Chunker<
+				SoftSpokenMalLeakyDotReceiverHasher,
+				std::tuple<block>,
+				std::tuple<AlignedUnVector<block>>
+			>;
+			friend ChunkerBase;
+			friend SoftSpokenMalLeakyDotReceiver;
+
+			SoftSpokenMalLeakyDotReceiverHasher() : ChunkerBase(this) {}
+
+			void recv(Channel& chl) {}
+			size_t chunkSize() const { return 128; }
+			size_t paddingSize() const { return 0; }
+
+			SoftSpokenMalLeakyDotReceiver* mParent;
+			block* mInputV = nullptr;
+			void setParams(SoftSpokenMalLeakyDotReceiver* parent, block* inputV)
+			{
+				mParent = parent;
+				mInputV = inputV;
+			}
+
+			OC_FORCEINLINE void processChunk(
+				size_t nChunk, size_t numUsed,
+				span<block> messages, block choices);
+		};
+	}
+
+	class SoftSpokenMalLeakyDotSender :
+		public SoftSpokenShDotSenderWithVole<SubspaceVoleMaliciousReceiver<RepetitionCode>>,
+		private ChunkedReceiver<
+		SoftSpokenMalLeakyDotSender,
+		std::tuple<block>
+		>
+	{
+	public:
+		using Base = SoftSpokenShDotSenderWithVole<SubspaceVoleMaliciousReceiver<RepetitionCode>>;
+
+		AlignedUnVector<block> mExtraW;
+
+		using Hasher = details::SoftSpokenMalLeakyDotSenderHasher;
+		friend Hasher;
 		Hasher mHasher;
 
 		SoftSpokenMalLeakyDotSender(size_t fieldBits = 2, size_t numThreads_ = 1) :
@@ -133,40 +177,8 @@ namespace osuCrypto
 
 		AlignedUnVector<block> mExtraV;
 
-		struct Hasher :
-			private Chunker<
-			Hasher,
-			std::tuple<block>,
-			std::tuple<AlignedUnVector<block>>
-			>
-		{
-			using ChunkerBase = Chunker<
-				Hasher,
-				std::tuple<block>,
-				std::tuple<AlignedUnVector<block>>
-			>;
-			friend ChunkerBase;
-			friend SoftSpokenMalLeakyDotReceiver;
-
-			Hasher() : ChunkerBase(this) {}
-
-			void recv(Channel& chl) {}
-			size_t chunkSize() const { return 128; }
-			size_t paddingSize() const { return 0; }
-
-			SoftSpokenMalLeakyDotReceiver* mParent;
-			block* mInputV = nullptr;
-			void setParams(SoftSpokenMalLeakyDotReceiver* parent, block* inputV)
-			{
-				mParent = parent;
-				mInputV = inputV;
-			}
-
-			OC_FORCEINLINE void processChunk(
-				size_t nChunk, size_t numUsed,
-				span<block> messages, block choices);
-		};
-
+		using Hasher = details::SoftSpokenMalLeakyDotReceiverHasher;
+		friend Hasher;
 		Hasher mHasher;
 
 		SoftSpokenMalLeakyDotReceiver(size_t fieldBits = 2, size_t numThreads_ = 1) :
@@ -227,7 +239,7 @@ namespace osuCrypto
 		size_t paddingSize() const { return vPadded() - chunkSize(); }
 	};
 
-	void SoftSpokenMalLeakyDotReceiver::Hasher::processChunk(
+	void details::SoftSpokenMalLeakyDotReceiverHasher::processChunk(
 		size_t nChunk, size_t numUsed,
 		span<block> messages, block choices)
 	{
