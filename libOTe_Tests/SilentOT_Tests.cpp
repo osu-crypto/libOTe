@@ -1,6 +1,7 @@
 #include "SilentOT_Tests.h"
 
 #include "libOTe/Tools/SilentPprf.h"
+#include "libOTe/Tools/Tools.h"
 #include "libOTe/TwoChooseOne/SilentOtExtSender.h"
 #include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
 #include <cryptoTools/Common/Log.h>
