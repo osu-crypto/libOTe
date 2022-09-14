@@ -376,7 +376,11 @@ void OtExt_Silent_random_Test(const CLP& cmd)
 
     auto thrd = std::thread([&] {
         sender.silentSend(messages, prng, chl0); });
-    recver.silentReceive(choice, messages2, prng, chl1, type);
+
+    try {
+        recver.silentReceive(choice, messages2, prng, chl1, type);
+    }
+    catch (...) {}
 
     thrd.join();
     checkRandom(messages2, messages, choice, n, verbose);
@@ -665,7 +669,10 @@ void OtExt_Silent_mal_Test(const oc::CLP& cmd)
     auto thrd = std::thread([&] {
         sender.silentSend(msg2, prng, chl0);
         });
-    recver.silentReceive(choice, msg1, prng, chl1);
+    try {
+        recver.silentReceive(choice, msg1, prng, chl1);
+    }
+    catch (...) {}
 
     thrd.join();
 

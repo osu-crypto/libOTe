@@ -37,6 +37,7 @@
         "ENABLE_BOOST": true,
         "ENABLE_RELIC": true,
         "ENABLE_ALL_OT": true,
+        "ENABLE_BITPOLYMUl": false,
         "ENABLE_SSE": false,
         "ENABLE_AVX": false,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
