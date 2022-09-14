@@ -120,6 +120,7 @@ int main(int argc, char** argv)
         tests += tests_libOTe::Tests;
 
         auto r = tests.runIf(cmd);
+        std::cout << " done " << (int)r << std::endl;
         return r == TestCollection::Result::passed ? 0 : -1;
     }
 

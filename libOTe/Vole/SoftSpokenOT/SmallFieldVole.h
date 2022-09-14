@@ -123,7 +123,7 @@ namespace osuCrypto
 				return numVoles;
 		}
 
-	private:
+	//private:
 		void (* const generatePtr)(const SmallFieldVoleSender&,
 			size_t, const AES&, block* BOOST_RESTRICT, block* BOOST_RESTRICT);
 
@@ -243,7 +243,7 @@ namespace osuCrypto
 			return std::max<u64>(volesPadded, roundUpTo(numVoles, 4));
 		}
 
-	private:
+	//private:
 		void (* const generatePtr)(const SmallFieldVoleReceiver&,
 			size_t, const AES&, block* BOOST_RESTRICT, const block* BOOST_RESTRICT);
 
