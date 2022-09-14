@@ -684,7 +684,8 @@ void OtExt_Silent_mal_Test(const oc::CLP& cmd)
 
 void Tools_Pprf_test(const CLP& cmd)
 {
-#ifdef ENABLE_SILENTOT
+#if defined(ENABLE_SILENTOT) || defined(ENABLE_SOFTSPOKEN_OT)
+
 
     u64 depth = cmd.getOr("d", 3);;
     u64 domain = 1ull << depth;
@@ -768,7 +769,8 @@ void Tools_Pprf_test(const CLP& cmd)
 
 void Tools_Pprf_trans_test(const CLP& cmd)
 {
-#ifdef ENABLE_SILENTOT
+#if defined(ENABLE_SILENTOT) || defined(ENABLE_SOFTSPOKEN_OT)
+
 
     //u64 depth = 6;
     //u64 domain = 13;// (1ull << depth) - 7;
@@ -874,7 +876,8 @@ void Tools_Pprf_trans_test(const CLP& cmd)
 
 void Tools_Pprf_inter_test(const CLP& cmd)
 {
-#ifdef ENABLE_SILENTOT
+#if defined(ENABLE_SILENTOT) || defined(ENABLE_SOFTSPOKEN_OT)
+
 
     //u64 depth = 6;
     //u64 domain = 13;// (1ull << depth) - 7;

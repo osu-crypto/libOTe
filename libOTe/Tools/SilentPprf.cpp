@@ -1,5 +1,5 @@
 #include "SilentPprf.h"
-#ifdef ENABLE_SILENTOT
+#if defined(ENABLE_SILENTOT) || defined(ENABLE_SOFTSPOKEN_OT)
 
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Common/Aligned.h>

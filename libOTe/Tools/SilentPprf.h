@@ -1,6 +1,6 @@
 #pragma once
 #include <libOTe/config.h>
-#ifdef ENABLE_SILENTOT
+#if defined(ENABLE_SILENTOT) || defined(ENABLE_SOFTSPOKEN_OT)
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/BitVector.h>
