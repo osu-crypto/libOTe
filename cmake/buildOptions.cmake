@@ -60,7 +60,8 @@ if(DEFINED ENABLE_ALL_OT)
 	unset(ENABLE_ALL_OT CACHE)
 endif()
 
-option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" OFF)
+
+
 option(ENABLE_SIMPLESTOT     "Build the SimplestOT base OT" OFF)
 option(ENABLE_SIMPLESTOT_ASM "Build the assembly based SimplestOT library" OFF)
 option(ENABLE_MRR            "Build the McQuoidRosulekRoy 20 PopfOT base OT using Ristretto KA" OFF)
@@ -82,7 +83,13 @@ option(ENABLE_RR             "Build the RR 1-oo-N OT-Ext protocol." OFF)
 
 option(ENABLE_AKN            "Build the RR ~k-oo-N OT-Ext protocol." OFF)
 
-set(ENABLE_BITPOLYMUL ${ENABLE_SILENTOT})
+if(ENABLE_SSE)
+	set(ENABLE_BITPOLYMUL_DEFAULT ${ENABLE_SILENTOT})
+else()
+	set(ENABLE_BITPOLYMUL_DEFAULT OFF)
+endif()
+
+option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" ${ENABLE_BITPOLYMUL_DEFAULT})
 
 
 #option(FETCH_BITPOLYMUL		"download and build bitpolymul" OFF))
