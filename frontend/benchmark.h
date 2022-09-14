@@ -89,6 +89,7 @@ namespace osuCrypto
 
     inline void transpose(const CLP& cmd)
     {
+#ifdef ENABLE_AVX
         u64 trials = cmd.getOr("trials", 1ull << 18);
 
         {
@@ -98,12 +99,11 @@ namespace osuCrypto
 
             Timer timer;
             auto start0 = timer.setTimePoint("b");
-#ifdef ENABLE_AVX
             for (u64 i = 0; i < trials; ++i)
             {
                 avx_transpose128(data.data());
             }
-#endif
+
             auto end0 = timer.setTimePoint("b");
 
 
@@ -124,21 +124,18 @@ namespace osuCrypto
             Timer timer;
             auto start1 = timer.setTimePoint("b");
 
-#ifdef ENABLE_AVX
             for (u64 i = 0; i < trials * 8; ++i)
             {
                 avx_transpose128(data.data());
             }
-#endif
+
 
             auto start0 = timer.setTimePoint("b");
 
-#ifdef ENABLE_AVX
             for (u64 i = 0; i < trials; ++i)
             {
                 avx_transpose128x1024(data.data());
             }
-#endif
 
             auto end0 = timer.setTimePoint("b");
 
@@ -154,5 +151,6 @@ namespace osuCrypto
             std::cout << "avx " << std::chrono::duration_cast<std::chrono::milliseconds>(end0 - start0).count() << std::endl;
             std::cout << "sse " << std::chrono::duration_cast<std::chrono::milliseconds>(end1 - end0).count() << std::endl;
         }
+#endif
     }
 }

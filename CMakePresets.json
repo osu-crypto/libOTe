@@ -37,8 +37,8 @@
         "ENABLE_BOOST": true,
         "ENABLE_RELIC": true,
         "ENABLE_ALL_OT": true,
-        "ENABLE_SSE": true,
-        "ENABLE_AVX": true,
+        "ENABLE_SSE": false,
+        "ENABLE_AVX": false,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
       },
       "vendor": { "microsoft.com/VisualStudioSettings/CMake/1.0": { "hostOS": [ "Windows" ] } }
