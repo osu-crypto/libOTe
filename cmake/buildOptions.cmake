@@ -87,7 +87,7 @@ else()
 	set(ENABLE_BITPOLYMUL_DEFAULT OFF)
 endif()
 
-option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" ${ENABLE_BITPOLYMUL_DEFAULT})
+option(ENABLE_BITPOLYMUL     "Build with bit poly mul integration" ${ENABLE_BITPOLYMUL_DEFAULT})
 
 
 #option(FETCH_BITPOLYMUL		"download and build bitpolymul" OFF))
@@ -99,6 +99,7 @@ EVAL(FETCH_BITPOLYMUL_IMPL
 message(STATUS "General Options\n=======================================================")
 
 message(STATUS "Option: FETCH_BITPOLYMUL      = ${FETCH_BITPOLYMUL_IMPL}")
+message(STATUS "Option: ENABLE_BITPOLYMUL     = ${ENABLE_BITPOLYMUL}")
 message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF\n\n")
 
 message(STATUS "Base OT protocols\n=======================================================")
