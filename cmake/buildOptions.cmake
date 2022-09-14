@@ -87,7 +87,7 @@ else()
 	set(ENABLE_BITPOLYMUL_DEFAULT OFF)
 endif()
 
-option(ENABLE_BITPOLYMUL     "Build with bit poly mul integration" ${ENABLE_BITPOLYMUL_DEFAULT})
+set(ENABLE_BITPOLYMUL     ${ENABLE_SILENTOT})
 
 
 #option(FETCH_BITPOLYMUL		"download and build bitpolymul" OFF))
