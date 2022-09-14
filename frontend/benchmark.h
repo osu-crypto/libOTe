@@ -98,12 +98,12 @@ namespace osuCrypto
 
             Timer timer;
             auto start0 = timer.setTimePoint("b");
-
+#ifdef ENABLE_AVX
             for (u64 i = 0; i < trials; ++i)
             {
                 avx_transpose128(data.data());
             }
-
+#endif
             auto end0 = timer.setTimePoint("b");
 
 
@@ -124,18 +124,21 @@ namespace osuCrypto
             Timer timer;
             auto start1 = timer.setTimePoint("b");
 
+#ifdef ENABLE_AVX
             for (u64 i = 0; i < trials * 8; ++i)
             {
                 avx_transpose128(data.data());
             }
-
+#endif
 
             auto start0 = timer.setTimePoint("b");
 
+#ifdef ENABLE_AVX
             for (u64 i = 0; i < trials; ++i)
             {
                 avx_transpose128x1024(data.data());
             }
+#endif
 
             auto end0 = timer.setTimePoint("b");
 
