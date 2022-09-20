@@ -52,7 +52,7 @@ CMake 3.15+ is required and the build script assumes python 3.
  
 The library can be built as
 ```
-git clone --recursive https://github.com/osu-crypto/libOTe.git
+git clone https://github.com/osu-crypto/libOTe.git
 cd libOTe
 python build.py --relic
 ```
