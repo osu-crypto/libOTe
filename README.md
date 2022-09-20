@@ -6,7 +6,8 @@
 
 A fast and portable C++14 library for Oblivious Transfer extension (OTe). The 
 primary design goal of this library to obtain *high performance* while being 
-*easy to use*.  This library currently implements:
+*easy to use*. Checkout [version 1.6](https://github.com/osu-crypto/libOTe/releases/tag/v1.6.0) for the previous version.
+This library currently implements:
  
 * The semi-honest 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf).
 * The semi-honest 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf).
@@ -42,7 +43,7 @@ external socket classes. See the coproto tutorial for an example.
 ## Build
  
 The library is *cross platform* and has been tested on Windows, Mac and Linux. 
-There is one mandatory dependency on coproto (networking),
+There is one mandatory dependency on [coproto](https://github.com/Visa-Research/coproto) (networking),
 and three **optional dependencies** on [libsodium](https://doc.libsodium.org/),
 [Relic](https://github.com/relic-toolkit/relic), or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
