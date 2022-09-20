@@ -1,4 +1,9 @@
 
+if(DEFINED LOG_FILE AND (NOT DEFINED VERBOSE_FETCH OR NOT VERBOSE_FETCH))
+    set(LOG_SETTING OUTPUT_FILE ${LOG_FILE} ERROR_FILE ${LOG_FILE} ${OUTPUT_QUIET})
+else()
+    unset(LOG_SETTING)
+endif()
 
 function(RUN)
     cmake_parse_arguments(
@@ -20,12 +25,10 @@ function(RUN)
         WORKING_DIRECTORY ${PARSED_ARGS_WD}
         RESULT_VARIABLE RESULT
         COMMAND_ECHO STDOUT
-        OUTPUT_FILE ${LOG_FILE}
-        ERROR_FILE ${LOG_FILE}
-        OUTPUT_QUIET
+        ${LOG_SETTING}
     )
     if(RESULT)
-        message(FATAL_ERROR "${PARSED_ARGS_NAME} failed (${RESULT}). See ${LOG_FILE}")
+        message(FATAL_ERROR "${PARSED_ARGS_NAME} failed (${RESULT}).\nLOG:\n${LOG_STRING}")
     endif()
 endfunction()
 

@@ -1,5 +1,12 @@
 #pragma once
-// This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use.
+// © 2016 Peter Rindal.
+// © 2022 Visa.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 #include "libOTe/config.h"
 #ifdef ENABLE_KKRT
 
@@ -85,18 +92,14 @@ namespace osuCrypto {
         //      2-choose-1 OT mMessages. The sender should hold one of them.
         // @ choices: The select bits that were used in the base OT
         // @ chl: not used.
-        void setBaseOts(
+        task<> setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices, Channel& chl) {
+            const BitVector& choices, Socket& chl) override {
+            MC_BEGIN(task<>,this, baseRecvOts, &choices);
             setBaseOts(baseRecvOts, choices);
+            MC_END();
         }
 
-        void setBaseOts(
-            span<block> baseRecvOts,
-            const BitVector& choices,
-            PRNG& prng, Channel& chl) override {
-            setBaseOts(baseRecvOts, choices, chl);
-        }
 
         // See other setBaseOts(...).
         void setBaseOts(
@@ -109,7 +112,7 @@ namespace osuCrypto {
         // internal state and creating new OTs.
         // @ numOtExt: denotes the number of OTs that can be used before init
         //      should be called again.
-        void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
+        task<> init(u64 numOtExt, PRNG& prng, Socket& chl) override;
 
         using NcoOtExtSender::encode;
 
@@ -139,13 +142,13 @@ namespace osuCrypto {
         // is sent. The receiver should call sendCorrection(recvCount) with the same recvCount.
         // @ chl: the channel that the data will be sent over
         // @ recvCount: the number of correction values that should be received.
-        void recvCorrection(Channel& chl, u64 recvCount) override;
-
-        // An alternative version of the recvCorrection(...) function which dynamically receivers the number of
+        task<> recvCorrection(Socket& chl, u64 recvCount) override;
+        
+        // An alternative version of the recvCorrection(...) function which dynamically receivers the number of 
         // corrections based on how many were sent. The return value is the number received. See overload for details.
-        u64 recvCorrection(Channel& chl) override;
+        //cp::task<>V<u64> recvCorrection(Socket& chl) override;
 
-        void check(Channel& chl, block seed) override {}
+        task<> check(Socket& chl, block seed) override { MC_BEGIN(task<>); MC_END(); }
 
 
         // Creates a new OT extesion of the same type that can be used

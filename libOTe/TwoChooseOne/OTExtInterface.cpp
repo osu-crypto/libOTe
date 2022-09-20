@@ -5,91 +5,159 @@
 #include <vector>
 #include <cryptoTools/Network/Channel.h>
 
-void osuCrypto::OtExtReceiver::genBaseOts(PRNG & prng, Channel & chl)
+//void OtExtReceiver::genBaseOts(PRNG & prng, Channel & chl)
+//{
+//    CpChannel s(chl);
+//    auto ec = eval(genBaseOts(prng, s));
+//    if (ec)
+//        throw std::system_error(ec);
+//}
+//
+//void OtExtReceiver::genBaseOts(OtSender& base, PRNG& prng, Channel& chl)
+//{
+//
+//    CpChannel s(chl);
+//    auto ec = eval(genBaseOts(base, prng, s));
+//    if (ec)
+//        throw std::system_error(ec);
+//}
+//
+//void OtExtSender::genBaseOts(PRNG & prng, Channel & chl)
+//{
+//
+//    CpChannel s(chl);
+//    auto ec = eval(genBaseOts(prng, s));
+//    if (ec)
+//        throw std::system_error(ec);
+//}
+//
+//void OtExtSender::genBaseOts(OtReceiver& base, PRNG& prng, Channel& chl)
+//{
+// 
+//    CpChannel s(chl);
+//    auto ec = eval(genBaseOts(base, prng, s));
+//    if (ec)
+//        throw std::system_error(ec);
+//}
+//
+namespace osuCrypto
 {
+
+
+    task<> OtExtReceiver::genBaseOts(PRNG& prng, Socket& chl)
+    {
 #ifdef LIBOTE_HAS_BASE_OT
-    DefaultBaseOT base;
-    genBaseOts(base, prng, chl);
+        MC_BEGIN(task<>,this, &prng, &chl, base = DefaultBaseOT{});
+        MC_AWAIT(genBaseOts(base, prng, chl));
+        MC_END();
 #else
-    throw std::runtime_error("The libOTe library does not have base OTs. Enable them to call this. " LOCATION);
+        throw std::runtime_error("The libOTe library does not have base OTs. Enable them to call this. " LOCATION);
 #endif
-}
+    }
 
-void osuCrypto::OtExtReceiver::genBaseOts(OtSender& base, PRNG& prng, Channel& chl)
-{
-    auto count = baseOtCount();
-    AlignedUnVector<std::array<block, 2>>msgs(count);
-    base.send(msgs, prng, chl);
-    setBaseOts(msgs, prng, chl);
-}
+    task<> OtExtReceiver::genBaseOts(OtSender& base, PRNG& prng, Socket& chl)
+    {
+        MC_BEGIN(task<>,&,
+            count = baseOtCount(),
+            msgs = std::vector<std::array<block, 2>>{}
+        );
+        msgs.resize(count);
+        MC_AWAIT(base.send(msgs, prng, chl));
+        MC_AWAIT(setBaseOts(msgs, prng, chl));
+        MC_END();
+    }
 
-void osuCrypto::OtExtSender::genBaseOts(PRNG & prng, Channel & chl)
-{
+    task<> OtExtSender::genBaseOts(PRNG& prng, Socket& chl)
+    {
 #ifdef LIBOTE_HAS_BASE_OT
-    DefaultBaseOT base;
-    genBaseOts(base, prng, chl);
+        MC_BEGIN(task<>,&, base = DefaultBaseOT{});
+        MC_AWAIT(genBaseOts(base, prng, chl));
+        MC_END();
 #else
-    throw std::runtime_error("The libOTe library does not have base OTs. Enable them to call this. " LOCATION);
+        throw std::runtime_error("The libOTe library does not have base OTs. Enable them to call this. " LOCATION);
 #endif
 
-}
-
-void osuCrypto::OtExtSender::genBaseOts(OtReceiver& base, PRNG& prng, Channel& chl)
-{
-    auto count = baseOtCount();
-    AlignedUnVector<block>msgs(count);
-    BitVector bv(count);
-    bv.randomize(prng);
-    base.receive(bv, msgs, prng, chl);
-    setBaseOts(msgs, bv, prng, chl);
-}
-
-
-void osuCrypto::OtReceiver::receiveChosen(
-    const BitVector & choices,
-    span<block> recvMessages,
-    PRNG & prng,
-    Channel & chl)
-{
-    receive(choices, recvMessages, prng, chl);
-    std::vector<std::array<block,2>> temp(recvMessages.size());
-    chl.recv(temp.data(), temp.size());
-    auto iter = choices.begin();
-    for (u64 i = 0; i < temp.size(); ++i)
-    {
-        recvMessages[i] = recvMessages[i] ^ temp[i][*iter];
-        ++iter;
-    }
-}
-
-void osuCrypto::OtReceiver::receiveCorrelated(const BitVector& choices, span<block> recvMessages, PRNG& prng, Channel& chl)
-{
-    receive(choices, recvMessages, prng, chl);
-    std::vector<block> temp(recvMessages.size());
-    chl.recv(temp.data(), temp.size());
-    auto iter = choices.begin();
-
-    for (u64 i = 0; i < temp.size(); ++i)
-    {
-        recvMessages[i] = recvMessages[i] ^ (zeroAndAllOne[*iter] & temp[i]);
-        ++iter;
     }
 
-}
-
-void osuCrypto::OtSender::sendChosen(
-    span<std::array<block, 2>> messages,
-    PRNG & prng,
-    Channel & chl)
-{
-    AlignedUnVector<std::array<block, 2>> temp(messages.size());
-    send(temp, prng, chl);
-
-    for (u64 i = 0; i < static_cast<u64>(messages.size()); ++i)
+    task<> OtExtSender::genBaseOts(OtReceiver& base, PRNG& prng, Socket& chl)
     {
-        temp[i][0] = temp[i][0] ^ messages[i][0];
-        temp[i][1] = temp[i][1] ^ messages[i][1];
+        MC_BEGIN(task<>,&,
+            count = baseOtCount(),
+            msgs = std::vector<block>{},
+            bv = BitVector{}
+        );
+        msgs.resize(count);
+        bv.resize(count);
+        bv.randomize(prng);
+        MC_AWAIT(base.receive(bv, msgs, prng, chl));
+        MC_AWAIT(setBaseOts(msgs, bv, chl));
+
+        MC_END();
     }
 
-    chl.asyncSend(std::move(temp));
+
+    task<> OtReceiver::receiveChosen(
+        const BitVector& choices,
+        span<block> recvMessages,
+        PRNG& prng,
+        Socket& chl)
+    {
+        MC_BEGIN(task<>,&, recvMessages,
+            temp = std::vector<std::array<block, 2>>(recvMessages.size())
+        );
+        MC_AWAIT(receive(choices, recvMessages, prng, chl));
+        MC_AWAIT(chl.recv(temp));
+        {
+
+            auto iter = choices.begin();
+            for (u64 i = 0; i < temp.size(); ++i)
+            {
+                recvMessages[i] = recvMessages[i] ^ temp[i][*iter];
+                ++iter;
+            }
+        }
+
+        MC_END();
+    }
+
+    task<> OtReceiver::receiveCorrelated(const BitVector& choices, span<block> recvMessages, PRNG& prng, Socket& chl)
+    {
+        MC_BEGIN(task<>,this, &choices, recvMessages, &prng, &chl,
+            temp = std::vector<block>(recvMessages.size())
+        );
+
+        MC_AWAIT(receive(choices, recvMessages, prng, chl));
+        MC_AWAIT(chl.recv(temp));
+        {
+
+            auto iter = choices.begin();
+            for (u64 i = 0; i < temp.size(); ++i)
+            {
+                recvMessages[i] = recvMessages[i] ^ (zeroAndAllOne[*iter] & temp[i]);
+                ++iter;
+            }
+        }
+        MC_END();
+    }
+
+    task<> OtSender::sendChosen(
+        span<std::array<block, 2>> messages,
+        PRNG& prng,
+        Socket& chl)
+    {
+        MC_BEGIN(task<>,
+            this, messages, &prng, &chl,
+            temp = std::vector<std::array<block, 2>>(messages.size())
+        );
+        MC_AWAIT(send(temp, prng, chl));
+
+        for (u64 i = 0; i < static_cast<u64>(messages.size()); ++i)
+        {
+            temp[i][0] = temp[i][0] ^ messages[i][0];
+            temp[i][1] = temp[i][1] ^ messages[i][1];
+        }
+
+        MC_AWAIT(chl.send(std::move(temp)));
+        MC_END();
+    }
 }

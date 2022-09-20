@@ -1,4 +1,12 @@
 #pragma once
+// © 2020 Lawrence Roy.
+// © 2022 Visa.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 #include "libOTe/config.h"
 #ifdef ENABLE_MRR_TWIST
 
@@ -15,7 +23,7 @@
 #include "libOTe/Tools/Popf/FeistelMulPopf.h"
 #include "libOTe/Tools/Popf/FeistelPopf.h"
 #include "libOTe/Tools/Popf/MRPopf.h"
-
+#include "libOTe/Tools/Coproto.h"
 #include <cryptoTools/Crypto/SodiumCurve.h>
 #ifndef ENABLE_SODIUM
 static_assert(0, "ENABLE_SODIUM must be defined to build McRosRoyTwist");
@@ -69,29 +77,17 @@ namespace osuCrypto
 			McRosRoyTwist(const PopfFactory& p) : popfFactory(p) {}
 			McRosRoyTwist(PopfFactory&& p) : popfFactory(p) {}
 
-			void receive(
+			task<> receive(
 				const BitVector& choices,
 				span<block> messages,
 				PRNG& prng,
-				Channel& chl,
-				u64 numThreads);
+				Socket& chl) override;
 
-			void send(
+			task<> send(
 				span<std::array<block, 2>> messages,
 				PRNG& prng,
-				Channel& chl,
-				u64 numThreads);
+				Socket& chl) override;
 
-			void receive(
-				const BitVector& choices,
-				span<block> messages,
-				PRNG& prng,
-				Channel& chl) override;
-
-			void send(
-				span<std::array<block, 2>> messages,
-				PRNG& prng,
-				Channel& chl) override;
 
 			static_assert(std::is_pod<typename PopfFactory::ConstructedPopf::PopfFunc>::value,
 				"Popf function must be Plain Old Data");
@@ -139,30 +135,27 @@ namespace osuCrypto
 
 	namespace details
 	{
-		template<typename DSPopf>
-		inline void McRosRoyTwist<DSPopf>::receive(const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl, u64 numThreads)
-		{
-			receive(choices, messages, prng, chl);
-		}
 
 		template<typename DSPopf>
-		inline void McRosRoyTwist<DSPopf>::send(span<std::array<block, 2>> messages, PRNG& prng, Channel& chl, u64 numThreads)
+		inline task<> McRosRoyTwist<DSPopf>::receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
 		{
-			send(messages, prng, chl);
-		}
 
-		template<typename DSPopf>
-		inline void McRosRoyTwist<DSPopf>::receive(const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl)
-		{
-			u64 n = choices.size();
+			MC_BEGIN(task<>,
+				this,
+				&choices,
+				&prng,
+				&chl,
+				messages,
+				n = choices.size(),
+				sk = std::vector<Scalar25519>{},
+				curveChoice = std::vector<u8>{},
+				A = std::array<Monty25519, 2>{},
+				sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
+			);
 
-			std::vector<Scalar25519> sk; sk.reserve(n);
-			std::vector<u8> curveChoice; curveChoice.reserve(n);
-
-			Monty25519 A[2];
-			auto recvDone = chl.asyncRecv(A, 2);
-
-			std::vector<typename PopfFactory::ConstructedPopf::PopfFunc> sendBuff(n);
+			sk.reserve(n);
+			curveChoice.reserve(n);
+			sendBuff.resize(n);
 
 			for (u64 i = 0; i < n; ++i)
 			{
@@ -172,16 +165,16 @@ namespace osuCrypto
 
 				curveChoice.emplace_back(prng.getBit());
 				sk.emplace_back(prng, false);
-				Monty25519 g = (curveChoice[i] == 0) ?
+				const Monty25519& g = (curveChoice[i] == 0) ?
 					Monty25519::wholeGroupGenerator : Monty25519::wholeTwistGroupGenerator;
 				Monty25519 B = g * sk[i];
 
 				sendBuff[i] = popf.program(choices[i], curveToBlock(B, prng), prng);
 			}
 
-			chl.asyncSend(std::move(sendBuff));
+			MC_AWAIT(chl.send(std::move(sendBuff)));
 
-			recvDone.wait();
+			MC_AWAIT(chl.recv(A));
 
 			for (u64 i = 0; i < n; ++i)
 			{
@@ -193,21 +186,32 @@ namespace osuCrypto
 				ro.Update((bool)choices[i]);
 				ro.Final(messages[i]);
 			}
+
+			MC_END();
 		}
 
 		template<typename DSPopf>
-		inline void McRosRoyTwist<DSPopf>::send(span<std::array<block, 2>> msg, PRNG& prng, Channel& chl)
+		inline task<> McRosRoyTwist<DSPopf>::send(span<std::array<block, 2>> msg, PRNG& prng, Socket& chl)
 		{
-			u64 n = static_cast<u64>(msg.size());
+			MC_BEGIN(task<>,
+				this,
+				msg,
+				&prng,
+				&chl,
+				n = static_cast<u64>(msg.size()),
+				A = std::vector<Monty25519>{},
+				sk = Scalar25519(prng),
+				recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
+			);
 
-			Scalar25519 sk(prng);
-			Monty25519 A[2] = {
-				Monty25519::wholeGroupGenerator * sk, Monty25519::wholeTwistGroupGenerator * sk };
+			A = {
+				Monty25519::wholeGroupGenerator * sk, 
+				Monty25519::wholeTwistGroupGenerator * sk };
 
-			chl.asyncSend(A, 2);
+			MC_AWAIT(chl.send(std::move(A)));
 
-			std::vector<typename PopfFactory::ConstructedPopf::PopfFunc> recvBuff(n);
-			chl.recv(recvBuff.data(), recvBuff.size());
+			recvBuff.resize(n);
+			MC_AWAIT(chl.recv(recvBuff));
 
 
 			Monty25519 Bz, Bo;
@@ -236,7 +240,10 @@ namespace osuCrypto
 				ro.Update((bool)1);
 				ro.Final(msg[i][1]);
 			}
+
+			MC_END();
 		}
+
 		template<typename DSPopf>
 		inline typename McRosRoyTwist<DSPopf>::Monty25519 McRosRoyTwist<DSPopf>::blockToCurve(Block256 b)
 		{

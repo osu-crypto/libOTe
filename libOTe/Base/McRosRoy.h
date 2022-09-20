@@ -1,4 +1,12 @@
 #pragma once
+// © 2020 Lawrence Roy.
+// © 2022 Visa.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 #include "libOTe/config.h"
 #ifdef ENABLE_MRR
 
@@ -38,35 +46,35 @@ namespace osuCrypto
             McRosRoy(const PopfFactory& p) : popfFactory(p) {}
             McRosRoy(PopfFactory&& p) : popfFactory(p) {}
 
-            void receive(
+            task<> receive(
                 const BitVector& choices,
                 span<block> messages,
                 PRNG& prng,
-                Channel& chl,
+                Socket& chl,
                 u64 numThreads)
             {
-                receive(choices, messages, prng, chl);
+                return receive(choices, messages, prng, chl);
             }
 
-            void send(
+            task<> send(
                 span<std::array<block, 2>> messages,
                 PRNG& prng,
-                Channel& chl,
+                Socket& chl,
                 u64 numThreads)
             {
-                send(messages, prng, chl);
+                return send(messages, prng, chl);
             }
 
-            void receive(
+            task<> receive(
                 const BitVector& choices,
                 span<block> messages,
                 PRNG& prng,
-                Channel& chl) override;
+                Socket& chl) override;
 
-            void send(
+            task<> send(
                 span<std::array<block, 2>> messages,
                 PRNG& prng,
-                Channel& chl) override;
+                Socket& chl) override;
 
             static_assert(std::is_pod<typename PopfFactory::ConstructedPopf::PopfFunc>::value,
                 "Popf function must be Plain Old Data");
@@ -98,21 +106,24 @@ namespace osuCrypto
 
 
         template<typename DSPopf>
-        void McRosRoy<DSPopf>::receive(
+        task<> McRosRoy<DSPopf>::receive(
             const BitVector& choices,
             span<block> messages,
             PRNG& prng,
-            Channel& chl)
+            Socket& chl)
         {
-            Curve curve;
+            MC_BEGIN(task<>,this, &choices, messages, &prng, &chl,
+                n = u64{},
+                A = Point{},
+                sk = std::vector<Number>{},
+                buff = std::vector<u8>(Point::size),
+                sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
+            );
 
-            u64 n = choices.size();
-            std::vector<Number> sk; sk.reserve(n);
-
-            unsigned char recvBuff[Point::size];
-            auto recvDone = chl.asyncRecv(recvBuff, Point::size);
-
-            std::vector<typename PopfFactory::ConstructedPopf::PopfFunc> sendBuff(n);
+            Curve{};
+            n = choices.size();
+            sk.reserve(n);
+            sendBuff.resize(n);
 
             for (u64 i = 0; i < n; ++i)
             {
@@ -126,11 +137,12 @@ namespace osuCrypto
                 sendBuff[i] = popf.program(choices[i], std::move(B), prng);
             }
 
-            chl.asyncSend(std::move(sendBuff));
+            MC_AWAIT(chl.send(std::move(sendBuff)));
 
-            recvDone.wait();
-            Point A;
-            A.fromBytes(recvBuff);
+            MC_AWAIT(chl.recv(buff));
+            Curve{};
+
+            A.fromBytes(buff.data());
 
             for (u64 i = 0; i < n; ++i)
             {
@@ -142,27 +154,36 @@ namespace osuCrypto
                 ro.Update((bool)choices[i]);
                 ro.Final(messages[i]);
             }
+
+            MC_END();
         }
 
         template<typename DSPopf>
-        void McRosRoy<DSPopf>::send(
+        task<> McRosRoy<DSPopf>::send(
             span<std::array<block, 2>> msg,
             PRNG& prng,
-            Channel& chl)
+            Socket& chl)
         {
-            Curve curve;
+            MC_BEGIN(task<>,this, msg, &prng, &chl,
+                curve = Curve{},
+                n = u64{},
+                A = Point{},
+                sk = Number{},
+                buff = std::vector<u8>( Point::size ),
+                recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
+            );
 
-            u64 n = static_cast<u64>(msg.size());
+            n = static_cast<u64>(msg.size());
+            sk.randomize(prng);
+            A = Point::mulGenerator(sk);
 
-            Number sk(prng);
-            Point A = Point::mulGenerator(sk);
+            assert(buff.size() == A.sizeBytes());
+            A.toBytes(buff.data());
 
-            unsigned char sendBuff[Point::size];
-            A.toBytes(sendBuff);
-            chl.asyncSend(sendBuff, Point::size);
+            MC_AWAIT(chl.send(std::move(buff)));
 
-            std::vector<typename PopfFactory::ConstructedPopf::PopfFunc> recvBuff(n);
-            chl.recv(recvBuff.data(), recvBuff.size());
+            recvBuff.resize(n);
+            MC_AWAIT(chl.recv(recvBuff));
 
             for (u64 i = 0; i < n; ++i)
             {
@@ -188,6 +209,8 @@ namespace osuCrypto
                 ro.Update((bool)1);
                 ro.Final(msg[i][1]);
             }
+
+            MC_END();
         }
     }
 }

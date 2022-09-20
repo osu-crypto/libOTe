@@ -1,239 +1,141 @@
 #pragma once
 
 
-#include "libOTe/Vole/SilentVoleReceiver.h"
-#include "libOTe/Vole/SilentVoleSender.h"
+#include "libOTe/Vole/Silent/SilentVoleReceiver.h"
+#include "libOTe/Vole/Silent/SilentVoleSender.h"
 
 namespace osuCrypto
 {
 
 
-    //template<typename OtExtSender, typename OtExtRecver>
-    void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
-    {
-#ifdef ENABLE_SILENT_VOLE
+	//template<typename OtExtSender, typename OtExtRecver>
+	void Vole_example(Role role, int numOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
+	{
+#if defined(ENABLE_SILENT_VOLE) && defined(COPROTO_ENABLE_BOOST)
 
-        if (numOTs == 0)
-            numOTs = 1 << 20;
-        using OtExtSender = SilentVoleSender;
-        using OtExtRecver = SilentVoleReceiver;
+		if (numOTs == 0)
+			numOTs = 1 << 20;
+		using OtExtSender = SilentVoleSender;
+		using OtExtRecver = SilentVoleReceiver;
 
-        // get up the networking
-        auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
-        IOService ios;
-        Session  ep0(ios, ip, rr);
-        PRNG prng(sysRandomSeed());
+		// get up the networking
+		auto chl = cp::asioConnect(ip, role == Role::Sender);
 
-        // for each thread we need to construct a channel (socket) for it to communicate on.
-        std::vector<Channel> chls(numThreads);
-        for (int i = 0; i < numThreads; ++i)
-            chls[i] = ep0.addChannel();
+		// get a random number generator seeded from the system
+		PRNG prng(sysRandomSeed());
 
-        //bool mal = cmd.isSet("mal");
-        OtExtSender sender;
-        OtExtRecver receiver;
+		auto mulType = (MultType)cmd.getOr("multType", (int)MultType::slv5);
+		bool fakeBase = cmd.isSet("fakeBase");
 
-        bool fakeBase = cmd.isSet("fakeBase");
+		u64 milli;
+		Timer timer;
 
-        gTimer.setTimePoint("begin");
+		gTimer.setTimePoint("begin");
+		if (role == Role::Receiver)
+		{
+			// construct a vector to stored the received messages. 
+			std::unique_ptr<block[]> backing0(new block[numOTs]);
+			std::unique_ptr<block[]> backing1(new block[numOTs]);
+			span<block> choice(backing0.get(), numOTs);
+			span<block> msgs(backing1.get(), numOTs);
+			gTimer.setTimePoint("recver.msg.alloc");
 
-        auto routine = [&](int s, int sec, SilentBaseType type)
-        {
+			OtExtRecver receiver;
+			receiver.mMultType = mulType;
+			receiver.configure(numOTs);
+			gTimer.setTimePoint("recver.config");
 
-            Timer timer;
-            u64 milli;
+			// generate base OTs
+			if (fakeBase)
+			{
+				auto nn = receiver.baseOtCount();
+				std::vector<std::array<block, 2>> baseSendMsgs(nn);
+				PRNG pp(oc::ZeroBlock);
+				pp.get(baseSendMsgs.data(), baseSendMsgs.size());
+				receiver.setBaseOts(baseSendMsgs);
+			}
+			else
+			{
+				cp::sync_wait(receiver.genSilentBaseOts(prng, chl));
+			}
 
-            // get a random number generator seeded from the system
-            PRNG prng(sysRandomSeed());
-            PRNG pp(ZeroBlock);
+			// block until both parties are ready (optional).
+			cp::sync_wait(sync(chl, role));
+			auto b = timer.setTimePoint("start");
+			receiver.setTimePoint("start");
+			gTimer.setTimePoint("recver.genBase");
 
+			// perform  numOTs random OTs, the results will be written to msgs.
+			cp::sync_wait(receiver.silentReceive(choice, msgs, prng, chl));
 
-            if (role == Role::Receiver)
-            {
-                gTimer.setTimePoint("recver.thrd.begin");
-
-                std::vector<block> choice(numOTs);
-                gTimer.setTimePoint("recver.msg.alloc0");
-
-                // construct a vector to stored the received mMessages. 
-                //std::vector<block> msgs(numOTs);
-                AlignedVector<block> backing(new block[numOTs]);
-                span<block> msgs(backing.get(), numOTs);
-                gTimer.setTimePoint("recver.msg.alloc1");
-
-                receiver.configure(numOTs, sec);
-                gTimer.setTimePoint("recver.config");
-
-                //sync(chls[0], role);
-                if (fakeBase)
-                {
-                    auto nn = receiver.baseOtCount();
-                    std::vector<std::array<block, 2>> baseSendMsgs(nn);
-                    pp.get(baseSendMsgs.data(), baseSendMsgs.size());
-                    receiver.setBaseOts(baseSendMsgs);
-                }
-                else
-                {
-                    receiver.genSilentBaseOts(prng, chls[0]);
-                }
-                sync(chls[0], role);
-                auto b = timer.setTimePoint("start");
-                receiver.setTimePoint("start");
-                gTimer.setTimePoint("recver.genBase");
-
-                // perform  numOTs random OTs, the results will be written to msgs.
-                receiver.silentReceive(choice, msgs, prng, chls[0]);
-                receiver.setTimePoint("finish");
-
-                auto e = timer.setTimePoint("finish");
-                milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
-            }
-            else
-            {
-                gTimer.setTimePoint("sender.thrd.begin");
-
-                //std::vector<std::array<block, 2>> msgs(numOTs);
-                AlignedVector<block> backing(new block[numOTs]);
-                span<block> msgs(backing.get(), numOTs);
-                gTimer.setTimePoint("sender.msg.alloc");
-                sender.configure(numOTs, sec);
-                gTimer.setTimePoint("sender.config");
-                block delta = prng.get();
-
-                auto b = timer.setTimePoint("start");
-                //sync(chls[0], role);
-                if (fakeBase)
-                {
-                    auto nn = receiver.baseOtCount();
-                    BitVector bits(nn); bits.randomize(prng);
-                    std::vector<std::array<block, 2>> baseSendMsgs(nn);
-                    std::vector<block> baseRecvMsgs(nn);
-                    pp.get(baseSendMsgs.data(), baseSendMsgs.size());
-                    for (u64 i = 0; i < nn; ++i)
-                        baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
-                    sender.setBaseOts(baseRecvMsgs, bits);
-                }
-                else
-                {
-                    sender.genSilentBaseOts(prng, chls[0]);
-                }
-                sync(chls[0], role);
-
-                sender.setTimePoint("start");
-                gTimer.setTimePoint("sender.genBase");
-
-                // construct a vector to stored the random send mMessages. 
-
-                // if delta OT is used, then the user can call the following 
-                // to set the desired XOR difference between the zero mMessages
-                // and the one mMessages.
-                //
-                //     senders[i].setDelta(some 128 bit delta);
-                //
-
-                // perform the OTs and write the random OTs to msgs.
-                sender.silentSend(delta, msgs, prng, chls[0]);
-                sender.setTimePoint("finish");
-
-                auto e = timer.setTimePoint("finish");
-                milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
-
-            }
-            return milli;
-        };
-
-        cmd.setDefault("s", "2");
-        cmd.setDefault("sec", "128");
-        std::vector<int> ss = cmd.getMany<int>("s");
-        std::vector<int> secs = cmd.getMany<int>("sec");
-        u64 trials = cmd.getOr("trials", 1);
-        auto mulType = (MultType)cmd.getOr("multType", (int)MultType::slv5);
-        std::vector< SilentBaseType> types;
-
-        receiver.mMultType = mulType;
-        sender.mMultType = mulType;
-
-        if (cmd.isSet("base"))
-            types.push_back(SilentBaseType::Base);
-        else if (cmd.isSet("baseExtend"))
-            types.push_back(SilentBaseType::BaseExtend);
-        else
-            types.push_back(SilentBaseType::BaseExtend);
-        //if (cmd.isSet("extend"))
-        //	types.push_back(SilentBaseType::Extend);
-        //if (types.size() == 0 || cmd.isSet("none"))
-        //	types.push_back(SilentBaseType::None);
+			// record the time.
+			receiver.setTimePoint("finish");
+			auto e = timer.setTimePoint("finish");
+			milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
+		}
+		else
+		{
+			gTimer.setTimePoint("sender.thrd.begin");
 
 
-        for (auto s : ss)
-            for (auto sec : secs)
-                for (auto type : types)
-                {
-                    for (u64 tt = 0; tt < trials; ++tt)
-                    {
+			std::unique_ptr<block[]> backing(new block[numOTs]);
+			span<block> msgs(backing.get(), numOTs);
 
-                        chls[0].resetStats();
+			gTimer.setTimePoint("sender.msg.alloc");
 
-                        Timer sendTimer, recvTimer;
+			OtExtSender sender;
+			sender.mMultType = mulType;
+			sender.configure(numOTs);
+			gTimer.setTimePoint("sender.config");
+			timer.setTimePoint("start");
 
-                        sendTimer.setTimePoint("start");
-                        recvTimer.setTimePoint("start");
+			// generate base OTs
+			if (fakeBase)
+			{
+				auto nn = sender.baseOtCount();
+				BitVector bits(nn); bits.randomize(prng);
+				std::vector<std::array<block, 2>> baseSendMsgs(nn);
+				std::vector<block> baseRecvMsgs(nn);
+				PRNG pp(oc::ZeroBlock);
+				pp.get(baseSendMsgs.data(), baseSendMsgs.size());
+				for (u64 i = 0; i < nn; ++i)
+					baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
+				sender.setBaseOts(baseRecvMsgs, bits);
+			}
+			else
+			{
+				cp::sync_wait(sender.genSilentBaseOts(prng, chl));
+			}
 
-                        sender.setTimer(sendTimer);
-                        receiver.setTimer(recvTimer);
+			// block until both parties are ready (optional).
+			cp::sync_wait(sync(chl, role));
+			auto b = sender.setTimePoint("start");
+			gTimer.setTimePoint("sender.genBase");
 
-                        auto milli = routine(s, sec, type);
+			// perform the OTs and write the random OTs to msgs.
+			block delta = prng.get();
+			cp::sync_wait(sender.silentSend(delta, msgs, prng, chl));
 
+			sender.setTimePoint("finish");
+			auto e = timer.setTimePoint("finish");
+			milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
+		}
+		if (role == Role::Sender)
+		{
 
+			lout << tag <<
+				" n:" << Color::Green << std::setw(6) << std::setfill(' ') << numOTs << Color::Default <<
+				"   ||   " << Color::Green <<
+				std::setw(6) << std::setfill(' ') << milli << " ms   " <<
+				//std::setw(6) << std::setfill(' ') << com << " bytes" <<
+				std::endl << Color::Default;
 
-                        u64 com = 0;
-                        for (auto& c : chls)
-                            com += (c.getTotalDataRecv() + c.getTotalDataSent());
+			if (cmd.getOr("v", 0) > 1)
+				lout << gTimer << std::endl;
 
-                        std::string typeStr = "n ";
-                        switch (type)
-                        {
-                        case SilentBaseType::Base:
-                            typeStr = "b ";
-                            break;
-                            //case SilentBaseType::Extend:
-                            //	typeStr = "e ";
-                            //	break;
-                        case SilentBaseType::BaseExtend:
-                            typeStr = "be";
-                            break;
-                        default:
-                            break;
-                        }
-                        if (role == Role::Sender)
-                        {
-
-                            lout << tag <<
-                                " n:" << Color::Green << std::setw(6) << std::setfill(' ') << numOTs << Color::Default <<
-                                " type: " << Color::Green << typeStr << Color::Default <<
-                                " sec: " << Color::Green << std::setw(3) << std::setfill(' ') << sec << Color::Default <<
-                                " s: " << Color::Green << s << Color::Default <<
-                                "   ||   " << Color::Green <<
-                                std::setw(6) << std::setfill(' ') << milli << " ms   " <<
-                                std::setw(6) << std::setfill(' ') << com << " bytes" << std::endl << Color::Default;
-
-                            if (cmd.getOr("v", 0) > 1)
-                                lout << gTimer << std::endl;
-
-                        }
-                        if (cmd.isSet("v"))
-                        {
-                            if (role == Role::Sender)
-                                lout << " **** sender ****\n" << sendTimer << std::endl;
-
-                            if (role == Role::Receiver)
-                                lout << " **** receiver ****\n" << recvTimer << std::endl;
-                        }
-                    }
-
-                }
+		}
 
 #endif
-    }
+	}
 
 }

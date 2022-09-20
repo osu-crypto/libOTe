@@ -1,5 +1,12 @@
 #pragma once
-// This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
+// © 2016 Peter Rindal.
+// © 2022 Visa.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 #include "libOTe/config.h"
 #ifdef ENABLE_KKRT
 #include "libOTe/NChooseOne/NcoOtExt.h"
@@ -32,7 +39,8 @@ namespace osuCrypto
         std::vector<std::array<AES, 2>> mGens;
         std::vector<u64> mGensBlkIdx;
         Matrix<block> mT0;
-        Matrix<block> mT1;
+        std::shared_ptr<Matrix<block>> mT1;
+        
         u64 mCorrectionIdx;
 
         u64 mInputByteCount;
@@ -40,8 +48,6 @@ namespace osuCrypto
         MultiKeyAES<4> mMultiKeyAES;
 
 
-        bool mHasPendingSendFuture = false;
-        std::future<void> mPendingSendFuture;
 
         KkrtNcoOtReceiver() = default;
         KkrtNcoOtReceiver(const KkrtNcoOtReceiver&) = delete;
@@ -52,8 +58,6 @@ namespace osuCrypto
 
         ~KkrtNcoOtReceiver()
         {
-            if (mHasPendingSendFuture)
-                mPendingSendFuture.get();
         }
 
 
@@ -66,9 +70,6 @@ namespace osuCrypto
             mCorrectionIdx = v.mCorrectionIdx;
             mInputByteCount = v.mInputByteCount;
             mMultiKeyAES = std::move(v.mMultiKeyAES);
-            mHasPendingSendFuture = v.mHasPendingSendFuture;
-            mPendingSendFuture = std::move(v.mPendingSendFuture);
-            v.mHasPendingSendFuture = false;
         }
 
         bool isMalicious() const override { return false; }
@@ -97,9 +98,11 @@ namespace osuCrypto
         //      2-choose-1 OT mMessages. The sender should hold one of them.
         // @ prng: not used.
         // @ chl: not used.
-        void setBaseOts(span<std::array<block, 2>> baseRecvOts, PRNG& prng, Channel& chl) override
+        task<> setBaseOts(span<std::array<block, 2>> baseRecvOts, PRNG& prng, Socket& chl) override
         {
+            MC_BEGIN(task<>, this, baseRecvOts);
             setBaseOts(baseRecvOts);
+            MC_END();
         }
         
         // See other setBaseOts(...);
@@ -111,7 +114,7 @@ namespace osuCrypto
         //       i should be less then numOtExt.
         // @ prng: A random number generator for initializing the OTs
         // @ Channel: the channel that should be used to communicate with the sender.
-        void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
+        task<> init(u64 numOtExt, PRNG& prng, Socket& chl) override;
 
         using NcoOtExtReceiver::encode;
 
@@ -145,13 +148,13 @@ namespace osuCrypto
         // is sent. The sender should call recvCorrection(sendCount) with the same sendCount.
         // @ chl: the channel that the data will be sent over
         // @ sendCount: the number of correction values that should be sent.
-        void sendCorrection(Channel& chl, u64 sendCount) override;
+        task<> sendCorrection(Socket& chl, u64 sendCount) override;
 
         // Some malicious secure OT extensions require an additional step after all corrections have 
         // been sent. In this case, this method should be called.
         // @ chl: the channel that will be used to communicate
         // @ seed: a random seed that will be used in the function
-        void check(Channel& chl, block seed) override {}
+        task<> check(Socket& chl, block seed) override { MC_BEGIN(task<>); MC_END(); }
 
         // Allows a single NcoOtExtReceiver to be split into two, with each being 
         // independent of each other.

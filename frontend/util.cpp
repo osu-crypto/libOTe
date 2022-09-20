@@ -8,10 +8,9 @@
 #include <cryptoTools/Network/IOService.h>
 #include <cryptoTools/Network/Session.h>
 
-
 namespace osuCrypto
 {
-
+#ifdef ENABLE_BOOST
 	void getLatency(CLP& cmd)
 	{
 		auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
@@ -74,6 +73,7 @@ namespace osuCrypto
 			chl.recv(dummy, 1);
 		}
 	}
+
 
 	void senderGetLatency(Channel& chl)
 	{
@@ -145,4 +145,53 @@ namespace osuCrypto
 		chl.asyncSend(dummy, 1);
 
 	}
+#endif
+
+
+	task<> sync(Socket& chl, Role role)
+	{
+		MC_BEGIN(task<>,&chl, role,
+			dummy = u8{},
+			timer = std::unique_ptr<Timer>{new Timer},
+			start = Timer::timeUnit{},
+			mid = Timer::timeUnit{},
+			end = Timer::timeUnit{},
+			ms = u64{},
+			rrt = std::chrono::system_clock::duration{}
+		);
+
+		if (role == Role::Receiver)
+		{
+
+		 	MC_AWAIT(chl.recv(dummy));
+
+			start = timer->setTimePoint("");
+
+			MC_AWAIT(chl.send(dummy));
+			MC_AWAIT(chl.recv(dummy));
+
+			mid = timer->setTimePoint("");
+
+			MC_AWAIT(chl.send(std::move(dummy)));
+
+			rrt = mid - start;
+			ms = std::chrono::duration_cast<std::chrono::milliseconds>(rrt).count();
+
+			// wait for half the round trip time to start both parties at the same time.
+			if (ms > 4)
+				std::this_thread::sleep_for(rrt / 2);
+
+		}
+		else
+		{
+			MC_AWAIT(chl.send(dummy));
+			MC_AWAIT(chl.recv(dummy));
+			MC_AWAIT(chl.send(dummy));
+			MC_AWAIT(chl.recv(dummy));
+		}
+
+		MC_END();
+	}
+
+
 }

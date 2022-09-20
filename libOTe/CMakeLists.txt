@@ -16,7 +16,7 @@ target_include_directories(libOTe PUBLIC
                     $<INSTALL_INTERFACE:include>)
 
 
-target_link_libraries(libOTe cryptoTools)
+target_link_libraries(libOTe cryptoTools coproto::coproto)
 
 if(MSVC)
     #target_compile_options(libOTe PRIVATE -openmp:experimental)

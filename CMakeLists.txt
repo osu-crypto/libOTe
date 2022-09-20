@@ -18,15 +18,6 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 	############################################
 	add_definitions(-DSOLUTION_DIR='${CMAKE_SOURCE_DIR}')
 	if(MSVC)
-
-		# optionally add the following to CMAKE_PREFIX_PATH
-		if(NOT DEFINED CMAKE_PREFIX_PATH AND NOT DEFINED NO_OC_DEFAULT_PREFIX)
-			set(CMAKE_PREFIX_PATH
-				"c:/libs"
-				"${CMAKE_CURRENT_LIST_DIR}/..;"
-				)
-		endif()
-
 	else()
 		set(COMMON_FLAGS "-Wall -march=native -Wfatal-errors")
 		SET(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG")

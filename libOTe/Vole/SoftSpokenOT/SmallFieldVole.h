@@ -1,4 +1,11 @@
 #pragma once
+// © 2022 Lawrence Roy.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 #include <libOTe/config.h>
 #ifdef ENABLE_SOFTSPOKEN_OT
 
@@ -8,6 +15,8 @@
 #include <cryptoTools/Common/MatrixView.h>
 #include <cryptoTools/Network/Channel.h>
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
+#include "libOTe/Tools/Coproto.h"
+#include "libOTe/Tools/SilentPprf.h"
 
 namespace osuCrypto
 {
@@ -23,47 +32,74 @@ namespace osuCrypto
 	class SmallFieldVoleBase
 	{
 	public:
-		static constexpr size_t fieldBitsMax = 31;
+		static constexpr u64 fieldBitsMax = 31;
 
-		const size_t mFieldBits;
-		const size_t mNumVoles;
+		u64 mFieldBits = 0;
+		u64 mNumVoles = 0;
+		u64 mNumVolesPadded = 0;
+		bool mMalicious = false;
+		bool mInit = false;
 
 		// 2D array, with one row for each VOLE and one column for each field element (minus one for the
 		// receiver). Since the receiver doesn't know the zeroth seed, the columns are all shifted by 1
 		// for them.
 		AlignedUnVector<block> mSeeds;
 
-		static constexpr size_t numBaseOTsNeeded(size_t fieldBits, size_t numVoles)
+		static constexpr u64 baseOtCount(u64 fieldBits, u64 numVoles)
 		{
 			return fieldBits * numVoles;
 		}
 
-		size_t numBaseOTs() const
+		u64 baseOtCount() const
 		{
-			return mFieldBits * mNumVoles;
+			assert(mInit);
+			return baseOtCount(mFieldBits,  mNumVoles);
 		}
 
-		size_t fieldSize() const
+		u64 fieldSize() const
 		{
-			return (size_t)1 << mFieldBits;
+			return (u64)1 << mFieldBits;
 		}
 
-		SmallFieldVoleBase(size_t fieldBits_, size_t numVoles_) :
-			mFieldBits(fieldBits_),
-			mNumVoles(numVoles_)
+		u64 fieldBits() const
 		{
-			if (mFieldBits < 1 || mFieldBits > fieldBitsMax)
-				throw RTE_LOC;
+			return mFieldBits;
 		}
+
+
+		// The number of useful blocks in u, v.
+		u64 uSize() const { return mNumVoles; }
+		u64 vSize() const { return mFieldBits * mNumVoles; }
+
+		// The u correction must also be padded, according to uPadded(), as garbage values may be read.
+		// ... plus the number of padding blocks at the end where garbage may be written.
+		u64 uPadded() const { return mNumVolesPadded; }
+
+		// The v correction must also be padded, according to uPadded(), as garbage values may be read.
+		u64 vPadded() const { return mFieldBits * mNumVolesPadded; }
+
+
+		// The number of useful blocks in w.
+		u64 wSize() const { return mFieldBits * mNumVoles; }
+
+		// wSize plus the number of padding blocks at the end where garbage may be written.
+		u64 wPadded() const { return mFieldBits * mNumVolesPadded; }
+
+
+	protected:
+
+		void init(u64 fieldBits_, u64 numVoles_, bool malicious);
 
 	private:
-		// Helper to convert generateImpl into a non-member function.
-		template<size_t fieldBitsConst, typename T, T Func>
-		struct call_member_func;
+		//// Helper to convert generateImpl into a non-member function.
+		//template<u64 fieldBitsConst, typename T, T Func>
+		//struct call_member_func;
 
 		friend class SmallFieldVoleSender;
 		friend class SmallFieldVoleReceiver;
 	};
+
+
 
 	class SmallFieldVoleSender : public SmallFieldVoleBase
 	{
@@ -73,83 +109,79 @@ namespace osuCrypto
 		// numVolesPadded VOLEs, rather than mNumVoles, and the extra output values will be garbage. This
 		// wastes a few AES calls, but saving them wouldn't have helped much because you still have to
 		// pay for the AES latency.
-		const size_t numVolesPadded;
+		u64 numVolesPadded;
 
-		SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_);
+		SilentMultiPprfSender mPprf;
+
+		void setBaseOts(span<std::array<block, 2>> msgs);
+
+		void init(u64 fieldBits, u64 numVoles, bool malicious = false);
+
 
 		// mSeeds must be the OT messages from mNumVoles instances of 2**mFieldBits - 1 of 2**mFieldBits OT,
 		// with each OT occupying a contiguous memory range.
-		SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_, span<const block> seeds_);
+		void setSeed(span<const block> seeds_);
+
 
 		// Uses a PPRF to implement the 2**mFieldBits - 1 of 2**mFieldBits OTs out of 1 of 2 base OTs. The
 		// messages of the base OTs must be in baseMessages.
-		SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_,
-			Channel& chl, PRNG& prng, span<const std::array<block, 2>> baseMessages, size_t numThreads,
-			bool malicious);
+		task<> expand(Socket& chl, PRNG& prng, u64 numThreads);
 
-		// The number of useful blocks in u, v.
-		size_t uSize() const { return mNumVoles; }
-		size_t vSize() const { return mFieldBits * mNumVoles; }
 
-		// ... plus the number of padding blocks at the end where garbage may be written.
-		size_t uPadded() const { return numVolesPadded; }
-		size_t vPadded() const { return mFieldBits * numVolesPadded; }
-
+		bool hasBaseOts() const
+		{
+			return mPprf.hasBaseOts();
+		}
 
 		// outV outputs the values for v, i.e. xor_x x * PRG(seed[x]). outU gives the values for u (the
 		// xor of all PRG evaluations).
-		void generate(size_t blockIdx, const AES& aes, block* outU, block* outV) const
+		void generate(u64 blockIdx, const AES& aes, block* outU, block* outV) const
 		{
-			generatePtr(*this, blockIdx, aes, outU, outV);
+			mGenerateFn(*this, blockIdx, aes, outU, outV);
 		}
 
-		void generate(size_t blockIdx, const AES& aes, span<block> outU, span<block> outV) const
+		void generate(u64 blockIdx, const AES& aes, span<block> outU, span<block> outV) const
 		{
 #ifndef NDEBUG
-			if ((size_t)outU.size() != uPadded())
+			if ((u64)outU.size() != uPadded())
 				throw RTE_LOC;
-			if ((size_t)outV.size() != vPadded())
+			if ((u64)outV.size() != vPadded())
 				throw RTE_LOC;
 #endif
 
 			return generate(blockIdx, aes, outU.data(), outV.data());
 		}
 
-		static size_t computeNumVolesPadded(size_t fieldBits, size_t numVoles)
-		{
-			if (fieldBits <= superBlkShift) // >= 1 VOLEs per superblock.
-				return roundUpTo(numVoles, superBlkSize >> fieldBits);
-			else // > 1 super block per VOLE.
-				return numVoles;
-		}
 
-	//private:
-		void (* const generatePtr)(const SmallFieldVoleSender&,
-			size_t, const AES&, block* BOOST_RESTRICT, block* BOOST_RESTRICT);
 
-		template<size_t fieldBitsConst>
-		OC_FORCEINLINE void generateImpl(size_t blockIdx, const AES& aes,
-			block* BOOST_RESTRICT outV, block* BOOST_RESTRICT outU) const;
+	private:
 
-		template<size_t fieldBitsConst, typename T, T Func>
-		friend struct call_member_func;
+		void init(u64 fieldBits_, u64 numVoles_);
+
+		using GenerateFn =  void (*)(const SmallFieldVoleSender&,
+			u64, const AES&, block* __restrict, block* __restrict);
+
+		// a pointer to a template function that generates the output with the field bit count hard coded (for up to 10).
+		GenerateFn mGenerateFn;
 
 		// Select specialized implementation of generate.
-		static decltype(generatePtr) selectGenerateImpl(size_t fieldBits);
+		static GenerateFn selectGenerateImpl(u64 fieldBits);
 	};
 
 	class SmallFieldVoleReceiver : public SmallFieldVoleBase
 	{
 	public:
-		BitVector delta;
-		std::unique_ptr<u8[]> deltaUnpacked; // Each bit of delta becomes a byte, either 0 or 0xff.
+		SilentMultiPprfReceiver mPprf;
+		BitVector mDelta;
+		AlignedUnVector<u8> mDeltaUnpacked; // Each bit of delta becomes a byte, either 0 or 0xff.
+
+		SmallFieldVoleReceiver() {}
 
 		// Same as for SmallFieldVoleSender, except that the AES operations are performed in differently
 		// sized chunks for the receiver.
-		const size_t numVolesPadded;
 
-		SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_);
-		SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_, BitVector delta_);
+		void init(u64 fieldBits_, u64 numVoles_, bool malicious = false);
+
 
 		// mSeeds must be the OT messages from mNumVoles instances of 2**mFieldBits - 1 of 2**mFieldBits OT,
 		// with each OT occupying a contiguous memory range. The choice bits (i.e. the indices of the
@@ -157,26 +189,48 @@ namespace osuCrypto
 		// which must then be uniformly random for security. mSeeds must be ordered so that the delta'th
 		// seed in a mVole (the one that is unknown to the receiver) would be in position -1 (in general,
 		// i gets stored at (i ^ delta) - 1).
-		SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_, span<const block> seeds_, BitVector delta_);
+		void setSeeds(span<const block> seeds_);
+
+
+		void setBaseOts(span<const block> baseMessages, const BitVector& choices);
+
+		bool hasBaseOts() const
+		{
+			return mPprf.hasBaseOts();
+		}
+
+		const BitVector& getDelta() const { return mDelta; }
 
 		// Uses a PPRF to implement the 2**mFieldBits - 1 of 2**mFieldBits OTs out of 1 of 2 base OTs. The
 		// messages and choice bits (which must be uniformly random) of the base OTs must be in
 		// baseMessages and choices.
-		SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_,
-			Channel& chl, PRNG& prng, span<const block> baseMessages, BitVector choices,
-			size_t numThreads, bool malicious);
+		task<> expand(Socket& chl, PRNG& prng, u64 numThreads);
 
-		// The number of useful blocks in w.
-		size_t wSize() const { return mFieldBits * mNumVoles; }
 
-		// wSize plus the number of padding blocks at the end where garbage may be written.
-		size_t wPadded() const { return mFieldBits * numVolesPadded; }
+		// outW outputs the values for w, i.e. xor_x x * PRG(seed[x]). If correction is passed, its
+		// effect is the same as running sharedFunctionXor(correction, outW) after this function.
+		void generate(u64 blockIdx, const AES& aes,
+			block* outW, const block* correction = nullptr) const
+		{
+			mGenerateFn(*this, blockIdx, aes, outW, correction);
+		}
 
-		// The size of the u correction.
-		size_t uSize() const { return mNumVoles; }
+		void generate(u64 blockIdx, const AES& aes,
+			span<block> outW, span<const block> correction = span<block>()) const
+		{
+#ifndef NDEBUG
+			if ((u64)outW.size() != wPadded())
+				throw RTE_LOC;
+			if (correction.data() && (u64)correction.size() != uPadded())
+				throw RTE_LOC;
+#endif
 
-		// The u correction must also be padded, according to uPadded(), as garbage values may be read.
-		size_t uPadded() const { return numVolesPadded; }
+			return generate(blockIdx, aes, outW.data(), correction.data());
+		}
+
+
+
+
 
 		// The VOLE outputs secret shares shares of u cdot Delta, where u is in GF(2)^mNumVoles, Delta is
 		// in GF(2^mFieldBits)^mNumVoles, and cdot represents the componentwise product. This computes the
@@ -189,9 +243,9 @@ namespace osuCrypto
 		void sharedFunctionXor(span<const T> u, span<T> product)
 		{
 #ifndef NDEBUG
-			if ((size_t)u.size() != mNumVoles)
+			if ((u64)u.size() != mNumVoles)
 				throw RTE_LOC;
-			if ((size_t)product.size() != wPadded())
+			if ((u64)product.size() != wPadded())
 				throw RTE_LOC;
 #endif
 			sharedFunctionXor(u.data(), product.data());
@@ -200,7 +254,7 @@ namespace osuCrypto
 		// Same, but on values in GF(2^mFieldBits)^mNumVoles instead of GF(2)^mNumVoles. modulus is the
 		// modulus of the GF(2^mFieldBits) field being used.
 		template<typename T>
-		inline void sharedFunctionXorGF(const T* BOOST_RESTRICT u, T* BOOST_RESTRICT product, u64 modulus);
+		inline void sharedFunctionXorGF(const T* __restrict u, T* __restrict product, u64 modulus);
 
 		// Helper for above. See below class for specialization on block.
 		template<typename T>
@@ -210,57 +264,25 @@ namespace osuCrypto
 			return (typename std::make_signed<T>::type) (i8) in;
 		}
 
-		// outW outputs the values for w, i.e. xor_x x * PRG(seed[x]). If correction is passed, its
-		// effect is the same as running sharedFunctionXor(correction, outW) after this function.
-		void generate(size_t blockIdx, const AES& aes,
-			block* outW, const block* correction = nullptr) const
-		{
-			generatePtr(*this, blockIdx, aes, outW, correction);
-		}
 
-		void generate(size_t blockIdx, const AES& aes,
-			span<block> outW, span<const block> correction = span<block>()) const
-		{
-#ifndef NDEBUG
-			if ((size_t)outW.size() != wPadded())
-				throw RTE_LOC;
-			if (correction.data() && (size_t)correction.size() != uPadded())
-				throw RTE_LOC;
-#endif
+	private:
 
-			return generate(blockIdx, aes, outW.data(), correction.data());
-		}
+		void setDelta(BitVector delta_);
 
-		static size_t computeNumVolesPadded(size_t fieldBits, size_t numVoles)
-		{
-			size_t volesPadded;
-			if (fieldBits <= superBlkShift) // >= 1 VOLEs per superblock.
-				volesPadded = roundUpTo(numVoles, divNearest(superBlkSize, (1 << fieldBits) - 1));
-			else // > 1 super block per VOLE.
-				volesPadded = numVoles;
 
-			// Padding for sharedFunctionXor.
-			return std::max<u64>(volesPadded, roundUpTo(numVoles, 4));
-		}
+		using GenerateFn = void (*)(const SmallFieldVoleReceiver&,
+			u64 blockIdx, const AES& aes,
+			block* __restrict outW, const block* __restrict correction);
 
-	//private:
-		void (* const generatePtr)(const SmallFieldVoleReceiver&,
-			size_t, const AES&, block* BOOST_RESTRICT, const block* BOOST_RESTRICT);
-
-		template<size_t fieldBitsConst>
-		OC_FORCEINLINE void generateImpl(size_t blockIdx, const AES& aes,
-			block* BOOST_RESTRICT outW, const block* BOOST_RESTRICT correction) const;
-
-		template<size_t fieldBitsConst, typename T, T Func>
-		friend struct call_member_func;
+		GenerateFn mGenerateFn;
 
 		// Select specialized implementation of generate.
-		static decltype(generatePtr) selectGenerateImpl(size_t fieldBits);
+		static GenerateFn selectGenerateImpl(u64 fieldBits);
 
 		template<typename T>
 		OC_FORCEINLINE void sharedFunctionXorGFImpl(
-			const T* BOOST_RESTRICT u, T* BOOST_RESTRICT product, u64 modulus,
-			size_t nVole, size_t chunk);
+			const T* __restrict u, T* __restrict product, u64 modulus,
+			u64 nVole, u64 chunk);
 	};
 
 	template<> inline block SmallFieldVoleReceiver::allSame<block>(u8 in)
@@ -271,51 +293,51 @@ namespace osuCrypto
 	template<typename T>
 	void SmallFieldVoleReceiver::sharedFunctionXor(const T* u, T* product)
 	{
-		for (size_t nVole = 0; nVole < mNumVoles; nVole += 4)
+		for (u64 nVole = 0; nVole < mNumVoles; nVole += 4)
 		{
 			T uBlock[4];
-			for (size_t i = 0; i < 4; ++i)
+			for (u64 i = 0; i < 4; ++i)
 				uBlock[i] = u[nVole + i];
 
-			for (size_t bit = 0; bit < mFieldBits; ++bit)
-				for (size_t i = 0; i < 4; ++i)
+			for (u64 bit = 0; bit < mFieldBits; ++bit)
+				for (u64 i = 0; i < 4; ++i)
 					product[(nVole + i) * mFieldBits + bit] ^=
-					uBlock[i] & allSame<T>(deltaUnpacked[(nVole + i) * mFieldBits + bit]);
+					uBlock[i] & allSame<T>(mDeltaUnpacked[(nVole + i) * mFieldBits + bit]);
 		}
 	}
 
 	template<typename T>
 	OC_FORCEINLINE void SmallFieldVoleReceiver::sharedFunctionXorGFImpl(
-		const T* BOOST_RESTRICT u, T* BOOST_RESTRICT product, u64 modulus, size_t nVole, size_t step)
+		const T* __restrict u, T* __restrict product, u64 modulus, u64 nVole, u64 step)
 	{
-		T products[4][2 * SmallFieldVoleBase::fieldBitsMax - 1] = { 0 };
+		T products[4][2 * SmallFieldVoleBase::fieldBitsMax - 1] = { {0} };
 
 		// Don't bother with fast multiplication for now.
-		for (size_t bitU = 0; bitU < mFieldBits; ++bitU)
-			for (size_t bitD = 0; bitD < mFieldBits; ++bitD)
-				for (size_t i = 0; i < step; ++i)
+		for (u64 bitU = 0; bitU < mFieldBits; ++bitU)
+			for (u64 bitD = 0; bitD < mFieldBits; ++bitD)
+				for (u64 i = 0; i < step; ++i)
 					products[i][bitU + bitD] ^= u[(nVole + i) * mFieldBits + bitU] &
-					allSame<T>(deltaUnpacked[(nVole + i) * mFieldBits + bitD]);
+					allSame<T>(mDeltaUnpacked[(nVole + i) * mFieldBits + bitD]);
 
 		// Apply modular reduction to put the result in GF(2^mFieldBits). Again, don't bother with
 		// fast techinques.
-		for (size_t j = 2 * mFieldBits - 2; j >= mFieldBits; --j)
-			for (size_t k = 1; k <= mFieldBits; ++k)
+		for (u64 j = 2 * mFieldBits - 2; j >= mFieldBits; --j)
+			for (u64 k = 1; k <= mFieldBits; ++k)
 				if ((modulus >> (mFieldBits - k)) & 1)
-					for (size_t i = 0; i < step; ++i)
+					for (u64 i = 0; i < step; ++i)
 						products[i][j - k] ^= products[i][j];
 
 		// XOR out
-		for (size_t j = 0; j < mFieldBits; ++j)
-			for (size_t i = 0; i < step; ++i)
+		for (u64 j = 0; j < mFieldBits; ++j)
+			for (u64 i = 0; i < step; ++i)
 				product[(nVole + i) * mFieldBits + j] ^= products[i][j];
 	}
 
 	template<typename T>
 	void SmallFieldVoleReceiver::sharedFunctionXorGF(
-		const T* BOOST_RESTRICT u, T* BOOST_RESTRICT product, u64 modulus)
+		const T* __restrict u, T* __restrict product, u64 modulus)
 	{
-		size_t nVole;
+		u64 nVole;
 		for (nVole = 0; nVole + 4 <= mNumVoles; nVole += 4)
 			sharedFunctionXorGFImpl(u, product, modulus, nVole, 4);
 		for (; nVole < mNumVoles; ++nVole)

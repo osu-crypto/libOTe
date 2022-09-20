@@ -1,4 +1,11 @@
 #pragma once
+// © 2022 Lawrence Roy.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 #include <libOTe/config.h>
 #ifdef ENABLE_SOFTSPOKEN_OT
 
@@ -17,10 +24,16 @@ namespace osuCrypto
 	template<typename Code>
 	struct SubspaceVoleBase
 	{
+		SubspaceVoleBase() {}
+		static constexpr bool mMalicious = false;
+
+
 		Code mCode;
 		static_assert(std::is_base_of<GenericLinearCode<Code>, Code>::value, "Code must be a linear code.");
 
-		SubspaceVoleBase(Code code) : mCode(std::move(code)) {}
+		//void init(Code code) {
+		//	mCode = (std::move(code)); 
+		//}
 
 		const GenericLinearCode<Code>& code() const { return mCode; }
 		GenericLinearCode<Code>& code() { return mCode; }
@@ -37,16 +50,38 @@ namespace osuCrypto
 		using Base = SubspaceVoleBase<Code>;
 		using Base::code;
 
-		SubspaceVoleSender(SmallFieldVoleSender vole_, Code code_) :
-			Base(std::move(code_)),
-			mVole(std::move(vole_))
+		SubspaceVoleSender() {}
+		SubspaceVoleSender(SubspaceVoleSender&&) = default;
+		SubspaceVoleSender(const SubspaceVoleSender&) = delete;
+
+		void init(u64 fieldBits, u64 numVoles)
 		{
+			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits));
+			mVole.init(fieldBits, numVoles, false);
+
 			if (mVole.mNumVoles != code().length())
 				throw RTE_LOC;
 		}
 
+		bool hasBaseOts() const
+		{
+			return mVole.hasBaseOts();
+		}
+
+		void setBaseOts(
+			span<std::array<block,2>> baseSendOts)
+		{
+			mVole.setBaseOts(baseSendOts);
+		}
+
+
+		u64 fieldBits() const
+		{
+			return mVole.fieldBits();
+		}
+
 		// Reserve room for blocks blocks in the send buffer.
-		void reserveMessages(size_t blocks)
+		void reserveMessages(u64 blocks)
 		{
 			// The extra added on is because some extra memory is used temporarily in generateRandom and
 			// generateChosen.
@@ -54,35 +89,33 @@ namespace osuCrypto
 		}
 
 		// Reserve room for the given numbers of random and chosen u subspace VOLEs.
-		void reserveMessages(size_t random, size_t chosen)
+		void reserveMessages(u64 random, u64 chosen)
 		{
 			reserveMessages(code().codimension() * random + code().length() * chosen);
 		}
 
 		// Extend mMessages by blocks blocks, and return the span of added blocks.
-		span<block> extendMessages(size_t blocks)
+		span<block> extendMessages(u64 blocks)
 		{
-			size_t currentEnd = mMessages.size();
+			u64 currentEnd = mMessages.size();
 			mMessages.resize(currentEnd + blocks);
 			return mMessages.subspan(currentEnd);
 		}
 
+		bool hasSendBuffer() const { return mMessages.size(); }
+
 		// Asynchronous
-		void send(Channel& chl)
+		auto send(Socket& chl)
 		{
-			if (mMessages.size())
-			{
-				chl.asyncSend(std::move(mMessages));
-				mMessages.clear();
-			}
+			return chl.send(std::move(mMessages));
 		}
 
-		size_t uSize() const { return code().dimension(); }
-		size_t vSize() const { return mVole.vSize(); }
-		size_t uPadded() const { return code().dimension(); }
-		size_t vPadded() const { return mVole.vPadded(); }
+		u64 uSize() const { return code().dimension(); }
+		u64 vSize() const { return mVole.vSize(); }
+		u64 uPadded() const { return code().dimension(); }
+		u64 vPadded() const { return mVole.vPadded(); }
 
-		void generateRandom(size_t blockIdx, const AES& aes, span<block> randomU, span<block> outV)
+		void generateRandom(u64 blockIdx, const AES& aes, span<block> randomU, span<block> outV)
 		{
 			span<block> tmpU = extendMessages(mVole.uPadded());
 
@@ -93,7 +126,7 @@ namespace osuCrypto
 			mMessages.resize(mMessages.size() - (mVole.uPadded() - syndrome.size()));
 		}
 
-		void generateChosen(size_t blockIdx, const AES& aes, span<const block> chosenU, span<block> outV)
+		void generateChosen(u64 blockIdx, const AES& aes, span<const block> chosenU, span<block> outV)
 		{
 			span<block> correction = extendMessages(mVole.uPadded());
 
@@ -114,10 +147,13 @@ namespace osuCrypto
 
 		// Use boost's vector implementation because it allows resizing without initialization.
 		AlignedUnVector<block> mMessages;
-		size_t mReadIndex = 0;
+		u64 mReadIndex = 0;
 
 		using Base = SubspaceVoleBase<Code>;
 		using Base::code;
+
+		SubspaceVoleReceiver()
+		{}
 
 		SubspaceVoleReceiver(SubspaceVoleReceiver&& o)
 			: Base(std::move(o))
@@ -127,17 +163,44 @@ namespace osuCrypto
 			, mReadIndex(std::exchange(o.mReadIndex, 0))
 		{}
 
-		SubspaceVoleReceiver(SmallFieldVoleReceiver vole_, Code code_) :
-			Base(std::move(code_)),
-			mVole(std::move(vole_)),
-			mCorrectionU(uPadded())
+		void init(u64 fieldBits_, u64 numVoles_)
 		{
+			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits_));
+			mVole.init(fieldBits_, numVoles_, false);
+			mCorrectionU.resize(uPadded());
+
 			if (mVole.mNumVoles != code().length())
 				throw RTE_LOC;
 		}
 
-		// Synchronous.
-		void recv(Channel& chl, size_t blocks)
+		void setBaseOts(
+			span<block> baseRecvOts,
+			const BitVector& choices)
+		{
+			mVole.setBaseOts(baseRecvOts, choices);
+		}
+
+		bool hasBaseOts() const
+		{
+			return mVole.hasBaseOts();
+		}
+
+		u64 fieldBits() const
+		{
+			return mVole.fieldBits();
+		}
+
+		const BitVector& getDelta() const { return mVole.getDelta(); }
+
+		task<> expand(Socket& chl, PRNG& prng, u64 numThreads)
+		{
+			return mVole.expand(chl, prng, numThreads);
+		}
+
+
+		// await the result to perform the receive.
+		[[nodiscard]]
+		auto recv(Socket& chl, u64 blocks)
 		{
 			// To avoid needing a queue, this assumes that all mMessages are used up before more are
 			// read.
@@ -147,20 +210,21 @@ namespace osuCrypto
 #endif
 			clear();
 
-			//size_t currentEnd = mMessages.size();
+			//u64 currentEnd = mMessages.size();
 			mMessages.resize(blocks + uPadded() - uSize());
-			chl.recv(mMessages.data(), blocks);
+			return chl.recv(span<block>{ mMessages.data(), blocks });
 		}
 
 		// Receive exactly enough blocks for the given numbers of random and chosen u subspace VOLEs.
-		void recv(Channel& chl, size_t random, size_t chosen)
+		// await the result to perform the receive.
+		auto recv(Socket& socket, u64 random, u64 chosen)
 		{
-			recv(chl, code().codimension() * random + code().length() * chosen);
+			return recv(socket, code().codimension() * random + code().length() * chosen);
 		}
 
 		// Get a message from the receive buffer that is blocks blocks long, with paddedLen extra blocks
 		// on the end that should be ignored.
-		span<block> getMessage(size_t blocks, size_t paddedLen)
+		span<block> getMessage(u64 blocks, u64 paddedLen)
 		{
 #ifndef NDEBUG
 			if (mReadIndex + paddedLen > mMessages.size())
@@ -172,7 +236,7 @@ namespace osuCrypto
 			return output;
 		}
 
-		span<block> getMessage(size_t blocks)
+		span<block> getMessage(u64 blocks)
 		{
 			return getMessage(blocks, blocks);
 		}
@@ -188,12 +252,12 @@ namespace osuCrypto
 		//	return span<block>(mCorrectionU.get(), wPadded());
 		//}
 
-		size_t wSize() const { return mVole.wSize(); }
-		size_t wPadded() const { return mVole.wPadded(); }
-		size_t uSize() const { return mVole.uSize(); }
-		size_t uPadded() const { return mVole.uPadded(); }
+		u64 wSize() const { return mVole.wSize(); }
+		u64 wPadded() const { return mVole.wPadded(); }
+		u64 uSize() const { return mVole.uSize(); }
+		u64 uPadded() const { return mVole.uPadded(); }
 
-		void generateRandom(size_t blockIdx, const AES& aes, span<block> outW)
+		void generateRandom(u64 blockIdx, const AES& aes, span<block> outW)
 		{
 			span<block> syndrome = getMessage(code().codimension());
 
@@ -202,7 +266,7 @@ namespace osuCrypto
 			mVole.generate(blockIdx, aes, outW, mCorrectionU);
 		}
 
-		void generateChosen(size_t blockIdx, const AES& aes, span<block> outW)
+		void generateChosen(u64 blockIdx, const AES& aes, span<block> outW)
 		{
 			span<block> correctionU = getMessage(uSize(), uPadded());
 			mVole.generate(blockIdx, aes, outW, correctionU);

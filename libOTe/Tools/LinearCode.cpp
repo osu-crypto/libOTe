@@ -7,6 +7,10 @@
 #include <iomanip>
 
 #include <cryptoTools/Common/MatrixView.h>
+#include <string>
+#include <sstream>
+#include <cassert>
+
 namespace osuCrypto
 {
     // must be a multiple of 8...

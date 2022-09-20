@@ -260,7 +260,7 @@ namespace osuCrypto
 
                 if (mtx(i, i) == 0)
                 {
-                    //std::cout << mtx << std::endl;
+                    std::cout << mtx << std::endl;
                     return {};
                 }
             }

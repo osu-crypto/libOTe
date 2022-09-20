@@ -999,6 +999,7 @@ namespace osuCrypto {
     static OC_FORCEINLINE typename std::enable_if<(iter > avxBlockShift + 1)>::type
     avx_transpose(__m256i* inOut)
     {
+        assert((u64)inOut % 32 == 0);
         avx_transpose<iter - avxBlockShift>(inOut);
 
         constexpr size_t blockSizeShift = iter - avxBlockShift;
@@ -1022,6 +1023,7 @@ namespace osuCrypto {
     // input is 128 rows off 8 blocks each.
     void avx_transpose128x1024(block* inOut)
     {
+        assert((u64)inOut % 32 == 0);
         AlignedArray<block, 128 * 8> buff;
         for (u64 i = 0; i < 8; ++i)
         {
