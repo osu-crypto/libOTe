@@ -9,15 +9,11 @@
 #include "libOTe/config.h"
 #include <functional>
 #include <string>
+#include "libOTe/Tools/Coproto.h"
 
 
 namespace osuCrypto
 {
-
-    void senderGetLatency(Channel& chl);
-
-    void recverGetLatency(Channel& chl);
-    void getLatency(CLP& cmd);
 
     enum class Role
     {
@@ -25,7 +21,15 @@ namespace osuCrypto
         Receiver
     };
 
+#ifdef ENABLE_BOOST
+    void senderGetLatency(Channel& chl);
+
+    void recverGetLatency(Channel& chl);
+    void getLatency(CLP& cmd);
     void sync(Channel& chl, Role role);
+#endif
+
+    task<> sync(Socket& chl, Role role);
 
 
 

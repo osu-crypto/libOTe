@@ -1,6 +1,14 @@
 #pragma once
-// This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
-#include "cryptoTools/Common/CLP.h"
+// © 2016 Peter Rindal.
+// © 2022 Visa.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+#include "cryptoTools/Common/BitVector.h"
+#include "cryptoTools/Common/block.h"
 namespace tests_libOTe
 {
 
@@ -20,10 +28,11 @@ namespace tests_libOTe
     void OtExt_Iknp_Test();
     void DotExt_Iknp_Test();
 
-    void Vole_SoftSpokenSmall_Test(const oc::CLP& cmd);
-    void DotExt_SoftSpokenSemiHonest_Test(const oc::CLP& cmd);
-    void OtExt_SoftSpokenSemiHonest21_Test(const oc::CLP& cmd);
-    void DotExt_SoftSpokenMaliciousLeaky_Test(const oc::CLP& cmd);
-    void OtExt_SoftSpokenMalicious21_Test(const oc::CLP& cmd);
+
+
+    void OT_100Receive_Test(
+        osuCrypto::BitVector& choiceBits,
+        osuCrypto::span<osuCrypto::block> recv,
+        osuCrypto::span<std::array<osuCrypto::block, 2>>  sender);
 
 }

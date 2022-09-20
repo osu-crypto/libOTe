@@ -6,7 +6,7 @@ name: CI
 on:
   # Triggers the workflow on push or pull request events but only for the master branch
   push:
-    branches: [ master, ci, soft]
+    branches: [ master, stage, coproto ]
   pull_request: {}
 
   # Allows you to run this workflow manually from the Actions tab
@@ -18,6 +18,7 @@ jobs:
   build-ubuntu:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -27,17 +28,15 @@ jobs:
             submodules: recursive
 
       # Runs a set of commands using the runners shell
-      - name: build boost
-        run:  python3 build.py --setup --boost --par=4
-        
+      
       - name: build relic
-        run:  python3 build.py --setup --relic --par=4
-
+        run:  python3 build.py --setup --relic --par=4 -DVERBOSE_FETCH=ON -DENABLE_BOOST=OFF -DENABLE_SODIUM=OFF
+        
       - name: build bitpolymul
-        run:  python3 build.py --setup --bitpolymul --par=4
+        run:  python3 build.py --setup --bitpolymul --par=4  -DVERBOSE_FETCH=ON
           
       - name: build libOTe
-        run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON  -DENABLE_CIRCUIT=ON -DENABLE_BITPOLYMUL=ON
+        run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -DENABLE_CIRCUITS=ON 
 
       - name: unit tests
         run:  ./out/build/linux/frontend/frontend_libOTe -u
@@ -63,7 +62,7 @@ jobs:
 
       - name: install prefix test
         run: |
-            python3 build.py --setup --boost --relic --bitpolymul --install=~/install
+            python3 build.py --setup --relic --bitpolymul --install=~/install
             python3 build.py --install=~/install
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
@@ -75,7 +74,7 @@ jobs:
 
       - name: install test
         run: |
-            python3 build.py --setup --boost --relic --bitpolymul --install --sudo
+            python3 build.py --setup --relic --bitpolymul --install --sudo
             python3 build.py --install --sudo
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release
@@ -84,11 +83,14 @@ jobs:
             rm -rf out/
             cd ../..
   
+            
       - name: build sodium
-        run:  python3 build.py --setup --sodium --par=4
+        run:  python3 build.py --setup --sodium --par=4 -DVERBOSE_FETCH=ON -DENABLE_BOOST=OFF
         
       - name: build libOTe
-        run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -D ENABLE_SODIUM=ON -DENABLE_RELIC=OFF
+        run:  |
+            rm ./out/build/linux/frontend/frontend_libOTe
+            python3 build.py --par=4 -D ENABLE_ALL_OT=ON -D ENABLE_SODIUM=ON -DENABLE_RELIC=OFF -DPRINT_LOG_ON_FAIL=ON
 
       - name: unit tests
         run:  ./out/build/linux/frontend/frontend_libOTe -u
@@ -114,7 +116,7 @@ jobs:
 
       - name: install prefix test
         run: |
-            python3 build.py --setup --boost --relic --sodium --install=~/install
+            python3 build.py --setup --sodium --install=~/install
             python3 build.py --install=~/install
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
@@ -126,7 +128,7 @@ jobs:
 
       - name: install test
         run: |
-            python3 build.py --setup --boost --sodium --install --sudo
+            python3 build.py --setup --sodium --install --sudo
             python3 build.py --install --sudo
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release
@@ -139,6 +141,7 @@ jobs:
   build-osx:
     # The type of runner that the job will run on
     runs-on: macos-latest
+    timeout-minutes: 20
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -148,15 +151,9 @@ jobs:
             submodules: recursive
 
       # Runs a set of commands using the runners shell
-      - name: build boost
-        run:  python3 build.py --setup --boost --par=4 -D ENABLE_SSE=OFF  -D ENABLE_AVX=OFF -DENABLE_BITPOLYMUL=OFF
 
-      - name: build relic
-        run:  python3 build.py --setup --relic --par=4 -D ENABLE_SSE=OFF  -D ENABLE_AVX=OFF -DENABLE_BITPOLYMUL=OFF
-          
       - name: build libOTe
-        run:  |
-            python3 build.py --par=4 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON  -D ENABLE_SSE=OFF  -D ENABLE_AVX=OFF -DENABLE_BITPOLYMUL=OFF
+        run:  python3 build.py -DENABLE_BOOST=OFF -DVERBOSE_FETCH=ON -DENABLE_SSE=OFF -DENABLE_RELIC=ON  -D ENABLE_ALL_OT=ON 
 
       - name: unit tests
         run:  ./out/build/osx/frontend/frontend_libOTe -u
@@ -182,7 +179,7 @@ jobs:
 
       - name: install prefix test
         run: |
-            python3 build.py --setup --boost --relic --install=~/install
+            python3 build.py --setup --relic --install=~/install
             python3 build.py --install=~/install
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
@@ -194,7 +191,7 @@ jobs:
 
       - name: install test
         run: |
-            python3 build.py --setup --boost --relic --install --sudo
+            python3 build.py --setup --relic --install --sudo
             python3 build.py --install --sudo
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release
@@ -207,6 +204,7 @@ jobs:
   build-windows:
     # The type of runner that the job will run on
     runs-on: windows-2019
+    timeout-minutes: 20
   
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -218,11 +216,8 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
 
       # Runs a set of commands using the runners shell
-      - name: build boost
-        run: python3 build.py --setup --boost --par=4 -G Ninja
-
       - name: build relic
-        run: python3 build.py --setup --relic --par=4 -G Ninja
+        run: python3 build.py --setup --relic --par=4 -G Ninja  -DENABLE_BOOST=OFF  -DVERBOSE_FETCH=ON
         
       - name: build libOTe
         run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON   -G Ninja
@@ -253,7 +248,7 @@ jobs:
 
       - name: install prefix test
         run: |
-            python3 build.py --relic --boost --bitpolymul --install=~/install
+            python3 build.py --relic --bitpolymul --install=~/install
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
             cmake --build out/ --config Release

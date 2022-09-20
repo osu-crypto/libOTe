@@ -2,6 +2,7 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "Util.h"
 #include "cryptoTools/Common/Matrix.h"
+#include "LdpcSampler.h"
 
 namespace osuCrypto
 {
@@ -451,9 +452,9 @@ namespace osuCrypto
             while (b1 != e1)
                 r.mDataCol.push_back(*b1++);
 
-            r.mCols[i] = Col(span<u64>(
-                r.mDataCol.begin() + prev,
-                r.mDataCol.end()));
+            r.mCols[i] = (prev != r.mDataCol.size()) ?
+                Col(span<u64>(r.mDataCol.begin() + prev, r.mDataCol.end())) :
+                Col{};
 
             prev = r.mDataCol.size();
         }
@@ -487,9 +488,9 @@ namespace osuCrypto
             while (b1 != e1)
                 r.mDataRow.push_back(*b1++);
 
-            r.mRows[i] = Row(span<u64>(
-                r.mDataRow.begin() + prev,
-                r.mDataRow.end()));
+            r.mRows[i] = (prev != r.mDataRow.size()) ?
+                Row(span<u64>(r.mDataRow.begin() + prev, r.mDataRow.end())) :
+                Row{};
 
             prev = r.mDataRow.size();
         }
@@ -523,10 +524,10 @@ namespace osuCrypto
     {
         auto eq = rows() == X.rows() &&
             cols() == X.cols() &&
-            mDataCol.size() == X.mDataCol.size() && 
+            mDataCol.size() == X.mDataCol.size() &&
             mDataCol == X.mDataCol;
 
-        if(eq)
+        if (eq)
         {
             for (u64 i = 0; i < cols(); ++i)
                 if (col(i).size() != X.col(i).size())
@@ -1539,7 +1540,65 @@ namespace osuCrypto
         assert(I == DenseMtx::Identity(n1));
 
     }
-    
+
+    void tests::Mtx_block_test()
+    {
+        oc::PRNG prng(block(0, 0));
+
+        u64 n = 10, w = 4;
+        auto n2 = n / 2;
+        auto M = sampleFixedColWeight(n, n, w, prng, false);
+
+
+        auto M00 = M.subMatrix(0, 0, n2, n2);
+        auto M01 = M.subMatrix(0, n2, n2, n2);
+        auto M10 = M.subMatrix(n2, 0, n2, n2);
+        auto M11 = M.subMatrix(n2, n2, n2, n2);
+
+
+        //std::cout << M << std::endl;
+        //std::cout << M00 << std::endl;
+        //std::cout << M01 << std::endl;
+        //std::cout << M10 << std::endl;
+        //std::cout << M11 << std::endl;
+
+#ifndef NDEBUG
+        u64 cc =
+            M00.mDataCol.size() +
+            M01.mDataCol.size() +
+            M10.mDataCol.size() +
+            M11.mDataCol.size(),
+            rr =
+            M00.mDataRow.size() +
+            M01.mDataRow.size() +
+            M10.mDataRow.size() +
+            M11.mDataRow.size();
+#endif
+
+
+        assert(cc == M.mDataCol.size());
+        assert(rr == M.mDataRow.size());
+
+        assert(M.validate());
+        assert(M00.validate());
+        assert(M01.validate());
+        assert(M10.validate());
+        assert(M11.validate());
+
+        for (u64 i = 0; i < n2; ++i)
+        {
+            for (u64 j = 0; j < n2; ++j)
+            {
+                assert(M.isSet(i, j) == M00.isSet(i, j));
+                assert(M.isSet(i, j + n2) == M01.isSet(i, j));
+                assert(M.isSet(i + n2, j) == M10.isSet(i, j));
+                assert(M.isSet(i + n2, j + n2) == M11.isSet(i, j));
+            }
+        }
+
+    }
+
+
 
 }
 

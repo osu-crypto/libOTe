@@ -49,3 +49,8 @@ if(NOT DEFINED OC_THIRDPARTY_HINT)
         set(OC_THIRDPARTY_HINT "${CMAKE_CURRENT_LIST_DIR}/../../..")
     endif()
 endif()
+
+
+if(NOT DEFINED ENABLE_BOOST)
+    set(ENABLE_BOOST OFF)
+endif()

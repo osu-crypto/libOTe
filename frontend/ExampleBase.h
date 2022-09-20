@@ -11,9 +11,11 @@
 #include "libOTe/Tools/Popf/FeistelMulRistPopf.h"
 #include "libOTe/Base/MasnyRindal.h"
 #include "libOTe/Base/MasnyRindalKyber.h"
-#include "libOTe/Base/naor-pinkas.h"
 
 #include "cryptoTools/Common/BitVector.h"
+#include "cryptoTools/Common/CLP.h"
+#include "util.h"
+#include "coproto/Socket/AsioSocket.h"
 
 namespace osuCrypto
 {
@@ -21,7 +23,7 @@ namespace osuCrypto
     template<typename BaseOT>
     void baseOT_example_from_ot(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP&, BaseOT ot)
     {
-        IOService ios;
+#ifdef COPROTO_ENABLE_BOOST
         PRNG prng(sysRandomSeed());
 
         if (totalOTs == 0)
@@ -34,8 +36,7 @@ namespace osuCrypto
         Timer::timeUnit s;
         if (role == Role::Receiver)
         {
-            auto chl0 = Session(ios, ip, SessionMode::Server).addChannel();
-            chl0.waitForConnection();
+            auto sock = cp::asioConnect(ip, false);
             BaseOT recv = ot;
 
             AlignedVector<block> msg(totalOTs);
@@ -45,13 +46,12 @@ namespace osuCrypto
 
             s = t.setTimePoint("base OT start");
 
-            recv.receive(choice, msg, prng, chl0);
+            coproto::sync_wait(recv.receive(choice, msg, prng, sock));
+
         }
         else
         {
-
-            auto chl1 = Session(ios, ip, SessionMode::Client).addChannel();
-            chl1.waitForConnection();
+            auto sock = cp::asioConnect(ip, true);
 
             BaseOT send = ot;
 
@@ -59,7 +59,7 @@ namespace osuCrypto
 
             s = t.setTimePoint("base OT start");
 
-            send.send(msg, prng, chl1);
+            coproto::sync_wait(send.send(msg, prng, sock));
         }
 
         auto e = t.setTimePoint("base OT end");
@@ -67,6 +67,7 @@ namespace osuCrypto
 
         std::cout << tag << (role == Role::Receiver ? " (receiver)" : " (sender)")
             << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+#endif
     }
 
     template<typename BaseOT>

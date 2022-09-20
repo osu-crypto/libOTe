@@ -2,10 +2,11 @@
 #ifdef ENABLE_SOFTSPOKEN_OT
 
 #include <cryptoTools/Common/Matrix.h>
+#include <cryptoTools/Common/Log.h>
+#include <cryptoTools/Common/Range.h>
 #include <cryptoTools/Common/TestCollection.h>
 #include <cryptoTools/Crypto/AES.h>
 #include <cryptoTools/Crypto/Blake2.h>
-#include "libOTe/Tools/SilentPprf.h"
 
 //#include <boost/log/core.hpp> // For BOOST_LOG_UNREACHABLE()
 //
@@ -29,8 +30,8 @@ namespace osuCrypto
 
 	// Output: v (or w) in inOut[1 ...], and u in inOut[0]. If blocks > 2**depth, this pattern repeats
 	// once every 2**depth blocks.
-	template<size_t depth, size_t blocks = superBlkSize>
-	static OC_FORCEINLINE void xorReduce(block* BOOST_RESTRICT inOut, size_t maxDepth)
+	template<u64 depth, u64 blocks = superBlkSize>
+	static OC_FORCEINLINE void xorReduce(block* __restrict inOut, u64 maxDepth)
 	{
 		assert((blocks & ((1 << depth) - 1)) == 0); // Can't reduce partial trees.
 
@@ -39,10 +40,10 @@ namespace osuCrypto
 
 		if (depth <= maxDepth)
 		{
-			size_t stride = 1 << (depth - 1);
-			for (size_t i = 0; i < blocks; i += 2 * stride)
+			u64 stride = 1 << (depth - 1);
+			for (u64 i = 0; i < blocks; i += 2 * stride)
 			{
-				for (size_t j = 0; j < depth; ++j)
+				for (u64 j = 0; j < depth; ++j)
 					inOut[i + j] ^= inOut[i + stride + j];
 				inOut[i + depth] = inOut[i + stride];
 			}
@@ -50,26 +51,26 @@ namespace osuCrypto
 	}
 
 	// Base case
-	template<> OC_FORCEINLINE void xorReduce<0, 0>(block* BOOST_RESTRICT inOut, size_t maxDepth) {}
+	template<> OC_FORCEINLINE void xorReduce<0, 0>(block* __restrict inOut, u64 maxDepth) {}
 
 	// outU is unused when this is called by the receiver, and a few operations might be saved by not
 	// computing it. However, it's just a few XORs, and the compiler will likely optimize it out anyway.
 	static OC_FORCEINLINE void xorReducePath(
-		size_t fieldBits, size_t fieldSize, size_t superBlk, block(*BOOST_RESTRICT path)[superBlkSize],
-		block* BOOST_RESTRICT outU, block* BOOST_RESTRICT outVW, bool isReceiver,
+		u64 fieldBits, u64 fieldSize, u64 superBlk, block(*__restrict path)[superBlkSize],
+		block* __restrict outU, block* __restrict outVW, bool isReceiver,
 		bool correctionPresent = false)
 	{
 		// Reduce up the combining tree, continuing for as many nodes just got completed.
 		// However, the root is skipped, in case it might have a different size.
-		size_t treeDepth = 0;
-		for (size_t blkInTree = superBlk; treeDepth < (fieldBits - 1) / superBlkShift
+		u64 treeDepth = 0;
+		for (u64 blkInTree = superBlk; treeDepth < (fieldBits - 1) / superBlkShift
 			&& blkInTree % superBlkSize == 0; ++treeDepth)
 		{
 			blkInTree /= superBlkSize;
 
 			xorReduce<superBlkShift>(path[treeDepth], superBlkShift);
 
-			for (size_t depth = 0; depth < superBlkShift; ++depth)
+			for (u64 depth = 0; depth < superBlkShift; ++depth)
 				outVW[treeDepth * superBlkShift + depth] ^= path[treeDepth][depth + 1];
 			path[treeDepth + 1][(blkInTree - 1) % superBlkSize] = path[treeDepth][0];
 		}
@@ -77,31 +78,32 @@ namespace osuCrypto
 		// Reduce the root of the combining tree.
 		if ((superBlk & (fieldSize - 1)) == 0)
 		{
-			size_t depthRemaining = 1 + (fieldBits - 1) % superBlkShift;
+			u64 depthRemaining = 1 + (fieldBits - 1) % superBlkShift;
 			xorReduce<superBlkShift>(path[treeDepth], depthRemaining);
 
 			if (correctionPresent)
-				for (size_t j = 0; j < depthRemaining; ++j)
+				for (u64 j = 0; j < depthRemaining; ++j)
 					outVW[treeDepth * superBlkShift + j] ^= path[treeDepth][j + 1];
 			else
-				for (size_t j = 0; j < depthRemaining; ++j)
+				for (u64 j = 0; j < depthRemaining; ++j)
 					outVW[treeDepth * superBlkShift + j] = path[treeDepth][j + 1];
 			if (!isReceiver)
 				*outU = path[treeDepth][0];
 		}
 	}
 
-	template<size_t fieldBitsConst>
-	OC_FORCEINLINE void SmallFieldVoleSender::generateImpl(
-		size_t blockIdx, const AES& aes, block* BOOST_RESTRICT outU, block* BOOST_RESTRICT outV) const
+	template<u64 fieldBitsConst>
+	OC_FORCEINLINE void generateSenderImpl(
+		const SmallFieldVoleSender& This,
+		u64 blockIdx, const AES& aes, block* __restrict outU, block* __restrict outV)
 	{
 		// Allow the compiler to hardcode mFieldBits based on the template parameter.
-		const size_t fieldBits = fieldBitsConst > 0 ? fieldBitsConst : this->mFieldBits;
-		constexpr size_t fieldBitsMax =
+		const u64 fieldBits = fieldBitsConst > 0 ? fieldBitsConst : This.mFieldBits;
+		constexpr u64 fieldBitsMax =
 			fieldBitsConst > 0 ? fieldBitsConst : SmallFieldVoleSender::fieldBitsMax;
-		const size_t fieldSize = 1 << fieldBits;
+		const u64 fieldSize = 1 << fieldBits;
 
-		block* BOOST_RESTRICT seeds = this->mSeeds.data();
+		block* __restrict seeds = This.mSeeds.data();
 		block blockIdxBlock = toBlock(blockIdx);
 
 		if (fieldBits <= superBlkShift) // >= 1 VOLEs per superblock.
@@ -109,65 +111,68 @@ namespace osuCrypto
 			if (fieldBitsConst == 0)
 				UNREACHABLE();
 
-			const size_t volePerSuperBlk = superBlkSize / fieldSize;
-			for (size_t nVole = 0; nVole < mNumVoles; nVole += volePerSuperBlk)
+			const u64 volePerSuperBlk = superBlkSize / fieldSize;
+			for (u64 nVole = 0; nVole < This.mNumVoles; nVole += volePerSuperBlk)
 			{
 				// TODO: Try combining the block index into the AES key. It gives the same PRG, but
 				// might be faster.
 				block input[superBlkSize], hashes[superBlkSize];
-				for (size_t i = 0; i < superBlkSize; ++i, ++seeds)
+				for (u64 i = 0; i < superBlkSize; ++i, ++seeds)
 					input[i] = blockIdxBlock ^ *seeds;
 				aes.hashBlocks<superBlkSize>(input, hashes);
 
 				xorReduce<superBlkShift>(hashes, fieldBits);
-				for (size_t i = 0; i < volePerSuperBlk; ++i, ++outU)
+				for (u64 i = 0; i < volePerSuperBlk; ++i, ++outU)
 				{
-					for (size_t j = 0; j < fieldBits; ++j, ++outV)
+					for (u64 j = 0; j < fieldBits; ++j, ++outV)
+					{
 						*outV = hashes[i * fieldSize + j + 1];
+					}
 					*outU = hashes[i * fieldSize];
 				}
 			}
 		}
 		else // > 1 super block per VOLE.
 		{
-			for (size_t nVole = 0; nVole < mNumVoles; ++nVole, outV += fieldBits, ++outU)
+			for (u64 nVole = 0; nVole < This.mNumVoles; ++nVole, outV += fieldBits, ++outU)
 			{
 				block path[divCeil(fieldBitsMax, superBlkShift)][superBlkSize];
-				for (size_t i = 0; i < fieldBits; ++i)
+				for (u64 i = 0; i < fieldBits; ++i)
 					// GCC seems to generate better code with an open coded memset.
 					outV[i] = toBlock(0, 0);
 
 #ifdef __GNUC__
 #pragma GCC unroll 4
 #endif
-				for (size_t superBlk = 0; superBlk < fieldSize;)
+				for (u64 superBlk = 0; superBlk < fieldSize;)
 				{
 					block input[superBlkSize];
-					for (size_t i = 0; i < superBlkSize; ++i, ++superBlk, ++seeds)
+					for (u64 i = 0; i < superBlkSize; ++i, ++superBlk, ++seeds)
 						input[i] = blockIdxBlock ^ *seeds;
 					aes.hashBlocks<superBlkSize>(input, path[0]);
 					xorReducePath(fieldBits, fieldSize, superBlk, path, outU, outV, false);
+				}
 			}
 		}
 	}
-}
 
-	template<size_t fieldBitsConst>
-	OC_FORCEINLINE void SmallFieldVoleReceiver::generateImpl(
-		size_t blockIdx, const AES& aes,
-		block* BOOST_RESTRICT outW, const block* BOOST_RESTRICT correction) const
+	template<u64 fieldBitsConst>
+	OC_FORCEINLINE void generateReceiverImpl(
+		const SmallFieldVoleReceiver& This,
+		u64 blockIdx, const AES& aes,
+		block* __restrict outW, const block* __restrict correction) 
 	{
 		// Allow the compiler to hardcode mFieldBits based on the template parameter.
-		const size_t fieldBits = fieldBitsConst > 0 ? fieldBitsConst : this->mFieldBits;
-		constexpr size_t fieldBitsMax =
+		const u64 fieldBits = fieldBitsConst > 0 ? fieldBitsConst : This.mFieldBits;
+		constexpr u64 fieldBitsMax =
 			fieldBitsConst > 0 ? fieldBitsConst : SmallFieldVoleSender::fieldBitsMax;
-		const size_t fieldSize = 1 << fieldBits;
+		const u64 fieldSize = 1 << fieldBits;
 
-		block* BOOST_RESTRICT seeds = this->mSeeds.data();
+		block* __restrict seeds = This.mSeeds.data();
 		block blockIdxBlock = toBlock(blockIdx);
 
 		bool correctionPresent = (correction != nullptr);
-		const u8* BOOST_RESTRICT deltaPtr = deltaUnpacked.get();
+		const u8* __restrict deltaPtr = This.mDeltaUnpacked.data();
 
 		if (fieldBits <= superBlkShift)
 		{
@@ -177,41 +182,41 @@ namespace osuCrypto
 				UNREACHABLE();
 
 			// Avoid compilation trouble when this if branch is unreachable.
-			constexpr size_t fieldBits_ = std::min(fieldBitsMax, (size_t)superBlkShift);
+			constexpr u64 fieldBits_ = std::min(fieldBitsMax, (u64)superBlkShift);
 
 			// This is a trickier case, as we need to decide how many VOLES will fit
 			// per super block, and how many AES calls to use. Try to get as close to 8 AES invocations
 			// per superblock as possible.
-			constexpr size_t aesPerVole = (1 << fieldBits_) - 1;
-			constexpr size_t volePerSuperBlk = divNearest(superBlkSize, aesPerVole);
-			constexpr size_t aesPerSuperBlk = aesPerVole * volePerSuperBlk;
-			constexpr size_t fieldsPerSuperBlk = volePerSuperBlk << fieldBits_;
+			constexpr u64 aesPerVole = (1 << fieldBits_) - 1;
+			constexpr u64 volePerSuperBlk = divNearest(superBlkSize, aesPerVole);
+			constexpr u64 aesPerSuperBlk = aesPerVole * volePerSuperBlk;
+			constexpr u64 fieldsPerSuperBlk = volePerSuperBlk << fieldBits_;
 
-			for (size_t nVole = 0; nVole < mNumVoles; nVole += volePerSuperBlk,
+			for (u64 nVole = 0; nVole < This.mNumVoles; nVole += volePerSuperBlk,
 				correction += volePerSuperBlk, deltaPtr += fieldBits * volePerSuperBlk)
 			{
 				block input[aesPerSuperBlk], hashes[aesPerSuperBlk], xorHashes[fieldsPerSuperBlk];
-				for (size_t i = 0; i < aesPerSuperBlk; ++i, ++seeds)
+				for (u64 i = 0; i < aesPerSuperBlk; ++i, ++seeds)
 					input[i] = blockIdxBlock ^ *seeds;
 				aes.hashBlocks<aesPerSuperBlk>(input, hashes);
 
 				// Intersperse the hashes with zeros, because the zeroth seed for each VOLE is unknown.
-				for (size_t i = 0; i < volePerSuperBlk; ++i)
+				for (u64 i = 0; i < volePerSuperBlk; ++i)
 				{
 					xorHashes[i * fieldSize] = toBlock(0, 0);
-					for (size_t j = 0; j < aesPerVole; ++j)
+					for (u64 j = 0; j < aesPerVole; ++j)
 						xorHashes[i * fieldSize + j + 1] = hashes[i * aesPerVole + j];
 				}
 
 				xorReduce<fieldBits_, fieldsPerSuperBlk>(xorHashes, fieldBits);
 				if (correctionPresent)
-					for (size_t i = 0; i < volePerSuperBlk; ++i)
-						for (size_t j = 0; j < fieldBits; ++j, ++outW)
+					for (u64 i = 0; i < volePerSuperBlk; ++i)
+						for (u64 j = 0; j < fieldBits; ++j, ++outW)
 							*outW = xorHashes[i * fieldSize + j + 1] ^
 							correction[i] & block::allSame(deltaPtr[i * fieldBits + j]);
 				else
-					for (size_t i = 0; i < volePerSuperBlk; ++i)
-						for (size_t j = 0; j < fieldBits; ++j, ++outW)
+					for (u64 i = 0; i < volePerSuperBlk; ++i)
+						for (u64 j = 0; j < fieldBits; ++j, ++outW)
 							*outW = xorHashes[i * fieldSize + j + 1];
 			}
 		}
@@ -219,25 +224,25 @@ namespace osuCrypto
 		{
 			// > 1 super block per VOLE. Do blocks of 8, or 7 at the start because the zeroth seed in a
 			// VOLE is unknown.
-			for (size_t nVole = 0; nVole < mNumVoles; ++nVole, outW += fieldBits, deltaPtr += fieldBits)
+			for (u64 nVole = 0; nVole < This.mNumVoles; ++nVole, outW += fieldBits, deltaPtr += fieldBits)
 			{
 				block path[divCeil(fieldBitsMax, superBlkShift)][superBlkSize];
 				if (correctionPresent)
-					for (size_t i = 0; i < fieldBits; ++i)
+					for (u64 i = 0; i < fieldBits; ++i)
 						outW[i] = correction[nVole] & block::allSame(deltaPtr[i]);
 				else
-					for (size_t i = 0; i < fieldBits; ++i)
+					for (u64 i = 0; i < fieldBits; ++i)
 						outW[i] = toBlock(0, 0);
 
 				block input0[superBlkSize - 1];
-				for (size_t i = 0; i < superBlkSize - 1; ++i, ++seeds)
+				for (u64 i = 0; i < superBlkSize - 1; ++i, ++seeds)
 					input0[i] = blockIdxBlock ^ *seeds;
 				aes.hashBlocks<superBlkSize - 1>(input0, &path[0][1]);
 
 				// The zeroth seed is unknown, so set the corresponding path element to zero.
 				path[0][0] = toBlock(0, 0);
 
-				size_t superBlk = superBlkSize;
+				u64 superBlk = superBlkSize;
 				xorReducePath(fieldBits, fieldSize, superBlk, path, nullptr, outW, true);
 
 #ifdef __GNUC__
@@ -246,97 +251,163 @@ namespace osuCrypto
 				while (superBlk < fieldSize)
 				{
 					block input[superBlkSize];
-					for (size_t i = 0; i < superBlkSize; ++i, ++superBlk, ++seeds)
+					for (u64 i = 0; i < superBlkSize; ++i, ++superBlk, ++seeds)
 						input[i] = blockIdxBlock ^ *seeds;
 					aes.hashBlocks<superBlkSize>(input, path[0]);
 
 					xorReducePath(fieldBits, fieldSize, superBlk, path, nullptr, outW,
 						true, correctionPresent);
+				}
 			}
 		}
 	}
-}
 
-	template<size_t fieldBitsConst, typename T, T Func>
-	struct SmallFieldVoleBase::call_member_func {};
 
-	template<size_t fieldBitsConst, typename Class, typename Return, typename... Params, Return(Class::* Func)(Params...) const>
-	struct SmallFieldVoleBase::call_member_func<fieldBitsConst, Return(Class::*)(Params...) const, Func>
+	// mSeeds must be the OT messages from mNumVoles instances of 2**mFieldBits - 1 of 2**mFieldBits OT,
+	// with each OT occupying a contiguous memory range.
+
+	void SmallFieldVoleSender::setSeed(span<const block> seeds_) {
+		u64 numSeeds = mNumVoles * fieldSize();
+		if ((u64)seeds_.size() != numSeeds)
+			throw RTE_LOC;
+		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
+	}
+
+	u64 computeNumVolesPadded(u64 fieldBits, u64 numVoles)
 	{
-		static Return call(const Class& this_, Params... params)
-		{
-			this_.template generateImpl<fieldBitsConst>(std::forward<Params>(params)...);
-		}
-	};
+		u64 volesPadded;
+		if (fieldBits <= superBlkShift) // >= 1 VOLEs per superblock.
+			volesPadded = roundUpTo(numVoles, divNearest(superBlkSize, (1 << fieldBits) - 1));
+		else // > 1 super block per VOLE.
+			volesPadded = numVoles;
 
-	SmallFieldVoleSender::SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_) :
-		SmallFieldVoleBase(fieldBits_, numVoles_),
-		numVolesPadded(computeNumVolesPadded(fieldBits_, numVoles_)),
-		generatePtr(selectGenerateImpl(mFieldBits))
+		// Padding for sharedFunctionXor.
+		return std::max<u64>(volesPadded, roundUpTo(numVoles, 4));
+	}
+
+	void SmallFieldVoleBase::init(u64 fieldBits_, u64 numVoles_, bool malicious)
 	{
+		mFieldBits = fieldBits_;
+		mNumVoles = numVoles_;
+		mMalicious = malicious;
+		mInit = true;
+		if (mFieldBits < 1 || mFieldBits > fieldBitsMax)
+			throw RTE_LOC;
+		mNumVolesPadded = (computeNumVolesPadded(fieldBits_, numVoles_));
+	}
+
+	void SmallFieldVoleSender::init(u64 fieldBits_, u64 numVoles_, bool malicious)
+	{
+		SmallFieldVoleBase::init(fieldBits_, numVoles_, malicious);
+		numVolesPadded = (computeNumVolesPadded(fieldBits_, numVoles_));
+		mGenerateFn = (selectGenerateImpl(mFieldBits));
 		mSeeds.resize(numVolesPadded * fieldSize());
 		std::fill_n(mSeeds.data(), mSeeds.size(), toBlock(0, 0));
 	}
 
-	SmallFieldVoleReceiver::SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_) :
-		SmallFieldVoleBase(fieldBits_, numVoles_),
-		numVolesPadded(computeNumVolesPadded(fieldBits_, numVoles_)),
-		generatePtr(selectGenerateImpl(mFieldBits))
+	void SmallFieldVoleReceiver::init(u64 fieldBits_, u64 numVoles_, bool malicious)
 	{
-		mSeeds.resize(numVolesPadded * (fieldSize() - 1));
-		std::fill_n(mSeeds.data(), mSeeds.size(), toBlock(0, 0));
+		SmallFieldVoleBase::init(fieldBits_, numVoles_, malicious);
+		mGenerateFn = (selectGenerateImpl(mFieldBits));
+		mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
+		std::fill_n(mSeeds.data(), mSeeds.size(), block(0, 0));
 	}
 
-	SmallFieldVoleSender::SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_, span<const block> seeds_) :
-		SmallFieldVoleSender(fieldBits_, numVoles_)
+	void SmallFieldVoleReceiver::setDelta(BitVector delta_)
 	{
-		size_t numSeeds = mNumVoles * fieldSize();
-		if ((size_t)seeds_.size() != numSeeds)
+		if ((u64)delta_.size() != baseOtCount())
+			throw RTE_LOC;
+		mDelta = std::move(delta_);
+		mDeltaUnpacked.resize(wPadded());
+		for (u64 i = 0; i < mDelta.size(); ++i)
+			mDeltaUnpacked[i] = -(u8)mDelta[i];
+	}
+
+	void SmallFieldVoleReceiver::setSeeds(span<const block> seeds_) 
+	{
+		u64 numSeeds = mNumVoles * (fieldSize() - 1);
+		if ((u64)seeds_.size() != numSeeds)
 			throw RTE_LOC;
 		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
 	}
 
-	SmallFieldVoleReceiver::SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_, BitVector delta_) :
-		SmallFieldVoleReceiver(fieldBits_, numVoles_)
+	// The choice bits (as expected by SilentMultiPprfReceiver) store the locations of the complements
+	// of the active paths (because they tell which messages were transferred, not which ones weren't),
+	// in big endian. We want delta, which is the locations of the active paths, in little endian.
+	static BitVector choicesToDelta(const BitVector& choices, u64 fieldBits, u64 numVoles)
 	{
-		if ((size_t)delta_.size() != numBaseOTs())
+		if ((u64)choices.size() != numVoles * fieldBits)
 			throw RTE_LOC;
-		delta = std::move(delta_);
-		deltaUnpacked.reset(new u8[wPadded()]);
-		for (size_t i = 0; i < delta.size(); ++i)
-			deltaUnpacked[i] = -(u8)delta[i];
+
+		BitVector delta(choices.size());
+		for (u64 i = 0; i < numVoles; ++i)
+			for (u64 j = 0; j < fieldBits; ++j)
+				delta[i * fieldBits + j] = 1 ^ choices[(i + 1) * fieldBits - j - 1];
+		return delta;
 	}
 
-	SmallFieldVoleReceiver::SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_,
-		span<const block> seeds_, BitVector delta_) :
-		SmallFieldVoleReceiver(fieldBits_, numVoles_, delta_)
+
+	void SmallFieldVoleReceiver::setBaseOts(span<const block> baseMessages, const BitVector& choices)
 	{
-		size_t numSeeds = mNumVoles * (fieldSize() - 1);
-		if ((size_t)seeds_.size() != numSeeds)
+		setDelta(choicesToDelta(choices, mFieldBits, mNumVoles));
+
+		mPprf.configure(fieldSize(), mNumVoles);
+
+		if (mPprf.mDepth != mFieldBits) // Sanity check: log2ceil.
 			throw RTE_LOC;
-		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
+		if (mPprf.baseOtCount() != baseOtCount()) // Sanity check
+			throw RTE_LOC;
+
+
+
+		//for (auto i : rng(baseMessages.size()))
+		//{
+		//	lout << "r" << i << " " << baseMessages[i] << " " << choices[i] << std::endl;
+		//}
+
+		mPprf.setBase(baseMessages);
+		mPprf.setChoiceBits(PprfOutputFormat::BlockTransposed, choices);
 	}
 
-	SmallFieldVoleSender::SmallFieldVoleSender(size_t fieldBits_, size_t numVoles_, Channel& chl,
-		PRNG& prng, span<const std::array<block, 2>> baseMessages, size_t numThreads, bool malicious) :
-		SmallFieldVoleSender(fieldBits_, numVoles_)
+	void SmallFieldVoleSender::setBaseOts(span<std::array<block, 2>> msgs)
 	{
-		SilentMultiPprfSender pprf(fieldSize(), mNumVoles);
-		pprf.setBase(baseMessages);
+		//for (auto i : rng(msgs.size()))
+		//{
+		//	lout << "s" << i << " " << msgs[i][0] << " "<< msgs[i][1] << std::endl;
+		//}
 
-		MatrixView<block> seedView(mSeeds.data(), mNumVoles, fieldSize());
-		pprf.expand(chl, span<const block>(), prng, seedView, PprfOutputFormat::BlockTransposed, numThreads);
+		mPprf.configure(fieldSize(), mNumVoles);
+
+		if (mPprf.mDepth != mFieldBits) // Sanity check: log2ceil.
+			throw RTE_LOC;
+		if (mPprf.baseOtCount() != baseOtCount()) // Sanity check
+			throw RTE_LOC;
+
+
+		mPprf.setBase(msgs);
+	}
+
+	task<> SmallFieldVoleSender::expand(Socket& chl,PRNG& prng, u64 numThreads)
+	{
+		MC_BEGIN(task<>, this, &chl, &prng, numThreads,
+			corrections = std::vector<std::array<block, 2>>{},
+			hashes = std::vector<std::array<block, 2>>{},
+			seedView = MatrixView<block>{}
+		);
+
+		seedView = MatrixView<block>(mSeeds.data(), mNumVoles, fieldSize());
+		MC_AWAIT(mPprf.expand(chl, span<const block>(), prng, seedView, PprfOutputFormat::BlockTransposed, false, 1));
 
 		// Prove consistency
-		if (malicious)
+		if (mMalicious)
 		{
-			std::vector<std::array<block, 2>> corrections(mNumVoles, { block::allSame(0) });
-			std::vector<std::array<block, 2>> hashes(mNumVoles, { block::allSame(0) });
-			for (size_t row = 0; row < mNumVoles; ++row)
+			corrections.resize(mNumVoles, { block::allSame(0) });
+			hashes.resize(mNumVoles, { block::allSame(0) });
+			for (u64 row = 0; row < mNumVoles; ++row)
 			{
 				Blake2 hasher(2 * sizeof(block));
 
-				for (size_t col = 0; col < fieldSize(); ++col)
+				for (u64 col = 0; col < fieldSize(); ++col)
 				{
 					Blake2 prg(3 * sizeof(block));
 					std::array<block, 3> prgOut;
@@ -353,55 +424,38 @@ namespace osuCrypto
 				hasher.Final(hashes[row]);
 			}
 
-			chl.asyncSend(std::move(corrections));
-			chl.asyncSend(std::move(hashes));
+			MC_AWAIT(chl.send(std::move(corrections)));
+			MC_AWAIT(chl.send(std::move(hashes)));
 		}
+
+		MC_END();
 	}
 
-	// The choice bits (as expected by SilentMultiPprfReceiver) store the locations of the complements
-	// of the active paths (because they tell which messages were transferred, not which ones weren't),
-	// in big endian. We want delta, which is the locations of the active paths, in little endian.
-	static BitVector choicesToDelta(const BitVector& choices, size_t fieldBits, size_t numVoles)
+
+	task<> SmallFieldVoleReceiver::expand(Socket& chl, PRNG& prng, u64 numThreads)
 	{
-		if ((size_t)choices.size() != numVoles * fieldBits)
-			throw RTE_LOC;
+		MC_BEGIN(task<>, this, &chl, &prng, numThreads, 
+			seedsFull = Matrix<block>{},
+			totals = std::vector<std::array<block, 2>>{},
+			entryHashes = std::vector<std::array<block, 2>>{},
+			corrections = std::vector<std::array<block, 2>>{},
+			hashes = std::vector<std::array<block, 2>>{},
+			seedMatrix = (block*)nullptr
+		);
 
-		BitVector delta(choices.size());
-		for (size_t i = 0; i < numVoles; ++i)
-			for (size_t j = 0; j < fieldBits; ++j)
-				delta[i * fieldBits + j] = 1 ^ choices[(i + 1) * fieldBits - j - 1];
-		return delta;
-	}
-
-	SmallFieldVoleReceiver::SmallFieldVoleReceiver(size_t fieldBits_, size_t numVoles_, Channel& chl,
-		PRNG& prng, span<const block> baseMessages, BitVector choices, size_t numThreads,
-		bool malicious) :
-		SmallFieldVoleReceiver(fieldBits_, numVoles_, choicesToDelta(choices, fieldBits_, numVoles_))
-	{
-		SilentMultiPprfReceiver pprf;
-		pprf.configure(fieldSize(), mNumVoles);
-
-		if (pprf.mDepth != mFieldBits) // Sanity check: log2ceil.
-			throw RTE_LOC;
-		if (pprf.baseOtCount() != numBaseOTs()) // Sanity check
-			throw RTE_LOC;
-
-		pprf.setBase(baseMessages);
-		pprf.setChoiceBits(PprfOutputFormat::BlockTransposed, choices);
-
-		Matrix<block> seedsFull(mNumVoles, fieldSize());
-		pprf.expand(chl, prng, seedsFull, PprfOutputFormat::BlockTransposed, false, numThreads);
+		seedsFull.resize(mNumVoles, fieldSize());
+		MC_AWAIT(mPprf.expand(chl, prng, seedsFull, PprfOutputFormat::BlockTransposed, false, 1));
 
 		// Check consistency
-		if (malicious)
+		if (mMalicious)
 		{
-			std::vector<std::array<block, 2>> totals(mNumVoles, { block::allSame(0) });
-			std::vector<std::array<block, 2>> entryHashes(mNumVoles * fieldSize(), { block::allSame(0) });
-			block* seedMatrix = seedsFull.data();
-			for (size_t row = 0; row < mNumVoles; ++row)
+			totals.resize(mNumVoles, { block::allSame(0) });
+			entryHashes.resize(mNumVoles * fieldSize(), { block::allSame(0) });
+			seedMatrix = seedsFull.data();
+			for (u64 row = 0; row < mNumVoles; ++row)
 			{
 
-				for (size_t col = 0; col < fieldSize(); ++col)
+				for (u64 col = 0; col < fieldSize(); ++col)
 				{
 					Blake2 prg(3 * sizeof(block));
 					std::array<block, 3> prgOut;
@@ -417,120 +471,121 @@ namespace osuCrypto
 				}
 			}
 
-			std::vector<std::array<block, 2>> corrections(mNumVoles, { block::allSame(0) });
-			std::vector<std::array<block, 2>> hashes(mNumVoles, { block::allSame(0) });
-			chl.recv(&corrections[0], corrections.size());
-			chl.recv(&hashes[0], hashes.size());
+			corrections.resize(mNumVoles, { block::allSame(0) });
+			hashes.resize(mNumVoles, { block::allSame(0) });
+			MC_AWAIT(chl.recv(corrections));
+			MC_AWAIT(chl.recv(hashes));
 
-			bool eq = true;
-			for (size_t row = 0; row < mNumVoles; ++row)
 			{
-				for (int i = 0; i < 2; ++i)
-					corrections[row][i] ^= totals[row][i];
-
-				size_t rowDelta = 0;
-				for (size_t bit = 0; bit < mFieldBits; ++bit)
-					rowDelta |= (size_t)delta[row * mFieldBits + bit] << bit;
-
-				for (size_t col = 0; col < fieldSize(); ++col)
+				bool eq = true;
+				for (u64 row = 0; row < mNumVoles; ++row)
 				{
-					block isUnknownSeed = block::allSame(col == rowDelta);
 					for (int i = 0; i < 2; ++i)
-						entryHashes[row * fieldSize() + col][i] ^= isUnknownSeed & corrections[row][i];
+						corrections[row][i] ^= totals[row][i];
+
+					u64 rowDelta = 0;
+					for (u64 bit = 0; bit < mFieldBits; ++bit)
+						rowDelta |= (u64)mDelta[row * mFieldBits + bit] << bit;
+
+					for (u64 col = 0; col < fieldSize(); ++col)
+					{
+						block isUnknownSeed = block::allSame(col == rowDelta);
+						for (int i = 0; i < 2; ++i)
+							entryHashes[row * fieldSize() + col][i] ^= isUnknownSeed & corrections[row][i];
+					}
+
+					Blake2 hasher(2 * sizeof(block));
+					std::array<block, 2> hash;
+					for (u64 col = 0; col < fieldSize(); ++col)
+						hasher.Update(entryHashes[row * fieldSize() + col]);
+					hasher.Final(hash);
+
+					for (int i = 0; i < 2; ++i)
+						eq &= (hash[i] == hashes[row][i]);
 				}
 
-				Blake2 hasher(2 * sizeof(block));
-				std::array<block, 2> hash;
-				for (size_t col = 0; col < fieldSize(); ++col)
-					hasher.Update(entryHashes[row * fieldSize() + col]);
-				hasher.Final(hash);
+				// TODO: Should delay abort until the VOLE consistency check, to stop the two events from
+				// being distinguished.
+				if (!eq)
+					throw std::runtime_error("PPRF failed consistency check.");
+			}
+		}
+		{
 
-				for (int i = 0; i < 2; ++i)
-					eq &= (hash[i] == hashes[row][i]);
+			// Reorder mSeeds to handle the (Delta ^) part, moving the unknown mSeeds to column 0. This
+			// effectively makes it compute w = sum_x (Delta ^ x) * r_x instead of v = sum_x x * r_x.
+			// TODO: Might be best to do this as part of going down the pprf tree. There, it would cost
+			// O(mNumVoles * fieldSize) time, rather than O(mNumVoles * fieldSize * mFieldBits).
+			for (u64 i = 0; i < mFieldBits; ++i)
+			{
+				u64 dMask = (u64)1 << i;
+				block* matrix = seedsFull.data();
+				// Bit hack to iterate over all values that are have a 0 in position i (from Hacker's
+				// Delight).
+				for (u64 col = 0; col < fieldSize(); col = (col + dMask + 1) & ~dMask)
+					for (u64 row = 0; row < mNumVoles; ++row)
+						cswapBytes(
+							matrix[row * fieldSize() + col],
+							matrix[row * fieldSize() + col + dMask],
+							mDeltaUnpacked[row * mFieldBits + i]);
 			}
 
-			// TODO: Should delay abort until the VOLE consistency check, to stop the two events from
-			// being distinguished.
-			if (!eq)
-				throw std::runtime_error("PPRF failed consistency check.");
+			// Remove the unknown mSeeds so that generate doesn't have to skip over them.
+			MatrixView<block> seedView(mSeeds.data(), mNumVoles, fieldSize() - 1);
+			for (u64 row = 0; row < mNumVoles; ++row)
+			{
+				auto src = seedsFull[row].subspan(1);
+				std::copy(src.begin(), src.end(), seedView[row].begin());
+			}
 		}
 
-		// Reorder mSeeds to handle the (Delta ^) part, moving the unknown mSeeds to column 0. This
-		// effectively makes it compute w = sum_x (Delta ^ x) * r_x instead of v = sum_x x * r_x.
-		// TODO: Might be best to do this as part of going down the pprf tree. There, it would cost
-		// O(mNumVoles * fieldSize) time, rather than O(mNumVoles * fieldSize * mFieldBits).
-		for (size_t i = 0; i < mFieldBits; ++i)
-		{
-			size_t dMask = (size_t)1 << i;
-			block* matrix = seedsFull.data();
-			// Bit hack to iterate over all values that are have a 0 in position i (from Hacker's
-			// Delight).
-			for (size_t col = 0; col < fieldSize(); col = (col + dMask + 1) & ~dMask)
-				for (size_t row = 0; row < mNumVoles; ++row)
-					cswapBytes(
-						matrix[row * fieldSize() + col],
-						matrix[row * fieldSize() + col + dMask],
-						deltaUnpacked[row * mFieldBits + i]);
-		}
-
-		// Remove the unknown mSeeds so that generate doesn't have to skip over them.
-		MatrixView<block> seedView(mSeeds.data(), mNumVoles, fieldSize() - 1);
-		for (size_t row = 0; row < mNumVoles; ++row)
-		{
-			auto src = seedsFull[row].subspan(1);
-			std::copy(src.begin(), src.end(), seedView[row].begin());
-		}
+		MC_END();
 	}
 
 	// TODO: Malicious version. Should use an actual hash function for bottom layer of tree.
 
-#define VOLE_GEN_FUNC(party, n) &SmallFieldVole##party::generateImpl<n>
-#define VOLE_FIELD_BITS_TABLE(party, n) \
-	&call_member_func<n, decltype(VOLE_GEN_FUNC(party, n)), VOLE_GEN_FUNC(party, n)>::call
-
-	decltype(SmallFieldVoleSender::generatePtr)
-		SmallFieldVoleSender::selectGenerateImpl(size_t fieldBits)
+	SmallFieldVoleSender::GenerateFn
+		SmallFieldVoleSender::selectGenerateImpl(u64 fieldBits)
 	{
-		static const decltype(generatePtr) table[] = {
-			VOLE_FIELD_BITS_TABLE(Sender, 1),
-			VOLE_FIELD_BITS_TABLE(Sender, 2),
-			VOLE_FIELD_BITS_TABLE(Sender, 3),
-			VOLE_FIELD_BITS_TABLE(Sender, 4),
-			VOLE_FIELD_BITS_TABLE(Sender, 5),
-			VOLE_FIELD_BITS_TABLE(Sender, 6),
-			VOLE_FIELD_BITS_TABLE(Sender, 7),
-			VOLE_FIELD_BITS_TABLE(Sender, 8),
-			VOLE_FIELD_BITS_TABLE(Sender, 9),
-			VOLE_FIELD_BITS_TABLE(Sender, 10)
+		static const GenerateFn table[] = {
+			generateSenderImpl<1>,
+			generateSenderImpl<2>,
+			generateSenderImpl<3>,
+			generateSenderImpl<4>,
+			generateSenderImpl<5>,
+			generateSenderImpl<6>,
+			generateSenderImpl<7>,
+			generateSenderImpl<8>,
+			generateSenderImpl<9>,
+			generateSenderImpl<10>
 		};
 		if (fieldBits <= sizeof(table) / sizeof(table[0]))
 			return table[fieldBits - 1];
 		else
-			return VOLE_FIELD_BITS_TABLE(Sender, 0);
+			return generateSenderImpl<0>;
 	}
 
-	decltype(SmallFieldVoleReceiver::generatePtr)
-		SmallFieldVoleReceiver::selectGenerateImpl(size_t fieldBits)
+	SmallFieldVoleReceiver::GenerateFn
+		SmallFieldVoleReceiver::selectGenerateImpl(u64 fieldBits)
 	{
-		static const decltype(generatePtr) table[] = {
-			VOLE_FIELD_BITS_TABLE(Receiver, 1),
-			VOLE_FIELD_BITS_TABLE(Receiver, 2),
-			VOLE_FIELD_BITS_TABLE(Receiver, 3),
-			VOLE_FIELD_BITS_TABLE(Receiver, 4),
-			VOLE_FIELD_BITS_TABLE(Receiver, 5),
-			VOLE_FIELD_BITS_TABLE(Receiver, 6),
-			VOLE_FIELD_BITS_TABLE(Receiver, 7),
-			VOLE_FIELD_BITS_TABLE(Receiver, 8),
-			VOLE_FIELD_BITS_TABLE(Receiver, 9),
-			VOLE_FIELD_BITS_TABLE(Receiver, 10)
+		static const GenerateFn table[] = {
+			generateReceiverImpl<1>,
+			generateReceiverImpl<2>,
+			generateReceiverImpl<3>,
+			generateReceiverImpl<4>,
+			generateReceiverImpl<5>,
+			generateReceiverImpl<6>,
+			generateReceiverImpl<7>,
+			generateReceiverImpl<8>,
+			generateReceiverImpl<9>,
+			generateReceiverImpl<10>
 		};
 		if (fieldBits <= sizeof(table) / sizeof(table[0]))
 			return table[fieldBits - 1];
 		else
-			return VOLE_FIELD_BITS_TABLE(Receiver, 0);
+			return generateReceiverImpl<0>;
 	}
 
-#undef VOLE_FIELD_BITS_CASE
 
 	void tests::xorReduction()
 	{

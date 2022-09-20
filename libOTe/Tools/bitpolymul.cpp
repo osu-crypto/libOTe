@@ -146,7 +146,7 @@ namespace osuCrypto
 
     void bitpolymul(uint64_t* c, const uint64_t* a, const uint64_t* b, uint64_t _n_64)
     {
-        u64 n = u64(_n_64);
+        auto n = _n_64;
         FFTPoly A(span<const u64>(a, n));
         FFTPoly B(span<const u64>(b, n));
 

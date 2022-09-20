@@ -9,20 +9,22 @@
 #include <cryptoTools/Network/IOService.h>
 #include <cryptoTools/Common/Log.h>
 
-#include "libOTe/TwoChooseOne/IknpOtExtReceiver.h"
-#include "libOTe/TwoChooseOne/IknpOtExtSender.h"
+#include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 
-#include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
-#include "libOTe/TwoChooseOne/KosOtExtSender.h"
+#include "libOTe/TwoChooseOne/Kos/KosOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/Kos/KosOtExtSender.h"
 
 
-#include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
-#include "libOTe/TwoChooseOne/KosDotExtSender.h"
+#include "libOTe/TwoChooseOne/KosDot/KosDotExtReceiver.h"
+#include "libOTe/TwoChooseOne/KosDot/KosDotExtSender.h"
 
-#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalLeakyDotExt.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShDotExt.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
+
+
+//#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalLeakyDotExt.h"
+//#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h"
+//#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShDotExt.h"
+//#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
 
 
 #include "libOTe/NChooseOne/Kkrt/KkrtNcoOtReceiver.h"
@@ -48,60 +50,58 @@ using namespace osuCrypto;
 
 namespace tests_libOTe
 {
-	void OT_100Receive_Test(BitVector& choiceBits, span<block> recv, span<std::array<block, 2>>  sender)
-	{
+    void OT_100Receive_Test(BitVector& choiceBits, span<block> recv, span<std::array<block, 2>>  sender)
+    {
 
-		for (u64 i = 0; i < choiceBits.size(); ++i)
-		{
+        for (u64 i = 0; i < choiceBits.size(); ++i)
+        {
 
-			u8 choice = choiceBits[i];
-			const block& revcBlock = recv[i];
-			//(i, choice, revcBlock);
-			const block& senderBlock = sender[i][choice];
+            u8 choice = choiceBits[i];
+            const block& revcBlock = recv[i];
+            //(i, choice, revcBlock);
+            const block& senderBlock = sender[i][choice];
 
-			//if (i%512==0) {
-			//    std::cout << "[" << i << ",0]--" << sender[i][0] << std::endl;
-			//    std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
-			//    std::cout << (int)choice << "-- " << recv[i] << std::endl;
-			//}
-			if (neq(revcBlock, senderBlock) || eq(revcBlock, sender[i][1 ^ choice]))
-			{
-				std::cout << "\n[" << i << ",0]--" << sender[i][0] << std::endl;
-				std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
-				std::cout << (int)choice << "-- " << recv[i] << std::endl;
-				throw UnitTestFail();
-			}
-		}
+            //if (i%512==0) {
+            //    std::cout << "[" << i << ",0]--" << sender[i][0] << std::endl;
+            //    std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
+            //    std::cout << (int)choice << "-- " << recv[i] << std::endl;
+            //}
+            if (neq(revcBlock, senderBlock))
+                throw UnitTestFail();
 
-	}
+            if (eq(revcBlock, sender[i][1 ^ choice]))
+                throw UnitTestFail();
+        }
+
+    }
 
 
-	void printMtx(std::array<block, 128>& data)
-	{
-		for (auto& d : data)
-		{
-			std::cout << d << std::endl;
-		}
-	}
+    void printMtx(std::array<block, 128>& data)
+    {
+        for (auto& d : data)
+        {
+            std::cout << d << std::endl;
+        }
+    }
 
-	void Tools_Transpose_Test()
-	{
-		{
+    void Tools_Transpose_Test()
+    {
+        {
 
-			std::array<block, 128> data;
-			memset((u8*)data.data(), 0, sizeof(data));
+            std::array<block, 128> data;
+            memset((u8*)data.data(), 0, sizeof(data));
 
-			data[0] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[1] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[2] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[3] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[4] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[5] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[6] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[7] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[0] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[1] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[2] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[3] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[4] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[5] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[6] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[7] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
 
-			//printMtx(data);
-			eklundh_transpose128(data.data());
+            //printMtx(data);
+            eklundh_transpose128(data);
 
 
 			for (auto& d : data)
@@ -111,7 +111,7 @@ namespace tests_libOTe
 					std::cout << "expected" << std::endl;
 					std::cout << block(0, 0xFF) << std::endl << std::endl;
 
-					printMtx(data);
+                    printMtx(data);
 
 					throw UnitTestFail();
 				}
@@ -122,17 +122,17 @@ namespace tests_libOTe
 		{
 
 
-			std::array<block, 128> data;
-			memset((u8*)data.data(), 0, sizeof(data));
+            std::array<block, 128> data;
+            memset((u8*)data.data(), 0, sizeof(data));
 
-			data[0] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[1] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[2] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[3] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[4] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[5] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[6] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
-			data[7] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[0] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[1] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[2] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[3] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[4] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[5] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[6] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+            data[7] = block(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
 
 			sse_transpose128(data.data());
 
@@ -144,7 +144,7 @@ namespace tests_libOTe
 					std::cout << "expected" << std::endl;
 					std::cout << block(0, 0xFF) << std::endl << std::endl;
 
-					printMtx(data);
+                    printMtx(data);
 
 					throw UnitTestFail();
 				}
@@ -189,25 +189,25 @@ namespace tests_libOTe
 		{
 			PRNG prng(ZeroBlock);
 
-			std::array<std::array<block, 8>, 128> data;
-
-			prng.get((u8*)data.data(), sizeof(block) * 8 * 128);
-
-
-			std::array<std::array<block, 8>, 128> data2 = data;
-
-			transpose128x1024(data);
+            AlignedArray<std::array<block, 8>, 128> data;
+            assert((u64)data.data() % 32 == 0);
+            prng.get((u8*)data.data(), sizeof(block) * 8 * 128);
 
 
-			for (u64 i = 0; i < 8; ++i)
-			{
+            AlignedArray<std::array<block, 8>, 128> data2 = data;
+
+            transpose128x1024(data);
+
+
+            for (u64 i = 0; i < 8; ++i)
+            {
 
 				AlignedArray<block, 128> sub;
 
-				for (u64 j = 0; j < 128; ++j)
-				{
-					sub[j] = data2[j][i];
-				}
+                for (u64 j = 0; j < 128; ++j)
+                {
+                    sub[j] = data2[j][i];
+                }
 
 				transpose128(sub.data());
 
@@ -223,8 +223,8 @@ namespace tests_libOTe
 				}
 			}
 
-		}
-	}
+        }
+    }
 
 	void Tools_Transpose_Bench()
 	{
@@ -251,200 +251,202 @@ namespace tests_libOTe
 
 
 
-		{
+        {
 
-			PRNG prng(ZeroBlock);
+            PRNG prng(ZeroBlock);
 
 			AlignedArray<block, 128> data;
 			prng.get(data.data(), data.size());
 			std::array<block, 128> data2;
 
-			MatrixView<block> dataView(data.begin(), data.end(), 1);
-			MatrixView<block> data2View(data2.begin(), data2.end(), 1);
+            MatrixView<block> dataView(data.begin(), data.end(), 1);
+            MatrixView<block> data2View(data2.begin(), data2.end(), 1);
 
-			transpose(dataView, data2View);
+            transpose(dataView, data2View);
 
 			transpose128(data.data());
 
 
 
 
-			for (u64 i = 0; i < 128; ++i)
-			{
-				if (neq(data[i], data2[i]))
-				{
-					std::cout << i << "\n";
-					printMtx(data);
-					std::cout << "\n";
-					printMtx(data2);
+            for (u64 i = 0; i < 128; ++i)
+            {
+                if (neq(data[i], data2[i]))
+                {
+                    std::cout << i << "\n";
+                    printMtx(data);
+                    std::cout << "\n";
+                    printMtx(data2);
 
-					throw UnitTestFail();
-				}
-			}
-		}
-
-
-		{
-			PRNG prng(ZeroBlock);
-
-			std::array<std::array<block, 8>, 128> data;
-
-			prng.get((u8*)data.data(), sizeof(block) * 8 * 128);
+                    throw UnitTestFail();
+                }
+            }
+        }
 
 
-			std::array<std::array<block, 8>, 128> data2;
+        {
+            PRNG prng(ZeroBlock);
 
-			MatrixView<block> dataView((block*)data.data(), 128, 8);
-			MatrixView<block> data2View((block*)data2.data(), 128 * 8, 1);
-			transpose(dataView, data2View);
+            std::array<std::array<block, 8>, 128> data;
+
+            prng.get((u8*)data.data(), sizeof(block) * 8 * 128);
+
+
+            std::array<std::array<block, 8>, 128> data2;
+
+            MatrixView<block> dataView((block*)data.data(), 128, 8);
+            MatrixView<block> data2View((block*)data2.data(), 128 * 8, 1);
+            transpose(dataView, data2View);
 
 
 			for (u64 i = 0; i < 8; ++i)
 			{
 				AlignedArray<block, 128> data128;
 
-				for (u64 j = 0; j < 128; ++j)
-				{
-					data128[j] = data[j][i];
-				}
+                for (u64 j = 0; j < 128; ++j)
+                {
+                    data128[j] = data[j][i];
+                }
 
 				transpose128(data128.data());
 
 
-				for (u64 j = 0; j < 128; ++j)
-				{
-					if (neq(data128[j], data2View[i * 128 + j][0]))
-						throw UnitTestFail();
-				}
-			}
+                for (u64 j = 0; j < 128; ++j)
+                {
+                    if (neq(data128[j], data2View[i * 128 + j][0]))
+                        throw UnitTestFail();
+                }
+            }
 
-		}
+        }
 
 
-		{
-			PRNG prng(ZeroBlock);
+        {
+            PRNG prng(ZeroBlock);
 
-			//std::array<std::array<std::array<block, 8>, 128>, 2> data;
+            //std::array<std::array<std::array<block, 8>, 128>, 2> data;
 
-			Matrix<block> dataView(208, 8);
-			prng.get((u8*)dataView.data(), sizeof(block) * dataView.bounds()[0] * dataView.stride());
+            Matrix<block> dataView(208, 8);
+            prng.get((u8*)dataView.data(), sizeof(block) * dataView.bounds()[0] * dataView.stride());
 
-			Matrix<block> data2View(1024, 2);
-			memset(data2View.data(), 0, data2View.bounds()[0] * data2View.stride() * sizeof(block));
-			transpose(dataView, data2View);
+            Matrix<block> data2View(1024, 2);
+            memset(data2View.data(), 0, data2View.bounds()[0] * data2View.stride() * sizeof(block));
+            transpose(dataView, data2View);
 
-			for (u64 b = 0; b < 2; ++b)
-			{
+            for (u64 b = 0; b < 2; ++b)
+            {
 
 				for (u64 i = 0; i < 8; ++i)
 				{
 					AlignedArray<block, 128> data128;
 
-					for (u64 j = 0; j < 128; ++j)
-					{
-						if (dataView.bounds()[0] > 128 * b + j)
-							data128[j] = dataView[128 * b + j][i];
-						else
-							data128[j] = ZeroBlock;
-					}
+                    for (u64 j = 0; j < 128; ++j)
+                    {
+                        if (dataView.bounds()[0] > 128 * b + j)
+                            data128[j] = dataView[128 * b + j][i];
+                        else
+                            data128[j] = ZeroBlock;
+                    }
 
 					transpose128(data128.data());
 
-					for (u64 j = 0; j < 128; ++j)
-					{
-						if (neq(data128[j], data2View[i * 128 + j][b]))
-						{
-							std::cout << "failed " << i << "  " << j << "  " << b << std::endl;
-							std::cout << "exp: " << data128[j] << "\nact: " << data2View[i * 128 + j][b] << std::endl;
-							throw UnitTestFail();
-						}
-					}
-				}
-			}
-		}
+                    for (u64 j = 0; j < 128; ++j)
+                    {
+                        if (neq(data128[j], data2View[i * 128 + j][b]))
+                        {
+                            std::cout << "failed " << i << "  " << j << "  " << b << std::endl;
+                            std::cout << "exp: " << data128[j] << "\nact: " << data2View[i * 128 + j][b] << std::endl;
+                            throw UnitTestFail();
+                        }
+                    }
+                }
+            }
+        }
 
-		{
-			PRNG prng(ZeroBlock);
+        {
+            PRNG prng(ZeroBlock);
 
-			Matrix<u8> in(16, 8);
-			prng.get((u8*)in.data(), sizeof(u8) * in.bounds()[0] * in.stride());
+            Matrix<u8> in(16, 8);
+            prng.get((u8*)in.data(), sizeof(u8) * in.bounds()[0] * in.stride());
 
-			Matrix<u8> out(63, 2);
-			transpose(in, out);
+            Matrix<u8> out(63, 2);
+            transpose(in, out);
 
 
-			Matrix<u8> out2(64, 2);
-			transpose(in, out2);
+            Matrix<u8> out2(64, 2);
+            transpose(in, out2);
 
-			for (u64 i = 0; i < out.bounds()[0]; ++i)
-			{
-				if (memcmp(out[i].data(), out2[i].data(), out[i].size()))
-				{
-					std::cout << "bad " << i << std::endl;
-					throw UnitTestFail();
-				}
-			}
-		}
+            for (u64 i = 0; i < out.bounds()[0]; ++i)
+            {
+                if (memcmp(out[i].data(), out2[i].data(), out[i].size()))
+                {
+                    std::cout << "bad " << i << std::endl;
+                    throw UnitTestFail();
+                }
+            }
+        }
 
-		{
-			PRNG prng(ZeroBlock);
+        {
+            PRNG prng(ZeroBlock);
 
-			//std::array<std::array<std::array<block, 8>, 128>, 2> data;
+            //std::array<std::array<std::array<block, 8>, 128>, 2> data;
 
-			Matrix<u8> in(25, 9);
-			Matrix<u8> in2(32, 9);
+            Matrix<u8> in(25, 9);
+            Matrix<u8> in2(32, 9);
 
-			prng.get((u8*)in.data(), sizeof(u8) * in.bounds()[0] * in.stride());
-			memset(in2.data(), 0, in2.bounds()[0] * in2.stride());
+            prng.get((u8*)in.data(), sizeof(u8) * in.bounds()[0] * in.stride());
+            memset(in2.data(), 0, in2.bounds()[0] * in2.stride());
 
-			for (u64 i = 0; i < in.bounds()[0]; ++i)
-			{
-				for (u64 j = 0; j < in.stride(); ++j)
-				{
-					in2[i][j] = in[i][j];
-				}
-			}
+            for (u64 i = 0; i < in.bounds()[0]; ++i)
+            {
+                for (u64 j = 0; j < in.stride(); ++j)
+                {
+                    in2[i][j] = in[i][j];
+                }
+            }
 
-			Matrix<u8> out(72, 4);
-			Matrix<u8> out2(72, 4);
+            Matrix<u8> out(72, 4);
+            Matrix<u8> out2(72, 4);
 
-			transpose(in, out);
-			transpose(in2, out2);
+            transpose(in, out);
+            transpose(in2, out2);
 
-			for (u64 i = 0; i < out.bounds()[0]; ++i)
-			{
-				for (u64 j = 0; j < out.stride(); ++j)
-				{
-					if (out[i][j] != out2[i][j])
-					{
-						std::cout << (u32)out[i][j] << " != " << (u32)out2[i][j] << std::endl;
-						throw UnitTestFail();
-					}
-				}
-			}
-		}
-	}
+            for (u64 i = 0; i < out.bounds()[0]; ++i)
+            {
+                for (u64 j = 0; j < out.stride(); ++j)
+                {
+                    if (out[i][j] != out2[i][j])
+                    {
+                        std::cout << (u32)out[i][j] << " != " << (u32)out2[i][j] << std::endl;
+                        throw UnitTestFail();
+                    }
+                }
+            }
+        }
+    }
 
-	void OtExt_genBaseOts_Test()
-	{
+    void OtExt_genBaseOts_Test()
+    {
+        
 #if defined(LIBOTE_HAS_BASE_OT) && defined(ENABLE_KOS)
-		IOService ios(0);
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
+        //IOService ios(0);
+        //Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+        //Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+        //Channel senderChannel = ep1.addChannel();
+        //Channel recvChannel = ep0.addChannel();
+        
+        auto sockets = cp::LocalAsyncSocket::makePair();
 
 		KosOtExtSender sender;
 		KosOtExtReceiver recv;
 
-		auto thrd = std::thread([&]() {
-			PRNG prng(ZeroBlock);
-			recv.genBaseOts(prng, recvChannel);
-			});
+        PRNG prng0(ZeroBlock);
+        PRNG prng2(OneBlock);
 
-		PRNG prng(OneBlock);
-		sender.genBaseOts(prng, senderChannel);
-		thrd.join();
+        auto proto0 = recv.genBaseOts(prng0, sockets[0]);
+        auto proto1 = sender.genBaseOts(prng2, sockets[1]);
+
+        eval(proto0, proto1);
 
 		for (u64 i = 0; i < sender.mGens.size(); ++i)
 		{
@@ -452,188 +454,210 @@ namespace tests_libOTe
 			if (neq(sender.mGens[i].getSeed(), recv.mGens[i][b].getSeed()))
 				throw RTE_LOC;
 
-			if (eq(sender.mGens[i].getSeed(), recv.mGens[i][b ^ 1].getSeed()))
-				throw RTE_LOC;
-		}
+            if (eq(sender.mGens[i].getSeed(), recv.mGens[i][b ^ 1].getSeed()))
+                throw RTE_LOC;
+        }
 #else
 		throw UnitTestSkipped("LibOTe has no BaseOTs or ENABLE_KOS not define  ");
 #endif
 	}
 
 
-	void OtExt_Kos_Test()
-	{
+    void OtExt_Kos_Test()
+    {
 #if defined(ENABLE_KOS)
-		setThreadName("Sender");
+        setThreadName("Sender");
 
-		IOService ios;
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
+        //IOService ios;
+        //Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+        //Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+        //Channel senderChannel = ep1.addChannel();
+        //Channel recvChannel = ep0.addChannel();
+        
+        auto sockets = cp::LocalAsyncSocket::makePair();
 
-		PRNG prng0(block(4253465, 3434565));
-		PRNG prng1(block(42532335, 334565));
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
-		u64 numOTs = 20000;
+        u64 numOTs = 20000;
 
-		std::vector<block> recvMsg(numOTs), baseRecv(128);
-		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
-		BitVector choices(numOTs), baseChoice(128);
-		choices.randomize(prng0);
-		baseChoice.randomize(prng0);
+        std::vector<block> recvMsg(numOTs), baseRecv(128);
+        std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+        BitVector choices(numOTs), baseChoice(128);
+        choices.randomize(prng0);
+        baseChoice.randomize(prng0);
 
-		for (u64 i = 0; i < 128; ++i)
-		{
-			baseSend[i][0] = prng0.get<block>();
-			baseSend[i][1] = prng0.get<block>();
-			baseRecv[i] = baseSend[i][baseChoice[i]];
-		}
+        for (u64 i = 0; i < 128; ++i)
+        {
+            baseSend[i][0] = prng0.get<block>();
+            baseSend[i][1] = prng0.get<block>();
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+        }
 
-		KosOtExtSender sender;
-		KosOtExtReceiver recv;
+        KosOtExtSender sender;
+        KosOtExtReceiver recv;
 
-		std::thread thrd = std::thread([&]() {
-			setThreadName("receiver");
 
-			recv.setBaseOts(baseSend, prng0, recvChannel);
-			recv.receive(choices, recvMsg, prng0, recvChannel);
-			});
+        auto base0 = recv.setBaseOts(baseSend, prng0, sockets[0]);
+        auto base1 = sender.setBaseOts(baseRecv, baseChoice, sockets[1]);
 
-		sender.setBaseOts(baseRecv, baseChoice, senderChannel);
-		sender.send(sendMsg, prng1, senderChannel);
-		thrd.join();
+        eval(base0, base1);
 
-		OT_100Receive_Test(choices, recvMsg, sendMsg);
+        auto main0 = recv.receive(choices, recvMsg, prng0, sockets[0]);
+        auto main1 = sender.send(sendMsg, prng1, sockets[1]);
+
+        eval(main0, main1);
+
+        OT_100Receive_Test(choices, recvMsg, sendMsg);
 #else
-		throw UnitTestSkipped("ENABLE_KOS is not defined.");
+        throw UnitTestSkipped("ENABLE_KOS is not defined.");
 #endif
-	}
+    }
 
 
 
-	void OtExt_Kos_fs_Test()
-	{
+    void OtExt_Kos_fs_Test()
+    {
 #if defined(ENABLE_KOS)
-		setThreadName("Sender");
+        setThreadName("Sender");
 
-		IOService ios;
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
 
-		PRNG prng0(block(4253465, 3434565));
-		PRNG prng1(block(42532335, 334565));
+        
+        auto sockets = cp::LocalAsyncSocket::makePair();
 
-		u64 numOTs = 20000;
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
-		std::vector<block> recvMsg(numOTs), baseRecv(128);
-		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
-		BitVector choices(numOTs), baseChoice(128);
-		choices.randomize(prng0);
-		baseChoice.randomize(prng0);
+        u64 numOTs = 20000;
 
-		for (u64 i = 0; i < 128; ++i)
-		{
-			baseSend[i][0] = prng0.get<block>();
-			baseSend[i][1] = prng0.get<block>();
-			baseRecv[i] = baseSend[i][baseChoice[i]];
-		}
+        std::vector<block> recvMsg(numOTs), baseRecv(128);
+        std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+        BitVector choices(numOTs), baseChoice(128);
+        choices.randomize(prng0);
+        baseChoice.randomize(prng0);
 
-		KosOtExtSender sender;
-		KosOtExtReceiver recv;
+        for (u64 i = 0; i < 128; ++i)
+        {
+            baseSend[i][0] = prng0.get<block>();
+            baseSend[i][1] = prng0.get<block>();
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+        }
 
-		sender.mFiatShamir = true;
-		recv.mFiatShamir = true;
+        KosOtExtSender sender;
+        KosOtExtReceiver recv;
 
-		std::thread thrd = std::thread([&]() {
-			setThreadName("receiver");
+        sender.mFiatShamir = true;
+        recv.mFiatShamir = true;
 
-			recv.setBaseOts(baseSend, prng0, recvChannel);
-			recv.receive(choices, recvMsg, prng0, recvChannel);
-			});
+        auto base0 = recv.setBaseOts(baseSend, prng0, sockets[0]);
+        auto base1 = sender.setBaseOts(baseRecv, baseChoice, sockets[1]);
 
-		sender.setBaseOts(baseRecv, baseChoice, senderChannel);
-		sender.send(sendMsg, prng1, senderChannel);
-		thrd.join();
+        eval(base0, base1);
 
-		OT_100Receive_Test(choices, recvMsg, sendMsg);
+        auto main0 = recv.receive(choices, recvMsg, prng1, sockets[0]);
+        auto main1 = sender.send(sendMsg, prng1, sockets[1]);
+
+        eval(main0, main1);
+
+        //    recv.setBaseOts(baseSend, prng0, recvChannel);
+        //    recv.receive(choices, recvMsg, prng0, recvChannel);
+
+        //sender.setBaseOts(baseRecv, baseChoice, senderChannel);
+        //sender.send(sendMsg, prng1, senderChannel);
+
+        OT_100Receive_Test(choices, recvMsg, sendMsg);
 #else
-		throw UnitTestSkipped("ENABLE_KOS is not defined.");
+        throw UnitTestSkipped("ENABLE_KOS is not defined.");
 #endif
-	}
+    }
 
-	void OtExt_Kos_ro_Test()
-	{
+    void OtExt_Kos_ro_Test()
+    {
 #if defined(ENABLE_KOS)
-		setThreadName("Sender");
+        setThreadName("Sender");
 
-		IOService ios;
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
+        //IOService ios;
+        //Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
+        //Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
+        //Channel senderChannel = ep1.addChannel();
+        //Channel recvChannel = ep0.addChannel();
 
-		PRNG prng0(block(4253465, 3434565));
-		PRNG prng1(block(42532335, 334565));
+        
+        auto sockets = cp::LocalAsyncSocket::makePair();
 
-		u64 numOTs = 20000;
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
-		std::vector<block> recvMsg(numOTs), baseRecv(128);
-		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
-		BitVector choices(numOTs), baseChoice(128);
-		choices.randomize(prng0);
-		baseChoice.randomize(prng0);
+        u64 numOTs = 20000;
 
-		for (u64 i = 0; i < 128; ++i)
-		{
-			baseSend[i][0] = prng0.get<block>();
-			baseSend[i][1] = prng0.get<block>();
-			baseRecv[i] = baseSend[i][baseChoice[i]];
-		}
+        std::vector<block> recvMsg(numOTs), baseRecv(128);
+        std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+        BitVector choices(numOTs), baseChoice(128);
+        choices.randomize(prng0);
+        baseChoice.randomize(prng0);
 
-		KosOtExtSender sender;
-		KosOtExtReceiver recv;
+        for (u64 i = 0; i < 128; ++i)
+        {
+            baseSend[i][0] = prng0.get<block>();
+            baseSend[i][1] = prng0.get<block>();
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+        }
 
-		sender.mHashType = KosOtExtSender::HashType::RandomOracle;
-		recv.mHashType = KosOtExtReceiver::HashType::RandomOracle;
+        KosOtExtSender sender;
+        KosOtExtReceiver recv;
 
-		std::thread thrd = std::thread([&]() {
-			setThreadName("receiver");
+        sender.mHashType = KosOtExtSender::HashType::RandomOracle;
+        recv.mHashType = KosOtExtReceiver::HashType::RandomOracle;
 
-			recv.setBaseOts(baseSend, prng0, recvChannel);
-			recv.receive(choices, recvMsg, prng0, recvChannel);
-			});
+        //std::thread thrd = std::thread([&]() {
+        //    setThreadName("receiver");
 
-		sender.setBaseOts(baseRecv, baseChoice, senderChannel);
-		sender.send(sendMsg, prng1, senderChannel);
-		thrd.join();
+        //    recv.setBaseOts(baseSend, prng0, recvChannel);
+        //    recv.receive(choices, recvMsg, prng0, recvChannel);
+        //    });
 
-		OT_100Receive_Test(choices, recvMsg, sendMsg);
+        //sender.setBaseOts(baseRecv, baseChoice, senderChannel);
+        //sender.send(sendMsg, prng1, senderChannel);
+        //thrd.join();
+
+        auto base0 = recv.setBaseOts(baseSend, prng0, sockets[0]);
+        auto base1 = sender.setBaseOts(baseRecv, baseChoice, sockets[1]);
+
+        eval(base0, base1);
+        auto main0 = recv.receive(choices, recvMsg, prng1, sockets[0]);
+        auto main1 = sender.send(sendMsg, prng1, sockets[1]);
+
+        eval(main0, main1);
+
+
+        OT_100Receive_Test(choices, recvMsg, sendMsg);
 #else
-		throw UnitTestSkipped("ENABLE_KOS is not defined.");
+        throw UnitTestSkipped("ENABLE_KOS is not defined.");
 #endif
-	}
+    }
 
 	void OtExt_Chosen_Test()
 	{
 #if defined(ENABLE_KOS)
 
-		IOService ios;
-		Session ep0(ios, "127.0.0.1:1212", SessionMode::Server);
-		Session ep1(ios, "127.0.0.1:1212", SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
+        //IOService ios;
+        //Session ep0(ios, "127.0.0.1:1212", SessionMode::Server);
+        //Session ep1(ios, "127.0.0.1:1212", SessionMode::Client);
+        //Channel senderChannel = ep1.addChannel();
+        //Channel recvChannel = ep0.addChannel();
 
-		u64 numOTs = 200;
+        
+        auto sockets = cp::LocalAsyncSocket::makePair();
 
-		std::vector<block> recvMsg(numOTs), baseRecv(128);
-		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
-		BitVector choices(numOTs), baseChoice(128);
-		PRNG prng0(ZeroBlock);
-		choices.randomize(prng0);
-		baseChoice.randomize(prng0);
+        u64 numOTs = 200;
+
+        std::vector<block> recvMsg(numOTs), baseRecv(128);
+        std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+        BitVector choices(numOTs), baseChoice(128);
+        PRNG prng0(ZeroBlock);
+        PRNG prng1(block(42532335, 334565));
+        choices.randomize(prng0);
+        baseChoice.randomize(prng0);
 
 		for (u64 i = 0; i < 128; ++i)
 		{
@@ -647,16 +671,26 @@ namespace tests_libOTe
 		KosOtExtSender sender;
 		KosOtExtReceiver recv;
 
-		auto thrd = std::thread([&]() {
-			PRNG prng1(OneBlock);
-			recv.setBaseOts(baseSend, prng1, recvChannel);
-			recv.receiveChosen(choices, recvMsg, prng1, recvChannel);
-			});
+        //auto thrd = std::thread([&]() {
+        //    PRNG prng1(OneBlock);
+        //    recv.setBaseOts(baseSend, prng1, recvChannel);
+        //    recv.receiveChosen(choices, recvMsg, prng1, recvChannel);
+        //    });
 
-		sender.setBaseOts(baseRecv, baseChoice, senderChannel);
-		sender.sendChosen(sendMsg, prng0, senderChannel);
+        //sender.setBaseOts(baseRecv, baseChoice, senderChannel);
+        //sender.sendChosen(sendMsg, prng0, senderChannel);
 
-		thrd.join();
+        //thrd.join();
+
+        auto base0 = recv.setBaseOts(baseSend, prng0, sockets[0]);
+        auto base1 = sender.setBaseOts(baseRecv, baseChoice, sockets[1]);
+
+        eval(base0, base1);
+
+        auto main0 = recv.receive(choices, recvMsg, prng1, sockets[0]);
+        auto main1 = sender.send(sendMsg, prng1, sockets[1]);
+
+        eval(main0, main1);
 
 		for (u64 i = 0; i < numOTs; ++i)
 		{
@@ -664,588 +698,190 @@ namespace tests_libOTe
 				throw UnitTestFail("bad message " LOCATION);
 		}
 #else
-		throw UnitTestSkipped("ENABLE_KOS is not defined.");
+        throw UnitTestSkipped("ENABLE_KOS is not defined.");
 #endif
 	}
 
 
-	//void mul128b(__m128i b, __m128i a, __m128i &c0, __m128i &c1)
-	//{
-	//	__m128i t1, t2;
-	//	c0 = _mm_clmulepi64_si128(a, b, 0x00);
-	//	c1 = _mm_clmulepi64_si128(a, b, 0x11);
-	//	t1 = _mm_shuffle_epi32(a, 0xEE);
-	//	t1 = _mm_xor_si128(a, t1);
-	//	t2 = _mm_shuffle_epi32(b, 0xEE);
-	//	t2 = _mm_xor_si128(b, t2);
-	//	t1 = _mm_clmulepi64_si128(t1, t2, 0x00);
-	//	t1 = _mm_xor_si128(c0, t1);
-	//	t1 = _mm_xor_si128(c1, t1);
-	//	t2 = t1;
-	//	t1 = _mm_slli_si128(t1, 8);
-	//	t2 = _mm_srli_si128(t2, 8);
-	//	c0 = _mm_xor_si128(c0, t1);
-	//	c1 = _mm_xor_si128(c1, t2);
-	//}
+    //void mul128b(__m128i b, __m128i a, __m128i &c0, __m128i &c1)
+    //{
+    //	__m128i t1, t2;
+    //	c0 = _mm_clmulepi64_si128(a, b, 0x00);
+    //	c1 = _mm_clmulepi64_si128(a, b, 0x11);
+    //	t1 = _mm_shuffle_epi32(a, 0xEE);
+    //	t1 = _mm_xor_si128(a, t1);
+    //	t2 = _mm_shuffle_epi32(b, 0xEE);
+    //	t2 = _mm_xor_si128(b, t2);
+    //	t1 = _mm_clmulepi64_si128(t1, t2, 0x00);
+    //	t1 = _mm_xor_si128(c0, t1);
+    //	t1 = _mm_xor_si128(c1, t1);
+    //	t2 = t1;
+    //	t1 = _mm_slli_si128(t1, 8);
+    //	t2 = _mm_srli_si128(t2, 8);
+    //	c0 = _mm_xor_si128(c0, t1);
+    //	c1 = _mm_xor_si128(c1, t2);
+    //}
 
-	void DotExt_Kos_Test()
-	{
+    void DotExt_Kos_Test()
+    {
 #if defined(ENABLE_DELTA_KOS)
 
-		setThreadName("Sender");
+        setThreadName("Sender");
 
-		IOService ios;
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
+        auto sock = cp::LocalAsyncSocket::makePair();
 
-		PRNG prng0(block(4253465, 3434565));
-		PRNG prng1(block(42532335, 334565));
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
-		u64 numOTs = 952;
-		u64 s = 40;
+        u64 numOTs = 952;
+        u64 s = 40;
 
-		std::vector<block> recvMsg(numOTs), baseRecv(128 + s);
-		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128 + s);
-		BitVector choices(numOTs);
-		choices.randomize(prng0);
+        std::vector<block> recvMsg(numOTs), baseRecv(128 + s);
+        std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128 + s);
+        BitVector choices(numOTs);
+        choices.randomize(prng0);
 
-		BitVector baseChoice(128 + s);
-		baseChoice.randomize(prng0);
+        BitVector baseChoice(128 + s);
+        baseChoice.randomize(prng0);
 
-		for (u64 i = 0; i < 128 + s; ++i)
-		{
-			baseSend[i][0] = prng0.get<block>();
-			baseSend[i][1] = prng0.get<block>();
-			baseRecv[i] = baseSend[i][baseChoice[i]];
-		}
-		KosDotExtSender sender;
-		KosDotExtReceiver recv;
+        for (u64 i = 0; i < 128 + s; ++i)
+        {
+            baseSend[i][0] = prng0.get<block>();
+            baseSend[i][1] = prng0.get<block>();
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+        }
+        KosDotExtSender sender;
+        KosDotExtReceiver recv;
 
-		std::thread thrd = std::thread([&]() {
-			setThreadName("receiver");
-			recv.setBaseOts(baseSend);
-			recv.receive(choices, recvMsg, prng0, recvChannel);
-			});
+        setThreadName("receiver");
+        recv.setBaseOts(baseSend);
 
-		block delta = prng1.get<block>();
-		sender.setDelta(delta);
-		sender.setBaseOts(baseRecv, baseChoice);
-		sender.send(sendMsg, prng1, senderChannel);
-		thrd.join();
+        block delta = prng1.get<block>();
+        sender.setDelta(delta);
+        sender.setBaseOts(baseRecv, baseChoice);
 
+        auto p1 = recv.receive(choices, recvMsg, prng0, sock[1]);
+        auto p0 = sender.send(sendMsg, prng1, sock[0]);
 
-		OT_100Receive_Test(choices, recvMsg, sendMsg);
+        eval(p0, p1);
 
-		for (auto& s : sendMsg)
-		{
-			if (neq(s[0] ^ delta, s[1]))
-				throw UnitTestFail();
-		}
+        OT_100Receive_Test(choices, recvMsg, sendMsg);
 
-		senderChannel.close();
-		recvChannel.close();
+        for (auto& s : sendMsg)
+        {
+            if (neq(s[0] ^ delta, s[1]))
+                throw UnitTestFail();
+        }
 
 #else
-		throw UnitTestSkipped("ENABLE_DELTA_KOS is not defined.");
+        throw UnitTestSkipped("ENABLE_DELTA_KOS is not defined.");
 #endif
-	}
+    }
 
-	void DotExt_Iknp_Test()
-	{
+    void DotExt_Iknp_Test()
+    {
 #ifdef ENABLE_IKNP
 
-		setThreadName("Sender");
+        setThreadName("Sender");
 
-		IOService ios;
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
 
-		PRNG prng0(block(4253465, 3434565));
-		PRNG prng1(block(42532335, 334565));
+        
+        auto sockets = cp::LocalAsyncSocket::makePair();
 
-		u64 numTrials = 4;
-		for (u64 t = 0; t < numTrials; ++t)
-		{
-			u64 numOTs = 4234;
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
-			AlignedUnVector<block> recvMsg(numOTs), baseRecv(128);
-			AlignedUnVector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
-			BitVector choices(numOTs);
-			choices.randomize(prng0);
+        u64 numTrials = 4;
+        for (u64 t = 0; t < numTrials; ++t)
+        {
+            u64 numOTs = 4234;
 
-			BitVector baseChoice(128);
-			baseChoice.randomize(prng0);
+            AlignedUnVector<block> recvMsg(numOTs), baseRecv(128);
+            AlignedUnVector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+            BitVector choices(numOTs);
+            choices.randomize(prng0);
 
-			for (u64 i = 0; i < 128; ++i)
-			{
-				baseSend[i][0] = prng0.get<block>();
-				baseSend[i][1] = prng0.get<block>();
-				baseRecv[i] = baseSend[i][baseChoice[i]];
-			}
+            BitVector baseChoice(128);
+            baseChoice.randomize(prng0);
 
-			IknpOtExtSender sender;
-			IknpOtExtReceiver recv;
+            for (u64 i = 0; i < 128; ++i)
+            {
+                baseSend[i][0] = prng0.get<block>();
+                baseSend[i][1] = prng0.get<block>();
+                baseRecv[i] = baseSend[i][baseChoice[i]];
+            }
 
-			sender.mHash = false;
-			recv.mHash = false;
+            IknpOtExtSender sender;
+            IknpOtExtReceiver recv;
 
-			std::thread thrd = std::thread([&]() {
-				setThreadName("receiver");
-				recv.setBaseOts(baseSend);
-				recv.receive(choices, recvMsg, prng0, recvChannel);
-				});
+            sender.mHash = false;
+            recv.mHash = false;
+            ;
+            recv.setBaseOts(baseSend);
+            auto proto0 = recv.receive(choices, recvMsg, prng0, sockets[0]);
+            block delta = baseChoice.getArrayView<block>()[0];
 
-			block delta = baseChoice.getArrayView<block>()[0];
-			//sender.setDelta(delta);
-			sender.setBaseOts(baseRecv, baseChoice);
-			sender.send(sendMsg, prng1, senderChannel);
-			thrd.join();
+            sender.setBaseOts(baseRecv, baseChoice);
+            auto proto1 = sender.send(sendMsg, prng1, sockets[1]);
 
-			OT_100Receive_Test(choices, recvMsg, sendMsg);
+            eval(proto0, proto1);
 
-			for (auto& s : sendMsg)
-			{
-				if (neq(s[0] ^ delta, s[1]))
-					throw UnitTestFail(LOCATION);
-			}
-		}
+            OT_100Receive_Test(choices, recvMsg, sendMsg);
 
-		senderChannel.close();
-		recvChannel.close();
+            for (auto& s : sendMsg)
+            {
+                if (neq(s[0] ^ delta, s[1]))
+                    throw UnitTestFail(LOCATION);
+            }
+        }
+
 #else
-		throw UnitTestSkipped("ENABLE_IKNP is not defined.");
+        throw UnitTestSkipped("ENABLE_IKNP is not defined.");
 #endif
-	}
+}
 
 
-	void OtExt_Iknp_Test()
-	{
+    void OtExt_Iknp_Test()
+    {
 #ifdef ENABLE_IKNP
 
-		setThreadName("Sender");
+        setThreadName("Sender");
 
-		IOService ios;
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
 
-		PRNG prng0(block(4253465, 3434565));
-		PRNG prng1(block(42532335, 334565));
+        
+        auto sockets = cp::LocalAsyncSocket::makePair();
 
-		u64 numOTs = 200;
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
-		std::vector<block> recvMsg(numOTs), baseRecv(128);
-		std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
-		BitVector choices(numOTs), baseChoice(128);
-		choices.randomize(prng0);
-		baseChoice.randomize(prng0);
+        u64 numOTs = 200;
 
-		prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-		for (u64 i = 0; i < 128; ++i)
-		{
-			baseRecv[i] = baseSend[i][baseChoice[i]];
-		}
+        std::vector<block> recvMsg(numOTs), baseRecv(128);
+        std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
+        BitVector choices(numOTs), baseChoice(128);
+        choices.randomize(prng0);
+        baseChoice.randomize(prng0);
 
-		IknpOtExtSender sender;
-		IknpOtExtReceiver recv;
+        prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+        for (u64 i = 0; i < 128; ++i)
+        {
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+        }
 
-		std::thread thrd = std::thread([&]() {
-			recv.setBaseOts(baseSend);
-			recv.receive(choices, recvMsg, prng0, recvChannel);
-			});
+        IknpOtExtSender sender;
+        IknpOtExtReceiver recv;
 
-		sender.setBaseOts(baseRecv, baseChoice);
-		sender.send(sendMsg, prng1, senderChannel);
-		thrd.join();
+        recv.setBaseOts(baseSend);
+        auto proto0 = recv.receive(choices, recvMsg, prng0, sockets[0]);
 
-		OT_100Receive_Test(choices, recvMsg, sendMsg);
+        sender.setBaseOts(baseRecv, baseChoice);
+        auto proto1 = sender.send(sendMsg, prng1, sockets[1]);
+        eval(proto0, proto1);
+
+        OT_100Receive_Test(choices, recvMsg, sendMsg);
 
 #else
-		throw UnitTestSkipped("ENABLE_IKNP is not defined.");
+        throw UnitTestSkipped("ENABLE_IKNP is not defined.");
 #endif
 	}
-
-
-	void Vole_SoftSpokenSmall_Test(const oc::CLP& cmd)
-	{
-#ifdef ENABLE_SOFTSPOKEN_OT
-		tests::xorReduction();
-
-		const bool print = false;
-
-		setThreadName("Receiver");
-
-		IOService ios;
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
-
-		PRNG prng0(block(4234385, 3445235));
-		PRNG prng1(block(42348395, 989835));
-
-		u64 numVoles = cmd.getOr("n", 128);
-
-		for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
-		{
-			for (int malicious = 0; malicious < 2; ++malicious)
-			{
-				const size_t nBaseOTs = SmallFieldVoleBase::numBaseOTsNeeded(fieldBits, numVoles);
-
-				std::vector<std::array<block, 2>> baseSend(nBaseOTs);
-				std::vector<block> baseRecv(nBaseOTs);
-				BitVector baseChoice(nBaseOTs);
-				baseChoice.randomize(prng0);
-
-				prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-				for (u64 i = 0; i < nBaseOTs; ++i)
-					baseRecv[i] = baseSend[i][baseChoice[i]];
-
-				std::vector<block> u, v, w;
-				size_t senderUSize, senderVSize;
-				AlignedUnVector<block> senderSeeds;
-				std::future<void> thrd = std::async([&]() {
-					SmallFieldVoleSender sender(fieldBits, numVoles, senderChannel, prng1, baseSend, 1, malicious);
-					u.resize(sender.uPadded());
-					v.resize(sender.vPadded());
-					sender.generate(0, mAesFixedKey, u, v);
-
-					senderUSize = sender.uSize();
-					senderVSize = sender.vSize();
-					senderSeeds = std::move(sender.mSeeds);
-					});
-
-				SmallFieldVoleReceiver recv(fieldBits, numVoles, recvChannel, prng0, baseRecv, baseChoice, 1, malicious);
-				BitVector delta = recv.delta;
-				w.resize(recv.wPadded());
-				recv.generate(0, mAesFixedKey, w);
-				thrd.wait();
-
-				if (senderVSize != recv.wSize())
-					throw UnitTestFail(LOCATION);
-				if (senderUSize > u.size())
-					throw UnitTestFail(LOCATION);
-				if (senderVSize > v.size() || recv.wSize() > w.size())
-					throw UnitTestFail(LOCATION);
-				u.resize(numVoles);
-
-				if (print)
-				{
-					std::cout << "Delta:\n";
-					for (size_t i = 0; i < delta.sizeBlocks(); ++i)
-						std::cout << delta.blocks()[i] << ", ";
-
-					std::cout << "\nSeeds:\n";
-				}
-
-				size_t fieldSize = recv.fieldSize();
-				for (size_t i = 0; i < numVoles; ++i)
-				{
-					size_t deltaI = 0;
-					for (size_t j = 0; j < fieldBits; ++j)
-						deltaI += (size_t)delta[i * fieldBits + j] << j;
-
-					if (print)
-					{
-						for (size_t j = 0; j < fieldSize; ++j)
-							std::cout << j << ": " << senderSeeds[i * fieldSize + j] << '\n';
-						for (size_t j = 1; j < fieldSize; ++j)
-							std::cout << j << ": " << recv.mSeeds[i * (fieldSize - 1) + j - 1] << '\n';
-					}
-
-					for (size_t j = 0; j < fieldSize; ++j)
-					{
-						if (j == deltaI)
-							// Punctured point.
-							continue;
-
-						block senderSeed = senderSeeds[i * fieldSize + j];
-						block recvSeed = recv.mSeeds[i * (fieldSize - 1) + (j ^ deltaI) - 1];
-						if (senderSeed != recvSeed)
-							throw UnitTestFail(LOCATION);
-					}
-				}
-
-				if (print)
-					std::cout << "\nOutputs:\n";
-
-				std::vector<block> shouldEqualV = w;
-				recv.sharedFunctionXor(span<const block>(u), span<block>(shouldEqualV));
-				for (size_t i = 0; i < recv.wSize(); ++i)
-				{
-					if (print)
-					{
-						std::cout << u[i] << '\n';
-						std::cout << v[i] << '\n';
-						std::cout << shouldEqualV[i] << '\n';
-						std::cout << w[i] << '\n';
-					}
-					if (v[i] != shouldEqualV[i])
-						throw UnitTestFail(LOCATION);
-					if (v[i] != (w[i] ^ (block::allSame((bool)delta[i]) & u[i / fieldBits])))
-						throw UnitTestFail(LOCATION);
-				}
-			}
-		}
-
-#else
-		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
-#endif
-	}
-
-	void DotExt_SoftSpokenSemiHonest_Test(const oc::CLP& cmd)
-	{
-#ifdef ENABLE_SOFTSPOKEN_OT
-		setThreadName("Sender");
-
-		IOService ios;
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
-
-		PRNG prng0(block(4234335, 3445235));
-		PRNG prng1(block(42348345, 989835));
-
-		auto nnumOTs = cmd.getManyOr<u64>("n", { 9733 });
-		for (auto numOTs : nnumOTs)
-		{
-
-			for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
-			{
-
-				SoftSpokenShDotSender sender(fieldBits);
-				SoftSpokenShDotReceiver recv(fieldBits);
-
-				const size_t nBaseOTs = sender.baseOtCount();
-				if (nBaseOTs != recv.baseOtCount())
-					throw UnitTestFail(LOCATION);
-
-				std::vector<block> baseRecv(nBaseOTs);
-				std::vector<std::array<block, 2>> baseSend(nBaseOTs);
-				BitVector choices(numOTs), baseChoice(nBaseOTs);
-				choices.randomize(prng0);
-				baseChoice.randomize(prng0);
-
-				prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-				for (u64 i = 0; i < nBaseOTs; ++i)
-				{
-					baseRecv[i] = baseSend[i][baseChoice[i]];
-				}
-
-				AlignedUnVector<block> recvMsg(numOTs);
-				AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
-				std::future<void> thrd = std::async([&]() {
-					recv.setBaseOts(baseSend, prng0, recvChannel);
-					recv.receive(choices, recvMsg, prng0, recvChannel);
-					});
-
-				sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
-				sender.send(sendMsg, prng1, senderChannel);
-				thrd.wait();
-
-				OT_100Receive_Test(choices, recvMsg, sendMsg);
-
-				const block delta = sender.delta();
-				for (auto& s : sendMsg)
-					if (neq(s[0] ^ delta, s[1]))
-						throw UnitTestFail(LOCATION);
-			}
-		}
-#else
-		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
-#endif
-	}
-
-	void OtExt_SoftSpokenSemiHonest21_Test(const oc::CLP& cmd)
-	{
-#ifdef ENABLE_SOFTSPOKEN_OT
-		setThreadName("Sender");
-
-		IOService ios;
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
-
-		PRNG prng0(block(4234335, 3445235));
-		PRNG prng1(block(42348345, 989835));
-
-		auto nnumOTs = cmd.getManyOr<u64>("n", { 9733 });
-		for (auto numOTs : nnumOTs)
-		{
-
-			for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
-			{
-				SoftSpokenShOtSender sender(fieldBits);
-				SoftSpokenShOtReceiver recv(fieldBits);
-
-				size_t nBaseOTs = sender.baseOtCount();
-				if (nBaseOTs != recv.baseOtCount())
-					throw UnitTestFail(LOCATION);
-
-				std::vector<block> baseRecv(nBaseOTs);
-				std::vector<std::array<block, 2>> baseSend(nBaseOTs);
-				BitVector choices(numOTs), baseChoice(nBaseOTs);
-				choices.randomize(prng0);
-				baseChoice.randomize(prng0);
-
-				prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-				for (u64 i = 0; i < nBaseOTs; ++i)
-				{
-					baseRecv[i] = baseSend[i][baseChoice[i]];
-				}
-
-				AlignedUnVector<block> recvMsg(numOTs);
-				AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
-				std::future<void> thrd = std::async([&]() {
-					recv.setBaseOts(baseSend, prng0, recvChannel);
-					recv.receive(choices, recvMsg, prng0, recvChannel);
-					});
-
-				sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
-				sender.send(sendMsg, prng1, senderChannel);
-				thrd.wait();
-
-				OT_100Receive_Test(choices, recvMsg, sendMsg);
-			}
-		}
-#else
-		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
-#endif
-	}
-
-	void DotExt_SoftSpokenMaliciousLeaky_Test(const oc::CLP& cmd)
-	{
-#ifdef ENABLE_SOFTSPOKEN_OT
-		setThreadName("Sender");
-
-		IOService ios;
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
-
-		PRNG prng0(block(4234335, 3445235));
-		PRNG prng1(block(42348345, 989835));
-
-		auto nnumOTs = cmd.getManyOr<u64>("n", { 9733 });
-		for (auto numOTs : nnumOTs)
-		{
-
-			for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
-			{
-
-
-				SoftSpokenMalLeakyDotSender sender(fieldBits);
-				SoftSpokenMalLeakyDotReceiver recv(fieldBits);
-
-				const size_t nBaseOTs = sender.baseOtCount();
-				if (nBaseOTs != recv.baseOtCount())
-					throw UnitTestFail(LOCATION);
-
-				std::vector<block> baseRecv(nBaseOTs);
-				std::vector<std::array<block, 2>> baseSend(nBaseOTs);
-				BitVector choices(numOTs), baseChoice(nBaseOTs);
-				choices.randomize(prng0);
-				baseChoice.randomize(prng0);
-
-				prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-				for (u64 i = 0; i < nBaseOTs; ++i)
-				{
-					baseRecv[i] = baseSend[i][baseChoice[i]];
-				}
-
-				AlignedUnVector<block> recvMsg(numOTs);
-				AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
-				std::future<void> thrd = std::async([&]() {
-					recv.setBaseOts(baseSend, prng0, recvChannel);
-					recv.receive(choices, recvMsg, prng0, recvChannel);
-					});
-
-				sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
-				sender.send(sendMsg, prng1, senderChannel);
-				thrd.wait();
-
-				OT_100Receive_Test(choices, recvMsg, sendMsg);
-
-				const block delta = sender.delta();
-				for (auto& s : sendMsg)
-					if (neq(s[0] ^ delta, s[1]))
-						throw UnitTestFail(LOCATION);
-			}
-		}
-#else
-		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
-#endif
-	}
-
-	void OtExt_SoftSpokenMalicious21_Test(const oc::CLP& cmd)
-	{
-#ifdef ENABLE_SOFTSPOKEN_OT
-		setThreadName("Sender");
-
-		IOService ios;
-		Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-		Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-		Channel senderChannel = ep1.addChannel();
-		Channel recvChannel = ep0.addChannel();
-
-		PRNG prng0(block(4234335, 3445235));
-		PRNG prng1(block(42348345, 989835));
-
-		auto nnumOTs = cmd.getManyOr<u64>("n", { 9733 });
-		for (auto numOTs : nnumOTs)
-		{
-
-			for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
-			{
-
-				SoftSpokenMalOtSender sender(fieldBits);
-				SoftSpokenMalOtReceiver recv(fieldBits);
-
-				size_t nBaseOTs = sender.baseOtCount();
-				if (nBaseOTs != recv.baseOtCount())
-					throw UnitTestFail(LOCATION);
-
-				std::vector<block> baseRecv(nBaseOTs);
-				std::vector<std::array<block, 2>> baseSend(nBaseOTs);
-				BitVector choices(numOTs), baseChoice(nBaseOTs);
-				choices.randomize(prng0);
-				baseChoice.randomize(prng0);
-
-				prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-				for (u64 i = 0; i < nBaseOTs; ++i)
-				{
-					baseRecv[i] = baseSend[i][baseChoice[i]];
-				}
-
-				AlignedUnVector<block> recvMsg(numOTs);
-				AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
-				std::thread thrd = std::thread([&]() {
-					recv.setBaseOts(baseSend, prng0, recvChannel);
-					recv.receive(choices, recvMsg, prng0, recvChannel);
-					});
-
-				sender.setBaseOts(baseRecv, baseChoice, prng1, senderChannel);
-				sender.send(sendMsg, prng1, senderChannel);
-				thrd.join();
-
-				OT_100Receive_Test(choices, recvMsg, sendMsg);
-			}
-		}
-#else
-		throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
-#endif
-	}
-
-
-
-
-
 }

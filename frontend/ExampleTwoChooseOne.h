@@ -1,52 +1,54 @@
 #pragma once
 
 #include "libOTe/Base/BaseOT.h"
-#include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
-#include "libOTe/TwoChooseOne/KosOtExtSender.h"
-#include "libOTe/TwoChooseOne/KosDotExtReceiver.h"
-#include "libOTe/TwoChooseOne/KosDotExtSender.h"
-#include "libOTe/TwoChooseOne/IknpOtExtReceiver.h"
-#include "libOTe/TwoChooseOne/IknpOtExtSender.h"
+#include "libOTe/TwoChooseOne/Kos/KosOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/Kos/KosOtExtSender.h"
+#include "libOTe/TwoChooseOne/KosDot/KosDotExtReceiver.h"
+#include "libOTe/TwoChooseOne/KosDot/KosDotExtSender.h"
+#include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 
 
-#include "libOTe/TwoChooseOne/SilentOtExtReceiver.h"
-#include "libOTe/TwoChooseOne/SilentOtExtSender.h"
+#include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 
-#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalLeakyDotExt.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
-#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShDotExt.h"
+//#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalLeakyDotExt.h"
+//#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h"
+//#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
+//#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShDotExt.h"
 
 namespace osuCrypto
 {
 
 #ifdef ENABLE_IKNP
-    void noHash(IknpOtExtSender& s, IknpOtExtReceiver& r)
-    {
-        s.mHash = false;
-        r.mHash = false;
-    }
+	void noHash(IknpOtExtSender& s, IknpOtExtReceiver& r)
+	{
+		s.mHash = false;
+		r.mHash = false;
+	}
 #endif
 
-    template<typename Sender, typename Receiver>
-    void noHash(Sender&, Receiver&)
-    {
-        throw std::runtime_error("This protocol does not support noHash");
-    }
+	template<typename Sender, typename Receiver>
+	void noHash(Sender&, Receiver&)
+	{
+		throw std::runtime_error("This protocol does not support noHash");
+	}
 
 #ifdef ENABLE_SOFTSPOKEN_OT
     // soft spoken takes an extra parameter as input what determines
     // the computation/communication trade-off.
     template<typename T>
     using is_SoftSpoken = typename std::conditional<
-        std::is_same<T, SoftSpokenShOtSender>::value ||
-        std::is_same<T, SoftSpokenShOtReceiver>::value ||
-        std::is_same<T, SoftSpokenShDotSender>::value ||
-        std::is_same<T, SoftSpokenShDotReceiver>::value ||
-        std::is_same<T, SoftSpokenMalOtSender>::value ||
-        std::is_same<T, SoftSpokenMalOtReceiver>::value ||
-        std::is_same<T, SoftSpokenMalLeakyDotSender>::value ||
-        std::is_same<T, SoftSpokenMalLeakyDotReceiver>::value,
+        //std::is_same<T, SoftSpokenShOtSender>::value ||
+        //std::is_same<T, SoftSpokenShOtReceiver>::value ||
+        //std::is_same<T, SoftSpokenShOtSender>::value ||
+        //std::is_same<T, SoftSpokenShOtReceiver>::value ||
+        //std::is_same<T, SoftSpokenMalOtSender>::value ||
+        //std::is_same<T, SoftSpokenMalOtReceiver>::value ||
+        //std::is_same<T, SoftSpokenMalLeakyDotSender>::value ||
+        //std::is_same<T, SoftSpokenMalOtReceiver>::value
+		false
+		,
         std::true_type, std::false_type>::type;
 #else
     template<typename T>
@@ -70,230 +72,246 @@ namespace osuCrypto
     template<typename OtExtSender, typename OtExtRecver>
     void TwoChooseOne_example(Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& cmd)
     {
+
+#ifdef COPROTO_ENABLE_BOOST
         if (totalOTs == 0)
             totalOTs = 1 << 20;
 
-        bool randomOT = true;
+		bool randomOT = true;
 
-        auto numOTs = totalOTs / numThreads;
-        u64 trials = cmd.getOr("trials", 1);
+		// get up the networking
+		auto chl = cp::asioConnect(ip, role == Role::Sender);
 
-        // get up the networking
-        auto rr = role == Role::Sender ? SessionMode::Server : SessionMode::Client;
-        IOService ios;
-        Session  ep0(ios, ip, rr);
-        PRNG prng(sysRandomSeed());
-
-        // for each thread we need to construct a channel (socket) for it to communicate on.
-        std::vector<Channel> chls(numThreads);
-        for (int i = 0; i < numThreads; ++i)
-            chls[i] = ep0.addChannel();
+		PRNG prng(sysRandomSeed());
 
 
+		OtExtSender  sender;
+		OtExtRecver  receiver;
 
-        std::vector<OtExtSender> senders;
-        std::vector<OtExtRecver> receivers;
-        senders.reserve(numThreads);
-        receivers.reserve(numThreads);
-
-        size_t nBaseOTs;
-        if (role == Role::Receiver)
-        {
-            receivers.emplace_back(construct<OtExtRecver>(cmd));
-            nBaseOTs = receivers[0].baseOtCount();
-        }
-        else
-        {
-            senders.emplace_back(construct<OtExtSender>(cmd));
-            nBaseOTs = senders[0].baseOtCount();
-        }
-
-#ifndef LIBOTE_HAS_BASE_OT
-        if (!cmd.isSet("fakeBase"))
-            std::cout << "warning, base ots are not enabled. Fake base OTs will be used. " << std::endl;
-#else
-        if (cmd.isSet("fakeBase"))
-#endif
-        {
-
-            PRNG commonPRNG(oc::ZeroBlock);
-            std::vector<std::array<block, 2>> sendMsgs(nBaseOTs);
-            commonPRNG.get(sendMsgs.data(), sendMsgs.size());
-            if (role == Role::Receiver)
-            {
-                receivers[0].setBaseOts(sendMsgs, prng, chls[0]);
-            }
-            else
-            {
-                BitVector bv(nBaseOTs);
-                bv.randomize(commonPRNG);
-                std::vector<block> recvMsgs(nBaseOTs);
-                for (u64 i = 0; i < nBaseOTs; ++i)
-                    recvMsgs[i] = sendMsgs[i][bv[i]];
-                senders[0].setBaseOts(recvMsgs, bv, prng, chls[0]);
-            }
-        }
-
-        // for the rest of the extenders, call split. This securely
-        // creates two sets of extenders that can be used in parallel.
-        for (auto i = 1; i < numThreads; ++i)
-        {
-            if (role == Role::Receiver)
-                receivers.push_back(receivers[0].splitBase());
-            else
-                senders.push_back(senders[0].splitBase());
-        }
-
-        if (cmd.isSet("noHash"))
-            for (auto i = 0; i < numThreads; ++i)
-                noHash(senders[i], receivers[i]);
-
-        Timer timer, sendTimer, recvTimer;
-        sendTimer.setTimePoint("start");
-        recvTimer.setTimePoint("start");
-        auto routine = [&](int i)
-        {
-            // get a random number generator seeded from the system
-            PRNG prng(sysRandomSeed());
-
-            // construct a vector to stored the random send mMessages.
-            auto sMsgs = AlignedUnVector<std::array<block, 2>>(numOTs * (role == Role::Sender));
-
-            // construct the choices that we want.
-            BitVector choice(numOTs);
-            // in this case pick random mMessages.
-            choice.randomize(prng);
-
-            // construct a vector to stored the received mMessages.
-            auto rMsgs = AlignedUnVector<block>(numOTs * (role != Role::Sender));
-
-            const char* roleStr = (role == Role::Sender) ? "Sender" : "Receiver";
-
-            u64 totalMilli = 0;
-            u64 totalCom = 0;
-            u64 totalStartupMilli = 0;
-            u64 totalStartupCom = 0;
-            for (u64 tt = 0; tt < trials; ++tt)
-            {
-                sync(chls[i], role);
-                chls[0].resetStats();
-
-                timer.reset();
-                auto s = timer.setTimePoint("start");
 
 #ifdef LIBOTE_HAS_BASE_OT
-                if (!cmd.isSet("fakeBase"))
-                {
-                    // Now compute the base OTs, we need to set them on the first pair of extenders.
-                    // In real code you would only have a sender or reciever, not both. But we do
-                    // here just showing the example.
-                    if (role == Role::Receiver)
-                    {
-                        receivers[i].genBaseOts(prng, chls[i]);
-                    }
-                    else
-                    {
-                        senders[i].genBaseOts(prng, chls[i]);
-                    }
-                }
+		// Now compute the base OTs, we need to set them on the first pair of extenders.
+		// In real code you would only have a sender or reciever, not both. But we do
+		// here just showing the example.
+		if (role == Role::Receiver)
+		{
+			DefaultBaseOT base;
+			std::array<std::array<block, 2>, 128> baseMsg;
+
+			// perform the base To, call sync_wait to block until they have completed.
+			cp::sync_wait(base.send(baseMsg, prng, chl));
+			cp::sync_wait(receiver.setBaseOts(baseMsg, prng, chl));
+		}
+		else
+		{
+
+			DefaultBaseOT base;
+			BitVector bv(128);
+			std::array<block, 128> baseMsg;
+			bv.randomize(prng);
+
+			// perform the base To, call sync_wait to block until they have completed.
+			cp::sync_wait(base.receive(bv, baseMsg, prng, chl));
+			cp::sync_wait(sender.setBaseOts(baseMsg, bv, chl));
+		}
+
+#else
+		if (!cmd.isSet("fakeBase"))
+			std::cout << "warning, base ots are not enabled. Fake base OTs will be used. " << std::endl;
+		PRNG commonPRNG(oc::ZeroBlock);
+		std::array<std::array<block, 2>, 128> sendMsgs;
+		commonPRNG.get(sendMsgs.data(), sendMsgs.size());
+		if (role == Role::Receiver)
+		{
+			cp::sync_wait(receiver.setBaseOts(sendMsgs, prng, chl));
+		}
+		else
+		{
+			BitVector bv(128);
+			bv.randomize(commonPRNG);
+			std::array<block, 128> recvMsgs;
+			for (u64 i = 0; i < 128; ++i)
+				recvMsgs[i] = sendMsgs[i][bv[i]];
+			cp::sync_wait(sender.setBaseOts(recvMsgs, bv, chl));
+		}
 #endif
 
-                auto Startup = timer.setTimePoint("Startup");
-                auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(Startup - s).count();
-                totalStartupMilli += milli;
+		if (cmd.isSet("noHash"))
+			noHash(sender, receiver);
 
-                auto com = chls[0].getTotalDataRecv() * numThreads;
-                totalStartupCom += com;
+		Timer timer, sendTimer, recvTimer;
+		sendTimer.setTimePoint("start");
+		recvTimer.setTimePoint("start");
+		auto s = timer.setTimePoint("start");
 
-                if (role == Role::Receiver)
-                {
+		if (numThreads == 1)
+		{
+			if (role == Role::Receiver)
+			{
+				// construct the choices that we want.
+				BitVector choice(totalOTs);
+				// in this case pick random messages.
+				choice.randomize(prng);
 
-                    if (randomOT)
-                    {
-                        // perform  numOTs random OTs, the results will be written to msgs.
-                        receivers[i].receive(choice, rMsgs, prng, chls[i]);
-                    }
-                    else
-                    {
-                        // perform  numOTs chosen message OTs, the results will be written to msgs.
-                        receivers[i].receiveChosen(choice, rMsgs, prng, chls[i]);
-                    }
-                }
-                else
-                {
+				// construct a vector to stored the received messages.
+				std::vector<block> rMsgs(totalOTs);
 
-                    // if delta OT is used, then the user can call the following
-                    // to set the desired XOR difference between the zero mMessages
-                    // and the one mMessages.
-                    //
-                    //     senders[i].setDelta(some 128 bit delta);
-                    //
-
-                    if (randomOT)
-                    {
-                        // perform the OTs and write the random OTs to msgs.
-                        senders[i].send(sMsgs, prng, chls[i]);
-                    }
-                    else
-                    {
-                        // Populate msgs with something useful...
-                        prng.get(sMsgs.data(), sMsgs.size());
-
-                        // perform the OTs. The receiver will learn one
-                        // of the mMessages stored in msgs.
-                        senders[i].sendChosen(sMsgs, prng, chls[i]);
-                    }
-                }
-
-                auto e = timer.setTimePoint("finish");
-                milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
-                totalMilli += milli;
-
-                com = chls[0].getTotalDataRecv() * numThreads;
-                totalCom += com;
-                chls[0].resetStats();
-
-                if (i == 0)
-                {
-                    lout << tag << " (" << roleStr << ") n=" << Color::Green << totalOTs << " " << milli << " ms  " << com << " bytes" << std::endl << Color::Default;
-                }
-
-            }
-
-            if (i == 0)
-            {
-                i64 avgMilli = lround((double) totalMilli / trials);
-                i64 avgCom = lround((double) totalCom / trials);
-                i64 avgStartupMilli = lround((double) totalStartupMilli / trials);
-                i64 avgStartupCom = lround((double) totalStartupCom / trials);
-                lout << tag << " (" << roleStr << ") average: n=" << Color::Green << totalOTs << " " << avgMilli << " ms  " << avgCom << " bytes, Startup " << avgStartupMilli << " ms  " << avgStartupCom << " bytes" << std::endl << Color::Default;
-            }
-
-            if (cmd.isSet("v") && role == Role::Sender && i == 0)
-            {
-                if (role == Role::Sender)
-                    lout << " **** sender ****\n" << sendTimer << std::endl;
-
-                if (role == Role::Receiver)
-                    lout << " **** receiver ****\n" << recvTimer << std::endl;
-            }
-
-        };
-
-        if (role == Role::Receiver)
-            receivers[0].setTimer(recvTimer);
-        else
-            senders[0].setTimer(sendTimer);
-
-        std::vector<std::thread> thrds(numThreads);
-        for (int i = 0; i < numThreads; ++i)
-            thrds[i] = std::thread(routine, i);
-
-        for (int i = 0; i < numThreads; ++i)
-            thrds[i].join();
+				if (randomOT)
+				{
+					// perform  totalOTs random OTs, the results will be written to msgs.
+					cp::sync_wait(receiver.receive(choice, rMsgs, prng, chl));
+				}
+				else
+				{
+					// perform  totalOTs chosen message OTs, the results will be written to msgs.
+					cp::sync_wait(receiver.receiveChosen(choice, rMsgs, prng, chl));
+				}
+			}
+			else
+			{
+				// construct a vector to stored the random send messages.
+				std::vector<std::array<block, 2>> sMsgs(totalOTs);
 
 
-    }
+				// if delta OT is used, then the user can call the following
+				// to set the desired XOR difference between the zero messages
+				// and the one messages.
+				//
+				//     senders[i].setDelta(some 128 bit delta);
+				//
+
+				if (randomOT)
+				{
+					// perform the OTs and write the random OTs to msgs.
+					cp::sync_wait(sender.send(sMsgs, prng, chl));
+				}
+				else
+				{
+					// Populate msgs with something useful...
+					prng.get(sMsgs.data(), sMsgs.size());
+
+					// perform the OTs. The receiver will learn one
+					// of the messages stored in msgs.
+					cp::sync_wait(sender.sendChosen(sMsgs, prng, chl));
+				}
+			}
+
+		}
+		else
+		{	
+			
+			// for multi threading, we only show example for random OTs.
+			// We first need to construct the inputs
+			// that each thread will use. Note that the actual protocol 
+			// is not thread safe so everything needs to be independent.
+			std::vector<macoro::eager_task<>> tasks(numThreads);
+			std::vector<PRNG> threadPrngs(numThreads);
+			std::vector<cp::Socket> threadChls(numThreads);
+
+			macoro::thread_pool::work work;
+			macoro::thread_pool threadPool(numThreads, work);
+
+			if (role == Role::Receiver)
+			{
+				std::vector<OtExtRecver> receivers(numThreads);
+				std::vector<BitVector> threadChoices(numThreads);
+				std::vector<std::vector<block>> threadMsgs(numThreads);
+
+				for (u64 threadIndex = 0; threadIndex < (u64)numThreads; ++threadIndex)
+				{
+					u64 beginIndex = oc::roundUpTo(totalOTs * threadIndex / numThreads, 128);
+					u64 endIndex = oc::roundUpTo((totalOTs + 1) * threadIndex / numThreads, 128);
+
+					threadChoices[threadIndex].resize(endIndex - beginIndex);
+					threadChoices[threadIndex].randomize(prng);
+
+					threadMsgs[threadIndex].resize(endIndex - beginIndex);
+
+					// create a copy of the receiver so that each can run 
+					// independently. A single receiver is not thread safe.
+					receivers[threadIndex] = receiver.splitBase();
+
+					// create a PRNG for this thread.
+					threadPrngs[threadIndex].SetSeed(prng.get<block>());
+
+					// create a socket for this thread. This is done by calling fork().
+					threadChls[threadIndex] = chl.fork();
+
+					// start the receive protocol on the thread pool
+					tasks[threadIndex] =
+						receivers[threadIndex].receive(
+							threadChoices[threadIndex],
+							threadMsgs[threadIndex],
+							threadPrngs[threadIndex],
+							threadChls[threadIndex])
+						| macoro::start_on(threadPool);
+				}
+
+				// block this thread until the receive operations
+				// have completed. 
+				for (u64 threadIndex = 0; threadIndex < (u64)numThreads; ++threadIndex)
+					cp::sync_wait(tasks[threadIndex]);
+			}
+			else
+			{
+				std::vector<OtExtSender> senders(numThreads);
+				std::vector<std::vector<std::array<block, 2>>> threadMsgs(numThreads);
+
+				for (u64 threadIndex = 0; threadIndex < (u64)numThreads; ++threadIndex)
+				{
+					u64 beginIndex = oc::roundUpTo(totalOTs * threadIndex / numThreads, 128);
+					u64 endIndex = oc::roundUpTo((totalOTs + 1) * threadIndex / numThreads, 128);
+
+					threadMsgs[threadIndex].resize(endIndex - beginIndex);
+
+					// create a copy of the receiver so that each can run 
+					// independently. A single receiver is not thread safe.
+					senders[threadIndex] = sender.splitBase();
+
+					// create a PRNG for this thread.
+					threadPrngs[threadIndex].SetSeed(prng.get<block>());
+
+					// create a socket for this thread. This is done by calling fork().
+					threadChls[threadIndex] = chl.fork();
+
+					// start the send protocol on the thread pool
+					tasks[threadIndex] =
+						senders[threadIndex].send(
+							threadMsgs[threadIndex],
+							threadPrngs[threadIndex],
+							threadChls[threadIndex])
+						| macoro::start_on(threadPool);
+				}
+
+				// block this thread until the receive operations
+				// have completed. 
+				for (u64 threadIndex = 0; threadIndex < (u64)numThreads; ++threadIndex)
+					cp::sync_wait(tasks[threadIndex]);
+			}
+
+			work.reset();
+		}
+
+		auto e = timer.setTimePoint("finish");
+		auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+
+		auto com = 0;// (chls[0].getTotalDataRecv() + chls[0].getTotalDataSent())* numThreads;
+
+		if (role == Role::Sender)
+			lout << tag << " n=" << Color::Green << totalOTs << " " << milli << " ms  " << com << " bytes" << std::endl << Color::Default;
 
 
+		if (cmd.isSet("v") && role == Role::Sender)
+		{
+			if (role == Role::Sender)
+				lout << " **** sender ****\n" << sendTimer << std::endl;
+
+			if (role == Role::Receiver)
+				lout << " **** receiver ****\n" << recvTimer << std::endl;
+		}
+
+#else
+	throw std::runtime_error("This example requires coproto to enable boost support. Please build libOTe with `-DCOPROTO_ENABLE_BOOST=ON`. " LOCATION);
+#endif
+	}
 }

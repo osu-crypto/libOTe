@@ -1,305 +1,308 @@
 #pragma once
+// © 2022 Lawrence Roy.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 #include <libOTe/config.h>
 #ifdef ENABLE_SOFTSPOKEN_OT
 
-#include <cryptoTools/Common/Defines.h>
-#include <cryptoTools/Network/Channel.h>
-#include "SoftSpokenMalLeakyDotExt.h"
 #include "SoftSpokenShOtExt.h"
-
+#include "libOTe/Vole/SoftSpokenOT/SubspaceVoleMaliciousLeaky.h"
+#include <cryptoTools/Common/Aligned.h>
 namespace osuCrypto
 {
 
-		// Hash DotMaliciousLeaky to get a random OT.
+	// Uses SubspaceVoleMalicious as a Delta OT.
 
-		template<size_t blocksPerTweak>
-		struct TwoOneRTCR : AESRekeyManager
+	template<u64 blocksPerTweak>
+	struct TwoOneRTCR : AESRekeyManager
+	{
+		block hashKeys[64];
+
+		static constexpr std::uint32_t mod = 0b10000111;
+
+		static block mul2(block x)
 		{
-			block hashKeys[64];
+			block wordsRotated = x.shuffle_epi32<0b10010011>();
+			block mask(std::array<u32, 4>{mod, 1, 1, 1});
+			block output = x.slli_epi32<1>();
+			output ^= wordsRotated.srai_epi32<31>() & mask;
+			return output;
+		}
 
-			static constexpr std::uint32_t mod = 0b10000111;
+		u64 tweak = 0;
+		block tweakMul = block(0ull);
 
-			static block mul2(block x)
-			{
-				block wordsRotated = x.shuffle_epi32<0b10010011>();
-				block mask(std::array<u32, 4>{mod, 1, 1, 1});
-				block output = x.slli_epi32<1>();
-				output ^= wordsRotated.srai_epi32<31>() & mask;
-				return output;
-			}
+		TwoOneRTCR() = default;
+		TwoOneRTCR(block hashKey, block seed)
+		{
+			setKey(hashKey, seed);
+		}
 
-			u64 tweak = 0;
-			block tweakMul = block(0ull);
+		void setKey(block hashKey, block seed)
+		{
+			mAESs.setSeed(seed);
+			hashKeys[0] = hashKey;
+			for (u64 i = 0; i < 63; ++i)
+				hashKeys[i + 1] = mul2(hashKeys[i]);
 
-			TwoOneRTCR() = default;
-			TwoOneRTCR(block hashKey, block seed)
-			{
-				setKey(hashKey, seed);
-			}
+			// Now hashKeys[i] = 2**i * hashKey
 
-			void setKey(block hashKey, block seed)
-			{
-				mAESs.setSeed(seed);
-				hashKeys[0] = hashKey;
-				for (size_t i = 0; i < 63; ++i)
-					hashKeys[i + 1] = mul2(hashKeys[i]);
+			for (u64 i = 0; i < 63; ++i)
+				hashKeys[i + 1] ^= hashKeys[i];
 
-				// Now hashKeys[i] = 2**i * hashKey
+			// Now hashKeys[i] = 2**i * hashKey + 2**(i - 1) * hashKey + ... + hashKey.
+		}
 
-				for (size_t i = 0; i < 63; ++i)
-					hashKeys[i + 1] ^= hashKeys[i];
+		template<u64 numBlocks>
+		void hashBlocks(const block* plaintext, block* ciphertext)
+		{
+			static_assert(numBlocks % blocksPerTweak == 0, "can't partially use tweak");
+			u64 tweakIncrease = numBlocks / blocksPerTweak;
 
-				// Now hashKeys[i] = 2**i * hashKey + 2**(i - 1) * hashKey + ... + hashKey.
-			}
+			// Assumes that tweak is always divisible by tweakIncrease (i.e. that the tweaks are
+			// naturally aligned).
 
-			template<size_t numBlocks>
-			void hashBlocks(const block* plaintext, block* ciphertext)
-			{
-				static_assert(numBlocks % blocksPerTweak == 0, "can't partially use tweak");
-				u64 tweakIncrease = numBlocks / blocksPerTweak;
-
-				// Assumes that tweak is always divisible by tweakIncrease (i.e. that the tweaks are
-				// naturally aligned).
-
-				block tmp[numBlocks];
-				block tweakMulLocal = tweakMul; // Avoid aliasing concerns.
+			block tmp[numBlocks];
+			block tweakMulLocal = tweakMul; // Avoid aliasing concerns.
 #ifdef __GNUC__
 #pragma GCC unroll 16
 #endif
-				for (size_t i = 0; i < numBlocks / blocksPerTweak; ++i)
+			for (u64 i = 0; i < numBlocks / blocksPerTweak; ++i)
+			{
+				for (u64 j = 0; j < blocksPerTweak; ++j)
 				{
-					for (size_t j = 0; j < blocksPerTweak; ++j)
-					{
-						// Go backwards so that it works well with everything else going backwards.
-						size_t idx = numBlocks - 1 - (i * blocksPerTweak + j);
-						tmp[idx] = tweakMulLocal ^ plaintext[idx];
-					}
-
-					if (i < numBlocks / blocksPerTweak - 1)
-						tweakMulLocal ^= hashKeys[log2floor(i ^ (i + 1))];
+					// Go backwards so that it works well with everything else going backwards.
+					u64 idx = numBlocks - 1 - (i * blocksPerTweak + j);
+					tmp[idx] = tweakMulLocal ^ plaintext[idx];
 				}
 
-				tweak += tweakIncrease;
-				tweakMul = tweakMulLocal ^ hashKeys[log2floor((tweak - 1) ^ tweak)];
-
-				mAESs.get().template hashBlocks<numBlocks>(tmp, ciphertext);
+				if (i < numBlocks / blocksPerTweak - 1)
+					tweakMulLocal ^= hashKeys[log2floor(i ^ (i + 1))];
 			}
+
+			tweak += tweakIncrease;
+			tweakMul = tweakMulLocal ^ hashKeys[log2floor((tweak - 1) ^ tweak)];
+
+			mAESs.get().template hashBlocks<numBlocks>(tmp, ciphertext);
+		}
+	};
+
+
+	class SoftSpokenMalLeakyDotSender :
+		public SoftSpokenShOtSender<SubspaceVoleMaliciousReceiver<RepetitionCode>>
+
+	{
+	public:
+		using Base = SoftSpokenShOtSender<SubspaceVoleMaliciousReceiver<RepetitionCode>>;
+
+		AlignedUnVector<block> mExtraW;
+
+		struct Hasher 
+		{
+			Hasher() {}
+			TwoOneRTCR<2> rtcr;
+			//macoro::suspend_never send(PRNG& prng, Socket& chl) { return{}; }
+
+			auto send(PRNG& prng, Socket& chl)
+			{
+				std::array<block, 2> keyAndSeed = prng.get();
+				rtcr.setKey(keyAndSeed[0], keyAndSeed[1]);
+				return chl.send(std::move(keyAndSeed));
+			}
+
+			constexpr inline u64 chunkSize() const { return 128; }
+
+			void runBatch(
+				span<std::array<block, 2>> messages, 
+				SoftSpokenMalLeakyDotSender* parent, 
+				span<block> inputW_);
+
+
+			OC_FORCEINLINE void processChunk(
+				u64 nChunk, u64 numUsed,
+				span<std::array<block, 2>> messages,
+				SoftSpokenMalLeakyDotSender* parent_, span<block> inputW_);
 		};
 
+		Hasher mHasher;
 
-		class SoftSpokenMalOtSender;
-		class SoftSpokenMalOtReceiver;
-		namespace details
+		SoftSpokenMalLeakyDotSender()
 		{
-
-			struct SoftSpokenMalOtSenderHasher :
-				public Chunker<
-				SoftSpokenMalOtSenderHasher,
-				std::tuple<std::array<block, 2>>,
-				std::tuple<AlignedUnVector<std::array<block, 2>>>
-				>
-			{
-				using ChunkerBase = Chunker<
-					SoftSpokenMalOtSenderHasher,
-					std::tuple<std::array<block, 2>>,
-					std::tuple<AlignedUnVector<std::array<block, 2>>>
-				>;
-				friend ChunkerBase;
-				friend SoftSpokenMalLeakyDotSender;
-				friend SoftSpokenMalOtSender;
-
-				TwoOneRTCR<2> rtcr;
-
-				SoftSpokenMalOtSenderHasher() : ChunkerBase(this) {}
-
-				void send(PRNG& prng, Channel& chl)
-				{
-					std::array<block, 2> keyAndSeed = prng.get();
-					rtcr.setKey(keyAndSeed[0], keyAndSeed[1]);
-					chl.asyncSendCopy(keyAndSeed);
-				}
-
-				size_t chunkSize() const { return 128; }
-				size_t paddingSize() const { return 0; }
-
-				SoftSpokenMalLeakyDotSender* mParent = nullptr;
-				block* mInputW = nullptr;
-				void setParams(SoftSpokenMalLeakyDotSender* p, block* w)
-				{
-					mParent = p;
-					mInputW = w;
-				}
-
-				OC_FORCEINLINE void processChunk(
-					size_t nChunk, size_t numUsed,
-					span<std::array<block, 2>> messages);
-			};
-
-
-			struct SoftSpokenMalOtReceiverHasher :
-				public Chunker<
-				SoftSpokenMalOtReceiverHasher,
-				std::tuple<block>,
-				std::tuple<AlignedUnVector<block>>
-				>
-			{
-				using ChunkerBase = Chunker<
-					SoftSpokenMalOtReceiverHasher,
-					std::tuple<block>,
-					std::tuple<AlignedUnVector<block>>
-				>;
-				friend ChunkerBase;
-				friend SoftSpokenMalLeakyDotReceiver;
-				friend SoftSpokenMalOtReceiver;
-
-				TwoOneRTCR<1> rtcr;
-
-				SoftSpokenMalOtReceiverHasher() : ChunkerBase(this) {}
-
-				void recv(Channel& chl)
-				{
-					std::array<block, 2> keyAndSeed;
-					chl.recv(&keyAndSeed, 1);
-					rtcr.setKey(keyAndSeed[0], keyAndSeed[1]);
-				}
-
-				size_t chunkSize() const { return 128; }
-				size_t paddingSize() const { return 0; }
-
-				SoftSpokenMalLeakyDotReceiver* mParent = nullptr;
-				block* mInputV = nullptr;
-
-				void setParams(SoftSpokenMalLeakyDotReceiver* parent, block* inputV)
-				{
-					mParent = parent;
-					mInputV = inputV;
-				}
-
-				OC_FORCEINLINE void processChunk(
-					size_t nChunk, size_t numUsed,
-					span<block> messages, block choices);
-			};
-
 		}
 
-		class SoftSpokenMalOtSender : public SoftSpokenMalLeakyDotSender
+		void init(u64 fieldBits = 2, bool randomOt = true, u64 numThreads = 1)
 		{
-		public:
-			using Base = SoftSpokenMalLeakyDotSender;
+			Base::init(fieldBits, randomOt, numThreads);
+			mExtraW.resize(2 * chunkSize() + paddingSize());
+		}
 
-			using Hasher = details::SoftSpokenMalOtSenderHasher;
-			friend Hasher;
-			Hasher hasher;
+		SoftSpokenMalLeakyDotSender splitBase()
+		{
+			throw RTE_LOC; // TODO: unimplemented.
+		}
 
-			SoftSpokenMalOtSender(size_t fieldBits = 2, size_t numThreads_ = 1) :
-				Base(fieldBits, numThreads_) {}
+		std::unique_ptr<OtExtSender> split() override
+		{
+			throw RTE_LOC; // TODO: unimplemented.
+			//return std::make_unique<SoftSpokenMalLeakyDotSender>(splitBase());
+		}
 
-			SoftSpokenMalOtSender splitBase()
+
+		void setBaseOts(
+			span<block> baseRecvOts,
+			const BitVector& choices) 
+		{
+			return Base::setBaseOts(baseRecvOts, choices);
+		}
+
+		task<> setBaseOts(
+			span<block> baseRecvOts,
+			const BitVector& choices,
+			Socket& chl) override
+		{
+			return Base::setBaseOts(baseRecvOts, choices, chl);
+		}
+
+		task<> send(span<std::array<block, 2>> messages, PRNG& prng, Socket& chl) override;
+		// Low level functions.
+
+		//template<typename Hasher1>
+		//task<> sendImpl(span<std::array<block, 2>> messages, PRNG& prng, Socket& chl, Hasher1& hasher);
+
+		task<> runBatch(Socket& chl, span<block>);
+
+
+		OC_FORCEINLINE void processChunk(
+			u64 nChunk, u64 numUsed, span<block> messages);
+
+
+		OC_FORCEINLINE void processPartialChunk(
+			u64 nChunk, u64 numUsed,
+			span<block> messages,
+			span<block> temp);
+
+	private:
+		// These functions don't keep information around to compute the hashes.
+		using Base::generateRandom;
+		using Base::generateChosen;
+
+	protected:
+		//using ChunkerBase = ChunkedReceiver<
+		//	SoftSpokenMalLeakyDotSender,
+		//	std::tuple<block>
+		//>;
+		//friend ChunkerBase;
+		//friend ChunkerBase::Base;
+
+		u64 chunkSize() const { return std::max<u64>(roundUpTo(wSize(), 2), (u64)2 * 128); }
+		u64 paddingSize() const { return std::max<u64>(chunkSize(), wPadded()) - chunkSize(); }
+	};
+
+	class SoftSpokenMalOtReceiver :
+		public SoftSpokenShOtReceiver<SubspaceVoleMaliciousSender<RepetitionCode>>
+	{
+	public:
+		using Base = SoftSpokenShOtReceiver<SubspaceVoleMaliciousSender<RepetitionCode>>;
+
+		AlignedUnVector<block> mExtraV;
+
+		struct Hasher 
+		{
+			Hasher() {}
+
+			TwoOneRTCR<1> rtcr;
+
+			task<> recv(Socket& chl)
 			{
-				throw RTE_LOC; // TODO: unimplemented.
+				MC_BEGIN(task<>, this, &chl,
+					keyAndSeed = std::array<block, 2>{}
+				);
+				MC_AWAIT(chl.recv(keyAndSeed));
+				rtcr.setKey(keyAndSeed[0], keyAndSeed[1]);
+				MC_END();
 			}
 
-			std::unique_ptr<OtExtSender> split() override
-			{
-				return std::make_unique<SoftSpokenMalOtSender>(splitBase());
-			}
 
-			virtual void initTemporaryStorage()
-			{
-				Base::initTemporaryStorage();
-				hasher.initTemporaryStorage();
-			}
+			constexpr inline u64 chunkSize() const { return 128; }
 
-			void send(span<std::array<block, 2>> messages, PRNG& prng, Channel& chl) override
-			{
-				sendImpl(messages, prng, chl, hasher);
-			}
+			void runBatch(
+				span<block> messages, span<block> choice,
+				SoftSpokenMalOtReceiver* parent, 
+				block* inputV);
+
+
+			OC_FORCEINLINE void processChunk(
+				u64 nChunk, u64 numUsed,
+				span<block> messages, block choices,
+				SoftSpokenMalOtReceiver* parent,
+				block* inputV);
 		};
 
-		class SoftSpokenMalOtReceiver : public SoftSpokenMalLeakyDotReceiver
+		Hasher mHasher;
+
+		SoftSpokenMalOtReceiver()
 		{
-		public:
-			using Base = SoftSpokenMalLeakyDotReceiver;
-
-			using Hasher = details::SoftSpokenMalOtReceiverHasher;
-			friend Hasher;
-			Hasher hasher;
-
-			SoftSpokenMalOtReceiver(size_t fieldBits = 2, size_t numThreads_ = 1) :
-				Base(fieldBits, numThreads_) {}
-
-			SoftSpokenMalOtReceiver splitBase()
-			{
-				throw RTE_LOC; // TODO: unimplemented.
-			}
-			std::unique_ptr<OtExtReceiver> split() override
-			{
-				return std::make_unique<SoftSpokenMalOtReceiver>(splitBase());
-			}
-
-			virtual void initTemporaryStorage()
-			{
-				Base::initTemporaryStorage();
-				hasher.initTemporaryStorage();
-			}
-
-			void receive(const BitVector& choices, span<block> messages, PRNG& prng, Channel& chl) override
-			{
-				Base::receiveImpl(choices, messages, prng, chl, hasher);
-			}
-		};
-
-		void details::SoftSpokenMalOtSenderHasher::processChunk(
-			size_t nChunk, size_t numUsed,
-			span<std::array<block, 2>> messages)
-		{
-			rtcr.useAES(128);
-
-			SoftSpokenMalOtSender* parent_ = static_cast<SoftSpokenMalOtSender*>(mParent);
-			
-			auto inputW = mInputW + nChunk * parent_->chunkSize();
-			parent_->mVole->hash(span<const block>(inputW, parent_->wPadded()));
-
-			transpose128(inputW);
-			SoftSpokenShOtSender::xorAndHashMessages(
-				numUsed, parent_->delta(), (block*)messages.data(), inputW, rtcr);
 		}
 
-		void details::SoftSpokenMalOtReceiverHasher::processChunk(
-			size_t nChunk, size_t numUsed,
-			span<block> messages, block choices)
+
+		void init(u64 fieldBits = 2, bool randomOt = true,  u64 numThreads = 1)
 		{
-			SoftSpokenMalOtReceiver* parent_ = static_cast<SoftSpokenMalOtReceiver*>(mParent);
-			auto inputV = mInputV + nChunk * parent_->chunkSize();
-			parent_->mVole->hash(span<block>(&choices, 1), span<const block>(inputV, parent_->vPadded()));
-			transpose128(inputV);
-
-			rtcr.useAES(numUsed);
-			block* messagesOut = messages.data();
-
-			// Go backwards to match the sender.
-			size_t i = numUsed;
-			while (i >= superBlkSize)
-			{
-				i -= superBlkSize;
-				rtcr.template hashBlocks<superBlkSize>(inputV + i, messagesOut + i);
-			}
-
-			// Finish up. Other side hashes in blocks of superBlkSize / 2.
-			if (i >= superBlkSize / 2)
-			{
-				i -= superBlkSize / 2;
-				rtcr.template hashBlocks<superBlkSize / 2>(inputV + i, messagesOut + i);
-
-			}
-
-			size_t remainingIters = i;
-			for (size_t j = 0; j < remainingIters; ++j)
-			{
-				i = remainingIters - j - 1;
-				rtcr.template hashBlocks<1>(inputV + i, messagesOut + i);
-			}
+			Base::init(fieldBits, randomOt, numThreads);
+			mExtraV.resize(2 * chunkSize() + paddingSize());
 		}
+
+		SoftSpokenMalOtReceiver splitBase()
+		{
+			throw RTE_LOC; // TODO: unimplemented.
+		}
+
+		std::unique_ptr<OtExtReceiver> split() override
+		{
+			throw RTE_LOC; // TODO: unimplemented.
+		}
+
+		void setBaseOts(span<std::array<block, 2>> baseSendOts) 
+		{
+			return Base::setBaseOts(baseSendOts);
+		}
+
+		task<> setBaseOts(span<std::array<block, 2>> baseSendOts, PRNG& prng, Socket& chl) override
+		{
+			return Base::setBaseOts(baseSendOts, prng, chl);
+		}
+
+
+		task<> receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl) override;
+		// Low level functions.
+
+
+		task<> runBatch(Socket& chl, span<block>messages, span<block> choices);
+
+
+		OC_FORCEINLINE void processPartialChunk(
+			u64 nChunk, u64 numUsed,
+			span<block> messages, block choice, span<block> temp);
+
+		OC_FORCEINLINE void processChunk(
+			u64 nChunk, u64 numUsed, span<block> messages, block choices);
+
+	private:
+		// These functions don't keep information around to compute the hashes.
+		using Base::generateRandom;
+		using Base::generateChosen;
+
+	protected:
+
+
+		u64 chunkSize() const { return roundUpTo(vSize(), 2); }
+		u64 paddingSize() const { return vPadded() - chunkSize(); }
+	};
+
 
 }
+
 #endif

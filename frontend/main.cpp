@@ -22,9 +22,13 @@ using namespace osuCrypto;
 #include "benchmark.h"
 
 #include "ExampleBase.h"
+#include "benchmark.h"
 #include "ExampleTwoChooseOne.h"
 #include "ExampleNChooseOne.h"
 #include "ExampleSilent.h"
+#include "ExampleVole.h"
+#include "libOTe/Tools/LDPC/LdpcImpulseDist.h"
+#include "libOTe/Tools/LDPC/Util.h"
 
 static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
@@ -52,214 +56,264 @@ simpleasm{ "simplest-asm" };
 #ifdef ENABLE_IKNP
 void minimal()
 {
-    // Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
-    IOService ios;
-    Channel senderChl = Session(ios, "localhost:1212", SessionMode::Server).addChannel();
-    Channel recverChl = Session(ios, "localhost:1212", SessionMode::Client).addChannel();
+	// Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
+	auto sockets = coproto::LocalAsyncSocket::makePair();
 
-    // The number of OTs.
-    int n = 100;
+	// The number of OTs.
+	int n = 100;
 
-    // The code to be run by the OT receiver.
-    auto recverThread = std::thread([&]() {
-        PRNG prng(sysRandomSeed());
-        IknpOtExtReceiver recver;
+	// The code to be run by the OT receiver.
+	auto recverThread = std::thread([&]() {
+		PRNG prng(sysRandomSeed());
+		IknpOtExtReceiver recver;
 
-        // Choose which mMessages should be received.
-        BitVector choices(n);
-        choices[0] = 1;
-        //...
+		// Choose which messages should be received.
+		BitVector choices(n);
+		choices[0] = 1;
+		//...
 
-        // Receive the mMessages
-        AlignedVector<block> messages(n);
-        recver.receiveChosen(choices, messages, prng, recverChl);
+		// Receive the messages
+		std::vector<block> messages(n);
+		auto proto = recver.receiveChosen(choices, messages, prng, sockets[0]);
 
-        // mMessages[i] = sendMessages[i][choices[i]];
-        });
+		coproto::sync_wait(proto);
 
-    PRNG prng(sysRandomSeed());
-    IknpOtExtSender sender;
+		// messages[i] = sendMessages[i][choices[i]];
+		});
 
-    // Choose which mMessages should be sent.
-    std::vector<std::array<block, 2>> sendMessages(n);
-    sendMessages[0] = { toBlock(54), toBlock(33) };
-    //...
+	PRNG prng(sysRandomSeed());
+	IknpOtExtSender sender;
 
-    // Send the mMessages.
-    sender.sendChosen(sendMessages, prng, senderChl);
-    recverThread.join();
+	// Choose which messages should be sent.
+	std::vector<std::array<block, 2>> sendMessages(n);
+	sendMessages[0] = { toBlock(54), toBlock(33) };
+	//...
+
+	// Send the messages.
+	auto proto = sender.sendChosen(sendMessages, prng, sockets[1]);
+
+	auto r = coproto::sync_wait(macoro::wrap(proto));
+
+	recverThread.join();
+
+	r.value();
 }
 #endif
 
 
+void mtx(oc::CLP& cmd)
+{
+	auto rr = cmd.getManyOr<u64>("n", { 100 });
+	auto code = SilverCode::Weight5;
 
+	for (auto rows : rr)
+	{
+
+		SilverEncoder enc;
+		enc.mL.init(rows, code);
+		enc.mR.init(rows, code, cmd.isSet("x"));
+		auto H = enc.getMatrix();
+		auto HD = H.dense();
+		auto Gt = computeGen(HD).transpose();
+
+		std::cout << "H\n" << H << std::endl << std::endl;
+		std::cout << "Gt\n" << Gt << std::endl << std::endl;
+	}
+
+}
+void sss()
+{
+
+	details::SilverLeftEncoder enc;
+
+	for (u64 i = 128; i < (1 << 24); i += 1)
+	{
+
+		enc.init(i, SilverCode::Weight11);
+
+		bool bad = true;
+		for (auto j : enc.mYs)
+		{
+			bad &= (j % 32) == 0;
+		}
+		if(bad)
+			std::cout << "bad " << i << std::endl;
+	}
+}
+
+#include "cryptoTools/Crypto/RandomOracle.h"
 int main(int argc, char** argv)
 {
 
-    CLP cmd;
-    cmd.parse(argc, argv);
-    bool flagSet = false;
-
-    //if (cmd.isSet("triang"))
-    //{
-    //    ldpc(cmd);
-    //    return 0;
-    //}
+	CLP cmd;
+	cmd.parse(argc, argv);
+	bool flagSet = false;
 
 
-    //if (cmd.isSet("encode"))
-    //{
-    //    encodeBench(cmd);
-    //    return 0;
-    //}
-
-    if (cmd.isSet(unitTestTag))
-    {
-        flagSet = true;
-        auto tests = tests_cryptoTools::Tests;
-        tests += tests_libOTe::Tests;
-
-        auto r = tests.runIf(cmd);
-        //std::cout << " done " << (int)r << std::endl;
-        return r == TestCollection::Result::passed ? 0 : -1;
-    }
-
-    if (cmd.isSet("latency"))
-    {
-        getLatency(cmd);
-        flagSet = true;
-    }
+	if (cmd.isSet("bad"))
+	{
+		sss();
+		return 0;
+	}
+	//mtx(cmd);
+	//return 0;
+	//if (cmd.isSet("triang"))
+	//{
+	//    ldpc(cmd);
+	//    return 0;
+	//}
 
 
-    if (cmd.isSet("transpose"))
-    {
-        transpose(cmd);
-        flagSet = true;
-    }
+	if (cmd.isSet("encode"))
+	{
+		encodeBench(cmd);
+		return 0;
+	}
+
+	if (cmd.isSet("ldpc"))
+	{
+		LdpcDecode_impulse(cmd);
+		return 0;
+	}
+
+	if (cmd.isSet(unitTestTag))
+	{
+		flagSet = true;
+		auto tests = tests_cryptoTools::Tests;
+		tests += tests_libOTe::Tests;
+
+		auto r = tests.runIf(cmd);
+		return r == TestCollection::Result::passed ? 0 : -1;
+	}
+
+#ifdef ENABE_BOOST
+	if (cmd.isSet("latency"))
+	{
+		getLatency(cmd);
+		flagSet = true;
+	}
+#endif
 
 
 
 #ifdef ENABLE_SIMPLESTOT
-    flagSet |= runIf(baseOT_example<SimplestOT>, cmd, simple);
+	flagSet |= runIf(baseOT_example<SimplestOT>, cmd, simple);
 #endif
 
 #ifdef ENABLE_SIMPLESTOT_ASM
-    flagSet |= runIf(baseOT_example<AsmSimplestOT>, cmd, simpleasm);
+	flagSet |= runIf(baseOT_example<AsmSimplestOT>, cmd, simpleasm);
 #endif
 
 #ifdef ENABLE_MRR_TWIST
 #ifdef ENABLE_SSE
-    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        DomainSepEKEPopf factory;
-        const char* domain = "EKE POPF OT example";
-        factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwist(factory));
-    }, cmd, moellerpopf, {"eke"});
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepEKEPopf factory;
+		const char* domain = "EKE POPF OT example";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwist(factory));
+		}, cmd, moellerpopf, { "eke" });
 #endif
 
-    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        DomainSepMRPopf factory;
-        const char* domain = "MR POPF OT example";
-        factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistMR(factory));
-    }, cmd, moellerpopf, {"mrPopf"});
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepMRPopf factory;
+		const char* domain = "MR POPF OT example";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistMR(factory));
+		}, cmd, moellerpopf, { "mrPopf" });
 
-    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        DomainSepFeistelPopf factory;
-        const char* domain = "Feistel POPF OT example";
-        factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistFeistel(factory));
-    }, cmd, moellerpopf, {"feistel"});
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepFeistelPopf factory;
+		const char* domain = "Feistel POPF OT example";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistFeistel(factory));
+		}, cmd, moellerpopf, { "feistel" });
 
-    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        DomainSepFeistelMulPopf factory;
-        const char* domain = "Feistel With Multiplication POPF OT example";
-        factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistMul(factory));
-    }, cmd, moellerpopf, {"feistelMul"});
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepFeistelMulPopf factory;
+		const char* domain = "Feistel With Multiplication POPF OT example";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistMul(factory));
+}, cmd, moellerpopf, { "feistelMul" });
 #endif
 
 #ifdef ENABLE_MRR
-    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        DomainSepFeistelRistPopf factory;
-        const char* domain = "Feistel POPF OT example (Risretto)";
-        factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoy(factory));
-    }, cmd, ristrettopopf, {"feistel"});
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepFeistelRistPopf factory;
+		const char* domain = "Feistel POPF OT example (Risretto)";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoy(factory));
+		}, cmd, ristrettopopf, { "feistel" });
 
-    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        DomainSepFeistelMulRistPopf factory;
-        const char* domain = "Feistel With Multiplication POPF OT example (Risretto)";
-        factory.Update(domain, std::strlen(domain));
-        baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyMul(factory));
-    }, cmd, ristrettopopf, {"feistelMul"});
+	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+		DomainSepFeistelMulRistPopf factory;
+		const char* domain = "Feistel With Multiplication POPF OT example (Risretto)";
+		factory.Update(domain, std::strlen(domain));
+		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyMul(factory));
+		}, cmd, ristrettopopf, { "feistelMul" });
 #endif
 
 #ifdef ENABLE_MR
-    flagSet |= runIf(baseOT_example<MasnyRindal>, cmd, mr);
-#endif
-
-#ifdef ENABLE_NP
-    flagSet |= runIf(baseOT_example<NaorPinkas>, cmd, np);
+	flagSet |= runIf(baseOT_example<MasnyRindal>, cmd, mr);
 #endif
 
 #ifdef ENABLE_IKNP
-    flagSet |= runIf(TwoChooseOne_example<IknpOtExtSender, IknpOtExtReceiver>, cmd, iknp);
+	flagSet |= runIf(TwoChooseOne_example<IknpOtExtSender, IknpOtExtReceiver>, cmd, iknp);
 #endif
 
 #ifdef ENABLE_KOS
-    flagSet |= runIf(TwoChooseOne_example<KosOtExtSender, KosOtExtReceiver>, cmd, kos);
+	flagSet |= runIf(TwoChooseOne_example<KosOtExtSender, KosOtExtReceiver>, cmd, kos);
 #endif
 
 #ifdef ENABLE_DELTA_KOS
-    flagSet |= runIf(TwoChooseOne_example<KosDotExtSender, KosDotExtReceiver>, cmd, dkos);
+	flagSet |= runIf(TwoChooseOne_example<KosDotExtSender, KosDotExtReceiver>, cmd, dkos);
 #endif
 
 #ifdef ENABLE_SOFTSPOKEN_OT
 
-    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        TwoChooseOne_example<SoftSpokenShDotSender, SoftSpokenShDotReceiver>(
-            role, totalOTs, numThreads, ip, tag, clp);
-    }, cmd, ssdelta);
+    //flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+    //    TwoChooseOne_example<SoftSpokenShOtSender, SoftSpokenShOtReceiver>(
+    //        role, totalOTs, numThreads, ip, tag, clp);
+    //}, cmd, ssdelta);
 
-    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        TwoChooseOne_example<SoftSpokenShOtSender, SoftSpokenShOtReceiver>(
-            role, totalOTs, numThreads, ip, tag, clp);
-    }, cmd, sshonest);
+    //flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+    //    TwoChooseOne_example<SoftSpokenShOtSender, SoftSpokenShOtReceiver>(
+    //        role, totalOTs, numThreads, ip, tag, clp);
+    //}, cmd, sshonest);
 
-    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        TwoChooseOne_example<SoftSpokenMalLeakyDotSender, SoftSpokenMalLeakyDotReceiver>(
-            role, totalOTs, numThreads, ip, tag, clp);
-    }, cmd, smleakydelta);
+    //flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+    //    TwoChooseOne_example<SoftSpokenMalLeakyDotSender, SoftSpokenMalOtReceiver>(
+    //        role, totalOTs, numThreads, ip, tag, clp);
+    //}, cmd, smleakydelta);
 
-    flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-        TwoChooseOne_example<SoftSpokenMalOtSender, SoftSpokenMalOtReceiver>(
-            role, totalOTs, numThreads, ip, tag, clp);
-    }, cmd, smalicious);
+    //flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
+    //    TwoChooseOne_example<SoftSpokenMalOtSender, SoftSpokenMalOtReceiver>(
+    //        role, totalOTs, numThreads, ip, tag, clp);
+    //}, cmd, smalicious);
 #endif
 
 #ifdef ENABLE_KKRT
-    flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
+	flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
 #endif
 
 #ifdef ENABLE_OOS
-    flagSet |= runIf(NChooseOne_example<OosNcoOtSender, OosNcoOtReceiver>, cmd, oos);
+	flagSet |= runIf(NChooseOne_example<OosNcoOtSender, OosNcoOtReceiver>, cmd, oos);
 #endif
 
-    flagSet |= runIf(Silent_example, cmd, Silent);
+	flagSet |= runIf(Silent_example, cmd, Silent);
+	flagSet |= runIf(Vole_example, cmd, vole);
 
 
 
-    if (flagSet == false)
-    {
+	if (flagSet == false)
+	{
 
-        std::cout
-            << "#######################################################\n"
-            << "#                      - libOTe -                     #\n"
-            << "#               A library for performing              #\n"
-            << "#                  oblivious transfer.                #\n"
-            << "#                     Peter Rindal                    #\n"
-            << "#######################################################\n" << std::endl;
+		std::cout
+			<< "#######################################################\n"
+			<< "#                      - libOTe -                     #\n"
+			<< "#               A library for performing              #\n"
+			<< "#                  oblivious transfer.                #\n"
+			<< "#                     Peter Rindal                    #\n"
+			<< "#######################################################\n" << std::endl;
 
 
         std::cout
@@ -282,11 +336,11 @@ int main(int argc, char** argv)
             << Color::Green << "  -oos          " << Color::Default << "  : to run the OOS             active secure       1-out-of-N OT for N=2^76 " << Color::Red << (oosEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
             << Color::Green << "  -kkrt         " << Color::Default << "  : to run the KKRT            passive secure      1-out-of-N OT for N=2^128" << Color::Red << (kkrtEnabled ? "" : "(disabled)")            << "\n\n" << Color::Default
 
-            << "POPF Options:\n"
-            << Color::Green << "  -eke          " << Color::Default << "  : to run the EKE POPF (Moeller only)                                  " << "\n"<< Color::Default
-            << Color::Green << "  -mrPopf       " << Color::Default << "  : to run the MasnyRindal POPF (Moeller only)                          " << "\n"<< Color::Default
-            << Color::Green << "  -feistel      " << Color::Default << "  : to run the Feistel POPF                                             " << "\n"<< Color::Default
-            << Color::Green << "  -feistelMul   " << Color::Default << "  : to run the Feistel With Multiplication POPF                         " << "\n\n"<< Color::Default
+			<< "POPF Options:\n"
+			<< Color::Green << "  -eke          " << Color::Default << "  : to run the EKE POPF (Moeller only)                                  " << "\n" << Color::Default
+			<< Color::Green << "  -mrPopf       " << Color::Default << "  : to run the MasnyRindal POPF (Moeller only)                          " << "\n" << Color::Default
+			<< Color::Green << "  -feistel      " << Color::Default << "  : to run the Feistel POPF                                             " << "\n" << Color::Default
+			<< Color::Green << "  -feistelMul   " << Color::Default << "  : to run the Feistel With Multiplication POPF                         " << "\n\n" << Color::Default
 
             << "SoftSpokenOT options:\n"
             << Color::Green << "  -f            " << Color::Default << "  : the number of bits in the finite field (aka the depth of the PPRF). " << "\n\n"<< Color::Default
@@ -302,5 +356,5 @@ int main(int argc, char** argv)
             << std::endl;
     }
 
-    return 0;
+	return 0;
 }

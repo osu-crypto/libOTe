@@ -1,5 +1,10 @@
 #pragma once
-// This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use.
+// © 2016 Peter Rindal.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/MatrixView.h>
@@ -76,6 +81,7 @@ namespace osuCrypto {
     u8 getBit(std::array<block, 128>& inOut, u64 i, u64 j);
 
     void eklundh_transpose128(block* inOut);
+    inline void eklundh_transpose128(std::array<block, 128>& inOut) { eklundh_transpose128(inOut.data()); }
     void eklundh_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut);
 
 #ifdef OC_ENABLE_AVX2
@@ -85,6 +91,7 @@ namespace osuCrypto {
 #ifdef OC_ENABLE_SSE2
     void sse_transpose128(block* inOut);
     void sse_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut);
+    inline void sse_transpose128(std::array<block, 128>& inOut) { sse_transpose128(inOut.data()); };
 #endif
     void transpose(const MatrixView<block>& in, const MatrixView<block>& out);
     void transpose(const MatrixView<u8>& in, const MatrixView<u8>& out);
@@ -105,12 +112,13 @@ namespace osuCrypto {
 #endif
     }
 
+    inline void transpose128(std::array<block, 128>& inOut) { transpose128(inOut.data()); };
+
 
     inline void transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
     {
 
 #if defined(OC_ENABLE_AVX2)
-        assert((u64)&inOut % 32 == 0);
         avx_transpose128x1024(inOut[0].data());
 #elif defined(OC_ENABLE_SSE2)
         sse_transpose128x1024(inOut);
@@ -119,5 +127,8 @@ namespace osuCrypto {
 #endif
     }
 
-
+    inline void transpose128x1024(block* inOut)
+    {
+        transpose128x1024(*(std::array<std::array<block, 8>, 128>*)inOut);
+    }
 }

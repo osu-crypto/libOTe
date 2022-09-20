@@ -3,64 +3,68 @@
 
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/PRNG.h>
-#include <cryptoTools/Network/Channel.h>
 
 namespace osuCrypto
 {
 
-    void MasnyRindalKyber::receive(
+    task<> MasnyRindalKyber::receive(
         const BitVector & choices, 
         span<block> messages, 
         PRNG & prng, 
-        Channel & chl)
+        Socket & chl)
     {
-        u64 n = choices.size();
+        MC_BEGIN(task<>,this, &choices, messages, &prng, &chl,
+            n = u64{},
+            ot = std::vector<KyberOTRecver>{},
+            pkBuff = std::vector<KyberOtRecvPKs>{},
+            ctxts = std::vector<KyberOTCtxt>{}
+        );
+        static_assert(std::is_trivial<KyberOtRecvPKs>::value, "");
+        static_assert(std::is_pod<KyberOTCtxt>::value, "");
 
-        std::vector<KyberOTRecver> ot(n);
-
-        static_assert(std::is_pod<KyberOtRecvPKs>::value, "");
-        std::vector<KyberOtRecvPKs> pkBuff(n);
-
-        auto iter = pkBuff.data();
+        n = choices.size();
+        ot.resize(n);
+        pkBuff.resize(n);
+        ctxts.resize(n);
 
         for (u64 i = 0; i < n; ++i)
         {
             ot[i].b = choices[i];
 
             //get receivers message and secret coins
-            KyberReceiverMessage(&ot[i], iter++);
+            KyberReceiverMessage(&ot[i], &pkBuff[i]);
         }
 
-        chl.asyncSend(std::move(pkBuff));
-
-
-        static_assert(std::is_pod<KyberOTCtxt>::value, "");
-        std::vector<KyberOTCtxt> ctxts(n);
-
-        chl.recv(ctxts.data(), ctxts.size());
+        MC_AWAIT(chl.send(std::move(pkBuff)));
+        MC_AWAIT(chl.recv(ctxts));
 
         for (u64 i = 0; i < n; ++i)
         {
             KyberReceiverStrings(&ot[i], &ctxts[i]);
             memcpy(&messages[i], ot[i].rot, sizeof(block));
         }
+
+        MC_END();
     }
 
-    void MasnyRindalKyber::send(
+    task<> MasnyRindalKyber::send(
         span<std::array<block, 2>> messages, 
         PRNG & prng, 
-        Channel & chl)
+        Socket & chl)
     {
-        u64 n = messages.size();
-        std::vector<KyberOtRecvPKs> pkBuff(n);
-        std::vector<KyberOTCtxt> ctxts(n);
-
+        MC_BEGIN(task<>,this, messages, &prng, &chl,
+            n = u64{},
+            pkBuff = std::vector<KyberOtRecvPKs>{},
+            ctxts = std::vector<KyberOTCtxt>{},
+            ptxt = KyberOTPtxt{}
+        );
+        n = messages.size();
+        pkBuff.resize(n);
+        ctxts.resize(n);
 
         prng.get(messages.data(), messages.size());
 
-
-        chl.recv(pkBuff);
-        KyberOTPtxt ptxt;
+        MC_AWAIT(chl.recv(pkBuff));
 
         for (u64 i = 0; i < n; ++i)
         {
@@ -74,7 +78,9 @@ namespace osuCrypto
             KyberSenderMessage(&ctxts[i], &ptxt, &pkBuff[i]);
         }
 
-        chl.asyncSend(std::move(ctxts));
+        MC_AWAIT(chl.send(std::move(ctxts)));
+
+        MC_END();
     }
 }
 #endif

@@ -8,6 +8,7 @@ set(BUILD_DIR "${CLONE_DIR}/build/${OC_CONFIG}")
 set(LOG_FILE  "${CMAKE_CURRENT_LIST_DIR}/log-bitpolymul.txt")
 set(CONFIG    --config ${CMAKE_BUILD_TYPE})
 
+
 include("${CMAKE_CURRENT_LIST_DIR}/fetch.cmake")
 
 if(NOT EXISTS ${BUILD_DIR} OR NOT BITPOLYMUL_FOUND)

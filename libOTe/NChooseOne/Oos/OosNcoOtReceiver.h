@@ -1,5 +1,12 @@
 #pragma once
-// This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use. 
+// © 2016 Peter Rindal.
+// © 2022 Visa.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 #include "libOTe/config.h"
 #ifdef ENABLE_OOS
 #include "libOTe/NChooseOne/NcoOtExt.h"
@@ -40,7 +47,7 @@ namespace osuCrypto
 
         std::vector<std::array<PRNG, 2>> mGens;
         Matrix<block> mT0;
-        Matrix<block> mT1;
+        std::shared_ptr<Matrix<block>> mT1;
         Matrix<block> mW;
 
         bool mHasPendingSendFuture = false;
@@ -97,8 +104,8 @@ namespace osuCrypto
 
         // Sets the base OTs. Note that getBaseOTCount() of OTs should be provided.
         // @ baseSendOts: a std vector like container that which holds a series of both 
-        //      2-choose-1 OT mMessages. The sender should hold one of them.
-        void setBaseOts(span<std::array<block, 2>> baseRecvOts, PRNG& prng, Channel& chl) override;
+        //      2-choose-1 OT messages. The sender should hold one of them.
+        task<> setBaseOts(span<std::array<block, 2>> baseRecvOts, PRNG& prng, Socket& chl) override;
         void setUniformBaseOts(span<std::array<block, 2>> baseRecvOts);
 
         // returns whether the base OTs have been set. They must be set before
@@ -113,8 +120,8 @@ namespace osuCrypto
         // @ numOtExt: the number of OTs that should be initialized. for encode(i,...) calls,
         //       i should be less then numOtExt.
         // @ prng: A random number generator for initializing the OTs
-        // @ Channel: the channel that should be used to communicate with the sender.
-        void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
+        // @ Socket: the Socket that should be used to communicate with the sender.
+        task<> init(u64 numOtExt, PRNG& prng, Socket& chl) override;
 
 
         using NcoOtExtReceiver::encode;
@@ -147,15 +154,15 @@ namespace osuCrypto
         // data for otIdx \in {0, 1, ..., sendCount - 1} is sent. The next time this function is  called
         // with sendCount' the data for otIdx \in {sendCount, sendCount + 1, ..., sendCount' + sendCount - 1}
         // is sent. The sender should call recvCorrection(sendCount) with the same sendCount.
-        // @ chl: the channel that the data will be sent over
+        // @ chl: the Socket that the data will be sent over
         // @ sendCount: the number of correction values that should be sent.
-        void sendCorrection(Channel& chl, u64 sendCount) override;
+        task<> sendCorrection(Socket& chl, u64 sendCount) override;
 
         // Some malicious secure OT extensions require an additional step after all corrections have 
         // been sent. In this case, this method should be called.
-        // @ chl: the channel that will be used to communicate
+        // @ chl: the Socket that will be used to communicate
         // @ seed: a random seed that will be used in the function
-        void check(Channel& chl, block wordSeed) override;
+        task<> check(Socket& chl, block wordSeed) override;
 
 
         // Allows a single NcoOtExtReceiver to be split into two, with each being 
@@ -170,10 +177,10 @@ namespace osuCrypto
         // special functions below and may not have a stable API...
 
         std::vector<block> mWBuff, mTBuff;
-        void sendFinalization(Channel& chl, block seed);
-        void recvChallenge(Channel& chl);
+        task<> sendFinalization(Socket& chl, block seed);
+        task<> recvChallenge(Socket& chl);
         void computeProof();
-        void sendProof(Channel& chl);
+        task<> sendProof(Socket& chl);
 
 
     };

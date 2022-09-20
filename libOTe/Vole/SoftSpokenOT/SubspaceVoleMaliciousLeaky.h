@@ -1,4 +1,11 @@
 #pragma once
+// © 2022 Lawrence Roy.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 #include <libOTe/config.h>
 #ifdef ENABLE_SOFTSPOKEN_OT
 
@@ -63,8 +70,8 @@ namespace osuCrypto
 		u64 hashKey;
 
 		// Maximum number of times a hash key can be used before being replaced.
-		static constexpr size_t maxHashKeyUsage = 1024 * 1024;
-		size_t hashKeyUseCount = 0;
+		static constexpr u64 maxHashKeyUsage = 1024 * 1024;
+		u64 hashKeyUseCount = 0;
 
 		// inHalf == 0 => input in low 64 bits. High 64 bits of output should be ignored.
 		template <int inHalf>
@@ -88,7 +95,7 @@ namespace osuCrypto
 
 		static u64 reduceU64(block in)
 		{
-			return reduce(in).get<u64>(0);
+			return reduce(in).get<u64>()[0];
 			//return _mm_extract_epi64(reduce(in), 0);
 		}
 
@@ -113,9 +120,9 @@ namespace osuCrypto
 			return true;
 		}
 
-		void addSubtotalAfterRekey(block* hashes, block* subtotals, size_t count)
+		void addSubtotalAfterRekey(block* hashes, block* subtotals, u64 count)
 		{
-			for (size_t i = 0; i < count; ++i)
+			for (u64 i = 0; i < count; ++i)
 			{
 				subtotals[i] ^= hashes[i];
 				hashes[i] = block::allSame(0);
@@ -137,7 +144,7 @@ namespace osuCrypto
 			mulHash(hash);
 		}
 
-		static size_t finalHashRows(size_t fieldBits)
+		static u64 finalHashRows(u64 fieldBits)
 		{
 			return divCeil(40, fieldBits);
 		}
@@ -145,7 +152,7 @@ namespace osuCrypto
 		// The final hash is a random matrix in GF(2^mFieldBits), with finalHashRows() rows and 64
 		// columns. Each row is stored in mFieldBits non-consecutive u64s, with the 1 component of all
 		// rows followed by the a component of all rows, etc.
-		void getFinalHashKey(u64* finalHashKey, size_t fieldBits)
+		void getFinalHashKey(u64* finalHashKey, u64 fieldBits)
 		{
 			hashKeyPrng.get(finalHashKey, finalHashRows(fieldBits) * fieldBits);
 		}
@@ -153,12 +160,12 @@ namespace osuCrypto
 		// Apply the final hash to a 64 bit vector. Output is a sequence of packed 64 bit integers, with
 		// all bits in the 1 component in the first integer, etc.
 		static OC_FORCEINLINE void getFinalHashSubfield(
-			const u64* finalHashKey, u64 x, u64* finalHash, size_t fieldBits)
+			const u64* finalHashKey, u64 x, u64* finalHash, u64 fieldBits)
 		{
-			for (size_t i = 0; i < fieldBits; ++i)
+			for (u64 i = 0; i < fieldBits; ++i)
 			{
 				u64 output = 0;
-				for (size_t j = 0; j < finalHashRows(fieldBits); ++j, ++finalHashKey)
+				for (u64 j = 0; j < finalHashRows(fieldBits); ++j, ++finalHashKey)
 					output |= (u64)(popcount(*finalHashKey & x) & 1) << j;
 				finalHash[i] = output;
 			}
@@ -166,7 +173,7 @@ namespace osuCrypto
 
 		// For when x is a 64 dimensional vector over GF(2^mFieldBits). Again, output is packed.
 		static OC_FORCEINLINE void getFinalHash(
-			const u64* finalHashKey, const u64* x, u64* finalHash, size_t fieldBits)
+			const u64* finalHashKey, const u64* x, u64* finalHash, u64 fieldBits)
 		{
 			memset(finalHash, 0, fieldBits * sizeof(u64));
 
@@ -206,6 +213,9 @@ namespace osuCrypto
 	class SubspaceVoleMaliciousSender : public SubspaceVoleSender<Code>, public SubspaceVoleMaliciousBase
 	{
 	public:
+
+		static constexpr bool mMalicious = true;
+
 		AlignedUnVector<block> hashU;
 		AlignedUnVector<block> subtotalU;
 		AlignedUnVector<block> hashV;
@@ -214,45 +224,54 @@ namespace osuCrypto
 		using Sender = SubspaceVoleSender<Code>;
 		using Sender::code;
 
-		SubspaceVoleMaliciousSender(SmallFieldVoleSender vole_, Code code_) :
-			Sender(std::move(vole_), std::move(code_)),
-			hashU(Sender::uSize()),
-			subtotalU(Sender::uSize()),
-			hashV(vPadded()),
-			subtotalV(vPadded())
+		SubspaceVoleMaliciousSender()
 		{
+		}
+
+
+		void init(u64 fieldBits, u64 numVoles)
+		{
+			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits));
+			Sender::mVole.init(fieldBits, numVoles, true);
+
+			if (Sender::mVole.mNumVoles != code().length())
+				throw RTE_LOC;
+
+			hashU.resize(Sender::uSize());
+			subtotalU.resize(Sender::uSize());
+			hashV.resize(vPadded());
+			subtotalV.resize(vPadded());
+			
 			clearHashes();
 		}
 
-		size_t vPadded() const { return roundUpTo(Sender::vPadded(), 4); }
 
-		void generateRandom(size_t blockIdx, const AES& aes, span<block> randomU, span<block> outV)
+		u64 vPadded() const { return roundUpTo(Sender::vPadded(), 4); }
+
+		void generateRandom(u64 blockIdx, const AES& aes, span<block> randomU, span<block> outV)
 		{
 			Sender::generateRandom(blockIdx, aes, randomU, outV.subspan(0, Sender::vPadded()));
 		}
 
-		void generateChosen(size_t blockIdx, const AES& aes, span<const block> chosenU, span<block> outV)
+		void generateChosen(u64 blockIdx, const AES& aes, span<const block> chosenU, span<block> outV)
 		{
 			Sender::generateChosen(blockIdx, aes, chosenU, outV.subspan(0, Sender::vPadded()));
 		}
 
-		void recvChallenge(Channel& chl)
+		void setChallenge(block seed)
 		{
-			block seed;
-			chl.recv(&seed, 1);
 			hashKeyPrng.SetSeed(seed);
 			setupHash();
 		}
 
 		void hash(span<const block> u, span<const block> v)
 		{
-			for (size_t i = 0; i < code().dimension(); ++i)
+			for (u64 i = 0; i < code().dimension(); ++i)
 				updateHash(hashU[i], u[i]);
-			for (size_t i = 0; i < Sender::vSize(); i += 4)
+			for (u64 i = 0; i < Sender::vSize(); i += 4)
 				// Unrolled for ILP.
-				for (size_t j = 0; j < 4; ++j)
+				for (u64 j = 0; j < 4; ++j)
 					updateHash(hashV[i + j], v[i + j]);
-
 			if (rekeyCheck())
 				addSubtotalAfterRekey();
 		}
@@ -273,29 +292,30 @@ namespace osuCrypto
 			std::fill_n(subtotalV.data(), vPadded(), block::allSame(0));
 		}
 
-		void sendResponse(Channel& chl)
+		[[nodiscard]]
+		auto sendResponse(Socket& chl)
 		{
-			size_t fieldBits = Sender::mVole.mFieldBits;
-			size_t numVoles = Sender::mVole.mNumVoles;
+			u64 fieldBits = Sender::mVole.mFieldBits;
+			u64 numVoles = Sender::mVole.mNumVoles;
 
 			u64 finalHashKey[64]; // Non-tight upper bound on size.
 			getFinalHashKey(finalHashKey, fieldBits);
 
 			addSubtotalAfterRekey();
 
-			size_t rows = finalHashRows(fieldBits);
-			size_t bytesPerHash = divCeil(rows * fieldBits, 8);
-			size_t dim = code().dimension();
-			size_t numHashes = dim + numVoles;
+			u64 rows = finalHashRows(fieldBits);
+			u64 bytesPerHash = divCeil(rows * fieldBits, 8);
+			u64 dim = code().dimension();
+			u64 numHashes = dim + numVoles;
 			std::vector<u64> finalHashes(fieldBits * numHashes);
-			for (size_t i = 0; i < dim; ++i)
+			for (u64 i = 0; i < dim; ++i)
 				getFinalHashSubfield(
 					finalHashKey, reduceU64(subtotalU[i]), &finalHashes[i * fieldBits], fieldBits);
 
-			for (size_t i = 0; i < numVoles; ++i)
+			for (u64 i = 0; i < numVoles; ++i)
 			{
 				u64 reducedHashes[SmallFieldVoleBase::fieldBitsMax];
-				for (size_t j = 0; j < fieldBits; ++j)
+				for (u64 j = 0; j < fieldBits; ++j)
 					reducedHashes[j] = reduceU64(subtotalV[i * fieldBits + j]);
 
 				getFinalHash(
@@ -306,15 +326,16 @@ namespace osuCrypto
 			clearHashes();
 
 			std::vector<u8> finalHashesPacked(bytesPerHash * numHashes);
-			for (size_t i = 0; i < numHashes; ++i)
+			for (u64 i = 0; i < numHashes; ++i)
 			{
 				u64 output = 0;
-				for (size_t j = 0; j < fieldBits; ++j)
+				for (u64 j = 0; j < fieldBits; ++j)
 					output |= finalHashes[i * fieldBits + j] << j * rows;
 				memcpy(&finalHashesPacked[bytesPerHash * i], &output, bytesPerHash);
 			}
 
-			chl.asyncSend(std::move(finalHashesPacked));
+			return chl.send(std::move(finalHashesPacked));
+			//return finalHashesPacked;
 		}
 	};
 
@@ -322,46 +343,62 @@ namespace osuCrypto
 	class SubspaceVoleMaliciousReceiver : public SubspaceVoleReceiver<Code>, public SubspaceVoleMaliciousBase
 	{
 	public:
-		AlignedUnVector<block> hashW;
-		AlignedUnVector<block> subtotalW;
+		static constexpr bool mMalicious = true;
+
+		AlignedUnVector<block> mHashW;
+		AlignedUnVector<block> mSubtotalW;
 
 		using Receiver = SubspaceVoleReceiver<Code>;
 		using Receiver::code;
 
-		SubspaceVoleMaliciousReceiver(SmallFieldVoleReceiver vole_, Code code_) :
-			Receiver(std::move(vole_), std::move(code_)),
-			hashW(wPadded()),
-			subtotalW(wPadded())
+		SubspaceVoleMaliciousReceiver()
 		{
+		}
+
+		void init(u64 fieldBits_, u64 numVoles_)
+		{
+			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits_));
+			Receiver::mVole.init(fieldBits_, numVoles_, false);
+			Receiver::mCorrectionU.resize(Receiver::uPadded());
+
+			if (Receiver::mVole.mNumVoles != code().length())
+			{
+				std::cout << Receiver::mVole.mNumVoles << " vs " << code().length() << std::endl;
+				throw RTE_LOC;
+			}
+
+			mHashW.resize(wPadded());
+			mSubtotalW.resize(wPadded());
 			clearHashes();
 		}
 
-		size_t wPadded() const { return roundUpTo(Receiver::wPadded(), 4); }
+		u64 wPadded() const { return roundUpTo(Receiver::wPadded(), 4); }
 
-		void generateRandom(size_t blockIdx, const AES& aes, span<block> outW)
+		void generateRandom(u64 blockIdx, const AES& aes, span<block> outW)
 		{
 			Receiver::generateRandom(blockIdx, aes, outW.subspan(0, Receiver::wPadded()));
 		}
 
-		void generateChosen(size_t blockIdx, const AES& aes, span<block> outW)
+		void generateChosen(u64 blockIdx, const AES& aes, span<block> outW)
 		{
 			Receiver::generateChosen(blockIdx, aes, outW.subspan(0, Receiver::wPadded()));
 		}
 
-		void sendChallenge(PRNG& prng, Channel& chl)
+		[[nodiscard]]
+		auto sendChallenge(PRNG& prng, Socket& chl)
 		{
 			block seed = prng.get<block>();
-			chl.asyncSendCopy(&seed, 1);
 			hashKeyPrng.SetSeed(seed);
 			setupHash();
+			return chl.send(std::move(seed));
 		}
 
 		void hash(span<const block> w)
 		{
-			for (size_t i = 0; i < Receiver::wSize(); i += 4)
+			for (u64 i = 0; i < Receiver::wSize(); i += 4)
 				// Unrolled for ILP.
-				for (size_t j = 0; j < 4; ++j)
-					updateHash(hashW[i + j], w[i + j]);
+				for (u64 j = 0; j < 4; ++j)
+					updateHash(mHashW[i + j], w[i + j]);
 
 			if (rekeyCheck())
 				addSubtotalAfterRekey();
@@ -371,56 +408,71 @@ namespace osuCrypto
 
 		void addSubtotalAfterRekey()
 		{
-			addSubtotalAfterRekey(hashW.data(), subtotalW.data(), Receiver::wSize());
+			addSubtotalAfterRekey(mHashW.data(), mSubtotalW.data(), Receiver::wSize());
 		}
 
 		void clearHashes()
 		{
-			std::fill_n(hashW.data(), wPadded(), block::allSame(0));
-			std::fill_n(subtotalW.data(), wPadded(), block::allSame(0));
+			std::fill_n(mHashW.data(), wPadded(), block::allSame(0));
+			std::fill_n(mSubtotalW.data(), wPadded(), block::allSame(0));
 		}
 
-		void checkResponse(Channel& chl)
+		task<> checkResponse(Socket& chl)
 		{
-			size_t fieldBits = Receiver::mVole.mFieldBits;
-			size_t numVoles = Receiver::mVole.mNumVoles;
+			MC_BEGIN(task<>, this, &chl,
+				fieldBits = u64{},
+				numVoles = u64{},
+				rows = u64{},
+				bytesPerHash = u64{},
+				dim = u64{},
+				numSenderHashes = u64{},
+				senderBytes = u64{},
+				finalHashW = AlignedUnVector<u64>{},
+				senderFinalHashesPackedU8 = AlignedUnVector<u8>{},
+				senderFinalUHashesPacked = AlignedUnVector<u64>{},
+				senderFinalHashesPacked = AlignedUnVector<u64>{},
+				senderFinalHashes = AlignedUnVector<u64>{},
+				finalHashKey = std::array<u64, 64>{}
+				);
 
-			u64 finalHashKey[64]; // Non-tight upper bound on size.
-			getFinalHashKey(finalHashKey, fieldBits);
+			fieldBits = Receiver::mVole.mFieldBits;
+			numVoles = Receiver::mVole.mNumVoles;
+
+			getFinalHashKey(finalHashKey.data(), fieldBits);
 
 			addSubtotalAfterRekey();
-
-			std::unique_ptr<u64[]> finalHashW(new u64[roundUpTo(numVoles, 4) * fieldBits]);
-			for (size_t i = 0; i < numVoles; ++i)
+			finalHashW.resize(roundUpTo(numVoles, 4) * fieldBits);
+			for (u64 i = 0; i < numVoles; ++i)
 			{
 				u64 reducedHashes[SmallFieldVoleBase::fieldBitsMax];
-				for (size_t j = 0; j < fieldBits; ++j)
-					reducedHashes[j] = reduceU64(subtotalW[i * fieldBits + j]);
+				for (u64 j = 0; j < fieldBits; ++j)
+					reducedHashes[j] = reduceU64(mSubtotalW[i * fieldBits + j]);
 
-				getFinalHash(finalHashKey, reducedHashes, &finalHashW[i * fieldBits], fieldBits);
+				getFinalHash(finalHashKey.data(), reducedHashes, &finalHashW[i * fieldBits], fieldBits);
 			}
 
 			clearHashes();
 
-			size_t rows = finalHashRows(fieldBits);
-			size_t bytesPerHash = divCeil(rows * fieldBits, 8);
-			size_t dim = code().dimension();
-			size_t numSenderHashes = dim + numVoles;
-			size_t senderBytes = bytesPerHash * numSenderHashes;
-			std::unique_ptr<u8[]> senderFinalHashesPackedU8(new u8[senderBytes]);
-			std::unique_ptr<u64[]> senderFinalUHashesPacked(new u64[dim]);
-			std::unique_ptr<u64[]> senderFinalHashesPacked(new u64[2 * numVoles]);
-			std::unique_ptr<u64[]> senderFinalHashes(new u64[2 * numVoles * fieldBits]);
-			chl.recv(senderFinalHashesPackedU8.get(), senderBytes);
+			rows = finalHashRows(fieldBits);
+			bytesPerHash = divCeil(rows * fieldBits, 8);
+			dim = code().dimension();
+			numSenderHashes = dim + numVoles;
+			senderBytes = bytesPerHash * numSenderHashes;
+			senderFinalHashesPackedU8.resize(senderBytes);
+			senderFinalUHashesPacked.resize(dim);
+			senderFinalHashesPacked.resize(2 * numVoles);
+			senderFinalHashes.resize(2 * numVoles * fieldBits);
 
-			for (size_t i = 0; i < dim; ++i)
+			MC_AWAIT(chl.recv(senderFinalHashesPackedU8));
+
+			for (u64 i = 0; i < dim; ++i)
 			{
 				u64 hash = 0;
 				memcpy(&hash, &senderFinalHashesPackedU8[bytesPerHash * i], bytesPerHash);
 				senderFinalUHashesPacked[i] = hash;
 			}
 
-			for (size_t i = 0; i < numVoles; ++i)
+			for (u64 i = 0; i < numVoles; ++i)
 			{
 				u64 hash = 0;
 				memcpy(&hash, &senderFinalHashesPackedU8[bytesPerHash * (dim + i)], bytesPerHash);
@@ -431,22 +483,28 @@ namespace osuCrypto
 			code().encode(&senderFinalUHashesPacked[0], &senderFinalHashesPacked[0]);
 
 			// Unpack both U's and V's hashes.
-			for (size_t i = 0; i < 2 * numVoles; ++i)
+			for (u64 i = 0; i < 2 * numVoles; ++i)
 			{
 				u64 hash = senderFinalHashesPacked[i];
 				u64 mask = ((u64)1 << rows) - 1;
-				for (size_t j = 0; j < fieldBits; ++j)
+				for (u64 j = 0; j < fieldBits; ++j)
 					senderFinalHashes[i * fieldBits + j] = (hash >> j * rows) & mask;
 			}
 
-			const u64* finalHashU = &senderFinalHashes[0];
-			const u64* finalHashV = &senderFinalHashes[numVoles * fieldBits];
+			{
 
-			Receiver::mVole.sharedFunctionXorGF(finalHashU, finalHashW.get(), gfMods[fieldBits]);
-			if (!std::equal(finalHashW.get(), finalHashW.get() + numVoles * fieldBits, finalHashV))
-				throw std::runtime_error("Failed subspace VOLE consistency check");;
+				const u64* finalHashU = &senderFinalHashes[0];
+				const u64* finalHashV = &senderFinalHashes[numVoles * fieldBits];
+
+				Receiver::mVole.sharedFunctionXorGF(finalHashU, finalHashW.data(), gfMods[fieldBits]);
+				if (!std::equal(finalHashW.data(), finalHashW.data() + numVoles * fieldBits, finalHashV))
+					throw std::runtime_error("Failed subspace VOLE consistency check");;
+			}
+
+			MC_END();
 		}
 	};
+
 
 }
 #endif
