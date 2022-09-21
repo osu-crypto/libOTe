@@ -142,6 +142,9 @@ message(STATUS "Option: ENABLE_SOFTSPOKEN_OT  = ${ENABLE_SOFTSPOKEN_OT}\n\n")
 message(STATUS "1-out-of-2 Delta-OT Extension protocols\n=======================================================")
 message(STATUS "Option: ENABLE_DELTA_KOS      = ${ENABLE_DELTA_KOS}\n\n")
 
+message(STATUS "Vole protocols\n=======================================================")
+message(STATUS "Option: ENABLE_SILENT_VOLE      = ${ENABLE_SILENT_VOLE}\n\n")
+
 message(STATUS "1-out-of-N OT Extension protocols\n=======================================================")
 message(STATUS "Option: ENABLE_OOS            = ${ENABLE_OOS}")
 message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}\n\n")
