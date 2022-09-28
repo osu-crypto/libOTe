@@ -1,7 +1,66 @@
 #pragma once
+#include "libOTe/version.h"
 
+#define LIBOTE_VERSION (LIBOTE_VERSION_MAJOR * 10000 + LIBOTE_VERSION_MINOR * 100 + LIBOTE_VERSION_PATCH)
 
-// build the library with simplest OT enabled
+// build the library bit poly mul integration
+#cmakedefine ENABLE_BITPOLYMUL @ENABLE_BITPOLYMUL@
+
+// build the library with "simplest" Base OT enabled
 #cmakedefine ENABLE_SIMPLESTOT @ENABLE_SIMPLESTOT@
 
+// build the library with the ASM "simplest" Base OT enabled
+#cmakedefine ENABLE_SIMPLESTOT_ASM @ENABLE_SIMPLESTOT_ASM@
 
+// build the library with POPF Base OT using Ristretto KA enabled
+#cmakedefine ENABLE_MRR @ENABLE_MRR@
+
+// build the library with POPF Base OT using Moeller KA enabled
+#cmakedefine ENABLE_MRR_TWIST @ENABLE_MRR_TWIST@
+
+// build the library with Masney Rindal Base OT enabled
+#cmakedefine ENABLE_MR @ENABLE_MR@
+
+// build the library with Masney Rindal Kyber Base OT enabled
+#cmakedefine ENABLE_MR_KYBER @ENABLE_MR_KYBER@
+
+
+
+// build the library with Keller Orse Scholl OT-Ext enabled
+#cmakedefine ENABLE_KOS @ENABLE_KOS@
+
+// build the library with IKNP OT-Ext enabled
+#cmakedefine ENABLE_IKNP @ENABLE_IKNP@
+
+// build the library with Silent OT Extension enabled
+#cmakedefine ENABLE_SILENTOT @ENABLE_SILENTOT@
+
+// build the library with SoftSpokenOT enabled
+#cmakedefine ENABLE_SOFTSPOKEN_OT @ENABLE_SOFTSPOKEN_OT@
+
+
+
+// build the library with KOS Delta-OT-ext enabled
+#cmakedefine ENABLE_DELTA_KOS @ENABLE_DELTA_KOS@
+
+// build the library with OOS 1-oo-N OT-Ext enabled
+#cmakedefine ENABLE_OOS @ENABLE_OOS@
+
+// build the library with KKRT 1-oo-N OT-Ext enabled
+#cmakedefine ENABLE_KKRT @ENABLE_KKRT@
+
+// build the library with silent vole enabled
+#cmakedefine ENABLE_SILENT_VOLE @ENABLE_SILENT_VOLE@
+
+// build the library with no silver security warning
+#cmakedefine NO_SILVER_WARNING @NO_SILVER_WARNING@
+
+#if defined(ENABLE_SIMPLESTOT_ASM) && defined(_MSC_VER)
+    #undef ENABLE_SIMPLESTOT_ASM
+    #pragma message("ENABLE_SIMPLESTOT_ASM should not be defined on windows.")
+#endif
+#if defined(ENABLE_MR_KYBER) && defined(_MSC_VER)
+    #undef ENABLE_MR_KYBER
+    #pragma message("ENABLE_MR_KYBER should not be defined on windows.")
+#endif
+        

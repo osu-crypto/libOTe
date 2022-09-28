@@ -6,6 +6,7 @@
 *.user
 *.sln.docstates
 *.vs
+.vscode/
 
 CMakeFiles/*
 */CMakeFiles/*
@@ -13,9 +14,18 @@ CMakeFiles/*
 
 CMakeCache.txt
 */CMakeCache.txt
+CMakeSettings.json
 
 *.a
 *.args.json
+libOTe/config.h
+frontend/frontend_libOTe
+
+.DS_Store
+*/.DS_Store
+
+lib/
+CMakeSettings.json
 
 # Build results
 [Dd]ebug/
@@ -26,6 +36,7 @@ build/
 bld/
 [Bb]in/
 [Oo]bj/
+out/ 
 
 # Roslyn cache directories
 *.ide/

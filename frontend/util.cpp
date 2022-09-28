@@ -1,78 +1,197 @@
 #include "util.h"
 
-using namespace osuCrypto;
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Common/Timer.h>
 #include <chrono>
 #define tryCount 2
 
-void senderGetLatency(Channel& chl)
+#include <cryptoTools/Network/IOService.h>
+#include <cryptoTools/Network/Session.h>
+
+namespace osuCrypto
 {
+#ifdef ENABLE_BOOST
+	void getLatency(CLP& cmd)
+	{
+		auto ip = cmd.getOr<std::string>("ip", "localhost:1212");
 
-    u8 dummy[1];
+		if (cmd.hasValue("r"))
+		{
+			auto mode = cmd.get<int>("r") != 0 ? SessionMode::Server : SessionMode::Client;
+			IOService ios;
+			Session session(ios, ip, mode);
+			auto chl = session.addChannel();
+			if (mode == SessionMode::Server)
+				senderGetLatency(chl);
+			else
+				recverGetLatency(chl);
+		}
+		else
+		{
+			IOService ios;
+			Session s(ios, ip, SessionMode::Server);
+			Session r(ios, ip, SessionMode::Client);
+			auto cs = s.addChannel();
+			auto cr = r.addChannel();
 
-    chl.asyncSend(dummy, 1);
+			auto thrd = std::thread([&]() {senderGetLatency(cs); });
+			recverGetLatency(cr);
+
+			thrd.join();
+		}
+	}
+
+	void sync(Channel& chl, Role role)
+	{
+		if (role == Role::Receiver)
+		{
+
+			u8 dummy[1];
+			chl.recv(dummy, 1);
+			Timer timer;
+
+
+			auto start = timer.setTimePoint("");
+			chl.asyncSend(dummy, 1);
+			chl.recv(dummy, 1);
+			auto mid = timer.setTimePoint("");
+
+			chl.asyncSend(dummy, 1);
+
+			auto rrt = mid - start;
+			auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(rrt).count();
+			if (ms > 4)
+				std::this_thread::sleep_for(rrt / 2);
+
+		}
+		else
+		{
+			u8 dummy[1];
+			chl.asyncSend(dummy, 1);
+			chl.recv(dummy, 1);
+			chl.asyncSend(dummy, 1);
+			chl.recv(dummy, 1);
+		}
+	}
+
+
+	void senderGetLatency(Channel& chl)
+	{
+
+		u8 dummy[1];
+
+		chl.asyncSend(dummy, 1);
 
 
 
-    chl.recv(dummy, 1);
-    chl.asyncSend(dummy, 1);
+		chl.recv(dummy, 1);
+		chl.asyncSend(dummy, 1);
 
 
-    std::vector<u8> oneMbit((1 << 20) / 8);
-    for (u64 i = 0; i < tryCount; ++i)
-    {
-        chl.recv(dummy, 1);
+		std::vector<u8> oneMbit((1 << 20) / 8);
+		for (u64 i = 0; i < tryCount; ++i)
+		{
+			chl.recv(dummy, 1);
 
-        for(u64 j =0; j < (1<<10); ++j)
-            chl.asyncSend(oneMbit.data(), oneMbit.size());
-    }
-    chl.recv(dummy, 1);
+			for (u64 j = 0; j < (1 << 10); ++j)
+				chl.asyncSend(oneMbit.data(), oneMbit.size());
+		}
+		chl.recv(dummy, 1);
 
-}
+	}
 
-void recverGetLatency(Channel& chl)
-{
+	void recverGetLatency(Channel& chl)
+	{
 
-    u8 dummy[1];
-    chl.recv(dummy, 1);
-    Timer timer;
-    auto start = timer.setTimePoint("");
-    chl.asyncSend(dummy, 1);
+		u8 dummy[1];
+		chl.recv(dummy, 1);
+		Timer timer;
+		auto start = timer.setTimePoint("");
+		chl.asyncSend(dummy, 1);
 
 
-    chl.recv(dummy, 1);
+		chl.recv(dummy, 1);
 
-    auto mid = timer.setTimePoint("");
-    auto recvStart = mid;
-    auto recvEnd = mid;
+		auto mid = timer.setTimePoint("");
+		auto recvStart = mid;
+		auto recvEnd = mid;
 
-    auto rrt = mid - start;
-    std::cout << "latency:   " << std::chrono::duration_cast<std::chrono::milliseconds>(rrt).count() << " ms" << std::endl;
-                 
-	std::vector<u8> oneMbit((1 << 20) / 8);
-    for (u64 i = 0; i < tryCount; ++i)
-    {
-        recvStart = timer.setTimePoint("");
-        chl.asyncSend(dummy, 1);
+		auto rrt = mid - start;
+		std::cout << "latency:   " << std::chrono::duration_cast<std::chrono::milliseconds>(rrt).count() << " ms" << std::endl;
 
-        for (u64 j = 0; j < (1 << 10); ++j)
-            chl.recv(oneMbit);
+		std::vector<u8> oneMbit((1 << 20) / 8);
+		for (u64 i = 0; i < tryCount; ++i)
+		{
+			recvStart = timer.setTimePoint("");
+			chl.asyncSend(dummy, 1);
 
-        recvEnd = timer.setTimePoint("");
+			for (u64 j = 0; j < (1 << 10); ++j)
+				chl.recv(oneMbit);
 
-        // nanoseconds per GegaBit
-        auto uspGb = std::chrono::duration_cast<std::chrono::nanoseconds>(recvEnd - recvStart - rrt / 2).count();
+			recvEnd = timer.setTimePoint("");
 
-        // nanoseconds per second
-        double usps = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds(1)).count();
+			// nanoseconds per GegaBit
+			auto uspGb = std::chrono::duration_cast<std::chrono::nanoseconds>(recvEnd - recvStart - rrt / 2).count();
 
-        // MegaBits per second
-        auto Mbps = usps / uspGb *  (1 << 10);
+			// nanoseconds per second
+			auto usps = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds(1)).count();
 
-        std::cout << "bandwidth: " << Mbps << " Mbps" << std::endl;
-    }
+			// MegaBits per second
+			auto Mbps = usps * 1.0 / uspGb * (1 << 10);
 
-    chl.asyncSend(dummy, 1);
+			std::cout << "bandwidth: " << Mbps << " Mbps" << std::endl;
+		}
+
+		chl.asyncSend(dummy, 1);
+
+	}
+#endif
+
+
+	task<> sync(Socket& chl, Role role)
+	{
+		MC_BEGIN(task<>,&chl, role,
+			dummy = u8{},
+			timer = std::unique_ptr<Timer>{new Timer},
+			start = Timer::timeUnit{},
+			mid = Timer::timeUnit{},
+			end = Timer::timeUnit{},
+			ms = u64{},
+			rrt = std::chrono::system_clock::duration{}
+		);
+
+		if (role == Role::Receiver)
+		{
+
+		 	MC_AWAIT(chl.recv(dummy));
+
+			start = timer->setTimePoint("");
+
+			MC_AWAIT(chl.send(dummy));
+			MC_AWAIT(chl.recv(dummy));
+
+			mid = timer->setTimePoint("");
+
+			MC_AWAIT(chl.send(std::move(dummy)));
+
+			rrt = mid - start;
+			ms = std::chrono::duration_cast<std::chrono::milliseconds>(rrt).count();
+
+			// wait for half the round trip time to start both parties at the same time.
+			if (ms > 4)
+				std::this_thread::sleep_for(rrt / 2);
+
+		}
+		else
+		{
+			MC_AWAIT(chl.send(dummy));
+			MC_AWAIT(chl.recv(dummy));
+			MC_AWAIT(chl.send(dummy));
+			MC_AWAIT(chl.recv(dummy));
+		}
+
+		MC_END();
+	}
+
 
 }

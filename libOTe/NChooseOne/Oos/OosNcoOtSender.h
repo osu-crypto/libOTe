@@ -1,11 +1,20 @@
 #pragma once
-// This file and the associated implementation has been placed in the public domain, waiving all copyright. No restrictions are placed on its use.  
+// © 2016 Peter Rindal.
+// © 2022 Visa.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+#include "libOTe/config.h"
+#ifdef ENABLE_OOS
 #include "libOTe/NChooseOne/NcoOtExt.h"
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Matrix.h>
 #include "libOTe/Base/BaseOT.h"
 #include "libOTe/Tools/LinearCode.h"
-#include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Common/Timer.h>
 
 #include <array>
 #include <vector>
@@ -28,7 +37,7 @@ namespace osuCrypto {
     // give you the corresponding encoding. Finally, after all correction values have been
     // received, check should be called if this is a malicious secure protocol.
     class OosNcoOtSender
-        : public NcoOtExtSender
+        : public NcoOtExtSender, public TimerAdapter
     {
     public:
 
@@ -65,6 +74,7 @@ namespace osuCrypto {
             qSum = std::move(v.qSum);
         }
 
+        bool isMalicious() const override { return mMalicious; }
 
         // This function should be called first. It sets a variety of internal parameters such as
         // the number of base OTs that are required.
@@ -86,11 +96,11 @@ namespace osuCrypto {
 
         // Sets the base OTs. Note that  getBaseOTCount() number of OTs should be provided
         // @ baseRecvOts: a std vector like container that which holds a series of both 
-        //      2-choose-1 OT messages. The sender should hold one of them.
+        //      2-choose-1 OT mMessages. The sender should hold one of them.
         // @ choices: The select bits that were used in the base OT
-        void setBaseOts(
+        task<> setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices) override;
+            const BitVector& choices, Socket& chl) override;
 
         // Performs the PRNG expantion and transpose operations. This sets the 
         // internal data structures that are needed for the subsequent encode(..)
@@ -98,10 +108,10 @@ namespace osuCrypto {
         // internal state and creating new OTs.
         // @ numOtExt: denotes the number of OTs that can be used before init
         //      should be called again.
-        void init(u64 numOtExt, PRNG& prng, Channel& chl) override;
+        task<> init(u64 numOtExt, PRNG& prng, Socket& chl) override;
 
 
-        // This function allows the user to obtain the random OT messages of their choice
+        // This function allows the user to obtain the random OT mMessages of their choice
         // at a given index. 
         // @ otIdx: denotes the OT index that should be encoded. Each OT index allows
         //       the receiver to learn a single message.
@@ -127,20 +137,20 @@ namespace osuCrypto {
         // data for otIdx \in {0, 1, ..., recvCount - 1} is received. The next time this function is  called
         // with recvCount' the data for otIdx \in {recvCount, recvCount + 1, ..., recvCount' + recvCount - 1}
         // is sent. The receiver should call sendCorrection(recvCount) with the same recvCount.
-        // @ chl: the channel that the data will be sent over
+        // @ chl: the Socket that the data will be sent over
         // @ recvCount: the number of correction values that should be received.
-        void recvCorrection(Channel& chl, u64 recvCount) override;
+        task<> recvCorrection(Socket& chl, u64 recvCount) override;
 
         // An alternative version of the recvCorrection(...) function which dynamically receivers the number of 
         // corrections based on how many were sent. The return value is the number received. See overload for details.
-        u64 recvCorrection(Channel& chl) override;
+        // u64 recvCorrection(Socket& chl) override;
 
         // Some malicious secure OT extensions require an additional step after all corrections have 
         // been received. In this case, this method should be called.
-        // @ chl: the channel that will be used to communicate
+        // @ chl: the Socket that will be used to communicate
         // @ seed: a random seed that will be used in the function
-        void check(Channel& chl, block seed) override;
-        
+        task<> check(Socket& chl, block seed) override;
+
 
         // Creates a new OT extesion of the same type that can be used
         // in parallel to the original. Each will be independent and can
@@ -154,13 +164,20 @@ namespace osuCrypto {
 
         // special functions below which might not have a stable API.
 
-        std::future<void> asyncRecvCorrection(Channel& chl, u64 recvCount);
+        //std::future<void> asyncRecvCorrection(Socket& chl, u64 recvCount);
 
-        void recvFinalization(Channel& chl);
+        task<> recvFinalization(Socket& chl);
 
-        void sendChallenge(Channel& chl, block seed);
+        task<> sendChallenge(Socket& chl, block seed);
         void computeProof();
-        void recvProof(Channel& chl);
+        task<> recvProof(Socket& chl);
+
+
+
+        void setUniformBaseOts(
+            span<block> baseRecvOts,
+            const BitVector& choices);
     };
 }
 
+#endif

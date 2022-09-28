@@ -1,20 +1,148 @@
 #include "Tools.h"
+#include <type_traits>
 #include <cryptoTools/Common/Defines.h>
-#include <wmmintrin.h>
 #include <cryptoTools/Common/MatrixView.h>
 #ifndef _MSC_VER
 #include <x86intrin.h>
-#endif 
+#endif
+
+#ifdef OC_ENABLE_SSE2
+#include <wmmintrin.h>
+#endif
+#ifdef OC_ENABLE_AVX2
+#include <immintrin.h>
+#endif
 
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Log.h>
-
+#include "libOTe/Tools/Tools.h"
+#include "cryptoTools/Common/Aligned.h"
 using std::array;
 
 namespace osuCrypto {
 
 
-    void eklundh_transpose128(array<block, 128>& inOut)
+    //bool gUseBgicksPprf(true);
+
+//using namespace std;
+
+// Utility function to do modular exponentiation.
+// It returns (x^y) % p
+    u64 power(u64 x, u64 y, u64 p)
+    {
+        u64 res = 1;      // Initialize result
+        x = x % p;  // Update x if it is more than or
+                    // equal to p
+        while (y > 0)
+        {
+            // If y is odd, multiply x with result
+            if (y & 1)
+                res = (res * x) % p;
+
+            // y must be even now
+            y = y >> 1; // y = y/2
+            x = (x * x) % p;
+        }
+        return res;
+    }
+
+    // This function is called for all k trials. It returns
+    // false if n is composite and returns false if n is
+    // probably prime.
+    // d is an odd number such that  d*2<sup>r</sup> = n-1
+    // for some r >= 1
+    bool millerTest(u64 d, PRNG& prng, u64 n)
+    {
+        // Pick a random number in [2..n-2]
+        // Corner cases make sure that n > 4
+        u64 a = 2 + prng.get<u64>() % (n - 4);
+
+        // Compute a^d % n
+        u64 x = power(a, d, n);
+
+        if (x == 1 || x == n - 1)
+            return true;
+
+        // Keep squaring x while one of the following doesn't
+        // happen
+        // (i)   d does not reach n-1
+        // (ii)  (x^2) % n is not 1
+        // (iii) (x^2) % n is not n-1
+        while (d != n - 1)
+        {
+            x = (x * x) % n;
+            d *= 2;
+
+            if (x == 1)     return false;
+            if (x == n - 1) return true;
+        }
+
+        // Return composite
+        return false;
+    }
+
+    // It returns false if n is composite and returns true if n
+    // is probably prime.  k is an input parameter that determines
+    // accuracy level. Higher value of k indicates more accuracy.
+    bool isPrime(u64 n, PRNG& prng, u64 k)
+    {
+        // Corner cases
+        if (n <= 1 || n == 4)  return false;
+        if (n <= 3) return true;
+
+        // Find r such that n = 2^d * r + 1 for some r >= 1
+        u64 d = n - 1;
+        while (d % 2 == 0)
+            d /= 2;
+
+        // Iterate given nber of 'k' times
+        for (u64 i = 0; i < k; i++)
+            if (!millerTest(d, prng, n))
+                return false;
+
+        return true;
+    }
+
+    bool isPrime(u64 n)
+    {
+        PRNG prng(ZeroBlock);
+        return isPrime(n, prng);
+    }
+
+
+    u64 nextPrime(u64 n)
+    {
+        PRNG prng(ZeroBlock);
+
+        while (isPrime(n, prng) == false)
+            ++n;
+        return n;
+    }
+
+    void print(array<block, 128>& inOut)
+    {
+        BitVector temp(128);
+
+        for (u64 i = 0; i < 128; ++i)
+        {
+
+            temp.assign(inOut[i]);
+            std::cout << temp << std::endl;
+        }
+        std::cout << std::endl;
+    }
+
+    u8 getBit(array<block, 128>& inOut, u64 i, u64 j)
+    {
+        BitVector temp(128);
+        temp.assign(inOut[i]);
+
+        return temp[j];
+
+    }
+
+
+    void eklundh_transpose128(block* inOut)
     {
         const static u64 TRANSPOSE_MASKS128[7][2] = {
             { 0x0000000000000000, 0xFFFFFFFFFFFFFFFF },
@@ -140,6 +268,23 @@ namespace osuCrypto {
 
 
 
+    void eklundh_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut)
+    {
+
+
+        for (u64 i = 0; i < 8; ++i)
+        {
+            std::array<block, 128> sub;
+            for (u64 j = 0; j < 128; ++j)
+                sub[j] = inOut[j][i];
+
+            eklundh_transpose128(sub.data());
+
+            for (u64 j = 0; j < 128; ++j)
+                inOut[j][i] = sub[j];
+        }
+
+    }
 
 
 
@@ -155,17 +300,17 @@ namespace osuCrypto {
     //                  |                  |
     //                  |                  |
     //                   ------------------
-    //                    
+    //
     // note: u16OutView is a 16x16 bit matrix = 16 rows of 2 bytes each.
     //       u16OutView[0] stores the first column of 16 bytes,
     //       u16OutView[1] stores the second column of 16 bytes.
-    void sse_loadSubSquare(array<block, 128>& in, array<block, 2>& out, u64 x, u64 y)
+    void sse_loadSubSquare(block* in, array<block, 2>& out, u64 x, u64 y)
     {
         static_assert(sizeof(array<array<u8, 16>, 2>) == sizeof(array<block, 2>), "");
         static_assert(sizeof(array<array<u8, 16>, 128>) == sizeof(array<block, 128>), "");
 
         array<array<u8, 16>, 2>& outByteView = *(array<array<u8, 16>, 2>*)&out;
-        array<array<u8, 16>, 128>& inByteView = *(array<array<u8, 16>, 128>*)&in;
+        array<u8, 16>* inByteView = (array<u8, 16>*)in;
 
         for (int l = 0; l < 16; l++)
         {
@@ -176,58 +321,58 @@ namespace osuCrypto {
 
 
 
-    // given a 16x16 sub square, place its transpose into u16OutView at 
-    // rows  16*h, ..., 16 *(h+1)  a byte  columns w, w+1. 
-    void sse_transposeSubSquare(array<block, 128>& out, array<block, 2>& in, u64 x, u64 y)
+    // given a 16x16 sub square, place its transpose into u16OutView at
+    // rows  16*h, ..., 16 *(h+1)  a byte  columns w, w+1.
+    void sse_transposeSubSquare(block* out, array<block, 2>& in, u64 x, u64 y)
     {
         static_assert(sizeof(array<array<u16, 8>, 128>) == sizeof(array<block, 128>), "");
 
-        array<array<u16, 8>, 128>& outU16View = *(array<array<u16, 8>, 128>*)&out;
+        array<u16, 8>* outU16View = (array<u16, 8>*)out;
 
 
         for (int j = 0; j < 8; j++)
         {
-            outU16View[16 * x + 7 - j][y] = _mm_movemask_epi8(in[0]);
-            outU16View[16 * x + 15 - j][y] = _mm_movemask_epi8(in[1]);
+            outU16View[16 * x + 7 - j][y] = in[0].movemask_epi8();
+            outU16View[16 * x + 15 - j][y] = in[1].movemask_epi8();
 
-            in[0] = _mm_slli_epi64(in[0], 1);
-            in[1] = _mm_slli_epi64(in[1], 1);
+            in[0] = (in[0] << 1);
+            in[1] = (in[1] << 1);
         }
     }
 
 
-    void sse_transpose(const MatrixView<block>& in, const MatrixView<block>& out)
+    void transpose(const MatrixView<block>& in, const MatrixView<block>& out)
     {
         MatrixView<u8> inn((u8*)in.data(), in.bounds()[0], in.stride() * sizeof(block));
         MatrixView<u8> outt((u8*)out.data(), out.bounds()[0], out.stride() * sizeof(block));
 
-        sse_transpose(inn, outt);
+        transpose(inn, outt);
     }
 
-    void sse_transpose(const MatrixView<u8>& in, const MatrixView<u8>& out)
+    void transpose(const MatrixView<u8>& in, const MatrixView<u8>& out)
     {
         // the amount of work that we use to vectorize (hard code do not change)
         static const u64 chunkSize = 8;
 
         // the number of input columns
-        int bitWidth = in.bounds()[0];
+        int bitWidth = static_cast<int>(in.bounds()[0]);
 
         // In the main loop, we tranpose things in subBlocks. This is how many we have.
         // a subblock is 16 (bits) columns wide and 64 bits tall
         int subBlockWidth = bitWidth / 16;
-        int subBlockHight = out.bounds()[0] / (8 * chunkSize);
+        int subBlockHight = static_cast<int>(out.bounds()[0]) / (8 * chunkSize);
 
         // since we allows arbitrary sized inputs, we have to deal with the left overs
-        int leftOverHeight = out.bounds()[0] % (chunkSize * 8);
-        int leftOverWidth = in.bounds()[0] % 16;
+        int leftOverHeight = static_cast<int>(out.bounds()[0]) % (chunkSize * 8);
+        int leftOverWidth = static_cast<int>(in.bounds()[0]) % 16;
 
 
         // make sure that the output can hold the input.
         if (static_cast<int>(out.stride()) < (bitWidth + 7) / 8)
             throw std::runtime_error(LOCATION);
 
-        // we can handle the case that the output should be truncated, but 
-        // not the case that the input is too small. (simple call this function 
+        // we can handle the case that the output should be truncated, but
+        // not the case that the input is too small. (simple call this function
         // with a smaller out.bounds()[0], since thats "free" to do.)
         if (out.bounds()[0] > in.stride() * 8)
             throw std::runtime_error(LOCATION);
@@ -235,9 +380,9 @@ namespace osuCrypto {
         union TempObj
         {
             //array<block, chunkSize> blks;
-			block blks[chunkSize];
-			//array < array<u8, 16>, chunkSize> bytes;
-			u8 bytes[chunkSize][16];
+            block blks[chunkSize];
+            //array < array<u8, 16>, chunkSize> bytes;
+            u8 bytes[chunkSize][16];
         };
 
         TempObj t;
@@ -294,8 +439,8 @@ namespace osuCrypto {
                 auto src14 = start + step14;
                 auto src15 = start + step15;
 
-                // perform the transpose on the byte level. We will then use 
-                // sse instrucitions to get it on the bit level. t.bytes is the 
+                // perform the transpose on the byte level. We will then use
+                // sse instrucitions to get it on the bit level. t.bytes is the
                 // same as a but in a 2D byte view.
                 t.bytes[0][0] = src00[0]; t.bytes[1][0] = src00[1];  t.bytes[2][0] = src00[2]; t.bytes[3][0] = src00[3];   t.bytes[4][0] = src00[4];  t.bytes[5][0] = src00[5];  t.bytes[6][0] = src00[6]; t.bytes[7][0] = src00[7];
                 t.bytes[0][1] = src01[0]; t.bytes[1][1] = src01[1];  t.bytes[2][1] = src01[2]; t.bytes[3][1] = src01[3];   t.bytes[4][1] = src01[4];  t.bytes[5][1] = src01[5];  t.bytes[6][1] = src01[6]; t.bytes[7][1] = src01[7];
@@ -314,7 +459,7 @@ namespace osuCrypto {
                 t.bytes[0][14] = src14[0]; t.bytes[1][14] = src14[1];  t.bytes[2][14] = src14[2]; t.bytes[3][14] = src14[3];   t.bytes[4][14] = src14[4];  t.bytes[5][14] = src14[5];  t.bytes[6][14] = src14[6]; t.bytes[7][14] = src14[7];
                 t.bytes[0][15] = src15[0]; t.bytes[1][15] = src15[1];  t.bytes[2][15] = src15[2]; t.bytes[3][15] = src15[3];   t.bytes[4][15] = src15[4];  t.bytes[5][15] = src15[5];  t.bytes[6][15] = src15[6]; t.bytes[7][15] = src15[7];
 
-                // get pointers to the output. 
+                // get pointers to the output.
                 auto out0 = outStart + (chunkSize * h + 0) * eightOutSize1 + w * 2;
                 auto out1 = outStart + (chunkSize * h + 1) * eightOutSize1 + w * 2;
                 auto out2 = outStart + (chunkSize * h + 2) * eightOutSize1 + w * 2;
@@ -326,17 +471,17 @@ namespace osuCrypto {
 
                 for (int j = 0; j < 8; j++)
                 {
-                    // use the special _mm_movemask_epi8 to perform the final step of that bit-wise tranpose.
+                    // use the special movemask_epi8 to perform the final step of that bit-wise tranpose.
                     // this instruction takes ever 8'th bit (start at idx 7) and moves them into a single
                     // 16 bit output. Its like shaving off the top bit of each of the 16 bytes.
-                    *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
-                    *(u16*)out1 = _mm_movemask_epi8(t.blks[1]);
-                    *(u16*)out2 = _mm_movemask_epi8(t.blks[2]);
-                    *(u16*)out3 = _mm_movemask_epi8(t.blks[3]);
-                    *(u16*)out4 = _mm_movemask_epi8(t.blks[4]);
-                    *(u16*)out5 = _mm_movemask_epi8(t.blks[5]);
-                    *(u16*)out6 = _mm_movemask_epi8(t.blks[6]);
-                    *(u16*)out7 = _mm_movemask_epi8(t.blks[7]);
+                    *(u16*)out0 = t.blks[0].movemask_epi8();
+                    *(u16*)out1 = t.blks[1].movemask_epi8();
+                    *(u16*)out2 = t.blks[2].movemask_epi8();
+                    *(u16*)out3 = t.blks[3].movemask_epi8();
+                    *(u16*)out4 = t.blks[4].movemask_epi8();
+                    *(u16*)out5 = t.blks[5].movemask_epi8();
+                    *(u16*)out6 = t.blks[6].movemask_epi8();
+                    *(u16*)out7 = t.blks[7].movemask_epi8();
 
                     // step each of out 8 pointer over to the next output row.
                     out0 -= out.stride();
@@ -348,21 +493,21 @@ namespace osuCrypto {
                     out6 -= out.stride();
                     out7 -= out.stride();
 
-                    // shift the 128 values so that the top bit is not the next one.
-                    t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
-                    t.blks[1] = _mm_slli_epi64(t.blks[1], 1);
-                    t.blks[2] = _mm_slli_epi64(t.blks[2], 1);
-                    t.blks[3] = _mm_slli_epi64(t.blks[3], 1);
-                    t.blks[4] = _mm_slli_epi64(t.blks[4], 1);
-                    t.blks[5] = _mm_slli_epi64(t.blks[5], 1);
-                    t.blks[6] = _mm_slli_epi64(t.blks[6], 1);
-                    t.blks[7] = _mm_slli_epi64(t.blks[7], 1);
+                    // shift the 128 values so that the top bit is now the next one.
+                    t.blks[0] = (t.blks[0] << 1);
+                    t.blks[1] = (t.blks[1] << 1);
+                    t.blks[2] = (t.blks[2] << 1);
+                    t.blks[3] = (t.blks[3] << 1);
+                    t.blks[4] = (t.blks[4] << 1);
+                    t.blks[5] = (t.blks[5] << 1);
+                    t.blks[6] = (t.blks[6] << 1);
+                    t.blks[7] = (t.blks[7] << 1);
                 }
             }
         }
 
         // this is a special case there we dont have chunkSize bytes of input column left.
-        // because of this, the vectorized code above does not work and we instead so thing 
+        // because of this, the vectorized code above does not work and we instead so thing
         // one byte as a time.
 
         // hhEnd denotes how many bytes are left [0,8).
@@ -370,12 +515,12 @@ namespace osuCrypto {
 
         // the last byte might be only part of a byte, so we also account for this
         auto lastSkip = (8 - leftOverHeight % 8) % 8;
-        
+
         for (int hh = 0; hh < hhEnd; ++hh)
         {
             // compute those parameters that determine if this is the last byte
-            // and that its a partial byte meaning that the last so mant output 
-            // rows  should not be written to. 
+            // and that its a partial byte meaning that the last so mant output
+            // rows  should not be written to.
             auto skip = hh == (hhEnd - 1) ? lastSkip : 0;
             auto rem = 8 - skip;
 
@@ -405,21 +550,21 @@ namespace osuCrypto {
                 auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.stride() + w * 2;
 
                 out0 -= out.stride() * skip;
-                t.blks[0] = _mm_slli_epi64(t.blks[0],int( skip));
+                t.blks[0] = (t.blks[0] << int( skip));
 
                 for (int j = 0; j < rem; j++)
                 {
-                    *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
+                    *(u16*)out0 = t.blks[0].movemask_epi8();
 
                     out0 -= out.stride();
 
-                    t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
+                    t.blks[0] = (t.blks[0] << 1);
                 }
             }
         }
 
-        // this is a special case where the input column count was not a multiple of 16. 
-        // For this case, we use 
+        // this is a special case where the input column count was not a multiple of 16.
+        // For this case, we use
         if (leftOverWidth)
         {
             for (int h = 0; h < subBlockHight; ++h)
@@ -460,14 +605,14 @@ namespace osuCrypto {
                 {
                     for (int j = 0; j < 8; j++)
                     {
-                        *out0 = _mm_movemask_epi8(t.blks[0]);
-                        *out1 = _mm_movemask_epi8(t.blks[1]);
-                        *out2 = _mm_movemask_epi8(t.blks[2]);
-                        *out3 = _mm_movemask_epi8(t.blks[3]);
-                        *out4 = _mm_movemask_epi8(t.blks[4]);
-                        *out5 = _mm_movemask_epi8(t.blks[5]);
-                        *out6 = _mm_movemask_epi8(t.blks[6]);
-                        *out7 = _mm_movemask_epi8(t.blks[7]);
+                        *out0 = t.blks[0].movemask_epi8();
+                        *out1 = t.blks[1].movemask_epi8();
+                        *out2 = t.blks[2].movemask_epi8();
+                        *out3 = t.blks[3].movemask_epi8();
+                        *out4 = t.blks[4].movemask_epi8();
+                        *out5 = t.blks[5].movemask_epi8();
+                        *out6 = t.blks[6].movemask_epi8();
+                        *out7 = t.blks[7].movemask_epi8();
 
                         out0 -= out.stride();
                         out1 -= out.stride();
@@ -478,28 +623,28 @@ namespace osuCrypto {
                         out6 -= out.stride();
                         out7 -= out.stride();
 
-                        t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
-                        t.blks[1] = _mm_slli_epi64(t.blks[1], 1);
-                        t.blks[2] = _mm_slli_epi64(t.blks[2], 1);
-                        t.blks[3] = _mm_slli_epi64(t.blks[3], 1);
-                        t.blks[4] = _mm_slli_epi64(t.blks[4], 1);
-                        t.blks[5] = _mm_slli_epi64(t.blks[5], 1);
-                        t.blks[6] = _mm_slli_epi64(t.blks[6], 1);
-                        t.blks[7] = _mm_slli_epi64(t.blks[7], 1);
+                        t.blks[0] = (t.blks[0] << 1);
+                        t.blks[1] = (t.blks[1] << 1);
+                        t.blks[2] = (t.blks[2] << 1);
+                        t.blks[3] = (t.blks[3] << 1);
+                        t.blks[4] = (t.blks[4] << 1);
+                        t.blks[5] = (t.blks[5] << 1);
+                        t.blks[6] = (t.blks[6] << 1);
+                        t.blks[7] = (t.blks[7] << 1);
                     }
                 }
                 else
                 {
                     for (int j = 0; j < 8; j++)
                     {
-                        *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
-                        *(u16*)out1 = _mm_movemask_epi8(t.blks[1]);
-                        *(u16*)out2 = _mm_movemask_epi8(t.blks[2]);
-                        *(u16*)out3 = _mm_movemask_epi8(t.blks[3]);
-                        *(u16*)out4 = _mm_movemask_epi8(t.blks[4]);
-                        *(u16*)out5 = _mm_movemask_epi8(t.blks[5]);
-                        *(u16*)out6 = _mm_movemask_epi8(t.blks[6]);
-                        *(u16*)out7 = _mm_movemask_epi8(t.blks[7]);
+                        *(u16*)out0 = t.blks[0].movemask_epi8();
+                        *(u16*)out1 = t.blks[1].movemask_epi8();
+                        *(u16*)out2 = t.blks[2].movemask_epi8();
+                        *(u16*)out3 = t.blks[3].movemask_epi8();
+                        *(u16*)out4 = t.blks[4].movemask_epi8();
+                        *(u16*)out5 = t.blks[5].movemask_epi8();
+                        *(u16*)out6 = t.blks[6].movemask_epi8();
+                        *(u16*)out7 = t.blks[7].movemask_epi8();
 
                         out0 -= out.stride();
                         out1 -= out.stride();
@@ -510,14 +655,14 @@ namespace osuCrypto {
                         out6 -= out.stride();
                         out7 -= out.stride();
 
-                        t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
-                        t.blks[1] = _mm_slli_epi64(t.blks[1], 1);
-                        t.blks[2] = _mm_slli_epi64(t.blks[2], 1);
-                        t.blks[3] = _mm_slli_epi64(t.blks[3], 1);
-                        t.blks[4] = _mm_slli_epi64(t.blks[4], 1);
-                        t.blks[5] = _mm_slli_epi64(t.blks[5], 1);
-                        t.blks[6] = _mm_slli_epi64(t.blks[6], 1);
-                        t.blks[7] = _mm_slli_epi64(t.blks[7], 1);
+                        t.blks[0] = (t.blks[0] << 1);
+                        t.blks[1] = (t.blks[1] << 1);
+                        t.blks[2] = (t.blks[2] << 1);
+                        t.blks[3] = (t.blks[3] << 1);
+                        t.blks[4] = (t.blks[4] << 1);
+                        t.blks[5] = (t.blks[5] << 1);
+                        t.blks[6] = (t.blks[6] << 1);
+                        t.blks[7] = (t.blks[7] << 1);
                     }
                 }
             }
@@ -541,7 +686,7 @@ namespace osuCrypto {
                 };
 
 
-                t.blks[0] = ZeroBlock; 
+                t.blks[0] = ZeroBlock;
                 for (int i = 0; i < leftOverWidth; ++i)
                 {
                     t.bytes[0][i] = src[i][0];
@@ -550,53 +695,31 @@ namespace osuCrypto {
                 auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.stride() + w * 2;
 
                 out0 -= out.stride() * skip;
-                t.blks[0] = _mm_slli_epi64(t.blks[0],int( skip));
+                t.blks[0] = (t.blks[0] << int( skip));
 
                 for (int j = 0; j < rem; j++)
                 {
                     if (leftOverWidth > 8)
                     {
-                        *(u16*)out0 = _mm_movemask_epi8(t.blks[0]);
+                        *(u16*)out0 = t.blks[0].movemask_epi8();
                     }
                     else
                     {
-                        *out0 = _mm_movemask_epi8(t.blks[0]);
+                        *out0 = t.blks[0].movemask_epi8();
                     }
 
                     out0 -= out.stride();
 
-                    t.blks[0] = _mm_slli_epi64(t.blks[0], 1);
+                    t.blks[0] = (t.blks[0] << 1);
                 }
             }
         }
     }
 
 
-    void print(array<block, 128>& inOut)
-    {
-        BitVector temp(128);
-
-        for (u64 i = 0; i < 128; ++i)
-        {
-
-            temp.assign(inOut[i]);
-            std::cout << temp << std::endl;
-        }
-        std::cout << std::endl;
-    }
-
-    u8 getBit(array<block, 128>& inOut, u64 i, u64 j)
-    {
-        BitVector temp(128);
-        temp.assign(inOut[i]);
-
-        return temp[j];
-
-    }
 
 
-
-    void sse_transpose128(array<block, 128>& inOut)
+    void sse_transpose128(block* inOut)
     {
         array<block, 2> a, b;
 
@@ -682,41 +805,41 @@ namespace osuCrypto {
         auto x16_7 = x * 16 + 7;
         auto x16_15 = x * 16 + 15;
 
-        block b0 = _mm_slli_epi64(in[0], 0);
-        block b1 = _mm_slli_epi64(in[0], 1);
-        block b2 = _mm_slli_epi64(in[0], 2);
-        block b3 = _mm_slli_epi64(in[0], 3);
-        block b4 = _mm_slli_epi64(in[0], 4);
-        block b5 = _mm_slli_epi64(in[0], 5);
-        block b6 = _mm_slli_epi64(in[0], 6);
-        block b7 = _mm_slli_epi64(in[0], 7);
+        block b0 = (in[0] << 0);
+        block b1 = (in[0] << 1);
+        block b2 = (in[0] << 2);
+        block b3 = (in[0] << 3);
+        block b4 = (in[0] << 4);
+        block b5 = (in[0] << 5);
+        block b6 = (in[0] << 6);
+        block b7 = (in[0] << 7);
 
-        outU16View[x16_7 - 0][i8y] = _mm_movemask_epi8(b0);
-        outU16View[x16_7 - 1][i8y] = _mm_movemask_epi8(b1);
-        outU16View[x16_7 - 2][i8y] = _mm_movemask_epi8(b2);
-        outU16View[x16_7 - 3][i8y] = _mm_movemask_epi8(b3);
-        outU16View[x16_7 - 4][i8y] = _mm_movemask_epi8(b4);
-        outU16View[x16_7 - 5][i8y] = _mm_movemask_epi8(b5);
-        outU16View[x16_7 - 6][i8y] = _mm_movemask_epi8(b6);
-        outU16View[x16_7 - 7][i8y] = _mm_movemask_epi8(b7);
+        outU16View[x16_7 - 0][i8y] = b0.movemask_epi8();
+        outU16View[x16_7 - 1][i8y] = b1.movemask_epi8();
+        outU16View[x16_7 - 2][i8y] = b2.movemask_epi8();
+        outU16View[x16_7 - 3][i8y] = b3.movemask_epi8();
+        outU16View[x16_7 - 4][i8y] = b4.movemask_epi8();
+        outU16View[x16_7 - 5][i8y] = b5.movemask_epi8();
+        outU16View[x16_7 - 6][i8y] = b6.movemask_epi8();
+        outU16View[x16_7 - 7][i8y] = b7.movemask_epi8();
 
-        b0 = _mm_slli_epi64(in[1], 0);
-        b1 = _mm_slli_epi64(in[1], 1);
-        b2 = _mm_slli_epi64(in[1], 2);
-        b3 = _mm_slli_epi64(in[1], 3);
-        b4 = _mm_slli_epi64(in[1], 4);
-        b5 = _mm_slli_epi64(in[1], 5);
-        b6 = _mm_slli_epi64(in[1], 6);
-        b7 = _mm_slli_epi64(in[1], 7);
+        b0 = (in[1] << 0);
+        b1 = (in[1] << 1);
+        b2 = (in[1] << 2);
+        b3 = (in[1] << 3);
+        b4 = (in[1] << 4);
+        b5 = (in[1] << 5);
+        b6 = (in[1] << 6);
+        b7 = (in[1] << 7);
 
-        outU16View[x16_15 - 0][i8y] = _mm_movemask_epi8(b0);
-        outU16View[x16_15 - 1][i8y] = _mm_movemask_epi8(b1);
-        outU16View[x16_15 - 2][i8y] = _mm_movemask_epi8(b2);
-        outU16View[x16_15 - 3][i8y] = _mm_movemask_epi8(b3);
-        outU16View[x16_15 - 4][i8y] = _mm_movemask_epi8(b4);
-        outU16View[x16_15 - 5][i8y] = _mm_movemask_epi8(b5);
-        outU16View[x16_15 - 6][i8y] = _mm_movemask_epi8(b6);
-        outU16View[x16_15 - 7][i8y] = _mm_movemask_epi8(b7);
+        outU16View[x16_15 - 0][i8y] = b0.movemask_epi8();
+        outU16View[x16_15 - 1][i8y] = b1.movemask_epi8();
+        outU16View[x16_15 - 2][i8y] = b2.movemask_epi8();
+        outU16View[x16_15 - 3][i8y] = b3.movemask_epi8();
+        outU16View[x16_15 - 4][i8y] = b4.movemask_epi8();
+        outU16View[x16_15 - 5][i8y] = b5.movemask_epi8();
+        outU16View[x16_15 - 6][i8y] = b6.movemask_epi8();
+        outU16View[x16_15 - 7][i8y] = b7.movemask_epi8();
 
     }
 
@@ -747,6 +870,192 @@ namespace osuCrypto {
 
     }
 
+#ifdef OC_ENABLE_AVX2
+    // Templates are used for loop unrolling.
+
+    // Base case for the following function.
+    template<size_t blockSizeShift, size_t blockRowsShift, size_t j = 0>
+    static OC_FORCEINLINE typename std::enable_if<j == (1 << blockSizeShift)>::type
+    avx_transpose_block_iter1(__m256i* inOut) {}
+
+    // Transpose the order of the 2^blockSizeShift by 2^blockSizeShift blocks (but not within each
+    // block) within each 2^(blockSizeShift+1) by 2^(blockSizeShift+1) matrix in a nRows by 2^7
+    // matrix. Only handles the first two rows out of every 2^blockRowsShift rows in each block,
+    // starting j * 2^blockRowsShift rows into the block. When blockRowsShift == 1 this does the
+    // transposes within the 2 by 2 blocks as well.
+    template<size_t blockSizeShift, size_t blockRowsShift, size_t j = 0>
+    static OC_FORCEINLINE typename std::enable_if<
+        (j < (1 << blockSizeShift)) && (blockSizeShift > 0) && (blockSizeShift < 6) &&
+        (blockRowsShift >= 1)
+    >::type avx_transpose_block_iter1(__m256i* inOut)
+    {
+        avx_transpose_block_iter1<blockSizeShift, blockRowsShift, j + (1 << blockRowsShift)>(inOut);
+
+        // Mask consisting of alternating 2^blockSizeShift 0s and 2^blockSizeShift 1s. Least
+        // significant bit is 0.
+        u64 mask = ((u64) -1) << 32;
+        for (int k = 4; k >= (int) blockSizeShift; --k)
+            mask = mask ^ (mask >> (1 << k));
+
+        __m256i& x = inOut[j / 2];
+        __m256i& y = inOut[j / 2 + (1 << (blockSizeShift - 1))];
+
+        // Handle the 2x2 blocks as well. Each block is within a single 256-bit vector, so it works
+        // differently from the other cases.
+        if (blockSizeShift == 1)
+        {
+            // transpose 256 bit blocks so that two can be done in parallel.
+            __m256i u = _mm256_permute2x128_si256(x, y, 0x20);
+            __m256i v = _mm256_permute2x128_si256(x, y, 0x31);
+
+            __m256i diff = _mm256_xor_si256(u, _mm256_slli_epi16(v, 1));
+            diff = _mm256_and_si256(diff, _mm256_set1_epi16(0xaaaa));
+            u = _mm256_xor_si256(u, diff);
+            v = _mm256_xor_si256(v, _mm256_srli_epi16(diff, 1));
+
+            // Transpose again to switch back.
+            x = _mm256_permute2x128_si256(u, v, 0x20);
+            y = _mm256_permute2x128_si256(u, v, 0x31);
+        }
+
+        __m256i diff = _mm256_xor_si256(x, _mm256_slli_epi64(y, (u64) 1 << blockSizeShift));
+        diff = _mm256_and_si256(diff, _mm256_set1_epi64x(mask));
+        x = _mm256_xor_si256(x, diff);
+        y = _mm256_xor_si256(y, _mm256_srli_epi64(diff, (u64) 1 << blockSizeShift));
+    }
+
+    // Special case to use the unpack* instructions.
+    template<size_t blockSizeShift, size_t blockRowsShift, size_t j = 0>
+    static OC_FORCEINLINE typename std::enable_if<
+        (j < (1 << blockSizeShift)) && (blockSizeShift == 6)
+    >::type avx_transpose_block_iter1(__m256i* inOut)
+    {
+        avx_transpose_block_iter1<blockSizeShift, blockRowsShift, j + (1 << blockRowsShift)>(inOut);
+
+        __m256i& x = inOut[j / 2];
+        __m256i& y = inOut[j / 2 + (1 << (blockSizeShift - 1))];
+        __m256i outX = _mm256_unpacklo_epi64(x, y);
+        __m256i outY = _mm256_unpackhi_epi64(x, y);
+        x = outX;
+        y = outY;
+    }
+
+    // Base case for the following function.
+    template<size_t blockSizeShift, size_t blockRowsShift, size_t nRows>
+    static OC_FORCEINLINE typename std::enable_if<nRows == 0>::type
+    avx_transpose_block_iter2(__m256i* inOut) {}
+
+    // Transpose the order of the 2^blockSizeShift by 2^blockSizeShift blocks (but not within each
+    // block) within each 2^(blockSizeShift+1) by 2^(blockSizeShift+1) matrix in a nRows by 2^7
+    // matrix. Only handles the first two rows out of every 2^blockRowsShift rows in each block.
+    // When blockRowsShift == 1 this does the transposes within the 2 by 2 blocks as well.
+    template<size_t blockSizeShift, size_t blockRowsShift, size_t nRows>
+    static OC_FORCEINLINE typename std::enable_if<(nRows > 0)>::type
+    avx_transpose_block_iter2(__m256i* inOut)
+    {
+        constexpr size_t matSize = 1 << (blockSizeShift + 1);
+        static_assert(nRows % matSize == 0, "Can't transpose a fractional number of matrices");
+
+        constexpr size_t i = nRows - matSize;
+        avx_transpose_block_iter2<blockSizeShift, blockRowsShift, i>(inOut);
+        avx_transpose_block_iter1<blockSizeShift, blockRowsShift>(inOut + i / 2);
+    }
+
+    // Base case for the following function.
+    template<size_t blockSizeShift, size_t matSizeShift, size_t blockRowsShift, size_t matRowsShift>
+    static OC_FORCEINLINE typename std::enable_if<blockSizeShift == matSizeShift>::type
+    avx_transpose_block(__m256i* inOut) {}
+
+    // Transpose the order of the 2^blockSizeShift by 2^blockSizeShift blocks (but not within each
+    // block) within each 2^matSizeShift by 2^matSizeShift matrix in a 2^(matSizeShift +
+    // matRowsShift) by 2^7 matrix. Only handles the first two rows out of every 2^blockRowsShift
+    // rows in each block. When blockRowsShift == 1 this does the transposes within the 2 by 2
+    // blocks as well.
+    template<size_t blockSizeShift, size_t matSizeShift, size_t blockRowsShift, size_t matRowsShift>
+    static OC_FORCEINLINE typename std::enable_if<(blockSizeShift < matSizeShift)>::type
+    avx_transpose_block(__m256i* inOut)
+    {
+        avx_transpose_block_iter2<
+            blockSizeShift, blockRowsShift, (1 << (matRowsShift + matSizeShift))>(inOut);
+        avx_transpose_block<blockSizeShift + 1, matSizeShift, blockRowsShift, matRowsShift>(inOut);
+    }
+
+    static constexpr size_t avxBlockShift = 4;
+    static constexpr size_t avxBlockSize = 1 << avxBlockShift;
+
+    // Base case for the following function.
+    template<size_t iter = 7>
+    static OC_FORCEINLINE typename std::enable_if<iter <= avxBlockShift + 1>::type
+    avx_transpose(__m256i* inOut)
+    {
+        for (size_t i = 0; i < 64; i += avxBlockSize)
+            avx_transpose_block<1, iter, 1, avxBlockShift + 1 - iter>(inOut + i);
+    }
+
+    // Algorithm roughly from "Extension of Eklundh's matrix transposition algorithm and its
+    // application in digital image processing". Transpose each block of size 2^iter by 2^iter
+    // inside a 2^7 by 2^7 matrix.
+    template<size_t iter = 7>
+    static OC_FORCEINLINE typename std::enable_if<(iter > avxBlockShift + 1)>::type
+    avx_transpose(__m256i* inOut)
+    {
+        assert((u64)inOut % 32 == 0);
+        avx_transpose<iter - avxBlockShift>(inOut);
+
+        constexpr size_t blockSizeShift = iter - avxBlockShift;
+        size_t mask = (1 << (iter - 1)) - (1 << (blockSizeShift - 1));
+        if (iter == 7)
+            // Simpler (but equivalent) iteration for when iter == 7, which means that it doesn't
+            // need to count on both sides of the range of bits specified in mask.
+            for (size_t i = 0; i < (1 << (blockSizeShift - 1)); ++i)
+                avx_transpose_block<blockSizeShift, iter, blockSizeShift, 0>(inOut + i);
+        else
+            // Iteration trick adapted from "Hacker's Delight".
+            for (size_t i = 0; i < 64; i = (i + mask + 1) & ~mask)
+                avx_transpose_block<blockSizeShift, iter, blockSizeShift, 0>(inOut + i);
+    }
+
+    void avx_transpose128(block* inOut)
+    {
+        avx_transpose((__m256i*) inOut);
+    }
+
+    // input is 128 rows off 8 blocks each.
+    void avx_transpose128x1024(block* inOut)
+    {
+        assert((u64)inOut % 32 == 0);
+        AlignedArray<block, 128 * 8> buff;
+        for (u64 i = 0; i < 8; ++i)
+        {
+
+
+            //AlignedArray<block, 128> sub;
+            auto sub = &buff[128 * i];
+            for (u64 j = 0; j < 128; ++j)
+            {
+                sub[j] = inOut[j * 8 + i];
+            }
+
+            //for (u64 j = 0; j < 128; ++j)
+            //{
+            //    buff[128 * i + j] = inOut[i + j * 8];
+            //}
+
+            avx_transpose128(&buff[128 * i]);
+        }
+
+        for (u64 i = 0; i < 8; ++i)
+        {
+            //AlignedArray<block, 128> sub;
+            auto sub = &buff[128 * i];
+            for (u64 j = 0; j < 128; ++j)
+            {
+                inOut[j * 8 + i] = sub[j];
+            }
+        }
+
+    }
+#endif
 }
 
 

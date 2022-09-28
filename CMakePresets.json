@@ -1,0 +1,89 @@
+﻿{
+  "version": 2,
+  "configurePresets": [
+    {
+      "name": "linux",
+      "displayName": "Linux",
+      "description": "Target the Windows Subsystem for Linux (WSL) or a remote Linux system.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_ALL_OT": true,
+        "LIBOTE_CPP_VER": "17",
+        "ENABLE_KKRT": "ON",
+        "ENABLE_IKNP": "ON",
+        "ENABLE_MR": "ON",
+        "ENABLE_SIMPLESTOT": "ON",
+        "ENABLE_RELIC": "OFF",
+        "ENABLE_SODIUM": "ON",
+        "ENABLE_BOOST": "OFF",
+        "FETCH_AUTO": "ON",
+        "ENABLE_CIRCUITS": true,
+        "VERBOSE_FETCH": true,
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
+      },
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": { "hostOS": [ "Linux" ] },
+        "microsoft.com/VisualStudioRemoteSettings/CMake/1.0": { "sourceDir": "$env{HOME}/.vs/$ms{projectDirName}" }
+      }
+    },
+    {
+      "name": "x64-Debug",
+      "displayName": "Windows x64 Debug",
+      "description": "Target Windows with the Visual Studio development environment.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "LIBOTE_CPP_VER": "17",
+        "ENABLE_ALL_OT": true,
+        "ENABLE_KKRT": "ON",
+        "ENABLE_IKNP": "ON",
+        "ENABLE_MR": "ON",
+        "ENABLE_SIMPLESTOT": "ON",
+        "ENABLE_RELIC": "ON",
+        "ENABLE_BOOST": "ON",
+        "ENABLE_BITPOLYMUL": true,
+        "FETCH_AUTO": "ON",
+        "ENABLE_CIRCUITS": true,
+        "VERBOSE_FETCH": true,
+        "ENABLE_SSE": true,
+        "ENABLE_AVX": true,
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
+      },
+      "vendor": { "microsoft.com/VisualStudioSettings/CMake/1.0": { "hostOS": [ "Windows" ] } }
+    },
+    {
+      "name": "x64-Release",
+      "displayName": "Windows x64 Release",
+      "description": "Target Windows with the Visual Studio development environment.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "LIBOTE_CPP_VER": "17",
+        "ENABLE_ALL_OT": true,
+        "ENABLE_RELIC": true,
+        "COPROTO_ENABLE_BOOST": true,
+        "ENABLE_BOOST": "OFF",
+        "FETCH_AUTO": "ON",
+        "ENABLE_CIRCUITS": true,
+        "ENABLE_BITPOLYMUL": true,
+        "VERBOSE_FETCH": true,
+        "ENABLE_RELIC": true,
+        "ENABLE_ALL_OT": true,
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
+      },
+      "vendor": { "microsoft.com/VisualStudioSettings/CMake/1.0": { "hostOS": [ "Windows" ] } }
+    }
+  ]
+}
