@@ -20,6 +20,7 @@
 #include "Tools.h"
 #include "LDPC/Mtx.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
+#include <cmath>
 
 namespace osuCrypto
 {
