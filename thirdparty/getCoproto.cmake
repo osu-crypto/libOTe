@@ -2,7 +2,7 @@
 set(USER_NAME           )      
 set(TOKEN               )      
 set(GIT_REPOSITORY      "https://github.com/Visa-Research/coproto.git")
-set(GIT_TAG             "8ec044185ddfdb5ae6c13d4045dde3bbce30a40a" )
+set(GIT_TAG             "cb0be43b4f273b403479740bf9e22600a6656af7" )
 
 set(CLONE_DIR "${CMAKE_CURRENT_LIST_DIR}/coproto")
 set(BUILD_DIR "${CLONE_DIR}/out/build/${OC_CONFIG}")
@@ -18,7 +18,9 @@ if(NOT COPROTO_FOUND)
                        -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE} -DVERBOSE_FETCH=${VERBOSE_FETCH}
                        -DCOPROTO_FETCH_AUTO=true
                        -DCOPROTO_ENABLE_BOOST=${COPROTO_ENABLE_BOOST}
-                       -DCOPROTO_CPP_VER=${LIBOTE_CPP_VER})
+                       -DCOPROTO_CPP_VER=${LIBOTE_CPP_VER}
+                       -DCOPROTO_PIC=${OC_PIC}
+                       )
     set(BUILD_CMD     ${CMAKE_COMMAND} --build ${BUILD_DIR} --config ${CMAKE_BUILD_TYPE})
     set(INSTALL_CMD   ${CMAKE_COMMAND} --install ${BUILD_DIR} --config ${CMAKE_BUILD_TYPE} --prefix ${OC_THIRDPARTY_INSTALL_PREFIX})
 
