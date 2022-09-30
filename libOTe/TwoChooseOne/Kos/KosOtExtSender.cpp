@@ -6,6 +6,7 @@
 #include "cryptoTools/Crypto/Commit.h"
 #include "cryptoTools/Network/Channel.h"
 #include "cryptoTools/Common/Timer.h"
+#include "cryptoTools/Common/Log.h"
 
 
 namespace osuCrypto
@@ -72,6 +73,24 @@ namespace osuCrypto
         PRNG& prng,
         Socket& chl)
     {
+
+#ifndef NO_KOS_WARNING
+        // warn the user on program exit.
+        struct Warned
+        {
+            ~Warned()
+            {
+                std::cout << Color::Red << "WARNING: This program made use of the KOS OT extension protocol. "
+                    << "The security of this protocol remains unclear and it is highly recommended to use the "
+                    << "SoftSpoken protocol instead. See the associated paper for details. Rebuild the library "
+                    << "with -DNO_KOS_WARNING=ON to disable this message."
+                    << LOCATION << Color::Default << std::endl;
+
+            }
+        };
+        static Warned wardned;
+#endif
+
         if (messages.size() == 0)
             throw RTE_LOC;
 
@@ -394,8 +413,8 @@ namespace osuCrypto
             else
             {
                 span<block> hh(&messages[doneIdx][0], 2 * (stop - doneIdx));
-                mAesFixedKey.TmmoHashBlocks(hh, hh, [tweak = doneIdx * 2]() mutable {
-                    return block(tweak++ >> 1);
+                mAesFixedKey.TmmoHashBlocks(hh, hh, [mTweak = doneIdx * 2]() mutable {
+                    return block(mTweak++ >> 1);
                 });
             }
 

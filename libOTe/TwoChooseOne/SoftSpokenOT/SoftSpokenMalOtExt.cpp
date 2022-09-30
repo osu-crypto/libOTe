@@ -10,7 +10,7 @@ namespace osuCrypto
 
 	constexpr u64 SubspaceVoleMaliciousBase::gfMods[];
 
-	task<> SoftSpokenMalLeakyDotSender::send(
+	task<> SoftSpokenMalOtSender::send(
 		span<std::array<block, 2>> messages, PRNG& prng, Socket& chl)
 	{
 		MC_BEGIN(task<>, this, messages, &prng, &chl, 
@@ -26,10 +26,10 @@ namespace osuCrypto
 		if (!hasBaseOts())
 			MC_AWAIT(genBaseOts(prng, chl));
 
-		if (mBlockIdx == 0)
+		if (mBase.mBlockIdx == 0)
 		{
 			seed = prng.get<block>();
-			mAesMgr.setSeed(seed);
+			mBase.mAesMgr.setSeed(seed);
 			MC_AWAIT(chl.send(std::move(seed)));
 		}
 
@@ -38,23 +38,25 @@ namespace osuCrypto
 		numExtra = nChunks - messagesFullChunks; // Always 1 or 2
 
 		scratch = span<block>(messages[0].data(), messages.size() * 2);
-		if (wSize() > 2 * 128)
+		if (mBase.wSize() > 2 * 128)
 		{
 			scratchBacking.resize(messagesFullChunks * chunkSize() + paddingSize());
 			scratch = scratchBacking;
 		}
 
-
+		scratch[0] = ZeroBlock;
 
 		MC_AWAIT(runBatch(chl, scratch.subspan(0, messagesFullChunks * chunkSize())));
+
+		assert(scratch[0] != ZeroBlock);
 
 		// Extra blocks
 		MC_AWAIT(runBatch(chl, mExtraW.subspan(0, numExtra * chunkSize())));
 
 
-		MC_AWAIT(mSubVole.sendChallenge(prng, chl));
+		MC_AWAIT(mBase.mSubVole.sendChallenge(prng, chl));
 
-		if(mRandomOt)
+		if(mBase.mRandomOt)
 			MC_AWAIT(mHasher.send(prng, chl));
 
 		//hasher.setGlobalParams(this, scratch);
@@ -65,14 +67,14 @@ namespace osuCrypto
 
 		// Hash the last extra block if there was one with no used mMessages in it at all.
 		if (numExtra == 2 || messages.size() % 128 == 0)
-			mSubVole.hash(mExtraW.subspan(chunkSize() * (numExtra - 1), wPadded()));
+			mBase.mSubVole.hash(mExtraW.subspan(chunkSize() * (numExtra - 1), mBase.wPadded()));
 
-		MC_AWAIT(mSubVole.checkResponse(chl));
+		MC_AWAIT(mBase.mSubVole.checkResponse(chl));
 
 		MC_END();
 	}
 
-	task<> SoftSpokenMalLeakyDotSender::runBatch(Socket& chl, span<block> messages)
+	task<> SoftSpokenMalOtSender::runBatch(Socket& chl, span<block> messages)
 	{
 		MC_BEGIN(task<>, this, messages, &chl,
 			numInstances = u64{},
@@ -96,8 +98,8 @@ namespace osuCrypto
 		nInstance = 0;
 		for (; nInstance + minInstances <= numInstances; ++nChunk, nInstance += chunkSize_)
 		{
-			if (nChunk % commSize == 0)
-				MC_AWAIT(recvBuffer(chl, std::min<u64>(numChunks - nChunk, commSize)));
+			if (nChunk % mBase.commSize == 0)
+				MC_AWAIT(mBase.recvBuffer(chl, std::min<u64>(numChunks - nChunk, mBase.commSize)));
 
 			processChunk(
 				nChunk, chunkSize_,
@@ -110,8 +112,8 @@ namespace osuCrypto
 
 		for (; nInstance < numInstances; ++nChunk, nInstance += chunkSize_)
 		{
-			if (nChunk % commSize == 0)
-				MC_AWAIT(recvBuffer(chl, std::min<u64>(numChunks - nChunk, commSize)));
+			if (nChunk % mBase.commSize == 0)
+				MC_AWAIT(mBase.recvBuffer(chl, std::min<u64>(numChunks - nChunk, mBase.commSize)));
 
 			numUsed = std::min<u64>(numInstances - nInstance, chunkSize_);
 
@@ -124,13 +126,16 @@ namespace osuCrypto
 		MC_END();
 	}
 
-	void SoftSpokenMalLeakyDotSender::processChunk(u64 nChunk, u64 numUsed, span<block> messages)
+	void SoftSpokenMalOtSender::processChunk(u64 nChunk, u64 numUsed, span<block> messages)
 	{
-		u64 blockIdx = mBlockIdx++;
-		mSubVole.generateChosen(blockIdx, mAesMgr.useAES(mSubVole.mVole.mNumVoles), messages.subspan(0, wPadded()));
+		u64 blockIdx = mBase.mBlockIdx++;
+		mBase.mSubVole.generateChosen(
+			blockIdx, 
+			mBase.mAesMgr.useAES(mBase.mSubVole.mVole.mNumVoles), 
+			messages.subspan(0, mBase.wPadded()));
 	}
 
-	OC_FORCEINLINE void SoftSpokenMalLeakyDotSender::processPartialChunk(
+	OC_FORCEINLINE void SoftSpokenMalOtSender::processPartialChunk(
 		u64 nChunk, u64 numUsed, 
 		span<block> messages, span<block> temp)
 	{
@@ -143,9 +148,9 @@ namespace osuCrypto
 	}
 
 
-	inline void SoftSpokenMalLeakyDotSender::Hasher::runBatch(
+	inline void SoftSpokenMalOtSender::Hasher::runBatch(
 		span<std::array<block,2>> messages,
-		SoftSpokenMalLeakyDotSender* parent,
+		SoftSpokenMalOtSender* parent,
 		span<block> extras)
 	{
 
@@ -161,7 +166,7 @@ namespace osuCrypto
 			processChunk(
 				nChunk, chunkSize(),
 				messages.subspan(nInstance, minInstances), parent, 
-				extras.subspan(nChunk * parent->chunkSize(), parent->wPadded()));
+				extras.subspan(nChunk * parent->chunkSize(), parent->mBase.wPadded()));
 
 		std::array<std::array<block,2>, 128> temps;
 
@@ -173,7 +178,7 @@ namespace osuCrypto
 			memset(temps.data() + numUsed, 0, (temps.size() - numUsed) * sizeof(block) * 2);
 
 			processChunk(nChunk, numUsed, temps, parent, 
-				extras.subspan(nChunk * parent->chunkSize(), parent->wPadded()));
+				extras.subspan(nChunk * parent->chunkSize(), parent->mBase.wPadded()));
 
 			memcpy(&messages[nInstance], temps.data(), numUsed * sizeof(block) * 2);
 
@@ -184,27 +189,40 @@ namespace osuCrypto
 		}
 	}
 
-	void SoftSpokenMalLeakyDotSender::Hasher::processChunk(
+	void SoftSpokenMalOtSender::Hasher::processChunk(
 		u64 nChunk, u64 numUsed,
 		span<std::array<block, 2>> messages,
-		SoftSpokenMalLeakyDotSender* parent,
+		SoftSpokenMalOtSender* parent,
 		span<block> inputW)
 	{
 
-		parent->mSubVole.hash(inputW);
+		parent->mBase.mSubVole.hash(inputW);
 
 		assert(inputW.size() >= 128);
+		//AlignedUnVector<block> tt(inputW.size());
+		//std::copy(inputW.begin(), inputW.end(), tt.begin());
+
 		transpose128(inputW.data());
 
-		if (parent->mRandomOt)
+		//AlignedUnVector<block> dd(inputW.size());
+		//std::copy(inputW.begin(), inputW.end(), dd.begin());
+		//transpose128(dd.data());
+
+
+		//for(u64 i =0; i < 128; ++i)
+		//	if(dd[i] != tt[i])
+		//		throw RTE_LOC;
+
+
+		if (parent->mBase.mRandomOt)
 		{
 			rtcr.useAES(numUsed);
-			SoftSpokenShOtSender::xorAndHashMessages(
-				numUsed, parent->delta(), (block*)messages.data(), inputW.data(), rtcr);
+			Base::xorAndHashMessages(
+				numUsed, parent->mBase.delta(), (block*)messages.data(), inputW.data(), rtcr);
 		}
 		else
 		{
-			parent->xorMessages(numUsed, (block*)messages.data(), inputW.data());
+			parent->mBase.xorMessages(numUsed, (block*)messages.data(), inputW.data());
 		}
 	}
 
@@ -257,10 +275,10 @@ namespace osuCrypto
 		inputV = inputV + nChunk * parent->chunkSize();
 
 		//auto inputV = mInputV + nChunk * mParent->chunkSize();
-		parent->mSubVole.hash(span<block>(&choices, 1), span<const block>(inputV, parent->vPadded()));
+		parent->mBase.mSubVole.hash(span<block>(&choices, 1), span<const block>(inputV, parent->mBase.vPadded()));
 		transpose128(inputV);
 
-		if (parent->mRandomOt == false)
+		if (parent->mBase.mRandomOt == false)
 		{
 
 			if (messages.data() != inputV)
@@ -320,17 +338,17 @@ namespace osuCrypto
 		if (!hasBaseOts())
 			MC_AWAIT(genBaseOts(prng, chl));
 
-		if (mBlockIdx == 0)
+		if (mBase.mBlockIdx == 0)
 		{
 			MC_AWAIT(chl.recv(seed));
-			mAesMgr.setSeed(seed);
+			mBase.mAesMgr.setSeed(seed);
 		}
 
 		nChunks = divCeil(messages.size() + 64, 128);
 		messagesFullChunks = messages.size() / 128;
 
 		scratch = (block*)messages.data();
-		if (vSize() > 128)
+		if (mBase.vSize() > 128)
 		{
 			scratchBacking.resize(messagesFullChunks * chunkSize() + paddingSize());
 			scratch = scratchBacking.data();
@@ -365,9 +383,9 @@ namespace osuCrypto
 			span<block>(extraChoices.data(), numExtra)));
 
 		MC_AWAIT(chl.recv(challenge));
-		mSubVole.setChallenge(challenge);
+		mBase.mSubVole.setChallenge(challenge);
 
-		if(mRandomOt)
+		if(mBase.mRandomOt)
 			MC_AWAIT(mHasher.recv(chl));
 
 		//void runBatch(
@@ -388,11 +406,11 @@ namespace osuCrypto
 
 		// Hash the last extra block if there was one with no used mMessages in it at all.
 		if (numExtra == 2 || messages.size() % 128 == 0)
-			mSubVole.hash(
+			mBase.mSubVole.hash(
 				span<block>(&extraChoices[numExtra - 1], 1),
-				mExtraV.subspan(chunkSize() * (numExtra - 1), vPadded()));
+				mExtraV.subspan(chunkSize() * (numExtra - 1), mBase.vPadded()));
 
-		MC_AWAIT(mSubVole.sendResponse(chl));
+		MC_AWAIT(mBase.mSubVole.sendResponse(chl));
 
 		MC_END();
 	}
@@ -410,7 +428,7 @@ namespace osuCrypto
 		);
 
 		minInstances = chunkSize() + paddingSize();
-		reserveSendBuffer(std::min<u64>(numChunks, commSize));
+		mBase.reserveSendBuffer(std::min<u64>(numChunks, mBase.commSize));
 
 		while (nInstance + minInstances <= numInstances)
 		{
@@ -424,20 +442,20 @@ namespace osuCrypto
 			if (nInstance + minInstances > numInstances)
 				break;
 
-			if (nChunk % commSize == 0)
+			if (nChunk % mBase.commSize == 0)
 			{
-				MC_AWAIT(sendBuffer(chl));
-				reserveSendBuffer(std::min<u64>(numChunks - nChunk, commSize));
+				MC_AWAIT(mBase.sendBuffer(chl));
+				mBase.reserveSendBuffer(std::min<u64>(numChunks - nChunk, mBase.commSize));
 			}
 		}
 
 		temp.resize(minInstances * (nInstance < numInstances));
 		for (; nInstance < numInstances; ++nChunk, nInstance += chunkSize())
 		{
-			if (nChunk && nChunk % commSize == 0)
+			if (nChunk && nChunk % mBase.commSize == 0)
 			{
-				MC_AWAIT(sendBuffer(chl));
-				reserveSendBuffer(std::min<u64>(numChunks - nChunk, commSize));
+				MC_AWAIT(mBase.sendBuffer(chl));
+				mBase.reserveSendBuffer(std::min<u64>(numChunks - nChunk, mBase.commSize));
 			}
 
 			numUsed = std::min<u64>(numInstances - nInstance, chunkSize());
@@ -448,8 +466,8 @@ namespace osuCrypto
 				temp);
 		}
 
-		if(hasSendBuffer())
-			MC_AWAIT(sendBuffer(chl));
+		if(mBase.hasSendBuffer())
+			MC_AWAIT(mBase.sendBuffer(chl));
 
 		MC_END();
 	}
@@ -470,20 +488,22 @@ namespace osuCrypto
 	void SoftSpokenMalOtReceiver::processChunk(
 		u64 nChunk, u64 numUsed, span<block> messages, block choices)
 	{
-		u64 blockIdx = mBlockIdx++;
-		mSubVole.generateChosen(
-			blockIdx, mAesMgr.useAES(mSubVole.mVole.mNumVoles),
-			span<block>(&choices, 1), messages.subspan(0, vPadded()));
+		u64 blockIdx = mBase.mBlockIdx++;
+		mBase.mSubVole.generateChosen(
+			blockIdx, 
+			mBase.mAesMgr.useAES(mBase.mSubVole.mVole.mNumVoles),
+			span<block>(&choices, 1), 
+			messages.subspan(0, mBase.vPadded()));
 	}
 
-	//template task<> SoftSpokenMalLeakyDotSender::sendImpl(
+	//template task<> SoftSpokenMalOtSender::sendImpl(
 	//	span<std::array<block, 2>> messages, PRNG& prng, Socket& chl,
-	//	SoftSpokenMalLeakyDotSender::Hasher& hasher);
+	//	SoftSpokenMalOtSender::Hasher& hasher);
 	//template task<> SoftSpokenMalOtReceiver::receiveImpl(
 	//	const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl,
 	//	SoftSpokenMalOtReceiver::Hasher& hasher);
 
-	//template task<> SoftSpokenMalLeakyDotSender::sendImpl(
+	//template task<> SoftSpokenMalOtSender::sendImpl(
 	//	span<std::array<block, 2>> messages, PRNG& prng, Socket& chl,
 	//	SoftSpokenMalOtSender::Hasher& hasher);
 	//template task<> SoftSpokenMalOtReceiver::receiveImpl(

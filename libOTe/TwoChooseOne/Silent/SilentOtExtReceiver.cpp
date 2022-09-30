@@ -35,29 +35,29 @@ namespace osuCrypto
 	// sets the KOS base OTs that are then used to extend
 	void SilentOtExtReceiver::setBaseOts(
 		span<std::array<block, 2>> baseSendOts) {
-#ifdef ENABLE_KOS
-		mKosRecver.setUniformBaseOts(baseSendOts);
+#ifdef ENABLE_SOFTSPOKEN_OT
+		mOtExtRecver.setBaseOts(baseSendOts);
 #else
-		throw std::runtime_error("KOS must be enabled");
+		throw std::runtime_error("soft spoken ot must be enabled");
 #endif
 	}
 
 
-	// return the number of base OTs KOS needs
+	// return the number of base OTs soft spoken ot needs
 	u64 SilentOtExtReceiver::baseOtCount() const {
-#ifdef ENABLE_KOS
-		return mKosRecver.baseOtCount();
+#ifdef ENABLE_SOFTSPOKEN_OT
+		return mOtExtRecver.baseOtCount();
 #else
-		throw std::runtime_error("KOS must be enabled");
+		throw std::runtime_error("soft spoken ot must be enabled");
 #endif
 	}
 
-	// returns true if the KOS base OTs are currently set.
+	// returns true if the soft spoken ot base OTs are currently set.
 	bool SilentOtExtReceiver::hasBaseOts() const {
-#ifdef ENABLE_KOS
-		return mKosRecver.hasBaseOts();
+#ifdef ENABLE_SOFTSPOKEN_OT
+		return mOtExtRecver.hasBaseOts();
 #else
-		throw std::runtime_error("KOS must be enabled");
+		throw std::runtime_error("soft spoken ot must be enabled");
 #endif
 	};
 
@@ -85,24 +85,24 @@ namespace osuCrypto
 	{
 		MC_BEGIN(task<>, this, &prng, &chl);
 		setTimePoint("recver.gen.start");
-#ifdef ENABLE_KOS
-		mKosRecver.mFiatShamir = true;
-		MC_AWAIT(mKosRecver.genBaseOts(prng, chl));
+#ifdef ENABLE_SOFTSPOKEN_OT
+		//mOtExtRecver.mFiatShamir = true;
+		MC_AWAIT(mOtExtRecver.genBaseOts(prng, chl));
 #else
-		throw std::runtime_error("KOS must be enabled");
+		throw std::runtime_error("soft spoken ot must be enabled");
 #endif
 		MC_END();
 	}
-	// Returns an indpendent copy of this extender.
+	// Returns an independent copy of this extender.
 	std::unique_ptr<OtExtReceiver> SilentOtExtReceiver::split() {
 
-#ifdef ENABLE_KOS
+#ifdef ENABLE_SOFTSPOKEN_OT
 		auto ptr = new SilentOtExtReceiver;
 		auto ret = std::unique_ptr<OtExtReceiver>(ptr);
-		ptr->mKosRecver = mKosRecver.splitBase();
+		ptr->mOtExtRecver = mOtExtRecver.splitBase();
 		return ret;
 #else
-		throw std::runtime_error("KOS must be enabled");
+		throw std::runtime_error("soft spoken ot must be enabled");
 #endif
 	};
 
@@ -168,17 +168,16 @@ namespace osuCrypto
 
 		msg.resize(choice.size());
 
-		// If we have KOS base OTs, use them
+		// If we have soft spoken ot base OTs, use them
 		// to extend to get the silent base OTs.
 
-#if defined(ENABLE_KOS) || defined(LIBOTE_HAS_BASE_OT)
+#if defined(ENABLE_SOFTSPOKEN_OT) || defined(LIBOTE_HAS_BASE_OT)
 
-#ifdef ENABLE_KOS
+#ifdef ENABLE_SOFTSPOKEN_OT
 		if (useOtExtension)
 		{
-
-			mKosRecver.mFiatShamir = true;
-			MC_AWAIT(mKosRecver.receive(choice, msg, prng, chl));
+			//mKosRecver.mFiatShamir = true;
+			MC_AWAIT(mOtExtRecver.receive(choice, msg, prng, chl));
 		}
 		else
 #endif
@@ -190,7 +189,7 @@ namespace osuCrypto
 		}
 
 #else
-		throw std::runtime_error("KOS or base OTs must be enabled");
+		throw std::runtime_error("soft spoken ot or base OTs must be enabled");
 #endif
 		setSilentBaseOts(msg);
 

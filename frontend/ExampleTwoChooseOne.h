@@ -45,7 +45,7 @@ namespace osuCrypto
         //std::is_same<T, SoftSpokenShOtReceiver>::value ||
         //std::is_same<T, SoftSpokenMalOtSender>::value ||
         //std::is_same<T, SoftSpokenMalOtReceiver>::value ||
-        //std::is_same<T, SoftSpokenMalLeakyDotSender>::value ||
+        //std::is_same<T, SoftSpokenMalOtSender>::value ||
         //std::is_same<T, SoftSpokenMalOtReceiver>::value
 		false
 		,

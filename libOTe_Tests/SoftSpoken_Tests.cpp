@@ -241,7 +241,7 @@ namespace tests_libOTe
         	{
 
 
-        		SoftSpokenMalLeakyDotSender sender;
+        		SoftSpokenMalOtSender sender;
         		SoftSpokenMalOtReceiver recver;
 
 
@@ -264,8 +264,8 @@ namespace tests_libOTe
         			baseRecv[i] = baseSend[i][baseChoice[i]];
         		}
 
-        		AlignedUnVector<block> recvMsg(numOTs);
-        		AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
+        		AlignedVector<block> recvMsg(numOTs);
+        		AlignedVector<std::array<block, 2>> sendMsg(numOTs);
 
                 memset(recvMsg.data(), 0xcc, numOTs * sizeof(block));
                 block bb0, bb1;
@@ -331,7 +331,7 @@ namespace tests_libOTe
                 //recver.init(fieldBits);
 
 
-                SoftSpokenMalLeakyDotSender sender;
+                SoftSpokenMalOtSender sender;
                 SoftSpokenMalOtReceiver recver;
                 sender.init(fieldBits, true);
                 recver.init(fieldBits, true);
@@ -352,8 +352,8 @@ namespace tests_libOTe
         			baseRecv[i] = baseSend[i][baseChoice[i]];
         		}
 
-        		AlignedUnVector<block> recvMsg(numOTs);
-        		AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
+        		AlignedVector<block> recvMsg(numOTs);
+        		AlignedVector<std::array<block, 2>> sendMsg(numOTs);
   
                 recver.setBaseOts(baseSend);
                 sender.setBaseOts(baseRecv, baseChoice);
@@ -364,6 +364,8 @@ namespace tests_libOTe
                         sender.send(sendMsg, prng1, sockets[1])
                     )
                 );
+
+                
 
         		OT_100Receive_Test(choices, recvMsg, sendMsg);
         	}

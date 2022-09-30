@@ -15,13 +15,9 @@
 namespace osuCrypto
 {
 
-	// Uses SubspaceVoleMalicious as a Delta OT.
-
 	template<u64 blocksPerTweak>
 	struct TwoOneRTCR : AESRekeyManager
 	{
-		block hashKeys[64];
-
 		static constexpr std::uint32_t mod = 0b10000111;
 
 		static block mul2(block x)
@@ -33,10 +29,27 @@ namespace osuCrypto
 			return output;
 		}
 
-		u64 tweak = 0;
-		block tweakMul = block(0ull);
+		std::array<block,64> mHashKeys;
+		u64 mTweak = -1;
+		block mTweakMul = block(0ull);
 
 		TwoOneRTCR() = default;
+		TwoOneRTCR(TwoOneRTCR&& o)
+			: mHashKeys(std::exchange(o.mHashKeys, {}))
+			, mTweak(std::exchange(o.mTweak, -1))
+			, mTweakMul(std::exchange(o.mTweakMul, block(0ull)))
+		{}
+
+		TwoOneRTCR& operator=(TwoOneRTCR&& o)
+		{
+			mHashKeys = (std::exchange(o.mHashKeys, {}));
+			mTweak = (std::exchange(o.mTweak, -1));
+			mTweakMul = (std::exchange(o.mTweakMul, block(0ull)));
+			return *this;
+
+		}
+
+
 		TwoOneRTCR(block hashKey, block seed)
 		{
 			setKey(hashKey, seed);
@@ -44,30 +57,34 @@ namespace osuCrypto
 
 		void setKey(block hashKey, block seed)
 		{
-			mAESs.setSeed(seed);
-			hashKeys[0] = hashKey;
+			mTweak = 0;
+			mTweakMul = block(0ull);
+			AESRekeyManager::setSeed(seed);
+			mHashKeys[0] = hashKey;
 			for (u64 i = 0; i < 63; ++i)
-				hashKeys[i + 1] = mul2(hashKeys[i]);
+				mHashKeys[i + 1] = mul2(mHashKeys[i]);
 
-			// Now hashKeys[i] = 2**i * hashKey
+			// Now mHashKeys[i] = 2**i * hashKey
 
 			for (u64 i = 0; i < 63; ++i)
-				hashKeys[i + 1] ^= hashKeys[i];
+				mHashKeys[i + 1] ^= mHashKeys[i];
 
-			// Now hashKeys[i] = 2**i * hashKey + 2**(i - 1) * hashKey + ... + hashKey.
+			// Now mHashKeys[i] = 2**i * hashKey + 2**(i - 1) * hashKey + ... + hashKey.
 		}
 
 		template<u64 numBlocks>
 		void hashBlocks(const block* plaintext, block* ciphertext)
 		{
+			assert(mTweak != (u64)-1);
+
 			static_assert(numBlocks % blocksPerTweak == 0, "can't partially use tweak");
 			u64 tweakIncrease = numBlocks / blocksPerTweak;
 
-			// Assumes that tweak is always divisible by tweakIncrease (i.e. that the tweaks are
+			// Assumes that mTweak is always divisible by tweakIncrease (i.e. that the tweaks are
 			// naturally aligned).
 
 			block tmp[numBlocks];
-			block tweakMulLocal = tweakMul; // Avoid aliasing concerns.
+			block tweakMulLocal = mTweakMul; // Avoid aliasing concerns.
 #ifdef __GNUC__
 #pragma GCC unroll 16
 #endif
@@ -81,29 +98,31 @@ namespace osuCrypto
 				}
 
 				if (i < numBlocks / blocksPerTweak - 1)
-					tweakMulLocal ^= hashKeys[log2floor(i ^ (i + 1))];
+					tweakMulLocal ^= mHashKeys[log2floor(i ^ (i + 1))];
 			}
 
-			tweak += tweakIncrease;
-			tweakMul = tweakMulLocal ^ hashKeys[log2floor((tweak - 1) ^ tweak)];
+			mTweak += tweakIncrease;
+			mTweakMul = tweakMulLocal ^ mHashKeys[log2floor((mTweak - 1) ^ mTweak)];
 
-			mAESs.get().template hashBlocks<numBlocks>(tmp, ciphertext);
+
+			AESRekeyManager::get().template hashBlocks<numBlocks>(tmp, ciphertext);
 		}
 	};
 
 
-	class SoftSpokenMalLeakyDotSender :
-		public SoftSpokenShOtSender<SubspaceVoleMaliciousReceiver<RepetitionCode>>
+	class SoftSpokenMalOtSender :
+		public OtExtSender
 
 	{
 	public:
 		using Base = SoftSpokenShOtSender<SubspaceVoleMaliciousReceiver<RepetitionCode>>;
 
-		AlignedUnVector<block> mExtraW;
-
 		struct Hasher 
 		{
-			Hasher() {}
+			Hasher() = default;
+			Hasher(Hasher&&) = default;
+			Hasher&operator=(Hasher&&) = default;
+
 			TwoOneRTCR<2> rtcr;
 			//macoro::suspend_never send(PRNG& prng, Socket& chl) { return{}; }
 
@@ -118,45 +137,37 @@ namespace osuCrypto
 
 			void runBatch(
 				span<std::array<block, 2>> messages, 
-				SoftSpokenMalLeakyDotSender* parent, 
+				SoftSpokenMalOtSender* parent, 
 				span<block> inputW_);
 
 
 			OC_FORCEINLINE void processChunk(
 				u64 nChunk, u64 numUsed,
 				span<std::array<block, 2>> messages,
-				SoftSpokenMalLeakyDotSender* parent_, span<block> inputW_);
+				SoftSpokenMalOtSender* parent_, span<block> inputW_);
 		};
 
+		Base mBase;
+		AlignedUnVector<block> mExtraW;
 		Hasher mHasher;
 
-		SoftSpokenMalLeakyDotSender()
-		{
-		}
+		SoftSpokenMalOtSender() = default;
+		SoftSpokenMalOtSender(SoftSpokenMalOtSender&& o) = default;
+		SoftSpokenMalOtSender& operator=(SoftSpokenMalOtSender&& o) = default;
 
 		void init(u64 fieldBits = 2, bool randomOt = true, u64 numThreads = 1)
 		{
-			Base::init(fieldBits, randomOt, numThreads);
+			mBase.init(fieldBits, randomOt, numThreads);
 			mExtraW.resize(2 * chunkSize() + paddingSize());
 		}
 
-		SoftSpokenMalLeakyDotSender splitBase()
+		bool hasBaseOts() const override
 		{
-			throw RTE_LOC; // TODO: unimplemented.
+			return mBase.hasBaseOts();
 		}
-
-		std::unique_ptr<OtExtSender> split() override
+		u64 baseOtCount() const override
 		{
-			throw RTE_LOC; // TODO: unimplemented.
-			//return std::make_unique<SoftSpokenMalLeakyDotSender>(splitBase());
-		}
-
-
-		void setBaseOts(
-			span<block> baseRecvOts,
-			const BitVector& choices) 
-		{
-			return Base::setBaseOts(baseRecvOts, choices);
+			return mBase.baseOtCount();
 		}
 
 		task<> setBaseOts(
@@ -164,8 +175,34 @@ namespace osuCrypto
 			const BitVector& choices,
 			Socket& chl) override
 		{
-			return Base::setBaseOts(baseRecvOts, choices, chl);
+			return mBase.setBaseOts(
+				baseRecvOts,
+				choices,
+				chl);
 		}
+
+		void setBaseOts(
+			span<block> baseRecvOts,
+			const BitVector& choices) 
+		{
+			mBase.setBaseOts(
+				baseRecvOts,
+				choices);
+		}
+
+		block delta() { return mBase.delta(); }
+
+		SoftSpokenMalOtSender splitBase()
+		{
+			throw RTE_LOC; // TODO: unimplemented.
+		}
+
+		std::unique_ptr<OtExtSender> split() override
+		{
+			throw RTE_LOC; // TODO: unimplemented.
+			//return std::make_unique<SoftSpokenMalOtSender>(splitBase());
+		}
+
 
 		task<> send(span<std::array<block, 2>> messages, PRNG& prng, Socket& chl) override;
 		// Low level functions.
@@ -187,32 +224,39 @@ namespace osuCrypto
 
 	private:
 		// These functions don't keep information around to compute the hashes.
-		using Base::generateRandom;
-		using Base::generateChosen;
+		//using Base::generateRandom;
+		//using Base::generateChosen;
 
 	protected:
 		//using ChunkerBase = ChunkedReceiver<
-		//	SoftSpokenMalLeakyDotSender,
+		//	SoftSpokenMalOtSender,
 		//	std::tuple<block>
 		//>;
 		//friend ChunkerBase;
 		//friend ChunkerBase::Base;
 
-		u64 chunkSize() const { return std::max<u64>(roundUpTo(wSize(), 2), (u64)2 * 128); }
-		u64 paddingSize() const { return std::max<u64>(chunkSize(), wPadded()) - chunkSize(); }
+		u64 chunkSize() const { return std::max<u64>(roundUpTo(mBase.wSize(), 2), (u64)2 * 128); }
+		u64 paddingSize() const { return std::max<u64>(chunkSize(), mBase.wPadded()) - chunkSize(); }
 	};
 
 	class SoftSpokenMalOtReceiver :
-		public SoftSpokenShOtReceiver<SubspaceVoleMaliciousSender<RepetitionCode>>
+		public OtExtReceiver
 	{
 	public:
 		using Base = SoftSpokenShOtReceiver<SubspaceVoleMaliciousSender<RepetitionCode>>;
 
-		AlignedUnVector<block> mExtraV;
-
 		struct Hasher 
 		{
 			Hasher() {}
+			Hasher(Hasher&& o) 
+				: rtcr(std::move(o.rtcr))
+			{}
+
+			Hasher& operator=(Hasher&& o)
+			{
+				rtcr = (std::move(o.rtcr));
+				return *this;
+			}
 
 			TwoOneRTCR<1> rtcr;
 
@@ -242,43 +286,70 @@ namespace osuCrypto
 				block* inputV);
 		};
 
+		Base mBase;
+		AlignedUnVector<block> mExtraV;
 		Hasher mHasher;
 
-		SoftSpokenMalOtReceiver()
-		{
-		}
+		SoftSpokenMalOtReceiver() = default;
+		SoftSpokenMalOtReceiver(SoftSpokenMalOtReceiver&& o) 
+			:mBase(std::move(o.mBase))
+			,mExtraV(std::move(o.mExtraV))
+			,mHasher(std::move(o.mHasher))
+		{}
 
+		SoftSpokenMalOtReceiver& operator=(SoftSpokenMalOtReceiver&& o)
+		{
+
+			mBase = (std::move(o.mBase));
+			mExtraV = (std::move(o.mExtraV));
+			mHasher = (std::move(o.mHasher));
+			return *this;
+		}
 
 		void init(u64 fieldBits = 2, bool randomOt = true,  u64 numThreads = 1)
 		{
-			Base::init(fieldBits, randomOt, numThreads);
+			mBase.init(fieldBits, randomOt, numThreads);
 			mExtraV.resize(2 * chunkSize() + paddingSize());
 		}
+
+		bool hasBaseOts() const override
+		{
+			return mBase.hasBaseOts();
+		}
+		u64 baseOtCount() const override
+		{
+			return mBase.baseOtCount();
+		}
+
+		task<> setBaseOts(
+			span<std::array<block,2>> base,
+			PRNG& prng,
+			Socket& chl) override
+		{
+			return mBase.setBaseOts(
+				base,
+				prng,
+				chl);
+		}
+
+		void setBaseOts(span<std::array<block, 2>> baseSendOts) 
+		{
+			return mBase.setBaseOts(baseSendOts);
+		}
+
 
 		SoftSpokenMalOtReceiver splitBase()
 		{
 			throw RTE_LOC; // TODO: unimplemented.
 		}
 
-		std::unique_ptr<OtExtReceiver> split() override
+		std::unique_ptr<OtExtReceiver> split() 
 		{
 			throw RTE_LOC; // TODO: unimplemented.
 		}
 
-		void setBaseOts(span<std::array<block, 2>> baseSendOts) 
-		{
-			return Base::setBaseOts(baseSendOts);
-		}
-
-		task<> setBaseOts(span<std::array<block, 2>> baseSendOts, PRNG& prng, Socket& chl) override
-		{
-			return Base::setBaseOts(baseSendOts, prng, chl);
-		}
-
-
-		task<> receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl) override;
+		task<> receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl) ;
 		// Low level functions.
-
 
 		task<> runBatch(Socket& chl, span<block>messages, span<block> choices);
 
@@ -292,16 +363,18 @@ namespace osuCrypto
 
 	private:
 		// These functions don't keep information around to compute the hashes.
-		using Base::generateRandom;
-		using Base::generateChosen;
+		//using Base::generateRandom;
+		//using Base::generateChosen;
 
 	protected:
 
-
-		u64 chunkSize() const { return roundUpTo(vSize(), 2); }
-		u64 paddingSize() const { return vPadded() - chunkSize(); }
+		u64 chunkSize() const { return roundUpTo(mBase.vSize(), 2); }
+		u64 paddingSize() const { return mBase.vPadded() - chunkSize(); }
 	};
 
+
+	static_assert(std::is_move_constructible<SoftSpokenMalOtReceiver>::value, "");
+	static_assert(std::is_move_assignable<SoftSpokenMalOtReceiver>::value, "");
 
 }
 

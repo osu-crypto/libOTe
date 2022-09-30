@@ -23,20 +23,37 @@ namespace osuCrypto
 {
 		struct AESRekeyManager
 		{
-			AESStream mAESs;
-
 			// Maximum number of times an AES key can be used on secret data before being replaced. This is
 			// a computation / security tradeoff.
 			static constexpr u64 maxAESKeyUsage = 1024;
-			u64 aesKeyUseCount = 0;
+		private:
+			u64 mAesKeyUseCount = ~0ull;
+			AESStream mAESs;
+		public:
+
+			AESRekeyManager() = default;
+			AESRekeyManager(AESRekeyManager&&o) 
+				: mAesKeyUseCount(std::exchange(o.mAesKeyUseCount, ~0ull))
+				, mAESs(std::move(o.mAESs))
+			{}
+
+			AESRekeyManager& operator=(AESRekeyManager&& o)
+			{
+				mAesKeyUseCount = (std::exchange(o.mAesKeyUseCount, ~0ull));
+				mAESs = (std::move(o.mAESs));
+				return *this;
+			}
 
 			// Prepare for using AES n times.
 			const AES& useAES(u64 n)
 			{
-				aesKeyUseCount += n;
-				if (aesKeyUseCount > maxAESKeyUsage)
+				if (mAesKeyUseCount == ~0ull)
+					throw RTE_LOC;
+
+				mAesKeyUseCount += n;
+				if (mAesKeyUseCount > maxAESKeyUsage)
 				{
-					aesKeyUseCount = 0;
+					mAesKeyUseCount = 0;
 					mAESs.next();
 				}
 
@@ -46,6 +63,13 @@ namespace osuCrypto
 			void setSeed(block seed)
 			{
 				mAESs.setSeed(seed);
+				mAesKeyUseCount = 0;
+			}
+
+		protected:
+			const AES& get()
+			{
+				return mAESs.get();
 			}
 		};
 
@@ -56,19 +80,31 @@ namespace osuCrypto
 			public TimerAdapter
 		{
 		public:
-
-			SoftSpokenShOtSender() 
-			{}
-			SoftSpokenShOtSender(SoftSpokenShOtSender&&) = delete;
-
-			//using SubspaceVole = SubspaceVoleReceiver<RepetitionCode>;
-			// Present once base OTs have finished.
 			SubspaceVole mSubVole;
-
 			u64 mBlockIdx = 0; // mFieldBits before initialization, blockIdx after.
 			u64 mNumThreads = 0;
 			bool mRandomOt = false;
 			AESRekeyManager  mAesMgr;
+
+			SoftSpokenShOtSender() = default;
+			SoftSpokenShOtSender(SoftSpokenShOtSender&& o)
+				: mSubVole(std::move(o.mSubVole))
+				, mBlockIdx(std::exchange(o.mBlockIdx, 0))
+				, mNumThreads(std::exchange(o.mNumThreads, 0))
+				, mRandomOt(std::exchange(o.mRandomOt, 0))
+				, mAesMgr(std::move(o.mAesMgr))
+			{}
+
+			SoftSpokenShOtSender& operator=(SoftSpokenShOtSender&& o)
+			{
+				mSubVole = (std::move(o.mSubVole));
+				mBlockIdx = (std::exchange(o.mBlockIdx, 0));
+				mNumThreads = (std::exchange(o.mNumThreads, 0));
+				mRandomOt = (std::exchange(o.mRandomOt, 0));
+				mAesMgr = (std::move(o.mAesMgr));
+				return *this;
+			}
+
 
 			void init(u64 fieldBits = 2, bool randomOts = true, u64 numThreads = 1)
 			{
@@ -94,7 +130,7 @@ namespace osuCrypto
 				return mSubVole.getDelta().template getSpan<block>()[0];
 			}
 
-			u64 baseOtCount() const override final
+			u64 baseOtCount() const override 
 			{
 				if (fieldBits() == 0)
 					throw std::runtime_error("init(...) must be called first. " LOCATION);
@@ -103,7 +139,7 @@ namespace osuCrypto
 				return roundUpTo(gOtExtBaseOtCount, fieldBits());
 			}
 
-			bool hasBaseOts() const override final
+			bool hasBaseOts() const override 
 			{
 				return mSubVole.hasBaseOts();
 			}
@@ -201,7 +237,7 @@ namespace osuCrypto
 				// Note: probably need a stronger hash for malicious secure version.
 			}
 
-		protected:
+		//protected:
 
 
 			static constexpr u64 commSize = commStepSize * superBlkSize; // picked to match the other OTs.
@@ -226,17 +262,34 @@ namespace osuCrypto
 		{
 		public:
 			// Present once base OTs have finished.
-			//using SubspaceVole = SubspaceVoleReceiver<RepetitionCode>;
 			SubspaceVole mSubVole;
 
-			u64 mBlockIdx = 0; // mFieldBits before initialization, blockIdx after.
+			u64 mBlockIdx = 0; 
 			u64 mNumThreads = 0;
 			bool mRandomOt = false;
 			AESRekeyManager mAesMgr;
 
-			SoftSpokenShOtReceiver() {};
-			SoftSpokenShOtReceiver(SoftSpokenShOtReceiver&&) = delete;
+
+			SoftSpokenShOtReceiver() = default;
 			SoftSpokenShOtReceiver(const SoftSpokenShOtReceiver&) = delete;
+			SoftSpokenShOtReceiver(SoftSpokenShOtReceiver&& o) 
+				: mSubVole(std::move(o.mSubVole))
+				, mBlockIdx(std::exchange(o.mBlockIdx, 0))
+				, mNumThreads(std::exchange(o.mNumThreads, 0))
+				, mRandomOt(std::exchange(o.mRandomOt, false))
+				, mAesMgr(std::move(o.mAesMgr))
+			{}
+
+			SoftSpokenShOtReceiver& operator=(SoftSpokenShOtReceiver&& o)
+			{
+				mSubVole = (std::move(o.mSubVole));
+				mBlockIdx = (std::exchange(o.mBlockIdx, 0));
+				mNumThreads = (std::exchange(o.mNumThreads, 0));
+				mRandomOt = (std::exchange(o.mRandomOt, false));
+				mAesMgr = (std::move(o.mAesMgr));
+				return *this;
+			}
+
 
 
 			void init(u64 fieldBits = 2, bool randomOts = true, u64 numThreads = 1)
@@ -259,13 +312,13 @@ namespace osuCrypto
 			u64 vSize() const { return mSubVole.vSize(); }
 			u64 vPadded() const { return mSubVole.vPadded(); }
 
-			u64 baseOtCount() const override final
+			u64 baseOtCount() const override 
 			{
 				// Can only use base OTs in groups of mFieldBits.
 				return roundUpTo(gOtExtBaseOtCount, fieldBits());
 			}
 
-			bool hasBaseOts() const override final
+			bool hasBaseOts() const override 
 			{
 				return mSubVole.hasBaseOts();
 			}
@@ -321,7 +374,7 @@ namespace osuCrypto
 
 			}
 
-		protected:
+
 
 
 			static const u64 commSize = commStepSize * superBlkSize; // picked to match the other OTs.

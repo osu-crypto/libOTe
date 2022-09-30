@@ -55,6 +55,9 @@
 // build the library with no silver security warning
 #cmakedefine NO_SILVER_WARNING @NO_SILVER_WARNING@
 
+// build the library with no KOS security warning
+#cmakedefine NO_KOS_WARNING @NO_KOS_WARNING@
+
 #if defined(ENABLE_SIMPLESTOT_ASM) && defined(_MSC_VER)
     #undef ENABLE_SIMPLESTOT_ASM
     #pragma message("ENABLE_SIMPLESTOT_ASM should not be defined on windows.")

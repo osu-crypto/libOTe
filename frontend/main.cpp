@@ -281,7 +281,7 @@ int main(int argc, char** argv)
     //}, cmd, sshonest);
 
     //flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-    //    TwoChooseOne_example<SoftSpokenMalLeakyDotSender, SoftSpokenMalOtReceiver>(
+    //    TwoChooseOne_example<SoftSpokenMalOtSender, SoftSpokenMalOtReceiver>(
     //        role, totalOTs, numThreads, ip, tag, clp);
     //}, cmd, smleakydelta);
 

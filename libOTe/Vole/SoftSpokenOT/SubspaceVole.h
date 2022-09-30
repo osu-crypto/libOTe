@@ -24,16 +24,15 @@ namespace osuCrypto
 	template<typename Code>
 	struct SubspaceVoleBase
 	{
-		SubspaceVoleBase() {}
 		static constexpr bool mMalicious = false;
 
 
 		Code mCode;
 		static_assert(std::is_base_of<GenericLinearCode<Code>, Code>::value, "Code must be a linear code.");
 
-		//void init(Code code) {
-		//	mCode = (std::move(code)); 
-		//}
+		SubspaceVoleBase() = default;
+		SubspaceVoleBase(SubspaceVoleBase&& o) = default;
+		SubspaceVoleBase&operator=(SubspaceVoleBase&& o) = default;
 
 		const GenericLinearCode<Code>& code() const { return mCode; }
 		GenericLinearCode<Code>& code() { return mCode; }
@@ -50,9 +49,19 @@ namespace osuCrypto
 		using Base = SubspaceVoleBase<Code>;
 		using Base::code;
 
-		SubspaceVoleSender() {}
-		SubspaceVoleSender(SubspaceVoleSender&&) = default;
+		SubspaceVoleSender() = default;
 		SubspaceVoleSender(const SubspaceVoleSender&) = delete;
+		SubspaceVoleSender(SubspaceVoleSender && o)
+			: Base(std::move(o))
+			, mVole(std::move(o.mVole))
+		{}
+
+		SubspaceVoleSender& operator=(SubspaceVoleSender&& o)
+		{
+			*(Base*)this = (std::move(o));
+			mVole = (std::move(o.mVole));
+			return *this;
+		}
 
 		void init(u64 fieldBits, u64 numVoles)
 		{
@@ -152,8 +161,7 @@ namespace osuCrypto
 		using Base = SubspaceVoleBase<Code>;
 		using Base::code;
 
-		SubspaceVoleReceiver()
-		{}
+		SubspaceVoleReceiver() = default;
 
 		SubspaceVoleReceiver(SubspaceVoleReceiver&& o)
 			: Base(std::move(o))
@@ -162,6 +170,16 @@ namespace osuCrypto
 			, mMessages(std::move(o.mMessages))
 			, mReadIndex(std::exchange(o.mReadIndex, 0))
 		{}
+
+		SubspaceVoleReceiver& operator=(SubspaceVoleReceiver&& o)
+		{
+			*(Base*)this = (std::move(o));
+			mVole = (std::move(o.mVole));
+			mCorrectionU = (std::move(o.mCorrectionU));
+			mMessages = (std::move(o.mMessages));
+			mReadIndex = (std::exchange(o.mReadIndex, 0));
+			return *this;
+		}
 
 		void init(u64 fieldBits_, u64 numVoles_)
 		{

@@ -303,6 +303,8 @@ namespace osuCrypto
 		mGenerateFn = (selectGenerateImpl(mFieldBits));
 		mSeeds.resize(numVolesPadded * fieldSize());
 		std::fill_n(mSeeds.data(), mSeeds.size(), toBlock(0, 0));
+		if (!mPprf)
+			mPprf.reset(new SilentMultiPprfSender);
 	}
 
 	void SmallFieldVoleReceiver::init(u64 fieldBits_, u64 numVoles_, bool malicious)
@@ -311,6 +313,8 @@ namespace osuCrypto
 		mGenerateFn = (selectGenerateImpl(mFieldBits));
 		mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
 		std::fill_n(mSeeds.data(), mSeeds.size(), block(0, 0));
+		if (!mPprf)
+			mPprf.reset(new SilentMultiPprfReceiver);
 	}
 
 	void SmallFieldVoleReceiver::setDelta(BitVector delta_)
@@ -351,40 +355,36 @@ namespace osuCrypto
 	{
 		setDelta(choicesToDelta(choices, mFieldBits, mNumVoles));
 
-		mPprf.configure(fieldSize(), mNumVoles);
 
-		if (mPprf.mDepth != mFieldBits) // Sanity check: log2ceil.
-			throw RTE_LOC;
-		if (mPprf.baseOtCount() != baseOtCount()) // Sanity check
+		if (!mPprf)
 			throw RTE_LOC;
 
+		mPprf->configure(fieldSize(), mNumVoles);
 
+		if (mPprf->mDepth != mFieldBits) // Sanity check: log2ceil.
+			throw RTE_LOC;
+		if (mPprf->baseOtCount() != baseOtCount()) // Sanity check
+			throw RTE_LOC;
 
-		//for (auto i : rng(baseMessages.size()))
-		//{
-		//	lout << "r" << i << " " << baseMessages[i] << " " << choices[i] << std::endl;
-		//}
-
-		mPprf.setBase(baseMessages);
-		mPprf.setChoiceBits(PprfOutputFormat::BlockTransposed, choices);
+		mPprf->setBase(baseMessages);
+		mPprf->setChoiceBits(PprfOutputFormat::BlockTransposed, choices);
 	}
 
 	void SmallFieldVoleSender::setBaseOts(span<std::array<block, 2>> msgs)
 	{
-		//for (auto i : rng(msgs.size()))
-		//{
-		//	lout << "s" << i << " " << msgs[i][0] << " "<< msgs[i][1] << std::endl;
-		//}
 
-		mPprf.configure(fieldSize(), mNumVoles);
-
-		if (mPprf.mDepth != mFieldBits) // Sanity check: log2ceil.
-			throw RTE_LOC;
-		if (mPprf.baseOtCount() != baseOtCount()) // Sanity check
+		if (!mPprf)
 			throw RTE_LOC;
 
+		mPprf->configure(fieldSize(), mNumVoles);
 
-		mPprf.setBase(msgs);
+		if (mPprf->mDepth != mFieldBits) // Sanity check: log2ceil.
+			throw RTE_LOC;
+		if (mPprf->baseOtCount() != baseOtCount()) // Sanity check
+			throw RTE_LOC;
+
+
+		mPprf->setBase(msgs);
 	}
 
 	task<> SmallFieldVoleSender::expand(Socket& chl,PRNG& prng, u64 numThreads)
@@ -396,7 +396,7 @@ namespace osuCrypto
 		);
 
 		seedView = MatrixView<block>(mSeeds.data(), mNumVoles, fieldSize());
-		MC_AWAIT(mPprf.expand(chl, span<const block>(), prng, seedView, PprfOutputFormat::BlockTransposed, false, 1));
+		MC_AWAIT(mPprf->expand(chl, span<const block>(), prng, seedView, PprfOutputFormat::BlockTransposed, false, 1));
 
 		// Prove consistency
 		if (mMalicious)
@@ -444,7 +444,7 @@ namespace osuCrypto
 		);
 
 		seedsFull.resize(mNumVoles, fieldSize());
-		MC_AWAIT(mPprf.expand(chl, prng, seedsFull, PprfOutputFormat::BlockTransposed, false, 1));
+		MC_AWAIT(mPprf->expand(chl, prng, seedsFull, PprfOutputFormat::BlockTransposed, false, 1));
 
 		// Check consistency
 		if (mMalicious)

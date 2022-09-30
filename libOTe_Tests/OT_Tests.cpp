@@ -62,10 +62,13 @@ namespace tests_libOTe
             const block& senderBlock = sender[i][choice];
 
             //if (i%512==0) {
-            //    std::cout << "[" << i << ",0]--" << sender[i][0] << std::endl;
-            //    std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
-            //    std::cout << (int)choice << "-- " << recv[i] << std::endl;
+                std::cout << "[" << i << ",0]--" << sender[i][0] << std::endl;
+                std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
+                std::cout << (int)choice << "-- " << recv[i] << std::endl;
             //}
+                if (revcBlock == ZeroBlock)
+                    throw RTE_LOC;
+
             if (neq(revcBlock, senderBlock))
                 throw UnitTestFail();
 

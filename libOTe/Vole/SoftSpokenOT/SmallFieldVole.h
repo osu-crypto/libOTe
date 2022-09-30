@@ -45,6 +45,10 @@ namespace osuCrypto
 		// for them.
 		AlignedUnVector<block> mSeeds;
 
+		SmallFieldVoleBase() = default;
+		SmallFieldVoleBase(SmallFieldVoleBase&&) = default;
+		SmallFieldVoleBase& operator=(SmallFieldVoleBase&&) = default;
+
 		static constexpr u64 baseOtCount(u64 fieldBits, u64 numVoles)
 		{
 			return fieldBits * numVoles;
@@ -111,7 +115,12 @@ namespace osuCrypto
 		// pay for the AES latency.
 		u64 numVolesPadded;
 
-		SilentMultiPprfSender mPprf;
+		std::unique_ptr<SilentMultiPprfSender> mPprf;
+
+		SmallFieldVoleSender() = default;
+		SmallFieldVoleSender(SmallFieldVoleSender&&) = default;
+		SmallFieldVoleSender& operator=(SmallFieldVoleSender&&) = default;
+
 
 		void setBaseOts(span<std::array<block, 2>> msgs);
 
@@ -130,7 +139,7 @@ namespace osuCrypto
 
 		bool hasBaseOts() const
 		{
-			return mPprf.hasBaseOts();
+			return mPprf && mPprf->hasBaseOts();
 		}
 
 		// outV outputs the values for v, i.e. xor_x x * PRG(seed[x]). outU gives the values for u (the
@@ -162,7 +171,7 @@ namespace osuCrypto
 			u64, const AES&, block* __restrict, block* __restrict);
 
 		// a pointer to a template function that generates the output with the field bit count hard coded (for up to 10).
-		GenerateFn mGenerateFn;
+		GenerateFn mGenerateFn = nullptr;
 
 		// Select specialized implementation of generate.
 		static GenerateFn selectGenerateImpl(u64 fieldBits);
@@ -171,11 +180,13 @@ namespace osuCrypto
 	class SmallFieldVoleReceiver : public SmallFieldVoleBase
 	{
 	public:
-		SilentMultiPprfReceiver mPprf;
+		std::unique_ptr<SilentMultiPprfReceiver> mPprf;
 		BitVector mDelta;
 		AlignedUnVector<u8> mDeltaUnpacked; // Each bit of delta becomes a byte, either 0 or 0xff.
 
-		SmallFieldVoleReceiver() {}
+		SmallFieldVoleReceiver() = default;
+		SmallFieldVoleReceiver(SmallFieldVoleReceiver&&) = default;
+		SmallFieldVoleReceiver& operator=(SmallFieldVoleReceiver&&) = default;
 
 		// Same as for SmallFieldVoleSender, except that the AES operations are performed in differently
 		// sized chunks for the receiver.
@@ -196,7 +207,7 @@ namespace osuCrypto
 
 		bool hasBaseOts() const
 		{
-			return mPprf.hasBaseOts();
+			return mPprf && mPprf->hasBaseOts();
 		}
 
 		const BitVector& getDelta() const { return mDelta; }
@@ -274,7 +285,7 @@ namespace osuCrypto
 			u64 blockIdx, const AES& aes,
 			block* __restrict outW, const block* __restrict correction);
 
-		GenerateFn mGenerateFn;
+		GenerateFn mGenerateFn = nullptr;
 
 		// Select specialized implementation of generate.
 		static GenerateFn selectGenerateImpl(u64 fieldBits);

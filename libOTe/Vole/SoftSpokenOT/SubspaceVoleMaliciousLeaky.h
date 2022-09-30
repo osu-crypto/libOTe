@@ -73,6 +73,11 @@ namespace osuCrypto
 		static constexpr u64 maxHashKeyUsage = 1024 * 1024;
 		u64 hashKeyUseCount = 0;
 
+
+		SubspaceVoleMaliciousBase() = default;
+		SubspaceVoleMaliciousBase(SubspaceVoleMaliciousBase&& o) = default;
+		SubspaceVoleMaliciousBase& operator=(SubspaceVoleMaliciousBase&& o) = default;
+
 		// inHalf == 0 => input in low 64 bits. High 64 bits of output should be ignored.
 		template <int inHalf>
 		static block mulA64(block in)
@@ -221,13 +226,14 @@ namespace osuCrypto
 		AlignedUnVector<block> hashV;
 		AlignedUnVector<block> subtotalV;
 
+		using Base = SubspaceVoleMaliciousBase;
 		using Sender = SubspaceVoleSender<Code>;
 		using Sender::code;
 
-		SubspaceVoleMaliciousSender()
-		{
-		}
+		SubspaceVoleMaliciousSender() = default;
 
+		SubspaceVoleMaliciousSender(SubspaceVoleMaliciousSender&& o) = default;
+		SubspaceVoleMaliciousSender&operator=(SubspaceVoleMaliciousSender&& o) = default;
 
 		void init(u64 fieldBits, u64 numVoles)
 		{
@@ -348,12 +354,13 @@ namespace osuCrypto
 		AlignedUnVector<block> mHashW;
 		AlignedUnVector<block> mSubtotalW;
 
+		using Base = SubspaceVoleMaliciousBase;
 		using Receiver = SubspaceVoleReceiver<Code>;
 		using Receiver::code;
 
-		SubspaceVoleMaliciousReceiver()
-		{
-		}
+		SubspaceVoleMaliciousReceiver() = default;
+		SubspaceVoleMaliciousReceiver(SubspaceVoleMaliciousReceiver&& o) = default;
+		SubspaceVoleMaliciousReceiver& operator=(SubspaceVoleMaliciousReceiver&& o) = default;
 
 		void init(u64 fieldBits_, u64 numVoles_)
 		{
