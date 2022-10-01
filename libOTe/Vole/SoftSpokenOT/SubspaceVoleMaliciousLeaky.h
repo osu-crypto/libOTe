@@ -358,7 +358,7 @@ namespace osuCrypto
 		void init(u64 fieldBits_, u64 numVoles_)
 		{
 			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits_));
-			Receiver::mVole.init(fieldBits_, numVoles_, false);
+			Receiver::mVole.init(fieldBits_, numVoles_, true);
 			Receiver::mCorrectionU.resize(Receiver::uPadded());
 
 			if (Receiver::mVole.mNumVoles != code().length())
