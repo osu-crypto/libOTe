@@ -33,6 +33,8 @@ namespace osuCrypto
 			MC_AWAIT(chl.send(std::move(seed)));
 		}
 
+		MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
+
 		nChunks = divCeil(messages.size() + 64, 128);
 		messagesFullChunks = messages.size() / 128;
 		numExtra = nChunks - messagesFullChunks; // Always 1 or 2
@@ -344,6 +346,8 @@ namespace osuCrypto
 			mBase.mAesMgr.setSeed(seed);
 		}
 
+		MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
+		
 		nChunks = divCeil(messages.size() + 64, 128);
 		messagesFullChunks = messages.size() / 128;
 
