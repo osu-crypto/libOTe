@@ -71,16 +71,8 @@ namespace osuCrypto {
         // See frontend/main.cpp for an example. 
         void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices);
+            const BitVector& choices) override;
 
-        task<> setBaseOts(
-            span<block> baseRecvOts,
-            const BitVector& choices,
-            Socket& chl) override {
-            MC_BEGIN(task<>, this, baseRecvOts, &choices);
-            setBaseOts(baseRecvOts, choices);
-            MC_END();
-        }
 
         // Takes a destination span of two blocks and performs OT extension
         // where the destination span is populated (written to) with the random

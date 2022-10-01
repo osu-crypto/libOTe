@@ -34,7 +34,7 @@ namespace osuCrypto
         };
         HashType mHashType = HashType::AesHash;
         bool mFiatShamir = false;
-
+        bool mUniformBase = false;
 
         KosOtExtReceiver() = default;
         KosOtExtReceiver(const KosOtExtReceiver&) = delete;
@@ -58,7 +58,7 @@ namespace osuCrypto
         }
 
         // sets the base OTs.
-        task<> setBaseOts(span<std::array<block, 2>> baseSendOts,PRNG& prng, Socket&chl) override;
+        void setBaseOts(span<std::array<block, 2>> baseSendOts) override;
 
         void setUniformBaseOts(span<std::array<block, 2>> baseSendOts);
 

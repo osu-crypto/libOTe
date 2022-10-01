@@ -21,17 +21,6 @@ namespace osuCrypto
 	u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
 
-
-	// sets the Iknp base OTs that are then used to extend
-	task<> SilentOtExtReceiver::setBaseOts(
-		span<std::array<block, 2>> baseSendOts,
-		PRNG& prng,
-		Socket& chl) {
-
-		setBaseOts(baseSendOts);
-		return {};
-	}
-
 	// sets the KOS base OTs that are then used to extend
 	void SilentOtExtReceiver::setBaseOts(
 		span<std::array<block, 2>> baseSendOts) {

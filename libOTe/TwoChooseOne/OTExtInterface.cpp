@@ -63,7 +63,7 @@ namespace osuCrypto
         );
         msgs.resize(count);
         MC_AWAIT(base.send(msgs, prng, chl));
-        MC_AWAIT(setBaseOts(msgs, prng, chl));
+        setBaseOts(msgs);
         MC_END();
     }
 
@@ -90,7 +90,7 @@ namespace osuCrypto
         bv.resize(count);
         bv.randomize(prng);
         MC_AWAIT(base.receive(bv, msgs, prng, chl));
-        MC_AWAIT(setBaseOts(msgs, bv, chl));
+        setBaseOts(msgs, bv);
 
         MC_END();
     }

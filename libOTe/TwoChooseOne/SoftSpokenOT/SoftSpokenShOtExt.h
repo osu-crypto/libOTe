@@ -158,17 +158,7 @@ namespace osuCrypto
 
 			void setBaseOts(
 				span<block> baseRecvOts,
-				const BitVector& choices);
-
-			task<> setBaseOts(
-				span<block> baseRecvOts,
-				const BitVector& choices,
-				Socket& chl) override
-			{
-				setBaseOts(baseRecvOts, choices);
-				MC_BEGIN(task<>);
-				MC_END();
-			}
+				const BitVector& choices) override;
 
 			//virtual void initTemporaryStorage() { ChunkerBase::initTemporaryStorage(); }
 
@@ -339,18 +329,7 @@ namespace osuCrypto
 			}
 
 			void setBaseOts(
-				span<std::array<block, 2>> baseSendOts);
-
-			task<> setBaseOts(
-				span<std::array<block, 2>> baseSendOts,
-				PRNG& prng,
-				Socket& chl) override
-			{
-				setBaseOts(baseSendOts);
-
-				MC_BEGIN(task<>);
-				MC_END();
-			}
+				span<std::array<block, 2>> baseSendOts) override;
 
 
 			task<> receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl) override;

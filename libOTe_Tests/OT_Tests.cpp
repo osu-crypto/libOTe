@@ -501,10 +501,8 @@ namespace tests_libOTe
         KosOtExtReceiver recv;
 
 
-        auto base0 = recv.setBaseOts(baseSend, prng0, sockets[0]);
-        auto base1 = sender.setBaseOts(baseRecv, baseChoice, sockets[1]);
-
-        eval(base0, base1);
+        recv.setBaseOts(baseSend);
+        sender.setBaseOts(baseRecv, baseChoice);
 
         auto main0 = recv.receive(choices, recvMsg, prng0, sockets[0]);
         auto main1 = sender.send(sendMsg, prng1, sockets[1]);
@@ -552,10 +550,8 @@ namespace tests_libOTe
         sender.mFiatShamir = true;
         recv.mFiatShamir = true;
 
-        auto base0 = recv.setBaseOts(baseSend, prng0, sockets[0]);
-        auto base1 = sender.setBaseOts(baseRecv, baseChoice, sockets[1]);
-
-        eval(base0, base1);
+        recv.setBaseOts(baseSend);
+        sender.setBaseOts(baseRecv, baseChoice);
 
         auto main0 = recv.receive(choices, recvMsg, prng1, sockets[0]);
         auto main1 = sender.send(sendMsg, prng1, sockets[1]);
@@ -623,10 +619,9 @@ namespace tests_libOTe
         //sender.send(sendMsg, prng1, senderChannel);
         //thrd.join();
 
-        auto base0 = recv.setBaseOts(baseSend, prng0, sockets[0]);
-        auto base1 = sender.setBaseOts(baseRecv, baseChoice, sockets[1]);
+        recv.setBaseOts(baseSend);
+        sender.setBaseOts(baseRecv, baseChoice);
 
-        eval(base0, base1);
         auto main0 = recv.receive(choices, recvMsg, prng1, sockets[0]);
         auto main1 = sender.send(sendMsg, prng1, sockets[1]);
 
@@ -685,10 +680,8 @@ namespace tests_libOTe
 
         //thrd.join();
 
-        auto base0 = recv.setBaseOts(baseSend, prng0, sockets[0]);
-        auto base1 = sender.setBaseOts(baseRecv, baseChoice, sockets[1]);
-
-        eval(base0, base1);
+        recv.setBaseOts(baseSend);
+        sender.setBaseOts(baseRecv, baseChoice);
 
         auto main0 = recv.receive(choices, recvMsg, prng1, sockets[0]);
         auto main1 = sender.send(sendMsg, prng1, sockets[1]);

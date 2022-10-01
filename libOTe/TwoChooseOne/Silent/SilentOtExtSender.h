@@ -152,13 +152,7 @@ namespace osuCrypto
 
         void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices);
-
-        // sets the IKNP base OTs that are then used to extend
-        task<> setBaseOts(
-            span<block> baseRecvOts,
-            const BitVector& choices,
-            Socket& chl) override;
+            const BitVector& choices)override;
 
         // Returns an independent copy of this extender.
         std::unique_ptr<OtExtSender> split() override;

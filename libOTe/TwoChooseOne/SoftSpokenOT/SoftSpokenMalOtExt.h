@@ -172,20 +172,9 @@ namespace osuCrypto
 			return mBase.baseOtCount();
 		}
 
-		task<> setBaseOts(
-			span<block> baseRecvOts,
-			const BitVector& choices,
-			Socket& chl) override
-		{
-			return mBase.setBaseOts(
-				baseRecvOts,
-				choices,
-				chl);
-		}
-
 		void setBaseOts(
 			span<block> baseRecvOts,
-			const BitVector& choices) 
+			const BitVector& choices)  override
 		{
 			mBase.setBaseOts(
 				baseRecvOts,
@@ -326,18 +315,7 @@ namespace osuCrypto
 			return mBase.baseOtCount();
 		}
 
-		task<> setBaseOts(
-			span<std::array<block,2>> base,
-			PRNG& prng,
-			Socket& chl) override
-		{
-			return mBase.setBaseOts(
-				base,
-				prng,
-				chl);
-		}
-
-		void setBaseOts(span<std::array<block, 2>> baseSendOts) 
+		void setBaseOts(span<std::array<block, 2>> baseSendOts) override
 		{
 			return mBase.setBaseOts(baseSendOts);
 		}

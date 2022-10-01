@@ -113,15 +113,9 @@ namespace osuCrypto
         // The standard OT extension interface
         /////////////////////////////////////////////////////
 
-        // sets the Kos base OTs that are then used to extend
-        task<> setBaseOts(
-            span<std::array<block, 2>> baseSendOts,
-            PRNG& prng,
-            Socket& chl) override;
-
-        // sets the Kos base OTs that are then used to extend
+        // sets the soft spoken base OTs that are then used to extend
         void setBaseOts(
-            span<std::array<block, 2>> baseSendOts);
+            span<std::array<block, 2>> baseSendOts) override;
 
         // return the number of base OTs IKNP needs
         u64 baseOtCount() const override;

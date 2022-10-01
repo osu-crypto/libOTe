@@ -18,6 +18,9 @@ namespace osuCrypto
 
     void KosOtExtSender::setUniformBaseOts(span<block> baseRecvOts, const BitVector& choices)
     {
+        if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
+            throw std::runtime_error("not supported/implemented");
+
         mBaseChoiceBits = choices;
 
         mGens.resize(gOtExtBaseOtCount);
@@ -25,6 +28,8 @@ namespace osuCrypto
         {
             mGens[i].SetSeed(baseRecvOts[i]);
         }
+
+        mUniformBase = true;
     }
 
     KosOtExtSender KosOtExtSender::splitBase()
@@ -48,24 +53,10 @@ namespace osuCrypto
         return std::make_unique<KosOtExtSender>(SetUniformOts{}, baseRecvOts, mBaseChoiceBits);
     }
 
-    task<> KosOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector& choices, Socket& chl)
+    void KosOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector& choices)
     {
-        MC_BEGIN(task<>,this, baseRecvOts, &choices, &chl,
-            delta = BitVector(128));
-        if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
-            throw std::runtime_error("not supported/implemented");
-
-        MC_AWAIT(chl.recv(delta.getSpan<u8>()));
-
-        mBaseChoiceBits = choices;
-        mBaseChoiceBits ^= delta;
-
-        mGens.resize(gOtExtBaseOtCount);
-        for (u64 i = 0; i < gOtExtBaseOtCount; i++)
-        {
-            mGens[i].SetSeed(baseRecvOts[i]);
-        }
-        MC_END();
+        setUniformBaseOts(baseRecvOts, choices);
+        mUniformBase = false;
     }
 
     task<> KosOtExtSender::send(
@@ -121,11 +112,20 @@ namespace osuCrypto
             seed = block{},
             theirSeed = block{},
             recvView = span<u8>{},
-            recvStepSize = u64{}
+            recvStepSize = u64{},
+            diff = BitVector{}
 
         );
         if (hasBaseOts() == false)
             MC_AWAIT(genBaseOts(prng, chl));
+
+        if (mUniformBase == false)
+        {
+            diff.resize(mBaseChoiceBits.size());
+            MC_AWAIT(chl.recv(diff.getSpan<u8>()));
+            mBaseChoiceBits ^= diff;
+            mUniformBase = true;
+        }
 
         setTimePoint("Kos.send.start");
 

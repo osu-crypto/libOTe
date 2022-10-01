@@ -106,10 +106,8 @@ namespace osuCrypto
         OtExtReceiver() {}
         
         // sets the base OTs that are then used to extend
-        virtual task<> setBaseOts(
-            span<std::array<block,2>> baseSendOts,
-            PRNG& prng,
-            Socket& chl) = 0;
+        virtual void setBaseOts(
+            span<std::array<block,2>> baseSendOts) = 0;
         
         // the number of base OTs that should be set.
         virtual u64 baseOtCount() const { return gOtExtBaseOtCount; }
@@ -139,10 +137,9 @@ namespace osuCrypto
         virtual bool hasBaseOts() const = 0;
 
         // sets the base OTs that are then used to extend
-        virtual task<> setBaseOts(
+        virtual void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices,
-            Socket& chl)  = 0;
+            const BitVector& choices)  = 0;
 
         // Returns an indpendent copy of this extender.
         virtual std::unique_ptr<OtExtSender> split() = 0;

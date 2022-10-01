@@ -34,7 +34,7 @@ namespace osuCrypto {
         };
         HashType mHashType = HashType::AesHash;
         bool mFiatShamir = false;
-
+        bool mUniformBase = false;
 
         KosOtExtSender() = default;
         KosOtExtSender(const KosOtExtSender&) = delete;
@@ -71,9 +71,9 @@ namespace osuCrypto {
 
         // Sets the base OTs which must be peformed before calling split or send.
         // See frontend/main.cpp for an example. 
-        task<> setBaseOts(
+        void setBaseOts(
             span<block> baseRecvOts,
-            const BitVector& choices, Socket&) override;
+            const BitVector& choices) override;
 
         void setUniformBaseOts(
             span<block> baseRecvOts,

@@ -24,6 +24,9 @@ namespace osuCrypto
 
     void KosOtExtReceiver::setUniformBaseOts(span<std::array<block, 2>> baseOTs)
     {
+        if (baseOTs.size() != gOtExtBaseOtCount)
+            throw std::runtime_error(LOCATION);
+
         mGens.resize(gOtExtBaseOtCount);
         for (u64 i = 0; i < gOtExtBaseOtCount; i++)
         {
@@ -32,35 +35,13 @@ namespace osuCrypto
         }
 
         mHasBase = true;
+        mUniformBase = true;
     }
 
-    task<> KosOtExtReceiver::setBaseOts(span<std::array<block, 2>> baseOTs, PRNG& prng, Socket& chl)
+    void KosOtExtReceiver::setBaseOts(span<std::array<block, 2>> baseOTs)
     {
-        MC_BEGIN(task<>,this, baseOTs, &chl,
-            rand = prng.get<block>(),
-            iter = BitIterator{}
-        );
-
-        if (baseOTs.size() != gOtExtBaseOtCount)
-            throw std::runtime_error(LOCATION);
-
-
-        MC_AWAIT(chl.send(std::move(rand)));
-
-        iter = BitIterator((u8*)&rand, 0);
-
-        mGens.resize(gOtExtBaseOtCount);
-        for (u64 i = 0; i < gOtExtBaseOtCount; i++)
-        {
-            mGens[i][0].SetSeed(baseOTs[i][0 ^ *iter]);
-            mGens[i][1].SetSeed(baseOTs[i][1 ^ *iter]);
-
-            ++iter;
-        }
-
-
-        mHasBase = true;
-        MC_END();
+        setUniformBaseOts(baseOTs);
+        mUniformBase = false;
     }
 
     KosOtExtReceiver KosOtExtReceiver::splitBase()
@@ -104,7 +85,7 @@ namespace osuCrypto
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
         u64 numBlocks = numSuperBlocks * superBlkSize;
 
-        MC_BEGIN(task<>,this, &choices, messages, &prng, &chl,
+        MC_BEGIN(task<>, this, &choices, messages, &prng, &chl,
             numSuperBlocks, numBlocks,
             myComm = Commit{},
             seed = block{},
@@ -122,13 +103,34 @@ namespace osuCrypto
             uEnd = (block*)nullptr,
             tIter = (block*)nullptr,
             cIter = (block*)nullptr,
-            theirSeed = block{}
+            theirSeed = block{},
+            diff = block{}
         );
 
         if (hasBaseOts() == false)
             MC_AWAIT(genBaseOts(prng, chl));
 
         setTimePoint("Kos.recv.start");
+
+        if (mUniformBase==false)
+        {
+            diff = prng.get();
+            MC_AWAIT(chl.send(std::move(diff)));
+
+            {
+                auto iter = BitIterator((u8*)&rand, 0);
+
+                mGens.resize(gOtExtBaseOtCount);
+                for (u64 i = 0; i < gOtExtBaseOtCount; i++)
+                {
+                    if (*iter)
+                        std::swap(mGens[i][0], mGens[i][1]);
+
+                    ++iter;
+                }
+            }
+            mUniformBase = true;
+        }
 
         assert((u64)t0.data() % 32 == 0);
         if (mFiatShamir == false)

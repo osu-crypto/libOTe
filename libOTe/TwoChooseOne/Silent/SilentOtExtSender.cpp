@@ -130,15 +130,6 @@ namespace osuCrypto
 namespace osuCrypto
 {
 
-    // sets the IKNP base OTs that are then used to extend
-    task<> SilentOtExtSender::setBaseOts(
-        span<block> baseRecvOts,
-        const BitVector& choices,
-        Socket& chl)
-    {
-        setBaseOts(baseRecvOts, choices);
-        return {};
-    }
 
     // sets the KOS base OTs that are then used to extend
     void SilentOtExtSender::setBaseOts(
