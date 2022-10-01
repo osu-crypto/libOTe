@@ -83,6 +83,11 @@ namespace osuCrypto
 			mVole.setBaseOts(baseSendOts);
 		}
 
+		task<> expand(Socket& chl, PRNG& prng, u64 numThreads)
+		{
+			return mVole.expand(chl, prng, numThreads);
+		}
+
 
 		u64 fieldBits() const
 		{

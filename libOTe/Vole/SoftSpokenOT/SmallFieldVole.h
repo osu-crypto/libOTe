@@ -113,7 +113,6 @@ namespace osuCrypto
 		// numVolesPadded VOLEs, rather than mNumVoles, and the extra output values will be garbage. This
 		// wastes a few AES calls, but saving them wouldn't have helped much because you still have to
 		// pay for the AES latency.
-		u64 numVolesPadded;
 
 		std::unique_ptr<SilentMultiPprfSender> mPprf;
 
@@ -236,7 +235,7 @@ namespace osuCrypto
 				throw RTE_LOC;
 #endif
 
-			return generate(blockIdx, aes, outW.data(), correction.data());
+			generate(blockIdx, aes, outW.data(), correction.data());
 		}
 
 

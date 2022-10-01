@@ -1204,7 +1204,7 @@ namespace osuCrypto
             throw RTE_LOC;
         }
 
-        mPoints.resize(mPntCount);
+        mPoints.resize(roundUpTo(mPntCount, 8));
         getPoints(mPoints, PprfOutputFormat::Plain);
 
 

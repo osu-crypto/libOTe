@@ -75,7 +75,6 @@ namespace tests_libOTe
 			tc.add("Vole_SoftSpokenSmall_Test               ", Vole_SoftSpokenSmall_Test);
 			tc.add("DotExt_Kos_Test                         ", DotExt_Kos_Test);
 			tc.add("DotExt_Iknp_Test                        ", DotExt_Iknp_Test);
-			tc.add("DotExt_SoftSpokenMaliciousLeaky_Test    ", DotExt_SoftSpokenMaliciousLeaky_Test);
 
 
 			tc.add("OtExt_genBaseOts_Test                   ", OtExt_genBaseOts_Test);
@@ -96,6 +95,7 @@ namespace tests_libOTe
 			tc.add("OtExt_SoftSpokenSemiHonest_Test         ", OtExt_SoftSpokenSemiHonest_Test);
 			//tc.add("OtExt_SoftSpokenSemiHonest21_Test       ", OtExt_SoftSpokenSemiHonest21_Test);
 			tc.add("OtExt_SoftSpokenMalicious21_Test        ", OtExt_SoftSpokenMalicious21_Test);
+			tc.add("DotExt_SoftSpokenMaliciousLeaky_Test    ", DotExt_SoftSpokenMaliciousLeaky_Test);
 
 			tc.add("Vole_Noisy_test                         ", Vole_Noisy_test);
 			tc.add("Vole_Silent_QuasiCyclic_test            ", Vole_Silent_QuasiCyclic_test);
