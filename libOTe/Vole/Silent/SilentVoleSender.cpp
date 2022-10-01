@@ -19,31 +19,31 @@ namespace osuCrypto
 
     u64 SilentVoleSender::baseOtCount() const
     {
-#ifdef ENABLE_KOS
-        return mKosSender.baseOtCount();
+#ifdef ENABLE_SOFTSPOKEN_OT
+        return mOtExtSender.baseOtCount();
 #else
-        throw std::runtime_error("IKNP must be enabled");
+        throw std::runtime_error("soft spoken must be enabled");
 #endif
     }
 
     bool SilentVoleSender::hasBaseOts() const
     {
-#ifdef ENABLE_KOS
-        return mKosSender.hasBaseOts();
+#ifdef ENABLE_SOFTSPOKEN_OT
+        return mOtExtSender.hasBaseOts();
 #else
-        throw std::runtime_error("IKNP must be enabled");
+        throw std::runtime_error("soft spoken must be enabled");
 #endif
     }
 
-    // sets the IKNP base OTs that are then used to extend
+    // sets the soft spoken base OTs that are then used to extend
     void SilentVoleSender::setBaseOts(
         span<block> baseRecvOts,
         const BitVector& choices)
     {
-#ifdef ENABLE_KOS
-        mKosSender.setUniformBaseOts(baseRecvOts, choices);
+#ifdef ENABLE_SOFTSPOKEN_OT
+        mOtExtSender.setBaseOts(baseRecvOts, choices);
 #else
-        throw std::runtime_error("IKNP must be enabled");
+        throw std::runtime_error("soft spoken must be enabled");
 #endif
     }
 
@@ -74,21 +74,20 @@ namespace osuCrypto
 
         if (mBaseType == SilentBaseType::BaseExtend)
         {
-            mKosSender.mFiatShamir = true;
-            mKosRecver.mFiatShamir = true;
+#ifdef ENABLE_SOFTSPOKEN_OT
 
-            if (mKosRecver.hasBaseOts() == false)
+            if (mOtExtRecver.hasBaseOts() == false)
             {
-                msg.resize(msg.size() + mKosRecver.baseOtCount());
-                MC_AWAIT(mKosSender.send(msg, prng, chl));
+                msg.resize(msg.size() + mOtExtRecver.baseOtCount());
+                MC_AWAIT(mOtExtSender.send(msg, prng, chl));
                 
-                mKosRecver.setUniformBaseOts(
+                mOtExtRecver.setBaseOts(
                     span<std::array<block,2>>(msg).subspan(
-                        msg.size() - mKosRecver.baseOtCount(),
-                        mKosRecver.baseOtCount()));
-                msg.resize(msg.size() - mKosRecver.baseOtCount());
+                        msg.size() - mOtExtRecver.baseOtCount(),
+                        mOtExtRecver.baseOtCount()));
+                msg.resize(msg.size() - mOtExtRecver.baseOtCount());
 
-                MC_AWAIT(nv.send(*delta, noiseDeltaShares, prng, mKosRecver, chl));
+                MC_AWAIT(nv.send(*delta, noiseDeltaShares, prng, mOtExtRecver, chl));
             }
             else
             {
@@ -97,9 +96,12 @@ namespace osuCrypto
 
                 MC_AWAIT(
                     macoro::when_all_ready(
-                        nv.send(*delta, noiseDeltaShares, prng2, mKosRecver, chl2),
-                        mKosSender.send(msg, prng, chl)));
+                        nv.send(*delta, noiseDeltaShares, prng2, mOtExtRecver, chl2),
+                        mOtExtSender.send(msg, prng, chl)));
             }
+#else
+
+#endif
         }
         else
         {

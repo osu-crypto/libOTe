@@ -86,7 +86,10 @@ namespace osuCrypto
 			bool mRandomOt = false;
 			AESRekeyManager  mAesMgr;
 
-			SoftSpokenShOtSender() = default;
+			SoftSpokenShOtSender()
+			{
+				init();
+			}
 			SoftSpokenShOtSender(SoftSpokenShOtSender&& o)
 				: mSubVole(std::move(o.mSubVole))
 				, mBlockIdx(std::exchange(o.mBlockIdx, 0))
@@ -132,9 +135,6 @@ namespace osuCrypto
 
 			u64 baseOtCount() const override 
 			{
-				if (fieldBits() == 0)
-					throw std::runtime_error("init(...) must be called first. " LOCATION);
-
 				// Can only use base OTs in groups of mFieldBits.
 				return roundUpTo(gOtExtBaseOtCount, fieldBits());
 			}
@@ -166,7 +166,8 @@ namespace osuCrypto
 				Socket& chl) override
 			{
 				setBaseOts(baseRecvOts, choices);
-				return {};
+				MC_BEGIN(task<>);
+				MC_END();
 			}
 
 			//virtual void initTemporaryStorage() { ChunkerBase::initTemporaryStorage(); }
@@ -270,7 +271,10 @@ namespace osuCrypto
 			AESRekeyManager mAesMgr;
 
 
-			SoftSpokenShOtReceiver() = default;
+			SoftSpokenShOtReceiver()
+			{
+				init();
+			}
 			SoftSpokenShOtReceiver(const SoftSpokenShOtReceiver&) = delete;
 			SoftSpokenShOtReceiver(SoftSpokenShOtReceiver&& o) 
 				: mSubVole(std::move(o.mSubVole))
@@ -343,7 +347,9 @@ namespace osuCrypto
 				Socket& chl) override
 			{
 				setBaseOts(baseSendOts);
-				return {};
+
+				MC_BEGIN(task<>);
+				MC_END();
 			}
 
 

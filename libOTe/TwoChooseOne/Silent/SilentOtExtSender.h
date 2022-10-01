@@ -17,7 +17,7 @@
 #include <cryptoTools/Common/Timer.h>
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
-#include <libOTe/TwoChooseOne/Kos/KosOtExtSender.h>
+#include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
@@ -102,9 +102,9 @@ namespace osuCrypto
         // The number of threads that should be used (when applicable).
         u64 mNumThreads = 1;
 
-#ifdef ENABLE_KOS
-        // Kos instance used to generate the base OTs.
-        KosOtExtSender mKosSender;
+#ifdef ENABLE_SOFTSPOKEN_OT
+        // ot extension instance used to generate the base OTs.
+        SoftSpokenMalOtSender mOtExtSender;
 #endif
 
         // The ggm tree thats used to generate the sparse vectors.

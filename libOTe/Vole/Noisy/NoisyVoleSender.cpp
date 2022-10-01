@@ -14,7 +14,7 @@ namespace osuCrypto
     {
         MC_BEGIN(task<>,this, x, z, &prng, &ot, &chl,
             bv = BitVector((u8*)&x, 128),
-            otMsg = std::array<block, 128>{});
+            otMsg = AlignedUnVector<block>{ 128 });
 
         setTimePoint("NoisyVoleSender.ot.begin");
 

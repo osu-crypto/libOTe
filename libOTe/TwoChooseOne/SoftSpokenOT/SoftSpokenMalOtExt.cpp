@@ -13,6 +13,9 @@ namespace osuCrypto
 	task<> SoftSpokenMalOtSender::send(
 		span<std::array<block, 2>> messages, PRNG& prng, Socket& chl)
 	{
+		if ((u64)messages.data() % 32)
+			throw std::runtime_error("soft spoken requires the messages to by 32 byte aligned. Consider using AlignedUnVector or AlignedVector." LOCATION);
+
 		MC_BEGIN(task<>, this, messages, &prng, &chl, 
 			nChunks = u64{},
 			messagesFullChunks = u64{},
@@ -21,7 +24,6 @@ namespace osuCrypto
 			scratchBacking = AlignedUnVector<block>{},
 			seed = block{}
 		);
-
 
 		if (!hasBaseOts())
 			MC_AWAIT(genBaseOts(prng, chl));
@@ -33,7 +35,7 @@ namespace osuCrypto
 			MC_AWAIT(chl.send(std::move(seed)));
 		}
 
-		MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
+		MC_AWAIT(mBase.mSubVole.expand(chl, prng, mBase.mNumThreads));
 
 		nChunks = divCeil(messages.size() + 64, 128);
 		messagesFullChunks = messages.size() / 128;
@@ -320,6 +322,9 @@ namespace osuCrypto
 	task<> SoftSpokenMalOtReceiver::receive(
 		const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
 	{
+		if ((u64)messages.data() % 32)
+			throw std::runtime_error("soft spoken requires the messages to by 32 byte aligned. Consider using AlignedUnVector or AlignedVector." LOCATION);
+
 		MC_BEGIN(task<>, this, &choices, messages, &prng, &chl, 
 			nChunks = u64{},
 			messagesFullChunks = u64{},
@@ -346,7 +351,7 @@ namespace osuCrypto
 			mBase.mAesMgr.setSeed(seed);
 		}
 
-		MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
+		MC_AWAIT(mBase.mSubVole.expand(chl, prng, mBase.mNumThreads));
 		
 		nChunks = divCeil(messages.size() + 64, 128);
 		messagesFullChunks = messages.size() / 128;

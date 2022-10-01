@@ -17,8 +17,7 @@
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
-#include <libOTe/TwoChooseOne/Kos/KosOtExtReceiver.h>
-#include <libOTe/TwoChooseOne/Kos/KosOtExtSender.h>
+#include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
 #include <libOTe/Tools/QuasiCyclicCode.h>
@@ -101,9 +100,9 @@ namespace osuCrypto
         AlignedVector<block> mNoiseDeltaShare, mNoiseValues;
 
 
-#ifdef ENABLE_KOS
-        KosOtExtReceiver mKosRecver;
-        KosOtExtSender mKosSender;
+#ifdef ENABLE_SOFTSPOKEN_OT
+        SoftSpokenMalOtSender mOtExtSender;
+        SoftSpokenMalOtReceiver mOtExtRecver;
 #endif
 
         // sets the Iknp base OTs that are then used to extend

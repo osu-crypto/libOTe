@@ -12,7 +12,7 @@ namespace osuCrypto
         OtSender& ot, Socket& chl)
     {
         MC_BEGIN(task<>,this, y,z, &prng, &ot, &chl,
-            otMsg = std::array<std::array<block, 2>, 128>{}
+            otMsg = AlignedUnVector<std::array<block, 2>>{ 128 }
             );
 
         setTimePoint("NoisyVoleReceiver.ot.begin");
@@ -25,6 +25,7 @@ namespace osuCrypto
 
         MC_END();
     }
+
     task<> NoisyVoleReceiver::receive(
         span<block> y, span<block> z, 
         PRNG& _, span<std::array<block, 2>> otMsg, 

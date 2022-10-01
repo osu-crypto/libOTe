@@ -24,28 +24,28 @@ namespace osuCrypto
 	void SilentVoleReceiver::setBaseOts(
 		span<std::array<block, 2>> baseSendOts)
 	{
-#ifdef ENABLE_KOS
-		mKosRecver.setUniformBaseOts(baseSendOts);
+#ifdef ENABLE_SOFTSPOKEN_OT
+		mOtExtRecver.setBaseOts(baseSendOts);
 #else
-		throw std::runtime_error("IKNP must be enabled");
+		throw std::runtime_error("soft spoken must be enabled");
 #endif
 	}
 
-	// return the number of base OTs IKNP needs
+	// return the number of base OTs soft spoken needs
 	u64 SilentVoleReceiver::baseOtCount() const {
-#ifdef ENABLE_KOS
-		return mKosRecver.baseOtCount();
+#ifdef ENABLE_SOFTSPOKEN_OT
+		return mOtExtRecver.baseOtCount();
 #else
-		throw std::runtime_error("IKNP must be enabled");
+		throw std::runtime_error("soft spoken must be enabled");
 #endif
 	}
 
-	// returns true if the IKNP base OTs are currently set.
+	// returns true if the soft spoken base OTs are currently set.
 	bool SilentVoleReceiver::hasBaseOts() const {
-#ifdef ENABLE_KOS
-		return mKosRecver.hasBaseOts();
+#ifdef ENABLE_SOFTSPOKEN_OT
+		return mOtExtRecver.hasBaseOts();
 #else
-		throw std::runtime_error("IKNP must be enabled");
+		throw std::runtime_error("soft spoken must be enabled");
 #endif
 	};
 
@@ -133,11 +133,11 @@ namespace osuCrypto
 		Socket& chl)
 	{
 		setTimePoint("SilentVoleReceiver.gen.start");
-#ifdef ENABLE_KOS
-		return mKosRecver.genBaseOts(prng, chl);
+#ifdef ENABLE_SOFTSPOKEN_OT
+		return mOtExtRecver.genBaseOts(prng, chl);
 		//mIknpSender.genBaseOts(mIknpRecver, prng, chl);
 #else
-		throw std::runtime_error("IKNP must be enabled");
+		throw std::runtime_error("soft spoken must be enabled");
 #endif
 	}
 
@@ -260,26 +260,25 @@ namespace osuCrypto
 
 		if (mBaseType == SilentBaseType::BaseExtend)
 		{
-			mKosSender.mFiatShamir = true;
-			mKosRecver.mFiatShamir = true;
+#ifdef ENABLE_SOFTSPOKEN_OT
 
-			if (mKosSender.hasBaseOts() == false)
+			if (mOtExtSender.hasBaseOts() == false)
 			{
-				msg.resize(msg.size() + mKosSender.baseOtCount());
-				bb.resize(mKosSender.baseOtCount());
+				msg.resize(msg.size() + mOtExtSender.baseOtCount());
+				bb.resize(mOtExtSender.baseOtCount());
 				bb.randomize(prng);
 				choice.append(bb);
 
-				MC_AWAIT(mKosRecver.receive(choice, msg, prng, chl));
+				MC_AWAIT(mOtExtRecver.receive(choice, msg, prng, chl));
 
-				mKosSender.setUniformBaseOts(
+				mOtExtSender.setBaseOts(
 					span<block>(msg).subspan(
-						msg.size() - mKosSender.baseOtCount(),
-						mKosSender.baseOtCount()),
+						msg.size() - mOtExtSender.baseOtCount(),
+						mOtExtSender.baseOtCount()),
 					bb);
 
-				msg.resize(msg.size() - mKosSender.baseOtCount());
-				MC_AWAIT(nv.receive(noiseVals, noiseDeltaShares, prng, mKosSender, chl));
+				msg.resize(msg.size() - mOtExtSender.baseOtCount());
+				MC_AWAIT(nv.receive(noiseVals, noiseDeltaShares, prng, mOtExtSender, chl));
 			}
 			else
 			{
@@ -289,10 +288,13 @@ namespace osuCrypto
 
 				MC_AWAIT(
 					macoro::when_all_ready(
-						nv.receive(noiseVals, noiseDeltaShares, prng2, mKosSender, chl2),
-						mKosRecver.receive(choice, msg, prng, chl)
+						nv.receive(noiseVals, noiseDeltaShares, prng2, mOtExtSender, chl2),
+						mOtExtRecver.receive(choice, msg, prng, chl)
 					));
 			}
+#else
+			throw std::runtime_error("soft spoken must be enabled");
+#endif
 		}
 		else
 		{

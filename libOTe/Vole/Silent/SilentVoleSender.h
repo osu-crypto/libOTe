@@ -18,8 +18,7 @@
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
-#include <libOTe/TwoChooseOne/Kos/KosOtExtSender.h>
-#include <libOTe/TwoChooseOne/Kos/KosOtExtReceiver.h>
+#include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/QuasiCyclicCode.h>
 //#define NO_HASH
@@ -57,9 +56,9 @@ namespace osuCrypto
 
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
-#ifdef ENABLE_KOS
-        KosOtExtSender mKosSender;
-        KosOtExtReceiver mKosRecver;
+#ifdef ENABLE_SOFTSPOKEN_OT
+        SoftSpokenMalOtSender mOtExtSender;
+        SoftSpokenMalOtReceiver mOtExtRecver;
 #endif
 
         MultType mMultType = DefaultMultType;
@@ -93,7 +92,7 @@ namespace osuCrypto
         // IKNP base OTs that are required.
         task<> genBaseOts(PRNG& prng, Socket& chl)
         {
-            return mKosSender.genBaseOts(prng, chl);
+            return mOtExtSender.genBaseOts(prng, chl);
         }
 
         /////////////////////////////////////////////////////

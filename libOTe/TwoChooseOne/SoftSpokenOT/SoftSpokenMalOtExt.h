@@ -151,7 +151,9 @@ namespace osuCrypto
 		AlignedUnVector<block> mExtraW;
 		Hasher mHasher;
 
-		SoftSpokenMalOtSender() = default;
+		SoftSpokenMalOtSender() {
+			init();
+		}
 		SoftSpokenMalOtSender(SoftSpokenMalOtSender&& o) = default;
 		SoftSpokenMalOtSender& operator=(SoftSpokenMalOtSender&& o) = default;
 
@@ -290,7 +292,10 @@ namespace osuCrypto
 		AlignedUnVector<block> mExtraV;
 		Hasher mHasher;
 
-		SoftSpokenMalOtReceiver() = default;
+		SoftSpokenMalOtReceiver()
+		{
+			init();
+		}
 		SoftSpokenMalOtReceiver(SoftSpokenMalOtReceiver&& o) 
 			:mBase(std::move(o.mBase))
 			,mExtraV(std::move(o.mExtraV))

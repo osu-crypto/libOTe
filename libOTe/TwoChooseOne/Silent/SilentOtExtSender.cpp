@@ -145,8 +145,8 @@ namespace osuCrypto
         span<block> baseRecvOts,
         const BitVector& choices)
     {
-#ifdef ENABLE_KOS
-        mKosSender.setUniformBaseOts(baseRecvOts, choices);
+#ifdef ENABLE_SOFTSPOKEN_OT
+        mOtExtSender.setBaseOts(baseRecvOts, choices);
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -156,10 +156,10 @@ namespace osuCrypto
     std::unique_ptr<OtExtSender> SilentOtExtSender::split()
     {
 
-#ifdef ENABLE_KOS
+#ifdef ENABLE_SOFTSPOKEN_OT
         auto ptr = new SilentOtExtSender;
         auto ret = std::unique_ptr<OtExtSender>(ptr);
-        ptr->mKosSender = mKosSender.splitBase();
+        ptr->mOtExtSender = mOtExtSender.splitBase();
         return ret;
 #else
         throw std::runtime_error("KOS must be enabled");
@@ -170,8 +170,8 @@ namespace osuCrypto
     // IKNP base OTs that are required.
     task<> SilentOtExtSender::genBaseOts(PRNG& prng, Socket& chl)
     {
-#ifdef ENABLE_KOS
-        return mKosSender.genBaseOts(prng, chl);
+#ifdef ENABLE_SOFTSPOKEN_OT
+        return mOtExtSender.genBaseOts(prng, chl);
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -180,8 +180,8 @@ namespace osuCrypto
 
     u64 SilentOtExtSender::baseOtCount() const
     {
-#ifdef ENABLE_KOS
-        return mKosSender.baseOtCount();
+#ifdef ENABLE_SOFTSPOKEN_OT
+        return mOtExtSender.baseOtCount();
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -189,8 +189,8 @@ namespace osuCrypto
 
     bool SilentOtExtSender::hasBaseOts() const
     {
-#ifdef ENABLE_KOS
-        return mKosSender.hasBaseOts();
+#ifdef ENABLE_SOFTSPOKEN_OT
+        return mOtExtSender.hasBaseOts();
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -209,14 +209,14 @@ namespace osuCrypto
 
         // If we have IKNP base OTs, use them
         // to extend to get the silent base OTs.
-#if defined(ENABLE_KOS) || defined(LIBOTE_HAS_BASE_OT)
+#if defined(ENABLE_SOFTSPOKEN_OT) || defined(LIBOTE_HAS_BASE_OT)
 
-#ifdef ENABLE_KOS
+#ifdef ENABLE_SOFTSPOKEN_OT
         if (useOtExtension)
         {
 
-            mKosSender.mFiatShamir = true;
-            MC_AWAIT(mKosSender.send(msg, prng, chl));
+            //mOtExtSender.mFiatShamir = true;
+            MC_AWAIT(mOtExtSender.send(msg, prng, chl));
         }
         else
 #endif
