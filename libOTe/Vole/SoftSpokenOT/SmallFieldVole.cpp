@@ -103,6 +103,8 @@ namespace osuCrypto
 			fieldBitsConst > 0 ? fieldBitsConst : SmallFieldVoleSender::fieldBitsMax;
 		const u64 fieldSize = 1 << fieldBits;
 
+		assert(This.mSeeds.size());
+
 		block* __restrict seeds = This.mSeeds.data();
 		block blockIdxBlock = toBlock(blockIdx);
 
@@ -168,6 +170,7 @@ namespace osuCrypto
 			fieldBitsConst > 0 ? fieldBitsConst : SmallFieldVoleSender::fieldBitsMax;
 		const u64 fieldSize = 1 << fieldBits;
 
+		assert(This.mSeeds.size());
 		block* __restrict seeds = This.mSeeds.data();
 		block blockIdxBlock = toBlock(blockIdx);
 
@@ -213,7 +216,7 @@ namespace osuCrypto
 					for (u64 i = 0; i < volePerSuperBlk; ++i)
 						for (u64 j = 0; j < fieldBits; ++j, ++outW)
 							*outW = xorHashes[i * fieldSize + j + 1] ^
-							correction[i] & block::allSame(deltaPtr[i * fieldBits + j]);
+								correction[i] & block::allSame(deltaPtr[i * fieldBits + j]);
 				else
 					for (u64 i = 0; i < volePerSuperBlk; ++i)
 						for (u64 j = 0; j < fieldBits; ++j, ++outW)
@@ -270,6 +273,9 @@ namespace osuCrypto
 		u64 numSeeds = mNumVoles * fieldSize();
 		if ((u64)seeds_.size() != numSeeds)
 			throw RTE_LOC;
+
+		assert(mNumVolesPadded >= numSeeds);
+		mSeeds.resize(mNumVolesPadded * fieldSize());
 		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
 	}
 
@@ -294,23 +300,24 @@ namespace osuCrypto
 		if (mFieldBits < 1 || mFieldBits > fieldBitsMax)
 			throw RTE_LOC;
 		mNumVolesPadded = (computeNumVolesPadded(fieldBits_, numVoles_));
+		mSeeds.resize(0);
 	}
 
 	void SmallFieldVoleSender::init(u64 fieldBits_, u64 numVoles_, bool malicious)
 	{
 		SmallFieldVoleBase::init(fieldBits_, numVoles_, malicious);
-		numVolesPadded = (computeNumVolesPadded(fieldBits_, numVoles_));
+		//mNumVolesPadded = (computeNumVolesPadded(fieldBits_, numVoles_));
 		mGenerateFn = (selectGenerateImpl(mFieldBits));
-		mSeeds.resize(numVolesPadded * fieldSize());
-		std::fill_n(mSeeds.data(), mSeeds.size(), toBlock(0, 0));
+		//mSeeds.resize(numVolesPadded * fieldSize());
+		//std::fill_n(mSeeds.data(), mSeeds.size(), toBlock(0, 0));
 	}
 
 	void SmallFieldVoleReceiver::init(u64 fieldBits_, u64 numVoles_, bool malicious)
 	{
 		SmallFieldVoleBase::init(fieldBits_, numVoles_, malicious);
 		mGenerateFn = (selectGenerateImpl(mFieldBits));
-		mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
-		std::fill_n(mSeeds.data(), mSeeds.size(), block(0, 0));
+		//mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
+		//std::fill_n(mSeeds.data(), mSeeds.size(), block(0, 0));
 	}
 
 	void SmallFieldVoleReceiver::setDelta(BitVector delta_)
@@ -328,6 +335,9 @@ namespace osuCrypto
 		u64 numSeeds = mNumVoles * (fieldSize() - 1);
 		if ((u64)seeds_.size() != numSeeds)
 			throw RTE_LOC;
+
+		assert(mNumVolesPadded >= numSeeds);
+		mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
 		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
 	}
 
@@ -395,6 +405,11 @@ namespace osuCrypto
 			seedView = MatrixView<block>{}
 		);
 
+		
+		assert(mSeeds.size() == 0  && mNumVoles && mNumVoles <= mNumVolesPadded);
+		mSeeds.resize(mNumVolesPadded * fieldSize());
+		std::fill(mSeeds.begin(), mSeeds.end(), block(0, 0));
+
 		seedView = MatrixView<block>(mSeeds.data(), mNumVoles, fieldSize());
 		MC_AWAIT(mPprf.expand(chl, span<const block>(), prng, seedView, PprfOutputFormat::BlockTransposed, false, 1));
 
@@ -442,6 +457,11 @@ namespace osuCrypto
 			hashes = std::vector<std::array<block, 2>>{},
 			seedMatrix = (block*)nullptr
 		);
+
+		assert(mSeeds.size() == 0 && mNumVoles && mNumVoles <= mNumVolesPadded);
+		mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
+		std::fill(mSeeds.begin(), mSeeds.end(), block(0, 0));
+
 
 		seedsFull.resize(mNumVoles, fieldSize());
 		MC_AWAIT(mPprf.expand(chl, prng, seedsFull, PprfOutputFormat::BlockTransposed, false, 1));

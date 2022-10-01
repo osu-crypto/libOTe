@@ -66,6 +66,9 @@ namespace tests_libOTe
             //    std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
             //    std::cout << (int)choice << "-- " << recv[i] << std::endl;
             //}
+            if (revcBlock == ZeroBlock)
+                throw RTE_LOC;
+
             if (neq(revcBlock, senderBlock))
                 throw UnitTestFail();
 

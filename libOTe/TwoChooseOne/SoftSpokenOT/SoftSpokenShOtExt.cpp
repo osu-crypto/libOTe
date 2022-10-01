@@ -56,6 +56,9 @@ namespace osuCrypto
 			MC_AWAIT(chl.send(std::move(seed)));
 		}
 
+
+		MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
+
 		//MC_AWAIT(runBatch(chl, messages));
 		//auto nums = checkSpanLengths(instParams..., chunkParams...);
 		numInstances = messages.size();
@@ -199,6 +202,8 @@ namespace osuCrypto
 			mAesMgr.setSeed(seed);
 		}
 
+		MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
+
 		numInstances = messages.size();
 		numChunks = divCeil(numInstances, chunkSize());
 		minInstances = chunkSize() + paddingSize();
@@ -231,7 +236,9 @@ namespace osuCrypto
 		{
 			if (nChunk % commSize == 0)
 			{
-				MC_AWAIT(sendBuffer(chl));
+				if(hasSendBuffer())
+					MC_AWAIT(sendBuffer(chl));
+
 				reserveSendBuffer(std::min<u64>(numChunks - nChunk, commSize));
 			}
 

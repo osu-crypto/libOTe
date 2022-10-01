@@ -165,7 +165,8 @@ namespace tests_libOTe
         PRNG prng0(block(4234335, 3445235));
         PRNG prng1(block(42348345, 989835));
 
-        auto nnumOTs = cmd.getManyOr<u64>("n", { 9733 });
+        auto nnumOTs = cmd.getManyOr<u64>("n", { { 10, 100, 9733 } });
+
         for (auto random : { false, true})
         {
             for (auto numOTs : nnumOTs)
@@ -184,8 +185,8 @@ namespace tests_libOTe
                     if (nBaseOTs != recver.baseOtCount())
                         throw UnitTestFail(LOCATION);
 
-                    AlignedUnVector<block> recvMsg(numOTs), baseRecv(nBaseOTs);
-                    AlignedUnVector<std::array<block, 2>> sendMsg(numOTs), baseSend(nBaseOTs);
+                    AlignedVector<block> recvMsg(numOTs), baseRecv(nBaseOTs);
+                    AlignedVector<std::array<block, 2>> sendMsg(numOTs), baseSend(nBaseOTs);
                     BitVector choices(numOTs), baseChoice(nBaseOTs);
 
                     choices.randomize(prng0);
@@ -204,10 +205,17 @@ namespace tests_libOTe
                     ));
 
 
+                        //for (u64 i = 0; i < numOTs; ++i)
+                        //{
+                        //    std::cout << sendMsg[i][0] << ", " << sendMsg[i][1] << ", " << recvMsg[i] << "," << std::endl;
+                        //}
+                        //std::cout << std::endl;
+
                     OT_100Receive_Test(choices, recvMsg, sendMsg);
 
                     if (random == false)
                     {
+
 
                         const block delta = sender.delta();
                         for (auto& s : sendMsg)
@@ -264,8 +272,8 @@ namespace tests_libOTe
         			baseRecv[i] = baseSend[i][baseChoice[i]];
         		}
 
-        		AlignedUnVector<block> recvMsg(numOTs);
-        		AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
+        		AlignedVector<block> recvMsg(numOTs);
+        		AlignedVector<std::array<block, 2>> sendMsg(numOTs);
 
                 memset(recvMsg.data(), 0xcc, numOTs * sizeof(block));
                 block bb0, bb1;
@@ -352,8 +360,8 @@ namespace tests_libOTe
         			baseRecv[i] = baseSend[i][baseChoice[i]];
         		}
 
-        		AlignedUnVector<block> recvMsg(numOTs);
-        		AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
+        		AlignedVector<block> recvMsg(numOTs);
+        		AlignedVector<std::array<block, 2>> sendMsg(numOTs);
   
                 recver.setBaseOts(baseSend);
                 sender.setBaseOts(baseRecv, baseChoice);
