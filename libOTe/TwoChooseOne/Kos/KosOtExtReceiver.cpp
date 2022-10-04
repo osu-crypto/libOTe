@@ -118,7 +118,7 @@ namespace osuCrypto
             MC_AWAIT(chl.send(std::move(diff)));
 
             {
-                auto iter = BitIterator((u8*)&rand, 0);
+                auto iter = BitIterator((u8*)&diff, 0);
 
                 mGens.resize(gOtExtBaseOtCount);
                 for (u64 i = 0; i < gOtExtBaseOtCount; i++)

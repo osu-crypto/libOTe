@@ -59,12 +59,8 @@ namespace osuCrypto
         mUniformBase = false;
     }
 
-    task<> KosOtExtSender::send(
-        span<std::array<block, 2>> messages,
-        PRNG& prng,
-        Socket& chl)
+    void KosWarning()
     {
-
 #ifndef NO_KOS_WARNING
         // warn the user on program exit.
         struct Warned
@@ -81,6 +77,14 @@ namespace osuCrypto
         };
         static Warned wardned;
 #endif
+    }
+
+    task<> KosOtExtSender::send(
+        span<std::array<block, 2>> messages,
+        PRNG& prng,
+        Socket& chl)
+    {
+        KosWarning();
 
         if (messages.size() == 0)
             throw RTE_LOC;

@@ -52,27 +52,14 @@ namespace osuCrypto
         mDelta = delta;
     }
 
+    void KosWarning();
+    
     task<> KosDotExtSender::send(
         span<std::array<block, 2>> messages,
         PRNG& prng,
         Socket& chl)
     {
-#ifndef NO_KOS_WARNING
-        // warn the user on program exit.
-        struct Warned
-        {
-            ~Warned()
-            {
-                std::cout << Color::Red << "WARNING: This program made use of the KOS OT extension protocol. "
-                    << "The security of this protocol remains unclear and it is highly recommended to use the "
-                    << "SoftSpoken protocol instead. See the associated paper for details. Rebuild the library "
-                    << "with -DNO_KOS_WARNING=ON to disable this message."
-                    << LOCATION << Color::Default << std::endl;
-
-            }
-        };
-        static Warned wardned;
-#endif
+        KosWarning();
 
         MC_BEGIN(task<>,this, messages, &prng, &chl,
             numOtExt = u64{}, numSuperBlocks = u64{},
