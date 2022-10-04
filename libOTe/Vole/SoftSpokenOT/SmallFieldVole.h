@@ -31,6 +31,8 @@ namespace osuCrypto
 	// Commonalities between sender and receiver.
 	class SmallFieldVoleBase
 	{
+		SmallFieldVoleBase(const SmallFieldVoleBase&) = default;
+
 	public:
 		static constexpr u64 fieldBitsMax = 31;
 
@@ -48,6 +50,12 @@ namespace osuCrypto
 		SmallFieldVoleBase() = default;
 		SmallFieldVoleBase(SmallFieldVoleBase&&) = default;
 		SmallFieldVoleBase& operator=(SmallFieldVoleBase&&) = default;
+
+
+		SmallFieldVoleBase copy() const
+		{
+			return *this;
+		}
 
 		static constexpr u64 baseOtCount(u64 fieldBits, u64 numVoles)
 		{
@@ -68,6 +76,12 @@ namespace osuCrypto
 		u64 fieldBits() const
 		{
 			return mFieldBits;
+		}
+
+
+		bool hasSeed() const
+		{
+			return mSeeds.size();
 		}
 
 
@@ -107,6 +121,12 @@ namespace osuCrypto
 
 	class SmallFieldVoleSender : public SmallFieldVoleBase
 	{
+		SmallFieldVoleSender(const SmallFieldVoleSender& b)
+			: SmallFieldVoleBase(b)
+			, mPprf(new SilentMultiPprfSender)
+			, mGenerateFn(b.mGenerateFn)
+		{}
+
 	public:
 		// Instead of special casing the last few VOLEs when the number of AES calls wouldn't be a
 		// multiple of superBlkSize, just pad the mSeeds and output. The output must be sized for
@@ -120,6 +140,11 @@ namespace osuCrypto
 		SmallFieldVoleSender(SmallFieldVoleSender&&) = default;
 		SmallFieldVoleSender& operator=(SmallFieldVoleSender&&) = default;
 
+		// copy the vole seeds but not the pprf/base-OTs
+		SmallFieldVoleSender copy()const
+		{
+			return *this;
+		}
 
 		void setBaseOts(span<std::array<block, 2>> msgs);
 
@@ -138,7 +163,7 @@ namespace osuCrypto
 
 		bool hasBaseOts() const
 		{
-			return mPprf && mPprf->hasBaseOts();
+			return mSeeds.size() || (mPprf && mPprf->hasBaseOts());
 		}
 
 		// outV outputs the values for v, i.e. xor_x x * PRG(seed[x]). outU gives the values for u (the
@@ -178,6 +203,15 @@ namespace osuCrypto
 
 	class SmallFieldVoleReceiver : public SmallFieldVoleBase
 	{
+
+		SmallFieldVoleReceiver(const SmallFieldVoleReceiver& b)
+			: SmallFieldVoleBase(b)
+			, mPprf(new SilentMultiPprfReceiver)
+			, mDelta(b.mDelta)
+			, mDeltaUnpacked(b.mDeltaUnpacked)
+			, mGenerateFn(b.mGenerateFn)
+		{}
+
 	public:
 		std::unique_ptr<SilentMultiPprfReceiver> mPprf;
 		BitVector mDelta;
@@ -186,6 +220,14 @@ namespace osuCrypto
 		SmallFieldVoleReceiver() = default;
 		SmallFieldVoleReceiver(SmallFieldVoleReceiver&&) = default;
 		SmallFieldVoleReceiver& operator=(SmallFieldVoleReceiver&&) = default;
+
+
+		// copy the vole seeds but not the pprf/base-OTs
+		SmallFieldVoleReceiver copy()const
+		{
+			return *this;
+		}
+
 
 		// Same as for SmallFieldVoleSender, except that the AES operations are performed in differently
 		// sized chunks for the receiver.
@@ -206,7 +248,7 @@ namespace osuCrypto
 
 		bool hasBaseOts() const
 		{
-			return mPprf && mPprf->hasBaseOts();
+			return mSeeds.size() || (mPprf && mPprf->hasBaseOts());
 		}
 
 		const BitVector& getDelta() const { return mDelta; }

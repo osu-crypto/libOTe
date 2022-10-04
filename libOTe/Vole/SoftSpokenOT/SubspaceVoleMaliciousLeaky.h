@@ -67,11 +67,11 @@ namespace osuCrypto
 		block hashKeySqAndA64;
 
 		// Universal hash key.
-		u64 hashKey;
+		u64 hashKey = 0;
 
 		// Maximum number of times a hash key can be used before being replaced.
 		static constexpr u64 maxHashKeyUsage = 1024 * 1024;
-		u64 hashKeyUseCount = 0;
+		u64 hashKeyUseCount = ~0ull;
 
 
 		SubspaceVoleMaliciousBase() = default;
@@ -143,6 +143,8 @@ namespace osuCrypto
 
 		OC_FORCEINLINE void updateHash(block& hash, block in) const
 		{
+			assert(hashKeyUseCount != ~0ull && "setupHash() must be called first");
+
 			block inMul = in.clmulepi64_si128<0x00>(toBlock(hashKey));
 			block inHigh = in.srli_si128<8>();
 			hash ^= inMul ^ inHigh;
@@ -229,6 +231,8 @@ namespace osuCrypto
 		using Base = SubspaceVoleMaliciousBase;
 		using Sender = SubspaceVoleSender<Code>;
 		using Sender::code;
+		using Sender::hasSeed;
+
 
 		SubspaceVoleMaliciousSender() = default;
 
@@ -251,6 +255,18 @@ namespace osuCrypto
 			clearHashes();
 		}
 
+		SubspaceVoleMaliciousSender copy() const
+		{
+			SubspaceVoleMaliciousSender r;
+			(Sender&)r = Sender::copy();
+			r.hashU.resize(hashU.size());
+			r.subtotalU.resize(subtotalU.size());
+			r.hashV.resize(hashV.size());
+			r.subtotalV.resize(subtotalV.size());
+			r.clearHashes();
+			return r;
+		}
+
 
 		u64 vPadded() const { return roundUpTo(Sender::vPadded(), 4); }
 
@@ -263,6 +279,8 @@ namespace osuCrypto
 		{
 			Sender::generateChosen(blockIdx, aes, chosenU, outV.subspan(0, Sender::vPadded()));
 		}
+
+
 
 		void setChallenge(block seed)
 		{
@@ -357,10 +375,24 @@ namespace osuCrypto
 		using Base = SubspaceVoleMaliciousBase;
 		using Receiver = SubspaceVoleReceiver<Code>;
 		using Receiver::code;
+		using Receiver::hasSeed;
+		
 
 		SubspaceVoleMaliciousReceiver() = default;
 		SubspaceVoleMaliciousReceiver(SubspaceVoleMaliciousReceiver&& o) = default;
 		SubspaceVoleMaliciousReceiver& operator=(SubspaceVoleMaliciousReceiver&& o) = default;
+
+
+		SubspaceVoleMaliciousReceiver copy() const
+		{
+			SubspaceVoleMaliciousReceiver r;
+			r.mHashW.resize(mHashW.size());
+			r.mSubtotalW.resize(mSubtotalW.size());
+			(Receiver&)r = Receiver::copy();
+			r.clearHashes();
+			return r;
+		}
+
 
 		void init(u64 fieldBits_, u64 numVoles_)
 		{

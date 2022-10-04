@@ -63,6 +63,16 @@ namespace osuCrypto
 			return *this;
 		}
 
+		// return a copy of this subspace vole with the same correlated randomness...
+		SubspaceVoleSender copy() const
+		{
+			SubspaceVoleSender r;
+			r.mCode = this->mCode;
+			assert(r.code().length() == code().length() && r.code().codimension() == code().codimension());
+			r.mVole = mVole.copy();
+			return r;
+		}
+
 		void init(u64 fieldBits, u64 numVoles)
 		{
 			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits));
@@ -70,6 +80,12 @@ namespace osuCrypto
 
 			if (mVole.mNumVoles != code().length())
 				throw RTE_LOC;
+		}
+
+
+		bool hasSeed() const
+		{
+			return mVole.hasSeed();
 		}
 
 		bool hasBaseOts() const
@@ -155,6 +171,7 @@ namespace osuCrypto
 	template<typename Code>
 	class SubspaceVoleReceiver : public SubspaceVoleBase<Code>
 	{
+
 	public:
 		SmallFieldVoleReceiver mVole;
 		AlignedUnVector<block> mCorrectionU;
@@ -186,6 +203,15 @@ namespace osuCrypto
 			return *this;
 		}
 
+		// return a copy of this subspace vole with the same correlated randomness...
+		SubspaceVoleReceiver copy() const
+		{
+			SubspaceVoleReceiver r;
+			r.mCode = this->mCode;
+			r.mVole = mVole.copy();
+			return r;
+		}
+
 		void init(u64 fieldBits_, u64 numVoles_)
 		{
 			this->mCode = Code(divCeil(gOtExtBaseOtCount, fieldBits_));
@@ -201,6 +227,11 @@ namespace osuCrypto
 			const BitVector& choices)
 		{
 			mVole.setBaseOts(baseRecvOts, choices);
+		}
+
+		bool hasSeed() const
+		{
+			return mVole.hasSeed();
 		}
 
 		bool hasBaseOts() const
@@ -219,6 +250,7 @@ namespace osuCrypto
 		{
 			return mVole.expand(chl, prng, numThreads);
 		}
+
 
 
 		// await the result to perform the receive.

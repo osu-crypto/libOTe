@@ -100,7 +100,7 @@ namespace osuCrypto
 
 			// perform the base To, call sync_wait to block until they have completed.
 			cp::sync_wait(base.send(baseMsg, prng, chl));
-			cp::sync_wait(receiver.setBaseOts(baseMsg, prng, chl));
+			receiver.setBaseOts(baseMsg);
 		}
 		else
 		{
@@ -112,7 +112,7 @@ namespace osuCrypto
 
 			// perform the base To, call sync_wait to block until they have completed.
 			cp::sync_wait(base.receive(bv, baseMsg, prng, chl));
-			cp::sync_wait(sender.setBaseOts(baseMsg, bv, chl));
+			sender.setBaseOts(baseMsg, bv);
 		}
 
 #else

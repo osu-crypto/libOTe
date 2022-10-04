@@ -167,7 +167,7 @@ namespace tests_libOTe
 
         auto nnumOTs = cmd.getManyOr<u64>("n", { { 10, 100, 9733 } });
 
-        for (auto random : { false, true})
+        for (auto random : { false, true })
         {
             for (auto numOTs : nnumOTs)
             {
@@ -205,11 +205,11 @@ namespace tests_libOTe
                     ));
 
 
-                        //for (u64 i = 0; i < numOTs; ++i)
-                        //{
-                        //    std::cout << sendMsg[i][0] << ", " << sendMsg[i][1] << ", " << recvMsg[i] << "," << std::endl;
-                        //}
-                        //std::cout << std::endl;
+                    //for (u64 i = 0; i < numOTs; ++i)
+                    //{
+                    //    std::cout << sendMsg[i][0] << ", " << sendMsg[i][1] << ", " << recvMsg[i] << "," << std::endl;
+                    //}
+                    //std::cout << std::endl;
 
                     OT_100Receive_Test(choices, recvMsg, sendMsg);
 
@@ -231,6 +231,61 @@ namespace tests_libOTe
     }
 
 
+    void OtExt_SoftSpokenSemiHonest_Split_Test(const oc::CLP& cmd)
+    {
+#ifdef ENABLE_SOFTSPOKEN_OT
+        setThreadName("Sender");
+
+        auto sockets = cp::LocalAsyncSocket::makePair();
+
+        PRNG prng0(block(4234335, 3445235));
+        PRNG prng1(block(42348345, 989835));
+
+        auto numOTs = 1231;
+
+        SoftSpokenShOtSender<> sender;
+        SoftSpokenShOtReceiver<> recver;
+
+        const size_t nBaseOTs = sender.baseOtCount();
+        if (nBaseOTs != recver.baseOtCount())
+            throw UnitTestFail(LOCATION);
+
+        AlignedVector<block> recvMsg(numOTs), baseRecv(nBaseOTs);
+        AlignedVector<std::array<block, 2>> sendMsg(numOTs), baseSend(nBaseOTs);
+        BitVector choices(numOTs), baseChoice(nBaseOTs);
+
+        choices.randomize(prng0);
+        baseChoice.randomize(prng0);
+
+        prng0.get(baseSend.data(), baseSend.size());
+        for (u64 i = 0; i < nBaseOTs; ++i)
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+
+        recver.setBaseOts(baseSend);
+        sender.setBaseOts(baseRecv, baseChoice);
+
+        cp::sync_wait(cp::when_all_ready(
+            recver.receive(choices, recvMsg, prng0, sockets[0]),
+            sender.send(sendMsg, prng1, sockets[1])
+        ));
+
+        OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+
+        auto recver2 = recver.splitBase();
+        auto sender2 = sender.splitBase();
+        cp::sync_wait(cp::when_all_ready(
+            recver2.receive(choices, recvMsg, prng0, sockets[0]),
+            sender2.send(sendMsg, prng1, sockets[1])
+        ));
+
+
+        OT_100Receive_Test(choices, recvMsg, sendMsg);
+#else
+        throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
+#endif
+    }
+
     void DotExt_SoftSpokenMaliciousLeaky_Test(const oc::CLP& cmd)
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
@@ -245,35 +300,35 @@ namespace tests_libOTe
         for (auto numOTs : nnumOTs)
         {
 
-        	for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
-        	{
+            for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
+            {
 
 
-        		SoftSpokenMalOtSender sender;
-        		SoftSpokenMalOtReceiver recver;
+                SoftSpokenMalOtSender sender;
+                SoftSpokenMalOtReceiver recver;
 
 
                 sender.init(fieldBits, false);
                 recver.init(fieldBits, false);
 
-        		const size_t nBaseOTs = sender.baseOtCount();
-        		if (nBaseOTs != recver.baseOtCount())
-        			throw UnitTestFail(LOCATION);
+                const size_t nBaseOTs = sender.baseOtCount();
+                if (nBaseOTs != recver.baseOtCount())
+                    throw UnitTestFail(LOCATION);
 
-        		std::vector<block> baseRecv(nBaseOTs);
-        		std::vector<std::array<block, 2>> baseSend(nBaseOTs);
-        		BitVector choices(numOTs), baseChoice(nBaseOTs);
-        		choices.randomize(prng0);
-        		baseChoice.randomize(prng0);
+                std::vector<block> baseRecv(nBaseOTs);
+                std::vector<std::array<block, 2>> baseSend(nBaseOTs);
+                BitVector choices(numOTs), baseChoice(nBaseOTs);
+                choices.randomize(prng0);
+                baseChoice.randomize(prng0);
 
-        		prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-        		for (u64 i = 0; i < nBaseOTs; ++i)
-        		{
-        			baseRecv[i] = baseSend[i][baseChoice[i]];
-        		}
+                prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+                for (u64 i = 0; i < nBaseOTs; ++i)
+                {
+                    baseRecv[i] = baseSend[i][baseChoice[i]];
+                }
 
-        		AlignedVector<block> recvMsg(numOTs);
-        		AlignedVector<std::array<block, 2>> sendMsg(numOTs);
+                AlignedVector<block> recvMsg(numOTs);
+                AlignedVector<std::array<block, 2>> sendMsg(numOTs);
 
                 memset(recvMsg.data(), 0xcc, numOTs * sizeof(block));
                 block bb0, bb1;
@@ -286,29 +341,29 @@ namespace tests_libOTe
                 }
 
 
-        		recver.setBaseOts(baseSend);
-        		sender.setBaseOts(baseRecv, baseChoice);
+                recver.setBaseOts(baseSend);
+                sender.setBaseOts(baseRecv, baseChoice);
 
 
                 cp::sync_wait(
                     cp::when_all_ready(
-        			    recver.receive(choices, recvMsg, prng0, sockets[0]),
-        		        sender.send(sendMsg, prng1, sockets[1])
+                        recver.receive(choices, recvMsg, prng0, sockets[0]),
+                        sender.send(sendMsg, prng1, sockets[1])
                     )
                 );
 
-        		OT_100Receive_Test(choices, recvMsg, sendMsg);
+                OT_100Receive_Test(choices, recvMsg, sendMsg);
 
-        		const block delta = sender.delta();
+                const block delta = sender.delta();
                 for (auto& s : sendMsg)
                 {
                     if (s[0] == bb0 || s[1] == bb1)
                         throw RTE_LOC;
 
-        			if (neq(s[0] ^ delta, s[1]))
-        				throw UnitTestFail(LOCATION);
+                    if (neq(s[0] ^ delta, s[1]))
+                        throw UnitTestFail(LOCATION);
                 }
-        	}
+            }
         }
 #else
         throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
@@ -330,8 +385,8 @@ namespace tests_libOTe
         for (auto numOTs : nnumOTs)
         {
 
-        	for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
-        	{
+            for (size_t fieldBits = 1; fieldBits <= 11; fieldBits += 3)
+            {
 
                 //SoftSpokenMalOtSender sender;
                 //SoftSpokenMalOtReceiver recver;
@@ -344,25 +399,25 @@ namespace tests_libOTe
                 sender.init(fieldBits, true);
                 recver.init(fieldBits, true);
 
-        		size_t nBaseOTs = sender.baseOtCount();
-        		if (nBaseOTs != recver.baseOtCount())
-        			throw UnitTestFail(LOCATION);
+                size_t nBaseOTs = sender.baseOtCount();
+                if (nBaseOTs != recver.baseOtCount())
+                    throw UnitTestFail(LOCATION);
 
-        		std::vector<block> baseRecv(nBaseOTs);
-        		std::vector<std::array<block, 2>> baseSend(nBaseOTs);
-        		BitVector choices(numOTs), baseChoice(nBaseOTs);
-        		choices.randomize(prng0);
-        		baseChoice.randomize(prng0);
+                std::vector<block> baseRecv(nBaseOTs);
+                std::vector<std::array<block, 2>> baseSend(nBaseOTs);
+                BitVector choices(numOTs), baseChoice(nBaseOTs);
+                choices.randomize(prng0);
+                baseChoice.randomize(prng0);
 
-        		prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
-        		for (u64 i = 0; i < nBaseOTs; ++i)
-        		{
-        			baseRecv[i] = baseSend[i][baseChoice[i]];
-        		}
+                prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+                for (u64 i = 0; i < nBaseOTs; ++i)
+                {
+                    baseRecv[i] = baseSend[i][baseChoice[i]];
+                }
 
-        		AlignedVector<block> recvMsg(numOTs);
-        		AlignedVector<std::array<block, 2>> sendMsg(numOTs);
-  
+                AlignedVector<block> recvMsg(numOTs);
+                AlignedVector<std::array<block, 2>> sendMsg(numOTs);
+
                 recver.setBaseOts(baseSend);
                 sender.setBaseOts(baseRecv, baseChoice);
 
@@ -373,16 +428,83 @@ namespace tests_libOTe
                     )
                 );
 
-                
 
-        		OT_100Receive_Test(choices, recvMsg, sendMsg);
-        	}
+
+                OT_100Receive_Test(choices, recvMsg, sendMsg);
+            }
         }
 #else
         throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
 #endif
     }
 
+
+
+
+    void OtExt_SoftSpokenMalicious21_Split_Test(const oc::CLP& cmd)
+    {
+#ifdef ENABLE_SOFTSPOKEN_OT
+
+        setThreadName("Sender");
+
+        auto sockets = cp::LocalAsyncSocket::makePair();
+
+        PRNG prng0(block(4234335, 3445235));
+        PRNG prng1(block(42348345, 989835));
+
+        auto numOTs = 9733;
+
+                SoftSpokenMalOtSender sender;
+                SoftSpokenMalOtReceiver recver;
+
+                size_t nBaseOTs = sender.baseOtCount();
+                if (nBaseOTs != recver.baseOtCount())
+                    throw UnitTestFail(LOCATION);
+
+                std::vector<block> baseRecv(nBaseOTs);
+                std::vector<std::array<block, 2>> baseSend(nBaseOTs);
+                BitVector choices(numOTs), baseChoice(nBaseOTs);
+                choices.randomize(prng0);
+                baseChoice.randomize(prng0);
+
+                prng0.get((u8*)baseSend.data()->data(), sizeof(block) * 2 * baseSend.size());
+                for (u64 i = 0; i < nBaseOTs; ++i)
+                {
+                    baseRecv[i] = baseSend[i][baseChoice[i]];
+                }
+
+                AlignedVector<block> recvMsg(numOTs);
+                AlignedVector<std::array<block, 2>> sendMsg(numOTs);
+
+                recver.setBaseOts(baseSend);
+                sender.setBaseOts(baseRecv, baseChoice);
+
+                cp::sync_wait(
+                    cp::when_all_ready(
+                        recver.receive(choices, recvMsg, prng0, sockets[0]),
+                        sender.send(sendMsg, prng1, sockets[1])
+                    )
+                );
+
+                OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+                auto recver2 = recver.splitBase();
+                auto sender2 = sender.splitBase();
+
+
+                cp::sync_wait(
+                    cp::when_all_ready(
+                        recver2.receive(choices, recvMsg, prng0, sockets[0]),
+                        sender2.send(sendMsg, prng1, sockets[1])
+                    )
+                );
+
+                OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+#else
+        throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
+#endif
+    }
 
 
 

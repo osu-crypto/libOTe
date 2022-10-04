@@ -49,15 +49,15 @@ namespace osuCrypto
 		if (!hasBaseOts())
 			MC_AWAIT(genBaseOts(prng, chl));
 
-		if (mBlockIdx == 0)
+		if (mSubVole.hasSeed() == false)
 		{
 			seed = prng.get<block>();
 			mAesMgr.setSeed(seed);
 			MC_AWAIT(chl.send(std::move(seed)));
+			MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
 		}
 
 
-		MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
 
 		//MC_AWAIT(runBatch(chl, messages));
 		//auto nums = checkSpanLengths(instParams..., chunkParams...);
@@ -196,13 +196,12 @@ namespace osuCrypto
 		if (!hasBaseOts())
 			MC_AWAIT(genBaseOts(prng, chl));
 
-		if (mBlockIdx == 0)
+		if (mSubVole.hasSeed() == false)
 		{
 			MC_AWAIT(chl.recv(seed));
 			mAesMgr.setSeed(seed);
+			MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
 		}
-
-		MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
 
 		numInstances = messages.size();
 		numChunks = divCeil(numInstances, chunkSize());

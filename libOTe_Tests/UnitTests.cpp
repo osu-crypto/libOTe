@@ -93,8 +93,10 @@ namespace tests_libOTe
 			tc.add("OtExt_Silent_mal_Test                   ", OtExt_Silent_mal_Test);
 
 			tc.add("OtExt_SoftSpokenSemiHonest_Test         ", OtExt_SoftSpokenSemiHonest_Test);
+			tc.add("OtExt_SoftSpokenSemiHonest_Split_Test   ", OtExt_SoftSpokenSemiHonest_Split_Test);
 			//tc.add("OtExt_SoftSpokenSemiHonest21_Test       ", OtExt_SoftSpokenSemiHonest21_Test);
 			tc.add("OtExt_SoftSpokenMalicious21_Test        ", OtExt_SoftSpokenMalicious21_Test);
+			tc.add("OtExt_SoftSpokenMalicious21_Split_Test  ", OtExt_SoftSpokenMalicious21_Split_Test);
 			tc.add("DotExt_SoftSpokenMaliciousLeaky_Test    ", DotExt_SoftSpokenMaliciousLeaky_Test);
 
 			tc.add("Vole_Noisy_test                         ", Vole_Noisy_test);

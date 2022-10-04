@@ -21,6 +21,12 @@ namespace osuCrypto
 		RepetitionCode() : GenericLinearCode<RepetitionCode>(this) {}
 		RepetitionCode(u64 n_) : GenericLinearCode<RepetitionCode>(this), n(n_) {}
 
+		RepetitionCode(const RepetitionCode& o) : GenericLinearCode<RepetitionCode>(this), n(o.n) {}
+		RepetitionCode& operator=(const RepetitionCode& o) { 
+			n = o.n; 
+			return *this;
+		};
+
 		u64 dimension() const { return 1; }
 		u64 length() const { return n; }
 

@@ -66,6 +66,16 @@ namespace osuCrypto
 				mAesKeyUseCount = 0;
 			}
 
+			// returns a new AES stream that is derived from this one.
+			// Both can be used independently.
+			AESRekeyManager split()
+			{
+				AESRekeyManager r;
+				r.mAESs = mAESs.split();
+				r.mAesKeyUseCount = 0;
+				return r;
+			}
+
 		protected:
 			const AES& get()
 			{
@@ -90,6 +100,7 @@ namespace osuCrypto
 			{
 				init();
 			}
+
 			SoftSpokenShOtSender(SoftSpokenShOtSender&& o)
 				: mSubVole(std::move(o.mSubVole))
 				, mBlockIdx(std::exchange(o.mBlockIdx, 0))
@@ -135,6 +146,7 @@ namespace osuCrypto
 
 			u64 baseOtCount() const override 
 			{
+				assert(fieldBits() && "init() must be called first");
 				// Can only use base OTs in groups of mFieldBits.
 				return roundUpTo(gOtExtBaseOtCount, fieldBits());
 			}
@@ -146,13 +158,17 @@ namespace osuCrypto
 
 			SoftSpokenShOtSender splitBase()
 			{
-				throw RTE_LOC; // TODO: unimplemented.
+				SoftSpokenShOtSender r;
+				r.mSubVole = mSubVole.copy();
+				r.mRandomOt = mRandomOt;
+				r.mNumThreads = mNumThreads;
+				r.mAesMgr = mAesMgr.split();
+				return r;
 			}
 
 			std::unique_ptr<OtExtSender> split() override
 			{
-				throw RTE_LOC; // TODO: unimplemented.
-				//return std::make_unique<SoftSpokenShOtSender>(splitBase());
+				return std::make_unique<SoftSpokenShOtSender>(splitBase());
 			}
 
 
@@ -308,6 +324,7 @@ namespace osuCrypto
 
 			u64 baseOtCount() const override 
 			{
+				assert(fieldBits() && "init() must be called first");
 				// Can only use base OTs in groups of mFieldBits.
 				return roundUpTo(gOtExtBaseOtCount, fieldBits());
 			}
@@ -319,13 +336,18 @@ namespace osuCrypto
 
 			SoftSpokenShOtReceiver splitBase()
 			{
-				throw RTE_LOC; // TODO: unimplemented.
+				SoftSpokenShOtReceiver r;
+				r.mSubVole = mSubVole.copy();
+				r.mRandomOt = mRandomOt;
+				r.mNumThreads = mNumThreads;
+				r.mAesMgr = mAesMgr.split();
+				return r;
 			}
 
 			std::unique_ptr<OtExtReceiver> split() override
 			{
-				throw RTE_LOC; // TODO: unimplemented.
-				//return std::make_unique<SoftSpokenShOtReceiver>(splitBase());
+				//throw RTE_LOC; // TODO: unimplemented.
+				return std::make_unique<SoftSpokenShOtReceiver>(splitBase());
 			}
 
 			void setBaseOts(

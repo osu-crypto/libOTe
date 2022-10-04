@@ -149,7 +149,6 @@ namespace osuCrypto
 
 		Base mBase;
 		AlignedUnVector<block> mExtraW;
-		Hasher mHasher;
 
 		SoftSpokenMalOtSender() {
 			init();
@@ -185,13 +184,15 @@ namespace osuCrypto
 
 		SoftSpokenMalOtSender splitBase()
 		{
-			throw RTE_LOC; // TODO: unimplemented.
+			SoftSpokenMalOtSender r;
+			r.mBase = mBase.splitBase();
+			r.mExtraW.resize(mExtraW.size());
+			return r;
 		}
 
 		std::unique_ptr<OtExtSender> split() override
 		{
-			throw RTE_LOC; // TODO: unimplemented.
-			//return std::make_unique<SoftSpokenMalOtSender>(splitBase());
+			return std::make_unique<SoftSpokenMalOtSender>(splitBase());
 		}
 
 
@@ -279,7 +280,6 @@ namespace osuCrypto
 
 		Base mBase;
 		AlignedUnVector<block> mExtraV;
-		Hasher mHasher;
 
 		SoftSpokenMalOtReceiver()
 		{
@@ -288,15 +288,12 @@ namespace osuCrypto
 		SoftSpokenMalOtReceiver(SoftSpokenMalOtReceiver&& o) 
 			:mBase(std::move(o.mBase))
 			,mExtraV(std::move(o.mExtraV))
-			,mHasher(std::move(o.mHasher))
 		{}
 
 		SoftSpokenMalOtReceiver& operator=(SoftSpokenMalOtReceiver&& o)
 		{
-
 			mBase = (std::move(o.mBase));
 			mExtraV = (std::move(o.mExtraV));
-			mHasher = (std::move(o.mHasher));
 			return *this;
 		}
 
@@ -323,12 +320,15 @@ namespace osuCrypto
 
 		SoftSpokenMalOtReceiver splitBase()
 		{
-			throw RTE_LOC; // TODO: unimplemented.
+			SoftSpokenMalOtReceiver r;
+			r.mBase = mBase.splitBase();
+			r.mExtraV.resize(mExtraV.size());
+			return r;
 		}
 
 		std::unique_ptr<OtExtReceiver> split() 
 		{
-			throw RTE_LOC; // TODO: unimplemented.
+			return std::unique_ptr<OtExtReceiver>(new SoftSpokenMalOtReceiver(splitBase()));
 		}
 
 		task<> receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl) ;

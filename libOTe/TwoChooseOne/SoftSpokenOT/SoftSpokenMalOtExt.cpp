@@ -22,20 +22,21 @@ namespace osuCrypto
 			numExtra = u64{},
 			scratch = span<block>{},
 			scratchBacking = AlignedUnVector<block>{},
-			seed = block{}
+			seed = block{},
+			mHasher = Hasher{}
 		);
 
 		if (!hasBaseOts())
 			MC_AWAIT(genBaseOts(prng, chl));
 
-		if (mBase.mBlockIdx == 0)
+		if (mBase.mSubVole.hasSeed() == 0)
 		{
 			seed = prng.get<block>();
 			mBase.mAesMgr.setSeed(seed);
 			MC_AWAIT(chl.send(std::move(seed)));
+			MC_AWAIT(mBase.mSubVole.expand(chl, prng, mBase.mNumThreads));
 		}
 
-		MC_AWAIT(mBase.mSubVole.expand(chl, prng, mBase.mNumThreads));
 
 		nChunks = divCeil(messages.size() + 64, 128);
 		messagesFullChunks = messages.size() / 128;
@@ -339,19 +340,20 @@ namespace osuCrypto
 			mask = u64{},
 			extraChoices = std::array<block, 2>{},
 			challenge = block{},
-			seed = block{}
+			seed = block{},
+			mHasher = Hasher{}
 		);
 
 		if (!hasBaseOts())
 			MC_AWAIT(genBaseOts(prng, chl));
 
-		if (mBase.mBlockIdx == 0)
+		if (mBase.mSubVole.hasSeed() == false)
 		{
 			MC_AWAIT(chl.recv(seed));
 			mBase.mAesMgr.setSeed(seed);
+			MC_AWAIT(mBase.mSubVole.expand(chl, prng, mBase.mNumThreads));
 		}
 
-		MC_AWAIT(mBase.mSubVole.expand(chl, prng, mBase.mNumThreads));
 		
 		nChunks = divCeil(messages.size() + 64, 128);
 		messagesFullChunks = messages.size() / 128;
