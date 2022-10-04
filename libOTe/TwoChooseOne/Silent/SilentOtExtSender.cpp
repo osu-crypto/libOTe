@@ -191,7 +191,7 @@ namespace osuCrypto
     task<> SilentOtExtSender::genSilentBaseOts(PRNG& prng, Socket& chl, bool useOtExtension)
     {
         MC_BEGIN(task<>, this, &prng, &chl, useOtExtension,
-            msg = std::vector<std::array<block, 2>>(silentBaseOtCount()),
+            msg = AlignedUnVector<std::array<block, 2>>(silentBaseOtCount()),
             base = DefaultBaseOT{}
         );
 

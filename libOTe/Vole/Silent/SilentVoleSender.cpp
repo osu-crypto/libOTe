@@ -51,7 +51,7 @@ namespace osuCrypto
     task<> SilentVoleSender::genSilentBaseOts(PRNG& prng, Socket& chl, cp::optional<block> delta)
     {
         MC_BEGIN(task<>,this, delta, &prng, &chl, 
-            msg = std::vector<std::array<block, 2>>(silentBaseOtCount()),
+            msg = AlignedUnVector<std::array<block, 2>>(silentBaseOtCount()),
             baseOt = DefaultBaseOT{},
             prng2 = std::move(PRNG{}),
             xx = BitVector{},

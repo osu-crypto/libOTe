@@ -221,7 +221,7 @@ namespace osuCrypto
 		MC_BEGIN(task<>, this, &prng, &chl,
 			choice = BitVector{},
 			bb = BitVector{},
-			msg = std::vector<block>{},
+			msg = AlignedUnVector<block>{},
 			baseVole = std::vector<block>{},
 			baseOt = DefaultBaseOT{},
 			chl2 = Socket{},

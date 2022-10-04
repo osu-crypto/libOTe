@@ -148,7 +148,7 @@ namespace osuCrypto
 	{
 		MC_BEGIN(task<>, this, &prng, &chl, useOtExtension,
 			choice = sampleBaseChoiceBits(prng),
-			msg = std::vector<block>{},
+			msg = AlignedUnVector<block>{},
 			base = DefaultBaseOT{}
 		);
 
