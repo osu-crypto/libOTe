@@ -54,6 +54,7 @@
         "VERBOSE_FETCH": true,
         "ENABLE_SSE": true,
         "ENABLE_AVX": true,
+        "COPROTO_ENABLE_BOOST": true,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
       },
       "vendor": { "microsoft.com/VisualStudioSettings/CMake/1.0": { "hostOS": [ "Windows" ] } }

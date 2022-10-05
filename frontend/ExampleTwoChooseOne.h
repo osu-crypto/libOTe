@@ -123,7 +123,7 @@ namespace osuCrypto
 		commonPRNG.get(sendMsgs.data(), sendMsgs.size());
 		if (role == Role::Receiver)
 		{
-			cp::sync_wait(receiver.setBaseOts(sendMsgs, prng, chl));
+			receiver.setBaseOts(sendMsgs);
 		}
 		else
 		{
@@ -132,7 +132,7 @@ namespace osuCrypto
 			std::array<block, 128> recvMsgs;
 			for (u64 i = 0; i < 128; ++i)
 				recvMsgs[i] = sendMsgs[i][bv[i]];
-			cp::sync_wait(sender.setBaseOts(recvMsgs, bv, chl));
+			sender.setBaseOts(recvMsgs, bv);
 		}
 #endif
 
