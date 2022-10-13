@@ -29,6 +29,8 @@ using namespace osuCrypto;
 #include "ExampleVole.h"
 #include "libOTe/Tools/LDPC/LdpcImpulseDist.h"
 #include "libOTe/Tools/LDPC/Util.h"
+#include "cryptoTools/Crypto/RandomOracle.h"
+#include "libOTe/Tools/tungsten/accTest.h"
 
 static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
@@ -141,7 +143,6 @@ void sss()
 	}
 }
 
-#include "cryptoTools/Crypto/RandomOracle.h"
 int main(int argc, char** argv)
 {
 
@@ -149,6 +150,8 @@ int main(int argc, char** argv)
 	cmd.parse(argc, argv);
 	bool flagSet = false;
 
+	accTest(cmd);
+	return 0;
 
 	if (cmd.isSet("bad"))
 	{
