@@ -150,8 +150,9 @@ int main(int argc, char** argv)
 	cmd.parse(argc, argv);
 	bool flagSet = false;
 
-	accTest(cmd);
-	return 0;
+	//accTest(cmd);
+	//accPr(cmd);
+	//return 0;
 
 	if (cmd.isSet("bad"))
 	{

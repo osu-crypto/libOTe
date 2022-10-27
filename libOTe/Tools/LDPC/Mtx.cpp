@@ -15,7 +15,10 @@ namespace osuCrypto
         for (auto p : pp)
             push_back(p);
     }
-
+    void PointList::push_back(u64 x, u64 y)
+    {
+        push_back({ x,y });
+    }
     void PointList::push_back(const Point& p)
     {
         if (p.mRow >= mRows)

@@ -13,6 +13,7 @@
 #include "libOTe_Tests/Vole_Tests.h"
 #include "libOTe/Tools/LDPC/LdpcDecoder.h"
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
+#include "libOTe_Tests/Tungsten_Tests.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -52,6 +53,9 @@ namespace tests_libOTe
 			tc.add("LdpcComposit_RegRepDiagBand_encode_test ", tests::LdpcComposit_RegRepDiagBand_encode_test);
 			tc.add("LdpcComposit_RegRepDiagBand_Trans_test  ", tests::LdpcComposit_RegRepDiagBand_Trans_test);
 
+
+			tc.add("Tungstan_encode_basic_test              ", Tungsten_encode_basic_test);
+			
 
 			tc.add("Tools_Pprf_test                         ", Tools_Pprf_test);
 			tc.add("Tools_Pprf_trans_test                   ", Tools_Pprf_trans_test);
