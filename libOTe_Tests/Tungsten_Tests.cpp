@@ -23,9 +23,9 @@ namespace tests_libOTe
 
 		std::cout << "B\n" << B << std::endl << std::endl;
 		std::cout << "A'\n" << code.getAPar() << std::endl << std::endl;
-		std::cout << "A\n" << A << std::endl << std::endl;
+		std::cout << "A\n" << A.dense().transpose() << std::endl << std::endl;
 
-		auto G = B * A;
+		auto G = B * A.dense().transpose().sparse();
 		std::cout << "G\n" << G << std::endl;
 
 

@@ -100,7 +100,6 @@ namespace osuCrypto
 				auto rIter = row.rbegin();
 				assert(*rIter++ == i);
 
-				std::cout << i << ": ";
 
 				prng.get((u8*)buff.data(), a8);
 
@@ -113,7 +112,6 @@ namespace osuCrypto
 				{
 					x[j] = x[j] ^ x[i];
 					xorAdd(A.col(j), A.col(i));
-					std::cout << j << " ";
 					assert(*rIter++ == j);
 				}
 
@@ -135,7 +133,6 @@ namespace osuCrypto
 						{
 							x[j] = x[j] ^ x[i];
 							xorAdd(A.col(j), A.col(i));
-							std::cout << j << " ";
 							assert(*rIter++ == j);
 						}
 						//x[j] = x[j] ^ (x[i] & zeroOne[v & 1]);
@@ -145,15 +142,8 @@ namespace osuCrypto
 				}
 				assert(rIter == row.rend());
 
-				std::cout << "\n"<<i<<": ";
-
-				for (auto j = AP.row(i).rbegin(); j != AP.row(i).rend();++j)
-					if(*j!=i)
-						std::cout << *j << " ";
-				std::cout << "\n";
 			}
 
-			std::cout << "AA\n" << A << std::endl;
 		}
 
 
@@ -242,7 +232,6 @@ namespace osuCrypto
 
 			for (u64 i = mCodeSize - 1; i < mCodeSize; --i)
 			{
-				std::cout << i << ":";
 				for (auto y : APar.row(i))
 				{
 					if (y != i)
@@ -250,13 +239,10 @@ namespace osuCrypto
 						auto ay = A.col(y);
 						auto ai = A.col(i);
 						xorAdd(ay, ai);
-						std::cout << y << " ";
 					}							
 
 				}
 
-				std::cout << "\n";
-				//std::cout << A << std::endl << std::endl;
 			}
 
 			return A.sparse();
