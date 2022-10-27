@@ -94,56 +94,56 @@ namespace osuCrypto
 			memset(zeroOne, 0, sizeof(T));
 			memset(zeroOne + 1, ~0, sizeof(T));
 			DenseMtx A = DenseMtx::Identity(mCodeSize);
-			for (i64 i = mCodeSize-1; i < mCodeSize; --i)
+			for (i64 i = 0; i < mCodeSize; ++i)
 			{
 				auto row = AP.row(i);
 				auto rIter = row.rbegin();
-				assert(*rIter++ == i);
+				//assert(*rIter++ == i);
 
 
 				prng.get((u8*)buff.data(), a8);
 
 
-				i64 j = i - 1;
-				auto s = std::max<i64>(-1, j - mStickyAccumulator);
-				auto e = std::max<i64>(-1, s - mAccumulatorSize);
+				i64 j = i + 1;
+				auto s = std::min<i64>(mCodeSize, j + mStickyAccumulator);
+				auto e = std::min<i64>(mCodeSize, s + mAccumulatorSize);
 
-				for (; j > s; --j)
+				for (; j < s; ++j)
 				{
 					x[j] = x[j] ^ x[i];
-					xorAdd(A.col(j), A.col(i));
-					assert(*rIter++ == j);
+					A.row(j) ^= A.row(i);
+					//assert(*rIter++ == j);
 				}
 
 				auto iter = BitIterator((u8*)buff.data(), 0);
 				auto bb = buff.data();
 
-				for (; j > e;)
+				for (; j < e;)
 				{
-					auto rem = j - e;
+					auto rem = e - j;
 					auto v = *bb++;
 					auto ek = std::min<u64>(64, rem);
 
-					for (u64 k = 0; k < ek; ++k, --j, ++iter)
+					for (u64 k = 0; k < ek; ++k, ++j, ++iter)
 					{
 						assert((v & 1) == *iter);
-						assert((v & 1) == (u8)AP(i, j));
+						//assert((v & 1) == (u8)AP(i, j));
 
 						if (v & 1)
 						{
 							x[j] = x[j] ^ x[i];
-							xorAdd(A.col(j), A.col(i));
-							assert(*rIter++ == j);
+							A.row(j) ^=  A.row(i);
+							//assert(*rIter++ == j);
 						}
 						//x[j] = x[j] ^ (x[i] & zeroOne[v & 1]);
 
 						v = v/2;
 					}
 				}
-				assert(rIter == row.rend());
-
+				//assert(rIter == row.rend());
 			}
 
+			std::cout << "A* " << A << std::endl;
 		}
 
 
@@ -196,31 +196,55 @@ namespace osuCrypto
 		SparseMtx getAPar() const
 		{
 			PRNG prng(mSeed ^ OneBlock);
-			PointList points(mCodeSize, mCodeSize);
 
-			std::vector<u8> buff(divCeil(mAccumulatorSize, 8));
-			for (u64 i = mCodeSize-1; i < mCodeSize; --i)
+			PointList AP(mCodeSize, mCodeSize);;
+
+			std::vector<u64> buff(divCeil(mAccumulatorSize, 64));
+			auto a8 = divCeil(mAccumulatorSize, 8);
+
+			DenseMtx A = DenseMtx::Identity(mCodeSize);
+			for (i64 i = 0; i < mCodeSize; ++i)
 			{
-				points.push_back(i, i);
+				prng.get((u8*)buff.data(), a8);
 
-				prng.get(buff.data(), buff.size());
-				auto iter = BitIterator(buff.data(), 0);
+				i64 j = i + 1;
+				auto s = std::min<i64>(mCodeSize, j + mStickyAccumulator);
+				auto e = std::min<i64>(mCodeSize, s + mAccumulatorSize);
+				AP.push_back(i, i);
 
-				i64 j = i - 1;
-				auto s = std::max<i64>(-1, j - mStickyAccumulator);
-				auto e = std::max<i64>(-1, s - mAccumulatorSize);
-
-				for (; j > s; --j)
-					points.push_back(i, j);
-
-				for (; j > e; --j, ++iter)
+				for (; j < s; ++j)
 				{
-					if (*iter)
-						points.push_back(i, j);
+					AP.push_back(j, i);
+					//xorAdd(A.col(j), A.col(i));
+					//assert(*rIter++ == j);
 				}
-			}
 
-			return points;
+				auto bb = buff.data();
+
+				for (; j < e;)
+				{
+					auto rem = e - j;
+					auto v = *bb++;
+					auto ek = std::min<u64>(64, rem);
+
+					for (u64 k = 0; k < ek; ++k, ++j)
+					{
+						if (v & 1)
+						{
+							AP.push_back(j, i);
+							//x[j] = x[j] ^ x[i];
+							//xorAdd(A.col(j), A.col(i));
+							//assert(*rIter++ == j);
+						}
+						//x[j] = x[j] ^ (x[i] & zeroOne[v & 1]);
+
+						v = v / 2;
+					}
+				}
+				//assert(rIter == row.rend());
+
+			}
+			return AP;
 		}
 
 
@@ -230,15 +254,16 @@ namespace osuCrypto
 			
 			auto A = DenseMtx::Identity(mCodeSize);
 
-			for (u64 i = mCodeSize - 1; i < mCodeSize; --i)
+			for (u64 i = 0; i < mCodeSize; ++i)
 			{
-				for (auto y : APar.row(i))
+				for (auto y : APar.col(i))
 				{
 					if (y != i)
 					{
-						auto ay = A.col(y);
-						auto ai = A.col(i);
-						xorAdd(ay, ai);
+						auto ay = A.row(y);
+						auto ai = A.row(i);
+						ay ^= ai;
+						
 					}							
 
 				}

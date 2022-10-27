@@ -23,9 +23,9 @@ namespace tests_libOTe
 
 		std::cout << "B\n" << B << std::endl << std::endl;
 		std::cout << "A'\n" << code.getAPar() << std::endl << std::endl;
-		std::cout << "A\n" << A.dense().transpose() << std::endl << std::endl;
+		std::cout << "A\n" << A << std::endl << std::endl;
 
-		auto G = B * A.dense().transpose().sparse();
+		auto G = B * A;
 		std::cout << "G\n" << G << std::endl;
 
 
@@ -36,8 +36,8 @@ namespace tests_libOTe
 
 		auto a0 = c0;
 		code.accumulate<u8>(a0);
-		//A.multAdd(c0, a1);
-		A.leftMultAdd(c0, a1);
+		A.multAdd(c0, a1);
+		//A.leftMultAdd(c0, a1);
 		if (a0 != a1)
 		{
 			for (u64 i = 0; i < k; ++i)
