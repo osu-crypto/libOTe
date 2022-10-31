@@ -21,7 +21,7 @@
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
-#include <libOTe/TwoChooseOne/OtExtInterface.h>
+#include <libOTe/TwoChooseOne/OTExtInterface.h>
 
 namespace osuCrypto
 {
