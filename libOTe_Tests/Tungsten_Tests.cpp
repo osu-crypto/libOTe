@@ -14,10 +14,11 @@ namespace tests_libOTe
 		auto bw = cmd.getOr("bw", 7);
 		auto aw = cmd.getOr("aw", 5);
 		auto sticky = cmd.getOr("ns", 1);
+		auto skip = cmd.isSet("skip");
 
 		Tungsten code;
 		code.config(k, n, bw, aw, sticky);
-
+		
 		auto A = code.getA();
 		auto B = code.getB();
 
