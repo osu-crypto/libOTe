@@ -12,14 +12,15 @@ namespace tests_libOTe
 		auto k = cmd.getOr("k", 10);
 		auto n = cmd.getOr("n", k * 2);
 		auto bw = cmd.getOr("bw", 7);
-		auto aw = cmd.getOr("aw", 5);
+		auto aw = cmd.getOr("aw", 10);
 		auto sticky = cmd.getOr("ns", 1);
 		auto skip = cmd.isSet("skip");
+		bool reuse = cmd.isSet("reuse");
 
 		bool v = cmd.isSet("v");
 
 		Tungsten code;
-		code.config(k, n, bw, aw, sticky);
+		code.config(k, n, bw, aw, reuse, sticky);
 		
 		auto A = code.getA();
 		auto B = code.getB();
@@ -72,14 +73,15 @@ namespace tests_libOTe
 		auto k = cmd.getOr("k", 10);
 		auto n = cmd.getOr("n", k * 2);
 		auto bw = cmd.getOr("bw", 7);
-		auto aw = cmd.getOr("aw", 5);
+		auto aw = cmd.getOr("aw", 10);
 		auto sticky = cmd.getOr("ns", 1);
+		bool reuse = cmd.isSet("reuse");
 		auto skip = cmd.isSet("skip");
 
 		bool v = cmd.isSet("v");
 
 		Tungsten code;
-		code.config(k, n, bw, aw, sticky);
+		code.config(k, n, bw, aw, reuse, sticky);
 
 		std::vector<u8> m0(k), m1(k), c0(n), a1(n);
 
