@@ -10,4 +10,5 @@
 namespace tests_libOTe
 {
 	void Tungsten_encode_basic_test(const oc::CLP& cmd);
+	void Tungsten_encode_basic_bench(const oc::CLP& cmd);
 }

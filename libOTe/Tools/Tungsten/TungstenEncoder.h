@@ -2,6 +2,7 @@
 #include "libOTe/Tools/LDPC/Mtx.h"
 #include "cryptoTools/Common/Range.h"
 #include "cryptoTools/Common/BitVector.h"
+#include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Crypto/Prng.h"
 
 namespace osuCrypto
@@ -17,7 +18,7 @@ namespace osuCrypto
     // A is a lower triangular n by n matrix with ones on the diagonal. The
     // mAccumulatorSize diagonals left of the main diagonal are uniformly random.
     // If mStickyAccumulator, then the first diagonal left of the main is always ones.
-    class Tungsten
+    class Tungsten : public TimerAdapter
     {
     public:
 
@@ -69,8 +70,11 @@ namespace osuCrypto
             assert(e.size() == mCodeSize);
             assert(w.size() == mMessageSize);
 
+            setTimePoint("tungsten.encode.begin");
             accumulate<T>(e);
+            setTimePoint("tungsten.encode.accumulate");
             expand<T>(e, w);
+            setTimePoint("tungsten.encode.expand");
         }
 
         template<typename T>
@@ -189,7 +193,31 @@ namespace osuCrypto
             //std::cout << "A* " << A << std::endl;
         }
 
+        struct Modd
+        {
+            PRNG prng;
+            u64 mod, i;
+            span<u64> vals;
 
+            Modd(block seed, u64 m)
+                :prng(seed)
+                ,mod(m)
+            {
+                refill();
+            }
+
+            void refill()
+            {
+
+                auto s = prng.getBufferSpan(-1);
+                vals = span<u64>((u64*)s.data(), s.size() / sizeof(u64));
+            }
+
+            u64 get()
+            {
+
+            }
+        };
 
         template<typename T>
         void expand(span<const T> e, span<T> w)
