@@ -93,6 +93,7 @@ option(ENABLE_KKRT           "Build the KKRT 1-oo-N OT-Ext protocol." OFF)
 
 option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
 option(COPROTO_ENABLE_BOOST  "Build with coproto boost support." OFF)
+option(COPROTO_ENABLE_OPENSSL  "Build with coproto boost open ssl support." OFF)
 
 option(NO_SILVER_WARNING     "Build with no silver security warning." OFF)
 option(NO_KOS_WARNING        "Build with no kos security warning." OFF)
@@ -124,7 +125,8 @@ message(STATUS "Option: FETCH_COPROTO         = ${FETCH_COPROTO_IMPL}\n")
 message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF")
 message(STATUS "Option: ENABLE_BITPOLYMUL     = ${ENABLE_BITPOLYMUL}")
 message(STATUS "Option: LIBOTE_CPP_VER        = ${LIBOTE_CPP_VER}")
-message(STATUS "Option: COPROTO_ENABLE_BOOST  = ${COPROTO_ENABLE_BOOST}\n\n")
+message(STATUS "Option: COPROTO_ENABLE_BOOST  = ${COPROTO_ENABLE_BOOST}")
+message(STATUS "Option: COPROTO_ENABLE_OPENSSL= ${COPROTO_ENABLE_OPENSSL}\n\n")
 
 message(STATUS "Base OT protocols\n=======================================================")
 message(STATUS "Option: ENABLE_SIMPLESTOT     = ${ENABLE_SIMPLESTOT}")

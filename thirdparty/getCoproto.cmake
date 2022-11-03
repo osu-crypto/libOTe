@@ -18,6 +18,7 @@ if(NOT COPROTO_FOUND)
                        -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE} -DVERBOSE_FETCH=${VERBOSE_FETCH}
                        -DCOPROTO_FETCH_AUTO=true
                        -DCOPROTO_ENABLE_BOOST=${COPROTO_ENABLE_BOOST}
+                       -DCOPROTO_ENABLE_OPENSSL=${COPROTO_ENABLE_OPENSSL}
                        -DCOPROTO_CPP_VER=${LIBOTE_CPP_VER}
                        -DCOPROTO_PIC=${OC_PIC}
                        )
