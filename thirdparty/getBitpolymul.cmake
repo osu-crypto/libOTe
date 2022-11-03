@@ -3,7 +3,7 @@
 set(GIT_REPOSITORY      https://github.com/ladnir/bitpolymul.git)
 set(GIT_TAG             "4e3bca53cf3bacc1bdd07a0901cfde8c460f7a54" )
 
-set(CLONE_DIR "${CMAKE_CURRENT_LIST_DIR}/bitpolymul")
+set(CLONE_DIR "${OC_THIRDPARTY_CLONE_DIR}/bitpolymul")
 set(BUILD_DIR "${CLONE_DIR}/build/${OC_CONFIG}")
 set(LOG_FILE  "${CMAKE_CURRENT_LIST_DIR}/log-bitpolymul.txt")
 set(CONFIG    --config ${CMAKE_BUILD_TYPE})
@@ -23,7 +23,7 @@ if(NOT EXISTS ${BUILD_DIR} OR NOT BITPOLYMUL_FOUND)
 
     message("============= Building bitpolymul =============")
     if(NOT EXISTS ${CLONE_DIR})
-        run(NAME "Cloning ${GIT_REPOSITORY}" CMD ${DOWNLOAD_CMD} WD ${CMAKE_CURRENT_LIST_DIR})
+        run(NAME "Cloning ${GIT_REPOSITORY}" CMD ${DOWNLOAD_CMD} WD ${OC_THIRDPARTY_CLONE_DIR})
     endif()
 
     run(NAME "Checkout ${GIT_TAG} " CMD ${CHECKOUT_CMD}  WD ${CLONE_DIR})
@@ -37,10 +37,12 @@ else()
 endif()
 
 install(CODE "
-    execute_process(
-        COMMAND ${SUDO} \${CMAKE_COMMAND} --install \"${BUILD_DIR}\" ${CONFIG}  --prefix \${CMAKE_INSTALL_PREFIX}
-        WORKING_DIRECTORY ${CLONE_DIR}
-        RESULT_VARIABLE RESULT
-        COMMAND_ECHO STDOUT
-    )
+    if(NOT CMAKE_INSTALL_PREFIX STREQUAL \"${OC_THIRDPARTY_INSTALL_PREFIX}\")
+        execute_process(
+            COMMAND ${SUDO} \${CMAKE_COMMAND} --install \"${BUILD_DIR}\" ${CONFIG}  --prefix \${CMAKE_INSTALL_PREFIX}
+            WORKING_DIRECTORY ${CLONE_DIR}
+            RESULT_VARIABLE RESULT
+            COMMAND_ECHO STDOUT
+        )
+    endif()
 ")
