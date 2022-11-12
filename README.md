@@ -54,12 +54,12 @@ The library can be built as
 ```
 git clone https://github.com/osu-crypto/libOTe.git
 cd libOTe
-python build.py --relic
+python build.py --sodium
 ```
 The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
 
 ### Build Options
-LibOTe can be built with various only the selected protocols enabled. `-D ENABLE_ALL_OT=ON` will enable all available protocols depending on platform/dependancies. The `ON`/`OFF` options include
+LibOTe can be built with various only the selected protocols enabled. `-D ENABLE_ALL_OT=ON` will enable all available protocols depending on platform/dependencies. The `ON`/`OFF` options include
 
 **Malicious base OT:**
  * `ENABLE_SIMPLESTOT` the SimplestOT [[CO15]](https://eprint.iacr.org/2015/267.pdf) protocol (relic or sodium).

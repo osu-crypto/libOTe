@@ -4,7 +4,7 @@
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/bch511.h"
 #include <cryptoTools/Crypto/RandomOracle.h>
-#include  <mmintrin.h>
+
 #include "OosDefines.h"
 
 #include <cryptoTools/Common/BitVector.h>
