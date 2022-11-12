@@ -56,6 +56,7 @@ namespace tests_libOTe
 
 			tc.add("Tungstan_encode_basic_test              ", Tungsten_encode_basic_test);
 			tc.add("Tungsten_encode_basic_bench             ", Tungsten_encode_basic_bench);
+			tc.add("perm_bench                              ", perm_bench);
 			
 
 			tc.add("Tools_Pprf_test                         ", Tools_Pprf_test);

@@ -15,12 +15,19 @@ namespace tests_libOTe
 		auto aw = cmd.getOr("aw", 10);
 		auto sticky = cmd.getOr("ns", 1);
 		auto skip = cmd.isSet("skip");
-		bool reuse = cmd.isSet("reuse");
+		auto reuse = (Tungsten::RNG)cmd.getOr("rng", 2);
+		bool permute = cmd.isSet("permute");
 
 		bool v = cmd.isSet("v");
 
+		if (reuse != Tungsten::RNG::gf128mul &&
+			reuse != Tungsten::RNG::prng &&
+			reuse != Tungsten::RNG::xoshiro256Plus
+			)
+			throw RTE_LOC;
+
 		Tungsten code;
-		code.config(k, n, bw, aw, reuse, sticky);
+		code.config(k, n, bw, aw, reuse, permute, sticky);
 		
 		auto A = code.getA();
 		auto B = code.getB();
@@ -65,29 +72,71 @@ namespace tests_libOTe
 		if (m0 != m1)
 			throw RTE_LOC;
 
+	} 
+
+	void perm_bench(const oc::CLP& cmd)
+	{
+		auto n = cmd.getOr("n", 1 << cmd.getOr("nn", 20));
+		auto binSize = 1 << cmd.getOr("mm", 10);
+		auto tt = cmd.getOr("t",10);
+		PRNG prng(ZeroBlock);
+		SqrtPerm sp;
+		Perm p;
+
+
+		AlignedUnVector<block> x(n);
+		sp.init(n, binSize, prng);
+		p.init(n, prng);
+		Timer t, t2;
+		sp.setTimer(t2);
+		std::cout << n / binSize << " bins of size " << binSize << std::endl;
+		t.setTimePoint("b");
+
+
+
+		for(u64 i =0; i < tt; ++i)
+			sp.apply<block>(x);
+		t.setTimePoint("sp");
+
+		for (u64 i = 0; i < tt; ++i)
+		{
+			p.apply<block>(x);
+			t2.setTimePoint("p");
+		}
+		t.setTimePoint("p");
+		std::cout << t << std::endl;
+		std::cout << t2 << std::endl;
+
 	}
 
 
 	void Tungsten_encode_basic_bench(const oc::CLP& cmd)
 	{
-		auto k = cmd.getOr("k", 10);
+		auto k = cmd.getOr("k", 1<< cmd.getOr("kk", 10));
 		auto n = cmd.getOr("n", k * 2);
 		auto bw = cmd.getOr("bw", 7);
 		auto aw = cmd.getOr("aw", 10);
 		auto sticky = cmd.getOr("ns", 1);
-		bool reuse = cmd.isSet("reuse");
+		auto reuse = (Tungsten::RNG)cmd.getOr("rng", 2);
 		auto skip = cmd.isSet("skip");
+		auto permute = cmd.getOr("permute",0);
 
 		bool v = cmd.isSet("v");
 
-		Tungsten code;
-		code.config(k, n, bw, aw, reuse, sticky);
+		if (reuse != Tungsten::RNG::gf128mul &&
+			reuse != Tungsten::RNG::prng &&
+			reuse != Tungsten::RNG::xoshiro256Plus
+			)
+			throw RTE_LOC;
 
-		std::vector<u8> m0(k), m1(k), c0(n), a1(n);
+		Tungsten code;
+		code.config(k, n, bw, aw, reuse, permute, sticky);
+
+		AlignedUnVector<block> m1(k), c0(n);
 
 		oc::Timer timer;
 		code.setTimer(timer);
-		code.cirTransEncode<u8>(c0, m1);
+		code.cirTransEncode<block>(c0, m1);
 
 
 		std::cout << timer << std::endl;
