@@ -29,7 +29,9 @@ namespace osuCrypto
         Plain,                // One column per tree, one row per leaf
         BlockTransposed,      // One row per tree, one column per leaf
         Interleaved,
-        InterleavedTransposed // Bit transposed
+        InterleavedTransposed, // Bit transposed
+        Callback               // call the user's callback
+
     };
 
     enum class OTType
@@ -119,7 +121,7 @@ namespace osuCrypto
         TreeAllocator mTreeAlloc;
         Matrix<std::array<block, 2>> mBaseOTs;
         
-
+        std::function<void(u64 treeIdx, span<AlignedArray<block, 8>>)> mOutputFn;
 
         SilentMultiPprfSender() = default;
         SilentMultiPprfSender(const SilentMultiPprfSender&) = delete;
@@ -252,6 +254,7 @@ namespace osuCrypto
         bool mPrint = false;
         TreeAllocator mTreeAlloc;
         block mDebugValue;
+        std::function<void(u64 treeIdx, span<AlignedArray<block, 8>>)> mOutputFn;
 
         SilentMultiPprfReceiver() = default;
         SilentMultiPprfReceiver(const SilentMultiPprfReceiver&) = delete;

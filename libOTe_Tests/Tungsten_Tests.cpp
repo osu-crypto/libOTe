@@ -46,7 +46,7 @@ namespace tests_libOTe
 		prng.get(c0.data(), c0.size());
 
 		auto a0 = c0;
-		code.accumulate<u8>(a0);
+		code.uniformAccumulate<u8>(a0);
 		A.multAdd(c0, a1);
 		//A.leftMultAdd(c0, a1);
 		if (a0 != a1)
@@ -114,12 +114,13 @@ namespace tests_libOTe
 	{
 		auto k = cmd.getOr("k", 1<< cmd.getOr("kk", 10));
 		auto n = cmd.getOr("n", k * 2);
-		auto bw = cmd.getOr("bw", 7);
+		auto bw = cmd.getOr("bw", 5);
 		auto aw = cmd.getOr("aw", 10);
 		auto sticky = cmd.getOr("ns", 1);
 		auto reuse = (Tungsten::RNG)cmd.getOr("rng", 2);
 		auto skip = cmd.isSet("skip");
 		auto permute = cmd.getOr("permute",0);
+		auto tt = cmd.getOr("trials", 1);
 
 		bool v = cmd.isSet("v");
 
@@ -131,12 +132,14 @@ namespace tests_libOTe
 
 		Tungsten code;
 		code.config(k, n, bw, aw, reuse, permute, sticky);
-
+		code.mAccumulatorWeight = cmd.isSet("aaw");
 		AlignedUnVector<block> m1(k), c0(n);
 
 		oc::Timer timer;
 		code.setTimer(timer);
-		code.cirTransEncode<block>(c0, m1);
+
+		for(auto t : rng(tt))
+			code.cirTransEncode<block>(c0, m1);
 
 
 		std::cout << timer << std::endl;

@@ -1,4 +1,5 @@
 #include <iostream>
+#include "libOTe/Tools/Tungsten/TungstenSampler.h"
 
 //using namespace std;
 #include "tests_cryptoTools/UnitTests.h"
@@ -151,6 +152,11 @@ int main(int argc, char** argv)
 	cmd.parse(argc, argv);
 	bool flagSet = false;
 
+	if (cmd.isSet("tungsten"))
+	{
+		sampleTungstenDiag(cmd);
+		return 0;
+	}
 	//accTest(cmd);
 	//accPr(cmd);
 	//return 0;

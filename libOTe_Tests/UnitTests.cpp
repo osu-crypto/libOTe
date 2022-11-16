@@ -54,7 +54,7 @@ namespace tests_libOTe
 			tc.add("LdpcComposit_RegRepDiagBand_Trans_test  ", tests::LdpcComposit_RegRepDiagBand_Trans_test);
 
 
-			tc.add("Tungstan_encode_basic_test              ", Tungsten_encode_basic_test);
+			tc.add("Tungsten_encode_basic_test              ", Tungsten_encode_basic_test);
 			tc.add("Tungsten_encode_basic_bench             ", Tungsten_encode_basic_bench);
 			tc.add("perm_bench                              ", perm_bench);
 			
@@ -63,6 +63,7 @@ namespace tests_libOTe
 			tc.add("Tools_Pprf_trans_test                   ", Tools_Pprf_trans_test);
 			tc.add("Tools_Pprf_inter_test                   ", Tools_Pprf_inter_test);
 			tc.add("Tools_Pprf_blockTrans_test              ", Tools_Pprf_blockTrans_test);
+			tc.add("Tools_Pprf_callback_test                ", Tools_Pprf_callback_test);
 
 			tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
 			tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);

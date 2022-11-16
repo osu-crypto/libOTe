@@ -13,6 +13,7 @@
 #endif
 #include "SqrtPerm.h"
 #include "libdivide.h"
+#include "TungstenData.h"
 
 namespace osuCrypto
 {
@@ -45,6 +46,7 @@ namespace osuCrypto
             u64 codeSize,
             u64 expanderWeight,
             u64 accumulatorSize,
+            //u64 accumulatorWeight,
             RNG reuse,
             u64 permute,
             u64 stickyAccumulator,
@@ -54,6 +56,7 @@ namespace osuCrypto
             mCodeSize = codeSize;
             mExpanderWeight = expanderWeight;
             mAccumulatorSize = accumulatorSize;
+            mAccumulatorWeight = 0;// accumulatorWeight;
             mStickyAccumulator = stickyAccumulator;
             mReuse = reuse;
             mPermute = permute;
@@ -65,20 +68,6 @@ namespace osuCrypto
                 PRNG prng(seed ^ block(34231, 123412));
                 mSqrtPerm.init(mCodeSize, 1ull << permute, prng);
                 mPerm.init(mCodeSize, prng);
-                //mPerm.resize(divCeil(mCodeSize, permute));
-                //std::iota(mPerm.begin(), mPerm.end(), 0ull);
-
-                //for (u64 i = 0, rem = mPerm.size(); i < mPerm.size();  ++i, --rem)
-                //{
-                //    auto j = prng.get<u64>() % rem;
-                //    mPerm[i] = i + j;
-
-                //    //for (auto j =0; j< mPermute &&i < mPerm.size(); ++i, --rem)
-                //    //{
-
-                //    //}
-                //    //std::swap(mPerm[i], mPerm[i + j]);
-                //}
             }
         }
 
@@ -96,6 +85,8 @@ namespace osuCrypto
 
         // The size of the accumulator.
         u64 mAccumulatorSize = 0;
+
+        u64 mAccumulatorWeight = 0;
 
         u64 mStickyAccumulator = 1;
 
@@ -121,7 +112,11 @@ namespace osuCrypto
             assert(w.size() == mMessageSize);
 
             setTimePoint("tungsten.encode.begin");
-            accumulate<T>(e);
+            if (mAccumulatorWeight)
+                fixedAccumulate<T>(e);
+            else
+                uniformAccumulate<T>(e);
+
             setTimePoint("tungsten.encode.accumulate");
 
             if (mPermute)
@@ -181,7 +176,7 @@ namespace osuCrypto
                         vals[i] = mXoshiro256Plus.next();
                 }
 
-                
+
                 block mask = block(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
                 // now expand each of these bits into its own byte. This is done with the
@@ -221,8 +216,105 @@ namespace osuCrypto
 
         };
 
+
+
         template<typename T>
-        void accumulate(span<T> x)
+        void fixedAccumulate(span<T> x)
+        {
+#define TABLE tunsten_diagMtx_128x4
+            auto main = x.size() / TABLE.size();
+            main = main ?  (main - 1) * TABLE.size() : 0;
+
+            auto xx = x.data();
+
+            if (TABLE[0].size() == 4)
+            {
+
+                for (u64 i = 0; i < main; )
+                {
+
+                    for (u64 j = 0; j < TABLE.size(); ++j, ++i)
+                    {
+                        _mm_prefetch((char*)(xx + i + 2 * TABLE.size()), _MM_HINT_T0);
+                        T* __restrict xi = xx + i;
+                        T* __restrict xs = xi + 1;
+                        T* __restrict x0 = xi + TABLE[j][0];
+                        T* __restrict x1 = xi + TABLE[j][1];
+                        T* __restrict x2 = xi + TABLE[j][2];
+                        T* __restrict x3 = xi + TABLE[j][3];
+
+
+                        *xs = *xs ^ *xi;
+                        *x0 = *x0 ^ *xi;
+                        *x1 = *x1 ^ *xi;
+                        *x2 = *x2 ^ *xi;
+                        *x3 = *x3 ^ *xi;
+
+                    }
+                }
+
+            }
+            else if (TABLE[0].size() == 10)
+            {
+
+                for (u64 i = 0; i < main; )
+                {
+
+                    for (u64 j = 0; j < TABLE.size(); ++j, ++i)
+                    {
+                        _mm_prefetch((char*)(xx + i + 2 * TABLE.size()), _MM_HINT_T0);
+                        T* __restrict xi = xx + i;
+                        T* __restrict xs = xi + 1;
+                        T* __restrict x0 = xi + TABLE[j][0];
+                        T* __restrict x1 = xi + TABLE[j][1];
+                        T* __restrict x2 = xi + TABLE[j][2];
+                        T* __restrict x3 = xi + TABLE[j][3];
+                        T* __restrict x4 = xi + TABLE[j][4];
+                        T* __restrict x5 = xi + TABLE[j][5];
+                        T* __restrict x6 = xi + TABLE[j][6];
+                        T* __restrict x7 = xi + TABLE[j][7];
+                        T* __restrict x8 = xi + TABLE[j][8];
+                        T* __restrict x9 = xi + TABLE[j][9];
+
+
+                        *xs = *xs ^ *xi;
+                        *x0 = *x0 ^ *xi;
+                        *x1 = *x1 ^ *xi;
+                        *x2 = *x2 ^ *xi;
+                        *x3 = *x3 ^ *xi;
+                        *x4 = *x4 ^ *xi;
+                        *x5 = *x5 ^ *xi;
+                        *x6 = *x6 ^ *xi;
+                        *x7 = *x7 ^ *xi;
+                        *x8 = *x8 ^ *xi;
+                        *x9 = *x9 ^ *xi;
+
+                    }
+                }
+            }
+
+            for (u64 i = main, j= 0; i < x.size(); ++i, ++j)
+            {
+
+                T* __restrict xi = xx + i;
+
+                if (i + 1 < x.size())
+                    xi[1] = xi[1] ^ xi[0];
+
+                for (u64 k = 0; k < TABLE[0].size(); ++k)
+                {
+                    if (i + TABLE[j][k] < x.size())
+                    {
+
+                        T* __restrict xk = xi + TABLE[j][k];
+                        *xk = *xi ^ *xk;
+                    }
+                }
+            }
+        }
+
+        template<typename T>
+        void uniformAccumulate(span<T> x)
         {
             //PRNG prng(mSeed ^ OneBlock);
             BitStream prng(mSeed ^ OneBlock, mAccumulatorSize, mReuse);
@@ -326,7 +418,7 @@ namespace osuCrypto
                         buf[5] = zeroOne[vv[5]];
                         buf[6] = zeroOne[vv[6]];
                         buf[7] = zeroOne[vv[7]];
-                        
+
                         buf[0] = xi & buf[0];
                         buf[1] = xi & buf[1];
                         buf[2] = xi & buf[2];
@@ -469,7 +561,7 @@ namespace osuCrypto
                 }
 
                 return y;
-            }
+        }
 #endif
 
 
@@ -536,7 +628,7 @@ namespace osuCrypto
                     vals[i + 31] -= temp64h[3] * modVal;
                 }
             }
-        };
+    };
 
 
         template<typename T, u64 count>
@@ -609,7 +701,7 @@ namespace osuCrypto
                 switch (mExpanderWeight)
                 {
                 case 5:
-                    ww[i] = expandOne<T,5>(ee, prng);
+                    ww[i] = expandOne<T, 5>(ee, prng);
                     break;
                 case 7:
                     ww[i] = expandOne<T, 7>(ee, prng);
@@ -635,20 +727,12 @@ namespace osuCrypto
                         do {
                             rr[j] = prng.get();
                         } while (0);
-                        //if (std::find(row.data(), row.data() + j, row[j]) != row.data() + j)
-                        //{
-                        //    std::cout << i << std::endl;
-                        //}
 
                         wv = wv ^ ee[rr[j]];
                     }
                     ww[i] = wv;
                 }
                 }
-                //for (auto j = 1ull; j < mExpanderWeight; ++j)
-                //{
-                //    rowVal[0] = rowVal[0] ^ rowVal[j];
-                //}
 
             }
         }
@@ -657,43 +741,20 @@ namespace osuCrypto
         template<typename T>
         void permExpand(span<T> e, span<T> w)
         {
-
-
-            {
-                //T* __restrict ee = e.data();
-                //T* __restrict ei = e.data();
-                //u64* __restrict pi = mPerm.data();
-                if (mPermute == 1)
-                {
-                    mPerm.apply(e);
-                    //auto ss = mCodeSize;
-                    //for (u64 i = 0; i < ss; ++i)
-                    //{
-                    //   //std::swap(*ei++, ee[*pi++]);
-                    //    std::swap(ee[i], ee[mPerm.data()[i]]);
-
-                    //}
-                }
-                else
-                {
-                    mSqrtPerm.apply(e);
-                    //if (mCodeSize % mPermute)
-                    //    throw RTE_LOC;
-                    //auto step = mCodeSize / mPermute;
-
-                    //for (u64 i = 0, p = 0; i < mCodeSize; ++p)
-                    //{
-                    //    auto pp = mPerm.data()[p];
-                    //    for (u64 j = 0; j < mPermute; ++i, ++j)
-                    //    {
-                    //        std::swap(ee[i], ee[pp + j * step]);
-                    //    }
-                    //}
-                }
-            }
-
+            if (mPermute == 1)
+                mPerm.apply(e);
+            else
+                mSqrtPerm.apply(e);
 
             setTimePoint("permute");
+
+            linearSums(e, w);
+        }
+
+        template<typename T>
+        void linearSums(span<T> e, span<T> w)
+        {
+
             details::SilverLeftEncoder L;
 
             if (mExpanderWeight == 5)
@@ -713,161 +774,151 @@ namespace osuCrypto
             }
             auto mWeight = L.mWeight;
             auto mYs = L.mYs;
-            
+
+            auto v = mYs;
+            T* __restrict pp = w.data();
+            const T* __restrict m = e.data();
+
+            for (u64 i = 0; i < mMessageSize; )
             {
-                //auto cols = w.size();
-                //auto mRows = e.size();
-//                assert(ppp.size() == mRows);
-//                assert(mm.size() == cols);
-                auto v = mYs;
-                T* __restrict pp = w.data();
-                const T* __restrict m = e.data();
-
-                for (u64 i = 0; i < mMessageSize; )
+                auto end = mMessageSize;
+                for (u64 j = 0; j < mWeight; ++j)
                 {
-                    auto end = mMessageSize;
-                    for (u64 j = 0; j < mWeight; ++j)
-                    {
-                        if (v[j] == mCodeSize)
-                            v[j] = 0;
+                    if (v[j] == mCodeSize)
+                        v[j] = 0;
 
-                        auto jEnd = mCodeSize - v[j] + i;
-                        end = std::min<u64>(end, jEnd);
-                    }
-                    T* __restrict P = &pp[i];
-                    T* __restrict PE = &pp[end];
-                    
-                    switch (mWeight)
-                    {
-                    case 5:
-                    {
-                        const T* __restrict M0 = &m[v[0]];
-                        const T* __restrict M1 = &m[v[1]];
-                        const T* __restrict M2 = &m[v[2]];
-                        const T* __restrict M3 = &m[v[3]];
-                        const T* __restrict M4 = &m[v[4]];
-
-                        v[0] += end - i;
-                        v[1] += end - i;
-                        v[2] += end - i;
-                        v[3] += end - i;
-                        v[4] += end - i;
-                        i = end;
-
-                        while (P != PE)
-                        {
-                            *P =  *M0
-                                ^ *M1
-                                ^ *M2
-                                ^ *M3
-                                ^ *M4
-                                ;
-
-                            ++M0;
-                            ++M1;
-                            ++M2;
-                            ++M3;
-                            ++M4;
-                            ++P;
-
-                            assert(P <= w.data() + w.size());
-                            assert(M0 <= e.data() + e.size());
-                            assert(M1 <= e.data() + e.size());
-                            assert(M2 <= e.data() + e.size());
-                            assert(M3 <= e.data() + e.size());
-                            assert(M4 <= e.data() + e.size());
-                        }
-
-
-                        break;
-                    }
-                    case 11:
-                    {
-
-                        const T* __restrict M0 = &m[v[0]];
-                        const T* __restrict M1 = &m[v[1]];
-                        const T* __restrict M2 = &m[v[2]];
-                        const T* __restrict M3 = &m[v[3]];
-                        const T* __restrict M4 = &m[v[4]];
-                        const T* __restrict M5 = &m[v[5]];
-                        const T* __restrict M6 = &m[v[6]];
-                        const T* __restrict M7 = &m[v[7]];
-                        const T* __restrict M8 = &m[v[8]];
-                        const T* __restrict M9 = &m[v[9]];
-                        const T* __restrict M10 = &m[v[10]];
-
-                        v[0] += end - i;
-                        v[1] += end - i;
-                        v[2] += end - i;
-                        v[3] += end - i;
-                        v[4] += end - i;
-                        v[5] += end - i;
-                        v[6] += end - i;
-                        v[7] += end - i;
-                        v[8] += end - i;
-                        v[9] += end - i;
-                        v[10] += end - i;
-                        i = end;
-
-                        while (P != PE)
-                        {
-                            *P =  *M0
-                                ^ *M1
-                                ^ *M2
-                                ^ *M3
-                                ^ *M4
-                                ^ *M5
-                                ^ *M6
-                                ^ *M7
-                                ^ *M8
-                                ^ *M9
-                                ^ *M10
-                                ;
-
-                            ++M0;
-                            ++M1;
-                            ++M2;
-                            ++M3;
-                            ++M4;
-                            ++M5;
-                            ++M6;
-                            ++M7;
-                            ++M8;
-                            ++M9;
-                            ++M10;
-                            ++P;
-                        }
-
-                        break;
-                    }
-                    default:
-                        while (i != end)
-                        {
-                            {
-                                auto row = v[0];
-                                pp[i] = m[row];
-                                ++v[0];
-                            }
-
-                            for (u64 j = 1; j < mWeight; ++j)
-                            {
-                                auto row = v[j];
-                                pp[i] = pp[i] ^ m[row];
-                                ++v[j];
-                            }
-                            ++i;
-                        }
-                        break;
-                    }
-
+                    auto jEnd = mCodeSize - v[j] + i;
+                    end = std::min<u64>(end, jEnd);
                 }
+                T* __restrict P = &pp[i];
+                T* __restrict PE = &pp[end];
 
+                switch (mWeight)
+                {
+                case 5:
+                {
+                    const T* __restrict M0 = &m[v[0]];
+                    const T* __restrict M1 = &m[v[1]];
+                    const T* __restrict M2 = &m[v[2]];
+                    const T* __restrict M3 = &m[v[3]];
+                    const T* __restrict M4 = &m[v[4]];
+
+                    v[0] += end - i;
+                    v[1] += end - i;
+                    v[2] += end - i;
+                    v[3] += end - i;
+                    v[4] += end - i;
+                    i = end;
+
+                    while (P != PE)
+                    {
+                        *P = *M0
+                            ^ *M1
+                            ^ *M2
+                            ^ *M3
+                            ^ *M4
+                            ;
+
+                        ++M0;
+                        ++M1;
+                        ++M2;
+                        ++M3;
+                        ++M4;
+                        ++P;
+
+                        assert(P <= w.data() + w.size());
+                        assert(M0 <= e.data() + e.size());
+                        assert(M1 <= e.data() + e.size());
+                        assert(M2 <= e.data() + e.size());
+                        assert(M3 <= e.data() + e.size());
+                        assert(M4 <= e.data() + e.size());
+                    }
+
+
+                    break;
+                }
+                case 11:
+                {
+
+                    const T* __restrict M0 = &m[v[0]];
+                    const T* __restrict M1 = &m[v[1]];
+                    const T* __restrict M2 = &m[v[2]];
+                    const T* __restrict M3 = &m[v[3]];
+                    const T* __restrict M4 = &m[v[4]];
+                    const T* __restrict M5 = &m[v[5]];
+                    const T* __restrict M6 = &m[v[6]];
+                    const T* __restrict M7 = &m[v[7]];
+                    const T* __restrict M8 = &m[v[8]];
+                    const T* __restrict M9 = &m[v[9]];
+                    const T* __restrict M10 = &m[v[10]];
+
+                    v[0] += end - i;
+                    v[1] += end - i;
+                    v[2] += end - i;
+                    v[3] += end - i;
+                    v[4] += end - i;
+                    v[5] += end - i;
+                    v[6] += end - i;
+                    v[7] += end - i;
+                    v[8] += end - i;
+                    v[9] += end - i;
+                    v[10] += end - i;
+                    i = end;
+
+                    while (P != PE)
+                    {
+                        *P = *M0
+                            ^ *M1
+                            ^ *M2
+                            ^ *M3
+                            ^ *M4
+                            ^ *M5
+                            ^ *M6
+                            ^ *M7
+                            ^ *M8
+                            ^ *M9
+                            ^ *M10
+                            ;
+
+                        ++M0;
+                        ++M1;
+                        ++M2;
+                        ++M3;
+                        ++M4;
+                        ++M5;
+                        ++M6;
+                        ++M7;
+                        ++M8;
+                        ++M9;
+                        ++M10;
+                        ++P;
+                    }
+
+                    break;
+                }
+                default:
+                    while (i != end)
+                    {
+                        {
+                            auto row = v[0];
+                            pp[i] = m[row];
+                            ++v[0];
+                        }
+
+                        for (u64 j = 1; j < mWeight; ++j)
+                        {
+                            auto row = v[j];
+                            pp[i] = pp[i] ^ m[row];
+                            ++v[j];
+                        }
+                        ++i;
+                    }
+                    break;
+                }
 
             }
 
         }
-
-
 
         SparseMtx getB() const
         {
@@ -916,8 +967,6 @@ namespace osuCrypto
                     if (j <= mCodeSize)
                         AP.push_back(j - 1, i);
                 }
-                //for (; j < s; ++j)
-                //    AP.push_back(j, i);
 
                 auto vv = prng.get();
                 for (; j < e;)
@@ -930,15 +979,9 @@ namespace osuCrypto
                         if (vv[k])
                         {
                             AP.push_back(j, i);
-                            //x[j] = x[j] ^ x[i];
-                            //xorAdd(A.col(j), A.col(i));
-                            //assert(*rIter++ == j);
                         }
-                        //x[j] = x[j] ^ (x[i] & zeroOne[v & 1]);
                     }
                 }
-                //assert(rIter == row.rend());
-
             }
             return AP;
         }
@@ -968,6 +1011,25 @@ namespace osuCrypto
 
             return A.sparse();
         }
-    };
+};
 
+
+    //Matrix<u32> sampleDiag(u64 size, u64 weight, u64 length, PRNG& prng)
+    //{
+
+    //    Matrix<u32> ss(length, size);
+
+    //    std::vector<u32> weights(length);
+
+
+    //    for (u64 i = 0; i < length; ++i)
+    //    {
+    //        u32 dd = 0;
+    //        std::vector<u32> dist(size);
+    //        for (u64 j = 0; j < size; ++j)
+    //        {
+
+    //        }
+    //    }
+    //}
 }
