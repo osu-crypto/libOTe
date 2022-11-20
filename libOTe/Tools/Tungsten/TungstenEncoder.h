@@ -1375,6 +1375,7 @@ namespace osuCrypto
         static constexpr int chunkSize = Perm::chunkSize;
 
         static_assert(Table::data.size() % chunkSize == 0, "");
+        auto tIter = Table::data.data();
         for (u64 j = 0; j < Table::data.size();)
         {
 
@@ -1387,10 +1388,10 @@ namespace osuCrypto
 
                 if constexpr (Table::data[0].size() == 4)
                 {
-                    T* __restrict x0 = xi + Table::data[j][0];
-                    T* __restrict x1 = xi + Table::data[j][1];
-                    T* __restrict x2 = xi + Table::data[j][2];
-                    T* __restrict x3 = xi + Table::data[j][3];
+                    T* __restrict x0 = xi + tIter[j].data()[0];
+                    T* __restrict x1 = xi + tIter[j].data()[1];
+                    T* __restrict x2 = xi + tIter[j].data()[2];
+                    T* __restrict x3 = xi + tIter[j].data()[3];
 
 
                     if constexpr (rangeCheck)
