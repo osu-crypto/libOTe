@@ -14,20 +14,35 @@ namespace osuCrypto
     public:
         AlignedUnVector<u32> mPerm;
 
-        void init(u64 n, PRNG& prng)
+        void init(u64 n, PRNG& prng, bool swap = false)
         {
             mPerm.resize(n);
             std::iota(mPerm.begin(), mPerm.end(), 0);
-            for (u64 i = 0; i < n; ++i)
+
+            if (swap)
             {
-                auto j = prng.get<u32>() % (n - i) + i;
-                mPerm[i] = j;
-                //std::swap(mPerm[i], mPerm[j]);
+
+                for (u64 i = 0; i < n; ++i)
+                {
+                    auto j = prng.get<u32>() % (n - i) + i;
+                    std::swap(mPerm.data()[i], mPerm.data()[j]);
+                }
+
+            }
+            else
+            {
+
+                for (u64 i = 0; i < n; ++i)
+                {
+                    auto j = prng.get<u32>() % (n - i) + i;
+                    mPerm.data()[i] = j;
+                    //std::swap(mPerm[i], mPerm[j]);
+                }
             }
         }
 
 
-        template<typename T> 
+        template<typename T>
         __declspec(noinline) void apply(span<T> x)
         {
             auto n = mPerm.size();
@@ -38,17 +53,17 @@ namespace osuCrypto
 
             //for (u64 i = 0; i < n; ++i)
             //    std::swap(xx[i], xx[pp[i]]);
-            {
+            //{
 
-                auto& x0 = xx[0];
-                auto& x1 = xx[pp[0]];
+            //    auto& x0 = xx[0];
+            //    auto& x1 = xx[pp[0]];
 
-                auto t = x0;
-                x0 = x1;
-                x1 = t;
-            }
+            //    auto t = x0;
+            //    x0 = x1;
+            //    x1 = t;
+            //}
 
-            for (u64 i = 1; i < n; ++i)
+            for (u64 i = 0; i < n; ++i)
             {
                 auto jPre = pp[i + 128];
                 _mm_prefetch((char*)(&xx[jPre]), _MM_HINT_T0);
@@ -59,8 +74,8 @@ namespace osuCrypto
                 auto t = x0;
                 x0 = x1;//^ xx[i - 1];
                 x1 = t;
-                
-                
+
+
                 //std::swap(x0, x1);
             }
         }
@@ -69,7 +84,7 @@ namespace osuCrypto
         __declspec(noinline) void applyStep(span<T> x, u64 step, u64 offset)
         {
             auto n = mPerm.size();
-            if (x.size() < (n-1) * step + offset)
+            if (x.size() < (n - 1) * step + offset)
             {
                 throw RTE_LOC;
             }
@@ -81,11 +96,11 @@ namespace osuCrypto
             // x[step * 1 + i]
             // ...
             // x[step * (n-1) + i]
-            T*__restrict xx = x.data() + offset;
+            T* __restrict xx = x.data() + offset;
             u32* __restrict pp = mPerm.data();
             for (u64 i = 0; i < n; ++i)
             {
-                auto jPre = pp[i+ 128] * step;
+                auto jPre = pp[i + 128] * step;
                 _mm_prefetch((char*)(&xx[jPre]), _MM_HINT_T0);
                 auto j = pp[i] * step;
 
@@ -94,7 +109,7 @@ namespace osuCrypto
         }
     };
 
-    class SqrtPerm: public TimerAdapter
+    class SqrtPerm : public TimerAdapter
     {
     public:
         std::vector<Perm> mPerms;
@@ -111,9 +126,9 @@ namespace osuCrypto
 
             mPerms.resize(b);
             for (auto& p : mPerms)
-                p.init(m, prng);
+                p.init(m, prng, false);
 
-            mBinPerm.init(b, prng);
+            mBinPerm.init(b, prng, false);
 
         }
 

@@ -19,6 +19,221 @@ namespace osuCrypto
 {
 
 
+
+    template<typename T>
+    void linearSums(span<T> e, span<T> w, u64 mExpanderWeight)
+    {
+        auto mCodeSize = e.size();
+        auto mMessageSize = w.size();
+
+        details::SilverLeftEncoder L;
+
+        if (mExpanderWeight == 5)
+            L.init(mCodeSize, SilverCode::code::Weight5);
+        else if (mExpanderWeight == 11)
+        {
+            L.init(mCodeSize, SilverCode::code::Weight11);
+        }
+        else
+        {
+            std::vector<double> s; s.push_back(0);
+            while (s.size() != mExpanderWeight)
+            {
+                s.push_back((rand() % mCodeSize) / double(mCodeSize));
+            }
+            L.init(mCodeSize, s);
+        }
+        auto mWeight = L.mWeight;
+        auto mYs = L.mYs;
+
+        auto v = mYs;
+        T* __restrict pp = w.data();
+        const T* __restrict m = e.data();
+
+        for (u64 i = 0; i < mMessageSize; )
+        {
+            auto end = mMessageSize;
+            for (u64 j = 0; j < mWeight; ++j)
+            {
+                if (v[j] == mCodeSize)
+                    v[j] = 0;
+
+                auto jEnd = mCodeSize - v[j] + i;
+                end = std::min<u64>(end, jEnd);
+            }
+            T* __restrict P = &pp[i];
+            T* __restrict PE = &pp[end];
+            T* __restrict PE8 = &pp[(end - i) / 8 * 8 + i];
+
+            switch (mWeight)
+            {
+            case 5:
+            {
+                const T* __restrict M0 = &m[v[0]];
+                const T* __restrict M1 = &m[v[1]];
+                const T* __restrict M2 = &m[v[2]];
+                const T* __restrict M3 = &m[v[3]];
+                const T* __restrict M4 = &m[v[4]];
+
+                v[0] += end - i;
+                v[1] += end - i;
+                v[2] += end - i;
+                v[3] += end - i;
+                v[4] += end - i;
+                i = end;
+
+
+                //while (P != PE8)
+                //{
+                //    P[0] = M0[0] ^ M1[0];
+                //    P[1] = M0[1] ^ M1[1];
+                //    P[2] = M0[2] ^ M1[2];
+                //    P[3] = M0[3] ^ M1[3];
+                //    P[4] = M0[4] ^ M1[4];
+                //    P[5] = M0[5] ^ M1[5];
+                //    P[6] = M0[6] ^ M1[6];
+                //    P[7] = M0[7] ^ M1[7];
+
+                //    P[0] = P[0] ^ M2[0];
+                //    P[1] = P[1] ^ M2[1];
+                //    P[2] = P[2] ^ M2[2];
+                //    P[3] = P[3] ^ M2[3];
+                //    P[4] = P[4] ^ M2[4];
+                //    P[5] = P[5] ^ M2[5];
+                //    P[6] = P[6] ^ M2[6];
+                //    P[7] = P[7] ^ M2[7];
+
+
+                //    P[0] = P[0] ^ M3[0];
+                //    P[1] = P[1] ^ M3[1];
+                //    P[2] = P[2] ^ M3[2];
+                //    P[3] = P[3] ^ M3[3];
+                //    P[4] = P[4] ^ M3[4];
+                //    P[5] = P[5] ^ M3[5];
+                //    P[6] = P[6] ^ M3[6];
+                //    P[7] = P[7] ^ M3[7];
+
+                //    P[0] = P[0] ^ M4[0];
+                //    P[1] = P[1] ^ M4[1];
+                //    P[2] = P[2] ^ M4[2];
+                //    P[3] = P[3] ^ M4[3];
+                //    P[4] = P[4] ^ M4[4];
+                //    P[5] = P[5] ^ M4[5];
+                //    P[6] = P[6] ^ M4[6];
+                //    P[7] = P[7] ^ M4[7];
+                //        ;
+
+                //    M0 += 8;
+                //    M1 += 8;
+                //    M2 += 8;
+                //    M3 += 8;
+                //    M4 += 8;
+                //    P  += 8;
+                //}
+
+
+                while (P != PE)
+                {
+                    *P = *M0
+                        ^ *M1
+                        ^ *M2
+                        ^ *M3
+                        ^ *M4
+                        ;
+
+                    ++M0;
+                    ++M1;
+                    ++M2;
+                    ++M3;
+                    ++M4;
+                    ++P;
+                }
+
+
+                break;
+            }
+            case 11:
+            {
+
+                const T* __restrict M0 = &m[v[0]];
+                const T* __restrict M1 = &m[v[1]];
+                const T* __restrict M2 = &m[v[2]];
+                const T* __restrict M3 = &m[v[3]];
+                const T* __restrict M4 = &m[v[4]];
+                const T* __restrict M5 = &m[v[5]];
+                const T* __restrict M6 = &m[v[6]];
+                const T* __restrict M7 = &m[v[7]];
+                const T* __restrict M8 = &m[v[8]];
+                const T* __restrict M9 = &m[v[9]];
+                const T* __restrict M10 = &m[v[10]];
+
+                v[0] += end - i;
+                v[1] += end - i;
+                v[2] += end - i;
+                v[3] += end - i;
+                v[4] += end - i;
+                v[5] += end - i;
+                v[6] += end - i;
+                v[7] += end - i;
+                v[8] += end - i;
+                v[9] += end - i;
+                v[10] += end - i;
+                i = end;
+
+                while (P != PE)
+                {
+                    *P = *M0
+                        ^ *M1
+                        ^ *M2
+                        ^ *M3
+                        ^ *M4
+                        ^ *M5
+                        ^ *M6
+                        ^ *M7
+                        ^ *M8
+                        ^ *M9
+                        ^ *M10
+                        ;
+
+                    ++M0;
+                    ++M1;
+                    ++M2;
+                    ++M3;
+                    ++M4;
+                    ++M5;
+                    ++M6;
+                    ++M7;
+                    ++M8;
+                    ++M9;
+                    ++M10;
+                    ++P;
+                }
+
+                break;
+            }
+            default:
+                while (i != end)
+                {
+                    {
+                        auto row = v[0];
+                        pp[i] = m[row];
+                        ++v[0];
+                    }
+
+                    for (u64 j = 1; j < mWeight; ++j)
+                    {
+                        auto row = v[j];
+                        pp[i] = pp[i] ^ m[row];
+                        ++v[j];
+                    }
+                    ++i;
+                }
+                break;
+            }
+
+        }
+    }
+
     // THe encoder for the generator matrix G = B * A.
     // B is the expander while A is the accumulator.
     // 
@@ -216,23 +431,47 @@ namespace osuCrypto
 
         };
 
+        template<typename T, u64 rows, u64 weight>
+        void fixedAccumulate(
+            u64 main,
+            span<T> x,
+            const std::array<std::array<u8, weight>, rows>& TABLE)
+        {
+            auto xx = x.data();
+            for (u64 i = main, j = 0; i < x.size(); ++i, ++j)
+            {
 
+                T* __restrict xi = xx + i;
+
+                if (i + 1 < x.size())
+                    xi[1] = xi[1] ^ xi[0];
+
+                for (u64 k = 0; k < TABLE[0].size(); ++k)
+                {
+                    if (i + TABLE[j][k] < x.size())
+                    {
+                        T* __restrict xk = xi + TABLE[j][k];
+                        *xk = *xi ^ *xk;
+                    }
+                }
+            }
+        }
 
         template<typename T>
         void fixedAccumulate(span<T> x)
         {
-#define TABLE tunsten_diagMtx_128x4
-            auto main = x.size() / TABLE.size();
-            main = main ?  (main - 1) * TABLE.size() : 0;
 
+            //#define TABLE tunsten_diagMtx_128x4
             auto xx = x.data();
 
-            if (TABLE[0].size() == 4)
+            if (mAccumulatorWeight == 4)
             {
+#define TABLE tunsten_diagMtx_128x4
+                auto main = x.size() / TABLE.size();
+                main = main ? (main - 1) * TABLE.size() : 0;
 
                 for (u64 i = 0; i < main; )
                 {
-
                     for (u64 j = 0; j < TABLE.size(); ++j, ++i)
                     {
                         _mm_prefetch((char*)(xx + i + 2 * TABLE.size()), _MM_HINT_T0);
@@ -249,13 +488,16 @@ namespace osuCrypto
                         *x1 = *x1 ^ *xi;
                         *x2 = *x2 ^ *xi;
                         *x3 = *x3 ^ *xi;
-
                     }
                 }
 
+                fixedAccumulate(main, x, TABLE);
             }
-            else if (TABLE[0].size() == 10)
+            else if (mAccumulatorWeight == 10)
             {
+#define TABLE tunsten_diagMtx_128x10
+                auto main = x.size() / TABLE.size();
+                main = main ? (main - 1) * TABLE.size() : 0;
 
                 for (u64 i = 0; i < main; )
                 {
@@ -291,26 +533,14 @@ namespace osuCrypto
 
                     }
                 }
-            }
 
-            for (u64 i = main, j= 0; i < x.size(); ++i, ++j)
+                fixedAccumulate(main, x, TABLE);
+            }
+            else
             {
-
-                T* __restrict xi = xx + i;
-
-                if (i + 1 < x.size())
-                    xi[1] = xi[1] ^ xi[0];
-
-                for (u64 k = 0; k < TABLE[0].size(); ++k)
-                {
-                    if (i + TABLE[j][k] < x.size())
-                    {
-
-                        T* __restrict xk = xi + TABLE[j][k];
-                        *xk = *xi ^ *xk;
-                    }
-                }
+                throw RTE_LOC;
             }
+#undef TABLE
         }
 
         template<typename T>
@@ -340,7 +570,7 @@ namespace osuCrypto
                     j = j + mStickyAccumulator;
                     auto jj = j - 1;
                     x[jj] = x[jj] ^ x[i];
-                    //A.row(jj) ^= A.row(i);
+                    //A.row(jj) ^= A.row(j);
                 }
 
                 //prng.get((u8*)buff.data(), a8);
@@ -368,9 +598,9 @@ namespace osuCrypto
             auto xx = x.data();
             for (; i < mCodeSize; ++i)
             {
-                //auto row = AP.row(i);
+                //auto row = AP.row(j);
                 //auto rIter = row.rbegin();
-                //assert(*rIter++ == i);
+                //assert(*rIter++ == j);
 
 
                 auto xi = xx[i];
@@ -387,15 +617,15 @@ namespace osuCrypto
                     {
                         auto jj = j - 1;
                         xx[jj] = xx[jj] ^ xi;
-                        //A.row(jj) ^= A.row(i);
-                        //AP.push_back(j - 1, i);
+                        //A.row(jj) ^= A.row(j);
+                        //AP.push_back(j - 1, j);
                     }
                 }
 
                 //for (; j < s; ++j)
                 //{
-                //    x[j] = x[j] ^ x[i];
-                //    A.row(j) ^= A.row(i);
+                //    x[j] = x[j] ^ x[j];
+                //    A.row(j) ^= A.row(j);
                 //}
 
                 auto vv = prng.get();
@@ -444,8 +674,8 @@ namespace osuCrypto
                     {
                         //if (v & 1)
                         //{
-                        //    x[j] = x[j] ^ x[i];
-                        //    //A.row(j) ^= A.row(i);
+                        //    x[j] = x[j] ^ x[j];
+                        //    //A.row(j) ^= A.row(j);
                         //    //assert(*rIter++ == j);
                         //}
 
@@ -458,6 +688,7 @@ namespace osuCrypto
             }
 
         }
+
 
         struct Modd
         {
@@ -561,7 +792,7 @@ namespace osuCrypto
                 }
 
                 return y;
-        }
+            }
 #endif
 
 
@@ -628,7 +859,7 @@ namespace osuCrypto
                     vals[i + 31] -= temp64h[3] * modVal;
                 }
             }
-    };
+        };
 
 
         template<typename T, u64 count>
@@ -742,182 +973,21 @@ namespace osuCrypto
         void permExpand(span<T> e, span<T> w)
         {
             if (mPermute == 1)
+            {
+
+                setTimePoint("permute ");
                 mPerm.apply(e);
+            }
             else
+            {
+
                 mSqrtPerm.apply(e);
-
-            setTimePoint("permute");
-
-            linearSums(e, w);
-        }
-
-        template<typename T>
-        void linearSums(span<T> e, span<T> w)
-        {
-
-            details::SilverLeftEncoder L;
-
-            if (mExpanderWeight == 5)
-                L.init(mCodeSize, SilverCode::code::Weight5);
-            else if (mExpanderWeight == 11)
-            {
-                L.init(mCodeSize, SilverCode::code::Weight11);
-            }
-            else
-            {
-                std::vector<double> s; s.push_back(0);
-                while (s.size() != mExpanderWeight)
-                {
-                    s.push_back((rand() % mCodeSize) / double(mCodeSize));
-                }
-                L.init(mCodeSize, s);
-            }
-            auto mWeight = L.mWeight;
-            auto mYs = L.mYs;
-
-            auto v = mYs;
-            T* __restrict pp = w.data();
-            const T* __restrict m = e.data();
-
-            for (u64 i = 0; i < mMessageSize; )
-            {
-                auto end = mMessageSize;
-                for (u64 j = 0; j < mWeight; ++j)
-                {
-                    if (v[j] == mCodeSize)
-                        v[j] = 0;
-
-                    auto jEnd = mCodeSize - v[j] + i;
-                    end = std::min<u64>(end, jEnd);
-                }
-                T* __restrict P = &pp[i];
-                T* __restrict PE = &pp[end];
-
-                switch (mWeight)
-                {
-                case 5:
-                {
-                    const T* __restrict M0 = &m[v[0]];
-                    const T* __restrict M1 = &m[v[1]];
-                    const T* __restrict M2 = &m[v[2]];
-                    const T* __restrict M3 = &m[v[3]];
-                    const T* __restrict M4 = &m[v[4]];
-
-                    v[0] += end - i;
-                    v[1] += end - i;
-                    v[2] += end - i;
-                    v[3] += end - i;
-                    v[4] += end - i;
-                    i = end;
-
-                    while (P != PE)
-                    {
-                        *P = *M0
-                            ^ *M1
-                            ^ *M2
-                            ^ *M3
-                            ^ *M4
-                            ;
-
-                        ++M0;
-                        ++M1;
-                        ++M2;
-                        ++M3;
-                        ++M4;
-                        ++P;
-
-                        assert(P <= w.data() + w.size());
-                        assert(M0 <= e.data() + e.size());
-                        assert(M1 <= e.data() + e.size());
-                        assert(M2 <= e.data() + e.size());
-                        assert(M3 <= e.data() + e.size());
-                        assert(M4 <= e.data() + e.size());
-                    }
-
-
-                    break;
-                }
-                case 11:
-                {
-
-                    const T* __restrict M0 = &m[v[0]];
-                    const T* __restrict M1 = &m[v[1]];
-                    const T* __restrict M2 = &m[v[2]];
-                    const T* __restrict M3 = &m[v[3]];
-                    const T* __restrict M4 = &m[v[4]];
-                    const T* __restrict M5 = &m[v[5]];
-                    const T* __restrict M6 = &m[v[6]];
-                    const T* __restrict M7 = &m[v[7]];
-                    const T* __restrict M8 = &m[v[8]];
-                    const T* __restrict M9 = &m[v[9]];
-                    const T* __restrict M10 = &m[v[10]];
-
-                    v[0] += end - i;
-                    v[1] += end - i;
-                    v[2] += end - i;
-                    v[3] += end - i;
-                    v[4] += end - i;
-                    v[5] += end - i;
-                    v[6] += end - i;
-                    v[7] += end - i;
-                    v[8] += end - i;
-                    v[9] += end - i;
-                    v[10] += end - i;
-                    i = end;
-
-                    while (P != PE)
-                    {
-                        *P = *M0
-                            ^ *M1
-                            ^ *M2
-                            ^ *M3
-                            ^ *M4
-                            ^ *M5
-                            ^ *M6
-                            ^ *M7
-                            ^ *M8
-                            ^ *M9
-                            ^ *M10
-                            ;
-
-                        ++M0;
-                        ++M1;
-                        ++M2;
-                        ++M3;
-                        ++M4;
-                        ++M5;
-                        ++M6;
-                        ++M7;
-                        ++M8;
-                        ++M9;
-                        ++M10;
-                        ++P;
-                    }
-
-                    break;
-                }
-                default:
-                    while (i != end)
-                    {
-                        {
-                            auto row = v[0];
-                            pp[i] = m[row];
-                            ++v[0];
-                        }
-
-                        for (u64 j = 1; j < mWeight; ++j)
-                        {
-                            auto row = v[j];
-                            pp[i] = pp[i] ^ m[row];
-                            ++v[j];
-                        }
-                        ++i;
-                    }
-                    break;
-                }
-
+                setTimePoint("permute " /*+ std::to_string(mSqrtPerm.mPerms.size())*/);
+                //setTimePoint("permute " + std::to_string(mSqrtPerm.mPerms.size()));
             }
 
+
+            linearSums(e, w, mExpanderWeight);
         }
 
         SparseMtx getB() const
@@ -1011,8 +1081,469 @@ namespace osuCrypto
 
             return A.sparse();
         }
-};
+    };
 
+
+    struct TungstenBinPermuter : TimerAdapter
+    {
+        using T = block;
+        static constexpr int NumBins = 8;
+
+        std::array<Perm, NumBins> mPerm;
+        Perm mP2;
+        Perm mP8;
+        u64 mExpanderWeight;
+
+        AlignedUnVector<T> mBuffer;
+        std::array<T* __restrict, NumBins> mBins;
+        u64 mIdx = 0;
+        static constexpr bool eagerPermute = true;
+        static constexpr bool accumulate2 = true;
+        static constexpr bool verbose = false;
+
+        void reset()
+        {
+            auto s = mBuffer.size() / NumBins;
+            mIdx = 0;
+            PRNG prng(CCBlock);
+            for (u64 i = 0; i < NumBins; ++i)
+            {
+                mBins[i] = mBuffer.data() + i * s;
+
+                if (mPerm[i].mPerm.size() == 0)
+                    mPerm[i].init(s, prng, eagerPermute);
+            }
+
+            if (mP2.mPerm.size() == 0)
+                mP2.init(mBuffer.size(), prng, true);
+        }
+
+
+        TungstenBinPermuter(u64 size, u64 expanderWeight)
+            : mBuffer(size)
+            , mExpanderWeight(expanderWeight)
+        {
+            if (size % NumBins)
+                throw RTE_LOC;
+
+            reset();
+        }
+
+
+        template<int size>
+        OC_FORCEINLINE void processBlock(T* __restrict xx, T* end)
+        {
+            static_assert(size % NumBins == 0, "");
+
+            if (eagerPermute)
+            {
+                for (u64 i = 0; i < size; i += 8)
+                {
+                    static_assert(NumBins == 8, "");
+                    assert(mBins[7] < mBuffer.data() + mBuffer.size());
+                    assert(&xx[7] < end);
+
+                    //*(T * __restrict)&mBins[0][mPerm[0].mPerm[mIdx]] = xx[0];
+                    //*(T * __restrict)&mBins[1][mPerm[1].mPerm[mIdx]] = xx[1];
+                    //*(T * __restrict)&mBins[2][mPerm[2].mPerm[mIdx]] = xx[2];
+                    //*(T * __restrict)&mBins[3][mPerm[3].mPerm[mIdx]] = xx[3];
+                    //*(T * __restrict)&mBins[4][mPerm[4].mPerm[mIdx]] = xx[4];
+                    //*(T * __restrict)&mBins[5][mPerm[5].mPerm[mIdx]] = xx[5];
+                    //*(T * __restrict)&mBins[6][mPerm[6].mPerm[mIdx]] = xx[6];
+                    //*(T * __restrict)&mBins[7][mPerm[7].mPerm[mIdx]] = xx[7];
+                    //++mIdx;
+
+
+                    * (T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 0]] = xx[0];
+                    *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 1]] = xx[1];
+                    *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 2]] = xx[2];
+                    *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 3]] = xx[3];
+                    *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 4]] = xx[4];
+                    *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 5]] = xx[5];
+                    *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 6]] = xx[6];
+                    *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 7]] = xx[7];
+                    mIdx += 8;
+
+                    xx += 8;
+                }
+            }
+            else
+            {
+
+                for (u64 i = 0; i < size; i += 8)
+                {
+                    static_assert(NumBins == 8, "");
+                    assert(mBins[7] < mBuffer.data() + mBuffer.size());
+                    assert(&xx[7] < end);
+
+                    *(T * __restrict)mBins[0] = xx[0];
+                    *(T * __restrict)mBins[1] = xx[1];
+                    *(T * __restrict)mBins[2] = xx[2];
+                    *(T * __restrict)mBins[3] = xx[3];
+                    *(T * __restrict)mBins[4] = xx[4];
+                    *(T * __restrict)mBins[5] = xx[5];
+                    *(T * __restrict)mBins[6] = xx[6];
+                    *(T * __restrict)mBins[7] = xx[7];
+
+                    ++mBins[0];
+                    ++mBins[1];
+                    ++mBins[2];
+                    ++mBins[3];
+                    ++mBins[4];
+                    ++mBins[5];
+                    ++mBins[6];
+                    ++mBins[7];
+
+                    xx += 8;
+                }
+
+            }
+
+        }
+
+
+
+        void finalize(span<T> w)
+        {
+
+            if (verbose)
+            {
+                //BitVector bv((u8*)mBuffer.data(), mBuffer.size() * 128);
+                std::cout << "pi(acc)\n";
+                for (u64 i = 0; i < mBuffer.size(); ++i)
+                {
+                    std::cout << ((int)*(u8*)&mBuffer[i] & 1);
+                }
+                std::cout << std::endl;
+            }
+
+            if (!eagerPermute)
+            {
+                auto s = mBuffer.size() / NumBins;
+                for (u64 j = 0; j < NumBins; ++j)
+                {
+                    auto sub = mBuffer.subspan(s * j, s);
+                    mPerm[j].apply(sub);
+                    //{
+                    //    auto n = std::min<u64>(mPerm.size(), ;
+                    //    T* __restrict xx = sub.data();
+                    //    u32* __restrict  pp = mPerm[j].mPerm.data();
+                    //    //for (u64 j = 0; j < n; ++j)
+                    //    //    std::swap(xx[j], xx[pp[j]]);
+                    //    //{
+                    //    //    auto& x0 = xx[0];
+                    //    //    auto& x1 = xx[pp[0]];
+                    //    //    auto t = x0;
+                    //    //    x0 = x1;
+                    //    //    x1 = t;
+                    //    //}
+                    //    for (u64 i = 0; i < n; ++i)
+                    //    {
+                    //        auto jPre = pp[i + 128];
+                    //        _mm_prefetch((char*)(&xx[jPre]), _MM_HINT_T0);
+                    //        auto& x0 = xx[i];
+                    //        auto& x1 = xx[pp[i]];
+                    //        auto t = x0;
+                    //        x0 = x1;//^ xx[j - 1];
+                    //        x1 = t;
+                    //        //std::swap(x0, x1);
+                    //    }
+                    //}
+                }
+
+                setTimePoint("binPerm");
+            }
+
+
+
+
+
+            if constexpr (accumulate2)
+            {
+                using Table = TableTungsten1024x5;
+                T* __restrict xx = mBuffer.data();
+                for (u64 i = 0; i < mBuffer.size() - Table::data.size(); i += Table::data.size())
+                {
+                    static_assert(1024 == Table::data.size());
+                    for (u64 j = 0; j < 1024;)
+                    {
+                        _mm_prefetch((char*)(xx + j + Table::data.size()), _MM_HINT_T0);
+                        for (u64 k = 0; k < 8; ++k, ++j)
+                        {
+
+                            T* __restrict xi = xx + j;
+                            T* __restrict xs = xi + 1;
+                            T* __restrict x0 = xi + Table::data[j][0];
+                            T* __restrict x1 = xi + Table::data[j][1];
+                            T* __restrict x2 = xi + Table::data[j][2];
+                            T* __restrict x3 = xi + Table::data[j][3];
+
+
+                            auto xxs = *xs ^ *xi;
+                            auto xx0 = *x0 ^ *xi;
+                            auto xx1 = *x1 ^ *xi;
+                            auto xx2 = *x2 ^ *xi;
+                            auto xx3 = *x3 ^ *xi;
+
+                            *xs = xxs;
+                            *x0 = xx0;
+                            *x1 = xx1;
+                            *x2 = xx2;
+                            *x3 = xx3;
+                        }
+
+                    }
+                }
+
+                setTimePoint("acc2");
+            }
+
+
+            linearSums<T>(mBuffer, w, mExpanderWeight);
+
+
+            if (verbose)
+            {
+                //BitVector bv((u8*)mBuffer.data(), mBuffer.size() * 128);
+                std::cout << "out\n";
+                for (u64 i = 0; i < w.size(); ++i)
+                {
+                    std::cout << ((int)*(u8*)&w[i] & 1);
+                }
+                std::cout << std::endl;
+            }
+
+        }
+
+
+    };
+
+
+    //template<typename T = block, typename Next = TungstenPermuter, typename Table = TableTungsten128x4>
+    struct TungstenAccumulator
+    {
+        using T = block;
+        using Next = TungstenBinPermuter;
+        using Table = TableTungsten1024x5;
+
+        bool mFirst = true;
+        Next mNext;
+        static constexpr int permSize = 8;
+
+        std::array<T, Table::data.size() * 2> mBuffer;
+
+        AlignedUnVector<T> mVerboseBuff;
+
+
+        T* __restrict mDst;
+        std::array<T, permSize>* __restrict mDst8;
+        u32* __restrict mPi;
+        u32* __restrict mPi8;
+
+        TungstenAccumulator(Next&& next)
+            : mNext(std::move(next))
+        {
+            reset();
+        }
+
+        void reset()
+        {
+            mFirst = true;
+            mNext.reset();
+            if (mNext.verbose)
+            {
+                //BitVector bv((u8*)mBuffer.data(), mBuffer.size() * 128);
+                //std::cout << "in\n";
+                mVerboseBuff.resize(mNext.mBuffer.size());
+            }
+
+
+            mDst = mNext.mBins[0];
+            mPi = mNext.mP2.mPerm.data();
+            mDst8 = (std::array<T, permSize>*)mNext.mBins[0];
+
+            PRNG prng(ZeroBlock);
+            if (mNext.mP8.mPerm.size() == 0)
+                mNext.mP8.init(mNext.mBuffer.size() / permSize, prng, true);
+            mPi8 = mNext.mP8.mPerm.data();
+
+        }
+
+        template<bool rangeCheck = false>
+        OC_FORCEINLINE void processBlock(T* xx, T* end)
+        {
+            auto pi8 = mPi8;
+            auto bins = mNext.mBins;
+
+            for (u64 j = 0; j < Table::data.size();)
+            {
+
+                _mm_prefetch((char*)(xx + j + Table::data.size()), _MM_HINT_T0);
+                for (u64 k = 0; k < permSize; ++k, ++j)
+                {
+                    //_mm_prefetch((char*)(xx + j + Table::data.size() / 2), _MM_HINT_T0);
+                    T* __restrict xi = xx + j;
+                    T* __restrict xs = xi + 1;
+                    T* __restrict x0 = xi + Table::data[j][0];
+                    T* __restrict x1 = xi + Table::data[j][1];
+                    T* __restrict x2 = xi + Table::data[j][2];
+                    T* __restrict x3 = xi + Table::data[j][3];
+
+
+                    if constexpr(rangeCheck)
+                    {
+                        if (xs < end) *xs = *xs ^ *xi;
+                        if (x0 < end) *x0 = *x0 ^ *xi;
+                        if (x1 < end) *x1 = *x1 ^ *xi;
+                        if (x2 < end) *x2 = *x2 ^ *xi;
+                        if (x3 < end) *x3 = *x3 ^ *xi;
+                    }
+                    else
+                    {
+
+                        auto xxs = *xs ^ *xi;
+                        auto xx0 = *x0 ^ *xi;
+                        auto xx1 = *x1 ^ *xi;
+                        auto xx2 = *x2 ^ *xi;
+                        auto xx3 = *x3 ^ *xi;
+
+                        *xs = xxs;
+                        *x0 = xx0;
+                        *x1 = xx1;
+                        *x2 = xx2;
+                        *x3 = xx3;
+                    }
+
+                    if constexpr (!mNext.eagerPermute)
+                    {
+                        *(T * __restrict)bins[k] = *xi;
+                        //memcpy(bins[k], xi, sizeof(T));
+                        ++bins[k];
+                    }
+
+                    if constexpr (mNext.verbose)
+                    {
+                        BitVector state;
+                        state.reserve(Table::data.size());
+                        auto base = (int)*(u8*)&xx[j] & 1;
+                        for (u64 i : rng(Table::data.size()))
+                        {
+                            auto bit = (int)*(u8*)&xx[j + i] & 1;
+                            if (i == 1 || std::find(Table::data[j].begin(), Table::data[j].end(), i) != Table::data[j].end())
+                            {
+                                std::cout << state << (base ? Color::Green : Color::Red) << bit << Color::Default;
+                                state.resize(0);
+                            }
+                            else
+                                state.pushBack(bit);
+                        }
+                        if (state.size())
+                            std::cout << state;
+                        std::cout << std::endl;
+                    }
+                }
+
+                if constexpr (mNext.eagerPermute)
+                {
+                    if (rangeCheck == false || pi8 != mNext.mP8.mPerm.data() + mNext.mP8.mPerm.size())
+                    {
+                        std::array<T, permSize>* __restrict xi8 = (std::array<T, permSize>*)(xx + j - 8);
+                        memcpy(&mDst8[*pi8], xi8, sizeof(xi8));
+                        ++pi8;
+                    }
+                }
+            }
+
+
+            mPi8 = pi8;
+            mNext.mBins = bins;
+
+        }
+
+        void update(span<T> x)
+        {
+            if (x.size() == 0 && x.size() % Table::data.size())
+                throw RTE_LOC;
+            auto xx_ = x.data();
+            auto rem = x.size() - Table::data.size();
+
+            if (mFirst)
+            {
+                if (rem)
+                {
+                    for (u64 i = 0; i < rem; )
+                    {
+                        processBlock(xx_ + i, x.data() + x.size());
+                        i += Table::data.size();
+                    }
+                }
+
+                memcpy(mBuffer.data(), x.data() + rem, Table::data.size() * sizeof(T));
+            }
+            else
+            {
+                memcpy(mBuffer.data() + Table::data.size(), x.data(), Table::data.size() * sizeof(T));
+                processBlock(mBuffer.data(), mBuffer.data() + mBuffer.size());
+
+                T* src;
+                if (rem)
+                {
+                    for (u64 i = 0; i < rem; )
+                    {
+                        processBlock(xx_ + i, x.data() + x.size());
+                        i += Table::data.size();
+                    }
+
+                    src = x.data() + rem;
+                }
+                else
+                    src = mBuffer.data() + Table::data.size();
+
+                memcpy(mBuffer.data(), src, Table::data.size() * sizeof(T));
+            }
+
+            //if (rem)
+            //{
+            //    for (u64 i = 0; i < rem; )
+            //    {
+            //        processBlock(xx_ + i, x.data() + x.size());
+            //        i += Table::data.size();
+            //    }
+            //    memcpy(mBuffer.data(), x.data() + rem, Table::data.size() * sizeof(T));
+            //}
+            //else
+            //{
+            //    if(!mFirst)
+            //        memcpy(mBuffer.data(), mBuffer.data() + Table::data.size(), Table::data.size() * sizeof(T));
+            //}
+
+            mFirst = false;
+
+        }
+
+        void finalize(span<T> w)
+        {
+
+            processBlock<true>(mBuffer.data(), mBuffer.data() + mBuffer.size());
+
+
+            if (mNext.verbose)
+            {
+                //std::cout << std::endl;
+
+                std::cout << "acc\n";
+                for (u64 i = 0; i < w.size(); ++i)
+                {
+                    std::cout << ((int)*(u8*)&mVerboseBuff[i] & 1);
+                }
+                std::cout << std::endl;
+
+            }
+
+            mNext.finalize(w);
+        }
+
+    };
 
     //Matrix<u32> sampleDiag(u64 size, u64 weight, u64 length, PRNG& prng)
     //{
@@ -1022,7 +1553,7 @@ namespace osuCrypto
     //    std::vector<u32> weights(length);
 
 
-    //    for (u64 i = 0; i < length; ++i)
+    //    for (u64 j = 0; j < length; ++j)
     //    {
     //        u32 dd = 0;
     //        std::vector<u32> dist(size);

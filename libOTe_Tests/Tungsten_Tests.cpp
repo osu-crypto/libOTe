@@ -82,11 +82,11 @@ namespace tests_libOTe
 		PRNG prng(ZeroBlock);
 		SqrtPerm sp;
 		Perm p;
-
+		static constexpr int step = 8;
 
 		AlignedUnVector<block> x(n);
 		sp.init(n, binSize, prng);
-		p.init(n, prng);
+		p.init(n / step, prng);
 		Timer t, t2;
 		sp.setTimer(t2);
 		std::cout << n / binSize << " bins of size " << binSize << std::endl;
@@ -96,16 +96,24 @@ namespace tests_libOTe
 
 		for(u64 i =0; i < tt; ++i)
 			sp.apply<block>(x);
-		t.setTimePoint("sp");
-
+		auto b = t.setTimePoint("sp");
+		std::vector<u64> diffs;
 		for (u64 i = 0; i < tt; ++i)
 		{
-			p.apply<block>(x);
-			t2.setTimePoint("p");
+			span<std::array<block, step>> x8((std::array<block, step>*)x.data(), x.size() / step);
+			p.apply<std::array<block, step>>(x8);
+			//p.apply<block>(x);
+			auto e = t2.setTimePoint("p");
+			diffs.push_back(std::chrono::duration_cast<std::chrono::nanoseconds>(e - b).count());
+			b = e;
+
 		}
 		t.setTimePoint("p");
 		std::cout << t << std::endl;
 		std::cout << t2 << std::endl;
+		for (u64 i = 0; i < tt; ++i)
+			std::cout << diffs[i] / double(n) << " " << diffs[i] << std::endl;
+		
 
 	}
 
@@ -130,18 +138,62 @@ namespace tests_libOTe
 			)
 			throw RTE_LOC;
 
-		Tungsten code;
-		code.config(k, n, bw, aw, reuse, permute, sticky);
-		code.mAccumulatorWeight = cmd.isSet("aaw");
-		AlignedUnVector<block> m1(k), c0(n);
+		u64 step = 1 << cmd.getOr("step", 14);
 
-		oc::Timer timer;
-		code.setTimer(timer);
+		if (n % step)
+			throw RTE_LOC;
+		if (cmd.isSet("or"))
+		{
+			Tungsten code;
+			code.config(k, n, bw, aw, reuse, permute, sticky);
+			code.mAccumulatorWeight = cmd.getOr("aaw", 4);
+			AlignedUnVector<block> m1(k), c0(n);
 
-		for(auto t : rng(tt))
-			code.cirTransEncode<block>(c0, m1);
+			oc::Timer timer;
+			code.setTimer(timer);
+			for (auto t : rng(tt))
+			{
+				code.cirTransEncode<block>(c0, m1);
+			}
+			std::cout << timer << std::endl;
+		}
+		else
+		{
+
+			//Tungsten code;
+			//code.config(k, n, bw, aw, reuse, permute, sticky);
+			//code.mAccumulatorWeight = cmd.getOr("aaw", 4);
+			AlignedUnVector<block> m1(k)/*, c0(n)*/;
+		
+			TungstenAccumulator code(TungstenBinPermuter{ (u64)n, (u64)bw });
+			oc::Timer timer;
+			code.mNext.setTimer(timer);
+			//code.setTimer(timer);
+			std::vector<block> c0(step, ZeroBlock);
+			c0[0] = OneBlock;
+			for (auto t : rng(tt))
+			{
+				code.reset();
+				timer.setTimePoint("reset");
+				for (u64 j = 0; j < n; j += step)
+				{
+					span<block> buff(c0.data(), step);
+					code.update(buff);
+				}
+
+				timer.setTimePoint("acc");
+
+				code.finalize(m1);
+
+				timer.setTimePoint("expand");
+				//code.cirTransEncode<block>(c0, m1);
+			}
 
 
-		std::cout << timer << std::endl;
+			if(!cmd.isSet("quiet"))
+				std::cout << timer << std::endl;
+		}
 	}
+
+
 }
