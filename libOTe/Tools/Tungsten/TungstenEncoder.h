@@ -775,7 +775,7 @@ namespace osuCrypto
             }
 
 
-#ifdef ENABLE_SSE
+#ifdef ENABLE_AVX
             using block256 = __m256i;
             static inline block256 my_libdivide_u64_do_vec256(const block256& x, const libdivide::libdivide_u64_t* divider)
             {
@@ -1740,8 +1740,8 @@ namespace osuCrypto
         using T = block;
         static constexpr int chunkSize = 8;
         static constexpr bool accTwice = true;
-        using Perm = TungstenBinPerm<T, chunkSize>;
-        //using Perm = TungstenPerm<T, chunkSize>;
+        //using Perm = TungstenBinPerm<T, chunkSize>;
+        using Perm = TungstenPerm<T, chunkSize>;
         using Table = TableTungsten128x4;
 
         bool mFirst = true;
