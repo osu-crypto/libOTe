@@ -471,7 +471,7 @@ namespace osuCrypto
 
             if (mAccumulatorWeight == 4)
             {
-#define TABLE tunsten_diagMtx_128x4
+#define TABLE TableTungsten128x4::data
                 auto main = x.size() / TABLE.size();
                 main = main ? (main - 1) * TABLE.size() : 0;
 
