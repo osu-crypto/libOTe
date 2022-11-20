@@ -3,7 +3,7 @@
 #include "cryptoTools/Common/Range.h"
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Timer.h"
-#include "cryptoTools/Crypto/Prng.h"
+#include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "Xoshiro256Plus.h"
 #ifdef ENABLE_AVX
@@ -141,7 +141,7 @@ namespace osuCrypto
                         ^ *M4
                         ;
 
-                    if constexpr (std::is_same_v<block, T>)
+                    if constexpr (std::is_same<block, T>::value)
                         _mm_stream_si128((__m128i*)P, (__m128i)t);
                     else
                         *P = t;

@@ -43,7 +43,7 @@ namespace osuCrypto
 
 
         template<typename T>
-        __declspec(noinline) void apply(span<T> x)
+        void apply(span<T> x)
         {
             auto n = mPerm.size();
             if (x.size() != n)
@@ -139,7 +139,7 @@ namespace osuCrypto
         }
 
         template<typename T>
-        __declspec(noinline) void applyStep(span<T> x, u64 step, u64 offset)
+        void applyStep(span<T> x, u64 step, u64 offset)
         {
             auto n = mPerm.size();
             if (x.size() < (n - 1) * step + offset)
@@ -192,7 +192,7 @@ namespace osuCrypto
 
 
         template<typename T>
-        __declspec(noinline) void apply(span<T> x)
+        void apply(span<T> x)
         {
             auto b = mPerms.size();
             auto m = mPerms[0].mPerm.size();
