@@ -1,7 +1,7 @@
 #include "accTest.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Common/BitVector.h"
-#include <cmake>
+#include <cmath>
 
 namespace osuCrypto
 {
