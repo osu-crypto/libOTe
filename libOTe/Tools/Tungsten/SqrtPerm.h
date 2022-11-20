@@ -62,10 +62,70 @@ namespace osuCrypto
             //    x0 = x1;
             //    x1 = t;
             //}
+            u64 i = 0;
+            //for (; i < n; i+=8)
+            //{
 
-            for (u64 i = 0; i < n; ++i)
+            //    //for (u64 j = 0; j < 8; ++j, )
+            //    //{
+            //    _mm_prefetch((char*)(&xx[pp[i + 8]]), _MM_HINT_T1);
+            //    _mm_prefetch((char*)(&xx[pp[i + 9]]), _MM_HINT_T1);
+            //    _mm_prefetch((char*)(&xx[pp[i + 10]]), _MM_HINT_T1);
+            //    _mm_prefetch((char*)(&xx[pp[i + 11]]), _MM_HINT_T1);
+            //    _mm_prefetch((char*)(&xx[pp[i + 12]]), _MM_HINT_T1);
+            //    _mm_prefetch((char*)(&xx[pp[i + 13]]), _MM_HINT_T1);
+            //    _mm_prefetch((char*)(&xx[pp[i + 14]]), _MM_HINT_T1);
+            //    _mm_prefetch((char*)(&xx[pp[i + 15]]), _MM_HINT_T1);
+
+            //        auto& x0 = xx[i + 0];
+            //        auto& x1 = xx[i + 1];
+            //        auto& x2 = xx[i + 2];
+            //        auto& x3 = xx[i + 3];
+            //        auto& x4 = xx[i + 4];
+            //        auto& x5 = xx[i + 5];
+            //        auto& x6 = xx[i + 6];
+            //        auto& x7 = xx[i + 7];
+
+            //        auto& y0 = xx[pp[i + 0]];
+            //        auto& y1 = xx[pp[i + 1]];
+            //        auto& y2 = xx[pp[i + 2]];
+            //        auto& y3 = xx[pp[i + 3]];
+            //        auto& y4 = xx[pp[i + 4]];
+            //        auto& y5 = xx[pp[i + 5]];
+            //        auto& y6 = xx[pp[i + 6]];
+            //        auto& y7 = xx[pp[i + 7]];
+
+            //        auto t0 = x0;
+            //        auto t1 = x1;
+            //        auto t2 = x2;
+            //        auto t3 = x3;
+            //        auto t4 = x4;
+            //        auto t5 = x5;
+            //        auto t6 = x6;
+            //        auto t7 = x7;
+
+            //        x0 = y0;
+            //        x1 = y1;
+            //        x2 = y2;
+            //        x3 = y3;
+            //        x4 = y4;
+            //        x5 = y5;
+            //        x6 = y6;
+            //        x7 = y7;
+            //        
+            //        y0 = t0;
+            //        y1 = t1;
+            //        y2 = t2;
+            //        y3 = t3;
+            //        y4 = t4;
+            //        y5 = t5;
+            //        y6 = t6;
+            //        y7 = t7;
+            //}
+
+            for (; i < n; ++i)
             {
-                auto jPre = pp[i + 128];
+                auto jPre = pp[i + 16];
                 _mm_prefetch((char*)(&xx[jPre]), _MM_HINT_T0);
 
                 auto& x0 = xx[i];
@@ -74,8 +134,6 @@ namespace osuCrypto
                 auto t = x0;
                 x0 = x1;//^ xx[i - 1];
                 x1 = t;
-
-
                 //std::swap(x0, x1);
             }
         }

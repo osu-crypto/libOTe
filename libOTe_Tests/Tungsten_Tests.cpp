@@ -165,9 +165,10 @@ namespace tests_libOTe
 			//code.mAccumulatorWeight = cmd.getOr("aaw", 4);
 			AlignedUnVector<block> m1(k)/*, c0(n)*/;
 		
-			TungstenAccumulator code(TungstenBinPermuter{ (u64)n, (u64)bw });
+			Tungsten2 code(n, bw);
+			//TungstenAccumulator code(TungstenBinPermuter{ (u64)n, (u64)bw });
 			oc::Timer timer;
-			code.mNext.setTimer(timer);
+			code.setTimer(timer);
 			//code.setTimer(timer);
 			std::vector<block> c0(step, ZeroBlock);
 			c0[0] = OneBlock;
