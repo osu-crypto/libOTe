@@ -1392,10 +1392,6 @@ namespace osuCrypto
                     T* __restrict x2 = xi + Table::data[j][2];
                     T* __restrict x3 = xi + Table::data[j][3];
 
-                    __assume(xs < x0);
-                    __assume(xs < x1);
-                    __assume(xs < x2);
-                    __assume(xs < x3);
 
                     if constexpr (rangeCheck)
                     {
@@ -1498,7 +1494,7 @@ namespace osuCrypto
                 }
             }
 
-            perm.applyChunk<flush>(xx + j - chunkSize);
+            perm.template applyChunk<flush>(xx + j - chunkSize);
             //if constexpr (eagerPermute)
             //{
             //    //if (rangeCheck == false || perm != permEnd)
