@@ -1603,35 +1603,35 @@ namespace osuCrypto
 
                     if constexpr (NumBins == 8)
                     {
-                        *(__m128i*)mBins[0]++ = x[0] ;
-                        *(__m128i*)mBins[1]++ = x[8] ;
-                        *(__m128i*)mBins[2]++ = x[16];
-                        *(__m128i*)mBins[3]++ = x[24];
-                        *(__m128i*)mBins[4]++ = x[32];
-                        *(__m128i*)mBins[5]++ = x[40];
-                        *(__m128i*)mBins[6]++ = x[48];
-                        *(__m128i*)mBins[7]++ = x[56];
+                        *mBins[0]++ = x[0] ;
+                        *mBins[1]++ = x[8] ;
+                        *mBins[2]++ = x[16];
+                        *mBins[3]++ = x[24];
+                        *mBins[4]++ = x[32];
+                        *mBins[5]++ = x[40];
+                        *mBins[6]++ = x[48];
+                        *mBins[7]++ = x[56];
                     }
                     else if constexpr (NumBins == 16)
                     {
 
-                        *(__m128i*)mBins[0]++ = x[0] ;
-                        *(__m128i*)mBins[1]++ = x[8] ;
-                        *(__m128i*)mBins[2]++ = x[16];
-                        *(__m128i*)mBins[3]++ = x[24];
-                        *(__m128i*)mBins[4]++ = x[32];
-                        *(__m128i*)mBins[5]++ = x[40];
-                        *(__m128i*)mBins[6]++ = x[48];
-                        *(__m128i*)mBins[7]++ = x[56];
+                        *mBins[0]++ = x[0] ;
+                        *mBins[1]++ = x[8] ;
+                        *mBins[2]++ = x[16];
+                        *mBins[3]++ = x[24];
+                        *mBins[4]++ = x[32];
+                        *mBins[5]++ = x[40];
+                        *mBins[6]++ = x[48];
+                        *mBins[7]++ = x[56];
                         *
-                        *(__m128i*)mBins[8 + 0]++ = x[64 + 0] ;
-                        *(__m128i*)mBins[8 + 1]++ = x[64 + 8] ;
-                        *(__m128i*)mBins[8 + 2]++ = x[64 + 16];
-                        *(__m128i*)mBins[8 + 3]++ = x[64 + 24];
-                        *(__m128i*)mBins[8 + 4]++ = x[64 + 32];
-                        *(__m128i*)mBins[8 + 5]++ = x[64 + 40];
-                        *(__m128i*)mBins[8 + 6]++ = x[64 + 48];
-                        *(__m128i*)mBins[8 + 7]++ = x[64 + 56];
+                        *mBins[8 + 0]++ = x[64 + 0] ;
+                        *mBins[8 + 1]++ = x[64 + 8] ;
+                        *mBins[8 + 2]++ = x[64 + 16];
+                        *mBins[8 + 3]++ = x[64 + 24];
+                        *mBins[8 + 4]++ = x[64 + 32];
+                        *mBins[8 + 5]++ = x[64 + 40];
+                        *mBins[8 + 6]++ = x[64 + 48];
+                        *mBins[8 + 7]++ = x[64 + 56];
                     }
                     else
                     {
