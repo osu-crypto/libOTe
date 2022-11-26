@@ -33,7 +33,7 @@ namespace osuCrypto
 		gTimer.setTimePoint("begin");
 		if (role == Role::Receiver)
 		{
-			// construct a vector to stored the received messages. 
+			// construct a vector to stored the received messages.
 			std::unique_ptr<block[]> backing0(new block[numOTs]);
 			std::unique_ptr<block[]> backing1(new block[numOTs]);
 			span<block> choice(backing0.get(), numOTs);
@@ -135,6 +135,7 @@ namespace osuCrypto
 
 		}
 
+		cp::sync_wait(chl.flushed());
 #endif
 	}
 

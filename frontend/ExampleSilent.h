@@ -37,7 +37,7 @@ namespace osuCrypto
         std::vector<SilentBaseType> types;
         if (cmd.isSet("base"))
             types.push_back(SilentBaseType::Base);
-        else 
+        else
             types.push_back(SilentBaseType::BaseExtend);
 
         macoro::thread_pool threadPool;
@@ -79,7 +79,7 @@ namespace osuCrypto
                     else
                     {
                         // optional. You can request that the base ot are generated either
-                        // using just base OTs (few rounds, more computation) or 128 base OTs and then extend those. 
+                        // using just base OTs (few rounds, more computation) or 128 base OTs and then extend those.
                         // The default is the latter, base + extension.
                         cp::sync_wait(sender.genSilentBaseOts(prng, chl, type == SilentBaseType::BaseExtend));
                     }
@@ -128,7 +128,7 @@ namespace osuCrypto
                     else
                     {
                         // optional. You can request that the base ot are generated either
-                        // using just base OTs (few rounds, more computation) or 128 base OTs and then extend those. 
+                        // using just base OTs (few rounds, more computation) or 128 base OTs and then extend those.
                         // The default is the latter, base + extension.
                         cp::sync_wait(recver.genSilentBaseOts(prng, chl, type == SilentBaseType::BaseExtend));
                     }
@@ -180,6 +180,8 @@ namespace osuCrypto
             }
 
         }
+
+        cp::sync_wait(chl.flushed());
 
 #endif
     }
