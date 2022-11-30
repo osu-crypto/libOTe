@@ -3,7 +3,6 @@
 #include "KkrtNcoOtReceiver.h"
 #include "libOTe/Tools/Tools.h"
 #include <cryptoTools/Common/Log.h>
-#include  <mmintrin.h>
 #include "KkrtDefines.h"
 #include <cryptoTools/Crypto/RandomOracle.h>
 

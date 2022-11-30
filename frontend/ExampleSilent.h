@@ -11,149 +11,6 @@
 namespace osuCrypto
 {
 
-#ifdef ENABLE_SILENTOT
-    namespace {
-
-
-        task<u64> senderProto(Socket& socket, Timer& timer, SilentBaseType type, u64 numOTs, bool fakeBase)
-        {
-            MC_BEGIN(task<u64>, &socket, numOTs, fakeBase, &timer,
-                milli = u64{ 0 },
-                // get a random number generator seeded from the system
-                prng = PRNG(sysRandomSeed()),
-
-                delta = block{},
-                sender = std::unique_ptr<SilentOtExtSender>{new SilentOtExtSender},
-                b = Timer::timeUnit{},
-                e = Timer::timeUnit{}
-            );
-
-            sender->setTimer(timer);
-            timer.setTimePoint("sender.thrd.begin");
-
-            delta = prng.get<block>();
-
-            sender->configure(numOTs);
-            timer.setTimePoint("sender.config");
-
-
-            if (fakeBase)
-            {
-
-                auto nn = sender->baseOtCount();
-                BitVector bits(nn);
-                bits.randomize(prng);
-                std::vector<std::array<block, 2>> baseSendMsgs(bits.size());
-                std::vector<block> baseRecvMsgs(bits.size());
-
-                auto commonPrng = PRNG(ZeroBlock);
-                commonPrng.get(baseSendMsgs.data(), baseSendMsgs.size());
-                for (u64 i = 0; i < bits.size(); ++i)
-                    baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
-
-                sender->setBaseOts(baseRecvMsgs, bits);
-            }
-
-            timer.setTimePoint("sender.genBase");
-
-            MC_AWAIT(sync(socket, Role::Sender));
-
-            b = timer.setTimePoint("start");
-
-            // perform the OTs and write the random OTs to msgs.
-            MC_AWAIT(sender->silentSendInplace(delta, numOTs, prng, socket));
-
-            e = timer.setTimePoint("finish");
-            milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
-            MC_RETURN(milli);
-            MC_END();
-        }
-
-        task<u64> receiverProto(Socket& socket, Timer& timer, SilentBaseType type, u64 numOTs, bool fakeBase)
-        {
-            MC_BEGIN(task<u64>, &socket, numOTs, fakeBase, &timer,
-                milli = u64{ 0 },
-                // get a random number generator seeded from the system
-                prng = PRNG(sysRandomSeed()),
-
-                // a common prng for fake OTs
-                commonPrng = PRNG(ZeroBlock),
-
-                receiver = std::unique_ptr<SilentOtExtReceiver>{new SilentOtExtReceiver },
-
-                // construct the choices that we want.
-                choice = BitVector(numOTs),
-                b = Timer::timeUnit{},
-                e = Timer::timeUnit{}
-            );
-
-
-            receiver->setTimer(timer);
-
-            timer.setTimePoint("recver.thrd.begin");
-
-            receiver->configure(numOTs);
-
-            timer.setTimePoint("recver.config");
-
-            if (fakeBase)
-            {
-                auto nn = receiver->baseOtCount();
-                std::vector<std::array<block, 2>> baseSendMsgs(nn);
-                auto commonPrng = PRNG(ZeroBlock);
-                commonPrng.get(baseSendMsgs.data(), baseSendMsgs.size());
-                receiver->setBaseOts(baseSendMsgs);
-            }
-
-            timer.setTimePoint("recver.genBase");
-
-            MC_AWAIT(sync(socket, Role::Receiver));
-
-            b = timer.setTimePoint("start");
-
-            // perform  numOTs random OTs, the results will be written to msgs.
-            MC_AWAIT(receiver->silentReceiveInplace(numOTs, prng, socket));
-
-            e = timer.setTimePoint("finish");
-
-            milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count();
-
-            MC_RETURN(milli);
-            MC_END();
-        }
-
-        task<u64> multiThread(Socket& socket, Timer& timer, SilentBaseType type, u64 numOTs, u64 numThreads, macoro::thread_pool& tp, bool fakeBase, Role role)
-        {
-            MC_BEGIN(task<u64>, &socket, type, numOTs, fakeBase, &timer, numThreads, &tp, role,
-                fu = std::vector<macoro::eager_task<u64>>{ numThreads },
-                i = u64{},
-                ret = u64{});
-
-            for (i = 0; i < numThreads; ++i)
-            {
-                if (role == Role::Sender)
-                {
-                    fu[i] = senderProto(socket, timer, type, numOTs / numThreads, fakeBase) | macoro::start_on(tp);
-                }
-                else
-                {
-                    fu[i] = receiverProto(socket, timer, type, numOTs / numThreads, fakeBase) | macoro::start_on(tp);
-                         
-                }
-            }
-
-            for (i = 0; i < numThreads; ++i)
-                MC_AWAIT_SET(ret, fu[i]);
-
-            MC_RETURN(ret);
-            MC_END();
-        }
-    }
-#endif
-
-
-
-
     void Silent_example(Role role, u64 numOTs, u64 numThreads, std::string ip, std::string tag, CLP& cmd)
     {
 #if defined(ENABLE_SILENTOT) && defined(COPROTO_ENABLE_BOOST)
@@ -169,57 +26,138 @@ namespace osuCrypto
 
         bool fakeBase = cmd.isSet("fakeBase");
         u64 trials = cmd.getOr("trials", 1);
+        auto malicious = cmd.isSet("mal") ? SilentSecType::Malicious : SilentSecType::SemiHonest;
 
-        std::vector< SilentBaseType> types;
+#ifdef ENABLE_BITPOLYMUL
+        auto multType = cmd.isSet("silver") ? MultType::slv5 : MultType::QuasiCyclic;
+#else
+        auto multType = MultType::slv5;
+#endif;
+
+        std::vector<SilentBaseType> types;
         if (cmd.isSet("base"))
             types.push_back(SilentBaseType::Base);
-        else if (cmd.isSet("baseExtend"))
+        else 
             types.push_back(SilentBaseType::BaseExtend);
-        else
-            types.push_back(SilentBaseType::BaseExtend);
+
+        macoro::thread_pool threadPool;
+        auto work = threadPool.make_work();
+        if (numThreads > 1)
+            threadPool.create_threads(numThreads);
 
         for (auto type : types)
         {
             for (u64 tt = 0; tt < trials; ++tt)
             {
                 Timer timer;
-
-                timer.setTimePoint("start");
-                u64 milli;
-                if (numThreads > 1)
+                auto start = timer.setTimePoint("start");
+                if (role == Role::Sender)
                 {
-                    macoro::thread_pool tp;
-                    auto work = tp.make_work();
-                    tp.create_threads(numThreads);
-                    auto protocol = multiThread(chl, timer, type, numOTs, numThreads, tp, fakeBase, role);
-                    milli = coproto::sync_wait(protocol);
+                    SilentOtExtSender sender;
+
+                    // optionally request the LPN encoding matrix.
+                    sender.mMultType = multType;
+
+                    // optionally configure the sender. default is semi honest security.
+                    sender.configure(numOTs, 2, numThreads, malicious);
+
+                    if (fakeBase)
+                    {
+                        auto nn = sender.baseOtCount();
+                        BitVector bits(nn);
+                        bits.randomize(prng);
+                        std::vector<std::array<block, 2>> baseSendMsgs(bits.size());
+                        std::vector<block> baseRecvMsgs(bits.size());
+
+                        auto commonPrng = PRNG(ZeroBlock);
+                        commonPrng.get(baseSendMsgs.data(), baseSendMsgs.size());
+                        for (u64 i = 0; i < bits.size(); ++i)
+                            baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
+
+                        sender.setBaseOts(baseRecvMsgs, bits);
+                    }
+                    else
+                    {
+                        // optional. You can request that the base ot are generated either
+                        // using just base OTs (few rounds, more computation) or 128 base OTs and then extend those. 
+                        // The default is the latter, base + extension.
+                        cp::sync_wait(sender.genSilentBaseOts(prng, chl, type == SilentBaseType::BaseExtend));
+                    }
+
+                    std::vector<std::array<block, 2>> messages(numOTs);
+
+                    // create the protocol object.
+                    auto protocol = sender.silentSend(messages, prng, chl);
+
+                    // run the protocol
+                    if (numThreads <= 1)
+                        cp::sync_wait(protocol);
+                    else
+                        // launch the protocol on the thread pool.
+                        cp::sync_wait(std::move(protocol) | macoro::start_on(threadPool));
+
+                    // messages has been populated with random OT messages.
+                    // See the header for other options.
                 }
                 else
                 {
-                    if (role == Role::Sender)
-                        milli = coproto::sync_wait(senderProto(chl, timer, type, numOTs, fakeBase));
+
+                    SilentOtExtReceiver recver;
+
+                    // optionally request the LPN encoding matrix.
+                    recver.mMultType = multType;
+
+                    // configure the sender. optional for semi honest security...
+                    recver.configure(numOTs, 2, numThreads, malicious);
+
+                    if (fakeBase)
+                    {
+                        auto nn = recver.baseOtCount();
+                        BitVector bits(nn);
+                        bits.randomize(prng);
+                        std::vector<std::array<block, 2>> baseSendMsgs(bits.size());
+                        std::vector<block> baseRecvMsgs(bits.size());
+
+                        auto commonPrng = PRNG(ZeroBlock);
+                        commonPrng.get(baseSendMsgs.data(), baseSendMsgs.size());
+                        for (u64 i = 0; i < bits.size(); ++i)
+                            baseRecvMsgs[i] = baseSendMsgs[i][bits[i]];
+
+                        recver.setBaseOts(baseSendMsgs);
+                    }
                     else
-                        milli = coproto::sync_wait(receiverProto(chl, timer, type, numOTs, fakeBase));
+                    {
+                        // optional. You can request that the base ot are generated either
+                        // using just base OTs (few rounds, more computation) or 128 base OTs and then extend those. 
+                        // The default is the latter, base + extension.
+                        cp::sync_wait(recver.genSilentBaseOts(prng, chl, type == SilentBaseType::BaseExtend));
+                    }
+
+                    std::vector<block> messages(numOTs);
+                    BitVector choices(numOTs);
+
+                    // create the protocol object.
+                    auto protocol = recver.silentReceive(choices, messages, prng, chl);
+
+                    // run the protocol
+                    if (numThreads <= 1)
+                        cp::sync_wait(protocol);
+                    else
+                        // launch the protocol on the thread pool.
+                        cp::sync_wait(std::move(protocol) | macoro::start_on(threadPool));
+
+                    // choices, messages has been populated with random OT messages.
+                    // messages[i] = sender.message[i][choices[i]]
+                    // See the header for other options.
                 }
+                auto end = timer.setTimePoint("end");
+                auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
+                u64 com = chl.bytesReceived() + chl.bytesSent();
 
-                u64 com = 0/*(c.getTotalDataRecv() + c.getTotalDataSent())*/;
-
-                std::string typeStr = "n ";
-                switch (type)
-                {
-                case SilentBaseType::Base:
-                    typeStr = "b ";
-                    break;
-                case SilentBaseType::BaseExtend:
-                    typeStr = "be";
-                    break;
-                default:
-                    break;
-                }
                 if (role == Role::Sender)
                 {
-
+                    std::string typeStr = type == SilentBaseType::Base ? "b " : "be ";
                     lout << tag <<
                         " n:" << Color::Green << std::setw(6) << std::setfill(' ') << numOTs << Color::Default <<
                         " type: " << Color::Green << typeStr << Color::Default <<
@@ -229,8 +167,8 @@ namespace osuCrypto
 
                     if (cmd.getOr("v", 0) > 1)
                         lout << gTimer << std::endl;
-
                 }
+
                 if (cmd.isSet("v"))
                 {
                     if (role == Role::Sender)
@@ -244,7 +182,7 @@ namespace osuCrypto
         }
 
 #endif
-	}
+    }
 
 
 }
