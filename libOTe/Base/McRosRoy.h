@@ -184,6 +184,7 @@ namespace osuCrypto
 
             recvBuff.resize(n);
             MC_AWAIT(chl.recv(recvBuff));
+            Curve{};
 
             for (u64 i = 0; i < n; ++i)
             {
