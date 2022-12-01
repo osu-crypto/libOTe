@@ -52,8 +52,8 @@
         "FETCH_AUTO": "ON",
         "ENABLE_CIRCUITS": true,
         "VERBOSE_FETCH": true,
-        "ENABLE_SSE": false,
-        "ENABLE_AVX": false,
+        "ENABLE_SSE": true,
+        "ENABLE_AVX": true,
         "COPROTO_ENABLE_BOOST": true,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
       },

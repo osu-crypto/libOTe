@@ -1508,7 +1508,9 @@ namespace osuCrypto
         }
     }
 
-
+    // this expander/permuter first maps items into bins, every (i + j * NumBins)'th item 
+    // is mapped to the i'th bin. These bins are then permuted
+    // uniformly. The final expander is obtained by doing linear sums.
     template<typename T, int NumBins>
     struct TungstenBinPerm
     {
@@ -1649,6 +1651,7 @@ namespace osuCrypto
         }
     };
 
+    // this expander/permuter maps chunks of inputs uniformly. The final expander is obtained by doing linear sums.
     template<typename T, int chunkSize_>
     struct TungstenPerm
     {
@@ -1711,6 +1714,7 @@ namespace osuCrypto
         }
     };
 
+    // this exapnder/permuter does nothing.
     struct NoopPerm
     {
         static constexpr int chunkSize = 8;
@@ -1762,23 +1766,6 @@ namespace osuCrypto
         {
             mFirst = true;
             mPerm.reset();
-            //if (mNext.verbose)
-            //{
-            //    //BitVector bv((u8*)mBuffer.data(), mBuffer.size() * 128);
-            //    //std::cout << "in\n";
-            //    mVerboseBuff.resize(mNext.mBuffer.size());
-            //}
-
-
-            //mDst = mNext.mBins[0];
-            //mPi = mNext.mP2.mPerm.data();
-            //mDst8 = (std::array<T, permSize>*)mNext.mBins[0];
-
-            //PRNG prng(ZeroBlock);
-            //if (mNext.mP8.mPerm.size() == 0)
-            //    mNext.mP8.init(mNext.mBuffer.size() / permSize, prng, true);
-            //mPi8 = mNext.mP8.mPerm.data();
-
         }
 
         template<bool rangeCheck = false, bool flush = false>
@@ -1786,14 +1773,6 @@ namespace osuCrypto
         {
 
             accumulateBlock<Table, Perm, T, rangeCheck, flush>(xx, end, mPerm);
-            //if constexpr (mNext.eagerPermute)
-            //{
-            //    auto pend = mNext.mP8.mPerm.data() + mNext.mP8.mPerm.size();
-            //}
-            //else
-            //{
-            //    accumulateBlock<Table, std::array<u32, permSize>, T, permSize, mNext.eagerPermute, rangeCheck>(xx, end, mNext.mBins, {});
-            //}
         }
 
         void update(span<T> x)
@@ -1889,25 +1868,234 @@ namespace osuCrypto
             linearSums<T>(mPerm.mBuffer, w, mExpanderWeight);
 
         }
-
     };
 
-    //Matrix<u32> sampleDiag(u64 size, u64 weight, u64 length, PRNG& prng)
-    //{
 
-    //    Matrix<u32> ss(length, size);
+    template<typename T>
+    struct TunstenExpander
+    {
+        AlignedVector<T> mBuffer;
+        AlignedUnVector<u32> mMapping;
+        AlignedVector<u32> mCounts;
 
-    //    std::vector<u32> weights(length);
+        u32* mSizeIter;
+        u32* mDstIter;
+        u32 mSize;
+        static constexpr int chunkSize = 8;
+
+        void reset()
+        {
+            mDstIter = mMapping.data();
+            mSizeIter = mCounts.data();
+            if (mBuffer.size())
+                memset(mBuffer.data(), 0, mBuffer.size() * sizeof(T));
+            else
+                mBuffer.resize(mSize);
+        }
+
+        TunstenExpander(u64 size, u64 weight)
+            : mBuffer(size)
+            , mSize(size)
+        {
+            PRNG prng(CCBlock);
+            mCounts.resize(size);
+            AlignedUnVector<u32> binIdx(size);
+            Matrix<u32> vals(size / 2, weight);
+            mMapping.resize(size / 2 * weight);
+            auto iter = vals.data();
+
+            for (u64 j = 0; j < vals.size(); ++j)
+            {
+                *iter = prng.get<u64>() % size;
+                ++mCounts[*iter];
+                ++iter;
+            }
+
+            binIdx[0] = 0;
+            for (u64 i = 1; i < size; ++i)
+                binIdx[i] = binIdx[i - 1] + mCounts[i-1];
+
+            for (u64 i = 0; i < vals.size(); ++i)
+            {
+                auto s = vals(i);
+                auto d = i / weight;
+
+                auto p = binIdx[s]++;
+                mMapping[p] = d;
+            }
+
+            reset();
+        }
+
+        OC_FORCEINLINE void apply(T* __restrict xi, u64 k)
+        {
+        }
 
 
-    //    for (u64 j = 0; j < length; ++j)
-    //    {
-    //        u32 dd = 0;
-    //        std::vector<u32> dist(size);
-    //        for (u64 j = 0; j < size; ++j)
-    //        {
+        template<bool flush>
+        OC_FORCEINLINE void applyChunk(T* __restrict x)
+        {
+            for (u64 i = 0; i < chunkSize; ++i, ++mSizeIter)
+            {
+                for (u64 j = 0; j < *mSizeIter; ++j)
+                {
+                    auto& p = mBuffer.data()[*mDstIter++];
+                    p = p ^ x[i];
+                }
+                assert(mDstIter <= mMapping.data() + mMapping.size());
+            }
+        }
+    };
 
-    //        }
-    //    }
-    //}
+
+    template<typename T>
+    struct TunstenRegularExpander
+    {
+        AlignedVector<T> mBuffer;
+        Matrix<u32> mMapping;
+        u32* mIter;
+        static constexpr int chunkSize = 8;
+        const int mD;
+
+        void reset()
+        {
+            mIter = mMapping.data();
+            if (mBuffer.size())
+                memset(mBuffer.data(), 0, mBuffer.size() * sizeof(T));
+            else
+                mBuffer.resize(mMapping.rows());
+        }
+
+        TunstenRegularExpander(u64 size, u64 weight)
+            : mBuffer(size)
+            , mD(weight/2)
+        {
+            if (weight % 2)
+                throw RTE_LOC;
+            PRNG prng(CCBlock);
+            mMapping.resize(size, mD);
+
+            AlignedUnVector<u32> mPerm(size);
+            std::iota(mPerm.begin(), mPerm.end(), 0);
+
+            for (u64 j = 0; j < mMapping.cols(); ++j)
+            {
+                for (u64 i = 0; i < size; ++i)
+                {
+                    span<u32> bin;
+                    u32 d, s;
+                    bool collision;
+                    do {
+                        auto k = prng.get<u32>() % (size - i) + i;
+                        std::swap(mPerm.data()[i], mPerm.data()[k]);
+                        d = i / 2;
+                        s = mPerm[i];
+                        bin = mMapping[s];
+                        auto e = bin.begin() + j;
+                        collision = std::find(bin.begin(), e, d) != e;
+                    } while (collision);
+
+                    bin[j] = d;
+                }
+            }
+
+            reset();
+        }
+
+        OC_FORCEINLINE void apply(T* __restrict xi, u64 k)
+        {
+        }
+
+
+        template<bool flush>
+        OC_FORCEINLINE void applyChunk(T* __restrict x)
+        {
+            auto d = mD;
+            for (u64 i = 0; i < chunkSize; ++i)
+            {
+                //T* __restrict p0 = mBuffer.data() + *mIter++;
+                //T* __restrict p1 = mBuffer.data() + *mIter++;
+                //T* __restrict p2 = mBuffer.data() + *mIter++;
+
+                //auto v0 = *p0 ^ x[i];
+                //auto v1 = *p1 ^ x[i];
+                //auto v2 = *p2 ^ x[i];
+
+
+                //*p0 = v0;
+                //*p1 = v1;
+                //*p2 = v2;
+                for (u64 j = 0; j < d; ++j)
+                {
+                    auto& p = mBuffer.data()[*mIter++];
+                    p = p ^ x[i];
+                }
+                assert(mIter <= mMapping.data() + mMapping.size());
+            }
+        }
+    };
+
+    struct TungstanClassic : public TimerAdapter
+    {
+        using T = block;
+
+        //using Perm = TunstenRegularExpander<T>;
+        using Perm = TunstenExpander<T>;
+        using Table = TableTungsten128x4;
+        std::array<T, Table::data.size() * 2> mBuffer;
+        bool mFirst = true;
+        Perm mPerm;
+
+        TungstanClassic(u64 size, u64 weight)
+            : mPerm(size, weight)
+        {
+        }
+
+        void reset()
+        {
+            mPerm.reset();
+        }
+
+        template<bool rangeCheck = false, bool flush = false>
+        OC_FORCEINLINE void processBlock(T* xx, T* end)
+        {
+            accumulateBlock<Table, Perm, T, rangeCheck, flush>(xx, end, mPerm);
+        }
+
+        void update(span<T> x)
+        {
+            if (x.size() == 0 && x.size() % Table::data.size())
+                throw RTE_LOC;
+            auto xx_ = x.data();
+            auto rem = x.size() - Table::data.size();
+
+            if (mFirst)
+            {
+                for (u64 i = 0; i < rem; i += Table::data.size())
+                    processBlock<false, true>(xx_ + i, x.data() + x.size());
+
+                memcpy(mBuffer.data(), x.data() + rem, Table::data.size() * sizeof(T));
+            }
+            else
+            {
+                memcpy(mBuffer.data() + Table::data.size(), x.data(), Table::data.size() * sizeof(T));
+                processBlock(mBuffer.data(), mBuffer.data() + mBuffer.size());
+
+                for (u64 i = 0; i < rem; i += Table::data.size())
+                    processBlock<false, true>(xx_ + i, x.data() + x.size());
+                        
+                T* src  = rem ?  
+                    x.data() + rem  :
+                    mBuffer.data() + Table::data.size();
+
+                memcpy(mBuffer.data(), src, Table::data.size() * sizeof(T));
+            }
+            mFirst = false;
+        }
+
+        void finalize(span<T>)
+        {
+
+        }
+    };
 }
