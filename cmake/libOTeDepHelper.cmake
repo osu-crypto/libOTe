@@ -41,32 +41,41 @@ if (ENABLE_BITPOLYMUL)
     endif()
 endif()
 
-## coproto
-###########################################################################
-
-macro(FIND_COPROTO)
-    if(FETCH_COPROTO)
-        set(COPROTO_DP NO_DEFAULT_PATH PATHS ${OC_THIRDPARTY_HINT})
-    else()
-        unset(COPROTO_DP)
-    endif()
-    
-    find_package(coproto ${COPROTO_DP} ${ARGN})
-
-    if(TARGET coproto::coproto)
-        set(COPROTO_FOUND ON)
-    else()
-        set(COPROTO_FOUND OFF)
-    endif()
-endmacro()
-
-if(FETCH_COPROTO_IMPL)
-    FIND_COPROTO(QUIET)
-    include(${CMAKE_CURRENT_LIST_DIR}/../thirdparty/getCoproto.cmake)
-endif()
-
-
-FIND_COPROTO(REQUIRED)
+### coproto
+#############################################################################
+#
+#macro(FIND_COPROTO)
+#    if(FETCH_COPROTO)
+#        set(COPROTO_DP NO_DEFAULT_PATH PATHS ${OC_THIRDPARTY_HINT})
+#    else()
+#        unset(COPROTO_DP)
+#    endif()
+#    
+#    if(COPROTO_ENABLE_BOOST)
+#        set(COPROTO_COMPONENTS boost)
+#    endif()
+#
+#    if(COPROTO_ENABLE_OPENSSL)
+#        set(COPROTO_COMPONENTS ${COPROTO_COMPONENTS} openssl)
+#    endif()
+#
+#    set(LIBOTE_ENABLE_BOOST ${COPROTO_ENABLE_BOOST})
+#    set(LIBOTE_ENABLE_OPENSSL ${COPROTO_ENABLE_OPENSSL})
+#
+#    find_package(coproto ${COPROTO_DP} ${ARGN} COMPONENTS ${COPROTO_COMPONENTS})
+#    
+#    set(COPROTO_ENABLE_BOOST   ${LIBOTE_ENABLE_BOOST})
+#    set(COPROTO_ENABLE_OPENSSL ${LIBOTE_ENABLE_OPENSSL})
+#    
+#endmacro()
+#
+#if(FETCH_COPROTO_IMPL)
+#    FIND_COPROTO(QUIET)
+#    include(${CMAKE_CURRENT_LIST_DIR}/../thirdparty/getCoproto.cmake)
+#endif()
+#
+#
+#FIND_COPROTO(REQUIRED)
 
 
 # resort the previous prefix path

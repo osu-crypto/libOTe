@@ -58,15 +58,6 @@ if(DEFINED ENABLE_ALL_OT)
 	unset(ENABLE_ALL_OT CACHE)
 endif()
 
-if(NOT DEFINED LIBOTE_CPP_VER)
-	set(LIBOTE_CPP_VER 14)
-endif()
-
-if(NOT LIBOTE_CPP_VER EQUAL 20 AND
-	NOT LIBOTE_CPP_VER EQUAL 17 AND
-	NOT LIBOTE_CPP_VER EQUAL 14)
-	message(FATAL_ERROR "Unknown c++ version. LIBOTE_CPP_VER=${LIBOTE_CPP_VER}")
-endif()
 
 if(APPLE)
 	option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" FALSE)
@@ -92,8 +83,8 @@ option(ENABLE_OOS            "Build the OOS 1-oo-N OT-Ext protocol." OFF)
 option(ENABLE_KKRT           "Build the KKRT 1-oo-N OT-Ext protocol." OFF)
 
 option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
-option(COPROTO_ENABLE_BOOST  "Build with coproto boost support." OFF)
-option(COPROTO_ENABLE_OPENSSL  "Build with coproto boost open ssl support." OFF)
+#option(COPROTO_ENABLE_BOOST  "Build with coproto boost support." OFF)
+#option(COPROTO_ENABLE_OPENSSL  "Build with coproto boost open ssl support." OFF)
 
 option(NO_SILVER_WARNING     "Build with no silver security warning." OFF)
 option(NO_KOS_WARNING        "Build with no kos security warning." OFF)
@@ -103,10 +94,6 @@ EVAL(FETCH_BITPOLYMUL_IMPL
 	(DEFINED FETCH_BITPOLYMUL AND FETCH_BITPOLYMUL) OR
 	((NOT DEFINED FETCH_BITPOLYMUL) AND (FETCH_AUTO AND ENABLE_BITPOLYMUL)))
 
-#option(FETCH_COPROTO		"download and build Coproto" OFF))
-EVAL(FETCH_COPROTO_IMPL 
-	(DEFINED FETCH_COPROTO AND FETCH_COPROTO) OR
-	((NOT DEFINED FETCH_COPROTO) AND (FETCH_AUTO)))
 
 #option(FETCH_BITPOLYMUL		"download and build bitpolymul" OFF))
 EVAL(FETCH_BITPOLYMUL_IMPL 
@@ -120,13 +107,10 @@ message(STATUS "General Options\n===============================================
 
 message(STATUS "Option: VERBOSE_FETCH         = ${VERBOSE_FETCH}")
 message(STATUS "Option: FETCH_BITPOLYMUL      = ${FETCH_BITPOLYMUL_IMPL}")
-message(STATUS "Option: FETCH_COPROTO         = ${FETCH_COPROTO_IMPL}\n")
 
 message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF")
 message(STATUS "Option: ENABLE_BITPOLYMUL     = ${ENABLE_BITPOLYMUL}")
 message(STATUS "Option: LIBOTE_CPP_VER        = ${LIBOTE_CPP_VER}")
-message(STATUS "Option: COPROTO_ENABLE_BOOST  = ${COPROTO_ENABLE_BOOST}")
-message(STATUS "Option: COPROTO_ENABLE_OPENSSL= ${COPROTO_ENABLE_OPENSSL}\n\n")
 
 message(STATUS "Base OT protocols\n=======================================================")
 message(STATUS "Option: ENABLE_SIMPLESTOT     = ${ENABLE_SIMPLESTOT}")
@@ -139,7 +123,7 @@ message(STATUS "Option: ENABLE_MR_KYBER       = ${ENABLE_MR_KYBER}")
 message(STATUS "1-out-of-2 OT Extension protocols\n=======================================================")
 message(STATUS "Option: ENABLE_KOS            = ${ENABLE_KOS}")
 message(STATUS "Option: ENABLE_IKNP           = ${ENABLE_IKNP}")
-message(STATUS "Option: ENABLE_SILENTOT       = ${ENABLE_SILENTOT}\n\n")
+message(STATUS "Option: ENABLE_SILENTOT       = ${ENABLE_SILENTOT}")
 message(STATUS "Option: ENABLE_SOFTSPOKEN_OT  = ${ENABLE_SOFTSPOKEN_OT}\n\n")
 
 message(STATUS "1-out-of-2 Delta-OT Extension protocols\n=======================================================")
@@ -154,7 +138,7 @@ message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}\n\n")
 
 
 message(STATUS "other \n=======================================================")
-message(STATUS "Option: NO_SILVER_WARNING    = ${NO_SILVER_WARNING}\n\n")
+message(STATUS "Option: NO_SILVER_WARNING    = ${NO_SILVER_WARNING}")
 message(STATUS "Option: NO_KOS_WARNING       = ${NO_KOS_WARNING}\n\n")
 
 #############################################
