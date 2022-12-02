@@ -30,13 +30,13 @@ jobs:
       # Runs a set of commands using the runners shell
       
       - name: build relic
-        run:  python3 build.py --setup --relic --par=4 -DVERBOSE_FETCH=ON -DENABLE_BOOST=OFF -DENABLE_SODIUM=OFF -DENABLE_ASAN=ON
+        run:  python3 build.py --setup --relic --par=4 -DVERBOSE_FETCH=ON -DENABLE_BOOST=OFF -DENABLE_SODIUM=OFF -DENABLE_ASAN=ON  -DCMAKE_BUILD_TYPE=RELWITHDEBINFO
         
       - name: build bitpolymul
-        run:  python3 build.py --setup --bitpolymul --par=4  -DVERBOSE_FETCH=ON
+        run:  python3 build.py --setup --bitpolymul --par=4  -DVERBOSE_FETCH=ON -DCMAKE_BUILD_TYPE=RELWITHDEBINFO
           
       - name: build libOTe
-        run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -DENABLE_CIRCUITS=ON 
+        run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -DENABLE_CIRCUITS=ON -DCMAKE_BUILD_TYPE=RELWITHDEBINFO
 
       - name: unit tests
         run:  ./out/build/linux/frontend/frontend_libOTe -u
