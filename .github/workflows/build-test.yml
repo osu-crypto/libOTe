@@ -30,7 +30,7 @@ jobs:
       # Runs a set of commands using the runners shell
       
       - name: build relic
-        run:  python3 build.py --setup --relic --par=4 -DVERBOSE_FETCH=ON -DENABLE_BOOST=OFF -DENABLE_SODIUM=OFF
+        run:  python3 build.py --setup --relic --par=4 -DVERBOSE_FETCH=ON -DENABLE_BOOST=OFF -DENABLE_SODIUM=OFF -DENABLE_ASAN=ON
         
       - name: build bitpolymul
         run:  python3 build.py --setup --bitpolymul --par=4  -DVERBOSE_FETCH=ON

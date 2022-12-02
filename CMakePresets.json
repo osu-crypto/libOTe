@@ -82,6 +82,7 @@
         "VERBOSE_FETCH": true,
         "ENABLE_RELIC": true,
         "ENABLE_ALL_OT": true,
+        "ENABLE_ASAN": true,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
       },
       "vendor": { "microsoft.com/VisualStudioSettings/CMake/1.0": { "hostOS": [ "Windows" ] } }
