@@ -38,8 +38,18 @@ set(libOTe_openssl_FOUND	${ENABLE_OPENSSL})
 set(libOTe_circuits_FOUND	${ENABLE_CIRCUITS})
 set(libOTe_sse_FOUND		${ENABLE_SSE})
 set(libOTe_avx_FOUND		${ENABLE_AVX})
-set(libOTe_no_sse_FOUND NOT ${ENABLE_SSE})
-set(libOTe_no_avx_FOUND NOT ${ENABLE_AVX})
+
+if(ENABLE_SSE)
+	set(libOTe_no_sse_FOUND false)
+else()
+	set(libOTe_no_sse_FOUND true)
+endif()
+
+if(ENABLE_AVX)
+	set(libOTe_no_avx_FOUND false)
+else()
+	set(libOTe_no_avx_FOUND true)
+endif()
 
 
 set(libOTe_simplestot_FOUND		${ENABLE_SIMPLESTOT})
