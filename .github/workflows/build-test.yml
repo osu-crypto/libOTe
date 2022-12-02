@@ -99,7 +99,7 @@ jobs:
       - name: find source tree
         run: |
             cd libOTe_Tests/cmakeTests
-            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -D CMAKE_PREFIX_PATH=../../
+            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DSODIUM=ON -D CMAKE_PREFIX_PATH=../../
             cmake --build out/
             ./out/main
             rm -rf out/
@@ -108,7 +108,7 @@ jobs:
       - name: hint test
         run: |
             cd libOTe_Tests/cmakeTests
-            cmake -S . -B out/  -D LIBOTE_HINT=../..
+            cmake -S . -B out/ -DSODIUM=ON -D LIBOTE_HINT=../..
             cmake --build out/
             ./out/main
             rm -rf out/
@@ -119,7 +119,7 @@ jobs:
             python3 build.py --setup --sodium --install=~/install
             python3 build.py --install=~/install
             cd libOTe_Tests/cmakeTests
-            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
+            cmake -S . -B out/ -DSODIUM=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
             cmake --build out/
             ./out/main
             rm -rf out/
