@@ -50,6 +50,7 @@ configure_file("${CMAKE_CURRENT_LIST_DIR}/libOTePreample.cmake" "libOTePreample.
 # install the configuration file
 install(FILES
           "${CMAKE_CURRENT_BINARY_DIR}/libOTeConfig.cmake"
+          "${CMAKE_CURRENT_BINARY_DIR}/buildOptions.cmake"
           "${CMAKE_CURRENT_BINARY_DIR}/libOTeConfigVersion.cmake"
           "${CMAKE_CURRENT_BINARY_DIR}/libOTeDepHelper.cmake"
           "${CMAKE_CURRENT_BINARY_DIR}/libOTePreample.cmake"
