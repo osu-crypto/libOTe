@@ -135,7 +135,7 @@ namespace osuCrypto
 
 		}
 
-		cp::sync_wait(chl.flushed());
+		cp::sync_wait(chl.flush());
 #endif
 	}
 

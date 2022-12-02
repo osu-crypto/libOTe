@@ -6,6 +6,7 @@ endif (POLICY CMP0048)
 
 project(libOTe VERSION 2.0.4)
 
+include(cmake/libOTePreample.cmake)
 
 if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 
@@ -23,7 +24,7 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 		SET(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG")
 		SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb")
 		SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb")
-		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -std=c++17")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ")
 	endif()
 	#set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 
@@ -55,7 +56,6 @@ endif()
 #############################################
 #    Build cryptoTools (common utilities)   #
 #############################################
-include(cmake/libOTePreample.cmake)
 add_subdirectory(cryptoTools)
 
 

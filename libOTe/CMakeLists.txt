@@ -14,13 +14,14 @@ target_include_directories(libOTe PUBLIC
 target_include_directories(libOTe PUBLIC
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
                     $<INSTALL_INTERFACE:include>)
-
-
+                    
 target_link_libraries(libOTe cryptoTools)
 
 if(MSVC)
+    target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
     #target_compile_options(libOTe PRIVATE -openmp:experimental)
 else()
+    target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
 
     if(ENABLE_SSE)
         target_compile_options(libOTe PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)

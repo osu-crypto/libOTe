@@ -110,7 +110,7 @@ message(STATUS "Option: FETCH_BITPOLYMUL      = ${FETCH_BITPOLYMUL_IMPL}")
 
 message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF")
 message(STATUS "Option: ENABLE_BITPOLYMUL     = ${ENABLE_BITPOLYMUL}")
-message(STATUS "Option: LIBOTE_CPP_VER        = ${LIBOTE_CPP_VER}")
+message(STATUS "Option: LIBOTE_STD_VER        = ${LIBOTE_STD_VER}")
 
 message(STATUS "Base OT protocols\n=======================================================")
 message(STATUS "Option: ENABLE_SIMPLESTOT     = ${ENABLE_SIMPLESTOT}")
