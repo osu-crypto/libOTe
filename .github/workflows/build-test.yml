@@ -131,7 +131,7 @@ jobs:
             python3 build.py --setup --sodium --install --sudo
             python3 build.py --install --sudo
             cd libOTe_Tests/cmakeTests
-            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release
+            cmake -S . -B out/  -DSODIUM=ON -DCMAKE_BUILD_TYPE=Release
             cmake --build out/
             ./out/main
             rm -rf out/
