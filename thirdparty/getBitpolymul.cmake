@@ -1,7 +1,7 @@
 
 
 set(GIT_REPOSITORY      https://github.com/ladnir/bitpolymul.git)
-set(GIT_TAG             "3b8e72676fbdbf1d7ba38794a34b9aa96dfaf002" )
+set(GIT_TAG             "97e189ee36f34ab9ea19e46e1539a096e8da0ad7" )
 
 set(CLONE_DIR "${OC_THIRDPARTY_CLONE_DIR}/bitpolymul")
 set(BUILD_DIR "${CLONE_DIR}/build/${OC_CONFIG}")
