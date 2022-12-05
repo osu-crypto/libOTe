@@ -1,4 +1,25 @@
 
+
+if(DEFINED COPROTO_ENABLE_BOOST)
+    message("warning: setting ENABLE_BOOST as COPROTO_ENABLE_BOOST=${COPROTO_ENABLE_BOOST}")
+    set(ENABLE_BOOST ${COPROTO_ENABLE_BOOST})
+    unset(COPROTO_ENABLE_BOOST CACHE )
+endif()
+
+if(NOT DEFINED ENABLE_COPROTO)
+    set(ENABLE_COPROTO true)
+endif()
+
+if(NOT ENABLE_COPROTO)
+    message("warning: setting ENABLE_BOOST as true")
+    set(ENABLE_COPROTO true)
+endif()
+
+if(DEFINED COPROTO_ENABLE_OPENSSL)
+    set(ENABLE_OPENSSL ${COPROTO_ENABLE_OPENSSL})
+    unset(COPROTO_ENABLE_OPENSSL)
+endif()
+
 if(DEFINED ENABLE_ALL_OT)
 
 	# requires sodium or relic

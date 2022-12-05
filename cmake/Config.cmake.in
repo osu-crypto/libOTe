@@ -1,9 +1,9 @@
 @PACKAGE_INIT@
 
 
+include("${CMAKE_CURRENT_LIST_DIR}/buildOptions.cmake")
 find_package(cryptoTools REQUIRED HINTS "${CMAKE_CURRENT_LIST_DIR}/.." ${CMAKE_CURRENT_LIST_DIR})
 
-include("${CMAKE_CURRENT_LIST_DIR}/buildOptions.cmake")
 
 #set(ENABLE_BITPOLYMUL     @ENABLE_BITPOLYMUL@)
 #set(ENABLE_SIMPLESTOT     @ENABLE_SIMPLESTOT@)

@@ -6,7 +6,7 @@ endif (POLICY CMP0048)
 
 project(libOTe VERSION 2.0.4)
 
-include(cmake/libOTePreample.cmake)
+include(cmake/libOTePreamble.cmake)
 
 if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 
@@ -52,6 +52,21 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 
 endif()
 
+
+if(DEFINED LIBOTE_CPP_VER)
+    message("warning: setting LIBOTE_STD_VER as LIBOTE_CPP_VER=${LIBOTE_CPP_VER}")
+    set(LIBOTE_STD_VER ${LIBOTE_CPP_VER})
+    unset(LIBOTE_CPP_VER CACHE )
+endif()
+if(NOT DEFINED LIBOTE_STD_VER)
+	set(LIBOTE_STD_VER 14)
+endif()
+if(NOT LIBOTE_STD_VER EQUAL 20 AND
+	NOT LIBOTE_STD_VER EQUAL 17 AND
+	NOT LIBOTE_STD_VER EQUAL 14)
+	message(FATAL_ERROR "Unknown c++ version. LIBOTE_STD_VER=${LIBOTE_STD_VER}")
+endif()
+set(CRYPTO_TOOLS_STD_VER ${LIBOTE_STD_VER})
 
 #############################################
 #    Build cryptoTools (common utilities)   #
