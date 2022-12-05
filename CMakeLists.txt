@@ -67,6 +67,14 @@ if(NOT LIBOTE_STD_VER EQUAL 20 AND
 	message(FATAL_ERROR "Unknown c++ version. LIBOTE_STD_VER=${LIBOTE_STD_VER}")
 endif()
 set(CRYPTO_TOOLS_STD_VER ${LIBOTE_STD_VER})
+if(NOT DEFINED ENABLE_COPROTO)
+    set(ENABLE_COPROTO true)
+endif()
+if(NOT ENABLE_COPROTO)
+    message("warning: setting ENABLE_BOOST as true")
+    set(ENABLE_COPROTO true)
+endif()
+
 
 #############################################
 #    Build cryptoTools (common utilities)   #
