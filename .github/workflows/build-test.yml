@@ -62,7 +62,6 @@ jobs:
 
       - name: install prefix test
         run: |
-            python3 build.py --setup --relic --bitpolymul --install=~/install-DCMAKE_BUILD_TYPE=RelWithDebInfo
             python3 build.py --install=~/install -DCMAKE_BUILD_TYPE=RelWithDebInfo
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=~/install
