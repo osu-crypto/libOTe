@@ -703,6 +703,8 @@ namespace osuCrypto
 
         for (i = 0; i < mExps.size(); ++i)
             MC_AWAIT(mExps[i].mFuture);
+
+        mExps.clear();
         setTimePoint("SilentMultiPprfSender.join");
 
         mBaseOTs = {};
