@@ -1,4 +1,16 @@
 
+
+if(DEFINED COPROTO_ENABLE_BOOST)
+    message("warning: setting ENABLE_BOOST as COPROTO_ENABLE_BOOST=${COPROTO_ENABLE_BOOST}")
+    set(ENABLE_BOOST ${COPROTO_ENABLE_BOOST})
+    unset(COPROTO_ENABLE_BOOST CACHE )
+endif()
+
+if(DEFINED COPROTO_ENABLE_OPENSSL)
+    set(ENABLE_OPENSSL ${COPROTO_ENABLE_OPENSSL})
+    unset(COPROTO_ENABLE_OPENSSL)
+endif()
+
 if(DEFINED ENABLE_ALL_OT)
 
 	# requires sodium or relic
@@ -34,7 +46,7 @@ if(DEFINED ENABLE_ALL_OT)
 	else()
 		set(oc_BB OFF)
 	endif()
-	#set(ENABLE_SIMPLESTOT_ASM ${oc_BB}						CACHE BOOL "" FORCE)
+	set(ENABLE_SIMPLESTOT_ASM ${oc_BB}						CACHE BOOL "" FORCE)
 	set(ENABLE_MR_KYBER       ${oc_BB}						CACHE BOOL "" FORCE)
 
 	# requires sse
@@ -119,7 +131,7 @@ message(STATUS "Option: FETCH_LIBDIVIDE       = ${FETCH_LIBDIVIDE_IMPL}\n")
 
 message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF")
 message(STATUS "Option: ENABLE_BITPOLYMUL     = ${ENABLE_BITPOLYMUL}")
-message(STATUS "Option: LIBOTE_CPP_VER        = ${LIBOTE_CPP_VER}")
+message(STATUS "Option: LIBOTE_STD_VER        = ${LIBOTE_STD_VER}")
 
 message(STATUS "Base OT protocols\n=======================================================")
 message(STATUS "Option: ENABLE_SIMPLESTOT     = ${ENABLE_SIMPLESTOT}")
@@ -165,7 +177,7 @@ if(NOT UNIX OR APPLE OR MSVC)
 endif()
 
 if( NOT ENABLE_SIMPLESTOT AND
-	#NOT ENABLE_SIMPLESTOT_ASM AND
+	NOT ENABLE_SIMPLESTOT_ASM AND
 	NOT ENABLE_MRR AND
 	NOT ENABLE_MRR_TWIST AND
 	NOT ENABLE_MR AND

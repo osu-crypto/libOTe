@@ -72,6 +72,8 @@ namespace osuCrypto
 #    error "asm base simplest OT and windows is incompatible."
 #endif
 
+    void AsmSimplestOTTest();
+
     class AsmSimplestOT : public OtReceiver, public OtSender
     {
     public:

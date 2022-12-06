@@ -17,7 +17,5 @@ if __name__ == "__main__":
 
     argv = sys.argv
     replace(argv, "--bitpolymul", "-DENABLE_SILENTOT=ON -DENABLE_BITPOLYMUL=ON")
-    replace(argv, "--all", "-DENABLE_BITPOLYMUL=ON -DENABLE_SODIUM=ON -DENABLE_ALL_OT=ON")
-    replace(argv, "--boost", "-DCOPROTO_ENABLE_BOOST=ON")
-    replace(argv, "--openssl", "-DCOPROTO_ENABLE_OPENSSL=ON")
+    replace(argv, "--all", "-DENABLE_ALL_OT=ON")
     cryptoTools.build.main("libOTe", argv[1:])

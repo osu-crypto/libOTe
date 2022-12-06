@@ -4,8 +4,9 @@ if (POLICY CMP0048)
   cmake_policy(SET CMP0048 NEW)
 endif (POLICY CMP0048)
 
-project(libOTe VERSION 2.0.3)
+project(libOTe VERSION 2.0.4)
 
+include(cmake/libOTePreamble.cmake)
 
 if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 
@@ -23,7 +24,7 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 		SET(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG")
 		SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -ggdb")
 		SET(CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -ggdb")
-		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -std=c++17")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ")
 	endif()
 	#set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 
@@ -52,10 +53,32 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
 endif()
 
 
+if(DEFINED LIBOTE_CPP_VER)
+    message("warning: setting LIBOTE_STD_VER as LIBOTE_CPP_VER=${LIBOTE_CPP_VER}")
+    set(LIBOTE_STD_VER ${LIBOTE_CPP_VER})
+    unset(LIBOTE_CPP_VER CACHE )
+endif()
+if(NOT DEFINED LIBOTE_STD_VER)
+	set(LIBOTE_STD_VER 14)
+endif()
+if(NOT LIBOTE_STD_VER EQUAL 20 AND
+	NOT LIBOTE_STD_VER EQUAL 17 AND
+	NOT LIBOTE_STD_VER EQUAL 14)
+	message(FATAL_ERROR "Unknown c++ version. LIBOTE_STD_VER=${LIBOTE_STD_VER}")
+endif()
+set(CRYPTO_TOOLS_STD_VER ${LIBOTE_STD_VER})
+if(NOT DEFINED ENABLE_COPROTO)
+    set(ENABLE_COPROTO true)
+endif()
+if(NOT ENABLE_COPROTO)
+    message("warning: setting ENABLE_BOOST as true")
+    set(ENABLE_COPROTO true)
+endif()
+
+
 #############################################
 #    Build cryptoTools (common utilities)   #
 #############################################
-include(cmake/libOTePreample.cmake)
 add_subdirectory(cryptoTools)
 
 

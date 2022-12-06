@@ -86,88 +86,34 @@ namespace tests_libOTe
     {
 #ifdef ENABLE_SIMPLESTOT_ASM
         setThreadName("Sender");
-        //{
 
-        //    IOService ios(0);
-        //    Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
-        //    Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
-        //    Channel senderChannel = ep1.addChannel();
-        //    Channel recvChannel = ep0.addChannel();
+        setThreadName("Sender");
 
-        //    PRNG prng0(block(4253465, 3434565));
-        //    PRNG prng1(block(42532335, 334565));
+        auto sock = cp::LocalAsyncSocket::makePair();
 
-        //    u64 numOTs = 50;
-        //    std::vector<block> recvMsg(numOTs);
-        //    std::vector<std::array<block, 2>> sendMsg(numOTs);
-        //    BitVector choices(numOTs);
-        //    choices.randomize(prng0);
+        PRNG prng0(block(4253465, 3434565));
+        PRNG prng1(block(42532335, 334565));
 
+        u64 numOTs = 50;
+        std::vector<block> recvMsg(numOTs);
+        std::vector<std::array<block, 2>> sendMsg(numOTs);
+        BitVector choices(numOTs);
+        choices.randomize(prng0);
 
-        //    std::thread thrd = std::thread([&]() {
-        //        setThreadName("receiver");
-        //        AsmSimplestOT baseOTs;
-        //        baseOTs.send(sendMsg, prng1, recvChannel);
+        AsmSimplestOT baseOTs0;
+        auto p0 = baseOTs0.send(sendMsg, prng1, sock[0]);
 
-        //        });
+        AsmSimplestOT baseOTs;
+        auto p1 = baseOTs.receive(choices, recvMsg, prng0, sock[1]);
 
-        //    AsmSimplestOT baseOTs;
-        //    baseOTs.receive(choices, recvMsg, prng0, senderChannel);
+        eval(p0, p1);
 
-        //    thrd.join();
-        //    RandomOracle ro(16);
-        //    ro.Update(recvMsg.data(), recvMsg.size());
-        //    block hr;
-        //    ro.Final(hr);
-
-
-        //    ro.Reset(16);
-        //    ro.Update(sendMsg.data(), sendMsg.size());
-        //    block hs;
-        //    ro.Final(hs);
-
-        //    std::cout << hr << " " << hs << std::endl;
-
-        //    for (u64 i = 0; i < numOTs; ++i)
-        //    {
-        //        if (neq(recvMsg[i], sendMsg[i][choices[i]]))
-        //        {
-        //            std::cout << "failed " << i << " exp = m[" << int(choices[i]) << "], act = " << recvMsg[i] << " true = " << sendMsg[i][0] << ", " << sendMsg[i][1] << std::endl;
-        //            throw UnitTestFail();
-        //        }
-        //    }
-
-        //}
+        for (u64 i = 0; i < numOTs; ++i)
         {
-
-            setThreadName("Sender");
-
-            auto sock = cp::LocalAsyncSocket::makePair();
-
-            PRNG prng0(block(4253465, 3434565));
-            PRNG prng1(block(42532335, 334565));
-
-            u64 numOTs = 50;
-            std::vector<block> recvMsg(numOTs);
-            std::vector<std::array<block, 2>> sendMsg(numOTs);
-            BitVector choices(numOTs);
-            choices.randomize(prng0);
-
-            AsmSimplestOT baseOTs0;
-            auto p0 = baseOTs0.send(sendMsg, prng1, sock[0]);
-
-            AsmSimplestOT baseOTs;
-            auto p1 = baseOTs.receive(choices, recvMsg, prng0, sock[1]);
-
-            eval(p0, p1);
-
-            for (u64 i = 0; i < numOTs; ++i)
+            if (neq(recvMsg[i], sendMsg[i][choices[i]]))
             {
-                if (neq(recvMsg[i], sendMsg[i][choices[i]]))
-                {
-                    std::cout << "***failed " << i << " exp = m[" << int(choices[i]) << "], act = " << recvMsg[i] << " true = " << sendMsg[i][0] << ", " << sendMsg[i][1] << std::endl;
-                    throw UnitTestFail();
-                }
+                std::cout << "***failed " << i << " exp = m[" << int(choices[i]) << "], act = " << recvMsg[i] << " true = " << sendMsg[i][0] << ", " << sendMsg[i][1] << std::endl;
+                throw UnitTestFail();
             }
         }
 #else
@@ -232,7 +178,7 @@ namespace tests_libOTe
     void Bot_McQuoidRR_Moeller_MR_Test()
     {
         Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepMRPopf>();
-}
+    }
 
     void Bot_McQuoidRR_Moeller_F_Test()
     {
@@ -289,7 +235,7 @@ namespace tests_libOTe
         setThreadName("Sender");
 
 
-auto sock = cp::LocalAsyncSocket::makePair();
+        auto sock = cp::LocalAsyncSocket::makePair();
 
         PRNG prng0(block(4253465, 3434565));
         PRNG prng1(block(42532335, 334565));
