@@ -19,7 +19,6 @@ This library currently implements:
 * The malicious secure 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The malicious 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
 * The malicious secure 1-out-of-N OT [[OOS16]](http://eprint.iacr.org/2016/933).
-* The malicious secure approximate K-out-of-N OT [[RR16]](https://eprint.iacr.org/2016/746).
 * The malicious secure 1-out-of-2 base OT [NP01].
 * The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
 * The malicious secure 1-out-of-2 base OT [[MR19]](https://eprint.iacr.org/2019/706.pdf) 
@@ -30,14 +29,13 @@ This library currently implements:
 This library provides several different classes of OT protocols. First is the 
 base OT protocol of [CO15, MR19, MRR21]. These protocol bootstraps all the other
 OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2,
-1-out-of-N and K-out-of-N, both in the semi-honest and malicious settings. See The `frontend` or `libOTe_Tests` folder for examples.
+1-out-of-N, and VOLE both in the semi-honest and malicious settings. See The `frontend` or `libOTe_Tests` folder for examples.
 
 All implementations are highly optimized using fast SSE instructions and vectorization
-to obtain optimal performance both in the single and multi-threaded setting. See 
-the **Performance** section for a comparison between protocols and to other libraries. 
+to obtain optimal performance both in the single and multi-threaded setting. 
  
 Networking can be performed using both the sockets provided by the library and
-external socket classes. See the coproto tutorial for an example.
+external socket classes. The simplest integration can be achieved via the [message passing interface](https://github.com/osu-crypto/libOTe/blob/master/frontend/ExampleMessagePassing.h) where the user is given the protocol messages that need to be sent/received. Users can also integrate their own socket type for maximum performance. See the [coproto](https://github.com/Visa-Research/coproto/blob/main/frontend/SocketTutorial.cpp) tutorial for examples.
 
 
 ## Build
@@ -47,14 +45,14 @@ There is one mandatory dependency on [coproto](https://github.com/Visa-Research/
 and three **optional dependencies** on [libsodium](https://doc.libsodium.org/),
 [Relic](https://github.com/relic-toolkit/relic), or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
-for Base OTs.
+for Base OTs. [Boost Asio](https://www.boost.org/doc/libs/1_77_0/doc/html/boost_asio.html) tcp networking and [OpenSSL](https://www.openssl.org/) support can optionally be enabled.
 CMake 3.15+ is required and the build script assumes python 3.
  
-The library can be built as
+The library can be built with libsodium, all OT protocols enabled and boost asio TCP networking as
 ```
 git clone https://github.com/osu-crypto/libOTe.git
 cd libOTe
-python build.py --sodium --boost
+python build.py --all --boost --sodium
 ```
 The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
 
@@ -96,16 +94,33 @@ Dependencies can be managed by cmake/build.py or installed via an external tool.
 ```
 python build.py --relic
 ```
-Relic can be disabled by removing `--relic` from the setup and setting `-D ENABLE_RELIC=OFF`. Relic can always be fetched and locally built using `-D FETCH_RELIC=true`.
+Relic can be disabled by removing `--relic` from the setup and setting `-D ENABLE_RELIC=false`. This will always download and build relic. To only enable but not download relic, use `python build.py -D ENABLE_RELIC=true`.
 
 **Enabling/Disabling [libsodium](https://github.com/osu-crypto/libsodium) (for base OTs):**
   The library can be built with libsodium as
 ```
 python build.py --sodium
 ```
-libsodium can be disabled by removing `--sodium` from the setup and setting `-D ENABLE_SODIUM=OFF`.  Sodium can always be fetched and locally built using `-D FETCH_SODIUM=true`.
+libsodium can be disabled by removing `--sodium` from the setup and setting `-D ENABLE_SODIUM=false`.  This will always download and build sodium. To only enable but not download relic, use `python build.py -D ENABLE_SODIUM=true`.
 
-The McQuoid Rosulek Roy 2021 Base OTs uses a twisted curve which additionally require the `noclamp` option for Montgomery curves and is currently only in a [fork](https://github.com/osu-crypto/libsodium) of libsodium. If you prefer the stable libsodium, then install it and add `-D SODIUM_MONTGOMERY=OFF` as a cmake argument to libOTe.
+The McQuoid Rosulek Roy 2021 Base OTs uses a twisted curve which additionally require the `noclamp` option for Montgomery curves and is currently only in a [fork](https://github.com/osu-crypto/libsodium) of libsodium. If you prefer the stable libsodium, then install it and add `-D SODIUM_MONTGOMERY=false` as a cmake argument to libOTe.
+
+
+**Enabling/Disabling [boost asio](https://www.boost.org/doc/libs/1_77_0/doc/html/boost_asio.html) (for TCP networking):**
+  The library can be built with boost as
+```
+python build.py --boost
+```
+boost can be disabled by removing `--boost` from the setup and setting `-D ENABLE_BOOST=false`.  This will always download and build boost. To only enable but not download relic, use `python build.py -D ENABLE_BOOST=true`.
+
+
+
+**Enabling/Disabling [OpenSSL](https://www.boost.org/doc/libs/1_77_0/doc/html/boost_asio.html) (for TLS networking):**
+  The library can be built with boost as
+```
+python build.py --openssl
+```
+OpenSSL can be disabled by removing `--openssl` from the setup and setting `-D ENABLE_OPENSSL=false`. OpenSSL is never downloaded for you and is always found using your system installs.
 
 ## Install
 
@@ -114,8 +129,7 @@ libOTe can be installed and linked the same way as other cmake projects. To inst
 python build.py --install
 ```
 
-
-By default, sudo is not used. If installation requires sudo access, then add `--sudo` to the `build.py` script arguments. See `python build.py --help` for full details.
+Sudo is not used. If installation requires sudo access, then install as root. See `python build.py --help` for full details.
 
 
 ## Linking
@@ -128,7 +142,40 @@ Other exposed targets are `oc::cryptoTools, oc::tests_cryptoTools, oc::libOTe_Te
 
 To ensure that cmake can find libOTe, you can either install libOTe or build it locally and set `-D CMAKE_PREFIX_PATH=path/to/libOTe` or provide its location as a cmake `HINTS`, i.e. `find_package(libOTe HINTS path/to/libOTe)`.
 
-
+libOTe can be found with the following components:
+```
+find_package(libOTe REQUIRED 
+    COMPONENTS 
+        boost
+        relic
+        sodium
+        bitpolymul
+        openssl
+        circuits
+        sse
+        avx
+        asan
+        pic
+        no_sse
+        no_avx
+        no_asan
+        no_pic
+        simplestot
+        simplestot_asm
+        mrr
+        mrr_twist
+        mr
+        mr_kyber
+        kos
+        iknp
+        silentot
+        softspoken_ot
+        delta_kos
+        silent_vole
+        oos
+        kkrt
+)
+```
 
 ## Help
  

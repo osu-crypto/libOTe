@@ -33,8 +33,9 @@ namespace osuCrypto
 
 
 
-    using ProtocolFunc = std::function<void(Role, int, int, std::string, std::string, CLP&)>;
+    //using ProtocolFunc = std::function<void(Role, int, int, std::string, std::string, CLP&)>;
 
+    template<typename ProtocolFunc>
     inline bool runIf(ProtocolFunc protocol, CLP & cmd, std::vector<std::string> tag,
                       std::vector<std::string> tag2 = std::vector<std::string>())
     {
