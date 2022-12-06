@@ -157,7 +157,6 @@ namespace osuCrypto
 	}
 }
 #endif
-
 #ifdef ENABLE_SIMPLESTOT_ASM
 extern "C"
 {
@@ -295,13 +294,8 @@ namespace osuCrypto
 			void init(PRNG& prng)
 			{
 				std::lock_guard<std::mutex>l(_gmtx);
-				std::cout << "recv init0 " << hash() << std::endl;
 				receiver_procS(&receiver);
-				std::cout << "recv init1 " << hash() << std::endl;
-				ge4xDebug = true;
 				receiver_maketable(&receiver);
-				ge4xDebug = false;
-				std::cout << "recv init2 " << hash() << std::endl;
 				rand = makeRandSource(prng);
 			}
 
@@ -363,8 +357,6 @@ namespace osuCrypto
 		Socket& chl)
 	{
 
-		std::cout << "Simplest OT ASM not working" << LOCATION << std::endl;
-		throw std::runtime_error("Simplest OT ASM not working" LOCATION);
 		MC_BEGIN(task<>, this, &choices, msg, &prng, &chl,
 			rs = std::make_unique<RecvState>(),
 			i = u64{},
@@ -395,10 +387,8 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
-		std::cout << "Simplest OT ASM not working" << LOCATION << std::endl;
-		throw std::runtime_error("Simplest OT ASM not working" LOCATION);
 		MC_BEGIN(task<>, this, msg, &prng, &chl,
-			ss = std::unique_ptr<SendState>(),
+			ss = std::make_unique<SendState>(),
 			i = u64{},
 			rd = span<u8>{},
 			sd = std::vector<u8>{}

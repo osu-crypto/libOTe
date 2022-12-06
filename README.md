@@ -146,12 +146,21 @@ libOTe can be found with the following components:
 ```
 find_package(libOTe REQUIRED 
     COMPONENTS 
+        std_14
+        std_17
+        std_20
+        
+        Debug
+        Release
+        RelWithDebInfo
+
         boost
         relic
         sodium
         bitpolymul
         openssl
         circuits
+
         sse
         avx
         asan
@@ -160,6 +169,7 @@ find_package(libOTe REQUIRED
         no_avx
         no_asan
         no_pic
+
         simplestot
         simplestot_asm
         mrr
