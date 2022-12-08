@@ -18,7 +18,60 @@
 namespace osuCrypto
 {
 
+    SparseMtx getLinearSums(u64 n, u64 weight)
+    {
 
+        auto mCodeSize = n;
+        auto mMessageSize = n/2;
+
+        PointList ret(mMessageSize, mCodeSize);
+
+        details::SilverLeftEncoder L;
+
+        if (weight == 5)
+            L.init(mCodeSize, SilverCode::code::Weight5);
+        else if (weight == 11)
+        {
+            L.init(mCodeSize, SilverCode::code::Weight11);
+        }
+        else
+        {
+            std::vector<double> s; s.push_back(0);
+            while (s.size() != weight)
+            {
+                s.push_back((rand() % mCodeSize) / double(mCodeSize));
+            }
+            L.init(mCodeSize, s);
+        }
+        auto mWeight = L.mWeight;
+        auto mYs = L.mYs;
+
+        auto v = mYs;
+
+        for (u64 i = 0; i < mMessageSize; )
+        {
+            auto end = mMessageSize;
+            for (u64 j = 0; j < mWeight; ++j)
+            {
+                if (v[j] == mCodeSize)
+                    v[j] = 0;
+
+                auto jEnd = mCodeSize - v[j] + i;
+                end = std::min<u64>(end, jEnd);
+            }
+
+            while (i != end)
+            {
+                for (u64 j = 0; j < mWeight; ++j)
+                {
+                    ret.push_back({ i, v[j]++ });
+                }
+                ++i;
+            }
+
+        }
+        return ret;
+    }
 
     template<typename T>
     void linearSums(span<T> e, span<T> w, u64 mExpanderWeight)
@@ -81,56 +134,6 @@ namespace osuCrypto
                 v[3] += end - i;
                 v[4] += end - i;
                 i = end;
-
-
-                //while (P != PE8)
-                //{
-                //    P[0] = M0[0] ^ M1[0];
-                //    P[1] = M0[1] ^ M1[1];
-                //    P[2] = M0[2] ^ M1[2];
-                //    P[3] = M0[3] ^ M1[3];
-                //    P[4] = M0[4] ^ M1[4];
-                //    P[5] = M0[5] ^ M1[5];
-                //    P[6] = M0[6] ^ M1[6];
-                //    P[7] = M0[7] ^ M1[7];
-
-                //    P[0] = P[0] ^ M2[0];
-                //    P[1] = P[1] ^ M2[1];
-                //    P[2] = P[2] ^ M2[2];
-                //    P[3] = P[3] ^ M2[3];
-                //    P[4] = P[4] ^ M2[4];
-                //    P[5] = P[5] ^ M2[5];
-                //    P[6] = P[6] ^ M2[6];
-                //    P[7] = P[7] ^ M2[7];
-
-
-                //    P[0] = P[0] ^ M3[0];
-                //    P[1] = P[1] ^ M3[1];
-                //    P[2] = P[2] ^ M3[2];
-                //    P[3] = P[3] ^ M3[3];
-                //    P[4] = P[4] ^ M3[4];
-                //    P[5] = P[5] ^ M3[5];
-                //    P[6] = P[6] ^ M3[6];
-                //    P[7] = P[7] ^ M3[7];
-
-                //    P[0] = P[0] ^ M4[0];
-                //    P[1] = P[1] ^ M4[1];
-                //    P[2] = P[2] ^ M4[2];
-                //    P[3] = P[3] ^ M4[3];
-                //    P[4] = P[4] ^ M4[4];
-                //    P[5] = P[5] ^ M4[5];
-                //    P[6] = P[6] ^ M4[6];
-                //    P[7] = P[7] ^ M4[7];
-                //        ;
-
-                //    M0 += 8;
-                //    M1 += 8;
-                //    M2 += 8;
-                //    M3 += 8;
-                //    M4 += 8;
-                //    P  += 8;
-                //}
-
 
                 while (P != PE)
                 {
@@ -794,10 +797,10 @@ namespace osuCrypto
                 for (u64 i = 0; i < 4; ++i)
                 {
                     y64[i] = libdivide::libdivide_u64_do(x64[i], divider);
-        }
+                }
 
                 return y;
-    }
+            }
 #endif
 
 
@@ -864,7 +867,7 @@ namespace osuCrypto
                     vals[i + 31] -= temp64h[3] * modVal;
                 }
             }
-};
+        };
 
 
         template<typename T, u64 count>
@@ -1360,6 +1363,63 @@ namespace osuCrypto
     //};
 
 
+    template<
+        typename Table>
+        OC_FORCEINLINE SparseMtx getAccPar(u64 n)
+    {
+
+        PointList AP(n, n);;
+
+        for (i64 i = 0; i < n; ++i)
+        {
+            //std::cout << "x[" << i << "] += x[" << i + 1;
+            AP.push_back(i, i);
+
+            if (i + 1 < n)
+                AP.push_back(i + 1, i);
+
+            auto col = Table::data[i % Table::data.size()];
+            for (auto x : col)
+            {
+                //std::cout << " " << x + i;
+                if (x + i < n)
+                    AP.push_back(x + i, i);
+            }
+
+            std::cout << std::endl;
+        }
+
+        return AP;
+    }
+
+    template<typename Table> 
+    DenseMtx getAcc(u64 n)
+    {
+        auto APar = getAccPar<Table>(n);
+        auto A = DenseMtx::Identity(n);
+
+        //std::cout << A << std::endl << std::endl;
+
+        for (u64 i = 0; i < n; ++i)
+        {
+            for (auto y : APar.col(i))
+            {
+                if (y != i)
+                {
+                    auto ay = A.row(y);
+                    auto ai = A.row(i);
+                    ay ^= ai;
+                }
+
+
+            }
+            //std::cout << i << "\n";
+            //std::cout << A << std::endl << std::endl;
+        }
+
+        return A;
+    }
+
 
     template<
 
@@ -1393,6 +1453,11 @@ namespace osuCrypto
                     T* __restrict x2 = xi + tIter[j].data()[2];
                     T* __restrict x3 = xi + tIter[j].data()[3];
 
+                    //std::cout << "x[" << j << "] += x[" << j + 1
+                    //    << " + " << j + (int)tIter[j].data()[0]
+                    //    << " + " << j + (int)tIter[j].data()[1]
+                    //    << " + " << j + (int)tIter[j].data()[2]
+                    //    << " + " << j + (int)tIter[j].data()[3] << std::endl;
 
                     if constexpr (rangeCheck)
                     {
@@ -1411,6 +1476,7 @@ namespace osuCrypto
                         auto xx2 = *x2 ^ *xi;
                         auto xx3 = *x3 ^ *xi;
 
+                        assert(x3 < end);
                         *xs = xxs;
                         *x0 = xx0;
                         *x1 = xx1;
@@ -1602,8 +1668,8 @@ namespace osuCrypto
 
                     if constexpr (NumBins == 8)
                     {
-                        *mBins[0]++ = x[0] ;
-                        *mBins[1]++ = x[8] ;
+                        *mBins[0]++ = x[0];
+                        *mBins[1]++ = x[8];
                         *mBins[2]++ = x[16];
                         *mBins[3]++ = x[24];
                         *mBins[4]++ = x[32];
@@ -1614,8 +1680,8 @@ namespace osuCrypto
                     else if constexpr (NumBins == 16)
                     {
 
-                        *mBins[0]++ = x[0] ;
-                        *mBins[1]++ = x[8] ;
+                        *mBins[0]++ = x[0];
+                        *mBins[1]++ = x[8];
                         *mBins[2]++ = x[16];
                         *mBins[3]++ = x[24];
                         *mBins[4]++ = x[32];
@@ -1623,8 +1689,8 @@ namespace osuCrypto
                         *mBins[6]++ = x[48];
                         *mBins[7]++ = x[56];
                         *
-                        *mBins[8 + 0]++ = x[64 + 0] ;
-                        *mBins[8 + 1]++ = x[64 + 8] ;
+                            *mBins[8 + 0]++ = x[64 + 0];
+                        *mBins[8 + 1]++ = x[64 + 8];
                         *mBins[8 + 2]++ = x[64 + 16];
                         *mBins[8 + 3]++ = x[64 + 24];
                         *mBins[8 + 4]++ = x[64 + 32];
@@ -1688,7 +1754,13 @@ namespace osuCrypto
         {
             assert(mPermIter < mPerm.mPerm.data() + mPerm.mPerm.size());
 
-            T* __restrict dst = &mBuffer.data()[*(u32 * __restrict)mPermIter];
+            T* __restrict dst = &mBuffer.data()[*(u32 * __restrict)mPermIter * chunkSize];
+
+            //for (u64 i = 0; i < chunkSize; ++i)
+            //{
+            //    std::cout << ">" << mIdx++ <<" -> " << 
+            //}
+            //std::cout<< ">" << *mPermIter << std::endl;
             ++mPermIter;
 
             //if constexpr (std::is_same_v<T, block> && flush)
@@ -1712,12 +1784,33 @@ namespace osuCrypto
             //else
             memcpy(dst, x, sizeof(*x) * chunkSize);
         }
+
+        SparseMtx getMatrix() const
+        {
+            auto n = mPerm.mPerm.size() * chunkSize;
+            PointList ret(n,n);
+
+            u64 r = 0;
+            for (auto p : mPerm.mPerm)
+            {
+                //std::cout << "<" << p << std::endl;
+
+                for (u64 i = 0; i < chunkSize; ++i, ++r)
+                {
+                    ret.push_back({ p * chunkSize + i , r});
+                }
+            }
+            return ret;
+        }
     };
 
     // this exapnder/permuter does nothing.
     struct NoopPerm
     {
-        static constexpr int chunkSize = 8;
+        static constexpr int chunkSize = 1;
+
+        NoopPerm() = default;
+        NoopPerm(u64 n) {}
 
         void reset()
         {
@@ -1732,22 +1825,26 @@ namespace osuCrypto
         OC_FORCEINLINE void apply(T* __restrict x, u64 k)
         {}
 
-        template<bool,typename T>
+        template<bool, typename T>
         OC_FORCEINLINE void applyChunk(T* __restrict x)
         {
         }
     };
 
 
-    //template<typename T = block, typename Next = TungstenPermuter, typename Table = TableTungsten128x4>
+    template<typename T_ = block, typename Next_ = TungstenPerm<T_, 8>, typename Table_ = TableTungsten1024x4>
     struct Tungsten2 : public TimerAdapter
     {
-        using T = block;
-        static constexpr int chunkSize = 8;
+        using T = T_;
+        using Perm = Next_;
+        using Table = Table_;
+
         static constexpr bool accTwice = true;
+        static constexpr int chunkSize = Perm::chunkSize;
         //using Perm = TungstenBinPerm<T, chunkSize>;
-        using Perm = TungstenPerm<T, chunkSize>;
-        using Table = TableTungsten128x4;
+        //using Perm = TungstenPerm<T, chunkSize>;
+        //using Table = TableTungsten128x4;
+        //using Table = TableTungsten8x4;
 
         bool mFirst = true;
         u64 mExpanderWeight = 0;
@@ -1777,7 +1874,7 @@ namespace osuCrypto
 
         void update(span<T> x)
         {
-            if (x.size() == 0 && x.size() % Table::data.size())
+            if (x.size() == 0 ||( x.size() % Table::data.size()))
                 throw RTE_LOC;
             auto xx_ = x.data();
             auto rem = x.size() - Table::data.size();
@@ -1868,6 +1965,26 @@ namespace osuCrypto
             linearSums<T>(mPerm.mBuffer, w, mExpanderWeight);
 
         }
+
+
+        SparseMtx getAPar()
+        {
+            return getAccPar<Table>(mPerm.mBuffer.size());
+        }
+        DenseMtx getA()
+        {
+            return getAcc<Table>(mPerm.mBuffer.size());
+        }
+
+        SparseMtx getP()
+        {
+            return mPerm.getMatrix();
+        }
+
+        SparseMtx getS()
+        {
+            return getLinearSums(mPerm.mBuffer.size(), mExpanderWeight);
+        }
     };
 
 
@@ -1913,7 +2030,7 @@ namespace osuCrypto
 
             binIdx[0] = 0;
             for (u64 i = 1; i < size; ++i)
-                binIdx[i] = binIdx[i - 1] + mCounts[i-1];
+                binIdx[i] = binIdx[i - 1] + mCounts[i - 1];
 
             for (u64 i = 0; i < vals.size(); ++i)
             {
@@ -1968,7 +2085,7 @@ namespace osuCrypto
 
         TunstenRegularExpander(u64 size, u64 weight)
             : mBuffer(size)
-            , mD(weight/2)
+            , mD(weight / 2)
         {
             if (weight % 2)
                 throw RTE_LOC;
@@ -2083,9 +2200,9 @@ namespace osuCrypto
 
                 for (u64 i = 0; i < rem; i += Table::data.size())
                     processBlock<false, true>(xx_ + i, x.data() + x.size());
-                        
-                T* src  = rem ?  
-                    x.data() + rem  :
+
+                T* src = rem ?
+                    x.data() + rem :
                     mBuffer.data() + Table::data.size();
 
                 memcpy(mBuffer.data(), src, Table::data.size() * sizeof(T));

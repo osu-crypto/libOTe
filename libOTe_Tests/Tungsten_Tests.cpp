@@ -75,6 +75,230 @@ namespace tests_libOTe
 
     }
 
+    struct Perm__
+    {
+        static constexpr int chunkSize = 8;
+
+        Perm__() = default;
+        Perm__(u64 n) : buff(n) {}
+
+
+        std::vector<block> buff;
+        std::vector<block>::iterator mIter;
+        void reset()
+        {
+            mIter = buff.begin();
+        }
+
+
+        void finalize()
+        {
+        }
+
+        template<typename T>
+        OC_FORCEINLINE void apply(T* __restrict x, u64 k)
+        {}
+
+        template<bool, typename T>
+        OC_FORCEINLINE void applyChunk(T* __restrict x)
+        {
+            std::copy(x, x + chunkSize, mIter);
+            mIter += chunkSize;
+        }
+    };
+
+
+    void Tungsten2_encode_basic_test(const oc::CLP& cmd)
+    {
+        auto k = cmd.getOr("k", 16);
+        auto n = cmd.getOr("n", k * 2);
+        auto bw = cmd.getOr("bw", 5);
+        auto aw = cmd.getOr("aw", 10);
+        auto sticky = cmd.getOr("ns", 1);
+        auto skip = cmd.isSet("skip");
+        auto reuse = (Tungsten::RNG)cmd.getOr("rng", 2);
+        bool permute = cmd.isSet("permute");
+
+        bool v = cmd.isSet("v");
+
+        if (reuse != Tungsten::RNG::gf128mul &&
+            reuse != Tungsten::RNG::prng &&
+            reuse != Tungsten::RNG::xoshiro256Plus
+            )
+            throw RTE_LOC;
+        using Tung = Tungsten2<block, TungstenPerm<block, 8>, TableTungsten8x4>;
+
+        Tung code(n, bw);
+
+
+        //code.config(k, n, bw, aw, reuse, permute, sticky);
+
+        auto A = code.getA();
+        auto P = code.getP();
+        auto S = code.getS();
+        auto PA = P.dense() * A;
+        auto APA = A * PA;
+        //auto G = S.dense() * PA;
+        auto SAPA = S.dense() * APA; 
+        
+        if (v)
+        {
+            std::cout << "P\n" << P << std::endl << std::endl;
+            std::cout << "A'\n" << code.getAPar() << std::endl << std::endl;
+            std::cout << "A\n" << A << std::endl << std::endl;
+            std::cout << "PA\n" << PA << std::endl << std::endl;
+            std::cout << "APA\n" << A * PA << std::endl;
+            std::cout << "SAPA\n" << SAPA << std::endl;
+        }
+
+        std::cout << S << std::endl;
+
+        const std::vector<block> c0 = [n]() {
+             std::vector<block> c0(n);
+            c0[0] = AllOneBlock;
+            return c0;
+        }();
+
+        PRNG prng(ZeroBlock);
+
+
+        {
+            std::vector<block> a1(n);
+            auto tt = c0;
+            Tung code(n, bw);
+            auto iter = tt.data();
+            if (tt.size() % Tung::Table::data.size())
+                throw RTE_LOC;
+            while (iter != tt.data() + n)
+            {
+                code.processBlock<true>(iter, tt.data() + tt.size());
+                iter += Tung::Table::data.size();
+            }
+            A.sparse().multAdd(c0, a1);
+
+            if (memcmp(tt.data(), a1.data(), n * sizeof(block)))
+            {
+                //if (v)
+                {
+
+                    for (u64 i = 0; i <n; ++i)
+                        std::cout << std::hex   << (tt[i].get<int>(0)&1) << (tt[i] != a1[i] ? "<" : " ");
+                    std::cout << "\n";            
+                    for (u64 i = 0; i < n; ++i)   
+                        std::cout << std::hex   << (a1[i].get<int>(0) & 1) << " ";
+                    std::cout << "\n";
+                }
+
+                throw RTE_LOC;
+            }
+        }
+
+
+        {
+
+            auto tt = c0;
+            Tungsten2<block, Perm__, TableTungsten8x4> code(n, bw);
+            code.update(tt);
+            code.processBlock<true>(code.mBuffer.data(), code.mBuffer.data() + code.mBuffer.size());
+
+
+            std::vector<block> a1(n);
+            A.sparse().multAdd(c0, a1);
+
+            if (memcmp(code.mPerm.buff.data(), a1.data(), n * sizeof(block)))
+            {
+                //if (v)
+                {
+
+                    for (u64 i = 0; i < n; ++i)
+                        std::cout << std::hex << (tt[i].get<int>(0) & 1) << (tt[i] != a1[i] ? "<" : " ");
+                    std::cout << "\n";
+                    for (u64 i = 0; i < n; ++i)
+                        std::cout << std::hex << (a1[i].get<int>(0) & 1) << " ";
+                    std::cout << "\n";
+                }
+
+                throw RTE_LOC;
+            }
+        }
+
+        {
+
+            auto tt = c0;
+            Tung code(n, bw);
+            code.update(tt);
+            code.processBlock<true>(code.mBuffer.data(), code.mBuffer.data() + code.mBuffer.size());
+
+
+            std::vector<block> a1(n);
+            PA.sparse().multAdd(c0, a1);
+
+            if (memcmp(code.mPerm.mBuffer.data(), a1.data(), n * sizeof(block)))
+            {
+                //if (v)
+                {
+
+                    for (u64 i = 0; i < n; ++i)
+                        std::cout << std::hex << (tt[i].get<int>(0) & 1) << (tt[i] != a1[i] ? "<" : " ");
+                    std::cout << "\n";
+                    for (u64 i = 0; i < n; ++i)
+                        std::cout << std::hex << (a1[i].get<int>(0) & 1) << " ";
+                    std::cout << "\n";
+                }
+
+                throw RTE_LOC;
+            }
+        }
+
+        {
+
+            auto tt = c0;
+            Tung code(n, bw);
+            code.update(tt);
+            tt.resize(k);
+            code.finalize(tt);
+
+
+            std::vector<block> a0(n);
+            APA.sparse().multAdd(c0, a0);
+
+            if (memcmp(code.mPerm.mBuffer.data(), a0.data(), n * sizeof(block)))
+            {
+                //if (v)
+                {
+
+                    for (u64 i = 0; i < k; ++i)
+                        std::cout << std::hex << (code.mPerm.mBuffer[i].get<int>(0) & 1) << (code.mPerm.mBuffer[i] != a0[i] ? "<" : " ");
+                    std::cout << "\n";
+                    for (u64 i = 0; i < k; ++i)
+                        std::cout << std::hex << (a0[i].get<int>(0) & 1) << " ";
+                    std::cout << "\n";
+                }
+
+                throw RTE_LOC;
+            }
+
+            std::vector<block> a1(k);
+            SAPA.sparse().multAdd(c0, a1);
+
+            if (memcmp(tt.data(), a1.data(), k * sizeof(block)))
+            {
+                //if (v)
+                {
+
+                    for (u64 i = 0; i < k; ++i)
+                        std::cout << std::hex << (tt[i].get<int>(0) & 1) << (tt[i] != a1[i] ? "<" : " ");
+                    std::cout << "\n";
+                    for (u64 i = 0; i < k; ++i)
+                        std::cout << std::hex << (a1[i].get<int>(0) & 1) << " ";
+                    std::cout << "\n";
+                }
+
+                throw RTE_LOC;
+            }
+        }
+    }
+
     void perm_bench(const oc::CLP& cmd)
     {
         auto n = cmd.getOr("n", 1 << cmd.getOr("nn", 20));
@@ -147,7 +371,7 @@ namespace tests_libOTe
         {
             Tungsten code;
             code.config(k, n, bw, aw, reuse, permute, sticky);
-            code.mAccumulatorWeight = cmd.getOr("aaw", 4);
+            code.mAccumulatorWeight = cmd.getOr("aaw", 0);
             AlignedUnVector<block> m1(k), c0(n);
 
             oc::Timer timer;
@@ -193,6 +417,7 @@ namespace tests_libOTe
         }
         else if (cmd.isSet("bpm"))
         {
+#ifdef ENABLE_BITPOLYMUL
             oc::Timer timer;
             QuasiCyclicCode code;
             auto p = nextPrime(n);
@@ -210,6 +435,7 @@ namespace tests_libOTe
 
             if (!cmd.isSet("quiet"))
                 std::cout << timer << std::endl;
+#endif
         }
         else
         {
@@ -219,7 +445,7 @@ namespace tests_libOTe
             //code.mAccumulatorWeight = cmd.getOr("aaw", 4);
             AlignedUnVector<block> m1(k)/*, c0(n)*/;
 
-            Tungsten2 code(n, bw);
+            Tungsten2<> code(n, bw);
             //TungstenAccumulator code(TungstenBinPermuter{ (u64)n, (u64)bw });
             oc::Timer timer;
             code.setTimer(timer);
