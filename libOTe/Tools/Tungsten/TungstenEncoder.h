@@ -22,7 +22,7 @@ namespace osuCrypto
     {
 
         auto mCodeSize = n;
-        auto mMessageSize = n/2;
+        auto mMessageSize = n / 2;
 
         PointList ret(mMessageSize, mCodeSize);
 
@@ -259,7 +259,8 @@ namespace osuCrypto
         {
             prng = 0,
             gf128mul = 1,
-            xoshiro256Plus = 2
+            xoshiro256Plus = 2,
+            aeslite = 3
         };
 
 
@@ -391,6 +392,21 @@ namespace osuCrypto
                 else if (mReuse == RNG::prng)
                 {
                     mPrng.getBufferSpan(-1);
+                }
+                else if (mReuse == RNG::aeslite)
+                {
+                    assert(mPrng.mBuffer.size() == 256);
+                    for (u64 i = 0; i < 256; ++i)
+                    {
+                        //auto idx = mPrng.mBuffer[i].get<u8>();
+                        block b = mPrng.mBuffer[i];
+                        block k = mPrng.mBuffer[(u8)(i - 1)];
+                        //for (u64 j = 0; j < 8; ++j)
+                        //{
+                        //    b = b ^ mPrng.mBuffer.data()[idx[j]];
+                        //}
+                        mPrng.mBuffer[i] = AES::roundEnc(b, k) ^ k;
+                    }
                 }
                 else
                 {
@@ -551,150 +567,223 @@ namespace osuCrypto
 #undef TABLE
         }
 
+
+        OC_FORCEINLINE void accOne(
+            PointList& pl,
+            u64 i,
+            u8* __restrict& ptr,
+            PRNG& prng,
+            block& rnd,
+            u64& q,
+            u64 qe) const
+        {
+            u64 j = i + 1;
+
+            if (j < mCodeSize)
+                pl.push_back(j, i);
+            ++j;
+
+            {
+                if (q + mAccumulatorSize > qe)
+                {
+                    //assert(ptr == (u8*)(prng.mBuffer.data() + prng.mBuffer.size()));
+
+                    assert(prng.mBuffer.size() == 256);
+                    for (u64 i = 0; i < 256; ++i)
+                    {
+                        block b = prng.mBuffer.data()[i];
+                        block k = prng.mBuffer.data()[(u8)(i - 1)];
+                        prng.mBuffer[i] = AES::roundEnc(b, k) ^ k;
+                    }
+
+                    ptr = (u8*)prng.mBuffer.data();
+                    q = 0;
+                }
+
+                assert(ptr < (u8*)(prng.mBuffer.data() + prng.mBuffer.size()));
+            }
+
+            for (u64 k = 0; k < mAccumulatorSize; k += 8, q += 8, j += 8)
+            {
+                //if (q % 32 == 0)
+                //{
+                //    if (q == qe)
+                //    {
+                //        assert(ptr == (u8*)(prng.mBuffer.data() + prng.mBuffer.size()));
+
+                //        assert(prng.mBuffer.size() == 256);
+                //        for (u64 i = 0; i < 256; ++i)
+                //        {
+                //            block b = prng.mBuffer.data()[i];
+                //            block k = prng.mBuffer.data()[(u8)(i - 1)];
+                //            prng.mBuffer[i] = AES::roundEnc(b, k) ^ k;
+                //        }
+
+                //        ptr = (u8*)prng.mBuffer.data();
+                //        q = 0;
+                //    }
+
+                //}
+                assert(ptr < (u8*)(prng.mBuffer.data() + prng.mBuffer.size()));
+                rnd = block::allSame<u8>(*ptr);
+                ++ptr;
+
+                //std::cout << "r " << rnd << std::endl;
+                auto b0 = rnd;
+                auto b1 = rnd.mm_slli_epi32<1>();
+                auto b2 = rnd.mm_slli_epi32<2>();
+                auto b3 = rnd.mm_slli_epi32<3>();
+                auto b4 = rnd.mm_slli_epi32<4>();
+                auto b5 = rnd.mm_slli_epi32<5>();
+                auto b6 = rnd.mm_slli_epi32<6>();
+                auto b7 = rnd.mm_slli_epi32<7>();
+                //rnd = rnd.mm_slli_epi32<8>();
+
+                if (j + 0 < mCodeSize && b0.get<i32>(0) < 0) pl.push_back(j + 0, i);
+                if (j + 1 < mCodeSize && b1.get<i32>(0) < 0) pl.push_back(j + 1, i);
+                if (j + 2 < mCodeSize && b2.get<i32>(0) < 0) pl.push_back(j + 2, i);
+                if (j + 3 < mCodeSize && b3.get<i32>(0) < 0) pl.push_back(j + 3, i);
+                if (j + 4 < mCodeSize && b4.get<i32>(0) < 0) pl.push_back(j + 4, i);
+                if (j + 5 < mCodeSize && b5.get<i32>(0) < 0) pl.push_back(j + 5, i);
+                if (j + 6 < mCodeSize && b6.get<i32>(0) < 0) pl.push_back(j + 6, i);
+                if (j + 7 < mCodeSize && b7.get<i32>(0) < 0) pl.push_back(j + 7, i);
+            }
+
+            //if (q % 4 == 0)
+
+        }
+
+
+        template<typename T, bool rangeCheck, int width>
+        OC_FORCEINLINE void accOne(
+            T* __restrict xx,
+            T& xi,
+            u64 i,
+            u8*& ptr,
+            PRNG& prng,
+            u64& q,
+            u64 qe)
+        {
+            T buf[8];
+            __m128 Zero = _mm_setzero_ps();
+
+            auto xii = _mm_load_ps((float*)&xi);
+
+            u64 j = i + 1;
+
+            if (!rangeCheck || j < mCodeSize)
+            {
+                auto xj = xx[j] ^ xi;
+                xi = xj;
+                xx[j] = xj;
+            }
+            ++j;
+
+            {
+                if (q + width > qe)
+                {
+                    assert(prng.mBuffer.size() == 256);
+                    for (u64 i = 0; i < 256; ++i)
+                    {
+                        block b = prng.mBuffer.data()[i];
+                        block k = prng.mBuffer.data()[(u8)(i - 1)];
+                        prng.mBuffer[i] = AES::roundEnc(b, k) ^ k;
+                    }
+
+                    ptr = (u8*)prng.mBuffer.data();
+                    q = 0;
+                }
+                q += width;
+                assert(ptr < (u8*)(prng.mBuffer.data() + prng.mBuffer.size()));
+            }
+
+            for (u64 k = 0; k < width; ++k, j += 8)
+            {
+
+
+                assert(ptr < (u8*)(prng.mBuffer.data() + prng.mBuffer.size()));
+                block rnd = _mm_set1_epi8(*(u8*)ptr++);
+
+
+                auto b0 = rnd;
+                auto b1 = _mm_slli_epi32(rnd, 1);;
+                auto b2 = _mm_slli_epi32(rnd, 2);
+                auto b3 = _mm_slli_epi32(rnd, 3);
+                auto b4 = _mm_slli_epi32(rnd, 4);
+                auto b5 = _mm_slli_epi32(rnd, 5);
+                auto b6 = _mm_slli_epi32(rnd, 6);
+                auto b7 = _mm_slli_epi32(rnd, 7);
+
+                auto bb0 = _mm_load_ps((float*)&b0);
+                auto bb1 = _mm_load_ps((float*)&b1);
+                auto bb2 = _mm_load_ps((float*)&b2);
+                auto bb3 = _mm_load_ps((float*)&b3);
+                auto bb4 = _mm_load_ps((float*)&b4);
+                auto bb5 = _mm_load_ps((float*)&b5);
+                auto bb6 = _mm_load_ps((float*)&b6);
+                auto bb7 = _mm_load_ps((float*)&b7);
+
+                buf[0] = *(block*)&_mm_blendv_ps(Zero, xii, bb0);
+                buf[1] = *(block*)&_mm_blendv_ps(Zero, xii, bb1);
+                buf[2] = *(block*)&_mm_blendv_ps(Zero, xii, bb2);
+                buf[3] = *(block*)&_mm_blendv_ps(Zero, xii, bb3);
+                buf[4] = *(block*)&_mm_blendv_ps(Zero, xii, bb4);
+                buf[5] = *(block*)&_mm_blendv_ps(Zero, xii, bb5);
+                buf[6] = *(block*)&_mm_blendv_ps(Zero, xii, bb6);
+                buf[7] = *(block*)&_mm_blendv_ps(Zero, xii, bb7);
+
+                if (!rangeCheck || j + 0 < mCodeSize) xx[j + 0] = _mm_xor_si128(xx[j + 0], buf[0]);
+                if (!rangeCheck || j + 1 < mCodeSize) xx[j + 1] = _mm_xor_si128(xx[j + 1], buf[1]);
+                if (!rangeCheck || j + 2 < mCodeSize) xx[j + 2] = _mm_xor_si128(xx[j + 2], buf[2]);
+                if (!rangeCheck || j + 3 < mCodeSize) xx[j + 3] = _mm_xor_si128(xx[j + 3], buf[3]);
+                if (!rangeCheck || j + 4 < mCodeSize) xx[j + 4] = _mm_xor_si128(xx[j + 4], buf[4]);
+                if (!rangeCheck || j + 5 < mCodeSize) xx[j + 5] = _mm_xor_si128(xx[j + 5], buf[5]);
+                if (!rangeCheck || j + 6 < mCodeSize) xx[j + 6] = _mm_xor_si128(xx[j + 6], buf[6]);
+                if (!rangeCheck || j + 7 < mCodeSize) xx[j + 7] = _mm_xor_si128(xx[j + 7], buf[7]);
+            }
+        }
+
+
         template<typename T>
         void uniformAccumulate(span<T> x)
         {
-            //PRNG prng(mSeed ^ OneBlock);
-            BitStream prng(mSeed ^ OneBlock, mAccumulatorSize, mReuse);
-            //auto AP = getAPar();
+            PRNG prng(mSeed ^ OneBlock);
 
-            //std::vector<u64> buff(divCeil(mAccumulatorSize, 64));
-            auto a8 = divCeil(mAccumulatorSize, 8);
-
-            T zeroOne[2];
-            memset(zeroOne, 0, sizeof(T));
-            memset(zeroOne + 1, ~0, sizeof(T));
-            //DenseMtx A = DenseMtx::Identity(mCodeSize);
 
             u64 i = 0;
-            auto main = (u64)std::min<i64>(0, mCodeSize - mStickyAccumulator - mAccumulatorSize);
+            auto main = (u64)std::max<i64>(0, mCodeSize - mStickyAccumulator - mAccumulatorSize);
+            block rnd;
+            u8* ptr = (u8*)prng.mBuffer.data();
+            u8* ptr2 = (u8*)prng.mBuffer.data();
+            auto qe = prng.mBuffer.size() * 128 / 8;
+            u64 q = 0;
+            T* __restrict xx = x.data();
 
-            for (; i < main; ++i)
+
+            if (mAccumulatorSize % 8)
+                throw RTE_LOC;
+
+
+            block xi = xx[0];
+
+#define CASE(I) case I:\
+            for (; i < main; ++i)\
+                accOne<T, false, I>(xx, xi, i, ptr, prng, q, qe);\
+            for (; i < mCodeSize; ++i)\
+                accOne<T, true, I>(xx, xi, i, ptr, prng, q, qe);\
+            break
+
+            switch (mAccumulatorSize / 8)
             {
-                auto j = i + 1;
-
-                if (mStickyAccumulator)
-                {
-                    j = j + mStickyAccumulator;
-                    auto jj = j - 1;
-                    x[jj] = x[jj] ^ x[i];
-                    //A.row(jj) ^= A.row(j);
-                }
-
-                //prng.get((u8*)buff.data(), a8);
-                //auto bb = buff.data();
-                auto vv = prng.get();
-                auto e = j + mAccumulatorSize;
-                auto xi = x[i];
-                for (; j < e;)
-                {
-                    auto rem = e - j;
-                    //auto v = *bb++;
-                    auto ek = std::min<u64>(64, rem);
-
-                    for (u64 k = 0; k < ek; ++k, ++j)
-                    {
-                        auto v = vv[k];
-                        assert(v < 2);
-                        x[j] = x[j] ^ (xi & zeroOne[v]);
-
-                        //v = v / 2;
-                    }
-                }
+                CASE(1);
+                CASE(2);
+                CASE(3);
+                CASE(4);
+            default:
+                throw RTE_LOC;
+                break;
             }
-
-            auto xx = x.data();
-            for (; i < mCodeSize; ++i)
-            {
-                //auto row = AP.row(j);
-                //auto rIter = row.rbegin();
-                //assert(*rIter++ == j);
-
-
-                auto xi = xx[i];
-
-                i64 j = i + 1;
-                auto s = std::min<i64>(mCodeSize, j + mStickyAccumulator);
-                auto e = std::min<i64>(mCodeSize, s + mAccumulatorSize);
-
-
-                if (mStickyAccumulator)
-                {
-                    j = j + mStickyAccumulator;
-                    if (j <= mCodeSize)
-                    {
-                        auto jj = j - 1;
-                        xx[jj] = xx[jj] ^ xi;
-                        //A.row(jj) ^= A.row(j);
-                        //AP.push_back(j - 1, j);
-                    }
-                }
-
-                //for (; j < s; ++j)
-                //{
-                //    x[j] = x[j] ^ x[j];
-                //    A.row(j) ^= A.row(j);
-                //}
-
-                auto vv = prng.get();
-                T buf[8];
-
-                for (; j < e;)
-                {
-                    auto rem = e - j;
-                    auto ek = std::min<u64>(64, rem);
-                    auto ek8 = ek / 8 * 8;
-                    u64 k = 0;
-
-                    for (; k < ek8; k += 8, j += 8, vv += 8)
-                    {
-                        buf[0] = zeroOne[vv[0]];
-                        buf[1] = zeroOne[vv[1]];
-                        buf[2] = zeroOne[vv[2]];
-                        buf[3] = zeroOne[vv[3]];
-                        buf[4] = zeroOne[vv[4]];
-                        buf[5] = zeroOne[vv[5]];
-                        buf[6] = zeroOne[vv[6]];
-                        buf[7] = zeroOne[vv[7]];
-
-                        buf[0] = xi & buf[0];
-                        buf[1] = xi & buf[1];
-                        buf[2] = xi & buf[2];
-                        buf[3] = xi & buf[3];
-                        buf[4] = xi & buf[4];
-                        buf[5] = xi & buf[5];
-                        buf[6] = xi & buf[6];
-                        buf[7] = xi & buf[7];
-
-
-                        xx[j + 0] = xx[j + 0] ^ buf[0];
-                        xx[j + 1] = xx[j + 1] ^ buf[1];
-                        xx[j + 2] = xx[j + 2] ^ buf[2];
-                        xx[j + 3] = xx[j + 3] ^ buf[3];
-                        xx[j + 4] = xx[j + 4] ^ buf[4];
-                        xx[j + 5] = xx[j + 5] ^ buf[5];
-                        xx[j + 6] = xx[j + 6] ^ buf[6];
-                        xx[j + 7] = xx[j + 7] ^ buf[7];
-                    }
-
-
-                    for (; k < ek; ++k, ++j)
-                    {
-                        //if (v & 1)
-                        //{
-                        //    x[j] = x[j] ^ x[j];
-                        //    //A.row(j) ^= A.row(j);
-                        //    //assert(*rIter++ == j);
-                        //}
-
-                        xx[j] = xx[j] ^ (xi & zeroOne[*vv++]);
-
-                    }
-                    assert(j <= x.size());
-                }
-                //assert(rIter == row.rend());
-            }
-
+#undef CASE
         }
 
 
@@ -744,6 +833,22 @@ namespace osuCrypto
                 {
                     prng.getBufferSpan(-1);
                 }
+                else if (mReuse == RNG::aeslite)
+                {
+
+                    assert(prng.mBuffer.size() == 256);
+                    for (u64 i = 0; i < 256; ++i)
+                    {
+                        //auto idx = mPrng.mBuffer[i].get<u8>();
+                        block b = prng.mBuffer.data()[i];
+                        block k = prng.mBuffer.data()[(u8)(i - 1)];
+                        //for (u64 j = 0; j < 8; ++j)
+                        //{
+                        //    b = b ^ mPrng.mBuffer.data()[idx[j]];
+                        //}
+                        prng.mBuffer[i] = AES::roundEnc(b, k) ^ k;
+                    }
+                }
                 else
                 {
                     for (u64 i = 0; i < vals.size(); ++i)
@@ -774,7 +879,7 @@ namespace osuCrypto
                 if (idx == vals.size())
                     refill();
 
-                return vals[idx++];
+                return vals.data()[idx++];
             }
 
 
@@ -867,12 +972,12 @@ namespace osuCrypto
                     vals[i + 31] -= temp64h[3] * modVal;
                 }
             }
-        };
+                };
 
 
         template<typename T, u64 count>
-        OC_FORCEINLINE typename std::enable_if<count, T>::type
-            expandOne(const T* __restrict ee, Modd& prng)
+        OC_FORCEINLINE typename std::enable_if<(count > 1), T>::type
+            expandOne(const T* __restrict ee, Modd& prng)const
         {
             if constexpr (count == 8)
             {
@@ -909,6 +1014,7 @@ namespace osuCrypto
             else
             {
                 auto r = prng.get();
+                //std::cout << r << " ";
                 return expandOne<T, count - 1>(ee, prng) ^ ee[r];
             }
         }
@@ -916,16 +1022,19 @@ namespace osuCrypto
 
 
         template<typename T, u64 count>
-        OC_FORCEINLINE typename std::enable_if<!count, T>::type
-            expandOne(const T* __restrict ee, Modd& prng)
+        OC_FORCEINLINE typename std::enable_if<count == 1, T>::type
+            expandOne(const T* __restrict ee, Modd& prng) const
         {
             auto r = prng.get();
+            //std::cout << r << " ";
             return ee[r];
         }
 
         template<typename T>
-        void expand(span<const T> e, span<T> w)
+        void expand(span<const T> e, span<T> w) const
         {
+            assert(w.size() == mMessageSize);
+            assert(e.size() == mCodeSize);
             Modd prng(mSeed, mCodeSize, mReuse);
 
             std::vector<u64> row(mExpanderWeight);
@@ -944,6 +1053,7 @@ namespace osuCrypto
                     break;
                 case 7:
                     ww[i] = expandOne<T, 7>(ee, prng);
+
                     break;
                 case 40:
                 {
@@ -953,6 +1063,7 @@ namespace osuCrypto
                     w = w ^ expandOne<T, 8>(ee, prng);
                     w = w ^ expandOne<T, 8>(ee, prng);
                     w = w ^ expandOne<T, 8>(ee, prng);
+                    ww[i] = w;
                     break;
                 }
                 default:
@@ -972,7 +1083,6 @@ namespace osuCrypto
                     ww[i] = wv;
                 }
                 }
-
             }
         }
 
@@ -982,7 +1092,6 @@ namespace osuCrypto
         {
             if (mPermute == 1)
             {
-
                 setTimePoint("permute ");
                 mPerm.apply(e);
             }
@@ -1005,17 +1114,46 @@ namespace osuCrypto
             PointList points(mMessageSize, mCodeSize);
 
             std::vector<u64> row(mExpanderWeight);
-            for (auto i : rng(mMessageSize))
-            {
-                row[0] = prng.get();
-                points.push_back(i, row[0]);
-                for (auto j : rng(1, mExpanderWeight))
-                {
-                    do {
-                        row[j] = prng.get();
-                    } while (std::find(row.data(), row.data() + j, row[j]) != row.data() + j);
 
-                    points.push_back(i, row[j]);
+            if (mPermute)
+            {
+                throw RTE_LOC;
+            }
+            else
+            {
+
+                for (auto i : rng(mMessageSize))
+                {
+                    row[0] = prng.get();
+                    //points.push_back(i, row[0]);
+                    for (auto j : rng(1, mExpanderWeight))
+                    {
+                        //do {
+                        row[j] = prng.get();
+                        //} while
+                        auto iter = std::find(row.data(), row.data() + j, row[j]);
+                        if (iter != row.data() + j)
+                        {
+                            row[j] = -1;
+                            *iter = -1;
+                        }
+                        //throw RTE_LOC;
+
+                    }
+                    for (auto j : rng(mExpanderWeight))
+                    {
+
+                        if (row[j] != -1)
+                        {
+                            //std::cout << row[j] << " ";
+                            points.push_back(i, row[j]);
+                        }
+                        else
+                        {
+                            //std::cout << "* ";
+                        }
+                    }
+                    //std::cout << std::endl;
                 }
             }
 
@@ -1025,45 +1163,29 @@ namespace osuCrypto
         // Get the parity check version of the accumulator
         SparseMtx getAPar() const
         {
-            BitStream prng(mSeed ^ OneBlock, mAccumulatorSize, mReuse);
+            PRNG prng(mSeed ^ OneBlock);
 
             PointList AP(mCodeSize, mCodeSize);;
-
-            auto a8 = divCeil(mAccumulatorSize, 8);
-
             DenseMtx A = DenseMtx::Identity(mCodeSize);
-            for (i64 i = 0; i < mCodeSize; ++i)
+
+            block rnd;
+            u8* __restrict ptr = (u8*)prng.mBuffer.data();
+            auto qe = prng.mBuffer.size() * 128;
+            u64 q = 0;
+
+            if (mAccumulatorWeight)
             {
-                i64 j = i + 1;
-                auto s = std::min<i64>(mCodeSize, j + mStickyAccumulator);
-                auto e = std::min<i64>(mCodeSize, s + mAccumulatorSize);
-                AP.push_back(i, i);
-
-                if (mStickyAccumulator)
+                throw RTE_LOC;
+            }
+            else
+            {
+                for (i64 i = 0; i < mCodeSize; ++i)
                 {
-                    j = j + mStickyAccumulator;
-                    if (j <= mCodeSize)
-                        AP.push_back(j - 1, i);
-                }
-
-                auto vv = prng.get();
-                for (; j < e;)
-                {
-                    auto rem = e - j;
-                    auto ek = std::min<u64>(64, rem);
-
-                    for (u64 k = 0; k < ek; ++k, ++j)
-                    {
-                        if (vv[k])
-                        {
-                            AP.push_back(j, i);
-                        }
-                    }
+                    accOne(AP, i, ptr, prng, rnd, q, qe);
                 }
             }
             return AP;
         }
-
 
         SparseMtx getA() const
         {
@@ -1082,285 +1204,12 @@ namespace osuCrypto
                         ay ^= ai;
 
                     }
-
                 }
-
             }
 
             return A.sparse();
         }
-    };
-
-
-
-    //struct TungstenBinPermuter : TimerAdapter
-    //{
-    //    using T = block;
-    //    static constexpr int NumBins = 8;
-    //    using Table = TableTungsten1024x4;
-
-    //    std::array<Perm, NumBins> mPerm;
-    //    Perm mP2;
-    //    Perm mP8;
-    //    u64 mExpanderWeight;
-
-    //    AlignedUnVector<T> mBuffer;
-    //    std::array<T* __restrict, NumBins> mBins;
-    //    u64 mIdx = 0;
-    //    static constexpr bool eagerPermute = true;
-    //    static constexpr bool accumulate2 = true;
-    //    static constexpr bool verbose = false;
-
-    //    void reset()
-    //    {
-    //        auto s = mBuffer.size() / NumBins;
-    //        mIdx = 0;
-    //        PRNG prng(CCBlock);
-    //        for (u64 i = 0; i < NumBins; ++i)
-    //        {
-    //            mBins[i] = mBuffer.data() + i * s;
-
-    //            if (mPerm[i].mPerm.size() == 0)
-    //                mPerm[i].init(s, prng, eagerPermute);
-    //        }
-
-    //        if (mP2.mPerm.size() == 0)
-    //            mP2.init(mBuffer.size(), prng, true);
-    //    }
-
-
-    //    TungstenBinPermuter(u64 size, u64 expanderWeight)
-    //        : mBuffer(size)
-    //        , mExpanderWeight(expanderWeight)
-    //    {
-    //        if (size % NumBins)
-    //            throw RTE_LOC;
-
-    //        reset();
-    //    }
-
-
-    //    template<int size>
-    //    OC_FORCEINLINE void processBlock(T* __restrict xx, T* end)
-    //    {
-    //        static_assert(size % NumBins == 0, "");
-
-    //        if (eagerPermute)
-    //        {
-    //            for (u64 i = 0; i < size; i += 8)
-    //            {
-    //                static_assert(NumBins == 8, "");
-    //                assert(mBins[7] < mBuffer.data() + mBuffer.size());
-    //                assert(&xx[7] < end);
-
-    //                //*(T * __restrict)&mBins[0][mPerm[0].mPerm[mIdx]] = xx[0];
-    //                //*(T * __restrict)&mBins[1][mPerm[1].mPerm[mIdx]] = xx[1];
-    //                //*(T * __restrict)&mBins[2][mPerm[2].mPerm[mIdx]] = xx[2];
-    //                //*(T * __restrict)&mBins[3][mPerm[3].mPerm[mIdx]] = xx[3];
-    //                //*(T * __restrict)&mBins[4][mPerm[4].mPerm[mIdx]] = xx[4];
-    //                //*(T * __restrict)&mBins[5][mPerm[5].mPerm[mIdx]] = xx[5];
-    //                //*(T * __restrict)&mBins[6][mPerm[6].mPerm[mIdx]] = xx[6];
-    //                //*(T * __restrict)&mBins[7][mPerm[7].mPerm[mIdx]] = xx[7];
-    //                //++mIdx;
-
-
-    //                * (T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 0]] = xx[0];
-    //                *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 1]] = xx[1];
-    //                *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 2]] = xx[2];
-    //                *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 3]] = xx[3];
-    //                *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 4]] = xx[4];
-    //                *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 5]] = xx[5];
-    //                *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 6]] = xx[6];
-    //                *(T * __restrict)& mBins[0][mP2.mPerm.data()[mIdx + 7]] = xx[7];
-    //                mIdx += 8;
-
-    //                xx += 8;
-    //            }
-    //        }
-    //        else
-    //        {
-
-    //            for (u64 i = 0; i < size; i += 8)
-    //            {
-    //                static_assert(NumBins == 8, "");
-    //                assert(mBins[7] < mBuffer.data() + mBuffer.size());
-    //                assert(&xx[7] < end);
-
-    //                *(T * __restrict)mBins[0] = xx[0];
-    //                *(T * __restrict)mBins[1] = xx[1];
-    //                *(T * __restrict)mBins[2] = xx[2];
-    //                *(T * __restrict)mBins[3] = xx[3];
-    //                *(T * __restrict)mBins[4] = xx[4];
-    //                *(T * __restrict)mBins[5] = xx[5];
-    //                *(T * __restrict)mBins[6] = xx[6];
-    //                *(T * __restrict)mBins[7] = xx[7];
-
-    //                ++mBins[0];
-    //                ++mBins[1];
-    //                ++mBins[2];
-    //                ++mBins[3];
-    //                ++mBins[4];
-    //                ++mBins[5];
-    //                ++mBins[6];
-    //                ++mBins[7];
-
-    //                xx += 8;
-    //            }
-
-    //        }
-
-    //    }
-
-
-
-    //    void finalize(span<T> w)
-    //    {
-
-    //        if (verbose)
-    //        {
-    //            //BitVector bv((u8*)mBuffer.data(), mBuffer.size() * 128);
-    //            std::cout << "pi(acc)\n";
-    //            for (u64 i = 0; i < mBuffer.size(); ++i)
-    //            {
-    //                std::cout << ((int)*(u8*)&mBuffer[i] & 1);
-    //            }
-    //            std::cout << std::endl;
-    //        }
-
-    //        if (!eagerPermute)
-    //        {
-    //            auto s = mBuffer.size() / NumBins;
-    //            for (u64 j = 0; j < NumBins; ++j)
-    //            {
-    //                auto sub = mBuffer.subspan(s * j, s);
-    //                mPerm[j].apply(sub);
-    //                //{
-    //                //    auto n = std::min<u64>(mPerm.size(), ;
-    //                //    T* __restrict xx = sub.data();
-    //                //    u32* __restrict  pp = mPerm[j].mPerm.data();
-    //                //    //for (u64 j = 0; j < n; ++j)
-    //                //    //    std::swap(xx[j], xx[pp[j]]);
-    //                //    //{
-    //                //    //    auto& x0 = xx[0];
-    //                //    //    auto& x1 = xx[pp[0]];
-    //                //    //    auto t = x0;
-    //                //    //    x0 = x1;
-    //                //    //    x1 = t;
-    //                //    //}
-    //                //    for (u64 i = 0; i < n; ++i)
-    //                //    {
-    //                //        auto jPre = pp[i + 128];
-    //                //        _mm_prefetch((char*)(&xx[jPre]), _MM_HINT_T0);
-    //                //        auto& x0 = xx[i];
-    //                //        auto& x1 = xx[pp[i]];
-    //                //        auto t = x0;
-    //                //        x0 = x1;//^ xx[j - 1];
-    //                //        x1 = t;
-    //                //        //std::swap(x0, x1);
-    //                //    }
-    //                //}
-    //            }
-
-    //            setTimePoint("binPerm");
-    //        }
-
-
-
-
-
-    //        if constexpr (accumulate2)
-    //        {
-    //            T* __restrict xx = mBuffer.data();
-
-
-    //            for (u64 i = 0; i < mBuffer.size() - Table::data.size(); i += Table::data.size())
-    //            {
-    //                static_assert(1024 == Table::data.size());
-    //                for (u64 j = 0; j < 1024;)
-    //                {
-    //                    _mm_prefetch((char*)(xx + j + Table::data.size()), _MM_HINT_T0);
-    //                    for (u64 k = 0; k < 8; ++k, ++j)
-    //                    {
-    //                        if constexpr (Table::data[0].size() == 4)
-    //                        {
-    //                            T* __restrict xi = xx + j;
-    //                            T* __restrict xs = xi + 1;
-    //                            T* __restrict x0 = xi + Table::data[j][0];
-    //                            T* __restrict x1 = xi + Table::data[j][1];
-    //                            T* __restrict x2 = xi + Table::data[j][2];
-    //                            T* __restrict x3 = xi + Table::data[j][3];
-
-    //                            auto xxs = *xs ^ *xi;
-    //                            auto xx0 = *x0 ^ *xi;
-    //                            auto xx1 = *x1 ^ *xi;
-    //                            auto xx2 = *x2 ^ *xi;
-    //                            auto xx3 = *x3 ^ *xi;
-
-    //                            *xs = xxs;
-    //                            *x0 = xx0;
-    //                            *x1 = xx1;
-    //                            *x2 = xx2;
-    //                            *x3 = xx3;
-    //                        }
-    //                        else if constexpr (Table::data[0].size() == 7)
-    //                        {
-    //                            T* __restrict xi = xx + j;
-    //                            T* __restrict xs = xi + 1;
-    //                            T* __restrict x0 = xi + Table::data[j][0];
-    //                            T* __restrict x1 = xi + Table::data[j][1];
-    //                            T* __restrict x2 = xi + Table::data[j][2];
-    //                            T* __restrict x3 = xi + Table::data[j][3];
-    //                            T* __restrict x4 = xi + Table::data[j][4];
-    //                            T* __restrict x5 = xi + Table::data[j][5];
-    //                            T* __restrict x6 = xi + Table::data[j][6];
-
-    //                            auto xxs = *xs ^ *xi;
-    //                            auto xx0 = *x0 ^ *xi;
-    //                            auto xx1 = *x1 ^ *xi;
-    //                            auto xx2 = *x2 ^ *xi;
-    //                            auto xx3 = *x3 ^ *xi;
-    //                            auto xx4 = *x4 ^ *xi;
-    //                            auto xx5 = *x5 ^ *xi;
-    //                            auto xx6 = *x6 ^ *xi;
-
-    //                            *xs = xxs;
-    //                            *x0 = xx0;
-    //                            *x1 = xx1;
-    //                            *x2 = xx2;
-    //                            *x3 = xx3;
-    //                            *x4 = xx4;
-    //                            *x5 = xx5;
-    //                            *x6 = xx6;
-    //                        }
-    //                        else
-    //                        {
-    //                            throw RTE_LOC;
-    //                        }
-    //                    }
-    //                }
-    //            }
-    //            setTimePoint("acc2");
-    //        }
-
-
-    //        linearSums<T>(mBuffer, w, mExpanderWeight);
-
-
-    //        if (verbose)
-    //        {
-    //            //BitVector bv((u8*)mBuffer.data(), mBuffer.size() * 128);
-    //            std::cout << "out\n";
-    //            for (u64 i = 0; i < w.size(); ++i)
-    //            {
-    //                std::cout << ((int)*(u8*)&w[i] & 1);
-    //            }
-    //            std::cout << std::endl;
-    //        }
-
-    //    }
-
-
-    //};
+            };
 
 
     template<
@@ -1392,7 +1241,7 @@ namespace osuCrypto
         return AP;
     }
 
-    template<typename Table> 
+    template<typename Table>
     DenseMtx getAcc(u64 n)
     {
         auto APar = getAccPar<Table>(n);
@@ -1788,7 +1637,7 @@ namespace osuCrypto
         SparseMtx getMatrix() const
         {
             auto n = mPerm.mPerm.size() * chunkSize;
-            PointList ret(n,n);
+            PointList ret(n, n);
 
             u64 r = 0;
             for (auto p : mPerm.mPerm)
@@ -1797,7 +1646,7 @@ namespace osuCrypto
 
                 for (u64 i = 0; i < chunkSize; ++i, ++r)
                 {
-                    ret.push_back({ p * chunkSize + i , r});
+                    ret.push_back({ p * chunkSize + i , r });
                 }
             }
             return ret;
@@ -1874,7 +1723,7 @@ namespace osuCrypto
 
         void update(span<T> x)
         {
-            if (x.size() == 0 ||( x.size() % Table::data.size()))
+            if (x.size() == 0 || (x.size() % Table::data.size()))
                 throw RTE_LOC;
             auto xx_ = x.data();
             auto rem = x.size() - Table::data.size();
@@ -2215,4 +2064,4 @@ namespace osuCrypto
 
         }
     };
-}
+        }
