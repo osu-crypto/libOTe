@@ -10,9 +10,9 @@ namespace tests_libOTe
 {
     void Tungsten_encode_basic_test(const oc::CLP& cmd)
     {
-        auto k = cmd.getOr("k", 10);
+        auto k = cmd.getOr("k", 16);
         auto n = cmd.getOr("n", k * 2);
-        auto bw = cmd.getOr("bw", 7);
+        auto bw = cmd.getOr("bw", 5);
         auto aw = cmd.getOr("aw", 8);
         auto sticky = cmd.getOr("ns", 1);
         auto skip = cmd.isSet("skip");
@@ -30,6 +30,7 @@ namespace tests_libOTe
 
         Tungsten code;
         code.config(k, n, bw, aw, reuse, permute, sticky);
+        code.mExtraDiag = cmd.getOr("extra", 0);
 
         auto A = code.getA();
         auto B = code.getB();
@@ -145,20 +146,23 @@ namespace tests_libOTe
         //code.config(k, n, bw, aw, reuse, permute, sticky);
 
         auto A = code.getA();
-        auto P = code.getP();
-        auto S = code.getS();
-        auto PA = P.dense() * A;
+        auto P = code.getP().dense();
+        auto S = code.getS().dense();
+        auto PA = P * A;
         auto APA = A * PA;
         //auto G = S.dense() * PA;
-        auto SAPA = S.dense() * APA; 
+        auto SAPA = S * APA; 
         
         if (v)
         {
-            std::cout << "P\n" << P << std::endl << std::endl;
+            //std::cout << "P\n" << P << std::endl << std::endl;
             std::cout << "A'\n" << code.getAPar() << std::endl << std::endl;
+            //std::cout << "S\n" << S << std::endl << std::endl;
+            //std::cout << "AP\n" << A * P << std::endl << std::endl;
+
             std::cout << "A\n" << A << std::endl << std::endl;
-            std::cout << "PA\n" << PA << std::endl << std::endl;
-            std::cout << "APA\n" << A * PA << std::endl;
+            //std::cout << "PA\n" << PA << std::endl << std::endl;
+            //std::cout << "APA\n" << A * PA << std::endl;
             std::cout << "SAPA\n" << SAPA << std::endl;
         }
 
@@ -384,6 +388,7 @@ namespace tests_libOTe
             Tungsten code;
             code.config(k, n, bw, aw, reuse, permute, sticky);
             code.mAccumulatorWeight = cmd.getOr("aaw", 0);
+            code.mExtraDiag = cmd.getOr("extra", 0);
             AlignedUnVector<block> m1(k), c0(n);
 
             oc::Timer timer;

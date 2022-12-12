@@ -118,10 +118,14 @@ int main(int argc, char** argv)
 		sampleTungstenDiag(cmd);
 		return 0;
 	}
-	//accTest(cmd);
-	//accPr(cmd);
-	//return 0;
 
+	if (cmd.isSet("acc"))
+	{
+		periodTest(cmd);
+		//accTest(cmd);
+		//accPr(cmd);
+		return 0;
+	}
 
 	if (cmd.isSet("encode"))
 	{

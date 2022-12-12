@@ -320,6 +320,8 @@ namespace osuCrypto
 
         Perm mPerm;
         SqrtPerm mSqrtPerm;
+
+        u64 mExtraDiag = 0;
         //std::vector<u64> mPerm;
 
         u64 parityRows() const { return mCodeSize - mMessageSize; }
@@ -517,6 +519,7 @@ namespace osuCrypto
 
                 fixedAccumulate(main, x, TABLE);
             }
+#undef TABLE
             else if (mAccumulatorWeight == 10)
             {
 #define TABLE tunsten_diagMtx_128x10
@@ -579,9 +582,14 @@ namespace osuCrypto
         {
             u64 j = i + 1;
 
-            if (j < mCodeSize)
-                pl.push_back(j, i);
-            ++j;
+            pl.push_back(i, i);
+
+            if(mStickyAccumulator)
+            {
+                if (j < mCodeSize)
+                    pl.push_back(j, i);
+                ++j;
+            }
 
             {
                 if (q + mAccumulatorSize > qe)
@@ -649,6 +657,8 @@ namespace osuCrypto
                 if (j + 7 < mCodeSize && b7.get<i32>(0) < 0) pl.push_back(j + 7, i);
             }
 
+            if (j + mExtraDiag - 1 < mCodeSize && mExtraDiag)
+                pl.push_back(j + mExtraDiag - 1, i);
             //if (q % 4 == 0)
 
         }
@@ -741,6 +751,12 @@ namespace osuCrypto
                 if (!rangeCheck || j + 6 < mCodeSize) xx[j + 6] = _mm_xor_si128(xx[j + 6], buf[6]);
                 if (!rangeCheck || j + 7 < mCodeSize) xx[j + 7] = _mm_xor_si128(xx[j + 7], buf[7]);
             }
+
+
+            if (j + mExtraDiag - 1 < mCodeSize && mExtraDiag)
+            {
+                xx[j + mExtraDiag -1] = _mm_xor_si128(xx[j + mExtraDiag-1], xi);
+            }
         }
 
 
@@ -795,9 +811,9 @@ namespace osuCrypto
             span<u64> vals;
             libdivide::libdivide_u64_t mod;
             RNG mReuse;
-            bool mPow2;
+            bool mIsPow2;
             std::vector<u64> mPow2Vals;
-            u64 mPow2Mask, mPow2Step;
+            u64 mPow2, mPow2Mask, mPow2Step;
 
             Modd(block seed, u64 m, RNG reuse)
                 : prng(seed)
@@ -806,10 +822,11 @@ namespace osuCrypto
                 , mod(libdivide::libdivide_u64_gen(m))
                 , mReuse(reuse)
             {
-                mPow2 = log2ceil(modVal) == log2floor(modVal);
-                if (mPow2)
+                mPow2 = log2ceil(modVal);
+                mIsPow2 = mPow2 == log2floor(modVal);
+                if (mIsPow2)
                 {
-                    mPow2Mask = (1ull << (mPow2)) - 1;
+                    mPow2Mask = modVal - 1;
                     mPow2Step = divCeil(mPow2, 8);
                     mPow2Vals.resize(prng.mBufferByteCapacity / mPow2Step);
                     vals = mPow2Vals;
@@ -1197,6 +1214,7 @@ namespace osuCrypto
             {
                 for (auto y : APar.col(i))
                 {
+                    //std::cout << y << " ";
                     if (y != i)
                     {
                         auto ay = A.row(y);
@@ -1205,6 +1223,8 @@ namespace osuCrypto
 
                     }
                 }
+
+                //std::cout << "\n" << A << std::endl;
             }
 
             return A.sparse();
@@ -1235,7 +1255,7 @@ namespace osuCrypto
                     AP.push_back(x + i, i);
             }
 
-            std::cout << std::endl;
+            //std::cout << std::endl;
         }
 
         return AP;
