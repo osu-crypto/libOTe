@@ -1327,7 +1327,6 @@ namespace osuCrypto
         } };
     };
 
-
     struct TableTungsten1024x7 {
         static constexpr  std::array<std::array<u16, 7>, 1024> data
         { {

@@ -462,6 +462,7 @@ namespace tests_libOTe
             //code.mAccumulatorWeight = cmd.getOr("aaw", 4);
             AlignedUnVector<block> m1(k)/*, c0(n)*/;
 
+            //Tungsten2<block, NoopPerm, TableTungsten1024x4> code(n, bw);
             Tungsten2<> code(n, bw);
             //TungstenAccumulator code(TungstenBinPermuter{ (u64)n, (u64)bw });
             oc::Timer timer;

@@ -121,8 +121,8 @@ int main(int argc, char** argv)
 
 	if (cmd.isSet("acc"))
 	{
-		periodTest(cmd);
-		//accTest(cmd);
+		//periodTest(cmd);
+		accTest(cmd);
 		//accPr(cmd);
 		return 0;
 	}
