@@ -1845,6 +1845,20 @@ namespace osuCrypto
     };
 
 
+    template<typename Table_ = TableTungsten1024x4>
+    struct TableAcc
+    {
+
+        template<bool rangeCheck = false, bool flush = false, typename T>
+        OC_FORCEINLINE void processBlock(T* xx, T* end)
+        {
+
+            accumulateBlock<Table, Perm, T, rangeCheck, flush>(xx, end, mPerm);
+        }
+
+    };
+
+
     template<typename T_ = block, typename Next_ = TungstenPerm<T_, 8>, typename Table_ = TableTungsten1024x4>
     struct Tungsten2 : public TimerAdapter
     {
