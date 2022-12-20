@@ -1,3 +1,5 @@
+#pragma once
+
 #include "cryptoTools/Common/Defines.h"
 #include "libOTe/Tools/LDPC/Mtx.h"
 #include "cryptoTools/Common/Range.h"
@@ -5,7 +7,6 @@
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
-#include "Xoshiro256Plus.h"
 #ifdef ENABLE_AVX
 #define LIBDIVIDE_AVX2
 #elif ENABLE_SSE
@@ -14,233 +15,10 @@
 #include "SqrtPerm.h"
 #include "libdivide.h"
 #include "TungstenData.h"
+#include "TungstenLinearSum.h"
 
 namespace osuCrypto
 {
-
-    SparseMtx getLinearSums(u64 n, u64 weight)
-    {
-
-        auto mCodeSize = n;
-        auto mMessageSize = n / 2;
-
-        PointList ret(mMessageSize, mCodeSize);
-
-        details::SilverLeftEncoder L;
-
-        if (weight == 5)
-            L.init(mCodeSize, SilverCode::code::Weight5);
-        else if (weight == 11)
-        {
-            L.init(mCodeSize, SilverCode::code::Weight11);
-        }
-        else
-        {
-            std::vector<double> s; s.push_back(0);
-            while (s.size() != weight)
-            {
-                s.push_back((rand() % mCodeSize) / double(mCodeSize));
-            }
-            L.init(mCodeSize, s);
-        }
-        auto mWeight = L.mWeight;
-        auto mYs = L.mYs;
-
-        auto v = mYs;
-
-        for (u64 i = 0; i < mMessageSize; )
-        {
-            auto end = mMessageSize;
-            for (u64 j = 0; j < mWeight; ++j)
-            {
-                if (v[j] == mCodeSize)
-                    v[j] = 0;
-
-                auto jEnd = mCodeSize - v[j] + i;
-                end = std::min<u64>(end, jEnd);
-            }
-
-            while (i != end)
-            {
-                for (u64 j = 0; j < mWeight; ++j)
-                {
-                    ret.push_back({ i, v[j]++ });
-                }
-                ++i;
-            }
-
-        }
-        return ret;
-    }
-
-    template<typename T>
-    void linearSums(span<T> e, span<T> w, u64 mExpanderWeight)
-    {
-        auto mCodeSize = e.size();
-        auto mMessageSize = w.size();
-
-        details::SilverLeftEncoder L;
-
-        if (mExpanderWeight == 5)
-            L.init(mCodeSize, SilverCode::code::Weight5);
-        else if (mExpanderWeight == 11)
-        {
-            L.init(mCodeSize, SilverCode::code::Weight11);
-        }
-        else
-        {
-            std::vector<double> s; s.push_back(0);
-            while (s.size() != mExpanderWeight)
-            {
-                s.push_back((rand() % mCodeSize) / double(mCodeSize));
-            }
-            L.init(mCodeSize, s);
-        }
-        auto mWeight = L.mWeight;
-        auto mYs = L.mYs;
-
-        auto v = mYs;
-        T* __restrict pp = w.data();
-        const T* __restrict m = e.data();
-
-        for (u64 i = 0; i < mMessageSize; )
-        {
-            auto end = mMessageSize;
-            for (u64 j = 0; j < mWeight; ++j)
-            {
-                if (v[j] == mCodeSize)
-                    v[j] = 0;
-
-                auto jEnd = mCodeSize - v[j] + i;
-                end = std::min<u64>(end, jEnd);
-            }
-            T* __restrict P = &pp[i];
-            T* __restrict PE = &pp[end];
-            T* __restrict PE8 = &pp[(end - i) / 8 * 8 + i];
-
-            switch (mWeight)
-            {
-            case 5:
-            {
-                const T* __restrict M0 = &m[v[0]];
-                const T* __restrict M1 = &m[v[1]];
-                const T* __restrict M2 = &m[v[2]];
-                const T* __restrict M3 = &m[v[3]];
-                const T* __restrict M4 = &m[v[4]];
-
-                v[0] += end - i;
-                v[1] += end - i;
-                v[2] += end - i;
-                v[3] += end - i;
-                v[4] += end - i;
-                i = end;
-
-                while (P != PE)
-                {
-                    T t = *M0
-                        ^ *M1
-                        ^ *M2
-                        ^ *M3
-                        ^ *M4
-                        ;
-
-                    if constexpr (std::is_same<block, T>::value)
-                        _mm_stream_si128((__m128i*)P, (__m128i)t);
-                    else
-                        *P = t;
-
-                    ++M0;
-                    ++M1;
-                    ++M2;
-                    ++M3;
-                    ++M4;
-                    ++P;
-                }
-
-
-                break;
-            }
-            case 11:
-            {
-
-                const T* __restrict M0 = &m[v[0]];
-                const T* __restrict M1 = &m[v[1]];
-                const T* __restrict M2 = &m[v[2]];
-                const T* __restrict M3 = &m[v[3]];
-                const T* __restrict M4 = &m[v[4]];
-                const T* __restrict M5 = &m[v[5]];
-                const T* __restrict M6 = &m[v[6]];
-                const T* __restrict M7 = &m[v[7]];
-                const T* __restrict M8 = &m[v[8]];
-                const T* __restrict M9 = &m[v[9]];
-                const T* __restrict M10 = &m[v[10]];
-
-                v[0] += end - i;
-                v[1] += end - i;
-                v[2] += end - i;
-                v[3] += end - i;
-                v[4] += end - i;
-                v[5] += end - i;
-                v[6] += end - i;
-                v[7] += end - i;
-                v[8] += end - i;
-                v[9] += end - i;
-                v[10] += end - i;
-                i = end;
-
-                while (P != PE)
-                {
-                    *P = *M0
-                        ^ *M1
-                        ^ *M2
-                        ^ *M3
-                        ^ *M4
-                        ^ *M5
-                        ^ *M6
-                        ^ *M7
-                        ^ *M8
-                        ^ *M9
-                        ^ *M10
-                        ;
-
-                    ++M0;
-                    ++M1;
-                    ++M2;
-                    ++M3;
-                    ++M4;
-                    ++M5;
-                    ++M6;
-                    ++M7;
-                    ++M8;
-                    ++M9;
-                    ++M10;
-                    ++P;
-                }
-
-                break;
-            }
-            default:
-                while (i != end)
-                {
-                    {
-                        auto row = v[0];
-                        pp[i] = m[row];
-                        ++v[0];
-                    }
-
-                    for (u64 j = 1; j < mWeight; ++j)
-                    {
-                        auto row = v[j];
-                        pp[i] = pp[i] ^ m[row];
-                        ++v[j];
-                    }
-                    ++i;
-                }
-                break;
-            }
-
-        }
-    }
 
     // THe encoder for the generator matrix G = B * A.
     // B is the expander while A is the accumulator.
@@ -259,10 +37,8 @@ namespace osuCrypto
         {
             prng = 0,
             gf128mul = 1,
-            xoshiro256Plus = 2,
             aeslite = 3
         };
-
 
 
         void config(
@@ -363,14 +139,12 @@ namespace osuCrypto
         struct BitStream
         {
             PRNG mPrng;
-            details::Xoshiro256Plus mXoshiro256Plus;
             AlignedUnVector<block> mBuff;
             u64 mIdx, mEnd, mSize;
             RNG mReuse;
 
             BitStream(block seed, u64 size, RNG reuse)
                 : mPrng(seed)
-                , mXoshiro256Plus(seed)
                 , mSize(size)
                 , mReuse(reuse)
             {
@@ -412,9 +186,7 @@ namespace osuCrypto
                 }
                 else
                 {
-                    span<u64> vals((u64*)mPrng.mBuffer.data(), mPrng.mBuffer.size() * 2);
-                    for (u64 i = 0; i < vals.size(); ++i)
-                        vals[i] = mXoshiro256Plus.next();
+                    throw RTE_LOC;
                 }
 
 
@@ -806,7 +578,6 @@ namespace osuCrypto
         struct Modd
         {
             PRNG prng;
-            details::Xoshiro256Plus mXoshiro256Plus;
             u64 modVal, idx;
             span<u64> vals;
             libdivide::libdivide_u64_t mod;
@@ -817,7 +588,6 @@ namespace osuCrypto
 
             Modd(block seed, u64 m, RNG reuse)
                 : prng(seed)
-                , mXoshiro256Plus(seed)
                 , modVal(m)
                 , mod(libdivide::libdivide_u64_gen(m))
                 , mReuse(reuse)
@@ -868,8 +638,7 @@ namespace osuCrypto
                 }
                 else
                 {
-                    for (u64 i = 0; i < vals.size(); ++i)
-                        vals[i] = mXoshiro256Plus.next();
+                    throw RTE_LOC;
                 }
 
                 if (mPow2)
@@ -1232,831 +1001,6 @@ namespace osuCrypto
     };
 
 
-    template<
-        typename Table>
-        OC_FORCEINLINE SparseMtx getAccPar(u64 n)
-    {
-
-        PointList AP(n, n);;
-
-        for (i64 i = 0; i < n; ++i)
-        {
-            //std::cout << "x[" << i << "] += x[" << i + 1;
-            AP.push_back(i, i);
-
-            if (i + 1 < n)
-                AP.push_back(i + 1, i);
-
-            auto col = Table::data[i % Table::data.size()];
-            for (auto x : col)
-            {
-                //std::cout << " " << x + i;
-                if (x + i < n)
-                    AP.push_back(x + i, i);
-            }
-
-            //std::cout << std::endl;
-        }
-
-        return AP;
-    }
-
-    template<typename Table>
-    DenseMtx getAcc(u64 n)
-    {
-        auto APar = getAccPar<Table>(n);
-        auto A = DenseMtx::Identity(n);
-
-        //std::cout << A << std::endl << std::endl;
-
-        for (u64 i = 0; i < n; ++i)
-        {
-            for (auto y : APar.col(i))
-            {
-                if (y != i)
-                {
-                    auto ay = A.row(y);
-                    auto ai = A.row(i);
-                    ay ^= ai;
-                }
-
-
-            }
-            //std::cout << i << "\n";
-            //std::cout << A << std::endl << std::endl;
-        }
-
-        return A;
-    }
-
-
-    template<
-
-        typename Table,
-        typename Perm,
-        typename T,
-        bool rangeCheck,
-        bool flush = false,
-        bool verbose = false>
-        OC_FORCEINLINE void accumulateBlock(T* xx, T* end, Perm& perm)
-    {
-        //auto& perm = mPerm;
-        static constexpr int chunkSize = Perm::chunkSize;
-
-        static_assert(Table::data.size() % chunkSize == 0, "");
-        auto tIter = Table::data.data();
-        for (u64 j = 0; j < Table::data.size();)
-        {
-
-            _mm_prefetch((char*)(xx + j + Table::data.size()), _MM_HINT_T0);
-            for (u64 k = 0; k < chunkSize; ++k, ++j)
-            {
-
-                T* __restrict xi = xx + j;
-                T* __restrict xs = xi + 1;
-
-                if constexpr (Table::data[0].size() == 4)
-                {
-                    T* __restrict x0 = xi + tIter[j].data()[0];
-                    T* __restrict x1 = xi + tIter[j].data()[1];
-                    T* __restrict x2 = xi + tIter[j].data()[2];
-                    T* __restrict x3 = xi + tIter[j].data()[3];
-
-                    //std::cout << "x[" << j << "] += x[" << j + 1
-                    //    << " + " << j + (int)tIter[j].data()[0]
-                    //    << " + " << j + (int)tIter[j].data()[1]
-                    //    << " + " << j + (int)tIter[j].data()[2]
-                    //    << " + " << j + (int)tIter[j].data()[3] << std::endl;
-
-                    if constexpr (rangeCheck)
-                    {
-                        if (xs < end) *xs = *xs ^ *xi;
-                        if (x0 < end) *x0 = *x0 ^ *xi;
-                        if (x1 < end) *x1 = *x1 ^ *xi;
-                        if (x2 < end) *x2 = *x2 ^ *xi;
-                        if (x3 < end) *x3 = *x3 ^ *xi;
-                    }
-                    else
-                    {
-
-                        auto xxs = *xs ^ *xi;
-                        auto xx0 = *x0 ^ *xi;
-                        auto xx1 = *x1 ^ *xi;
-                        auto xx2 = *x2 ^ *xi;
-                        auto xx3 = *x3 ^ *xi;
-
-                        assert(x3 < end);
-                        *xs = xxs;
-                        *x0 = xx0;
-                        *x1 = xx1;
-                        *x2 = xx2;
-                        *x3 = xx3;
-
-                    }
-                }
-                else if constexpr (Table::data[0].size() == 7)
-                {
-                    T* __restrict x0 = xi + Table::data[j][0];
-                    T* __restrict x1 = xi + Table::data[j][1];
-                    T* __restrict x2 = xi + Table::data[j][2];
-                    T* __restrict x3 = xi + Table::data[j][3];
-                    T* __restrict x4 = xi + Table::data[j][4];
-                    T* __restrict x5 = xi + Table::data[j][5];
-                    T* __restrict x6 = xi + Table::data[j][6];
-
-                    if constexpr (rangeCheck)
-                    {
-                        if (xs < end) *xs = *xs ^ *xi;
-                        if (x0 < end) *x0 = *x0 ^ *xi;
-                        if (x1 < end) *x1 = *x1 ^ *xi;
-                        if (x2 < end) *x2 = *x2 ^ *xi;
-                        if (x3 < end) *x3 = *x3 ^ *xi;
-                        if (x4 < end) *x4 = *x3 ^ *xi;
-                        if (x5 < end) *x5 = *x5 ^ *xi;
-                        if (x6 < end) *x6 = *x6 ^ *xi;
-                    }
-                    else
-                    {
-                        auto xxs = *xs ^ *xi;
-                        auto xx0 = *x0 ^ *xi;
-                        auto xx1 = *x1 ^ *xi;
-                        auto xx2 = *x2 ^ *xi;
-                        auto xx3 = *x3 ^ *xi;
-                        auto xx4 = *x4 ^ *xi;
-                        auto xx5 = *x5 ^ *xi;
-                        auto xx6 = *x6 ^ *xi;
-
-                        *xs = xxs;
-                        *x0 = xx0;
-                        *x1 = xx1;
-                        *x2 = xx2;
-                        *x3 = xx3;
-                        *x4 = xx4;
-                        *x5 = xx5;
-                        *x6 = xx6;
-                    }
-                }
-                else
-                {
-                    throw RTE_LOC;
-                }
-
-                perm.apply(xi, k);
-                //if constexpr (!eagerPermute)
-                //{
-                //    *(T * __restrict)perm[k] = *xi;
-                //    ++perm[k];
-                //}
-
-                if constexpr (verbose)
-                {
-                    BitVector state;
-                    state.reserve(Table::data.size());
-                    auto base = (int)*(u8*)&xx[j] & 1;
-                    for (u64 i : rng(Table::data.size()))
-                    {
-                        auto bit = (int)*(u8*)&xx[j + i] & 1;
-                        if (i == 1 || std::find(Table::data[j].begin(), Table::data[j].end(), i) != Table::data[j].end())
-                        {
-                            std::cout << state << (base ? Color::Green : Color::Red) << bit << Color::Default;
-                            state.resize(0);
-                        }
-                        else
-                            state.pushBack(bit);
-                    }
-                    if (state.size())
-                        std::cout << state;
-                    std::cout << std::endl;
-                }
-            }
-
-            perm.template applyChunk<flush>(xx + j - chunkSize);
-            //if constexpr (eagerPermute)
-            //{
-            //    //if (rangeCheck == false || perm != permEnd)
-            //    //{
-            //    //    std::array<T, permSize>* __restrict xi8 = (std::array<T, permSize>*)(xx + j - 8);
-            //    //    memcpy(&dst[*(u32 * __restrict)perm], xi8, sizeof(xi8));
-            //    //    ++perm;
-            //    //}
-            //}
-        }
-    }
-
-
-    template<
-
-        typename Table,
-        typename Perm,
-        typename T,
-        bool rangeCheck,
-        bool verbose = false>
-        OC_FORCEINLINE void accumulateBlock2(T* xx, T* b, T* e, Perm& perm)
-    {
-        //auto& perm = mPerm;
-        static constexpr int chunkSize = Perm::chunkSize;
-        //auto e = xx - Table::data.size();
-        static_assert(Table::data.size() % chunkSize == 0, "");
-        auto tIter = Table::data.data();
-        for (u64 j = 0; j < Table::data.size();)
-        {
-
-            _mm_prefetch((char*)(xx + j + Table::data.size() * 2), _MM_HINT_T0);
-            for (u64 k = 0; k < chunkSize; ++k, ++j)
-            {
-
-                T* __restrict xb = xx + j;
-                T* __restrict xi = xb + Table::data.size();
-                T* __restrict xs = xi - 1;
-
-                if constexpr (Table::data[0].size() == 4)
-                {
-                    T* __restrict x0 = xb + tIter[j].data()[0];
-                    T* __restrict x1 = xb + tIter[j].data()[1];
-                    T* __restrict x2 = xb + tIter[j].data()[2];
-                    T* __restrict x3 = xb + tIter[j].data()[3];
-
-                    //std::cout << "x[" << j << "] += x[" << j + 1
-                    //    << " + " << j + (int)tIter[j].data()[0]
-                    //    << " + " << j + (int)tIter[j].data()[1]
-                    //    << " + " << j + (int)tIter[j].data()[2]
-                    //    << " + " << j + (int)tIter[j].data()[3] << std::endl;
-
-                    assert(x3 < e);
-                    assert(xi < e);
-
-                    if constexpr (rangeCheck)
-                    {
-                        if (xs >= b) *xi = *xs ^ *xi;
-                        if (x0 >= b) *xi = *x0 ^ *xi;
-                        if (x1 >= b) *xi = *x1 ^ *xi;
-                        if (x2 >= b) *xi = *x2 ^ *xi;
-                        if (x3 >= b) *xi = *x3 ^ *xi;
-                    }
-                    else
-                    {
-                        assert(x0 >= b);
-
-                        *xi = *xi
-                            ^ *xs
-                            ^ *x0
-                            ^ *x1
-                            ^ *x2
-                            ^ *x3;
-                    }
-                }
-                else if constexpr (Table::data[0].size() == 7)
-                {
-                    T* __restrict x0 = xb + Table::data[j][0];
-                    T* __restrict x1 = xb + Table::data[j][1];
-                    T* __restrict x2 = xb + Table::data[j][2];
-                    T* __restrict x3 = xb + Table::data[j][3];
-                    T* __restrict x4 = xb + Table::data[j][4];
-                    T* __restrict x5 = xb + Table::data[j][5];
-                    T* __restrict x6 = xb + Table::data[j][6];
-
-                    if constexpr (rangeCheck)
-                    {
-                        if (xs >= e) *xi = *xs ^ *xi;
-                        if (x0 >= e) *xi = *x0 ^ *xi;
-                        if (x1 >= e) *xi = *x1 ^ *xi;
-                        if (x2 >= e) *xi = *x2 ^ *xi;
-                        if (x3 >= e) *xi = *x3 ^ *xi;
-                        if (x4 >= e) *xi = *x3 ^ *xi;
-                        if (x5 >= e) *xi = *x5 ^ *xi;
-                        if (x6 >= e) *xi = *x6 ^ *xi;
-                    }
-                    else
-                    {
-                        *xi = *xi
-                            ^ *xs
-                            ^ *x0
-                            ^ *x1
-                            ^ *x2
-                            ^ *x3
-                            ^ *x4
-                            ^ *x5
-                            ^ *x6;
-                    }
-                }
-                else
-                {
-                    throw RTE_LOC;
-                }
-
-                perm.apply(xi, k);
-                //if constexpr (!eagerPermute)
-                //{
-                //    *(T * __restrict)perm[k] = *xi;
-                //    ++perm[k];
-                //}
-
-                if constexpr (verbose)
-                {
-                    BitVector state;
-                    state.reserve(Table::data.size());
-                    auto base = (int)*(u8*)&xx[j] & 1;
-                    for (u64 i : rng(Table::data.size()))
-                    {
-                        auto bit = (int)*(u8*)&xx[j + i] & 1;
-                        if (i == 1 || std::find(Table::data[j].begin(), Table::data[j].end(), i) != Table::data[j].end())
-                        {
-                            std::cout << state << (base ? Color::Green : Color::Red) << bit << Color::Default;
-                            state.resize(0);
-                        }
-                        else
-                            state.pushBack(bit);
-                    }
-                    if (state.size())
-                        std::cout << state;
-                    std::cout << std::endl;
-                }
-            }
-
-            perm.template applyChunk<false> (xx + j - chunkSize);
-            //if constexpr (eagerPermute)
-            //{
-            //    //if (rangeCheck == false || perm != permEnd)
-            //    //{
-            //    //    std::array<T, permSize>* __restrict xi8 = (std::array<T, permSize>*)(xx + j - 8);
-            //    //    memcpy(&dst[*(u32 * __restrict)perm], xi8, sizeof(xi8));
-            //    //    ++perm;
-            //    //}
-            //}
-        }
-    }
-
-
-    // this expander/permuter first maps items into bins, every (i + j * NumBins)'th item 
-    // is mapped to the i'th bin. These bins are then permuted
-    // uniformly. The final expander is obtained by doing linear sums.
-    template<typename T, int NumBins>
-    struct TungstenBinPerm
-    {
-        static constexpr int c2 = 16;
-        static constexpr int chunkSize = NumBins * c2;
-
-        std::array<Perm, NumBins> mPerm;
-        AlignedUnVector<T> mBuffer;
-        std::array<T* __restrict, NumBins> mBins;
-
-        void reset()
-        {
-            for (u64 i = 0; i < NumBins; ++i)
-            {
-                mBins[i] = mBuffer.data() + i * mPerm[i].mPerm.size();
-            }
-        }
-
-        TungstenBinPerm(u64 size)
-            : mBuffer(size)
-        {
-            if (size % NumBins)
-                throw RTE_LOC;
-            auto s = mBuffer.size() / NumBins;
-            PRNG prng(CCBlock);
-            for (u64 i = 0; i < NumBins; ++i)
-            {
-                mPerm[i].init(s, prng);
-            }
-            reset();
-        }
-
-        OC_FORCEINLINE void apply(T* __restrict xi, u64 k)
-        {
-            //assert(k < NumBins);
-            //assert(mBins[k] < (k + 1) * mPerm[0].mPerm.size() + mBuffer.data());
-            //*(T * __restrict)mBins[k] = *xi;
-            //++mBins[k];
-        }
-
-
-        template<bool flush>
-        OC_FORCEINLINE void applyChunk(T* __restrict x)
-        {
-            for (u64 i = 0; i < c2; ++i, ++x)
-            {
-                if (flush)
-                {
-
-                    if constexpr (NumBins == 8)
-                    {
-                        _mm_stream_si128((__m128i*)mBins[0]++, x[0]);
-                        _mm_stream_si128((__m128i*)mBins[1]++, x[8]);
-                        _mm_stream_si128((__m128i*)mBins[2]++, x[16]);
-                        _mm_stream_si128((__m128i*)mBins[3]++, x[24]);
-                        _mm_stream_si128((__m128i*)mBins[4]++, x[32]);
-                        _mm_stream_si128((__m128i*)mBins[5]++, x[40]);
-                        _mm_stream_si128((__m128i*)mBins[6]++, x[48]);
-                        _mm_stream_si128((__m128i*)mBins[7]++, x[56]);
-                    }
-                    else if constexpr (NumBins == 16)
-                    {
-
-                        _mm_stream_si128((__m128i*)mBins[0]++, x[0]);
-                        _mm_stream_si128((__m128i*)mBins[1]++, x[8]);
-                        _mm_stream_si128((__m128i*)mBins[2]++, x[16]);
-                        _mm_stream_si128((__m128i*)mBins[3]++, x[24]);
-                        _mm_stream_si128((__m128i*)mBins[4]++, x[32]);
-                        _mm_stream_si128((__m128i*)mBins[5]++, x[40]);
-                        _mm_stream_si128((__m128i*)mBins[6]++, x[48]);
-                        _mm_stream_si128((__m128i*)mBins[7]++, x[56]);
-
-                        _mm_stream_si128((__m128i*)mBins[8 + 0]++, x[64 + 0]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 1]++, x[64 + 8]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 2]++, x[64 + 16]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 3]++, x[64 + 24]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 4]++, x[64 + 32]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 5]++, x[64 + 40]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 6]++, x[64 + 48]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 7]++, x[64 + 56]);
-                    }
-                    else
-                    {
-                        throw RTE_LOC;
-                    }
-                }
-                else
-                {
-
-                    if constexpr (NumBins == 8)
-                    {
-                        *mBins[0]++ = x[0];
-                        *mBins[1]++ = x[8];
-                        *mBins[2]++ = x[16];
-                        *mBins[3]++ = x[24];
-                        *mBins[4]++ = x[32];
-                        *mBins[5]++ = x[40];
-                        *mBins[6]++ = x[48];
-                        *mBins[7]++ = x[56];
-                    }
-                    else if constexpr (NumBins == 16)
-                    {
-
-                        *mBins[0]++ = x[0];
-                        *mBins[1]++ = x[8];
-                        *mBins[2]++ = x[16];
-                        *mBins[3]++ = x[24];
-                        *mBins[4]++ = x[32];
-                        *mBins[5]++ = x[40];
-                        *mBins[6]++ = x[48];
-                        *mBins[7]++ = x[56];
-                        *
-                            *mBins[8 + 0]++ = x[64 + 0];
-                        *mBins[8 + 1]++ = x[64 + 8];
-                        *mBins[8 + 2]++ = x[64 + 16];
-                        *mBins[8 + 3]++ = x[64 + 24];
-                        *mBins[8 + 4]++ = x[64 + 32];
-                        *mBins[8 + 5]++ = x[64 + 40];
-                        *mBins[8 + 6]++ = x[64 + 48];
-                        *mBins[8 + 7]++ = x[64 + 56];
-                    }
-                    else
-                    {
-                        throw RTE_LOC;
-                    }
-                }
-            }
-        }
-
-        void finalize()
-        {
-            auto s = mBuffer.size() / NumBins;
-            for (u64 j = 0; j < NumBins; ++j)
-            {
-                auto sub = mBuffer.subspan(s * j, s);
-                mPerm[j].apply(sub);
-            }
-        }
-    };
-
-    // this expander/permuter maps chunks of inputs uniformly. The final expander is obtained by doing linear sums.
-    template<typename T, int chunkSize_>
-    struct TungstenPerm
-    {
-        static constexpr int chunkSize = chunkSize_;
-        Perm mPerm;
-        AlignedUnVector<T> mBuffer;
-        u32* mPermIter;
-
-        void reset()
-        {
-            mPermIter = mPerm.mPerm.data();
-        }
-
-        TungstenPerm(u64 size)
-            : mBuffer(size)
-        {
-            if (size % chunkSize)
-                throw RTE_LOC;
-            PRNG prng(CCBlock);
-            if (mPerm.mPerm.size() == 0)
-                mPerm.init(mBuffer.size() / chunkSize, prng, true);
-            reset();
-        }
-
-        void finalize()
-        {
-        }
-
-        OC_FORCEINLINE void apply(T* __restrict x, u64 k)
-        {}
-
-        template<bool flush>
-        OC_FORCEINLINE void applyChunk(T* __restrict x)
-        {
-            assert(mPermIter < mPerm.mPerm.data() + mPerm.mPerm.size());
-
-            T* __restrict dst = &mBuffer.data()[*(u32 * __restrict)mPermIter * chunkSize];
-
-            //for (u64 i = 0; i < chunkSize; ++i)
-            //{
-            //    std::cout << ">" << mIdx++ <<" -> " << 
-            //}
-            //std::cout<< ">" << *mPermIter << std::endl;
-            ++mPermIter;
-
-            //if constexpr (std::is_same_v<T, block> && flush)
-            //{
-            //    if constexpr (chunkSize == 8)
-            //    {
-            //        _mm_stream_si128((__m128i*)dst + 0, x[0]);
-            //        _mm_stream_si128((__m128i*)dst + 1, x[1]);
-            //        _mm_stream_si128((__m128i*)dst + 2, x[2]);
-            //        _mm_stream_si128((__m128i*)dst + 3, x[3]);
-            //        _mm_stream_si128((__m128i*)dst + 4, x[4]);
-            //        _mm_stream_si128((__m128i*)dst + 5, x[5]);
-            //        _mm_stream_si128((__m128i*)dst + 6, x[6]);
-            //        _mm_stream_si128((__m128i*)dst + 7, x[7]);
-
-            //    }
-            //    else
-            //        for (u64 i = 0; i < chunkSize; ++i)
-            //            _mm_stream_si128((__m128i*)dst + i, x[i]);
-            //}
-            //else
-            memcpy(dst, x, sizeof(*x) * chunkSize);
-        }
-
-        SparseMtx getMatrix() const
-        {
-            auto n = mPerm.mPerm.size() * chunkSize;
-            PointList ret(n, n);
-
-            u64 r = 0;
-            for (auto p : mPerm.mPerm)
-            {
-                //std::cout << "<" << p << std::endl;
-
-                for (u64 i = 0; i < chunkSize; ++i, ++r)
-                {
-                    ret.push_back({ p * chunkSize + i , r });
-                }
-            }
-            return ret;
-        }
-    };
-
-    // this exapnder/permuter does nothing.
-    struct NoopPerm
-    {
-        static constexpr int chunkSize = 1;
-
-        NoopPerm() = default;
-        NoopPerm(u64 n) {}
-
-        void reset()
-        {
-        }
-
-
-        void finalize()
-        {
-        }
-
-        template<typename T>
-        OC_FORCEINLINE void apply(T* __restrict x, u64 k)
-        {}
-
-        template<bool, typename T>
-        OC_FORCEINLINE void applyChunk(T* __restrict x)
-        {
-        }
-    };
-
-
-    template<typename Table_ = TableTungsten1024x4>
-    struct TableAcc
-    {
-
-        template<bool rangeCheck = false, bool flush = false, typename T>
-        OC_FORCEINLINE void processBlock(T* xx, T* end)
-        {
-
-            accumulateBlock<Table, Perm, T, rangeCheck, flush>(xx, end, mPerm);
-        }
-
-    };
-
-
-    template<typename T_ = block, typename Next_ = TungstenPerm<T_, 8>, typename Table_ = TableTungsten1024x4>
-    struct Tungsten2 : public TimerAdapter
-    {
-        using T = T_;
-        using Perm = Next_;
-        using Table = Table_;
-
-        static constexpr bool accTwice = true;
-        static constexpr int chunkSize = Perm::chunkSize;
-        //using Perm = TungstenBinPerm<T, chunkSize>;
-        //using Perm = TungstenPerm<T, chunkSize>;
-        //using Table = TableTungsten128x4;
-        //using Table = TableTungsten8x4;
-
-        bool mFirst = true;
-        u64 mExpanderWeight = 0;
-        Perm mPerm;
-        std::array<T, Table::data.size() * 2> mBuffer;
-
-
-        Tungsten2(u64 size, u64 expanderWeight)
-            : mPerm(size)
-            , mExpanderWeight(expanderWeight)
-        {
-            reset();
-        }
-
-        void reset()
-        {
-            mFirst = true;
-            mPerm.reset();
-        }
-
-        template<bool rangeCheck = false, bool flush = false>
-        OC_FORCEINLINE void processBlock(T* xx, T* end)
-        {
-
-            accumulateBlock<Table, Perm, T, rangeCheck, flush>(xx, end, mPerm);
-        }
-
-        void update(span<T> x)
-        {
-            if (x.size() == 0 || (x.size() % Table::data.size()))
-                throw RTE_LOC;
-            auto xx_ = x.data();
-            auto rem = x.size() - Table::data.size();
-
-            if (mFirst)
-            {
-                if (rem)
-                {
-                    for (u64 i = 0; i < rem; )
-                    {
-                        processBlock<false, true>(xx_ + i, x.data() + x.size());
-                        i += Table::data.size();
-                    }
-                }
-
-                memcpy(mBuffer.data(), x.data() + rem, Table::data.size() * sizeof(T));
-            }
-            else
-            {
-                memcpy(mBuffer.data() + Table::data.size(), x.data(), Table::data.size() * sizeof(T));
-                processBlock(mBuffer.data(), mBuffer.data() + mBuffer.size());
-
-                T* src;
-                if (rem)
-                {
-                    for (u64 i = 0; i < rem; )
-                    {
-                        processBlock<false, true>(xx_ + i, x.data() + x.size());
-                        i += Table::data.size();
-                    }
-
-                    src = x.data() + rem;
-                }
-                else
-                    src = mBuffer.data() + Table::data.size();
-
-                memcpy(mBuffer.data(), src, Table::data.size() * sizeof(T));
-            }
-
-            mFirst = false;
-        }
-
-        template<bool rangeCheck = false>
-        OC_FORCEINLINE void processBlock2(T* x, T* xb, T* xe)
-        {
-            accumulateBlock2<Table, Perm, T, rangeCheck>(x, xb,xe, mPerm);
-        }
-
-
-        void update2(span<T> x)
-        {
-            assert(x.size() && (x.size() % Table::data.size() == 0));
-
-            auto xx_ = x.data();
-            auto rem = x.size() - Table::data.size();
-            auto e = x.data() + x.size();
-
-            if (mFirst)
-            {
-                processBlock2<true>(xx_, xx_, e);
-
-                for (u64 i = Table::data.size(); i < rem; i += Table::data.size())
-                {
-                    processBlock2(xx_ + i, xx_, e);
-                }
-
-                memcpy(mBuffer.data(), x.data() + rem, Table::data.size() * sizeof(T));
-            }
-            else
-            {
-                memcpy(mBuffer.data() + Table::data.size(), x.data(), Table::data.size() * sizeof(T));
-                processBlock2(mBuffer.data(), mBuffer.data(), mBuffer.data() + mBuffer.size());
-
-                T* src;
-                if (rem)
-                {
-                    memcpy(
-                        x.data(),
-                        mBuffer.data() + Table::data.size(),
-                        Table::data.size() * sizeof(T));
-
-                    for (u64 i = Table::data.size(); i < rem; i += Table::data.size())
-                    {
-                        processBlock2(xx_ + i, xx_, e);
-                    }
-
-                    src = x.data() + rem;
-                }
-                else
-                    src = mBuffer.data() + Table::data.size();
-
-                memcpy(mBuffer.data(), src, Table::data.size() * sizeof(T));
-            }
-
-            mFirst = false;
-        }
-
-        void finalize(span<T> w)
-        {
-            processBlock<true>(mBuffer.data(), mBuffer.data() + mBuffer.size());
-            finalize2(w);
-        }
-
-        void finalize2(span<T> w)
-        {
-            mPerm.finalize();
-
-            if constexpr (std::is_same<Perm, TungstenBinPerm<T, chunkSize>>::value)
-                setTimePoint("permFinalize");
-
-
-
-            if constexpr (accTwice)
-            {
-                T* __restrict xx = mPerm.mBuffer.data();
-                auto end = mPerm.mBuffer.data() + mPerm.mBuffer.size();
-                NoopPerm noop;
-
-                for (u64 i = 0; i < mPerm.mBuffer.size() - Table::data.size(); i += Table::data.size())
-                {
-                    accumulateBlock<Table, NoopPerm, T, false, true>(xx + i, end, noop);
-                    //processBlock<false>(xx + i, end);
-                }
-
-                accumulateBlock<Table, NoopPerm, T, true>(end - Table::data.size(), end, noop);
-                setTimePoint("acc2");
-            }
-
-
-            linearSums<T>(mPerm.mBuffer, w, mExpanderWeight);
-
-        }
-
-
-        SparseMtx getAPar()
-        {
-            return getAccPar<Table>(mPerm.mBuffer.size());
-        }
-        DenseMtx getA()
-        {
-            return getAcc<Table>(mPerm.mBuffer.size());
-        }
-
-        SparseMtx getP()
-        {
-            return mPerm.getMatrix();
-        }
-
-        SparseMtx getS()
-        {
-            return getLinearSums(mPerm.mBuffer.size(), mExpanderWeight);
-        }
-    };
-
-
     template<typename T>
     struct TunstenExpander
     {
@@ -2221,67 +1165,67 @@ namespace osuCrypto
         }
     };
 
-    struct TungstanClassic : public TimerAdapter
-    {
-        using T = block;
+    //struct TungstanClassic : public TimerAdapter
+    //{
+    //    using T = block;
 
-        //using Perm = TunstenRegularExpander<T>;
-        using Perm = TunstenExpander<T>;
-        using Table = TableTungsten128x4;
-        std::array<T, Table::data.size() * 2> mBuffer;
-        bool mFirst = true;
-        Perm mPerm;
+    //    //using Perm = TunstenRegularExpander<T>;
+    //    using Perm = TunstenExpander<T>;
+    //    using Table = TableTungsten128x4;
+    //    std::array<T, Table::data.size() * 2> mBuffer;
+    //    bool mFirst = true;
+    //    Perm mPerm;
 
-        TungstanClassic(u64 size, u64 weight)
-            : mPerm(size, weight)
-        {
-        }
+    //    TungstanClassic(u64 size, u64 weight)
+    //        : mPerm(size, weight)
+    //    {
+    //    }
 
-        void reset()
-        {
-            mPerm.reset();
-        }
+    //    void reset()
+    //    {
+    //        mPerm.reset();
+    //    }
 
-        template<bool rangeCheck = false, bool flush = false>
-        OC_FORCEINLINE void processBlock(T* xx, T* end)
-        {
-            accumulateBlock<Table, Perm, T, rangeCheck, flush>(xx, end, mPerm);
-        }
+    //    template<bool rangeCheck = false, bool flush = false>
+    //    OC_FORCEINLINE void processBlock(T* xx, T* end)
+    //    {
+    //        accumulateBlock<Table, Perm, T, rangeCheck, flush>(xx, end, mPerm);
+    //    }
 
-        void update(span<T> x)
-        {
-            if (x.size() == 0 && x.size() % Table::data.size())
-                throw RTE_LOC;
-            auto xx_ = x.data();
-            auto rem = x.size() - Table::data.size();
+    //    void update(span<T> x)
+    //    {
+    //        if (x.size() == 0 && x.size() % Table::data.size())
+    //            throw RTE_LOC;
+    //        auto xx_ = x.data();
+    //        auto rem = x.size() - Table::data.size();
 
-            if (mFirst)
-            {
-                for (u64 i = 0; i < rem; i += Table::data.size())
-                    processBlock<false, true>(xx_ + i, x.data() + x.size());
+    //        if (mFirst)
+    //        {
+    //            for (u64 i = 0; i < rem; i += Table::data.size())
+    //                processBlock<false, true>(xx_ + i, x.data() + x.size());
 
-                memcpy(mBuffer.data(), x.data() + rem, Table::data.size() * sizeof(T));
-            }
-            else
-            {
-                memcpy(mBuffer.data() + Table::data.size(), x.data(), Table::data.size() * sizeof(T));
-                processBlock(mBuffer.data(), mBuffer.data() + mBuffer.size());
+    //            memcpy(mBuffer.data(), x.data() + rem, Table::data.size() * sizeof(T));
+    //        }
+    //        else
+    //        {
+    //            memcpy(mBuffer.data() + Table::data.size(), x.data(), Table::data.size() * sizeof(T));
+    //            processBlock(mBuffer.data(), mBuffer.data() + mBuffer.size());
 
-                for (u64 i = 0; i < rem; i += Table::data.size())
-                    processBlock<false, true>(xx_ + i, x.data() + x.size());
+    //            for (u64 i = 0; i < rem; i += Table::data.size())
+    //                processBlock<false, true>(xx_ + i, x.data() + x.size());
 
-                T* src = rem ?
-                    x.data() + rem :
-                    mBuffer.data() + Table::data.size();
+    //            T* src = rem ?
+    //                x.data() + rem :
+    //                mBuffer.data() + Table::data.size();
 
-                memcpy(mBuffer.data(), src, Table::data.size() * sizeof(T));
-            }
-            mFirst = false;
-        }
+    //            memcpy(mBuffer.data(), src, Table::data.size() * sizeof(T));
+    //        }
+    //        mFirst = false;
+    //    }
 
-        void finalize(span<T>)
-        {
+    //    void finalize(span<T>)
+    //    {
 
-        }
-    };
+    //    }
+    //};
 }

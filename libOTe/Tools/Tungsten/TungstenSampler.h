@@ -1,3 +1,4 @@
+#pragma once
 
 #include "libOTe/Tools/LDPC/LdpcSampler.h"
 #include "cryptoTools/Common/CLP.h"

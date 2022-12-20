@@ -1,6 +1,7 @@
 
 #include "Tungsten_Tests.h"
 #include "libOTe/Tools/Tungsten/TungstenEncoder.h"
+#include "libOTe/Tools/Tungsten/TungstenEncoder2.h"
 #include <iomanip>
 #include "cryptoTools/Common/Timer.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
@@ -23,7 +24,6 @@ namespace tests_libOTe
 
         if (reuse != Tungsten::RNG::gf128mul &&
             reuse != Tungsten::RNG::prng &&
-            reuse != Tungsten::RNG::xoshiro256Plus &&
             reuse != Tungsten::RNG::aeslite
             )
             throw RTE_LOC;
@@ -111,7 +111,7 @@ namespace tests_libOTe
         OC_FORCEINLINE void apply(T* __restrict x, u64 k)
         {}
 
-        template<bool, typename T>
+        template<typename T>
         OC_FORCEINLINE void applyChunk(T* __restrict x)
         {
             std::copy(x, x + chunkSize, mIter);
@@ -122,26 +122,19 @@ namespace tests_libOTe
 
     void Tungsten2_encode_basic_test(const oc::CLP& cmd)
     {
-        auto k = cmd.getOr("k", 16);
+        auto k = cmd.getOr("k", 64);
         auto n = cmd.getOr("n", k * 2);
         auto bw = cmd.getOr("bw", 5);
         auto aw = cmd.getOr("aw", 10);
         auto sticky = cmd.getOr("ns", 1);
         auto skip = cmd.isSet("skip");
-        auto reuse = (Tungsten::RNG)cmd.getOr("rng", 2);
         bool permute = cmd.isSet("permute");
 
         bool v = cmd.isSet("v");
 
-        if (reuse != Tungsten::RNG::gf128mul &&
-            reuse != Tungsten::RNG::prng &&
-            reuse != Tungsten::RNG::xoshiro256Plus
-            )
-            throw RTE_LOC;
-        using Tung = Tungsten2<block, TungstenPerm<block, 8>, TableTungsten8x4>;
+        using Tung = Tungsten2<block, TungstenPerm<block, 8>, TableAcc<block, TableTungsten8x4>>;
 
         Tung code(n, bw);
-
 
         //code.config(k, n, bw, aw, reuse, permute, sticky);
 
@@ -151,7 +144,8 @@ namespace tests_libOTe
         auto PA = P * A;
         auto APA = A * PA;
         //auto G = S.dense() * PA;
-        auto SAPA = S * APA; 
+        auto SAPA = S * APA;
+        auto SPA = S * PA;
         
         if (v)
         {
@@ -176,18 +170,18 @@ namespace tests_libOTe
 
         PRNG prng(ZeroBlock);
 
-
+        using Table = Tung::Acc::Table;
         {
             std::vector<block> a1(n);
             auto tt = c0;
             Tung code(n, bw);
             auto iter = tt.data();
-            if (tt.size() % Tung::Table::data.size())
+            if (tt.size() % Table::data.size())
                 throw RTE_LOC;
             while (iter != tt.data() + n)
             {
-                code.processBlock<true>(iter, tt.data() + tt.size());
-                iter += Tung::Table::data.size();
+                code.mAcc.processBlock<true>(iter, tt.data() + tt.size(), code.mExpander);
+                iter += Table::data.size();
             }
             A.sparse().multAdd(c0, a1);
 
@@ -212,15 +206,19 @@ namespace tests_libOTe
         {
 
             auto tt = c0;
-            Tungsten2<block, Perm__, TableTungsten8x4> code(n, bw);
+            Tungsten2<block, Perm__, TableAcc<block,TableTungsten8x4>> code(n, bw);
             code.update(tt);
-            code.processBlock<true>(code.mBuffer.data(), code.mBuffer.data() + code.mBuffer.size());
+
+            code.mAcc.finalize(code.mExpander);
+            //code.mAcc.processBlock<true>(code.mBuffer.data(), code.mBuffer.data() + code.mBuffer.size(), code.mExpander);
+
+            //code.processBlock<true>(code.mBuffer.data(), code.mBuffer.data() + code.mBuffer.size());
 
 
             std::vector<block> a1(n);
             A.sparse().multAdd(c0, a1);
 
-            if (memcmp(code.mPerm.buff.data(), a1.data(), n * sizeof(block)))
+            if (memcmp(code.mExpander.buff.data(), a1.data(), n * sizeof(block)))
             {
                 //if (v)
                 {
@@ -242,13 +240,13 @@ namespace tests_libOTe
             auto tt = c0;
             Tung code(n, bw);
             code.update(tt);
-            code.processBlock<true>(code.mBuffer.data(), code.mBuffer.data() + code.mBuffer.size());
+            code.mAcc.finalize(code.mExpander);
 
 
             std::vector<block> a1(n);
             PA.sparse().multAdd(c0, a1);
 
-            if (memcmp(code.mPerm.mBuffer.data(), a1.data(), n * sizeof(block)))
+            if (memcmp(code.mExpander.mBuffer.data(), a1.data(), n * sizeof(block)))
             {
                 //if (v)
                 {
@@ -269,21 +267,31 @@ namespace tests_libOTe
 
             auto tt = c0;
             Tung code(n, bw);
+
+
+            //span<block> ss = tt;
+            //while (ss.size())
+            //{
+            //    auto step = std::min<u64>(ss.size(), Tung::Acc::blockSize * 4);
+            //    code.update(ss.subspan(0, step));
+            //    ss = ss.subspan(step);
+            //}
             code.update(tt);
+
             tt.resize(k);
             code.finalize(tt);
 
 
-            std::vector<block> a0(n);
-            APA.sparse().multAdd(c0, a0);
+            std::vector<block> a0(k);
+            SAPA.sparse().multAdd(c0, a0);
 
-            if (memcmp(code.mPerm.mBuffer.data(), a0.data(), n * sizeof(block)))
+            if (memcmp(tt.data(), a0.data(), k * sizeof(block)))
             {
                 //if (v)
                 {
 
                     for (u64 i = 0; i < k; ++i)
-                        std::cout << std::hex << (code.mPerm.mBuffer[i].get<int>(0) & 1) << (code.mPerm.mBuffer[i] != a0[i] ? "<" : " ");
+                        std::cout << std::hex << (code.mExpander.mBuffer[i].get<int>(0) & 1) << (code.mExpander.mBuffer[i] != a0[i] ? "<" : " ");
                     std::cout << "\n";
                     for (u64 i = 0; i < k; ++i)
                         std::cout << std::hex << (a0[i].get<int>(0) & 1) << " ";
@@ -293,24 +301,24 @@ namespace tests_libOTe
                 throw RTE_LOC;
             }
 
-            std::vector<block> a1(k);
-            SAPA.sparse().multAdd(c0, a1);
+            //std::vector<block> a1(k);
+            //SAPA.sparse().multAdd(c0, a1);
 
-            if (memcmp(tt.data(), a1.data(), k * sizeof(block)))
-            {
-                //if (v)
-                {
+            //if (memcmp(tt.data(), a1.data(), k * sizeof(block)))
+            //{
+            //    //if (v)
+            //    {
 
-                    for (u64 i = 0; i < k; ++i)
-                        std::cout << std::hex << (tt[i].get<int>(0) & 1) << (tt[i] != a1[i] ? "<" : " ");
-                    std::cout << "\n";
-                    for (u64 i = 0; i < k; ++i)
-                        std::cout << std::hex << (a1[i].get<int>(0) & 1) << " ";
-                    std::cout << "\n";
-                }
+            //        for (u64 i = 0; i < k; ++i)
+            //            std::cout << std::hex << (tt[i].get<int>(0) & 1) << (tt[i] != a1[i] ? "<" : " ");
+            //        std::cout << "\n";
+            //        for (u64 i = 0; i < k; ++i)
+            //            std::cout << std::hex << (a1[i].get<int>(0) & 1) << " ";
+            //        std::cout << "\n";
+            //    }
 
-                throw RTE_LOC;
-            }
+            //    throw RTE_LOC;
+            //}
         }
     }
 
@@ -374,7 +382,6 @@ namespace tests_libOTe
 
         if (reuse != Tungsten::RNG::gf128mul &&
             reuse != Tungsten::RNG::prng &&
-            reuse != Tungsten::RNG::xoshiro256Plus &&
             reuse != Tungsten::RNG::aeslite
             )
             throw RTE_LOC;
@@ -401,35 +408,35 @@ namespace tests_libOTe
         }
         else if (cmd.isSet("reg"))
         {
-            TungstanClassic code(n, bw);
+            //TungstanClassic code(n, bw);
 
-            //TungstenAccumulator code(TungstenBinPermuter{ (u64)n, (u64)bw });
-            oc::Timer timer;
-            code.setTimer(timer);
+            ////TungstenAccumulator code(TungstenBinPermuter{ (u64)n, (u64)bw });
+            //oc::Timer timer;
             //code.setTimer(timer);
-            std::vector<block> c0(step, ZeroBlock);
-            c0[0] = OneBlock;
-            for (auto t : rng(tt))
-            {
-                code.reset();
-                timer.setTimePoint("reset");
-                for (u64 j = 0; j < n; j += step)
-                {
-                    span<block> buff(c0.data(), step);
-                    code.update(buff);
-                }
+            ////code.setTimer(timer);
+            //std::vector<block> c0(step, ZeroBlock);
+            //c0[0] = OneBlock;
+            //for (auto t : rng(tt))
+            //{
+            //    code.reset();
+            //    timer.setTimePoint("reset");
+            //    for (u64 j = 0; j < n; j += step)
+            //    {
+            //        span<block> buff(c0.data(), step);
+            //        code.update(buff);
+            //    }
 
-                timer.setTimePoint("acc");
+            //    timer.setTimePoint("acc");
 
-                //code.finalize(m1);
+            //    //code.finalize(m1);
 
-                timer.setTimePoint("expand");
-                //code.cirTransEncode<block>(c0, m1);
-            }
+            //    timer.setTimePoint("expand");
+            //    //code.cirTransEncode<block>(c0, m1);
+            //}
 
 
-            if (!cmd.isSet("quiet"))
-                std::cout << timer << std::endl;
+            //if (!cmd.isSet("quiet"))
+            //    std::cout << timer << std::endl;
 
         }
         else if (cmd.isSet("bpm"))
