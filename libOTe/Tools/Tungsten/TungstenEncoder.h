@@ -292,54 +292,10 @@ namespace osuCrypto
                 fixedAccumulate(main, x, TABLE);
             }
 #undef TABLE
-            else if (mAccumulatorWeight == 10)
-            {
-#define TABLE tunsten_diagMtx_128x10
-                auto main = x.size() / TABLE.size();
-                main = main ? (main - 1) * TABLE.size() : 0;
-
-                for (u64 i = 0; i < main; )
-                {
-
-                    for (u64 j = 0; j < TABLE.size(); ++j, ++i)
-                    {
-                        _mm_prefetch((char*)(xx + i + 2 * TABLE.size()), _MM_HINT_T0);
-                        T* __restrict xi = xx + i;
-                        T* __restrict xs = xi + 1;
-                        T* __restrict x0 = xi + TABLE[j][0];
-                        T* __restrict x1 = xi + TABLE[j][1];
-                        T* __restrict x2 = xi + TABLE[j][2];
-                        T* __restrict x3 = xi + TABLE[j][3];
-                        T* __restrict x4 = xi + TABLE[j][4];
-                        T* __restrict x5 = xi + TABLE[j][5];
-                        T* __restrict x6 = xi + TABLE[j][6];
-                        T* __restrict x7 = xi + TABLE[j][7];
-                        T* __restrict x8 = xi + TABLE[j][8];
-                        T* __restrict x9 = xi + TABLE[j][9];
-
-
-                        *xs = *xs ^ *xi;
-                        *x0 = *x0 ^ *xi;
-                        *x1 = *x1 ^ *xi;
-                        *x2 = *x2 ^ *xi;
-                        *x3 = *x3 ^ *xi;
-                        *x4 = *x4 ^ *xi;
-                        *x5 = *x5 ^ *xi;
-                        *x6 = *x6 ^ *xi;
-                        *x7 = *x7 ^ *xi;
-                        *x8 = *x8 ^ *xi;
-                        *x9 = *x9 ^ *xi;
-
-                    }
-                }
-
-                fixedAccumulate(main, x, TABLE);
-            }
             else
             {
                 throw RTE_LOC;
             }
-#undef TABLE
         }
 
 

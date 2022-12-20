@@ -27,9 +27,22 @@ namespace osuCrypto
             for (u64 i : rng(row))
             {
                 std::set<u64> col;
+                auto c = (i + row - 1) % row;
+
+                for (u64 j = 0; j <= shift; ++j)
+                {
+                    col.insert(c);
+                    c = (c + row - 1) % row;
+                }
+
+                //col.insert(c--);
+                //col.insert(i);
+                //M(i, c) = 1;
+                auto tw = weight + col.size();
+
                 u64 j = 0;
                 u64 tries = 0;
-                while (col.size() < weight)
+                while (col.size() < tw)
                 {
                     ++tries;
                     if (tries > 10000)
@@ -38,6 +51,9 @@ namespace osuCrypto
                     auto p = perms[j];
                     auto d = (prng.get<u64>() % (row - i)) + i;
                     std::swap(p[i], p[d]);
+
+                    //if (p[i] == i || p[i] == c)
+                    //    continue;
 
                     auto b = col.insert(p[i]);
                     if (b.second)
@@ -48,7 +64,7 @@ namespace osuCrypto
                 }
             }
         }
-
+        //std::cout << M << std::endl;
         Matrix<u64> ret(row, weight);
         for (u64 i : rng(row))
         {

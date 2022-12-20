@@ -32,8 +32,8 @@ namespace osuCrypto
             //std::cout << "x[" << i << "] += x[" << i + 1;
             AP.push_back(i, i);
 
-            if (i + 1 < n)
-                AP.push_back(i + 1, i);
+            //if (i + 1 < n)
+            //    AP.push_back(i + 1, i);
 
 
             if (transposed)
@@ -59,8 +59,8 @@ namespace osuCrypto
                 }
             }
 
-            //if (i + 1 < n)
-            //    AP.push_back(i + 1, i);
+            if (i + Table::data.size()-1 < n)
+                AP.push_back(i + Table::data.size()-1, i);
             //std::cout << std::endl;
         }
 
@@ -112,12 +112,12 @@ namespace osuCrypto
         for (u64 j = 0; j < Table::data.size();)
         {
 
-            _mm_prefetch((char*)(xx + j + Table::data.size()), _MM_HINT_T0);
+            //_mm_prefetch((char*)(xx + j + Table::data.size()), _MM_HINT_T0);
             for (u64 k = 0; k < chunkSize; ++k, ++j)
             {
 
                 T* __restrict xi = xx + j;
-                T* __restrict xs = xi + 1;
+                T* __restrict xs = xi + Table::data.size()-1;
 
                 if constexpr (Table::data[0].size() == 4)
                 {
@@ -125,6 +125,12 @@ namespace osuCrypto
                     T* __restrict x1 = xi + tIter[j].data()[1];
                     T* __restrict x2 = xi + tIter[j].data()[2];
                     T* __restrict x3 = xi + tIter[j].data()[3];
+
+                    //std::cout << "xs[" << j << "] += " << (Table::data.size() + 2) << std::endl;
+                    //std::cout << "x0[" << j << "] += " << tIter[j][0] << std::endl;
+                    //std::cout << "x1[" << j << "] += " << tIter[j][1] << std::endl;
+                    //std::cout << "x2[" << j << "] += " << tIter[j][2] << std::endl;
+                    //std::cout << "x3[" << j << "] += " << tIter[j][3] << std::endl;
 
                     if constexpr (rangeCheck)
                     {
@@ -144,6 +150,7 @@ namespace osuCrypto
                         auto xx3 = *x3 ^ *xi;
 
                         assert(x3 < end);
+                        assert(xs < end);
                         *xs = xxs;
                         *x0 = xx0;
                         *x1 = xx1;
@@ -440,26 +447,103 @@ namespace osuCrypto
 
         SparseMtx getAPar(u64 n)const
         {
-            return getAccPar<Table>(n);
+            return getAccPar<Table>(n, false);
+        }
+        DenseMtx getA(u64 n) const
+        {
+            return getAcc<Table>(n, false);
+        }
+
+    };
+
+    template<typename T, typename Table_ = TableTungsten1024x4>
+    struct TableAccTrans
+    {
+
+        using Table = Table_;
+        static constexpr int blockSize = Table::data.size();
+
+        std::array<T, blockSize * 2> mBuffer;
+        bool mFirst = true;
+
+        void reset()
+        {
+            mFirst = true;
+        }
+
+        template<bool rangeCheck, typename Perm>
+        OC_FORCEINLINE void processBlock(T* xx, T* end, Perm& perm)
+        {
+            accumulateBlock2<Table, Perm, T, rangeCheck>(xx, end, perm);
+        }
+
+
+        template<typename Perm>
+        void update(span<T> x, Perm& perm)
+        {
+            if (x.size() == 0 || (x.size() % blockSize))
+                throw RTE_LOC;
+            auto xx_ = x.data();
+            auto rem = x.size() - blockSize;
+
+            if (mFirst)
+            {
+                if (rem)
+                {
+                    for (u64 i = 0; i < rem; )
+                    {
+                        processBlock<false>(xx_ + i, x.data() + x.size(), perm);
+                        i += blockSize;
+                    }
+                }
+
+                memcpy(mBuffer.data(), x.data() + rem, blockSize * sizeof(T));
+            }
+            else
+            {
+                memcpy(mBuffer.data() + blockSize, xx_, blockSize * sizeof(T));
+                processBlock<false>(mBuffer.data(), mBuffer.data() + mBuffer.size(), perm);
+                memcpy(xx_, mBuffer.data() + blockSize, blockSize * sizeof(T));
+
+                T* src;
+                if (rem)
+                {
+                    for (u64 i = 0; i < rem; )
+                    {
+                        processBlock<false>(xx_ + i, x.data() + x.size(), perm);
+                        i += blockSize;
+                    }
+
+                    src = x.data() + rem;
+                }
+                else
+                    src = mBuffer.data() + blockSize;
+
+                memcpy(mBuffer.data(), src, blockSize * sizeof(T));
+            }
+
+            mFirst = false;
+        }
+
+
+        template<typename Perm>
+        void finalize(Perm& perm)
+        {
+            processBlock<true>(mBuffer.data(), mBuffer.data() + mBuffer.size(), perm);
+            perm.finalize();
+        }
+
+
+
+        SparseMtx getAPar(u64 n)const
+        {
+            return getAccPar<Table>(n, false);
         }
         DenseMtx getA(u64 n) const
         {
             return getAcc<Table>(n);
         }
 
-    };
-
-    template<typename Table_ = TableTungsten1024x4>
-    struct TableAcc2
-    {
-        using Table = Table_;
-
-        template<bool rangeCheck = false, typename T, typename Perm>
-        OC_FORCEINLINE void processBlock(T* xx, T* end, Perm& perm)
-        {
-
-            accumulateBlock2<Table, Perm, T, rangeCheck>(xx, end, perm);
-        }
     };
 
 }

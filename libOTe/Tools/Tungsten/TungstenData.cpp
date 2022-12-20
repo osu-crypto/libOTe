@@ -6,7 +6,7 @@ namespace osuCrypto
 
     constexpr std::array<std::array<u8, 4>, 10> TableTungsten10x4::data;
     constexpr std::array<std::array<u8, 4>, 16> TableTungsten16x4::data;
-    constexpr std::array<std::array<u8, 4>, 24> TableTungsten24x4::data;
+    //constexpr std::array<std::array<u8, 4>, 24> TableTungsten24x4::data;
     constexpr std::array<std::array<u8, 4>, 8> TableTungsten8x4::data;
     constexpr std::array<std::array<u16, 4>, 1024> TableTungsten1024x4::data;
     //constexpr std::array<std::array<u64, 4>, 1024> TableTungsten1024x4b::data;
