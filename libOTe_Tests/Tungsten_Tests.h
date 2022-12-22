@@ -12,5 +12,6 @@ namespace tests_libOTe
 	void perm_bench(const oc::CLP& cmd);
 	void Tungsten_encode_basic_test(const oc::CLP& cmd);
 	void Tungsten2_encode_basic_test(const oc::CLP& cmd);
+	void Tungsten2_encode_basic_trans_test(const oc::CLP& cmd);
 	void Tungsten_encode_basic_bench(const oc::CLP& cmd);
 }

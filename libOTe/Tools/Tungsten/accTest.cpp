@@ -24,38 +24,6 @@ namespace osuCrypto
     //    return v;
     //}
 
-    struct color
-    {
-        BitVector mBv;
-        Color cc;
-        color(BitVector bv, Color c = Color::Green)
-            :mBv(std::move(bv))
-            , cc(c)
-        {
-        }
-    };
-
-    inline std::ostream& operator<<(std::ostream& o, const color& c)
-    {
-
-        Color cur = Color::Default;
-        Color alt = c.cc;
-        for (u64 i = 0; i < c.mBv.size(); ++i)
-        {
-            if (c.mBv[i] != (cur == c.cc))
-            {
-                o << alt;
-                std::swap(alt, cur);
-            }
-
-            o << c.mBv[i];
-        }
-
-        //if (cur != Color::Default)
-        o << Color::White;
-
-        return o;
-    }
 
     struct Acc
     {

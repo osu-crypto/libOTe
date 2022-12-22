@@ -29,7 +29,7 @@ namespace osuCrypto
 
         for (i64 i = 0; i < n; ++i)
         {
-            //std::cout << "x[" << i << "] += x[" << i + 1;
+            //std::cout << "x[" << i << "] += ";
             AP.push_back(i, i);
 
             //if (i + 1 < n)
@@ -39,12 +39,22 @@ namespace osuCrypto
             if (transposed)
             {
                 auto row = Table::data[i % Table::data.size()];
+                auto xi = i;
+                i64 xs = xi - Table::data.size() + 1;
+                if (xs >= 0)
+                {
+                    //std::cout << " " << i64(xs);
+                    AP.push_back(i, xs);
+                }
+
                 for (auto x : row)
                 {
-                    i64 xx = x + i - Table::data.size();
-                    //std::cout << " " << x + i;
-                    if (xx > 0)
+                    i64 xx = x + xs;
+                    if (xx >= 0)
+                    {
+                        //std::cout << " " << i64(xx);
                         AP.push_back(i, xx);
+                    }
                 }
             }
             else
@@ -57,10 +67,10 @@ namespace osuCrypto
                     if (x + i < n)
                         AP.push_back(x + i, i);
                 }
+                if (i + Table::data.size() - 1 < n)
+                    AP.push_back(i + Table::data.size() - 1, i);
             }
 
-            if (i + Table::data.size()-1 < n)
-                AP.push_back(i + Table::data.size()-1, i);
             //std::cout << std::endl;
         }
 
@@ -75,21 +85,48 @@ namespace osuCrypto
 
         //std::cout << A << std::endl << std::endl;
 
-        for (u64 i = 0; i < n; ++i)
+        //if (transposed)
+        //{
+
+        //    for (u64 i = 0; i < n; ++i)
+        //    {
+        //        for (auto y : APar.row(i))
+        //        {
+        //            if (y != i)
+        //            {
+        //                auto ay = A.row(y);
+        //                auto ai = A.row(i);
+
+        //                //for (auto j = 0; j < ay.size(); ++j)
+        //                //{
+        //                //    ai[j] = ai[j] ^ ay[j];
+        //                //}
+        //                ai ^= ay;
+        //            }
+        //        }
+        //        //std::cout << i << "\n";
+        //        //std::cout << A << std::endl << std::endl;
+        //    }
+        //}
+        //else
         {
-            for (auto y : APar.col(i))
+
+            for (u64 i = 0; i < n; ++i)
             {
-                if (y != i)
+                for (auto y : APar.col(i))
                 {
-                    auto ay = A.row(y);
-                    auto ai = A.row(i);
-                    ay ^= ai;
+                    if (y != i)
+                    {
+                        auto ay = A.row(y);
+                        auto ai = A.row(i);
+                        ay ^= ai;
+                    }
+
+
                 }
-
-
+                //std::cout << i << "\n";
+                //std::cout << A << std::endl << std::endl;
             }
-            //std::cout << i << "\n";
-            //std::cout << A << std::endl << std::endl;
         }
 
         return A;
@@ -117,7 +154,7 @@ namespace osuCrypto
             {
 
                 T* __restrict xi = xx + j;
-                T* __restrict xs = xi + Table::data.size()-1;
+                T* __restrict xs = xi + Table::data.size() - 1;
 
                 if constexpr (Table::data[0].size() == 4)
                 {
@@ -248,6 +285,7 @@ namespace osuCrypto
         //auto e = xx - Table::data.size();
         static_assert(Table::data.size() % chunkSize == 0, "");
         auto tIter = Table::data.data();
+
         for (u64 j = 0; j < Table::data.size();)
         {
 
@@ -255,22 +293,23 @@ namespace osuCrypto
             for (u64 k = 0; k < chunkSize; ++k, ++j)
             {
 
-                T* __restrict xb = xx + j;
-                T* __restrict xi = xb + Table::data.size();
-                T* __restrict xs = xi - 1;
+                auto i = xx - b;
+
+                T* const  __restrict xi = xx + j;
+                T* __restrict xs = xi - Table::data.size() + 1;
+                //T* __restrict xs = xi - 1;
 
                 if constexpr (Table::data[0].size() == 4)
                 {
-                    T* __restrict x0 = xb + tIter[j].data()[0];
-                    T* __restrict x1 = xb + tIter[j].data()[1];
-                    T* __restrict x2 = xb + tIter[j].data()[2];
-                    T* __restrict x3 = xb + tIter[j].data()[3];
+                    T* const  __restrict x0 = xs + tIter[j].data()[0];
+                    T* const  __restrict x1 = xs + tIter[j].data()[1];
+                    T* const  __restrict x2 = xs + tIter[j].data()[2];
+                    T* const  __restrict x3 = xs + tIter[j].data()[3];
 
-                    //std::cout << "x[" << j << "] += x[" << j + 1
-                    //    << " + " << j + (int)tIter[j].data()[0]
-                    //    << " + " << j + (int)tIter[j].data()[1]
-                    //    << " + " << j + (int)tIter[j].data()[2]
-                    //    << " + " << j + (int)tIter[j].data()[3] << std::endl;
+                    if (x0 >= b)
+                    {
+                        //assert(A(i, (x0 - b)) == 1);
+                    }
 
                     assert(x3 < e);
                     assert(xi < e);
@@ -285,7 +324,14 @@ namespace osuCrypto
                     }
                     else
                     {
-                        assert(x0 >= b);
+                        //std::cout << (xs - b)
+                        //    << " + " << (x0 - b)
+                        //    << " + " << (x1 - b)
+                        //    << " + " << (x2 - b)
+                        //    << " + " << (x3 - b);
+
+
+                        assert(xs >= b);
 
                         *xi = *xi
                             ^ *xs
@@ -294,73 +340,49 @@ namespace osuCrypto
                             ^ *x2
                             ^ *x3;
                     }
+                    //std::cout << "\n";
                 }
-                else if constexpr (Table::data[0].size() == 7)
-                {
-                    T* __restrict x0 = xb + Table::data[j][0];
-                    T* __restrict x1 = xb + Table::data[j][1];
-                    T* __restrict x2 = xb + Table::data[j][2];
-                    T* __restrict x3 = xb + Table::data[j][3];
-                    T* __restrict x4 = xb + Table::data[j][4];
-                    T* __restrict x5 = xb + Table::data[j][5];
-                    T* __restrict x6 = xb + Table::data[j][6];
+                //else if constexpr (Table::data[0].size() == 7)
+                //{
 
-                    if constexpr (rangeCheck)
-                    {
-                        if (xs >= e) *xi = *xs ^ *xi;
-                        if (x0 >= e) *xi = *x0 ^ *xi;
-                        if (x1 >= e) *xi = *x1 ^ *xi;
-                        if (x2 >= e) *xi = *x2 ^ *xi;
-                        if (x3 >= e) *xi = *x3 ^ *xi;
-                        if (x4 >= e) *xi = *x3 ^ *xi;
-                        if (x5 >= e) *xi = *x5 ^ *xi;
-                        if (x6 >= e) *xi = *x6 ^ *xi;
-                    }
-                    else
-                    {
-                        *xi = *xi
-                            ^ *xs
-                            ^ *x0
-                            ^ *x1
-                            ^ *x2
-                            ^ *x3
-                            ^ *x4
-                            ^ *x5
-                            ^ *x6;
-                    }
-                }
+                //    T* __restrict x0 = xb + Table::data[j][0];
+                //    T* __restrict x1 = xb + Table::data[j][1];
+                //    T* __restrict x2 = xb + Table::data[j][2];
+                //    T* __restrict x3 = xb + Table::data[j][3];
+                //    T* __restrict x4 = xb + Table::data[j][4];
+                //    T* __restrict x5 = xb + Table::data[j][5];
+                //    T* __restrict x6 = xb + Table::data[j][6];
+
+                //    if constexpr (rangeCheck)
+                //    {
+                //        if (xs >= e) *xi = *xs ^ *xi;
+                //        if (x0 >= e) *xi = *x0 ^ *xi;
+                //        if (x1 >= e) *xi = *x1 ^ *xi;
+                //        if (x2 >= e) *xi = *x2 ^ *xi;
+                //        if (x3 >= e) *xi = *x3 ^ *xi;
+                //        if (x4 >= e) *xi = *x3 ^ *xi;
+                //        if (x5 >= e) *xi = *x5 ^ *xi;
+                //        if (x6 >= e) *xi = *x6 ^ *xi;
+                //    }
+                //    else
+                //    {
+                //        *xi = *xi
+                //            ^ *xs
+                //            ^ *x0
+                //            ^ *x1
+                //            ^ *x2
+                //            ^ *x3
+                //            ^ *x4
+                //            ^ *x5
+                //            ^ *x6;
+                //    }
+                //}
                 else
                 {
                     throw RTE_LOC;
                 }
 
                 perm.apply(xi, k);
-                //if constexpr (!eagerPermute)
-                //{
-                //    *(T * __restrict)perm[k] = *xi;
-                //    ++perm[k];
-                //}
-
-                if constexpr (verbose)
-                {
-                    BitVector state;
-                    state.reserve(Table::data.size());
-                    auto base = (int)*(u8*)&xx[j] & 1;
-                    for (u64 i : rng(Table::data.size()))
-                    {
-                        auto bit = (int)*(u8*)&xx[j + i] & 1;
-                        if (i == 1 || std::find(Table::data[j].begin(), Table::data[j].end(), i) != Table::data[j].end())
-                        {
-                            std::cout << state << (base ? Color::Green : Color::Red) << bit << Color::Default;
-                            state.resize(0);
-                        }
-                        else
-                            state.pushBack(bit);
-                    }
-                    if (state.size())
-                        std::cout << state;
-                    std::cout << std::endl;
-                }
             }
 
             perm.applyChunk(xx + j - chunkSize);
@@ -472,9 +494,9 @@ namespace osuCrypto
         }
 
         template<bool rangeCheck, typename Perm>
-        OC_FORCEINLINE void processBlock(T* xx, T* end, Perm& perm)
+        OC_FORCEINLINE void processBlock(T* xx, T* begin, T* end, Perm& perm)
         {
-            accumulateBlock2<Table, Perm, T, rangeCheck>(xx, end, perm);
+            accumulateBlock2<Table, Perm, T, rangeCheck>(xx, begin, end, perm);
         }
 
 
@@ -484,52 +506,54 @@ namespace osuCrypto
             if (x.size() == 0 || (x.size() % blockSize))
                 throw RTE_LOC;
             auto xx_ = x.data();
-            auto rem = x.size() - blockSize;
+            auto rem = x.size();
 
             if (mFirst)
             {
+                auto e = x.data() + x.size();
                 if (rem)
                 {
-                    for (u64 i = 0; i < rem; )
+                    processBlock<true>(xx_, xx_, e, perm);
+                    for (u64 i = blockSize; i < rem; )
                     {
-                        processBlock<false>(xx_ + i, x.data() + x.size(), perm);
+                        processBlock<false>(xx_ + i, xx_, e, perm);
                         i += blockSize;
                     }
                 }
 
                 memcpy(mBuffer.data(), x.data() + rem, blockSize * sizeof(T));
+                mFirst = false;
             }
             else
             {
-                memcpy(mBuffer.data() + blockSize, xx_, blockSize * sizeof(T));
-                processBlock<false>(mBuffer.data(), mBuffer.data() + mBuffer.size(), perm);
-                memcpy(xx_, mBuffer.data() + blockSize, blockSize * sizeof(T));
+                auto buffMid = mBuffer.data() + blockSize;
+                memcpy(buffMid, xx_, blockSize * sizeof(T));
+                processBlock<false>(buffMid, mBuffer.data(), mBuffer.data() + mBuffer.size(), perm);
+                memcpy(xx_, buffMid, blockSize * sizeof(T));
 
                 T* src;
                 if (rem)
                 {
                     for (u64 i = 0; i < rem; )
                     {
-                        processBlock<false>(xx_ + i, x.data() + x.size(), perm);
+                        processBlock<false>(xx_ + i, xx_, x.data() + x.size(), perm);
                         i += blockSize;
                     }
 
                     src = x.data() + rem;
                 }
                 else
-                    src = mBuffer.data() + blockSize;
+                    src = buffMid;
 
                 memcpy(mBuffer.data(), src, blockSize * sizeof(T));
             }
 
-            mFirst = false;
         }
 
 
         template<typename Perm>
         void finalize(Perm& perm)
         {
-            processBlock<true>(mBuffer.data(), mBuffer.data() + mBuffer.size(), perm);
             perm.finalize();
         }
 
@@ -537,11 +561,11 @@ namespace osuCrypto
 
         SparseMtx getAPar(u64 n)const
         {
-            return getAccPar<Table>(n, false);
+            return getAccPar<Table>(n, true);
         }
         DenseMtx getA(u64 n) const
         {
-            return getAcc<Table>(n);
+            return getAcc<Table>(n, true);
         }
 
     };

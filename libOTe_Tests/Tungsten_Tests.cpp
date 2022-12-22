@@ -5,8 +5,10 @@
 #include <iomanip>
 #include "cryptoTools/Common/Timer.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
-using namespace oc;
+#include "libOTe/Tools/Tungsten/accTest.h"
 
+
+using namespace oc;
 namespace tests_libOTe
 {
     void Tungsten_encode_basic_test(const oc::CLP& cmd)
@@ -320,6 +322,208 @@ namespace tests_libOTe
             //    throw RTE_LOC;
             //}
         }
+    }
+
+
+    void Tungsten2_encode_basic_trans_test(const oc::CLP& cmd)
+    {
+        auto k = cmd.getOr("k", 64);
+        auto n = cmd.getOr("n", k * 2);
+        auto bw = cmd.getOr("bw", 5);
+        auto aw = cmd.getOr("aw", 10);
+        auto sticky = cmd.getOr("ns", 1);
+        auto skip = cmd.isSet("skip");
+        bool permute = cmd.isSet("permute");
+
+        bool v = cmd.isSet("v");
+        PRNG prng(ZeroBlock);
+
+        using Table = TableTungsten16x4;
+        using Tung = Tungsten2<block, TungstenPerm<block, 1>, TableAccTrans<block, Table>>;
+
+        Tung code(n, bw);
+
+        //code.config(k, n, bw, aw, reuse, permute, sticky);
+
+        auto A = code.getA();
+        auto APar = code.getAPar().dense();
+        auto P = code.getP().dense();
+        auto S = code.getS().dense();
+
+        //DenseMtx APar(n,n), E(k,n), A(n,n);
+        //for (u64 i = 0; i < n; ++i)
+        //{
+        //    APar(i, i) = 1;
+        //    if (i)
+        //        APar(i, i - 1) = 1;
+        //    for (u64 j = 0; j <= i; ++j)
+        //        A(i, j) = 1;
+
+        //}
+        //for (u64 i = 0; i < k; ++i)
+        //    for (u64 j = 0; j < bw; ++j)
+        //        E(i, prng.get<u64>() % n) = 1;
+        
+        //auto PAPar = (P * APar);
+        //auto AParPAPar = APar * PAPar;
+        //auto SAParPAPar = S*AParPAPar;
+        ////std::cout << "P\n" << P << std::endl << std::endl;
+        //std::cout << "A'\n" << APar << std::endl << std::endl;
+
+        //auto EA = A * P * A;
+        //auto EAp = APar * PAPar;
+        //for (u64 i = 0; i < n; ++i)
+        //{
+        //    BitVector a(n), ap(n), pap(n);
+        //    for (u64 j = 0; j < n; ++j)
+        //    {
+        //        a[j] = EA(i, j);
+        //        ap[j] = EAp(i, j);
+        //        pap[j] = PAPar(i, j);
+        //    }
+        //    std::cout << color(a, Color::Green, ' ') << std::endl;
+        //    std::cout << color(ap, Color::Red, ' ') << std::endl;
+        //    //std::cout << color(pap, Color::Blue, ' ') << std::endl;
+        //}
+        //std::cout << "EA'\n" << E*APar << std::endl << std::endl;
+        //std::cout << "PA'\n" << PAPar << std::endl << std::endl;
+        //std::cout << "APA'\n" << AParPAPar << std::endl << std::endl;
+        //std::cout << "SAPA'\n" << SAParPAPar << std::endl << std::endl;
+        //std::cout << "SA'\n" << S * APar << std::endl << std::endl;
+        //[i = 43, j = i](){}
+
+        //return;
+        auto PA = P * A;
+        auto APA = A * PA;
+        //auto G = S.dense() * PA;
+        auto SAPA = S * APA;
+        auto SPA = S * PA;
+
+        if (v)
+        {
+            auto APar = code.getAPar().dense();
+            //std::cout << "P\n" << P << std::endl << std::endl;
+            std::cout << "A'\n" << APar << std::endl << std::endl;
+            std::cout << "PA'\n" << (P * APar) << std::endl << std::endl;
+            std::cout << "APA'\n" << APar * P * APar << std::endl << std::endl;
+            std::cout << "SAPA'\n" << S * APar * P * APar << std::endl << std::endl;
+            std::cout << "SA'\n" <<S* APar << std::endl << std::endl;
+            //std::cout << "S\n" << S << std::endl << std::endl;
+            //std::cout << "AP\n" << A * P << std::endl << std::endl;
+
+            //std::cout << "A\n" << A << std::endl << std::endl;
+            //std::cout << "PA\n" << PA << std::endl << std::endl;
+            //std::cout << "APA\n" << A * PA << std::endl;
+            //std::cout << "SAPA\n" << SAPA << std::endl;
+        }
+
+
+        const std::vector<block> c0 = [n]() {
+            std::vector<block> c0(n);
+            c0[0] = AllOneBlock;
+            return c0;
+        }();
+
+
+        {
+            std::vector<block> a1(n);
+            auto tt = c0;
+            Tung code(n, bw);
+            auto iter = tt.data();
+            if (tt.size() % Table::data.size())
+                throw RTE_LOC;
+
+            u64 jj = 0;
+            while (iter != tt.data() + n)
+            {
+                code.mAcc.processBlock<true>(iter, tt.data(), tt.data() + tt.size(), code.mExpander);
+                iter += Table::data.size();
+                ++jj;
+            }
+            A.sparse().multAdd(c0, a1);
+
+            if (memcmp(tt.data(), a1.data(), n * sizeof(block)))
+            {
+                //if (v)
+                {
+
+                    for (u64 i = 0; i < n; ++i)
+                        std::cout << std::hex << (tt[i].get<int>(0) & 1) << (tt[i] != a1[i] ? "<" : " ");
+                    std::cout << "\n";
+                    for (u64 i = 0; i < n; ++i)
+                        std::cout << std::hex << (a1[i].get<int>(0) & 1) << " ";
+                    std::cout << "\n";
+                }
+
+                throw RTE_LOC;
+            }
+        }
+
+
+        {
+
+            auto tt = c0;
+            Tungsten2<block, Perm__, TableAccTrans<block, Table>> code(n, bw);
+            code.update(tt);
+
+            code.mAcc.finalize(code.mExpander);
+            //code.mAcc.processBlock<true>(code.mBuffer.data(), code.mBuffer.data() + code.mBuffer.size(), code.mExpander);
+
+            //code.processBlock<true>(code.mBuffer.data(), code.mBuffer.data() + code.mBuffer.size());
+
+
+            std::vector<block> a1(n);
+            A.sparse().multAdd(c0, a1);
+
+            if (memcmp(code.mExpander.buff.data(), a1.data(), n * sizeof(block)))
+            {
+                //if (v)
+                {
+                    BitVector act(n);
+                    BitVector exp(n);
+
+                    for (u64 i = 0; i < n; ++i)
+                        act[i] = tt[i].get<u8>(0) & 1;
+                    for (u64 i = 0; i < n; ++i)
+                        exp[i] = a1[i].get<u8>(0) & 1;
+
+                    std::cout << "act " << color(act) << "\n";
+                    std::cout << "exp " << color(exp) << "\n";
+                    std::cout << "    " << color(exp ^ act, Color::Red) << "\n";
+                }
+
+                throw RTE_LOC;
+            }
+        }
+
+        {
+
+            auto tt = c0;
+            Tung code(n, bw);
+            code.update(tt);
+            code.mAcc.finalize(code.mExpander);
+
+
+            std::vector<block> a1(n);
+            PA.sparse().multAdd(c0, a1);
+
+            if (memcmp(code.mExpander.mBuffer.data(), a1.data(), n * sizeof(block)))
+            {
+                //if (v)
+                {
+
+                    for (u64 i = 0; i < n; ++i)
+                        std::cout << std::hex << (tt[i].get<int>(0) & 1) << (tt[i] != a1[i] ? "<" : " ");
+                    std::cout << "\n";
+                    for (u64 i = 0; i < n; ++i)
+                        std::cout << std::hex << (a1[i].get<int>(0) & 1) << " ";
+                    std::cout << "\n";
+                }
+
+                throw RTE_LOC;
+            }
+        }
+
     }
 
     void perm_bench(const oc::CLP& cmd)
