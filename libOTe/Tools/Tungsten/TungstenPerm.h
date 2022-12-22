@@ -176,6 +176,8 @@ namespace osuCrypto
 
         void finalize()
         {
+            assert(mPermIter == mPerm.mPerm.data() + mPerm.mPerm.size());
+
         }
 
         OC_FORCEINLINE void apply(T* __restrict x, u64 k)

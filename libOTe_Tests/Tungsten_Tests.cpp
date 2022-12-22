@@ -524,6 +524,35 @@ namespace tests_libOTe
             }
         }
 
+        {
+
+            auto tt = c0;
+            std::vector<block> w(k);
+            Tung code(n, bw);
+            code.update(tt);
+            code.finalize(w);
+
+
+            std::vector<block> a1(k);
+            SAPA.sparse().multAdd(c0, a1);
+
+            if (memcmp(w.data(), a1.data(), k * sizeof(block)))
+            {
+                //if (v)
+                {
+
+                    for (u64 i = 0; i <k; ++i)
+                        std::cout << std::hex << (tt[i].get<int>(0) & 1) << (tt[i] != a1[i] ? "<" : " ");
+                    std::cout << "\n";
+                    for (u64 i = 0; i < k; ++i)
+                        std::cout << std::hex << (a1[i].get<int>(0) & 1) << " ";
+                    std::cout << "\n";
+                }
+
+                throw RTE_LOC;
+            }
+        }
+
     }
 
     void perm_bench(const oc::CLP& cmd)
@@ -664,6 +693,44 @@ namespace tests_libOTe
             if (!cmd.isSet("quiet"))
                 std::cout << timer << std::endl;
 #endif
+        }
+        else if (cmd.isSet("trans"))
+        {
+            //Tungsten code;
+            //code.config(k, n, bw, aw, reuse, permute, sticky);
+            //code.mAccumulatorWeight = cmd.getOr("aaw", 4);
+            AlignedUnVector<block> m1(k)/*, c0(n)*/;
+
+            //Tungsten2<block, NoopPerm, TableTungsten1024x4> code(n, bw);
+            Tungsten2<block, TungstenPerm<block,8>, TableAccTrans<block,TableTungsten1024x4>> 
+                code(n, bw);
+            //TungstenAccumulator code(TungstenBinPermuter{ (u64)n, (u64)bw });
+            oc::Timer timer;
+            code.setTimer(timer);
+            //code.setTimer(timer);
+            std::vector<block> c0(step, ZeroBlock);
+            c0[0] = OneBlock;
+            for (auto t : rng(tt))
+            {
+                code.reset();
+                timer.setTimePoint("reset");
+                for (u64 j = 0; j < n; j += step)
+                {
+                    span<block> buff(c0.data(), step);
+                    code.update(buff);
+                }
+
+                timer.setTimePoint("acc");
+
+                code.finalize(m1);
+
+                timer.setTimePoint("expand");
+                //code.cirTransEncode<block>(c0, m1);
+            }
+
+
+            if (!cmd.isSet("quiet"))
+                std::cout << timer << std::endl;
         }
         else
         {

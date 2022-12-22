@@ -409,6 +409,17 @@ namespace osuCrypto
             accumulateBlock<Table, Perm, T, rangeCheck>(xx, end, perm);
         }
 
+        void run(span<T> x)
+        {
+
+            T* __restrict xx = x.data();
+            auto end = x.data() + x.size();
+            NoopPerm noop;
+
+            update(x, noop);
+            processBlock<true>(end - blockSize, end, noop);
+
+        }
 
         template<typename Perm>
         void update(span<T> x, Perm& perm)
@@ -478,7 +489,7 @@ namespace osuCrypto
 
     };
 
-    template<typename T, typename Table_ = TableTungsten1024x4>
+    template<typename T, typename Table_ >
     struct TableAccTrans
     {
 
@@ -499,6 +510,12 @@ namespace osuCrypto
             accumulateBlock2<Table, Perm, T, rangeCheck>(xx, begin, end, perm);
         }
 
+
+        void run(span<T> x)
+        {
+            NoopPerm noop;
+            update(x, noop);
+        }
 
         template<typename Perm>
         void update(span<T> x, Perm& perm)
@@ -521,7 +538,7 @@ namespace osuCrypto
                     }
                 }
 
-                memcpy(mBuffer.data(), x.data() + rem, blockSize * sizeof(T));
+                memcpy(mBuffer.data(), x.data() + rem - blockSize, blockSize * sizeof(T));
                 mFirst = false;
             }
             else
@@ -534,13 +551,13 @@ namespace osuCrypto
                 T* src;
                 if (rem)
                 {
-                    for (u64 i = 0; i < rem; )
+                    for (u64 i = blockSize; i < rem; )
                     {
                         processBlock<false>(xx_ + i, xx_, x.data() + x.size(), perm);
                         i += blockSize;
                     }
 
-                    src = x.data() + rem;
+                    src = x.data() + rem - blockSize;
                 }
                 else
                     src = buffMid;
@@ -555,6 +572,9 @@ namespace osuCrypto
         void finalize(Perm& perm)
         {
             perm.finalize();
+
+
+
         }
 
 

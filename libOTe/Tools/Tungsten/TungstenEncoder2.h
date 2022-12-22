@@ -131,22 +131,7 @@ namespace osuCrypto
             {
 
                 Acc2 acc;
-
-                T* __restrict xx = mExpander.mBuffer.data();
-                auto end = mExpander.mBuffer.data() + mExpander.mBuffer.size();
-                NoopPerm noop;
-
-                acc.update(mExpander.mBuffer, noop);
-                acc.processBlock<true>(end - Acc2::blockSize, end, noop);
-
-                //acc.finalize(noop);
-                //for (u64 i = 0; i < mPerm.mBuffer.size() - Table::data.size(); i += Table::data.size())
-                //{
-                //    accumulateBlock<Table, NoopPerm, T, false, true>(xx + i, end, noop);
-                //    //processBlock<false>(xx + i, end);
-                //}
-
-                //accumulateBlock<Table, NoopPerm, T, true>(end - Table::data.size(), end, noop);
+                acc.run(mExpander.mBuffer);
                 setTimePoint("acc2");
             }
 
