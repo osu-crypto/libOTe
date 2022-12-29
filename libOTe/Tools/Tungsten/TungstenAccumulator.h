@@ -77,59 +77,34 @@ namespace osuCrypto
         return AP;
     }
 
-    template<typename Table>
-    DenseMtx getAcc(u64 n, bool transposed)
+    DenseMtx accumulate(const SparseMtx& APar)
     {
-        auto APar = getAccPar<Table>(n, transposed);
+        auto n = APar.rows();
         auto A = DenseMtx::Identity(n);
 
-        //std::cout << A << std::endl << std::endl;
-
-        //if (transposed)
-        //{
-
-        //    for (u64 i = 0; i < n; ++i)
-        //    {
-        //        for (auto y : APar.row(i))
-        //        {
-        //            if (y != i)
-        //            {
-        //                auto ay = A.row(y);
-        //                auto ai = A.row(i);
-
-        //                //for (auto j = 0; j < ay.size(); ++j)
-        //                //{
-        //                //    ai[j] = ai[j] ^ ay[j];
-        //                //}
-        //                ai ^= ay;
-        //            }
-        //        }
-        //        //std::cout << i << "\n";
-        //        //std::cout << A << std::endl << std::endl;
-        //    }
-        //}
-        //else
+        for (u64 i = 0; i < n; ++i)
         {
-
-            for (u64 i = 0; i < n; ++i)
+            for (auto y : APar.col(i))
             {
-                for (auto y : APar.col(i))
+                if (y != i)
                 {
-                    if (y != i)
-                    {
-                        auto ay = A.row(y);
-                        auto ai = A.row(i);
-                        ay ^= ai;
-                    }
-
-
+                    auto ay = A.row(y);
+                    auto ai = A.row(i);
+                    ay ^= ai;
                 }
-                //std::cout << i << "\n";
-                //std::cout << A << std::endl << std::endl;
+
+
             }
         }
 
         return A;
+    }
+
+    template<typename Table>
+    DenseMtx getAcc(u64 n, bool transposed)
+    {
+        auto APar = getAccPar<Table>(n, transposed);
+        return accumulate(APar);
     }
 
 
@@ -504,6 +479,7 @@ namespace osuCrypto
             mFirst = true;
         }
 
+
         template<bool rangeCheck, typename Perm>
         OC_FORCEINLINE void processBlock(T* xx, T* begin, T* end, Perm& perm)
         {
@@ -572,9 +548,6 @@ namespace osuCrypto
         void finalize(Perm& perm)
         {
             perm.finalize();
-
-
-
         }
 
 
@@ -588,6 +561,329 @@ namespace osuCrypto
             return getAcc<Table>(n, true);
         }
 
+    };
+
+
+    template<int size>
+    struct FastRng
+    {
+
+        static_assert(size % 8 == 0, "");
+        AES mAes;
+        std::array<block, size / sizeof(block)> mBuffer;
+
+        FastRng()
+            :FastRng(block(34235234, 2453125432))
+        {}
+
+        FastRng(block seed)
+        {
+            mAes.setKey(seed);
+            mAes.ecbEncCounterMode(0, mBuffer.size(), mBuffer.data());
+        }
+
+
+        u8* begin() {
+            return (u8*)mBuffer.data();
+        }
+        u8* end() { return (u8*)(mBuffer.data() + mBuffer.size()); }
+
+        void refill()
+        {
+            {
+                block b = mBuffer[0];
+                block k = mBuffer[mBuffer.size() - 1];
+                mBuffer[0] = AES::roundEnc(b, k) ^ k;
+            }
+
+            for (u64 i = 1; i < mBuffer.size(); ++i)
+            {
+                block b = mBuffer[i];
+                block k = mBuffer[(u8)(i - 1)];
+                mBuffer[i] = AES::roundEnc(b, k) ^ k;
+            }
+        }
+
+    };
+
+    template<typename T>
+    class SumAcc
+    {
+    public:
+        static constexpr int blockSize = 256;
+        std::array<T, blockSize * 2> mBuffer;
+        bool mFirst = true;
+
+        static constexpr bool rand = true;
+
+
+        static constexpr int mSum1Offset = 20, mSum1Size = 30;
+        static constexpr int mSum1End = blockSize - mSum1Offset;
+        static constexpr int mSum1Begin = mSum1End - mSum1Size;
+
+        static constexpr int mSum8Offset = 1, mSum8Size = blockSize - 1;
+        static constexpr int mSum8End = blockSize - mSum8Offset;
+        static constexpr int mSum8Begin = mSum8End - (std::min<int>(mSum8Size, mSum8End) / 8) * 8;
+
+        block mSum1;
+        std::array<block, 8> mSum8;
+        //PRNG mPrng;
+        FastRng<blockSize> mRng;
+        u8* mIter = nullptr;
+
+        SumAcc() { reset(); }
+
+        void reset()
+        {
+            //mPrng.SetSeed(ZeroBlock);
+            mRng = {};
+            mIter = mRng.begin();
+            mFirst = true;
+            mSum1 = ZeroBlock;
+            std::fill(mSum8.begin(), mSum8.end(), ZeroBlock);
+        }
+
+        template<bool rangeCheck, typename Perm>
+        OC_FORCEINLINE void processBlock(T* xx, T* begin, T* end, Perm& perm)
+        {
+
+            static_assert((blockSize % perm.chunkSize) == 0, "");
+
+            auto xs = xx - blockSize;
+            for (u64 i = 0; i < blockSize;)
+            {
+
+                for (u64 k = 0; k < perm.chunkSize; ++k, ++i)
+                {
+
+                    //auto i8 = i % 8;
+                    static_assert(perm.chunkSize == 8, "");
+                    auto& sum8 = mSum8[k];
+
+                    //std::cout << "i " << i << std::endl;
+
+
+                    if constexpr (rangeCheck)
+                    {
+
+                        if (&xs[mSum1Begin] >= begin)
+                        {
+                            mSum1 = mSum1 ^ xs[mSum1Begin];
+                            //std::cout << "sum1 b ^= " << (&xs[mSum1Begin] - begin) << " " << mSum1 << std::endl;
+                        }
+
+                        if (&xs[mSum1End] >= begin)
+                        {
+                            mSum1 = mSum1 ^ xs[mSum1End];
+                            //std::cout << "sum1 e ^= " << (&xs[mSum1End] - begin) << " " << mSum1 << std::endl;
+                        }
+
+                        if (&xs[mSum8Begin] >= begin)
+                        {
+                            assert(&xs[mSum8Begin] < xx);
+                            sum8 = sum8 ^ xs[mSum8Begin];
+                            //std::cout << "sum8 b ^= " << (&xs[mSum8Begin] - begin) << " " << sum8 << std::endl;
+                        }
+
+                        if (&xs[mSum8End] >= begin)
+                        {
+                            assert(&xs[mSum8End] < xx);
+                            sum8 = sum8 ^ xs[mSum8End];
+                            //std::cout << "sum8 e ^= " << (&xs[mSum8End] - begin)  << " " << sum8 << std::endl;
+                        }
+                    }
+                    else
+                    {
+                        assert(&xs[mSum1Begin] >= begin);
+                        assert(&xs[mSum1End] >= begin);
+                        assert(&xs[mSum8Begin] >= begin);
+                        assert(&xs[mSum8End] >= begin);
+
+                        mSum1 = mSum1
+                            ^ xs[mSum1Begin]
+                            ^ xs[mSum1End];
+
+                        sum8 = sum8
+                            ^ xs[mSum8Begin]
+                            ^ xs[mSum8End];
+                    }
+
+                    *xx = *xx
+                        ^ mSum1
+                        ^ sum8;
+
+                    //if constexpr (rangeCheck)
+                    //{
+                    //    auto r = mRng
+                    //    *xx = *xx
+                    //        ^ 
+                    //}
+
+                    if constexpr (rand)
+                    {
+                        //auto j = xx - 1 - *mIter++;
+                        auto j = xs + *mIter++;
+
+                        if constexpr (rangeCheck == false)
+                        {
+                            *xx = *xx ^ *j;
+                            assert(j >= begin);
+                        }
+                        else {
+                            if (j >= begin)
+                                *xx = *xx ^ *j;
+                        }
+
+                    }
+                    //*xx = *xx ^
+                    //    xs[mPrng.get<u64>() % blockSize];
+
+                    ++xx;
+                    ++xs;
+                }
+
+                perm.applyChunk(xx - perm.chunkSize);
+            }
+
+            if constexpr (rand)
+            {
+                assert(mIter == mRng.end());
+                mRng.refill();
+                mIter = mRng.begin();
+            }
+        }
+
+
+        void run(span<T> x)
+        {
+            NoopPerm noop;
+            update(x, noop);
+        }
+
+        template<typename Perm>
+        void update(span<T> x, Perm& perm)
+        {
+            if (x.size() == 0 || (x.size() % blockSize))
+                throw RTE_LOC;
+            auto xx_ = x.data();
+            auto rem = x.size();
+
+            if (mFirst)
+            {
+                auto e = x.data() + x.size();
+                if (rem)
+                {
+                    processBlock<true>(xx_, xx_, e, perm);
+                    for (u64 i = blockSize; i < rem; )
+                    {
+                        processBlock<false>(xx_ + i, xx_, e, perm);
+                        i += blockSize;
+                    }
+                }
+
+                memcpy(mBuffer.data(), x.data() + rem - blockSize, blockSize * sizeof(T));
+                mFirst = false;
+            }
+            else
+            {
+                auto buffMid = mBuffer.data() + blockSize;
+                memcpy(buffMid, xx_, blockSize * sizeof(T));
+                processBlock<false>(buffMid, mBuffer.data(), mBuffer.data() + mBuffer.size(), perm);
+                memcpy(xx_, buffMid, blockSize * sizeof(T));
+
+                T* src;
+                if (rem)
+                {
+                    for (u64 i = blockSize; i < rem; )
+                    {
+                        processBlock<false>(xx_ + i, xx_, x.data() + x.size(), perm);
+                        i += blockSize;
+                    }
+
+                    src = x.data() + rem - blockSize;
+                }
+                else
+                    src = buffMid;
+
+                memcpy(mBuffer.data(), src, blockSize * sizeof(T));
+            }
+
+        }
+
+
+        template<typename Perm>
+        void finalize(Perm& perm)
+        {
+            perm.finalize();
+        }
+
+
+        SparseMtx getAPar(u64 n) const
+        {
+            FastRng<blockSize> prng;;
+            auto iter = prng.begin();
+            PointList points(n, n);
+            i64 begin = 0;
+            for (i64 i = 0; i < n; ++i)
+            {
+                points.push_back(i, i);
+
+                i64 xs = i - blockSize;
+
+                std::set<i64> ss;
+                for (auto b = xs + mSum1Begin + 1; b <= xs + mSum1End; ++b)
+                {
+                    if (b >= begin)
+                    {
+                        auto in = ss.insert(b);
+                        if (in.second == false)
+                            ss.erase(in.first);
+                    }
+                }
+
+                for (auto b = xs + mSum8Begin + 8; b <= xs + mSum8End; b += 8)
+                {
+                    if (b >= begin)
+                    {
+                        auto in = ss.insert(b);
+                        if (in.second == false)
+                            ss.erase(in.first);
+                    }
+                }
+
+                //if (std::min<u64>(blockSize, i))
+                {
+                    std::cout << i << " " << (int)*iter << std::endl;
+                    auto j = i - 1 - *iter++;
+                    if (j >= begin)
+                    {
+                        auto in = ss.insert(j);
+                        if (in.second == false)
+                            ss.erase(in.first);
+                    }
+
+                    if (iter == prng.end())
+                    {
+                        if ((i + 1) % blockSize)
+                            throw RTE_LOC;
+                        prng.refill();
+                        iter = prng.begin();
+                    }
+                }
+
+                for (auto s : ss)
+                    points.push_back(i, s);
+            }
+
+
+            //std::cout << SparseMtx(points) << std::endl;
+            return points;
+        }
+
+        DenseMtx getA(u64 n) const
+        {
+            return accumulate(getAPar(n));
+        }
     };
 
 }

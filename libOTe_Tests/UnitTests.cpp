@@ -56,7 +56,9 @@ namespace tests_libOTe
 
 			tc.add("Tungsten_encode_basic_test              ", Tungsten_encode_basic_test);
 			tc.add("Tungsten2_encode_basic_test             ", Tungsten2_encode_basic_test);
-			tc.add("Tungsten2_encode_basic_trans_test       ", Tungsten2_encode_basic_trans_test);
+			tc.add("Tungsten2_encode_trans_test             ", Tungsten2_encode_trans_test);
+			tc.add("Tungsten2_encode_sum_test               ", Tungsten2_encode_sum_test);
+			
 			tc.add("Tungsten_encode_basic_bench             ", Tungsten_encode_basic_bench);
 			tc.add("perm_bench                              ", perm_bench);
 

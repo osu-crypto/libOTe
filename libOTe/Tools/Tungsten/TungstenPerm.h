@@ -240,7 +240,7 @@ namespace osuCrypto
     // this exapnder/permuter does nothing.
     struct NoopPerm
     {
-        static constexpr int chunkSize = 1;
+        static constexpr int chunkSize = 8;
 
         NoopPerm() = default;
         NoopPerm(u64 n) {}
