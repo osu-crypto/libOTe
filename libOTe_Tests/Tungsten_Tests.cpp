@@ -687,6 +687,143 @@ namespace tests_libOTe
 
     }
 
+
+    void Tungsten2_encode_APA_test(const oc::CLP& cmd)
+    {
+        auto k = cmd.getOr("k", 64);
+        auto n = cmd.getOr("n", k * 2);
+        auto bw = cmd.getOr("bw", 5);
+        auto aw = cmd.getOr("aw", 10);
+        auto sticky = cmd.getOr("ns", 1);
+        auto skip = cmd.isSet("skip");
+        bool permute = cmd.isSet("permute");
+
+        bool v = cmd.isSet("v");
+        PRNG prng(ZeroBlock);
+
+        using Acc = SumAcc<block>;
+        using Acc2 = TableAccTrans<block, TableTungsten128x4>;
+        using Perm = TungstenPerm<block, 8>;
+        using Tung = Tungsten3<block, Perm, Acc, Acc2>;
+
+        Tung code(n, bw);
+
+
+        auto A = code.getA();
+        auto A2 = Acc2::getA(n);
+        //auto APar = code.getAPar().dense();
+        auto P = code.getP().dense();
+        auto S = code.getS().dense();
+
+        auto PA = P * A;
+        auto APA = A2 * PA;
+        //auto G = S.dense() * PA;
+        auto SAPA = S * APA;
+        //auto SPA = S * PA;
+
+        if (v)
+        {
+            //auto APar = code.getAPar().dense();
+            //std::cout << "P\n" << P << std::endl << std::endl;
+            //std::cout << "A'\n" << APar << std::endl << std::endl;
+            //std::cout << "PA'\n" << (P * APar) << std::endl << std::endl;
+            //std::cout << "APA'\n" << APar * P * APar << std::endl << std::endl;
+            //std::cout << "SAPA'\n" << S * APar * P * APar << std::endl << std::endl;
+            //std::cout << "SA'\n" << S * APar << std::endl << std::endl;
+
+            std::cout << "S\n" << S << std::endl << std::endl;
+            //std::cout << "AP\n" << A * P << std::endl << std::endl;
+
+            std::cout << "A\n" << A << std::endl << std::endl;
+            std::cout << "PA\n" << PA << std::endl << std::endl;
+            std::cout << "APA\n" << A2 * PA << std::endl;
+            std::cout << "SAPA\n" << SAPA << std::endl;
+        }
+
+
+        const std::vector<block> c0 = [n]() {
+            std::vector<block> c0(n);
+            c0[0] = AllOneBlock;
+            return c0;
+        }();
+
+
+        {
+            std::vector<block> a1(n);
+            auto tt = c0;
+            Tung code(n, bw);
+            auto iter = tt.data();
+            if (tt.size() % Acc::blockSize)
+                throw RTE_LOC;
+
+            u64 jj = 0;
+            while (iter != tt.data() + n)
+            {
+                if (iter == tt.data())
+                    code.mAcc.processBlock<true>(iter, tt.data(), tt.data() + tt.size(), code.mExpander);
+                else
+                    code.mAcc.processBlock<false>(iter, tt.data(), tt.data() + tt.size(), code.mExpander);
+
+                iter += Acc::blockSize;
+                ++jj;
+            }
+            A.sparse().multAdd(c0, a1);
+
+            if (memcmp(tt.data(), a1.data(), n * sizeof(block)))
+            {
+                //std::cout << APar << std::endl;
+                {
+                    BitVector act(n);
+                    BitVector exp(n);
+
+                    for (u64 i = 0; i < n; ++i)
+                        act[i] = tt[i].get<u8>(0) & 1;
+                    for (u64 i = 0; i < n; ++i)
+                        exp[i] = a1[i].get<u8>(0) & 1;
+
+                    std::cout << "act " << color(act) << "\n";
+                    std::cout << "exp " << color(exp) << "\n";
+                    std::cout << "    " << color(exp ^ act, Color::Red) << "\n";
+                }
+
+                throw RTE_LOC;
+            }
+        }
+
+        {
+
+            auto tt = c0;
+            std::vector<block> w(k);
+            Tung code(n, bw);
+            code.update(tt);
+            code.finalize(w);
+
+
+            std::vector<block> a1(k);
+            SAPA.sparse().multAdd(c0, a1);
+
+            if (memcmp(w.data(), a1.data(), k * sizeof(block)))
+            {
+                //if (v)
+
+                BitVector act(k);
+                BitVector exp(k);
+
+                for (u64 i = 0; i < k; ++i)
+                    act[i] = w[i].get<u8>(0) & 1;
+                for (u64 i = 0; i < k; ++i)
+                    exp[i] = a1[i].get<u8>(0) & 1;
+
+                std::cout << "\nact " << color(act) << "\n";
+                std::cout << "exp " << color(exp) << "\n";
+                std::cout << "    " << color(exp ^ act, Color::Red) << "\n";
+                throw RTE_LOC;
+            }
+        }
+
+
+    }
+
     void perm_bench(const oc::CLP& cmd)
     {
         auto n = cmd.getOr("n", 1 << cmd.getOr("nn", 20));

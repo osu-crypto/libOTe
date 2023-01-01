@@ -122,6 +122,8 @@ namespace osuCrypto
         //    mFirst = false;
         //}
 
+
+
         void finalize(span<T> w)
         {
             mAcc.finalize(mExpander);
@@ -158,6 +160,78 @@ namespace osuCrypto
         SparseMtx getS()
         {
             return getLinearSums(mExpander.mBuffer.size(), mExpanderWeight);
+        }
+    };
+
+
+    template<
+        typename T_ = block,
+        typename Expander_ = TungstenPerm<T_, 8>,
+        typename Acc_ = TableAcc<T_, TableTungsten1024x4>,
+        typename Acc2_ = Acc_
+    >
+        struct Tungsten3 : public TimerAdapter
+    {
+        using T = T_;
+        using Expander = Expander_;
+        using Acc = Acc_;
+        using Acc2 = Acc2_;
+
+        bool accTwice = true;
+        static constexpr int chunkSize = Expander::chunkSize;
+        static constexpr int blockSize = Acc::blockSize;
+
+        bool mFirst = true;
+        u64 mExpanderWeight = 0;
+        Expander mExpander;
+        Acc mAcc;
+
+
+        Tungsten3(u64 size, u64 expanderWeight)
+            : mExpander(size)
+            , mExpanderWeight(expanderWeight)
+        {
+            reset();
+        }
+
+        void reset()
+        {
+            mFirst = true;
+            mAcc.reset();
+            mExpander.reset();
+        }
+
+        void update(span<T> x)
+        {
+            mAcc.update(x, mExpander);
+        }
+
+        void finalize(span<T> w)
+        {
+            mAcc.finalize(mExpander);
+            EveryOther<T,8> eo(w);
+            Acc2 acc;
+            acc.run(mExpander.mBuffer, eo);
+            setTimePoint("acc2");
+        }
+
+        SparseMtx getAPar()
+        {
+            return mAcc.getAPar(mExpander.mBuffer.size());
+        }
+        DenseMtx getA()
+        {
+            return mAcc.getA(mExpander.mBuffer.size());
+        }
+
+        SparseMtx getP()
+        {
+            return mExpander.getMatrix();
+        }
+
+        SparseMtx getS()
+        {
+            return EveryOther<T, 8>::getMatrix(mExpander.mBuffer.size());
         }
     };
 

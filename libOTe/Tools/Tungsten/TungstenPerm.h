@@ -266,4 +266,71 @@ namespace osuCrypto
 
 
 
+    // this expander/permuter maps chunks of inputs uniformly. The final expander is obtained by doing linear sums.
+    template<typename T, int chunkSize_>
+    struct EveryOther
+    {
+        static constexpr int chunkSize = chunkSize_;
+        static_assert(chunkSize % 2 == 0, "");
+        Perm mPerm;
+        span<T> mOutput;
+        T* mOutIter;
+
+        void reset()
+        {
+            mOutIter = mOutput.data();
+        }
+
+        EveryOther(span<T> out)
+            : mOutput(out)
+        {
+            reset();
+        }
+
+        void finalize()
+        {
+            assert(mOutIter == mOutput.data() + mOutput.size());
+
+        }
+
+        OC_FORCEINLINE void apply(T* __restrict x, u64 k)
+        {}
+
+        OC_FORCEINLINE void applyChunk(T* __restrict x)
+        {
+            assert(mOutIter < mOutput.data() + mOutput.size());
+
+
+            if constexpr (chunkSize == 8)
+            {
+                mOutIter[0] = x[0];
+                mOutIter[1] = x[2];
+                mOutIter[2] = x[4];
+                mOutIter[3] = x[6];
+                mOutIter += 4;
+            }
+            else
+            {
+
+                for (u64 j = 0; j < chunkSize; j+=2, ++mOutIter)
+                {
+                    *mOutIter = x[j];
+                }
+            }
+        }
+
+        static SparseMtx getMatrix(u64 n) 
+        {
+            PointList ret(n/2, n);
+
+            u64 r = 0;
+            for (auto p : rng(n/2))
+            {
+                ret.push_back({ p , 2*p });
+            }
+            return ret;
+        }
+    };
+
+
 }

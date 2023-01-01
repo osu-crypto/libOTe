@@ -487,6 +487,13 @@ namespace osuCrypto
         }
 
 
+        template<typename Next>
+        void run(span<T> x, Next&& next)
+        {
+            update(x, next);
+        }
+
+
         void run(span<T> x)
         {
             NoopPerm noop;
@@ -552,11 +559,11 @@ namespace osuCrypto
 
 
 
-        SparseMtx getAPar(u64 n)const
+        static SparseMtx getAPar(u64 n) 
         {
             return getAccPar<Table>(n, true);
         }
-        DenseMtx getA(u64 n) const
+        static DenseMtx getA(u64 n) 
         {
             return getAcc<Table>(n, true);
         }
@@ -614,7 +621,7 @@ namespace osuCrypto
         std::array<T, blockSize * 2> mBuffer;
         bool mFirst = true;
 
-        static constexpr bool rand = true;
+        static constexpr bool randIndex = true;
 
 
         static constexpr int mSum1Offset = 20, mSum1Size = 30;
@@ -631,6 +638,8 @@ namespace osuCrypto
         FastRng<blockSize> mRng;
         u8* mIter = nullptr;
 
+        u64 mDebugIndex = 0;
+
         SumAcc() { reset(); }
 
         void reset()
@@ -639,6 +648,7 @@ namespace osuCrypto
             mRng = {};
             mIter = mRng.begin();
             mFirst = true;
+            mDebugIndex = 0;
             mSum1 = ZeroBlock;
             std::fill(mSum8.begin(), mSum8.end(), ZeroBlock);
         }
@@ -719,24 +729,36 @@ namespace osuCrypto
                     //        ^ 
                     //}
 
-                    if constexpr (rand)
+                    if constexpr (randIndex)
                     {
+
                         //auto j = xx - 1 - *mIter++;
                         auto j = xs + *mIter++;
+
 
                         if constexpr (rangeCheck == false)
                         {
                             *xx = *xx ^ *j;
+                            //std::cout << mDebugIndex << "< " << (int)*(mIter -1)<< std::endl;
                             assert(j >= begin);
                         }
                         else {
                             if (j >= begin)
+                            {
                                 *xx = *xx ^ *j;
+                                //std::cout << mDebugIndex << "< " << (int)*(mIter - 1) << std::endl;
+                            }
                         }
 
                     }
                     //*xx = *xx ^
                     //    xs[mPrng.get<u64>() % blockSize];
+
+#ifndef NDEBUG
+                    if constexpr (rangeCheck)
+                        assert(xx - begin == mDebugIndex);
+                    ++mDebugIndex;
+#endif
 
                     ++xx;
                     ++xs;
@@ -745,12 +767,19 @@ namespace osuCrypto
                 perm.applyChunk(xx - perm.chunkSize);
             }
 
-            if constexpr (rand)
+            if constexpr (randIndex)
             {
                 assert(mIter == mRng.end());
                 mRng.refill();
                 mIter = mRng.begin();
             }
+        }
+
+
+        template<typename Next>
+        void run(span<T> x, Next&& next)
+        {
+            update(x, next);
         }
 
 
@@ -824,6 +853,7 @@ namespace osuCrypto
             auto iter = prng.begin();
             PointList points(n, n);
             i64 begin = 0;
+
             for (i64 i = 0; i < n; ++i)
             {
                 points.push_back(i, i);
@@ -852,11 +882,15 @@ namespace osuCrypto
                 }
 
                 //if (std::min<u64>(blockSize, i))
+                if constexpr(randIndex)
                 {
-                    std::cout << i << " " << (int)*iter << std::endl;
-                    auto j = i - 1 - *iter++;
+                    //auto j = i - 1 - *iter++;
+                    auto j = xs + *iter++;
+
                     if (j >= begin)
                     {
+                        //std::cout << i << "> " << (int)*(iter -1)<< std::endl;
+
                         auto in = ss.insert(j);
                         if (in.second == false)
                             ss.erase(in.first);
