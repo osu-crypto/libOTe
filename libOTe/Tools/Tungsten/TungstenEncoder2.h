@@ -182,14 +182,12 @@ namespace osuCrypto
         static constexpr int blockSize = Acc::blockSize;
 
         bool mFirst = true;
-        u64 mExpanderWeight = 0;
         Expander mExpander;
         Acc mAcc;
 
 
-        Tungsten3(u64 size, u64 expanderWeight)
+        Tungsten3(u64 size)
             : mExpander(size)
-            , mExpanderWeight(expanderWeight)
         {
             reset();
         }

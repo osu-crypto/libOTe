@@ -692,7 +692,6 @@ namespace tests_libOTe
     {
         auto k = cmd.getOr("k", 64);
         auto n = cmd.getOr("n", k * 2);
-        auto bw = cmd.getOr("bw", 5);
         auto aw = cmd.getOr("aw", 10);
         auto sticky = cmd.getOr("ns", 1);
         auto skip = cmd.isSet("skip");
@@ -706,7 +705,7 @@ namespace tests_libOTe
         using Perm = TungstenPerm<block, 8>;
         using Tung = Tungsten3<block, Perm, Acc, Acc2>;
 
-        Tung code(n, bw);
+        Tung code(n);
 
 
         auto A = code.getA();
@@ -751,7 +750,7 @@ namespace tests_libOTe
         {
             std::vector<block> a1(n);
             auto tt = c0;
-            Tung code(n, bw);
+            Tung code(n);
             auto iter = tt.data();
             if (tt.size() % Acc::blockSize)
                 throw RTE_LOC;
@@ -794,7 +793,7 @@ namespace tests_libOTe
 
             auto tt = c0;
             std::vector<block> w(k);
-            Tung code(n, bw);
+            Tung code(n);
             code.update(tt);
             code.finalize(w);
 
@@ -1011,6 +1010,47 @@ namespace tests_libOTe
             //Tungsten2<block, NoopPerm, TableTungsten1024x4> code(n, bw);
             Tungsten2<block, TungstenPerm<block, 8>, SumAcc<block>, TableAccTrans<block, TableTungsten1024x4>>
                 code(n, bw);
+            //TungstenAccumulator code(TungstenBinPermuter{ (u64)n, (u64)bw });
+            oc::Timer timer;
+            code.setTimer(timer);
+            //code.setTimer(timer);
+            std::vector<block> c0(step, ZeroBlock);
+            c0[0] = OneBlock;
+            for (auto t : rng(tt))
+            {
+                code.reset();
+                timer.setTimePoint("reset");
+                for (u64 j = 0; j < n; j += step)
+                {
+                    span<block> buff(c0.data(), step);
+                    code.update(buff);
+                }
+
+                timer.setTimePoint("acc");
+
+                code.finalize(m1);
+
+                timer.setTimePoint("expand");
+                //code.cirTransEncode<block>(c0, m1);
+            }
+
+
+            if (!cmd.isSet("quiet"))
+                std::cout << timer << std::endl;
+        }
+        else if (cmd.isSet("APA"))
+        {
+            //Tungsten code;
+            //code.config(k, n, bw, aw, reuse, permute, sticky);
+            //code.mAccumulatorWeight = cmd.getOr("aaw", 4);
+            AlignedUnVector<block> m1(k)/*, c0(n)*/;
+
+
+            using Acc = SumAcc<block>;
+            using Acc2 = TableAccTrans<block, TableTungsten128x4>; // SumAcc<block>; // TableAccTrans<block, TableTungsten128x4>;
+            using Perm = TungstenPerm<block, 8>;
+            using Tung = Tungsten3<block, Perm, Acc, Acc2>;
+            Tung code(n);
             //TungstenAccumulator code(TungstenBinPermuter{ (u64)n, (u64)bw });
             oc::Timer timer;
             code.setTimer(timer);

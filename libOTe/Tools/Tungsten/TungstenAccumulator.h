@@ -718,41 +718,50 @@ namespace osuCrypto
                             ^ xs[mSum8End];
                     }
 
-                    *xx = *xx
-                        ^ mSum1
-                        ^ sum8;
-
-                    //if constexpr (rangeCheck)
-                    //{
-                    //    auto r = mRng
-                    //    *xx = *xx
-                    //        ^ 
-                    //}
 
                     if constexpr (randIndex)
                     {
+                        
 
-                        //auto j = xx - 1 - *mIter++;
+
+
                         auto j = xs + *mIter++;
-
 
                         if constexpr (rangeCheck == false)
                         {
-                            *xx = *xx ^ *j;
-                            //std::cout << mDebugIndex << "< " << (int)*(mIter -1)<< std::endl;
                             assert(j >= begin);
+
+                            *xx = *xx
+                                ^ mSum1
+                                ^ sum8
+                                ^ *j;
+                            //std::cout << mDebugIndex << "< " << (int)*(mIter -1)<< std::endl;
                         }
                         else {
                             if (j >= begin)
                             {
-                                *xx = *xx ^ *j;
+                                *xx = *xx
+                                    ^ mSum1
+                                    ^ sum8 
+                                    ^ *j;
                                 //std::cout << mDebugIndex << "< " << (int)*(mIter - 1) << std::endl;
+                            }
+                            else
+                            {
+                                *xx = *xx
+                                    ^ mSum1
+                                    ^ sum8;
                             }
                         }
 
                     }
-                    //*xx = *xx ^
-                    //    xs[mPrng.get<u64>() % blockSize];
+                    else
+                    {
+                        *xx = *xx
+                            ^ mSum1
+                            ^ sum8;
+
+                    }
 
 #ifndef NDEBUG
                     if constexpr (rangeCheck)
