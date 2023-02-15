@@ -32,6 +32,7 @@ using namespace osuCrypto;
 #include "libOTe/Tools/LDPC/LdpcImpulseDist.h"
 #include "libOTe/Tools/LDPC/Util.h"
 #include "cryptoTools/Crypto/RandomOracle.h"
+#include "libOTe/Tools/EA/EAAttack.h"
 #include "libOTe/Tools/Tungsten/accTest.h"
 
 static const std::vector<std::string>
@@ -112,6 +113,8 @@ int main(int argc, char** argv)
 	CLP cmd;
 	cmd.parse(argc, argv);
 	bool flagSet = false;
+	
+
 
 	if (cmd.isSet("tungsten"))
 	{
@@ -129,7 +132,12 @@ int main(int argc, char** argv)
 
 	if (cmd.isSet("encode"))
 	{
-		encodeBench(cmd);
+		if (cmd.isSet("silver"))
+			encodeBench(cmd);
+		else if (cmd.isSet("QC"))
+			QCCodeBench(cmd);
+		else
+			ExConvCodeBench(cmd);
 		return 0;
 	}
 

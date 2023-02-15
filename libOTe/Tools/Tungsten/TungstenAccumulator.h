@@ -668,7 +668,7 @@ namespace osuCrypto
 
                     //auto i8 = i % 8;
                     static_assert(perm.chunkSize == 8, "");
-                    auto& sum8 = mSum8[k];
+                    T*__restrict sum8 = &mSum8[k];
 
                     //std::cout << "i " << i << std::endl;
 
@@ -691,14 +691,14 @@ namespace osuCrypto
                         if (&xs[mSum8Begin] >= begin)
                         {
                             assert(&xs[mSum8Begin] < xx);
-                            sum8 = sum8 ^ xs[mSum8Begin];
+                            *sum8 = *sum8 ^ xs[mSum8Begin];
                             //std::cout << "sum8 b ^= " << (&xs[mSum8Begin] - begin) << " " << sum8 << std::endl;
                         }
 
                         if (&xs[mSum8End] >= begin)
                         {
                             assert(&xs[mSum8End] < xx);
-                            sum8 = sum8 ^ xs[mSum8End];
+                            *sum8 = *sum8 ^ xs[mSum8End];
                             //std::cout << "sum8 e ^= " << (&xs[mSum8End] - begin)  << " " << sum8 << std::endl;
                         }
                     }
@@ -713,7 +713,7 @@ namespace osuCrypto
                             ^ xs[mSum1Begin]
                             ^ xs[mSum1End];
 
-                        sum8 = sum8
+                        *sum8 = *sum8
                             ^ xs[mSum8Begin]
                             ^ xs[mSum8End];
                     }
@@ -733,7 +733,7 @@ namespace osuCrypto
 
                             *xx = *xx
                                 ^ mSum1
-                                ^ sum8
+                                ^ *sum8
                                 ^ *j;
                             //std::cout << mDebugIndex << "< " << (int)*(mIter -1)<< std::endl;
                         }
@@ -742,7 +742,7 @@ namespace osuCrypto
                             {
                                 *xx = *xx
                                     ^ mSum1
-                                    ^ sum8 
+                                    ^ *sum8 
                                     ^ *j;
                                 //std::cout << mDebugIndex << "< " << (int)*(mIter - 1) << std::endl;
                             }
@@ -750,7 +750,7 @@ namespace osuCrypto
                             {
                                 *xx = *xx
                                     ^ mSum1
-                                    ^ sum8;
+                                    ^ *sum8;
                             }
                         }
 
@@ -759,7 +759,7 @@ namespace osuCrypto
                     {
                         *xx = *xx
                             ^ mSum1
-                            ^ sum8;
+                            ^ *sum8;
 
                     }
 

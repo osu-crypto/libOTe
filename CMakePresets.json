@@ -81,7 +81,7 @@
         "ENABLE_OPENSSL": false,
         "FETCH_AUTO": true,
         "ENABLE_CIRCUITS": true,
-        "ENABLE_BITPOLYMUL": false,
+        "ENABLE_BITPOLYMUL": true,
         "VERBOSE_FETCH": true,
         "ENABLE_PIC": true,
         "ENABLE_ASAN": false,

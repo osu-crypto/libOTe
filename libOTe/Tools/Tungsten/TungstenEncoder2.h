@@ -207,9 +207,17 @@ namespace osuCrypto
         void finalize(span<T> w)
         {
             mAcc.finalize(mExpander);
-            EveryOther<T,8> eo(w);
+            //EveryOther<T,8> eo(w);
+            //RepTwo<T,8> eo(w);
             Acc2 acc;
-            acc.run(mExpander.mBuffer, eo);
+            {
+                SMemcpy<T,8> eo(w);
+                acc.run(span<T>(mExpander.mBuffer.data(), w.size()), eo);
+            }
+            {
+                SXor<T, 8> eo(w);
+                acc.run(span<T>(mExpander.mBuffer.data()+ w.size(), w.size()), eo);
+            }
             setTimePoint("acc2");
         }
 
@@ -229,7 +237,8 @@ namespace osuCrypto
 
         SparseMtx getS()
         {
-            return EveryOther<T, 8>::getMatrix(mExpander.mBuffer.size());
+            //return EveryOther<T, 8>::getMatrix(mExpander.mBuffer.size());
+            return RepTwo<T, 8>::getMatrix(mExpander.mBuffer.size());
         }
     };
 

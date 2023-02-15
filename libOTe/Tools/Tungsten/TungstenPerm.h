@@ -272,7 +272,6 @@ namespace osuCrypto
     {
         static constexpr int chunkSize = chunkSize_;
         static_assert(chunkSize % 2 == 0, "");
-        Perm mPerm;
         span<T> mOutput;
         T* mOutIter;
 
@@ -312,25 +311,217 @@ namespace osuCrypto
             else
             {
 
-                for (u64 j = 0; j < chunkSize; j+=2, ++mOutIter)
+                for (u64 j = 0; j < chunkSize; j += 2, ++mOutIter)
                 {
                     *mOutIter = x[j];
                 }
             }
         }
 
-        static SparseMtx getMatrix(u64 n) 
+        static SparseMtx getMatrix(u64 n)
         {
-            PointList ret(n/2, n);
+            PointList ret(n / 2, n);
 
             u64 r = 0;
-            for (auto p : rng(n/2))
+            for (auto p : rng(n / 2))
             {
-                ret.push_back({ p , 2*p });
+                ret.push_back({ p , 2 * p });
             }
             return ret;
         }
     };
 
+
+
+
+    template<typename T, int chunkSize_>
+    struct RepTwo
+    {
+        static constexpr int chunkSize = chunkSize_;
+        static_assert(chunkSize % 2 == 0, "");
+        span<T> mOutput;
+        T* mOutIter, * mEnd;
+        bool mFirst = true;
+
+        void reset()
+        {
+            mOutIter = mOutput.data();
+            mEnd = mOutput.data() + mOutput.size();
+            mFirst = true;
+        }
+
+        RepTwo(span<T> out)
+            : mOutput(out)
+        {
+            reset();
+        }
+
+        void finalize()
+        {
+            assert(mOutIter == mOutput.data() + mOutput.size() && mFirst == false);
+
+        }
+
+        OC_FORCEINLINE void apply(T* __restrict x, u64 k)
+        {}
+
+        OC_FORCEINLINE void applyChunk(T* __restrict x)
+        {
+            assert(mOutIter < mOutput.data() + mOutput.size());
+
+
+            if (mFirst)
+            {
+                memcpy(mOutIter, x, sizeof(T) * chunkSize);
+                mOutIter += chunkSize;
+
+                if (mOutIter == mEnd)
+                {
+                    mFirst = false;
+                    mOutIter = mOutput.data();
+                }
+            }
+            else
+            {
+                if constexpr (chunkSize == 8)
+                {
+                    mOutIter[0] = mOutIter[0] ^ x[0];
+                    mOutIter[1] = mOutIter[1] ^ x[1];
+                    mOutIter[2] = mOutIter[2] ^ x[2];
+                    mOutIter[3] = mOutIter[3] ^ x[3];
+                    mOutIter[4] = mOutIter[4] ^ x[4];
+                    mOutIter[5] = mOutIter[5] ^ x[5];
+                    mOutIter[6] = mOutIter[6] ^ x[6];
+                    mOutIter[7] = mOutIter[7] ^ x[7];
+                }
+                else
+                {
+                    for (u64 i = 0; i < chunkSize; ++i)
+                    {
+                        mOutIter[i] = mOutIter[i] ^ x[i];
+                    }
+                }
+                mOutIter += chunkSize;
+            }
+        }
+
+        static SparseMtx getMatrix(u64 n)
+        {
+            auto m = n / 2;
+            PointList ret(m, n);
+
+            u64 r = 0;
+            for (auto p : rng(m))
+            {
+                ret.push_back({ p , p });
+                ret.push_back({ p , p + m });
+            }
+            return ret;
+        }
+    };
+
+
+
+    template<typename T, int chunkSize_>
+    struct SMemcpy
+    {
+        static constexpr int chunkSize = chunkSize_;
+        static_assert(chunkSize % 2 == 0, "");
+        span<T> mOutput;
+        T* mOutIter;
+
+        void reset()
+        {
+            mOutIter = mOutput.data();
+        }
+
+        SMemcpy(span<T> out)
+            : mOutput(out)
+        {
+            reset();
+        }
+
+        void finalize()
+        {
+            assert(mOutIter == mOutput.data() + mOutput.size());
+        }
+
+        OC_FORCEINLINE void apply(T* __restrict x, u64 k)
+        {}
+
+        OC_FORCEINLINE void applyChunk(T* __restrict x)
+        {
+            assert(mOutIter < mOutput.data() + mOutput.size());
+
+
+            memcpy(mOutIter, x, sizeof(T) * chunkSize);
+            mOutIter += chunkSize;
+        }
+
+        static SparseMtx getMatrix(u64 n)
+        {
+            throw RTE_LOC;
+        }
+    };
+
+
+
+    template<typename T, int chunkSize_>
+    struct SXor
+    {
+        static constexpr int chunkSize = chunkSize_;
+        static_assert(chunkSize % 2 == 0, "");
+        span<T> mOutput;
+        T* mOutIter;
+
+        void reset()
+        {
+            mOutIter = mOutput.data();
+        }
+
+        SXor(span<T> out)
+            : mOutput(out)
+        {
+            reset();
+        }
+
+        void finalize()
+        {
+            assert(mOutIter == mOutput.data() + mOutput.size());
+        }
+
+        OC_FORCEINLINE void apply(T* __restrict x, u64 k)
+        {}
+
+        OC_FORCEINLINE void applyChunk(T* __restrict x)
+        {
+            assert(mOutIter < mOutput.data() + mOutput.size());
+
+            if constexpr (chunkSize == 8)
+            {
+                mOutIter[0] = mOutIter[0] ^ x[0];
+                mOutIter[1] = mOutIter[1] ^ x[1];
+                mOutIter[2] = mOutIter[2] ^ x[2];
+                mOutIter[3] = mOutIter[3] ^ x[3];
+                mOutIter[4] = mOutIter[4] ^ x[4];
+                mOutIter[5] = mOutIter[5] ^ x[5];
+                mOutIter[6] = mOutIter[6] ^ x[6];
+                mOutIter[7] = mOutIter[7] ^ x[7];
+            }
+            else
+            {
+                for (u64 i = 0; i < chunkSize; ++i)
+                {
+                    mOutIter[i] = mOutIter[i] ^ x[i];
+                }
+            }
+            mOutIter += chunkSize;
+        }
+
+        static SparseMtx getMatrix(u64 n)
+        {
+            throw RTE_LOC;
+        }
+    };
 
 }

@@ -6,7 +6,7 @@
 #include "cryptoTools/Common/Timer.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/Tools/Tungsten/accTest.h"
-
+#include "libOTe/Tools/LDPC/Util.h"
 
 using namespace oc;
 namespace tests_libOTe
@@ -45,7 +45,25 @@ namespace tests_libOTe
             std::cout << "A'\n" << code.getAPar() << std::endl << std::endl;
             std::cout << "A\n" << A << std::endl << std::endl;
             std::cout << "G\n" << G << std::endl;
+
+            auto H = B * code.getAPar();
+            std::cout << "H\n" << H << std::endl;
+             
+            std::vector<std::pair<u64, u64>> colSwaps;
+            auto G2 = computeGen(H.dense(), colSwaps);
+            std::cout << "G2\n" << G2 << std::endl;
+            for (auto swap : colSwaps)
+                std::cout << swap.first << "  " << swap.second << std::endl;
+
+            auto GG = G.dense();// colSwap(G.dense(), colSwaps);
+            GG = computeSysGen(GG);
+            std::cout << "GG\n" << GG << std::endl;
+
+
         }
+
+
+
 
         PRNG prng(ZeroBlock);
         prng.get(c0.data(), c0.size());
