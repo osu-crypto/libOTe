@@ -4,7 +4,7 @@ set(GIT_REPOSITORY      https://github.com/ladnir/bitpolymul.git)
 set(GIT_TAG             "97e189ee36f34ab9ea19e46e1539a096e8da0ad7" )
 
 set(CLONE_DIR "${OC_THIRDPARTY_CLONE_DIR}/bitpolymul")
-set(BUILD_DIR "${CLONE_DIR}/build/${OC_CONFIG}")
+set(BUILD_DIR "${CLONE_DIR}/out/build/${OC_CONFIG}")
 set(LOG_FILE  "${CMAKE_CURRENT_LIST_DIR}/log-bitpolymul.txt")
 set(CONFIG    --config ${CMAKE_BUILD_TYPE})
 

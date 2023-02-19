@@ -105,7 +105,8 @@ namespace tests_libOTe
 			tc.add("Vole_Silent_paramSweep_test             ", Vole_Silent_paramSweep_test);
 			tc.add("Vole_Silent_baseOT_test                 ", Vole_Silent_baseOT_test);
 			tc.add("Vole_Silent_mal_test                    ", Vole_Silent_mal_test);
-
+			tc.add("Vole_Silent_Rounds_test                 ", Vole_Silent_Rounds_test);
+			
 			tc.add("NcoOt_Kkrt_Test                         ", NcoOt_Kkrt_Test);
 			tc.add("NcoOt_Oos_Test                          ", NcoOt_Oos_Test);
 			tc.add("NcoOt_genBaseOts_Test                   ", NcoOt_genBaseOts_Test);

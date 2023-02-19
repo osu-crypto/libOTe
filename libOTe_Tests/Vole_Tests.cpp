@@ -457,33 +457,66 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 
     send.mMalType = SilentSecType::SemiHonest;
     recv.mMalType = SilentSecType::SemiHonest;
-    send.configure(n, SilentBaseType::Base);
-    recv.configure(n, SilentBaseType::Base);
-    // c * x = z + m
-
-    //for (u64 n = 5000; n < 10000; ++n)
+    for (u64 jj : {0, 1})
     {
-        std::vector<block> c(n), z0(n), z1(n);
 
+        send.configure(n, SilentBaseType::Base);
+        recv.configure(n, SilentBaseType::Base);
+        // c * x = z + m
 
-        recv.setTimer(timer);
-        send.setTimer(timer);
-        auto p0 = recv.silentReceive(c, z0, prng, chls[0]);
-        auto p1 = send.silentSend(x, z1, prng, chls[1]);
-
-
-        auto rounds = eval(p0, p1, chls[1], chls[0]);
-
-        for (u64 i = 0; i < n; ++i)
+        //for (u64 n = 5000; n < 10000; ++n)
         {
-            if (c[i].gf128Mul(x) != (z0[i] ^ z1[i]))
+
+            recv.setTimer(timer);
+            send.setTimer(timer);
+            if (jj)
             {
-                throw RTE_LOC;
+                std::vector<block> c(n), z0(n), z1(n);
+                auto p0 = recv.silentReceive(c, z0, prng, chls[0]);
+                auto p1 = send.silentSend(x, z1, prng, chls[1]);
+
+
+                auto rounds = eval(p0, p1, chls[1], chls[0]);
+                if (rounds != 3)
+                    throw RTE_LOC;
+
+
+                for (u64 i = 0; i < n; ++i)
+                {
+                    if (c[i].gf128Mul(x) != (z0[i] ^ z1[i]))
+                    {
+                        throw RTE_LOC;
+                    }
+                }
             }
+            else
+            {
+
+
+                auto p0 = send.genSilentBaseOts(prng, chls[0], x);
+                auto p1 = recv.genSilentBaseOts(prng, chls[1]);
+
+                auto rounds = eval(p0, p1, chls[1], chls[0]);
+                if (rounds != 3)
+                    throw RTE_LOC;
+
+                p0 = send.silentSendInplace(x, n, prng, chls[0]);
+                p1 = recv.silentReceiveInplace(n, prng, chls[1]);
+                rounds = eval(p0, p1, chls[1], chls[0]);
+
+
+
+                for (u64 i = 0; i < n; ++i)
+                {
+                    if (recv.mC[i].gf128Mul(x) != (send.mB[i] ^ recv.mA[i]))
+                    {
+                        throw RTE_LOC;
+                    }
+                }
+            }
+
         }
 
-        if (rounds != 3)
-            throw RTE_LOC;
         timer.setTimePoint("done");
     }
 }
