@@ -218,12 +218,22 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
+#if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
+using BaseOT = McRosRoyTwist;
+#elif defined ENABLE_MR
+using BaseOT = MasnyRindal;
+#elif defined ENABLE_MRR
+using BaseOT = McRosRoy;
+#else
+using BaseOT = DefaultBaseOT;
+#endif
+
 		MC_BEGIN(task<>, this, &prng, &chl,
 			choice = BitVector{},
 			bb = BitVector{},
 			msg = AlignedUnVector<block>{},
 			baseVole = std::vector<block>{},
-			baseOt = DefaultBaseOT{},
+			baseOt = BaseOT{},
 			chl2 = Socket{},
 			prng2 = std::move(PRNG{}),
 			noiseVals = std::vector<block>{},

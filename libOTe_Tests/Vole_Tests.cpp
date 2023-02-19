@@ -478,7 +478,7 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 
                 auto rounds = eval(p0, p1, chls[1], chls[0]);
                 if (rounds != 3)
-                    throw RTE_LOC;
+                    throw std::runtime_error(std::to_string(rounds) + "!=3. " +COPROTO_LOCATION);
 
 
                 for (u64 i = 0; i < n; ++i)

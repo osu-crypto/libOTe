@@ -50,9 +50,20 @@ namespace osuCrypto
 
     task<> SilentVoleSender::genSilentBaseOts(PRNG& prng, Socket& chl, cp::optional<block> delta)
     {
+
+#if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
+        using BaseOT = McRosRoyTwist;
+#elif defined ENABLE_MR
+        using BaseOT = MasnyRindal;
+#elif defined ENABLE_MRR
+        using BaseOT = McRosRoy;
+#else
+    using BaseOT = DefaultBaseOT;
+#endif
+
         MC_BEGIN(task<>,this, delta, &prng, &chl, 
             msg = AlignedUnVector<std::array<block, 2>>(silentBaseOtCount()),
-            baseOt = DefaultBaseOT{},
+            baseOt = BaseOT{},
             prng2 = std::move(PRNG{}),
             xx = BitVector{},
             chl2 = Socket{},
