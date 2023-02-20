@@ -16,10 +16,11 @@ if(NOT EXISTS ${BUILD_DIR} OR NOT BITPOLYMUL_FOUND)
     set(DOWNLOAD_CMD  ${GIT} clone ${GIT_REPOSITORY})
     set(CHECKOUT_CMD  ${GIT} checkout ${GIT_TAG})
     set(CONFIGURE_CMD ${CMAKE_COMMAND} -S ${CLONE_DIR} -B ${BUILD_DIR} -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
-                       -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE})
-    set(BUILD_CMD     ${CMAKE_COMMAND} --build ${BUILD_DIR} ${CONFIG}
+                       -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
                         -DBITPOLYMUL_ASAN=${ENABLE_ASAN}
-                        -DBITPOLYMUL_PIC=${ENABLE_PIC})
+                        -DBITPOLYMUL_PIC=${ENABLE_PIC}
+                        )
+    set(BUILD_CMD     ${CMAKE_COMMAND} --build ${BUILD_DIR} ${CONFIG})
     set(INSTALL_CMD   ${CMAKE_COMMAND} --install ${BUILD_DIR} ${CONFIG} --prefix ${OC_THIRDPARTY_INSTALL_PREFIX})
 
 
