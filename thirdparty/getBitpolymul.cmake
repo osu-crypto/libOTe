@@ -1,7 +1,7 @@
 
 
 set(GIT_REPOSITORY      https://github.com/ladnir/bitpolymul.git)
-set(GIT_TAG             "97e189ee36f34ab9ea19e46e1539a096e8da0ad7" )
+set(GIT_TAG             "ba351330f397ce758757f7858d5c479f35a340b4" )
 
 set(CLONE_DIR "${OC_THIRDPARTY_CLONE_DIR}/bitpolymul")
 set(BUILD_DIR "${CLONE_DIR}/out/build/${OC_CONFIG}")
@@ -18,7 +18,10 @@ if(NOT EXISTS ${BUILD_DIR} OR NOT BITPOLYMUL_FOUND)
     set(CONFIGURE_CMD ${CMAKE_COMMAND} -S ${CLONE_DIR} -B ${BUILD_DIR} -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
                        -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE})
     set(BUILD_CMD     ${CMAKE_COMMAND} --build ${BUILD_DIR} ${CONFIG})
-    set(INSTALL_CMD   ${CMAKE_COMMAND} --install ${BUILD_DIR} ${CONFIG} --prefix ${OC_THIRDPARTY_INSTALL_PREFIX})
+    set(INSTALL_CMD   ${CMAKE_COMMAND} --install ${BUILD_DIR} ${CONFIG} --prefix ${OC_THIRDPARTY_INSTALL_PREFIX}
+                        -DBITPOLYMUL_ASAN=${ENABLE_ASAN}
+                        -DBITPOLYMUL_PIC=${ENABLE_PIC}
+    )
 
 
     message("============= Building bitpolymul =============")
