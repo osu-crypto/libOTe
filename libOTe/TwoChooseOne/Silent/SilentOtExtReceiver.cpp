@@ -198,6 +198,17 @@ namespace osuCrypto
 	}
 
 
+	void ExConvConfigure(
+		u64 numOTs, u64 secParam,
+		MultType mMultType,
+		u64& mRequestedNumOTs,
+		u64& mNumPartitions,
+		u64& mSizePer,
+		u64& mN2,
+		u64& mN,
+		ExConvCode& mEncoder
+	);
+
 	void SilverConfigure(
 		u64 numOTs, u64 secParam,
 		MultType mMultType,
@@ -229,8 +240,25 @@ namespace osuCrypto
 	{
 		mMalType = malType;
 		mNumThreads = numThreads;
+		mGapOts.resize(0);
 
-		if (mMultType == MultType::slv5 || mMultType == MultType::slv11)
+		switch (mMultType)
+		{
+		case osuCrypto::MultType::QuasiCyclic:
+
+			QuasiCyclicConfigure(numOTs, 128, scaler,
+				mMultType,
+				mRequestedNumOts,
+				mNumPartitions,
+				mSizePer,
+				mN2,
+				mN,
+				mP,
+				mScaler);
+
+			break;
+		case osuCrypto::MultType::slv5:
+		case osuCrypto::MultType::slv11:
 		{
 			if (scaler != 2)
 				throw std::runtime_error("only scaler = 2 is supported for slv. " LOCATION);
@@ -247,21 +275,26 @@ namespace osuCrypto
 				mEncoder);
 
 			mGapOts.resize(gap);
-
+			break;
 		}
-		else
-		{
-			QuasiCyclicConfigure(numOTs, 128, scaler,
-				mMultType,
-				mRequestedNumOts,
-				mNumPartitions,
-				mSizePer,
-				mN2,
-				mN,
-				mP,
-				mScaler);
+		case osuCrypto::MultType::ExConv5x8:
+		case osuCrypto::MultType::ExConv7x8:
+		case osuCrypto::MultType::ExConv11x8:
+		case osuCrypto::MultType::ExConv21x8:
+		case osuCrypto::MultType::ExConv5x16:
+		case osuCrypto::MultType::ExConv7x16:
+		case osuCrypto::MultType::ExConv11x16:
+		case osuCrypto::MultType::ExConv21x16:
+		case osuCrypto::MultType::ExAcc7:
+		case osuCrypto::MultType::ExAcc11:
+		case osuCrypto::MultType::ExAcc21:
+		case osuCrypto::MultType::ExAcc40:
 
-			mGapOts.resize(0);
+		ExConvConfigure(numOTs, 128, mMultType, mRequestedNumOts, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
+			break;
+		default:
+			throw RTE_LOC;
+			break;
 		}
 
 
@@ -683,8 +716,9 @@ namespace osuCrypto
 				mA[p] = mA[p] | OneBlock;
 			setTimePoint("recver.expand.ldpc.mask");
 
-			// encode both mA and mC (which is the lsb of mA)
-			if (mMultType == MultType::QuasiCyclic)
+			switch (mMultType)
+			{
+			case osuCrypto::MultType::QuasiCyclic:
 			{
 #ifdef ENABLE_BITPOLYMUL
 				QuasiCyclicCode code;
@@ -694,8 +728,34 @@ namespace osuCrypto
 				throw std::runtime_error("ENABLE_BITPOLYMUL not defined.");
 #endif
 			}
-			else
+				break;
+			case osuCrypto::MultType::slv5:
+			case osuCrypto::MultType::slv11:
 				mEncoder.cirTransEncode<block>(mA);
+				break;
+			case osuCrypto::MultType::ExConv5x8:
+			case osuCrypto::MultType::ExConv7x8:
+			case osuCrypto::MultType::ExConv11x8:
+			case osuCrypto::MultType::ExConv21x8:
+			case osuCrypto::MultType::ExConv5x16:
+			case osuCrypto::MultType::ExConv7x16:
+			case osuCrypto::MultType::ExConv11x16:
+			case osuCrypto::MultType::ExConv21x16:
+			case osuCrypto::MultType::ExAcc7:
+			case osuCrypto::MultType::ExAcc11:
+			case osuCrypto::MultType::ExAcc21:
+			case osuCrypto::MultType::ExAcc40:
+			{
+				AlignedUnVector<block> A2(mExConvEncoder.mMessageSize);
+				mExConvEncoder.dualEncode<block>(mA, A2);
+				std::swap(mA, A2);
+				break;
+			}
+			default:
+				throw RTE_LOC;
+				break;
+			}
+
 			setTimePoint("recver.expand.ldpc.cirTransEncode");
 
 		}
@@ -714,6 +774,53 @@ namespace osuCrypto
 			for (auto p : mS)
 				cc[p] = 1;
 
+
+			switch (mMultType)
+			{
+			case osuCrypto::MultType::QuasiCyclic:
+			{
+#ifdef ENABLE_BITPOLYMUL
+				QuasiCyclicCode code;
+				code.init(mP, mScaler);
+				code.encode(mA.subspan(0, code.size()));
+				code.encode(mC.subspan(0, code.size()));
+#else
+				throw std::runtime_error("ENABLE_BITPOLYMUL not defined.");
+#endif
+			}
+			break;
+			case osuCrypto::MultType::slv5:
+			case osuCrypto::MultType::slv11:
+				mEncoder.cirTransEncode2<block, u8>(mA, mC);
+				break;
+			case osuCrypto::MultType::ExConv5x8:
+			case osuCrypto::MultType::ExConv7x8:
+			case osuCrypto::MultType::ExConv11x8:
+			case osuCrypto::MultType::ExConv21x8:
+			case osuCrypto::MultType::ExConv5x16:
+			case osuCrypto::MultType::ExConv7x16:
+			case osuCrypto::MultType::ExConv11x16:
+			case osuCrypto::MultType::ExConv21x16:
+			case osuCrypto::MultType::ExAcc7:
+			case osuCrypto::MultType::ExAcc11:
+			case osuCrypto::MultType::ExAcc21:
+			case osuCrypto::MultType::ExAcc40:
+			{
+				AlignedUnVector<block> A2(mExConvEncoder.mMessageSize);
+				AlignedUnVector<u8> C2(mExConvEncoder.mMessageSize);
+				//mExConvEncoder.dualEncode<block>(mA, A2);
+				mExConvEncoder.dualEncode<block>(mA.subspan(0, mExConvEncoder.mCodeSize), A2);
+				mExConvEncoder.dualEncode<u8>(mC.subspan(0, mExConvEncoder.mCodeSize), C2);
+				std::swap(mA, A2);
+				std::swap(mC, C2);
+				break;
+			}
+			default:
+				throw RTE_LOC;
+				break;
+			}
+
+
 			// encode both the mA and mC vectors in place.
 			if (mMultType == MultType::QuasiCyclic)
 			{
@@ -727,7 +834,6 @@ namespace osuCrypto
 #endif
 			}
 			else
-				mEncoder.cirTransEncode2<block, u8>(mA, mC);
 			setTimePoint("recver.expand.ldpc.cirTransEncode");
 		}
 	}

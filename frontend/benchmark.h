@@ -8,6 +8,9 @@
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 
+#include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
+
 namespace osuCrypto
 {
 
@@ -80,6 +83,7 @@ namespace osuCrypto
         ExConvCode code;
         code.config(k, n, w, a, true);
 
+        code.mTrans = cmd.isSet("trans");
 
         if (v)
         {
@@ -234,5 +238,81 @@ namespace osuCrypto
             std::cout << "sse " << std::chrono::duration_cast<std::chrono::milliseconds>(end1 - end0).count() << std::endl;
         }
 #endif
+    }
+
+
+    inline void SilentOtBench(const CLP& cmd)
+    {
+        try
+        {
+
+        SilentOtExtSender sender;
+        SilentOtExtReceiver recver;
+
+        u64 trials = cmd.getOr("t", 10);
+
+        u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
+        MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv5x16);
+        std::cout << multType << std::endl; 
+
+        recver.mMultType = multType;
+        sender.mMultType = multType;
+
+        PRNG prng0(ZeroBlock), prng1(ZeroBlock);
+        block delta = prng0.get();
+
+        auto sock = coproto::LocalAsyncSocket::makePair();
+
+        Timer sTimer;
+        Timer rTimer;
+        sTimer.setTimePoint("start");
+        rTimer.setTimePoint("start");
+
+        auto t0 = std::thread([&] {
+            for (u64 t = 0; t < trials; ++t)
+            {
+                auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
+
+                char c;
+
+                coproto::sync_wait(sock[0].send(std::move(c)));
+                coproto::sync_wait(sock[0].recv(c));
+                sTimer.setTimePoint("__");
+                coproto::sync_wait(sock[0].send(std::move(c)));
+                coproto::sync_wait(sock[0].recv(c));
+                sTimer.setTimePoint("s start");
+                coproto::sync_wait(p0);
+                sTimer.setTimePoint("s done");
+            }
+            });
+
+
+        for (u64 t = 0; t < trials; ++t)
+        {
+            auto p1 = recver.silentReceiveInplace(n, prng1, sock[1]);
+            char c;
+            coproto::sync_wait(sock[1].send(std::move(c)));
+            coproto::sync_wait(sock[1].recv(c));
+
+            rTimer.setTimePoint("__");
+            coproto::sync_wait(sock[1].send(std::move(c)));
+            coproto::sync_wait(sock[1].recv(c));
+
+            rTimer.setTimePoint("r start");
+            coproto::sync_wait(p1);
+            rTimer.setTimePoint("r done");
+            
+        }
+
+
+        t0.join();
+        std::cout << sTimer << std::endl;
+        std::cout << rTimer << std::endl;
+
+        }
+        catch (std::exception& e)
+        {
+            std::cout << e.what() << std::endl;
+        }
     }
 }

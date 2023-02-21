@@ -114,7 +114,11 @@ int main(int argc, char** argv)
 	cmd.parse(argc, argv);
 	bool flagSet = false;
 	
-
+	if (cmd.isSet("ea"))
+	{
+		EAAttack(cmd);
+		return 0;
+	}
 
 	if (cmd.isSet("tungsten"))
 	{
@@ -136,6 +140,8 @@ int main(int argc, char** argv)
 			encodeBench(cmd);
 		else if (cmd.isSet("QC"))
 			QCCodeBench(cmd);
+		else if (cmd.isSet("silent"))
+			SilentOtBench(cmd);
 		else
 			ExConvCodeBench(cmd);
 		return 0;

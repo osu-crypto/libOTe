@@ -21,6 +21,7 @@
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
+#include "libOTe/Tools/ExConvCode/ExConvCode.h"
 
 namespace osuCrypto
 {
@@ -119,6 +120,8 @@ namespace osuCrypto
 
         // The Silver encoder for MultType::slv5, MultType::slv11
         SilverEncoder mEncoder;
+
+        ExConvCode mExConvEncoder;
 
         // The OTs send msgs which will be used to flood the
         // last gap bits of the noisy vector for the slv code.

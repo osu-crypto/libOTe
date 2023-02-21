@@ -10,6 +10,7 @@
 #include <cryptoTools/Common/Defines.h>
 #include "libOTe/config.h"
 #include <cassert>
+#include <iostream>
 
 //#define OTE_KOS_HASH
 //#define IKNP_SHA_HASH
@@ -36,14 +37,85 @@ namespace osuCrypto
 	{
 		QuasiCyclic = 1,
 		slv5,
-		slv11
+		slv11,
+		ExConv5x8,
+		ExConv7x8,
+		ExConv11x8,
+		ExConv21x8,
+		ExConv5x16,
+		ExConv7x16,
+		ExConv11x16,
+		ExConv21x16,
+		ExAcc7,
+		ExAcc11,
+		ExAcc21,
+		ExAcc40
 	};
 
-#ifdef ENABLE_BITPOLYMUL
-	constexpr MultType DefaultMultType = MultType::QuasiCyclic;
-#else
-	constexpr MultType DefaultMultType = MultType::slv5;
-#endif
+	inline std::ostream& operator<<(std::ostream& o, MultType m)
+	{
+		switch (m)
+		{
+		case osuCrypto::MultType::QuasiCyclic:
+			o << "QuasiCyclic";
+			break;
+		case osuCrypto::MultType::slv5:
+			o << "slv5";
+			break;
+		case osuCrypto::MultType::slv11:
+			o << "slv11";
+			break;
+		case osuCrypto::MultType::ExConv5x8:
+			o << "ExConv5x8";
+			break;
+		case osuCrypto::MultType::ExConv7x8:
+			o << "ExConv7x8";
+			break;
+		case osuCrypto::MultType::ExConv11x8:
+			o << "ExConv11x8";
+			break;
+		case osuCrypto::MultType::ExConv21x8:
+			o << "ExConv21x8";
+			break;
+		case osuCrypto::MultType::ExConv5x16:
+			o << "ExConv5x16";
+			break;
+		case osuCrypto::MultType::ExConv7x16:
+			o << "ExConv7x16";
+			break;
+		case osuCrypto::MultType::ExConv11x16:
+			o << "ExConv11x16";
+			break;
+		case osuCrypto::MultType::ExConv21x16:
+			o << "ExConv21x16";
+			break;
+		case osuCrypto::MultType::ExAcc7:
+			o << "ExAcc7";
+			break;
+		case osuCrypto::MultType::ExAcc11:
+			o << "ExAcc11";
+			break;
+		case osuCrypto::MultType::ExAcc21:
+			o << "ExAcc21";
+			break;
+		case osuCrypto::MultType::ExAcc40:
+			o << "ExAcc40";
+			break;
+		default:
+			throw RTE_LOC;
+			break;
+		}
+
+		return o;
+	}
+	
+	constexpr MultType DefaultMultType = MultType::ExConv7x16;
+
+//#ifdef ENABLE_BITPOLYMUL
+//	constexpr MultType DefaultMultType = MultType::QuasiCyclic;
+//#else
+//	constexpr MultType DefaultMultType = MultType::slv5;
+//#endif
 
 	
 
