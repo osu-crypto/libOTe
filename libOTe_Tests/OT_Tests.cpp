@@ -432,6 +432,7 @@ namespace tests_libOTe
     {
         
 #if defined(LIBOTE_HAS_BASE_OT) && defined(ENABLE_KOS)
+        gKosWarning = false;
         //IOService ios(0);
         //Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
         //Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
@@ -469,6 +470,7 @@ namespace tests_libOTe
     void OtExt_Kos_Test()
     {
 #if defined(ENABLE_KOS)
+        gKosWarning = false;
         setThreadName("Sender");
 
         //IOService ios;
@@ -520,6 +522,7 @@ namespace tests_libOTe
     void OtExt_Kos_fs_Test()
     {
 #if defined(ENABLE_KOS)
+        gKosWarning = false;
         setThreadName("Sender");
 
 
@@ -573,6 +576,7 @@ namespace tests_libOTe
     void OtExt_Kos_ro_Test()
     {
 #if defined(ENABLE_KOS)
+        gKosWarning = false;
         setThreadName("Sender");
 
         //IOService ios;
@@ -637,6 +641,7 @@ namespace tests_libOTe
 	void OtExt_Chosen_Test()
 	{
 #if defined(ENABLE_KOS)
+        gKosWarning = false;
 
         //IOService ios;
         //Session ep0(ios, "127.0.0.1:1212", SessionMode::Server);
@@ -721,6 +726,7 @@ namespace tests_libOTe
     void DotExt_Kos_Test()
     {
 #if defined(ENABLE_DELTA_KOS)
+        gKosWarning = false;
 
         setThreadName("Sender");
 

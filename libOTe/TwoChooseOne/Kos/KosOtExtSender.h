@@ -13,10 +13,10 @@
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/PRNG.h>
-extern bool gKosWarning;
 #include <array>
 namespace osuCrypto {
 
+    extern bool gKosWarning;
     class KosOtExtSender :
         public OtExtSender, public TimerAdapter
     {

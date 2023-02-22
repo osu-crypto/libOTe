@@ -1,4 +1,4 @@
-#include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
+﻿#include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 
 #if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE) 
 
@@ -10,28 +10,47 @@
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
 namespace osuCrypto
 {
-    u64 secLevel(u64 scale, u64 p, u64 points)
-    {
-        auto x1 = std::log2(scale * p / double(p));
-        auto x2 = std::log2(scale * p) / 2;
-        return static_cast<u64>(points * x1 + x2);
-    }
+    //u64 secLevel(u64 scale, u64 n, u64 points)
+    //{
+    //    auto x1 = std::log2(scale * n / double(n));
+    //    auto x2 = std::log2(scale * n) / 2;
+    //    return static_cast<u64>(points * x1 + x2);
+    //}
 
-    u64 getPartitions(u64 scaler, u64 p, u64 secParam)
-    {
-        if (scaler < 2)
-            throw std::runtime_error("scaler must be 2 or greater");
+    //u64 getPartitions(u64 scaler, u64 n, u64 secParam)
+    //{
+    //    if (scaler < 2)
+    //        throw std::runtime_error("scaler must be 2 or greater");
 
-        u64 ret = 1;
-        auto ss = secLevel(scaler, p, ret);
-        while (ss < secParam)
-        {
-            ++ret;
-            ss = secLevel(scaler, p, ret);
-            if (ret > 1000)
-                throw std::runtime_error("failed to find silent OT parameters");
-        }
-        return roundUpTo(ret, 8);
+    //    u64 ret = 1;
+    //    auto ss = secLevel(scaler, n, ret);
+    //    while (ss < secParam)
+    //    {
+    //        ++ret;
+    //        ss = secLevel(scaler, n, ret);
+    //        if (ret > 1000)
+    //            throw std::runtime_error("failed to find silent OT parameters");
+    //    }
+    //    return roundUpTo(ret, 8);
+    //}
+
+
+    // We get e^{-2td} security against linear attacks, 
+    // with noise weigh t and minDist d. 
+    // For regular we can be slightly more accurate with
+    //    (1 − 2d)^t
+    // which implies a bit security level of
+    // k = -t * log2(1 - 2d)
+    // t = -k / log2(1 - 2d)
+    u64 getRegNoiseWeight(double minDistRatio, u64 secParam)
+    {
+        if (minDistRatio > 0.5 || minDistRatio <= 0)
+            throw RTE_LOC;
+
+        auto d = std::log2(1 - 2 * minDistRatio);
+        auto t = std::max<u64>(128, -double(secParam) / d);
+
+        return roundUpTo(t, 8);
     }
 
 
@@ -48,19 +67,25 @@ namespace osuCrypto
     {
         auto mScaler = 2;
         u64 w;
+        double minDist;
         switch (mMultType)
         {
         case osuCrypto::MultType::ExAcc7:
             w = 7;
+            // this is known to be high but likely overall accurate
+            minDist = 0.05;
             break;
         case osuCrypto::MultType::ExAcc11:
             w = 11;
+            minDist = 0.1;
             break;
         case osuCrypto::MultType::ExAcc21:
             w = 21;
+            minDist = 0.1;
             break;
         case osuCrypto::MultType::ExAcc40:
             w = 40;
+            minDist = 0.2;
             break;
         default:
             throw RTE_LOC;
@@ -68,7 +93,7 @@ namespace osuCrypto
         }
 
         mRequestedNumOTs = numOTs;
-        mNumPartitions = getPartitions(mScaler, numOTs, secParam);
+        mNumPartitions = getRegNoiseWeight(minDist, secParam);
         mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
         mN2 = mSizePer * mNumPartitions;
         mN = mN2 / mScaler;
@@ -118,7 +143,7 @@ namespace osuCrypto
 
         gap = SilverCode::gap(code);
 
-        mNumPartitions = getPartitions(mScaler, numOTs, secParam);
+        mNumPartitions = getRegNoiseWeight(0.2, secParam);
         mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
         mN2 = mSizePer * mNumPartitions + gap;
         mN = mN2 / mScaler;
@@ -150,7 +175,7 @@ namespace osuCrypto
 
         mRequestedNumOTs = numOTs;
         mP = nextPrime(std::max<u64>(numOTs, 128 * 128));
-        mNumPartitions = getPartitions(scaler, mP, secParam);
+        mNumPartitions = getRegNoiseWeight(0.2, secParam);
         auto ss = (mP * scaler + mNumPartitions - 1) / mNumPartitions;
         mSizePer = roundUpTo(ss, 8);
         mN2 = mSizePer * mNumPartitions;
@@ -777,7 +802,7 @@ namespace osuCrypto
 //                for (u64 j = 0; j < nBlocks; ++j)
 //                    temp128[j] = temp128[j] ^ b128[j];
 //
-//                // reduce s[i] mod (x^p - 1) and store it at cModP1[i]
+//                // reduce s[i] mod (x^n - 1) and store it at cModP1[i]
 //                modp(dest, temp128, mP);
 //
 //            };
