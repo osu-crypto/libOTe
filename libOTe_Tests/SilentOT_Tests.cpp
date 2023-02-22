@@ -214,9 +214,9 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
             C[i] = A[i] ^ B[i];
         }
 
-        code.encode(A);
-        code.encode(B);
-        code.encode(C);
+        code.dualEncode(A);
+        code.dualEncode(B);
+        code.dualEncode(C);
 
         for (u64 i : rng(mP))
         {
@@ -236,7 +236,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
             A[i] = oc::zeroAndAllOne[prng.getBit()];
         }
 
-        code.encode(A);
+        code.dualEncode(A);
         
         for (u64 i : rng(mP))
         {
@@ -269,7 +269,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
                 AA(j, i) = *BitIterator((u8*)&A[i], j);
         }
 
-        code.encode(A);
+        code.dualEncode(A);
         auto A2 = AA * mtx;
 
         for (auto i : rng(mP))
@@ -702,6 +702,7 @@ void OtExt_Silent_Silver_Test(const oc::CLP& cmd)
 {
 
 #if defined(ENABLE_SILENTOT)
+    gSilverWarning = false;
 
     auto sockets = cp::LocalAsyncSocket::makePair();
 

@@ -32,7 +32,7 @@ using namespace osuCrypto;
 #include "libOTe/Tools/LDPC/LdpcImpulseDist.h"
 #include "libOTe/Tools/LDPC/Util.h"
 #include "cryptoTools/Crypto/RandomOracle.h"
-#include "libOTe/Tools/EA/EAAttack.h"
+#include "libOTe/Tools/EACode/EAChecker.h"
 #include "libOTe/Tools/Tungsten/accTest.h"
 
 static const std::vector<std::string>
@@ -116,7 +116,7 @@ int main(int argc, char** argv)
 	
 	if (cmd.isSet("ea"))
 	{
-		EAAttack(cmd);
+		EAChecker(cmd);
 		return 0;
 	}
 
@@ -134,7 +134,7 @@ int main(int argc, char** argv)
 		return 0;
 	}
 
-	if (cmd.isSet("encode"))
+	if (cmd.isSet("bench"))
 	{
 		if (cmd.isSet("silver"))
 			encodeBench(cmd);
@@ -143,7 +143,7 @@ int main(int argc, char** argv)
 		else if (cmd.isSet("silent"))
 			SilentOtBench(cmd);
 		else
-			ExConvCodeBench(cmd);
+			EACodeBench(cmd);
 		return 0;
 	}
 

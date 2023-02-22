@@ -503,8 +503,8 @@ namespace osuCrypto
 				mQuasiCyclicEncoder.setTimer(getTimer());
 
 			// compress both mA and mC in place.
-			mQuasiCyclicEncoder.encode(mA.subspan(0, mQuasiCyclicEncoder.size()));
-			mQuasiCyclicEncoder.encode(mC.subspan(0, mQuasiCyclicEncoder.size()));
+			mQuasiCyclicEncoder.dualEncode(mA.subspan(0, mQuasiCyclicEncoder.size()));
+			mQuasiCyclicEncoder.dualEncode(mC.subspan(0, mQuasiCyclicEncoder.size()));
 #else
 			throw std::runtime_error("ENABLE_BITPOLYMUL not defined.");
 #endif
@@ -518,7 +518,7 @@ namespace osuCrypto
 				mEncoder.setTimer(getTimer());
 
 			// compress both mA and mC in place.
-			mEncoder.cirTransEncode2<block, block>(mA, mC);
+			mEncoder.dualEncode2<block, block>(mA, mC);
 			setTimePoint("SilentVoleReceiver.expand.cirTransEncode.a");
 		}
 

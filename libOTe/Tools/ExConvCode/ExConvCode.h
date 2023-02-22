@@ -8,7 +8,7 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 
-#include "Util.h"
+#include "libOTe/Tools/EACode/Util.h"
 
 namespace osuCrypto
 {
@@ -548,7 +548,7 @@ namespace osuCrypto
 
         template<typename T, u64 count>
         OC_FORCEINLINE typename std::enable_if<(count > 1), T>::type
-            expandOne(const T* __restrict ee, detail::ExConvModd& prng)const
+            expandOne(const T* __restrict ee, detail::ExpanderModd& prng)const
         {
             if constexpr (count == 8)
             {
@@ -646,7 +646,7 @@ namespace osuCrypto
 
         template<typename T, u64 count>
         OC_FORCEINLINE typename std::enable_if<count == 1, T>::type
-            expandOne(const T* __restrict ee, detail::ExConvModd& prng) const
+            expandOne(const T* __restrict ee, detail::ExpanderModd& prng) const
         {
             auto r = prng.get();
             //std::cout << r << " ";
@@ -658,7 +658,7 @@ namespace osuCrypto
         {
             assert(w.size() == mMessageSize);
             assert(e.size() == mCodeSize);
-            detail::ExConvModd prng(mSeed, mCodeSize);
+            detail::ExpanderModd prng(mSeed, mCodeSize);
 
             std::vector<u64> row(mExpanderWeight);
             u64* __restrict rr = row.data();
@@ -776,7 +776,7 @@ namespace osuCrypto
         SparseMtx getB() const
         {
             //PRNG prng(mSeed);
-            detail::ExConvModd prng(mSeed, mCodeSize);
+            detail::ExpanderModd prng(mSeed, mCodeSize);
             PointList points(mMessageSize, mCodeSize);
 
             std::vector<u64> row(mExpanderWeight);

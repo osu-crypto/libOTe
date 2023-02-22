@@ -192,7 +192,7 @@ namespace osuCrypto
 				memset(((u8*)dest.data()) + pBytes, 0, rem);
 		}
 
-		void encode(span<u8> X)
+		void dualEncode(span<u8> X)
 		{
 			std::vector<block> XX(X.size());
 			for (auto i : rng(X.size()))
@@ -202,7 +202,7 @@ namespace osuCrypto
 
 				XX[i] = block(X[i], X[i]);
 			}
-			encode(XX);
+			dualEncode(XX);
 			for (auto i : rng(X.size()))
 			{
 				X[i] = XX[i] == ZeroBlock ? 0 : 1;
@@ -217,7 +217,7 @@ namespace osuCrypto
 		}
 
 
-		void encode(span<block> X)
+		void dualEncode(span<block> X)
 		{
 			if(X.size() != mM)
 				throw RTE_LOC;
@@ -378,7 +378,7 @@ namespace osuCrypto
 				std::vector<block> in(mM);
 				in[i] = oc::AllOneBlock;
 
-				encode(in);
+				dualEncode(in);
 
 				u64 w = 0;
 				for (u64 j = 0; j < mP; ++j)

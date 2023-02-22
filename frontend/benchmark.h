@@ -5,7 +5,7 @@
 #include "libOTe/Tools/Tools.h"
 
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
-#include "libOTe/Tools/ExConvCode/ExConvCode.h"
+#include "libOTe/Tools/EACode/EACode.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
@@ -44,7 +44,7 @@ namespace osuCrypto
         {
 
             timer.setTimePoint("reset");
-            code.encode(c0);
+            code.dualEncode(c0);
             timer.setTimePoint("encode");
         }
 
@@ -55,7 +55,7 @@ namespace osuCrypto
 #endif
     }
 
-    inline void ExConvCodeBench(CLP& cmd)
+    inline void EACodeBench(CLP& cmd)
     {
         u64 trials = cmd.getOr("t", 10);
 
@@ -68,7 +68,7 @@ namespace osuCrypto
         // to state that 2^X rows should be used.
         u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
 
-        u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
+        u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 5.0));
 
         // the weight of the code
         u64 w = cmd.getOr("w", 7);
@@ -80,19 +80,14 @@ namespace osuCrypto
         bool v = cmd.isSet("v");
 
 
-        ExConvCode code;
-        code.config(k, n, w, a, true);
-
-        code.mTrans = cmd.isSet("trans");
+        EACode code;
+        code.config(k, n, w);
 
         if (v)
         {
             std::cout << "n: " << code.mCodeSize << std::endl;
             std::cout << "k: " << code.mMessageSize << std::endl;
-            std::cout << "m: " << code.mAccumulatorSize << std::endl;
             std::cout << "w: " << code.mExpanderWeight << std::endl;
-            std::cout << "wrap: " << code.mWrapping << std::endl;
-
         }
 
         std::vector<block> x(code.mCodeSize), y(code.mMessageSize);
@@ -161,7 +156,7 @@ namespace osuCrypto
         timer.setTimePoint("_____________________");
         for (u64 i = 0; i < trials; ++i)
         {
-            encoder.cirTransEncode<block>(x);
+            encoder.dualEncode<block>(x);
             timer.setTimePoint("encode");
         }
 
@@ -252,7 +247,7 @@ namespace osuCrypto
         u64 trials = cmd.getOr("t", 10);
 
         u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
-        MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv5x16);
+        MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExAcc11);
         std::cout << multType << std::endl; 
 
         recver.mMultType = multType;

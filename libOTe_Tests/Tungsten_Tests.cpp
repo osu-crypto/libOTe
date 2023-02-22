@@ -100,7 +100,7 @@ namespace tests_libOTe
 
         G.multAdd(c0, m0);
 
-        code.cirTransEncode<block>(c0, m1);
+        code.dualEncode<block>(c0, m1);
 
         if (m0 != m1)
             throw RTE_LOC;
@@ -575,7 +575,7 @@ namespace tests_libOTe
 
     void Tungsten2_encode_sum_test(const oc::CLP& cmd)
     {
-        auto k = cmd.getOr("k", 64);
+        auto k = cmd.getOr("k", 1024);
         auto n = cmd.getOr("n", k * 2);
         auto bw = cmd.getOr("bw", 5);
         auto aw = cmd.getOr("aw", 10);
@@ -921,7 +921,7 @@ namespace tests_libOTe
             code.setTimer(timer);
             for (auto t : rng(tt))
             {
-                code.cirTransEncode<block>(c0, m1);
+                code.dualEncode<block>(c0, m1);
             }
             std::cout << timer << std::endl;
         }
@@ -950,7 +950,7 @@ namespace tests_libOTe
             //    //code.finalize(m1);
 
             //    timer.setTimePoint("expand");
-            //    //code.cirTransEncode<block>(c0, m1);
+            //    //code.dualEncode<block>(c0, m1);
             //}
 
 
@@ -970,7 +970,7 @@ namespace tests_libOTe
             {
 
                 timer.setTimePoint("reset");
-                code.encode(c0);
+                code.dualEncode(c0);
                 timer.setTimePoint("encode");
             }
 
@@ -1011,7 +1011,7 @@ namespace tests_libOTe
                 code.finalize(m1);
 
                 timer.setTimePoint("expand");
-                //code.cirTransEncode<block>(c0, m1);
+                //code.dualEncode<block>(c0, m1);
             }
 
 
@@ -1049,7 +1049,7 @@ namespace tests_libOTe
                 code.finalize(m1);
 
                 timer.setTimePoint("expand");
-                //code.cirTransEncode<block>(c0, m1);
+                //code.dualEncode<block>(c0, m1);
             }
 
 
@@ -1090,7 +1090,7 @@ namespace tests_libOTe
                 code.finalize(m1);
 
                 timer.setTimePoint("expand");
-                //code.cirTransEncode<block>(c0, m1);
+                //code.dualEncode<block>(c0, m1);
             }
 
 
@@ -1128,7 +1128,7 @@ namespace tests_libOTe
                 code.finalize(m1);
 
                 timer.setTimePoint("expand");
-                //code.cirTransEncode<block>(c0, m1);
+                //code.dualEncode<block>(c0, m1);
             }
 
 

@@ -375,7 +375,7 @@ namespace osuCrypto
             if (mTimer)
                 mQuasiCyclicEncoder.setTimer(getTimer());
 
-            mQuasiCyclicEncoder.encode(mB.subspan(0, mQuasiCyclicEncoder.size()));
+            mQuasiCyclicEncoder.dualEncode(mB.subspan(0, mQuasiCyclicEncoder.size()));
 #else
             throw std::runtime_error("ENABLE_BITPOLYMUL not defined.");
 #endif
@@ -387,7 +387,7 @@ namespace osuCrypto
             if (mTimer)
                 mEncoder.setTimer(getTimer());
 
-            mEncoder.cirTransEncode<block>(mB);
+            mEncoder.dualEncode<block>(mB);
             setTimePoint("SilentVoleSender.expand.ldpc.cirTransEncode");
         }
 

@@ -108,7 +108,7 @@ namespace osuCrypto
 
         // Compute w = G * e.
         template<typename T>
-        void cirTransEncode(span<T> e, span<T> w)
+        void dualEncode(span<T> e, span<T> w)
         {
             assert(e.size() == mCodeSize);
             assert(w.size() == mMessageSize);

@@ -1,3 +1,4 @@
+#pragma once
 #include "cryptoTools/Crypto/PRNG.h"
 #include <vector>
 #ifdef ENABLE_AVX
@@ -12,7 +13,7 @@ namespace osuCrypto
     {
 
 
-        struct ExConvModd
+        struct ExpanderModd
         {
             using value_type = u64;
             PRNG prng;
@@ -27,7 +28,7 @@ namespace osuCrypto
 
             //static const auto numIdx = 
 
-            ExConvModd(block seed, u64 m)
+            ExpanderModd(block seed, u64 m)
                 : prng(seed, 256)
                 , modVal(m)
                 , mod(libdivide::libdivide_u64_gen(m))

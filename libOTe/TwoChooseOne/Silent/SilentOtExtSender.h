@@ -21,7 +21,7 @@
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
-#include "libOTe/Tools/ExConvCode/ExConvCode.h"
+#include "libOTe/Tools/EACode/EACode.h"
 
 namespace osuCrypto
 {
@@ -121,7 +121,7 @@ namespace osuCrypto
         // The Silver encoder for MultType::slv5, MultType::slv11
         SilverEncoder mEncoder;
 
-        ExConvCode mExConvEncoder;
+        EACode mEAEncoder;
 
         // The OTs send msgs which will be used to flood the
         // last gap bits of the noisy vector for the slv code.
@@ -130,12 +130,6 @@ namespace osuCrypto
         // The OTs send msgs which will be used to create the 
         // secret share of xa * delta as described in ferret.
         std::vector<std::array<block, 2>> mMalCheckOts;
-
-        // The memory backing mB
-        //AlignedUnVector<block> mBacking;
-
-        // The size of the memory backing mB
-        //u64 mBackingSize = 0;
 
         // A flag that helps debug
         bool mDebug = false;
@@ -272,6 +266,7 @@ namespace osuCrypto
         // clears the internal buffers.
         void clear();
     };
+    extern bool gSilverWarning;
 
 
 }

@@ -198,7 +198,7 @@ namespace osuCrypto
 	}
 
 
-	void ExConvConfigure(
+	void EAConfigure(
 		u64 numOTs, u64 secParam,
 		MultType mMultType,
 		u64& mRequestedNumOTs,
@@ -206,7 +206,7 @@ namespace osuCrypto
 		u64& mSizePer,
 		u64& mN2,
 		u64& mN,
-		ExConvCode& mEncoder
+		EACode& mEncoder
 	);
 
 	void SilverConfigure(
@@ -277,20 +277,20 @@ namespace osuCrypto
 			mGapOts.resize(gap);
 			break;
 		}
-		case osuCrypto::MultType::ExConv5x8:
-		case osuCrypto::MultType::ExConv7x8:
-		case osuCrypto::MultType::ExConv11x8:
-		case osuCrypto::MultType::ExConv21x8:
-		case osuCrypto::MultType::ExConv5x16:
-		case osuCrypto::MultType::ExConv7x16:
-		case osuCrypto::MultType::ExConv11x16:
-		case osuCrypto::MultType::ExConv21x16:
+		//case osuCrypto::MultType::ExConv5x8:
+		//case osuCrypto::MultType::ExConv7x8:
+		//case osuCrypto::MultType::ExConv11x8:
+		//case osuCrypto::MultType::ExConv21x8:
+		//case osuCrypto::MultType::ExConv5x16:
+		//case osuCrypto::MultType::ExConv7x16:
+		//case osuCrypto::MultType::ExConv11x16:
+		//case osuCrypto::MultType::ExConv21x16:
 		case osuCrypto::MultType::ExAcc7:
 		case osuCrypto::MultType::ExAcc11:
 		case osuCrypto::MultType::ExAcc21:
 		case osuCrypto::MultType::ExAcc40:
 
-		ExConvConfigure(numOTs, 128, mMultType, mRequestedNumOts, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
+		EAConfigure(numOTs, 128, mMultType, mRequestedNumOts, mNumPartitions, mSizePer, mN2, mN, mEAEncoder);
 			break;
 		default:
 			throw RTE_LOC;
@@ -723,7 +723,7 @@ namespace osuCrypto
 #ifdef ENABLE_BITPOLYMUL
 				QuasiCyclicCode code;
 				code.init(mP, mScaler);
-				code.encode(mA.subspan(0, code.size()));
+				code.dualEncode(mA.subspan(0, code.size()));
 #else
 				throw std::runtime_error("ENABLE_BITPOLYMUL not defined.");
 #endif
@@ -731,23 +731,15 @@ namespace osuCrypto
 				break;
 			case osuCrypto::MultType::slv5:
 			case osuCrypto::MultType::slv11:
-				mEncoder.cirTransEncode<block>(mA);
+				mEncoder.dualEncode<block>(mA);
 				break;
-			case osuCrypto::MultType::ExConv5x8:
-			case osuCrypto::MultType::ExConv7x8:
-			case osuCrypto::MultType::ExConv11x8:
-			case osuCrypto::MultType::ExConv21x8:
-			case osuCrypto::MultType::ExConv5x16:
-			case osuCrypto::MultType::ExConv7x16:
-			case osuCrypto::MultType::ExConv11x16:
-			case osuCrypto::MultType::ExConv21x16:
 			case osuCrypto::MultType::ExAcc7:
 			case osuCrypto::MultType::ExAcc11:
 			case osuCrypto::MultType::ExAcc21:
 			case osuCrypto::MultType::ExAcc40:
 			{
-				AlignedUnVector<block> A2(mExConvEncoder.mMessageSize);
-				mExConvEncoder.dualEncode<block>(mA, A2);
+				AlignedUnVector<block> A2(mEAEncoder.mMessageSize);
+				mEAEncoder.dualEncode<block>(mA.subspan(0, mEAEncoder.mCodeSize), A2);
 				std::swap(mA, A2);
 				break;
 			}
@@ -756,7 +748,7 @@ namespace osuCrypto
 				break;
 			}
 
-			setTimePoint("recver.expand.ldpc.cirTransEncode");
+			setTimePoint("recver.expand.ldpc.dualEncode");
 
 		}
 		else
@@ -782,8 +774,8 @@ namespace osuCrypto
 #ifdef ENABLE_BITPOLYMUL
 				QuasiCyclicCode code;
 				code.init(mP, mScaler);
-				code.encode(mA.subspan(0, code.size()));
-				code.encode(mC.subspan(0, code.size()));
+				code.dualEncode(mA.subspan(0, code.size()));
+				code.dualEncode(mC.subspan(0, code.size()));
 #else
 				throw std::runtime_error("ENABLE_BITPOLYMUL not defined.");
 #endif
@@ -791,26 +783,19 @@ namespace osuCrypto
 			break;
 			case osuCrypto::MultType::slv5:
 			case osuCrypto::MultType::slv11:
-				mEncoder.cirTransEncode2<block, u8>(mA, mC);
+				mEncoder.dualEncode2<block, u8>(mA, mC);
 				break;
-			case osuCrypto::MultType::ExConv5x8:
-			case osuCrypto::MultType::ExConv7x8:
-			case osuCrypto::MultType::ExConv11x8:
-			case osuCrypto::MultType::ExConv21x8:
-			case osuCrypto::MultType::ExConv5x16:
-			case osuCrypto::MultType::ExConv7x16:
-			case osuCrypto::MultType::ExConv11x16:
-			case osuCrypto::MultType::ExConv21x16:
 			case osuCrypto::MultType::ExAcc7:
 			case osuCrypto::MultType::ExAcc11:
 			case osuCrypto::MultType::ExAcc21:
 			case osuCrypto::MultType::ExAcc40:
 			{
-				AlignedUnVector<block> A2(mExConvEncoder.mMessageSize);
-				AlignedUnVector<u8> C2(mExConvEncoder.mMessageSize);
-				//mExConvEncoder.dualEncode<block>(mA, A2);
-				mExConvEncoder.dualEncode<block>(mA.subspan(0, mExConvEncoder.mCodeSize), A2);
-				mExConvEncoder.dualEncode<u8>(mC.subspan(0, mExConvEncoder.mCodeSize), C2);
+				AlignedUnVector<block> A2(mEAEncoder.mMessageSize);
+				AlignedUnVector<u8> C2(mEAEncoder.mMessageSize);
+				mEAEncoder.dualEncode2<block, u8>(
+					mA.subspan(0, mEAEncoder.mCodeSize), A2,
+					mC.subspan(0, mEAEncoder.mCodeSize), C2);
+
 				std::swap(mA, A2);
 				std::swap(mC, C2);
 				break;
@@ -820,21 +805,7 @@ namespace osuCrypto
 				break;
 			}
 
-
-			// encode both the mA and mC vectors in place.
-			if (mMultType == MultType::QuasiCyclic)
-			{
-#ifdef ENABLE_BITPOLYMUL
-				QuasiCyclicCode code;
-				code.init(mP, mScaler);
-				code.encode(mA.subspan(0, code.size()));
-				code.encode(mC.subspan(0, code.size()));
-#else
-				throw std::runtime_error("ENABLE_BITPOLYMUL not defined.");
-#endif
-			}
-			else
-			setTimePoint("recver.expand.ldpc.cirTransEncode");
+			setTimePoint("recver.expand.ldpc.dualEncode");
 		}
 	}
 

@@ -38,18 +38,10 @@ namespace osuCrypto
 		QuasiCyclic = 1,
 		slv5,
 		slv11,
-		ExConv5x8,
-		ExConv7x8,
-		ExConv11x8,
-		ExConv21x8,
-		ExConv5x16,
-		ExConv7x16,
-		ExConv11x16,
-		ExConv21x16,
-		ExAcc7,
-		ExAcc11,
+		ExAcc7, // fast
+		ExAcc11,// fast but more conservative
 		ExAcc21,
-		ExAcc40
+		ExAcc40 // conservative.
 	};
 
 	inline std::ostream& operator<<(std::ostream& o, MultType m)
@@ -64,30 +56,6 @@ namespace osuCrypto
 			break;
 		case osuCrypto::MultType::slv11:
 			o << "slv11";
-			break;
-		case osuCrypto::MultType::ExConv5x8:
-			o << "ExConv5x8";
-			break;
-		case osuCrypto::MultType::ExConv7x8:
-			o << "ExConv7x8";
-			break;
-		case osuCrypto::MultType::ExConv11x8:
-			o << "ExConv11x8";
-			break;
-		case osuCrypto::MultType::ExConv21x8:
-			o << "ExConv21x8";
-			break;
-		case osuCrypto::MultType::ExConv5x16:
-			o << "ExConv5x16";
-			break;
-		case osuCrypto::MultType::ExConv7x16:
-			o << "ExConv7x16";
-			break;
-		case osuCrypto::MultType::ExConv11x16:
-			o << "ExConv11x16";
-			break;
-		case osuCrypto::MultType::ExConv21x16:
-			o << "ExConv21x16";
 			break;
 		case osuCrypto::MultType::ExAcc7:
 			o << "ExAcc7";
@@ -109,7 +77,7 @@ namespace osuCrypto
 		return o;
 	}
 	
-	constexpr MultType DefaultMultType = MultType::ExConv7x16;
+	constexpr MultType DefaultMultType = MultType::ExAcc11;
 
 //#ifdef ENABLE_BITPOLYMUL
 //	constexpr MultType DefaultMultType = MultType::QuasiCyclic;

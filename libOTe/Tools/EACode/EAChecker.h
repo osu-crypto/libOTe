@@ -99,7 +99,7 @@ namespace osuCrypto
     //};
 
         
-    void EAAttack(CLP& cmd)
+    void EAChecker(CLP& cmd)
     {
         u64 seed = cmd.getOr("s", 0);
         u64 tt = cmd.getOr("t", 1);

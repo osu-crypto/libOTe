@@ -59,6 +59,7 @@ namespace osuCrypto
         mUniformBase = false;
     }
 
+    bool gKosWarning = true;
     void KosWarning()
     {
 #ifndef NO_KOS_WARNING
@@ -67,12 +68,15 @@ namespace osuCrypto
         {
             ~Warned()
             {
-                std::cout << Color::Red << "WARNING: This program made use of the KOS OT extension protocol. "
-                    << "The security of this protocol remains unclear and it is highly recommended to use the "
-                    << "SoftSpoken protocol instead. See the associated paper for details. Rebuild the library "
-                    << "with -DNO_KOS_WARNING=ON to disable this message."
-                    << LOCATION << Color::Default << std::endl;
+                if (gKosWarning)
+                {
 
+                    std::cout << Color::Red << "WARNING: This program made use of the KOS OT extension protocol. "
+                        << "The security of this protocol remains unclear and it is highly recommended to use the "
+                        << "SoftSpoken protocol instead. See the associated paper for details. Rebuild the library "
+                        << "with -DNO_KOS_WARNING=ON to disable this message."
+                        << LOCATION << Color::Default << std::endl;
+                }
             }
         };
         static Warned wardned;

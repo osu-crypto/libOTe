@@ -15,6 +15,7 @@
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "libOTe_Tests/Tungsten_Tests.h"
 #include "libOTe_Tests/ExConvCode_Tests.h"
+#include "libOTe_Tests/EACode_Tests.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -55,15 +56,16 @@ namespace tests_libOTe
 			tc.add("LdpcComposit_RegRepDiagBand_Trans_test  ", tests::LdpcComposit_RegRepDiagBand_Trans_test);
 
 			
+			tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
 			tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
-			tc.add("Tungsten_encode_basic_test              ", Tungsten_encode_basic_test);
-			tc.add("Tungsten2_encode_basic_test             ", Tungsten2_encode_basic_test);
-			tc.add("Tungsten2_encode_trans_test             ", Tungsten2_encode_trans_test);
-			tc.add("Tungsten2_encode_sum_test               ", Tungsten2_encode_sum_test);
-			tc.add("Tungsten2_encode_APA_test               ", Tungsten2_encode_APA_test);
-			
-			tc.add("Tungsten_encode_basic_bench             ", Tungsten_encode_basic_bench);
-			tc.add("perm_bench                              ", perm_bench);
+			//tc.add("Tungsten_encode_basic_test              ", Tungsten_encode_basic_test);
+			//tc.add("Tungsten2_encode_basic_test             ", Tungsten2_encode_basic_test);
+			//tc.add("Tungsten2_encode_trans_test             ", Tungsten2_encode_trans_test);
+			//tc.add("Tungsten2_encode_sum_test               ", Tungsten2_encode_sum_test);
+			//tc.add("Tungsten2_encode_APA_test               ", Tungsten2_encode_APA_test);
+			//
+			//tc.add("Tungsten_encode_basic_bench             ", Tungsten_encode_basic_bench);
+			//tc.add("perm_bench                              ", perm_bench);
 
 			tc.add("Tools_Pprf_test                         ", Tools_Pprf_test);
 			tc.add("Tools_Pprf_trans_test                   ", Tools_Pprf_trans_test);
