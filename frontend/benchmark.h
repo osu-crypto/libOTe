@@ -6,6 +6,7 @@
 
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "libOTe/Tools/EACode/EACode.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
@@ -91,6 +92,60 @@ namespace osuCrypto
         }
 
         std::vector<block> x(code.mCodeSize), y(code.mMessageSize);
+        Timer timer, verbose;
+
+        if (v)
+            code.setTimer(verbose);
+
+        timer.setTimePoint("_____________________");
+        for (u64 i = 0; i < trials; ++i)
+        {
+            code.dualEncode<block>(x, y);
+            timer.setTimePoint("encode");
+        }
+
+        std::cout << timer << std::endl;
+
+        if (v)
+            std::cout << verbose << std::endl;
+    }
+
+    inline void ExConvCodeBench(CLP& cmd)
+    {
+        u64 trials = cmd.getOr("t", 10);
+
+        // the message length of the code. 
+        // The noise vector will have size n=2*k.
+        // the user can use 
+        //   -k X 
+        // to state that exactly X rows should be used or
+        //   -kk X
+        // to state that 2^X rows should be used.
+        u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
+
+        u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 5.0));
+
+        // the weight of the code
+        u64 w = cmd.getOr("w", 7);
+
+        // size for the accumulator (# random transitions)
+        u64 a = cmd.getOr("a", roundUpTo(log2ceil(n), 8));
+
+        // verbose flag.
+        bool v = cmd.isSet("v");
+        bool sys = cmd.isSet("sys");
+
+        ExConvCode code;
+        code.config(k, n, w, a, sys);
+
+        if (v)
+        {
+            std::cout << "n: " << code.mCodeSize << std::endl;
+            std::cout << "k: " << code.mMessageSize << std::endl;
+            std::cout << "w: " << code.mExpander.mExpanderWeight << std::endl;
+        }
+
+        std::vector<block> x(code.mCodeSize), y(code.mMessageSize * !sys);
         Timer timer, verbose;
 
         if (v)

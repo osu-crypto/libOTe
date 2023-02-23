@@ -2,6 +2,8 @@
 
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/Timer.h"
+#include "cryptoTools/Common/Range.h"
+#include "libOTe/Tools/LDPC/Mtx.h"
 #include "Util.h"
 
 namespace osuCrypto
@@ -10,7 +12,7 @@ namespace osuCrypto
     // The encoder for the expander matrix B.
     // B has mMessageSize rows and mCodeSize columns. It is sampled uniformly
     // with fixed row weight mExpanderWeight.
-    class ExpanderCode : public TimerAdapter
+    class ExpanderCode
     {
     public:
 
@@ -207,7 +209,7 @@ namespace osuCrypto
         }
 
 
-        template<typename T>
+        template<typename T, bool Add = false>
         void expand(
             span<const T> e,
             span<T> w) const
@@ -226,14 +228,28 @@ namespace osuCrypto
             {
 #define CASE(I) \
                 case I:\
-                ww[i + 0] = expandOne<T, I>(ee, prng);\
-                ww[i + 1] = expandOne<T, I>(ee, prng);\
-                ww[i + 2] = expandOne<T, I>(ee, prng);\
-                ww[i + 3] = expandOne<T, I>(ee, prng);\
-                ww[i + 4] = expandOne<T, I>(ee, prng);\
-                ww[i + 5] = expandOne<T, I>(ee, prng);\
-                ww[i + 6] = expandOne<T, I>(ee, prng);\
-                ww[i + 7] = expandOne<T, I>(ee, prng);\
+                if constexpr(Add)\
+                {\
+                    ww[i + 0] = ww[i + 0] ^ expandOne<T, I>(ee, prng);\
+                    ww[i + 1] = ww[i + 1] ^ expandOne<T, I>(ee, prng);\
+                    ww[i + 2] = ww[i + 2] ^ expandOne<T, I>(ee, prng);\
+                    ww[i + 3] = ww[i + 3] ^ expandOne<T, I>(ee, prng);\
+                    ww[i + 4] = ww[i + 4] ^ expandOne<T, I>(ee, prng);\
+                    ww[i + 5] = ww[i + 5] ^ expandOne<T, I>(ee, prng);\
+                    ww[i + 6] = ww[i + 6] ^ expandOne<T, I>(ee, prng);\
+                    ww[i + 7] = ww[i + 7] ^ expandOne<T, I>(ee, prng);\
+                }\
+                else\
+                {\
+                    ww[i + 0] = expandOne<T, I>(ee, prng);\
+                    ww[i + 1] = expandOne<T, I>(ee, prng);\
+                    ww[i + 2] = expandOne<T, I>(ee, prng);\
+                    ww[i + 3] = expandOne<T, I>(ee, prng);\
+                    ww[i + 4] = expandOne<T, I>(ee, prng);\
+                    ww[i + 5] = expandOne<T, I>(ee, prng);\
+                    ww[i + 6] = expandOne<T, I>(ee, prng);\
+                    ww[i + 7] = expandOne<T, I>(ee, prng);\
+                }\
                 break
 
                 switch (mExpanderWeight)
@@ -255,7 +271,11 @@ namespace osuCrypto
                             r = prng.get();
                             wv = wv ^ ee[r];
                         }
-                        ww[i + jj] = wv;
+                        if constexpr (Add)
+                            ww[i + jj] = ww[i + jj] ^ wv;
+                        else
+                            ww[i + jj] = wv;
+
                     }
                 }
 #undef CASE
@@ -266,7 +286,11 @@ namespace osuCrypto
                 auto wv = ee[prng.get()];
                 for (auto j = 1ull; j < mExpanderWeight; ++j)
                     wv = wv ^ ee[prng.get()];
-                ww[i] = wv;
+
+                if constexpr (Add)
+                    ww[i] = ww[i] ^ wv;
+                else
+                    ww[i] = wv;
             }
         }
 

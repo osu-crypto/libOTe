@@ -55,47 +55,47 @@ namespace osuCrypto
         {
             for (u64 i = 0; i < c2; ++i, ++x)
             {
-                if (flush)
-                {
+                //if (flush)
+                //{
 
-                    if constexpr (NumBins == 8)
-                    {
-                        _mm_stream_si128((__m128i*)mBins[0]++, x[0]);
-                        _mm_stream_si128((__m128i*)mBins[1]++, x[8]);
-                        _mm_stream_si128((__m128i*)mBins[2]++, x[16]);
-                        _mm_stream_si128((__m128i*)mBins[3]++, x[24]);
-                        _mm_stream_si128((__m128i*)mBins[4]++, x[32]);
-                        _mm_stream_si128((__m128i*)mBins[5]++, x[40]);
-                        _mm_stream_si128((__m128i*)mBins[6]++, x[48]);
-                        _mm_stream_si128((__m128i*)mBins[7]++, x[56]);
-                    }
-                    else if constexpr (NumBins == 16)
-                    {
+                //    if constexpr (NumBins == 8)
+                //    {
+                //        _mm_stream_si128((__m128i*)mBins[0]++, x[0]);
+                //        _mm_stream_si128((__m128i*)mBins[1]++, x[8]);
+                //        _mm_stream_si128((__m128i*)mBins[2]++, x[16]);
+                //        _mm_stream_si128((__m128i*)mBins[3]++, x[24]);
+                //        _mm_stream_si128((__m128i*)mBins[4]++, x[32]);
+                //        _mm_stream_si128((__m128i*)mBins[5]++, x[40]);
+                //        _mm_stream_si128((__m128i*)mBins[6]++, x[48]);
+                //        _mm_stream_si128((__m128i*)mBins[7]++, x[56]);
+                //    }
+                //    else if constexpr (NumBins == 16)
+                //    {
 
-                        _mm_stream_si128((__m128i*)mBins[0]++, x[0]);
-                        _mm_stream_si128((__m128i*)mBins[1]++, x[8]);
-                        _mm_stream_si128((__m128i*)mBins[2]++, x[16]);
-                        _mm_stream_si128((__m128i*)mBins[3]++, x[24]);
-                        _mm_stream_si128((__m128i*)mBins[4]++, x[32]);
-                        _mm_stream_si128((__m128i*)mBins[5]++, x[40]);
-                        _mm_stream_si128((__m128i*)mBins[6]++, x[48]);
-                        _mm_stream_si128((__m128i*)mBins[7]++, x[56]);
+                //        _mm_stream_si128((__m128i*)mBins[0]++, x[0]);
+                //        _mm_stream_si128((__m128i*)mBins[1]++, x[8]);
+                //        _mm_stream_si128((__m128i*)mBins[2]++, x[16]);
+                //        _mm_stream_si128((__m128i*)mBins[3]++, x[24]);
+                //        _mm_stream_si128((__m128i*)mBins[4]++, x[32]);
+                //        _mm_stream_si128((__m128i*)mBins[5]++, x[40]);
+                //        _mm_stream_si128((__m128i*)mBins[6]++, x[48]);
+                //        _mm_stream_si128((__m128i*)mBins[7]++, x[56]);
 
-                        _mm_stream_si128((__m128i*)mBins[8 + 0]++, x[64 + 0]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 1]++, x[64 + 8]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 2]++, x[64 + 16]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 3]++, x[64 + 24]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 4]++, x[64 + 32]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 5]++, x[64 + 40]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 6]++, x[64 + 48]);
-                        _mm_stream_si128((__m128i*)mBins[8 + 7]++, x[64 + 56]);
-                    }
-                    else
-                    {
-                        throw RTE_LOC;
-                    }
-                }
-                else
+                //        _mm_stream_si128((__m128i*)mBins[8 + 0]++, x[64 + 0]);
+                //        _mm_stream_si128((__m128i*)mBins[8 + 1]++, x[64 + 8]);
+                //        _mm_stream_si128((__m128i*)mBins[8 + 2]++, x[64 + 16]);
+                //        _mm_stream_si128((__m128i*)mBins[8 + 3]++, x[64 + 24]);
+                //        _mm_stream_si128((__m128i*)mBins[8 + 4]++, x[64 + 32]);
+                //        _mm_stream_si128((__m128i*)mBins[8 + 5]++, x[64 + 40]);
+                //        _mm_stream_si128((__m128i*)mBins[8 + 6]++, x[64 + 48]);
+                //        _mm_stream_si128((__m128i*)mBins[8 + 7]++, x[64 + 56]);
+                //    }
+                //    else
+                //    {
+                //        throw RTE_LOC;
+                //    }
+                //}
+                //else
                 {
 
                     if constexpr (NumBins == 8)

@@ -1,13 +1,8 @@
 #pragma once
 
 #include "cryptoTools/Common/Defines.h"
-#include "libOTe/Tools/LDPC/Mtx.h"
-#include "cryptoTools/Common/Range.h"
-#include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Timer.h"
-#include "cryptoTools/Crypto/PRNG.h"
-#include "libOTe/Tools/LDPC/LdpcEncoder.h"
-
+#include "libOTe/Tools/EACode/Expander.h"
 #include "libOTe/Tools/EACode/Util.h"
 
 namespace osuCrypto
@@ -25,22 +20,22 @@ namespace osuCrypto
     class ExConvCode : public TimerAdapter
     {
     public:
+        ExpanderCode mExpander;
 
         void config(
             u64 messageSize,
             u64 codeSize,
             u64 expanderWeight,
             u64 accumulatorSize,
-            bool wrapping,
+            bool systematic,
             block seed = block(0, 0))
         {
+            mExpander.config(messageSize, codeSize - messageSize * systematic, expanderWeight, seed ^ CCBlock);
+            mSeed = seed;
             mMessageSize = messageSize;
             mCodeSize = codeSize;
-            mExpanderWeight = expanderWeight;
             mAccumulatorSize = accumulatorSize;
-            mWrapping = wrapping;
-            mSeed = seed;
-
+            mSystematic = systematic;
         }
 
         // the seed that generates the code.
@@ -52,13 +47,12 @@ namespace osuCrypto
         // The codeword size of the code. n.
         u64 mCodeSize = 0;
 
-        // The row weight of the B matrix.
-        u64 mExpanderWeight = 0;
-
         // The size of the accumulator.
         u64 mAccumulatorSize = 0;
 
-        bool mWrapping = false;
+        bool mSystematic = true;
+
+        bool mWrapping = true;
 
         bool mTrans = false;
 
@@ -74,38 +68,37 @@ namespace osuCrypto
         {
             if (e.size() != mCodeSize)
                 throw RTE_LOC;
-            if(w.size() != mMessageSize)
-                throw RTE_LOC;
 
+            if (mSystematic)
+            {
+                if (w.size())
+                    throw RTE_LOC;
 
-            setTimePoint("ExConv.encode.begin");
+                auto d = e.subspan(mMessageSize);
+                accumulate<T>(d);
 
-            accumulate<T>(e);
+                expand<T>(d, e.subspan(0, mMessageSize));
+                //mExpander.expand<T, true>(d, e.subspan(0,mMessageSize));
 
-            setTimePoint("ExConv.encode.accumulate");
+            }
+            else
+            {
 
-            expand<T>(e, w);
-            setTimePoint("ExConv.encode.expand");
+                if (w.size() != mMessageSize)
+                    throw RTE_LOC;
+
+                setTimePoint("ExConv.encode.begin");
+
+                accumulate<T>(e);
+
+                setTimePoint("ExConv.encode.accumulate");
+
+                expand<T>(e, w);
+                //mExpander.expand<T>(e, w);
+                setTimePoint("ExConv.encode.expand");
+            }
         }
 
-
-        //template<typename T>
-        //void dualEncode2(span<T> e0, span<T> e1, span<T> w0, span<T> w1)
-        //{
-        //    assert(e0.size() == mCodeSize);
-        //    assert(e1.size() == mCodeSize);
-        //    assert(w0.size() == mMessageSize);
-        //    assert(w1.size() == mMessageSize);
-
-        //    setTimePoint("ExConv.encode.begin");
-
-        //    accumulate2<T>(e0,e1);
-
-        //    setTimePoint("ExConv.encode.accumulate");
-
-        //    expand2<T>(e0, e1, w0, w1);
-        //    setTimePoint("ExConv.encode.expand");
-        //}
 
         OC_FORCEINLINE void accOne(
             PointList& pl,
@@ -311,24 +304,24 @@ namespace osuCrypto
 
 
 
-                        buf[0] = *(block*)&_mm_blendv_ps(Zero, xj0, bb0);
-                        buf[1] = *(block*)&_mm_blendv_ps(Zero, xj1, bb1);
-                        buf[2] = *(block*)&_mm_blendv_ps(Zero, xj2, bb2);
-                        buf[3] = *(block*)&_mm_blendv_ps(Zero, xj3, bb3);
-                        buf[4] = *(block*)&_mm_blendv_ps(Zero, xj4, bb4);
-                        buf[5] = *(block*)&_mm_blendv_ps(Zero, xj5, bb5);
-                        buf[6] = *(block*)&_mm_blendv_ps(Zero, xj6, bb6);
-                        buf[7] = *(block*)&_mm_blendv_ps(Zero, xj7, bb7);
+                        bb0 = _mm_blendv_ps(Zero, xj0, bb0);
+                        bb1 = _mm_blendv_ps(Zero, xj1, bb1);
+                        bb2 = _mm_blendv_ps(Zero, xj2, bb2);
+                        bb3 = _mm_blendv_ps(Zero, xj3, bb3);
+                        bb4 = _mm_blendv_ps(Zero, xj4, bb4);
+                        bb5 = _mm_blendv_ps(Zero, xj5, bb5);
+                        bb6 = _mm_blendv_ps(Zero, xj6, bb6);
+                        bb7 = _mm_blendv_ps(Zero, xj7, bb7);
 
                         xx[i] = xx[i]
-                            ^ buf[0]
-                            ^ buf[1]
-                            ^ buf[2]
-                            ^ buf[3]
-                            ^ buf[4]
-                            ^ buf[5]
-                            ^ buf[6]
-                            ^ buf[7];
+                            ^ *(block*)&bb0
+                            ^ *(block*)&bb1
+                            ^ *(block*)&bb2
+                            ^ *(block*)&bb3
+                            ^ *(block*)&bb4
+                            ^ *(block*)&bb5
+                            ^ *(block*)&bb6
+                            ^ *(block*)&bb7;
                     }
                     else
                     {
@@ -361,7 +354,6 @@ namespace osuCrypto
             if (width)
             {
 
-                T buf[8];
                 __m128 Zero = _mm_setzero_ps();
 
                 auto xii = _mm_load_ps((float*)(xx + i));
@@ -437,35 +429,44 @@ namespace osuCrypto
                         auto bb7 = _mm_load_ps((float*)&b7);
 
 
-                        buf[0] = *(block*)&_mm_blendv_ps(Zero, xii, bb0);
-                        buf[1] = *(block*)&_mm_blendv_ps(Zero, xii, bb1);
-                        buf[2] = *(block*)&_mm_blendv_ps(Zero, xii, bb2);
-                        buf[3] = *(block*)&_mm_blendv_ps(Zero, xii, bb3);
-                        buf[4] = *(block*)&_mm_blendv_ps(Zero, xii, bb4);
-                        buf[5] = *(block*)&_mm_blendv_ps(Zero, xii, bb5);
-                        buf[6] = *(block*)&_mm_blendv_ps(Zero, xii, bb6);
-                        buf[7] = *(block*)&_mm_blendv_ps(Zero, xii, bb7);
+                        bb0 = _mm_blendv_ps(Zero, xii, bb0);
+                        bb1 = _mm_blendv_ps(Zero, xii, bb1);
+                        bb2 = _mm_blendv_ps(Zero, xii, bb2);
+                        bb3 = _mm_blendv_ps(Zero, xii, bb3);
+                        bb4 = _mm_blendv_ps(Zero, xii, bb4);
+                        bb5 = _mm_blendv_ps(Zero, xii, bb5);
+                        bb6 = _mm_blendv_ps(Zero, xii, bb6);
+                        bb7 = _mm_blendv_ps(Zero, xii, bb7);
+
+                        if (!rangeCheck || j + 0 < mCodeSize) xx[j + 0] = xx[j + 0] ^ *(block*)&bb0;
+                        if (!rangeCheck || j + 1 < mCodeSize) xx[j + 1] = xx[j + 1] ^ *(block*)&bb1;
+                        if (!rangeCheck || j + 2 < mCodeSize) xx[j + 2] = xx[j + 2] ^ *(block*)&bb2;
+                        if (!rangeCheck || j + 3 < mCodeSize) xx[j + 3] = xx[j + 3] ^ *(block*)&bb3;
+                        if (!rangeCheck || j + 4 < mCodeSize) xx[j + 4] = xx[j + 4] ^ *(block*)&bb4;
+                        if (!rangeCheck || j + 5 < mCodeSize) xx[j + 5] = xx[j + 5] ^ *(block*)&bb5;
+                        if (!rangeCheck || j + 6 < mCodeSize) xx[j + 6] = xx[j + 6] ^ *(block*)&bb6;
+                        if (!rangeCheck || j + 7 < mCodeSize) xx[j + 7] = xx[j + 7] ^ *(block*)&bb7;
                     }
                     else
                     {
-                        buf[0] = xx[i] *  (b0.get<i32>(0) < 0);
-                        buf[1] = xx[i] *  (b1.get<i32>(0) < 0);
-                        buf[2] = xx[i] *  (b2.get<i32>(0) < 0);
-                        buf[3] = xx[i] *  (b3.get<i32>(0) < 0);
-                        buf[4] = xx[i] *  (b4.get<i32>(0) < 0);
-                        buf[5] = xx[i] *  (b5.get<i32>(0) < 0);
-                        buf[6] = xx[i] *  (b6.get<i32>(0) < 0);
-                        buf[7] = xx[i] *  (b7.get<i32>(0) < 0);
+                        auto bb0 = xx[i] *  (b0.get<i32>(0) < 0);
+                        auto bb1 = xx[i] *  (b1.get<i32>(0) < 0);
+                        auto bb2 = xx[i] *  (b2.get<i32>(0) < 0);
+                        auto bb3 = xx[i] *  (b3.get<i32>(0) < 0);
+                        auto bb4 = xx[i] *  (b4.get<i32>(0) < 0);
+                        auto bb5 = xx[i] *  (b5.get<i32>(0) < 0);
+                        auto bb6 = xx[i] *  (b6.get<i32>(0) < 0);
+                        auto bb7 = xx[i] *  (b7.get<i32>(0) < 0);
 
+                        if (!rangeCheck || j + 0 < mCodeSize) xx[j + 0] = xx[j + 0] ^ bb0;
+                        if (!rangeCheck || j + 1 < mCodeSize) xx[j + 1] = xx[j + 1] ^ bb1;
+                        if (!rangeCheck || j + 2 < mCodeSize) xx[j + 2] = xx[j + 2] ^ bb2;
+                        if (!rangeCheck || j + 3 < mCodeSize) xx[j + 3] = xx[j + 3] ^ bb3;
+                        if (!rangeCheck || j + 4 < mCodeSize) xx[j + 4] = xx[j + 4] ^ bb4;
+                        if (!rangeCheck || j + 5 < mCodeSize) xx[j + 5] = xx[j + 5] ^ bb5;
+                        if (!rangeCheck || j + 6 < mCodeSize) xx[j + 6] = xx[j + 6] ^ bb6;
+                        if (!rangeCheck || j + 7 < mCodeSize) xx[j + 7] = xx[j + 7] ^ bb7;
                     }
-                    if (!rangeCheck || j + 0 < mCodeSize) xx[j + 0] = xx[j + 0] ^ buf[0];
-                    if (!rangeCheck || j + 1 < mCodeSize) xx[j + 1] = xx[j + 1] ^ buf[1];
-                    if (!rangeCheck || j + 2 < mCodeSize) xx[j + 2] = xx[j + 2] ^ buf[2];
-                    if (!rangeCheck || j + 3 < mCodeSize) xx[j + 3] = xx[j + 3] ^ buf[3];
-                    if (!rangeCheck || j + 4 < mCodeSize) xx[j + 4] = xx[j + 4] ^ buf[4];
-                    if (!rangeCheck || j + 5 < mCodeSize) xx[j + 5] = xx[j + 5] ^ buf[5];
-                    if (!rangeCheck || j + 6 < mCodeSize) xx[j + 6] = xx[j + 6] ^ buf[6];
-                    if (!rangeCheck || j + 7 < mCodeSize) xx[j + 7] = xx[j + 7] ^ buf[7];
                 }
             }
 
@@ -484,7 +485,8 @@ namespace osuCrypto
 
 
             u64 i = 0;
-            auto main = (u64)std::max<i64>(0, mCodeSize - mWrapping - mAccumulatorSize);
+            auto size = x.size();
+            auto main = (u64)std::max<i64>(0, size - mWrapping - mAccumulatorSize);
             block rnd;
             u8* ptr = (u8*)prng.mBuffer.data();
             auto qe = prng.mBuffer.size() * 128 / 8;
@@ -527,7 +529,7 @@ namespace osuCrypto
 #define CASE(I) case I:\
                 for (; i < main; ++i)\
                     accOne<T, false, I>(xx, i, ptr, prng, q, qe);\
-                for (; i < mCodeSize; ++i)\
+                for (; i < size; ++i)\
                     accOne<T, true, I>(xx, i, ptr, prng, q, qe);\
                 break
 
@@ -545,6 +547,12 @@ namespace osuCrypto
 #undef CASE
             }
         }
+
+
+
+
+
+
 
         template<typename T, u64 count>
         OC_FORCEINLINE typename std::enable_if<(count > 1), T>::type
@@ -656,23 +664,23 @@ namespace osuCrypto
         template<typename T>
         void expand(span<const T> e, span<T> w) const
         {
-            assert(w.size() == mMessageSize);
-            assert(e.size() == mCodeSize);
-            detail::ExpanderModd prng(mSeed, mCodeSize);
+            //assert(w.size() == mMessageSize);
+            //assert(e.size() == mCodeSize);
+            detail::ExpanderModd prng(mSeed, e.size());
 
-            std::vector<u64> row(mExpanderWeight);
+            std::vector<u64> row(mExpander.mExpanderWeight);
             u64* __restrict rr = row.data();
-            std::vector<T> rowVal(mExpanderWeight);
+            std::vector<T> rowVal(mExpander.mExpanderWeight);
             const T* __restrict  ee = e.data();
             T* __restrict  ww = w.data();
 
-            auto main = mMessageSize / 8 * 8;
+            auto main = w.size() / 8 * 8;
             u64 i = 0;
 
             for (; i < main; i += 8)
             {
 
-                switch (mExpanderWeight)
+                switch (mExpander.mExpanderWeight)
                 {
                 case 5:
                     ww[i + 0] = expandOne<T, 5>(ee, prng);
@@ -715,7 +723,7 @@ namespace osuCrypto
                         rr[0] = prng.get();
                         auto wv = ee[rr[0]];
 
-                        for (auto j = 1ull; j < mExpanderWeight; ++j)
+                        for (auto j = 1ull; j < mExpander.mExpanderWeight; ++j)
                         {
                             do {
                                 rr[j] = prng.get();
@@ -729,10 +737,10 @@ namespace osuCrypto
                 }
             }
 
-            for (; i < mMessageSize; ++i)
+            for (; i < w.size(); ++i)
             {
 
-                switch (mExpanderWeight)
+                switch (mExpander.mExpanderWeight)
                 {
                 case 5:
                     ww[i] = expandOne<T, 5>(ee, prng);
@@ -758,7 +766,7 @@ namespace osuCrypto
                     rr[0] = prng.get();
                     auto wv = ee[rr[0]];
 
-                    for (auto j = 1ull; j < mExpanderWeight; ++j)
+                    for (auto j = 1ull; j < mExpander.mExpanderWeight; ++j)
                     {
                         do {
                             rr[j] = prng.get();
@@ -773,52 +781,11 @@ namespace osuCrypto
         }
 
 
+
+
         SparseMtx getB() const
         {
-            //PRNG prng(mSeed);
-            detail::ExpanderModd prng(mSeed, mCodeSize);
-            PointList points(mMessageSize, mCodeSize);
-
-            std::vector<u64> row(mExpanderWeight);
-
-            {
-
-                for (auto i : rng(mMessageSize))
-                {
-                    row[0] = prng.get();
-                    //points.push_back(i, row[0]);
-                    for (auto j : rng(1, mExpanderWeight))
-                    {
-                        //do {
-                        row[j] = prng.get();
-                        //} while
-                        auto iter = std::find(row.data(), row.data() + j, row[j]);
-                        if (iter != row.data() + j)
-                        {
-                            row[j] = -1;
-                            *iter = -1;
-                        }
-                        //throw RTE_LOC;
-
-                    }
-                    for (auto j : rng(mExpanderWeight))
-                    {
-
-                        if (row[j] != -1)
-                        {
-                            //std::cout << row[j] << " ";
-                            points.push_back(i, row[j]);
-                        }
-                        else
-                        {
-                            //std::cout << "* ";
-                        }
-                    }
-                    //std::cout << std::endl;
-                }
-            }
-
-            return points;
+            return mExpander.getB();
         }
 
         // Get the parity check version of the accumulator

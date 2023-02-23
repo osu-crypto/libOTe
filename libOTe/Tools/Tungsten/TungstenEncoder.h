@@ -461,29 +461,29 @@ namespace osuCrypto
                 auto bb6 = _mm_load_ps((float*)&b6);
                 auto bb7 = _mm_load_ps((float*)&b7);
 
-                buf[0] = *(block*)&_mm_blendv_ps(Zero, xii, bb0);
-                buf[1] = *(block*)&_mm_blendv_ps(Zero, xii, bb1);
-                buf[2] = *(block*)&_mm_blendv_ps(Zero, xii, bb2);
-                buf[3] = *(block*)&_mm_blendv_ps(Zero, xii, bb3);
-                buf[4] = *(block*)&_mm_blendv_ps(Zero, xii, bb4);
-                buf[5] = *(block*)&_mm_blendv_ps(Zero, xii, bb5);
-                buf[6] = *(block*)&_mm_blendv_ps(Zero, xii, bb6);
-                buf[7] = *(block*)&_mm_blendv_ps(Zero, xii, bb7);
+                bb0 = _mm_blendv_ps(Zero, xii, bb0);
+                bb1 = _mm_blendv_ps(Zero, xii, bb1);
+                bb2 = _mm_blendv_ps(Zero, xii, bb2);
+                bb3 = _mm_blendv_ps(Zero, xii, bb3);
+                bb4 = _mm_blendv_ps(Zero, xii, bb4);
+                bb5 = _mm_blendv_ps(Zero, xii, bb5);
+                bb6 = _mm_blendv_ps(Zero, xii, bb6);
+                bb7 = _mm_blendv_ps(Zero, xii, bb7);
 
-                if (!rangeCheck || j + 0 < mCodeSize) xx[j + 0] = _mm_xor_si128(xx[j + 0], buf[0]);
-                if (!rangeCheck || j + 1 < mCodeSize) xx[j + 1] = _mm_xor_si128(xx[j + 1], buf[1]);
-                if (!rangeCheck || j + 2 < mCodeSize) xx[j + 2] = _mm_xor_si128(xx[j + 2], buf[2]);
-                if (!rangeCheck || j + 3 < mCodeSize) xx[j + 3] = _mm_xor_si128(xx[j + 3], buf[3]);
-                if (!rangeCheck || j + 4 < mCodeSize) xx[j + 4] = _mm_xor_si128(xx[j + 4], buf[4]);
-                if (!rangeCheck || j + 5 < mCodeSize) xx[j + 5] = _mm_xor_si128(xx[j + 5], buf[5]);
-                if (!rangeCheck || j + 6 < mCodeSize) xx[j + 6] = _mm_xor_si128(xx[j + 6], buf[6]);
-                if (!rangeCheck || j + 7 < mCodeSize) xx[j + 7] = _mm_xor_si128(xx[j + 7], buf[7]);
+                if (!rangeCheck || j + 0 < mCodeSize) xx[j + 0] = xx[j + 0] ^ *(block*)&bb0;
+                if (!rangeCheck || j + 1 < mCodeSize) xx[j + 1] = xx[j + 1] ^ *(block*)&bb1;
+                if (!rangeCheck || j + 2 < mCodeSize) xx[j + 2] = xx[j + 2] ^ *(block*)&bb2;
+                if (!rangeCheck || j + 3 < mCodeSize) xx[j + 3] = xx[j + 3] ^ *(block*)&bb3;
+                if (!rangeCheck || j + 4 < mCodeSize) xx[j + 4] = xx[j + 4] ^ *(block*)&bb4;
+                if (!rangeCheck || j + 5 < mCodeSize) xx[j + 5] = xx[j + 5] ^ *(block*)&bb5;
+                if (!rangeCheck || j + 6 < mCodeSize) xx[j + 6] = xx[j + 6] ^ *(block*)&bb6;
+                if (!rangeCheck || j + 7 < mCodeSize) xx[j + 7] = xx[j + 7] ^ *(block*)&bb7;
             }
 
 
             if (j + mExtraDiag - 1 < mCodeSize && mExtraDiag)
             {
-                xx[j + mExtraDiag - 1] = _mm_xor_si128(xx[j + mExtraDiag - 1], xi);
+                xx[j + mExtraDiag - 1] = xx[j + mExtraDiag - 1] ^ xi;
             }
         }
 
