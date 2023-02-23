@@ -85,11 +85,13 @@ endif()
 
 FIND_LIBDIVIDE(REQUIRED)
 
-add_library(libdivide INTERFACE IMPORTED)
-    
-target_include_directories(libdivide INTERFACE 
-                $<BUILD_INTERFACE:${LIBDIVIDE_INCLUDE_DIRS}>
-                $<INSTALL_INTERFACE:>)
+if(NOT TARGET libdivide)
+    add_library(libdivide INTERFACE IMPORTED)
+
+    target_include_directories(libdivide INTERFACE 
+                    $<BUILD_INTERFACE:${LIBDIVIDE_INCLUDE_DIRS}>
+                    $<INSTALL_INTERFACE:>)
+endif()
 
 message(STATUS "LIBDIVIDE_INCLUDE_DIRS:  ${LIBDIVIDE_INCLUDE_DIRS}")
 
