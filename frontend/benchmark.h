@@ -142,7 +142,7 @@ namespace osuCrypto
         {
             std::cout << "n: " << code.mCodeSize << std::endl;
             std::cout << "k: " << code.mMessageSize << std::endl;
-            std::cout << "w: " << code.mExpander.mExpanderWeight << std::endl;
+            std::cout << "w: " << code.mExpanderWeight << std::endl;
         }
 
         std::vector<block> x(code.mCodeSize), y(code.mMessageSize * !sys);

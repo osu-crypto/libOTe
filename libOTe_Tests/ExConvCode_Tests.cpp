@@ -62,7 +62,7 @@ namespace osuCrypto
 
         auto cc = c0;
         B.multAdd(cc, m0);
-        code.mExpander.expand<block>(cc, m1);
+        code.expand<block>(cc, m1);
 
         if (m0 != m1)
             throw RTE_LOC;
