@@ -166,6 +166,18 @@ namespace osuCrypto
 		u64& mP,
 		u64& mScaler);
 
+
+	void EAConfigure(
+		u64 numOTs, u64 secParam,
+		MultType mMultType,
+		u64& mRequestedNumOTs,
+		u64& mNumPartitions,
+		u64& mSizePer,
+		u64& mN2,
+		u64& mN,
+		EACode& mEncoder
+	);
+
 	void SilentVoleReceiver::configure(
 		u64 numOTs,
 		SilentBaseType type,
@@ -175,7 +187,9 @@ namespace osuCrypto
 		u64 gap = 0;
 		mBaseType = type;
 
-		if (mMultType == MultType::QuasiCyclic)
+		switch (mMultType)
+		{
+		case osuCrypto::MultType::QuasiCyclic:
 		{
 			u64 p, s;
 			QuasiCyclicConfigure(numOTs, secParam,
@@ -188,15 +202,16 @@ namespace osuCrypto
 				mN,
 				p,
 				s
-				);
+			);
 #ifdef ENABLE_BITPOLYMUL
 			mQuasiCyclicEncoder.init(p, s);
 #else
 			throw std::runtime_error("ENABLE_BITPOLYMUL not defined.");
 #endif
-			
+			break;
 		}
-		else {
+		case osuCrypto::MultType::slv5:
+		case osuCrypto::MultType::slv11:
 
 			SilverConfigure(numOTs, secParam,
 				mMultType,
@@ -208,8 +223,27 @@ namespace osuCrypto
 				gap,
 				mEncoder);
 
-			mGapOts.resize(gap);
+			break;
+		case osuCrypto::MultType::ExAcc7:
+		case osuCrypto::MultType::ExAcc11:
+		case osuCrypto::MultType::ExAcc21:
+		case osuCrypto::MultType::ExAcc40:
+			EAConfigure(numOTs, secParam, 
+				mMultType, 
+				mRequestedNumOTs, 
+				mNumPartitions, 
+				mSizePer, 
+				mN2, 
+				mN, 
+				mEAEncoder);
+
+			break;
+		default:
+			throw RTE_LOC;
+			break;
 		}
+
+		mGapOts.resize(gap);
 		mGen.configure(mSizePer, mNumPartitions);
 	}
 
@@ -437,7 +471,7 @@ using BaseOT = DefaultBaseOT;
 
 		// allocate the space for mC
 		mC.resize(0);
-		mC.resize(mN2);
+		mC.resize(mN2, AllocType::Zeroed);
 		setTimePoint("SilentVoleReceiver.alloc.zero");
 
 		// derandomize the random OTs for the gap 
@@ -506,30 +540,58 @@ using BaseOT = DefaultBaseOT;
 				throw RTE_LOC;
 		}
 
-		if (mMultType == MultType::QuasiCyclic)
+		switch (mMultType)
 		{
+		case osuCrypto::MultType::QuasiCyclic:
+
 #ifdef ENABLE_BITPOLYMUL
 			if (mTimer)
 				mQuasiCyclicEncoder.setTimer(getTimer());
 
 			// compress both mA and mC in place.
-			mQuasiCyclicEncoder.encode(mA.subspan(0, mQuasiCyclicEncoder.size()));
-			mQuasiCyclicEncoder.encode(mC.subspan(0, mQuasiCyclicEncoder.size()));
+			mQuasiCyclicEncoder.dualEncode(mA.subspan(0, mQuasiCyclicEncoder.size()));
+			mQuasiCyclicEncoder.dualEncode(mC.subspan(0, mQuasiCyclicEncoder.size()));
 #else
 			throw std::runtime_error("ENABLE_BITPOLYMUL not defined.");
 #endif
 
 			setTimePoint("SilentVoleReceiver.expand.mQuasiCyclicEncoder.a");
-		}
-		else
-		{
-
+			break;
+		case osuCrypto::MultType::slv5:
+		case osuCrypto::MultType::slv11:
 			if (mTimer)
 				mEncoder.setTimer(getTimer());
 
 			// compress both mA and mC in place.
-			mEncoder.cirTransEncode2<block, block>(mA, mC);
+			mEncoder.dualEncode2<block, block>(mA, mC);
 			setTimePoint("SilentVoleReceiver.expand.cirTransEncode.a");
+			break;
+		case osuCrypto::MultType::ExAcc7:
+		case osuCrypto::MultType::ExAcc11:
+		case osuCrypto::MultType::ExAcc21:
+		case osuCrypto::MultType::ExAcc40:
+		{
+			if (mTimer)
+				mEAEncoder.setTimer(getTimer());
+
+			AlignedUnVector<block>
+				A2(mEAEncoder.mMessageSize),
+				C2(mEAEncoder.mMessageSize);
+
+			// compress both mA and mC in place.
+			mEAEncoder.dualEncode2<block, block>(
+				mA.subspan(0, mEAEncoder.mCodeSize), A2,
+				mC.subspan(0, mEAEncoder.mCodeSize), C2);
+
+			std::swap(mA, A2);
+			std::swap(mC, C2);
+
+			setTimePoint("SilentVoleReceiver.expand.cirTransEncode.a");
+			break;
+		}
+		default:
+			throw RTE_LOC;
+			break;
 		}
 
 		// resize the buffers down to only contain the real elements.

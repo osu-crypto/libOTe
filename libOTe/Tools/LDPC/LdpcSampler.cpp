@@ -43,7 +43,7 @@ namespace osuCrypto
 
                 // how many remaining slots there are to the right.
                 u64 remB = std::min<u64>(j, cols - c);
-                
+
                 u64 rem = remA + remB;
 
 
@@ -80,7 +80,7 @@ namespace osuCrypto
 
             for (auto ss : s)
             {
-                rowSets[ss% cols].insert(c);
+                rowSets[ss % cols].insert(c);
                 if (rowSets[ss % cols].size() > weight)
                     throw RTE_LOC;
             }
@@ -99,8 +99,13 @@ namespace osuCrypto
         {
 
             //std::vector<std::vector<u64>> hh;
-            SparseMtx H(rows, cols, points);
-            std::cout << H << std::endl << std::endl;
+            auto pp = points;
+
+            for (u64 i = 0; i < rows - 1; ++i)
+                pp.push_back({ i, i + 1 });
+
+            SparseMtx H(rows, rows, points);
+            //std::cout << (SparseMtx(pp)) << std::endl << std::endl;
 
             std::cout << "{{\n";
 
@@ -111,10 +116,10 @@ namespace osuCrypto
                 bool first = true;
                 //hh.emplace_back();
 
-                for (u64 j = 0; j < (u64)H.row(i).size(); ++j)
+                for (u64 j = 0; j < (u64)H.col(i).size(); ++j)
                 {
-                    auto c = H.row(i)[j];
-                    c = (c + cols - 1 - i) % cols;
+                    auto c = H.col(i)[j];
+                    c = (c - i) % cols;
 
                     if (!first)
                         std::cout << ", ";
@@ -124,24 +129,27 @@ namespace osuCrypto
                     first = false;
                 }
 
-                for (u64 j = 0; j < (u64)H.row(i + cols).size(); ++j)
-                {
+                //if (i + cols < H.rows() && 0)
+                //{
+                //    for (u64 j = 0; j < (u64)H.row(i + cols).size(); ++j)
+                //    {
 
-                    auto c = H.row(i+cols)[j];
-                    c = (c + cols - 1 - i) % cols;
+                //        auto c = H.row(i + cols)[j];
+                //        c = (c + cols - 1 - i) % cols;
 
-                    if (!first)
-                        std::cout << ", ";
-                    std::cout << c;
-                    //hh[i].push_back(H.row(i+cols)[j]);
-                    first = false;
-                }
+                //        if (!first)
+                //            std::cout << ", ";
+                //        std::cout << c;
+                //        //hh[i].push_back(H.row(i+cols)[j]);
+                //        first = false;
+                //    }
+                //}
 
 
 
                 std::cout << "}},\n";
             }
-            std::cout << "}}"<< std::endl;
+            std::cout << "}}" << std::endl;
 
 
             //{
@@ -171,7 +179,7 @@ namespace osuCrypto
     // The other columns will have weight = weight.
     void sampleRegTriangularBand(u64 rows, u64 cols,
         u64 weight, u64 gap, u64 dWeight,
-        u64 diag, u64 dDiag,u64 period,
+        u64 diag, u64 dDiag, u64 period,
         std::vector<u64> doubleBand,
         bool trim, bool extend, bool randY,
         oc::PRNG& prng, PointList& points)
@@ -208,7 +216,7 @@ namespace osuCrypto
         PointList diagPoints(period + gap, period);
         sampleRegDiag(period + gap, gap, dWeight - 1, prng, diagPoints);
         //std::cout << "cols " << cols << std::endl;
-            
+
         std::set<std::pair<u64, u64>> ss;
         for (u64 i = 0; i < e; ++i)
         {
@@ -236,7 +244,7 @@ namespace osuCrypto
             {
                 auto r = ii + p.mRow + 1;
                 auto c = ii + p.mCol + b;
-                if(r < rows && c < e2)
+                if (r < rows && c < e2)
                     points.push_back({ r, c });
             }
         }

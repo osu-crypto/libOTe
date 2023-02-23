@@ -214,9 +214,9 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
             C[i] = A[i] ^ B[i];
         }
 
-        code.encode(A);
-        code.encode(B);
-        code.encode(C);
+        code.dualEncode(A);
+        code.dualEncode(B);
+        code.dualEncode(C);
 
         for (u64 i : rng(mP))
         {
@@ -236,7 +236,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
             A[i] = oc::zeroAndAllOne[prng.getBit()];
         }
 
-        code.encode(A);
+        code.dualEncode(A);
         
         for (u64 i : rng(mP))
         {
@@ -269,7 +269,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
                 AA(j, i) = *BitIterator((u8*)&A[i], j);
         }
 
-        code.encode(A);
+        code.dualEncode(A);
         auto A2 = AA * mtx;
 
         for (auto i : rng(mP))
@@ -702,6 +702,7 @@ void OtExt_Silent_Silver_Test(const oc::CLP& cmd)
 {
 
 #if defined(ENABLE_SILENTOT)
+    gSilverWarning = false;
 
     auto sockets = cp::LocalAsyncSocket::makePair();
 
@@ -1203,6 +1204,98 @@ void Tools_Pprf_blockTrans_test(const oc::CLP& cmd)
             if (cmd.isSet("v"))
                 std::cout << "r[" << j << "][" << i << "] " << ss << " " << rr << std::endl << Color::Default;
         }
+    }
+
+    if (failed)
+        throw RTE_LOC;
+
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+}
+
+
+
+void Tools_Pprf_callback_test(const oc::CLP& cmd)
+{
+#if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
+
+    u64 domain = cmd.getOr("d", 512);
+    auto threads = cmd.getOr("t", 1ull);
+    u64 numPoints = cmd.getOr("s", 5) * 8;
+
+    PRNG prng(ZeroBlock);
+    auto sockets = cp::LocalAsyncSocket::makePair();
+
+
+    auto format = PprfOutputFormat::Callback;
+    SilentMultiPprfSender sender;
+    SilentMultiPprfReceiver recver;
+
+    sender.configure(domain, numPoints);
+    recver.configure(domain, numPoints);
+
+    auto numOTs = sender.baseOtCount();
+    std::vector<std::array<block, 2>> sendOTs(numOTs);
+    std::vector<block> recvOTs(numOTs);
+    BitVector recvBits = recver.sampleChoiceBits(domain * numPoints, format, prng);
+
+    prng.get(sendOTs.data(), sendOTs.size());
+    for (u64 i = 0; i < numOTs; ++i)
+    {
+        recvOTs[i] = sendOTs[i][recvBits[i]];
+    }
+    sender.setBase(sendOTs);
+    recver.setBase(recvOTs);
+
+    //auto cols = (numPoints * domain + 127) / 128;
+    Matrix<block> sOut2(numPoints * domain, 1);
+    Matrix<block> rOut2(numPoints * domain, 1);
+    std::vector<u64> points(numPoints);
+    recver.getPoints(points, format);
+
+    sender.mOutputFn = [&](u64 treeIdx, span<AlignedArray<block, 8>> data)
+    {
+        span<block> d = sOut2;
+        d = d.subspan(treeIdx * data.size());
+        d = d.subspan(0, std::min<u64>(d.size(), data.size() * 8));
+        memcpy(d.data(), data.data(), d.size_bytes());
+    };
+    recver.mOutputFn = [&](u64 treeIdx, span<AlignedArray<block, 8>> data)
+    {
+        span<block> d = rOut2;
+        d = d.subspan(treeIdx * data.size());
+        d = d.subspan(0, std::min<u64>(d.size(), data.size() * 8));
+        memcpy(d.data(), data.data(), d.size_bytes());
+    };
+
+
+    auto p0 = sender.expand(sockets[0], { &AllOneBlock,1 }, prng, span<block>{}, format, true, threads);
+    auto p1 = recver.expand(sockets[1], prng, span<block>{}, format, true, threads);
+
+    eval(p0, p1);
+    for (u64 i = 0; i < rOut2.rows(); ++i)
+    {
+        sOut2(i) = (sOut2(i) ^ rOut2(i));
+    }
+
+    bool failed = false;
+    for (u64 i = 0; i < sOut2.rows(); ++i)
+    {
+
+        auto f = std::find(points.begin(), points.end(), i) != points.end();
+
+        auto exp = f ? AllOneBlock : ZeroBlock;
+
+        if (neq(sOut2(i), exp))
+        {
+            failed = true;
+
+            if (cmd.getOr("v", 0) > 1)
+                std::cout << Color::Red;
+        }
+        if (cmd.getOr("v", 0) > 1)
+            std::cout << i << " " << sOut2(i) << " " << exp << std::endl << Color::Default;
     }
 
     if (failed)

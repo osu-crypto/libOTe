@@ -812,7 +812,7 @@ namespace osuCrypto
 		for (u64 i = 0; i < rows; ++i)
 			m[i] = prng.getBit();
 
-		zz.cirTransEncode<u8>(pp, m);
+		zz.dualEncode<u8>(pp, m);
 
 		auto At = zz.getMatrix().dense().transpose().sparse();
 		auto p2 = At.mult(m);
@@ -957,14 +957,14 @@ namespace osuCrypto
 		//std::cout << "\n";
 
 		auto mOld = c;
-		enc2.cirTransEncode<u8>(mOld);
+		enc2.dualEncode<u8>(mOld);
 		mOld.resize(k);
 
 		////std::cout << "R\n" << enc.mR.getMatrix() << std::endl << std::endl;
 		//std::cout << "L\n" << enc.mL.getTransMatrix() << std::endl << std::endl;
 
 		auto mCur = c;
-		enc.cirTransEncode<u8>(mCur);
+		enc.dualEncode<u8>(mCur);
 		mCur.resize(k);
 	}
 

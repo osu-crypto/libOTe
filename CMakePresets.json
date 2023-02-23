@@ -57,6 +57,7 @@
         "VERBOSE_FETCH": true,
         "ENABLE_SSE": true,
         "ENABLE_AVX": true,
+        "ENABLE_ASAN": false,
         "COPROTO_ENABLE_BOOST": true,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install/${presetName}"
@@ -83,7 +84,7 @@
         "ENABLE_OPENSSL": false,
         "FETCH_AUTO": true,
         "ENABLE_CIRCUITS": true,
-        "ENABLE_BITPOLYMUL": false,
+        "ENABLE_BITPOLYMUL": true,
         "VERBOSE_FETCH": true,
         "ENABLE_PIC": true,
         "ENABLE_ASAN": false,

@@ -15,6 +15,9 @@
 #include "Mtx.h"
 namespace osuCrypto
 {
+    DenseMtx computeSysGen(DenseMtx G);
+    DenseMtx colSwap(DenseMtx G, std::vector<std::pair<u64, u64>>& swaps);
+
     DenseMtx computeGen(DenseMtx& H);
     DenseMtx computeGen(DenseMtx H, std::vector<std::pair<u64, u64>>& colSwaps);
 
@@ -26,6 +29,56 @@ namespace osuCrypto
     std::vector<u64> ithCombination(u64 index, u64 n, u64 k);
     u64 choose(u64 n, u64 k);
 
+
+    struct NChooseK
+    {
+        u64 mN;
+        u64 mK;
+        u64 mI, mEnd;
+        std::vector<u64> mSet;
+
+        NChooseK(u64 n, u64 k, u64 begin = 0, u64 end = -1)
+            : mN(n)
+            , mK(k)
+            , mI(begin)
+            , mEnd(std::min<u64>(choose(n, k), end))
+        {
+            assert(k <= n);
+            mSet = ithCombination(begin, n, k);
+        }
+
+        const std::vector<u64>& operator*() const
+        {
+            return mSet;
+        }
+
+        void operator++()
+        {
+            ++mI;
+            assert(mI <= mEnd);
+
+            u64 i = 0;
+            while (i < mK - 1 && mSet[i] + 1 == mSet[i + 1])
+                ++i;
+
+            //if (i == mK - 1 && mSet.back() == mN - 1)
+            //{
+            //    mSet.clear();
+            //    return;
+            //    //assert(mSet.back() != mN - 1);
+            //}
+
+            ++mSet[i];
+            for (u64 j = 0; j < i; ++j)
+                mSet[j] = j;
+        }
+
+        explicit operator bool() const
+        {
+            return mI < mEnd;
+        }
+
+    };
 #ifdef ENABLE_ALGO994
     extern int alg994;
     extern int num_saved_generators;

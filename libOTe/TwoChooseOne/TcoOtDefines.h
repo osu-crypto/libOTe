@@ -10,6 +10,7 @@
 #include <cryptoTools/Common/Defines.h>
 #include "libOTe/config.h"
 #include <cassert>
+#include <iostream>
 
 //#define OTE_KOS_HASH
 //#define IKNP_SHA_HASH
@@ -36,14 +37,53 @@ namespace osuCrypto
 	{
 		QuasiCyclic = 1,
 		slv5,
-		slv11
+		slv11,
+		ExAcc7, // fast
+		ExAcc11,// fast but more conservative
+		ExAcc21,
+		ExAcc40 // conservative.
 	};
 
-#ifdef ENABLE_BITPOLYMUL
-	constexpr MultType DefaultMultType = MultType::QuasiCyclic;
-#else
-	constexpr MultType DefaultMultType = MultType::slv5;
-#endif
+	inline std::ostream& operator<<(std::ostream& o, MultType m)
+	{
+		switch (m)
+		{
+		case osuCrypto::MultType::QuasiCyclic:
+			o << "QuasiCyclic";
+			break;
+		case osuCrypto::MultType::slv5:
+			o << "slv5";
+			break;
+		case osuCrypto::MultType::slv11:
+			o << "slv11";
+			break;
+		case osuCrypto::MultType::ExAcc7:
+			o << "ExAcc7";
+			break;
+		case osuCrypto::MultType::ExAcc11:
+			o << "ExAcc11";
+			break;
+		case osuCrypto::MultType::ExAcc21:
+			o << "ExAcc21";
+			break;
+		case osuCrypto::MultType::ExAcc40:
+			o << "ExAcc40";
+			break;
+		default:
+			throw RTE_LOC;
+			break;
+		}
+
+		return o;
+	}
+	
+	constexpr MultType DefaultMultType = MultType::ExAcc11;
+
+//#ifdef ENABLE_BITPOLYMUL
+//	constexpr MultType DefaultMultType = MultType::QuasiCyclic;
+//#else
+//	constexpr MultType DefaultMultType = MultType::slv5;
+//#endif
 
 	
 

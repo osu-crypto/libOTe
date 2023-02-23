@@ -51,6 +51,7 @@ namespace osuCrypto
 
         // add the given point. SHould not have previously been added.
         void push_back(const Point& p);
+        void push_back(u64 x, u64 y);
 
         operator span<Point>() { return mPoints; }
 
@@ -225,6 +226,22 @@ namespace osuCrypto
             }
         }
 
+
+        // compute y = x * this.
+        template<typename ConstVec, typename Vec>
+        void leftMultAdd(const ConstVec& x, Vec& y) const
+        {
+            assert(rows() == x.size());
+            assert(y.size() == cols());
+            for (u64 i = 0; i < cols(); ++i)
+            {
+                for (auto c : col(i))
+                {
+                    assert(c < rows());
+                    y[i] = y[i] ^ x[c];
+                }
+            }
+        }
 
         std::vector<u8> operator*(span<const u8> x) const { return mult(x); }
 

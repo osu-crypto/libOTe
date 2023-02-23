@@ -92,7 +92,7 @@ namespace osuCrypto
 		// perform the circuit transpose of the encoding algorithm.
 		// the inputs and output is c.
 		template<typename T>
-		void cirTransEncode(span<T> c)
+		void dualEncode(span<T> c)
 		{
 			if (mGap)
 				throw std::runtime_error(LOCATION);
@@ -207,12 +207,12 @@ namespace osuCrypto
 			// perform the circuit transpose of the encoding algorithm.
 			// the output it written to ppp.
 			template<typename T>
-			void cirTransEncode(span<T> ppp, span<const T> mm);
+			void dualEncode(span<T> ppp, span<const T> mm);
 
 			// perform the circuit transpose of the encoding algorithm twice.
 			// the output it written to ppp0 and ppp1.
 			template<typename T0, typename T1>
-			void cirTransEncode2(
+			void dualEncode2(
 				span<T0> ppp0, span<T1> ppp1,
 				span<const T0> mm0, span<const T1> mm1);
 		};
@@ -317,12 +317,12 @@ namespace osuCrypto
 			// perform the circuit transpose of the encoding algorithm.
 			// the inputs and output is x.
 			template<typename T>
-			void cirTransEncode(span<T> x);
+			void dualEncode(span<T> x);
 
 			// perform the circuit transpose of the encoding algorithm twice.
 			// the inputs and output is x0 and x1.
 			template<typename T0, typename T1>
-			void cirTransEncode2(span<T0> x0, span<T1> x1);
+			void dualEncode2(span<T0> x0, span<T1> x1);
 		};
 
 		// a full encoder expressed and the left and right encoder.
@@ -357,23 +357,23 @@ namespace osuCrypto
 			}
 
 			template<typename T>
-			void cirTransEncode(span<T> c)
+			void dualEncode(span<T> c)
 			{
 				auto k = cols() - rows();
 				assert(c.size() == cols());
 				setTimePoint("encode_begin");
 				span<T> pp(c.subspan(k, rows()));
 
-				mR.template cirTransEncode<T>(pp);
+				mR.template dualEncode<T>(pp);
 				setTimePoint("diag");
-				mL.template cirTransEncode<T>(c.subspan(0, k), pp);
+				mL.template dualEncode<T>(c.subspan(0, k), pp);
 				setTimePoint("L");
 
 			}
 
 
 			template<typename T0, typename T1>
-			void cirTransEncode2(span<T0> c0, span<T1> c1)
+			void dualEncode2(span<T0> c0, span<T1> c1)
 			{
 				auto k = cols() - rows();
 				assert(c0.size() == cols());
@@ -382,10 +382,10 @@ namespace osuCrypto
 				span<T0> pp0(c0.subspan(k, rows()));
 				span<T1> pp1(c1.subspan(k, rows()));
 
-				mR.template cirTransEncode2<T0, T1>(pp0, pp1);
+				mR.template dualEncode2<T0, T1>(pp0, pp1);
 
 				setTimePoint("diag");
-				mL.template cirTransEncode2<T0, T1>(c0.subspan(0, k), c1.subspan(0, k), pp0, pp1);
+				mL.template dualEncode2<T0, T1>(c0.subspan(0, k), c1.subspan(0, k), pp0, pp1);
 				setTimePoint("L");
 			}
 
@@ -463,7 +463,7 @@ namespace osuCrypto
 	// perform the circuit transpose of the encoding algorithm.
 	// the output it written to ppp.
 	template<typename T>
-	void details::SilverLeftEncoder::cirTransEncode(span<T> ppp, span<const T> mm)
+	void details::SilverLeftEncoder::dualEncode(span<T> ppp, span<const T> mm)
 	{
 		auto cols = mRows;
 		assert(ppp.size() == mRows);
@@ -605,7 +605,7 @@ namespace osuCrypto
 	// perform the circuit transpose of the encoding algorithm twice.
 	// the output it written to ppp0 and ppp1.
 	template<typename T0, typename T1>
-	void details::SilverLeftEncoder::cirTransEncode2(
+	void details::SilverLeftEncoder::dualEncode2(
 		span<T0> ppp0, span<T1> ppp1,
 		span<const T0> mm0, span<const T1> mm1)
 	{
@@ -738,7 +738,7 @@ namespace osuCrypto
 
 
 	template<typename T>
-	void details::SilverRightEncoder::cirTransEncode(span<T> x)
+	void details::SilverRightEncoder::dualEncode(span<T> x)
 	{
 		// solves for x such that y = M x, ie x := H^-1 y 
 		assert(mExtend);
@@ -921,7 +921,7 @@ namespace osuCrypto
 	}
 
 	template<typename T0, typename T1>
-	void details::SilverRightEncoder::cirTransEncode2(span<T0> x0, span<T1> x1)
+	void details::SilverRightEncoder::dualEncode2(span<T0> x0, span<T1> x1)
 	{
 		// solves for x such that y = M x, ie x := H^-1 y 
 		assert(mExtend);

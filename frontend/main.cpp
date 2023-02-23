@@ -1,4 +1,5 @@
 #include <iostream>
+#include "libOTe/Tools/Tungsten/TungstenSampler.h"
 
 //using namespace std;
 #include "tests_cryptoTools/UnitTests.h"
@@ -30,6 +31,9 @@ using namespace osuCrypto;
 #include "ExampleMessagePassing.h"
 #include "libOTe/Tools/LDPC/LdpcImpulseDist.h"
 #include "libOTe/Tools/LDPC/Util.h"
+#include "cryptoTools/Crypto/RandomOracle.h"
+#include "libOTe/Tools/EACode/EAChecker.h"
+#include "libOTe/Tools/Tungsten/accTest.h"
 
 static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
@@ -109,12 +113,37 @@ int main(int argc, char** argv)
 	CLP cmd;
 	cmd.parse(argc, argv);
 	bool flagSet = false;
-
-
-
-	if (cmd.isSet("encode"))
+	
+	if (cmd.isSet("ea"))
 	{
-		encodeBench(cmd);
+		EAChecker(cmd);
+		return 0;
+	}
+
+	if (cmd.isSet("tungsten"))
+	{
+		sampleTungstenDiag(cmd);
+		return 0;
+	}
+
+	if (cmd.isSet("acc"))
+	{
+		//periodTest(cmd);
+		accTest(cmd);
+		//accPr(cmd);
+		return 0;
+	}
+
+	if (cmd.isSet("bench"))
+	{
+		if (cmd.isSet("silver"))
+			encodeBench(cmd);
+		else if (cmd.isSet("QC"))
+			QCCodeBench(cmd);
+		else if (cmd.isSet("silent"))
+			SilentOtBench(cmd);
+		else
+			EACodeBench(cmd);
 		return 0;
 	}
 

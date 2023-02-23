@@ -181,55 +181,6 @@ namespace osuCrypto
         return (n * choose(n - 1, k - 1)) / k;
     }
 
-    struct NChooseK
-    {
-        u64 mN;
-        u64 mK;
-        u64 mI, mEnd;
-        std::vector<u64> mSet;
-
-        NChooseK(u64 n, u64 k, u64 begin = 0, u64 end = -1)
-            : mN(n)
-            , mK(k)
-            , mI(begin)
-            , mEnd(std::min<u64>(choose(n, k), end))
-        {
-            assert(k <= n);
-            mSet = ithCombination(begin, n, k);
-        }
-
-        const std::vector<u64>& operator*() const
-        {
-            return mSet;
-        }
-
-        void operator++()
-        {
-            ++mI;
-            assert(mI <= mEnd);
-
-            u64 i = 0;
-            while (i < mK - 1 && mSet[i] + 1 == mSet[i + 1])
-                ++i;
-
-            //if (i == mK - 1 && mSet.back() == mN - 1)
-            //{
-            //    mSet.clear();
-            //    return;
-            //    //assert(mSet.back() != mN - 1);
-            //}
-
-            ++mSet[i];
-            for (u64 j = 0; j < i; ++j)
-                mSet[j] = j;
-        }
-
-        explicit operator bool() const
-        {
-            return mI < mEnd;
-        }
-
-    };
 
 
     DenseMtx computeGen(DenseMtx& H)
@@ -388,6 +339,110 @@ namespace osuCrypto
                 G(j, i + k) = P(i, j);
             }
         }
+
+
+        return G;
+    }
+
+    DenseMtx colSwap(DenseMtx G, std::vector<std::pair<u64, u64>>& swaps)
+    {
+        for (auto s : swaps)
+        {
+            auto col = s.first;
+            auto col2 = s.second;
+
+            auto c0 = G.col(col);
+            auto c1 = G.col(col2);
+            std::swap_ranges(c0.begin(), c0.end(), c1.begin());
+        }
+        return G;
+    }
+
+    DenseMtx computeSysGen(DenseMtx G)
+    {
+        auto n = G.cols();
+        auto k = G.rows();
+        auto m = n - k;
+
+        for (u64 row = 0, col = 0; row < k; ++row, ++col)
+        {
+            //std::cout << row << std::endl << H << std::endl;;
+
+            if (G(row, col) == 0)
+            {
+                bool found = false;
+                // look row a row swap
+                for (u64 row2 = row + 1; row2 < k && found == false; ++row2)
+                {
+                    if (G(row2, col) == 1)
+                    {
+                        G.row(row).swap(G.row(row2));
+                        found = true;
+                    }
+                }
+
+
+                //if (found == false)
+                //{
+                //    // look for a col swap
+
+                //    for (u64 col2 = 0; col2 < k && found == false; ++col2)
+                //    {
+                //        for (u64 row2 = row; row2 < m && found == false; ++row2)
+                //        {
+                //            if (H(row2, col2) == 1)
+                //            {
+                //                H.row(row).swap(H.row(row2));
+
+                //                // swap columns.
+                //                colSwaps.push_back({ col,col2 });
+                //                auto c0 = H.col(col);
+                //                auto c1 = H.col(col2);
+                //                std::swap_ranges(c0.begin(), c0.end(), c1.begin());
+                //                found = true;
+                //            }
+                //        }
+                //    }
+                //}
+
+                if (found == false)
+                {
+                    // can not be put in systematic form.
+                    std::cout <<"can not be put in systematic form.\n" << G << std::endl;
+
+                    return {};
+                }
+            }
+
+
+            // clear all other ones from the current column. 
+            for (u64 row2 = 0; row2 < k; ++row2)
+            {
+                if (row2 != row && G(row2, col))
+                {
+                    // row2 = row ^ row2
+                    for (u64 col2 = 0; col2 < n; ++col2)
+                    {
+                        G(row2, col2) ^= G(row, col2);
+                    }
+                }
+            }
+
+        }
+
+        //auto P = H.subMatrix(0, 0, m, k);
+
+        //DenseMtx G(k, n);
+        //for (u64 i = 0; i < k; ++i)
+        //    G(i, i) = 1;
+
+        //for (u64 i = 0; i < m; ++i)
+        //{
+        //    for (u64 j = 0; j < k; ++j)
+        //    {
+        //        G(j, i + k) = P(i, j);
+        //    }
+        //}
 
 
         return G;

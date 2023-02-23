@@ -47,7 +47,8 @@ namespace osuCrypto
         MatrixView<block> output,
         u64 totalTrees,
         u64 tIdx,
-        PprfOutputFormat oFormat)
+        PprfOutputFormat oFormat,
+        std::function<void(u64 treeIdx, span<AlignedArray<block, 8>> lvl)>& callback)
     {
 
         if (oFormat == PprfOutputFormat::InterleavedTransposed)
@@ -163,6 +164,8 @@ namespace osuCrypto
         {
             // no op
         }
+        else if (oFormat == PprfOutputFormat::Callback)
+            callback(tIdx, lvl);
         else
             throw RTE_LOC;
     }
@@ -174,6 +177,7 @@ namespace osuCrypto
         switch (format)
         {
         case osuCrypto::PprfOutputFormat::Interleaved:
+        case osuCrypto::PprfOutputFormat::Callback:
         {
 
             if (domain <= point)
@@ -248,6 +252,7 @@ namespace osuCrypto
             break;
         case PprfOutputFormat::InterleavedTransposed:
         case PprfOutputFormat::Interleaved:
+        case PprfOutputFormat::Callback:
 
             if ((u64)points.size() != mPntCount)
                 throw RTE_LOC;
@@ -288,6 +293,7 @@ namespace osuCrypto
                 break;
             case osuCrypto::PprfOutputFormat::Interleaved:
             case osuCrypto::PprfOutputFormat::InterleavedTransposed:
+            case osuCrypto::PprfOutputFormat::Callback:
 
                 // make sure that at least the first element of this tree
                 // is within the modulus.
@@ -564,7 +570,7 @@ namespace osuCrypto
                     lastOts[j][1] = lastOts[j][1] ^ masks[1];
                     lastOts[j][2] = lastOts[j][2] ^ masks[2];
                     lastOts[j][3] = lastOts[j][3] ^ masks[3];
-                }
+                    }
 
                 // pprf.setTimePoint("SilentMultiPprfSender.last " + std::to_string(treeIdx));
 
@@ -572,7 +578,7 @@ namespace osuCrypto
                 // the unmasked sums on the last level!
                 sums[0].resize(pprf.mDepth - 1);
                 sums[1].resize(pprf.mDepth - 1);
-            }
+                }
 
             // Send the sums to the other party.
             //sendOne(treeGrp);
@@ -595,11 +601,11 @@ namespace osuCrypto
             auto lvl = getLevel(pprf.mDepth, treeIdx);
 
             // s is a checksum that is used for malicious security. 
-            copyOut(lvl, output, pprf.mPntCount, treeIdx, oFormat);
+            copyOut(lvl, output, pprf.mPntCount, treeIdx, oFormat, pprf.mOutputFn);
 
             // pprf.setTimePoint("SilentMultiPprfSender.copyOut " + std::to_string(treeIdx));
 
-        }
+            }
 
         //uPtr_ = {};
         //tree = {};
@@ -607,7 +613,7 @@ namespace osuCrypto
         // pprf.setTimePoint("SilentMultiPprfSender.delete " + std::to_string(treeIdx));
 
         MC_END();
-    }
+        }
 
 
     //task<> expand(
@@ -663,7 +669,8 @@ namespace osuCrypto
             if (mPntCount & 7)
                 throw RTE_LOC;
         }
-        else if (oFormat == PprfOutputFormat::Interleaved)
+        else if
+            (oFormat == PprfOutputFormat::Interleaved)
         {
             if (output.cols() != 1)
                 throw RTE_LOC;
@@ -673,6 +680,13 @@ namespace osuCrypto
             auto rows = output.rows();
             if (rows > (mDomain * mPntCount) ||
                 rows / 128 != (mDomain * mPntCount) / 128)
+                throw RTE_LOC;
+            if (mPntCount & 7)
+                throw RTE_LOC;
+        }
+        else if (oFormat == PprfOutputFormat::Callback)
+        {
+            if (mDomain & 1)
                 throw RTE_LOC;
             if (mPntCount & 7)
                 throw RTE_LOC;
@@ -688,6 +702,9 @@ namespace osuCrypto
             dd = u64{}
         );
 
+
+        if (oFormat == PprfOutputFormat::Callback && numThreads > 1)
+            throw RTE_LOC;
 
         dd = mDepth + (oFormat == PprfOutputFormat::Interleaved ? 0 : 1);
         mTreeAlloc.reserve(numThreads, (1ull << dd) + (32 * dd));
@@ -1033,13 +1050,13 @@ namespace osuCrypto
                             throw RTE_LOC;
 #endif
                     }
-                }
+                    }
 #ifdef DEBUG_PRINT_PPRF
                 if (mPrint)
                     printLevel(d + 1);
 #endif
 
-            }
+                }
 
             // pprf.setTimePoint("SilentMultiPprfReceiver.expand " + std::to_string(treeIdx));
 
@@ -1121,7 +1138,7 @@ namespace osuCrypto
                 // pprf.setTimePoint("SilentMultiPprfReceiver.last " + std::to_string(treeIdx));
 
                 //timer.setTimePoint("recv.expandLast");
-            }
+                }
             else
             {
                 for (auto j : rng(std::min<u64>(8, pprf.mPntCount - treeIdx)))
@@ -1134,7 +1151,7 @@ namespace osuCrypto
             }
 
             // s is a checksum that is used for malicious security. 
-            copyOut(lvl, output, pprf.mPntCount, treeIdx, oFormat);
+            copyOut(lvl, output, pprf.mPntCount, treeIdx, oFormat, pprf.mOutputFn);
 
             // pprf.setTimePoint("SilentMultiPprfReceiver.copy " + std::to_string(treeIdx));
 
@@ -1144,10 +1161,10 @@ namespace osuCrypto
 
             // pprf.setTimePoint("SilentMultiPprfReceiver.delete " + std::to_string(treeIdx));
 
-        }
+            }
 
         MC_END();
-    }
+            }
 
 
 
@@ -1201,6 +1218,13 @@ namespace osuCrypto
             if (mPntCount & 7)
                 throw RTE_LOC;
         }
+        else if (oFormat == PprfOutputFormat::Callback)
+        {
+            if (mDomain & 1)
+                throw RTE_LOC;
+            if (mPntCount & 7)
+                throw RTE_LOC;
+        }
         else
         {
             throw RTE_LOC;
@@ -1239,6 +1263,6 @@ namespace osuCrypto
         MC_END();
     }
 
-}
+                }
 
 #endif

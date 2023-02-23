@@ -22,6 +22,7 @@
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
+#include "libOTe/Tools/EACode/EACode.h"
 
 namespace osuCrypto
 {
@@ -104,6 +105,8 @@ namespace osuCrypto
 
         // The Silver encoder for MultType::slv5, MultType::slv11
         SilverEncoder mEncoder;
+
+        EACode mEAEncoder;
 
         // A flag that helps debug
         bool mDebug = false;
@@ -248,20 +251,7 @@ namespace osuCrypto
 
         PprfOutputFormat getPprfFormat()
         {
-            switch (mMultType)
-            {
-            //case osuCrypto::MultType::QuasiCyclic:
-            //    return PprfOutputFormat::InterleavedTransposed;
-            //    break;
-            case osuCrypto::MultType::slv5:
-            case osuCrypto::MultType::slv11:
-            case osuCrypto::MultType::QuasiCyclic:
-                return PprfOutputFormat::Interleaved;
-                break;
-            default:
-                throw RTE_LOC;
-                break;
-            }
+            return PprfOutputFormat::Interleaved;
         }
 
         // clears the internal buffers.

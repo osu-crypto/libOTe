@@ -1,4 +1,4 @@
-#include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
+﻿#include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 
 #if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE) 
 
@@ -10,31 +10,98 @@
 
 namespace osuCrypto
 {
-    u64 secLevel(u64 scale, u64 p, u64 points)
+    //u64 secLevel(u64 scale, u64 n, u64 points)
+    //{
+    //    auto x1 = std::log2(scale * n / double(n));
+    //    auto x2 = std::log2(scale * n) / 2;
+    //    return static_cast<u64>(points * x1 + x2);
+    //}
+
+    //u64 getPartitions(u64 scaler, u64 n, u64 secParam)
+    //{
+    //    if (scaler < 2)
+    //        throw std::runtime_error("scaler must be 2 or greater");
+
+    //    u64 ret = 1;
+    //    auto ss = secLevel(scaler, n, ret);
+    //    while (ss < secParam)
+    //    {
+    //        ++ret;
+    //        ss = secLevel(scaler, n, ret);
+    //        if (ret > 1000)
+    //            throw std::runtime_error("failed to find silent OT parameters");
+    //    }
+    //    return roundUpTo(ret, 8);
+    //}
+
+
+    // We get e^{-2td} security against linear attacks, 
+    // with noise weigh t and minDist d. 
+    // For regular we can be slightly more accurate with
+    //    (1 − 2d)^t
+    // which implies a bit security level of
+    // k = -t * log2(1 - 2d)
+    // t = -k / log2(1 - 2d)
+    u64 getRegNoiseWeight(double minDistRatio, u64 secParam)
     {
-        auto x1 = std::log2(scale * p / double(p));
-        auto x2 = std::log2(scale * p) / 2;
-        return static_cast<u64>(points * x1 + x2);
+        if (minDistRatio > 0.5 || minDistRatio <= 0)
+            throw RTE_LOC;
+
+        auto d = std::log2(1 - 2 * minDistRatio);
+        auto t = std::max<u64>(128, -double(secParam) / d);
+
+        return roundUpTo(t, 8);
     }
 
-    u64 getPartitions(u64 scaler, u64 p, u64 secParam)
-    {
-        if (scaler < 2)
-            throw std::runtime_error("scaler must be 2 or greater");
 
-        u64 ret = 1;
-        auto ss = secLevel(scaler, p, ret);
-        while (ss < secParam)
+    void EAConfigure(
+        u64 numOTs, u64 secParam,
+        MultType mMultType,
+        u64& mRequestedNumOTs,
+        u64& mNumPartitions,
+        u64& mSizePer,
+        u64& mN2,
+        u64& mN,
+        EACode& mEncoder
+    )
+    {
+        auto mScaler = 2;
+        u64 w;
+        double minDist;
+        switch (mMultType)
         {
-            ++ret;
-            ss = secLevel(scaler, p, ret);
-            if (ret > 1000)
-                throw std::runtime_error("failed to find silent OT parameters");
+        case osuCrypto::MultType::ExAcc7:
+            w = 7;
+            // this is known to be high but likely overall accurate
+            minDist = 0.05;
+            break;
+        case osuCrypto::MultType::ExAcc11:
+            w = 11;
+            minDist = 0.1;
+            break;
+        case osuCrypto::MultType::ExAcc21:
+            w = 21;
+            minDist = 0.1;
+            break;
+        case osuCrypto::MultType::ExAcc40:
+            w = 40;
+            minDist = 0.2;
+            break;
+        default:
+            throw RTE_LOC;
+            break;
         }
-        return roundUpTo(ret, 8);
+
+        mRequestedNumOTs = numOTs;
+        mNumPartitions = getRegNoiseWeight(minDist, secParam);
+        mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
+        mN2 = mSizePer * mNumPartitions;
+        mN = mN2 / mScaler;
+
+        mEncoder.config(numOTs, numOTs * mScaler, w);
     }
 
-
+    bool gSilverWarning = true;
     void SilverConfigure(
         u64 numOTs, u64 secParam,
         MultType mMultType,
@@ -53,11 +120,14 @@ namespace osuCrypto
         {
             ~Warned()
             {
-                std::cout <<oc::Color::Red<< "WARNING: This program made use of the LPN silver encoder. "
-                    << "This encoder is experimental and should not be used in production."
-                    << " Rebuild libOTe with `-DNO_SILVER_WARNING=TRUE` to disable this message or build the library with "
-                    << "`-DENABLE_BITPOLYMUL=TRUE` to use an encoding with provable minimum distance. "
-                    << LOCATION << oc::Color::Default<< std::endl;
+                if (gSilverWarning)
+                {
+                    std::cout <<oc::Color::Red<< "WARNING: This program made use of the LPN silver encoder. "
+                        << "This encoder is experimental and should not be used in production."
+                        << " Rebuild libOTe with `-DNO_SILVER_WARNING=TRUE` to disable this message or build the library with "
+                        << "`-DENABLE_BITPOLYMUL=TRUE` to use an encoding with provable minimum distance. "
+                        << LOCATION << oc::Color::Default<< std::endl;
+                }
 
             }
         };
@@ -73,7 +143,7 @@ namespace osuCrypto
 
         gap = SilverCode::gap(code);
 
-        mNumPartitions = getPartitions(mScaler, numOTs, secParam);
+        mNumPartitions = getRegNoiseWeight(0.2, secParam);
         mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
         mN2 = mSizePer * mNumPartitions + gap;
         mN = mN2 / mScaler;
@@ -105,7 +175,7 @@ namespace osuCrypto
 
         mRequestedNumOTs = numOTs;
         mP = nextPrime(std::max<u64>(numOTs, 128 * 128));
-        mNumPartitions = getPartitions(scaler, mP, secParam);
+        mNumPartitions = getRegNoiseWeight(0.2, secParam);
         auto ss = (mP * scaler + mNumPartitions - 1) / mNumPartitions;
         mSizePer = roundUpTo(ss, 8);
         mN2 = mSizePer * mNumPartitions;
@@ -264,7 +334,25 @@ namespace osuCrypto
         mMalType = malType;
         mNumThreads = numThreads;
 
-        if (mMultType == MultType::slv5 || mMultType == MultType::slv11)
+        mGapOts.resize(0);
+
+        switch (mMultType)
+        {
+        case osuCrypto::MultType::QuasiCyclic:
+
+            QuasiCyclicConfigure(numOTs, 128, scaler,
+                mMultType,
+                mRequestNumOts,
+                mNumPartitions,
+                mSizePer,
+                mN2,
+                mN,
+                mP,
+                mScaler);
+
+            break;
+        case osuCrypto::MultType::slv5:
+        case osuCrypto::MultType::slv11:
         {
             if (scaler != 2)
                 throw std::runtime_error("only scaler = 2 is supported for slv. " LOCATION);
@@ -281,24 +369,19 @@ namespace osuCrypto
                 mEncoder);
 
             mGapOts.resize(gap);
-
+            break;
         }
-        else
-        {
-            QuasiCyclicConfigure(numOTs, 128, scaler,
-                mMultType,
-                mRequestNumOts,
-                mNumPartitions,
-                mSizePer,
-                mN2,
-                mN,
-                mP,
-                mScaler);
+        case osuCrypto::MultType::ExAcc7:
+        case osuCrypto::MultType::ExAcc11:
+        case osuCrypto::MultType::ExAcc21:
+        case osuCrypto::MultType::ExAcc40:
 
-            mGapOts.resize(0);
+            EAConfigure(numOTs, 128, mMultType, mRequestNumOts, mNumPartitions, mSizePer, mN2, mN, mEAEncoder);
+            break;
+        default:
+            throw RTE_LOC;
+            break;
         }
-
-
 
         mGen.configure(mSizePer, mNumPartitions);
     }
@@ -598,24 +681,56 @@ namespace osuCrypto
 
     void SilentOtExtSender::compress()
     {
-        if (mMultType == MultType::QuasiCyclic)
+        switch (mMultType)
         {
+        case osuCrypto::MultType::QuasiCyclic:
+        {
+
 #ifdef ENABLE_BITPOLYMUL
             QuasiCyclicCode code;
             code.init(mP, mScaler);
-            code.encode(mB.subspan(0, code.size()));
+            code.dualEncode(mB.subspan(0, code.size()));
 #else
             throw std::runtime_error("ENABLE_BITPOLYMUL");
 #endif
         }
-        else
-        {
-            if(mTimer)
-                mEncoder.setTimer(getTimer());
-            mEncoder.cirTransEncode<block>(mB);
-            setTimePoint("sender.expand.ldpc.cirTransEncode");
+            break;
+        case osuCrypto::MultType::slv5:
+        case osuCrypto::MultType::slv11:
 
+            if (mTimer)
+                mEncoder.setTimer(getTimer());
+            mEncoder.dualEncode<block>(mB);
+            setTimePoint("sender.expand.ldpc.dualEncode");
+
+            break;
+        //case osuCrypto::MultType::ExConv5x8:
+        //case osuCrypto::MultType::ExConv7x8:
+        //case osuCrypto::MultType::ExConv11x8:
+        //case osuCrypto::MultType::ExConv21x8:
+        //case osuCrypto::MultType::ExConv5x16:
+        //case osuCrypto::MultType::ExConv7x16:
+        //case osuCrypto::MultType::ExConv11x16:
+        //case osuCrypto::MultType::ExConv21x16:
+        case osuCrypto::MultType::ExAcc7:
+        case osuCrypto::MultType::ExAcc11:
+        case osuCrypto::MultType::ExAcc21:
+        case osuCrypto::MultType::ExAcc40:
+        {
+            if (mTimer)
+                mEAEncoder.setTimer(getTimer());
+            AlignedUnVector<block> B2(mEAEncoder.mMessageSize);
+            mEAEncoder.dualEncode<block>(mB.subspan(0, mEAEncoder.mCodeSize), B2);
+            std::swap(mB, B2);
+            setTimePoint("sender.expand.ExConv.dualEncode");
+            break;
         }
+        default:
+            throw RTE_LOC;
+            break;
+        }
+
+
     }
 //
 //
@@ -687,7 +802,7 @@ namespace osuCrypto
 //                for (u64 j = 0; j < nBlocks; ++j)
 //                    temp128[j] = temp128[j] ^ b128[j];
 //
-//                // reduce s[i] mod (x^p - 1) and store it at cModP1[i]
+//                // reduce s[i] mod (x^n - 1) and store it at cModP1[i]
 //                modp(dest, temp128, mP);
 //
 //            };
