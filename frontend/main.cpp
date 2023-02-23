@@ -1,5 +1,4 @@
 #include <iostream>
-#include "libOTe/Tools/Tungsten/TungstenSampler.h"
 
 //using namespace std;
 #include "tests_cryptoTools/UnitTests.h"
@@ -33,7 +32,6 @@ using namespace osuCrypto;
 #include "libOTe/Tools/LDPC/Util.h"
 #include "cryptoTools/Crypto/RandomOracle.h"
 #include "libOTe/Tools/EACode/EAChecker.h"
-#include "libOTe/Tools/Tungsten/accTest.h"
 
 static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
@@ -117,20 +115,6 @@ int main(int argc, char** argv)
 	if (cmd.isSet("ea"))
 	{
 		EAChecker(cmd);
-		return 0;
-	}
-
-	if (cmd.isSet("tungsten"))
-	{
-		sampleTungstenDiag(cmd);
-		return 0;
-	}
-
-	if (cmd.isSet("acc"))
-	{
-		//periodTest(cmd);
-		accTest(cmd);
-		//accPr(cmd);
 		return 0;
 	}
 

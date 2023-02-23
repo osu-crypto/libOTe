@@ -13,7 +13,6 @@
 #include "libOTe_Tests/Vole_Tests.h"
 #include "libOTe/Tools/LDPC/LdpcDecoder.h"
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
-#include "libOTe_Tests/Tungsten_Tests.h"
 #include "libOTe_Tests/EACode_Tests.h"
 
 using namespace osuCrypto;
