@@ -13,15 +13,16 @@
         "LIBOTE_STD_VER": "17",
         "ENABLE_KKRT": false,
         "ENABLE_IKNP": true,
-        "ENABLE_MR": false,
-        "ENABLE_SIMPLESTOT": true,
-        "ENABLE_SIMPLESTOT_ASM": true,
+        "ENABLE_MR": true,
+        "ENABLE_SIMPLESTOT": false,
+        "ENABLE_SIMPLESTOT_ASM": false,
         "ENABLE_RELIC": false,
-        "ENABLE_SODIUM": false,
+        "ENABLE_SODIUM":true,
         "ENABLE_BOOST": false,
         "FETCH_AUTO": "ON",
         "ENABLE_CIRCUITS": true,
         "VERBOSE_FETCH": true,
+        "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
       },
       "vendor": {
@@ -47,7 +48,8 @@
         "ENABLE_IKNP": "ON",
         "ENABLE_MR": "ON",
         "ENABLE_SIMPLESTOT": "ON",
-        "ENABLE_RELIC": "ON",
+        "ENABLE_RELIC": false,
+        "ENABLE_SODIUM": true,
         "ENABLE_BOOST": false,
         "ENABLE_BITPOLYMUL": true,
         "FETCH_AUTO": "ON",
@@ -57,7 +59,8 @@
         "ENABLE_AVX": true,
         "ENABLE_ASAN": false,
         "COPROTO_ENABLE_BOOST": true,
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+        "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install/${presetName}"
       },
       "vendor": { "microsoft.com/VisualStudioSettings/CMake/1.0": { "hostOS": [ "Windows" ] } }
     },

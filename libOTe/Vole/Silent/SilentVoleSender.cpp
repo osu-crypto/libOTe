@@ -14,9 +14,6 @@
 
 namespace osuCrypto
 {
-    u64 secLevel(u64 scale, u64 p, u64 points);
-    u64 getPartitions(u64 scaler, u64 p, u64 secParam);
-
     u64 SilentVoleSender::baseOtCount() const
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
@@ -50,9 +47,20 @@ namespace osuCrypto
 
     task<> SilentVoleSender::genSilentBaseOts(PRNG& prng, Socket& chl, cp::optional<block> delta)
     {
+
+#if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
+        using BaseOT = McRosRoyTwist;
+#elif defined ENABLE_MR
+        using BaseOT = MasnyRindal;
+#elif defined ENABLE_MRR
+        using BaseOT = McRosRoy;
+#else
+    using BaseOT = DefaultBaseOT;
+#endif
+
         MC_BEGIN(task<>,this, delta, &prng, &chl, 
             msg = AlignedUnVector<std::array<block, 2>>(silentBaseOtCount()),
-            baseOt = DefaultBaseOT{},
+            baseOt = BaseOT{},
             prng2 = std::move(PRNG{}),
             xx = BitVector{},
             chl2 = Socket{},
@@ -169,15 +177,30 @@ namespace osuCrypto
         u64& mP,
         u64& mScaler);
 
+
+    void EAConfigure(
+        u64 numOTs, u64 secParam,
+        MultType mMultType,
+        u64& mRequestedNumOTs,
+        u64& mNumPartitions,
+        u64& mSizePer,
+        u64& mN2,
+        u64& mN,
+        EACode& mEncoder
+    );
+
+
     void SilentVoleSender::configure(
         u64 numOTs, 
         SilentBaseType type,
         u64 secParam)
     {
         mBaseType = type;
+        u64 gap = 0;
 
-
-        if (mMultType == MultType::QuasiCyclic)
+        switch (mMultType)
+        {
+        case osuCrypto::MultType::QuasiCyclic:
         {
             u64 p, s;
 
@@ -197,22 +220,41 @@ namespace osuCrypto
 #else
             throw std::runtime_error("ENABLE_BITPOLYMUL not defined.");
 #endif
-
+            break;
         }
-        else {
-            u64 gap = 0;
+        case osuCrypto::MultType::slv5:
+        case osuCrypto::MultType::slv11:
+
             SilverConfigure(numOTs, secParam,
                 mMultType,
                 mRequestedNumOTs,
                 mNumPartitions,
-                mSizePer, 
-                mN2, 
-                mN, 
-                gap, 
+                mSizePer,
+                mN2,
+                mN,
+                gap,
                 mEncoder);
+            break;
+        case osuCrypto::MultType::ExAcc7:
+        case osuCrypto::MultType::ExAcc11:
+        case osuCrypto::MultType::ExAcc21:
+        case osuCrypto::MultType::ExAcc40:
 
-            mGapOts.resize(gap);
+            EAConfigure(numOTs, secParam,
+                mMultType,
+                mRequestedNumOTs,
+                mNumPartitions,
+                mSizePer,
+                mN2,
+                mN,
+                mEAEncoder);
+            break;
+        default:
+            throw RTE_LOC;
+            break;
         }
+
+        mGapOts.resize(gap);
         mGen.configure(mSizePer, mNumPartitions);
         
         mState = State::Configured;
@@ -367,9 +409,10 @@ namespace osuCrypto
             MC_AWAIT(chl.send(std::move(hash)));
         }
 
-
-        if (mMultType == MultType::QuasiCyclic)
+        switch (mMultType)
         {
+        case osuCrypto::MultType::QuasiCyclic:
+
 #ifdef ENABLE_BITPOLYMUL
 
             if (mTimer)
@@ -379,17 +422,36 @@ namespace osuCrypto
 #else
             throw std::runtime_error("ENABLE_BITPOLYMUL not defined.");
 #endif
-            setTimePoint("SilentVoleSender.expand.ldpc.cirTransEncode");
-        }
-        else
-        {
+            setTimePoint("SilentVoleSender.expand.QuasiCyclic");
+            break;
+        case osuCrypto::MultType::slv5:
+        case osuCrypto::MultType::slv11:
 
             if (mTimer)
                 mEncoder.setTimer(getTimer());
 
             mEncoder.dualEncode<block>(mB);
-            setTimePoint("SilentVoleSender.expand.ldpc.cirTransEncode");
+            setTimePoint("SilentVoleSender.expand.Silver");
+            break;
+        case osuCrypto::MultType::ExAcc7:
+        case osuCrypto::MultType::ExAcc11:
+        case osuCrypto::MultType::ExAcc21:
+        case osuCrypto::MultType::ExAcc40:
+        {
+            if (mTimer)
+                mEAEncoder.setTimer(getTimer());
+            AlignedUnVector<block> B2(mEAEncoder.mMessageSize);
+            mEAEncoder.dualEncode<block>(mB.subspan(0,mEAEncoder.mCodeSize), B2);
+            std::swap(mB, B2);
+
+            setTimePoint("SilentVoleSender.expand.Silver");
+            break;
         }
+        default:
+            throw RTE_LOC;
+            break;
+        }
+
 
         mB.resize(mRequestedNumOTs);
 

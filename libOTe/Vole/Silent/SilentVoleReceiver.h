@@ -19,6 +19,7 @@
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
+#include <libOTe/Tools/EACode/EACode.h>
 #include <libOTe/Tools/Coproto.h>
 #include <libOTe/Tools/QuasiCyclicCode.h>
 
@@ -70,6 +71,8 @@ namespace osuCrypto
         // The silver encoder.
         SilverEncoder mEncoder;
 
+        EACode mEAEncoder;
+
 #ifdef ENABLE_BITPOLYMUL
         QuasiCyclicCode mQuasiCyclicEncoder;
 #endif
@@ -83,7 +86,7 @@ namespace osuCrypto
         AlignedUnVector<block> mA;
 
         // mA + mB = mC * delta
-        AlignedVector<block> mC;
+        AlignedUnVector<block> mC;
 
         std::vector<block> mGapOts;
 

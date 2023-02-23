@@ -21,6 +21,7 @@
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/QuasiCyclicCode.h>
+#include <libOTe/Tools/EACode/EACode.h>
 //#define NO_HASH
 
 namespace osuCrypto
@@ -64,6 +65,8 @@ namespace osuCrypto
         MultType mMultType = DefaultMultType;
         SilverEncoder mEncoder;
         
+        EACode mEAEncoder;
+
 #ifdef ENABLE_BITPOLYMUL
         QuasiCyclicCode mQuasiCyclicEncoder;
 #endif

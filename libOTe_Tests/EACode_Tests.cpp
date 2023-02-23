@@ -1,4 +1,4 @@
-#include "ExConvCode_Tests.h"
+#include "EACode_Tests.h"
 #include "libOTe/Tools/EACode/EACode.h"
 #include <iomanip>
 

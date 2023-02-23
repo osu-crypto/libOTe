@@ -59,6 +59,8 @@ namespace osuCrypto
         template<typename T>
         void dualEncode(span<T> e, span<T> w)
         {
+            if (mCodeSize == 0)
+                throw RTE_LOC;
             if (e.size() != mCodeSize)
                 throw RTE_LOC;
             if (w.size() != mMessageSize)
@@ -84,10 +86,16 @@ namespace osuCrypto
             span<T2> w1
         )
         {
-            assert(e0.size() == mCodeSize);
-            assert(e1.size() == mCodeSize);
-            assert(w0.size() == mMessageSize);
-            assert(w1.size() == mMessageSize);
+            if (mCodeSize == 0)
+                throw RTE_LOC;
+            if (e0.size() != mCodeSize) 
+                throw RTE_LOC;
+            if(e1.size() != mCodeSize)
+                throw RTE_LOC;
+            if(w0.size() != mMessageSize)
+                throw RTE_LOC;
+            if(w1.size() != mMessageSize)
+                throw RTE_LOC;
 
             setTimePoint("ExConv.encode.begin");
 
