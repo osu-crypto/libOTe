@@ -876,8 +876,8 @@ namespace osuCrypto
                         auto iter = std::find(row.data(), row.data() + j, row[j]);
                         if (iter != row.data() + j)
                         {
-                            row[j] = -1;
-                            *iter = -1;
+                            row[j] = ~0ull;
+                            *iter = ~0ull;
                         }
                         //throw RTE_LOC;
 
@@ -885,7 +885,7 @@ namespace osuCrypto
                     for (auto j : rng(mExpanderWeight))
                     {
 
-                        if (row[j] != -1)
+                        if (row[j] != ~0ull)
                         {
                             //std::cout << row[j] << " ";
                             points.push_back(i, row[j]);
@@ -921,7 +921,7 @@ namespace osuCrypto
             }
             else
             {
-                for (i64 i = 0; i < mCodeSize; ++i)
+                for (u64 i = 0; i < mCodeSize; ++i)
                 {
                     accOne(AP, i, ptr, prng, rnd, q, qe);
                 }

@@ -129,7 +129,7 @@ namespace osuCrypto
 
             while (true)
             {
-                auto c = 0;// prng.get<u64>() < pct;
+                //auto c = 0;// prng.get<u64>() < pct;
                 acc0.step();
                 acc0.step();
                 acc1.step();
@@ -260,12 +260,12 @@ namespace osuCrypto
         u64 accSize = stateSize - sticky;
         if (accSize > stateSize)
             throw RTE_LOC;
-        u64 accMask = (1ull << accSize) - 1;
+        //u64 accMask = (1ull << accSize) - 1;
         std::vector<u64> counts(stateSize + 1),
             totals;
         Timer timer;
 
-        u64 pattern = 0, patternSize = 0;
+        u64 pattern = 0;
         for (auto ss : accShift)
         {
             pattern <<= ss;
@@ -279,7 +279,7 @@ namespace osuCrypto
         auto stepSizes = cmd.getManyOr<u64>("stepSizes", std::vector<u64>(steps.size(), stepSize));
         auto stepStart = cmd.getManyOr<u64>("stepStart", std::vector<u64>(steps.size()));
 
-        u64 jj = 0;
+        //u64 jj = 0;
         //for (auto s : steps)
         //{
         //    u64 p = 0;
@@ -329,7 +329,7 @@ namespace osuCrypto
                 auto s = steps[j];
                 BitIterator iter((u8*)mask.data());
                 iter = iter + stepStart[j];
-                for (auto i = 0; i < stepSizes[j]; i += s)
+                for (auto i = 0ull; i < stepSizes[j]; i += s)
                 {
                     iter = iter + s;
                     *iter ^= 1;
@@ -370,7 +370,7 @@ namespace osuCrypto
                     auto row = table.data[r];
                     for (auto j : row)
                     {
-                        assert((j - 2) < accSize);
+                        assert((j - 2) < i64(accSize));
                         mask[0] |= 1ull << (j - 2);
                     }
                 }
@@ -383,7 +383,7 @@ namespace osuCrypto
 
                         for (u64 j = 0; j < a; ++j)
                             mask[0] |= 1ull << (prng.get<u16>() % (accSize));
-                        while (popcount(mask[0]) != a)
+                        while ((u64)popcount(mask[0]) != a)
                             mask[0] |= 1ull << (prng.get<u16>() % (accSize));
                     }
                     else
@@ -541,14 +541,14 @@ namespace osuCrypto
         double pa = double(a) / stateSize;
         double pc = 1 - std::pow(1 - w / double(n), c);
         assert(pc < 1);
-        u64 pct = ~0ull * pc;
+        //u64 pct = ~0ull * pc;
         std::cout << "pa " << pa << std::endl;
         std::cout << "pc " << pc << std::endl;
 
         assert(stateSize < 64);
         u64 stateMask = (1ull << stateSize) - 1;
 
-        const bool sticky = cmd.isSet("sticky");
+        //const bool sticky = cmd.isSet("sticky");
 
         PRNG prng(block(0, cmd.getOr("seed", 0)));
 

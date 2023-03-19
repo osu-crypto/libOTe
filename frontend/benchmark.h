@@ -7,6 +7,7 @@
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "libOTe/Tools/EACode/EACode.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode2.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
@@ -32,7 +33,7 @@ namespace osuCrypto
         u64 n = k * 2;
 
         // verbose flag.
-        bool v = cmd.isSet("v");
+        //bool v = cmd.isSet("v");
 
 
 #ifdef ENABLE_BITPOLYMUL
@@ -41,7 +42,7 @@ namespace osuCrypto
         auto p = nextPrime(n);
         code.init(p);
         std::vector<block> c0(code.size(), ZeroBlock);
-        for (auto t = 0; t < trials; ++t)
+        for (auto t = 0ull; t < trials; ++t)
         {
 
             timer.setTimePoint("reset");
@@ -75,7 +76,7 @@ namespace osuCrypto
         u64 w = cmd.getOr("w", 7);
 
         // size for the accumulator (# random transitions)
-        u64 a = cmd.getOr("a",  roundUpTo(log2ceil(n), 8));
+        //u64 a = cmd.getOr("a",  roundUpTo(log2ceil(n), 8));
 
         // verbose flag.
         bool v = cmd.isSet("v");
@@ -123,7 +124,7 @@ namespace osuCrypto
         // to state that 2^X rows should be used.
         u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
 
-        u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 5.0));
+        u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
 
         // the weight of the code
         u64 w = cmd.getOr("w", 7);
@@ -135,14 +136,14 @@ namespace osuCrypto
         bool v = cmd.isSet("v");
         bool sys = cmd.isSet("sys");
 
-        ExConvCode code;
+        ExConvCode2 code;
         code.config(k, n, w, a, sys);
 
         if (v)
         {
             std::cout << "n: " << code.mCodeSize << std::endl;
             std::cout << "k: " << code.mMessageSize << std::endl;
-            std::cout << "w: " << code.mExpanderWeight << std::endl;
+            //std::cout << "w: " << code.mExpanderWeight << std::endl;
         }
 
         std::vector<block> x(code.mCodeSize), y(code.mMessageSize * !sys);

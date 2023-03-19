@@ -67,6 +67,8 @@ macro(FIND_LIBDIVIDE)
     #explicitly asked to fetch libdivide
     if(FETCH_LIBDIVIDE)
         list(APPEND ARGS NO_DEFAULT_PATH PATHS ${VOLEPSI_THIRDPARTY_DIR})
+    elseif(${NO_CMAKE_SYSTEM_PATH})
+        list(APPEND ARGS NO_DEFAULT_PATH PATHS ${CMAKE_PREFIX_PATH})
     endif()
 
     find_path(LIBDIVIDE_INCLUDE_DIRS "libdivide.h" PATH_SUFFIXES "include" ${ARGS})

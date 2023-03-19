@@ -68,7 +68,6 @@ namespace osuCrypto
         Matrix<u64> ret(row, weight);
         for (u64 i : rng(row))
         {
-            bool first = true;
             u64 k = 0;
             for (auto j : rng(i, row))
             {

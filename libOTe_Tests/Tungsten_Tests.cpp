@@ -13,7 +13,7 @@ namespace tests_libOTe
 {
     void Tungsten_encode_basic_test(const oc::CLP& cmd)
     {
-        auto k = cmd.getOr("k", 16);
+        auto k = cmd.getOr("k", 16ull);
         auto n = cmd.getOr("n", k * 2);
         auto bw = cmd.getOr("bw", 5);
         auto aw = cmd.getOr("aw", 8);
@@ -142,7 +142,7 @@ namespace tests_libOTe
 
     void Tungsten2_encode_basic_test(const oc::CLP& cmd)
     {
-        auto k = cmd.getOr("k", 64);
+        auto k = cmd.getOr("k", 64ull);
         auto n = cmd.getOr("n", k * 2);
         auto bw = cmd.getOr("bw", 5);
         auto aw = cmd.getOr("aw", 10);
@@ -345,7 +345,7 @@ namespace tests_libOTe
 
     void Tungsten2_encode_trans_test(const oc::CLP& cmd)
     {
-        auto k = cmd.getOr("k", 64);
+        auto k = cmd.getOr("k", 64ull);
         auto n = cmd.getOr("n", k * 2);
         auto bw = cmd.getOr("bw", 5);
         auto aw = cmd.getOr("aw", 10);
@@ -575,7 +575,7 @@ namespace tests_libOTe
 
     void Tungsten2_encode_sum_test(const oc::CLP& cmd)
     {
-        auto k = cmd.getOr("k", 1024);
+        auto k = cmd.getOr("k", 1024ull);
         auto n = cmd.getOr("n", k * 2);
         auto bw = cmd.getOr("bw", 5);
         auto aw = cmd.getOr("aw", 10);

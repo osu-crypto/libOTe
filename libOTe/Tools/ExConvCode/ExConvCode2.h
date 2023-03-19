@@ -418,34 +418,38 @@ namespace osuCrypto
 
                     if constexpr (std::is_same<block, T>::value)
                     {
+                        __m128 bb[8];
+                        bb[0] = _mm_load_ps((float*)&b0);
+                        bb[1] = _mm_load_ps((float*)&b1);
+                        bb[2] = _mm_load_ps((float*)&b2);
+                        bb[3] = _mm_load_ps((float*)&b3);
+                        bb[4] = _mm_load_ps((float*)&b4);
+                        bb[5] = _mm_load_ps((float*)&b5);
+                        bb[6] = _mm_load_ps((float*)&b6);
+                        bb[7] = _mm_load_ps((float*)&b7);
 
-                        auto bb0 = _mm_load_ps((float*)&b0);
-                        auto bb1 = _mm_load_ps((float*)&b1);
-                        auto bb2 = _mm_load_ps((float*)&b2);
-                        auto bb3 = _mm_load_ps((float*)&b3);
-                        auto bb4 = _mm_load_ps((float*)&b4);
-                        auto bb5 = _mm_load_ps((float*)&b5);
-                        auto bb6 = _mm_load_ps((float*)&b6);
-                        auto bb7 = _mm_load_ps((float*)&b7);
 
+                        bb[0] = _mm_blendv_ps(Zero, xii, bb[0]);
+                        bb[1] = _mm_blendv_ps(Zero, xii, bb[1]);
+                        bb[2] = _mm_blendv_ps(Zero, xii, bb[2]);
+                        bb[3] = _mm_blendv_ps(Zero, xii, bb[3]);
+                        bb[4] = _mm_blendv_ps(Zero, xii, bb[4]);
+                        bb[5] = _mm_blendv_ps(Zero, xii, bb[5]);
+                        bb[6] = _mm_blendv_ps(Zero, xii, bb[6]);
+                        bb[7] = _mm_blendv_ps(Zero, xii, bb[7]);
 
-                        bb0 = _mm_blendv_ps(Zero, xii, bb0);
-                        bb1 = _mm_blendv_ps(Zero, xii, bb1);
-                        bb2 = _mm_blendv_ps(Zero, xii, bb2);
-                        bb3 = _mm_blendv_ps(Zero, xii, bb3);
-                        bb4 = _mm_blendv_ps(Zero, xii, bb4);
-                        bb5 = _mm_blendv_ps(Zero, xii, bb5);
-                        bb6 = _mm_blendv_ps(Zero, xii, bb6);
-                        bb7 = _mm_blendv_ps(Zero, xii, bb7);
+                        block tt[8];
+                        memcpy(tt, bb, 8 * 16);
+                        
 
-                        if (!rangeCheck || j + 0 < mCodeSize) xx[j + 0] = xx[j + 0] ^ *(block*)&bb0;
-                        if (!rangeCheck || j + 1 < mCodeSize) xx[j + 1] = xx[j + 1] ^ *(block*)&bb1;
-                        if (!rangeCheck || j + 2 < mCodeSize) xx[j + 2] = xx[j + 2] ^ *(block*)&bb2;
-                        if (!rangeCheck || j + 3 < mCodeSize) xx[j + 3] = xx[j + 3] ^ *(block*)&bb3;
-                        if (!rangeCheck || j + 4 < mCodeSize) xx[j + 4] = xx[j + 4] ^ *(block*)&bb4;
-                        if (!rangeCheck || j + 5 < mCodeSize) xx[j + 5] = xx[j + 5] ^ *(block*)&bb5;
-                        if (!rangeCheck || j + 6 < mCodeSize) xx[j + 6] = xx[j + 6] ^ *(block*)&bb6;
-                        if (!rangeCheck || j + 7 < mCodeSize) xx[j + 7] = xx[j + 7] ^ *(block*)&bb7;
+                        if (!rangeCheck || j + 0 < mCodeSize) xx[j + 0] = xx[j + 0] ^ tt[0];
+                        if (!rangeCheck || j + 1 < mCodeSize) xx[j + 1] = xx[j + 1] ^ tt[1];
+                        if (!rangeCheck || j + 2 < mCodeSize) xx[j + 2] = xx[j + 2] ^ tt[2];
+                        if (!rangeCheck || j + 3 < mCodeSize) xx[j + 3] = xx[j + 3] ^ tt[3];
+                        if (!rangeCheck || j + 4 < mCodeSize) xx[j + 4] = xx[j + 4] ^ tt[4];
+                        if (!rangeCheck || j + 5 < mCodeSize) xx[j + 5] = xx[j + 5] ^ tt[5];
+                        if (!rangeCheck || j + 6 < mCodeSize) xx[j + 6] = xx[j + 6] ^ tt[6];
+                        if (!rangeCheck || j + 7 < mCodeSize) xx[j + 7] = xx[j + 7] ^ tt[7];
                     }
                     else
                     {
@@ -487,7 +491,6 @@ namespace osuCrypto
             u64 i = 0;
             auto size = x.size();
             auto main = (u64)std::max<i64>(0, size - mWrapping - mAccumulatorSize);
-            block rnd;
             u8* ptr = (u8*)prng.mBuffer.data();
             auto qe = prng.mBuffer.size() * 128 / 8;
             u64 q = 0;
@@ -498,32 +501,6 @@ namespace osuCrypto
                 throw RTE_LOC;
 
 
-            //block xi = xx[0];
-//            if (mTrans)
-//            {
-//
-//
-//#define CASE(I) case I:\
-//                for (; i < mAccumulatorSize; ++i)\
-//                    accOneTrans<T, true, I>(xx, i, ptr, prng, q, qe);\
-//                for (; i < mCodeSize; ++i)\
-//                    accOneTrans<T, false, I>(xx, i, ptr, prng, q, qe);\
-//                break
-//
-//                switch (mAccumulatorSize / 8)
-//                {
-//                    CASE(0);
-//                    CASE(1);
-//                    CASE(2);
-//                    CASE(3);
-//                    CASE(4);
-//                default:
-//                    throw RTE_LOC;
-//                    break;
-//                }
-//#undef CASE
-//            }
-//            else
             {
 
 #define CASE(I) case I:\
@@ -801,7 +778,7 @@ namespace osuCrypto
             auto qe = prng.mBuffer.size() * 128;
             u64 q = 0;
 
-            for (i64 i = 0; i < mCodeSize; ++i)
+            for (u64 i = 0; i < mCodeSize; ++i)
             {
                 accOne(AP, i, ptr, prng, rnd, q, qe);
             }

@@ -124,7 +124,7 @@ namespace osuCrypto
         SparseMtx getAPar() const
         {
             PointList AP(mCodeSize, mCodeSize);;
-            for (i64 i = 0; i < mCodeSize; ++i)
+            for (u64 i = 0; i < mCodeSize; ++i)
             {
                 AP.push_back(i, i);
                 if (i + 1 < mCodeSize)

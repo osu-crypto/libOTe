@@ -7,7 +7,7 @@ namespace osuCrypto
     void ExConvCode_encode_basic_test(const oc::CLP& cmd)
     {
 
-        auto k = cmd.getOr("k", 16);
+        auto k = cmd.getOr("k", 16ul);
         auto R = cmd.getOr("R", 2.0);
         auto n = cmd.getOr("n", k * R);
         auto bw = cmd.getOr("bw", 7);

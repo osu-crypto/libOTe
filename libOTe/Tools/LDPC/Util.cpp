@@ -362,7 +362,7 @@ namespace osuCrypto
     {
         auto n = G.cols();
         auto k = G.rows();
-        auto m = n - k;
+        //auto m = n - k;
 
         for (u64 row = 0, col = 0; row < k; ++row, ++col)
         {

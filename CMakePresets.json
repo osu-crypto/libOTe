@@ -15,7 +15,7 @@
         "ENABLE_IKNP": true,
         "ENABLE_MR": true,
         "ENABLE_SIMPLESTOT": false,
-        "ENABLE_SIMPLESTOT_ASM": false,
+        "ENABLE_SIMPLESTOT_ASM": true,
         "ENABLE_RELIC": false,
         "ENABLE_SODIUM":true,
         "ENABLE_BOOST": false,
