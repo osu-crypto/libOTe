@@ -72,7 +72,6 @@ namespace osuCrypto
 
             for (u64 i = 1; i < (1ull << tweakIdx.size()); ++i)
             {
-                auto K = popcount(i);
                 RandomOracle ro(sizeof(u64));
                 BitIterator iIter((u8*)&i);
                 auto bb = B;
@@ -128,7 +127,7 @@ namespace osuCrypto
             std::unordered_map<u64, std::vector<u64>> sets;
             //sig.reserve(n);
 
-            u64 max = 0, maxIdx = -1, minDis = N, min0 = -1;
+            u64 max = 0, minDis = N, min0 = -1;
             PRNG prng(block(seed, t));
             for (u64 i = 0; i < n; ++i)
             {

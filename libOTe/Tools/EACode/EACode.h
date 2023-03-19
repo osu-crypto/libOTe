@@ -480,8 +480,8 @@ namespace osuCrypto
                         auto iter = std::find(row.data(), row.data() + j, row[j]);
                         if (iter != row.data() + j)
                         {
-                            row[j] = -1;
-                            *iter = -1;
+                            row[j] = ~0ull;
+                            *iter =  ~0ull;
                         }
                         //throw RTE_LOC;
 
@@ -489,7 +489,7 @@ namespace osuCrypto
                     for (auto j : rng(mExpanderWeight))
                     {
 
-                        if (row[j] != -1)
+                        if (row[j] != ~0ull)
                         {
                             //std::cout << row[j] << " ";
                             points.push_back(i, row[j]);
@@ -510,7 +510,7 @@ namespace osuCrypto
         SparseMtx getAPar() const
         {
             PointList AP(mCodeSize, mCodeSize);;
-            for (i64 i = 0; i < mCodeSize; ++i)
+            for (u64 i = 0; i < mCodeSize; ++i)
             {
                 AP.push_back(i, i);
                 if (i + 1 < mCodeSize)

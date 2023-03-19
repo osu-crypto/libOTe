@@ -205,6 +205,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
 
     for (auto tt : rng(t))
     {
+        (void)tt;
 
         prng.get(A.data(), n);
         prng.get(B.data(), n);
@@ -230,6 +231,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
 
     for (auto tt : rng(t))
     {
+        (void)tt;
 
         for (u64 i = 0; i < n; ++i)
         {
