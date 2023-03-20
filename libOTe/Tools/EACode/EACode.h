@@ -12,7 +12,11 @@
 
 namespace osuCrypto
 {
-
+#if __cplusplus >= 201703L
+#define EA_CONSTEXPR constexpr
+#else
+#define EA_CONSTEXPR
+#endif
     // THe encoder for the generator matrix G = B * A.
     // B is the expander while A is the accumulator.
     // 
@@ -156,7 +160,7 @@ namespace osuCrypto
         OC_FORCEINLINE typename std::enable_if<(count > 1), T>::type
             expandOne(const T* __restrict ee, detail::ExpanderModd& prng)const
         {
-            if constexpr (count >= 8)
+            if EA_CONSTEXPR (count >= 8)
             {
                 u64 rr[8];
                 T w[8];
@@ -188,8 +192,11 @@ namespace osuCrypto
                     w[6] ^
                     w[7];
 
-                if constexpr (count > 8)
-                    ww = ww ^ expandOne<T,count-8>(ee, prng);
+                if EA_CONSTEXPR(count > 8)
+                {
+
+                    ww = ww ^ expandOne<T, (count < 8 ? 0 : count - 8)>(ee, prng);
+                }
                 return ww;
             }
             else
@@ -211,7 +218,7 @@ namespace osuCrypto
                 T2* __restrict y2,
                 detail::ExpanderModd& prng)const
         {
-            if constexpr (count >= 8)
+            if EA_CONSTEXPR (count >= 8)
             {
                 u64 rr[8];
                 T w1[8];
@@ -262,11 +269,11 @@ namespace osuCrypto
                     w2[6] ^
                     w2[7];
 
-                if constexpr (count > 8)
+                if EA_CONSTEXPR (count > 8)
                 {
                     T yy1;
                     T2 yy2;
-                    expandOne<T, count - 8>(ee1, ee2, yy1,yy2, prng);
+                    expandOne<T, (count < 8 ? 0 : count - 8)>(ee1, ee2, yy1,yy2, prng);
                     ww1 = ww1 ^ yy1;
                     ww2 = ww2 ^ yy2;
                 }
@@ -297,6 +304,7 @@ namespace osuCrypto
             return ee[r];
         }
 
+
         template<typename T, typename T2, u64 count>
         OC_FORCEINLINE typename std::enable_if<count == 1, T>::type
             expandOne(
@@ -309,6 +317,26 @@ namespace osuCrypto
             auto r = prng.get();
             *y1 = ee1[r];
             *y2 = ee2[r];
+        }
+
+
+        template<typename T, u64 count>
+        OC_FORCEINLINE typename std::enable_if<count == 0, T>::type
+            expandOne(const T* __restrict ee, detail::ExpanderModd& prng) const
+        {
+            return {};
+        }
+
+
+        template<typename T, typename T2, u64 count>
+        OC_FORCEINLINE typename std::enable_if<count == 0, T>::type
+            expandOne(
+                const T* __restrict ee1,
+                const T2* __restrict ee2,
+                T* __restrict y1,
+                T2* __restrict y2,
+                detail::ExpanderModd& prng) const
+        {
         }
 
 
@@ -545,4 +573,6 @@ namespace osuCrypto
             return A.sparse();
         }
     };
+
+#undef EA_CONSTEXPR
 }

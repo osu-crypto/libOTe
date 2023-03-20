@@ -1,3 +1,7 @@
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 #include "SmallFieldVole.h"
 #ifdef ENABLE_SOFTSPOKEN_OT
 
@@ -23,6 +27,7 @@
 #else
 #	define UNREACHABLE()
 #endif
+
 
 
 namespace osuCrypto
@@ -90,6 +95,7 @@ namespace osuCrypto
 			if (!isReceiver)
 				*outU = path[treeDepth][0];
 		}
+
 	}
 
 	template<u64 fieldBitsConst>

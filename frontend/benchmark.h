@@ -236,6 +236,8 @@ namespace osuCrypto
 
     inline void SilentOtBench(const CLP& cmd)
     {
+#ifdef ENABLE_SILENTOT
+
         try
         {
 
@@ -307,5 +309,6 @@ namespace osuCrypto
         {
             std::cout << e.what() << std::endl;
         }
+#endif
     }
 }
