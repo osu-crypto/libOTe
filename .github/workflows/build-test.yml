@@ -203,7 +203,7 @@ jobs:
   build-windows:
     # The type of runner that the job will run on
     runs-on: windows-2019
-    timeout-minutes: 20
+    timeout-minutes: 30
   
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -216,10 +216,10 @@ jobs:
 
       # Runs a set of commands using the runners shell
       - name: build relic
-        run: python3 build.py --setup --relic --par=2 -G Ninja  -DENABLE_BOOST=OFF  -DVERBOSE_FETCH=ON
+        run: python3 build.py --setup --relic  -G Ninja  -DENABLE_BOOST=OFF  -DVERBOSE_FETCH=ON
         
       - name: build libOTe
-        run:  python3 build.py --par=2 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON   -G Ninja
+        run:  python3 build.py -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON   -G Ninja
 
         
       - name: unit test
