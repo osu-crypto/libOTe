@@ -183,18 +183,18 @@ namespace osuCrypto
 			return rand;
 		}
 
-		std::string hexPrnt(span<u8> d)
-		{
-			std::stringstream ss;
-			for (auto dd : d)
-			{
-				ss << std::setw(2) << std::setfill('0') << std::hex
-					<< int(dd);
-			}
-			return ss.str();
-		}
+		//std::string hexPrnt(span<u8> d)
+		//{
+		//	std::stringstream ss;
+		//	for (auto dd : d)
+		//	{
+		//		ss << std::setw(2) << std::setfill('0') << std::hex
+		//			<< int(dd);
+		//	}
+		//	return ss.str();
+		//}
 
-		std::mutex _gmtx;
+		//std::mutex _gmtx;
 
 		struct SendState
 		{
@@ -218,7 +218,7 @@ namespace osuCrypto
 
 			std::vector<u8> init(PRNG& prng)
 			{
-				std::lock_guard<std::mutex>l(_gmtx);
+				//std::lock_guard<std::mutex>l(_gmtx);
 				//std::cout << "S0 " << hash() << std::endl;
 				rand = makeRandSource(prng);
 				//std::cout << "S1 " << hash() << std::endl;
@@ -237,7 +237,7 @@ namespace osuCrypto
 			void gen4(u64 i, span<std::array<block, 2>> msg)
 			{
 
-				std::lock_guard<std::mutex>l(_gmtx);
+				//std::lock_guard<std::mutex>l(_gmtx);
 				sender_keygen(&sender, Rs_pack, keys);
 
 				auto min = std::min<u32>(4, msg.size() - i);
@@ -266,7 +266,6 @@ namespace osuCrypto
 				memset(&cs, 0, sizeof(cs));
 			}
 
-
 			RecvState(RecvState&& o) = delete;
 
 			block hash()
@@ -293,7 +292,7 @@ namespace osuCrypto
 
 			void init(PRNG& prng)
 			{
-				std::lock_guard<std::mutex>l(_gmtx);
+				//std::lock_guard<std::mutex>l(_gmtx);
 				receiver_procS(&receiver);
 				receiver_maketable(&receiver);
 				rand = makeRandSource(prng);
@@ -301,7 +300,7 @@ namespace osuCrypto
 
 			std::vector<u8> send4(u64 i, const BitVector& choices)
 			{
-				std::lock_guard<std::mutex>l(_gmtx);
+				//std::lock_guard<std::mutex>l(_gmtx);
 				auto min = std::min<u32>(4, choices.size() - i);
 
 				for (u32 j = 0; j < min; j++)
@@ -314,7 +313,7 @@ namespace osuCrypto
 
 			void gen4(u64 i, span<block> msg)
 			{
-				std::lock_guard<std::mutex>l(_gmtx);
+				//std::lock_guard<std::mutex>l(_gmtx);
 				auto min = std::min<u32>(4, msg.size() - i);
 
 				receiver_keygen(&receiver, keys);
@@ -324,9 +323,85 @@ namespace osuCrypto
 			}
 		};
 
+		template<typename State>
+		struct AlginedState
+		{
+			State* ptr = nullptr;
+			AlginedState()
+			{
+				ptr = new (AlignedAllocator<char>{}.aligned_malloc(sizeof(State), 32)) State;
+			}
+			AlginedState(AlginedState&& o)
+				: ptr(std::exchange(o.ptr, nullptr))
+			{}
+
+			~AlginedState()
+			{
+				if (ptr)
+				{
+					ptr->~State();
+					AlignedAllocator<char>{}.aligned_free(ptr);
+				}
+			}
+
+			State* operator->()
+			{
+				return ptr;
+			}
+		};
 
 	}
 
+
+	void AsmSimplestOTTest()
+	{
+
+		for (u64 j = 0; j < 1; ++j)
+		{
+
+
+			u64 n = 16;
+
+			BitVector choices(n);
+			RecvState recv;
+			SendState send;
+			std::vector<std::array<block, 2>> sMsg(n);
+			std::vector<block> rMsg(n);
+
+			PRNG sprng(ZeroBlock);
+
+			auto sd = send.init(sprng);
+			//std::cout << "send 1 " << hexPrnt(sd) << std::endl;
+			auto rd = recv.recvData();
+
+			if (sd.size() != rd.size())
+				throw RTE_LOC;
+			memcpy(rd.data(), sd.data(), sd.size());
+
+			// recv
+			PRNG rprng(ZeroBlock);
+			recv.init(rprng);
+
+			for (auto i = 0ull; i < sMsg.size(); i += 4)
+			{
+				sd = recv.send4(i, choices);
+				rd = send.recv4();
+
+
+				if (sd.size() != rd.size())
+					throw RTE_LOC;
+				memcpy(rd.data(), sd.data(), sd.size());
+
+				//std::cout << "send 2 " << i << std::endl;
+				send.gen4(i, sMsg);
+
+				//MC_AWAIT(chl.send(sd));
+				//std::cout << "recv 3 " << i << std::endl;
+				recv.gen4(i, rMsg);
+				//std::cout << "recv 4 " << i << std::endl;
+			}
+		}
+	}
 
 	//void AsmSimplestOT::receive(
 	//	const BitVector& choices,
@@ -358,12 +433,13 @@ namespace osuCrypto
 	{
 
 		MC_BEGIN(task<>, this, &choices, msg, &prng, &chl,
-			rs = std::make_unique<RecvState>(),
+			rs = AlginedState<RecvState>(),
 			i = u64{},
 			rd = span<u8>{},
 			sd = std::vector<u8>{}
 		);
 
+		//prng.SetSeed(ZeroBlock);
 		//std::cout << "recv 0" << std::endl;
 		rd = rs->recvData();
 		MC_AWAIT(chl.recv(rd));
@@ -388,16 +464,18 @@ namespace osuCrypto
 		Socket& chl)
 	{
 		MC_BEGIN(task<>, this, msg, &prng, &chl,
-			ss = std::make_unique<SendState>(),
+			ss = AlginedState<SendState>(),
 			i = u64{},
 			rd = span<u8>{},
 			sd = std::vector<u8>{}
 		);
 
+		//prng.SetSeed(ZeroBlock);
+
 		//std::cout << "send 0" << std::endl;
 		sd = ss->init(prng);
+		//std::cout << "send 1 " << hexPrnt(sd) << std::endl;
 		MC_AWAIT(chl.send(sd));
-		//std::cout << "send 1" << std::endl;
 
 		for (i = 0; i < msg.size(); i += 4)
 		{

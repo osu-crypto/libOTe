@@ -31,7 +31,6 @@ namespace osuCrypto
         u64 n = k * 2;
 
         // verbose flag.
-        bool v = cmd.isSet("v");
 
 
 #ifdef ENABLE_BITPOLYMUL
@@ -40,7 +39,7 @@ namespace osuCrypto
         auto p = nextPrime(n);
         code.init(p);
         std::vector<block> c0(code.size(), ZeroBlock);
-        for (auto t = 0; t < trials; ++t)
+        for (auto t = 0ull; t < trials; ++t)
         {
 
             timer.setTimePoint("reset");
@@ -74,7 +73,6 @@ namespace osuCrypto
         u64 w = cmd.getOr("w", 7);
 
         // size for the accumulator (# random transitions)
-        u64 a = cmd.getOr("a",  roundUpTo(log2ceil(n), 8));
 
         // verbose flag.
         bool v = cmd.isSet("v");
@@ -238,6 +236,8 @@ namespace osuCrypto
 
     inline void SilentOtBench(const CLP& cmd)
     {
+#ifdef ENABLE_SILENTOT
+
         try
         {
 
@@ -309,5 +309,6 @@ namespace osuCrypto
         {
             std::cout << e.what() << std::endl;
         }
+#endif
     }
 }

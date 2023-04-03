@@ -7,7 +7,7 @@ namespace osuCrypto
     void EACode_encode_basic_test(const oc::CLP& cmd)
     {
 
-        auto k = cmd.getOr("k", 16);
+        auto k = cmd.getOr("k", 16ull);
         auto R = cmd.getOr("R", 5.0);
         auto n = cmd.getOr("n", k * R);
         auto bw = cmd.getOr("bw", 7);
