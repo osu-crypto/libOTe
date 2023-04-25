@@ -95,27 +95,35 @@ namespace tests_libOTe
         PRNG prng1(block(42532335, 334565));
 
         u64 numOTs = 50;
-        std::vector<block> recvMsg(numOTs);
-        std::vector<std::array<block, 2>> sendMsg(numOTs);
-        BitVector choices(numOTs);
-        choices.randomize(prng0);
 
-        AsmSimplestOT baseOTs0;
-        auto p0 = baseOTs0.send(sendMsg, prng1, sock[0]);
-
-        AsmSimplestOT baseOTs;
-        auto p1 = baseOTs.receive(choices, recvMsg, prng0, sock[1]);
-
-        eval(p0, p1);
-
-        for (u64 i = 0; i < numOTs; ++i)
         {
-            if (neq(recvMsg[i], sendMsg[i][choices[i]]))
-            {
-                std::cout << "***failed " << i << " exp = m[" << int(choices[i]) << "], act = " << recvMsg[i] << " true = " << sendMsg[i][0] << ", " << sendMsg[i][1] << std::endl;
-                throw UnitTestFail();
-            }
+            AsmSimplestOTTest();
         }
+
+        {
+
+            std::vector<block> recvMsg(numOTs);
+            std::vector<std::array<block, 2>> sendMsg(numOTs);
+            BitVector choices(numOTs);
+            choices.randomize(prng0);
+
+            AsmSimplestOT baseOTs0;
+            auto p0 = baseOTs0.send(sendMsg, prng1, sock[0]);
+
+            AsmSimplestOT baseOTs;
+            auto p1 = baseOTs.receive(choices, recvMsg, prng0, sock[1]);
+
+            eval(p0, p1);
+
+            for (u64 i = 0; i < numOTs; ++i)
+            {
+                if (neq(recvMsg[i], sendMsg[i][choices[i]]))
+                {
+                    std::cout << "***failed " << i << " exp = m[" << int(choices[i]) << "], act = " << recvMsg[i] << " true = " << sendMsg[i][0] << ", " << sendMsg[i][1] << std::endl;
+                    throw UnitTestFail();
+                }
+    }
+}
 #else
         throw UnitTestSkipped("Simplest OT ASM not enabled");
 #endif
@@ -159,7 +167,7 @@ namespace tests_libOTe
                 throw UnitTestFail();
             }
         }
-    }
+        }
 
 #if defined(ENABLE_MRR_TWIST) && defined(ENABLE_SSE)
     void Bot_McQuoidRR_Moeller_EKE_Test()

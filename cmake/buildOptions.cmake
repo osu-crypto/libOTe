@@ -114,10 +114,7 @@ EVAL(FETCH_BITPOLYMUL_IMPL
 	((NOT DEFINED FETCH_BITPOLYMUL) AND (FETCH_AUTO AND ENABLE_BITPOLYMUL)))
 
 	
-#option(FETCH_BITPOLYMUL		"download and build bitpolymul" OFF))
-EVAL(FETCH_LIBDIVIDE_IMPL 
-	(DEFINED FETCH_LIBDIVIDE AND FETCH_LIBDIVIDE) OR
-	((NOT DEFINED FETCH_LIBDIVIDE) AND (FETCH_AUTO)))
+
 
 
 option(VERBOSE_FETCH        "Print build info for fetched libraries" ON)
@@ -126,8 +123,7 @@ option(VERBOSE_FETCH        "Print build info for fetched libraries" ON)
 message(STATUS "General Options\n=======================================================")
 
 message(STATUS "Option: VERBOSE_FETCH         = ${VERBOSE_FETCH}")
-message(STATUS "Option: FETCH_BITPOLYMUL      = ${FETCH_BITPOLYMUL_IMPL}")
-message(STATUS "Option: FETCH_LIBDIVIDE       = ${FETCH_LIBDIVIDE_IMPL}\n")
+message(STATUS "Option: FETCH_BITPOLYMUL      = ${FETCH_BITPOLYMUL_IMPL}\n")
 
 message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF")
 message(STATUS "Option: ENABLE_BITPOLYMUL     = ${ENABLE_BITPOLYMUL}")
