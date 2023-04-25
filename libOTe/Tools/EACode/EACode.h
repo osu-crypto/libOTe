@@ -371,12 +371,9 @@ namespace osuCrypto
 
                 switch (mExpanderWeight)
                 {
-                    CASE(5);
                     CASE(7);
-                    CASE(9);
                     CASE(11);
                     CASE(21);
-                    CASE(40);
                 default:
                     for (u64 jj = 0; jj < 8; ++jj)
                     {
