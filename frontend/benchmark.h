@@ -101,13 +101,12 @@ namespace osuCrypto
             timer.setTimePoint("encode");
         }
 
+        std::cout << "EA " << std::endl;
         std::cout << timer << std::endl;
 
         if (v)
             std::cout << verbose << std::endl;
     }
-
-
 
     inline void encodeBench(CLP& cmd)
     {

@@ -277,14 +277,6 @@ namespace osuCrypto
 			mGapOts.resize(gap);
 			break;
 		}
-		//case osuCrypto::MultType::ExConv5x8:
-		//case osuCrypto::MultType::ExConv7x8:
-		//case osuCrypto::MultType::ExConv11x8:
-		//case osuCrypto::MultType::ExConv21x8:
-		//case osuCrypto::MultType::ExConv5x16:
-		//case osuCrypto::MultType::ExConv7x16:
-		//case osuCrypto::MultType::ExConv11x16:
-		//case osuCrypto::MultType::ExConv21x16:
 		case osuCrypto::MultType::ExAcc7:
 		case osuCrypto::MultType::ExAcc11:
 		case osuCrypto::MultType::ExAcc21:

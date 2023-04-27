@@ -7,7 +7,6 @@
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
-
 namespace osuCrypto
 {
     //u64 secLevel(u64 scale, u64 n, u64 points)
@@ -704,14 +703,6 @@ namespace osuCrypto
             setTimePoint("sender.expand.ldpc.dualEncode");
 
             break;
-        //case osuCrypto::MultType::ExConv5x8:
-        //case osuCrypto::MultType::ExConv7x8:
-        //case osuCrypto::MultType::ExConv11x8:
-        //case osuCrypto::MultType::ExConv21x8:
-        //case osuCrypto::MultType::ExConv5x16:
-        //case osuCrypto::MultType::ExConv7x16:
-        //case osuCrypto::MultType::ExConv11x16:
-        //case osuCrypto::MultType::ExConv21x16:
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
         case osuCrypto::MultType::ExAcc21:
@@ -722,7 +713,6 @@ namespace osuCrypto
             AlignedUnVector<block> B2(mEAEncoder.mMessageSize);
             mEAEncoder.dualEncode<block>(mB.subspan(0, mEAEncoder.mCodeSize), B2);
             std::swap(mB, B2);
-            setTimePoint("sender.expand.ExConv.dualEncode");
             break;
         }
         default:
