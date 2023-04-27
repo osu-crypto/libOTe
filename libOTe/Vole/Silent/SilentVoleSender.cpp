@@ -154,42 +154,6 @@ namespace osuCrypto
         std::copy(noiseDeltaShares.begin(), noiseDeltaShares.end(), mNoiseDeltaShares.begin());
     }
 
-    void SilverConfigure(
-        u64 numOTs, u64 secParam,
-        MultType mMultType,
-        u64& mRequestedNumOTs,
-        u64& mNumPartitions,
-        u64& mSizePer,
-        u64& mN2,
-        u64& mN,
-        u64& gap,
-        SilverEncoder& mEncoder);
-
-    void QuasiCyclicConfigure(
-        u64 numOTs, u64 secParam,
-        u64 scaler,
-        MultType mMultType,
-        u64& mRequestedNumOTs,
-        u64& mNumPartitions,
-        u64& mSizePer,
-        u64& mN2,
-        u64& mN,
-        u64& mP,
-        u64& mScaler);
-
-
-    void EAConfigure(
-        u64 numOTs, u64 secParam,
-        MultType mMultType,
-        u64& mRequestedNumOTs,
-        u64& mNumPartitions,
-        u64& mSizePer,
-        u64& mN2,
-        u64& mN,
-        EACode& mEncoder
-    );
-
-
     void SilentVoleSender::configure(
         u64 numOTs, 
         SilentBaseType type,

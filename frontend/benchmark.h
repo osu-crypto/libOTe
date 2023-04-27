@@ -108,6 +108,7 @@ namespace osuCrypto
             std::cout << verbose << std::endl;
     }
 
+
     inline void encodeBench(CLP& cmd)
     {
         u64 trials = cmd.getOr("t", 10);

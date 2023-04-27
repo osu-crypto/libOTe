@@ -5,15 +5,15 @@
 namespace osuCrypto
 {
     template<typename T, u64 count>
-    OC_FORCEINLINE typename std::enable_if<count == 1, T>::type
+    typename std::enable_if<count == 1, T>::type
         ExpanderCode::expandOne(const T* __restrict ee, detail::ExpanderModd& prng) const
     {
         auto r = prng.get();
         return ee[r];
     }
 
-    template<typename T, typename T2, u64 count>
-    OC_FORCEINLINE typename std::enable_if<count == 1>::type
+    template<typename T, typename T2, u64 count, bool Add>
+    typename std::enable_if<count == 1>::type
         ExpanderCode::expandOne(
             const T* __restrict ee1,
             const T2* __restrict ee2,
@@ -22,8 +22,18 @@ namespace osuCrypto
             detail::ExpanderModd& prng) const
     {
         auto r = prng.get();
-        *y1 = ee1[r];
-        *y2 = ee2[r];
+
+        if (Add)
+        {
+            *y1 = *y1 ^ ee1[r];
+            *y2 = *y2 ^ ee2[r];
+        }
+        else
+        {
+
+            *y1 = ee1[r];
+            *y2 = ee2[r];
+        }
     }
 
 
@@ -77,7 +87,7 @@ namespace osuCrypto
     }
 
 
-    template<typename T, typename T2, u64 count>
+    template<typename T, typename T2, u64 count, bool Add>
     OC_FORCEINLINE typename std::enable_if<(count > 1)>::type
         ExpanderCode::expandOne(
             const T* __restrict ee1,
@@ -141,24 +151,45 @@ namespace osuCrypto
             {
                 T yy1;
                 T2 yy2;
-                expandOne<T, T2, count - 8>(ee1, ee2, &yy1, &yy2, prng);
+                expandOne<T, T2, count - 8, false>(ee1, ee2, &yy1, &yy2, prng);
                 ww1 = ww1 ^ yy1;
                 ww2 = ww2 ^ yy2;
             }
 
-            *y1 = ww1;
-            *y2 = ww2;
+            if constexpr (Add)
+            {
+                *y1 = *y1 ^ ww1;
+                *y2 = *y2 ^ ww2;
+            }
+            else
+            {
+                *y1 = ww1;
+                *y2 = ww2;
+            }
 
         }
         else
         {
 
             auto r = prng.get();
-            T yy1;
-            T2 yy2;
-            expandOne<T, T2, count - 1>(ee1, ee2, &yy1, &yy2, prng);
-            *y1 = ee1[r] ^ yy1;
-            *y2 = ee2[r] ^ yy2;
+            if constexpr (Add)
+            {
+                auto w1 = ee1[r];
+                auto w2 = ee2[r];
+                expandOne<T, T2, count - 1, true>(ee1, ee2, y1, y2, prng);
+                *y1 = *y1 ^ w1;
+                *y2 = *y2 ^ w2;
+
+            }
+            else
+            {
+
+                T yy1;
+                T2 yy2;
+                expandOne<T, T2, count - 1, false>(ee1, ee2, &yy1, &yy2, prng);
+                *y1 = ee1[r] ^ yy1;
+                *y2 = ee2[r] ^ yy2;
+            }
         }
     }
 
@@ -251,7 +282,7 @@ namespace osuCrypto
 
 
 
-    template<typename T, typename T2>
+    template<typename T, typename T2, bool Add>
     void ExpanderCode::expand(
         span<const T> e1,
         span<const T2> e2,
@@ -277,14 +308,14 @@ namespace osuCrypto
         {
 #define CASE(I) \
                 case I:\
-                expandOne<T, T2, I>(ee1, ee2, &ww1[i + 0], &ww2[i + 0], prng);\
-                expandOne<T, T2, I>(ee1, ee2, &ww1[i + 1], &ww2[i + 1], prng);\
-                expandOne<T, T2, I>(ee1, ee2, &ww1[i + 2], &ww2[i + 2], prng);\
-                expandOne<T, T2, I>(ee1, ee2, &ww1[i + 3], &ww2[i + 3], prng);\
-                expandOne<T, T2, I>(ee1, ee2, &ww1[i + 4], &ww2[i + 4], prng);\
-                expandOne<T, T2, I>(ee1, ee2, &ww1[i + 5], &ww2[i + 5], prng);\
-                expandOne<T, T2, I>(ee1, ee2, &ww1[i + 6], &ww2[i + 6], prng);\
-                expandOne<T, T2, I>(ee1, ee2, &ww1[i + 7], &ww2[i + 7], prng);\
+                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 0], &ww2[i + 0], prng);\
+                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 1], &ww2[i + 1], prng);\
+                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 2], &ww2[i + 2], prng);\
+                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 3], &ww2[i + 3], prng);\
+                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 4], &ww2[i + 4], prng);\
+                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 5], &ww2[i + 5], prng);\
+                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 6], &ww2[i + 6], prng);\
+                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 7], &ww2[i + 7], prng);\
                 break
 
             switch (mExpanderWeight)
@@ -308,8 +339,17 @@ namespace osuCrypto
                         wv1 = wv1 ^ ee1[r];
                         wv2 = wv2 ^ ee2[r];
                     }
-                    ww1[i + jj] = wv1;
-                    ww2[i + jj] = wv2;
+                    if constexpr (Add)
+                    {
+                        ww1[i + jj] = ww1[i + jj] ^ wv1;
+                        ww2[i + jj] = ww2[i + jj] ^ wv2;
+                    }
+                    else
+                    {
+
+                        ww1[i + jj] = wv1;
+                        ww2[i + jj] = wv2;
+                    }
                 }
             }
 #undef CASE
@@ -327,8 +367,16 @@ namespace osuCrypto
                 wv2 = wv2 ^ ee2[r];
 
             }
-            ww1[i] = wv1;
-            ww2[i] = wv2;
+            if constexpr (Add)
+            {
+                ww1[i] = ww1[i] ^ wv1;
+                ww2[i] = ww2[i] ^ wv2;
+            }
+            else
+            {
+                ww1[i] = wv1;
+                ww2[i] = wv2;
+            }
         }
     }
 

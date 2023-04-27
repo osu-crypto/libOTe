@@ -132,6 +132,12 @@ int main(int argc, char** argv)
 		return 0;
 	}
 
+	if (cmd.isSet("ea"))
+	{
+		EAChecker(cmd);
+		return 0;
+	}
+
 	if (cmd.isSet("ldpc"))
 	{
 		LdpcDecode_impulse(cmd);

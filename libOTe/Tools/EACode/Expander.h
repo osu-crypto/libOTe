@@ -54,11 +54,11 @@ namespace osuCrypto
 
 
         template<typename T, u64 count>
-        OC_FORCEINLINE typename std::enable_if<(count > 1), T>::type
+        typename std::enable_if<(count > 1), T>::type
             expandOne(const T* __restrict ee, detail::ExpanderModd& prng)const;
 
-        template<typename T, typename T2, u64 count>
-        OC_FORCEINLINE typename std::enable_if<(count > 1)>::type
+        template<typename T, typename T2, u64 count, bool Add>
+        typename std::enable_if<(count > 1)>::type
             expandOne(
                 const T* __restrict ee1,
                 const T2* __restrict ee2,
@@ -67,11 +67,11 @@ namespace osuCrypto
                 detail::ExpanderModd& prng)const;
 
         template<typename T, u64 count>
-        OC_FORCEINLINE typename std::enable_if<count == 1, T>::type
+        typename std::enable_if<count == 1, T>::type
             expandOne(const T* __restrict ee, detail::ExpanderModd& prng) const;
 
-        template<typename T, typename T2, u64 count>
-        OC_FORCEINLINE typename std::enable_if<count == 1>::type
+        template<typename T, typename T2, u64 count, bool Add>
+        typename std::enable_if<count == 1>::type
             expandOne(
                 const T* __restrict ee1,
                 const T2* __restrict ee2,
@@ -84,7 +84,7 @@ namespace osuCrypto
             span<const T> e,
             span<T> w) const;
 
-        template<typename T, typename T2>
+        template<typename T, typename T2, bool Add>
         void expand(
             span<const T> e1,
             span<const T2> e2,

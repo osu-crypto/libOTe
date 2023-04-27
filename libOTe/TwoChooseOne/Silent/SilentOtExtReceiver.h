@@ -105,7 +105,6 @@ namespace osuCrypto
 
         // The Silver encoder for MultType::slv5, MultType::slv11
         SilverEncoder mEncoder;
-
         EACode mEAEncoder;
 
         // A flag that helps debug
