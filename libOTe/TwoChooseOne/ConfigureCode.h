@@ -1,5 +1,5 @@
 ﻿#pragma once
-#include "libOTe/Config.h"
+#include "libOTe/config.h"
 #include "cryptoTools/Common/Defines.h"
 
 
@@ -76,7 +76,7 @@ namespace osuCrypto
 	);
 
 
-	class SilverEncoder;
+	struct SilverEncoder;
 	void SilverConfigure(
 		u64 numOTs, u64 secParam,
 		MultType mMultType,
