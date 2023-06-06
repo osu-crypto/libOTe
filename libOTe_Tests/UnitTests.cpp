@@ -58,13 +58,14 @@ namespace tests_libOTe
 			
 			tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
 			tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
-			//tc.add("Tungsten_encode_basic_test              ", Tungsten_encode_basic_test);
-			//tc.add("Tungsten2_encode_basic_test             ", Tungsten2_encode_basic_test);
-			//tc.add("Tungsten2_encode_trans_test             ", Tungsten2_encode_trans_test);
-			//tc.add("Tungsten2_encode_sum_test               ", Tungsten2_encode_sum_test);
-			//tc.add("Tungsten2_encode_APA_test               ", Tungsten2_encode_APA_test);
-			//
-			//tc.add("Tungsten_encode_basic_bench             ", Tungsten_encode_basic_bench);
+	
+			tc.add("Tungsten_encode_basic_test              ", Tungsten_encode_basic_test);
+			tc.add("Tungsten2_encode_basic_test             ", Tungsten2_encode_basic_test);
+			tc.add("Tungsten2_encode_trans_test             ", Tungsten2_encode_trans_test);
+			tc.add("Tungsten2_encode_sum_test               ", Tungsten2_encode_sum_test);
+			tc.add("Tungsten2_encode_APA_test               ", Tungsten2_encode_APA_test);
+			
+			tc.add("Tungsten_encode_basic_bench             ", Tungsten_encode_basic_bench);
 			//tc.add("perm_bench                              ", perm_bench);
 
 			tc.add("Tools_Pprf_test                         ", Tools_Pprf_test);
