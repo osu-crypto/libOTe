@@ -64,7 +64,6 @@ namespace osuCrypto
 
         MultType mMultType = DefaultMultType;
         SilverEncoder mEncoder;
-        
         EACode mEAEncoder;
 
 #ifdef ENABLE_BITPOLYMUL

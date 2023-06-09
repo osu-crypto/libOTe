@@ -46,7 +46,7 @@
         "VERBOSE_FETCH": true,
         "ENABLE_SSE": true,
         "ENABLE_AVX": true,
-        "ENABLE_ASAN": false,
+        "ENABLE_ASAN": true,
         "COPROTO_ENABLE_BOOST": true,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install/${presetName}"

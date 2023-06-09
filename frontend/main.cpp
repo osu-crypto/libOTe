@@ -112,11 +112,6 @@ int main(int argc, char** argv)
 	cmd.parse(argc, argv);
 	bool flagSet = false;
 	
-	if (cmd.isSet("ea"))
-	{
-		EAChecker(cmd);
-		return 0;
-	}
 
 	if (cmd.isSet("bench"))
 	{
@@ -128,6 +123,18 @@ int main(int argc, char** argv)
 			SilentOtBench(cmd);
 		else
 			EACodeBench(cmd);
+		return 0;
+	}
+
+	if (cmd.isSet("ea"))
+	{
+		EAChecker(cmd);
+		return 0;
+	}
+
+	if (cmd.isSet("ea"))
+	{
+		EAChecker(cmd);
 		return 0;
 	}
 

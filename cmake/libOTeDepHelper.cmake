@@ -58,46 +58,6 @@ endif()
 
 
 
-#######################################
-# libDivide
-
-macro(FIND_LIBDIVIDE)
-    set(ARGS ${ARGN})
-
-    #explicitly asked to fetch libdivide
-    if(FETCH_LIBDIVIDE)
-        list(APPEND ARGS NO_DEFAULT_PATH PATHS ${VOLEPSI_THIRDPARTY_DIR})
-    endif()
-
-    find_path(LIBDIVIDE_INCLUDE_DIRS "libdivide.h" PATH_SUFFIXES "include" ${ARGS})
-    if(EXISTS "${LIBDIVIDE_INCLUDE_DIRS}/libdivide.h")
-        set(LIBDIVIDE_FOUND ON)
-    else()
-        set(LIBDIVIDE_FOUND OFF)
-    endif()
-
-endmacro()
-
-if(FETCH_LIBDIVIDE_IMPL)
-    FIND_LIBDIVIDE(QUIET)
-    include(${CMAKE_CURRENT_LIST_DIR}/../thirdparty/getLibDivide.cmake)
-endif()
-
-FIND_LIBDIVIDE(REQUIRED)
-
-if(NOT TARGET libdivide)
-    add_library(libdivide INTERFACE IMPORTED)
-
-    target_include_directories(libdivide INTERFACE 
-                    $<BUILD_INTERFACE:${LIBDIVIDE_INCLUDE_DIRS}>
-                    $<INSTALL_INTERFACE:>)
-endif()
-
-message(STATUS "LIBDIVIDE_INCLUDE_DIRS:  ${LIBDIVIDE_INCLUDE_DIRS}")
-
-
-
-
 # resort the previous prefix path
 set(CMAKE_PREFIX_PATH ${PUSHED_CMAKE_PREFIX_PATH})
 cmake_policy(POP)

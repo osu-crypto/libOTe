@@ -120,7 +120,6 @@ namespace osuCrypto
 
         // The Silver encoder for MultType::slv5, MultType::slv11
         SilverEncoder mEncoder;
-
         EACode mEAEncoder;
 
         // The OTs send msgs which will be used to flood the

@@ -70,7 +70,6 @@ namespace osuCrypto
 
         // The silver encoder.
         SilverEncoder mEncoder;
-
         EACode mEAEncoder;
 
 #ifdef ENABLE_BITPOLYMUL

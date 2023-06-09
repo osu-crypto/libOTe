@@ -16,7 +16,7 @@ namespace osuCrypto
 {
 
 
-	u64 getPartitions(u64 scaler, u64 p, u64 secParam);
+	//u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
 
 
@@ -140,43 +140,6 @@ namespace osuCrypto
 		throw std::runtime_error("soft spoken must be enabled");
 #endif
 	}
-
-
-	void SilverConfigure(
-		u64 numOTs, u64 secParam,
-		MultType mMultType,
-		u64& mRequestedNumOTs,
-		u64& mNumPartitions,
-		u64& mSizePer,
-		u64& mN2,
-		u64& mN,
-		u64& gap,
-		SilverEncoder& mEncoder);
-
-
-	void QuasiCyclicConfigure(
-		u64 numOTs, u64 secParam,
-		u64 scaler,
-		MultType mMultType,
-		u64& mRequestedNumOTs,
-		u64& mNumPartitions,
-		u64& mSizePer,
-		u64& mN2,
-		u64& mN,
-		u64& mP,
-		u64& mScaler);
-
-
-	void EAConfigure(
-		u64 numOTs, u64 secParam,
-		MultType mMultType,
-		u64& mRequestedNumOTs,
-		u64& mNumPartitions,
-		u64& mSizePer,
-		u64& mN2,
-		u64& mN,
-		EACode& mEncoder
-	);
 
 	void SilentVoleReceiver::configure(
 		u64 numOTs,
