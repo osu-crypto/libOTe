@@ -289,7 +289,7 @@ namespace osuCrypto
                     }
                 }
 
-                fixedAccumulate(main, x, TABLE);
+                fixedAccumulate<T, 128, 4>(main, x, TABLE);
             }
 #undef TABLE
             else
