@@ -8,16 +8,21 @@ namespace osuCrypto
 
 	enum class MultType
 	{
+		// https://eprint.iacr.org/2019/1159.pdf
 		QuasiCyclic = 1,
 #ifdef ENABLE_INSECURE_SILVER
+		// https://eprint.iacr.org/2021/1150, see https://eprint.iacr.org/2023/882 for attack.
 		slv5,
 		slv11,
 #endif
+		// https://eprint.iacr.org/2022/1014
 		ExAcc7, // fast
 		ExAcc11,// fast but more conservative
 		ExAcc21,
 		ExAcc40, // conservative
-		ExConv7x24, //fast
+
+		// https://eprint.iacr.org/2023/882
+		ExConv7x24, //fastest
 		ExConv21x24 // conservative.
 	};
 

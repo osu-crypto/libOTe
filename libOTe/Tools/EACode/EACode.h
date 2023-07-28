@@ -18,13 +18,14 @@ namespace osuCrypto
 #else
 #define EA_CONSTEXPR
 #endif
-    // THe encoder for the generator matrix G = B * A.
+    // Teh encoder for the generator matrix G = B * A.
     // B is the expander while A is the accumulator.
     // 
     // B has mMessageSize rows and mCodeSize columns. It is sampled uniformly
     // with fixed row weight mExpanderWeight.
     //
     // A is a solid upper triangular n by n matrix
+    // https://eprint.iacr.org/2022/1014
     class EACode : public ExpanderCode, public TimerAdapter
     {
     public:

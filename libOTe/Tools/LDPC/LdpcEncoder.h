@@ -116,7 +116,10 @@ namespace osuCrypto
 		}
 	};
 
+	// INSECURE
 	// enum struct to specify which silver code variant to use.
+	// https://eprint.iacr.org/2021/1150
+	// see also https://eprint.iacr.org/2023/882
 	struct SilverCode
 	{
 		enum code

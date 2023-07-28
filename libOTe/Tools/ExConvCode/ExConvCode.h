@@ -28,6 +28,8 @@ namespace osuCrypto
     //
     // See ExConvCodeInstantiations.cpp for how to instantiate new types that
     // dualEncode can be called on.
+    //
+    // https://eprint.iacr.org/2023/882
     class ExConvCode : public TimerAdapter
     {
     public:
