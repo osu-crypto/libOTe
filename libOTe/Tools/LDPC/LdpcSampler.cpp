@@ -1,4 +1,6 @@
 #include "libOTe/Tools/LDPC/LdpcSampler.h"
+#ifdef ENABLE_LDPC
+
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include <fstream>
 #include "libOTe/Tools/LDPC/Util.h"
@@ -251,3 +253,4 @@ namespace osuCrypto
 
     }
 }
+#endif

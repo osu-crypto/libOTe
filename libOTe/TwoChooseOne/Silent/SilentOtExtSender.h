@@ -120,7 +120,9 @@ namespace osuCrypto
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
         // The Silver encoder for MultType::slv5, MultType::slv11
+#ifdef ENABLE_INSECURE_SILVER
         SilverEncoder mEncoder;
+#endif
         ExConvCode mExConvEncoder;
         EACode mEAEncoder;
 
@@ -267,7 +269,7 @@ namespace osuCrypto
         // clears the internal buffers.
         void clear();
     };
-    extern bool gSilverWarning;
+    //extern bool gSilverWarning;
 
 
 }

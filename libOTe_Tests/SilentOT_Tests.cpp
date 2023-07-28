@@ -703,8 +703,7 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
 void OtExt_Silent_Silver_Test(const oc::CLP& cmd)
 {
 
-#if defined(ENABLE_SILENTOT)
-    gSilverWarning = false;
+#if defined(ENABLE_SILENTOT) && defined(ENABLE_INSECURE_SILVER)
 
     auto sockets = cp::LocalAsyncSocket::makePair();
 
@@ -760,7 +759,7 @@ void OtExt_Silent_Silver_Test(const oc::CLP& cmd)
     }
 
 #else
-    throw UnitTestSkipped("ENABLE_SILENTOT or ENABLE_BITPOLYMUL are not defined.");
+    throw UnitTestSkipped("ENABLE_SILENTOT or ENABLE_INSECURE_SILVER are not defined.");
 #endif
 }
 

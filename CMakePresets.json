@@ -13,7 +13,7 @@
         "ENABLE_SSE": false,
         "ENABLE_AVX": false,
         "ENABLE_BITPOLYMUL": false,
-        "LIBOTE_STD_VER": "14",
+        "LIBOTE_STD_VER": "17",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
       },
@@ -34,7 +34,8 @@
       },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "LIBOTE_STD_VER": "14",
+        "ENABLE_INSECURE_SILVER": true,
+        "LIBOTE_STD_VER": "17",
         "ENABLE_ALL_OT": true,
         "ENABLE_KKRT": "ON",
         "ENABLE_IKNP": "ON",

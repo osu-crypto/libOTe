@@ -166,6 +166,7 @@ namespace osuCrypto
                 mScaler);
 
             break;
+#ifdef ENABLE_INSECURE_SILVER
         case osuCrypto::MultType::slv5:
         case osuCrypto::MultType::slv11:
         {
@@ -186,6 +187,7 @@ namespace osuCrypto
             mGapOts.resize(gap);
             break;
         }
+#endif
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
         case osuCrypto::MultType::ExAcc21:
@@ -515,6 +517,7 @@ namespace osuCrypto
 #endif
         }
             break;
+#ifdef ENABLE_INSECURE_SILVER
         case osuCrypto::MultType::slv5:
         case osuCrypto::MultType::slv11:
 
@@ -524,6 +527,7 @@ namespace osuCrypto
             setTimePoint("sender.expand.ldpc.dualEncode");
 
             break;
+#endif
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
         case osuCrypto::MultType::ExAcc21:

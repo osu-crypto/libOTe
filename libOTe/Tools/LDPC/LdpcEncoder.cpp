@@ -1,4 +1,6 @@
 #include "LdpcEncoder.h"
+#ifdef  ENABLE_INSECURE_SILVER
+
 //#include <eigen/dense>
 #include <set>
 #include "cryptoTools/Crypto/PRNG.h"
@@ -970,3 +972,4 @@ namespace osuCrypto
 
 
 }
+#endif

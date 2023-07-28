@@ -173,6 +173,7 @@ namespace osuCrypto
 #endif
 			break;
 		}
+#ifdef ENABLE_INSECURE_SILVER
 		case osuCrypto::MultType::slv5:
 		case osuCrypto::MultType::slv11:
 
@@ -187,6 +188,7 @@ namespace osuCrypto
 				mEncoder);
 
 			break;
+#endif
 		case osuCrypto::MultType::ExAcc7:
 		case osuCrypto::MultType::ExAcc11:
 		case osuCrypto::MultType::ExAcc21:
@@ -525,6 +527,7 @@ using BaseOT = DefaultBaseOT;
 
 			setTimePoint("SilentVoleReceiver.expand.mQuasiCyclicEncoder.a");
 			break;
+#ifdef ENABLE_INSECURE_SILVER
 		case osuCrypto::MultType::slv5:
 		case osuCrypto::MultType::slv11:
 			if (mTimer)
@@ -534,6 +537,7 @@ using BaseOT = DefaultBaseOT;
 			mEncoder.dualEncode2<block, block>(mA, mC);
 			setTimePoint("SilentVoleReceiver.expand.cirTransEncode.a");
 			break;
+#endif
 		case osuCrypto::MultType::ExAcc7:
 		case osuCrypto::MultType::ExAcc11:
 		case osuCrypto::MultType::ExAcc21:

@@ -112,7 +112,7 @@ int main(int argc, char** argv)
 	cmd.parse(argc, argv);
 	bool flagSet = false;
 	
-
+	// various benchmarks
 	if (cmd.isSet("bench"))
 	{
 		if (cmd.isSet("silver"))
@@ -128,18 +128,22 @@ int main(int argc, char** argv)
 		return 0;
 	}
 
+
+	// minimum distance checker for EA codes.
 	if (cmd.isSet("ea"))
 	{
 		EAChecker(cmd);
 		return 0;
 	}
-
+#ifdef ENABLE_LDPC
 	if (cmd.isSet("ldpc"))
 	{
 		LdpcDecode_impulse(cmd);
 		return 0;
 	}
+#endif
 
+	// unit tests.
 	if (cmd.isSet(unitTestTag))
 	{
 		flagSet = true;
@@ -151,6 +155,7 @@ int main(int argc, char** argv)
 	}
 
 #ifdef ENABE_BOOST
+	// compute the network latency.
 	if (cmd.isSet("latency"))
 	{
 		getLatency(cmd);
@@ -158,6 +163,8 @@ int main(int argc, char** argv)
 	}
 #endif
 
+
+	// run various examples.
 
 
 #ifdef ENABLE_SIMPLESTOT

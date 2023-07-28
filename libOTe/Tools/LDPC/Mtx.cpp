@@ -1546,6 +1546,7 @@ namespace osuCrypto
 
     void tests::Mtx_block_test()
     {
+#ifdef ENABLE_DLPC
         oc::PRNG prng(block(0, 0));
 
         u64 n = 10, w = 4;
@@ -1598,9 +1599,9 @@ namespace osuCrypto
                 assert(M.isSet(i + n2, j + n2) == M11.isSet(i, j));
             }
         }
+#endif
 
     }
-
 
 
 }

@@ -69,8 +69,11 @@ namespace osuCrypto
         // the sparse vector.
         MultType mMultType = DefaultMultType;
 
+#ifdef ENABLE_INSECURE_SILVER
         // The silver encoder.
         SilverEncoder mEncoder;
+#endif
+
         ExConvCode mExConvEncoder;
         EACode mEAEncoder;
 

@@ -170,6 +170,7 @@ namespace osuCrypto
 
     inline void encodeBench(CLP& cmd)
     {
+#ifdef ENABLE_INSECURE_SILVER
         u64 trials = cmd.getOr("t", 10);
 
         // the message length of the code. 
@@ -221,6 +222,9 @@ namespace osuCrypto
 
         if (v)
             std::cout << verbose << std::endl;
+#else
+        std::cout << "disabled, ENABLE_INSECURE_SILVER not defined " << std::endl;
+#endif
     }
 
 

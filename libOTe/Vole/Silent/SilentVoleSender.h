@@ -64,7 +64,9 @@ namespace osuCrypto
 #endif
 
         MultType mMultType = DefaultMultType;
+#ifdef ENABLE_INSECURE_SILVER
         SilverEncoder mEncoder;
+#endif
         ExConvCode mExConvEncoder;
         EACode mEAEncoder;
 

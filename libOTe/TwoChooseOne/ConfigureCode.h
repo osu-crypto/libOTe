@@ -9,8 +9,10 @@ namespace osuCrypto
 	enum class MultType
 	{
 		QuasiCyclic = 1,
+#ifdef ENABLE_INSECURE_SILVER
 		slv5,
 		slv11,
+#endif
 		ExAcc7, // fast
 		ExAcc11,// fast but more conservative
 		ExAcc21,
@@ -26,12 +28,14 @@ namespace osuCrypto
 		case osuCrypto::MultType::QuasiCyclic:
 			o << "QuasiCyclic";
 			break;
+#ifdef ENABLE_INSECURE_SILVER
 		case osuCrypto::MultType::slv5:
 			o << "slv5";
 			break;
 		case osuCrypto::MultType::slv11:
 			o << "slv11";
 			break;
+#endif
 		case osuCrypto::MultType::ExAcc7:
 			o << "ExAcc7";
 			break;
@@ -96,6 +100,7 @@ namespace osuCrypto
 		ExConvCode& mEncoder
 	);
 
+#ifdef ENABLE_INSECURE_SILVER
 	struct SilverEncoder;
 	void SilverConfigure(
 		u64 numOTs, u64 secParam,
@@ -107,7 +112,7 @@ namespace osuCrypto
 		u64& mN,
 		u64& gap,
 		SilverEncoder& mEncoder);
-
+#endif
 
 	void QuasiCyclicConfigure(
 		u64 numOTs, u64 secParam,

@@ -235,6 +235,7 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
 void Vole_Silent_Silver_test(const oc::CLP& cmd)
 {
 
+#ifdef ENABLE_INSECURE_SILVER
     Timer timer;
     timer.setTimePoint("start");
     u64 n = cmd.getOr("n", 102043);
@@ -281,6 +282,7 @@ void Vole_Silent_Silver_test(const oc::CLP& cmd)
         }
     }
     timer.setTimePoint("done");
+#endif
 }
 
 
