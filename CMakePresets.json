@@ -34,7 +34,8 @@
       },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "ENABLE_INSECURE_SILVER": true,
+        "ENABLE_INSECURE_SILVER": false,
+        "ENABLE_LDPC": false,
         "LIBOTE_STD_VER": "17",
         "ENABLE_ALL_OT": true,
         "ENABLE_KKRT": "ON",

@@ -15,6 +15,7 @@
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "libOTe_Tests/ExConvCode_Tests.h"
 #include "libOTe_Tests/EACode_Tests.h"
+#include "libOTe/Tools/LDPC/Mtx.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
