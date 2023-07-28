@@ -22,6 +22,7 @@
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
 #include "libOTe/Tools/EACode/EACode.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode.h"
 
 namespace osuCrypto
 {
@@ -120,6 +121,7 @@ namespace osuCrypto
 
         // The Silver encoder for MultType::slv5, MultType::slv11
         SilverEncoder mEncoder;
+        ExConvCode mExConvEncoder;
         EACode mEAEncoder;
 
         // The OTs send msgs which will be used to flood the

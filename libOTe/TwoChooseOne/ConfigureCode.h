@@ -14,7 +14,9 @@ namespace osuCrypto
 		ExAcc7, // fast
 		ExAcc11,// fast but more conservative
 		ExAcc21,
-		ExAcc40 // conservative
+		ExAcc40, // conservative
+		ExConv7x24, //fast
+		ExConv21x24 // conservative.
 	};
 
 	inline std::ostream& operator<<(std::ostream& o, MultType m)
@@ -42,6 +44,12 @@ namespace osuCrypto
 		case osuCrypto::MultType::ExAcc40:
 			o << "ExAcc40";
 			break;
+		case osuCrypto::MultType::ExConv21x24:
+			o << "ExConv21x24";
+			break;
+		case osuCrypto::MultType::ExConv7x24:
+			o << "ExConv7x24";
+			break;
 		default:
 			throw RTE_LOC;
 			break;
@@ -50,7 +58,7 @@ namespace osuCrypto
 		return o;
 	}
 
-	constexpr MultType DefaultMultType = MultType::ExAcc11;
+	constexpr MultType DefaultMultType = MultType::ExConv7x24;
 
     // We get e^{-2td} security against linear attacks, 
     // with noise weigh t and minDist d. 
@@ -75,6 +83,18 @@ namespace osuCrypto
 		EACode& mEncoder
 	);
 
+
+	class ExConvCode;
+	void ExConvConfigure(
+		u64 numOTs, u64 secParam,
+		MultType mMultType,
+		u64& mRequestedNumOTs,
+		u64& mNumPartitions,
+		u64& mSizePer,
+		u64& mN2,
+		u64& mN,
+		ExConvCode& mEncoder
+	);
 
 	struct SilverEncoder;
 	void SilverConfigure(

@@ -10,6 +10,9 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "ENABLE_ALL_OT": true,
+        "ENABLE_SSE": false,
+        "ENABLE_AVX": false,
+        "ENABLE_BITPOLYMUL": false,
         "LIBOTE_STD_VER": "14",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"

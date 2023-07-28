@@ -22,6 +22,7 @@
 #include <libOTe/Tools/EACode/EACode.h>
 #include <libOTe/Tools/Coproto.h>
 #include <libOTe/Tools/QuasiCyclicCode.h>
+#include <libOTe/Tools/ExConvCode/ExConvCode.h>
 
 namespace osuCrypto
 {
@@ -70,6 +71,7 @@ namespace osuCrypto
 
         // The silver encoder.
         SilverEncoder mEncoder;
+        ExConvCode mExConvEncoder;
         EACode mEAEncoder;
 
 #ifdef ENABLE_BITPOLYMUL

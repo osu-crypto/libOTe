@@ -13,6 +13,7 @@
 #include "libOTe_Tests/Vole_Tests.h"
 #include "libOTe/Tools/LDPC/LdpcDecoder.h"
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
+#include "libOTe_Tests/ExConvCode_Tests.h"
 #include "libOTe_Tests/EACode_Tests.h"
 
 using namespace osuCrypto;
@@ -55,6 +56,7 @@ namespace tests_libOTe
 
 			
 			tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
+			tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
 
 			tc.add("Tools_Pprf_test                         ", Tools_Pprf_test);
 			tc.add("Tools_Pprf_trans_test                   ", Tools_Pprf_trans_test);

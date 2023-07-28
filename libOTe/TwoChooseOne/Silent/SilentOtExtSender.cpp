@@ -193,6 +193,11 @@ namespace osuCrypto
 
             EAConfigure(numOTs, 128, mMultType, mRequestNumOts, mNumPartitions, mSizePer, mN2, mN, mEAEncoder);
             break;
+        case osuCrypto::MultType::ExConv7x24:
+        case osuCrypto::MultType::ExConv21x24:
+
+            ExConvConfigure(numOTs, 128, mMultType, mRequestNumOts, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
+            break;
         default:
             throw RTE_LOC;
             break;
@@ -531,6 +536,12 @@ namespace osuCrypto
             std::swap(mB, B2);
             break;
         }
+        case osuCrypto::MultType::ExConv7x24:
+        case osuCrypto::MultType::ExConv21x24:
+            if (mTimer)
+                mExConvEncoder.setTimer(getTimer());
+            mExConvEncoder.dualEncode<block>(mB.subspan(0, mExConvEncoder.mCodeSize));
+            break;
         default:
             throw RTE_LOC;
             break;

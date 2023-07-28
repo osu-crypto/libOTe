@@ -23,6 +23,7 @@
 #include <libOTe/Tools/Coproto.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include "libOTe/Tools/EACode/EACode.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode.h"
 
 namespace osuCrypto
 {
@@ -105,6 +106,7 @@ namespace osuCrypto
 
         // The Silver encoder for MultType::slv5, MultType::slv11
         SilverEncoder mEncoder;
+        ExConvCode mExConvEncoder;
         EACode mEAEncoder;
 
         // A flag that helps debug

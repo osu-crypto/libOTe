@@ -121,14 +121,10 @@ int main(int argc, char** argv)
 			QCCodeBench(cmd);
 		else if (cmd.isSet("silent"))
 			SilentOtBench(cmd);
-		else
+		else if (cmd.isSet("ea"))
 			EACodeBench(cmd);
-		return 0;
-	}
-
-	if (cmd.isSet("ea"))
-	{
-		EAChecker(cmd);
+		else
+			ExConvCodeBench(cmd);
 		return 0;
 	}
 

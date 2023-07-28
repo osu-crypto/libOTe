@@ -7,6 +7,8 @@
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/Tools/EACode/EACode.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode.h"
+#include <cmath>
 namespace osuCrypto
 {
     //u64 secLevel(u64 scale, u64 n, u64 points)
@@ -98,6 +100,46 @@ namespace osuCrypto
         mN = mN2 / mScaler;
 
         mEncoder.config(numOTs, numOTs * mScaler, w);
+    }
+
+
+    void ExConvConfigure(
+        u64 numOTs, u64 secParam,
+        MultType mMultType,
+        u64& mRequestedNumOTs,
+        u64& mNumPartitions,
+        u64& mSizePer,
+        u64& mN2,
+        u64& mN,
+        ExConvCode& mEncoder
+    )
+    {
+        u64 a = 24;
+        auto mScaler = 2;
+        u64 w;
+        double minDist;
+        switch (mMultType)
+        {
+        case osuCrypto::MultType::ExConv7x24:
+            w = 7;
+            minDist = 0.1;
+            break;
+        case osuCrypto::MultType::ExConv21x24:
+            w = 21;
+            minDist = 0.15;
+            break;
+        default:
+            throw RTE_LOC;
+            break;
+        }
+
+        mRequestedNumOTs = numOTs;
+        mNumPartitions = getRegNoiseWeight(minDist, secParam);
+        mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
+        mN2 = mSizePer * mNumPartitions;
+        mN = mN2 / mScaler;
+
+        mEncoder.config(numOTs, numOTs * mScaler, w, a, true);
     }
 
 

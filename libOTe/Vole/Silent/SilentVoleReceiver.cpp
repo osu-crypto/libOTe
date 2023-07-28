@@ -201,6 +201,11 @@ namespace osuCrypto
 				mEAEncoder);
 
 			break;
+		case osuCrypto::MultType::ExConv7x24:
+		case osuCrypto::MultType::ExConv21x24:
+
+			ExConvConfigure(numOTs, 128, mMultType, mRequestedNumOTs, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
+			break;
 		default:
 			throw RTE_LOC;
 			break;
@@ -552,6 +557,15 @@ using BaseOT = DefaultBaseOT;
 			setTimePoint("SilentVoleReceiver.expand.cirTransEncode.a");
 			break;
 		}
+		case osuCrypto::MultType::ExConv7x24:
+		case osuCrypto::MultType::ExConv21x24:
+			if (mTimer)
+				mExConvEncoder.setTimer(getTimer());
+			mExConvEncoder.dualEncode2<block, block>(
+				mA.subspan(0, mExConvEncoder.mCodeSize),
+				mC.subspan(0, mExConvEncoder.mCodeSize)
+				);
+			break;
 		default:
 			throw RTE_LOC;
 			break;
