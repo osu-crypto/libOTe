@@ -18,7 +18,7 @@ namespace osuCrypto
 #else
 #define EA_CONSTEXPR
 #endif
-    // Teh encoder for the generator matrix G = B * A.
+    // The encoder for the generator matrix G = B * A.
     // B is the expander while A is the accumulator.
     // 
     // B has mMessageSize rows and mCodeSize columns. It is sampled uniformly

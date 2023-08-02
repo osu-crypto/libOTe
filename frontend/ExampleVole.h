@@ -24,7 +24,7 @@ namespace osuCrypto
 		// get a random number generator seeded from the system
 		PRNG prng(sysRandomSeed());
 
-		auto mulType = (MultType)cmd.getOr("multType", (int)MultType::slv5);
+		auto mulType = (MultType)cmd.getOr("multType", (int)DefaultMultType);
 		bool fakeBase = cmd.isSet("fakeBase");
 
 		u64 milli;

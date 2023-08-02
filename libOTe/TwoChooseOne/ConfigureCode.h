@@ -12,18 +12,18 @@ namespace osuCrypto
 		QuasiCyclic = 1,
 #ifdef ENABLE_INSECURE_SILVER
 		// https://eprint.iacr.org/2021/1150, see https://eprint.iacr.org/2023/882 for attack.
-		slv5,
-		slv11,
+		slv5 = 2,
+		slv11 = 3,
 #endif
 		// https://eprint.iacr.org/2022/1014
-		ExAcc7, // fast
-		ExAcc11,// fast but more conservative
-		ExAcc21,
-		ExAcc40, // conservative
+		ExAcc7 = 4, // fast
+		ExAcc11 = 5,// fast but more conservative
+		ExAcc21 = 6,
+		ExAcc40 = 7, // conservative
 
 		// https://eprint.iacr.org/2023/882
-		ExConv7x24, //fastest
-		ExConv21x24 // conservative.
+		ExConv7x24 = 8, //fastest
+		ExConv21x24 = 9 // conservative.
 	};
 
 	inline std::ostream& operator<<(std::ostream& o, MultType m)
