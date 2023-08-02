@@ -4,7 +4,7 @@
 
 ![Build Status](https://github.com/osu-crypto/libOTe/actions/workflows/build-test.yml/badge.svg)
 
-A fast and portable C++14 library for Oblivious Transfer extension (OTe). The 
+A fast and portable C++17 library for Oblivious Transfer extension (OTe). The 
 primary design goal of this library to obtain *high performance* while being 
 *easy to use*. Checkout [version 1.6](https://github.com/osu-crypto/libOTe/releases/tag/v1.6.0) for the previous version.
 This library currently implements:

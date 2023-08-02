@@ -4,7 +4,7 @@ if (POLICY CMP0048)
   cmake_policy(SET CMP0048 NEW)
 endif (POLICY CMP0048)
 
-project(libOTe VERSION 2.0.4)
+project(libOTe VERSION 2.1.0)
 
 include(cmake/libOTePreamble.cmake)
 
