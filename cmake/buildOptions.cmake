@@ -98,7 +98,11 @@ option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
 #option(COPROTO_ENABLE_BOOST  "Build with coproto boost support." OFF)
 #option(COPROTO_ENABLE_OPENSSL  "Build with coproto boost open ssl support." OFF)
 
-option(NO_SILVER_WARNING     "Build with no silver security warning." OFF)
+option(ENABLE_INSECURE_SILVER   "Build with silver codes." OFF)
+option(ENABLE_LDPC              "Build with ldpc functions." OFF)
+if(ENABLE_INSECURE_SILVER)
+	set(ENABLE_LDPC ON)
+endif()
 option(NO_KOS_WARNING        "Build with no kos security warning." OFF)
 
 #option(FETCH_BITPOLYMUL		"download and build bitpolymul" OFF))
@@ -155,7 +159,6 @@ message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}\n\n")
 
 
 message(STATUS "other \n=======================================================")
-message(STATUS "Option: NO_SILVER_WARNING    = ${NO_SILVER_WARNING}")
 message(STATUS "Option: NO_KOS_WARNING       = ${NO_KOS_WARNING}\n\n")
 
 #############################################

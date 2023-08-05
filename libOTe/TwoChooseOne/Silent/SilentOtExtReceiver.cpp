@@ -223,6 +223,7 @@ namespace osuCrypto
                 mScaler);
 
             break;
+#ifdef ENABLE_INSECURE_SILVER
         case osuCrypto::MultType::slv5:
         case osuCrypto::MultType::slv11:
         {
@@ -243,12 +244,18 @@ namespace osuCrypto
             mGapOts.resize(gap);
             break;
         }
+#endif
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
         case osuCrypto::MultType::ExAcc21:
         case osuCrypto::MultType::ExAcc40:
 
             EAConfigure(numOTs, 128, mMultType, mRequestedNumOts, mNumPartitions, mSizePer, mN2, mN, mEAEncoder);
+            break;
+        case osuCrypto::MultType::ExConv7x24:
+        case osuCrypto::MultType::ExConv21x24:
+
+            ExConvConfigure(numOTs, 128, mMultType, mRequestedNumOts, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
             break;
         default:
             throw RTE_LOC;
@@ -307,7 +314,11 @@ namespace osuCrypto
         for (i = 0; i < rT1.size(); ++i)
             rT2(i) = rT2(i) ^ rT1(i);
 
-        if (mMultType == MultType::slv11 || mMultType == MultType::slv5 || mMultType == MultType::QuasiCyclic)
+        if (
+#ifdef ENABLE_INSECURE_SILVER
+            mMultType == MultType::slv11 || mMultType == MultType::slv5 || 
+#endif
+            mMultType == MultType::QuasiCyclic)
         {
             if (rT1.cols() != 1)
                 throw RTE_LOC;
@@ -643,9 +654,6 @@ namespace osuCrypto
 
         setTimePoint("recver.expand.ldpc.mult");
 
-        if (mTimer)
-            mEncoder.setTimer(getTimer());
-
         if (packing == ChoiceBitPacking::True)
         {
             // zero out the lsb of mA. We will store mC there.
@@ -687,10 +695,15 @@ namespace osuCrypto
 #endif
             }
             break;
+#ifdef ENABLE_INSECURE_SILVER
             case osuCrypto::MultType::slv5:
             case osuCrypto::MultType::slv11:
+
+                if (mTimer)
+                    mEncoder.setTimer(getTimer());
                 mEncoder.dualEncode<block>(mA);
                 break;
+#endif
             case osuCrypto::MultType::ExAcc7:
             case osuCrypto::MultType::ExAcc11:
             case osuCrypto::MultType::ExAcc21:
@@ -701,6 +714,12 @@ namespace osuCrypto
                 std::swap(mA, A2);
                 break;
             }
+            case osuCrypto::MultType::ExConv7x24:
+            case osuCrypto::MultType::ExConv21x24:
+                if (mTimer)
+                    mExConvEncoder.setTimer(getTimer());
+                mExConvEncoder.dualEncode<block>(mA.subspan(0, mExConvEncoder.generatorCols()));
+                break;
             default:
                 throw RTE_LOC;
                 break;
@@ -739,10 +758,12 @@ namespace osuCrypto
 #endif
             }
             break;
+#ifdef ENABLE_INSECURE_SILVER
             case osuCrypto::MultType::slv5:
             case osuCrypto::MultType::slv11:
                 mEncoder.dualEncode2<block, u8>(mA, mC);
                 break;
+#endif
             case osuCrypto::MultType::ExAcc7:
             case osuCrypto::MultType::ExAcc11:
             case osuCrypto::MultType::ExAcc21:
@@ -758,6 +779,16 @@ namespace osuCrypto
                 std::swap(mC, C2);
                 break;
             }
+
+            case osuCrypto::MultType::ExConv7x24:
+            case osuCrypto::MultType::ExConv21x24:
+                if (mTimer)
+                    mExConvEncoder.setTimer(getTimer());
+                mExConvEncoder.dualEncode2<block, u8>(
+                    mA.subspan(0, mExConvEncoder.mCodeSize),
+                    mC.subspan(0, mExConvEncoder.mCodeSize)
+                    );
+                break;
             default:
                 throw RTE_LOC;
                 break;

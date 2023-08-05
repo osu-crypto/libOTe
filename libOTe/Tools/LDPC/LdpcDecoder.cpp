@@ -1,4 +1,6 @@
 #include "LdpcDecoder.h"
+#ifdef ENABLE_LDPC
+
 #include <cassert>
 #include "Mtx.h"
 #include "LdpcEncoder.h"
@@ -608,3 +610,4 @@ namespace osuCrypto {
 
 
 }
+#endif

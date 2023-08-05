@@ -22,6 +22,7 @@
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/QuasiCyclicCode.h>
 #include <libOTe/Tools/EACode/EACode.h>
+#include <libOTe/Tools/ExConvCode/ExConvCode.h>
 //#define NO_HASH
 
 namespace osuCrypto
@@ -63,7 +64,10 @@ namespace osuCrypto
 #endif
 
         MultType mMultType = DefaultMultType;
+#ifdef ENABLE_INSECURE_SILVER
         SilverEncoder mEncoder;
+#endif
+        ExConvCode mExConvEncoder;
         EACode mEAEncoder;
 
 #ifdef ENABLE_BITPOLYMUL

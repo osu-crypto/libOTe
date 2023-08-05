@@ -22,6 +22,7 @@
 #include <libOTe/Tools/EACode/EACode.h>
 #include <libOTe/Tools/Coproto.h>
 #include <libOTe/Tools/QuasiCyclicCode.h>
+#include <libOTe/Tools/ExConvCode/ExConvCode.h>
 
 namespace osuCrypto
 {
@@ -68,8 +69,12 @@ namespace osuCrypto
         // the sparse vector.
         MultType mMultType = DefaultMultType;
 
+#ifdef ENABLE_INSECURE_SILVER
         // The silver encoder.
         SilverEncoder mEncoder;
+#endif
+
+        ExConvCode mExConvEncoder;
         EACode mEAEncoder;
 
 #ifdef ENABLE_BITPOLYMUL

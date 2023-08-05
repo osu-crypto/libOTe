@@ -4,7 +4,7 @@ if (POLICY CMP0048)
   cmake_policy(SET CMP0048 NEW)
 endif (POLICY CMP0048)
 
-project(libOTe VERSION 2.0.4)
+project(libOTe VERSION 2.1.0)
 
 include(cmake/libOTePreamble.cmake)
 
@@ -59,11 +59,10 @@ if(DEFINED LIBOTE_CPP_VER)
     unset(LIBOTE_CPP_VER CACHE )
 endif()
 if(NOT DEFINED LIBOTE_STD_VER)
-	set(LIBOTE_STD_VER 14)
+	set(LIBOTE_STD_VER 17)
 endif()
 if(NOT LIBOTE_STD_VER EQUAL 20 AND
-	NOT LIBOTE_STD_VER EQUAL 17 AND
-	NOT LIBOTE_STD_VER EQUAL 14)
+	NOT LIBOTE_STD_VER EQUAL 17)
 	message(FATAL_ERROR "Unknown c++ version. LIBOTE_STD_VER=${LIBOTE_STD_VER}")
 endif()
 set(CRYPTO_TOOLS_STD_VER ${LIBOTE_STD_VER})

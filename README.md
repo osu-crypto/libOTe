@@ -4,7 +4,7 @@
 
 ![Build Status](https://github.com/osu-crypto/libOTe/actions/workflows/build-test.yml/badge.svg)
 
-A fast and portable C++14 library for Oblivious Transfer extension (OTe). The 
+A fast and portable C++17 library for Oblivious Transfer extension (OTe). The 
 primary design goal of this library to obtain *high performance* while being 
 *easy to use*. Checkout [version 1.6](https://github.com/osu-crypto/libOTe/releases/tag/v1.6.0) for the previous version.
 This library currently implements:
@@ -14,7 +14,7 @@ This library currently implements:
 * The semi-honest 1-out-of-2 Delta-OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The semi-honest 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
 * The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
-* The malicious secure 1-out-of-2 Silent+Silver [[CRR21]](https://eprint.iacr.org/2021/1150).
+* The malicious secure 1-out-of-2 Silent+Expand Convolute [[RRT23]](https://eprint.iacr.org/2023/882).
 * The malicious secure 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
 * The malicious secure 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * The malicious 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
@@ -73,7 +73,7 @@ LibOTe can be built with various only the selected protocols enabled. `-D ENABLE
  * `ENABLE_KOS` the Keller et al [[KOS15]](https://eprint.iacr.org/2015/546) malicious protocol.
  * `ENABLE_DELTA_KOS` the Burra et al [[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf),[[KOS15]](https://eprint.iacr.org/2015/546) malicious Delta-OT protocol.
  * `ENABLE_SOFTSPOKEN_OT` the Roy [Roy22](https://eprint.iacr.org/2022/192) semi-honest/malicious protocol.
- * `ENABLE_SILENTOT` the Couteau et al [CRR21],[[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf) semi-honest/malicious protocol.
+ * `ENABLE_SILENTOT` the Couteau et al [RRT23],[[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf) semi-honest/malicious protocol.
 
  **Vole:**
  * `ENABLE_SILENT_VOLE` the Couteau et al [CRR21] semi-honest/malicious protocol.
@@ -225,3 +225,5 @@ or running the library.
 [CRR21] - Geoffroy Couteau ,Srinivasan Raghuraman and Peter Rindal, _Silver: Silent VOLE and Oblivious Transfer from Hardness of Decoding Structured LDPC Codes_.
 
 [Roy22] - Lawrence Roy, SoftSpokenOT: Communication--Computation Tradeoffs in OT Extension. [eprint/2022/192](https://eprint.iacr.org/2022/192)
+
+[RRT23] - Srinivasan Raghuraman, Peter Rindal and  Titouan Tanguy, _Expand-Convolute Codes for Pseudorandom Correlation Generators from LPN_. [eeprint/2023/882](https://eprint.iacr.org/2023/882)

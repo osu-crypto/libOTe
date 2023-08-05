@@ -22,6 +22,7 @@
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
 #include "libOTe/Tools/EACode/EACode.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode.h"
 
 namespace osuCrypto
 {
@@ -119,7 +120,10 @@ namespace osuCrypto
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
         // The Silver encoder for MultType::slv5, MultType::slv11
+#ifdef ENABLE_INSECURE_SILVER
         SilverEncoder mEncoder;
+#endif
+        ExConvCode mExConvEncoder;
         EACode mEAEncoder;
 
         // The OTs send msgs which will be used to flood the
@@ -265,7 +269,7 @@ namespace osuCrypto
         // clears the internal buffers.
         void clear();
     };
-    extern bool gSilverWarning;
+    //extern bool gSilverWarning;
 
 
 }

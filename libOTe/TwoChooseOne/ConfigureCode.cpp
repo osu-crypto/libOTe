@@ -7,6 +7,8 @@
 #include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/Tools/EACode/EACode.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode.h"
+#include <cmath>
 namespace osuCrypto
 {
     //u64 secLevel(u64 scale, u64 n, u64 points)
@@ -101,7 +103,47 @@ namespace osuCrypto
     }
 
 
-    bool gSilverWarning = true;
+    void ExConvConfigure(
+        u64 numOTs, u64 secParam,
+        MultType mMultType,
+        u64& mRequestedNumOTs,
+        u64& mNumPartitions,
+        u64& mSizePer,
+        u64& mN2,
+        u64& mN,
+        ExConvCode& mEncoder
+    )
+    {
+        u64 a = 24;
+        auto mScaler = 2;
+        u64 w;
+        double minDist;
+        switch (mMultType)
+        {
+        case osuCrypto::MultType::ExConv7x24:
+            w = 7;
+            minDist = 0.1;
+            break;
+        case osuCrypto::MultType::ExConv21x24:
+            w = 21;
+            minDist = 0.15;
+            break;
+        default:
+            throw RTE_LOC;
+            break;
+        }
+
+        mRequestedNumOTs = numOTs;
+        mNumPartitions = getRegNoiseWeight(minDist, secParam);
+        mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
+        mN2 = mSizePer * mNumPartitions;
+        mN = mN2 / mScaler;
+
+        mEncoder.config(numOTs, numOTs * mScaler, w, a, true);
+    }
+
+#ifdef ENABLE_INSECURE_SILVER
+
     void SilverConfigure(
         u64 numOTs, u64 secParam,
         MultType mMultType,
@@ -113,26 +155,20 @@ namespace osuCrypto
         u64& gap,
         SilverEncoder& mEncoder)
     {
-#ifndef NO_SILVER_WARNING
-
         // warn the user on program exit.
         struct Warned
         {
             ~Warned()
             {
-                if (gSilverWarning)
                 {
                     std::cout << oc::Color::Red << "WARNING: This program made use of the LPN silver encoder. "
-                        << "This encoder is experimental and should not be used in production."
-                        << " Rebuild libOTe with `-DNO_SILVER_WARNING=TRUE` to disable this message or build the library with "
-                        << "`-DENABLE_BITPOLYMUL=TRUE` to use an encoding with provable minimum distance. "
+                        << "This encoder is insecure and should not be used in production." 
+                        << " It remains here for performance comparison reasons only. \n\nDo not use this encode.\n\n"
                         << LOCATION << oc::Color::Default << std::endl;
                 }
-
             }
         };
         static Warned wardned;
-#endif
 
         mRequestedNumOTs = numOTs;
         auto mScaler = 2;
@@ -154,7 +190,7 @@ namespace osuCrypto
         mEncoder.mL.init(mN, code);
         mEncoder.mR.init(mN, code, true);
     }
-
+#endif
 
     void QuasiCyclicConfigure(
         u64 numOTs, u64 secParam,

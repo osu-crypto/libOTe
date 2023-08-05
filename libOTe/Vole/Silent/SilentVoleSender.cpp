@@ -186,6 +186,7 @@ namespace osuCrypto
 #endif
             break;
         }
+#ifdef ENABLE_INSECURE_SILVER
         case osuCrypto::MultType::slv5:
         case osuCrypto::MultType::slv11:
 
@@ -199,6 +200,7 @@ namespace osuCrypto
                 gap,
                 mEncoder);
             break;
+#endif
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
         case osuCrypto::MultType::ExAcc21:
@@ -212,6 +214,11 @@ namespace osuCrypto
                 mN2,
                 mN,
                 mEAEncoder);
+            break;
+        case osuCrypto::MultType::ExConv7x24:
+        case osuCrypto::MultType::ExConv21x24:
+
+            ExConvConfigure(numOTs, 128, mMultType, mRequestedNumOTs, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
             break;
         default:
             throw RTE_LOC;
@@ -388,6 +395,7 @@ namespace osuCrypto
 #endif
             setTimePoint("SilentVoleSender.expand.QuasiCyclic");
             break;
+#ifdef ENABLE_INSECURE_SILVER
         case osuCrypto::MultType::slv5:
         case osuCrypto::MultType::slv11:
 
@@ -397,6 +405,7 @@ namespace osuCrypto
             mEncoder.dualEncode<block>(mB);
             setTimePoint("SilentVoleSender.expand.Silver");
             break;
+#endif
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
         case osuCrypto::MultType::ExAcc21:
@@ -411,6 +420,12 @@ namespace osuCrypto
             setTimePoint("SilentVoleSender.expand.Silver");
             break;
         }
+        case osuCrypto::MultType::ExConv7x24:
+        case osuCrypto::MultType::ExConv21x24:
+            if (mTimer)
+                mExConvEncoder.setTimer(getTimer());
+            mExConvEncoder.dualEncode<block>(mB.subspan(0, mExConvEncoder.mCodeSize));
+            break;
         default:
             throw RTE_LOC;
             break;
