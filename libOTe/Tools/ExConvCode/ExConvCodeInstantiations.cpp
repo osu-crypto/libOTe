@@ -13,5 +13,5 @@ namespace osuCrypto
     template void ExConvCode::dualEncode2<block, block>(span<block>, span<block> e);
 
     template void ExConvCode::accumulate<block, u8>(span<block>, span<u8> e);
-    template void ExConvCode::accumulate<block, block>(span<block>, span<u8> e);
+    template void ExConvCode::accumulate<block, block>(span<block>, span<block> e);
 }
