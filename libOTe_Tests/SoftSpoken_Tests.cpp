@@ -136,7 +136,7 @@ namespace tests_libOTe
                 {
                     if (print)
                     {
-                        std::cout << u[i] << '\n';
+                        std::cout << u[i / fieldBits] << '\n';
                         std::cout << v[i] << '\n';
                         std::cout << shouldEqualV[i] << '\n';
                         std::cout << w[i] << '\n';
