@@ -22,7 +22,10 @@ namespace osuCrypto
         const BitVector& choices)
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
-        mOtExtSender.setBaseOts(baseRecvOts, choices);
+        if (!mOtExtSender)
+            mOtExtSender.emplace();
+
+        mOtExtSender->setBaseOts(baseRecvOts, choices);
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -35,7 +38,9 @@ namespace osuCrypto
 #ifdef ENABLE_SOFTSPOKEN_OT
         auto ptr = new SilentOtExtSender;
         auto ret = std::unique_ptr<OtExtSender>(ptr);
-        ptr->mOtExtSender = mOtExtSender.splitBase();
+        if (!mOtExtSender)
+            throw RTE_LOC;
+        ptr->mOtExtSender = mOtExtSender->splitBase();
         return ret;
 #else
         throw std::runtime_error("KOS must be enabled");
@@ -47,7 +52,9 @@ namespace osuCrypto
     task<> SilentOtExtSender::genBaseOts(PRNG& prng, Socket& chl)
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
-        return mOtExtSender.genBaseOts(prng, chl);
+        if (!mOtExtSender)
+            mOtExtSender.emplace();
+        return mOtExtSender->genBaseOts(prng, chl);
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -57,7 +64,13 @@ namespace osuCrypto
     u64 SilentOtExtSender::baseOtCount() const
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
-        return mOtExtSender.baseOtCount();
+
+        if (!mOtExtSender)
+        {
+            const_cast<macoro::optional<SoftSpokenMalOtSender>*>(&mOtExtSender)
+                ->emplace();
+        }
+        return mOtExtSender->baseOtCount();
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -66,7 +79,10 @@ namespace osuCrypto
     bool SilentOtExtSender::hasBaseOts() const
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
-        return mOtExtSender.hasBaseOts();
+
+        if (!mOtExtSender)
+            return false;
+        return mOtExtSender->hasBaseOts();
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -90,9 +106,10 @@ namespace osuCrypto
 #ifdef ENABLE_SOFTSPOKEN_OT
         if (useOtExtension)
         {
-
+            if (!mOtExtSender)
+                mOtExtSender.emplace();
             //mOtExtSender.mFiatShamir = true;
-            MC_AWAIT(mOtExtSender.send(msg, prng, chl));
+            MC_AWAIT(mOtExtSender->send(msg, prng, chl));
         }
         else
 #endif

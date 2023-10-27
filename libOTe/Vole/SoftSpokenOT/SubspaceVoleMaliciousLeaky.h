@@ -452,8 +452,10 @@ namespace osuCrypto
 
 		void clearHashes()
 		{
-			std::fill_n(mHashW.data(), wPadded(), block::allSame(0));
-			std::fill_n(mSubtotalW.data(), wPadded(), block::allSame(0));
+			memset(mHashW.data(), 0, wPadded() * sizeof(block));
+			memset(mSubtotalW.data(), 0, wPadded() * sizeof(block));
+			//std::fill_n(mHashW.data(), wPadded(), block::allSame(0));
+			//std::fill_n(mSubtotalW.data(), wPadded(), block::allSame(0));
 		}
 
 		task<> checkResponse(Socket& chl)

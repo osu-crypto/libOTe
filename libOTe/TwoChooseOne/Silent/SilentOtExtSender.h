@@ -106,7 +106,7 @@ namespace osuCrypto
 
 #ifdef ENABLE_SOFTSPOKEN_OT
         // ot extension instance used to generate the base OTs.
-        SoftSpokenMalOtSender mOtExtSender;
+        macoro::optional<SoftSpokenMalOtSender> mOtExtSender;
 #endif
 
         // The ggm tree thats used to generate the sparse vectors.

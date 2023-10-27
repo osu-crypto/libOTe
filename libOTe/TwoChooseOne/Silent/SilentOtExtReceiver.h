@@ -67,7 +67,7 @@ namespace osuCrypto
 
 #ifdef ENABLE_SOFTSPOKEN_OT
         // the instance used to generate the base OTs.
-        SoftSpokenMalOtReceiver mOtExtRecver;
+        macoro::optional<SoftSpokenMalOtReceiver> mOtExtRecver;
 #endif
 
         // The OTs recv msgs which will be used to flood the

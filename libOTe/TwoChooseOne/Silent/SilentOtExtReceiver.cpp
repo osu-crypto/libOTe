@@ -25,7 +25,9 @@ namespace osuCrypto
     void SilentOtExtReceiver::setBaseOts(
         span<std::array<block, 2>> baseSendOts) {
 #ifdef ENABLE_SOFTSPOKEN_OT
-        mOtExtRecver.setBaseOts(baseSendOts);
+        if (!mOtExtRecver)
+            mOtExtRecver.emplace();
+        mOtExtRecver->setBaseOts(baseSendOts);
 #else
         throw std::runtime_error("soft spoken ot must be enabled");
 #endif
@@ -35,7 +37,12 @@ namespace osuCrypto
     // return the number of base OTs soft spoken ot needs
     u64 SilentOtExtReceiver::baseOtCount() const {
 #ifdef ENABLE_SOFTSPOKEN_OT
-        return mOtExtRecver.baseOtCount();
+        if (!mOtExtRecver)
+        {
+            const_cast<macoro::optional<SoftSpokenMalOtReceiver>*>(&mOtExtRecver)
+                ->emplace();
+        }
+        return  mOtExtRecver->baseOtCount();
 #else
         throw std::runtime_error("soft spoken ot must be enabled");
 #endif
@@ -44,7 +51,9 @@ namespace osuCrypto
     // returns true if the soft spoken ot base OTs are currently set.
     bool SilentOtExtReceiver::hasBaseOts() const {
 #ifdef ENABLE_SOFTSPOKEN_OT
-        return mOtExtRecver.hasBaseOts();
+        if (!mOtExtRecver)
+            return false;
+        return mOtExtRecver->hasBaseOts();
 #else
         throw std::runtime_error("soft spoken ot must be enabled");
 #endif
@@ -76,7 +85,10 @@ namespace osuCrypto
         setTimePoint("recver.gen.start");
 #ifdef ENABLE_SOFTSPOKEN_OT
         //mOtExtRecver.mFiatShamir = true;
-        MC_AWAIT(mOtExtRecver.genBaseOts(prng, chl));
+
+        if (!mOtExtRecver)
+            mOtExtRecver.emplace();
+        MC_AWAIT(mOtExtRecver->genBaseOts(prng, chl));
 #else
         throw std::runtime_error("soft spoken ot must be enabled");
 #endif
@@ -88,7 +100,10 @@ namespace osuCrypto
 #ifdef ENABLE_SOFTSPOKEN_OT
         auto ptr = new SilentOtExtReceiver;
         auto ret = std::unique_ptr<OtExtReceiver>(ptr);
-        ptr->mOtExtRecver = mOtExtRecver.splitBase();
+
+        if (!mOtExtRecver)
+            throw RTE_LOC;
+        ptr->mOtExtRecver = mOtExtRecver->splitBase();
         return ret;
 #else
         throw std::runtime_error("soft spoken ot must be enabled");
@@ -166,7 +181,9 @@ namespace osuCrypto
         if (useOtExtension)
         {
             //mKosRecver.mFiatShamir = true;
-            MC_AWAIT(mOtExtRecver.receive(choice, msg, prng, chl));
+            if (!mOtExtRecver)
+                mOtExtRecver.emplace();
+            MC_AWAIT(mOtExtRecver->receive(choice, msg, prng, chl));
         }
         else
 #endif
