@@ -5,6 +5,10 @@
 #include "cryptoTools/Common/Range.h"
 #include <iostream>
 #include <iomanip>
+#include "cryptoTools/Common/Matrix.h"
+#include "cryptoTools/Crypto/PRNG.h"
+#include <numeric>
+#include "libOTe/Tools/LDPC/Mtx.h"
 
 namespace osuCrypto
 {

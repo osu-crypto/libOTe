@@ -16,7 +16,7 @@ namespace osuCrypto
 {
 
 
-	u64 getPartitions(u64 scaler, u64 p, u64 secParam);
+	//u64 getPartitions(u64 scaler, u64 p, u64 secParam);
 
 
 
@@ -141,43 +141,6 @@ namespace osuCrypto
 #endif
 	}
 
-
-	void SilverConfigure(
-		u64 numOTs, u64 secParam,
-		MultType mMultType,
-		u64& mRequestedNumOTs,
-		u64& mNumPartitions,
-		u64& mSizePer,
-		u64& mN2,
-		u64& mN,
-		u64& gap,
-		SilverEncoder& mEncoder);
-
-
-	void QuasiCyclicConfigure(
-		u64 numOTs, u64 secParam,
-		u64 scaler,
-		MultType mMultType,
-		u64& mRequestedNumOTs,
-		u64& mNumPartitions,
-		u64& mSizePer,
-		u64& mN2,
-		u64& mN,
-		u64& mP,
-		u64& mScaler);
-
-
-	void EAConfigure(
-		u64 numOTs, u64 secParam,
-		MultType mMultType,
-		u64& mRequestedNumOTs,
-		u64& mNumPartitions,
-		u64& mSizePer,
-		u64& mN2,
-		u64& mN,
-		EACode& mEncoder
-	);
-
 	void SilentVoleReceiver::configure(
 		u64 numOTs,
 		SilentBaseType type,
@@ -210,6 +173,7 @@ namespace osuCrypto
 #endif
 			break;
 		}
+#ifdef ENABLE_INSECURE_SILVER
 		case osuCrypto::MultType::slv5:
 		case osuCrypto::MultType::slv11:
 
@@ -224,6 +188,7 @@ namespace osuCrypto
 				mEncoder);
 
 			break;
+#endif
 		case osuCrypto::MultType::ExAcc7:
 		case osuCrypto::MultType::ExAcc11:
 		case osuCrypto::MultType::ExAcc21:
@@ -237,6 +202,11 @@ namespace osuCrypto
 				mN, 
 				mEAEncoder);
 
+			break;
+		case osuCrypto::MultType::ExConv7x24:
+		case osuCrypto::MultType::ExConv21x24:
+
+			ExConvConfigure(numOTs, 128, mMultType, mRequestedNumOTs, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
 			break;
 		default:
 			throw RTE_LOC;
@@ -557,6 +527,7 @@ using BaseOT = DefaultBaseOT;
 
 			setTimePoint("SilentVoleReceiver.expand.mQuasiCyclicEncoder.a");
 			break;
+#ifdef ENABLE_INSECURE_SILVER
 		case osuCrypto::MultType::slv5:
 		case osuCrypto::MultType::slv11:
 			if (mTimer)
@@ -566,6 +537,7 @@ using BaseOT = DefaultBaseOT;
 			mEncoder.dualEncode2<block, block>(mA, mC);
 			setTimePoint("SilentVoleReceiver.expand.cirTransEncode.a");
 			break;
+#endif
 		case osuCrypto::MultType::ExAcc7:
 		case osuCrypto::MultType::ExAcc11:
 		case osuCrypto::MultType::ExAcc21:
@@ -589,6 +561,15 @@ using BaseOT = DefaultBaseOT;
 			setTimePoint("SilentVoleReceiver.expand.cirTransEncode.a");
 			break;
 		}
+		case osuCrypto::MultType::ExConv7x24:
+		case osuCrypto::MultType::ExConv21x24:
+			if (mTimer)
+				mExConvEncoder.setTimer(getTimer());
+			mExConvEncoder.dualEncode2<block, block>(
+				mA.subspan(0, mExConvEncoder.mCodeSize),
+				mC.subspan(0, mExConvEncoder.mCodeSize)
+				);
+			break;
 		default:
 			throw RTE_LOC;
 			break;

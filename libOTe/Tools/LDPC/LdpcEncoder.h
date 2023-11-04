@@ -7,6 +7,8 @@
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 // This code implements features described in [Silver: Silent VOLE and Oblivious Transfer from Hardness of Decoding Structured LDPC Codes, https://eprint.iacr.org/2021/1150]; the paper is licensed under Creative Commons Attribution 4.0 International Public License (https://creativecommons.org/licenses/by/4.0/legalcode).
+#include "libOTe/config.h"
+#ifdef  ENABLE_INSECURE_SILVER
 
 #include "Mtx.h"
 #include "cryptoTools/Crypto/PRNG.h"
@@ -114,7 +116,10 @@ namespace osuCrypto
 		}
 	};
 
+	// INSECURE
 	// enum struct to specify which silver code variant to use.
+	// https://eprint.iacr.org/2021/1150
+	// see also https://eprint.iacr.org/2023/882
 	struct SilverCode
 	{
 		enum code
@@ -1165,6 +1170,6 @@ namespace osuCrypto
 
 
 
-
-
 }
+#endif //  ENABLE_INSECURE_SILVER
+

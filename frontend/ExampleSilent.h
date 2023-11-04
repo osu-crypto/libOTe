@@ -28,11 +28,7 @@ namespace osuCrypto
         u64 trials = cmd.getOr("trials", 1);
         auto malicious = cmd.isSet("mal") ? SilentSecType::Malicious : SilentSecType::SemiHonest;
 
-#ifdef ENABLE_BITPOLYMUL
-        auto multType = cmd.isSet("silver") ? MultType::slv5 : MultType::QuasiCyclic;
-#else
-        auto multType = MultType::slv5;
-#endif;
+        auto multType = (MultType)cmd.getOr("multType", (int)DefaultMultType);
 
         std::vector<SilentBaseType> types;
         if (cmd.isSet("base"))

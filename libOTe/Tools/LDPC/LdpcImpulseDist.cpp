@@ -2,6 +2,9 @@
 
 #define _CRT_SECURE_NO_WARNINGS
 #include "LdpcImpulseDist.h"
+
+#ifdef ENABLE_LDPC
+
 #include "LdpcDecoder.h"
 #include "Util.h"
 #include <unordered_set>
@@ -1125,3 +1128,5 @@ namespace osuCrypto
 
 
 }
+
+#endif

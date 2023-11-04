@@ -25,6 +25,7 @@
 namespace osuCrypto
 {
 
+	// https://eprint.iacr.org/2019/1159.pdf
 	struct QuasiCyclicCode : public TimerAdapter
 	{
 	private:
