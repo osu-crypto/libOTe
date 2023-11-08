@@ -34,6 +34,7 @@ using namespace osuCrypto;
 #include "cryptoTools/Crypto/RandomOracle.h"
 #include "libOTe/Tools/EACode/EAChecker.h"
 #include "libOTe/Tools/Tungsten/accTest.h"
+#include "libOTe/Tools/Tungsten/ConvEnumerator.h"
 
 static const std::vector<std::string>
 unitTestTag{ "u", "unitTest" },
@@ -106,12 +107,18 @@ void minimal()
 #endif
 
 
-#include "cryptoTools/Crypto/RandomOracle.h"
 int main(int argc, char** argv)
 {
 
 	CLP cmd;
 	cmd.parse(argc, argv);
+
+	if (cmd.isSet("convEnum"))
+	{
+		convEnumMain(cmd);
+		return 0;
+	}
+
 	bool flagSet = false;
 	
 	// various benchmarks
