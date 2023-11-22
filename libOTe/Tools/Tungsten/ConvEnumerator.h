@@ -486,6 +486,9 @@ namespace osuCrypto
     template<typename T>
     inline T ballBinCap(u64 balls, u64 bins, u64 cap)
     {
+        if (balls == 0)
+            return 1;
+
         if (balls * 2 > bins * cap)
             balls = bins * cap - balls;
 
@@ -622,33 +625,19 @@ namespace osuCrypto
         i64 stateSize = 0;
 
         // verbose
-        u64 v = 0;
+        u64 verbose = 0;
 
-        // does the last run terminate?
-        i64 b = 0;
+        // the number of input zeros each almost termination requires.
+        i64 inZerosPerAlmostTerm = 1;
 
-        // rMax: the maximum number of runs we need to consider.
-        i64 rMax = 0;
+        // the number of output ones each almost termination requires.
+        i64 outOnesPerAlmostTerm = 0;
 
-        i64 r = 0;
-         
-        // the number of runs that terminate.
-        i64 terminatingRuns = 0;
+        // the number of output zeros each almost termination requires.
+        i64 outZerosPerAlmostTerm = 0;
 
-        // the number of output k where zeros can be place 
-        // that have a cap of stateSize - 1. For each run,
-        // all but the last 1 can have stateSize-1 zeros to its 
-        // right. There are h - r such ones. If the last run 
-        // doesn't terminate, then the last one can also have 
-        // stateSize - 1 zeros to its right.
-        u64 numOutputZeroBinsWthCap = 0;
 
-        // the maximum number of zeros within a run that we need to consider.
-        // we have n-h zeros. of these, stateSize * (r - 1 + b) of them go
-        //are used to terminate a run.
-        i64 g0Max = 0;
-
-        i64 g = 0;
+        i64 bMax = 0;
 
         void init(i64 n_, i64 w_, i64 h_, i64 stateSize_, u64 v_)
         {
@@ -656,44 +645,135 @@ namespace osuCrypto
             w = w_;
             h = h_;
             stateSize = stateSize_;
-            v = v_;
+            verbose = v_;
+
+            if (stateSize < 0)
+                throw RTE_LOC;
+
+            // one or two.
+            outOnesPerAlmostTerm = std::min<i64>(2, stateSize);
+
+            outZerosPerAlmostTerm = stateSize - 1;
+
+            bMax = outOnesPerAlmostTerm;
+        }
+        struct VParam;
+        struct RParam;
+
+
+        struct BParam : EnumOne
+        {
+            // does the last run terminate?
+            i64 b = 0;
+
+            // 1 if the last run has special termination.
+            i64 d = 0;
+
+            // the maximum number of almost terminations
+            u64 vMax = 0;
+
+
+            BParam(EnumOne& e, i64 b_)
+                : EnumOne(e)
+            {
+                if (n == 0)
+                    throw RTE_LOC;
+                if (b_ > bMax)
+                    throw RTE_LOC;
+
+                b = b_ ? 1 : 0;
+                d = b_ / 2;
+
+                if (e.stateSize == 1)
+                {
+                    vMax = h - 1;
+                }
+                else
+                {
+                    auto inputZeros = n - w;
+                    auto outputZeros = n - h - d * (e.stateSize - 1);
+                    auto outputOnes = h - d;
+
+
+                    vMax = std::min<i64>(
+                        inputZeros / inZerosPerAlmostTerm,
+                        outputOnes / outOnesPerAlmostTerm);
+
+                    vMax = std::min<i64>(
+                        vMax,
+                        outputZeros / outZerosPerAlmostTerm);
+                }
+            }
+
+            VParam setV(i64 v)
+            {
+                return VParam(*this, v);
+            }
+        };
+
+        BParam setB(i64 b)
+        {
+            return BParam(*this, b);
         }
 
-
-        void setB(i64 b_)
+        struct VParam : BParam
         {
-            if (n == 0)
-                throw RTE_LOC;
-            if (b_ > 1)
-                throw RTE_LOC;
-
-            b = b_;
+            // the number of almost terminations
+            u64 v = 0;
 
             // rMax: the maximum number of runs we need to consider.
-            // if the output looks like 10000 10000 10000 ...
-            rMax = divCeil(n, stateSize + 1);
+            i64 rMax = 0;
 
-            // we require at least w >= 2 r - 1 + b input ones.
-            // (w +1-b)/2 >= r
-            rMax = std::min<i64>(rMax, (w + 1 - b) / 2);
 
-            // we require at least r ones in the output.
-            rMax = std::min<i64>(rMax, h);
+            // set the number of almost terminations.
+            // This is turn determines rMax.
+            VParam(BParam& bp, u64 v_)
+                : BParam(bp)
+            {
+                if (v_ > vMax)
+                    throw RTE_LOC;
 
-            // we require at least n-h>=(r-1+b)*stateSize output zeros
-            // (n-h)/stateSize -b + 1 >= r
-            rMax = std::min<i64>(rMax, (n - h) / stateSize - b + 1);
-        }
+                v = v_;
 
-        void setR(i64 r_)
+                auto inputZeros = n - w - v * inZerosPerAlmostTerm;
+                auto inputOnes = w;
+                auto outputZeros = n - h - d * (stateSize - 1) - v * outZerosPerAlmostTerm;
+                auto outputOnes = h - d - v * outOnesPerAlmostTerm;
+
+                // rMax: the maximum number of runs we need to consider.
+                // if the output looks like 10000 10000 10000 ...
+                rMax = divCeil(n, stateSize + 1);
+
+                // Each run must start and terminate with a 1.
+                // We require at least inputOnes >= r+r' = 2 r - 1 + b input ones.
+                // (inputOnes + 1-b)/2 >= r
+                rMax = std::min<i64>(rMax, (inputOnes + 1 - b) / 2);
+
+                // we require at least r ones in the output.
+                rMax = std::min<i64>(rMax, outputOnes);
+
+                // we require at least outputZeros>=(r-1+b)*stateSize output zeros
+                // outputZeros/stateSize -b + 1 >= r
+                rMax = std::min<i64>(rMax, outputZeros / stateSize - b + 1);
+            }
+
+
+            auto setR(u64 r)
+            {
+                return RParam(*this, r);
+            }
+
+        };
+
+
+        struct RParam : VParam
         {
-            if (r_ > rMax)
-                throw RTE_LOC;
-            r = r_;
+
+
+            i64 r = 0;
 
             // the number of runs that terminate.
-            terminatingRuns = (r - 1 + b);
-
+            i64 terminatingRuns = 0;
 
             // the number of output k where zeros can be place 
             // that have a cap of stateSize - 1. For each run,
@@ -701,43 +781,222 @@ namespace osuCrypto
             // right. There are h - r such ones. If the last run 
             // doesn't terminate, then the last one can also have 
             // stateSize - 1 zeros to its right.
-            numOutputZeroBinsWthCap = h - r + 1 - b;
+            //u64 numOutputZeroBinsWthCap = 0;
 
-            // the maximum number of zeros within a run that we need to consider.
+            // the maximum number of free zeros within a run that we need to consider.
             // we have n-h zeros. of these, stateSize * (r - 1 + b) of them go
             //are used to terminate a run.
-            g0Max = n - h - stateSize * terminatingRuns;
+            i64 t0Max = 0;
 
-            g0Max = std::min<i64>(g0Max, numOutputZeroBinsWthCap * (stateSize - 1));
 
-        }
+            i64 f1 = 0;
+            RParam(VParam& vp, i64 r_)
+                :VParam(vp)
+            {
+                if (r_ > rMax)
+                    throw RTE_LOC;
+                r = r_;
+
+                // the number of runs that terminate.
+                terminatingRuns = (r - 1 + b);
+
+                // the number of off zeros can not be negative.
+                // 
+                // z = n - h - (v + d) * (stateSize - 1) - terminatingRuns * stateSize - t0;
+                // 
+                // t0 <= n - h - (v + d) * (stateSize - 1) - terminatingRuns * stateSize
+                if (stateSize == 1)
+                    t0Max = 0;
+                else
+                {
+                    t0Max = n - h - (v + d) * outZerosPerAlmostTerm - terminatingRuns * stateSize;
+                    if (t0Max < 0)
+                        throw RTE_LOC;
+                }
+
+                //f0 = n - r - terminatingRuns;
+                f1 = w - r - terminatingRuns;
+                if (f1 < 0)
+                    throw RTE_LOC;
+            }
+
+            i64 getZ(i64 t0)
+            {
+                auto z = n - h - (v + d) * (stateSize - 1) - terminatingRuns * stateSize - t0;
+                if (z < 0)
+                    throw RTE_LOC;
+                return z;
+            }
+
+            i64 getF0(i64 t0)
+            {
+                auto z = getZ(t0);
+                auto f0 = n - w - z - v;
+                if (f0 < 0)
+                    throw RTE_LOC;
+                return f0;
+            }
+
+            i64 getG(i64 t0)
+            {
+                return f1 + getF0(t0);
+            }
+
+
+            //i64 gInput()
+            //{
+            //}
+
+            T enumerate(i64 t0)
+            {
+
+                if (t0 > t0Max)
+                    throw RTE_LOC;
+
+                auto z = getZ(t0);
+                auto f0 = getF0(t0);
+
+                auto t1 = h - outOnesPerAlmostTerm * v - r;
+                if (t1 < 0)
+                    throw RTE_LOC;
+                if (stateSize == 1 && t1 > 0)
+                    return 0;
+
+                if (z + f0 + v * inZerosPerAlmostTerm != n - w)
+                    throw RTE_LOC;
+                if (r + terminatingRuns + f1 != w)
+                    throw RTE_LOC;
+                if (z + t0 + terminatingRuns * stateSize + (v + d) * outZerosPerAlmostTerm != n - h)
+                    throw RTE_LOC;
+                if (r + outOnesPerAlmostTerm * v + t1 != h)
+                    throw RTE_LOC;
+
+                auto E1 = ballsBins<T>(z, terminatingRuns + 1);
+                auto E2 = choose<T>(f0 + f1, f0);
+                auto E3 = ballsBins<T>(v, t1 + 1);
+                auto E4 = ballBinCap<T>(t0, v + t1, stateSize - 2);
+                auto E5 = ballsBins<T>(t1 + v, terminatingRuns+1);
+                auto eg = E1 * E2 * E3 * E4 * E5;
+
+                if (verbose > 1)
+                    std::cout
+                    << " r " << r << "." << b << " t0 " << t0 << "  "
+                    << "  E1 " << E1 << " = B(" << z << ", " << (terminatingRuns + 1) << ") "
+                    << ", E2 " << E2 << " = C(" << (f0 + f1) << ", " << (f0) << ") "
+                    << ", E3 " << E3 << " = B(" << v << ", " << (t1 + 1) << ") "
+                    << ", E4 " << E4 << " = N(" << t0 << ", " << (v + t1) << ", " << stateSize - 2 << ") "
+                    << ", E5 " << E5 << " = B(" << t1 + v << ", " << terminatingRuns+1 << ")"
+                    << " ->      " << eg << " * 2^-" << getG(t0) << std::endl;
+
+                return eg;
+                // total number of items in runs.
+                // we have g0p random zeros, then there are (h-r) ones.
+                // then there are (r-1+b) runs that terminate, each
+                // with stateSize zeros at the end.
+                //auto runLen = g0p + h - r + terminatingRuns * stateSize;
+
+                //z = n - h - (v)
+
+                //    g = ;
+                ////g = runLen - terminatingRuns * (stateSize - 1);
+
+                //if (g >= n || g0p > g)
+                //    throw RTE_LOC;
+
+                //// w', the number of input ones that aren't allocated
+                //// to the start or end of a run.
+                //i64 remainingInputOnes = w - 2 * r + 1 - b;
+
+                //// the number of input zeros
+                //i64 inputZeros = n - w;
+
+                //// z1, the number of input zeros while the convolution is on.
+                //i64 inputZerosOn = runLen - remainingInputOnes;
+
+                //// z0, the number of input zeros while the convolution is off.
+                //i64 inputZerosOff = inputZeros - inputZerosOn;
+
+                //// h', output ones that are not used to start a run.
+                //i64 remainingOutputOnes = h - r;
+
+                //// v, the output zeros that are not used within a run.
+                //i64 remainingOutputZeros = n - runLen - r;
+                ////assert(remainingOutputZeros == (n - h) - terminatingRuns * stateSize - g0p);
+
+                //// (1) output ones can be assigned to any run.
+                //T enumOutputOnes = ballsBins<T>(remainingOutputOnes, r);
+
+                //// (2) output zeros that are one can be assigned anywhere so long
+                //// as we dont have stateSize zeros in a row. Balls in k with capacity.
+                //T enumOuptutZerosOn = ballBinCap<T>(g0p, numOutputZeroBinsWthCap, stateSize - 1);
+
+                //// (3) the remaining output zeros are assigned to before any run or after the 
+                //// last if it terminates.
+                //T enumOutputZerosOff = ballsBins<T>(remainingOutputZeros, r + b);
+
+                //// (4') input ones are assigned to an run.
+                //T enumInputOnes = ballsBins<T>(remainingInputOnes, r);
+
+                //// (5) input zeros that are On can be assigned to come
+                //// after any one.
+                //T enumInputZerosOn = ballsBins<T>(inputZerosOn, w - r + 1 - b);
+
+
+                //auto enumOutputZeros = enumOuptutZerosOn * enumOutputZerosOff;
+
+                //auto eg =
+                //    enumInputOnes * enumInputZerosOn *
+                //    enumOutputOnes * enumOutputZeros;
+
+
+                //auto egx = enumerateX(n, w, h, stateSize, r, g0p, b);
+
+                //if (v > 1)
+                //    std::cout
+                //    << " r " << r << "." << b << " g0 " << g0p
+                //    << "    in (" << enumInputZerosOn << ", " << enumInputOnes
+                //    << ") out (" << enumOuptutZerosOn << ", " << enumOutputOnes
+                //    << ") " << enumOutputZerosOff << "     =      " << eg << " * 2^-" << g << std::endl;
+                //return eg;
+            }
+
+        };
 
         inline T enumerate()
         {
             if (n == 0)
                 throw RTE_LOC;
 
-            if (v > 1)
+            if (verbose > 1)
                 std::cout << "n " << n << " w " << w << " h " << h << " s " << stateSize << "\n---------------------------------" << std::endl;
 
             typename RationalOf<T>::type  e = 0;
 
+
             // b: do we terminate the last run?
-            for (i64 b_ = 0; b_ < 2; ++b_)
+            for (i64 b_ = 0; b_ < 3; ++b_)
             {
-                setB(b_);
+                auto B = setB(b_);
 
-                for (i64 r_ = 1; r_ <= rMax; ++r_)
+                for (u64 v = 0; v <= B.vMax; ++v)
                 {
-                    setR(r_);
 
-                    // the number of zeros in the runs.
-                    for (i64 g0p = 0; g0p <= g0Max; ++g0p)
+                    auto V = B.setV(v);
+
+                    for (i64 r_ = 1; r_ <= V.rMax; ++r_)
                     {
+                        auto R = V.setR(r_);
 
-                        auto eg = enumerate(g0p);
-                        // e += eg / 2^g
-                        e += divPow2(eg, g);
+                        // the number of zeros in the runs.
+                        for (i64 t0 = 0; t0 <= R.t0Max; ++t0)
+                        {
+
+                            auto eg = R.enumerate(t0);
+                            auto g = R.getG(t0);
+
+                            // e += eg / 2^g
+                            e += divPow2(eg, g);
+                        }
                     }
                 }
             }
@@ -745,76 +1004,6 @@ namespace osuCrypto
             return to<T>(e);
         }
 
-        T enumerate(i64 g0p)
-        {
-
-            // total number of items in runs.
-            // we have g0p random zeros, then there are (h-r) ones.
-            // then there are (r-1+b) runs that terminate, each
-            // with stateSize zeros at the end.
-            auto runLen = g0p + h - r + terminatingRuns * stateSize;
-            
-            g = runLen - terminatingRuns * (stateSize - 1);
-
-            if (g >= n || g0p > g)
-                throw RTE_LOC;
-
-            // w', the number of input ones that aren't allocated
-            // to the start or end of a run.
-            i64 remainingInputOnes = w - 2 * r + 1 - b;
-
-            // the number of input zeros
-            i64 inputZeros = n - w;
-
-            // z1, the number of input zeros while the convolution is on.
-            i64 inputZerosOn = runLen - remainingInputOnes;
-
-            // z0, the number of input zeros while the convolution is off.
-            i64 inputZerosOff = inputZeros - inputZerosOn;
-
-            // h', output ones that are not used to start a run.
-            i64 remainingOutputOnes = h - r;
-
-            // v, the output zeros that are not used within a run.
-            i64 remainingOutputZeros = n - runLen - r;
-            //assert(remainingOutputZeros == (n - h) - terminatingRuns * stateSize - g0p);
-
-            // (1) output ones can be assigned to any run.
-            T enumOutputOnes = ballsBins<T>(remainingOutputOnes, r);
-
-            // (2) output zeros that are one can be assigned anywhere so long
-            // as we dont have stateSize zeros in a row. Balls in k with capacity.
-            T enumOuptutZerosOn = ballBinCap<T>(g0p, numOutputZeroBinsWthCap, stateSize - 1);
-
-            // (3) the remaining output zeros are assigned to before any run or after the 
-            // last if it terminates.
-            T enumOutputZerosOff = ballsBins<T>(remainingOutputZeros, r + b);
-
-            // (4') input ones are assigned to an run.
-            T enumInputOnes = ballsBins<T>(remainingInputOnes, r);
-
-            // (5) input zeros that are On can be assigned to come
-            // after any one.
-            T enumInputZerosOn = ballsBins<T>(inputZerosOn, w - r + 1 - b);
-
-
-            auto enumOutputZeros = enumOuptutZerosOn * enumOutputZerosOff;
-
-            auto eg =
-                enumInputOnes * enumInputZerosOn *
-                enumOutputOnes * enumOutputZeros;
-
-
-            //auto egx = enumerateX(n, w, h, stateSize, r, g0p, b);
-
-            if (v > 1)
-                std::cout
-                << " r " << r << "." << b << " g0 " << g0p
-                << "    in (" << enumInputZerosOn << ", " << enumInputOnes
-                << ") out (" << enumOuptutZerosOn << ", " << enumOutputOnes
-                << ") " << enumOutputZerosOff << "     =      " << eg << " * 2^-" << g << std::endl;
-            return eg;
-        }
     };
 
 
@@ -980,12 +1169,12 @@ namespace osuCrypto
 
     }
 
-    template<typename T> 
+    template<typename T>
     T accumulate(u64 n, u64 w, u64 h)
     {
         return choose<T>(n - h, w / 2) * choose<T>(h - 1, divCeil(w, 2) - 1);
     }
-    
+
 
     inline void accumulateTest(const oc::CLP cmd)
     {
@@ -993,22 +1182,29 @@ namespace osuCrypto
         u64 w = cmd.getOr("w", 3);
         u64 h = cmd.getOr("h", 3);
         u64 s = 1;
-        u64 v = cmd.getOr("v", 0);
+        u64 verbose = cmd.getOr("verbose", 0);
 
         EnumOne<Int> e;
-        e.init(n, w, h, s, v);
+        e.init(n, w, h, s, verbose);
 
         u64 r = (w + 1) / 2;
         u64 b = 1 - (w % 2);
-        e.setB(b);
-        e.setR(r);
+        u64 v = cmd.getOr("v", h-r);
+        //u64 v = h - r;
+
+        auto p = e.setB(b).setV(v).setR(r);
+        //BParam B(e, b);
+        //VParam V(B, v);
+
+        //e.setB(b);
+        //e.setR(r);
 
 
         auto exp = accumulate<Int>(n, w, h);
 
-        u64 g0 = 0;
+        u64 f0 = 0;
         //u64 g = h;
-        auto act = e.enumerate(g0);
+        auto act = p.enumerate(f0);
 
 
         if (exp != act)
