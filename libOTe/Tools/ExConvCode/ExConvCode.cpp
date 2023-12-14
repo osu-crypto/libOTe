@@ -1,3 +1,4 @@
+#include <cstring>
 #include "ExConvCode.h"
 
 
@@ -11,6 +12,12 @@ namespace osuCrypto
     using My__m128 = block;
 
     inline My__m128 _mm_load_ps(float* b) { return *(block*)b; }
+    inline My__m128 _mm_loadu_ps(float* b) { 
+        // b is potentially unaligned, so we memcpy it
+        My__m128 dst;
+        std::memcpy((void*) &dst, (void*) b, sizeof(My__m128));
+        return dst; 
+    }
 
     // https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_blendv_ps&ig_expand=557
     inline My__m128 _mm_blendv_ps(My__m128 a, My__m128 b, My__m128 mask)
@@ -350,7 +357,7 @@ namespace osuCrypto
         if (width)
         {
             auto xii0 = _mm_load_ps((float*)(xx0 + i));
-            auto xii1 = _mm_load_ps((float*)(xx1 + i));
+            auto xii1 = _mm_loadu_ps((float*)(xx1 + i));
 
             if (q + width > qe)
             {
