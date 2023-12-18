@@ -297,7 +297,11 @@ namespace osuCrypto
         u64 j = i + 1;
         if (width)
         {
-            auto xii = _mm_load_ps((float*)(xx + i));
+            My__m128 xii;
+            if constexpr (std::is_same<T, block>::value)
+                xii = _mm_load_ps((float*)(xx + i));
+            else
+                xii = _mm_setzero_ps();
 
             if (q + width > qe)
             {
@@ -349,8 +353,15 @@ namespace osuCrypto
         u64 j = i + 1;
         if (width)
         {
-            auto xii0 = _mm_load_ps((float*)(xx0 + i));
-            auto xii1 = _mm_load_ps((float*)(xx1 + i));
+            My__m128 xii0, xii1;
+            if constexpr (std::is_same<block, T0>::value)
+                xii0 = _mm_load_ps((float*)(xx0 + i));
+            else
+                xii0 = _mm_setzero_ps();
+            if constexpr (std::is_same<block, T1>::value)
+                xii1 = _mm_load_ps((float*)(xx1 + i));
+            else
+                xii1 = _mm_setzero_ps();
 
             if (q + width > qe)
             {
