@@ -18,6 +18,7 @@ namespace osuCrypto
     inline void QCCodeBench(CLP& cmd)
     {
 
+#ifdef ENABLE_BITPOLYMUL
         u64 trials = cmd.getOr("t", 10);
 
         // the message length of the code. 
@@ -34,7 +35,6 @@ namespace osuCrypto
         // verbose flag.
 
 
-#ifdef ENABLE_BITPOLYMUL
         oc::Timer timer;
         QuasiCyclicCode code;
         auto p = nextPrime(n);
@@ -231,8 +231,8 @@ namespace osuCrypto
 
     inline void transpose(const CLP& cmd)
     {
-        u64 trials = cmd.getOr("trials", 1ull << 18);
 #ifdef ENABLE_AVX
+        u64 trials = cmd.getOr("trials", 1ull << 18);
         {
 
 
