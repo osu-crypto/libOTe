@@ -9,6 +9,7 @@
 
 #include <cryptoTools/Common/CLP.h>
 
+void Tools_Pprf_expandOne_test(const oc::CLP& cmd);
 void Tools_Pprf_test(const oc::CLP& cmd);
 void Tools_Pprf_trans_test(const oc::CLP& cmd);
 void Tools_Pprf_inter_test(const oc::CLP& cmd);

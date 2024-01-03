@@ -56,9 +56,9 @@ namespace tests_libOTe
 
             tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
             tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
-
+            
+            tc.add("Tools_Pprf_expandOne_test               ", Tools_Pprf_expandOne_test);
             tc.add("Tools_Pprf_test                         ", Tools_Pprf_test);
-            tc.add("Tools_Pprf_trans_test                   ", Tools_Pprf_trans_test);
             tc.add("Tools_Pprf_inter_test                   ", Tools_Pprf_inter_test);
             tc.add("Tools_Pprf_blockTrans_test              ", Tools_Pprf_blockTrans_test);
             tc.add("Tools_Pprf_callback_test                ", Tools_Pprf_callback_test);

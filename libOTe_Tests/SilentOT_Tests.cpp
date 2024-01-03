@@ -185,7 +185,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
 
     QuasiCyclicCode code;
     u64 nn = 1 << 10;
-    u64 t = 10;
+    u64 t = 1;
     auto scaler = 2;
     //auto secParam = 128;
 
@@ -239,7 +239,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
         }
 
         code.dualEncode(A);
-        
+
         for (u64 i : rng(mP))
         {
 
@@ -254,7 +254,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
 
 
     {
-        
+
         mP = nextPrime(50);
         n = mP * scaler;
         code.init(mP);
@@ -460,7 +460,7 @@ void OtExt_Silent_random_Test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     u64 n = cmd.getOr("n", 10000);
@@ -498,7 +498,7 @@ void OtExt_Silent_correlated_Test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     u64 n = cmd.getOr("n", 10000);
@@ -541,7 +541,7 @@ void OtExt_Silent_inplace_Test(const CLP& cmd)
 #ifdef ENABLE_SILENTOT
 
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     u64 n = cmd.getOr("n", 10000);
@@ -598,7 +598,7 @@ void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     std::vector<u64> nn = cmd.getManyOr<u64>("n",
@@ -641,7 +641,7 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
 #if defined(ENABLE_SILENTOT) && defined(ENABLE_BITPOLYMUL)
 
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     std::vector<u64> nn = cmd.getManyOr<u64>("n",
@@ -769,7 +769,7 @@ void OtExt_Silent_baseOT_Test(const oc::CLP& cmd)
 #ifdef ENABLE_SILENTOT
 
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     u64 n = 123;//
@@ -809,7 +809,7 @@ void OtExt_Silent_mal_Test(const oc::CLP& cmd)
 #ifdef ENABLE_SILENTOT
 
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     u64 n = 12093;//
@@ -841,6 +841,120 @@ void OtExt_Silent_mal_Test(const oc::CLP& cmd)
 #endif
 }
 
+
+void Tools_Pprf_expandOne_test(const oc::CLP& cmd)
+{
+#if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
+
+    u64 depth = cmd.getOr("d", 4);;
+    u64 domain = (1ull << depth) * 0.75;
+    auto pntCount = 8ull;
+    PRNG prng(CCBlock);
+
+    auto format = PprfOutputFormat::Interleaved;
+    SilentMultiPprfSender sender;
+    SilentMultiPprfReceiver recver;
+
+    sender.configure(domain, pntCount);
+    recver.configure(domain, pntCount);
+
+    block value = prng.get();
+    sender.setValue({ &value, 1 });
+
+    auto numOTs = sender.baseOtCount();
+    std::vector<std::array<block, 2>> sendOTs(numOTs);
+    std::vector<block> recvOTs(numOTs);
+    BitVector recvBits = recver.sampleChoiceBits(domain * pntCount, format, prng);
+
+
+    prng.get(sendOTs.data(), sendOTs.size());
+    for (u64 i = 0; i < numOTs; ++i)
+    {
+        recvOTs[i] = sendOTs[i][recvBits[i]];
+    }
+    sender.setBase(sendOTs);
+    recver.setBase(recvOTs);
+
+    std::vector<u64> points(8);
+    recver.getPoints(points, PprfOutputFormat::ByLeafIndex);
+
+    block seed = CCBlock;
+    bool program = true;
+
+    auto sTree = span<AlignedArray<block, 8>>{};
+    auto sLevels = std::vector<span<AlignedArray<block, 8>>>{};
+    auto rTree = span<AlignedArray<block, 8>>{};
+    auto rLevels = std::vector<span<AlignedArray<block, 8>>>{};
+    //auto rBuff = std::vector<block>{};
+    auto sBuff = std::vector<block>{};
+    auto sSums = span<std::array<std::array<block, 8>, 2>>{};
+    auto sLast = span<std::array<block, 4>>{};
+
+    TreeAllocator mTreeAlloc;
+    sLevels.resize(depth + 1);
+    rLevels.resize(depth + 1);
+
+
+    mTreeAlloc.reserve(2, (1ull << (depth + 1)) + 2);
+    allocateExpandTree(depth + 1, mTreeAlloc, sTree, sLevels);
+    allocateExpandTree(depth + 1, mTreeAlloc, rTree, rLevels);
+
+
+    allocateExpandBuffer(depth, program, sBuff, sSums, sLast);
+    //allocateExpandBuffer(depth, program, rbuff, sSums, sLast);
+
+    recver.mPoints.resize(roundUpTo(recver.mPntCount, 8));
+    recver.getPoints(recver.mPoints, PprfOutputFormat::ByLeafIndex);
+
+    sender.expandOne(seed, 0, program, sLevels, sSums, sLast);
+    recver.expandOne(0, program, rLevels, sSums, sLast);
+
+    bool failed = false;
+    for (u64 i = 0; i < pntCount; ++i)
+    {
+        // the index of the leaf node that is active.
+        auto leafIdx = points[i];
+        //std::cout << leafIdx << std::endl;
+        for (u64 d = 1; d <= depth; ++d)
+        {
+            //u64 width = std::min<u64>(domain, 1ull << d);
+            auto width = divCeil(domain, 1ull << (depth - d));
+
+            // The index of the active child node.
+            auto activeChildIdx = leafIdx >> (depth - d);
+
+            // The index of the active child node sibling.
+
+            for (u64 j = 0; j < width; ++j)
+            {
+                //std::cout
+                //    << " " << sLevels[d][j][i].get<u16>()[0]
+                //    << " " << rLevels[d][j][i].get<u16>()[0]
+                //    << ", ";
+
+                if (j == activeChildIdx)
+                {
+                    //std::cout << "*";
+                    continue;
+                }
+
+                if (sLevels[d][j][i] != rLevels[d][j][i])
+                {
+                    //std::cout << " < ";
+                    failed = true;
+                }
+            }
+            //std::cout << std::endl;
+            }
+        }
+
+    if (failed)
+        throw RTE_LOC;
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+    }
+
 void Tools_Pprf_test(const CLP& cmd)
 {
 #if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
@@ -857,11 +971,11 @@ void Tools_Pprf_test(const CLP& cmd)
     //Session s1(ios, "localhost:1212", SessionMode::Client);
     //auto sockets[0] = s0.addChannel();
     //auto sockets[1] = s1.addChannel();
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
 
-    auto format = PprfOutputFormat::Plain;
+    auto format = PprfOutputFormat::ByLeafIndex;
     SilentMultiPprfSender sender;
     SilentMultiPprfReceiver recver;
 
@@ -890,8 +1004,8 @@ void Tools_Pprf_test(const CLP& cmd)
     std::vector<u64> points(numPoints);
     recver.getPoints(points, format);
 
-    auto p0 = sender.expand(sockets[0], {&CCBlock,1}, prng, sOut, format, true, threads);
-    auto p1 = recver.expand(sockets[1], prng, rOut, format, true, threads);
+    auto p0 = sender.expand(sockets[0], { &CCBlock,1 }, prng.get(), sOut, format, true, threads);
+    auto p1 = recver.expand(sockets[1], rOut, format, true, threads);
 
     eval(p0, p1);
 
@@ -927,112 +1041,6 @@ void Tools_Pprf_test(const CLP& cmd)
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif
 }
-
-void Tools_Pprf_trans_test(const CLP& cmd)
-{
-#if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
-
-    //u64 depth = 6;
-    //u64 domain = 13;// (1ull << depth) - 7;
-    //u64 numPoints = 40;
-
-    u64 domain = cmd.getOr("d", 334);
-    auto threads = cmd.getOr("t", 3ull);
-    u64 numPoints = cmd.getOr("s", 5) * 8;
-    //bool mal = cmd.isSet("mal");
-
-    PRNG prng(ZeroBlock);
-
-    
-    auto sockets = cp::LocalAsyncSocket::makePair();
-
-
-
-
-    auto format = PprfOutputFormat::InterleavedTransposed;
-    SilentMultiPprfSender sender;
-    SilentMultiPprfReceiver recver;
-
-    sender.configure(domain, numPoints);
-    recver.configure(domain, numPoints);
-
-    auto numOTs = sender.baseOtCount();
-    std::vector<std::array<block, 2>> sendOTs(numOTs);
-    std::vector<block> recvOTs(numOTs);
-    BitVector recvBits = recver.sampleChoiceBits(domain * numPoints, format, prng);
-    //recvBits.randomize(prng);
-
-    //recvBits[16] = 1;
-    prng.get(sendOTs.data(), sendOTs.size());
-    for (u64 i = 0; i < numOTs; ++i)
-    {
-        //recvBits[i] = 0;
-        recvOTs[i] = sendOTs[i][recvBits[i]];
-    }
-    sender.setBase(sendOTs);
-    recver.setBase(recvOTs);
-
-    auto cols = (numPoints * domain + 127) / 128;
-    Matrix<block> sOut(128, cols);
-    Matrix<block> rOut(128, cols);
-
-    std::vector<u64> points(numPoints);
-    recver.getPoints(points, format);
-
-
-
-
-    auto p0 = sender.expand(sockets[0], { &AllOneBlock,1 }, prng, sOut, format, true, threads);
-    auto p1 = recver.expand(sockets[1], prng, rOut, format, true, threads);
-
-
-    eval(p0, p1);
-    bool failed = false;
-
-    Matrix<block> out(128, cols);
-    Matrix<block> outT(numPoints * domain, 1);
-
-    if (cmd.getOr("v", 0) > 1)
-        std::cout << sender.mDomain << " " << sender.mPntCount <<
-        " " << sOut.rows() << " " << sOut.cols() << std::endl;
-
-    for (u64 i = 0; i < cols; ++i)
-    {
-        for (u64 j = 0; j < 128; ++j)
-        {
-            out(j, i) = (sOut(j, i) ^ rOut(j, i));
-            //if (cmd.isSet("v"))
-            //	std::cout << "r[" << i << "][" << j << "] " << out(j,i)  << " ~ " << rOut(j, i) << std::endl << Color::Default;
-        }
-    }
-    transpose(MatrixView<block>(out), MatrixView<block>(outT));
-
-    for (u64 i = 0; i < outT.rows(); ++i)
-    {
-
-        auto f = std::find(points.begin(), points.end(), i) != points.end();
-
-        auto exp = f ? AllOneBlock : ZeroBlock;
-
-        if (neq(outT(i), exp))
-        {
-            failed = true;
-
-            if (cmd.getOr("v", 0) > 1)
-                std::cout << Color::Red;
-        }
-        if (cmd.getOr("v", 0) > 1)
-            std::cout << i << " " << outT(i) << " " << exp << std::endl << Color::Default;
-    }
-
-    if (failed)
-        throw RTE_LOC;
-
-#else
-    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
-#endif
-}
-
 
 void Tools_Pprf_inter_test(const CLP& cmd)
 {
@@ -1082,10 +1090,24 @@ void Tools_Pprf_inter_test(const CLP& cmd)
     recver.getPoints(points, format);
 
 
-    auto p0 = sender.expand(sockets[0], { &AllOneBlock,1 }, prng, sOut2, format, true, threads);
-    auto p1 = recver.expand(sockets[1], prng, rOut2, format, true, threads);
+    auto p0 = sender.expand(sockets[0], { &AllOneBlock,1 }, prng.get(), sOut2, format, true, threads);
+    auto p1 = recver.expand(sockets[1], rOut2, format, true, threads);
 
-    eval(p0, p1);
+    try
+    {
+
+        eval(p0, p1);
+    }
+    catch (std::exception& e)
+    {
+        sockets[0].close();
+        sockets[1].close();
+        macoro::sync_wait(macoro::when_all_ready(
+            sockets[0].flush(),
+            sockets[1].flush()
+        ));
+        throw;
+    }
     for (u64 i = 0; i < rOut2.rows(); ++i)
     {
         sOut2(i) = (sOut2(i) ^ rOut2(i));
@@ -1137,7 +1159,7 @@ void Tools_Pprf_blockTrans_test(const oc::CLP& cmd)
     auto sockets = cp::LocalAsyncSocket::makePair();
 
 
-    auto format = PprfOutputFormat::BlockTransposed;
+    auto format = PprfOutputFormat::ByTreeIndex;
     SilentMultiPprfSender sender;
     SilentMultiPprfReceiver recver;
 
@@ -1167,8 +1189,8 @@ void Tools_Pprf_blockTrans_test(const oc::CLP& cmd)
     recver.getPoints(points, format);
 
     cp::sync_wait(cp::when_all_ready(
-        sender.expand(sockets[0], span<block>{}, prng, sOut, format, false, threads),
-        recver.expand(sockets[1], prng, rOut, format, false, threads)
+        sender.expand(sockets[0], span<block>{}, prng.get(), sOut, format, false, threads),
+        recver.expand(sockets[1], rOut, format, false, threads)
     ));
 
     bool failed = false;
@@ -1194,7 +1216,7 @@ void Tools_Pprf_blockTrans_test(const oc::CLP& cmd)
             }
             else
             {
-                if (ss != rr  || rr == ZeroBlock)
+                if (ss != rr || rr == ZeroBlock)
                 {
                     failed = true;
 
@@ -1256,23 +1278,23 @@ void Tools_Pprf_callback_test(const oc::CLP& cmd)
     recver.getPoints(points, format);
 
     sender.mOutputFn = [&](u64 treeIdx, span<AlignedArray<block, 8>> data)
-    {
-        span<block> d = sOut2;
-        d = d.subspan(treeIdx * data.size());
-        d = d.subspan(0, std::min<u64>(d.size(), data.size() * 8));
-        memcpy(d.data(), data.data(), d.size_bytes());
-    };
+        {
+            span<block> d = sOut2;
+            d = d.subspan(treeIdx * data.size());
+            d = d.subspan(0, std::min<u64>(d.size(), data.size() * 8));
+            memcpy(d.data(), data.data(), d.size_bytes());
+        };
     recver.mOutputFn = [&](u64 treeIdx, span<AlignedArray<block, 8>> data)
-    {
-        span<block> d = rOut2;
-        d = d.subspan(treeIdx * data.size());
-        d = d.subspan(0, std::min<u64>(d.size(), data.size() * 8));
-        memcpy(d.data(), data.data(), d.size_bytes());
-    };
+        {
+            span<block> d = rOut2;
+            d = d.subspan(treeIdx * data.size());
+            d = d.subspan(0, std::min<u64>(d.size(), data.size() * 8));
+            memcpy(d.data(), data.data(), d.size_bytes());
+        };
 
 
-    auto p0 = sender.expand(sockets[0], { &AllOneBlock,1 }, prng, span<block>{}, format, true, threads);
-    auto p1 = recver.expand(sockets[1], prng, span<block>{}, format, true, threads);
+    auto p0 = sender.expand(sockets[0], { &AllOneBlock,1 }, prng.get(), span<block>{}, format, true, threads);
+    auto p1 = recver.expand(sockets[1], span<block>{}, format, true, threads);
 
     eval(p0, p1);
     for (u64 i = 0; i < rOut2.rows(); ++i)
@@ -1297,7 +1319,7 @@ void Tools_Pprf_callback_test(const oc::CLP& cmd)
         }
         if (cmd.getOr("v", 0) > 1)
             std::cout << i << " " << sOut2(i) << " " << exp << std::endl << Color::Default;
-    }
+        }
 
     if (failed)
         throw RTE_LOC;
@@ -1305,4 +1327,4 @@ void Tools_Pprf_callback_test(const oc::CLP& cmd)
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif
-}
+    }

@@ -454,7 +454,7 @@ namespace osuCrypto
             }
 
 
-            MC_AWAIT(mGen.expand(chl, { &mDelta,1 }, prng, mB.subspan(0, main), PprfOutputFormat::Interleaved, true, mNumThreads));
+            MC_AWAIT(mGen.expand(chl, { &mDelta,1 }, prng.get(), mB.subspan(0, main), PprfOutputFormat::Interleaved, true, mNumThreads));
 
 
             if (mMalType == SilentSecType::Malicious)

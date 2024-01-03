@@ -395,16 +395,18 @@ inline u64 eval(
     macoro::task<>& t1, macoro::task<>& t0,
     cp::BufferingSocket& s1, cp::BufferingSocket& s0)
 {
+    std::cout << "begin " << std::endl;
     auto e = macoro::make_eager(macoro::when_all_ready(std::move(t0), std::move(t1)));
 
     u64 rounds = 0;
-
     {
         auto b1 = s1.getOutbound();
         if (b1)
         {
             s0.processInbound(*b1);
             ++rounds;
+
+            std::cout << "round " << rounds << std::endl;
         }
     }
 
@@ -429,6 +431,7 @@ inline u64 eval(
 
 
         ++rounds;
+        std::cout << "round " << rounds << std::endl;
 
         ++idx;
     }
@@ -476,11 +479,16 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
                 std::vector<block> c(n), z0(n), z1(n);
                 auto p0 = recv.silentReceive(c, z0, prng, chls[0]);
                 auto p1 = send.silentSend(x, z1, prng, chls[1]);
-
+#if (defined ENABLE_MRR_TWIST && defined ENABLE_SSE) || \
+                defined ENABLE_MR || defined ENABLE_MRR
+                u64 expRound = 3;
+#else
+                u64 expRound = 5;
+#endif
 
                 auto rounds = eval(p0, p1, chls[1], chls[0]);
-                if (rounds != 3)
-                    throw std::runtime_error(std::to_string(rounds) + "!=3. " +COPROTO_LOCATION);
+                if (rounds != expRound)
+                    throw std::runtime_error(std::to_string(rounds) + "!="+std::to_string(expRound)+". " +COPROTO_LOCATION);
 
 
                 for (u64 i = 0; i < n; ++i)

@@ -507,7 +507,7 @@ namespace osuCrypto
             }
 
 
-            MC_AWAIT(mGen.expand(chl, prng, mA.subspan(0, main), PprfOutputFormat::Interleaved, true, mNumThreads));
+            MC_AWAIT(mGen.expand(chl, mA.subspan(0, main), PprfOutputFormat::Interleaved, true, mNumThreads));
             setTimePoint("recver.expand.pprf_transpose");
             gTimer.setTimePoint("recver.expand.pprf_transpose");
 

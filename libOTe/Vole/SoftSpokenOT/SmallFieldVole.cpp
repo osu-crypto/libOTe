@@ -379,7 +379,7 @@ namespace osuCrypto
 			throw RTE_LOC;
 
 		mPprf->setBase(baseMessages);
-		mPprf->setChoiceBits(PprfOutputFormat::BlockTransposed, choices);
+		mPprf->setChoiceBits(PprfOutputFormat::ByTreeIndex, choices);
 	}
 
 	void SmallFieldVoleSender::setBaseOts(span<std::array<block, 2>> msgs)
@@ -413,7 +413,7 @@ namespace osuCrypto
 		std::fill(mSeeds.begin(), mSeeds.end(), block(0, 0));
 
 		seedView = MatrixView<block>(mSeeds.data(), mNumVoles, fieldSize());
-		MC_AWAIT(mPprf->expand(chl, span<const block>(), prng, seedView, PprfOutputFormat::BlockTransposed, false, 1));
+		MC_AWAIT(mPprf->expand(chl, span<const block>(), prng.get(), seedView, PprfOutputFormat::ByTreeIndex, false, 1));
 
 		// Prove consistency
 		if (mMalicious)
@@ -466,7 +466,7 @@ namespace osuCrypto
 
 
 		seedsFull.resize(mNumVoles, fieldSize());
-		MC_AWAIT(mPprf->expand(chl, prng, seedsFull, PprfOutputFormat::BlockTransposed, false, 1));
+		MC_AWAIT(mPprf->expand(chl, seedsFull, PprfOutputFormat::ByTreeIndex, false, 1));
 
 		// Check consistency
 		if (mMalicious)

@@ -11,7 +11,8 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "FETCH_AUTO": true,
         "ENABLE_ALL_OT": true,
-        "ENABLE_SSE": false,
+        "ENABLE_SSE": true,
+        "ENABLE_AVX": true,
         "ENABLE_BITPOLYMUL": false,
         "ENABLE_CIRCUITS": true,
         "LIBOTE_STD_VER": "17",
@@ -19,8 +20,14 @@
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
       },
       "vendor": {
-        "microsoft.com/VisualStudioSettings/CMake/1.0": { "hostOS": [ "Linux" ] },
-        "microsoft.com/VisualStudioRemoteSettings/CMake/1.0": { "sourceDir": "$env{HOME}/.vs/$ms{projectDirName}" }
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "hostOS": [
+            "Linux"
+          ]
+        },
+        "microsoft.com/VisualStudioRemoteSettings/CMake/1.0": {
+          "sourceDir": "$env{HOME}/.vs/$ms{projectDirName}"
+        }
       }
     },
     {
@@ -57,7 +64,13 @@
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install/${presetName}"
       },
-      "vendor": { "microsoft.com/VisualStudioSettings/CMake/1.0": { "hostOS": [ "Windows" ] } }
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "hostOS": [
+            "Windows"
+          ]
+        }
+      }
     },
     {
       "name": "x64-Release",
@@ -85,7 +98,13 @@
         "ENABLE_ASAN": false,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
       },
-      "vendor": { "microsoft.com/VisualStudioSettings/CMake/1.0": { "hostOS": [ "Windows" ] } }
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "hostOS": [
+            "Windows"
+          ]
+        }
+      }
     }
   ]
 }
