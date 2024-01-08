@@ -16,6 +16,7 @@
 #include "libOTe_Tests/ExConvCode_Tests.h"
 #include "libOTe_Tests/EACode_Tests.h"
 #include "libOTe/Tools/LDPC/Mtx.h"
+#include "libOTe_Tests/Subfield_Test.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -115,6 +116,11 @@ namespace tests_libOTe
             tc.add("NcoOt_Kkrt_Test                         ", NcoOt_Kkrt_Test);
             tc.add("NcoOt_Oos_Test                          ", NcoOt_Oos_Test);
             tc.add("NcoOt_genBaseOts_Test                   ", NcoOt_genBaseOts_Test);
+
+            tc.add("Subfield_ExConvCode_encode_test         ", Subfield::Subfield_ExConvCode_encode_test);
+            tc.add("Subfield_Tools_Pprf_test                ", Subfield::Subfield_Tools_Pprf_test);
+            tc.add("Subfield_Noisy_Vole_test                ", Subfield::Subfield_Noisy_Vole_test);
+            tc.add("Subfield_Silent_Vole_test               ", Subfield::Subfield_Silent_Vole_test);
 
         });
 }

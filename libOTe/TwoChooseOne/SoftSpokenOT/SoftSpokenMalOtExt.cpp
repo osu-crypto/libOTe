@@ -53,7 +53,7 @@ namespace osuCrypto
 
 		MC_AWAIT(runBatch(chl, scratch.subspan(0, messagesFullChunks * chunkSize())));
 
-		assert(scratch[0] != ZeroBlock);
+		assert(messagesFullChunks == 0 || scratch[0] != ZeroBlock);
 
 		// Extra blocks
 		MC_AWAIT(runBatch(chl, mExtraW.subspan(0, numExtra * chunkSize())));

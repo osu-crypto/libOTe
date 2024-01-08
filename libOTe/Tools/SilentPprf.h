@@ -72,6 +72,10 @@ namespace osuCrypto
         //MaliciousFS
     };
 
+    u64 interleavedPoint(u64 point, u64 treeIdx, u64 totalTrees, u64 domain, PprfOutputFormat format);
+    void interleavedPoints(span<u64> points, u64 domain, PprfOutputFormat format);
+    u64 getActivePath(const span<u8>& choiceBits);
+
     struct TreeAllocator
     {
         TreeAllocator() = default;
