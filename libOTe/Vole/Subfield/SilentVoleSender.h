@@ -389,7 +389,7 @@ namespace osuCrypto::Subfield
             // output of the PPRF at the correct locations.
             noiseShares = span<F>(mNoiseDeltaShares.data(), mNumPartitions);
             mbb = mB.subspan(0, mNumPartitions * mSizePer);
-            MC_AWAIT(mGen.expand(chl, noiseShares, prng, mbb,
+            MC_AWAIT(mGen.expand(chl, noiseShares, prng.get(), mbb,
                 PprfOutputFormat::Interleaved, true, mNumThreads));
 
             setTimePoint("SilentVoleSender.expand.pprf_transpose");

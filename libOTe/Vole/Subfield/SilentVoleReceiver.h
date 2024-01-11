@@ -486,7 +486,7 @@ namespace osuCrypto::Subfield
             if (mTimer)
                 mGen.setTimer(*mTimer);
             // expand the seeds into mA
-            MC_AWAIT(mGen.expand(chl, prng, mA.subspan(0, mNumPartitions * mSizePer), PprfOutputFormat::Interleaved, true, mNumThreads));
+            MC_AWAIT(mGen.expand(chl, mA.subspan(0, mNumPartitions * mSizePer), PprfOutputFormat::Interleaved, true, mNumThreads));
 
             setTimePoint("SilentVoleReceiver.expand.pprf_transpose");
 
