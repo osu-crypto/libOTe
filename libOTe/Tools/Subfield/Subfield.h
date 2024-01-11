@@ -8,27 +8,6 @@ namespace osuCrypto::Subfield {
         block b;
         F128() = default;
         explicit F128(const block& b) : b(b) {}
-//        OC_FORCEINLINE F128 operator+(const F128& rhs) const {
-//            F128 ret;
-//            ret.b = b ^ rhs.b;
-//            return ret;
-//        }
-//        OC_FORCEINLINE F128 operator-(const F128& rhs) const {
-//            F128 ret;
-//            ret.b = b ^ rhs.b;
-//            return ret;
-//        }
-//        OC_FORCEINLINE F128 operator*(const F128& rhs) const {
-//            F128 ret;
-//            ret.b = b.gf128Mul(rhs.b);
-//            return ret;
-//        }
-//        OC_FORCEINLINE bool operator==(const F128& rhs) const {
-//            return b == rhs.b;
-//        }
-//        OC_FORCEINLINE bool operator!=(const F128& rhs) const {
-//            return b != rhs.b;
-//        }
     };
 
     /*

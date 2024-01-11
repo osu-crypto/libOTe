@@ -956,7 +956,7 @@ namespace osuCrypto::Subfield
                             // Subfield:
                             if (d == mDepth - 1) {
                                 if (lastLevel.size() <= childIdx) {
-                                    // todo
+                                    // todo: I have fix in my old code, not sure we need this for the new pprf
                                     throw RTE_LOC;
                                 }
                                 auto& realChild = lastLevel[childIdx];
