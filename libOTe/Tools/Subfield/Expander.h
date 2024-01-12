@@ -17,7 +17,6 @@ namespace osuCrypto::Subfield
     // The encoder for the expander matrix B.
     // B has mMessageSize rows and mCodeSize columns. It is sampled uniformly
     // with fixed row weight mExpanderWeight.
-    template<typename TypeTrait>
     class ExpanderCode
     {
     public:
@@ -55,7 +54,7 @@ namespace osuCrypto::Subfield
 
 
 
-        template<typename T, u64 count>
+        template<typename TypeTrait, typename T, u64 count>
         typename std::enable_if<count == 1, T>::type
         expandOne(const T* __restrict ee, detail::ExpanderModd& prng) const
         {
@@ -63,7 +62,7 @@ namespace osuCrypto::Subfield
           return ee[r];
         }
 
-        template<typename T, typename T2, u64 count, bool Add>
+        template<typename TypeTrait, typename T, typename T2, u64 count, bool Add>
         typename std::enable_if<(count == 1)>::type
             expandOne(
                 const T* __restrict ee1,
@@ -87,7 +86,7 @@ namespace osuCrypto::Subfield
           }
         }
 
-        template<typename T, u64 count>
+        template<typename TypeTrait, typename T, u64 count>
         OC_FORCEINLINE typename std::enable_if<(count > 1), T>::type
             expandOne(const T* __restrict ee, detail::ExpanderModd& prng) const
         {
@@ -131,19 +130,19 @@ namespace osuCrypto::Subfield
                     w[7]);
 
             if constexpr (count > 8)
-              ww = TypeTrait::plus(ww, expandOne<T, count - 8>(ee, prng));
+              ww = TypeTrait::plus(ww, expandOne<TypeTrait, T, count - 8>(ee, prng));
             return ww;
           }
           else
           {
 
             auto r = prng.get();
-            auto ww = expandOne<T, count - 1>(ee, prng);
+            auto ww = expandOne<TypeTrait, T, count - 1>(ee, prng);
             return TypeTrait::plus(ww, ee[r]);
           }
         }
 
-        template<typename T, typename T2, u64 count, bool Add>
+        template<typename TypeTrait, typename T, typename T2, u64 count, bool Add>
         OC_FORCEINLINE typename std::enable_if<(count > 1)>::type
             expandOne(
                 const T* __restrict ee1,
@@ -221,7 +220,7 @@ namespace osuCrypto::Subfield
             {
               T yy1;
               T2 yy2;
-              expandOne<T, T2, count - 8, false>(ee1, ee2, &yy1, &yy2, prng);
+              expandOne<TypeTrait, T, T2, count - 8, false>(ee1, ee2, &yy1, &yy2, prng);
               ww1 = TypeTrait::plus(ww1, yy1);
               ww2 = TypeTrait::plus(ww2, yy2);
             }
@@ -246,7 +245,7 @@ namespace osuCrypto::Subfield
             {
               auto w1 = ee1[r];
               auto w2 = ee2[r];
-              expandOne<T, T2, count - 1, true>(ee1, ee2, y1, y2, prng);
+              expandOne<TypeTrait, T, T2, count - 1, true>(ee1, ee2, y1, y2, prng);
               *y1 = TypeTrait::plus(*y1, w1);
               *y2 = TypeTrait::plus(*y2, w2);
 
@@ -256,14 +255,14 @@ namespace osuCrypto::Subfield
 
               T yy1;
               T2 yy2;
-              expandOne<T, T2, count - 1, false>(ee1, ee2, &yy1, &yy2, prng);
+              expandOne<TypeTrait, T, T2, count - 1, false>(ee1, ee2, &yy1, &yy2, prng);
               *y1 = TypeTrait::plus(yy1, ee1[r]);
               *y2 = TypeTrait::plus(yy2, ee2[r]);
             }
           }
         }
 
-        template<typename T, bool Add = false>
+        template<typename TypeTrait, typename T, bool Add = false>
         void expand(
             span<const T> e,
             span<T> w) const
@@ -284,25 +283,25 @@ namespace osuCrypto::Subfield
                 case I:\
                 if constexpr(Add)\
                 {\
-                    ww[i + 0] = TypeTrait::plus(ww[i + 0], expandOne<T, I>(ee, prng));\
-                    ww[i + 1] = TypeTrait::plus(ww[i + 1], expandOne<T, I>(ee, prng));\
-                    ww[i + 2] = TypeTrait::plus(ww[i + 2], expandOne<T, I>(ee, prng));\
-                    ww[i + 3] = TypeTrait::plus(ww[i + 3], expandOne<T, I>(ee, prng));\
-                    ww[i + 4] = TypeTrait::plus(ww[i + 4], expandOne<T, I>(ee, prng));\
-                    ww[i + 5] = TypeTrait::plus(ww[i + 5], expandOne<T, I>(ee, prng));\
-                    ww[i + 6] = TypeTrait::plus(ww[i + 6], expandOne<T, I>(ee, prng));\
-                    ww[i + 7] = TypeTrait::plus(ww[i + 7], expandOne<T, I>(ee, prng));\
+                    ww[i + 0] = TypeTrait::plus(ww[i + 0], expandOne<TypeTrait, T, I>(ee, prng));\
+                    ww[i + 1] = TypeTrait::plus(ww[i + 1], expandOne<TypeTrait, T, I>(ee, prng));\
+                    ww[i + 2] = TypeTrait::plus(ww[i + 2], expandOne<TypeTrait, T, I>(ee, prng));\
+                    ww[i + 3] = TypeTrait::plus(ww[i + 3], expandOne<TypeTrait, T, I>(ee, prng));\
+                    ww[i + 4] = TypeTrait::plus(ww[i + 4], expandOne<TypeTrait, T, I>(ee, prng));\
+                    ww[i + 5] = TypeTrait::plus(ww[i + 5], expandOne<TypeTrait, T, I>(ee, prng));\
+                    ww[i + 6] = TypeTrait::plus(ww[i + 6], expandOne<TypeTrait, T, I>(ee, prng));\
+                    ww[i + 7] = TypeTrait::plus(ww[i + 7], expandOne<TypeTrait, T, I>(ee, prng));\
                 }\
                 else\
                 {\
-                    ww[i + 0] = expandOne<T, I>(ee, prng);\
-                    ww[i + 1] = expandOne<T, I>(ee, prng);\
-                    ww[i + 2] = expandOne<T, I>(ee, prng);\
-                    ww[i + 3] = expandOne<T, I>(ee, prng);\
-                    ww[i + 4] = expandOne<T, I>(ee, prng);\
-                    ww[i + 5] = expandOne<T, I>(ee, prng);\
-                    ww[i + 6] = expandOne<T, I>(ee, prng);\
-                    ww[i + 7] = expandOne<T, I>(ee, prng);\
+                    ww[i + 0] = expandOne<TypeTrait, T, I>(ee, prng);\
+                    ww[i + 1] = expandOne<TypeTrait, T, I>(ee, prng);\
+                    ww[i + 2] = expandOne<TypeTrait, T, I>(ee, prng);\
+                    ww[i + 3] = expandOne<TypeTrait, T, I>(ee, prng);\
+                    ww[i + 4] = expandOne<TypeTrait, T, I>(ee, prng);\
+                    ww[i + 5] = expandOne<TypeTrait, T, I>(ee, prng);\
+                    ww[i + 6] = expandOne<TypeTrait, T, I>(ee, prng);\
+                    ww[i + 7] = expandOne<TypeTrait, T, I>(ee, prng);\
                 }\
                 break
 
@@ -348,7 +347,7 @@ namespace osuCrypto::Subfield
           }
         }
 
-        template<typename T, typename T2, bool Add>
+        template<typename TypeTrait, typename T, typename T2, bool Add>
         void expand(
             span<const T> e1,
             span<const T2> e2,
@@ -374,14 +373,14 @@ namespace osuCrypto::Subfield
           {
 #define CASE(I) \
                 case I:\
-                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 0], &ww2[i + 0], prng);\
-                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 1], &ww2[i + 1], prng);\
-                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 2], &ww2[i + 2], prng);\
-                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 3], &ww2[i + 3], prng);\
-                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 4], &ww2[i + 4], prng);\
-                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 5], &ww2[i + 5], prng);\
-                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 6], &ww2[i + 6], prng);\
-                expandOne<T, T2, I, Add>(ee1, ee2, &ww1[i + 7], &ww2[i + 7], prng);\
+                expandOne<TypeTrait, T, T2, I, Add>(ee1, ee2, &ww1[i + 0], &ww2[i + 0], prng);\
+                expandOne<TypeTrait, T, T2, I, Add>(ee1, ee2, &ww1[i + 1], &ww2[i + 1], prng);\
+                expandOne<TypeTrait, T, T2, I, Add>(ee1, ee2, &ww1[i + 2], &ww2[i + 2], prng);\
+                expandOne<TypeTrait, T, T2, I, Add>(ee1, ee2, &ww1[i + 3], &ww2[i + 3], prng);\
+                expandOne<TypeTrait, T, T2, I, Add>(ee1, ee2, &ww1[i + 4], &ww2[i + 4], prng);\
+                expandOne<TypeTrait, T, T2, I, Add>(ee1, ee2, &ww1[i + 5], &ww2[i + 5], prng);\
+                expandOne<TypeTrait, T, T2, I, Add>(ee1, ee2, &ww1[i + 6], &ww2[i + 6], prng);\
+                expandOne<TypeTrait, T, T2, I, Add>(ee1, ee2, &ww1[i + 7], &ww2[i + 7], prng);\
                 break
 
             switch (mExpanderWeight)

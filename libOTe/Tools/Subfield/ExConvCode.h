@@ -31,11 +31,10 @@ namespace osuCrypto::Subfield
     //
     // https://eprint.iacr.org/2023/882
 
-    template<typename TypeTrait>
     class ExConvCode : public TimerAdapter
     {
     public:
-        ExpanderCode<TypeTrait> mExpander;
+        ExpanderCode mExpander;
 
         // configure the code. The default parameters are choses to balance security and performance.
         // For additional parameter choices see the paper.
@@ -89,7 +88,7 @@ namespace osuCrypto::Subfield
         u64 generatorCols() const { return mCodeSize; }
 
         // Compute w = G * e. e will be modified in the computation.
-        template<typename T>
+        template<typename TypeTrait, typename T>
         void dualEncode(span<T> e, span<T> w)
         {
             if (e.size() != mCodeSize)
@@ -100,7 +99,7 @@ namespace osuCrypto::Subfield
 
             if (mSystematic)
             {
-                dualEncode<T>(e);
+                dualEncode<TypeTrait, T>(e);
                 memcpy(w.data(), e.data(), w.size() * sizeof(T));
                 setTimePoint("ExConv.encode.memcpy");
             }
@@ -109,17 +108,17 @@ namespace osuCrypto::Subfield
 
                 setTimePoint("ExConv.encode.begin");
 
-                accumulate<T>(e);
+                accumulate<TypeTrait, T>(e);
 
                 setTimePoint("ExConv.encode.accumulate");
 
-                mExpander.template expand<T, false>(e, w);
+                mExpander.expand<TypeTrait, T, false>(e, w);
                 setTimePoint("ExConv.encode.expand");
             }
         }
 
         // Compute e[0,...,k-1] = G * e.
-        template<typename T>
+        template<typename TypeTrait, typename T>
         void dualEncode(span<T> e)
         {
             if (e.size() != mCodeSize)
@@ -129,15 +128,15 @@ namespace osuCrypto::Subfield
             {
                 auto d = e.subspan(mMessageSize);
                 setTimePoint("ExConv.encode.begin");
-                accumulate<T>(d);
+                accumulate<TypeTrait, T>(d);
                 setTimePoint("ExConv.encode.accumulate");
-                mExpander.template expand<T, true>(d, e.subspan(0, mMessageSize));
+                mExpander.expand<TypeTrait, T, true>(d, e.subspan(0, mMessageSize));
                 setTimePoint("ExConv.encode.expand");
             }
             else
             {
                 oc::AlignedUnVector<T> w(mMessageSize);
-                dualEncode<T>(e, w);
+                dualEncode<TypeTrait, T>(e, w);
                 memcpy(e.data(), w.data(), w.size() * sizeof(T));
                 setTimePoint("ExConv.encode.memcpy");
 
@@ -146,7 +145,7 @@ namespace osuCrypto::Subfield
 
 
         // Compute e[0,...,k-1] = G * e.
-        template<typename T0, typename T1>
+        template<typename TypeTrait, typename T0, typename T1>
         void dualEncode2(span<T0> e0, span<T1> e1)
         {
             if (e0.size() != mCodeSize)
@@ -159,9 +158,9 @@ namespace osuCrypto::Subfield
                 auto d0 = e0.subspan(mMessageSize);
                 auto d1 = e1.subspan(mMessageSize);
                 setTimePoint("ExConv.encode.begin");
-                accumulate<T0, T1>(d0, d1);
+                accumulate<TypeTrait, T0, T1>(d0, d1);
                 setTimePoint("ExConv.encode.accumulate");
-                mExpander.template expand<T0, T1, true>(
+                mExpander.expand<TypeTrait, T0, T1, true>(
                     d0, d1,
                     e0.subspan(0, mMessageSize),
                     e1.subspan(0, mMessageSize));
@@ -375,7 +374,7 @@ namespace osuCrypto::Subfield
         inline My__m128 _mm_setzero_ps() { return ZeroBlock; }
 #endif
 
-        template<typename T, bool rangeCheck>
+        template<typename TypeTrait, typename T, bool rangeCheck>
         OC_FORCEINLINE void accOneHelper(
             T* __restrict xx,
             My__m128 xii,
@@ -433,7 +432,7 @@ namespace osuCrypto::Subfield
         }
 
         // accumulating row i.
-        template<typename T, bool rangeCheck, int width>
+        template<typename TypeTrait, typename T, bool rangeCheck, int width>
         OC_FORCEINLINE void accOne(
             T* __restrict xx,
             u64 i,
@@ -472,7 +471,7 @@ namespace osuCrypto::Subfield
 //                    else {
                         My__m128 xii;// = ::_mm_set_ps(0.0f, 0.0f, 0.0f, 0.0f);
                         memset(&xii, 0, sizeof(My__m128));
-                        accOneHelper<T, rangeCheck>(xx, xii, j, i, size, b);
+                        accOneHelper<TypeTrait, T, rangeCheck>(xx, xii, j, i, size, b);
 //                    }
                 }
             }
@@ -485,7 +484,7 @@ namespace osuCrypto::Subfield
 
 
         // accumulating row i.
-        template<typename T0, typename T1, bool rangeCheck, int width>
+        template<typename TypeTrait, typename T0, typename T1, bool rangeCheck, int width>
         OC_FORCEINLINE void accOne(
             T0* __restrict xx0,
             T1* __restrict xx1,
@@ -530,14 +529,14 @@ namespace osuCrypto::Subfield
 //                        accOneHelper<T0, rangeCheck>(xx0, xii0, j, i, size, b);
 //                    }
 //                    else {
-                        accOneHelper<T0, rangeCheck>(xx0, _mm_setzero_ps(), j, i, size, b);
+                        accOneHelper<TypeTrait, T0, rangeCheck>(xx0, _mm_setzero_ps(), j, i, size, b);
 //                    }
 //                    if constexpr (std::is_same<block, T1>::value) {
 //                        auto xii1 = _mm_load_ps((float*)(xx1 + i));
 //                        accOneHelper<T1, rangeCheck>(xx1, xii1, j, i, size, b);
 //                    }
 //                    else {
-                        accOneHelper<T1, rangeCheck>(xx1, _mm_setzero_ps(), j, i, size, b);
+                        accOneHelper<TypeTrait, T1, rangeCheck>(xx1, _mm_setzero_ps(), j, i, size, b);
 //                    }
                 }
             }
@@ -551,7 +550,7 @@ namespace osuCrypto::Subfield
 
 
         // accumulate x onto itself.
-        template<typename T>
+        template<typename TypeTrait, typename T>
         void accumulate(span<T> x)
         {
             PRNG prng(mSeed ^ OneBlock);
@@ -568,9 +567,9 @@ namespace osuCrypto::Subfield
 
 #define CASE(I) case I:\
                 for (; i < main; ++i)\
-                    accOne<T, false, I>(xx, i, ptr, prng, q, qe, size);\
+                    accOne<TypeTrait, T, false, I>(xx, i, ptr, prng, q, qe, size);\
                 for (; i < size; ++i)\
-                    accOne<T, true, I>(xx, i, ptr, prng, q, qe, size);\
+                    accOne<TypeTrait, T, true, I>(xx, i, ptr, prng, q, qe, size);\
                 break
 
                 switch (mAccumulatorSize / 8)
@@ -590,7 +589,7 @@ namespace osuCrypto::Subfield
 
 
         // accumulate x onto itself.
-        template<typename T0, typename T1>
+        template<typename TypeTrait, typename T0, typename T1>
         void accumulate(span<T0> x0, span<T1> x1)
         {
             PRNG prng(mSeed ^ OneBlock);
@@ -608,9 +607,9 @@ namespace osuCrypto::Subfield
 
 #define CASE(I) case I:\
                 for (; i < main; ++i)\
-                    accOne<T0, T1, false, I>(xx0,xx1, i, ptr, prng, q, qe, size);\
+                    accOne<TypeTrait, T0, T1, false, I>(xx0,xx1, i, ptr, prng, q, qe, size);\
                 for (; i < size; ++i)\
-                    accOne<T0, T1, true, I>(xx0, xx1, i, ptr, prng, q, qe, size);\
+                    accOne<TypeTrait, T0, T1, true, I>(xx0, xx1, i, ptr, prng, q, qe, size);\
                 break
 
                 switch (mAccumulatorSize / 8)

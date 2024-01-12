@@ -73,7 +73,7 @@ namespace osuCrypto::Subfield
         // the sparse vector.
         MultType mMultType = DefaultMultType;
 
-        ExConvCode<TypeTrait> mExConvEncoder;
+        ExConvCode mExConvEncoder;
 
         // The multi-point punctured PRF for generating
         // the sparse vectors.
@@ -526,7 +526,7 @@ namespace osuCrypto::Subfield
                     mExConvEncoder.setTimer(getTimer());
                 }
 
-                mExConvEncoder.template dualEncode2<F, G>(
+                mExConvEncoder.dualEncode2<TypeTrait, F, G>(
                     mA.subspan(0, mExConvEncoder.mCodeSize),
                     mC.subspan(0, mExConvEncoder.mCodeSize)
                     );

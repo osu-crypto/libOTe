@@ -16,8 +16,9 @@ namespace osuCrypto::Subfield
     void Subfield_ExConvCode_encode_test(const oc::CLP& cmd)
     {
         {
+            using TypeTrait = TypeTraitF128;
             u64 n = 1024;
-            ExConvCode<TypeTraitF128> code;
+            ExConvCode code;
             code.config(n / 2, n, 7, 24, true);
 
             PRNG prng(ZeroBlock);
@@ -30,10 +31,10 @@ namespace osuCrypto::Subfield
                 z1[i] = z0[i] ^ delta.gf128Mul(y[i]);
             }
 
-            code.dualEncode<block>(z1);
+            code.dualEncode<TypeTrait, block>(z1);
 //            code.dualEncode<block>(z0);
 //            code.dualEncode<block>(y);
-            code.dualEncode2<block, block>(z0, y);
+            code.dualEncode2<TypeTrait, block, block>(z0, y);
 
             for (u64 i = 0; i < n; ++i)
             {
@@ -45,8 +46,9 @@ namespace osuCrypto::Subfield
         }
 
         {
+            using TypeTrait = TypeTraitPrimitive<u8>;
             u64 n = 1024;
-            ExConvCode<TypeTraitPrimitive<u8>> code;
+            ExConvCode code;
             code.config(n / 2, n, 7, 24, true);
 
             PRNG prng(ZeroBlock);
@@ -59,8 +61,8 @@ namespace osuCrypto::Subfield
                 z1[i] = z0[i] + delta * y[i];
             }
 
-            code.dualEncode<u8>(z1);
-            code.dualEncode2<u8, u8>(z0, y);
+            code.dualEncode<TypeTrait, u8>(z1);
+            code.dualEncode2<TypeTrait, u8, u8>(z0, y);
 
             for (u64 i = 0; i < n; ++i)
             {
@@ -72,8 +74,9 @@ namespace osuCrypto::Subfield
         }
 
         {
+            using TypeTrait = TypeTrait64;
             u64 n = 1024;
-            ExConvCode<TypeTrait64> code;
+            ExConvCode code;
             code.config(n / 2, n, 7, 24, true);
 
             PRNG prng(ZeroBlock);
@@ -86,8 +89,8 @@ namespace osuCrypto::Subfield
                 z1[i] = z0[i] + delta * y[i];
             }
 
-            code.dualEncode<u64>(z1);
-            code.dualEncode2<u64, u64>(z0, y);
+            code.dualEncode<TypeTrait, u64>(z1);
+            code.dualEncode2<TypeTrait, u64, u64>(z0, y);
 
             for (u64 i = 0; i < n; ++i)
             {
