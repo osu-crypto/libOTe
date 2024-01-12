@@ -13,16 +13,8 @@
 
 namespace osuCrypto::Subfield
 {
-    namespace
-    {
-        // A public PRF/PRG that we will use for deriving the GGM tree.
-        const std::array<AES, 2> gAes = []() {
-            std::array<AES, 2> aes;
-            aes[0].setKey(toBlock(3242342));
-            aes[1].setKey(toBlock(8993849));
-            return aes;
-        }();
-    }
+
+    extern const std::array<AES, 2> gAes;
 
     template<typename F>
     void copyOut(
