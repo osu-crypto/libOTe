@@ -301,16 +301,15 @@ namespace osuCrypto::Subfield
             // sample the values of the noisy coordinate of c
             // and perform a noicy vole to get x+y = mD * c
             auto w = mNumPartitions + mGapOts.size();
-            //std::vector<block> y(w);
+            std::vector<block> seeds(w);
             mNoiseValues.resize(w);
-            prng.get(mNoiseValues.data(), mNoiseValues.size());
+            prng.get(seeds.data(), seeds.size());
+            for (size_t i = 0; i < w; i++) {
+                mNoiseValues[i] = TypeTrait::fromBlockG(seeds[i]);
+            }
 
             mS.resize(mNumPartitions);
             mGen.getPoints(mS, getPprfFormat());
-
-            // todo
-            std::vector<u64> tmp = mS;
-            std::sort(tmp.begin(), tmp.end());
 
             auto j = mNumPartitions * mSizePer;
 

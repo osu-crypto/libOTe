@@ -43,6 +43,11 @@ namespace osuCrypto::Subfield {
         static OC_FORCEINLINE F fromBlock(const block& b) {
             return b.get<F>()[0];
         }
+
+        static OC_FORCEINLINE G fromBlockG(const block& b) {
+            return b.get<G>()[0];
+        }
+
         static OC_FORCEINLINE F pow(u64 power) {
             F ret = 1;
             ret <<= power;
@@ -84,6 +89,11 @@ namespace osuCrypto::Subfield {
         static OC_FORCEINLINE F fromBlock(const block& b) {
             return b;
         }
+
+        static OC_FORCEINLINE G fromBlockG(const block& b) {
+            return b;
+        }
+
         static OC_FORCEINLINE F pow(u64 power) {
             F ret = ZeroBlock;
             *BitIterator((u8*)&ret, power) = 1;
@@ -197,6 +207,11 @@ namespace osuCrypto::Subfield {
                 memcpy(&ret, &buf, sizeof(F));
                 return ret;
             }
+        }
+
+        // assume primitive type for G now
+        static OC_FORCEINLINE G fromBlockG(const block& b) {
+            return b.get<G>()[0];
         }
 
         static OC_FORCEINLINE F pow(u64 power) {
