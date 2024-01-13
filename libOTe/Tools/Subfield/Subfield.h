@@ -48,12 +48,6 @@ namespace osuCrypto::Subfield {
         }
     };
 
-
-    template<typename F, typename G>
-    struct DefaultTrait: TypeTraitPrimitive<F> {
-        static_assert(std::is_same<F, G>::value, "F and G must be the same type");
-    };
-
     using TypeTrait64 = TypeTraitPrimitive<u64>;
 
     /*
@@ -221,4 +215,10 @@ namespace osuCrypto::Subfield {
         }
     };
 
+    template<typename F, typename G>
+    struct DefaultTrait: TypeTraitPrimitive<F> {
+        static_assert(std::is_same<F, G>::value, "F and G must be the same type");
+    };
+
+    template<> struct DefaultTrait<block, block>: TypeTraitF128 {};
 }

@@ -420,8 +420,8 @@ namespace osuCrypto::Subfield
             block x = prng.get();
             std::vector<block> c(n), z0(n), z1(n);
 
-            SilentSubfieldVoleReceiver<block, block, TypeTraitF128> recv;
-            SilentSubfieldVoleSender<block, block, TypeTraitF128> send;
+            SilentSubfieldVoleReceiver<block> recv;
+            SilentSubfieldVoleSender<block> send;
 
             recv.mMultType = MultType::ExConv7x24;
             send.mMultType = MultType::ExConv7x24;
