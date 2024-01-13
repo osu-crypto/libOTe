@@ -69,13 +69,10 @@ namespace osuCrypto::Subfield
     }
 
 
-    template<typename TypeTrait>
+    template<typename F, typename G = F, typename TypeTrait = DefaultTrait<F, G>>
     class SilentSubfieldVoleSender : public TimerAdapter
     {
     public:
-        using F = typename TypeTrait::F;
-        using G = typename TypeTrait::G;
-
         static constexpr u64 mScaler = 2;
 
         enum class State
@@ -88,7 +85,7 @@ namespace osuCrypto::Subfield
 
         State mState = State::Default;
 
-        SilentSubfieldPprfSender<TypeTrait> mGen;
+        SilentSubfieldPprfSender<F, G, TypeTrait> mGen;
 
         u64 mRequestedNumOTs = 0;
         u64 mN2 = 0;

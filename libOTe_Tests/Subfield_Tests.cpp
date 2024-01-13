@@ -327,11 +327,11 @@ namespace osuCrypto::Subfield
 
         {
             PRNG prng(seed);
-            u64 x = TypeTrait64::fromBlock(prng.get<block>());
+            u64 x = prng.get<u64>();
             std::vector<u64> c(n), z0(n), z1(n);
 
-            SilentSubfieldVoleReceiver<TypeTrait64> recv;
-            SilentSubfieldVoleSender<TypeTrait64> send;
+            SilentSubfieldVoleReceiver<u64> recv;
+            SilentSubfieldVoleSender<u64> send;
 
             recv.mMultType = MultType::ExConv7x24;
             send.mMultType = MultType::ExConv7x24;
@@ -368,15 +368,15 @@ namespace osuCrypto::Subfield
         {
             PRNG prng(seed);
             constexpr size_t N = 10;
+            using F = Vec<u32, N>;
+            using G = u32;
             using TypeTrait = TypeTraitVec<u32, N>;
-            using F = TypeTrait::F;
-            using G = TypeTrait::G;
             F x = TypeTrait::fromBlock(prng.get<block>());
             std::vector<G> c(n);
             std::vector<F> z0(n), z1(n);
 
-            SilentSubfieldVoleReceiver<TypeTrait> recv;
-            SilentSubfieldVoleSender<TypeTrait> send;
+            SilentSubfieldVoleReceiver<F, G, TypeTrait> recv;
+            SilentSubfieldVoleSender<F, G, TypeTrait> send;
 
             recv.mMultType = MultType::ExConv7x24;
             send.mMultType = MultType::ExConv7x24;
@@ -420,8 +420,8 @@ namespace osuCrypto::Subfield
             block x = prng.get();
             std::vector<block> c(n), z0(n), z1(n);
 
-            SilentSubfieldVoleReceiver<TypeTraitF128> recv;
-            SilentSubfieldVoleSender<TypeTraitF128> send;
+            SilentSubfieldVoleReceiver<block, block, TypeTraitF128> recv;
+            SilentSubfieldVoleSender<block, block, TypeTraitF128> send;
 
             recv.mMultType = MultType::ExConv7x24;
             send.mMultType = MultType::ExConv7x24;

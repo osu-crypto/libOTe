@@ -29,13 +29,10 @@ namespace osuCrypto::Subfield
 {
 
 
-    template<typename TypeTrait>
+    template<typename F, typename G = F, typename TypeTrait = DefaultTrait<F, G>>
     class SilentSubfieldVoleReceiver : public TimerAdapter
     {
     public:
-        using F = typename TypeTrait::F;
-        using G = typename TypeTrait::G;
-
         static constexpr u64 mScaler = 2;
 
         enum class State
@@ -77,7 +74,7 @@ namespace osuCrypto::Subfield
 
         // The multi-point punctured PRF for generating
         // the sparse vectors.
-        SilentSubfieldPprfReceiver<TypeTrait> mGen;
+        SilentSubfieldPprfReceiver<F, G, TypeTrait> mGen;
 
         // The internal buffers for holding the expanded vectors.
         // mA + mB = mC * delta

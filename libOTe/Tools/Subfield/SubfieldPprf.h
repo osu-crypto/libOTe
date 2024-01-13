@@ -171,12 +171,11 @@ namespace osuCrypto::Subfield
         }
     }
 
-    template<typename TypeTrait>
+    template<typename F, typename G = F, typename TypeTrait = DefaultTrait<F, G>>
     class SilentSubfieldPprfSender : public TimerAdapter {
     public:
-        using F = typename TypeTrait::F;
         u64 mDomain = 0, mDepth = 0, mPntCount = 0;
-        std::vector<typename TypeTrait::F> mValue;
+        std::vector<F> mValue;
         bool mPrint = false;
         TreeAllocator mTreeAlloc;
         Matrix<std::array<block, 2>> mBaseOTs;
@@ -535,11 +534,10 @@ namespace osuCrypto::Subfield
     };
 
 
-    template<typename TypeTrait>
+    template<typename F, typename G = F, typename TypeTrait = DefaultTrait<F, G>>
     class SilentSubfieldPprfReceiver : public TimerAdapter
     {
     public:
-        using F = typename TypeTrait::F;
         u64 mDomain = 0, mDepth = 0, mPntCount = 0;
 
         std::vector<u64> mPoints;

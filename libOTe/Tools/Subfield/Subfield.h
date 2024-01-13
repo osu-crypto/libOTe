@@ -3,13 +3,6 @@
 #include "cryptoTools/Common/BitVector.h"
 
 namespace osuCrypto::Subfield {
-
-    struct F128 {
-        block b;
-        F128() = default;
-        explicit F128(const block& b) : b(b) {}
-    };
-
     /*
      * Primitive TypeTrait for integers
      */
@@ -53,6 +46,12 @@ namespace osuCrypto::Subfield {
             ret <<= power;
             return ret;
         }
+    };
+
+
+    template<typename F, typename G>
+    struct DefaultTrait: TypeTraitPrimitive<F> {
+        static_assert(std::is_same<F, G>::value, "F and G must be the same type");
     };
 
     using TypeTrait64 = TypeTraitPrimitive<u64>;
