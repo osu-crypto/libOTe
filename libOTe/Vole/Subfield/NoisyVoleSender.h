@@ -33,18 +33,26 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
+#include "libOTe/Tools/Subfield/Subfield.h"
 
-namespace osuCrypto::Subfield {
-    template <typename TypeTrait>
-    class NoisySubfieldVoleSender : public TimerAdapter {
+namespace osuCrypto {
+    template <
+        typename F, 
+        typename G = F, 
+        typename CoeffCtx = DefaultCoeffCtx<F,G>
+    >
+    class NoisySubfieldVoleSender : public TimerAdapter 
+    {
+
     public:
-        using F = typename TypeTrait::F;
-        using G = typename TypeTrait::G;
-        task<> send(F x, span<F> z, PRNG& prng,
+
+        template<typename FVec>
+        task<> send(F x, FVec&& z, PRNG& prng,
             OtReceiver& ot, Socket& chl) {
             MC_BEGIN(task<>, this, x, z, &prng, &ot, &chl,
-                bv = TypeTrait::BitVectorF(x),
-                otMsg = AlignedUnVector<block>{ TypeTrait::bitsF });
+                bv = CoeffCtx::binaryDecomposition(x),
+                otMsg = AlignedUnVector<block>{ });
+            otMsg.resize(bv.size());
 
             setTimePoint("NoisyVoleSender.ot.begin");
 
@@ -56,34 +64,56 @@ namespace osuCrypto::Subfield {
             MC_END();
         }
 
-        task<> send(F x, span<F> z, PRNG& _,
+        template<typename FVec>
+        task<> send(F x, FVec&& z, PRNG& _,
             span<block> otMsg, Socket& chl) {
             MC_BEGIN(task<>, this, x, z, otMsg, &chl,
                 prng = std::move(PRNG{}),
-                msg = Matrix<F>{},
+                buffer = std::vector<u8>{},
+                msg = typename CoeffCtx::Vec<F>{},
+                temp = typename CoeffCtx::Vec<F>{},
                 xb = BitVector{});
 
-            if (otMsg.size() != TypeTrait::bitsF)
+            xb = CoeffCtx::binaryDecomposition<F>(x);
+
+            if (otMsg.size() != xb.size())
                 throw RTE_LOC;
             setTimePoint("NoisyVoleSender.main");
 
-            memset(z.data(), 0, TypeTrait::bytesF * z.size());
-            msg.resize(otMsg.size(), z.size(), AllocType::Uninitialized);
+            // z = 0;
+            CoeffCtx::zero(z.begin(), z.end());
 
-            MC_AWAIT(chl.recv(msg));
+            // receive the the excrypted one shares.
+            buffer.resize(otMsg.size() * z.size() * CoeffCtx::byteSize<F>());
+            MC_AWAIT(chl.recv(buffer));
+            CoeffCtx::deserialize(msg, buffer);
 
             setTimePoint("NoisyVoleSender.recvMsg");
 
-            xb = TypeTrait::BitVectorF(x);
-            for (size_t i = 0; i < TypeTrait::bitsF; ++i)
+            temp.resize(1);
+            for (size_t i = 0, k = 0; i < xb.size(); ++i)
             {
+                // expand the zero shares or one share masks
                 prng.SetSeed(otMsg[i], z.size());
 
-                for (u64 j = 0; j < (u64)z.size(); ++j) 
+                // otMsg[i,j, bc[i]] 
+                //auto otMsgi = prng.getBufferSpan(z.size());
+
+                for (u64 j = 0; j < (u64)z.size(); ++j, ++k) 
                 {
-                    F bufj = TypeTrait::fromBlock(prng.mBuffer[j]);
-                    F data = xb[i] ? TypeTrait::minus(msg(i, j), bufj) : bufj;
-                    z[j] = TypeTrait::plus(z[j], data);
+                    // temp = otMsg[i,j, xb[i]]
+                    CoeffCtx::fromBlock(temp[0], prng.get<block>());
+
+                    // temp = otMsg[i,j,xb[i]] + xb[i] * msg[i,j] 
+                    //      = otMsg[i,j,xb[i]] + xb[i] * (otMsg[i,j,0] + 2^i * y[j] - otMsg[i,j,1])
+                    //      = otMsg[i,j,xb[i]]           // if 0
+                    //      = otMsg[i,j,0] + 2^i * y[j]  // if 1
+                    //      = -z + 2^i * y[j]            // if 1
+                    if (xb[i])
+                        CoeffCtx::plus(temp[0], msg[k], temp[0]);
+                    
+                    // zj += msg - xb[i] * otMsg[i,j]
+                    CoeffCtx::plus(z[j], z[j], temp[0]);
                 }
             }
             setTimePoint("NoisyVoleSender.done");

@@ -18,12 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// This code implements features described in [Silver: Silent VOLE and Oblivious
-// Transfer from Hardness of Decoding Structured LDPC Codes,
-// https://eprint.iacr.org/2021/1150]; the paper is licensed under Creative
-// Commons Attribution 4.0 International Public License
-// (https://creativecommons.org/licenses/by/4.0/legalcode).
-
 #include <libOTe/config.h>
 #if defined(ENABLE_SILENT_VOLE) || defined(ENABLE_SILENTOT)
 
@@ -32,18 +26,25 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
+#include "libOTe/Tools/Subfield/Subfield.h"
 
-namespace osuCrypto::Subfield {
+namespace osuCrypto {
 
-    template <typename TypeTrait>
-    class NoisySubfieldVoleReceiver : public TimerAdapter {
+    template <
+        typename F,
+        typename G = F,
+        typename CoeffCtx = DefaultCoeffCtx<F, G>
+    >
+    class NoisySubfieldVoleReceiver : public TimerAdapter
+    {
     public:
-        using F = typename TypeTrait::F;
-        using G = typename TypeTrait::G;
-        task<> receive(span<G> y, span<F> z, PRNG& prng,
-            OtSender& ot, Socket& chl) {
+
+        template<typename VecG, typename VecF>
+        task<> receive(VecG&& y, VecF&& z, PRNG& prng,
+            OtSender& ot, Socket& chl)
+        {
             MC_BEGIN(task<>, this, y, z, &prng, &ot, &chl,
-                otMsg = AlignedUnVector<std::array<block, 2>>{ TypeTrait::bitsF });
+                otMsg = AlignedUnVector<std::array<block, 2>>{});
 
             setTimePoint("NoisyVoleReceiver.ot.begin");
 
@@ -56,44 +57,69 @@ namespace osuCrypto::Subfield {
             MC_END();
         }
 
-        task<> receive(span<G> y, span<F> z, PRNG& _,
+        template<typename VecG, typename VecF>
+        task<> receive(VecG&& y, VecF&& z, PRNG& _,
             span<std::array<block, 2>> otMsg,
-            Socket& chl) {
-            MC_BEGIN(task<>, this, y, z, otMsg, &chl, 
-                msg = Matrix<F>{},
+            Socket& chl)
+        {
+            MC_BEGIN(task<>, this, y, z, otMsg, &chl,
+                buff = std::vector<u8>{},
+                msg = typename CoeffCtx::Vec<F>{},
+                temp = typename CoeffCtx::Vec<F>{},
                 prng = std::move(PRNG{})
             );
 
-            if (otMsg.size() != TypeTrait::bitsF) throw RTE_LOC;
-            if (y.size() != z.size()) throw RTE_LOC;
-            if (z.size() == 0) throw RTE_LOC;
+            if (y.size() != z.size())
+                throw RTE_LOC;
+            if (z.size() == 0)
+                throw RTE_LOC;
 
             setTimePoint("NoisyVoleReceiver.begin");
 
-            memset(z.data(), 0, TypeTrait::bytesF * z.size());
-            msg.resize(otMsg.size(), z.size(), AllocType::Uninitialized);
+            CoeffCtx::zero(z.begin(), z.end());
+            CoeffCtx::resize(msg, otMsg.size() * z.size());
+            CoeffCtx::resize(temp, 2);
 
-            for (size_t ii = 0; ii < TypeTrait::bitsF; ++ii) {
-                prng.SetSeed(otMsg[ii][0], z.size());
-                auto& buffer = prng.mBuffer;
-                auto pow = TypeTrait::pow(ii);
-                for (size_t j = 0; j < y.size(); ++j) {
-                    auto bufj = TypeTrait::fromBlock(buffer[j]);
-                    z[j] = TypeTrait::plus(z[j], bufj);
-                    F yy = TypeTrait::mul(pow, y[j]);
+            for (size_t i = 0, k = 0; i < otMsg.size(); ++i)
+            {
+                prng.SetSeed(otMsg[i][0], z.size());
 
-                    msg(ii, j) = TypeTrait::plus(yy, bufj);
+                // t1 = 2^i
+                CoeffCtx::pow(temp[1], i);
+
+                for (size_t j = 0; j < y.size(); ++j, ++k)
+                {
+                    // msg[i,j] = otMsg[i,j,0]
+                    CoeffCtx::fromBlock<F>(msg[k], prng.get<block>());
+
+                    // z[j] -= otMsg[i,j,0]
+                    CoeffCtx::minus(z[j], z[j], msg[k]);
+
+                    // temp = 2^i * y[j]
+                    CoeffCtx::mul(temp[0], temp[1], y[j]);
+
+                    // msg[i,j] = otMsg[i,j,0] + 2^i * y[j]
+                    CoeffCtx::plus(msg[k], msg[k], temp[0]);
                 }
 
-                prng.SetSeed(otMsg[ii][1], z.size());
+                k -= y.size();
+                prng.SetSeed(otMsg[i][1], z.size());
 
-                for (size_t j = 0; j < y.size(); ++j) {
+                for (size_t j = 0; j < y.size(); ++j, ++k)
+                {
+                    // temp = otMsg[i,j,1]
+                    CoeffCtx::fromBlock(temp[0], prng.get<block>());
+
                     // enc one message under the OT msg.
-                    msg(ii, j) = TypeTrait::plus(msg(ii, j), TypeTrait::fromBlock(prng.mBuffer[j]));
+                    // msg[i,j] = (otMsg[i,j,0] + 2^i * y[j]) - otMsg[i,j,1]
+                    CoeffCtx::minus(msg[k], msg[k], temp[0]);
                 }
             }
 
-            MC_AWAIT(chl.send(std::move(msg)));
+            buff.resize(msg.size() * CoeffCtx::byteSize<F>());
+            CoeffCtx::serialize(buff, msg);
+
+            MC_AWAIT(chl.send(std::move(buff)));
             setTimePoint("NoisyVoleReceiver.done");
 
             MC_END();

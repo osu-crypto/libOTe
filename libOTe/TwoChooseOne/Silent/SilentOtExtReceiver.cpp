@@ -13,7 +13,7 @@
 #include <cryptoTools/Common/Range.h>
 #include <cryptoTools/Common/ThreadBarrier.h>
 #include "libOTe/Tools/QuasiCyclicCode.h"
-
+#include "libOTe/Tools/Subfield/Subfield.h"
 namespace osuCrypto
 {
 
@@ -747,13 +747,6 @@ namespace osuCrypto
         }
         else
         {
-            // allocate and initialize mC
-            //if (mChoiceSpanSize < mN2)
-            //{
-            //	mChoiceSpanSize = mN2;
-            //	mChoicePtr.reset((new u8[mN2]()));
-            //}
-            //else
             mC.resize(mN2);
             std::memset(mC.data(), 0, mN2);
             auto cc = mC.data();

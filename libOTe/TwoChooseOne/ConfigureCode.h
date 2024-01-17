@@ -105,6 +105,19 @@ namespace osuCrypto
 		ExConvCode& mEncoder
 	);
 
+
+	class ExConvCode2;
+	void ExConvConfigure(
+		u64 numOTs, u64 secParam,
+		MultType mMultType,
+		u64& mRequestedNumOTs,
+		u64& mNumPartitions,
+		u64& mSizePer,
+		u64& mN2,
+		u64& mN,
+		ExConvCode2& mEncoder
+	);
+
 #ifdef ENABLE_INSECURE_SILVER
 	struct SilverEncoder;
 	void SilverConfigure(

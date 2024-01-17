@@ -19,57 +19,19 @@
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
-#include <libOTe/Tools/LDPC/LdpcEncoder.h>
-#include <libOTe/Tools/Subfield/ExConvCode.h>
+#include <libOTe/Tools/ExConvCode/ExConvCode2.h>
 #include <libOTe/Base/BaseOT.h>
 #include <libOTe/Vole/Subfield/NoisyVoleReceiver.h>
 #include <libOTe/Vole/Subfield/NoisyVoleSender.h>
 //#define NO_HASH
 
-namespace osuCrypto::Subfield
+namespace osuCrypto
 {
-
-    inline void SubfieldExConvConfigure(
-        u64 numOTs, u64 secParam,
-        MultType mMultType,
-        u64& mRequestedNumOTs,
-        u64& mNumPartitions,
-        u64& mSizePer,
-        u64& mN2,
-        u64& mN,
-        ExConvCode& mEncoder
-    )
-    {
-        u64 a = 24;
-        auto mScaler = 2;
-        u64 w;
-        double minDist;
-        switch (mMultType)
-        {
-        case osuCrypto::MultType::ExConv7x24:
-            w = 7;
-            minDist = 0.1;
-            break;
-        case osuCrypto::MultType::ExConv21x24:
-            w = 21;
-            minDist = 0.15;
-            break;
-        default:
-            throw RTE_LOC;
-            break;
-        }
-
-        mRequestedNumOTs = numOTs;
-        mNumPartitions = getRegNoiseWeight(minDist, secParam);
-        mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
-        mN2 = mSizePer * mNumPartitions;
-        mN = mN2 / mScaler;
-
-        mEncoder.config(numOTs, numOTs * mScaler, w, a, true);
-    }
-
-
-    template<typename F, typename G = F, typename TypeTrait = DefaultTrait<F, G>>
+    template<
+        typename F,
+        typename G = F,
+        typename CoeffCtx = DefaultCoeffCtx<F, G>
+    >
     class SilentSubfieldVoleSender : public TimerAdapter
     {
     public:
@@ -82,10 +44,12 @@ namespace osuCrypto::Subfield
             HasBase
         };
 
+        using VecF = typename CoeffCtx::template Vec<F>;
+        using VecG = typename CoeffCtx::template Vec<G>;
 
         State mState = State::Default;
 
-        SilentSubfieldPprfSender<F, G, TypeTrait> mGen;
+        SilentSubfieldPprfSender<F, G, CoeffCtx> mGen;
 
         u64 mRequestedNumOTs = 0;
         u64 mN2 = 0;
@@ -93,9 +57,8 @@ namespace osuCrypto::Subfield
         u64 mNumPartitions = 0;
         u64 mSizePer = 0;
         u64 mNumThreads = 1;
-        std::vector<std::array<block, 2>> mGapOts;
         SilentBaseType mBaseType;
-        std::vector<F> mNoiseDeltaShares;
+        VecF mNoiseDeltaShares;
 
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
@@ -105,41 +68,14 @@ namespace osuCrypto::Subfield
 #endif
 
         MultType mMultType = DefaultMultType;
-#ifdef ENABLE_INSECURE_SILVER
-        SilverEncoder mEncoder;
-#endif
-        ExConvCode mExConvEncoder;
 
-        AlignedUnVector<F> mB;
+        ExConvCode2 mExConvEncoder;
 
-        /////////////////////////////////////////////////////
-        // The standard OT extension interface
-        /////////////////////////////////////////////////////
+        VecF mB;
 
-//        // the number of IKNP base OTs that should be set.
-//        u64 baseOtCount() const;
-//
-//        // returns true if the IKNP base OTs are currently set.
-//        bool hasBaseOts() const;
-//
-//        // sets the IKNP base OTs that are then used to extend
-//        void setBaseOts(
-//            span<block> baseRecvOts,
-//            const BitVector& choices);
-
-        // use the default base OT class to generate the
-        // IKNP base OTs that are required.
-//        task<> genBaseOts(PRNG& prng, Socket& chl)
-//        {
-//            return mOtExtSender.genBaseOts(prng, chl);
-//        }
-
-        /////////////////////////////////////////////////////
-        // The native silent OT extension interface
-        /////////////////////////////////////////////////////
 
         u64 baseVoleCount() const {
-            return mNumPartitions + mGapOts.size() + 1 * (mMalType == SilentSecType::Malicious);
+            return mNumPartitions + 1 * (mMalType == SilentSecType::Malicious);
         }
 
         // Generate the silent base OTs. If the Iknp 
@@ -157,7 +93,7 @@ namespace osuCrypto::Subfield
                 prng2 = std::move(PRNG{}),
                 xx = BitVector{},
                 chl2 = Socket{},
-                nv = NoisySubfieldVoleSender<TypeTrait>{},
+                nv = NoisySubfieldVoleSender<F, G, CoeffCtx>{},
                 noiseDeltaShares = std::vector<F>{}
             );
             setTimePoint("SilentVoleSender.genSilent.begin");
@@ -165,9 +101,10 @@ namespace osuCrypto::Subfield
             if (isConfigured() == false)
                 throw std::runtime_error("configure must be called first");
 
+            if(!delta)
+                CoeffCtx::fromBlock(*delta, prng.get<block>());
 
-            delta = delta.value_or(TypeTrait::fromBlock(prng.get<block>()));
-            xx = TypeTrait::BitVectorF(*delta);
+            xx = CoeffCtx::binaryDecomposition<F>(*delta);
 
             // compute the correlation for the noisy coordinates.
             noiseDeltaShares.resize(baseVoleCount());
@@ -232,21 +169,19 @@ namespace osuCrypto::Subfield
             u64 secParam = 128)
         {
             mBaseType = type;
-            u64 gap = 0;
 
             switch (mMultType)
             {
             case osuCrypto::MultType::ExConv7x24:
             case osuCrypto::MultType::ExConv21x24:
 
-                SubfieldExConvConfigure(numOTs, 128, mMultType, mRequestedNumOTs, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
+                ExConvConfigure(numOTs, 128, mMultType, mRequestedNumOTs, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
                 break;
             default:
                 throw RTE_LOC;
                 break;
             }
 
-            mGapOts.resize(gap);
             mGen.configure(mSizePer, mNumPartitions);
 
             mState = State::Configured;
@@ -262,7 +197,7 @@ namespace osuCrypto::Subfield
             if (isConfigured() == false)
                 throw std::runtime_error("configure must be called first");
 
-            return mGen.baseOtCount() + mGapOts.size();
+            return mGen.baseOtCount();
         }
 
         // Set the externally generated base OTs. This choice
@@ -277,11 +212,7 @@ namespace osuCrypto::Subfield
             if (noiseDeltaShares.size() != baseVoleCount())
                 throw RTE_LOC;
 
-            auto genOt = sendBaseOts.subspan(0, mGen.baseOtCount());
-            auto gapOt = sendBaseOts.subspan(genOt.size(), mGapOts.size());
-
-            mGen.setBase(genOt);
-            std::copy(gapOt.begin(), gapOt.end(), mGapOts.begin());
+            mGen.setBase(sendBaseOts);
             mNoiseDeltaShares.resize(noiseDeltaShares.size());
             std::copy(noiseDeltaShares.begin(), noiseDeltaShares.end(), mNoiseDeltaShares.begin());
         }
@@ -301,7 +232,8 @@ namespace osuCrypto::Subfield
 
             MC_AWAIT(silentSendInplace(delta, b.size(), prng, chl));
 
-            std::memcpy(b.data(), mB.data(), b.size() * TypeTrait::bytesF);
+            CoeffCtx::copy(mB.begin(), mB.begin() + b.size(), b.begin());
+            //std::memcpy(b.data(), mB.data(), b.size() * CoeffCtx::bytesF);
             clear();
 
             setTimePoint("SilentVoleSender.expand.ldpc.msgCpy");
@@ -320,12 +252,9 @@ namespace osuCrypto::Subfield
             Socket& chl)
         {
             MC_BEGIN(task<>, this, delta, n, &prng, &chl,
-                gapVals = std::vector<F>{},
                 deltaShare = block{},
                 X = block{},
-                hash = std::array<u8, 32>{},
-                noiseShares = span<F>{},
-                mbb = span<F>{}
+                hash = std::array<u8, 32>{}
             );
             setTimePoint("SilentVoleSender.ot.enter");
 
@@ -349,32 +278,15 @@ namespace osuCrypto::Subfield
             setTimePoint("SilentVoleSender.start");
             //gTimer.setTimePoint("SilentVoleSender.iknp.base2");
 
-//               if (mMalType == SilentSecType::Malicious)
-//               {
-//                 deltaShare = mNoiseDeltaShares.back();
-//                 mNoiseDeltaShares.pop_back();
-//               }
+            //if (mMalType == SilentSecType::Malicious)
+            //{
+            //  deltaShare = mNoiseDeltaShares.back();
+            //  mNoiseDeltaShares.pop_back();
+            //}
 
-               // allocate B
+            // allocate B
             mB.resize(0);
             mB.resize(mN2);
-
-            // derandomize the random OTs for the gap
-            // to have the desired correlation.
-            gapVals.resize(mGapOts.size());
-            for (u64 i = mNumPartitions * mSizePer, j = 0; i < mN2; ++i, ++j)
-            {
-                auto t = TypeTrait::fromBlock(mGapOts[j][0]);
-                auto v = TypeTrait::plus(t, mNoiseDeltaShares[mNumPartitions + j]);
-                gapVals[j] = TypeTrait::plus(
-                        TypeTrait::fromBlock(AES(mGapOts[j][1]).ecbEncBlock(ZeroBlock)),
-                        v);
-                mB[i] = t;
-            }
-
-            if (gapVals.size())
-                MC_AWAIT(chl.send(std::move(gapVals)));
-
 
             if (mTimer)
                 mGen.setTimer(*mTimer);
@@ -383,25 +295,22 @@ namespace osuCrypto::Subfield
             // our secret share of delta * noiseVals. The receiver
             // can then manually add their shares of this to the
             // output of the PPRF at the correct locations.
-            noiseShares = span<F>(mNoiseDeltaShares.data(), mNumPartitions);
-            mbb = mB.subspan(0, mNumPartitions * mSizePer);
-            MC_AWAIT(mGen.expand(chl, noiseShares, prng.get(), mbb,
+            MC_AWAIT(mGen.expand(chl, mNoiseDeltaShares, prng.get(), mB,
                 PprfOutputFormat::Interleaved, true, mNumThreads));
+            setTimePoint("SilentVoleSender.expand.pprf");
 
-            setTimePoint("SilentVoleSender.expand.pprf_transpose");
             if (mDebug)
             {
                 MC_AWAIT(checkRT(chl, delta));
                 setTimePoint("SilentVoleSender.expand.checkRT");
             }
 
-
-            //               if (mMalType == SilentSecType::Malicious)
-            //               {
-            //                 MC_AWAIT(chl.recv(X));
-            //                 hash = ferretMalCheck(X, deltaShare);
-            //                 MC_AWAIT(chl.send(std::move(hash)));
-            //               }
+            //if (mMalType == SilentSecType::Malicious)
+            //{
+            //  MC_AWAIT(chl.recv(X));
+            //  hash = ferretMalCheck(X, deltaShare);
+            //  MC_AWAIT(chl.send(std::move(hash)));
+            //}
 
             switch (mMultType)
             {
@@ -410,7 +319,7 @@ namespace osuCrypto::Subfield
                 if (mTimer) {
                     mExConvEncoder.setTimer(getTimer());
                 }
-                mExConvEncoder.dualEncode<TypeTrait, F>(mB.subspan(0, mExConvEncoder.mCodeSize));
+                mExConvEncoder.dualEncode<F, CoeffCtx>(mB.begin());
                 break;
             default:
                 throw RTE_LOC;

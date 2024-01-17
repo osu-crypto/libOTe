@@ -1,224 +1,246 @@
+#pragma once
 #include "libOTe/Vole/Noisy/NoisyVoleSender.h"
 #include "cryptoTools/Common/BitIterator.h"
 #include "cryptoTools/Common/BitVector.h"
 
-namespace osuCrypto::Subfield {
+namespace osuCrypto {
+
     /*
-     * Primitive TypeTrait for integers
+     * Primitive CoeffCtx for integers-like types
      */
-    template<typename T>
-    struct TypeTraitPrimitive {
-        using G = T;
-        using F = T;
+    struct CoeffCtxInteger
+    {
 
-        static constexpr size_t bitsG = sizeof(G) * 8;
-        static constexpr size_t bitsF = sizeof(F) * 8;
-        static constexpr size_t bytesG = sizeof(G);
-        static constexpr size_t bytesF = sizeof(F);
+        template<typename R, typename F1, typename F2>
+        static OC_FORCEINLINE void plus(R&& ret, F1&& lhs, F2&& rhs) {
+            ret = lhs + rhs;
+        }
 
-        static OC_FORCEINLINE F plus(const F& lhs, const F& rhs) {
-            return lhs + rhs;
+        template<typename R, typename F1, typename F2>
+        static OC_FORCEINLINE void minus(R&& ret, F1&& lhs, F2&& rhs) {
+            ret = lhs - rhs;
         }
-        static OC_FORCEINLINE F minus(const F& lhs, const F& rhs) {
-            return lhs - rhs;
+        template<typename R, typename F1, typename F2>
+        static OC_FORCEINLINE void mul(R&& ret, F1&& lhs, F2&& rhs) {
+            ret = lhs * rhs;
         }
-        static OC_FORCEINLINE F mul(const F& lhs, const F& rhs) {
-            return lhs * rhs;
-        }
-        static OC_FORCEINLINE bool eq(const F& lhs, const F& rhs) {
+
+        template<typename F>
+        static OC_FORCEINLINE bool eq(F&& lhs, F&& rhs) {
             return lhs == rhs;
         }
 
-        static OC_FORCEINLINE BitVector BitVectorF(F& x) {
-            return {(u8*)&x, bitsF};
+
+        // the bit size require to prepresent F
+        // the protocol will perform binary decomposition
+        // of F using this many bits
+        template<typename F>
+        static u64 bitSize()
+        {
+            return sizeof(F) * 8;
         }
 
-        static OC_FORCEINLINE F fromBlock(const block& b) {
-            return b.get<F>()[0];
+
+        template<typename F>
+        static OC_FORCEINLINE BitVector binaryDecomposition(F& x) {
+            static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
+            return { (u8*)&x, sizeof(F) * 8 };
         }
 
-        static OC_FORCEINLINE G fromBlockG(const block& b) {
-            return b.get<G>()[0];
+        template<typename F>
+        static OC_FORCEINLINE void fromBlock(F& ret, const block& b) {
+            static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
+
+            if constexpr (sizeof(F) <= sizeof(block))
+            {
+                memcpy(&ret, &b, sizeof(F));
+            }
+            else
+            {
+                auto constexpr size = (sizeof(F) + sizeof(block) - 1) / sizeof(block);
+                std::array<block, size> buffer;
+                mAesFixedKey.ecbEncCounterMode(b, buffer);
+                memcpy(&ret, buffer.data(), sizeof(ret));
+            }
         }
 
-        static OC_FORCEINLINE F pow(u64 power) {
-            F ret = 1;
-            ret <<= power;
-            return ret;
+        template<typename F>
+        static OC_FORCEINLINE void pow(F& ret, u64 power) {
+            static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
+            memset(&ret, 0, sizeof(F));
+            *BitIterator((u8*)&ret, power) = 1;
+        }
+
+
+        template<typename F>
+        static OC_FORCEINLINE void copy(F& dst, const F& src)
+        {
+            dst = src;
+        }
+
+        template<typename SrcIter, typename DstIter>
+        static OC_FORCEINLINE void copy(
+            SrcIter begin,
+            SrcIter end,
+            DstIter dstBegin)
+        {
+            using F1 = std::remove_reference_t<decltype(*begin)>;
+            using F2 = std::remove_reference_t<decltype(*dstBegin)>;
+            static_assert(std::is_trivially_copyable<F1>::value, "memcpy is used so must be trivially_copyable.");
+            static_assert(std::is_same_v<F1, F2>, "src and destication types are not the same.");
+
+            std::copy(begin, end, dstBegin);
+        }
+
+        // must have 
+        // .size()
+        // operator[] that returns the element.
+        // begin() iterator
+        // end() iterator
+        template<typename F>
+        using Vec = AlignedUnVector<F>;
+
+        // the size of F when serialized.
+        template<typename F>
+        static u64 byteSize()
+        {
+            return sizeof(F);
+        }
+
+
+        // deserialize buff into dst
+        template<typename F>
+        static void deserialize(Vec<F>& dst, span<u8> buff)
+        {
+            if (dst.size() * sizeof(F) != buff.size())
+            {
+                std::cout << "bad buffer size " << LOCATION << std::endl;
+                std::terminate();
+            }
+            static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
+            memcpy(dst.data(), buff.data(), buff.size());
+        }
+
+        // serial buff into dst
+        template<typename F>
+        static void serialize(span<u8> dst, Vec<F>& buff)
+        {
+            if (buff.size() * sizeof(F) != dst.size())
+            {
+                std::cout << "bad buffer size " << LOCATION << std::endl;
+                std::terminate();
+            }
+            static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
+            memcpy(dst.data(), buff.data(), dst.size());
+        }
+
+        template<typename Iter>
+        static void zero(Iter begin, Iter end)
+        {
+            using F = std::remove_reference_t<decltype(*begin)>;
+            static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
+
+            if (begin != end)
+            {
+                auto n = std::distance(begin, end);
+                assert(n > 0);
+                memset(&*begin, 0, n * sizeof(F));
+            }
+        }
+
+        template<typename Iter>
+        static void one(Iter begin, Iter end)
+        {
+            std::fill(begin, end, 1);
+        }
+
+        // resize Vec
+        template<typename FVec>
+        static void resize(FVec&& f, u64 size)
+        {
+            f.resize(size);
         }
     };
 
-    using TypeTrait64 = TypeTraitPrimitive<u64>;
+    // CoeffCtx for GF fields. 
+    // ^ operator is used for addition.
+    struct CoeffCtxGF : CoeffCtxInteger
+    {
 
-    /*
-     * TypeTrait for GF(2^128)
-     */
-    struct TypeTraitF128 {
-        using G = block;
-        using F = block;
+        template<typename F>
+        static OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs) {
+            ret = lhs ^ rhs;
+        }
+        template<typename F>
+        static OC_FORCEINLINE void minus(F& ret, const F& lhs, const F& rhs) {
+            ret = lhs ^ rhs;
+        }
+    };
 
-        static constexpr size_t bitsG = sizeof(G) * 8;
-        static constexpr size_t bitsF = sizeof(F) * 8;
-        static constexpr size_t bytesG = sizeof(G);
-        static constexpr size_t bytesF = sizeof(F);
+    // block does not use operator*
+    struct CoeffCtxGFBlock : CoeffCtxGF
+    {
+        static OC_FORCEINLINE void mul(block& ret, const block& lhs, const block& rhs) {
+            ret = lhs.gf128Mul(rhs);
+        }
+    };
 
-        static OC_FORCEINLINE F plus(const F& lhs, const F& rhs) {
-            return lhs ^ rhs;
+
+    template<typename G, u64 N>
+    struct CoeffCtxArray : CoeffCtxInteger
+    {
+        using F = std::array<G, N>;
+
+        static OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs) {
+            for (u64 i = 0; i < lhs.size(); ++i) {
+                ret[i] = lhs[i] + rhs[i];
+            }
         }
-        static OC_FORCEINLINE F minus(const F& lhs, const F& rhs) {
-            return lhs ^ rhs;
+
+        static OC_FORCEINLINE void plus(G& ret, const  G& lhs, const G& rhs) {
+            ret = lhs + rhs;
         }
-        static OC_FORCEINLINE F mul(const F& lhs, const F& rhs) {
-            return lhs.gf128Mul(rhs);
+
+        static OC_FORCEINLINE void minus(F& ret, const F& lhs, const F& rhs)
+        {
+            for (u64 i = 0; i < lhs.size(); ++i) {
+                ret[i] = lhs[i] - rhs[i];
+            }
         }
-        static OC_FORCEINLINE bool eq(const F& lhs, const F& rhs) {
+
+        static OC_FORCEINLINE void minus(G& ret, const G& lhs, const G& rhs) {
+            ret = lhs - rhs;
+        }
+
+        static OC_FORCEINLINE void mul(F& ret, const F& lhs, const G& rhs)
+        {
+            for (u64 i = 0; i < lhs.size(); ++i) {
+                ret[i] = lhs[i] * rhs;
+            }
+        }
+
+        static OC_FORCEINLINE bool eq(const F& lhs, const F& rhs)
+        {
+            for (u64 i = 0; i < lhs.size(); ++i) {
+                if (lhs[i] != rhs[i])
+                    return false;
+            }
+            return true;
+        }
+
+        static OC_FORCEINLINE bool eq(const G& lhs, const G& rhs)
+        {
             return lhs == rhs;
         }
-
-        static OC_FORCEINLINE BitVector BitVectorF(F& x) {
-            return {(u8*)&x, bitsF};
-        }
-
-        static OC_FORCEINLINE F fromBlock(const block& b) {
-            return b;
-        }
-
-        static OC_FORCEINLINE G fromBlockG(const block& b) {
-            return b;
-        }
-
-        static OC_FORCEINLINE F pow(u64 power) {
-            F ret = ZeroBlock;
-            *BitIterator((u8*)&ret, power) = 1;
-            return ret;
-        }
     };
 
-    // array
-    template<typename T, size_t N>
-    struct Vec {
-        std::array<T, N> v;
-        OC_FORCEINLINE Vec operator+(const Vec& rhs) const {
-            Vec ret;
-            for (u64 i = 0; i < N; ++i) {
-                ret.v[i] = v[i] + rhs.v[i];
-            }
-            return ret;
-        }
-        OC_FORCEINLINE Vec operator-(const Vec& rhs) const {
-            Vec ret;
-            for (u64 i = 0; i < N; ++i) {
-                ret.v[i] = v[i] - rhs.v[i];
-            }
-            return ret;
-        }
-        OC_FORCEINLINE Vec operator*(const T& rhs) const {
-            Vec ret;
-            for (u64 i = 0; i < N; ++i) {
-                ret.v[i] = v[i] * rhs;
-            }
-            return ret;
-        }
-        OC_FORCEINLINE T operator[](u64 idx) const {
-            return v[idx];
-        }
-        OC_FORCEINLINE T& operator[](u64 idx) {
-            return v[idx];
-        }
-        OC_FORCEINLINE bool operator==(const Vec& rhs) const {
-            for (u64 i = 0; i < N; ++i) {
-                if (v[i] != rhs.v[i]) return false;
-            }
-            return true;
-        }
-        OC_FORCEINLINE bool operator!=(const Vec& rhs) const {
-            return !(*this == rhs);
-        }
+    template<typename F, typename G = F>
+    struct DefaultCoeffCtx : CoeffCtxInteger {
     };
 
-    // TypeTraitVec for array of integers
-    template<typename T, size_t N>
-    struct TypeTraitVec {
-        using G = T;
-        using F = Vec<T, N>;
+    // GF128 vole
+    template<> struct DefaultCoeffCtx<block, block> : CoeffCtxGFBlock {};
 
-        static constexpr size_t bitsG = sizeof(G) * 8;
-        static constexpr size_t bitsF = sizeof(F) * 8;
-        static constexpr size_t bytesG = sizeof(G);
-        static constexpr size_t bytesF = sizeof(F);
-
-        static constexpr size_t sizeBlocks = (bytesF + sizeof(block) - 1) / sizeof(block);
-        static constexpr size_t size = N;
-
-        static OC_FORCEINLINE F plus(const F& lhs, const F& rhs) {
-            F ret;
-            for (u64 i = 0; i < N; ++i) {
-                ret.v[i] = lhs.v[i] + rhs.v[i];
-            }
-            return ret;
-        }
-        static OC_FORCEINLINE F minus(const F& lhs, const F& rhs) {
-            F ret;
-            for (u64 i = 0; i < N; ++i) {
-                ret.v[i] = lhs.v[i] - rhs.v[i];
-            }
-            return ret;
-        }
-        static OC_FORCEINLINE F mul(const F& lhs, const G& rhs) {
-            F ret;
-            for (u64 i = 0; i < N; ++i) {
-                ret.v[i] = lhs.v[i] * rhs;
-            }
-            return ret;
-        }
-        static OC_FORCEINLINE bool eq(const F& lhs, const F& rhs) {
-            for (u64 i = 0; i < N; ++i) {
-                if (lhs.v[i] != rhs.v[i]) return false;
-            }
-            return true;
-        }
-        static OC_FORCEINLINE G plus(const G& lhs, const G& rhs) {
-            return lhs + rhs;
-        }
-
-        static OC_FORCEINLINE BitVector BitVectorF(F& x) {
-            return {(u8*)&x, bitsF};
-        }
-
-        static OC_FORCEINLINE F fromBlock(const block& b) {
-            F ret;
-            if (N * sizeof(T) <= sizeof(block)) {
-                memcpy(ret.v.data(), &b, bytesF);
-                return ret;
-            }
-            else {
-                std::array<block, sizeBlocks> buf;
-                for (u64 i = 0; i < sizeBlocks; ++i) {
-                    buf[i] = b + block(i, i);
-                }
-                mAesFixedKey.hashBlocks<sizeBlocks>(buf.data(), buf.data());
-                memcpy(&ret, &buf, sizeof(F));
-                return ret;
-            }
-        }
-
-        // assume primitive type for G now
-        static OC_FORCEINLINE G fromBlockG(const block& b) {
-            return b.get<G>()[0];
-        }
-
-        static OC_FORCEINLINE F pow(u64 power) {
-            F ret;
-            memset(&ret, 0, sizeof(ret));
-            *BitIterator((u8*)&ret, power) = 1;
-            return ret;
-        }
-    };
-
-    template<typename F, typename G>
-    struct DefaultTrait: TypeTraitPrimitive<F> {
-        static_assert(std::is_same<F, G>::value, "F and G must be the same type");
-    };
-
-    template<> struct DefaultTrait<block, block>: TypeTraitF128 {};
+    // OT
+    template<> struct DefaultCoeffCtx<block, bool> : CoeffCtxGFBlock {};
 }

@@ -121,7 +121,6 @@ namespace osuCrypto
                 else
                 {
                     memcpy(dst, src, vals.size() * sizeof(value_type));
-                    //throw RTE_LOC;
                     //assert(vals.size() % 32 == 0);
                     for (u64 i = 0; i < vals.size(); i += 32)
                         doMod32(vals.data() + i, &mod, modVal);

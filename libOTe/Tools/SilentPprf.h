@@ -30,11 +30,11 @@ namespace osuCrypto
     {
         // The i'th row holds the i'th leaf for all trees. 
         // The j'th tree is in the j'th column.
-        ByLeafIndex,               
+        ByLeafIndex,
 
         // The i'th row holds the i'th tree. 
         // The j'th leaf is in the j'th column.
-        ByTreeIndex,      
+        ByTreeIndex,
 
         // The native output mode. The output will be 
         // a single row with all leaf values.
@@ -48,11 +48,11 @@ namespace osuCrypto
         // ...
         // 
         // These are all flattened into a single row.
-        Interleaved,          
+        Interleaved,
 
         // call the user's callback. The leaves will be in
         // Interleaved format.
-        Callback               
+        Callback
     };
 
     enum class OTType
@@ -147,7 +147,7 @@ namespace osuCrypto
         span< std::array<block, 4>>& last);
 
     void allocateExpandTree(
-        u64 dpeth,
+        u64 depth,
         TreeAllocator& alloc,
         span<AlignedArray<block, 8>>& tree,
         std::vector<span<AlignedArray<block, 8>>>& levels);
@@ -160,7 +160,7 @@ namespace osuCrypto
         bool mPrint = false;
         TreeAllocator mTreeAlloc;
         Matrix<std::array<block, 2>> mBaseOTs;
-        
+
         std::function<void(u64 treeIdx, span<AlignedArray<block, 8>>)> mOutputFn;
 
         SilentMultiPprfSender() = default;
@@ -197,7 +197,7 @@ namespace osuCrypto
 
 
         void setBase(span<const std::array<block, 2>> baseMessages);
-        
+
         task<> expand(Socket& chls, span<const block> value, block seed, span<block> output, PprfOutputFormat oFormat, bool activeChildXorDelta, u64 numThreads)
         {
             MatrixView<block> o(output.data(), output.size(), 1);
@@ -205,10 +205,10 @@ namespace osuCrypto
         }
 
         task<> expand(
-            Socket& chl, 
-            span<const block> value, 
+            Socket& chl,
+            span<const block> value,
             block seed,
-            MatrixView<block> output, 
+            MatrixView<block> output,
             PprfOutputFormat oFormat,
             bool activeChildXorDelta,
             u64 numThreads);

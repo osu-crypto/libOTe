@@ -1,222 +1,232 @@
 #include "ExConvCode_Tests.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
-#include "libOTe/Tools/ExConvCode/ExConvCode.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode2.h"
 #include <iomanip>
+#include "libOTe/Tools/Subfield/Subfield.h"
 
 namespace osuCrypto
 {
-    void ExConvCode_encode_basic_test(const oc::CLP& cmd)
+
+    std::ostream& operator<<(std::ostream& o, const std::array<u8, 3>&a)
+    {
+        o << "{" << a[0] << " " << a[1] << " " << a[2] << "}";
+        return o;
+    }
+
+    struct mtxPrint
+    {
+        mtxPrint(AlignedUnVector<u8>& d, u64 r, u64 c)
+            :mData(d)
+            , mRows(r)
+            , mCols(c)
+        {}
+
+        AlignedUnVector<u8>& mData;
+        u64 mRows, mCols;
+    };
+
+    std::ostream& operator<<(std::ostream& o, const mtxPrint& m)
+    {
+        for (u64 i = 0; i < m.mRows; ++i)
+        {
+            for (u64 j = 0; j < m.mCols; ++j)
+            {
+                bool color = (int)m.mData[i * m.mCols + j] && &o == &std::cout;
+                if (color)
+                    o << Color::Green;
+
+                o << (int)m.mData[i * m.mCols + j] << " ";
+
+                if (color)
+                    o << Color::Default;
+            }
+            o << std::endl;
+        }
+        return o;
+    }
+
+    template<typename F, typename CoeffCtx>
+    void exConvTest(u64 k, u64 n, u64 bw, u64 aw, bool sys)
     {
 
-        auto k = cmd.getOr("k", 16ul);
-        auto R = cmd.getOr("R", 2.0);
-        auto n = cmd.getOr<u64>("n", k * R);
-        auto bw = cmd.getOr("bw", 7);
-        auto aw = cmd.getOr("aw", 8);
+        ExConvCode2 code;
+        code.config(k, n, bw, aw, sys);
 
-        bool v = cmd.isSet("v");
+        auto accOffset = sys * k;
+        std::vector<F> x1(n), x2(n), x3(n), x4(n);
+        PRNG prng(CCBlock);
 
-        for (auto sys : {/* false,*/ true })
+        for (u64 i = 0; i < x1.size(); ++i)
         {
+            x1[i] = x2[i] = x3[i] = prng.get();
+        }
+
+        std::vector<u8> rand(divCeil(aw, 8));
+        for (i64 i = 0; i < x1.size() - aw - 1; ++i)
+        {
+            prng.get(rand.data(), rand.size());
+            code.accOne<F, CoeffCtx, true>(x1.begin() + i, x1.end(), rand.data(), std::integral_constant<u64, 0>{});
+
+            if (aw == 16)
+                code.accOne<F, CoeffCtx, true>(x2.begin() + i, x2.end(), rand.data(), std::integral_constant<u64, 16>{});
 
 
-
-            ExConvCode code;
-            code.config(k, n, bw, aw, sys);
-
-            auto A = code.getA();
-            auto B = code.getB();
-            auto G = B * A;
-
-            std::vector<block> m0(k), m1(k), a1(n);
-
-            if (v)
+            CoeffCtx::plus(x3[i + 1], x3[i + 1], x3[i]);
+            for (u64 j = 0; j < aw && (i + j + 2) < x3.size(); ++j)
             {
-                std::cout << "B\n" << B << std::endl << std::endl;
-                std::cout << "A'\n" << code.getAPar() << std::endl << std::endl;
-                std::cout << "A\n" << A << std::endl << std::endl;
-                std::cout << "G\n" << G << std::endl;
-
-            }
-
-            const auto c0 = [&]() {
-                std::vector<block> c0(n);
-                PRNG prng(ZeroBlock);
-                prng.get(c0.data(), c0.size());
-                return c0;
-            }();
-
-            auto a0 = c0;
-            auto aa0 = a0;
-            std::vector<u8> aa1(n);
-            for (u64 i = 0; i < n; ++i)
-            {
-                aa1[i] = aa0[i].get<u8>(0);
-            }
-            if (code.mSystematic)
-            {
-                code.accumulate<block>(span<block>(a0.begin() + k, a0.begin() + n));
-                code.accumulate<block, u8>(
-                    span<block>(aa0.begin() + k, aa0.begin() + n),
-                    span<u8>(aa1.begin() + k, aa1.begin() + n)
-                    );
-
-                for (u64 i = 0; i < n; ++i)
+                if (*BitIterator(rand.data(), j))
                 {
-                    if (aa0[i] != a0[i])
-                        throw RTE_LOC;
-                    if (aa1[i] != a0[i].get<u8>(0))
-                        throw RTE_LOC;
+                    CoeffCtx::plus(x3[i + j + 2], x3[i + j + 2], x3[i]);
                 }
             }
-            else
+
+            for (u64 j = i; j < x1.size() && j < i + aw + 2; ++j)
             {
-                code.accumulate<block>(a0);
-            }
-            A.multAdd(c0, a1);
-            //A.leftMultAdd(c0, a1);
-            if (a0 != a1)
-            {
-                if (v)
+                if (aw == 16 && x1[j] != x2[j])
                 {
-
-                    for (u64 i = 0; i < k; ++i)
-                        std::cout << std::hex << std::setw(2) << std::setfill('0') << (a0[i]) << " ";
-                    std::cout << "\n";
-                    for (u64 i = 0; i < k; ++i)
-                        std::cout << std::hex << std::setw(2) << std::setfill('0') << (a1[i]) << " ";
-                    std::cout << "\n";
-                }
-
-                throw RTE_LOC;
-            }
-
-
-
-            for (u64 q = 0; q < n; ++q)
-            {
-                std::vector<block> c0(n);
-                c0[q] = AllOneBlock;
-
-                //auto q = 0;
-                auto cc = c0;
-                auto cc1 = c0;
-                auto mm1 = m1;
-                
-                std::vector<u8> cc2(cc1.size()), mm2(mm1.size());
-                for (u64 i = 0; i < n; ++i)
-                    cc2[i] = cc1[i].get<u8>(0);
-                for (u64 i = 0; i < k; ++i)
-                    mm2[i] = mm1[i].get<u8>(0);
-                //std::vector<block> cc(n);
-                //cc[q] = AllOneBlock;
-                std::fill(m0.begin(), m0.end(), ZeroBlock);
-                B.multAdd(cc, m0);
-
-
-                if (code.mSystematic)
-                {
-                    std::copy(cc.begin(), cc.begin() + k, m1.begin());
-                    code.mExpander.expand<block, true>(
-                        span<block>(cc.begin() + k, cc.end()),
-                        m1);
-                    //for (u64 i = 0; i < k; ++i)
-                    //    m1[i] ^= cc[i];
-                    std::copy(cc1.begin(), cc1.begin() + k, mm1.begin());
-                    std::copy(cc2.begin(), cc2.begin() + k, mm2.begin());
-
-                    code.mExpander.expand<block, u8, true>(
-                        span<block>(cc1.begin() + k, cc1.end()),
-                        span<u8>(cc2.begin() + k, cc2.end()),
-                        mm1, mm2);
-                }
-                else
-                {
-                    code.mExpander.expand<block>(cc, m1);
-                }
-                if (m0 != m1)
-                {
-
-                    std::cout << "B\n" << B << std::endl << std::endl;
-                    for (u64 i = 0; i < n; ++i)
-                        std::cout << (c0[i].get<u8>(0) & 1) << " ";
-                    std::cout << std::endl;
-
-                    std::cout << "exp act " << q << "\n";
-                    for (u64 i = 0; i < k; ++i)
-                    {
-                        std::cout << (m0[i].get<u8>(0) & 1) << " " << (m1[i].get<u8>(0) & 1) << std::endl;
-                    }
+                    std::cout << j << " " << (x1[j]) << " " << (x2[j]) << std::endl;
                     throw RTE_LOC;
                 }
 
-                if (code.mSystematic)
+                if (x1[j] != x3[j])
                 {
-                    if (mm1 != m1)
-                        throw RTE_LOC;
-
-                    for (u64 i = 0; i < k; ++i)
-                        if (mm2[i] != m1[i].get<u8>(0))
-                            throw RTE_LOC;
-                }
-            }
-
-            //for (u64 q = 0; q < n; ++q)
-            {
-                auto q = 0;
-
-                //std::fill(c0.begin(), c0.end(), ZeroBlock);
-                //c0[q] = AllOneBlock;
-                auto cc = c0;
-                auto cc1 = c0;
-                std::vector<u8> cc2(cc1.size());
-                for (u64 i = 0; i < n; ++i)
-                    cc2[i] = cc1[i].get<u8>(0);
-
-
-                std::fill(m0.begin(), m0.end(), ZeroBlock);
-                G.multAdd(c0, m0);
-
-                if (code.mSystematic)
-                {
-                    code.dualEncode<block>(cc);
-                    std::copy(cc.begin(), cc.begin() + k, m1.begin());
-                }
-                else
-                {
-                    code.dualEncode<block>(cc, m1);
-                }
-
-                if (m0 != m1)
-                {
-                    std::cout << "G\n" << G << std::endl << std::endl;
-                    for (u64 i = 0; i < n; ++i)
-                        std::cout << (c0[i].get<u8>(0) & 1) << " ";
-                    std::cout << std::endl;
-
-                    std::cout << "exp act " << q << "\n";
-                    for (u64 i = 0; i < k; ++i)
-                    {
-                        std::cout << (m0[i].get<u8>(0) & 1) << " " << (m1[i].get<u8>(0) & 1) << std::endl;
-                    }
+                    std::cout << j << " " << (x1[j]) << " " << (x3[j]) << std::endl;
                     throw RTE_LOC;
-                }
-
-
-                if (code.mSystematic)
-                {
-                    code.dualEncode2<block, u8>(cc1, cc2);
-
-                    for (u64 i = 0; i < k; ++i)
-                    {
-                        if (cc1[i] != cc[i])
-                            throw RTE_LOC;
-                        if (cc2[i] != cc[i].get<u8>(0))
-                            throw RTE_LOC;
-                    }
                 }
             }
         }
+
+
+        x4 = x1;
+        //std::cout << std::endl;
+
+        code.accumulateFixed<F, CoeffCtx, 0>(x1.begin() + accOffset);
+
+        if (aw == 16)
+        {
+            code.accumulateFixed<F, CoeffCtx, 16>(x2.begin() + accOffset);
+
+            if (x1 != x2)
+            {
+                for (u64 i = 0; i < x1.size(); ++i)
+                {
+                    std::cout << i << " " << (x1[i]) << " " << (x2[i]) << std::endl;
+                }
+                throw RTE_LOC;
+            }
+        }
+
+        {
+            PRNG coeffGen(code.mSeed ^ OneBlock);
+            u8* mtxCoeffIter = (u8*)coeffGen.mBuffer.data();
+            auto mtxCoeffEnd = mtxCoeffIter + coeffGen.mBuffer.size() * sizeof(block) - divCeil(aw, 8);
+
+            auto xi = x3.begin() + accOffset;
+            auto end = x3.end();
+            while (xi < end)
+            {
+                if (mtxCoeffIter > mtxCoeffEnd)
+                {
+                    // generate more mtx coefficients
+                    ExConvCode2::refill(coeffGen);
+                    mtxCoeffIter = (u8*)coeffGen.mBuffer.data();
+                }
+                
+                // add xi to the next positions
+                auto xj = xi + 1;
+                if (xj != end)
+                {
+                    CoeffCtx::plus(*xj, *xj, *xi);
+                    ++xj;
+                }
+                for (u64 j = 0; j < aw && xj != end; ++j, ++xj)
+                {
+                    if (*BitIterator(mtxCoeffIter, j))
+                    {
+                        CoeffCtx::plus(*xj, *xj, *xi);
+                    }
+                }
+                ++mtxCoeffIter;
+
+                ++xi;
+            }
+        }
+
+        if (x1 != x3)
+        {
+            for (u64 i = 0; i < x1.size(); ++i)
+            {
+                std::cout << i << " " << (x1[i]) << " " << (x3[i]) << std::endl;
+            }
+            throw RTE_LOC;
+        }
+
+
+        detail::ExpanderModd expanderCoeff(code.mExpander.mSeed, code.mExpander.mCodeSize);
+        std::vector<F> y1(k), y2(k);
+
+        if (sys)
+        {
+            std::copy(x1.begin(), x1.begin() + k, y1.begin());
+            y2 = y1;
+            code.mExpander.expand<F, CoeffCtx, true>(x1.cbegin() + accOffset, y1.begin());
+        }
+        else
+        {
+            code.mExpander.expand<F, CoeffCtx, false>(x1.cbegin() + accOffset, y1.begin());
+        }
+
+        u64 i = 0;
+        auto main = k / 8 * 8;
+        for (; i < main; i += 8)
+        {
+            for (u64 j = 0; j < code.mExpander.mExpanderWeight; ++j)
+            {
+                for (u64 p = 0; p < 8; ++p)
+                {
+                    auto idx = expanderCoeff.get();
+                    CoeffCtx::plus(y2[i + p], y2[i + p], x1[idx + accOffset]);
+                }
+            }
+        }
+
+        for (; i < k; ++i)
+        {
+            for (u64 j = 0; j < code.mExpander.mExpanderWeight; ++j)
+            {
+                auto idx = expanderCoeff.get();
+                CoeffCtx::plus(y2[i], y2[i], x1[idx + accOffset]);
+            }
+        }
+
+        if (y1 != y2)
+            throw RTE_LOC;
+
+        code.dualEncode<F, CoeffCtx>(x4.begin());
+
+        x4.resize(k);
+        if (x4 != y1)
+            throw RTE_LOC;
     }
 
+
+    void ExConvCode_encode_basic_test(const oc::CLP& cmd)
+    {
+
+        auto K = cmd.getManyOr<u64>("k", { 16ul, 64, 4353 });
+        auto R = cmd.getManyOr<double>("R", { 2.0, 3.0 });
+        auto Bw = cmd.getManyOr<u64>("bw", { 7, 21 });
+        auto Aw = cmd.getManyOr<u64>("aw", { 16, 24, 29 });
+
+        bool v = cmd.isSet("v");
+        for (auto k : K) for (auto r : R) for (auto bw : Bw) for (auto aw : Aw) for (auto sys : { false, true })
+        {
+            auto n = k * r;
+            exConvTest<u32, CoeffCtxInteger>(k, n, bw, aw, sys);
+            exConvTest<u8, CoeffCtxInteger>(k, n, bw, aw, sys);
+            exConvTest<block, CoeffCtxGFBlock>(k, n, bw, aw, sys);
+            exConvTest<std::array<u8, 3>, CoeffCtxArray<u8, 3>>(k, n, bw, aw, sys);
+        }
+
+    }
 }

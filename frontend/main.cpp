@@ -107,7 +107,6 @@ void minimal()
 #include "cryptoTools/Crypto/RandomOracle.h"
 int main(int argc, char** argv)
 {
-
 	CLP cmd;
 	cmd.parse(argc, argv);
 	bool flagSet = false;

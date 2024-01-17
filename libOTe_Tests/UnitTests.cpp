@@ -57,12 +57,18 @@ namespace tests_libOTe
 
             tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
             tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
-            
+            tc.add("Subfield_ExConvCode_encode_test         ", Subfield::Subfield_ExConvCode_encode_test);
+
             tc.add("Tools_Pprf_expandOne_test               ", Tools_Pprf_expandOne_test);
             tc.add("Tools_Pprf_test                         ", Tools_Pprf_test);
             tc.add("Tools_Pprf_inter_test                   ", Tools_Pprf_inter_test);
             tc.add("Tools_Pprf_blockTrans_test              ", Tools_Pprf_blockTrans_test);
             tc.add("Tools_Pprf_callback_test                ", Tools_Pprf_callback_test);
+
+
+            tc.add("Subfield_Tools_Pprf_test                ", Subfield::Subfield_Tools_Pprf_test);
+            tc.add("Subfield_Noisy_Vole_test                ", Subfield::Subfield_Noisy_Vole_test);
+            tc.add("Subfield_Silent_Vole_test               ", Subfield::Subfield_Silent_Vole_test);
 
             tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
             tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);
@@ -117,10 +123,6 @@ namespace tests_libOTe
             tc.add("NcoOt_Oos_Test                          ", NcoOt_Oos_Test);
             tc.add("NcoOt_genBaseOts_Test                   ", NcoOt_genBaseOts_Test);
 
-            tc.add("Subfield_ExConvCode_encode_test         ", Subfield::Subfield_ExConvCode_encode_test);
-            tc.add("Subfield_Tools_Pprf_test                ", Subfield::Subfield_Tools_Pprf_test);
-            tc.add("Subfield_Noisy_Vole_test                ", Subfield::Subfield_Noisy_Vole_test);
-            tc.add("Subfield_Silent_Vole_test               ", Subfield::Subfield_Silent_Vole_test);
 
         });
 }

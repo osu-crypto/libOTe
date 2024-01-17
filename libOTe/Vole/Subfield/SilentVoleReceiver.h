@@ -20,7 +20,7 @@
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
 #include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
-#include <libOTe/Tools/Subfield/ExConvCode.h>
+#include <libOTe/Tools/ExConvCode/ExConvCode.h>
 #include <libOTe/Base/BaseOT.h>
 #include <libOTe/Vole/Subfield/NoisyVoleReceiver.h>
 #include <libOTe/Vole/Subfield/NoisyVoleSender.h>
@@ -29,7 +29,11 @@ namespace osuCrypto::Subfield
 {
 
 
-    template<typename F, typename G = F, typename TypeTrait = DefaultTrait<F, G>>
+    template<
+        typename F,
+        typename G = F,
+        typename CoeffCtx = DefaultCoeffCtx<F, G>
+    >
     class SilentSubfieldVoleReceiver : public TimerAdapter
     {
     public:
@@ -42,6 +46,9 @@ namespace osuCrypto::Subfield
             HasBase
         };
 
+        using VecF = typename CoeffCtx::template Vec<F>;
+        using VecG = typename CoeffCtx::template Vec<G>;
+
         // The current state of the protocol
         State mState = State::Default;
 
@@ -51,7 +58,7 @@ namespace osuCrypto::Subfield
         // The number of OTs actually produced (at least the number requested).
         u64 mN = 0;
 
-        // The length of the noisy vectors (2 * mN for the silver codes).
+        // The length of the noisy vectors (2 * mN for the most codes).
         u64 mN2 = 0;
 
         // We perform regular LPN, so this is the
@@ -70,33 +77,31 @@ namespace osuCrypto::Subfield
         // the sparse vector.
         MultType mMultType = DefaultMultType;
 
-        ExConvCode mExConvEncoder;
+        ExConvCode2 mExConvEncoder;
 
         // The multi-point punctured PRF for generating
         // the sparse vectors.
-        SilentSubfieldPprfReceiver<F, G, TypeTrait> mGen;
+        SilentSubfieldPprfReceiver<F, G, CoeffCtx> mGen;
 
         // The internal buffers for holding the expanded vectors.
         // mA + mB = mC * delta
-        AlignedUnVector<F> mA;
+        VecF mA;
 
         // mA + mB = mC * delta
-        AlignedUnVector<G> mC;
-
-        std::vector<block> mGapOts;
+        VecG mC;
 
         u64 mNumThreads = 1;
 
         bool mDebug = false;
 
-        BitVector mIknpSendBaseChoice, mGapBaseChoice;
+        BitVector mIknpSendBaseChoice;
 
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
         block mMalCheckSeed, mMalCheckX, mDeltaShare;
 
-        AlignedVector<F> mNoiseDeltaShare;
-        AlignedVector<G> mNoiseValues;
+        VecF mNoiseDeltaShare;
+        VecG mNoiseValues;
 
 
 #ifdef ENABLE_SOFTSPOKEN_OT
@@ -113,7 +118,7 @@ namespace osuCrypto::Subfield
 
         u64 baseVoleCount() const
         {
-            return mNumPartitions + mGapOts.size() + 1 * (mMalType == SilentSecType::Malicious);
+            return mNumPartitions + 1 * (mMalType == SilentSecType::Malicious);
         }
 
         //        // returns true if the IKNP base OTs are currently set.
@@ -144,9 +149,9 @@ namespace osuCrypto::Subfield
                 baseOt = BaseOT{},
                 chl2 = Socket{},
                 prng2 = std::move(PRNG{}),
-                noiseVals = std::vector<G>{},
-                noiseDeltaShares = std::vector<F>{},
-                nv = NoisySubfieldVoleReceiver<TypeTrait>{}
+                noiseVals = VecG{},
+                noiseDeltaShares = VecF{},
+                nv = NoisySubfieldVoleReceiver<F,G,CoeffCtx>{}
 
             );
 
@@ -172,7 +177,8 @@ namespace osuCrypto::Subfield
             // other party will program the PPRF to output their share of delta * noiseVals.
             //
             noiseVals = sampleBaseVoleVals(prng);
-            noiseDeltaShares.resize(noiseVals.size());
+            CoeffCtx::resize(noiseDeltaShares, noiseVals.size());
+
             if (mTimer)
                 nv.setTimer(*mTimer);
 
@@ -237,7 +243,6 @@ namespace osuCrypto::Subfield
             u64 secParam = 128)
         {
             mState = State::Configured;
-            u64 gap = 0;
             mBaseType = type;
 
             switch (mMultType)
@@ -245,14 +250,13 @@ namespace osuCrypto::Subfield
             case osuCrypto::MultType::ExConv7x24:
             case osuCrypto::MultType::ExConv21x24:
 
-                SubfieldExConvConfigure(numOTs, 128, mMultType, mRequestedNumOTs, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
+                ExConvConfigure(numOTs, 128, mMultType, mRequestedNumOTs, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
                 break;
             default:
                 throw RTE_LOC;
                 break;
             }
 
-            mGapOts.resize(gap);
             mGen.configure(mSizePer, mNumPartitions);
         }
 
@@ -266,7 +270,7 @@ namespace osuCrypto::Subfield
             if (isConfigured() == false)
                 throw std::runtime_error("configure must be called first");
 
-            return mGen.baseOtCount() + mGapOts.size();
+            return mGen.baseOtCount();
 
         }
 
@@ -281,42 +285,26 @@ namespace osuCrypto::Subfield
 
             auto choice = mGen.sampleChoiceBits(mN2, getPprfFormat(), prng);
 
-            mGapBaseChoice.resize(mGapOts.size());
-            mGapBaseChoice.randomize(prng);
-            choice.append(mGapBaseChoice);
-
             return choice;
         }
 
-        std::vector<G> sampleBaseVoleVals(PRNG& prng)
+        VecG sampleBaseVoleVals(PRNG& prng)
         {
             if (isConfigured() == false)
                 throw RTE_LOC;
-            if (mGapBaseChoice.size() != mGapOts.size())
-                throw std::runtime_error("sampleBaseChoiceBits must be called before sampleBaseVoleVals. " LOCATION);
 
             // sample the values of the noisy coordinate of c
             // and perform a noicy vole to get x+y = mD * c
-            auto w = mNumPartitions + mGapOts.size();
+            auto w = mNumPartitions;
             std::vector<block> seeds(w);
-            mNoiseValues.resize(w);
+            CoeffCtx::resize(mNoiseValues, w);
             prng.get(seeds.data(), seeds.size());
             for (size_t i = 0; i < w; i++) {
-                mNoiseValues[i] = TypeTrait::fromBlockG(seeds[i]);
+                CoeffCtx::fromBlock<G>(mNoiseValues[i], seeds[i]);
             }
 
             mS.resize(mNumPartitions);
             mGen.getPoints(mS, getPprfFormat());
-
-            auto j = mNumPartitions * mSizePer;
-
-            for (u64 i = 0; i < (u64)mGapBaseChoice.size(); ++i)
-            {
-                if (mGapBaseChoice[i])
-                {
-                    mS.push_back(j + i);
-                }
-            }
 
             //          if (mMalType == SilentSecType::Malicious)
             //          {
@@ -352,7 +340,7 @@ namespace osuCrypto::Subfield
             //            return y;
             //          }
 
-            return std::vector<G>(mNoiseValues.begin(), mNoiseValues.end());
+            return mNoiseValues;
         }
 
         // Set the externally generated base OTs. This choice
@@ -366,11 +354,7 @@ namespace osuCrypto::Subfield
             if (static_cast<u64>(recvBaseOts.size()) != silentBaseOtCount())
                 throw std::runtime_error("wrong number of silent base OTs");
 
-            auto genOts = recvBaseOts.subspan(0, mGen.baseOtCount());
-            auto gapOts = recvBaseOts.subspan(mGen.baseOtCount(), mGapOts.size());
-
-            mGen.setBase(genOts);
-            std::copy(gapOts.begin(), gapOts.end(), mGapOts.begin());
+            mGen.setBase(recvBaseOts);
 
             //          if (mMalType == SilentSecType::Malicious)
             //          {
@@ -378,7 +362,8 @@ namespace osuCrypto::Subfield
             //            noiseDeltaShare = noiseDeltaShare.subspan(0, noiseDeltaShare.size() - 1);
             //          }
 
-            mNoiseDeltaShare = AlignedVector<F>(noiseDeltaShare.begin(), noiseDeltaShare.end());
+            CoeffCtx::resize(mNoiseDeltaShare, noiseDeltaShare.size());
+            CoeffCtx::copy(noiseDeltaShare.begin(), noiseDeltaShare.end(), mNoiseDeltaShare.begin());
 
             mState = State::HasBase;
         }
@@ -389,18 +374,19 @@ namespace osuCrypto::Subfield
         // the silent base OTs will automatically be performed.
         task<> silentReceive(
             span<G> c,
-            span<F> b,
+            span<F> a,
             PRNG& prng,
             Socket& chl)
         {
-            MC_BEGIN(task<>, this, c, b, &prng, &chl);
-            if (c.size() != b.size())
+            MC_BEGIN(task<>, this, c, a, &prng, &chl);
+            if (c.size() != a.size())
                 throw RTE_LOC;
 
             MC_AWAIT(silentReceiveInplace(c.size(), prng, chl));
 
-            std::memcpy(c.data(), mC.data(), c.size() * TypeTrait::bytesG);
-            std::memcpy(b.data(), mA.data(), b.size() * TypeTrait::bytesF);
+            CoeffCtx::copy(mC.begin(), mC.begin() + c.size(), c.begin());
+            CoeffCtx::copy(mA.begin(), mA.begin() + a.size(), a.begin());
+
             clear();
             MC_END();
         }
@@ -415,7 +401,6 @@ namespace osuCrypto::Subfield
             Socket& chl)
         {
             MC_BEGIN(task<>, this, n, &prng, &chl,
-                gapVals = std::vector<F>{},
                 myHash = std::array<u8, 32>{},
                 theirHash = std::array<u8, 32>{}
             );
@@ -437,52 +422,21 @@ namespace osuCrypto::Subfield
             }
 
             // allocate mA
-            mA.resize(0);
-            mA.resize(mN2);
+            CoeffCtx::resize(mA, 0);
+            CoeffCtx::resize(mA, mN2);
 
             setTimePoint("SilentVoleReceiver.alloc");
 
             // allocate the space for mC
-            mC.resize(0);
-            mC.resize(mN2, AllocType::Zeroed);
+            CoeffCtx::resize(mC, 0);
+            CoeffCtx::resize(mC, mN2);
+            CoeffCtx::zero(mC.begin(), mC.end());
             setTimePoint("SilentVoleReceiver.alloc.zero");
-
-            // derandomize the random OTs for the gap
-            // to have the desired correlation.
-            gapVals.resize(mGapOts.size());
-
-            if (gapVals.size())
-                MC_AWAIT(chl.recv(gapVals));
-
-            for (auto g : rng(mGapOts.size()))
-            {
-                auto aa = mA.subspan(mNumPartitions * mSizePer);
-                auto cc = mC.subspan(mNumPartitions * mSizePer);
-
-                auto noise = mNoiseValues.subspan(mNumPartitions);
-                auto noiseShares = mNoiseDeltaShare.subspan(mNumPartitions);
-
-                if (mGapBaseChoice[g])
-                {
-                    cc[g] = noise[g];
-                    aa[g] = TypeTrait::minus(
-                            TypeTrait::minus(gapVals[g], TypeTrait::fromBlock(AES(mGapOts[g]).ecbEncBlock(ZeroBlock))),
-                            noiseShares[g]);
-                }
-                else
-                {
-                    aa[g] = TypeTrait::fromBlock(mGapOts[g]);
-                }
-            }
-
-            setTimePoint("SilentVoleReceiver.recvGap");
-
-
 
             if (mTimer)
                 mGen.setTimer(*mTimer);
             // expand the seeds into mA
-            MC_AWAIT(mGen.expand(chl, mA.subspan(0, mNumPartitions * mSizePer), PprfOutputFormat::Interleaved, true, mNumThreads));
+            MC_AWAIT(mGen.expand(chl, mA, PprfOutputFormat::Interleaved, true, mNumThreads));
 
             setTimePoint("SilentVoleReceiver.expand.pprf_transpose");
 
@@ -491,10 +445,9 @@ namespace osuCrypto::Subfield
             for (u64 i = 0; i < mNumPartitions; ++i)
             {
                 auto pnt = mS[i];
-                mC[pnt] = mNoiseValues[i];
-                mA[pnt] = TypeTrait::minus(mA[pnt], mNoiseDeltaShare[i]);
+                CoeffCtx::copy(mC[pnt], mNoiseValues[i]);
+                CoeffCtx::minus(mA[pnt], mA[pnt], mNoiseDeltaShare[i]);
             }
-
 
             if (mDebug)
             {
@@ -503,17 +456,17 @@ namespace osuCrypto::Subfield
             }
 
 
-            //               if (mMalType == SilentSecType::Malicious)
-            //               {
-            //                 MC_AWAIT(chl.send(std::move(mMalCheckSeed)));
+            // if (mMalType == SilentSecType::Malicious)
+            // {
+            //   MC_AWAIT(chl.send(std::move(mMalCheckSeed)));
             //
-            //                 myHash = ferretMalCheck(mDeltaShare, mNoiseValues);
+            //   myHash = ferretMalCheck(mDeltaShare, mNoiseValues);
             //
-            //                 MC_AWAIT(chl.recv(theirHash));
+            //   MC_AWAIT(chl.recv(theirHash));
             //
-            //                 if (theirHash != myHash)
-            //                   throw RTE_LOC;
-            //               }
+            //   if (theirHash != myHash)
+            //     throw RTE_LOC;
+            // }
 
             switch (mMultType)
             {
@@ -523,10 +476,10 @@ namespace osuCrypto::Subfield
                     mExConvEncoder.setTimer(getTimer());
                 }
 
-                mExConvEncoder.dualEncode2<TypeTrait, F, G>(
-                    mA.subspan(0, mExConvEncoder.mCodeSize),
-                    mC.subspan(0, mExConvEncoder.mCodeSize)
-                    );
+                mExConvEncoder.dualEncode2<F, G, CoeffCtx>(
+                    mA.begin(),
+                    mC.begin()
+                );
 
                 break;
             default:
@@ -535,8 +488,8 @@ namespace osuCrypto::Subfield
             }
 
             // resize the buffers down to only contain the real elements.
-            mA.resize(mRequestedNumOTs);
-            mC.resize(mRequestedNumOTs);
+            CoeffCtx::resize(mA, mRequestedNumOTs);
+            CoeffCtx::resize(mC, mRequestedNumOTs);
 
             mNoiseValues = {};
             mNoiseDeltaShare = {};
@@ -554,23 +507,29 @@ namespace osuCrypto::Subfield
         task<> checkRT(Socket& chl) const
         {
             MC_BEGIN(task<>, this, &chl,
-                B = AlignedVector<F>(mA.size()),
-                sparseNoiseDelta = std::vector<F>(mA.size()),
-                noiseDeltaShare2 = std::vector<F>(),
-                delta = F{}
+                B = typename CoeffCtx::Vec<F>{},
+                sparseNoiseDelta = typename CoeffCtx::Vec<F>{},
+                noiseDeltaShare2 = typename CoeffCtx::Vec<F>{},
+                delta = typename CoeffCtx::Vec<F>{},
+                tempF = typename CoeffCtx::Vec<F>{},
+                tempG = typename CoeffCtx::Vec<G>{},
+                buffer = std::vector<u8>{}
             );
-            //std::vector<block> mB(mA.size());
-            MC_AWAIT(chl.recv(delta));
-            MC_AWAIT(chl.recv(B));
-            MC_AWAIT(chl.recvResize(noiseDeltaShare2));
 
-            for (u64 i = 0; i < mA.size(); i++) {
-                F left = TypeTrait::mul(delta, mC[i]);
-                F right = TypeTrait::minus(mA[i], B[i]);
-                if (left != right) {
-                    throw RTE_LOC;
-                }
-            }
+            // recv delta
+            buffer.resize(CoeffCtx::byteSize<F>());
+            MC_AWAIT(chl.recv(buffer));
+            CoeffCtx::deserialize(delta, buffer);
+
+            // recv B
+            buffer.resize(CoeffCtx::byteSize<F>() * mA.size());
+            MC_AWAIT(chl.recv(buffer));
+            CoeffCtx::deserialize(B, buffer);
+
+            // recv the noisy values.
+            buffer.resize(CoeffCtx::byteSize<F>() * mNoiseDeltaShare.size());
+            MC_AWAIT(chl.recvResize(buffer));
+            CoeffCtx::deserialize(noiseDeltaShare2, buffer);
 
             //check that at locations  mS[0],...,mS[..]
             // that we hold a sharing mA, mB of
@@ -584,154 +543,72 @@ namespace osuCrypto::Subfield
             //  delta * mC = mA + mB
             //
 
-//               if (noiseDeltaShare2.size() != mNoiseDeltaShare.size())
-//                 throw RTE_LOC;
-//
-//               for (auto i : rng(mNoiseDeltaShare.size()))
-//               {
-//                 if ((mNoiseDeltaShare[i] ^ noiseDeltaShare2[i]) != mNoiseValues[i].gf128Mul(delta))
-//                   throw RTE_LOC;
-//               }
-//
-//               {
-//
-//                 for (auto i : rng(mNumPartitions* mSizePer))
-//                 {
-//                   auto iter = std::find(mS.begin(), mS.end(), i);
-//                   if (iter != mS.end())
-//                   {
-//                     auto d = iter - mS.begin();
-//
-//                     if (mC[i] != mNoiseValues[d])
-//                       throw RTE_LOC;
-//
-//                     if (mNoiseValues[d].gf128Mul(delta) != (mA[i] ^ B[i]))
-//                     {
-//                       std::cout << "bad vole base correlation, mA[i] + mB[i] != mC[i] * delta" << std::endl;
-//                       std::cout << "i     " << i << std::endl;
-//                       std::cout << "mA[i] " << mA[i] << std::endl;
-//                       std::cout << "mB[i] " << B[i] << std::endl;
-//                       std::cout << "mC[i] " << mC[i] << std::endl;
-//                       std::cout << "delta " << delta << std::endl;
-//                       std::cout << "mA[i] + mB[i] " << (mA[i] ^ B[i]) << std::endl;
-//                       std::cout << "mC[i] * delta " << (mC[i].gf128Mul(delta)) << std::endl;
-//
-//                       throw RTE_LOC;
-//                     }
-//                   }
-//                   else
-//                   {
-//                     if (mA[i] != B[i])
-//                     {
-//                       std::cout << mA[i] << " " << B[i] << std::endl;
-//                       throw RTE_LOC;
-//                     }
-//
-//                     if (mC[i] != oc::ZeroBlock)
-//                       throw RTE_LOC;
-//                   }
-//                 }
-//
-//                 u64 d = mNumPartitions;
-//                 for (auto j : rng(mGapBaseChoice.size()))
-//                 {
-//                   auto idx = j + mNumPartitions * mSizePer;
-//                   auto aa = mA.subspan(mNumPartitions * mSizePer);
-//                   auto bb = B.subspan(mNumPartitions * mSizePer);
-//                   auto cc = mC.subspan(mNumPartitions * mSizePer);
-//                   auto noise = mNoiseValues.subspan(mNumPartitions);
-//                   //auto noiseShare = mNoiseValues.subspan(mNumPartitions);
-//                   if (mGapBaseChoice[j])
-//                   {
-//                     if (mS[d++] != idx)
-//                       throw RTE_LOC;
-//
-//                     if (cc[j] != noise[j])
-//                     {
-//                       std::cout << "sparse noise vector mC is not the expected value" << std::endl;
-//                       std::cout << "i j      " << idx << " " << j << std::endl;
-//                       std::cout << "mC[i]    " << cc[j] << std::endl;
-//                       std::cout << "noise[j] " << noise[j] << std::endl;
-//                       throw RTE_LOC;
-//                     }
-//
-//                     if (noise[j].gf128Mul(delta) != (aa[j] ^ bb[j]))
-//                     {
-//
-//                       std::cout << "bad vole base GAP correlation, mA[i] + mB[i] != mC[i] * delta" << std::endl;
-//                       std::cout << "i     " << idx << std::endl;
-//                       std::cout << "mA[i] " << aa[j] << std::endl;
-//                       std::cout << "mB[i] " << bb[j] << std::endl;
-//                       std::cout << "mC[i] " << cc[j] << std::endl;
-//                       std::cout << "delta " << delta << std::endl;
-//                       std::cout << "mA[i] + mB[i] " << (aa[j] ^ bb[j]) << std::endl;
-//                       std::cout << "mC[i] * delta " << (cc[j].gf128Mul(delta)) << std::endl;
-//                       std::cout << "noise * delta " << (noise[j].gf128Mul(delta)) << std::endl;
-//                       throw RTE_LOC;
-//                     }
-//
-//                   }
-//                   else
-//                   {
-//                     if (aa[j] != bb[j])
-//                       throw RTE_LOC;
-//
-//                     if (cc[j] != oc::ZeroBlock)
-//                       throw RTE_LOC;
-//                   }
-//                 }
-//
-//                 if (d != mS.size())
-//                   throw RTE_LOC;
-//               }
+            CoeffCtx::resize(tempF, 2);
+            CoeffCtx::resize(tempG, 1);
+            CoeffCtx::zero(tempG.begin(), tempG.end());
+
+            for (auto i : rng(mNoiseDeltaShare.size()))
+            {
+                // temp[0] = mNoiseDeltaShare[i] + noiseDeltaShare2[i]
+                CoeffCtx::plus(tempF[0], mNoiseDeltaShare[i], noiseDeltaShare2[i]);
+
+                // temp[1] =  mNoiseValues[i] * delta[0]
+                CoeffCtx::mul(tempF[1], delta[0], mNoiseValues[i]);
+
+                if (!CoeffCtx::eq(tempF[0], tempF[1]))
+                    throw RTE_LOC;
+            }
+
+            {
+
+                for (auto i : rng(mNumPartitions* mSizePer))
+                {
+                    auto iter = std::find(mS.begin(), mS.end(), i);
+                    if (iter != mS.end())
+                    {
+                        auto d = iter - mS.begin();
+
+                        if (!CoeffCtx::eq(mC[i], mNoiseValues[d]))
+                            throw RTE_LOC;
+
+                        // temp[0] = A[i] + B[i]
+                        CoeffCtx::plus(tempF[0], mA[i], B[i]);
+
+                        // temp[1] =  mNoiseValues[d] * delta[0]
+                        CoeffCtx::mul(tempF[1], delta[0], mNoiseValues[d]);
 
 
-               //{
+                        if (!CoeffCtx::eq(tempF[0], tempF[1]))
+                        {
+                            std::cout << "bad vole base noisy correlation, mA[i] + mB[i] != mC[i] * delta" << std::endl;
+                            std::cout << "i     " << i << std::endl;
+                            //std::cout << "mA[i] " << mA[i] << std::endl;
+                            //std::cout << "mB[i] " << B[i] << std::endl;
+                            //std::cout << "mC[i] " << mC[i] << std::endl;
+                            //std::cout << "delta " << delta << std::endl;
+                            //std::cout << "mA[i] + mB[i] " << (mA[i] ^ B[i]) << std::endl;
+                            //std::cout << "mC[i] * delta " << (mC[i].gf128Mul(delta)) << std::endl;
 
-               //	auto cDelta = B;
-               //	for (u64 i = 0; i < cDelta.size(); ++i)
-               //		cDelta[i] = cDelta[i] ^ mA[i];
+                            throw RTE_LOC;
+                        }
+                    }
+                    else
+                    {
+                        if (!CoeffCtx::eq(mA[i], B[i]))
+                        {
+                            std::cout << "bad vole base non-noisy correlation, mA[i] + mB[i] != 0" << std::endl;
+                            //std::cout << mA[i] << " " << B[i] << std::endl;
+                            throw RTE_LOC;
+                        }
 
-               //	std::vector<block> exp(mN2);
-               //	for (u64 i = 0; i < mNumPartitions; ++i)
-               //	{
-               //		auto j = mS[i];
-               //		exp[j] = noiseDeltaShare2[i];
-               //	}
-
-               //	auto iter = mS.begin() + mNumPartitions;
-               //	for (u64 i = 0, j = mNumPartitions * mSizePer; i < mGapOts.size(); ++i, ++j)
-               //	{
-               //		if (mGapBaseChoice[i])
-               //		{
-               //			if (*iter != j)
-               //				throw RTE_LOC;
-               //			++iter;
-
-               //			exp[j] = noiseDeltaShare2[mNumPartitions + i];
-               //		}
-               //	}
-
-               //	if (iter != mS.end())
-               //		throw RTE_LOC;
-
-               //	bool failed = false;
-               //	for (u64 i = 0; i < mN2; ++i)
-               //	{
-               //		if (neq(cDelta[i], exp[i]))
-               //		{
-               //			std::cout << i << " / " << mN2 <<
-               //				" cd = " << cDelta[i] <<
-               //				" exp= " << exp[i] << std::endl;
-               //			failed = true;
-               //		}
-               //	}
-
-               //	if (failed)
-               //		throw RTE_LOC;
-
-               //	std::cout << "debug check ok" << std::endl;
-               //}
+                        if (!CoeffCtx::eq(mC[i], tempG[0]))
+                        {
+                            std::cout << "bad vole base non-noisy correlation, mC[i] != 0" << std::endl;
+                            throw RTE_LOC;
+                        }
+                    }
+                }
+            }
 
             MC_END();
         }
@@ -777,7 +654,6 @@ namespace osuCrypto::Subfield
             mA = {};
             mC = {};
             mGen.clear();
-            mGapBaseChoice = {};
         }
     };
 }

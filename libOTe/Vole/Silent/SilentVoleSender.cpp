@@ -132,7 +132,7 @@ namespace osuCrypto
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
 
-        return mGen.baseOtCount() + mGapOts.size();
+        return mGen.baseOtCount();
     }
 
     void SilentVoleSender::setSilentBaseOts(
@@ -145,11 +145,7 @@ namespace osuCrypto
         if (noiseDeltaShares.size() != baseVoleCount())
             throw RTE_LOC;
 
-        auto genOt = sendBaseOts.subspan(0, mGen.baseOtCount());
-        auto gapOt = sendBaseOts.subspan(genOt.size(), mGapOts.size());
-
-        mGen.setBase(genOt);
-        std::copy(gapOt.begin(), gapOt.end(), mGapOts.begin());
+        mGen.setBase(sendBaseOts);
         mNoiseDeltaShares.resize(noiseDeltaShares.size());
         std::copy(noiseDeltaShares.begin(), noiseDeltaShares.end(), mNoiseDeltaShares.begin());
     }
@@ -160,7 +156,6 @@ namespace osuCrypto
         u64 secParam)
     {
         mBaseType = type;
-        u64 gap = 0;
 
         switch (mMultType)
         {
@@ -186,21 +181,6 @@ namespace osuCrypto
 #endif
             break;
         }
-#ifdef ENABLE_INSECURE_SILVER
-        case osuCrypto::MultType::slv5:
-        case osuCrypto::MultType::slv11:
-
-            SilverConfigure(numOTs, secParam,
-                mMultType,
-                mRequestedNumOTs,
-                mNumPartitions,
-                mSizePer,
-                mN2,
-                mN,
-                gap,
-                mEncoder);
-            break;
-#endif
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
         case osuCrypto::MultType::ExAcc21:
@@ -225,7 +205,6 @@ namespace osuCrypto
             break;
         }
 
-        mGapOts.resize(gap);
         mGen.configure(mSizePer, mNumPartitions);
         
         mState = State::Configured;
@@ -299,7 +278,6 @@ namespace osuCrypto
         Socket& chl)
     {
         MC_BEGIN(task<>,this, delta, n, &prng, &chl,
-            gapVals = std::vector<block>{},
             deltaShare = block{},
             X = block{},
             hash = std::array<u8, 32>{},
@@ -338,19 +316,6 @@ namespace osuCrypto
         // allocate B
         mB.resize(0);
         mB.resize(mN2);
-
-        // derandomize the random OTs for the gap 
-        // to have the desired correlation.
-        gapVals.resize(mGapOts.size());
-        for (u64 i = mNumPartitions * mSizePer, j = 0; i < mN2; ++i, ++j)
-        {
-            auto v = mGapOts[j][0] ^ mNoiseDeltaShares[mNumPartitions + j];
-            gapVals[j] = AES(mGapOts[j][1]).ecbEncBlock(ZeroBlock) ^ v;
-            mB[i] = mGapOts[j][0];
-        }
-
-        if(gapVals.size())
-            MC_AWAIT(chl.send(std::move(gapVals)));
 
 
         if (mTimer)

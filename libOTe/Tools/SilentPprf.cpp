@@ -515,7 +515,7 @@ namespace osuCrypto
     }
 
     void allocateExpandTree(
-        u64 dpeth,
+        u64 depth,
         TreeAllocator& alloc,
         span<AlignedArray<block, 8>>& tree,
         std::vector<span<AlignedArray<block, 8>>>& levels)
@@ -524,7 +524,7 @@ namespace osuCrypto
         assert((u64)tree.data() % 32 == 0);
         levels[0] = tree.subspan(0, 1);
         auto rem = tree.subspan(2);
-        for (auto i : rng(1ull, dpeth))
+        for (auto i : rng(1ull, depth))
         {
             levels[i] = rem.subspan(0, levels[i - 1].size() * 2);
             assert((u64)levels[i].data() % 32 == 0);

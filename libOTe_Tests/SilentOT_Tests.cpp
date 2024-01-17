@@ -841,7 +841,6 @@ void OtExt_Silent_mal_Test(const oc::CLP& cmd)
 #endif
 }
 
-
 void Tools_Pprf_expandOne_test(const oc::CLP& cmd)
 {
 #if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)

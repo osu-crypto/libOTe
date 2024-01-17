@@ -1,6 +1,6 @@
 #include "Subfield_Test.h"
 #include "libOTe/Tools/Subfield/Subfield.h"
-#include "libOTe/Tools/Subfield/ExConvCode.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode2.h"
 #include "libOTe/Vole/Subfield/NoisyVoleSender.h"
 #include "libOTe/Vole/Subfield/NoisyVoleReceiver.h"
 #include "libOTe/Vole/Subfield/SilentVoleSender.h"
@@ -10,15 +10,16 @@
 
 namespace osuCrypto::Subfield
 {
+    static_assert(std::is_trivially_copyable_v<std::array<u32, 10>>);
+    static_assert(std::is_trivially_copyable_v<block>);
 
     using tests_libOTe::eval;
-
     void Subfield_ExConvCode_encode_test(const oc::CLP& cmd)
     {
         {
-            using TypeTrait = TypeTraitF128;
+            using CoeffCtx = DefaultCoeffCtx<block>;
             u64 n = 1024;
-            ExConvCode code;
+            ExConvCode2 code;
             code.config(n / 2, n, 7, 24, true);
 
             PRNG prng(ZeroBlock);
@@ -31,10 +32,10 @@ namespace osuCrypto::Subfield
                 z1[i] = z0[i] ^ delta.gf128Mul(y[i]);
             }
 
-            code.dualEncode<TypeTrait, block>(z1);
-//            code.dualEncode<block>(z0);
-//            code.dualEncode<block>(y);
-            code.dualEncode2<TypeTrait, block, block>(z0, y);
+            code.dualEncode<block, CoeffCtx>(z1.begin());
+            code.dualEncode<block, CoeffCtx>(z0.begin());
+            code.dualEncode<block, CoeffCtx>(y.begin());
+            //code.dualEncode2<block, block, CoeffCtx>(z0, y);
 
             for (u64 i = 0; i < n; ++i)
             {
@@ -46,9 +47,9 @@ namespace osuCrypto::Subfield
         }
 
         {
-            using TypeTrait = TypeTraitPrimitive<u8>;
+            using CoeffCtx = DefaultCoeffCtx<u8>;
             u64 n = 1024;
-            ExConvCode code;
+            ExConvCode2 code;
             code.config(n / 2, n, 7, 24, true);
 
             PRNG prng(ZeroBlock);
@@ -61,8 +62,11 @@ namespace osuCrypto::Subfield
                 z1[i] = z0[i] + delta * y[i];
             }
 
-            code.dualEncode<TypeTrait, u8>(z1);
-            code.dualEncode2<TypeTrait, u8, u8>(z0, y);
+            code.dualEncode<u8, CoeffCtx>(z1.begin());
+            code.dualEncode<u8, CoeffCtx>(z0.begin());
+            code.dualEncode<u8, CoeffCtx>(y.begin());
+
+            //code.dualEncode2<u8, u8, CoeffCtx>(z0, y);
 
             for (u64 i = 0; i < n; ++i)
             {
@@ -74,9 +78,9 @@ namespace osuCrypto::Subfield
         }
 
         {
-            using TypeTrait = TypeTrait64;
+            using CoeffCtx = DefaultCoeffCtx<u64>;
             u64 n = 1024;
-            ExConvCode code;
+            ExConvCode2 code;
             code.config(n / 2, n, 7, 24, true);
 
             PRNG prng(ZeroBlock);
@@ -89,8 +93,10 @@ namespace osuCrypto::Subfield
                 z1[i] = z0[i] + delta * y[i];
             }
 
-            code.dualEncode<TypeTrait, u64>(z1);
-            code.dualEncode2<TypeTrait, u64, u64>(z0, y);
+            code.dualEncode<u64, CoeffCtx>(z1.begin());
+            code.dualEncode<u64, CoeffCtx>(z0.begin());
+            code.dualEncode<u64, CoeffCtx>(y.begin());
+            //code.dualEncode2<u64, u64, CoeffCtx>(z0, y);
 
             for (u64 i = 0; i < n; ++i)
             {
@@ -115,8 +121,8 @@ namespace osuCrypto::Subfield
         //    auto sockets = cp::LocalAsyncSocket::makePair();
 
         //    auto format = PprfOutputFormat::Interleaved;
-        //    SilentSubfieldPprfSender<TypeTrait128> sender;
-        //    SilentSubfieldPprfReceiver<TypeTrait128> recver;
+        //    SilentSubfieldPprfSender<CoeffCtx128> sender;
+        //    SilentSubfieldPprfReceiver<CoeffCtx128> recver;
 
         //    sender.configure(domain, numPoints);
         //    recver.configure(domain, numPoints);
@@ -176,8 +182,10 @@ namespace osuCrypto::Subfield
             std::vector<u64> z0(n), z1(n);
             prng.get(y.data(), y.size());
 
-            NoisySubfieldVoleReceiver<TypeTrait64> recv;
-            NoisySubfieldVoleSender<TypeTrait64> send;
+
+            using Trait = DefaultCoeffCtx<u64>;
+            NoisySubfieldVoleReceiver<u64> recv;
+            NoisySubfieldVoleSender<u64> send;
 
             recv.setTimer(timer);
             send.setTimer(timer);
@@ -218,18 +226,23 @@ namespace osuCrypto::Subfield
             PRNG prng(seed);
 
             constexpr size_t N = 3;
-            using TypeTrait = TypeTraitVec<u32, N>;
-            u64 bitsF = TypeTrait::bitsF;
-            using F = TypeTrait::F;
-            using G = TypeTrait::G;
+            using G = u32;
+            using F = std::array<G, N>;
+            using CoeffCtx = CoeffCtxArray<G,N>;
+            u64 bitsF = sizeof(F) * 8;;
 
-            F x = TypeTrait::fromBlock(prng.get<block>());
+            static_assert(
+                std::is_standard_layout<F>::value &&
+                std::is_trivial<F>::value
+                );
+            F x;
+            CoeffCtx::fromBlock<F>(x, prng.get<block>());
             std::vector<G> y(n);
             std::vector<F> z0(n), z1(n);
             prng.get(y.data(), y.size());
 
-            NoisySubfieldVoleReceiver<TypeTrait> recv;
-            NoisySubfieldVoleSender<TypeTrait> send;
+            NoisySubfieldVoleReceiver<F, G, CoeffCtx> recv;
+            NoisySubfieldVoleSender<F, G, CoeffCtx> send;
 
             recv.setTimer(timer);
             send.setTimer(timer);
@@ -245,7 +258,7 @@ namespace osuCrypto::Subfield
                 otRecvMsg[i] = otSendMsg[i][recvChoice[i]];
             timer.setTimePoint("ot");
 
-            auto p0 = recv.receive(y, z0, prng, otSendMsg, chls[0]);
+            auto p0 = recv.receive((span<G>)y, (span<F>)z0, prng, otSendMsg, chls[0]);
             auto p1 = send.send(x, z1, prng, otRecvMsg, chls[1]);
 
             eval(p0, p1);
@@ -279,9 +292,10 @@ namespace osuCrypto::Subfield
             std::vector<block> y(n);
             std::vector<block> z0(n), z1(n);
             prng.get(y.data(), y.size());
-
-            NoisySubfieldVoleReceiver<TypeTraitF128> recv;
-            NoisySubfieldVoleSender<TypeTraitF128> send;
+            using F = block;
+            using G = block;
+            NoisySubfieldVoleReceiver<F, G, CoeffCtxGFBlock> recv;
+            NoisySubfieldVoleSender<F, G, CoeffCtxGFBlock> send;
 
             recv.setTimer(timer);
             send.setTimer(timer);
@@ -339,8 +353,8 @@ namespace osuCrypto::Subfield
             recv.setTimer(timer);
             send.setTimer(timer);
 
-//            recv.mDebug = true;
-//            send.mDebug = true;
+            //            recv.mDebug = true;
+            //            send.mDebug = true;
 
             auto chls = cp::LocalAsyncSocket::makePair();
 
@@ -368,15 +382,16 @@ namespace osuCrypto::Subfield
         {
             PRNG prng(seed);
             constexpr size_t N = 10;
-            using F = Vec<u32, N>;
             using G = u32;
-            using TypeTrait = TypeTraitVec<u32, N>;
-            F x = TypeTrait::fromBlock(prng.get<block>());
+            using F = std::array<G, N>;
+            using CoeffCtx = CoeffCtxArray<G, N>;
+            F x;
+            CoeffCtx::fromBlock<F>(x, prng.get<block>());
             std::vector<G> c(n);
-            std::vector<F> z0(n), z1(n);
+            std::vector<F> a(n), b(n);
 
-            SilentSubfieldVoleReceiver<F, G, TypeTrait> recv;
-            SilentSubfieldVoleSender<F, G, TypeTrait> send;
+            SilentSubfieldVoleReceiver<F, G, CoeffCtx> recv;
+            SilentSubfieldVoleSender<F, G, CoeffCtx> send;
 
             recv.mMultType = MultType::ExConv7x24;
             send.mMultType = MultType::ExConv7x24;
@@ -394,8 +409,8 @@ namespace osuCrypto::Subfield
             timer.setTimePoint("ot");
             //  fakeBase(n, nt, prng, x, recv, send);
 
-            auto p0 = send.silentSend(x, span<F>(z0), prng, chls[0]);
-            auto p1 = recv.silentReceive(span<G>(c), span<F>(z1), prng, chls[1]);
+            auto p0 = send.silentSend(x, span<F>(b), prng, chls[0]);
+            auto p1 = recv.silentReceive(span<G>(c), span<F>(a), prng, chls[1]);
 
             eval(p0, p1);
             //    std::cout << "transferred " << (chls[0].bytesSent() + chls[0].bytesReceived()) << std::endl;
@@ -404,13 +419,16 @@ namespace osuCrypto::Subfield
             timer.setTimePoint("send");
             for (u64 i = 0; i < n; i++) {
                 for (u64 j = 0; j < N; j++) {
-                    G left = c[i] * x[j];
-                    G right = z1[i][j] - z0[i][j];
-                    if (left != right) {
-                        std::cout << "bad " << i << "\n  c[i] " << c[i] << " * x[j] " << x[j] << " = " << left << std::endl;
-                        std::cout << "z0[i][j] " << z0[i][j] << " - z1 " << z1[i][j] << " = " << right << std::endl;
-                        throw RTE_LOC;
-                    }
+                    throw RTE_LOC;// fix this
+                    // c = a x + b
+                    // c - b = a x
+                    //G left = a[i] * x[j];
+                    //G right = c[i][j] - b[i][j];
+                    //if (left != right) {
+                    //    std::cout << "bad " << i << "\n  a[i] " << a[i] << " * x[j] " << x[j] << " = " << left << std::endl;
+                    //    std::cout << "c[i][j] " << c[i][j] << " - b " << b[i][j] << " = " << right << std::endl;
+                    //    throw RTE_LOC;
+                    //}
                 }
             }
         }
@@ -429,8 +447,8 @@ namespace osuCrypto::Subfield
             recv.setTimer(timer);
             send.setTimer(timer);
 
-//            recv.mDebug = true;
-//            send.mDebug = true;
+            //            recv.mDebug = true;
+            //            send.mDebug = true;
 
             auto chls = cp::LocalAsyncSocket::makePair();
 
