@@ -100,15 +100,15 @@ namespace osuCrypto
         // return code size n.
         u64 generatorCols() const { return mCodeSize; }
 
-        // Compute w = G * e. e will be modified in the computation.
-        // the computation will be done over F using CoeffCtx::plus
-        template<
-            typename F,
-            typename CoeffCtx,
-            typename SrcIter,
-            typename DstIter
-        >
-        void dualEncode(SrcIter&& e, DstIter&& w);
+        //// Compute w = G * e. e will be modified in the computation.
+        //// the computation will be done over F using CoeffCtx::plus
+        //template<
+        //    typename F,
+        //    typename CoeffCtx,
+        //    typename SrcIter,
+        //    typename DstIter
+        //>
+        //void dualEncode(SrcIter&& e, DstIter&& w);
 
         // Compute e[0,...,k-1] = G * e.
         // the computation will be done over F using CoeffCtx::plus
@@ -240,41 +240,41 @@ namespace osuCrypto
 {
 
     // Compute w = G * e. e will be modified in the computation.
-    template<
-        typename F,
-        typename CoeffCtx,
-        typename SrcIter,
-        typename DstIter
-    >
-    void ExConvCode2::dualEncode(SrcIter&& e, DstIter&& w)
-    {
+    //template<
+    //    typename F,
+    //    typename CoeffCtx,
+    //    typename SrcIter,
+    //    typename DstIter
+    //>
+    //void ExConvCode2::dualEncode(SrcIter&& e, DstIter&& w)
+    //{
 
-        static_assert(is_iterator<SrcIter>::value, "must pass in an iterator to the data, " __FUNCTION__);
-        static_assert(is_iterator<DstIter>::value, "must pass in an iterator to the data");
+    //    static_assert(is_iterator<SrcIter>::value, "must pass in an iterator to the data, " __FUNCTION__);
+    //    static_assert(is_iterator<DstIter>::value, "must pass in an iterator to the data");
 
-        // try to deref the back. might bounds check.
-        (void)*(e + mCodeSize - 1);
-        (void)*(w + mMessageSize - 1);
+    //    // try to deref the back. might bounds check.
+    //    (void)*(e + mCodeSize - 1);
+    //    (void)*(w + mMessageSize - 1);
 
-        if (mSystematic)
-        {
-            dualEncode<F, CoeffCtx>(e);
-            CoeffCtx::copy(w, w + mMessageSize, e);
-            setTimePoint("ExConv.encode.memcpy");
-        }
-        else
-        {
+    //    if (mSystematic)
+    //    {
+    //        dualEncode<F, CoeffCtx>(e);
+    //        CoeffCtx::copy(w, w + mMessageSize, e);
+    //        setTimePoint("ExConv.encode.memcpy");
+    //    }
+    //    else
+    //    {
 
-            setTimePoint("ExConv.encode.begin");
+    //        setTimePoint("ExConv.encode.begin");
 
-            accumulate<F, CoeffCtx>(e);
+    //        accumulate<F, CoeffCtx>(e);
 
-            setTimePoint("ExConv.encode.accumulate");
+    //        setTimePoint("ExConv.encode.accumulate");
 
-            mExpander.expand<F, CoeffCtx, false>(e, w);
-            setTimePoint("ExConv.encode.expand");
-        }
-    }
+    //        mExpander.expand<F, CoeffCtx, false>(e, w);
+    //        setTimePoint("ExConv.encode.expand");
+    //    }
+    //}
 
     // Compute e[0,...,k-1] = G * e.
     template<typename F, typename CoeffCtx, typename Iter>
@@ -295,11 +295,17 @@ namespace osuCrypto
         }
         else
         {
+
+            setTimePoint("ExConv.encode.begin");
+            accumulate<F, CoeffCtx>(e);
+            setTimePoint("ExConv.encode.accumulate");
+
             CoeffCtx::template Vec<F> w;
             CoeffCtx::resize(w, mMessageSize);
-            dualEncode<F, CoeffCtx>(e, w.begin());
+            mExpander.expand<F, CoeffCtx, false>(e, w.begin());
+            setTimePoint("ExConv.encode.expand");
+
             CoeffCtx::copy(w.begin(), w.end(), e);
-            //memcpy(e.data(), w.data(), w.size() * sizeof(T));
             setTimePoint("ExConv.encode.memcpy");
 
         }

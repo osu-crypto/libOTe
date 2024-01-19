@@ -116,7 +116,7 @@ namespace osuCrypto
     template<typename F, typename CoeffCtx>
     void allocateExpandBuffer(
         u64 depth,
-        u64 programPuncturedPoint,
+        bool programPuncturedPoint,
         std::vector<u8>& buff,
         span<std::array<std::array<block, 8>, 2>>& sums,
         span<u8>& leaf)
@@ -125,25 +125,24 @@ namespace osuCrypto
         u64 elementSize = CoeffCtx::byteSize<F>();
 
         using SumType = std::array<std::array<block, 8>, 2>;
-
-        // the number of internal levels. We process 8 trees at a time
-        u64 numSums = (depth - programPuncturedPoint) * 8;
-
-        // the number of leaf level that we will program
-        u64 numleaf = programPuncturedPoint * 8;
-
         // num of bytes they will take up.
-        u64 numBytes = numSums * 2 * sizeof(block) + numleaf * 4 * elementSize;
+        u64 numBytes =
+            depth * sizeof(SumType) +  // each internal level of the tree has a sum
+            elementSize * 8 * 2 +          // we must program 8 inactive F leaves
+            elementSize * 8 * 2 * programPuncturedPoint; // if we are programing the active lead, then we have 8 more.
 
         // allocate the buffer and partition them.
         buff.resize(numBytes);
-        sums = span<SumType>((SumType*)buff.data(), numSums);
-        leaf = span<u8>((u8*)(sums.data() + sums.size()), numleaf * 4 * elementSize);
+        sums = span<SumType>((SumType*)buff.data(), depth);
+        leaf = span<u8>((u8*)(sums.data() + sums.size()),
+            elementSize * 8 * 2 +
+            elementSize * 8 * 2 * programPuncturedPoint
+        );
 
         void* sEnd = sums.data() + sums.size();
         void* lEnd = leaf.data() + leaf.size();
         void* end = buff.data() + buff.size();
-        if (sEnd > end || lEnd > end)
+        if (sEnd > end || lEnd != end)
             throw RTE_LOC;
     }
 
@@ -201,7 +200,13 @@ namespace osuCrypto
             configure(domainSize, pointCount);
         }
 
-        void configure(u64 domainSize, u64 pointCount) {
+        void configure(u64 domainSize, u64 pointCount)
+        {
+            if (domainSize & 1)
+                throw std::runtime_error("Pprf domain must be even. " LOCATION);
+            if (mPntCount % 8)
+                throw std::runtime_error("pointCount must be a multiple of 8 (general case not impl). " LOCATION);
+
             mDomain = domainSize;
             mDepth = log2ceil(mDomain);
             mPntCount = pointCount;
@@ -236,7 +241,6 @@ namespace osuCrypto
         //    MatrixView<F> o(output.data(), output.size(), 1);
         //    return expand(chls, value, seed, o, oFormat, programPuncturedPoint, numThreads);
         //}
-
         task<> expand(
             Socket& chl,
             const VecF& value,
@@ -244,7 +248,8 @@ namespace osuCrypto
             VecF& output,
             PprfOutputFormat oFormat,
             bool programPuncturedPoint,
-            u64 numThreads) {
+            u64 numThreads)
+        {
             if (programPuncturedPoint)
                 setValue(value);
 
@@ -252,7 +257,7 @@ namespace osuCrypto
 
             validateExpandFormat(oFormat, output, mDomain, mPntCount);
 
-            MC_BEGIN(task<>, this, numThreads, oFormat, output, seed, &chl, programPuncturedPoint,
+            MC_BEGIN(task<>, this, numThreads, oFormat, &output, seed, &chl, programPuncturedPoint,
                 treeIndex = u64{},
                 tree = span<AlignedArray<block, 8>>{},
                 levels = std::vector<span<AlignedArray<block, 8>> >{},
@@ -262,7 +267,6 @@ namespace osuCrypto
                 buff = std::vector<u8>{},
                 encSums = span<std::array<std::array<block, 8>, 2>>{},
                 leafMsgs = span<u8>{}
-
             );
 
             mTreeAlloc.reserve(numThreads, (1ull << mDepth) + 2);
@@ -290,7 +294,7 @@ namespace osuCrypto
                 }
 
                 // allocate the send buffer and partition it.
-                allocateExpandBuffer<F, CoeffCtx>(mDepth, programPuncturedPoint, buff, encSums, leafMsgs);
+                allocateExpandBuffer<F, CoeffCtx>(mDepth - 1, programPuncturedPoint, buff, encSums, leafMsgs);
 
                 // exapnd the tree
                 expandOne(seed, treeIndex, programPuncturedPoint, levels, *leafLevelPtr, leafIndex, encSums, leafMsgs);
@@ -341,7 +345,7 @@ namespace osuCrypto
             bool programPuncturedPoint,
             span<span<AlignedArray<block, 8>>> levels,
             VecF& leafLevel,
-            u64 leafOffset,
+            const u64 leafOffset,
             span<std::array<std::array<block, 8>, 2>>  encSums,
             span<u8> leafMsgs)
         {
@@ -443,8 +447,8 @@ namespace osuCrypto
                 // encrypt the sums and write them to the output.
                 for (u64 j = 0; j < 8; ++j)
                 {
-                    encSums[d][0][j] = sums[0][j] ^ mBaseOTs[treeIdx + j][d][0];
-                    encSums[d][1][j] = sums[1][j] ^ mBaseOTs[treeIdx + j][d][1];
+                    encSums[d][0][j] = sums[0][j] ^ mBaseOTs[treeIdx + j][mDepth - 1 - d][1];
+                    encSums[d][1][j] = sums[1][j] ^ mBaseOTs[treeIdx + j][mDepth - 1 - d][0];
                 }
             }
 
@@ -468,14 +472,14 @@ namespace osuCrypto
             CoeffCtx::zero(leafSums[1].begin(), leafSums[1].end());
 
             // for the leaf nodes we need to hash both children.
-            for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx)
+            for (u64 parentIdx = 0, outIdx = leafOffset, childIdx = 0; parentIdx < width; ++parentIdx)
             {
                 // The value of the parent.
                 auto& parent = level0.data()[parentIdx];
 
                 // The bit that indicates if we are on the left child (0)
                 // or on the right child (1).
-                for (u64 keep = 0; keep < 2; ++keep, ++childIdx, leafOffset += 8)
+                for (u64 keep = 0; keep < 2; ++keep, ++childIdx, outIdx += 8)
                 {
                     // The child that we will write in this iteration.
 
@@ -487,28 +491,28 @@ namespace osuCrypto
                     // where each half defines one of the children.
                     gGgmAes[keep].hashBlocks<8>(parent.data(), child.data());
 
-                    CoeffCtx::fromBlock(leafLevel[leafOffset + 0], child[0]);
-                    CoeffCtx::fromBlock(leafLevel[leafOffset + 1], child[1]);
-                    CoeffCtx::fromBlock(leafLevel[leafOffset + 2], child[2]);
-                    CoeffCtx::fromBlock(leafLevel[leafOffset + 3], child[3]);
-                    CoeffCtx::fromBlock(leafLevel[leafOffset + 4], child[4]);
-                    CoeffCtx::fromBlock(leafLevel[leafOffset + 5], child[5]);
-                    CoeffCtx::fromBlock(leafLevel[leafOffset + 6], child[6]);
-                    CoeffCtx::fromBlock(leafLevel[leafOffset + 7], child[7]);
+                    CoeffCtx::fromBlock(leafLevel[outIdx + 0], child[0]);
+                    CoeffCtx::fromBlock(leafLevel[outIdx + 1], child[1]);
+                    CoeffCtx::fromBlock(leafLevel[outIdx + 2], child[2]);
+                    CoeffCtx::fromBlock(leafLevel[outIdx + 3], child[3]);
+                    CoeffCtx::fromBlock(leafLevel[outIdx + 4], child[4]);
+                    CoeffCtx::fromBlock(leafLevel[outIdx + 5], child[5]);
+                    CoeffCtx::fromBlock(leafLevel[outIdx + 6], child[6]);
+                    CoeffCtx::fromBlock(leafLevel[outIdx + 7], child[7]);
 
                     // leafSum += child
                     auto& leafSum = leafSums[keep];
-                    CoeffCtx::plus(leafSum[0], leafSum[0], leafLevel[leafOffset + 0]);
-                    CoeffCtx::plus(leafSum[1], leafSum[1], leafLevel[leafOffset + 1]);
-                    CoeffCtx::plus(leafSum[2], leafSum[2], leafLevel[leafOffset + 2]);
-                    CoeffCtx::plus(leafSum[3], leafSum[3], leafLevel[leafOffset + 3]);
-                    CoeffCtx::plus(leafSum[4], leafSum[4], leafLevel[leafOffset + 4]);
-                    CoeffCtx::plus(leafSum[5], leafSum[5], leafLevel[leafOffset + 5]);
-                    CoeffCtx::plus(leafSum[6], leafSum[6], leafLevel[leafOffset + 6]);
-                    CoeffCtx::plus(leafSum[7], leafSum[7], leafLevel[leafOffset + 7]);
+                    CoeffCtx::plus(leafSum[0], leafSum[0], leafLevel[outIdx + 0]);
+                    CoeffCtx::plus(leafSum[1], leafSum[1], leafLevel[outIdx + 1]);
+                    CoeffCtx::plus(leafSum[2], leafSum[2], leafLevel[outIdx + 2]);
+                    CoeffCtx::plus(leafSum[3], leafSum[3], leafLevel[outIdx + 3]);
+                    CoeffCtx::plus(leafSum[4], leafSum[4], leafLevel[outIdx + 4]);
+                    CoeffCtx::plus(leafSum[5], leafSum[5], leafLevel[outIdx + 5]);
+                    CoeffCtx::plus(leafSum[6], leafSum[6], leafLevel[outIdx + 6]);
+                    CoeffCtx::plus(leafSum[7], leafSum[7], leafLevel[outIdx + 7]);
                 }
-            }
 
+            }
 
             if (programPuncturedPoint)
             {
@@ -550,10 +554,10 @@ namespace osuCrypto
                         // copy m0 into the output buffer.
                         span<u8> buff = leafMsgs.subspan(0, 2 * CoeffCtx::byteSize<F>());
                         leafMsgs = leafMsgs.subspan(buff.size());
-                        CoeffCtx::serialize(buff, leafOts);
+                        CoeffCtx::serialize(leafOts.begin(), leafOts.end(), buff.begin());
 
                         // encrypt the output buffer.
-                        otMasker.SetSeed(mBaseOTs[treeIdx + j][d][k], divCeil(buff.size(), sizeof(block)));
+                        otMasker.SetSeed(mBaseOTs[treeIdx + j][0][1 ^ k], divCeil(buff.size(), sizeof(block)));
                         for (u64 i = 0; i < buff.size(); ++i)
                             buff[i] ^= otMasker.get<u8>();
 
@@ -574,10 +578,10 @@ namespace osuCrypto
                         CoeffCtx::copy(leafOts[0], leafSums[k][j]);
                         span<u8> buff = leafMsgs.subspan(0, CoeffCtx::byteSize<F>());
                         leafMsgs = leafMsgs.subspan(buff.size());
-                        CoeffCtx::serialize(buff, leafOts);
+                        CoeffCtx::serialize(leafOts.begin(), leafOts.end(), buff.begin());
 
                         // encrypt the output buffer.
-                        otMasker.SetSeed(mBaseOTs[treeIdx + j][d][k], divCeil(buff.size(), sizeof(block)));
+                        otMasker.SetSeed(mBaseOTs[treeIdx + j][0][1 ^ k], divCeil(buff.size(), sizeof(block)));
                         for (u64 i = 0; i < buff.size(); ++i)
                             buff[i] ^= otMasker.get<u8>();
 
@@ -620,6 +624,8 @@ namespace osuCrypto
 
         void configure(u64 domainSize, u64 pointCount)
         {
+            if (domainSize & 1)
+                throw std::runtime_error("Pprf domain must be even. " LOCATION);
             mDomain = domainSize;
             mDepth = log2ceil(mDomain);
             mPntCount = pointCount;
@@ -628,62 +634,20 @@ namespace osuCrypto
         }
 
 
-        // For output format ByLeafIndex or ByTreeIndex, the choice bits it
-        // samples are in blocks of mDepth, with mPntCount blocks total (one for
-        // each punctured point). For ByLeafIndex these blocks encode the punctured
-        // leaf index in big endian, while for ByTreeIndex they are in
-        // little endian.
+        // this function sample mPntCount integers in the range
+        // [0,domain) and returns these as the choice bits.
         BitVector sampleChoiceBits(u64 modulus, PprfOutputFormat format, PRNG& prng)
         {
             BitVector choices(mPntCount * mDepth);
 
             // The points are read in blocks of 8, so make sure that there is a
             // whole number of blocks.
-            mBaseChoices.resize(roundUpTo(mPntCount, 8), mDepth);
+            mBaseChoices.resize(mPntCount, mDepth);
             for (u64 i = 0; i < mPntCount; ++i)
             {
-                u64 idx;
-                switch (format)
-                {
-                case osuCrypto::PprfOutputFormat::ByLeafIndex:
-                case osuCrypto::PprfOutputFormat::ByTreeIndex:
-                    do {
-                        for (u64 j = 0; j < mDepth; ++j)
-                            mBaseChoices(i, j) = prng.getBit();
-                        idx = getActivePath(mBaseChoices[i]);
-                    } while (idx >= modulus);
-
-                    break;
-                case osuCrypto::PprfOutputFormat::Interleaved:
-                case osuCrypto::PprfOutputFormat::Callback:
-
-                    if (modulus > mPntCount * mDomain)
-                        throw std::runtime_error("modulus too big. " LOCATION);
-                    if (modulus < mPntCount * mDomain / 2)
-                        throw std::runtime_error("modulus too small. " LOCATION);
-
-                    // make sure that at least the first element of this tree
-                    // is within the modulus.
-                    idx = interleavedPoint(0, i, mPntCount, mDomain, format);
-                    if (idx >= modulus)
-                        throw RTE_LOC;
-
-
-                    do {
-                        for (u64 j = 0; j < mDepth; ++j)
-                            mBaseChoices(i, j) = prng.getBit();
-                        idx = getActivePath(mBaseChoices[i]);
-
-                        idx = interleavedPoint(idx, i, mPntCount, mDomain, format);
-                    } while (idx >= modulus);
-
-
-                    break;
-                default:
-                    throw RTE_LOC;
-                    break;
-                }
-
+                u64 idx = prng.get<u64>() % mDomain;
+                for (u64 j = 0; j < mDepth; ++j)
+                    mBaseChoices(i, j) = *BitIterator((u8*)&idx, j);
             }
 
             for (u64 i = 0; i < mBaseChoices.size(); ++i)
@@ -701,33 +665,18 @@ namespace osuCrypto
             if (choices.size() != baseOtCount())
                 throw RTE_LOC;
 
-            mBaseChoices.resize(roundUpTo(mPntCount, 8), mDepth);
+            mBaseChoices.resize(mPntCount, mDepth);
             for (u64 i = 0; i < mPntCount; ++i)
             {
+                u64 idx = 0;
                 for (u64 j = 0; j < mDepth; ++j)
+                {
                     mBaseChoices(i, j) = choices[mDepth * i + j];
-
-                switch (format)
-                {
-                case osuCrypto::PprfOutputFormat::ByLeafIndex:
-                case osuCrypto::PprfOutputFormat::ByTreeIndex:
-                    if (getActivePath(mBaseChoices[i]) >= mDomain)
-                        throw RTE_LOC;
-
-                    break;
-                case osuCrypto::PprfOutputFormat::Interleaved:
-                case osuCrypto::PprfOutputFormat::Callback:
-                {
-                    auto idx = getActivePath(mBaseChoices[i]);
-                    auto idx2 = interleavedPoint(idx, i, mPntCount, mDomain, format);
-                    if (idx2 > mPntCount * mDomain)
-                        throw std::runtime_error("the base ot choice bits index outside of the domain. see sampleChoiceBits(...). " LOCATION);
-                    break;
+                    idx |= u64(choices[mDepth * i + j]) << j;
                 }
-                default:
-                    throw RTE_LOC;
-                    break;
-                }
+
+                if (idx >= mDomain)
+                    throw std::runtime_error("provided choice bits index outside of the domain." LOCATION);
             }
         }
 
@@ -764,6 +713,9 @@ namespace osuCrypto
         }
         void getPoints(span<u64> points, PprfOutputFormat format)
         {
+            if ((u64)points.size() != mPntCount)
+                throw RTE_LOC;
+
             switch (format)
             {
             case PprfOutputFormat::ByLeafIndex:
@@ -772,20 +724,29 @@ namespace osuCrypto
                 memset(points.data(), 0, points.size() * sizeof(u64));
                 for (u64 j = 0; j < mPntCount; ++j)
                 {
-                    points[j] = getActivePath(mBaseChoices[j]);
+                    for (u64 k = 0; k < mDepth; ++k)
+                        points[j] |= u64(mBaseChoices(j, k)) << k;
+
+                    assert(points[j] < mDomain);
                 }
+
 
                 break;
             case PprfOutputFormat::Interleaved:
             case PprfOutputFormat::Callback:
 
-                if ((u64)points.size() != mPntCount)
-                    throw RTE_LOC;
-                if (points.size() % 8)
-                    throw RTE_LOC;
-
                 getPoints(points, PprfOutputFormat::ByLeafIndex);
-                interleavedPoints(points, mDomain, format);
+
+                // in interleaved mode we generate 8 trees in a batch.
+                // the i'th leaf of these 8 trees are next to eachother.
+                for (u64 j = 0; j < points.size(); ++j)
+                {
+                    auto subTree = j % 8;
+                    auto batch = j / 8;
+                    points[j] =  (batch * mDomain + points[j]) * 8 + subTree;
+                }
+
+                //interleavedPoints(points, mDomain, format);
 
                 break;
             default:
@@ -797,11 +758,16 @@ namespace osuCrypto
         // programPuncturedPoint says whether the sender is trying to program the
         // active child to be its correct value XOR delta. If it is not, the
         // active child will just take a random value.
-        task<> expand(Socket& chl, VecF& output, PprfOutputFormat oFormat, bool programPuncturedPoint, u64 numThreads)
+        task<> expand(
+            Socket& chl,
+            VecF& output,
+            PprfOutputFormat oFormat,
+            bool programPuncturedPoint,
+            u64 numThreads)
         {
             validateExpandFormat(oFormat, output, mDomain, mPntCount);
 
-            MC_BEGIN(task<>, this, oFormat, output, &chl, programPuncturedPoint,
+            MC_BEGIN(task<>, this, oFormat, &output, &chl, programPuncturedPoint,
                 treeIndex = u64{},
                 tree = span<AlignedArray<block, 8>>{},
                 levels = std::vector<span<AlignedArray<block, 8>>>{},
@@ -842,7 +808,7 @@ namespace osuCrypto
                 }
 
                 // allocate the send buffer and partition it.
-                allocateExpandBuffer<F, CoeffCtx>(mDepth, programPuncturedPoint, buff, encSums, leafMsgs);
+                allocateExpandBuffer<F, CoeffCtx>(mDepth - 1, programPuncturedPoint, buff, encSums, leafMsgs);
 
                 MC_AWAIT(chl.recv(buff));
 
@@ -880,7 +846,7 @@ namespace osuCrypto
             u64 treeIdx,
             bool programPuncturedPoint,
             span<span<AlignedArray<block, 8>>> levels,
-            VecF leafLevel,
+            VecF& leafLevel,
             const u64 outputOffset,
             span<std::array<std::array<block, 8>, 2>> theirSums,
             span<u8> leafMsg)
@@ -893,9 +859,16 @@ namespace osuCrypto
             {
                 // For the non-active path, set the child of the root node
                 // as the OT message XOR'ed with the correction sum.
-                int notAi = mBaseChoices[i + treeIdx][0];
-                l1[notAi][i] = mBaseOTs[i + treeIdx][0] ^ theirSums[0][notAi][i];
-                l1[notAi ^ 1][i] = ZeroBlock;
+
+                int active = mBaseChoices[i + treeIdx].back();
+                l1[active ^ 1][i] = mBaseOTs[i + treeIdx].back() ^ theirSums[0][active ^ 1][i];
+                l1[active][i] = ZeroBlock;
+                //if (!i)
+                //    std::cout << " unmask " 
+                //    << mBaseOTs[i + treeIdx].back() << " ^ "
+                //    << theirSums[0][active ^ 1][i] << " = "
+                //    << l1[active ^ 1][i] << std::endl;
+
             }
 
             // space for our sums of each level.
@@ -930,7 +903,7 @@ namespace osuCrypto
                 // The next level that we want to construct.
                 auto level1 = levels[d + 1];
 
-                for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx)
+                for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx, childIdx += 2)
                 {
                     // The value of the parent.
                     auto parent = level0[parentIdx];
@@ -995,6 +968,7 @@ namespace osuCrypto
                     mySums[1][5] = mySums[1][5] ^ child1[5];
                     mySums[1][6] = mySums[1][6] ^ child1[6];
                     mySums[1][7] = mySums[1][7] ^ child1[7];
+
                 }
 
 
@@ -1004,25 +978,25 @@ namespace osuCrypto
                     // the index of the leaf node that is active.
                     auto leafIdx = mPoints[i + treeIdx];
 
-                    // The index of the active child node.
-                    auto activeChildIdx = leafIdx >> (mDepth - 1 - d);
+                    // The index of the active (missing) child node.
+                    auto missingChildIdx = leafIdx >> (mDepth - 1 - d);
 
                     // The index of the active child node sibling.
-                    auto inactiveChildIdx = activeChildIdx ^ 1;
+                    auto siblingIdx = missingChildIdx ^ 1;
 
                     // The indicator as to the left or right child is inactive
-                    auto notAi = inactiveChildIdx & 1;
+                    auto notAi = siblingIdx & 1;
 
                     // our sums & OTs cancel and we are leaf with the 
                     // correct value for the inactive child.
-                    level1[inactiveChildIdx][i] =
+                    level1[siblingIdx][i] =
                         theirSums[d][notAi][i] ^
                         mySums[notAi][i] ^
-                        mBaseOTs[i + treeIdx][d];
+                        mBaseOTs[i + treeIdx][mDepth - 1 - d];
 
                     // we have to set the active child to zero so 
                     // the next children are predictable.
-                    level1[activeChildIdx][i] = ZeroBlock;
+                    level1[missingChildIdx][i] = ZeroBlock;
                 }
             }
 
@@ -1052,21 +1026,23 @@ namespace osuCrypto
                 inactiveChildValues[k] = gGgmAes[k].hashBlock(ZeroBlock);
                 CoeffCtx::fromBlock(temp[k], inactiveChildValues[k]);
 
+
+
                 // leafSum = -inactiveChildValues
                 CoeffCtx::resize(leafSums[k], 8);
                 CoeffCtx::zero(leafSums[k].begin(), leafSums[k].end());
-                CoeffCtx::minus(leafSums[k][0], leafSums[k][0], temp[0]);
+                CoeffCtx::minus(leafSums[k][0], leafSums[k][0], temp[k]);
                 for (u64 i = 1; i < 8; ++i)
                     CoeffCtx::copy(leafSums[k][i], leafSums[k][0]);
             }
 
             // for leaf nodes both children should be hashed.
-            for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx)
+            for (u64 parentIdx = 0, childIdx = 0, outputIdx = outputOffset; parentIdx < width; ++parentIdx)
             {
                 // The value of the parent.
                 auto parent = level0[parentIdx];
 
-                for (u64 keep = 0, outputIdx = outputOffset; keep < 2; ++keep, ++childIdx, outputIdx += 8)
+                for (u64 keep = 0; keep < 2; ++keep, ++childIdx, outputIdx += 8)
                 {
                     // Each parent is expanded into the left and right children
                     // using a different AES fixed-key. Therefore our OWF is:
@@ -1084,6 +1060,8 @@ namespace osuCrypto
                     CoeffCtx::fromBlock(leafLevel[outputIdx + 5], child[5]);
                     CoeffCtx::fromBlock(leafLevel[outputIdx + 6], child[6]);
                     CoeffCtx::fromBlock(leafLevel[outputIdx + 7], child[7]);
+
+
 
                     auto& leafSum = leafSums[keep];
                     CoeffCtx::plus(leafSum[0], leafSum[0], leafLevel[outputIdx + 0]);
@@ -1112,6 +1090,7 @@ namespace osuCrypto
 
                 for (u64 j = 0; j < 8; ++j)
                 {
+
                     // The index of the child on the active path.
                     auto activeChildIdx = mPoints[j + treeIdx];
 
@@ -1124,14 +1103,15 @@ namespace osuCrypto
                     // offset to the first or second ot message, based on the one we want
                     auto offset = CoeffCtx::template byteSize<F>() * 2 * notAi;
 
+
                     // decrypt the ot string
                     span<u8> buff = leafMsg.subspan(offset, CoeffCtx::byteSize<F>() * 2);
                     leafMsg = leafMsg.subspan(buff.size() * 2);
-                    otMasker.SetSeed(mBaseOTs[j + treeIdx][d], divCeil(buff.size(), sizeof(block)));
+                    otMasker.SetSeed(mBaseOTs[j + treeIdx][0], divCeil(buff.size(), sizeof(block)));
                     for (u64 i = 0; i < buff.size(); ++i)
                         buff[i] ^= otMasker.get<u8>();
 
-                    CoeffCtx::deserialize(leafOts, buff);
+                    CoeffCtx::deserialize(buff.begin(), buff.end(), leafOts.begin());
 
                     auto out0 = (activeChildIdx & ~1ull) * 8 + j + outputOffset;
                     auto out1 = (activeChildIdx | 1ull) * 8 + j + outputOffset;
@@ -1163,11 +1143,11 @@ namespace osuCrypto
                     // decrypt the ot string
                     span<u8> buff = leafMsg.subspan(offset, CoeffCtx::byteSize<F>());
                     leafMsg = leafMsg.subspan(buff.size() * 2);
-                    otMasker.SetSeed(mBaseOTs[j + treeIdx][d], divCeil(buff.size(), sizeof(block)));
+                    otMasker.SetSeed(mBaseOTs[j + treeIdx][0], divCeil(buff.size(), sizeof(block)));
                     for (u64 i = 0; i < buff.size(); ++i)
                         buff[i] ^= otMasker.get<u8>();
 
-                    CoeffCtx::deserialize(leafOts, buff);
+                    CoeffCtx::deserialize(buff.begin(), buff.end(), leafOts.begin());
 
                     std::array<u64, 2> out{
                         (activeChildIdx & ~1ull) * 8 + j + outputOffset,
@@ -1175,7 +1155,7 @@ namespace osuCrypto
                     };
 
                     auto keep = leafLevel.begin() + out[notAi];
-                    auto zero = leafLevel.begin() + out[notAi^1];
+                    auto zero = leafLevel.begin() + out[notAi ^ 1];
 
                     CoeffCtx::minus(*keep, leafOts[0], leafSums[notAi][j]);
                     CoeffCtx::zero(zero, zero + 1);

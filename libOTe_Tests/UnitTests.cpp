@@ -17,7 +17,7 @@
 #include "libOTe_Tests/EACode_Tests.h"
 #include "libOTe/Tools/LDPC/Mtx.h"
 #include "libOTe_Tests/Subfield_Test.h"
-
+#include "libOTe_Tests/Pprf_Tests.h"
 using namespace osuCrypto;
 namespace tests_libOTe
 {
@@ -57,12 +57,11 @@ namespace tests_libOTe
 
             tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
             tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
-            tc.add("Subfield_ExConvCode_encode_test         ", Subfield::Subfield_ExConvCode_encode_test);
 
             tc.add("Tools_Pprf_expandOne_test               ", Tools_Pprf_expandOne_test);
-            tc.add("Tools_Pprf_test                         ", Tools_Pprf_test);
             tc.add("Tools_Pprf_inter_test                   ", Tools_Pprf_inter_test);
-            tc.add("Tools_Pprf_blockTrans_test              ", Tools_Pprf_blockTrans_test);
+            tc.add("Tools_Pprf_ByLeafIndex_test             ", Tools_Pprf_ByLeafIndex_test);
+            tc.add("Tools_Pprf_ByTreeIndex_test             ", Tools_Pprf_ByTreeIndex_test);
             tc.add("Tools_Pprf_callback_test                ", Tools_Pprf_callback_test);
 
 

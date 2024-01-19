@@ -285,8 +285,8 @@ namespace osuCrypto
             //}
 
             // allocate B
-            mB.resize(0);
-            mB.resize(mN2);
+            CoeffCtx::resize(mB, 0);
+            CoeffCtx::resize(mB, mN2);
 
             if (mTimer)
                 mGen.setTimer(*mTimer);
@@ -326,8 +326,8 @@ namespace osuCrypto
                 break;
             }
 
+            CoeffCtx::resize(mB, mRequestedNumOTs);
 
-            mB.resize(mRequestedNumOTs);
 
             mState = State::Default;
             mNoiseDeltaShares.clear();

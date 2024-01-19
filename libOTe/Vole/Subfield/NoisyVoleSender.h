@@ -46,11 +46,15 @@ namespace osuCrypto {
 
     public:
 
+        // for chosen delta, compute b such htat
+        //
+        //  a = b + c * delta
+        //
         template<typename FVec>
-        task<> send(F x, FVec&& z, PRNG& prng,
+        task<> send(F delta, FVec& b, PRNG& prng,
             OtReceiver& ot, Socket& chl) {
-            MC_BEGIN(task<>, this, x, z, &prng, &ot, &chl,
-                bv = CoeffCtx::binaryDecomposition(x),
+            MC_BEGIN(task<>, this, delta, &b, &prng, &ot, &chl,
+                bv = CoeffCtx::binaryDecomposition(delta),
                 otMsg = AlignedUnVector<block>{ });
             otMsg.resize(bv.size());
 
@@ -59,34 +63,39 @@ namespace osuCrypto {
             MC_AWAIT(ot.receive(bv, otMsg, prng, chl));
             setTimePoint("NoisyVoleSender.ot.end");
 
-            MC_AWAIT(send(x, z, prng, otMsg, chl));
+            MC_AWAIT(send(delta, b, prng, otMsg, chl));
 
             MC_END();
         }
 
+        // for chosen delta, compute b such htat
+        //
+        //  a = b + c * delta
+        //
         template<typename FVec>
-        task<> send(F x, FVec&& z, PRNG& _,
+        task<> send(F delta, FVec& b, PRNG& _,
             span<block> otMsg, Socket& chl) {
-            MC_BEGIN(task<>, this, x, z, otMsg, &chl,
+            MC_BEGIN(task<>, this, delta, &b, otMsg, &chl,
                 prng = std::move(PRNG{}),
                 buffer = std::vector<u8>{},
                 msg = typename CoeffCtx::Vec<F>{},
                 temp = typename CoeffCtx::Vec<F>{},
                 xb = BitVector{});
 
-            xb = CoeffCtx::binaryDecomposition<F>(x);
+            xb = CoeffCtx::binaryDecomposition<F>(delta);
 
             if (otMsg.size() != xb.size())
                 throw RTE_LOC;
             setTimePoint("NoisyVoleSender.main");
 
-            // z = 0;
-            CoeffCtx::zero(z.begin(), z.end());
+            // b = 0;
+            CoeffCtx::zero(b.begin(), b.end());
 
             // receive the the excrypted one shares.
-            buffer.resize(otMsg.size() * z.size() * CoeffCtx::byteSize<F>());
+            buffer.resize(xb.size() * b.size() * CoeffCtx::byteSize<F>());
             MC_AWAIT(chl.recv(buffer));
-            CoeffCtx::deserialize(msg, buffer);
+            CoeffCtx::resize(msg, xb.size() * b.size());
+            CoeffCtx::deserialize(buffer.begin(), buffer.end(), msg.begin());
 
             setTimePoint("NoisyVoleSender.recvMsg");
 
@@ -94,26 +103,31 @@ namespace osuCrypto {
             for (size_t i = 0, k = 0; i < xb.size(); ++i)
             {
                 // expand the zero shares or one share masks
-                prng.SetSeed(otMsg[i], z.size());
+                prng.SetSeed(otMsg[i], b.size());
 
                 // otMsg[i,j, bc[i]] 
-                //auto otMsgi = prng.getBufferSpan(z.size());
+                //auto otMsgi = prng.getBufferSpan(b.size());
 
-                for (u64 j = 0; j < (u64)z.size(); ++j, ++k) 
+                for (u64 j = 0; j < (u64)b.size(); ++j, ++k) 
                 {
                     // temp = otMsg[i,j, xb[i]]
                     CoeffCtx::fromBlock(temp[0], prng.get<block>());
+                    //CoeffCtx::zero(temp.begin(), temp.begin() + 1);
+                    //std::cout << "m" << i << ","<<xb[i]<<" = " << CoeffCtx::str(temp[0]) << std::endl;
 
                     // temp = otMsg[i,j,xb[i]] + xb[i] * msg[i,j] 
                     //      = otMsg[i,j,xb[i]] + xb[i] * (otMsg[i,j,0] + 2^i * y[j] - otMsg[i,j,1])
                     //      = otMsg[i,j,xb[i]]           // if 0
                     //      = otMsg[i,j,0] + 2^i * y[j]  // if 1
-                    //      = -z + 2^i * y[j]            // if 1
+                    //      = -b + 2^i * y[j]            // if 1
                     if (xb[i])
                         CoeffCtx::plus(temp[0], msg[k], temp[0]);
                     
+                    //std::cout << "m" << i << ",b + d = " << CoeffCtx::str(temp[0]) << std::endl;
+
                     // zj += msg - xb[i] * otMsg[i,j]
-                    CoeffCtx::plus(z[j], z[j], temp[0]);
+                    CoeffCtx::plus(b[j], b[j], temp[0]);
+                    //std::cout << "z = " << CoeffCtx::str(b[j]) << std::endl << std::endl;
                 }
             }
             setTimePoint("NoisyVoleSender.done");

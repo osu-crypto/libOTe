@@ -64,20 +64,6 @@ namespace osuCrypto
         u64 generatorRows() const { return mMessageSize; }
         u64 generatorCols() const { return mCodeSize; }
 
-        // compute a eight output.
-        // the result is written to the dst iterator/ptr.
-        // 
-        template<
-            typename CoeffCtx,
-            typename DstIter,
-            typename SrcIter
-        >
-        void expandEight(
-            DstIter&& dst,
-            SrcIter&& ee,
-            detail::ExpanderModd& prng,
-            CoeffCtx ctx) const;
-
 
         template<
             typename F,
@@ -99,40 +85,21 @@ namespace osuCrypto
         >
         typename CoeffCtx::template Vec<F> getB(CoeffCtx ctx = {}) const;
 
+
+
+
+        //template<
+        //    bool Add,
+        //    typename CoeffCtx,
+        //    typename... F,
+        //    typename... SrcDstIterPair
+        //>
+        //void expandMany(
+        //    std::tuple<SrcDstIterPair...>  out,
+        //    CoeffCtx ctx = {})const;
+
     };
 
-    template<
-        typename CoeffCtx,
-        typename DstIter,
-        typename SrcIter
-    >
-    OC_FORCEINLINE void
-        ExpanderCode2::expandEight(
-            DstIter&& dst,
-            SrcIter&& ee,
-            detail::ExpanderModd& prng,
-            CoeffCtx ctx) const
-    {
-        u64 rr[8];
-        rr[0] = prng.get();
-        rr[1] = prng.get();
-        rr[2] = prng.get();
-        rr[3] = prng.get();
-        rr[4] = prng.get();
-        rr[5] = prng.get();
-        rr[6] = prng.get();
-        rr[7] = prng.get();
-
-        ctx.plus(*(dst + 0), *(dst + 0), *(ee + rr[0]));
-        ctx.plus(*(dst + 1), *(dst + 1), *(ee + rr[1]));
-        ctx.plus(*(dst + 2), *(dst + 2), *(ee + rr[2]));
-        ctx.plus(*(dst + 3), *(dst + 3), *(ee + rr[3]));
-        ctx.plus(*(dst + 4), *(dst + 4), *(ee + rr[4]));
-        ctx.plus(*(dst + 5), *(dst + 5), *(ee + rr[5]));
-        ctx.plus(*(dst + 6), *(dst + 6), *(ee + rr[6]));
-        ctx.plus(*(dst + 7), *(dst + 7), *(ee + rr[7]));
-
-    }
 
 
     template<
@@ -147,6 +114,12 @@ namespace osuCrypto
         DstIter&& output,
         CoeffCtx ctx) const
     {
+        //using P = std::pair<SrcIter, DstIter>;
+        //expandMany<Add, CoeffCtx, F>(
+        //    std::tuple<P>{ P{input, output}},
+        //    ctx
+        //);
+
         (void)*(input + (mCodeSize - 1));
         (void)*(output + (mMessageSize - 1));
 
@@ -164,16 +137,30 @@ namespace osuCrypto
 
             for (auto j = 0ull; j < mExpanderWeight; ++j)
             {
-                // temp[0...7] = expand(input)
-                expandEight<CoeffCtx>(
-                    output, input, 
-                    prng, ctx);
+                u64 rr[8];
+                rr[0] = prng.get();
+                rr[1] = prng.get();
+                rr[2] = prng.get();
+                rr[3] = prng.get();
+                rr[4] = prng.get();
+                rr[5] = prng.get();
+                rr[6] = prng.get();
+                rr[7] = prng.get();
+
+                ctx.plus(*(output + 0), *(output + 0), *(input + rr[0]));
+                ctx.plus(*(output + 1), *(output + 1), *(input + rr[1]));
+                ctx.plus(*(output + 2), *(output + 2), *(input + rr[2]));
+                ctx.plus(*(output + 3), *(output + 3), *(input + rr[3]));
+                ctx.plus(*(output + 4), *(output + 4), *(input + rr[4]));
+                ctx.plus(*(output + 5), *(output + 5), *(input + rr[5]));
+                ctx.plus(*(output + 6), *(output + 6), *(input + rr[6]));
+                ctx.plus(*(output + 7), *(output + 7), *(input + rr[7]));
             }
         }
 
         if constexpr (Add == false)
         {
-            ctx.zero(output, output + (mMessageSize-i));
+            ctx.zero(output, output + (mMessageSize - i));
         }
 
         for (; i < mMessageSize; ++i, ++output)
@@ -185,77 +172,103 @@ namespace osuCrypto
         }
     }
 
+    //template<
+    //    bool Add,
+    //    typename CoeffCtx,
+    //    typename... F,
+    //    typename... SrcDstIterPair
+    //>
+    //void ExpanderCode2::expandMany(
+    //    std::tuple<SrcDstIterPair...>  inOuts,
+    //    CoeffCtx ctx)const
+    //{
 
-    template<
-        typename F,
-        typename CoeffCtx
-    >
-    inline typename CoeffCtx::template Vec<F> ExpanderCode2::getB(CoeffCtx ctx) const
-    {
-
-        typename CoeffCtx::template Vec<F> e, x;
-        ctx.resize(e, mCodeSize);
-        ctx.resize(x, mMessageSize * mCodeSize);
-
-        for (u64 i = 0; i < e.size(); ++i)
-        {
-            // construct the i'th unit vector as input.
-            ctx.zero(e.begin(), e.end());
-            ctx.one(e.begin() + i, e.begin() + i + 1);
-
-            // expand it to geth the i'th row of the matrix
-            expand<F, CoeffCtx, false>(e.begin(), x.begin() + i * mCodeSize);
-        }
-
-        return x;
-    }
+    //    std::apply([&](auto&&... inOut) {(
+    //        [&] {
+    //            (void)*(std::get<0>(inOut) + (mCodeSize - 1));
+    //            (void)*(std::get<1>(inOut) + (mMessageSize - 1));
+    //        }(), ...); }, inOuts);
 
 
-    //    //detail::ExpanderModd prng(mSeed, mCodeSize);
-    //    //PointList points(mMessageSize, mCodeSize);
+    //    detail::ExpanderModd prng(mSeed, mCodeSize);
 
-    //    //u64 i = 0;
-    //    //auto main = mMessageSize / 8 * 8;
+    //    auto main = mMessageSize / 8 * 8;
+    //    u64 i = 0;
 
-    //    //// for the main phase we process 8 expands in parallel.
-    //    //Matrix<u64> rows(8, mExpanderWeight);
-    //    //for (; i < main; i += 8)
-    //    //{
-    //    //    for (auto j = 0ull; j < mExpanderWeight; ++j)
-    //    //    {
-    //    //        for (u64 k = 0; k < 8; ++k)
-    //    //            rows(k, j) = prng.get();
-    //    //    }
+    //    std::vector<u64> rr(8 * mExpanderWeight);
 
-    //    //    for (auto j = 0ull; j < mExpanderWeight; ++j)
-    //    //    {
-    //    //        for (u64 k = 0; k < 8; ++k)
-    //    //        {
-    //    //            auto rk = rows[k];
-    //    //            // we could have duplicates that cancel.
-    //    //            auto count = std::count(rk.begin(), rk.end(), rk[j]);
-    //    //            if (count == 1 || (count > 1 && std::find(rk.begin(), rk.end(), rk[j]) == rk.begin() + j))
-    //    //                points.push_back(i + k, rk[j]);
-    //    //        }
-    //    //    }
-    //    //}
+    //    for (; i < main; i += 8)
+    //    {
+    //        for (auto j = 0ull; j < mExpanderWeight; ++j)
+    //        {
+    //            rr[j * 8 + 0] = prng.get();
+    //            rr[j * 8 + 1] = prng.get();
+    //            rr[j * 8 + 2] = prng.get();
+    //            rr[j * 8 + 3] = prng.get();
+    //            rr[j * 8 + 4] = prng.get();
+    //            rr[j * 8 + 5] = prng.get();
+    //            rr[j * 8 + 6] = prng.get();
+    //            rr[j * 8 + 7] = prng.get();
+    //        }
 
-    //    //for (; i < mMessageSize; ++i)
-    //    //{
-    //    //    auto rk = rows[0];
-    //    //    for (auto j = 0ull; j < mExpanderWeight; ++j)
-    //    //        rk[j] = prng.get();
+    //        std::apply([&](auto&&... inOut) {([&] {
 
-    //    //    for (auto j = 0ull; j < mExpanderWeight; ++j)
-    //    //    {
-    //    //        // we could have duplicates that cancel.
-    //    //        auto count = std::count(rk.begin(), rk.end(), rk[j]);
-    //    //        if (count == 1 || (count > 1 && std::find(rk.begin(), rk.end(), rk[j]) == rk.begin() + j))
-    //    //            points.push_back(i, rk[j]);
-    //    //    }
-    //    //}
+    //            auto& input = std::get<0>(inOut);
+    //            auto& output = std::get<1>(inOut);
 
-    //    //return points;
+    //            if constexpr (Add == false)
+    //            {
+    //                ctx.zero(output, output + 8);
+    //            }
+
+    //            for (auto j = 0ull; j < mExpanderWeight; ++j)
+    //            {
+    //                ctx.plus(*(output + 0), *(output + 0), *(input + rr[j * 8 + 0]));
+    //                ctx.plus(*(output + 1), *(output + 1), *(input + rr[j * 8 + 1]));
+    //                ctx.plus(*(output + 2), *(output + 2), *(input + rr[j * 8 + 2]));
+    //                ctx.plus(*(output + 3), *(output + 3), *(input + rr[j * 8 + 3]));
+    //                ctx.plus(*(output + 4), *(output + 4), *(input + rr[j * 8 + 4]));
+    //                ctx.plus(*(output + 5), *(output + 5), *(input + rr[j * 8 + 5]));
+    //                ctx.plus(*(output + 6), *(output + 6), *(input + rr[j * 8 + 6]));
+    //                ctx.plus(*(output + 7), *(output + 7), *(input + rr[j * 8 + 7]));
+    //            }
+
+    //            output += 8;
+    //            }(), ...); }, inOuts);
+
+    //    }
+
+    //    for (auto j = 0ull; j < mExpanderWeight; ++j)
+    //    {
+    //        rr[j * 8 + 0] = prng.get();
+    //        rr[j * 8 + 1] = prng.get();
+    //        rr[j * 8 + 2] = prng.get();
+    //        rr[j * 8 + 3] = prng.get();
+    //        rr[j * 8 + 4] = prng.get();
+    //        rr[j * 8 + 5] = prng.get();
+    //        rr[j * 8 + 6] = prng.get();
+    //        rr[j * 8 + 7] = prng.get();
+    //    }
+
+    //    std::apply([&](auto&&... inOut) {([&] {
+
+    //        auto& input = std::get<0>(inOut);
+    //        auto& output = std::get<1>(inOut);
+    //        if constexpr (Add == false)
+    //        {
+    //            ctx.zero(output, output + (mMessageSize - i));
+    //        }
+
+    //        for (u64 k = 0; i < mMessageSize; ++i, ++output, ++k)
+    //        {
+    //            for (auto j = 0ull; j < mExpanderWeight; ++j)
+    //            {
+    //                ctx.plus(*output, *output, *(input + rr[j*8 + k]));
+    //            }
+    //        }
+    //        }(), ...); }, inOuts);
     //}
+
+
 
 }

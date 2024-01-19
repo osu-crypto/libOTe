@@ -519,17 +519,17 @@ namespace osuCrypto::Subfield
             // recv delta
             buffer.resize(CoeffCtx::byteSize<F>());
             MC_AWAIT(chl.recv(buffer));
-            CoeffCtx::deserialize(delta, buffer);
+            CoeffCtx::deserialize(buffer.begin(), buffer.end(), delta.begin());
 
             // recv B
             buffer.resize(CoeffCtx::byteSize<F>() * mA.size());
             MC_AWAIT(chl.recv(buffer));
-            CoeffCtx::deserialize(B, buffer);
+            CoeffCtx::deserialize(buffer.begin(), buffer.end(), B.begin());
 
             // recv the noisy values.
             buffer.resize(CoeffCtx::byteSize<F>() * mNoiseDeltaShare.size());
             MC_AWAIT(chl.recvResize(buffer));
-            CoeffCtx::deserialize(noiseDeltaShare2, buffer);
+            CoeffCtx::deserialize(buffer.begin(), buffer.end(), noiseDeltaShare2.begin());
 
             //check that at locations  mS[0],...,mS[..]
             // that we hold a sharing mA, mB of
@@ -540,7 +540,7 @@ namespace osuCrypto::Subfield
             //
             // That is, I hold mA, mC s.t.
             //
-            //  delta * mC = mA + mB
+            //  mA = mB + mC * mDelta
             //
 
             CoeffCtx::resize(tempF, 2);

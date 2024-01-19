@@ -1,6 +1,6 @@
 #pragma once
-// Â© 2020 Peter Rindal.
-// Â© 2022 Visa.
+// © 2020 Peter Rindal.
+// © 2022 Visa.
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 // 
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
@@ -9,18 +9,8 @@
 
 #include <cryptoTools/Common/CLP.h>
 
-
-void OtExt_Silent_random_Test(const oc::CLP& cmd);
-void OtExt_Silent_correlated_Test(const oc::CLP& cmd);
-void OtExt_Silent_inplace_Test(const oc::CLP& cmd);
-void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd);
-void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd);
-void OtExt_Silent_Silver_Test(const oc::CLP& cmd);
-void OtExt_Silent_baseOT_Test(const oc::CLP& cmd);
-void OtExt_Silent_mal_Test(const oc::CLP& cmd);
-
-void Tools_bitShift_test(const oc::CLP& cmd);
-void Tools_modp_test(const oc::CLP& cmd);
-void Tools_quasiCyclic_test(const oc::CLP& cmd);
-
-void SilentOT_mul_Test(const oc::CLP& cmd);
+void Tools_Pprf_expandOne_test(const oc::CLP& cmd);
+void Tools_Pprf_inter_test(const oc::CLP& cmd);
+void Tools_Pprf_ByLeafIndex_test(const oc::CLP& cmd);
+void Tools_Pprf_ByTreeIndex_test(const oc::CLP& cmd);
+void Tools_Pprf_callback_test(const oc::CLP& cmd);

@@ -170,6 +170,11 @@ namespace osuCrypto
             std::copy(x1.begin(), x1.begin() + k, y1.begin());
             y2 = y1;
             code.mExpander.expand<F, CoeffCtx, true>(x1.cbegin() + accOffset, y1.begin());
+            //using P = std::pair<typename std::vector<F>::const_iterator, typename std::vector<F>::iterator>;
+            //auto p = P{ x1.cbegin() + accOffset, y1.begin() };
+            //code.mExpander.expandMany<true, CoeffCtx, F>(
+            //    std::tuple<P>{ p }
+            //);
         }
         else
         {
@@ -210,8 +215,23 @@ namespace osuCrypto
     }
 
 
+
+
     void ExConvCode_encode_basic_test(const oc::CLP& cmd)
     {
+
+        //std::vector<int> i0, o0;
+        //std::vector<u16> i1, o1;
+        //std::vector<i32> i2, o2;
+
+        //ExpanderCode2 ex;
+        //ex.expandMany<true, CoeffCtxInteger, int, u16, i32>(
+        //    std::tuple{
+        //        std::pair{i0.begin(), o0.begin()},
+        //        std::pair{i1.begin(), o1.begin()},
+        //        std::pair{i2.begin(), o2.begin()}
+        //    }, {});
+
 
         auto K = cmd.getManyOr<u64>("k", { 16ul, 64, 4353 });
         auto R = cmd.getManyOr<double>("R", { 2.0, 3.0 });
