@@ -3,7 +3,6 @@
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include <libOTe/Tools/bitpolymul.h>
-#include <libOTe/Tools/LDPC/LdpcSampler.h>
 #include <libOTe/Vole/Noisy/NoisyVoleSender.h>
 #include <libOTe/Base/BaseOT.h>
 

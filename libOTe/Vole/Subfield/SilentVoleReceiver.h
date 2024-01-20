@@ -18,26 +18,30 @@
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
-#include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
 #include <libOTe/Tools/ExConvCode/ExConvCode.h>
 #include <libOTe/Base/BaseOT.h>
 #include <libOTe/Vole/Subfield/NoisyVoleReceiver.h>
 #include <libOTe/Vole/Subfield/NoisyVoleSender.h>
-
-namespace osuCrypto::Subfield
+#include <numeric>
+#include "libOTe/Tools/QuasiCyclicCode.h"
+namespace osuCrypto
 {
 
 
     template<
         typename F,
         typename G = F,
-        typename CoeffCtx = DefaultCoeffCtx<F, G>
+        typename Ctx = DefaultCoeffCtx<F, G>
     >
     class SilentSubfieldVoleReceiver : public TimerAdapter
     {
     public:
         static constexpr u64 mScaler = 2;
+
+        static constexpr bool MaliciousSupported =
+            std::is_same_v<F, block>&&
+            std::is_same_v<Ctx, CoeffCtxGFBlock>;
 
         enum class State
         {
@@ -46,25 +50,29 @@ namespace osuCrypto::Subfield
             HasBase
         };
 
-        using VecF = typename CoeffCtx::template Vec<F>;
-        using VecG = typename CoeffCtx::template Vec<G>;
+        using VecF = typename Ctx::template Vec<F>;
+        using VecG = typename Ctx::template Vec<G>;
 
         // The current state of the protocol
         State mState = State::Default;
 
-        // The number of OTs the user requested.
-        u64 mRequestedNumOTs = 0;
+        // the context used to perform F, G operations
+        Ctx mCtx;
 
-        // The number of OTs actually produced (at least the number requested).
-        u64 mN = 0;
+        // The number of correlations the user requested.
+        u64 mRequestSize = 0;
+
+        // the LPN security parameter
+        u64 mSecParam = 0;
 
         // The length of the noisy vectors (2 * mN for the most codes).
-        u64 mN2 = 0;
+        u64 mNoiseVecSize = 0;
 
         // We perform regular LPN, so this is the
         // size of the each chunk. 
         u64 mSizePer = 0;
 
+        // the number of noisy positions
         u64 mNumPartitions = 0;
 
         // The noisy coordinates.
@@ -77,17 +85,15 @@ namespace osuCrypto::Subfield
         // the sparse vector.
         MultType mMultType = DefaultMultType;
 
-        ExConvCode2 mExConvEncoder;
-
         // The multi-point punctured PRF for generating
         // the sparse vectors.
-        SilentSubfieldPprfReceiver<F, G, CoeffCtx> mGen;
+        SilentSubfieldPprfReceiver<F, G, Ctx> mGen;
 
         // The internal buffers for holding the expanded vectors.
-        // mA + mB = mC * delta
+        // mA  = mB + mC * delta
         VecF mA;
 
-        // mA + mB = mC * delta
+        // mA = mB + mC * delta
         VecG mC;
 
         u64 mNumThreads = 1;
@@ -98,10 +104,11 @@ namespace osuCrypto::Subfield
 
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
-        block mMalCheckSeed, mMalCheckX, mDeltaShare;
+        block mMalCheckSeed, mMalCheckX, mMalBaseA;
 
-        VecF mNoiseDeltaShare;
-        VecG mNoiseValues;
+        // we 
+        VecF mBaseA;
+        VecG mBaseC;
 
 
 #ifdef ENABLE_SOFTSPOKEN_OT
@@ -150,8 +157,8 @@ namespace osuCrypto::Subfield
                 chl2 = Socket{},
                 prng2 = std::move(PRNG{}),
                 noiseVals = VecG{},
-                noiseDeltaShares = VecF{},
-                nv = NoisySubfieldVoleReceiver<F,G,CoeffCtx>{}
+                baseAs = VecF{},
+                nv = NoisySubfieldVoleReceiver<F, G, Ctx>{}
 
             );
 
@@ -177,7 +184,7 @@ namespace osuCrypto::Subfield
             // other party will program the PPRF to output their share of delta * noiseVals.
             //
             noiseVals = sampleBaseVoleVals(prng);
-            CoeffCtx::resize(noiseDeltaShares, noiseVals.size());
+            Ctx::resize(baseAs, noiseVals.size());
 
             if (mTimer)
                 nv.setTimer(*mTimer);
@@ -202,7 +209,7 @@ namespace osuCrypto::Subfield
                         bb);
 
                     msg.resize(msg.size() - mOtExtSender.baseOtCount());
-                    MC_AWAIT(nv.receive(noiseVals, noiseDeltaShares, prng, mOtExtSender, chl));
+                    MC_AWAIT(nv.receive(noiseVals, baseAs, prng, mOtExtSender, chl));
                 }
                 else
                 {
@@ -212,7 +219,7 @@ namespace osuCrypto::Subfield
 
                     MC_AWAIT(
                         macoro::when_all_ready(
-                            nv.receive(noiseVals, noiseDeltaShares, prng2, mOtExtSender, chl2),
+                            nv.receive(noiseVals, baseAs, prng2, mOtExtSender, chl2),
                             mOtExtRecver.receive(choice, msg, prng, chl)
                         ));
                 }
@@ -225,10 +232,10 @@ namespace osuCrypto::Subfield
                 chl2 = chl.fork();
                 prng2.SetSeed(prng.get());
                 MC_AWAIT(baseOt.receive(choice, msg, prng, chl));
-                MC_AWAIT(nv.receive(noiseVals, noiseDeltaShares, prng2, baseOt, chl2));
+                MC_AWAIT(nv.receive(noiseVals, baseAs, prng2, baseOt, chl2));
             }
 
-            setSilentBaseOts(msg, noiseDeltaShares);
+            setSilentBaseOts(msg, baseAs);
             setTimePoint("SilentVoleReceiver.genSilent.done");
             MC_END();
         };
@@ -238,24 +245,37 @@ namespace osuCrypto::Subfield
         // will be needed. These can then be ganerated for
         // a different OT extension or using a base OT protocol.
         void configure(
-            u64 numOTs,
+            u64 requestSize,
             SilentBaseType type = SilentBaseType::BaseExtend,
-            u64 secParam = 128)
+            u64 secParam = 128,
+            Ctx ctx = {})
         {
+            mCtx = std::move(ctx);
+            mSecParam = secParam;
+            mRequestSize = requestSize;
             mState = State::Configured;
             mBaseType = type;
-
+            double minDist = 0;
             switch (mMultType)
             {
             case osuCrypto::MultType::ExConv7x24:
             case osuCrypto::MultType::ExConv21x24:
-
-                ExConvConfigure(numOTs, 128, mMultType, mRequestedNumOTs, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
+            {
+                u64 _1, _2;
+                ExConvConfigure(mScaler, mMultType, _1, _2, minDist);
+                break;
+            }
+            case MultType::QuasiCyclic:
+                QuasiCyclicConfigure(mScaler, minDist);
                 break;
             default:
                 throw RTE_LOC;
                 break;
             }
+
+            mNumPartitions = getRegNoiseWeight(minDist, secParam);
+            mSizePer = std::max<u64>(4, roundUpTo(divCeil(mRequestSize * mScaler, mNumPartitions), 2));
+            mNoiseVecSize = mSizePer * mNumPartitions;
 
             mGen.configure(mSizePer, mNumPartitions);
         }
@@ -283,7 +303,7 @@ namespace osuCrypto::Subfield
             if (isConfigured() == false)
                 throw std::runtime_error("configure(...) must be called first");
 
-            auto choice = mGen.sampleChoiceBits(mN2, getPprfFormat(), prng);
+            auto choice = mGen.sampleChoiceBits(prng);
 
             return choice;
         }
@@ -294,59 +314,45 @@ namespace osuCrypto::Subfield
                 throw RTE_LOC;
 
             // sample the values of the noisy coordinate of c
-            // and perform a noicy vole to get x+y = mD * c
-            auto w = mNumPartitions;
-            std::vector<block> seeds(w);
-            CoeffCtx::resize(mNoiseValues, w);
-            prng.get(seeds.data(), seeds.size());
-            for (size_t i = 0; i < w; i++) {
-                CoeffCtx::fromBlock<G>(mNoiseValues[i], seeds[i]);
-            }
+            // and perform a noicy vole to get a = b + mD * c
+
+            Ctx::resize(mBaseC, mNumPartitions + (mMalType == SilentSecType::Malicious));
+            for (size_t i = 0; i < mNumPartitions; i++)
+                Ctx::fromBlock<G>(mBaseC[i], prng.get<block>());
 
             mS.resize(mNumPartitions);
-            mGen.getPoints(mS, getPprfFormat());
+            mGen.getPoints(mS, PprfOutputFormat::Interleaved);
 
-            //          if (mMalType == SilentSecType::Malicious)
-            //          {
-            //
-            //            mMalCheckSeed = prng.get();
-            //            mMalCheckX = ZeroBlock;
-            //            auto yIter = mNoiseValues.begin();
-            //
-            //            for (u64 i = 0; i < mNumPartitions; ++i)
-            //            {
-            //              auto s = mS[i];
-            //              auto xs = mMalCheckSeed.gf128Pow(s + 1);
-            //              mMalCheckX = mMalCheckX ^ xs.gf128Mul(*yIter);
-            //              ++yIter;
-            //            }
-            //
-            //            auto sIter = mS.begin() + mNumPartitions;
-            //            for (u64 i = 0; i < mGapBaseChoice.size(); ++i)
-            //            {
-            //              if (mGapBaseChoice[i])
-            //              {
-            //                auto s = *sIter;
-            //                auto xs = mMalCheckSeed.gf128Pow(s + 1);
-            //                mMalCheckX = mMalCheckX ^ xs.gf128Mul(*yIter);
-            //                ++sIter;
-            //              }
-            //              ++yIter;
-            //            }
-            //
-            //
-            //            std::vector<block> y(mNoiseValues.begin(), mNoiseValues.end());
-            //            y.push_back(mMalCheckX);
-            //            return y;
-            //          }
+            if (mMalType == SilentSecType::Malicious)
+            {
+                if constexpr (MaliciousSupported)
+                {
+                    mMalCheckSeed = prng.get();
 
-            return mNoiseValues;
+                    auto yIter = mBaseC.begin();
+                    mCtx.zero(mBaseC.end() - 1, mBaseC.end());
+                    for (u64 i = 0; i < mNumPartitions; ++i)
+                    {
+                        auto s = mS[i];
+                        auto xs = mMalCheckSeed.gf128Pow(s + 1);
+                        mBaseC[mNumPartitions] = mBaseC[mNumPartitions] ^ xs.gf128Mul(*yIter);
+                        ++yIter;
+                    }
+                }
+                else
+                {
+                    throw std::runtime_error("malicious is currently only supported for GF128 block. " LOCATION);
+                }
+            }
+
+            return mBaseC;
         }
 
         // Set the externally generated base OTs. This choice
         // bits must be the one return by sampleBaseChoiceBits(...).
-        void setSilentBaseOts(span<block> recvBaseOts,
-            span<F> noiseDeltaShare)
+        void setSilentBaseOts(
+            span<block> recvBaseOts,
+            VecF& baseA)
         {
             if (isConfigured() == false)
                 throw std::runtime_error("configure(...) must be called first.");
@@ -356,15 +362,8 @@ namespace osuCrypto::Subfield
 
             mGen.setBase(recvBaseOts);
 
-            //          if (mMalType == SilentSecType::Malicious)
-            //          {
-            //            mDeltaShare = noiseDeltaShare.back();
-            //            noiseDeltaShare = noiseDeltaShare.subspan(0, noiseDeltaShare.size() - 1);
-            //          }
-
-            CoeffCtx::resize(mNoiseDeltaShare, noiseDeltaShare.size());
-            CoeffCtx::copy(noiseDeltaShare.begin(), noiseDeltaShare.end(), mNoiseDeltaShare.begin());
-
+            Ctx::resize(mBaseA, baseA.size());
+            Ctx::copy(baseA.begin(), baseA.end(), mBaseA.begin());
             mState = State::HasBase;
         }
 
@@ -373,19 +372,19 @@ namespace osuCrypto::Subfield
         // this function is non-interactive. Otherwise
         // the silent base OTs will automatically be performed.
         task<> silentReceive(
-            span<G> c,
-            span<F> a,
+            VecG& c,
+            VecF& a,
             PRNG& prng,
             Socket& chl)
         {
-            MC_BEGIN(task<>, this, c, a, &prng, &chl);
+            MC_BEGIN(task<>, this, &c, &a, &prng, &chl);
             if (c.size() != a.size())
                 throw RTE_LOC;
 
             MC_AWAIT(silentReceiveInplace(c.size(), prng, chl));
 
-            CoeffCtx::copy(mC.begin(), mC.begin() + c.size(), c.begin());
-            CoeffCtx::copy(mA.begin(), mA.begin() + a.size(), a.begin());
+            Ctx::copy(mC.begin(), mC.begin() + c.size(), c.begin());
+            Ctx::copy(mA.begin(), mA.begin() + a.size(), a.begin());
 
             clear();
             MC_END();
@@ -410,10 +409,9 @@ namespace osuCrypto::Subfield
             {
                 // first generate 128 normal base OTs
                 configure(n, SilentBaseType::BaseExtend);
-                //                 configure(n, SilentBaseType::Base);
             }
 
-            if (mRequestedNumOTs != n)
+            if (mRequestSize != n)
                 throw std::invalid_argument("n does not match the requested number of OTs via configure(...). " LOCATION);
 
             if (hasSilentBaseOts() == false)
@@ -422,20 +420,38 @@ namespace osuCrypto::Subfield
             }
 
             // allocate mA
-            CoeffCtx::resize(mA, 0);
-            CoeffCtx::resize(mA, mN2);
+            Ctx::resize(mA, 0);
+            Ctx::resize(mA, mNoiseVecSize);
 
             setTimePoint("SilentVoleReceiver.alloc");
 
             // allocate the space for mC
-            CoeffCtx::resize(mC, 0);
-            CoeffCtx::resize(mC, mN2);
-            CoeffCtx::zero(mC.begin(), mC.end());
+            Ctx::resize(mC, 0);
+            Ctx::resize(mC, mNoiseVecSize);
+            Ctx::zero(mC.begin(), mC.end());
             setTimePoint("SilentVoleReceiver.alloc.zero");
 
             if (mTimer)
                 mGen.setTimer(*mTimer);
-            // expand the seeds into mA
+
+            // As part of the setup, we have generated 
+            //  
+            //  mBaseA + mBaseB = mBaseC * mDelta
+            // 
+            // We have   mBaseA, mBaseC, 
+            // they have mBaseB, mDelta
+            // This was done with a small (noisy) vole.
+            // 
+            // We use the Pprf to expand as
+            //   
+            //    mA' = mB + mS(mBaseB)
+            //        = mB + mS(mBaseC * mDelta - mBaseA)
+            //        = mB + mS(mBaseC * mDelta) - mS(mBaseA) 
+            // 
+            // Therefore if we add mS(mBaseA) to mA' we will get
+            // 
+            //    mA = mB + mS(mBaseC * mDelta)
+            //
             MC_AWAIT(mGen.expand(chl, mA, PprfOutputFormat::Interleaved, true, mNumThreads));
 
             setTimePoint("SilentVoleReceiver.expand.pprf_transpose");
@@ -445,8 +461,8 @@ namespace osuCrypto::Subfield
             for (u64 i = 0; i < mNumPartitions; ++i)
             {
                 auto pnt = mS[i];
-                CoeffCtx::copy(mC[pnt], mNoiseValues[i]);
-                CoeffCtx::minus(mA[pnt], mA[pnt], mNoiseDeltaShare[i]);
+                Ctx::copy(mC[pnt], mBaseC[i]);
+                Ctx::plus(mA[pnt], mA[pnt], mBaseA[i]);
             }
 
             if (mDebug)
@@ -456,43 +472,68 @@ namespace osuCrypto::Subfield
             }
 
 
-            // if (mMalType == SilentSecType::Malicious)
-            // {
-            //   MC_AWAIT(chl.send(std::move(mMalCheckSeed)));
-            //
-            //   myHash = ferretMalCheck(mDeltaShare, mNoiseValues);
-            //
-            //   MC_AWAIT(chl.recv(theirHash));
-            //
-            //   if (theirHash != myHash)
-            //     throw RTE_LOC;
-            // }
+            if (mMalType == SilentSecType::Malicious)
+            {
+                MC_AWAIT(chl.send(std::move(mMalCheckSeed)));
+
+                if constexpr (MaliciousSupported)
+                    myHash = ferretMalCheck();
+                else
+                    throw std::runtime_error("malicious is currently only supported for GF128 block. " LOCATION);
+
+                MC_AWAIT(chl.recv(theirHash));
+
+                if (theirHash != myHash)
+                    throw RTE_LOC;
+            }
 
             switch (mMultType)
             {
             case osuCrypto::MultType::ExConv7x24:
             case osuCrypto::MultType::ExConv21x24:
-                if (mTimer) {
-                    mExConvEncoder.setTimer(getTimer());
-                }
+            {
+                u64 expanderWeight, accumulatorWeight;
+                double _;
+                ExConvConfigure(mScaler, mMultType, expanderWeight, accumulatorWeight, _);
+                ExConvCode2 encoder;
+                encoder.config(mRequestSize, mNoiseVecSize, expanderWeight, accumulatorWeight);
 
-                mExConvEncoder.dualEncode2<F, G, CoeffCtx>(
+                if (mTimer)
+                    encoder.setTimer(getTimer());
+
+                encoder.dualEncode2<F, G, Ctx>(
                     mA.begin(),
                     mC.begin()
                 );
-
                 break;
+            }
+            case osuCrypto::MultType::QuasiCyclic:
+            {
+                if constexpr (
+                    std::is_same_v<F, block> &&
+                    std::is_same_v<G, block> &&
+                    std::is_same_v<Ctx, CoeffCtxGFBlock>)
+                {
+                    QuasiCyclicCode encoder;
+                    encoder.init2(mRequestSize, mNoiseVecSize);
+                    encoder.dualEncode(mA);
+                    encoder.dualEncode(mC);
+                }
+                else
+                    throw std::runtime_error("QuasiCyclic is only supported for GF128, i.e. block. " LOCATION);
+                break;
+            }
             default:
-                throw RTE_LOC;
+                throw std::runtime_error("Code is not supported. " LOCATION);
                 break;
             }
 
             // resize the buffers down to only contain the real elements.
-            CoeffCtx::resize(mA, mRequestedNumOTs);
-            CoeffCtx::resize(mC, mRequestedNumOTs);
+            Ctx::resize(mA, mRequestSize);
+            Ctx::resize(mC, mRequestSize);
 
-            mNoiseValues = {};
-            mNoiseDeltaShare = {};
+            mBaseC = {};
+            mBaseA = {};
 
             // make the protocol as done and that
             // mA,mC are ready to be consumed.
@@ -507,115 +548,136 @@ namespace osuCrypto::Subfield
         task<> checkRT(Socket& chl) const
         {
             MC_BEGIN(task<>, this, &chl,
-                B = typename CoeffCtx::Vec<F>{},
-                sparseNoiseDelta = typename CoeffCtx::Vec<F>{},
-                noiseDeltaShare2 = typename CoeffCtx::Vec<F>{},
-                delta = typename CoeffCtx::Vec<F>{},
-                tempF = typename CoeffCtx::Vec<F>{},
-                tempG = typename CoeffCtx::Vec<G>{},
+                B = typename Ctx::Vec<F>{},
+                sparseNoiseDelta = typename Ctx::Vec<F>{},
+                baseB = typename Ctx::Vec<F>{},
+                delta = typename Ctx::Vec<F>{},
+                tempF = typename Ctx::Vec<F>{},
+                tempG = typename Ctx::Vec<G>{},
                 buffer = std::vector<u8>{}
             );
 
             // recv delta
-            buffer.resize(CoeffCtx::byteSize<F>());
+            buffer.resize(Ctx::byteSize<F>());
+            Ctx::resize(delta, 1);
             MC_AWAIT(chl.recv(buffer));
-            CoeffCtx::deserialize(buffer.begin(), buffer.end(), delta.begin());
+            Ctx::deserialize(buffer.begin(), buffer.end(), delta.begin());
 
             // recv B
-            buffer.resize(CoeffCtx::byteSize<F>() * mA.size());
+            buffer.resize(Ctx::byteSize<F>() * mA.size());
+            Ctx::resize(B, mA.size());
             MC_AWAIT(chl.recv(buffer));
-            CoeffCtx::deserialize(buffer.begin(), buffer.end(), B.begin());
+            Ctx::deserialize(buffer.begin(), buffer.end(), B.begin());
 
             // recv the noisy values.
-            buffer.resize(CoeffCtx::byteSize<F>() * mNoiseDeltaShare.size());
+            buffer.resize(Ctx::byteSize<F>() * mBaseA.size());
+            Ctx::resize(baseB, mBaseA.size());
             MC_AWAIT(chl.recvResize(buffer));
-            CoeffCtx::deserialize(buffer.begin(), buffer.end(), noiseDeltaShare2.begin());
+            Ctx::deserialize(buffer.begin(), buffer.end(), baseB.begin());
 
-            //check that at locations  mS[0],...,mS[..]
-            // that we hold a sharing mA, mB of
+            // it shoudl hold that 
+            // 
+            // mBaseA = baseB + mBaseC * mDelta
             //
-            //  delta * mC = delta * (00000 noiseDeltaShare2[0] 0000 .... 0000 noiseDeltaShare2[m] 0000)
-            //
-            // where noiseDeltaShare2[i] is at position mS[i] of mC
-            //
-            // That is, I hold mA, mC s.t.
-            //
+            // and
+            // 
             //  mA = mB + mC * mDelta
             //
-
-            CoeffCtx::resize(tempF, 2);
-            CoeffCtx::resize(tempG, 1);
-            CoeffCtx::zero(tempG.begin(), tempG.end());
-
-            for (auto i : rng(mNoiseDeltaShare.size()))
             {
-                // temp[0] = mNoiseDeltaShare[i] + noiseDeltaShare2[i]
-                CoeffCtx::plus(tempF[0], mNoiseDeltaShare[i], noiseDeltaShare2[i]);
+                bool verbose = false;
+                bool failed = false;
+                std::vector<std::size_t> index(mS.size());
+                std::iota(index.begin(), index.end(), 0);
+                std::sort(index.begin(), index.end(),
+                    [&](std::size_t i, std::size_t j) { return mS[i] < mS[j]; });
 
-                // temp[1] =  mNoiseValues[i] * delta[0]
-                CoeffCtx::mul(tempF[1], delta[0], mNoiseValues[i]);
+                Ctx::resize(tempF, 2);
+                Ctx::resize(tempG, 1);
+                Ctx::zero(tempG.begin(), tempG.end());
 
-                if (!CoeffCtx::eq(tempF[0], tempF[1]))
-                    throw RTE_LOC;
-            }
 
-            {
-
-                for (auto i : rng(mNumPartitions* mSizePer))
+                // check the correlation that
+                //
+                //  mBaseA + mBaseB = mBaseC * mDelta
+                for (auto i : rng(mBaseA.size()))
                 {
-                    auto iter = std::find(mS.begin(), mS.end(), i);
-                    if (iter != mS.end())
+                    // temp[0] = baseB[i] + mBaseA[i]
+                    Ctx::plus(tempF[0], baseB[i], mBaseA[i]);
+
+                    // temp[1] =  mBaseC[i] * delta[0]
+                    Ctx::mul(tempF[1], delta[0], mBaseC[i]);
+
+                    if (!Ctx::eq(tempF[0], tempF[1]))
+                        throw RTE_LOC;
+
+                    if (i < mNumPartitions)
                     {
-                        auto d = iter - mS.begin();
-
-                        if (!CoeffCtx::eq(mC[i], mNoiseValues[d]))
+                        //auto idx = index[i];
+                        auto point = mS[i];
+                        if (!Ctx::eq(mBaseC[i], mC[point]))
                             throw RTE_LOC;
 
-                        // temp[0] = A[i] + B[i]
-                        CoeffCtx::plus(tempF[0], mA[i], B[i]);
-
-                        // temp[1] =  mNoiseValues[d] * delta[0]
-                        CoeffCtx::mul(tempF[1], delta[0], mNoiseValues[d]);
-
-
-                        if (!CoeffCtx::eq(tempF[0], tempF[1]))
-                        {
-                            std::cout << "bad vole base noisy correlation, mA[i] + mB[i] != mC[i] * delta" << std::endl;
-                            std::cout << "i     " << i << std::endl;
-                            //std::cout << "mA[i] " << mA[i] << std::endl;
-                            //std::cout << "mB[i] " << B[i] << std::endl;
-                            //std::cout << "mC[i] " << mC[i] << std::endl;
-                            //std::cout << "delta " << delta << std::endl;
-                            //std::cout << "mA[i] + mB[i] " << (mA[i] ^ B[i]) << std::endl;
-                            //std::cout << "mC[i] * delta " << (mC[i].gf128Mul(delta)) << std::endl;
-
+                        if (i && mS[index[i - 1]] >= mS[index[i]])
                             throw RTE_LOC;
-                        }
                     }
-                    else
-                    {
-                        if (!CoeffCtx::eq(mA[i], B[i]))
-                        {
-                            std::cout << "bad vole base non-noisy correlation, mA[i] + mB[i] != 0" << std::endl;
-                            //std::cout << mA[i] << " " << B[i] << std::endl;
-                            throw RTE_LOC;
-                        }
+                }
 
-                        if (!CoeffCtx::eq(mC[i], tempG[0]))
+
+                auto iIter = index.begin();
+                auto leafIdx = mS[*iIter];
+                F act = tempF[0];
+                G zero = tempG[0];
+                Ctx::zero(tempG.begin(), tempG.end());
+
+                for (u64 j = 0; j < mA.size(); ++j)
+                {
+                    Ctx::mul(act, delta[0], mC[j]);
+                    Ctx::plus(act, act, B[j]);
+
+                    bool active = false;
+                    if (j == leafIdx)
+                    {
+                        active = true;
+                    }
+                    else if (!Ctx::eq(zero, mC[j]))
+                        throw RTE_LOC;
+
+                    if (mA[j] != act)
+                    {
+                        failed = true;
+                        if (verbose)
+                            std::cout << Color::Red;
+                    }
+
+                    if (verbose)
+                    {
+                        std::cout << j << " act " << Ctx::str(act)
+                            << " a " << Ctx::str(mA[j]) << " b " << Ctx::str(B[j]);
+
+                        if (active)
+                            std::cout << " < " << Ctx::str(delta[0]);
+
+                        std::cout << std::endl << Color::Default;
+                    }
+
+                    if (j == leafIdx)
+                    {
+                        ++iIter;
+                        if (iIter != index.end())
                         {
-                            std::cout << "bad vole base non-noisy correlation, mC[i] != 0" << std::endl;
-                            throw RTE_LOC;
+                            leafIdx = mS[*iIter];
                         }
                     }
                 }
+
+                if (failed)
+                    throw RTE_LOC;
             }
 
             MC_END();
         }
 
-        std::array<u8, 32> ferretMalCheck(
-            block deltaShare,
-            span<block> y)
+        std::array<u8, 32> ferretMalCheck()
         {
 
             block xx = mMalCheckSeed;
@@ -634,18 +696,15 @@ namespace osuCrypto::Subfield
                 // xx = mMalCheckSeed^{i+1}
                 xx = xx.gf128Mul(mMalCheckSeed);
             }
+
+            // <A,X> = <
             block mySum = sum0.gf128Reduce(sum1);
 
             std::array<u8, 32> myHash;
             RandomOracle ro(32);
-            ro.Update(mySum ^ deltaShare);
+            ro.Update(mySum ^ mBaseA.back());
             ro.Final(myHash);
             return myHash;
-        }
-
-        PprfOutputFormat getPprfFormat()
-        {
-            return PprfOutputFormat::Interleaved;
         }
 
         void clear()

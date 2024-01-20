@@ -9,7 +9,6 @@
 #include "libOTe/Tools/Tools.h"
 #include "cryptoTools/Common/Log.h"
 #include "cryptoTools/Crypto/RandomOracle.h"
-#include "libOTe/Tools/LDPC/LdpcSampler.h"
 
 
 namespace osuCrypto

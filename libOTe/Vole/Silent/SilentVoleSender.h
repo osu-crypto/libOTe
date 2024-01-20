@@ -19,7 +19,6 @@
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
-#include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/QuasiCyclicCode.h>
 #include <libOTe/Tools/EACode/EACode.h>
 #include <libOTe/Tools/ExConvCode/ExConvCode.h>
@@ -64,9 +63,6 @@ namespace osuCrypto
 #endif
 
         MultType mMultType = DefaultMultType;
-#ifdef ENABLE_INSECURE_SILVER
-        SilverEncoder mEncoder;
-#endif
         ExConvCode mExConvEncoder;
         EACode mEAEncoder;
 

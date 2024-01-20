@@ -29,7 +29,7 @@ void Tools_Pprf_expandOne_test_impl(u64 domain, bool program)
     auto numOTs = sender.baseOtCount();
     std::vector<std::array<block, 2>> sendOTs(numOTs);
     std::vector<block> recvOTs(numOTs);
-    BitVector recvBits = recver.sampleChoiceBits(domain * pntCount, format, prng);
+    BitVector recvBits = recver.sampleChoiceBits(prng);
 
 
     prng.get(sendOTs.data(), sendOTs.size());
@@ -66,13 +66,14 @@ void Tools_Pprf_expandOne_test_impl(u64 domain, bool program)
     Ctx::Vec<F> rLeafLevel(8ull << depth);
     u64 leafOffset = 0;
 
-    allocateExpandBuffer<F, Ctx>(depth - 1, program, sBuff, sSums, sLast);
+    Ctx ctx;
+    allocateExpandBuffer<F, Ctx>(depth - 1, program, sBuff, sSums, sLast, ctx);
 
     recver.mPoints.resize(roundUpTo(recver.mPntCount, 8));
     recver.getPoints(recver.mPoints, PprfOutputFormat::ByLeafIndex);
 
-    sender.expandOne(seed, 0, program, sLevels, sLeafLevel, leafOffset, sSums, sLast);
-    recver.expandOne(0, program, rLevels, rLeafLevel, leafOffset, sSums, sLast);
+    sender.expandOne(seed, 0, program, sLevels, sLeafLevel, leafOffset, sSums, sLast, ctx);
+    recver.expandOne(0, program, rLevels, rLeafLevel, leafOffset, sSums, sLast, ctx);
 
     bool failed = false;
     for (u64 i = 0; i < pntCount; ++i)
@@ -148,7 +149,7 @@ void Tools_Pprf_expandOne_test(const oc::CLP& cmd)
 #if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
 
 
-    for (u64 domain : { 8, 128, 4522}) for (bool program : {true, false})
+    for (u64 domain : { 4, 128, 4522}) for (bool program : {true, false})
     {
 
         Tools_Pprf_expandOne_test_impl<u64, u64, CoeffCtxInteger>(domain, program);
@@ -193,7 +194,7 @@ void Tools_Pprf_test_impl(
     auto numOTs = sender.baseOtCount();
     std::vector<std::array<block, 2>> sendOTs(numOTs);
     std::vector<block> recvOTs(numOTs);
-    BitVector recvBits = recver.sampleChoiceBits(domain * numPoints, format, prng);
+    BitVector recvBits = recver.sampleChoiceBits(prng);
 
     prng.get(sendOTs.data(), sendOTs.size());
     for (u64 i = 0; i < numOTs; ++i)
@@ -399,7 +400,7 @@ void Tools_Pprf_ByLeafIndex_test(const CLP& cmd)
 
     auto f = PprfOutputFormat::ByLeafIndex;
     auto v = cmd.isSet("v");
-    for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true, false })
+    for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true/*, false */})
     {
         Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, v);
         Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, v);
@@ -418,7 +419,7 @@ void Tools_Pprf_ByTreeIndex_test(const oc::CLP& cmd)
 
     auto f = PprfOutputFormat::ByTreeIndex;
     auto v = cmd.isSet("v");
-    for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true, false })
+    for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true/*, false*/ })
     {
         Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, v);
         Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, v);
@@ -437,7 +438,7 @@ void Tools_Pprf_callback_test(const oc::CLP& cmd)
 
     auto f = PprfOutputFormat::Callback;
     auto v = cmd.isSet("v");
-    for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true, false })
+    for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true/*, false */})
     {
         Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, v);
         Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, v);

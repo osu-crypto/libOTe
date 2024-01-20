@@ -19,7 +19,6 @@
 #include <libOTe/Tools/SilentPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
-#include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include "libOTe/Tools/EACode/EACode.h"

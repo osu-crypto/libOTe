@@ -1,7 +1,7 @@
 #include "cryptoTools/Common/CLP.h"
 
 
-namespace osuCrypto::Subfield
+namespace osuCrypto
 {
 
 

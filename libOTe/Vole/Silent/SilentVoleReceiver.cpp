@@ -4,7 +4,6 @@
 #include "libOTe/Vole/Silent/SilentVoleSender.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include <libOTe/Base/BaseOT.h>
-#include <libOTe/Tools/LDPC/LdpcSampler.h>
 
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RandomOracle.h>

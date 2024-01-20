@@ -28,7 +28,6 @@ using namespace osuCrypto;
 #include "ExampleSilent.h"
 #include "ExampleVole.h"
 #include "ExampleMessagePassing.h"
-#include "libOTe/Tools/LDPC/LdpcImpulseDist.h"
 #include "libOTe/Tools/LDPC/Util.h"
 #include "cryptoTools/Crypto/RandomOracle.h"
 #include "libOTe/Tools/EACode/EAChecker.h"
@@ -134,13 +133,6 @@ int main(int argc, char** argv)
 		EAChecker(cmd);
 		return 0;
 	}
-#ifdef ENABLE_LDPC
-	if (cmd.isSet("ldpc"))
-	{
-		LdpcDecode_impulse(cmd);
-		return 0;
-	}
-#endif
 
 	// unit tests.
 	if (cmd.isSet(unitTestTag))

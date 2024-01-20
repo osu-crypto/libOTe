@@ -4,7 +4,6 @@
 #include <chrono>
 #include "libOTe/Tools/Tools.h"
 
-#include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "libOTe/Tools/EACode/EACode.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
