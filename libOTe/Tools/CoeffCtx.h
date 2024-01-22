@@ -357,6 +357,8 @@ namespace osuCrypto {
         {
             // multiplication y modulo mod
             block y(0, 4234123421);
+
+#ifdef ENABLE_SSE
             static const constexpr std::uint64_t mod = 0b10000111;
             const __m128i modulus = _mm_loadl_epi64((const __m128i*) & (mod));
 
@@ -368,6 +370,9 @@ namespace osuCrypto {
             /* reduce w.r.t. high half of mul256_high */
             auto tmp = _mm_clmulepi64_si128(xy2, modulus, 0x00);
             ret = _mm_xor_si128(xy1, tmp);
+#else
+            ret = x.gf128Mul(y);
+#endif
         }
     };
 
