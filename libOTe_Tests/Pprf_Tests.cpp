@@ -178,7 +178,7 @@ void Tools_Pprf_test_impl(
 
     auto threads = 1;
     PRNG prng(CCBlock);
-    using Vec = typename Ctx::Vec<F>;
+    using Vec = typename Ctx::template Vec<F>;
 
     auto sockets = cp::LocalAsyncSocket::makePair();
 
