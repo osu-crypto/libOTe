@@ -151,7 +151,7 @@ void Tools_Pprf_expandOne_test(const oc::CLP& cmd)
     {
 
         Tools_Pprf_expandOne_test_impl<u64, u64, CoeffCtxInteger>(domain, program);
-        Tools_Pprf_expandOne_test_impl<block, block, CoeffCtxGFBlock>(domain, program);
+        Tools_Pprf_expandOne_test_impl<block, block, CoeffCtxGF128>(domain, program);
         Tools_Pprf_expandOne_test_impl<std::array<u32,11>, u32, CoeffCtxArray<u32, 11>>(domain, program);
 
     }

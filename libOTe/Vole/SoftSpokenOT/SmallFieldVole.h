@@ -123,7 +123,7 @@ namespace osuCrypto
 	{
 
 	public:
-		using  PprfSender = RegularPprfSender<block, block, CoeffCtxGFBlock>;
+		using  PprfSender = RegularPprfSender<block, block, CoeffCtxGF128>;
 
 	private:
 		SmallFieldVoleSender(const SmallFieldVoleSender& b)
@@ -209,7 +209,7 @@ namespace osuCrypto
 	class SmallFieldVoleReceiver : public SmallFieldVoleBase
 	{
 	public:
-		using  PprfReceiver = RegularPprfReceiver<block, block, CoeffCtxGFBlock>;
+		using  PprfReceiver = RegularPprfReceiver<block, block, CoeffCtxGF128>;
 
 	private:
 		SmallFieldVoleReceiver(const SmallFieldVoleReceiver& b)

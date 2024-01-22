@@ -476,7 +476,7 @@ namespace osuCrypto
              b = AlignedUnVector<block>(1),
         //deltaShare = block{},
             i = u64{},
-            sender = NoisyVoleSender<block, block, CoeffCtxGFBlock>{},
+            sender = NoisyVoleSender<block, block, CoeffCtxGF128>{},
             theirHash = std::array<u8, 32>{},
             myHash = std::array<u8, 32>{},
             ro = RandomOracle(32)
@@ -658,7 +658,7 @@ namespace osuCrypto
             case osuCrypto::MultType::ExAcc40:
             {
                 AlignedUnVector<block> A2(mEAEncoder.mMessageSize);
-                mEAEncoder.dualEncode<block, CoeffCtxGFBlock>(mA.subspan(0, mEAEncoder.mCodeSize), A2, {});
+                mEAEncoder.dualEncode<block, CoeffCtxGF2>(mA.subspan(0, mEAEncoder.mCodeSize), A2, {});
                 std::swap(mA, A2);
                 break;
             }
@@ -666,7 +666,7 @@ namespace osuCrypto
             case osuCrypto::MultType::ExConv21x24:
                 if (mTimer)
                     mExConvEncoder.setTimer(getTimer());
-                mExConvEncoder.dualEncode<block, CoeffCtxGFBlock>(mA.begin(), {});
+                mExConvEncoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {});
                 break;
             default:
                 throw RTE_LOC;
@@ -712,7 +712,7 @@ namespace osuCrypto
             {
                 AlignedUnVector<block> A2(mEAEncoder.mMessageSize);
                 AlignedUnVector<u8> C2(mEAEncoder.mMessageSize);
-                mEAEncoder.dualEncode2<block, u8, CoeffCtxGFBlock>(
+                mEAEncoder.dualEncode2<block, u8, CoeffCtxGF2>(
                     mA.subspan(0, mEAEncoder.mCodeSize), A2,
                     mC.subspan(0, mEAEncoder.mCodeSize), C2, 
                     {});
@@ -726,7 +726,7 @@ namespace osuCrypto
             case osuCrypto::MultType::ExConv21x24:
                 if (mTimer)
                     mExConvEncoder.setTimer(getTimer());
-                mExConvEncoder.dualEncode2<block, u8, CoeffCtxGFBlock>(
+                mExConvEncoder.dualEncode2<block, u8, CoeffCtxGF2>(
                     mA.begin(),
                     mC.begin(), 
                     {});

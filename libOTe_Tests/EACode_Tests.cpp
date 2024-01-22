@@ -39,16 +39,19 @@ namespace osuCrypto
         prng.get(c0.data(), c0.size());
 
         auto a0 = c0;
-        code.accumulate<block, CoeffCtxGFBlock>(a0, {});
-
+        code.accumulate<block, CoeffCtxGF128>(a0, {});
+        CoeffCtxGF128 ctx;
         block sum = c0[0];
         for (u64 i = 0; i < a0.size(); ++i)
         {
             if (a0[i] != sum)
                 throw RTE_LOC;
 
-            if(i+1 < a0.size())
+            if (i + 1 < a0.size())
+            {
                 sum ^= c0[i + 1];
+                ctx.mulConst(sum, sum);
+            }
         }
 
         u64 i = 0;
@@ -75,7 +78,7 @@ namespace osuCrypto
             }
         }
 
-        code.dualEncode<block, CoeffCtxGFBlock>(c0, m1, {});
+        code.dualEncode<block, CoeffCtxGF128>(c0, m1, {});
 
         if (m0 != m1)
             throw RTE_LOC;

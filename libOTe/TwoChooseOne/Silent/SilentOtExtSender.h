@@ -110,7 +110,7 @@ namespace osuCrypto
 #endif
 
         // The ggm tree thats used to generate the sparse vectors.
-        RegularPprfSender<block, block, CoeffCtxGFBlock> mGen;
+        RegularPprfSender<block, block, CoeffCtxGF2> mGen;
 
         // The type of compress we will use to generate the
         // dense vectors from the sparse vectors.

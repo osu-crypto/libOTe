@@ -120,6 +120,7 @@ namespace osuCrypto
         for (u64 i = 0; i < main; ++i)
         {
             ctx.plus(xx[i + 1], xx[i + 1], xx[i]);
+            ctx.mulConst(xx[i + 1], xx[i + 1]);
         }
     }
 
@@ -139,6 +140,9 @@ namespace osuCrypto
         {
             ctx.plus(xx1[i + 1], xx1[i + 1], xx1[i]);
             ctx.plus(xx2[i + 1], xx2[i + 1], xx2[i]);
+            ctx.mulConst(xx1[i + 1], xx1[i + 1]);
+            ctx.mulConst(xx2[i + 1], xx2[i + 1]);
+
         }
     }
 

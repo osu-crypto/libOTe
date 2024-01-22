@@ -428,7 +428,7 @@ namespace osuCrypto
             c = AlignedUnVector<block>(1),
             //deltaShare = block{},
             i = u64{},
-            recver = NoisyVoleReceiver<block, block, CoeffCtxGFBlock>{},
+            recver = NoisyVoleReceiver<block, block, CoeffCtxGF128>{},
             myHash = std::array<u8, 32>{},
             ro = RandomOracle(32)
             );
@@ -485,7 +485,7 @@ namespace osuCrypto
             if (mTimer)
                 mEAEncoder.setTimer(getTimer());
             AlignedUnVector<block> B2(mEAEncoder.mMessageSize);
-            mEAEncoder.dualEncode<block, CoeffCtxGFBlock>(mB.subspan(0, mEAEncoder.mCodeSize), B2, {});
+            mEAEncoder.dualEncode<block, CoeffCtxGF2>(mB.subspan(0, mEAEncoder.mCodeSize), B2, {});
             std::swap(mB, B2);
             break;
         }
@@ -493,7 +493,7 @@ namespace osuCrypto
         case osuCrypto::MultType::ExConv21x24:
             if (mTimer)
                 mExConvEncoder.setTimer(getTimer());
-            mExConvEncoder.dualEncode<block, CoeffCtxGFBlock>(mB.begin(), {});
+            mExConvEncoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
             break;
         default:
             throw RTE_LOC;

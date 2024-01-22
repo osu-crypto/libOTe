@@ -99,7 +99,7 @@ namespace osuCrypto
         timer.setTimePoint("_____________________");
         for (u64 i = 0; i < trials; ++i)
         {
-            code.dualEncode<block, CoeffCtxGFBlock>(x, y, {});
+            code.dualEncode<block, CoeffCtxGF128>(x, y, {});
             timer.setTimePoint("encode");
         }
 
@@ -131,6 +131,8 @@ namespace osuCrypto
         // size for the accumulator (# random transitions)
         u64 a = cmd.getOr("a", roundUpTo(log2ceil(n), 8));
 
+        bool gf128 = cmd.isSet("gf128");
+
         // verbose flag.
         bool v = cmd.isSet("v");
         bool sys = cmd.isSet("sys");
@@ -154,7 +156,10 @@ namespace osuCrypto
         timer.setTimePoint("_____________________");
         for (u64 i = 0; i < trials; ++i)
         {
-            code.dualEncode<block, CoeffCtxGFBlock>(x.begin(), {});
+            if(gf128)
+                code.dualEncode<block, CoeffCtxGF128>(x.begin(), {});
+            else
+                code.dualEncode<block, CoeffCtxGF2>(x.begin(), {});
 
             timer.setTimePoint("encode");
         }
@@ -385,8 +390,8 @@ namespace osuCrypto
         try
         {
 
-            SilentSubfieldVoleSender<block, block, CoeffCtxGFBlock> sender;
-            SilentSubfieldVoleReceiver<block, block, CoeffCtxGFBlock> recver;
+            SilentSubfieldVoleSender<block, block, CoeffCtxGF128> sender;
+            SilentSubfieldVoleReceiver<block, block, CoeffCtxGF128> recver;
 
             u64 trials = cmd.getOr("t", 10);
 

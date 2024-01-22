@@ -250,12 +250,14 @@ namespace osuCrypto
     // Compute e[0,...,k-1] = G * e.
     template<typename F, typename CoeffCtx, typename Iter>
     void ExConvCode::dualEncode(
-        Iter&& e,
+        Iter&& e_,
         CoeffCtx ctx)
     {
         static_assert(is_iterator<Iter>::value, "must pass in an iterator to the data");
 
-        (void)*(e + mCodeSize - 1);
+        (void)*(e_ + mCodeSize - 1);
+
+        auto e = ctx.restrictPtr<F>(e_);
 
         if (mSystematic)
         {
@@ -275,7 +277,9 @@ namespace osuCrypto
 
             CoeffCtx::template Vec<F> w;
             ctx.resize(w, mMessageSize);
-            mExpander.expand<F, CoeffCtx, false>(e, w.begin(), ctx);
+            auto wIter = ctx.restrictPtr<F>(w.begin());
+
+            mExpander.expand<F, CoeffCtx, false>(e, wIter, ctx);
             setTimePoint("ExConv.encode.expand");
 
             ctx.copy(w.begin(), w.end(), e);
@@ -407,6 +411,7 @@ namespace osuCrypto
         if (!rangeCheck || xj < end)
         {
             ctx.plus(*xj, *xj, *xi);
+            ctx.mulConst(*xj, *xj);
             ++xj;
         }
 
@@ -470,6 +475,7 @@ namespace osuCrypto
         if (!rangeCheck || xj < end)
         {
             ctx.plus(*xj, *xj, *xi);
+            ctx.mulConst(*xj, *xj);
             ++xj;
         }
 

@@ -71,7 +71,7 @@ void Vole_Noisy_test(const oc::CLP& cmd)
     {
         Vole_Noisy_test_impl<u8, u8, CoeffCtxInteger>(n);
         Vole_Noisy_test_impl<u64, u32, CoeffCtxInteger>(n);
-        Vole_Noisy_test_impl<block, block, CoeffCtxGFBlock>(n);
+        Vole_Noisy_test_impl<block, block, CoeffCtxGF128>(n);
         Vole_Noisy_test_impl<std::array<u32, 11>, u32, CoeffCtxArray<u32, 11>>(n);
     }
 }
@@ -184,7 +184,8 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
     for (u64 n : {128, 45364})
     {
         Vole_Silent_test_impl<u64, u64, CoeffCtxInteger>(n, DefaultMultType, debug, false, false);
-        Vole_Silent_test_impl<block, block, CoeffCtxGFBlock>(n, DefaultMultType, debug, false, false);
+        Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, DefaultMultType, debug, false, false);
+        //Vole_Silent_test_impl<block, bool, CoeffCtxGF2>(n, DefaultMultType, debug, false, false);
         Vole_Silent_test_impl<std::array<u32, 8>, u32, CoeffCtxArray<u32, 8>>(n, DefaultMultType, debug, false, false);
     }
 }
@@ -194,7 +195,7 @@ void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd)
 #if defined(ENABLE_SILENTOT) && defined(ENABLE_BITPOLYMUL)
     auto debug = cmd.isSet("debug");
     for (u64 n : {128, 333})
-        Vole_Silent_test_impl<block, block, CoeffCtxGFBlock>(n, MultType::QuasiCyclic, debug, false, false);
+        Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, MultType::QuasiCyclic, debug, false, false);
 #else
     throw UnitTestSkipped("ENABLE_BITPOLYMUL not defined." LOCATION);
 #endif
@@ -206,7 +207,7 @@ void Vole_Silent_baseOT_test(const oc::CLP& cmd)
     auto debug = cmd.isSet("debug");
     u64 n = 128;
     Vole_Silent_test_impl<u64, u64, CoeffCtxInteger>(n, DefaultMultType, debug, true, false);
-    Vole_Silent_test_impl<block, block, CoeffCtxGFBlock>(n, DefaultMultType, debug, true, false);
+    Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, DefaultMultType, debug, true, false);
     Vole_Silent_test_impl<std::array<u32, 8>, u32, CoeffCtxArray<u32, 8>>(n, DefaultMultType, debug, true, false);
 }
 
@@ -217,7 +218,7 @@ void Vole_Silent_mal_test(const oc::CLP& cmd)
     auto debug = cmd.isSet("debug");
     for (u64 n : {45364})
     {
-        Vole_Silent_test_impl<block, block, CoeffCtxGFBlock>(n, DefaultMultType, debug, false, true);
+        Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, DefaultMultType, debug, false, true);
     }
 }
 
@@ -282,8 +283,8 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 
     cp::BufferingSocket chls[2];
 
-    SilentSubfieldVoleReceiver<block, block, CoeffCtxGFBlock> recv;
-    SilentSubfieldVoleSender<block, block, CoeffCtxGFBlock> send;
+    SilentSubfieldVoleReceiver<block, block, CoeffCtxGF128> recv;
+    SilentSubfieldVoleSender<block, block, CoeffCtxGF128> send;
 
     send.mMalType = SilentSecType::SemiHonest;
     recv.mMalType = SilentSecType::SemiHonest;

@@ -40,7 +40,7 @@ namespace osuCrypto
 
         static constexpr bool MaliciousSupported =
             std::is_same_v<F, block>&&
-            std::is_same_v<Ctx, CoeffCtxGFBlock>;
+            std::is_same_v<Ctx, CoeffCtxGF128>;
 
         enum class State
         {
@@ -398,7 +398,7 @@ namespace osuCrypto
                 if constexpr (
                     std::is_same_v<F, block> &&
                     std::is_same_v<G, block> &&
-                    std::is_same_v<Ctx, CoeffCtxGFBlock>)
+                    std::is_same_v<Ctx, CoeffCtxGF128>)
                 {
                     QuasiCyclicCode encoder;
                     encoder.init2(mRequestSize, mNoiseVecSize);
