@@ -48,7 +48,7 @@ namespace osuCrypto
                 throw RTE_LOC;
 
             if(i+1 < a0.size())
-                sum += c0[i + 1];
+                sum ^= c0[i + 1];
         }
 
         u64 i = 0;

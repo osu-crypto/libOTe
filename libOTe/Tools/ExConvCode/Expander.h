@@ -103,11 +103,11 @@ namespace osuCrypto
         auto main = mMessageSize / 8 * 8;
         u64 i = 0;
 
-        for (; i < main; i += 8, output += 8)
+        for (; i < main; i += 8, rOutput+= 8)
         {
             if constexpr (Add == false)
             {
-                ctx.zero(output, output + 8);
+                ctx.zero(rOutput, rOutput + 8);
             }
 
             for (auto j = 0ull; j < mExpanderWeight; ++j)
@@ -135,14 +135,14 @@ namespace osuCrypto
 
         if constexpr (Add == false)
         {
-            ctx.zero(output, output + (mMessageSize - i));
+            ctx.zero(rOutput, rOutput + (mMessageSize - i));
         }
 
-        for (; i < mMessageSize; ++i, ++output)
+        for (; i < mMessageSize; ++i, ++rOutput)
         {
             for (auto j = 0ull; j < mExpanderWeight; ++j)
             {
-                ctx.plus(*output, *output, *(input + prng.get()));
+                ctx.plus(*rOutput, *rOutput, *(input + prng.get()));
             }
         }
     }
