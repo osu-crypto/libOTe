@@ -1,4 +1,7 @@
 #pragma once
+#include "libOTe/config.h"
+
+#ifdef ENABLE_PPRF
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Matrix.h"
@@ -1032,3 +1035,5 @@ namespace osuCrypto
         }
     };
 }
+
+#endif

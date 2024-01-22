@@ -12,6 +12,7 @@
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "libOTe/Vole/Silent/SilentVoleSender.h"
 #include "libOTe/Vole/Silent/SilentVoleReceiver.h"
+#include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto
 {
@@ -171,73 +172,11 @@ namespace osuCrypto
             std::cout << verbose << std::endl;
     }
 
-    inline void encodeBench(CLP& cmd)
-    {
-#ifdef ENABLE_INSECURE_SILVER
-        u64 trials = cmd.getOr("t", 10);
-
-        // the message length of the code. 
-        // The noise vector will have size n=2*m.
-        // the user can use 
-        //   -m X 
-        // to state that exactly X rows should be used or
-        //   -mm X
-        // to state that 2^X rows should be used.
-        u64 m = cmd.getOr("m", 1ull << cmd.getOr("mm", 10));
-
-        // the weight of the code, must be 5 or 11.
-        u64 w = cmd.getOr("w", 5);
-
-        // verbose flag.
-        bool v = cmd.isSet("v");
-
-
-        SilverCode code;
-        if (w == 11)
-            code = SilverCode::Weight11;
-        else if (w == 5)
-            code = SilverCode::Weight5;
-        else
-        {
-            std::cout << "invalid weight" << std::endl;
-            throw RTE_LOC;
-        }
-
-        PRNG prng(ZeroBlock);
-        SilverEncoder encoder;
-        encoder.init(m, code);
-
-
-        std::vector<block> x(encoder.cols());
-        Timer timer, verbose;
-
-        if (v)
-            encoder.setTimer(verbose);
-
-        timer.setTimePoint("_____________________");
-        for (u64 i = 0; i < trials; ++i)
-        {
-            encoder.dualEncode<block>(x);
-            timer.setTimePoint("encode");
-        }
-
-        std::cout << timer << std::endl;
-
-        if (v)
-            std::cout << verbose << std::endl;
-#else
-        std::cout << "disabled, ENABLE_INSECURE_SILVER not defined " << std::endl;
-#endif
-    }
-
-
-
     inline void transpose(const CLP& cmd)
     {
 #ifdef ENABLE_AVX
         u64 trials = cmd.getOr("trials", 1ull << 18);
         {
-
 
             AlignedArray<block, 128> data;
 
@@ -376,17 +315,14 @@ namespace osuCrypto
         {
             std::cout << e.what() << std::endl;
         }
+#else
+        std::cout << "ENABLE_SILENTOT = false" << std::endl;
 #endif
     }
 
-
-
-
-
     inline void VoleBench2(const CLP& cmd)
     {
-#ifdef ENABLE_SILENTOT
-
+#ifdef ENABLE_SILENT_VOLE
         try
         {
 
@@ -412,6 +348,8 @@ namespace osuCrypto
                 baseSend[i] = prng.get();
                 baseRecv[i] = baseSend[i][baseChoice[i]];
             }
+
+#ifdef ENABLE_SOFTSPOKEN_OT
             sender.mOtExtRecver.emplace();
             sender.mOtExtSender.emplace();
             recver.mOtExtRecver.emplace();
@@ -420,6 +358,7 @@ namespace osuCrypto
             recver.mOtExtRecver->setBaseOts(baseSend);
             sender.mOtExtSender->setBaseOts(baseRecv, baseChoice);
             recver.mOtExtSender->setBaseOts(baseRecv, baseChoice);
+#endif // ENABLE_SOFTSPOKEN_OT
 
             PRNG prng0(ZeroBlock), prng1(ZeroBlock);
             block delta = prng0.get();
@@ -478,6 +417,8 @@ namespace osuCrypto
         {
             std::cout << e.what() << std::endl;
         }
+#else
+        std::cout << "ENABLE_Silent_VOLE = false" << std::endl;
 #endif
     }
 }

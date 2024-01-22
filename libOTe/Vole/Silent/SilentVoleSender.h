@@ -123,6 +123,7 @@ namespace osuCrypto
         // generate the needed OTs.
         task<> genSilentBaseOts(PRNG& prng, Socket& chl, F delta)
         {
+#ifdef LIBOTE_HAS_BASE_OT
             using BaseOT = DefaultBaseOT;
 
             MC_BEGIN(task<>, this, delta, &prng, &chl,
@@ -195,6 +196,9 @@ namespace osuCrypto
             setSilentBaseOts(msg, b);
             setTimePoint("SilentVoleSender.genSilent.done");
             MC_END();
+#else
+            throw std::runtime_error("LIBOTE_HAS_BASE_OT = false, must enable relic, sodium or simplest ot asm." LOCATION);
+#endif
         }
 
         // configure the silent OT extension. This sets

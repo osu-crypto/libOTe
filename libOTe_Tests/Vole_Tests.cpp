@@ -18,7 +18,7 @@ using namespace oc;
 #include "libOTe/Tools/CoeffCtx.h"
 
 using namespace tests_libOTe;
-
+#ifdef ENABLE_SILENT_VOLE
 template<typename F, typename G, typename Ctx>
 void Vole_Noisy_test_impl(u64 n)
 {
@@ -356,15 +356,26 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
         timer.setTimePoint("done");
     }
 }
-//
-//namespace {
-//    void throwDisabled()
-//    {
-//        throw UnitTestSkipped(
-//            "ENABLE_SILENT_VOLE not defined. "
-//        );
-//    }
-//}
+#else
+
+
+namespace {
+    void throwDisabled()
+    {
+        throw UnitTestSkipped(
+            "ENABLE_SILENT_VOLE not defined. "
+        );
+    }
+}
+void Vole_Noisy_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_paramSweep_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_baseOT_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_mal_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_Rounds_test(const oc::CLP& cmd) { throwDisabled(); }
+
+
+#endif
 //
 //
 //void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd) { throwDisabled(); }

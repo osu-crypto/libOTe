@@ -7,6 +7,7 @@
 
 #include <cryptoTools/Network/IOService.h>
 #include <cryptoTools/Network/Session.h>
+#include "util.h"
 
 namespace osuCrypto
 {
@@ -67,6 +68,7 @@ namespace osuCrypto
 		else
 		{
 			u8 dummy[1];
+			dummy[0] = 0;
 			chl.asyncSend(dummy, 1);
 			chl.recv(dummy, 1);
 			chl.asyncSend(dummy, 1);
@@ -79,6 +81,7 @@ namespace osuCrypto
 	{
 
 		u8 dummy[1];
+		dummy[0] = 0;
 
 		chl.asyncSend(dummy, 1);
 

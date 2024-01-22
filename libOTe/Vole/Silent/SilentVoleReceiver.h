@@ -25,6 +25,8 @@
 #include <libOTe/Vole/Noisy/NoisyVoleSender.h>
 #include <numeric>
 #include "libOTe/Tools/QuasiCyclicCode.h"
+#include "libOTe/TwoChooseOne/Silent/SilentOtExtUtil.h"
+
 namespace osuCrypto
 {
 
@@ -145,6 +147,8 @@ namespace osuCrypto
         // generate the needed OTs.
         task<> genSilentBaseOts(PRNG& prng, Socket& chl)
         {
+#ifdef LIBOTE_HAS_BASE_OT
+
             using BaseOT = DefaultBaseOT;
 
 
@@ -246,7 +250,11 @@ namespace osuCrypto
 
             setSilentBaseOts(msg, baseAs);
             setTimePoint("SilentVoleReceiver.genSilent.done");
-            MC_END();
+            MC_END(); 
+#else
+                throw std::runtime_error("LIBOTE_HAS_BASE_OT = false, must enable relic, sodium or simplest ot asm." LOCATION);
+#endif
+
         };
 
         // configure the silent OT extension. This sets

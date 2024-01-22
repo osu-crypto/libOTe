@@ -1,6 +1,9 @@
 #include "Pprf_Tests.h"
 
 #include "libOTe/Tools/Pprf/RegularPprf.h"
+#include "cryptoTools/Common/TestCollection.h"
+
+#ifdef ENABLE_PPRF
 #include "cryptoTools/Common/Log.h"
 #include "Common.h"
 #include <numeric>
@@ -447,3 +450,22 @@ void Tools_Pprf_callback_test(const oc::CLP& cmd)
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif
 }
+#else
+
+
+namespace {
+    void throwDisabled()
+    {
+        throw oc::UnitTestSkipped(
+            "ENABLE_PPRF not defined. "
+        );
+    }
+}
+
+void Tools_Pprf_expandOne_test(const oc::CLP& cmd) { throwDisabled(); }
+void Tools_Pprf_inter_test(const oc::CLP& cmd) { throwDisabled(); }
+void Tools_Pprf_ByLeafIndex_test(const oc::CLP& cmd) { throwDisabled(); }
+void Tools_Pprf_ByTreeIndex_test(const oc::CLP& cmd) { throwDisabled(); }
+void Tools_Pprf_callback_test(const oc::CLP& cmd) { throwDisabled(); }
+
+#endif
