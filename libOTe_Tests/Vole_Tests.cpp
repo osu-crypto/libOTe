@@ -112,7 +112,7 @@ namespace
         // the sender gets b, d
         // the recver gets a, c
         auto c = recver.sampleBaseVoleVals(prng);
-        Ctx::template Vec<F> a(c.size()), b(c.size());
+        typename Ctx::template Vec<F> a(c.size()), b(c.size());
 
         prng.get(b.data(), b.size());
         for (auto i : rng(c.size()))
@@ -130,8 +130,8 @@ namespace
 template<typename F, typename G, typename Ctx>
 void Vole_Silent_test_impl(u64 n, MultType type, bool debug, bool doFakeBase, bool mal)
 {
-    using VecF = Ctx::Vec<F>;
-    using VecG = Ctx::Vec<G>;
+    using VecF = typename Ctx::template Vec<F>;
+    using VecG = typename Ctx::template Vec<G>;
     Ctx ctx;
 
     block seed = CCBlock;

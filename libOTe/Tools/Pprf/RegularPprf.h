@@ -310,7 +310,7 @@ namespace osuCrypto
             std::array<block, 8> child;
 
             // clear the sums
-            std::array<CoeffCtx::template Vec<F>, 2> leafSums;
+            std::array<VecF, 2> leafSums;
             ctx.resize(leafSums[0], 8);
             ctx.resize(leafSums[1], 8);
             ctx.zero(leafSums[0].begin(), leafSums[0].end());
@@ -368,7 +368,7 @@ namespace osuCrypto
                 // active child should be the correct value XOR the delta.
                 // This will be done by sending the sums and the sums plus
                 // delta and ensure that they can only decrypt the correct ones.
-                CoeffCtx::template Vec<F> leafOts;
+                VecF leafOts;
                 ctx.resize(leafOts, 2);
                 PRNG otMasker;
 
@@ -397,7 +397,7 @@ namespace osuCrypto
                         }
 
                         // copy m0 into the output buffer.
-                        span<u8> buff = leafMsgs.subspan(0, 2 * ctx.byteSize<F>());
+                        span<u8> buff = leafMsgs.subspan(0, 2 * ctx.template byteSize<F>());
                         leafMsgs = leafMsgs.subspan(buff.size());
                         ctx.serialize(leafOts.begin(), leafOts.end(), buff.begin());
 
@@ -411,7 +411,7 @@ namespace osuCrypto
             }
             else
             {
-                CoeffCtx::template Vec<F> leafOts;
+                VecF leafOts;
                 ctx.resize(leafOts, 1);
                 PRNG otMasker;
 
@@ -421,7 +421,7 @@ namespace osuCrypto
                     {
                         // copy the sum k into the output buffer.
                         ctx.copy(leafOts[0], leafSums[k][j]);
-                        span<u8> buff = leafMsgs.subspan(0, ctx.byteSize<F>());
+                        span<u8> buff = leafMsgs.subspan(0, ctx.template byteSize<F>());
                         leafMsgs = leafMsgs.subspan(buff.size());
                         ctx.serialize(leafOts.begin(), leafOts.end(), buff.begin());
 
@@ -716,7 +716,7 @@ namespace osuCrypto
             // We change the hash function for the leaf so lets update  
             // inactiveChildValues to use the new hash and subtract
             // these from the leafSums
-            std::array<CoeffCtx::template Vec<F>, 2> leafSums;
+            std::array<VecF, 2> leafSums;
             if (mDepth > 1)
             {
                 auto theirSumsIter = theirSums.begin();
@@ -885,7 +885,7 @@ namespace osuCrypto
                 // overwrite whatever the value was. This is an optimization.
                 auto width = divCeil(mDomain, 1ull << (mDepth - d));
 
-                CoeffCtx::template Vec<F> temp;
+                VecF temp;
                 ctx.resize(temp, 2);
                 for (u64 k = 0; k < 2; ++k)
                 {
@@ -969,11 +969,11 @@ namespace osuCrypto
                     auto notAi = inactiveChildIdx & 1;
 
                     // offset to the first or second ot message, based on the one we want
-                    auto offset = ctx.byteSize<F>() * 2 * notAi;
+                    auto offset = ctx.template byteSize<F>() * 2 * notAi;
 
 
                     // decrypt the ot string
-                    span<u8> buff = leafMsg.subspan(offset, ctx.byteSize<F>() * 2);
+                    span<u8> buff = leafMsg.subspan(offset, ctx.template byteSize<F>() * 2);
                     leafMsg = leafMsg.subspan(buff.size() * 2);
                     otMasker.SetSeed(mBaseOTs[j + treeIdx][0], divCeil(buff.size(), sizeof(block)));
                     for (u64 i = 0; i < buff.size(); ++i)
@@ -1006,10 +1006,10 @@ namespace osuCrypto
                     auto notAi = inactiveChildIdx & 1;
 
                     // offset to the first or second ot message, based on the one we want
-                    auto offset = ctx.byteSize<F>() * notAi;
+                    auto offset = ctx.template byteSize<F>() * notAi;
 
                     // decrypt the ot string
-                    span<u8> buff = leafMsg.subspan(offset, ctx.byteSize<F>());
+                    span<u8> buff = leafMsg.subspan(offset, ctx.template byteSize<F>());
                     leafMsg = leafMsg.subspan(buff.size() * 2);
                     otMasker.SetSeed(mBaseOTs[j + treeIdx][0], divCeil(buff.size(), sizeof(block)));
                     for (u64 i = 0; i < buff.size(); ++i)

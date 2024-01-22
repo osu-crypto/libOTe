@@ -62,13 +62,13 @@ namespace osuCrypto
         }
         CoeffCtx ctx;
         std::vector<u8> rand(divCeil(aw, 8));
-        for (i64 i = 0; i < x1.size() - aw - 1; ++i)
+        for (i64 i = 0; i < i64(x1.size() - aw - 1); ++i)
         {
             prng.get(rand.data(), rand.size());
-            code.accOne<F, CoeffCtx, true>(x1.data() + i, x1.data()+n, rand.data(), ctx, std::integral_constant<u64, 0>{});
+            code.accOneGen<F, CoeffCtx, true>(x1.data() + i, x1.data()+n, rand.data(), ctx);
 
             if (aw == 16)
-                code.accOne<F, CoeffCtx, true>(x2.data() + i, x2.data()+n, rand.data(), ctx, std::integral_constant<u64, 16>{});
+                code.accOne<F, CoeffCtx, true, 16>(x2.data() + i, x2.data()+n, rand.data(), ctx);
 
 
             ctx.plus(x3[i + 1], x3[i + 1], x3[i]);
@@ -259,7 +259,7 @@ namespace osuCrypto
         auto Bw = cmd.getManyOr<u64>("bw", { 7, 21 });
         auto Aw = cmd.getManyOr<u64>("aw", { 16, 24, 29 });
 
-        bool v = cmd.isSet("v");
+        //bool v = cmd.isSet("v");
         for (auto k : K) for (auto r : R) for (auto bw : Bw) for (auto aw : Aw) for (auto sys : { false, true })
         {
             auto n = k * r;

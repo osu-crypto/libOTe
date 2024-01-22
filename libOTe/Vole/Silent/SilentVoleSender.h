@@ -139,7 +139,7 @@ namespace osuCrypto
             if (isConfigured() == false)
                 throw std::runtime_error("configure must be called first");
 
-            xx = mCtx.binaryDecomposition<F>(delta);
+            xx = mCtx.template binaryDecomposition<F>(delta);
 
             // compute the correlation for the noisy coordinates.
             b.resize(baseVoleCount());

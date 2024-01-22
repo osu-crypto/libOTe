@@ -97,8 +97,8 @@ namespace osuCrypto
 
         detail::ExpanderModd prng(mSeed, mCodeSize);
 
-        auto rInput = ctx.restrictPtr<const F>(input);
-        auto rOutput = ctx.restrictPtr<F>(output);
+        auto rInput = ctx.template restrictPtr<const F>(input);
+        auto rOutput = ctx.template restrictPtr<F>(output);
 
         auto main = mMessageSize / 8 * 8;
         u64 i = 0;

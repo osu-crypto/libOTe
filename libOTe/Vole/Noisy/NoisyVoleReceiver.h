@@ -53,7 +53,7 @@ namespace osuCrypto {
                 otMsg = AlignedUnVector<std::array<block, 2>>{});
 
             setTimePoint("NoisyVoleReceiver.ot.begin");
-            otMsg.resize(ctx.bitSize<F>());
+            otMsg.resize(ctx.template bitSize<F>());
             MC_AWAIT(ot.send(otMsg, prng, chl));
 
             setTimePoint("NoisyVoleReceiver.ot.end");
@@ -101,7 +101,7 @@ namespace osuCrypto {
                 for (size_t j = 0; j < c.size(); ++j, ++k)
                 {
                     // msg[i,j] = otMsg[i,j,0]
-                    ctx.fromBlock<F>(msg[k], prng.get<block>());
+                    ctx.fromBlock(msg[k], prng.get<block>());
                     //ctx.zero(msg.begin() + k, msg.begin() + k + 1);
                     //std::cout << "m" << i << ",0 = " << ctx.str(msg[k]) << std::endl;
 
@@ -135,7 +135,7 @@ namespace osuCrypto {
                 }
             }
 
-            buff.resize(msg.size() * ctx.byteSize<F>());
+            buff.resize(msg.size() * ctx.template byteSize<F>());
             ctx.serialize(msg.begin(), msg.end(), buff.begin());
 
             MC_AWAIT(chl.send(std::move(buff)));

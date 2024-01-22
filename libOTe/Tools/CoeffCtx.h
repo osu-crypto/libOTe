@@ -3,6 +3,7 @@
 #include "cryptoTools/Common/BitIterator.h"
 #include "cryptoTools/Common/BitVector.h"
 #include <sstream>
+#include <cryptoTools/Common/block.h>
 
 namespace osuCrypto {
 
@@ -453,12 +454,21 @@ namespace osuCrypto {
     };
 
     template<typename F, typename G = F>
-    struct DefaultCoeffCtx : CoeffCtxInteger {
+    struct DefaultCoeffCtx_t {
+        using type = CoeffCtxInteger;
     };
 
     // GF128 vole
-    template<> struct DefaultCoeffCtx<block, block> : CoeffCtxGF128 {};
+    template<> 
+    struct DefaultCoeffCtx_t<block, block> {
+        using type = CoeffCtxGF128;
+    };
 
-    // OT
-    template<> struct DefaultCoeffCtx<block, bool> : CoeffCtxGF2 {};
+    // OT, gf2
+    template<> struct DefaultCoeffCtx_t<block, bool> {
+        using type = CoeffCtxGF2;
+    };
+
+    template<typename F, typename G = F>
+    using DefaultCoeffCtx = typename DefaultCoeffCtx_t<F, G>::type;
 }

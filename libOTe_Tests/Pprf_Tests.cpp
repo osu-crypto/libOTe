@@ -16,7 +16,6 @@ void Tools_Pprf_expandOne_test_impl(u64 domain, bool program)
     auto pntCount = 8ull;
     PRNG prng(CCBlock);
 
-    auto format = PprfOutputFormat::Interleaved;
     RegularPprfSender<F, G, Ctx> sender;
     RegularPprfReceiver<F, G, Ctx> recver;
 
@@ -59,9 +58,9 @@ void Tools_Pprf_expandOne_test_impl(u64 domain, bool program)
 
     pprf::allocateExpandTree(mTreeAlloc, sLevels);
     pprf::allocateExpandTree(mTreeAlloc, rLevels);
-
-    Ctx::Vec<F> sLeafLevel(8ull << depth);
-    Ctx::Vec<F> rLeafLevel(8ull << depth);
+    using VecF = typename Ctx::template Vec<F>;
+    VecF sLeafLevel(8ull * domain);
+    VecF rLeafLevel(8ull * domain);
     u64 leafOffset = 0;
 
     Ctx ctx;
@@ -133,7 +132,10 @@ void Tools_Pprf_expandOne_test_impl(u64 domain, bool program)
             else
             {
                 if (sLeaves(j, i) != rLeaves(j, i))
+                {
+                    std::cout << "j " << j << " i " << i << " sender " << ctx.str(sLeaves(j, i)) << " recver " << ctx.str(rLeaves(j, i)) << std::endl;
                     throw RTE_LOC;
+                }
             }
         }
     }
@@ -171,7 +173,6 @@ void Tools_Pprf_test_impl(
     bool verbose)
 {
 
-    u64 depth = log2ceil(domain);
     auto threads = 1;
     PRNG prng(CCBlock);
     using Vec = typename Ctx::Vec<F>;

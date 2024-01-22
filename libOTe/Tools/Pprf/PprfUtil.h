@@ -134,7 +134,7 @@ namespace osuCrypto
             CoeffCtx& ctx)
         {
 
-            u64 elementSize = ctx.byteSize<F>();
+            u64 elementSize = ctx.template byteSize<F>();
 
             // num of bytes they will take up.
             u64 numBytes =

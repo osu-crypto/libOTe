@@ -38,8 +38,8 @@
 namespace osuCrypto {
     template <
         typename F, 
-        typename G = F, 
-        typename CoeffCtx = DefaultCoeffCtx<F,G>
+        typename G, 
+        typename CoeffCtx
     >
     class NoisyVoleSender : public TimerAdapter 
     {
@@ -83,7 +83,7 @@ namespace osuCrypto {
                 temp = VecF{},
                 xb = BitVector{});
 
-            xb = ctx.binaryDecomposition<F>(delta);
+            xb = ctx.binaryDecomposition(delta);
 
             if (otMsg.size() != xb.size())
                 throw RTE_LOC;
@@ -93,7 +93,7 @@ namespace osuCrypto {
             ctx.zero(b.begin(), b.end());
 
             // receive the the excrypted one shares.
-            buffer.resize(xb.size() * b.size() * ctx.byteSize<F>());
+            buffer.resize(xb.size() * b.size() * ctx.template byteSize<F>());
             MC_AWAIT(chl.recv(buffer));
             ctx.resize(msg, xb.size() * b.size());
             ctx.deserialize(buffer.begin(), buffer.end(), msg.begin());

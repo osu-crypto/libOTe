@@ -13,7 +13,6 @@ namespace osuCrypto
         auto n = cmd.getOr("n", k * R);
         auto bw = cmd.getOr("bw", 7);
 
-        bool v = cmd.isSet("v");
 
 
         EACode code;

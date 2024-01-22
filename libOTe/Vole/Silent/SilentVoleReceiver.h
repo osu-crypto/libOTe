@@ -330,7 +330,7 @@ namespace osuCrypto
 
             mCtx.resize(mBaseC, mNumPartitions + (mMalType == SilentSecType::Malicious));
             
-            if (mCtx.bitSize<G>() == 1)
+            if (mCtx.template bitSize<G>() == 1)
             {
                 mCtx.one(mBaseC.begin(), mBaseC.begin() + mNumPartitions);
             }
@@ -343,14 +343,14 @@ namespace osuCrypto
                 mCtx.one(one.begin(), one.end());
                 for (size_t i = 0; i < mNumPartitions; i++)
                 {
-                    mCtx.fromBlock<G>(mBaseC[i], prng.get<block>());
+                    mCtx.fromBlock(mBaseC[i], prng.get<block>());
 
                     // must not be zero.
                     while(mCtx.eq(zero[0], mBaseC[i]))
-                        mCtx.fromBlock<G>(mBaseC[i], prng.get<block>());
+                        mCtx.fromBlock(mBaseC[i], prng.get<block>());
 
                     // if we are not a field, then the noise should be odd.
-                    if (mCtx.isField<F>() == false)
+                    if (mCtx.template isField<F>() == false)
                     {
                         u8 odd = mCtx.binaryDecomposition(mBaseC[i])[0];
                         if (odd)
@@ -605,19 +605,19 @@ namespace osuCrypto
             );
 
             // recv delta
-            buffer.resize(mCtx.byteSize<F>());
+            buffer.resize(mCtx.template byteSize<F>());
             mCtx.resize(delta, 1);
             MC_AWAIT(chl.recv(buffer));
             mCtx.deserialize(buffer.begin(), buffer.end(), delta.begin());
 
             // recv B
-            buffer.resize(mCtx.byteSize<F>() * mA.size());
+            buffer.resize(mCtx.template byteSize<F>() * mA.size());
             mCtx.resize(B, mA.size());
             MC_AWAIT(chl.recv(buffer));
             mCtx.deserialize(buffer.begin(), buffer.end(), B.begin());
 
             // recv the noisy values.
-            buffer.resize(mCtx.byteSize<F>() * mBaseA.size());
+            buffer.resize(mCtx.template byteSize<F>() * mBaseA.size());
             mCtx.resize(baseB, mBaseA.size());
             MC_AWAIT(chl.recvResize(buffer));
             mCtx.deserialize(buffer.begin(), buffer.end(), baseB.begin());
