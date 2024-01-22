@@ -34,14 +34,14 @@ namespace osuCrypto
         typename G = F,
         typename Ctx = DefaultCoeffCtx<F, G>
     >
-    class SilentSubfieldVoleReceiver : public TimerAdapter
+    class SilentVoleReceiver : public TimerAdapter
     {
     public:
         static constexpr u64 mScaler = 2;
 
         static constexpr bool MaliciousSupported =
-            std::is_same_v<F, block>&&
-            std::is_same_v<Ctx, CoeffCtxGF128>;
+            std::is_same_v<F, block> &&  std::is_same_v<Ctx, CoeffCtxGF128>;
+
 
         enum class State
         {
@@ -112,8 +112,8 @@ namespace osuCrypto
 
 
 #ifdef ENABLE_SOFTSPOKEN_OT
-        SoftSpokenMalOtSender mOtExtSender;
-        SoftSpokenMalOtReceiver mOtExtRecver;
+        macoro::optional<SoftSpokenMalOtSender> mOtExtSender;
+        macoro::optional<SoftSpokenMalOtReceiver> mOtExtRecver;
 #endif
 
         //        // sets the Iknp base OTs that are then used to extend
@@ -192,24 +192,29 @@ namespace osuCrypto
             if (mBaseType == SilentBaseType::BaseExtend)
             {
 #ifdef ENABLE_SOFTSPOKEN_OT
+                if (!mOtExtRecver)
+                    mOtExtRecver.emplace();
 
-                if (mOtExtSender.hasBaseOts() == false)
+                if (!mOtExtSender)
+                    mOtExtSender.emplace();
+
+                if (mOtExtSender->hasBaseOts() == false)
                 {
-                    msg.resize(msg.size() + mOtExtSender.baseOtCount());
-                    bb.resize(mOtExtSender.baseOtCount());
+                    msg.resize(msg.size() + mOtExtSender->baseOtCount());
+                    bb.resize(mOtExtSender->baseOtCount());
                     bb.randomize(prng);
                     choice.append(bb);
 
-                    MC_AWAIT(mOtExtRecver.receive(choice, msg, prng, chl));
+                    MC_AWAIT(mOtExtRecver->receive(choice, msg, prng, chl));
 
-                    mOtExtSender.setBaseOts(
+                    mOtExtSender->setBaseOts(
                         span<block>(msg).subspan(
-                            msg.size() - mOtExtSender.baseOtCount(),
-                            mOtExtSender.baseOtCount()),
+                            msg.size() - mOtExtSender->baseOtCount(),
+                            mOtExtSender->baseOtCount()),
                         bb);
 
-                    msg.resize(msg.size() - mOtExtSender.baseOtCount());
-                    MC_AWAIT(nv.receive(noiseVals, baseAs, prng, mOtExtSender, chl, mCtx));
+                    msg.resize(msg.size() - mOtExtSender->baseOtCount());
+                    MC_AWAIT(nv.receive(noiseVals, baseAs, prng, *mOtExtSender, chl, mCtx));
                 }
                 else
                 {
@@ -219,8 +224,8 @@ namespace osuCrypto
 
                     MC_AWAIT(
                         macoro::when_all_ready(
-                            nv.receive(noiseVals, baseAs, prng2, mOtExtSender, chl2, mCtx),
-                            mOtExtRecver.receive(choice, msg, prng, chl)
+                            nv.receive(noiseVals, baseAs, prng2, *mOtExtSender, chl2, mCtx),
+                            mOtExtRecver->receive(choice, msg, prng, chl)
                         ));
                 }
 #else
@@ -323,26 +328,34 @@ namespace osuCrypto
             // and perform a noicy vole to get a = b + mD * c
 
 
-            VecG zero, one;
-            mCtx.resize(zero, 1);
-            mCtx.resize(one, 1);
-            mCtx.zero(zero.begin(), zero.end());
-            mCtx.one(one.begin(), one.end());
             mCtx.resize(mBaseC, mNumPartitions + (mMalType == SilentSecType::Malicious));
-            for (size_t i = 0; i < mNumPartitions; i++)
+            
+            if (mCtx.bitSize<G>() == 1)
             {
-                mCtx.fromBlock<G>(mBaseC[i], prng.get<block>());
-
-                // must not be zero.
-                while(mCtx.eq(zero[0], mBaseC[i]))
+                mCtx.one(mBaseC.begin(), mBaseC.begin() + mNumPartitions);
+            }
+            else
+            {
+                VecG zero, one;
+                mCtx.resize(zero, 1);
+                mCtx.resize(one, 1);
+                mCtx.zero(zero.begin(), zero.end());
+                mCtx.one(one.begin(), one.end());
+                for (size_t i = 0; i < mNumPartitions; i++)
+                {
                     mCtx.fromBlock<G>(mBaseC[i], prng.get<block>());
 
-                // if we are not a field, then the noise should be odd.
-                if (mCtx.isField<F>() == false)
-                {
-                    u8 odd = mCtx.binaryDecomposition(mBaseC[i])[0];
-                    if (odd)
-                        mCtx.plus(mBaseC[i], mBaseC[i], one[0]);
+                    // must not be zero.
+                    while(mCtx.eq(zero[0], mBaseC[i]))
+                        mCtx.fromBlock<G>(mBaseC[i], prng.get<block>());
+
+                    // if we are not a field, then the noise should be odd.
+                    if (mCtx.isField<F>() == false)
+                    {
+                        u8 odd = mCtx.binaryDecomposition(mBaseC[i])[0];
+                        if (odd)
+                            mCtx.plus(mBaseC[i], mBaseC[i], one[0]);
+                    }
                 }
             }
 

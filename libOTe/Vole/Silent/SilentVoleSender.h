@@ -33,14 +33,13 @@ namespace osuCrypto
         typename G = F,
         typename Ctx = DefaultCoeffCtx<F, G>
     >
-    class SilentSubfieldVoleSender : public TimerAdapter
+    class SilentVoleSender : public TimerAdapter
     {
     public:
         static constexpr u64 mScaler = 2;
 
         static constexpr bool MaliciousSupported =
-            std::is_same_v<F, block>&&
-            std::is_same_v<Ctx, CoeffCtxGF128>;
+            std::is_same_v<F, block> && std::is_same_v<Ctx, CoeffCtxGF128>;
 
         enum class State
         {
@@ -103,11 +102,14 @@ namespace osuCrypto
         block mDeltaShare;
 
 #ifdef ENABLE_SOFTSPOKEN_OT
-        SoftSpokenMalOtSender mOtExtSender;
-        SoftSpokenMalOtReceiver mOtExtRecver;
+        macoro::optional<SoftSpokenMalOtSender> mOtExtSender;
+        macoro::optional<SoftSpokenMalOtReceiver> mOtExtRecver;
 #endif
 
-
+        bool hasSilentBaseOts()const
+        {
+            return mGen.hasBaseOts();
+        }
 
 
         u64 baseVoleCount() const
@@ -147,18 +149,23 @@ namespace osuCrypto
             {
 #ifdef ENABLE_SOFTSPOKEN_OT
 
-                if (mOtExtRecver.hasBaseOts() == false)
+                if (!mOtExtSender)
+                    mOtExtSender = SoftSpokenMalOtSender{};
+                if (!mOtExtRecver)
+                    mOtExtRecver = SoftSpokenMalOtReceiver{};
+
+                if (mOtExtRecver->hasBaseOts() == false)
                 {
-                    msg.resize(msg.size() + mOtExtRecver.baseOtCount());
-                    MC_AWAIT(mOtExtSender.send(msg, prng, chl));
+                    msg.resize(msg.size() + mOtExtRecver->baseOtCount());
+                    MC_AWAIT(mOtExtSender->send(msg, prng, chl));
 
-                    mOtExtRecver.setBaseOts(
+                    mOtExtRecver->setBaseOts(
                         span<std::array<block, 2>>(msg).subspan(
-                            msg.size() - mOtExtRecver.baseOtCount(),
-                            mOtExtRecver.baseOtCount()));
-                    msg.resize(msg.size() - mOtExtRecver.baseOtCount());
+                            msg.size() - mOtExtRecver->baseOtCount(),
+                            mOtExtRecver->baseOtCount()));
+                    msg.resize(msg.size() - mOtExtRecver->baseOtCount());
 
-                    MC_AWAIT(nv.send(delta, b, prng, mOtExtRecver, chl, mCtx));
+                    MC_AWAIT(nv.send(delta, b, prng, *mOtExtRecver, chl, mCtx));
                 }
                 else
                 {
@@ -167,19 +174,17 @@ namespace osuCrypto
 
                     MC_AWAIT(
                         macoro::when_all_ready(
-                            nv.send(delta, b, prng2, mOtExtRecver, chl2, mCtx),
-                            mOtExtSender.send(msg, prng, chl)));
+                            nv.send(delta, b, prng2, *mOtExtRecver, chl2, mCtx),
+                            mOtExtSender->send(msg, prng, chl)));
                 }
 #else
-
+                throw RTE_LOC;
 #endif
             }
             else
             {
                 chl2 = chl.fork();
                 prng2.SetSeed(prng.get());
-                //MC_AWAIT(baseOt.send(msg, prng, chl));
-                //MC_AWAIT(nv.send(delta, b, prng2, baseOt, chl2));
                 MC_AWAIT(
                     macoro::when_all_ready(
                         nv.send(delta, b, prng2, baseOt, chl2, mCtx),

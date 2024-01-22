@@ -390,8 +390,8 @@ namespace osuCrypto
         try
         {
 
-            SilentSubfieldVoleSender<block, block, CoeffCtxGF128> sender;
-            SilentSubfieldVoleReceiver<block, block, CoeffCtxGF128> recver;
+            SilentVoleSender<block, block, CoeffCtxGF128> sender;
+            SilentVoleReceiver<block, block, CoeffCtxGF128> recver;
 
             u64 trials = cmd.getOr("t", 10);
 
@@ -412,11 +412,14 @@ namespace osuCrypto
                 baseSend[i] = prng.get();
                 baseRecv[i] = baseSend[i][baseChoice[i]];
             }
-
-            sender.mOtExtRecver.setBaseOts(baseSend);
-            recver.mOtExtRecver.setBaseOts(baseSend);
-            sender.mOtExtSender.setBaseOts(baseRecv, baseChoice);
-            recver.mOtExtSender.setBaseOts(baseRecv, baseChoice);
+            sender.mOtExtRecver.emplace();
+            sender.mOtExtSender.emplace();
+            recver.mOtExtRecver.emplace();
+            recver.mOtExtSender.emplace();
+            sender.mOtExtRecver->setBaseOts(baseSend);
+            recver.mOtExtRecver->setBaseOts(baseSend);
+            sender.mOtExtSender->setBaseOts(baseRecv, baseChoice);
+            recver.mOtExtSender->setBaseOts(baseRecv, baseChoice);
 
             PRNG prng0(ZeroBlock), prng1(ZeroBlock);
             block delta = prng0.get();

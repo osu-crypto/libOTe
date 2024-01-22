@@ -139,8 +139,8 @@ void Vole_Silent_test_impl(u64 n, MultType type, bool debug, bool doFakeBase, bo
 
     auto chls = cp::LocalAsyncSocket::makePair();
 
-    SilentSubfieldVoleReceiver<F, G, Ctx> recv;
-    SilentSubfieldVoleSender<F, G, Ctx> send;
+    SilentVoleReceiver<F, G, Ctx> recv;
+    SilentVoleSender<F, G, Ctx> send;
     recv.mMultType = type;
     send.mMultType = type;
     recv.mDebug = debug;
@@ -185,7 +185,7 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
     {
         Vole_Silent_test_impl<u64, u64, CoeffCtxInteger>(n, DefaultMultType, debug, false, false);
         Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, DefaultMultType, debug, false, false);
-        //Vole_Silent_test_impl<block, bool, CoeffCtxGF2>(n, DefaultMultType, debug, false, false);
+        Vole_Silent_test_impl<block, bool, CoeffCtxGF2>(n, DefaultMultType, debug, false, false);
         Vole_Silent_test_impl<std::array<u32, 8>, u32, CoeffCtxArray<u32, 8>>(n, DefaultMultType, debug, false, false);
     }
 }
@@ -283,8 +283,8 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 
     cp::BufferingSocket chls[2];
 
-    SilentSubfieldVoleReceiver<block, block, CoeffCtxGF128> recv;
-    SilentSubfieldVoleSender<block, block, CoeffCtxGF128> send;
+    SilentVoleReceiver<block, block, CoeffCtxGF128> recv;
+    SilentVoleSender<block, block, CoeffCtxGF128> send;
 
     send.mMalType = SilentSecType::SemiHonest;
     recv.mMalType = SilentSecType::SemiHonest;

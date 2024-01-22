@@ -73,7 +73,7 @@ namespace osuCrypto {
         template<typename F>
         OC_FORCEINLINE BitVector binaryDecomposition(F& x) {
             static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
-            return { (u8*)&x, sizeof(F) * 8 };
+            return { (u8*)&x, bitSize<F>() };
         }
 
         // derive an F using the randomness b. 
@@ -309,10 +309,22 @@ namespace osuCrypto {
             ret = lhs & rhs;
         }
 
-        //template<typename F>
-        //OC_FORCEINLINE void mul(F& ret, const F& lhs, const bool& rhs) {
-        //    ret = rhs ? lhs : zeroElem<F>();
-        //}
+        template<typename F>
+        OC_FORCEINLINE void mul(F& ret, const F& lhs, const bool& rhs) {
+            ret = rhs ? lhs : zeroElem<F>();
+        }
+
+        // the bit size require to prepresent F
+        // the protocol will perform binary decomposition
+        // of F using this many bits
+        template<typename F>
+        u64 bitSize()
+        {
+            if (std::is_same<bool, F>::value)
+                return 1;
+            else
+                return sizeof(F) * 8;
+        }
 
         // is F a field?
         template<typename F>
@@ -320,14 +332,14 @@ namespace osuCrypto {
             return true; // default.
         }
 
-        //template<typename F>
-        //static OC_FORCEINLINE constexpr F zeroElem()
-        //{
-        //    static_assert(std::is_trivially_copyable<F>::value, "memset is used so must be trivially_copyable.");
-        //    F r;
-        //    memset(&r, 0, sizeof(F));
-        //    return r;
-        //}
+        template<typename F>
+        static OC_FORCEINLINE constexpr F zeroElem()
+        {
+            static_assert(std::is_trivially_copyable<F>::value, "memset is used so must be trivially_copyable.");
+            F r;
+            memset(&r, 0, sizeof(F));
+            return r;
+        }
     };
 
 
