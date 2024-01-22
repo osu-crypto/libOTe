@@ -16,7 +16,7 @@
 #include <cryptoTools/Network/Channel.h>
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 #include "libOTe/Tools/Coproto.h"
-#include "libOTe/Tools/SilentPprf.h"
+#include "libOTe/Tools/Pprf/RegularPprf.h"
 
 namespace osuCrypto
 {
@@ -121,9 +121,14 @@ namespace osuCrypto
 
 	class SmallFieldVoleSender : public SmallFieldVoleBase
 	{
+
+	public:
+		using  PprfSender = RegularPprfSender<block, block, CoeffCtxGFBlock>;
+
+	private:
 		SmallFieldVoleSender(const SmallFieldVoleSender& b)
 			: SmallFieldVoleBase(b)
-			, mPprf(new SilentMultiPprfSender)
+			, mPprf(new PprfSender)
 			, mGenerateFn(b.mGenerateFn)
 		{}
 
@@ -134,7 +139,7 @@ namespace osuCrypto
 		// wastes a few AES calls, but saving them wouldn't have helped much because you still have to
 		// pay for the AES latency.
 
-		std::unique_ptr<SilentMultiPprfSender> mPprf;
+		std::unique_ptr<PprfSender> mPprf;
 
 		SmallFieldVoleSender() = default;
 		SmallFieldVoleSender(SmallFieldVoleSender&&) = default;
@@ -203,17 +208,20 @@ namespace osuCrypto
 
 	class SmallFieldVoleReceiver : public SmallFieldVoleBase
 	{
+	public:
+		using  PprfReceiver = RegularPprfReceiver<block, block, CoeffCtxGFBlock>;
 
+	private:
 		SmallFieldVoleReceiver(const SmallFieldVoleReceiver& b)
 			: SmallFieldVoleBase(b)
-			, mPprf(new SilentMultiPprfReceiver)
+			, mPprf(new PprfReceiver)
 			, mDelta(b.mDelta)
 			, mDeltaUnpacked(b.mDeltaUnpacked)
 			, mGenerateFn(b.mGenerateFn)
 		{}
 
 	public:
-		std::unique_ptr<SilentMultiPprfReceiver> mPprf;
+		std::unique_ptr<PprfReceiver> mPprf;
 		BitVector mDelta;
 		AlignedUnVector<u8> mDeltaUnpacked; // Each bit of delta becomes a byte, either 0 or 0xff.
 

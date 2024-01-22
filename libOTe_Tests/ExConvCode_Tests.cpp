@@ -1,8 +1,8 @@
 #include "ExConvCode_Tests.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
-#include "libOTe/Tools/ExConvCode/ExConvCode2.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include <iomanip>
-#include "libOTe/Tools/Subfield/Subfield.h"
+#include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto
 {
@@ -49,7 +49,7 @@ namespace osuCrypto
     void exConvTest(u64 k, u64 n, u64 bw, u64 aw, bool sys)
     {
 
-        ExConvCode2 code;
+        ExConvCode code;
         code.config(k, n, bw, aw, sys);
 
         auto accOffset = sys * k;
@@ -60,23 +60,23 @@ namespace osuCrypto
         {
             x1[i] = x2[i] = x3[i] = prng.get();
         }
-
+        CoeffCtx ctx;
         std::vector<u8> rand(divCeil(aw, 8));
         for (i64 i = 0; i < x1.size() - aw - 1; ++i)
         {
             prng.get(rand.data(), rand.size());
-            code.accOne<F, CoeffCtx, true>(x1.begin() + i, x1.end(), rand.data(), std::integral_constant<u64, 0>{});
+            code.accOne<F, CoeffCtx, true>(x1.begin() + i, x1.end(), rand.data(), ctx, std::integral_constant<u64, 0>{});
 
             if (aw == 16)
-                code.accOne<F, CoeffCtx, true>(x2.begin() + i, x2.end(), rand.data(), std::integral_constant<u64, 16>{});
+                code.accOne<F, CoeffCtx, true>(x2.begin() + i, x2.end(), rand.data(), ctx, std::integral_constant<u64, 16>{});
 
 
-            CoeffCtx::plus(x3[i + 1], x3[i + 1], x3[i]);
+            ctx.plus(x3[i + 1], x3[i + 1], x3[i]);
             for (u64 j = 0; j < aw && (i + j + 2) < x3.size(); ++j)
             {
                 if (*BitIterator(rand.data(), j))
                 {
-                    CoeffCtx::plus(x3[i + j + 2], x3[i + j + 2], x3[i]);
+                    ctx.plus(x3[i + j + 2], x3[i + j + 2], x3[i]);
                 }
             }
 
@@ -100,11 +100,11 @@ namespace osuCrypto
         x4 = x1;
         //std::cout << std::endl;
 
-        code.accumulateFixed<F, CoeffCtx, 0>(x1.begin() + accOffset);
+        code.accumulateFixed<F, CoeffCtx, 0>(x1.begin() + accOffset, ctx);
 
         if (aw == 16)
         {
-            code.accumulateFixed<F, CoeffCtx, 16>(x2.begin() + accOffset);
+            code.accumulateFixed<F, CoeffCtx, 16>(x2.begin() + accOffset, ctx);
 
             if (x1 != x2)
             {
@@ -128,7 +128,7 @@ namespace osuCrypto
                 if (mtxCoeffIter > mtxCoeffEnd)
                 {
                     // generate more mtx coefficients
-                    ExConvCode2::refill(coeffGen);
+                    ExConvCode::refill(coeffGen);
                     mtxCoeffIter = (u8*)coeffGen.mBuffer.data();
                 }
                 
@@ -136,14 +136,14 @@ namespace osuCrypto
                 auto xj = xi + 1;
                 if (xj != end)
                 {
-                    CoeffCtx::plus(*xj, *xj, *xi);
+                    ctx.plus(*xj, *xj, *xi);
                     ++xj;
                 }
                 for (u64 j = 0; j < aw && xj != end; ++j, ++xj)
                 {
                     if (*BitIterator(mtxCoeffIter, j))
                     {
-                        CoeffCtx::plus(*xj, *xj, *xi);
+                        ctx.plus(*xj, *xj, *xi);
                     }
                 }
                 ++mtxCoeffIter;
@@ -190,7 +190,7 @@ namespace osuCrypto
                 for (u64 p = 0; p < 8; ++p)
                 {
                     auto idx = expanderCoeff.get();
-                    CoeffCtx::plus(y2[i + p], y2[i + p], x1[idx + accOffset]);
+                    ctx.plus(y2[i + p], y2[i + p], x1[idx + accOffset]);
                 }
             }
         }
@@ -200,14 +200,14 @@ namespace osuCrypto
             for (u64 j = 0; j < code.mExpander.mExpanderWeight; ++j)
             {
                 auto idx = expanderCoeff.get();
-                CoeffCtx::plus(y2[i], y2[i], x1[idx + accOffset]);
+                ctx.plus(y2[i], y2[i], x1[idx + accOffset]);
             }
         }
 
         if (y1 != y2)
             throw RTE_LOC;
 
-        code.dualEncode<F, CoeffCtx>(x4.begin());
+        code.dualEncode<F, CoeffCtx>(x4.begin(), {});
 
         x4.resize(k);
         if (x4 != y1)
@@ -224,7 +224,7 @@ namespace osuCrypto
         //std::vector<u16> i1, o1;
         //std::vector<i32> i2, o2;
 
-        //ExpanderCode2 ex;
+        //ExpanderCode ex;
         //ex.expandMany<true, CoeffCtxInteger, int, u16, i32>(
         //    std::tuple{
         //        std::pair{i0.begin(), o0.begin()},

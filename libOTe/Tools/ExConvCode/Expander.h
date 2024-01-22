@@ -17,7 +17,7 @@ namespace osuCrypto
     // The encoder for the expander matrix B.
     // B has mMessageSize rows and mCodeSize columns. It is sampled uniformly
     // with fixed row weight mExpanderWeight.
-    class ExpanderCode2
+    class ExpanderCode
     {
     public:
 
@@ -66,15 +66,6 @@ namespace osuCrypto
         ) const;
 
 
-        template<
-            typename F,
-            typename CoeffCtx
-        >
-        typename CoeffCtx::template Vec<F> getB(CoeffCtx ctx = {}) const;
-
-
-
-
         //template<
         //    bool Add,
         //    typename CoeffCtx,
@@ -96,7 +87,7 @@ namespace osuCrypto
         typename SrcIter,
         typename DstIter
     >
-    void ExpanderCode2::expand(
+    void ExpanderCode::expand(
         SrcIter&& input,
         DstIter&& output,
         CoeffCtx ctx) const
@@ -162,7 +153,7 @@ namespace osuCrypto
     //    typename... F,
     //    typename... SrcDstIterPair
     //>
-    //void ExpanderCode2::expandMany(
+    //void ExpanderCode::expandMany(
     //    std::tuple<SrcDstIterPair...>  inOuts,
     //    CoeffCtx ctx)const
     //{

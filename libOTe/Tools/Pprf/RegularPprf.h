@@ -7,182 +7,25 @@
 #include "cryptoTools/Common/Range.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/Coproto.h"
-#include "libOTe/Tools/SilentPprf.h"
-#include "SubfieldPprf.h"
 #include <array>
-#include "libOTe/Tools/Subfield/Subfield.h"
+#include "libOTe/Tools/CoeffCtx.h"
+#include "PprfUtil.h"
 
 namespace osuCrypto
 {
 
     extern const std::array<AES, 2> gGgmAes;
 
-    inline void allocateExpandTree(
-        TreeAllocator& alloc,
-        span<AlignedArray<block, 8>>& tree,
-        std::vector<span<AlignedArray<block, 8>>>& levels)
-    {
-        tree = alloc.get();
-        assert((u64)tree.data() % 32 == 0);
-        levels[0] = tree.subspan(0, 1);
-        auto rem = tree.subspan(2);
-        for (auto i : rng(1ull, levels.size()))
-        {
-            levels[i] = rem.subspan(0, levels[i - 1].size() * 2);
-            assert((u64)levels[i].data() % 32 == 0);
-            rem = rem.subspan(levels[i].size());
-        }
-    }
-
-    template<typename VecF, typename CoeffCtx>
-    void copyOut(
-        VecF& leaf,
-        VecF& output,
-        u64 totalTrees,
-        u64 treeIndex,
-        PprfOutputFormat oFormat,
-        std::function<void(u64 treeIdx, VecF& lvl)>& callback)
-    {
-        auto curSize = std::min<u64>(totalTrees - treeIndex, 8);
-        auto domain = leaf.size() / 8;
-        if (oFormat == PprfOutputFormat::ByLeafIndex)
-        {
-            if (curSize == 8)
-            {
-                for (u64 leafIndex = 0; leafIndex < domain; ++leafIndex)
-                {
-                    auto oIdx = totalTrees * leafIndex + treeIndex;
-                    auto iIdx = leafIndex * 8;
-                    output[oIdx + 0] = leaf[iIdx + 0];
-                    output[oIdx + 1] = leaf[iIdx + 1];
-                    output[oIdx + 2] = leaf[iIdx + 2];
-                    output[oIdx + 3] = leaf[iIdx + 3];
-                    output[oIdx + 4] = leaf[iIdx + 4];
-                    output[oIdx + 5] = leaf[iIdx + 5];
-                    output[oIdx + 6] = leaf[iIdx + 6];
-                    output[oIdx + 7] = leaf[iIdx + 7];
-                }
-            }
-            else
-            {
-                for (u64 leafIndex = 0; leafIndex < domain; ++leafIndex)
-                {
-                    //auto oi = output[leafIndex].subspan(treeIndex, curSize);
-                    //auto& ii = leaf[leafIndex];
-                    auto oIdx = totalTrees * leafIndex + treeIndex;
-                    auto iIdx = leafIndex * 8;
-                    for (u64 j = 0; j < curSize; ++j)
-                        output[oIdx + j] = leaf[iIdx + j];
-                }
-            }
-
-        }
-        else if (oFormat == PprfOutputFormat::ByTreeIndex)
-        {
-
-            if (curSize == 8)
-            {
-                for (u64 leafIndex = 0; leafIndex < domain; ++leafIndex)
-                {
-                    auto iIdx = leafIndex * 8;
-
-                    output[(treeIndex + 0) * domain + leafIndex] = leaf[iIdx + 0];
-                    output[(treeIndex + 1) * domain + leafIndex] = leaf[iIdx + 1];
-                    output[(treeIndex + 2) * domain + leafIndex] = leaf[iIdx + 2];
-                    output[(treeIndex + 3) * domain + leafIndex] = leaf[iIdx + 3];
-                    output[(treeIndex + 4) * domain + leafIndex] = leaf[iIdx + 4];
-                    output[(treeIndex + 5) * domain + leafIndex] = leaf[iIdx + 5];
-                    output[(treeIndex + 6) * domain + leafIndex] = leaf[iIdx + 6];
-                    output[(treeIndex + 7) * domain + leafIndex] = leaf[iIdx + 7];
-                }
-            }
-            else
-            {
-                for (u64 leafIndex = 0; leafIndex < domain; ++leafIndex)
-                {
-                    auto iIdx = leafIndex * 8;
-                    for (u64 j = 0; j < curSize; ++j)
-                        output[(treeIndex + j) * domain + leafIndex] = leaf[iIdx + j];
-                }
-            }
-
-        }
-        else if (oFormat == PprfOutputFormat::Callback)
-            callback(treeIndex, leaf);
-        else
-            throw RTE_LOC;
-    }
-
-    template<typename F, typename CoeffCtx>
-    void allocateExpandBuffer(
-        u64 depth,
-        bool programPuncturedPoint,
-        std::vector<u8>& buff,
-        span<std::array<std::array<block, 8>, 2>>& sums,
-        span<u8>& leaf,
-        CoeffCtx& ctx)
-    {
-
-        u64 elementSize = ctx.byteSize<F>();
-
-        using SumType = std::array<std::array<block, 8>, 2>;
-        // num of bytes they will take up.
-        u64 numBytes =
-            depth * sizeof(SumType) +  // each internal level of the tree has a sum
-            elementSize * 8 * 2 +          // we must program 8 inactive F leaves
-            elementSize * 8 * 2 * programPuncturedPoint; // if we are programing the active lead, then we have 8 more.
-
-        // allocate the buffer and partition them.
-        buff.resize(numBytes);
-        sums = span<SumType>((SumType*)buff.data(), depth);
-        leaf = span<u8>((u8*)(sums.data() + sums.size()),
-            elementSize * 8 * 2 +
-            elementSize * 8 * 2 * programPuncturedPoint
-        );
-
-        void* sEnd = sums.data() + sums.size();
-        void* lEnd = leaf.data() + leaf.size();
-        void* end = buff.data() + buff.size();
-        if (sEnd > end || lEnd != end)
-            throw RTE_LOC;
-    }
-
-    template<typename VecF>
-    void validateExpandFormat(
-        PprfOutputFormat oFormat,
-        VecF& output,
-        u64 domain,
-        u64 pntCount)
-    {
-        switch (oFormat)
-        {
-        case osuCrypto::PprfOutputFormat::ByLeafIndex:
-        case osuCrypto::PprfOutputFormat::ByTreeIndex:
-        case osuCrypto::PprfOutputFormat::Interleaved:
-            if (output.size() != domain * pntCount)
-                throw RTE_LOC;
-            break;
-        case osuCrypto::PprfOutputFormat::Callback:
-            if (output.size())
-                throw RTE_LOC;
-            break;
-        default:
-            throw RTE_LOC;
-            break;
-        }
-
-    }
 
     template<
         typename F,
         typename G = F,
         typename CoeffCtx = DefaultCoeffCtx<F, G>
     >
-    class SilentSubfieldPprfSender : public TimerAdapter {
+    class RegularPprfSender : public TimerAdapter {
     public:
         u64 mDomain = 0, mDepth = 0, mPntCount = 0;
         std::vector<F> mValue;
-        TreeAllocator mTreeAlloc;
         Matrix<std::array<block, 2>> mBaseOTs;
 
         using VecF = typename CoeffCtx::template Vec<F>;
@@ -191,13 +34,13 @@ namespace osuCrypto
         std::function<void(u64 treeIdx, VecF& leaf)> mOutputFn;
 
 
-        SilentSubfieldPprfSender() = default;
+        RegularPprfSender() = default;
 
-        SilentSubfieldPprfSender(const SilentSubfieldPprfSender&) = delete;
+        RegularPprfSender(const RegularPprfSender&) = delete;
 
-        SilentSubfieldPprfSender(SilentSubfieldPprfSender&&) = delete;
+        RegularPprfSender(RegularPprfSender&&) = delete;
 
-        SilentSubfieldPprfSender(u64 domainSize, u64 pointCount) {
+        RegularPprfSender(u64 domainSize, u64 pointCount) {
             configure(domainSize, pointCount);
         }
 
@@ -205,15 +48,12 @@ namespace osuCrypto
         {
             if (domainSize & 1)
                 throw std::runtime_error("Pprf domain must be even. " LOCATION);
-            if (domainSize < 4)
-                throw std::runtime_error("Pprf domain must must be at least 4. " LOCATION);
-            if (mPntCount % 8)
-                throw std::runtime_error("pointCount must be a multiple of 8 (general case not impl). " LOCATION);
+            if (domainSize < 2)
+                throw std::runtime_error("Pprf domain must must be at least 2. " LOCATION);
 
             mDomain = domainSize;
             mDepth = log2ceil(mDomain);
             mPntCount = pointCount;
-            //mPntCount8 = roundUpTo(pointCount, 8);
 
             mBaseOTs.resize(0, 0);
         }
@@ -239,11 +79,6 @@ namespace osuCrypto
                 mBaseOTs(i) = baseMessages[i];
         }
 
-        //task<> expand(Socket& chls, span<const F> value, block seed, span <F> output, PprfOutputFormat oFormat,
-        //    bool programPuncturedPoint, u64 numThreads) {
-        //    MatrixView<F> o(output.data(), output.size(), 1);
-        //    return expand(chls, value, seed, o, oFormat, programPuncturedPoint, numThreads);
-        //}
         task<> expand(
             Socket& chl,
             const VecF& value,
@@ -259,7 +94,7 @@ namespace osuCrypto
 
             setTimePoint("SilentMultiPprfSender.start");
 
-            validateExpandFormat(oFormat, output, mDomain, mPntCount);
+            pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
 
             MC_BEGIN(task<>, this, numThreads, oFormat, &output, seed, &chl, programPuncturedPoint, ctx,
                 treeIndex = u64{},
@@ -269,15 +104,16 @@ namespace osuCrypto
                 leafLevelPtr = (VecF*)nullptr,
                 leafLevel = VecF{},
                 buff = std::vector<u8>{},
-                encSums = span<std::array<std::array<block, 8>, 2>>{},
-                leafMsgs = span<u8>{}
+                encSums = span<std::array<block, 2>>{},
+                leafMsgs = span<u8>{},
+                mTreeAlloc = pprf::TreeAllocator{}
             );
 
             mTreeAlloc.reserve(numThreads, (1ull << mDepth) + 2);
             setTimePoint("SilentMultiPprfSender.reserve");
 
             levels.resize(mDepth);
-            allocateExpandTree(mTreeAlloc, tree, levels);
+            pprf::allocateExpandTree(mTreeAlloc, levels);
 
             for (treeIndex = 0; treeIndex < mPntCount; treeIndex += 8)
             {
@@ -298,7 +134,8 @@ namespace osuCrypto
                 }
 
                 // allocate the send buffer and partition it.
-                allocateExpandBuffer<F>(mDepth - 1, programPuncturedPoint, buff, encSums, leafMsgs, ctx);
+                pprf::allocateExpandBuffer<F>(
+                    mDepth - 1, std::min<u64>(8, mPntCount - treeIndex), programPuncturedPoint, buff, encSums, leafMsgs, ctx);
 
                 // exapnd the tree
                 expandOne(seed, treeIndex, programPuncturedPoint, levels, *leafLevelPtr, leafIndex, encSums, leafMsgs, ctx);
@@ -308,12 +145,12 @@ namespace osuCrypto
                 // if we aren't interleaved, we need to copy the
                 // leaf layer to the output.
                 if (oFormat != PprfOutputFormat::Interleaved)
-                    copyOut<VecF, CoeffCtx>(leafLevel, output, mPntCount, treeIndex, oFormat, mOutputFn);
+                    pprf::copyOut<VecF, CoeffCtx>(leafLevel, output, mPntCount, treeIndex, oFormat, mOutputFn);
 
             }
 
             mBaseOTs = {};
-            mTreeAlloc.del(tree);
+            //mTreeAlloc.del(tree);
             mTreeAlloc.clear();
 
             setTimePoint("SilentMultiPprfSender.de-alloc");
@@ -350,10 +187,11 @@ namespace osuCrypto
             span<span<AlignedArray<block, 8>>> levels,
             VecF& leafLevel,
             const u64 leafOffset,
-            span<std::array<std::array<block, 8>, 2>>  encSums,
+            span<std::array<block, 2>>  encSums,
             span<u8> leafMsgs,
             CoeffCtx ctx)
         {
+            auto remTrees = std::min<u64>(8, mPntCount - treeIdx);
 
             // the first level should be size 1, the root of the tree.
             // we will populate it with random seeds using aesSeed in counter mode
@@ -361,7 +199,8 @@ namespace osuCrypto
             assert(levels[0].size() == 1);
             mAesFixedKey.ecbEncCounterMode(aesSeed ^ block(treeIdx), levels[0][0]);
 
-            assert(encSums.size() == mDepth - 1);
+            assert(encSums.size() == (mDepth - 1) * remTrees);
+            auto encSumIter = encSums.begin();
 
             // space for our sums of each level. Should always be less then
             // 24 levels... If not increase the limit or make it a vector.
@@ -450,13 +289,14 @@ namespace osuCrypto
                 }
 
                 // encrypt the sums and write them to the output.
-                for (u64 j = 0; j < 8; ++j)
+                for (u64 j = 0; j < remTrees; ++j)
                 {
-                    encSums[d][0][j] = sums[0][j] ^ mBaseOTs[treeIdx + j][mDepth - 1 - d][1];
-                    encSums[d][1][j] = sums[1][j] ^ mBaseOTs[treeIdx + j][mDepth - 1 - d][0];
+                    (*encSumIter)[0] = sums[0][j] ^ mBaseOTs[treeIdx + j][mDepth - 1 - d][1];
+                    (*encSumIter)[1] = sums[1][j] ^ mBaseOTs[treeIdx + j][mDepth - 1 - d][0];
+                    ++encSumIter;
                 }
             }
-
+            assert(encSumIter == encSums.end());
 
             auto d = mDepth - 1;
 
@@ -532,7 +372,7 @@ namespace osuCrypto
                 ctx.resize(leafOts, 2);
                 PRNG otMasker;
 
-                for (u64 j = 0; j < 8; ++j)
+                for (u64 j = 0; j < remTrees; ++j)
                 {
                     // we will construct two OT strings. Let
                     // s0, s1 be the left and right child sums.
@@ -575,7 +415,7 @@ namespace osuCrypto
                 ctx.resize(leafOts, 1);
                 PRNG otMasker;
 
-                for (u64 j = 0; j < 8; ++j)
+                for (u64 j = 0; j < remTrees; ++j)
                 {
                     for (u64 k = 0; k < 2; ++k)
                     {
@@ -606,35 +446,31 @@ namespace osuCrypto
         typename G = F,
         typename CoeffCtx = DefaultCoeffCtx<F, G>
     >
-    class SilentSubfieldPprfReceiver : public TimerAdapter
+    class RegularPprfReceiver : public TimerAdapter
     {
     public:
         u64 mDomain = 0, mDepth = 0, mPntCount = 0;
         using VecF = typename CoeffCtx::template Vec<F>;
         using VecG = typename CoeffCtx::template Vec<G>;
 
-        std::vector<u64> mPoints;
+        //std::vector<u64> mPoints;
 
         Matrix<block> mBaseOTs;
 
         Matrix<u8> mBaseChoices;
 
-        TreeAllocator mTreeAlloc;
-
         std::function<void(u64 treeIdx, VecF& leafs)> mOutputFn;
 
-        SilentSubfieldPprfReceiver() = default;
-        SilentSubfieldPprfReceiver(const SilentSubfieldPprfReceiver&) = delete;
-        SilentSubfieldPprfReceiver(SilentSubfieldPprfReceiver&&) = delete;
+        RegularPprfReceiver() = default;
+        RegularPprfReceiver(const RegularPprfReceiver&) = delete;
+        RegularPprfReceiver(RegularPprfReceiver&&) = delete;
 
         void configure(u64 domainSize, u64 pointCount)
         {
             if (domainSize & 1)
                 throw std::runtime_error("Pprf domain must be even. " LOCATION);
-            if (domainSize < 4)
-                throw std::runtime_error("Pprf domain must must be at least 4. " LOCATION);
-            if (mPntCount % 8)
-                throw std::runtime_error("pointCount must be a multiple of 8 (general case not impl). " LOCATION);
+            if (domainSize < 2)
+                throw std::runtime_error("Pprf domain must must be at least 2. " LOCATION);
 
             mDomain = domainSize;
             mDepth = log2ceil(mDomain);
@@ -753,7 +589,7 @@ namespace osuCrypto
                 {
                     auto subTree = j % 8;
                     auto batch = j / 8;
-                    points[j] =  (batch * mDomain + points[j]) * 8 + subTree;
+                    points[j] = (batch * mDomain + points[j]) * 8 + subTree;
                 }
 
                 //interleavedPoints(points, mDomain, format);
@@ -776,29 +612,30 @@ namespace osuCrypto
             u64 numThreads,
             CoeffCtx ctx = {})
         {
-            validateExpandFormat(oFormat, output, mDomain, mPntCount);
+            pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
 
             MC_BEGIN(task<>, this, oFormat, &output, &chl, programPuncturedPoint, ctx,
                 treeIndex = u64{},
-                tree = span<AlignedArray<block, 8>>{},
                 levels = std::vector<span<AlignedArray<block, 8>>>{},
                 leafIndex = u64{},
                 leafLevelPtr = (VecF*)nullptr,
                 leafLevel = VecF{},
                 buff = std::vector<u8>{},
-                encSums = span<std::array<std::array<block, 8>, 2>>{},
-                leafMsgs = span<u8>{}
+                encSums = span<std::array<block, 2>>{},
+                leafMsgs = span<u8>{},
+                mTreeAlloc = pprf::TreeAllocator{},
+                points = std::vector<u64>{}
             );
 
             setTimePoint("SilentMultiPprfReceiver.start");
-            mPoints.resize(roundUpTo(mPntCount, 8));
-            getPoints(mPoints, PprfOutputFormat::ByLeafIndex);
+            points.resize(mPntCount);
+            getPoints(points, PprfOutputFormat::ByLeafIndex);
 
             mTreeAlloc.reserve(1, (1ull << mDepth) + 2);
             setTimePoint("SilentMultiPprfSender.reserve");
 
             levels.resize(mDepth);
-            allocateExpandTree(mDepth, mTreeAlloc, tree, levels);
+            pprf::allocateExpandTree(mTreeAlloc, levels);
 
             for (treeIndex = 0; treeIndex < mPntCount; treeIndex += 8)
             {
@@ -819,23 +656,24 @@ namespace osuCrypto
                 }
 
                 // allocate the send buffer and partition it.
-                allocateExpandBuffer<F>(mDepth - 1, programPuncturedPoint, buff, encSums, leafMsgs, ctx);
+                pprf::allocateExpandBuffer<F>(mDepth - 1, std::min<u64>(8, mPntCount - treeIndex),
+                    programPuncturedPoint, buff, encSums, leafMsgs, ctx);
 
                 MC_AWAIT(chl.recv(buff));
 
                 // exapnd the tree
-                expandOne(treeIndex, programPuncturedPoint, levels, *leafLevelPtr, leafIndex, encSums, leafMsgs, ctx);
+                expandOne(treeIndex, programPuncturedPoint, levels, *leafLevelPtr, leafIndex, encSums, leafMsgs, points, ctx);
 
                 // if we aren't interleaved, we need to copy the
                 // leaf layer to the output.
                 if (oFormat != PprfOutputFormat::Interleaved)
-                    copyOut<VecF, CoeffCtx>(leafLevel, output, mPntCount, treeIndex, oFormat, mOutputFn);
+                    pprf::copyOut<VecF, CoeffCtx>(leafLevel, output, mPntCount, treeIndex, oFormat, mOutputFn);
             }
 
             setTimePoint("SilentMultiPprfReceiver.join");
 
             mBaseOTs = {};
-            mTreeAlloc.del(tree);
+            //mTreeAlloc.del(tree);
             mTreeAlloc.clear();
 
             setTimePoint("SilentMultiPprfReceiver.de-alloc");
@@ -852,6 +690,14 @@ namespace osuCrypto
             mPntCount = 0;
         }
 
+        void expandOneInternal(
+            u64 treeIdx,
+            span<span<AlignedArray<block, 8>>> levels,
+            span<std::array<std::array<block, 8>, 2>> theirSums,
+            CoeffCtx& ctx)
+        {
+        }
+
         //treeIndex, programPuncturedPoint, levels, *leafLevelPtr, leafIndex, encSums, leafMsgs
         void expandOne(
             u64 treeIdx,
@@ -859,48 +705,179 @@ namespace osuCrypto
             span<span<AlignedArray<block, 8>>> levels,
             VecF& leafLevel,
             const u64 outputOffset,
-            span<std::array<std::array<block, 8>, 2>> theirSums,
+            span<std::array<block, 2>> theirSums,
             span<u8> leafMsg,
-            CoeffCtx ctx)
+            span<u64> points,
+            CoeffCtx& ctx)
         {
-            // We will process 8 trees at a time.
+            auto remTrees = std::min<u64>(8, mPntCount - treeIdx);
+            assert(theirSums.size() == remTrees * (mDepth - 1));
 
-            // special case for the first level.
-            auto l1 = levels[1];
-            for (u64 i = 0; i < 8; ++i)
+            // We change the hash function for the leaf so lets update  
+            // inactiveChildValues to use the new hash and subtract
+            // these from the leafSums
+            std::array<CoeffCtx::template Vec<F>, 2> leafSums;
+            if (mDepth > 1)
             {
-                // For the non-active path, set the child of the root node
-                // as the OT message XOR'ed with the correction sum.
+                auto theirSumsIter = theirSums.begin();
 
-                int active = mBaseChoices[i + treeIdx].back();
-                l1[active ^ 1][i] = mBaseOTs[i + treeIdx].back() ^ theirSums[0][active ^ 1][i];
-                l1[active][i] = ZeroBlock;
-                //if (!i)
-                //    std::cout << " unmask " 
-                //    << mBaseOTs[i + treeIdx].back() << " ^ "
-                //    << theirSums[0][active ^ 1][i] << " = "
-                //    << l1[active ^ 1][i] << std::endl;
+                // special case for the first level.
+                auto l1 = levels[1];
+                for (u64 i = 0; i < remTrees; ++i)
+                {
+                    // For the non-active path, set the child of the root node
+                    // as the OT message XOR'ed with the correction sum.
 
-            }
+                    int active = mBaseChoices[i + treeIdx].back();
+                    l1[active ^ 1][i] = mBaseOTs[i + treeIdx].back() ^ (*theirSumsIter)[active ^ 1];
+                    l1[active][i] = ZeroBlock;
+                    ++theirSumsIter;
+                    //if (!i)
+                    //    std::cout << " unmask " 
+                    //    << mBaseOTs[i + treeIdx].back() << " ^ "
+                    //    << theirSums[0][active ^ 1][i] << " = "
+                    //    << l1[active ^ 1][i] << std::endl;
 
-            // space for our sums of each level.
-            std::array<std::array<block, 8>, 2> mySums;
+                }
 
-            // this will be the value of both children of active an parent
-            // before the active child is updated. We will need to subtract 
-            // this value as the main loop does not distinguish active parents.
-            std::array<block, 2> inactiveChildValues;
-            inactiveChildValues[0] = AES::roundEnc(mAesFixedKey.ecbEncBlock(ZeroBlock), ZeroBlock);
-            inactiveChildValues[1] = mAesFixedKey.ecbEncBlock(ZeroBlock);
+                // space for our sums of each level.
+                std::array<std::array<block, 8>, 2> mySums;
 
-            // For all other levels, expand the GGM tree and add in
-            // the correction along the active path.
-            for (u64 d = 1; d < mDepth - 1; ++d)
-            {
-                // initialized the sums with inactiveChildValue so that
-                // it will cancel when we expand the actual inactive child.
-                std::fill(mySums[0].begin(), mySums[0].end(), inactiveChildValues[0]);
-                std::fill(mySums[1].begin(), mySums[1].end(), inactiveChildValues[1]);
+                // this will be the value of both children of active an parent
+                // before the active child is updated. We will need to subtract 
+                // this value as the main loop does not distinguish active parents.
+                std::array<block, 2> inactiveChildValues;
+                inactiveChildValues[0] = AES::roundEnc(mAesFixedKey.ecbEncBlock(ZeroBlock), ZeroBlock);
+                inactiveChildValues[1] = mAesFixedKey.ecbEncBlock(ZeroBlock);
+
+                // For all other levels, expand the GGM tree and add in
+                // the correction along the active path.
+                for (u64 d = 1; d < mDepth - 1; ++d)
+                {
+                    // initialized the sums with inactiveChildValue so that
+                    // it will cancel when we expand the actual inactive child.
+                    std::fill(mySums[0].begin(), mySums[0].end(), inactiveChildValues[0]);
+                    std::fill(mySums[1].begin(), mySums[1].end(), inactiveChildValues[1]);
+
+                    // We will iterate over each node on this level and
+                    // expand it into it's two children. Note that the
+                    // active node will also be expanded. Later we will just
+                    // overwrite whatever the value was. This is an optimization.
+                    auto width = divCeil(mDomain, 1ull << (mDepth - d));
+
+                    // The already constructed level. Only missing the
+                    // GGM tree node value along the active path.
+                    auto level0 = levels[d];
+
+                    // The next level that we want to construct.
+                    auto level1 = levels[d + 1];
+
+                    for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx, childIdx += 2)
+                    {
+                        // The value of the parent.
+                        auto parent = level0[parentIdx];
+
+                        auto& child0 = level1.data()[childIdx];
+                        auto& child1 = level1.data()[childIdx + 1];
+                        mAesFixedKey.ecbEncBlocks<8>(parent.data(), child1.data());
+
+                        // inspired by the Expand Accumualte idea to
+                        // use 
+                        // 
+                        // child0 = AES(parent) ^ parent
+                        // child1 = AES(parent) + parent
+                        //
+                        // but instead we are a bit more conservative and
+                        // compute 
+                        //
+                        // child0 = AES:Round(AES(parent),      parent)
+                        //        = AES:Round(AES(parent), 0) ^ parent
+                        // child1 =           AES(parent)     + parent
+                        //
+                        // That is, we applies an additional AES round function
+                        // to the first child before XORing it with parent.
+                        child0[0] = AES::roundEnc(child1[0], parent[0]);
+                        child0[1] = AES::roundEnc(child1[1], parent[1]);
+                        child0[2] = AES::roundEnc(child1[2], parent[2]);
+                        child0[3] = AES::roundEnc(child1[3], parent[3]);
+                        child0[4] = AES::roundEnc(child1[4], parent[4]);
+                        child0[5] = AES::roundEnc(child1[5], parent[5]);
+                        child0[6] = AES::roundEnc(child1[6], parent[6]);
+                        child0[7] = AES::roundEnc(child1[7], parent[7]);
+
+                        // Update the running sums for this level. We keep
+                        // a left and right totals for each level. Note that
+                        // we are actually XOR in the incorrect value of the
+                        // children of the active parent but this will cancel 
+                        // with inactiveChildValue thats already there.
+                        mySums[0][0] = mySums[0][0] ^ child0[0];
+                        mySums[0][1] = mySums[0][1] ^ child0[1];
+                        mySums[0][2] = mySums[0][2] ^ child0[2];
+                        mySums[0][3] = mySums[0][3] ^ child0[3];
+                        mySums[0][4] = mySums[0][4] ^ child0[4];
+                        mySums[0][5] = mySums[0][5] ^ child0[5];
+                        mySums[0][6] = mySums[0][6] ^ child0[6];
+                        mySums[0][7] = mySums[0][7] ^ child0[7];
+
+                        // child1 = AES(parent) + parent
+                        child1[0] = child1[0] + parent[0];
+                        child1[1] = child1[1] + parent[1];
+                        child1[2] = child1[2] + parent[2];
+                        child1[3] = child1[3] + parent[3];
+                        child1[4] = child1[4] + parent[4];
+                        child1[5] = child1[5] + parent[5];
+                        child1[6] = child1[6] + parent[6];
+                        child1[7] = child1[7] + parent[7];
+
+                        mySums[1][0] = mySums[1][0] ^ child1[0];
+                        mySums[1][1] = mySums[1][1] ^ child1[1];
+                        mySums[1][2] = mySums[1][2] ^ child1[2];
+                        mySums[1][3] = mySums[1][3] ^ child1[3];
+                        mySums[1][4] = mySums[1][4] ^ child1[4];
+                        mySums[1][5] = mySums[1][5] ^ child1[5];
+                        mySums[1][6] = mySums[1][6] ^ child1[6];
+                        mySums[1][7] = mySums[1][7] ^ child1[7];
+
+                    }
+
+
+                    // we have to update the non-active child of the active parent.
+                    for (u64 i = 0; i < remTrees; ++i)
+                    {
+                        // the index of the leaf node that is active.
+                        auto leafIdx = points[i + treeIdx];
+
+                        // The index of the active (missing) child node.
+                        auto missingChildIdx = leafIdx >> (mDepth - 1 - d);
+
+                        // The index of the active child node sibling.
+                        auto siblingIdx = missingChildIdx ^ 1;
+
+                        // The indicator as to the left or right child is inactive
+                        auto notAi = siblingIdx & 1;
+
+                        // our sums & OTs cancel and we are leaf with the 
+                        // correct value for the inactive child.
+                        level1[siblingIdx][i] =
+                            (*theirSumsIter)[notAi] ^
+                            mySums[notAi][i] ^
+                            mBaseOTs[i + treeIdx][mDepth - 1 - d];
+
+                        ++theirSumsIter;
+
+                        // we have to set the active child to zero so 
+                        // the next children are predictable.
+                        level1[missingChildIdx][i] = ZeroBlock;
+                    }
+                }
+
+                auto d = mDepth - 1;
+                // The already constructed level. Only missing the
+                // GGM tree node value along the active path.
+                auto level0 = levels[d];
+
+                // The next level of theGGM tree that we are populating.
+                std::array<block, 8> child;
 
                 // We will iterate over each node on this level and
                 // expand it into it's two children. Note that the
@@ -908,182 +885,61 @@ namespace osuCrypto
                 // overwrite whatever the value was. This is an optimization.
                 auto width = divCeil(mDomain, 1ull << (mDepth - d));
 
-                // The already constructed level. Only missing the
-                // GGM tree node value along the active path.
-                auto level0 = levels[d];
+                CoeffCtx::template Vec<F> temp;
+                ctx.resize(temp, 2);
+                for (u64 k = 0; k < 2; ++k)
+                {
+                    ctx.resize(leafSums[k], 8);
+                    ctx.zero(leafSums[k].begin(), leafSums[k].end());
+                    ctx.fromBlock(temp[k], gGgmAes[k].hashBlock(ZeroBlock));
+                    ctx.minus(leafSums[k][0], leafSums[k][0], temp[k]);
+                    for (u64 i = 1; i < 8; ++i)
+                        ctx.copy(leafSums[k][i], leafSums[k][0]);
+                }
 
-                // The next level that we want to construct.
-                auto level1 = levels[d + 1];
-
-                for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx, childIdx += 2)
+                // for leaf nodes both children should be hashed.
+                for (u64 parentIdx = 0, childIdx = 0, outputIdx = outputOffset; parentIdx < width; ++parentIdx)
                 {
                     // The value of the parent.
                     auto parent = level0[parentIdx];
 
-                    auto& child0 = level1.data()[childIdx];
-                    auto& child1 = level1.data()[childIdx + 1];
-                    mAesFixedKey.ecbEncBlocks<8>(parent.data(), child1.data());
+                    for (u64 keep = 0; keep < 2; ++keep, ++childIdx, outputIdx += 8)
+                    {
+                        // Each parent is expanded into the left and right children
+                        // using a different AES fixed-key. Therefore our OWF is:
+                        //
+                        //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
+                        //
+                        // where each half defines one of the children.
+                        gGgmAes[keep].hashBlocks<8>(parent.data(), child.data());
 
-                    // inspired by the Expand Accumualte idea to
-                    // use 
-                    // 
-                    // child0 = AES(parent) ^ parent
-                    // child1 = AES(parent) + parent
-                    //
-                    // but instead we are a bit more conservative and
-                    // compute 
-                    //
-                    // child0 = AES:Round(AES(parent),      parent)
-                    //        = AES:Round(AES(parent), 0) ^ parent
-                    // child1 =           AES(parent)     + parent
-                    //
-                    // That is, we applies an additional AES round function
-                    // to the first child before XORing it with parent.
-                    child0[0] = AES::roundEnc(child1[0], parent[0]);
-                    child0[1] = AES::roundEnc(child1[1], parent[1]);
-                    child0[2] = AES::roundEnc(child1[2], parent[2]);
-                    child0[3] = AES::roundEnc(child1[3], parent[3]);
-                    child0[4] = AES::roundEnc(child1[4], parent[4]);
-                    child0[5] = AES::roundEnc(child1[5], parent[5]);
-                    child0[6] = AES::roundEnc(child1[6], parent[6]);
-                    child0[7] = AES::roundEnc(child1[7], parent[7]);
+                        ctx.fromBlock(leafLevel[outputIdx + 0], child[0]);
+                        ctx.fromBlock(leafLevel[outputIdx + 1], child[1]);
+                        ctx.fromBlock(leafLevel[outputIdx + 2], child[2]);
+                        ctx.fromBlock(leafLevel[outputIdx + 3], child[3]);
+                        ctx.fromBlock(leafLevel[outputIdx + 4], child[4]);
+                        ctx.fromBlock(leafLevel[outputIdx + 5], child[5]);
+                        ctx.fromBlock(leafLevel[outputIdx + 6], child[6]);
+                        ctx.fromBlock(leafLevel[outputIdx + 7], child[7]);
 
-                    // Update the running sums for this level. We keep
-                    // a left and right totals for each level. Note that
-                    // we are actually XOR in the incorrect value of the
-                    // children of the active parent but this will cancel 
-                    // with inactiveChildValue thats already there.
-                    mySums[0][0] = mySums[0][0] ^ child0[0];
-                    mySums[0][1] = mySums[0][1] ^ child0[1];
-                    mySums[0][2] = mySums[0][2] ^ child0[2];
-                    mySums[0][3] = mySums[0][3] ^ child0[3];
-                    mySums[0][4] = mySums[0][4] ^ child0[4];
-                    mySums[0][5] = mySums[0][5] ^ child0[5];
-                    mySums[0][6] = mySums[0][6] ^ child0[6];
-                    mySums[0][7] = mySums[0][7] ^ child0[7];
-
-                    // child1 = AES(parent) + parent
-                    child1[0] = child1[0] + parent[0];
-                    child1[1] = child1[1] + parent[1];
-                    child1[2] = child1[2] + parent[2];
-                    child1[3] = child1[3] + parent[3];
-                    child1[4] = child1[4] + parent[4];
-                    child1[5] = child1[5] + parent[5];
-                    child1[6] = child1[6] + parent[6];
-                    child1[7] = child1[7] + parent[7];
-
-                    mySums[1][0] = mySums[1][0] ^ child1[0];
-                    mySums[1][1] = mySums[1][1] ^ child1[1];
-                    mySums[1][2] = mySums[1][2] ^ child1[2];
-                    mySums[1][3] = mySums[1][3] ^ child1[3];
-                    mySums[1][4] = mySums[1][4] ^ child1[4];
-                    mySums[1][5] = mySums[1][5] ^ child1[5];
-                    mySums[1][6] = mySums[1][6] ^ child1[6];
-                    mySums[1][7] = mySums[1][7] ^ child1[7];
-
-                }
-
-
-                // we have to update the non-active child of the active parent.
-                for (u64 i = 0; i < 8; ++i)
-                {
-                    // the index of the leaf node that is active.
-                    auto leafIdx = mPoints[i + treeIdx];
-
-                    // The index of the active (missing) child node.
-                    auto missingChildIdx = leafIdx >> (mDepth - 1 - d);
-
-                    // The index of the active child node sibling.
-                    auto siblingIdx = missingChildIdx ^ 1;
-
-                    // The indicator as to the left or right child is inactive
-                    auto notAi = siblingIdx & 1;
-
-                    // our sums & OTs cancel and we are leaf with the 
-                    // correct value for the inactive child.
-                    level1[siblingIdx][i] =
-                        theirSums[d][notAi][i] ^
-                        mySums[notAi][i] ^
-                        mBaseOTs[i + treeIdx][mDepth - 1 - d];
-
-                    // we have to set the active child to zero so 
-                    // the next children are predictable.
-                    level1[missingChildIdx][i] = ZeroBlock;
+                        auto& leafSum = leafSums[keep];
+                        ctx.plus(leafSum[0], leafSum[0], leafLevel[outputIdx + 0]);
+                        ctx.plus(leafSum[1], leafSum[1], leafLevel[outputIdx + 1]);
+                        ctx.plus(leafSum[2], leafSum[2], leafLevel[outputIdx + 2]);
+                        ctx.plus(leafSum[3], leafSum[3], leafLevel[outputIdx + 3]);
+                        ctx.plus(leafSum[4], leafSum[4], leafLevel[outputIdx + 4]);
+                        ctx.plus(leafSum[5], leafSum[5], leafLevel[outputIdx + 5]);
+                        ctx.plus(leafSum[6], leafSum[6], leafLevel[outputIdx + 6]);
+                        ctx.plus(leafSum[7], leafSum[7], leafLevel[outputIdx + 7]);
+                    }
                 }
             }
-
-
-            auto d = mDepth - 1;
-            // The already constructed level. Only missing the
-            // GGM tree node value along the active path.
-            auto level0 = levels[d];
-
-            // The next level of theGGM tree that we are populating.
-            std::array<block, 8> child;
-
-            // We will iterate over each node on this level and
-            // expand it into it's two children. Note that the
-            // active node will also be expanded. Later we will just
-            // overwrite whatever the value was. This is an optimization.
-            auto width = divCeil(mDomain, 1ull << (mDepth - d));
-
-            // We change the hash function for the leaf so lets update  
-            // inactiveChildValues to use the new hash and subtract
-            // these from the leafSums
-            CoeffCtx::template Vec<F> temp;
-            ctx.resize(temp, 2);
-            std::array<CoeffCtx::template Vec<F>, 2> leafSums;
-            for (u64 k = 0; k < 2; ++k)
+            else
             {
-                inactiveChildValues[k] = gGgmAes[k].hashBlock(ZeroBlock);
-                ctx.fromBlock(temp[k], inactiveChildValues[k]);
-
-
-
-                // leafSum = -inactiveChildValues
-                ctx.resize(leafSums[k], 8);
-                ctx.zero(leafSums[k].begin(), leafSums[k].end());
-                ctx.minus(leafSums[k][0], leafSums[k][0], temp[k]);
-                for (u64 i = 1; i < 8; ++i)
-                    ctx.copy(leafSums[k][i], leafSums[k][0]);
-            }
-
-            // for leaf nodes both children should be hashed.
-            for (u64 parentIdx = 0, childIdx = 0, outputIdx = outputOffset; parentIdx < width; ++parentIdx)
-            {
-                // The value of the parent.
-                auto parent = level0[parentIdx];
-
-                for (u64 keep = 0; keep < 2; ++keep, ++childIdx, outputIdx += 8)
+                for (u64 k = 0; k < 2; ++k)
                 {
-                    // Each parent is expanded into the left and right children
-                    // using a different AES fixed-key. Therefore our OWF is:
-                    //
-                    //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
-                    //
-                    // where each half defines one of the children.
-                    gGgmAes[keep].hashBlocks<8>(parent.data(), child.data());
-
-                    ctx.fromBlock(leafLevel[outputIdx + 0], child[0]);
-                    ctx.fromBlock(leafLevel[outputIdx + 1], child[1]);
-                    ctx.fromBlock(leafLevel[outputIdx + 2], child[2]);
-                    ctx.fromBlock(leafLevel[outputIdx + 3], child[3]);
-                    ctx.fromBlock(leafLevel[outputIdx + 4], child[4]);
-                    ctx.fromBlock(leafLevel[outputIdx + 5], child[5]);
-                    ctx.fromBlock(leafLevel[outputIdx + 6], child[6]);
-                    ctx.fromBlock(leafLevel[outputIdx + 7], child[7]);
-
-
-
-                    auto& leafSum = leafSums[keep];
-                    ctx.plus(leafSum[0], leafSum[0], leafLevel[outputIdx + 0]);
-                    ctx.plus(leafSum[1], leafSum[1], leafLevel[outputIdx + 1]);
-                    ctx.plus(leafSum[2], leafSum[2], leafLevel[outputIdx + 2]);
-                    ctx.plus(leafSum[3], leafSum[3], leafLevel[outputIdx + 3]);
-                    ctx.plus(leafSum[4], leafSum[4], leafLevel[outputIdx + 4]);
-                    ctx.plus(leafSum[5], leafSum[5], leafLevel[outputIdx + 5]);
-                    ctx.plus(leafSum[6], leafSum[6], leafLevel[outputIdx + 6]);
-                    ctx.plus(leafSum[7], leafSum[7], leafLevel[outputIdx + 7]);
+                    ctx.resize(leafSums[k], 8);
+                    ctx.zero(leafSums[k].begin(), leafSums[k].end());
                 }
             }
 
@@ -1100,11 +956,11 @@ namespace osuCrypto
                 ctx.resize(leafOts, 2);
                 PRNG otMasker;
 
-                for (u64 j = 0; j < 8; ++j)
+                for (u64 j = 0; j < remTrees; ++j)
                 {
 
                     // The index of the child on the active path.
-                    auto activeChildIdx = mPoints[j + treeIdx];
+                    auto activeChildIdx = points[j + treeIdx];
 
                     // The index of the other (inactive) child.
                     auto inactiveChildIdx = activeChildIdx ^ 1;
@@ -1113,7 +969,7 @@ namespace osuCrypto
                     auto notAi = inactiveChildIdx & 1;
 
                     // offset to the first or second ot message, based on the one we want
-                    auto offset = CoeffCtx::template byteSize<F>() * 2 * notAi;
+                    auto offset = ctx.byteSize<F>() * 2 * notAi;
 
 
                     // decrypt the ot string
@@ -1138,10 +994,10 @@ namespace osuCrypto
                 ctx.resize(leafOts, 1);
                 PRNG otMasker;
 
-                for (u64 j = 0; j < 8; ++j)
+                for (u64 j = 0; j < remTrees; ++j)
                 {
                     // The index of the child on the active path.
-                    auto activeChildIdx = mPoints[j + treeIdx];
+                    auto activeChildIdx = points[j + treeIdx];
 
                     // The index of the other (inactive) child.
                     auto inactiveChildIdx = activeChildIdx ^ 1;
@@ -1150,7 +1006,7 @@ namespace osuCrypto
                     auto notAi = inactiveChildIdx & 1;
 
                     // offset to the first or second ot message, based on the one we want
-                    auto offset = CoeffCtx::template byteSize<F>() * notAi;
+                    auto offset = ctx.byteSize<F>() * notAi;
 
                     // decrypt the ot string
                     span<u8> buff = leafMsg.subspan(offset, ctx.byteSize<F>());

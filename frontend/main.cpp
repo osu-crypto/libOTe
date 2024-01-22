@@ -119,8 +119,6 @@ int main(int argc, char** argv)
 			QCCodeBench(cmd);
 		else if (cmd.isSet("silent"))
 			SilentOtBench(cmd);
-		else if (cmd.isSet("vole"))
-			VoleBench(cmd);
 		else if (cmd.isSet("vole2"))
 			VoleBench2(cmd);
 		else if (cmd.isSet("ea"))

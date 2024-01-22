@@ -12,27 +12,27 @@ namespace osuCrypto {
     struct CoeffCtxInteger
     {
         template<typename R, typename F1, typename F2>
-        static OC_FORCEINLINE void plus(R&& ret, F1&& lhs, F2&& rhs) {
+         OC_FORCEINLINE void plus(R&& ret, F1&& lhs, F2&& rhs) {
             ret = lhs + rhs;
         }
 
         template<typename R, typename F1, typename F2>
-        static OC_FORCEINLINE void minus(R&& ret, F1&& lhs, F2&& rhs) {
+         OC_FORCEINLINE void minus(R&& ret, F1&& lhs, F2&& rhs) {
             ret = lhs - rhs;
         }
         template<typename R, typename F1, typename F2>
-        static OC_FORCEINLINE void mul(R&& ret, F1&& lhs, F2&& rhs) {
+         OC_FORCEINLINE void mul(R&& ret, F1&& lhs, F2&& rhs) {
             ret = lhs * rhs;
         }
 
         template<typename F>
-        static OC_FORCEINLINE bool eq(F&& lhs, F&& rhs) {
+         OC_FORCEINLINE bool eq(F&& lhs, F&& rhs) {
             return lhs == rhs;
         }
 
         // is F a field?
         template<typename F>
-        static OC_FORCEINLINE bool isField() {
+         OC_FORCEINLINE bool isField() {
             return false; // default.
         }
 
@@ -45,7 +45,7 @@ namespace osuCrypto {
         // the protocol will perform binary decomposition
         // of F using this many bits
         template<typename F>
-        static u64 bitSize()
+         u64 bitSize()
         {
             return sizeof(F) * 8;
         }
@@ -56,15 +56,15 @@ namespace osuCrypto {
         //     x = sum_{i = 0,...,n} 2^i * binaryDecomposition(x)[i]
         //
         template<typename F>
-        static OC_FORCEINLINE BitVector binaryDecomposition(F& x) {
-            static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
+         OC_FORCEINLINE BitVector binaryDecomposition(F& x) {
+             static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
             return { (u8*)&x, sizeof(F) * 8 };
         }
 
         // sample an F using the randomness b.
         template<typename F>
-        static OC_FORCEINLINE void fromBlock(F& ret, const block& b) {
-            static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
+         OC_FORCEINLINE void fromBlock(F& ret, const block& b) {
+             static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
 
             if constexpr (sizeof(F) <= sizeof(block))
             {
@@ -84,8 +84,8 @@ namespace osuCrypto {
 
         // return the F element with value 2^power
         template<typename F>
-        static OC_FORCEINLINE void powerOfTwo(F& ret, u64 power) {
-            static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
+         OC_FORCEINLINE void powerOfTwo(F& ret, u64 power) {
+             static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
             memset(&ret, 0, sizeof(F));
             *BitIterator((u8*)&ret, power) = 1;
         }
@@ -102,22 +102,22 @@ namespace osuCrypto {
         using Vec = AlignedUnVector<F>;
 
         // resize Vec<F>
-        template<typename F>
-        static void resize(Vec<F>& f, u64 size)
+        template<typename VecF>
+         void resize(VecF& f, u64 size)
         {
             f.resize(size);
         }
 
         // the size of F when serialized.
         template<typename F>
-        static u64 byteSize()
+         u64 byteSize()
         {
             return sizeof(F);
         }
 
         // copy a single F element.
         template<typename F>
-        static OC_FORCEINLINE void copy(F& dst, const F& src)
+         OC_FORCEINLINE void copy(F& dst, const F& src)
         {
             dst = src;
         }
@@ -125,7 +125,7 @@ namespace osuCrypto {
         // copy [begin,...,end) into [dstBegin, ...)
         // the iterators will point to the same types, i.e. F
         template<typename SrcIter, typename DstIter>
-        static OC_FORCEINLINE void copy(
+         OC_FORCEINLINE void copy(
             SrcIter begin,
             SrcIter end,
             DstIter dstBegin)
@@ -142,7 +142,7 @@ namespace osuCrypto {
         // begin will be a byte pointer/iterator.
         // dstBegin will be an F pointer/iterator
         template<typename SrcIter, typename DstIter>
-        static void deserialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin)
+         void deserialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin)
         {
             // as written this function is a bit more general than strictly neccessary
             // due to serialize(...) redirecting here.
@@ -153,7 +153,7 @@ namespace osuCrypto {
 
 #if __cplusplus >= 202002L
             //std::contiguous_iterator<>
-            // static_assert contigous iter in cpp20
+            // _assert contigous iter in cpp20
 #endif
 
 
@@ -208,7 +208,7 @@ namespace osuCrypto {
         // begin will be an F pointer/iterator
         // dstBegin will be a byte pointer/iterator.
         template<typename SrcIter, typename DstIter>
-        static void serialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin)
+         void serialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin)
         {
             // for primitive types serialization and deserializaion 
             // are the same, a memcpy.
@@ -216,7 +216,7 @@ namespace osuCrypto {
         }
 
         template<typename F, typename Iter>
-        static F* __restrict restrictPtr(Iter iter)
+         F* __restrict restrictPtr(Iter iter)
         {
             return &*iter;
         }
@@ -225,7 +225,7 @@ namespace osuCrypto {
         // fill the range [begin,..., end) with zeros. 
         // begin will be an F pointer/iterator.
         template<typename Iter>
-        static void zero(Iter begin, Iter end)
+         void zero(Iter begin, Iter end)
         {
             using F = std::remove_reference_t<decltype(*begin)>;
             static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
@@ -241,7 +241,7 @@ namespace osuCrypto {
         // fill the range [begin,..., end) with ones. 
         // begin will be an F pointer/iterator.
         template<typename Iter>
-        static void one(Iter begin, Iter end)
+         void one(Iter begin, Iter end)
         {
             using F = std::remove_reference_t<decltype(*begin)>;
             static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
@@ -263,7 +263,7 @@ namespace osuCrypto {
 
         // convert F into a string
         template<typename F>
-        static std::string str(F&& f)
+         std::string str(F&& f)
         {
             std::stringstream ss;
             if constexpr (std::is_same_v<std::remove_reference_t<F>, u8>)
@@ -282,17 +282,17 @@ namespace osuCrypto {
     {
 
         template<typename F>
-        static OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs) {
+         OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs) {
             ret = lhs ^ rhs;
         }
         template<typename F>
-        static OC_FORCEINLINE void minus(F& ret, const F& lhs, const F& rhs) {
+         OC_FORCEINLINE void minus(F& ret, const F& lhs, const F& rhs) {
             ret = lhs ^ rhs;
         }
 
         // is F a field?
         template<typename F>
-        static OC_FORCEINLINE bool isField() {
+         OC_FORCEINLINE bool isField() {
             return true; // default.
         }
 
@@ -301,7 +301,7 @@ namespace osuCrypto {
     // block does not use operator*
     struct CoeffCtxGFBlock : CoeffCtxGF
     {
-        static OC_FORCEINLINE void mul(block& ret, const block& lhs, const block& rhs) {
+         OC_FORCEINLINE void mul(block& ret, const block& lhs, const block& rhs) {
             ret = lhs.gf128Mul(rhs);
         }
     };
@@ -312,35 +312,35 @@ namespace osuCrypto {
     {
         using F = std::array<G, N>;
 
-        static OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs) {
+         OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs) {
             for (u64 i = 0; i < lhs.size(); ++i) {
                 ret[i] = lhs[i] + rhs[i];
             }
         }
 
-        static OC_FORCEINLINE void plus(G& ret, const  G& lhs, const G& rhs) {
+         OC_FORCEINLINE void plus(G& ret, const  G& lhs, const G& rhs) {
             ret = lhs + rhs;
         }
 
-        static OC_FORCEINLINE void minus(F& ret, const F& lhs, const F& rhs)
+         OC_FORCEINLINE void minus(F& ret, const F& lhs, const F& rhs)
         {
             for (u64 i = 0; i < lhs.size(); ++i) {
                 ret[i] = lhs[i] - rhs[i];
             }
         }
 
-        static OC_FORCEINLINE void minus(G& ret, const G& lhs, const G& rhs) {
+         OC_FORCEINLINE void minus(G& ret, const G& lhs, const G& rhs) {
             ret = lhs - rhs;
         }
 
-        static OC_FORCEINLINE void mul(F& ret, const F& lhs, const G& rhs)
+         OC_FORCEINLINE void mul(F& ret, const F& lhs, const G& rhs)
         {
             for (u64 i = 0; i < lhs.size(); ++i) {
                 ret[i] = lhs[i] * rhs;
             }
         }
 
-        static OC_FORCEINLINE bool eq(const F& lhs, const F& rhs)
+         OC_FORCEINLINE bool eq(const F& lhs, const F& rhs)
         {
             for (u64 i = 0; i < lhs.size(); ++i) {
                 if (lhs[i] != rhs[i])
@@ -349,13 +349,13 @@ namespace osuCrypto {
             return true;
         }
 
-        static OC_FORCEINLINE bool eq(const G& lhs, const G& rhs)
+         OC_FORCEINLINE bool eq(const G& lhs, const G& rhs)
         {
             return lhs == rhs;
         }
 
         // convert F into a string
-        static std::string str(const F& f)
+         std::string str(const F& f)
         {
             auto delim = "{ ";
             std::stringstream ss;
@@ -375,7 +375,7 @@ namespace osuCrypto {
         }
 
         // convert G into a string
-        static std::string str(const G& g)
+         std::string str(const G& g)
         {
             std::stringstream ss;
             if constexpr (std::is_same_v<std::remove_reference_t<G>, u8>)

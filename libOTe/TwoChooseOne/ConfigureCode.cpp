@@ -7,7 +7,7 @@
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/Tools/EACode/EACode.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
-#include "libOTe/Tools/ExConvCode/ExConvCode2.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include <cmath>
 namespace osuCrypto
 {

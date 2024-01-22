@@ -14,8 +14,8 @@
 #include "libOTe_Tests/ExConvCode_Tests.h"
 #include "libOTe_Tests/EACode_Tests.h"
 #include "libOTe/Tools/LDPC/Mtx.h"
-#include "libOTe_Tests/Subfield_Test.h"
 #include "libOTe_Tests/Pprf_Tests.h"
+
 using namespace osuCrypto;
 namespace tests_libOTe
 {
@@ -92,7 +92,6 @@ namespace tests_libOTe
             tc.add("OtExt_SoftSpokenMalicious21_Split_Test  ", OtExt_SoftSpokenMalicious21_Split_Test);
             tc.add("DotExt_SoftSpokenMaliciousLeaky_Test    ", DotExt_SoftSpokenMaliciousLeaky_Test);
             
-            tc.add("Subfield_Silent_Vole_test               ", Subfield_Silent_Vole_test);
             tc.add("Vole_Noisy_test                         ", Vole_Noisy_test);
             tc.add("Vole_Silent_QuasiCyclic_test            ", Vole_Silent_QuasiCyclic_test);
             tc.add("Vole_Silent_paramSweep_test             ", Vole_Silent_paramSweep_test);

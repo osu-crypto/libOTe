@@ -15,13 +15,11 @@
 using namespace oc;
 
 #include <libOTe/config.h>
-#include "libOTe/Tools/Subfield/Subfield.h"
-#include "libOTe/Vole/Subfield/SilentVoleSender.h"
-#include "libOTe/Vole/Subfield/SilentVoleReceiver.h"
+#include "libOTe/Tools/CoeffCtx.h"
 
 using namespace tests_libOTe;
 
-template<typename F, typename G, typename Trait>
+template<typename F, typename G, typename Ctx>
 void Vole_Noisy_test_impl(u64 n)
 {
     PRNG prng(CCBlock);
@@ -31,12 +29,13 @@ void Vole_Noisy_test_impl(u64 n)
     std::vector<F> a(n), b(n);
     prng.get(c.data(), c.size());
 
-    NoisySubfieldVoleReceiver<F, G, Trait> recv;
-    NoisySubfieldVoleSender<F, G, Trait> send;
+    NoisyVoleReceiver<F, G, Ctx> recv;
+    NoisyVoleSender<F, G, Ctx> send;
 
     auto chls = cp::LocalAsyncSocket::makePair();
 
-    BitVector recvChoice = Trait::binaryDecomposition(delta);
+    Ctx ctx;
+    BitVector recvChoice = ctx.binaryDecomposition(delta);
     std::vector<block> otRecvMsg(recvChoice.size());
     std::vector<std::array<block, 2>> otSendMsg(recvChoice.size());
     prng.get<std::array<block, 2>>(otSendMsg);
@@ -47,8 +46,8 @@ void Vole_Noisy_test_impl(u64 n)
     // 
     //   a = b + c * delta
     //
-    auto p0 = recv.receive(c, a, prng, otSendMsg, chls[0]);
-    auto p1 = send.send(delta, b, prng, otRecvMsg, chls[1]);
+    auto p0 = recv.receive(c, a, prng, otSendMsg, chls[0], ctx);
+    auto p1 = send.send(delta, b, prng, otRecvMsg, chls[1], ctx);
 
     eval(p0, p1);
 
@@ -56,8 +55,8 @@ void Vole_Noisy_test_impl(u64 n)
     {
         F prod, sum;
 
-        Trait::mul(prod, delta, c[i]);
-        Trait::minus(sum, a[i], b[i]);
+        ctx.mul(prod, delta, c[i]);
+        ctx.minus(sum, a[i], b[i]);
 
         if (prod != sum)
         {

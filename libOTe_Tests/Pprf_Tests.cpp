@@ -1,6 +1,6 @@
 #include "Pprf_Tests.h"
 
-#include "libOTe/Tools/Subfield/SubfieldPprf.h"
+#include "libOTe/Tools/Pprf/RegularPprf.h"
 #include "cryptoTools/Common/Log.h"
 #include "Common.h"
 #include <numeric>
@@ -17,8 +17,8 @@ void Tools_Pprf_expandOne_test_impl(u64 domain, bool program)
     PRNG prng(CCBlock);
 
     auto format = PprfOutputFormat::Interleaved;
-    SilentSubfieldPprfSender<F, G, Ctx> sender;
-    SilentSubfieldPprfReceiver<F, G, Ctx> recver;
+    RegularPprfSender<F, G, Ctx> sender;
+    RegularPprfReceiver<F, G, Ctx> recver;
 
     sender.configure(domain, pntCount);
     recver.configure(domain, pntCount);
@@ -40,40 +40,38 @@ void Tools_Pprf_expandOne_test_impl(u64 domain, bool program)
     sender.setBase(sendOTs);
     recver.setBase(recvOTs);
 
-    std::vector<u64> points(8);
-    recver.getPoints(points, PprfOutputFormat::ByLeafIndex);
 
     block seed = CCBlock;
 
-    auto sTree = span<AlignedArray<block, 8>>{};
     auto sLevels = std::vector<span<AlignedArray<block, 8>>>{};
-    auto rTree = span<AlignedArray<block, 8>>{};
     auto rLevels = std::vector<span<AlignedArray<block, 8>>>{};
     auto sBuff = std::vector<u8>{};
-    auto sSums = span<std::array<std::array<block, 8>, 2>>{};
+    auto sSums = span<std::array<block, 2>>{};
     auto sLast = span<u8>{};
 
-    TreeAllocator mTreeAlloc;
+    pprf::TreeAllocator mTreeAlloc;
     sLevels.resize(depth);
     rLevels.resize(depth);
 
 
     mTreeAlloc.reserve(2, (1ull << depth) + 2);
-    allocateExpandTree(depth, mTreeAlloc, sTree, sLevels);
-    allocateExpandTree(depth, mTreeAlloc, rTree, rLevels);
+
+
+    pprf::allocateExpandTree(mTreeAlloc, sLevels);
+    pprf::allocateExpandTree(mTreeAlloc, rLevels);
 
     Ctx::Vec<F> sLeafLevel(8ull << depth);
     Ctx::Vec<F> rLeafLevel(8ull << depth);
     u64 leafOffset = 0;
 
     Ctx ctx;
-    allocateExpandBuffer<F, Ctx>(depth - 1, program, sBuff, sSums, sLast, ctx);
+    pprf::allocateExpandBuffer<F, Ctx>(depth - 1, pntCount, program, sBuff, sSums, sLast, ctx);
 
-    recver.mPoints.resize(roundUpTo(recver.mPntCount, 8));
-    recver.getPoints(recver.mPoints, PprfOutputFormat::ByLeafIndex);
+    std::vector<u64> points(recver.mPntCount);
+    recver.getPoints(points, PprfOutputFormat::ByLeafIndex);
 
     sender.expandOne(seed, 0, program, sLevels, sLeafLevel, leafOffset, sSums, sLast, ctx);
-    recver.expandOne(0, program, rLevels, rLeafLevel, leafOffset, sSums, sLast, ctx);
+    recver.expandOne(0, program, rLevels, rLeafLevel, leafOffset, sSums, sLast, points, ctx);
 
     bool failed = false;
     for (u64 i = 0; i < pntCount; ++i)
@@ -125,10 +123,10 @@ void Tools_Pprf_expandOne_test_impl(u64 domain, bool program)
             if (j == leafIdx)
             {
                 F exp;
-                Ctx::plus(exp, sLeaves(j, i), value);
+                ctx.plus(exp, sLeaves(j, i), value);
                 if (program && exp != rLeaves(j, i))
                 {
-                    std::cout << i << " exp " << Ctx::str(exp) << " " << Ctx::str(rLeaves(j, i)) << std::endl;
+                    std::cout << i << " exp " << ctx.str(exp) << " " << ctx.str(rLeaves(j, i)) << std::endl;
                     throw RTE_LOC;
                 }
             }
@@ -149,7 +147,7 @@ void Tools_Pprf_expandOne_test(const oc::CLP& cmd)
 #if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
 
 
-    for (u64 domain : { 4, 128, 4522}) for (bool program : {true, false})
+    for (u64 domain : { 2, 128, 4522}) for (bool program : {true, false})
     {
 
         Tools_Pprf_expandOne_test_impl<u64, u64, CoeffCtxInteger>(domain, program);
@@ -180,13 +178,14 @@ void Tools_Pprf_test_impl(
 
     auto sockets = cp::LocalAsyncSocket::makePair();
 
-    SilentSubfieldPprfSender<F, G, Ctx> sender;
-    SilentSubfieldPprfReceiver<F, G, Ctx> recver;
+    RegularPprfSender<F, G, Ctx> sender;
+    RegularPprfReceiver<F, G, Ctx> recver;
     Vec delta;
+    Ctx ctx;
     auto seed = prng.get<block>();
-    Ctx::resize(delta, numPoints * program);
+    ctx.resize(delta, numPoints * program);
     for (u64 i = 0; i < delta.size(); ++i)
-        Ctx::fromBlock(delta[i], seed);
+        ctx.fromBlock(delta[i], seed);
 
     sender.configure(domain, numPoints);
     recver.configure(domain, numPoints);
@@ -270,9 +269,9 @@ void Tools_Pprf_test_impl(
                 if (points[j] == i)
                 {
                     if (program)
-                        Ctx::plus(exp, b[idx], delta[j]);
+                        ctx.plus(exp, b[idx], delta[j]);
                     else
-                        Ctx::zero(&exp, &exp + 1);
+                        ctx.zero(&exp, &exp + 1);
                 }
                 else
                     exp = b[idx];
@@ -286,7 +285,7 @@ void Tools_Pprf_test_impl(
                 }
                 if (verbose)
                 {
-                    std::cout << "r[" << j << "][" << i << "] " << exp << " " << Ctx::str(a[idx]);
+                    std::cout << "r[" << j << "][" << i << "] " << exp << " " << ctx.str(a[idx]);
                     if (points[j] == i)
                         std::cout << " < ";
 
@@ -315,7 +314,7 @@ void Tools_Pprf_test_impl(
         auto iIter = index.begin();
         auto leafIdx = points[*iIter];
         F deltaVal;
-        Ctx::zero(&deltaVal, &deltaVal + 1);
+        ctx.zero(&deltaVal, &deltaVal + 1);
         if(program)
             deltaVal = delta[*iIter];
         
@@ -328,16 +327,16 @@ void Tools_Pprf_test_impl(
 
             // act = a - b 
             //     = point * delta
-            Ctx::minus(act, a[j], b[j]);
-            Ctx::zero(&exp, &exp + 1);
+            ctx.minus(act, a[j], b[j]);
+            ctx.zero(&exp, &exp + 1);
             bool active = false;
             if (j == leafIdx)
             {
                 active = true;
                 if (program)
-                    Ctx::copy(exp, deltaVal);
+                    ctx.copy(exp, deltaVal);
                 else
-                    Ctx::minus(exp, exp, b[j]);
+                    ctx.minus(exp, exp, b[j]);
             }
 
             if (exp != act)
@@ -349,8 +348,8 @@ void Tools_Pprf_test_impl(
 
             if (verbose)
             {
-                std::cout << j << " exp " << Ctx::str(exp) << " " << Ctx::str(act)
-                    << " a " << Ctx::str(a[j]) << " b " << Ctx::str(b[j]);
+                std::cout << j << " exp " << ctx.str(exp) << " " << ctx.str(act)
+                    << " a " << ctx.str(a[j]) << " b " << ctx.str(b[j]);
 
                 if (active)
                     std::cout << " < " << deltaVal;
@@ -419,7 +418,7 @@ void Tools_Pprf_ByTreeIndex_test(const oc::CLP& cmd)
 
     auto f = PprfOutputFormat::ByTreeIndex;
     auto v = cmd.isSet("v");
-    for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true/*, false*/ })
+    for (auto d : { 32,3242 }) for (auto n : { 8, 19}) for (auto p : { true/*, false*/ })
     {
         Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, v);
         Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, v);
