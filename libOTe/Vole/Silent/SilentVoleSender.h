@@ -24,7 +24,7 @@
 #include <libOTe/Vole/Noisy/NoisyVoleReceiver.h>
 #include <libOTe/Vole/Noisy/NoisyVoleSender.h>
 #include <libOTe/TwoChooseOne/Silent/SilentOtExtUtil.h>
-
+#include <libOTe/Tools/QuasiCyclicCode.h>
 
 namespace osuCrypto
 {

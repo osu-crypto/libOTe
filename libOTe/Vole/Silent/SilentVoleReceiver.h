@@ -26,6 +26,7 @@
 #include <numeric>
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtUtil.h"
+#include <libOTe/Tools/QuasiCyclicCode.h>
 
 namespace osuCrypto
 {
