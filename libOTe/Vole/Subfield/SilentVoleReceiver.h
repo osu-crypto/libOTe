@@ -184,7 +184,7 @@ namespace osuCrypto
             // other party will program the PPRF to output their share of delta * noiseVals.
             //
             noiseVals = sampleBaseVoleVals(prng);
-            Ctx::resize(baseAs, noiseVals.size());
+            mCtx.resize(baseAs, noiseVals.size());
 
             if (mTimer)
                 nv.setTimer(*mTimer);
@@ -231,8 +231,12 @@ namespace osuCrypto
             {
                 chl2 = chl.fork();
                 prng2.SetSeed(prng.get());
-                MC_AWAIT(baseOt.receive(choice, msg, prng, chl));
-                MC_AWAIT(nv.receive(noiseVals, baseAs, prng2, baseOt, chl2));
+
+                MC_AWAIT(
+                    macoro::when_all_ready(
+                        baseOt.receive(choice, msg, prng, chl),
+                        nv.receive(noiseVals, baseAs, prng2, baseOt, chl2))
+                );
             }
 
             setSilentBaseOts(msg, baseAs);
@@ -277,6 +281,8 @@ namespace osuCrypto
             mSizePer = std::max<u64>(4, roundUpTo(divCeil(mRequestSize * mScaler, mNumPartitions), 2));
             mNoiseVecSize = mSizePer * mNumPartitions;
 
+            //std::cout << "n " << mRequestSize << " -> " << mNoiseVecSize << " = " << mSizePer << " * " << mNumPartitions << std::endl;
+
             mGen.configure(mSizePer, mNumPartitions);
         }
 
@@ -316,9 +322,29 @@ namespace osuCrypto
             // sample the values of the noisy coordinate of c
             // and perform a noicy vole to get a = b + mD * c
 
-            Ctx::resize(mBaseC, mNumPartitions + (mMalType == SilentSecType::Malicious));
+
+            VecG zero, one;
+            mCtx.resize(zero, 1);
+            mCtx.zero(zero.begin(), zero.end());
+            mCtx.one(one.begin(), one.end());
+            mCtx.resize(mBaseC, mNumPartitions + (mMalType == SilentSecType::Malicious));
             for (size_t i = 0; i < mNumPartitions; i++)
-                Ctx::fromBlock<G>(mBaseC[i], prng.get<block>());
+            {
+                mCtx.fromBlock<G>(mBaseC[i], prng.get<block>());
+
+                // must not be zero.
+                while(mCtx.eq(zero[0], mBaseC[i]))
+                    mCtx.fromBlock<G>(mBaseC[i], prng.get<block>());
+
+                // if we are not a field, then the noise should be odd.
+                if (mCtx.isField<F>() == false)
+                {
+                    auto odd = mCtx.binaryDecomposition(mBaseC[i])[0];
+                    if (odd)
+                        mCtx.plus(mBaseC[i], mBaseC[i], one[0]);
+                }
+            }
+
 
             mS.resize(mNumPartitions);
             mGen.getPoints(mS, PprfOutputFormat::Interleaved);
@@ -362,8 +388,8 @@ namespace osuCrypto
 
             mGen.setBase(recvBaseOts);
 
-            Ctx::resize(mBaseA, baseA.size());
-            Ctx::copy(baseA.begin(), baseA.end(), mBaseA.begin());
+            mCtx.resize(mBaseA, baseA.size());
+            mCtx.copy(baseA.begin(), baseA.end(), mBaseA.begin());
             mState = State::HasBase;
         }
 
@@ -383,8 +409,8 @@ namespace osuCrypto
 
             MC_AWAIT(silentReceiveInplace(c.size(), prng, chl));
 
-            Ctx::copy(mC.begin(), mC.begin() + c.size(), c.begin());
-            Ctx::copy(mA.begin(), mA.begin() + a.size(), a.begin());
+            mCtx.copy(mC.begin(), mC.begin() + c.size(), c.begin());
+            mCtx.copy(mA.begin(), mA.begin() + a.size(), a.begin());
 
             clear();
             MC_END();
@@ -420,15 +446,15 @@ namespace osuCrypto
             }
 
             // allocate mA
-            Ctx::resize(mA, 0);
-            Ctx::resize(mA, mNoiseVecSize);
+            mCtx.resize(mA, 0);
+            mCtx.resize(mA, mNoiseVecSize);
 
             setTimePoint("SilentVoleReceiver.alloc");
 
             // allocate the space for mC
-            Ctx::resize(mC, 0);
-            Ctx::resize(mC, mNoiseVecSize);
-            Ctx::zero(mC.begin(), mC.end());
+            mCtx.resize(mC, 0);
+            mCtx.resize(mC, mNoiseVecSize);
+            mCtx.zero(mC.begin(), mC.end());
             setTimePoint("SilentVoleReceiver.alloc.zero");
 
             if (mTimer)
@@ -461,8 +487,8 @@ namespace osuCrypto
             for (u64 i = 0; i < mNumPartitions; ++i)
             {
                 auto pnt = mS[i];
-                Ctx::copy(mC[pnt], mBaseC[i]);
-                Ctx::plus(mA[pnt], mA[pnt], mBaseA[i]);
+                mCtx.copy(mC[pnt], mBaseC[i]);
+                mCtx.plus(mA[pnt], mA[pnt], mBaseA[i]);
             }
 
             if (mDebug)
@@ -496,7 +522,9 @@ namespace osuCrypto
                 double _;
                 ExConvConfigure(mScaler, mMultType, expanderWeight, accumulatorWeight, _);
                 ExConvCode2 encoder;
-                encoder.config(mRequestSize, mNoiseVecSize, expanderWeight, accumulatorWeight);
+                if (mScaler * mRequestSize > mNoiseVecSize)
+                    throw RTE_LOC;
+                encoder.config(mRequestSize, mScaler * mRequestSize, expanderWeight, accumulatorWeight);
 
                 if (mTimer)
                     encoder.setTimer(getTimer());
@@ -509,6 +537,7 @@ namespace osuCrypto
             }
             case osuCrypto::MultType::QuasiCyclic:
             {
+#ifdef ENABLE_BITPOLYMUL
                 if constexpr (
                     std::is_same_v<F, block> &&
                     std::is_same_v<G, block> &&
@@ -521,6 +550,9 @@ namespace osuCrypto
                 }
                 else
                     throw std::runtime_error("QuasiCyclic is only supported for GF128, i.e. block. " LOCATION);
+#else
+                throw std::runtime_error("QuasiCyclic requires ENABLE_BITPOLYMUL = true. " LOCATION);
+#endif
                 break;
             }
             default:
@@ -529,8 +561,8 @@ namespace osuCrypto
             }
 
             // resize the buffers down to only contain the real elements.
-            Ctx::resize(mA, mRequestSize);
-            Ctx::resize(mC, mRequestSize);
+            mCtx.resize(mA, mRequestSize);
+            mCtx.resize(mC, mRequestSize);
 
             mBaseC = {};
             mBaseA = {};
@@ -548,32 +580,32 @@ namespace osuCrypto
         task<> checkRT(Socket& chl) const
         {
             MC_BEGIN(task<>, this, &chl,
-                B = typename Ctx::Vec<F>{},
-                sparseNoiseDelta = typename Ctx::Vec<F>{},
-                baseB = typename Ctx::Vec<F>{},
-                delta = typename Ctx::Vec<F>{},
-                tempF = typename Ctx::Vec<F>{},
-                tempG = typename Ctx::Vec<G>{},
+                B = VecF{},
+                sparseNoiseDelta = VecF{},
+                baseB = VecF{},
+                delta = VecF{},
+                tempF = VecF{},
+                tempG = VecG{},
                 buffer = std::vector<u8>{}
             );
 
             // recv delta
-            buffer.resize(Ctx::byteSize<F>());
-            Ctx::resize(delta, 1);
+            buffer.resize(mCtx.byteSize<F>());
+            mCtx.resize(delta, 1);
             MC_AWAIT(chl.recv(buffer));
-            Ctx::deserialize(buffer.begin(), buffer.end(), delta.begin());
+            mCtx.deserialize(buffer.begin(), buffer.end(), delta.begin());
 
             // recv B
-            buffer.resize(Ctx::byteSize<F>() * mA.size());
-            Ctx::resize(B, mA.size());
+            buffer.resize(mCtx.byteSize<F>() * mA.size());
+            mCtx.resize(B, mA.size());
             MC_AWAIT(chl.recv(buffer));
-            Ctx::deserialize(buffer.begin(), buffer.end(), B.begin());
+            mCtx.deserialize(buffer.begin(), buffer.end(), B.begin());
 
             // recv the noisy values.
-            buffer.resize(Ctx::byteSize<F>() * mBaseA.size());
-            Ctx::resize(baseB, mBaseA.size());
+            buffer.resize(mCtx.byteSize<F>() * mBaseA.size());
+            mCtx.resize(baseB, mBaseA.size());
             MC_AWAIT(chl.recvResize(buffer));
-            Ctx::deserialize(buffer.begin(), buffer.end(), baseB.begin());
+            mCtx.deserialize(buffer.begin(), buffer.end(), baseB.begin());
 
             // it shoudl hold that 
             // 
@@ -591,9 +623,9 @@ namespace osuCrypto
                 std::sort(index.begin(), index.end(),
                     [&](std::size_t i, std::size_t j) { return mS[i] < mS[j]; });
 
-                Ctx::resize(tempF, 2);
-                Ctx::resize(tempG, 1);
-                Ctx::zero(tempG.begin(), tempG.end());
+                mCtx.resize(tempF, 2);
+                mCtx.resize(tempG, 1);
+                mCtx.zero(tempG.begin(), tempG.end());
 
 
                 // check the correlation that
@@ -602,19 +634,19 @@ namespace osuCrypto
                 for (auto i : rng(mBaseA.size()))
                 {
                     // temp[0] = baseB[i] + mBaseA[i]
-                    Ctx::plus(tempF[0], baseB[i], mBaseA[i]);
+                    mCtx.plus(tempF[0], baseB[i], mBaseA[i]);
 
                     // temp[1] =  mBaseC[i] * delta[0]
-                    Ctx::mul(tempF[1], delta[0], mBaseC[i]);
+                    mCtx.mul(tempF[1], delta[0], mBaseC[i]);
 
-                    if (!Ctx::eq(tempF[0], tempF[1]))
+                    if (!mCtx.eq(tempF[0], tempF[1]))
                         throw RTE_LOC;
 
                     if (i < mNumPartitions)
                     {
                         //auto idx = index[i];
                         auto point = mS[i];
-                        if (!Ctx::eq(mBaseC[i], mC[point]))
+                        if (!mCtx.eq(mBaseC[i], mC[point]))
                             throw RTE_LOC;
 
                         if (i && mS[index[i - 1]] >= mS[index[i]])
@@ -627,19 +659,19 @@ namespace osuCrypto
                 auto leafIdx = mS[*iIter];
                 F act = tempF[0];
                 G zero = tempG[0];
-                Ctx::zero(tempG.begin(), tempG.end());
+                mCtx.zero(tempG.begin(), tempG.end());
 
                 for (u64 j = 0; j < mA.size(); ++j)
                 {
-                    Ctx::mul(act, delta[0], mC[j]);
-                    Ctx::plus(act, act, B[j]);
+                    mCtx.mul(act, delta[0], mC[j]);
+                    mCtx.plus(act, act, B[j]);
 
                     bool active = false;
                     if (j == leafIdx)
                     {
                         active = true;
                     }
-                    else if (!Ctx::eq(zero, mC[j]))
+                    else if (!mCtx.eq(zero, mC[j]))
                         throw RTE_LOC;
 
                     if (mA[j] != act)
@@ -651,11 +683,11 @@ namespace osuCrypto
 
                     if (verbose)
                     {
-                        std::cout << j << " act " << Ctx::str(act)
-                            << " a " << Ctx::str(mA[j]) << " b " << Ctx::str(B[j]);
+                        std::cout << j << " act " << mCtx.str(act)
+                            << " a " << mCtx.str(mA[j]) << " b " << mCtx.str(B[j]);
 
                         if (active)
-                            std::cout << " < " << Ctx::str(delta[0]);
+                            std::cout << " < " << mCtx.str(delta[0]);
 
                         std::cout << std::endl << Color::Default;
                     }

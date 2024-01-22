@@ -10,7 +10,11 @@
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
+#include "libOTe/Vole/Silent/SilentVoleSender.h"
+#include "libOTe/Vole/Silent/SilentVoleReceiver.h"
 
+#include "libOTe/Vole/Subfield/SilentVoleSender.h"
+#include "libOTe/Vole/Subfield/SilentVoleReceiver.h"
 namespace osuCrypto
 {
 
@@ -314,6 +318,185 @@ namespace osuCrypto
 
             recver.mMultType = multType;
             sender.mMultType = multType;
+
+            PRNG prng0(ZeroBlock), prng1(ZeroBlock);
+            block delta = prng0.get();
+
+            auto sock = coproto::LocalAsyncSocket::makePair();
+
+            Timer sTimer;
+            Timer rTimer;
+            sTimer.setTimePoint("start");
+            rTimer.setTimePoint("start");
+
+            auto t0 = std::thread([&] {
+                for (u64 t = 0; t < trials; ++t)
+                {
+                    auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
+
+                    char c;
+
+                    coproto::sync_wait(sock[0].send(std::move(c)));
+                    coproto::sync_wait(sock[0].recv(c));
+                    sTimer.setTimePoint("__");
+                    coproto::sync_wait(sock[0].send(std::move(c)));
+                    coproto::sync_wait(sock[0].recv(c));
+                    sTimer.setTimePoint("s start");
+                    coproto::sync_wait(p0);
+                    sTimer.setTimePoint("s done");
+                }
+                });
+
+
+            for (u64 t = 0; t < trials; ++t)
+            {
+                auto p1 = recver.silentReceiveInplace(n, prng1, sock[1]);
+                char c;
+                coproto::sync_wait(sock[1].send(std::move(c)));
+                coproto::sync_wait(sock[1].recv(c));
+
+                rTimer.setTimePoint("__");
+                coproto::sync_wait(sock[1].send(std::move(c)));
+                coproto::sync_wait(sock[1].recv(c));
+
+                rTimer.setTimePoint("r start");
+                coproto::sync_wait(p1);
+                rTimer.setTimePoint("r done");
+
+            }
+
+
+            t0.join();
+            std::cout << sTimer << std::endl;
+            std::cout << rTimer << std::endl;
+
+            std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+        }
+        catch (std::exception& e)
+        {
+            std::cout << e.what() << std::endl;
+        }
+#endif
+    }
+
+
+
+    inline  void VoleBench(const CLP& cmd)
+    {
+#ifdef ENABLE_SILENTOT
+
+        try
+        {
+
+            SilentVoleSender sender;
+            SilentVoleReceiver recver;
+
+            u64 trials = cmd.getOr("t", 10);
+
+            u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
+            MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv7x24);
+            std::cout << multType << std::endl;
+
+            recver.mMultType = multType;
+            sender.mMultType = multType;
+
+            PRNG prng0(ZeroBlock), prng1(ZeroBlock);
+            block delta = prng0.get();
+
+            auto sock = coproto::LocalAsyncSocket::makePair();
+
+            Timer sTimer;
+            Timer rTimer;
+            sTimer.setTimePoint("start");
+            rTimer.setTimePoint("start");
+
+            auto t0 = std::thread([&] {
+                for (u64 t = 0; t < trials; ++t)
+                {
+                    auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
+
+                    char c;
+
+                    coproto::sync_wait(sock[0].send(std::move(c)));
+                    coproto::sync_wait(sock[0].recv(c));
+                    sTimer.setTimePoint("__");
+                    coproto::sync_wait(sock[0].send(std::move(c)));
+                    coproto::sync_wait(sock[0].recv(c));
+                    sTimer.setTimePoint("s start");
+                    coproto::sync_wait(p0);
+                    sTimer.setTimePoint("s done");
+                }
+                });
+
+
+            for (u64 t = 0; t < trials; ++t)
+            {
+                auto p1 = recver.silentReceiveInplace(n, prng1, sock[1]);
+                char c;
+                coproto::sync_wait(sock[1].send(std::move(c)));
+                coproto::sync_wait(sock[1].recv(c));
+
+                rTimer.setTimePoint("__");
+                coproto::sync_wait(sock[1].send(std::move(c)));
+                coproto::sync_wait(sock[1].recv(c));
+
+                rTimer.setTimePoint("r start");
+                coproto::sync_wait(p1);
+                rTimer.setTimePoint("r done");
+
+            }
+
+
+            t0.join();
+            std::cout << sTimer << std::endl;
+            std::cout << rTimer << std::endl;
+
+            std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+        }
+        catch (std::exception& e)
+        {
+            std::cout << e.what() << std::endl;
+        }
+#endif
+    }
+
+
+
+
+    inline void VoleBench2(const CLP& cmd)
+    {
+#ifdef ENABLE_SILENTOT
+
+        try
+        {
+
+            SilentSubfieldVoleSender<block, block, CoeffCtxGFBlock> sender;
+            SilentSubfieldVoleReceiver<block, block, CoeffCtxGFBlock> recver;
+
+            u64 trials = cmd.getOr("t", 10);
+
+            u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
+            MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv7x24);
+            std::cout << multType << std::endl;
+
+            recver.mMultType = multType;
+            sender.mMultType = multType;
+
+            std::vector<std::array<block, 2>> baseSend(128);
+            std::vector<block> baseRecv(128);
+            BitVector baseChoice(128);
+            PRNG prng(CCBlock);
+            baseChoice.randomize(prng);
+            for (u64 i = 0; i < 128; ++i)
+            {
+                baseSend[i] = prng.get();
+                baseRecv[i] = baseSend[i][baseChoice[i]];
+            }
+
+            sender.mOtExtRecver.setBaseOts(baseSend);
+            recver.mOtExtRecver.setBaseOts(baseSend);
+            sender.mOtExtSender.setBaseOts(baseRecv, baseChoice);
+            recver.mOtExtSender.setBaseOts(baseRecv, baseChoice);
 
             PRNG prng0(ZeroBlock), prng1(ZeroBlock);
             block delta = prng0.get();

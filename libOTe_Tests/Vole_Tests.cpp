@@ -77,7 +77,7 @@ void Vole_Noisy_test(const oc::CLP& cmd)
     }
 }
 
-namespace 
+namespace
 {
 
     template<typename R, typename S, typename F, typename Ctx>
@@ -156,7 +156,7 @@ void Vole_Silent_test_impl(u64 n, MultType type, bool debug, bool doFakeBase, bo
     VecG c(n);
     F d = prng.get();
 
-    if(doFakeBase)
+    if (doFakeBase)
         fakeBase(n, prng, d, recv, send, ctx);
 
     auto p0 = recv.silentReceive(c, a, prng, chls[0]);
@@ -274,7 +274,7 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 
     Timer timer;
     timer.setTimePoint("start");
-    u64 n = 12343;
+    u64 n = 1233;
     block seed = block(0, cmd.getOr("seed", 0));
     PRNG prng(seed);
 
@@ -283,8 +283,8 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 
     cp::BufferingSocket chls[2];
 
-    SilentVoleReceiver recv;
-    SilentVoleSender send;
+    SilentSubfieldVoleReceiver<block, block, CoeffCtxGFBlock> recv;
+    SilentSubfieldVoleSender<block, block, CoeffCtxGFBlock> send;
 
     send.mMalType = SilentSecType::SemiHonest;
     recv.mMalType = SilentSecType::SemiHonest;
@@ -302,7 +302,7 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
             send.setTimer(timer);
             if (jj)
             {
-                std::vector<block> c(n), z0(n), z1(n);
+                AlignedUnVector<block> c(n), z0(n), z1(n);
                 auto p0 = recv.silentReceive(c, z0, prng, chls[0]);
                 auto p1 = send.silentSend(x, z1, prng, chls[1]);
 #if (defined ENABLE_MRR_TWIST && defined ENABLE_SSE) || \

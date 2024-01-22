@@ -30,6 +30,16 @@ namespace osuCrypto {
             return lhs == rhs;
         }
 
+        // is F a field?
+        template<typename F>
+        static OC_FORCEINLINE bool isField() {
+            return false; // default.
+        }
+
+
+
+
+
 
         // the bit size require to prepresent F
         // the protocol will perform binary decomposition
@@ -205,7 +215,11 @@ namespace osuCrypto {
             deserialize(begin, end, dstBegin);
         }
 
-
+        template<typename F, typename Iter>
+        static F* __restrict restrictPtr(Iter iter)
+        {
+            return &*iter;
+        }
 
 
         // fill the range [begin,..., end) with zeros. 
@@ -229,7 +243,21 @@ namespace osuCrypto {
         template<typename Iter>
         static void one(Iter begin, Iter end)
         {
-            std::fill(begin, end, 1);
+            using F = std::remove_reference_t<decltype(*begin)>;
+            static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
+
+
+            if (begin != end)
+            {
+                auto n = std::distance(begin, end);
+                assert(n > 0);
+                memset(&*begin, 0, n * sizeof(F));
+                while (begin != end)
+                {
+                    auto& v = *begin++;
+                    *(u8*)&v = 1;
+                }
+            }
         }
 
 
@@ -261,6 +289,13 @@ namespace osuCrypto {
         static OC_FORCEINLINE void minus(F& ret, const F& lhs, const F& rhs) {
             ret = lhs ^ rhs;
         }
+
+        // is F a field?
+        template<typename F>
+        static OC_FORCEINLINE bool isField() {
+            return true; // default.
+        }
+
     };
 
     // block does not use operator*

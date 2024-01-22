@@ -14,19 +14,6 @@
 namespace osuCrypto
 {
 
-    template<class Iter>
-    auto getRestrictPtr(Iter& c)
-    {
-        //if constexpr (coproto::has_data_member_func<Container>::value)
-        //{
-        //    return (decltype(c.data())__restrict) c.data();
-        //}
-        //else
-        {
-            return c;
-        }
-    }
-
     // The encoder for the expander matrix B.
     // B has mMessageSize rows and mCodeSize columns. It is sampled uniformly
     // with fixed row weight mExpanderWeight.
@@ -114,16 +101,13 @@ namespace osuCrypto
         DstIter&& output,
         CoeffCtx ctx) const
     {
-        //using P = std::pair<SrcIter, DstIter>;
-        //expandMany<Add, CoeffCtx, F>(
-        //    std::tuple<P>{ P{input, output}},
-        //    ctx
-        //);
-
         (void)*(input + (mCodeSize - 1));
         (void)*(output + (mMessageSize - 1));
 
         detail::ExpanderModd prng(mSeed, mCodeSize);
+
+        auto rInput = ctx.restrictPtr<const F>(input);
+        auto rOutput = ctx.restrictPtr<F>(output);
 
         auto main = mMessageSize / 8 * 8;
         u64 i = 0;
@@ -147,14 +131,14 @@ namespace osuCrypto
                 rr[6] = prng.get();
                 rr[7] = prng.get();
 
-                ctx.plus(*(output + 0), *(output + 0), *(input + rr[0]));
-                ctx.plus(*(output + 1), *(output + 1), *(input + rr[1]));
-                ctx.plus(*(output + 2), *(output + 2), *(input + rr[2]));
-                ctx.plus(*(output + 3), *(output + 3), *(input + rr[3]));
-                ctx.plus(*(output + 4), *(output + 4), *(input + rr[4]));
-                ctx.plus(*(output + 5), *(output + 5), *(input + rr[5]));
-                ctx.plus(*(output + 6), *(output + 6), *(input + rr[6]));
-                ctx.plus(*(output + 7), *(output + 7), *(input + rr[7]));
+                ctx.plus(*(rOutput + 0), *(rOutput + 0), *(rInput + rr[0]));
+                ctx.plus(*(rOutput + 1), *(rOutput + 1), *(rInput + rr[1]));
+                ctx.plus(*(rOutput + 2), *(rOutput + 2), *(rInput + rr[2]));
+                ctx.plus(*(rOutput + 3), *(rOutput + 3), *(rInput + rr[3]));
+                ctx.plus(*(rOutput + 4), *(rOutput + 4), *(rInput + rr[4]));
+                ctx.plus(*(rOutput + 5), *(rOutput + 5), *(rInput + rr[5]));
+                ctx.plus(*(rOutput + 6), *(rOutput + 6), *(rInput + rr[6]));
+                ctx.plus(*(rOutput + 7), *(rOutput + 7), *(rInput + rr[7]));
             }
         }
 

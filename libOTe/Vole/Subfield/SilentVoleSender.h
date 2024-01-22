@@ -383,7 +383,9 @@ namespace osuCrypto
                 u64 expanderWeight, accumulatorWeight;
                 double _1;
                 ExConvConfigure(mScaler, mMultType, expanderWeight, accumulatorWeight, _1);
-                encoder.config(mRequestSize, mNoiseVecSize, expanderWeight, accumulatorWeight);
+                if (mScaler * mRequestSize > mNoiseVecSize)
+                    throw RTE_LOC;
+                encoder.config(mRequestSize, mScaler * mRequestSize, expanderWeight, accumulatorWeight);
                 if (mTimer)
                     encoder.setTimer(getTimer());
                 encoder.dualEncode<F, Ctx>(mB.begin());
@@ -391,6 +393,7 @@ namespace osuCrypto
             }
             case MultType::QuasiCyclic:
             {
+#ifdef ENABLE_BITPOLYMUL
                 if constexpr (
                     std::is_same_v<F, block> &&
                     std::is_same_v<G, block> &&
@@ -402,6 +405,9 @@ namespace osuCrypto
                 }
                 else
                     throw std::runtime_error("QuasiCyclic is only supported for GF128, i.e. block. " LOCATION);
+#else
+                throw std::runtime_error("QuasiCyclic requires ENABLE_BITPOLYMUL = true. " LOCATION);
+#endif
 
                 break;
             }

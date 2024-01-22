@@ -85,8 +85,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "LIBOTE_STD_VER": "17",
-        "ENABLE_ALL_OT": false,
-        "ENABLE_RELIC": false,
+        "ENABLE_ALL_OT": true,
+        "ENABLE_RELIC": true,
         "ENABLE_SODIUM": false,
         "ENABLE_BOOST": false,
         "ENABLE_OPENSSL": false,
