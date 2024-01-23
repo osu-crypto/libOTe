@@ -16,6 +16,10 @@
 #include "libOTe_Tests/ExConvCode_Tests.h"
 #include "libOTe_Tests/EACode_Tests.h"
 #include "libOTe/Tools/LDPC/Mtx.h"
+#include "libOTe_Tests/Field_Tests.h"
+#include "libOTe_Tests/Poly_Tests.h"
+#include "libOTe_Tests/Ntt_Tests.h"
+
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -63,6 +67,11 @@ namespace tests_libOTe
             tc.add("Tools_Pprf_blockTrans_test              ", Tools_Pprf_blockTrans_test);
             tc.add("Tools_Pprf_callback_test                ", Tools_Pprf_callback_test);
 
+            tc.add("Field_F7681_Test                        ", Field_F7681_Test);
+            tc.add("Field_F12289_Test                       ", Field_F12289_Test);
+            tc.add("Poly_basics_Tests                       ", Poly_basics_Tests);
+            tc.add("Ntt_nttNegWrapMatrix_Test               ", Ntt_nttNegWrapMatrix_Test);
+            
             tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
             tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);
 

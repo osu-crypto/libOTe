@@ -4,7 +4,7 @@ file(GLOB_RECURSE SRCS *.cpp *.c)
 
 set(SRCS "${SRCS}")
 
-add_library(libOTe STATIC ${SRCS} "Tools/EACode/EACodeInstantiations.cpp")
+add_library(libOTe STATIC ${SRCS})
 
 
 # make projects that include libOTe use this as an include folder

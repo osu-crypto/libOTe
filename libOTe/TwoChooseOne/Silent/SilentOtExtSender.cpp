@@ -227,7 +227,7 @@ namespace osuCrypto
 
     task<> SilentOtExtSender::checkRT(Socket& chl)
     {
-        MC_BEGIN(task<>,this, &chl);
+        MC_BEGIN(task<>, this, &chl);
 
         MC_AWAIT(chl.send(mB));
         MC_AWAIT(chl.send(mDelta));
@@ -247,7 +247,7 @@ namespace osuCrypto
 
         mB = {};
 
-        mDelta = block(0,0);
+        mDelta = block(0, 0);
 
         mGapOts = {};
 
@@ -259,11 +259,11 @@ namespace osuCrypto
         PRNG& prng,
         Socket& chl)
     {
-        MC_BEGIN(task<>,this, messages, &prng, &chl,
+        MC_BEGIN(task<>, this, messages, &prng, &chl,
             correction = BitVector(messages.size()),
             iter = BitIterator{},
             i = u64{}
-            );
+        );
 
         MC_AWAIT(silentSend(messages, prng, chl));
         MC_AWAIT(chl.recv(correction));
@@ -285,7 +285,7 @@ namespace osuCrypto
         PRNG& prng,
         Socket& chl)
     {
-        MC_BEGIN(task<>,this, messages, &prng, &chl,
+        MC_BEGIN(task<>, this, messages, &prng, &chl,
             type = ChoiceBitPacking::True
         );
 
@@ -375,7 +375,7 @@ namespace osuCrypto
         PRNG& prng,
         Socket& chl)
     {
-        MC_BEGIN(task<>,this, d, b, &prng, &chl);
+        MC_BEGIN(task<>, this, d, b, &prng, &chl);
 
         MC_AWAIT(silentSendInplace(d, b.size(), prng, chl));
 
@@ -391,13 +391,12 @@ namespace osuCrypto
         PRNG& prng,
         Socket& chl)
     {
-        MC_BEGIN(task<>,this, d, n, &prng, &chl,
+        MC_BEGIN(task<>, this, d, n, &prng, &chl,
             rT = MatrixView<block>{},
-            gapVals = std::vector<block> {},
+            gapVals = std::vector<block>{},
             i = u64{}, j = u64{}, main = u64{}
         );
 
-        gTimer.setTimePoint("sender.ot.enter");
         setTimePoint("sender.expand.enter");
 
         if (isConfigured() == false)
@@ -414,60 +413,40 @@ namespace osuCrypto
         }
 
         setTimePoint("sender.expand.start");
-        gTimer.setTimePoint("sender.expand.start");
 
         mDelta = d;
 
         // allocate b
         mB.resize(mN2);
 
-        //if (mMultType == MultType::QuasiCyclic)
-        //{
-        //    rT = MatrixView<block>(mB.data(), 128, mN2 / 128);
-
-        //    MC_AWAIT(mGen.expand(chl, mDelta, prng, rT, PprfOutputFormat::InterleavedTransposed, mNumThreads));
-        //    setTimePoint("sender.expand.pprf_transpose");
-        //    gTimer.setTimePoint("sender.expand.pprf_transpose");
-
-        //    if (mDebug)
-        //        MC_AWAIT(checkRT(chl));
-
-        //    randMulQuasiCyclic();
-        //}
-        //else
+        main = mNumPartitions * mSizePer;
+        if (mGapOts.size())
         {
-
-            main = mNumPartitions * mSizePer;
-            if (mGapOts.size())
+            // derandomize the random OTs for the gap 
+            // to have the desired correlation.
+            gapVals.resize(mGapOts.size());
+            for (i = main, j = 0; i < mN2; ++i, ++j)
             {
-                // derandomize the random OTs for the gap 
-                // to have the desired correlation.
-                gapVals.resize(mGapOts.size());
-                for (i = main, j = 0; i < mN2; ++i, ++j)
-                {
-                    auto v = mGapOts[j][0] ^ mDelta;
-                    gapVals[j] = AES(mGapOts[j][1]).ecbEncBlock(ZeroBlock) ^ v;
-                    mB[i] = mGapOts[j][0];
-                    //std::cout << "jj " << j << " " <<i << " " << mGapOts[j][0] << " " << v << " " << beta[mNumPartitions + j] << std::endl;
-                }
-                MC_AWAIT(chl.send(std::move(gapVals)));
+                auto v = mGapOts[j][0] ^ mDelta;
+                gapVals[j] = AES(mGapOts[j][1]).ecbEncBlock(ZeroBlock) ^ v;
+                mB[i] = mGapOts[j][0];
             }
-
-
-            MC_AWAIT(mGen.expand(chl, { &mDelta,1 }, prng.get(), mB.subspan(0, main), PprfOutputFormat::Interleaved, true, mNumThreads));
-
-
-            if (mMalType == SilentSecType::Malicious)
-                MC_AWAIT(ferretMalCheck(chl, prng));
-
-            setTimePoint("sender.expand.pprf_transpose");
-            gTimer.setTimePoint("sender.expand.pprf_transpose");
-
-            if (mDebug)
-                MC_AWAIT(checkRT(chl));
-
-            compress();
+            MC_AWAIT(chl.send(std::move(gapVals)));
         }
+
+
+        MC_AWAIT(mGen.expand(chl, { &mDelta,1 }, prng.get(), mB.subspan(0, main), PprfOutputFormat::Interleaved, true, mNumThreads));
+
+
+        if (mMalType == SilentSecType::Malicious)
+            MC_AWAIT(ferretMalCheck(chl, prng));
+
+        setTimePoint("sender.expand.pprf_transpose");
+
+        if (mDebug)
+            MC_AWAIT(checkRT(chl));
+
+        compress();
 
         mB.resize(mRequestNumOts);
 
@@ -477,7 +456,7 @@ namespace osuCrypto
 
     task<> SilentOtExtSender::ferretMalCheck(Socket& chl, PRNG& prng)
     {
-        MC_BEGIN(task<>,this, &chl, &prng,
+        MC_BEGIN(task<>, this, &chl, &prng,
             X = block{},
             xx = block{},
             sum0 = ZeroBlock,
@@ -488,7 +467,7 @@ namespace osuCrypto
             recver = NoisyVoleReceiver{},
             myHash = std::array<u8, 32>{},
             ro = RandomOracle(32)
-            );
+        );
 
         MC_AWAIT(chl.recv(X));
 
@@ -505,9 +484,9 @@ namespace osuCrypto
         }
 
         mySum = sum0.gf128Reduce(sum1);
-        
 
-        
+
+
         MC_AWAIT(recver.receive({ &mDelta,1 }, { &deltaShare,1 }, prng, mMalCheckOts, chl));
 
         ro.Update(mySum ^ deltaShare);
@@ -533,7 +512,7 @@ namespace osuCrypto
             throw std::runtime_error("ENABLE_BITPOLYMUL");
 #endif
         }
-            break;
+        break;
 #ifdef ENABLE_INSECURE_SILVER
         case osuCrypto::MultType::slv5:
         case osuCrypto::MultType::slv11:
@@ -567,132 +546,7 @@ namespace osuCrypto
             throw RTE_LOC;
             break;
         }
-
-
     }
-//
-//
-//    void SilentOtExtSender::randMulQuasiCyclic()
-//    {
-//#ifdef ENABLE_BITPOLYMUL
-//
-//        const u64 rows(128);
-//        auto nBlocks = mN / rows;
-//        auto n2Blocks = mN2 / rows;
-//        MatrixView<block> rT(mB.data(), rows, n2Blocks);
-//        auto n64 = i64(nBlocks * 2);
-//        std::vector<FFTPoly> a(mScaler - 1);
-//        Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
-//
-//        std::unique_ptr<ThreadBarrier[]> brs(new ThreadBarrier[mScaler]);
-//        for (u64 i = 0; i < mScaler; ++i)
-//            brs[i].reset(mNumThreads);
-//
-//        auto routine = [&](u64 index)
-//        {
-//            u64 j = 0;
-//            FFTPoly bPoly;
-//            FFTPoly cPoly;
-//
-//            Matrix<block>tt(1, 2 * nBlocks, AllocType::Uninitialized);
-//            auto temp128 = tt[0];
-//
-//            FFTPoly::DecodeCache cache;
-//            for (u64 s = index + 1; s < mScaler; s += mNumThreads)
-//            {
-//                auto a64 = spanCast<u64>(temp128).subspan(n64);
-//                PRNG pubPrng(toBlock(s));
-//                pubPrng.get(a64.data(), a64.size());
-//                a[s - 1].encode(a64);
-//            }
-//
-//            if (index == 0)
-//                setTimePoint("sender.expand.qc.randGen");
-//
-//            brs[j++].decrementWait();
-//
-//            if (index == 0)
-//                setTimePoint("sender.expand.qc.randGenWait");
-//
-//            auto multAddReduce = [this, nBlocks, n64, &a, &bPoly, &cPoly, &temp128, &cache](span<block> b128, span<block> dest)
-//            {
-//                for (u64 s = 1; s < mScaler; ++s)
-//                {
-//                    auto& aPoly = a[s - 1];
-//                    auto b64 = spanCast<u64>(b128).subspan(s * n64, n64);
-//
-//                    bPoly.encode(b64);
-//
-//                    if (s == 1)
-//                    {
-//                        cPoly.mult(aPoly, bPoly);
-//                    }
-//                    else
-//                    {
-//                        bPoly.multEq(aPoly);
-//                        cPoly.addEq(bPoly);
-//                    }
-//                }
-//
-//                // decode c[i] and store it at t64Ptr
-//                cPoly.decode(spanCast<u64>(temp128), cache, true);
-//
-//                for (u64 j = 0; j < nBlocks; ++j)
-//                    temp128[j] = temp128[j] ^ b128[j];
-//
-//                // reduce s[i] mod (x^n - 1) and store it at cModP1[i]
-//                modp(dest, temp128, mP);
-//
-//            };
-//
-//            for (u64 i = index; i < rows; i += mNumThreads)
-//                multAddReduce(rT[i], cModP1[i]);
-//
-//            if (index == 0)
-//                setTimePoint("sender.expand.qc.mulAddReduce");
-//
-//            brs[j++].decrementWait();
-//
-//
-//            std::array<block, 128> tpBuffer;
-//            auto numBlocks = (mRequestNumOts + 127) / 128;
-//            auto begin = index * numBlocks / mNumThreads;
-//            auto end = (index + 1) * numBlocks / mNumThreads;
-//            for (u64 i = begin; i < end; ++i)
-//            {
-//                u64 j = i * tpBuffer.size();
-//                auto min = std::min<u64>(tpBuffer.size(), mN - j);
-//
-//                for (u64 k = 0; k < tpBuffer.size(); ++k)
-//                    tpBuffer[k] = cModP1(k, i);
-//
-//                transpose128(tpBuffer);
-//
-//                auto end = i * tpBuffer.size() + min;
-//                for (u64 k = 0; j < end; ++j, ++k)
-//                    mB[j] = tpBuffer[k];
-//            }
-//
-//            if (index == 0)
-//                setTimePoint("sender.expand.qc.transposeXor");
-//        };
-//
-//        std::vector<std::thread> thrds(mNumThreads - 1);
-//        for (u64 i = 0; i < thrds.size(); ++i)
-//            thrds[i] = std::thread(routine, i);
-//
-//        routine(thrds.size());
-//
-//        for (u64 i = 0; i < thrds.size(); ++i)
-//            thrds[i].join();
-//
-//
-//#else
-//    std::cout << "bit poly mul is not enabled. Please recompile with ENABLE_BITPOLYMUL defined. " LOCATION << std::endl;
-//    throw RTE_LOC;
-//#endif
-//
-//    }
 }
 
 #endif

@@ -446,8 +446,6 @@ namespace osuCrypto
             i = u64{}, j = u64{}, main = u64{}
         );
 
-        gTimer.setTimePoint("recver.ot.enter");
-
         if (isConfigured() == false)
         {
             // first generate 128 normal base OTs
@@ -464,8 +462,6 @@ namespace osuCrypto
         }
 
         setTimePoint("recver.expand.start");
-        gTimer.setTimePoint("recver.expand.start");
-
 
         mA.resize(mN2);
         mC.resize(0);
@@ -509,8 +505,6 @@ namespace osuCrypto
 
             MC_AWAIT(mGen.expand(chl, mA.subspan(0, main), PprfOutputFormat::Interleaved, true, mNumThreads));
             setTimePoint("recver.expand.pprf_transpose");
-            gTimer.setTimePoint("recver.expand.pprf_transpose");
-
 
             if (mMalType == SilentSecType::Malicious)
                 MC_AWAIT(ferretMalCheck(chl, prng));

@@ -417,7 +417,6 @@ using BaseOT = DefaultBaseOT;
 			theirHash = std::array<u8, 32>{}
 
 		);
-		gTimer.setTimePoint("SilentVoleReceiver.ot.enter");
 
 		if (isConfigured() == false)
 		{

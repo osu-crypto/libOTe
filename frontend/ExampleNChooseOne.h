@@ -59,7 +59,7 @@ namespace osuCrypto
             if (randomOT)
             {
                 // once configure(...) and setBaseOts(...) are called,
-                // we can compute many batches of OTs. First we need to tell
+                // we can compute many mBatches of OTs. First we need to tell
                 // the instance how many OTs we want in this batch. This is done here.
                 MC_AWAIT(recver.init(numOTs, prng, chl));
 
