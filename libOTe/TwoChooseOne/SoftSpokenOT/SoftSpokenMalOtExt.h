@@ -153,6 +153,12 @@ namespace osuCrypto
 		SoftSpokenMalOtSender() {
 			init();
 		}
+
+		SoftSpokenMalOtSender(u64 fieldBits)
+		{
+			init(fieldBits);
+		}
+		
 		SoftSpokenMalOtSender(SoftSpokenMalOtSender&& o) = default;
 		SoftSpokenMalOtSender& operator=(SoftSpokenMalOtSender&& o) = default;
 
@@ -285,6 +291,13 @@ namespace osuCrypto
 		{
 			init();
 		}
+
+		SoftSpokenMalOtReceiver(u64 fieldBits)
+		{
+			init(fieldBits);
+		}
+
+
 		SoftSpokenMalOtReceiver(SoftSpokenMalOtReceiver&& o) 
 			:mBase(std::move(o.mBase))
 			,mExtraV(std::move(o.mExtraV))
