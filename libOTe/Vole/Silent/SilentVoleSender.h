@@ -124,7 +124,18 @@ namespace osuCrypto
         task<> genSilentBaseOts(PRNG& prng, Socket& chl, F delta)
         {
 #ifdef LIBOTE_HAS_BASE_OT
+
+#if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
+            using BaseOT = McRosRoyTwist;
+#elif defined ENABLE_MR
+            using BaseOT = MasnyRindal;
+#elif defined ENABLE_MRR
+            using BaseOT = McRosRoy;
+#elif defined ENABLE_NP_KYBER
+            using BaseOT = MasnyRindalKyber;
+#else
             using BaseOT = DefaultBaseOT;
+#endif
 
             MC_BEGIN(task<>, this, delta, &prng, &chl,
                 msg = AlignedUnVector<std::array<block, 2>>(silentBaseOtCount()),
