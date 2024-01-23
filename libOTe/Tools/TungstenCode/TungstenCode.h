@@ -209,8 +209,10 @@ namespace osuCrypto {
 
                 for (u64 j = 0; j < Table::data.size();)
                 {
+#ifdef ENABLE_SSE
                     if (rangeCheck == false || i + Table::data.size() * 2 < size)
                         _mm_prefetch((char*)(x + i + Table::data.size() * 2), _MM_HINT_T0);
+#endif
 
                     for (u64 k = 0; k < ChunkSize; ++k, ++j, ++i)
                     {
