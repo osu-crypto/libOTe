@@ -35,9 +35,9 @@ namespace osuCrypto
     template <typename T>
     using is_SoftSpoken = typename std::conditional<
         std::is_same<T, SoftSpokenShOtSender<>>::value ||
-            std::is_same<T, SoftSpokenShOtReceiver<>>::value ||
-            std::is_same<T, SoftSpokenMalOtSender>::value ||
-            std::is_same<T, SoftSpokenMalOtReceiver>::value,
+        std::is_same<T, SoftSpokenShOtReceiver<>>::value ||
+        std::is_same<T, SoftSpokenMalOtSender>::value ||
+        std::is_same<T, SoftSpokenMalOtReceiver>::value,
         std::true_type,
         std::false_type>::type;
 #else
@@ -84,7 +84,7 @@ namespace osuCrypto
         if (role == Role::Receiver)
         {
             DefaultBaseOT base;
-            std::array<std::array<block, 2>, 128> baseMsg;
+            std::vector<std::array<block, 2>> baseMsg(receiver.baseOtCount());
 
             // perform the base To, call sync_wait to block until they have completed.
             cp::sync_wait(base.send(baseMsg, prng, chl));
@@ -94,8 +94,8 @@ namespace osuCrypto
         {
 
             DefaultBaseOT base;
-            BitVector bv(128);
-            std::array<block, 128> baseMsg;
+            BitVector bv(sender.baseOtCount());
+            std::vector<block> baseMsg(sender.baseOtCount());
             bv.randomize(prng);
 
             // perform the base To, call sync_wait to block until they have completed.
@@ -106,19 +106,23 @@ namespace osuCrypto
 #else
         if (!cmd.isSet("fakeBase"))
             std::cout << "warning, base ots are not enabled. Fake base OTs will be used. " << std::endl;
-        PRNG commonPRNG(oc::ZeroBlock);
-        std::array<std::array<block, 2>, 128> sendMsgs;
-        commonPRNG.get(sendMsgs.data(), sendMsgs.size());
+        PRNG commonPRNG(oc::CCBlock);
         if (role == Role::Receiver)
         {
+            std::vector<std::array<block, 2>> sendMsgs(receiver.baseOtCount());
+            commonPRNG.get(sendMsgs.data(), sendMsgs.size());
             receiver.setBaseOts(sendMsgs);
         }
         else
         {
-            BitVector bv(128);
+
+            std::vector<std::array<block, 2>> sendMsgs(sender.baseOtCount());
+            commonPRNG.get(sendMsgs.data(), sendMsgs.size());
+
+            BitVector bv(sendMsgs.size());
             bv.randomize(commonPRNG);
-            std::array<block, 128> recvMsgs;
-            for (u64 i = 0; i < 128; ++i)
+            std::vector<block> recvMsgs(sendMsgs.size());
+            for (u64 i = 0; i < sendMsgs.size(); ++i)
                 recvMsgs[i] = sendMsgs[i][bv[i]];
             sender.setBaseOts(recvMsgs, bv);
         }
@@ -198,7 +202,7 @@ namespace osuCrypto
                     chl.close();
                 }
             }
-             
+
             // make sure all messages have been sent.
             cp::sync_wait(chl.flush());
         }
@@ -320,7 +324,7 @@ namespace osuCrypto
 #else
         throw std::runtime_error("This example requires coproto to enable boost support. Please build libOTe with `-DCOPROTO_ENABLE_BOOST=ON`. " LOCATION);
 #endif
-        }
+    }
 
 
 
@@ -346,4 +350,4 @@ namespace osuCrypto
 #endif
         return flagSet;
     }
-    }
+}
