@@ -4,37 +4,13 @@
 #include "cryptoTools/Common/Range.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 #include "libOTe/Tools/Tools.h"
-#include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/Tools/EACode/EACode.h"
+#include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include <cmath>
 namespace osuCrypto
 {
-    //u64 secLevel(u64 scale, u64 n, u64 points)
-    //{
-    //    auto x1 = std::log2(scale * n / double(n));
-    //    auto x2 = std::log2(scale * n) / 2;
-    //    return static_cast<u64>(points * x1 + x2);
-    //}
-
-    //u64 getPartitions(u64 scaler, u64 n, u64 secParam)
-    //{
-    //    if (scaler < 2)
-    //        throw std::runtime_error("scaler must be 2 or greater");
-
-    //    u64 ret = 1;
-    //    auto ss = secLevel(scaler, n, ret);
-    //    while (ss < secParam)
-    //    {
-    //        ++ret;
-    //        ss = secLevel(scaler, n, ret);
-    //        if (ret > 1000)
-    //            throw std::runtime_error("failed to find silent OT parameters");
-    //    }
-    //    return roundUpTo(ret, 8);
-    //}
-
 
     // We get e^{-2td} security against linear attacks, 
     // with noise weigh t and minDist d. 
@@ -141,6 +117,36 @@ namespace osuCrypto
 
         mEncoder.config(numOTs, numOTs * mScaler, w, a, true);
     }
+
+
+    void ExConvConfigure(
+        double scaler,
+        MultType mMultType,
+        u64& expanderWeight,
+        u64& accumulatorWeight,
+        double& minDist)
+    {
+        if (scaler != 2)
+            throw RTE_LOC;
+        switch (mMultType)
+        {
+        case osuCrypto::MultType::ExConv7x24:
+            accumulatorWeight = 24;
+            expanderWeight = 7;
+            minDist = 0.2; // psuedo min dist estimate
+            break;
+        case osuCrypto::MultType::ExConv21x24:
+            accumulatorWeight = 24;
+            expanderWeight = 21;
+            minDist = 0.25; // psuedo min dist estimate
+            break;
+        default:
+            throw RTE_LOC;
+            break;
+        }
+
+    }
+
 
 #ifdef ENABLE_INSECURE_SILVER
 

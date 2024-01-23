@@ -3,7 +3,6 @@
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include <libOTe/Tools/bitpolymul.h>
-#include <libOTe/Tools/LDPC/LdpcSampler.h>
 #include <libOTe/Vole/Noisy/NoisyVoleSender.h>
 #include <libOTe/Base/BaseOT.h>
 
@@ -13,6 +12,7 @@
 #include <cryptoTools/Common/Range.h>
 #include <cryptoTools/Common/ThreadBarrier.h>
 #include "libOTe/Tools/QuasiCyclicCode.h"
+#include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto
 {
@@ -68,11 +68,9 @@ namespace osuCrypto
             throw std::runtime_error("wrong number of silent base OTs");
 
         auto genOts = recvBaseOts.subspan(0, mGen.baseOtCount());
-        auto gapOts = recvBaseOts.subspan(genOts.size(), mGapOts.size());
-        auto malOts = recvBaseOts.subspan(genOts.size() + mGapOts.size());
+        auto malOts = recvBaseOts.subspan(genOts.size());
 
         mGen.setBase(genOts);
-        std::copy(gapOts.begin(), gapOts.end(), mGapOts.begin());
         std::copy(malOts.begin(), malOts.end(), mMalCheckOts.begin());
 
     }
@@ -115,14 +113,7 @@ namespace osuCrypto
         if (isConfigured() == false)
             throw std::runtime_error("configure(...) must be called first");
 
-        auto choice = mGen.sampleChoiceBits(mN2, getPprfFormat(), prng);
-
-        if (mGapOts.size())
-        {
-            mGapBaseChoice.resize(mGapOts.size());
-            mGapBaseChoice.randomize(prng);
-            choice.append(mGapBaseChoice);
-        }
+        auto choice = mGen.sampleChoiceBits(prng);
 
         mS.resize(mNumPartitions);
         mGen.getPoints(mS, getPprfFormat());
@@ -210,7 +201,6 @@ namespace osuCrypto
             throw std::runtime_error("configure must be called first");
         return
             mGen.baseOtCount() +
-            mGapOts.size() +
             (mMalType == SilentSecType::Malicious) * 128;
     }
 
@@ -223,7 +213,6 @@ namespace osuCrypto
     {
         mMalType = malType;
         mNumThreads = numThreads;
-        mGapOts.resize(0);
 
         switch (mMultType)
         {
@@ -240,28 +229,6 @@ namespace osuCrypto
                 mScaler);
 
             break;
-#ifdef ENABLE_INSECURE_SILVER
-        case osuCrypto::MultType::slv5:
-        case osuCrypto::MultType::slv11:
-        {
-            if (scaler != 2)
-                throw std::runtime_error("only scaler = 2 is supported for slv. " LOCATION);
-
-            u64 gap;
-            SilverConfigure(numOTs, 128,
-                mMultType,
-                mRequestedNumOts,
-                mNumPartitions,
-                mSizePer,
-                mN2,
-                mN,
-                gap,
-                mEncoder);
-
-            mGapOts.resize(gap);
-            break;
-        }
-#endif
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
         case osuCrypto::MultType::ExAcc21:
@@ -470,60 +437,23 @@ namespace osuCrypto
         mA.resize(mN2);
         mC.resize(0);
 
-        //// do the compression to get the final OTs.
-        //if (mMultType == MultType::QuasiCyclic)
-        //{
-        //	rT = MatrixView<block>(mA.data(), 128, mN2 / 128);
 
-        //	// locally expand the seeds.
-        //	MC_AWAIT(mGen.expand(chl, prng, rT, PprfOutputFormat::InterleavedTransposed, mNumThreads));
-        //	setTimePoint("recver.expand.pprf_transpose");
+        MC_AWAIT(mGen.expand(chl, mA, PprfOutputFormat::Interleaved, true, mNumThreads));
+        setTimePoint("recver.expand.pprf_transpose");
+        gTimer.setTimePoint("recver.expand.pprf_transpose");
 
-        //	if (mDebug)
-        //	{
-        //		MC_AWAIT(checkRT(chl, rT));
-        //	}
 
-        //	randMulQuasiCyclic(type);
+        if (mMalType == SilentSecType::Malicious)
+            MC_AWAIT(ferretMalCheck(chl, prng));
 
-        //}
-        //else
+
+        if (mDebug)
         {
-
-            main = mNumPartitions * mSizePer;
-            if (mGapOts.size())
-            {
-                // derandomize the random OTs for the gap 
-                // to have the desired correlation.
-                gapVals.resize(mGapOts.size());
-                MC_AWAIT(chl.recv(gapVals));
-                for (i = main, j = 0; i < mN2; ++i, ++j)
-                {
-                    if (mGapBaseChoice[j])
-                        mA[i] = AES(mGapOts[j]).ecbEncBlock(ZeroBlock) ^ gapVals[j];
-                    else
-                        mA[i] = mGapOts[j];
-                }
-            }
-
-
-            MC_AWAIT(mGen.expand(chl, mA.subspan(0, main), PprfOutputFormat::Interleaved, true, mNumThreads));
-            setTimePoint("recver.expand.pprf_transpose");
-            gTimer.setTimePoint("recver.expand.pprf_transpose");
-
-
-            if (mMalType == SilentSecType::Malicious)
-                MC_AWAIT(ferretMalCheck(chl, prng));
-
-
-            if (mDebug)
-            {
-                rT = MatrixView<block>(mA.data(), mN2, 1);
-                MC_AWAIT(checkRT(chl, rT));
-            }
-
-            compress(type);
+            rT = MatrixView<block>(mA.data(), mN2, 1);
+            MC_AWAIT(checkRT(chl, rT));
         }
+
+        compress(type);
 
         mA.resize(mRequestedNumOts);
 
@@ -543,9 +473,10 @@ namespace osuCrypto
             sum0 = block{},
             sum1 = block{},
             mySum = block{},
-            deltaShare = block{},
+             b = AlignedUnVector<block>(1),
+        //deltaShare = block{},
             i = u64{},
-            sender = NoisyVoleSender{},
+            sender = NoisyVoleSender<block, block, CoeffCtxGF128>{},
             theirHash = std::array<u8, 32>{},
             myHash = std::array<u8, 32>{},
             ro = RandomOracle(32)
@@ -570,9 +501,9 @@ namespace osuCrypto
         mySum = sum0.gf128Reduce(sum1);
 
 
-        MC_AWAIT(sender.send(mMalCheckX, { &deltaShare,1 }, prng, mMalCheckOts, chl));
+        MC_AWAIT(sender.send(mMalCheckX, b, prng, mMalCheckOts, chl, {}));
         ;
-        ro.Update(mySum ^ deltaShare);
+        ro.Update(mySum ^ b[0]);
         ro.Final(myHash);
 
         MC_AWAIT(chl.recv(theirHash));
@@ -727,7 +658,7 @@ namespace osuCrypto
             case osuCrypto::MultType::ExAcc40:
             {
                 AlignedUnVector<block> A2(mEAEncoder.mMessageSize);
-                mEAEncoder.dualEncode<block>(mA.subspan(0, mEAEncoder.mCodeSize), A2);
+                mEAEncoder.dualEncode<block, CoeffCtxGF2>(mA.subspan(0, mEAEncoder.mCodeSize), A2, {});
                 std::swap(mA, A2);
                 break;
             }
@@ -735,7 +666,7 @@ namespace osuCrypto
             case osuCrypto::MultType::ExConv21x24:
                 if (mTimer)
                     mExConvEncoder.setTimer(getTimer());
-                mExConvEncoder.dualEncode<block>(mA.subspan(0, mExConvEncoder.generatorCols()));
+                mExConvEncoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {});
                 break;
             default:
                 throw RTE_LOC;
@@ -747,13 +678,6 @@ namespace osuCrypto
         }
         else
         {
-            // allocate and initialize mC
-            //if (mChoiceSpanSize < mN2)
-            //{
-            //	mChoiceSpanSize = mN2;
-            //	mChoicePtr.reset((new u8[mN2]()));
-            //}
-            //else
             mC.resize(mN2);
             std::memset(mC.data(), 0, mN2);
             auto cc = mC.data();
@@ -788,9 +712,10 @@ namespace osuCrypto
             {
                 AlignedUnVector<block> A2(mEAEncoder.mMessageSize);
                 AlignedUnVector<u8> C2(mEAEncoder.mMessageSize);
-                mEAEncoder.dualEncode2<block, u8>(
+                mEAEncoder.dualEncode2<block, u8, CoeffCtxGF2>(
                     mA.subspan(0, mEAEncoder.mCodeSize), A2,
-                    mC.subspan(0, mEAEncoder.mCodeSize), C2);
+                    mC.subspan(0, mEAEncoder.mCodeSize), C2, 
+                    {});
 
                 std::swap(mA, A2);
                 std::swap(mC, C2);
@@ -801,10 +726,10 @@ namespace osuCrypto
             case osuCrypto::MultType::ExConv21x24:
                 if (mTimer)
                     mExConvEncoder.setTimer(getTimer());
-                mExConvEncoder.dualEncode2<block, u8>(
-                    mA.subspan(0, mExConvEncoder.mCodeSize),
-                    mC.subspan(0, mExConvEncoder.mCodeSize)
-                    );
+                mExConvEncoder.dualEncode2<block, u8, CoeffCtxGF2>(
+                    mA.begin(),
+                    mC.begin(), 
+                    {});
                 break;
             default:
                 throw RTE_LOC;
@@ -826,8 +751,6 @@ namespace osuCrypto
         mA = {};
 
         mGen.clear();
-
-        mGapOts = {};
 
         mS = {};
     }

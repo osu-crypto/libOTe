@@ -9,12 +9,6 @@
 
 #include <cryptoTools/Common/CLP.h>
 
-void Tools_Pprf_expandOne_test(const oc::CLP& cmd);
-void Tools_Pprf_test(const oc::CLP& cmd);
-void Tools_Pprf_trans_test(const oc::CLP& cmd);
-void Tools_Pprf_inter_test(const oc::CLP& cmd);
-void Tools_Pprf_blockTrans_test(const oc::CLP& cmd);
-void Tools_Pprf_callback_test(const oc::CLP& cmd);
 
 void OtExt_Silent_random_Test(const oc::CLP& cmd);
 void OtExt_Silent_correlated_Test(const oc::CLP& cmd);

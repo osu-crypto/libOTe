@@ -11,9 +11,6 @@ using namespace osuCrypto;
 #include <string.h>
 #include <stdio.h>
 
-#include <cryptoTools/Network/Channel.h>
-#include <cryptoTools/Network/Session.h>
-#include <cryptoTools/Network/IOService.h>
 #include <numeric>
 #include <cryptoTools/Common/Timer.h>
 
@@ -28,35 +25,16 @@ using namespace osuCrypto;
 #include "ExampleSilent.h"
 #include "ExampleVole.h"
 #include "ExampleMessagePassing.h"
-#include "libOTe/Tools/LDPC/LdpcImpulseDist.h"
 #include "libOTe/Tools/LDPC/Util.h"
 #include "cryptoTools/Crypto/RandomOracle.h"
 #include "libOTe/Tools/EACode/EAChecker.h"
 
-static const std::vector<std::string>
-unitTestTag{ "u", "unitTest" },
-kos{ "k", "kos" },
-dkos{ "d", "dkos" },
-ssdelta{ "ssd", "ssdelta" },
-sshonest{ "ss", "sshonest" },
-smleakydelta{ "smld", "smleakydelta" },
-smalicious{ "sm", "smalicious" },
-kkrt{ "kk", "kkrt" },
-iknp{ "i", "iknp" },
-diknp{ "diknp" },
-oos{ "o", "oos" },
-moellerpopf{ "p", "moellerpopf" },
-ristrettopopf{ "r", "ristrettopopf" },
-mr{ "mr" },
-mrb{ "mrb" },
-Silent{ "s", "Silent" },
-vole{ "vole" },
-akn{ "a", "akn" },
-np{ "np" },
-simple{ "simplest" },
-simpleasm{ "simplest-asm" };
+#include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
+#include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
 
 #ifdef ENABLE_IKNP
+using namespace oc;
+
 void minimal()
 {
 	// Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
@@ -107,7 +85,6 @@ void minimal()
 #include "cryptoTools/Crypto/RandomOracle.h"
 int main(int argc, char** argv)
 {
-
 	CLP cmd;
 	cmd.parse(argc, argv);
 	bool flagSet = false;
@@ -115,33 +92,18 @@ int main(int argc, char** argv)
 	// various benchmarks
 	if (cmd.isSet("bench"))
 	{
-		if (cmd.isSet("silver"))
-			encodeBench(cmd);
-		else if (cmd.isSet("QC"))
+		if (cmd.isSet("QC"))
 			QCCodeBench(cmd);
 		else if (cmd.isSet("silent"))
 			SilentOtBench(cmd);
+		else if (cmd.isSet("vole2"))
+			VoleBench2(cmd);
 		else if (cmd.isSet("ea"))
 			EACodeBench(cmd);
 		else
 			ExConvCodeBench(cmd);
 		return 0;
 	}
-
-
-	// minimum distance checker for EA codes.
-	if (cmd.isSet("ea"))
-	{
-		EAChecker(cmd);
-		return 0;
-	}
-#ifdef ENABLE_LDPC
-	if (cmd.isSet("ldpc"))
-	{
-		LdpcDecode_impulse(cmd);
-		return 0;
-	}
-#endif
 
 	// unit tests.
 	if (cmd.isSet(unitTestTag))
@@ -165,104 +127,17 @@ int main(int argc, char** argv)
 
 
 	// run various examples.
-
-
-#ifdef ENABLE_SIMPLESTOT
-	flagSet |= runIf(baseOT_example<SimplestOT>, cmd, simple);
-#endif
-
-#ifdef ENABLE_SIMPLESTOT_ASM
-	flagSet |= runIf(baseOT_example<AsmSimplestOT>, cmd, simpleasm);
-#endif
-
-#ifdef ENABLE_MRR_TWIST
-#ifdef ENABLE_SSE
-	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-		DomainSepEKEPopf factory;
-		const char* domain = "EKE POPF OT example";
-		factory.Update(domain, std::strlen(domain));
-		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwist(factory));
-		}, cmd, moellerpopf, { "eke" });
-#endif
-
-	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-		DomainSepMRPopf factory;
-		const char* domain = "MR POPF OT example";
-		factory.Update(domain, std::strlen(domain));
-		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistMR(factory));
-		}, cmd, moellerpopf, { "mrPopf" });
-
-	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-		DomainSepFeistelPopf factory;
-		const char* domain = "Feistel POPF OT example";
-		factory.Update(domain, std::strlen(domain));
-		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistFeistel(factory));
-		}, cmd, moellerpopf, { "feistel" });
-
-	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-		DomainSepFeistelMulPopf factory;
-		const char* domain = "Feistel With Multiplication POPF OT example";
-		factory.Update(domain, std::strlen(domain));
-		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyTwistMul(factory));
-}, cmd, moellerpopf, { "feistelMul" });
-#endif
-
-#ifdef ENABLE_MRR
-	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-		DomainSepFeistelRistPopf factory;
-		const char* domain = "Feistel POPF OT example (Risretto)";
-		factory.Update(domain, std::strlen(domain));
-		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoy(factory));
-		}, cmd, ristrettopopf, { "feistel" });
-
-	flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, CLP& clp) {
-		DomainSepFeistelMulRistPopf factory;
-		const char* domain = "Feistel With Multiplication POPF OT example (Risretto)";
-		factory.Update(domain, std::strlen(domain));
-		baseOT_example_from_ot(role, totalOTs, numThreads, ip, tag, clp, McRosRoyMul(factory));
-		}, cmd, ristrettopopf, { "feistelMul" });
-#endif
-
-#ifdef ENABLE_MR
-	flagSet |= runIf(baseOT_example<MasnyRindal>, cmd, mr);
-#endif
-
-#ifdef ENABLE_IKNP
-	flagSet |= runIf(TwoChooseOne_example<IknpOtExtSender, IknpOtExtReceiver>, cmd, iknp);
-#endif
-
-#ifdef ENABLE_KOS
-	flagSet |= runIf(TwoChooseOne_example<KosOtExtSender, KosOtExtReceiver>, cmd, kos);
-#endif
-
-#ifdef ENABLE_DELTA_KOS
-	flagSet |= runIf(TwoChooseOne_example<KosDotExtSender, KosDotExtReceiver>, cmd, dkos);
-#endif
-
-#ifdef ENABLE_SOFTSPOKEN_OT
-	flagSet |= runIf(TwoChooseOne_example<SoftSpokenShOtSender<>, SoftSpokenShOtReceiver<>>, cmd, sshonest);
-	flagSet |= runIf(TwoChooseOne_example<SoftSpokenMalOtSender, SoftSpokenMalOtReceiver>, cmd, smalicious);
-#endif
-
-#ifdef ENABLE_KKRT
-	flagSet |= runIf(NChooseOne_example<KkrtNcoOtSender, KkrtNcoOtReceiver>, cmd, kkrt);
-#endif
-
-#ifdef ENABLE_OOS
-	flagSet |= runIf(NChooseOne_example<OosNcoOtSender, OosNcoOtReceiver>, cmd, oos);
-#endif
-
-	flagSet |= runIf(Silent_example, cmd, Silent);
-	flagSet |= runIf(Vole_example, cmd, vole);
-
+	flagSet |= baseOT_examples(cmd);
+	flagSet |= TwoChooseOne_Examples(cmd);
+	flagSet |= NChooseOne_Examples(cmd);
+	flagSet |= Silent_Examples(cmd);
+	flagSet |= Vole_Examples(cmd);
 
 	if (cmd.isSet("messagePassing"))
 	{
 		messagePassingExample(cmd);
 		flagSet = 1;
 	}
-
-
 
 
 	if (flagSet == false)

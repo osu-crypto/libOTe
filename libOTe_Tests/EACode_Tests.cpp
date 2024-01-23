@@ -1,6 +1,7 @@
 #include "EACode_Tests.h"
 #include "libOTe/Tools/EACode/EACode.h"
 #include <iomanip>
+#include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto
 {
@@ -12,81 +13,74 @@ namespace osuCrypto
         auto n = cmd.getOr("n", k * R);
         auto bw = cmd.getOr("bw", 7);
 
-        bool v = cmd.isSet("v");
 
 
         EACode code;
         code.config(k, n, bw);
 
-        auto A = code.getA();
-        auto B = code.getB();
-        auto G = B * A;
+        //auto A = code.getA();
+        //auto B = code.getB();
+        //auto G = B * A;
         std::vector<block> m0(k), m1(k), c(n), c0(n), c1(n), a1(n);
         std::vector<u8> c2(n), m2(k);
 
-        if (v)
-        {
-            std::cout << "B\n" << B << std::endl << std::endl;
-            std::cout << "A'\n" << code.getAPar() << std::endl << std::endl;
-            std::cout << "A\n" << A << std::endl << std::endl;
-            std::cout << "G\n" << G << std::endl;
+        //if (v)
+        //{
+        //    std::cout << "B\n" << B << std::endl << std::endl;
+        //    std::cout << "A'\n" << code.getAPar() << std::endl << std::endl;
+        //    std::cout << "A\n" << A << std::endl << std::endl;
+        //    std::cout << "G\n" << G << std::endl;
 
-        }
+        //}
 
 
         PRNG prng(ZeroBlock);
         prng.get(c0.data(), c0.size());
 
         auto a0 = c0;
-        code.accumulate<block>(a0);
-        A.multAdd(c0, a1);
-        //A.leftMultAdd(c0, c1);
-        if (a0 != a1)
+        code.accumulate<block, CoeffCtxGF128>(a0, {});
+        CoeffCtxGF128 ctx;
+        block sum = c0[0];
+        for (u64 i = 0; i < a0.size(); ++i)
         {
-            if (v)
+            if (a0[i] != sum)
+                throw RTE_LOC;
+
+            if (i + 1 < a0.size())
             {
-
-                for (u64 i = 0; i < k; ++i)
-                    std::cout << std::hex << std::setw(2) << std::setfill('0') << (a0[i]) << " ";
-                std::cout << "\n";
-                for (u64 i = 0; i < k; ++i)
-                    std::cout << std::hex << std::setw(2) << std::setfill('0') << (c1[i]) << " ";
-                std::cout << "\n";
+                sum ^= c0[i + 1];
+                ctx.mulConst(sum, sum);
             }
-
-            throw RTE_LOC;
         }
 
-        auto cc = c0;
-        B.multAdd(cc, m0);
-        code.expand<block>(cc, m1);
+        u64 i = 0;
+        detail::ExpanderModd expanderCoeff(code.mSeed, code.mCodeSize);
+        auto main = k / 8 * 8;
+        for (; i < main; i += 8)
+        {
+            for (u64 j = 0; j < code.mExpanderWeight; ++j)
+            {
+                for (u64 p = 0; p < 8; ++p)
+                {
+                    auto idx = expanderCoeff.get();
+                    m0[i + p] = m0[i + p] ^ a0[idx];
+                }
+            }
+        }
+
+        for (; i < k; ++i)
+        {
+            for (u64 j = 0; j < code.mExpanderWeight; ++j)
+            {
+                auto idx = expanderCoeff.get();
+                m0[i] = m0[i] ^ a0[idx];
+            }
+        }
+
+        code.dualEncode<block, CoeffCtxGF128>(c0, m1, {});
 
         if (m0 != m1)
             throw RTE_LOC;
-
-        m0.resize(0);
-        m0.resize(k);
-
-        G.multAdd(c0, m0);
-
-
-        cc = c0;
-        code.dualEncode<block>(cc, m1);
-
-        if (m0 != m1)
-            throw RTE_LOC;
-
-        cc = c0;
-        for (u64 i = 0; i < code.mCodeSize; ++i)
-            c2[i] = c0[i].get<u8>(0);
-
-        code.dualEncode2<block,u8>(cc, m1, c2, m2);
-
-        if (m0 != m1)
-            throw RTE_LOC;
-
-        for (u64 i = 0; i < code.mMessageSize; ++i)
-            m2[i] = m0[i].get<u8>(0);
 
     }
 

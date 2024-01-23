@@ -86,14 +86,6 @@ namespace osuCrypto
                     b[6] = AES::roundEnc(b[6], k[6]);
                     b[7] = AES::roundEnc(b[7], k[7]);
 
-                    b[0] = b[0] ^ k[0];
-                    b[1] = b[1] ^ k[1];
-                    b[2] = b[2] ^ k[2];
-                    b[3] = b[3] ^ k[3];
-                    b[4] = b[4] ^ k[4];
-                    b[5] = b[5] ^ k[5];
-                    b[6] = b[6] ^ k[6];
-                    b[7] = b[7] ^ k[7];
                 }
 
                 auto src = prng.mBuffer.data();
@@ -121,7 +113,6 @@ namespace osuCrypto
                 else
                 {
                     memcpy(dst, src, vals.size() * sizeof(value_type));
-                    //throw RTE_LOC;
                     //assert(vals.size() % 32 == 0);
                     for (u64 i = 0; i < vals.size(); i += 32)
                         doMod32(vals.data() + i, &mod, modVal);

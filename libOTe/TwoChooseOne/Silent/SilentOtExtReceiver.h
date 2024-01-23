@@ -16,14 +16,14 @@
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Common/Aligned.h>
 #include <libOTe/Tools/Tools.h>
-#include <libOTe/Tools/SilentPprf.h>
+#include <libOTe/Tools/Pprf/RegularPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
-#include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include "libOTe/Tools/EACode/EACode.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
+#include "SilentOtExtUtil.h"
 
 namespace osuCrypto
 {
@@ -70,13 +70,9 @@ namespace osuCrypto
         macoro::optional<SoftSpokenMalOtReceiver> mOtExtRecver;
 #endif
 
-        // The OTs recv msgs which will be used to flood the
-        // last gap bits of the noisy vector for the slv code.
-        std::vector<block> mGapOts;
-
         // The OTs recv msgs which will be used to create the 
         // secret share of xa * delta as described in ferret.
-        std::vector<block> mMalCheckOts;
+        AlignedUnVector<block> mMalCheckOts;
 
         // The OTs choice bits which will be used to flood the
         // last gap bits of the noisy vector for the slv code.
@@ -95,7 +91,7 @@ namespace osuCrypto
         block mMalCheckX = ZeroBlock;
 
         // The ggm tree thats used to generate the sparse vectors.
-        SilentMultiPprfReceiver mGen;
+        RegularPprfReceiver<block, block, CoeffCtxGF2> mGen;
 
         // The type of compress we will use to generate the
         // dense vectors from the sparse vectors.

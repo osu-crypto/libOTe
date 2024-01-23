@@ -315,7 +315,7 @@ namespace osuCrypto
 		//mNumVolesPadded = (computeNumVolesPadded(fieldBits_, numVoles_));
 		mGenerateFn = (selectGenerateImpl(mFieldBits));
 		if (!mPprf)
-			mPprf.reset(new SilentMultiPprfSender);
+			mPprf.reset(new PprfSender);
 	}
 
 	void SmallFieldVoleReceiver::init(u64 fieldBits_, u64 numVoles_, bool malicious)
@@ -323,7 +323,7 @@ namespace osuCrypto
 		SmallFieldVoleBase::init(fieldBits_, numVoles_, malicious);
 		mGenerateFn = (selectGenerateImpl(mFieldBits));
 		if (!mPprf)
-			mPprf.reset(new SilentMultiPprfReceiver);
+			mPprf.reset(new PprfReceiver);
 	}
 
 	void SmallFieldVoleReceiver::setDelta(BitVector delta_)
@@ -347,26 +347,9 @@ namespace osuCrypto
 		std::copy(seeds_.begin(), seeds_.end(), mSeeds.data());
 	}
 
-	// The choice bits (as expected by SilentMultiPprfReceiver) store the locations of the complements
-	// of the active paths (because they tell which messages were transferred, not which ones weren't),
-	// in big endian. We want delta, which is the locations of the active paths, in little endian.
-	static BitVector choicesToDelta(const BitVector& choices, u64 fieldBits, u64 numVoles)
-	{
-		if ((u64)choices.size() != numVoles * fieldBits)
-			throw RTE_LOC;
-
-		BitVector delta(choices.size());
-		for (u64 i = 0; i < numVoles; ++i)
-			for (u64 j = 0; j < fieldBits; ++j)
-				delta[i * fieldBits + j] = 1 ^ choices[(i + 1) * fieldBits - j - 1];
-		return delta;
-	}
-
-
 	void SmallFieldVoleReceiver::setBaseOts(span<const block> baseMessages, const BitVector& choices)
 	{
-		setDelta(choicesToDelta(choices, mFieldBits, mNumVoles));
-
+		setDelta(choices);
 
 		if (!mPprf)
 			throw RTE_LOC;
@@ -379,7 +362,7 @@ namespace osuCrypto
 			throw RTE_LOC;
 
 		mPprf->setBase(baseMessages);
-		mPprf->setChoiceBits(PprfOutputFormat::ByTreeIndex, choices);
+		mPprf->setChoiceBits(choices);
 	}
 
 	void SmallFieldVoleSender::setBaseOts(span<std::array<block, 2>> msgs)
@@ -404,16 +387,19 @@ namespace osuCrypto
 		MC_BEGIN(task<>, this, &chl, &prng, numThreads,
 			corrections = std::vector<std::array<block, 2>>{},
 			hashes = std::vector<std::array<block, 2>>{},
-			seedView = MatrixView<block>{}
+			seedView = MatrixView<block>{},
+			_ = AlignedUnVector<block>{}
 		);
 
 		
 		assert(mSeeds.size() == 0  && mNumVoles && mNumVoles <= mNumVolesPadded);
 		mSeeds.resize(mNumVolesPadded * fieldSize());
 		std::fill(mSeeds.begin(), mSeeds.end(), block(0, 0));
+		mSeeds.resize(mNumVoles * fieldSize());
 
+		MC_AWAIT(mPprf->expand(chl, _, prng.get(), mSeeds, PprfOutputFormat::ByTreeIndex, false, 1));
+		mSeeds.resize(mNumVolesPadded * fieldSize());
 		seedView = MatrixView<block>(mSeeds.data(), mNumVoles, fieldSize());
-		MC_AWAIT(mPprf->expand(chl, span<const block>(), prng.get(), seedView, PprfOutputFormat::ByTreeIndex, false, 1));
 
 		// Prove consistency
 		if (mMalicious)
@@ -452,7 +438,8 @@ namespace osuCrypto
 	task<> SmallFieldVoleReceiver::expand(Socket& chl, PRNG& prng, u64 numThreads)
 	{
 		MC_BEGIN(task<>, this, &chl, &prng, numThreads, 
-			seedsFull = Matrix<block>{},
+			seeds = AlignedUnVector<block>{},
+			seedsFull = MatrixView<block>{},
 			totals = std::vector<std::array<block, 2>>{},
 			entryHashes = std::vector<std::array<block, 2>>{},
 			corrections = std::vector<std::array<block, 2>>{},
@@ -464,9 +451,9 @@ namespace osuCrypto
 		mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
 		std::fill(mSeeds.begin(), mSeeds.end(), block(0, 0));
 
-
-		seedsFull.resize(mNumVoles, fieldSize());
-		MC_AWAIT(mPprf->expand(chl, seedsFull, PprfOutputFormat::ByTreeIndex, false, 1));
+		seeds.resize(mNumVoles * fieldSize());
+		MC_AWAIT(mPprf->expand(chl, seeds, PprfOutputFormat::ByTreeIndex, false, 1));
+		seedsFull = MatrixView<block>(seeds.data(), mNumVoles, fieldSize());
 
 		// Check consistency
 		if (mMalicious)

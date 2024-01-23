@@ -8,16 +8,11 @@
 
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/Timer.h"
-#include "Expander.h"
+#include "libOTe/Tools/ExConvCode/Expander.h"
 #include "Util.h"
-
 namespace osuCrypto
 {
-#if __cplusplus >= 201703L
-#define EA_CONSTEXPR constexpr
-#else
-#define EA_CONSTEXPR
-#endif
+
     // The encoder for the generator matrix G = B * A.
     // B is the expander while A is the accumulator.
     // 
@@ -30,27 +25,25 @@ namespace osuCrypto
     {
     public:
         using ExpanderCode::config;
-        using ExpanderCode::getB;
-
 
         // Compute w = G * e.
-        template<typename T>
-        void dualEncode(span<T> e, span<T> w);
+        template<typename T, typename Ctx>
+        void dualEncode(span<T> e, span<T> w, Ctx ctx);
 
 
-        template<typename T, typename T2>
+        template<typename T, typename T2, typename Ctx>
         void dualEncode2(
             span<T> e0,
             span<T> w0,
             span<T2> e1,
-            span<T2> w1
+            span<T2> w1, Ctx ctx
         );
 
 
-        template<typename T>
-        void accumulate(span<T> x);
-        template<typename T, typename T2>
-        void accumulate(span<T> x, span<T2> x2);
+        template<typename T, typename Ctx>
+        void accumulate(span<T> x, Ctx ctx);
+        template<typename T, typename T2, typename Ctx>
+        void accumulate(span<T> x, span<T2> x2, Ctx ctx);
 
         // Get the parity check version of the accumulator
         SparseMtx getAPar() const;
@@ -58,5 +51,137 @@ namespace osuCrypto
         SparseMtx getA() const;
     };
 
-#undef EA_CONSTEXPR
+    // Compute w = G * e.
+    template<typename T, typename Ctx>
+    void EACode::dualEncode(span<T> e, span<T> w, Ctx ctx)
+    {
+        if (mCodeSize == 0)
+            throw RTE_LOC;
+        if (e.size() != mCodeSize)
+            throw RTE_LOC;
+        if (w.size() != mMessageSize)
+            throw RTE_LOC;
+
+
+        setTimePoint("EACode.encode.begin");
+
+        accumulate<T>(e, ctx);
+
+        setTimePoint("EACode.encode.accumulate");
+
+        expand<T, Ctx, false>(e.begin(), w.begin(), ctx);
+        setTimePoint("EACode.encode.expand");
+    }
+
+
+
+
+    template<typename T, typename T2, typename Ctx>
+    void EACode::dualEncode2(
+        span<T> e0,
+        span<T> w0,
+        span<T2> e1,
+        span<T2> w1, Ctx ctx
+    )
+    {
+        if (mCodeSize == 0)
+            throw RTE_LOC;
+        if (e0.size() != mCodeSize)
+            throw RTE_LOC;
+        if (e1.size() != mCodeSize)
+            throw RTE_LOC;
+        if (w0.size() != mMessageSize)
+            throw RTE_LOC;
+        if (w1.size() != mMessageSize)
+            throw RTE_LOC;
+
+        setTimePoint("EACode.encode.begin");
+
+        accumulate<T, T2>(e0, e1, ctx);
+        //accumulate<T2>(e1);
+
+        setTimePoint("EACode.encode.accumulate");
+
+        expand<T, Ctx, false>(e0.begin(), w0.begin(), ctx);
+        expand<T2, Ctx, false>(e1.begin(), w1.begin(), ctx);
+        setTimePoint("EACode.encode.expand");
+    }
+
+
+
+    template<typename T, typename Ctx>
+    void EACode::accumulate(span<T> x, Ctx ctx)
+    {
+        if (x.size() != mCodeSize)
+            throw RTE_LOC;
+        auto main = (u64)std::max<i64>(0, mCodeSize - 1);
+        T* __restrict xx = x.data();
+
+        for (u64 i = 0; i < main; ++i)
+        {
+            ctx.plus(xx[i + 1], xx[i + 1], xx[i]);
+            ctx.mulConst(xx[i + 1], xx[i + 1]);
+        }
+    }
+
+    template<typename T, typename T2, typename Ctx>
+    void EACode::accumulate(span<T> x, span<T2> x2, Ctx ctx)
+    {
+        if (x.size() != mCodeSize)
+            throw RTE_LOC;
+        if (x2.size() != mCodeSize)
+            throw RTE_LOC;
+
+        auto main = (u64)std::max<i64>(0, mCodeSize - 1);
+        T* __restrict xx1 = x.data();
+        T2* __restrict xx2 = x2.data();
+
+        for (u64 i = 0; i < main; ++i)
+        {
+            ctx.plus(xx1[i + 1], xx1[i + 1], xx1[i]);
+            ctx.plus(xx2[i + 1], xx2[i + 1], xx2[i]);
+            ctx.mulConst(xx1[i + 1], xx1[i + 1]);
+            ctx.mulConst(xx2[i + 1], xx2[i + 1]);
+
+        }
+    }
+
+
+    inline SparseMtx EACode::getAPar() const
+    {
+        PointList AP(mCodeSize, mCodeSize);;
+        for (u64 i = 0; i < mCodeSize; ++i)
+        {
+            AP.push_back(i, i);
+            if (i + 1 < mCodeSize)
+                AP.push_back(i + 1, i);
+        }
+        return AP;
+    }
+
+    inline SparseMtx EACode::getA() const
+    {
+        auto APar = getAPar();
+
+        auto A = DenseMtx::Identity(mCodeSize);
+
+        for (u64 i = 0; i < mCodeSize; ++i)
+        {
+            for (auto y : APar.col(i))
+            {
+                //std::cout << y << " ";
+                if (y != i)
+                {
+                    auto ay = A.row(y);
+                    auto ai = A.row(i);
+                    ay ^= ai;
+
+                }
+            }
+
+            //std::cout << "\n" << A << std::endl;
+        }
+
+        return A.sparse();
+    }
 }

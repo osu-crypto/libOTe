@@ -15,14 +15,14 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Common/Timer.h>
-#include <libOTe/Tools/SilentPprf.h>
+#include <libOTe/Tools/Pprf/RegularPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
-#include <libOTe/Tools/LDPC/LdpcEncoder.h>
 #include <libOTe/Tools/Coproto.h>
 #include "libOTe/Tools/EACode/EACode.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
+#include "SilentOtExtUtil.h"
 
 namespace osuCrypto
 {
@@ -110,7 +110,7 @@ namespace osuCrypto
 #endif
 
         // The ggm tree thats used to generate the sparse vectors.
-        SilentMultiPprfSender mGen;
+        RegularPprfSender<block, block, CoeffCtxGF2> mGen;
 
         // The type of compress we will use to generate the
         // dense vectors from the sparse vectors.
@@ -119,16 +119,8 @@ namespace osuCrypto
         // The flag which controls whether the malicious check is performed.
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
-        // The Silver encoder for MultType::slv5, MultType::slv11
-#ifdef ENABLE_INSECURE_SILVER
-        SilverEncoder mEncoder;
-#endif
         ExConvCode mExConvEncoder;
         EACode mEAEncoder;
-
-        // The OTs send msgs which will be used to flood the
-        // last gap bits of the noisy vector for the slv code.
-        std::vector<std::array<block, 2>> mGapOts;
 
         // The OTs send msgs which will be used to create the 
         // secret share of xa * delta as described in ferret.

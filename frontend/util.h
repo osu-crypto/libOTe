@@ -10,11 +10,34 @@
 #include <functional>
 #include <string>
 #include "libOTe/Tools/Coproto.h"
-
+#include <vector>
 
 namespace osuCrypto
 {
 
+
+    static const std::vector<std::string>
+        unitTestTag{ "u", "unitTest" },
+        kos{ "k", "kos" },
+        dkos{ "d", "dkos" },
+        ssdelta{ "ssd", "ssdelta" },
+        sshonest{ "ss", "sshonest" },
+        smleakydelta{ "smld", "smleakydelta" },
+        smalicious{ "sm", "smalicious" },
+        kkrt{ "kk", "kkrt" },
+        iknp{ "i", "iknp" },
+        diknp{ "diknp" },
+        oos{ "o", "oos" },
+        moellerpopf{ "p", "moellerpopf" },
+        ristrettopopf{ "r", "ristrettopopf" },
+        mr{ "mr" },
+        mrb{ "mrb" },
+        Silent{ "s", "Silent" },
+        vole{ "vole" },
+        akn{ "a", "akn" },
+        np{ "np" },
+        simple{ "simplest" },
+        simpleasm{ "simplest-asm" };
     enum class Role
     {
         Sender,
@@ -36,7 +59,7 @@ namespace osuCrypto
     //using ProtocolFunc = std::function<void(Role, int, int, std::string, std::string, CLP&)>;
 
     template<typename ProtocolFunc>
-    inline bool runIf(ProtocolFunc protocol, CLP & cmd, std::vector<std::string> tag,
+    inline bool runIf(ProtocolFunc protocol, const CLP & cmd, std::vector<std::string> tag,
                       std::vector<std::string> tag2 = std::vector<std::string>())
     {
         auto n = cmd.isSet("nn")
