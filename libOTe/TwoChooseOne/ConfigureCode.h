@@ -18,8 +18,11 @@ namespace osuCrypto
 		ExAcc40 = 7, // conservative
 
 		// https://eprint.iacr.org/2023/882
-		ExConv7x24 = 8, //fastest
-		ExConv21x24 = 9 // conservative.
+		ExConv7x24 = 8, //fast
+		ExConv21x24 = 9, // conservative.
+
+		// experimental
+		Tungsten // very fast, based on turbo codes. Unknown min distance. 
 	};
 
 	inline std::ostream& operator<<(std::ostream& o, MultType m)
@@ -47,6 +50,9 @@ namespace osuCrypto
 			break;
 		case osuCrypto::MultType::ExConv7x24:
 			o << "ExConv7x24";
+			break;
+		case osuCrypto::MultType::Tungsten:
+			o << "Tungsten";
 			break;
 		default:
 			throw RTE_LOC;
@@ -76,7 +82,7 @@ namespace osuCrypto
 		u64& mRequestedNumOTs,
 		u64& mNumPartitions,
 		u64& mSizePer,
-		u64& mN2,
+		u64& mNoiseVecSize,
 		u64& mN,
 		EACode& mEncoder
 	);
@@ -89,7 +95,7 @@ namespace osuCrypto
 		u64& mRequestedNumOTs,
 		u64& mNumPartitions,
 		u64& mSizePer,
-		u64& mN2,
+		u64& mNoiseVecSize,
 		u64& mN,
 		ExConvCode& mEncoder
 	);
@@ -110,7 +116,7 @@ namespace osuCrypto
 		u64& mRequestedNumOTs,
 		u64& mNumPartitions,
 		u64& mSizePer,
-		u64& mN2,
+		u64& mNoiseVecSize,
 		u64& mN,
 		u64& mP,
 		u64& mScaler);
@@ -121,8 +127,19 @@ namespace osuCrypto
 		double& minDist) 
 	{ 
 		if (mScaler == 2)
-			minDist = 0.2; // psuedo min dist
+			minDist = 0.2; // estimated psuedo min dist
 		else 
+			throw RTE_LOC; // not impl
+	}
+
+
+	inline void TungstenConfigure(
+		double mScaler,
+		double& minDist)
+	{
+		if (mScaler == 2)
+			minDist = 0.2; // estimated psuedo min dist
+		else
 			throw RTE_LOC; // not impl
 	}
 }

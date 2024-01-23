@@ -37,7 +37,7 @@ namespace osuCrypto
         u64& mRequestedNumOTs,
         u64& mNumPartitions,
         u64& mSizePer,
-        u64& mN2,
+        u64& mNoiseVecSize,
         u64& mN,
         EACode& mEncoder
     )
@@ -72,8 +72,8 @@ namespace osuCrypto
         mRequestedNumOTs = numOTs;
         mNumPartitions = getRegNoiseWeight(minDist, secParam);
         mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
-        mN2 = mSizePer * mNumPartitions;
-        mN = mN2 / mScaler;
+        mNoiseVecSize = mSizePer * mNumPartitions;
+        mN = mNoiseVecSize / mScaler;
 
         mEncoder.config(numOTs, numOTs * mScaler, w);
     }
@@ -85,7 +85,7 @@ namespace osuCrypto
         u64& mRequestedNumOTs,
         u64& mNumPartitions,
         u64& mSizePer,
-        u64& mN2,
+        u64& mNoiseVecSize,
         u64& mN,
         ExConvCode& mEncoder
     )
@@ -112,8 +112,8 @@ namespace osuCrypto
         mRequestedNumOTs = numOTs;
         mNumPartitions = getRegNoiseWeight(minDist, secParam);
         mSizePer = roundUpTo((numOTs * mScaler + mNumPartitions - 1) / mNumPartitions, 8);
-        mN2 = mSizePer * mNumPartitions;
-        mN = mN2 / mScaler;
+        mNoiseVecSize = mSizePer * mNumPartitions;
+        mN = mNoiseVecSize / mScaler;
 
         mEncoder.config(numOTs, numOTs * mScaler, w, a, true);
     }
@@ -205,7 +205,7 @@ namespace osuCrypto
         u64& mRequestedNumOTs,
         u64& mNumPartitions,
         u64& mSizePer,
-        u64& mN2,
+        u64& mNoiseVecSize,
         u64& mN,
         u64& mP,
         u64& mScaler)
@@ -220,8 +220,8 @@ namespace osuCrypto
         mNumPartitions = getRegNoiseWeight(0.2, secParam);
         auto ss = (mP * scaler + mNumPartitions - 1) / mNumPartitions;
         mSizePer = roundUpTo(ss, 8);
-        mN2 = mSizePer * mNumPartitions;
-        mN = mN2 / scaler;
+        mNoiseVecSize = mSizePer * mNumPartitions;
+        mN = mNoiseVecSize / scaler;
         mScaler = scaler;
     }
 

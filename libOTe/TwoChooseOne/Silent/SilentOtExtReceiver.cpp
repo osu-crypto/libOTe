@@ -13,6 +13,7 @@
 #include <cryptoTools/Common/ThreadBarrier.h>
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include "libOTe/Tools/TungstenCode/TungstenCode.h"
 
 namespace osuCrypto
 {
@@ -213,17 +214,18 @@ namespace osuCrypto
     {
         mMalType = malType;
         mNumThreads = numThreads;
+        u64 secParam = 128;
 
         switch (mMultType)
         {
         case osuCrypto::MultType::QuasiCyclic:
 
-            QuasiCyclicConfigure(numOTs, 128, scaler,
+            QuasiCyclicConfigure(numOTs, secParam, scaler,
                 mMultType,
-                mRequestedNumOts,
+                mRequestNumOts,
                 mNumPartitions,
                 mSizePer,
-                mN2,
+                mNoiseVecSize,
                 mN,
                 mP,
                 mScaler);
@@ -234,13 +236,26 @@ namespace osuCrypto
         case osuCrypto::MultType::ExAcc21:
         case osuCrypto::MultType::ExAcc40:
 
-            EAConfigure(numOTs, 128, mMultType, mRequestedNumOts, mNumPartitions, mSizePer, mN2, mN, mEAEncoder);
+            EAConfigure(numOTs, secParam, mMultType, mRequestNumOts, mNumPartitions, mSizePer, mNoiseVecSize, mN, mEAEncoder);
             break;
         case osuCrypto::MultType::ExConv7x24:
         case osuCrypto::MultType::ExConv21x24:
 
-            ExConvConfigure(numOTs, 128, mMultType, mRequestedNumOts, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
+            ExConvConfigure(numOTs, secParam, mMultType, mRequestNumOts, mNumPartitions, mSizePer, mNoiseVecSize, mN, mExConvEncoder);
             break;
+        case osuCrypto::MultType::Tungsten:
+        {
+            double minDist;
+            mRequestNumOts = numOTs;
+            mN = roundUpTo(numOTs, 8);
+            TungstenConfigure(mScaler, minDist);
+
+            mNumPartitions = getRegNoiseWeight(minDist, secParam);
+            mSizePer = std::max<u64>(4, roundUpTo(divCeil(mRequestNumOts * mScaler, mNumPartitions), 2));
+            mNoiseVecSize = mSizePer * mNumPartitions;
+
+            break;
+        }
         default:
             throw RTE_LOC;
             break;
@@ -421,7 +436,7 @@ namespace osuCrypto
             configure(n, mScaler, mNumThreads, mMalType);
         }
 
-        if (n != mRequestedNumOts)
+        if (n != mRequestNumOts)
             throw std::invalid_argument("messages.size() > n");
 
         if (mGen.hasBaseOts() == false)
@@ -434,7 +449,7 @@ namespace osuCrypto
         gTimer.setTimePoint("recver.expand.start");
 
 
-        mA.resize(mN2);
+        mA.resize(mNoiseVecSize);
         mC.resize(0);
 
 
@@ -449,17 +464,17 @@ namespace osuCrypto
 
         if (mDebug)
         {
-            rT = MatrixView<block>(mA.data(), mN2, 1);
+            rT = MatrixView<block>(mA.data(), mNoiseVecSize, 1);
             MC_AWAIT(checkRT(chl, rT));
         }
 
         compress(type);
 
-        mA.resize(mRequestedNumOts);
+        mA.resize(mRequestNumOts);
 
         if (mC.size())
         {
-            mC.resize(mRequestedNumOts);
+            mC.resize(mRequestNumOts);
         }
 
         MC_END();
@@ -519,15 +534,15 @@ namespace osuCrypto
         span<block> messages,
         ChoiceBitPacking type)
     {
-        if (choices.size() != mRequestedNumOts)
+        if (choices.size() != mRequestNumOts)
             throw RTE_LOC;
-        if ((u64)messages.size() != mRequestedNumOts)
+        if ((u64)messages.size() != mRequestNumOts)
             throw RTE_LOC;
 
         auto cIter = choices.begin();
         //std::array<block, 8> hashBuffer;
 
-        auto n8 = mRequestedNumOts / 8 * 8;
+        auto n8 = mRequestNumOts / 8 * 8;
         auto m = &messages[0];
         auto r = &mA[0];
 
@@ -606,7 +621,7 @@ namespace osuCrypto
         {
             // zero out the lsb of mA. We will store mC there.
             block mask = OneBlock ^ AllOneBlock;
-            auto m8 = mN2 / 8 * 8;
+            auto m8 = mNoiseVecSize / 8 * 8;
             auto r = mA.data();
             for (u64 i = 0; i < m8; i += 8)
             {
@@ -620,7 +635,7 @@ namespace osuCrypto
                 r[7] = r[7] & mask;
                 r += 8;
             }
-            for (u64 i = m8; i < mN2; ++i)
+            for (u64 i = m8; i < mNoiseVecSize; ++i)
             {
                 mA[i] = mA[i] & mask;
             }
@@ -668,6 +683,12 @@ namespace osuCrypto
                     mExConvEncoder.setTimer(getTimer());
                 mExConvEncoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {});
                 break;
+            case osuCrypto::MultType::Tungsten:
+            {
+                experimental::TungstenCode encoder;
+                encoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {});
+                break;
+            }
             default:
                 throw RTE_LOC;
                 break;
@@ -678,8 +699,8 @@ namespace osuCrypto
         }
         else
         {
-            mC.resize(mN2);
-            std::memset(mC.data(), 0, mN2);
+            mC.resize(mNoiseVecSize);
+            std::memset(mC.data(), 0, mNoiseVecSize);
             auto cc = mC.data();
             for (auto p : mS)
                 cc[p] = 1;
@@ -731,6 +752,13 @@ namespace osuCrypto
                     mC.begin(), 
                     {});
                 break;
+            case osuCrypto::MultType::Tungsten:
+            {
+                experimental::TungstenCode encoder;
+                encoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {});
+                encoder.dualEncode<u8, CoeffCtxGF2>(mC.begin(), {});
+                break;
+            }
             default:
                 throw RTE_LOC;
                 break;
@@ -743,8 +771,8 @@ namespace osuCrypto
     void SilentOtExtReceiver::clear()
     {
         mN = 0;
-        mN2 = 0;
-        mRequestedNumOts = 0;
+        mNoiseVecSize = 0;
+        mRequestNumOts = 0;
         mSizePer = 0;
 
         mC = {};

@@ -189,17 +189,8 @@ namespace osuCrypto
 
         u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
 
-        // the weight of the code
-        u64 w = cmd.getOr("w", 7);
-
-        // size for the accumulator (# random transitions)
-        u64 a = cmd.getOr("a", roundUpTo(log2ceil(n), 8));
-
-        bool gf128 = cmd.isSet("gf128");
-
         // verbose flag.
         bool v = cmd.isSet("v");
-        bool sys = cmd.isSet("sys");
 
         experimental::TungstenCode code;
         code.config(k, n);
@@ -211,14 +202,14 @@ namespace osuCrypto
             std::cout << "k: " << code.mMessageSize << std::endl;
         }
 
-        std::vector<block> x(code.mCodeSize), y(code.mMessageSize * !sys);
+        std::vector<block> x(code.mCodeSize);
         Timer timer, verbose;
 
 
         timer.setTimePoint("_____________________");
         for (u64 i = 0; i < trials; ++i)
         {
-            code.dualEncode<block>(x.data());
+            code.dualEncode<block, CoeffCtxGF128>(x.data(), {});
 
             timer.setTimePoint("encode");
         }

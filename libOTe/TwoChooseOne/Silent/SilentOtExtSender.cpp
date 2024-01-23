@@ -11,6 +11,7 @@
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
+#include "libOTe/Tools/TungstenCode/TungstenCode.h"
 
 namespace osuCrypto
 {
@@ -163,18 +164,19 @@ namespace osuCrypto
     {
         mMalType = malType;
         mNumThreads = numThreads;
+        u64 secParam = 128;
 
 
         switch (mMultType)
         {
         case osuCrypto::MultType::QuasiCyclic:
 
-            QuasiCyclicConfigure(numOTs, 128, scaler,
+            QuasiCyclicConfigure(numOTs, secParam, scaler,
                 mMultType,
                 mRequestNumOts,
                 mNumPartitions,
                 mSizePer,
-                mN2,
+                mNoiseVecSize,
                 mN,
                 mP,
                 mScaler);
@@ -185,13 +187,26 @@ namespace osuCrypto
         case osuCrypto::MultType::ExAcc21:
         case osuCrypto::MultType::ExAcc40:
 
-            EAConfigure(numOTs, 128, mMultType, mRequestNumOts, mNumPartitions, mSizePer, mN2, mN, mEAEncoder);
+            EAConfigure(numOTs, secParam, mMultType, mRequestNumOts, mNumPartitions, mSizePer, mNoiseVecSize, mN, mEAEncoder);
             break;
         case osuCrypto::MultType::ExConv7x24:
         case osuCrypto::MultType::ExConv21x24:
 
-            ExConvConfigure(numOTs, 128, mMultType, mRequestNumOts, mNumPartitions, mSizePer, mN2, mN, mExConvEncoder);
+            ExConvConfigure(numOTs, secParam, mMultType, mRequestNumOts, mNumPartitions, mSizePer, mNoiseVecSize, mN, mExConvEncoder);
             break;
+        case osuCrypto::MultType::Tungsten:
+        {
+            double minDist;
+            mRequestNumOts = numOTs;
+            mN = roundUpTo(numOTs, 8);
+            TungstenConfigure(mScaler, minDist);
+
+            mNumPartitions = getRegNoiseWeight(minDist, secParam);
+            mSizePer = std::max<u64>(4, roundUpTo(divCeil(mRequestNumOts * mScaler, mNumPartitions), 2));
+            mNoiseVecSize = mSizePer * mNumPartitions;
+
+            break;
+        }
         default:
             throw RTE_LOC;
             break;
@@ -214,7 +229,7 @@ namespace osuCrypto
     void SilentOtExtSender::clear()
     {
         mN = 0;
-        mN2 = 0;
+        mNoiseVecSize = 0;
         mRequestNumOts = 0;
         mSizePer = 0;
         mNumPartitions = 0;
@@ -391,7 +406,7 @@ namespace osuCrypto
         mDelta = d;
 
         // allocate b
-        mB.resize(mN2);
+        mB.resize(mNoiseVecSize);
         
         delta.resize(1);
         delta[0] = mDelta;
@@ -495,6 +510,12 @@ namespace osuCrypto
                 mExConvEncoder.setTimer(getTimer());
             mExConvEncoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
             break;
+        case osuCrypto::MultType::Tungsten:
+        {
+            experimental::TungstenCode encoder;
+            encoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
+            break;
+        }
         default:
             throw RTE_LOC;
             break;
@@ -502,129 +523,6 @@ namespace osuCrypto
 
          
     }
-//
-//
-//    void SilentOtExtSender::randMulQuasiCyclic()
-//    {
-//#ifdef ENABLE_BITPOLYMUL
-//
-//        const u64 rows(128);
-//        auto nBlocks = mN / rows;
-//        auto n2Blocks = mN2 / rows;
-//        MatrixView<block> rT(mB.data(), rows, n2Blocks);
-//        auto n64 = i64(nBlocks * 2);
-//        std::vector<FFTPoly> a(mScaler - 1);
-//        Matrix<block>cModP1(128, nBlocks, AllocType::Uninitialized);
-//
-//        std::unique_ptr<ThreadBarrier[]> brs(new ThreadBarrier[mScaler]);
-//        for (u64 i = 0; i < mScaler; ++i)
-//            brs[i].reset(mNumThreads);
-//
-//        auto routine = [&](u64 index)
-//        {
-//            u64 j = 0;
-//            FFTPoly bPoly;
-//            FFTPoly cPoly;
-//
-//            Matrix<block>tt(1, 2 * nBlocks, AllocType::Uninitialized);
-//            auto temp128 = tt[0];
-//
-//            FFTPoly::DecodeCache cache;
-//            for (u64 s = index + 1; s < mScaler; s += mNumThreads)
-//            {
-//                auto a64 = spanCast<u64>(temp128).subspan(n64);
-//                PRNG pubPrng(toBlock(s));
-//                pubPrng.get(a64.data(), a64.size());
-//                a[s - 1].encode(a64);
-//            }
-//
-//            if (index == 0)
-//                setTimePoint("sender.expand.qc.randGen");
-//
-//            brs[j++].decrementWait();
-//
-//            if (index == 0)
-//                setTimePoint("sender.expand.qc.randGenWait");
-//
-//            auto multAddReduce = [this, nBlocks, n64, &a, &bPoly, &cPoly, &temp128, &cache](span<block> b128, span<block> dest)
-//            {
-//                for (u64 s = 1; s < mScaler; ++s)
-//                {
-//                    auto& aPoly = a[s - 1];
-//                    auto b64 = spanCast<u64>(b128).subspan(s * n64, n64);
-//
-//                    bPoly.encode(b64);
-//
-//                    if (s == 1)
-//                    {
-//                        cPoly.mult(aPoly, bPoly);
-//                    }
-//                    else
-//                    {
-//                        bPoly.multEq(aPoly);
-//                        cPoly.addEq(bPoly);
-//                    }
-//                }
-//
-//                // decode c[i] and store it at t64Ptr
-//                cPoly.decode(spanCast<u64>(temp128), cache, true);
-//
-//                for (u64 j = 0; j < nBlocks; ++j)
-//                    temp128[j] = temp128[j] ^ b128[j];
-//
-//                // reduce s[i] mod (x^n - 1) and store it at cModP1[i]
-//                modp(dest, temp128, mP);
-//
-//            };
-//
-//            for (u64 i = index; i < rows; i += mNumThreads)
-//                multAddReduce(rT[i], cModP1[i]);
-//
-//            if (index == 0)
-//                setTimePoint("sender.expand.qc.mulAddReduce");
-//
-//            brs[j++].decrementWait();
-//
-//
-//            std::array<block, 128> tpBuffer;
-//            auto numBlocks = (mRequestNumOts + 127) / 128;
-//            auto begin = index * numBlocks / mNumThreads;
-//            auto end = (index + 1) * numBlocks / mNumThreads;
-//            for (u64 i = begin; i < end; ++i)
-//            {
-//                u64 j = i * tpBuffer.size();
-//                auto min = std::min<u64>(tpBuffer.size(), mN - j);
-//
-//                for (u64 k = 0; k < tpBuffer.size(); ++k)
-//                    tpBuffer[k] = cModP1(k, i);
-//
-//                transpose128(tpBuffer);
-//
-//                auto end = i * tpBuffer.size() + min;
-//                for (u64 k = 0; j < end; ++j, ++k)
-//                    mB[j] = tpBuffer[k];
-//            }
-//
-//            if (index == 0)
-//                setTimePoint("sender.expand.qc.transposeXor");
-//        };
-//
-//        std::vector<std::thread> thrds(mNumThreads - 1);
-//        for (u64 i = 0; i < thrds.size(); ++i)
-//            thrds[i] = std::thread(routine, i);
-//
-//        routine(thrds.size());
-//
-//        for (u64 i = 0; i < thrds.size(); ++i)
-//            thrds[i].join();
-//
-//
-//#else
-//    std::cout << "bit poly mul is not enabled. Please recompile with ENABLE_BITPOLYMUL defined. " LOCATION << std::endl;
-//    throw RTE_LOC;
-//#endif
-//
-//    }
 }
 
 #endif

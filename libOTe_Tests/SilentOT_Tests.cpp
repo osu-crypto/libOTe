@@ -193,8 +193,8 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
     //auto mNumPartitions = getPartitions(scaler, mP, secParam);
     //auto ss = (mP * scaler + mNumPartitions - 1) / mNumPartitions;
     //mSizePer = roundUpTo(ss, 8);
-    //mN2 = mSizePer * mNumPartitions;
-    //mN = mN2 / scaler;
+    //mNoiseVecSize = mSizePer * mNumPartitions;
+    //mN = mNoiseVecSize / scaler;
     //mScaler = scaler;
 
     AlignedUnVector<block> A(n), B(n), C(n);
@@ -699,10 +699,10 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
 #endif
 }
 
-void OtExt_Silent_Silver_Test(const oc::CLP& cmd)
+void OtExt_Silent_Tungsten_Test(const oc::CLP& cmd)
 {
 
-#if defined(ENABLE_SILENTOT) && defined(ENABLE_INSECURE_SILVER)
+#if defined(ENABLE_SILENTOT) 
 
     auto sockets = cp::LocalAsyncSocket::makePair();
 
@@ -720,18 +720,14 @@ void OtExt_Silent_Silver_Test(const oc::CLP& cmd)
     SilentOtExtSender sender;
     SilentOtExtReceiver recver;
 
-    sender.mMultType = MultType::slv5;
-    recver.mMultType = MultType::slv5;
+    sender.mMultType = MultType::Tungsten;
+    recver.mMultType = MultType::Tungsten;
 
-    //sender.mDebug = true;
-    //recver.mDebug = true;
 
     block delta = prng.get();
-    //auto type = OTType::Correlated;
 
     for (auto n : nn)
     {
-        //block delta
         std::vector<std::array<block, 2>> msg2(n);
         std::vector<block> msg1(n);
         BitVector choice(n);

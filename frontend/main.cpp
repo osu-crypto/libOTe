@@ -1,13 +1,9 @@
 #include <iostream>
-#include "libOTe/Tools/Tungsten/TungstenSampler.h"
-
-//using namespace std;
 #include "tests_cryptoTools/UnitTests.h"
 #include "libOTe_Tests/UnitTests.h"
 #include <cryptoTools/Common/Defines.h>
 #include "cryptoTools/Crypto/RandomOracle.h"
 
-using namespace osuCrypto;
 
 #include <string.h>
 #include <stdio.h>
@@ -29,24 +25,12 @@ using namespace osuCrypto;
 #include "libOTe/Tools/LDPC/Util.h"
 #include "cryptoTools/Crypto/RandomOracle.h"
 #include "libOTe/Tools/EACode/EAChecker.h"
-#include "libOTe/Tools/Tungsten/accTest.h"
-#include "libOTe/Tools/Tungsten/EnumeratorTools.h"
-#include "libOTe/Tools/Tungsten/ConvEnumerator.h"
-#include "libOTe/Tools/Tungsten/ExpandingBlockEnumerator.h"
-#include "libOTe/Tools/Tungsten/BlockEnumerator.h"
-#include "libOTe/Tools/Tungsten/BlockEnumeratorTest.h"
-#include "libOTe/Tools/Tungsten/CompositionEnumerator.h"
-#include "libOTe/Tools/Tungsten/NonrecConvEnumerator.h"
-#include "libOTe/Tools/Tungsten/RepeaterEnumerator.h"
-#include "libOTe/Tools/Tungsten/MinimumDistance.h"
-#include "libOTe/Tools/Tungsten/MinimumDistanceTest.h"
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
 
+using namespace osuCrypto;
 #ifdef ENABLE_IKNP
-using namespace oc;
-
 void minimal()
 {
 	// Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
@@ -98,25 +82,6 @@ int main(int argc, char** argv)
 {
 	CLP cmd;
 	cmd.parse(argc, argv);
-
-#ifdef ENABLE_BOOST
-	if (cmd.isSet("enumerator")) {
-        // EnumToolsMain(cmd);
-        // convEnumMain(cmd);
-        // blockEnumMain(cmd);
-        // repeaterEnumMain(cmd);
-        // expandingBlockEnumMain(cmd);
-        blockEnumTestMain(cmd);
-        // compositionEnumMain(cmd);
-        // TODO Uncomment when ready
-        // nonrecConvEnumMain(cmd);
-		return 0;
-	}
-    if (cmd.isSet("minimumdistance")) {
-        minimumDistanceMain(cmd);
-        // minimumDistanceTestMain(cmd);
-    }
-#endif
 
 	bool flagSet = false;
 	

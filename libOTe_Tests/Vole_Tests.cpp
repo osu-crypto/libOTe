@@ -192,13 +192,19 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
 
 void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd)
 {
-#if defined(ENABLE_SILENTOT) && defined(ENABLE_BITPOLYMUL)
+#if defined(ENABLE_BITPOLYMUL)
     auto debug = cmd.isSet("debug");
     for (u64 n : {128, 333})
         Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, MultType::QuasiCyclic, debug, false, false);
 #else
     throw UnitTestSkipped("ENABLE_BITPOLYMUL not defined." LOCATION);
 #endif
+}
+void Vole_Silent_Tungsten_test(const oc::CLP& cmd)
+{
+    auto debug = cmd.isSet("debug");
+    for (u64 n : {128, 33341})
+        Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, MultType::Tungsten, debug, false, false);
 }
 
 

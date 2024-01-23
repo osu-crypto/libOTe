@@ -81,9 +81,9 @@ namespace osuCrypto
         u64 mP = 0;
 
         // The sparse vector size, this will be mN * mScaler.
-        u64 mN2 = 0;
+        u64 mNoiseVecSize = 0;
         
-        // The dense vector size, this will be at least as big as mRequestedNumOts.
+        // The dense vector size, this will be at least as big as mRequestNumOts.
         u64 mN = 0;
         
         // The number of regular section of the sparse vector.
