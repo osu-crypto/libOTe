@@ -16,6 +16,7 @@
 #include "libOTe_Tests/EACode_Tests.h"
 #include "libOTe/Tools/LDPC/Mtx.h"
 #include "libOTe_Tests/Pprf_Tests.h"
+#include "libOTe_Tests/TungstenCode_Tests.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -44,7 +45,8 @@ namespace tests_libOTe
 
             tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
             tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
-
+            
+            tc.add("TungstenCode_encode_test                ", TungstenCode_encode_test);
             tc.add("Tungsten_encode_basic_test              ", Tungsten_encode_basic_test);
             tc.add("Tungsten2_encode_basic_test             ", Tungsten2_encode_basic_test);
             tc.add("Tungsten2_encode_trans_test             ", Tungsten2_encode_trans_test);

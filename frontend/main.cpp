@@ -90,11 +90,13 @@ int main(int argc, char** argv)
 	CLP cmd;
 	cmd.parse(argc, argv);
 
+#ifdef ENABLE_BOOST
 	if (cmd.isSet("convEnum"))
 	{
 		convEnumMain(cmd);
 		return 0;
 	}
+#endif
 
 	bool flagSet = false;
 	
@@ -109,8 +111,11 @@ int main(int argc, char** argv)
 			VoleBench2(cmd);
 		else if (cmd.isSet("ea"))
 			EACodeBench(cmd);
-		else
+		else if (cmd.isSet("ec"))
 			ExConvCodeBench(cmd);
+		else if (cmd.isSet("tungsten"))
+			TungstenCodeBench(cmd);
+
 		return 0;
 	}
 
