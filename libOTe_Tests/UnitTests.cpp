@@ -15,6 +15,7 @@
 #include "libOTe_Tests/EACode_Tests.h"
 #include "libOTe/Tools/LDPC/Mtx.h"
 #include "libOTe_Tests/Pprf_Tests.h"
+#include "libOTe_Tests/TungstenCode_Tests.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -43,6 +44,7 @@ namespace tests_libOTe
 
             tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
             tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
+            tc.add("TungstenCode_encode_test                ", TungstenCode_encode_test);
 
             tc.add("Tools_Pprf_expandOne_test               ", Tools_Pprf_expandOne_test);
             tc.add("Tools_Pprf_inter_test                   ", Tools_Pprf_inter_test);
@@ -81,7 +83,7 @@ namespace tests_libOTe
             tc.add("OtExt_Silent_inplace_Test               ", OtExt_Silent_inplace_Test);
             tc.add("OtExt_Silent_paramSweep_Test            ", OtExt_Silent_paramSweep_Test);
             tc.add("OtExt_Silent_QuasiCyclic_Test           ", OtExt_Silent_QuasiCyclic_Test);
-            tc.add("OtExt_Silent_Silver_Test                ", OtExt_Silent_Silver_Test);
+            tc.add("OtExt_Silent_Tungsten_Test              ", OtExt_Silent_Tungsten_Test);
             tc.add("OtExt_Silent_baseOT_Test                ", OtExt_Silent_baseOT_Test);
             tc.add("OtExt_Silent_mal_Test                   ", OtExt_Silent_mal_Test);
 
@@ -93,8 +95,9 @@ namespace tests_libOTe
             tc.add("DotExt_SoftSpokenMaliciousLeaky_Test    ", DotExt_SoftSpokenMaliciousLeaky_Test);
             
             tc.add("Vole_Noisy_test                         ", Vole_Noisy_test);
-            tc.add("Vole_Silent_QuasiCyclic_test            ", Vole_Silent_QuasiCyclic_test);
             tc.add("Vole_Silent_paramSweep_test             ", Vole_Silent_paramSweep_test);
+            tc.add("Vole_Silent_Tungsten_test               ", Vole_Silent_Tungsten_test);
+            tc.add("Vole_Silent_QuasiCyclic_test            ", Vole_Silent_QuasiCyclic_test);
             tc.add("Vole_Silent_baseOT_test                 ", Vole_Silent_baseOT_test);
             tc.add("Vole_Silent_mal_test                    ", Vole_Silent_mal_test);
             tc.add("Vole_Silent_Rounds_test                 ", Vole_Silent_Rounds_test);

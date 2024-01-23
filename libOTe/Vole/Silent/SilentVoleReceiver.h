@@ -27,6 +27,7 @@
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtUtil.h"
 #include <libOTe/Tools/QuasiCyclicCode.h>
+#include <libOTe/Tools/TungstenCode/TungstenCode.h>
 
 namespace osuCrypto
 {
@@ -295,6 +296,12 @@ namespace osuCrypto
             case MultType::QuasiCyclic:
                 QuasiCyclicConfigure(mScaler, minDist);
                 break;
+            case osuCrypto::MultType::Tungsten:
+            {
+                mRequestSize = roundUpTo(mRequestSize, 8);
+                TungstenConfigure(mScaler, minDist);
+                break;
+            }
             default:
                 throw RTE_LOC;
                 break;
@@ -303,8 +310,6 @@ namespace osuCrypto
             mNumPartitions = getRegNoiseWeight(minDist, secParam);
             mSizePer = std::max<u64>(4, roundUpTo(divCeil(mRequestSize * mScaler, mNumPartitions), 2));
             mNoiseVecSize = mSizePer * mNumPartitions;
-
-            //std::cout << "n " << mRequestSize << " -> " << mNoiseVecSize << " = " << mSizePer << " * " << mNumPartitions << std::endl;
 
             mGen.configure(mSizePer, mNumPartitions);
         }
@@ -469,7 +474,7 @@ namespace osuCrypto
                 configure(n, SilentBaseType::BaseExtend);
             }
 
-            if (mRequestSize != n)
+            if (mRequestSize < n)
                 throw std::invalid_argument("n does not match the requested number of OTs via configure(...). " LOCATION);
 
             if (hasSilentBaseOts() == false)
@@ -586,6 +591,14 @@ namespace osuCrypto
 #else
                 throw std::runtime_error("QuasiCyclic requires ENABLE_BITPOLYMUL = true. " LOCATION);
 #endif
+                break;
+            }
+            case osuCrypto::MultType::Tungsten:
+            {
+                experimental::TungstenCode encoder;
+                encoder.config(mRequestSize, mNoiseVecSize);
+                encoder.dualEncode<F, Ctx>(mA.begin(), mCtx);
+                encoder.dualEncode<G, Ctx>(mC.begin(), mCtx);
                 break;
             }
             default:

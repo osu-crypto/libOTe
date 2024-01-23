@@ -25,6 +25,7 @@
 #include <libOTe/Vole/Noisy/NoisyVoleSender.h>
 #include <libOTe/TwoChooseOne/Silent/SilentOtExtUtil.h>
 #include <libOTe/Tools/QuasiCyclicCode.h>
+#include <libOTe/Tools/TungstenCode/TungstenCode.h>
 
 namespace osuCrypto
 {
@@ -241,6 +242,12 @@ namespace osuCrypto
             case MultType::QuasiCyclic:
                 QuasiCyclicConfigure(mScaler, minDist);
                 break;
+            case osuCrypto::MultType::Tungsten:
+            {
+                mRequestSize = roundUpTo(mRequestSize, 8);
+                TungstenConfigure(mScaler, minDist);
+                break;
+            }
             default:
                 throw RTE_LOC;
                 break;
@@ -345,7 +352,7 @@ namespace osuCrypto
                 configure(n, SilentBaseType::BaseExtend);
             }
 
-            if (mRequestSize != n)
+            if (mRequestSize < n)
                 throw std::invalid_argument("n does not match the requested number of OTs via configure(...). " LOCATION);
 
             if (mGen.hasBaseOts() == false)
@@ -430,6 +437,13 @@ namespace osuCrypto
                 throw std::runtime_error("QuasiCyclic requires ENABLE_BITPOLYMUL = true. " LOCATION);
 #endif
 
+                break;
+            }
+            case osuCrypto::MultType::Tungsten:
+            {
+                experimental::TungstenCode encoder;
+                encoder.config(mRequestSize, mNoiseVecSize);
+                encoder.dualEncode<F, Ctx>(mB.begin(), mCtx);
                 break;
             }
             default:

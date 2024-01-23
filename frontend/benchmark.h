@@ -13,6 +13,7 @@
 #include "libOTe/Vole/Silent/SilentVoleSender.h"
 #include "libOTe/Vole/Silent/SilentVoleReceiver.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include "libOTe/Tools/TungstenCode/TungstenCode.h"
 
 namespace osuCrypto
 {
@@ -171,6 +172,55 @@ namespace osuCrypto
         if (v)
             std::cout << verbose << std::endl;
     }
+
+
+    inline void TungstenCodeBench(CLP& cmd)
+    {
+        u64 trials = cmd.getOr("t", 10);
+
+        // the message length of the code. 
+        // The noise vector will have size n=2*k.
+        // the user can use 
+        //   -k X 
+        // to state that exactly X rows should be used or
+        //   -kk X
+        // to state that 2^X rows should be used.
+        u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
+
+        u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
+
+        // verbose flag.
+        bool v = cmd.isSet("v");
+
+        experimental::TungstenCode code;
+        code.config(k, n);
+        code.mNumIter = cmd.getOr("iter", 2);
+
+        if (v)
+        {
+            std::cout << "n: " << code.mCodeSize << std::endl;
+            std::cout << "k: " << code.mMessageSize << std::endl;
+        }
+
+        std::vector<block> x(code.mCodeSize);
+        Timer timer, verbose;
+
+
+        timer.setTimePoint("_____________________");
+        for (u64 i = 0; i < trials; ++i)
+        {
+            code.dualEncode<block, CoeffCtxGF128>(x.data(), {});
+
+            timer.setTimePoint("encode");
+        }
+
+        std::cout << "tungsten " << std::endl;
+        std::cout << timer << std::endl;
+
+        if (v)
+            std::cout << verbose << std::endl;
+    }
+
 
     inline void transpose(const CLP& cmd)
     {

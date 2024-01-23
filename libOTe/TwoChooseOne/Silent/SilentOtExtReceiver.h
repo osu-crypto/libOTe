@@ -37,13 +37,13 @@ namespace osuCrypto
         u64 mP = 0;
 
         // the number of OTs being requested.
-        u64 mRequestedNumOts = 0;
+        u64 mRequestNumOts = 0;
 
-        // The dense vector size, this will be at least as big as mRequestedNumOts.
+        // The dense vector size, this will be at least as big as mRequestNumOts.
         u64 mN = 0;
 
         // The sparse vector size, this will be mN * mScaler.
-        u64 mN2 = 0;
+        u64 mNoiseVecSize = 0;
 
         // The scaling factor that the sparse vector will be compressed by.
         u64 mScaler = 2;

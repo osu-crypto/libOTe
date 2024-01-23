@@ -1,12 +1,9 @@
 #include <iostream>
-
-//using namespace std;
 #include "tests_cryptoTools/UnitTests.h"
 #include "libOTe_Tests/UnitTests.h"
 #include <cryptoTools/Common/Defines.h>
 #include "cryptoTools/Crypto/RandomOracle.h"
 
-using namespace osuCrypto;
 
 #include <string.h>
 #include <stdio.h>
@@ -32,9 +29,8 @@ using namespace osuCrypto;
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
 
+using namespace osuCrypto;
 #ifdef ENABLE_IKNP
-using namespace oc;
-
 void minimal()
 {
 	// Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
@@ -82,11 +78,11 @@ void minimal()
 #endif
 
 
-#include "cryptoTools/Crypto/RandomOracle.h"
 int main(int argc, char** argv)
 {
 	CLP cmd;
 	cmd.parse(argc, argv);
+
 	bool flagSet = false;
 	
 	// various benchmarks
@@ -100,8 +96,11 @@ int main(int argc, char** argv)
 			VoleBench2(cmd);
 		else if (cmd.isSet("ea"))
 			EACodeBench(cmd);
-		else
+		else if (cmd.isSet("ec"))
 			ExConvCodeBench(cmd);
+		else if (cmd.isSet("tungsten"))
+			TungstenCodeBench(cmd);
+
 		return 0;
 	}
 
