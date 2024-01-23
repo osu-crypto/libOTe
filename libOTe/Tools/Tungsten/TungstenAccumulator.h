@@ -6,7 +6,6 @@
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Crypto/PRNG.h"
-#include "libOTe/Tools/LDPC/LdpcEncoder.h"
 #ifdef ENABLE_AVX
 #define LIBDIVIDE_AVX2
 #elif ENABLE_SSE

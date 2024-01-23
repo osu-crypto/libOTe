@@ -2,7 +2,6 @@
 
 #include "cryptoTools/Common/Defines.h"
 #include "libOTe/Tools/LDPC/Mtx.h"
-#include "libOTe/Tools/LDPC/LdpcEncoder.h"
 
 
 namespace osuCrypto

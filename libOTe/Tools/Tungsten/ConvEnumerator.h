@@ -3,11 +3,14 @@
 #include <vector>
 #include <unordered_map>
 #include "cryptoTools/Common/CLP.h"
-#include <boost/multiprecision/cpp_bin_float.hpp> 
-#include <boost/multiprecision/gmp.hpp>
 
+#include <boost/multiprecision/cpp_bin_float.hpp> 
+#include <boost/multiprecision/cpp_int.hpp>
+#ifdef ENABLE_GMP
+#include <boost/multiprecision/gmp.hpp>
 #include "gmp.h"
 #include "gmpxx.h"
+#endif
 
 namespace osuCrypto
 {
@@ -258,9 +261,15 @@ namespace osuCrypto
 #endif
 
     using Float = boost::multiprecision::cpp_bin_float_oct;
+#ifdef ENABLE_GMP
     using Int = boost::multiprecision::mpz_int;
     using Rat = boost::multiprecision::mpq_rational;
+#else
 
+    using Int = boost::multiprecision::cpp_int;
+    using Rat = boost::multiprecision::cpp_rational;
+
+#endif
     template<>
     Float to<Float, Float>(const Float& v)
     {
@@ -348,19 +357,7 @@ namespace osuCrypto
         {
             return log(0);
         }
-        //while (x >= 2)
-        //{
-        //    x /= 2;
-        //    v += 1;
-        //}
-        //std::cout << "rem " << x << std::endl;
-        //if (x > 0)
-        //{
-        //    i64 r = x.convert_to<i64>();
-        //    std::cout << r << std::endl;
-        //    v += ::log2(double(r));
-        //}
-        //return v;
+#ifdef ENABLE_GMP
         signed long int ex;
         const double di = mpz_get_d_2exp(&ex, x.backend().data());
         auto ret = log(di) / log(2) + (double)ex;
@@ -372,6 +369,23 @@ namespace osuCrypto
             throw RTE_LOC;
         }
         return ret;
+#else
+        double v;
+        while (x >= 2)
+        {
+            x /= 2;
+            v += 1;
+        }
+        //std::cout << "rem " << x << std::endl;
+        if (x > 0)
+        {
+            i64 r = x.convert_to<i64>();
+            //std::cout << r << std::endl;
+            v += ::log2(double(r));
+        }
+        return v;
+#endif
+
     }
 
 

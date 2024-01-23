@@ -6,7 +6,6 @@
 
 #include "libOTe/Tools/EACode/EACode.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
-#include "libOTe/Tools/ExConvCode/ExConvCode2.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
