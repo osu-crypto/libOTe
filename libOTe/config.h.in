@@ -52,6 +52,8 @@
 // build the library with silent vole enabled
 #cmakedefine ENABLE_SILENT_VOLE @ENABLE_SILENT_VOLE@
 
+#cmakedefine ENABLE_PPRF @ENABLE_PPRF@
+
 // build the library with silver codes.
 #cmakedefine ENABLE_INSECURE_SILVER @ENABLE_INSECURE_SILVER@
 

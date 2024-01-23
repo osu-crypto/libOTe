@@ -2,7 +2,6 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "Util.h"
 #include "cryptoTools/Common/Matrix.h"
-#include "LdpcSampler.h"
 
 namespace osuCrypto
 {

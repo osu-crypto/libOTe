@@ -1,6 +1,5 @@
 #include "SilentOT_Tests.h"
 
-#include "libOTe/Tools/SilentPprf.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #include <cryptoTools/Common/Log.h>
@@ -185,7 +184,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
 
     QuasiCyclicCode code;
     u64 nn = 1 << 10;
-    u64 t = 10;
+    u64 t = 1;
     auto scaler = 2;
     //auto secParam = 128;
 
@@ -239,7 +238,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
         }
 
         code.dualEncode(A);
-        
+
         for (u64 i : rng(mP))
         {
 
@@ -254,7 +253,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
 
 
     {
-        
+
         mP = nextPrime(50);
         n = mP * scaler;
         code.init(mP);
@@ -460,7 +459,7 @@ void OtExt_Silent_random_Test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     u64 n = cmd.getOr("n", 10000);
@@ -498,7 +497,7 @@ void OtExt_Silent_correlated_Test(const CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     u64 n = cmd.getOr("n", 10000);
@@ -541,7 +540,7 @@ void OtExt_Silent_inplace_Test(const CLP& cmd)
 #ifdef ENABLE_SILENTOT
 
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     u64 n = cmd.getOr("n", 10000);
@@ -598,7 +597,7 @@ void OtExt_Silent_paramSweep_Test(const oc::CLP& cmd)
 {
 #ifdef ENABLE_SILENTOT
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     std::vector<u64> nn = cmd.getManyOr<u64>("n",
@@ -641,7 +640,7 @@ void OtExt_Silent_QuasiCyclic_Test(const oc::CLP& cmd)
 #if defined(ENABLE_SILENTOT) && defined(ENABLE_BITPOLYMUL)
 
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     std::vector<u64> nn = cmd.getManyOr<u64>("n",
@@ -769,7 +768,7 @@ void OtExt_Silent_baseOT_Test(const oc::CLP& cmd)
 #ifdef ENABLE_SILENTOT
 
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     u64 n = 123;//
@@ -809,7 +808,7 @@ void OtExt_Silent_mal_Test(const oc::CLP& cmd)
 #ifdef ENABLE_SILENTOT
 
 
-    
+
     auto sockets = cp::LocalAsyncSocket::makePair();
 
     u64 n = 12093;//
@@ -836,472 +835,6 @@ void OtExt_Silent_mal_Test(const oc::CLP& cmd)
     eval(p0, p1);
 
     checkRandom(msg1, msg2, choice, n, verbose);
-#else
-    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
-#endif
-}
-
-void Tools_Pprf_test(const CLP& cmd)
-{
-#if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
-
-    u64 depth = cmd.getOr("d", 3);;
-    u64 domain = 1ull << depth;
-    auto threads = cmd.getOr("t", 3ull);
-    u64 numPoints = cmd.getOr("s", 8);
-
-    PRNG prng(ZeroBlock);
-
-    //IOService ios;
-    //Session s0(ios, "localhost:1212", SessionMode::Server);
-    //Session s1(ios, "localhost:1212", SessionMode::Client);
-    //auto sockets[0] = s0.addChannel();
-    //auto sockets[1] = s1.addChannel();
-    
-    auto sockets = cp::LocalAsyncSocket::makePair();
-
-
-    auto format = PprfOutputFormat::Plain;
-    SilentMultiPprfSender sender;
-    SilentMultiPprfReceiver recver;
-
-    sender.configure(domain, numPoints);
-    recver.configure(domain, numPoints);
-
-    auto numOTs = sender.baseOtCount();
-    std::vector<std::array<block, 2>> sendOTs(numOTs);
-    std::vector<block> recvOTs(numOTs);
-    BitVector recvBits = recver.sampleChoiceBits(domain, format, prng);
-
-    prng.get(sendOTs.data(), sendOTs.size());
-    //sendOTs[cmd.getOr("i",0)] = prng.get();
-
-    //recvBits[16] = 1;
-    for (u64 i = 0; i < numOTs; ++i)
-    {
-        //recvBits[i] = 0;
-        recvOTs[i] = sendOTs[i][recvBits[i]];
-    }
-    sender.setBase(sendOTs);
-    recver.setBase(recvOTs);
-
-    Matrix<block> sOut(domain, numPoints);
-    Matrix<block> rOut(domain, numPoints);
-    std::vector<u64> points(numPoints);
-    recver.getPoints(points, format);
-
-    auto p0 = sender.expand(sockets[0], {&CCBlock,1}, prng, sOut, format, true, threads);
-    auto p1 = recver.expand(sockets[1], prng, rOut, format, true, threads);
-
-    eval(p0, p1);
-
-    bool failed = false;
-
-
-    for (u64 j = 0; j < numPoints; ++j)
-    {
-
-        for (u64 i = 0; i < domain; ++i)
-        {
-
-            auto exp = sOut(i, j);
-            if (points[j] == i)
-                exp = exp ^ CCBlock;
-
-            if (neq(exp, rOut(i, j)))
-            {
-                failed = true;
-
-                if (cmd.isSet("v"))
-                    std::cout << Color::Red;
-            }
-            if (cmd.isSet("v"))
-                std::cout << "r[" << j << "][" << i << "] " << exp << " " << rOut(i, j) << std::endl << Color::Default;
-        }
-    }
-
-    if (failed)
-        throw RTE_LOC;
-
-#else
-    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
-#endif
-}
-
-void Tools_Pprf_trans_test(const CLP& cmd)
-{
-#if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
-
-    //u64 depth = 6;
-    //u64 domain = 13;// (1ull << depth) - 7;
-    //u64 numPoints = 40;
-
-    u64 domain = cmd.getOr("d", 334);
-    auto threads = cmd.getOr("t", 3ull);
-    u64 numPoints = cmd.getOr("s", 5) * 8;
-    //bool mal = cmd.isSet("mal");
-
-    PRNG prng(ZeroBlock);
-
-    
-    auto sockets = cp::LocalAsyncSocket::makePair();
-
-
-
-
-    auto format = PprfOutputFormat::InterleavedTransposed;
-    SilentMultiPprfSender sender;
-    SilentMultiPprfReceiver recver;
-
-    sender.configure(domain, numPoints);
-    recver.configure(domain, numPoints);
-
-    auto numOTs = sender.baseOtCount();
-    std::vector<std::array<block, 2>> sendOTs(numOTs);
-    std::vector<block> recvOTs(numOTs);
-    BitVector recvBits = recver.sampleChoiceBits(domain * numPoints, format, prng);
-    //recvBits.randomize(prng);
-
-    //recvBits[16] = 1;
-    prng.get(sendOTs.data(), sendOTs.size());
-    for (u64 i = 0; i < numOTs; ++i)
-    {
-        //recvBits[i] = 0;
-        recvOTs[i] = sendOTs[i][recvBits[i]];
-    }
-    sender.setBase(sendOTs);
-    recver.setBase(recvOTs);
-
-    auto cols = (numPoints * domain + 127) / 128;
-    Matrix<block> sOut(128, cols);
-    Matrix<block> rOut(128, cols);
-
-    std::vector<u64> points(numPoints);
-    recver.getPoints(points, format);
-
-
-
-
-    auto p0 = sender.expand(sockets[0], { &AllOneBlock,1 }, prng, sOut, format, true, threads);
-    auto p1 = recver.expand(sockets[1], prng, rOut, format, true, threads);
-
-
-    eval(p0, p1);
-    bool failed = false;
-
-    Matrix<block> out(128, cols);
-    Matrix<block> outT(numPoints * domain, 1);
-
-    if (cmd.getOr("v", 0) > 1)
-        std::cout << sender.mDomain << " " << sender.mPntCount <<
-        " " << sOut.rows() << " " << sOut.cols() << std::endl;
-
-    for (u64 i = 0; i < cols; ++i)
-    {
-        for (u64 j = 0; j < 128; ++j)
-        {
-            out(j, i) = (sOut(j, i) ^ rOut(j, i));
-            //if (cmd.isSet("v"))
-            //	std::cout << "r[" << i << "][" << j << "] " << out(j,i)  << " ~ " << rOut(j, i) << std::endl << Color::Default;
-        }
-    }
-    transpose(MatrixView<block>(out), MatrixView<block>(outT));
-
-    for (u64 i = 0; i < outT.rows(); ++i)
-    {
-
-        auto f = std::find(points.begin(), points.end(), i) != points.end();
-
-        auto exp = f ? AllOneBlock : ZeroBlock;
-
-        if (neq(outT(i), exp))
-        {
-            failed = true;
-
-            if (cmd.getOr("v", 0) > 1)
-                std::cout << Color::Red;
-        }
-        if (cmd.getOr("v", 0) > 1)
-            std::cout << i << " " << outT(i) << " " << exp << std::endl << Color::Default;
-    }
-
-    if (failed)
-        throw RTE_LOC;
-
-#else
-    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
-#endif
-}
-
-
-void Tools_Pprf_inter_test(const CLP& cmd)
-{
-#if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
-
-    //u64 depth = 6;
-    //u64 domain = 13;// (1ull << depth) - 7;
-    //u64 numPoints = 40;
-
-    u64 domain = cmd.getOr("d", 334);
-    auto threads = cmd.getOr("t", 3ull);
-    u64 numPoints = cmd.getOr("s", 5) * 8;
-    //bool mal = cmd.isSet("mal");
-
-    PRNG prng(ZeroBlock);
-
-    auto sockets = cp::LocalAsyncSocket::makePair();
-
-
-    auto format = PprfOutputFormat::Interleaved;
-    SilentMultiPprfSender sender;
-    SilentMultiPprfReceiver recver;
-
-    sender.configure(domain, numPoints);
-    recver.configure(domain, numPoints);
-
-    auto numOTs = sender.baseOtCount();
-    std::vector<std::array<block, 2>> sendOTs(numOTs);
-    std::vector<block> recvOTs(numOTs);
-    BitVector recvBits = recver.sampleChoiceBits(domain * numPoints, format, prng);
-    //recvBits.randomize(prng);
-
-    //recvBits[16] = 1;
-    prng.get(sendOTs.data(), sendOTs.size());
-    for (u64 i = 0; i < numOTs; ++i)
-    {
-        //recvBits[i] = 0;
-        recvOTs[i] = sendOTs[i][recvBits[i]];
-    }
-    sender.setBase(sendOTs);
-    recver.setBase(recvOTs);
-
-    //auto cols = (numPoints * domain + 127) / 128;
-    Matrix<block> sOut2(numPoints * domain, 1);
-    Matrix<block> rOut2(numPoints * domain, 1);
-    std::vector<u64> points(numPoints);
-    recver.getPoints(points, format);
-
-
-    auto p0 = sender.expand(sockets[0], { &AllOneBlock,1 }, prng, sOut2, format, true, threads);
-    auto p1 = recver.expand(sockets[1], prng, rOut2, format, true, threads);
-
-    eval(p0, p1);
-    for (u64 i = 0; i < rOut2.rows(); ++i)
-    {
-        sOut2(i) = (sOut2(i) ^ rOut2(i));
-    }
-
-
-    bool failed = false;
-    for (u64 i = 0; i < sOut2.rows(); ++i)
-    {
-
-        auto f = std::find(points.begin(), points.end(), i) != points.end();
-
-        auto exp = f ? AllOneBlock : ZeroBlock;
-
-        if (neq(sOut2(i), exp))
-        {
-            failed = true;
-
-            if (cmd.getOr("v", 0) > 1)
-                std::cout << Color::Red;
-        }
-        if (cmd.getOr("v", 0) > 1)
-            std::cout << i << " " << sOut2(i) << " " << exp << std::endl << Color::Default;
-    }
-
-    if (failed)
-        throw RTE_LOC;
-
-
-#else
-    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
-#endif
-}
-
-
-
-void Tools_Pprf_blockTrans_test(const oc::CLP& cmd)
-{
-#if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
-
-
-    u64 depth = cmd.getOr("d", 2);;
-    u64 domain = 1ull << depth;
-    auto threads = cmd.getOr("t", 1ull);
-    u64 numPoints = cmd.getOr("s", 8);
-
-    PRNG prng(ZeroBlock);
-
-    auto sockets = cp::LocalAsyncSocket::makePair();
-
-
-    auto format = PprfOutputFormat::BlockTransposed;
-    SilentMultiPprfSender sender;
-    SilentMultiPprfReceiver recver;
-
-    sender.configure(domain, numPoints);
-    recver.configure(domain, numPoints);
-
-    auto numOTs = sender.baseOtCount();
-    std::vector<std::array<block, 2>> sendOTs(numOTs);
-    std::vector<block> recvOTs(numOTs);
-    BitVector recvBits = recver.sampleChoiceBits(domain, format, prng);
-
-    prng.get(sendOTs.data(), sendOTs.size());
-    //sendOTs[cmd.getOr("i",0)] = prng.get();
-
-    //recvBits[16] = 1;
-    for (u64 i = 0; i < numOTs; ++i)
-    {
-        //recvBits[i] = 0;
-        recvOTs[i] = sendOTs[i][recvBits[i]];
-    }
-    sender.setBase(sendOTs);
-    recver.setBase(recvOTs);
-
-    Matrix<block> sOut(numPoints, domain);
-    Matrix<block> rOut(numPoints, domain);
-    std::vector<u64> points(numPoints);
-    recver.getPoints(points, format);
-
-    cp::sync_wait(cp::when_all_ready(
-        sender.expand(sockets[0], span<block>{}, prng, sOut, format, false, threads),
-        recver.expand(sockets[1], prng, rOut, format, false, threads)
-    ));
-
-    bool failed = false;
-
-    for (u64 j = 0; j < numPoints; ++j)
-    {
-
-        for (u64 i = 0; i < domain; ++i)
-        {
-            auto ss = sOut(j, i);
-            auto rr = rOut(j, i);
-
-            if (points[j] == i)
-            {
-                if (ss == rr || rr != ZeroBlock)
-                {
-                    failed = true;
-
-                    if (cmd.isSet("v"))
-                        std::cout << Color::Red;
-                }
-
-            }
-            else
-            {
-                if (ss != rr  || rr == ZeroBlock)
-                {
-                    failed = true;
-
-                    if (cmd.isSet("v"))
-                        std::cout << Color::Red;
-                }
-            }
-            if (cmd.isSet("v"))
-                std::cout << "r[" << j << "][" << i << "] " << ss << " " << rr << std::endl << Color::Default;
-        }
-    }
-
-    if (failed)
-        throw RTE_LOC;
-
-#else
-    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
-#endif
-}
-
-
-
-void Tools_Pprf_callback_test(const oc::CLP& cmd)
-{
-#if defined(ENABLE_SILENTOT) || defined(ENABLE_SILENT_VOLE)
-
-    u64 domain = cmd.getOr("d", 512);
-    auto threads = cmd.getOr("t", 1ull);
-    u64 numPoints = cmd.getOr("s", 5) * 8;
-
-    PRNG prng(ZeroBlock);
-    auto sockets = cp::LocalAsyncSocket::makePair();
-
-
-    auto format = PprfOutputFormat::Callback;
-    SilentMultiPprfSender sender;
-    SilentMultiPprfReceiver recver;
-
-    sender.configure(domain, numPoints);
-    recver.configure(domain, numPoints);
-
-    auto numOTs = sender.baseOtCount();
-    std::vector<std::array<block, 2>> sendOTs(numOTs);
-    std::vector<block> recvOTs(numOTs);
-    BitVector recvBits = recver.sampleChoiceBits(domain * numPoints, format, prng);
-
-    prng.get(sendOTs.data(), sendOTs.size());
-    for (u64 i = 0; i < numOTs; ++i)
-    {
-        recvOTs[i] = sendOTs[i][recvBits[i]];
-    }
-    sender.setBase(sendOTs);
-    recver.setBase(recvOTs);
-
-    //auto cols = (numPoints * domain + 127) / 128;
-    Matrix<block> sOut2(numPoints * domain, 1);
-    Matrix<block> rOut2(numPoints * domain, 1);
-    std::vector<u64> points(numPoints);
-    recver.getPoints(points, format);
-
-    sender.mOutputFn = [&](u64 treeIdx, span<AlignedArray<block, 8>> data)
-    {
-        span<block> d = sOut2;
-        d = d.subspan(treeIdx * data.size());
-        d = d.subspan(0, std::min<u64>(d.size(), data.size() * 8));
-        memcpy(d.data(), data.data(), d.size_bytes());
-    };
-    recver.mOutputFn = [&](u64 treeIdx, span<AlignedArray<block, 8>> data)
-    {
-        span<block> d = rOut2;
-        d = d.subspan(treeIdx * data.size());
-        d = d.subspan(0, std::min<u64>(d.size(), data.size() * 8));
-        memcpy(d.data(), data.data(), d.size_bytes());
-    };
-
-
-    auto p0 = sender.expand(sockets[0], { &AllOneBlock,1 }, prng, span<block>{}, format, true, threads);
-    auto p1 = recver.expand(sockets[1], prng, span<block>{}, format, true, threads);
-
-    eval(p0, p1);
-    for (u64 i = 0; i < rOut2.rows(); ++i)
-    {
-        sOut2(i) = (sOut2(i) ^ rOut2(i));
-    }
-
-    bool failed = false;
-    for (u64 i = 0; i < sOut2.rows(); ++i)
-    {
-
-        auto f = std::find(points.begin(), points.end(), i) != points.end();
-
-        auto exp = f ? AllOneBlock : ZeroBlock;
-
-        if (neq(sOut2(i), exp))
-        {
-            failed = true;
-
-            if (cmd.getOr("v", 0) > 1)
-                std::cout << Color::Red;
-        }
-        if (cmd.getOr("v", 0) > 1)
-            std::cout << i << " " << sOut2(i) << " " << exp << std::endl << Color::Default;
-    }
-
-    if (failed)
-        throw RTE_LOC;
-
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif

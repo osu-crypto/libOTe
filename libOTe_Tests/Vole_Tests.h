@@ -10,9 +10,7 @@
 
 void Vole_Noisy_test(const oc::CLP& cmd);
 void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd);
-void Vole_Silent_Silver_test(const oc::CLP& cmd);
 void Vole_Silent_paramSweep_test(const oc::CLP& cmd);
-void Vole_Noisy_test(const oc::CLP& cmd);
 void Vole_Silent_baseOT_test(const oc::CLP& cmd);
 void Vole_Silent_mal_test(const oc::CLP& cmd);
 void Vole_Silent_Rounds_test(const oc::CLP& cmd);

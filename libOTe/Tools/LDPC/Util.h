@@ -61,13 +61,6 @@ namespace osuCrypto
             while (i < mK - 1 && mSet[i] + 1 == mSet[i + 1])
                 ++i;
 
-            //if (i == mK - 1 && mSet.back() == mN - 1)
-            //{
-            //    mSet.clear();
-            //    return;
-            //    //assert(mSet.back() != mN - 1);
-            //}
-
             ++mSet[i];
             for (u64 j = 0; j < i; ++j)
                 mSet[j] = j;
@@ -79,13 +72,7 @@ namespace osuCrypto
         }
 
     };
-#ifdef ENABLE_ALGO994
-    extern int alg994;
-    extern int num_saved_generators;
-    extern int num_cores;
-    extern int num_permutations;
-    extern int print_matrices;
-#endif
+
 
 }
 

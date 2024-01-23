@@ -147,7 +147,7 @@ void gfe4x_unpack_single(gfe4x *r, const unsigned char * x, int i)
     r->v[11].v[i] = r->v[11].v[i] + _2_234 - _2_255;
 }
 
-void gfe4x_unpack(gfe4x *r, const unsigned char x[128])
+void gfe4x_unpack(gfe4x *r, const unsigned char* x)
 {
 	gfe4x_unpack_single(r, x, 0);
 	gfe4x_unpack_single(r, x, 1);

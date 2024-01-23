@@ -16,6 +16,9 @@ namespace osuCrypto
 		if ((u64)messages.data() % 32)
 			throw std::runtime_error("soft spoken requires the messages to by 32 byte aligned. Consider using AlignedUnVector or AlignedVector." LOCATION);
 
+		if (messages.size() == 0)
+			throw std::runtime_error("soft spoken must be called with at least 1 messag." LOCATION);
+
 		MC_BEGIN(task<>, this, messages, &prng, &chl, 
 			nChunks = u64{},
 			messagesFullChunks = u64{},
@@ -25,6 +28,7 @@ namespace osuCrypto
 			seed = block{},
 			mHasher = Hasher{}
 		);
+
 
 		if (!hasBaseOts())
 			MC_AWAIT(genBaseOts(prng, chl));
@@ -53,7 +57,7 @@ namespace osuCrypto
 
 		MC_AWAIT(runBatch(chl, scratch.subspan(0, messagesFullChunks * chunkSize())));
 
-		assert(scratch[0] != ZeroBlock);
+		assert(messagesFullChunks == 0 || scratch[0] != ZeroBlock);
 
 		// Extra blocks
 		MC_AWAIT(runBatch(chl, mExtraW.subspan(0, numExtra * chunkSize())));

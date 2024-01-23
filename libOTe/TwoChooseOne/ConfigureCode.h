@@ -10,11 +10,7 @@ namespace osuCrypto
 	{
 		// https://eprint.iacr.org/2019/1159.pdf
 		QuasiCyclic = 1,
-#ifdef ENABLE_INSECURE_SILVER
-		// https://eprint.iacr.org/2021/1150, see https://eprint.iacr.org/2023/882 for attack.
-		slv5 = 2,
-		slv11 = 3,
-#endif
+
 		// https://eprint.iacr.org/2022/1014
 		ExAcc7 = 4, // fast
 		ExAcc11 = 5,// fast but more conservative
@@ -33,14 +29,7 @@ namespace osuCrypto
 		case osuCrypto::MultType::QuasiCyclic:
 			o << "QuasiCyclic";
 			break;
-#ifdef ENABLE_INSECURE_SILVER
-		case osuCrypto::MultType::slv5:
-			o << "slv5";
-			break;
-		case osuCrypto::MultType::slv11:
-			o << "slv11";
-			break;
-#endif
+
 		case osuCrypto::MultType::ExAcc7:
 			o << "ExAcc7";
 			break;
@@ -105,19 +94,14 @@ namespace osuCrypto
 		ExConvCode& mEncoder
 	);
 
-#ifdef ENABLE_INSECURE_SILVER
-	struct SilverEncoder;
-	void SilverConfigure(
-		u64 numOTs, u64 secParam,
+
+	void ExConvConfigure(
+		double scaler,
 		MultType mMultType,
-		u64& mRequestedNumOTs,
-		u64& mNumPartitions,
-		u64& mSizePer,
-		u64& mN2,
-		u64& mN,
-		u64& gap,
-		SilverEncoder& mEncoder);
-#endif
+		u64& expanderWeight,
+		u64& accumulatorWeight,
+		double& minDist
+	);
 
 	void QuasiCyclicConfigure(
 		u64 numOTs, u64 secParam,
@@ -130,4 +114,15 @@ namespace osuCrypto
 		u64& mN,
 		u64& mP,
 		u64& mScaler);
+
+
+	inline void QuasiCyclicConfigure(
+		double mScaler,
+		double& minDist) 
+	{ 
+		if (mScaler == 2)
+			minDist = 0.2; // psuedo min dist
+		else 
+			throw RTE_LOC; // not impl
+	}
 }

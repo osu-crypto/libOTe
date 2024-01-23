@@ -22,7 +22,10 @@ namespace osuCrypto
         const BitVector& choices)
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
-        mOtExtSender.setBaseOts(baseRecvOts, choices);
+        if (!mOtExtSender)
+            mOtExtSender.emplace();
+
+        mOtExtSender->setBaseOts(baseRecvOts, choices);
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -35,7 +38,9 @@ namespace osuCrypto
 #ifdef ENABLE_SOFTSPOKEN_OT
         auto ptr = new SilentOtExtSender;
         auto ret = std::unique_ptr<OtExtSender>(ptr);
-        ptr->mOtExtSender = mOtExtSender.splitBase();
+        if (!mOtExtSender)
+            throw RTE_LOC;
+        ptr->mOtExtSender = mOtExtSender->splitBase();
         return ret;
 #else
         throw std::runtime_error("KOS must be enabled");
@@ -47,7 +52,9 @@ namespace osuCrypto
     task<> SilentOtExtSender::genBaseOts(PRNG& prng, Socket& chl)
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
-        return mOtExtSender.genBaseOts(prng, chl);
+        if (!mOtExtSender)
+            mOtExtSender.emplace();
+        return mOtExtSender->genBaseOts(prng, chl);
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -57,7 +64,13 @@ namespace osuCrypto
     u64 SilentOtExtSender::baseOtCount() const
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
-        return mOtExtSender.baseOtCount();
+
+        if (!mOtExtSender)
+        {
+            const_cast<macoro::optional<SoftSpokenMalOtSender>*>(&mOtExtSender)
+                ->emplace();
+        }
+        return mOtExtSender->baseOtCount();
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -66,7 +79,10 @@ namespace osuCrypto
     bool SilentOtExtSender::hasBaseOts() const
     {
 #ifdef ENABLE_SOFTSPOKEN_OT
-        return mOtExtSender.hasBaseOts();
+
+        if (!mOtExtSender)
+            return false;
+        return mOtExtSender->hasBaseOts();
 #else
         throw std::runtime_error("KOS must be enabled");
 #endif
@@ -90,9 +106,10 @@ namespace osuCrypto
 #ifdef ENABLE_SOFTSPOKEN_OT
         if (useOtExtension)
         {
-
+            if (!mOtExtSender)
+                mOtExtSender.emplace();
             //mOtExtSender.mFiatShamir = true;
-            MC_AWAIT(mOtExtSender.send(msg, prng, chl));
+            MC_AWAIT(mOtExtSender->send(msg, prng, chl));
         }
         else
 #endif
@@ -118,7 +135,7 @@ namespace osuCrypto
         if (isConfigured() == false)
             throw std::runtime_error("configure must be called first");
 
-        auto n = mGen.baseOtCount() + mGapOts.size();
+        auto n = mGen.baseOtCount();
 
         if (mMalType == SilentSecType::Malicious)
             n += 128;
@@ -134,12 +151,10 @@ namespace osuCrypto
             throw RTE_LOC;
 
         auto genOt = sendBaseOts.subspan(0, mGen.baseOtCount());
-        auto gapOt = sendBaseOts.subspan(genOt.size(), mGapOts.size());
-        auto malOt = sendBaseOts.subspan(genOt.size() + gapOt.size());
+        auto malOt = sendBaseOts.subspan(genOt.size());
         mMalCheckOts.resize((mMalType == SilentSecType::Malicious) * 128);
 
         mGen.setBase(genOt);
-        std::copy(gapOt.begin(), gapOt.end(), mGapOts.begin());
         std::copy(malOt.begin(), malOt.end(), mMalCheckOts.begin());
     }
 
@@ -149,7 +164,6 @@ namespace osuCrypto
         mMalType = malType;
         mNumThreads = numThreads;
 
-        mGapOts.resize(0);
 
         switch (mMultType)
         {
@@ -166,28 +180,6 @@ namespace osuCrypto
                 mScaler);
 
             break;
-#ifdef ENABLE_INSECURE_SILVER
-        case osuCrypto::MultType::slv5:
-        case osuCrypto::MultType::slv11:
-        {
-            if (scaler != 2)
-                throw std::runtime_error("only scaler = 2 is supported for slv. " LOCATION);
-
-            u64 gap;
-            SilverConfigure(numOTs, 128,
-                mMultType,
-                mRequestNumOts,
-                mNumPartitions,
-                mSizePer,
-                mN2,
-                mN,
-                gap,
-                mEncoder);
-
-            mGapOts.resize(gap);
-            break;
-        }
-#endif
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
         case osuCrypto::MultType::ExAcc21:
@@ -231,8 +223,6 @@ namespace osuCrypto
         mB = {};
 
         mDelta = block(0,0);
-
-        mGapOts = {};
 
         mGen.clear();
     }
@@ -375,9 +365,8 @@ namespace osuCrypto
         Socket& chl)
     {
         MC_BEGIN(task<>,this, d, n, &prng, &chl,
-            rT = MatrixView<block>{},
-            gapVals = std::vector<block> {},
-            i = u64{}, j = u64{}, main = u64{}
+            i = u64{}, j = u64{},
+            delta = AlignedUnVector<block>{}
         );
 
         gTimer.setTimePoint("sender.ot.enter");
@@ -403,54 +392,23 @@ namespace osuCrypto
 
         // allocate b
         mB.resize(mN2);
+        
+        delta.resize(1);
+        delta[0] = mDelta;
 
-        //if (mMultType == MultType::QuasiCyclic)
-        //{
-        //    rT = MatrixView<block>(mB.data(), 128, mN2 / 128);
-
-        //    MC_AWAIT(mGen.expand(chl, mDelta, prng, rT, PprfOutputFormat::InterleavedTransposed, mNumThreads));
-        //    setTimePoint("sender.expand.pprf_transpose");
-        //    gTimer.setTimePoint("sender.expand.pprf_transpose");
-
-        //    if (mDebug)
-        //        MC_AWAIT(checkRT(chl));
-
-        //    randMulQuasiCyclic();
-        //}
-        //else
-        {
-
-            main = mNumPartitions * mSizePer;
-            if (mGapOts.size())
-            {
-                // derandomize the random OTs for the gap 
-                // to have the desired correlation.
-                gapVals.resize(mGapOts.size());
-                for (i = main, j = 0; i < mN2; ++i, ++j)
-                {
-                    auto v = mGapOts[j][0] ^ mDelta;
-                    gapVals[j] = AES(mGapOts[j][1]).ecbEncBlock(ZeroBlock) ^ v;
-                    mB[i] = mGapOts[j][0];
-                    //std::cout << "jj " << j << " " <<i << " " << mGapOts[j][0] << " " << v << " " << beta[mNumPartitions + j] << std::endl;
-                }
-                MC_AWAIT(chl.send(std::move(gapVals)));
-            }
+        MC_AWAIT(mGen.expand(chl, delta, prng.get(), mB, PprfOutputFormat::Interleaved, true, mNumThreads));
 
 
-            MC_AWAIT(mGen.expand(chl, { &mDelta,1 }, prng, mB.subspan(0, main), PprfOutputFormat::Interleaved, true, mNumThreads));
+        if (mMalType == SilentSecType::Malicious)
+            MC_AWAIT(ferretMalCheck(chl, prng));
 
+        setTimePoint("sender.expand.pprf_transpose");
+        gTimer.setTimePoint("sender.expand.pprf_transpose");
 
-            if (mMalType == SilentSecType::Malicious)
-                MC_AWAIT(ferretMalCheck(chl, prng));
+        if (mDebug)
+            MC_AWAIT(checkRT(chl));
 
-            setTimePoint("sender.expand.pprf_transpose");
-            gTimer.setTimePoint("sender.expand.pprf_transpose");
-
-            if (mDebug)
-                MC_AWAIT(checkRT(chl));
-
-            compress();
-        }
+        compress();
 
         mB.resize(mRequestNumOts);
 
@@ -466,9 +424,11 @@ namespace osuCrypto
             sum0 = ZeroBlock,
             sum1 = ZeroBlock,
             mySum = block{},
-            deltaShare = block{},
+            a = AlignedUnVector<block>(1),
+            c = AlignedUnVector<block>(1),
+            //deltaShare = block{},
             i = u64{},
-            recver = NoisyVoleReceiver{},
+            recver = NoisyVoleReceiver<block, block, CoeffCtxGF128>{},
             myHash = std::array<u8, 32>{},
             ro = RandomOracle(32)
             );
@@ -489,11 +449,11 @@ namespace osuCrypto
 
         mySum = sum0.gf128Reduce(sum1);
         
+        c[0] = mDelta;
+        //a[0] = deltaShare;
+        MC_AWAIT(recver.receive(c, a, prng, mMalCheckOts, chl, {}));
 
-        
-        MC_AWAIT(recver.receive({ &mDelta,1 }, { &deltaShare,1 }, prng, mMalCheckOts, chl));
-
-        ro.Update(mySum ^ deltaShare);
+        ro.Update(mySum ^ a[0]);
         ro.Final(myHash);
 
         MC_AWAIT(chl.send(std::move(myHash)));
@@ -517,17 +477,6 @@ namespace osuCrypto
 #endif
         }
             break;
-#ifdef ENABLE_INSECURE_SILVER
-        case osuCrypto::MultType::slv5:
-        case osuCrypto::MultType::slv11:
-
-            if (mTimer)
-                mEncoder.setTimer(getTimer());
-            mEncoder.dualEncode<block>(mB);
-            setTimePoint("sender.expand.ldpc.dualEncode");
-
-            break;
-#endif
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
         case osuCrypto::MultType::ExAcc21:
@@ -536,7 +485,7 @@ namespace osuCrypto
             if (mTimer)
                 mEAEncoder.setTimer(getTimer());
             AlignedUnVector<block> B2(mEAEncoder.mMessageSize);
-            mEAEncoder.dualEncode<block>(mB.subspan(0, mEAEncoder.mCodeSize), B2);
+            mEAEncoder.dualEncode<block, CoeffCtxGF2>(mB.subspan(0, mEAEncoder.mCodeSize), B2, {});
             std::swap(mB, B2);
             break;
         }
@@ -544,14 +493,14 @@ namespace osuCrypto
         case osuCrypto::MultType::ExConv21x24:
             if (mTimer)
                 mExConvEncoder.setTimer(getTimer());
-            mExConvEncoder.dualEncode<block>(mB.subspan(0, mExConvEncoder.mCodeSize));
+            mExConvEncoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
             break;
         default:
             throw RTE_LOC;
             break;
         }
 
-
+         
     }
 //
 //

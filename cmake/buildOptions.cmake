@@ -94,9 +94,8 @@ option(ENABLE_DELTA_IKNP     "Build the IKNP Delta-OT-Ext protocol." OFF)
 option(ENABLE_OOS            "Build the OOS 1-oo-N OT-Ext protocol." OFF)
 option(ENABLE_KKRT           "Build the KKRT 1-oo-N OT-Ext protocol." OFF)
 
+option(ENABLE_PPRF           "Build the PPRF protocol." OFF)
 option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
-#option(COPROTO_ENABLE_BOOST  "Build with coproto boost support." OFF)
-#option(COPROTO_ENABLE_OPENSSL  "Build with coproto boost open ssl support." OFF)
 
 option(ENABLE_INSECURE_SILVER   "Build with silver codes." OFF)
 option(ENABLE_LDPC              "Build with ldpc functions." OFF)
@@ -105,21 +104,14 @@ if(ENABLE_INSECURE_SILVER)
 endif()
 option(NO_KOS_WARNING        "Build with no kos security warning." OFF)
 
-#option(FETCH_BITPOLYMUL		"download and build bitpolymul" OFF))
 
 EVAL(FETCH_BITPOLYMUL_IMPL 
 	(DEFINED FETCH_BITPOLYMUL AND FETCH_BITPOLYMUL) OR
 	((NOT DEFINED FETCH_BITPOLYMUL) AND (FETCH_AUTO AND ENABLE_BITPOLYMUL)))
 
-
-#option(FETCH_BITPOLYMUL		"download and build bitpolymul" OFF))
-EVAL(FETCH_BITPOLYMUL_IMPL 
-	(DEFINED FETCH_BITPOLYMUL AND FETCH_BITPOLYMUL) OR
-	((NOT DEFINED FETCH_BITPOLYMUL) AND (FETCH_AUTO AND ENABLE_BITPOLYMUL)))
-
-	
-
-
+if(ENABLE_SILENT_VOLE OR ENABLE_SILENTOT OR ENABLE_SOFTSPOKEN_OT)
+	set(ENABLE_PPRF true)
+endif()
 
 option(VERBOSE_FETCH        "Print build info for fetched libraries" ON)
 
@@ -159,7 +151,8 @@ message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}\n\n")
 
 
 message(STATUS "other \n=======================================================")
-message(STATUS "Option: NO_KOS_WARNING       = ${NO_KOS_WARNING}\n\n")
+message(STATUS "Option: NO_KOS_WARNING       = ${NO_KOS_WARNING}")
+message(STATUS "Option: ENABLE_PPRF          = ${ENABLE_PPRF}\n\n")
 
 #############################################
 #               Config Checks               #

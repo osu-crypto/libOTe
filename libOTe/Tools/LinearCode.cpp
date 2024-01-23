@@ -456,14 +456,7 @@ namespace osuCrypto
         // create a local to store the partial codeword
         // and zero it out.
         block c[8];
-        c[0] = c[0] ^ c[0];
-        c[1] = c[1] ^ c[1];
-        c[2] = c[2] ^ c[2];
-        c[3] = c[3] ^ c[3];
-        c[4] = c[4] ^ c[4];
-        c[5] = c[5] ^ c[5];
-        c[6] = c[6] ^ c[6];
-        c[7] = c[7] ^ c[7];
+        memset(c, 0, sizeof(block) * 8);
 
         // for performance reasons, we have multiplt implementations, one for
         // each size under 9 blocks wide. There is a general case at the end.
@@ -729,14 +722,15 @@ namespace osuCrypto
         // create a local to store the partial codeword
         // and zero it out.
         block c[8];
-        c[0] = c[0] ^ c[0];
-        c[1] = c[1] ^ c[1];
-        c[2] = c[2] ^ c[2];
-        c[3] = c[3] ^ c[3];
-        c[4] = c[4] ^ c[4];
-        c[5] = c[5] ^ c[5];
-        c[6] = c[6] ^ c[6];
-        c[7] = c[7] ^ c[7];
+        memset(c, 0, sizeof(block) * 8);
+        //c[0] = c[0] ^ c[0];
+        //c[1] = c[1] ^ c[1];
+        //c[2] = c[2] ^ c[2];
+        //c[3] = c[3] ^ c[3];
+        //c[4] = c[4] ^ c[4];
+        //c[5] = c[5] ^ c[5];
+        //c[6] = c[6] ^ c[6];
+        //c[7] = c[7] ^ c[7];
 
         block* g0 = mG8.data() + 0 * rowSize + input[0] * codeSize;
         block* g1 = mG8.data() + 1 * rowSize + input[1] * codeSize;
