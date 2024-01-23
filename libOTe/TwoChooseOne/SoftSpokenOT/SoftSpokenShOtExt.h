@@ -101,6 +101,11 @@ namespace osuCrypto
 				init();
 			}
 
+			SoftSpokenShOtSender(u64 fieldBits)
+			{
+				init(fieldBits);
+			}
+
 			SoftSpokenShOtSender(SoftSpokenShOtSender&& o)
 				: mSubVole(std::move(o.mSubVole))
 				, mBlockIdx(std::exchange(o.mBlockIdx, 0))
@@ -281,6 +286,12 @@ namespace osuCrypto
 			{
 				init();
 			}
+
+			SoftSpokenShOtReceiver(u64 fieldBits)
+			{
+				init(fieldBits);
+			}
+			
 			SoftSpokenShOtReceiver(const SoftSpokenShOtReceiver&) = delete;
 			SoftSpokenShOtReceiver(SoftSpokenShOtReceiver&& o) 
 				: mSubVole(std::move(o.mSubVole))

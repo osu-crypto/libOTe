@@ -32,34 +32,29 @@ namespace osuCrypto
 #ifdef ENABLE_SOFTSPOKEN_OT
     // soft spoken takes an extra parameter as input what determines
     // the computation/communication trade-off.
-    template<typename T>
+    template <typename T>
     using is_SoftSpoken = typename std::conditional<
-        //std::is_same<T, SoftSpokenShOtSender>::value ||
-        //std::is_same<T, SoftSpokenShOtReceiver>::value ||
-        //std::is_same<T, SoftSpokenShOtSender>::value ||
-        //std::is_same<T, SoftSpokenShOtReceiver>::value ||
-        //std::is_same<T, SoftSpokenMalOtSender>::value ||
-        //std::is_same<T, SoftSpokenMalOtReceiver>::value ||
-        //std::is_same<T, SoftSpokenMalOtSender>::value ||
-        //std::is_same<T, SoftSpokenMalOtReceiver>::value
-        false
-        ,
-        std::true_type, std::false_type>::type;
+        std::is_same<T, SoftSpokenShOtSender<>>::value ||
+            std::is_same<T, SoftSpokenShOtReceiver<>>::value ||
+            std::is_same<T, SoftSpokenMalOtSender>::value ||
+            std::is_same<T, SoftSpokenMalOtReceiver>::value,
+        std::true_type,
+        std::false_type>::type;
 #else
-    template<typename T>
+    template <typename T>
     using is_SoftSpoken = std::false_type;
 #endif
 
     template<typename T>
     typename std::enable_if<is_SoftSpoken<T>::value, T>::type
-        construct(CLP& cmd)
+        construct(const CLP& cmd)
     {
         return T(cmd.getOr("f", 2));
     }
 
     template<typename T>
     typename std::enable_if<!is_SoftSpoken<T>::value, T>::type
-        construct(CLP& cmd)
+        construct(const CLP& cmd)
     {
         return T{};
     }
@@ -79,10 +74,8 @@ namespace osuCrypto
 
         PRNG prng(sysRandomSeed());
 
-
-        OtExtSender  sender;
-        OtExtRecver  receiver;
-
+        OtExtSender sender = construct<OtExtSender>(cmd);
+        OtExtRecver receiver = construct<OtExtRecver>(cmd);
 
 #ifdef LIBOTE_HAS_BASE_OT
         // Now compute the base OTs, we need to set them on the first pair of extenders.
