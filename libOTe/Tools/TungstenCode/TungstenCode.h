@@ -227,6 +227,7 @@ namespace osuCrypto {
                                 auto xi = x + i;
                                 auto xs = x + ((i + 1) % size);
                                 ctx.plus(*xs, *xs, *xi);
+                                ctx.mulConst(*xs, *xs);
 
                                 for (u64 p = 0; p < Table::data[0].size(); ++p)
                                 {
@@ -254,6 +255,7 @@ namespace osuCrypto {
                                 ctx.plus(*x1, *x1, *xi);
                                 ctx.plus(*x2, *x2, *xi);
                                 ctx.plus(*x3, *x3, *xi);
+                                ctx.mulConst(*xs, *xs);
 
                             }
                         }
