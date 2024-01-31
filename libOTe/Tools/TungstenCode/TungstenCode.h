@@ -228,7 +228,7 @@ namespace osuCrypto {
                                     return;
 
                                 auto xi = x + i;
-                                auto xs = x + ((i + 1) % size);
+                                auto xs = x + ((i + Table::max + 1) % size);
                                 ctx.plus(*xs, *xs, *xi);
                                 ctx.mulConst(*xs, *xs);
 
@@ -247,7 +247,7 @@ namespace osuCrypto {
                             {
                                 auto xi = x + i;
 
-                                auto xs = xi + 1;
+                                auto xs = xi + Table::max + 1;
                                 auto x0 = xi + table[j].data()[0];
                                 auto x1 = xi + table[j].data()[1];
                                 auto x2 = xi + table[j].data()[2];
@@ -297,7 +297,7 @@ namespace osuCrypto {
                 // for the first iteration, the last accumulateBlock
                 // will wrap anmd change its value. We therefore can't
                 // yet map the output for this part. We do this at the end.
-                while (i < Table::max)
+                while (i <= Table::max)
                 {
                     TungstenNoop noop;
                     if (i < main)
