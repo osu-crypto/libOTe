@@ -28,7 +28,7 @@ namespace tests_libOTe
             if (i == x.size())
                 return;
 
-            auto idx = (i + 1) % x.size();
+            auto idx = (i + Table::max + 1) % x.size();
             ctx.plus(x[idx], x[idx], x[i]);
             ctx.mulConst(x[idx], x[idx]);
 
