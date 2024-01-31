@@ -43,8 +43,13 @@ namespace tests_libOTe
             tc.add("Mtx_invert_test                         ", tests::Mtx_invert_test);
 
             tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
+            tc.add("EACode_weight_test                      ", EACode_weight_test);
+
             tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
+            tc.add("ExConvCode_weight_test                  ", ExConvCode_weight_test);
+            
             tc.add("TungstenCode_encode_test                ", TungstenCode_encode_test);
+            tc.add("TungstenCode_weight_test                ", TungstenCode_weight_test);
 
             tc.add("Tools_Pprf_expandOne_test               ", Tools_Pprf_expandOne_test);
             tc.add("Tools_Pprf_inter_test                   ", Tools_Pprf_inter_test);

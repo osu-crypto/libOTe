@@ -2,7 +2,10 @@
 #include "libOTe/Tools/TungstenCode/TungstenCode.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "libOTe/Tools/CoeffCtx.h"
-
+#include "TungstenCode_Tests.h"
+#include "ExConvCode_Tests.h"
+#include "cryptoTools/Common/Log.h"
+#include "libOTe/Tools/ExConvCode/ExConvChecker.h"
 using namespace oc;
 using namespace oc::experimental;
 namespace tests_libOTe
@@ -16,7 +19,7 @@ namespace tests_libOTe
     >
     void accumulateBlock(
         span<T> x,
-        u64 i, 
+        u64 i,
         Ctx ctx)
     {
         auto table = Table::data;
@@ -180,10 +183,35 @@ namespace tests_libOTe
         for (auto k : K) for (auto r : R)
         {
             TungstenCode_encode_impl<u32, CoeffCtxInteger>(k, r);
-            TungstenCode_encode_impl<u8, CoeffCtxInteger>(k,r);
+            TungstenCode_encode_impl<u8, CoeffCtxInteger>(k, r);
             TungstenCode_encode_impl<block, CoeffCtxGF128>(k, r);
             TungstenCode_encode_impl<std::array<u8, 4>, CoeffCtxArray<u8, 4>>(k, r);
         }
 
+    }
+    void TungstenCode_weight_test(const oc::CLP& cmd)
+    {
+        u64  k = cmd.getOr("k", 1ull << cmd.getOr("kk", 6));
+        u64 n = k * 2;
+        bool verbose = cmd.isSet("v");
+        TungstenCode encoder;
+        encoder.config(k, n);
+        encoder.mNumIter = cmd.getOr("iter", 2);
+        auto threshold = n / 4 - 2 * std::sqrt(n);
+        u64 min = 0;
+        //if(cmd.isSet("x2"))
+        //    min = getGeneratorWeightx2(encoder, verbose);
+        //else
+        min = getGeneratorWeight(encoder, verbose);
+
+        if (verbose)
+        {
+            std::cout << min << " / " << n << " = " << double(min) / n << " < threshold " << double(threshold) / n << std::endl;
+        }
+
+        if (min < threshold)
+        {
+            throw RTE_LOC;
+        }
     }
 }

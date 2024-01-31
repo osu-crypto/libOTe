@@ -25,11 +25,13 @@ namespace osuCrypto
             u64 messageSize,
             u64 codeSize,
             u64 expanderWeight,
+            bool regularExpander = true,
             block seed = block(33333, 33333))
         {
             mMessageSize = messageSize;
             mCodeSize = codeSize;
             mExpanderWeight = expanderWeight;
+            mRegular = regularExpander;
             mSeed = seed;
         }
 
@@ -45,13 +47,15 @@ namespace osuCrypto
         // The row weight of the B matrix.
         u64 mExpanderWeight = 0;
 
+        bool mRegular = true;
+
         u64 parityRows() const { return mCodeSize - mMessageSize; }
         u64 parityCols() const { return mCodeSize; }
 
         u64 generatorRows() const { return mMessageSize; }
         u64 generatorCols() const { return mCodeSize; }
 
-
+        // expand uniformly with the desired weight
         template<
             typename F,
             typename CoeffCtx,
@@ -66,6 +70,21 @@ namespace osuCrypto
         ) const;
 
 
+        //// expand so that each region has weight 1.
+        //template<
+        //    typename F,
+        //    typename CoeffCtx,
+        //    bool add,
+        //    typename SrcIter,
+        //    typename DstIter
+        //>
+        //void expandRegular(
+        //    SrcIter&& input,
+        //    DstIter&& output,
+        //    CoeffCtx ctx = {}
+        //) const;
+
+
         //template<
         //    bool Add,
         //    typename CoeffCtx,
@@ -76,6 +95,7 @@ namespace osuCrypto
         //    std::tuple<SrcDstIterPair...>  out,
         //    CoeffCtx ctx = {})const;
 
+        Matrix<u64> getMatrix();
     };
 
 
@@ -95,7 +115,6 @@ namespace osuCrypto
         (void)*(input + (mCodeSize - 1));
         (void)*(output + (mMessageSize - 1));
 
-        detail::ExpanderModd prng(mSeed, mCodeSize);
 
         auto rInput = ctx.template restrictPtr<const F>(input);
         auto rOutput = ctx.template restrictPtr<F>(output);
@@ -103,24 +122,59 @@ namespace osuCrypto
         auto main = mMessageSize / 8 * 8;
         u64 i = 0;
 
-        for (; i < main; i += 8, rOutput+= 8)
+        u64 reg = 0, uni = mExpanderWeight, step = 0;
+        detail::ExpanderModd uniGen(mSeed, mCodeSize), regGen;
+        if (mRegular)
+        {
+            uni = mExpanderWeight / 2;
+            reg = mExpanderWeight - uni;
+            step = mCodeSize / reg;
+            regGen.init(mSeed ^ block(342342134, 23421341), step);
+        }
+
+
+        for (; i < main; i += 8, rOutput += 8)
         {
             if constexpr (Add == false)
             {
                 ctx.zero(rOutput, rOutput + 8);
             }
-
-            for (auto j = 0ull; j < mExpanderWeight; ++j)
+             
+            // regular expanders
+            for (auto j = 0ull; j < reg; ++j)
             {
                 u64 rr[8];
-                rr[0] = prng.get();
-                rr[1] = prng.get();
-                rr[2] = prng.get();
-                rr[3] = prng.get();
-                rr[4] = prng.get();
-                rr[5] = prng.get();
-                rr[6] = prng.get();
-                rr[7] = prng.get();
+                rr[0] = regGen.get() + j * step;
+                rr[1] = regGen.get() + j * step;
+                rr[2] = regGen.get() + j * step;
+                rr[3] = regGen.get() + j * step;
+                rr[4] = regGen.get() + j * step;
+                rr[5] = regGen.get() + j * step;
+                rr[6] = regGen.get() + j * step;
+                rr[7] = regGen.get() + j * step;
+
+                ctx.plus(*(rOutput + 0), *(rOutput + 0), *(rInput + rr[0]));
+                ctx.plus(*(rOutput + 1), *(rOutput + 1), *(rInput + rr[1]));
+                ctx.plus(*(rOutput + 2), *(rOutput + 2), *(rInput + rr[2]));
+                ctx.plus(*(rOutput + 3), *(rOutput + 3), *(rInput + rr[3]));
+                ctx.plus(*(rOutput + 4), *(rOutput + 4), *(rInput + rr[4]));
+                ctx.plus(*(rOutput + 5), *(rOutput + 5), *(rInput + rr[5]));
+                ctx.plus(*(rOutput + 6), *(rOutput + 6), *(rInput + rr[6]));
+                ctx.plus(*(rOutput + 7), *(rOutput + 7), *(rInput + rr[7]));
+            }
+
+            // uniform expanders
+            for (auto j = 0ull; j < uni; ++j)
+            {
+                u64 rr[8];
+                rr[0] = uniGen.get();
+                rr[1] = uniGen.get();
+                rr[2] = uniGen.get();
+                rr[3] = uniGen.get();
+                rr[4] = uniGen.get();
+                rr[5] = uniGen.get();
+                rr[6] = uniGen.get();
+                rr[7] = uniGen.get();
 
                 ctx.plus(*(rOutput + 0), *(rOutput + 0), *(rInput + rr[0]));
                 ctx.plus(*(rOutput + 1), *(rOutput + 1), *(rInput + rr[1]));
@@ -140,12 +194,55 @@ namespace osuCrypto
 
         for (; i < mMessageSize; ++i, ++rOutput)
         {
-            for (auto j = 0ull; j < mExpanderWeight; ++j)
+            for (auto j = 0ull; j < reg; ++j)
             {
-                ctx.plus(*rOutput, *rOutput, *(input + prng.get()));
+                ctx.plus(*rOutput, *rOutput, *(input + regGen.get() + j * step));
+            }
+
+            for (auto j = 0ull; j < uni; ++j)
+            {
+                ctx.plus(*rOutput, *rOutput, *(input + uniGen.get()));
             }
         }
     }
+
+    inline Matrix<u64> ExpanderCode::getMatrix()
+    {
+        Matrix<u64> ret(mMessageSize, mExpanderWeight);
+
+        auto main = mMessageSize / 8 * 8;
+        u64 i = 0;
+
+        u64 step = mRegular ? mCodeSize / mExpanderWeight : 0;
+        detail::ExpanderModd prng(mSeed, mRegular ? mCodeSize / mExpanderWeight : mCodeSize);
+
+        for (; i < main; i += 8)
+        {
+            for (auto j = 0ull; j < mExpanderWeight; ++j)
+            {
+                ret(i + 0, j) = prng.get() + step * j;
+                ret(i + 1, j) = prng.get() + step * j;
+                ret(i + 2, j) = prng.get() + step * j;
+                ret(i + 3, j) = prng.get() + step * j;
+                ret(i + 4, j) = prng.get() + step * j;
+                ret(i + 5, j) = prng.get() + step * j;
+                ret(i + 6, j) = prng.get() + step * j;
+                ret(i + 7, j) = prng.get() + step * j;
+
+            }
+        }
+
+        for (; i < mMessageSize; ++i)
+        {
+            for (auto j = 0ull; j < mExpanderWeight; ++j)
+            {
+                ret(i, j) = prng.get() + step * j;
+            }
+        }
+
+        return ret;
+    }
+
 
     //template<
     //    bool Add,

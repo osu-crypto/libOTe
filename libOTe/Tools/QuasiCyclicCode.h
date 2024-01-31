@@ -45,17 +45,6 @@ namespace osuCrypto
         //size of the input
         u64 size() { return mCodeSize; }
 
-        // initialize the compressing matrix that maps a
-        // vector of size n * scaler to a vector of size n.
-        void init(u64 n, u64 scaler = 2)
-        {
-            if (scaler <= 1)
-                throw RTE_LOC;
-
-            mMessageSize = n;
-            mPrimeModulus = nextPrime(n);
-            mCodeSize = mMessageSize * scaler;
-        }
         void init2(u64 messageSize, u64 codeSize)
         {
             auto scaler = divCeil(codeSize, messageSize);

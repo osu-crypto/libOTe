@@ -2,6 +2,8 @@
 #include "libOTe/Tools/EACode/EACode.h"
 #include <iomanip>
 #include "libOTe/Tools/CoeffCtx.h"
+#include "libOTe_Tests/ExConvCode_Tests.h"
+#include "libOTe/Tools/ExConvCode/ExConvChecker.h"
 
 namespace osuCrypto
 {
@@ -82,6 +84,32 @@ namespace osuCrypto
         if (m0 != m1)
             throw RTE_LOC;
 
+    }
+
+
+    void EACode_weight_test(const oc::CLP& cmd)
+    {
+        u64  k = cmd.getOr("k", 1ull << cmd.getOr("kk", 6));
+        u64 n = k * 2;
+        u64 bw = cmd.getOr("bw", 21);
+        bool verbose = cmd.isSet("v");
+
+        EACode encoder;
+        encoder.config(k, n, bw);
+        auto threshold = n / 4 - 2 * std::sqrt(n);
+        u64 min = 0;
+        //if (cmd.isSet("x2"))
+        //    min = getGeneratorWeightx2(encoder, verbose);
+        //else
+        min = getGeneratorWeight(encoder, verbose);
+
+        if(verbose)
+            std::cout << min << " / " << n << " = " << double(min) / n << std::endl;
+
+        if (min < threshold)
+        {
+            throw RTE_LOC;
+        }
     }
 
 }

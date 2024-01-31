@@ -183,24 +183,15 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
 
 
     QuasiCyclicCode code;
-    u64 nn = 1 << 10;
+    u64 k = 1 << 10;
     u64 t = 1;
     auto scaler = 2;
-    //auto secParam = 128;
-
-    auto mP = nextPrime(nn);
-    auto n = mP * scaler;
-    //auto mNumPartitions = getPartitions(scaler, mP, secParam);
-    //auto ss = (mP * scaler + mNumPartitions - 1) / mNumPartitions;
-    //mSizePer = roundUpTo(ss, 8);
-    //mNoiseVecSize = mSizePer * mNumPartitions;
-    //mN = mNoiseVecSize / scaler;
-    //mScaler = scaler;
+    auto n = k * scaler;
 
     AlignedUnVector<block> A(n), B(n), C(n);
 
     PRNG prng(oc::ZeroBlock);
-    code.init(mP);
+    code.init2(k, n);
 
     for (auto tt : rng(t))
     {
@@ -218,7 +209,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
         code.dualEncode(B);
         code.dualEncode(C);
 
-        for (u64 i : rng(mP))
+        for (u64 i : rng(k))
         {
             if (C[i] != (A[i] ^ B[i]))
                 throw RTE_LOC;
@@ -239,7 +230,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
 
         code.dualEncode(A);
 
-        for (u64 i : rng(mP))
+        for (u64 i : rng(k))
         {
 
             if (A[i] != oc::AllOneBlock && A[i] != oc::ZeroBlock)
@@ -254,9 +245,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
 
     {
 
-        mP = nextPrime(50);
-        n = mP * scaler;
-        code.init(mP);
+        code.init2(k,n);
         auto mtx = code.getMatrix();
         A.resize(n);
         auto bb = 10;
@@ -273,7 +262,7 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
         code.dualEncode(A);
         auto A2 = AA * mtx;
 
-        for (auto i : rng(mP))
+        for (auto i : rng(k))
         {
             for (u64 j : rng(bb))
                 if (A2(j, i) != *BitIterator((u8*)&A[i], j))
@@ -333,6 +322,9 @@ namespace {
             throw RTE_LOC;
         bool passed = true;
 
+        auto hamming = choice.hammingWeight();
+        if(hamming < n / 2 - std::sqrt(n))
+            throw RTE_LOC;
         for (u64 i = 0; i < n; ++i)
         {
             block m1 = messages[i];
@@ -387,6 +379,7 @@ namespace {
         //bool first = true;
         block mask = AllOneBlock ^ OneBlock;
 
+        u64 hamming = 0;
 
         for (u64 i = 0; i < n; ++i)
         {
@@ -414,6 +407,8 @@ namespace {
             {
                 c = choice[i];
             }
+
+            hamming += c;
 
             std::array<bool, 2> eqq{
                 eq(m1, m2a),
@@ -447,6 +442,9 @@ namespace {
         }
 
         if (passed == false)
+            throw RTE_LOC;
+
+        if (n > 100 && hamming < n / 2 - std::sqrt(n))
             throw RTE_LOC;
     }
 

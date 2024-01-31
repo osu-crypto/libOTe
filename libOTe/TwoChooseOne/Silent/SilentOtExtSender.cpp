@@ -165,52 +165,10 @@ namespace osuCrypto
         mMalType = malType;
         mNumThreads = numThreads;
         u64 secParam = 128;
+        mRequestNumOts = numOTs;;
 
+        syndromeDecodingConfigure(mNumPartitions, mSizePer, mNoiseVecSize, secParam, mRequestNumOts, mMultType);
 
-        switch (mMultType)
-        {
-        case osuCrypto::MultType::QuasiCyclic:
-
-            QuasiCyclicConfigure(numOTs, secParam, scaler,
-                mMultType,
-                mRequestNumOts,
-                mNumPartitions,
-                mSizePer,
-                mNoiseVecSize,
-                mN,
-                mP,
-                mScaler);
-
-            break;
-        case osuCrypto::MultType::ExAcc7:
-        case osuCrypto::MultType::ExAcc11:
-        case osuCrypto::MultType::ExAcc21:
-        case osuCrypto::MultType::ExAcc40:
-
-            EAConfigure(numOTs, secParam, mMultType, mRequestNumOts, mNumPartitions, mSizePer, mNoiseVecSize, mN, mEAEncoder);
-            break;
-        case osuCrypto::MultType::ExConv7x24:
-        case osuCrypto::MultType::ExConv21x24:
-
-            ExConvConfigure(numOTs, secParam, mMultType, mRequestNumOts, mNumPartitions, mSizePer, mNoiseVecSize, mN, mExConvEncoder);
-            break;
-        case osuCrypto::MultType::Tungsten:
-        {
-            double minDist;
-            mRequestNumOts = numOTs;
-            mN = roundUpTo(numOTs, 8);
-            TungstenConfigure(mScaler, minDist);
-
-            mNumPartitions = getRegNoiseWeight(minDist, secParam);
-            mSizePer = std::max<u64>(4, roundUpTo(divCeil(mRequestNumOts * mScaler, mNumPartitions), 2));
-            mNoiseVecSize = mSizePer * mNumPartitions;
-
-            break;
-        }
-        default:
-            throw RTE_LOC;
-            break;
-        }
 
         mGen.configure(mSizePer, mNumPartitions);
     }
@@ -228,12 +186,10 @@ namespace osuCrypto
 
     void SilentOtExtSender::clear()
     {
-        mN = 0;
         mNoiseVecSize = 0;
         mRequestNumOts = 0;
         mSizePer = 0;
         mNumPartitions = 0;
-        mP = 0;
 
         mB = {};
 
@@ -389,7 +345,7 @@ namespace osuCrypto
 
         if (isConfigured() == false)
         {
-            configure(n, mScaler, mNumThreads, mMalType);
+            configure(n, 2, mNumThreads, mMalType);
         }
 
         if (n != mRequestNumOts)
@@ -485,7 +441,7 @@ namespace osuCrypto
 
 #ifdef ENABLE_BITPOLYMUL
             QuasiCyclicCode code;
-            code.init(mP, mScaler);
+            code.init2(mRequestNumOts, mNoiseVecSize);
             code.dualEncode(mB.subspan(0, code.size()));
 #else
             throw std::runtime_error("ENABLE_BITPOLYMUL");
@@ -497,22 +453,35 @@ namespace osuCrypto
         case osuCrypto::MultType::ExAcc21:
         case osuCrypto::MultType::ExAcc40:
         {
-            if (mTimer)
-                mEAEncoder.setTimer(getTimer());
-            AlignedUnVector<block> B2(mEAEncoder.mMessageSize);
-            mEAEncoder.dualEncode<block, CoeffCtxGF2>(mB.subspan(0, mEAEncoder.mCodeSize), B2, {});
+            EACode encoder;
+            u64 expanderWeight = 0, _1;
+            double _2;
+            EAConfigure(mMultType, _1, expanderWeight, _2);
+            encoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight);
+
+            AlignedUnVector<block> B2(encoder.mMessageSize);
+            encoder.dualEncode<block, CoeffCtxGF2>(mB, B2, {});
             std::swap(mB, B2);
             break;
         }
         case osuCrypto::MultType::ExConv7x24:
         case osuCrypto::MultType::ExConv21x24:
-            if (mTimer)
-                mExConvEncoder.setTimer(getTimer());
-            mExConvEncoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
+        {
+
+            u64 expanderWeight = 0, accWeight = 0, _1;
+            double _2;
+            ExConvConfigure(mMultType, _1, expanderWeight, accWeight, _2);
+
+            ExConvCode exConvEncoder;
+            exConvEncoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight, accWeight);
+
+            exConvEncoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
             break;
+        }
         case osuCrypto::MultType::Tungsten:
         {
             experimental::TungstenCode encoder;
+            encoder.config(oc::roundUpTo(mRequestNumOts, 8), mNoiseVecSize);
             encoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
             break;
         }

@@ -25,6 +25,7 @@
 #include "libOTe/Tools/LDPC/Util.h"
 #include "cryptoTools/Crypto/RandomOracle.h"
 #include "libOTe/Tools/EACode/EAChecker.h"
+#include "libOTe/Tools/ExConvCode/ExConvChecker.h"
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
@@ -84,7 +85,19 @@ int main(int argc, char** argv)
 	cmd.parse(argc, argv);
 
 	bool flagSet = false;
+
+	if (cmd.isSet("EAChecker"))
+	{
+		EAChecker(cmd);
+		return 0;
+	}
+	if (cmd.isSet("ExConvChecker"))
+	{
+		ExConvChecker(cmd);
+		return 0;
+	}
 	
+
 	// various benchmarks
 	if (cmd.isSet("bench"))
 	{
