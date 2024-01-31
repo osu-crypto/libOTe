@@ -33,20 +33,11 @@ namespace osuCrypto
     class SilentOtExtReceiver : public OtExtReceiver, public TimerAdapter
     {
     public:
-        // The prime for QuasiCycic encoding
-        u64 mP = 0;
-
         // the number of OTs being requested.
         u64 mRequestNumOts = 0;
 
-        // The dense vector size, this will be at least as big as mRequestNumOts.
-        u64 mN = 0;
-
         // The sparse vector size, this will be mN * mScaler.
         u64 mNoiseVecSize = 0;
-
-        // The scaling factor that the sparse vector will be compressed by.
-        u64 mScaler = 2;
 
         // The size of each regular section of the sparse vector.
         u64 mSizePer = 0;
@@ -99,13 +90,6 @@ namespace osuCrypto
 
         // The flag which controls whether the malicious check is performed.
         SilentSecType mMalType = SilentSecType::SemiHonest;
-
-        // The Silver encoder for MultType::slv5, MultType::slv11
-#ifdef ENABLE_INSECURE_SILVER
-        SilverEncoder mEncoder;
-#endif
-        ExConvCode mExConvEncoder;
-        EACode mEAEncoder;
 
         // A flag that helps debug
         bool mDebug = false;
@@ -172,7 +156,7 @@ namespace osuCrypto
             SilentSecType mal = SilentSecType::SemiHonest);
 
         // return true if this instance has been configured.
-        bool isConfigured() const { return mN > 0; }
+        bool isConfigured() const { return mRequestNumOts > 0; }
 
         // Returns how many base OTs the silent OT extension
         // protocol will needs.

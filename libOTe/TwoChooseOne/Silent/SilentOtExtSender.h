@@ -77,14 +77,8 @@ namespace osuCrypto
         // the number of OTs being requested.
         u64 mRequestNumOts = 0;
 
-        // The prime for QuasiCycic encoding
-        u64 mP = 0;
-
         // The sparse vector size, this will be mN * mScaler.
         u64 mNoiseVecSize = 0;
-        
-        // The dense vector size, this will be at least as big as mRequestNumOts.
-        u64 mN = 0;
         
         // The number of regular section of the sparse vector.
         u64 mNumPartitions = 0;
@@ -92,9 +86,6 @@ namespace osuCrypto
         // The size of each regular section of the sparse vector.
         u64 mSizePer = 0;
         
-        // The scaling factor that the sparse vector will be compressed by.
-        u64 mScaler = 2;
-
         // The B vector in the relation A + B = C * delta
         AlignedUnVector<block> mB;
 
@@ -119,16 +110,12 @@ namespace osuCrypto
         // The flag which controls whether the malicious check is performed.
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
-        ExConvCode mExConvEncoder;
-        EACode mEAEncoder;
-
         // The OTs send msgs which will be used to create the 
         // secret share of xa * delta as described in ferret.
         std::vector<std::array<block, 2>> mMalCheckOts;
 
         // A flag that helps debug
         bool mDebug = false;
-
 
         virtual ~SilentOtExtSender() = default;
 
@@ -192,7 +179,7 @@ namespace osuCrypto
             SilentSecType malType = SilentSecType::SemiHonest);
 
         // return true if this instance has been configured.
-        bool isConfigured() const { return mN > 0; }
+        bool isConfigured() const { return mRequestNumOts > 0; }
 
         // Returns how many base OTs the silent OT extension
         // protocol will needs.

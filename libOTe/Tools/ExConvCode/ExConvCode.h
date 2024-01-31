@@ -70,6 +70,7 @@ namespace osuCrypto
             u64 expanderWeight = 7,
             u64 accumulatorWeight = 16,
             bool systematic = true,
+            bool regularExpander = true,
             block seed = block(9996754675674599, 56756745976768754));
 
         // the seed that generates the code.
@@ -86,6 +87,10 @@ namespace osuCrypto
 
         // is the code systematic (true=faster)
         bool mSystematic = true;
+
+        // accumulate twice, this guards against an weakness when the expander expands
+        // into a small region. This region could be at the end and therefore small weight.
+        bool mAccTwice = true;
 
         // return n-k. code size n, message size k. 
         u64 parityRows() const { return mCodeSize - mMessageSize; }
@@ -155,9 +160,10 @@ namespace osuCrypto
             typename Iter
         >
         OC_FORCEINLINE void accOne8(
-            Iter&& xi,
-            Iter&& xj,
-            Iter&& end,
+            Iter X,
+            u64 i,
+            u64 j,
+            u64 size,
             u8 b,
             CoeffCtx& ctx);
 
@@ -170,8 +176,9 @@ namespace osuCrypto
             typename Iter
         >
         OC_FORCEINLINE void accOne(
-            Iter&& xi,
-            Iter&& end,
+            Iter x,
+            u64 i,
+            u64 size,
             u8* matrixCoeff,
             CoeffCtx& ctx);
 
@@ -183,8 +190,9 @@ namespace osuCrypto
             typename Iter
         >
         OC_FORCEINLINE void accOneGen(
-            Iter&& xi,
-            Iter&& end,
+            Iter x,
+            u64 i,
+            u64 size,
             u8* matrixCoeff,
             CoeffCtx& ctx);
 
@@ -199,17 +207,24 @@ namespace osuCrypto
             Iter x,
             CoeffCtx& ctx)
         {
+            auto size = mCodeSize - mSystematic * mMessageSize;
             switch (mAccumulatorSize)
             {
-            case 16:
-                accumulateFixed<F, CoeffCtx, 16, Iter>(std::forward<Iter>(x), ctx);
-                break;
+                //case 16:
+                //    accumulateFixed<F, CoeffCtx, 16, Iter>(std::forward<Iter>(x), ctx);
+                //    accumulateFixed<F, CoeffCtx, 16, Iter>(std::forward<Iter>(x), ctx);
+                //    break;
             case 24:
-                accumulateFixed<F, CoeffCtx, 24, Iter>(std::forward<Iter>(x), ctx);
+                accumulateFixed<F, CoeffCtx, 24, Iter>(std::forward<Iter>(x), size, ctx, mSeed);
+
+                if (mAccTwice)
+                    accumulateFixed<F, CoeffCtx, 24, Iter>(std::forward<Iter>(x), size, ctx, ~mSeed);
                 break;
             default:
                 // generic case
-                accumulateFixed<F, CoeffCtx, 0, Iter>(std::forward<Iter>(x), ctx);
+                accumulateFixed<F, CoeffCtx, 0, Iter>(std::forward<Iter>(x), size, ctx, mSeed);
+                if (mAccTwice)
+                    accumulateFixed<F, CoeffCtx, 0, Iter>(std::forward<Iter>(x), size, ctx, ~mSeed);
             }
         }
 
@@ -220,8 +235,11 @@ namespace osuCrypto
             u64 AccumulatorSize,
             typename Iter
         >
-        void accumulateFixed(Iter x,
-            CoeffCtx& ctx);
+        void accumulateFixed(
+            Iter x,
+            u64 size,
+            CoeffCtx& ctx,
+            block seed);
 
     };
 
@@ -232,6 +250,7 @@ namespace osuCrypto
         u64 expanderWeight,
         u64 accumulatorSize,
         bool systematic,
+        bool regularExpander,
         block seed)
     {
         if (codeSize == 0)
@@ -242,7 +261,7 @@ namespace osuCrypto
         mCodeSize = codeSize;
         mAccumulatorSize = accumulatorSize;
         mSystematic = systematic;
-        mExpander.config(messageSize, codeSize - messageSize * systematic, expanderWeight, seed ^ CCBlock);
+        mExpander.config(messageSize, codeSize - messageSize * systematic, expanderWeight, regularExpander, seed ^ CCBlock);
     }
 
     // Compute e[0,...,k-1] = G * e.
@@ -252,6 +271,9 @@ namespace osuCrypto
         CoeffCtx ctx)
     {
         static_assert(is_iterator<Iter>::value, "must pass in an iterator to the data");
+
+        if(mCodeSize == 0)
+            throw RTE_LOC;
 
         (void)*(e_ + mCodeSize - 1);
 
@@ -263,7 +285,9 @@ namespace osuCrypto
             setTimePoint("ExConv.encode.begin");
             accumulate<F, CoeffCtx>(d, ctx);
             setTimePoint("ExConv.encode.accumulate");
+
             mExpander.expand<F, CoeffCtx, true>(d, e, ctx);
+
             setTimePoint("ExConv.encode.expand");
         }
         else
@@ -278,6 +302,7 @@ namespace osuCrypto
             auto wIter = ctx.template restrictPtr<F>(w.begin());
 
             mExpander.expand<F, CoeffCtx, false>(e, wIter, ctx);
+
             setTimePoint("ExConv.encode.expand");
 
             ctx.copy(w.begin(), w.end(), e);
@@ -297,12 +322,38 @@ namespace osuCrypto
         typename Iter
     >
     OC_FORCEINLINE void ExConvCode::accOne8(
-        Iter&& xi,
-        Iter&& xj,
-        Iter&& end,
+        Iter X,
+        u64 i,
+        u64 j,
+        u64 size,
         u8 b,
         CoeffCtx& ctx)
     {
+        auto xi = X + i;
+
+        u64 js[8];
+        js[0] = j + 0;
+        js[1] = j + 1;
+        js[2] = j + 2;
+        js[3] = j + 3;
+        js[4] = j + 4;
+        js[5] = j + 5;
+        js[6] = j + 6;
+        js[7] = j + 7;
+
+        // xj += bj * xi
+        if constexpr (rangeCheck)
+        {
+            // j mod size
+            js[0] = js[0] >= size ? js[0] - size : js[0];
+            js[1] = js[1] >= size ? js[1] - size : js[1];
+            js[2] = js[2] >= size ? js[2] - size : js[2];
+            js[3] = js[3] >= size ? js[3] - size : js[3];
+            js[4] = js[4] >= size ? js[4] - size : js[4];
+            js[5] = js[5] >= size ? js[5] - size : js[5];
+            js[6] = js[6] >= size ? js[6] - size : js[6];
+            js[7] = js[7] >= size ? js[7] - size : js[7];
+        }
 
 #ifdef ENABLE_SSE
         if constexpr (std::is_same<F, block>::value)
@@ -355,23 +406,14 @@ namespace osuCrypto
             assert((((b >> 6) & 1) ? *xi : ZeroBlock) == tt[6]);
             assert((((b >> 7) & 1) ? *xi : ZeroBlock) == tt[7]);
 
-            // xj += bj * xi
-            if (rangeCheck && xj + 0 == end) return;
-            ctx.plus(*(xj + 0), *(xj + 0), tt[0]);
-            if (rangeCheck && xj + 1 == end) return;
-            ctx.plus(*(xj + 1), *(xj + 1), tt[1]);
-            if (rangeCheck && xj + 2 == end) return;
-            ctx.plus(*(xj + 2), *(xj + 2), tt[2]);
-            if (rangeCheck && xj + 3 == end) return;
-            ctx.plus(*(xj + 3), *(xj + 3), tt[3]);
-            if (rangeCheck && xj + 4 == end) return;
-            ctx.plus(*(xj + 4), *(xj + 4), tt[4]);
-            if (rangeCheck && xj + 5 == end) return;
-            ctx.plus(*(xj + 5), *(xj + 5), tt[5]);
-            if (rangeCheck && xj + 6 == end) return;
-            ctx.plus(*(xj + 6), *(xj + 6), tt[6]);
-            if (rangeCheck && xj + 7 == end) return;
-            ctx.plus(*(xj + 7), *(xj + 7), tt[7]);
+            ctx.plus(*(X + js[0]), *(X + js[0]), tt[0]);
+            ctx.plus(*(X + js[1]), *(X + js[1]), tt[1]);
+            ctx.plus(*(X + js[2]), *(X + js[2]), tt[2]);
+            ctx.plus(*(X + js[3]), *(X + js[3]), tt[3]);
+            ctx.plus(*(X + js[4]), *(X + js[4]), tt[4]);
+            ctx.plus(*(X + js[5]), *(X + js[5]), tt[5]);
+            ctx.plus(*(X + js[6]), *(X + js[6]), tt[6]);
+            ctx.plus(*(X + js[7]), *(X + js[7]), tt[7]);
         }
         else
 #endif
@@ -385,22 +427,14 @@ namespace osuCrypto
             auto b6 = b & 64;
             auto b7 = b & 128;
 
-            if (rangeCheck && xj + 0 == end) return;
-            if (b0) ctx.plus(*(xj + 0), *(xj + 0), *xi);
-            if (rangeCheck && xj + 1 == end) return;
-            if (b1) ctx.plus(*(xj + 1), *(xj + 1), *xi);
-            if (rangeCheck && xj + 2 == end) return;
-            if (b2) ctx.plus(*(xj + 2), *(xj + 2), *xi);
-            if (rangeCheck && xj + 3 == end) return;
-            if (b3) ctx.plus(*(xj + 3), *(xj + 3), *xi);
-            if (rangeCheck && xj + 4 == end) return;
-            if (b4) ctx.plus(*(xj + 4), *(xj + 4), *xi);
-            if (rangeCheck && xj + 5 == end) return;
-            if (b5) ctx.plus(*(xj + 5), *(xj + 5), *xi);
-            if (rangeCheck && xj + 6 == end) return;
-            if (b6) ctx.plus(*(xj + 6), *(xj + 6), *xi);
-            if (rangeCheck && xj + 7 == end) return;
-            if (b7) ctx.plus(*(xj + 7), *(xj + 7), *xi);
+            if (b0) ctx.plus(*(X + js[0]), *(X + js[0]), *xi);
+            if (b1) ctx.plus(*(X + js[1]), *(X + js[1]), *xi);
+            if (b2) ctx.plus(*(X + js[2]), *(X + js[2]), *xi);
+            if (b3) ctx.plus(*(X + js[3]), *(X + js[3]), *xi);
+            if (b4) ctx.plus(*(X + js[4]), *(X + js[4]), *xi);
+            if (b5) ctx.plus(*(X + js[5]), *(X + js[5]), *xi);
+            if (b6) ctx.plus(*(X + js[6]), *(X + js[6]), *xi);
+            if (b7) ctx.plus(*(X + js[7]), *(X + js[7]), *xi);
         }
     }
 
@@ -413,55 +447,53 @@ namespace osuCrypto
         typename Iter
     >
     OC_FORCEINLINE void ExConvCode::accOneGen(
-        Iter&& xi,
-        Iter&& end,
+        Iter X,
+        u64 i,
+        u64 size,
         u8* matrixCoeff,
         CoeffCtx& ctx)
     {
 
-        // xj += xi
-        std::remove_reference_t<Iter> xj = xi + 1;
-        if (!rangeCheck || xj < end)
-        {
-            ctx.plus(*xj, *xj, *xi);
-            ctx.mulConst(*xj, *xj);
-            ++xj;
-        }
+        auto xi = X + i;
+
+        u64 j = i + 1;
+        if (rangeCheck && j >= size)
+            j -= size;
 
         // xj += bj * xi
         u64 k = 0;
-        for (; k < mAccumulatorSize - 7; k += 8)
+        for (; k + 7 < mAccumulatorSize; k += 8)
         {
-            accOne8<F, CoeffCtx, rangeCheck>(xi, xj, end, *matrixCoeff++, ctx);
+            accOne8<F, CoeffCtx, rangeCheck>(X, i, j, size, *matrixCoeff++, ctx);
 
-            if constexpr (rangeCheck)
-            {
-                auto r = end - xj;
-                xj += std::min<u64>(r, 8);
-            }
-            else
-            {
-                xj += 8;
-            }
+            j += 8;
+            if (rangeCheck && j >= size)
+                j -= size;
         }
+
+        // xj += bj * xi
         for (; k < mAccumulatorSize; )
         {
             auto b = *matrixCoeff++;
 
-            for (u64 j = 0; j < 8 && k < mAccumulatorSize; ++j, ++k)
+            for (u64 p = 0; p < 8 && k < mAccumulatorSize; ++p, ++k)
             {
-
-                if (rangeCheck == false || (xj != end))
+                if (b & 1)
                 {
-                    if (b & 1)
-                        ctx.plus(*xj, *xj, *xi);
-
-                    ++xj;
-                    b >>= 1;
+                    auto xj = X + j;
+                    ctx.plus(*xj, *xj, *xi);
                 }
 
+                b >>= 1;
+                ++j;
+                if (rangeCheck && j >= size)
+                    j -= size;
             }
         }
+
+        auto xj = X + j;
+        ctx.plus(*xj, *xj, *xi);
+        ctx.mulConst(*xj, *xj);
     }
 
 
@@ -474,38 +506,37 @@ namespace osuCrypto
         typename Iter
     >
     OC_FORCEINLINE void ExConvCode::accOne(
-        Iter&& xi,
-        Iter&& end,
+        Iter X,
+        u64 i,
+        u64 size,
         u8* matrixCoeff,
         CoeffCtx& ctx)
     {
         static_assert(AccumulatorSize, "should have called the other overload");
         static_assert(AccumulatorSize % 8 == 0, "must be a multiple of 8");
 
-        // xj += xi
-        std::remove_reference_t<Iter> xj = xi + 1;
-        if (!rangeCheck || xj < end)
-        {
-            ctx.plus(*xj, *xj, *xi);
-            ctx.mulConst(*xj, *xj);
-            ++xj;
-        }
+
+        auto xi = X + i;
+
+        u64 j = i + 1;
+        if (rangeCheck && j >= size)
+            j -= size;
+
 
         // xj += bj * xi
         for (u64 k = 0; k < AccumulatorSize; k += 8)
         {
-            accOne8<F, CoeffCtx, rangeCheck>(xi, xj, end, *matrixCoeff++, ctx);
+            accOne8<F, CoeffCtx, rangeCheck>(X, i, j, size, *matrixCoeff++, ctx);
 
-            if constexpr (rangeCheck)
-            {
-                auto r = end - xj;
-                xj += std::min<u64>(r, 8);
-            }
-            else
-            {
-                xj += 8;
-            }
+            j += 8;
+            if (rangeCheck && j >= size)
+                j -= size;
         }
+
+        auto xj = X + j;
+        ctx.plus(*xj, *xj, *xi);
+        ctx.mulConst(*xj, *xj);
+
     }
 
     // accumulate x onto itself.
@@ -516,13 +547,15 @@ namespace osuCrypto
         typename Iter
     >
     void ExConvCode::accumulateFixed(
-        Iter xi,
-        CoeffCtx& ctx)
+        Iter X,
+        u64 size,
+        CoeffCtx& ctx,
+        block seed)
     {
-        auto end = xi + (mCodeSize - mSystematic * mMessageSize);
-        auto main = end - 1 - mAccumulatorSize;
+        u64 i = 0;
+        auto main = size - 1 - mAccumulatorSize;
 
-        PRNG prng(mSeed ^ OneBlock);
+        PRNG prng(seed);
         u8* mtxCoeffIter = (u8*)prng.mBuffer.data();
         auto mtxCoeffEnd = mtxCoeffIter + prng.mBuffer.size() * sizeof(block) - divCeil(mAccumulatorSize, 8);
 
@@ -532,24 +565,7 @@ namespace osuCrypto
         if (AccumulatorSize && mAccumulatorSize != AccumulatorSize)
             throw RTE_LOC;
 
-        while (xi < main)
-        {
-            if (mtxCoeffIter > mtxCoeffEnd)
-            {
-                // generate more mtx coefficients
-                refill(prng);
-                mtxCoeffIter = (u8*)prng.mBuffer.data();
-            }
-
-            // add xi to the next positions
-            if constexpr(AccumulatorSize == 0)
-                accOneGen<F, CoeffCtx, false>(xi, end, mtxCoeffIter++, ctx);
-            else
-                accOne<F, CoeffCtx, false, AccumulatorSize>(xi, end, mtxCoeffIter++, ctx);
-            ++xi;
-        }
-
-        while (xi < end)
+        while (i < main)
         {
             if (mtxCoeffIter > mtxCoeffEnd)
             {
@@ -560,10 +576,27 @@ namespace osuCrypto
 
             // add xi to the next positions
             if constexpr (AccumulatorSize == 0)
-                accOneGen<F, CoeffCtx, true>(xi, end, mtxCoeffIter++, ctx);
+                accOneGen<F, CoeffCtx, false>(X, i, size, mtxCoeffIter++, ctx);
             else
-                accOne<F, CoeffCtx, true, AccumulatorSize>(xi, end, mtxCoeffIter++, ctx);
-            ++xi;
+                accOne<F, CoeffCtx, false, AccumulatorSize>(X, i, size, mtxCoeffIter++, ctx);
+            ++i;
+        }
+
+        while (i < size)
+        {
+            if (mtxCoeffIter > mtxCoeffEnd)
+            {
+                // generate more mtx coefficients
+                refill(prng);
+                mtxCoeffIter = (u8*)prng.mBuffer.data();
+            }
+
+            // add xi to the next positions
+            if constexpr (AccumulatorSize == 0)
+                accOneGen<F, CoeffCtx, true>(X, i, size, mtxCoeffIter++, ctx);
+            else
+                accOne<F, CoeffCtx, true, AccumulatorSize>(X, i, size, mtxCoeffIter++, ctx);
+            ++i;
         }
     }
 

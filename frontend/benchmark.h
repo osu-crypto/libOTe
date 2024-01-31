@@ -40,8 +40,7 @@ namespace osuCrypto
 
         oc::Timer timer;
         QuasiCyclicCode code;
-        auto p = nextPrime(n);
-        code.init(p);
+        code.init2(k, n);
         std::vector<block> c0(code.size(), ZeroBlock);
         for (auto t = 0ull; t < trials; ++t)
         {

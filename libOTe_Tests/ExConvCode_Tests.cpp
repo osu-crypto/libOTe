@@ -1,13 +1,13 @@
 #include "ExConvCode_Tests.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
-#include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include <iomanip>
 #include "libOTe/Tools/CoeffCtx.h"
+#include "libOTe/Tools/ExConvCode/ExConvChecker.h"
 
 namespace osuCrypto
 {
 
-    std::ostream& operator<<(std::ostream& o, const std::array<u8, 3>&a)
+    std::ostream& operator<<(std::ostream& o, const std::array<u8, 3>& a)
     {
         o << "{" << a[0] << " " << a[1] << " " << a[2] << "}";
         return o;
@@ -62,56 +62,61 @@ namespace osuCrypto
         }
         CoeffCtx ctx;
         std::vector<u8> rand(divCeil(aw, 8));
-        for (i64 i = 0; i < i64(x1.size() - aw - 1); ++i)
+        for (u64 i = 0; i < n; ++i)
         {
             prng.get(rand.data(), rand.size());
-            code.accOneGen<F, CoeffCtx, true>(x1.data() + i, x1.data()+n, rand.data(), ctx);
+            code.accOneGen<F, CoeffCtx, true>(x1.data(), i, n, rand.data(), ctx);
 
-            if (aw == 16)
-                code.accOne<F, CoeffCtx, true, 16>(x2.data() + i, x2.data()+n, rand.data(), ctx);
+            if (aw == 24)
+                code.accOne<F, CoeffCtx, true, 24>(x2.data(), i, n, rand.data(), ctx);
 
+            u64 j = i + 1;
 
-            ctx.plus(x3[i + 1], x3[i + 1], x3[i]);
-            //std::cout << "x" << i + 1 << " " << x3[i + 1] << " -> ";
-            ctx.mulConst(x3[i + 1], x3[i + 1]);
-            //std::cout << x3[i + 1] << std::endl;;
             assert(aw <= 64);
             u64 bits = 0;
             memcpy(&bits, rand.data(), std::min<u64>(rand.size(), 8));
-            for (u64 j = 0; j < aw && (i + j + 2) < x3.size(); ++j)
+            for (u64 a = 0; a < aw; ++a, ++j)
             {
                 if (bits & 1)
                 {
-                    ctx.plus(x3[i + j + 2], x3[i + j + 2], x3[i]);
+                    ctx.plus(x3[j % n], x3[j % n], x3[i]);
                 }
                 bits >>= 1;
             }
+            ctx.plus(x3[j % n], x3[j % n], x3[i]);
+            ctx.mulConst(x3[j % n], x3[j % n]);
 
-            for (u64 j = i; j < x1.size() && j < i + aw + 2; ++j)
+            j = i + 1;
+            for (u64 a = 0; a <= aw; ++a, ++j)
             {
-                if (aw == 16 && x1[j] != x2[j])
+                //auto j = (i + a + 2) % n;
+
+                if (aw == 24 && x1[j%n] != x2[j % n])
                 {
-                    std::cout << j << " " << ctx.str(x1[j]) << " " << ctx.str(x2[j]) << std::endl;
+                    std::cout << j % n << " " << ctx.str(x1[j % n]) << " " << ctx.str(x2[j % n]) << std::endl;
                     throw RTE_LOC;
                 }
 
-                if (x1[j] != x3[j])
+                if (x1[j % n] != x3[j % n])
                 {
-                    std::cout << j << " " << ctx.str(x1[j]) << " " << ctx.str(x3[j]) << std::endl;
+                    std::cout << j % n << " " << ctx.str(x1[j % n]) << " " << ctx.str(x3[j % n]) << std::endl;
                     throw RTE_LOC;
                 }
             }
         }
 
-
         x4 = x1;
-        //std::cout << std::endl;
+        u64 size = n - accOffset;
 
-        code.accumulateFixed<F, CoeffCtx, 0>(x1.data() + accOffset, ctx);
-
-        if (aw == 16)
+        code.accumulateFixed<F, CoeffCtx, 0>(x1.data() + accOffset, size, ctx, code.mSeed);
+        if (code.mAccTwice)
+            code.accumulateFixed<F, CoeffCtx, 0>(x1.data() + accOffset, size, ctx, ~code.mSeed);
+        if (aw == 24)
         {
-            code.accumulateFixed<F, CoeffCtx, 16>(x2.data() + accOffset, ctx);
+            code.accumulateFixed<F, CoeffCtx, 24>(x2.data() + accOffset, size, ctx, code.mSeed);
+
+            if (code.mAccTwice)
+                code.accumulateFixed<F, CoeffCtx, 24>(x2.data() + accOffset, size, ctx, ~code.mSeed);
 
             if (x1 != x2)
             {
@@ -124,43 +129,52 @@ namespace osuCrypto
         }
 
         {
-            PRNG coeffGen(code.mSeed ^ OneBlock);
-            u8* mtxCoeffIter = (u8*)coeffGen.mBuffer.data();
-            auto mtxCoeffEnd = mtxCoeffIter + coeffGen.mBuffer.size() * sizeof(block) - divCeil(aw, 8);
-
-            auto xi = x3.data() + accOffset;
-            auto end = x3.data() + n;
-            while (xi < end)
+            for (auto r = 0; r < 1 + code.mAccTwice; ++r)
             {
-                if (mtxCoeffIter > mtxCoeffEnd)
-                {
-                    // generate more mtx coefficients
-                    ExConvCode::refill(coeffGen);
-                    mtxCoeffIter = (u8*)coeffGen.mBuffer.data();
-                }
-                
-                // add xi to the next positions
-                auto xj = xi + 1;
-                if (xj != end)
-                {
-                    ctx.plus(*xj, *xj, *xi);
-                    ctx.mulConst(*xj, *xj);
-                    ++xj;
-                }
-                //assert((mtxCoeffEnd - mtxCoeffIter) * 8 >= aw);
-                u64 bits = 0;
-                memcpy(&bits, mtxCoeffIter, divCeil(aw,8));
-                for (u64 j = 0; j < aw && xj != end; ++j, ++xj)
-                {
-                    if (bits &1)
-                    {
-                        ctx.plus(*xj, *xj, *xi);
-                    }
-                    bits >>= 1;
-                }
-                ++mtxCoeffIter;
+                PRNG coeffGen(r ? ~code.mSeed : code.mSeed);
+                u8* mtxCoeffIter = (u8*)coeffGen.mBuffer.data();
+                auto mtxCoeffEnd = mtxCoeffIter + coeffGen.mBuffer.size() * sizeof(block) - divCeil(aw, 8);
 
-                ++xi;
+                auto x = x3.data() + accOffset;
+                u64 i = 0;
+                while (i < size)
+                {
+                    auto xi = x + i;
+
+                    if (mtxCoeffIter > mtxCoeffEnd)
+                    {
+                        // generate more mtx coefficients
+                        ExConvCode::refill(coeffGen);
+                        mtxCoeffIter = (u8*)coeffGen.mBuffer.data();
+                    }
+
+                    // add xi to the next positions
+                    auto j = (i + 1) % size;
+
+                    u64 bits = 0;
+                    memcpy(&bits, mtxCoeffIter, divCeil(aw, 8));
+                    for (u64 a = 0; a < aw; ++a)
+                    {
+
+                        if (bits & 1)
+                        {
+                            auto xj = x + j;
+                            ctx.plus(*xj, *xj, *xi);
+                        }
+                        bits >>= 1;
+                        j = (j + 1) % size;
+                    }
+
+                    {
+                        auto xj = x + j;
+                        ctx.plus(*xj, *xj, *xi);
+                        ctx.mulConst(*xj, *xj);
+                    }
+ 
+                    ++mtxCoeffIter;
+
+                    ++i;
+                }
             }
         }
 
@@ -174,7 +188,6 @@ namespace osuCrypto
         }
 
 
-        detail::ExpanderModd expanderCoeff(code.mExpander.mSeed, code.mExpander.mCodeSize);
         std::vector<F> y1(k), y2(k);
 
         if (sys)
@@ -193,15 +206,38 @@ namespace osuCrypto
             code.mExpander.expand<F, CoeffCtx, false>(x1.data() + accOffset, y1.data());
         }
 
+        u64 step, exSize, regCount = 0;;
+        if (code.mExpander.mRegular)
+        {
+            regCount = divCeil(code.mExpander.mExpanderWeight, 2);
+            exSize = step = code.mExpander.mCodeSize / regCount;
+        }
+        else
+        {
+            step = 0;
+            exSize = n;
+        }
+        detail::ExpanderModd regExp(code.mExpander.mSeed^ block(342342134, 23421341), exSize);
+        detail::ExpanderModd fullExp(code.mExpander.mSeed, code.mExpander.mCodeSize);
+
         u64 i = 0;
         auto main = k / 8 * 8;
         for (; i < main; i += 8)
         {
-            for (u64 j = 0; j < code.mExpander.mExpanderWeight; ++j)
+            
+            for (u64 j = 0; j < regCount; ++j)
             {
                 for (u64 p = 0; p < 8; ++p)
                 {
-                    auto idx = expanderCoeff.get();
+                    auto idx = regExp.get() + step * j;
+                    ctx.plus(y2[i + p], y2[i + p], x1[idx + accOffset]);
+                }
+            }
+            for (u64 j = 0; j < code.mExpander.mExpanderWeight - regCount; ++j)
+            {
+                for (u64 p = 0; p < 8; ++p)
+                {
+                    auto idx = fullExp.get();
                     ctx.plus(y2[i + p], y2[i + p], x1[idx + accOffset]);
                 }
             }
@@ -209,9 +245,14 @@ namespace osuCrypto
 
         for (; i < k; ++i)
         {
-            for (u64 j = 0; j < code.mExpander.mExpanderWeight; ++j)
+            for (u64 j = 0; j < regCount; ++j)
             {
-                auto idx = expanderCoeff.get();
+                auto idx = regExp.get() + step * j;
+                ctx.plus(y2[i], y2[i], x1[idx + accOffset]);
+            }
+            for (u64 j = 0; j < code.mExpander.mExpanderWeight - regCount; ++j)
+            {
+                auto idx = fullExp.get();
                 ctx.plus(y2[i], y2[i], x1[idx + accOffset]);
             }
         }
@@ -245,8 +286,8 @@ namespace osuCrypto
     //        //return _mm_slli_si128(x, 8);
     //    }
     //    //TEMP[i] : = (TEMP1[0] and TEMP2[i])
-    //    //    FOR j : = 1 to i
-    //    //    TEMP[i] : = TEMP[i] XOR(TEMP1[j] AND TEMP2[i - j])
+    //    //    FOR a : = 1 to i
+    //    //    TEMP[i] : = TEMP[i] XOR(TEMP1[a] AND TEMP2[i - a])
     //    //    ENDFOR
     //    //dst[i] : = TEMP[i]
     //}
@@ -270,4 +311,183 @@ namespace osuCrypto
         }
 
     }
+
+
+    Matrix<u8> getAccumulator(ExConvCode& encoder)
+    {
+        auto k = encoder.mMessageSize;;
+        auto n = encoder.mCodeSize;;
+        if (encoder.mSystematic == false)
+            throw RTE_LOC;//not impl
+
+        auto d = n - k;
+        Matrix<u8> g(d, d);
+        for (u64 i = 0; i < d; ++i)
+        {
+            std::vector<u8> x(d);
+            x[i] = 1;
+            CoeffCtxGF2 ctx;
+            encoder.accumulate<u8, CoeffCtxGF2>(x.data(), ctx);
+
+            for (u64 j = 0; j < d; ++j)
+            {
+                g(j, i) = x[j];
+            }
+        }
+        return g;
+    }
+
+
+    u64 getGeneratorWeight_(ExConvCode& encoder, bool verbose)
+    {
+        auto k = encoder.mMessageSize;
+        auto n = encoder.mCodeSize;
+        auto g = getGenerator(encoder);
+        //bool failed = false;
+        u64 min = n;
+        u64 iMin = 0;;
+        for (u64 i = 0; i < k; ++i)
+        {
+            u64 weight = 0;
+            for (u64 j = 0; j < n; ++j)
+            {
+                //if (verbose)
+                //{
+                //    if (g(i, j))
+                //        std::cout << Color::Green << "1" << Color::Default;
+                //    else
+                //        std::cout << "0";
+                //}
+                assert(g(i, j) < 2);
+                weight += g(i, j);
+            }
+            //if (verbose)
+            //    std::cout << std::endl;
+
+            if (weight < min)
+                iMin = i;
+            min = std::min<u64>(min, weight);
+        }
+
+        if (verbose)
+        {
+            auto Ex = encoder.mExpander.getMatrix();
+            //for (u64 i = 0; i < Ex.cols(); ++i)
+            //{
+            //    std::cout << Ex(985, i) << " ";
+
+            //}
+            //std::cout << " ~ " << k << std::endl;
+
+            std::cout << "i " << iMin << " " << min << " / " << n << " = " << double(min) / n << std::endl;
+            for (u64 j = 0; j < n; ++j)
+            {
+                auto ei = Ex[iMin];
+                bool found = std::find(ei.begin(), ei.end(), j - k) != ei.end();
+                if (j == iMin + k)
+                {
+                    std::cout << Color::Blue << int(g(iMin, j)) << Color::Default;
+
+                }
+                else if (found)
+                {
+                    std::cout << Color::Red << int(g(iMin, j)) << Color::Default;
+
+                }
+                else if (g(iMin, j))
+                    std::cout << Color::Green << "1" << Color::Default;
+                else
+                    std::cout << "0";
+
+                if (j == k - 1)
+                {
+                    std::cout << "\n";
+                }
+            }
+            std::cout << std::endl << "--------------------------------\n";
+
+            auto a = getAccumulator(encoder);
+
+            auto ei = Ex[iMin];
+            for (auto i : ei)
+            {
+                for (u64 j = 0; j < k; ++j)
+                {
+                    if (a(i, j))
+                        std::cout << Color::Green << "1" << Color::Default;
+                    else
+                        std::cout << "0";
+                }
+                std::cout << std::endl;
+            }
+        }
+
+        return min;
+    }
+
+
+    void ExConvCode_weight_test(const oc::CLP& cmd)
+    {
+        u64  k = cmd.getOr("k", 1ull << cmd.getOr("kk", 6));
+        u64 n = k * 2;
+        //u64 aw = cmd.getOr("aw", 24);
+        //u64 bw = cmd.getOr("bw", 7);
+        bool verbose = cmd.isSet("v");
+        bool accTwice = cmd.getOr("accTwice", 1);
+        for (u64 aw = 4; aw < 16; aw += 2)
+        {
+            for (u64 bw = 3; bw < 11; bw += 2)
+            {
+
+                ExConvCode encoder;
+                encoder.config(k, n, bw, aw);
+                encoder.mAccTwice = accTwice;
+
+                auto threshold = n / 6 - 2 * std::sqrt(n);
+                u64 min = 0;
+                //if (cmd.isSet("x2"))
+                //    min = getGeneratorWeightx2(encoder, verbose);
+                //else
+                min = getGeneratorWeight_(encoder, verbose);
+
+                if (cmd.isSet("acc"))
+                {
+                    auto g = getAccumulator(encoder);
+
+                    for (u64 i = 0; i < k; ++i)
+                    {
+                        u64 w = 0;
+                        for (u64 j = 0; j < k; ++j)
+                        {
+                            w += g(i, j);
+                        }
+                        //if (w < k / 2.2)
+                        {
+                            //std::cout << i << " " << w << std::endl;
+                            for (u64 j = 0; j < k; ++j)
+                            {
+                                if (g(i, j))
+                                    std::cout << Color::Green << "1" << Color::Default;
+                                else
+                                    std::cout << "0";
+                            }
+                            std::cout << std::endl;
+                        }
+                    }
+                    std::cout << std::endl;
+                }
+
+                if (verbose)
+                    std::cout << "aw " << aw << " bw " << bw << ": " << min << " / " << n << " = " << double(min) / n << " < threshold " << double(threshold) / n << std::endl;
+
+                if (min < threshold)
+                {
+                    throw RTE_LOC;
+                }
+
+            }
+        }
+
+    }
+
 }

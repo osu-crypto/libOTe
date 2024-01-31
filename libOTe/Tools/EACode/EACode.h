@@ -24,12 +24,29 @@ namespace osuCrypto
     class EACode : public ExpanderCode, public TimerAdapter
     {
     public:
-        using ExpanderCode::config;
 
+
+        void config(
+            u64 messageSize,
+            u64 codeSize,
+            u64 expanderWeight,
+            block seed = block(33333, 33333))
+        {
+            ExpanderCode::config(messageSize, codeSize, expanderWeight, false, seed);
+        }
         // Compute w = G * e.
         template<typename T, typename Ctx>
         void dualEncode(span<T> e, span<T> w, Ctx ctx);
 
+
+        template<typename T, typename Ctx, typename Iter>
+        void dualEncode(Iter iter, Ctx ctx)
+        {
+            span<T> e(iter, iter + mCodeSize);
+            AlignedUnVector<T> w(mMessageSize);
+            dualEncode<T>(e, w, ctx);
+            std::copy(w.begin(), w.end(), iter);
+        }
 
         template<typename T, typename T2, typename Ctx>
         void dualEncode2(

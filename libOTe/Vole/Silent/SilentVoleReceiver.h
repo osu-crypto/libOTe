@@ -283,33 +283,10 @@ namespace osuCrypto
             mRequestSize = requestSize;
             mState = State::Configured;
             mBaseType = type;
-            double minDist = 0;
-            switch (mMultType)
-            {
-            case osuCrypto::MultType::ExConv7x24:
-            case osuCrypto::MultType::ExConv21x24:
-            {
-                u64 _1, _2;
-                ExConvConfigure(mScaler, mMultType, _1, _2, minDist);
-                break;
-            }
-            case MultType::QuasiCyclic:
-                QuasiCyclicConfigure(mScaler, minDist);
-                break;
-            case osuCrypto::MultType::Tungsten:
-            {
-                mRequestSize = roundUpTo(mRequestSize, 8);
-                TungstenConfigure(mScaler, minDist);
-                break;
-            }
-            default:
-                throw RTE_LOC;
-                break;
-            }
 
-            mNumPartitions = getRegNoiseWeight(minDist, secParam);
-            mSizePer = std::max<u64>(4, roundUpTo(divCeil(mRequestSize * mScaler, mNumPartitions), 2));
-            mNoiseVecSize = mSizePer * mNumPartitions;
+
+            syndromeDecodingConfigure(mNumPartitions, mSizePer, mNoiseVecSize, mSecParam, mRequestSize, mMultType);
+
 
             mGen.configure(mSizePer, mNumPartitions);
         }
@@ -555,13 +532,11 @@ namespace osuCrypto
             case osuCrypto::MultType::ExConv7x24:
             case osuCrypto::MultType::ExConv21x24:
             {
-                u64 expanderWeight, accumulatorWeight;
+                u64 expanderWeight, accumulatorWeight, scaler;
                 double _;
-                ExConvConfigure(mScaler, mMultType, expanderWeight, accumulatorWeight, _);
+                ExConvConfigure(mMultType, scaler, expanderWeight, accumulatorWeight, _);
                 ExConvCode encoder;
-                if (mScaler * mRequestSize > mNoiseVecSize)
-                    throw RTE_LOC;
-                encoder.config(mRequestSize, mScaler * mRequestSize, expanderWeight, accumulatorWeight);
+                encoder.config(mRequestSize, mNoiseVecSize, expanderWeight, accumulatorWeight);
 
                 if (mTimer)
                     encoder.setTimer(getTimer());
@@ -596,7 +571,7 @@ namespace osuCrypto
             case osuCrypto::MultType::Tungsten:
             {
                 experimental::TungstenCode encoder;
-                encoder.config(mRequestSize, mNoiseVecSize);
+                encoder.config(oc::roundUpTo(mRequestSize, 8), mNoiseVecSize);
                 encoder.dualEncode<F, Ctx>(mA.begin(), mCtx);
                 encoder.dualEncode<G, Ctx>(mC.begin(), mCtx);
                 break;

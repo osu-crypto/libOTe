@@ -148,6 +148,9 @@ namespace osuCrypto {
             >
             void dualEncode(Iter&& e, CoeffCtx ctx)
             {
+                if (mCodeSize == 0)
+                    throw RTE_LOC;
+
                 using VecF = typename CoeffCtx::template Vec<F>;
 
                 VecF temp(mCodeSize - mMessageSize);
