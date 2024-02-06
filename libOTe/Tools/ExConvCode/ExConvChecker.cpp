@@ -127,6 +127,7 @@ namespace osuCrypto
         u64 awEnd = cmd.getOr("awEnd", 20);
         u64 bwBeing = cmd.getOr("bw", 3);
         u64 bwEnd = cmd.getOr("bwEnd", 11);
+        auto x2 = cmd.isSet("x2");
 
         for (u64 aw = awBeing; aw < awEnd; aw += 2)
         {
@@ -137,8 +138,8 @@ namespace osuCrypto
                 u64 avg = 0;
                 u64 gMin = n;
                 std::mutex mtx;
-                u64 ticks = n * trials;
-               std::atomic<u64> done = 0;
+                u64 ticks = x2 ? k * k * trials  : n * trials;
+                std::atomic<u64> done = 0;
                 auto routine = [&](u64 i) {
                     for (u64 j = i; j < trials; j += nt)
                     {
@@ -147,11 +148,25 @@ namespace osuCrypto
                         encoder.config(k, n, bw, aw, sys, reg, block(21341234, j));
                         encoder.mAccTwice = accTwice;
 
+                        //auto g = getGenerator(encoder);
+                        //auto g2 = compress(g);
+                        //auto G = getCompressedGenerator(encoder);
+                        //if(std::equal(G.begin(), G.end(), g2.begin()) == false)
+                        //    throw RTE_LOC;
+
                         u64 min = 0;
-                        if (cmd.isSet("x2"))
-                            min = getGeneratorWeightx2(encoder, verbose);
+                        if (x2)
+                        {
+                            min = getGeneratorWeightx2<ExConvCode, std::atomic<u64>&>(encoder, verbose, done);
+                            
+                        }
                         else
-                            min = getGeneratorWeight<ExConvCode, std::atomic<u64>&>(encoder, verbose, done);
+                        {
+                            //min = getGeneratorWeight<ExConvCode, std::atomic<u64>&>(encoder, verbose, done);
+                            min = getGeneratorWeight2<ExConvCode, std::atomic<u64>&>(encoder, verbose, done);
+                            //if(min != min2)
+                            //    throw RTE_LOC;
+                        }
 
                         std::lock_guard<std::mutex> lock(mtx);
                         gMin = std::min(gMin, min);
@@ -166,24 +181,33 @@ namespace osuCrypto
                 }
                 //routine(nt - 1);
                 u64 sleep = 1;
+                auto start = std::chrono::high_resolution_clock::now();
                 while (done != ticks)
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(sleep));
                     sleep = std::min<u64>(1000, sleep * 2);
+                    u64 curDone = done;
+                    auto end = std::chrono::high_resolution_clock::now();
+                    auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+                    auto ticksPerSec = double(curDone) / dur * 1000;
 
-                    u64 d = double(done) * 40 / ticks;
+                    auto f = double(curDone) / ticks;
+                    u64 g = f * 40;
+                    u64 p = f * 100;
 
-                    std::cout << "[" << std::string(d, '|') << std::string(40 - d, ' ') << "] " << double(done) * 100 / ticks << "%\r" << std::flush;
+                    u64 sec = p > 2 ? (ticks - curDone) / ticksPerSec : 0;
+
+                    std::cout << "[" << std::string(g, '|') << std::string(40 - g, ' ') << "] " << p << "% "<< sec <<"s\r" << std::flush;
                 }
-                std::cout <<std::string(50, ' ') << "\r" << std::flush;
+                std::cout << std::string(60, ' ') << "\r" << std::flush;
 
                 for (u64 i = 0; i < thrds.size(); ++i)
                 {
                     thrds[i].join();
                 }
-                std::cout << "aw " << aw << " bw " << bw << 
-                    ": min " << double(gMin) / n <<
-                    ", avg " << double(avg) / n / trials << std::endl;
+                std::cout << "aw " << aw << " bw " << bw <<
+                    " min " << double(gMin) / n <<
+                    " avg " << double(avg) / n / trials << std::endl;
             }
         }
 

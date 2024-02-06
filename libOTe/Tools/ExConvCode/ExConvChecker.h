@@ -17,6 +17,21 @@ namespace osuCrypto
 
     // the (psuedo) minimum distance finder for expand convolute codes.
     void ExConvChecker(const CLP& cmd);
+    namespace detail
+    {
+        struct GetGeneratorBatch
+        {
+            std::array<block, 8> mVal;
+
+            GetGeneratorBatch operator^(const GetGeneratorBatch& b) const
+            {
+                GetGeneratorBatch ret;
+                for (u64 i = 0; i < mVal.size(); ++i)
+                    ret.mVal[i] = mVal[i] ^ b.mVal[i];
+                return ret;
+            }
+        };
+    }
 
 
     template<typename Code>
@@ -40,6 +55,39 @@ namespace osuCrypto
         return g;
     }
 
+    template<typename Code>
+    Matrix<block> getCompressedGenerator(Code& encoder)
+    {
+        auto k = encoder.mMessageSize;
+        auto n = encoder.mCodeSize;;
+        Matrix<block> g(k, divCeil(n, 128));
+
+        u64 batchSize = sizeof(detail::GetGeneratorBatch) * 8;
+        std::vector<detail::GetGeneratorBatch> x(n);
+        for (u64 i = 0; i < n; i += batchSize)
+        {
+            memset(x.data(), 0, sizeof(x[0]) * x.size());
+
+            for (u64 p = 0; p < batchSize; ++p)
+            {
+                *oc::BitIterator((u8*)&x[i + p], p) = 1;
+            }
+
+            // encode a batch of batchSize=1024 unit vectors...
+            encoder.template dualEncode<detail::GetGeneratorBatch, CoeffCtxGF2>(x.data(), {});
+
+            u64 mk = divCeil(std::min<u64>(batchSize, n - i), 8);
+            auto i128 = i / 128;
+
+            // x[j,p] is the (i+p)-th bit of the j-th codeword.
+            // We want g[j, i+p] = x[j,p]
+            for (u64 j = 0; j < k; ++j)
+            {
+                memcpy(g.data(j) + i128, &x[j], mk);
+            }
+        }
+        return g;
+    }
     inline Matrix<block> compress(Matrix<u8> g)
     {
         Matrix <block> G(g.rows(), divCeil(g.cols(), 128));
@@ -73,20 +121,21 @@ namespace osuCrypto
         return G;
     }
 
-    template<typename Code>
-    u64 getGeneratorWeightx2(Code& encoder, bool verbose)
+    template<typename Code, typename Count = u64>
+    u64 getGeneratorWeightx2(Code& encoder, bool verbose, Count c = {})
     {
         auto k = encoder.mMessageSize;
         auto n = encoder.mCodeSize;
-        auto g = getGenerator(encoder);
-        auto G = compress(g);
+        auto G = getCompressedGenerator(encoder);
+        //auto G = compress(g);
 
         u64 min = n;
         auto N = G.cols();
         for (u64 i = 0; i < k; ++i)
         {
             for (u64 i2 = 0; i2 < k; ++i2)
-            {
+            { 
+                ++c;
                 auto gg = G.data(i);
                 u64 weight = 0;
                 if (i == i2)
@@ -111,33 +160,33 @@ namespace osuCrypto
                     }
                 }
 
-                if (verbose)
-                {
-                    std::cout << i << " \n";
-                    for (u64 j = 0; j < n; ++j)
-                    {
-                        if (g(i, j))
-                            std::cout << Color::Green << "1" << Color::Default;
-                        else
-                            std::cout << "0";
-                    }
-                    std::cout << "\n";
+                //if (verbose)
+                //{
+                //    std::cout << i << " \n";
+                //    for (u64 j = 0; j < n; ++j)
+                //    {
+                //        if (g(i, j))
+                //            std::cout << Color::Green << "1" << Color::Default;
+                //        else
+                //            std::cout << "0";
+                //    }
+                //    std::cout << "\n";
 
-                    if (i != i2)
-                    {
+                //    if (i != i2)
+                //    {
 
-                        std::cout << i2 << " \n";
-                        for (u64 j = 0; j < n; ++j)
-                        {
-                            if (g(i2, j))
-                                std::cout << Color::Green << "1" << Color::Default;
-                            else
-                                std::cout << "0";
-                        }
-                        std::cout << "\n";
-                    }
+                //        std::cout << i2 << " \n";
+                //        for (u64 j = 0; j < n; ++j)
+                //        {
+                //            if (g(i2, j))
+                //                std::cout << Color::Green << "1" << Color::Default;
+                //            else
+                //                std::cout << "0";
+                //        }
+                //        std::cout << "\n";
+                //    }
 
-                }
+                //}
                 min = std::min<u64>(min, weight);
             }
         }
@@ -164,6 +213,65 @@ namespace osuCrypto
             }
             ++c;
         }
+        return *std::min_element(weights.begin(), weights.end());
+    }
+
+
+    template<typename Code, typename Count = u64>
+    u64 getGeneratorWeight2(Code& encoder, bool verbose, Count c = {})
+    {
+        auto k = encoder.mMessageSize;
+        auto n = encoder.mCodeSize;
+        //auto g = getGenerator(encoder);
+
+        std::vector<u64> weights(k);
+        //for (u64 i = 0; i < n; ++i)
+        //{
+        //    std::vector<u8> x(n);
+        //    x[i] = 1;
+        //    encoder.template dualEncode<u8, CoeffCtxGF2>(x.data(), {});
+
+        //    for (u64 j = 0; j < k; ++j)
+        //    {
+        //        weights[j] += x[j];
+        //    }
+        //    ++c;
+        //}
+        //Matrix<block> g(k, divCeil(n, 128));
+
+        u64 batchSize = sizeof(detail::GetGeneratorBatch) * 8;
+        std::vector<detail::GetGeneratorBatch> x(n);
+        for (u64 i = 0; i < n; i += batchSize)
+        {
+            memset(x.data(), 0, sizeof(x[0]) * x.size());
+            u64 min = std::min<u64>(batchSize, n - 1);
+
+            for (u64 p = 0; p < min; ++p)
+            {
+                *oc::BitIterator((u8*)&x[i + p], p) = 1;
+            }
+
+            // encode a batch of batchSize=1024 unit vectors...
+            encoder.template dualEncode<detail::GetGeneratorBatch, CoeffCtxGF2>(x.data(), {});
+
+            u64 mk = divCeil(min, 8);
+            auto i128 = i / 128;
+
+            // x[j,p] is the (i+p)-th bit of the j-th codeword.
+            // We want g[j, i+p] = x[j,p]
+            for (u64 j = 0; j < k; ++j)
+            {
+                for (u64 b = 0; b < x[j].mVal.size(); ++b)
+                {
+                    weights[j] += 
+                        popcount(x[j].mVal[b].get<u64>(0)) +
+                        popcount(x[j].mVal[b].get<u64>(1));
+                }
+            }
+
+            c += min;
+        }
+
         return *std::min_element(weights.begin(), weights.end());
     }
 
