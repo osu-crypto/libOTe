@@ -12,6 +12,8 @@
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "util.h"
 #include "coproto/Socket/AsioSocket.h"
+#include "cryptoTools/Common/BitVector.h"
+#include "cryptoTools/Crypto/PRNG.h"
 
 namespace osuCrypto
 {
@@ -203,8 +205,6 @@ namespace osuCrypto
                 }
             }
 
-            // make sure all messages have been sent.
-            cp::sync_wait(chl.flush());
         }
         else
         {
@@ -302,6 +302,8 @@ namespace osuCrypto
         }
 
 
+        // make sure all messages have been sent.
+        cp::sync_wait(chl.flush());
 
         auto e = timer.setTimePoint("finish");
         auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
