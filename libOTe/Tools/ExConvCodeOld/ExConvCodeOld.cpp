@@ -171,12 +171,6 @@ namespace osuCrypto
         u64 j = i + 1;
         pl.push_back(i, i);
 
-        //if (mWrapping)
-        {
-            if (j < size)
-                pl.push_back(j, i);
-            ++j;
-        }
 
         if (q + mAccumulatorSize > qe)
         {
@@ -213,7 +207,12 @@ namespace osuCrypto
             if (j + 7 < size && b7.get<i32>(0) < 0) pl.push_back(j + 7, i);
         }
 
-
+        //if (mWrapping)
+        {
+            if (j < size)
+                pl.push_back(j, i);
+            ++j;
+        }
 
     }
 #endif
@@ -301,12 +300,6 @@ namespace osuCrypto
         {
             auto xii = _mm_load_ps((float*)(xx + i));
 
-            if (!rangeCheck || j < size)
-            {
-                auto xj = xx[j] ^ xx[i];
-                xx[j] = xj;
-                ++j;
-            }
 
 
             if (q + width > qe)
@@ -336,6 +329,14 @@ namespace osuCrypto
 
                 accOneHelper<T, rangeCheck>(xx, xii, j, i, size, b);
             }
+
+            if (!rangeCheck || j < size)
+            {
+                auto xj = xx[j] ^ xx[i];
+                xx[j] = xj;
+                ++j;
+            }
+
         }
 
     }
@@ -356,14 +357,6 @@ namespace osuCrypto
         {
             auto xii0 = _mm_load_ps((float*)(xx0 + i));
             auto xii1 = _mm_load_ps((float*)(xx1 + i));
-            if (!rangeCheck || j < size)
-            {
-                auto xj0 = xx0[j] ^ xx0[i];
-                auto xj1 = xx1[j] ^ xx1[i];
-                xx0[j] = xj0;
-                xx1[j] = xj1;
-                ++j;
-            }
 
             if (q + width > qe)
             {
@@ -392,6 +385,16 @@ namespace osuCrypto
                 accOneHelper<T0, rangeCheck>(xx0, xii0, j, i, size, b);
                 accOneHelper<T1, rangeCheck>(xx1, xii1, j, i, size, b);
             }
+
+            if (!rangeCheck || j < size)
+            {
+                auto xj0 = xx0[j] ^ xx0[i];
+                auto xj1 = xx1[j] ^ xx1[i];
+                xx0[j] = xj0;
+                xx1[j] = xj1;
+                ++j;
+            }
+
         }
 
 
