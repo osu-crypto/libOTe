@@ -385,8 +385,10 @@ namespace osuCrypto
             {
                 ExConvCode encoder;
                 u64 expanderWeight, accumulatorWeight, scaler;
-                double _1;
-                ExConvConfigure(mMultType, scaler, expanderWeight, accumulatorWeight, _1);
+                double minDist;
+                ExConvConfigure(mMultType, scaler, expanderWeight, accumulatorWeight, minDist);
+                assert(scaler == 2 && minDist < 1 && minDist > 0);
+
                 encoder.config(mRequestSize, mNoiseVecSize, expanderWeight, accumulatorWeight);
                 if (mTimer)
                     encoder.setTimer(getTimer());

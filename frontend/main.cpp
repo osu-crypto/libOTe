@@ -105,12 +105,16 @@ int main(int argc, char** argv)
 			QCCodeBench(cmd);
 		else if (cmd.isSet("silent"))
 			SilentOtBench(cmd);
+		else if (cmd.isSet("pprf"))
+			PprfBench(cmd);
 		else if (cmd.isSet("vole2"))
 			VoleBench2(cmd);
 		else if (cmd.isSet("ea"))
 			EACodeBench(cmd);
 		else if (cmd.isSet("ec"))
 			ExConvCodeBench(cmd);
+		else if (cmd.isSet("ecold"))
+			ExConvCodeOldBench(cmd);
 		else if (cmd.isSet("tungsten"))
 			TungstenCodeBench(cmd);
 
