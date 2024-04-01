@@ -319,15 +319,17 @@ namespace osuCrypto
             ctx.zero(leafSums[0].begin(), leafSums[0].end());
             ctx.zero(leafSums[1].begin(), leafSums[1].end());
 
+            auto outIter = leafLevel.begin() + leafOffset;
+
             // for the leaf nodes we need to hash both children.
-            for (u64 parentIdx = 0, outIdx = leafOffset, childIdx = 0; parentIdx < width; ++parentIdx)
+            for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx)
             {
                 // The value of the parent.
                 auto& parent = level0.data()[parentIdx];
 
                 // The bit that indicates if we are on the left child (0)
                 // or on the right child (1).
-                for (u64 keep = 0; keep < 2; ++keep, ++childIdx, outIdx += 8)
+                for (u64 keep = 0; keep < 2; ++keep, ++childIdx)
                 {
                     // The child that we will write in this iteration.
 
@@ -337,27 +339,30 @@ namespace osuCrypto
                     //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
                     //
                     // where each half defines one of the children.
-                    gGgmAes[keep].hashBlocks<8>(parent.data(), child.data());
+                    gGgmAes.data()[keep].hashBlocks<8>(parent.data(), child.data());
 
-                    ctx.fromBlock(leafLevel[outIdx + 0], child[0]);
-                    ctx.fromBlock(leafLevel[outIdx + 1], child[1]);
-                    ctx.fromBlock(leafLevel[outIdx + 2], child[2]);
-                    ctx.fromBlock(leafLevel[outIdx + 3], child[3]);
-                    ctx.fromBlock(leafLevel[outIdx + 4], child[4]);
-                    ctx.fromBlock(leafLevel[outIdx + 5], child[5]);
-                    ctx.fromBlock(leafLevel[outIdx + 6], child[6]);
-                    ctx.fromBlock(leafLevel[outIdx + 7], child[7]);
+                    ctx.fromBlock(*(outIter + 0), child.data()[0]);
+                    ctx.fromBlock(*(outIter + 1), child.data()[1]);
+                    ctx.fromBlock(*(outIter + 2), child.data()[2]);
+                    ctx.fromBlock(*(outIter + 3), child.data()[3]);
+                    ctx.fromBlock(*(outIter + 4), child.data()[4]);
+                    ctx.fromBlock(*(outIter + 5), child.data()[5]);
+                    ctx.fromBlock(*(outIter + 6), child.data()[6]);
+                    ctx.fromBlock(*(outIter + 7), child.data()[7]);
 
                     // leafSum += child
                     auto& leafSum = leafSums[keep];
-                    ctx.plus(leafSum[0], leafSum[0], leafLevel[outIdx + 0]);
-                    ctx.plus(leafSum[1], leafSum[1], leafLevel[outIdx + 1]);
-                    ctx.plus(leafSum[2], leafSum[2], leafLevel[outIdx + 2]);
-                    ctx.plus(leafSum[3], leafSum[3], leafLevel[outIdx + 3]);
-                    ctx.plus(leafSum[4], leafSum[4], leafLevel[outIdx + 4]);
-                    ctx.plus(leafSum[5], leafSum[5], leafLevel[outIdx + 5]);
-                    ctx.plus(leafSum[6], leafSum[6], leafLevel[outIdx + 6]);
-                    ctx.plus(leafSum[7], leafSum[7], leafLevel[outIdx + 7]);
+                    ctx.plus(leafSum.data()[0], leafSum.data()[0], *(outIter + 0));
+                    ctx.plus(leafSum.data()[1], leafSum.data()[1], *(outIter + 1));
+                    ctx.plus(leafSum.data()[2], leafSum.data()[2], *(outIter + 2));
+                    ctx.plus(leafSum.data()[3], leafSum.data()[3], *(outIter + 3));
+                    ctx.plus(leafSum.data()[4], leafSum.data()[4], *(outIter + 4));
+                    ctx.plus(leafSum.data()[5], leafSum.data()[5], *(outIter + 5));
+                    ctx.plus(leafSum.data()[6], leafSum.data()[6], *(outIter + 6));
+                    ctx.plus(leafSum.data()[7], leafSum.data()[7], *(outIter + 7));
+
+                    outIter+= 8;
+                    assert(outIter <= leafLevel.end());
                 }
 
             }
@@ -900,13 +905,14 @@ namespace osuCrypto
                         ctx.copy(leafSums[k][i], leafSums[k][0]);
                 }
 
+                auto outIter = leafLevel.begin() + outputOffset;
                 // for leaf nodes both children should be hashed.
-                for (u64 parentIdx = 0, childIdx = 0, outputIdx = outputOffset; parentIdx < width; ++parentIdx)
+                for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx)
                 {
                     // The value of the parent.
-                    auto parent = level0[parentIdx];
+                    auto parent = level0.data()[parentIdx];
 
-                    for (u64 keep = 0; keep < 2; ++keep, ++childIdx, outputIdx += 8)
+                    for (u64 keep = 0; keep < 2; ++keep, ++childIdx)
                     {
                         // Each parent is expanded into the left and right children
                         // using a different AES fixed-key. Therefore our OWF is:
@@ -914,26 +920,29 @@ namespace osuCrypto
                         //    H(x) = (AES(k0, x) + x) || (AES(k1, x) + x);
                         //
                         // where each half defines one of the children.
-                        gGgmAes[keep].hashBlocks<8>(parent.data(), child.data());
+                        gGgmAes.data()[keep].hashBlocks<8>(parent.data(), child.data());
 
-                        ctx.fromBlock(leafLevel[outputIdx + 0], child[0]);
-                        ctx.fromBlock(leafLevel[outputIdx + 1], child[1]);
-                        ctx.fromBlock(leafLevel[outputIdx + 2], child[2]);
-                        ctx.fromBlock(leafLevel[outputIdx + 3], child[3]);
-                        ctx.fromBlock(leafLevel[outputIdx + 4], child[4]);
-                        ctx.fromBlock(leafLevel[outputIdx + 5], child[5]);
-                        ctx.fromBlock(leafLevel[outputIdx + 6], child[6]);
-                        ctx.fromBlock(leafLevel[outputIdx + 7], child[7]);
+                        ctx.fromBlock(*(outIter + 0), child.data()[0]);
+                        ctx.fromBlock(*(outIter + 1), child.data()[1]);
+                        ctx.fromBlock(*(outIter + 2), child.data()[2]);
+                        ctx.fromBlock(*(outIter + 3), child.data()[3]);
+                        ctx.fromBlock(*(outIter + 4), child.data()[4]);
+                        ctx.fromBlock(*(outIter + 5), child.data()[5]);
+                        ctx.fromBlock(*(outIter + 6), child.data()[6]);
+                        ctx.fromBlock(*(outIter + 7), child.data()[7]);
 
                         auto& leafSum = leafSums[keep];
-                        ctx.plus(leafSum[0], leafSum[0], leafLevel[outputIdx + 0]);
-                        ctx.plus(leafSum[1], leafSum[1], leafLevel[outputIdx + 1]);
-                        ctx.plus(leafSum[2], leafSum[2], leafLevel[outputIdx + 2]);
-                        ctx.plus(leafSum[3], leafSum[3], leafLevel[outputIdx + 3]);
-                        ctx.plus(leafSum[4], leafSum[4], leafLevel[outputIdx + 4]);
-                        ctx.plus(leafSum[5], leafSum[5], leafLevel[outputIdx + 5]);
-                        ctx.plus(leafSum[6], leafSum[6], leafLevel[outputIdx + 6]);
-                        ctx.plus(leafSum[7], leafSum[7], leafLevel[outputIdx + 7]);
+                        ctx.plus(leafSum.data()[0], leafSum.data()[0], *(outIter + 0));
+                        ctx.plus(leafSum.data()[1], leafSum.data()[1], *(outIter + 1));
+                        ctx.plus(leafSum.data()[2], leafSum.data()[2], *(outIter + 2));
+                        ctx.plus(leafSum.data()[3], leafSum.data()[3], *(outIter + 3));
+                        ctx.plus(leafSum.data()[4], leafSum.data()[4], *(outIter + 4));
+                        ctx.plus(leafSum.data()[5], leafSum.data()[5], *(outIter + 5));
+                        ctx.plus(leafSum.data()[6], leafSum.data()[6], *(outIter + 6));
+                        ctx.plus(leafSum.data()[7], leafSum.data()[7], *(outIter + 7));
+
+                        outIter += 8;
+                        assert(outIter <= leafLevel.end());
                     }
                 }
             }

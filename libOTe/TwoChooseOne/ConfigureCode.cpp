@@ -73,9 +73,9 @@ namespace osuCrypto
 
     void ExConvConfigure(
         MultType mMultType,
+        u64& scaler,
         u64& expanderWeight,
         u64& accumulatorWeight,
-        u64& scaler,
         double& minDist)
     {
         scaler = 2;

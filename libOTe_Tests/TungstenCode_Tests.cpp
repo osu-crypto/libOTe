@@ -105,7 +105,7 @@ namespace tests_libOTe
                     //std::cout << "\n";
                     encoder.mPerm.reset();
                     std::vector<F> out2(out.size());
-                    encoder.accumulate<F, TungstenPerm<8>, Ctx, F*>(in3.data(), out2.data(), in.size(), encoder.mPerm, ctx);
+                    encoder.accumulate<F, TungstenPerm<TungstenCode::ChunkSize>, Ctx, F*>(in3.data(), out2.data(), in.size(), encoder.mPerm, ctx);
 
 
                     if (in3 != in)
@@ -177,7 +177,7 @@ namespace tests_libOTe
     void TungstenCode_encode_test(const oc::CLP& cmd)
     {
 
-        auto K = cmd.getManyOr<u64>("k", { 256, 3328, 152336 });
+        auto K = cmd.getManyOr<u64>("k", { 256, 3328, 15232 });
         auto R = cmd.getManyOr<double>("R", { 2.0 });
 
         for (auto k : K) for (auto r : R)

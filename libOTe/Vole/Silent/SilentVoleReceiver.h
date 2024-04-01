@@ -533,9 +533,10 @@ namespace osuCrypto
             case osuCrypto::MultType::ExConv21x24:
             {
                 u64 expanderWeight, accumulatorWeight, scaler;
-                double _;
-                ExConvConfigure(mMultType, scaler, expanderWeight, accumulatorWeight, _);
+                double minDist;
+                ExConvConfigure(mMultType, scaler, expanderWeight, accumulatorWeight, minDist);
                 ExConvCode encoder;
+                assert(scaler == 2 && minDist <1 && minDist > 0);
                 encoder.config(mRequestSize, mNoiseVecSize, expanderWeight, accumulatorWeight);
 
                 if (mTimer)
