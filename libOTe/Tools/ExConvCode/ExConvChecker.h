@@ -254,8 +254,8 @@ namespace osuCrypto
             // encode a batch of batchSize=1024 unit vectors...
             encoder.template dualEncode<detail::GetGeneratorBatch, CoeffCtxGF2>(x.data(), {});
 
-            u64 mk = divCeil(min, 8);
-            auto i128 = i / 128;
+            //u64 mk = divCeil(min, 8);
+            //auto i128 = i / 128;
 
             // x[j,p] is the (i+p)-th bit of the j-th codeword.
             // We want g[j, i+p] = x[j,p]
