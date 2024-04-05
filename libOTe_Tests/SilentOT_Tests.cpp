@@ -242,8 +242,10 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
     }
 
 
-
+    if(cmd.isSet("getMatrix"))
     {
+        k = 256;
+        n = k * scaler;
 
         code.init2(k,n);
         auto mtx = code.getMatrix();

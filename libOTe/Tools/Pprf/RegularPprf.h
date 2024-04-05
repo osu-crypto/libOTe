@@ -132,12 +132,14 @@ namespace osuCrypto
                 leafStepSize = u64{},
                 encOffset = u64{},
                 leafOffset = u64{},
-                min = u64{}
+                min = u64{},
+                dd = u64{}
             );
 
             setTimePoint("SilentMultiPprfSender.reserve");
 
-            pprf::allocateExpandTree(roundUpTo((mDomain + 1) / 2, 2), mTempBuffer, levels);
+            dd = mDomain > 2 ? roundUpTo((mDomain + 1) / 2, 2) : 1;
+            pprf::allocateExpandTree(dd, mTempBuffer, levels);
             assert(levels.size() == mDepth);
 
             if (!mEagerSend)
@@ -722,7 +724,8 @@ namespace osuCrypto
                 leafStepSize = u64{},
                 encOffset = u64{},
                 leafOffset = u64{},
-                min = u64{}
+                min = u64{},
+                dd = u64{}
             );
 
             setTimePoint("SilentMultiPprfReceiver.start");
@@ -731,7 +734,8 @@ namespace osuCrypto
 
             //setTimePoint("SilentMultiPprfSender.reserve");
 
-            pprf::allocateExpandTree(roundUpTo((mDomain + 1) / 2, 2), mTempBuffer, levels);
+            dd = mDomain > 2 ? roundUpTo((mDomain + 1) / 2, 2) : 1;
+            pprf::allocateExpandTree(dd, mTempBuffer, levels);
             assert(levels.size() == mDepth);
 
 

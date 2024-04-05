@@ -47,8 +47,6 @@ namespace osuCrypto
 
         void init2(u64 messageSize, u64 codeSize)
         {
-            auto scaler = divCeil(codeSize, messageSize);
-
             mMessageSize = messageSize;
             mPrimeModulus = nextPrime(messageSize);
             mCodeSize = codeSize;
