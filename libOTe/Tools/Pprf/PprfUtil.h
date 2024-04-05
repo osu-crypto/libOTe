@@ -138,13 +138,13 @@ namespace osuCrypto
 
             // num of bytes they will take up.
             u64 numBytes =
-                depth * numTrees * sizeof(std::array<block,2>) +  // each internal level of the tree has two sums
+                depth * numTrees * sizeof(std::array<block, 2>) +  // each internal level of the tree has two sums
                 elementSize * numTrees * 2 +          // we must program numTrees inactive F leaves
                 elementSize * numTrees * 2 * programPuncturedPoint; // if we are programing the active lead, then we have numTrees more.
 
             // allocate the buffer and partition them.
             buff.resize(numBytes);
-            sums = span<std::array<block, 2>>((std::array<block,2>*)buff.data(), depth * numTrees);
+            sums = span<std::array<block, 2>>((std::array<block, 2>*)buff.data(), depth * numTrees);
             leaf = span<u8>((u8*)(sums.data() + sums.size()),
                 elementSize * numTrees * 2 +
                 elementSize * numTrees * 2 * programPuncturedPoint
@@ -188,76 +188,80 @@ namespace osuCrypto
         }
 
 
-        struct TreeAllocator
-        {
-            TreeAllocator() = default;
-            TreeAllocator(const TreeAllocator&) = delete;
-            TreeAllocator(TreeAllocator&&) = default;
-
-            using ValueType = AlignedArray<block, 8>;
-            std::list<AlignedUnVector<ValueType>> mTrees;
-            std::vector<span<ValueType>> mFreeTrees;
-            //std::mutex mMutex;
-            u64 mTreeSize = 0, mNumTrees = 0;
-
-            void reserve(u64 num, u64 size)
-            {
-                //std::lock_guard<std::mutex> lock(mMutex);
-                mTreeSize = size;
-                mNumTrees += num;
-                mTrees.clear();
-                mFreeTrees.clear();
-                mTrees.emplace_back(num * size);
-                auto iter = mTrees.back().data();
-                for (u64 i = 0; i < num; ++i)
-                {
-                    mFreeTrees.push_back(span<ValueType>(iter, size));
-                    assert((u64)mFreeTrees.back().data() % 32 == 0);
-                    iter += size;
-                }
-            }
-
-            span<ValueType> get()
-            {
-                //std::lock_guard<std::mutex> lock(mMutex);
-                if (mFreeTrees.size() == 0)
-                {
-                    assert(mTreeSize);
-                    mTrees.emplace_back(mTreeSize);
-                    mFreeTrees.push_back(span<ValueType>(mTrees.back().data(), mTreeSize));
-                    assert((u64)mFreeTrees.back().data() % 32 == 0);
-                    ++mNumTrees;
-                }
-
-                auto ret = mFreeTrees.back();
-                mFreeTrees.pop_back();
-                return ret;
-            }
-
-            void clear()
-            {
-                mTrees = {};
-                mFreeTrees = {};
-                mTreeSize = 0;
-                mNumTrees = 0;
-            }
-        };
-
-
         inline void allocateExpandTree(
-            TreeAllocator& alloc,
-            std::vector<span<AlignedArray<block, 8>>>& levels)
+            u64 domainSize,
+            AlignedUnVector<block>& alloc,
+            std::vector<span<AlignedArray<block, 8>>>& levels,
+            bool reuseLevel = true)
         {
-            span<AlignedArray<block, 8>> tree = alloc.get();
-            assert((u64)tree.data() % 32 == 0);
-            levels[0] = tree.subspan(0, 1);
-            auto rem = tree.subspan(2);
-            for (auto i = 1ull; i <  levels.size(); ++i)
+            auto depth = log2ceil(domainSize);
+            levels.resize(depth + 1);
+
+            if (reuseLevel)
             {
-                levels[i] = rem.subspan(0, levels[i - 1].size() * 2);
-                assert((u64)levels[i].data() % 32 == 0);
-                rem = rem.subspan(levels[i].size());
+                auto secondLast = roundUpTo((domainSize + 1) / 2,2);
+                auto size = roundUpTo((domainSize + secondLast),2);
+
+                // we will allocate the last twoo levels of the tree. 
+                // these levels will be used for the smaller levels as
+                // well. We will alternate between the two.
+                alloc.clear();
+                alloc.resize(size * 8);
+
+                std::array<span<AlignedArray<block, 8>>, 2>  buffs;
+                buffs[0] = { (AlignedArray<block, 8>*)alloc.data(), secondLast };
+                buffs[1] = { (AlignedArray<block, 8>*)alloc.data() + secondLast , domainSize };
+
+                // give the last level the big buffer.
+                levels.back() = buffs[1].subspan(0, domainSize);
+                for (u64 i = levels.size() - 2, j = 0ull; i < levels.size(); --i, ++j)
+                {
+                    auto width = divCeil(domainSize, 1ull << (depth - i));
+                    assert(
+                        levels[i + 1].size() == 2 * width || 
+                        levels[i + 1].size() == 2 * width - 1);
+
+                    if (width > 1)
+                        width = roundUpTo(width, 2);
+
+                    // each level will be half the size of the next level.
+                    // we alternate which buffer we use.
+                    levels[i] = buffs[j % 2].subspan(0, width);
+                }
             }
+            else
+            {
+                u64 totalSize = 0;
+                for (u64 i = 0; i < levels.size(); ++i)
+                {
+                    auto width = divCeil(domainSize, 1ull << (depth - i));
+                    totalSize += roundUpTo(width, 2);
+                }
+
+                alloc.clear();
+                alloc.resize(totalSize * 8);
+                span<AlignedArray<block, 8>> buff((AlignedArray<block, 8>*)alloc.data(), totalSize);
+
+                levels.back() = buff.subspan(0, domainSize);
+                buff = buff.subspan(domainSize);
+                for (u64 i = levels.size() - 2, j = 0ull; i < levels.size(); --i, ++j)
+                {
+                    // each level will be half the size of the next level.
+                    auto width = divCeil(domainSize, 1ull << (depth - i));
+                    assert(
+                        levels[i + 1].size() == 2 * width ||
+                        levels[i + 1].size() == 2 * width - 1);
+
+                    if(width > 1)
+                        width = roundUpTo(width, 2);
+
+                    levels[i] = buff.subspan(0, width);
+                    buff = buff.subspan(levels[i].size());
+                }
+            }
+
+            if (levels[0].size() != 1)
+                throw RTE_LOC;
         }
 
 

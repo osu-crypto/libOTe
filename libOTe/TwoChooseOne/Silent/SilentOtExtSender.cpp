@@ -192,6 +192,7 @@ namespace osuCrypto
         mNumPartitions = 0;
 
         mB = {};
+        mEncodeTemp = {};
 
         mDelta = block(0,0);
 
@@ -485,7 +486,8 @@ namespace osuCrypto
         {
             experimental::TungstenCode encoder;
             encoder.config(oc::roundUpTo(mRequestNumOts, 8), mNoiseVecSize);
-            encoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
+            
+            encoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {}, mEncodeTemp);
             break;
         }
         default:

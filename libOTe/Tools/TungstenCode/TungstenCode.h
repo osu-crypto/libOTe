@@ -44,7 +44,7 @@ namespace osuCrypto {
                 for (u64 i = 0; i < n; ++i)
                 {
                     auto j = prng.get<u32>() % (n - i) + i;
-                    std::swap(mPerm[i], mPerm[j]);
+                    std::swap(mPerm.data()[i], mPerm.data()[j]);
                 }
                 reset();
             }
@@ -155,16 +155,18 @@ namespace osuCrypto {
             template<
                 typename F,
                 typename CoeffCtx,
-                typename Iter
+                typename Iter,
+                typename VecF
             >
-            void dualEncode(Iter&& e, CoeffCtx ctx)
+            void dualEncode(Iter&& e, CoeffCtx ctx, VecF& temp)
             {
                 if (mCodeSize == 0)
                     throw RTE_LOC;
 
-                using VecF = typename CoeffCtx::template Vec<F>;
+                //using VecF = typename CoeffCtx::template Vec<F>;
 
-                VecF temp(mCodeSize - mMessageSize);
+
+                ctx.resize(temp, mCodeSize - mMessageSize);
 
                 if (temp.size() / ChunkSize != mPerm.mPerm.size())
                     throw RTE_LOC;
@@ -198,6 +200,21 @@ namespace osuCrypto {
                     mMessageSize,
                     adder,
                     ctx);
+            }
+
+
+            template<
+                typename F,
+                typename CoeffCtx,
+                typename Iter
+            >
+            void dualEncode(Iter&& e, CoeffCtx ctx)
+            {
+                if (mCodeSize == 0)
+                    throw RTE_LOC;
+                using VecF = typename CoeffCtx::template Vec<F>;
+                VecF temp;
+                dualEncode<F, CoeffCtx, Iter, VecF>(std::forward<Iter>(e), ctx, temp);
             }
 
             template<
@@ -299,94 +316,6 @@ namespace osuCrypto {
                         break;
                 }
             }
-            //
-            //
-            //            template<
-            //                typename Table,
-            //                typename F,
-            //                bool rangeCheck,
-            //                typename OutputMap,
-            //                typename CoeffCtx,
-            //                typename Iter
-            //            >
-            //            void accumulateBlockGather(
-            //                Iter x,
-            //                u64 i,
-            //                Iter dst,
-            //                u64 size,
-            //                OutputMap& output,
-            //                CoeffCtx& ctx)
-            //            {
-            //
-            //                //static constexpr int chunkSize = OutputMap::chunkSize;
-            //                static_assert(Table::data.size() % ChunkSize == 0);
-            //                auto table = Table::data.data();
-            //
-            //                for (u64 j = 0; j < Table::data.size();)
-            //                {
-            //#ifdef ENABLE_SSE
-            //                    if (rangeCheck == false || i + Table::data.size() * 2 < size)
-            //                        _mm_prefetch((char*)(x + i + Table::data.size() * 2), _MM_HINT_T0);
-            //#endif
-            //
-            //                    for (u64 k = 0; k < ChunkSize; ++k, ++j, ++i)
-            //                    {
-            //
-            //                        if constexpr (Table::data[0].size() == 4)
-            //                        {
-            //                            if constexpr (rangeCheck)
-            //                            {
-            //                                if (i == size)
-            //                                    return;
-            //
-            //                                auto xi = x + i;
-            //                                auto xs = x + ((i + Table::max + 1) % size);
-            //                                ctx.plus(*xs, *xs, *xi);
-            //                                ctx.mulConst(*xs, *xs);
-            //
-            //                                for (u64 p = 0; p < Table::data[0].size(); ++p)
-            //                                {
-            //                                    auto idx = (i + table[j].data()[p]) % size;
-            //                                    if (idx != i)
-            //                                    {
-            //                                        auto xi = x + i;
-            //                                        auto xp = x + idx;
-            //                                        ctx.plus(*xp, *xp, *xi);
-            //                                    }
-            //                                }
-            //                            }
-            //                            else
-            //                            {
-            //                                auto xi = x + i;
-            //
-            //                                auto xs = xi + Table::max + 1;
-            //                                auto x0 = xi + table[j].data()[0];
-            //                                auto x1 = xi + table[j].data()[1];
-            //                                auto x2 = xi + table[j].data()[2];
-            //                                auto x3 = xi + table[j].data()[3];
-            //
-            //                                ctx.plus(*xs, *xs, *xi);
-            //                                ctx.plus(*x0, *x0, *xi);
-            //                                ctx.plus(*x1, *x1, *xi);
-            //                                ctx.plus(*x2, *x2, *xi);
-            //                                ctx.plus(*x3, *x3, *xi);
-            //                                ctx.mulConst(*xs, *xs);
-            //
-            //                            }
-            //                        }
-            //                        else
-            //                        {
-            //                            throw RTE_LOC;
-            //                        }
-            //                    }
-            //
-            //                    output.template applyChunk<F>(dst, x + (i - ChunkSize), ctx);
-            //
-            //                    if (rangeCheck && i >= size)
-            //                        break;
-            //                }
-            //            }
-
 
             template<typename F,
                 typename OutputMap,
