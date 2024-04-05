@@ -408,10 +408,8 @@ namespace osuCrypto
         mA.resize(mNoiseVecSize);
         mC.resize(0);
 
-
         MC_AWAIT(mGen.expand(chl, mA, PprfOutputFormat::Interleaved, true, mNumThreads));
         setTimePoint("recver.expand.pprf");
-
 
         if (mMalType == SilentSecType::Malicious)
         {
@@ -653,7 +651,7 @@ namespace osuCrypto
 
                 experimental::TungstenCode encoder;
                 encoder.config(oc::roundUpTo(mRequestNumOts, 8), mNoiseVecSize);
-                encoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {});
+                encoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {}, mEncodeTemp);
                 break;
             }
             default:
@@ -735,7 +733,7 @@ namespace osuCrypto
             {
                 experimental::TungstenCode encoder;
                 encoder.config(roundUpTo(mRequestNumOts, 8), mNoiseVecSize);
-                encoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {});
+                encoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {}, mEncodeTemp);
                 encoder.dualEncode<u8, CoeffCtxGF2>(mC.begin(), {});
                 break;
             }

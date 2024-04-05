@@ -114,6 +114,9 @@ namespace osuCrypto
         // secret share of xa * delta as described in ferret.
         std::vector<std::array<block, 2>> mMalCheckOts;
 
+        // An temporary buffer used during LPN encoding.
+        AlignedUnVector<block> mEncodeTemp;
+
         // A flag that helps debug
         bool mDebug = false;
 

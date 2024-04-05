@@ -82,7 +82,12 @@ namespace osuCrypto {
         OC_FORCEINLINE void fromBlock(F& ret, const block& b) {
             static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
 
-            if constexpr (sizeof(F) <= sizeof(block))
+            if constexpr (std::is_same<F,block>::value)
+            {
+                // if F is a block, just return the block.
+                ret = b;
+            }
+            else if constexpr (sizeof(F) <= sizeof(block))
             {
                 // if small, just return the bytes of b
                 memcpy(&ret, &b, sizeof(F));

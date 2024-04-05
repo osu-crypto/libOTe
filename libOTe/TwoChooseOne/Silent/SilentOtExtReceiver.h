@@ -91,6 +91,9 @@ namespace osuCrypto
         // The flag which controls whether the malicious check is performed.
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
+        // An temporary buffer used during LPN encoding.
+        AlignedUnVector<block> mEncodeTemp;
+
         // A flag that helps debug
         bool mDebug = false;
 
