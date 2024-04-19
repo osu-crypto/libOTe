@@ -379,6 +379,7 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_baseOT_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_mal_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_Rounds_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_Tungsten_test(const oc::CLP& cmd) { throwDisabled(); }
 
 
 #endif
