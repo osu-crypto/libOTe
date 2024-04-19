@@ -14,6 +14,7 @@
 #include "coproto/Socket/AsioSocket.h"
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Crypto/PRNG.h"
+#include "cryptoTools/Common/Timer.h"
 
 namespace osuCrypto
 {
