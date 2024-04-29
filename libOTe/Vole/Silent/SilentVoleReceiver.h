@@ -156,7 +156,7 @@ namespace osuCrypto
 			auto baseVole = std::vector<block>{};
 			auto baseOt = BaseOT{};
 			auto chl2 = Socket{};
-			auto prng2 = std::move(PRNG{});
+			auto prng2 = PRNG{};
 			auto noiseVals = VecG{};
 			auto baseAs = VecF{};
 			auto nv = NoisyVoleReceiver<F, G, Ctx>{};

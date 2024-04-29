@@ -226,10 +226,14 @@ namespace osuCrypto
 				}
 			}
 #else
+			std::cout << LOCATION << std::endl;
 
 			mAesFixedKey.hashBlocks((block*)messages.data(), messages.size() * 2, (block*)messages.data());
 		}
 #endif
+
+		std::cout << LOCATION << std::endl;
+
 		static_assert(gOtExtBaseOtCount == 128, "expecting 128");
 	}
 

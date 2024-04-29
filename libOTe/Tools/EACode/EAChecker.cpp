@@ -227,7 +227,8 @@ namespace osuCrypto
 
                             if (d < minDis)
                             {
-                                ii = { { i } };
+                                ii.clear();
+                                ii.push_back( i );
                                 for (u64 j = 0; j < ss.size() - 1; ++j)
                                 {
                                     if (jj & (1ull << j))

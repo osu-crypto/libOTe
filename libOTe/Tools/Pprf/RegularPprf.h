@@ -118,7 +118,7 @@ namespace osuCrypto
 
             pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
 
-            auto tree = span<AlignedArray<block, 8>>{};
+            //auto tree = span<AlignedArray<block, 8>>{};
             auto levels = std::vector<span<AlignedArray<block, 8>> >{};
             auto leafIndex = u64{};
             auto leafLevelPtr = (VecF*)nullptr;

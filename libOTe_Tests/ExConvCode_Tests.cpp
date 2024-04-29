@@ -456,11 +456,11 @@ namespace osuCrypto
 
                     for (u64 i = 0; i < k; ++i)
                     {
-                        u64 w = 0;
-                        for (u64 j = 0; j < k; ++j)
-                        {
-                            w += g(i, j);
-                        }
+                        //u64 w = 0;
+                        //for (u64 j = 0; j < k; ++j)
+                        //{
+                        //    w += g(i, j);
+                        //}
                         //if (w < k / 2.2)
                         {
                             //std::cout << i << " " << w << std::endl;

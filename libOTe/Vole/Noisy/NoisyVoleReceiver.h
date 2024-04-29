@@ -72,7 +72,7 @@ namespace osuCrypto {
 			auto buff = std::vector<u8>{};
 			auto msg = VecF{};
 			auto temp = VecF{};
-			auto prng = std::move(PRNG{});
+			auto prng = PRNG{};
 
 			if (c.size() != a.size())
 				throw RTE_LOC;

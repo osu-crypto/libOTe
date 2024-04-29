@@ -140,7 +140,7 @@ namespace osuCrypto
 
 			auto msg = AlignedUnVector<std::array<block, 2>>(silentBaseOtCount());
 			auto baseOt = BaseOT{};
-			auto prng2 = std::move(PRNG{});
+			auto prng2 = PRNG{};
 			auto xx = BitVector{};
 			auto chl2 = Socket{};
 			auto nv = NoisyVoleSender<F, G, Ctx>{};
