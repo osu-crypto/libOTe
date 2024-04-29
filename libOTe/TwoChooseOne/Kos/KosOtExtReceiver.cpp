@@ -85,37 +85,34 @@ namespace osuCrypto
         u64 numSuperBlocks = (numOtExt / 128 + superBlkSize - 1) / superBlkSize;
         u64 numBlocks = numSuperBlocks * superBlkSize;
 
-        MC_BEGIN(task<>, this, &choices, messages, &prng, &chl,
-            numSuperBlocks, numBlocks,
-            myComm = Commit{},
-            seed = block{},
-            fs = RandomOracle(sizeof(block)),
-            choices2 = BitVector{},
-            t0 = AlignedUnVector<std::array<block, superBlkSize>>{ 128 },
-            t0v = span<block>{},
-            choiceBlocks = span<block>{},
-            extraBlocks = AlignedArray<block, 128>{},
-            mIter = span<block>::iterator{},
-            step = u64{},
-            superBlkIdx = u64{},
-            uBuff = AlignedUnVector<block>{},
-            uIter = (block*)nullptr,
-            uEnd = (block*)nullptr,
-            tIter = (block*)nullptr,
-            cIter = (block*)nullptr,
-            theirSeed = block{},
-            diff = block{}
-        );
+        auto myComm = Commit{};
+        auto seed = block{};
+        auto fs = RandomOracle(sizeof(block));
+        auto choices2 = BitVector{};
+        auto t0 = AlignedUnVector<std::array<block, superBlkSize>>{ 128 };
+        auto t0v = span<block>{};
+        auto choiceBlocks = span<block>{};
+        auto extraBlocks = AlignedArray<block, 128>{};
+        auto mIter = span<block>::iterator{};
+        auto step = u64{};
+        auto superBlkIdx = u64{};
+        auto uBuff = AlignedUnVector<block>{};
+        auto uIter = (block*)nullptr;
+        auto uEnd = (block*)nullptr;
+        auto tIter = (block*)nullptr;
+        auto cIter = (block*)nullptr;
+        auto theirSeed = block{};
+        auto diff = block{};
 
         if (hasBaseOts() == false)
-            MC_AWAIT(genBaseOts(prng, chl));
+            co_await genBaseOts(prng, chl);
 
         setTimePoint("Kos.recv.start");
 
         if (mUniformBase==false)
         {
             diff = prng.get();
-            MC_AWAIT(chl.send(std::move(diff)));
+            co_await chl.send(std::move(diff));
 
             {
                 auto iter = BitIterator((u8*)&diff, 0);
@@ -137,7 +134,7 @@ namespace osuCrypto
         {
             seed = prng.get<block>();
             myComm = Commit(seed);
-            MC_AWAIT(chl.send(std::move(myComm)));
+            co_await chl.send(std::move(myComm));
         }
 
         // turn the choice vbitVector into an array of blocks.
@@ -223,10 +220,9 @@ namespace osuCrypto
                 {
                     fs.Update(uBuff.data(), uBuff.size());
                 }
-                //std::cout << "send u " << std::endl;
 
                 // send over u buffer
-                MC_AWAIT(chl.send(std::move(uBuff)));
+                co_await chl.send(std::move(uBuff));
 
                 u64 step = std::min<u64>(numSuperBlocks - superBlkIdx - 1, (u64)commStepSize);
 
@@ -294,8 +290,8 @@ fix...
         }
         else
         {
-            MC_AWAIT(chl.recv(theirSeed));
-            MC_AWAIT(chl.send(std::move(seed)));
+            co_await chl.recv(theirSeed);
+            co_await chl.send(std::move(seed));
             seed = seed ^ theirSeed;
         }
 
@@ -304,9 +300,7 @@ fix...
 
         uBuff = hash(messages, choiceBlocks, seed, extraBlocks);
 
-        MC_AWAIT(chl.send(std::move(uBuff)));
-
-        MC_END();
+        co_await (chl.send(std::move(uBuff)));
 
     }
 

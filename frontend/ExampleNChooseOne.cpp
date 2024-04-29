@@ -49,21 +49,18 @@ namespace osuCrypto
         // create a lambda function that performs the computation of a single receiver thread.
         auto recvRoutine = [&]() -> task<>
             {
-                MC_BEGIN(task<>, &,
-                    i = u64{}, min = u64{},
-                    recvMsgs = std::vector<block>{},
-                    choices = std::vector<u64>{}
-                );
+                auto i = u64{}, min = u64{};
+                auto recvMsgs = std::vector<block>{};
+                auto choices = std::vector<u64>{};
 
                 recver.configure(maliciousSecure, statSecParam, inputBitCount);
-                //MC_AWAIT(sync(chl, Role::Receiver));
 
                 if (randomOT)
                 {
                     // once configure(...) and setBaseOts(...) are called,
                     // we can compute many batches of OTs. First we need to tell
                     // the instance how many OTs we want in this batch. This is done here.
-                    MC_AWAIT(recver.init(numOTs, prng, chl));
+                    co_await (recver.init(numOTs, prng, chl));
 
                     // now we can iterate over the OTs and actually retrieve the desired
                     // messages. However, for efficiency we will do this in steps where
@@ -104,13 +101,13 @@ namespace osuCrypto
                         // allows the sender to also compute the OT mMessages. Since we just
                         // encoded "min" OT mMessages, we will tell the class to send the
                         // next min "correction" values.
-                        MC_AWAIT(recver.sendCorrection(chl, min));
+                        co_await (recver.sendCorrection(chl, min));
                     }
 
                     // once all numOTs have been encoded and had their correction values sent
                     // we must call check. This allows to sender to make sure we did not cheat.
                     // For semi-honest protocols, this can and will be skipped.
-                    MC_AWAIT(recver.check(chl, prng.get()));
+                    co_await (recver.check(chl, prng.get()));
                 }
                 else
                 {
@@ -122,28 +119,25 @@ namespace osuCrypto
                         choices[i] = prng.get<u8>();
 
                     // the messages that were learned are written to recvMsgs.
-                    MC_AWAIT(recver.receiveChosen(numChosenMsgs, recvMsgs, choices, prng, chl));
+                    co_await (recver.receiveChosen(numChosenMsgs, recvMsgs, choices, prng, chl));
                 }
 
-                MC_AWAIT(chl.flush());
-                MC_END();
+                co_await (chl.flush());
             };
 
         // create a lambda function that performs the computation of a single sender thread.
-        auto sendRoutine = [&]()
+        auto sendRoutine = [&]() -> macoro::task<>
             {
-                MC_BEGIN(task<>, &,
-                    sendMessages = Matrix<block>{},
-                    i = u64{}, min = u64{}
-                );
+                auto sendMessages = Matrix<block>{};
+                auto i = u64{}, min = u64{};
 
                 sender.configure(maliciousSecure, statSecParam, inputBitCount);
-                //MC_AWAIT(sync(chl, Role::Sender));
+                //co_await (sync(chl, Role::Sender));
 
                 if (randomOT)
                 {
                     // Same explanation as above.
-                    MC_AWAIT(sender.init(numOTs, prng, chl));
+                    co_await (sender.init(numOTs, prng, chl));
 
                     // Same explanation as above.
                     for (i = 0; i < numOTs; )
@@ -158,7 +152,7 @@ namespace osuCrypto
                         // Note that the step size must match what the receiver used.
                         // If this is unknown you can use recvCorrection(chl) -> u64
                         // which will tell you how many were sent.
-                        MC_AWAIT(sender.recvCorrection(chl, min));
+                        co_await (sender.recvCorrection(chl, min));
 
                         // we now encode any OT message with index less that i + min.
                         for (u64 j = 0; j < min; ++j, ++i)
@@ -185,7 +179,7 @@ namespace osuCrypto
 
                     // This call is required to make sure the receiver did not cheat.
                     // All corrections must be received before this is called.
-                    MC_AWAIT(sender.check(chl, ZeroBlock));
+                    co_await (sender.check(chl, ZeroBlock));
                 }
                 else
                 {
@@ -194,12 +188,11 @@ namespace osuCrypto
                     prng.get(sendMessages.data(), sendMessages.size());
 
                     // perform the OTs with the given messages.
-                    MC_AWAIT(sender.sendChosen(sendMessages, prng, chl));
+                    co_await (sender.sendChosen(sendMessages, prng, chl));
 
                 }
 
-                MC_AWAIT(chl.flush());
-                MC_END();
+                co_await (chl.flush());
             };
 
 

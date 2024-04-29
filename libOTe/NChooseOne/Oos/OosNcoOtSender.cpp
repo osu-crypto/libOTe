@@ -21,16 +21,13 @@ namespace osuCrypto
 		span<block> baseRecvOts,
 		const BitVector& choices, Socket& chl)
 	{
-		MC_BEGIN(task<>, this, baseRecvOts, &choices, &chl,
-			delta = BitVector{});
+		auto delta = BitVector{};
 
 		delta.resize(choices.size());
 
-		MC_AWAIT(chl.recv(delta));
+		co_await chl.recv(delta);
 
 		setUniformBaseOts(baseRecvOts, choices ^ delta);
-
-		MC_END();
 	}
 
 	void OosNcoOtSender::setUniformBaseOts(span<block> baseRecvOts, const BitVector& uniformChoices)
@@ -76,11 +73,7 @@ namespace osuCrypto
 			}
 			raw.setUniformBaseOts(base, mBaseChoiceBits);
 		}
-#ifdef OC_NO_MOVE_ELISION
-		return std::move(raw);
-#else
 		return raw;
-#endif
 	}
 
 
@@ -93,96 +86,91 @@ namespace osuCrypto
 	task<> OosNcoOtSender::init(
 		u64 numOTExt, PRNG& prng, Socket& chl)
 	{
-		MC_BEGIN(task<>, this, numOTExt, &prng, &chl);
-
 		if (mInputByteCount == 0)
 			throw std::runtime_error("configure must be called first" LOCATION);
 
 		if (hasBaseOts() == false)
-			MC_AWAIT(genBaseOts(prng, chl));
+			co_await genBaseOts(prng, chl);
 
+		const u8 superBlkSize(8);
+		// round up
+		numOTExt = ((numOTExt + 127 + mStatSecParam) / 128) * 128;
+
+		// We need two matrices, one for the senders matrix T^i_{b_i} and
+		// one to hold the the correction values. This is sometimes called
+		// the u = T0 + T1 + C matrix in the papers.
+		mCorrectionVals = Matrix<block>();
+		mCorrectionVals.resize(numOTExt, mGens.size() / 128);
+		mT = Matrix<block>();
+		mT.resize(numOTExt, mGens.size() / 128);
+
+		// The receiver will send us correction values, this is the index of
+		// the next one they will send.
+		mCorrectionIdx = 0;
+
+		// we are going to process OTs in blocks of 128 * superblkSize messages.
+		u64 numSuperBlocks = (numOTExt / 128 + superBlkSize - 1) / superBlkSize;
+
+		// the index of the last OT that we have completed.
+		u64 doneIdx = 0;
+
+		// a temp that will be used to transpose the sender's matrix
+		AlignedUnVector<std::array<block, superBlkSize>> t(128);
+
+		u64 numCols = mGens.size();
+
+
+		for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
 		{
-			const u8 superBlkSize(8);
-			// round up
-			numOTExt = ((numOTExt + 127 + mStatSecParam) / 128) * 128;
+			// compute at what row does the user want use to stop.
+			// the code will still compute the transpose for these
+			// extra rows, but it is thrown away.
+			u64 stopIdx
+				= doneIdx
+				+ std::min<u64>(u64(128) * superBlkSize, mT.bounds()[0] - doneIdx);
 
-			// We need two matrices, one for the senders matrix T^i_{b_i} and
-			// one to hold the the correction values. This is sometimes called
-			// the u = T0 + T1 + C matrix in the papers.
-			mCorrectionVals = Matrix<block>();
-			mCorrectionVals.resize(numOTExt, mGens.size() / 128);
-			mT = Matrix<block>();
-			mT.resize(numOTExt, mGens.size() / 128);
-
-			// The receiver will send us correction values, this is the index of
-			// the next one they will send.
-			mCorrectionIdx = 0;
-
-			// we are going to process OTs in blocks of 128 * superblkSize messages.
-			u64 numSuperBlocks = (numOTExt / 128 + superBlkSize - 1) / superBlkSize;
-
-			// the index of the last OT that we have completed.
-			u64 doneIdx = 0;
-
-        // a temp that will be used to transpose the sender's matrix
-        AlignedArray<std::array<block, superBlkSize>, 128> t;
-
-			u64 numCols = mGens.size();
-
-
-			for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
+			for (u64 i = 0; i < numCols / 128; ++i)
 			{
-				// compute at what row does the user want use to stop.
-				// the code will still compute the transpose for these
-				// extra rows, but it is thrown away.
-				u64 stopIdx
-					= doneIdx
-					+ std::min<u64>(u64(128) * superBlkSize, mT.bounds()[0] - doneIdx);
 
-				for (u64 i = 0; i < numCols / 128; ++i)
+				// transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
+				for (u64 tIdx = 0, colIdx = i * 128; tIdx < 128; ++tIdx, ++colIdx)
 				{
-
-					// transpose 128 columns at at time. Each column will be 128 * superBlkSize = 1024 bits long.
-					for (u64 tIdx = 0, colIdx = i * 128; tIdx < 128; ++tIdx, ++colIdx)
-					{
-						// generate the columns using AES-NI in counter mode.
-						mGens[colIdx].mAes.ecbEncCounterMode(mGens[colIdx].mBlockIdx, superBlkSize, ((block*)t.data() + superBlkSize * tIdx));
-						mGens[colIdx].mBlockIdx += superBlkSize;
-					}
-
-					// transpose our 128 columns of 1024 bits. We will have 1024 rows,
-					// each 128 bits wide.
-					transpose128x1024(t);
-
-					// This is the index of where we will store the matrix long term.
-					// doneIdx is the starting row. l is the offset into the blocks of 128 bits.
-					// __restrict isn't crucial, it just tells the compiler that this pointer
-					// is unique and it shouldn't worry about pointer aliasing.
-					block* __restrict mTIter = mT.data() + doneIdx * mT.stride() + i;
-
-					for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
-					{
-						// because we transposed 1024 rows, the indexing gets a bit weird. But this
-						// is the location of the next row that we want. Keep in mind that we had long
-						// **contiguous** columns.
-						block* __restrict tIter = (((block*)t.data()) + j);
-
-						// do the copy!
-						for (u64 k = 0; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)
-						{
-							*mTIter = *tIter;
-
-							tIter += superBlkSize;
-							mTIter += mT.stride();
-						}
-					}
-
+					// generate the columns using AES-NI in counter mode.
+					mGens[colIdx].mAes.ecbEncCounterMode(mGens[colIdx].mBlockIdx, superBlkSize, ((block*)t.data() + superBlkSize * tIdx));
+					mGens[colIdx].mBlockIdx += superBlkSize;
 				}
 
-				doneIdx = stopIdx;
+				// transpose our 128 columns of 1024 bits. We will have 1024 rows,
+				// each 128 bits wide.
+				transpose128x1024(t[0].data());
+
+				// This is the index of where we will store the matrix long term.
+				// doneIdx is the starting row. l is the offset into the blocks of 128 bits.
+				// __restrict isn't crucial, it just tells the compiler that this pointer
+				// is unique and it shouldn't worry about pointer aliasing.
+				block* __restrict mTIter = mT.data() + doneIdx * mT.stride() + i;
+
+				for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
+				{
+					// because we transposed 1024 rows, the indexing gets a bit weird. But this
+					// is the location of the next row that we want. Keep in mind that we had long
+					// **contiguous** columns.
+					block* __restrict tIter = (((block*)t.data()) + j);
+
+					// do the copy!
+					for (u64 k = 0; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)
+					{
+						*mTIter = *tIter;
+
+						tIter += superBlkSize;
+						mTIter += mT.stride();
+					}
+				}
+
 			}
+
+			doneIdx = stopIdx;
 		}
-		MC_END();
 	}
 
 
@@ -204,12 +192,6 @@ namespace osuCrypto
 		memcpy(codeword.data(), plaintext, mInputByteCount);
 		mCode.encode((u8*)codeword.data(), (u8*)codeword.data());
 
-#ifdef OOS_SHA_HASH
-		//RandomOracle  sha1(destSize);
-#else
-#error "NOT ALLOWED"
-		std::array<block, 10> aesBuff;
-#endif
 		// the index of the otIdx'th correction value u = t1 + t0 + c(w)
 		// and the associated T value held by the sender.
 		auto* corVal = mCorrectionVals.data() + otIdx * mCorrectionVals.stride();
@@ -237,34 +219,11 @@ namespace osuCrypto
 			codeword[2] = tVal[2] ^ t2;
 			codeword[3] = tVal[3] ^ t3;
 
-#ifdef OOS_SHA_HASH
 			// hash it all to get rid of the correlation.
 			RandomOracle  sha1(destSize);
 			sha1.Update(otIdx);
 			sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
 			sha1.Final((u8*)dest);
-
-			//std::array<u32, 5> out{ 0,0,0,0,0 };
-			//sha1_compress(out.data(), (u8*)&codeword[0]);
-			//memcpy(dest, out.data(), destSize);
-
-#else
-			//H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
-			mAesFixedKey.ecbEncFourBlocks(codeword.data(), aesBuff.data());
-			codeword[0] = codeword[0] ^ aesBuff[0];
-			codeword[1] = codeword[1] ^ aesBuff[1];
-			codeword[2] = codeword[2] ^ aesBuff[2];
-			codeword[3] = codeword[3] ^ aesBuff[3];
-
-			block val = codeword[0] ^ codeword[1];
-			codeword[2] = codeword[2] ^ codeword[3];
-
-			val = val ^ codeword[2];
-
-			mAesFixedKey.ecbEncBlock(val, codeword[0]);
-			val = val ^ codeword[0];
-			memcpy(dest, &val, std::min<u64>(RandomOracle::HashSize, destSize));
-#endif
 		}
 		else
 		{
@@ -278,24 +237,10 @@ namespace osuCrypto
 					= tVal[i]
 					^ t1;
 			}
-#ifdef OOS_SHA_HASH
 			// hash it all to get rid of the correlation.
 			RandomOracle  sha1(destSize);
 			sha1.Update((u8*)codeword.data(), sizeof(block) * mT.stride());
 			sha1.Final((u8*)dest);
-#else
-			//H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
-			mAesFixedKey.ecbEncBlocks(codeword.data(), mT.stride(), aesBuff.data());
-
-			block val = ZeroBlock;
-			for (u64 i = 0; i < mT.stride(); ++i)
-				val = val ^ codeword[i] ^ aesBuff[i];
-
-
-			mAesFixedKey.ecbEncBlock(val, codeword[0]);
-			val = val ^ codeword[0];
-			memcpy(dest, &val, std::min<u64>(RandomOracle::HashSize, destSize));
-#endif
 		}
 	}
 
@@ -320,24 +265,9 @@ namespace osuCrypto
 		mGens.resize(roundUpTo(mCode.codewordBitSize(), 128));
 	}
 
-	//std::future<void> OosNcoOtSender::asyncRecvCorrection(Channel & chl, u64 recvCount)
-	//{
-	//    // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
-	//    // there c(w) is a pseudo-random code.
-	//    auto dest = &mCorrectionVals(mCorrectionIdx,0);
-
-	//    // update the index of there we should store the next set of correction values.
-	//    mCorrectionIdx += recvCount;
-
-	//    return chl.asyncRecv(dest, recvCount * mCorrectionVals.stride());
-	//}
-
 	task<> OosNcoOtSender::recvCorrection(Socket& chl, u64 recvCount)
 	{
 
-		MC_BEGIN(task<>, this, recvCount, &chl
-			, dest = (block*)nullptr
-		);
 #ifndef NDEBUG
 		if (recvCount > mCorrectionVals.bounds()[0] - mCorrectionIdx)
 			throw std::runtime_error("bad receiver, will overwrite the end of our buffer" LOCATION);
@@ -346,60 +276,32 @@ namespace osuCrypto
 
 		// receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
 		// there c(w) is a pseudo-random code.
-		dest = mCorrectionVals.data() + i32(mCorrectionIdx * mCorrectionVals.stride());
+		auto dest = mCorrectionVals.data() + i32(mCorrectionIdx * mCorrectionVals.stride());
 
 		// update the index of there we should store the next set of correction values.
 		mCorrectionIdx += recvCount;
 
-		MC_AWAIT(chl.recv(span<block>(dest, recvCount * mCorrectionVals.stride())));
-		MC_END();
+		co_await(chl.recv(span<block>(dest, recvCount * mCorrectionVals.stride())));
 	}
-
-	//u64 OosNcoOtSender::recvCorrection(Channel & chl)
-	//{
-
-	//    // receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
-	//    // there c(w) is a pseudo-random code.
-	//    auto dest = mCorrectionVals.data() + i32(mCorrectionIdx * mCorrectionVals.stride());
-	//    auto maxReceiveCount = (mCorrectionVals.rows() - mCorrectionIdx) * mCorrectionVals.stride();
-
-	//    ReceiveAtMost<block> reciever(dest, maxReceiveCount);
-	//    chl.recv(reciever);
-
-	//    // check that the number of blocks received is ok.
-	//    if (reciever.receivedSize() % mCorrectionVals.stride())
-	//        throw std::runtime_error("An even number of correction blocks were not sent. " LOCATION);
-
-	//    // compute how many corrections were received.
-	//    auto numCorrections = reciever.receivedSize() / mCorrectionVals.stride();
-
-	//    // update the index of there we should store the next set of correction values.
-	//    mCorrectionIdx += numCorrections;
-
-	//    return numCorrections;
-	//}
 
 	task<> OosNcoOtSender::check(Socket& chl, block seed)
 	{
-		MC_BEGIN(task<>, this, &chl, seed);
 		if (mMalicious)
 		{
-
 			if (mStatSecParam % 8)
 				throw std::runtime_error("Must be a multiple of 8. " LOCATION);
 
 			// first we need to receive the extra mStatSecParam number of correction
 			// values. This will just be for random inputs and are used to mask
 			// their true choices that were used in the remaining correction values.
-			MC_AWAIT(recvFinalization(chl));
+			co_await(recvFinalization(chl));
 
 			// now send them out challenge seed.
-			MC_AWAIT(sendChallenge(chl, seed));
+			co_await(sendChallenge(chl, seed));
 			computeProof();
-			MC_AWAIT(recvProof(chl));
+			co_await(recvProof(chl));
 			//std::cout << "pass" << std::endl;
 		}
-		MC_END();
 	}
 
 	task<> OosNcoOtSender::recvFinalization(Socket& chl)
@@ -688,53 +590,42 @@ namespace osuCrypto
 
 	task<> OosNcoOtSender::recvProof(Socket& chl)
 	{
-		MC_BEGIN(task<>, this, &chl,
-			tSum = std::vector<block>{},
-			wSum = std::vector<block>{}
-		);
+		auto tSum = std::vector<block>{};
+		auto wSum = std::vector<block>{};
 
 		tSum.resize(mStatSecParam * mT.stride());
 		wSum.resize(mStatSecParam * mCode.plaintextBlkSize());
 
 		// now wait for the receiver's challenge answer.
-		MC_AWAIT(chl.recv(tSum));
-		MC_AWAIT(chl.recv(wSum));
+		co_await(chl.recv(tSum));
+		co_await(chl.recv(wSum));
 
+		// a buffer to store codewords
+		std::vector<block> cw(mCode.codewordBlkSize());
+
+		// check each of the mStatSecParam number of challenges
+		for (u64 l = 0; l < mStatSecParam; ++l)
 		{
-			// a buffer to store codewords
-			std::vector<block> cw(mCode.codewordBlkSize());
+			span<block> word(
+				wSum.data() + l * mCode.plaintextBlkSize(),
+				mCode.plaintextBlkSize());
 
-			// check each of the mStatSecParam number of challenges
-			for (u64 l = 0; l < mStatSecParam; ++l)
+			// encode their l'th linear combination of choice words.
+			mCode.encode(word, cw);
+
+			// check that the linear relation holds.
+			for (u64 j = 0; j < cw.size(); ++j)
 			{
+				block tq = tSum[l * cw.size() + j] ^ qSum[l * cw.size() + j];
+				block cb = cw[j] & mChoiceBlks[j];
 
-				span<block> word(
-					wSum.data() + l * mCode.plaintextBlkSize(),
-					mCode.plaintextBlkSize());
-
-				// encode their l'th linear combination of choice words.
-				mCode.encode(word, cw);
-
-				// check that the linear relation holds.
-				for (u64 j = 0; j < cw.size(); ++j)
+				if (neq(tq, cb))
 				{
-					block tq = tSum[l * cw.size() + j] ^ qSum[l * cw.size() + j];
-					block cb = cw[j] & mChoiceBlks[j];
-
-					if (neq(tq, cb))
-					{
-						//std::cout << "bad OOS16 OT check. " << l << "m " << j << std::endl;
-						//return;
-						throw std::runtime_error("bad OOS16 OT check. " LOCATION);
-					}
+					throw std::runtime_error("bad OOS16 OT check. " LOCATION);
 				}
-
 			}
 		}
-
-		MC_END();
 	}
-
 }
 
 #endif

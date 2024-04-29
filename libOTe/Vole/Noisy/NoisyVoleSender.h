@@ -54,19 +54,17 @@ namespace osuCrypto {
         template<typename FVec>
         task<> send(F delta, FVec& b, PRNG& prng,
             OtReceiver& ot, Socket& chl, CoeffCtx ctx) {
-            MC_BEGIN(task<>, this, delta, &b, &prng, &ot, &chl, ctx,
-                bv = ctx.binaryDecomposition(delta),
-                otMsg = AlignedUnVector<block>{ });
+            auto bv = ctx.binaryDecomposition(delta);
+                auto otMsg = AlignedUnVector<block>{ };
             otMsg.resize(bv.size());
 
             setTimePoint("NoisyVoleSender.ot.begin");
 
-            MC_AWAIT(ot.receive(bv, otMsg, prng, chl));
+            co_await (ot.receive(bv, otMsg, prng, chl));
             setTimePoint("NoisyVoleSender.ot.end");
 
-            MC_AWAIT(send(delta, b, prng, otMsg, chl, ctx));
+            co_await (send(delta, b, prng, otMsg, chl, ctx));
 
-            MC_END();
         }
 
         // for chosen delta, compute b such htat
@@ -76,12 +74,11 @@ namespace osuCrypto {
         template<typename FVec>
         task<> send(F delta, FVec& b, PRNG& _,
             span<block> otMsg, Socket& chl, CoeffCtx ctx) {
-            MC_BEGIN(task<>, this, delta, &b, otMsg, &chl, ctx,
-                prng = std::move(PRNG{}),
-                buffer = std::vector<u8>{},
-                msg =  VecF{},
-                temp = VecF{},
-                xb = BitVector{});
+                auto prng = std::move(PRNG{});
+                auto buffer = std::vector<u8>{};
+                auto msg =  VecF{};
+                auto temp = VecF{};
+                auto xb = BitVector{};
 
             xb = ctx.binaryDecomposition(delta);
 
@@ -94,7 +91,7 @@ namespace osuCrypto {
 
             // receive the the excrypted one shares.
             buffer.resize(xb.size() * b.size() * ctx.template byteSize<F>());
-            MC_AWAIT(chl.recv(buffer));
+            co_await (chl.recv(buffer));
             ctx.resize(msg, xb.size() * b.size());
             ctx.deserialize(buffer.begin(), buffer.end(), msg.begin());
 
@@ -113,8 +110,6 @@ namespace osuCrypto {
                 {
                     // temp = otMsg[i,j, xb[i]]
                     ctx.fromBlock(temp[0], prng.get<block>());
-                    //ctx.zero(temp.begin(), temp.begin() + 1);
-                    //std::cout << "m" << i << ","<<xb[i]<<" = " << ctx.str(temp[0]) << std::endl;
 
                     // temp = otMsg[i,j,xb[i]] + xb[i] * msg[i,j] 
                     //      = otMsg[i,j,xb[i]] + xb[i] * (otMsg[i,j,0] + 2^i * y[j] - otMsg[i,j,1])
@@ -124,16 +119,12 @@ namespace osuCrypto {
                     if (xb[i])
                         ctx.plus(temp[0], msg[k], temp[0]);
                     
-                    //std::cout << "m" << i << ",b + d = " << ctx.str(temp[0]) << std::endl;
-
                     // zj += msg - xb[i] * otMsg[i,j]
                     ctx.plus(b[j], b[j], temp[0]);
-                    //std::cout << "z = " << ctx.str(b[j]) << std::endl << std::endl;
                 }
             }
             setTimePoint("NoisyVoleSender.done");
 
-            MC_END();
         }
 
     };

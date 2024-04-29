@@ -153,29 +153,27 @@ namespace osuCrypto
 
 	task<> sync(Socket& chl, Role role)
 	{
-		MC_BEGIN(task<>,&chl, role,
-			dummy = u8{},
-			timer = std::unique_ptr<Timer>{new Timer},
-			start = Timer::timeUnit{},
-			mid = Timer::timeUnit{},
-			end = Timer::timeUnit{},
-			ms = u64{},
-			rrt = std::chrono::system_clock::duration{}
-		);
+		auto dummy = u8{};
+		auto timer = std::unique_ptr<Timer>{ new Timer };
+		auto start = Timer::timeUnit{};
+		auto mid = Timer::timeUnit{};
+		//auto end = Timer::timeUnit{};
+		auto ms = u64{};
+		auto rrt = std::chrono::system_clock::duration{};
 
 		if (role == Role::Receiver)
 		{
 
-		 	MC_AWAIT(chl.recv(dummy));
+			co_await(chl.recv(dummy));
 
 			start = timer->setTimePoint("");
 
-			MC_AWAIT(chl.send(dummy));
-			MC_AWAIT(chl.recv(dummy));
+			co_await(chl.send(dummy));
+			co_await(chl.recv(dummy));
 
 			mid = timer->setTimePoint("");
 
-			MC_AWAIT(chl.send(std::move(dummy)));
+			co_await(chl.send(std::move(dummy)));
 
 			rrt = mid - start;
 			ms = std::chrono::duration_cast<std::chrono::milliseconds>(rrt).count();
@@ -187,13 +185,12 @@ namespace osuCrypto
 		}
 		else
 		{
-			MC_AWAIT(chl.send(dummy));
-			MC_AWAIT(chl.recv(dummy));
-			MC_AWAIT(chl.send(dummy));
-			MC_AWAIT(chl.recv(dummy));
+			co_await(chl.send(dummy));
+			co_await(chl.recv(dummy));
+			co_await(chl.send(dummy));
+			co_await(chl.recv(dummy));
 		}
 
-		MC_END();
 	}
 
 

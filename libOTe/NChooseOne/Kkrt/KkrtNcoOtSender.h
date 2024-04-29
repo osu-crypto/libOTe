@@ -95,9 +95,8 @@ namespace osuCrypto {
         task<> setBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices, Socket& chl) override {
-            MC_BEGIN(task<>,this, baseRecvOts, &choices);
             setBaseOts(baseRecvOts, choices);
-            MC_END();
+            co_return;
         }
 
 
@@ -148,7 +147,9 @@ namespace osuCrypto {
         // corrections based on how many were sent. The return value is the number received. See overload for details.
         //cp::task<>V<u64> recvCorrection(Socket& chl) override;
 
-        task<> check(Socket& chl, block seed) override { MC_BEGIN(task<>); MC_END(); }
+        task<> check(Socket& chl, block seed) override {
+            co_return;
+        }
 
 
         // Creates a new OT extesion of the same type that can be used

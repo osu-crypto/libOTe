@@ -85,7 +85,7 @@ namespace osuCrypto
                 temp = AlignedUnVector<std::array<block, 2>>(messages.size()),
                 temp2 = AlignedUnVector<block>(messages.size())
             );
-            MC_AWAIT(send(temp, prng, chl));
+            co_await (send(temp, prng, chl));
 
             for (u64 i = 0; i < static_cast<u64>(messages.size()); ++i)
             {
@@ -93,7 +93,7 @@ namespace osuCrypto
                 temp2[i] = temp[i][1] ^ corFunc(temp[i][0], i);
             }
 
-            MC_AWAIT(chl.send(std::move(temp2)));
+            co_await (chl.send(std::move(temp2)));
             MC_END();
         }
 
