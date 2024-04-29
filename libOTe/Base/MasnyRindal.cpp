@@ -29,113 +29,107 @@ namespace osuCrypto
     {
         using namespace DefaultCurve;
 
-        Curve{};
-        MC_BEGIN(task<>, &choices, messages, &prng, &chl,            
-            n = u64{},
-            i = u64{},
-            sk = std::vector<Number>{},
-            buff = std::vector<u8>{},
-            rrNot = Point{}, rr = Point{}, hPoint = Point{}
-            );
+        //MC_BEGIN(task<>, &choices, messages, &prng, &chl,            
+        //    n = u64{},
+        //    i = u64{},
+        //    sk = std::vector<Number>{},
+        //    buff = std::vector<u8>{},
+        //    rrNot = Point{}, rr = Point{}, hPoint = Point{}
+        //    );
 
-        n = choices.size();
+        auto n = choices.size();
 
+        Curve{}; // required to init relic
+        auto buff = std::vector<u8>{};
+        auto sk = std::vector<Number>{};
         sk.reserve(n);
 
-        for (i = 0; i < n;)
+        for (u64 i = 0; i < n;)
         {
-            {
-                Curve{};
+                Curve{};// required to init relic (might be on new thread here)
                 auto curStep = std::min<u64>(n - i, step);
 
                 buff.resize(Point::size * 2 * curStep);
 
                 for (u64 k = 0; k < curStep; ++k, ++i)
                 {
+                    Point rrNot;
                     rrNot.randomize(prng);
 
                     u8* rrNotPtr = &buff[Point::size * (2 * k + (choices[i] ^ 1))];
                     rrNot.toBytes(rrNotPtr);
 
                     // TODO: Ought to do domain separation.
+                    auto hPoint = Point{};
                     hPoint.fromHash(rrNotPtr, Point::size);
 
                     sk.emplace_back(prng);
-                    rr = Point::mulGenerator(sk[i]);
+                    auto rr = Point::mulGenerator(sk[i]);
                     rr -= hPoint;
                     rr.toBytes(&buff[Point::size * (2 * k + choices[i])]);
                 }
 
-            }
-            MC_AWAIT(chl.send(std::move(buff)));
+            co_await chl.send(std::move(buff));
         }
 
         buff.resize(Point::size);
-        MC_AWAIT(chl.recv(buff));
+        co_await chl.recv(buff);
 
+        Curve{};// required to init relic (might be on new thread here)
+        Point Mb, k;
+        Mb.fromBytes(buff.data());
+
+        for (u64 i = 0; i < n; ++i)
         {
-            Curve{};
-            Point Mb, k;
-            Mb.fromBytes(buff.data());
+            k = Mb;
+            k *= sk[i];
 
-            for (u64 i = 0; i < n; ++i)
-            {
-                k = Mb;
-                k *= sk[i];
-
-                RandomOracle ro(sizeof(block));
-                ro.Update(k);
-                ro.Update(i * 2 + choices[i]);
-                ro.Final(messages[i]);
-            }
+            RandomOracle ro(sizeof(block));
+            ro.Update(k);
+            ro.Update(i * 2 + choices[i]);
+            ro.Final(messages[i]);
         }
 
-        MC_END();
     }
 
 
     task<> MasnyRindal::send(span<std::array<block, 2>> messages, PRNG& prng, Socket& chl)
     {
         using namespace DefaultCurve;
-        Curve curve;
-        MC_BEGIN(task<>, messages, &prng, &chl,
-            n = u64{},
-            i = u64{},
-            curStep = u64{},
-            buff = std::vector<u8>{},
-            sk = Number{},
-            pHash = Point{}, r = Point{}
-        );
+        Curve{}; // required to init relic
 
-        n = static_cast<u64>(messages.size());
 
+        auto n = static_cast<u64>(messages.size());
+
+        auto buff = std::vector<u8>{};
         buff.resize(Point::size);
 
+        auto sk = Number{};
         sk.randomize(prng);
 
+        Point Mb = Point::mulGenerator(sk);
+        Mb.toBytes(buff.data());
+
+        co_await chl.send(std::move(buff));
+
+
+        for (u64 i = 0; i < n; )
         {
-            Curve{};
-            Point Mb = Point::mulGenerator(sk);
-            Mb.toBytes(buff.data());
-        }
-
-        MC_AWAIT(chl.send(std::move(buff)));
-
-
-        for (i = 0; i < n; )
-        {
-            curStep = std::min<u64>(n - i, step);
+            auto curStep = std::min<u64>(n - i, step);
             buff.resize(Point::size * 2 * curStep);
-            MC_AWAIT(chl.recv(buff));
-            Curve{};
+
+            co_await chl.recv(buff);
+            Curve{};// required to init relic (might be on new thread here)
 
             for (u64 k = 0; k < curStep; ++k, ++i)
             {
                 for (u64 j = 0; j < 2; ++j)
                 {
+                    auto r = Point{};
                     r.fromBytes(&buff[Point::size * (2 * k + j)]);
 
                     // TODO: Ought to do domain separation.
+                    auto pHash = Point{};
                     pHash.fromHash(&buff[Point::size * (2 * k + (j ^ 1))], Point::size);
 
                     r += pHash;
@@ -148,8 +142,6 @@ namespace osuCrypto
                 }
             }
         }
-
-        MC_END();
     }
 }
 #endif

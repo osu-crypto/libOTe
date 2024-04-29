@@ -40,26 +40,25 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
-		MC_BEGIN(task<>, this, messages, &prng, &chl,
-			numOtExt = u64{},
-			numSuperBlocks = u64{},
-			step = u64{},
-			superBlkIdx = u64{},
+			auto numOtExt = u64{};
+			auto numSuperBlocks = u64{};
+			auto step = u64{};
+			auto superBlkIdx = u64{};
+
 			// a temp that will be used to transpose the sender's matrix
-			t = AlignedUnVector<block>{ 128 },
-			u = AlignedUnVector<block>(128 * commStepSize),
-			choiceMask = AlignedArray<block, 128>{},
-			delta = block{},
-			recvView = span<u8>{},
-			mIter = span<std::array<block, 2>>::iterator{},
-			uIter = (block*)nullptr,
-			tIter = (block*)nullptr,
-			cIter = (block*)nullptr,
-			uEnd = (block*)nullptr
-		);
+			auto t = AlignedUnVector<block>{ 128 };
+			auto u = AlignedUnVector<block>(128 * commStepSize);
+			auto choiceMask = AlignedArray<block, 128>{};
+			auto delta = block{};
+			auto recvView = span<u8>{};
+			auto mIter = span<std::array<block, 2>>::iterator{};
+			auto uIter = (block*)nullptr;
+			auto tIter = (block*)nullptr;
+			auto cIter = (block*)nullptr;
+			auto uEnd = (block*)nullptr;
 
 		if (hasBaseOts() == false)
-			MC_AWAIT(genBaseOts(prng, chl));
+			co_await genBaseOts(prng, chl);
 
 		// round up 
 		numOtExt = roundUpTo(messages.size(), 128);
@@ -91,7 +90,7 @@ namespace osuCrypto
 				recvView = span<u8>((u8*)u.data(), step);
 				uIter = u.data();
 
-				MC_AWAIT(chl.recv(recvView));
+				co_await (chl.recv(recvView));
 			}
 
 			mGens.ecbEncCounterMode(mPrngIdx, tIter);
@@ -224,7 +223,6 @@ namespace osuCrypto
 			mAesFixedKey.hashBlocks((block*)messages.data(), messages.size() * 2, (block*)messages.data());
 		}
 #endif
-		MC_END();
 		static_assert(gOtExtBaseOtCount == 128, "expecting 128");
 	}
 

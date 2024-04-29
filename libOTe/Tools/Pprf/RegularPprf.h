@@ -118,27 +118,20 @@ namespace osuCrypto
 
             pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
 
-            MC_BEGIN(task<>, this, numThreads, oFormat, &output, seed, &chl, programPuncturedPoint, ctx,
-                treeIndex = u64{},
-                tree = span<AlignedArray<block, 8>>{},
-                levels = std::vector<span<AlignedArray<block, 8>> >{},
-                leafIndex = u64{},
-                leafLevelPtr = (VecF*)nullptr,
-                leafLevel = VecF{},
-                buff = std::vector<u8>{},
-                encSums = span<std::array<block, 2>>{},
-                leafMsgs = span<u8>{},
-                encStepSize = u64{},
-                leafStepSize = u64{},
-                encOffset = u64{},
-                leafOffset = u64{},
-                min = u64{},
-                dd = u64{}
-            );
+            auto tree = span<AlignedArray<block, 8>>{};
+            auto levels = std::vector<span<AlignedArray<block, 8>> >{};
+            auto leafIndex = u64{};
+            auto leafLevelPtr = (VecF*)nullptr;
+            auto leafLevel = VecF{};
+            auto buff = std::vector<u8>{};
+            auto encSums = span<std::array<block, 2>>{};
+            auto leafMsgs = span<u8>{};
+            auto encStepSize = u64{};
+            auto leafStepSize = u64{};
+            auto encOffset = u64{};
+            auto leafOffset = u64{};
 
-            setTimePoint("SilentMultiPprfSender.reserve");
-
-            dd = mDomain > 2 ? roundUpTo((mDomain + 1) / 2, 2) : 1;
+            auto dd = mDomain > 2 ? roundUpTo((mDomain + 1) / 2, 2) : 1;
             pprf::allocateExpandTree(dd, mTempBuffer, levels);
             assert(levels.size() == mDepth);
 
@@ -153,7 +146,7 @@ namespace osuCrypto
                 leafOffset = 0;
             }
 
-            for (treeIndex = 0; treeIndex < mPntCount; treeIndex += 8)
+            for (auto treeIndex = 0ull; treeIndex < mPntCount; treeIndex += 8)
             {
                 // for interleaved format, the leaf level of the tree
                 // is simply the output.
@@ -171,7 +164,7 @@ namespace osuCrypto
                     leafLevelPtr = &leafLevel;
                 }
 
-                min = std::min<u64>(8, mPntCount - treeIndex);
+                auto min = std::min<u64>(8, mPntCount - treeIndex);
                 if (mEagerSend)
                 {
                     // allocate a send buffer for the next 8 trees.
@@ -201,7 +194,7 @@ namespace osuCrypto
                 if (mEagerSend)
                 {
                     // send the buffer for the current set of trees.
-                    MC_AWAIT(chl.send(std::move(buff)));
+                    co_await (chl.send(std::move(buff)));
                 }
 
                 // if we aren't interleaved, we need to copy the
@@ -215,14 +208,12 @@ namespace osuCrypto
             if (!mEagerSend)
             {
                 // send the buffer for all of the trees.
-                MC_AWAIT(chl.send(std::move(buff)));
+                co_await (chl.send(std::move(buff)));
             }
 
             mBaseOTs = {};
 
             setTimePoint("SilentMultiPprfSender.de-alloc");
-
-            MC_END();
         }
 
         void setValue(span<const F> value) {
@@ -383,7 +374,7 @@ namespace osuCrypto
             ctx.zero(leafSums[0].begin(), leafSums[0].end());
             ctx.zero(leafSums[1].begin(), leafSums[1].end());
 
-            auto outIter = leafLevel.begin() + leafOffset;
+            auto outIter = leafLevel.data() + leafOffset;
 
             // for the leaf nodes we need to hash both children.
             for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx)
@@ -433,7 +424,7 @@ namespace osuCrypto
                     ctx.plus(leafSum.data()[7], leafSum.data()[7], *(outIter + 7));
 
                     outIter += 8;
-                    assert(outIter <= leafLevel.end());
+                    assert(outIter <= leafLevel.data() + leafLevel.size());
                 }
 
             }
@@ -710,23 +701,19 @@ namespace osuCrypto
         {
             pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
 
-            MC_BEGIN(task<>, this, oFormat, &output, &chl, programPuncturedPoint, ctx,
-                treeIndex = u64{},
-                levels = std::vector<span<AlignedArray<block, 8>>>{},
-                leafIndex = u64{},
-                leafLevelPtr = (VecF*)nullptr,
-                leafLevel = VecF{},
-                buff = std::vector<u8>{},
-                encSums = span<std::array<block, 2>>{},
-                leafMsgs = span<u8>{},
-                points = std::vector<u64>{},
-                encStepSize = u64{},
-                leafStepSize = u64{},
-                encOffset = u64{},
-                leafOffset = u64{},
-                min = u64{},
-                dd = u64{}
-            );
+            auto treeIndex = u64{};
+            auto levels = std::vector<span<AlignedArray<block, 8>>>{};
+            auto leafIndex = u64{};
+            auto leafLevelPtr = (VecF*)nullptr;
+            auto leafLevel = VecF{};
+            auto buff = std::vector<u8>{};
+            auto encSums = span<std::array<block, 2>>{};
+            auto leafMsgs = span<u8>{};
+            auto points = std::vector<u64>{};
+            auto encStepSize = u64{};
+            auto leafStepSize = u64{};
+            auto encOffset = u64{};
+            auto leafOffset = u64{};
 
             setTimePoint("SilentMultiPprfReceiver.start");
             points.resize(mPntCount);
@@ -734,7 +721,7 @@ namespace osuCrypto
 
             //setTimePoint("SilentMultiPprfSender.reserve");
 
-            dd = mDomain > 2 ? roundUpTo((mDomain + 1) / 2, 2) : 1;
+            auto dd = mDomain > 2 ? roundUpTo((mDomain + 1) / 2, 2) : 1;
             pprf::allocateExpandTree(dd, mTempBuffer, levels);
             assert(levels.size() == mDepth);
 
@@ -749,10 +736,10 @@ namespace osuCrypto
                 encOffset = 0;
                 leafOffset = 0;
 
-                MC_AWAIT(chl.recv(buff));
+                co_await (chl.recv(buff));
             }
 
-            for (treeIndex = 0; treeIndex < mPntCount; treeIndex += 8)
+            for (treeIndex = 0ull; treeIndex < mPntCount; treeIndex += 8)
             {
                 // for interleaved format, the leaf level of the tree
                 // is simply the output.
@@ -770,7 +757,7 @@ namespace osuCrypto
                     leafLevelPtr = &leafLevel;
                 }
 
-                min = std::min<u64>(8, mPntCount - treeIndex);
+                auto min = std::min<u64>(8, mPntCount - treeIndex);
                 if (mEagerSend)
                 {
 
@@ -781,7 +768,7 @@ namespace osuCrypto
                     leafStepSize = leafMsgs.size() / min;
                     encOffset = 0;
                     leafOffset = 0;
-                    MC_AWAIT(chl.recv(buff));
+                    co_await (chl.recv(buff));
                 }
 
                 // exapnd the tree
@@ -810,8 +797,6 @@ namespace osuCrypto
             mBaseOTs = {};
 
             setTimePoint("SilentMultiPprfReceiver.de-alloc");
-
-            MC_END();
         }
 
         void clear()
@@ -823,15 +808,6 @@ namespace osuCrypto
             mPntCount = 0;
         }
 
-        void expandOneInternal(
-            u64 treeIdx,
-            span<span<AlignedArray<block, 8>>> levels,
-            span<std::array<std::array<block, 8>, 2>> theirSums,
-            CoeffCtx& ctx)
-        {
-        }
-
-        //treeIndex, programPuncturedPoint, levels, *leafLevelPtr, leafIndex, encSums, leafMsgs
         void expandOne(
             u64 treeIdx,
             bool programPuncturedPoint,
@@ -1032,7 +1008,7 @@ namespace osuCrypto
                         ctx.copy(leafSums[k][i], leafSums[k][0]);
                 }
 
-                auto outIter = leafLevel.begin() + outputOffset;
+                auto outIter = leafLevel.data() + outputOffset;
                 // for leaf nodes both children should be hashed.
                 for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx)
                 {
@@ -1075,7 +1051,7 @@ namespace osuCrypto
                         ctx.plus(leafSum.data()[7], leafSum.data()[7], *(outIter + 7));
 
                         outIter += 8;
-                        assert(outIter <= leafLevel.end());
+                        assert(outIter <= leafLevel.data() + leafLevel.size());
                     }
                 }
             }

@@ -17,26 +17,19 @@ namespace osuCrypto
 		if (u64(baseRecvOts.size()) != u64(mGens.size()))
 			throw std::runtime_error("rt error at " LOCATION);
 
-		MC_BEGIN(task<>, this, baseRecvOts, &prng, &chl,
-			delta = BitVector(getBaseOTCount())
-		);
+		auto delta = BitVector(getBaseOTCount());
+		delta.randomize(prng);
+
+		auto iter = delta.begin();
+		for (u64 i = 0; i < mGens.size(); i++)
 		{
-
-			delta.randomize(prng);
-
-			auto iter = delta.begin();
-			for (u64 i = 0; i < mGens.size(); i++)
-			{
-				mGens[i][0].SetSeed(baseRecvOts[i][0 ^ *iter]);
-				mGens[i][1].SetSeed(baseRecvOts[i][1 ^ *iter]);
-				++iter;
-			}
-
-			mHasBase = true;
+			mGens[i][0].SetSeed(baseRecvOts[i][0 ^ *iter]);
+			mGens[i][1].SetSeed(baseRecvOts[i][1 ^ *iter]);
+			++iter;
 		}
-		MC_AWAIT(chl.send(std::move(delta)));
 
-		MC_END();
+		mHasBase = true;
+		co_await chl.send(std::move(delta));
 	}
 
 	void OosNcoOtReceiver::setUniformBaseOts(span<std::array<block, 2>> baseRecvOts)
@@ -55,130 +48,124 @@ namespace osuCrypto
 
 	task<> OosNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Socket& chl)
 	{
-		MC_BEGIN(task<>, this, numOtExt, &prng, &chl);
-
 		if (mInputByteCount == 0)
 			throw std::runtime_error("configure must be called first" LOCATION);
 
 		if (hasBaseOts() == false)
-			MC_AWAIT(genBaseOts(prng, chl));
+			co_await genBaseOts(prng, chl);
 
-		{
-			u64 doneIdx = 0;
-			const u8 superBlkSize(8);
+		u64 doneIdx = 0;
+		const u8 superBlkSize(8);
 
-			//TODO("Make the statistical sec param a parameter");
-			// = 40;
+		//TODO("Make the statistical sec param a parameter");
+		// = 40;
 
-        // this will be used as temporary buffers of 128 columns,
-        // each containing 1024 bits. Once transposed, they will be copied
-        // into the T1, T0 buffers for long term storage.
-        AlignedArray<std::array<block, superBlkSize>, 128> t0;
-        AlignedArray<std::array<block, superBlkSize>, 128> t1;
+		// this will be used as temporary buffers of 128 columns,
+		// each containing 1024 bits. Once transposed, they will be copied
+		// into the T1, T0 buffers for long term storage.
+		AlignedUnVector<std::array<block, superBlkSize>> t0(128);
+		AlignedUnVector<std::array<block, superBlkSize>> t1(128);
 
-			// round up and add the extra OT used in the check at the end
-			numOtExt = roundUpTo(numOtExt + mStatSecParam, 128);
+		// round up and add the extra OT used in the check at the end
+		numOtExt = roundUpTo(numOtExt + mStatSecParam, 128);
 
-			// we are going to process OTs in blocks of 128 * superblkSize messages.
-			u64 numSuperBlocks = ((numOtExt) / 128 + superBlkSize - 1) / superBlkSize;
-			u64 numCols = mGens.size();
+		// we are going to process OTs in blocks of 128 * superblkSize messages.
+		u64 numSuperBlocks = ((numOtExt) / 128 + superBlkSize - 1) / superBlkSize;
+		u64 numCols = mGens.size();
 
-			// The is the index of the last correction value u = T0 ^ T1 ^ c(w)
-			// that was sent to the sender.
-			mCorrectionIdx = 0;
-			mChallengeSeed = ZeroBlock;
+		// The is the index of the last correction value u = T0 ^ T1 ^ c(w)
+		// that was sent to the sender.
+		mCorrectionIdx = 0;
+		mChallengeSeed = ZeroBlock;
 
-			// We need three matrices, T0, T1, and mW. T1, T0 will hold the expanded
-			// and transposed rows that we got the using the base OTs as PRNG seed.
-			// mW will hold the record of all the words that we encoded. They will
-			// be used in the Check that is done at the end.
-			mW = Matrix<block>();
-			mT0 = Matrix<block>();
-			mT1 = std::make_shared<Matrix<block>>();
-			mW.resize(numOtExt, mCode.plaintextBlkSize());
-			mT0.resize(numOtExt, numCols / 128);
-			mT1->resize(numOtExt, numCols / 128);
+		// We need three matrices, T0, T1, and mW. T1, T0 will hold the expanded
+		// and transposed rows that we got the using the base OTs as PRNG seed.
+		// mW will hold the record of all the words that we encoded. They will
+		// be used in the Check that is done at the end.
+		mW = Matrix<block>();
+		mT0 = Matrix<block>();
+		mT1 = std::make_shared<Matrix<block>>();
+		mW.resize(numOtExt, mCode.plaintextBlkSize());
+		mT0.resize(numOtExt, numCols / 128);
+		mT1->resize(numOtExt, numCols / 128);
 
-			// An extra debugging check that can be used. Each one
-			// gets marked as used, makes use we don't encode twice.
+		// An extra debugging check that can be used. Each one
+		// gets marked as used, makes use we don't encode twice.
 #ifndef NDEBUG
-			mEncodeFlags = std::vector<u8>();
-			mEncodeFlags.resize(numOtExt, 0);
+		mEncodeFlags = std::vector<u8>();
+		mEncodeFlags.resize(numOtExt, 0);
 #endif
 
-			// NOTE: We do not transpose a bit-matrix of size numCol * numCol.
-			//   Instead we break it down into smaller chunks. We do 128 columns
-			//   times 8 * 128 rows at a time, where 8 = superBlkSize. This is done for
-			//   performance reasons. The reason for 8 is that most CPUs have 8 AES vector
-			//   lanes, and so its more efficient to encrypt (aka prng) 8 blocks at a time.
-			//   So that's what we do.
-			for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
+		// NOTE: We do not transpose a bit-matrix of size numCol * numCol.
+		//   Instead we break it down into smaller chunks. We do 128 columns
+		//   times 8 * 128 rows at a time, where 8 = superBlkSize. This is done for
+		//   performance reasons. The reason for 8 is that most CPUs have 8 AES vector
+		//   lanes, and so its more efficient to encrypt (aka prng) 8 blocks at a time.
+		//   So that's what we do.
+		for (u64 superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
+		{
+			// compute at what row does the user want us to stop.
+			// The code will still compute the transpose for these
+			// extra rows, but it is thrown away.
+			u64 stopIdx
+				= doneIdx
+				+ std::min<u64>(u64(128) * superBlkSize, numOtExt - doneIdx);
+
+
+			for (u64 i = 0; i < numCols / 128; ++i)
 			{
-				// compute at what row does the user want us to stop.
-				// The code will still compute the transpose for these
-				// extra rows, but it is thrown away.
-				u64 stopIdx
-					= doneIdx
-					+ std::min<u64>(u64(128) * superBlkSize, numOtExt - doneIdx);
 
-
-				for (u64 i = 0; i < numCols / 128; ++i)
+				for (u64 tIdx = 0, colIdx = i * 128; tIdx < 128; ++tIdx, ++colIdx)
 				{
+					// generate the column indexed by colIdx. This is done with
+					// AES in counter mode acting as a PRNG. We don't use the normal
+					// PRNG interface because that would result in a data copy when
+					// we mode it into the T0,T1 matrices. Instead we do it directly.
+					mGens[colIdx][0].mAes.ecbEncCounterMode(mGens[colIdx][0].mBlockIdx, superBlkSize, ((block*)t0.data() + superBlkSize * tIdx));
+					mGens[colIdx][1].mAes.ecbEncCounterMode(mGens[colIdx][1].mBlockIdx, superBlkSize, ((block*)t1.data() + superBlkSize * tIdx));
 
-					for (u64 tIdx = 0, colIdx = i * 128; tIdx < 128; ++tIdx, ++colIdx)
-					{
-						// generate the column indexed by colIdx. This is done with
-						// AES in counter mode acting as a PRNG. We don't use the normal
-						// PRNG interface because that would result in a data copy when
-						// we mode it into the T0,T1 matrices. Instead we do it directly.
-						mGens[colIdx][0].mAes.ecbEncCounterMode(mGens[colIdx][0].mBlockIdx, superBlkSize, ((block*)t0.data() + superBlkSize * tIdx));
-						mGens[colIdx][1].mAes.ecbEncCounterMode(mGens[colIdx][1].mBlockIdx, superBlkSize, ((block*)t1.data() + superBlkSize * tIdx));
-
-						// increment the counter mode idx.
-						mGens[colIdx][0].mBlockIdx += superBlkSize;
-						mGens[colIdx][1].mBlockIdx += superBlkSize;
-					}
-
-					// transpose our 128 columns of 1024 bits. We will have 1024 rows,
-					// each 128 bits wide.
-					transpose128x1024(t0);
-					transpose128x1024(t1);
-
-					// This is the index of where we will store the matrix long term.
-					// doneIdx is the starting row. i is the offset into the blocks of 128 bits.
-					// __restrict isn't crucial, it just tells the compiler that this pointer
-					// is unique and it shouldn't worry about pointer aliasing.
-					block* __restrict mT0Iter = mT0.data() + mT0.stride() * doneIdx + i;
-					block* __restrict mT1Iter = mT1->data() + mT0.stride() * doneIdx + i;
-
-					for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
-					{
-						// because we transposed 1024 rows, the indexing gets a bit weird. But this
-						// is the location of the next row that we want. Keep in mind that we had long
-						// **contiguous** columns.
-						block* __restrict t0Iter = ((block*)t0.data()) + j;
-						block* __restrict t1Iter = ((block*)t1.data()) + j;
-
-						// do the copy!
-						for (u64 k = 0; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)
-						{
-							*mT0Iter = *(t0Iter);
-							*mT1Iter = *(t1Iter);
-
-							t0Iter += superBlkSize;
-							t1Iter += superBlkSize;
-
-							mT0Iter += mT0.stride();
-							mT1Iter += mT0.stride();
-						}
-					}
+					// increment the counter mode idx.
+					mGens[colIdx][0].mBlockIdx += superBlkSize;
+					mGens[colIdx][1].mBlockIdx += superBlkSize;
 				}
 
+				// transpose our 128 columns of 1024 bits. We will have 1024 rows,
+				// each 128 bits wide.
+				transpose128x1024(t0[0].data());
+				transpose128x1024(t1[0].data());
 
-				doneIdx = stopIdx;
+				// This is the index of where we will store the matrix long term.
+				// doneIdx is the starting row. i is the offset into the blocks of 128 bits.
+				// __restrict isn't crucial, it just tells the compiler that this pointer
+				// is unique and it shouldn't worry about pointer aliasing.
+				block* __restrict mT0Iter = mT0.data() + mT0.stride() * doneIdx + i;
+				block* __restrict mT1Iter = mT1->data() + mT0.stride() * doneIdx + i;
+
+				for (u64 rowIdx = doneIdx, j = 0; rowIdx < stopIdx; ++j)
+				{
+					// because we transposed 1024 rows, the indexing gets a bit weird. But this
+					// is the location of the next row that we want. Keep in mind that we had long
+					// **contiguous** columns.
+					block* __restrict t0Iter = ((block*)t0.data()) + j;
+					block* __restrict t1Iter = ((block*)t1.data()) + j;
+
+					// do the copy!
+					for (u64 k = 0; rowIdx < stopIdx && k < 128; ++rowIdx, ++k)
+					{
+						*mT0Iter = *(t0Iter);
+						*mT1Iter = *(t1Iter);
+
+						t0Iter += superBlkSize;
+						t1Iter += superBlkSize;
+
+						mT0Iter += mT0.stride();
+						mT1Iter += mT0.stride();
+					}
+				}
 			}
+
+			doneIdx = stopIdx;
 		}
-		MC_END();
 	}
 
 
@@ -203,11 +190,8 @@ namespace osuCrypto
 			}
 			raw.setUniformBaseOts(base);
 		}
-#ifdef OC_NO_MOVE_ELISION 
-		return std::move(raw);
-#else
+
 		return raw;
-#endif
 	}
 
 	std::unique_ptr<NcoOtExtReceiver> OosNcoOtReceiver::split()
@@ -261,34 +245,11 @@ namespace osuCrypto
 			t1Val[2] = t1Val[2] ^ t0Val[2];
 			t1Val[3] = t1Val[3] ^ t0Val[3];
 
-#ifdef OOS_SHA_HASH
 			RandomOracle  sha1(destSize);
 			// now hash it to remove the correlation.
 			sha1.Update(otIdx);
 			sha1.Update((u8*)t0Val, mT0.stride() * sizeof(block));
 			sha1.Final((u8*)dest);
-
-			//std::array<u32, 5> out{ 0,0,0,0,0 };
-			//sha1_compress(out.data(), (u8*)&t0Val[0]);
-			//memcpy(dest, out.data(), destSize);
-#else
-			//H(x) = AES_f(H'(x)) + H'(x), where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
-			mAesFixedKey.ecbEncFourBlocks(t0Val, codeword.data());
-
-			codeword[0] = codeword[0] ^ t0Val[0];
-			codeword[1] = codeword[1] ^ t0Val[1];
-			codeword[2] = codeword[2] ^ t0Val[2];
-			codeword[3] = codeword[3] ^ t0Val[3];
-
-			val = codeword[0] ^ codeword[1];
-			codeword[2] = codeword[2] ^ codeword[3];
-
-			val = val ^ codeword[2];
-
-			mAesFixedKey.ecbEncBlock(val, codeword[0]);
-			val = val ^ codeword[0];
-#endif
-
 		}
 		else
 		{
@@ -303,26 +264,13 @@ namespace osuCrypto
 					^ t1Val[i];
 			}
 
-#ifdef OOS_SHA_HASH
 			RandomOracle  sha1;
 			u8 hashBuff[RandomOracle::HashSize];
 			// now hash it to remove the correlation.
 			sha1.Update((u8*)t0Val, mT0.stride() * sizeof(block));
 			sha1.Final(hashBuff);
 			memcpy(dest, hashBuff, std::min<u64>(RandomOracle::HashSize, destSize));
-			//val = toBlock(hashBuff);
-#else
-			//H(x) = AES_f(H'(x)) + H'(x),     where  H'(x) = AES_f(x_0) + x_0 + ... +  AES_f(x_n) + x_n.
-			mAesFixedKey.ecbEncBlocks(t0Val, mT0.stride(), codeword.data());
 
-			val = ZeroBlock;
-			for (u64 i = 0; i < mT0.stride(); ++i)
-				val = val ^ codeword[i] ^ t0Val[i];
-
-
-			mAesFixedKey.ecbEncBlock(val, codeword[0]);
-			val = val ^ codeword[0];
-#endif
 		}
 
 	}
@@ -408,9 +356,7 @@ namespace osuCrypto
 
 	task<> OosNcoOtReceiver::sendCorrection(Socket& chl, u64 sendCount)
 	{
-		MC_BEGIN(task<>, this, &chl, sendCount
-			, sub = T1Sub{}
-		);
+		auto sub = T1Sub{};
 #ifndef NDEBUG
 		for (u64 i = mCorrectionIdx; i < sendCount + mCorrectionIdx; ++i)
 		{
@@ -425,46 +371,34 @@ namespace osuCrypto
 		sub.mSub = span<block>(
 			mT1->data() + (mCorrectionIdx * mT0.stride()),
 			mT0.stride() * sendCount
-			);
+		);
 		mCorrectionIdx += sendCount;
 
-		MC_AWAIT(chl.send(std::move(sub)));
-		MC_END();
+		co_await chl.send(std::move(sub));
 	}
 
 	task<> OosNcoOtReceiver::check(Socket& chl, block wordSeed)
 	{
-		MC_BEGIN(task<>, this, &chl, wordSeed);
 		if (mMalicious)
 		{
-			MC_AWAIT(sendFinalization(chl, wordSeed));
-			MC_AWAIT(recvChallenge(chl));
+			co_await(sendFinalization(chl, wordSeed));
+			co_await(recvChallenge(chl));
 			computeProof();
-			MC_AWAIT(sendProof(chl));
+			co_await(sendProof(chl));
 		}
-
-		MC_END();
 	}
 
 	task<> OosNcoOtReceiver::sendFinalization(Socket& chl, block seed)
 	{
 
 #ifndef NDEBUG
-		//std::cout << IoStream::lock << "receiver " << std::endl;
 		for (u64 i = 0; i < mCorrectionIdx; ++i)
 		{
 			if (mEncodeFlags[i] == 0)
 			{
 				throw std::runtime_error("All messages must be encoded before check is called. " LOCATION);
 			}
-			//std::cout << i << " " << (int)mEncodeFlags[i] << " ";
-			//for (u64 j = 0; j < mT1.stride(); ++j)
-			//{
-			//    std::cout << mT1[i][j] << " ";
-			//}
-			//std::cout << std::endl;
 		}
-		//std::cout << IoStream::unlock;
 #endif
 
 		PRNG prng(seed);
@@ -746,12 +680,9 @@ namespace osuCrypto
 	}
 	task<> OosNcoOtReceiver::sendProof(Socket& chl)
 	{
-		MC_BEGIN(task<>, this, &chl);
 		// send over our summations.
-		MC_AWAIT(chl.send(std::move(mTBuff)));
-		MC_AWAIT(chl.send(std::move(mWBuff)));
-
-		MC_END();
+		co_await(chl.send(std::move(mTBuff)));
+		co_await(chl.send(std::move(mWBuff)));
 	}
 }
 #endif

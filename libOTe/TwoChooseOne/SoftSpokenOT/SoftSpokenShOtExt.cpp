@@ -34,36 +34,29 @@ namespace osuCrypto
 	task<> SoftSpokenShOtSender<SubspaceVole>::send(
 		span<std::array<block, 2>> messages, PRNG& prng, Socket& chl)
 	{
-		MC_BEGIN(task<>, this, messages, &prng, &chl,
-			numInstances = u64{},
-			numChunks = u64{},
-			chunkSize_ = u64{},
-			minInstances = u64{},
-			nChunk = u64{},
-			nInstance = u64{},
-			numUsed = u64{},
-			temp = AlignedUnVector<std::array<block,2>>(),
-			seed = block{}
-			);
+		auto numInstances = u64{};
+		auto numChunks = u64{};
+		auto chunkSize_ = u64{};
+		auto minInstances = u64{};
+		auto nChunk = u64{};
+		auto nInstance = u64{};
+		auto numUsed = u64{};
+		auto temp = AlignedUnVector<std::array<block, 2>>();
+		auto seed = block{};
 
 		if (!hasBaseOts())
-			MC_AWAIT(genBaseOts(prng, chl));
+			co_await genBaseOts(prng, chl);
 
 		if (mSubVole.hasSeed() == false)
 		{
 			seed = prng.get<block>();
 			mAesMgr.setSeed(seed);
-			MC_AWAIT(chl.send(std::move(seed)));
-			MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
+			co_await chl.send(std::move(seed));
+			co_await mSubVole.expand(chl, prng, mNumThreads);
 		}
 
-
-
-		//MC_AWAIT(runBatch(chl, messages));
-		//auto nums = checkSpanLengths(instParams..., chunkParams...);
 		numInstances = messages.size();
 		numChunks = divCeil(numInstances, chunkSize());
-
 		chunkSize_ = chunkSize();
 		minInstances = chunkSize_ + paddingSize();
 
@@ -73,13 +66,12 @@ namespace osuCrypto
 		for (; nInstance + minInstances <= numInstances; ++nChunk, nInstance += chunkSize_)
 		{
 			if (nChunk % commSize == 0)
-				MC_AWAIT(recvBuffer(chl, std::min<u64>(numChunks - nChunk, commSize)));
+				co_await(recvBuffer(chl, std::min<u64>(numChunks - nChunk, commSize)));
 
 			processChunk(
 				nChunk, chunkSize_,
 				messages.subspan(nInstance, minInstances));
 		}
-
 
 		// The last few (probably only 1) need an intermediate buffer.
 		temp.resize(minInstances * (nInstance < numInstances));
@@ -87,17 +79,14 @@ namespace osuCrypto
 		for (; nInstance < numInstances; ++nChunk, nInstance += chunkSize_)
 		{
 			if (nChunk % commSize == 0)
-				MC_AWAIT(recvBuffer(chl, std::min<u64>(numChunks - nChunk, commSize)));
+				co_await recvBuffer(chl, std::min<u64>(numChunks - nChunk, commSize));
 
 			numUsed = std::min<u64>(numInstances - nInstance, chunkSize_);
-
 			processPartialChunk(
 				nChunk, numUsed,
 				messages.subspan(nInstance, numUsed),
 				temp);
 		}
-
-		MC_END();
 	}
 
 	template<typename SubspaceVole>
@@ -124,7 +113,7 @@ namespace osuCrypto
 	template<typename SubspaceVole>
 	void SoftSpokenShOtSender<SubspaceVole>::processPartialChunk(
 		u64 chunkIdx, u64 numUsed,
-		span<std::array<block, 2>> messages, 
+		span<std::array<block, 2>> messages,
 		span<std::array<block, 2>> temp)
 	{
 		assert(temp.size() > messages.size());
@@ -182,25 +171,23 @@ namespace osuCrypto
 	task<> SoftSpokenShOtReceiver<SubspaceVole>::receive(
 		const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
 	{
-		MC_BEGIN(task<>, this, &choices, messages, &prng, &chl,
-			numInstances = u64{},
-			numChunks = u64{},
-			nChunk = u64{},
-			nInstance = u64{},
-			minInstances = u64{},
-			numUsed = u64{},
-			temp = AlignedUnVector<block>(),
-			seed = block{}
-		);
+		auto numInstances = u64{};
+		auto numChunks = u64{};
+		auto nChunk = u64{};
+		auto nInstance = u64{};
+		auto minInstances = u64{};
+		auto numUsed = u64{};
+		auto temp = AlignedUnVector<block>();
+		auto seed = block{};
 
 		if (!hasBaseOts())
-			MC_AWAIT(genBaseOts(prng, chl));
+			co_await genBaseOts(prng, chl);
 
 		if (mSubVole.hasSeed() == false)
 		{
-			MC_AWAIT(chl.recv(seed));
+			co_await chl.recv(seed);
 			mAesMgr.setSeed(seed);
-			MC_AWAIT(mSubVole.expand(chl, prng, mNumThreads));
+			co_await mSubVole.expand(chl, prng, mNumThreads);
 		}
 
 		numInstances = messages.size();
@@ -225,7 +212,7 @@ namespace osuCrypto
 
 			if (nChunk % commSize == 0)
 			{
-				MC_AWAIT(sendBuffer(chl));
+				co_await sendBuffer(chl);
 				reserveSendBuffer(std::min<u64>(numChunks - nChunk, commSize));
 			}
 		}
@@ -235,8 +222,8 @@ namespace osuCrypto
 		{
 			if (nChunk % commSize == 0)
 			{
-				if(hasSendBuffer())
-					MC_AWAIT(sendBuffer(chl));
+				if (hasSendBuffer())
+					co_await sendBuffer(chl);
 
 				reserveSendBuffer(std::min<u64>(numChunks - nChunk, commSize));
 			}
@@ -246,16 +233,14 @@ namespace osuCrypto
 				nChunk,
 				messages.subspan(nInstance, numUsed),
 				choices.blocks()[nChunk],
-				temp);		
+				temp);
 		}
 
-		if(hasSendBuffer())
-			MC_AWAIT(sendBuffer(chl));
-
-		MC_END();
+		if (hasSendBuffer())
+			co_await sendBuffer(chl);
 	}
 
-	
+
 	template<typename SubspaceVole>
 	void SoftSpokenShOtReceiver<SubspaceVole>::processChunk(
 		u64 nChunk, u64 numUsed, span<block> messages, block choices)
@@ -268,9 +253,9 @@ namespace osuCrypto
 
 	template<typename SubspaceVole>
 	void SoftSpokenShOtReceiver<SubspaceVole>::processPartialChunk(
-		u64 nChunk, 
-		span<block> messages, 
-		block choice, 
+		u64 nChunk,
+		span<block> messages,
+		block choice,
 		span<block> temp)
 	{
 		assert(temp.size() > messages.size());

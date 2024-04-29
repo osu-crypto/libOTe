@@ -64,30 +64,29 @@ namespace osuCrypto
         PRNG& prng,
         Socket& chl)
     {
-        MC_BEGIN(task<>,this, &choices, messages, &prng, &chl,
-            numOtExt = u64{},
-            numSuperBlocks = u64{},
-            numBlocks = u64{},
-            superBlkIdx = u64{},
-            step = u64{},
-            choices2 = BitVector{},
-            choiceBlocks = span<block>{},
-            // this will be used as temporary buffers of 128 columns, 
-            // each containing 1024 bits. Once transposed, they will be copied
-            // into the T1, T0 buffers for long term storage.
-            t0 = AlignedUnVector<block>{ 128 },
-            mIter = span<block>::iterator{},
-            uIter = (block*)nullptr,
-            tIter = (block*)nullptr,
-            cIter = (block*)nullptr,
-            uEnd = (block*)nullptr,
-            uBuff = AlignedUnVector<block>{}
-        );
+        auto numOtExt = u64{};
+        auto numSuperBlocks = u64{};
+        auto numBlocks = u64{};
+        auto superBlkIdx = u64{};
+        auto step = u64{};
+        auto choices2 = BitVector{};
+        auto choiceBlocks = span<block>{};
+        // this will be used as temporary buffers of 128 columns,
+        // each containing 1024 bits. Once transposed, they will be copies
+        // into the T1, T0 buffers for long term storage
+        auto t0 = AlignedUnVector<block>{ 128 };
+        auto mIter = (block*)nullptr;
+        auto uIter = (block*)nullptr;
+        auto tIter = (block*)nullptr;
+        auto cIter = (block*)nullptr;
+        auto uEnd = (block*)nullptr;
+        auto uBuff = AlignedUnVector<block>{};
+
         if (choices.size() != messages.size())
             throw RTE_LOC;
 
         if (hasBaseOts() == false)
-            MC_AWAIT(genBaseOts(prng, chl));
+            co_await genBaseOts(prng, chl);
 
         // we are going to process OTs in blocks of 128 * superBlkSize messages.
         numOtExt = roundUpTo(choices.size(), 128);
@@ -103,7 +102,7 @@ namespace osuCrypto
         // the index of the OT that has been completed.
         //u64 doneIdx = 0;
 
-        mIter = messages.begin();
+        mIter = messages.data();
 
         step = std::min<u64>(numSuperBlocks, (u64)commStepSize);
         uBuff.resize(step * 128);
@@ -157,7 +156,7 @@ namespace osuCrypto
             if (uIter == uEnd)
             {
                 // send over u buffer
-                MC_AWAIT(chl.send(std::move(uBuff)));
+                co_await chl.send(std::move(uBuff));
 
                 u64 step = std::min<u64>(numSuperBlocks - superBlkIdx - 1, (u64)commStepSize);
 
@@ -174,7 +173,7 @@ namespace osuCrypto
             transpose128(t0.data());
 
 
-            auto mEnd = mIter + std::min<u64>(128, messages.end() - mIter);
+            auto mEnd = mIter + std::min<u64>(128, messages.data() + messages.size() - mIter);
 
 
             tIter = t0.data();
@@ -190,7 +189,6 @@ namespace osuCrypto
             cIter = choiceBlocks.data() + superBlkSize * superBlkIdx;
             chl.send(cIter, sizeof(block) * superBlkSize);
 #endif
-            //doneIdx = stopIdx;
         }
 
         if (mHash)
@@ -221,8 +219,6 @@ namespace osuCrypto
 
         }
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");
-
-        MC_END();
     }
 
 }

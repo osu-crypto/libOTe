@@ -256,7 +256,7 @@ namespace osuCrypto
             u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 14));
 
             PRNG prng0(ZeroBlock), prng1(ZeroBlock);
-            block delta = prng0.get();
+            //block delta = prng0.get();
 
             auto sock = coproto::LocalAsyncSocket::makePair();
 

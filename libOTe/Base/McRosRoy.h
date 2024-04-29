@@ -76,7 +76,12 @@ namespace osuCrypto
                 PRNG& prng,
                 Socket& chl) override;
 
-            static_assert(std::is_pod<typename PopfFactory::ConstructedPopf::PopfFunc>::value,
+            using T = typename PopfFactory::ConstructedPopf::PopfFunc;
+
+
+            static_assert(
+                std::is_standard_layout<T>::value&&
+                std::is_trivial<T>::value,
                 "Popf function must be Plain Old Data");
             static_assert(std::is_same<typename PopfFactory::ConstructedPopf::PopfOut, Point>::value,
                 "Popf must be programmable on elliptic curve points");
@@ -112,16 +117,14 @@ namespace osuCrypto
             PRNG& prng,
             Socket& chl)
         {
-            MC_BEGIN(task<>,this, &choices, messages, &prng, &chl,
-                n = u64{},
-                A = Point{},
-                sk = std::vector<Number>{},
-                buff = std::vector<u8>(Point::size),
-                sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
-            );
 
-            Curve{};
-            n = choices.size();
+            auto A = Point{};
+            auto sk = std::vector<Number>{};
+            auto buff = std::vector<u8>(Point::size);
+            auto sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{ };
+
+            Curve{}; // init relic
+            auto n = choices.size();
             sk.reserve(n);
             sendBuff.resize(n);
 
@@ -137,10 +140,10 @@ namespace osuCrypto
                 sendBuff[i] = popf.program(choices[i], std::move(B), prng);
             }
 
-            MC_AWAIT(chl.send(std::move(sendBuff)));
+            co_await chl.send(std::move(sendBuff));
 
-            MC_AWAIT(chl.recv(buff));
-            Curve{};
+            co_await chl.recv(buff);
+            Curve{}; // init relic on this thread.
 
             A.fromBytes(buff.data());
 
@@ -155,7 +158,6 @@ namespace osuCrypto
                 ro.Final(messages[i]);
             }
 
-            MC_END();
         }
 
         template<typename DSPopf>
@@ -164,27 +166,25 @@ namespace osuCrypto
             PRNG& prng,
             Socket& chl)
         {
-            MC_BEGIN(task<>,this, msg, &prng, &chl,
-                curve = Curve{},
-                n = u64{},
-                A = Point{},
-                sk = Number{},
-                buff = std::vector<u8>( Point::size ),
-                recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
-            );
 
-            n = static_cast<u64>(msg.size());
+            Curve{}; // init relic
+            auto A = Point{};
+            auto sk = Number{};
+            auto buff = std::vector<u8>( Point::size );
+            auto recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
+
+            auto n = static_cast<u64>(msg.size());
             sk.randomize(prng);
             A = Point::mulGenerator(sk);
 
             assert(buff.size() == A.sizeBytes());
             A.toBytes(buff.data());
 
-            MC_AWAIT(chl.send(std::move(buff)));
+            co_await chl.send(std::move(buff));
 
             recvBuff.resize(n);
-            MC_AWAIT(chl.recv(recvBuff));
-            Curve{};
+            co_await chl.recv(recvBuff);
+            Curve{}; // init relic on this thread
 
             for (u64 i = 0; i < n; ++i)
             {
@@ -210,8 +210,6 @@ namespace osuCrypto
                 ro.Update((bool)1);
                 ro.Final(msg[i][1]);
             }
-
-            MC_END();
         }
     }
 }

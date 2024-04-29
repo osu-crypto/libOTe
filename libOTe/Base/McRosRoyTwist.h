@@ -139,20 +139,12 @@ namespace osuCrypto
 		template<typename DSPopf>
 		inline task<> McRosRoyTwist<DSPopf>::receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
 		{
-
-			MC_BEGIN(task<>,
-				this,
-				&choices,
-				&prng,
-				&chl,
-				messages,
-				n = choices.size(),
-				sk = std::vector<Scalar25519>{},
-				curveChoice = std::vector<u8>{},
-				A = std::array<Monty25519, 2>{},
-				sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
-			);
-
+			auto n = choices.size();
+			auto sk = std::vector<Scalar25519>{};
+			auto curveChoice = std::vector<u8>{};
+			auto A = std::array<Monty25519, 2>{};
+			auto sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
+			
 			sk.reserve(n);
 			curveChoice.reserve(n);
 			sendBuff.resize(n);
@@ -172,9 +164,9 @@ namespace osuCrypto
 				sendBuff[i] = popf.program(choices[i], curveToBlock(B, prng), prng);
 			}
 
-			MC_AWAIT(chl.send(std::move(sendBuff)));
+			co_await chl.send(std::move(sendBuff));
 
-			MC_AWAIT(chl.recv(A));
+			co_await chl.recv(A);
 
 			for (u64 i = 0; i < n; ++i)
 			{
@@ -186,32 +178,24 @@ namespace osuCrypto
 				ro.Update((bool)choices[i]);
 				ro.Final(messages[i]);
 			}
-
-			MC_END();
 		}
 
 		template<typename DSPopf>
 		inline task<> McRosRoyTwist<DSPopf>::send(span<std::array<block, 2>> msg, PRNG& prng, Socket& chl)
 		{
-			MC_BEGIN(task<>,
-				this,
-				msg,
-				&prng,
-				&chl,
-				n = static_cast<u64>(msg.size()),
-				A = std::vector<Monty25519>{},
-				sk = Scalar25519(prng),
-				recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
-			);
 
-			A = {
+			auto n = static_cast<u64>(msg.size());
+			auto sk = Scalar25519(prng);
+			auto recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
+
+			auto A = std::vector<Monty25519>{
 				Monty25519::wholeGroupGenerator * sk, 
 				Monty25519::wholeTwistGroupGenerator * sk };
 
-			MC_AWAIT(chl.send(std::move(A)));
+			co_await chl.send(std::move(A));
 
 			recvBuff.resize(n);
-			MC_AWAIT(chl.recv(recvBuff));
+			co_await chl.recv(recvBuff);
 
 
 			Monty25519 Bz, Bo;
@@ -240,8 +224,6 @@ namespace osuCrypto
 				ro.Update((bool)1);
 				ro.Final(msg[i][1]);
 			}
-
-			MC_END();
 		}
 
 		template<typename DSPopf>

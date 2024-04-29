@@ -460,21 +460,19 @@ namespace osuCrypto
 
 		task<> checkResponse(Socket& chl)
 		{
-			MC_BEGIN(task<>, this, &chl,
-				fieldBits = u64{},
-				numVoles = u64{},
-				rows = u64{},
-				bytesPerHash = u64{},
-				dim = u64{},
-				numSenderHashes = u64{},
-				senderBytes = u64{},
-				finalHashW = AlignedUnVector<u64>{},
-				senderFinalHashesPackedU8 = AlignedUnVector<u8>{},
-				senderFinalUHashesPacked = AlignedUnVector<u64>{},
-				senderFinalHashesPacked = AlignedUnVector<u64>{},
-				senderFinalHashes = AlignedUnVector<u64>{},
-				finalHashKey = std::array<u64, 64>{}
-				);
+			auto fieldBits = u64{};
+			auto numVoles = u64{};
+			auto rows = u64{};
+			auto bytesPerHash = u64{};
+			auto dim = u64{};
+			auto numSenderHashes = u64{};
+			auto senderBytes = u64{};
+			auto finalHashW = AlignedUnVector<u64>{};
+			auto senderFinalHashesPackedU8 = AlignedUnVector<u8>{};
+			auto senderFinalUHashesPacked = AlignedUnVector<u64>{};
+			auto senderFinalHashesPacked = AlignedUnVector<u64>{};
+			auto senderFinalHashes = AlignedUnVector<u64>{};
+			auto finalHashKey = std::array<u64, 64>{};
 
 			fieldBits = Receiver::mVole.mFieldBits;
 			numVoles = Receiver::mVole.mNumVoles;
@@ -504,7 +502,7 @@ namespace osuCrypto
 			senderFinalHashesPacked.resize(2 * numVoles);
 			senderFinalHashes.resize(2 * numVoles * fieldBits);
 
-			MC_AWAIT(chl.recv(senderFinalHashesPackedU8));
+			co_await (chl.recv(senderFinalHashesPackedU8));
 
 			for (u64 i = 0; i < dim; ++i)
 			{
@@ -542,7 +540,6 @@ namespace osuCrypto
 					throw std::runtime_error("Failed subspace VOLE consistency check");;
 			}
 
-			MC_END();
 		}
 	};
 

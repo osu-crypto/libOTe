@@ -47,10 +47,10 @@ namespace osuCrypto
 	{
 		using T = typename TSpan::value_type;
 		static_assert(
-			std::is_pod<T>::value &&
-			std::is_pod<S>::value &&
+			std::is_trivial<T>::value &&
+			std::is_trivial<S>::value &&
 			((sizeof(T) % sizeof(S) == 0) ||
-			(sizeof(S) % sizeof(T) == 0)), " types must be POD and a multiple of each other.");
+			(sizeof(S) % sizeof(T) == 0)), " types must be is_trivial and a multiple of each other.");
 
 		assert(u64(src.data()) % sizeof(S) == 0);
 
