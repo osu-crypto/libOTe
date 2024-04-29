@@ -42,11 +42,11 @@ find_package(libOTe REQUIRED HINTS ${LIBOTE_HINT}
 
 if(MSVC)
     target_compile_options( main PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_CPP_VER}>
+        $<$<COMPILE_LANGUAGE:CXX>:/std:c++${CRYPTO_TOOLS_STD_VER}>
     )
 else()
     target_compile_options( main PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_CPP_VER} -pthread>
+        $<$<COMPILE_LANGUAGE:CXX>:-std=c++${CRYPTO_TOOLS_STD_VER} -pthread>
     )
 endif()
 
