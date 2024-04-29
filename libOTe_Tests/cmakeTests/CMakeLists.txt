@@ -11,15 +11,6 @@ endif()
 
 
 
-if(MSVC)
-    target_compile_options( main PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:/std:c++${COPROTO_CPP_VER}>
-    )
-else()
-    target_compile_options( main PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-std=c++${COPROTO_CPP_VER}>
-    )
-endif()
 
 find_package(libOTe REQUIRED HINTS ${LIBOTE_HINT}
 	COMPONENTS
@@ -49,6 +40,14 @@ find_package(libOTe REQUIRED HINTS ${LIBOTE_HINT}
 )
 
 
-target_compile_options(main PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++14> -pthread)
+if(MSVC)
+    target_compile_options( main PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_CPP_VER}>
+    )
+else()
+    target_compile_options( main PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_CPP_VER} -pthread>
+    )
+endif()
 
 target_link_libraries(main oc::libOTe)
