@@ -111,8 +111,6 @@ namespace osuCrypto
         uIter = (block*)uBuff.data();
         uEnd = uIter + uBuff.size();
 
-        std::cout << LOCATION << std::endl;
-
         // NOTE: We do not transpose a bit-matrix of size numCol * numCol.
         //   Instead we break it down into smaller chunks. We do 128 columns 
         //   times 8 * 128 rows at a time, where 8 = superBlkSize. This is done for  
@@ -169,12 +167,10 @@ namespace osuCrypto
                     uEnd = uIter + uBuff.size();
                 }
             }
-            std::cout << LOCATION << std::endl;
 
             // transpose our 128 columns of 1024 bits. We will have 1024 rows, 
             // each 128 bits wide.
             transpose128(t0.data());
-            std::cout << LOCATION << std::endl;
 
 
             auto mEnd = mIter + std::min<u64>(128, messages.data() + messages.size() - mIter);
@@ -194,7 +190,6 @@ namespace osuCrypto
             chl.send(cIter, sizeof(block) * superBlkSize);
 #endif
         }
-        std::cout << LOCATION << std::endl;
 
         if (mHash)
         {
@@ -219,13 +214,11 @@ namespace osuCrypto
                 }
             }
 #else
-            std::cout << LOCATION << std::endl;
             mAesFixedKey.hashBlocks(messages.data(), messages.size(), messages.data());
 #endif
 
         }
         static_assert(gOtExtBaseOtCount == 128, "expecting 128");
-        std::cout << LOCATION << std::endl;
     }
 
 }

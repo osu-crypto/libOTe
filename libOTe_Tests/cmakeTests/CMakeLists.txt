@@ -3,18 +3,10 @@ project(cmakeTest)
 
 add_executable(main main.cpp)
 
-if(SODIUM)
-	set(cryptoDep sodium)
-else()
-	set(cryptoDep relic)
-endif()
-
-
 
 
 find_package(libOTe REQUIRED HINTS ${LIBOTE_HINT}
 	COMPONENTS
-		${cryptoDep}
 		#sodium
 		#boost
 		#openssl

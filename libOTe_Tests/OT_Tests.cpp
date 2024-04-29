@@ -825,10 +825,14 @@ namespace tests_libOTe
 
             sender.setBaseOts(baseRecv, baseChoice);
             auto proto1 = sender.send(sendMsg, prng1, sockets[1]);
+            std::cout << LOCATION << std::endl;
 
             eval(proto0, proto1);
 
+            std::cout << LOCATION << std::endl;
+
             OT_100Receive_Test(choices, recvMsg, sendMsg);
+            std::cout << LOCATION << std::endl;
 
             for (auto& s : sendMsg)
             {
