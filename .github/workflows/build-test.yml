@@ -153,7 +153,7 @@ jobs:
       # Runs a set of commands using the runners shell
 
       - name: build libOTe
-        run:  python3 build.py -DENABLE_BOOST=OFF -DVERBOSE_FETCH=ON -DENABLE_SSE=OFF -DENABLE_SODIUM=ON  -D ENABLE_ALL_OT=ON 
+        run:  python3 build.py -DENABLE_BOOST=OFF -DVERBOSE_FETCH=ON -DENABLE_SSE=OFF -DENABLE_SODIUM=ON -DFETCH_SODIUM=ON  -D ENABLE_ALL_OT=ON 
 
       - name: unit tests
         run:  ./out/build/osx/frontend/frontend_libOTe -u
