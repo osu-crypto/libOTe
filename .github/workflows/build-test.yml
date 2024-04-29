@@ -140,7 +140,7 @@ jobs:
   # This workflow contains a single job called "build"
   build-osx:
     # The type of runner that the job will run on
-    runs-on: macos-13
+    runs-on: macos-14
     timeout-minutes: 20
 
     # Steps represent a sequence of tasks that will be executed as part of the job
@@ -153,7 +153,7 @@ jobs:
       # Runs a set of commands using the runners shell
 
       - name: build libOTe
-        run:  python3 build.py -DENABLE_BOOST=OFF -DVERBOSE_FETCH=ON -DENABLE_SSE=OFF -DENABLE_RELIC=ON  -D ENABLE_ALL_OT=ON 
+        run:  python3 build.py -DENABLE_BOOST=OFF -DVERBOSE_FETCH=ON -DENABLE_SSE=OFF -DENABLE_SODIUM=ON  -D ENABLE_ALL_OT=ON 
 
       - name: unit tests
         run:  ./out/build/osx/frontend/frontend_libOTe -u
@@ -179,7 +179,7 @@ jobs:
 
       - name: install prefix test
         run: |
-            python3 build.py --setup --relic --install=~/install
+            python3 build.py --setup --sodium --install=~/install
             python3 build.py --install=~/install
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
@@ -191,7 +191,7 @@ jobs:
 
       - name: install test
         run: |
-            python3 build.py --setup --relic --install --sudo
+            python3 build.py --setup --sodium --install --sudo
             python3 build.py --install --sudo
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release
