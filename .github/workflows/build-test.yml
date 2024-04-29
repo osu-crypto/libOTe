@@ -217,7 +217,7 @@ jobs:
 
       # Runs a set of commands using the runners shell        
       - name: build libOTe
-        run:  python3 build.py --par=1 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON  -DENABLE_ASAN=true -DENABLE_RELIC=ON  -G Ninja -DCMAKE_BUILT_TYPE=Debug
+        run:  python3 build.py --par=1 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON  -DENABLE_ASAN=true -DENABLE_RELIC=OFF -G Ninja -DCMAKE_BUILT_TYPE=Debug
 
         
       - name: unit test
