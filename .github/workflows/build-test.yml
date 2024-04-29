@@ -217,7 +217,7 @@ jobs:
 
       # Runs a set of commands using the runners shell
       - name: build relic
-        run: python3 build.py --setup --relic --par=1 -G Ninja  -DENABLE_BOOST=OFF  -DVERBOSE_FETCH=ON
+        run: python3 build.py --setup --relic --par=1 -G Ninja  -DENABLE_BOOST=OFF  -DVERBOSE_FETCH=ON -DENABLE_ASAN=true
         
       - name: build libOTe
         run:  python3 build.py --par=1 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON   -G Ninja
