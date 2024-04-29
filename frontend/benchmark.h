@@ -560,7 +560,7 @@ namespace osuCrypto
                 {
                     auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
 
-                    char c;
+                    char c = 0;
 
                     coproto::sync_wait(sock[0].send(std::move(c)));
                     coproto::sync_wait(sock[0].recv(c));

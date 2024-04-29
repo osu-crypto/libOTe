@@ -40,27 +40,25 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
-			auto numOtExt = u64{};
-			auto numSuperBlocks = u64{};
-			auto step = u64{};
-			auto superBlkIdx = u64{};
+		auto numOtExt = u64{};
+		auto numSuperBlocks = u64{};
+		auto step = u64{};
+		auto superBlkIdx = u64{};
 
-			// a temp that will be used to transpose the sender's matrix
-			auto t = AlignedUnVector<block>{ 128 };
-			auto u = AlignedUnVector<block>(128 * commStepSize);
-			auto choiceMask = AlignedArray<block, 128>{};
-			auto delta = block{};
-			auto recvView = span<u8>{};
-			auto mIter = span<std::array<block, 2>>::iterator{};
-			auto uIter = (block*)nullptr;
-			auto tIter = (block*)nullptr;
-			auto cIter = (block*)nullptr;
-			auto uEnd = (block*)nullptr;
-			std::cout << LOCATION << std::endl;
+		// a temp that will be used to transpose the sender's matrix
+		auto t = AlignedUnVector<block>{ 128 };
+		auto u = AlignedUnVector<block>(128 * commStepSize);
+		auto choiceMask = AlignedArray<block, 128>{};
+		auto delta = block{};
+		auto recvView = span<u8>{};
+		auto mIter = span<std::array<block, 2>>::iterator{};
+		auto uIter = (block*)nullptr;
+		auto tIter = (block*)nullptr;
+		auto cIter = (block*)nullptr;
+		auto uEnd = (block*)nullptr;
 
 		if (hasBaseOts() == false)
 			co_await genBaseOts(prng, chl);
-		std::cout << LOCATION << std::endl;
 
 		// round up 
 		numOtExt = roundUpTo(messages.size(), 128);
@@ -75,7 +73,6 @@ namespace osuCrypto
 			if (mBaseChoiceBits[i]) choiceMask[i] = AllOneBlock;
 			else choiceMask[i] = ZeroBlock;
 		}
-		std::cout << LOCATION << std::endl;
 
 		mIter = messages.begin();
 		uEnd = u.data() + u.size();
@@ -93,9 +90,8 @@ namespace osuCrypto
 				recvView = span<u8>((u8*)u.data(), step);
 				uIter = u.data();
 
-				co_await (chl.recv(recvView));
+				co_await(chl.recv(recvView));
 			}
-			std::cout << LOCATION << std::endl;
 
 			mGens.ecbEncCounterMode(mPrngIdx, tIter);
 			++mPrngIdx;
@@ -125,13 +121,10 @@ namespace osuCrypto
 				uIter += 8;
 				tIter += 8;
 			}
-			std::cout << LOCATION << std::endl;
 
 			// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 			// each 128 bits wide.
 			transpose128(t.data());
-
-			std::cout << LOCATION << std::endl;
 
 			auto mEnd = mIter + std::min<u64>(128, messages.end() - mIter);
 
@@ -176,7 +169,7 @@ namespace osuCrypto
 
 #ifdef IKNP_DEBUG
 			fix this...
-			BitVector choice(128 * superBlkSize);
+				BitVector choice(128 * superBlkSize);
 			chl.recv(u.data(), superBlkSize * 128 * sizeof(block));
 			chl.recv(choice.data(), sizeof(block) * superBlkSize);
 
@@ -193,8 +186,6 @@ namespace osuCrypto
 			}
 #endif
 		}
-
-		std::cout << LOCATION << std::endl;
 
 		if (mHash)
 		{
@@ -226,13 +217,9 @@ namespace osuCrypto
 				}
 			}
 #else
-			std::cout << LOCATION << std::endl;
-
 			mAesFixedKey.hashBlocks((block*)messages.data(), messages.size() * 2, (block*)messages.data());
 		}
 #endif
-
-		std::cout << LOCATION << std::endl;
 
 		static_assert(gOtExtBaseOtCount == 128, "expecting 128");
 	}
