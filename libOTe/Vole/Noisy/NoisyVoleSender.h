@@ -36,98 +36,98 @@
 #include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto {
-    template <
-        typename F, 
-        typename G, 
-        typename CoeffCtx
-    >
-    class NoisyVoleSender : public TimerAdapter 
-    {
+	template <
+		typename F,
+		typename G,
+		typename CoeffCtx
+	>
+	class NoisyVoleSender : public TimerAdapter
+	{
 
-    public:
-        using VecF = typename CoeffCtx::template Vec<F>;
+	public:
+		using VecF = typename CoeffCtx::template Vec<F>;
 
-        // for chosen delta, compute b such htat
-        //
-        //  a = b + c * delta
-        //
-        template<typename FVec>
-        task<> send(F delta, FVec& b, PRNG& prng,
-            OtReceiver& ot, Socket& chl, CoeffCtx ctx) {
-            auto bv = ctx.binaryDecomposition(delta);
-                auto otMsg = AlignedUnVector<block>{ };
-            otMsg.resize(bv.size());
+		// for chosen delta, compute b such htat
+		//
+		//  a = b + c * delta
+		//
+		template<typename FVec>
+		task<> send(F delta, FVec& b, PRNG& prng,
+			OtReceiver& ot, Socket& chl, CoeffCtx ctx) {
+			auto bv = ctx.binaryDecomposition(delta);
+			auto otMsg = AlignedUnVector<block>{ };
+			otMsg.resize(bv.size());
 
-            setTimePoint("NoisyVoleSender.ot.begin");
+			setTimePoint("NoisyVoleSender.ot.begin");
 
-            co_await (ot.receive(bv, otMsg, prng, chl));
-            setTimePoint("NoisyVoleSender.ot.end");
+			co_await(ot.receive(bv, otMsg, prng, chl));
+			setTimePoint("NoisyVoleSender.ot.end");
 
-            co_await (send(delta, b, prng, otMsg, chl, ctx));
+			co_await(send(delta, b, prng, otMsg, chl, ctx));
 
-        }
+		}
 
-        // for chosen delta, compute b such htat
-        //
-        //  a = b + c * delta
-        //
-        template<typename FVec>
-        task<> send(F delta, FVec& b, PRNG& _,
-            span<block> otMsg, Socket& chl, CoeffCtx ctx) {
-                auto prng = std::move(PRNG{});
-                auto buffer = std::vector<u8>{};
-                auto msg =  VecF{};
-                auto temp = VecF{};
-                auto xb = BitVector{};
+		// for chosen delta, compute b such htat
+		//
+		//  a = b + c * delta
+		//
+		template<typename FVec>
+		task<> send(F delta, FVec& b, PRNG& _,
+			span<block> otMsg, Socket& chl, CoeffCtx ctx) {
+			auto prng = PRNG{};
+			auto buffer = std::vector<u8>{};
+			auto msg = VecF{};
+			auto temp = VecF{};
+			auto xb = BitVector{};
 
-            xb = ctx.binaryDecomposition(delta);
+			xb = ctx.binaryDecomposition(delta);
 
-            if (otMsg.size() != xb.size())
-                throw RTE_LOC;
-            setTimePoint("NoisyVoleSender.main");
+			if (otMsg.size() != xb.size())
+				throw RTE_LOC;
+			setTimePoint("NoisyVoleSender.main");
 
-            // b = 0;
-            ctx.zero(b.begin(), b.end());
+			// b = 0;
+			ctx.zero(b.begin(), b.end());
 
-            // receive the the excrypted one shares.
-            buffer.resize(xb.size() * b.size() * ctx.template byteSize<F>());
-            co_await (chl.recv(buffer));
-            ctx.resize(msg, xb.size() * b.size());
-            ctx.deserialize(buffer.begin(), buffer.end(), msg.begin());
+			// receive the the excrypted one shares.
+			buffer.resize(xb.size() * b.size() * ctx.template byteSize<F>());
+			co_await(chl.recv(buffer));
+			ctx.resize(msg, xb.size() * b.size());
+			ctx.deserialize(buffer.begin(), buffer.end(), msg.begin());
 
-            setTimePoint("NoisyVoleSender.recvMsg");
+			setTimePoint("NoisyVoleSender.recvMsg");
 
-            temp.resize(1);
-            for (size_t i = 0, k = 0; i < xb.size(); ++i)
-            {
-                // expand the zero shares or one share masks
-                prng.SetSeed(otMsg[i], b.size());
+			temp.resize(1);
+			for (size_t i = 0, k = 0; i < xb.size(); ++i)
+			{
+				// expand the zero shares or one share masks
+				prng.SetSeed(otMsg[i], b.size());
 
-                // otMsg[i,j, bc[i]] 
-                //auto otMsgi = prng.getBufferSpan(b.size());
+				// otMsg[i,j, bc[i]] 
+				//auto otMsgi = prng.getBufferSpan(b.size());
 
-                for (u64 j = 0; j < (u64)b.size(); ++j, ++k) 
-                {
-                    // temp = otMsg[i,j, xb[i]]
-                    ctx.fromBlock(temp[0], prng.get<block>());
+				for (u64 j = 0; j < (u64)b.size(); ++j, ++k)
+				{
+					// temp = otMsg[i,j, xb[i]]
+					ctx.fromBlock(temp[0], prng.get<block>());
 
-                    // temp = otMsg[i,j,xb[i]] + xb[i] * msg[i,j] 
-                    //      = otMsg[i,j,xb[i]] + xb[i] * (otMsg[i,j,0] + 2^i * y[j] - otMsg[i,j,1])
-                    //      = otMsg[i,j,xb[i]]           // if 0
-                    //      = otMsg[i,j,0] + 2^i * y[j]  // if 1
-                    //      = -b + 2^i * y[j]            // if 1
-                    if (xb[i])
-                        ctx.plus(temp[0], msg[k], temp[0]);
-                    
-                    // zj += msg - xb[i] * otMsg[i,j]
-                    ctx.plus(b[j], b[j], temp[0]);
-                }
-            }
-            setTimePoint("NoisyVoleSender.done");
+					// temp = otMsg[i,j,xb[i]] + xb[i] * msg[i,j] 
+					//      = otMsg[i,j,xb[i]] + xb[i] * (otMsg[i,j,0] + 2^i * y[j] - otMsg[i,j,1])
+					//      = otMsg[i,j,xb[i]]           // if 0
+					//      = otMsg[i,j,0] + 2^i * y[j]  // if 1
+					//      = -b + 2^i * y[j]            // if 1
+					if (xb[i])
+						ctx.plus(temp[0], msg[k], temp[0]);
 
-        }
+					// zj += msg - xb[i] * otMsg[i,j]
+					ctx.plus(b[j], b[j], temp[0]);
+				}
+			}
+			setTimePoint("NoisyVoleSender.done");
 
-    };
+		}
+
+	};
 }  // namespace osuCrypto
 
 #endif

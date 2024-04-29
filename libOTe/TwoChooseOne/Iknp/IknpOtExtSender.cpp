@@ -56,9 +56,11 @@ namespace osuCrypto
 			auto tIter = (block*)nullptr;
 			auto cIter = (block*)nullptr;
 			auto uEnd = (block*)nullptr;
+			std::cout << LOCATION << std::endl;
 
 		if (hasBaseOts() == false)
 			co_await genBaseOts(prng, chl);
+		std::cout << LOCATION << std::endl;
 
 		// round up 
 		numOtExt = roundUpTo(messages.size(), 128);
@@ -73,6 +75,7 @@ namespace osuCrypto
 			if (mBaseChoiceBits[i]) choiceMask[i] = AllOneBlock;
 			else choiceMask[i] = ZeroBlock;
 		}
+		std::cout << LOCATION << std::endl;
 
 		mIter = messages.begin();
 		uEnd = u.data() + u.size();
@@ -92,6 +95,7 @@ namespace osuCrypto
 
 				co_await (chl.recv(recvView));
 			}
+			std::cout << LOCATION << std::endl;
 
 			mGens.ecbEncCounterMode(mPrngIdx, tIter);
 			++mPrngIdx;
@@ -121,11 +125,13 @@ namespace osuCrypto
 				uIter += 8;
 				tIter += 8;
 			}
+			std::cout << LOCATION << std::endl;
 
 			// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 			// each 128 bits wide.
 			transpose128(t.data());
 
+			std::cout << LOCATION << std::endl;
 
 			auto mEnd = mIter + std::min<u64>(128, messages.end() - mIter);
 
@@ -188,6 +194,7 @@ namespace osuCrypto
 #endif
 		}
 
+		std::cout << LOCATION << std::endl;
 
 		if (mHash)
 		{
