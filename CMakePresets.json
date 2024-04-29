@@ -59,7 +59,7 @@
         "ENABLE_SIMPLESTOT": "ON",
         "ENABLE_GMP": false,
         "ENABLE_RELIC": false,
-        "ENABLE_SODIUM": true,
+        "ENABLE_SODIUM": false,
         "ENABLE_BOOST": true,
         "ENABLE_BITPOLYMUL": true,
         "FETCH_AUTO": "ON",
@@ -67,7 +67,7 @@
         "VERBOSE_FETCH": true,
         "ENABLE_SSE": true,
         "ENABLE_AVX": true,
-        "ENABLE_ASAN": false,
+        "ENABLE_ASAN": true,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install/${presetName}"
       },

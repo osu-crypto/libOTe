@@ -155,7 +155,6 @@ namespace osuCrypto
 	{
 		auto choice = sampleBaseChoiceBits(prng);
 		auto msg = AlignedUnVector<block>{};
-		auto base = DefaultBaseOT{};
 
 		if (isConfigured() == false)
 			throw std::runtime_error("configure must be called first");
@@ -165,7 +164,7 @@ namespace osuCrypto
 		// If we have soft spoken ot base OTs, use them
 		// to extend to get the silent base OTs.
 
-#if defined(ENABLE_SOFTSPOKEN_OT) || defined(LIBOTE_HAS_BASE_OT)
+#if defined(ENABLE_SOFTSPOKEN_OT) && defined(LIBOTE_HAS_BASE_OT)
 
 #ifdef ENABLE_SOFTSPOKEN_OT
 		if (useOtExtension)
@@ -178,6 +177,8 @@ namespace osuCrypto
 		else
 #endif
 		{
+			auto base = DefaultBaseOT{};
+
 			// otherwise just generate the silent 
 			// base OTs directly.
 			co_await(base.receive(choice, msg, prng, chl));
