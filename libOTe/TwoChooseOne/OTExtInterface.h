@@ -18,138 +18,136 @@
 
 namespace osuCrypto
 {
-    class PRNG;
-    class BitVector;
+	class PRNG;
+	class BitVector;
 
-    // The hard coded number of base OT that is expected by the OT Extension implementations.
-    // This can be changed if the code is adequately adapted.
-    const u64 gOtExtBaseOtCount(128);
+	// The hard coded number of base OT that is expected by the OT Extension implementations.
+	// This can be changed if the code is adequately adapted.
+	const u64 gOtExtBaseOtCount(128);
 
-    class OtReceiver
-    {
-    public:
-        OtReceiver() = default;
-        virtual ~OtReceiver() = default;
+	class OtReceiver
+	{
+	public:
+		OtReceiver() = default;
+		virtual ~OtReceiver() = default;
 
-        // Receive random strings indexed by choices. The random strings will be written to 
-        // messages. messages must have the same alignment as an AlignedBlockPtr, i.e. 32
-        // bytes with avx or 16 bytes without avx.
-        virtual task<> receive(
-            const BitVector& choices,
-            span<block> messages,
-            PRNG& prng,
-            Socket& chl) = 0;
+		// Receive random strings indexed by choices. The random strings will be written to 
+		// messages. messages must have the same alignment as an AlignedBlockPtr, i.e. 32
+		// bytes with avx or 16 bytes without avx.
+		virtual task<> receive(
+			const BitVector& choices,
+			span<block> messages,
+			PRNG& prng,
+			Socket& chl) = 0;
 
-        // Receive chosen strings indexed by choices. The chosen strings will be written to 
-        // messages. messages must have the same alignment as an AlignedBlockPtr, i.e. 32
-        // bytes with avx or 16 bytes without avx.
-        task<> receiveChosen(
-            const BitVector& choices,
-            span<block> recvMessages,
-            PRNG& prng,
-            Socket& chl);
+		// Receive chosen strings indexed by choices. The chosen strings will be written to 
+		// messages. messages must have the same alignment as an AlignedBlockPtr, i.e. 32
+		// bytes with avx or 16 bytes without avx.
+		task<> receiveChosen(
+			const BitVector& choices,
+			span<block> recvMessages,
+			PRNG& prng,
+			Socket& chl);
 
 
-        task<> receiveCorrelated(
-            const BitVector& choices,
-            span<block> recvMessages,
-            PRNG& prng,
-            Socket& chl);
+		task<> receiveCorrelated(
+			const BitVector& choices,
+			span<block> recvMessages,
+			PRNG& prng,
+			Socket& chl);
 
-    };
+	};
 
-    class OtSender
-    {
-    public:
-        OtSender() {}
-        virtual ~OtSender() = default;
+	class OtSender
+	{
+	public:
+		OtSender() {}
+		virtual ~OtSender() = default;
 
-        // send random strings. The random strings will be written to 
-        // messages.
-        virtual task<> send(
-            span<std::array<block, 2>> messages,
-            PRNG& prng,
-            Socket& chl) = 0;
+		// send random strings. The random strings will be written to 
+		// messages.
+		virtual task<> send(
+			span<std::array<block, 2>> messages,
+			PRNG& prng,
+			Socket& chl) = 0;
 
-        // send chosen strings. Thosen strings are read from messages.
-        task<> sendChosen(
-            span<std::array<block, 2>> messages,
-            PRNG& prng,
-            Socket& chl);
+		// send chosen strings. Thosen strings are read from messages.
+		task<> sendChosen(
+			span<std::array<block, 2>> messages,
+			PRNG& prng,
+			Socket& chl);
 
-        // No extra alignment is required.
-        template<typename CorrelationFunc>
-        task<> sendCorrelated(span<block> messages, const CorrelationFunc& corFunc, PRNG& prng, Socket& chl)
-        {
-            MC_BEGIN(task<>,this, messages, &corFunc, &prng, &chl,
-                temp = AlignedUnVector<std::array<block, 2>>(messages.size()),
-                temp2 = AlignedUnVector<block>(messages.size())
-            );
-            co_await (send(temp, prng, chl));
+		// No extra alignment is required.
+		template<typename CorrelationFunc>
+		task<> sendCorrelated(span<block> messages, const CorrelationFunc& corFunc, PRNG& prng, Socket& chl)
+		{
+			auto temp = AlignedUnVector<std::array<block, 2>>(messages.size());
+			auto temp2 = AlignedUnVector<block>(messages.size());
 
-            for (u64 i = 0; i < static_cast<u64>(messages.size()); ++i)
-            {
-                messages[i] = temp[i][0];
-                temp2[i] = temp[i][1] ^ corFunc(temp[i][0], i);
-            }
+			co_await(send(temp, prng, chl));
 
-            co_await (chl.send(std::move(temp2)));
-            MC_END();
-        }
+			for (u64 i = 0; i < static_cast<u64>(messages.size()); ++i)
+			{
+				messages[i] = temp[i][0];
+				temp2[i] = temp[i][1] ^ corFunc(temp[i][0], i);
+			}
 
-    };
+			co_await(chl.send(std::move(temp2)));
+		}
 
-    class OtExtSender;
-    class OtExtReceiver : public OtReceiver
-    {
-    public:
-        OtExtReceiver() {}
-        
-        // sets the base OTs that are then used to extend
-        virtual void setBaseOts(
-            span<std::array<block,2>> baseSendOts) = 0;
-        
-        // the number of base OTs that should be set.
-        virtual u64 baseOtCount() const { return gOtExtBaseOtCount; }
+	};
 
-        // returns true if the base OTs are currently set.
-        virtual bool hasBaseOts() const = 0;
+	class OtExtSender;
+	class OtExtReceiver : public OtReceiver
+	{
+	public:
+		OtExtReceiver() {}
 
-        // Returns an indpendent copy of this extender.
-        virtual std::unique_ptr<OtExtReceiver> split() = 0;
+		// sets the base OTs that are then used to extend
+		virtual void setBaseOts(
+			span<std::array<block, 2>> baseSendOts) = 0;
 
-        // use the default base OT class to generate the
-        // base OTs that are required.
-        virtual task<> genBaseOts(PRNG& prng, Socket& chl);
-        virtual task<> genBaseOts(OtSender& sender, PRNG& prng, Socket& chl);
+		// the number of base OTs that should be set.
+		virtual u64 baseOtCount() const { return gOtExtBaseOtCount; }
 
-    };
+		// returns true if the base OTs are currently set.
+		virtual bool hasBaseOts() const = 0;
 
-    class OtExtSender : public OtSender
-    {
-    public:
-        OtExtSender() {}
+		// Returns an indpendent copy of this extender.
+		virtual std::unique_ptr<OtExtReceiver> split() = 0;
 
-        // the number of base OTs that should be set.
-        virtual u64 baseOtCount() const { return gOtExtBaseOtCount; }
+		// use the default base OT class to generate the
+		// base OTs that are required.
+		virtual task<> genBaseOts(PRNG& prng, Socket& chl);
+		virtual task<> genBaseOts(OtSender& sender, PRNG& prng, Socket& chl);
 
-        // returns true if the base OTs are currently set.
-        virtual bool hasBaseOts() const = 0;
+	};
 
-        // sets the base OTs that are then used to extend
-        virtual void setBaseOts(
-            span<block> baseRecvOts,
-            const BitVector& choices)  = 0;
+	class OtExtSender : public OtSender
+	{
+	public:
+		OtExtSender() {}
 
-        // Returns an indpendent copy of this extender.
-        virtual std::unique_ptr<OtExtSender> split() = 0;
+		// the number of base OTs that should be set.
+		virtual u64 baseOtCount() const { return gOtExtBaseOtCount; }
 
-        // use the default base OT class to generate the
-        // base OTs that are required.
-        virtual task<> genBaseOts(PRNG& prng, Socket& chl);
-        virtual task<> genBaseOts(OtReceiver& recver, PRNG& prng, Socket& chl);
+		// returns true if the base OTs are currently set.
+		virtual bool hasBaseOts() const = 0;
 
-    };
+		// sets the base OTs that are then used to extend
+		virtual void setBaseOts(
+			span<block> baseRecvOts,
+			const BitVector& choices) = 0;
+
+		// Returns an indpendent copy of this extender.
+		virtual std::unique_ptr<OtExtSender> split() = 0;
+
+		// use the default base OT class to generate the
+		// base OTs that are required.
+		virtual task<> genBaseOts(PRNG& prng, Socket& chl);
+		virtual task<> genBaseOts(OtReceiver& recver, PRNG& prng, Socket& chl);
+
+	};
 
 
 }
