@@ -324,12 +324,12 @@ namespace osuCrypto
 			return r;
 		}
 
-		std::unique_ptr<OtExtReceiver> split() 
+		std::unique_ptr<OtExtReceiver> split() override
 		{
 			return std::unique_ptr<OtExtReceiver>(new SoftSpokenMalOtReceiver(splitBase()));
 		}
 
-		task<> receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl) ;
+		task<> receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl) override;
 		// Low level functions.
 
 		task<> runBatch(Socket& chl, span<block>messages, span<block> choices);
