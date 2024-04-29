@@ -577,7 +577,7 @@ namespace osuCrypto
             for (u64 t = 0; t < trials; ++t)
             {
                 auto p1 = recver.silentReceiveInplace(n, prng1, sock[1]);
-                char c;
+                char c=0;
                 coproto::sync_wait(sock[1].send(std::move(c)));
                 coproto::sync_wait(sock[1].recv(c));
 
