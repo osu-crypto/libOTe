@@ -215,23 +215,20 @@ jobs:
       - uses: seanmiddleditch/gha-setup-ninja@v3
       - uses: ilammy/msvc-dev-cmd@v1
 
-      # Runs a set of commands using the runners shell
-      - name: build relic
-        run: python3 build.py --setup --relic --par=1 -G Ninja  -DENABLE_BOOST=OFF  -DVERBOSE_FETCH=ON -DENABLE_ASAN=true
-        
+      # Runs a set of commands using the runners shell        
       - name: build libOTe
-        run:  python3 build.py --par=1 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON   -G Ninja
+        run:  python3 build.py --par=1 -D ENABLE_ALL_OT=ON -D ENABLE_RELIC=ON  -DENABLE_ASAN=true -DENABLE_RELIC=ON  -G Ninja -DCMAKE_BUILT_TYPE=Debug
 
         
       - name: unit test
-        run:  ./out/build/x64-Release/frontend/frontend_libOTe.exe -u
+        run:  ./out/build/x64-Debug/frontend/frontend_libOTe.exe -u
           
       - name: find source tree
         run: |
             cd libOTe_Tests/cmakeTests
-            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -D CMAKE_PREFIX_PATH=../../
-            cmake --build out/ --config Release
-            ./out/Release/main.exe
+            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Debug -D CMAKE_PREFIX_PATH=../../
+            cmake --build out/ --config Debug
+            ./out/Debug/main.exe
             rm -r -fo out/
             cd ../..
             
@@ -241,8 +238,8 @@ jobs:
             python3 build.py
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -D LIBOTE_HINT=../..
-            cmake --build out/ --config Release
-            ./out/Release/main.exe
+            cmake --build out/ --config Debug
+            ./out/Debug/main.exe
             rm -r -fo out/
             cd ../..
 
@@ -250,8 +247,8 @@ jobs:
         run: |
             python3 build.py --relic --bitpolymul --install=~/install
             cd libOTe_Tests/cmakeTests
-            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/install
-            cmake --build out/ --config Release
-            ./out/Release/main.exe
+            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=~/install
+            cmake --build out/ --config Debug
+            ./out/Debug/main.exe
             rm -r -fo out/
             cd ../..
