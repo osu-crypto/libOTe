@@ -149,7 +149,6 @@ namespace osuCrypto
 #else
 			using BaseOT = DefaultBaseOT;
 #endif
-			std::cout << "r gen 1" << std::endl;
 			setTimePoint("SilentVoleReceiver.genSilent.begin");
 			if (isConfigured() == false)
 				throw std::runtime_error("configure must be called first");
@@ -178,7 +177,6 @@ namespace osuCrypto
 			auto nv = NoisyVoleReceiver<F, G, Ctx>{};
 			if (mTimer)
 				nv.setTimer(*mTimer);
-			std::cout << "r gen 2" << std::endl;
 
 			if (mBaseType == SilentBaseType::BaseExtend)
 			{
@@ -195,7 +193,6 @@ namespace osuCrypto
 					auto bb = BitVector{ mOtExtSender->baseOtCount() };
 					bb.randomize(prng);
 					choice.append(bb);
-					std::cout << "r gen 3" << std::endl;
 
 					co_await(mOtExtRecver->receive(choice, msg, prng, chl));
 
@@ -204,7 +201,6 @@ namespace osuCrypto
 							msg.size() - mOtExtSender->baseOtCount(),
 							mOtExtSender->baseOtCount()),
 						bb);
-					std::cout << "r gen 4" << std::endl;
 
 					msg.resize(msg.size() - mOtExtSender->baseOtCount());
 					co_await(nv.receive(noiseVals, baseAs, prng, *mOtExtSender, chl, mCtx));
@@ -213,19 +209,14 @@ namespace osuCrypto
 				{
 					auto chl2 = chl.fork();
 					auto prng2 = prng.fork();
-					std::cout << "r gen 5" << std::endl;
 
 					co_await(
 						macoro::when_all_ready(
 							nv.receive(noiseVals, baseAs, prng2, *mOtExtSender, chl2, mCtx),
 							mOtExtRecver->receive(choice, msg, prng, chl)
 						));
-					std::cout << "r gen 6" << std::endl;
-
 				}
 #else
-				std::cout << "r gen 7" << std::endl;
-
 				throw std::runtime_error("soft spoken must be enabled");
 #endif
 			}
@@ -234,7 +225,6 @@ namespace osuCrypto
 				auto chl2 = chl.fork();
 				auto prng2 = prng.fork();
 				BaseOT baseOt;
-				std::cout << "r gen 8" << std::endl;
 
 				co_await(
 					macoro::when_all_ready(
@@ -242,21 +232,17 @@ namespace osuCrypto
 						nv.receive(noiseVals, baseAs, prng2, baseOt, chl2, mCtx))
 					);
 
-				std::cout << "r gen 9" << std::endl;
-
 			}
 
 			setSilentBaseOts(msg, baseAs);
 			setTimePoint("SilentVoleReceiver.genSilent.done");
 #else
-			std::cout << "r gen 10" << std::endl;
 			throw std::runtime_error("LIBOTE_HAS_BASE_OT = false, must enable relic, sodium or simplest ot asm." LOCATION);
 			co_return;
 #endif
 		}
 		catch (...)
 		{
-			std::cout << "r ex" << std::endl;
 			chl.close();
 			throw;
 		}
@@ -448,10 +434,7 @@ namespace osuCrypto
 
 			if (hasSilentBaseOts() == false)
 			{
-				std::cout << "r genBase " << std::endl;
 				co_await(genSilentBaseOts(prng, chl));
-				std::cout << "r genBase done" << std::endl;
-
 			}
 
 			// allocate mA
@@ -487,12 +470,7 @@ namespace osuCrypto
 			// 
 			//    mA = mB + mS(mBaseC * mDelta)
 			//
-
-			std::cout << "r expand" << std::endl;
-
 			co_await(mGen.expand(chl, mA, PprfOutputFormat::Interleaved, true, mNumThreads));
-
-			std::cout << "r expand done" << std::endl;
 
 			setTimePoint("SilentVoleReceiver.expand.pprf_transpose");
 
@@ -514,8 +492,6 @@ namespace osuCrypto
 
 			if (mMalType == SilentSecType::Malicious)
 			{
-				std::cout << "r mal" << std::endl;
-
 				co_await(chl.send(std::move(mMalCheckSeed)));
 
 				if constexpr (MaliciousSupported)
@@ -530,8 +506,6 @@ namespace osuCrypto
 				{
 					throw std::runtime_error("malcicious security check failed. " LOCATION);
 				}
-				std::cout << "r mal done" << std::endl;
-
 			}
 
 
@@ -598,9 +572,6 @@ namespace osuCrypto
 
 			mBaseC = {};
 			mBaseA = {};
-
-			std::cout << "r done" << std::endl;
-
 
 			// make the protocol as done and that
 			// mA,mC are ready to be consumed.
