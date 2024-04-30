@@ -125,7 +125,7 @@ namespace osuCrypto
 		// otherwise we perform a base OT protocol to
 		// generate the needed OTs.
 		task<> genSilentBaseOts(PRNG& prng, Socket& chl, F delta)
-		{
+		try {
 #ifdef LIBOTE_HAS_BASE_OT
 
 #if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
@@ -139,14 +139,16 @@ namespace osuCrypto
 #else
 			using BaseOT = DefaultBaseOT;
 #endif
+			std::cout << "s gen 1" << std::endl;
 
 			setTimePoint("SilentVoleSender.genSilent.begin");
 
 			if (isConfigured() == false)
 			{
-				chl.close();
 				throw std::runtime_error("configure must be called first");
 			}
+
+			std::cout << "s gen 2" << std::endl;
 
 			// compute the correlation for the noisy coordinates.
 			auto b = VecF{};
@@ -166,6 +168,8 @@ namespace osuCrypto
 
 				if (mOtExtRecver->hasBaseOts() == false)
 				{
+					std::cout << "s gen 3" << std::endl;
+
 					msg.resize(msg.size() + mOtExtRecver->baseOtCount());
 					co_await(mOtExtSender->send(msg, prng, chl));
 
@@ -174,6 +178,7 @@ namespace osuCrypto
 							msg.size() - mOtExtRecver->baseOtCount(),
 							mOtExtRecver->baseOtCount()));
 					msg.resize(msg.size() - mOtExtRecver->baseOtCount());
+					std::cout << "s gen 4" << std::endl;
 
 					co_await(nv.send(delta, b, prng, *mOtExtRecver, chl, mCtx));
 				}
@@ -181,14 +186,19 @@ namespace osuCrypto
 				{
 					auto chl2 = chl.fork();
 					auto prng2 = prng.fork();
-
+					std::cout << "s gen 5" << std::endl;
+					
 					co_await(
 						macoro::when_all_ready(
 							nv.send(delta, b, prng2, *mOtExtRecver, chl2, mCtx),
 							mOtExtSender->send(msg, prng, chl)));
+
+					std::cout << "s gen 6" << std::endl;
+
 				}
 #else
-				throw RTE_LOC;
+				std::cout << "s gen 7" << std::endl;
+				throw std::runtime_error("ENABLE_SOFTSPOKEN_OT = false, must enable soft spoken ." LOCATION);
 #endif
 			}
 			else
@@ -196,19 +206,28 @@ namespace osuCrypto
 				auto chl2 = chl.fork();
 				auto prng2 = prng.fork();
 				auto baseOt = BaseOT{};
+				std::cout << "s gen 7" << std::endl;
 
 				co_await(
 					macoro::when_all_ready(
 						nv.send(delta, b, prng2, baseOt, chl2, mCtx),
 						baseOt.send(msg, prng, chl)));
+				std::cout << "s gen 8" << std::endl;
+
 			}
 
 			setSilentBaseOts(msg, b);
 			setTimePoint("SilentVoleSender.genSilent.done");
 #else
+			std::cout << "s gen 9" << std::endl;
 			throw std::runtime_error("LIBOTE_HAS_BASE_OT = false, must enable relic, sodium or simplest ot asm." LOCATION);
 			co_return;
 #endif
+		}
+		catch (...)
+		{
+			chl.close();
+			throw;
 		}
 
 		// configure the silent OT extension. This sets
