@@ -300,6 +300,8 @@ namespace osuCrypto
             }
 
             work.reset();
+            for (u64 threadIndex = 0; threadIndex < (u64)numThreads; ++threadIndex)
+                macoro::sync_wait(threadChls[threadIndex].flush());
         }
 
 
