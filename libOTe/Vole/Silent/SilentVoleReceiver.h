@@ -242,20 +242,21 @@ namespace osuCrypto
 						nv.receive(noiseVals, baseAs, prng2, baseOt, chl2, mCtx))
 					);
 
-				std::cout << "r gen 8" << std::endl;
+				std::cout << "r gen 9" << std::endl;
 
 			}
 
 			setSilentBaseOts(msg, baseAs);
 			setTimePoint("SilentVoleReceiver.genSilent.done");
 #else
-			std::cout << "r gen 9" << std::endl;
+			std::cout << "r gen 10" << std::endl;
 			throw std::runtime_error("LIBOTE_HAS_BASE_OT = false, must enable relic, sodium or simplest ot asm." LOCATION);
 			co_return;
 #endif
 		}
 		catch (...)
 		{
+			std::cout << "r ex" << std::endl;
 			chl.close();
 			throw;
 		}
