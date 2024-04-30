@@ -52,14 +52,12 @@ namespace osuCrypto
 		mDelta = delta;
 	}
 
-	void KosWarning();
 
 	task<> KosDotExtSender::send(
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
 	{
-		KosWarning();
 
 		auto numOtExt = u64{};
 		auto numSuperBlocks = u64{};

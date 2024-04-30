@@ -15,22 +15,24 @@
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Common/Timer.h>
 #include <array>
+#include "libOTe/TwoChooseOne/Kos/KosOtExtReceiver.h"
 
 namespace osuCrypto
 {
 
     class IknpOtExtReceiver :
-        public OtExtReceiver, public TimerAdapter
+        public KosOtExtReceiver
     {
     public:
-        bool mHasBase = false, mHash = true;
-        //std::vector<std::array<PRNG, 2>> mGens;
-        AlignedArray<MultiKeyAES<gOtExtBaseOtCount>,2> mGens;
-        u64 mPrngIdx = 0;
 
-        IknpOtExtReceiver() = default;
+        IknpOtExtReceiver()
+        {
+            mIsMalicious = false;
+        }
+
         IknpOtExtReceiver(const IknpOtExtReceiver&) = delete;
-        IknpOtExtReceiver(IknpOtExtReceiver&&) = default;
+        IknpOtExtReceiver(IknpOtExtReceiver&& v) = default;
+        IknpOtExtReceiver& operator=(IknpOtExtReceiver&& v) = default;
 
         IknpOtExtReceiver(span<std::array<block, 2>> baseSendOts)
         {
@@ -39,44 +41,17 @@ namespace osuCrypto
 
         virtual ~IknpOtExtReceiver() = default;
 
-        void operator=(IknpOtExtReceiver&& v)
-        {
-            mHasBase = std::exchange(v.mHasBase, false);
-            mPrngIdx = std::exchange(v.mPrngIdx, 0);
-            mHash = v.mHash;
-            mGens = std::move(v.mGens);
-        }
-
-        // returns whether the base OTs have been set. They must be set before
-        // split or receive is called.
-        bool hasBaseOts() const override
-        {
-            return mHasBase;
-        }
-
-        // sets the base OTs.
-        void setBaseOts(span<std::array<block, 2>> baseSendOts) override;
-
 
         // returns an independent instance of this extender which can securely be
         // used concurrently to this current one. The base OTs for the new instance 
         // are derived from the orginial base OTs.
-        IknpOtExtReceiver splitBase();
-
-        // returns an independent (type eased) instance of this extender which can securely be
-        // used concurrently to this current one. The base OTs for the new instance 
-        // are derived from the orginial base OTs.
-        std::unique_ptr<OtExtReceiver> split() override;
-
-        // Performed the specicifed number of random OT extensions where the mMessages
-        // receivers are indexed by the choices vector that is passed in. The received
-        // values written to the messages parameter. 
-        task<> receive(
-            const BitVector& choices,
-            span<block> messages,
-            PRNG& prng,
-            Socket& chl)override;
-
+        IknpOtExtReceiver splitBase()
+        {
+            IknpOtExtReceiver r;
+            static_cast<KosOtExtReceiver&>(r) = static_cast<KosOtExtReceiver&>(*this).splitBase();
+            r.mIsMalicious = false;
+            return r;
+        }
     };
 
 }

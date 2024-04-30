@@ -97,6 +97,15 @@ namespace osuCrypto
 
 	};
 
+
+	enum class HashType
+	{
+		RandomOracle,
+		AesHash,
+		NoHash
+	};
+
+
 	class OtExtSender;
 	class OtExtReceiver : public OtReceiver
 	{

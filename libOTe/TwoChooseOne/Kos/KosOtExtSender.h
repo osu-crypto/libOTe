@@ -14,27 +14,35 @@
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <array>
+
 namespace osuCrypto {
 
-    extern bool gKosWarning;
     class KosOtExtSender :
         public OtExtSender, public TimerAdapter
     {
     public:
         struct SetUniformOts {};
 
+        // the base OTs messages as the AES keys.
+        MultiKeyAES<gOtExtBaseOtCount> mGens;
 
-        std::vector<PRNG> mGens;
+        // the index of the AES in counter mode used by mGen
+        u64 mPrngIdx = 0;
+
+        // the base ot choice bits
         BitVector mBaseChoiceBits;
 
-        enum class HashType
-        {
-            RandomOracle,
-            AesHash
-        };
-        HashType mHashType = HashType::AesHash;
-        bool mFiatShamir = false;
+        // if false and malicious, the base OT choice bits will be randomized.
+        // This prevents the sender from forcing both OTs messages to be the same.
         bool mUniformBase = false;
+
+        // the type of hashing used to generate the messages.
+        HashType mHashType = HashType::AesHash;
+
+        // if true, the malicious security challenge will be generated using FS.
+        bool mFiatShamir = false;
+
+        bool mIsMalicious = true;
 
         KosOtExtSender() = default;
         KosOtExtSender(const KosOtExtSender&) = delete;
@@ -50,7 +58,12 @@ namespace osuCrypto {
         void operator=(KosOtExtSender&& v)
         {
             mGens = std::move(v.mGens);
+            mPrngIdx = std::exchange(v.mPrngIdx, 0);
             mBaseChoiceBits = std::move(v.mBaseChoiceBits);
+            mUniformBase = std::exchange(v.mUniformBase, 0);
+            mHashType = v.mHashType;
+            mFiatShamir = v.mFiatShamir;
+            mIsMalicious = v.mIsMalicious;
         }
 
         // return true if this instance has valid base OTs. 
@@ -88,8 +101,10 @@ namespace osuCrypto {
             Socket& chl) override;
 
 
-
-        block hash(span<std::array<block, 2>> messages, block seed, std::array<block, 128>& extraBlocks);
+        std::vector<block> hash(
+            span<std::array<block, 2>> messages, 
+            block seed, 
+            span<std::array<block, 2>> extraMessages);
     };
 }
 

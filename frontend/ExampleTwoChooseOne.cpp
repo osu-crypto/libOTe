@@ -21,8 +21,8 @@ namespace osuCrypto
 #ifdef ENABLE_IKNP
     void noHash(IknpOtExtSender& s, IknpOtExtReceiver& r)
     {
-        s.mHash = false;
-        r.mHash = false;
+        s.mHashType = HashType::NoHash;
+        r.mHashType = HashType::NoHash;
     }
 #endif
 

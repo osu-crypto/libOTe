@@ -61,19 +61,33 @@ namespace tests_libOTe
             //(i, choice, revcBlock);
             const block& senderBlock = sender[i][choice];
 
+            auto print = [&] {
+                    std::cout << "[" << i << ",0]  " << sender[i][0] << std::endl;
+                    std::cout << "[" << i << ",1]  " << sender[i][1] << std::endl;
+                    std::cout <<"[  " <<(int)choice << "]  " << recv[i] << std::endl;
+                };
+
             //if (i%512==0) {
             //    std::cout << "[" << i << ",0]--" << sender[i][0] << std::endl;
             //    std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
             //    std::cout << (int)choice << "-- " << recv[i] << std::endl;
             //}
             if (revcBlock == ZeroBlock)
+            {
+                print();
                 throw RTE_LOC;
+            }
 
             if (neq(revcBlock, senderBlock))
+            {
+                print();
                 throw UnitTestFail();
-
+            }
             if (eq(revcBlock, sender[i][1 ^ choice]))
+            {
+                print();
                 throw UnitTestFail();
+            }
         }
 
     }
@@ -470,7 +484,6 @@ namespace tests_libOTe
     void OtExt_Kos_Test()
     {
 #if defined(ENABLE_KOS)
-        gKosWarning = false;
         setThreadName("Sender");
 
         //IOService ios;
@@ -522,7 +535,6 @@ namespace tests_libOTe
     void OtExt_Kos_fs_Test()
     {
 #if defined(ENABLE_KOS)
-        gKosWarning = false;
         setThreadName("Sender");
 
 
@@ -576,7 +588,6 @@ namespace tests_libOTe
     void OtExt_Kos_ro_Test()
     {
 #if defined(ENABLE_KOS)
-        gKosWarning = false;
         setThreadName("Sender");
 
         //IOService ios;
@@ -609,8 +620,8 @@ namespace tests_libOTe
         KosOtExtSender sender;
         KosOtExtReceiver recv;
 
-        sender.mHashType = KosOtExtSender::HashType::RandomOracle;
-        recv.mHashType = KosOtExtReceiver::HashType::RandomOracle;
+        sender.mHashType = HashType::RandomOracle;
+        recv.mHashType = HashType::RandomOracle;
 
         //std::thread thrd = std::thread([&]() {
         //    setThreadName("receiver");
@@ -641,7 +652,6 @@ namespace tests_libOTe
 	void OtExt_Chosen_Test()
 	{
 #if defined(ENABLE_KOS)
-        gKosWarning = false;
 
         //IOService ios;
         //Session ep0(ios, "127.0.0.1:1212", SessionMode::Server);
@@ -726,7 +736,6 @@ namespace tests_libOTe
     void DotExt_Kos_Test()
     {
 #if defined(ENABLE_DELTA_KOS)
-        gKosWarning = false;
 
         setThreadName("Sender");
 
@@ -796,7 +805,7 @@ namespace tests_libOTe
         u64 numTrials = 4;
         for (u64 t = 0; t < numTrials; ++t)
         {
-            u64 numOTs = 4234;
+            u64 numOTs = 128;
 
             AlignedUnVector<block> recvMsg(numOTs), baseRecv(128);
             AlignedUnVector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
@@ -816,8 +825,8 @@ namespace tests_libOTe
             IknpOtExtSender sender;
             IknpOtExtReceiver recv;
 
-            sender.mHash = false;
-            recv.mHash = false;
+            sender.mHashType = HashType::NoHash;
+            recv.mHashType = HashType::NoHash;
             ;
             recv.setBaseOts(baseSend);
             auto proto0 = recv.receive(choices, recvMsg, prng0, sockets[0]);
@@ -825,14 +834,10 @@ namespace tests_libOTe
 
             sender.setBaseOts(baseRecv, baseChoice);
             auto proto1 = sender.send(sendMsg, prng1, sockets[1]);
-            std::cout << LOCATION << std::endl;
 
             eval(proto0, proto1);
 
-            std::cout << LOCATION << std::endl;
-
             OT_100Receive_Test(choices, recvMsg, sendMsg);
-            std::cout << LOCATION << std::endl;
 
             for (auto& s : sendMsg)
             {

@@ -22,19 +22,31 @@ namespace osuCrypto
         public OtExtReceiver, public TimerAdapter
     {
     public:
-        bool mHasBase = false;
-        std::vector<std::array<PRNG, 2>> mGens;
-
         struct SetUniformOts {};
 
-        enum class HashType
-        {
-            RandomOracle,
-            AesHash
-        };
-        HashType mHashType = HashType::AesHash;
-        bool mFiatShamir = false;
+        // have the base ots been set
+        bool mHasBase = false;
+
+        // true if the base OTs have uniform choice bits.
+        // if false, the choice bits will be randomized
+        // when malicious security is used.
         bool mUniformBase = false;
+
+        // the base OTs messages as the AES keys.
+        std::vector<MultiKeyAES<gOtExtBaseOtCount>> mGens;
+
+        // the index of the AES in counter mode used by mGen
+        u64 mPrngIdx = 0;
+
+        // If true, the malicious check is performed.
+        bool mIsMalicious = true;
+
+        // the type of hashing that is perform.
+        HashType mHashType = HashType::AesHash;
+
+        // if malicious, and this is true then Fiat Shamir is used
+        // to generate the malicious security challenge.
+        bool mFiatShamir = false;
 
         KosOtExtReceiver() = default;
         KosOtExtReceiver(const KosOtExtReceiver&) = delete;
@@ -43,9 +55,13 @@ namespace osuCrypto
 
         void operator=(KosOtExtReceiver&& v)
         {
-            mHasBase = std::move(v.mHasBase);
+            mHasBase = std::exchange(v.mHasBase, 0);
             mGens = std::move(v.mGens);
-            v.mHasBase = false;
+            mPrngIdx = std::exchange(v.mPrngIdx, 0);
+            mIsMalicious = v.mIsMalicious;
+            mHashType = v.mHashType;
+            mFiatShamir = v.mFiatShamir;
+            mUniformBase = std::exchange(v.mUniformBase, 0);
         }
 
         virtual ~KosOtExtReceiver() = default;
@@ -60,8 +76,8 @@ namespace osuCrypto
         // sets the base OTs.
         void setBaseOts(span<std::array<block, 2>> baseSendOts) override;
 
+        // sets the base OTs and the uniform base flag (base OTs will not be randomized)
         void setUniformBaseOts(span<std::array<block, 2>> baseSendOts);
-
 
         // returns an independent instance of this extender which can securely be
         // used concurrently to this current one. The base OTs for the new instance 
@@ -82,7 +98,13 @@ namespace osuCrypto
             PRNG& prng,
             Socket& chl) override;
 
-        AlignedUnVector<block> hash(span<block> messages, span<block> choiceBlocks, block seed, std::array<block, 128>& extraBlocks);
+        // internal, hashes and returns the malicious check message.
+        AlignedUnVector<block> hash(
+            span<block> messages,
+            BitVector const& choices,
+            block seed,
+            span<block> extraChoices,
+            span<block> extraBlocks);
 
     };
 

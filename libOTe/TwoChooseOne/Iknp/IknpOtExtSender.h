@@ -11,6 +11,7 @@
 #ifdef ENABLE_IKNP
 
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
+#include "libOTe/TwoChooseOne/Kos/KosOtExtSender.h"
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/PRNG.h>
@@ -21,66 +22,36 @@
 namespace osuCrypto {
 
     class IknpOtExtSender :
-        public OtExtSender, public TimerAdapter
+        public KosOtExtSender
     {
     public: 
-        //std::vector<PRNG> mGens;
-        MultiKeyAES<gOtExtBaseOtCount> mGens;
-        BitVector mBaseChoiceBits;
-        bool mHash = true;
-        u64 mPrngIdx = 0;
-
-        IknpOtExtSender() = default;
+        IknpOtExtSender()
+        {
+            mIsMalicious = false;
+        }
         IknpOtExtSender(const IknpOtExtSender&) = delete;
         IknpOtExtSender(IknpOtExtSender&&) = default;
+        IknpOtExtSender& operator=(IknpOtExtSender&& v) = default;
 
         IknpOtExtSender(
             span<block> baseRecvOts,
             const BitVector& choices)
         {
+            mIsMalicious = false;
             setBaseOts(baseRecvOts, choices);
         }
         virtual ~IknpOtExtSender() = default;
 
-        void operator=(IknpOtExtSender&&v) 
-        {
-            mPrngIdx = std::exchange(v.mPrngIdx, 0);
-            mGens = std::move(v.mGens);
-            mBaseChoiceBits = std::move(v.mBaseChoiceBits);
-            mHash = v.mHash;
-        }
-
-
-        // return true if this instance has valid base OTs. 
-        bool hasBaseOts() const override
-        {
-            return mBaseChoiceBits.size() > 0;
-        }
-
         // Returns a independent instance of this extender which can 
         // be executed concurrently. The base OTs are derived from the
         // original base OTs.
-        IknpOtExtSender splitBase();
+        IknpOtExtSender splitBase()
+        {
+            IknpOtExtSender r;
+            static_cast<KosOtExtSender&>(r) = static_cast<KosOtExtSender&>(*this).splitBase();
+            return r;
+        }
 
-        // Returns a independent (type eased) instance of this extender which can 
-        // be executed concurrently. The base OTs are derived from the
-        // original base OTs.
-        std::unique_ptr<OtExtSender> split() override;
-
-        // Sets the base OTs which must be peformed before calling split or send.
-        // See frontend/main.cpp for an example. 
-        void setBaseOts(
-            span<block> baseRecvOts,
-            const BitVector& choices) override;
-
-
-        // Takes a destination span of two blocks and performs OT extension
-        // where the destination span is populated (written to) with the random
-        // OT messages that then extension generates. User data is not transmitted. 
-        task<> send(
-            span<std::array<block, 2>> messages,
-            PRNG& prng,
-            Socket& chl) override;
 
     };
 }
