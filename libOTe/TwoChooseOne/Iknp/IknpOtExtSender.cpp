@@ -40,10 +40,6 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
-		auto numOtExt = u64{};
-		auto numSuperBlocks = u64{};
-		auto step = u64{};
-		auto superBlkIdx = u64{};
 
 		// a temp that will be used to transpose the sender's matrix
 		auto t = AlignedUnVector<block>{ 128 };
@@ -53,24 +49,14 @@ namespace osuCrypto
 				auto choiceMask = AlignedUnVector<block>{ 128 };
 				{
 
-					auto delta = block{};
-					auto recvView = span<u8>{};
-					auto mIter = span<std::array<block, 2>>::iterator{};
-					auto uIter = (block*)nullptr;
-					auto tIter = (block*)nullptr;
-					auto cIter = (block*)nullptr;
-					auto uEnd = (block*)nullptr;
-
 					if (hasBaseOts() == false)
 						co_await genBaseOts(prng, chl);
 
 					// round up 
-					numOtExt = roundUpTo(messages.size(), 128);
-					numSuperBlocks = (numOtExt / 128);
-					//u64 numBlocks = numSuperBlocks * superBlkSize;
+					auto numBlocks = divCeil(messages.size(), 128);
 
-
-					delta = *(block*)mBaseChoiceBits.data();
+					assert(mBaseChoiceBits.size() == 128);
+					auto delta = *(block*)mBaseChoiceBits.data();
 
 					for (u64 i = 0; i < 128; ++i)
 					{
@@ -78,23 +64,23 @@ namespace osuCrypto
 						else choiceMask[i] = ZeroBlock;
 					}
 
-					mIter = messages.begin();
-					uEnd = u.data() + u.size();
-					uIter = uEnd;
+					auto mIter = messages.data();
+					block* uEnd = 0;
+					block* uIter = 0;
 
-					for (superBlkIdx = 0; superBlkIdx < numSuperBlocks; ++superBlkIdx)
+					for (auto i = 0ull; i < numBlocks; ++i)
 					{
-						tIter = (block*)t.data();
-						cIter = choiceMask.data();
+						auto tIter = t.data();
+						auto cIter = choiceMask.data();
 
 						if (uIter == uEnd)
 						{
-							step = std::min<u64>(numSuperBlocks - superBlkIdx, (u64)commStepSize);
-							step *= 128 * sizeof(block);
-							recvView = span<u8>((u8*)u.data(), step);
+							auto step = std::min<u64>(numBlocks - i, (u64)commStepSize) * 128;
+							u.resize(step);
 							uIter = u.data();
+							uEnd = uIter + u.size();
 
-							co_await(chl.recv(recvView));
+							co_await(chl.recv(u));
 						}
 
 						mGens.ecbEncCounterMode(mPrngIdx, tIter);
@@ -126,41 +112,47 @@ namespace osuCrypto
 							tIter += 8;
 						}
 
+						assert(cIter == choiceMask.data() + choiceMask.size());
+						assert(tIter == t.data() + t.size());
+
 						// transpose our 128 columns of 1024 bits. We will have 1024 rows,
 						// each 128 bits wide.
+						assert(t.size() == 128);
 						transpose128(t.data());
 
-						auto mEnd = mIter + std::min<u64>(128, messages.end() - mIter);
-
+						auto size = std::min<u64>(128, messages.data() + messages.size() - mIter);
 						tIter = t.data();
-						if (mEnd - mIter == 128)
+
+						if (size == 128)
 						{
 							for (u64 i = 0; i < 128; i += 8)
 							{
-								mIter[i + 0][0] = tIter[i + 0];
-								mIter[i + 1][0] = tIter[i + 1];
-								mIter[i + 2][0] = tIter[i + 2];
-								mIter[i + 3][0] = tIter[i + 3];
-								mIter[i + 4][0] = tIter[i + 4];
-								mIter[i + 5][0] = tIter[i + 5];
-								mIter[i + 6][0] = tIter[i + 6];
-								mIter[i + 7][0] = tIter[i + 7];
-								mIter[i + 0][1] = tIter[i + 0] ^ delta;
-								mIter[i + 1][1] = tIter[i + 1] ^ delta;
-								mIter[i + 2][1] = tIter[i + 2] ^ delta;
-								mIter[i + 3][1] = tIter[i + 3] ^ delta;
-								mIter[i + 4][1] = tIter[i + 4] ^ delta;
-								mIter[i + 5][1] = tIter[i + 5] ^ delta;
-								mIter[i + 6][1] = tIter[i + 6] ^ delta;
-								mIter[i + 7][1] = tIter[i + 7] ^ delta;
+								mIter[0][0] = tIter[0];
+								mIter[1][0] = tIter[1];
+								mIter[2][0] = tIter[2];
+								mIter[3][0] = tIter[3];
+								mIter[4][0] = tIter[4];
+								mIter[5][0] = tIter[5];
+								mIter[6][0] = tIter[6];
+								mIter[7][0] = tIter[7];
+								mIter[0][1] = tIter[0] ^ delta;
+								mIter[1][1] = tIter[1] ^ delta;
+								mIter[2][1] = tIter[2] ^ delta;
+								mIter[3][1] = tIter[3] ^ delta;
+								mIter[4][1] = tIter[4] ^ delta;
+								mIter[5][1] = tIter[5] ^ delta;
+								mIter[6][1] = tIter[6] ^ delta;
+								mIter[7][1] = tIter[7] ^ delta;
 
+								tIter += 8;
+								mIter += 8;
 							}
 
-							mIter += 128;
 
 						}
 						else
 						{
+							auto mEnd = mIter + size;
 							while (mIter != mEnd)
 							{
 								(*mIter)[0] = *tIter;
@@ -170,6 +162,9 @@ namespace osuCrypto
 								mIter += 1;
 							}
 						}
+
+						assert(tIter == t.data() + size);
+
 
 #ifdef IKNP_DEBUG
 						fix this...
@@ -190,6 +185,9 @@ namespace osuCrypto
 						}
 #endif
 					}
+
+					assert(uIter == uEnd);
+					assert(mIter == messages.data() + messages.size());
 
 					if (mHash)
 					{
