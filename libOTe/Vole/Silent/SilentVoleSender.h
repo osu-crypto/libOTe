@@ -206,13 +206,13 @@ namespace osuCrypto
 				auto chl2 = chl.fork();
 				auto prng2 = prng.fork();
 				auto baseOt = BaseOT{};
-				std::cout << "s gen 7" << std::endl;
+				std::cout << "s gen 8" << std::endl;
 
 				co_await(
 					macoro::when_all_ready(
-						nv.send(delta, b, prng2, baseOt, chl2, mCtx),
-						baseOt.send(msg, prng, chl)));
-				std::cout << "s gen 8" << std::endl;
+						baseOt.send(msg, prng, chl),
+						nv.send(delta, b, prng2, baseOt, chl2, mCtx)));
+				std::cout << "s gen 9" << std::endl;
 
 			}
 
@@ -226,6 +226,7 @@ namespace osuCrypto
 		}
 		catch (...)
 		{
+			std::cout << "s ex" << std::endl;
 			chl.close();
 			throw;
 		}
