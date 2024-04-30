@@ -446,7 +446,6 @@ namespace tests_libOTe
     {
         
 #if defined(LIBOTE_HAS_BASE_OT) && defined(ENABLE_KOS)
-        gKosWarning = false;
         //IOService ios(0);
         //Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
         //Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
