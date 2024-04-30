@@ -58,7 +58,7 @@
         "ENABLE_MR": "ON",
         "ENABLE_SIMPLESTOT": "ON",
         "ENABLE_GMP": false,
-        "ENABLE_RELIC": false,
+        "ENABLE_RELIC": true,
         "ENABLE_SODIUM": false,
         "ENABLE_BOOST": true,
         "ENABLE_BITPOLYMUL": true,

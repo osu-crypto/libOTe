@@ -445,13 +445,13 @@ namespace tests_libOTe
     void OtExt_genBaseOts_Test()
     {
         
-#if defined(LIBOTE_HAS_BASE_OT) && defined(ENABLE_KOS)
         //IOService ios(0);
         //Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
         //Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
         //Channel senderChannel = ep1.addChannel();
         //Channel recvChannel = ep0.addChannel();
-        
+#if defined(LIBOTE_HAS_BASE_OT) && defined(ENABLE_KOS)
+
         auto sockets = cp::LocalAsyncSocket::makePair();
 
 		KosOtExtSender sender;
@@ -465,13 +465,13 @@ namespace tests_libOTe
 
         eval(proto0, proto1);
 
-		for (u64 i = 0; i < sender.mGens.size(); ++i)
+		for (u64 i = 0; i < gOtExtBaseOtCount; ++i)
 		{
 			auto b = sender.mBaseChoiceBits[i];
-			if (neq(sender.mGens[i].getSeed(), recv.mGens[i][b].getSeed()))
+			if (neq(sender.mGens.mAESs[i].getKey(), recv.mGens[b].mAESs[i].getKey()))
 				throw RTE_LOC;
 
-            if (eq(sender.mGens[i].getSeed(), recv.mGens[i][b ^ 1].getSeed()))
+            if (eq(sender.mGens.mAESs[i].getKey(), recv.mGens[b ^ 1].mAESs[i].getKey()))
                 throw RTE_LOC;
         }
 #else
