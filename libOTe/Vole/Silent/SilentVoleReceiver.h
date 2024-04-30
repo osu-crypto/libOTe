@@ -149,15 +149,7 @@ namespace osuCrypto
 #else
 			using BaseOT = DefaultBaseOT;
 #endif
-
-			//auto choice = BitVector{};
-			//auto bb = BitVector{};
-			//auto msg = AlignedUnVector<block>{};
-			//auto baseVole = std::vector<block>{};
-			//auto baseOt = BaseOT{};
-			//auto nv = NoisyVoleReceiver<F, G, Ctx>{};
-
-
+			std::cout << "r gen 1" << std::endl;
 			setTimePoint("SilentVoleReceiver.genSilent.begin");
 			if (isConfigured() == false)
 				throw std::runtime_error("configure must be called first");
@@ -186,6 +178,7 @@ namespace osuCrypto
 			auto nv = NoisyVoleReceiver<F, G, Ctx>{};
 			if (mTimer)
 				nv.setTimer(*mTimer);
+			std::cout << "r gen 2" << std::endl;
 
 			if (mBaseType == SilentBaseType::BaseExtend)
 			{
@@ -202,6 +195,7 @@ namespace osuCrypto
 					auto bb = BitVector{ mOtExtSender->baseOtCount() };
 					bb.randomize(prng);
 					choice.append(bb);
+					std::cout << "r gen 3" << std::endl;
 
 					co_await(mOtExtRecver->receive(choice, msg, prng, chl));
 
@@ -210,6 +204,7 @@ namespace osuCrypto
 							msg.size() - mOtExtSender->baseOtCount(),
 							mOtExtSender->baseOtCount()),
 						bb);
+					std::cout << "r gen 4" << std::endl;
 
 					msg.resize(msg.size() - mOtExtSender->baseOtCount());
 					co_await(nv.receive(noiseVals, baseAs, prng, *mOtExtSender, chl, mCtx));
@@ -218,14 +213,19 @@ namespace osuCrypto
 				{
 					auto chl2 = chl.fork();
 					auto prng2 = prng.fork();
+					std::cout << "r gen 5" << std::endl;
 
 					co_await(
 						macoro::when_all_ready(
 							nv.receive(noiseVals, baseAs, prng2, *mOtExtSender, chl2, mCtx),
 							mOtExtRecver->receive(choice, msg, prng, chl)
 						));
+					std::cout << "r gen 6" << std::endl;
+
 				}
 #else
+				std::cout << "r gen 7" << std::endl;
+
 				throw std::runtime_error("soft spoken must be enabled");
 #endif
 			}
@@ -234,17 +234,22 @@ namespace osuCrypto
 				auto chl2 = chl.fork();
 				auto prng2 = prng.fork();
 				BaseOT baseOt;
+				std::cout << "r gen 8" << std::endl;
 
 				co_await(
 					macoro::when_all_ready(
 						baseOt.receive(choice, msg, prng, chl),
 						nv.receive(noiseVals, baseAs, prng2, baseOt, chl2, mCtx))
 					);
+
+				std::cout << "r gen 8" << std::endl;
+
 			}
 
 			setSilentBaseOts(msg, baseAs);
 			setTimePoint("SilentVoleReceiver.genSilent.done");
 #else
+			std::cout << "r gen 9" << std::endl;
 			throw std::runtime_error("LIBOTE_HAS_BASE_OT = false, must enable relic, sodium or simplest ot asm." LOCATION);
 			co_return;
 #endif
