@@ -135,7 +135,7 @@ namespace osuCrypto
 		// otherwise we perform a base OT protocol to
 		// generate the needed OTs.
 		task<> genSilentBaseOts(PRNG& prng, Socket& chl)
-		{
+		try {
 #ifdef LIBOTE_HAS_BASE_OT
 
 #if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
@@ -150,24 +150,20 @@ namespace osuCrypto
 			using BaseOT = DefaultBaseOT;
 #endif
 
-			auto choice = BitVector{};
-			auto bb = BitVector{};
-			auto msg = AlignedUnVector<block>{};
-			auto baseVole = std::vector<block>{};
-			auto baseOt = BaseOT{};
-			auto chl2 = Socket{};
-			auto prng2 = PRNG{};
-			auto noiseVals = VecG{};
-			auto baseAs = VecF{};
-			auto nv = NoisyVoleReceiver<F, G, Ctx>{};
+			//auto choice = BitVector{};
+			//auto bb = BitVector{};
+			//auto msg = AlignedUnVector<block>{};
+			//auto baseVole = std::vector<block>{};
+			//auto baseOt = BaseOT{};
+			//auto nv = NoisyVoleReceiver<F, G, Ctx>{};
 
 
 			setTimePoint("SilentVoleReceiver.genSilent.begin");
 			if (isConfigured() == false)
 				throw std::runtime_error("configure must be called first");
 
-			choice = sampleBaseChoiceBits(prng);
-			msg.resize(choice.size());
+			auto choice = sampleBaseChoiceBits(prng);
+			AlignedUnVector<block> msg(choice.size());
 
 			// sample the noise vector noiseVals such that we will compute
 			//
@@ -183,9 +179,11 @@ namespace osuCrypto
 			// plus voleDeltaShares[i] added to the appreciate spot. Similarly, the
 			// other party will program the PPRF to output their share of delta * noiseVals.
 			//
-			noiseVals = sampleBaseVoleVals(prng);
+			auto noiseVals = sampleBaseVoleVals(prng);
+			auto baseAs = VecF{};
 			mCtx.resize(baseAs, noiseVals.size());
 
+			auto nv = NoisyVoleReceiver<F, G, Ctx>{};
 			if (mTimer)
 				nv.setTimer(*mTimer);
 
@@ -201,7 +199,7 @@ namespace osuCrypto
 				if (mOtExtSender->hasBaseOts() == false)
 				{
 					msg.resize(msg.size() + mOtExtSender->baseOtCount());
-					bb.resize(mOtExtSender->baseOtCount());
+					auto bb = BitVector{ mOtExtSender->baseOtCount() };
 					bb.randomize(prng);
 					choice.append(bb);
 
@@ -218,9 +216,8 @@ namespace osuCrypto
 				}
 				else
 				{
-					chl2 = chl.fork();
-					prng2.SetSeed(prng.get());
-
+					auto chl2 = chl.fork();
+					auto prng2 = prng.fork();
 
 					co_await(
 						macoro::when_all_ready(
@@ -234,8 +231,9 @@ namespace osuCrypto
 			}
 			else
 			{
-				chl2 = chl.fork();
-				prng2.SetSeed(prng.get());
+				auto chl2 = chl.fork();
+				auto prng2 = prng.fork();
+				BaseOT baseOt;
 
 				co_await(
 					macoro::when_all_ready(
@@ -250,7 +248,12 @@ namespace osuCrypto
 			throw std::runtime_error("LIBOTE_HAS_BASE_OT = false, must enable relic, sodium or simplest ot asm." LOCATION);
 			co_return;
 #endif
-		};
+		}
+		catch (...)
+		{
+			chl.close();
+			throw;
+		}
 
 		// configure the silent OT extension. This sets
 		// the parameters and figures out how many base OT
@@ -268,9 +271,7 @@ namespace osuCrypto
 			mState = State::Configured;
 			mBaseType = type;
 
-
 			syndromeDecodingConfigure(mNumPartitions, mSizePer, mNoiseVecSize, mSecParam, mRequestSize, mMultType);
-
 
 			mGen.configure(mSizePer, mNumPartitions);
 		}
@@ -286,7 +287,6 @@ namespace osuCrypto
 				throw std::runtime_error("configure must be called first");
 
 			return mGen.baseOtCount();
-
 		}
 
 		// The silent base OTs must have specially set base OTs.
@@ -306,7 +306,7 @@ namespace osuCrypto
 		VecG sampleBaseVoleVals(PRNG& prng)
 		{
 			if (isConfigured() == false)
-				throw RTE_LOC;
+				throw std::runtime_error("configure must be called first. " LOCATION);
 
 			// sample the values of the noisy coordinate of c
 			// and perform a noicy vole to get a = b + mD * c
@@ -400,9 +400,10 @@ namespace osuCrypto
 			VecF& a,
 			PRNG& prng,
 			Socket& chl)
-		{
+		try {
+			
 			if (c.size() != a.size())
-				throw RTE_LOC;
+				throw std::runtime_error("input sizes do not match." LOCATION);
 
 			co_await(silentReceiveInplace(c.size(), prng, chl));
 
@@ -410,6 +411,11 @@ namespace osuCrypto
 			mCtx.copy(mA.begin(), mA.begin() + a.size(), a.begin());
 
 			clear();
+		}
+		catch (...)
+		{
+			chl.close();
+			throw;
 		}
 
 		// Perform the actual OT extension. If silent
@@ -420,11 +426,10 @@ namespace osuCrypto
 			u64 n,
 			PRNG& prng,
 			Socket& chl)
-		{
+		try {
 			auto myHash = std::array<u8, 32>{};
 			auto theirHash = std::array<u8, 32>{};
 			gTimer.setTimePoint("SilentVoleReceiver.ot.enter");
-
 			if (isConfigured() == false)
 			{
 				// first generate 128 normal base OTs
@@ -434,9 +439,13 @@ namespace osuCrypto
 			if (mRequestSize < n)
 				throw std::invalid_argument("n does not match the requested number of OTs via configure(...). " LOCATION);
 
+
 			if (hasSilentBaseOts() == false)
 			{
+				std::cout << "r genBase " << std::endl;
 				co_await(genSilentBaseOts(prng, chl));
+				std::cout << "r genBase done" << std::endl;
+
 			}
 
 			// allocate mA
@@ -472,7 +481,12 @@ namespace osuCrypto
 			// 
 			//    mA = mB + mS(mBaseC * mDelta)
 			//
+
+			std::cout << "r expand" << std::endl;
+
 			co_await(mGen.expand(chl, mA, PprfOutputFormat::Interleaved, true, mNumThreads));
+
+			std::cout << "r expand done" << std::endl;
 
 			setTimePoint("SilentVoleReceiver.expand.pprf_transpose");
 
@@ -494,18 +508,26 @@ namespace osuCrypto
 
 			if (mMalType == SilentSecType::Malicious)
 			{
+				std::cout << "r mal" << std::endl;
+
 				co_await(chl.send(std::move(mMalCheckSeed)));
 
 				if constexpr (MaliciousSupported)
 					myHash = ferretMalCheck();
-				else
+				else {
 					throw std::runtime_error("malicious is currently only supported for GF128 block. " LOCATION);
+				}
 
 				co_await(chl.recv(theirHash));
 
 				if (theirHash != myHash)
-					throw RTE_LOC;
+				{
+					throw std::runtime_error("malcicious security check failed. " LOCATION);
+				}
+				std::cout << "r mal done" << std::endl;
+
 			}
+
 
 			switch (mMultType)
 			{
@@ -543,7 +565,9 @@ namespace osuCrypto
 					encoder.dualEncode(mC);
 				}
 				else
+				{
 					throw std::runtime_error("QuasiCyclic is only supported for GF128, i.e. block. " LOCATION);
+				}
 #else
 				throw std::runtime_error("QuasiCyclic requires ENABLE_BITPOLYMUL = true. " LOCATION);
 #endif
@@ -569,11 +593,18 @@ namespace osuCrypto
 			mBaseC = {};
 			mBaseA = {};
 
+			std::cout << "r done" << std::endl;
+
+
 			// make the protocol as done and that
 			// mA,mC are ready to be consumed.
 			mState = State::Default;
 		}
-
+		catch (...)
+		{
+			chl.close();
+			throw;
+		}
 
 
 		// internal.

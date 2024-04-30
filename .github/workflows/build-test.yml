@@ -221,7 +221,7 @@ jobs:
 
         
       - name: unit test
-        run:  ./out/build/x64-Release/frontend/frontend_libOTe.exe -u
+        run:  ./out/build/x64-Release/frontend/frontend_libOTe.exe -u 111
           
       # - name: find source tree
       #   run: |

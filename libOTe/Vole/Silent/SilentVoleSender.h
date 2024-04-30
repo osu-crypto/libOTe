@@ -37,6 +37,8 @@ namespace osuCrypto
 	class SilentVoleSender : public TimerAdapter
 	{
 	public:
+		bool mDebug = false;
+
 		static constexpr u64 mScaler = 2;
 
 		static constexpr bool MaliciousSupported =
@@ -138,23 +140,20 @@ namespace osuCrypto
 			using BaseOT = DefaultBaseOT;
 #endif
 
-			auto msg = AlignedUnVector<std::array<block, 2>>(silentBaseOtCount());
-			auto baseOt = BaseOT{};
-			auto prng2 = PRNG{};
-			auto xx = BitVector{};
-			auto chl2 = Socket{};
-			auto nv = NoisyVoleSender<F, G, Ctx>{};
-			auto b = VecF{};
 			setTimePoint("SilentVoleSender.genSilent.begin");
 
 			if (isConfigured() == false)
+			{
+				chl.close();
 				throw std::runtime_error("configure must be called first");
-
-			xx = mCtx.template binaryDecomposition<F>(delta);
+			}
 
 			// compute the correlation for the noisy coordinates.
-			b.resize(baseVoleCount());
-
+			auto b = VecF{};
+			mCtx.resize(b, baseVoleCount());
+			auto xx = mCtx.template binaryDecomposition<F>(delta);
+			auto msg = AlignedUnVector<std::array<block, 2>>(silentBaseOtCount());
+			auto nv = NoisyVoleSender<F, G, Ctx>{};
 
 			if (mBaseType == SilentBaseType::BaseExtend)
 			{
@@ -180,8 +179,8 @@ namespace osuCrypto
 				}
 				else
 				{
-					chl2 = chl.fork();
-					prng2.SetSeed(prng.get());
+					auto chl2 = chl.fork();
+					auto prng2 = prng.fork();
 
 					co_await(
 						macoro::when_all_ready(
@@ -194,14 +193,15 @@ namespace osuCrypto
 			}
 			else
 			{
-				chl2 = chl.fork();
-				prng2.SetSeed(prng.get());
+				auto chl2 = chl.fork();
+				auto prng2 = prng.fork();
+				auto baseOt = BaseOT{};
+
 				co_await(
 					macoro::when_all_ready(
 						nv.send(delta, b, prng2, baseOt, chl2, mCtx),
 						baseOt.send(msg, prng, chl)));
 			}
-
 
 			setSilentBaseOts(msg, b);
 			setTimePoint("SilentVoleSender.genSilent.done");
@@ -306,7 +306,7 @@ namespace osuCrypto
 			u64 n,
 			PRNG& prng,
 			Socket& chl)
-		{
+		try {
 			auto X = block{};
 			auto hash = std::array<u8, 32>{};
 			auto baseB = VecF{};
@@ -324,8 +324,11 @@ namespace osuCrypto
 
 			if (mGen.hasBaseOts() == false)
 			{
+				std::cout << "s genBase " << std::endl;
+
 				// recvs data
 				co_await(genSilentBaseOts(prng, chl, delta));
+				std::cout << "s genBase done " << std::endl;
 			}
 
 			setTimePoint("SilentVoleSender.start");
@@ -347,9 +350,14 @@ namespace osuCrypto
 			// our secret share of delta * noiseVals. The receiver
 			// can then manually add their shares of this to the
 			// output of the PPRF at the correct locations.
+
+			std::cout << "s expand " << std::endl;
+
 			co_await(mGen.expand(chl, baseB, prng.get(), mB,
 				PprfOutputFormat::Interleaved, true, 1));
 			setTimePoint("SilentVoleSender.expand.pprf");
+
+			std::cout << "s expand done " << std::endl;
 
 			if (mDebug)
 			{
@@ -359,6 +367,7 @@ namespace osuCrypto
 
 			if (mMalType == SilentSecType::Malicious)
 			{
+				std::cout << "s mal " << std::endl;
 				co_await(chl.recv(X));
 
 				if constexpr (MaliciousSupported)
@@ -367,6 +376,8 @@ namespace osuCrypto
 					throw std::runtime_error("malicious is currently only supported for GF128 block. " LOCATION);
 
 				co_await(chl.send(std::move(hash)));
+
+				std::cout << "s mal done " << std::endl;
 			}
 
 			switch (mMultType)
@@ -420,12 +431,17 @@ namespace osuCrypto
 
 			mCtx.resize(mB, mRequestSize);
 
-
 			mState = State::Default;
 			mBaseB.clear();
-		}
 
-		bool mDebug = false;
+			std::cout << "s done " << std::endl;
+
+		}
+		catch (...)
+		{
+			chl.close();
+			throw;
+		}
 
 		task<> checkRT(Socket& chl, F delta) const
 		{
