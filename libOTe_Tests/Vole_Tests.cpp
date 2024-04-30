@@ -244,7 +244,6 @@ inline u64 eval(
             ++rounds;
         }
     }
-    std::cout << "round " << rounds << std::endl;
 
     u64 idx = 0;
     while (e.is_ready() == false)
@@ -268,13 +267,9 @@ inline u64 eval(
         ++rounds;
         ++idx;
 
-        std::cout << "round " << rounds << std::endl;
-
     }
-    std::cout << "sync " << std::endl;
 
     auto r = macoro::sync_wait(std::move(e));
-    std::cout << "done " << std::endl;
     std::get<0>(r).result();
     std::get<1>(r).result();
     return rounds;

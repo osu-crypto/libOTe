@@ -139,16 +139,12 @@ namespace osuCrypto
 #else
 			using BaseOT = DefaultBaseOT;
 #endif
-			std::cout << "s gen 1" << std::endl;
-
 			setTimePoint("SilentVoleSender.genSilent.begin");
 
 			if (isConfigured() == false)
 			{
 				throw std::runtime_error("configure must be called first");
 			}
-
-			std::cout << "s gen 2" << std::endl;
 
 			// compute the correlation for the noisy coordinates.
 			auto b = VecF{};
@@ -168,8 +164,6 @@ namespace osuCrypto
 
 				if (mOtExtRecver->hasBaseOts() == false)
 				{
-					std::cout << "s gen 3" << std::endl;
-
 					msg.resize(msg.size() + mOtExtRecver->baseOtCount());
 					co_await(mOtExtSender->send(msg, prng, chl));
 
@@ -178,26 +172,20 @@ namespace osuCrypto
 							msg.size() - mOtExtRecver->baseOtCount(),
 							mOtExtRecver->baseOtCount()));
 					msg.resize(msg.size() - mOtExtRecver->baseOtCount());
-					std::cout << "s gen 4" << std::endl;
-
+					
 					co_await(nv.send(delta, b, prng, *mOtExtRecver, chl, mCtx));
 				}
 				else
 				{
 					auto chl2 = chl.fork();
 					auto prng2 = prng.fork();
-					std::cout << "s gen 5" << std::endl;
 					
 					co_await(
 						macoro::when_all_ready(
 							nv.send(delta, b, prng2, *mOtExtRecver, chl2, mCtx),
 							mOtExtSender->send(msg, prng, chl)));
-
-					std::cout << "s gen 6" << std::endl;
-
 				}
 #else
-				std::cout << "s gen 7" << std::endl;
 				throw std::runtime_error("ENABLE_SOFTSPOKEN_OT = false, must enable soft spoken ." LOCATION);
 #endif
 			}
@@ -206,27 +194,22 @@ namespace osuCrypto
 				auto chl2 = chl.fork();
 				auto prng2 = prng.fork();
 				auto baseOt = BaseOT{};
-				std::cout << "s gen 8" << std::endl;
-
+				
 				co_await(
 					macoro::when_all_ready(
 						baseOt.send(msg, prng, chl),
 						nv.send(delta, b, prng2, baseOt, chl2, mCtx)));
-				std::cout << "s gen 9" << std::endl;
-
 			}
 
 			setSilentBaseOts(msg, b);
 			setTimePoint("SilentVoleSender.genSilent.done");
 #else
-			std::cout << "s gen 9" << std::endl;
 			throw std::runtime_error("LIBOTE_HAS_BASE_OT = false, must enable relic, sodium or simplest ot asm." LOCATION);
 			co_return;
 #endif
 		}
 		catch (...)
 		{
-			std::cout << "s ex" << std::endl;
 			chl.close();
 			throw;
 		}
@@ -344,11 +327,8 @@ namespace osuCrypto
 
 			if (mGen.hasBaseOts() == false)
 			{
-				std::cout << "s genBase " << std::endl;
-
 				// recvs data
 				co_await(genSilentBaseOts(prng, chl, delta));
-				std::cout << "s genBase done " << std::endl;
 			}
 
 			setTimePoint("SilentVoleSender.start");
@@ -370,14 +350,9 @@ namespace osuCrypto
 			// our secret share of delta * noiseVals. The receiver
 			// can then manually add their shares of this to the
 			// output of the PPRF at the correct locations.
-
-			std::cout << "s expand " << std::endl;
-
 			co_await(mGen.expand(chl, baseB, prng.get(), mB,
 				PprfOutputFormat::Interleaved, true, 1));
 			setTimePoint("SilentVoleSender.expand.pprf");
-
-			std::cout << "s expand done " << std::endl;
 
 			if (mDebug)
 			{
@@ -387,7 +362,6 @@ namespace osuCrypto
 
 			if (mMalType == SilentSecType::Malicious)
 			{
-				std::cout << "s mal " << std::endl;
 				co_await(chl.recv(X));
 
 				if constexpr (MaliciousSupported)
@@ -396,8 +370,6 @@ namespace osuCrypto
 					throw std::runtime_error("malicious is currently only supported for GF128 block. " LOCATION);
 
 				co_await(chl.send(std::move(hash)));
-
-				std::cout << "s mal done " << std::endl;
 			}
 
 			switch (mMultType)
@@ -453,9 +425,6 @@ namespace osuCrypto
 
 			mState = State::Default;
 			mBaseB.clear();
-
-			std::cout << "s done " << std::endl;
-
 		}
 		catch (...)
 		{
