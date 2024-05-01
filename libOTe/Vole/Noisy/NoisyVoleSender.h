@@ -53,7 +53,8 @@ namespace osuCrypto {
 		//
 		template<typename FVec>
 		task<> send(F delta, FVec& b, PRNG& prng,
-			OtReceiver& ot, Socket& chl, CoeffCtx ctx) {
+			OtReceiver& ot, Socket& chl, CoeffCtx ctx) 
+		try {
 			auto bv = ctx.binaryDecomposition(delta);
 			auto otMsg = AlignedUnVector<block>{ };
 			otMsg.resize(bv.size());
@@ -66,6 +67,11 @@ namespace osuCrypto {
 			co_await(send(delta, b, prng, otMsg, chl, ctx));
 
 		}
+		catch (...)
+		{
+			chl.close();
+			throw;
+		}
 
 		// for chosen delta, compute b such htat
 		//
@@ -73,7 +79,8 @@ namespace osuCrypto {
 		//
 		template<typename FVec>
 		task<> send(F delta, FVec& b, PRNG& _,
-			span<block> otMsg, Socket& chl, CoeffCtx ctx) {
+			span<block> otMsg, Socket& chl, CoeffCtx ctx) 
+		try {
 			auto prng = PRNG{};
 			auto buffer = std::vector<u8>{};
 			auto msg = VecF{};
@@ -125,6 +132,11 @@ namespace osuCrypto {
 			}
 			setTimePoint("NoisyVoleSender.done");
 
+		}
+		catch (...)
+		{
+			chl.close();
+			throw;
 		}
 
 	};

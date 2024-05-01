@@ -383,7 +383,7 @@ namespace osuCrypto
 	}
 
 	task<> SmallFieldVoleSender::expand(Socket& chl,PRNG& prng, u64 numThreads)
-	{
+	try {
 		auto corrections = std::vector<std::array<block, 2>>{};
 			auto hashes = std::vector<std::array<block, 2>>{};
 			auto seedView = MatrixView<block>{};
@@ -430,10 +430,15 @@ namespace osuCrypto
 		}
 
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 
 	task<> SmallFieldVoleReceiver::expand(Socket& chl, PRNG& prng, u64 numThreads)
-	{
+	try {
 		auto seeds = AlignedUnVector<block>{};
 			auto seedsFull = MatrixView<block>{};
 			auto totals = std::vector<std::array<block, 2>>{};
@@ -543,6 +548,11 @@ namespace osuCrypto
 			}
 		}
 
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 	// TODO: Malicious version. Should use an actual hash function for bottom layer of tree.

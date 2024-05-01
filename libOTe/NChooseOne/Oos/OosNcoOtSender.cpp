@@ -85,7 +85,7 @@ namespace osuCrypto
 
 	task<> OosNcoOtSender::init(
 		u64 numOTExt, PRNG& prng, Socket& chl)
-	{
+	try {
 		if (mInputByteCount == 0)
 			throw std::runtime_error("configure must be called first" LOCATION);
 
@@ -171,6 +171,11 @@ namespace osuCrypto
 
 			doneIdx = stopIdx;
 		}
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 
@@ -266,7 +271,7 @@ namespace osuCrypto
 	}
 
 	task<> OosNcoOtSender::recvCorrection(Socket& chl, u64 recvCount)
-	{
+	try {
 
 #ifndef NDEBUG
 		if (recvCount > mCorrectionVals.bounds()[0] - mCorrectionIdx)
@@ -283,9 +288,14 @@ namespace osuCrypto
 
 		co_await(chl.recv(span<block>(dest, recvCount * mCorrectionVals.stride())));
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	task<> OosNcoOtSender::check(Socket& chl, block seed)
-	{
+	try {
 		if (mMalicious)
 		{
 			if (mStatSecParam % 8)
@@ -303,20 +313,35 @@ namespace osuCrypto
 			//std::cout << "pass" << std::endl;
 		}
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	task<> OosNcoOtSender::recvFinalization(Socket& chl)
-	{
+	try {
 		// first we need to receive the extra mStatSecParam number of correction
 		// values. This will just be for random inputs and are used to mask
 		// their true choices that were used in the remaining correction values.
 		return recvCorrection(chl, mStatSecParam);
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 
 	task<> OosNcoOtSender::sendChallenge(Socket& chl, block seed)
-	{
+	try {
 		mChallengeSeed = seed;
 		return macoro::make_task(chl.send(std::move(mChallengeSeed)));
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 	void OosNcoOtSender::computeProof()

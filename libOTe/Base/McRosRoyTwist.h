@@ -138,7 +138,7 @@ namespace osuCrypto
 
 		template<typename DSPopf>
 		inline task<> McRosRoyTwist<DSPopf>::receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
-		{
+		try {
 			auto n = choices.size();
 			auto sk = std::vector<Scalar25519>{};
 			auto curveChoice = std::vector<u8>{};
@@ -179,10 +179,15 @@ namespace osuCrypto
 				ro.Final(messages[i]);
 			}
 		}
+		catch (...)
+		{
+			chl.close();
+			throw;
+		}
 
 		template<typename DSPopf>
 		inline task<> McRosRoyTwist<DSPopf>::send(span<std::array<block, 2>> msg, PRNG& prng, Socket& chl)
-		{
+		try {
 
 			auto n = static_cast<u64>(msg.size());
 			auto sk = Scalar25519(prng);
@@ -224,6 +229,11 @@ namespace osuCrypto
 				ro.Update((bool)1);
 				ro.Final(msg[i][1]);
 			}
+		}
+		catch (...)
+		{
+			chl.close();
+			throw;
 		}
 
 		template<typename DSPopf>

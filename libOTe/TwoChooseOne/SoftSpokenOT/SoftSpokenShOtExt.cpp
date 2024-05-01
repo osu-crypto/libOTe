@@ -33,7 +33,7 @@ namespace osuCrypto
 	template<typename SubspaceVole>
 	task<> SoftSpokenShOtSender<SubspaceVole>::send(
 		span<std::array<block, 2>> messages, PRNG& prng, Socket& chl)
-	{
+	try {
 		auto numInstances = u64{};
 		auto numChunks = u64{};
 		auto chunkSize_ = u64{};
@@ -87,6 +87,11 @@ namespace osuCrypto
 				messages.subspan(nInstance, numUsed),
 				temp);
 		}
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 	template<typename SubspaceVole>
@@ -170,7 +175,7 @@ namespace osuCrypto
 	template<typename SubspaceVole>
 	task<> SoftSpokenShOtReceiver<SubspaceVole>::receive(
 		const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
-	{
+	try {
 		auto numInstances = u64{};
 		auto numChunks = u64{};
 		auto nChunk = u64{};
@@ -239,7 +244,11 @@ namespace osuCrypto
 		if (hasSendBuffer())
 			co_await sendBuffer(chl);
 	}
-
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	template<typename SubspaceVole>
 	void SoftSpokenShOtReceiver<SubspaceVole>::processChunk(

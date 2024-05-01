@@ -15,7 +15,7 @@ namespace osuCrypto
 {
 
 	task<> NcoOtExtReceiver::genBaseOts(PRNG& prng, Socket& chl)
-	{
+	try {
 		struct TT
 		{
 #ifdef ENABLE_IKNP
@@ -59,10 +59,15 @@ namespace osuCrypto
 		co_await(setBaseOts(msgs, prng, chl));
 
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 
 	task<> NcoOtExtSender::genBaseOts(PRNG& prng, Socket& chl)
-	{
+	try {
 		struct TT
 		{
 #ifdef ENABLE_IKNP
@@ -108,9 +113,14 @@ namespace osuCrypto
 		co_await(setBaseOts(msgs, bv, chl));
 
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	task<> NcoOtExtSender::sendChosen(MatrixView<block> messages, PRNG& prng, Socket& chl)
-	{
+	try {
 		auto temp = Matrix<block>{};
 
 		if (hasBaseOts() == false)
@@ -143,12 +153,17 @@ namespace osuCrypto
 		co_await(chl.send(std::move(temp)));
 
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	task<> NcoOtExtReceiver::receiveChosen(
 		u64 numMsgsPerOT,
 		span<block> messages,
 		span<u64> choices, PRNG& prng, Socket& chl)
-	{
+	try {
 		auto temp = Matrix<block>{};
 
 		if (hasBaseOts() == false)
@@ -180,6 +195,11 @@ namespace osuCrypto
 			messages[i] = messages[i] ^ temp(i, choices[i]);
 		}
 
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 }
 #endif
