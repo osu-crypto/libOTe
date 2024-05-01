@@ -12,7 +12,7 @@ namespace osuCrypto
 
 	task<> SoftSpokenMalOtSender::send(
 		span<std::array<block, 2>> messages, PRNG& prng, Socket& chl)
-	{
+	try {
 		if ((u64)messages.data() % 32)
 			throw std::runtime_error("soft spoken requires the messages to by 32 byte aligned. Consider using AlignedUnVector or AlignedVector." LOCATION);
 
@@ -67,6 +67,11 @@ namespace osuCrypto
 			mBase.mSubVole.hash(mExtraW.subspan(chunkSize() * (numExtra - 1), mBase.wPadded()));
 
 		co_await(mBase.mSubVole.checkResponse(chl));
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 	task<> SoftSpokenMalOtSender::runBatch(Socket& chl, span<block> messages)
@@ -284,7 +289,7 @@ namespace osuCrypto
 
 	task<> SoftSpokenMalOtReceiver::receive(
 		const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
-	{
+	try {
 		if ((u64)messages.data() % 32)
 			throw std::runtime_error("soft spoken requires the messages to by 32 byte aligned. Consider using AlignedUnVector or AlignedVector." LOCATION);
 
@@ -373,6 +378,11 @@ namespace osuCrypto
 				mExtraV.subspan(chunkSize() * (numExtra - 1), mBase.vPadded()));
 
 		co_await(mBase.mSubVole.sendResponse(chl));
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 	task<> SoftSpokenMalOtReceiver::runBatch(Socket& chl, span<block> messages, span<block> choices)

@@ -48,7 +48,7 @@ namespace osuCrypto {
 		template<typename VecG, typename VecF>
 		task<> receive(VecG& c, VecF& a, PRNG& prng,
 			OtSender& ot, Socket& chl, CoeffCtx ctx)
-		{
+		try {
 			auto otMsg = AlignedUnVector<std::array<block, 2>>{};
 
 			setTimePoint("NoisyVoleReceiver.ot.begin");
@@ -59,6 +59,11 @@ namespace osuCrypto {
 
 			co_await(receive(c, a, prng, otMsg, chl, ctx));
 		}
+		catch (...)
+		{
+			chl.close();
+			throw;
+		}
 
 		// for chosen c, compute a such htat
 		//
@@ -68,7 +73,7 @@ namespace osuCrypto {
 		task<> receive(VecG& c, VecF& a, PRNG& _,
 			span<std::array<block, 2>> otMsg,
 			Socket& chl, CoeffCtx ctx)
-		{
+		try {
 			auto buff = std::vector<u8>{};
 			auto msg = VecF{};
 			auto temp = VecF{};
@@ -135,6 +140,11 @@ namespace osuCrypto {
 
 			co_await(chl.send(std::move(buff)));
 			setTimePoint("NoisyVoleReceiver.done");
+		}
+		catch (...)
+		{
+			chl.close();
+			throw;
 		}
 
 	};

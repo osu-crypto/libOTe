@@ -12,7 +12,7 @@ namespace osuCrypto
 		span<block> messages,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		static_assert(std::is_trivial<KyberOtRecvPKs>::value, "");
 		static_assert(std::is_trivial<KyberOTCtxt>::value, "");
 
@@ -41,12 +41,17 @@ namespace osuCrypto
 			memcpy(&messages[i], ot[i].rot, sizeof(block));
 		}
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	task<> MasnyRindalKyber::send(
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		auto pkBuff = std::vector<KyberOtRecvPKs>{};
 		auto ctxts = std::vector<KyberOTCtxt>{};
 		auto ptxt = KyberOTPtxt{ };
@@ -71,6 +76,11 @@ namespace osuCrypto
 		}
 
 		co_await chl.send(std::move(ctxts));
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 }
 #endif

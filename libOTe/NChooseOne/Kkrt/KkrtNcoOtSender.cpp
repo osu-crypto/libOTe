@@ -67,7 +67,7 @@ namespace osuCrypto
 
 	task<> KkrtNcoOtSender::init(
 		u64 numOTExt, PRNG& prng, Socket& chl)
-	{
+	try {
 
 
 
@@ -161,6 +161,11 @@ namespace osuCrypto
 
 			doneIdx = stopIdx;
 		}
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 	void KkrtNcoOtSender::encode(u64 otIdx, const void* input, void* dest, u64 destSize)
@@ -258,7 +263,7 @@ namespace osuCrypto
 	}
 
 	task<> KkrtNcoOtSender::recvCorrection(Socket& chl, u64 recvCount)
-	{
+	try {
 
 #ifndef NDEBUG
 		if (recvCount > mCorrectionVals.bounds()[0] - mCorrectionIdx)
@@ -271,6 +276,11 @@ namespace osuCrypto
 		// update the index of there we should store the next set of correction values.
 		mCorrectionIdx += recvCount;
 		co_await chl.recv(span<block>(&*dest, recvCount * mCorrectionVals.stride()));
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 }
 #endif

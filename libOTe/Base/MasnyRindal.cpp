@@ -26,7 +26,7 @@ namespace osuCrypto
         span<block> messages,
         PRNG& prng,
         Socket& chl)
-    {
+    try {
         using namespace DefaultCurve;
 
         //MC_BEGIN(task<>, &choices, messages, &prng, &chl,            
@@ -91,10 +91,15 @@ namespace osuCrypto
         }
 
     }
+    catch (...)
+    {
+        chl.close();
+        throw;
+    }
 
 
     task<> MasnyRindal::send(span<std::array<block, 2>> messages, PRNG& prng, Socket& chl)
-    {
+    try {
         using namespace DefaultCurve;
         Curve{}; // required to init relic
 
@@ -142,6 +147,11 @@ namespace osuCrypto
                 }
             }
         }
+    }
+    catch (...)
+    {
+        chl.close();
+        throw;
     }
 }
 #endif

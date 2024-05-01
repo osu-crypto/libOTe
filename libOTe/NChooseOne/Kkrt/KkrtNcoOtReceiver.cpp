@@ -33,7 +33,7 @@ namespace osuCrypto
 
 
 	task<> KkrtNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Socket& chl)
-	{
+	try {
 		if (hasBaseOts() == false)
 			co_await(genBaseOts(prng, chl));
 
@@ -139,6 +139,11 @@ namespace osuCrypto
 		std::array<block, 4> keys;
 		PRNG(theirSeed).get(keys.data(), keys.size());
 		mMultiKeyAES.setKeys(keys);
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 
@@ -311,7 +316,7 @@ namespace osuCrypto
 	}
 
 	task<> KkrtNcoOtReceiver::sendCorrection(Socket& chl, u64 sendCount)
-	{
+	try {
 
 #ifndef NDEBUG
 		// make sure these OTs all contain valid correction values, aka encode has been called.
@@ -333,6 +338,11 @@ namespace osuCrypto
 		mCorrectionIdx += sendCount;
 
 		co_await chl.send(std::move(sub));
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 }

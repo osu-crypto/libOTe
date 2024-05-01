@@ -57,7 +57,7 @@ namespace osuCrypto
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 
 		auto numOtExt = u64{};
 		auto numSuperBlocks = u64{};
@@ -318,6 +318,11 @@ namespace osuCrypto
 
 			static_assert(gOtExtBaseOtCount == 128, "expecting 128");
 		}
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 }

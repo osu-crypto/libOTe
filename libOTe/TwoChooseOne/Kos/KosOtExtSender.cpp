@@ -56,7 +56,7 @@ namespace osuCrypto
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		if (hasBaseOts() == false)
 			co_await genBaseOts(prng, chl);
 
@@ -269,7 +269,11 @@ namespace osuCrypto
 		}
 
 		setTimePoint("Kos.send.done");
-
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 

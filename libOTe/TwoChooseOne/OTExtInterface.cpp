@@ -20,16 +20,21 @@ namespace osuCrypto
 	}
 
 	task<> OtExtReceiver::genBaseOts(OtSender& base, PRNG& prng, Socket& chl)
-	{
+	try {
 		auto count = baseOtCount();
 		auto msgs = std::vector<std::array<block, 2>>{};
 		msgs.resize(count);
 		co_await base.send(msgs, prng, chl);
 		setBaseOts(msgs);
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	task<> OtExtSender::genBaseOts(PRNG& prng, Socket& chl)
-	{
+	try {
 #ifdef LIBOTE_HAS_BASE_OT
 		auto base = DefaultBaseOT{};
 		co_await genBaseOts(base, prng, chl);
@@ -37,11 +42,15 @@ namespace osuCrypto
 		throw std::runtime_error("The libOTe library does not have base OTs. Enable them to call this. " LOCATION);
 		co_return;
 #endif
-
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 	task<> OtExtSender::genBaseOts(OtReceiver& base, PRNG& prng, Socket& chl)
-	{
+	try {
 		auto count = baseOtCount();
 		auto msgs = std::vector<block>{};
 		auto bv = BitVector{};
@@ -52,6 +61,11 @@ namespace osuCrypto
 		setBaseOts(msgs, bv);
 
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 
 	task<> OtReceiver::receiveChosen(
@@ -59,7 +73,7 @@ namespace osuCrypto
 		span<block> recvMessages,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		auto temp = std::vector<std::array<block, 2>>(recvMessages.size());
 		
 		co_await(receive(choices, recvMessages, prng, chl));
@@ -72,9 +86,14 @@ namespace osuCrypto
 			++iter;
 		}
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	task<> OtReceiver::receiveCorrelated(const BitVector& choices, span<block> recvMessages, PRNG& prng, Socket& chl)
-	{
+	try {
 		auto  temp = std::vector<block>(recvMessages.size());
 
 		co_await(receive(choices, recvMessages, prng, chl));
@@ -87,12 +106,17 @@ namespace osuCrypto
 			++iter;
 		}
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	task<> OtSender::sendChosen(
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		auto temp = std::vector<std::array<block, 2>>(messages.size());
 
 		co_await(send(temp, prng, chl));
@@ -103,5 +127,10 @@ namespace osuCrypto
 			temp[i][1] = temp[i][1] ^ messages[i][1];
 		}
 		co_await(chl.send(std::move(temp)));
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 }

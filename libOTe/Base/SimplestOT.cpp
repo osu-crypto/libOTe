@@ -15,7 +15,7 @@ namespace osuCrypto
 		span<block> msg,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		using namespace DefaultCurve;
 		Curve{};// init relic
 		auto buff = std::vector<u8>{};
@@ -75,12 +75,17 @@ namespace osuCrypto
 			ro.Final(msg[i]);
 		}
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	task<> SimplestOT::send(
 		span<std::array<block, 2>> msg,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		using namespace DefaultCurve;
 		Curve{}; // init relic
 
@@ -141,6 +146,11 @@ namespace osuCrypto
 			if (mUniformOTs) ro.Update(seed);
 			ro.Final(msg[i][1]);
 		}
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 }
 #endif
@@ -397,7 +407,7 @@ namespace osuCrypto
 		span<block> msg,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		auto rs = AlginedState<RecvState>();
 		auto rd = rs->recvData();
 		co_await chl.recv(rd);
@@ -410,12 +420,17 @@ namespace osuCrypto
 			rs->gen4(i, msg);
 		}
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	task<> AsmSimplestOT::send(
 		span<std::array<block, 2>> msg,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		auto ss = AlginedState<SendState>();
 
 		auto sd = ss->init(prng);
@@ -427,6 +442,11 @@ namespace osuCrypto
 			co_await chl.recv(rd);
 			ss->gen4(i, msg);
 		}
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 }
 #endif

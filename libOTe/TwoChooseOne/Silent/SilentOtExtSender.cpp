@@ -91,7 +91,7 @@ namespace osuCrypto
 	}
 
 	task<> SilentOtExtSender::genSilentBaseOts(PRNG& prng, Socket& chl, bool useOtExtension)
-	{
+	try {
 		auto msg = AlignedUnVector<std::array<block, 2>>(silentBaseOtCount());
 
 		if (isConfigured() == false)
@@ -124,6 +124,11 @@ namespace osuCrypto
 		setSilentBaseOts(msg);
 
 		setTimePoint("sender.gen.done");
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 	u64 SilentOtExtSender::silentBaseOtCount() const
@@ -195,7 +200,7 @@ namespace osuCrypto
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		auto correction = BitVector(messages.size());
 		auto iter = BitIterator{};
 		auto i = u64{};
@@ -212,15 +217,25 @@ namespace osuCrypto
 			messages[i][1] = temp[bit ^ 1];
 		}
 	}
+	catch (...)
+	{
+		chl.close();
+		throw;
+	}
 
 	task<> SilentOtExtSender::silentSend(
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		co_await(silentSendInplace(prng.get(), messages.size(), prng, chl));
 		hash(messages, ChoiceBitPacking::True);
 		clear();
+	}
+	catch (...)
+	{
+		chl.close();
+		throw;
 	}
 
 	void SilentOtExtSender::hash(
@@ -313,7 +328,7 @@ namespace osuCrypto
 		u64 n,
 		PRNG& prng,
 		Socket& chl)
-	{
+	try {
 		auto delta = AlignedUnVector<block>{};
 
 		setTimePoint("sender.expand.enter");
@@ -361,6 +376,11 @@ namespace osuCrypto
 
 		mB.resize(mRequestNumOts);
 
+	}
+	catch (...)
+	{
+		chl.close();
+		throw RTE_LOC;
 	}
 
 

@@ -116,7 +116,7 @@ namespace osuCrypto
             span<block> messages,
             PRNG& prng,
             Socket& chl)
-        {
+        try {
 
             auto A = Point{};
             auto sk = std::vector<Number>{};
@@ -159,13 +159,18 @@ namespace osuCrypto
             }
 
         }
+        catch (...)
+        {
+            chl.close();
+            throw;
+        }
 
         template<typename DSPopf>
         task<> McRosRoy<DSPopf>::send(
             span<std::array<block, 2>> msg,
             PRNG& prng,
             Socket& chl)
-        {
+        try {
 
             Curve{}; // init relic
             auto A = Point{};
@@ -210,6 +215,11 @@ namespace osuCrypto
                 ro.Update((bool)1);
                 ro.Final(msg[i][1]);
             }
+        }
+        catch (...)
+        {
+            chl.close();
+            throw;
         }
     }
 }
