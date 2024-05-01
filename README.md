@@ -4,7 +4,7 @@
 
 ![Build Status](https://github.com/osu-crypto/libOTe/actions/workflows/build-test.yml/badge.svg)
 
-A fast and portable C++17 library for Oblivious Transfer extension (OTe). The 
+A fast and portable C++20 library for Oblivious Transfer extension (OTe). The 
 primary design goal of this library to obtain *high performance* while being 
 *easy to use*. Checkout [version 1.6](https://github.com/osu-crypto/libOTe/releases/tag/v1.6.0) for the previous version.
  
@@ -47,7 +47,7 @@ There is one mandatory dependency on [coproto](https://github.com/Visa-Research/
 and three **optional dependencies** on [libsodium](https://doc.libsodium.org/),
 [Relic](https://github.com/relic-toolkit/relic), or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
-for Base OTs. [Boost Asio](https://www.boost.org/doc/libs/1_77_0/doc/html/boost_asio.html) tcp networking and [OpenSSL](https://www.openssl.org/) support can optionally be enabled.
+for Base OTs. [Boost Asio](https://www.boost.org/doc/libs/1_84_0/doc/html/boost_asio.html) tcp networking and [OpenSSL](https://www.openssl.org/) support can optionally be enabled.
 CMake 3.15+ is required and the build script assumes python 3.
  
 The library can be built with libsodium, all OT protocols enabled and boost asio TCP networking as
@@ -56,7 +56,7 @@ git clone https://github.com/osu-crypto/libOTe.git
 cd libOTe
 python build.py --all --boost --sodium
 ```
-The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
+The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend, out/build/x64-Release/frontend/frontend.exe` depending on the OS. 
 
 ### Build Options
 LibOTe can be built with various only the selected protocols enabled. `-D ENABLE_ALL_OT=ON` will enable all available protocols depending on platform/dependencies. The `ON`/`OFF` options include
@@ -147,9 +147,7 @@ To ensure that cmake can find libOTe, you can either install libOTe or build it 
 libOTe can be found with the following components:
 ```
 find_package(libOTe REQUIRED 
-    COMPONENTS 
-        std_14
-        std_17
+    COMPONENTS
         std_20
         
         Debug
