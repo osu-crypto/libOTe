@@ -87,12 +87,15 @@ namespace osuCrypto {
 #ifdef OC_ENABLE_AVX2
     void avx_transpose128(block* inOut);
     void avx_transpose128x1024(block* inOut);
+    void avx_transpose(const MatrixView<u8>& in, const MatrixView<u8>& out);
 #endif
 #ifdef OC_ENABLE_SSE2
     void sse_transpose128(block* inOut);
     void sse_transpose128x1024(std::array<std::array<block, 8>, 128>& inOut);
     inline void sse_transpose128(std::array<block, 128>& inOut) { sse_transpose128(inOut.data()); };
+    void sse_transpose(const MatrixView<u8>& in, const MatrixView<u8>& out);
 #endif
+
     void transpose(const MatrixView<block>& in, const MatrixView<block>& out);
     void transpose(const MatrixView<u8>& in, const MatrixView<u8>& out);
 

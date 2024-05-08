@@ -380,36 +380,18 @@ namespace tests_libOTe
             }
         }
 
-        {
-            PRNG prng(ZeroBlock);
-
-            Matrix<u8> in(16, 8);
-            prng.get((u8*)in.data(), sizeof(u8) * in.bounds()[0] * in.stride());
-
-            Matrix<u8> out(63, 2);
-            transpose(in, out);
-
-
-            Matrix<u8> out2(64, 2);
-            transpose(in, out2);
-
-            for (u64 i = 0; i < out.bounds()[0]; ++i)
-            {
-                if (memcmp(out[i].data(), out2[i].data(), out[i].size()))
-                {
-                    std::cout << "bad " << i << std::endl;
-                    throw UnitTestFail();
-                }
-            }
-        }
-
+        u64 L = 128 * 3;
+        for(u64 b = 1; b < L-1; ++b)
         {
             PRNG prng(ZeroBlock);
 
             //std::array<std::array<std::array<block, 8>, 128>, 2> data;
 
-            Matrix<u8> in(25, 9);
-            Matrix<u8> in2(32, 9);
+            u64 rows = L - b;
+            u64 cols = b;
+
+            Matrix<u8> in(rows, divCeil(cols, 8));
+            Matrix<u8> in2(rows, divCeil(cols, 8));
 
             prng.get((u8*)in.data(), sizeof(u8) * in.bounds()[0] * in.stride());
             memset(in2.data(), 0, in2.bounds()[0] * in2.stride());
@@ -422,11 +404,11 @@ namespace tests_libOTe
                 }
             }
 
-            Matrix<u8> out(72, 4);
-            Matrix<u8> out2(72, 4);
+            Matrix<u8> out(cols, divCeil(rows,8));
+            Matrix<u8> out2(cols, divCeil(rows, 8));
 
-            transpose(in, out);
-            transpose(in2, out2);
+            avx_transpose(in, out);
+            sse_transpose(in2, out2);
 
             for (u64 i = 0; i < out.bounds()[0]; ++i)
             {
@@ -434,7 +416,7 @@ namespace tests_libOTe
                 {
                     if (out[i][j] != out2[i][j])
                     {
-                        std::cout << (u32)out[i][j] << " != " << (u32)out2[i][j] << std::endl;
+                        std::cout << i <<" " <<j << " : " << (u32)out[i][j] << " != " << (u32)out2[i][j] << std::endl;
                         throw UnitTestFail();
                     }
                 }
