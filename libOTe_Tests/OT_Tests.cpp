@@ -379,7 +379,7 @@ namespace tests_libOTe
                 }
             }
         }
-
+#ifdef ENABLE_AVX
         u64 L = 128 * 3;
         for(u64 b = 1; b < L-1; ++b)
         {
@@ -422,6 +422,7 @@ namespace tests_libOTe
                 }
             }
         }
+#endif
     }
 
     void OtExt_genBaseOts_Test()
