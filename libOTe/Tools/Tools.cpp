@@ -353,7 +353,7 @@ namespace osuCrypto {
 	{
 #if defined(ENABLE_AVX)
 		avx_transpose(in, out);
-#else if defined(ENABLE_SSE)
+#elif defined(ENABLE_SSE)
 		sse_transpose(in, out);
 #else
 		throw std::runtime_error("not impl. " LOCATION);
