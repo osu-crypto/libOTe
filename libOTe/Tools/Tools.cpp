@@ -349,19 +349,6 @@ namespace osuCrypto {
 		transpose(inn, outt);
 	}
 
-	void transpose(const MatrixView<u8>& in, const MatrixView<u8>& out)
-	{
-#if defined(ENABLE_AVX)
-		avx_transpose(in, out);
-#elif defined(ENABLE_SSE)
-		sse_transpose(in, out);
-#else
-		throw std::runtime_error("not impl. " LOCATION);
-		//eklundh_transpose(in, out);
-#endif
-	}
-
-
 	void sse_transpose(const MatrixView<u8>& in, const MatrixView<u8>& out)
 	{
 		// the amount of work that we use to vectorize (hard code do not change)
@@ -850,6 +837,18 @@ namespace osuCrypto {
 
 	}
 #endif
+
+
+	void transpose(const MatrixView<u8>& in, const MatrixView<u8>& out)
+	{
+#if defined(ENABLE_AVX)
+		avx_transpose(in, out);
+#else
+		sse_transpose(in, out);
+#endif
+	}
+
+
 
 	void sse_transpose128(block* inOut)
 	{
