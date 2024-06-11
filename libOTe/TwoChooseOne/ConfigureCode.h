@@ -131,6 +131,7 @@ namespace osuCrypto
         {
             u64 _1;
             EAConfigure(mMultType, scaler, _1, minDist);
+            break;
         }
         case osuCrypto::MultType::ExConv7x24:
         case osuCrypto::MultType::ExConv21x24:

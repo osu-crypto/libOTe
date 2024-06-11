@@ -76,17 +76,15 @@ endif()
 
 
 #############################################
+#    Build cryptoTools (common utilities)   #
+#############################################
+add_subdirectory(cryptoTools)
+
+#############################################
 #                CONFIGURE                  #
 #############################################
 include(cmake/buildOptions.cmake)
 include(cmake/libOTeDepHelper.cmake)
-
-#############################################
-#    Build cryptoTools (common utilities)   #
-#############################################
-
-
-add_subdirectory(cryptoTools)
 
 
 
