@@ -57,7 +57,8 @@ namespace osuCrypto
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 
 		auto numOtExt = u64{};
 		auto numSuperBlocks = u64{};
@@ -318,11 +319,11 @@ namespace osuCrypto
 
 			static_assert(gOtExtBaseOtCount == 128, "expecting 128");
 		}
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 }

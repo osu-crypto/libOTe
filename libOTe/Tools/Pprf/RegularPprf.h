@@ -110,7 +110,8 @@ namespace osuCrypto
 			bool programPuncturedPoint,
 			u64 numThreads,
 			CoeffCtx ctx = {})
-			try {
+		{
+			MACORO_TRY{
 			if (programPuncturedPoint)
 				setValue(value);
 
@@ -214,11 +215,11 @@ namespace osuCrypto
 			mBaseOTs = {};
 
 			setTimePoint("SilentMultiPprfSender.de-alloc");
-		}
-		catch (...)
-		{
-			chl.close();
-			throw;
+
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
 
 		void setValue(span<const F> value) {
@@ -703,111 +704,111 @@ namespace osuCrypto
 			bool programPuncturedPoint,
 			u64 numThreads,
 			CoeffCtx ctx = {})
-		try 
 		{
-			pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
+			MACORO_TRY{
+				pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
 
-			auto treeIndex = u64{};
-			auto levels = std::vector<span<AlignedArray<block, 8>>>{};
-			auto leafIndex = u64{};
-			auto leafLevelPtr = (VecF*)nullptr;
-			auto leafLevel = VecF{};
-			auto buff = std::vector<u8>{};
-			auto encSums = span<std::array<block, 2>>{};
-			auto leafMsgs = span<u8>{};
-			auto points = std::vector<u64>{};
-			auto encStepSize = u64{};
-			auto leafStepSize = u64{};
-			auto encOffset = u64{};
-			auto leafOffset = u64{};
+				auto treeIndex = u64{};
+				auto levels = std::vector<span<AlignedArray<block, 8>>>{};
+				auto leafIndex = u64{};
+				auto leafLevelPtr = (VecF*)nullptr;
+				auto leafLevel = VecF{};
+				auto buff = std::vector<u8>{};
+				auto encSums = span<std::array<block, 2>>{};
+				auto leafMsgs = span<u8>{};
+				auto points = std::vector<u64>{};
+				auto encStepSize = u64{};
+				auto leafStepSize = u64{};
+				auto encOffset = u64{};
+				auto leafOffset = u64{};
 
-			setTimePoint("SilentMultiPprfReceiver.start");
-			points.resize(mPntCount);
-			getPoints(points, PprfOutputFormat::ByLeafIndex);
+				setTimePoint("SilentMultiPprfReceiver.start");
+				points.resize(mPntCount);
+				getPoints(points, PprfOutputFormat::ByLeafIndex);
 
-			//setTimePoint("SilentMultiPprfSender.reserve");
+				//setTimePoint("SilentMultiPprfSender.reserve");
 
-			auto dd = mDomain > 2 ? roundUpTo((mDomain + 1) / 2, 2) : 1;
-			pprf::allocateExpandTree(dd, mTempBuffer, levels);
-			assert(levels.size() == mDepth);
+				auto dd = mDomain > 2 ? roundUpTo((mDomain + 1) / 2, 2) : 1;
+				pprf::allocateExpandTree(dd, mTempBuffer, levels);
+				assert(levels.size() == mDepth);
 
 
-			if (!mEagerSend)
-			{
-				// we need to allocate one large buffer that will store all OT messages.
-				pprf::allocateExpandBuffer<F>(
-					mDepth - 1, mPntCount, programPuncturedPoint, buff, encSums, leafMsgs, ctx);
-				encStepSize = encSums.size() / mPntCount;
-				leafStepSize = leafMsgs.size() / mPntCount;
-				encOffset = 0;
-				leafOffset = 0;
-
-				co_await(chl.recv(buff));
-			}
-
-			for (treeIndex = 0ull; treeIndex < mPntCount; treeIndex += 8)
-			{
-				// for interleaved format, the leaf level of the tree
-				// is simply the output.
-				if (oFormat == PprfOutputFormat::Interleaved)
+				if (!mEagerSend)
 				{
-					leafIndex = treeIndex * mDomain;
-					leafLevelPtr = &output;
-				}
-				else
-				{
-					// we will use leaf level as a buffer before
-					// copying the result to the output.
-					leafIndex = 0;
-					ctx.resize(leafLevel, mDomain * 8);
-					leafLevelPtr = &leafLevel;
-				}
-
-				auto min = std::min<u64>(8, mPntCount - treeIndex);
-				if (mEagerSend)
-				{
-
-					// allocate the send buffer and partition it.
-					pprf::allocateExpandBuffer<F>(mDepth - 1, min,
-						programPuncturedPoint, buff, encSums, leafMsgs, ctx);
-					encStepSize = encSums.size() / min;
-					leafStepSize = leafMsgs.size() / min;
+					// we need to allocate one large buffer that will store all OT messages.
+					pprf::allocateExpandBuffer<F>(
+						mDepth - 1, mPntCount, programPuncturedPoint, buff, encSums, leafMsgs, ctx);
+					encStepSize = encSums.size() / mPntCount;
+					leafStepSize = leafMsgs.size() / mPntCount;
 					encOffset = 0;
 					leafOffset = 0;
+
 					co_await(chl.recv(buff));
 				}
 
-				// exapnd the tree
-				expandOne(
-					treeIndex,
-					programPuncturedPoint,
-					levels,
-					*leafLevelPtr,
-					leafIndex,
-					encSums.subspan(encOffset, encStepSize * min),
-					leafMsgs.subspan(leafOffset, leafStepSize * min),
-					points,
-					ctx);
+				for (treeIndex = 0ull; treeIndex < mPntCount; treeIndex += 8)
+				{
+					// for interleaved format, the leaf level of the tree
+					// is simply the output.
+					if (oFormat == PprfOutputFormat::Interleaved)
+					{
+						leafIndex = treeIndex * mDomain;
+						leafLevelPtr = &output;
+					}
+					else
+					{
+						// we will use leaf level as a buffer before
+						// copying the result to the output.
+						leafIndex = 0;
+						ctx.resize(leafLevel, mDomain * 8);
+						leafLevelPtr = &leafLevel;
+					}
 
-				encOffset += encStepSize * min;
-				leafOffset += leafStepSize * min;
+					auto min = std::min<u64>(8, mPntCount - treeIndex);
+					if (mEagerSend)
+					{
 
-				// if we aren't interleaved, we need to copy the
-				// leaf layer to the output.
-				if (oFormat != PprfOutputFormat::Interleaved)
-					pprf::copyOut<VecF, CoeffCtx>(leafLevel, output, mPntCount, treeIndex, oFormat, mOutputFn);
+						// allocate the send buffer and partition it.
+						pprf::allocateExpandBuffer<F>(mDepth - 1, min,
+							programPuncturedPoint, buff, encSums, leafMsgs, ctx);
+						encStepSize = encSums.size() / min;
+						leafStepSize = leafMsgs.size() / min;
+						encOffset = 0;
+						leafOffset = 0;
+						co_await(chl.recv(buff));
+					}
+
+					// exapnd the tree
+					expandOne(
+						treeIndex,
+						programPuncturedPoint,
+						levels,
+						*leafLevelPtr,
+						leafIndex,
+						encSums.subspan(encOffset, encStepSize * min),
+						leafMsgs.subspan(leafOffset, leafStepSize * min),
+						points,
+						ctx);
+
+					encOffset += encStepSize * min;
+					leafOffset += leafStepSize * min;
+
+					// if we aren't interleaved, we need to copy the
+					// leaf layer to the output.
+					if (oFormat != PprfOutputFormat::Interleaved)
+						pprf::copyOut<VecF, CoeffCtx>(leafLevel, output, mPntCount, treeIndex, oFormat, mOutputFn);
+				}
+
+				setTimePoint("SilentMultiPprfReceiver.join");
+
+				mBaseOTs = {};
+
+				setTimePoint("SilentMultiPprfReceiver.de-alloc");
+
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
 			}
-
-			setTimePoint("SilentMultiPprfReceiver.join");
-
-			mBaseOTs = {};
-
-			setTimePoint("SilentMultiPprfReceiver.de-alloc");
-		}
-		catch (...)
-		{
-			chl.close();
-			throw;
 		}
 
 		void clear()

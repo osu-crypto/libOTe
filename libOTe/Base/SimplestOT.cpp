@@ -15,7 +15,9 @@ namespace osuCrypto
 		span<block> msg,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{
+		MACORO_TRY{
+
 		using namespace DefaultCurve;
 		Curve{};// init relic
 		auto buff = std::vector<u8>{};
@@ -74,18 +76,19 @@ namespace osuCrypto
 			if (mUniformOTs) ro.Update(seed);
 			ro.Final(msg[i]);
 		}
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	task<> SimplestOT::send(
 		span<std::array<block, 2>> msg,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		using namespace DefaultCurve;
 		Curve{}; // init relic
 
@@ -146,11 +149,11 @@ namespace osuCrypto
 			if (mUniformOTs) ro.Update(seed);
 			ro.Final(msg[i][1]);
 		}
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 }
 #endif
@@ -175,7 +178,7 @@ namespace osuCrypto
 			rand.get = [](void* ctx, unsigned char* dest, unsigned long long length) {
 				PRNG& prng = *(PRNG*)ctx;
 				prng.get(dest, length);
-			};
+				};
 			rand.ctx = &prng;
 
 			return rand;
@@ -407,7 +410,8 @@ namespace osuCrypto
 		span<block> msg,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		auto rs = AlginedState<RecvState>();
 		auto rd = rs->recvData();
 		co_await chl.recv(rd);
@@ -419,18 +423,18 @@ namespace osuCrypto
 			co_await chl.send(sd);
 			rs->gen4(i, msg);
 		}
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
-	}
 
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
+	}
 	task<> AsmSimplestOT::send(
 		span<std::array<block, 2>> msg,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{ 
+		MACORO_TRY {
 		auto ss = AlginedState<SendState>();
 
 		auto sd = ss->init(prng);
@@ -442,11 +446,11 @@ namespace osuCrypto
 			co_await chl.recv(rd);
 			ss->gen4(i, msg);
 		}
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 }
 #endif

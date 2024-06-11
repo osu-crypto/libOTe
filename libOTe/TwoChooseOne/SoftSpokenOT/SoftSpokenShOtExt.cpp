@@ -33,7 +33,9 @@ namespace osuCrypto
 	template<typename SubspaceVole>
 	task<> SoftSpokenShOtSender<SubspaceVole>::send(
 		span<std::array<block, 2>> messages, PRNG& prng, Socket& chl)
-	try {
+	{
+		MACORO_TRY{
+
 		auto numInstances = u64{};
 		auto numChunks = u64{};
 		auto chunkSize_ = u64{};
@@ -87,11 +89,11 @@ namespace osuCrypto
 				messages.subspan(nInstance, numUsed),
 				temp);
 		}
+
+	} MACORO_CATCH(eptr) {
+		if (!chl.closed()) co_await chl.close();
+		std::rethrow_exception(eptr);
 	}
-	catch (...)
-	{
-		chl.close();
-		throw;
 	}
 
 	template<typename SubspaceVole>
@@ -175,7 +177,8 @@ namespace osuCrypto
 	template<typename SubspaceVole>
 	task<> SoftSpokenShOtReceiver<SubspaceVole>::receive(
 		const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		auto numInstances = u64{};
 		auto numChunks = u64{};
 		auto nChunk = u64{};
@@ -243,11 +246,11 @@ namespace osuCrypto
 
 		if (hasSendBuffer())
 			co_await sendBuffer(chl);
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	template<typename SubspaceVole>

@@ -76,24 +76,26 @@ endif()
 
 
 #############################################
-#    Build cryptoTools (common utilities)   #
-#############################################
-add_subdirectory(cryptoTools)
-
-
-#############################################
 #                CONFIGURE                  #
 #############################################
 include(cmake/buildOptions.cmake)
 include(cmake/libOTeDepHelper.cmake)
 
-file(REMOVE ${CMAKE_CURRENT_LIST_DIR}/libOTe/config.h)
-configure_file(libOTe/config.h.in libOTe/config.h)
+#############################################
+#    Build cryptoTools (common utilities)   #
+#############################################
+
+
+add_subdirectory(cryptoTools)
+
+
 
 
 #############################################
 #               Build libOTe                #
 #############################################
+file(REMOVE ${CMAKE_CURRENT_LIST_DIR}/libOTe/config.h)
+configure_file(libOTe/config.h.in libOTe/config.h)
 
 if(ENABLE_SIMPLESTOT_ASM AND (NOT MSVC))
 	add_subdirectory(thirdparty/SimplestOT)

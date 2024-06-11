@@ -56,7 +56,9 @@ namespace osuCrypto
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{
+		MACORO_TRY{
+
 		if (hasBaseOts() == false)
 			co_await genBaseOts(prng, chl);
 
@@ -269,11 +271,11 @@ namespace osuCrypto
 		}
 
 		setTimePoint("Kos.send.done");
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 

@@ -138,13 +138,14 @@ namespace osuCrypto
 
 		template<typename DSPopf>
 		inline task<> McRosRoyTwist<DSPopf>::receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
-		try {
+		{
+			MACORO_TRY{
 			auto n = choices.size();
 			auto sk = std::vector<Scalar25519>{};
 			auto curveChoice = std::vector<u8>{};
 			auto A = std::array<Monty25519, 2>{};
 			auto sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
-			
+
 			sk.reserve(n);
 			curveChoice.reserve(n);
 			sendBuff.resize(n);
@@ -178,23 +179,25 @@ namespace osuCrypto
 				ro.Update((bool)choices[i]);
 				ro.Final(messages[i]);
 			}
+
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
-		catch (...)
-		{
-			chl.close();
-			throw;
-		}
+
 
 		template<typename DSPopf>
 		inline task<> McRosRoyTwist<DSPopf>::send(span<std::array<block, 2>> msg, PRNG& prng, Socket& chl)
-		try {
+		{ 
+			MACORO_TRY{
 
 			auto n = static_cast<u64>(msg.size());
 			auto sk = Scalar25519(prng);
 			auto recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
 
 			auto A = std::vector<Monty25519>{
-				Monty25519::wholeGroupGenerator * sk, 
+				Monty25519::wholeGroupGenerator * sk,
 				Monty25519::wholeTwistGroupGenerator * sk };
 
 			co_await chl.send(std::move(A));
@@ -229,11 +232,11 @@ namespace osuCrypto
 				ro.Update((bool)1);
 				ro.Final(msg[i][1]);
 			}
-		}
-		catch (...)
-		{
-			chl.close();
-			throw;
+
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
 
 		template<typename DSPopf>

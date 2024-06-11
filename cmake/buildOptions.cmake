@@ -1,3 +1,14 @@
+include_guard(GLOBAL)
+
+set(LIBOTE_BUILD ON)
+
+macro(EVAL var)
+     if(${ARGN})
+         set(${var} ON)
+     else()
+         set(${var} OFF)
+     endif()
+endmacro()
 
 
 if(DEFINED COPROTO_ENABLE_BOOST)
@@ -68,6 +79,10 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_SILENTOT		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_SILENT_VOLE		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	unset(ENABLE_ALL_OT CACHE)
+
+	if(ENABLE_IKNP)
+		set(ENABLE_KOS true)
+	endif()
 endif()
 
 
@@ -188,3 +203,7 @@ endif()
 if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_NP OR ENABLE_MRR) AND NOT (ENABLE_SODIUM OR ENABLE_RELIC))
 	message(FATAL_ERROR "ENABLE_SIMPLESTOT, ENABLE_MR, ENABLE_NP, and ENABLE_MRR require ENABLE_SODIUM or ENABLE_RELIC")
 endif()
+
+
+
+#include(${CMAKE_CURRENT_LIST_DIR}/../cryptoTools/cmake/cryptoToolsBuildOptions.cmake)

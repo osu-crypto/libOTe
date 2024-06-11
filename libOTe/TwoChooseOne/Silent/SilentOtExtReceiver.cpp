@@ -152,7 +152,8 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl,
 		bool useOtExtension)
-	try {
+	{
+		MACORO_TRY{
 		auto choice = sampleBaseChoiceBits(prng);
 		auto msg = AlignedUnVector<block>{};
 
@@ -190,11 +191,11 @@ namespace osuCrypto
 #endif
 		setSilentBaseOts(msg);
 		setTimePoint("recver.gen.done");
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	u64 SilentOtExtReceiver::silentBaseOtCount() const
@@ -301,16 +302,17 @@ namespace osuCrypto
 		span<block> messages,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		auto randChoice = BitVector(messages.size());
 		co_await silentReceive(randChoice, messages, prng, chl, OTType::Random);
 		randChoice ^= choices;
 		co_await chl.send(std::move(randChoice));
+
+	} MACORO_CATCH(eptr) {
+		if (!chl.closed()) co_await chl.close();
+		std::rethrow_exception(eptr);
 	}
-	catch (...)
-	{
-		chl.close();
-		throw;
 	}
 
 	task<> SilentOtExtReceiver::silentReceive(
@@ -319,7 +321,8 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl,
 		OTType type)
-	try {
+	{
+		MACORO_TRY{
 		auto packing = (type == OTType::Random) ?
 			ChoiceBitPacking::True :
 			ChoiceBitPacking::False;
@@ -348,11 +351,11 @@ namespace osuCrypto
 		}
 
 		clear();
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	task<> SilentOtExtReceiver::silentReceiveInplace(
@@ -360,7 +363,8 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl,
 		ChoiceBitPacking type)
-	try {
+	{
+		MACORO_TRY{
 		auto gapVals = std::vector<block>{};
 		auto rT = MatrixView<block>{};
 
@@ -406,11 +410,11 @@ namespace osuCrypto
 
 		if (mC.size())
 			mC.resize(mRequestNumOts);
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	task<> SilentOtExtReceiver::ferretMalCheck(Socket& chl, PRNG& prng)

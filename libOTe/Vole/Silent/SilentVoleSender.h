@@ -125,7 +125,8 @@ namespace osuCrypto
 		// otherwise we perform a base OT protocol to
 		// generate the needed OTs.
 		task<> genSilentBaseOts(PRNG& prng, Socket& chl, F delta)
-		try {
+		{
+			MACORO_TRY{
 #ifdef LIBOTE_HAS_BASE_OT
 
 #if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
@@ -207,11 +208,11 @@ namespace osuCrypto
 			throw std::runtime_error("LIBOTE_HAS_BASE_OT = false, must enable relic, sodium or simplest ot asm." LOCATION);
 			co_return;
 #endif
+
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
 		}
-		catch (...)
-		{
-			chl.close();
-			throw;
 		}
 
 		// configure the silent OT extension. This sets
@@ -309,7 +310,8 @@ namespace osuCrypto
 			u64 n,
 			PRNG& prng,
 			Socket& chl)
-		try {
+		{
+			MACORO_TRY{
 			auto X = block{};
 			auto hash = std::array<u8, 32>{};
 			auto baseB = VecF{};
@@ -425,11 +427,12 @@ namespace osuCrypto
 
 			mState = State::Default;
 			mBaseB.clear();
-		}
-		catch (...)
-		{
-			chl.close();
-			throw;
+
+
+			} MACORO_CATCH(eptr) {
+				co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
 
 		task<> checkRT(Socket& chl, F delta) const

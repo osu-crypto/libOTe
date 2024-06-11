@@ -383,7 +383,8 @@ namespace osuCrypto
 	}
 
 	task<> SmallFieldVoleSender::expand(Socket& chl,PRNG& prng, u64 numThreads)
-	try {
+	{
+		MACORO_TRY{
 		auto corrections = std::vector<std::array<block, 2>>{};
 			auto hashes = std::vector<std::array<block, 2>>{};
 			auto seedView = MatrixView<block>{};
@@ -429,16 +430,16 @@ namespace osuCrypto
 			co_await (chl.send(std::move(hashes)));
 		}
 
+	} MACORO_CATCH(eptr) {
+		if (!chl.closed()) co_await chl.close();
+		std::rethrow_exception(eptr);
 	}
-	catch (...)
-	{
-		chl.close();
-		throw;
 	}
 
 
 	task<> SmallFieldVoleReceiver::expand(Socket& chl, PRNG& prng, u64 numThreads)
-	try {
+	{
+		MACORO_TRY{
 		auto seeds = AlignedUnVector<block>{};
 			auto seedsFull = MatrixView<block>{};
 			auto totals = std::vector<std::array<block, 2>>{};
@@ -548,11 +549,10 @@ namespace osuCrypto
 			}
 		}
 
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	// TODO: Malicious version. Should use an actual hash function for bottom layer of tree.

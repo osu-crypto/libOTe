@@ -135,7 +135,9 @@ namespace osuCrypto
 		// otherwise we perform a base OT protocol to
 		// generate the needed OTs.
 		task<> genSilentBaseOts(PRNG& prng, Socket& chl)
-		try {
+		{
+			MACORO_TRY{
+
 #ifdef LIBOTE_HAS_BASE_OT
 
 #if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
@@ -240,11 +242,11 @@ namespace osuCrypto
 			throw std::runtime_error("LIBOTE_HAS_BASE_OT = false, must enable relic, sodium or simplest ot asm." LOCATION);
 			co_return;
 #endif
-		}
-		catch (...)
-		{
-			chl.close();
-			throw;
+
+			} MACORO_CATCH(eptr) {
+				co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
 
 		// configure the silent OT extension. This sets
@@ -392,7 +394,8 @@ namespace osuCrypto
 			VecF& a,
 			PRNG& prng,
 			Socket& chl)
-		try {
+		{
+			MACORO_TRY{
 			
 			if (c.size() != a.size())
 				throw std::runtime_error("input sizes do not match." LOCATION);
@@ -403,13 +406,12 @@ namespace osuCrypto
 			mCtx.copy(mA.begin(), mA.begin() + a.size(), a.begin());
 
 			clear();
-		}
-		catch (...)
-		{
-			chl.close();
-			throw;
-		}
 
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
+		}
 		// Perform the actual OT extension. If silent
 		// base OTs have been generated or set, then
 		// this function is non-interactive. Otherwise
@@ -418,7 +420,8 @@ namespace osuCrypto
 			u64 n,
 			PRNG& prng,
 			Socket& chl)
-		try {
+		{
+			MACORO_TRY{
 			auto myHash = std::array<u8, 32>{};
 			auto theirHash = std::array<u8, 32>{};
 			gTimer.setTimePoint("SilentVoleReceiver.ot.enter");
@@ -576,11 +579,11 @@ namespace osuCrypto
 			// make the protocol as done and that
 			// mA,mC are ready to be consumed.
 			mState = State::Default;
-		}
-		catch (...)
-		{
-			chl.close();
-			throw;
+
+			} MACORO_CATCH(eptr) {
+				co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
 
 
