@@ -48,7 +48,9 @@ namespace osuCrypto {
 		template<typename VecG, typename VecF>
 		task<> receive(VecG& c, VecF& a, PRNG& prng,
 			OtSender& ot, Socket& chl, CoeffCtx ctx)
-		try {
+		{
+			MACORO_TRY{
+
 			auto otMsg = AlignedUnVector<std::array<block, 2>>{};
 
 			setTimePoint("NoisyVoleReceiver.ot.begin");
@@ -58,11 +60,11 @@ namespace osuCrypto {
 			setTimePoint("NoisyVoleReceiver.ot.end");
 
 			co_await(receive(c, a, prng, otMsg, chl, ctx));
-		}
-		catch (...)
-		{
-			chl.close();
-			throw;
+
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
 
 		// for chosen c, compute a such htat
@@ -73,7 +75,8 @@ namespace osuCrypto {
 		task<> receive(VecG& c, VecF& a, PRNG& _,
 			span<std::array<block, 2>> otMsg,
 			Socket& chl, CoeffCtx ctx)
-		try {
+		{
+			MACORO_TRY{
 			auto buff = std::vector<u8>{};
 			auto msg = VecF{};
 			auto temp = VecF{};
@@ -140,11 +143,11 @@ namespace osuCrypto {
 
 			co_await(chl.send(std::move(buff)));
 			setTimePoint("NoisyVoleReceiver.done");
-		}
-		catch (...)
-		{
-			chl.close();
-			throw;
+
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
 
 	};

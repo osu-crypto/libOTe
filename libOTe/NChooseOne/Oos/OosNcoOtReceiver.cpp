@@ -13,7 +13,8 @@ using namespace std;
 namespace osuCrypto
 {
 	task<> OosNcoOtReceiver::setBaseOts(span<std::array<block, 2>> baseRecvOts, PRNG& prng, Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		if (u64(baseRecvOts.size()) != u64(mGens.size()))
 			throw std::runtime_error("rt error at " LOCATION);
 
@@ -30,11 +31,12 @@ namespace osuCrypto
 
 		mHasBase = true;
 		co_await chl.send(std::move(delta));
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	void OosNcoOtReceiver::setUniformBaseOts(span<std::array<block, 2>> baseRecvOts)
@@ -52,7 +54,8 @@ namespace osuCrypto
 	}
 
 	task<> OosNcoOtReceiver::init(u64 numOtExt, PRNG& prng, Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		if (mInputByteCount == 0)
 			throw std::runtime_error("configure must be called first" LOCATION);
 
@@ -171,11 +174,11 @@ namespace osuCrypto
 
 			doneIdx = stopIdx;
 		}
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 
@@ -365,7 +368,8 @@ namespace osuCrypto
 	}
 
 	task<> OosNcoOtReceiver::sendCorrection(Socket& chl, u64 sendCount)
-	try {
+	{
+		MACORO_TRY{
 		auto sub = T1Sub{};
 #ifndef NDEBUG
 		for (u64 i = mCorrectionIdx; i < sendCount + mCorrectionIdx; ++i)
@@ -385,15 +389,16 @@ namespace osuCrypto
 		mCorrectionIdx += sendCount;
 
 		co_await chl.send(std::move(sub));
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	task<> OosNcoOtReceiver::check(Socket& chl, block wordSeed)
-	try {
+	{
+		MACORO_TRY{
 		if (mMalicious)
 		{
 			co_await(sendFinalization(chl, wordSeed));
@@ -401,15 +406,15 @@ namespace osuCrypto
 			computeProof();
 			co_await(sendProof(chl));
 		}
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	task<> OosNcoOtReceiver::sendFinalization(Socket& chl, block seed)
-	try {
+	{
 
 #ifndef NDEBUG
 		for (u64 i = 0; i < mCorrectionIdx; ++i)
@@ -455,22 +460,12 @@ namespace osuCrypto
 		// now send the internally stored correction values.
 		return sendCorrection(chl, mStatSecParam);
 	}
-	catch (...)
-	{
-		chl.close();
-		throw;
-	}
 
 	task<> OosNcoOtReceiver::recvChallenge(Socket& chl)
-	try {
+	{
 
 		// the sender will now tell us the random challenge seed.
 		return macoro::make_task(chl.recv(mChallengeSeed));
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
 	}
 
 	void OosNcoOtReceiver::computeProof()
@@ -710,15 +705,10 @@ namespace osuCrypto
 	}
 
 	task<> OosNcoOtReceiver::sendProof(Socket& chl)
-	try {
+	{
 		// send over our summations.
 		co_await(chl.send(std::move(mTBuff)));
 		co_await(chl.send(std::move(mWBuff)));
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
 	}
 }
 #endif

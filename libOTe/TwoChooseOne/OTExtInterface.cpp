@@ -20,21 +20,23 @@ namespace osuCrypto
 	}
 
 	task<> OtExtReceiver::genBaseOts(OtSender& base, PRNG& prng, Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		auto count = baseOtCount();
 		auto msgs = std::vector<std::array<block, 2>>{};
 		msgs.resize(count);
 		co_await base.send(msgs, prng, chl);
 		setBaseOts(msgs);
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	task<> OtExtSender::genBaseOts(PRNG& prng, Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 #ifdef LIBOTE_HAS_BASE_OT
 		auto base = DefaultBaseOT{};
 		co_await genBaseOts(base, prng, chl);
@@ -42,15 +44,16 @@ namespace osuCrypto
 		throw std::runtime_error("The libOTe library does not have base OTs. Enable them to call this. " LOCATION);
 		co_return;
 #endif
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	task<> OtExtSender::genBaseOts(OtReceiver& base, PRNG& prng, Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		auto count = baseOtCount();
 		auto msgs = std::vector<block>{};
 		auto bv = BitVector{};
@@ -60,22 +63,21 @@ namespace osuCrypto
 		co_await base.receive(bv, msgs, prng, chl);
 		setBaseOts(msgs, bv);
 
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
-	catch (...)
-	{
-		chl.close();
-		throw;
-	}
-
 
 	task<> OtReceiver::receiveChosen(
 		const BitVector& choices,
 		span<block> recvMessages,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		auto temp = std::vector<std::array<block, 2>>(recvMessages.size());
-		
+
 		co_await(receive(choices, recvMessages, prng, chl));
 		co_await(chl.recv(temp));
 
@@ -85,15 +87,16 @@ namespace osuCrypto
 			recvMessages[i] = recvMessages[i] ^ temp[i][*iter];
 			++iter;
 		}
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	task<> OtReceiver::receiveCorrelated(const BitVector& choices, span<block> recvMessages, PRNG& prng, Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		auto  temp = std::vector<block>(recvMessages.size());
 
 		co_await(receive(choices, recvMessages, prng, chl));
@@ -105,18 +108,20 @@ namespace osuCrypto
 			recvMessages[i] = recvMessages[i] ^ (zeroAndAllOne[*iter] & temp[i]);
 			++iter;
 		}
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	task<> OtSender::sendChosen(
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
-	try {
+
+	{
+		MACORO_TRY{
 		auto temp = std::vector<std::array<block, 2>>(messages.size());
 
 		co_await(send(temp, prng, chl));
@@ -127,10 +132,10 @@ namespace osuCrypto
 			temp[i][1] = temp[i][1] ^ messages[i][1];
 		}
 		co_await(chl.send(std::move(temp)));
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 }

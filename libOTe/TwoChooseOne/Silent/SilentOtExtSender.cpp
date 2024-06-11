@@ -91,7 +91,9 @@ namespace osuCrypto
 	}
 
 	task<> SilentOtExtSender::genSilentBaseOts(PRNG& prng, Socket& chl, bool useOtExtension)
-	try {
+	{
+		MACORO_TRY{
+
 		auto msg = AlignedUnVector<std::array<block, 2>>(silentBaseOtCount());
 
 		if (isConfigured() == false)
@@ -124,11 +126,11 @@ namespace osuCrypto
 		setSilentBaseOts(msg);
 
 		setTimePoint("sender.gen.done");
+
+	} MACORO_CATCH(eptr) {
+		if (!chl.closed()) co_await chl.close();
+		std::rethrow_exception(eptr);
 	}
-	catch (...)
-	{
-		chl.close();
-		throw;
 	}
 
 	u64 SilentOtExtSender::silentBaseOtCount() const
@@ -200,7 +202,8 @@ namespace osuCrypto
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		auto correction = BitVector(messages.size());
 		auto iter = BitIterator{};
 		auto i = u64{};
@@ -216,26 +219,27 @@ namespace osuCrypto
 			messages[i][0] = temp[bit];
 			messages[i][1] = temp[bit ^ 1];
 		}
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	task<> SilentOtExtSender::silentSend(
 		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		co_await(silentSendInplace(prng.get(), messages.size(), prng, chl));
 		hash(messages, ChoiceBitPacking::True);
 		clear();
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	void SilentOtExtSender::hash(
@@ -328,7 +332,8 @@ namespace osuCrypto
 		u64 n,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 		auto delta = AlignedUnVector<block>{};
 
 		setTimePoint("sender.expand.enter");
@@ -376,11 +381,11 @@ namespace osuCrypto
 
 		mB.resize(mRequestNumOts);
 
-	}
-	catch (...)
-	{
-		chl.close();
-		throw RTE_LOC;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 

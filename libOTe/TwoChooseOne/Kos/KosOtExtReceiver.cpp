@@ -77,7 +77,9 @@ namespace osuCrypto
 		span<block> messages,
 		PRNG& prng,
 		Socket& chl)
-	try {
+	{
+		MACORO_TRY{
+
 		// we are going to process OTs in blocks of 128 * superBlkSize messages.
 		if (hasBaseOts() == false)
 			co_await genBaseOts(prng, chl);
@@ -240,11 +242,11 @@ namespace osuCrypto
 
 		if(mIsMalicious)
 			co_await(chl.send(std::move(uBuff)));
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 	}
 
 	AlignedUnVector<block> KosOtExtReceiver::hash(

@@ -235,20 +235,8 @@ void Tools_Pprf_test_impl(
     auto p1 = recver.expand(sockets[1], a, format, program, threads);
 
 
-    try
-    {
-        eval(p0, p1);
-    }
-    catch (std::exception& e)
-    {
-        sockets[0].close();
-        sockets[1].close();
-        macoro::sync_wait(macoro::when_all_ready(
-            sockets[0].flush(),
-            sockets[1].flush()
-        ));
-        throw;
-    }
+    eval(p0, p1);
+    
 
     if (format == PprfOutputFormat::Callback)
     {

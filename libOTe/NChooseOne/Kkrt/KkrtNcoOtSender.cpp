@@ -67,7 +67,8 @@ namespace osuCrypto
 
 	task<> KkrtNcoOtSender::init(
 		u64 numOTExt, PRNG& prng, Socket& chl)
-	try {
+	{
+		MACORO_TRY{
 
 
 
@@ -161,11 +162,11 @@ namespace osuCrypto
 
 			doneIdx = stopIdx;
 		}
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	void KkrtNcoOtSender::encode(u64 otIdx, const void* input, void* dest, u64 destSize)
@@ -263,8 +264,8 @@ namespace osuCrypto
 	}
 
 	task<> KkrtNcoOtSender::recvCorrection(Socket& chl, u64 recvCount)
-	try {
-
+	{
+		MACORO_TRY{
 #ifndef NDEBUG
 		if (recvCount > mCorrectionVals.bounds()[0] - mCorrectionIdx)
 			throw std::runtime_error("bad receiver, will overwrite the end of our buffer" LOCATION);
@@ -276,11 +277,11 @@ namespace osuCrypto
 		// update the index of there we should store the next set of correction values.
 		mCorrectionIdx += recvCount;
 		co_await chl.recv(span<block>(&*dest, recvCount * mCorrectionVals.stride()));
-	}
-	catch (...)
-	{
-		chl.close();
-		throw;
+
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 }
 #endif
