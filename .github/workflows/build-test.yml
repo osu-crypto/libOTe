@@ -37,7 +37,7 @@ jobs:
       #  run:  python3 build.py --setup --bitpolymul --par=4  -DVERBOSE_FETCH=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
           
       - name: build libOTe
-        run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -DENABLE_CIRCUITS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_ASAN=ON -DENABLE_MOCK_OT=true 
+        run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -DENABLE_CIRCUITS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_ASAN=ON -DENABLE_MOCK_OT=true -DMACORO_GIT_TAG=89e65ddf327d642bc60a7ff2209fb9186a300d33
 
       - name: unit tests
         run:  ./out/build/linux/frontend/frontend_libOTe -u
