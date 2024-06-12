@@ -24,6 +24,8 @@
 // build the library with Masney Rindal Kyber Base OT enabled
 #cmakedefine ENABLE_MR_KYBER @ENABLE_MR_KYBER@
 
+// build the library with mocked Base OT enabled
+#cmakedefine ENABLE_MOCK_OT @ENABLE_MOCK_OT@
 
 
 // build the library with Keller Orse Scholl OT-Ext enabled

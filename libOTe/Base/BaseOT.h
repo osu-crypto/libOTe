@@ -13,6 +13,7 @@
 #include "McRosRoy.h"
 #include "libOTe/Tools/Popf/EKEPopf.h"
 #include "libOTe/Tools/Popf/FeistelMulRistPopf.h"
+#include "MockOt.h"
 
 namespace osuCrypto
 {
@@ -29,6 +30,8 @@ namespace osuCrypto
     using DefaultBaseOT = MasnyRindalKyber;
 #elif defined ENABLE_SIMPLESTOT
     using DefaultBaseOT = SimplestOT;
+#elif defined ENABLE_MOCK_OT
+    using DefaultBaseOT = INSECURE_MOCK_OT;
 #else
 #undef LIBOTE_HAS_BASE_OT
 #endif
