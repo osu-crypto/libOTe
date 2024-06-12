@@ -1,6 +1,9 @@
 @PACKAGE_INIT@
 
-message("found libOTe: ${CMAKE_CURRENT_LIST_FILE}")
+
+if(NOT LIBOTE_FIND_QUIETLY)
+    message("libOTeConfig.cmake: ${CMAKE_CURRENT_LIST_DIR}")
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/buildOptions.cmake")
 find_package(cryptoTools REQUIRED HINTS "${CMAKE_CURRENT_LIST_DIR}/.." ${CMAKE_CURRENT_LIST_DIR})

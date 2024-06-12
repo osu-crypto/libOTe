@@ -16,10 +16,10 @@ find_package(libOTe REQUIRED HINTS ${LIBOTE_HINT}
 		#no_sse
 		#no_avx
 		#bitpolymul
-		simplestot
-		mrr
+		#simplestot
+		#mrr
 		#mrr_twist
-		mr
+		#mr
 		#mr_kyber
 		kos
 		iknp
