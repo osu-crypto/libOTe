@@ -313,7 +313,7 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
                 auto p0 = recv.silentReceive(c, z0, prng, chls[0]);
                 auto p1 = send.silentSend(x, z1, prng, chls[1]);
 #if (defined ENABLE_MRR_TWIST && defined ENABLE_SSE) || \
-                defined ENABLE_MR || defined ENABLE_MRR
+                defined ENABLE_MR || defined ENABLE_MRR || defined ENABLE_MOCK_OT
                 u64 expRound = 3;
 #else
                 u64 expRound = 5;

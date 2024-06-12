@@ -92,6 +92,8 @@ else()
 	option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" TRUE)
 endif()
 
+option(ENABLE_MOCK_OT        "Build the insecure mock base OT" OFF)
+
 option(ENABLE_SIMPLESTOT     "Build the SimplestOT base OT" OFF)
 option(ENABLE_SIMPLESTOT_ASM "Build the assembly based SimplestOT library" OFF)
 option(ENABLE_MRR            "Build the McQuoidRosulekRoy 20 PopfOT base OT using Ristretto KA" OFF)
@@ -172,6 +174,10 @@ message(STATUS "Option: ENABLE_PPRF          = ${ENABLE_PPRF}\n\n")
 #############################################
 #               Config Checks               #
 #############################################
+
+if(ENABLE_MOCK_OT)
+	message("\n\nWarning: the libary is being build with insecure mock base OTs. ENABLE_MOCK_OT=${ENABLE_MOCK_OT}\n\n")
+endif()
 
 if(NOT UNIX OR APPLE OR MSVC)
 	#if(ENABLE_SIMPLESTOT_ASM)

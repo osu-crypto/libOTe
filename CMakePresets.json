@@ -95,7 +95,7 @@
         "ENABLE_GMP": false,
         "ENABLE_ALL_OT": true,
         "ENABLE_RELIC": false,
-        "ENABLE_SODIUM": true,
+        "ENABLE_SODIUM": false,
         "ENABLE_BOOST": false,
         "ENABLE_OPENSSL": false,
         "FETCH_AUTO": true,
@@ -104,6 +104,7 @@
         "VERBOSE_FETCH": true,
         "ENABLE_PIC": false,
         "ENABLE_ASAN": false,
+        "ENABLE_MOCK_OT": true,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
       },
       "vendor": {
