@@ -41,12 +41,7 @@ jobs:
 
       - name: unit tests
         run: |
-             pwd
-             ls .out
-             ls .out/build
-             ls .out/build/linux
-             ls .out/build/linux/frontend
-              ./out/build/linux/frontend/frontend_libOTe -u
+             ./out/build/linux/frontend/frontend_libOTe -u
        
 
       - name: find source tree
