@@ -323,7 +323,6 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 #elif defined ENABLE_SIMPLESTOT
                 u64 expRound = 5;
 #elif defined ENABLE_MOCK_OT
-                using DefaultBaseOT = INSECURE_MOCK_OT;
                 u64 expRound = 3;
 #else
                 u64 expRound = 5;
@@ -331,7 +330,26 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 
                 auto rounds = eval(p0, p1, chls[1], chls[0]);
                 if (rounds != expRound)
-                    throw std::runtime_error(std::to_string(rounds) + "!=" + std::to_string(expRound) + ". " + COPROTO_LOCATION);
+                {
+#ifdef ENABLE_SIMPLESTOT_ASM
+                    std::cout << "using DefaultBaseOT = AsmSimplestOT;" << std::endl;
+#elif defined ENABLE_MRR_TWIST && defined ENABLE_SSE
+                    std::cout << "using DefaultBaseOT = McRosRoyTwist;" << std::endl;
+#elif defined ENABLE_MR
+                    std::cout << "using DefaultBaseOT = MasnyRindal;" << std::endl;
+#elif defined ENABLE_MRR
+                    std::cout << "using DefaultBaseOT = McRosRoy;" << std::endl;
+#elif defined ENABLE_NP_KYBER
+                    std::cout << "using DefaultBaseOT = MasnyRindalKyber;" << std::endl;
+#elif defined ENABLE_SIMPLESTOT
+                    std::cout << "using DefaultBaseOT = SimplestOT;" << std::endl;
+#elif defined ENABLE_MOCK_OT
+                    std::cout << "using DefaultBaseOT = INSECURE_MOCK_OT;" << std::endl;
+#else
+                    std::cout << " LIBOTE_HAS_BASE_OT" << std::endl;
+#endif
+                    throw std::runtime_error("act " + std::to_string(rounds) + "!= exp " + std::to_string(expRound) + " " + COPROTO_LOCATION);
+                }
 
 
                 for (u64 i = 0; i < n; ++i)
