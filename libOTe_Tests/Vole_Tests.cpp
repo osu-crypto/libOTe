@@ -312,51 +312,46 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
                 AlignedUnVector<block> c(n), z0(n), z1(n);
                 auto p0 = recv.silentReceive(c, z0, prng, chls[0]);
                 auto p1 = send.silentSend(x, z1, prng, chls[1]);
-#ifdef ENABLE_SIMPLESTOT_ASM
+                std::string baseName;
+                //
+//#if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
+//                using BaseOT = McRosRoyTwist;
+//#elif defined ENABLE_MR
+//                using BaseOT = MasnyRindal;
+//#elif defined ENABLE_MRR
+//                using BaseOT = McRosRoy;
+//#elif defined ENABLE_NP_KYBER
+
+#if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
                 u64 expRound = 3;
-                std::cout << "using DefaultBaseOT = AsmSimplestOT;" << std::endl;
-#elif defined ENABLE_MRR_TWIST && defined ENABLE_SSE
-                u64 expRound = 3;
-                std::cout << "using DefaultBaseOT = McRosRoyTwist;" << std::endl;
+                baseName = "using DefaultBaseOT = McRosRoyTwist;";
 #elif defined ENABLE_MR
                 u64 expRound = 3;
-                std::cout << "using DefaultBaseOT = MasnyRindal;" << std::endl;
+                baseName = "using DefaultBaseOT = MasnyRindal;";
 #elif defined ENABLE_MRR
                 u64 expRound = 3;
-                std::cout << "using DefaultBaseOT = McRosRoy;" << std::endl;
+                baseName = "using DefaultBaseOT = McRosRoy;";
 #elif defined ENABLE_NP_KYBER
                 u64 expRound = 3;
-                std::cout << "using DefaultBaseOT = MasnyRindalKyber;" << std::endl;
+                baseName = "using DefaultBaseOT = MasnyRindalKyber;";
+#elif defined ENABLE_SIMPLESTOT_ASM
+                u64 expRound = 5;
+                baseName = "using DefaultBaseOT = AsmSimplestOT;";
 #elif defined ENABLE_SIMPLESTOT
                 u64 expRound = 5;
-                std::cout << "using DefaultBaseOT = SimplestOT;" << std::endl;
+                baseName = "using DefaultBaseOT = SimplestOT;";
 #elif defined ENABLE_MOCK_OT
                 u64 expRound = 3;
-                std::cout << "using DefaultBaseOT = INSECURE_MOCK_OT;" << std::endl;
+                baseName = "using DefaultBaseOT = INSECURE_MOCK_OT;";
 #else
+                baseName = "????";
                 u64 expRound = 0;
 #endif
 
                 auto rounds = eval(p0, p1, chls[1], chls[0]);
                 if (rounds != expRound)
                 {
-//#ifdef ENABLE_SIMPLESTOT_ASM
-//                    std::cout << "using DefaultBaseOT = AsmSimplestOT;" << std::endl;
-//#elif defined ENABLE_MRR_TWIST && defined ENABLE_SSE
-//                    std::cout << "using DefaultBaseOT = McRosRoyTwist;" << std::endl;
-//#elif defined ENABLE_MR
-//                    std::cout << "using DefaultBaseOT = MasnyRindal;" << std::endl;
-//#elif defined ENABLE_MRR
-//                    std::cout << "using DefaultBaseOT = McRosRoy;" << std::endl;
-//#elif defined ENABLE_NP_KYBER
-//                    std::cout << "using DefaultBaseOT = MasnyRindalKyber;" << std::endl;
-//#elif defined ENABLE_SIMPLESTOT
-//                    std::cout << "using DefaultBaseOT = SimplestOT;" << std::endl;
-//#elif defined ENABLE_MOCK_OT
-//                    std::cout << "using DefaultBaseOT = INSECURE_MOCK_OT;" << std::endl;
-//#else
-//                    std::cout << " LIBOTE_HAS_BASE_OT" << std::endl;
-//#endif
+                    std::cout << baseName << std::endl;
                     throw std::runtime_error("act " + std::to_string(rounds) + "!= exp " + std::to_string(expRound) + " " + COPROTO_LOCATION);
                 }
 
