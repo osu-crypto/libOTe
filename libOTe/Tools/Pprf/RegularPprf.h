@@ -394,7 +394,10 @@ namespace osuCrypto
 				{
 					// The child that we will write in this iteration.
 
-					if constexpr (std::is_same_v<F, block>)
+					if constexpr (std::is_same_v<F, block> && (
+						std::is_same_v<CoeffCtx, CoeffCtxGF2> ||
+						std::is_same_v<CoeffCtx, CoeffCtxGF128>)
+						)
 					{
 						gGgmAes.data()[keep].hashBlocks<8>(parent.data(), outIter);
 					}
@@ -704,6 +707,7 @@ namespace osuCrypto
 			bool programPuncturedPoint,
 			u64 numThreads,
 			CoeffCtx ctx = {})
+		try 
 		{
 			MACORO_TRY{
 				pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
@@ -1029,9 +1033,12 @@ namespace osuCrypto
 
 					for (u64 keep = 0; keep < 2; ++keep, ++childIdx)
 					{
-						if constexpr (std::is_same_v<F, block>)
-						{
-							gGgmAes.data()[keep].hashBlocks<8>(parent.data(), outIter);
+						if constexpr (std::is_same_v<F, block> && (
+							std::is_same_v<CoeffCtx, CoeffCtxGF2> ||
+							std::is_same_v<CoeffCtx, CoeffCtxGF128>
+							))
+							{
+								gGgmAes.data()[keep].hashBlocks<8>(parent.data(), outIter);
 						}
 						else
 						{
