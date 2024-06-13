@@ -2,6 +2,7 @@
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include <iomanip>
 #include "libOTe/Tools/CoeffCtx.h"
+#include <thread>
 
 namespace osuCrypto
 {
