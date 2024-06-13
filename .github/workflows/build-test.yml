@@ -191,7 +191,7 @@ jobs:
 
       - name: install test
         run: |
-            python3 build.py --setup --sodium --install --sudo
+            python3 build.py --setup --install --sudo
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release
             cmake --build out/
