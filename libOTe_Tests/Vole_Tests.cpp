@@ -313,7 +313,7 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
                 auto p0 = recv.silentReceive(c, z0, prng, chls[0]);
                 auto p1 = send.silentSend(x, z1, prng, chls[1]);
 #ifdef ENABLE_SIMPLESTOT_ASM
-                u64 expRound = 5;
+                u64 expRound = 3;
                 std::cout << "using DefaultBaseOT = AsmSimplestOT;" << std::endl;
 #elif defined ENABLE_MRR_TWIST && defined ENABLE_SSE
                 u64 expRound = 3;
