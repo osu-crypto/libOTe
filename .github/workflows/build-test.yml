@@ -34,7 +34,7 @@ jobs:
       #  run:  python3 build.py -DENABLE_BOOST=OFF -DENABLE_SODIUM=OFF -DENABLE_ASAN=ON  -DCMAKE_BUILD_TYPE=RelWithDebInfo
         
       #- name: build bitpolymul
-      #  run:  python3 build.py --setup --bitpolymul --par=4  -DVERBOSE_FETCH=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      #  run:  python3 build.py --bitpolymul --par=4  -DVERBOSE_FETCH=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
           
       - name: build libOTe
         run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -DENABLE_CIRCUITS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_ASAN=ON -DENABLE_MOCK_OT=true 
@@ -84,11 +84,8 @@ jobs:
             rm -rf out/
             cd ../..
   
-            
-      - name: build sodium
-        run:  python3 build.py --setup --sodium --par=4 -DVERBOSE_FETCH=ON -DENABLE_BOOST=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo
-        
-      - name: build libOTe
+                    
+      - name: build libOTe w/ sodium
         run:  |
             rm ./out/build/linux/frontend/frontend_libOTe
             python3 build.py --par=4 -D ENABLE_ALL_OT=ON -D ENABLE_SODIUM=ON -DENABLE_RELIC=OFF -DPRINT_LOG_ON_FAIL=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -117,7 +114,6 @@ jobs:
 
       - name: install prefix test
         run: |
-            python3 build.py --setup --sodium --install=~/install -DCMAKE_BUILD_TYPE=RelWithDebInfo
             python3 build.py --install=~/install -DCMAKE_BUILD_TYPE=RelWithDebInfo
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/ -DSODIUM=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=~/install
@@ -129,7 +125,6 @@ jobs:
 
       - name: install test
         run: |
-            python3 build.py --setup --sodium --install --sudo -DCMAKE_BUILD_TYPE=RelWithDebInfo
             python3 build.py --install --sudo -DCMAKE_BUILD_TYPE=RelWithDebInfo
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DSODIUM=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -191,7 +186,7 @@ jobs:
 
       - name: install test
         run: |
-            python3 build.py --setup --install --sudo
+            python3 build.py --install --sudo
             cd libOTe_Tests/cmakeTests
             cmake -S . -B out/  -DCMAKE_BUILD_TYPE=Release
             cmake --build out/
