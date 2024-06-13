@@ -19,8 +19,10 @@
         "ENABLE_SIMPLESTOT": true,
         "ENABLE_MRR": true,
         "ENABLE_MR": true,
-        "ENABLE_RELIC": true,
+        "ENABLE_RELIC": false,
+        "ENABLE_SODIUM": true,
         "ENABLE_ASAN": true,
+        "ENABLE_MOCK_OT": true,
         "LIBOTE_STD_VER": "20",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
@@ -32,7 +34,11 @@
           ]
         },
         "microsoft.com/VisualStudioRemoteSettings/CMake/1.0": {
-          "sourceDir": "$env{HOME}/.vs/$ms{projectDirName}"
+          "sourceDir": "$env{HOME}/.vs/$ms{projectDirName}",
+          "copySourcesOptions": {
+            "exclusionList": [ ".vs", "out/build", "out/install", "out/boost*", "out/relic/build" ]
+          },
+          "rsyncCommandArgs": [ "-t", "--delete", "--include=${sourceDir}/out/macoro/*", "--verbose" ]
         }
       }
     },

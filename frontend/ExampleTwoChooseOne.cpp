@@ -167,7 +167,7 @@ namespace osuCrypto
                 catch (std::exception& e)
                 {
                     std::cout << e.what() << std::endl;
-                    chl.close();
+                    cp::sync_wait(chl.close());
                 }
             }
             else
@@ -202,7 +202,7 @@ namespace osuCrypto
                 catch (std::exception& e)
                 {
                     std::cout << e.what() << std::endl;
-                    chl.close();
+                    cp::sync_wait(chl.close());
                 }
             }
 
