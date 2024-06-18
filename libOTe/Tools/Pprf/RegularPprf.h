@@ -707,7 +707,6 @@ namespace osuCrypto
 			bool programPuncturedPoint,
 			u64 numThreads,
 			CoeffCtx ctx = {})
-		try 
 		{
 			MACORO_TRY{
 				pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
