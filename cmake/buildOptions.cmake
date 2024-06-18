@@ -80,9 +80,6 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_SILENT_VOLE		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	unset(ENABLE_ALL_OT CACHE)
 
-	if(ENABLE_IKNP)
-		set(ENABLE_KOS true)
-	endif()
 endif()
 
 
@@ -132,6 +129,9 @@ endif()
 
 option(VERBOSE_FETCH        "Print build info for fetched libraries" ON)
 
+if(ENABLE_IKNP)
+	set(ENABLE_KOS true)
+endif()
 
 message(STATUS "General Options\n=======================================================")
 
@@ -208,6 +208,10 @@ endif()
 
 if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_NP OR ENABLE_MRR) AND NOT (ENABLE_SODIUM OR ENABLE_RELIC))
 	message(FATAL_ERROR "ENABLE_SIMPLESTOT, ENABLE_MR, ENABLE_NP, and ENABLE_MRR require ENABLE_SODIUM or ENABLE_RELIC")
+endif()
+
+if(ENABLE_IKNP AND NOT ENABLE_KOS)
+	message(FATAL_ERROR "ENABLE_IKNP requires ENABLE_KOS")
 endif()
 
 
