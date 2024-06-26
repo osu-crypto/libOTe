@@ -19,7 +19,6 @@
         "ENABLE_SIMPLESTOT": true,
         "ENABLE_MRR": true,
         "ENABLE_MR": true,
-        "ENABLE_SIMPLESTOT": true,
         "ENABLE_RELIC": true,
         "LIBOTE_STD_VER": "17",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install",

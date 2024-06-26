@@ -237,7 +237,7 @@ namespace osuCrypto
 
 
     template <>
-    inline MPZ choose<MPZ>(i64 n, i64 k)
+    inline MPZ choose_<MPZ>(i64 n, i64 k)
     {
         //mpz_fac_ui
         //choozeZ()
@@ -434,7 +434,7 @@ namespace osuCrypto
     }
 
     template <typename T>
-    inline T choose<T>(i64 n, i64 k)
+    inline T choose_(i64 n, i64 k)
     {
         if (k < 0 || k > n)
             return 0;
@@ -515,7 +515,7 @@ namespace osuCrypto
             for (u64 i = 0; i < bins; ++i)
             {
                 T v = (i & 1) ? -1 : 1;
-                auto mt = choose<T>(bins, i);
+                auto mt = choose_<T>(bins, i);
 
                 //std::cout << i << " mt " << mt << " = C("<< bins<<", " << i << ")" << std::endl;
 
@@ -523,7 +523,7 @@ namespace osuCrypto
                 if (bb < bins - 1 || bb < 0)
                     break;
 
-                auto r = choose<T>(bb, bins - 1);
+                auto r = choose_<T>(bb, bins - 1);
                 //std::cout << i << " r " << r << " = C(" << bb << ", " << bins-1 << ")" << std::endl;
 
                 if (mt != mt)
@@ -575,11 +575,11 @@ namespace osuCrypto
             for (auto kk : k)
             {
                 std::cout << "n " << nn << " k " << kk << " : f ";
-                auto f = choose<Float>(nn, kk);
+                auto f = choose_<Float>(nn, kk);
                 auto fl = log2(f);
                 std::cout << fl << " ~ i ";
 
-                auto z = choose<Int>(nn, kk);
+                auto z = choose_<Int>(nn, kk);
                 auto zl = log2(z);
                 std::cout << zl << " @ ";
 #ifdef MPZ_ENABLE
@@ -621,7 +621,7 @@ namespace osuCrypto
     template<typename T>
     inline T ballsBins(i64 n, i64 k)
     {
-        return choose<T>(n + k - 1, k - 1);
+        return choose_<T>(n + k - 1, k - 1);
     }
 
 
@@ -746,31 +746,31 @@ namespace osuCrypto
             VParam(BParam& bp, u64 v_)
                 : BParam(bp)
             {
-                if (v_ > vMax)
+                if (v_ > this->vMax)
                     throw RTE_LOC;
 
                 v = v_;
 
-                auto inputZeros = n - w - v * inZerosPerAlmostTerm;
-                auto inputOnes = w;
-                auto outputZeros = n - h - d * (stateSize - 1) - v * outZerosPerAlmostTerm;
-                auto outputOnes = h - d - v * outOnesPerAlmostTerm;
+                auto inputZeros = this->n - this->w - v * this->inZerosPerAlmostTerm;
+                auto inputOnes = this->w;
+                auto outputZeros = this->n - this->h - this->d * (this->stateSize - 1) - v * this->outZerosPerAlmostTerm;
+                auto outputOnes = this->h - this->d - v * this->outOnesPerAlmostTerm;
 
                 // rMax: the maximum number of runs we need to consider.
                 // if the output looks like 10000 10000 10000 ...
-                rMax = divCeil(n, stateSize + 1);
+                rMax = divCeil(this->n, this->stateSize + 1);
 
                 // Each run must start and terminate with a 1.
                 // We require at least inputOnes >= r+r' = 2 r - 1 + b input ones.
                 // (inputOnes + 1-b)/2 >= r
-                rMax = std::min<i64>(rMax, (inputOnes + 1 - b) / 2);
+                rMax = std::min<i64>(rMax, (inputOnes + 1 - this->b) / 2);
 
                 // we require at least r ones in the output.
                 rMax = std::min<i64>(rMax, outputOnes);
 
                 // we require at least outputZeros>=(r-1+b)*stateSize output zeros
                 // outputZeros/stateSize -b + 1 >= r
-                rMax = std::min<i64>(rMax, outputZeros / stateSize - b + 1);
+                rMax = std::min<i64>(rMax, outputZeros / this->stateSize - this->b + 1);
             }
 
 
@@ -809,36 +809,36 @@ namespace osuCrypto
             RParam(VParam& vp, i64 r_)
                 :VParam(vp)
             {
-                if (r_ > rMax)
+                if (r_ > this->rMax)
                     throw RTE_LOC;
                 r = r_;
 
                 // the number of runs that terminate.
-                terminatingRuns = (r - 1 + b);
+                terminatingRuns = (r - 1 + this->b);
 
                 // the number of off zeros can not be negative.
                 // 
                 // z = n - h - (v + d) * (stateSize - 1) - terminatingRuns * stateSize - t0;
                 // 
                 // t0 <= n - h - (v + d) * (stateSize - 1) - terminatingRuns * stateSize
-                if (stateSize == 1)
+                if (this->stateSize == 1)
                     t0Max = 0;
                 else
                 {
-                    t0Max = n - h - (v + d) * outZerosPerAlmostTerm - terminatingRuns * stateSize;
+                    t0Max = this->n - this->h - (this->v + this->d) * this->outZerosPerAlmostTerm - terminatingRuns * this->stateSize;
                     if (t0Max < 0)
                         throw RTE_LOC;
                 }
 
                 //f0 = n - r - terminatingRuns;
-                f1 = w - r - terminatingRuns;
+                f1 = this->w - r - terminatingRuns;
                 if (f1 < 0)
                     throw RTE_LOC;
             }
 
             i64 getZ(i64 t0)
             {
-                auto z = n - h - (v + d) * (stateSize - 1) - terminatingRuns * stateSize - t0;
+                auto z = this->n - this->h - (this->v + this->d) * (this->stateSize - 1) - terminatingRuns * this->stateSize - t0;
                 if (z < 0)
                     throw RTE_LOC;
                 return z;
@@ -847,7 +847,7 @@ namespace osuCrypto
             i64 getF0(i64 t0)
             {
                 auto z = getZ(t0);
-                auto f0 = n - w - z - v;
+                auto f0 = this->n - this->w - z - this->v;
                 if (f0 < 0)
                     throw RTE_LOC;
                 return f0;
@@ -872,36 +872,36 @@ namespace osuCrypto
                 auto z = getZ(t0);
                 auto f0 = getF0(t0);
 
-                auto t1 = h - outOnesPerAlmostTerm * v - r;
+                auto t1 = this->h - this->outOnesPerAlmostTerm * this->v - r;
                 if (t1 < 0)
                     throw RTE_LOC;
-                if (stateSize == 1 && t1 > 0)
+                if (this->stateSize == 1 && t1 > 0)
                     return 0;
 
-                if (z + f0 + v * inZerosPerAlmostTerm != n - w)
+                if (z + f0 + this->v * this->inZerosPerAlmostTerm != this->n - this->w)
                     throw RTE_LOC;
-                if (r + terminatingRuns + f1 != w)
+                if (r + terminatingRuns + f1 != this->w)
                     throw RTE_LOC;
-                if (z + t0 + terminatingRuns * stateSize + (v + d) * outZerosPerAlmostTerm != n - h)
+                if (z + t0 + terminatingRuns * this->stateSize + (this->v + this->d) * this->outZerosPerAlmostTerm != this->n - this->h)
                     throw RTE_LOC;
-                if (r + outOnesPerAlmostTerm * v + t1 != h)
+                if (r + this->outOnesPerAlmostTerm * this->v + t1 != this->h)
                     throw RTE_LOC;
 
                 auto E1 = ballsBins<T>(z, terminatingRuns + 1);
-                auto E2 = choose<T>(f0 + f1, f0);
-                auto E3 = ballsBins<T>(v, t1 + 1);
-                auto E4 = ballBinCap<T>(t0, v + t1, stateSize - 2);
-                auto E5 = ballsBins<T>(t1 + v, terminatingRuns+1);
+                auto E2 = choose_<T>(f0 + f1, f0);
+                auto E3 = ballsBins<T>(this->v, t1 + 1);
+                auto E4 = ballBinCap<T>(t0, this->v + t1, this->stateSize - 2);
+                auto E5 = ballsBins<T>(t1 + this->v, terminatingRuns+1);
                 auto eg = E1 * E2 * E3 * E4 * E5;
 
-                if (verbose > 1)
+                if (this->verbose > 1)
                     std::cout
-                    << " r " << r << "." << b << " t0 " << t0 << "  "
+                    << " r " << r << "." << this->b << " t0 " << t0 << "  "
                     << "  E1 " << E1 << " = B(" << z << ", " << (terminatingRuns + 1) << ") "
                     << ", E2 " << E2 << " = C(" << (f0 + f1) << ", " << (f0) << ") "
-                    << ", E3 " << E3 << " = B(" << v << ", " << (t1 + 1) << ") "
-                    << ", E4 " << E4 << " = N(" << t0 << ", " << (v + t1) << ", " << stateSize - 2 << ") "
-                    << ", E5 " << E5 << " = B(" << t1 + v << ", " << terminatingRuns+1 << ")"
+                    << ", E3 " << E3 << " = B(" << this->v << ", " << (t1 + 1) << ") "
+                    << ", E4 " << E4 << " = N(" << t0 << ", " << (this->v + t1) << ", " << this->stateSize - 2 << ") "
+                    << ", E5 " << E5 << " = B(" << t1 + this->v << ", " << terminatingRuns+1 << ")"
                     << " ->      " << eg << " * 2^-" << getG(t0) << std::endl;
 
                 return eg;
@@ -1117,10 +1117,10 @@ namespace osuCrypto
         {
             for (u64 j = 0; j < m; ++j)
             {
-                auto I = choose<Int>(i, j);
+                auto I = choose_<Int>(i, j);
                 //std::cout << I << " ";
 
-                auto F = choose<Float>(i, j);
+                auto F = choose_<Float>(i, j);
                 //auto S = chooseApx(i, j);
                 auto div = (I ? I.convert_to<Float>() : 1);
                 auto d0 = abs((I - F.convert_to<Int>()).convert_to<Float>() / div);
@@ -1188,7 +1188,7 @@ namespace osuCrypto
     template<typename T>
     T accumulate(u64 n, u64 w, u64 h)
     {
-        return choose<T>(n - h, w / 2) * choose<T>(h - 1, divCeil(w, 2) - 1);
+        return choose_<T>(n - h, w / 2) * choose_<T>(h - 1, divCeil(w, 2) - 1);
     }
 
 

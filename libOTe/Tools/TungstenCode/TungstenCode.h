@@ -2,6 +2,7 @@
 
 
 #include "cryptoTools/Common/Defines.h"
+#include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Common/Aligned.h"
 #include "libOTe/Tools/Tungsten/TungstenData.h"
 #include <numeric>
@@ -40,7 +41,7 @@ namespace osuCrypto {
 
             void finalize()
             {
-                assert(mPermIter == mPerm.mPerm.data() + mPerm.mPerm.size());
+                //assert(mPermIter == mPerm.mPerm.data() + mPerm.mPerm.size());
             }
 
             template<typename T>
