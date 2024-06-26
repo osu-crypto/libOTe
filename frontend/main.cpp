@@ -30,7 +30,10 @@ using namespace osuCrypto;
 #include "cryptoTools/Crypto/RandomOracle.h"
 #include "libOTe/Tools/EACode/EAChecker.h"
 #include "libOTe/Tools/Tungsten/accTest.h"
+#include "libOTe/Tools/Tungsten/EnumeratorTools.h"
 #include "libOTe/Tools/Tungsten/ConvEnumerator.h"
+#include "libOTe/Tools/Tungsten/BlockEnumerator.h"
+#include "libOTe/Tools/Tungsten/NonrecConvEnumerator.h"
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
@@ -91,9 +94,13 @@ int main(int argc, char** argv)
 	cmd.parse(argc, argv);
 
 #ifdef ENABLE_BOOST
-	if (cmd.isSet("convEnum"))
+	if (cmd.isSet("enumerator"))
 	{
-		convEnumMain(cmd);
+        EnumToolsMain(cmd);
+        convEnumMain(cmd);
+        // TODO Uncomment when ready
+        // blockEnumMain(cmd);
+        // nonrecConvEnumMain(cmd);
 		return 0;
 	}
 #endif

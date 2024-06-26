@@ -2,7 +2,9 @@ enable_language(ASM)
 
 file(GLOB_RECURSE SRCS *.cpp *.c)
 
-set(SRCS "${SRCS}")
+set(SRCS "${SRCS}"
+        Tools/Tungsten/NonrecConvEnumerator.h
+        Tools/Tungsten/EnumeratorTools.h)
 
 add_library(libOTe STATIC ${SRCS} )
 
