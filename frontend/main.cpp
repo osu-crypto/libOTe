@@ -97,9 +97,9 @@ int main(int argc, char** argv)
 	if (cmd.isSet("enumerator"))
 	{
         EnumToolsMain(cmd);
-        convEnumMain(cmd);
+        // convEnumMain(cmd);
+        blockEnumMain(cmd);
         // TODO Uncomment when ready
-        // blockEnumMain(cmd);
         // nonrecConvEnumMain(cmd);
 		return 0;
 	}

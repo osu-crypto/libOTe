@@ -533,10 +533,10 @@ namespace osuCrypto
 
     }
 
-    inline void convEnumMain(oc::CLP& cmd)
-    {
-        if (cmd.isSet("enum"))
+    inline void convEnumMain(oc::CLP& cmd) {
+        // if (cmd.isSet("enum")) {
             enumMain(cmd);
+        // }
     }
 }
 

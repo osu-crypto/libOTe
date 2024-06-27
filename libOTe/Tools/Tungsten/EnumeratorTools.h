@@ -6,7 +6,6 @@
 #include <unordered_map>
 #include "cryptoTools/Common/CLP.h"
 
-
 #ifdef ENABLE_BOOST
 #include <boost/multiprecision/cpp_bin_float.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
