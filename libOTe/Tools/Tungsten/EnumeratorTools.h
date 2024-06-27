@@ -15,8 +15,7 @@
 #include "gmpxx.h"
 #endif
 
-namespace osuCrypto
-{
+namespace osuCrypto {
     template<typename T, typename R>
     T to(const R&);
 

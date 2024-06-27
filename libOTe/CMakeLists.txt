@@ -4,7 +4,8 @@ file(GLOB_RECURSE SRCS *.cpp *.c)
 
 set(SRCS "${SRCS}"
         Tools/Tungsten/NonrecConvEnumerator.h
-        Tools/Tungsten/EnumeratorTools.h)
+        Tools/Tungsten/EnumeratorTools.h
+        Tools/Tungsten/MinimumDistance.h)
 
 add_library(libOTe STATIC ${SRCS} )
 

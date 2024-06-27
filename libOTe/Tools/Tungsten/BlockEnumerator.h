@@ -60,6 +60,7 @@ namespace osuCrypto {
 
     inline void blockEnumMain(oc::CLP& cmd) {
         assert(ballBinCap<Int>(2, 3, 1) == 3);
+        assert(choose_<Int>(-2, 2) == 0);
         // if (cmd.isSet("enum")) {
             block_enum(cmd);
         // }
