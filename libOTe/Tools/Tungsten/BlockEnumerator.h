@@ -12,12 +12,13 @@ namespace osuCrypto {
     R block_enum(u64 w, u64 h, u64 n, u64 sigma) {
         R enumerator = 0;
         size_t n_over_sigma = n / sigma;
-        for (size_t q = 0; q <= n_over_sigma; q++) {
+        for (size_t q = 1; q <= n_over_sigma; q++) {
             // Part 1: 2^{-\sigma q}
             R scale = 1.0 / (1 << (sigma * q));
             std::cerr << "scale " << scale << std::endl;
 
             // Part 2: E_{w,q}
+            // std::cout  << (w-q) << "," << q << "," << (sigma-1) << std::endl;
             I E_wq = ballBinCap<I>(w - q, q, sigma - 1);
             std::cerr << "E_wq " << E_wq << std::endl;
 
@@ -36,7 +37,7 @@ namespace osuCrypto {
         std::cout << "Computing enumerator for the block construction..." << std::endl;
 
         u64 w = cmd.getOr("w", 5); // input weight
-        u64 h = cmd.getOr("h", 5); // output weight
+        u64 h = cmd.getOr("h", 6); // output weight
         u64 n = cmd.getOr("n", 10); // msg/codeword length
         u64 sigma = cmd.getOr("sigma", 2); // window size
 
@@ -46,6 +47,7 @@ namespace osuCrypto {
         std::cout << "sigma: " << sigma << std::endl;
 
         assert(w <= n && h <= n && sigma <= n);
+        assert(n % sigma == 0);
 
         Rat block_enumerator = block_enum<Int, Rat>(w, h, n, sigma);
         std::cout << "Block Enumerator: " << block_enumerator << std::endl;
@@ -57,6 +59,7 @@ namespace osuCrypto {
     }
 
     inline void blockEnumMain(oc::CLP& cmd) {
+        assert(ballBinCap<Int>(2, 3, 1) == 3);
         // if (cmd.isSet("enum")) {
             block_enum(cmd);
         // }
