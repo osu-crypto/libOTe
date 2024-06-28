@@ -10,21 +10,9 @@
 namespace osuCrypto {
 
     template<typename I, typename R>
-    I block_minimum_distance(u64 n, u64 sigma, u64 num_iters) {
-        std::cout << "Computing minimum distance for the block construction..." << std::endl;
-
-        assert(n % sigma == 0);
+    u64 minimum_distance(std::vector<std::vector<R>> &block_enumerators, u64 n, u64 num_iters) {
 
         // TODO consider impact of repeater
-
-        // Compute all n^2 possible block enumerators
-        // n^2 space... but it is reused at each iteration
-        std::vector<std::vector<R>> block_enumerators(n, std::vector<R>(n));
-        for (size_t w = 0; w < n; w++) {
-            for (size_t h = 0; h < n; h++) {
-                block_enumerators[w][h] = block_enum<I, R>(w, h, n, sigma);
-            }
-        }
 
         // Save all n choose w as used at each iteration
         // n space
@@ -55,11 +43,16 @@ namespace osuCrypto {
 
         // Now take whichever of temp[0]/temp[1] was filled last
         // and find at which index the sum >= 1. That is the minimum distance
-
-
-
-
-        return 0;
+        R sum = 0;
+        u64 minimum_distance = 0;
+        for (size_t h = 0; h < n; h++) {
+            sum += temp[(num_iters + 1) % 2][h];
+            if (sum >= 1.) {
+                return minimum_distance;
+            }
+            minimum_distance++;
+        }
+        return n;
     }
 
     inline void minimumDistanceMain(oc::CLP& cmd) {
@@ -75,7 +68,20 @@ namespace osuCrypto {
         assert(num_iters >= 1);
 
         if (cmd.isSet("block")) {
-            Int block_minimum_distance = block_minimum_distance<Int, Rat>(n, sigma, num_iters);
+            std::cout << "Computing minimum distance for the block construction..." << std::endl;
+
+            assert(n % sigma == 0);
+
+            // Compute all n^2 possible block enumerators
+            // n^2 space... but it is reused at each iteration
+            std::vector<std::vector<Rat>> block_enumerators(n, std::vector<Rat>(n));
+            for (size_t w = 0; w < n; w++) {
+                for (size_t h = 0; h < n; h++) {
+                    block_enumerators[w][h] = block_enum<Int, Rat>(w, h, n, sigma);
+                }
+            }
+
+            u64 block_minimum_distance = minimum_distance<Int, Rat>(block_enumerators, n, num_iters);
             std::cout << "Block Minimum Distance: " << block_minimum_distance << std::endl;
         } else if (cmd.isSet("nonrecConv")) {
             // TODO
