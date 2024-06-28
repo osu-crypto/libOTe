@@ -1,6 +1,8 @@
 #ifndef LIBOTE_MINIMUMDISTANCE_H
 #define LIBOTE_MINIMUMDISTANCE_H
 
+#include <vector>
+
 #include "BlockEnumerator.h"
 #include "NonrecConvEnumerator.h"
 #include "EnumeratorTools.h"
@@ -15,21 +17,39 @@ namespace osuCrypto {
 
         // TODO consider impact of repeater
 
-        // TODO Compute all n^2 possible block enumerators
-
-        std::vector<Rat> temp (2, std::vector<Rat>(n));
-
-        // First step is different
+        // Compute all n^2 possible block enumerators
+        // n^2 space... but it is reused at each iteration
+        std::vector<std::vector<R>> block_enumerators(n, std::vector<R>(n));
         for (size_t w = 0; w < n; w++) {
-            temp[0][w] = choose_<R>(n, w);
+            for (size_t h = 0; h < n; h++) {
+                block_enumerators[w][h] = block_enum<I, R>(w, h, n, sigma);
+            }
         }
 
-        // Remaining steps
-        for (size_t iter = 0; iter < num_iters; iter++) {
-            // compute temp[(iter+1) % 2]
-            for (size_t h = 0; h < n; h++) {
-                // TODO
+        // Save all n choose w as used at each iteration
+        // n space
+        std::vector<I> n_choose_w (n);
+        for (size_t w = 0; w < n; w++) {
+            n_choose_w[w] = choose_<I>(n, w);
+        }
 
+        // 2n space
+        std::vector<std::vector<R>> temp (2, std::vector<R>(n));
+
+        // First iteration is different
+        for (size_t h = 0; h < n; h++) {
+            for (size_t w = 0; w < n; w++) {
+                temp[0][h] += block_enumerators[w][h];
+            }
+        }
+
+        // Remaining iterations
+        for (size_t iter = 1; iter < num_iters; iter++) {
+            // compute temp[iter % 2]
+            for (size_t h = 0; h < n; h++) {
+                for (size_t w = 0; w < n; w++) {
+                    temp[iter % 2][h] += temp[(iter + 1) % 2][w] / n_choose_w[w] * block_enumerators[w][h];
+                }
             }
         }
 
