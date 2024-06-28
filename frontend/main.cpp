@@ -34,6 +34,7 @@ using namespace osuCrypto;
 #include "libOTe/Tools/Tungsten/ConvEnumerator.h"
 #include "libOTe/Tools/Tungsten/BlockEnumerator.h"
 #include "libOTe/Tools/Tungsten/NonrecConvEnumerator.h"
+#include "libOTe/Tools/Tungsten/MinimumDistance.h"
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
@@ -94,8 +95,7 @@ int main(int argc, char** argv)
 	cmd.parse(argc, argv);
 
 #ifdef ENABLE_BOOST
-	if (cmd.isSet("enumerator"))
-	{
+	if (cmd.isSet("enumerator")) {
         EnumToolsMain(cmd);
         // convEnumMain(cmd);
         blockEnumMain(cmd);
@@ -103,6 +103,9 @@ int main(int argc, char** argv)
         // nonrecConvEnumMain(cmd);
 		return 0;
 	}
+    if (cmd.isSet("minimumdistance")) {
+        minimumDistanceMain(cmd);
+    }
 #endif
 
 	bool flagSet = false;
