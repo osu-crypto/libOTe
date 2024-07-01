@@ -14,45 +14,67 @@ namespace osuCrypto {
                          u64 n, u64 k, u64 sigma) {
         std::cout << "Computing minimum distance..." << std::endl;
 
-        assert(sigma <= n);
+        u64 expanded_n = k * n;
+
+        assert(sigma <= expanded_n);
         assert(num_iters >= 1);
         assert(k > 1); // need to be expanding
-        assert(n % sigma == 0);
+        assert(expanded_n % sigma == 0);
 
+        // NOTE no longer used as n^2 space too big
         // Compute all n^2 possible block enumerators
         // n^2 space... but it is reused at each iteration
-        std::vector<std::vector<Rat>> block_enumerators(n, std::vector<Rat>(n));
+        /*
+        std::vector<std::vector<R>> block_enumerators(n, std::vector<R>(n));
         for (size_t w = 0; w < n; w++) {
             for (size_t h = 0; h < n; h++) {
-                block_enumerators[w][h] = block_enum<Int, Rat>(w, h, n, sigma);
+                block_enumerators[w][h] = block_enum<I, R>(w, h, n, sigma);
             }
         }
+         */
 
-        // TODO consider impact of repeater
-
-        // Save all n choose w as used at each iteration
-        // n space
-        std::vector<I> n_choose_w(n);
-        for (size_t w = 0; w < n; w++) {
-            n_choose_w[w] = choose_<I>(n, w);
+        // Save all kn choose w as used at all iterations (but not expansion step)
+        // kn space
+        std::vector<I> kn_choose_w(expanded_n);
+        for (size_t w = 0; w < expanded_n; w++) {
+            kn_choose_w[w] = choose_<I>(expanded_n, w);
         }
 
-        // 2n space
-        std::vector<std::vector<R>> temp(2, std::vector<R>(n));
+        // 2 * kn space
+        std::vector<std::vector<R>> temp(2, std::vector<R>(expanded_n));
 
-        // First iteration is different
-        for (size_t h = 0; h < n; h++) {
+        // Expansion step is slightly different from the iterations
+        // as 1. we are expanding and 2. c_w = n choose w, so they divide each other
+        for (size_t h = 0; h < expanded_n; h++) {
+            // note that for repeater, we do NOT need this loop, but used now for modularity
             for (size_t w = 0; w < n; w++) {
-                temp[0][h] += block_enumerators[w][h];
+                if (expander == 0) {
+                    // repeater
+                    temp[0][h] += repeater_enum<I>(w, h, n, k);
+                } else if (expander == 1) {
+                    // block expander (identity + block)
+                    // TODO add when implemented
+                    // temp[0][h] += ;
+                    assert(false);
+                }
             }
         }
 
-        // Remaining iterations
-        for (size_t iter = 1; iter < num_iters; iter++) {
-            // compute temp[iter % 2]
-            for (size_t h = 0; h < n; h++) {
-                for (size_t w = 0; w < n; w++) {
-                    temp[iter % 2][h] += temp[(iter + 1) % 2][w] / n_choose_w[w] * block_enumerators[w][h];
+        // Iterations
+        for (size_t iter = 0; iter < num_iters; iter++) {
+            // compute temp[(iter + 1) % 2]
+            for (size_t h = 0; h < expanded_n; h++) {
+                for (size_t w = 0; w < expanded_n; w++) {
+                    R enumerator = 0;
+                    if (multiplier == 0) {
+                        // block enumerator
+                        enumerator = block_enum<I, R>(w, h, expanded_n, sigma);
+                    } else if (multiplier == 1) {
+                        // non-recursive convolution
+                        // TODO
+                        assert(false);
+                    }
+                    temp[(iter + 1) % 2][h] += temp[iter % 2][w] / kn_choose_w[w] * enumerator;
                 }
             }
         }
@@ -61,14 +83,14 @@ namespace osuCrypto {
         // and find at which index the sum >= 1. That is the minimum distance
         R sum = 0;
         u64 minimum_distance = 0;
-        for (size_t h = 0; h < n; h++) {
-            sum += temp[(num_iters + 1) % 2][h];
+        for (size_t h = 0; h < expanded_n; h++) {
+            sum += temp[num_iters % 2][h];
             if (sum >= 1.) {
                 return minimum_distance;
             }
             minimum_distance++;
         }
-        return n;
+        return expanded_n;
     }
 
     inline void minimumDistanceMain(oc::CLP &cmd) {
