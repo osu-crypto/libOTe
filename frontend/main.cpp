@@ -34,6 +34,7 @@ using namespace osuCrypto;
 #include "libOTe/Tools/Tungsten/ConvEnumerator.h"
 #include "libOTe/Tools/Tungsten/BlockEnumerator.h"
 #include "libOTe/Tools/Tungsten/NonrecConvEnumerator.h"
+#include "libOTe/Tools/Tungsten/RepeaterEnumerator.h"
 #include "libOTe/Tools/Tungsten/MinimumDistance.h"
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
@@ -98,7 +99,8 @@ int main(int argc, char** argv)
 	if (cmd.isSet("enumerator")) {
         EnumToolsMain(cmd);
         // convEnumMain(cmd);
-        blockEnumMain(cmd);
+        // blockEnumMain(cmd);
+        repeaterEnumMain(cmd);
         // TODO Uncomment when ready
         // nonrecConvEnumMain(cmd);
 		return 0;
