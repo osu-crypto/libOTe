@@ -10,6 +10,9 @@ namespace osuCrypto {
 
     template<typename I, typename R>
     R block_enum(u64 w, u64 h, u64 n, u64 sigma) {
+        assert(w <= n && h <= n && sigma <= n);
+        assert(n % sigma == 0);
+
         R enumerator = 0;
         size_t n_over_sigma = n / sigma;
         for (size_t q = 1; q <= n_over_sigma; q++) {
@@ -45,9 +48,6 @@ namespace osuCrypto {
         std::cout << "h: " << h << std::endl;
         std::cout << "n: " << n << std::endl;
         std::cout << "sigma: " << sigma << std::endl;
-
-        assert(w <= n && h <= n && sigma <= n);
-        assert(n % sigma == 0);
 
         Rat block_enumerator = block_enum<Int, Rat>(w, h, n, sigma);
         std::cout << "Block Enumerator: " << block_enumerator << std::endl;
