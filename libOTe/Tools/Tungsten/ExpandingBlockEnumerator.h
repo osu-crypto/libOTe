@@ -13,10 +13,9 @@ namespace osuCrypto {
         u64 k = 2; // fixed
 
         assert(w <= n);
-        assert(h <= k * n);
-        assert(sigma <= k * n);
+        assert(sigma <= n);
 
-        if (h < w) {
+        if (h < w || h > (n + w)) { // TODO assuming k == 2 h <= n + w
             return 0;
         }
         return block_enum<I, R>(w, h - w, n, sigma);
@@ -29,13 +28,15 @@ namespace osuCrypto {
         u64 h = cmd.getOr("h", 15); // output weight
         u64 n = cmd.getOr("n", 10); // msg length (note NOT codeword length, which is k * n)
         // Expansion factor is fixed
-        // u64 k = cmd.getOr("k", 3); // # of repetitions
+        // u64 k = cmd.getOr("k", 2); // # of repetitions
+        u64 sigma = cmd.getOr("sigma", 2); // window size
 
         std::cout << "w: " << w << std::endl;
         std::cout << "h: " << h << std::endl;
         std::cout << "n: " << n << std::endl;
+        std::cout << "sigma: " << sigma << std::endl;
 
-        Int expanding_block_enumerator = expanding_block_enum<Int, Rat>(w, h, n);
+        Rat expanding_block_enumerator = expanding_block_enum<Int, Rat>(w, h, n, sigma);
         std::cout << "Expanding Block Enumerator: " << expanding_block_enumerator << std::endl;
     }
 

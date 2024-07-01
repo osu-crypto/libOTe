@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "BlockEnumerator.h"
+#include "ExpandingBlockEnumerator.h"
 #include "NonrecConvEnumerator.h"
 #include "EnumeratorTools.h"
 
@@ -13,6 +14,12 @@ namespace osuCrypto {
     u64 minimum_distance(u64 expander, u64 multiplier, u64 num_iters,
                          u64 n, u64 k, u64 sigma) {
         std::cout << "Computing minimum distance..." << std::endl;
+
+        if (expander == 1) {
+            // block expander at the beginning
+            assert(k == 2); // TODO do we limit it to 2?
+            assert(sigma <= n); // TODO should we have separate sigma for the expander?
+        }
 
         u64 expanded_n = k * n;
 
@@ -53,9 +60,7 @@ namespace osuCrypto {
                     temp[0][h] += repeater_enum<I>(w, h, n, k);
                 } else if (expander == 1) {
                     // block expander (identity + block)
-                    // TODO add when implemented
-                    // temp[0][h] += ;
-                    assert(false);
+                    temp[0][h] += expanding_block_enum<I, R>(w, h, n, sigma);
                 }
             }
         }
@@ -97,7 +102,7 @@ namespace osuCrypto {
         u64 n = cmd.getOr("n", 10); // msg/codeword length
         u64 sigma = cmd.getOr("sigma", 2); // window size
         // expander (0: repeater, 1: block expander)
-        u64 expander = cmd.getOr("expander", 0);
+        u64 expander = cmd.getOr("expander", 1);
         // multiplier (0: block, 1: non recursive convolution)
         // i.e. the enumerator we compute at each iteration
         u64 multiplier = cmd.getOr("multiplier", 0);
