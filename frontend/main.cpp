@@ -32,6 +32,7 @@ using namespace osuCrypto;
 #include "libOTe/Tools/Tungsten/accTest.h"
 #include "libOTe/Tools/Tungsten/EnumeratorTools.h"
 #include "libOTe/Tools/Tungsten/ConvEnumerator.h"
+#include "libOTe/Tools/Tungsten/ExpandingBlockEnumerator.h"
 #include "libOTe/Tools/Tungsten/BlockEnumerator.h"
 #include "libOTe/Tools/Tungsten/NonrecConvEnumerator.h"
 #include "libOTe/Tools/Tungsten/RepeaterEnumerator.h"
@@ -100,7 +101,8 @@ int main(int argc, char** argv)
         EnumToolsMain(cmd);
         // convEnumMain(cmd);
         // blockEnumMain(cmd);
-        repeaterEnumMain(cmd);
+        // repeaterEnumMain(cmd);
+        expandingBlockEnumMain(cmd);
         // TODO Uncomment when ready
         // nonrecConvEnumMain(cmd);
 		return 0;

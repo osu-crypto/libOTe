@@ -102,7 +102,7 @@ namespace osuCrypto {
         u64 n = cmd.getOr("n", 10); // msg/codeword length
         u64 sigma = cmd.getOr("sigma", 2); // window size
         // expander (0: repeater, 1: block expander)
-        u64 expander = cmd.getOr("expander", 1);
+        u64 expander = cmd.getOr("expander", 0);
         // multiplier (0: block, 1: non recursive convolution)
         // i.e. the enumerator we compute at each iteration
         u64 multiplier = cmd.getOr("multiplier", 0);
