@@ -9,7 +9,7 @@
 
 namespace osuCrypto {
 
-    std::vector<std::bitset<64>> generate_all_gi(u64 n, u64 sigma) {
+    std::vector<std::bitset<64>> generate_all_gis(u64 n, u64 sigma) {
         u64 num_gis_in_g = n / sigma;
         u64 num_elements_in_one_gi = sigma * sigma;
         u64 num_elements_in_all_gis = num_gis_in_g * num_elements_in_one_gi;
@@ -23,9 +23,23 @@ namespace osuCrypto {
         return all_possibilities;
     }
 
+    std::vector<std::bitset<64>> generate_all_x_of_weight_w(u64 n, u64 w) {
+        std::vector<std::bitset<64>> all_xs;
+        u64 num_possibilities = 1 << n; // 2^{n}
+        for (size_t idx = 0; idx < num_possibilities; idx++) {
+            std::bitset<64> possibility = idx;
+            if (possibility.count() == w) {
+                all_xs.push_back(possibility);
+                std::cout << possibility << std::endl;
+            }
+        }
+        return all_xs;
+    }
+
     template<typename I>
     I block_enum_test(u64 w, u64 h, u64 n, u64 sigma) {
-        std::vector<std::bitset<64>> gis = generate_all_gi(n, sigma);
+        // std::vector<std::bitset<64>> gis = generate_all_gis(n, sigma);
+        std::vector<std::bitset<64>> xs = generate_all_x_of_weight_w(n, w);
         return 0;
 
     }
