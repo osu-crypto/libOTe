@@ -498,6 +498,47 @@ namespace osuCrypto {
     }
 
     template<typename T>
+    inline T labeledBallBinCap(u64 balls, u64 bins, u64 cap) {
+        if (balls == 0)
+            return 1;
+
+        //if (balls * 2 > bins * cap)
+        //    balls = bins * cap - balls;
+
+        if (balls < bins * cap)
+        {
+
+            T d = 0;
+            for (u64 i = 0; i < bins; ++i)
+            {
+                T v = (i & 1) ? -1 : 1;
+                auto mt = choose_<T>(bins, i);
+
+                //std::cout << i << " mt " << mt << " = C("<< bins<<", " << i << ")" << std::endl;
+
+                i64 bb = cap * (bins - i64(i));
+                if (bb < balls || bb < 0)
+                    break;
+
+                auto r = choose_<T>(bb, balls);
+                //std::cout << i << " r " << r << " = C(" << bb << ", " << bins-1 << ")" << std::endl;
+
+                //if (mt != mt)
+                //    throw RTE_LOC;
+                //if (r != r)
+                //    throw RTE_LOC;
+                d += v * mt * r;
+                //std::cout << i << " d " << d << std::endl;
+            }
+            return d;
+        }
+        else if (balls == bins * cap)
+            return 1;
+        else
+            return 0;
+    }
+
+    template<typename T>
     inline T ballBinCap(u64 balls, u64 bins, u64 cap)
     {
         if (balls == 0)

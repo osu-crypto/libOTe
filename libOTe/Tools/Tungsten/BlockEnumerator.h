@@ -15,14 +15,14 @@ namespace osuCrypto {
 
         R enumerator = 0;
         size_t n_over_sigma = n / sigma;
-        for (size_t q = 1; q <= n_over_sigma; q++) {
+        for (size_t q = 0; q <= n_over_sigma; q++) {
             // Part 1: 2^{-\sigma q}
             R scale = 1.0 / (1 << (sigma * q));
             std::cerr << "scale " << scale << std::endl;
 
             // Part 2: E_{w,q}
             // std::cout  << (w-q) << "," << q << "," << (sigma-1) << std::endl;
-            I E_wq = ballBinCap<I>(w - q, q, sigma - 1);
+            I E_wq = choose_<I>(n / sigma, q) * labeledBallBinCap<I>(w, q, sigma);
             std::cerr << "E_wq " << E_wq << std::endl;
 
             // Part 3: E_{q,h} = sigma * q choose h

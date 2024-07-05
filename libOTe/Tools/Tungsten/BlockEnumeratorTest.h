@@ -80,6 +80,9 @@ namespace osuCrypto {
                 std::bitset<BITSET_SIZE> xg = multiply_x_g(x, g, sigma, n);
                 // if xg has weight h, add 1 to the enumerator
                 if (xg.count() == h) {
+                    //std::cout << "X: " << x << std::endl;
+                    //std::cout << "G: " << g << std::endl;
+                    //std::cout << "XG: " << xg << std::endl;
                     enumerator++;
                 }
             }
