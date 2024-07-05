@@ -64,7 +64,7 @@ namespace osuCrypto {
     }
 
     template<typename R>
-    R block_enum_test(u64 w, u64 h, u64 n, u64 sigma) {
+    R block_enum_true(u64 w, u64 h, u64 n, u64 sigma) {
         // Generate all possible G_i's (the blocks in matrix G)
         std::vector<std::bitset<BITSET_SIZE>> gis = generate_all_gis(n, sigma);
         std::cout << "All " << gis.size() << " Gi's generated..." << std::endl;
@@ -92,8 +92,32 @@ namespace osuCrypto {
         return enumerator;
     }
 
+    void block_enumerator_tests() {
+        // w, h, n, sigma
+        std::vector<std::vector<u64>> params = {
+                {2,2,4,2},
+                {2,3,4,2},
+                {3,5,6,3}
+        };
+        for (size_t idx = 0; idx < params.size(); idx++) {
+            Rat expected_enumerator = block_enum<Int, Rat>(params[idx][0],
+                                                           params[idx][1],
+                                                           params[idx][2],
+                                                           params[idx][3]);
+            Rat true_enumerator = block_enum_true<Rat>(params[idx][0],
+                                                       params[idx][1],
+                                                       params[idx][2],
+                                                       params[idx][3]);
+            if (expected_enumerator != true_enumerator) {
+                throw RTE_LOC;
+            }
+        }
+    }
+
 
     inline void blockEnumTestMain(oc::CLP& cmd) {
+        block_enumerator_tests();
+
         std::cout << "Computing true and expected enumerator for the block construction..." << std::endl;
 
         u64 w = cmd.getOr("w", 5); // input weight
@@ -109,7 +133,7 @@ namespace osuCrypto {
         Rat expected_enumerator = block_enum<Int, Rat>(w, h, n, sigma);
         std::cout << "Expected Block Enumerator: " << expected_enumerator << std::endl;
 
-        Rat true_enumerator = block_enum_test<Rat>(w, h, n, sigma);
+        Rat true_enumerator = block_enum_true<Rat>(w, h, n, sigma);
         std::cout << "True Block Enumerator (test): " << true_enumerator << std::endl;
 
     }
