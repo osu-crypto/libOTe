@@ -35,6 +35,7 @@ using namespace osuCrypto;
 #include "libOTe/Tools/Tungsten/ExpandingBlockEnumerator.h"
 #include "libOTe/Tools/Tungsten/BlockEnumerator.h"
 #include "libOTe/Tools/Tungsten/BlockEnumeratorTest.h"
+#include "libOTe/Tools/Tungsten/CompositionEnumerator.h"
 #include "libOTe/Tools/Tungsten/NonrecConvEnumerator.h"
 #include "libOTe/Tools/Tungsten/RepeaterEnumerator.h"
 #include "libOTe/Tools/Tungsten/MinimumDistance.h"
@@ -104,7 +105,8 @@ int main(int argc, char** argv)
         // blockEnumMain(cmd);
         // repeaterEnumMain(cmd);
         // expandingBlockEnumMain(cmd);
-        blockEnumTestMain(cmd);
+        // blockEnumTestMain(cmd);
+        compositionEnumMain(cmd);
         // TODO Uncomment when ready
         // nonrecConvEnumMain(cmd);
 		return 0;

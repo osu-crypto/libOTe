@@ -1,6 +1,7 @@
 // balls into bins, balls into bins with capacity, etc.
 
 #pragma once
+#include "cryptoTools/Common/TestCollection.h"
 #include "cryptoTools/Common/Defines.h"
 #include <vector>
 #include <unordered_map>

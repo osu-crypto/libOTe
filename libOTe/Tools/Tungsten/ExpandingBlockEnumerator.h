@@ -6,6 +6,8 @@
 
 #include <iostream>
 
+// TODO REMOVE THIS AND GENERALIZE BLOCK ENUMERATOR
+
 namespace osuCrypto {
 
     template<typename I, typename R>

@@ -9,6 +9,7 @@ set(SRCS "${SRCS}"
         Tools/Tungsten/RepeaterEnumerator.h
         Tools/Tungsten/ExpandingBlockEnumerator.h
         Tools/Tungsten/BlockEnumeratorTest.h
+        Tools/Tungsten/CompositionEnumerator.h
 )
 
 add_library(libOTe STATIC ${SRCS} )
