@@ -7,7 +7,7 @@
 #include "EnumeratorTools.h"
 #include "BlockEnumerator.h"
 
-#define BITSET_SIZE 64
+#define BITSET_SIZE 128
 
 // TODO test for expanding block
 
@@ -60,7 +60,7 @@ namespace osuCrypto {
             for (size_t si = 0; si < (e * sigma); si++) {
                 for (size_t sj = 0; sj < sigma; sj++) {
                     res[res_offset + si]  = res[res_offset + si] ^
-                            (x[x_offset + sj] & g[g_offset + sj * e * sigma + si]);
+                            (x[x_offset + sj] && g[g_offset + sj * e * sigma + si]);
                 }
             }
         }
@@ -114,6 +114,7 @@ namespace osuCrypto {
                                                        param[2],
                                                        param[3],
                                                        param[4]);
+            assert(expected_enumerator == true_enumerator);
             if (expected_enumerator != true_enumerator) {
                 throw RTE_LOC;
             }
@@ -125,16 +126,16 @@ namespace osuCrypto {
 
         std::cout << "Computing true and expected enumerator for the block construction..." << std::endl;
 
-        u64 w = cmd.getOr("w", 5); // input weight
-        u64 h = cmd.getOr("h", 12); // output weight
-        u64 k = cmd.getOr("k", 10); // msg length
-        u64 n = cmd.getOr("n", 20); // codeword length
+        u64 w = cmd.getOr("w", 3); // input weight
+        u64 h = cmd.getOr("h", 10); // output weight
+        u64 k = cmd.getOr("k", 6); // msg length
+        u64 n = cmd.getOr("n", 12); // codeword length
         u64 sigma = cmd.getOr("sigma", 2); // window size
 
         std::cout << "w: " << w << std::endl;
         std::cout << "h: " << h << std::endl;
         std::cout << "k: " << k << std::endl;
-        std::cout << "k: " << n << std::endl;
+        std::cout << "n: " << n << std::endl;
         std::cout << "sigma: " << sigma << std::endl;
 
         Rat expected_enumerator = block_enum<Int, Rat>(w, h, k, n, sigma);
