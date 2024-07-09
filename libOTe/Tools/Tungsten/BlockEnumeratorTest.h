@@ -9,6 +9,7 @@
 
 #define BITSET_SIZE 64
 
+// TODO test for expanding block
 
 namespace osuCrypto {
 
@@ -93,15 +94,17 @@ namespace osuCrypto {
     }
 
     void block_enumerator_tests() {
-        // w, h, n, sigma
+        // w, h, n (k == n), sigma
         std::vector<std::vector<u64>> params = {
                 {2,2,4,2},
                 {2,3,4,2},
                 {3,5,6,3}
         };
         for (size_t idx = 0; idx < params.size(); idx++) {
+            // TODO cge for expandinghan
             Rat expected_enumerator = block_enum<Int, Rat>(params[idx][0],
                                                            params[idx][1],
+                                                           params[idx][2],
                                                            params[idx][2],
                                                            params[idx][3]);
             Rat true_enumerator = block_enum_true<Rat>(params[idx][0],
@@ -130,7 +133,8 @@ namespace osuCrypto {
         std::cout << "n: " << n << std::endl;
         std::cout << "sigma: " << sigma << std::endl;
 
-        Rat expected_enumerator = block_enum<Int, Rat>(w, h, n, sigma);
+        // TODO change for expanding
+        Rat expected_enumerator = block_enum<Int, Rat>(w, h, n, n, sigma);
         std::cout << "Expected Block Enumerator: " << expected_enumerator << std::endl;
 
         Rat true_enumerator = block_enum_true<Rat>(w, h, n, sigma);
