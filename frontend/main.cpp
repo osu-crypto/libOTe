@@ -104,7 +104,7 @@ int main(int argc, char** argv)
         // convEnumMain(cmd);
         // blockEnumMain(cmd);
         // repeaterEnumMain(cmd);
-        expandingBlockEnumMain(cmd);
+        // expandingBlockEnumMain(cmd);
         blockEnumTestMain(cmd);
         // compositionEnumMain(cmd);
         // TODO Uncomment when ready
