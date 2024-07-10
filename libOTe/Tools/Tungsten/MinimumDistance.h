@@ -84,6 +84,7 @@ namespace osuCrypto {
         assert(num_iters >= 1);
         assert(n >= k);
         assert(e > 1); // need to be expanding
+        assert(n % k == 0);
         assert(n % sigma == 0);
 
         // NOTE no longer used as k^2 space too big
@@ -98,36 +99,38 @@ namespace osuCrypto {
         }
          */
 
-        // Save all kn choose w as used at all iterations (but not expansion step)
-        // kn space
-        std::vector<I> kn_choose_w(n);
-        for (size_t w = 0; w < n; w++) {
-            kn_choose_w[w] = choose_<I>(n, w);
+        // Save all n choose w as used at all iterations (but not expansion step)
+        // n + 1 space
+        std::vector<I> n_choose_w(n + 1);
+        for (size_t w = 0; w <= n; w++) {
+            n_choose_w[w] = choose_<I>(n, w);
         }
 
-        // 2 * kn space
-        std::vector<std::vector<R>> temp(2, std::vector<R>(n));
+        // 2 * (n + 1) space
+        std::vector<std::vector<R>> distributions(2, std::vector<R>(n + 1, 0)); // distribution for w = 0 to w = n
 
         // Expansion step is slightly different from the iterations
         // as 1. we are expanding and 2. c_w = k choose w, so they divide each other
-        for (size_t h = 0; h < n; h++) {
+        for (size_t h = 0; h <= n; h++) {
             // note that for repeater, we do NOT need this loop, but used now for modularity
-            for (size_t w = 0; w < k; w++) {
+            // NOTE we exclude w=0 from the input x as it would always result in all zeros
+            for (size_t w = 1; w <= k; w++) {
                 if (expander == 0) {
                     // repeater
-                    temp[0][h] += repeater_enum<I>(w, h, k, e);
+                    distributions[0][h] += repeater_enum<I>(w, h, k, e);
+                    assert(distributions[0][0] == 0);
                 } else if (expander == 1) {
                     // block expander (identity + block)
-                    temp[0][h] += expanding_block_enum<I, R>(w, h, k, n, sigma);
+                    distributions[0][h] += expanding_block_enum<I, R>(w, h, k, n, sigma);
                 }
             }
         }
 
         // Iterations
         for (size_t iter = 0; iter < num_iters; iter++) {
-            // compute temp[(iter + 1) % 2]
-            for (size_t h = 0; h < n; h++) {
-                for (size_t w = 0; w < n; w++) {
+            // compute distributions[(iter + 1) % 2]
+            for (size_t h = 0; h <= n; h++) {
+                for (size_t w = 0; w <= n; w++) {
                     R enumerator = 0;
                     if (multiplier == 0) {
                         // block enumerator
@@ -137,17 +140,23 @@ namespace osuCrypto {
                         // TODO
                         assert(false);
                     }
-                    temp[(iter + 1) % 2][h] += temp[iter % 2][w] / kn_choose_w[w] * enumerator;
+                    std::cout << "h " << h << std::endl;
+                    std::cout << "w " << w << std::endl;
+                    std::cout << "n " << n << std::endl;
+                    std::cout << "enumerator " << enumerator << std::endl;
+                    std::cout << "n choose w " <<n_choose_w[w] << std::endl;
+                    assert(enumerator <= n_choose_w[w]);
+                    distributions[(iter + 1) % 2][h] += (distributions[iter % 2][w] / n_choose_w[w] * enumerator);
                 }
             }
         }
 
-        // Now take whichever of temp[0]/temp[1] was filled last
+        // Now take whichever of distributions[0]/distributions[1] was filled last
         // and find at which index the sum >= 1. That is the minimum distance
         R sum = 0;
         u64 minimum_distance = 0;
-        for (size_t h = 0; h < n; h++) {
-            sum += temp[num_iters % 2][h];
+        for (size_t h = 0; h <= n; h++) {
+            sum += distributions[num_iters % 2][h];
             if (sum >= 1.) {
                 return minimum_distance;
             }

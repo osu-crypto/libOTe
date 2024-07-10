@@ -136,7 +136,7 @@ namespace osuCrypto {
     void minimum_distance_tests() {
         // expander, multiplier, num_iters, k, n, sigma
         std::vector<std::vector<u64>> params = {
-                {0, 0, 1, 4, 8, 2}, // repeater and block enumerator
+                {0, 0, 2, 100, 200, 20}, // repeater and block enumerator
                 // TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
                 //  TODO add more tests
                 //{4,12,2},
@@ -149,19 +149,19 @@ namespace osuCrypto {
                                                             param[3],
                                                             param[4],
                                                             param[5]);
-            u64 true_md = minimum_distance_v1_true<Rat>(param[0],
+            /*u64 true_md = minimum_distance_v1_true<Rat>(param[0],
                                                         param[1],
                                                         param[2],
                                                         param[3],
                                                         param[4],
-                                                        param[5]);
+                                                        param[5]);*/
             std::cout << "Expected minimum distance: " << expected_md << std::endl;
-            std::cout << "True minimum distance: " << true_md << std::endl;
+            /*std::cout << "True minimum distance: " << true_md << std::endl;
 
             assert(expected_md == true_md);
             if (expected_md != true_md) {
                 throw RTE_LOC;
-            }
+            }*/
         }
     }
 

@@ -5,18 +5,20 @@
 
 #include <iostream>
 
-
 namespace osuCrypto {
 
-    template<typename I>
-    I repeater_enum(u64 w, u64 h, u64 n, u64 k) {
-        assert(w <= n);
-        assert(h <= k * n);
+    //template<typename I>
+    //I repeater_enum(u64 w, u64 h, u64 n, u64 k);
 
-        if (h != w * k) {
+    template<typename I>
+    I repeater_enum(u64 w, u64 h, u64 k, u64 e) {
+        assert(w <= k);
+        assert(h <= e * k);
+
+        if (h != w * e) {
             return 0;
         }
-        return choose_<I>(n, w);
+        return choose_<I>(k, w);
     }
 
     inline void repeater_enum(oc::CLP& cmd) {
@@ -24,15 +26,15 @@ namespace osuCrypto {
 
         u64 w = cmd.getOr("w", 5); // input weight
         u64 h = cmd.getOr("h", 15); // output weight
-        u64 n = cmd.getOr("n", 10); // msg length (note NOT codeword length, which is k * n)
-        u64 k = cmd.getOr("k", 3); // # of repetitions
+        u64 k = cmd.getOr("k", 10); // msg length (note NOT codeword length, which is e * k)
+        u64 e = cmd.getOr("e", 3); // # of repetitions
 
         std::cout << "w: " << w << std::endl;
         std::cout << "h: " << h << std::endl;
-        std::cout << "n: " << n << std::endl;
         std::cout << "k: " << k << std::endl;
+        std::cout << "e: " << e << std::endl;
 
-        Int repeater_enumerator = repeater_enum<Int>(w, h, n, k);
+        Int repeater_enumerator = repeater_enum<Int>(w, h, k, e);
         std::cout << "Repeater Enumerator: " << repeater_enumerator << std::endl;
 
         assert(repeater_enum<Int>(5, 15, 10, 3) == 252);
