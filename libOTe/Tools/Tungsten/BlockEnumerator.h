@@ -33,7 +33,7 @@ namespace osuCrypto {
 
             // Putting it all together
             enumerator += scale * E_wq * E_qh;
-            std::cerr << "Enumerator " << enumerator << std::endl;
+            // std::cerr << "Enumerator " << enumerator << std::endl;
         }
         return enumerator;
     }

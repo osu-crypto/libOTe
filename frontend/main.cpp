@@ -39,6 +39,7 @@ using namespace osuCrypto;
 #include "libOTe/Tools/Tungsten/NonrecConvEnumerator.h"
 #include "libOTe/Tools/Tungsten/RepeaterEnumerator.h"
 #include "libOTe/Tools/Tungsten/MinimumDistance.h"
+#include "libOTe/Tools/Tungsten/MinimumDistanceTest.h"
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
@@ -112,7 +113,8 @@ int main(int argc, char** argv)
 		return 0;
 	}
     if (cmd.isSet("minimumdistance")) {
-        minimumDistanceMain(cmd);
+        // minimumDistanceMain(cmd);
+        minimumDistanceTestMain(cmd);
     }
 #endif
 

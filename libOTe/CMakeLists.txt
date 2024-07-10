@@ -10,6 +10,7 @@ set(SRCS "${SRCS}"
         Tools/Tungsten/ExpandingBlockEnumerator.h
         Tools/Tungsten/BlockEnumeratorTest.h
         Tools/Tungsten/CompositionEnumerator.h
+        Tools/Tungsten/MinimumDistanceTest.h
 )
 
 add_library(libOTe STATIC ${SRCS} )

@@ -7,6 +7,7 @@
 #include "ExpandingBlockEnumerator.h"
 #include "NonrecConvEnumerator.h"
 #include "EnumeratorTools.h"
+#include "RepeaterEnumerator.h"
 
 namespace osuCrypto {
 
@@ -69,7 +70,7 @@ namespace osuCrypto {
 
     template<typename I, typename R>
     u64 minimum_distance_v1(u64 expander, u64 multiplier, u64 num_iters,
-                            u64 k, u64 e, u64 sigma) {
+                            u64 k, u64 n, u64 sigma) {
         std::cout << "Computing minimum distance..." << std::endl;
 
         if (expander == 1) {
@@ -77,10 +78,11 @@ namespace osuCrypto {
             assert(sigma <= k); // TODO should we have separate sigma for the expander?
         }
 
-        u64 n = e * k;
+        u64 e = n / k;
 
         assert(sigma <= n);
         assert(num_iters >= 1);
+        assert(n >= k);
         assert(e > 1); // need to be expanding
         assert(n % sigma == 0);
 
@@ -155,31 +157,28 @@ namespace osuCrypto {
     }
 
     inline void minimumDistanceMain(oc::CLP &cmd) {
-        u64 n = cmd.getOr("n", 10); // msg/codeword length
+        u64 k = cmd.getOr("k", 10); // msg length
+        u64 n = cmd.getOr("n", 20); // codeword length
         u64 sigma = cmd.getOr("sigma", 2); // window size
         // expander (0: repeater, 1: block expander)
         u64 expander = cmd.getOr("expander", 0);
         // multiplier (0: block, 1: non recursive convolution)
         // i.e. the enumerator we compute at each iteration
         u64 multiplier = cmd.getOr("multiplier", 0);
-        u64 k = cmd.getOr("k", 2); // expansion param - how much to expand, e.g. 2x
         u64 num_iters = cmd.getOr("iters", 1); // number of permute & [multiply] iterations
 
+        std::cout << "k: " << k << std::endl;
         std::cout << "n: " << n << std::endl;
         std::cout << "sigma: " << sigma << std::endl;
         std::cout << "expander: " << expander << ", if 0 then repeater, "
                                                  "if 1 then block"
                   << std::endl;
-        std::cout << "k (expansion parameter): " << k << std::endl;
         std::cout << "multiplier: " << multiplier << ", if 0 then block enumerator, "
                                                      "if 1 then non-recursive convolution enumerator"
                   << std::endl;
 
         u64 min_distance_v1 = minimum_distance_v1<Int, Rat>(expander, multiplier,
-                                                            num_iters, n, k, sigma);
-        //u64 min_distance_v2 = minimum_distance_v2<Int, Rat>(expander, multiplier,
-        //                                                    num_iters, n, k, sigma);
-        //assert(min_distance_v1 == min_distance_v2);
+                                                            num_iters, k, n, sigma);
         std::cout << "Minimum Distance: " << min_distance_v1 << std::endl;
     }
 }
