@@ -80,8 +80,10 @@ namespace osuCrypto {
                                  u64 multiplier,
                                  u64 num_iters,
                                  u64 k, u64 n, u64 sigma) {
+        size_t e = n/k;
         // Generate all possible G_i's (the blocks in matrix G)
-        std::vector<std::bitset<BITSET_SIZE>> gis = generate_all_gis(k, n, sigma);
+        // TODO Assume for now a single G for all iterations and only a repeater for the expansion
+        std::vector<std::bitset<BITSET_SIZE>> gis = generate_all_gis(n, n, sigma);
         std::cout << "All " << gis.size() << " Gi's generated..." << std::endl;
         // Generate all possible input x's
         std::vector<std::bitset<BITSET_SIZE>> xs = generate_all_x(k);
@@ -91,8 +93,24 @@ namespace osuCrypto {
         for (const auto &g: gis) {
             // for each G, iterate over all x's
             for (const auto &x: xs) {
-                // multiply x and g
-                std::bitset<BITSET_SIZE> xg = multiply_x_g(x, g, sigma, k, n);
+                // expander
+                std::bitset<BITSET_SIZE> expanded_x;
+                if (expander == 0) {
+                    // repeater
+                    u64 offset = 0;
+                    for (size_t i = 0; i < k; i++) {
+                        for (size_t j = 0; j < e; j++) {
+                            expanded_x[offset++] = x[i];
+                        }
+                    }
+                } else if (expander == 1) {
+                    // expanding block
+                    // TODO
+                    assert(false);
+                }
+                // multiply x and g at each iteration
+                // TODO different G at each iteration?
+                std::bitset<BITSET_SIZE> xg = multiply_x_g(expanded_x, g, sigma, n, n);
                 // if xg has weight h, add 1 to the enumerator
                 count_weight_h_outputs[xg.count()]++;
             }
@@ -119,7 +137,7 @@ namespace osuCrypto {
         // expander, multiplier, num_iters, k, n, sigma
         std::vector<std::vector<u64>> params = {
                 {0, 0, 1, 4, 8, 2}, // repeater and block enumerator
-                {0, 0, 1, 6, 12, 2},
+                // TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
                 //  TODO add more tests
                 //{4,12,2},
                 //{6,6,3}
