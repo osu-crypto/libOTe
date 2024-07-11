@@ -11,6 +11,32 @@
 
 namespace osuCrypto {
 
+    u64 hamming_weight(const std::vector<short> &array) {
+        u64 sum = 0;
+        for (const auto &a: array) {
+            sum += a;
+        }
+        return sum;
+    }
+
+    std::vector<short> decimalToBinary(uint64_t n, uint64_t bitsize) {
+        assert(bitsize < 64);
+        assert(n < (uint64_t(1) << bitsize));
+        std::vector<short> binary (bitsize);
+        if (n == 0) {
+            return binary; // 0
+        }
+
+        // NOTE put in the same order as in bitset
+        uint64_t i = 0; // bitsize-1;
+        while (n > 0) {
+            binary[i++] = static_cast<short>(n % 2);
+            //binary[i--] = static_cast<short>(n % 2);
+            n /= uint64_t(2);
+        }
+        return binary;
+    }
+
     std::vector<std::bitset<BITSET_SIZE>> generate_all_gis(u64 k, u64 n, u64 sigma) {
         u64 num_gis_in_g = k / sigma;
         u64 e = n / k;
@@ -20,7 +46,8 @@ namespace osuCrypto {
         // std::cout << "Bitset size: " << num_elements_in_all_gis << std::endl;
         assert(BITSET_SIZE >= num_elements_in_all_gis);
         // 2^{k/sigma * sigma * e * sigma}
-        u64 num_possibilities = 1 << num_elements_in_all_gis;
+        assert(num_elements_in_all_gis < 64);
+        u64 num_possibilities = u64(1) << num_elements_in_all_gis;
         std::vector<std::bitset<BITSET_SIZE>> all_possibilities (num_possibilities);
         for (size_t idx = 0; idx < num_possibilities; idx++) {
             all_possibilities[idx] = idx;
@@ -29,9 +56,27 @@ namespace osuCrypto {
         return all_possibilities;
     }
 
+    std::vector<std::vector<short>> generate_all_gis_bool(u64 k, u64 n, u64 sigma) {
+        u64 num_gis_in_g = k / sigma;
+        u64 e = n / k;
+        u64 num_elements_in_one_gi = sigma * e * sigma;
+        // all G_is but in the same G
+        const u64 num_elements_in_all_gis = num_gis_in_g * num_elements_in_one_gi;
+        // 2^{k/sigma * sigma * e * sigma}
+        assert(num_elements_in_all_gis < 64);
+        u64 num_possibilities = u64(1) << num_elements_in_all_gis;
+        std::vector<std::vector<short>> all_possibilities;
+        for (size_t idx = 0; idx < num_possibilities; idx++) {
+            all_possibilities.push_back(decimalToBinary(idx, num_elements_in_all_gis));
+            // std::cout << all_possibilities[idx] << std::endl;
+        }
+        return all_possibilities;
+    }
+
     std::vector<std::bitset<BITSET_SIZE>> generate_all_x_of_weight_w(u64 k, u64 w) {
         assert(BITSET_SIZE >= k);
         std::vector<std::bitset<BITSET_SIZE>> all_xs;
+        assert(k <= 63);
         u64 num_possibilities = 1 << k; // 2^{k}
         for (size_t idx = 0; idx < num_possibilities; idx++) {
             std::bitset<BITSET_SIZE> possibility = idx;
@@ -43,12 +88,38 @@ namespace osuCrypto {
         return all_xs;
     }
 
+    std::vector<std::vector<short>> generate_all_x_of_weight_w_bool(u64 k, u64 w) {
+        std::vector<std::vector<short>> all_xs;
+        assert(k < 64);
+        u64 num_possibilities = 1 << k; // 2^{k}
+        for (size_t idx = 0; idx < num_possibilities; idx++) {
+            std::vector<short> possibility = decimalToBinary(idx, k);
+            u64 sum = hamming_weight(possibility);
+            if (sum == w) {
+                all_xs.push_back(possibility);
+                // std::cout << possibility << std::endl;
+            }
+        }
+        return all_xs;
+    }
+
     std::vector<std::bitset<BITSET_SIZE>> generate_all_x(u64 k) {
         assert(BITSET_SIZE >= k);
-        u64 num_possibilities = 1 << k; // 2^{k}
+        assert(k < 64);
+        u64 num_possibilities = u64(1) << k; // 2^{k}
         std::vector<std::bitset<BITSET_SIZE>> all_xs (num_possibilities);
         for (size_t idx = 0; idx < num_possibilities; idx++) {
             all_xs[idx] = idx;
+        }
+        return all_xs;
+    }
+
+    std::vector<std::vector<short>> generate_all_x_bool(u64 k) {
+        assert(k < 64);
+        u64 num_possibilities = u64(1) << k; // 2^{k}
+        std::vector<std::vector<short>> all_xs;
+        for (size_t idx = 0; idx < num_possibilities; idx++) {
+            all_xs.push_back(decimalToBinary(idx, k));
         }
         return all_xs;
     }
@@ -58,6 +129,27 @@ namespace osuCrypto {
                                           u64 sigma, u64 k, u64 n) {
         assert(BITSET_SIZE >= n);
         std::bitset<BITSET_SIZE> res;
+        size_t e = n / k;
+        assert(k % sigma == 0 && n % sigma == 0);
+        size_t num_gis = k / sigma; // number of G_i's in a single G
+        for (size_t gi = 0; gi < num_gis; gi++) {
+            size_t x_offset = gi * sigma;
+            size_t res_offset = gi * e * sigma;
+            size_t g_offset = gi * sigma * e * sigma;
+            for (size_t si = 0; si < (e * sigma); si++) {
+                for (size_t sj = 0; sj < sigma; sj++) {
+                    res[res_offset + si]  = res[res_offset + si] ^
+                                            (x[x_offset + sj] && g[g_offset + sj * e * sigma + si]);
+                }
+            }
+        }
+        return res;
+    }
+
+    std::vector<short> multiply_x_g_bool(const std::vector<short> &x,
+                                         const std::vector<short> &g,
+                                         u64 sigma, u64 k, u64 n) {
+        std::vector<short> res (n);
         size_t e = n / k;
         assert(k % sigma == 0 && n % sigma == 0);
         size_t num_gis = k / sigma; // number of G_i's in a single G
@@ -136,32 +228,35 @@ namespace osuCrypto {
     void minimum_distance_tests() {
         // expander, multiplier, num_iters, k, n, sigma
         std::vector<std::vector<u64>> params = {
-                {0, 0, 2, 100, 200, 20}, // repeater and block enumerator
+                {0, 0, 1, 6, 12, 6}, // repeater and block enumerator
+                // {0, 0, 1, 4, 8, 8}, // repeater and block enumerator
                 // TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
-                //  TODO add more tests
+                //  TODO add more tests with different expander multiplier
                 //{4,12,2},
                 //{6,6,3}
         };
         for (auto & param : params) {
+            // TODO remove when ready
+            if (param[0] != 0 || param[1] != 0) assert(false);
             u64 expected_md = minimum_distance_v1<Int, Rat>(param[0],
                                                             param[1],
                                                             param[2],
                                                             param[3],
                                                             param[4],
                                                             param[5]);
-            /*u64 true_md = minimum_distance_v1_true<Rat>(param[0],
+            u64 true_md = minimum_distance_v1_true<Rat>(param[0],
                                                         param[1],
                                                         param[2],
                                                         param[3],
                                                         param[4],
-                                                        param[5]);*/
+                                                        param[5]);
             std::cout << "Expected minimum distance: " << expected_md << std::endl;
-            /*std::cout << "True minimum distance: " << true_md << std::endl;
+            std::cout << "True minimum distance: " << true_md << std::endl;
 
             assert(expected_md == true_md);
             if (expected_md != true_md) {
                 throw RTE_LOC;
-            }*/
+            }
         }
     }
 

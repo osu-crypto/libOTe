@@ -10,8 +10,40 @@
 
 namespace osuCrypto {
 
+    // NOTE WORKS WITH vector<short>
+    // Runtime should be faster but needs more memory
     template<typename R>
-    R block_enum_true(u64 w, u64 h, u64 k, u64 n, u64 sigma) {
+    R block_enum_true_v2(u64 w, u64 h, u64 k, u64 n, u64 sigma) {
+        // Generate all possible G_i's (the blocks in matrix G)
+        std::vector<std::vector<short>> gis = generate_all_gis_bool(k, n, sigma);
+        std::cout << "All " << gis.size() << " Gi's generated..." << std::endl;
+        // Generate all possible weight w input x's
+        std::vector<std::vector<short>> xs = generate_all_x_of_weight_w_bool(k, w);
+        std::cout << "All " << xs.size() << " x's of weight w generated..." << std::endl;
+        R enumerator = 0;
+        // iterate over all G's
+        for (const auto &g: gis) {
+            // for each G, iterate over all weight w inputs
+            for (const auto &x: xs) {
+                // multiply x and g
+                std::vector<short> xg = multiply_x_g_bool(x, g, sigma, k, n);
+                // if xg has weight h, add 1 to the enumerator
+                if (hamming_weight(xg) == h) {
+                    //std::cout << "X: " << x << std::endl;
+                    //std::cout << "G: " << g << std::endl;
+                    //std::cout << "XG: " << xg << std::endl;
+                    enumerator++;
+                }
+            }
+        }
+        // Divide the enumerator by the number of G's
+        enumerator /= gis.size();
+        return enumerator;
+    }
+
+    // NOTE WORKS WITH BITSET
+    template<typename R>
+    R block_enum_true_v1(u64 w, u64 h, u64 k, u64 n, u64 sigma) {
         // Generate all possible G_i's (the blocks in matrix G)
         std::vector<std::bitset<BITSET_SIZE>> gis = generate_all_gis(k, n, sigma);
         std::cout << "All " << gis.size() << " Gi's generated..." << std::endl;
@@ -42,6 +74,7 @@ namespace osuCrypto {
     void block_enumerator_tests() {
         // w, h, k, n, sigma
         std::vector<std::vector<u64>> params = {
+                {0,0,4,8,2},
                 {2,2,4,8,2},
                 {2,3,4,12,2},
                 {3,5,6,6,3}
@@ -52,11 +85,11 @@ namespace osuCrypto {
                                                            param[2],
                                                            param[3],
                                                            param[4]);
-            Rat true_enumerator = block_enum_true<Rat>(param[0],
-                                                       param[1],
-                                                       param[2],
-                                                       param[3],
-                                                       param[4]);
+            Rat true_enumerator = block_enum_true_v2<Rat>(param[0],
+                                                          param[1],
+                                                          param[2],
+                                                          param[3],
+                                                          param[4]);
             assert(expected_enumerator == true_enumerator);
             if (expected_enumerator != true_enumerator) {
                 throw RTE_LOC;
@@ -84,7 +117,7 @@ namespace osuCrypto {
         Rat expected_enumerator = block_enum<Int, Rat>(w, h, k, n, sigma);
         std::cout << "Expected Block Enumerator: " << expected_enumerator << std::endl;
 
-        Rat true_enumerator = block_enum_true<Rat>(w, h, k, n, sigma);
+        Rat true_enumerator = block_enum_true_v2<Rat>(w, h, k, n, sigma);
         std::cout << "True Block Enumerator (test): " << true_enumerator << std::endl;
 
         assert(expected_enumerator == true_enumerator);

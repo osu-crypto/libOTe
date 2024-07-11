@@ -101,7 +101,7 @@ int main(int argc, char** argv)
 
 #ifdef ENABLE_BOOST
 	if (cmd.isSet("enumerator")) {
-        EnumToolsMain(cmd);
+        // EnumToolsMain(cmd);
         // convEnumMain(cmd);
         // blockEnumMain(cmd);
         // repeaterEnumMain(cmd);

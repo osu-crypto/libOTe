@@ -506,8 +506,9 @@ namespace osuCrypto {
             auto mt = choose_<T>(bins, i);
 
             i64 bb = cap * (bins - i64(i));
-            if (bb < balls || bb < 0)
+            if (bb < balls || bb < 0) {
                 break;
+            }
 
             auto r = choose_<T>(bb, balls);
             //std::cout << i << " r " << r << " = C(" << bb << ", " << bins-1 << ")" << std::endl;
@@ -563,9 +564,14 @@ namespace osuCrypto {
             return 0;
     }*/
 
+
+   // TODO note this function is likely buggy
     template<typename T>
     inline T ballBinCap(u64 balls, u64 bins, u64 cap)
     {
+        // TODO the special cases eg balls=0 are probably buggy, or at least they were in labeledballbincap
+        std::cout << "debug before using" << std::endl;
+        assert(false);
         if (balls == 0)
             return 1;
 
