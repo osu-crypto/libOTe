@@ -19,21 +19,22 @@ namespace osuCrypto {
         size_t e = n / k;
         for (size_t q = 0; q <= k_over_sigma; q++) {
             // Part 1: 2^{-e\sigma q}
-            R scale = 1.0 / (1 << (e * sigma * q));
-            // std::cerr << "scale " << scale << std::endl;
+            // assert(e * sigma * q <= 64);
+            R scale = R(1.0) / boost::multiprecision::pow(boost::multiprecision::cpp_int(2), e * sigma * q); // R(1 << e * sigma * q);
+            std::cerr << "scale " << scale << std::endl;
 
             // Part 2: E_{w,q}
             // std::cout  << (w-q) << "," << q << "," << (sigma-1) << std::endl;
             I E_wq = choose_<I>(k_over_sigma, q) * labeledBallBinCap<I>(w, q, sigma);
-            // std::cerr << "E_wq " << E_wq << std::endl;
+            std::cerr << "E_wq " << E_wq << std::endl;
 
             // Part 3: E_{q,h} = e * sigma * q choose h
             I E_qh = choose_<I>(e * sigma * q, h);
-            // std::cerr << "E_qh " << E_qh << std::endl;
+            std::cerr << "E_qh " << E_qh << std::endl;
 
             // Putting it all together
             enumerator += scale * E_wq * E_qh;
-            // std::cerr << "Enumerator " << enumerator << std::endl;
+            std::cerr << "Enumerator " << enumerator << std::endl;
         }
         return enumerator;
     }
