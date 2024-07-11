@@ -168,10 +168,11 @@ namespace osuCrypto {
     }
 
     template<typename I, typename R>
-    u64 minimum_distance_v1_true(u64 expander,
-                                 u64 multiplier,
-                                 u64 num_iters,
-                                 u64 k, u64 n, u64 sigma) {
+    u64 minimum_distance_exact_true(u64 expander,
+                                    u64 multiplier,
+                                    u64 num_iters,
+                                    u64 k, u64 n, u64 sigma) {
+        assert(expander == 0 && multiplier == 0); // now only supports these
         size_t e = n/k;
         // Generate all possible G_i's (the blocks in matrix G)
         // TODO Assume for now a single G for all iterations and only a repeater for the expansion
@@ -227,29 +228,22 @@ namespace osuCrypto {
         }
         // Compute the minimum distance
         // Find at which index the sum >= 1. That is the minimum distance
-        R sum = 0;
-        u64 minimum_distance = 0;
-        for (size_t h = 0; h < n; h++) {
-            sum += count_weight_h_outputs[h];
-            if (sum >= 1.) {
-                return minimum_distance;
-            }
-            minimum_distance++;
-        }
-        return n;
+        u64 minimum_distance = minimum_distance_from_distribution<R>(n, count_weight_h_outputs);
+        return minimum_distance;
     }
 
     void minimum_distance_tests() {
         // expander, multiplier, num_iters, k, n, sigma
         std::vector<std::vector<u64>> params = {
                 {0, 0, 1, 3, 6, 3}, // repeater and block enumerator
-                // {0, 0, 1, 4, 8, 8}, // repeater and block enumerator
+                //{0, 0, 1, 3, 6, 6},
+                //{0, 0, 1, 4, 8, 4}, // repeater and block enumerator
                 // TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
                 //  TODO add more tests with different expander multiplier
                 //{4,12,2},
                 //{6,6,3}
         };
-        for (auto & param : params) {
+        for (const auto & param : params) {
             // TODO remove when ready
             if (param[0] != 0 || param[1] != 0) assert(false);
             u64 expected_md = minimum_distance_v1<Int, Rat>(param[0],
@@ -258,12 +252,12 @@ namespace osuCrypto {
                                                             param[3],
                                                             param[4],
                                                             param[5]);
-            u64 true_md = minimum_distance_v1_true<Int, Rat>(param[0],
-                                                             param[1],
-                                                             param[2],
-                                                             param[3],
-                                                             param[4],
-                                                             param[5]);
+            u64 true_md = minimum_distance_exact_true<Int, Rat>(param[0],
+                                                                param[1],
+                                                                param[2],
+                                                                param[3],
+                                                                param[4],
+                                                                param[5]);
             std::cout << "Expected minimum distance: " << expected_md << std::endl;
             std::cout << "True minimum distance: " << true_md << std::endl;
 

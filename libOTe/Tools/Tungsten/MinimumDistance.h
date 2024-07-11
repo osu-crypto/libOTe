@@ -11,6 +11,22 @@
 
 namespace osuCrypto {
 
+    template<typename R>
+    u64 minimum_distance_from_distribution(u64 n, std::vector<R> &distribution) {
+        assert(distribution.size() == (n + 1));
+        R sum = 0;
+        u64 minimum_distance = 0;
+        for (size_t h = 0; h < n; h++) {
+            sum += distribution[h];
+            if (sum >= 1.) {
+                return minimum_distance;
+            }
+            minimum_distance++;
+        }
+        assert(n == minimum_distance);
+        return n;
+    }
+
     /*
     // TODO this is version 2, v1 will be deprecated
     template<typename I, typename R>
@@ -140,11 +156,11 @@ namespace osuCrypto {
                         // TODO
                         assert(false);
                     }
-                    std::cout << "h " << h << std::endl;
-                    std::cout << "w " << w << std::endl;
-                    std::cout << "n " << n << std::endl;
-                    std::cout << "enumerator " << enumerator << std::endl;
-                    std::cout << "n choose w " <<n_choose_w[w] << std::endl;
+//                    std::cout << "h " << h << std::endl;
+//                    std::cout << "w " << w << std::endl;
+//                    std::cout << "n " << n << std::endl;
+//                    std::cout << "enumerator " << enumerator << std::endl;
+//                    std::cout << "n choose w " <<n_choose_w[w] << std::endl;
                     assert(enumerator <= n_choose_w[w]);
                     distributions[(iter + 1) % 2][h] += (distributions[iter % 2][w] / n_choose_w[w] * enumerator);
                 }
@@ -153,16 +169,8 @@ namespace osuCrypto {
 
         // Now take whichever of distributions[0]/distributions[1] was filled last
         // and find at which index the sum >= 1. That is the minimum distance
-        R sum = 0;
-        u64 minimum_distance = 0;
-        for (size_t h = 0; h <= n; h++) {
-            sum += distributions[num_iters % 2][h];
-            if (sum >= 1.) {
-                return minimum_distance;
-            }
-            minimum_distance++;
-        }
-        return n;
+        u64 minimum_distance = minimum_distance_from_distribution<R>(n, distributions[num_iters % 2]);
+        return minimum_distance;
     }
 
     inline void minimumDistanceMain(oc::CLP &cmd) {
