@@ -116,10 +116,10 @@ namespace osuCrypto {
 
     std::vector<std::vector<short>> generate_all_x_bool(u64 k) {
         assert(k < 64);
-        u64 num_possibilities = u64(1) << k; // 2^{k}
+        u64 num_possibilities = (u64(1) << k) - 1; // 2^{k} - 1 (as we skip all 0 x)
         std::vector<std::vector<short>> all_xs;
         for (size_t idx = 0; idx < num_possibilities; idx++) {
-            all_xs.push_back(decimalToBinary(idx, k));
+            all_xs.push_back(decimalToBinary(idx + 1, k));
         }
         return all_xs;
     }
@@ -167,7 +167,7 @@ namespace osuCrypto {
         return res;
     }
 
-    template<typename R>
+    template<typename I, typename R>
     u64 minimum_distance_v1_true(u64 expander,
                                  u64 multiplier,
                                  u64 num_iters,
@@ -175,18 +175,18 @@ namespace osuCrypto {
         size_t e = n/k;
         // Generate all possible G_i's (the blocks in matrix G)
         // TODO Assume for now a single G for all iterations and only a repeater for the expansion
-        std::vector<std::bitset<BITSET_SIZE>> gis = generate_all_gis(n, n, sigma);
+        std::vector<std::vector<short>> gis = generate_all_gis_bool(n, n, sigma);
         std::cout << "All " << gis.size() << " Gi's generated..." << std::endl;
         // Generate all possible input x's
-        std::vector<std::bitset<BITSET_SIZE>> xs = generate_all_x(k);
+        std::vector<std::vector<short>> xs = generate_all_x_bool(k);
         std::cout << "All " << xs.size() << " x's generated..." << std::endl;
-        std::vector<Rat> count_weight_h_outputs (n + 1);
+        std::vector<R> count_weight_h_outputs (n + 1);
         // iterate over all G's
         for (const auto &g: gis) {
             // for each G, iterate over all x's
             for (const auto &x: xs) {
                 // expander
-                std::bitset<BITSET_SIZE> expanded_x;
+                std::vector<short> expanded_x (n);
                 if (expander == 0) {
                     // repeater
                     u64 offset = 0;
@@ -200,11 +200,25 @@ namespace osuCrypto {
                     // TODO
                     assert(false);
                 }
-                // multiply x and g at each iteration
-                // TODO different G at each iteration?
-                std::bitset<BITSET_SIZE> xg = multiply_x_g(expanded_x, g, sigma, n, n);
-                // if xg has weight h, add 1 to the enumerator
-                count_weight_h_outputs[xg.count()]++;
+                //
+                // Iterate over all permutations
+                //
+                // 1. first sort expanded_x
+                std::sort(expanded_x.begin(), expanded_x.end());
+                // 2. compute number of permutations
+                u64 hw = hamming_weight(expanded_x);
+                I num_perms = fact<I>(n) / (fact<I>(hw) * fact<I>(n - hw));
+                I num_perms_check = 0;
+                // 2. use std::next_permutation to get all perms
+                do {
+                    num_perms_check++;
+                    // multiply x and g at each iteration
+                    // TODO different G at each iteration?
+                    std::vector<short> xg = multiply_x_g_bool(expanded_x, g, sigma, n, n);
+                    count_weight_h_outputs[hamming_weight(xg)] += R(1) / num_perms;
+                } while (std::next_permutation(expanded_x.begin(),
+                                               expanded_x.end()));
+                assert(num_perms_check == num_perms);
             }
         }
         // Divide each count by the number of G's
@@ -228,7 +242,7 @@ namespace osuCrypto {
     void minimum_distance_tests() {
         // expander, multiplier, num_iters, k, n, sigma
         std::vector<std::vector<u64>> params = {
-                {0, 0, 1, 6, 12, 6}, // repeater and block enumerator
+                {0, 0, 1, 3, 6, 3}, // repeater and block enumerator
                 // {0, 0, 1, 4, 8, 8}, // repeater and block enumerator
                 // TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
                 //  TODO add more tests with different expander multiplier
@@ -244,12 +258,12 @@ namespace osuCrypto {
                                                             param[3],
                                                             param[4],
                                                             param[5]);
-            u64 true_md = minimum_distance_v1_true<Rat>(param[0],
-                                                        param[1],
-                                                        param[2],
-                                                        param[3],
-                                                        param[4],
-                                                        param[5]);
+            u64 true_md = minimum_distance_v1_true<Int, Rat>(param[0],
+                                                             param[1],
+                                                             param[2],
+                                                             param[3],
+                                                             param[4],
+                                                             param[5]);
             std::cout << "Expected minimum distance: " << expected_md << std::endl;
             std::cout << "True minimum distance: " << true_md << std::endl;
 
