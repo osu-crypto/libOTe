@@ -11,6 +11,60 @@
 
 namespace osuCrypto {
 
+    template<typename I, typename R>
+    void compute_expanding_distribution(std::vector<R> &distribution,
+                                        u64 expander,
+                                        u64 k,
+                                        u64 n,
+                                        u64 e,
+                                        u64 sigma) {
+        assert(e == n / k);
+        for (size_t h = 0; h <= n; h++) {
+            // note that for repeater, we do NOT need this loop, but used now for modularity
+            // NOTE we exclude w=0 from the input x as it would always result in all zeros
+            for (size_t w = 1; w <= k; w++) {
+                if (expander == 0) {
+                    // repeater
+                    distribution[h] += repeater_enum<I>(w, h, k, e);
+                    assert(distribution[0] == 0);
+                } else if (expander == 1) {
+                    assert(sigma <= k); // TODO should we have separate sigma for the expander?
+                    // block expander (identity + block)
+                    distribution[h] += expanding_block_enum<I, R>(w, h, k, n, sigma);
+                }
+            }
+        }
+    }
+
+    template<typename I, typename R>
+    void compute_next_distribution(const std::vector<R> &old_distribution,
+                                   std::vector<R> &new_distribution,
+                                   const std::vector<I> &n_choose_w,
+                                   u64 multiplier,
+                                   u64 n,
+                                   u64 sigma) {
+        for (size_t h = 0; h <= n; h++) {
+            for (size_t w = 0; w <= n; w++) {
+                R enumerator = 0;
+                if (multiplier == 0) {
+                    // block enumerator
+                    enumerator = block_enum<I, R>(w, h, n, n, sigma);
+                } else if (multiplier == 1) {
+                    // non-recursive convolution
+                    // TODO
+                    assert(false);
+                }
+//                    std::cout << "h " << h << std::endl;
+//                    std::cout << "w " << w << std::endl;
+//                    std::cout << "n " << n << std::endl;
+//                    std::cout << "enumerator " << enumerator << std::endl;
+//                    std::cout << "n choose w " <<n_choose_w[w] << std::endl;
+                assert(enumerator <= n_choose_w[w]);
+                new_distribution[h] += (old_distribution[w] / n_choose_w[w] * enumerator);
+            }
+        }
+    }
+
     template<typename R>
     u64 minimum_distance_from_distribution(u64 n, std::vector<R> &distribution) {
         assert(distribution.size() == (n + 1));
@@ -89,11 +143,6 @@ namespace osuCrypto {
                             u64 k, u64 n, u64 sigma) {
         std::cout << "Computing minimum distance..." << std::endl;
 
-        if (expander == 1) {
-            // block expander at the beginning
-            assert(sigma <= k); // TODO should we have separate sigma for the expander?
-        }
-
         u64 e = n / k;
 
         assert(sigma <= n);
@@ -126,45 +175,18 @@ namespace osuCrypto {
         std::vector<std::vector<R>> distributions(2, std::vector<R>(n + 1, 0)); // distribution for w = 0 to w = n
 
         // Expansion step is slightly different from the iterations
+        // e.g. w starts at 1 (as we do not consider hw=0 input, we pass expander instead of multiplier)
         // as 1. we are expanding and 2. c_w = k choose w, so they divide each other
-        for (size_t h = 0; h <= n; h++) {
-            // note that for repeater, we do NOT need this loop, but used now for modularity
-            // NOTE we exclude w=0 from the input x as it would always result in all zeros
-            for (size_t w = 1; w <= k; w++) {
-                if (expander == 0) {
-                    // repeater
-                    distributions[0][h] += repeater_enum<I>(w, h, k, e);
-                    assert(distributions[0][0] == 0);
-                } else if (expander == 1) {
-                    // block expander (identity + block)
-                    distributions[0][h] += expanding_block_enum<I, R>(w, h, k, n, sigma);
-                }
-            }
-        }
+        compute_expanding_distribution<I, R>(distributions[0], expander, k, n, e, sigma);
 
-        // Iterations
+        // Compute distributions for iterations
         for (size_t iter = 0; iter < num_iters; iter++) {
-            // compute distributions[(iter + 1) % 2]
-            for (size_t h = 0; h <= n; h++) {
-                for (size_t w = 0; w <= n; w++) {
-                    R enumerator = 0;
-                    if (multiplier == 0) {
-                        // block enumerator
-                        enumerator = block_enum<I, R>(w, h, n, n, sigma);
-                    } else if (multiplier == 1) {
-                        // non-recursive convolution
-                        // TODO
-                        assert(false);
-                    }
-//                    std::cout << "h " << h << std::endl;
-//                    std::cout << "w " << w << std::endl;
-//                    std::cout << "n " << n << std::endl;
-//                    std::cout << "enumerator " << enumerator << std::endl;
-//                    std::cout << "n choose w " <<n_choose_w[w] << std::endl;
-                    assert(enumerator <= n_choose_w[w]);
-                    distributions[(iter + 1) % 2][h] += (distributions[iter % 2][w] / n_choose_w[w] * enumerator);
-                }
-            }
+            // Compute distributions[(iter + 1) % 2]
+            compute_next_distribution<I, R>(distributions[iter % 2],
+                                            distributions[(iter + 1) % 2],
+                                            n_choose_w,
+                                            multiplier,
+                                            n, sigma);
         }
 
         // Now take whichever of distributions[0]/distributions[1] was filled last
