@@ -3,6 +3,7 @@
 
 #include <bitset>
 #include <cassert>
+#include <random>
 
 #include "EnumeratorTools.h"
 #include "MinimumDistance.h"
@@ -35,6 +36,17 @@ namespace osuCrypto {
             n /= uint64_t(2);
         }
         return binary;
+    }
+
+    std::vector<short> generate_uniform_bits(size_t size, std::mt19937 &gen) {
+        std::vector<short> bits(size);
+        std::uniform_int_distribution<> dis(0, 1); // Distribution to produce 0 or 1
+
+        for (size_t i = 0; i < size; ++i) {
+            bits[i] = static_cast<short>(dis(gen));
+        }
+
+        return bits;
     }
 
     std::vector<std::bitset<BITSET_SIZE>> generate_all_gis(u64 k, u64 n, u64 sigma) {
@@ -71,6 +83,21 @@ namespace osuCrypto {
             // std::cout << all_possibilities[idx] << std::endl;
         }
         return all_possibilities;
+    }
+
+    std::vector<std::vector<short>> generate_random_gis_bool(u64 k, u64 n, u64 sigma,
+                                                             size_t num_random,
+                                                             std::mt19937 &gen) {
+        u64 num_gis_in_g = k / sigma;
+        u64 e = n / k;
+        u64 num_elements_in_one_gi = sigma * e * sigma;
+        // all G_is but in the same G
+        const u64 num_elements_in_all_gis = num_gis_in_g * num_elements_in_one_gi;
+        std::vector<std::vector<short>> random_gis;
+        for (size_t idx = 0; idx < num_random; idx++) {
+            random_gis.push_back(generate_uniform_bits(num_elements_in_all_gis, gen));
+        }
+        return random_gis;
     }
 
     std::vector<std::bitset<BITSET_SIZE>> generate_all_x_of_weight_w(u64 k, u64 w) {
@@ -232,12 +259,79 @@ namespace osuCrypto {
         return minimum_distance;
     }
 
+    template<typename I, typename R>
+    u64 minimum_distance_approximate_true(u64 expander,
+                                          u64 multiplier,
+                                          u64 num_iters,
+                                          u64 k, u64 n, u64 sigma,
+                                          size_t num_random,
+                                          std::mt19937 &gen) {
+        assert(expander == 0 && multiplier == 0); // now only supports these
+        size_t e = n/k;
+        // Generate num_random possible G_i's (the blocks in matrix G)
+        // TODO Assume for now a single G for all iterations and only a repeater for the expansion
+        std::vector<std::vector<short>> gis = generate_random_gis_bool(n, n, sigma, num_random, gen);
+        std::cout << "All " << gis.size() << " Gi's generated..." << std::endl;
+        // Generate all possible input x's
+        std::vector<std::vector<short>> xs = generate_all_x_bool(k);
+        std::cout << "All " << xs.size() << " x's generated..." << std::endl;
+        std::vector<R> count_weight_h_outputs (n + 1);
+        // iterate over all G's
+        for (const auto &g: gis) {
+            // for each G, iterate over all x's
+            for (const auto &x: xs) {
+                // expander
+                std::vector<short> expanded_x (n);
+                if (expander == 0) {
+                    // repeater
+                    u64 offset = 0;
+                    for (size_t i = 0; i < k; i++) {
+                        for (size_t j = 0; j < e; j++) {
+                            expanded_x[offset++] = x[i];
+                        }
+                    }
+                } else if (expander == 1) {
+                    // expanding block
+                    // TODO
+                    assert(false);
+                }
+                //
+                // Iterate over all permutations
+                //
+                // 1. first sort expanded_x
+                std::sort(expanded_x.begin(), expanded_x.end());
+                // 2. compute number of permutations
+                u64 hw = hamming_weight(expanded_x);
+                I num_perms = fact<I>(n) / (fact<I>(hw) * fact<I>(n - hw));
+                I num_perms_check = 0;
+                // 2. use std::next_permutation to get all perms
+                do {
+                    num_perms_check++;
+                    // multiply x and g at each iteration
+                    // TODO different G at each iteration?
+                    std::vector<short> xg = multiply_x_g_bool(expanded_x, g, sigma, n, n);
+                    count_weight_h_outputs[hamming_weight(xg)] += R(1) / num_perms;
+                } while (std::next_permutation(expanded_x.begin(),
+                                               expanded_x.end()));
+                assert(num_perms_check == num_perms);
+            }
+        }
+        // Divide each count by the number of G's
+        for (auto& count : count_weight_h_outputs) {
+            count /= gis.size();
+        }
+        // Compute the minimum distance
+        // Find at which index the sum >= 1. That is the minimum distance
+        u64 minimum_distance = minimum_distance_from_distribution<R>(n, count_weight_h_outputs);
+        return minimum_distance;
+    }
+
     void minimum_distance_tests() {
         // expander, multiplier, num_iters, k, n, sigma
         std::vector<std::vector<u64>> params = {
                 {0, 0, 1, 3, 6, 3}, // repeater and block enumerator
-                //{0, 0, 1, 3, 6, 6},
-                //{0, 0, 1, 4, 8, 4}, // repeater and block enumerator
+                {0, 0, 1, 3, 6, 6},
+                {0, 0, 1, 4, 8, 4}, // repeater and block enumerator
                 // TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
                 //  TODO add more tests with different expander multiplier
                 //{4,12,2},
@@ -252,17 +346,33 @@ namespace osuCrypto {
                                                             param[3],
                                                             param[4],
                                                             param[5]);
-            u64 true_md = minimum_distance_exact_true<Int, Rat>(param[0],
+            /*u64 true_md = minimum_distance_exact_true<Int, Rat>(param[0],
                                                                 param[1],
                                                                 param[2],
                                                                 param[3],
                                                                 param[4],
-                                                                param[5]);
-            std::cout << "Expected minimum distance: " << expected_md << std::endl;
-            std::cout << "True minimum distance: " << true_md << std::endl;
+                                                                param[5]);*/
 
-            assert(expected_md == true_md);
-            if (expected_md != true_md) {
+            std::random_device rd; // Seed for the random number engine
+            std::mt19937 gen(rd()); // Mersenne Twister engine
+            size_t num_random = 1000;
+            u64 approximate_true_md = minimum_distance_approximate_true<Int, Rat>(param[0],
+                                                                                  param[1],
+                                                                                  param[2],
+                                                                                  param[3],
+                                                                                  param[4],
+                                                                                  param[5],
+                                                                                  num_random,
+                                                                                  gen);
+
+            std::cout << "Expected minimum distance: " << expected_md << std::endl;
+            // std::cout << "True minimum distance: " << true_md << std::endl;
+            std::cout << "Approximate true minimum distance: " << approximate_true_md << std::endl;
+
+            // assert(expected_md == true_md);
+            assert(expected_md == approximate_true_md);
+            // if (expected_md != true_md) {
+            if (expected_md != approximate_true_md) {
                 throw RTE_LOC;
             }
         }
