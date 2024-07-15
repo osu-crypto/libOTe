@@ -11,6 +11,20 @@
 
 namespace osuCrypto {
 
+    template<typename R>
+    bool compare_distributions(const std::vector<R> &distribution1,
+                               const std::vector<R> &distribution2,
+                               u64 l, double tolerance) {
+        assert(distribution1.size() == l);
+        assert(distribution2.size() == l);
+        for (size_t idx = 0; idx < l; idx++) {
+            if ((distribution1[idx] - distribution2[idx]) > tolerance) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     template<typename I, typename R>
     void compute_expanding_distribution(std::vector<R> &distribution,
                                         u64 expander,
@@ -140,8 +154,8 @@ namespace osuCrypto {
     */
 
     template<typename I, typename R>
-    u64 minimum_distance_v1(u64 expander, u64 multiplier, u64 num_iters,
-                            u64 k, u64 n, u64 sigma, u64 sigma_expander) {
+    std::vector<R> minimum_distance_v1(u64 expander, u64 multiplier, u64 num_iters,
+                                       u64 k, u64 n, u64 sigma, u64 sigma_expander) {
         // TODO Assumes G's sigma is the same for all iterations (except expanding step)
         std::cout << "Computing minimum distance..." << std::endl;
 
@@ -193,8 +207,8 @@ namespace osuCrypto {
 
         // Now take whichever of distributions[0]/distributions[1] was filled last
         // and find at which index the sum >= 1. That is the minimum distance
-        u64 minimum_distance = minimum_distance_from_distribution<R>(n, distributions[num_iters % 2]);
-        return minimum_distance;
+        // u64 minimum_distance = minimum_distance_from_distribution<R>(n, distributions[num_iters % 2]);
+        return distributions[num_iters % 2];
     }
 
     inline void minimumDistanceMain(oc::CLP &cmd) {
@@ -220,9 +234,10 @@ namespace osuCrypto {
                                                      "if 1 then non-recursive convolution enumerator"
                   << std::endl;
 
-        u64 min_distance_v1 = minimum_distance_v1<Int, Rat>(expander, multiplier,
+        std::vector<Rat> distribution = minimum_distance_v1<Int, Rat>(expander, multiplier,
                                                             num_iters, k, n,
                                                             sigma, sigma_expander);
+        u64 min_distance_v1 = minimum_distance_from_distribution<Rat>(n, distribution);
         std::cout << "Minimum Distance: " << min_distance_v1 << std::endl;
     }
 }

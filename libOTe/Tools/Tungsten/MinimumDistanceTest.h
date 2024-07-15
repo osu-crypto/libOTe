@@ -220,14 +220,14 @@ namespace osuCrypto {
     }
 
     template<typename I, typename R>
-    u64 minimum_distance_approximate_true(u64 expander,
-                                          u64 multiplier,
-                                          u64 num_iters,
-                                          u64 k, u64 n,
-                                          u64 sigma, u64 sigma_expander,
-                                          size_t num_random,
-                                          std::mt19937 &gen,
-                                          bool exact) {
+    std::vector<R> minimum_distance_approximate_true(u64 expander,
+                                                     u64 multiplier,
+                                                     u64 num_iters,
+                                                     u64 k, u64 n,
+                                                     u64 sigma, u64 sigma_expander,
+                                                     size_t num_random,
+                                                     std::mt19937 &gen,
+                                                     bool exact) {
         assert(multiplier == 0 && num_iters == 1); // now only supports these
         size_t e = n/k;
         // Generate num_random possible G_i's (the blocks in matrix G)
@@ -293,8 +293,8 @@ namespace osuCrypto {
         }
         // Compute the minimum distance
         // Find at which index the sum >= 1. That is the minimum distance
-        u64 minimum_distance = minimum_distance_from_distribution<R>(n, count_weight_h_outputs);
-        return minimum_distance;
+        // u64 minimum_distance = minimum_distance_from_distribution<R>(n, count_weight_h_outputs);
+        return count_weight_h_outputs;
     }
 
     void minimum_distance_tests() {
@@ -315,13 +315,14 @@ namespace osuCrypto {
         for (const auto & param : params) {
             // TODO remove when ready
             if (param[1] != 0) assert(false);
-            u64 expected_md = minimum_distance_v1<Int, Rat>(param[0],
-                                                            param[1],
-                                                            param[2],
-                                                            param[3],
-                                                            param[4],
-                                                            param[5],
-                                                            param[6]);
+            std::vector<Rat> expected_distribution = minimum_distance_v1<Int, Rat>(param[0],
+                                                                                   param[1],
+                                                                                   param[2],
+                                                                                   param[3],
+                                                                                   param[4],
+                                                                                   param[5],
+                                                                                   param[6]);
+            u64 expected_md = minimum_distance_from_distribution<Rat>(param[4], expected_distribution);
             /*u64 true_md = minimum_distance_exact_true<Int, Rat>(param[0],
                                                                 param[1],
                                                                 param[2],
@@ -332,18 +333,18 @@ namespace osuCrypto {
             std::random_device rd; // Seed for the random number engine
             std::mt19937 gen(rd()); // Mersenne Twister engine
             size_t num_random = 300;
-            u64 approximate_true_md = minimum_distance_approximate_true<Int, Rat>(param[0],
-                                                                                  param[1],
-                                                                                  param[2],
-                                                                                  param[3],
-                                                                                  param[4],
-                                                                                  param[5],
-                                                                                  param[6],
-                                                                                  num_random,
-                                                                                  gen,
-                                                                                  false);
-
-            std::cout << "Expected minimum distance: " << expected_md << std::endl;
+            std::vector<Rat> approximate_true_distribution = minimum_distance_approximate_true<Int, Rat>(param[0],
+                                                                                                       param[1],
+                                                                                                       param[2],
+                                                                                                       param[3],
+                                                                                                       param[4],
+                                                                                                       param[5],
+                                                                                                       param[6],
+                                                                                                       num_random,
+                                                                                                       gen,
+                                                                                                       false);
+            u64 approximate_true_md = minimum_distance_from_distribution<Rat>(param[4], approximate_true_distribution);
+                    std::cout << "Expected minimum distance: " << expected_md << std::endl;
             // std::cout << "True minimum distance: " << true_md << std::endl;
             std::cout << "Approximate true minimum distance: " << approximate_true_md << std::endl;
 
@@ -351,6 +352,12 @@ namespace osuCrypto {
             assert(expected_md == approximate_true_md);
             // if (expected_md != true_md) {
             if (expected_md != approximate_true_md) {
+                throw RTE_LOC;
+            }
+
+            // Compare the full distributions
+            bool similar = compare_distributions<Rat>(expected_distribution, approximate_true_distribution, param[4] + 1, 0.1); // last param is error tolerance
+            if (!similar) {
                 throw RTE_LOC;
             }
         }
