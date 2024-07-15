@@ -304,6 +304,7 @@ namespace osuCrypto {
                 {0, 0, 1, 3, 6, 6, 0}, // repeater and block enumerator
                 {0, 0, 1, 4, 8, 4, 0}, // repeater and block enumerator
                 {0, 0, 1, 4, 12, 6, 0}, // repeater and block enumerator
+                {1, 0, 1, 4, 8, 4, 2}, // expanding block and block enumerator
                 {1, 0, 1, 3, 9, 3, 3}, // expanding block and block enumerator
                 //{1, 0, 1, 4, 8, 8, 2} // expanding block and block enumerator
                 // TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
