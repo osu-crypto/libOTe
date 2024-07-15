@@ -17,7 +17,7 @@ namespace osuCrypto {
                                         u64 k,
                                         u64 n,
                                         u64 e,
-                                        u64 sigma) {
+                                        u64 sigma_expander) { // only for the expanding block
         assert(e == n / k);
         for (size_t h = 0; h <= n; h++) {
             // note that for repeater, we do NOT need this loop, but used now for modularity
@@ -28,9 +28,10 @@ namespace osuCrypto {
                     distribution[h] += repeater_enum<I>(w, h, k, e);
                     assert(distribution[0] == 0);
                 } else if (expander == 1) {
-                    assert(sigma <= k); // TODO should we have separate sigma for the expander?
+                    assert(sigma_expander <= k);
+                    assert(k % sigma_expander == 0);
                     // block expander (identity + block)
-                    distribution[h] += expanding_block_enum<I, R>(w, h, k, n, sigma);
+                    distribution[h] += expanding_block_enum<I, R>(w, h, k, n, sigma_expander);
                 }
             }
         }
@@ -140,7 +141,8 @@ namespace osuCrypto {
 
     template<typename I, typename R>
     u64 minimum_distance_v1(u64 expander, u64 multiplier, u64 num_iters,
-                            u64 k, u64 n, u64 sigma) {
+                            u64 k, u64 n, u64 sigma, u64 sigma_expander) {
+        // TODO Assumes G's sigma is the same for all iterations (except expanding step)
         std::cout << "Computing minimum distance..." << std::endl;
 
         u64 e = n / k;
@@ -177,7 +179,7 @@ namespace osuCrypto {
         // Expansion step is slightly different from the iterations
         // e.g. w starts at 1 (as we do not consider hw=0 input, we pass expander instead of multiplier)
         // as 1. we are expanding and 2. c_w = k choose w, so they divide each other
-        compute_expanding_distribution<I, R>(distributions[0], expander, k, n, e, sigma);
+        compute_expanding_distribution<I, R>(distributions[0], expander, k, n, e, sigma_expander);
 
         // Compute distributions for iterations
         for (size_t iter = 0; iter < num_iters; iter++) {
@@ -199,6 +201,7 @@ namespace osuCrypto {
         u64 k = cmd.getOr("k", 10); // msg length
         u64 n = cmd.getOr("n", 20); // codeword length
         u64 sigma = cmd.getOr("sigma", 2); // window size
+        u64 sigma_expander = cmd.getOr("sigmaexpander", 0); // window size
         // expander (0: repeater, 1: block expander)
         u64 expander = cmd.getOr("expander", 0);
         // multiplier (0: block, 1: non recursive convolution)
@@ -209,6 +212,7 @@ namespace osuCrypto {
         std::cout << "k: " << k << std::endl;
         std::cout << "n: " << n << std::endl;
         std::cout << "sigma: " << sigma << std::endl;
+        std::cout << "sigma_expander: " << sigma_expander << std::endl;
         std::cout << "expander: " << expander << ", if 0 then repeater, "
                                                  "if 1 then block"
                   << std::endl;
@@ -217,7 +221,8 @@ namespace osuCrypto {
                   << std::endl;
 
         u64 min_distance_v1 = minimum_distance_v1<Int, Rat>(expander, multiplier,
-                                                            num_iters, k, n, sigma);
+                                                            num_iters, k, n,
+                                                            sigma, sigma_expander);
         std::cout << "Minimum Distance: " << min_distance_v1 << std::endl;
     }
 }

@@ -16,7 +16,7 @@ namespace osuCrypto {
         assert(w <= k);
         assert(sigma <= k);
 
-        if (h < w || h > (k + w)) { // TODO assuming e == 2 h <= k + w
+        if (h < w || h > ((e-1) * k + w)) {
             return 0;
         }
         return block_enum<I, R>(w, h - w, k, (e-1) * k, sigma);

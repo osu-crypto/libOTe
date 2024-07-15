@@ -195,82 +195,57 @@ namespace osuCrypto {
     }
 
     template<typename I, typename R>
-    u64 minimum_distance_exact_true(u64 expander,
-                                    u64 multiplier,
-                                    u64 num_iters,
-                                    u64 k, u64 n, u64 sigma) {
-        assert(expander == 0 && multiplier == 0); // now only supports these
-        size_t e = n/k;
-        // Generate all possible G_i's (the blocks in matrix G)
-        // TODO Assume for now a single G for all iterations and only a repeater for the expansion
-        std::vector<std::vector<short>> gis = generate_all_gis_bool(n, n, sigma);
-        std::cout << "All " << gis.size() << " Gi's generated..." << std::endl;
-        // Generate all possible input x's
-        std::vector<std::vector<short>> xs = generate_all_x_bool(k);
-        std::cout << "All " << xs.size() << " x's generated..." << std::endl;
-        std::vector<R> count_weight_h_outputs (n + 1);
-        // iterate over all G's
-        for (const auto &g: gis) {
-            // for each G, iterate over all x's
-            for (const auto &x: xs) {
-                // expander
-                std::vector<short> expanded_x (n);
-                if (expander == 0) {
-                    // repeater
-                    u64 offset = 0;
-                    for (size_t i = 0; i < k; i++) {
-                        for (size_t j = 0; j < e; j++) {
-                            expanded_x[offset++] = x[i];
-                        }
-                    }
-                } else if (expander == 1) {
-                    // expanding block
-                    // TODO
-                    assert(false);
-                }
-                //
-                // Iterate over all permutations
-                //
-                // 1. first sort expanded_x
-                std::sort(expanded_x.begin(), expanded_x.end());
-                // 2. compute number of permutations
-                u64 hw = hamming_weight(expanded_x);
-                I num_perms = fact<I>(n) / (fact<I>(hw) * fact<I>(n - hw));
-                I num_perms_check = 0;
-                // 2. use std::next_permutation to get all perms
-                do {
-                    num_perms_check++;
-                    // multiply x and g at each iteration
-                    // TODO different G at each iteration?
-                    std::vector<short> xg = multiply_x_g_bool(expanded_x, g, sigma, n, n);
-                    count_weight_h_outputs[hamming_weight(xg)] += R(1) / num_perms;
-                } while (std::next_permutation(expanded_x.begin(),
-                                               expanded_x.end()));
-                assert(num_perms_check == num_perms);
-            }
-        }
-        // Divide each count by the number of G's
-        for (auto& count : count_weight_h_outputs) {
-            count /= gis.size();
-        }
-        // Compute the minimum distance
-        // Find at which index the sum >= 1. That is the minimum distance
-        u64 minimum_distance = minimum_distance_from_distribution<R>(n, count_weight_h_outputs);
-        return minimum_distance;
+    void iterate_and_count(std::vector<short> &expanded_x,
+                           const std::vector<short> &g,
+                           std::vector<R> &count_weight_h_outputs,
+                           u64 n, u64 sigma,
+                           size_t num_expanding_gis) {
+        // Iterate over all permutations
+        // 1. first sort expanded_x
+        std::sort(expanded_x.begin(), expanded_x.end());
+        // 2. compute number of permutations
+        u64 hw = hamming_weight(expanded_x);
+        I num_perms = fact<I>(n) / (fact<I>(hw) * fact<I>(n - hw));
+        I num_perms_check = 0;
+        // 2. use std::next_permutation to get all perms
+        do {
+            num_perms_check++;
+            // multiply x and g at each iteration
+            // TODO different G at each iteration?
+            std::vector<short> xg = multiply_x_g_bool(expanded_x, g, sigma, n, n);
+            count_weight_h_outputs[hamming_weight(xg)] += R(1) / num_perms / R(num_expanding_gis);
+        } while (std::next_permutation(expanded_x.begin(),
+                                       expanded_x.end()));
+        assert(num_perms_check == num_perms);
     }
 
     template<typename I, typename R>
     u64 minimum_distance_approximate_true(u64 expander,
                                           u64 multiplier,
                                           u64 num_iters,
-                                          u64 k, u64 n, u64 sigma,
+                                          u64 k, u64 n,
+                                          u64 sigma, u64 sigma_expander,
                                           size_t num_random,
-                                          std::mt19937 &gen) {
-        assert(expander == 0 && multiplier == 0); // now only supports these
+                                          std::mt19937 &gen,
+                                          bool exact) {
+        assert(multiplier == 0 && num_iters == 1); // now only supports these
         size_t e = n/k;
         // Generate num_random possible G_i's (the blocks in matrix G)
-        // TODO Assume for now a single G for all iterations and only a repeater for the expansion
-        std::vector<std::vector<short>> gis = generate_random_gis_bool(n, n, sigma, num_random, gen);
+        // TODO Generate different G for all iterations
+        std::vector<std::vector<short>> expanding_gis;
+        std::vector<std::vector<short>> gis;
+        if (exact) {
+            gis = generate_all_gis_bool(n, n, sigma);
+            if (expander == 1) {
+                assert(false); // TODO function does not yet exist
+            }
+        } else { // approximate
+            gis = generate_random_gis_bool(n, n, sigma, num_random, gen);
+            if (expander == 1) {
+                // Remember this is missing the identity, which is handled later
+                expanding_gis = generate_random_gis_bool(k, n - k, sigma_expander, num_random, gen);
+            }
+        }
         std::cout << "All " << gis.size() << " Gi's generated..." << std::endl;
         // Generate all possible input x's
         std::vector<std::vector<short>> xs = generate_all_x_bool(k);
@@ -281,39 +256,35 @@ namespace osuCrypto {
             // for each G, iterate over all x's
             for (const auto &x: xs) {
                 // expander
-                std::vector<short> expanded_x (n);
                 if (expander == 0) {
                     // repeater
-                    u64 offset = 0;
+                    std::vector<short> expanded_x;
                     for (size_t i = 0; i < k; i++) {
                         for (size_t j = 0; j < e; j++) {
-                            expanded_x[offset++] = x[i];
+                            expanded_x.push_back(x[i]);
                         }
                     }
+                    // Iterate over all permutations and count weights
+                    iterate_and_count<I, R>(expanded_x, g, count_weight_h_outputs,
+                                            n, sigma, 1);
                 } else if (expander == 1) {
+                    size_t num_expanding_gis = expanding_gis.size();
                     // expanding block
-                    // TODO
-                    assert(false);
+                    for (const auto &expanding_g: expanding_gis) {
+                        std::vector<short> expanded_x;
+                        // insert identity of size k
+                        expanded_x.insert(expanded_x.end(), x.begin(), x.end());
+                        assert(expanded_x.size() == k);
+                        // insert the multiplied part of size n-k
+                        std::vector<short> expansion = multiply_x_g_bool(x, expanding_g,
+                                                                         sigma_expander, k, n - k);
+                        expanded_x.insert(expanded_x.end(), expansion.begin(), expansion.end());
+                        assert(expanded_x.size() == n);
+                        // Iterate over all permutations and count weights
+                        iterate_and_count<I, R>(expanded_x, g, count_weight_h_outputs,
+                                                n, sigma, num_expanding_gis);
+                    }
                 }
-                //
-                // Iterate over all permutations
-                //
-                // 1. first sort expanded_x
-                std::sort(expanded_x.begin(), expanded_x.end());
-                // 2. compute number of permutations
-                u64 hw = hamming_weight(expanded_x);
-                I num_perms = fact<I>(n) / (fact<I>(hw) * fact<I>(n - hw));
-                I num_perms_check = 0;
-                // 2. use std::next_permutation to get all perms
-                do {
-                    num_perms_check++;
-                    // multiply x and g at each iteration
-                    // TODO different G at each iteration?
-                    std::vector<short> xg = multiply_x_g_bool(expanded_x, g, sigma, n, n);
-                    count_weight_h_outputs[hamming_weight(xg)] += R(1) / num_perms;
-                } while (std::next_permutation(expanded_x.begin(),
-                                               expanded_x.end()));
-                assert(num_perms_check == num_perms);
             }
         }
         // Divide each count by the number of G's
@@ -327,12 +298,14 @@ namespace osuCrypto {
     }
 
     void minimum_distance_tests() {
-        // expander, multiplier, num_iters, k, n, sigma
+        // expander, multiplier, num_iters, k, n, sigma, sigma_expander (0 if repeater)
         std::vector<std::vector<u64>> params = {
-                {0, 0, 1, 3, 6, 3}, // repeater and block enumerator
-                {0, 0, 1, 3, 6, 6},
-                {0, 0, 1, 4, 8, 4}, // repeater and block enumerator
-                {0, 0, 1, 4, 12, 6}, // repeater and block enumerator
+                {0, 0, 1, 3, 6, 3, 0}, // repeater and block enumerator
+                {0, 0, 1, 3, 6, 6, 0}, // repeater and block enumerator
+                {0, 0, 1, 4, 8, 4, 0}, // repeater and block enumerator
+                {0, 0, 1, 4, 12, 6, 0}, // repeater and block enumerator
+                {1, 0, 1, 3, 9, 3, 3}, // expanding block and block enumerator
+                //{1, 0, 1, 4, 8, 8, 2} // expanding block and block enumerator
                 // TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
                 //  TODO add more tests with different expander multiplier
                 //{4,12,2},
@@ -340,13 +313,14 @@ namespace osuCrypto {
         };
         for (const auto & param : params) {
             // TODO remove when ready
-            if (param[0] != 0 || param[1] != 0) assert(false);
+            if (param[1] != 0) assert(false);
             u64 expected_md = minimum_distance_v1<Int, Rat>(param[0],
                                                             param[1],
                                                             param[2],
                                                             param[3],
                                                             param[4],
-                                                            param[5]);
+                                                            param[5],
+                                                            param[6]);
             /*u64 true_md = minimum_distance_exact_true<Int, Rat>(param[0],
                                                                 param[1],
                                                                 param[2],
@@ -356,15 +330,17 @@ namespace osuCrypto {
 
             std::random_device rd; // Seed for the random number engine
             std::mt19937 gen(rd()); // Mersenne Twister engine
-            size_t num_random = 1000;
+            size_t num_random = 300;
             u64 approximate_true_md = minimum_distance_approximate_true<Int, Rat>(param[0],
                                                                                   param[1],
                                                                                   param[2],
                                                                                   param[3],
                                                                                   param[4],
                                                                                   param[5],
+                                                                                  param[6],
                                                                                   num_random,
-                                                                                  gen);
+                                                                                  gen,
+                                                                                  false);
 
             std::cout << "Expected minimum distance: " << expected_md << std::endl;
             // std::cout << "True minimum distance: " << true_md << std::endl;
