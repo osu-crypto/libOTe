@@ -60,6 +60,7 @@ namespace osuCrypto {
                                    u64 multiplier,
                                    u64 n,
                                    u64 sigma) {
+        std::fill(new_distribution.begin(), new_distribution.end(), R(0));
         for (size_t h = 0; h <= n; h++) {
             for (size_t w = 0; w <= n; w++) {
                 R enumerator = 0;
@@ -77,7 +78,7 @@ namespace osuCrypto {
 //                    std::cout << "enumerator " << enumerator << std::endl;
 //                    std::cout << "n choose w " <<n_choose_w[w] << std::endl;
                 assert(enumerator <= n_choose_w[w]);
-                new_distribution[h] += (old_distribution[w] / n_choose_w[w] * enumerator);
+                new_distribution[h] += (old_distribution[w] / R(n_choose_w[w]) * enumerator);
             }
         }
     }
@@ -219,6 +220,8 @@ namespace osuCrypto {
         for (size_t w = 1; w <= k; w++) {
             initial_distribution_sum += R(choose_<I>(k, w));
         }
+        std::cout << "Initial distribution sum: " << initial_distribution_sum << std::endl;
+        std::cout << "Final distribution sum: " << final_distribution_sum << std::endl;
         assert(final_distribution_sum == initial_distribution_sum);
         if (final_distribution_sum != initial_distribution_sum) throw RTE_LOC;
 
