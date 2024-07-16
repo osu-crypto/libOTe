@@ -1,6 +1,7 @@
 #ifndef LIBOTE_MINIMUMDISTANCE_H
 #define LIBOTE_MINIMUMDISTANCE_H
 
+#include <numeric>
 #include <vector>
 
 #include "BlockEnumerator.h"
@@ -42,6 +43,7 @@ namespace osuCrypto {
                     distribution[h] += repeater_enum<I>(w, h, k, e);
                     assert(distribution[0] == 0);
                 } else if (expander == 1) {
+                    assert(sigma_expander > 0);
                     assert(sigma_expander <= k);
                     assert(k % sigma_expander == 0);
                     // block expander (identity + block)
@@ -157,7 +159,7 @@ namespace osuCrypto {
     std::vector<R> minimum_distance_v1(u64 expander, u64 multiplier, u64 num_iters,
                                        u64 k, u64 n, u64 sigma, u64 sigma_expander) {
         // TODO Assumes G's sigma is the same for all iterations (except expanding step)
-        std::cout << "Computing minimum distance..." << std::endl;
+        // std::cout << "Computing minimum distance..." << std::endl;
 
         u64 e = n / k;
 
@@ -208,10 +210,65 @@ namespace osuCrypto {
         // Now take whichever of distributions[0]/distributions[1] was filled last
         // and find at which index the sum >= 1. That is the minimum distance
         // u64 minimum_distance = minimum_distance_from_distribution<R>(n, distributions[num_iters % 2]);
+
+        // Check the sum of the final distribution is equal to the sum of the initial distribution
+        R final_distribution_sum = std::reduce(distributions[num_iters % 2].begin(),
+                                               distributions[num_iters % 2].end()); // distribution_sum<R>(distributions[num_iters % 2]);
+        // Sum initial distribution
+        R initial_distribution_sum = 0;
+        for (size_t w = 1; w <= k; w++) {
+            initial_distribution_sum += R(choose_<I>(k, w));
+        }
+        assert(final_distribution_sum == initial_distribution_sum);
+        if (final_distribution_sum != initial_distribution_sum) throw RTE_LOC;
+
         return distributions[num_iters % 2];
     }
 
+    void benchmarks() {
+        // expander, multiplier, num_iters, k, n, sigma, sigma_expander (0 if repeater)
+
+        //
+        // varying iterations, everything else fixed
+        //
+        std::vector<std::vector<u64>> params = {
+                {1, 0, 1, 10, 20, 10, 5},
+                {1, 0, 1, 10, 30, 10, 5},
+                {1, 0, 1, 10, 40, 10, 5},
+                {1, 0, 1, 10, 50, 10, 5},
+                {1, 0, 1, 10, 60, 10, 5},
+                {1, 0, 1, 10, 70, 10, 5},
+                {1, 0, 1, 10, 80, 10, 5},
+                {1, 0, 1, 10, 90, 10, 5},
+                {1, 0, 1, 10, 100, 10, 5},
+        };
+        for (const auto & param : params) {
+            // TODO remove when ready
+            if (param[1] != 0) assert(false);
+            std::vector<Rat> expected_distribution = minimum_distance_v1<Int, Rat>(param[0],
+                                                                                   param[1],
+                                                                                   param[2],
+                                                                                   param[3],
+                                                                                   param[4],
+                                                                                   param[5],
+                                                                                   param[6]);
+            u64 expected_md = minimum_distance_from_distribution<Rat>(param[4], expected_distribution);
+            /*std::cout << "expander " << param[0] << ", "
+                      << "multiplier " << param[1] << ", "
+                      << "num_iters " << param[2] << ", "
+                      << "k " << param[3] << ", "
+                      << "n " << param[4] << ", "
+                      << "sigma " << param[5] << ", "
+                      << "sigma_expander " << param[6]  << ", ";
+            std::cout << "Expected minimum distance " << expected_md << std::endl;*/
+            std::cout << expected_md << std::endl;
+        }
+        std::cout << "finished" << std::endl;
+    }
+
     inline void minimumDistanceMain(oc::CLP &cmd) {
+        benchmarks();
+
         u64 k = cmd.getOr("k", 10); // msg length
         u64 n = cmd.getOr("n", 20); // codeword length
         u64 sigma = cmd.getOr("sigma", 2); // window size
