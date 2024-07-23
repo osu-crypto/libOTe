@@ -1,0 +1,14 @@
+So far, I have implemented
+1. enumerator for the block, repeater, and expanding block
+2. minimum distance from those enumerators (see MinimumDistance.h)
+3. brute force verification (MinimumDistanceTest.h) that confirms the enumerators above/minimum distance are correct
+
+The verification in 3 is only for a SINGLE iteration. Multiple iterations not formally verified
+
+The verification enumerates everything (all perms, all inputs x), with possible exception of the blocks G,
+where we take a random small subset (but there is also a function that enumerates all G's).
+
+TODOS:
+1. Verify the code for multiple iterations as the minimum distance now stops increasing after only 2 iterations
+2. implement non-recursive block enumerator
+3. test minimum distance with this non-recursive block enumerator
