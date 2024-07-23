@@ -9,8 +9,8 @@ The verification enumerates everything (all perms, all inputs x), with possible 
 where we take a random small subset (but there is also a function that enumerates all G's).
 
 TODOS:
-1. Verify the code for multiple iterations as the minimum distance now stops increasing after only 2 iterations
+1. try to optimize n choose k function - pascal's triangle recurrence and cache values
 2. Verify Srini's non-recursive block enumerator in overleaf (also in implementation with brute force)
 3. implement non-recursive block enumerator
 4. test minimum distance with this non-recursive block enumerator
-5. work on the enumerator
+5. work on the recursive enumerator
