@@ -15,6 +15,7 @@
 #include <vector>
 #include <cryptoTools/Crypto/AES.h>
 #include <cryptoTools/Common/Timer.h>
+#include <cryptoTools/Crypto/MultiKeyAES.h>
 
 #ifdef GetMessage
 #undef GetMessage
