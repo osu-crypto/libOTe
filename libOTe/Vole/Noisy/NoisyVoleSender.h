@@ -63,10 +63,10 @@ namespace osuCrypto {
 
 			setTimePoint("NoisyVoleSender.ot.begin");
 
-			co_await(ot.receive(bv, otMsg, prng, chl));
+			co_await ot.receive(bv, otMsg, prng, chl);
 			setTimePoint("NoisyVoleSender.ot.end");
 
-			co_await(send(delta, b, prng, otMsg, chl, ctx));
+			co_await send(delta, b, prng, otMsg, chl, ctx);
 
 			} MACORO_CATCH(eptr) {
 				co_await chl.close();
@@ -100,7 +100,7 @@ namespace osuCrypto {
 
 			// receive the the excrypted one shares.
 			buffer.resize(xb.size() * b.size() * ctx.template byteSize<F>());
-			co_await(chl.recv(buffer));
+			co_await chl.recv(buffer);
 			ctx.resize(msg, xb.size() * b.size());
 			ctx.deserialize(buffer.begin(), buffer.end(), msg.begin());
 
