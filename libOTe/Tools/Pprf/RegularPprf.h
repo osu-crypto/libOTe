@@ -284,7 +284,10 @@ namespace osuCrypto
 				auto parents = levels[d];
 
 				// The next level of theGGM tree that we are populating.
-				auto children = levels[d + 1];
+				auto children = levels[d + 1]; 
+				assert((u64)level0.data() % sizeof(block) == 0 && "levels requires aligment");
+				assert((u64)level1.data() % sizeof(block) == 0 && "levels requires aligment");
+
 
 				// For each child, populate the child by expanding the parent.
 				for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx, childIdx += 2)
@@ -897,6 +900,8 @@ namespace osuCrypto
 					// The next level that we want to construct.
 					auto level1 = levels[d + 1];
 					assert(level1.size() == width * 2);
+					assert((u64)level0.data() % sizeof(block) == 0 && "levels requires aligment");
+					assert((u64)level1.data() % sizeof(block) == 0 && "levels requires aligment");
 
 					for (u64 parentIdx = 0, childIdx = 0; parentIdx < width; ++parentIdx, childIdx += 2)
 					{
