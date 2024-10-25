@@ -647,6 +647,8 @@ namespace osuCrypto
 			// The OTs are used in blocks of 8, so make sure that there is a whole
 			// number of blocks.
 			mBaseOTs.resize(roundUpTo(mPntCount, 8), mDepth);
+			if (mBaseOTs.size() < baseMessages.size())
+				throw RTE_LOC;
 			memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
 		}
 
