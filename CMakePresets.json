@@ -98,6 +98,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "LIBOTE_STD_VER": "20",
+        "ENABLE_PORTABLE_AES": true,
         "ENABLE_GMP": false,
         "ENABLE_ALL_OT": true,
         "ENABLE_RELIC": false,

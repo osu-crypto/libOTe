@@ -606,4 +606,88 @@ namespace osuCrypto
         std::cout << "ENABLE_Silent_VOLE = false" << std::endl;
 #endif
     }
+
+
+    void AESBenchmark(const oc::CLP& cmd)
+    {
+        u64 n = roundUpTo(cmd.getOr("n", 1ull << cmd.getOr("nn", 20)), 8);
+        u64 t =cmd.getOr("t", 10);
+        using AES_ = AES;// details::AES<details::AESTypes::Portable>;
+
+        auto unroll8 = [](AES_& aes, block* __restrict s)
+            {
+                block b[8];
+                b[0] = AES_::firstFn(s[0], aes.mRoundKey[0]);
+                b[1] = AES_::firstFn(s[1], aes.mRoundKey[0]);
+                b[2] = AES_::firstFn(s[2], aes.mRoundKey[0]);
+                b[3] = AES_::firstFn(s[3], aes.mRoundKey[0]);
+                b[4] = AES_::firstFn(s[4], aes.mRoundKey[0]);
+                b[5] = AES_::firstFn(s[5], aes.mRoundKey[0]);
+                b[6] = AES_::firstFn(s[6], aes.mRoundKey[0]);
+                b[7] = AES_::firstFn(s[7], aes.mRoundKey[0]);
+
+                for (u64 i = 1; i < 9; ++i)
+                {
+                    b[0] = AES_::roundFn(b[0], aes.mRoundKey[i]);
+                    b[1] = AES_::roundFn(b[1], aes.mRoundKey[i]);
+                    b[2] = AES_::roundFn(b[2], aes.mRoundKey[i]);
+                    b[3] = AES_::roundFn(b[3], aes.mRoundKey[i]);
+                    b[4] = AES_::roundFn(b[4], aes.mRoundKey[i]);
+                    b[5] = AES_::roundFn(b[5], aes.mRoundKey[i]);
+                    b[6] = AES_::roundFn(b[6], aes.mRoundKey[i]);
+                    b[7] = AES_::roundFn(b[7], aes.mRoundKey[i]);
+                }
+
+
+                b[0] = AES_::penultimateFn(b[0], aes.mRoundKey[9]);
+                b[1] = AES_::penultimateFn(b[1], aes.mRoundKey[9]);
+                b[2] = AES_::penultimateFn(b[2], aes.mRoundKey[9]);
+                b[3] = AES_::penultimateFn(b[3], aes.mRoundKey[9]);
+                b[4] = AES_::penultimateFn(b[4], aes.mRoundKey[9]);
+                b[5] = AES_::penultimateFn(b[5], aes.mRoundKey[9]);
+                b[6] = AES_::penultimateFn(b[6], aes.mRoundKey[9]);
+                b[7] = AES_::penultimateFn(b[7], aes.mRoundKey[9]);
+                s[0] = AES_::finalFn(b[0], aes.mRoundKey[10]);
+                s[1] = AES_::finalFn(b[1], aes.mRoundKey[10]);
+                s[2] = AES_::finalFn(b[2], aes.mRoundKey[10]);
+                s[3] = AES_::finalFn(b[3], aes.mRoundKey[10]);
+                s[4] = AES_::finalFn(b[4], aes.mRoundKey[10]);
+                s[5] = AES_::finalFn(b[5], aes.mRoundKey[10]);
+                s[6] = AES_::finalFn(b[6], aes.mRoundKey[10]);
+                s[7] = AES_::finalFn(b[7], aes.mRoundKey[10]);
+
+            };
+
+        oc::AlignedUnVector<block> x(n);
+        auto n8 = n / 8;
+        AES_ aes(block(42352345, 3245345234676534));
+        Timer timer;
+        timer.setTimePoint("begin");
+        for (u64 tt = 0; tt < t; ++tt)
+        {
+            for (u64 i = 0; i < n; i += 8)
+            {
+                unroll8(aes, x.data() + i);
+            }
+            timer.setTimePoint("unroll");
+        }
+
+        for (u64 tt = 0; tt < t; ++tt)
+        {
+            for (u64 i = 0; i < n; i += 8)
+            {
+                aes.ecbEncBlocks<8>(x.data() + i, x.data() + i);
+            }
+            timer.setTimePoint("aes <>");
+        }
+
+        for (u64 tt = 0; tt < t; ++tt)
+        {
+                aes.ecbEncBlocks(x, x);
+            timer.setTimePoint("aes ");
+        }
+
+        std::cout << timer << std::endl;
+
+    }
 }

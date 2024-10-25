@@ -117,6 +117,8 @@ int main(int argc, char** argv)
 			ExConvCodeOldBench(cmd);
 		else if (cmd.isSet("tungsten"))
 			TungstenCodeBench(cmd);
+		else if (cmd.isSet("aes"))
+			AESBenchmark(cmd);
 
 		return 0;
 	}
