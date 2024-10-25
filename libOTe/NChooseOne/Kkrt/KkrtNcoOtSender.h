@@ -17,6 +17,7 @@
 
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Network/Channel.h>
+#include <cryptoTools/Crypto/MultiKeyAES.h>
 
 #include <array>
 #include <vector>

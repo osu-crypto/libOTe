@@ -14,6 +14,7 @@
 #include <cryptoTools/Common/Timer.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <array>
+#include <cryptoTools/Crypto/MultiKeyAES.h>
 
 namespace osuCrypto {
 
