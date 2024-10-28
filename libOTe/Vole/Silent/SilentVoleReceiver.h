@@ -146,7 +146,7 @@ namespace osuCrypto
 			using BaseOT = MasnyRindal;
 #elif defined ENABLE_MRR
 			using BaseOT = McRosRoy;
-#elif defined ENABLE_NP_KYBER
+#elif defined ENABLE_MR_KYBER
 			using BaseOT = MasnyRindalKyber;
 #else
 			using BaseOT = DefaultBaseOT;

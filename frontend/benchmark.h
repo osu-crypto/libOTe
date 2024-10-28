@@ -659,7 +659,6 @@ namespace osuCrypto
             };
 
         oc::AlignedUnVector<block> x(n);
-        auto n8 = n / 8;
         AES_ aes(block(42352345, 3245345234676534));
         Timer timer;
         timer.setTimePoint("begin");
