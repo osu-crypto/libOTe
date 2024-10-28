@@ -320,7 +320,7 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 //                using BaseOT = MasnyRindal;
 //#elif defined ENABLE_MRR
 //                using BaseOT = McRosRoy;
-//#elif defined ENABLE_NP_KYBER
+//#elif defined ENABLE_MR_KYBER
 
 #if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
                 u64 expRound = 3;
@@ -331,7 +331,7 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 #elif defined ENABLE_MRR
                 u64 expRound = 3;
                 baseName = "using DefaultBaseOT = McRosRoy;";
-#elif defined ENABLE_NP_KYBER
+#elif defined ENABLE_MR_KYBER
                 u64 expRound = 3;
                 baseName = "using DefaultBaseOT = MasnyRindalKyber;";
 #elif defined ENABLE_SIMPLESTOT_ASM

@@ -13,14 +13,14 @@
         "ENABLE_ALL_OT": true,
         "ENABLE_SSE": true,
         "ENABLE_AVX": true,
-        "ENABLE_BOOST": true,
+        "ENABLE_BOOST": false,
         "ENABLE_BITPOLYMUL": false,
         "ENABLE_CIRCUITS": true,
         "ENABLE_SIMPLESTOT": true,
         "ENABLE_MRR": true,
         "ENABLE_MR": true,
         "ENABLE_RELIC": false,
-        "ENABLE_SODIUM": true,
+        "ENABLE_SODIUM": false,
         "ENABLE_ASAN": true,
         "ENABLE_MOCK_OT": true,
         "LIBOTE_STD_VER": "20",
@@ -36,7 +36,7 @@
         "microsoft.com/VisualStudioRemoteSettings/CMake/1.0": {
           "sourceDir": "$env{HOME}/.vs/$ms{projectDirName}",
           "copySourcesOptions": {
-            "exclusionList": [ ".vs", "out/build", "out/install", "out/boost*", "out/relic/build" ]
+            "exclusionList": [ ".vs", "out/build", "out/install", "out/boost*", "out/relic/build", ".git" ]
           },
           "rsyncCommandArgs": [ "-t", "--delete", "--include=${sourceDir}/out/macoro/*", "--verbose" ]
         }
