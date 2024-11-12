@@ -85,7 +85,7 @@ namespace osuCrypto {
     }
 
     inline void binomialCoefficientTestMain(oc::CLP& cmd) {
-        int64_t n = 100;
+        int64_t n = 1000;
 
         // Verify correctness
         for (int64_t k = -2; k < (n + 2); k++) {
@@ -105,8 +105,8 @@ namespace osuCrypto {
         }
         auto end = std::chrono::high_resolution_clock::now();
         // Calculate elapsed time in milliseconds
-        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
-        std::cout << "Execution time: " << duration.count() << " ms" << std::endl;
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        std::cout << "Execution time: " << duration.count() << " microseconds" << std::endl;
 
         std::cout << "Running old..." << std::endl;
         start = std::chrono::high_resolution_clock::now();
@@ -115,8 +115,8 @@ namespace osuCrypto {
         }
         end = std::chrono::high_resolution_clock::now();
         // Calculate elapsed time in milliseconds
-        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
-        std::cout << "Execution time: " << duration.count() << " ms" << std::endl;
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        std::cout << "Execution time: " << duration.count() << " microseconds" << std::endl;
     }
 }
 

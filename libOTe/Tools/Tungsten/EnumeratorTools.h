@@ -494,22 +494,6 @@ namespace osuCrypto {
     }
 
 
-    template <typename T>
-    inline T choose_old(i64 n, i64 k)
-    {
-        if (k < 0 || k > n)
-            return 0;
-        if (k == 0 || k == n)
-            return 1;
-
-        k = std::min<i64>(k, n - k);
-        T c = 1;
-        for (u64 i = 0; i < k; ++i)
-            c = c * (n - i) / (i + 1);
-        return c;
-    }
-
-
     inline Int ballBinCapX(u64 balls, u64 bins, u64 cap, std::vector<u64>& stack)
     {
         if (balls > bins * cap)

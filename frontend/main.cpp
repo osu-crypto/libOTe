@@ -102,6 +102,7 @@ int main(int argc, char** argv)
 		EAChecker(cmd);
 		return 0;
 	}
+#ifdef ENABLE_BOOST
 	if (cmd.isSet("enumerator")) {
 		// EnumToolsMain(cmd);
 		// convEnumMain(cmd);
@@ -122,14 +123,7 @@ int main(int argc, char** argv)
 		binomialCoefficientTestMain(cmd);
 	}
 #endif
-
-	bool flagSet = false;
 	
-	if (cmd.isSet("ExConvChecker"))
-	{
-		ExConvChecker(cmd);
-		return 0;
-	}
 	
 
 	// various benchmarks
