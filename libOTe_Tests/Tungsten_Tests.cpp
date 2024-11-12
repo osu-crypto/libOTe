@@ -970,8 +970,7 @@ namespace tests_libOTe
 #ifdef ENABLE_BITPOLYMUL
             oc::Timer timer;
             QuasiCyclicCode code;
-            auto p = nextPrime(n);
-            code.init(p);
+            code.init2(n, k);
             std::vector<block> c0(code.size(), ZeroBlock);
             for (auto t : rng(tt))
             {
