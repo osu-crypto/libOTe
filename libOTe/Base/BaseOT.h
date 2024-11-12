@@ -10,9 +10,11 @@
 #include "SimplestOT.h"
 #include "MasnyRindal.h"
 #include "McRosRoyTwist.h"
+#include "MasnyRindalKyber.h"
 #include "McRosRoy.h"
 #include "libOTe/Tools/Popf/EKEPopf.h"
 #include "libOTe/Tools/Popf/FeistelMulRistPopf.h"
+#include "MockOt.h"
 
 namespace osuCrypto
 {
@@ -25,10 +27,12 @@ namespace osuCrypto
     using DefaultBaseOT = MasnyRindal;
 #elif defined ENABLE_MRR
     using DefaultBaseOT = McRosRoy;
-#elif defined ENABLE_NP_KYBER
+#elif defined ENABLE_MR_KYBER
     using DefaultBaseOT = MasnyRindalKyber;
 #elif defined ENABLE_SIMPLESTOT
     using DefaultBaseOT = SimplestOT;
+#elif defined ENABLE_MOCK_OT
+    using DefaultBaseOT = INSECURE_MOCK_OT;
 #else
 #undef LIBOTE_HAS_BASE_OT
 #endif

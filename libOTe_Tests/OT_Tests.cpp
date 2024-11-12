@@ -61,19 +61,33 @@ namespace tests_libOTe
             //(i, choice, revcBlock);
             const block& senderBlock = sender[i][choice];
 
+            auto print = [&] {
+                    std::cout << "[" << i << ",0]  " << sender[i][0] << std::endl;
+                    std::cout << "[" << i << ",1]  " << sender[i][1] << std::endl;
+                    std::cout <<"[  " <<(int)choice << "]  " << recv[i] << std::endl;
+                };
+
             //if (i%512==0) {
             //    std::cout << "[" << i << ",0]--" << sender[i][0] << std::endl;
             //    std::cout << "[" << i << ",1]--" << sender[i][1] << std::endl;
             //    std::cout << (int)choice << "-- " << recv[i] << std::endl;
             //}
             if (revcBlock == ZeroBlock)
+            {
+                print();
                 throw RTE_LOC;
+            }
 
             if (neq(revcBlock, senderBlock))
+            {
+                print();
                 throw UnitTestFail();
-
+            }
             if (eq(revcBlock, sender[i][1 ^ choice]))
+            {
+                print();
                 throw UnitTestFail();
+            }
         }
 
     }
@@ -365,37 +379,19 @@ namespace tests_libOTe
                 }
             }
         }
-
-        {
-            PRNG prng(ZeroBlock);
-
-            Matrix<u8> in(16, 8);
-            prng.get((u8*)in.data(), sizeof(u8) * in.bounds()[0] * in.stride());
-
-            Matrix<u8> out(63, 2);
-            transpose(in, out);
-
-
-            Matrix<u8> out2(64, 2);
-            transpose(in, out2);
-
-            for (u64 i = 0; i < out.bounds()[0]; ++i)
-            {
-                if (memcmp(out[i].data(), out2[i].data(), out[i].size()))
-                {
-                    std::cout << "bad " << i << std::endl;
-                    throw UnitTestFail();
-                }
-            }
-        }
-
+#ifdef ENABLE_AVX
+        u64 L = 128 * 3;
+        for(u64 b = 1; b < L-1; ++b)
         {
             PRNG prng(ZeroBlock);
 
             //std::array<std::array<std::array<block, 8>, 128>, 2> data;
 
-            Matrix<u8> in(25, 9);
-            Matrix<u8> in2(32, 9);
+            u64 rows = L - b;
+            u64 cols = b;
+
+            Matrix<u8> in(rows, divCeil(cols, 8));
+            Matrix<u8> in2(rows, divCeil(cols, 8));
 
             prng.get((u8*)in.data(), sizeof(u8) * in.bounds()[0] * in.stride());
             memset(in2.data(), 0, in2.bounds()[0] * in2.stride());
@@ -408,11 +404,11 @@ namespace tests_libOTe
                 }
             }
 
-            Matrix<u8> out(72, 4);
-            Matrix<u8> out2(72, 4);
+            Matrix<u8> out(cols, divCeil(rows,8));
+            Matrix<u8> out2(cols, divCeil(rows, 8));
 
-            transpose(in, out);
-            transpose(in2, out2);
+            avx_transpose(in, out);
+            sse_transpose(in2, out2);
 
             for (u64 i = 0; i < out.bounds()[0]; ++i)
             {
@@ -420,25 +416,25 @@ namespace tests_libOTe
                 {
                     if (out[i][j] != out2[i][j])
                     {
-                        std::cout << (u32)out[i][j] << " != " << (u32)out2[i][j] << std::endl;
+                        std::cout << i <<" " <<j << " : " << (u32)out[i][j] << " != " << (u32)out2[i][j] << std::endl;
                         throw UnitTestFail();
                     }
                 }
             }
         }
+#endif
     }
 
     void OtExt_genBaseOts_Test()
     {
         
-#if defined(LIBOTE_HAS_BASE_OT) && defined(ENABLE_KOS)
-        gKosWarning = false;
         //IOService ios(0);
         //Session ep0(ios, "127.0.0.1", 1212, SessionMode::Server);
         //Session ep1(ios, "127.0.0.1", 1212, SessionMode::Client);
         //Channel senderChannel = ep1.addChannel();
         //Channel recvChannel = ep0.addChannel();
-        
+#if defined(LIBOTE_HAS_BASE_OT) && defined(ENABLE_KOS)
+
         auto sockets = cp::LocalAsyncSocket::makePair();
 
 		KosOtExtSender sender;
@@ -452,13 +448,13 @@ namespace tests_libOTe
 
         eval(proto0, proto1);
 
-		for (u64 i = 0; i < sender.mGens.size(); ++i)
+		for (u64 i = 0; i < gOtExtBaseOtCount; ++i)
 		{
 			auto b = sender.mBaseChoiceBits[i];
-			if (neq(sender.mGens[i].getSeed(), recv.mGens[i][b].getSeed()))
+			if (neq(sender.mGens.mAESs[i].getKey(), recv.mGens[b].mAESs[i].getKey()))
 				throw RTE_LOC;
 
-            if (eq(sender.mGens[i].getSeed(), recv.mGens[i][b ^ 1].getSeed()))
+            if (eq(sender.mGens.mAESs[i].getKey(), recv.mGens[b ^ 1].mAESs[i].getKey()))
                 throw RTE_LOC;
         }
 #else
@@ -470,7 +466,6 @@ namespace tests_libOTe
     void OtExt_Kos_Test()
     {
 #if defined(ENABLE_KOS)
-        gKosWarning = false;
         setThreadName("Sender");
 
         //IOService ios;
@@ -522,7 +517,6 @@ namespace tests_libOTe
     void OtExt_Kos_fs_Test()
     {
 #if defined(ENABLE_KOS)
-        gKosWarning = false;
         setThreadName("Sender");
 
 
@@ -576,7 +570,6 @@ namespace tests_libOTe
     void OtExt_Kos_ro_Test()
     {
 #if defined(ENABLE_KOS)
-        gKosWarning = false;
         setThreadName("Sender");
 
         //IOService ios;
@@ -609,8 +602,8 @@ namespace tests_libOTe
         KosOtExtSender sender;
         KosOtExtReceiver recv;
 
-        sender.mHashType = KosOtExtSender::HashType::RandomOracle;
-        recv.mHashType = KosOtExtReceiver::HashType::RandomOracle;
+        sender.mHashType = HashType::RandomOracle;
+        recv.mHashType = HashType::RandomOracle;
 
         //std::thread thrd = std::thread([&]() {
         //    setThreadName("receiver");
@@ -641,7 +634,6 @@ namespace tests_libOTe
 	void OtExt_Chosen_Test()
 	{
 #if defined(ENABLE_KOS)
-        gKosWarning = false;
 
         //IOService ios;
         //Session ep0(ios, "127.0.0.1:1212", SessionMode::Server);
@@ -726,7 +718,6 @@ namespace tests_libOTe
     void DotExt_Kos_Test()
     {
 #if defined(ENABLE_DELTA_KOS)
-        gKosWarning = false;
 
         setThreadName("Sender");
 
@@ -796,7 +787,7 @@ namespace tests_libOTe
         u64 numTrials = 4;
         for (u64 t = 0; t < numTrials; ++t)
         {
-            u64 numOTs = 4234;
+            u64 numOTs = 128;
 
             AlignedUnVector<block> recvMsg(numOTs), baseRecv(128);
             AlignedUnVector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
@@ -816,8 +807,8 @@ namespace tests_libOTe
             IknpOtExtSender sender;
             IknpOtExtReceiver recv;
 
-            sender.mHash = false;
-            recv.mHash = false;
+            sender.mHashType = HashType::NoHash;
+            recv.mHashType = HashType::NoHash;
             ;
             recv.setBaseOts(baseSend);
             auto proto0 = recv.receive(choices, recvMsg, prng0, sockets[0]);

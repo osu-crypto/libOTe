@@ -30,121 +30,127 @@
 
 namespace osuCrypto {
 
-    template <
-        typename F,
-        typename G = F,
-        typename CoeffCtx = DefaultCoeffCtx<F, G>
-    >
-    class NoisyVoleReceiver : public TimerAdapter
-    {
-    public:
-        using VecF = typename CoeffCtx::template Vec<F>;
+	template <
+		typename F,
+		typename G = F,
+		typename CoeffCtx = DefaultCoeffCtx<F, G>
+	>
+	class NoisyVoleReceiver : public TimerAdapter
+	{
+	public:
+		using VecF = typename CoeffCtx::template Vec<F>;
 
 
-        // for chosen c, compute a such htat
-        //
-        //  a = b + c * delta
-        //
-        template<typename VecG, typename VecF>
-        task<> receive(VecG& c, VecF& a, PRNG& prng,
-            OtSender& ot, Socket& chl, CoeffCtx ctx)
-        {
-            MC_BEGIN(task<>, this, &c, &a, &prng, &ot, &chl, ctx,
-                otMsg = AlignedUnVector<std::array<block, 2>>{});
+		// for chosen c, compute a such htat
+		//
+		//  a = b + c * delta
+		//
+		template<typename VecG, typename VecF>
+		task<> receive(VecG& c, VecF& a, PRNG& prng,
+			OtSender& ot, Socket& chl, CoeffCtx ctx)
+		{
+			MACORO_TRY{
 
-            setTimePoint("NoisyVoleReceiver.ot.begin");
-            otMsg.resize(ctx.template bitSize<F>());
-            MC_AWAIT(ot.send(otMsg, prng, chl));
+			auto otMsg = AlignedUnVector<std::array<block, 2>>{};
 
-            setTimePoint("NoisyVoleReceiver.ot.end");
+			setTimePoint("NoisyVoleReceiver.ot.begin");
+			otMsg.resize(ctx.template bitSize<F>());
+			co_await(ot.send(otMsg, prng, chl));
 
-            MC_AWAIT(receive(c, a, prng, otMsg, chl,ctx));
+			setTimePoint("NoisyVoleReceiver.ot.end");
 
-            MC_END();
-        }
+			co_await(receive(c, a, prng, otMsg, chl, ctx));
 
-        // for chosen c, compute a such htat
-        //
-        //  a = b + c * delta
-        //
-        template<typename VecG, typename VecF>
-        task<> receive(VecG& c, VecF& a, PRNG& _,
-            span<std::array<block, 2>> otMsg,
-            Socket& chl, CoeffCtx ctx)
-        {
-            MC_BEGIN(task<>, this, &c, &a, otMsg, &chl, ctx,
-                buff = std::vector<u8>{},
-                msg = VecF{},
-                temp = VecF{},
-                prng = std::move(PRNG{})
-            );
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
+		}
 
-            if (c.size() != a.size())
-                throw RTE_LOC;
-            if (a.size() == 0)
-                throw RTE_LOC;
+		// for chosen c, compute a such htat
+		//
+		//  a = b + c * delta
+		//
+		template<typename VecG, typename VecF>
+		task<> receive(VecG& c, VecF& a, PRNG& _,
+			span<std::array<block, 2>> otMsg,
+			Socket& chl, CoeffCtx ctx)
+		{
+			MACORO_TRY{
+			auto buff = std::vector<u8>{};
+			auto msg = VecF{};
+			auto temp = VecF{};
+			auto prng = PRNG{};
 
-            setTimePoint("NoisyVoleReceiver.begin");
+			if (c.size() != a.size())
+				throw RTE_LOC;
+			if (a.size() == 0)
+				throw RTE_LOC;
 
-            ctx.zero(a.begin(), a.end());
-            ctx.resize(msg, otMsg.size() * a.size());
-            ctx.resize(temp, 2);
+			setTimePoint("NoisyVoleReceiver.begin");
 
-            for (size_t i = 0, k = 0; i < otMsg.size(); ++i)
-            {
-                prng.SetSeed(otMsg[i][0], a.size());
+			ctx.zero(a.begin(), a.end());
+			ctx.resize(msg, otMsg.size() * a.size());
+			ctx.resize(temp, 2);
 
-                // t1 = 2^i
-                ctx.powerOfTwo(temp[1], i);
-                //std::cout << "2^i " << ctx.str(temp[1]) << "\n";
+			for (size_t i = 0, k = 0; i < otMsg.size(); ++i)
+			{
+				prng.SetSeed(otMsg[i][0], a.size());
 
-                for (size_t j = 0; j < c.size(); ++j, ++k)
-                {
-                    // msg[i,j] = otMsg[i,j,0]
-                    ctx.fromBlock(msg[k], prng.get<block>());
-                    //ctx.zero(msg.begin() + k, msg.begin() + k + 1);
-                    //std::cout << "m" << i << ",0 = " << ctx.str(msg[k]) << std::endl;
+				// t1 = 2^i
+				ctx.powerOfTwo(temp[1], i);
+				//std::cout << "2^i " << ctx.str(temp[1]) << "\n";
 
-                    // a[j] += otMsg[i,j,0]
-                    ctx.plus(a[j], a[j], msg[k]);
-                    //std::cout << "z = " << ctx.str(a[j]) << std::endl;
+				for (size_t j = 0; j < c.size(); ++j, ++k)
+				{
+					// msg[i,j] = otMsg[i,j,0]
+					ctx.fromBlock(msg[k], prng.get<block>());
+					//ctx.zero(msg.begin() + k, msg.begin() + k + 1);
+					//std::cout << "m" << i << ",0 = " << ctx.str(msg[k]) << std::endl;
 
-                    // temp = 2^i * c[j]
-                    ctx.mul(temp[0], temp[1], c[j]);
-                    //std::cout << "2^i y = " << ctx.str(temp[0]) << std::endl;
+					// a[j] += otMsg[i,j,0]
+					ctx.plus(a[j], a[j], msg[k]);
+					//std::cout << "z = " << ctx.str(a[j]) << std::endl;
 
-                    // msg[i,j] = otMsg[i,j,0] + 2^i * c[j]
-                    ctx.minus(msg[k], msg[k], temp[0]);
-                    //std::cout << "m" << i << ",0 + 2^i y = " << ctx.str(msg[k]) << std::endl;
-                }
+					// temp = 2^i * c[j]
+					ctx.mul(temp[0], temp[1], c[j]);
+					//std::cout << "2^i y = " << ctx.str(temp[0]) << std::endl;
 
-                k -= c.size();
-                prng.SetSeed(otMsg[i][1], a.size());
+					// msg[i,j] = otMsg[i,j,0] + 2^i * c[j]
+					ctx.minus(msg[k], msg[k], temp[0]);
+					//std::cout << "m" << i << ",0 + 2^i y = " << ctx.str(msg[k]) << std::endl;
+				}
 
-                for (size_t j = 0; j < c.size(); ++j, ++k)
-                {
-                    // temp = otMsg[i,j,1]
-                    ctx.fromBlock(temp[0], prng.get<block>());
-                    //ctx.zero(temp.begin(), temp.begin() + 1);
-                    //std::cout << "m" << i << ",1 = " << ctx.str(temp[0]) << std::endl;
+				k -= c.size();
+				prng.SetSeed(otMsg[i][1], a.size());
 
-                    // enc one message under the OT msg.
-                    // msg[i,j] = (otMsg[i,j,0] + 2^i * c[j]) - otMsg[i,j,1]
-                    ctx.minus(msg[k], msg[k], temp[0]);
-                    //std::cout << "m" << i << ",0 + 2^i y - m" << i << ",1 = " << ctx.str(msg[k]) << std::endl << std::endl;
-                }
-            }
+				for (size_t j = 0; j < c.size(); ++j, ++k)
+				{
+					// temp = otMsg[i,j,1]
+					ctx.fromBlock(temp[0], prng.get<block>());
+					//ctx.zero(temp.begin(), temp.begin() + 1);
+					//std::cout << "m" << i << ",1 = " << ctx.str(temp[0]) << std::endl;
 
-            buff.resize(msg.size() * ctx.template byteSize<F>());
-            ctx.serialize(msg.begin(), msg.end(), buff.begin());
+					// enc one message under the OT msg.
+					// msg[i,j] = (otMsg[i,j,0] + 2^i * c[j]) - otMsg[i,j,1]
+					ctx.minus(msg[k], msg[k], temp[0]);
+					//std::cout << "m" << i << ",0 + 2^i y - m" << i << ",1 = " << ctx.str(msg[k]) << std::endl << std::endl;
+				}
+			}
 
-            MC_AWAIT(chl.send(std::move(buff)));
-            setTimePoint("NoisyVoleReceiver.done");
+			buff.resize(msg.size() * ctx.template byteSize<F>());
+			ctx.serialize(msg.begin(), msg.end(), buff.begin());
 
-            MC_END();
-        }
+			co_await(chl.send(std::move(buff)));
+			setTimePoint("NoisyVoleReceiver.done");
 
-    };
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
+		}
+
+	};
 
 }  // namespace osuCrypto
 #endif

@@ -15,6 +15,7 @@
 #include <vector>
 #include <cryptoTools/Crypto/AES.h>
 #include <cryptoTools/Common/Timer.h>
+#include <cryptoTools/Crypto/MultiKeyAES.h>
 
 #ifdef GetMessage
 #undef GetMessage
@@ -100,9 +101,8 @@ namespace osuCrypto
         // @ chl: not used.
         task<> setBaseOts(span<std::array<block, 2>> baseRecvOts, PRNG& prng, Socket& chl) override
         {
-            MC_BEGIN(task<>, this, baseRecvOts);
             setBaseOts(baseRecvOts);
-            MC_END();
+            co_return;
         }
         
         // See other setBaseOts(...);
@@ -154,7 +154,7 @@ namespace osuCrypto
         // been sent. In this case, this method should be called.
         // @ chl: the channel that will be used to communicate
         // @ seed: a random seed that will be used in the function
-        task<> check(Socket& chl, block seed) override { MC_BEGIN(task<>); MC_END(); }
+        task<> check(Socket& chl, block seed) override { co_return; }
 
         // Allows a single NcoOtExtReceiver to be split into two, with each being 
         // independent of each other.

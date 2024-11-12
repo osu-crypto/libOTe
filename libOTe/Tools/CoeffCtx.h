@@ -82,7 +82,12 @@ namespace osuCrypto {
         OC_FORCEINLINE void fromBlock(F& ret, const block& b) {
             static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
 
-            if constexpr (sizeof(F) <= sizeof(block))
+            if constexpr (std::is_same<F,block>::value)
+            {
+                // if F is a block, just return the block.
+                ret = b;
+            }
+            else if constexpr (sizeof(F) <= sizeof(block))
             {
                 // if small, just return the bytes of b
                 memcpy(&ret, &b, sizeof(F));
@@ -151,7 +156,8 @@ namespace osuCrypto {
             static_assert(std::is_trivially_copyable<F1>::value, "memcpy is used so must be trivially_copyable.");
             static_assert(std::is_same_v<F1, F2>, "src and destication types are not the same.");
 
-            std::copy(begin, end, dstBegin);
+            memcpy((F2* __restrict) & *dstBegin, (F1 * __restrict) &*begin, std::distance(begin, end) * sizeof(F1));
+            //std::copy(begin, end, dstBegin);
         }
 
         // deserialize [begin,...,end) into  [dstBegin, ...)

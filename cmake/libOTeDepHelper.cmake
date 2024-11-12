@@ -1,3 +1,5 @@
+include_guard(GLOBAL)
+
 cmake_policy(PUSH)
 cmake_policy(SET CMP0057 NEW)
 cmake_policy(SET CMP0045 NEW)
@@ -8,6 +10,9 @@ cmake_policy(SET CMP0074 NEW)
 set(PUSHED_CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH})
 set(CMAKE_PREFIX_PATH "${OC_THIRDPARTY_HINT};${CMAKE_PREFIX_PATH}")
 
+#if(LIBOTE_BUILD)
+#    include(${CMAKE_CURRENT_LIST_DIR}/../cryptoTools/cmake/cryptoToolsDepHelper.cmake)
+#endif()
 
 ## bitpolymul
 ###########################################################################

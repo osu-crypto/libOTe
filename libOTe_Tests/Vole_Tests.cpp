@@ -192,13 +192,19 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
 
 void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd)
 {
-#if defined(ENABLE_SILENTOT) && defined(ENABLE_BITPOLYMUL)
+#if defined(ENABLE_BITPOLYMUL)
     auto debug = cmd.isSet("debug");
     for (u64 n : {128, 333})
         Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, MultType::QuasiCyclic, debug, false, false);
 #else
     throw UnitTestSkipped("ENABLE_BITPOLYMUL not defined." LOCATION);
 #endif
+}
+void Vole_Silent_Tungsten_test(const oc::CLP& cmd)
+{
+    auto debug = cmd.isSet("debug");
+    for (u64 n : {128, 33341})
+        Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, MultType::Tungsten, debug, false, false);
 }
 
 
@@ -260,6 +266,7 @@ inline u64 eval(
 
         ++rounds;
         ++idx;
+
     }
 
     auto r = macoro::sync_wait(std::move(e));
@@ -305,16 +312,48 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
                 AlignedUnVector<block> c(n), z0(n), z1(n);
                 auto p0 = recv.silentReceive(c, z0, prng, chls[0]);
                 auto p1 = send.silentSend(x, z1, prng, chls[1]);
-#if (defined ENABLE_MRR_TWIST && defined ENABLE_SSE) || \
-                defined ENABLE_MR || defined ENABLE_MRR
+                std::string baseName;
+                //
+//#if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
+//                using BaseOT = McRosRoyTwist;
+//#elif defined ENABLE_MR
+//                using BaseOT = MasnyRindal;
+//#elif defined ENABLE_MRR
+//                using BaseOT = McRosRoy;
+//#elif defined ENABLE_MR_KYBER
+
+#if defined ENABLE_MRR_TWIST && defined ENABLE_SSE
                 u64 expRound = 3;
-#else
+                baseName = "using DefaultBaseOT = McRosRoyTwist;";
+#elif defined ENABLE_MR
+                u64 expRound = 3;
+                baseName = "using DefaultBaseOT = MasnyRindal;";
+#elif defined ENABLE_MRR
+                u64 expRound = 3;
+                baseName = "using DefaultBaseOT = McRosRoy;";
+#elif defined ENABLE_MR_KYBER
+                u64 expRound = 3;
+                baseName = "using DefaultBaseOT = MasnyRindalKyber;";
+#elif defined ENABLE_SIMPLESTOT_ASM
                 u64 expRound = 5;
+                baseName = "using DefaultBaseOT = AsmSimplestOT;";
+#elif defined ENABLE_SIMPLESTOT
+                u64 expRound = 5;
+                baseName = "using DefaultBaseOT = SimplestOT;";
+#elif defined ENABLE_MOCK_OT
+                u64 expRound = 3;
+                baseName = "using DefaultBaseOT = INSECURE_MOCK_OT;";
+#else
+                baseName = "????";
+                u64 expRound = 0;
 #endif
 
                 auto rounds = eval(p0, p1, chls[1], chls[0]);
                 if (rounds != expRound)
-                    throw std::runtime_error(std::to_string(rounds) + "!=" + std::to_string(expRound) + ". " + COPROTO_LOCATION);
+                {
+                    std::cout << baseName << std::endl;
+                    throw std::runtime_error("act " + std::to_string(rounds) + "!= exp " + std::to_string(expRound) + " " + COPROTO_LOCATION);
+                }
 
 
                 for (u64 i = 0; i < n; ++i)
@@ -367,6 +406,7 @@ namespace {
         );
     }
 }
+void Vole_Silent_Tungsten_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Noisy_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_paramSweep_test(const oc::CLP& cmd) { throwDisabled(); }

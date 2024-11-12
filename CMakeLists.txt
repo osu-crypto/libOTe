@@ -4,7 +4,7 @@ if (POLICY CMP0048)
   cmake_policy(SET CMP0048 NEW)
 endif (POLICY CMP0048)
 
-project(libOTe VERSION 2.1.0)
+project(libOTe VERSION 2.2.0)
 
 include(cmake/libOTePreamble.cmake)
 
@@ -59,18 +59,18 @@ if(DEFINED LIBOTE_CPP_VER)
     unset(LIBOTE_CPP_VER CACHE )
 endif()
 if(NOT DEFINED LIBOTE_STD_VER)
-	set(LIBOTE_STD_VER 17)
+	set(LIBOTE_STD_VER 20)
 endif()
-if(NOT LIBOTE_STD_VER EQUAL 20 AND
-	NOT LIBOTE_STD_VER EQUAL 17)
-	message(FATAL_ERROR "Unknown c++ version. LIBOTE_STD_VER=${LIBOTE_STD_VER}")
+if (NOT LIBOTE_STD_VER EQUAL 23 AND
+	NOT LIBOTE_STD_VER EQUAL 20)
+	message(FATAL_ERROR "unsupported c++ version (requires 20,23). LIBOTE_STD_VER=${LIBOTE_STD_VER}")
 endif()
 set(CRYPTO_TOOLS_STD_VER ${LIBOTE_STD_VER})
 if(NOT DEFINED ENABLE_COPROTO)
     set(ENABLE_COPROTO true)
 endif()
 if(NOT ENABLE_COPROTO)
-    message("warning: setting ENABLE_BOOST as true")
+    message("warning: setting ENABLE_COPROTO as true")
     set(ENABLE_COPROTO true)
 endif()
 
@@ -80,20 +80,20 @@ endif()
 #############################################
 add_subdirectory(cryptoTools)
 
-
 #############################################
 #                CONFIGURE                  #
 #############################################
 include(cmake/buildOptions.cmake)
 include(cmake/libOTeDepHelper.cmake)
 
-file(REMOVE ${CMAKE_CURRENT_LIST_DIR}/libOTe/config.h)
-configure_file(libOTe/config.h.in libOTe/config.h)
+
 
 
 #############################################
 #               Build libOTe                #
 #############################################
+file(REMOVE ${CMAKE_CURRENT_LIST_DIR}/libOTe/config.h)
+configure_file(libOTe/config.h.in libOTe/config.h)
 
 if(ENABLE_SIMPLESTOT_ASM AND (NOT MSVC))
 	add_subdirectory(thirdparty/SimplestOT)

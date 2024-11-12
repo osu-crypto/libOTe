@@ -3,16 +3,10 @@ project(cmakeTest)
 
 add_executable(main main.cpp)
 
-if(SODIUM)
-	set(cryptoDep sodium)
-else()
-	set(cryptoDep relic)
-endif()
 
 
 find_package(libOTe REQUIRED HINTS ${LIBOTE_HINT}
 	COMPONENTS
-		${cryptoDep}
 		#sodium
 		#boost
 		#openssl
@@ -22,10 +16,10 @@ find_package(libOTe REQUIRED HINTS ${LIBOTE_HINT}
 		#no_sse
 		#no_avx
 		#bitpolymul
-		simplestot
-		mrr
+		#simplestot
+		#mrr
 		#mrr_twist
-		mr
+		#mr
 		#mr_kyber
 		kos
 		iknp
@@ -38,6 +32,14 @@ find_package(libOTe REQUIRED HINTS ${LIBOTE_HINT}
 )
 
 
-target_compile_options(main PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++14> -pthread)
+if(MSVC)
+    target_compile_options( main PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:/std:c++${CRYPTO_TOOLS_STD_VER}>
+    )
+else()
+    target_compile_options( main PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-std=c++${CRYPTO_TOOLS_STD_VER} -pthread>
+    )
+endif()
 
 target_link_libraries(main oc::libOTe)

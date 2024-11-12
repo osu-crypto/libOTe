@@ -4,25 +4,27 @@
 
 ![Build Status](https://github.com/osu-crypto/libOTe/actions/workflows/build-test.yml/badge.svg)
 
-A fast and portable C++17 library for Oblivious Transfer extension (OTe). The 
+A fast and portable C++20 library for Oblivious Transfer extension (OTe). The 
 primary design goal of this library to obtain *high performance* while being 
 *easy to use*. Checkout [version 1.6](https://github.com/osu-crypto/libOTe/releases/tag/v1.6.0) for the previous version.
-This library currently implements:
  
-* The semi-honest 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf).
-* The semi-honest 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf).
-* The semi-honest 1-out-of-2 Delta-OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
-* The semi-honest 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
-* The semi-honest 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
-* The malicious secure 1-out-of-2 Silent+Expand Convolute [[RRT23]](https://eprint.iacr.org/2023/882).
-* The malicious secure 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
-* The malicious secure 1-out-of-2 Delta-OT [[KOS15]](https://eprint.iacr.org/2015/546),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
-* The malicious 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
-* The malicious secure 1-out-of-N OT [[OOS16]](http://eprint.iacr.org/2016/933).
-* The malicious secure 1-out-of-2 base OT [NP01].
-* The malicious secure 1-out-of-2 base OT [[CO15]](https://eprint.iacr.org/2015/267.pdf) (Faster Linux ASM version disabled by default).
-* The malicious secure 1-out-of-2 base OT [[MR19]](https://eprint.iacr.org/2019/706.pdf) 
-* Several malicious secure batched 1-out-of-2 base OTs from [[MRR21]](https://eprint.iacr.org/2021/682)
+Semi-honest OT extension:
+* 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882).
+* 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf).
+* 1-out-of-2 Correlated-OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
+* 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
+* 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
+
+Malicious OT extension:
+* 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882).
+* 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
+* 1-out-of-2 Correlated-OT [[KOS15]](https://eprint.iacr.org/2015/546).
+* 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
+* 1-out-of-2 base OT, several protocols. 
+
+Vole:
+* Generic subfield noisy VOLE (semi-honest) [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf)
+* Generic subfield silent VOLE (malicious/semi-honest)  [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882).
  
 ## Introduction
  
@@ -45,7 +47,7 @@ There is one mandatory dependency on [coproto](https://github.com/Visa-Research/
 and three **optional dependencies** on [libsodium](https://doc.libsodium.org/),
 [Relic](https://github.com/relic-toolkit/relic), or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
-for Base OTs. [Boost Asio](https://www.boost.org/doc/libs/1_77_0/doc/html/boost_asio.html) tcp networking and [OpenSSL](https://www.openssl.org/) support can optionally be enabled.
+for Base OTs. [Boost Asio](https://www.boost.org/doc/libs/1_84_0/doc/html/boost_asio.html) tcp networking and [OpenSSL](https://www.openssl.org/) support can optionally be enabled.
 CMake 3.15+ is required and the build script assumes python 3.
  
 The library can be built with libsodium, all OT protocols enabled and boost asio TCP networking as
@@ -54,7 +56,7 @@ git clone https://github.com/osu-crypto/libOTe.git
 cd libOTe
 python build.py --all --boost --sodium
 ```
-The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend.exe, out/build/x64-Release/frontend/Release/frontend.exe` depending on the OS. 
+The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend, out/build/x64-Release/frontend/frontend.exe` depending on the OS. 
 
 ### Build Options
 LibOTe can be built with various only the selected protocols enabled. `-D ENABLE_ALL_OT=ON` will enable all available protocols depending on platform/dependencies. The `ON`/`OFF` options include
@@ -73,10 +75,10 @@ LibOTe can be built with various only the selected protocols enabled. `-D ENABLE
  * `ENABLE_KOS` the Keller et al [[KOS15]](https://eprint.iacr.org/2015/546) malicious protocol.
  * `ENABLE_DELTA_KOS` the Burra et al [[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf),[[KOS15]](https://eprint.iacr.org/2015/546) malicious Delta-OT protocol.
  * `ENABLE_SOFTSPOKEN_OT` the Roy [Roy22](https://eprint.iacr.org/2022/192) semi-honest/malicious protocol.
- * `ENABLE_SILENTOT` the Couteau et al [RRT23],[[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf) semi-honest/malicious protocol.
+ * `ENABLE_SILENTOT` the [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol.
 
  **Vole:**
- * `ENABLE_SILENT_VOLE` the Couteau et al [CRR21] semi-honest/malicious protocol.
+ * `ENABLE_SILENT_VOLE` the [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol.
 
  Addition options can be set for cryptoTools. See the cmake output.
 
@@ -145,9 +147,7 @@ To ensure that cmake can find libOTe, you can either install libOTe or build it 
 libOTe can be found with the following components:
 ```
 find_package(libOTe REQUIRED 
-    COMPONENTS 
-        std_14
-        std_17
+    COMPONENTS
         std_20
         
         Debug

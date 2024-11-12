@@ -33,31 +33,27 @@ namespace osuCrypto
             value_type mPow2Mask;
             block mPow2MaskBlk;
 
-            //static const auto numIdx = 
+            ExpanderModd() = default;
 
             ExpanderModd(block seed, u64 m)
-                : prng(seed, 256)
-                , modVal(m)
-                , mod(libdivide::libdivide_u64_gen(m))
             {
+                init(seed, m);
+            }
+
+            void init(block seed, u64 m)
+            {
+                prng = PRNG(seed, 256);
+                modVal = (m);
+                mod = (libdivide::libdivide_u64_gen(m));
                 mPow2 = log2ceil(modVal);
                 mIsPow2 = mPow2 == log2floor(modVal);
-                //mIsPow2 = false;
                 if (mIsPow2)
                 {
                     mPow2Mask = modVal - 1;
-                    //mPow2MaskBlk = std::array<value_type,4>{ mPow2Mask, mPow2Mask, mPow2Mask, mPow2Mask };
                     mPow2MaskBlk = std::array<value_type,2>{ mPow2Mask, mPow2Mask};
-                    //mPow2Step = divCeil(mPow2, 8);
-                    //mPow2Vals.resize(prng.mBufferByteCapacity / mPow2Step);
-                    //vals = mPow2Vals;
                 }
-                else
-                {
-                    //throw RTE_LOC;
-                }
-                    //vals = span<u64>((u64*)prng.mBuffer.data(), prng.mBuffer.size() * 2);
-                //std::cout << "mIsPow2 " << mIsPow2 << std::endl;
+
+
                 vals.resize(prng.mBuffer.size() * sizeof(block) / sizeof(vals[0]));
                 refill();
             }
@@ -67,16 +63,11 @@ namespace osuCrypto
                 idx = 0;
 
                 assert(prng.mBuffer.size() == 256);
-                //block b[8];
                 for (u64 i = 0; i < 256; i += 8)
                 {
-                    //auto idx = mPrng.mBuffer[i].get<u8>();
                     block* __restrict b = prng.mBuffer.data() + i;
                     block* __restrict k = prng.mBuffer.data() + (u8)(i - 8);
-                    //for (u64 j = 0; j < 8; ++j)
-                    //{
-                    //    b = b ^ mPrng.mBuffer.data()[idx[j]];
-                    //}
+                    
                     b[0] = AES::roundEnc(b[0], k[0]);
                     b[1] = AES::roundEnc(b[1], k[1]);
                     b[2] = AES::roundEnc(b[2], k[2]);
@@ -104,16 +95,11 @@ namespace osuCrypto
                         dst[i + 5] = src[i + 5] & mPow2MaskBlk;
                         dst[i + 6] = src[i + 6] & mPow2MaskBlk;
                         dst[i + 7] = src[i + 7] & mPow2MaskBlk;
-                        //vals[i]
-                        //vals.data()[i] = *(u64*)ptr & mPow2Mask;
-                        //ptr += mPow2Step;
-                        //++ptr;
                     }
                 }
                 else
                 {
                     memcpy(dst, src, vals.size() * sizeof(value_type));
-                    //assert(vals.size() % 32 == 0);
                     for (u64 i = 0; i < vals.size(); i += 32)
                         doMod32(vals.data() + i, &mod, modVal);
                 }

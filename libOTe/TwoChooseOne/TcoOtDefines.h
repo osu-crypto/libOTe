@@ -22,6 +22,7 @@ namespace osuCrypto
 	const u64 commStepSize(512); // TODO: try increasing this for optimization.
 	const u64 superBlkShift(3);
 	const u64 superBlkSize(1 << superBlkShift);
+	const u64 gKosChallengeRepititions(1);
 
 	enum class SilentBaseType {
 		// Use a standalone base OT protocol to generate the required base OTs
@@ -47,10 +48,10 @@ namespace osuCrypto
 	{
 		using T = typename TSpan::value_type;
 		static_assert(
-			std::is_pod<T>::value &&
-			std::is_pod<S>::value &&
+			std::is_trivial<T>::value &&
+			std::is_trivial<S>::value &&
 			((sizeof(T) % sizeof(S) == 0) ||
-			(sizeof(S) % sizeof(T) == 0)), " types must be POD and a multiple of each other.");
+			(sizeof(S) % sizeof(T) == 0)), " types must be is_trivial and a multiple of each other.");
 
 		assert(u64(src.data()) % sizeof(S) == 0);
 

@@ -1,3 +1,14 @@
+include_guard(GLOBAL)
+
+set(LIBOTE_BUILD ON)
+
+macro(EVAL var)
+     if(${ARGN})
+         set(${var} ON)
+     else()
+         set(${var} OFF)
+     endif()
+endmacro()
 
 
 if(DEFINED COPROTO_ENABLE_BOOST)
@@ -68,6 +79,7 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_SILENTOT		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_SILENT_VOLE		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	unset(ENABLE_ALL_OT CACHE)
+
 endif()
 
 
@@ -76,6 +88,8 @@ if(APPLE)
 else()
 	option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" TRUE)
 endif()
+
+option(ENABLE_MOCK_OT        "Build the insecure mock base OT" OFF)
 
 option(ENABLE_SIMPLESTOT     "Build the SimplestOT base OT" OFF)
 option(ENABLE_SIMPLESTOT_ASM "Build the assembly based SimplestOT library" OFF)
@@ -115,6 +129,9 @@ endif()
 
 option(VERBOSE_FETCH        "Print build info for fetched libraries" ON)
 
+if(ENABLE_IKNP)
+	set(ENABLE_KOS true)
+endif()
 
 message(STATUS "General Options\n=======================================================")
 
@@ -158,6 +175,10 @@ message(STATUS "Option: ENABLE_PPRF          = ${ENABLE_PPRF}\n\n")
 #               Config Checks               #
 #############################################
 
+if(ENABLE_MOCK_OT)
+	message("\n\nWarning: the libary is being build with insecure mock base OTs. ENABLE_MOCK_OT=${ENABLE_MOCK_OT}\n\n")
+endif()
+
 if(NOT UNIX OR APPLE OR MSVC)
 	#if(ENABLE_SIMPLESTOT_ASM)
 	#	message(FATAL_ERROR "ENABLE_SIMPLESTOT_ASM only supported on Linux")
@@ -188,3 +209,11 @@ endif()
 if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_NP OR ENABLE_MRR) AND NOT (ENABLE_SODIUM OR ENABLE_RELIC))
 	message(FATAL_ERROR "ENABLE_SIMPLESTOT, ENABLE_MR, ENABLE_NP, and ENABLE_MRR require ENABLE_SODIUM or ENABLE_RELIC")
 endif()
+
+if(ENABLE_IKNP AND NOT ENABLE_KOS)
+	message(FATAL_ERROR "ENABLE_IKNP requires ENABLE_KOS")
+endif()
+
+
+
+#include(${CMAKE_CURRENT_LIST_DIR}/../cryptoTools/cmake/cryptoToolsBuildOptions.cmake)

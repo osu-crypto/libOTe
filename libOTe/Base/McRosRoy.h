@@ -28,192 +28,201 @@ static_assert(0, "ENABLE_SODIUM or ENABLE_RELIC must be defined to build McRosRo
 
 namespace osuCrypto
 {
-    namespace details
-    {
-        // The Popf's PopfFunc must be plain old data, PopfIn must be convertible from an integer, and
-        // PopfOut must be a DefaultCurve::Point.
-        template<typename DSPopf>
-        class McRosRoy : public OtReceiver, public OtSender
-        {
-            using Curve = DefaultCurve::Curve;
-            using Point = DefaultCurve::Point;
-            using Number = DefaultCurve::Number;
+	namespace details
+	{
+		// The Popf's PopfFunc must be plain old data, PopfIn must be convertible from an integer, and
+		// PopfOut must be a DefaultCurve::Point.
+		template<typename DSPopf>
+		class McRosRoy : public OtReceiver, public OtSender
+		{
+			using Curve = DefaultCurve::Curve;
+			using Point = DefaultCurve::Point;
+			using Number = DefaultCurve::Number;
 
-        public:
-            typedef DSPopf PopfFactory;
+		public:
+			typedef DSPopf PopfFactory;
 
-            McRosRoy() = default;
-            McRosRoy(const PopfFactory& p) : popfFactory(p) {}
-            McRosRoy(PopfFactory&& p) : popfFactory(p) {}
+			McRosRoy() = default;
+			McRosRoy(const PopfFactory& p) : popfFactory(p) {}
+			McRosRoy(PopfFactory&& p) : popfFactory(p) {}
 
-            task<> receive(
-                const BitVector& choices,
-                span<block> messages,
-                PRNG& prng,
-                Socket& chl,
-                u64 numThreads)
-            {
-                return receive(choices, messages, prng, chl);
-            }
+			task<> receive(
+				const BitVector& choices,
+				span<block> messages,
+				PRNG& prng,
+				Socket& chl,
+				u64 numThreads)
+			{
+				return receive(choices, messages, prng, chl);
+			}
 
-            task<> send(
-                span<std::array<block, 2>> messages,
-                PRNG& prng,
-                Socket& chl,
-                u64 numThreads)
-            {
-                return send(messages, prng, chl);
-            }
+			task<> send(
+				span<std::array<block, 2>> messages,
+				PRNG& prng,
+				Socket& chl,
+				u64 numThreads)
+			{
+				return send(messages, prng, chl);
+			}
 
-            task<> receive(
-                const BitVector& choices,
-                span<block> messages,
-                PRNG& prng,
-                Socket& chl) override;
+			task<> receive(
+				const BitVector& choices,
+				span<block> messages,
+				PRNG& prng,
+				Socket& chl) override;
 
-            task<> send(
-                span<std::array<block, 2>> messages,
-                PRNG& prng,
-                Socket& chl) override;
+			task<> send(
+				span<std::array<block, 2>> messages,
+				PRNG& prng,
+				Socket& chl) override;
 
-            static_assert(std::is_pod<typename PopfFactory::ConstructedPopf::PopfFunc>::value,
-                "Popf function must be Plain Old Data");
-            static_assert(std::is_same<typename PopfFactory::ConstructedPopf::PopfOut, Point>::value,
-                "Popf must be programmable on elliptic curve points");
-
-        private:
-            PopfFactory popfFactory;
-        };
+			using T = typename PopfFactory::ConstructedPopf::PopfFunc;
 
 
-    }
+			static_assert(
+				std::is_standard_layout<T>::value&&
+				std::is_trivial<T>::value,
+				"Popf function must be Plain Old Data");
+			static_assert(std::is_same<typename PopfFactory::ConstructedPopf::PopfOut, Point>::value,
+				"Popf must be programmable on elliptic curve points");
 
-    // The McQuoid Rosulek Roy OT protocol over the main and twisted curve 
-    // with the Feistel Popf impl. See https://eprint.iacr.org/2021/682
-    using McRosRoy = details::McRosRoy<DomainSepFeistelRistPopf>;
-
-    // The McQuoid Rosulek Roy OT protocol over the main and twisted curve 
-    // with the streamlined Feistel Popf impl. See https://eprint.iacr.org/2021/682
-    using McRosRoyMul = details::McRosRoy<DomainSepFeistelMulRistPopf>;
-
-
-    ///////////////////////////////////////////////////////////////////////////////
-    /// impl 
-    ///////////////////////////////////////////////////////////////////////////////
-
-    namespace details
-    {
+		private:
+			PopfFactory popfFactory;
+		};
 
 
-        template<typename DSPopf>
-        task<> McRosRoy<DSPopf>::receive(
-            const BitVector& choices,
-            span<block> messages,
-            PRNG& prng,
-            Socket& chl)
-        {
-            MC_BEGIN(task<>,this, &choices, messages, &prng, &chl,
-                n = u64{},
-                A = Point{},
-                sk = std::vector<Number>{},
-                buff = std::vector<u8>(Point::size),
-                sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
-            );
+	}
 
-            Curve{};
-            n = choices.size();
-            sk.reserve(n);
-            sendBuff.resize(n);
+	// The McQuoid Rosulek Roy OT protocol over the main and twisted curve 
+	// with the Feistel Popf impl. See https://eprint.iacr.org/2021/682
+	using McRosRoy = details::McRosRoy<DomainSepFeistelRistPopf>;
 
-            for (u64 i = 0; i < n; ++i)
-            {
-                auto factory = popfFactory;
-                factory.Update(i);
-                auto popf = factory.construct();
+	// The McQuoid Rosulek Roy OT protocol over the main and twisted curve 
+	// with the streamlined Feistel Popf impl. See https://eprint.iacr.org/2021/682
+	using McRosRoyMul = details::McRosRoy<DomainSepFeistelMulRistPopf>;
 
-                sk.emplace_back(prng);
-                Point B = Point::mulGenerator(sk[i]);
 
-                sendBuff[i] = popf.program(choices[i], std::move(B), prng);
-            }
+	///////////////////////////////////////////////////////////////////////////////
+	/// impl 
+	///////////////////////////////////////////////////////////////////////////////
 
-            MC_AWAIT(chl.send(std::move(sendBuff)));
+	namespace details
+	{
 
-            MC_AWAIT(chl.recv(buff));
-            Curve{};
 
-            A.fromBytes(buff.data());
+		template<typename DSPopf>
+		task<> McRosRoy<DSPopf>::receive(
+			const BitVector& choices,
+			span<block> messages,
+			PRNG& prng,
+			Socket& chl)
+		{
+			MACORO_TRY{
 
-            for (u64 i = 0; i < n; ++i)
-            {
-                Point B = A * sk[i];
+			auto A = Point{};
+			auto sk = std::vector<Number>{};
+			auto buff = std::vector<u8>(Point::size);
+			auto sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{ };
 
-                RandomOracle ro(sizeof(block));
-                ro.Update(B);
-                ro.Update(i);
-                ro.Update((bool)choices[i]);
-                ro.Final(messages[i]);
-            }
+			Curve{}; // init relic
+			auto n = choices.size();
+			sk.reserve(n);
+			sendBuff.resize(n);
 
-            MC_END();
-        }
+			for (u64 i = 0; i < n; ++i)
+			{
+				auto factory = popfFactory;
+				factory.Update(i);
+				auto popf = factory.construct();
 
-        template<typename DSPopf>
-        task<> McRosRoy<DSPopf>::send(
-            span<std::array<block, 2>> msg,
-            PRNG& prng,
-            Socket& chl)
-        {
-            MC_BEGIN(task<>,this, msg, &prng, &chl,
-                curve = Curve{},
-                n = u64{},
-                A = Point{},
-                sk = Number{},
-                buff = std::vector<u8>( Point::size ),
-                recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
-            );
+				sk.emplace_back(prng);
+				Point B = Point::mulGenerator(sk[i]);
 
-            n = static_cast<u64>(msg.size());
-            sk.randomize(prng);
-            A = Point::mulGenerator(sk);
+				sendBuff[i] = popf.program(choices[i], std::move(B), prng);
+			}
 
-            assert(buff.size() == A.sizeBytes());
-            A.toBytes(buff.data());
+			co_await chl.send(std::move(sendBuff));
 
-            MC_AWAIT(chl.send(std::move(buff)));
+			co_await chl.recv(buff);
+			Curve{}; // init relic on this thread.
 
-            recvBuff.resize(n);
-            MC_AWAIT(chl.recv(recvBuff));
-            Curve{};
+			A.fromBytes(buff.data());
 
-            for (u64 i = 0; i < n; ++i)
-            {
-                auto factory = popfFactory;
-                factory.Update(i);
-                auto popf = factory.construct();
+			for (u64 i = 0; i < n; ++i)
+			{
+				Point B = A * sk[i];
 
-                Point Bz = popf.eval(recvBuff[i], 0);
-                Point Bo = popf.eval(recvBuff[i], 1);
+				RandomOracle ro(sizeof(block));
+				ro.Update(B);
+				ro.Update(i);
+				ro.Update((bool)choices[i]);
+				ro.Final(messages[i]);
+			}
 
-                Bz *= sk;
-                Bo *= sk;
+			} MACORO_CATCH(eptr) {
+				co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
+		}
 
-                RandomOracle ro(sizeof(block));
-                ro.Update(Bz);
-                ro.Update(i);
-                ro.Update((bool)0);
-                ro.Final(msg[i][0]);
+		template<typename DSPopf>
+		task<> McRosRoy<DSPopf>::send(
+			span<std::array<block, 2>> msg,
+			PRNG& prng,
+			Socket& chl)
+		{
+			MACORO_TRY{
 
-                ro.Reset();
-                ro.Update(Bo);
-                ro.Update(i);
-                ro.Update((bool)1);
-                ro.Final(msg[i][1]);
-            }
+			Curve{}; // init relic
+			auto A = Point{};
+			auto sk = Number{};
+			auto buff = std::vector<u8>(Point::size);
+			auto recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
 
-            MC_END();
-        }
-    }
+			auto n = static_cast<u64>(msg.size());
+			sk.randomize(prng);
+			A = Point::mulGenerator(sk);
+
+			assert(buff.size() == A.sizeBytes());
+			A.toBytes(buff.data());
+
+			co_await chl.send(std::move(buff));
+
+			recvBuff.resize(n);
+			co_await chl.recv(recvBuff);
+			Curve{}; // init relic on this thread
+
+			for (u64 i = 0; i < n; ++i)
+			{
+				auto factory = popfFactory;
+				factory.Update(i);
+				auto popf = factory.construct();
+
+				Point Bz = popf.eval(recvBuff[i], 0);
+				Point Bo = popf.eval(recvBuff[i], 1);
+
+				Bz *= sk;
+				Bo *= sk;
+
+				RandomOracle ro(sizeof(block));
+				ro.Update(Bz);
+				ro.Update(i);
+				ro.Update((bool)0);
+				ro.Final(msg[i][0]);
+
+				ro.Reset();
+				ro.Update(Bo);
+				ro.Update(i);
+				ro.Update((bool)1);
+				ro.Final(msg[i][1]);
+			}
+
+			} MACORO_CATCH(eptr) {
+				co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
+		}
+	}
 }
 
 #endif

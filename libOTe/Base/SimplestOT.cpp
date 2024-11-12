@@ -16,23 +16,22 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
-		using namespace DefaultCurve;
-		Curve curve;
-		MC_BEGIN(task<>, this, &choices, msg, &prng, &chl,
-			n = u64{},
-			buff = std::vector<u8>{},
-			comm = std::array<u8, RandomOracle::HashSize>{},
-			seed = block{},
-			b = std::vector<Number>{},
-			B = std::array<Point, 2>{},
-			A = Point{}
-		);
+		MACORO_TRY{
 
-		n = msg.size();
+		using namespace DefaultCurve;
+		Curve{};// init relic
+		auto buff = std::vector<u8>{};
+		auto comm = std::array<u8, RandomOracle::HashSize>{};
+		auto seed = block{};
+		auto b = std::vector<Number>{};
+		auto B = std::array<Point, 2>{};
+		auto A = Point{ };
+
+		auto n = msg.size();
 
 		buff.resize(Point::size + RandomOracle::HashSize * mUniformOTs);
-		MC_AWAIT(chl.recv(buff));
-		Curve{};
+		co_await chl.recv(buff);
+		Curve{}; // init relic on this thread.
 
 
 		A.fromBytes(buff.data());
@@ -52,11 +51,11 @@ namespace osuCrypto
 			B[choices[i]].toBytes(&buff[Point::size * i]);
 		}
 
-		MC_AWAIT(chl.send(std::move(buff)));
+		co_await chl.send(std::move(buff));
 
 		if (mUniformOTs)
 		{
-			MC_AWAIT(chl.recv(seed));
+			co_await chl.recv(seed);
 
 			RandomOracle ro;
 			std::array<u8, RandomOracle::HashSize> comm2;
@@ -78,7 +77,10 @@ namespace osuCrypto
 			ro.Final(msg[i]);
 		}
 
-		MC_END();
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	task<> SimplestOT::send(
@@ -86,24 +88,19 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
+		MACORO_TRY{
 		using namespace DefaultCurve;
-		Curve{};
+		Curve{}; // init relic
 
 
-		MC_BEGIN(task<>, this, msg, &prng, &chl,
-			n = u64{},
-			a = Number{},
-			A = Point{},
-			B = Point{},
-			buff = std::vector<u8>{},
-			seed = block{}
-		);
+		auto buff = std::vector<u8>{};
+		auto seed = block{ };
 
-		Curve{};
-		n = msg.size();
+		auto n = msg.size();
 
+		auto a = Number{};
 		a.randomize(prng);
-		A = Point::mulGenerator(a);
+		auto A = Point::mulGenerator(a);
 
 		buff.resize(Point::size + RandomOracle::HashSize * mUniformOTs);
 		A.toBytes(buff.data());
@@ -120,21 +117,22 @@ namespace osuCrypto
 		}
 
 
-		MC_AWAIT(chl.send(std::move(buff)));
+		co_await chl.send(std::move(buff));
 
 		buff.resize(Point::size * n);
-		MC_AWAIT(chl.recv(buff));
+		co_await chl.recv(buff);
 
 		if (mUniformOTs)
 		{
 			// decommit to the seed now that we have their messages.
-			MC_AWAIT(chl.send(std::move(seed)));
+			co_await chl.send(std::move(seed));
 		}
 
 		Curve{};
 		A *= a;
 		for (u64 i = 0; i < n; ++i)
 		{
+			auto B = Point{};
 			B.fromBytes(&buff[Point::size * i]);
 
 			B *= a;
@@ -152,11 +150,14 @@ namespace osuCrypto
 			ro.Final(msg[i][1]);
 		}
 
-
-		MC_END();
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 }
 #endif
+
 #ifdef ENABLE_SIMPLESTOT_ASM
 extern "C"
 {
@@ -177,7 +178,7 @@ namespace osuCrypto
 			rand.get = [](void* ctx, unsigned char* dest, unsigned long long length) {
 				PRNG& prng = *(PRNG*)ctx;
 				prng.get(dest, length);
-			};
+				};
 			rand.ctx = &prng;
 
 			return rand;
@@ -395,34 +396,13 @@ namespace osuCrypto
 				//std::cout << "send 2 " << i << std::endl;
 				send.gen4(i, sMsg);
 
-				//MC_AWAIT(chl.send(sd));
+				//co_await (chl.send(sd));
 				//std::cout << "recv 3 " << i << std::endl;
 				recv.gen4(i, rMsg);
 				//std::cout << "recv 4 " << i << std::endl;
 			}
 		}
 	}
-
-	//void AsmSimplestOT::receive(
-	//	const BitVector& choices,
-	//	span<block> msg,
-	//	PRNG& prng,
-	//	Channel& chl)
-	//{
-	//	RecvState rs;
-	//	auto buff = rs.recvData();
-	//	chl.recv(buff);
-	//	//std::cout << "Recv 1 " << hexPrnt(buff) << std::endl;
-	//	rs.init(prng);
-
-	//	for (u32 i = 0; i < msg.size(); i += 4)
-	//	{
-	//		auto sendData = rs.send4(i, choices);
-	//		chl.asyncSend(std::move(sendData));
-	//		rs.gen4(i, msg);
-	//	}
-
-	//}
 
 
 	task<> AsmSimplestOT::receive(
@@ -431,80 +411,46 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& chl)
 	{
-
-		MC_BEGIN(task<>, this, &choices, msg, &prng, &chl,
-			rs = AlginedState<RecvState>(),
-			i = u64{},
-			rd = span<u8>{},
-			sd = std::vector<u8>{}
-		);
-
-		//prng.SetSeed(ZeroBlock);
-		//std::cout << "recv 0" << std::endl;
-		rd = rs->recvData();
-		MC_AWAIT(chl.recv(rd));
-		//std::cout << "recv 1 " << hexPrnt(rd) << std::endl;
+		MACORO_TRY{
+		auto rs = AlginedState<RecvState>();
+		auto rd = rs->recvData();
+		co_await chl.recv(rd);
 		rs->init(prng);
-		//std::cout << "recv 2" << std::endl;
 
-		for (i = 0; i < msg.size(); i += 4)
+		for (u64 i = 0; i < msg.size(); i += 4)
 		{
-			sd = rs->send4(i, choices);
-			MC_AWAIT(chl.send(sd));
-			//std::cout << "recv 3 " << i << std::endl;
+			auto sd = rs->send4(i, choices);
+			co_await chl.send(sd);
 			rs->gen4(i, msg);
-			//std::cout << "recv 4 " << i << std::endl;
 		}
-		MC_END();
-	}
 
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
+	}
 	task<> AsmSimplestOT::send(
 		span<std::array<block, 2>> msg,
 		PRNG& prng,
 		Socket& chl)
-	{
-		MC_BEGIN(task<>, this, msg, &prng, &chl,
-			ss = AlginedState<SendState>(),
-			i = u64{},
-			rd = span<u8>{},
-			sd = std::vector<u8>{}
-		);
+	{ 
+		MACORO_TRY {
+		auto ss = AlginedState<SendState>();
 
-		//prng.SetSeed(ZeroBlock);
+		auto sd = ss->init(prng);
+		co_await chl.send(sd);
 
-		//std::cout << "send 0" << std::endl;
-		sd = ss->init(prng);
-		//std::cout << "send 1 " << hexPrnt(sd) << std::endl;
-		MC_AWAIT(chl.send(sd));
-
-		for (i = 0; i < msg.size(); i += 4)
+		for (u64 i = 0; i < msg.size(); i += 4)
 		{
-			rd = ss->recv4();
-			MC_AWAIT(chl.recv(rd));
-			//std::cout << "send 2 " << i << std::endl;
+			auto rd = ss->recv4();
+			co_await chl.recv(rd);
 			ss->gen4(i, msg);
-			//std::cout << "send 3 " << i << std::endl;
 		}
-		MC_END();
+
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
-
-	//void AsmSimplestOT::send(
-	//	span<std::array<block, 2>> msg,
-	//	PRNG& prng,
-	//	Channel& chl)
-	//{
-
-	//	SendState ss;
-	//	auto sendData = ss.init(prng);
-	//	chl.asyncSend(std::move(sendData));
-
-	//	for (u32 i = 0; i < msg.size(); i += 4)
-	//	{
-	//		auto buff = ss.recv4();
-	//		chl.recv(buff);
-
-	//		ss.gen4(i, msg);
-	//	}
-	//}
 }
 #endif

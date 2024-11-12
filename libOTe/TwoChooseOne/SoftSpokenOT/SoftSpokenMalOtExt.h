@@ -153,6 +153,12 @@ namespace osuCrypto
 		SoftSpokenMalOtSender() {
 			init();
 		}
+
+		SoftSpokenMalOtSender(u64 fieldBits)
+		{
+			init(fieldBits);
+		}
+		
 		SoftSpokenMalOtSender(SoftSpokenMalOtSender&& o) = default;
 		SoftSpokenMalOtSender& operator=(SoftSpokenMalOtSender&& o) = default;
 
@@ -214,18 +220,7 @@ namespace osuCrypto
 			span<block> messages,
 			span<block> temp);
 
-	private:
-		// These functions don't keep information around to compute the hashes.
-		//using Base::generateRandom;
-		//using Base::generateChosen;
-
 	protected:
-		//using ChunkerBase = ChunkedReceiver<
-		//	SoftSpokenMalOtSender,
-		//	std::tuple<block>
-		//>;
-		//friend ChunkerBase;
-		//friend ChunkerBase::Base;
 
 		u64 chunkSize() const { return std::max<u64>(roundUpTo(mBase.wSize(), 2), (u64)2 * 128); }
 		u64 paddingSize() const { return std::max<u64>(chunkSize(), mBase.wPadded()) - chunkSize(); }
@@ -254,14 +249,10 @@ namespace osuCrypto
 
 			task<> recv(Socket& chl)
 			{
-				MC_BEGIN(task<>, this, &chl,
-					keyAndSeed = std::array<block, 2>{}
-				);
-				MC_AWAIT(chl.recv(keyAndSeed));
+				auto keyAndSeed = std::array<block, 2>{};
+				co_await chl.recv(keyAndSeed);
 				rtcr.setKey(keyAndSeed[0], keyAndSeed[1]);
-				MC_END();
 			}
-
 
 			constexpr inline u64 chunkSize() const { return 128; }
 
@@ -285,6 +276,13 @@ namespace osuCrypto
 		{
 			init();
 		}
+
+		SoftSpokenMalOtReceiver(u64 fieldBits)
+		{
+			init(fieldBits);
+		}
+
+
 		SoftSpokenMalOtReceiver(SoftSpokenMalOtReceiver&& o) 
 			:mBase(std::move(o.mBase))
 			,mExtraV(std::move(o.mExtraV))
@@ -326,12 +324,12 @@ namespace osuCrypto
 			return r;
 		}
 
-		std::unique_ptr<OtExtReceiver> split() 
+		std::unique_ptr<OtExtReceiver> split() override
 		{
 			return std::unique_ptr<OtExtReceiver>(new SoftSpokenMalOtReceiver(splitBase()));
 		}
 
-		task<> receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl) ;
+		task<> receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl) override;
 		// Low level functions.
 
 		task<> runBatch(Socket& chl, span<block>messages, span<block> choices);
@@ -343,11 +341,6 @@ namespace osuCrypto
 
 		OC_FORCEINLINE void processChunk(
 			u64 nChunk, u64 numUsed, span<block> messages, block choices);
-
-	private:
-		// These functions don't keep information around to compute the hashes.
-		//using Base::generateRandom;
-		//using Base::generateChosen;
 
 	protected:
 

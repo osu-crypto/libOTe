@@ -384,12 +384,11 @@ namespace osuCrypto
 
 	task<> SmallFieldVoleSender::expand(Socket& chl,PRNG& prng, u64 numThreads)
 	{
-		MC_BEGIN(task<>, this, &chl, &prng, numThreads,
-			corrections = std::vector<std::array<block, 2>>{},
-			hashes = std::vector<std::array<block, 2>>{},
-			seedView = MatrixView<block>{},
-			_ = AlignedUnVector<block>{}
-		);
+		MACORO_TRY{
+		auto corrections = std::vector<std::array<block, 2>>{};
+			auto hashes = std::vector<std::array<block, 2>>{};
+			auto seedView = MatrixView<block>{};
+			auto _ = AlignedUnVector<block>{};
 
 		
 		assert(mSeeds.size() == 0  && mNumVoles && mNumVoles <= mNumVolesPadded);
@@ -397,7 +396,7 @@ namespace osuCrypto
 		std::fill(mSeeds.begin(), mSeeds.end(), block(0, 0));
 		mSeeds.resize(mNumVoles * fieldSize());
 
-		MC_AWAIT(mPprf->expand(chl, _, prng.get(), mSeeds, PprfOutputFormat::ByTreeIndex, false, 1));
+		co_await (mPprf->expand(chl, _, prng.get(), mSeeds, PprfOutputFormat::ByTreeIndex, false, 1));
 		mSeeds.resize(mNumVolesPadded * fieldSize());
 		seedView = MatrixView<block>(mSeeds.data(), mNumVoles, fieldSize());
 
@@ -427,32 +426,34 @@ namespace osuCrypto
 				hasher.Final(hashes[row]);
 			}
 
-			MC_AWAIT(chl.send(std::move(corrections)));
-			MC_AWAIT(chl.send(std::move(hashes)));
+			co_await (chl.send(std::move(corrections)));
+			co_await (chl.send(std::move(hashes)));
 		}
 
-		MC_END();
+	} MACORO_CATCH(eptr) {
+		if (!chl.closed()) co_await chl.close();
+		std::rethrow_exception(eptr);
+	}
 	}
 
 
 	task<> SmallFieldVoleReceiver::expand(Socket& chl, PRNG& prng, u64 numThreads)
 	{
-		MC_BEGIN(task<>, this, &chl, &prng, numThreads, 
-			seeds = AlignedUnVector<block>{},
-			seedsFull = MatrixView<block>{},
-			totals = std::vector<std::array<block, 2>>{},
-			entryHashes = std::vector<std::array<block, 2>>{},
-			corrections = std::vector<std::array<block, 2>>{},
-			hashes = std::vector<std::array<block, 2>>{},
-			seedMatrix = (block*)nullptr
-		);
+		MACORO_TRY{
+		auto seeds = AlignedUnVector<block>{};
+			auto seedsFull = MatrixView<block>{};
+			auto totals = std::vector<std::array<block, 2>>{};
+			auto entryHashes = std::vector<std::array<block, 2>>{};
+			auto corrections = std::vector<std::array<block, 2>>{};
+			auto hashes = std::vector<std::array<block, 2>>{};
+			auto seedMatrix = (block*)nullptr;
 
 		assert(mSeeds.size() == 0 && mNumVoles && mNumVoles <= mNumVolesPadded);
 		mSeeds.resize(mNumVolesPadded * (fieldSize() - 1));
 		std::fill(mSeeds.begin(), mSeeds.end(), block(0, 0));
 
 		seeds.resize(mNumVoles * fieldSize());
-		MC_AWAIT(mPprf->expand(chl, seeds, PprfOutputFormat::ByTreeIndex, false, 1));
+		co_await (mPprf->expand(chl, seeds, PprfOutputFormat::ByTreeIndex, false, 1));
 		seedsFull = MatrixView<block>(seeds.data(), mNumVoles, fieldSize());
 
 		// Check consistency
@@ -482,8 +483,8 @@ namespace osuCrypto
 
 			corrections.resize(mNumVoles, { block::allSame(0) });
 			hashes.resize(mNumVoles, { block::allSame(0) });
-			MC_AWAIT(chl.recv(corrections));
-			MC_AWAIT(chl.recv(hashes));
+			co_await (chl.recv(corrections));
+			co_await (chl.recv(hashes));
 
 			{
 				bool eq = true;
@@ -548,7 +549,10 @@ namespace osuCrypto
 			}
 		}
 
-		MC_END();
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	// TODO: Malicious version. Should use an actual hash function for bottom layer of tree.

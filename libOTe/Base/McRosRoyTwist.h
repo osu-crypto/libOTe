@@ -89,7 +89,7 @@ namespace osuCrypto
 				Socket& chl) override;
 
 
-			static_assert(std::is_pod<typename PopfFactory::ConstructedPopf::PopfFunc>::value,
+			static_assert(std::is_trivial<typename PopfFactory::ConstructedPopf::PopfFunc>::value,
 				"Popf function must be Plain Old Data");
 			static_assert(std::is_same<typename PopfFactory::ConstructedPopf::PopfOut, Block256>::value,
 				"Popf must be programmable on 256-bit blocks");
@@ -139,19 +139,12 @@ namespace osuCrypto
 		template<typename DSPopf>
 		inline task<> McRosRoyTwist<DSPopf>::receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
 		{
-
-			MC_BEGIN(task<>,
-				this,
-				&choices,
-				&prng,
-				&chl,
-				messages,
-				n = choices.size(),
-				sk = std::vector<Scalar25519>{},
-				curveChoice = std::vector<u8>{},
-				A = std::array<Monty25519, 2>{},
-				sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
-			);
+			MACORO_TRY{
+			auto n = choices.size();
+			auto sk = std::vector<Scalar25519>{};
+			auto curveChoice = std::vector<u8>{};
+			auto A = std::array<Monty25519, 2>{};
+			auto sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
 
 			sk.reserve(n);
 			curveChoice.reserve(n);
@@ -172,9 +165,9 @@ namespace osuCrypto
 				sendBuff[i] = popf.program(choices[i], curveToBlock(B, prng), prng);
 			}
 
-			MC_AWAIT(chl.send(std::move(sendBuff)));
+			co_await chl.send(std::move(sendBuff));
 
-			MC_AWAIT(chl.recv(A));
+			co_await chl.recv(A);
 
 			for (u64 i = 0; i < n; ++i)
 			{
@@ -187,31 +180,30 @@ namespace osuCrypto
 				ro.Final(messages[i]);
 			}
 
-			MC_END();
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
+
 
 		template<typename DSPopf>
 		inline task<> McRosRoyTwist<DSPopf>::send(span<std::array<block, 2>> msg, PRNG& prng, Socket& chl)
-		{
-			MC_BEGIN(task<>,
-				this,
-				msg,
-				&prng,
-				&chl,
-				n = static_cast<u64>(msg.size()),
-				A = std::vector<Monty25519>{},
-				sk = Scalar25519(prng),
-				recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{}
-			);
+		{ 
+			MACORO_TRY{
 
-			A = {
-				Monty25519::wholeGroupGenerator * sk, 
+			auto n = static_cast<u64>(msg.size());
+			auto sk = Scalar25519(prng);
+			auto recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
+
+			auto A = std::vector<Monty25519>{
+				Monty25519::wholeGroupGenerator * sk,
 				Monty25519::wholeTwistGroupGenerator * sk };
 
-			MC_AWAIT(chl.send(std::move(A)));
+			co_await chl.send(std::move(A));
 
 			recvBuff.resize(n);
-			MC_AWAIT(chl.recv(recvBuff));
+			co_await chl.recv(recvBuff);
 
 
 			Monty25519 Bz, Bo;
@@ -241,7 +233,10 @@ namespace osuCrypto
 				ro.Final(msg[i][1]);
 			}
 
-			MC_END();
+			} MACORO_CATCH(eptr) {
+				if (!chl.closed()) co_await chl.close();
+				std::rethrow_exception(eptr);
+			}
 		}
 
 		template<typename DSPopf>

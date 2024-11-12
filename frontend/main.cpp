@@ -1,13 +1,9 @@
 #include <iostream>
-#include "libOTe/Tools/Tungsten/TungstenSampler.h"
-
-//using namespace std;
 #include "tests_cryptoTools/UnitTests.h"
 #include "libOTe_Tests/UnitTests.h"
 #include <cryptoTools/Common/Defines.h>
 #include "cryptoTools/Crypto/RandomOracle.h"
 
-using namespace osuCrypto;
 
 #include <string.h>
 #include <stdio.h>
@@ -45,9 +41,8 @@ using namespace osuCrypto;
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
 
+using namespace osuCrypto;
 #ifdef ENABLE_IKNP
-using namespace oc;
-
 void minimal()
 {
 	// Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
@@ -100,17 +95,23 @@ int main(int argc, char** argv)
 	CLP cmd;
 	cmd.parse(argc, argv);
 
-#ifdef ENABLE_BOOST
+	bool flagSet = false;
+
+	if (cmd.isSet("EAChecker"))
+	{
+		EAChecker(cmd);
+		return 0;
+	}
 	if (cmd.isSet("enumerator")) {
-        // EnumToolsMain(cmd);
-        // convEnumMain(cmd);
-        // blockEnumMain(cmd);
-        // repeaterEnumMain(cmd);
-        // expandingBlockEnumMain(cmd);
-        blockEnumTestMain(cmd);
-        // compositionEnumMain(cmd);
-        // TODO Uncomment when ready
-        // nonrecConvEnumMain(cmd);
+		// EnumToolsMain(cmd);
+		// convEnumMain(cmd);
+		// blockEnumMain(cmd);
+		// repeaterEnumMain(cmd);
+		// expandingBlockEnumMain(cmd);
+		blockEnumTestMain(cmd);
+		// compositionEnumMain(cmd);
+		// TODO Uncomment when ready
+		// nonrecConvEnumMain(cmd);
 		return 0;
 	}
     if (cmd.isSet("minimumdistance")) {
@@ -124,6 +125,13 @@ int main(int argc, char** argv)
 
 	bool flagSet = false;
 	
+	if (cmd.isSet("ExConvChecker"))
+	{
+		ExConvChecker(cmd);
+		return 0;
+	}
+	
+
 	// various benchmarks
 	if (cmd.isSet("bench"))
 	{
@@ -131,14 +139,20 @@ int main(int argc, char** argv)
 			QCCodeBench(cmd);
 		else if (cmd.isSet("silent"))
 			SilentOtBench(cmd);
+		else if (cmd.isSet("pprf"))
+			PprfBench(cmd);
 		else if (cmd.isSet("vole2"))
 			VoleBench2(cmd);
 		else if (cmd.isSet("ea"))
 			EACodeBench(cmd);
 		else if (cmd.isSet("ec"))
 			ExConvCodeBench(cmd);
+		else if (cmd.isSet("ecold"))
+			ExConvCodeOldBench(cmd);
 		else if (cmd.isSet("tungsten"))
 			TungstenCodeBench(cmd);
+		else if (cmd.isSet("aes"))
+			AESBenchmark(cmd);
 
 		return 0;
 	}

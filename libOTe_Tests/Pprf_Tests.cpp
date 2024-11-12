@@ -51,16 +51,16 @@ void Tools_Pprf_expandOne_test_impl(u64 domain, bool program)
     auto sSums = span<std::array<block, 2>>{};
     auto sLast = span<u8>{};
 
-    pprf::TreeAllocator mTreeAlloc;
+    //pprf::TreeAllocator mTreeAlloc;
     sLevels.resize(depth);
     rLevels.resize(depth);
 
 
-    mTreeAlloc.reserve(2, (1ull << depth) + 2);
+    //mTreeAlloc.reserve(2, (1ull << depth) + 2);
+    AlignedUnVector<block> sTree, rTree;
 
-
-    pprf::allocateExpandTree(mTreeAlloc, sLevels);
-    pprf::allocateExpandTree(mTreeAlloc, rLevels);
+    pprf::allocateExpandTree(domain, sTree, sLevels, false);
+    pprf::allocateExpandTree(domain, rTree, rLevels, false);
     using VecF = typename Ctx::template Vec<F>;
     VecF sLeafLevel(8ull * domain);
     VecF rLeafLevel(8ull * domain);
@@ -173,6 +173,7 @@ void Tools_Pprf_test_impl(
     u64 numPoints, 
     bool program, 
     PprfOutputFormat  format,
+    bool eagerSend,
     bool verbose)
 {
 
@@ -226,26 +227,16 @@ void Tools_Pprf_test_impl(
 
     std::vector<u64> points(numPoints);
     recver.getPoints(points, format);
+    sender.mEagerSend = eagerSend;
+    recver.mEagerSend = eagerSend;
 
     // a = b + points * delta
     auto p0 = sender.expand(sockets[0], delta, prng.get(), b, format, program, threads);
     auto p1 = recver.expand(sockets[1], a, format, program, threads);
 
 
-    try
-    {
-        eval(p0, p1);
-    }
-    catch (std::exception& e)
-    {
-        sockets[0].close();
-        sockets[1].close();
-        macoro::sync_wait(macoro::when_all_ready(
-            sockets[0].flush(),
-            sockets[1].flush()
-        ));
-        throw;
-    }
+    eval(p0, p1);
+    
 
     if (format == PprfOutputFormat::Callback)
     {
@@ -388,10 +379,10 @@ void Tools_Pprf_inter_test(const CLP& cmd)
 {
     auto f = PprfOutputFormat::Interleaved;
     auto v = cmd.isSet("v");
-    for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true, false })
+    for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true, false }) for (auto e : { true, false })
     {
-        Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, v);
-        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, v);
+        Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, e, v);
+        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, e, v);
     }
 }
 
@@ -403,10 +394,10 @@ void Tools_Pprf_ByLeafIndex_test(const CLP& cmd)
 
     auto f = PprfOutputFormat::ByLeafIndex;
     auto v = cmd.isSet("v");
-    for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true/*, false */})
+    for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true/*, false */}) for (auto e : { true/*, false */})
     {
-        Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, v);
-        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, v);
+        Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, e, v);
+        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, e, v);
     }
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
@@ -424,8 +415,8 @@ void Tools_Pprf_ByTreeIndex_test(const oc::CLP& cmd)
     auto v = cmd.isSet("v");
     for (auto d : { 32,3242 }) for (auto n : { 8, 19}) for (auto p : { true/*, false*/ })
     {
-        Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, v);
-        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, v);
+        Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, false, v);
+        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, false, v);
     }
 
 #else
@@ -443,8 +434,8 @@ void Tools_Pprf_callback_test(const oc::CLP& cmd)
     auto v = cmd.isSet("v");
     for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true/*, false */})
     {
-        Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, v);
-        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, v);
+        Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, false, v);
+        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, false, v);
     }
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
