@@ -35,6 +35,7 @@ using namespace osuCrypto;
 #include "libOTe/Tools/Tungsten/ExpandingBlockEnumerator.h"
 #include "libOTe/Tools/Tungsten/BlockEnumerator.h"
 #include "libOTe/Tools/Tungsten/BlockEnumeratorTest.h"
+#include "libOTe/Tools/Tungsten/BinomialCoefficientTest.h"
 #include "libOTe/Tools/Tungsten/CompositionEnumerator.h"
 #include "libOTe/Tools/Tungsten/NonrecConvEnumerator.h"
 #include "libOTe/Tools/Tungsten/RepeaterEnumerator.h"
@@ -116,6 +117,9 @@ int main(int argc, char** argv)
         minimumDistanceMain(cmd);
         // minimumDistanceTestMain(cmd);
     }
+	if (cmd.isSet("binomial")) {
+		binomialCoefficientTestMain(cmd);
+	}
 #endif
 
 	bool flagSet = false;
