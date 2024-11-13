@@ -56,7 +56,6 @@ namespace osuCrypto {
     template<typename I, typename R>
     void compute_next_distribution(const std::vector<R> &old_distribution,
                                    std::vector<R> &new_distribution,
-                                   const std::vector<I> &n_choose_w,
                                    u64 multiplier,
                                    u64 n,
                                    u64 sigma) {
@@ -77,8 +76,11 @@ namespace osuCrypto {
 //                    std::cout << "n " << n << std::endl;
 //                    std::cout << "enumerator " << enumerator << std::endl;
 //                    std::cout << "n choose w " <<n_choose_w[w] << std::endl;
-                assert(enumerator <= n_choose_w[w]);
-                new_distribution[h] += (old_distribution[w] / R(n_choose_w[w]) * enumerator);
+// 
+                // NOTE this n_choose_w value is not recomputed each time as the function caches the values in the Pascal triangle
+                I n_choose_w = choose_<I>(n, w); 
+                assert(enumerator <= n_choose_w);
+                new_distribution[h] += (old_distribution[w] / R(n_choose_w) * enumerator);
             }
         }
     }
@@ -157,7 +159,7 @@ namespace osuCrypto {
     */
 
     template<typename I, typename R>
-    std::vector<R> minimum_distance_v1(u64 expander, u64 multiplier, u64 num_iters,
+    std::vector<R> minimum_distance(u64 expander, u64 multiplier, u64 num_iters,
                                        u64 k, u64 n, u64 sigma, u64 sigma_expander) {
         // TODO Assumes G's sigma is the same for all iterations (except expanding step)
         // std::cout << "Computing minimum distance..." << std::endl;
@@ -167,7 +169,7 @@ namespace osuCrypto {
         assert(sigma <= n);
         assert(num_iters >= 1);
         assert(n >= k);
-        assert(e > 1); // need to be expanding
+        assert(e > 1); // need to be expanding (otherwise no hope to have good minimum distance)
         assert(n % k == 0);
         assert(n % sigma == 0);
 
@@ -183,19 +185,13 @@ namespace osuCrypto {
         }
          */
 
-        // Save all n choose w as used at all iterations (but not expansion step)
-        // n + 1 space
-        std::vector<I> n_choose_w(n + 1);
-        for (size_t w = 0; w <= n; w++) {
-            n_choose_w[w] = choose_<I>(n, w);
-        }
-
         // 2 * (n + 1) space
         std::vector<std::vector<R>> distributions(2, std::vector<R>(n + 1, 0)); // distribution for w = 0 to w = n
 
+        // Compute distribution for the expansion step
         // Expansion step is slightly different from the iterations
-        // e.g. w starts at 1 (as we do not consider hw=0 input, we pass expander instead of multiplier)
-        // as 1. we are expanding and 2. c_w = k choose w, so they divide each other
+        // At the beginning there are c_w = k choose w inputs of weight w<=k
+        // After expansion, c_w (for w<=n) depends on what expander we use
         compute_expanding_distribution<I, R>(distributions[0], expander, k, n, e, sigma_expander);
 
         // Compute distributions for iterations
@@ -203,14 +199,11 @@ namespace osuCrypto {
             // Compute distributions[(iter + 1) % 2]
             compute_next_distribution<I, R>(distributions[iter % 2],
                                             distributions[(iter + 1) % 2],
-                                            n_choose_w,
                                             multiplier,
                                             n, sigma);
         }
 
-        // Now take whichever of distributions[0]/distributions[1] was filled last
-        // and find at which index the sum >= 1. That is the minimum distance
-        // u64 minimum_distance = minimum_distance_from_distribution<R>(n, distributions[num_iters % 2]);
+        // Now return the distribution associated with the last iteration
 
         // Check the sum of the final distribution is equal to the sum of the initial distribution
         R final_distribution_sum = std::reduce(distributions[num_iters % 2].begin(),
@@ -229,7 +222,9 @@ namespace osuCrypto {
     }
 
     void benchmarks() {
-        // expander, multiplier, num_iters, k, n, sigma, sigma_expander (0 if repeater)
+        // expander (0: repeater, 1: block expander), 
+        // multiplier (0: block, 1: non recursive convolution), 
+        // num_iters, k, n, sigma, sigma_expander (0 if repeater)
 
         //
         // varying iterations, everything else fixed
@@ -246,15 +241,18 @@ namespace osuCrypto {
                 {1, 0, 1, 10, 100, 10, 5},
         };
         for (const auto & param : params) {
-            // TODO remove when ready
+            // TODO remove when implemented
             if (param[1] != 0) assert(false);
-            std::vector<Rat> expected_distribution = minimum_distance_v1<Int, Rat>(param[0],
+            // Compute the distribution after the last iteration
+            std::vector<Rat> expected_distribution = minimum_distance<Int, Rat>(param[0],
                                                                                    param[1],
                                                                                    param[2],
                                                                                    param[3],
                                                                                    param[4],
                                                                                    param[5],
                                                                                    param[6]);
+            // Now take the distribution that was returned in the function above
+            // and find at which index the sum >= 1. That is the minimum distance
             u64 expected_md = minimum_distance_from_distribution<Rat>(param[4], expected_distribution);
             /*std::cout << "expander " << param[0] << ", "
                       << "multiplier " << param[1] << ", "
@@ -294,7 +292,7 @@ namespace osuCrypto {
                                                      "if 1 then non-recursive convolution enumerator"
                   << std::endl;
 
-        std::vector<Rat> distribution = minimum_distance_v1<Int, Rat>(expander, multiplier,
+        std::vector<Rat> distribution = minimum_distance<Int, Rat>(expander, multiplier,
                                                             num_iters, k, n,
                                                             sigma, sigma_expander);
         u64 min_distance_v1 = minimum_distance_from_distribution<Rat>(n, distribution);

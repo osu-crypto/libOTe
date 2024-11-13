@@ -315,7 +315,7 @@ namespace osuCrypto {
         for (const auto & param : params) {
             // TODO remove when ready
             if (param[1] != 0) assert(false);
-            std::vector<Rat> expected_distribution = minimum_distance_v1<Int, Rat>(param[0],
+            std::vector<Rat> expected_distribution = minimum_distance<Int, Rat>(param[0],
                                                                                    param[1],
                                                                                    param[2],
                                                                                    param[3],
