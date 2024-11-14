@@ -5,7 +5,6 @@
 
 #include <iostream>
 
-
 namespace osuCrypto {
 
     template<typename I, typename R>
@@ -20,7 +19,8 @@ namespace osuCrypto {
         for (size_t q = 0; q <= k_over_sigma; q++) {
             // Part 1: 2^{-e\sigma q}
             // assert(e * sigma * q <= 64);
-            R scale = R(1.0) / boost::multiprecision::pow(boost::multiprecision::cpp_int(2), e * sigma * q); // R(1 << e * sigma * q);
+            // R scale = R(1.0) / boost::multiprecision::pow(boost::multiprecision::cpp_int(2), e * sigma * q); // R(1 << e * sigma * q);
+            R scale(1, boost::multiprecision::cpp_int(1) << (e * sigma * q));
             // std::cerr << "scale " << scale << std::endl;
 
             // Part 2: E_{w,q}

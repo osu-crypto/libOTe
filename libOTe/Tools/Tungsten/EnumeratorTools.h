@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_map>
 #include "cryptoTools/Common/CLP.h"
+#include <omp.h>
 
 #ifdef ENABLE_BOOST
 #include <boost/multiprecision/cpp_bin_float.hpp>
@@ -463,17 +464,21 @@ namespace osuCrypto {
         // Static cache for Pascal's Triangle
         static std::vector<std::vector<T>> cache;
 
-        // Resize the cache if necessary
-        if (cache.size() <= n) {
-            cache.resize(n + 1);
-        }
+#pragma omp critical
+        {
+            // Resize the cache if necessary
+            if (cache.size() <= n) {
+                cache.resize(n + 1);
+            }
 
-        // Resize the specific row if necessary
-        if (cache[n].size() <= k) {
-            cache[n].resize(k + 1, -1); // Use -1 to denote uncomputed values
+            // Resize the specific row if necessary
+            if (cache[n].size() <= k) {
+                cache[n].resize(k + 1, -1); // Use -1 to denote uncomputed values
+            }
         }
 
         // Return cached value if it exists
+#pragma omp critical
         if (cache[n][k] != -1) return cache[n][k];
 
         // Use a 1D vector to store the current row of Pascal's Triangle
@@ -489,6 +494,7 @@ namespace osuCrypto {
         }
 
         // Store the result in the cache before returning
+#pragma omp critical
         cache[n][k] = row[k];
         return row[k];
     }

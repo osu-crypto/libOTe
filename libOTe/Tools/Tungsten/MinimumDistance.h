@@ -2,6 +2,7 @@
 #define LIBOTE_MINIMUMDISTANCE_H
 
 #include <numeric>
+#include <omp.h>
 #include <vector>
 
 #include "BlockEnumerator.h"
@@ -60,6 +61,15 @@ namespace osuCrypto {
                                    u64 n,
                                    u64 sigma) {
         std::fill(new_distribution.begin(), new_distribution.end(), R(0));
+
+        // Precompute old_distribution[w] / R(n_choose_w) so that we do only n instead of n^2 times
+        std::vector<R> count_fraction(n + 1);
+        for (size_t w = 0; w <= n; w++) {
+            // NOTE this n_choose_w value is not recomputed each time as the function caches the values in the Pascal triangle
+            count_fraction[w] = old_distribution[w] / R(choose_<I>(n, w));
+        }
+
+#pragma omp parallel for collapse(2) reduction(+:new_distribution[:n+1])
         for (size_t h = 0; h <= n; h++) {
             for (size_t w = 0; w <= n; w++) {
                 R enumerator = 0;
@@ -76,11 +86,7 @@ namespace osuCrypto {
 //                    std::cout << "n " << n << std::endl;
 //                    std::cout << "enumerator " << enumerator << std::endl;
 //                    std::cout << "n choose w " <<n_choose_w[w] << std::endl;
-// 
-                // NOTE this n_choose_w value is not recomputed each time as the function caches the values in the Pascal triangle
-                I n_choose_w = choose_<I>(n, w); 
-                assert(enumerator <= n_choose_w);
-                new_distribution[h] += (old_distribution[w] / R(n_choose_w) * enumerator);
+                new_distribution[h] += (count_fraction[w] * enumerator);
             }
         }
     }
@@ -222,6 +228,7 @@ namespace osuCrypto {
     }
 
     void benchmarks() {
+
         // expander (0: repeater, 1: block expander), 
         // multiplier (0: block, 1: non recursive convolution), 
         // num_iters, k, n, sigma, sigma_expander (0 if repeater)
@@ -230,15 +237,14 @@ namespace osuCrypto {
         // varying iterations, everything else fixed
         //
         std::vector<std::vector<u64>> params = {
-                {1, 0, 1, 10, 20, 10, 5},
-                {1, 0, 1, 10, 30, 10, 5},
-                {1, 0, 1, 10, 40, 10, 5},
-                {1, 0, 1, 10, 50, 10, 5},
-                {1, 0, 1, 10, 60, 10, 5},
-                {1, 0, 1, 10, 70, 10, 5},
-                {1, 0, 1, 10, 80, 10, 5},
-                {1, 0, 1, 10, 90, 10, 5},
-                {1, 0, 1, 10, 100, 10, 5},
+                //{0, 0, 2, 4, 8, 8, 0},
+                //{0, 0, 2, 8, 16, 16, 0},
+                //{0, 0, 2, 16, 32, 32, 0},
+                //{0, 0, 2, 32, 64, 64, 0},
+                //{0, 0, 2, 64, 128, 128, 0},
+                //{0, 0, 2, 128, 256, 256, 0},
+                //{0, 0, 2, 256, 512, 512, 0},
+                {0, 0, 2, 512, 1024, 64, 0},
         };
         for (const auto & param : params) {
             // TODO remove when implemented
@@ -263,6 +269,7 @@ namespace osuCrypto {
                       << "sigma_expander " << param[6]  << ", ";
             std::cout << "Expected minimum distance " << expected_md << std::endl;*/
             std::cout << expected_md << std::endl;
+            std::cout << "DONE";
         }
         std::cout << "finished" << std::endl;
     }
