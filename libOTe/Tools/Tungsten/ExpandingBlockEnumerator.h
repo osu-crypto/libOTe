@@ -9,7 +9,7 @@
 namespace osuCrypto {
 
     template<typename I, typename R>
-    R expanding_block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma) {
+    R expanding_block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma, std::vector<std::vector<I>>& pascal_triangle) {
         assert(n % k == 0);
         size_t e = n / k;
 
@@ -19,7 +19,7 @@ namespace osuCrypto {
         if (h < w || h > ((e-1) * k + w)) {
             return 0;
         }
-        return block_enum<I, R>(w, h - w, k, (e-1) * k, sigma);
+        return block_enum<I, R>(w, h - w, k, (e-1) * k, sigma, pascal_triangle);
     }
 
     inline void expanding_block_enum(oc::CLP& cmd) {
@@ -37,7 +37,8 @@ namespace osuCrypto {
         std::cout << "n: " << n << std::endl;
         std::cout << "sigma: " << sigma << std::endl;
 
-        Rat expanding_block_enumerator = expanding_block_enum<Int, Rat>(w, h, k, n, sigma);
+        std::vector<std::vector<Int>> pascal_triangle;
+        Rat expanding_block_enumerator = expanding_block_enum<Int, Rat>(w, h, k, n, sigma, pascal_triangle);
         std::cout << "Expanding Block Enumerator: " << expanding_block_enumerator << std::endl;
     }
 

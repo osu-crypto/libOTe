@@ -72,6 +72,8 @@ namespace osuCrypto {
     }
 
     void block_enumerator_tests() {
+        std::vector<std::vector<Int>> pascal_triangle;
+
         // w, h, k, n, sigma
         std::vector<std::vector<u64>> params = {
                 {0,0,4,8,2},
@@ -84,7 +86,8 @@ namespace osuCrypto {
                                                            param[1],
                                                            param[2],
                                                            param[3],
-                                                           param[4]);
+                                                           param[4], 
+                                                           pascal_triangle);
             Rat true_enumerator = block_enum_true_v2<Rat>(param[0],
                                                           param[1],
                                                           param[2],
@@ -100,6 +103,8 @@ namespace osuCrypto {
     inline void blockEnumTestMain(oc::CLP& cmd) {
         block_enumerator_tests();
 
+        std::vector<std::vector<Int>> pascal_triangle;
+
         std::cout << "Computing true and expected enumerator for the block construction..." << std::endl;
 
         u64 w = cmd.getOr("w", 3); // input weight
@@ -114,7 +119,7 @@ namespace osuCrypto {
         std::cout << "n: " << n << std::endl;
         std::cout << "sigma: " << sigma << std::endl;
 
-        Rat expected_enumerator = block_enum<Int, Rat>(w, h, k, n, sigma);
+        Rat expected_enumerator = block_enum<Int, Rat>(w, h, k, n, sigma, pascal_triangle);
         std::cout << "Expected Block Enumerator: " << expected_enumerator << std::endl;
 
         Rat true_enumerator = block_enum_true_v2<Rat>(w, h, k, n, sigma);

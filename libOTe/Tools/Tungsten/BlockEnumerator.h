@@ -8,7 +8,7 @@
 namespace osuCrypto {
 
     template<typename I, typename R>
-    R block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma) {
+    R block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma, std::vector<std::vector<I>>& pascal_triangle) {
         assert(w <= k && h <= n && sigma <= k);
         assert(k% sigma == 0 && n % sigma == 0);
         assert(n % k == 0);
@@ -25,11 +25,11 @@ namespace osuCrypto {
 
             // Part 2: E_{w,q}
             // std::cout  << (w-q) << "," << q << "," << (sigma-1) << std::endl;
-            I E_wq = choose_<I>(k_over_sigma, q) * labeledBallBinCap<I>(w, q, sigma);
+            I E_wq = choose_pascal<I>(k_over_sigma, q, pascal_triangle) * labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
             // std::cerr << "E_wq " << E_wq << std::endl;
 
             // Part 3: E_{q,h} = e * sigma * q choose h
-            I E_qh = choose_<I>(e * sigma * q, h);
+            I E_qh = choose_pascal<I>(e * sigma * q, h, pascal_triangle);
             // std::cerr << "E_qh " << E_qh << std::endl;
 
             // Putting it all together
@@ -54,7 +54,8 @@ namespace osuCrypto {
         std::cout << "n: " << n << std::endl;
         std::cout << "sigma: " << sigma << std::endl;
 
-        Rat block_enumerator = block_enum<Int, Rat>(w, h, k, n, sigma);
+        std::vector<std::vector<Int>> pascal_triangle;
+        Rat block_enumerator = block_enum<Int, Rat>(w, h, k, n, sigma, pascal_triangle);
         std::cout << "Block Enumerator: " << block_enumerator << std::endl;
     }
 

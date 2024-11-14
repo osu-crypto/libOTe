@@ -280,11 +280,13 @@ namespace osuCrypto
                 if (r + this->outOnesPerAlmostTerm * this->v + t1 != this->h)
                     throw RTE_LOC;
 
-                auto E1 = ballsBins<T>(z, terminatingRuns + 1);
-                auto E2 = choose_<T>(f0 + f1, f0);
-                auto E3 = ballsBins<T>(this->v, t1 + 1);
-                auto E4 = ballBinCap<T>(t0, this->v + t1, this->stateSize - 2);
-                auto E5 = ballsBins<T>(t1 + this->v, terminatingRuns+1);
+                std::vector<std::vector<T>> pascal_triangle;
+
+                auto E1 = ballsBins<T>(z, terminatingRuns + 1, pascal_triangle);
+                auto E2 = choose_pascal<T>(f0 + f1, f0, pascal_triangle);
+                auto E3 = ballsBins<T>(this->v, t1 + 1, pascal_triangle);
+                auto E4 = ballBinCap<T>(t0, this->v + t1, this->stateSize - 2, pascal_triangle);
+                auto E5 = ballsBins<T>(t1 + this->v, terminatingRuns+1, pascal_triangle);
                 auto eg = E1 * E2 * E3 * E4 * E5;
 
                 if (this->verbose > 1)
@@ -484,9 +486,9 @@ namespace osuCrypto
     }
 
     template<typename T>
-    T accumulate(u64 n, u64 w, u64 h)
+    T accumulate(u64 n, u64 w, u64 h, std::vector<std::vector<T>> &pascal_triangle)
     {
-        return choose_<T>(n - h, w / 2) * choose_<T>(h - 1, divCeil(w, 2) - 1);
+        return choose_pascal<T>(n - h, w / 2, pascal_triangle) * choose_pascal<T>(h - 1, divCeil(w, 2) - 1, pascal_triangle);
     }
 
 
@@ -513,8 +515,8 @@ namespace osuCrypto
         //e.setB(b);
         //e.setR(r);
 
-
-        auto exp = accumulate<Int>(n, w, h);
+        std::vector<std::vector<Int>> pascal_triangle;
+        auto exp = accumulate<Int>(n, w, h, pascal_triangle);
 
         u64 f0 = 0;
         //u64 g = h;

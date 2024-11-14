@@ -2,7 +2,7 @@
 #define LIBOTE_MINIMUMDISTANCE_H
 
 #include <numeric>
-#include <omp.h>
+#include <stdexcept>
 #include <vector>
 
 #include "BlockEnumerator.h"
@@ -33,7 +33,8 @@ namespace osuCrypto {
                                         u64 k,
                                         u64 n,
                                         u64 e,
-                                        u64 sigma_expander) { // only for the expanding block
+                                        u64 sigma_expander,
+                                        std::vector<std::vector<I>> &pascal_triangle) { // only for the expanding block
         assert(e == n / k);
         for (size_t h = 0; h <= n; h++) {
             // note that for repeater, we do NOT need this loop, but used now for modularity
@@ -41,41 +42,89 @@ namespace osuCrypto {
             for (size_t w = 1; w <= k; w++) {
                 if (expander == 0) {
                     // repeater
-                    distribution[h] += repeater_enum<I>(w, h, k, e);
+                    distribution[h] += repeater_enum<I>(w, h, k, e, pascal_triangle);
                     assert(distribution[0] == 0);
                 } else if (expander == 1) {
                     assert(sigma_expander > 0);
                     assert(sigma_expander <= k);
                     assert(k % sigma_expander == 0);
                     // block expander (identity + block)
-                    distribution[h] += expanding_block_enum<I, R>(w, h, k, n, sigma_expander);
+                    distribution[h] += expanding_block_enum<I, R>(w, h, k, n, sigma_expander, pascal_triangle);
                 }
             }
         }
     }
+
+
+    template<typename I, typename R>
+    void distribution_thread_function(u64 start_h, u64 end_h, u64 n, u64 multiplier, u64 sigma,
+            const std::vector<R>& count_fraction, std::vector<R>& new_distribution,
+            std::vector<std::vector<I>> pascal_triangle) {
+        for (u64 h = start_h; h < end_h; ++h) {
+            for (u64 w = 0; w <= n; ++w) {
+                R enumerator = 0;
+                if (multiplier == 0) {
+                    // Use the thread-specific copy of pascal_triangle
+                    enumerator = block_enum<I, R>(w, h, n, n, sigma, pascal_triangle);
+                }
+                else if (multiplier == 1) {
+                    // TODO: non-recursive convolution
+                    assert(false);
+                }
+
+                // Safely update the shared new_distribution[h] (one element per h)
+                // Note no need to lock it as each thread operates on different unique index h in new_distribution
+                new_distribution[h] += (count_fraction[w] * enumerator);
+            }
+        }
+    }
+
 
     template<typename I, typename R>
     void compute_next_distribution(const std::vector<R> &old_distribution,
                                    std::vector<R> &new_distribution,
                                    u64 multiplier,
                                    u64 n,
-                                   u64 sigma) {
+                                   u64 sigma, 
+                                   std::vector<std::vector<I>>& pascal_triangle) {
         std::fill(new_distribution.begin(), new_distribution.end(), R(0));
 
         // Precompute old_distribution[w] / R(n_choose_w) so that we do only n instead of n^2 times
         std::vector<R> count_fraction(n + 1);
         for (size_t w = 0; w <= n; w++) {
             // NOTE this n_choose_w value is not recomputed each time as the function caches the values in the Pascal triangle
-            count_fraction[w] = old_distribution[w] / R(choose_<I>(n, w));
+            count_fraction[w] = old_distribution[w] / R(choose_pascal<I>(n, w, pascal_triangle));
         }
 
-#pragma omp parallel for collapse(2) reduction(+:new_distribution[:n+1])
-        for (size_t h = 0; h <= n; h++) {
+        // 16 as my computer has 16 cores
+        // 50 picked heuristically
+        u64 num_cores = 16;
+        u64 heuristic = ceil((n+1) / 50.);
+        u64 num_threads = (heuristic < num_cores) ? heuristic : num_cores;
+        // Calculate chunk size for each thread
+        u64 chunk_size = (n + 1) / num_threads;
+        std::vector<std::thread> threads;
+
+        for (int i = 0; i < num_threads; ++i) {
+            u64 start_h = i * chunk_size;
+            u64 end_h = (i == num_threads - 1) ? (n + 1) : (start_h + chunk_size);
+
+            // Start each thread with its range of `h` and thread-specific pascal_triangle
+            threads.emplace_back(distribution_thread_function<I, R>, start_h, end_h, n, multiplier, sigma, 
+                std::cref(count_fraction), std::ref(new_distribution), pascal_triangle);
+        }
+
+        // Join threads to ensure all complete
+        for (auto& t : threads) {
+            t.join();
+        }
+
+        /*for (size_t h = 0; h <= n; h++) {
             for (size_t w = 0; w <= n; w++) {
                 R enumerator = 0;
                 if (multiplier == 0) {
                     // block enumerator
-                    enumerator = block_enum<I, R>(w, h, n, n, sigma);
+                    enumerator = block_enum<I, R>(w, h, n, n, sigma, pascal_triangle);
                 } else if (multiplier == 1) {
                     // non-recursive convolution
                     // TODO
@@ -88,7 +137,7 @@ namespace osuCrypto {
 //                    std::cout << "n choose w " <<n_choose_w[w] << std::endl;
                 new_distribution[h] += (count_fraction[w] * enumerator);
             }
-        }
+        }*/
     }
 
     template<typename R>
@@ -170,6 +219,8 @@ namespace osuCrypto {
         // TODO Assumes G's sigma is the same for all iterations (except expanding step)
         // std::cout << "Computing minimum distance..." << std::endl;
 
+        std::vector<std::vector<I>> pascal_triangle;
+
         u64 e = n / k;
 
         assert(sigma <= n);
@@ -198,7 +249,7 @@ namespace osuCrypto {
         // Expansion step is slightly different from the iterations
         // At the beginning there are c_w = k choose w inputs of weight w<=k
         // After expansion, c_w (for w<=n) depends on what expander we use
-        compute_expanding_distribution<I, R>(distributions[0], expander, k, n, e, sigma_expander);
+        compute_expanding_distribution<I, R>(distributions[0], expander, k, n, e, sigma_expander, pascal_triangle);
 
         // Compute distributions for iterations
         for (size_t iter = 0; iter < num_iters; iter++) {
@@ -206,7 +257,8 @@ namespace osuCrypto {
             compute_next_distribution<I, R>(distributions[iter % 2],
                                             distributions[(iter + 1) % 2],
                                             multiplier,
-                                            n, sigma);
+                                            n, sigma,
+                                            pascal_triangle);
         }
 
         // Now return the distribution associated with the last iteration
@@ -217,7 +269,7 @@ namespace osuCrypto {
         // Sum initial distribution
         R initial_distribution_sum = 0;
         for (size_t w = 1; w <= k; w++) {
-            initial_distribution_sum += R(choose_<I>(k, w));
+            initial_distribution_sum += R(choose_pascal<I>(k, w, pascal_triangle));
         }
         std::cout << "Initial distribution sum: " << initial_distribution_sum << std::endl;
         std::cout << "Final distribution sum: " << final_distribution_sum << std::endl;
@@ -269,7 +321,6 @@ namespace osuCrypto {
                       << "sigma_expander " << param[6]  << ", ";
             std::cout << "Expected minimum distance " << expected_md << std::endl;*/
             std::cout << expected_md << std::endl;
-            std::cout << "DONE";
         }
         std::cout << "finished" << std::endl;
     }

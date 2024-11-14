@@ -10,13 +10,14 @@ namespace osuCrypto {
     template<typename R>
     R composition_enum(u64 w, u64 h, u64 n1,
                        std::vector<Rat> &e1,
-                       std::vector<Rat> &e2) {
+                       std::vector<Rat> &e2,
+                       std::vector<std::vector<R>> &pascal_triangle) {
         assert(e1.size() == (n1 + 1));
         assert(e2.size() == (n1 + 1));
 
         R enumerator = 0;
         for (size_t h1 = 0; h1 <= n1; h1++) {
-            enumerator += (e1[h1] * e2[h1] / choose_<R>(n1, h1));
+            enumerator += (e1[h1] * e2[h1] / choose_pascal<R>(n1, h1, pascal_triangle));
         }
         return enumerator;
     }
@@ -34,7 +35,8 @@ namespace osuCrypto {
         std::cout << "h: " << h << std::endl;
         std::cout << "n1: " << n1 << std::endl;
 
-        Rat composition_enumerator = composition_enum<Rat>(w, h, n1, e1, e2);
+        std::vector<std::vector<Rat>> pascal_triangle;
+        Rat composition_enumerator = composition_enum<Rat>(w, h, n1, e1, e2, pascal_triangle);
         std::cout << "Composition Enumerator: " << composition_enumerator << std::endl;
 
         assert(composition_enumerator == Rat(74) / 3);
