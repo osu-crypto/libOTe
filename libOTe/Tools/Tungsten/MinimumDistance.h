@@ -11,6 +11,8 @@
 #include "EnumeratorTools.h"
 #include "RepeaterEnumerator.h"
 
+#include <boost/multiprecision/cpp_dec_float.hpp>
+
 namespace osuCrypto {
 
     template<typename R>
@@ -213,6 +215,14 @@ namespace osuCrypto {
     }
     */
 
+    void print_distribution(std::vector<Rat> &distribution) {
+        std::cout << "Printing distribution: " << std::endl;
+        for (const auto& d : distribution) {
+            std::cout << boost::multiprecision::cpp_dec_float_100(d) << std::endl;
+        }
+        std::cout << "Finished printing distribution. " << std::endl;
+    }
+
     template<typename I, typename R>
     std::vector<R> minimum_distance(u64 expander, u64 multiplier, u64 num_iters,
                                        u64 k, u64 n, u64 sigma, u64 sigma_expander) {
@@ -250,6 +260,7 @@ namespace osuCrypto {
         // At the beginning there are c_w = k choose w inputs of weight w<=k
         // After expansion, c_w (for w<=n) depends on what expander we use
         compute_expanding_distribution<I, R>(distributions[0], expander, k, n, e, sigma_expander, pascal_triangle);
+        //print_distribution(distributions[0]);
 
         // Compute distributions for iterations
         for (size_t iter = 0; iter < num_iters; iter++) {
@@ -259,6 +270,7 @@ namespace osuCrypto {
                                             multiplier,
                                             n, sigma,
                                             pascal_triangle);
+            print_distribution(distributions[(iter + 1) % 2]);
         }
 
         // Now return the distribution associated with the last iteration
@@ -296,7 +308,11 @@ namespace osuCrypto {
                 //{0, 0, 2, 64, 128, 128, 0},
                 //{0, 0, 2, 128, 256, 256, 0},
                 //{0, 0, 2, 256, 512, 512, 0},
-                {0, 0, 2, 512, 1024, 64, 0},
+            {0, 0, 2, 256, 512, 32, 0},
+            //{0, 0, 2, 2048, 4096, 128, 0},
+            //{0, 0, 2, 2048, 4096, 256, 0},
+            //{0, 0, 2, 2048, 4096, 512, 0},
+            //{0, 0, 2, 2048, 4096, 1024, 0},
         };
         for (const auto & param : params) {
             // TODO remove when implemented
