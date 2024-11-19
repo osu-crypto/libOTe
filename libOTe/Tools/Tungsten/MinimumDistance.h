@@ -57,9 +57,32 @@ namespace osuCrypto {
         }
     }
 
+    template<typename I, typename R>
+    void distribution_thread_function_v2(u64 start_w, u64 end_w, u64 n, u64 multiplier, u64 sigma,
+        const std::vector<R>& count_fraction, std::vector<R>& thread_partial_counts,
+        std::vector<std::vector<I>> pascal_triangle) {
+        for (u64 w = start_w; w < end_w; ++w) {
+            for (u64 h = 0; h <= n; ++h) {
+                R enumerator = 0;
+                if (multiplier == 0) {
+                    // Use the thread-specific copy of pascal_triangle
+                    enumerator = block_enum<I, R>(w, h, n, n, sigma, pascal_triangle);
+                }
+                else if (multiplier == 1) {
+                    // TODO: non-recursive convolution
+                    assert(false);
+                }
+
+                // Safely update the shared thread_partial_counts[h] (one element per h)
+                // Note no need to lock it as each thread operates on different copy of thread_partial_counts
+                thread_partial_counts[h] += (count_fraction[w] * enumerator);
+            }
+        }
+    }
+
 
     template<typename I, typename R>
-    void distribution_thread_function(u64 start_h, u64 end_h, u64 n, u64 multiplier, u64 sigma,
+    void distribution_thread_function_v1(u64 start_h, u64 end_h, u64 n, u64 multiplier, u64 sigma,
             const std::vector<R>& count_fraction, std::vector<R>& new_distribution,
             std::vector<std::vector<I>> pascal_triangle) {
         for (u64 h = start_h; h < end_h; ++h) {
@@ -89,6 +112,9 @@ namespace osuCrypto {
                                    u64 n,
                                    u64 sigma, 
                                    std::vector<std::vector<I>>& pascal_triangle) {
+        assert(old_distribution.size() == n + 1);
+        assert(new_distribution.size() == n + 1);
+
         std::fill(new_distribution.begin(), new_distribution.end(), R(0));
 
         // Precompute old_distribution[w] / R(n_choose_w) so that we do only n instead of n^2 times
@@ -101,24 +127,32 @@ namespace osuCrypto {
         // 16 as my computer has 16 cores
         // 50 picked heuristically
         u64 num_cores = 16;
-        u64 heuristic = ceil((n+1) / 50.);
+        u64 heuristic = ceil(new_distribution.size() / 50.);
         u64 num_threads = (heuristic < num_cores) ? heuristic : num_cores;
         // Calculate chunk size for each thread
-        u64 chunk_size = (n + 1) / num_threads;
+        u64 chunk_size = new_distribution.size() / num_threads;
         std::vector<std::thread> threads;
+        std::vector<std::vector<R>> thread_partial_counts(num_threads, std::vector<R>(new_distribution.size()));
 
-        for (int i = 0; i < num_threads; ++i) {
-            u64 start_h = i * chunk_size;
-            u64 end_h = (i == num_threads - 1) ? (n + 1) : (start_h + chunk_size);
+        for (int t = 0; t < num_threads; ++t) {
+            u64 start_w = t * chunk_size;
+            u64 end_w = (t == num_threads - 1) ? new_distribution.size() : (start_w + chunk_size);
 
-            // Start each thread with its range of `h` and thread-specific pascal_triangle
-            threads.emplace_back(distribution_thread_function<I, R>, start_h, end_h, n, multiplier, sigma, 
-                std::cref(count_fraction), std::ref(new_distribution), pascal_triangle);
+            // Start each thread with its range of `w` and thread-specific pascal_triangle
+            threads.emplace_back(distribution_thread_function_v2<I, R>, start_w, end_w, n, multiplier, sigma, 
+                std::cref(count_fraction), std::ref(thread_partial_counts[t]), pascal_triangle);
         }
 
         // Join threads to ensure all complete
         for (auto& t : threads) {
             t.join();
+        }
+
+        // Add thread_partial_counts into new_distribution
+        for (u64 t = 0; t < num_threads; ++t) {
+            for (u64 i = 0; i < new_distribution.size(); ++i) {
+                new_distribution[i] += thread_partial_counts[t][i];
+            }
         }
 
         /*for (size_t h = 0; h <= n; h++) {
@@ -308,7 +342,7 @@ namespace osuCrypto {
                 //{0, 0, 2, 64, 128, 128, 0},
                 //{0, 0, 2, 128, 256, 256, 0},
                 //{0, 0, 2, 256, 512, 512, 0},
-            {0, 0, 2, 256, 512, 32, 0},
+            {0, 0, 2, 512, 1024, 64, 0},
             //{0, 0, 2, 2048, 4096, 128, 0},
             //{0, 0, 2, 2048, 4096, 256, 0},
             //{0, 0, 2, 2048, 4096, 512, 0},

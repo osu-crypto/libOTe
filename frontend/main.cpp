@@ -116,8 +116,8 @@ int main(int argc, char** argv)
 		return 0;
 	}
     if (cmd.isSet("minimumdistance")) {
-        //minimumDistanceMain(cmd);
-        minimumDistanceTestMain(cmd);
+        minimumDistanceMain(cmd);
+        //minimumDistanceTestMain(cmd);
     }
 	if (cmd.isSet("binomial")) {
 		binomialCoefficientTestMain(cmd);
