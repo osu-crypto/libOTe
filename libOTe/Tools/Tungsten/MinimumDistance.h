@@ -270,7 +270,7 @@ namespace osuCrypto {
                                             multiplier,
                                             n, sigma,
                                             pascal_triangle);
-            print_distribution(distributions[(iter + 1) % 2]);
+            // print_distribution(distributions[(iter + 1) % 2]);
         }
 
         // Now return the distribution associated with the last iteration
