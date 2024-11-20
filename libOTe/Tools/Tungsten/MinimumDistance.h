@@ -60,19 +60,24 @@ namespace osuCrypto {
     template<typename I, typename R>
     void distribution_thread_function_v2(u64 start_w, u64 end_w, u64 n, u64 multiplier, u64 sigma,
         const std::vector<R>& count_fraction, std::vector<R>& thread_partial_counts,
+        const std::vector<R> &block_enum_part,
         std::vector<std::vector<I>> pascal_triangle) {
+        assert(multiplier == 0); // TODO only block enumerator supported now
+        // (non-recursive convolution not yet supported)
+       
+        // Do not use the block_enum function, but unroll the function to avoid recomputing stuff
         for (u64 w = start_w; w < end_w; ++w) {
+            // precompute as much from block_enum as you can as soon as possible (a lot of it is independent of h)
+            std::vector<R> block_enum_part2(block_enum_part.size());
+            for (size_t q = 0; q < block_enum_part.size(); q++) {
+                block_enum_part2[q] = block_enum_part[q] * labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
+            }
+
             for (u64 h = 0; h <= n; ++h) {
                 R enumerator = 0;
-                if (multiplier == 0) {
-                    // Use the thread-specific copy of pascal_triangle
-                    enumerator = block_enum<I, R>(w, h, n, n, sigma, pascal_triangle);
+                for (size_t q = 0; q < block_enum_part2.size(); q++) {
+                    enumerator += block_enum_part2[q] * choose_pascal<I>(sigma * q, h, pascal_triangle);
                 }
-                else if (multiplier == 1) {
-                    // TODO: non-recursive convolution
-                    assert(false);
-                }
-
                 // Safely update the shared thread_partial_counts[h] (one element per h)
                 // Note no need to lock it as each thread operates on different copy of thread_partial_counts
                 thread_partial_counts[h] += (count_fraction[w] * enumerator);
@@ -134,13 +139,37 @@ namespace osuCrypto {
         std::vector<std::thread> threads;
         std::vector<std::vector<R>> thread_partial_counts(num_threads, std::vector<R>(new_distribution.size()));
 
+        // precompute as much from block_enum as you can as soon as possible (a lot of it is independent of w, h)
+        size_t k_over_sigma = n / sigma; // note k==n at this step
+        std::vector<R> block_enum_part;
+        block_enum_part.reserve(k_over_sigma + 1);
+        // Precompute the base scaling factor
+        I base_factor = I(1) << sigma;
+        I current_factor = 1; // Start with 1 (2^0)
+        for (u64 q = 0; q <= k_over_sigma; q++) {
+            block_enum_part.emplace_back(1, current_factor);
+            block_enum_part[q] *= choose_pascal<I>(k_over_sigma, q, pascal_triangle);
+            // Incrementally compute the next power of 2
+            current_factor *= base_factor;
+        }
+        // ensure sigma * q choose h is precomputed in pascal_triangle for all q, h before invoking each thread
+        for (u64 q = 0; q <= k_over_sigma; q++) {
+            u64 sigma_q = sigma * q;
+            for (u64 h = 0; h < new_distribution.size(); h++) {
+                choose_pascal<I>(sigma_q, h, pascal_triangle);
+            }
+            for (u64 i = 0; i <= q; i++) {
+                choose_pascal<I>(q, i, pascal_triangle);
+            }
+        }
+
         for (int t = 0; t < num_threads; ++t) {
             u64 start_w = t * chunk_size;
             u64 end_w = (t == num_threads - 1) ? new_distribution.size() : (start_w + chunk_size);
 
             // Start each thread with its range of `w` and thread-specific pascal_triangle
             threads.emplace_back(distribution_thread_function_v2<I, R>, start_w, end_w, n, multiplier, sigma, 
-                std::cref(count_fraction), std::ref(thread_partial_counts[t]), pascal_triangle);
+                std::cref(count_fraction), std::ref(thread_partial_counts[t]), std::cref(block_enum_part), pascal_triangle);
         }
 
         // Join threads to ensure all complete
