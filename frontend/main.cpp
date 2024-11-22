@@ -119,6 +119,12 @@ int main(int argc, char** argv)
 			TungstenCodeBench(cmd);
 		else if (cmd.isSet("aes"))
 			AESBenchmark(cmd);
+		else if (cmd.isSet("dpf"))
+			RegularDpfBenchmark(cmd);
+		else
+		{
+			std::cout << "unknown benchmark" << std::endl;
+		}
 
 		return 0;
 	}

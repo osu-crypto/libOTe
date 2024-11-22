@@ -16,6 +16,7 @@
 #include "libOTe/Tools/LDPC/Mtx.h"
 #include "libOTe_Tests/Pprf_Tests.h"
 #include "libOTe_Tests/TungstenCode_Tests.h"
+#include "libOTe_Tests/RegularDpf_Tests.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -57,7 +58,9 @@ namespace tests_libOTe
             tc.add("Tools_Pprf_ByTreeIndex_test             ", Tools_Pprf_ByTreeIndex_test);
             tc.add("Tools_Pprf_callback_test                ", Tools_Pprf_callback_test);
 
-
+            tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
+            tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
+            
             tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
             tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);
 

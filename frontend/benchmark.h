@@ -15,678 +15,753 @@
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe/Tools/TungstenCode/TungstenCode.h"
 #include "libOTe/Tools/ExConvCodeOld/ExConvCodeOld.h"
+#include "libOTe/Tools/Dpf/RegularDpf.h"
 
 namespace osuCrypto
 {
 
-    inline void QCCodeBench(CLP& cmd)
-    {
+	inline void QCCodeBench(CLP& cmd)
+	{
 
 #ifdef ENABLE_BITPOLYMUL
-        u64 trials = cmd.getOr("t", 10);
+		u64 trials = cmd.getOr("t", 10);
 
-        // the message length of the code. 
-        // The noise vector will have size n=2*k.
-        // the user can use 
-        //   -k X 
-        // to state that exactly X rows should be used or
-        //   -kk X
-        // to state that 2^X rows should be used.
-        u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
+		// the message length of the code. 
+		// The noise vector will have size n=2*k.
+		// the user can use 
+		//   -k X 
+		// to state that exactly X rows should be used or
+		//   -kk X
+		// to state that 2^X rows should be used.
+		u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
 
-        u64 n = k * 2;
+		u64 n = k * 2;
 
-        // verbose flag.
-
-
-        oc::Timer timer;
-        QuasiCyclicCode code;
-        code.init2(k, n);
-        std::vector<block> c0(code.size(), ZeroBlock);
-        for (auto t = 0ull; t < trials; ++t)
-        {
-
-            timer.setTimePoint("reset");
-            code.dualEncode(c0);
-            timer.setTimePoint("encode");
-        }
+		// verbose flag.
 
 
+		oc::Timer timer;
+		QuasiCyclicCode code;
+		code.init2(k, n);
+		std::vector<block> c0(code.size(), ZeroBlock);
+		for (auto t = 0ull; t < trials; ++t)
+		{
 
-        if (!cmd.isSet("quiet"))
-            std::cout << timer << std::endl;
+			timer.setTimePoint("reset");
+			code.dualEncode(c0);
+			timer.setTimePoint("encode");
+		}
+
+
+
+		if (!cmd.isSet("quiet"))
+			std::cout << timer << std::endl;
 #endif
-    }
+	}
 
-    inline void EACodeBench(CLP& cmd)
-    {
-        u64 trials = cmd.getOr("t", 10);
+	inline void EACodeBench(CLP& cmd)
+	{
+		u64 trials = cmd.getOr("t", 10);
 
-        // the message length of the code. 
-        // The noise vector will have size n=2*k.
-        // the user can use 
-        //   -k X 
-        // to state that exactly X rows should be used or
-        //   -kk X
-        // to state that 2^X rows should be used.
-        u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
+		// the message length of the code. 
+		// The noise vector will have size n=2*k.
+		// the user can use 
+		//   -k X 
+		// to state that exactly X rows should be used or
+		//   -kk X
+		// to state that 2^X rows should be used.
+		u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
 
-        u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 5.0));
+		u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 5.0));
 
-        // the weight of the code
-        u64 w = cmd.getOr("w", 7);
+		// the weight of the code
+		u64 w = cmd.getOr("w", 7);
 
-        // size for the accumulator (# random transitions)
+		// size for the accumulator (# random transitions)
 
-        // verbose flag.
-        bool v = cmd.isSet("v");
+		// verbose flag.
+		bool v = cmd.isSet("v");
 
 
-        EACode code;
-        code.config(k, n, w);
+		EACode code;
+		code.config(k, n, w);
 
-        if (v)
-        {
-            std::cout << "n: " << code.mCodeSize << std::endl;
-            std::cout << "k: " << code.mMessageSize << std::endl;
-            std::cout << "w: " << code.mExpanderWeight << std::endl;
-        }
+		if (v)
+		{
+			std::cout << "n: " << code.mCodeSize << std::endl;
+			std::cout << "k: " << code.mMessageSize << std::endl;
+			std::cout << "w: " << code.mExpanderWeight << std::endl;
+		}
 
-        std::vector<block> x(code.mCodeSize), y(code.mMessageSize);
-        Timer timer, verbose;
+		std::vector<block> x(code.mCodeSize), y(code.mMessageSize);
+		Timer timer, verbose;
 
-        if (v)
-            code.setTimer(verbose);
+		if (v)
+			code.setTimer(verbose);
 
-        timer.setTimePoint("_____________________");
-        for (u64 i = 0; i < trials; ++i)
-        {
-            code.dualEncode<block, CoeffCtxGF128>(x, y, {});
-            timer.setTimePoint("encode");
-        }
+		timer.setTimePoint("_____________________");
+		for (u64 i = 0; i < trials; ++i)
+		{
+			code.dualEncode<block, CoeffCtxGF128>(x, y, {});
+			timer.setTimePoint("encode");
+		}
 
-        std::cout << "EA " << std::endl;
-        std::cout << timer << std::endl;
+		std::cout << "EA " << std::endl;
+		std::cout << timer << std::endl;
 
-        if (v)
-            std::cout << verbose << std::endl;
-    }
+		if (v)
+			std::cout << verbose << std::endl;
+	}
 
-    inline void ExConvCodeBench(CLP& cmd)
-    {
-        u64 trials = cmd.getOr("t", 10);
+	inline void ExConvCodeBench(CLP& cmd)
+	{
+		u64 trials = cmd.getOr("t", 10);
 
-        // the message length of the code. 
-        // The noise vector will have size n=2*k.
-        // the user can use 
-        //   -k X 
-        // to state that exactly X rows should be used or
-        //   -kk X
-        // to state that 2^X rows should be used.
-        u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
+		// the message length of the code. 
+		// The noise vector will have size n=2*k.
+		// the user can use 
+		//   -k X 
+		// to state that exactly X rows should be used or
+		//   -kk X
+		// to state that 2^X rows should be used.
+		u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
 
-        u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
+		u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
 
-        // the weight of the code
-        u64 w = cmd.getOr("w", 7);
+		// the weight of the code
+		u64 w = cmd.getOr("w", 7);
 
-        // size for the accumulator (# random transitions)
-        u64 a = cmd.getOr("a", roundUpTo(log2ceil(n), 8));
+		// size for the accumulator (# random transitions)
+		u64 a = cmd.getOr("a", roundUpTo(log2ceil(n), 8));
 
-        bool gf128 = cmd.isSet("gf128");
+		bool gf128 = cmd.isSet("gf128");
 
-        // verbose flag.
-        bool v = cmd.isSet("v");
-        bool sys = cmd.isSet("sys");
+		// verbose flag.
+		bool v = cmd.isSet("v");
+		bool sys = cmd.isSet("sys");
 
-        ExConvCode code;
-        code.config(k, n, w, a, sys);
+		ExConvCode code;
+		code.config(k, n, w, a, sys);
 
-        if (v)
-        {
-            std::cout << "n: " << code.mCodeSize << std::endl;
-            std::cout << "k: " << code.mMessageSize << std::endl;
-            //std::cout << "w: " << code.mExpanderWeight << std::endl;
-        }
+		if (v)
+		{
+			std::cout << "n: " << code.mCodeSize << std::endl;
+			std::cout << "k: " << code.mMessageSize << std::endl;
+			//std::cout << "w: " << code.mExpanderWeight << std::endl;
+		}
 
-        std::vector<block> x(code.mCodeSize), y(code.mMessageSize * !sys);
-        Timer timer, verbose;
+		std::vector<block> x(code.mCodeSize), y(code.mMessageSize * !sys);
+		Timer timer, verbose;
 
-        if (v)
-            code.setTimer(verbose);
+		if (v)
+			code.setTimer(verbose);
 
-        timer.setTimePoint("_____________________");
-        for (u64 i = 0; i < trials; ++i)
-        {
-            if (gf128)
-                code.dualEncode<block, CoeffCtxGF128>(x.begin(), {});
-            else
-                code.dualEncode<block, CoeffCtxGF2>(x.begin(), {});
+		timer.setTimePoint("_____________________");
+		for (u64 i = 0; i < trials; ++i)
+		{
+			if (gf128)
+				code.dualEncode<block, CoeffCtxGF128>(x.begin(), {});
+			else
+				code.dualEncode<block, CoeffCtxGF2>(x.begin(), {});
 
-            timer.setTimePoint("encode");
-        }
+			timer.setTimePoint("encode");
+		}
 
-        std::cout << "EC " << std::endl;
-        std::cout << timer << std::endl;
+		std::cout << "EC " << std::endl;
+		std::cout << timer << std::endl;
 
-        if (v)
-            std::cout << verbose << std::endl;
-    }
+		if (v)
+			std::cout << verbose << std::endl;
+	}
 
-    inline void ExConvCodeOldBench(CLP& cmd)
-    {
+	inline void ExConvCodeOldBench(CLP& cmd)
+	{
 #ifdef LIBOTE_ENABLE_OLD_EXCONV
 
-        u64 trials = cmd.getOr("t", 10);
+		u64 trials = cmd.getOr("t", 10);
 
-        // the message length of the code. 
-        // The noise vector will have size n=2*k.
-        // the user can use 
-        //   -k X 
-        // to state that exactly X rows should be used or
-        //   -kk X
-        // to state that 2^X rows should be used.
-        u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
+		// the message length of the code. 
+		// The noise vector will have size n=2*k.
+		// the user can use 
+		//   -k X 
+		// to state that exactly X rows should be used or
+		//   -kk X
+		// to state that 2^X rows should be used.
+		u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
 
-        u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
+		u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
 
-        // the weight of the code
-        u64 w = cmd.getOr("w", 7);
+		// the weight of the code
+		u64 w = cmd.getOr("w", 7);
 
-        // size for the accumulator (# random transitions)
-        u64 a = cmd.getOr("a", roundUpTo(log2ceil(n), 8));
+		// size for the accumulator (# random transitions)
+		u64 a = cmd.getOr("a", roundUpTo(log2ceil(n), 8));
 
-        bool gf128 = cmd.isSet("gf128");
+		bool gf128 = cmd.isSet("gf128");
 
-        // verbose flag.
-        bool v = cmd.isSet("v");
-        bool sys = cmd.isSet("sys");
+		// verbose flag.
+		bool v = cmd.isSet("v");
+		bool sys = cmd.isSet("sys");
 
-        ExConvCodeOld code;
-        code.config(k, n, w, a, sys);
+		ExConvCodeOld code;
+		code.config(k, n, w, a, sys);
 
-        if (v)
-        {
-            std::cout << "n: " << code.mCodeSize << std::endl;
-            std::cout << "k: " << code.mMessageSize << std::endl;
-            //std::cout << "w: " << code.mExpanderWeight << std::endl;
-        }
+		if (v)
+		{
+			std::cout << "n: " << code.mCodeSize << std::endl;
+			std::cout << "k: " << code.mMessageSize << std::endl;
+			//std::cout << "w: " << code.mExpanderWeight << std::endl;
+		}
 
-        std::vector<block> x(code.mCodeSize), y(code.mMessageSize * !sys);
-        Timer timer, verbose;
+		std::vector<block> x(code.mCodeSize), y(code.mMessageSize * !sys);
+		Timer timer, verbose;
 
-        if (v)
-            code.setTimer(verbose);
+		if (v)
+			code.setTimer(verbose);
 
-        timer.setTimePoint("_____________________");
-        for (u64 i = 0; i < trials; ++i)
-        {
-            code.dualEncode<block>(x);
+		timer.setTimePoint("_____________________");
+		for (u64 i = 0; i < trials; ++i)
+		{
+			code.dualEncode<block>(x);
 
-            timer.setTimePoint("encode");
-        }
+			timer.setTimePoint("encode");
+		}
 
-        if (cmd.isSet("quiet") == false)
-        {
-            std::cout << "EC " << std::endl;
-            std::cout << timer << std::endl;
-        }
-        if (v)
-            std::cout << verbose << std::endl;
+		if (cmd.isSet("quiet") == false)
+		{
+			std::cout << "EC " << std::endl;
+			std::cout << timer << std::endl;
+		}
+		if (v)
+			std::cout << verbose << std::endl;
 #else
-        std::cout << "LIBOTE_ENABLE_OLD_EXCONV = false" << std::endl;
+		std::cout << "LIBOTE_ENABLE_OLD_EXCONV = false" << std::endl;
 #endif
-    }
+	}
 
 
-    inline void PprfBench(CLP& cmd)
-    {
+	inline void PprfBench(CLP& cmd)
+	{
 
 #ifdef ENABLE_SILENTOT
 
-        try
-        {
-            using Ctx = CoeffCtxGF2;
-            RegularPprfReceiver<block, block, Ctx> recver;
-            RegularPprfSender<block, block, Ctx> sender;
+		try
+		{
+			using Ctx = CoeffCtxGF2;
+			RegularPprfReceiver<block, block, Ctx> recver;
+			RegularPprfSender<block, block, Ctx> sender;
 
-            u64 trials = cmd.getOr("t", 10);
+			u64 trials = cmd.getOr("t", 10);
 
-            u64 w = cmd.getOr("w", 32);
-            u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 14));
+			u64 w = cmd.getOr("w", 32);
+			u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 14));
 
-            PRNG prng0(ZeroBlock), prng1(ZeroBlock);
-            //block delta = prng0.get();
+			PRNG prng0(ZeroBlock), prng1(ZeroBlock);
+			//block delta = prng0.get();
 
-            auto sock = coproto::LocalAsyncSocket::makePair();
+			auto sock = coproto::LocalAsyncSocket::makePair();
 
-            Timer rTimer;
-            auto s = rTimer.setTimePoint("start");
-            auto ctx = Ctx{};
-            auto vals = Ctx::Vec<block>(w);
-            auto out0 = Ctx::Vec<block>(n / w * w);
-            auto out1 = Ctx::Vec<block>(n / w * w);
+			Timer rTimer;
+			auto s = rTimer.setTimePoint("start");
+			auto ctx = Ctx{};
+			auto vals = Ctx::Vec<block>(w);
+			auto out0 = Ctx::Vec<block>(n / w * w);
+			auto out1 = Ctx::Vec<block>(n / w * w);
 
 
 
-            for (u64 t = 0; t < trials; ++t)
-            {
-                sender.configure(n / w, w);
-                recver.configure(n / w, w);
+			for (u64 t = 0; t < trials; ++t)
+			{
+				sender.configure(n / w, w);
+				recver.configure(n / w, w);
 
-                std::vector<std::array<block, 2>> baseSend(sender.baseOtCount());
-                std::vector<block> baseRecv(sender.baseOtCount());
-                BitVector baseChoice(sender.baseOtCount());
-                sender.setBase(baseSend);
-                recver.setBase(baseRecv);
-                recver.setChoiceBits(baseChoice);
+				std::vector<std::array<block, 2>> baseSend(sender.baseOtCount());
+				std::vector<block> baseRecv(sender.baseOtCount());
+				BitVector baseChoice(sender.baseOtCount());
+				sender.setBase(baseSend);
+				recver.setBase(baseRecv);
+				recver.setChoiceBits(baseChoice);
 
-                auto p0 = sender.expand(sock[0], vals, prng0.get(), out0, PprfOutputFormat::Interleaved, true, 1, ctx);
-                auto p1 = recver.expand(sock[1], out1, PprfOutputFormat::Interleaved, true, 1, ctx);
+				auto p0 = sender.expand(sock[0], vals, prng0.get(), out0, PprfOutputFormat::Interleaved, true, 1, ctx);
+				auto p1 = recver.expand(sock[1], out1, PprfOutputFormat::Interleaved, true, 1, ctx);
 
-                rTimer.setTimePoint("r start");
-                coproto::sync_wait(macoro::when_all_ready(
-                    std::move(p0), std::move(p1)));
-                rTimer.setTimePoint("r done");
+				rTimer.setTimePoint("r start");
+				coproto::sync_wait(macoro::when_all_ready(
+					std::move(p0), std::move(p1)));
+				rTimer.setTimePoint("r done");
 
-            }
-            auto e = rTimer.setTimePoint("end");
+			}
+			auto e = rTimer.setTimePoint("end");
 
-            auto time = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
-            auto avgTime = time / double(trials);
-            auto timePer512 = avgTime / n * 512;
-            std::cout << "OT n:" << n << ", " <<
-                avgTime << "ms/batch, " << timePer512 << "ms/512ot" << std::endl;
+			auto time = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+			auto avgTime = time / double(trials);
+			auto timePer512 = avgTime / n * 512;
+			std::cout << "OT n:" << n << ", " <<
+				avgTime << "ms/batch, " << timePer512 << "ms/512ot" << std::endl;
 
-            std::cout << rTimer << std::endl;
+			std::cout << rTimer << std::endl;
 
-            std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
-        }
-        catch (std::exception& e)
-        {
-            std::cout << e.what() << std::endl;
-        }
+			std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+		}
+		catch (std::exception& e)
+		{
+			std::cout << e.what() << std::endl;
+		}
 #else
-        std::cout << "ENABLE_SILENTOT = false" << std::endl;
+		std::cout << "ENABLE_SILENTOT = false" << std::endl;
 #endif
-    }
+	}
 
-    inline void TungstenCodeBench(CLP& cmd)
-    {
-        u64 trials = cmd.getOr("t", 10);
+	inline void TungstenCodeBench(CLP& cmd)
+	{
+		u64 trials = cmd.getOr("t", 10);
 
-        // the message length of the code. 
-        // The noise vector will have size n=2*k.
-        // the user can use 
-        //   -k X 
-        // to state that exactly X rows should be used or
-        //   -kk X
-        // to state that 2^X rows should be used.
-        u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
+		// the message length of the code. 
+		// The noise vector will have size n=2*k.
+		// the user can use 
+		//   -k X 
+		// to state that exactly X rows should be used or
+		//   -kk X
+		// to state that 2^X rows should be used.
+		u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
 
-        u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
+		u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
 
-        // verbose flag.
-        bool v = cmd.isSet("v");
+		// verbose flag.
+		bool v = cmd.isSet("v");
 
-        experimental::TungstenCode code;
-        code.config(k, n);
-        code.mNumIter = cmd.getOr("iter", 2);
+		experimental::TungstenCode code;
+		code.config(k, n);
+		code.mNumIter = cmd.getOr("iter", 2);
 
-        if (v)
-        {
-            std::cout << "n: " << code.mCodeSize << std::endl;
-            std::cout << "k: " << code.mMessageSize << std::endl;
-        }
+		if (v)
+		{
+			std::cout << "n: " << code.mCodeSize << std::endl;
+			std::cout << "k: " << code.mMessageSize << std::endl;
+		}
 
-        AlignedUnVector<block> x(code.mCodeSize);
-        Timer timer, verbose;
-        
-
-        timer.setTimePoint("_____________________");
-        for (u64 i = 0; i < trials; ++i)
-        {
-            code.dualEncode<block, CoeffCtxGF2>(x.data(), {});
-
-            timer.setTimePoint("encode");
-        }
-
-        if (cmd.isSet("quiet") == false)
-        {
-            std::cout << "tungsten " << std::endl;
-            std::cout << timer << std::endl;
-        }
-        if (v)
-            std::cout << verbose << std::endl;
-    }
+		AlignedUnVector<block> x(code.mCodeSize);
+		Timer timer, verbose;
 
 
-    inline void transpose(const CLP& cmd)
-    {
+		timer.setTimePoint("_____________________");
+		for (u64 i = 0; i < trials; ++i)
+		{
+			code.dualEncode<block, CoeffCtxGF2>(x.data(), {});
+
+			timer.setTimePoint("encode");
+		}
+
+		if (cmd.isSet("quiet") == false)
+		{
+			std::cout << "tungsten " << std::endl;
+			std::cout << timer << std::endl;
+		}
+		if (v)
+			std::cout << verbose << std::endl;
+	}
+
+
+	inline void transpose(const CLP& cmd)
+	{
 #ifdef ENABLE_AVX
-        u64 trials = cmd.getOr("trials", 1ull << 18);
-        {
+		u64 trials = cmd.getOr("trials", 1ull << 18);
+		{
 
-            AlignedArray<block, 128> data;
+			AlignedArray<block, 128> data;
 
-            Timer timer;
-            auto start0 = timer.setTimePoint("b");
+			Timer timer;
+			auto start0 = timer.setTimePoint("b");
 
-            for (u64 i = 0; i < trials; ++i)
-            {
-                avx_transpose128(data.data());
-            }
+			for (u64 i = 0; i < trials; ++i)
+			{
+				avx_transpose128(data.data());
+			}
 
-            auto end0 = timer.setTimePoint("b");
-
-
-            for (u64 i = 0; i < trials; ++i)
-            {
-                sse_transpose128(data.data());
-            }
-
-            auto end1 = timer.setTimePoint("b");
-
-            std::cout << "avx " << std::chrono::duration_cast<std::chrono::milliseconds>(end0 - start0).count() << std::endl;
-            std::cout << "sse " << std::chrono::duration_cast<std::chrono::milliseconds>(end1 - end0).count() << std::endl;
-        }
-
-        {
-            AlignedArray<block, 1024> data;
-
-            Timer timer;
-            auto start1 = timer.setTimePoint("b");
-
-            for (u64 i = 0; i < trials * 8; ++i)
-            {
-                avx_transpose128(data.data());
-            }
+			auto end0 = timer.setTimePoint("b");
 
 
-            auto start0 = timer.setTimePoint("b");
+			for (u64 i = 0; i < trials; ++i)
+			{
+				sse_transpose128(data.data());
+			}
 
-            for (u64 i = 0; i < trials; ++i)
-            {
-                avx_transpose128x1024(data.data());
-            }
+			auto end1 = timer.setTimePoint("b");
 
-            auto end0 = timer.setTimePoint("b");
+			std::cout << "avx " << std::chrono::duration_cast<std::chrono::milliseconds>(end0 - start0).count() << std::endl;
+			std::cout << "sse " << std::chrono::duration_cast<std::chrono::milliseconds>(end1 - end0).count() << std::endl;
+		}
+
+		{
+			AlignedArray<block, 1024> data;
+
+			Timer timer;
+			auto start1 = timer.setTimePoint("b");
+
+			for (u64 i = 0; i < trials * 8; ++i)
+			{
+				avx_transpose128(data.data());
+			}
 
 
-            for (u64 i = 0; i < trials; ++i)
-            {
-                sse_transpose128x1024(*(std::array<std::array<block, 8>, 128>*)data.data());
-            }
+			auto start0 = timer.setTimePoint("b");
 
-            auto end1 = timer.setTimePoint("b");
+			for (u64 i = 0; i < trials; ++i)
+			{
+				avx_transpose128x1024(data.data());
+			}
 
-            std::cout << "avx " << std::chrono::duration_cast<std::chrono::milliseconds>(start0 - start1).count() << std::endl;
-            std::cout << "avx " << std::chrono::duration_cast<std::chrono::milliseconds>(end0 - start0).count() << std::endl;
-            std::cout << "sse " << std::chrono::duration_cast<std::chrono::milliseconds>(end1 - end0).count() << std::endl;
-        }
+			auto end0 = timer.setTimePoint("b");
+
+
+			for (u64 i = 0; i < trials; ++i)
+			{
+				sse_transpose128x1024(*(std::array<std::array<block, 8>, 128>*)data.data());
+			}
+
+			auto end1 = timer.setTimePoint("b");
+
+			std::cout << "avx " << std::chrono::duration_cast<std::chrono::milliseconds>(start0 - start1).count() << std::endl;
+			std::cout << "avx " << std::chrono::duration_cast<std::chrono::milliseconds>(end0 - start0).count() << std::endl;
+			std::cout << "sse " << std::chrono::duration_cast<std::chrono::milliseconds>(end1 - end0).count() << std::endl;
+		}
 #endif
-    }
+	}
 
 
-    inline void SilentOtBench(const CLP& cmd)
-    {
+	inline void SilentOtBench(const CLP& cmd)
+	{
 #ifdef ENABLE_SILENTOT
 
-        try
-        {
+		try
+		{
 
-            SilentOtExtSender sender;
-            SilentOtExtReceiver recver;
+			SilentOtExtSender sender;
+			SilentOtExtReceiver recver;
 
-            u64 trials = cmd.getOr("t", 10);
+			u64 trials = cmd.getOr("t", 10);
 
-            u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
-            MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv7x24);
-            std::cout << multType << std::endl;
+			u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
+			MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv7x24);
+			std::cout << multType << std::endl;
 
-            recver.mMultType = multType;
-            sender.mMultType = multType;
+			recver.mMultType = multType;
+			sender.mMultType = multType;
 
-            PRNG prng0(ZeroBlock), prng1(ZeroBlock);
-            block delta = prng0.get();
+			PRNG prng0(ZeroBlock), prng1(ZeroBlock);
+			block delta = prng0.get();
 
-            auto sock = coproto::LocalAsyncSocket::makePair();
+			auto sock = coproto::LocalAsyncSocket::makePair();
 
-            Timer sTimer;
-            Timer rTimer;
-            recver.setTimer(rTimer);
-            sender.setTimer(rTimer);
-            sTimer.setTimePoint("start");
-            auto s = sTimer.setTimePoint("start");
+			Timer sTimer;
+			Timer rTimer;
+			recver.setTimer(rTimer);
+			sender.setTimer(rTimer);
+			sTimer.setTimePoint("start");
+			auto s = sTimer.setTimePoint("start");
 
-            for (u64 t = 0; t < trials; ++t)
-            {
-                sender.configure(n);
-                recver.configure(n);
+			for (u64 t = 0; t < trials; ++t)
+			{
+				sender.configure(n);
+				recver.configure(n);
 
-                auto choice = recver.sampleBaseChoiceBits(prng0);
-                std::vector<std::array<block, 2>> sendBase(sender.silentBaseOtCount());
-                std::vector<block> recvBase(recver.silentBaseOtCount());
-                sender.setSilentBaseOts(sendBase);
-                recver.setSilentBaseOts(recvBase);
+				auto choice = recver.sampleBaseChoiceBits(prng0);
+				std::vector<std::array<block, 2>> sendBase(sender.silentBaseOtCount());
+				std::vector<block> recvBase(recver.silentBaseOtCount());
+				sender.setSilentBaseOts(sendBase);
+				recver.setSilentBaseOts(recvBase);
 
-                auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
-                auto p1 = recver.silentReceiveInplace(n, prng1, sock[1], ChoiceBitPacking::True);
+				auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
+				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1], ChoiceBitPacking::True);
 
-                rTimer.setTimePoint("r start");
-                coproto::sync_wait(macoro::when_all_ready(
-                    std::move(p0), std::move(p1)));
-                rTimer.setTimePoint("r done");
+				rTimer.setTimePoint("r start");
+				coproto::sync_wait(macoro::when_all_ready(
+					std::move(p0), std::move(p1)));
+				rTimer.setTimePoint("r done");
 
-            }
-            auto e = rTimer.setTimePoint("end");
+			}
+			auto e = rTimer.setTimePoint("end");
 
-            if (cmd.isSet("quiet") == false)
-            {
+			if (cmd.isSet("quiet") == false)
+			{
 
-                auto time = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
-                auto avgTime = time / double(trials);
-                auto timePer512 = avgTime / n * 512;
-                std::cout << "OT n:" << n << ", " <<
-                    avgTime << "ms/batch, " << timePer512 << "ms/512ot" << std::endl;
+				auto time = std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count();
+				auto avgTime = time / double(trials);
+				auto timePer512 = avgTime / n * 512;
+				std::cout << "OT n:" << n << ", " <<
+					avgTime << "ms/batch, " << timePer512 << "ms/512ot" << std::endl;
 
-                std::cout << sTimer << std::endl;
-                std::cout << rTimer << std::endl;
+				std::cout << sTimer << std::endl;
+				std::cout << rTimer << std::endl;
 
-                std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
-            }
-        }
-        catch (std::exception& e)
-        {
-            std::cout << e.what() << std::endl;
-        }
+				std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+			}
+		}
+		catch (std::exception& e)
+		{
+			std::cout << e.what() << std::endl;
+		}
 #else
-        std::cout << "ENABLE_SILENTOT = false" << std::endl;
+		std::cout << "ENABLE_SILENTOT = false" << std::endl;
 #endif
-    }
+	}
 
-    inline void VoleBench2(const CLP& cmd)
-    {
+	inline void VoleBench2(const CLP& cmd)
+	{
 #ifdef ENABLE_SILENT_VOLE
-        try
-        {
+		try
+		{
 
-            SilentVoleSender<block, block, CoeffCtxGF128> sender;
-            SilentVoleReceiver<block, block, CoeffCtxGF128> recver;
+			SilentVoleSender<block, block, CoeffCtxGF128> sender;
+			SilentVoleReceiver<block, block, CoeffCtxGF128> recver;
 
-            u64 trials = cmd.getOr("t", 10);
+			u64 trials = cmd.getOr("t", 10);
 
-            u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
-            MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv7x24);
-            std::cout << multType << std::endl;
+			u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
+			MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv7x24);
+			std::cout << multType << std::endl;
 
-            recver.mMultType = multType;
-            sender.mMultType = multType;
+			recver.mMultType = multType;
+			sender.mMultType = multType;
 
-            std::vector<std::array<block, 2>> baseSend(128);
-            std::vector<block> baseRecv(128);
-            BitVector baseChoice(128);
-            PRNG prng(CCBlock);
-            baseChoice.randomize(prng);
-            for (u64 i = 0; i < 128; ++i)
-            {
-                baseSend[i] = prng.get();
-                baseRecv[i] = baseSend[i][baseChoice[i]];
-            }
+			std::vector<std::array<block, 2>> baseSend(128);
+			std::vector<block> baseRecv(128);
+			BitVector baseChoice(128);
+			PRNG prng(CCBlock);
+			baseChoice.randomize(prng);
+			for (u64 i = 0; i < 128; ++i)
+			{
+				baseSend[i] = prng.get();
+				baseRecv[i] = baseSend[i][baseChoice[i]];
+			}
 
 #ifdef ENABLE_SOFTSPOKEN_OT
-            sender.mOtExtRecver.emplace();
-            sender.mOtExtSender.emplace();
-            recver.mOtExtRecver.emplace();
-            recver.mOtExtSender.emplace();
-            sender.mOtExtRecver->setBaseOts(baseSend);
-            recver.mOtExtRecver->setBaseOts(baseSend);
-            sender.mOtExtSender->setBaseOts(baseRecv, baseChoice);
-            recver.mOtExtSender->setBaseOts(baseRecv, baseChoice);
+			sender.mOtExtRecver.emplace();
+			sender.mOtExtSender.emplace();
+			recver.mOtExtRecver.emplace();
+			recver.mOtExtSender.emplace();
+			sender.mOtExtRecver->setBaseOts(baseSend);
+			recver.mOtExtRecver->setBaseOts(baseSend);
+			sender.mOtExtSender->setBaseOts(baseRecv, baseChoice);
+			recver.mOtExtSender->setBaseOts(baseRecv, baseChoice);
 #endif // ENABLE_SOFTSPOKEN_OT
 
-            PRNG prng0(ZeroBlock), prng1(ZeroBlock);
-            block delta = prng0.get();
+			PRNG prng0(ZeroBlock), prng1(ZeroBlock);
+			block delta = prng0.get();
 
-            auto sock = coproto::LocalAsyncSocket::makePair();
+			auto sock = coproto::LocalAsyncSocket::makePair();
 
-            Timer sTimer;
-            Timer rTimer;
-            sTimer.setTimePoint("start");
-            rTimer.setTimePoint("start");
+			Timer sTimer;
+			Timer rTimer;
+			sTimer.setTimePoint("start");
+			rTimer.setTimePoint("start");
 
-            auto t0 = std::thread([&] {
-                for (u64 t = 0; t < trials; ++t)
-                {
-                    auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
+			auto t0 = std::thread([&] {
+				for (u64 t = 0; t < trials; ++t)
+				{
+					auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
 
-                    char c = 0;
+					char c = 0;
 
-                    coproto::sync_wait(sock[0].send(std::move(c)));
-                    coproto::sync_wait(sock[0].recv(c));
-                    sTimer.setTimePoint("__");
-                    coproto::sync_wait(sock[0].send(std::move(c)));
-                    coproto::sync_wait(sock[0].recv(c));
-                    sTimer.setTimePoint("s start");
-                    coproto::sync_wait(p0);
-                    sTimer.setTimePoint("s done");
-                }
-                });
-
-
-            for (u64 t = 0; t < trials; ++t)
-            {
-                auto p1 = recver.silentReceiveInplace(n, prng1, sock[1]);
-                char c=0;
-                coproto::sync_wait(sock[1].send(std::move(c)));
-                coproto::sync_wait(sock[1].recv(c));
-
-                rTimer.setTimePoint("__");
-                coproto::sync_wait(sock[1].send(std::move(c)));
-                coproto::sync_wait(sock[1].recv(c));
-
-                rTimer.setTimePoint("r start");
-                coproto::sync_wait(p1);
-                rTimer.setTimePoint("r done");
-
-            }
+					coproto::sync_wait(sock[0].send(std::move(c)));
+					coproto::sync_wait(sock[0].recv(c));
+					sTimer.setTimePoint("__");
+					coproto::sync_wait(sock[0].send(std::move(c)));
+					coproto::sync_wait(sock[0].recv(c));
+					sTimer.setTimePoint("s start");
+					coproto::sync_wait(p0);
+					sTimer.setTimePoint("s done");
+				}
+				});
 
 
-            t0.join();
-            std::cout << sTimer << std::endl;
-            std::cout << rTimer << std::endl;
+			for (u64 t = 0; t < trials; ++t)
+			{
+				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1]);
+				char c = 0;
+				coproto::sync_wait(sock[1].send(std::move(c)));
+				coproto::sync_wait(sock[1].recv(c));
 
-            std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
-        }
-        catch (std::exception& e)
-        {
-            std::cout << e.what() << std::endl;
-        }
+				rTimer.setTimePoint("__");
+				coproto::sync_wait(sock[1].send(std::move(c)));
+				coproto::sync_wait(sock[1].recv(c));
+
+				rTimer.setTimePoint("r start");
+				coproto::sync_wait(p1);
+				rTimer.setTimePoint("r done");
+
+			}
+
+
+			t0.join();
+			std::cout << sTimer << std::endl;
+			std::cout << rTimer << std::endl;
+
+			std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+		}
+		catch (std::exception& e)
+		{
+			std::cout << e.what() << std::endl;
+		}
 #else
-        std::cout << "ENABLE_Silent_VOLE = false" << std::endl;
+		std::cout << "ENABLE_Silent_VOLE = false" << std::endl;
 #endif
-    }
+	}
 
 
-    void AESBenchmark(const oc::CLP& cmd)
-    {
-        u64 n = roundUpTo(cmd.getOr("n", 1ull << cmd.getOr("nn", 20)), 8);
-        u64 t =cmd.getOr("t", 10);
-        using AES_ = AES;// details::AES<details::AESTypes::Portable>;
+	void AESBenchmark(const oc::CLP& cmd)
+	{
+		u64 n = roundUpTo(cmd.getOr("n", 1ull << cmd.getOr("nn", 20)), 8);
+		u64 t = cmd.getOr("t", 10);
+		using AES_ = AES;// details::AES<details::AESTypes::Portable>;
 
-        auto unroll8 = [](AES_& aes, block* __restrict s)
-            {
-                block b[8];
-                b[0] = AES_::firstFn(s[0], aes.mRoundKey[0]);
-                b[1] = AES_::firstFn(s[1], aes.mRoundKey[0]);
-                b[2] = AES_::firstFn(s[2], aes.mRoundKey[0]);
-                b[3] = AES_::firstFn(s[3], aes.mRoundKey[0]);
-                b[4] = AES_::firstFn(s[4], aes.mRoundKey[0]);
-                b[5] = AES_::firstFn(s[5], aes.mRoundKey[0]);
-                b[6] = AES_::firstFn(s[6], aes.mRoundKey[0]);
-                b[7] = AES_::firstFn(s[7], aes.mRoundKey[0]);
+		auto unroll8 = [](AES_& aes, block* __restrict s)
+			{
+				block b[8];
+				b[0] = AES_::firstFn(s[0], aes.mRoundKey[0]);
+				b[1] = AES_::firstFn(s[1], aes.mRoundKey[0]);
+				b[2] = AES_::firstFn(s[2], aes.mRoundKey[0]);
+				b[3] = AES_::firstFn(s[3], aes.mRoundKey[0]);
+				b[4] = AES_::firstFn(s[4], aes.mRoundKey[0]);
+				b[5] = AES_::firstFn(s[5], aes.mRoundKey[0]);
+				b[6] = AES_::firstFn(s[6], aes.mRoundKey[0]);
+				b[7] = AES_::firstFn(s[7], aes.mRoundKey[0]);
 
-                for (u64 i = 1; i < 9; ++i)
-                {
-                    b[0] = AES_::roundFn(b[0], aes.mRoundKey[i]);
-                    b[1] = AES_::roundFn(b[1], aes.mRoundKey[i]);
-                    b[2] = AES_::roundFn(b[2], aes.mRoundKey[i]);
-                    b[3] = AES_::roundFn(b[3], aes.mRoundKey[i]);
-                    b[4] = AES_::roundFn(b[4], aes.mRoundKey[i]);
-                    b[5] = AES_::roundFn(b[5], aes.mRoundKey[i]);
-                    b[6] = AES_::roundFn(b[6], aes.mRoundKey[i]);
-                    b[7] = AES_::roundFn(b[7], aes.mRoundKey[i]);
-                }
+				for (u64 i = 1; i < 9; ++i)
+				{
+					b[0] = AES_::roundFn(b[0], aes.mRoundKey[i]);
+					b[1] = AES_::roundFn(b[1], aes.mRoundKey[i]);
+					b[2] = AES_::roundFn(b[2], aes.mRoundKey[i]);
+					b[3] = AES_::roundFn(b[3], aes.mRoundKey[i]);
+					b[4] = AES_::roundFn(b[4], aes.mRoundKey[i]);
+					b[5] = AES_::roundFn(b[5], aes.mRoundKey[i]);
+					b[6] = AES_::roundFn(b[6], aes.mRoundKey[i]);
+					b[7] = AES_::roundFn(b[7], aes.mRoundKey[i]);
+				}
 
 
-                b[0] = AES_::penultimateFn(b[0], aes.mRoundKey[9]);
-                b[1] = AES_::penultimateFn(b[1], aes.mRoundKey[9]);
-                b[2] = AES_::penultimateFn(b[2], aes.mRoundKey[9]);
-                b[3] = AES_::penultimateFn(b[3], aes.mRoundKey[9]);
-                b[4] = AES_::penultimateFn(b[4], aes.mRoundKey[9]);
-                b[5] = AES_::penultimateFn(b[5], aes.mRoundKey[9]);
-                b[6] = AES_::penultimateFn(b[6], aes.mRoundKey[9]);
-                b[7] = AES_::penultimateFn(b[7], aes.mRoundKey[9]);
-                s[0] = AES_::finalFn(b[0], aes.mRoundKey[10]);
-                s[1] = AES_::finalFn(b[1], aes.mRoundKey[10]);
-                s[2] = AES_::finalFn(b[2], aes.mRoundKey[10]);
-                s[3] = AES_::finalFn(b[3], aes.mRoundKey[10]);
-                s[4] = AES_::finalFn(b[4], aes.mRoundKey[10]);
-                s[5] = AES_::finalFn(b[5], aes.mRoundKey[10]);
-                s[6] = AES_::finalFn(b[6], aes.mRoundKey[10]);
-                s[7] = AES_::finalFn(b[7], aes.mRoundKey[10]);
+				b[0] = AES_::penultimateFn(b[0], aes.mRoundKey[9]);
+				b[1] = AES_::penultimateFn(b[1], aes.mRoundKey[9]);
+				b[2] = AES_::penultimateFn(b[2], aes.mRoundKey[9]);
+				b[3] = AES_::penultimateFn(b[3], aes.mRoundKey[9]);
+				b[4] = AES_::penultimateFn(b[4], aes.mRoundKey[9]);
+				b[5] = AES_::penultimateFn(b[5], aes.mRoundKey[9]);
+				b[6] = AES_::penultimateFn(b[6], aes.mRoundKey[9]);
+				b[7] = AES_::penultimateFn(b[7], aes.mRoundKey[9]);
+				s[0] = AES_::finalFn(b[0], aes.mRoundKey[10]);
+				s[1] = AES_::finalFn(b[1], aes.mRoundKey[10]);
+				s[2] = AES_::finalFn(b[2], aes.mRoundKey[10]);
+				s[3] = AES_::finalFn(b[3], aes.mRoundKey[10]);
+				s[4] = AES_::finalFn(b[4], aes.mRoundKey[10]);
+				s[5] = AES_::finalFn(b[5], aes.mRoundKey[10]);
+				s[6] = AES_::finalFn(b[6], aes.mRoundKey[10]);
+				s[7] = AES_::finalFn(b[7], aes.mRoundKey[10]);
 
-            };
+			};
 
-        oc::AlignedUnVector<block> x(n);
-        AES_ aes(block(42352345, 3245345234676534));
-        Timer timer;
-        timer.setTimePoint("begin");
-        for (u64 tt = 0; tt < t; ++tt)
-        {
-            for (u64 i = 0; i < n; i += 8)
-            {
-                unroll8(aes, x.data() + i);
-            }
-            timer.setTimePoint("unroll");
-        }
+		oc::AlignedUnVector<block> x(n);
+		AES_ aes(block(42352345, 3245345234676534));
+		Timer timer;
+		timer.setTimePoint("begin");
+		for (u64 tt = 0; tt < t; ++tt)
+		{
+			for (u64 i = 0; i < n; i += 8)
+			{
+				unroll8(aes, x.data() + i);
+			}
+			timer.setTimePoint("unroll");
+		}
 
-        for (u64 tt = 0; tt < t; ++tt)
-        {
-            for (u64 i = 0; i < n; i += 8)
-            {
-                aes.ecbEncBlocks<8>(x.data() + i, x.data() + i);
-            }
-            timer.setTimePoint("aes <>");
-        }
+		for (u64 tt = 0; tt < t; ++tt)
+		{
+			for (u64 i = 0; i < n; i += 8)
+			{
+				aes.ecbEncBlocks<8>(x.data() + i, x.data() + i);
+			}
+			timer.setTimePoint("aes <>");
+		}
 
-        for (u64 tt = 0; tt < t; ++tt)
-        {
-                aes.ecbEncBlocks(x, x);
-            timer.setTimePoint("aes ");
-        }
+		for (u64 tt = 0; tt < t; ++tt)
+		{
+			aes.ecbEncBlocks(x, x);
+			timer.setTimePoint("aes ");
+		}
 
-        std::cout << timer << std::endl;
+		std::cout << timer << std::endl;
 
-    }
+	}
+
+	void RegularDpfBenchmark(const oc::CLP& cmd)
+	{
+		PRNG prng(block(231234, 321312));
+		u64 trials = cmd.getOr("t", 100);
+		u64 domain = 1ull << cmd.getOr("d", 10);
+		u64 numPoints = cmd.getOr("p", 64);
+		std::vector<u64> points0(numPoints);
+		std::vector<u64> points1(numPoints);
+		std::vector<block> values0(numPoints);
+		std::vector<block> values1(numPoints);
+		for (u64 i = 0; i < numPoints; ++i)
+		{
+			points1[i] = prng.get<u64>();
+			points0[i] = (prng.get<u64>() % domain) ^ points1[i];
+			values0[i] = prng.get();
+			values1[i] = prng.get();
+		}
+
+
+		auto sock = coproto::LocalAsyncSocket::makePair();
+
+		Timer timer;
+
+		std::array<oc::RegularDpf, 2> dpf;
+		dpf[0].init(0, domain, points0, values0);
+		dpf[1].init(1, domain, points1, values1);
+
+		auto baseCount = dpf[0].baseOtCount();
+
+		std::array<std::vector<block>, 2> baseRecv;
+		std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+		std::array<BitVector, 2> baseChoice;
+		baseRecv[0].resize(baseCount);
+		baseRecv[1].resize(baseCount);
+		baseSend[0].resize(baseCount);
+		baseSend[1].resize(baseCount);
+		baseChoice[0].resize(baseCount);
+		baseChoice[1].resize(baseCount);
+		baseChoice[0].randomize(prng);
+		baseChoice[1].randomize(prng);
+		for (u64 i = 0; i < baseCount; ++i)
+		{
+			baseSend[0][i] = prng.get();
+			baseSend[1][i] = prng.get();
+			baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+			baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+		}
+		dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+		dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+		std::array<Matrix<block>, 2> output;
+		output[0].resize(numPoints, domain);
+		output[1].resize(numPoints, domain);
+
+		for (u64 tt = 0; tt < trials; ++tt)
+		{
+
+			timer.setTimePoint("start");
+			macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].expand(output[0], prng, sock[0]),
+				dpf[1].expand(output[1], prng, sock[1])
+			));
+			timer.setTimePoint("finish");
+
+			dpf[0].init(0, domain, points0, values0);
+			dpf[1].init(1, domain, points1, values1);
+			dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+			dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+		}
+
+		if (cmd.isSet("v"))
+			std::cout << timer << std::endl;
+	}
 }
