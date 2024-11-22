@@ -59,12 +59,15 @@ namespace osuCrypto {
 
     template<typename I, typename R>
     void distribution_thread_function_v2(u64 start_w, u64 end_w, u64 n, u64 multiplier, u64 sigma,
+        u64 approximate,
         const std::vector<R>& count_fraction, std::vector<R>& thread_partial_counts,
         const std::vector<R> &block_enum_part,
         std::vector<std::vector<I>> pascal_triangle) {
         assert(multiplier == 0); // TODO only block enumerator supported now
         // (non-recursive convolution not yet supported)
        
+        std::fill(thread_partial_counts.begin(), thread_partial_counts.end(), R(0));
+
         // Do not use the block_enum function, but unroll the function to avoid recomputing stuff
         for (u64 w = start_w; w < end_w; ++w) {
             // precompute as much from block_enum as you can as soon as possible (a lot of it is independent of h)
@@ -73,15 +76,24 @@ namespace osuCrypto {
                 block_enum_part2[q] = block_enum_part[q] * labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
             }
 
-            for (u64 h = 0; h <= n; ++h) {
+            // Handle all but last h
+            u64 offset = 0;
+            for (u64 h = 0; h < (thread_partial_counts.size() - 1); ++h) {
                 R enumerator = 0;
                 for (size_t q = 0; q < block_enum_part2.size(); q++) {
-                    enumerator += block_enum_part2[q] * choose_pascal<I>(sigma * q, h, pascal_triangle);
+                    enumerator += block_enum_part2[q] * choose_pascal<I>(sigma * q, offset, pascal_triangle);
                 }
                 // Safely update the shared thread_partial_counts[h] (one element per h)
                 // Note no need to lock it as each thread operates on different copy of thread_partial_counts
                 thread_partial_counts[h] += (count_fraction[w] * enumerator);
+                offset += approximate;
             }
+            // Handle last h separately (last h is the last point in the distribution and is not h * approximate but n
+            R enumerator = 0;
+            for (size_t q = 0; q < block_enum_part2.size(); q++) {
+                enumerator += block_enum_part2[q] * choose_pascal<I>(sigma * q, n, pascal_triangle);
+            }
+            thread_partial_counts[thread_partial_counts.size() - 1] += (count_fraction[w] * enumerator);
         }
     }
 
@@ -115,7 +127,8 @@ namespace osuCrypto {
                                    std::vector<R> &new_distribution,
                                    u64 multiplier,
                                    u64 n,
-                                   u64 sigma, 
+                                   u64 sigma,
+                                   u64 approximate,
                                    std::vector<std::vector<I>>& pascal_triangle) {
         assert(old_distribution.size() == n + 1);
         assert(new_distribution.size() == n + 1);
@@ -134,10 +147,13 @@ namespace osuCrypto {
         u64 num_cores = 16;
         u64 heuristic = ceil(new_distribution.size() / 50.);
         u64 num_threads = (heuristic < num_cores) ? heuristic : num_cores;
-        // Calculate chunk size for each thread
+        // Calculate chunk size for each thread (in terms of w)
         u64 chunk_size = new_distribution.size() / num_threads;
+        // Calculate the number of counts to compute by each thread (in terms of h) - 
+        // i.e. the number of points on the distribution that is exactly computed
+        u64 num_real = (n % approximate == 0) ? (n / approximate + 1) : (n / approximate + 2);
         std::vector<std::thread> threads;
-        std::vector<std::vector<R>> thread_partial_counts(num_threads, std::vector<R>(new_distribution.size()));
+        std::vector<std::vector<R>> thread_partial_counts(num_threads, std::vector<R>(num_real));
 
         // precompute as much from block_enum as you can as soon as possible (a lot of it is independent of w, h)
         size_t k_over_sigma = n / sigma; // note k==n at this step
@@ -168,7 +184,7 @@ namespace osuCrypto {
             u64 end_w = (t == num_threads - 1) ? new_distribution.size() : (start_w + chunk_size);
 
             // Start each thread with its range of `w` and thread-specific pascal_triangle
-            threads.emplace_back(distribution_thread_function_v2<I, R>, start_w, end_w, n, multiplier, sigma, 
+            threads.emplace_back(distribution_thread_function_v2<I, R>, start_w, end_w, n, multiplier, sigma, approximate,
                 std::cref(count_fraction), std::ref(thread_partial_counts[t]), std::cref(block_enum_part), pascal_triangle);
         }
 
@@ -179,8 +195,37 @@ namespace osuCrypto {
 
         // Add thread_partial_counts into new_distribution
         for (u64 t = 0; t < num_threads; ++t) {
-            for (u64 i = 0; i < new_distribution.size(); ++i) {
-                new_distribution[i] += thread_partial_counts[t][i];
+            u64 offset = 0;
+            for (u64 i = 0; i < (num_real - 1); ++i) {
+                new_distribution[offset] += thread_partial_counts[t][i];
+                offset += approximate;
+            }
+            // last one may be at a different offset (we ensure the first and last points of a distribution always computed)
+            new_distribution[new_distribution.size() - 1] += thread_partial_counts[t][num_real - 1];
+        }
+        
+        // Now that each 'approximate'th point of new_distribution was computed,
+        // Interpolate remaining points (if approximate > 1)
+        // linear spline
+        if (approximate > 1) {
+            // handle all but last pair
+            u64 offset = 0;
+            for (u64 i = 0; i < num_real - 2; i++) {
+                R start = new_distribution[offset];
+                R step = (new_distribution[offset + approximate] - start) / R(approximate);
+                for (u64 j = 1; j < approximate; ++j) {
+                    start += step;
+                    new_distribution[offset + j] = start;
+                }
+                offset += approximate;
+            }
+            // handle last pair separately
+            R start = new_distribution[offset];
+            u64 step_size = new_distribution.size() - 1 - offset;
+            R step = (new_distribution[new_distribution.size() - 1] - start) / R(step_size);
+            for (u64 j = 1; j < step_size; ++j) {
+                start += step;
+                new_distribution[offset + j] = start;
             }
         }
 
@@ -288,7 +333,8 @@ namespace osuCrypto {
 
     template<typename I, typename R>
     std::vector<R> minimum_distance(u64 expander, u64 multiplier, u64 num_iters,
-                                       u64 k, u64 n, u64 sigma, u64 sigma_expander) {
+                                       u64 k, u64 n, u64 sigma, u64 sigma_expander,
+                                       u64 approximate) {
         // TODO Assumes G's sigma is the same for all iterations (except expanding step)
         // std::cout << "Computing minimum distance..." << std::endl;
 
@@ -322,6 +368,7 @@ namespace osuCrypto {
         // Expansion step is slightly different from the iterations
         // At the beginning there are c_w = k choose w inputs of weight w<=k
         // After expansion, c_w (for w<=n) depends on what expander we use
+        // TODO add approximate here
         compute_expanding_distribution<I, R>(distributions[0], expander, k, n, e, sigma_expander, pascal_triangle);
         //print_distribution(distributions[0]);
 
@@ -332,8 +379,9 @@ namespace osuCrypto {
                                             distributions[(iter + 1) % 2],
                                             multiplier,
                                             n, sigma,
+                                            approximate,
                                             pascal_triangle);
-            // print_distribution(distributions[(iter + 1) % 2]);
+            print_distribution(distributions[(iter + 1) % 2]);
         }
 
         // Now return the distribution associated with the last iteration
@@ -358,7 +406,10 @@ namespace osuCrypto {
 
         // expander (0: repeater, 1: block expander), 
         // multiplier (0: block, 1: non recursive convolution), 
-        // num_iters, k, n, sigma, sigma_expander (0 if repeater)
+        // num_iters, k, n, sigma, sigma_expander (0 if repeater),
+        // approximate - 1 if exact ie compute exactly all elements in the distribution, 2 means compute every other
+        //               element in the distribution and approximate the remaining, 4 means compute every 4th element
+        //               and approximate the rest
 
         //
         // varying iterations, everything else fixed
@@ -371,7 +422,15 @@ namespace osuCrypto {
                 //{0, 0, 2, 64, 128, 128, 0},
                 //{0, 0, 2, 128, 256, 256, 0},
                 //{0, 0, 2, 256, 512, 512, 0},
-            {0, 0, 2, 512, 1024, 64, 0},
+
+
+            //{0, 0, 2, 512, 1024, 64, 0, 2},
+            {0, 0, 2, 64, 128, 32, 0, 1},
+
+
+            //{0, 0, 2, 8192, 16384, 16384, 0},
+            //{0, 0, 2, 16384, 32768, 32768, 0},
+            //{0, 0, 2, 32768, 65536, 65536, 0},
             //{0, 0, 2, 2048, 4096, 128, 0},
             //{0, 0, 2, 2048, 4096, 256, 0},
             //{0, 0, 2, 2048, 4096, 512, 0},
@@ -387,7 +446,8 @@ namespace osuCrypto {
                                                                                    param[3],
                                                                                    param[4],
                                                                                    param[5],
-                                                                                   param[6]);
+                                                                                   param[6],
+                                                                                   param[7]);
             // Now take the distribution that was returned in the function above
             // and find at which index the sum >= 1. That is the minimum distance
             u64 expected_md = minimum_distance_from_distribution<Rat>(param[4], expected_distribution);
@@ -417,6 +477,8 @@ namespace osuCrypto {
         // i.e. the enumerator we compute at each iteration
         u64 multiplier = cmd.getOr("multiplier", 0);
         u64 num_iters = cmd.getOr("iters", 1); // number of permute & [multiply] iterations
+        u64 approximate = cmd.getOr("approx", 1); // compute exactly every approximate'th point in the distribution,
+                                                  // approximate the rest
 
         std::cout << "k: " << k << std::endl;
         std::cout << "n: " << n << std::endl;
@@ -428,10 +490,13 @@ namespace osuCrypto {
         std::cout << "multiplier: " << multiplier << ", if 0 then block enumerator, "
                                                      "if 1 then non-recursive convolution enumerator"
                   << std::endl;
+        std::cout << "approximate: " << approximate << ", if 1 then compute all points in the distribution exactly, "
+            "else compute exactly every approximate'th element"
+            << std::endl;
 
         std::vector<Rat> distribution = minimum_distance<Int, Rat>(expander, multiplier,
                                                             num_iters, k, n,
-                                                            sigma, sigma_expander);
+                                                            sigma, sigma_expander, approximate);
         u64 min_distance_v1 = minimum_distance_from_distribution<Rat>(n, distribution);
         std::cout << "Minimum Distance: " << min_distance_v1 << std::endl;
     }

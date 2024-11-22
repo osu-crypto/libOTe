@@ -298,14 +298,15 @@ namespace osuCrypto {
     }
 
     void minimum_distance_tests() {
-        // expander, multiplier, num_iters, k, n, sigma, sigma_expander (0 if repeater)
+        // expander, multiplier, num_iters, k, n, sigma, sigma_expander (0 if repeater), approximate (1 means compute all 
+        // elements in the distribution exactly)
         std::vector<std::vector<u64>> params = {
-                {0, 0, 1, 3, 6, 3, 0}, // repeater and block enumerator
-                {0, 0, 1, 3, 6, 6, 0}, // repeater and block enumerator
-                {0, 0, 1, 4, 8, 4, 0}, // repeater and block enumerator
-                {0, 0, 1, 4, 12, 6, 0}, // repeater and block enumerator
-                {1, 0, 1, 4, 8, 4, 2}, // expanding block and block enumerator
-                {1, 0, 1, 3, 9, 3, 3}, // expanding block and block enumerator
+                {0, 0, 1, 3, 6, 3, 0, 1}, // repeater and block enumerator
+                {0, 0, 1, 3, 6, 6, 0, 1}, // repeater and block enumerator
+                {0, 0, 1, 4, 8, 4, 0, 1}, // repeater and block enumerator
+                {0, 0, 1, 4, 12, 6, 0, 1}, // repeater and block enumerator
+                {1, 0, 1, 4, 8, 4, 2, 1}, // expanding block and block enumerator
+                {1, 0, 1, 3, 9, 3, 3, 1}, // expanding block and block enumerator
                 //{1, 0, 1, 4, 8, 8, 2} // expanding block and block enumerator
                 // TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
                 //  TODO add more tests with different expander multiplier
@@ -321,7 +322,8 @@ namespace osuCrypto {
                                                                                    param[3],
                                                                                    param[4],
                                                                                    param[5],
-                                                                                   param[6]);
+                                                                                   param[6],
+                                                                                   param[7]);
             u64 expected_md = minimum_distance_from_distribution<Rat>(param[4], expected_distribution);
             /*u64 true_md = minimum_distance_exact_true<Int, Rat>(param[0],
                                                                 param[1],
