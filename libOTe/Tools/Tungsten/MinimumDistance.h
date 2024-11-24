@@ -1,6 +1,7 @@
 #ifndef LIBOTE_MINIMUMDISTANCE_H
 #define LIBOTE_MINIMUMDISTANCE_H
 
+#include <chrono>
 #include <numeric>
 #include <stdexcept>
 #include <vector>
@@ -136,11 +137,17 @@ namespace osuCrypto {
         std::fill(new_distribution.begin(), new_distribution.end(), R(0));
 
         // Precompute old_distribution[w] / R(n_choose_w) so that we do only n instead of n^2 times
+        std::cout << "Started precomputing the fraction of counts necessary to compute the next distribution..." << std::endl;
+        auto start = std::chrono::steady_clock::now();
         std::vector<R> count_fraction(n + 1);
         for (size_t w = 0; w <= n; w++) {
             // NOTE this n_choose_w value is not recomputed each time as the function caches the values in the Pascal triangle
             count_fraction[w] = old_distribution[w] / R(choose_pascal<I>(n, w, pascal_triangle));
         }
+        auto end = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << "Finished precomputing the fraction of counts necessary to compute the next distribution:" <<
+            elapsed.count() << " ms" << std::endl;
 
         // 16 as my computer has 16 cores
         // 50 picked heuristically
@@ -156,6 +163,8 @@ namespace osuCrypto {
         std::vector<std::vector<R>> thread_partial_counts(num_threads, std::vector<R>(num_real));
 
         // precompute as much from block_enum as you can as soon as possible (a lot of it is independent of w, h)
+        std::cout << "Started precomputing parts of block enumerator before multithreading..." << std::endl;
+        start = std::chrono::steady_clock::now();
         size_t k_over_sigma = n / sigma; // note k==n at this step
         std::vector<R> block_enum_part;
         block_enum_part.reserve(k_over_sigma + 1);
@@ -168,7 +177,13 @@ namespace osuCrypto {
             // Incrementally compute the next power of 2
             current_factor *= base_factor;
         }
+        end = std::chrono::steady_clock::now();
+        elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << "Finished precomputing parts of block enumerator before multithreading:" << 
+            elapsed.count() << " ms" << std::endl;
         // ensure sigma * q choose h is precomputed in pascal_triangle for all q, h before invoking each thread
+        std::cout << "Started precomputing pascal's triangle..." << std::endl;
+        start = std::chrono::steady_clock::now();
         for (u64 q = 0; q <= k_over_sigma; q++) {
             u64 sigma_q = sigma * q;
             for (u64 h = 0; h < new_distribution.size(); h++) {
@@ -178,7 +193,13 @@ namespace osuCrypto {
                 choose_pascal<I>(q, i, pascal_triangle);
             }
         }
+        end = std::chrono::steady_clock::now();
+        elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << "Finished precomputing pascal's triangle:" << 
+            elapsed.count() << " ms" << std::endl;
 
+        std::cout << "Started multithreading..." << std::endl;
+        start = std::chrono::steady_clock::now();
         for (int t = 0; t < num_threads; ++t) {
             u64 start_w = t * chunk_size;
             u64 end_w = (t == num_threads - 1) ? new_distribution.size() : (start_w + chunk_size);
@@ -192,7 +213,13 @@ namespace osuCrypto {
         for (auto& t : threads) {
             t.join();
         }
+        end = std::chrono::steady_clock::now();
+        elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << "Finished multithreading:" << 
+            elapsed.count() << " ms" << std::endl;
 
+        std::cout << "Started combining results from each thread into final distribution..." << std::endl;
+        start = std::chrono::steady_clock::now();
         // Add thread_partial_counts into new_distribution
         for (u64 t = 0; t < num_threads; ++t) {
             u64 offset = 0;
@@ -203,30 +230,40 @@ namespace osuCrypto {
             // last one may be at a different offset (we ensure the first and last points of a distribution always computed)
             new_distribution[new_distribution.size() - 1] += thread_partial_counts[t][num_real - 1];
         }
+        end = std::chrono::steady_clock::now();
+        elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << "Finished combining results from each thread into final distribution:" << 
+            elapsed.count() << " ms" << std::endl;
         
         // Now that each 'approximate'th point of new_distribution was computed,
         // Interpolate remaining points (if approximate > 1)
         // linear spline
         if (approximate > 1) {
+            std::cout << "Started interpolating remaining points in the  final distribution..." << std::endl;
+            start = std::chrono::steady_clock::now();
             // handle all but last pair
             u64 offset = 0;
             for (u64 i = 0; i < num_real - 2; i++) {
-                R start = new_distribution[offset];
-                R step = (new_distribution[offset + approximate] - start) / R(approximate);
+                R initial = new_distribution[offset];
+                R step = (new_distribution[offset + approximate] - initial) / R(approximate);
                 for (u64 j = 1; j < approximate; ++j) {
-                    start += step;
-                    new_distribution[offset + j] = start;
+                    initial += step;
+                    new_distribution[offset + j] = initial;
                 }
                 offset += approximate;
             }
             // handle last pair separately
-            R start = new_distribution[offset];
+            R initial = new_distribution[offset];
             u64 step_size = new_distribution.size() - 1 - offset;
-            R step = (new_distribution[new_distribution.size() - 1] - start) / R(step_size);
+            R step = (new_distribution[new_distribution.size() - 1] - initial) / R(step_size);
             for (u64 j = 1; j < step_size; ++j) {
-                start += step;
-                new_distribution[offset + j] = start;
+                initial += step;
+                new_distribution[offset + j] = initial;
             }
+            end = std::chrono::steady_clock::now();
+            elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            std::cout << "Finished interpolating remaining points in the  final distribution:" << 
+                elapsed.count() << " ms" << std::endl;
         }
 
         /*for (size_t h = 0; h <= n; h++) {
@@ -381,7 +418,7 @@ namespace osuCrypto {
                                             n, sigma,
                                             approximate,
                                             pascal_triangle);
-            print_distribution(distributions[(iter + 1) % 2]);
+            //print_distribution(distributions[(iter + 1) % 2]);
         }
 
         // Now return the distribution associated with the last iteration
@@ -397,7 +434,7 @@ namespace osuCrypto {
         std::cout << "Initial distribution sum: " << initial_distribution_sum << std::endl;
         std::cout << "Final distribution sum: " << final_distribution_sum << std::endl;
         assert(final_distribution_sum == initial_distribution_sum);
-        if (final_distribution_sum != initial_distribution_sum) throw RTE_LOC;
+        if (approximate == 1 && final_distribution_sum != initial_distribution_sum) throw RTE_LOC;
 
         return distributions[num_iters % 2];
     }
@@ -423,9 +460,9 @@ namespace osuCrypto {
                 //{0, 0, 2, 128, 256, 256, 0},
                 //{0, 0, 2, 256, 512, 512, 0},
 
-
-            //{0, 0, 2, 512, 1024, 64, 0, 2},
-            {0, 0, 2, 64, 128, 32, 0, 1},
+            //{0, 0, 2, 512, 1024, 64, 0, 1},
+            //{0, 0, 2, 1024, 2048, 64, 0, 1},
+            {0, 0, 2, 2048, 4096, 64, 0, 2},
 
 
             //{0, 0, 2, 8192, 16384, 16384, 0},

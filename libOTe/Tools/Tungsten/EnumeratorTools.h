@@ -421,7 +421,7 @@ namespace osuCrypto {
 		return v * expansion;
 	}
 
-
+	// approximation of the binomial coefficient using logarithmic properties
 	Float chooseApx(i64 n, i64 k)
 	{
 		if (k < 0 || k > n)
@@ -430,6 +430,23 @@ namespace osuCrypto {
 			return 1;
 		auto b = (n - k) * log(Float(n) / (n - k)) + k * log(Float(n) / k);
 		return exp(b);
+	}
+
+	// Computes n choose k using an efficient iterative approach.
+	// This avoids computing factorials directly, which can grow very large and cause overflow.
+	template <typename T>
+	inline T choose_iterative(i64 n, i64 k)
+	{
+		if (k < 0 || k > n)
+			return 0;
+		if (k == 0 || k == n)
+			return 1;
+
+		k = std::min<i64>(k, n - k);
+		T c = 1;
+		for (u64 i = 0; i < k; ++i)
+			c = c * (n - i) / (i + 1);
+		return c;
 	}
 
 	/*
@@ -473,6 +490,10 @@ namespace osuCrypto {
 		// Return cached value if it exists
 		if (cache[n][k] != -1) return cache[n][k];
 
+		// Option 1
+		// computes unnecessary values in a row even if just one k for n is needed
+		// does not cache intermediate rows
+		/*
 		// Use a 1D vector to store the current row of Pascal's Triangle
 		std::vector<T> row(k + 1, 0);
 		row[0] = 1; // C(n, 0) is always 1
@@ -488,6 +509,12 @@ namespace osuCrypto {
 		// Store the result in the cache before returning
 		cache[n][k] = row[k];
 		return row[k];
+		*/
+		// Option 2: avoids the issues in the first option
+		// Recursive computation: C(n, k) = C(n-1, k-1) + C(n-1, k)
+		cache[n][k] = choose_pascal<T>(n - 1, k - 1, cache) +
+			choose_pascal<T>(n - 1, k, cache);
+		return cache[n][k];
 	}
 
 

@@ -26,7 +26,7 @@ namespace osuCrypto {
     This function is optimized for efficiency by using caching, symmetry reduction, and a dynamic programming approach with a 1D row calculation based on Pascal’s Triangle. It is suitable for computing binomial coefficients with moderate values of "n" and "k" and can handle repeated calls efficiently due to caching.
     */
     template <typename T>
-    T choose_new(int64_t n, int64_t k) {
+    T choose_new(int64_t n, int64_t k, std::vector<std::vector<T>>& cache) {
         if (k < 0 || k > n)
             return 0;
         if (k == 0 || k == n)
@@ -35,9 +35,6 @@ namespace osuCrypto {
         // Reduce the number of calculations by using symmetry: C(n, k) = C(n, n - k)
         if (k > n - k)
             k = n - k;
-
-        // Static cache for Pascal's Triangle
-        static std::vector<std::vector<T>> cache;
 
         // Resize the cache if necessary
         if (cache.size() <= n) {
@@ -52,6 +49,10 @@ namespace osuCrypto {
         // Return cached value if it exists
         if (cache[n][k] != -1) return cache[n][k];
 
+        // Option 1
+        // computes unnecessary values in a row even if just one k for n is needed
+        // does not cache intermediate rows
+        /*
         // Use a 1D vector to store the current row of Pascal's Triangle
         std::vector<T> row(k + 1, 0);
         row[0] = 1; // C(n, 0) is always 1
@@ -67,6 +68,12 @@ namespace osuCrypto {
         // Store the result in the cache before returning
         cache[n][k] = row[k];
         return row[k];
+        */
+        // Option 2: avoids the issues in the first option
+        // Recursive computation: C(n, k) = C(n-1, k-1) + C(n-1, k)
+        cache[n][k] = choose_new<T>(n - 1, k - 1, cache) +
+            choose_new<T>(n - 1, k, cache);
+        return cache[n][k];
     }
 
     template <typename T>
@@ -87,9 +94,11 @@ namespace osuCrypto {
     inline void binomialCoefficientTestMain(oc::CLP& cmd) {
         int64_t n = 1000;
 
+        std::vector<std::vector<Int>> pascal_triangle;
+
         // Verify correctness
         for (int64_t k = -2; k < (n + 2); k++) {
-            Int new_choose = choose_new<Int>(n, k);
+            Int new_choose = choose_new<Int>(n, k, pascal_triangle);
             Int old_choose = choose_old<Int>(n, k);
             std::cout << "New: C(" << n << ", " << k << ") = " << new_choose << std::endl;
             std::cout << "Old: C(" << n << ", " << k << ") = " << old_choose << std::endl;
@@ -101,7 +110,8 @@ namespace osuCrypto {
         std::cout << "Running new..." << std::endl;
         auto start = std::chrono::high_resolution_clock::now();
         for (int64_t k = -2; k < (n + 2); k++) {
-            Int new_choose = choose_new<Int>(n, k);
+            // NOTE not completely fair as pascal_triangle already built
+            Int new_choose = choose_new<Int>(n, k, pascal_triangle);
         }
         auto end = std::chrono::high_resolution_clock::now();
         // Calculate elapsed time in milliseconds
