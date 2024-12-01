@@ -41,7 +41,9 @@ namespace osuCrypto {
         assert(e == n / k);
         for (size_t h = 0; h <= n; h++) {
             // note that for repeater, we do NOT need this loop, but used now for modularity
-            // NOTE we exclude w=0 from the input x as it would always result in all zeros
+            // NOTE we exclude w=0 from the input x as it would always result in all zeros, so E_{w=0,h=0}=1
+            // but then minimum distance would always be 0 as the distribution would be 1 in the first entry! 
+            // in the following iterations we care about w=0 as non-zero input could result in h=0
             for (size_t w = 1; w <= k; w++) {
                 if (expander == 0) {
                     // repeater
@@ -221,7 +223,7 @@ namespace osuCrypto {
         std::cout << "Started combining results from each thread into final distribution..." << std::endl;
         start = std::chrono::steady_clock::now();
         // Add thread_partial_counts into new_distribution
-        for (u64 t = 0; t < num_threads; ++t) {
+       for (u64 t = 0; t < num_threads; ++t) {
             u64 offset = 0;
             for (u64 i = 0; i < (num_real - 1); ++i) {
                 new_distribution[offset] += thread_partial_counts[t][i];
@@ -360,6 +362,28 @@ namespace osuCrypto {
     }
     */
 
+    // function to help with estimating a distribution f(2n) from f(n)
+    template <typename T>
+    void expand_and_interpolate(std::vector<T>& distribution) {
+        // Check that the input vector has at least two elements for interpolation
+        if (distribution.size() < 2) {
+            throw std::invalid_argument("Input vector must have at least two elements.");
+        }
+
+        size_t n = distribution.size();
+        distribution.resize(2 * n - 1); // Resize the vector to accommodate 2n elements
+
+        // Shift the original elements to their new positions (end to start to avoid overwriting)
+        for (size_t i = n; i > 0; --i) {
+            distribution[2 * (i - 1)] = distribution[i - 1];
+        }
+
+        // Perform linear interpolation for the even indices
+        for (size_t i = 0; i < n - 1; ++i) {
+            distribution[2 * i + 1] = (distribution[2 * i] + distribution[2 * i + 2]) / 2;
+        }
+    }
+
     void print_distribution(std::vector<Rat> &distribution) {
         std::cout << "Printing distribution: " << std::endl;
         for (const auto& d : distribution) {
@@ -405,9 +429,8 @@ namespace osuCrypto {
         // Expansion step is slightly different from the iterations
         // At the beginning there are c_w = k choose w inputs of weight w<=k
         // After expansion, c_w (for w<=n) depends on what expander we use
-        // TODO add approximate here
         compute_expanding_distribution<I, R>(distributions[0], expander, k, n, e, sigma_expander, pascal_triangle);
-        //print_distribution(distributions[0]);
+        // print_distribution(distributions[0]);
 
         // Compute distributions for iterations
         for (size_t iter = 0; iter < num_iters; iter++) {
@@ -418,7 +441,8 @@ namespace osuCrypto {
                                             n, sigma,
                                             approximate,
                                             pascal_triangle);
-            //print_distribution(distributions[(iter + 1) % 2]);
+            // expand_and_interpolate(distributions[(iter + 1) % 2]);
+            print_distribution(distributions[(iter + 1) % 2]);
         }
 
         // Now return the distribution associated with the last iteration
@@ -460,9 +484,13 @@ namespace osuCrypto {
                 //{0, 0, 2, 128, 256, 256, 0},
                 //{0, 0, 2, 256, 512, 512, 0},
 
-            //{0, 0, 2, 512, 1024, 64, 0, 1},
-            //{0, 0, 2, 1024, 2048, 64, 0, 1},
-            {0, 0, 2, 2048, 4096, 64, 0, 2},
+            {0, 0, 2, 512, 1024, 64, 0, 1},
+            //{0, 0, 1, 1024, 2048, 64, 0, 1},
+            //{0, 0, 2, 4096, 8192, 64, 0, 1},
+            //{0, 0, 2, 4096, 8192, 128, 0, 1},
+            //{0, 0, 2, 4096, 8192, 256, 0, 1},
+            //{0, 0, 2, 4096, 8192, 512, 0, 1},
+            //{0, 0, 2, 4096, 8192, 1024, 0, 1},
 
 
             //{0, 0, 2, 8192, 16384, 16384, 0},

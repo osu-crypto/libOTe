@@ -14,3 +14,45 @@ TODOS:
 3. implement non-recursive block enumerator
 4. test minimum distance with this non-recursive block enumerator
 5. work on the recursive enumerator
+
+
+
+NOTES
+
+n choose w distribution (initial)
+- not a normal distribution (primarily, it is discrete, not continuous), much more similar to binomial distribution
+-not a probability distribution since (1) k choose w are counts, not probabilities, (2) the sum is non-normalized
+- the sum in probability distributions needs to be 1
+- we know that sum from w=0 to w=n of (n choose w), for a fixed n, is 2^n 
+- clearly 2^n != 1
+- n choose w represents the number of ways to choose w successes out of n trials
+- binomial distribution  shows the likelihood of each possible number of successes (w) in n independent Bernoulli trials, 
+given the probability of success p for each trial.
+- Observe, just like binomial distribution for p=0.5, the peak is at n/2, the curve is symmetric, and discrete
+- can we convert n choose w distribution to binomial distribution?
+- To convert the n choose w values into a valid probability distribution, you can normalize them 
+by dividing each value by the total sum 2^n, i.e. (n choose w) / 2^n for all w
+- then we get binomial distribution parameterized by n and p=0.5
+- we now know the mean is at np = 0.5n and the variance is np(1-p) = 0.5n(1-0.5) = 0.25n
+- also note that for larger n, the curve approximates gaussian distribution due to central limit theorem
+- the mean stays same for following iterations, but the variance shrinks
+- maybe we can use it to compute the distribution in the next iterations of permute-multiply (while dealing with much smaller numbers)
+
+Distribution after repeater (expansion factor 2) and a single iteration of permute-multiply
+
+ - as we run permute-multiply iterations, the mean of the distributions stays the same -> n/2
+ - it is still bell curved with rapid increase/decrease (as in n choose w distributions)
+ - the difference is that the distribution gets narrower (symmetrically on both left and right side), 
+ i.e. it becomes steeper and narrower
+ -after expansion with a repeater (assuming expansion is 2), every other number on the distribution is 0, otherwise
+ the curve is similar to n choose w
+ - after the permute-multiply, it is similar to Binomial Distribution with Large n, could be approximated with gaussian distribution
+
+
+Key question:
+
+Find a pattern that given one distribution of size n (let's call f(n)) can predict distribution of size 2n (i.e. f(2n)):
+1. expand f(n) to f(2n) first by setting f1->f1, f2->f3,f3->f5, etc. and then interpolate f2 = (f1+f3)/2, f4=(f3+f5)/2, etc.
+2. new mean is at 2n/2 = n
+3. compute the actual value of the peak of f(2n) as I will need to do some scaling
+....
