@@ -31,6 +31,107 @@ namespace osuCrypto {
     }
 
     template<typename I, typename R>
+    void compute_repeater_distribution(
+        std::vector<R>& distribution,
+		u64 k,
+		u64 n,
+		u64 e,
+		std::vector<std::vector<I>>& pascal_triangle) {
+        assert(distribution.size() == n + 1);
+        assert(k * e == n);
+        // NOTE we exclude w=0 from the input x as it would always result in all zeros, so E_{w=0,h=0}=1
+        // but then minimum distance would always be 0 as the distribution would be 1 in the first entry! 
+        // in the following iterations we do care about w=0 as non-zero input could result in h=0
+        distribution[0] = I(0);
+        for (u64 h = 1; h <= n; h++) {
+            u64 w = h / e; // all other w will result in 0 enumerator, only non-zero when h = w * e
+            if (w * e == h) {
+                distribution[h] = repeater_enum<I>(w, h, k, e, pascal_triangle);
+            }
+            else {
+                distribution[h] = I(0);
+            }
+        }
+
+        /*// the method below is also correct
+		for (size_t h = 0; h <= n; h++) {
+			// note that for repeater, we do NOT need this loop, but used now for modularity
+			// NOTE we exclude w=0 from the input x as it would always result in all zeros, so E_{w=0,h=0}=1
+			// but then minimum distance would always be 0 as the distribution would be 1 in the first entry! 
+			// in the following iterations we care about w=0 as non-zero input could result in h=0
+			for (size_t w = 1; w <= k; w++) {
+				distribution[h] += repeater_enum<I>(w, h, k, e, pascal_triangle);
+				assert(distribution[0] == 0);
+			}
+		}*/
+	}
+
+    template<typename I, typename R>
+    void expanding_block_thread_function(u64 start_h, u64 end_h, u64 k, u64 n, u64 sigma_expander,
+        std::vector<R>& distribution, std::vector<std::vector<I>> pascal_triangle) {
+        for (u64 h = start_h; h < end_h; ++h) {
+            for (u64 w = 1; w <= k; ++w) {
+                // Use the thread-specific copy of pascal_triangle
+                // Safely update the shared distribution[h] (one element per h)
+                // Note no need to lock it as each thread operates on different unique index h in new_distribution
+                distribution[h] += expanding_block_enum<I, R>(w, h, k, n, sigma_expander, pascal_triangle);
+            }
+        }
+    }
+
+    template<typename I, typename R>
+    void compute_expanding_block_distribution(
+        std::vector<R>& distribution,
+        u64 k,
+        u64 n,
+        u64 e,
+        u64 sigma_expander,
+        std::vector<std::vector<I>>& pascal_triangle) {
+        std::fill(distribution.begin(), distribution.end(), R(0));
+
+        // NOTE the code below could be optimized as when computing the distributions in the following iterations
+        // I.e. switching the h,w loops enables to precompute parts of the enumerator (if we iterate over w first)
+
+        // 16 as my computer has 16 cores
+        // 50 picked heuristically
+        u64 num_cores = 16;
+        u64 heuristic = ceil((n + 1) / 50.);
+        u64 num_threads = (heuristic < num_cores) ? heuristic : num_cores;
+        // Calculate chunk size for each thread
+        u64 chunk_size = (n + 1) / num_threads;
+        std::vector<std::thread> threads;
+
+        for (int i = 0; i < num_threads; ++i) {
+            u64 start_h = i * chunk_size;
+            u64 end_h = (i == num_threads - 1) ? (n + 1) : (start_h + chunk_size);
+
+            // Start each thread with its range of `h` and thread-specific pascal_triangle
+            threads.emplace_back(expanding_block_thread_function<I, R>, start_h, end_h, k, n, sigma_expander,
+                std::ref(distribution), pascal_triangle);
+        }
+
+        // Join threads to ensure all complete
+        for (auto& t : threads) {
+            t.join();
+        }
+
+
+
+        // TODO simple way to do
+        /*
+        // compute_block_distribution<I, R>()
+        for (size_t h = 0; h <= n; h++) {
+            // note that for repeater, we do NOT need this loop, but used now for modularity
+            // NOTE we exclude w=0 from the input x as it would always result in all zeros, so E_{w=0,h=0}=1
+            // but then minimum distance would always be 0 as the distribution would be 1 in the first entry! 
+            // in the following iterations we care about w=0 as non-zero input could result in h=0
+            for (size_t w = 1; w <= k; w++) {
+                distribution[h] += expanding_block_enum<I, R>(w, h, k, n, sigma_expander, pascal_triangle);
+            }
+        }*/
+    }
+
+    template<typename I, typename R>
     void compute_expanding_distribution(std::vector<R> &distribution,
                                         u64 expander,
                                         u64 k,
@@ -38,25 +139,24 @@ namespace osuCrypto {
                                         u64 e,
                                         u64 sigma_expander,
                                         std::vector<std::vector<I>> &pascal_triangle) { // only for the expanding block
-        assert(e == n / k);
-        for (size_t h = 0; h <= n; h++) {
-            // note that for repeater, we do NOT need this loop, but used now for modularity
-            // NOTE we exclude w=0 from the input x as it would always result in all zeros, so E_{w=0,h=0}=1
-            // but then minimum distance would always be 0 as the distribution would be 1 in the first entry! 
-            // in the following iterations we care about w=0 as non-zero input could result in h=0
-            for (size_t w = 1; w <= k; w++) {
-                if (expander == 0) {
-                    // repeater
-                    distribution[h] += repeater_enum<I>(w, h, k, e, pascal_triangle);
-                    assert(distribution[0] == 0);
-                } else if (expander == 1) {
-                    assert(sigma_expander > 0);
-                    assert(sigma_expander <= k);
-                    assert(k % sigma_expander == 0);
-                    // block expander (identity + block)
-                    distribution[h] += expanding_block_enum<I, R>(w, h, k, n, sigma_expander, pascal_triangle);
-                }
-            }
+        assert((k * e) == n);
+        //if (e != (n / k) < 0) {
+        //    throw std::invalid_argument("e is inconsistent with k, n");
+        //}
+        if (expander == 0) {
+            // repeater
+            compute_repeater_distribution<I, R>(distribution, k, n, e, pascal_triangle);
+        }
+        else if (expander == 1) {
+            // expanding block
+            assert(sigma_expander > 0);
+            assert(sigma_expander <= k);
+            assert(k % sigma_expander == 0);
+
+            compute_expanding_block_distribution<I, R>(distribution, k, n, e, sigma_expander, pascal_triangle);
+		}
+        else {
+            throw std::invalid_argument("invalid expander (currently only repeater, and expanding block supported)");
         }
     }
 
@@ -126,7 +226,7 @@ namespace osuCrypto {
 
 
     template<typename I, typename R>
-    void compute_next_distribution(const std::vector<R> &old_distribution,
+    void compute_block_distribution(const std::vector<R> &old_distribution,
                                    std::vector<R> &new_distribution,
                                    u64 multiplier,
                                    u64 n,
@@ -435,7 +535,7 @@ namespace osuCrypto {
         // Compute distributions for iterations
         for (size_t iter = 0; iter < num_iters; iter++) {
             // Compute distributions[(iter + 1) % 2]
-            compute_next_distribution<I, R>(distributions[iter % 2],
+            compute_block_distribution<I, R>(distributions[iter % 2],
                                             distributions[(iter + 1) % 2],
                                             multiplier,
                                             n, sigma,

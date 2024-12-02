@@ -8,6 +8,9 @@
 
 namespace osuCrypto {
 
+    // G: kxk identity followed by a k x [(e-1)k] block
+    // outputs the input x concatenated with the {x multiplied by the k x [(e-1)k] block}
+    // NOTE deprecated - we just use block_enumerator
     template<typename I, typename R>
     R expanding_block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma, std::vector<std::vector<I>>& pascal_triangle) {
         assert(n % k == 0);

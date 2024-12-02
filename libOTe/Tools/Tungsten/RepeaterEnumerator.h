@@ -15,6 +15,7 @@ namespace osuCrypto {
         assert(w <= k);
         assert(h <= e * k);
 
+        // for E_w,h to be nonzero, h must equal to w*e
         if (h != w * e) {
             return 0;
         }
