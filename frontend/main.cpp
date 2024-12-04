@@ -29,6 +29,7 @@
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
+int H4main();
 
 using namespace osuCrypto;
 #ifdef ENABLE_IKNP
@@ -81,6 +82,8 @@ void minimal()
 
 int main(int argc, char** argv)
 {
+	//H4main();
+	//return 0;
 	CLP cmd;
 	cmd.parse(argc, argv);
 

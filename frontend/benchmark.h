@@ -715,8 +715,8 @@ namespace osuCrypto
 		Timer timer;
 
 		std::array<oc::RegularDpf, 2> dpf;
-		dpf[0].init(0, domain, points0, values0);
-		dpf[1].init(1, domain, points1, values1);
+		dpf[0].init(0, domain, numPoints);
+		dpf[1].init(1, domain, numPoints);
 
 		auto baseCount = dpf[0].baseOtCount();
 
@@ -750,13 +750,13 @@ namespace osuCrypto
 
 			timer.setTimePoint("start");
 			macoro::sync_wait(macoro::when_all_ready(
-				dpf[0].expand(output[0], prng, sock[0]),
-				dpf[1].expand(output[1], prng, sock[1])
+				dpf[0].expand(points0, values0, [&](auto k, auto i, auto v, auto t) { output[0](k,i) = v; }, prng, sock[0]),
+				dpf[1].expand(points1, values1, [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; }, prng, sock[1])
 			));
 			timer.setTimePoint("finish");
 
-			dpf[0].init(0, domain, points0, values0);
-			dpf[1].init(1, domain, points1, values1);
+			dpf[0].init(0, domain, numPoints);
+			dpf[1].init(1, domain, numPoints);
 			dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
 			dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 		}

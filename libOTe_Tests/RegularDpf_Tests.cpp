@@ -1,14 +1,16 @@
 #include "RegularDpf_Tests.h"
 #include "libOTe/Tools/Dpf/RegularDpf.h"
 #include "coproto/Socket/LocalAsyncSock.h"
-
+#include "libOTe/Tools/Dpf/SparseDpf.h"
+#include <algorithm>
+#include <numeric>
 using namespace oc;
 
 void RegularDpf_Multiply_Test(const CLP& cmd)
 {
 	u64 n = 13;
 	PRNG prng(block(231234, 321312));
-	std::array<oc::RegularDpf, 2> dpf;
+	std::array<oc::DpfMult, 2> dpf;
 	dpf[0].mPartyIdx = 0;
 	dpf[1].mPartyIdx = 1;
 	dpf[0].mSendOts.push_back(prng.get());
@@ -102,7 +104,7 @@ void RegularDpf_Multiply_Test(const CLP& cmd)
 void RegularDpf_Proto_Test(const CLP& cmd)
 {
 	PRNG prng(block(231234, 321312));
-	u64 domain = 8;
+	u64 domain = 131;
 	u64 numPoints = 11;
 	std::vector<u64> points0(numPoints);
 	std::vector<u64> points1(numPoints);
@@ -117,8 +119,8 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 	}
 
 	std::array<oc::RegularDpf, 2> dpf;
-	dpf[0].init(0, domain, points0, values0);
-	dpf[1].init(1, domain, points1, values1);
+	dpf[0].init(0, domain, numPoints);
+	dpf[1].init(1, domain, numPoints);
 
 	auto baseCount = dpf[0].baseOtCount();
 
@@ -144,13 +146,16 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 	dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 
 	std::array<Matrix<block>, 2> output;
+	std::array<Matrix<u8>, 2> tags;
 	output[0].resize(numPoints, domain);
 	output[1].resize(numPoints, domain);
+	tags[0].resize(numPoints, domain);
+	tags[1].resize(numPoints, domain);
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 	macoro::sync_wait(macoro::when_all_ready(
-		dpf[0].expand(output[0], prng, sock[0]),
-		dpf[1].expand(output[1], prng, sock[1])
+		dpf[0].expand(points0, values0, [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; tags[0](k, i) = t; }, prng, sock[0]),
+		dpf[1].expand(points1, values1, [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; tags[1](k, i) = t; }, prng, sock[1])
 	));
 
 
@@ -160,9 +165,37 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 		{
 			auto p = points0[k] ^ points1[k];
 			auto act = output[0][k][i] ^ output[1][k][i];
-			auto exp = i == p ? (values0[k] ^ values1[k]) : ZeroBlock;
+			auto t = i == p;
+			auto tAct = tags[0][k][i] ^ tags[1][k][i];
+			auto exp = t ? (values0[k] ^ values1[k]) : ZeroBlock;
 			if (exp != act)
+				throw RTE_LOC;
+			if (t != tAct)
 				throw RTE_LOC;
 		}
 	}
+}
+
+void SparseDpf_Proto_Test(const oc::CLP& cmd)
+{
+	PRNG prng(block(32324, 2342));
+	u64 numPoints = 1;
+	u64 domain = 256;
+	oc::SparseDpf dpf;
+	Matrix<u32> sparsePoints(numPoints, domain / 10);
+	std::vector<u32> set(domain);
+	std::iota(set.begin(), set.end(), 0);
+	for(u64 i = 0; i < sparsePoints.size(); ++i)
+	{
+		auto j = prng.get<u32>() % set.size();
+		std::swap(set[j], set.back());
+		sparsePoints(i) = set.back();
+		set.pop_back();
+	}
+
+	for (u64 i = 0; i < sparsePoints.rows(); ++i)
+	{
+		std::sort(sparsePoints[i].begin(), sparsePoints[i].end());
+	}
+	dpf.init(0, domain, sparsePoints);
 }

@@ -60,6 +60,7 @@ namespace tests_libOTe
 
             tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
             tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
+            tc.add("SparseDpf_Proto_Test                    ", SparseDpf_Proto_Test);
             
             tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
             tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);
