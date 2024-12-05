@@ -72,7 +72,7 @@ namespace osuCrypto {
     }
 
     void block_enumerator_tests() {
-        std::vector<std::vector<Int>> pascal_triangle;
+        ChooseCache<Int> pascal_triangle;
 
         // w, h, k, n, sigma
         std::vector<std::vector<u64>> params = {
@@ -103,7 +103,7 @@ namespace osuCrypto {
     inline void blockEnumTestMain(oc::CLP& cmd) {
         block_enumerator_tests();
 
-        std::vector<std::vector<Int>> pascal_triangle;
+        ChooseCache<Int> pascal_triangle;
 
         std::cout << "Computing true and expected enumerator for the block construction..." << std::endl;
 

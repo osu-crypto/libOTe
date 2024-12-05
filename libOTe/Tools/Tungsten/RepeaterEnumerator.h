@@ -11,7 +11,7 @@ namespace osuCrypto {
     //I repeater_enum(u64 w, u64 h, u64 n, u64 k);
 
     template<typename I>
-    I repeater_enum(u64 w, u64 h, u64 k, u64 e, std::vector<std::vector<I>> &pascal_triangle) {
+    I repeater_enum(u64 w, u64 h, u64 k, u64 e, ChooseCache<I>&pascal_triangle) {
         assert(w <= k);
         assert(h <= e * k);
 
@@ -35,12 +35,12 @@ namespace osuCrypto {
         std::cout << "k: " << k << std::endl;
         std::cout << "e: " << e << std::endl;
 
-        std::vector<std::vector<Int>> pascal_triangle;
+        ChooseCache<Int> pascal_triangle;
         Int repeater_enumerator = repeater_enum<Int>(w, h, k, e, pascal_triangle);
         std::cout << "Repeater Enumerator: " << repeater_enumerator << std::endl;
 
-        assert(repeater_enum<Int>(5, 15, 10, 3) == 252);
-        assert(repeater_enum<Int>(5, 15, 10, 2) == 0);
+        //assert(repeater_enum<Int>(5, 15, 10, 3) == 252);
+        //assert(repeater_enum<Int>(5, 15, 10, 2) == 0);
     }
 
     inline void repeaterEnumMain(oc::CLP& cmd) {

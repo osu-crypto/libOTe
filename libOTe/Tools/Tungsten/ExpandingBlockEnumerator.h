@@ -12,17 +12,17 @@ namespace osuCrypto {
     // outputs the input x concatenated with the {x multiplied by the k x [(e-1)k] block}
     // NOTE deprecated - we just use block_enumerator
     template<typename I, typename R>
-    R expanding_block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma, std::vector<std::vector<I>>& pascal_triangle) {
-        assert(n % k == 0);
-        size_t e = n / k;
+    R expanding_block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma, ChooseCache<I>& pascal_triangle) {
+        auto nn = n - k;
+        if (nn % sigma)
+            throw RTE_LOC;
+        if (w > k)
+            throw RTE_LOC;;
 
-        assert(w <= k);
-        assert(sigma <= k);
-
-        if (h < w || h > ((e-1) * k + w)) {
+        if (h < w || h > (nn + w)) {
             return 0;
         }
-        return block_enum<I, R>(w, h - w, k, (e-1) * k, sigma, pascal_triangle);
+        return block_enum<I, R>(w, h - w, k, nn, sigma, pascal_triangle);
     }
 
     inline void expanding_block_enum(oc::CLP& cmd) {
@@ -40,7 +40,7 @@ namespace osuCrypto {
         std::cout << "n: " << n << std::endl;
         std::cout << "sigma: " << sigma << std::endl;
 
-        std::vector<std::vector<Int>> pascal_triangle;
+        ChooseCache<Int> pascal_triangle;
         Rat expanding_block_enumerator = expanding_block_enum<Int, Rat>(w, h, k, n, sigma, pascal_triangle);
         std::cout << "Expanding Block Enumerator: " << expanding_block_enumerator << std::endl;
     }

@@ -280,7 +280,7 @@ namespace osuCrypto
                 if (r + this->outOnesPerAlmostTerm * this->v + t1 != this->h)
                     throw RTE_LOC;
 
-                std::vector<std::vector<T>> pascal_triangle;
+                ChooseCache<T> pascal_triangle;
 
                 auto E1 = ballsBins<T>(z, terminatingRuns + 1, pascal_triangle);
                 auto E2 = choose_pascal<T>(f0 + f1, f0, pascal_triangle);
@@ -486,7 +486,7 @@ namespace osuCrypto
     }
 
     template<typename T>
-    T accumulate(u64 n, u64 w, u64 h, std::vector<std::vector<T>> &pascal_triangle)
+    T accumulate(u64 n, u64 w, u64 h, ChooseCache<T> &pascal_triangle)
     {
         return choose_pascal<T>(n - h, w / 2, pascal_triangle) * choose_pascal<T>(h - 1, divCeil(w, 2) - 1, pascal_triangle);
     }
@@ -515,7 +515,7 @@ namespace osuCrypto
         //e.setB(b);
         //e.setR(r);
 
-        std::vector<std::vector<Int>> pascal_triangle;
+        ChooseCache<Int> pascal_triangle;
         auto exp = accumulate<Int>(n, w, h, pascal_triangle);
 
         u64 f0 = 0;

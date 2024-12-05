@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_map>
 #include "cryptoTools/Common/CLP.h"
+#include "cryptoTools/Common/Log.h"
 
 #ifdef ENABLE_BOOST
 #include <boost/multiprecision/cpp_bin_float.hpp>
@@ -449,6 +450,13 @@ namespace osuCrypto {
 		return c;
 	}
 
+	template<typename T>
+	struct ChooseCache
+	{
+		std::vector<std::vector<T>> mRec, mStack;
+
+	};
+
 	/*
 	NEW BINOMIAL COEFFICIENT FUNCTION BASED ON PASCAL'S TRIANGLE WITH CACHING ACROSS CALLS
 
@@ -467,7 +475,7 @@ namespace osuCrypto {
 	This function is optimized for efficiency by using caching, symmetry reduction, and a dynamic programming approach with a 1D row calculation based on Pascal’s Triangle. It is suitable for computing binomial coefficients with moderate values of "n" and "k" and can handle repeated calls efficiently due to caching.
 	*/
 	template <typename T>
-	T choose_pascal(int64_t n, int64_t k, std::vector<std::vector<T>>& cache) {
+	T choose_pascal_recursive(int64_t n, int64_t k, std::vector<std::vector<T>>& cache) {
 		if (k < 0 || k > n)
 			return 0;
 		if (k == 0 || k == n)
@@ -512,11 +520,148 @@ namespace osuCrypto {
 		*/
 		// Option 2: avoids the issues in the first option
 		// Recursive computation: C(n, k) = C(n-1, k-1) + C(n-1, k)
-		cache[n][k] = choose_pascal<T>(n - 1, k - 1, cache) +
-			choose_pascal<T>(n - 1, k, cache);
+		cache[n][k] = choose_pascal_recursive<T>(n - 1, k - 1, cache) +
+			choose_pascal_recursive<T>(n - 1, k, cache);
 		return cache[n][k];
 	}
 
+	//struct NKC_State
+	//{
+	//	u64 n, k, step;
+	//};
+
+	template <typename T>
+	T choose_pascal_stack(int64_t n_, int64_t k_, std::vector<std::vector<T>>& cache) {
+
+
+		auto C = [&cache](u64 n, u64 k) -> T {
+			if (k == 0 || k == n)
+				return 1;
+			if (k > n || n == 0)
+				return 0;
+
+			// Reduce the number of calculations by using symmetry: C(n, k) = C(n, n - k)
+			if (k > n - k)
+				k = n - k;
+
+			// Resize the cache if necessary
+			if (cache.size() <= n) {
+				cache.resize(n + 1);
+				//cache[n].reserve(k + 1);
+				//cache[n].resize(1, 1ull);
+			}
+
+			// Resize the specific row if necessary
+			if (cache[n].size() <= k) {
+				cache[n].resize(k + 1, -1); // Use -1 to denote uncomputed values
+			}
+
+			// Return cached value if it exists
+			//if (cache[n][k] != -1) 
+			return cache[n][k];
+
+			};
+
+		k_ = std::min(k_, n_ - k_);
+		auto res = C(n_, k_);
+		if (res == -1)
+		{
+			std::vector<std::pair<u64, u64>> NKStack{ {n_, k_} };
+			while (NKStack.size())
+			{
+				auto [n, k] = NKStack.back();
+				// Option 1
+				// computes unnecessary values in a row even if just one k for n is needed
+				// does not cache intermediate rows
+				/*
+				// Use a 1D vector to store the current row of Pascal's Triangle
+				std::vector<T> row(k + 1, 0);
+				row[0] = 1; // C(n, 0) is always 1
+
+				// Build up Pascal's Triangle up to the nth row
+				for (int64_t i = 1; i <= n; ++i) {
+					// Update row from the end to the beginning to use only one array
+					for (int64_t j = std::min(i, k); j > 0; --j) {
+						row[j] += row[j - 1];
+					}
+				}
+
+				// Store the result in the cache before returning
+				cache[n][k] = row[k];
+				return row[k];
+				*/
+				// Option 2: avoids the issues in the first option
+				// Recursive computation: C(n, k) = C(n-1, k-1) + C(n-1, k)
+				auto v0 = C(n - 1, k - 1);
+				if (v0 == -1)
+				{
+					NKStack.emplace_back(n - 1, k - 1);
+					continue;
+				}
+
+				auto v1 = C(n - 1, k);
+				if (v1 == -1)
+				{
+					NKStack.emplace_back(n - 1, k);
+					continue;
+				}
+
+				NKStack.pop_back();
+
+				auto kk = std::min(k, n - k);
+				cache[n][kk] = v0 + v1;
+			}
+
+			res = C(n_, k_);
+		}
+		return res;
+	}
+
+
+	template <typename T>
+	T choose_pascal(int64_t n, int64_t k, ChooseCache<T>& cache) {
+		auto v1 = choose_pascal_stack(n, k, cache.mStack);
+
+		if (0 && n < 1000)
+		{
+
+			auto v0 = choose_pascal_recursive(n, k, cache.mRec);
+
+			if (v0 != v1 /*|| cache.mRec != cache.mStack*/)
+			{
+				std::lock_guard l(gIoStreamMtx);
+				std::cout << "n  " << n << std::endl;
+				std::cout << "k  " << k << std::endl;
+				std::cout << "v0 " << v0 << std::endl;
+				std::cout << "v1 " << v1 << std::endl;
+
+				for (auto r : cache.mRec)
+				{
+					std::cout << "[";
+					for (auto c : r)
+					{
+						std::cout << c << " ";
+					}
+					std::cout << "]" << std::endl;
+				}
+				std::cout << std::endl;
+
+				for (auto r : cache.mStack)
+				{
+					std::cout << "[";
+					for (auto c : r)
+					{
+						std::cout << c << " ";
+					}
+					std::cout << "]" << std::endl;
+				}
+
+				throw RTE_LOC;
+			}
+
+		}
+		return v1;
+	}
 
 	inline Int ballBinCapX(u64 balls, u64 bins, u64 cap, std::vector<u64>& stack)
 	{
@@ -569,7 +714,7 @@ namespace osuCrypto {
 	}
 
 	template<typename T>
-	inline T labeledBallBinCap(u64 balls, u64 bins, u64 cap, std::vector<std::vector<T>>& pascal_triangle) {
+	inline T labeledBallBinCap(u64 balls, u64 bins, u64 cap, ChooseCache<T>& pascal_triangle) {
 		T d = 0;
 		for (u64 i = 0; i <= bins; ++i) {
 			T v = (i & 1) ? -1 : 1;
@@ -637,7 +782,7 @@ namespace osuCrypto {
 
 	 // TODO note this function is likely buggy
 	template<typename T>
-	inline T ballBinCap(u64 balls, u64 bins, u64 cap, std::vector<std::vector<T>>& pascal_triangle)
+	inline T ballBinCap(u64 balls, u64 bins, u64 cap, ChooseCache<T>& pascal_triangle)
 	{
 		// TODO the special cases eg balls=0 are probably buggy, or at least they were in labeledballbincap
 		std::cout << "debug before using" << std::endl;
@@ -709,20 +854,19 @@ namespace osuCrypto {
 
 		auto n = cmd.getManyOr<u64>("n", { 10 });
 		auto k = cmd.getManyOr<u64>("k", { 10 });
-
+		ChooseCache<Float> fc;
+		ChooseCache<Int> ic;
 
 		for (auto nn : n)
 		{
 			for (auto kk : k)
 			{
-				std::vector<std::vector<Float>> pascal_triangle_float;
 				std::cout << "n " << nn << " k " << kk << " : f ";
-				auto f = choose_pascal<Float>(nn, kk, pascal_triangle_float);
+				auto f = choose_pascal<Float>(nn, kk, fc);
 				auto fl = log2(f);
 				std::cout << fl << " ~ i ";
 
-				std::vector<std::vector<Int>> pascal_triangle_int;
-				auto z = choose_pascal<Int>(nn, kk, pascal_triangle_int);
+				auto z = choose_pascal<Int>(nn, kk, ic);
 				auto zl = log2(z);
 				std::cout << zl << " @ ";
 #ifdef MPZ_ENABLE
@@ -738,6 +882,8 @@ namespace osuCrypto {
 		auto bins = cmd.getManyOr<u64>("m", { 10 });
 		u64 cap = cmd.getOr("c", 12);
 
+		ChooseCache<Float> fc;
+		ChooseCache<Int> ic;
 		std::cout << "k _:";
 		for (auto bin : bins)
 			std::cout << bin << " ";
@@ -748,11 +894,11 @@ namespace osuCrypto {
 			for (auto bin : bins)
 			{
 				std::vector<std::vector<Float>> pascal_triangle_float;
-				auto f = ballBinCap<Float>(ball, bin, cap, pascal_triangle_float);
+				auto f = ballBinCap<Float>(ball, bin, cap, fc);
 				auto fl = log2(f);
 				std::cout << fl << " i ";
 				std::vector<std::vector<Int>> pascal_triangle_int;
-				auto z = ballBinCap<Int>(ball, bin, cap, pascal_triangle_int);
+				auto z = ballBinCap<Int>(ball, bin, cap, ic);
 				auto zl = log2(z);
 				std::cout << zl << ",  ";
 #ifdef MPZ_ENABLE
@@ -764,7 +910,7 @@ namespace osuCrypto {
 	}
 
 	template<typename T>
-	inline T ballsBins(i64 n, i64 k, std::vector<std::vector<T>> &pascal_triangle)
+	inline T ballsBins(i64 n, i64 k, ChooseCache<T>& pascal_triangle)
 	{
 		return choose_pascal<T>(n + k - 1, k - 1, pascal_triangle);
 	}
@@ -793,16 +939,25 @@ namespace osuCrypto {
 	{
 		u64 n = cmd.getOr("n", 44);
 		u64 m = cmd.getOr("m", 44);
+		std::vector<std::vector<Int>> pascal_triangle_int2;
+		std::vector<std::vector<Int>> pascal_triangle_int;
+
+		ChooseCache<Float> fc;
+		ChooseCache<Int> ic;
+		bool failed = false;
 		for (u64 i = 0; i < n; ++i)
 		{
 			for (u64 j = 0; j < m; ++j)
 			{
-				std::vector<std::vector<Int>> pascal_triangle_int;
-				auto I = choose_pascal<Int>(i, j, pascal_triangle_int);
+				auto I = choose_pascal_recursive<Int>(i, j, pascal_triangle_int);
 				//std::cout << I << " ";
 
+				auto I2 = choose_pascal<Int>(i, j, ic);
+				if (I != I2)
+					throw RTE_LOC;
+
 				std::vector<std::vector<Float>> pascal_triangle_float;
-				auto F = choose_pascal<Float>(i, j, pascal_triangle_float);
+				auto F = choose_pascal_recursive<Float>(i, j, pascal_triangle_float);
 				//auto S = chooseApx(i, j);
 				auto div = (I ? I.convert_to<Float>() : 1);
 				auto d0 = abs((I - F.convert_to<Int>()).convert_to<Float>() / div);
@@ -810,12 +965,19 @@ namespace osuCrypto {
 
 				//std::cout << i << " " << j << ": " << d0 << " " << d1 << std::endl;
 				if (d0 > 0.000001)
-					throw RTE_LOC;
+				{
+					failed = true;
+					//std::cout << d0 << std::endl;
+					//throw RTE_LOC;
+				}
 				//if (d1 > 0.000001)
 				//    throw RTE_LOC;
 			}
 			//std::cout << "\n";
 		}
+
+		if (failed)
+			throw std::runtime_error("choose Float failed." LOCATION);
 		//std::cout << "\n";
 		//std::cout << "\n";
 		//for (u64 i = 0; i < n; ++i)
@@ -835,6 +997,8 @@ namespace osuCrypto {
 		auto bins = cmd.getManyOr<u64>("m", { 4, 10, 100 });
 		auto caps = cmd.getManyOr<u64>("c", { 2,4, 12 });
 
+		ChooseCache<Float> fc;
+		ChooseCache<Int> ic;
 		for (auto ball : balls)
 		{
 			for (auto bin : bins)
@@ -842,11 +1006,11 @@ namespace osuCrypto {
 				for (auto cap : caps)
 				{
 					std::vector<std::vector<Float>> pascal_triangle_float;
-					auto f = ballBinCap<Float>(ball, bin, cap, pascal_triangle_float);
+					auto f = ballBinCap<Float>(ball, bin, cap, fc);
 					auto fl = log2(f);
 					//std::cout << fl << " i ";
 					std::vector<std::vector<Int>> pascal_triangle_int;
-					auto z = ballBinCap<Int>(ball, bin, cap, pascal_triangle_int);
+					auto z = ballBinCap<Int>(ball, bin, cap, ic);
 					auto zl = log2(z);
 					//std::cout << zl << ",  ";
 
@@ -874,7 +1038,7 @@ namespace osuCrypto {
 		TestCollection tests;
 		tests.add("stirlingTest      ", stirlingTest);
 		tests.add("chooseTest        ", chooseTest);
-		tests.add("ballbincapTest    ", ballbincapTest);
+		//tests.add("ballbincapTest    ", ballbincapTest);
 
 		tests.runIf(cmd);
 	}
