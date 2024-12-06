@@ -723,8 +723,9 @@ namespace osuCrypto {
 		if (0)
 		{
 			std::vector<R> temp(new_distribution.size());
-			compute_block_distribution_opt<I, R>(old_distribution, temp,
-				n, n, sigma, num_threads, pascal_triangle);
+			throw RTE_LOC;
+			//compute_block_distribution_opt<I, R>(old_distribution, temp,
+			//	n, n, sigma, num_threads, pascal_triangle);
 
 			auto similiar = true;
 			for (size_t idx = 0; idx < temp.size(); idx++) {
@@ -747,19 +748,31 @@ namespace osuCrypto {
 	}
 
 	template<typename R>
-	double minimum_distance_from_distribution(span<R> distribution) {
+	std::vector<double> minimum_distance_from_distribution(span<R> distribution, u64 count) {
 		assert(distribution.size() > 0);
 		auto n = distribution.size() - 1;
 		R sum = 0;
-		u64 minimum_distance = 0;
+		//u64 minimum_distance = 0;
+		R threshold = 1;
+		std::vector<double> ret;
 		for (size_t h = 0; h < n; h++) {
+			;
 			sum += distribution[h];
-			if (sum >= 1.) {
-				break;
+			if (sum >= threshold) {
+				ret.push_back((double)h / n);
+				threshold *= 2;
+				if (ret.size() == count)
+					break;
 			}
-			minimum_distance++;
 		}
-		return (double)minimum_distance / n;
+		return ret;
+	}
+
+
+	template<typename R>
+	double minimum_distance_from_distribution(span<R> distribution)
+	{
+		return minimum_distance_from_distribution(distribution, 1)[0];
 	}
 
 	/*
@@ -878,35 +891,54 @@ namespace osuCrypto {
 		{
 			for (u64 i = 0; i < numPoints; ++i)
 			{
-				double DS = distribution.size();
-				auto IPS = static_cast<double>(i) / numPoints;// in [0,1)
-				auto scaled = IPS * DS; // in [0,DS)
-				u64 lowIdx = std::floor(scaled); // in [0,DS)
-				u64 highIdx = std::min<u64>(std::ceil(scaled), distribution.size()-1); // in [0,DS)
-
-				auto DL = log2(distribution[lowIdx] / total);
-				auto DH = log2(distribution[highIdx] / total);
-				auto LDS = lowIdx / DS; // in [0,1)
-				auto HDS = highIdx / DS;// in [0,1)
-
-				R slope = 0;
-				auto d = (HDS - LDS);
-				if (d)
-					slope = (DH - DL) / d;
-
-				auto diff = IPS - LDS;
-				auto val = DL + diff * slope;
 				try {
 
-					std::cout << Float(val) << std::endl;
+					double DS = distribution.size();
+					auto IPS = static_cast<double>(i) / numPoints;// in [0,1)
+					auto scaled = IPS * DS; // in [0,DS)
+					u64 lowIdx = std::floor(scaled); // in [0,DS)
+					u64 highIdx = std::min<u64>(std::ceil(scaled), distribution.size() - 1); // in [0,DS)
+
+					Float DL = distribution[lowIdx] != 0 ? log2(Float(distribution[lowIdx] / total)) : -99999999999;
+					Float DH = log2(Float(distribution[highIdx] / total));
+					auto LDS = lowIdx / DS; // in [0,1)
+					auto HDS = highIdx / DS;// in [0,1)
+
+					Float slope = 0;
+					auto d = (HDS - LDS);
+					if (d)
+						slope = (DH - DL) / d;
+
+					auto diff = IPS - LDS;
+					auto val = DL + diff * slope;
+					try {
+
+						std::cout << Float(val) << std::endl;
+					}
+					catch (...)
+					{
+						auto p = [](auto v) {
+							std::stringstream ss;
+							try {
+								ss << v;
+							}
+							catch (...)
+							{
+								ss << "NaN";
+							}
+							return ss.str();
+							};
+						std::cout << p(val) << " = " << p(DL) << " + " << p(diff) << " * " << p(slope)
+							<<", DL = " << p(distribution[lowIdx])  << std::endl;
+					}
 				}
 				catch (...)
 				{
-					std::cout << val << std::endl;
+					std::cout << "error" << std::endl;
 				}
 			}
 		}
-		std::cout << std::endl;
+		std::cout <<"------------" << std::endl;
 	}
 
 	template<typename I, typename R>
@@ -915,7 +947,7 @@ namespace osuCrypto {
 		u64 approximate,
 		bool verbose, // print the distribution
 		u64 numPoints,  // number of locations to print
-		bool normalizes // normalize the distribution to be a probability distribution
+		bool normalizes // normalize the distribution to be a probability distribution when printing
 	) {
 		// TODO Assumes G's sigma is the same for all iterations (except expanding step)
 
@@ -1052,6 +1084,7 @@ namespace osuCrypto {
 		bool verbose = cmd.isSet("verbose");
 		u64 numPoints = cmd.getOr("numPoints", 0);
 		bool normalizes = cmd.getOr("normalize", 1);
+		u64 numMD = cmd.getOr("numMD", 10);
 
 		//auto sigma_expander = cmd.getManyOr("sigmaexpander", std::vector<u64>{64});
 		std::vector<std::vector<u64>> params;
@@ -1073,7 +1106,7 @@ namespace osuCrypto {
 						u64 n = k / rate;
 						auto start = std::chrono::high_resolution_clock::now();
 						auto dist = minimum_distance<INT, RAT>(!repeater, conv, i, k, n, sigma, sigma, 1, verbose, numPoints, normalizes);
-						double expected_md = minimum_distance_from_distribution<RAT>(dist);
+						auto expected_md = minimum_distance_from_distribution<RAT>(dist, numMD);
 						auto end = std::chrono::high_resolution_clock::now();
 
 						std::cout << "k: " << k << " n: " << n << " sigma: " << sigma << " iters: " << i << " rate: " << rate << " time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
@@ -1089,7 +1122,9 @@ namespace osuCrypto {
 								  <<sigma " << param[5] << ", "
 								  << "sigma_expander " << param[6]  << ", ";
 						std::cout << "Expected minimum distance " << expected_md << std::endl;*/
-						std::cout << expected_md << std::endl;
+						for (auto e : expected_md)
+							std::cout << e << " ";
+						std::cout << std::endl;
 					}
 				}
 			}
