@@ -8,7 +8,7 @@
 namespace osuCrypto {
 
 	template<typename I, typename R>
-	R block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma, ChooseCache<I>& pascal_triangle) {
+	R block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma, const ChooseCache<I>& pascal_triangle) {
 		if (!(w <= k && h <= n && sigma <= k))
 			throw RTE_LOC;
 		if (k % sigma)

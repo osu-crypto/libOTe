@@ -12,7 +12,7 @@ namespace osuCrypto {
     // outputs the input x concatenated with the {x multiplied by the k x [(e-1)k] block}
     // NOTE deprecated - we just use block_enumerator
     template<typename I, typename R>
-    R expanding_block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma, ChooseCache<I>& pascal_triangle) {
+    R expanding_block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma, const ChooseCache<I>& pascal_triangle) {
         auto nn = n - k;
         if (nn % sigma)
             throw RTE_LOC;

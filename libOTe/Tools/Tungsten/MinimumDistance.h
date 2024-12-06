@@ -13,6 +13,7 @@
 #include "RepeaterEnumerator.h"
 #include "cryptoTools/Common/Matrix.h"
 #include "cryptoTools/Common/Log.h"
+#include "cryptoTools/Common/ThreadBarrier.h"
 
 #include <boost/multiprecision/cpp_dec_float.hpp>
 #include <future>
@@ -30,12 +31,20 @@ namespace osuCrypto {
 		//std::chrono::time_point<std::chrono::system_clock> mStart;
 		std::mutex mLock;
 		bool mPrint = true;
+		bool done = false;
+		void cancel()
+		{
+			if (!done)
+				mProm.set_value();
+			done = true;
+		}
 
 		void start(u64 total, std::string message)
 		{
 			mProgress = 0;
 			mTotal = total;
 			mMessage = message;
+			done = false;
 			//mStart = std::chrono::system_clock::now();
 			mProm = std::promise<void>();
 		}
@@ -44,7 +53,10 @@ namespace osuCrypto {
 		{
 			auto res = mProgress.fetch_add(delta, std::memory_order_relaxed);
 			if (res + delta == mTotal)
+			{
+				done = true;
 				mProm.set_value();
+			}
 		}
 
 		void print()
@@ -118,7 +130,7 @@ namespace osuCrypto {
 		span<R> distribution,
 		u64 k,
 		u64 n,
-		ChooseCache<I>& pascal_triangle) {
+		const ChooseCache<I>& pascal_triangle) {
 		auto e = n / k;
 		if (distribution.size() != n + 1)
 			throw RTE_LOC;
@@ -168,14 +180,134 @@ namespace osuCrypto {
 	}
 
 
+	template<typename I, typename R>
+	void compute_block_distribution_opt(
+		span<const R> inputDist,
+		span<R> outputDist,
+		bool sysematic,
+		u64 k,
+		u64 n,
+		u64 sigma,
+		u64 numThreads,
+		const ChooseCache<I>& pascal_triangle)
+	{
+
+
+		if (inputDist.size() != 0 && inputDist.size() != k + 1)
+			throw RTE_LOC;
+		if (outputDist.size() != n + 1)
+			throw RTE_LOC;
+		if (k % sigma)
+			throw RTE_LOC;
+		if (n % k)
+			throw RTE_LOC;
+		if (numThreads < 1)
+			throw RTE_LOC;
+
+		auto nn = sysematic ? n - k : n;
+		if (nn % k)
+			throw RTE_LOC;
+
+		auto e = nn / k;
+		auto qMax = k / sigma;
+
+		// v[q] = 2^{-e sigma q} * C(k/sigma, q)
+		std::vector<R> v(qMax + 1);
+		Matrix<R> D(numThreads - 1, outputDist.size());
+		ThreadBarrier vBarrier(numThreads);
+		ThreadBarrier cBarrier(numThreads);
+
+		std::vector<R> inputFrac(inputDist.size());
+
+		// precompute 2^{-e sigma}
+		R twoESigma = R(1) / pow2_<I>(e * sigma);
+
+		std::vector<std::jthread> threads(numThreads);
+		for (u64 i = 0; i < threads.size(); ++i)
+		{
+			threads[i] = std::jthread([&, i] {
+				auto qBegin = i * v.size() / numThreads;
+				auto qEnd = (i + 1) * v.size() / numThreads;
+				auto wBegin = i * (k + 1) / numThreads;
+				auto wEnd = (i + 1) * (k + 1) / numThreads;
+				auto hBegin = i * outputDist.size() / numThreads;
+				auto hEnd = (i + 1) * outputDist.size() / numThreads;
+
+				if (inputDist.size())
+				{
+					for (u64 w = wBegin; w < wEnd; ++w)
+					{
+						inputFrac[w] = inputDist[w] / choose_pascal(k, w, pascal_triangle);
+					}
+				}
+
+				span<R> Di = i == 0 ? outputDist : D[i - 1];
+
+				//Int e = boost::multiprecision::pow(Int(2), power);
+				//R(boost::multiprecision::pow(v, power));
+				R twoESigmaQ = R(1) / pow2_<I>(e * sigma * qBegin);
+				for (u64 q = qBegin; q < qEnd; ++q)
+				{
+					// vq = 2^{-e sigma q} * C(k/sigma, q)
+					v[q] = twoESigmaQ * choose_pascal<I>(k / sigma, q, pascal_triangle);
+
+					// update 2^{-e sigma q} = 2^{-e sigma {q-1}} * 2^{-e sigma}
+					twoESigmaQ *= twoESigma;
+				}
+
+				vBarrier.decrementWait();
+
+				std::vector<R> cqw(qMax + 1);
+				for (auto w = wBegin; w < wEnd; ++w)
+				{
+					for (u64 q = 0; q <= qMax; ++q)
+					{
+						cqw[q] = v[q] * labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
+					}
+
+					auto hBegin = sysematic ? w : 0;
+					for (u64 h_ = hBegin; h_ <= n; ++h_)
+					{
+						u64 h = sysematic ? h_ - w : h_;
+
+						R enumerator = 0;
+						for (u64 q = 0; q <= qMax; ++q)
+						{
+							enumerator += cqw[q] * choose_pascal<I>(e * sigma * q, h, pascal_triangle);
+						}
+
+						if (inputDist.size())
+						{
+							Di[h_] += enumerator * inputFrac[w];
+						}
+						else
+						{
+							Di[h_] += enumerator;
+						}
+					}
+				}
+
+				cBarrier.decrementWait();
+
+				for (u64 t = 0; t < D.rows(); ++t)
+				{
+					for (u64 h = hBegin; h < hEnd; ++h)
+					{
+						outputDist[h] += D(t, h);
+					}
+				}
+				});
+		}
+
+	}
 
 	template<typename I, typename R>
 	void compute_expanding_block_distribution(
 		span<R> distribution,
 		u64 k,
 		u64 n,
-		u64 sigma_expander,
-		ChooseCache<I>& pascal_triangle) {
+		u64 sigma,
+		const ChooseCache<I>& pascal_triangle) {
 		std::fill(distribution.begin(), distribution.end(), R(0));
 
 		// NOTE the code below could be optimized as when computing the distributions in the following iterations
@@ -190,19 +322,92 @@ namespace osuCrypto {
 		u64 chunk_size = (n + 1) / num_threads;
 		std::vector<std::jthread> threads;
 
-		for (int i = 0; i < num_threads; ++i) {
-			// Start each thread with its range of `h` and thread-specific pascal_triangle
-			threads.emplace_back(
-				[&, i]() {
-					u64 start_h = i * chunk_size;
-					u64 end_h = (i == num_threads - 1) ? (n + 1) : (start_h + chunk_size);
 
-					expanding_block_thread_function<I, R>(start_h, end_h, k, n, sigma_expander,
-						distribution, pascal_triangle);
-				});
+		if (1)
+		{
+
+
+			for (int i = 0; i < num_threads; ++i) {
+				// Start each thread with its range of `h` and thread-specific pascal_triangle
+				threads.emplace_back(
+					[&, i]() {
+						u64 start_h = i * chunk_size;
+						u64 end_h = (i == num_threads - 1) ? (n + 1) : (start_h + chunk_size);
+
+						expanding_block_thread_function<I, R>(start_h, end_h, k, n, sigma,
+							distribution, pascal_triangle);
+					});
+			}
+
+			//auto nn = n - k;
+			//std::vector<R> distribution2(nn+1);
+			//compute_block_distribution_opt<I, R>(
+			//	span<R>(), distribution2, k, nn, sigma, num_threads, pascal_triangle);
+			//
+			//for (u64 h = 0; h <= n; h++) {
+
+			//	// how many things have weight h?
+			//	// we know the first half has inputDist[h] things with weight h
+			//	// the second half has distribution2[h] things with weight h
+			//	// so the total is the sum of these two
+			//	distribution[h] = distribution2[h] +;
+			//}
+
 		}
+		else
+		{
 
+			//auto nn = n - k;
+			//if (nn % sigma)
+			//	throw RTE_LOC;
 
+			//for (int i = 0; i < num_threads; ++i) {
+			//	// Start each thread with its range of `h` and thread-specific pascal_triangle
+			//	threads.emplace_back(
+			//		[&, i]() {
+			//			// Use the thread-specific copy of pascal_triangle
+
+			//			for (u64 h = i; h <= n; h += num_threads)
+			//			{
+			//				R dh(0);
+			//				for (u64 w = std::max<i64>(1, h - nn); w < std::min(k + 1, h); ++w) {
+
+			//					dh += block_enum<I, R>(w, h - w, k, nn, sigma, pascal_triangle);
+			//				}
+			//				R dh2(0);
+			//				u64 first = -1;
+			//				u64 last = -1;
+			//				for (u64 w = 1; w <= k; ++w) {
+			//					auto nn = n - k;
+			//					if (nn % sigma)
+			//						throw RTE_LOC;
+			//					if (w > k)
+			//						throw RTE_LOC;;
+
+			//					if (h < w || h >(nn + w)) {
+			//						return 0;
+			//					}
+			//					last = w;
+			//					if (first == -1)
+			//						first = w;
+			//					dh2 += block_enum<I, R>(w, h - w, k, nn, sigma, pascal_triangle);
+			//				}
+			//				if (dh != dh2)
+			//				{
+			//					std::lock_guard l(gIoStreamMtx);
+			//					std::cout << "h " << h << " dh " << dh << " dh2 " << dh2 << std::endl;
+			//					std::cout << "first " << first << " last " << last << std::endl;
+			//					std::cout << "first " << std::max<i64>(1, h - nn) << " last " << std::min(k + 1, h)-1 << std::endl;
+
+			//				}
+
+			//				distribution[h] = dh;
+			//				loadBar.tick();
+			//			}
+			//		});
+			//}
+
+		}
 
 
 		// TODO simple way to do
@@ -225,7 +430,7 @@ namespace osuCrypto {
 		u64 k,
 		u64 n,
 		u64 sigma_expander,
-		ChooseCache<I>& pascal_triangle) { // only for the expanding block
+		const ChooseCache<I>& pascal_triangle) { // only for the expanding block
 		//if (e != (n / k) < 0) {
 		//    throw std::invalid_argument("e is inconsistent with k, n");
 		//}
@@ -248,7 +453,6 @@ namespace osuCrypto {
 
 	template<typename I, typename R>
 	void distribution_thread_function_v2(u64 start_w, u64 end_w, u64 n, u64 multiplier, u64 sigma,
-		u64 approximate,
 		span<const R> count_fraction, span<R> thread_partial_counts,
 		span<const R> block_enum_part,
 		ChooseCache<I>pascal_triangle) {
@@ -259,10 +463,13 @@ namespace osuCrypto {
 
 		// Do not use the block_enum function, but unroll the function to avoid recomputing stuff
 		for (u64 w = start_w; w < end_w; ++w) {
-			// precompute as much from block_enum as you can as soon as possible (a lot of it is independent of h)
+			// precompute as much from block_enum as you can 
+			// as soon as possible (a lot of it is independent of h)
 			std::vector<R> block_enum_part2(block_enum_part.size());
 			for (size_t q = 0; q < block_enum_part.size(); q++) {
-				block_enum_part2[q] = block_enum_part[q] * labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
+				block_enum_part2[q] =
+					block_enum_part[q] *
+					labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
 			}
 
 			// Handle all but last h
@@ -270,12 +477,15 @@ namespace osuCrypto {
 			for (u64 h = 0; h < (thread_partial_counts.size() - 1); ++h) {
 				R enumerator = 0;
 				for (size_t q = 0; q < block_enum_part2.size(); q++) {
-					enumerator += block_enum_part2[q] * choose_pascal<I>(sigma * q, offset, pascal_triangle);
+					enumerator +=
+						block_enum_part2[q] *
+						choose_pascal<I>(sigma * q, offset, pascal_triangle);
 				}
-				// Safely update the shared thread_partial_counts[h] (one element per h)
-				// Note no need to lock it as each thread operates on different copy of thread_partial_counts
+				// Safely update the shared thread_partial_counts[h] 
+				// (one element per h) Note no need to lock it as each 
+				// thread operates on different copy of thread_partial_counts
 				thread_partial_counts[h] += (count_fraction[w] * enumerator);
-				offset += approximate;
+				offset += 1;
 			}
 			// Handle last h separately (last h is the last point in the distribution and is not h * approximate but n
 			R enumerator = 0;
@@ -289,31 +499,31 @@ namespace osuCrypto {
 	}
 
 
-	template<typename I, typename R>
-	void distribution_thread_function_v1(u64 start_h, u64 end_h, u64 n, u64 multiplier, u64 sigma,
-		span<const R> count_fraction, span<R> new_distribution,
-		ChooseCache<I>pascal_triangle) {
-		for (u64 h = start_h; h < end_h; ++h) {
-			for (u64 w = 0; w <= n; ++w) {
-				R enumerator = 0;
-				if (multiplier == 0) {
-					// Use the thread-specific copy of pascal_triangle
-					enumerator = block_enum<I, R>(w, h, n, n, sigma, pascal_triangle);
-				}
-				else if (multiplier == 1) {
-					// TODO: non-recursive convolution
-					assert(false);
-				}
+	//template<typename I, typename R>
+	//void distribution_thread_function_v1(u64 start_h, u64 end_h, u64 n, u64 multiplier, u64 sigma,
+	//	span<const R> count_fraction, span<R> new_distribution,
+	//	ChooseCache<I>pascal_triangle) {
+	//	for (u64 h = start_h; h < end_h; ++h) {
+	//		for (u64 w = 0; w <= n; ++w) {
+	//			R enumerator = 0;
+	//			if (multiplier == 0) {
+	//				// Use the thread-specific copy of pascal_triangle
+	//				enumerator = block_enum<I, R>(w, h, n, n, sigma, pascal_triangle);
+	//			}
+	//			else if (multiplier == 1) {
+	//				// TODO: non-recursive convolution
+	//				assert(false);
+	//			}
 
-				// Safely update the shared new_distribution[h] (one element per h)
-				// Note no need to lock it as each thread operates on different unique index h in new_distribution
-				new_distribution[h] += (count_fraction[w] * enumerator);
-			}
+	//			// Safely update the shared new_distribution[h] (one element per h)
+	//			// Note no need to lock it as each thread operates on different unique index h in new_distribution
+	//			new_distribution[h] += (count_fraction[w] * enumerator);
+	//		}
 
-			loadBar.tick();
+	//		loadBar.tick();
 
-		}
-	}
+	//	}
+	//}
 
 	template<typename I>
 	auto pow2_(u64 power)
@@ -325,12 +535,13 @@ namespace osuCrypto {
 			if (e != r)
 				throw RTE_LOC;
 			return r;
+
 		}
 		else if constexpr (std::is_same_v<I, Float>)
 		{
 			Float v(2);
 			return Float(boost::multiprecision::pow(v, power));
-			
+
 		}
 		else
 		{
@@ -345,8 +556,7 @@ namespace osuCrypto {
 		u64 multiplier,
 		u64 n,
 		u64 sigma,
-		u64 approximate,
-		ChooseCache<I>& pascal_triangle) {
+		const ChooseCache<I>& pascal_triangle) {
 
 
 		assert(old_distribution.size() == n + 1);
@@ -378,16 +588,18 @@ namespace osuCrypto {
 		u64 chunk_size = new_distribution.size() / num_threads;
 		// Calculate the number of counts to compute by each thread (in terms of h) - 
 		// i.e. the number of points on the distribution that is exactly computed
-		u64 num_real = (n % approximate == 0) ? (n / approximate + 1) : (n / approximate + 2);
 		std::vector<std::thread> threads;
-		std::vector<std::vector<R>> thread_partial_counts(num_threads, std::vector<R>(num_real));
+		std::vector<std::vector<R>> thread_partial_counts(num_threads, std::vector<R>(new_distribution.size()));
 
 		// precompute as much from block_enum as you can as soon as possible (a lot of it is independent of w, h)
 		if (print_timings)
 			std::cout << "Started precomputing parts of block enumerator before multithreading..." << std::endl;
 		start = std::chrono::steady_clock::now();
 		size_t k_over_sigma = n / sigma; // note k==n at this step
+
+		// 2^{-e sigma q} * C(k/sigma, q)
 		std::vector<R> block_enum_part;
+
 		block_enum_part.reserve(k_over_sigma + 1);
 		// Precompute the base scaling factor
 		I base_factor = pow2_<I>(sigma);
@@ -397,7 +609,7 @@ namespace osuCrypto {
 
 			//block_enum_part.emplace_back(1, current_factor);
 			block_enum_part.push_back(R(1) / current_factor);
-			
+
 			block_enum_part[q] *= choose_pascal<I>(k_over_sigma, q, pascal_triangle);
 			// Incrementally compute the next power of 2
 			current_factor *= base_factor;
@@ -430,15 +642,56 @@ namespace osuCrypto {
 			std::cout << "Started multithreading..." << std::endl;
 		start = std::chrono::steady_clock::now();
 		for (int t = 0; t < num_threads; ++t) {
+
 			u64 start_w = t * chunk_size;
 			u64 end_w = (t == num_threads - 1) ? new_distribution.size() : (start_w + chunk_size);
 
 			// Start each thread with its range of `w` and thread-specific pascal_triangle
 			threads.emplace_back(
 				[&, t, start_w, end_w] {
-					distribution_thread_function_v2<I, R>(start_w, end_w, n, multiplier, sigma, approximate,
-					count_fraction, thread_partial_counts[t], block_enum_part, pascal_triangle);
+					distribution_thread_function_v2<I, R>(start_w, end_w, n, multiplier, sigma,
+						count_fraction, thread_partial_counts[t], block_enum_part, pascal_triangle);
 				});
+			//// Start each thread with its range of `w` and thread-specific pascal_triangle
+			//threads.emplace_back(
+			//	[&, t] {
+			//		//u64 start_w = t * chunk_size;
+			//		//u64 end_w = (t == num_threads - 1) ? new_distribution.size() : (start_w + chunk_size);
+			//		//distribution_thread_function_v2<I, R>(start_w, end_w, n, multiplier, sigma, 1,
+			//		//	count_fraction, thread_partial_counts[t], block_enum_part, pascal_triangle);
+
+			//		assert(multiplier == 0); // TODO only block enumerator supported now
+			//		// (non-recursive convolution not yet supported)
+
+			//		auto& counts = thread_partial_counts[t];
+			//		// Do not use the block_enum function, but unroll the function 
+			//		// to avoid recomputing stuff
+			//		//
+			//		// vq * S(w,q,sigma)
+			//		std::vector<R> block_enum_part2(block_enum_part.size());
+			//		for (u64 w = t; w < counts.size(); w += num_threads) {
+			//			// precompute as much from block_enum as you can as soon 
+			//			// as possible (a lot of it is independent of h)
+			//			//
+			//			// for each q, compute vq * S(w,q,sigma)
+			//			for (size_t q = 0; q < block_enum_part.size(); q++) {
+			//				block_enum_part2[q] = block_enum_part[q] * labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
+			//			}
+
+			//			for (u64 h = 0; h < counts.size(); ++h) {
+			//				R enumerator = 0;
+			//				for (size_t q = 0; q < block_enum_part2.size(); q++) {
+			//					enumerator += block_enum_part2[q] * choose_pascal<I>(sigma * q, h, pascal_triangle);
+			//				}
+			//				// Safely update the shared thread_partial_counts[h] (one element per h)
+			//				// Note no need to lock it as each thread operates on different
+			//				// copy of thread_partial_counts
+			//				counts[h] += (count_fraction[w] * enumerator);
+			//			}
+
+			//			loadBar.tick();
+			//		}
+			//	});
 		}
 
 		// Join threads to ensure all complete
@@ -456,70 +709,41 @@ namespace osuCrypto {
 		start = std::chrono::steady_clock::now();
 		// Add thread_partial_counts into new_distribution
 		for (u64 t = 0; t < num_threads; ++t) {
-			u64 offset = 0;
-			for (u64 i = 0; i < (num_real - 1); ++i) {
-				new_distribution[offset] += thread_partial_counts[t][i];
-				offset += approximate;
+			for (u64 i = 0; i < thread_partial_counts[t].size(); ++i) {
+				new_distribution[i] += thread_partial_counts[t][i];
 			}
-			// last one may be at a different offset (we ensure the first and last points of a distribution always computed)
-			new_distribution[new_distribution.size() - 1] += thread_partial_counts[t][num_real - 1];
 		}
+
 		end = std::chrono::steady_clock::now();
 		elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 		if (print_timings)
 			std::cout << "Finished combining results from each thread into final distribution:" <<
 			elapsed.count() << " ms" << std::endl;
 
-		// Now that each 'approximate'th point of new_distribution was computed,
-		// Interpolate remaining points (if approximate > 1)
-		// linear spline
-		if (approximate > 1) {
-			std::cout << "Started interpolating remaining points in the  final distribution..." << std::endl;
-			start = std::chrono::steady_clock::now();
-			// handle all but last pair
-			u64 offset = 0;
-			for (u64 i = 0; i < num_real - 2; i++) {
-				R initial = new_distribution[offset];
-				R step = (new_distribution[offset + approximate] - initial) / R(approximate);
-				for (u64 j = 1; j < approximate; ++j) {
-					initial += step;
-					new_distribution[offset + j] = initial;
-				}
-				offset += approximate;
-			}
-			// handle last pair separately
-			R initial = new_distribution[offset];
-			u64 step_size = new_distribution.size() - 1 - offset;
-			R step = (new_distribution[new_distribution.size() - 1] - initial) / R(step_size);
-			for (u64 j = 1; j < step_size; ++j) {
-				initial += step;
-				new_distribution[offset + j] = initial;
-			}
-			end = std::chrono::steady_clock::now();
-			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-			std::cout << "Finished interpolating remaining points in the  final distribution:" <<
-				elapsed.count() << " ms" << std::endl;
-		}
+		if (0)
+		{
+			std::vector<R> temp(new_distribution.size());
+			compute_block_distribution_opt<I, R>(old_distribution, temp,
+				n, n, sigma, num_threads, pascal_triangle);
 
-		/*for (size_t h = 0; h <= n; h++) {
-			for (size_t w = 0; w <= n; w++) {
-				R enumerator = 0;
-				if (multiplier == 0) {
-					// block enumerator
-					enumerator = block_enum<I, R>(w, h, n, n, sigma, pascal_triangle);
-				} else if (multiplier == 1) {
-					// non-recursive convolution
-					// TODO
-					assert(false);
+			auto similiar = true;
+			for (size_t idx = 0; idx < temp.size(); idx++) {
+				if ((new_distribution[idx] - temp[idx]) != 0) {
+					similiar = false;
+					break;
 				}
-//                    std::cout << "h " << h << std::endl;
-//                    std::cout << "w " << w << std::endl;
-//                    std::cout << "n " << n << std::endl;
-//                    std::cout << "enumerator " << enumerator << std::endl;
-//                    std::cout << "n choose w " <<n_choose_w[w] << std::endl;
-				new_distribution[h] += (count_fraction[w] * enumerator);
 			}
-		}*/
+			if (!similiar)
+			{
+				std::cout << "new_distribution vs temp : " << std::endl;
+				for (size_t i = 0; i < new_distribution.size(); i++) {
+					if (new_distribution[i] != temp[i])
+						std::cout << Color::Red;
+					std::cout << new_distribution[i] << " " << temp[i] << std::endl << Color::Default;
+				}
+				throw std::runtime_error("Distributions do not match");
+			}
+		}
 	}
 
 	template<typename R>
@@ -658,7 +882,7 @@ namespace osuCrypto {
 				auto IPS = static_cast<double>(i) / numPoints;// in [0,1)
 				auto scaled = IPS * DS; // in [0,DS)
 				u64 lowIdx = std::floor(scaled); // in [0,DS)
-				u64 highIdx = std::ceil(scaled); // in [0,DS)
+				u64 highIdx = std::min<u64>(std::ceil(scaled), distribution.size()-1); // in [0,DS)
 
 				auto DL = log2(distribution[lowIdx] / total);
 				auto DH = log2(distribution[highIdx] / total);
@@ -672,7 +896,14 @@ namespace osuCrypto {
 
 				auto diff = IPS - LDS;
 				auto val = DL + diff * slope;
-				std::cout << val << std::endl;
+				try {
+
+					std::cout << Float(val) << std::endl;
+				}
+				catch (...)
+				{
+					std::cout << val << std::endl;
+				}
 			}
 		}
 		std::cout << std::endl;
@@ -688,7 +919,7 @@ namespace osuCrypto {
 	) {
 		// TODO Assumes G's sigma is the same for all iterations (except expanding step)
 
-		ChooseCache<I> pascal_triangle;
+		ChooseCache<I> pascal_triangle(n);
 
 		if (n == k) throw RTE_LOC;
 		if (k % sigma)
@@ -740,7 +971,6 @@ namespace osuCrypto {
 				distributions[(iter + 1) % 2],
 				multiplier,
 				n, sigma,
-				approximate,
 				pascal_triangle);
 			// expand_and_interpolate(distributions[(iter + 1) % 2]);
 
@@ -764,7 +994,7 @@ namespace osuCrypto {
 
 			if (initial_distribution_sum != final_distribution_sum)
 			{
-				std::cout <<Color::Red<< "Initial distribution sum: " << initial_distribution_sum << std::endl;
+				std::cout << Color::Red << "Initial distribution sum: " << initial_distribution_sum << std::endl;
 				std::cout << "Final distribution sum: " << final_distribution_sum << std::endl << Color::Default;
 			}
 		}
@@ -781,10 +1011,13 @@ namespace osuCrypto {
 		//if (approximate == 1 && final_distribution_sum != initial_distribution_sum) throw RTE_LOC;
 
 		auto ret = distributions[num_iters % 2];
+		loadBar.cancel();
+
 		return { ret.begin(), ret.end() };
+
 	}
 
-	void benchmarks(const oc::CLP& cmd) {
+	void benchmarks(const oc::CLP& cmd) try {
 
 		// expander (0: repeater, 1: block expander), 
 		// multiplier (0: block, 1: non recursive convolution), 
@@ -830,7 +1063,7 @@ namespace osuCrypto {
 				{
 					//for (auto sigma_exp : sigma_expander)
 					{
-#if 1
+#if 0
 						using INT = Float;
 						using RAT = Float;
 #else
@@ -916,6 +1149,9 @@ namespace osuCrypto {
 		//	std::cout << expected_md << std::endl;
 		//}
 		//std::cout << "finished" << std::endl;
+	}
+	catch (std::exception& e) {
+		std::cout << e.what() << std::endl;
 	}
 
 	inline void minimumDistanceMain(oc::CLP& cmd) {

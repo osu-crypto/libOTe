@@ -318,22 +318,18 @@ namespace osuCrypto {
 		for (const auto& param : params) {
 			// TODO remove when ready
 			if (param[1] != 0) assert(false);
-			std::vector<Rat> expected_distribution = minimum_distance<Int, Rat>(param[0],
-				param[1],
-				param[2],
-				param[3],
-				param[4],
-				param[5],
-				param[6],
-				param[7],
-				0,0,0);
-			double expected_md = minimum_distance_from_distribution<Rat>(expected_distribution);
-			/*u64 true_md = minimum_distance_exact_true<Int, Rat>(param[0],
-																param[1],
-																param[2],
-																param[3],
-																param[4],
-																param[5]);*/
+			std::vector<Rat> expected_distribution =
+				minimum_distance<Int, Rat>(param[0],
+					param[1],
+					param[2],
+					param[3],
+					param[4],
+					param[5],
+					param[6],
+					param[7],
+					0, 0, 0);
+			double expected_md =
+				minimum_distance_from_distribution<Rat>(expected_distribution);
 
 			std::random_device rd; // Seed for the random number engine
 			std::mt19937 gen(rd()); // Mersenne Twister engine

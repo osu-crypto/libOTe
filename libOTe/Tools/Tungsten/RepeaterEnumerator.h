@@ -11,7 +11,7 @@ namespace osuCrypto {
     //I repeater_enum(u64 w, u64 h, u64 n, u64 k);
 
     template<typename I>
-    I repeater_enum(u64 w, u64 h, u64 k, u64 e, ChooseCache<I>&pascal_triangle) {
+    I repeater_enum(u64 w, u64 h, u64 k, u64 e, const ChooseCache<I>&pascal_triangle) {
         assert(w <= k);
         assert(h <= e * k);
 

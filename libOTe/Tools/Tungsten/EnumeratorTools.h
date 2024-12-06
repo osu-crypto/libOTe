@@ -262,7 +262,8 @@ namespace osuCrypto {
 
 #endif
 
-	using Float = boost::multiprecision::cpp_bin_float_oct;
+	using Float = boost::multiprecision::cpp_bin_float_quad;
+	//using Float = boost::multiprecision::cpp_bin_float_oct;
 #ifdef ENABLE_GMP
 	using Int = boost::multiprecision::mpz_int;
 	using Rat = boost::multiprecision::mpq_rational;
@@ -453,179 +454,235 @@ namespace osuCrypto {
 	template<typename T>
 	struct ChooseCache
 	{
+		T mZero = 0, mOne = 1;
+
+		ChooseCache() = default;	
+		ChooseCache(u64 n)
+		{
+			precompute(n);
+		}
 		std::vector<std::vector<T>> mRec, mStack;
 
-	};
 
-	/*
-	NEW BINOMIAL COEFFICIENT FUNCTION BASED ON PASCAL'S TRIANGLE WITH CACHING ACROSS CALLS
-
-	Cache: The function uses a cache, which is a std::vector of std::vector<T>, to store previously computed values of the binomial coefficient "n choose k." The cache allows the function to avoid recomputation by storing results of binomial coefficient calculations, which can be reused in future calls. The value -1 is used to denote uncomputed values within the cache.
-
-	Dynamic Resizing: To handle any input values of "n" and "k," the function dynamically resizes the cache. If the cache has fewer rows than needed for the requested "n," it resizes to accommodate up to row "n." Similarly, if row "n" has fewer columns than required for "k," it resizes that row up to column "k." This dynamic resizing ensures that the cache can store values up to the requested "n" and "k," allowing the function to retain previously computed results.
-
-	Symmetry Optimization: The function takes advantage of the symmetry of binomial coefficients, where "n choose k" is the same as "n choose (n - k)." By setting "k" to min(k, n - k), the function minimizes the number of multiplications needed, reducing computation time.
-
-	Checking Cache: After resizing, the function first checks whether the required value "n choose k" is already in the cache. If the cache contains a previously computed value, the function simply returns it immediately, saving time and resources.
-
-	1D Row Calculation: The function calculates Pascal’s Triangle values up to the "n-th" row using a single row vector of size "k + 1." Each element row[j] represents the binomial coefficient for the current row "i choose j." For each row "i," it updates row[j] from right to left (starting from min(i, k) down to 1). This update pattern ensures that each row[j] value is based on the values from the previous row of Pascal’s Triangle, but only one row is stored at a time, making the calculation efficient in terms of memory.
-
-	Cache Storage: After calculating the desired binomial coefficient, the function stores this value in cache[n][k] before returning it. Storing the value allows any future requests for "n choose k" to retrieve the result directly from the cache, avoiding recomputation.
-
-	This function is optimized for efficiency by using caching, symmetry reduction, and a dynamic programming approach with a 1D row calculation based on Pascal’s Triangle. It is suitable for computing binomial coefficients with moderate values of "n" and "k" and can handle repeated calls efficiently due to caching.
-	*/
-	template <typename T>
-	T choose_pascal_recursive(int64_t n, int64_t k, std::vector<std::vector<T>>& cache) {
-		if (k < 0 || k > n)
-			return 0;
-		if (k == 0 || k == n)
-			return 1;
-
-		// Reduce the number of calculations by using symmetry: C(n, k) = C(n, n - k)
-		if (k > n - k)
-			k = n - k;
-
-		// Resize the cache if necessary
-		if (cache.size() <= n) {
-			cache.resize(n + 1);
-		}
-
-		// Resize the specific row if necessary
-		if (cache[n].size() <= k) {
-			cache[n].resize(k + 1, -1); // Use -1 to denote uncomputed values
-		}
-
-		// Return cached value if it exists
-		if (cache[n][k] != -1) return cache[n][k];
-
-		// Option 1
-		// computes unnecessary values in a row even if just one k for n is needed
-		// does not cache intermediate rows
-		/*
-		// Use a 1D vector to store the current row of Pascal's Triangle
-		std::vector<T> row(k + 1, 0);
-		row[0] = 1; // C(n, 0) is always 1
-
-		// Build up Pascal's Triangle up to the nth row
-		for (int64_t i = 1; i <= n; ++i) {
-			// Update row from the end to the beginning to use only one array
-			for (int64_t j = std::min(i, k); j > 0; --j) {
-				row[j] += row[j - 1];
+		void precompute(u64 n)
+		{
+			for (u64 i = 0; i <= (n / 2); ++i)
+			{
+				choose_pascal_stack(n, i);
 			}
 		}
 
-		// Store the result in the cache before returning
-		cache[n][k] = row[k];
-		return row[k];
+
+		/*
+		NEW BINOMIAL COEFFICIENT FUNCTION BASED ON PASCAL'S TRIANGLE WITH CACHING ACROSS CALLS
+
+		Cache: The function uses a cache, which is a std::vector of std::vector<T>, to store previously computed values of the binomial coefficient "n choose k." The cache allows the function to avoid recomputation by storing results of binomial coefficient calculations, which can be reused in future calls. The value -1 is used to denote uncomputed values within the cache.
+
+		Dynamic Resizing: To handle any input values of "n" and "k," the function dynamically resizes the cache. If the cache has fewer rows than needed for the requested "n," it resizes to accommodate up to row "n." Similarly, if row "n" has fewer columns than required for "k," it resizes that row up to column "k." This dynamic resizing ensures that the cache can store values up to the requested "n" and "k," allowing the function to retain previously computed results.
+
+		Symmetry Optimization: The function takes advantage of the symmetry of binomial coefficients, where "n choose k" is the same as "n choose (n - k)." By setting "k" to min(k, n - k), the function minimizes the number of multiplications needed, reducing computation time.
+
+		Checking Cache: After resizing, the function first checks whether the required value "n choose k" is already in the cache. If the cache contains a previously computed value, the function simply returns it immediately, saving time and resources.
+
+		1D Row Calculation: The function calculates Pascal’s Triangle values up to the "n-th" row using a single row vector of size "k + 1." Each element row[j] represents the binomial coefficient for the current row "i choose j." For each row "i," it updates row[j] from right to left (starting from min(i, k) down to 1). This update pattern ensures that each row[j] value is based on the values from the previous row of Pascal’s Triangle, but only one row is stored at a time, making the calculation efficient in terms of memory.
+
+		Cache Storage: After calculating the desired binomial coefficient, the function stores this value in cache[n][k] before returning it. Storing the value allows any future requests for "n choose k" to retrieve the result directly from the cache, avoiding recomputation.
+
+		This function is optimized for efficiency by using caching, symmetry reduction, and a dynamic programming approach with a 1D row calculation based on Pascal’s Triangle. It is suitable for computing binomial coefficients with moderate values of "n" and "k" and can handle repeated calls efficiently due to caching.
 		*/
-		// Option 2: avoids the issues in the first option
-		// Recursive computation: C(n, k) = C(n-1, k-1) + C(n-1, k)
-		cache[n][k] = choose_pascal_recursive<T>(n - 1, k - 1, cache) +
-			choose_pascal_recursive<T>(n - 1, k, cache);
-		return cache[n][k];
-	}
-
-	//struct NKC_State
-	//{
-	//	u64 n, k, step;
-	//};
-
-	template <typename T>
-	T choose_pascal_stack(int64_t n_, int64_t k_, std::vector<std::vector<T>>& cache) {
-
-
-		auto C = [&cache](u64 n, u64 k) -> T {
+		T choose_pascal_recursive(int64_t n, int64_t k) {
+			if (k < 0 || k > n)
+				return 0;
 			if (k == 0 || k == n)
 				return 1;
-			if (k > n || n == 0)
-				return 0;
 
 			// Reduce the number of calculations by using symmetry: C(n, k) = C(n, n - k)
 			if (k > n - k)
 				k = n - k;
 
-			// Resize the cache if necessary
-			if (cache.size() <= n) {
-				cache.resize(n + 1);
-				//cache[n].reserve(k + 1);
-				//cache[n].resize(1, 1ull);
+			// Resize the mRec if necessary
+			if (mRec.size() <= n) {
+				mRec.resize(n + 1);
 			}
 
 			// Resize the specific row if necessary
-			if (cache[n].size() <= k) {
-				cache[n].resize(k + 1, -1); // Use -1 to denote uncomputed values
+			if (mRec[n].size() <= k) {
+				mRec[n].resize(k + 1, -1); // Use -1 to denote uncomputed values
 			}
 
-			// Return cached value if it exists
-			//if (cache[n][k] != -1) 
-			return cache[n][k];
+			// Return mRecd value if it exists
+			if (mRec[n][k] != -1) return mRec[n][k];
 
-			};
+			// Option 1
+			// computes unnecessary values in a row even if just one k for n is needed
+			// does not mRec intermediate rows
+			/*
+			// Use a 1D vector to store the current row of Pascal's Triangle
+			std::vector<T> row(k + 1, 0);
+			row[0] = 1; // C(n, 0) is always 1
 
-		k_ = std::min(k_, n_ - k_);
-		auto res = C(n_, k_);
-		if (res == -1)
-		{
-			std::vector<std::pair<u64, u64>> NKStack{ {n_, k_} };
-			while (NKStack.size())
-			{
-				auto [n, k] = NKStack.back();
-				// Option 1
-				// computes unnecessary values in a row even if just one k for n is needed
-				// does not cache intermediate rows
-				/*
-				// Use a 1D vector to store the current row of Pascal's Triangle
-				std::vector<T> row(k + 1, 0);
-				row[0] = 1; // C(n, 0) is always 1
+			// Build up Pascal's Triangle up to the nth row
+			for (int64_t i = 1; i <= n; ++i) {
+				// Update row from the end to the beginning to use only one array
+				for (int64_t j = std::min(i, k); j > 0; --j) {
+					row[j] += row[j - 1];
+				}
+			}
 
-				// Build up Pascal's Triangle up to the nth row
-				for (int64_t i = 1; i <= n; ++i) {
-					// Update row from the end to the beginning to use only one array
-					for (int64_t j = std::min(i, k); j > 0; --j) {
-						row[j] += row[j - 1];
+			// Store the result in the mRec before returning
+			mRec[n][k] = row[k];
+			return row[k];
+			*/
+			// Option 2: avoids the issues in the first option
+			// Recursive computation: C(n, k) = C(n-1, k-1) + C(n-1, k)
+			mRec[n][k] = 
+				choose_pascal_recursive(n - 1, k - 1) +
+				choose_pascal_recursive(n - 1, k);
+			return mRec[n][k];
+		}
+
+
+
+		T& choose_pascal_stack(int64_t n_, int64_t k_) {
+
+			auto& cache = mStack;
+			auto C = [this, &cache](u64 n, u64 k) -> T& {
+				if (k == 0 || k == n)
+					return mOne;
+				if (k > n || n == 0)
+					return mZero;
+
+				// Reduce the number of calculations by using symmetry: C(n, k) = C(n, n - k)
+				if (k > n - k)
+					k = n - k;
+
+				// Resize the cache if necessary
+				if (cache.size() <= n) {
+					auto oldSize = cache.size();
+					cache.resize(n + 1);
+					for (u64 nn = oldSize; nn <= n; ++nn)
+					{
+						cache[nn].resize(nn / 2 + 1, -1);
 					}
 				}
 
-				// Store the result in the cache before returning
-				cache[n][k] = row[k];
-				return row[k];
-				*/
-				// Option 2: avoids the issues in the first option
-				// Recursive computation: C(n, k) = C(n-1, k-1) + C(n-1, k)
-				auto v0 = C(n - 1, k - 1);
-				if (v0 == -1)
+				// Resize the specific row if necessary
+				//if (cache[n].size() <= k) {
+				//	cache[n].resize(k + 1, -1); // Use -1 to denote uncomputed values
+				//}
+
+				// Return cached value if it exists
+				//if (cache[n][k] != -1) 
+				return cache[n][k];
+
+				};
+
+			k_ = std::min(k_, n_ - k_);
+			auto& res = C(n_, k_);
+			if (res == -1)
+			{
+				std::vector<std::pair<u64, u64>> NKStack{ {n_, k_} };
+				while (NKStack.size())
 				{
-					NKStack.emplace_back(n - 1, k - 1);
-					continue;
+					auto [n, k] = NKStack.back();
+					// Option 1
+					// computes unnecessary values in a row even if just one k for n is needed
+					// does not cache intermediate rows
+					/*
+					// Use a 1D vector to store the current row of Pascal's Triangle
+					std::vector<T> row(k + 1, 0);
+					row[0] = 1; // C(n, 0) is always 1
+
+					// Build up Pascal's Triangle up to the nth row
+					for (int64_t i = 1; i <= n; ++i) {
+						// Update row from the end to the beginning to use only one array
+						for (int64_t j = std::min(i, k); j > 0; --j) {
+							row[j] += row[j - 1];
+						}
+					}
+
+					// Store the result in the cache before returning
+					cache[n][k] = row[k];
+					return row[k];
+					*/
+					// Option 2: avoids the issues in the first option
+					// Recursive computation: C(n, k) = C(n-1, k-1) + C(n-1, k)
+					auto v0 = C(n - 1, k - 1);
+					if (v0 == -1)
+					{
+						NKStack.emplace_back(n - 1, k - 1);
+						continue;
+					}
+
+					auto v1 = C(n - 1, k);
+					if (v1 == -1)
+					{
+						NKStack.emplace_back(n - 1, k);
+						continue;
+					}
+
+					NKStack.pop_back();
+
+					auto kk = std::min(k, n - k);
+					cache[n][kk] = v0 + v1;
 				}
 
-				auto v1 = C(n - 1, k);
-				if (v1 == -1)
-				{
-					NKStack.emplace_back(n - 1, k);
-					continue;
-				}
-
-				NKStack.pop_back();
-
-				auto kk = std::min(k, n - k);
-				cache[n][kk] = v0 + v1;
+				assert(&res == &cache[n_][k_]);
+				//C(n_, k_);
 			}
 
-			res = C(n_, k_);
+			assert(res != -1);
+
+			auto exp = choose_pascal_recursive(n_, k_);;
+			if (exp != res)
+				throw RTE_LOC;
+
+			return res;
 		}
-		return res;
-	}
+
+	};
 
 
 	template <typename T>
+	T choose_pascal(int64_t n, int64_t k, const ChooseCache<T>& cache) {
+
+		if (k > n) return cache.mZero;
+		if (k == 0 || k == n) return cache.mOne;
+		k = std::min(k, n - k);
+
+		if (cache.mStack.size() > n && cache.mStack[n].size() > k && cache.mStack[n][k] != -1)
+		{
+			return cache.mStack[n][k];
+		}
+		else
+		{
+			std::lock_guard l(gIoStreamMtx);
+			std::cout << "missing n " << n << " k " << k << std::endl;
+			std::cout << "cache.size()  " << cache.mStack.size() << std::endl;
+			if (cache.mStack.size() > n)
+			{
+				if (cache.mStack[n].size() > k)
+				{
+					std::cout << "val " << cache.mStack[n][k] << std::endl;
+				}
+				else
+					std::cout << "bad k" << std::endl;
+			}
+			else
+				std::cout << "bad n" << std::endl;
+
+			throw RTE_LOC;
+		}
+	}
+
+	template <typename T>
 	T choose_pascal(int64_t n, int64_t k, ChooseCache<T>& cache) {
-		auto v1 = choose_pascal_stack(n, k, cache.mStack);
+		auto& v1 = cache.choose_pascal_stack(n, k);
 
 		if (0 && n < 1000)
 		{
 
-			auto v0 = choose_pascal_recursive(n, k, cache.mRec);
+			auto v0 = cache.choose_pascal_recursive(n, k);
 
 			if (v0 != v1 /*|| cache.mRec != cache.mStack*/)
 			{
@@ -713,11 +770,13 @@ namespace osuCrypto {
 		return ballBinCapX(balls, bins, cap, stack);
 	}
 
+
+	//
 	template<typename T>
-	inline T labeledBallBinCap(u64 balls, u64 bins, u64 cap, ChooseCache<T>& pascal_triangle) {
+	inline T labeledBallBinCap(u64 balls, u64 bins, u64 cap, const ChooseCache<T>& pascal_triangle) {
 		T d = 0;
 		for (u64 i = 0; i <= bins; ++i) {
-			T v = (i & 1) ? -1 : 1;
+			//T v = (i & 1) ? -1 : 1;
 			auto mt = choose_pascal<T>(bins, i, pascal_triangle);
 
 			i64 bb = cap * (bins - i64(i));
@@ -732,11 +791,49 @@ namespace osuCrypto {
 			//    throw RTE_LOC;
 			//if (r != r)
 			//    throw RTE_LOC;
-			d += v * mt * r;
+			if (i & 1)
+				d -= mt * r;
+			else
+				d += mt * r;
 			//std::cout << i << " d " << d << std::endl;
 		}
 		return d;
 	}
+
+
+
+	//// for fixed number of balls and capcity, iterate over all possible bin counts
+	//// and output the balls into bins with capacity.
+	//template<typename T>
+	//struct BallBinCapIter
+	//{
+	//	T mCurrent;
+	//	u64 mBalls = 0, mBins = 0, mCap = 0;
+	//	BallBinCapIter() = default;
+	//	BallBinCapIter(u64 balls, u64 intialBins, u64 cap)
+	//		: mBalls(balls)
+	//		, mBins(intialBins)
+	//		, mCap(cap)
+	//	{
+	//		mCurrent = labeledBallBinCap(mBalls, mBins, mCap);
+	//	}
+
+	//	const T& operator->() const
+	//	{
+	//		return mCurrent;
+	//	}
+
+	//	void operator++()
+	//	{
+	//		auto i = ++mBins;
+	//		T nextTerm = i&1 ? -1 : 1;
+	//		nextTerm *= choose_pascal<T>(mBins, 0);
+
+	//		auto exp = labeledBallBinCap(mBalls, mBins, mCap);
+	//	}
+
+
+	//};
 
 	/* template<typename T>
 	 inline T labeledBallBinCap(u64 balls, u64 bins, u64 cap) {
@@ -949,7 +1046,7 @@ namespace osuCrypto {
 		{
 			for (u64 j = 0; j < m; ++j)
 			{
-				auto I = choose_pascal_recursive<Int>(i, j, pascal_triangle_int);
+				auto I = ic.choose_pascal_recursive(i, j);
 				//std::cout << I << " ";
 
 				auto I2 = choose_pascal<Int>(i, j, ic);
@@ -957,7 +1054,7 @@ namespace osuCrypto {
 					throw RTE_LOC;
 
 				std::vector<std::vector<Float>> pascal_triangle_float;
-				auto F = choose_pascal_recursive<Float>(i, j, pascal_triangle_float);
+				auto F = fc.choose_pascal_recursive(i, j);
 				//auto S = chooseApx(i, j);
 				auto div = (I ? I.convert_to<Float>() : 1);
 				auto d0 = abs((I - F.convert_to<Int>()).convert_to<Float>() / div);
