@@ -7,6 +7,8 @@
 
 #include "EnumeratorTools.h"
 #include "MinimumDistance.h"
+#include "cryptoTools/Common/Timer.h"
+#include "cryptoTools/Crypto/PRNG.h"
 
 #define BITSET_SIZE 128
 
@@ -220,14 +222,16 @@ namespace osuCrypto {
 	}
 
 	template<typename I, typename R>
-	std::vector<R> minimum_distance_approximate_true(u64 expander,
+	std::vector<R> minimum_distance_approximate_true(
+		ExpandType expander,
 		u64 multiplier,
 		u64 num_iters,
 		u64 k, u64 n,
 		u64 sigma, u64 sigma_expander,
 		size_t num_random,
 		std::mt19937& gen,
-		bool exact) {
+		bool exact,
+		bool verbose) {
 		assert(multiplier == 0 && num_iters == 1); // now only supports these
 		size_t e = n / k;
 		// Generate num_random possible G_i's (the blocks in matrix G)
@@ -236,28 +240,30 @@ namespace osuCrypto {
 		std::vector<std::vector<short>> gis;
 		if (exact) {
 			gis = generate_all_gis_bool(n, n, sigma);
-			if (expander == 1) {
+			if (expander == ExpandType::Block) {
 				assert(false); // TODO function does not yet exist
 			}
 		}
 		else { // approximate
 			gis = generate_random_gis_bool(n, n, sigma, num_random, gen);
-			if (expander == 1) {
+			if (expander == ExpandType::Block) {
 				// Remember this is missing the identity, which is handled later
 				expanding_gis = generate_random_gis_bool(k, n - k, sigma_expander, num_random, gen);
 			}
 		}
-		std::cout << "All " << gis.size() << " Gi's generated..." << std::endl;
+		if (verbose)
+			std::cout << "All " << gis.size() << " Gi's generated..." << std::endl;
 		// Generate all possible input x's
 		std::vector<std::vector<short>> xs = generate_all_x_bool(k);
-		std::cout << "All " << xs.size() << " x's generated..." << std::endl;
+		if (verbose)
+			std::cout << "All " << xs.size() << " x's generated..." << std::endl;
 		std::vector<R> count_weight_h_outputs(n + 1);
 		// iterate over all G's
 		for (const auto& g : gis) {
 			// for each G, iterate over all x's
 			for (const auto& x : xs) {
 				// expander
-				if (expander == 0) {
+				if (expander == ExpandType::Repeater) {
 					// repeater
 					std::vector<short> expanded_x;
 					for (size_t i = 0; i < k; i++) {
@@ -269,7 +275,7 @@ namespace osuCrypto {
 					iterate_and_count<I, R>(expanded_x, g, count_weight_h_outputs,
 						n, sigma, 1);
 				}
-				else if (expander == 1) {
+				else if (expander == ExpandType::Block) {
 					size_t num_expanding_gis = expanding_gis.size();
 					// expanding block
 					for (const auto& expanding_g : expanding_gis) {
@@ -287,6 +293,8 @@ namespace osuCrypto {
 							n, sigma, num_expanding_gis);
 					}
 				}
+				else
+					throw RTE_LOC;
 			}
 		}
 		// Divide each count by the number of G's
@@ -299,73 +307,224 @@ namespace osuCrypto {
 		return count_weight_h_outputs;
 	}
 
-	void minimum_distance_tests() {
+
+
+	void expanding_distribution_opt_test(const CLP& cmd)
+	{
+
+		using INT = Int;
+		using RAT = Rat;
+		//using INT = Float;
+		//using RAT = Float;
+		bool systematic = true;
+		u64 k = 1 << cmd.getOr("kk", 6);
+		u64 n = k + k * systematic;
+		u64 sigma = cmd.getOr("s", 16);
+		u64 numThreads = cmd.getOr("threads", 4);
+		ChooseCache<INT> pas(n);
+		u64 trials = cmd.getOr("trials", 1);
+		Timer timer;
+		print_timings = cmd.isSet("print_timings");
+
+		for (u64 tt = 0; tt < trials; ++tt)
+		{
+
+			std::vector<RAT>/* inputDist(k + 1), */outputDist0(n + 1), outputDist1(n + 1);
+			//for (u64 i = 1; i < inputDist.size(); ++i)
+			//	inputDist[i] = choose_pascal(k, i, pas);
+
+			timer.setTimePoint("start");
+			
+			compute_block_distribution_opt<INT, RAT>(
+				{}, outputDist0,
+				systematic, k, n, sigma,
+				numThreads, pas);
+			timer.setTimePoint("opt");
+
+			compute_expanding_block_distribution<INT, RAT>(outputDist1,k, n, sigma, pas);
+			timer.setTimePoint("old");
+
+			if (std::is_same_v<INT, Float>)
+			{
+				for (u64 i = 0; i < outputDist0.size(); ++i)
+				{
+					auto f = (outputDist0[i] / outputDist1[i]);
+					if (f > 1.001 || f < 0.999)
+					{
+						std::cout << Color::Red;
+						std::cout << i << "  " << outputDist0[i] << "  " << outputDist1[i] << std::endl << Color::Default;
+						throw RTE_LOC;
+					}
+				}
+			}
+			else
+			{
+
+				if (outputDist0 != outputDist1)
+				{
+					std::cout << "opt vs old" << std::endl;
+					for (u64 i = 0; i < outputDist0.size(); ++i)
+					{
+						if (outputDist0[i] != outputDist1[i])
+							std::cout << Color::Red;
+						std::cout << i << "  " << outputDist0[i] << "  " << outputDist1[i] << std::endl << Color::Default;
+					}
+					throw RTE_LOC;
+				}
+			}
+		}
+		if (cmd.isSet("timing"))
+			std::cout << timer << std::endl;
+	}
+
+	void compute_block_distribution_opt_test(const CLP& cmd)
+	{
+		using INT = Int;
+		using RAT = Rat;
+		//using INT = Float;
+		//using RAT = Float;
+		bool systematic = false;
+		u64 k = 1 << cmd.getOr("kk", 6);
+		u64 n = k + k * systematic;
+		u64 sigma = cmd.getOr("s", 16);
+		u64 numThreads = cmd.getOr("threads", 4);
+		ChooseCache<INT> pas(n);
+		u64 trials = cmd.getOr("trials", 1);
+		Timer timer;
+		PRNG prng(CCBlock);
+		print_timings = cmd.isSet("print_timings");
+
+		for (u64 tt = 0; tt < trials; ++tt)
+		{
+
+			std::vector<RAT> inputDist(k + 1), outputDist0(n + 1), outputDist1(n + 1);
+			for (u64 i = 0; i < inputDist.size(); ++i)
+				inputDist[i] = i;
+
+			timer.setTimePoint("start");
+			compute_block_distribution_opt<INT, RAT>(
+				inputDist, outputDist0,
+				systematic, k, n, sigma,
+				numThreads, pas);
+			timer.setTimePoint("opt");
+
+			compute_block_distribution<INT, RAT>(inputDist, outputDist1,
+				0, n, sigma, numThreads, pas);
+			timer.setTimePoint("old");
+
+			if (std::is_same_v<INT, Float>)
+			{
+				for (u64 i = 0; i < outputDist0.size(); ++i)
+				{
+					auto f = (outputDist0[i] / outputDist1[i]);
+					if (f > 1.001 || f < 0.999)
+					{
+						std::cout << Color::Red;
+						std::cout << i << "  " << outputDist0[i] << "  " << outputDist1[i] << std::endl << Color::Default;
+						throw RTE_LOC;
+					}
+				}
+			}
+			else
+			{
+
+				if (outputDist0 != outputDist1)
+				{
+					for (u64 i = 0; i < outputDist0.size(); ++i)
+					{
+						if (outputDist0[i] != outputDist1[i])
+							std::cout << Color::Red;
+						std::cout << i << "  " << outputDist0[i] << "  " << outputDist1[i] << std::endl << Color::Default;
+					}
+					throw RTE_LOC;
+				}
+			}
+		}
+		if (cmd.isSet("timing"))
+			std::cout << timer << std::endl;
+	}
+
+	void minimum_distance_tests(const CLP& cmd) {
+
+		u64 numThreads = 16;
 		// expander, multiplier, num_iters, k, n, sigma, sigma_expander (0 if repeater), approximate (1 means compute all 
 		// elements in the distribution exactly)
 		std::vector<std::vector<u64>> params = {
-				{0, 0, 1, 3, 6, 3, 0, 1}, // repeater and block enumerator
-				{0, 0, 1, 3, 6, 6, 0, 1}, // repeater and block enumerator
-				{0, 0, 1, 4, 8, 4, 0, 1}, // repeater and block enumerator
-				{0, 0, 1, 4, 12, 6, 0, 1}, // repeater and block enumerator
-				{1, 0, 1, 4, 8, 4, 2, 1}, // expanding block and block enumerator
-				{1, 0, 1, 3, 9, 3, 3, 1}, // expanding block and block enumerator
-				//{1, 0, 1, 4, 8, 8, 2} // expanding block and block enumerator
+				{0, 1, 3, 6, 3, 0, 1}, // repeater and block enumerator
+				{0, 1, 4, 8, 2, 0, 1}, // repeater and block enumerator
+				{0, 1, 6, 12, 3, 0, 1}, // repeater and block enumerator
+				//{0, 1, 4, 8, 4, 2, 1}, // expanding block and block enumerator
+				//{0, 1, 3, 9, 3, 3, 1}, // expanding block and block enumerator
+				//{0, 1, 4, 8, 8, 2} // expanding block and block enumerator
 				// TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
 				//  TODO add more tests with different expander multiplier
 				//{4,12,2},
 				//{6,6,3}
 		};
+		auto et = ExpandType::Repeater;
+
 		for (const auto& param : params) {
 			// TODO remove when ready
 			if (param[1] != 0) assert(false);
 			std::vector<Rat> expected_distribution =
-				minimum_distance<Int, Rat>(param[0],
-					param[1],
-					param[2],
-					param[3],
-					param[4],
-					param[5],
-					param[6],
-					param[7],
-					0, 0, 0);
+				minimum_distance<Int, Rat>(et,
+					param[0],// multipler
+					param[1],// num_iters
+					param[2],// k
+					param[3],// n
+					param[4],// sigma
+					param[5],// sigma_expander
+					param[6],// approximate
+					numThreads,
+					0, 0, 0);// verbose, numpoints, normalize
 			double expected_md =
 				minimum_distance_from_distribution<Rat>(expected_distribution);
 
-			std::random_device rd; // Seed for the random number engine
-			std::mt19937 gen(rd()); // Mersenne Twister engine
-			size_t num_random = 300;
-			std::vector<Rat> approximate_true_distribution = minimum_distance_approximate_true<Int, Rat>(param[0],
+			u64 seed = 24523452345234523;
+			std::mt19937 gen(seed); // Mersenne Twister engine
+			size_t num_random = cmd.getOr("trials", 1000);
+			std::vector<Rat> approximate_true_distribution = minimum_distance_approximate_true<Int, Rat>(
+				et,
+				param[0],
 				param[1],
 				param[2],
 				param[3],
 				param[4],
 				param[5],
-				param[6],
 				num_random,
 				gen,
-				false);
-			u64 approximate_true_md = minimum_distance_from_distribution<Rat>(approximate_true_distribution);
-			std::cout << "Expected minimum distance: " << expected_md << std::endl;
-			// std::cout << "True minimum distance: " << true_md << std::endl;
-			std::cout << "Approximate true minimum distance: " << approximate_true_md << std::endl;
+				false,
+				cmd.isSet("v"));
+			double approximate_true_md = minimum_distance_from_distribution<Rat>(approximate_true_distribution);
 
-			// assert(expected_md == true_md);
-			assert(expected_md == approximate_true_md);
-			// if (expected_md != true_md) {
-			if (expected_md != approximate_true_md) {
-				throw RTE_LOC;
-			}
 
 			// Compare the full distributions
 			bool similar = compare_distributions<Rat>(expected_distribution, approximate_true_distribution, param[4] + 1, 0.1); // last param is error tolerance
 			if (!similar) {
+				print_distribution<Rat>(expected_distribution, approximate_true_distribution);
+
 				throw RTE_LOC;
 			}
+
+			if (expected_md != approximate_true_md) {
+				std::cout << "Expected minimum distance: " << expected_md << std::endl;
+				// std::cout << "True minimum distance: " << true_md << std::endl;
+				std::cout << "Approximate true minimum distance: " << approximate_true_md << std::endl;
+
+				print_distribution<Rat>(expected_distribution, approximate_true_distribution);
+
+				throw RTE_LOC;
+			}
+
 		}
 	}
 
 	inline void minimumDistanceTestMain(oc::CLP& cmd) {
-		minimum_distance_tests();
+		TestCollection tests;
+		tests.add("expanding_distribution_opt_test     ", expanding_distribution_opt_test);
+		tests.add("compute_block_distribution_opt_test ", compute_block_distribution_opt_test);
+		tests.add("minimum_distance_tests              ", minimum_distance_tests);
+		tests.runIf(cmd);
 	}
 }
 

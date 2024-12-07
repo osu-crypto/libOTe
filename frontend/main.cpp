@@ -116,8 +116,10 @@ int main(int argc, char** argv)
 		return 0;
 	}
     if (cmd.isSet("minimumdistance")) {
-        //minimumDistanceTestMain(cmd);
-        minimumDistanceMain(cmd);
+		if(cmd.isSet("u"))
+			minimumDistanceTestMain(cmd);
+		else
+			minimumDistanceMain(cmd);
 		return 0;
     }
 	if (cmd.isSet("binomial")) {

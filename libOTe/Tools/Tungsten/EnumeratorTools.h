@@ -262,6 +262,7 @@ namespace osuCrypto {
 
 #endif
 
+	//using Float = boost::multiprecision::cpp_bin_float_double;
 	using Float = boost::multiprecision::cpp_bin_float_quad;
 	//using Float = boost::multiprecision::cpp_bin_float_oct;
 #ifdef ENABLE_GMP
@@ -373,7 +374,7 @@ namespace osuCrypto {
 		}
 		return ret;
 #else
-		double v;
+		double v = 0;
 		while (x >= 2)
 		{
 			x /= 2;
@@ -543,7 +544,7 @@ namespace osuCrypto {
 
 
 
-		T& choose_pascal_stack(int64_t n_, int64_t k_) {
+		const T& choose_pascal_stack(int64_t n_, int64_t k_) {
 
 			auto& cache = mStack;
 			auto C = [this, &cache](u64 n, u64 k) -> T& {
@@ -633,9 +634,9 @@ namespace osuCrypto {
 
 			assert(res != -1);
 
-			auto exp = choose_pascal_recursive(n_, k_);;
-			if (exp != res)
-				throw RTE_LOC;
+			//auto exp = choose_pascal_recursive(n_, k_);;
+			//if (exp != res)
+			//	throw RTE_LOC;
 
 			return res;
 		}
@@ -644,7 +645,7 @@ namespace osuCrypto {
 
 
 	template <typename T>
-	T choose_pascal(int64_t n, int64_t k, const ChooseCache<T>& cache) {
+	const T& choose_pascal(int64_t n, int64_t k, const ChooseCache<T>& cache) {
 
 		if (k > n) return cache.mZero;
 		if (k == 0 || k == n) return cache.mOne;
@@ -676,7 +677,7 @@ namespace osuCrypto {
 	}
 
 	template <typename T>
-	T choose_pascal(int64_t n, int64_t k, ChooseCache<T>& cache) {
+	const T& choose_pascal(int64_t n, int64_t k, ChooseCache<T>& cache) {
 		auto& v1 = cache.choose_pascal_stack(n, k);
 
 		if (0 && n < 1000)
