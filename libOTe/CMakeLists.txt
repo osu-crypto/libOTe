@@ -1,21 +1,29 @@
 enable_language(ASM)
+enable_language(CUDA)
+find_package(CUDAToolkit REQUIRED)
 
 file(GLOB_RECURSE SRCS *.cpp *.c)
 
+set(CUDA_SRCS Tools/Tungsten/ParallelSyndromeDecoding.cu)
+
+set_source_files_properties(${CUDA_SRCS} PROPERTIES LANGUAGE CUDA)
+
 set(SRCS "${SRCS}"
-        Tools/Tungsten/BinomialCoefficientTest.h
-        Tools/Tungsten/NonrecConvEnumerator.h
-        Tools/Tungsten/EnumeratorTools.h
-        Tools/Tungsten/MinimumDistance.h
-        Tools/Tungsten/RepeaterEnumerator.h
-        Tools/Tungsten/ExpandingBlockEnumerator.h
-        Tools/Tungsten/BlockEnumeratorTest.h
-        Tools/Tungsten/CompositionEnumerator.h
-        Tools/Tungsten/MinimumDistanceTest.h
-        Tools/Tungsten/RepeaterEnumerator.cpp
+        #Tools/Tungsten/BinomialCoefficientTest.h
+        #Tools/Tungsten/NonrecConvEnumerator.h
+        #Tools/Tungsten/EnumeratorTools.h
+        #Tools/Tungsten/MinimumDistance.h
+        #Tools/Tungsten/RepeaterEnumerator.h
+        #Tools/Tungsten/ExpandingBlockEnumerator.h
+        #Tools/Tungsten/BlockEnumeratorTest.h
+        #Tools/Tungsten/CompositionEnumerator.h
+        #Tools/Tungsten/MinimumDistanceTest.h
+        #Tools/Tungsten/RepeaterEnumerator.cpp
+        #Tools/Tungsten/ParallelSyndromeDecoding.h
 )
 
-add_library(libOTe STATIC ${SRCS} )
+add_library(libOTe STATIC ${SRCS})
+add_library(libOTeCUDA STATIC ${CUDA_SRCS})
 
 
 # make projects that include libOTe use this as an include folder
@@ -27,20 +35,34 @@ target_include_directories(libOTe PUBLIC
                     $<INSTALL_INTERFACE:include>)
                     
 target_link_libraries(libOTe cryptoTools)
+target_link_libraries(libOTeCUDA CUDAToolkit)
+#target_link_libraries(libOTeCUDA CUDAToolkit cryptoTools)
+
+#set(CMAKE_CUDA_ARCHITECTURES 86)
+#set_target_properties(libOTe PROPERTIES
+#    CUDA_ARCHITECTURES "86"
+#)
+
 
 if(MSVC)
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
-    #target_compile_options(libOTe PRIVATE -openmp:experimental)
 else()
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
 
     if(ENABLE_SSE)
-        target_compile_options(libOTe PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)
+        #target_compile_options(libOTe PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)
+        target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-maes -msse2 -msse3 -msse4.1 -mpclmul>)
     endif()
     if(ENABLE_AVX)
-        target_compile_options(libOTe PRIVATE -mavx2)
+        #target_compile_options(libOTe PRIVATE -mavx2)
+        target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-mavx2>)
     endif()
 endif()
+
+# Ensure consistent CUDA standard
+set(CMAKE_CUDA_STANDARD ${LIBOTE_STD_VER})
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
 if (ENABLE_BITPOLYMUL)
 	target_link_libraries(libOTe bitpolymul)
 endif ()

@@ -125,6 +125,7 @@ int main(int argc, char** argv)
 	if (cmd.isSet("binomial")) {
 		binomialCoefficientTestMain(cmd);
 	}
+
 #endif
 	
 	
