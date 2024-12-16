@@ -736,14 +736,17 @@ namespace osuCrypto {
 		assert(distribution.size() > 0);
 		auto n = distribution.size() - 1;
 		R sum = 0;
+		R weighted = 0;
 		//u64 minimum_distance = 0;
 		R threshold = 1;
 		std::vector<double> ret;
 		for (size_t h = 0; h < n; h++) {
 			;
 			sum += distribution[h];
+			weighted += distribution[h] * h;
+
 			if (sum >= threshold) {
-				ret.push_back((double)h / n);
+				ret.push_back((double)(weighted / sum / n));
 				threshold *= 2;
 				if (ret.size() == count)
 					break;
@@ -791,9 +794,9 @@ namespace osuCrypto {
 		R total = 0;;
 		if (normalize)
 		{
-			std::cout << "Printing log2 probability distribution: " << std::endl;
+			std::cout << "Printing normalized log2 counts distribution: " << std::endl;
 			for (size_t i = 0; i < distribution.size(); i++) {
-				total += distribution[i];
+				total += boost::multiprecision::abs(log2(distribution[i]));
 			}
 		}
 		else
@@ -805,7 +808,7 @@ namespace osuCrypto {
 		if (numPoints == 0)
 		{
 			for (const auto& d : distribution) {
-				std::cout << log2(d / total) << std::endl;
+				std::cout << log2(d) / total << std::endl;
 			}
 		}
 		else
@@ -820,8 +823,8 @@ namespace osuCrypto {
 					u64 lowIdx = std::floor(scaled); // in [0,DS)
 					u64 highIdx = std::min<u64>(std::ceil(scaled), distribution.size() - 1); // in [0,DS)
 
-					Float DL = distribution[lowIdx] != 0 ? log2(Float(distribution[lowIdx] / total)) : -99999999999;
-					Float DH = log2(Float(distribution[highIdx] / total));
+					Float DL = log2(Float(distribution[lowIdx])) / total;
+					Float DH = log2(Float(distribution[highIdx])) / total;
 					auto LDS = lowIdx / DS; // in [0,1)
 					auto HDS = highIdx / DS;// in [0,1)
 
@@ -982,8 +985,6 @@ namespace osuCrypto {
 			{
 				throw std::runtime_error("NAN final sum. " LOCATION );
 			}
-			else
-				std::cout << "final sum " << final_distribution_sum << std::endl;
 		}
 		// Sum initial distribution
 		R initial_distribution_sum = 0;
@@ -1052,7 +1053,7 @@ namespace osuCrypto {
 		auto sigmas = cmd.getManyOr("sigma", std::vector<u64>{64});
 		bool verbose = cmd.isSet("verbose");
 		u64 numPoints = cmd.getOr("numPoints", 0);
-		bool normalizes = cmd.getOr("normalize", 1);
+		bool normalizes = cmd.getOr("normalize", 0);
 		u64 numMD = cmd.getOr("numMD", 10);
 		u64 num_threads = cmd.getOr("threads", std::thread::hardware_concurrency());
 		print_timings = verbose;
