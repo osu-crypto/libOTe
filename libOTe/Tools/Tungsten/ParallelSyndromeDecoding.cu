@@ -1,6 +1,7 @@
 #include "ParallelSyndromeDecoding.h"
 #include <cuda_runtime.h>
 #include <iostream>
+//#include "cryptoTools/Common/Matrix.h"
 
 namespace osuCrypto {
 

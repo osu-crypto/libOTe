@@ -2,7 +2,7 @@
 #project(libOTe_Tests)
 
 file(GLOB SRCS *.cpp) 
-add_library(libOTe_Tests STATIC ${SRCS})
+add_library(libOTe_Tests STATIC ${SRCS} ${CUDA_SRCS})
 
 target_link_libraries(libOTe_Tests libOTe)
 

@@ -37,6 +37,7 @@
 #include "libOTe/Tools/Tungsten/RepeaterEnumerator.h"
 #include "libOTe/Tools/Tungsten/MinimumDistance.h"
 #include "libOTe/Tools/Tungsten/MinimumDistanceTest.h"
+#include "libOTe/Tools/Tungsten/ParallelSyndromeDecoding.h"
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
@@ -124,6 +125,9 @@ int main(int argc, char** argv)
     }
 	if (cmd.isSet("binomial")) {
 		binomialCoefficientTestMain(cmd);
+	}
+	if (cmd.isSet("parallelsd")) {
+		parallelSD();
 	}
 
 #endif

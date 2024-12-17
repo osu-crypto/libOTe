@@ -22,8 +22,8 @@ set(SRCS "${SRCS}"
         #Tools/Tungsten/ParallelSyndromeDecoding.h
 )
 
-add_library(libOTe STATIC ${SRCS})
-add_library(libOTeCUDA STATIC ${CUDA_SRCS})
+add_library(libOTe STATIC ${SRCS} ${CUDA_SRCS})
+#add_library(libOTeCUDA STATIC ${CUDA_SRCS})
 
 
 # make projects that include libOTe use this as an include folder
@@ -35,7 +35,6 @@ target_include_directories(libOTe PUBLIC
                     $<INSTALL_INTERFACE:include>)
                     
 target_link_libraries(libOTe cryptoTools)
-target_link_libraries(libOTeCUDA CUDAToolkit)
 #target_link_libraries(libOTeCUDA CUDAToolkit cryptoTools)
 
 #set(CMAKE_CUDA_ARCHITECTURES 86)
