@@ -172,15 +172,118 @@ namespace osuCrypto {
 
     void parallelSD() {
 
+        // Is cuda included properly into cmake?
         test_cuda_compiled();
 
-        constexpr int n = 1 << 21;
-        std::cout << "n: " << n << std::endl;
+        //
+        // client sets
+        //
+        constexpr int k = 9;// 1 << 20; // Total rows of G and size of vector x
+        constexpr int e = 2; // Scaling factor (n/k)
+        constexpr int n = e * k; // Total columns of G
+        constexpr int sigma = 3;// 32; // Block row size
+        constexpr int block_cols = sigma * e; // Block column size
+        constexpr int t = k / sigma; // Number of blocks
 
+        std::cout << "k: " << k << std::endl;
+        std::cout << "n: " << n << std::endl;
+        std::cout << "e: " << e << std::endl;
+        std::cout << "sigma: " << sigma << std::endl;
+        std::cout << "t: " << t << std::endl;
+
+        // set up pseudorandom generator
+        unsigned int seed = static_cast<unsigned int>(time(0)); // Random seed
+        thrust::default_random_engine rng(seed);
+
+        //
+        // Benchmark different permutations
+        //
         benchmark_permutations(n);
 
+        //
+        // test block multiply
+        //
+        // test_block_multiply();
 
+        //
+        // block multiply
+        //
 
+        using T = uint8_t; // Binary representation as uint8_t
+
+        // --- Host Input Vector x ---
+        std::vector<T> h_vector = { 1, 1, 1, 
+                                            0, 0, 1, 
+                                                    1, 0, 1 }; // Binary vector of size k
+
+        // --- Host Block Matrices (G1, G2, ..., Gt) ---
+        // std::vector<std::vector<T>> h_blocks(t, std::vector<T>(sigma * (sigma * e), 1));
+        std::vector<std::vector<T>> h_blocks = { {1,0,1,1,1,0,
+                                                  1,1,1,0,0,0,
+                                                  0,1,0,1,0,1}, 
+                                                               {1,1,1,1,1,1,
+                                                                0,0,0,0,0,0,
+                                                                1,1,1,0,0,0}, 
+                                                                             {1,1,0,0,1,1,
+                                                                              1,0,1,1,1,0,
+                                                                              0,0,0,1,0,1} };
+        // --- Host Expected xG ---
+        std::vector<T> h_expected_result = {0,0,0,0,1,1,
+                                                        1,1,1,0,0,0,
+                                                                    1,1,0,1,1,0};
+
+        // --- Host Result Vector ---
+        std::vector<T> h_result(n, 0);
+
+        // --- Transfer Data to GPU ---
+        thrust::device_vector<T> d_vector = h_vector; // Vector x on GPU
+        thrust::device_vector<T> d_result(n, 0);      // Final result vector on GPU
+
+        for (int i = 0; i < t; ++i) {
+            
+            // Transfer current block Gi to GPU
+            thrust::device_vector<T> d_block = h_blocks[i];
+            thrust::device_vector<T> d_block_result(block_cols, 0);
+
+            // Extract the relevant slice of vector x (size sigma)
+            thrust::device_vector<T> d_vector_slice(
+                d_vector.begin() + i * sigma,
+                d_vector.begin() + (i + 1) * sigma
+            );
+
+            // Perform binary matrix-vector multiplication (column-wise)
+            thrust::for_each(
+                thrust::device,
+                thrust::counting_iterator<int>(0),
+                thrust::counting_iterator<int>(block_cols),
+                BlockVectorColumnMultiply(
+                    thrust::raw_pointer_cast(d_block.data()),
+                    thrust::raw_pointer_cast(d_vector_slice.data()),
+                    thrust::raw_pointer_cast(d_block_result.data()),
+                    sigma,
+                    block_cols
+                )
+            );
+
+            // Place block result into the correct section of the final result vector
+            thrust::copy(
+                d_block_result.begin(),
+                d_block_result.end(),
+                d_result.begin() + i * block_cols
+            );
+        }
+
+        // Copy results back to host
+        thrust::host_vector<T> h_result_gpu = d_result;
+
+        // Verify correctness
+        for (size_t i = 0; i < n; i++) {
+            std::cout << "expected at index " << i << ": " << static_cast<int>(h_expected_result[i]) << std::endl;
+            std::cout << "computed at index " << i << ": " << static_cast<int>(h_result_gpu[i]) << std::endl;
+            if (h_result_gpu[i] != h_expected_result[i])
+                throw std::runtime_error("Computed result not as expected");
+        }
+        std::cout << std::endl;
     }
 
 } // namespace osuCrypto
