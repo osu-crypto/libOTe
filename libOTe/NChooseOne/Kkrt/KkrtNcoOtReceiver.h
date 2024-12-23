@@ -7,6 +7,7 @@
 #include <cryptoTools/Common/Matrix.h>
 #include <vector>
 #include <cryptoTools/Crypto/AES.h>
+#include <cryptoTools/Crypto/MultiKeyAES.h>
 #include <cryptoTools/Common/Timer.h>
 
 #ifdef GetMessage

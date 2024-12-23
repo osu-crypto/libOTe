@@ -86,7 +86,7 @@ namespace osuCrypto
         //u64 doneIdx = 0;
         static const auto superBlkSize = 1;
         static const auto commStepSize = 512 * 8;
-        auto mIter = messages.begin();
+        auto mIter = messages.data();
 
         u64 step = std::min<u64>(numSuperBlocks, (u64)commStepSize);
         AlignedUnVector<block> uBuff(step * 128);
@@ -194,7 +194,7 @@ namespace osuCrypto
 
             //block* mStart = mIter;
             //block* mEnd = std::min<block*>(mIter + 128 * superBlkSize, &*mMessages.end());
-            auto mEnd = mIter + std::min<u64>(128 * superBlkSize, messages.end() - mIter);
+            auto mEnd = mIter + std::min<u64>(128 * superBlkSize, messages.data() + messages.size() - mIter);
 
 
             tIter = (block*)t0.data();

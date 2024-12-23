@@ -59,7 +59,6 @@ if(DEFINED ENABLE_ALL_OT)
 endif()
 
 
-
 option(ENABLE_SIMPLESTOT     "Build the SimplestOT base OT" OFF)
 option(ENABLE_SIMPLESTOT_ASM "Build the assembly based SimplestOT library" OFF)
 option(ENABLE_MRR            "Build the McQuoidRosulekRoy 20 PopfOT base OT using Ristretto KA" OFF)
@@ -124,7 +123,8 @@ message(STATUS "1-out-of-N OT Extension protocols\n=============================
 message(STATUS "Option: ENABLE_OOS            = ${ENABLE_OOS}")
 message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}")
 message(STATUS "Option: ENABLE_RR             = ${ENABLE_RR}\n\n")
-
+message(STATUS "CRYPTO_TOOLS_STD_VER=${CRYPTO_TOOLS_STD_VER}")
+set(LIBOTE_STD_VER ${CRYPTO_TOOLS_STD_VER})
 
 #############################################
 #               Config Checks               #

@@ -5,8 +5,9 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Network/Channel.h>
 #include "SoftSpokenShDotExt.h"
-#include "cryptoTools/Common/Aligned.h"
 
+#include <cryptoTools/Crypto/MultiKeyAES.h>
+#include <cryptoTools/Common/Aligned.h>
 namespace osuCrypto
 {
 

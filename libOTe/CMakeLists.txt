@@ -18,9 +18,12 @@ target_include_directories(libOTe PUBLIC
 
 target_link_libraries(libOTe cryptoTools)
 
+message("LIBOTE_STD_VER=${LIBOTE_STD_VER}")
+
 if(MSVC)
-    #target_compile_options(libOTe PRIVATE -openmp:experimental)
+    target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
 else()
+    target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
 
     if(ENABLE_SSE)
         target_compile_options(libOTe PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)

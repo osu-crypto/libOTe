@@ -5,6 +5,7 @@
 #include <cryptoTools/Common/Log.h>
 #include "KkrtDefines.h"
 #include <cryptoTools/Crypto/RandomOracle.h>
+#include <cryptoTools/Crypto/MultiKeyAES.h>
 
 namespace osuCrypto
 {
