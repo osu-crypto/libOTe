@@ -13,11 +13,25 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/transform.h>
+#include <thrust/for_each.h>
+#include <thrust/transform_reduce.h>
+#include <thrust/execution_policy.h>
+
 
 namespace osuCrypto {
 
     __global__ void test_kernel() {
         printf("CUDA Kernel Executed\n");
+    }
+
+    void test_cuda_compiled() {
+        test_kernel << <1, 1 >> > ();
+        cudaError_t err = cudaDeviceSynchronize();
+        if (err != cudaSuccess) {
+            std::cerr << "CUDA Error: " << cudaGetErrorString(err) << std::endl;
+            return;
+        }
+        std::cout << "CUDA included successfully!" << std::endl;
     }
 
     // Functor to initialize sequence values
@@ -27,25 +41,10 @@ namespace osuCrypto {
         }
     };
 
-    void parallelSD() {
-        test_kernel << <1, 1 >> > ();
-        cudaError_t err = cudaDeviceSynchronize();
-        if (err != cudaSuccess) {
-            std::cerr << "CUDA Error: " << cudaGetErrorString(err) << std::endl;
-            return;
-        }
-        std::cout << "CUDA included successfully!" << std::endl;
-
-        int n = 1 << 21;
-        std::cout << "n: " << n << std::endl;
-
+    void benchmark_permutations(int n) {
         // Step 2: Set up a random number generator
         unsigned int seed = static_cast<unsigned int>(time(0)); // Random seed
         thrust::default_random_engine rng(seed);
-
-        int A[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
-        const int N = sizeof(A) / sizeof(int);
-        thrust::shuffle(A, A + N, rng);
 
         //
         // GPU device_vector thrust::shuffle
@@ -125,7 +124,7 @@ namespace osuCrypto {
 
         // Step 2: Set up the random number generator
         std::random_device rd;                  // Random seed
-        std::default_random_engine rng_vector (rd());   // Random number engine
+        std::default_random_engine rng_vector(rd());   // Random number engine
 
         // Step 3: Measure the time to shuffle using std::chrono
         auto start_vector = std::chrono::high_resolution_clock::now();
@@ -144,6 +143,41 @@ namespace osuCrypto {
         //}
         //std::cout << std::endl;
 
+    }
+
+    // Functor for Binary Block-Vector Multiplication (Column-wise)
+    struct BlockVectorColumnMultiply {
+        const uint8_t* matrix;  // Pointer to block matrix Gi (flattened, row-major)
+        const uint8_t* vector;  // Pointer to corresponding vector slice x_i
+        uint8_t* result;        // Pointer to result slice
+        int sigma;             // Number of rows in the block
+        int block_cols;        // Number of columns in the block (sigma * e)
+
+        BlockVectorColumnMultiply(const uint8_t* matrix, 
+            const uint8_t* vector, uint8_t* result, int sigma, int block_cols)
+            : matrix(matrix), vector(vector), result(result), sigma(sigma), block_cols(block_cols) {}
+
+        // Function can be executed on CPU (host) or GPU (device)
+        __host__ __device__
+            void operator()(int col) const {
+            uint8_t sum = 0;
+            for (int row = 0; row < sigma; ++row) {
+                // Binary AND between vector value and matrix element
+                sum ^= (vector[row] & matrix[row * block_cols + col]);
+            }
+            result[col] = sum;
+        }
+    };
+
+
+    void parallelSD() {
+
+        test_cuda_compiled();
+
+        constexpr int n = 1 << 21;
+        std::cout << "n: " << n << std::endl;
+
+        benchmark_permutations(n);
 
 
 
