@@ -63,6 +63,8 @@ namespace osuCrypto {
             d_vec.begin(),
             sequence_functor());
 
+        auto start_device_chrono = std::chrono::high_resolution_clock::now();
+
         // Step 3: Set up CUDA events for timing
         cudaEvent_t start_device, stop_device;
         cudaEventCreate(&start_device);
@@ -82,8 +84,16 @@ namespace osuCrypto {
         float milliseconds = 0;
         cudaEventElapsedTime(&milliseconds, start_device, stop_device);
 
+        auto stop_device_chrono = std::chrono::high_resolution_clock::now();
+
         // Print the result
-        std::cout << "Time to thrust::shuffle a thrust::device_vector (GPU): " << milliseconds << " ms" << std::endl;
+        std::cout << "Time to thrust::shuffle a thrust::device_vector (GPU) using cuda events: " << 
+            milliseconds << " ms" << std::endl;
+
+        std::chrono::duration<double, std::milli> elapsed_device_chrono = stop_device_chrono - start_device_chrono;
+
+        // Step 5: Print the elapsed time
+        std::cout << "Time to thrust::shuffle a thrust::device_vector (GPU) using chrono: " << elapsed_device_chrono.count() << " ms" << std::endl;
 
 
         // Step 8: Copy the result back to the host for printing
@@ -517,7 +527,14 @@ namespace osuCrypto {
         initialize_block_matrix(G, k, n, sigma, dist, rngcpu);
         initialize_block_matrix(H, n, k, sigma, dist, rngcpu);
 
+        auto start = std::chrono::high_resolution_clock::now();
         code_cuda(d_x, G, H, d_xG);
+        auto stop = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = stop - start;
+
+        // Step 4: Print the elapsed time
+        std::cout << "Time to compute the code implemented with cuda kernels: " << 
+            elapsed.count() << " ms" << std::endl;
 
         // Optionally copy results back to host
         // thrust::host_vector<T> h_xG = d_xG;        
