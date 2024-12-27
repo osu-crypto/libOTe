@@ -187,8 +187,6 @@ namespace osuCrypto {
         // block multiply
         //
 
-        using T = uint8_t; // Binary representation as uint8_t
-
         // --- Host Input Vector x ---
         std::vector<T> h_vector = { 1, 1, 1,
                                             0, 0, 1,
@@ -265,7 +263,6 @@ namespace osuCrypto {
 
     // TODO Incomplete (Entirely implemented in thrust)
     void test_code_thrust() {
-        using T = uint8_t; // Binary representation as uint8_t
 
         // Set up pseudorandom generator
         unsigned int seed = static_cast<unsigned int>(time(0)); // Random seed
@@ -320,6 +317,7 @@ namespace osuCrypto {
     struct BlockMatrix {
         thrust::device_vector<T> data;      // Non-zero entries (flattened)
         thrust::device_vector<int> blockOffsets; // Starting index of each block in data
+        thrust::device_vector<int> rowIndices;   // Row indices of non-zero blocks
         thrust::device_vector<int> colIndices;   // Column indices of non-zero blocks
         int sigma; // Block size
         int e;     // Expansion factor (e = n / k)
@@ -335,7 +333,8 @@ namespace osuCrypto {
         // Allocate memory for block data
         mat.data.resize(mat.t * sigma * (sigma * mat.e)); // Only store non-zero blocks
         mat.blockOffsets.resize(mat.t + 1); // Start of each block in data
-        mat.colIndices.resize(mat.t); // Row start for each block
+        mat.rowIndices.resize(mat.t); // Row start for each block
+        mat.colIndices.resize(mat.t); // Col start for each block
 
         // Fill the vector with random binary values
         std::vector<T> h_mat(mat.data.size());
@@ -345,6 +344,8 @@ namespace osuCrypto {
         mat.data = h_mat;
         // 0, sigma(sigma*e), 2sigma(sigma*e), 3sigma(sigma*e), etc.
         thrust::sequence(mat.blockOffsets.begin(), mat.blockOffsets.end(), 0, sigma * (sigma * mat.e));
+        // 0, sigma, 2sigma, 3sigma, etc.
+        thrust::sequence(mat.rowIndices.begin(), mat.rowIndices.end(), 0, sigma);
         // 0, sigma * e, 2sigma * e, 3sigma * e, etc.
         thrust::sequence(mat.colIndices.begin(), mat.colIndices.end(), 0, sigma * mat.e);
     }
@@ -353,6 +354,7 @@ namespace osuCrypto {
         const T* x,
         const T* blockData,
         const int* blockOffsets,
+        const int* rowIndices,
         const int* colIndices,
         T* result,
         int sigma, int e, int t) {
@@ -360,13 +362,14 @@ namespace osuCrypto {
         int threadIdxLocal = threadIdx.x; // [0,sigma*e)
 
         if (blockIdxGlobal < t) {
+            int row_start = rowIndices[blockIdxGlobal];
             int col_start = colIndices[blockIdxGlobal];
             int data_start = blockOffsets[blockIdxGlobal];
 
             if (threadIdxLocal < sigma * e) {
                 T temp = 0;
                 for (int row = 0; row < sigma; ++row) {
-                    temp ^= (x[col_start + row] & blockData[data_start + threadIdxLocal + row * (sigma * e)]);
+                    temp ^= (x[row_start + row] & blockData[data_start + threadIdxLocal + row * (sigma * e)]);
                 }
                 result[col_start + threadIdxLocal] = temp;
             }
@@ -383,6 +386,7 @@ namespace osuCrypto {
             thrust::raw_pointer_cast(x.data()),
             thrust::raw_pointer_cast(mat.data.data()),
             thrust::raw_pointer_cast(mat.blockOffsets.data()),
+            thrust::raw_pointer_cast(mat.rowIndices.data()),
             thrust::raw_pointer_cast(mat.colIndices.data()),
             thrust::raw_pointer_cast(result.data()),
             mat.sigma, mat.e, mat.t
@@ -412,8 +416,74 @@ namespace osuCrypto {
          sparse_vector_matrix_mul_host(intermediate_result, H, result);
     }
 
+    // block multiply function with cuda written kernels
+    void test_cuda_block_multiply() {
+        constexpr int k = 9;// 1 << 20; // Total rows of G and size of vector x
+        constexpr int e = 2; // Scaling factor (n/k)
+        constexpr int n = e * k; // Total columns of G
+        constexpr int sigma = 3;// 32; // Block row size
+        constexpr int t = k / sigma; // Number of blocks
 
-    void test_code_cuda() {
+        //
+        // block multiply
+        //
+
+        // --- Host Input Vector x ---
+        std::vector<T> h_vector = { 1, 1, 1,
+                                            0, 0, 1,
+                                                    1, 0, 1 }; // Binary vector of size k
+
+        // --- Host Block Matrices (G1, G2, ..., Gt) ---
+        // std::vector<std::vector<T>> h_blocks(t, std::vector<T>(sigma * (sigma * e), 1));
+        std::vector<T> h_blocks = { 1,0,1,1,1,0,
+                                    1,1,1,0,0,0,
+                                    0,1,0,1,0,1,
+                                                1,1,1,1,1,1,
+                                                0,0,0,0,0,0,
+                                                1,1,1,0,0,0,
+                                                            1,1,0,0,1,1,
+                                                            1,0,1,1,1,0,
+                                                            0,0,0,1,0,1 };
+        BlockMatrix d_blocks;
+        d_blocks.data = h_blocks;
+        d_blocks.blockOffsets.resize(t + 1);
+        d_blocks.rowIndices.resize(t);
+        d_blocks.colIndices.resize(t);
+        thrust::sequence(d_blocks.blockOffsets.begin(), d_blocks.blockOffsets.end(), 0, sigma * (sigma * e));
+        thrust::sequence(d_blocks.rowIndices.begin(), d_blocks.rowIndices.end(), 0, sigma);
+        thrust::sequence(d_blocks.colIndices.begin(), d_blocks.colIndices.end(), 0, sigma * e);
+        d_blocks.sigma = sigma;
+        d_blocks.e = e;
+        d_blocks.t = t;
+
+        // --- Host Expected xG ---
+        std::vector<T> h_expected_result = { 0,0,0,0,1,1,
+                                                        1,1,1,0,0,0,
+                                                                    1,1,0,1,1,0 };
+
+        // --- Transfer Data to GPU ---
+        thrust::device_vector<T> d_vector = h_vector; // Vector x on GPU
+
+        // --- Final Result Vector on GPU ---
+        thrust::device_vector<T> d_result(n, 0);
+
+        sparse_vector_matrix_mul_host(d_vector, d_blocks, d_result);
+
+        // Copy results back to host
+        thrust::host_vector<T> h_result_gpu = d_result;
+
+        // Verify correctness
+        for (size_t i = 0; i < n; i++) {
+            // std::cout << "expected at index " << i << ": " << static_cast<int>(h_expected_result[i]) << std::endl;
+            // std::cout << "computed at index " << i << ": " << static_cast<int>(h_result_gpu[i]) << std::endl;
+            if (h_result_gpu[i] != h_expected_result[i])
+                throw std::runtime_error("Computed result not as expected");
+        }
+        std::cout << std::endl;
+    }
+
+
+    void benchmark_code_cuda() {
 
         // Set up pseudorandom generator
         std::mt19937 rngcpu(std::random_device{}()); // Random number generator
@@ -449,16 +519,9 @@ namespace osuCrypto {
 
         code_cuda(d_x, G, H, d_xG);
 
-        // Copy results back to host
-        thrust::host_vector<T> h_xG = d_xG;
-
-        // TODO Verify correctness
-        
+        // Optionally copy results back to host
+        // thrust::host_vector<T> h_xG = d_xG;        
     }
-
-
-
-
 
 
     void parallelSD() {
@@ -467,14 +530,15 @@ namespace osuCrypto {
         test_cuda_compiled();
 
         //
+        // test block multiply with thrust and cuda
+        //
+        test_thrust_block_multiply();
+        test_cuda_block_multiply();
+
+        //
         // Benchmark different permutations
         //
         benchmark_permutations();
-
-        //
-        // test block multiply with thrust
-        //
-        test_thrust_block_multiply();
 
         //
         // TODO INCOMPLETE test_code_thrust()
@@ -483,7 +547,7 @@ namespace osuCrypto {
         //
         // TODO test code cuda
         //
-        test_code_cuda();
+        benchmark_code_cuda();
 
     }
 
