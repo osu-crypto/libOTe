@@ -320,7 +320,7 @@ namespace osuCrypto {
     struct BlockMatrix {
         thrust::device_vector<T> data;      // Non-zero entries (flattened)
         thrust::device_vector<int> blockOffsets; // Starting index of each block in data
-        thrust::device_vector<int> rowIndices;   // Row indices of non-zero blocks
+        thrust::device_vector<int> colIndices;   // Column indices of non-zero blocks
         int sigma; // Block size
         int e;     // Expansion factor (e = n / k)
         int t;     // Number of diagonal blocks (t = k / sigma)
@@ -335,7 +335,7 @@ namespace osuCrypto {
         // Allocate memory for block data
         mat.data.resize(mat.t * sigma * (sigma * mat.e)); // Only store non-zero blocks
         mat.blockOffsets.resize(mat.t + 1); // Start of each block in data
-        mat.rowIndices.resize(mat.t); // Row start for each block
+        mat.colIndices.resize(mat.t); // Row start for each block
 
         // Fill the vector with random binary values
         std::vector<T> h_mat(mat.data.size());
@@ -345,31 +345,30 @@ namespace osuCrypto {
         mat.data = h_mat;
         // 0, sigma(sigma*e), 2sigma(sigma*e), 3sigma(sigma*e), etc.
         thrust::sequence(mat.blockOffsets.begin(), mat.blockOffsets.end(), 0, sigma * (sigma * mat.e));
-        // 0, sigma, 2sigma, 3sigma, etc.
-        thrust::sequence(mat.rowIndices.begin(), mat.rowIndices.end(), 0, sigma);
+        // 0, sigma * e, 2sigma * e, 3sigma * e, etc.
+        thrust::sequence(mat.colIndices.begin(), mat.colIndices.end(), 0, sigma * mat.e);
     }
 
     __global__ void sparse_vector_matrix_mul(
         const T* x,
         const T* blockData,
         const int* blockOffsets,
-        const int* rowIndices,
+        const int* colIndices,
         T* result,
         int sigma, int e, int t) {
-        int blockIdxGlobal = blockIdx.x;
-        int threadIdxLocal = threadIdx.x;
+        int blockIdxGlobal = blockIdx.x; // [0,t)
+        int threadIdxLocal = threadIdx.x; // [0,sigma*e)
 
         if (blockIdxGlobal < t) {
-            int row_start = rowIndices[blockIdxGlobal];
+            int col_start = colIndices[blockIdxGlobal];
             int data_start = blockOffsets[blockIdxGlobal];
 
-            int row = row_start + threadIdxLocal;
-            if (threadIdxLocal < sigma) {
+            if (threadIdxLocal < sigma * e) {
                 T temp = 0;
-                for (int col = 0; col < sigma * e; ++col) {
-                    temp ^= (x[row] & blockData[data_start + threadIdxLocal * (sigma * e) + col]);
+                for (int row = 0; row < sigma; ++row) {
+                    temp ^= (x[col_start + row] & blockData[data_start + threadIdxLocal + row * (sigma * e)]);
                 }
-                result[row] = temp;
+                result[col_start + threadIdxLocal] = temp;
             }
         }
     }
@@ -377,14 +376,14 @@ namespace osuCrypto {
     void sparse_vector_matrix_mul_host(const thrust::device_vector<T>& x,
         const BlockMatrix& mat,
         thrust::device_vector<T>& result) {
-        int threadsPerBlock = mat.sigma;
+        int threadsPerBlock = mat.sigma * mat.e;
         int numBlocks = mat.t;
 
         sparse_vector_matrix_mul << <numBlocks, threadsPerBlock >> > (
             thrust::raw_pointer_cast(x.data()),
             thrust::raw_pointer_cast(mat.data.data()),
             thrust::raw_pointer_cast(mat.blockOffsets.data()),
-            thrust::raw_pointer_cast(mat.rowIndices.data()),
+            thrust::raw_pointer_cast(mat.colIndices.data()),
             thrust::raw_pointer_cast(result.data()),
             mat.sigma, mat.e, mat.t
             );
