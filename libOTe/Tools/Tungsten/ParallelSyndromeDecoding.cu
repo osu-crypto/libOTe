@@ -434,17 +434,18 @@ namespace osuCrypto {
         //bool gs_or_hs, // 0: gs, 1: hs
         //int start_gs_or_hs, // index to the subblock i am recursing on
         //thrust::device_vector<T>& result,
-        std::vector<int> &sigma, // one for each recursive depth (will be roughly 2sqrt(k) each time)
+        std::vector<int> &sigma, // one for each recursive depth (will be roughly 2sqrt(k) each time, set such that t stays the same???)
         int k,
         int n,
         int e,
-        int t,
+        int t, // TODO may need to become vector, one for each recursive step, as it depends on sigma
         int currRecursiveDepth,
         int baseRecursiveDepth) {
         // Check arguments passed ok
         if (k * e != n) throw std::runtime_error("invalid arguments");
         if (currRecursiveDepth > baseRecursiveDepth) throw std::runtime_error("invalid arguments");
         if (sigma.size() != baseRecursiveDepth) throw std::runtime_error("invalid arguments");
+        if (sigma[currRecursiveDepth] * t != k) throw std::runtime_error("invalid arguments");
 
         thrust::device_vector<T> result(n);
         thrust::device_vector<T> intermediate_result(n);
@@ -470,9 +471,19 @@ namespace osuCrypto {
         // iterate over the t Gi's
         for (int i = 0; i < ((e > 1) ? t : (e * t)); ++i) {
             // call recursive_code_cuda on each, with currRecursiveDepth+1
+            intermediate_result = recursive_code_cuda(
+                x,
+                start_x + sigma[currRecursiveDepth] * e * sigma[currRecursiveDepth] * i, // part of x under consideration
+                sigma, // one for each recursive depth (will be roughly 2sqrt(k) each time)
+                sigma[currRecursiveDepth], // k
+                e * sigma[currRecursiveDepth],  // n
+                e, // expanding factor
+                t,
+                currRecursiveDepth + 1,
+                baseRecursiveDepth
+            );
         }
         
-
         // Top level Shuffle
         gpu_shuffle(intermediate_result);
 
@@ -480,6 +491,17 @@ namespace osuCrypto {
         // iterate over the e * t Hi's
         for (int i = 0; i < e * t; ++i) {
             // call recursive_code_cuda on each, with currRecursiveDepth+1
+            result = recursive_code_cuda(
+                intermediate_result,
+                sigma[currRecursiveDepth] * sigma[currRecursiveDepth] * i, // start index in intermediate_result
+                sigma,
+                sigma[currRecursiveDepth], // k
+                sigma[currRecursiveDepth], // n
+                1, // expanding factor e (always 1 here)
+                e * t, // t
+                currRecursiveDepth + 1,
+                baseRecursiveDepth
+            );
         }
 
         return result;
