@@ -426,6 +426,65 @@ namespace osuCrypto {
          sparse_vector_matrix_mul_host(intermediate_result, H, result);
     }
 
+    thrust::device_vector<T> recursive_code_cuda(
+        const thrust::device_vector<T>& x, // does not change across recursion, we index into it
+        int start_x, // index to the part of x i am recursing on
+        //const std::vector<thrust::device_vector<T>> &GsHs, // GsHs.size() == 2 * recursive depth
+        //                                                   // G[0],H[0],G[1],H[1],etc.
+        //bool gs_or_hs, // 0: gs, 1: hs
+        //int start_gs_or_hs, // index to the subblock i am recursing on
+        //thrust::device_vector<T>& result,
+        std::vector<int> &sigma, // one for each recursive depth (will be roughly 2sqrt(k) each time)
+        int k,
+        int n,
+        int e,
+        int t,
+        int currRecursiveDepth,
+        int baseRecursiveDepth) {
+        // Check arguments passed ok
+        if (k * e != n) throw std::runtime_error("invalid arguments");
+        if (currRecursiveDepth > baseRecursiveDepth) throw std::runtime_error("invalid arguments");
+        if (sigma.size() != baseRecursiveDepth) throw std::runtime_error("invalid arguments");
+
+        thrust::device_vector<T> result(n);
+        thrust::device_vector<T> intermediate_result(n);
+
+        // Base case
+        if (currRecursiveDepth == baseRecursiveDepth) {
+            // Step1: xG Multiplication
+/*            recursive_sparse_vector_matrix_mul_host(x, start_x,
+                                                    intermediate_result,
+                                                    sigma[currRecursiveDepth], e, (e > 1) ? t : (e * t));
+            // Step 2: Shuffle
+            gpu_shuffle(intermediate_result);
+            // Step 3: (xGpi)H Multiplication
+            // Note: different inputs from step 1, as can be reached when recursing on xG or (xGpi)H
+            recursive_sparse_vector_matrix_mul_host(intermediate_result, 0, 
+                                                    result,
+                                                    sigma[currRecursiveDepth], 1, e * t);
+*/
+            return result;
+        }
+
+        // Step 1: Recurse (on the xG Multiplication)
+        // iterate over the t Gi's
+        for (int i = 0; i < ((e > 1) ? t : (e * t)); ++i) {
+            // call recursive_code_cuda on each, with currRecursiveDepth+1
+        }
+        
+
+        // Top level Shuffle
+        gpu_shuffle(intermediate_result);
+
+        // Step 3: Recurse (on the (xGpi)H Multiplication)
+        // iterate over the e * t Hi's
+        for (int i = 0; i < e * t; ++i) {
+            // call recursive_code_cuda on each, with currRecursiveDepth+1
+        }
+
+        return result;
+    }
+
     // block multiply function with cuda written kernels
     void test_cuda_block_multiply() {
         constexpr int k = 9;// 1 << 20; // Total rows of G and size of vector x
