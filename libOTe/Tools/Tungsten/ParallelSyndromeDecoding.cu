@@ -321,6 +321,32 @@ namespace osuCrypto {
         // TODO
     }
 
+    // mixing hash function (MurmurHash3)
+    __device__
+        unsigned int hash(unsigned int x) {
+        x ^= x >> 16;
+        x *= 0x85ebca6b;
+        x ^= x >> 13;
+        x *= 0xc2b2ae35;
+        x ^= x >> 16;
+        return x;
+    }
+
+    // Functor for generating random binary values (0 or 1)
+    struct RandomBinaryFunctor {
+        unsigned int seed;
+
+        __host__ __device__
+            RandomBinaryFunctor(unsigned int seed) : seed(seed) {}
+
+        __device__
+            int operator()(const int& index) const {
+            // Combine the seed and index for pseudo-randomness
+            unsigned int value = hash(seed ^ index);
+            return value & 1; // Return the least significant bit (0 or 1)
+        }
+    };
+
 
     // Data structure for sparse matrices
     // CSR-like representation for the diagonal blocks of G (compressed sparse row)
@@ -334,11 +360,11 @@ namespace osuCrypto {
         int t;     // Number of diagonal blocks (t = k / sigma)
     };
 
-    void initialize_block_matrix(BlockMatrix& mat, int k, int n, int sigma, 
+    void initialize_block_matrix(BlockMatrix& mat, int sigma, int k, int n, 
         std::bernoulli_distribution &dist, std::mt19937 &rngcpu) {
         mat.sigma = sigma;
-        mat.e = n / k;
-        mat.t = k / sigma;
+        mat.e = n/k;
+        mat.t = k/sigma;
 
         // Allocate memory for block data
         mat.data.resize(mat.t * sigma * (sigma * mat.e)); // Only store non-zero blocks
@@ -352,6 +378,42 @@ namespace osuCrypto {
             h_mat[i] = dist(rngcpu); // Assign random 0 or 1
         }
         mat.data = h_mat;
+        // 0, sigma(sigma*e), 2sigma(sigma*e), 3sigma(sigma*e), etc.
+        thrust::sequence(mat.blockOffsets.begin(), mat.blockOffsets.end(), 0, sigma * (sigma * mat.e));
+        // 0, sigma, 2sigma, 3sigma, etc.
+        thrust::sequence(mat.rowIndices.begin(), mat.rowIndices.end(), 0, sigma);
+        // 0, sigma * e, 2sigma * e, 3sigma * e, etc.
+        thrust::sequence(mat.colIndices.begin(), mat.colIndices.end(), 0, sigma * mat.e);
+    }
+
+    void initialize_block_matrix_v2(BlockMatrix& mat, int sigma, int e, int t) {
+        mat.sigma = sigma;
+        mat.e = e;
+        mat.t = t;
+
+        // Allocate memory for block data
+        mat.data.resize(mat.t * mat.sigma * (mat.sigma * mat.e)); // Only store non-zero blocks
+        mat.blockOffsets.resize(mat.t + 1); // Start of each block in data
+        mat.rowIndices.resize(mat.t); // Row start for each block
+        mat.colIndices.resize(mat.t); // Col start for each block
+
+        // Fill the vector with random binary values
+        // directly on GPU but currently slow as  randombinaryfunctor not done well
+        thrust::transform(
+            thrust::device,
+            thrust::counting_iterator<int>(0),
+            thrust::counting_iterator<int>(mat.data.size()),
+            mat.data.begin(),
+            RandomBinaryFunctor(time(NULL))
+        );
+
+        // Copy back to host to print
+        //thrust::host_vector<int> host_data = mat.data;
+        //for (int i = 0; i < mat.data.size(); i++) {
+        //    std::cout << host_data[i] << " ";
+        //}
+        //std::cout << std::endl;
+
         // 0, sigma(sigma*e), 2sigma(sigma*e), 3sigma(sigma*e), etc.
         thrust::sequence(mat.blockOffsets.begin(), mat.blockOffsets.end(), 0, sigma * (sigma * mat.e));
         // 0, sigma, 2sigma, 3sigma, etc.
@@ -386,6 +448,7 @@ namespace osuCrypto {
         }
     }
 
+
     void sparse_vector_matrix_mul_host(const thrust::device_vector<T>& x,
         const BlockMatrix& mat,
         thrust::device_vector<T>& result) {
@@ -401,6 +464,28 @@ namespace osuCrypto {
             thrust::raw_pointer_cast(result.data()),
             mat.sigma, mat.e, mat.t
             );
+
+        cudaDeviceSynchronize();
+    }
+
+    void recursive_sparse_vector_matrix_mul_host(
+        const thrust::device_vector<T>& x,
+        int start_x,
+        thrust::device_vector<T>& result,
+        int start_result,
+        int sigma, int e, int t) {
+        BlockMatrix mat;
+        initialize_block_matrix_v2(mat, sigma, e, t);
+
+        sparse_vector_matrix_mul << <t, sigma * e >> > (
+            thrust::raw_pointer_cast(x.data()) + start_x,
+            thrust::raw_pointer_cast(mat.data.data()),
+            thrust::raw_pointer_cast(mat.blockOffsets.data()),
+            thrust::raw_pointer_cast(mat.rowIndices.data()),
+            thrust::raw_pointer_cast(mat.colIndices.data()),
+            thrust::raw_pointer_cast(result.data()) + start_result,
+            sigma, e, t
+        );
 
         cudaDeviceSynchronize();
     }
@@ -426,14 +511,15 @@ namespace osuCrypto {
          sparse_vector_matrix_mul_host(intermediate_result, H, result);
     }
 
-    thrust::device_vector<T> recursive_code_cuda(
+    void recursive_code_cuda(
         const thrust::device_vector<T>& x, // does not change across recursion, we index into it
         int start_x, // index to the part of x i am recursing on
         //const std::vector<thrust::device_vector<T>> &GsHs, // GsHs.size() == 2 * recursive depth
         //                                                   // G[0],H[0],G[1],H[1],etc.
         //bool gs_or_hs, // 0: gs, 1: hs
         //int start_gs_or_hs, // index to the subblock i am recursing on
-        //thrust::device_vector<T>& result,
+        thrust::device_vector<T>& result,
+        int start_result, // index to the part of result i am recursing on
         std::vector<int> &sigma, // one for each recursive depth (will be roughly 2sqrt(k) each time, set such that t stays the same???)
         int k,
         int n,
@@ -447,33 +533,34 @@ namespace osuCrypto {
         if (sigma.size() != baseRecursiveDepth) throw std::runtime_error("invalid arguments");
         if (sigma[currRecursiveDepth] * t != k) throw std::runtime_error("invalid arguments");
 
-        thrust::device_vector<T> result(n);
-        thrust::device_vector<T> intermediate_result(n);
+        thrust::device_vector<T> intermediate_result (n);
 
         // Base case
         if (currRecursiveDepth == baseRecursiveDepth) {
             // Step1: xG Multiplication
-/*            recursive_sparse_vector_matrix_mul_host(x, start_x,
-                                                    intermediate_result,
+            recursive_sparse_vector_matrix_mul_host(x, start_x,
+                                                    intermediate_result, 0,
                                                     sigma[currRecursiveDepth], e, (e > 1) ? t : (e * t));
             // Step 2: Shuffle
             gpu_shuffle(intermediate_result);
             // Step 3: (xGpi)H Multiplication
             // Note: different inputs from step 1, as can be reached when recursing on xG or (xGpi)H
             recursive_sparse_vector_matrix_mul_host(intermediate_result, 0, 
-                                                    result,
+                                                    result, start_result,
                                                     sigma[currRecursiveDepth], 1, e * t);
-*/
-            return result;
+
+            return;
         }
 
         // Step 1: Recurse (on the xG Multiplication)
         // iterate over the t Gi's
         for (int i = 0; i < ((e > 1) ? t : (e * t)); ++i) {
             // call recursive_code_cuda on each, with currRecursiveDepth+1
-            intermediate_result = recursive_code_cuda(
+            recursive_code_cuda(
                 x,
                 start_x + sigma[currRecursiveDepth] * e * sigma[currRecursiveDepth] * i, // part of x under consideration
+                intermediate_result,
+                sigma[currRecursiveDepth] * e * i,
                 sigma, // one for each recursive depth (will be roughly 2sqrt(k) each time)
                 sigma[currRecursiveDepth], // k
                 e * sigma[currRecursiveDepth],  // n
@@ -491,9 +578,11 @@ namespace osuCrypto {
         // iterate over the e * t Hi's
         for (int i = 0; i < e * t; ++i) {
             // call recursive_code_cuda on each, with currRecursiveDepth+1
-            result = recursive_code_cuda(
+            recursive_code_cuda(
                 intermediate_result,
                 sigma[currRecursiveDepth] * sigma[currRecursiveDepth] * i, // start index in intermediate_result
+                result,
+                start_result + sigma[currRecursiveDepth] * i, // start index in result
                 sigma,
                 sigma[currRecursiveDepth], // k
                 sigma[currRecursiveDepth], // n
@@ -504,7 +593,6 @@ namespace osuCrypto {
             );
         }
 
-        return result;
     }
 
     // block multiply function with cuda written kernels
@@ -605,8 +693,10 @@ namespace osuCrypto {
         thrust::device_vector<T> d_xG(n, 0);
 
         BlockMatrix G, H;
-        initialize_block_matrix(G, k, n, sigma, dist, rngcpu);
-        initialize_block_matrix(H, n, k, sigma, dist, rngcpu);
+        //initialize_block_matrix(G, sigma, k, n, dist, rngcpu);
+        //initialize_block_matrix(H, sigma, k, n, dist, rngcpu);
+        initialize_block_matrix_v2(G, sigma, n/k, k/sigma);
+        initialize_block_matrix_v2(H, sigma, n/k, k/sigma);
 
         auto start = std::chrono::high_resolution_clock::now();
         code_cuda(d_x, G, H, d_xG);
