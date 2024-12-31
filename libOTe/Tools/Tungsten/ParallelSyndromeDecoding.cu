@@ -455,6 +455,10 @@ namespace osuCrypto {
         int threadsPerBlock = mat.sigma * mat.e;
         int numBlocks = mat.t;
 
+        if (threadsPerBlock > 1024) {
+            throw std::runtime_error("Block can have at most 1024 threads");
+        }
+
         sparse_vector_matrix_mul << <numBlocks, threadsPerBlock >> > (
             thrust::raw_pointer_cast(x.data()),
             thrust::raw_pointer_cast(mat.data.data()),
@@ -466,6 +470,11 @@ namespace osuCrypto {
             );
 
         cudaDeviceSynchronize();
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error(cudaGetErrorString(err));
+        }
     }
 
     void recursive_sparse_vector_matrix_mul_host(
@@ -477,7 +486,12 @@ namespace osuCrypto {
         BlockMatrix mat;
         initialize_block_matrix_v2(mat, sigma, e, t);
 
-        sparse_vector_matrix_mul << <t, sigma * e >> > (
+        int threadsPerBlock = sigma * e;
+        if (threadsPerBlock > 1024) {
+            throw std::runtime_error("Block can have at most 1024 threads");
+        }
+
+        sparse_vector_matrix_mul << <t, threadsPerBlock >> > (
             thrust::raw_pointer_cast(x.data()) + start_x,
             thrust::raw_pointer_cast(mat.data.data()),
             thrust::raw_pointer_cast(mat.blockOffsets.data()),
@@ -488,6 +502,11 @@ namespace osuCrypto {
         );
 
         cudaDeviceSynchronize();
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error(cudaGetErrorString(err));
+        }
     }
 
     void gpu_shuffle(thrust::device_vector<T>& data) {
@@ -514,10 +533,6 @@ namespace osuCrypto {
     void recursive_code_cuda(
         const thrust::device_vector<T>& x, // does not change across recursion, we index into it
         int start_x, // index to the part of x i am recursing on
-        //const std::vector<thrust::device_vector<T>> &GsHs, // GsHs.size() == 2 * recursive depth
-        //                                                   // G[0],H[0],G[1],H[1],etc.
-        //bool gs_or_hs, // 0: gs, 1: hs
-        //int start_gs_or_hs, // index to the subblock i am recursing on
         thrust::device_vector<T>& result,
         int start_result, // index to the part of result i am recursing on
         std::vector<int> &sigma, // one for each recursive depth (will be roughly 2sqrt(k) each time, set such that t stays the same???)
@@ -670,7 +685,7 @@ namespace osuCrypto {
 
         constexpr int k = 1 << 20; // 2^20
         constexpr int n = 1 << 21; // 2^21
-        constexpr int sigma = 64;  // Block size
+        constexpr int sigma = 512;// 2048;  // Block size (2 * sqrt(k))
 
         std::cout << "k: " << k << std::endl;
         std::cout << "n: " << n << std::endl;
@@ -733,9 +748,13 @@ namespace osuCrypto {
         //
 
         //
-        // TODO test code cuda
+        // benchmark code cuda (non recursive)
         //
         benchmark_code_cuda();
+
+        //
+        // benchmark recursive code cuda
+        //
 
     }
 
