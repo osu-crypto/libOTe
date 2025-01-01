@@ -438,6 +438,7 @@ namespace osuCrypto {
             int col_start = colIndices[blockIdxGlobal];
             int data_start = blockOffsets[blockIdxGlobal];
 
+            // good memory coalescing
             if (threadIdxLocal < sigma * e) {
                 T temp = 0;
                 for (int row = 0; row < sigma; ++row) {
@@ -539,14 +540,20 @@ namespace osuCrypto {
         int k,
         int n,
         int e,
-        int t, // TODO may need to become vector, one for each recursive step, as it depends on sigma
         int currRecursiveDepth,
         int baseRecursiveDepth) {
+
+        int t = k / sigma[currRecursiveDepth];
+
         // Check arguments passed ok
+        if (sigma[currRecursiveDepth] * t != k)
+            throw std::runtime_error(
+                "sigma needs to be set such that t divides k "
+                "at each recursive step"
+            );
         if (k * e != n) throw std::runtime_error("invalid arguments");
         if (currRecursiveDepth > baseRecursiveDepth) throw std::runtime_error("invalid arguments");
-        if (sigma.size() != baseRecursiveDepth) throw std::runtime_error("invalid arguments");
-        if (sigma[currRecursiveDepth] * t != k) throw std::runtime_error("invalid arguments");
+        if (sigma.size() != (baseRecursiveDepth + 1)) throw std::runtime_error("invalid arguments");
 
         thrust::device_vector<T> intermediate_result (n);
 
@@ -555,7 +562,7 @@ namespace osuCrypto {
             // Step1: xG Multiplication
             recursive_sparse_vector_matrix_mul_host(x, start_x,
                                                     intermediate_result, 0,
-                                                    sigma[currRecursiveDepth], e, (e > 1) ? t : (e * t));
+                                                    sigma[currRecursiveDepth], e, t);
             // Step 2: Shuffle
             gpu_shuffle(intermediate_result);
             // Step 3: (xGpi)H Multiplication
@@ -569,18 +576,17 @@ namespace osuCrypto {
 
         // Step 1: Recurse (on the xG Multiplication)
         // iterate over the t Gi's
-        for (int i = 0; i < ((e > 1) ? t : (e * t)); ++i) {
+        for (int i = 0; i < t; ++i) {
             // call recursive_code_cuda on each, with currRecursiveDepth+1
             recursive_code_cuda(
                 x,
-                start_x + sigma[currRecursiveDepth] * e * sigma[currRecursiveDepth] * i, // part of x under consideration
+                start_x + sigma[currRecursiveDepth] * i, // start x
                 intermediate_result,
-                sigma[currRecursiveDepth] * e * i,
+                sigma[currRecursiveDepth] * e * i, // start result
                 sigma, // one for each recursive depth (will be roughly 2sqrt(k) each time)
                 sigma[currRecursiveDepth], // k
                 e * sigma[currRecursiveDepth],  // n
                 e, // expanding factor
-                t,
                 currRecursiveDepth + 1,
                 baseRecursiveDepth
             );
@@ -595,14 +601,13 @@ namespace osuCrypto {
             // call recursive_code_cuda on each, with currRecursiveDepth+1
             recursive_code_cuda(
                 intermediate_result,
-                sigma[currRecursiveDepth] * sigma[currRecursiveDepth] * i, // start index in intermediate_result
+                sigma[currRecursiveDepth] * i, // start index in intermediate_result
                 result,
                 start_result + sigma[currRecursiveDepth] * i, // start index in result
                 sigma,
                 sigma[currRecursiveDepth], // k
                 sigma[currRecursiveDepth], // n
                 1, // expanding factor e (always 1 here)
-                e * t, // t
                 currRecursiveDepth + 1,
                 baseRecursiveDepth
             );
@@ -727,6 +732,69 @@ namespace osuCrypto {
     }
 
 
+    void benchmark_recursive_code_cuda() {
+
+        // Set up pseudorandom generator
+        std::mt19937 rngcpu(std::random_device{}()); // Random number generator
+        std::bernoulli_distribution dist(0.5);    // 50% chance for 0 or 1
+
+        constexpr int k = 1 << 20; // 2^20
+        constexpr int n = 1 << 21; // 2^21
+        std::vector<int> sigmas = { 2048, 128 };  // Block size ~ (2 * sqrt(k))
+        int baseRecursiveDepth = sigmas.size() - 1; // starts with 0
+
+        std::cout << "k: " << k << std::endl;
+        std::cout << "n: " << n << std::endl;
+
+        int e = n / k;
+        if (k * e != n) throw std::runtime_error("invalid k, n");
+        if (k % sigmas[0] != 0) throw std::runtime_error("invalid sigmas[0]");
+        for (int i = 0; i < sigmas.size() - 1; ++i) {
+            if (sigmas[i] % sigmas[i + 1] != 0) throw std::runtime_error("invalid sigmas[i]");
+        }
+
+        //
+        // Initialize x and empty xG, and move them from host to device
+        //
+        // --- Host Input Vector x ---
+        std::vector<T> h_x(k); // Binary vector of size k
+        for (auto& val : h_x) {
+            val = dist(rngcpu); // Generate 0 or 1 and assign to the vector
+            // std::cout << static_cast<int>(val);
+        }
+
+        // --- Transfer Data to GPU ---
+        thrust::device_vector<T> d_x = h_x; // Vector x on GPU
+        // --- Final result vector on GPU ---
+
+        thrust::device_vector<T> d_result(n);
+
+        auto start = std::chrono::high_resolution_clock::now();
+
+        recursive_code_cuda(
+            d_x, // does not change across recursion, we index into it
+            0, // index to the part of x i am recursing on
+            d_result,
+            0,
+            sigmas, // one for each recursive depth (will be roughly 2sqrt(k) each time, set such that t stays the same???)
+            k,
+            n,
+            e,
+            0,
+            baseRecursiveDepth);
+
+        auto stop = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = stop - start;
+
+        // Print the elapsed time
+        std::cout << "Time to compute the code implemented with cuda kernels: " <<
+            elapsed.count() << " ms" << std::endl;
+
+        // Optionally copy results back to host
+        // thrust::host_vector<T> h_xG = d_xG;        
+    }
+
+
     void parallelSD() {
 
         // Is cuda included properly into cmake?
@@ -748,13 +816,14 @@ namespace osuCrypto {
         //
 
         //
-        // benchmark code cuda (non recursive)
+        // benchmark code cuda (non recursive) with fixed sigma
         //
         benchmark_code_cuda();
 
         //
-        // benchmark recursive code cuda
+        // benchmark recursive code cuda (with blocks generated on the fly in the base case)
         //
+        benchmark_recursive_code_cuda();
 
     }
 
