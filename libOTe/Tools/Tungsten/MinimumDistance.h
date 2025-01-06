@@ -17,8 +17,13 @@
 
 #include <boost/multiprecision/cpp_dec_float.hpp>
 #include <future>
+#include <fstream>
 
-namespace osuCrypto {
+namespace osuCrypto
+{
+
+	bool old = false;
+
 	struct LoadingBar
 	{
 		//std::thread thrd;
@@ -91,10 +96,22 @@ namespace osuCrypto {
 				// time remaining in sec
 				i64 eta = rem / avgRate;
 
+				auto sec = eta % 60;
+				auto min = (eta / 60) % 60;
+				auto hour = eta / 3600;
+
 				u64 numBars = double(count) * mWidth / mTotal;
 				std::stringstream ss;
 				ss << "\r" << mMessage << " [" << std::string(numBars, '|') << std::string(mWidth - numBars, ' ') << "] "
-					<< count << "/" << mTotal << ", rate: " << u64(avgRate) << " ticks/sec,  ETA: " << eta << " sec";
+					<< count << "/" << mTotal << ", rate: " << u64(avgRate) << " ticks/sec,  ETA: ";
+
+				if (hour)
+					ss << hour << "h " << min << "m " << sec << "s";
+				else if (min)
+					ss << min << "m " << sec << "s";
+				else
+					ss << sec << "s";
+
 				auto str = ss.str();
 				std::cout << str << std::string(std::max<i64>(leng - str.size(), 0), ' ') << std::flush;
 				leng = std::max(leng, str.size());
@@ -180,7 +197,7 @@ namespace osuCrypto {
 	}
 
 
-	template<typename I, typename R>
+	template<typename I, typename R, typename I2>
 	void compute_block_distribution_opt(
 		span<const R> inputDist,
 		span<R> outputDist,
@@ -189,7 +206,8 @@ namespace osuCrypto {
 		u64 n,
 		u64 sigma,
 		u64 numThreads,
-		const ChooseCache<I>& pascal_triangle)
+		const ChooseCache<I>& pascal_triangle,
+		const ChooseCache<I2>& pascal_triangle2)
 	{
 
 
@@ -244,6 +262,7 @@ namespace osuCrypto {
 						inputFrac[w] = inputDist[w] / choose_pascal(k, w, pascal_triangle);
 					}
 				}
+				//std::stringstream ss;
 
 				span<R> Di = i == 0 ? outputDist : D[i - 1];
 				auto k_over_sigma = k / sigma;
@@ -275,7 +294,8 @@ namespace osuCrypto {
 
 					for (u64 q = 0; q <= qMax; ++q)
 					{
-						cqw[q] = v[q] * labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
+						cqw[q] = v[q] * labeledBallBinCap(w, q, sigma, pascal_triangle2).convert_to<I>();
+						//cqw[q] = v[q] * labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
 					}
 
 					auto hBegin = sysematic ? w : 0;
@@ -291,8 +311,24 @@ namespace osuCrypto {
 
 						if (inputDist.size())
 						{
+							if constexpr (std::is_same_v<R, Float>)
+							{
+
+								if (boost::multiprecision::isnan(enumerator) || enumerator < 0)
+								{
+									std::lock_guard l(gIoStreamMtx);
+									std::cout << "(w,h) = " << w << ", " << h << " abnormal " << enumerator << std::endl;
+									int i = 0;
+									std::cin >> i;
+								}
+							}
+							//auto dih = Di[h_];
+
 							Di[h_] += enumerator * inputFrac[w];
+
+
 						}
+
 						else
 						{
 							Di[h_] += enumerator;
@@ -316,7 +352,21 @@ namespace osuCrypto {
 				{
 					for (u64 h = hBegin; h < hEnd; ++h)
 					{
+						auto dh = outputDist[h];
+
 						outputDist[h] += D(t, h);
+
+						if constexpr (std::is_same_v<Rat, Float>)
+						{
+							if (isnan(outputDist[h]))
+							{
+								std::lock_guard l(gIoStreamMtx);
+								std::cout << "outputDist[h] " << outputDist[h] << " D(t, h) " << D(t, h) << " dh " << dh << std::endl;
+								int i = 0;
+								std::cin >> i;
+
+							}
+						}
 					}
 				}
 
@@ -327,6 +377,7 @@ namespace osuCrypto {
 					std::cout << "compute sums: " << elapsed.count() << "ms" << std::endl;
 					start = std::chrono::system_clock::now();
 				}
+
 
 				});
 		}
@@ -499,6 +550,8 @@ namespace osuCrypto {
 
 		std::fill(thread_partial_counts.begin(), thread_partial_counts.end(), R(0));
 
+		//std::stringstream ss;
+
 		// Do not use the block_enum function, but unroll the function to avoid recomputing stuff
 		for (u64 w = start_w; w < end_w; ++w) {
 			// precompute as much from block_enum as you can 
@@ -512,7 +565,7 @@ namespace osuCrypto {
 
 			// Handle all but last h
 			u64 offset = 0;
-			for (u64 h = 0; h < (thread_partial_counts.size() - 1); ++h) {
+			for (u64 h = 0; h < (thread_partial_counts.size()); ++h) {
 				R enumerator = 0;
 				for (size_t q = 0; q < block_enum_part2.size(); q++) {
 					enumerator +=
@@ -522,18 +575,35 @@ namespace osuCrypto {
 				// Safely update the shared thread_partial_counts[h] 
 				// (one element per h) Note no need to lock it as each 
 				// thread operates on different copy of thread_partial_counts
+
 				thread_partial_counts[h] += (count_fraction[w] * enumerator);
+				//ss << enumerator << " " << count_fraction[w] << " ";
+				//std::cout << "w " << w << " -> " << h << ": "<< thread_partial_counts[h]<<" += " << enumerator << " * " << count_fraction[w] << " ~ ";
+
+				//auto str = ss.str();
+				//RandomOracle ro(16);
+				//ro.Update((u8*)str.data(), str.size());
+				//block hash;
+				//ro.Final<block>(hash);
+				//std::cout << hash << std::endl;
+
 				offset += 1;
 			}
-			// Handle last h separately (last h is the last point in the distribution and is not h * approximate but n
-			R enumerator = 0;
-			for (size_t q = 0; q < block_enum_part2.size(); q++) {
-				enumerator += block_enum_part2[q] * choose_pascal<I>(sigma * q, n, pascal_triangle);
-			}
-			thread_partial_counts[thread_partial_counts.size() - 1] += (count_fraction[w] * enumerator);
+			//// Handle last h separately (last h is the last point in the distribution and is not h * approximate but n
+			//R enumerator = 0;
+			//for (size_t q = 0; q < block_enum_part2.size(); q++) {
+			//	enumerator += block_enum_part2[q] * choose_pascal<I>(sigma * q, n, pascal_triangle);
+			//}
+
+			//auto h = thread_partial_counts.size() - 1;
+			//thread_partial_counts[h] += (count_fraction[w] * enumerator);
+			//ss << enumerator << " " << count_fraction[w] << " ";
+			//std::cout << "w " << w << " -> " << h << ": " << thread_partial_counts[h] << " += " << enumerator << " * " << count_fraction[w] << std::endl;
+
 
 			loadBar.tick();
 		}
+
 	}
 
 
@@ -731,41 +801,50 @@ namespace osuCrypto {
 		}
 	}
 
+	struct MD
+	{
+		double mExpectMD = 0;
+		double mZeroIdx = 0;
+		double mZeroValue = 0;
+	};
 	template<typename R>
-	std::vector<double> minimum_distance_from_distribution(span<R> distribution, u64 count) {
+	MD minimum_distance_from_distribution(span<R> distribution) {
 		assert(distribution.size() > 0);
 		auto n = distribution.size() - 1;
 		R sum = 0;
 		R weighted = 0;
 		//u64 minimum_distance = 0;
-		R threshold = 1;
-		std::vector<double> ret;
+		MD ret;
 		for (size_t h = 0; h < n; h++) {
 			;
 			sum += distribution[h];
 			weighted += distribution[h] * h;
 
-			if (sum >= threshold) {
-				ret.push_back((double)(weighted / sum / n));
-				threshold *= 2;
-				if (ret.size() == count)
-					break;
+			if (ret.mZeroIdx == 0 && distribution[h] >= 1)
+			{
+				std::cout << "zero " << h << " " << distribution[h] << std::endl;
+				ret.mZeroIdx = double(h) / n;
+				ret.mZeroValue = ((double)(weighted / n));
 			}
+
+			if (ret.mExpectMD == 0 && sum >= 1) {
+				std::cout << "expected " << h << " " << distribution[h] << std::endl;
+				ret.mExpectMD = (double)(weighted / n);
+			}
+
+			if (ret.mExpectMD && ret.mZeroIdx)
+				break;
 		}
 		return ret;
 	}
 
 
-	template<typename R>
-	double minimum_distance_from_distribution(span<R> distribution)
-	{
-		return minimum_distance_from_distribution(distribution, 1)[0];
+	auto log2_(const Rat& v) {
+		auto f = v.convert_to<Float>();
+		return boost::multiprecision::log2(f);
 	}
 
-
-
-	auto log2(const Rat& v) {
-		auto f = v.convert_to<Float>();
+	auto log2_(const Float& f) {
 		return boost::multiprecision::log2(f);
 	}
 
@@ -787,28 +866,30 @@ namespace osuCrypto {
 	void print_distribution(
 		span<R> distribution,
 		u64 numPoints,
-		bool normalize
+		bool normalize,
+		std::ostream& out = std::cout
 	) {
 		auto n = distribution.size() - 1;
 		//Int total = Int(0) << n;
-		R total = 0;;
+		Float total = 0;;
 		if (normalize)
 		{
-			std::cout << "Printing normalized log2 counts distribution: " << std::endl;
+			out << "Printing normalized log2 counts distribution: " << std::endl;
 			for (size_t i = 0; i < distribution.size(); i++) {
 				total += boost::multiprecision::abs(log2(distribution[i]));
 			}
 		}
 		else
 		{
-			std::cout << "Printing log2 count distribution: " << std::endl;
+			out << "Printing log2 count distribution: " << std::endl;
 			total = 1;
 		}
 
 		if (numPoints == 0)
 		{
+			u64 h = 0;
 			for (const auto& d : distribution) {
-				std::cout << log2(d) / total << std::endl;
+				out <<double(h++)/n<< " " << log2_(d) / total /*<< " " << d*/ << std::endl;
 			}
 		}
 		else
@@ -823,8 +904,8 @@ namespace osuCrypto {
 					u64 lowIdx = std::floor(scaled); // in [0,DS)
 					u64 highIdx = std::min<u64>(std::ceil(scaled), distribution.size() - 1); // in [0,DS)
 
-					Float DL = log2(Float(distribution[lowIdx])) / total;
-					Float DH = log2(Float(distribution[highIdx])) / total;
+					Float DL = log2_(Float(distribution[lowIdx])) / total;
+					Float DH = log2_(Float(distribution[highIdx])) / total;
 					auto LDS = lowIdx / DS; // in [0,1)
 					auto HDS = highIdx / DS;// in [0,1)
 
@@ -837,7 +918,7 @@ namespace osuCrypto {
 					auto val = DL + diff * slope;
 					try {
 
-						std::cout << Float(val) << std::endl;
+						out<< double(i) / numPoints <<" " << Float(val) << std::endl;
 					}
 					catch (...)
 					{
@@ -852,17 +933,17 @@ namespace osuCrypto {
 							}
 							return ss.str();
 							};
-						std::cout << p(val) << " = " << p(DL) << " + " << p(diff) << " * " << p(slope)
+						out << p(val) << " = " << p(DL) << " + " << p(diff) << " * " << p(slope)
 							<< ", DL = " << p(distribution[lowIdx]) << std::endl;
 					}
 				}
 				catch (...)
 				{
-					std::cout << "error" << std::endl;
+					out << "error" << std::endl;
 				}
 			}
 		}
-		std::cout << "------------" << std::endl;
+		out << "------------" << std::endl;
 	}
 	struct OnExit
 	{
@@ -886,21 +967,34 @@ namespace osuCrypto {
 		if (num_threads < 1)
 			throw RTE_LOC;
 
-		ChooseCache<I> pascal_triangle(n);
-
 		if (n == k) throw RTE_LOC;
 		if (k % sigma)
 		{
 			auto kk = k;
-			k = divCeil(k, sigma) * sigma;
-			std::cout << Color::Red << "Rounding k to the next multiple of sigma. k = " << kk << " -> " << k << std::endl << Color::Default;
+			k = ((k + sigma / 2) / sigma) * sigma;
+			std::cout << Color::Red << "Rounding k to the nearest multiple of sigma. k = " << kk << " -> " << k << std::endl << Color::Default;
 		}
 		if (n % k)
 		{
 			auto nn = n;
-			n = divCeil(n, k) * k;
-			std::cout << Color::Red << "rounding n to the next multiple of k. n = " << nn << " -> " << n << std::endl << Color::Default;
+			n = ((n + k / 2) / k) * k;
+			std::cout << Color::Red << "rounding n to the nearest multiple of k. n = " << nn << " -> " << n << std::endl << Color::Default;
 		}
+
+		std::cout << "pascal I ";
+		auto start = std::chrono::steady_clock::now();
+		ChooseCache<I> pascal_triangle(n);
+		auto end = std::chrono::steady_clock::now();
+		auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+		std::cout << elapsed.count() << " ms" << std::endl;
+		start = std::chrono::steady_clock::now();
+		std::cout << "pascal Int ";
+		ChooseCache<Int> pascal_triangle2(n);
+		//auto& pascal_triangle2 = pascal_triangle;
+		end = std::chrono::steady_clock::now();
+		elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+		std::cout << elapsed.count() << " ms" << std::endl;
+
 
 		// NOTE no longer used as k^2 space too big
 		// Compute all k^2 possible block enumerators
@@ -917,7 +1011,7 @@ namespace osuCrypto {
 		 // 2 * (n + 1) space
 		Matrix<R> distributions(2, n + 1);
 
-		loadBar.start((n + 1) * (num_iters + 1), "Computing distribution");
+		loadBar.start((n + 1) * num_iters + (n+1)/2, "Computing distribution");
 		std::jthread printer([] {loadBar.print(); });
 		OnExit oe([&]() {loadBar.cancel(); });
 
@@ -937,7 +1031,8 @@ namespace osuCrypto {
 			compute_block_distribution_opt<I, R>(
 				{}, distributions[0], 1,
 				k, n, sigma_expander, num_threads,
-				pascal_triangle);
+				pascal_triangle, 
+				pascal_triangle2);
 
 		}
 
@@ -946,7 +1041,8 @@ namespace osuCrypto {
 		// Compute distributions for iterations
 		for (size_t iter = 0; iter < num_iters; iter++) {
 
-			if (0)
+
+			if (old)
 			{
 
 				compute_block_distribution<I, R>(distributions[iter % 2],
@@ -958,6 +1054,8 @@ namespace osuCrypto {
 			}
 			else
 			{
+				if (iter)
+					std::fill(distributions[(iter + 1) % 2].begin(), distributions[(iter + 1) % 2].end(), R(0));
 				compute_block_distribution_opt<I, R>(
 					distributions[iter % 2],
 					distributions[(iter + 1) % 2],
@@ -966,7 +1064,8 @@ namespace osuCrypto {
 					n,
 					sigma,
 					num_threads,
-					pascal_triangle);
+					pascal_triangle,
+					pascal_triangle2);
 			}
 			// expand_and_interpolate(distributions[(iter + 1) % 2]);
 
@@ -983,12 +1082,12 @@ namespace osuCrypto {
 			if (boost::multiprecision::isinf(final_distribution_sum) ||
 				boost::multiprecision::isnan(final_distribution_sum))
 			{
-				throw std::runtime_error("NAN final sum. " LOCATION );
+				throw std::runtime_error("NAN final sum. " LOCATION);
 			}
 		}
 		// Sum initial distribution
 		R initial_distribution_sum = 0;
-		for (size_t w = 1; w <= k; w++) {			
+		for (size_t w = 1; w <= k; w++) {
 			initial_distribution_sum += R(choose_pascal<I>(k, w, pascal_triangle));
 		}
 
@@ -997,8 +1096,9 @@ namespace osuCrypto {
 
 			if (initial_distribution_sum != final_distribution_sum)
 			{
-				std::cout << Color::Red << "Initial distribution sum: " << initial_distribution_sum << std::endl;
-				std::cout << "Final distribution sum: " << final_distribution_sum << std::endl << Color::Default;
+				std::cout << Color::Red
+					<< "Initial distribution sum: " << initial_distribution_sum << std::endl
+					<< "Final distribution sum  : " << final_distribution_sum << std::endl << Color::Default;
 			}
 		}
 		else
@@ -1020,6 +1120,16 @@ namespace osuCrypto {
 	}
 
 	void benchmarks(const oc::CLP& cmd) try {
+
+
+		//{
+		//	ChooseCache<Int> p(5000);
+		//	auto r = labeledBallBinCap<Int>(18, 99, 44, p);
+
+		//	ChooseCache<Float> pp(5000);
+		//	auto rr = labeledBallBinCap<Float>(18, 99, 44, pp);
+
+		//}
 
 		// expander (0: repeater, 1: block expander), 
 		// multiplier (0: block, 1: non recursive convolution), 
@@ -1044,22 +1154,38 @@ namespace osuCrypto {
 			return;
 		}
 
-
 		auto repeater = cmd.isSet("repeater") ? ExpandType::Repeater : ExpandType::Block;
 		auto conv = cmd.isSet("conv");
 		auto num_iters = cmd.getManyOr("iters", std::vector<u64>{1});
+
+		// the input size
 		auto Ks = cmd.getManyOr("k", std::vector<u64>{512});
+
+		// n = k / rate
 		auto rate = cmd.getOr("rate", 0.5);
+
+		// block size
 		auto sigmas = cmd.getManyOr("sigma", std::vector<u64>{64});
 		bool verbose = cmd.isSet("verbose");
+
+		// when printing the curve, how many points to show. 0=all n points.
 		u64 numPoints = cmd.getOr("numPoints", 0);
+
+		// when printing the distribution, should we normalize it so the area under the
+		// curve is 1.
 		bool normalizes = cmd.getOr("normalize", 0);
-		u64 numMD = cmd.getOr("numMD", 10);
+
+		// the number of "threshold distances". For `threshold in {1,2,4,...}`, we 
+		// print the weight just that `threshold` codewords are expected to exist.
+		u64 numMD = cmd.getOr("numMD", 1);
+
 		u64 num_threads = cmd.getOr("threads", std::thread::hardware_concurrency());
 		print_timings = verbose;
-		bool print_dist = cmd.isSet("printDist") || numPoints;
+		bool print_dist = cmd.isSet("printDist") || cmd.isSet("numPoints");
 
-		//auto sigma_expander = cmd.getManyOr("sigmaexpander", std::vector<u64>{64});
+		old = cmd.isSet("old");
+		//Int;
+		//boost::multiprecision::cpp_int
 		std::vector<std::vector<u64>> params;
 		for (auto i : num_iters)
 		{
@@ -1077,23 +1203,39 @@ namespace osuCrypto {
 						using RAT = Rat;
 #endif
 						u64 n = k / rate;
+						if (k % sigma)
+						{
+							auto kk = k;
+							k = ((k + sigma / 2) / sigma) * sigma;
+							std::cout << Color::Red << "Rounding k to the nearest multiple of sigma. k = " << kk << " -> " << k << std::endl << Color::Default;
+						}
+						if (n % k)
+						{
+							auto nn = n;
+							n = ((n + k / 2) / k) * k;
+							std::cout << Color::Red << "rounding n to the nearest multiple of k. n = " << nn << " -> " << n << std::endl << Color::Default;
+						}
+
+
 						auto start = std::chrono::high_resolution_clock::now();
 						auto dist = minimum_distance<INT, RAT>(
 							repeater, conv, i, k, n, sigma, sigma, 1,
 							num_threads, verbose, numPoints, normalizes);
-						auto expected_md = minimum_distance_from_distribution<RAT>(dist, numMD);
+						auto expected_md = minimum_distance_from_distribution<RAT>(dist);
 						auto end = std::chrono::high_resolution_clock::now();
 
 						if (print_dist)
 						{
 							print_distribution<RAT>(dist, numPoints, normalizes);
 						}
+						std::ofstream out(
+							"dist_k" + std::to_string(k) + "_n" + std::to_string(n) + "_s" + std::to_string(sigma) + "_i" + std::to_string(i) + ".txt", std::ios::trunc);
+						out << "k:" << k << "_n:" << n << "_sigma:" << sigma << "_iters:" << i << std::endl;
+						print_distribution<RAT>(dist, 0, normalizes, out);
 
 						std::cout << "k: " << k << " n: " << n << " sigma: " << sigma << " iters: " << i << " rate: " << rate << " time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
 
-						for (auto e : expected_md)
-							std::cout << e << " ";
-						std::cout << std::endl;
+						std::cout << "MD: " << expected_md.mExpectMD << " zero: " << expected_md.mZeroIdx << " zeroVal: " << expected_md.mZeroValue << std::endl;
 					}
 				}
 			}
