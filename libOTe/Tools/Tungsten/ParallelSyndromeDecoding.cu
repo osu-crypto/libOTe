@@ -397,7 +397,7 @@ namespace osuCrypto {
         mat.rowIndices.resize(mat.t); // Row start for each block
         mat.colIndices.resize(mat.t); // Col start for each block
 
-        // Fill the vector with random binary values
+        // Fill the vector with random binary values - with help of murmurhash3 hash function
         // directly on GPU but currently slow as  randombinaryfunctor not done well
         thrust::transform(
             thrust::device,
@@ -615,6 +615,98 @@ namespace osuCrypto {
 
     }
 
+    // Feistel cipher-based bijection for pseudorandom permutation
+    __device__ uint64_t feistel_bijection(uint64_t idx, uint64_t n, uint32_t* keys, int num_rounds, uint64_t block_id) {
+        uint32_t left = static_cast<uint32_t>(idx >> 32);
+        uint32_t right = static_cast<uint32_t>(idx & 0xFFFFFFFF);
+
+        for (int i = 0; i < num_rounds; ++i) {
+            uint32_t temp = right;
+            // block_id to add block-specific randomness
+            right = (left ^ (keys[i] + (block_id * 0xDEADBEEF) + (right * 0x5DEECE66DLL % n))) % n;
+            left = temp;
+        }
+
+        return ((static_cast<uint64_t>(left) << 32) | right) % n;
+    }
+
+
+    // CUDA kernel for block-wise shuffle of uint8_t data
+    __global__ void shuffle_blocks_uint8_kernel(
+        uint8_t* data, // Pointer to the vector to be shuffled
+        uint64_t n, // Total number of elements in the input vector
+        uint64_t block_size, // Size of each block to shuffle independently
+        uint32_t* keys, // Array of random keys used for the Feistel bijection to generate pseudorandom permutations
+        int num_rounds) { // Number of Feistel rounds for generating pseudorandom indices
+        uint64_t tid = threadIdx.x + blockIdx.x * blockDim.x; // Compute global thread ID
+        uint64_t block_id = tid / block_size;  // Identify the block
+        
+        uint64_t block_start = block_id * block_size; // Calculates the starting index of the block 
+                                                      // the thread is operating on
+        // uint64_t block_end = min(block_start + block_size, n); // Calculates the ending index of the block
+
+        // Print thread information for debugging
+        //printf("Thread %llu: block_start=%llu, block_end=%llu, block_id=%llu\\n", 
+        //    tid, block_start, block_end, block_id);
+
+        // Note tid can be >= n
+        if (tid < n && block_start < n) {
+                // Maps the local block index (i - block_start) to a pseudorandom index within the block
+                uint64_t index_to_permute = tid - block_start;
+                uint64_t permuted_idx = feistel_bijection(index_to_permute, block_size, keys, num_rounds, block_id)
+                    + block_start;
+
+                // Swap data[i] and data[permuted_idx]
+                if (index_to_permute < permuted_idx) { // Ensures that each pair is swapped only once, avoiding redundant swaps
+                    uint8_t temp = data[index_to_permute];
+                    data[index_to_permute] = data[permuted_idx];
+                    data[permuted_idx] = temp;
+                }
+        }
+    }
+
+    // Wrapper function to shuffle a thrust::device_vector containing uint8_t data
+    void shuffle_blocks_uint8(
+        thrust::device_vector<T>& data, // The vector of uint8_t elements to shuffle
+        uint64_t block_size) { // Specifies the size of each block that will be independently shuffled
+        uint64_t n = data.size();
+        // block size must evenly divide the total number of elements
+        if (block_size == 0 || n % block_size != 0) {
+            throw std::invalid_argument("Block size must be a positive divisor of the input size.");
+        }
+        if (block_size > 1024) {
+            throw std::invalid_argument("Block size is too big. Should be at most 1024.");
+        }
+
+        const int num_rounds = 24; // The number of Feistel rounds to use in the pseudorandom permutation
+                                   // same as in the thrust implementation
+        thrust::host_vector<uint32_t> h_keys(num_rounds);
+        // NOTE need to generate fresh randomness for each block (look at feistel_bijection)
+        // so that each block is shuffled differently
+        // thrust::default_random_engine rng; // default seed (SAME each time)
+        thrust::default_random_engine rng(static_cast<unsigned int>(time(0)));
+
+        for (int i = 0; i < num_rounds; ++i) {
+            h_keys[i] = rng(); // A random key is generated for each round using thrust::default_random_engine
+        }
+
+        thrust::device_vector<uint32_t> d_keys = h_keys; // Copy keys to device
+
+        // Launch kernel
+        int threads_per_block = 256; //block_size; // Sets the number of threads in each block (exactly 8 warps)
+        int blocks_per_grid = (n + threads_per_block - 1) / threads_per_block; 
+                                                                 // (n + block_size - 1) / block_size;
+                                                                 // Determines the total number of blocks 
+                                                                 // needed to cover all n elements
+        std::cout << "blocks per grid: " << blocks_per_grid << std::endl;
+        shuffle_blocks_uint8_kernel << <blocks_per_grid, threads_per_block >> > (
+            thrust::raw_pointer_cast(data.data()), n, block_size,
+            thrust::raw_pointer_cast(d_keys.data()), num_rounds);
+
+        cudaDeviceSynchronize();
+    }
+
+
     // block multiply function with cuda written kernels
     void test_cuda_block_multiply() {
         constexpr int k = 9;// 1 << 20; // Total rows of G and size of vector x
@@ -775,13 +867,13 @@ namespace osuCrypto {
             d_x, // does not change across recursion, we index into it
             0, // index to the part of x i am recursing on
             d_result,
-            0,
+            0, // index to the result index i am recursing on
             sigmas, // one for each recursive depth (will be roughly 2sqrt(k) each time, set such that t stays the same???)
             k,
             n,
             e,
-            0,
-            baseRecursiveDepth);
+            0, // current recursive depth
+            baseRecursiveDepth); // total recursive depth
 
         auto stop = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> elapsed = stop - start;
@@ -792,6 +884,104 @@ namespace osuCrypto {
 
         // Optionally copy results back to host
         // thrust::host_vector<T> h_xG = d_xG;        
+    }
+
+    void iterative_sparse_vector_matrix_mul(
+        const thrust::device_vector<T>& x,
+        thrust::device_vector<T>& result,
+        std::vector<int>& sigma,
+        int k,
+        int n,
+        int e) {
+
+        int depth = sigma.size();
+        int num_iters = pow(2, depth);
+
+        // We implement 2 cuda kernels that we keep invoking
+        // The current function is run on the host and invokes the kernels
+        // Iterate and keep doing one after the other these 2 operations:
+        // 1. Multiply a vector x = x1,...,xt by a bunch of base size blocks G=G1,...,Gt, where t=k/sigma[depth]
+        // 2. Permute: split the vector resulting from multiplication in 1 into k/sigma[curr_depth-1] 
+        //             same-size pieces and shuffle each piece (in 1 kernel)
+        // Each iteration invokes 1 followed by 2
+
+        int curr_sigma = sigma[depth - 1];
+        int curr_t = k / curr_sigma;
+        if (curr_sigma * curr_t != k)
+            throw std::runtime_error("Invalid sigma and k relation");
+        if (k * e != n)
+            throw std::runtime_error("Invalid k, e, n");
+
+        // Each iteration (but the first one) will use one vector as input and the other as result:
+        std::vector<thrust::device_vector<T>> results(2, thrust::device_vector<T>(n));
+
+        // First iteration (uses x as input)
+        recursive_sparse_vector_matrix_mul_host(
+            x,
+            0,
+            results[0],
+            0,
+            curr_sigma, 
+            e, 
+            curr_t);
+        // TODO Shuffle
+        // Split result into pieces of size (e * sigma[depth-2]), and shuffle each
+
+        // TODO Remaining iterations
+        for (size_t iter = 0; iter < num_iters; ++iter) {
+
+            // Multiply
+            //recursive_sparse_vector_matrix_mul_host(
+            //    results[iter & 1], // iter % 2
+            //    0,
+            //    results[(iter + 1) & 1], // (iter+1) % 2
+            //    0,
+            //    int sigma, 
+            //    1, // does not expand after 1st multiplication 
+            //    e * t);
+
+
+            // TODO Shuffle
+
+        }
+    }
+
+
+    void benchmark_iterative_sparse_vector_matrix_mul() {
+        constexpr int k = 1 << 20; // 2^20
+        constexpr int n = 1 << 21; // 2^21
+        std::vector<int> sigmas = { 2048, 128 };
+        int e = n / k;
+
+        if (k * e != n) throw std::runtime_error("invalid k, n");
+
+        std::vector<T> h_x(k);
+        std::mt19937 rngcpu(std::random_device{}());
+        std::bernoulli_distribution dist(0.5);
+
+        for (auto& val : h_x) {
+            val = dist(rngcpu);
+        }
+
+        thrust::device_vector<T> d_x = h_x;
+        thrust::device_vector<T> d_result(n);
+
+        auto start = std::chrono::high_resolution_clock::now();
+
+        iterative_sparse_vector_matrix_mul(
+            d_x,
+            d_result,
+            sigmas,
+            k,
+            n,
+            e
+        );
+
+        auto stop = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = stop - start;
+
+        std::cout << "Time to compute optimized iterative CUDA implementation: "
+            << elapsed.count() << " ms" << std::endl;
     }
 
 
@@ -824,6 +1014,34 @@ namespace osuCrypto {
         // benchmark recursive code cuda (with blocks generated on the fly in the base case)
         //
         benchmark_recursive_code_cuda();
+
+        //
+        // like the recursive approach above, but much more in parallel (reduces #kernel launches and fills gpu)
+        //
+        benchmark_iterative_sparse_vector_matrix_mul();
+
+        //
+        // Shuffle, split vector into equal sized blocks and shuffle each
+        //
+
+        thrust::device_vector<uint8_t> data(512);
+        thrust::sequence(data.begin(), data.end(), 0);
+
+        std::cout << "Before shuffle:\n";
+        thrust::host_vector<uint8_t> h_data = data;
+        for (size_t i = 0; i < h_data.size(); ++i) {
+            std::cout << static_cast<int>(h_data[i]) << " ";
+        }
+        std::cout << "\n";
+
+        shuffle_blocks_uint8(data, 256);
+
+        std::cout << "After shuffle:\n";
+        h_data = data;
+        for (size_t i = 0; i < h_data.size(); ++i) {
+            std::cout << static_cast<int>(h_data[i]) << " ";
+        }
+        std::cout << "\n";
 
     }
 
