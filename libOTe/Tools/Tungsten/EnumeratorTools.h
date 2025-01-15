@@ -263,8 +263,8 @@ namespace osuCrypto {
 #endif
 
 	//using Float = boost::multiprecision::cpp_bin_float_double;
-	using Float = boost::multiprecision::cpp_bin_float_quad;
-	//using Float = boost::multiprecision::cpp_bin_float_oct;
+	//using Float = boost::multiprecision::cpp_bin_float_quad;
+	using Float = boost::multiprecision::cpp_bin_float_oct;
 #ifdef ENABLE_GMP
 	using Int = boost::multiprecision::mpz_int;
 	using Rat = boost::multiprecision::mpq_rational;
@@ -772,9 +772,23 @@ namespace osuCrypto {
 	}
 
 
+
+	template<typename T>
+	inline T ballsBins(i64 n, i64 k, const ChooseCache<T>& pascal_triangle)
+	{
+		return choose_pascal<T>(n + k - 1, k - 1, pascal_triangle);
+	}
+
+
 	//
 	template<typename T>
 	inline T labeledBallBinCap(u64 balls, u64 bins, u64 cap, const ChooseCache<T>& pascal_triangle) {
+
+		if (balls < bins)
+			return 0;
+		if (balls == bins)
+			return 1;
+
 		T d = 0;
 		for (u64 i = 0; i <= bins; ++i) {
 			//T v = (i & 1) ? -1 : 1;
@@ -798,6 +812,21 @@ namespace osuCrypto {
 				d += mt * r;
 			//std::cout << i << " d " << d << std::endl;
 		}
+		//if (balls < cap)
+		//{
+		//	auto d2 = ballsBins<T>(balls, bins, pascal_triangle);
+		//	if (d != d2)
+		//		throw RTE_LOC;
+		//}
+		if (d < 0)
+			return 0;
+		//if (d < 0)
+		//{
+		//	std::lock_guard l(gIoStreamMtx);
+		//	std::cout << "ballBinCap(" << balls << ", " << bins << ", " << cap << ") = " << d << std::endl;
+		//	int i = 0;
+		//	std::cin >> i;
+		//}
 		return d;
 	}
 
@@ -1006,13 +1035,6 @@ namespace osuCrypto {
 		}
 
 	}
-
-	template<typename T>
-	inline T ballsBins(i64 n, i64 k, ChooseCache<T>& pascal_triangle)
-	{
-		return choose_pascal<T>(n + k - 1, k - 1, pascal_triangle);
-	}
-
 
 	inline void stirlingTest(const oc::CLP& cmd)
 	{

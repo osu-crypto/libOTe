@@ -338,7 +338,7 @@ namespace osuCrypto {
 			compute_block_distribution_opt<INT, RAT>(
 				{}, outputDist0,
 				systematic, k, n, sigma,
-				numThreads, pas);
+				numThreads, pas, pas);
 			timer.setTimePoint("opt");
 
 			compute_expanding_block_distribution<INT, RAT>(outputDist1,k, n, sigma, pas);
@@ -405,7 +405,7 @@ namespace osuCrypto {
 			compute_block_distribution_opt<INT, RAT>(
 				inputDist, outputDist0,
 				systematic, k, n, sigma,
-				numThreads, pas);
+				numThreads, pas, pas);
 			timer.setTimePoint("opt");
 
 			compute_block_distribution<INT, RAT>(inputDist, outputDist1,
@@ -478,7 +478,7 @@ namespace osuCrypto {
 					numThreads,
 					0, 0, 0);// verbose, numpoints, normalize
 			double expected_md =
-				minimum_distance_from_distribution<Rat>(expected_distribution);
+				minimum_distance_from_distribution<Rat>(expected_distribution).mExpectMD;
 
 			u64 seed = 24523452345234523;
 			std::mt19937 gen(seed); // Mersenne Twister engine
@@ -495,7 +495,7 @@ namespace osuCrypto {
 				gen,
 				false,
 				cmd.isSet("v"));
-			double approximate_true_md = minimum_distance_from_distribution<Rat>(approximate_true_distribution);
+			double approximate_true_md = minimum_distance_from_distribution<Rat>(approximate_true_distribution).mExpectMD;
 
 
 			// Compare the full distributions
