@@ -44,121 +44,6 @@ namespace osuCrypto {
         }
     };
 
-    void benchmark_permutations() {
-        constexpr int n = 1 << 21;
-
-        // Set up a random number generator
-        unsigned int seed = static_cast<unsigned int>(time(0)); // Random seed
-        thrust::default_random_engine rng(seed);
-
-        //
-        // GPU device_vector thrust::shuffle
-        //
-
-        // Step 1: Create a device_vector with some data
-        thrust::device_vector<uint64_t> d_vec(n);
-        // Step 2: Fill the vector with sequential values (0, 1, 2, ..., n-1)
-        thrust::transform(thrust::make_counting_iterator(0),
-            thrust::make_counting_iterator(n),
-            d_vec.begin(),
-            sequence_functor());
-
-        auto start_device_chrono = std::chrono::high_resolution_clock::now();
-
-        // Step 3: Set up CUDA events for timing
-        cudaEvent_t start_device, stop_device;
-        cudaEventCreate(&start_device);
-        cudaEventCreate(&stop_device);
-
-        // Step 4: Record the start time
-        cudaEventRecord(start_device);
-
-        // Step 5: Shuffle the device_vector
-        thrust::shuffle(d_vec.begin(), d_vec.end(), rng);
-
-        // Step 6: Record the stop time
-        cudaEventRecord(stop_device);
-        cudaEventSynchronize(stop_device); // Ensure GPU operations are finished
-
-        // Step 7: Calculate the elapsed time
-        float milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start_device, stop_device);
-
-        auto stop_device_chrono = std::chrono::high_resolution_clock::now();
-
-        // Print the result
-        std::cout << "Time to thrust::shuffle a thrust::device_vector (GPU) using cuda events: " << 
-            milliseconds << " ms" << std::endl;
-
-        std::chrono::duration<double, std::milli> elapsed_device_chrono = stop_device_chrono - start_device_chrono;
-
-        // Step 5: Print the elapsed time
-        std::cout << "Time to thrust::shuffle a thrust::device_vector (GPU) using chrono: " << elapsed_device_chrono.count() << " ms" << std::endl;
-
-
-        // Step 8: Copy the result back to the host for printing
-        // thrust::host_vector<uint64_t> h_vec = d_vec;
-
-        //std::cout << "Shuffled GPU vector: ";
-        //for (int val : h_vec) {
-        //    std::cout << val << " ";
-        //}
-        //std::cout << std::endl;
-
-        //
-        // CPU host_vector thrust::shuffle
-        //
-
-        // Step 1: Create a host_vector with some data
-        thrust::host_vector<uint64_t> h_vec(n);
-        // Step 2: Fill the vector with sequential values (0, 1, 2, ..., n-1)
-        thrust::transform(thrust::make_counting_iterator(0),
-            thrust::make_counting_iterator(n),
-            h_vec.begin(),
-            sequence_functor());
-
-        // Step 3: Measure the time to shuffle using std::chrono
-        auto start_host = std::chrono::high_resolution_clock::now();
-
-        // Step 4: Shuffle the device_vector
-        thrust::shuffle(h_vec.begin(), h_vec.end(), rng);
-
-        auto stop_host = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> elapsed_host = stop_host - start_host;
-
-        // Step 5: Print the elapsed time
-        std::cout << "Time to thrust::shuffle host_vector (CPU): " << elapsed_host.count() << " ms" << std::endl;
-
-        //
-        // CPU std::vector std::shuffle
-        //
-
-        // Step 1: Create and initialize a vector
-        std::vector<int> vector_std(n);
-        std::iota(vector_std.begin(), vector_std.end(), 0); // Fill with 0, 1, 2, ..., N-1
-
-        // Step 2: Set up the random number generator
-        std::random_device rd;                  // Random seed
-        std::default_random_engine rng_vector(rd());   // Random number engine
-
-        // Step 3: Measure the time to shuffle using std::chrono
-        auto start_vector = std::chrono::high_resolution_clock::now();
-
-        std::shuffle(vector_std.begin(), vector_std.end(), rng_vector);
-
-        auto stop_vector = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> elapsed_vector = stop_vector - start_vector;
-
-        // Step 4: Print the elapsed time
-        std::cout << "Time to std::shuffle std::vector: " << elapsed_vector.count() << " ms" << std::endl;
-
-        //std::cout << "Shuffled CPU vector: ";
-        //for (int val : cpu_vector) {
-        //    std::cout << val << " ";
-        //}
-        //std::cout << std::endl;
-
-    }
 
     // Functor for Binary Block-Vector Multiplication (Column-wise)
     struct BlockVectorColumnMultiply {
@@ -623,7 +508,10 @@ namespace osuCrypto {
         for (int i = 0; i < num_rounds; ++i) {
             uint32_t temp = right;
             // block_id to add block-specific randomness
-            right = (left ^ (keys[i] + (block_id * 0xDEADBEEF) + (right * 0x5DEECE66DLL % n))) % n;
+            //right = (left ^ (keys[i] + (block_id * 0xDEADBEEF) + (right * 0x5DEECE66DLL % n))) % n;
+            // replacing modulo with & -> ONLY WORKS WHEN N A POWER OF 2
+            right = (left ^ (keys[i] + (block_id * 0xDEADBEEF) + (right * 0x5DEECE66DLL & (n - 1)))) & (n - 1);
+
             left = temp;
         }
 
@@ -674,8 +562,9 @@ namespace osuCrypto {
         if (block_size == 0 || n % block_size != 0) {
             throw std::invalid_argument("Block size must be a positive divisor of the input size.");
         }
-        if (block_size > 1024) {
-            throw std::invalid_argument("Block size is too big. Should be at most 1024.");
+        // ensure n is a power of 2
+        if ((n & (n - 1)) != 0) {
+            throw std::invalid_argument("n should be a power of 2");
         }
 
         const int num_rounds = 24; // The number of Feistel rounds to use in the pseudorandom permutation
@@ -886,6 +775,151 @@ namespace osuCrypto {
         // thrust::host_vector<T> h_xG = d_xG;        
     }
 
+    void benchmark_permutations() {
+        int n = 1 << 21;
+
+        // Set up a random number generator
+        unsigned int seed = static_cast<unsigned int>(time(0)); // Random seed
+        thrust::default_random_engine rng(seed);
+
+        //
+        // GPU device_vector thrust::shuffle
+        //
+
+        // Step 1: Create a device_vector with some data
+        thrust::device_vector<uint64_t> d_vec(n);
+        // Step 2: Fill the vector with sequential values (0, 1, 2, ..., n-1)
+        thrust::transform(thrust::make_counting_iterator(0),
+            thrust::make_counting_iterator(n),
+            d_vec.begin(),
+            sequence_functor());
+
+        auto start_device_chrono = std::chrono::high_resolution_clock::now();
+
+        // Step 3: Set up CUDA events for timing
+        cudaEvent_t start_device, stop_device;
+        cudaEventCreate(&start_device);
+        cudaEventCreate(&stop_device);
+
+        // Step 4: Record the start time
+        cudaEventRecord(start_device);
+
+        // Step 5: Shuffle the device_vector
+        thrust::shuffle(d_vec.begin(), d_vec.end(), rng);
+
+        // Step 6: Record the stop time
+        cudaEventRecord(stop_device);
+        cudaEventSynchronize(stop_device); // Ensure GPU operations are finished
+
+        // Step 7: Calculate the elapsed time
+        float milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start_device, stop_device);
+
+        auto stop_device_chrono = std::chrono::high_resolution_clock::now();
+
+        // Print the result
+        std::cout << "Time to thrust::shuffle a thrust::device_vector (GPU) using cuda events: " <<
+            milliseconds << " ms" << std::endl;
+
+        std::chrono::duration<double, std::milli> elapsed_device_chrono = stop_device_chrono - start_device_chrono;
+
+        // Step 5: Print the elapsed time
+        std::cout << "Time to thrust::shuffle a thrust::device_vector (GPU) using chrono: " << elapsed_device_chrono.count() << " ms" << std::endl;
+
+
+        // Step 8: Copy the result back to the host for printing
+        // thrust::host_vector<uint64_t> h_vec = d_vec;
+
+        //std::cout << "Shuffled GPU vector: ";
+        //for (int val : h_vec) {
+        //    std::cout << val << " ";
+        //}
+        //std::cout << std::endl;
+
+        //
+        // CPU host_vector thrust::shuffle
+        //
+
+        // Step 1: Create a host_vector with some data
+        thrust::host_vector<uint64_t> h_vec(n);
+        // Step 2: Fill the vector with sequential values (0, 1, 2, ..., n-1)
+        thrust::transform(thrust::make_counting_iterator(0),
+            thrust::make_counting_iterator(n),
+            h_vec.begin(),
+            sequence_functor());
+
+        // Step 3: Measure the time to shuffle using std::chrono
+        auto start_host = std::chrono::high_resolution_clock::now();
+
+        // Step 4: Shuffle the device_vector
+        thrust::shuffle(h_vec.begin(), h_vec.end(), rng);
+
+        auto stop_host = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed_host = stop_host - start_host;
+
+        // Step 5: Print the elapsed time
+        std::cout << "Time to thrust::shuffle host_vector (CPU): " << elapsed_host.count() << " ms" << std::endl;
+
+        //
+        // CPU std::vector std::shuffle
+        //
+
+        // Step 1: Create and initialize a vector
+        std::vector<int> vector_std(n);
+        std::iota(vector_std.begin(), vector_std.end(), 0); // Fill with 0, 1, 2, ..., N-1
+
+        // Step 2: Set up the random number generator
+        std::random_device rd;                  // Random seed
+        std::default_random_engine rng_vector(rd());   // Random number engine
+
+        // Step 3: Measure the time to shuffle using std::chrono
+        auto start_vector = std::chrono::high_resolution_clock::now();
+
+        std::shuffle(vector_std.begin(), vector_std.end(), rng_vector);
+
+        auto stop_vector = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed_vector = stop_vector - start_vector;
+
+        // Step 4: Print the elapsed time
+        std::cout << "Time to std::shuffle std::vector: " << elapsed_vector.count() << " ms" << std::endl;
+
+        //std::cout << "Shuffled CPU vector: ";
+        //for (int val : cpu_vector) {
+        //    std::cout << val << " ";
+        //}
+        //std::cout << std::endl;
+
+
+        //
+        // Feistel bijection on GPU
+        //
+
+        // Create a device_vector with some data
+        thrust::device_vector<uint8_t> d_vec2(n);
+        // Fill the vector with sequential values (0, 1, 2, ..., n-1)
+        thrust::transform(thrust::make_counting_iterator(0),
+            thrust::make_counting_iterator(n),
+            d_vec2.begin(),
+            sequence_functor());
+
+        start_device_chrono = std::chrono::high_resolution_clock::now();
+
+        // Shuffle the device_vector
+        uint64_t block_size = n;
+        shuffle_blocks_uint8(d_vec2, block_size); // 1 block
+
+
+        stop_device_chrono = std::chrono::high_resolution_clock::now();
+
+
+        elapsed_device_chrono = stop_device_chrono - start_device_chrono;
+
+        // Step 5: Print the elapsed time
+        std::cout << "Feistel shuffle (note a little unfair as using uint8_t instead of uint64_t with feistel" << std::endl;
+        std::cout << "Time to Feistel shuffle (our function) a thrust::device_vector (GPU) using chrono: " << elapsed_device_chrono.count() << " ms" << std::endl;
+
+    }
+
     void iterative_sparse_vector_matrix_mul(
         const thrust::device_vector<T>& x,
         thrust::device_vector<T>& result,
@@ -985,6 +1019,27 @@ namespace osuCrypto {
     }
 
 
+    void test_feistel_shuffle() {
+        thrust::device_vector<uint8_t> data(512);
+        thrust::sequence(data.begin(), data.end(), 0);
+
+        std::cout << "Before shuffle:\n";
+        thrust::host_vector<uint8_t> h_data = data;
+        for (size_t i = 0; i < h_data.size(); ++i) {
+            std::cout << static_cast<int>(h_data[i]) << " ";
+        }
+        std::cout << "\n";
+
+        shuffle_blocks_uint8(data, 256);
+
+        std::cout << "After shuffle:\n";
+        h_data = data;
+        for (size_t i = 0; i < h_data.size(); ++i) {
+            std::cout << static_cast<int>(h_data[i]) << " ";
+        }
+        std::cout << "\n";
+    }
+
     void parallelSD() {
 
         // Is cuda included properly into cmake?
@@ -1023,25 +1078,7 @@ namespace osuCrypto {
         //
         // Shuffle, split vector into equal sized blocks and shuffle each
         //
-
-        thrust::device_vector<uint8_t> data(512);
-        thrust::sequence(data.begin(), data.end(), 0);
-
-        std::cout << "Before shuffle:\n";
-        thrust::host_vector<uint8_t> h_data = data;
-        for (size_t i = 0; i < h_data.size(); ++i) {
-            std::cout << static_cast<int>(h_data[i]) << " ";
-        }
-        std::cout << "\n";
-
-        shuffle_blocks_uint8(data, 256);
-
-        std::cout << "After shuffle:\n";
-        h_data = data;
-        for (size_t i = 0; i < h_data.size(); ++i) {
-            std::cout << static_cast<int>(h_data[i]) << " ";
-        }
-        std::cout << "\n";
+        test_feistel_shuffle();
 
     }
 
