@@ -69,6 +69,32 @@ namespace osuCrypto {
         }
     };
 
+    template <typename RandomIterator, typename URBG>
+    void shuffle_chunks(
+        thrust::cuda_cub::par_t exec,
+        RandomIterator first, RandomIterator last,
+        std::size_t chunk_size, URBG&& g) {
+        using InputType = typename thrust::iterator_value_t<RandomIterator>;
+
+        // Total number of elements
+        std::size_t total_size = last - first;
+
+        // Iterate over each chunk
+        for (std::size_t chunk_start = 0; chunk_start < total_size; chunk_start += chunk_size) {
+            // Calculate the start and end of the current chunk
+            auto chunk_end = thrust::min(chunk_start + chunk_size, total_size);
+
+            // Create a temporary vector for the current chunk
+            thrust::device_vector<InputType> temp(first + chunk_start, first + chunk_end);
+
+            // Shuffle the temporary vector
+            thrust::shuffle(temp.begin(), temp.end(), g);
+
+            // Copy the shuffled data back to the original range
+            thrust::copy(exec, temp.begin(), temp.end(), first + chunk_start);
+        }
+    }
+
     // block multiply function with thrust
     void test_thrust_block_multiply() {
         constexpr int k = 9;// 1 << 20; // Total rows of G and size of vector x
@@ -891,7 +917,7 @@ namespace osuCrypto {
 
 
         //
-        // Feistel bijection on GPU
+        // TODO (currently buggy) Feistel bijection on GPU
         //
 
         // Create a device_vector with some data
@@ -911,12 +937,40 @@ namespace osuCrypto {
 
         stop_device_chrono = std::chrono::high_resolution_clock::now();
 
-
         elapsed_device_chrono = stop_device_chrono - start_device_chrono;
 
         // Step 5: Print the elapsed time
         std::cout << "Feistel shuffle (note a little unfair as using uint8_t instead of uint64_t with feistel" << std::endl;
         std::cout << "Time to Feistel shuffle (our function) a thrust::device_vector (GPU) using chrono: " << elapsed_device_chrono.count() << " ms" << std::endl;
+
+        //
+        // modified thrust shuffle
+        //
+
+        thrust::device_vector<uint64_t> d_vec3(n);
+        // Fill the vector with sequential values (0, 1, 2, ..., n-1)
+        thrust::transform(thrust::make_counting_iterator(0),
+            thrust::make_counting_iterator(n),
+            d_vec3.begin(),
+            sequence_functor());
+
+        start_device_chrono = std::chrono::high_resolution_clock::now();
+
+        thrust::default_random_engine rng2;
+        auto seed2 = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+        rng2.seed(static_cast<unsigned int>(seed2)); // Seed based on current time
+
+        shuffle_chunks(thrust::cuda::par, d_vec3.begin(), d_vec3.end(), block_size, rng2);
+
+        stop_device_chrono = std::chrono::high_resolution_clock::now();
+
+        elapsed_device_chrono = stop_device_chrono - start_device_chrono;
+
+        // Step 5: Print the elapsed time
+        std::cout << "Modified thrust shuffle" << std::endl;
+        std::cout << "Time modify thrust shuffle a thrust::device_vector (GPU) using chrono: " 
+            << elapsed_device_chrono.count() << " ms" << std::endl;
+
 
     }
 
@@ -1020,7 +1074,7 @@ namespace osuCrypto {
 
 
     void test_feistel_shuffle() {
-        thrust::device_vector<uint8_t> data(512);
+        thrust::device_vector<uint8_t> data(16);
         thrust::sequence(data.begin(), data.end(), 0);
 
         std::cout << "Before shuffle:\n";
@@ -1030,7 +1084,7 @@ namespace osuCrypto {
         }
         std::cout << "\n";
 
-        shuffle_blocks_uint8(data, 256);
+        shuffle_blocks_uint8(data, 4);
 
         std::cout << "After shuffle:\n";
         h_data = data;
@@ -1039,6 +1093,37 @@ namespace osuCrypto {
         }
         std::cout << "\n";
     }
+
+
+
+    void test_modified_thrust_shuffle() {
+        thrust::device_vector<uint64_t> data(16);
+        thrust::sequence(data.begin(), data.end(), 0);
+
+        std::cout << "Before shuffle:\n";
+        thrust::host_vector<uint64_t> h_data = data;
+        for (size_t i = 0; i < h_data.size(); ++i) {
+            std::cout << static_cast<int>(h_data[i]) << " ";
+        }
+        std::cout << "\n";
+
+        std::size_t chunk_size = 4;         // Example chunk size
+
+        thrust::default_random_engine rng;
+        auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+        rng.seed(static_cast<unsigned int>(seed)); // Seed based on current time
+
+        shuffle_chunks(thrust::cuda::par, data.begin(), data.end(), chunk_size, rng);
+
+        std::cout << "After shuffle:\n";
+        h_data = data;
+        for (size_t i = 0; i < h_data.size(); ++i) {
+            std::cout << static_cast<int>(h_data[i]) << " ";
+        }
+        std::cout << "\n";
+    }
+
+
 
     void parallelSD() {
 
@@ -1077,8 +1162,16 @@ namespace osuCrypto {
 
         //
         // Shuffle, split vector into equal sized blocks and shuffle each
+        // TODO currently buggy
         //
         test_feistel_shuffle();
+
+        //
+        // Shuffle, split vector into equal sized blocks and shuffle each
+        //
+        test_modified_thrust_shuffle();
+
+
 
     }
 
