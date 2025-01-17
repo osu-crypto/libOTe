@@ -611,6 +611,7 @@ namespace osuCrypto {
     // CUDA kernel for block-wise shuffle of uint8_t data
     __global__ void shuffle_blocks_uint64_kernel(
         uint64_t* data, // Pointer to the vector to be shuffled
+        uint64_t* result, // Pointer to the result
         uint64_t n, // Total number of elements in the input vector
         uint64_t block_size, // Size of each block to shuffle independently
         uint32_t* keys, // Array of random keys used for the Feistel bijection to generate pseudorandom permutations
@@ -639,14 +640,15 @@ namespace osuCrypto {
                 uint64_t index_to_permute = tid - block_start;
                 //printf("index to permute: %llu\\n", index_to_permute);
                 uint64_t permuted_idx = bijection(index_to_permute, keys + keys_start) + block_start;
-                printf("block start: %llu\\n", block_start);
-                //printf("permuted index: %llu\\n", permuted_idx);
-                // Swap data[i] and data[permuted_idx]
-                if (tid < permuted_idx) { // Ensures that each pair is swapped only once, avoiding redundant swaps
-                    uint64_t temp = data[tid];
-                    data[tid] = data[permuted_idx];
-                    data[permuted_idx] = temp;
-                }
+                //printf("block start: %llu\\n", block_start);
+                // printf("permuted index: %llu", permuted_idx);
+                // gather
+                result[tid] = data[permuted_idx];
+                //if (tid < permuted_idx) { // Ensures that each pair is swapped only once, avoiding redundant swaps
+                //    uint64_t temp = data[tid];
+                //    data[tid] = data[permuted_idx];
+                //    data[permuted_idx] = temp;
+                //}
         }
     }
 
@@ -655,6 +657,7 @@ namespace osuCrypto {
         thrust::device_vector<uint64_t>& data, // The vector of uint64_t elements to shuffle
         uint64_t block_size) { // Specifies the size of each block that will be independently shuffled
         uint64_t n = data.size();
+        thrust::device_vector<uint64_t> result(n);
         // block size must evenly divide the total number of elements
         if (block_size == 0 || n % block_size != 0) {
             throw std::invalid_argument("Block size must be a positive divisor of the input size.");
@@ -688,10 +691,12 @@ namespace osuCrypto {
                                                                  // needed to cover all n elements
         std::cout << "blocks per grid: " << blocks_per_grid << std::endl;
         shuffle_blocks_uint64_kernel << <blocks_per_grid, threads_per_block >> > (
-            thrust::raw_pointer_cast(data.data()), n, block_size,
+            thrust::raw_pointer_cast(data.data()), thrust::raw_pointer_cast(result.data()), n, block_size,
             thrust::raw_pointer_cast(d_keys.data()), num_rounds);
 
         cudaDeviceSynchronize();
+
+        thrust::copy(result.begin(), result.end(), data.begin());
     }
 
 
@@ -1004,9 +1009,8 @@ namespace osuCrypto {
         start_device_chrono = std::chrono::high_resolution_clock::now();
 
         // Shuffle the device_vector
-        uint64_t block_size = n;
-        // T
-        //shuffle_blocks_uint64(d_vec2, block_size); // 1 block
+        uint64_t block_size = n / 4;
+        shuffle_blocks_uint64(d_vec2, block_size); // 1 block
 
 
         stop_device_chrono = std::chrono::high_resolution_clock::now();
@@ -1014,7 +1018,6 @@ namespace osuCrypto {
         elapsed_device_chrono = stop_device_chrono - start_device_chrono;
 
         // Step 5: Print the elapsed time
-        std::cout << "Feistel shuffle (note a little unfair as using uint8_t instead of uint64_t with feistel" << std::endl;
         std::cout << "Time to Feistel shuffle (our function) a thrust::device_vector (GPU) using chrono: " << elapsed_device_chrono.count() << " ms" << std::endl;
 
         //
@@ -1149,7 +1152,7 @@ namespace osuCrypto {
 
     void test_feistel_shuffle() {
         int n = 128;
-        int block_size = 16;
+        int block_size = 32;
         thrust::device_vector<uint64_t> data(n);
         thrust::sequence(data.begin(), data.end(), 0);
 
@@ -1171,11 +1174,9 @@ namespace osuCrypto {
         }
         std::cout << "\n";
 
-        int num_errors = 0;
         for (const auto& vb:  verify_bijection) {
-            if (vb != 0) num_errors++;// throw std::runtime_error("not perfect bijection");
+            if (vb != 0) throw std::runtime_error("not perfect bijection");
         }        
-        std::cout << "Number of errors in bijection " << num_errors << std::endl;
     }
 
 
