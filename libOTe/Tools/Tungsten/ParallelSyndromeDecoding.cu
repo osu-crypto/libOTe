@@ -34,7 +34,7 @@ namespace osuCrypto {
             std::cerr << "CUDA Error: " << cudaGetErrorString(err) << std::endl;
             return;
         }
-        std::cout << "CUDA included successfully!" << std::endl;
+        std::cout << "CUDA included successfully!\n" << std::endl;
     }
 
     // Functor to initialize sequence values
@@ -578,7 +578,7 @@ namespace osuCrypto {
     }
 
     __host__ __device__ std::uint64_t feistel_bijection(
-        const std::uint64_t val, 
+        const std::uint64_t val, // index to permute
         std::uint32_t* key,
         std::uint64_t left_side_bits,
         std::uint64_t left_side_mask,
@@ -599,65 +599,6 @@ namespace osuCrypto {
         // Combine the left and right sides together to get result
         return static_cast<std::uint64_t>(state[0] << right_side_bits) | static_cast<std::uint64_t>(state[1]);
     }
-     
-    
-    // An implementation of a Feistel cipher for operating on 64 bit keys
-    /*class feistel_bijection {
-
-    public:
-        __host__ __device__ feistel_bijection(std::uint64_t m, std::uint32_t num_rounds) {
-            std::uint64_t total_bits = get_cipher_bits(m);
-            // Half bits rounded down
-            left_side_bits = total_bits / 2;
-            left_side_mask = (1ull << left_side_bits) - 1;
-            // Half the bits rounded up
-            right_side_bits = total_bits - left_side_bits;
-            right_side_mask = (1ull << right_side_bits) - 1;
-            this->num_rounds = num_rounds;
-        }
-
-        __host__ __device__ std::uint64_t operator()(const std::uint64_t val, std::uint32_t *key) const {
-            std::uint32_t state[2] = { static_cast<std::uint32_t>(val >> right_side_bits), static_cast<std::uint32_t>(val & right_side_mask) };
-            for (std::uint32_t i = 0; i < num_rounds; i++)
-            {
-                std::uint32_t hi, lo;
-                constexpr std::uint64_t M0 = UINT64_C(0xD2B74407B1CE6E93);
-                mulhilo(M0, state[0], hi, lo);
-                lo = (lo << (right_side_bits - left_side_bits)) | state[1] >> left_side_bits;
-                state[0] = ((hi ^ key[i]) ^ state[1]) & left_side_mask;
-                state[1] = lo & right_side_mask;
-            }
-            // Combine the left and right sides together to get result
-            return static_cast<std::uint64_t>(state[0] << right_side_bits) | static_cast<std::uint64_t>(state[1]);
-        }
-
-    private:
-        // Perform 64 bit multiplication and save result in two 32 bit int
-        static __host__ __device__ void mulhilo(std::uint64_t a, std::uint64_t b, std::uint32_t& hi, std::uint32_t& lo)
-        {
-            std::uint64_t product = a * b;
-            hi = static_cast<std::uint32_t>(product >> 32);
-            lo = static_cast<std::uint32_t>(product);
-        }
-
-        // Find the nearest power of two
-        static __host__ __device__ std::uint64_t get_cipher_bits(std::uint64_t m) {
-            if (m <= 16) return 4;
-            std::uint64_t i = 0;
-            m--;
-            while (m != 0) {
-                i++;
-                m >>= 1;
-            }
-            return i;
-        }
-
-        std::uint32_t num_rounds;
-        std::uint64_t right_side_bits;
-        std::uint64_t left_side_bits;
-        std::uint64_t right_side_mask;
-        std::uint64_t left_side_mask;
-    };*/
 
     // Feistel cipher-based bijection for pseudorandom permutation
     /*__device__ uint64_t feistel_bijection(uint64_t idx, uint64_t n, uint32_t* keys, int num_rounds, uint64_t block_id) {
@@ -679,9 +620,10 @@ namespace osuCrypto {
 
 
     // CUDA kernel for block-wise shuffle of uint8_t data
-    __global__ void shuffle_blocks_uint64_kernel(
-        uint64_t* data, // Pointer to the vector to be shuffled
-        uint64_t* result, // Pointer to the result
+    template<typename V>
+    __global__ void shuffle_blocks_feistel_kernel(
+        V* data, // Pointer to the vector to be shuffled
+        V* result, // Pointer to the result
         uint64_t n, // Total number of elements in the input vector
         uint64_t block_size, // Size of each block to shuffle independently
         uint32_t* keys, // Array of random keys used for the Feistel bijection to generate pseudorandom permutations
@@ -735,11 +677,12 @@ namespace osuCrypto {
     }
 
     // Wrapper function to shuffle a thrust::device_vector containing uint8_t data
-    void shuffle_blocks_uint64(
-        thrust::device_vector<uint64_t>& data, // The vector of uint64_t elements to shuffle
+    template<typename V>
+    void shuffle_blocks_feistel(
+        thrust::device_vector<V>& data, // The vector of V type (e.g. uint64_t) elements to shuffle
         uint64_t block_size) { // Specifies the size of each block that will be independently shuffled
         uint64_t n = data.size();
-        thrust::device_vector<uint64_t> result(n);
+        thrust::device_vector<V> result(n);
         // block size must evenly divide the total number of elements
         if (block_size == 0 || n % block_size != 0) {
             throw std::invalid_argument("Block size must be a positive divisor of the input size.");
@@ -773,8 +716,7 @@ namespace osuCrypto {
                                                                  // (n + block_size - 1) / block_size;
                                                                  // Determines the total number of blocks 
                                                                  // needed to cover all n elements
-        std::cout << "blocks per grid: " << blocks_per_grid << std::endl;
-        shuffle_blocks_uint64_kernel << <blocks_per_grid, threads_per_block >> > (
+        shuffle_blocks_feistel_kernel << <blocks_per_grid, threads_per_block >> > (
             thrust::raw_pointer_cast(data.data()), thrust::raw_pointer_cast(result.data()), n, block_size,
             thrust::raw_pointer_cast(d_keys.data()), num_rounds, 
             feistel_params.left_side_bits, feistel_params.left_side_mask,
@@ -863,10 +805,6 @@ namespace osuCrypto {
         constexpr int n = 1 << 21; // 2^21
         constexpr int sigma = 512;// 2048;  // Block size (2 * sqrt(k))
 
-        std::cout << "k: " << k << std::endl;
-        std::cout << "n: " << n << std::endl;
-        std::cout << "sigma: " << sigma << std::endl;
-
         //
         // Initialize x, G, and empty xG, and move them from host to device
         //
@@ -895,8 +833,13 @@ namespace osuCrypto {
         std::chrono::duration<double, std::milli> elapsed = stop - start;
 
         // Step 4: Print the elapsed time
-        std::cout << "Time to compute the code implemented with cuda kernels: " << 
-            elapsed.count() << " ms" << std::endl;
+        std::cout << "Time to compute plain multiply-shuffle-multiply with "
+            << " k: " << k
+            << " n: " << n
+            << " sigma: " << sigma
+            << " is " << elapsed.count() << " ms" << std::endl;
+        std::cout << "NOTE The number above does NOT include the cost to initialize the matrices G, H" << std::endl;
+        std::cout << "TODO The implementation above needs to be revisited as it supports sigma at most 512!" << std::endl;
 
         // Optionally copy results back to host
         // thrust::host_vector<T> h_xG = d_xG;        
@@ -958,14 +901,22 @@ namespace osuCrypto {
         std::chrono::duration<double, std::milli> elapsed = stop - start;
 
         // Print the elapsed time
-        std::cout << "Time to compute the code implemented with cuda kernels: " <<
-            elapsed.count() << " ms" << std::endl;
+        std::cout << "Time to compute recursive multiply-shuffle-multiply (plain recursion, not unrolled) with "
+            << " k: " << k
+            << " n: " << n
+            << " sigmas: ";
+        for (const auto s : sigmas) std::cout << s << " ";
+            std::cout << "is " << elapsed.count() << " ms" << std::endl;
+        std::cout << "NOTE The number above DOES include the cost to initialize the matrices G, H" << std::endl;
+        std::cout << "NOTE The plain recursive function above is NOT carefully debugged" << std::endl;
 
         // Optionally copy results back to host
         // thrust::host_vector<T> h_xG = d_xG;        
     }
 
     void benchmark_permutations() {
+        std::cout << "BENCHMARKING DIFFERENT PERMUTATIONS:" << std::endl;
+
         int n = 1 << 21;
 
         // Set up a random number generator
@@ -1096,7 +1047,7 @@ namespace osuCrypto {
 
         // Shuffle the device_vector
         uint64_t block_size = n;
-        shuffle_blocks_uint64(d_vec2, block_size); // 1 block
+        shuffle_blocks_feistel<uint64_t>(d_vec2, block_size); // 1 block
 
 
         stop_device_chrono = std::chrono::high_resolution_clock::now();
@@ -1104,7 +1055,8 @@ namespace osuCrypto {
         elapsed_device_chrono = stop_device_chrono - start_device_chrono;
 
         // Step 5: Print the elapsed time
-        std::cout << "Time to Feistel shuffle (our function) a thrust::device_vector (GPU) using chrono: " << elapsed_device_chrono.count() << " ms" << std::endl;
+        std::cout << "Time to block-wise Feistel shuffle (our function) a thrust::device_vector (GPU) using chrono "
+            " with block of size " << block_size << " is " << elapsed_device_chrono.count() << " ms" << std::endl;
 
         //
         // modified thrust shuffle
@@ -1130,11 +1082,12 @@ namespace osuCrypto {
         elapsed_device_chrono = stop_device_chrono - start_device_chrono;
 
         // Step 5: Print the elapsed time
-        std::cout << "Modified thrust shuffle" << std::endl;
-        std::cout << "Time modify thrust shuffle a thrust::device_vector (GPU) using chrono: " 
-            << elapsed_device_chrono.count() << " ms" << std::endl;
+        std::cout << "Time for modified block-wise thrust shuffle (sequential) for a thrust::device_vector (GPU)"
+                     " with block of size " << block_size << " is "
+                     "using chrono: "
+                     << elapsed_device_chrono.count() << " ms" << std::endl;
 
-
+        std::cout << std::endl;
     }
 
     void iterative_sparse_vector_matrix_mul(
@@ -1242,26 +1195,26 @@ namespace osuCrypto {
         thrust::device_vector<uint64_t> data(n);
         thrust::sequence(data.begin(), data.end(), 0);
 
-        std::cout << "Before feistel shuffle:\n";
+        //std::cout << "Before feistel shuffle:\n";
         thrust::host_vector<uint64_t> h_data = data;
-        for (size_t i = 0; i < h_data.size(); ++i) {
-            std::cout << static_cast<int>(h_data[i]) << " ";
-        }
-        std::cout << "\n";
+        //for (size_t i = 0; i < h_data.size(); ++i) {
+        //    std::cout << static_cast<int>(h_data[i]) << " ";
+        //}
+        //std::cout << "\n";
 
-        shuffle_blocks_uint64(data, block_size);
+        shuffle_blocks_feistel<uint64_t>(data, block_size);
 
         std::vector<int> verify_bijection(n, 1);
-        std::cout << "After feistel shuffle:\n";
+        //std::cout << "After feistel shuffle:\n";
         h_data = data;
         for (size_t i = 0; i < h_data.size(); ++i) {
-            std::cout << static_cast<int>(h_data[i]) << " ";
+            //std::cout << static_cast<int>(h_data[i]) << " ";
             verify_bijection[h_data[i]]--;
         }
-        std::cout << "\n";
+        //std::cout << "\n";
 
         for (const auto& vb:  verify_bijection) {
-            if (vb != 0) throw std::runtime_error("not perfect bijection");
+            if (vb != 0) throw std::runtime_error("Not a perfect bijection");
         }        
     }
 
@@ -1302,23 +1255,17 @@ namespace osuCrypto {
         test_cuda_compiled();
 
         //
-        // test block multiply with thrust and cuda
+        // BENCHMARKS
         //
-        test_thrust_block_multiply();
-        test_cuda_block_multiply();
 
-        //
         // Benchmark different permutations
-        //
         benchmark_permutations();
 
-        //
-        // TODO INCOMPLETE test_code_thrust()
-        //
+        std::cout << "BENCHMARKING OUR CODES:" << std::endl;
 
-        //
+        // TODO INCOMPLETE test_code_thrust()
+
         // benchmark code cuda (non recursive) with fixed sigma
-        //
         benchmark_code_cuda();
 
         //
@@ -1331,15 +1278,25 @@ namespace osuCrypto {
         //
         benchmark_iterative_sparse_vector_matrix_mul();
 
-        //
-        // Shuffle, split vector into equal sized blocks and shuffle each
-        //
-        test_feistel_shuffle();
+
 
         //
-        // Shuffle, split vector into equal sized blocks and shuffle each
+        // DIFFERENT TESTS
         //
-        //test_modified_thrust_shuffle();
+
+        // test block multiply with thrust and cuda
+        test_thrust_block_multiply();
+        test_cuda_block_multiply();
+
+
+        // Shuffle, split vector into equal sized blocks and shuffle each
+        // Do NOT use this one (just done for comparison)
+        // TODO add test case here
+        //test_modified_thrust_shuffle
+
+        // Shuffle, split vector into equal sized blocks and shuffle each
+        // Use this shuffle
+        test_feistel_shuffle();
 
 
 
