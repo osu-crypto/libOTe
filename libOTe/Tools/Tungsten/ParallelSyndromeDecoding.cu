@@ -529,10 +529,6 @@ namespace osuCrypto {
     // Thrust's implementation of feistel bijection
     // An implementation of a Feistel cipher for operating on 64 bit keys
     class feistel_bijection {
-        struct round_state {
-            std::uint32_t left;
-            std::uint32_t right;
-        };
 
     public:
         __host__ __device__ feistel_bijection(std::uint64_t m, std::uint32_t num_rounds) {
@@ -1009,7 +1005,7 @@ namespace osuCrypto {
         start_device_chrono = std::chrono::high_resolution_clock::now();
 
         // Shuffle the device_vector
-        uint64_t block_size = n / 4;
+        uint64_t block_size = n;
         shuffle_blocks_uint64(d_vec2, block_size); // 1 block
 
 
