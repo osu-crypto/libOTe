@@ -1087,7 +1087,7 @@ namespace osuCrypto {
         std::cout << std::endl;
     }
 
-    void iterative_sparse_vector_matrix_mul(
+    void iterative_code_cuda(
         const thrust::device_vector<T>& x,
         thrust::device_vector<T>& result,
         std::vector<int>& sigma,
@@ -1147,8 +1147,7 @@ namespace osuCrypto {
         }
     }
 
-
-    void benchmark_iterative_sparse_vector_matrix_mul() {
+    void benchmark_iterative_coda_cuda() {
         constexpr int k = 1 << 20; // 2^20
         constexpr int n = 1 << 21; // 2^21
         std::vector<int> sigmas = { 2048, 128 };
@@ -1169,7 +1168,7 @@ namespace osuCrypto {
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        iterative_sparse_vector_matrix_mul(
+        iterative_code_cuda(
             d_x,
             d_result,
             sigmas,
@@ -1281,8 +1280,7 @@ namespace osuCrypto {
         //
         // like the recursive approach above, but much more in parallel (reduces #kernel launches and fills gpu)
         //
-        benchmark_iterative_sparse_vector_matrix_mul();
-
+        benchmark_iterative_coda_cuda();
 
 
         //
@@ -1300,9 +1298,6 @@ namespace osuCrypto {
         // Shuffle, split vector into equal sized blocks and shuffle each
         // Use this shuffle
         test_feistel_shuffle();
-
-
-
     }
 
 } // namespace osuCrypto
