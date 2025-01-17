@@ -526,8 +526,71 @@ namespace osuCrypto {
 
     }
 
+    // Thrust's implementation of feistel bijection
+    // An implementation of a Feistel cipher for operating on 64 bit keys
+    class feistel_bijection {
+        struct round_state {
+            std::uint32_t left;
+            std::uint32_t right;
+        };
+
+    public:
+        __host__ __device__ feistel_bijection(std::uint64_t m, std::uint32_t num_rounds) {
+            std::uint64_t total_bits = get_cipher_bits(m);
+            // Half bits rounded down
+            left_side_bits = total_bits / 2;
+            left_side_mask = (1ull << left_side_bits) - 1;
+            // Half the bits rounded up
+            right_side_bits = total_bits - left_side_bits;
+            right_side_mask = (1ull << right_side_bits) - 1;
+            this->num_rounds = num_rounds;
+        }
+
+        __host__ __device__ std::uint64_t operator()(const std::uint64_t val, std::uint32_t *key) const {
+            std::uint32_t state[2] = { static_cast<std::uint32_t>(val >> right_side_bits), static_cast<std::uint32_t>(val & right_side_mask) };
+            for (std::uint32_t i = 0; i < num_rounds; i++)
+            {
+                std::uint32_t hi, lo;
+                constexpr std::uint64_t M0 = UINT64_C(0xD2B74407B1CE6E93);
+                mulhilo(M0, state[0], hi, lo);
+                lo = (lo << (right_side_bits - left_side_bits)) | state[1] >> left_side_bits;
+                state[0] = ((hi ^ key[i]) ^ state[1]) & left_side_mask;
+                state[1] = lo & right_side_mask;
+            }
+            // Combine the left and right sides together to get result
+            return static_cast<std::uint64_t>(state[0] << right_side_bits) | static_cast<std::uint64_t>(state[1]);
+        }
+
+    private:
+        // Perform 64 bit multiplication and save result in two 32 bit int
+        static __host__ __device__ void mulhilo(std::uint64_t a, std::uint64_t b, std::uint32_t& hi, std::uint32_t& lo)
+        {
+            std::uint64_t product = a * b;
+            hi = static_cast<std::uint32_t>(product >> 32);
+            lo = static_cast<std::uint32_t>(product);
+        }
+
+        // Find the nearest power of two
+        static __host__ __device__ std::uint64_t get_cipher_bits(std::uint64_t m) {
+            if (m <= 16) return 4;
+            std::uint64_t i = 0;
+            m--;
+            while (m != 0) {
+                i++;
+                m >>= 1;
+            }
+            return i;
+        }
+
+        std::uint32_t num_rounds;
+        std::uint64_t right_side_bits;
+        std::uint64_t left_side_bits;
+        std::uint64_t right_side_mask;
+        std::uint64_t left_side_mask;
+    };
+
     // Feistel cipher-based bijection for pseudorandom permutation
-    __device__ uint64_t feistel_bijection(uint64_t idx, uint64_t n, uint32_t* keys, int num_rounds, uint64_t block_id) {
+    /*__device__ uint64_t feistel_bijection(uint64_t idx, uint64_t n, uint32_t* keys, int num_rounds, uint64_t block_id) {
         uint32_t left = static_cast<uint32_t>(idx >> 32);
         uint32_t right = static_cast<uint32_t>(idx & 0xFFFFFFFF);
 
@@ -542,46 +605,54 @@ namespace osuCrypto {
         }
 
         return ((static_cast<uint64_t>(left) << 32) | right) % n;
-    }
+    }*/
 
 
     // CUDA kernel for block-wise shuffle of uint8_t data
-    __global__ void shuffle_blocks_uint8_kernel(
-        uint8_t* data, // Pointer to the vector to be shuffled
+    __global__ void shuffle_blocks_uint64_kernel(
+        uint64_t* data, // Pointer to the vector to be shuffled
         uint64_t n, // Total number of elements in the input vector
         uint64_t block_size, // Size of each block to shuffle independently
         uint32_t* keys, // Array of random keys used for the Feistel bijection to generate pseudorandom permutations
-        int num_rounds) { // Number of Feistel rounds for generating pseudorandom indices
+        uint32_t num_rounds) { // Number of Feistel rounds for generating pseudorandom indices
         uint64_t tid = threadIdx.x + blockIdx.x * blockDim.x; // Compute global thread ID
-        uint64_t block_id = tid / block_size;  // Identify the block
+        uint64_t block_id = tid / block_size;  // Identify the block (the chunk of the array i am permuting)
         
         uint64_t block_start = block_id * block_size; // Calculates the starting index of the block 
                                                       // the thread is operating on
         // uint64_t block_end = min(block_start + block_size, n); // Calculates the ending index of the block
+       
 
         // Print thread information for debugging
         //printf("Thread %llu: block_start=%llu, block_end=%llu, block_id=%llu\\n", 
         //    tid, block_start, block_end, block_id);
 
+        feistel_bijection bijection (block_size, num_rounds);
+        //printf("Thread %llu: feistel 0=%llu, feistel 1=%llu, feistel 2=%llu, feistel 3=%llu\\n", tid,
+        //    bijection(0, keys + keys_start), bijection(1, keys + keys_start),
+        //    bijection(2, keys + keys_start), bijection(3, keys + keys_start));
+
         // Note tid can be >= n
         if (tid < n && block_start < n) {
+                uint64_t keys_start = block_id * num_rounds;
                 // Maps the local block index (i - block_start) to a pseudorandom index within the block
                 uint64_t index_to_permute = tid - block_start;
-                uint64_t permuted_idx = feistel_bijection(index_to_permute, block_size, keys, num_rounds, block_id)
-                    + block_start;
-
+                //printf("index to permute: %llu\\n", index_to_permute);
+                uint64_t permuted_idx = bijection(index_to_permute, keys + keys_start) + block_start;
+                printf("block start: %llu\\n", block_start);
+                //printf("permuted index: %llu\\n", permuted_idx);
                 // Swap data[i] and data[permuted_idx]
-                if (index_to_permute < permuted_idx) { // Ensures that each pair is swapped only once, avoiding redundant swaps
-                    uint8_t temp = data[index_to_permute];
-                    data[index_to_permute] = data[permuted_idx];
+                if (tid < permuted_idx) { // Ensures that each pair is swapped only once, avoiding redundant swaps
+                    uint64_t temp = data[tid];
+                    data[tid] = data[permuted_idx];
                     data[permuted_idx] = temp;
                 }
         }
     }
 
     // Wrapper function to shuffle a thrust::device_vector containing uint8_t data
-    void shuffle_blocks_uint8(
-        thrust::device_vector<T>& data, // The vector of uint8_t elements to shuffle
+    void shuffle_blocks_uint64(
+        thrust::device_vector<uint64_t>& data, // The vector of uint64_t elements to shuffle
         uint64_t block_size) { // Specifies the size of each block that will be independently shuffled
         uint64_t n = data.size();
         // block size must evenly divide the total number of elements
@@ -593,16 +664,18 @@ namespace osuCrypto {
             throw std::invalid_argument("n should be a power of 2");
         }
 
-        const int num_rounds = 24; // The number of Feistel rounds to use in the pseudorandom permutation
+        uint32_t num_rounds = 24; // The number of Feistel rounds to use in the pseudorandom permutation
                                    // same as in the thrust implementation
-        thrust::host_vector<uint32_t> h_keys(num_rounds);
+        const int num_blocks = n / block_size;
+        const int num_keys = num_rounds * num_blocks; // for each round and each block, unique feistel keys
+        thrust::host_vector<uint32_t> h_keys (num_keys);
         // NOTE need to generate fresh randomness for each block (look at feistel_bijection)
         // so that each block is shuffled differently
         // thrust::default_random_engine rng; // default seed (SAME each time)
         thrust::default_random_engine rng(static_cast<unsigned int>(time(0)));
 
-        for (int i = 0; i < num_rounds; ++i) {
-            h_keys[i] = rng(); // A random key is generated for each round using thrust::default_random_engine
+        for (int i = 0; i < num_keys; ++i) {
+            h_keys[i] = rng(); // A random key is generated for each round/block using thrust::default_random_engine
         }
 
         thrust::device_vector<uint32_t> d_keys = h_keys; // Copy keys to device
@@ -614,7 +687,7 @@ namespace osuCrypto {
                                                                  // Determines the total number of blocks 
                                                                  // needed to cover all n elements
         std::cout << "blocks per grid: " << blocks_per_grid << std::endl;
-        shuffle_blocks_uint8_kernel << <blocks_per_grid, threads_per_block >> > (
+        shuffle_blocks_uint64_kernel << <blocks_per_grid, threads_per_block >> > (
             thrust::raw_pointer_cast(data.data()), n, block_size,
             thrust::raw_pointer_cast(d_keys.data()), num_rounds);
 
@@ -921,7 +994,7 @@ namespace osuCrypto {
         //
 
         // Create a device_vector with some data
-        thrust::device_vector<uint8_t> d_vec2(n);
+        thrust::device_vector<uint64_t> d_vec2(n);
         // Fill the vector with sequential values (0, 1, 2, ..., n-1)
         thrust::transform(thrust::make_counting_iterator(0),
             thrust::make_counting_iterator(n),
@@ -932,7 +1005,8 @@ namespace osuCrypto {
 
         // Shuffle the device_vector
         uint64_t block_size = n;
-        shuffle_blocks_uint8(d_vec2, block_size); // 1 block
+        // T
+        //shuffle_blocks_uint64(d_vec2, block_size); // 1 block
 
 
         stop_device_chrono = std::chrono::high_resolution_clock::now();
@@ -1074,24 +1148,34 @@ namespace osuCrypto {
 
 
     void test_feistel_shuffle() {
-        thrust::device_vector<uint8_t> data(16);
+        int n = 128;
+        int block_size = 16;
+        thrust::device_vector<uint64_t> data(n);
         thrust::sequence(data.begin(), data.end(), 0);
 
-        std::cout << "Before shuffle:\n";
-        thrust::host_vector<uint8_t> h_data = data;
+        std::cout << "Before feistel shuffle:\n";
+        thrust::host_vector<uint64_t> h_data = data;
         for (size_t i = 0; i < h_data.size(); ++i) {
             std::cout << static_cast<int>(h_data[i]) << " ";
         }
         std::cout << "\n";
 
-        shuffle_blocks_uint8(data, 4);
+        shuffle_blocks_uint64(data, block_size);
 
-        std::cout << "After shuffle:\n";
+        std::vector<int> verify_bijection(n, 1);
+        std::cout << "After feistel shuffle:\n";
         h_data = data;
         for (size_t i = 0; i < h_data.size(); ++i) {
             std::cout << static_cast<int>(h_data[i]) << " ";
+            verify_bijection[h_data[i]]--;
         }
         std::cout << "\n";
+
+        int num_errors = 0;
+        for (const auto& vb:  verify_bijection) {
+            if (vb != 0) num_errors++;// throw std::runtime_error("not perfect bijection");
+        }        
+        std::cout << "Number of errors in bijection " << num_errors << std::endl;
     }
 
 
@@ -1169,7 +1253,7 @@ namespace osuCrypto {
         //
         // Shuffle, split vector into equal sized blocks and shuffle each
         //
-        test_modified_thrust_shuffle();
+        //test_modified_thrust_shuffle();
 
 
 
