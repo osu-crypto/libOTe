@@ -857,9 +857,6 @@ namespace osuCrypto {
         std::vector<int> sigmas = { 2048, 128 };  // Block size ~ (2 * sqrt(k))
         int baseRecursiveDepth = sigmas.size() - 1; // starts with 0
 
-        std::cout << "k: " << k << std::endl;
-        std::cout << "n: " << n << std::endl;
-
         int e = n / k;
         if (k * e != n) throw std::runtime_error("invalid k, n");
         if (k % sigmas[0] != 0) throw std::runtime_error("invalid sigmas[0]");
