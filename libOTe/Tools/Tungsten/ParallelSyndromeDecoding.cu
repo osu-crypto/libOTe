@@ -526,9 +526,83 @@ namespace osuCrypto {
 
     }
 
-    // Thrust's implementation of feistel bijection
+    // Thrust's implementation of feistel bijection (slightly refactored)
+    // operating on 64-bit keys
+    // Transformed into functions
+    
+    // Define a struct to hold the Feistel parameters
+    struct FeistelParams {
+        std::uint64_t left_side_bits;
+        std::uint64_t left_side_mask;
+        std::uint64_t right_side_bits;
+        std::uint64_t right_side_mask;
+        std::uint32_t num_rounds;
+    };
+
+    // Find the nearest power of two
+    __host__ __device__ std::uint64_t get_cipher_bits(std::uint64_t m) {
+        if (m <= 16) return 4;
+        std::uint64_t i = 0;
+        m--;
+        while (m != 0) {
+            i++;
+            m >>= 1;
+        }
+        return i;
+    }
+
+    // Function to set Feistel parameters and return them as a struct
+    __host__ __device__ FeistelParams initialize_feistel_params(std::uint64_t m, std::uint32_t num_rounds) {
+        std::uint64_t total_bits = get_cipher_bits(m);
+
+        FeistelParams params;
+        // Half bits rounded down
+        params.left_side_bits = total_bits / 2;
+        params.left_side_mask = (1ull << params.left_side_bits) - 1;
+        // Half the bits rounded up
+        params.right_side_bits = total_bits - params.left_side_bits;
+        params.right_side_mask = (1ull << params.right_side_bits) - 1;
+
+        // Set the number of rounds
+        params.num_rounds = num_rounds;
+
+        return params;
+    }
+
+    // Perform 64 bit multiplication and save result in two 32 bit int
+    __host__ __device__ void mulhilo(std::uint64_t a, std::uint64_t b, std::uint32_t& hi, std::uint32_t& lo)
+    {
+        std::uint64_t product = a * b;
+        hi = static_cast<std::uint32_t>(product >> 32);
+        lo = static_cast<std::uint32_t>(product);
+    }
+
+    __host__ __device__ std::uint64_t feistel_bijection(
+        const std::uint64_t val, 
+        std::uint32_t* key,
+        std::uint64_t left_side_bits,
+        std::uint64_t left_side_mask,
+        std::uint64_t right_side_bits,
+        std::uint64_t right_side_mask,    
+        std::uint32_t num_rounds
+        ) {
+        std::uint32_t state[2] = { static_cast<std::uint32_t>(val >> right_side_bits), static_cast<std::uint32_t>(val & right_side_mask) };
+        for (std::uint32_t i = 0; i < num_rounds; i++)
+        {
+            std::uint32_t hi, lo;
+            constexpr std::uint64_t M0 = UINT64_C(0xD2B74407B1CE6E93);
+            mulhilo(M0, state[0], hi, lo);
+            lo = (lo << (right_side_bits - left_side_bits)) | state[1] >> left_side_bits;
+            state[0] = ((hi ^ key[i]) ^ state[1]) & left_side_mask;
+            state[1] = lo & right_side_mask;
+        }
+        // Combine the left and right sides together to get result
+        return static_cast<std::uint64_t>(state[0] << right_side_bits) | static_cast<std::uint64_t>(state[1]);
+    }
+     
+    
     // An implementation of a Feistel cipher for operating on 64 bit keys
-    class feistel_bijection {
+    /*class feistel_bijection {
 
     public:
         __host__ __device__ feistel_bijection(std::uint64_t m, std::uint32_t num_rounds) {
@@ -583,7 +657,7 @@ namespace osuCrypto {
         std::uint64_t left_side_bits;
         std::uint64_t right_side_mask;
         std::uint64_t left_side_mask;
-    };
+    };*/
 
     // Feistel cipher-based bijection for pseudorandom permutation
     /*__device__ uint64_t feistel_bijection(uint64_t idx, uint64_t n, uint32_t* keys, int num_rounds, uint64_t block_id) {
@@ -611,7 +685,12 @@ namespace osuCrypto {
         uint64_t n, // Total number of elements in the input vector
         uint64_t block_size, // Size of each block to shuffle independently
         uint32_t* keys, // Array of random keys used for the Feistel bijection to generate pseudorandom permutations
-        uint32_t num_rounds) { // Number of Feistel rounds for generating pseudorandom indices
+        uint32_t num_rounds, // Number of Feistel rounds for generating pseudorandom indices
+        uint64_t left_side_bits,
+        uint64_t left_side_mask,
+        uint64_t right_side_bits,
+        uint64_t right_side_mask
+        ) { 
         uint64_t tid = threadIdx.x + blockIdx.x * blockDim.x; // Compute global thread ID
         uint64_t block_id = tid / block_size;  // Identify the block (the chunk of the array i am permuting)
         
@@ -624,7 +703,6 @@ namespace osuCrypto {
         //printf("Thread %llu: block_start=%llu, block_end=%llu, block_id=%llu\\n", 
         //    tid, block_start, block_end, block_id);
 
-        feistel_bijection bijection (block_size, num_rounds);
         //printf("Thread %llu: feistel 0=%llu, feistel 1=%llu, feistel 2=%llu, feistel 3=%llu\\n", tid,
         //    bijection(0, keys + keys_start), bijection(1, keys + keys_start),
         //    bijection(2, keys + keys_start), bijection(3, keys + keys_start));
@@ -635,7 +713,15 @@ namespace osuCrypto {
                 // Maps the local block index (i - block_start) to a pseudorandom index within the block
                 uint64_t index_to_permute = tid - block_start;
                 //printf("index to permute: %llu\\n", index_to_permute);
-                uint64_t permuted_idx = bijection(index_to_permute, keys + keys_start) + block_start;
+                uint64_t permuted_idx = feistel_bijection(
+                    index_to_permute, 
+                    keys + keys_start,
+                    left_side_bits,
+                    left_side_mask,
+                    right_side_bits,
+                    right_side_mask,
+                    num_rounds)
+                    + block_start;
                 //printf("block start: %llu\\n", block_start);
                 // printf("permuted index: %llu", permuted_idx);
                 // gather
@@ -679,6 +765,8 @@ namespace osuCrypto {
 
         thrust::device_vector<uint32_t> d_keys = h_keys; // Copy keys to device
 
+        FeistelParams feistel_params = initialize_feistel_params(block_size, num_rounds);
+
         // Launch kernel
         int threads_per_block = 256; //block_size; // Sets the number of threads in each block (exactly 8 warps)
         int blocks_per_grid = (n + threads_per_block - 1) / threads_per_block; 
@@ -688,7 +776,9 @@ namespace osuCrypto {
         std::cout << "blocks per grid: " << blocks_per_grid << std::endl;
         shuffle_blocks_uint64_kernel << <blocks_per_grid, threads_per_block >> > (
             thrust::raw_pointer_cast(data.data()), thrust::raw_pointer_cast(result.data()), n, block_size,
-            thrust::raw_pointer_cast(d_keys.data()), num_rounds);
+            thrust::raw_pointer_cast(d_keys.data()), num_rounds, 
+            feistel_params.left_side_bits, feistel_params.left_side_mask,
+            feistel_params.right_side_bits, feistel_params.right_side_mask);
 
         cudaDeviceSynchronize();
 
@@ -1148,7 +1238,7 @@ namespace osuCrypto {
 
     void test_feistel_shuffle() {
         int n = 128;
-        int block_size = 32;
+        int block_size = 16;
         thrust::device_vector<uint64_t> data(n);
         thrust::sequence(data.begin(), data.end(), 0);
 
@@ -1243,7 +1333,6 @@ namespace osuCrypto {
 
         //
         // Shuffle, split vector into equal sized blocks and shuffle each
-        // TODO currently buggy
         //
         test_feistel_shuffle();
 
