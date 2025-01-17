@@ -1183,6 +1183,7 @@ namespace osuCrypto {
 
         std::cout << "Time to compute optimized iterative CUDA implementation: "
             << elapsed.count() << " ms" << std::endl;
+        std::cout << "TODO Iterative method incomplete" << std::endl;
     }
 
 
@@ -1218,30 +1219,37 @@ namespace osuCrypto {
 
 
     void test_modified_thrust_shuffle() {
-        thrust::device_vector<uint64_t> data(16);
+        int n = 128;
+        int block_size = 16;
+
+        thrust::device_vector<uint64_t> data(n);
         thrust::sequence(data.begin(), data.end(), 0);
 
-        std::cout << "Before shuffle:\n";
+        //std::cout << "Before shuffle:\n";
         thrust::host_vector<uint64_t> h_data = data;
-        for (size_t i = 0; i < h_data.size(); ++i) {
-            std::cout << static_cast<int>(h_data[i]) << " ";
-        }
-        std::cout << "\n";
-
-        std::size_t chunk_size = 4;         // Example chunk size
+        //for (size_t i = 0; i < h_data.size(); ++i) {
+        //    std::cout << static_cast<int>(h_data[i]) << " ";
+        //}
+        //std::cout << "\n";
 
         thrust::default_random_engine rng;
         auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
         rng.seed(static_cast<unsigned int>(seed)); // Seed based on current time
 
-        shuffle_chunks(thrust::cuda::par, data.begin(), data.end(), chunk_size, rng);
+        shuffle_chunks(thrust::cuda::par, data.begin(), data.end(), block_size, rng);
 
-        std::cout << "After shuffle:\n";
+        std::vector<int> verify_bijection(n, 1);
+        //std::cout << "After shuffle:\n";
         h_data = data;
         for (size_t i = 0; i < h_data.size(); ++i) {
-            std::cout << static_cast<int>(h_data[i]) << " ";
+            //std::cout << static_cast<int>(h_data[i]) << " ";
+            verify_bijection[h_data[i]]--;
         }
-        std::cout << "\n";
+        //std::cout << "\n";
+
+        for (const auto& vb : verify_bijection) {
+            if (vb != 0) throw std::runtime_error("Not a perfect bijection");
+        }
     }
 
 
@@ -1285,11 +1293,9 @@ namespace osuCrypto {
         test_thrust_block_multiply();
         test_cuda_block_multiply();
 
-
         // Shuffle, split vector into equal sized blocks and shuffle each
         // Do NOT use this one (just done for comparison)
-        // TODO add test case here
-        //test_modified_thrust_shuffle
+        test_modified_thrust_shuffle();
 
         // Shuffle, split vector into equal sized blocks and shuffle each
         // Use this shuffle
