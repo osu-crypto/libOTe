@@ -21,8 +21,6 @@
 
 namespace osuCrypto {
 
-    using T = uint8_t; // Binary representation as uint8_t
-
     __global__ void test_kernel() {
         printf("CUDA Kernel Executed\n");
     }
@@ -96,6 +94,7 @@ namespace osuCrypto {
     }
 
     // block multiply function with thrust
+    // NOTE currently tests only for uint8_t as BlockVectorColumnMultiply is for uint8_t only
     void test_thrust_block_multiply() {
         constexpr int k = 9;// 1 << 20; // Total rows of G and size of vector x
         constexpr int e = 2; // Scaling factor (n/k)
@@ -109,40 +108,40 @@ namespace osuCrypto {
         //
 
         // --- Host Input Vector x ---
-        std::vector<T> h_vector = { 1, 1, 1,
-                                            0, 0, 1,
-                                                    1, 0, 1 }; // Binary vector of size k
+        std::vector<uint8_t> h_vector = { 1, 1, 1,
+                                                   0, 0, 1,
+                                                            1, 0, 1 }; // Binary vector of size k
 
         // --- Host Block Matrices (G1, G2, ..., Gt) ---
-        // std::vector<std::vector<T>> h_blocks(t, std::vector<T>(sigma * (sigma * e), 1));
-        std::vector<std::vector<T>> h_blocks = { {1,0,1,1,1,0,
-                                                  1,1,1,0,0,0,
-                                                  0,1,0,1,0,1},
-                                                               {1,1,1,1,1,1,
-                                                                0,0,0,0,0,0,
-                                                                1,1,1,0,0,0},
-                                                                             {1,1,0,0,1,1,
-                                                                              1,0,1,1,1,0,
-                                                                              0,0,0,1,0,1} };
-        // --- Host Expected xG ---
-        std::vector<T> h_expected_result = { 0,0,0,0,1,1,
+        // std::vector<std::vector<uint8_t>> h_blocks(t, std::vector<uint8_t>(sigma * (sigma * e), 1));
+        std::vector<std::vector<uint8_t>> h_blocks = { {1,0,1,1,1,0,
                                                         1,1,1,0,0,0,
-                                                                    1,1,0,1,1,0 };
+                                                        0,1,0,1,0,1},
+                                                                   {1,1,1,1,1,1,
+                                                                    0,0,0,0,0,0,
+                                                                    1,1,1,0,0,0},
+                                                                                 {1,1,0,0,1,1,
+                                                                                  1,0,1,1,1,0,
+                                                                                  0,0,0,1,0,1} };
+        // --- Host Expected xG ---
+        std::vector<uint8_t> h_expected_result = { 0,0,0,0,1,1,
+                                                               1,1,1,0,0,0,
+                                                                           1,1,0,1,1,0 };
 
         // --- Transfer Data to GPU ---
-        thrust::device_vector<T> d_vector = h_vector; // Vector x on GPU
+        thrust::device_vector<uint8_t> d_vector = h_vector; // Vector x on GPU
 
         // --- Final Result Vector on GPU ---
-        thrust::device_vector<T> d_result(n, 0);      
+        thrust::device_vector<uint8_t> d_result(n, 0);
 
         for (int i = 0; i < t; ++i) {
 
             // Transfer current block Gi to GPU
-            thrust::device_vector<T> d_block = h_blocks[i];
-            thrust::device_vector<T> d_block_result(block_cols, 0);
+            thrust::device_vector<uint8_t> d_block = h_blocks[i];
+            thrust::device_vector<uint8_t> d_block_result(block_cols, 0);
 
             // Extract the relevant slice of vector x (size sigma)
-            thrust::device_vector<T> d_vector_slice(
+            thrust::device_vector<uint8_t> d_vector_slice(
                 d_vector.begin() + i * sigma,
                 d_vector.begin() + (i + 1) * sigma
             );
@@ -170,7 +169,7 @@ namespace osuCrypto {
         }
 
         // Copy results back to host
-        thrust::host_vector<T> h_result_gpu = d_result;
+        thrust::host_vector<uint8_t> h_result_gpu = d_result;
 
         // Verify correctness
         for (size_t i = 0; i < n; i++) {
@@ -180,56 +179,6 @@ namespace osuCrypto {
                 throw std::runtime_error("Computed result not as expected");
         }
         std::cout << std::endl;
-    }
-
-    // TODO Incomplete (Entirely implemented in thrust)
-    void test_code_thrust() {
-
-        // Set up pseudorandom generator
-        unsigned int seed = static_cast<unsigned int>(time(0)); // Random seed
-        thrust::default_random_engine rnggpu(seed);
-        std::mt19937 rngcpu(std::random_device{}()); // Random number generator
-        std::bernoulli_distribution dist(0.5);    // 50% chance for 0 or 1
-        /*
-        //
-        // Initialize x, G, and empty xG, and move them from host to device
-        //
-        // --- Host Input Vector x ---
-        std::vector<T> h_x(k); // Binary vector of size k
-        for (auto& val : h_x) {
-            val = dist(rngcpu); // Generate 0 or 1 and assign to the vector
-            // std::cout << static_cast<int>(val);
-        }
-
-        // --- Host Block Matrices (G1, G2, ..., Gt) ---
-        std::vector<std::vector<T>> h_G(t, std::vector<T>(sigma * (sigma * e)));
-
-        // Fill the vector with random binary values
-        for (size_t i = 0; i < t; ++i) {
-            for (size_t j = 0; j < h_G[0].size(); ++j) {
-                h_G[i][j] = dist(rngcpu); // Assign random 0 or 1
-            }
-        }
-
-        // --- Host Result Vector ---
-        std::vector<T> h_xG(n, 0);
-
-        // --- Transfer Data to GPU ---
-        thrust::device_vector<T> d_x = h_x; // Vector x on GPU
-        thrust::device_vector<T> d_xG(n, 0); // Final result vector on GPU
-        */
-        //
-        // Expanding block multiply (G: kxn)
-        // TODO
-
-
-        //
-        // Permute
-        // TODO
-
-        //
-        // Block Multiply (G: nxn)
-        // TODO
     }
 
     // mixing hash function (MurmurHash3)
@@ -262,7 +211,7 @@ namespace osuCrypto {
     // Data structure for sparse matrices
     // CSR-like representation for the diagonal blocks of G (compressed sparse row)
     struct BlockMatrix {
-        thrust::device_vector<T> data;      // Non-zero entries (flattened)
+        thrust::device_vector<uint8_t> data;      // Non-zero entries (flattened)
         thrust::device_vector<int> blockOffsets; // Starting index of each block in data
         thrust::device_vector<int> rowIndices;   // Row indices of non-zero blocks
         thrust::device_vector<int> colIndices;   // Column indices of non-zero blocks
@@ -284,7 +233,7 @@ namespace osuCrypto {
         mat.colIndices.resize(mat.t); // Col start for each block
 
         // Fill the vector with random binary values
-        std::vector<T> h_mat(mat.data.size());
+        std::vector<uint8_t> h_mat(mat.data.size());
         for (size_t i = 0; i < mat.data.size(); ++i) {
             h_mat[i] = dist(rngcpu); // Assign random 0 or 1
         }
@@ -333,13 +282,14 @@ namespace osuCrypto {
         thrust::sequence(mat.colIndices.begin(), mat.colIndices.end(), 0, sigma * mat.e);
     }
 
+    template <typename T>
     __global__ void sparse_vector_matrix_mul(
-        const T* x,
-        const T* blockData,
+        const T* x, // field
+        const uint8_t* blockData, // binary
         const int* blockOffsets,
         const int* rowIndices,
         const int* colIndices,
-        T* result,
+        T* result, // field
         int sigma, int e, int t) {
         int blockIdxGlobal = blockIdx.x; // [0,t)
         int threadIdxLocal = threadIdx.x; // [0,sigma*e)
@@ -353,15 +303,23 @@ namespace osuCrypto {
             if (threadIdxLocal < sigma * e) {
                 T temp = 0;
                 for (int row = 0; row < sigma; ++row) {
-                    temp ^= (x[row_start + row] & blockData[data_start + threadIdxLocal + row * (sigma * e)]);
+                    // line below if both binary
+                    //temp ^= (x[row_start + row] & blockData[data_start + threadIdxLocal + row * (sigma * e)]);
+                    temp += x[row_start + row] &
+                        static_cast<T>(
+                            -static_cast<int8_t>(
+                                blockData[data_start + threadIdxLocal + row * (sigma * e)]
+                            )
+                        );
                 }
                 result[col_start + threadIdxLocal] = temp;
             }
         }
     }
 
-
-    void sparse_vector_matrix_mul_host(const thrust::device_vector<T>& x,
+    template <typename T>
+    void sparse_vector_matrix_mul_host(
+        const thrust::device_vector<T>& x,
         const BlockMatrix& mat,
         thrust::device_vector<T>& result) {
         int threadsPerBlock = mat.sigma * mat.e;
@@ -389,6 +347,7 @@ namespace osuCrypto {
         }
     }
 
+    template <typename T>
     void recursive_sparse_vector_matrix_mul_host(
         const thrust::device_vector<T>& x,
         int start_x,
@@ -421,27 +380,31 @@ namespace osuCrypto {
         }
     }
 
+    template <typename T>
     void gpu_shuffle(thrust::device_vector<T>& data) {
         thrust::default_random_engine rnggpu(static_cast<unsigned int>(time(0)));
         thrust::shuffle(data.begin(), data.end(), rnggpu);
     }
 
-    void code_cuda(const thrust::device_vector<T>& x,
+    template <typename T>
+    void code_cuda(
+        const thrust::device_vector<T>& x,
         const BlockMatrix& G,
         const BlockMatrix& H,
         thrust::device_vector<T>& result) {
         thrust::device_vector<T> intermediate_result(result.size());
 
          // Step 1: xG Multiplication
-         sparse_vector_matrix_mul_host(x, G, intermediate_result);
+         sparse_vector_matrix_mul_host<T>(x, G, intermediate_result);
 
          // Step 2: Shuffle
-         gpu_shuffle(intermediate_result);
+         gpu_shuffle<T>(intermediate_result);
 
          // Step 3: xH Multiplication
-         sparse_vector_matrix_mul_host(intermediate_result, H, result);
+         sparse_vector_matrix_mul_host<T>(intermediate_result, H, result);
     }
 
+    template <typename T>
     void recursive_code_cuda(
         const thrust::device_vector<T>& x, // does not change across recursion, we index into it
         int start_x, // index to the part of x i am recursing on
@@ -471,16 +434,16 @@ namespace osuCrypto {
         // Base case
         if (currRecursiveDepth == baseRecursiveDepth) {
             // Step1: xG Multiplication
-            recursive_sparse_vector_matrix_mul_host(x, start_x,
-                                                    intermediate_result, 0,
-                                                    sigma[currRecursiveDepth], e, t);
+            recursive_sparse_vector_matrix_mul_host<T>(x, start_x,
+                                                       intermediate_result, 0,
+                                                       sigma[currRecursiveDepth], e, t);
             // Step 2: Shuffle
-            gpu_shuffle(intermediate_result);
+            gpu_shuffle<T>(intermediate_result);
             // Step 3: (xGpi)H Multiplication
             // Note: different inputs from step 1, as can be reached when recursing on xG or (xGpi)H
-            recursive_sparse_vector_matrix_mul_host(intermediate_result, 0, 
-                                                    result, start_result,
-                                                    sigma[currRecursiveDepth], 1, e * t);
+            recursive_sparse_vector_matrix_mul_host<T>(intermediate_result, 0, 
+                                                       result, start_result,
+                                                       sigma[currRecursiveDepth], 1, e * t);
 
             return;
         }
@@ -489,7 +452,7 @@ namespace osuCrypto {
         // iterate over the t Gi's
         for (int i = 0; i < t; ++i) {
             // call recursive_code_cuda on each, with currRecursiveDepth+1
-            recursive_code_cuda(
+            recursive_code_cuda<T>(
                 x,
                 start_x + sigma[currRecursiveDepth] * i, // start x
                 intermediate_result,
@@ -504,13 +467,13 @@ namespace osuCrypto {
         }
         
         // Top level Shuffle
-        gpu_shuffle(intermediate_result);
+        gpu_shuffle<T>(intermediate_result);
 
         // Step 3: Recurse (on the (xGpi)H Multiplication)
         // iterate over the e * t Hi's
         for (int i = 0; i < e * t; ++i) {
             // call recursive_code_cuda on each, with currRecursiveDepth+1
-            recursive_code_cuda(
+            recursive_code_cuda<T>(
                 intermediate_result,
                 sigma[currRecursiveDepth] * i, // start index in intermediate_result
                 result,
@@ -523,7 +486,6 @@ namespace osuCrypto {
                 baseRecursiveDepth
             );
         }
-
     }
 
     // Thrust's implementation of feistel bijection (slightly refactored)
@@ -620,10 +582,10 @@ namespace osuCrypto {
 
 
     // CUDA kernel for block-wise shuffle of uint8_t data
-    template<typename V>
+    template<typename T>
     __global__ void shuffle_blocks_feistel_kernel(
-        V* data, // Pointer to the vector to be shuffled
-        V* result, // Pointer to the result
+        T* data, // Pointer to the vector to be shuffled
+        T* result, // Pointer to the result
         uint64_t n, // Total number of elements in the input vector
         uint64_t block_size, // Size of each block to shuffle independently
         uint32_t* keys, // Array of random keys used for the Feistel bijection to generate pseudorandom permutations
@@ -677,12 +639,12 @@ namespace osuCrypto {
     }
 
     // Wrapper function to shuffle a thrust::device_vector containing uint8_t data
-    template<typename V>
+    template<typename T>
     void shuffle_blocks_feistel(
-        thrust::device_vector<V>& data, // The vector of V type (e.g. uint64_t) elements to shuffle
+        thrust::device_vector<T>& data, // The vector of T type (e.g. uint64_t) elements to shuffle
         uint64_t block_size) { // Specifies the size of each block that will be independently shuffled
         uint64_t n = data.size();
-        thrust::device_vector<V> result(n);
+        thrust::device_vector<T> result(n);
         // block size must evenly divide the total number of elements
         if (block_size == 0 || n % block_size != 0) {
             throw std::invalid_argument("Block size must be a positive divisor of the input size.");
@@ -741,21 +703,21 @@ namespace osuCrypto {
         //
 
         // --- Host Input Vector x ---
-        std::vector<T> h_vector = { 1, 1, 1,
-                                            0, 0, 1,
-                                                    1, 0, 1 }; // Binary vector of size k
+        std::vector<uint8_t> h_vector = { 1, 1, 1,
+                                                   0, 0, 1,
+                                                            1, 0, 1 }; // Binary vector of size k
 
         // --- Host Block Matrices (G1, G2, ..., Gt) ---
-        // std::vector<std::vector<T>> h_blocks(t, std::vector<T>(sigma * (sigma * e), 1));
-        std::vector<T> h_blocks = { 1,0,1,1,1,0,
-                                    1,1,1,0,0,0,
-                                    0,1,0,1,0,1,
-                                                1,1,1,1,1,1,
-                                                0,0,0,0,0,0,
-                                                1,1,1,0,0,0,
-                                                            1,1,0,0,1,1,
-                                                            1,0,1,1,1,0,
-                                                            0,0,0,1,0,1 };
+        // std::vector<std::vector<uint8_t>> h_blocks(t, std::vector<uint8_t>(sigma * (sigma * e), 1));
+        std::vector<uint8_t> h_blocks = { 1,0,1,1,1,0,
+                                          1,1,1,0,0,0,
+                                          0,1,0,1,0,1,
+                                                      1,1,1,1,1,1,
+                                                      0,0,0,0,0,0,
+                                                      1,1,1,0,0,0,
+                                                                  1,1,0,0,1,1,
+                                                                  1,0,1,1,1,0,
+                                                                  0,0,0,1,0,1 };
         BlockMatrix d_blocks;
         d_blocks.data = h_blocks;
         d_blocks.blockOffsets.resize(t + 1);
@@ -769,20 +731,24 @@ namespace osuCrypto {
         d_blocks.t = t;
 
         // --- Host Expected xG ---
-        std::vector<T> h_expected_result = { 0,0,0,0,1,1,
-                                                        1,1,1,0,0,0,
-                                                                    1,1,0,1,1,0 };
+        // when just binary
+        //std::vector<uint8_t> h_expected_result = { 0,0,0,0,1,1,
+        //                                                       1,1,1,0,0,0,
+        //                                                                   1,1,0,1,1,0 };
+        std::vector<uint8_t> h_expected_result = { 2,2,2,2,1,1,
+                                                               1,1,1,0,0,0,
+                                                                           1,1,0,1,1,2 };
 
         // --- Transfer Data to GPU ---
-        thrust::device_vector<T> d_vector = h_vector; // Vector x on GPU
+        thrust::device_vector<uint8_t> d_vector = h_vector; // Vector x on GPU
 
         // --- Final Result Vector on GPU ---
-        thrust::device_vector<T> d_result(n, 0);
+        thrust::device_vector<uint8_t> d_result(n, 0);
 
-        sparse_vector_matrix_mul_host(d_vector, d_blocks, d_result);
+        sparse_vector_matrix_mul_host<uint8_t>(d_vector, d_blocks, d_result);
 
         // Copy results back to host
-        thrust::host_vector<T> h_result_gpu = d_result;
+        thrust::host_vector<uint8_t> h_result_gpu = d_result;
 
         // Verify correctness
         for (size_t i = 0; i < n; i++) {
@@ -797,38 +763,39 @@ namespace osuCrypto {
 
     void benchmark_code_cuda() {
 
-        // Set up pseudorandom generator
-        std::mt19937 rngcpu(std::random_device{}()); // Random number generator
-        std::bernoulli_distribution dist(0.5);    // 50% chance for 0 or 1
+        // Set up pseudorandom generator for generating x
+        std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
+        // Uniform distribution over [0, UINT64_MAX]
+        std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
 
         constexpr int k = 1 << 20; // 2^20
         constexpr int n = 1 << 21; // 2^21
-        constexpr int sigma = 512;// 2048;  // Block size (2 * sqrt(k))
+        constexpr int sigma = 512; // 2048;  // Block size (2 * sqrt(k))
 
         //
         // Initialize x, G, and empty xG, and move them from host to device
         //
         // --- Host Input Vector x ---
-        std::vector<T> h_x(k); // Binary vector of size k
+        std::vector<uint64_t> h_x(k); // Field vector of size k
         for (auto& val : h_x) {
-            val = dist(rngcpu); // Generate 0 or 1 and assign to the vector
-            // std::cout << static_cast<int>(val);
+            val = dist(rngcpu); // Generate a uniform uint64_t value and assign to the vector
+            // std::cout << val << std::endl; // Uncomment to debug and print values
         }
 
         // --- Transfer Data to GPU ---
-        thrust::device_vector<T> d_x = h_x; // Vector x on GPU
+        thrust::device_vector<uint64_t> d_x = h_x; // Vector x on GPU
         // --- Final result vector on GPU ---
 
-        thrust::device_vector<T> d_xG(n, 0);
+        thrust::device_vector<uint64_t> d_xG(n, 0);
 
         BlockMatrix G, H;
         //initialize_block_matrix(G, sigma, k, n, dist, rngcpu);
         //initialize_block_matrix(H, sigma, k, n, dist, rngcpu);
         initialize_block_matrix_v2(G, sigma, n/k, k/sigma);
         initialize_block_matrix_v2(H, sigma, n/k, k/sigma);
-
+        
         auto start = std::chrono::high_resolution_clock::now();
-        code_cuda(d_x, G, H, d_xG);
+        code_cuda<uint64_t>(d_x, G, H, d_xG);
         auto stop = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> elapsed = stop - start;
 
@@ -840,17 +807,18 @@ namespace osuCrypto {
             << " is " << elapsed.count() << " ms" << std::endl;
         std::cout << "NOTE The number above does NOT include the cost to initialize the matrices G, H" << std::endl;
         std::cout << "TODO The implementation above needs to be revisited as it supports sigma at most 512!" << std::endl;
-
+        
         // Optionally copy results back to host
-        // thrust::host_vector<T> h_xG = d_xG;        
+        // thrust::host_vector<uint8_t> h_xG = d_xG;        
     }
 
 
     void benchmark_recursive_code_cuda() {
 
-        // Set up pseudorandom generator
-        std::mt19937 rngcpu(std::random_device{}()); // Random number generator
-        std::bernoulli_distribution dist(0.5);    // 50% chance for 0 or 1
+        // Set up pseudorandom generator for generating x
+        std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
+        // Uniform distribution over [0, UINT64_MAX]
+        std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
 
         constexpr int k = 1 << 20; // 2^20
         constexpr int n = 1 << 21; // 2^21
@@ -868,21 +836,21 @@ namespace osuCrypto {
         // Initialize x and empty xG, and move them from host to device
         //
         // --- Host Input Vector x ---
-        std::vector<T> h_x(k); // Binary vector of size k
+        std::vector<uint64_t> h_x(k); // Binary vector of size k
         for (auto& val : h_x) {
             val = dist(rngcpu); // Generate 0 or 1 and assign to the vector
             // std::cout << static_cast<int>(val);
         }
 
         // --- Transfer Data to GPU ---
-        thrust::device_vector<T> d_x = h_x; // Vector x on GPU
+        thrust::device_vector<uint64_t> d_x = h_x; // Vector x on GPU
         // --- Final result vector on GPU ---
 
-        thrust::device_vector<T> d_result(n);
+        thrust::device_vector<uint64_t> d_result(n);
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        recursive_code_cuda(
+        recursive_code_cuda<uint64_t>(
             d_x, // does not change across recursion, we index into it
             0, // index to the part of x i am recursing on
             d_result,
@@ -908,7 +876,7 @@ namespace osuCrypto {
         std::cout << "NOTE The plain recursive function above is NOT carefully debugged" << std::endl;
 
         // Optionally copy results back to host
-        // thrust::host_vector<T> h_xG = d_xG;        
+        // thrust::host_vector<uint8_t> h_xG = d_xG;        
     }
 
     void benchmark_permutations() {
@@ -1088,8 +1056,8 @@ namespace osuCrypto {
     }
 
     void iterative_code_cuda(
-        const thrust::device_vector<T>& x,
-        thrust::device_vector<T>& result,
+        const thrust::device_vector<uint8_t>& x,
+        thrust::device_vector<uint8_t>& result,
         std::vector<int>& sigma,
         int k,
         int n,
@@ -1114,7 +1082,7 @@ namespace osuCrypto {
             throw std::runtime_error("Invalid k, e, n");
 
         // Each iteration (but the first one) will use one vector as input and the other as result:
-        std::vector<thrust::device_vector<T>> results(2, thrust::device_vector<T>(n));
+        std::vector<thrust::device_vector<uint8_t>> results(2, thrust::device_vector<uint8_t>(n));
 
         // First iteration (uses x as input)
         recursive_sparse_vector_matrix_mul_host(
@@ -1155,7 +1123,7 @@ namespace osuCrypto {
 
         if (k * e != n) throw std::runtime_error("invalid k, n");
 
-        std::vector<T> h_x(k);
+        std::vector<uint8_t> h_x(k);
         std::mt19937 rngcpu(std::random_device{}());
         std::bernoulli_distribution dist(0.5);
 
@@ -1163,8 +1131,8 @@ namespace osuCrypto {
             val = dist(rngcpu);
         }
 
-        thrust::device_vector<T> d_x = h_x;
-        thrust::device_vector<T> d_result(n);
+        thrust::device_vector<uint8_t> d_x = h_x;
+        thrust::device_vector<uint8_t> d_result(n);
 
         auto start = std::chrono::high_resolution_clock::now();
 
