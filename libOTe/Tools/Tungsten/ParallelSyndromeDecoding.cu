@@ -1008,20 +1008,25 @@ namespace osuCrypto {
             d_vec2.begin(),
             sequence_functor());
 
-        start_device_chrono = std::chrono::high_resolution_clock::now();
+        std::cout << "Benchmarking our feistel shuffle for different block size:" << std::endl;
+        std::vector<uint64_t> block_size = {
+            uint64_t(n),
+            uint64_t(n) / 16,
+            uint64_t(n) / 128,
+            uint64_t(n) / 2048,
+            uint64_t(n) / 16384
+        };
 
-        // Shuffle the device_vector
-        uint64_t block_size = n;
-        shuffle_blocks_feistel<uint64_t>(d_vec2, block_size); // 1 block
+        for (auto& b : block_size) {
+            // different size block
+            start_device_chrono = std::chrono::high_resolution_clock::now();
+            shuffle_blocks_feistel<uint64_t>(d_vec2, b); // 1 block
+            stop_device_chrono = std::chrono::high_resolution_clock::now();
+            elapsed_device_chrono = stop_device_chrono - start_device_chrono;
+            std::cout << "Time to block-wise Feistel shuffle (our function) a thrust::device_vector (GPU) using chrono "
+                << "with block of size " << b << " is " << elapsed_device_chrono.count() << " ms" << std::endl;
 
-
-        stop_device_chrono = std::chrono::high_resolution_clock::now();
-
-        elapsed_device_chrono = stop_device_chrono - start_device_chrono;
-
-        // Step 5: Print the elapsed time
-        std::cout << "Time to block-wise Feistel shuffle (our function) a thrust::device_vector (GPU) using chrono "
-            " with block of size " << block_size << " is " << elapsed_device_chrono.count() << " ms" << std::endl;
+        }
 
         //
         // modified thrust shuffle
@@ -1040,7 +1045,7 @@ namespace osuCrypto {
         auto seed2 = std::chrono::high_resolution_clock::now().time_since_epoch().count();
         rng2.seed(static_cast<unsigned int>(seed2)); // Seed based on current time
 
-        shuffle_chunks(thrust::cuda::par, d_vec3.begin(), d_vec3.end(), block_size, rng2);
+        shuffle_chunks(thrust::cuda::par, d_vec3.begin(), d_vec3.end(), block_size[0], rng2);
 
         stop_device_chrono = std::chrono::high_resolution_clock::now();
 
@@ -1048,7 +1053,7 @@ namespace osuCrypto {
 
         // Step 5: Print the elapsed time
         std::cout << "Time for modified block-wise thrust shuffle (sequential) for a thrust::device_vector (GPU)"
-                     " with block of size " << block_size << " is "
+                     " with block of size " << block_size[0] << " is "
                      "using chrono: "
                      << elapsed_device_chrono.count() << " ms" << std::endl;
 
@@ -1235,19 +1240,17 @@ namespace osuCrypto {
 
         std::cout << "BENCHMARKING OUR CODES:" << std::endl;
 
-        // TODO INCOMPLETE test_code_thrust()
-
         // benchmark code cuda (non recursive) with fixed sigma
+        // plain multiply/permute/multiply
         benchmark_code_cuda();
 
-        //
         // benchmark recursive code cuda (with blocks generated on the fly in the base case)
-        //
+        // recursive approach (and implemented recursively)
         benchmark_recursive_code_cuda();
 
-        //
         // like the recursive approach above, but much more in parallel (reduces #kernel launches and fills gpu)
-        //
+        // recursive but implemented iteratively
+        // this is the approach we want to use
         benchmark_iterative_coda_cuda();
 
 
