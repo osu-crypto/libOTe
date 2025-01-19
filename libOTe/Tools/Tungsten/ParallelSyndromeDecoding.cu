@@ -397,10 +397,6 @@ namespace osuCrypto {
         int threadsPerBlock = 256;
         int numBlocks = (mat.sigma * mat.e * mat.t + threadsPerBlock - 1) / threadsPerBlock;
 
-        std::cout << "Launching kernel with " << numBlocks << " blocks and "
-            << threadsPerBlock << " threads per block.\n";
-
-
         sparse_vector_matrix_mul_v2 << <numBlocks, threadsPerBlock >> > (
             thrust::raw_pointer_cast(x.data()),
             thrust::raw_pointer_cast(mat.data.data()),
@@ -419,13 +415,16 @@ namespace osuCrypto {
         }
     }
 
+    // DEPRECATED
     template <typename T>
-    void recursive_sparse_vector_matrix_mul_host(
+    void sparse_vector_matrix_mul_with_init_host(
         const thrust::device_vector<T>& x,
         int start_x,
         thrust::device_vector<T>& result,
         int start_result,
         int sigma, int e, int t) {
+        std::cout << "DEPRECATED, USE V2 INSTEAD" << std::endl;
+
         BlockMatrix mat;
         initialize_block_matrix_v2(mat, sigma, e, t);
 
@@ -443,6 +442,38 @@ namespace osuCrypto {
             thrust::raw_pointer_cast(result.data()) + start_result,
             sigma, e, t
         );
+
+        cudaDeviceSynchronize();
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error(cudaGetErrorString(err));
+        }
+    }
+
+
+    template <typename T>
+    void sparse_vector_matrix_mul_with_init_host_v2(
+        const thrust::device_vector<T>& x,
+        int start_x,
+        thrust::device_vector<T>& result,
+        int start_result,
+        int sigma, int e, int t) {
+        BlockMatrix mat;
+        initialize_block_matrix_v2(mat, sigma, e, t);
+
+        int threadsPerBlock = 256;
+        int numBlocks = (mat.sigma * mat.e * mat.t + threadsPerBlock - 1) / threadsPerBlock;
+
+        sparse_vector_matrix_mul_v2 << <numBlocks, threadsPerBlock >> > (
+            thrust::raw_pointer_cast(x.data()) + start_x,
+            thrust::raw_pointer_cast(mat.data.data()),
+            thrust::raw_pointer_cast(mat.blockOffsets.data()),
+            thrust::raw_pointer_cast(mat.rowIndices.data()),
+            thrust::raw_pointer_cast(mat.colIndices.data()),
+            thrust::raw_pointer_cast(result.data()) + start_result,
+            sigma, e, t
+            );
 
         cudaDeviceSynchronize();
 
@@ -506,14 +537,14 @@ namespace osuCrypto {
         // Base case
         if (currRecursiveDepth == baseRecursiveDepth) {
             // Step1: xG Multiplication
-            recursive_sparse_vector_matrix_mul_host<T>(x, start_x,
+            sparse_vector_matrix_mul_with_init_host_v2<T>(x, start_x,
                                                           intermediate_result, 0,
                                                           sigma[currRecursiveDepth], e, t);
             // Step 2: Shuffle
             gpu_shuffle<T>(intermediate_result);
             // Step 3: (xGpi)H Multiplication
             // Note: different inputs from step 1, as can be reached when recursing on xG or (xGpi)H
-            recursive_sparse_vector_matrix_mul_host<T>(intermediate_result, 0, 
+            sparse_vector_matrix_mul_with_init_host_v2<T>(intermediate_result, 0,
                                                           result, start_result,
                                                           sigma[currRecursiveDepth], 1, e * t);
 
@@ -761,7 +792,6 @@ namespace osuCrypto {
         thrust::copy(result.begin(), result.end(), data.begin());
     }
 
-
     // block multiply function with cuda written kernels
     void test_cuda_block_multiply() {
         constexpr int k = 9;// 1 << 20; // Total rows of G and size of vector x
@@ -883,7 +913,7 @@ namespace osuCrypto {
         std::cout << "NOTE The number above does NOT include the cost to initialize the matrices G, H" << std::endl;
         std::cout << "NOTE this approach will run out of memory for sigma>512, "
                      "G, H: each t * sigma * sigma * e elements too much for gpu memory" << std::endl;
-        std::wcout << "TODO Generate each of the t blocks on the fly" << std::endl;
+        std::cout << "TODO Generate each of the t blocks on the fly" << std::endl;
         
         // Optionally copy results back to host
         // thrust::host_vector<uint8_t> h_xG = d_xG;        
@@ -1165,10 +1195,10 @@ namespace osuCrypto {
             throw std::runtime_error("Invalid k, e, n");
 
         // Each iteration (but the first one) will use one vector as input and the other as result:
-        std::vector<thrust::device_vector<uint8_t>> results(2, thrust::device_vector<uint8_t>(n));
+        std::vector<thrust::device_vector<uint64_t>> results(2, thrust::device_vector<uint64_t>(n));
 
         // First iteration (uses x as input)
-        recursive_sparse_vector_matrix_mul_host(
+        sparse_vector_matrix_mul_with_init_host_v2<uint64_t>(
             x,
             0,
             results[0],
@@ -1183,7 +1213,7 @@ namespace osuCrypto {
         for (size_t iter = 0; iter < num_iters; ++iter) {
 
             // Multiply
-            //recursive_sparse_vector_matrix_mul_host(
+            //sparse_vector_matrix_mul_with_init_host(
             //    results[iter & 1], // iter % 2
             //    0,
             //    results[(iter + 1) & 1], // (iter+1) % 2
