@@ -1208,8 +1208,9 @@ namespace osuCrypto {
             sequence = { 2, 1, 2, 0, 2, 1, 2 };
         }
         else {
+            throw std::runtime_error("you can use the commented out function below but expensive");
             // works for any depth, but it is a recursive function
-            sequence = buildSequence(depth);
+            //sequence = buildSequence(depth);
         }
         
         // We implement 2 cuda kernels that we keep invoking
