@@ -684,7 +684,7 @@ namespace osuCrypto {
     }*/
 
 
-    // CUDA kernel for block-wise shuffle of uint8_t data
+    // CUDA kernel for block-wise shuffle of T type data
     template<typename T>
     __global__ void shuffle_blocks_feistel_kernel(
         T* data, // Pointer to the vector to be shuffled
@@ -741,7 +741,7 @@ namespace osuCrypto {
         }
     }
 
-    // Wrapper function to shuffle a thrust::device_vector containing uint8_t data
+    // Wrapper function to shuffle a thrust::device_vector containing T type data
     template<typename T>
     void shuffle_blocks_feistel(
         thrust::device_vector<T>& data, // The vector of T type (e.g. uint64_t) elements to shuffle
@@ -913,10 +913,7 @@ namespace osuCrypto {
         std::cout << "NOTE The number above does NOT include the cost to initialize the matrices G, H" << std::endl;
         std::cout << "NOTE this approach will run out of memory for sigma>512, "
                      "G, H: each t * sigma * sigma * e elements too much for gpu memory" << std::endl;
-        std::cout << "TODO Generate each of the t blocks on the fly" << std::endl;
-        
-        // Optionally copy results back to host
-        // thrust::host_vector<uint8_t> h_xG = d_xG;        
+        std::cout << "TODO Generate each of the t blocks on the fly" << std::endl;      
     }
 
 
@@ -980,10 +977,7 @@ namespace osuCrypto {
         for (const auto s : sigmas) std::cout << s << " ";
             std::cout << "is " << elapsed.count() << " ms" << std::endl;
         std::cout << "NOTE The number above DOES include the cost to initialize the matrices G, H" << std::endl;
-        std::cout << "NOTE The plain recursive function above is NOT carefully debugged" << std::endl;
-
-        // Optionally copy results back to host
-        // thrust::host_vector<uint8_t> h_xG = d_xG;        
+        std::cout << "NOTE The plain recursive function above is NOT carefully debugged" << std::endl;      
     }
 
     void benchmark_permutations() {
@@ -1168,93 +1162,91 @@ namespace osuCrypto {
         std::cout << std::endl;
     }
 
+    template <typename T>
     void iterative_code_cuda(
-        const thrust::device_vector<uint8_t>& x,
-        thrust::device_vector<uint8_t>& result,
+        const thrust::device_vector<T>& x,
+        thrust::device_vector<T>& result,
         std::vector<int>& sigma,
         int k,
-        int n,
         int e) {
 
-        int depth = sigma.size();
-        int num_iters = pow(2, depth);
-
+        int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
+        int num_iters = pow(2, depth) - 1;
+        
         // We implement 2 cuda kernels that we keep invoking
         // The current function is run on the host and invokes the kernels
         // Iterate and keep doing one after the other these 2 operations:
         // 1. Multiply a vector x = x1,...,xt by a bunch of base size blocks G=G1,...,Gt, where t=k/sigma[depth]
-        // 2. Permute: split the vector resulting from multiplication in 1 into k/sigma[curr_depth-1] 
+        // 2. Shuffle: split the vector resulting from multiplication in 1 into k/sigma[curr_depth-1] 
         //             same-size pieces and shuffle each piece (in 1 kernel)
-        // Each iteration invokes 1 followed by 2
+        // Each iteration invokes 2 followed by 1
 
-        int curr_sigma = sigma[depth - 1];
-        int curr_t = k / curr_sigma;
-        if (curr_sigma * curr_t != k)
-            throw std::runtime_error("Invalid sigma and k relation");
-        if (k * e != n)
-            throw std::runtime_error("Invalid k, e, n");
+        int n = k * e;
+        int mul_sigma = sigma[depth];
+        int mul_t = n / mul_sigma; // except first iteration (where it is k/mul_sigma)
 
         // Each iteration (but the first one) will use one vector as input and the other as result:
-        std::vector<thrust::device_vector<uint64_t>> results(2, thrust::device_vector<uint64_t>(n));
+        std::vector<thrust::device_vector<T>> results(2, thrust::device_vector<T>(n));
 
-        // First iteration (uses x as input)
-        sparse_vector_matrix_mul_with_init_host_v2<uint64_t>(
+        // First iteration separate because:
+        // 1. it uses x as input
+        // 2. the first multiplication is the only EXPANDING one, all others are the same
+        sparse_vector_matrix_mul_with_init_host_v2<T>(
             x,
             0,
             results[0],
             0,
-            curr_sigma, 
+            mul_sigma,
             e, 
-            curr_t);
-        // TODO Shuffle
-        // Split result into pieces of size (e * sigma[depth-2]), and shuffle each
+            k / mul_sigma);
 
         // TODO Remaining iterations
         for (size_t iter = 0; iter < num_iters; ++iter) {
 
-            // Multiply
-            //sparse_vector_matrix_mul_with_init_host(
-            //    results[iter & 1], // iter % 2
-            //    0,
-            //    results[(iter + 1) & 1], // (iter+1) % 2
-            //    0,
-            //    int sigma, 
-            //    1, // does not expand after 1st multiplication 
-            //    e * t);
-
-
             // TODO Shuffle
+            // something like - Split result into pieces of size (e * sigma[depth-1]), and shuffle each
 
+            // Multiply
+            sparse_vector_matrix_mul_with_init_host_v2<T>(
+                results[iter & 1], // iter % 2
+                0,
+                results[(iter + 1) & 1], // (iter+1) % 2
+                0,
+                mul_sigma, 
+                1, // does not expand after 1st multiplication 
+                mul_t);
         }
     }
 
     void benchmark_iterative_coda_cuda() {
+
+        // Set up pseudorandom generator for generating x
+        std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
+        // Uniform distribution over [0, UINT64_MAX]
+        std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
+
         constexpr int k = 1 << 20; // 2^20
         constexpr int n = 1 << 21; // 2^21
-        std::vector<int> sigmas = { 2048, 128 };
+        std::vector<int> sigmas = { n, 2048, 128 }; // ~2sqrt(n)
         int e = n / k;
 
         if (k * e != n) throw std::runtime_error("invalid k, n");
 
-        std::vector<uint8_t> h_x(k);
-        std::mt19937 rngcpu(std::random_device{}());
-        std::bernoulli_distribution dist(0.5);
-
+        std::vector<uint64_t> h_x(k);
         for (auto& val : h_x) {
             val = dist(rngcpu);
         }
+        thrust::device_vector<uint64_t> d_x = h_x;
 
-        thrust::device_vector<uint8_t> d_x = h_x;
-        thrust::device_vector<uint8_t> d_result(n);
+        thrust::device_vector<uint64_t> d_result(n);
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        iterative_code_cuda(
+        iterative_code_cuda<uint64_t>(
             d_x,
             d_result,
             sigmas,
             k,
-            n,
             e
         );
 
