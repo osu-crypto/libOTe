@@ -1162,6 +1162,34 @@ namespace osuCrypto {
         std::cout << std::endl;
     }
 
+    // Recursive function to build the sequence
+    std::vector<int> buildSequence(int depth) {
+        if (depth == 1) {
+            return { 0 }; // Base case: For depth 1, the sequence is [0]
+        }
+
+        // Recursively build the sequence for the previous depth
+        std::vector<int> prevSequence = buildSequence(depth - 1);
+
+        // Construct the new sequence for the current depth
+        std::vector<int> newSequence;
+
+        // Left subtree: S(d-1) + depth
+        for (int val : prevSequence) {
+            newSequence.push_back(val + 1);
+        }
+
+        // Middle element: 0
+        newSequence.push_back(0);
+
+        // Right subtree: S(d-1) + depth
+        for (int val : prevSequence) {
+            newSequence.push_back(val + 1);
+        }
+
+        return newSequence;
+    }
+
     template <typename T>
     void iterative_code_cuda(
         const thrust::device_vector<T>& x,
@@ -1172,6 +1200,17 @@ namespace osuCrypto {
 
         int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
         int num_iters = pow(2, depth) - 1;
+        std::vector<int> sequence;
+        if (depth == 2) {
+            sequence = {1, 0, 1};
+        }
+        else if (depth == 3) {
+            sequence = { 2, 1, 2, 0, 2, 1, 2 };
+        }
+        else {
+            // works for any depth, but it is a recursive function
+            sequence = buildSequence(depth);
+        }
         
         // We implement 2 cuda kernels that we keep invoking
         // The current function is run on the host and invokes the kernels
