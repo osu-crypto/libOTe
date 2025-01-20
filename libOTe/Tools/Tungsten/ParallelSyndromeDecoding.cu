@@ -1096,11 +1096,6 @@ namespace osuCrypto {
         //}
         //std::cout << std::endl;
 
-
-        //
-        // TODO (currently buggy) Feistel bijection on GPU
-        //
-
         // Create a device_vector with some data
         thrust::device_vector<uint64_t> d_vec2(n);
         // Fill the vector with sequential values (0, 1, 2, ..., n-1)
@@ -1200,17 +1195,17 @@ namespace osuCrypto {
 
         int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
         int num_iters = pow(2, depth) - 1;
-        std::vector<int> sequence;
+        std::vector<int> perm_blocksize_idx;
         if (depth == 2) {
-            sequence = {1, 0, 1};
+            perm_blocksize_idx = {1, 0, 1};
         }
         else if (depth == 3) {
-            sequence = { 2, 1, 2, 0, 2, 1, 2 };
+            perm_blocksize_idx = { 2, 1, 2, 0, 2, 1, 2 };
         }
         else {
             throw std::runtime_error("you can use the commented out function below but expensive");
             // works for any depth, but it is a recursive function
-            //sequence = buildSequence(depth);
+            //perm_blocksize_idx = buildSequence(depth);
         }
         
         // We implement 2 cuda kernels that we keep invoking
@@ -1240,11 +1235,23 @@ namespace osuCrypto {
             e, 
             k / mul_sigma);
 
-        // TODO Remaining iterations
-        for (size_t iter = 0; iter < num_iters; ++iter) {
+        shuffle_blocks_feistel<T>(results[0], e * sigma[depth - 1]);
 
-            // TODO Shuffle
-            // something like - Split result into pieces of size (e * sigma[depth-1]), and shuffle each
+        // Multiply
+        sparse_vector_matrix_mul_with_init_host_v2<T>(
+            results[0], // iter % 2
+            0,
+            results[1],
+            0,
+            mul_sigma,
+            1, // does not expand after 1st multiplication 
+            mul_t);
+
+        // Remaining iterations
+        for (size_t iter = 1; iter < num_iters; ++iter) {
+
+            // Shuffle
+            shuffle_blocks_feistel<T>(results[iter & 1], sigma[perm_blocksize_idx[iter]]);
 
             // Multiply
             sparse_vector_matrix_mul_with_init_host_v2<T>(
