@@ -183,12 +183,25 @@ namespace osuCrypto {
 
     // mixing hash function (MurmurHash3)
     __device__
-        unsigned int hash(unsigned int x) {
+        unsigned int murmurhashhash(unsigned int x) {
         x ^= x >> 16;
         x *= 0x85ebca6b;
         x ^= x >> 13;
         x *= 0xc2b2ae35;
         x ^= x >> 16;
+        return x;
+    }
+
+    // Xorshift-based hash function
+    __device__
+        unsigned int xorshifthash(unsigned int x) {
+        // Force x to be non-zero using a bitwise OR with 1
+        x |= 1;
+
+        // Xorshift operations
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
         return x;
     }
 
@@ -202,7 +215,8 @@ namespace osuCrypto {
         __device__
             int operator()(const int& index) const {
             // Combine the seed and index for pseudo-randomness
-            unsigned int value = hash(seed ^ index);
+            //unsigned int value = murmurhashhash(seed ^ index);
+            unsigned int value = xorshifthash(seed ^ index);
             return value & 1; // Return the least significant bit (0 or 1)
         }
     };
@@ -1265,7 +1279,7 @@ namespace osuCrypto {
         }
     }
 
-    void benchmark_iterative_coda_cuda(int depth) {
+    void benchmark_iterative_code_cuda(int depth) {
 
         // Set up pseudorandom generator for generating x
         std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
@@ -1409,8 +1423,8 @@ namespace osuCrypto {
         // like the recursive approach above, but much more in parallel (reduces #kernel launches and fills gpu)
         // recursive but implemented iteratively
         // this is the approach we want to use
-        benchmark_iterative_coda_cuda(2);
-        benchmark_iterative_coda_cuda(3);
+        benchmark_iterative_code_cuda(2);
+        benchmark_iterative_code_cuda(3);
 
         //
         // DIFFERENT TESTS
