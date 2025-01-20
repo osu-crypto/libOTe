@@ -1265,7 +1265,7 @@ namespace osuCrypto {
         }
     }
 
-    void benchmark_iterative_coda_cuda() {
+    void benchmark_iterative_coda_cuda(int depth) {
 
         // Set up pseudorandom generator for generating x
         std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
@@ -1274,7 +1274,17 @@ namespace osuCrypto {
 
         constexpr int k = 1 << 20; // 2^20
         constexpr int n = 1 << 21; // 2^21
-        std::vector<int> sigmas = { n, 2048, 128 }; // ~2sqrt(n)
+        std::vector<int> sigmas;
+        if (depth == 2) {
+            sigmas = { n, 2048, 128 }; // ~2sqrt(n)
+        }
+        else if (depth == 3) {
+           sigmas = { n, 2048, 128, 32 }; // ~2sqrt(n)
+        }
+        else {
+            throw std::runtime_error("need to define sigma vector to run for depth > 3");
+        }
+
         int e = n / k;
 
         if (k * e != n) throw std::runtime_error("invalid k, n");
@@ -1300,9 +1310,14 @@ namespace osuCrypto {
         auto stop = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> elapsed = stop - start;
 
-        std::cout << "Time to compute optimized iterative CUDA implementation: "
-            << elapsed.count() << " ms" << std::endl;
-        std::cout << "TODO Iterative method incomplete" << std::endl;
+        std::cout << "Time to compute optimized iterative CUDA implementation (unrolled recursion) with "
+            << " k: " << k
+            << " n: " << n
+            << " depth: " << depth
+            << " sigmas: ";
+        for (const auto s : sigmas) std::cout << s << " ";
+        std::cout << "is " << elapsed.count() << " ms" << std::endl;
+        std::cout << "NOTE The number above DOES include the cost to initialize the matrices G, H" << std::endl;
     }
 
 
@@ -1394,7 +1409,8 @@ namespace osuCrypto {
         // like the recursive approach above, but much more in parallel (reduces #kernel launches and fills gpu)
         // recursive but implemented iteratively
         // this is the approach we want to use
-        benchmark_iterative_coda_cuda();
+        benchmark_iterative_coda_cuda(2);
+        benchmark_iterative_coda_cuda(3);
 
         //
         // DIFFERENT TESTS
