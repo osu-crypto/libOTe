@@ -306,11 +306,11 @@ namespace osuCrypto {
         thrust::sequence(mat.colIndices.begin(), mat.colIndices.end(), 0, sigma * mat.e);
     }
 
-    thrust::device_vector<uint8_t> initialize_random_block_matrix(int sigma, int e, int t) {
-        thrust::device_vector<uint8_t> data;
-
-        // Allocate memory for block data
-        data.resize(t * sigma * (sigma * e)); // Only store non-zero blocks
+    void initialize_random_block_matrix(
+        thrust::device_vector<uint8_t>& data, int sigma, int e, int t) {
+        // Make sure data is of the right size
+        // note that the memory has already been allocated to avoid allocating memory each time we invoke it
+        if (data.size() != (t * sigma * (sigma * e))) throw std::runtime_error("data not of the right size");
 
         // Fill the vector with random binary values - with help of murmurhash3 or xorshift hash function
         // directly on GPU but currently slow as  randombinaryfunctor not done well
@@ -329,8 +329,6 @@ namespace osuCrypto {
         //    std::cout << host_data[i] << " ";
         //}
         //std::cout << std::endl;
-
-        return data;
     }
 
     void initialize_mul_helper(MulHelper& mul_helper, int sigma, int e, int t) {
@@ -558,9 +556,11 @@ namespace osuCrypto {
         int start_x,
         thrust::device_vector<T>& result,
         int start_result,
+        thrust::device_vector<uint8_t> &mat,
         MulHelper& mulHelper) {
 
-        thrust::device_vector<uint8_t> mat = initialize_random_block_matrix(
+        initialize_random_block_matrix(
+            mat,
             mulHelper.sigma, mulHelper.e, mulHelper.t);
 
         int threadsPerBlock = 256;
@@ -1331,6 +1331,10 @@ namespace osuCrypto {
         // Each iteration (but the first one) will use one vector as input and the other as result:
         std::vector<thrust::device_vector<T>> results(2, thrust::device_vector<T>(n));
 
+        // Initialize block matrix (but do not fill it with randomness - that will be done each time it is used)
+        thrust::device_vector<uint8_t> mat (initial_t * mul_sigma * (mul_sigma * e));
+       // mat.resize(initial_t * mul_sigma * (mul_sigma * e)); // note this is constant for 1st and later iters
+
         // First iteration separate because:
         // 1. it uses x as input
         // 2. the first multiplication is the only EXPANDING one, all others are the same
@@ -1339,6 +1343,7 @@ namespace osuCrypto {
             0,
             results[0],
             0,
+            mat,
             mul_helper_expand);
 
         shuffle_blocks_feistel<T>(results[0], e * sigma[depth - 1]);
@@ -1349,6 +1354,7 @@ namespace osuCrypto {
             0,
             results[1],
             0,
+            mat,
             mul_helper_rest);
 
         // Remaining iterations
@@ -1363,6 +1369,7 @@ namespace osuCrypto {
                 0,
                 results[(iter + 1) & 1], // (iter+1) % 2
                 0,
+                mat,
                 mul_helper_rest);
         }
     }
