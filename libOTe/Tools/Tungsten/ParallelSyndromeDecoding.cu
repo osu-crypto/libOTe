@@ -234,6 +234,15 @@ namespace osuCrypto {
         int t;     // Number of diagonal blocks (t = k / sigma)
     };
 
+    struct MulHelper {
+        thrust::device_vector<int> blockOffsets; // Starting index of each block in data
+        thrust::device_vector<int> rowIndices;   // Row indices of non-zero blocks
+        thrust::device_vector<int> colIndices;   // Column indices of non-zero blocks
+        int sigma; // Block size
+        int e;     // Expansion factor (e = n / k)
+        int t;     // Number of diagonal blocks (t = k / sigma)
+    };
+
     void initialize_block_matrix(BlockMatrix& mat, int sigma, int k, int n, 
         std::bernoulli_distribution &dist, std::mt19937 &rngcpu) {
         mat.sigma = sigma;
@@ -271,14 +280,15 @@ namespace osuCrypto {
         mat.rowIndices.resize(mat.t); // Row start for each block
         mat.colIndices.resize(mat.t); // Col start for each block
 
-        // Fill the vector with random binary values - with help of murmurhash3 hash function
+        // Fill the vector with random binary values - with help of murmurhash3 or xorshift hash function
         // directly on GPU but currently slow as  randombinaryfunctor not done well
         thrust::transform(
             thrust::device,
             thrust::counting_iterator<int>(0),
             thrust::counting_iterator<int>(mat.data.size()),
             mat.data.begin(),
-            RandomBinaryFunctor(time(NULL))
+            RandomBinaryFunctor(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::high_resolution_clock::now().time_since_epoch()).count())
         );
 
         // Copy back to host to print
@@ -294,6 +304,52 @@ namespace osuCrypto {
         thrust::sequence(mat.rowIndices.begin(), mat.rowIndices.end(), 0, sigma);
         // 0, sigma * e, 2sigma * e, 3sigma * e, etc.
         thrust::sequence(mat.colIndices.begin(), mat.colIndices.end(), 0, sigma * mat.e);
+    }
+
+    thrust::device_vector<uint8_t> initialize_random_block_matrix(int sigma, int e, int t) {
+        thrust::device_vector<uint8_t> data;
+
+        // Allocate memory for block data
+        data.resize(t * sigma * (sigma * e)); // Only store non-zero blocks
+
+        // Fill the vector with random binary values - with help of murmurhash3 or xorshift hash function
+        // directly on GPU but currently slow as  randombinaryfunctor not done well
+        thrust::transform(
+            thrust::device,
+            thrust::counting_iterator<int>(0),
+            thrust::counting_iterator<int>(data.size()),
+            data.begin(),
+            RandomBinaryFunctor(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::high_resolution_clock::now().time_since_epoch()).count())
+        );
+
+        // Copy back to host to print
+        //thrust::host_vector<int> host_data = data;
+        //for (int i = 0; i < data.size(); i++) {
+        //    std::cout << host_data[i] << " ";
+        //}
+        //std::cout << std::endl;
+
+        return data;
+    }
+
+    void initialize_mul_helper(MulHelper& mul_helper, int sigma, int e, int t) {
+        mul_helper.sigma = sigma;
+        mul_helper.e = e;
+        mul_helper.t = t;
+
+        // Allocate memory for block data
+        mul_helper.blockOffsets.resize(t + 1); // Start of each block in data
+        mul_helper.rowIndices.resize(t); // Row start for each block
+        mul_helper.colIndices.resize(t); // Col start for each block
+
+        // 0, sigma(sigma*e), 2sigma(sigma*e), 3sigma(sigma*e), etc.
+        thrust::sequence(mul_helper.blockOffsets.begin(), 
+            mul_helper.blockOffsets.end(), 0, sigma * (sigma * e));
+        // 0, sigma, 2sigma, 3sigma, etc.
+        thrust::sequence(mul_helper.rowIndices.begin(), mul_helper.rowIndices.end(), 0, sigma);
+        // 0, sigma * e, 2sigma * e, 3sigma * e, etc.
+        thrust::sequence(mul_helper.colIndices.begin(), mul_helper.colIndices.end(), 0, sigma * e);
     }
 
     template <typename T>
@@ -465,7 +521,6 @@ namespace osuCrypto {
         }
     }
 
-
     template <typename T>
     void sparse_vector_matrix_mul_with_init_host_v2(
         const thrust::device_vector<T>& x,
@@ -487,6 +542,38 @@ namespace osuCrypto {
             thrust::raw_pointer_cast(mat.colIndices.data()),
             thrust::raw_pointer_cast(result.data()) + start_result,
             sigma, e, t
+            );
+
+        cudaDeviceSynchronize();
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error(cudaGetErrorString(err));
+        }
+    }
+
+    template <typename T>
+    void sparse_vector_matrix_mul_with_init_host_v3(
+        const thrust::device_vector<T>& x,
+        int start_x,
+        thrust::device_vector<T>& result,
+        int start_result,
+        MulHelper& mulHelper) {
+
+        thrust::device_vector<uint8_t> mat = initialize_random_block_matrix(
+            mulHelper.sigma, mulHelper.e, mulHelper.t);
+
+        int threadsPerBlock = 256;
+        int numBlocks = (mulHelper.sigma * mulHelper.e * mulHelper.t + threadsPerBlock - 1) / threadsPerBlock;
+
+        sparse_vector_matrix_mul_v2 << <numBlocks, threadsPerBlock >> > (
+            thrust::raw_pointer_cast(x.data()) + start_x,
+            thrust::raw_pointer_cast(mat.data()),
+            thrust::raw_pointer_cast(mulHelper.blockOffsets.data()),
+            thrust::raw_pointer_cast(mulHelper.rowIndices.data()),
+            thrust::raw_pointer_cast(mulHelper.colIndices.data()),
+            thrust::raw_pointer_cast(result.data()) + start_result,
+            mulHelper.sigma, mulHelper.e, mulHelper.t
             );
 
         cudaDeviceSynchronize();
@@ -1233,6 +1320,13 @@ namespace osuCrypto {
         int n = k * e;
         int mul_sigma = sigma[depth];
         int mul_t = n / mul_sigma; // except first iteration (where it is k/mul_sigma)
+        int initial_t = k / mul_sigma;
+
+        MulHelper mul_helper_expand;
+        initialize_mul_helper(mul_helper_expand, mul_sigma, e, initial_t);
+
+        MulHelper mul_helper_rest;
+        initialize_mul_helper(mul_helper_rest, mul_sigma, 1, mul_t);
 
         // Each iteration (but the first one) will use one vector as input and the other as result:
         std::vector<thrust::device_vector<T>> results(2, thrust::device_vector<T>(n));
@@ -1240,26 +1334,22 @@ namespace osuCrypto {
         // First iteration separate because:
         // 1. it uses x as input
         // 2. the first multiplication is the only EXPANDING one, all others are the same
-        sparse_vector_matrix_mul_with_init_host_v2<T>(
+        sparse_vector_matrix_mul_with_init_host_v3<T>(
             x,
             0,
             results[0],
             0,
-            mul_sigma,
-            e, 
-            k / mul_sigma);
+            mul_helper_expand);
 
         shuffle_blocks_feistel<T>(results[0], e * sigma[depth - 1]);
 
         // Multiply
-        sparse_vector_matrix_mul_with_init_host_v2<T>(
+        sparse_vector_matrix_mul_with_init_host_v3<T>(
             results[0], // iter % 2
             0,
             results[1],
             0,
-            mul_sigma,
-            1, // does not expand after 1st multiplication 
-            mul_t);
+            mul_helper_rest);
 
         // Remaining iterations
         for (size_t iter = 1; iter < num_iters; ++iter) {
@@ -1268,14 +1358,12 @@ namespace osuCrypto {
             shuffle_blocks_feistel<T>(results[iter & 1], sigma[perm_blocksize_idx[iter]]);
 
             // Multiply
-            sparse_vector_matrix_mul_with_init_host_v2<T>(
+            sparse_vector_matrix_mul_with_init_host_v3<T>(
                 results[iter & 1], // iter % 2
                 0,
                 results[(iter + 1) & 1], // (iter+1) % 2
                 0,
-                mul_sigma, 
-                1, // does not expand after 1st multiplication 
-                mul_t);
+                mul_helper_rest);
         }
     }
 
