@@ -143,16 +143,23 @@ namespace osuCrypto
 				}
 			}
 
+			// at each iteration we first correct the parent level.
+			// The parent level has two syblings which are random.
+			// We need to correct the inactive child so that both parties
+			// hold the same seed (a sharing of zero).
+			//
+			// we then expand the parent to level to get the children level.
+			// We compute left and right sums for the children.
 			for (u64 iter = 1; iter <= mDepth; ++iter)
 			{
-				// the parent level
+				// the grand parent level
 				auto& tp = t[(iter - 1) & 1];
 
-				// the child level
+				// the parent level
 				auto& sc = s[iter & 1];
 				auto& tc = t[iter & 1];
 
-				// the grandchild level
+				// the child level
 				auto& sg = s[(iter + 1) & 1];
 
 				auto size = 1ull << iter;

@@ -14,322 +14,601 @@ namespace osuCrypto
 	{
 		u64 mPartyIdx = 0;
 
+		u64 mNumPoints = 0;
+
 		u64 mDomain = 0;
 
-		struct Point
-		{
-			// the point's true address
-			u32 mAddress;
-
-			// the number of points before this point.
-			u32 mFinalRank;
-		};
-
-		BitVector reverse(BitVector b)
-		{
-			BitVector r(b.size());
-			for (u64 i = 0; i < b.size(); ++i)
-				r[r.size() - 1 - i] = b[i];
-			return r;
-		}
-		std::string print(u32 p, u32 bitCount)
-		{
-			auto low = reverse(BitVector((u8*)&p, bitCount));
-			auto hgh = reverse(BitVector((u8*)&p, 32 - bitCount, bitCount));
-			std::stringstream ss;
-			ss << hgh << "." << low;
-			return ss.str();
-		}
-
-		// For the given Expand node, mDepth[0] is how far down the 
-		// expanded left child should be copied. mDepth[1] is how far down the
-		// expanded right child should be copied.
-		//
-		// 0 indicates that it is a final node and should be copied to the
-		// final output.
-		struct Expand
-		{
-			std::array<u8, 2> mDepth;
-		};
-
-		enum class Initial
-		{
-			None,
-			Final,
-			Expand
-		};
-
-		bool mDebug = true;
-		std::vector<std::vector<Initial>> mInitals;
-		std::vector<std::vector<std::vector<u32>>> mFinals;
-		std::vector<std::vector<std::vector<Expand>>> mExpands;
+		u64 mDenseDepth = 0;
 
 
-		// A partition represents a path of mDepth degree 1 nodes
-		// followed a degree 2 node. e.g.
-		//  *		 <| 0
-		//   *		 <| 1
-		//    *		 <| 2
-		//   * *
-		// This would have depth 2.  A partition also
-		// contains two sets of points that are under 
-		// the left and right subtree.
-		struct Partition
-		{
-			// The sets of points that are contained in the left and right subtree.
-			std::array<span<u32>, 2> mSets;
+		RegularDpf mRegDpf;
 
-			// The number of degree 1 nodes that lead to the degree 2 node.
-			u32 mDepth;
-
-			//u32 mPrefix;
-
-			u32 mLowBitCount;
-		};
-
-		Partition partition(span<u32> points, u32 lowBitCount)
-		{
-#ifndef NDEBUG
-			u32 prefix = points[0] >> (lowBitCount + 1);
-			for (auto pp : points)
-				if (pp >> (lowBitCount + 1) != prefix)
-					throw RTE_LOC;
-#endif
-
-			assert(points.size() > 1);
-			auto iter = std::find_if(points.begin(), points.end(), [lowBitCount](auto v) {return (v >> lowBitCount) & 1; });
-			if (iter == points.begin() || iter == points.end())
-			{
-				assert(lowBitCount);
-				auto p = partition(points, lowBitCount - 1);
-				++p.mDepth;
-				return p;
-			}
-
-			return Partition{
-				.mSets{ span<u32>(points.begin(), iter), span<u32>(iter, points.end()) },
-				.mDepth{0},
-				.mLowBitCount = lowBitCount };
-		}
-
-		void getLevels(Partition& par, u64 treeIdx, span<u32> points)
-		{
-			std::cout << "-> {";
-			for (auto j = 0; j < 2; ++j)
-			{
-				if (j)
-					std::cout << ',' << std::endl;
-				else
-					std::cout << std::endl;
-
-				for (auto p : par.mSets[j])
-				{
-					std::cout << print(p, par.mLowBitCount) << std::endl;
-				}
-			}
-			std::cout << "}" << std::endl;
-
-			Expand expand;
-			for (u64 i = 0; i < 2; ++i)
-			{
-				if (par.mSets[i].size() == 1)
-				{
-					auto idx = std::distance(points.data(), &par.mSets[i][0]);
-					mFinals[treeIdx][par.mLowBitCount].push_back(idx);
-					expand.mDepth[i] = 0;
-					//expand = (Expand)((u8)i | (u8)expand);
-				}
-				else
-				{
-
-					//  *	 <| par	
-					//   *	 <|	
-					//    *	 <|	
-					//   * *     <| p2
-					//      *    <|
-					//       *   <|
-					//      * *
-
-					assert(par.mSets[i].size());
-					auto bIdx2 = par.mLowBitCount - 1 - par.mDepth;
-					auto p2 = partition(par.mSets[i], bIdx2);
-					getLevels(p2, treeIdx, points);
-					expand.mDepth[i] = p2.mDepth + 1;
-					//expand.mOutputs[i] = Address{ .mLevel{bIdx2}, .mIndex{mSizes[treeIdx][bIdx2]++} };
-				}
-			}
-			mExpands[treeIdx][par.mLowBitCount].push_back(expand);
-		}
-
+		DpfMult mMultiplier;
 
 		void init(
 			u64 partyIdx,
+			u64 numPoints,
 			u64 domain,
-			MatrixView<u32> sparsePoints)
+			u64 denseDepth
+		)
 		{
+			mNumPoints = numPoints;
 			mPartyIdx = partyIdx;
 			mDomain = domain;
-
-			auto depth = log2ceil(domain);
-			auto preDepth = log2ceil(sparsePoints.cols());
-			auto preDomain = 1ull << preDepth;
-			auto bitCount = depth - preDepth;
-			auto shift = bitCount - 1;
-			u32 mask = (1ull << bitCount) - 1;
-
-			mExpands.resize(sparsePoints.rows());
-			mFinals.resize(sparsePoints.rows());
-			mInitals.resize(sparsePoints.rows());
-
-			for (u64 r = 0; r < sparsePoints.rows(); ++r)
-			{
-				assert(std::is_sorted(sparsePoints[r].begin(), sparsePoints[r].end()));
-
-				mInitals[r].resize(preDomain);
-				mExpands[r].resize(bitCount);
-				mFinals[r].resize(bitCount + 1);
-				std::vector<span<u32>> points(preDomain);
-				auto iter = sparsePoints[r].begin();
-				while (iter != sparsePoints[r].end())
-				{
-					auto p = *iter;
-					auto idx = p >> bitCount;
-					auto end = std::find_if(iter, sparsePoints[r].end(), [idx, bitCount](auto v) {return (v >> bitCount) != idx; });
-					points[idx] = span<u32>(iter, end);
-					iter = end;
-				}
-				for (u64 c = 0; c < sparsePoints.cols(); ++c)
-				{
-					std::cout << "(" << sparsePoints(r, c) << ", " << c << ") ";
-				}
-				std::cout << std::endl;
-
-				for (u32 c = 0; c < points.size(); ++c)
-				{
-					std::cout << " group " << c << std::endl;
-					//std::sort(points[c].begin(), points[c].end(), [](auto& a, auto& b) {return a.mAddress < b.mAddress; });
-					for (auto p : points[c])
-					{
-						std::cout << print(p, bitCount) << std::endl;
-					}
-
-					if (points[c].size() == 1)
-					{
-						mInitals[r][c] = Initial::Final;
-						auto idx = std::distance(sparsePoints.data(), &points[c][0]);
-						mFinals[r].back().push_back(points[c][0]);
-					}
-					else if (points[c].size() > 1)
-					{
-						mInitals[r][c] = Initial::Expand;
-						auto par = partition(points[c], bitCount - 1);
-						getLevels(par, r, sparsePoints);
-					}
-					else
-					{
-						mInitals[r][c] = Initial::None;
-					}
-				}
-
-				std::vector<u8> set(sparsePoints.cols());
-				std::vector<std::vector<std::vector<u32>>> states(bitCount + 1);
-				states.back().resize(preDomain);
-				for (auto point : sparsePoints[r])
-					states.back()[point >> bitCount].push_back(point);
-				auto copyIter = mFinals[r].back().begin();
-				for (u64 i = 0; i < mInitals[r].size(); ++i)
-				{
-					switch (mInitals[r][i])
-					{
-					case Initial::None:
-						break;
-					case Initial::Final:
-					{
-
-						if (states.back()[i].size() != 1)
-							throw RTE_LOC;
-						auto idx = *copyIter++;
-						if (sparsePoints[r][idx] != states.back()[i][0])
-							throw RTE_LOC;
-						set[idx] = 1;
-						break;
-					}
-					case Initial::Expand:
-						states[bitCount - 1].push_back(states.back()[i]);
-						break;
-					}
-				}
-
-
-				if (mDebug)
-				{
-
-					for (u64 i = bitCount; i != 0; --i)
-					{
-						auto& ex = mExpands[r][i - 1];
-						auto& state = states[i - 1];
-						auto copyIter = mFinals[r][i - 1].begin();
-
-						for (u64 j = 0; j < ex.size(); ++j)
-						{
-							std::cout << "expand " << i << " " << j << std::endl;
-							auto mid = std::partition(state[j].begin(), state[j].end(), [&](auto& a) {return !(a >> (i - 1) & 1); });
-							for (auto p : state[j])
-							{
-
-								std::cout << print(p, i);
-								if (p == *mid)
-									std::cout << " <- mid";
-								std::cout << std::endl;
-							}
-							std::cout << std::endl;
-							std::array<span<u32>, 2> sets{ span<u32>(state[j].begin(), mid), span<u32>(mid, state[j].end()) };
-							for (u64 k = 0; k < 2; ++k)
-							{
-								if (ex[j].mDepth[k] == 0)
-								{
-									if (state[j].size() != 2)
-										throw RTE_LOC;
-									auto c0 = *copyIter++;
-									//auto c1 = *copyIter++;
-
-									auto p0 = sparsePoints[r][c0];
-									if (p0 != state[j][k])
-										throw RTE_LOC;
-
-									set[c0] = 1;
-								}
-								else
-								{
-									if (sets[k].size() <= 1)
-										throw RTE_LOC;
-									auto next = i - 1 - ex[j].mDepth[k];
-									std::cout << "pushing set " << k << " to lvl " << next << std::endl;
-									states[next].push_back(std::vector<u32>(sets[k].begin(), sets[k].end()));
-								}
-							}
-						}
-
-					}
-					if (std::find(set.begin(), set.end(), 0) != set.end())
-						throw RTE_LOC;;
-				}
-			}
-
+			mDenseDepth = std::min(denseDepth, log2ceil(mDomain));
+			auto depth = log2ceil(mDomain) - mDenseDepth;
+			mMultiplier.init(mPartyIdx, depth * mNumPoints);
+			if (mDenseDepth)
+				mRegDpf.init(mPartyIdx, 1ull << mDenseDepth, numPoints);
 		}
 
+		u8 lsb(const block& b)
+		{
+			return b.get<u8>(0) & 1;
+		}
+
+
+		u64 baseOtCount() const
+		{
+			return log2ceil(mDomain) * mNumPoints;
+		}
+
+
+		void setBaseOts(
+			span<const std::array<block, 2>> baseSendOts,
+			span<const block> recvBaseOts,
+			const oc::BitVector& baseChoices)
+		{
+			auto count = baseOtCount();
+			if (baseSendOts.size() != count)
+				throw RTE_LOC;
+			if (recvBaseOts.size() != count)
+				throw RTE_LOC;
+			if (baseChoices.size() != count)
+				throw RTE_LOC;
+
+			auto denseCount = mRegDpf.baseOtCount();
+			auto
+				sDense = baseSendOts.subspan(0, denseCount),
+				sRest = baseSendOts.subspan(denseCount);
+
+			auto
+				rDense = recvBaseOts.subspan(0, denseCount),
+				rRest = recvBaseOts.subspan(denseCount);
+
+			BitVector cDense, cRest;
+			cDense.append(baseChoices, denseCount);
+			cRest.append(baseChoices, count - denseCount, denseCount);
+
+			if (denseCount)
+				mRegDpf.setBaseOts(sDense, rDense, cDense);
+
+			mMultiplier.setBaseOts(sRest, rRest, cRest);
+		}
+
+
+		struct Partition
+		{
+			// the index of the bit that partitions the left and right
+			// sets.
+			span<u32> mRange;
+			span<u32>::iterator mMid;
+
+			Partition() = default;
+			Partition(span<u32> range, span<u32>::iterator mid)
+				: mRange(range), mMid(mid)
+			{
+			}
+
+
+
+			std::array<span<u32>, 2>  children()
+			{
+				return
+				{ span<u32>(mRange.begin(), mMid), span<u32>(mMid, mRange.end()) };
+			}
+
+			std::string print(u64 bitIdx)
+			{
+				std::stringstream ss;
+				ss << "bit " << bitIdx << " val " << (1 << bitIdx) << " {";
+				--bitIdx;
+				for (auto iter = mRange.begin(); iter != mRange.end(); ++iter)
+				{
+					if (iter == mMid)
+						ss << ",";
+
+					auto upper = *iter >> bitIdx;
+					auto lower = *iter & ((1 << bitIdx) - 1);
+
+					ss << " " << upper << "." << lower;
+				}
+				ss << "}";
+				return ss.str();
+			}
+		};
+
+
+		// the upper bits of points[i] are all the same and points is sorted.
+		// "upper bits" are defined as bits indexed by {upperBitsBegin,...,31}
+		// This function will look at the bits at index upperBitsBegin and paritions
+		// the points into two sets.
+		std::pair<u32, Partition> partition(span<u32> points, u32 upperBitsBegin)
+		{
+			if (points.size() == 1)
+				return { 0, Partition{points, points.end()} };
+#ifndef NDEBUG
+			if (std::adjacent_find(points.begin(), points.end(), std::greater<u32>{}) != points.end())
+				throw RTE_LOC;
+			if (std::any_of(points.begin(), points.end(),
+				[upperBitsBegin, prefix = points[0] >> (upperBitsBegin)](auto v) {return v >> (upperBitsBegin) != prefix; }))
+				throw RTE_LOC;
+			if (points.size() <= 1)
+				throw RTE_LOC;
+#endif
+
+			Partition par;
+			do {
+				assert(upperBitsBegin != 0);
+				--upperBitsBegin;
+				par.mMid = std::upper_bound(
+					points.begin(), points.end(), 0,
+					[upperBitsBegin](auto, auto b) {return (b >> upperBitsBegin) & 1; });
+			} while (par.mMid == points.begin() || par.mMid == points.end());
+
+			par.mRange = points;
+			return { upperBitsBegin + 1, par };
+		}
+
+		struct Tree
+		{
+			std::vector<std::vector<Partition>> mPartitions;
+			std::vector<std::vector<block>> mSeeds;
+			std::vector<std::vector<u8>> mTags;
+			std::vector<std::vector<u8>> mChild;
+			std::vector<std::vector<u8>> mParent;
+
+
+			std::vector<std::array<block, 2>> mZ;
+			std::vector<u8> mC;
+			std::vector<std::array<u8, 2>> mTau;
+			std::vector<block> mSigma;
+
+			void resize(u64 depth)
+			{
+				mPartitions.resize(depth);
+				mSeeds.resize(depth);
+				mTags.resize(depth);
+				mChild.resize(depth);
+				mParent.resize(depth);
+				mZ.resize(depth);
+				mC.resize(depth);
+				mTau.resize(depth);
+				mSigma.resize(depth);
+			}
+
+			struct Level
+			{
+				Tree* mTree;
+				u64 mIdx;
+
+				void push_back(u8 child, u8 parentLevel, Partition& b, block seed, u8 tag)
+				{
+					mTree->mPartitions[mIdx].push_back(b);
+					mTree->mSeeds[mIdx].push_back(seed);
+					mTree->mTags[mIdx].push_back(tag);
+					mTree->mChild[mIdx].push_back(child);
+					mTree->mParent[mIdx].push_back(parentLevel);
+				}
+
+				u64 size() const
+				{
+					return mTree->mPartitions[mIdx].size();
+				}
+			};
+			Level operator[](u64 i)
+			{
+				return { this, i };
+			}
+
+
+
+		};
 
 		template<typename Output>
 		macoro::task<> expand(
+			span<u64> points,
+			span<block> values,
 			Output&& output,
 			PRNG& prng,
+			MatrixView<u32> sparsePoints,
 			coproto::Socket& sock)
 		{
+			if (points.size() != sparsePoints.rows())
+				throw RTE_LOC;
+			u64 depth = log2ceil(mDomain) - mDenseDepth;
+
+			std::vector<Tree> trees(mNumPoints);
+			for (u64 i = 0; i < mNumPoints; ++i)
+			{
+				trees[i].resize(depth + 1);
+			}
+			using T = block;
+			std::unique_ptr<u8[]> mem;
+			std::vector<std::span<T>> leafValues(mNumPoints);
+			std::vector<std::span<u8>> leafTags(mNumPoints);
+			u64 totalSize = 0;
+			for (u64 i = 0; i < mNumPoints; ++i)
+				totalSize += sparsePoints[i].size();
+
+			mem.reset(new u8[totalSize * (sizeof(T) + 1)]());
+			auto iter = mem.get();
+			for (u64 i = 0; i < mNumPoints; ++i)
+			{
+				leafValues[i] = span<T>((T*)iter, sparsePoints[i].size());
+				iter += leafValues[i].size_bytes();
+			}
+			for (u64 i = 0; i < mNumPoints; ++i)
+			{
+				leafTags[i] = span<u8>(iter, sparsePoints[i].size());
+				iter += leafTags[i].size_bytes();
+			}
+
+			//for (u64 i = 0; i < mNumPoints; ++i)
+			//{
+			//	for (auto p : sparsePoints[i])
+			//		std::cout << p << " ";
+			//	std::cout << std::endl;
+			//}
+
+
+			if (mDenseDepth)
+			{
+
+				if (mDenseDepth > log2ceil(mDomain))
+					throw RTE_LOC;
+
+				std::vector<u64> densePoints(points.size());
+				for (u64 i = 0; i < points.size(); ++i)
+					densePoints[i] = points[i] >> depth;
+				Matrix<block> seeds(points.size(), 1ull << mDenseDepth);
+				Matrix<u8> tags(points.size(), 1ull << mDenseDepth);
+				co_await mRegDpf.expand(densePoints, {}, [&](auto treeIdx, auto leafIdx, auto seed, auto tag) {
+					seeds(treeIdx, leafIdx) = seed;
+					tags(treeIdx, leafIdx) = tag;
+					}, prng, sock);
+
+				for (u64 r = 0; r < sparsePoints.rows(); ++r)
+				{
+					//auto seed = seeds[i]
+					auto& tree = trees[r];
+					auto iter = sparsePoints[r].begin();
+					auto end = sparsePoints[r].end();
+					while (iter != end)
+					{
+						auto p = *iter;
+						auto bin = p >> depth;
+						auto seed = seeds(r, bin);
+						auto tag = tags(r, bin);
+
+						auto e = std::find_if(iter, end, [bin, depth](auto v) {return (v >> depth) != bin; });
+						auto points = span<u32>(iter, e);
+						if (points.size() == 1)
+						{
+							auto idx = std::distance(sparsePoints.data(r), &points[0]);
+							leafValues[r][idx] = seed;
+							leafTags[r][idx] = tag;
+							//std::cout << "p " << mPartyIdx << " leaf " << idx << " seed " << seed << " " << int(tag) << std::endl;
+						}
+						else if (points.size())
+						{
+							auto [delta, root] = partition(points, depth);
+
+							block cSeeds[2];
+							cSeeds[0] = mAesFixedKey.hashBlock(seed ^ ZeroBlock);
+							cSeeds[1] = mAesFixedKey.hashBlock(seed ^ OneBlock);
+
+							auto children = root.children();
+							for (u64 j = 0; j < 2; ++j)
+							{
+								auto [delta2, b2] = partition(children[j], delta);
+								//if (!mPartyIdx)
+								//	std::cout << b2.print(delta2) << std::endl;
+								//std::cout << "p " << mPartyIdx << " d " << delta << " j " << j <<" bin " << bin << " seed " << cSeeds[j] << " " << int(tag) << std::endl;
+								tree[delta2].push_back(j, delta, b2, cSeeds[j], tag);
+								tree.mZ[delta][j] ^= cSeeds[j];
+								tree.mC[delta] = 1;
+							}
+						}
+						iter = e;
+					}
+				}
+			}
+			else
+			{
+
+				for (u64 r = 0; r < mNumPoints; ++r)
+				{
+					auto points = sparsePoints[r];
+					auto& tree = trees[r];
+					// range must be sorted and unique
+					//if (std::adjacent_find(points.begin(), points.end(), std::greater<u32>{}) != points.end())
+					//	throw RTE_LOC;
+
+					auto [delta, b] = partition(points, depth);
+					//if (!mPartyIdx)
+					//	std::cout << b.print(delta) << std::endl;
+
+					auto children = b.children();
+					for (u64 j = 0; j < 2; ++j)
+					{
+						auto [delta2, b2] = partition(children[j], delta);
+						//if (!mPartyIdx)
+						//	std::cout << b2.print(delta2) << std::endl;
+						block seed = prng.get();
+						//std::cout << "p " << mPartyIdx << " d " << delta << " j " << j << " seed " << seed << std::endl;
+						tree[delta2].push_back(j, delta, b2, seed, mPartyIdx);
+						tree.mZ[delta][j] = seed;
+						tree.mC[delta] = 1;
+					}
+				}
+			}
+
+
+			for (u64 d = depth; d; --d)
+			{
+				//std::cout << "-----" << d << "-----" << std::endl;
+
+				std::vector<block> z0(mNumPoints);
+				std::vector<block> z1(mNumPoints);
+
+				BitVector negAlpha(mNumPoints);
+				std::vector<std::array<u8, 2>> taus(mNumPoints);
+				std::vector<block>  sigmas(mNumPoints);
+				bool used = false;
+				for (u64 r = 0; r < mNumPoints; ++r)
+				{
+					auto& tree = trees[r];
+					if (tree.mC[d] == 0)
+						tree.mZ[d] = prng.get();
+					else
+						used = true;
+
+					auto alphaD = (points[r] >> (d - 1)) & 1;
+					taus[r][0] = lsb(tree.mZ[d][0]) ^ alphaD ^ mPartyIdx;
+					taus[r][1] = lsb(tree.mZ[d][1]) ^ alphaD;
+
+					//std::cout << "p " << mPartyIdx << " d " << d << " z " << tree.mZ[d][0] << " " <<tree.mZ[d][1] << std::endl;
+
+
+					negAlpha[r] = alphaD ^ mPartyIdx;
+					sigmas[r] = tree.mZ[d][0] ^ tree.mZ[d][1];
+
+					z0[r] = tree.mZ[d][0];
+					z1[r] = tree.mZ[d][1];
+
+				}
+
+				if (used)
+				{
+
+					co_await reveal(z0, sock);
+					co_await reveal(z1, sock);
+
+
+					co_await mMultiplier.multiply(negAlpha, sigmas, sigmas, sock);
+					for (u64 r = 0; r < mNumPoints; ++r)
+						sigmas[r] = sigmas[r] ^ trees[r].mZ[d][0];
+					co_await reveal(sigmas, taus, sock);
+
+					//std::cout << "p " << mPartyIdx << " d " << d << " ~a " << negAlpha[0] << " s " << sigmas[0] << std::endl;
+					//std::cout << "        z  " << z0[0] << "   " << z1[0] << std::endl;
+
+					for (u64 r = 0; r < mNumPoints; ++r)
+					{
+						//std::cout << "setting >" << d << "<" << std::endl;
+						trees[r].mSigma[d] = sigmas[r];
+						trees[r].mTau[d] = taus[r];
+					}
+				}
+
+				auto dNext = d - 1;
+				if (dNext == 0)
+					break;
+
+				//std::cout << "vvvvv" << dNext << "vvvvv" << std::endl;
+
+				for (u64 r = 0; r < mNumPoints; ++r)
+				{
+					auto& tree = trees[r];
+					auto size = tree.mSeeds[dNext].size();
+
+					for (u64 i = 0; i < size; ++i)
+					{
+						auto& seed = tree.mSeeds[dNext][i];
+						auto par = tree.mPartitions[dNext][i];
+						auto tag = tree.mTags[dNext][i];
+						auto child = tree.mChild[dNext][i];
+						auto parent = tree.mParent[dNext][i];
+						auto pTau = tree.mTau[parent][child];
+						auto pSigma = tree.mSigma[parent];
+
+						auto cTag = lsb(seed) ^ tag * pTau;
+						//auto old = seed;
+						seed = seed ^ (pSigma & block::allSame<u8>(-tag));
+
+						//std::cout <<"p " << mPartyIdx << " d " << dNext << " i " << i << " "
+						//	<<old << " -> " << seed << " via >"<<  int(parent)<< "< " << pSigma << " t " << int(tag) << std::endl;
+
+						std::array<block, 2> cSeed;
+						cSeed[0] = mAesFixedKey.hashBlock(seed ^ ZeroBlock);
+						cSeed[1] = mAesFixedKey.hashBlock(seed ^ OneBlock);
+
+						tree.mZ[dNext][0] = tree.mZ[dNext][0] ^ cSeed[0];
+						tree.mZ[dNext][1] = tree.mZ[dNext][1] ^ cSeed[1];
+						tree.mC[dNext] = 1;
+
+						auto children = par.children();
+						for (u64 j = 0; j < 2; ++j)
+						{
+							auto [cd, cPar] = partition(children[j], dNext);
+
+							//if(!mPartyIdx)
+							//	std::cout << cPar.print(cd) << std::endl;
+							tree.mPartitions[cd].push_back(cPar);
+							tree.mChild[cd].push_back(j);
+							tree.mParent[cd].push_back(dNext);
+							tree.mSeeds[cd].push_back(cSeed[j]);
+							tree.mTags[cd].push_back(cTag);
+						}
+					}
+				}
+			}
+
+			std::vector<block> gamma(values.begin(), values.end());
+			for (u64 r = 0; r < mNumPoints; ++r)
+			{
+				auto& tree = trees[r];
+				auto size = tree.mSeeds[0].size();
+
+				for (u64 i = 0; i < size; ++i)
+				{
+					auto& seed = tree.mSeeds[0][i];
+					auto& tag = tree.mTags[0][i];
+					auto j = tree.mChild[0][i];
+					auto parent = tree.mParent[0][i];
+					auto par = tree.mPartitions[0][i];
+					auto pTau = tree.mTau[parent][j];
+					auto pSigma = tree.mSigma[parent];
+
+					auto b = std::distance(sparsePoints.data(r), par.mRange.data());
+					leafTags[r][b] = lsb(seed) ^ tag * pTau;
+					leafValues[r][b] = seed ^ (pSigma & block::allSame<u8>(-tag));
+					gamma[r] = gamma[r] ^ leafValues[r][b];
+					//std::cout << "p " << mPartyIdx << " d " << 0 << " i " << i << " "
+					//	<< seed << " -> " << leafValues[r][b] << " via >" << int(parent) << "< " << pSigma << " t " << int(tag) << std::endl;
+
+				}
+			}
+
+			co_await reveal(gamma, sock);
+			//std::cout << "-----------final-------------" << std::endl;
+			for (u64 r = 0; r < mNumPoints; ++r)
+			{
+				auto& tree = trees[r];
+				auto size = sparsePoints[r].size();
+				for (u64 i = 0; i < size; ++i)
+				{
+					assert(leafValues[r][i] != oc::ZeroBlock);
+					auto val = leafValues[r][i] ^ (gamma[r] & block::allSame<u8>(-leafTags[r][i]));
+
+					//std::cout << "p " << mPartyIdx << " d " << 0 << " i " << i << " "
+					//	<< leafValues[r][i] << " -> " << val << " via " << gamma[r] << " t " << int(leafTags[r][i]) << std::endl;
+
+					output(r, i, val, leafTags[r][i]);
+				}
+			}
+
+			co_return;
 		}
 
+
+
+		//std::vector<block> gamma(values.begin(), values.end());
+		//for (u64 r = 0; r < mNumPoints; ++r)
+		//{
+		//	auto& tree = trees[r];
+		//	auto size = sparsePoints[r].size();
+		//	if (tree.mSeeds[0].size() != size)
+		//		throw RTE_LOC;
+		//	for (u64 i = 0; i < size; ++i)
+		//	{
+		//		auto& seed = tree.mSeeds[0][i];
+		//		auto& tag = tree.mTags[0][i];
+		//		auto j = tree.mChild[0][i];
+		//		auto parent = tree.mParent[0][i];
+		//		auto par = tree.mPartitions[0][i];
+		//		auto pTau = tree.mTau[parent][j];
+		//		auto pSigma = tree.mSigma[parent];
+
+		//		//auto old = seed;
+
+		//		auto b = std::distance(sparsePoints.data(r), par.mRange.data());
+		//		leafTags[r][b] = lsb(seed) ^ tag * pTau;
+		//		leafValues[r][b] = seed ^ (pSigma & block::allSame<u8>(-tag));
+
+		//		//std::cout << "p " << mPartyIdx << " d " << 0 << " i " << i << " "
+		//		//	<< old << " -> " << seed << " via >" << int(parent) << "< " << pSigma << " t " << int(tag) << std::endl;
+
+
+		//		gamma[r] = gamma[r] ^ seed;
+		//	}
+		//}
+
+		//co_await reveal(gamma, sock);
+		////std::cout << "-----------final-------------" << std::endl;
+		//for (u64 r = 0; r < mNumPoints; ++r)
+		//{
+		//	//auto& tree = trees[r];
+		//	auto size = sparsePoints[r].size();
+		//	for (u64 i = 0; i < size; ++i)
+		//	{
+		//		//auto seed = tree.mSeeds[0][i];
+		//		//auto tag = tree.mTags[0][i];
+
+
+		//		//auto old = seed;
+		//		auto val = leafValues[r][i] ^ (gamma[r] & block::allSame<u8>(-leafTags[r][i]));
+
+		//		//std::cout << "p " << mPartyIdx << " d " << 0 << " i " << i << " "
+		//		//	<< old << " -> " << seed << " via " << gamma[r] << " t " << int(tag) << std::endl;
+
+		//		output(r, i, val, leafTags[r][i]);
+		//	}
+		//}
+
+
+
+		macoro::task<> reveal(span<block> sigma, span<std::array<u8, 2>> tau, coproto::Socket& sock)
+		{
+			if (sigma.size() != tau.size())
+				throw RTE_LOC;
+			std::vector<block> sBuff(sigma.begin(), sigma.end());
+			std::vector<std::array<u8, 2>> tBuff(tau.begin(), tau.end());
+			co_await macoro::when_all_ready(
+				sock.send(std::move(sBuff)),
+				sock.send(std::move(tBuff))
+			);
+			sBuff.resize(sigma.size());
+			tBuff.resize(tau.size());
+			co_await macoro::when_all_ready(
+				sock.recv(sBuff),
+				sock.recv(tBuff)
+			);
+			for (u64 i = 0; i < sigma.size(); ++i)
+			{
+				sigma[i] = sigma[i] ^ sBuff[i];
+				tau[i][0] = tau[i][0] ^ tBuff[i][0];
+				tau[i][1] = tau[i][1] ^ tBuff[i][1];
+			}
+		}
+
+
+		macoro::task<> reveal(span<block> sigma, coproto::Socket& sock)
+		{
+			std::vector<block> sBuff(sigma.begin(), sigma.end());
+			co_await sock.send(std::move(sBuff));
+			sBuff.resize(sigma.size());
+			co_await  sock.recv(sBuff);
+			for (u64 i = 0; i < sigma.size(); ++i)
+			{
+				sigma[i] = sigma[i] ^ sBuff[i];
+			}
+		}
 
 	};
 
 }
 
 #undef SIMD8
+

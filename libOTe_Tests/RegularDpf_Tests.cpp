@@ -11,15 +11,25 @@ void RegularDpf_Multiply_Test(const CLP& cmd)
 	u64 n = 13;
 	PRNG prng(block(231234, 321312));
 	std::array<oc::DpfMult, 2> dpf;
-	dpf[0].mPartyIdx = 0;
-	dpf[1].mPartyIdx = 1;
-	dpf[0].mSendOts.push_back(prng.get());
-	dpf[1].mSendOts.push_back(prng.get());
-	dpf[0].mChoiceBits.pushBack(0);
-	dpf[1].mChoiceBits.pushBack(1);
-	dpf[0].mRecvOts.push_back(dpf[1].mSendOts[0][dpf[0].mChoiceBits[0]]);
-	dpf[1].mRecvOts.push_back(dpf[0].mSendOts[0][dpf[1].mChoiceBits[0]]);
+	dpf[0].init(0, n);
+	dpf[1].init(1, n);
 
+	std::array<std::vector<std::array<block, 2>>, 2> sendOts;
+	std::array<std::vector<block>, 2> recvOts;
+	std::array<BitVector, 2> choices;
+	for (u64 i = 0; i < 2; ++i)
+	{
+		sendOts[i].resize(n);
+		recvOts[i].resize(n);
+		choices[i].resize(n);
+		choices[i].randomize(prng);
+		prng.get(sendOts[i].data(), sendOts[i].size());
+		for (u64 j = 0; j < n; ++j)
+			recvOts[i][j] = sendOts[i][j][choices[i][j]];
+	}
+
+	dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
+	dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
 
 	{
 		u64 i = 0;
@@ -59,16 +69,15 @@ void RegularDpf_Multiply_Test(const CLP& cmd)
 	{
 		//std::cout << "-=========================-" std::endl;
 
-		for (u64 j = 0; j < n; ++j)
+		for (u64 i = 0; i < 2; ++i)
 		{
-			dpf[0].mSendOts.push_back(prng.get());
-			dpf[1].mSendOts.push_back(prng.get());
-			dpf[0].mChoiceBits.pushBack(prng.getBit());
-			dpf[1].mChoiceBits.pushBack(prng.getBit());
-			dpf[0].mRecvOts.push_back(dpf[1].mSendOts.back()[dpf[0].mChoiceBits.back()]);
-			dpf[1].mRecvOts.push_back(dpf[0].mSendOts.back()[dpf[1].mChoiceBits.back()]);
+			choices[i].randomize(prng);
+			prng.get(sendOts[i].data(), sendOts[i].size());
+			for (u64 j = 0; j < n; ++j)
+				recvOts[i][j] = sendOts[i][j][choices[i][j]];
 		}
-
+		dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
+		dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
 
 		BitVector x0(n), x1(n);
 		x0.randomize(prng);
@@ -165,7 +174,7 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 		{
 			auto p = points0[k] ^ points1[k];
 			auto act = output[0][k][i] ^ output[1][k][i];
-			auto t = i == p;
+			auto t = i == p ? 1 : 0;
 			auto tAct = tags[0][k][i] ^ tags[1][k][i];
 			auto exp = t ? (values0[k] ^ values1[k]) : ZeroBlock;
 			if (exp != act)
@@ -180,22 +189,98 @@ void SparseDpf_Proto_Test(const oc::CLP& cmd)
 {
 	PRNG prng(block(32324, 2342));
 	u64 numPoints = 1;
-	u64 domain = 256;
-	oc::SparseDpf dpf;
-	Matrix<u32> sparsePoints(numPoints, domain / 10);
-	std::vector<u32> set(domain);
-	std::iota(set.begin(), set.end(), 0);
-	for(u64 i = 0; i < sparsePoints.size(); ++i)
+	u64 domain = 1773;
+	u64 dense = 4;
+	u64 fraction = 16;
+
+	auto index{ std::vector<u64>(numPoints) };
+	auto value{ std::vector<block>(numPoints) };
+	std::array points{ std::vector<u64>(numPoints),std::vector<u64>(numPoints) };
+	std::array values{ std::vector<block>(numPoints), std::vector<block>(numPoints) };
+	oc::SparseDpf dpf[2];
+	Matrix<u32> sparsePoints(numPoints, domain / fraction);
+
+	for (u64 j = 0; j < numPoints; ++j)
 	{
-		auto j = prng.get<u32>() % set.size();
-		std::swap(set[j], set.back());
-		sparsePoints(i) = set.back();
-		set.pop_back();
+		std::vector<u32> set(domain);
+		std::iota(set.begin(), set.end(), 0);
+		for (u64 i = 0; i < sparsePoints.cols(); ++i)
+		{
+			auto k = prng.get<u32>() % set.size();
+			std::swap(set[k], set.back());
+			sparsePoints(j, i) = set.back();
+			set.pop_back();
+		}
 	}
 
 	for (u64 i = 0; i < sparsePoints.rows(); ++i)
 	{
 		std::sort(sparsePoints[i].begin(), sparsePoints[i].end());
+		index[i] = prng.get<u64>() % sparsePoints.cols();
+		value[i] = prng.get();
+		auto alpha = sparsePoints(i, index[i]);
+		//std::cout << "alpha " << alpha << " " << oc::BitVector((u8*)&alpha, log2ceil(domain)) << std::endl;
+		points[0][i] = prng.get();
+		points[1][i] = points[0][i] ^ sparsePoints(i, index[i]);
+		values[0][i] = prng.get();
+		values[1][i] = values[0][i] ^ value[i];
 	}
-	dpf.init(0, domain, sparsePoints);
+
+
+	dpf[0].init(0, numPoints, domain, dense);
+	dpf[1].init(1, numPoints, domain, dense);
+	auto sock = coproto::LocalAsyncSocket::makePair();
+
+	auto baseCount = dpf[0].baseOtCount();
+
+	std::array<std::vector<std::array<block, 2>>, 2> sendOts;
+	std::array<std::vector<block>, 2> recvOts;
+	std::array<BitVector, 2> choices;
+	for (u64 i = 0; i < 2; ++i)
+	{
+		sendOts[i].resize(baseCount);
+		recvOts[i].resize(baseCount);
+		choices[i].resize(baseCount);
+		choices[i].randomize(prng);
+		prng.get(sendOts[i].data(), sendOts[i].size());
+		for (u64 j = 0; j < baseCount; ++j)
+			recvOts[i][j] = sendOts[i][j][choices[i][j]];
+	}
+
+	dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
+	dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
+
+
+	std::array<Matrix<block>, 2> out;
+	std::array<Matrix<u8>, 2> tags;
+	out[0].resize(numPoints, sparsePoints.cols());
+	out[1].resize(numPoints, sparsePoints.cols());
+	tags[0].resize(numPoints, sparsePoints.cols());
+	tags[1].resize(numPoints, sparsePoints.cols());
+	auto r = macoro::sync_wait(
+		macoro::when_all_ready(
+			dpf[0].expand(points[0], values[0], [&](auto k, auto i, auto v, auto t) { out[0](k, i) = v; tags[0](k, i) = t; }, prng, sparsePoints, sock[0]),
+			dpf[1].expand(points[1], values[1], [&](auto k, auto i, auto v, auto t) { out[1](k, i) = v; tags[1](k, i) = t; }, prng, sparsePoints, sock[1])
+		));
+
+
+	std::get<0>(r).result();
+	std::get<1>(r).result();
+
+	for (u64 i = 0; i < numPoints; ++i)
+	{
+		for (u64 j = 0; j < sparsePoints.cols(); ++j)
+		{
+			auto active = index[i] == j ? 1 : 0;
+
+			auto tag = tags[0](i, j) ^ tags[1](i, j);
+			if (tag != active)
+				throw RTE_LOC;
+
+			auto act = out[0](i, j) ^ out[1](i, j);
+			auto exp = active ? value[i] : ZeroBlock;
+			if (act != exp)
+				throw RTE_LOC;
+		}
+	}
 }

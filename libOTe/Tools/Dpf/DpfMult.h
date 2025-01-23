@@ -23,6 +23,8 @@ namespace osuCrypto
 
 		u64 mOtIdx = 0;
 
+		bool hasBaseOts() const { return mChoiceBits.size(); }
+
 		u8 lsb(const block& b)
 		{
 			return b.get<u8>(0) & 1;
@@ -87,6 +89,8 @@ namespace osuCrypto
 			if (x.size() != y.size() || x.size() != xy.size())
 				throw RTE_LOC;
 			if (x.size() + mOtIdx > mTotalMults)
+				throw RTE_LOC;
+			if (hasBaseOts() == false)
 				throw RTE_LOC;
 
 			BitVector a0; a0.append(mChoiceBits, x.size(), mOtIdx);
