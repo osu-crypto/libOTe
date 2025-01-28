@@ -66,6 +66,7 @@ namespace tests_libOTe
             tc.add("foliage_dpf_test                        ", foliage_dpf_test);
             tc.add("foliage_spfss_test                      ", foliage_spfss_test);
             tc.add("foliage_pcg_test                        ", foliage_pcg_test);
+            tc.add("foliage_F4ole_test                      ", foliage_F4ole_test);
             
 
             tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);

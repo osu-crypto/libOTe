@@ -1,8 +1,12 @@
 #pragma once
 #include "cryptoTools/Crypto/AES.h"
 #include "cryptoTools/Crypto/PRNG.h"
+#include "cryptoTools/Crypto/RandomOracle.h"
 #include <cmath>
 #include "uint128.h"
+#include <sstream>
+#include <iomanip>
+
 namespace osuCrypto
 {
 	using uint128_t = absl::uint128_t;
@@ -154,6 +158,27 @@ namespace osuCrypto
 		printf("\n");
 	}
 
+	template<typename T>
+	inline block hash(T* ptr, u64 size)
+	{
+		oc::RandomOracle ro(16);
+		ro.Update(ptr, size);
+		block f;
+		ro.Final(f);
+		return f;
+	}
+
+
+	inline std::string hex32(span<u32> ptr)
+	{
+		std::stringstream ss;
+		for (u64 i = 0; i < ptr.size(); ++i)
+			ss << std::setw(8)<<std::setfill('0')<< std::hex << ptr[i];
+		return ss.str();
+	}
+
+
+
 	// Samples a uniformly random value between 0 and max via rejection sampling.
 	inline uint64_t random_index(uint64_t max, PRNG& prng)
 	{
@@ -185,10 +210,10 @@ namespace osuCrypto
 	}
 
 	// Reverses the order of elements in an array of uint8_t values
-	inline  void reverse_uint8_array(span<uint8_t> trits, size_t size)
+	inline  void reverse_uint8_array(span<uint8_t> trits)
 	{
 		size_t i = 0;
-		size_t j = size - 1;
+		size_t j = trits.size() - 1;
 
 		while (i < j)
 		{
@@ -204,24 +229,24 @@ namespace osuCrypto
 	}
 
 	// Converts an array of trits (not packed) into their integer representation.
-	inline  size_t trits_to_int(span<uint8_t> trits, size_t size)
+	inline  size_t trits_to_int(span<uint8_t> trits)
 	{
-		reverse_uint8_array(trits, size);
+		reverse_uint8_array(trits);
 		size_t result = 0;
-		for (size_t i = 0; i < size; i++)
+		for (size_t i = 0; i < trits.size(); i++)
 			result = result * 3 + (size_t)trits[i];
 
 		return result;
 	}
 
 	// Converts an integer into ternary representation (each trit = 0,1,2)
-	inline  void int_to_trits(size_t n, span<uint8_t> trits, size_t size)
+	inline  void int_to_trits(size_t n, span<uint8_t> trits)
 	{
-		for (size_t i = 0; i < size; i++)
+		for (size_t i = 0; i < trits.size(); i++)
 			trits[i] = 0;
 
 		size_t index = 0;
-		while (n > 0 && index < size)
+		while (n > 0 && index < trits.size())
 		{
 			trits[index] = (uint8_t)(n % 3);
 			n = n / 3;
@@ -233,6 +258,21 @@ namespace osuCrypto
 	inline  double log_base(double a, double base)
 	{
 		return std::log2(a) / std::log2(base);
+	}
+
+	inline u64 log3Ceil(u64 x)
+	{
+		if (x == 0) return 0;
+		u64 i = 0;
+		u64 v = 1;
+		while (v < x)
+		{
+			v *= 3;
+			i++;
+		}
+		//assert(i == ceil(log_base(x, 3)));
+
+		return i;
 	}
 
 	// Compute base^exp without the floating-point precision
@@ -259,5 +299,25 @@ namespace osuCrypto
 		return result;
 	}
 
+	inline int popcount(uint128_t x)
+	{
+		std::array<u64, 2> xArr;
+		memcpy(xArr.data(), &x, 16);
+		return popcount(xArr[0]) + popcount(xArr[1]);
+	}
+
+	inline std::array<u8, 64> extractF4(const uint128_t& val)
+	{
+		std::array<u8, 64> ret;
+		const char* ptr = (const char*)&val;
+		for (u8 i = 0; i < 16; ++i)
+		{
+			ret[i * 4 + 0] = (ptr[i] >> 0) & 3;
+			ret[i * 4 + 1] = (ptr[i] >> 2) & 3;
+			ret[i * 4 + 2] = (ptr[i] >> 4) & 3;
+			ret[i * 4 + 3] = (ptr[i] >> 6) & 3;;
+		}
+		return ret;
+	}
 
 }

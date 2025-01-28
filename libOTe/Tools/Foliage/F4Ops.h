@@ -10,21 +10,12 @@ namespace osuCrypto
     // Samples a non-zero element of F4
     inline uint8_t rand_f4x(PRNG& prng)
     {
-        uint8_t t;
-        unsigned char rand_byte;
-
-        // loop until we have two bits where at least one is non-zero
-        while (1)
+        uint8_t t = 0;
+        while (t == 0)
         {
-            rand_byte = prng.get();
-            t = 0;
-            t |= rand_byte & 1;
-            t = t << 1;
-            t |= (rand_byte >> 1) & 1;
-
-            if (t != 0 && t != 4)
-                return t;
+            t = prng.get<u8>() & 3;
         }
+        return t;
     }
 
     // Multiplies two elements of F4 (optionally: 4 elements packed into uint8_t)
@@ -37,6 +28,17 @@ namespace osuCrypto
         return res;
     }
 
+    inline void f4Mult(
+        block aLsb, block aMsb,
+        block bLsb, block bMsb,
+		block& cLsb, block& cMsb)
+    {
+        auto tmp = aMsb & bMsb;// msb only
+        cMsb = tmp ^ (aMsb & bLsb) ^ (aLsb & bMsb);// msb only
+        cLsb = (aLsb & bLsb) ^ tmp;
+    }
+
+
     // Multiplies two packed matrices of F4 elements column-by-column.
     // Note that here the "columns" are packed into an element of uint8_t
     // resulting in a matrix with 4 columns.
@@ -47,8 +49,8 @@ namespace osuCrypto
         size_t poly_size)
     {
         const uint8_t pattern = 0xaa;
-        uint8_t mask_h = pattern;     // 0b101010101010101001010
-        uint8_t mask_l = mask_h >> 1; // 0b010101010101010100101
+        uint8_t mask_h = pattern;     // 0b10101010
+        uint8_t mask_l = mask_h >> 1; // 0b01010101
 
         uint8_t tmp;
         uint8_t a_h, a_l, b_h, b_l;
@@ -176,6 +178,8 @@ namespace osuCrypto
         {
             fft_a[i] = (fft_a[i] & ~3ull) | 1;
         }
+
+        //std::cout << "sampleA " << int(fft_a[0]) << int(fft_a[1]) << int(fft_a[2]) << int(fft_a[3]) << std::endl;
 
         // FOR DEBUGGING: set fft_a to the identity
         // for (size_t i = 0; i < poly_size; i++)

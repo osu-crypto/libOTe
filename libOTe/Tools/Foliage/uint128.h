@@ -85,22 +85,11 @@
 //   // assumption specified above.
 //   int y = x / 16;
 //
-#if !defined(NDEBUG)
-#define ABSL_INTERNAL_ASSUME(cond) assert(cond)
-#elif ABSL_HAVE_BUILTIN(__builtin_assume)
-#define ABSL_INTERNAL_ASSUME(cond) __builtin_assume(cond)
-#elif defined(__GNUC__) || ABSL_HAVE_BUILTIN(__builtin_unreachable)
-#define ABSL_INTERNAL_ASSUME(cond)        \
-  do {                                    \
-    if (!(cond)) __builtin_unreachable(); \
-  } while (0)
-#elif defined(_MSC_VER)
+
+#if defined(_MSC_VER)
 #define ABSL_INTERNAL_ASSUME(cond) __assume(cond)
 #else
-#define ABSL_INTERNAL_ASSUME(cond)      \
-  do {                                  \
-    static_cast<void>(false && (cond)); \
-  } while (0)
+#define ABSL_INTERNAL_ASSUME(cond)    
 #endif
 
 namespace absl {

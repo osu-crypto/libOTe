@@ -5,6 +5,8 @@
 //#include "libOTe/Tools/Foliage/tri-dpf/FoliageHalfDpf.h"
 #include "libOTe/Tools/Foliage/F4Ops.h"
 #include "cryptoTools/Common/Matrix.h"
+#include "libOTe/Tools/Foliage/FoliagePcg.h"
+#include "coproto/Socket/LocalAsyncSock.h"
 namespace osuCrypto
 {
 	//u8 extractF4(const uint128_t& val, u8 idx)
@@ -14,26 +16,6 @@ namespace osuCrypto
 	//	auto byte = ((u8*)&val)[byteIdx];
 	//	return (byte >> (bitIdx * 2)) & 0b11;
 	//}
-	int popcount(uint128_t x)
-	{
-		std::array<u64, 2> xArr;
-		memcpy(xArr.data(), &x, 16);
-		return popcount(xArr[0]) + popcount(xArr[1]);
-	}
-
-	std::array<u8, 64> extractF4(const uint128_t& val)
-	{
-		std::array<u8, 64> ret;
-		const char* ptr = (const char*)&val;
-		for (u8 i = 0; i < 16; ++i)
-		{
-			ret[i * 4 + 0] = (ptr[i] >> 0) & 3;
-			ret[i * 4 + 1] = (ptr[i] >> 2) & 3;
-			ret[i * 4 + 2] = (ptr[i] >> 4) & 3;
-			ret[i * 4 + 3] = (ptr[i] >> 6) & 3;;
-		}
-		return ret;
-	}
 
 	void testOutputCorrectness(
 		span<uint128_t> shares0,
@@ -310,27 +292,13 @@ namespace osuCrypto
 	// TODO[feature]: modularize the different components of the test case and
 	// design more unit tests.
 
-	u64 log3Ceil(u64 x)
-	{
-		if (x == 0) return 0;
-		u64 i = 0;
-		u64 v = 1;
-		while (v < x)
-		{
-			v *= 3;
-			i++;
-		}
-		assert(i == ceil(log_base(x, 3)));
-
-		return i;
-	}
 
 	// This test evaluates the full PCG.Expand for both parties and
 	// checks correctness of the resulting OLE correlation.
 	void foliage_pcg_test(const CLP& cmd)
 	{
 		bool check = !cmd.isSet("noCheck");
-		auto N = 14; // 3^N number of OLEs generated in total
+		auto N = 12; // 3^N number of OLEs generated in total
 
 		// The C and T parameters are computed using the SageMath script that can be
 		// found in https://github.com/mbombar/estimator_folding
@@ -341,7 +309,8 @@ namespace osuCrypto
 
 		clock_t time;
 		time = clock();
-		PRNG prng(block(54233453245));
+		PRNG prng0(block(2424523452345, 111124521521455324));
+		PRNG prng1(block(6474567454546, 567546754674345444));
 
 		const size_t n = N;
 		const size_t c = C;
@@ -355,7 +324,12 @@ namespace osuCrypto
 		//************************************************************************
 		std::vector<uint8_t> fft_a(poly_size);
 		std::vector<uint32_t> fft_a2(poly_size);
-		sample_a_and_a2(fft_a, fft_a2, poly_size, c, prng);
+		PRNG APrng(block(431234234, 213434234123));
+		sample_a_and_a2(fft_a, fft_a2, poly_size, c, APrng);
+
+		//std::cout << "a " << hash(fft_a.data(), fft_a.size()) << std::endl;
+		//std::cout << "a2 " << hash(fft_a2.data(), fft_a2.size()) << std::endl;
+
 
 		//************************************************************************
 		// Here, we figure out a good block size for the error vectors such that
@@ -407,14 +381,14 @@ namespace osuCrypto
 				size_t offset = i * t + j;
 
 				// random *non-zero* coefficients in F4
-				uint8_t a = rand_f4x(prng);
-				uint8_t b = rand_f4x(prng);
+				uint8_t a = rand_f4x(prng0);
+				uint8_t b = rand_f4x(prng1);
 				err_poly_coeffs_A[offset] = a;
 				err_poly_coeffs_B[offset] = b;
 
 				// random index within the block
-				size_t pos_A = random_index(block_size - 1, prng);
-				size_t pos_B = random_index(block_size - 1, prng);
+				size_t pos_A = random_index(block_size - 1, prng0);
+				size_t pos_B = random_index(block_size - 1, prng1);
 
 				if (pos_A >= block_size || pos_B >= block_size)
 				{
@@ -431,6 +405,13 @@ namespace osuCrypto
 				err_polys_B[i * poly_size + j * block_size + pos_B] = b;
 			}
 		}
+
+
+		//std::cout << "posA " << hash(err_poly_positions_A.data(), err_poly_positions_A.size()) << std::endl;
+		//std::cout << "posB " << hash(err_poly_positions_B.data(), err_poly_positions_B.size()) << std::endl;
+		//std::cout << "coeffA " << hash(err_poly_coeffs_A.data(), err_poly_coeffs_A.size()) << std::endl;
+		//std::cout << "coeffB " << hash(err_poly_coeffs_B.data(), err_poly_coeffs_B.size()) << std::endl;
+
 
 		// Compute FFT of eA and eB in packed form.
 		// Note that because c = 4, we can pack 4 FFTs into a uint8_t
@@ -454,6 +435,10 @@ namespace osuCrypto
 			}
 		}
 
+		//std::cout << "sparseA " << hash(fft_eA.data(), fft_eA.size()) << std::endl;
+		//std::cout << "sparseB " << hash(fft_eB.data(), fft_eB.size()) << std::endl;
+
+
 		// Evaluate the FFTs on the error polynomials eA and eB
 		fft_recursive_uint8(fft_eA, n, poly_size / 3);
 		fft_recursive_uint8(fft_eB, n, poly_size / 3);
@@ -474,6 +459,12 @@ namespace osuCrypto
 		multiply_fft_8(fft_a, fft_eA, res_poly_A, poly_size); // a*eA
 		multiply_fft_8(fft_a, fft_eB, res_poly_B, poly_size); // a*eB
 
+
+		//std::cout << "multA " << hash(res_poly_A.data(), res_poly_A.size()) << std::endl;
+		//std::cout << "multB " << hash(res_poly_B.data(), res_poly_B.size()) << std::endl;
+
+
+
 		// XOR the result into the accumulator.
 		// Specifically, we XOR all the columns of the FFT result to get a
 		// vector of size poly_size.
@@ -485,6 +476,10 @@ namespace osuCrypto
 				x_poly_B[i] ^= (res_poly_B[i] >> (2 * j)) & 0b11;
 			}
 		}
+
+		//std::cout << "compressA " << hash(x_poly_A.data(), x_poly_A.size()) << std::endl;
+		//std::cout << "compressB " << hash(x_poly_B.data(), x_poly_B.size()) << std::endl;
+
 
 		printf("[..     ]Done with Step 2 (computing the local vectors)\n");
 
@@ -536,8 +531,8 @@ namespace osuCrypto
 						}
 
 						// Decompose the position into the ternary basis
-						int_to_trits(posA, trit_decomp_A, n);
-						int_to_trits(posB, trit_decomp_B, n);
+						int_to_trits(posA, trit_decomp_A);
+						int_to_trits(posB, trit_decomp_B);
 
 						// printf("[DEBUG]: posA=%zu, posB=%zu\n", posA, posB);
 
@@ -551,7 +546,7 @@ namespace osuCrypto
 						}
 
 						// Get back the resulting cross-product position as an integer
-						size_t pos = trits_to_int(trit_decomp, n);
+						size_t pos = trits_to_int(trit_decomp);
 						size_t block_idx = floor(pos / block_size); // block index in polynomial
 						//size_t in_block_idx = pos % block_size;     // index within the block
 
@@ -579,6 +574,7 @@ namespace osuCrypto
 			}
 		}
 
+
 		// cleanup temporary values
 		//free(trit_decomp);
 		//free(trit_decomp_A);
@@ -595,7 +591,11 @@ namespace osuCrypto
 
 		// Sample PRF keys for the DPFs
 		PRFKeys prf_keys;
-		prf_keys.gen(prng);
+		PRNG prfSeedPrng(block(3412342134, 56453452362346));
+		prf_keys.gen(prfSeedPrng);
+		PRNG genPrng;
+		oc::RandomOracle dpfHash0(16);
+		oc::RandomOracle dpfHash1(16);
 
 		// Sample DPF keys for each of the t errors in the t blocks
 		for (size_t i = 0; i < c; i++)
@@ -633,11 +633,26 @@ namespace osuCrypto
 						beta[packed_idx] = coeff << (2 * (63 - bit_idx));
 
 						// Message (beta) is of size 4 blocks of 128 bits
-						DPFGen(prf_keys, dpf_domain_bits, alpha_0, beta, 4, dpf_keys_A[index], dpf_keys_B[index], prng);
+						genPrng.SetSeed(block(index, 542345234));
+						DPFGen(prf_keys, dpf_domain_bits, alpha_0, beta, 4, dpf_keys_A[index], dpf_keys_B[index], genPrng);
+
+
+						dpfHash0.Update(dpf_keys_A[index].k.data(), dpf_keys_A[index].k.size());
+						dpfHash0.Update(dpf_keys_A[index].msg_len);
+						dpfHash0.Update(dpf_keys_A[index].size);
+						dpfHash1.Update(dpf_keys_B[index].k.data(), dpf_keys_B[index].k.size());
+						dpfHash1.Update(dpf_keys_B[index].msg_len);
+						dpfHash1.Update(dpf_keys_B[index].size);
 					}
 				}
 			}
 		}
+
+		block dpfHashVal0, dpfHashVal1;
+		dpfHash0.Final(dpfHashVal0);
+		dpfHash1.Final(dpfHashVal1);
+		//std::cout << "dpfA " << dpfHashVal0 << std::endl;
+		//std::cout << "dpfB " << dpfHashVal1 << std::endl;
 
 		printf("[....   ]Done with Step 4 (sampling DPF keys)\n");
 
@@ -717,6 +732,9 @@ namespace osuCrypto
 				}
 			}
 		}
+
+		//std::cout << "blockA " << hash(packed_polys_A_.data(), packed_polys_A_.size()) << std::endl;
+		//std::cout << "blockB " << hash(packed_polys_B_.data(), packed_polys_B_.size()) << std::endl;
 
 
 		if (check)
@@ -872,8 +890,15 @@ namespace osuCrypto
 			}
 		}
 
+		//std::cout << "Cin0 " << hash(fft_uA.data(), fft_uA.size()) << std::endl;
+		//std::cout << "Cin1 " << hash(fft_uB.data(), fft_uB.size()) << std::endl;
+
 		fft_recursive_uint32(fft_uA, n, poly_size / 3);
 		fft_recursive_uint32(fft_uB, n, poly_size / 3);
+
+		//std::cout << "Cfft0 " << hash(fft_uA.data(), fft_uA.size()) << std::endl;
+		//std::cout << "Cfft1 " << hash(fft_uB.data(), fft_uB.size()) << std::endl;
+
 
 		printf("[...... ]Done with Step 6 (computing FFTs)\n");
 
@@ -882,6 +907,8 @@ namespace osuCrypto
 		//************************************************************************
 		multiply_fft_32(fft_a2, fft_uA, res_poly_mat_A, poly_size);
 		multiply_fft_32(fft_a2, fft_uB, res_poly_mat_B, poly_size);
+		//std::cout << "C0 " << hash(res_poly_mat_A.data(), res_poly_mat_A.size()) << std::endl;
+		//std::cout << "C1 " << hash(res_poly_mat_B.data(), res_poly_mat_B.size()) << std::endl;
 
 		//size_t num_ffts = c * c;
 
@@ -951,4 +978,55 @@ namespace osuCrypto
 
 	}
 
+
+	// This test evaluates the full PCG.Expand for both parties and
+	// checks correctness of the resulting OLE correlation.
+	void foliage_F4ole_test(const CLP& cmd)
+	{
+		std::array<FoliageF4Ole, 2> oles;
+
+		auto logn = 12;
+		u64 n = ipow(3, logn);
+		auto blocks = divCeil(n, 128);
+		//PRNG prng(block(342342));
+		PRNG prng0(block(2424523452345, 111124521521455324));
+		PRNG prng1(block(6474567454546, 567546754674345444));
+
+		oles[0].init(0, n, prng0);
+		oles[1].init(1, n, prng1);
+		auto sock = coproto::LocalAsyncSocket::makePair();
+		std::vector<block>
+			ALsb(blocks),
+			AMsb(blocks),
+			BLsb(blocks),
+			BMsb(blocks),
+			C0Lsb(blocks),
+			C0Msb(blocks),
+			C1Lsb(blocks),
+			C1Msb(blocks);
+
+		auto r = macoro::sync_wait(macoro::when_all_ready(
+			oles[0].expand(ALsb, AMsb, C0Lsb, C0Msb, prng0, sock[0]),
+			oles[1].expand(BLsb, BMsb, C1Lsb, C1Msb, prng1, sock[1])));
+		std::get<0>(r).result();
+		std::get<1>(r).result();
+
+		// Now we check that we got the correct OLE correlations and fail
+		// the test otherwise.
+		for (size_t i = 0; i < blocks; i++)
+		{
+			auto aLsb = C0Lsb[i] ^ C1Lsb[i];
+			auto aMsb = C0Msb[i] ^ C1Msb[i];
+			block mLsb, mMsb;
+			f4Mult(
+				ALsb[i], AMsb[i], 
+				BLsb[i], BMsb[i],
+				mLsb, mMsb);
+
+			if (aLsb != mLsb)
+				throw RTE_LOC;
+			if (aMsb != mMsb)
+				throw RTE_LOC;
+		}
+	}
 }
