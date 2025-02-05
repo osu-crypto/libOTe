@@ -17,7 +17,7 @@
 #include "libOTe_Tests/Pprf_Tests.h"
 #include "libOTe_Tests/TungstenCode_Tests.h"
 #include "libOTe_Tests/RegularDpf_Tests.h"
-#include "libOTe_Tests/Foliage_Tests.h"
+#include "libOTe_Tests/Foleage_Tests.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -63,10 +63,13 @@ namespace tests_libOTe
             tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
             tc.add("SparseDpf_Proto_Test                    ", SparseDpf_Proto_Test);
             
-            tc.add("foliage_dpf_test                        ", foliage_dpf_test);
-            tc.add("foliage_spfss_test                      ", foliage_spfss_test);
-            tc.add("foliage_pcg_test                        ", foliage_pcg_test);
-            tc.add("foliage_F4ole_test                      ", foliage_F4ole_test);
+            
+            tc.add("foleage_transpose_test                  ", foleage_transpose_test);
+            tc.add("foleage_fft_test                        ", foleage_fft_test);
+            tc.add("foleage_dpf_test                        ", foleage_dpf_test);
+            tc.add("foleage_spfss_test                      ", foleage_spfss_test);
+            tc.add("foleage_pcg_test                        ", foleage_pcg_test);
+            tc.add("foleage_F4ole_test                      ", foleage_F4ole_test);
             
 
             tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);

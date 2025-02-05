@@ -1,12 +1,14 @@
 
-#include "Foliage_Tests.h"
-#include "libOTe/Tools/Foliage/tri-dpf/FoliageDpf.h"
-#include "libOTe/Tools/Foliage/fft/FoliageFft.h"
-//#include "libOTe/Tools/Foliage/tri-dpf/FoliageHalfDpf.h"
-#include "libOTe/Tools/Foliage/F4Ops.h"
+#include "Foleage_Tests.h"
+#include "libOTe/Tools/Foleage/tri-dpf/FoleageDpf.h"
+#include "libOTe/Tools/Foleage/fft/FoleageFft.h"
+//#include "libOTe/Tools/Foleage/tri-dpf/FoleageHalfDpf.h"
+#include "libOTe/Tools/Foleage/F4Ops.h"
 #include "cryptoTools/Common/Matrix.h"
-#include "libOTe/Tools/Foliage/FoliagePcg.h"
+#include "libOTe/Tools/Foleage/FoleagePcg.h"
 #include "coproto/Socket/LocalAsyncSock.h"
+#include "libOTe/Tools/Foleage/PerfectShuffle.h"
+#include "cryptoTools/Common/Timer.h"
 namespace osuCrypto
 {
 	//u8 extractF4(const uint128_t& val, u8 idx)
@@ -149,7 +151,411 @@ namespace osuCrypto
 		}
 	}
 
-	void foliage_spfss_test()
+	void foleage_transpose_test(const oc::CLP& cmd)
+	{
+		{
+
+			std::vector<u16> v(3 * 8);
+			std::vector<u16> v2(3 * 8);
+
+			for (u64 i = 0; i < v.size(); ++i)
+			{
+				v[i] = i;
+			}
+
+
+			// input:
+			//  0  1  2  3  4  5  6  7
+			//  8  9 10 11 12 13 14 15
+			// 16 17 18 19 20 21 22 23
+			//
+			// output:
+			//  0  3  6  9 12 15 18 21
+			//  1  4  7 10 13 16 19 22
+			//  2  5  8 11 14 17 20 23
+			//printShuffle3(v.data());
+			foleageTransposeLeaf<2>((u8*)v.data(), (__m128i*)v2.data());
+			//printShuffle3(v2.data());
+
+			for (u64 i = 0; i < v2.size(); ++i)
+			{
+				auto e = i * 3 % 24 + (i / 8);
+				if (v2[i] != e)
+					throw RTE_LOC;
+
+			}
+
+		}
+
+		{
+			int randomize = 1;// 241234123; // set to 1 to make debuggable
+
+			std::vector<u16> v(9 * 8);
+			std::vector<u16> v2(9 * 8);
+
+
+			for (u64 i = 0; i < v.size(); ++i)
+			{
+				v[i] = i * randomize;
+			}
+
+
+			//std::cout << "\n";
+			//printShuffle3(v.data());
+			//std::cout << "\n";
+			//printShuffle3(v.data() + 3 * 8);
+			//std::cout << "\n";
+			//printShuffle3(v.data() + 6 * 8);
+			//std::cout << "--------------\n";
+
+			////dst[i * 3 + j] = a0;
+			foleageTranspose<2>((u8*)v.data(), (__m128i*)v2.data());
+
+
+			//printShuffle9(v2.data());
+			//std::cout << "\n";
+
+
+			//  0  1  2  3  4  5  6  7
+			//  8  9 10 11 12 13 14 15
+			// 16 17 18 19 20 21 22 23
+			//
+			// 24 25 26 27 28 29 30 31
+			// 32 33 34 35 36 37 38 39
+			// 40 41 42 43 44 45 46 47
+			//
+			// 48 49 50 51 52 53 54 55
+			// 56 57 58 59 60 61 62 63
+			// 64 65 66 67 68 69 70 71
+
+
+			//  0  8 16  3 11 19  6 14 22 25 33 41 28 36 44 31 39 47 50 58 66 53 61 69
+			//  1  9 17  4 12 20  7 15 23 26 34 42 29 37 45 48 56 64 51 59 67 54 62 70
+			//  2 10 18  5 13 21 24 32 40 27 45 43 30 38 46 49 57 65 52 60 68 55 63 71
+			//std::cout << std::endl;
+
+			std::vector<std::vector<u16>> exp(3);
+			for (u64 i = 0, k = 0; i < 3; ++i)
+			{
+				for (u64 j = 0; j < 24; ++j, ++k)
+				{
+					auto row = j / 8;
+					exp[row].push_back(k * randomize);
+				}
+			}
+			//std::cout << "before\n";
+			//for (u64 i = 0; i < 3; ++i)
+			//{
+			//	for (u64 j = 0; j < 24; ++j)
+			//	{
+			//		//std::cout << v2[i * 24 + j] << " ";
+			//		std::cout << std::setw(2) << std::setfill(' ') << exp[i][j] << " ";
+			//	}
+			//	std::cout << std::endl;
+			//}
+
+
+			for (u64 i = 0; i < 3; ++i)
+			{
+				for (u64 j = 0; j < 8; ++j)
+				{
+					auto b = j * 3;
+					for (u64 k = 0; k < 3; ++k)
+					{
+						for (u64 l = 0; l < k; ++l)
+						{
+							std::swap(exp[k][b + l], exp[l][b + k]);
+						}
+					}
+				}
+			}
+			//std::cout << "after\n";
+			//for (u64 i = 0; i < 3; ++i)
+			//{
+			//	for (u64 j = 0; j < 24; ++j)
+			//	{
+			//		//std::cout << v2[i * 24 + j] << " ";
+			//		std::cout << std::setw(2) << std::setfill(' ') << exp[i][j] << " ";
+			//	}
+			//	std::cout << std::endl;
+			//}
+
+			for (u64 i = 0; i < 3; ++i)
+			{
+				for (u64 j = 0; j < 24; ++j)
+				{
+					if (exp[i][j] != v2[i * 24 + j])
+						throw RTE_LOC;
+				}
+			}
+
+			//printShuffle9(v.data());
+			//foleageTranspose<2>((u8*)v2.data(), (__m128i*)v.data());
+
+			//for (u64 i = 0; i < v.size(); ++i)
+			//{
+			//	if(v[i] != i * randomize)
+			//		throw RTE_LOC;
+			//}
+		}
+
+		{
+			int randomize =  241234123; // set to 1 to make debuggable
+
+			std::vector<u16> v(9 * 8);
+			std::vector<u16> v2(9 * 8);
+
+
+			for (u64 i = 0; i < v.size(); ++i)
+			{
+				v[i] = i * randomize;
+			}
+			//std::cout << "in\n" << std::endl;
+			//printShuffle9(v.data());
+
+
+			foleageTransposeLeaf<2>((u8*)&v[0], (__m128i*)& v2[0]);
+			foleageTransposeLeaf<2>((u8*)&v[3 * 8], (__m128i*)& v2[3 * 8]);
+			foleageTransposeLeaf<2>((u8*)&v[6 * 8], (__m128i*)& v2[6 * 8]);
+
+			//std::cout << "l1\n" << std::endl;
+			//printShuffle9(v2.data());
+
+			foleageTranspose<2>((u8*)v2.data(), (__m128i*)v.data());
+
+
+			//std::cout << "l2\n" << std::endl;
+			//printShuffle9(v.data());
+
+			//std::vector<u16> inverse(v.size());
+			//for (u64 i = 0; i < v.size(); ++i)
+			//{
+			//	inverse[v[i]] = i;
+			//}
+
+
+			foliageUnTranspose<2>((u8*)v.data(), (__m128i*)v2.data());
+
+			//std::cout << "inv\n" << std::endl;
+			//for (u64 i = 0; i < inverse.size(); ++i)
+			//{
+			//	std::cout << std::setw(2) << std::setfill(' ') << inverse[i] << ", ";
+			//}
+			////printShuffle9(inverse.data());
+			//std::cout << "f\n";
+			//printShuffle9(v2.data());
+
+			for (u64 i = 0; i < v.size(); ++i)
+			{
+				if (v2[i] != u16(i * randomize))
+					throw RTE_LOC;
+			}
+		}
+
+		if(0)
+		{
+
+			u64 trials = 1000000;
+			int randomize = 241234123; // set to 1 to make debuggable
+
+			u64 ss = 9;
+			std::vector<block> lsb(ss * trials), msb(ss * trials);
+			std::vector<block> lsb2(ss * trials), msb2(ss * trials);
+
+			PRNG prng(block(342134213421, 2341234123421));
+			prng.get(lsb.data(), lsb.size());
+			prng.get(msb.data(), msb.size());
+
+
+			//for (u64 i = 0; i < 3 * 24; ++i)
+			//{
+			//	((u16*)lsb.data())[i] = i * randomize;
+			//	((u16*)msb.data())[i] = i * randomize ^ 2134123423;
+			//}
+			std::cout << "in\n" << std::endl;
+			//printShuffle9(v.data());
+			Timer t;
+			t.setTimePoint("b");
+
+			auto l = (u16*)lsb.data();
+			auto m = (u16*)msb.data();
+			for (u64 i = 0; i < trials * 8; ++i)
+			{
+				for (u64 j = 0; j < 3; ++j)
+				{
+					foleageFFTOne<1>(
+						&l[i * ss + j * 3 + 0], &m[i * ss + j * 3 + 0],
+						&l[i * ss + j * 3 + 1], &m[i * ss + j * 3 + 1],
+						&l[i * ss + j * 3 + 2], &m[i * ss + j * 3 + 2]
+					);
+				}
+
+
+				for (u64 j = 0; j < 3; ++j)
+				{
+					foleageFFTOne<2>(
+						&l[i * ss + 0 * 3 + j], &m[i * ss + 0 * 3 + j],
+						&l[i * ss + 1 * 3 + j], &m[i * ss + 1 * 3 + j],
+						&l[i * ss + 2 * 3 + j], &m[i * ss + 2 * 3 + j]
+					);
+				}
+			}
+
+			t.setTimePoint("o");
+			for (u64 i = 0; i < trials; ++i)
+			{
+				auto bLsb = lsb.data() + i * ss;
+				auto bMsb = msb.data() + i * ss;
+				auto bLsb2 = lsb2.data() + i * ss;
+				auto bMsb2 = msb2.data() + i * ss;
+				for (u64 j = 0; j < 3; ++j)
+				{
+
+					foleageTransposeLeaf<2>((u8*)& bLsb[j * 3], (__m128i*)& bLsb[j * 3]);
+					foleageTransposeLeaf<2>((u8*)& bMsb[j * 3], (__m128i*)& bMsb[j * 3]);
+					foleageFFTOne<1>(
+						&bLsb2[j * 3 + 0], &bLsb2[j * 3 + 0],
+						&bLsb2[j * 3 + 1], &bLsb2[j * 3 + 1],
+						&bLsb2[j * 3 + 2], &bLsb2[j * 3 + 2]
+					);
+				}
+
+				foleageTranspose<2>((u8*)&bLsb2[0], (__m128i*)bLsb);
+
+				foleageTranspose<2>((u8*)&bMsb2[0], (__m128i*)bMsb);
+
+				foleageFFTOne<3,block>(
+					&bLsb[0], &bMsb[0],
+					&bLsb[3], &bMsb[3],
+					&bLsb[6], &bMsb[6]
+				);
+
+			}
+			t.setTimePoint("e");
+
+			std::cout << t << std::endl;
+
+		}
+	}
+
+	void foleage_fft_test(const oc::CLP& cmd)
+	{
+		PRNG prng(block(342134213421, 2341234123421));
+		u64 nn = 14;
+		u64 n = ipow(3, nn);
+		Timer timer;
+		u64 trials = cmd.getOr("trials", 1);
+
+		if (0)
+		{
+
+			std::vector<uint8_t> a(n);
+			std::vector<uint8_t> lsb(n);
+			std::vector<uint8_t> msb(n);
+
+			prng.get(a.data(), a.size());
+			for (u64 i = 0; i < n; ++i)
+			{
+				lsb[i] =
+					(a[i] >> 0) & 1 |
+					(a[i] >> 1) & 2 |
+					(a[i] >> 2) & 4 |
+					(a[i] >> 3) & 8;
+				auto m = a[i] >> 1;
+				msb[i] =
+					(m >> 0) & 1 |
+					(m >> 1) & 2 |
+					(m >> 2) & 4 |
+					(m >> 3) & 8;
+			}
+
+			timer.setTimePoint("begin");
+			fft_recursive_uint8(a, nn, n / 3);
+			timer.setTimePoint("fft_recursive_uint8");
+			foleageFFT(lsb.data(), msb.data(), nn, n / 3);
+			timer.setTimePoint("foleageFFT 8 bit");
+
+			for (u64 i = 0; i < n; ++i)
+			{
+				auto a0 =
+					(a[i] >> 0) & 1 |
+					(a[i] >> 1) & 2 |
+					(a[i] >> 2) & 4 |
+					(a[i] >> 3) & 8;
+				auto m = a[i] >> 1;
+				auto a1 =
+					(m >> 0) & 1 |
+					(m >> 1) & 2 |
+					(m >> 2) & 4 |
+					(m >> 3) & 8;
+
+				if (a0 != lsb[i] || a1 != msb[i])
+					throw RTE_LOC;
+			}
+
+		}
+		{
+
+			std::vector<u32> a(n), a2(n);
+			oc::Matrix<u8> lsb(n, 2);
+			oc::Matrix<u8> msb(n, 2);
+
+			prng.get(a.data(), a.size());
+
+			auto av = span<u8>((u8*)a.data(), n * 4);
+			auto av2 = span<u8>((u8*)a2.data(), n * 4);
+
+			perfectUnshuffle(av, lsb, msb);
+
+			auto lsb2 = lsb;
+			auto msb2 = msb;
+
+			timer.setTimePoint("beign");
+			for (u64 i = 0; i < trials; ++i)
+				fft_recursive_uint32(a, nn, n / 3);
+			timer.setTimePoint("fft_recursive_uint32");
+
+
+			if (0)
+			{
+
+				for (u64 i = 0; i < trials; ++i)
+					foleageFFT(lsb.data(), msb.data(), nn, 2 * n / 3);
+				timer.setTimePoint("foleageFFT 32bit");
+
+				perfectShuffle(lsb, msb, av2);
+				for (u64 i = 0; i < n; ++i)
+				{
+					if (a[i] != a2[i])
+						throw RTE_LOC;
+				}
+				timer.setTimePoint("foleageFFT 32bit check");
+			}
+
+			if (1)
+			{
+
+				for (u64 i = 0; i < trials; ++i)
+					foleageFFT2<2>(lsb2, msb2);
+
+				timer.setTimePoint("foleageFFT2 32bit");
+
+				perfectShuffle(lsb2, msb2, av2);
+				for (u64 i = 0; i < n; ++i)
+				{
+					if (a[i] != a2[i])
+						throw RTE_LOC;
+				}
+				timer.setTimePoint("foleageFFT2 32bit check");
+			}
+
+			std::cout << timer << std::endl;
+
+		}
+
+	}
+
+	void foleage_spfss_test()
 	{
 
 		size_t SUMT = 730;// sum of T DPFs
@@ -221,7 +627,7 @@ namespace osuCrypto
 	}
 
 
-	void foliage_dpf_test()
+	void foleage_dpf_test()
 	{
 		const size_t size = 14; // evaluation will result in 3^size points
 		const size_t msg_len = 2;
@@ -295,7 +701,7 @@ namespace osuCrypto
 
 	// This test evaluates the full PCG.Expand for both parties and
 	// checks correctness of the resulting OLE correlation.
-	void foliage_pcg_test(const CLP& cmd)
+	void foleage_pcg_test(const CLP& cmd)
 	{
 		bool check = !cmd.isSet("noCheck");
 		auto N = 12; // 3^N number of OLEs generated in total
@@ -981,17 +1387,20 @@ namespace osuCrypto
 
 	// This test evaluates the full PCG.Expand for both parties and
 	// checks correctness of the resulting OLE correlation.
-	void foliage_F4ole_test(const CLP& cmd)
+	void foleage_F4ole_test(const CLP& cmd)
 	{
-		std::array<FoliageF4Ole, 2> oles;
+		std::array<FoleageF4Ole, 2> oles;
 
 		auto logn = 12;
 		u64 n = ipow(3, logn);
 		auto blocks = divCeil(n, 128);
+		bool verbose = cmd.isSet("v");
+
 		//PRNG prng(block(342342));
 		PRNG prng0(block(2424523452345, 111124521521455324));
 		PRNG prng1(block(6474567454546, 567546754674345444));
-
+		Timer timer;
+		
 		oles[0].init(0, n, prng0);
 		oles[1].init(1, n, prng1);
 		auto sock = coproto::LocalAsyncSocket::makePair();
@@ -1004,6 +1413,9 @@ namespace osuCrypto
 			C0Msb(blocks),
 			C1Lsb(blocks),
 			C1Msb(blocks);
+
+		if(verbose)
+			oles[0].setTimer(timer);
 
 		auto r = macoro::sync_wait(macoro::when_all_ready(
 			oles[0].expand(ALsb, AMsb, C0Lsb, C0Msb, prng0, sock[0]),
@@ -1019,7 +1431,7 @@ namespace osuCrypto
 			auto aMsb = C0Msb[i] ^ C1Msb[i];
 			block mLsb, mMsb;
 			f4Mult(
-				ALsb[i], AMsb[i], 
+				ALsb[i], AMsb[i],
 				BLsb[i], BMsb[i],
 				mLsb, mMsb);
 
@@ -1028,5 +1440,8 @@ namespace osuCrypto
 			if (aMsb != mMsb)
 				throw RTE_LOC;
 		}
+
+		if (verbose)
+			std::cout << "Time taken: \n" << timer << std::endl;
 	}
 }

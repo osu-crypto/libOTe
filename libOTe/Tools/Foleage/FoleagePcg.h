@@ -4,11 +4,12 @@
 #include "cryptoTools/Common/Aligned.h"
 #include "coproto/Socket/Socket.h"
 #include "cryptoTools/Crypto/PRNG.h"
+#include "cryptoTools/Common/Timer.h"
 
 namespace osuCrypto
 {
 
-	class FoliageF4Ole
+	class FoleageF4Ole : public TimerAdapter
 	{
 	public:
 		u64 mPartyIdx = 0;
@@ -18,6 +19,8 @@ namespace osuCrypto
 
 		// the number of noisy positions per polynomial
 		u64 mT = 27;
+
+		u64 mLog3T = 3;
 
 		// the number of polynomials
 		u64 mC = 4;

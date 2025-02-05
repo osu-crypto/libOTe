@@ -6,11 +6,11 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include "libOTe/Tools/Foliage/fft/FoliageFft.h"
+#include "libOTe/Tools/Foleage/fft/FoleageFft.h"
 #include "cryptoTools/Common/Aligned.h"
 #include "cryptoTools/Crypto/PRNG.h"
 
-#include "libOTe/Tools/Foliage/FoliageUtils.h"
+#include "libOTe/Tools/Foleage/FoleageUtils.h"
 
 #define NUMVARS 16
 
@@ -18,7 +18,7 @@ namespace osuCrypto
 {
 
 
-    double Foliage_FFT64_bench()
+    double Foleage_FFT64_bench()
     {
         size_t num_vars = NUMVARS;
         size_t num_coeffs = ipow(3, num_vars);
@@ -41,7 +41,7 @@ namespace osuCrypto
         return time_taken;
     }
 
-    double Foliage_FFT32_bench()
+    double Foleage_FFT32_bench()
     {
         size_t num_vars = NUMVARS;
         size_t num_coeffs = ipow(3, num_vars);
@@ -66,7 +66,7 @@ namespace osuCrypto
         return time_taken;
     }
 
-    double Foliage_FFT8_bench()
+    double Foleage_FFT8_bench()
     {
         size_t num_vars = NUMVARS;
         size_t num_coeffs = ipow(3, num_vars);
@@ -100,7 +100,7 @@ namespace osuCrypto
         printf("Testing FFT (uint8 packing)\n");
         for (int i = 0; i < testTrials; i++)
         {
-            time += Foliage_FFT8_bench();
+            time += Foleage_FFT8_bench();
             printf("Done with trial %i of %i\n", i + 1, testTrials);
         }
         printf("******************************************\n");
@@ -113,7 +113,7 @@ namespace osuCrypto
         time = 0;
         for (int i = 0; i < testTrials; i++)
         {
-            time += Foliage_FFT32_bench();
+            time += Foleage_FFT32_bench();
             printf("Done with trial %i of %i\n", i + 1, testTrials);
         }
         printf("******************************************\n");
@@ -126,7 +126,7 @@ namespace osuCrypto
         time = 0;
         for (int i = 0; i < testTrials; i++)
         {
-            time += Foliage_FFT64_bench();
+            time += Foleage_FFT64_bench();
             printf("Done with trial %i of %i\n", i + 1, testTrials);
         }
         printf("******************************************\n");

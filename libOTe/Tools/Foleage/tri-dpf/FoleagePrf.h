@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include "cryptoTools/Crypto/AES.h"
 //#include "utils.h"
-#include "libOTe/Tools/Foliage/FoliageUtils.h"
+#include "libOTe/Tools/Foleage/FoleageUtils.h"
 
 namespace osuCrypto
 {

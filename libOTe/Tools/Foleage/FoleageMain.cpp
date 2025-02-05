@@ -2,11 +2,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "libOTe/Tools/Foliage/F4Ops.h"
-#include "libOTe/Tools/Foliage/fft/FoliageFft.h"
+#include "libOTe/Tools/Foleage/F4Ops.h"
+#include "libOTe/Tools/Foleage/fft/FoleageFft.h"
 
-#include "libOTe/Tools/Foliage/tri-dpf/FoliageDpf.h"
-#include "libOTe/Tools/Foliage/tri-dpf/FoliagePrf.h"
+#include "libOTe/Tools/Foleage/tri-dpf/FoleageDpf.h"
+#include "libOTe/Tools/Foleage/tri-dpf/FoleagePrf.h"
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 

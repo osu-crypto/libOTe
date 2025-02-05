@@ -260,7 +260,7 @@ namespace osuCrypto
 		return std::log2(a) / std::log2(base);
 	}
 
-	inline u64 log3Ceil(u64 x)
+	inline u64 log3ceil(u64 x)
 	{
 		if (x == 0) return 0;
 		u64 i = 0;
@@ -277,7 +277,7 @@ namespace osuCrypto
 
 	// Compute base^exp without the floating-point precision
 	// errors of the built-in pow function.
-	inline size_t ipow(size_t base, size_t exp)
+	inline constexpr size_t ipow(size_t base, size_t exp)
 	{
 		if (exp == 1)
 			return base;

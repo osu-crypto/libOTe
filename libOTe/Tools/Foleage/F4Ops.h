@@ -1,6 +1,6 @@
 #pragma once
 
-#include "libOTe/Tools/Foliage/FoliageUtils.h"
+#include "libOTe/Tools/Foleage/FoleageUtils.h"
 
 namespace osuCrypto
 {

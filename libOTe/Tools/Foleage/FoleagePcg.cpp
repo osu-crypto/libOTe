@@ -1,20 +1,21 @@
-#include "FoliagePcg.h"
-#include "libOTe/Tools/Foliage/FoliageUtils.h"
-#include "libOTe/Tools/Foliage/F4Ops.h"
-#include "libOTe/Tools/Foliage/fft/FoliageFft.h"
+#include "FoleagePcg.h"
+#include "libOTe/Tools/Foleage/FoleageUtils.h"
+#include "libOTe/Tools/Foleage/F4Ops.h"
+#include "libOTe/Tools/Foleage/fft/FoleageFft.h"
 #include "cryptoTools/Common/BitIterator.h"
-#include "libOTe/Tools/Foliage/tri-dpf/FoliageDpf.h"
-#include "libOTe/Tools/Foliage/tri-dpf/FoliagePrf.h"
+#include "libOTe/Tools/Foleage/tri-dpf/FoleageDpf.h"
+#include "libOTe/Tools/Foleage/tri-dpf/FoleagePrf.h"
 namespace osuCrypto
 {
 
 
-	void FoliageF4Ole::init(u64 partyIdx, u64 n, PRNG& prng)
+	void FoleageF4Ole::init(u64 partyIdx, u64 n, PRNG& prng)
 	{
 		mPartyIdx = partyIdx;
 		mLog3N = log3Ceil(n);
 		mN = ipow(3, mLog3N);
-		if (mT % 3 != 0)
+
+		if (mT != ipow(3, mLog3T))
 			throw RTE_LOC;
 
 		mDpfDomainDepth = std::max<u64>(1, log3Ceil(divCeil(mN, mT * 256)));
@@ -34,7 +35,7 @@ namespace osuCrypto
 	}
 
 
-	void FoliageF4Ole::sampleA(block seed)
+	void FoleageF4Ole::sampleA(block seed)
 	{
 
 		if (mC > 4)
@@ -104,7 +105,7 @@ namespace osuCrypto
 	}
 
 
-	macoro::task<> FoliageF4Ole::expand(
+	macoro::task<> FoleageF4Ole::expand(
 		span<block> ALsb,
 		span<block> AMsb,
 		span<block> CLsb,
@@ -112,6 +113,8 @@ namespace osuCrypto
 		PRNG& prng,
 		coproto::Socket& sock)
 	{
+		setTimePoint("expand start");
+
 		if (divCeil(mN, 128) < ALsb.size())
 			throw RTE_LOC;
 		if (ALsb.size() != AMsb.size() || ALsb.size() != CLsb.size() || ALsb.size() != CMsb.size())
@@ -136,24 +139,33 @@ namespace osuCrypto
 
 		// we pack 4 FFTs into a single u8. 
 		std::vector<u8> fftSparsePoly(mN);
+		//std::vector<u8> fftSparsePolyLsb(mN), fftSparsePolyMsb(mN);
 		for (u64 i = 0; i < mT; ++i)
 		{
 			for (u64 j = 0; j < mC; ++j)
 			{
 				auto pos = i * mBlockSize + mSparsePositions(j, i);
 				fftSparsePoly[pos] |= mSparseCoefficients(j, i) << (2 * j);
+
+				//fftSparsePolyLsb[pos] |= (mSparseCoefficients(j, i) & 1) << j;
+				//fftSparsePolyMsb[pos] |= ((mSparseCoefficients(j, i) >> 1) & 1) << j;
 			}
 		}
+
+		setTimePoint("sparsePolySample");
 
 		//std::cout << "sparse " << hash(fftSparsePoly.data(), fftSparsePoly.size()) << std::endl;
 
 		// switch from polynomial to FFT form
 		fft_recursive_uint8(fftSparsePoly, mLog3N, mN / 3);
 
+		//foleageFFT2<1>(fftSparsePolyLsb, fftSparsePolyMsb);
+
 		// multiply by the packed A polynomial
 		multiply_fft_8(mFftA, fftSparsePoly, fftSparsePoly, mN);
 
 		//std::cout << "mult " << hash(fftSparsePoly.data(), fftSparsePoly.size()) << std::endl;
+		setTimePoint("sparsePolyMul");
 
 
 		// compress the resume and set the output.
@@ -172,14 +184,15 @@ namespace osuCrypto
 
 			A[i] = a;
 		}
+		setTimePoint("copyOutX");
 		//std::cout << "compress " << hash(fftSparsePoly.data(), fftSparsePoly.size()) << std::endl;
 
 
 		std::vector<uint8_t> prodPolyCoefficient(mC * mC * mT * mT);
 		std::vector<size_t> prodPolyPosition(mC * mC * mT * mT);
-		//auto prodPolyCoefficientIter = prodPolyCoefficient.begin();
-		//auto prodPolyPositionIter = prodPolyPosition.begin();
-		std::vector<u8> tritA(mLog3N), tritB(mLog3N), trits(mLog3N);
+
+		std::vector<u8> tritABlk(mLog3T), tritBBlk(mLog3T), tritsBlk(mLog3T);
+		std::vector<u8> tritAPos(mLog3N - mLog3T), tritBPos(mLog3N - mLog3T), tritsPos(mLog3N - mLog3T);
 
 		Matrix<u8> otherSparseCoefficients(mC, mT);
 		Matrix<u64> otherSparsePositions(mC, mT);
@@ -187,6 +200,8 @@ namespace osuCrypto
 		co_await sock.send(coproto::copy(mSparsePositions));
 		co_await sock.recv(otherSparseCoefficients);
 		co_await sock.recv(otherSparsePositions);
+		setTimePoint("sendRecv");
+
 		u64 polyOffset = 0;
 		u8 vA, vB;
 		for (u64 iA = 0; iA < mC; ++iA)
@@ -199,36 +214,46 @@ namespace osuCrypto
 				{
 					for (u64 jB = 0; jB < mT; ++jB)
 					{
+						int_to_trits(jA, tritABlk);
+						int_to_trits(jB, tritBBlk);
+
+						for (size_t k = 0; k < mLog3T; k++)
+						{
+							tritsBlk[k] = (tritABlk[k] + tritBBlk[k]) % 3;
+						}
+						u64 blockIdx = trits_to_int(tritsBlk);
+
+						u64 posA_;
+						u64 posB_;
+
 						if (mPartyIdx == 0)
 						{
 							vA = mSparseCoefficients(iA, jA);
 							vB = otherSparseCoefficients(iB, jB);
-							auto posA = jA * mBlockSize + mSparsePositions(iA, jA);
-							auto posB = jB * mBlockSize + otherSparsePositions(iB, jB);
-							int_to_trits(posA, tritA);
-							int_to_trits(posB, tritB);
+							posA_ = mSparsePositions(iA, jA);
+							posB_ = otherSparsePositions(iB, jB);
+
 						}
 						else
 						{
 							vA = otherSparseCoefficients(iA, jA);
 							vB = mSparseCoefficients(iB, jB);
-							auto posA = jA * mBlockSize + otherSparsePositions(iA, jA);
-							auto posB = jB * mBlockSize + mSparsePositions(iB, jB);
-							int_to_trits(posA, tritA);
-							int_to_trits(posB, tritB);
+							posA_ = otherSparsePositions(iA, jA);
+							posB_ = mSparsePositions(iB, jB);
 						}
+						int_to_trits(posA_, tritAPos);
+						int_to_trits(posB_, tritBPos);
 
-						for (size_t k = 0; k < mLog3N; k++)
+						for(u64 k = 0; k < tritBPos.size(); ++k)
 						{
-							trits[k] = (tritA[k] + tritB[k]) % 3;
+							tritsPos[k] = (tritAPos[k] + tritBPos[k]) % 3;
 						}
 
-						u64 pos = trits_to_int(trits);
-						auto blockIdx = pos / mBlockSize;
-
+						auto subblock_pos = trits_to_int(tritsPos);
+						
 						size_t idx = polyOffset + blockIdx * mT + nextIdx[blockIdx]++;
 						prodPolyCoefficient[idx] = mult_f4(vA, vB);
-						prodPolyPosition[idx] = pos % mBlockSize;
+						prodPolyPosition[idx] = subblock_pos;
 					}
 				}
 
@@ -239,6 +264,7 @@ namespace osuCrypto
 			}
 		}
 
+		setTimePoint("sparseProductCompute");
 
 		std::vector<DPFKey> Dpfs(mC * mC * mT * mT);
 
@@ -307,6 +333,7 @@ namespace osuCrypto
 				}
 			}
 		}
+		setTimePoint("dpfKeyGen");
 
 		//block dpfHashVal;
 		//dpfHash.Final(dpfHashVal);
@@ -355,6 +382,7 @@ namespace osuCrypto
 				}
 			}
 		}
+		setTimePoint("dpfKeyEval");
 
 		//std::cout << "block " << hash(blocks.data(), blocks.size()) << std::endl;
 
@@ -384,6 +412,9 @@ namespace osuCrypto
 				}
 			}
 		}
+
+		setTimePoint("transpose");
+
 		//std::cout << "CIn " << hash(fft.data(), fft.size()) << std::endl;
 
 
@@ -393,6 +424,7 @@ namespace osuCrypto
 
 		//std::cout << "C " << hash(fftRes.data(), fftRes.size()) << std::endl;
 
+		setTimePoint("fft");
 
 		// XOR the (packed) columns into the accumulator.
 		// Specifically, we perform column-wise XORs to get the result.
@@ -407,6 +439,9 @@ namespace osuCrypto
 			*BitIterator(CLsb.data(), i) = popcount(fftRes[i] & lsbMask) & 1;
 			*BitIterator(CMsb.data(), i) = popcount(fftRes[i] & msbMask) & 1;
 		}
+
+
+		setTimePoint("addCopyY");
 
 	}
 

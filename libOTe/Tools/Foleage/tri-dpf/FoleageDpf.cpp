@@ -1,7 +1,7 @@
 
-#include "FoliageDpf.h"
+#include "FoleageDpf.h"
 
-#include "libOTe/Tools/Foliage/tri-dpf/TriDpfUtils.h"
+#include "libOTe/Tools/Foleage/tri-dpf/TriDpfUtils.h"
 
 
 //#include <openssl/rand.h>

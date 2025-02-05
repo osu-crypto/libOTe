@@ -3,8 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "libOTe/Tools/Foliage/FoliageUtils.h"
-#include "libOTe/Tools/Foliage/tri-dpf/FoliagePrf.h"
+#include "libOTe/Tools/Foleage/FoleageUtils.h"
+#include "libOTe/Tools/Foleage/tri-dpf/FoleagePrf.h"
 
 
 namespace osuCrypto

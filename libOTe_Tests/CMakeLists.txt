@@ -14,7 +14,7 @@ set(SRCS
     TungstenCode_Tests.cpp
     UnitTests.cpp
     Vole_Tests.cpp
-    Foliage_Tests.cpp
+    Foleage_Tests.cpp
 )
 
 add_library(libOTe_Tests STATIC ${SRCS})

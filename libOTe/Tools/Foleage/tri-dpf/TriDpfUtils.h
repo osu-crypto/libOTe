@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include "libOTe/Tools/Foliage/FoliageUtils.h"
+#include "libOTe/Tools/Foleage/FoleageUtils.h"
 #include "cryptoTools/Common/BitIterator.h"
 
 namespace osuCrypto

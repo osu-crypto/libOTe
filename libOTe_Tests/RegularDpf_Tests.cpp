@@ -4,6 +4,8 @@
 #include "libOTe/Tools/Dpf/SparseDpf.h"
 #include <algorithm>
 #include <numeric>
+#include "libOTe/Tools/Dpf/TriDpf.h"
+
 using namespace oc;
 
 void RegularDpf_Multiply_Test(const CLP& cmd)
@@ -283,4 +285,82 @@ void SparseDpf_Proto_Test(const oc::CLP& cmd)
 				throw RTE_LOC;
 		}
 	}
+}
+
+void TritDpf_Proto_Test(const oc::CLP& cmd)
+{
+
+	PRNG prng(block(231234, 321312));
+	u64 depth = 3;
+	u64 domain = ipow(3,depth);
+	u64 numPoints = 11;
+	std::vector<u64> points0(numPoints);
+	std::vector<u64> points1(numPoints);
+	std::vector<block> values0(numPoints);
+	std::vector<block> values1(numPoints);
+	for (u64 i = 0; i < numPoints; ++i)
+	{
+		points1[i] = prng.get<u64>();
+		points0[i] = (prng.get<u64>() % domain) ^ points1[i];
+		values0[i] = prng.get();
+		values1[i] = prng.get();
+	}
+
+	std::array<oc::TriDpf, 2> dpf;
+	dpf[0].init(0, domain, numPoints);
+	dpf[1].init(1, domain, numPoints);
+
+	auto baseCount = dpf[0].baseOtCount();
+
+	std::array<std::vector<block>, 2> baseRecv;
+	std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+	std::array<BitVector, 2> baseChoice;
+	baseRecv[0].resize(baseCount);
+	baseRecv[1].resize(baseCount);
+	baseSend[0].resize(baseCount);
+	baseSend[1].resize(baseCount);
+	baseChoice[0].resize(baseCount);
+	baseChoice[1].resize(baseCount);
+	baseChoice[0].randomize(prng);
+	baseChoice[1].randomize(prng);
+	for (u64 i = 0; i < baseCount; ++i)
+	{
+		baseSend[0][i] = prng.get();
+		baseSend[1][i] = prng.get();
+		baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+		baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+	}
+	dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+	dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+	std::array<Matrix<block>, 2> output;
+	std::array<Matrix<u8>, 2> tags;
+	output[0].resize(numPoints, domain);
+	output[1].resize(numPoints, domain);
+	tags[0].resize(numPoints, domain);
+	tags[1].resize(numPoints, domain);
+
+	auto sock = coproto::LocalAsyncSocket::makePair();
+	macoro::sync_wait(macoro::when_all_ready(
+		dpf[0].expand(points0, values0, [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; tags[0](k, i) = t; }, prng, sock[0]),
+		dpf[1].expand(points1, values1, [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; tags[1](k, i) = t; }, prng, sock[1])
+	));
+
+
+	for (u64 i = 0; i < domain; ++i)
+	{
+		for (u64 k = 0; k < numPoints; ++k)
+		{
+			auto p = points0[k] ^ points1[k];
+			auto act = output[0][k][i] ^ output[1][k][i];
+			auto t = i == p ? 1 : 0;
+			auto tAct = tags[0][k][i] ^ tags[1][k][i];
+			auto exp = t ? (values0[k] ^ values1[k]) : ZeroBlock;
+			if (exp != act)
+				throw RTE_LOC;
+			if (t != tAct)
+				throw RTE_LOC;
+		}
+	}
+
 }

@@ -8,11 +8,26 @@
 #include "cryptoTools/Common/Matrix.h"
 
 #include "DpfMult.h"
+#include "libOTe/Tools/Foleage/FoleageUtils.h"
 
 namespace osuCrypto
 {
-	struct RegularDpf
+	struct TriDpf
 	{
+		enum class OutputFormat
+		{
+			// The i'th row holds the i'th leaf for all trees. 
+			// The j'th tree is in the j'th column.
+			ByLeafIndex,
+
+			// The i'th row holds the i'th tree. 
+			// The j'th leaf is in the j'th column.
+			ByTreeIndex,
+
+		};
+
+		OutputFormat mOutputFormat = OutputFormat::ByLeafIndex;
+
 		u64 mPartyIdx = 0;
 
 		u64 mDomain = 0;
@@ -21,7 +36,7 @@ namespace osuCrypto
 
 		u64 mNumPoints = 0;
 
-		DpfMult mMultiplier;
+		//DpfMult mMultiplier;
 
 		u8 lsb(const block& b)
 		{
@@ -40,11 +55,11 @@ namespace osuCrypto
 			if (!numPoints)
 				throw RTE_LOC;
 
-			mDepth = oc::log3ceil(domain);
+			mDepth = log3ceil(domain);
 			mPartyIdx = partyIdx;
 			mDomain = domain;
 			mNumPoints = numPoints;
-			mMultiplier.init(partyIdx, numPoints * mDepth);
+			//mMultiplier.init(partyIdx, numPoints * mDepth);
 		}
 
 #define SIMD8(VAR, STATEMENT) \
@@ -79,6 +94,19 @@ namespace osuCrypto
 				throw RTE_LOC;
 			if (values.size() && values.size() != mNumPoints)
 				throw RTE_LOC;
+
+			for (u64 i = 0; i < mNumPoints; ++i)
+			{
+				u64 v = points[i];
+				for (u64 j = 0; j < mDepth; ++j)
+				{
+					if ((v & 3) == 3)
+						throw std::runtime_error("TriDpf: invalid point sharing. Expects the input points to be shared over Z_3^D where each Z_3 elements takes up 2 bits of a the value. " LOCATION);
+					v >>= 2;
+				}
+				if(v)
+					throw std::runtime_error("TriDpf: invalid point sharing. point is larger than 3^D " LOCATION);
+			}
 
 			u64 numPoints = points.size();
 			u64 numPoints8 = numPoints / 8 * 8;
@@ -327,7 +355,7 @@ namespace osuCrypto
 						block T[8];
 
 						SIMD8(q, T[q] = block::allSame<u64>(-tdi[k + q]) & gamma[k + q]);
-						SIMD8(q, output(k + q, i, sdi[k + q] ^ T[q], tdi[k+q]));
+						SIMD8(q, output(k + q, i, sdi[k + q] ^ T[q], tdi[k + q]));
 					}
 					for (u64 k = numPoints8; k < mNumPoints; ++k)
 					{
@@ -357,7 +385,7 @@ namespace osuCrypto
 		}
 
 
-		u64 baseOtCount() const { 
+		u64 baseOtCount() const {
 			return mMultiplier.baseOtCount();
 		}
 
