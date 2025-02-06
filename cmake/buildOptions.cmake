@@ -57,8 +57,8 @@ if(DEFINED ENABLE_ALL_OT)
 	else()
 		set(oc_BB OFF)
 	endif()
-	set(ENABLE_SIMPLESTOT_ASM ${oc_BB}						CACHE BOOL "" FORCE)
-	set(ENABLE_MR_KYBER       ${oc_BB}						CACHE BOOL "" FORCE)
+	# set(ENABLE_SIMPLESTOT_ASM ${oc_BB}						CACHE BOOL "" FORCE)
+	# set(ENABLE_MR_KYBER       ${oc_BB}						CACHE BOOL "" FORCE)
 
 	# requires sse
 	if(ENABLE_SSE)
