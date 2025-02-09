@@ -58,6 +58,13 @@ python build.py --all --boost --sodium
 ```
 The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend, out/build/x64-Release/frontend/frontend.exe` depending on the OS. 
 
+### Unit Tests
+The unit tests can be run with the following command
+```
+./out/build/<platform>/frontend/frontend_libOTe -u
+```
+where `<platform>` is the build directory, eg `linux`, `x64-Release`, `osx`, etc.
+
 ### Build Options
 LibOTe can be built with various only the selected protocols enabled. `-D ENABLE_ALL_OT=ON` will enable all available protocols depending on platform/dependencies. The `ON`/`OFF` options include
 
