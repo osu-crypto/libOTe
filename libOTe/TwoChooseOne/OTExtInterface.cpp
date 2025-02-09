@@ -76,7 +76,7 @@ namespace osuCrypto
 		Socket& chl)
 	{
 		MACORO_TRY{
-		auto temp = std::vector<std::array<block, 2>>(recvMessages.size());
+		auto temp = AlignedUnVector<std::array<block, 2>>(recvMessages.size());
 
 		co_await(receive(choices, recvMessages, prng, chl));
 		co_await(chl.recv(temp));
@@ -97,7 +97,7 @@ namespace osuCrypto
 	task<> OtReceiver::receiveCorrelated(const BitVector& choices, span<block> recvMessages, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
-		auto  temp = std::vector<block>(recvMessages.size());
+		auto  temp = AlignedUnVector<block>(recvMessages.size());
 
 		co_await(receive(choices, recvMessages, prng, chl));
 		co_await(chl.recv(temp));
