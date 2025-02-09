@@ -6,6 +6,8 @@
 #include "ExConvCode_Tests.h"
 #include "cryptoTools/Common/Log.h"
 #include "libOTe/Tools/ExConvCode/ExConvChecker.h"
+#include <cmath>
+
 using namespace oc;
 using namespace oc::experimental;
 namespace tests_libOTe

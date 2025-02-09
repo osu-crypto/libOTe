@@ -4,6 +4,7 @@
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe_Tests/ExConvCode_Tests.h"
 #include "libOTe/Tools/ExConvCode/ExConvChecker.h"
+#include <cmath>
 
 namespace osuCrypto
 {
