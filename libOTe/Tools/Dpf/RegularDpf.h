@@ -40,7 +40,7 @@ namespace osuCrypto
 			if (!numPoints)
 				throw RTE_LOC;
 
-			mDepth = oc::log3ceil(domain);
+			mDepth = log2ceil(domain);
 			mPartyIdx = partyIdx;
 			mDomain = domain;
 			mNumPoints = numPoints;

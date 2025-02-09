@@ -70,7 +70,7 @@ namespace osuCrypto
         if (totalOTs == 0)
             totalOTs = 1 << 20;
 
-        bool randomOT = true;
+        bool randomOT = false;
 
         // get up the networking
         auto chl = cp::asioConnect(ip, role == Role::Sender);

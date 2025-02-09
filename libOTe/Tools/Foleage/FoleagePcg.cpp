@@ -12,13 +12,13 @@ namespace osuCrypto
 	void FoleageF4Ole::init(u64 partyIdx, u64 n, PRNG& prng)
 	{
 		mPartyIdx = partyIdx;
-		mLog3N = log3Ceil(n);
+		mLog3N = log2ceil(n);
 		mN = ipow(3, mLog3N);
 
 		if (mT != ipow(3, mLog3T))
 			throw RTE_LOC;
 
-		mDpfDomainDepth = std::max<u64>(1, log3Ceil(divCeil(mN, mT * 256)));
+		mDpfDomainDepth = std::max<u64>(1, log2ceil(divCeil(mN, mT * 256)));
 		mDpfBlockSize = 4 * ipow(3, mDpfDomainDepth);
 
 		mBlockSize = mN / mT;

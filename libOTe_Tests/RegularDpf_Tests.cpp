@@ -294,14 +294,14 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 	u64 depth = 3;
 	u64 domain = ipow(3,depth);
 	u64 numPoints = 11;
-	std::vector<u64> points0(numPoints);
-	std::vector<u64> points1(numPoints);
+	std::vector<Trit32> points0(numPoints);
+	std::vector<Trit32> points1(numPoints);
 	std::vector<block> values0(numPoints);
 	std::vector<block> values1(numPoints);
 	for (u64 i = 0; i < numPoints; ++i)
 	{
-		points1[i] = prng.get<u64>();
-		points0[i] = (prng.get<u64>() % domain) ^ points1[i];
+		points1[i] = Trit32(prng.get<u64>() % domain);
+		points0[i] = Trit32(prng.get<u64>() % domain) + points1[i];
 		values0[i] = prng.get();
 		values1[i] = prng.get();
 	}
@@ -351,7 +351,7 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 	{
 		for (u64 k = 0; k < numPoints; ++k)
 		{
-			auto p = points0[k] ^ points1[k];
+			auto p = (points0[k] + points1[k]).toInt();
 			auto act = output[0][k][i] ^ output[1][k][i];
 			auto t = i == p ? 1 : 0;
 			auto tAct = tags[0][k][i] ^ tags[1][k][i];

@@ -375,7 +375,7 @@ namespace osuCrypto {
 		auto numCoeffs = lsb.rows();
 		if (numCoeffs % 3)
 			throw RTE_LOC;
-		auto numVars = log3Ceil(numCoeffs);
+		auto numVars = log3ceil(numCoeffs);
 		foleageFFT(lsb.data(), msb.data(), numVars, lsb.size() / 3);
 	}
 

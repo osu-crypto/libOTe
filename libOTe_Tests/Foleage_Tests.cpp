@@ -743,7 +743,7 @@ namespace osuCrypto
 		// We pack L=256 coefficients of F4 into each DPF output (note that larger
 		// packing values are also okay, but they will do increase key size).
 		//************************************************************************
-		size_t dpf_domain_bits = log3Ceil(divCeil(poly_size, t * 256.0));
+		size_t dpf_domain_bits = log3ceil(divCeil(poly_size, t * 256.0));
 		if (dpf_domain_bits == 0)
 			dpf_domain_bits = 1;
 
