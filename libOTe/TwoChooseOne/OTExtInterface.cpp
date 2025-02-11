@@ -122,7 +122,7 @@ namespace osuCrypto
 
 	{
 		MACORO_TRY{
-		auto temp = std::vector<std::array<block, 2>>(messages.size());
+		auto temp = AlignedUnVector<std::array<block, 2>>(messages.size());
 
 		co_await(send(temp, prng, chl));
 
