@@ -30,33 +30,57 @@ namespace osuCrypto
 
 		Trit32 operator+(const Trit32& t) const
 		{
-			u64 msbMask, lsbMask;
-			setBytes(msbMask, 0b10101010);
-			setBytes(lsbMask, 0b01010101);
+			//u64 msbMask, lsbMask;
+			//setBytes(msbMask, 0b10101010);
+			//setBytes(lsbMask, 0b01010101);
 
-			auto x0 = mVal;
-			auto x1 = mVal >> 1;
-			auto y0 = t.mVal;
-			auto y1 = t.mVal >> 1;
+			//auto x0 = mVal;
+			//auto x1 = mVal >> 1;
+			//auto y0 = t.mVal;
+			//auto y1 = t.mVal >> 1;
 
 
-			auto x1x0 = x1 ^ x0;
-			auto z1 = (y0 ^ x0) & ~(x1x0 ^ y1);
-			auto z0 = (x1 ^ y1) & ~(x1x0 ^ y0);
+			//auto x1x0 = x1 ^ x0;
+			//auto z1 = (y0 ^ x0) & ~(x1x0 ^ y1);
+			//auto z0 = (x1 ^ y1) & ~(x1x0 ^ y0);
+
+			//r.mVal = ((z1 << 1) & msbMask) | (z0 & lsbMask);
 
 			Trit32 r;
-			r.mVal = ((z1 << 1) & msbMask) | (z0 & lsbMask);
-
 			for (u64 i = 0; i < 32; ++i)
 			{
-				auto a = (mVal >> (i * 2)) & 3;
-				auto b = (mVal >> (i * 2)) & 3;
+				auto a = t[i];
+				auto b = (*this)[i];
 				auto c = (a + b) % 3;
-				if (c != ((r.mVal >> (i * 2)) & 3))
-					throw RTE_LOC;
+
+				r.mVal |= u64(c) << (i * 2);
+				//if (c != ((r.mVal >> (i * 2)) & 3))
+					//throw RTE_LOC;
 			}
 			return r;
 		}
+
+
+		Trit32 operator-(const Trit32& t) const
+		{
+			Trit32 r;
+			for (u64 i = 0; i < 32; ++i)
+			{
+				auto a = t[i];
+				auto b = (*this)[i];
+				auto c = (b + 3 - a) % 3;
+
+				r.mVal |= u64(c) << (i * 2);
+			}
+			return r;
+		}
+
+
+		bool operator==(const Trit32& t) const
+		{
+			return mVal == t.mVal;
+		}
+
 
 		u64 toInt() const
 		{
@@ -82,11 +106,32 @@ namespace osuCrypto
 
 
 		// returns the i'th Z_3 element.
-		u8 operator[](u64 i)
+		u8 operator[](u64 i) const
 		{
-			return (mVal >> (i*2)) & 3;
+			return (mVal >> (i * 2)) & 3;
 		}
 	};
+
+	std::ostream& operator<<(std::ostream& o, const Trit32& t)
+	{
+		u64 m = 0;
+		u64 v = t.mVal;
+		while (v)
+		{
+			++m;
+			v >>= 2;
+		}
+		if (!m)
+			o << "0";
+		else
+		{
+			for (u64 i = m - 1; i < m; --i)
+			{
+				o << int(t[i]);
+			}
+		}
+		return o;
+	}
 
 	struct TriDpf
 	{
@@ -131,13 +176,18 @@ namespace osuCrypto
 			//mMultiplier.init(partyIdx, numPoints * mDepth);
 		}
 
-		// returns something similar to b % 3.
-		u8 trit(block b)
+		//// returns something similar to b % 3.
+		//u8 trit(block b)
+		//{
+		//	auto v = b.get<u64>(0);
+		//	return
+		//		static_cast<u8>(v > 6148914691236517205ull) +
+		//		static_cast<u8>(v > 12297829382473034410ull);
+		//}
+
+		u8 lsb(const block& b)
 		{
-			auto v = b.get<u64>(0);
-			return
-				static_cast<u8>(v > 6148914691236517205ull) +
-				static_cast<u8>(v > 12297829382473034410ull);
+			return b.get<u8>(0) & 1;
 		}
 
 #define SIMD8(VAR, STATEMENT) \
@@ -191,17 +241,19 @@ namespace osuCrypto
 
 
 			// shares of S'
-			auto pow2 = 1ull << log2ceil(mDomain);
-			std::array<Matrix<block>, 2> s;
-			s[mDepth & 1].resize(pow2, numPoints, oc::AllocType::Uninitialized);
-			s[(mDepth & 1) ^ 1].resize(pow2 / 2, numPoints, oc::AllocType::Uninitialized);
+			auto pow3 = ipow(3, mDepth);
+			std::array<Matrix<block>, 3> s;
+			auto last = mDepth % 3;
+			s[last].resize(pow3, numPoints, oc::AllocType::Uninitialized);
+			s[(last + 2) % 3].resize(pow3 / 3, numPoints, oc::AllocType::Uninitialized);
+			s[(last + 1) % 3].resize(pow3 / 9, numPoints, oc::AllocType::Uninitialized);
 
 			// share of t
-			std::array<Matrix<u8>, 2> t;
-			t[0].resize(s[0].rows(), s[0].cols());
-			t[1].resize(s[1].rows(), s[1].cols());
-			for (u64 i = 0; i < numPoints; ++i)
-				t[0](0, i) = mPartyIdx;
+			//std::array<Matrix<u8>, 2> t;
+			//t[0].resize(s[0].rows(), s[0].cols());
+			//t[1].resize(s[1].rows(), s[1].cols());
+			//for (u64 i = 0; i < numPoints; ++i)
+			//	t[0](0, i) = mPartyIdx;
 
 
 #if defined(NDEBUG)
@@ -209,18 +261,18 @@ namespace osuCrypto
 #else
 			auto getRow = [](auto&& m, u64 i) {return m[i]; };
 #endif
-			std::array<AlignedUnVector<u8>, 3> tau;
-			tau[0].resize(mNumPoints);
-			tau[1].resize(mNumPoints);
-			tau[2].resize(mNumPoints);
+			//std::array<AlignedUnVector<u8>, 3> tau;
+			//tau[0].resize(mNumPoints);
+			//tau[1].resize(mNumPoints);
+			//tau[2].resize(mNumPoints);
 			std::array<AlignedUnVector<block>, 3> z;
 			z[0].resize(mNumPoints);
 			z[1].resize(mNumPoints);
 			z[2].resize(mNumPoints);
-			std::array<AlignedUnVector<u8>, 3> v;
-			v[0].resize(mNumPoints);
-			v[1].resize(mNumPoints);
-			v[2].resize(mNumPoints);
+			//std::array<AlignedUnVector<u8>, 3> v;
+			//v[0].resize(mNumPoints);
+			//v[1].resize(mNumPoints);
+			//v[2].resize(mNumPoints);
 			std::array<AlignedUnVector<block>, 3> sigma;
 			sigma[0].resize(mNumPoints);
 			sigma[1].resize(mNumPoints);
@@ -229,11 +281,13 @@ namespace osuCrypto
 
 			{
 				// we skip level 0 and set level 1 to be random
+				auto t = s[0][0];
 				auto sc0 = s[1][0];
 				auto sc1 = s[1][1];
 				auto sc2 = s[1][2];
 				for (u64 k = 0; k < numPoints; ++k)
 				{
+					t[k] = block::allSame<u8>(-mPartyIdx);
 					sc0[k] = prng.get<block>();
 					sc1[k] = prng.get<block>();
 					sc2[k] = prng.get<block>();
@@ -241,6 +295,8 @@ namespace osuCrypto
 					z[0][k] = sc0[k];
 					z[1][k] = sc1[k];
 					z[2][k] = sc2[k];
+
+					//std::cout << "seed " << sc0[k] << " " << sc1[k] << " " << sc2[k] << std::endl;
 				}
 			}
 
@@ -258,23 +314,9 @@ namespace osuCrypto
 			// We compute left and right sums for the children.
 			for (u64 iter = 1; iter <= mDepth; ++iter)
 			{
-				// the parent level
-				auto& parentSeedBase = t[(iter - 1) & 1];
-
-				// current level
-				auto& seedBase = s[iter & 1];
-				auto& tagBase = t[iter & 1];
-
-				// the child level
-				auto& childSeedBase = s[(iter + 1) & 1];
-				//auto& childTagBase = t[(iter + 1) & 1];
-
-				auto size = ipow(3, iter);
-
 				{
 					std::vector<u8> alphaj(numPoints);
 					std::vector<block> zz(numPoints * 3); auto zzIter = zz.begin();
-					std::vector<u8> vv(numPoints * 3); auto vvIter = vv.begin();
 					for (u64 k = 0; k < numPoints; ++k)
 					{
 						alphaj[k] = points[k][mDepth - iter];
@@ -283,45 +325,73 @@ namespace osuCrypto
 					for (u64 k = 0; k < 3; ++k)
 					{
 						copyBytes(span<block>(zzIter, zzIter + numPoints), z[k]); zzIter += numPoints;
-						copyBytes(span<u8>(vvIter, vvIter + numPoints), v[k]); vvIter += numPoints;
 					}
 
 					co_await sock.send(coproto::copy(alphaj));
 					co_await sock.send(coproto::copy(zz));
-					co_await sock.send(coproto::copy(vv));
 
 					auto recvAlphaj = co_await sock.recv<std::vector<u8>>();
 					co_await sock.recv(zz);
-					co_await sock.recv(vv);
 
 					zzIter = zz.begin();
-					vvIter = vv.begin();
 					for (u64 k = 0; k < 3; ++k)
 					{
 						for (u64 i = 0; i < numPoints; ++i)
 						{
-							sigma[k][i] = z[k][i] ^ *zzIter++;
-							tau[k][i] = v[k][i] ^ *vvIter++ ^ 1;
-							assert(v[k][i] < 2);
+							//if (v[k][i] > 2)
+							//{
+							//	throw RTE_LOC;
+							//}
+							//std::cout << "sigma = " << z[k][i] << " + " << *zzIter;
+							sigma[k][i] = z[k][i] ^ *zzIter++;//^ OneBlock;
+
+							//std::cout << " = " << sigma[k][i] << std::endl;
+							//tau[k][i] = lsb(sigma[k][i]) ^ 1;
 						}
 					}
 
 					for (u64 i = 0; i < numPoints; ++i)
 					{
 						assert(recvAlphaj[i] < 3);
-						alphaj[i] = (alphaj[i] + recvAlphaj[i]) % 3;
+						auto a = (alphaj[i] + recvAlphaj[i]) % 3;
+						//std::cout << "alpha[" << (mDepth - iter) << "] = " << int(a) << " = " << int(alphaj[i]) << " + " << int(recvAlphaj[i]) << std::endl;
 
-						sigma[alphaj[i]][i] ^= oc::mAesFixedKey.ecbEncBlock(block(iter, i));
-						tau[alphaj[i]][i] ^= 1;
+						auto r = (oc::mAesFixedKey.ecbEncBlock(block(iter, i)) & ~OneBlock);
+						sigma[a][i] ^= r ^ OneBlock;
 					}
 				}
+
+
+				//for (u64 k = 0; k < 3; ++k)
+				//{
+				//	for (u64 i = 0; i < numPoints; ++i)
+				//	{
+				//		tau[k][i] = lsb(sigma[k][i]);
+				//	}
+				//}
+
+				//std::cout << "sigma[" << iter << "] " << sigma[0][0] << " " << sigma[1][0] << " " << sigma[2][0] << std::endl;
+				//std::cout << "tau[" << iter << "]   " << int(tau[0][0]) << " " << int(tau[1][0]) << " " << int(tau[2][0]) << std::endl;
+
+				// the parent level
+				auto& parentBase = s[(iter - 1) % 3];
+
+				// current level
+				auto& seedBase = s[iter % 3];
+				//auto& tagBase = t[iter % 3];
+
+				// the child level
+				auto& childBase = s[(iter + 1) % 3];
+				//auto& childTagBase = t[(iter + 1) & 1];
+
+				auto size = ipow(3, iter);
 
 				if (iter != mDepth)
 				{
 					for (u64 i = 0; i < 3; ++i)
 					{
 						setBytes(z[i], 0);
-						setBytes(v[i], 0);
+						//setBytes(v[i], 0);
 					}
 
 					// we iterate over each parent control bit.
@@ -330,52 +400,32 @@ namespace osuCrypto
 					for (u64 L = 0, L2 = 0, L4 = 0; L2 < size; ++L, L2 += 3, L4 += 9)
 					{
 						// parent control bits, one for each tree.
-						auto parentTag = getRow(parentSeedBase, L);
+						auto parentTag = getRow(parentBase, L);
+						//auto parentSeed = getRow(seedBase, L);
 
 						// child seed, three for each tree.
 						std::array seed{ getRow(seedBase, L2 + 0), getRow(seedBase, L2 + 1) , getRow(seedBase, L2 + 2) };
 
 						// child control bit, tree for each tree.
-						std::array tag{ getRow(tagBase, L2 + 0), getRow(tagBase, L2 + 1), getRow(tagBase, L2 + 2) };
+						//std::array tag{ getRow(tagBase, L2 + 0), getRow(tagBase, L2 + 1), getRow(tagBase, L2 + 2) };
 
 						// grandchild seeds, nine for each tree.
-						std::array<decltype(getRow(childSeedBase, L4 + 0)), 9> childSeed;
+						std::array<decltype(getRow(childBase, L4 + 0)), 9> childSeed;
 						for (u64 i = 0; i < 9; ++i)
-							childSeed[i] = getRow(childSeedBase, L4 + i);
-
-						//for (u64 k = 0; k < numPoints8; k += 8)
-						//{
-						//	block temp[8];
-						//	SIMD8(q, temp[q] = block::allSame<u64>(-parentTag[k + q]) & sigma[k + q]);
-						//	SIMD8(q, tag[0][k + q] = lsb(seed[0][k + q]) ^ parentTag[k + q] & tau[0][k + q]);
-						//	SIMD8(q, seed[0][k + q] ^= temp[q]);
+							childSeed[i] = getRow(childBase, L4 + i);
 
 
-						//	mAesFixedKey.ecbEncBlocks<8>(&seed[0][k], &childSeed[1][k]);
-						//	SIMD8(q, childSeed[0][k + q] = AES::roundEnc(childSeed[1][k + q], seed[0][k + q]));
-						//	SIMD8(q, childSeed[1][k + q] = childSeed[1][k + q] + seed[0][k + q]);
-
-						//	SIMD8(q, z[0][k + q] ^= childSeed[0][k + q]);
-						//	SIMD8(q, z[1][k + q] ^= childSeed[1][k + q]);
-
-						//	SIMD8(q, tag[1][k + q] = lsb(seed[1][k + q]) ^ parentTag[k + q] & tau[1][k + q]);
-						//	SIMD8(q, seed[1][k + q] ^= temp[q]);
-
-						//	mAesFixedKey.ecbEncBlocks<8>(&seed[1][k], &childSeed[3][k]);
-						//	SIMD8(q, childSeed[2][k + q] = AES::roundEnc(childSeed[3][k + q], seed[1][k + q]));
-						//	SIMD8(q, childSeed[3][k + q] = childSeed[3][k + q] + seed[1][k + q]);
-						//	SIMD8(q, z[0][k + q] ^= childSeed[2][k + q]);
-						//	SIMD8(q, z[1][k + q] ^= childSeed[3][k + q]);
-						//}
-						//auto& sigmaL = sigma[L % 3];
-
-						for (u64 k = 0; k < mNumPoints; ++k)
+						for (u64 j = 0; j < 3; ++j)
 						{
-							for (u64 j = 0; j < 3; ++j)
+							for (u64 k = 0; k < mNumPoints; ++k)
 							{
+
 								// (s,t) = (s,t) ^ q * sigma_j
-								tag[j][k] = trit(seed[j][k]) ^ parentTag[k] & tau[j][k];
-								seed[j][k] ^= block::allSame<u64>(-parentTag[k + 0]) & sigma[j][k + 0];
+								//tag[j][k] = lsb(seed[j][k]) ^ parentTag[k] & tau[j][k];
+								//seed[j][k] ^= block::allSame<u64>(-i64(parentTag[k + 0])) & sigma[j][k + 0];
+								seed[j][k] ^= parentTag[k] & sigma[j][k];
+								//tag[j][k] = lsb(seed[j][k]);
+								//std::cout << mPartyIdx << " " << Trit32(L2 + j) << " " << seed[j][k] << " " << int(lsb(seed[j][k])) <<" " << parentTag[k] << std::endl;
 
 								//
 								for (u64 i = 0; i < 3; ++i)
@@ -384,89 +434,75 @@ namespace osuCrypto
 									childSeed[j * 3 + i][k] = s;
 									z[i][k] ^= s;
 								}
+
+								// replace the seed with the tag.
+								seed[j][k] = block::allSame<u8>(-lsb(seed[j][k]));
 							}
-
-							//tag[1][k] = lsb(seed[1][k]) ^ parentTag[k] & tau[1][k];
-							//seed[1][k] ^= temp;
-
-							//childSeed[3][k] = mAesFixedKey.ecbEncBlock(seed[1][k]);
-							//childSeed[2][k] = AES::roundEnc(childSeed[3][k], seed[1][k]);
-							//childSeed[3][k] = childSeed[3][k] + seed[1][k];
-
-							//z[0][k] ^= childSeed[2][k];
-							//z[1][k] ^= childSeed[3][k];
 						}
 					}
 				}
 			}
-
-
+			AlignedUnVector<block> sums(mNumPoints);
+			Matrix<u8> t(ipow(3, mDepth), mNumPoints);
 			// fixing the last layer
 			{
 				auto size = ipow(3, mDepth);
 
-				auto& parentTag = t[(mDepth - 1) & 1];
-				auto& curSeed = s[mDepth & 1];
-				auto& curTag = t[mDepth & 1];
+				auto& parentTag = s[(mDepth - 1) % 3];
+				auto& curSeed = s[mDepth % 3];
+				//auto& curTag = t[mDepth & 1];
+
 				for (u64 L = 0, L2 = 0; L2 < size; ++L, L2 += 3)
 				{
 					// parent control bits
 					auto tpl = getRow(parentTag, L);
 
 					// child seed
-					std::array scl{ getRow(curSeed, L2 + 0), getRow(curSeed, L2 + 1) };
+					std::array scl{ getRow(curSeed, L2 + 0), getRow(curSeed, L2 + 1), getRow(curSeed, L2 + 2) };
 
 					// child control bit
-					std::array tcl{ getRow(curTag, L2 + 0), getRow(curTag, L2 + 1) };
+					//std::array tcl{ getRow(curTag, L2 + 0), getRow(curTag, L2 + 1) , getRow(curTag, L2 + 2) };
 
-					//for (u64 k = 0; k < numPoints8; k += 8)
-					//{
-					//	block temp[8];
-					//	SIMD8(q, temp[q] = block::allSame<u64>(-parentTag[k + q]) & sigma[k + q]);
-					//	SIMD8(q, tag[0][k + q] = lsb(seed[0][k + q]) ^ parentTag[k + q] & tau[0][k + q]);
-					//	SIMD8(q, tag[1][k + q] = lsb(seed[1][k + q]) ^ parentTag[k + q] & tau[1][k + q]);
-					//	SIMD8(q, seed[0][k + q] ^= temp[q]);
-					//	SIMD8(q, seed[1][k + q] ^= temp[q]);
-					//}
-
-					for (u64 k = 0; k < mNumPoints; ++k)
+					for (u64 j = 0; j < 3; ++j)
 					{
-						for (u64 j = 0; j < 3; ++j)
+						for (u64 k = 0; k < mNumPoints; ++k)
 						{
-							curTag[L2 + j][k] = trit(scl[j][k]) ^ tpl[k] & tau[j][k];
-							curSeed[L2 + j][k] ^= block::allSame<u64>(-tpl[k]) & sigma[j][k];;
+							//curTag[L2 + j][k] = lsb(scl[j][k]) ^ tpl[k] & tau[j][k];
+							auto s = curSeed[L2 + j][k] ^ tpl[k] & sigma[j][k];
+							t[L2 + j][k] = lsb(s);
+							curSeed[L2 + j][k] = /*convert_G*/ AES::roundFn(s, s);
+							sums[k] = sums[k] ^ curSeed[L2 + j][k];
+							//std::cout << mPartyIdx << " " << Trit32(L2 + j) << " " << curSeed[L2 + j][k] << " " << int(curTag[L2 + j][k]) << std::endl;
 						}
-
-
-						//curTag[L2 + 0][k] = lsb(scl[0][k]) ^ tpl[k] & tau[0][k];
-						//curTag[L2 + 1][k] = lsb(scl[1][k]) ^ tpl[k] & tau[1][k];
-						//curSeed[L2 + 0][k] ^= block::allSame<u64>(-tpl[k + 0]) & sigma[k % 3][k + 0];;
-						//curSeed[L2 + 1][k] ^= temp;
 					}
 				}
 			}
+			//std::cout << "----------" << std::endl;
 
 			if (values.size())
 			{
 
 				AlignedUnVector<block> gamma(mNumPoints), diff(mNumPoints);
+				setBytes(diff, 0);
+				auto& curSeed = s[mDepth % 3];
+
 				for (u64 k = 0; k < mNumPoints; ++k)
 				{
-					diff[k] = z[0][k] ^ z[1][k] ^ values[k];
+					diff[k] = sums[k] ^ values[k];
 				}
 				co_await sock.send(std::move(diff));
 				co_await sock.recv(gamma);
 				for (u64 k = 0; k < mNumPoints; ++k)
 				{
-					gamma[k] = z[0][k] ^ z[1][k] ^ values[k] ^ gamma[k];
+					gamma[k] = sums[k] ^ values[k] ^ gamma[k];
 				}
 
-				auto& sd = s[mDepth & 1];
-				auto& td = t[mDepth & 1];
+				auto& sd = s[mDepth % 3];
+				//auto& td = t[mDepth & 1];
 				for (u64 i = 0; i < mDomain; ++i)
 				{
 					auto sdi = getRow(sd, i);
-					auto tdi = getRow(td, i);
+					auto tdi = getRow(t, i);
 
 					//for (u64 k = 0; k < numPoints8; k += 8)
 					//{
@@ -476,15 +512,18 @@ namespace osuCrypto
 					//}
 					for (u64 k = 0; k < mNumPoints; ++k)
 					{
-						auto T = block::allSame<u64>(-tdi[k]) & gamma[k];
-						output(k, i, sdi[k] ^ T, tdi[k]);
+						auto T = block::allSame<u8>(-tdi[k]) & gamma[k];
+						auto V = sdi[k] ^ T;
+						//std::cout << mPartyIdx << " " << Trit32(i) << " " << sdi[k] << " " << int(tdi[k]) << std::endl;
+
+						output(k, i, V, tdi[k]);
 					}
 				}
 			}
 			else
 			{
-				auto& sd = s[mDepth & 1];
-				auto& td = t[mDepth & 1];
+				auto& sd = s[mDepth % 3];
+				auto& td = t;// [mDepth & 1] ;
 				for (u64 i = 0; i < mDomain; ++i)
 				{
 					auto sdi = getRow(sd, i);
@@ -503,7 +542,8 @@ namespace osuCrypto
 
 
 		u64 baseOtCount() const {
-			throw RTE_LOC;
+			return mDepth * mNumPoints;
+			//throw RTE_LOC;
 			//return mMultiplier.baseOtCount();
 		}
 
@@ -512,7 +552,7 @@ namespace osuCrypto
 			span<const block> recvBaseOts,
 			const oc::BitVector& baseChoices)
 		{
-			throw RTE_LOC;
+			//throw RTE_LOC;
 			//mMultiplier.setBaseOts(baseSendOts, recvBaseOts, baseChoices);
 		}
 

@@ -291,17 +291,21 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 {
 
 	PRNG prng(block(231234, 321312));
-	u64 depth = 3;
-	u64 domain = ipow(3,depth);
-	u64 numPoints = 11;
+	u64 depth = 4;
+	u64 domain = ipow(3,depth) - 3;
+	u64 numPoints = 17;
 	std::vector<Trit32> points0(numPoints);
 	std::vector<Trit32> points1(numPoints);
+	std::vector<Trit32> points(numPoints);
 	std::vector<block> values0(numPoints);
 	std::vector<block> values1(numPoints);
 	for (u64 i = 0; i < numPoints; ++i)
 	{
+		points[i] = Trit32(prng.get<u64>() % domain);
 		points1[i] = Trit32(prng.get<u64>() % domain);
-		points0[i] = Trit32(prng.get<u64>() % domain) + points1[i];
+		points0[i] = points[i] - points1[i];
+
+		//std::cout << points[i] << " = " << points0[i] <<" + "<< points1[i] << std::endl;
 		values0[i] = prng.get();
 		values1[i] = prng.get();
 	}
@@ -349,15 +353,20 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 
 	for (u64 i = 0; i < domain; ++i)
 	{
+		Trit32 I(i);
 		for (u64 k = 0; k < numPoints; ++k)
 		{
-			auto p = (points0[k] + points1[k]).toInt();
 			auto act = output[0][k][i] ^ output[1][k][i];
-			auto t = i == p ? 1 : 0;
+			auto t = I == points[k] ? 1 : 0;
 			auto tAct = tags[0][k][i] ^ tags[1][k][i];
 			auto exp = t ? (values0[k] ^ values1[k]) : ZeroBlock;
 			if (exp != act)
+			{
+				std::cout << "i " << i << "="<< Trit32(i)<<" " << t << std::endl;
+				std::cout << "exp " << exp << std::endl;
+				std::cout << "act " << act << std::endl;
 				throw RTE_LOC;
+			}
 			if (t != tAct)
 				throw RTE_LOC;
 		}
