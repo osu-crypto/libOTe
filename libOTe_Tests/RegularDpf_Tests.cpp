@@ -291,9 +291,9 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 {
 
 	PRNG prng(block(231234, 321312));
-	u64 depth = 4;
+	u64 depth = cmd.getOr("depth", 3);
 	u64 domain = ipow(3,depth) - 3;
-	u64 numPoints = 17;
+	u64 numPoints = cmd.getOr("numPoints", 17);
 	std::vector<Trit32> points0(numPoints);
 	std::vector<Trit32> points1(numPoints);
 	std::vector<Trit32> points(numPoints);
