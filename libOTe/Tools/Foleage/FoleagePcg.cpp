@@ -384,6 +384,9 @@ namespace osuCrypto
 		}
 		setTimePoint("dpfKeyEval");
 
+
+		co_await dpfEval(prng, sock);
+
 		//std::cout << "block " << hash(blocks.data(), blocks.size()) << std::endl;
 
 
@@ -445,5 +448,9 @@ namespace osuCrypto
 
 	}
 
+	macoro::task<> FoleageF4Ole::dpfEval(PRNG& prng, coproto::Socket& sock)
+	{
+		co_return;
+	}
 
 }

@@ -61,6 +61,7 @@ namespace osuCrypto
 			span<block> CMsb, PRNG& prng, coproto::Socket& sock);
 
 
+		macoro::task<> dpfEval(PRNG& prng, coproto::Socket& sock);
 
 		void sampleA(block seed);
 	};

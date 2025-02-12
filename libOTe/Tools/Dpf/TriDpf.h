@@ -166,17 +166,7 @@ namespace osuCrypto
 			mDomain = domain;
 			mNumPoints = numPoints;
 			mOtIdx = 0;
-			//mMultiplier.init(partyIdx, numPoints * mDepth);
 		}
-
-		//// returns something similar to b % 3.
-		//u8 trit(block b)
-		//{
-		//	auto v = b.get<u64>(0);
-		//	return
-		//		static_cast<u8>(v > 6148914691236517205ull) +
-		//		static_cast<u8>(v > 12297829382473034410ull);
-		//}
 
 		u8 lsb(const block& b)
 		{
@@ -367,7 +357,7 @@ namespace osuCrypto
 						{
 							auto s = curSeed[L2 + j][k] ^ parentTag[k] & sigma[j][k];
 							t[L2 + j][k] = lsb(s);
-							curSeed[L2 + j][k] = /*convert_G*/ AES::roundFn(s, s);
+							curSeed[L2 + j][k] = /*convert_G*/ AES::roundFn(s, s);//AES::roundFn is used to get rid of the correlation in the LSB.
 							sums[k] = sums[k] ^ curSeed[L2 + j][k];
 							//std::cout << mPartyIdx << " " << Trit32(L2 + j) << " " << curSeed[L2 + j][k] << " " << int(curTag[L2 + j][k]) << std::endl;
 						}
@@ -453,6 +443,7 @@ namespace osuCrypto
 
 			Matrix<block> sigmaShares(3, mNumPoints);
 			AlignedUnVector<std::array<block, 3>> mask(mNumPoints);
+			AlignedUnVector<std::array<block, 3>> recvBuffer(mNumPoints * 2);
 
 			std::array<coproto::Socket, 2> socks;
 			socks[0] = sock;
@@ -474,7 +465,7 @@ namespace osuCrypto
 				PRNG prng(block(234134, 21452345 * mPartyIdx));
 
 				BitVector correction(mNumPoints * 2);
-				AlignedUnVector<std::array<block, 3>> buffer(mNumPoints * 3);
+				AlignedUnVector<std::array<block, 3>> sendBuffer(mNumPoints * 2);
 				co_await socks[0].recv(correction);
 				//auto sendIter = mBaseSendOts.begin() + mOtIdx;
 				for (u64 i = 0; i < mNumPoints; ++i)
@@ -503,17 +494,31 @@ namespace osuCrypto
 					*BitIterator(&r) = mPartyIdx;
 
 					//std::array<block, 3> mask;// = prng.get();
-					setBytes(mask[i], 0);
+					//mask[i] = prng.get();
 					auto a = points[i][mDepth - iter];
 					//std::cout << "a0 " << int(a) << std::endl;
 
-					for (u64 j = 0; j < 3; ++j)
 					{
-						buffer[i * 3 + j] = PRNG(k[j], 3).get();
-						buffer[i * 3 + j][0] ^= mask[i][0];
-						buffer[i * 3 + j][1] ^= mask[i][1];
-						buffer[i * 3 + j][2] ^= mask[i][2];
-						buffer[i * 3 + j][(j + a) % 3] ^= r;
+
+						// sendBuffer[i * 3 + 0] = kj ^ mask ^ unitVec(r, a);
+						//                     0 = kj ^ mask ^ unitVec(r, a);
+						//                  mask = kj ^ unitVec(r, a);
+
+						mask[i] = PRNG(k[0], 3).get();
+						//setBytes(mask[i], 0);
+						mask[i][a] ^= r;
+					}
+
+					for (u64 j = 0; j < 2; ++j)
+					{
+						std::array<block,3> kj = PRNG(k[j+1], 3).get();
+						//setBytes(kj, 0);
+
+						//sendBuffer[i * 3 + j] = PRNG(k[j], 3).get();
+						sendBuffer[i * 2 + j][0] = kj[0] ^ mask[i][0];
+						sendBuffer[i * 2 + j][1] = kj[1] ^ mask[i][1];
+						sendBuffer[i * 2 + j][2] = kj[2] ^ mask[i][2];
+						sendBuffer[i * 2 + j][(j+1 + a) % 3] ^= r;
 
 						//std::cout << "buffer " << j << std::endl
 						//	<< " " << buffer[i * 3 + j][0] << "\n"
@@ -522,9 +527,8 @@ namespace osuCrypto
 					}
 				}
 
-				co_await socks[0].send(std::move(buffer));
+				co_await socks[0].send(std::move(sendBuffer));
 
-				co_await socks[0].recv(sigmaShares);
 
 				};
 
@@ -537,38 +541,10 @@ namespace osuCrypto
 					correction[i * 2 + 1] = ((a >> 1) & 1) ^ mBaseChoice[mOtIdx + i * 2 + 1];
 				}
 				co_await socks[1].send(std::move(correction));
-				AlignedUnVector<std::array<block, 3>> buffer(mNumPoints * 3);
 
-				co_await socks[1].recv(buffer);
-
-				for (u64 i = 0; i < mNumPoints; ++i)
-				{
-					auto a = points[i][mDepth - iter];
-
-					auto k = H(
-						mBaseRecvOts[mOtIdx + i * 2 + 0],
-						mBaseRecvOts[mOtIdx + i * 2 + 1]);
-					//std::cout << "p" << mPartyIdx << " ka " << k << " = H( "
-					//	<< std::hex << mBaseRecvOts[i * 2 + 0].get<u32>(0) << "  " << int(mBaseChoice[i * 2 + 0]) << " "
-					//	<< std::hex << mBaseRecvOts[i * 2 + 1].get<u32>(0) << "  " << int(mBaseChoice[i * 2 + 0]) << " )" << " a1 " << int(a) << std::endl;
-
-					//std::cout << "buffer " << std::endl
-					//	<< " " << buffer[i * 3 + a][0] << "\n"
-					//	<< " " << buffer[i * 3 + a][1] << "\n"
-					//	<< " " << buffer[i * 3 + a][2] << "\n";
-					std::array<block, 3> ka = PRNG(k, 3).get();
-					sigma[0][i] = ka[0] ^ buffer[i * 3 + a][0] ^ z[0][i];
-					sigma[1][i] = ka[1] ^ buffer[i * 3 + a][1] ^ z[1][i];
-					sigma[2][i] = ka[2] ^ buffer[i * 3 + a][2] ^ z[2][i];
-
-					//std::cout << "sigma " << std::endl
-					//	<< " " << sigma[0][i] << " = " << std::hex << ka[0].get<u32>(0) << " + " << std::hex << buffer[i * 3 + a][0].get<u32>(0) << " + " << std::hex << z[0][i].get<u32>(0) << "\n"
-					//	<< " " << sigma[1][i] << " = " << std::hex << ka[1].get<u32>(0) << " + " << std::hex << buffer[i * 3 + a][1].get<u32>(0) << " + " << std::hex << z[1][i].get<u32>(0) << "\n"
-					//	<< " " << sigma[2][i] << " = " << std::hex << ka[2].get<u32>(0) << " + " << std::hex << buffer[i * 3 + a][2].get<u32>(0) << " + " << std::hex << z[2][i].get<u32>(0) << "\n\n";
-				}
-
-				co_await socks[1].send(Matrix<block>(sigma));
+				co_await socks[1].recv(recvBuffer);
 				};
+
 			co_await macoro::when_all_ready(
 				sender(),
 				recver()
@@ -576,16 +552,53 @@ namespace osuCrypto
 
 			for (u64 i = 0; i < mNumPoints; ++i)
 			{
+				auto a = points[i][mDepth - iter];
+
+				auto k = H(
+					mBaseRecvOts[mOtIdx + i * 2 + 0],
+					mBaseRecvOts[mOtIdx + i * 2 + 1]);
+				//std::cout << "p" << mPartyIdx << " ka " << k << " = H( "
+				//	<< std::hex << mBaseRecvOts[i * 2 + 0].get<u32>(0) << "  " << int(mBaseChoice[i * 2 + 0]) << " "
+				//	<< std::hex << mBaseRecvOts[i * 2 + 1].get<u32>(0) << "  " << int(mBaseChoice[i * 2 + 0]) << " )" << " a1 " << int(a) << std::endl;
+
+				//std::cout << "buffer " << std::endl
+				//	<< " " << buffer[i * 3 + a][0] << "\n"
+				//	<< " " << buffer[i * 3 + a][1] << "\n"
+				//	<< " " << buffer[i * 3 + a][2] << "\n";
+				std::array<block, 3> ka = PRNG(k, 3).get();
+				//setBytes(ka, 0);
+
+				sigma[0][i] = ka[0] ^ mask[i][0] ^ z[0][i];
+				sigma[1][i] = ka[1] ^ mask[i][1] ^ z[1][i];
+				sigma[2][i] = ka[2] ^ mask[i][2] ^ z[2][i];
+				if (a)
+				{
+					sigma[0][i] ^= recvBuffer[i * 2 + a - 1][0];
+					sigma[1][i] ^= recvBuffer[i * 2 + a - 1][1];
+					sigma[2][i] ^= recvBuffer[i * 2 + a - 1][2];
+				}
+
+				//std::cout << "sigma " << std::endl
+				//	<< " " << sigma[0][i] << " = " << std::hex << ka[0].get<u32>(0) << " + " << std::hex << buffer[i * 3 + a][0].get<u32>(0) << " + " << std::hex << z[0][i].get<u32>(0) << "\n"
+				//	<< " " << sigma[1][i] << " = " << std::hex << ka[1].get<u32>(0) << " + " << std::hex << buffer[i * 3 + a][1].get<u32>(0) << " + " << std::hex << z[1][i].get<u32>(0) << "\n"
+				//	<< " " << sigma[2][i] << " = " << std::hex << ka[2].get<u32>(0) << " + " << std::hex << buffer[i * 3 + a][2].get<u32>(0) << " + " << std::hex << z[2][i].get<u32>(0) << "\n\n";
+			}
+			co_await sock.send(Matrix<block>(sigma));
+
+			co_await sock.recv(sigmaShares);
+
+			for (u64 i = 0; i < mNumPoints; ++i)
+			{
 				for (u64 j = 0; j < 3; ++j)
 				{
 					//std::cout << "sigma = " << (sigma[j][i] ^ sigmaShares[j][i]) << " = " << sigma[j][i] << " ^ " << sigmaShares[j][i] << std::endl;
-					sigma[j][i] ^= sigmaShares[j][i] ^ mask[i][j];
+					sigma[j][i] ^= sigmaShares[j][i];//^ mask[i][j];
 				}
 			}
 
 			mOtIdx += mNumPoints * 2;
 
-			if (0)
+			if (1)
 			{
 				std::vector<u8> alphaj(mNumPoints);
 				std::vector<block> zz(mNumPoints * 3); auto zzIter = zz.begin();
