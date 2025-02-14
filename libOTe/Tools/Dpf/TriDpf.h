@@ -112,7 +112,7 @@ namespace osuCrypto
 		}
 	};
 
-	std::ostream& operator<<(std::ostream& o, const Trit32& t)
+	inline std::ostream& operator<<(std::ostream& o, const Trit32& t)
 	{
 		u64 m = 0;
 		u64 v = t.mVal;
@@ -598,7 +598,7 @@ namespace osuCrypto
 
 			mOtIdx += mNumPoints * 2;
 
-			if (1)
+			if (0)
 			{
 				std::vector<u8> alphaj(mNumPoints);
 				std::vector<block> zz(mNumPoints * 3); auto zzIter = zz.begin();

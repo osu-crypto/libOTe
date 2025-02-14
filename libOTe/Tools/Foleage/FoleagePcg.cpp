@@ -5,6 +5,7 @@
 #include "cryptoTools/Common/BitIterator.h"
 #include "libOTe/Tools/Foleage/tri-dpf/FoleageDpf.h"
 #include "libOTe/Tools/Foleage/tri-dpf/FoleagePrf.h"
+#include "libOTe/Tools/Dpf/TriDpf.h"
 namespace osuCrypto
 {
 
@@ -190,6 +191,7 @@ namespace osuCrypto
 
 		std::vector<uint8_t> prodPolyCoefficient(mC * mC * mT * mT);
 		std::vector<size_t> prodPolyPosition(mC * mC * mT * mT);
+		std::vector<Trit32> prodPolyPositionTrit(mC * mC * mT * mT);
 
 		std::vector<u8> tritABlk(mLog3T), tritBBlk(mLog3T), tritsBlk(mLog3T);
 		std::vector<u8> tritAPos(mLog3N - mLog3T), tritBPos(mLog3N - mLog3T), tritsPos(mLog3N - mLog3T);
@@ -254,6 +256,7 @@ namespace osuCrypto
 						size_t idx = polyOffset + blockIdx * mT + nextIdx[blockIdx]++;
 						prodPolyCoefficient[idx] = mult_f4(vA, vB);
 						prodPolyPosition[idx] = subblock_pos;
+						prodPolyPositionTrit[idx] = subblock_pos;
 					}
 				}
 
@@ -385,7 +388,7 @@ namespace osuCrypto
 		setTimePoint("dpfKeyEval");
 
 
-		co_await dpfEval(prng, sock);
+		co_await dpfEval(prodPolyPositionTrit, prodPolyCoefficient,prng, sock);
 
 		//std::cout << "block " << hash(blocks.data(), blocks.size()) << std::endl;
 
@@ -448,7 +451,7 @@ namespace osuCrypto
 
 	}
 
-	macoro::task<> FoleageF4Ole::dpfEval(PRNG& prng, coproto::Socket& sock)
+	macoro::task<> FoleageF4Ole::dpfEval(span<Trit32> points, span<u8> coeffs, PRNG& prng, coproto::Socket& sock)
 	{
 		co_return;
 	}

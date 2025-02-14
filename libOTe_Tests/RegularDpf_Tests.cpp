@@ -115,8 +115,8 @@ void RegularDpf_Multiply_Test(const CLP& cmd)
 void RegularDpf_Proto_Test(const CLP& cmd)
 {
 	PRNG prng(block(231234, 321312));
-	u64 domain = 131;
-	u64 numPoints = 11;
+	u64 domain = cmd.getOr("domain", 211);
+	u64 numPoints = cmd.getOr("numPoints", 11);
 	std::vector<u64> points0(numPoints);
 	std::vector<u64> points1(numPoints);
 	std::vector<block> values0(numPoints);
@@ -165,8 +165,8 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 	macoro::sync_wait(macoro::when_all_ready(
-		dpf[0].expand(points0, values0, [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; tags[0](k, i) = t; }, prng, sock[0]),
-		dpf[1].expand(points1, values1, [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; tags[1](k, i) = t; }, prng, sock[1])
+		dpf[0].expand(points0, values0, [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0)&1; }, prng, sock[0]),
+		dpf[1].expand(points1, values1, [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; }, prng, sock[1])
 	));
 
 
@@ -180,7 +180,10 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 			auto tAct = tags[0][k][i] ^ tags[1][k][i];
 			auto exp = t ? (values0[k] ^ values1[k]) : ZeroBlock;
 			if (exp != act)
+			{
+
 				throw RTE_LOC;
+			}
 			if (t != tAct)
 				throw RTE_LOC;
 		}

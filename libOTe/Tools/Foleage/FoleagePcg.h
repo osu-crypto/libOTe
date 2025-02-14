@@ -5,7 +5,7 @@
 #include "coproto/Socket/Socket.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Common/Timer.h"
-
+#include "libOTe/Tools/Dpf/TriDpf.h"
 namespace osuCrypto
 {
 
@@ -61,7 +61,7 @@ namespace osuCrypto
 			span<block> CMsb, PRNG& prng, coproto::Socket& sock);
 
 
-		macoro::task<> dpfEval(PRNG& prng, coproto::Socket& sock);
+		macoro::task<> dpfEval(span<Trit32> points, span<u8> coeffs, PRNG& prng, coproto::Socket& sock);
 
 		void sampleA(block seed);
 	};

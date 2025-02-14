@@ -275,7 +275,7 @@ namespace osuCrypto
 				Matrix<u8> tags(points.size(), 1ull << mDenseDepth);
 				co_await mRegDpf.expand(densePoints, {}, [&](auto treeIdx, auto leafIdx, auto seed, auto tag) {
 					seeds(treeIdx, leafIdx) = seed;
-					tags(treeIdx, leafIdx) = tag;
+					tags(treeIdx, leafIdx) = tag.get<u8>(0)&1;
 					}, prng, sock);
 
 				for (u64 r = 0; r < sparsePoints.rows(); ++r)
