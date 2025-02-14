@@ -750,8 +750,8 @@ namespace osuCrypto
 
 			timer.setTimePoint("start");
 			macoro::sync_wait(macoro::when_all_ready(
-				dpf[0].expand(points0, values0, [&](auto k, auto i, auto v, auto t) { output[0](k,i) = v; }, prng, sock[0]),
-				dpf[1].expand(points1, values1, [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; }, prng, sock[1])
+				dpf[0].expand(points0, values0, prng.get(), [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; }, sock[0]),
+				dpf[1].expand(points1, values1, prng.get(), [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; }, sock[1])
 			));
 			timer.setTimePoint("finish");
 

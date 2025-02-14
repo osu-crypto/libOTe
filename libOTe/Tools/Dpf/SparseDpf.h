@@ -273,10 +273,10 @@ namespace osuCrypto
 					densePoints[i] = points[i] >> depth;
 				Matrix<block> seeds(points.size(), 1ull << mDenseDepth);
 				Matrix<u8> tags(points.size(), 1ull << mDenseDepth);
-				co_await mRegDpf.expand(densePoints, {}, [&](auto treeIdx, auto leafIdx, auto seed, auto tag) {
+				co_await mRegDpf.expand(densePoints, {}, prng.get(), [&](auto treeIdx, auto leafIdx, auto seed, auto tag) {
 					seeds(treeIdx, leafIdx) = seed;
 					tags(treeIdx, leafIdx) = tag.get<u8>(0)&1;
-					}, prng, sock);
+					}, sock);
 
 				for (u64 r = 0; r < sparsePoints.rows(); ++r)
 				{

@@ -165,8 +165,8 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 	macoro::sync_wait(macoro::when_all_ready(
-		dpf[0].expand(points0, values0, [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0)&1; }, prng, sock[0]),
-		dpf[1].expand(points1, values1, [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; }, prng, sock[1])
+		dpf[0].expand(points0, values0, prng.get(), [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; }, sock[0]),
+		dpf[1].expand(points1, values1, prng.get(), [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; }, sock[1])
 	));
 
 
@@ -188,6 +188,89 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 				throw RTE_LOC;
 		}
 	}
+}
+
+void RegularDpf_keyGen_Test(const oc::CLP& cmd)
+{
+
+	PRNG prng(block(231234, 321312));
+	u64 domain = cmd.getOr("domain", 211);
+	u64 numPoints = cmd.getOr("numPoints", 11);
+	std::vector<u64> points(numPoints);
+	std::vector<u64> points0(numPoints);
+	std::vector<u64> points1(numPoints);
+	std::vector<block> values(numPoints);
+	std::vector<block> values0(numPoints);
+	std::vector<block> values1(numPoints);
+	for (u64 i = 0; i < numPoints; ++i)
+	{
+		points[i] = prng.get<u64>() % domain;
+		points1[i] = prng.get<u64>();
+		points0[i] = points[i] ^ points1[i];
+		values0[i] = prng.get();
+		values1[i] = prng.get();
+		values[i] = values0[i] ^ values1[i];
+	}
+
+	std::array<oc::RegularDpf, 2> dpf;
+	dpf[0].init(0, domain, numPoints);
+	dpf[1].init(1, domain, numPoints);
+
+	auto baseCount = dpf[0].baseOtCount();
+
+	std::array<std::vector<block>, 2> baseRecv;
+	std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+	std::array<BitVector, 2> baseChoice;
+	baseRecv[0].resize(baseCount);
+	baseRecv[1].resize(baseCount);
+	baseSend[0].resize(baseCount);
+	baseSend[1].resize(baseCount);
+	baseChoice[0].resize(baseCount);
+	baseChoice[1].resize(baseCount);
+	baseChoice[0].randomize(prng);
+	baseChoice[1].randomize(prng);
+	for (u64 i = 0; i < baseCount; ++i)
+	{
+		baseSend[0][i] = prng.get();
+		baseSend[1][i] = prng.get();
+		baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+		baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+	}
+	dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+	dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+	std::array<Matrix<block>, 2> output;
+	std::array<Matrix<u8>, 2> tags;
+	output[0].resize(numPoints, domain);
+	output[1].resize(numPoints, domain);
+	tags[0].resize(numPoints, domain);
+	tags[1].resize(numPoints, domain);
+
+	std::array<RegularDpfKey, 2> key, key2;
+
+	auto sock = coproto::LocalAsyncSocket::makePair();
+
+	prng.SetSeed(block(214234, 2341234));
+	block seed0 = prng.get();
+	block seed1 = prng.get();
+
+	macoro::sync_wait(macoro::when_all_ready(
+		dpf[0].keyGen(points0, values0, seed0, key[0], sock[0]),
+		dpf[1].keyGen(points1, values1, seed1, key[1], sock[1])
+	));
+
+	prng.SetSeed(block(214234, 2341234));
+	RegularDpf::keyGen(domain, span<u64>(points), span<block>(values), prng, span<RegularDpfKey>(key2));
+
+
+	if (key[0] != key2[0])
+	{
+		std::cout << key[0] << std::endl;
+		std::cout << key2[0] << std::endl;
+		throw RTE_LOC;
+	}
+	if (key[1] != key2[1])
+		throw RTE_LOC;
 }
 
 void SparseDpf_Proto_Test(const oc::CLP& cmd)
@@ -295,7 +378,7 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 
 	PRNG prng(block(231234, 321312));
 	u64 depth = cmd.getOr("depth", 3);
-	u64 domain = ipow(3,depth) - 3;
+	u64 domain = ipow(3, depth) - 3;
 	u64 numPoints = cmd.getOr("numPoints", 17);
 	std::vector<Trit32> points0(numPoints);
 	std::vector<Trit32> points1(numPoints);
@@ -365,7 +448,7 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 			auto exp = t ? (values0[k] ^ values1[k]) : ZeroBlock;
 			if (exp != act)
 			{
-				std::cout << "i " << i << "="<< Trit32(i)<<" " << t << std::endl;
+				std::cout << "i " << i << "=" << Trit32(i) << " " << t << std::endl;
 				std::cout << "exp " << exp << std::endl;
 				std::cout << "act " << act << std::endl;
 				throw RTE_LOC;
