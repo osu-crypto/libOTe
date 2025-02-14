@@ -271,6 +271,27 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 	}
 	if (key[1] != key2[1])
 		throw RTE_LOC;
+	RegularDpf::expand(0, domain, key2[0], [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; });
+	RegularDpf::expand(1, domain, key2[1], [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; });
+
+	for (u64 i = 0; i < domain; ++i)
+	{
+		for (u64 k = 0; k < numPoints; ++k)
+		{
+			auto p = points0[k] ^ points1[k];
+			auto act = output[0][k][i] ^ output[1][k][i];
+			auto t = i == p ? 1 : 0;
+			auto tAct = tags[0][k][i] ^ tags[1][k][i];
+			auto exp = t ? (values0[k] ^ values1[k]) : ZeroBlock;
+			if (exp != act)
+			{
+
+				throw RTE_LOC;
+			}
+			if (t != tAct)
+				throw RTE_LOC;
+		}
+	}
 }
 
 void SparseDpf_Proto_Test(const oc::CLP& cmd)

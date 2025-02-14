@@ -559,7 +559,7 @@ namespace osuCrypto
 			}
 		}
 
-		if (values.size())
+		if (values.size() || inputKey && inputKey->mLeafVals.size())
 		{
 			AlignedUnVector<block> gamma(mNumPoints);
 			if (inputKey)
@@ -750,7 +750,8 @@ namespace osuCrypto
 	{
 		RegularDpf d;
 		d.init(partyIdx, domain, key.mCorrectionBits.cols());
-		return macoro::sync_wait(d.implExpand({}, {}, {}, key, output, {}, nullptr));
+		coproto::Socket sock;
+		return macoro::sync_wait(d.implExpand({}, {}, {}, &key, output, sock, nullptr));
 	}
 
 }
