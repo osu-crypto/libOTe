@@ -417,7 +417,7 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 		values1[i] = prng.get();
 	}
 
-	std::array<oc::TriDpf, 2> dpf;
+	std::array<oc::TriDpf<block>, 2> dpf;
 	dpf[0].init(0, domain, numPoints);
 	dpf[1].init(1, domain, numPoints);
 

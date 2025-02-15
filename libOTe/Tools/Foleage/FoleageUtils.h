@@ -231,6 +231,8 @@ namespace osuCrypto
 	// Converts an array of trits (not packed) into their integer representation.
 	inline  size_t trits_to_int(span<uint8_t> trits)
 	{
+		if (trits.size() == 0)
+			return 0;
 		reverse_uint8_array(trits);
 		size_t result = 0;
 		for (size_t i = 0; i < trits.size(); i++)
@@ -320,4 +322,41 @@ namespace osuCrypto
 		return ret;
 	}
 
+	struct block512
+	{
+		std::array<block, 4> mVal;
+
+		block512 operator+(const block512& o) const
+		{
+			block512 r;
+			r.mVal[0] = mVal[0] ^ o.mVal[0];
+			r.mVal[1] = mVal[1] ^ o.mVal[1];
+			r.mVal[2] = mVal[2] ^ o.mVal[2];
+			r.mVal[3] = mVal[3] ^ o.mVal[3];
+			return r;
+		}
+		block512 operator-(const block512& o) const { return *this + o; }
+		block512& operator+=(const block512& o)
+		{
+			mVal[0] = mVal[0] ^ o.mVal[0];
+			mVal[1] = mVal[1] ^ o.mVal[1];
+			mVal[2] = mVal[2] ^ o.mVal[2];
+			mVal[3] = mVal[3] ^ o.mVal[3];
+			return *this;
+		}
+	};
+
+	inline std::array<u8, 256> extractF4(const block512& val)
+	{
+		std::array<u8, 256> ret;
+		const char* ptr = (const char*)&val;
+		for (u8 i = 0; i < 64; ++i)
+		{
+			ret[i * 4 + 0] = (ptr[i] >> 0) & 3;
+			ret[i * 4 + 1] = (ptr[i] >> 2) & 3;
+			ret[i * 4 + 2] = (ptr[i] >> 4) & 3;
+			ret[i * 4 + 3] = (ptr[i] >> 6) & 3;;
+		}
+		return ret;
+	}
 }

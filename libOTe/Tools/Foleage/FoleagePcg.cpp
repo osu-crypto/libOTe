@@ -10,32 +10,32 @@ namespace osuCrypto
 {
 
 
-	void FoleageF4Ole::init(u64 partyIdx, u64 n, PRNG& prng)
+	void FoleageF4Ole::init2(u64 partyIdx, u64 n, PRNG& prng)
 	{
 		mPartyIdx = partyIdx;
 		mLog3N = log3ceil(n);
+		mLog3T = log3ceil(mT);
 		mN = ipow(3, mLog3N);
 
 		if (mT != ipow(3, mLog3T))
 			throw RTE_LOC;
 
-		//
-		// log3( (mN / mT) / 256  )
-		// log3N - log3(mT * 256)
 		mBlockSize = mN / mT;
-		mDpfDomainDepth = std::max<u64>(1, log3ceil(divCeil(mBlockSize, 256)));
-		mDpfBlockSize = 4 * ipow(3, mDpfDomainDepth);
+		mBlockDepth = mLog3N - mLog3T;
+		mDpfLeafDepth = std::min<u64>(5, mBlockDepth);
+		mDpfTreeDepth = mBlockDepth - mDpfLeafDepth;
+
+		mDpfLeafSize = ipow(3, mDpfLeafDepth);
+		mDpfTreeSize = ipow(3, mDpfTreeDepth);
+
+		_mDpfDomainDepth = std::max<u64>(1, log3ceil(divCeil(mBlockSize, 256)));
+		_mDpfBlockSize = 4 * ipow(3, _mDpfDomainDepth);
+
 
 		if (mBlockSize < 2)
 			throw RTE_LOC;
 
 		sampleA(block(431234234, 213434234123));
-
-
-		//std::cout << "a " << hash(mFftA.data(), mFftA.size()) << std::endl;
-		//std::cout << "a2 " << hash(mFftASquared.data(), mFftASquared.size()) << std::endl;
-
-
 	}
 
 
@@ -117,6 +117,8 @@ namespace osuCrypto
 		PRNG& prng,
 		coproto::Socket& sock)
 	{
+		bool oldDpf = false;
+
 		setTimePoint("expand start");
 
 		if (divCeil(mN, 128) < ALsb.size())
@@ -193,9 +195,10 @@ namespace osuCrypto
 
 
 		std::vector<uint8_t> prodPolyCoefficient(mC * mC * mT * mT);
-		std::vector<block> prodPolyCoefficient2(mC * mC * mT * mT);
+		std::vector<block512> prodPolyCoefficient2(mC * mC * mT * mT);
 		std::vector<size_t> prodPolyPosition(mC * mC * mT * mT);
-		std::vector<Trit32> prodPolyPositionTrit(mC * mC * mT * mT);
+		std::vector<Trit32> prodPolyLeafPos(mC * mC * mT * mT);
+		std::vector<Trit32> prodPolyTreePos(mC * mC * mT * mT);
 
 		std::vector<u8> tritABlk(mLog3T), tritBBlk(mLog3T), tritsBlk(mLog3T);
 		std::vector<u8> tritAPos(mLog3N - mLog3T), tritBPos(mLog3N - mLog3T), tritsPos(mLog3N - mLog3T);
@@ -256,9 +259,18 @@ namespace osuCrypto
 							tritsPos[k] = (tritAPos[k] + tritBPos[k]) % 3;
 						}
 
+						// the position within the leaf
+						std::vector<u8> leafPos(tritsPos.begin(), tritsPos.begin() + mDpfLeafDepth);
+
+						// the position within the tree
+						std::vector<u8> treePos(tritsPos.begin() + mDpfLeafDepth, tritsPos.begin() + mBlockDepth);
+
+						// the index of the value within the block
 						auto subblock_pos = trits_to_int(tritsPos);
 
-						//positionMap[pointIdx] = 
+						auto leafPosInt = trits_to_int(leafPos);
+						auto treePosInt = trits_to_int(treePos);
+
 
 						size_t idx = polyOffset + blockIdx * mT + nextIdx[blockIdx]++;
 						prodPolyCoefficient[idx] = mult_f4(vA, vB);
@@ -266,15 +278,23 @@ namespace osuCrypto
 
 						if (mPartyIdx)
 						{
-							prodPolyPositionTrit[idx] = Trit32(234 % mBlockSize);
-							prodPolyCoefficient2[idx] = block(42314342, 234123);
+							prodPolyLeafPos[idx] = Trit32(73452343 % mDpfLeafSize);
+							prodPolyTreePos[idx] = Trit32(53423453 % mDpfTreeSize);
+							prodPolyCoefficient2[idx].mVal[0] = block(42314342, 234123);
 
 						}
 						else
 						{
-							prodPolyPositionTrit[idx] = Trit32(subblock_pos) - Trit32(234 % mBlockSize);
-							prodPolyCoefficient2[idx] = block(0, mult_f4(vA, vB)) ^ block(42314342, 234123);
+							prodPolyLeafPos[idx] = Trit32(leafPosInt) - Trit32(53424534 % mDpfLeafSize);
+							prodPolyTreePos[idx] = Trit32(treePosInt) - Trit32(53423453 % mDpfTreeSize);
 
+							auto v = prodPolyCoefficient[idx];
+							auto iter = BitIterator(&prodPolyCoefficient2[idx]) + 2 * leafPosInt;
+
+							*iter++ = v & 1; v >>= 1;
+							*iter++ = v & 1; v >>= 1;
+
+							prodPolyCoefficient2[idx].mVal[0] ^= block(42314342, 234123);
 						}
 					}
 				}
@@ -300,9 +320,11 @@ namespace osuCrypto
 		PRNG genPrng;
 
 		////oc::RandomOracle dpfHash(16);
-		Matrix<uint128_t> blocks(mC * mC * mT, packedBlockSize);
-		if (0)
+		std::vector<u32> fft(mN), fftRes(mN);
+
+		if (oldDpf)
 		{
+			Matrix<uint128_t> blocks(mC * mC * mT, packedBlockSize);
 
 
 			for (u64 i = 0, index = 0; i < mC; i++)
@@ -345,11 +367,11 @@ namespace osuCrypto
 							DPFKey _;
 							if (mPartyIdx)
 							{
-								DPFGen(prf_keys, mDpfDomainDepth, alpha_0, beta, 4, _, Dpfs[index], genPrng);
+								DPFGen(prf_keys, _mDpfDomainDepth, alpha_0, beta, 4, _, Dpfs[index], genPrng);
 							}
 							else
 							{
-								DPFGen(prf_keys, mDpfDomainDepth, alpha_0, beta, 4, Dpfs[index], _, genPrng);
+								DPFGen(prf_keys, _mDpfDomainDepth, alpha_0, beta, 4, Dpfs[index], _, genPrng);
 							}
 
 							//dpfHash.Update(Dpfs[index].k.data(), Dpfs[index].k.size());
@@ -366,10 +388,9 @@ namespace osuCrypto
 			//dpfHash.Final(dpfHashVal);
 			//std::cout << "dpf " << dpfHashVal << std::endl;
 
-			std::vector<uint128_t> shares(mDpfBlockSize);
-			std::vector<uint128_t> cache(mDpfBlockSize);
+			std::vector<uint128_t> shares(_mDpfBlockSize);
+			std::vector<uint128_t> cache(_mDpfBlockSize);
 
-			Matrix<uint128_t> blocks(mC * mC * mT, packedBlockSize);
 
 
 			auto dpfIter = Dpfs.begin();
@@ -405,33 +426,99 @@ namespace osuCrypto
 					}
 				}
 			}
+
+
+			for (size_t j = 0; j < mC; j++)
+			{
+				for (size_t k = 0; k < mC; k++)
+				{
+					size_t poly_index = (j * mC + k);
+
+					oc::MatrixView<uint128_t> poly(blocks.data(poly_index * mT), mT, packedBlockSize);
+
+					u64 i = 0;
+					for (u64 block_idx = 0; block_idx < mT; ++block_idx)
+					{
+						for (u64 packed_idx = 0; packed_idx < packedBlockSize; ++packed_idx)
+						{
+							auto coeff = extractF4(poly(block_idx, packed_idx));
+							auto e = std::min<u64>(mBlockSize - packed_idx * 64, 64);
+
+							for (u64 element_idx = 0; element_idx < e; ++element_idx)
+							{
+								fft[i] |= u32{ coeff[element_idx] } << (2 * poly_index);
+								//fft[i] |= u32{ coeff[63 - element_idx] } << (2 * poly_index);
+								++i;
+							}
+						}
+					}
+				}
+			}
+
+			setTimePoint("transpose");
 		}
 		else
 		{
+			Matrix<block512> blocks512(mC * mC * mT, mDpfTreeSize);
 
-
+			//if (mDpfTreeSize == 1)
+			//{
+			//	//std::copy(prodPolyCoefficient2.begin(), prodPolyCoefficient2.end(), blocks512.data());
+			//	for(u64 i = 0; i < prodPolyCoefficient2.size(); ++i)
+			//		blocks512(i/mT) += prodPolyCoefficient2[i];
+			//}
+			//else
+			//{
+			mDpf.init(mPartyIdx, mDpfTreeSize, prodPolyLeafPos.size());
+			auto numOTs = mDpf.baseOtCount();
+			std::vector<block> baseRecvOts(numOTs);
+			std::vector<std::array<block, 2>> baseSendOts(numOTs);
+			BitVector baseChoices(numOTs);
+			PRNG basePrng(block(324234, 234234));
+			basePrng.get(baseSendOts.data(), baseSendOts.size());
+			baseChoices.randomize(basePrng);
+			for (u64 i = 0; i < numOTs; ++i)
 			{
-				mDpf.init(mPartyIdx, mBlockSize, prodPolyPositionTrit.size());
-				auto numOTs = mDpf.baseOtCount();
-				std::vector<block> baseRecvOts(numOTs);
-				std::vector<std::array<block, 2>> baseSendOts(numOTs);
-				BitVector baseChoices(numOTs);
-				PRNG basePrng(block(324234, 234234));
-				basePrng.get(baseSendOts.data(), baseSendOts.size());
-				baseChoices.randomize(basePrng);
-				for (u64 i = 0; i < numOTs; ++i)
-				{
-					baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
-				}
-
-				mDpf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
+				baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
 			}
 
-			co_await mDpf.expand(prodPolyPositionTrit, prodPolyCoefficient2, [&](u64 treeIdx, u64 leafIdx, block v, u8 t) {
+			mDpf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
+
+			co_await mDpf.expand(prodPolyLeafPos, prodPolyCoefficient2, [&](u64 treeIdx, u64 leafIdx, block512 v, u8 t) {
 				// treeIdx in [0, mC^2 * mT^2]
 				auto row = treeIdx / mT;
-				blocks(row, leafIdx / 64) ^= uint128_t(v.get<u8>(0)) << (2 * (leafIdx % 64));
+				blocks512(row, leafIdx) += v;
 				}, prng, sock);
+
+			//}
+
+
+			for (size_t j = 0; j < mC; j++)
+			{
+				for (size_t k = 0; k < mC; k++)
+				{
+					size_t poly_index = (j * mC + k);
+
+					oc::MatrixView<block512> poly(blocks512.data(poly_index * mT), mT, mDpfTreeSize);
+
+					u64 i = 0;
+					for (u64 block_idx = 0; block_idx < mT; ++block_idx)
+					{
+						for (u64 packed_idx = 0; packed_idx < mDpfTreeSize; ++packed_idx)
+						{
+							auto coeff = extractF4(poly(block_idx, packed_idx));
+							auto e = std::min<u64>(mBlockSize - packed_idx * mDpfLeafSize, mDpfLeafSize);
+
+							for (u64 element_idx = 0; element_idx < e; ++element_idx)
+							{
+								fft[i] |= u32{ coeff[element_idx] } << (2 * poly_index);
+								//fft[i] |= u32{ coeff[63 - element_idx] } << (2 * poly_index);
+								++i;
+							}
+						}
+					}
+				}
+			}
 
 		}
 		setTimePoint("dpfKeyEval");
@@ -518,35 +605,6 @@ namespace osuCrypto
 		//}
 		////std::cout << "block " << hash(blocks.data(), blocks.size()) << std::endl;
 
-		std::vector<u32> fft(mN), fftRes(mN);
-		for (size_t j = 0; j < mC; j++)
-		{
-			for (size_t k = 0; k < mC; k++)
-			{
-				size_t poly_index = (j * mC + k);
-
-				oc::MatrixView<uint128_t> poly(blocks.data(poly_index * mT), mT, packedBlockSize);
-
-				u64 i = 0;
-				for (u64 block_idx = 0; block_idx < mT; ++block_idx)
-				{
-					for (u64 packed_idx = 0; packed_idx < packedBlockSize; ++packed_idx)
-					{
-						auto coeff = extractF4(poly(block_idx, packed_idx));
-						auto e = std::min<u64>(mBlockSize - packed_idx * 64, 64);
-
-						for (u64 element_idx = 0; element_idx < e; ++element_idx)
-						{
-							fft[i] |= u32{ coeff[element_idx] } << (2 * poly_index);
-							//fft[i] |= u32{ coeff[63 - element_idx] } << (2 * poly_index);
-							++i;
-						}
-					}
-				}
-			}
-		}
-
-		setTimePoint("transpose");
 
 		//std::cout << "CIn " << hash(fft.data(), fft.size()) << std::endl;
 

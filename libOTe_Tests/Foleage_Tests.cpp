@@ -1401,8 +1401,8 @@ namespace osuCrypto
 		PRNG prng1(block(6474567454546, 567546754674345444));
 		Timer timer;
 		
-		oles[0].init(0, n, prng0);
-		oles[1].init(1, n, prng1);
+		oles[0].init2(0, n, prng0);
+		oles[1].init2(1, n, prng1);
 		auto sock = coproto::LocalAsyncSocket::makePair();
 		std::vector<block>
 			ALsb(blocks),

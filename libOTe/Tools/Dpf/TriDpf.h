@@ -9,6 +9,7 @@
 
 #include "DpfMult.h"
 #include "libOTe/Tools/Foleage/FoleageUtils.h"
+#include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto
 {
@@ -30,22 +31,6 @@ namespace osuCrypto
 
 		Trit32 operator+(const Trit32& t) const
 		{
-			//u64 msbMask, lsbMask;
-			//setBytes(msbMask, 0b10101010);
-			//setBytes(lsbMask, 0b01010101);
-
-			//auto x0 = mVal;
-			//auto x1 = mVal >> 1;
-			//auto y0 = t.mVal;
-			//auto y1 = t.mVal >> 1;
-
-
-			//auto x1x0 = x1 ^ x0;
-			//auto z1 = (y0 ^ x0) & ~(x1x0 ^ y1);
-			//auto z0 = (x1 ^ y1) & ~(x1x0 ^ y0);
-
-			//r.mVal = ((z1 << 1) & msbMask) | (z0 & lsbMask);
-
 			Trit32 r;
 			for (u64 i = 0; i < 32; ++i)
 			{
@@ -54,8 +39,6 @@ namespace osuCrypto
 				auto c = (a + b) % 3;
 
 				r.mVal |= u64(c) << (i * 2);
-				//if (c != ((r.mVal >> (i * 2)) & 3))
-					//throw RTE_LOC;
 			}
 			return r;
 		}
@@ -104,7 +87,6 @@ namespace osuCrypto
 			}
 		}
 
-
 		// returns the i'th Z_3 element.
 		u8 operator[](u64 i) const
 		{
@@ -133,8 +115,16 @@ namespace osuCrypto
 		return o;
 	}
 
+
+	template<
+		typename F,
+		typename CoeffCtx = DefaultCoeffCtx<F>
+	>
 	struct TriDpf
 	{
+		using VecF = typename CoeffCtx::template Vec<F>;
+
+
 		u64 mPartyIdx = 0;
 
 		u64 mDomain = 0;
@@ -156,7 +146,7 @@ namespace osuCrypto
 		{
 			if (partyIdx > 1)
 				throw RTE_LOC;
-			if (domain < 2)
+			if (domain == 0)
 				throw RTE_LOC;
 			if (!numPoints)
 				throw RTE_LOC;
@@ -184,27 +174,47 @@ namespace osuCrypto
 	{ constexpr u64 VAR = 7; STATEMENT; }\
 	do{}while(0)
 
-		template<
-			typename Output
-		>
+		template<typename Output, typename Fs>
 		macoro::task<> expand(
 			span<Trit32> points,
-			span<block> values,
+			Fs&& values,
 			Output&& output,
 			PRNG& prng,
-			coproto::Socket& sock)
+			coproto::Socket& sock,
+			CoeffCtx ctx = {})
 		{
-			if constexpr (std::is_same<std::remove_reference<Output>, Matrix<block>>::value)
-			{
-				if (output.rows() != mNumPoints)
-					throw RTE_LOC;
-				if (output.cols() != mDomain)
-					throw RTE_LOC;
-			}
+			static_assert(std::is_same_v<F, std::remove_cvref_t<decltype(values[0])>>, "values must be a vector like type of F.");
+			static_assert(
+				std::is_invocable_v<Output, u64, u64, F, u8> ||
+				std::is_invocable_v<Output, u64, u64, F>
+				, "output must be a callback/lambda that callable with (u64 treeIdx, u64 leafIdx, F value, u8 tag) or  (u64 treeIdx, u64 leafIdx, F value) ");
+
 			if (points.size() != mNumPoints)
 				throw RTE_LOC;
 			if (values.size() && values.size() != mNumPoints)
 				throw RTE_LOC;
+
+			if (mDomain == 1)
+			{
+				// trivial case where the domain is 1.
+				if (values.size())
+				{
+					for (u64 i = 0; i < mNumPoints; ++i)
+						output(i, 0, values[i], mPartyIdx);
+				}
+				else
+				{
+					VecF rand;
+					ctx.resize(rand, 1);
+					for (u64 i = 0; i < mNumPoints; ++i)
+					{
+						ctx.fromBlock(rand[0], prng.get<block>());
+						output(i, 0, rand[0], mPartyIdx);
+					}
+				}
+				co_return;
+			}
+
 
 			for (u64 i = 0; i < mNumPoints; ++i)
 			{
@@ -334,16 +344,21 @@ namespace osuCrypto
 					}
 				}
 			}
-			AlignedUnVector<block> sums(mNumPoints);
-			Matrix<u8> t(ipow(3, mDepth), mNumPoints);
+			//auto size = ipow(3, mDepth);
+			VecF sums, leafVals;
+			ctx.resize(sums, mNumPoints);
+			ctx.zero(sums.begin(), sums.end());
+			ctx.resize(leafVals, mNumPoints * mDomain);
+
+			Matrix<u8> t(mDomain, mNumPoints);
 			// fixing the last layer
 			{
-				auto size = ipow(3, mDepth);
 
 				auto& parentTags = s[(mDepth - 1) % 3];
 				auto& curSeed = s[mDepth % 3];
+				auto leafIter = leafVals.begin();
 
-				for (u64 L = 0, L2 = 0; L2 < size; ++L, L2 += 3)
+				for (u64 L = 0, L2 = 0; L2 < mDomain; ++L, L2 += 3)
 				{
 					// parent control bits
 					auto parentTag = getRow(parentTags, L);
@@ -351,14 +366,20 @@ namespace osuCrypto
 					// child seed
 					std::array scl{ getRow(curSeed, L2 + 0), getRow(curSeed, L2 + 1), getRow(curSeed, L2 + 2) };
 
-					for (u64 j = 0; j < 3; ++j)
+					auto m = std::min<u64>(3, mDomain - L2);
+					for (u64 j = 0; j < m; ++j)
 					{
 						for (u64 k = 0; k < mNumPoints; ++k)
 						{
 							auto s = curSeed[L2 + j][k] ^ parentTag[k] & sigma[j][k];
 							t[L2 + j][k] = lsb(s);
-							curSeed[L2 + j][k] = /*convert_G*/ AES::roundFn(s, s);//AES::roundFn is used to get rid of the correlation in the LSB.
-							sums[k] = sums[k] ^ curSeed[L2 + j][k];
+
+							ctx.fromBlock(*leafIter, AES::roundFn(s, s));
+							ctx.plus(sums[k], sums[k], *leafIter);
+							++leafIter;
+
+							//curSeed[L2 + j][k] = /*convert_G*/ AES::roundFn(s, s);//AES::roundFn is used to get rid of the correlation in the LSB.
+							//sums[k] = sums[k] ^ curSeed[L2 + j][k];
 							//std::cout << mPartyIdx << " " << Trit32(L2 + j) << " " << curSeed[L2 + j][k] << " " << int(curTag[L2 + j][k]) << std::endl;
 						}
 					}
@@ -368,26 +389,34 @@ namespace osuCrypto
 
 			if (values.size())
 			{
-				AlignedUnVector<block> gamma(mNumPoints), diff(mNumPoints);
-				setBytes(diff, 0);
+				VecF gamma, diff;
+				ctx.resize(gamma, mNumPoints);
+				ctx.resize(diff, mNumPoints);
+
 				auto& curSeed = s[mDepth % 3];
 
 				for (u64 k = 0; k < mNumPoints; ++k)
 				{
-					diff[k] = sums[k] ^ values[k];
+					//diff[k] = sums[k] + values[k];
+					ctx.plus(diff[k], values[k], sums[k]);
 				}
 				co_await sock.send(std::move(diff));
 				co_await sock.recv(gamma);
 				for (u64 k = 0; k < mNumPoints; ++k)
 				{
-					gamma[k] = sums[k] ^ values[k] ^ gamma[k];
+					//gamma[k] = reveal(sums[k] + values[k]);
+					ctx.plus(gamma[k], gamma[k], sums[k]);
+					ctx.plus(gamma[k], gamma[k], values[k]);
 				}
 
-				auto& sd = s[mDepth % 3];
+				auto leafIter = leafVals.begin();
+				VecF temp;
+				ctx.resize(temp, 1);
+				//auto& sd = s[mDepth % 3];
 				//auto& td = t[mDepth & 1];
 				for (u64 i = 0; i < mDomain; ++i)
 				{
-					auto sdi = getRow(sd, i);
+					//auto sdi = getRow(sd, i);
 					auto tdi = getRow(t, i);
 
 					//for (u64 k = 0; k < mNumPoints8; k += 8)
@@ -398,27 +427,31 @@ namespace osuCrypto
 					//}
 					for (u64 k = 0; k < mNumPoints; ++k)
 					{
-						auto T = block::allSame<u8>(-tdi[k]) & gamma[k];
-						auto V = sdi[k] ^ T;
-						output(k, i, V, tdi[k]);
+						ctx.mask(temp[0], gamma[k], block::allSame<u8>(-tdi[k]));
+						ctx.plus(temp[0], temp[0], *leafIter++);
+						//auto V = sdi[k] ^ T;
+						if constexpr (std::is_invocable_v<Output, u64, u64, F, u8>)
+							output(k, i, temp[0], tdi[k]);
+						else
+							output(k, i, temp[0]);
+
 					}
 				}
 			}
 			else
 			{
-				auto& sd = s[mDepth % 3];
-				auto& td = t;// [mDepth & 1] ;
+
+				auto leafIter = leafVals.begin();
+				auto tagIter = t.begin();
 				for (u64 i = 0; i < mDomain; ++i)
 				{
-					auto sdi = getRow(sd, i);
-					auto tdi = getRow(td, i);
-					for (u64 k = 0; k < numPoints8; k += 8)
-					{
-						SIMD8(q, output(k + q, i, sdi[k + q], tdi[k + q]));
-					}
 					for (u64 k = numPoints8; k < mNumPoints; ++k)
 					{
-						output(k, i, sdi[k], tdi[k]);
+						if constexpr (std::is_invocable_v<Output, u64, u64, F, u8>)
+							output(k, i, *leafIter++, *tagIter++);
+						else
+							output(k, i, *leafIter++);
+
 					}
 				}
 			}
@@ -511,14 +544,14 @@ namespace osuCrypto
 
 					for (u64 j = 0; j < 2; ++j)
 					{
-						std::array<block,3> kj = PRNG(k[j+1], 3).get();
+						std::array<block, 3> kj = PRNG(k[j + 1], 3).get();
 						//setBytes(kj, 0);
 
 						//sendBuffer[i * 3 + j] = PRNG(k[j], 3).get();
 						sendBuffer[i * 2 + j][0] = kj[0] ^ mask[i][0];
 						sendBuffer[i * 2 + j][1] = kj[1] ^ mask[i][1];
 						sendBuffer[i * 2 + j][2] = kj[2] ^ mask[i][2];
-						sendBuffer[i * 2 + j][(j+1 + a) % 3] ^= r;
+						sendBuffer[i * 2 + j][(j + 1 + a) % 3] ^= r;
 
 						//std::cout << "buffer " << j << std::endl
 						//	<< " " << buffer[i * 3 + j][0] << "\n"
