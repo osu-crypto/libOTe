@@ -18,9 +18,9 @@ namespace osuCrypto
 		u64 mLog3N = 0;
 
 		// the number of noisy positions per polynomial
-		u64 mT = 27;
+		u64 mT = 3;
 
-		u64 mLog3T = 3;
+		u64 mLog3T = 1;
 
 		// the number of polynomials
 		u64 mC = 4;
@@ -52,6 +52,8 @@ namespace osuCrypto
 		// the i'th row containts the coeffs for the i'th poly.
 		Matrix<u64> mSparsePositions;
 
+		TriDpf mDpf;
+
 		void init(u64 partyIdx, u64 n, PRNG& prng);
 
 		macoro::task<> expand(
@@ -61,7 +63,13 @@ namespace osuCrypto
 			span<block> CMsb, PRNG& prng, coproto::Socket& sock);
 
 
-		macoro::task<> dpfEval(span<Trit32> points, span<u8> coeffs, PRNG& prng, coproto::Socket& sock);
+		//macoro::task<> dpfEval(
+		//	u64 domain,
+		//	span<Trit32> points,
+		//	span<u8> coeffs,
+		//	MatrixView<uint128_t> output,
+		//	PRNG& prng,
+		//	coproto::Socket& sock);
 
 		void sampleA(block seed);
 	};

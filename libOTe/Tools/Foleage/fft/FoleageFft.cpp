@@ -806,7 +806,7 @@ namespace osuCrypto {
 	{
 		auto n = lsb.size() / stride;
 
-		auto log3N = log2ceil(n);
+		auto log3N = log3ceil(n);
 		if (n != ipow(3, log3N))
 			throw RTE_LOC;
 		if (lsb.size() != n * stride)

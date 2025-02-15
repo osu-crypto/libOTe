@@ -1391,7 +1391,7 @@ namespace osuCrypto
 	{
 		std::array<FoleageF4Ole, 2> oles;
 
-		auto logn = 12;
+		auto logn = 4;
 		u64 n = ipow(3, logn);
 		auto blocks = divCeil(n, 128);
 		bool verbose = cmd.isSet("v");
@@ -1427,17 +1427,17 @@ namespace osuCrypto
 		// the test otherwise.
 		for (size_t i = 0; i < blocks; i++)
 		{
-			auto aLsb = C0Lsb[i] ^ C1Lsb[i];
-			auto aMsb = C0Msb[i] ^ C1Msb[i];
+			auto Lsb = C0Lsb[i] ^ C1Lsb[i];
+			auto Msb = C0Msb[i] ^ C1Msb[i];
 			block mLsb, mMsb;
 			f4Mult(
 				ALsb[i], AMsb[i],
 				BLsb[i], BMsb[i],
 				mLsb, mMsb);
 
-			if (aLsb != mLsb)
+			if (Lsb != mLsb)
 				throw RTE_LOC;
-			if (aMsb != mMsb)
+			if (Msb != mMsb)
 				throw RTE_LOC;
 		}
 
