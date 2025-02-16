@@ -1391,7 +1391,7 @@ namespace osuCrypto
 	{
 		std::array<FoleageF4Ole, 2> oles;
 
-		auto logn = 4;
+		auto logn = 10;
 		u64 n = ipow(3, logn);
 		auto blocks = divCeil(n, 128);
 		bool verbose = cmd.isSet("v");

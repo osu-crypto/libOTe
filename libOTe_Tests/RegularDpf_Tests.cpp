@@ -394,7 +394,8 @@ void SparseDpf_Proto_Test(const oc::CLP& cmd)
 	}
 }
 
-void TritDpf_Proto_Test(const oc::CLP& cmd)
+template<typename F, typename Ctx>
+void TritDpf_Proto_Test_(const oc::CLP& cmd)
 {
 
 	PRNG prng(block(231234, 321312));
@@ -404,20 +405,21 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 	std::vector<Trit32> points0(numPoints);
 	std::vector<Trit32> points1(numPoints);
 	std::vector<Trit32> points(numPoints);
-	std::vector<block> values0(numPoints);
-	std::vector<block> values1(numPoints);
+	std::vector<F> values0(numPoints);
+	std::vector<F> values1(numPoints);
+	Ctx ctx;
 	for (u64 i = 0; i < numPoints; ++i)
 	{
 		points[i] = Trit32(prng.get<u64>() % domain);
 		points1[i] = Trit32(prng.get<u64>() % domain);
 		points0[i] = points[i] - points1[i];
-
 		//std::cout << points[i] << " = " << points0[i] <<" + "<< points1[i] << std::endl;
 		values0[i] = prng.get();
 		values1[i] = prng.get();
+		//ctx.minus(points0[i], points[i], points1[i];)
 	}
 
-	std::array<oc::TriDpf<block>, 2> dpf;
+	std::array<oc::TriDpf<F,Ctx>, 2> dpf;
 	dpf[0].init(0, domain, numPoints);
 	dpf[1].init(1, domain, numPoints);
 
@@ -444,7 +446,7 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 	dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
 	dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 
-	std::array<Matrix<block>, 2> output;
+	std::array<Matrix<F>, 2> output;
 	std::array<Matrix<u8>, 2> tags;
 	output[0].resize(numPoints, domain);
 	output[1].resize(numPoints, domain);
@@ -463,10 +465,16 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 		Trit32 I(i);
 		for (u64 k = 0; k < numPoints; ++k)
 		{
-			auto act = output[0][k][i] ^ output[1][k][i];
+			F act;
+			ctx.plus(act, output[0][k][i], output[1][k][i]);
 			auto t = I == points[k] ? 1 : 0;
 			auto tAct = tags[0][k][i] ^ tags[1][k][i];
-			auto exp = t ? (values0[k] ^ values1[k]) : ZeroBlock;
+			F exp;
+			if (t)
+				ctx.plus(exp, values0[k], values1[k]);
+			else
+				ctx.zero(&exp, &exp + 1);
+
 			if (exp != act)
 			{
 				std::cout << "i " << i << "=" << Trit32(i) << " " << t << std::endl;
@@ -480,3 +488,11 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 	}
 
 }
+void TritDpf_Proto_Test(const oc::CLP& cmd)
+{
+	TritDpf_Proto_Test_<block, CoeffCtxGF2>(cmd);
+	TritDpf_Proto_Test_<u8, CoeffCtxGF2>(cmd);
+	//TritDpf_Proto_Test_<u64, CoeffCtxInteger>(cmd);
+
+}
+

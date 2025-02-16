@@ -195,7 +195,9 @@ namespace osuCrypto
 
 
 		std::vector<uint8_t> prodPolyCoefficient(mC * mC * mT * mT);
-		std::vector<block512> prodPolyCoefficient2(mC * mC * mT * mT);
+		std::vector<uint8_t> prodPolyCoefficientShare(mC * mC * mT * mT);
+		//std::vector<block512> prodPolyCoefficient2(mC * mC * mT * mT);
+		std::vector<block512> prodPolyCoefficient3(mC * mC * mT * mT);
 		std::vector<size_t> prodPolyPosition(mC * mC * mT * mT);
 		std::vector<Trit32> prodPolyLeafPos(mC * mC * mT * mT);
 		std::vector<Trit32> prodPolyTreePos(mC * mC * mT * mT);
@@ -280,21 +282,16 @@ namespace osuCrypto
 						{
 							prodPolyLeafPos[idx] = Trit32(73452343 % mDpfLeafSize);
 							prodPolyTreePos[idx] = Trit32(53423453 % mDpfTreeSize);
-							prodPolyCoefficient2[idx].mVal[0] = block(42314342, 234123);
+							prodPolyCoefficientShare[idx] = (idx%4);
 
 						}
 						else
 						{
-							prodPolyLeafPos[idx] = Trit32(leafPosInt) - Trit32(53424534 % mDpfLeafSize);
+							prodPolyLeafPos[idx] = Trit32(leafPosInt) - Trit32(73452343 % mDpfLeafSize);
 							prodPolyTreePos[idx] = Trit32(treePosInt) - Trit32(53423453 % mDpfTreeSize);
 
 							auto v = prodPolyCoefficient[idx];
-							auto iter = BitIterator(&prodPolyCoefficient2[idx]) + 2 * leafPosInt;
-
-							*iter++ = v & 1; v >>= 1;
-							*iter++ = v & 1; v >>= 1;
-
-							prodPolyCoefficient2[idx].mVal[0] ^= block(42314342, 234123);
+							prodPolyCoefficientShare[idx] = v ^ (idx % 4);
 						}
 					}
 				}
@@ -308,22 +305,24 @@ namespace osuCrypto
 
 		setTimePoint("sparseProductCompute");
 
-		std::vector<DPFKey> Dpfs(mC * mC * mT * mT);
-
-		// Sample PRF keys for the DPFs
-		PRFKeys prf_keys;
-		PRNG prfSeedPrng(block(3412342134, 56453452362346));
-		prf_keys.gen(prfSeedPrng);
-		size_t packedBlockSize = divCeil(mBlockSize, 64);
-
-		// Sample DPF keys for each of the t errors in the t blocks
-		PRNG genPrng;
 
 		////oc::RandomOracle dpfHash(16);
 		std::vector<u32> fft(mN), fftRes(mN);
 
+
 		if (oldDpf)
 		{
+			std::vector<DPFKey> Dpfs(mC * mC * mT * mT);
+
+			// Sample PRF keys for the DPFs
+			PRFKeys prf_keys;
+			PRNG prfSeedPrng(block(3412342134, 56453452362346));
+			prf_keys.gen(prfSeedPrng);
+			size_t packedBlockSize = divCeil(mBlockSize, 64);
+
+			// Sample DPF keys for each of the t errors in the t blocks
+			PRNG genPrng;
+
 			Matrix<uint128_t> blocks(mC * mC * mT, packedBlockSize);
 
 
@@ -461,37 +460,44 @@ namespace osuCrypto
 		{
 			Matrix<block512> blocks512(mC * mC * mT, mDpfTreeSize);
 
-			//if (mDpfTreeSize == 1)
-			//{
-			//	//std::copy(prodPolyCoefficient2.begin(), prodPolyCoefficient2.end(), blocks512.data());
-			//	for(u64 i = 0; i < prodPolyCoefficient2.size(); ++i)
-			//		blocks512(i/mT) += prodPolyCoefficient2[i];
-			//}
-			//else
-			//{
-			mDpf.init(mPartyIdx, mDpfTreeSize, prodPolyLeafPos.size());
-			auto numOTs = mDpf.baseOtCount();
-			std::vector<block> baseRecvOts(numOTs);
-			std::vector<std::array<block, 2>> baseSendOts(numOTs);
-			BitVector baseChoices(numOTs);
-			PRNG basePrng(block(324234, 234234));
-			basePrng.get(baseSendOts.data(), baseSendOts.size());
-			baseChoices.randomize(basePrng);
-			for (u64 i = 0; i < numOTs; ++i)
 			{
-				baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
+				mDpfLeaf.init(mPartyIdx, mDpfLeafSize, prodPolyLeafPos.size());
+				auto numOTs = mDpfLeaf.baseOtCount();
+				std::vector<block> baseRecvOts(numOTs);
+				std::vector<std::array<block, 2>> baseSendOts(numOTs);
+				BitVector baseChoices(numOTs);
+				PRNG basePrng(block(324234, 234234));
+				basePrng.get(baseSendOts.data(), baseSendOts.size());
+				baseChoices.randomize(basePrng);
+				for (u64 i = 0; i < numOTs; ++i)
+					baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
+				mDpfLeaf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
 			}
 
-			mDpf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
-
-			co_await mDpf.expand(prodPolyLeafPos, prodPolyCoefficient2, [&](u64 treeIdx, u64 leafIdx, block512 v, u8 t) {
-				// treeIdx in [0, mC^2 * mT^2]
-				auto row = treeIdx / mT;
-				blocks512(row, leafIdx) += v;
+			co_await mDpfLeaf.expand(prodPolyLeafPos, prodPolyCoefficientShare, [&](u64 treeIdx, u64 leafIdx, u8 v) {
+				*BitIterator(&prodPolyCoefficient3[treeIdx], leafIdx * 2 + 0) = (v >> 0) & 1;
+				*BitIterator(&prodPolyCoefficient3[treeIdx], leafIdx * 2 + 1) = (v >> 1) & 1;
 				}, prng, sock);
 
-			//}
 
+			{
+				mDpf.init(mPartyIdx, mDpfTreeSize, prodPolyLeafPos.size());
+				auto numOTs = mDpf.baseOtCount();
+				std::vector<block> baseRecvOts(numOTs);
+				std::vector<std::array<block, 2>> baseSendOts(numOTs);
+				BitVector baseChoices(numOTs);
+				PRNG basePrng(block(324234, 234234));
+				basePrng.get(baseSendOts.data(), baseSendOts.size());
+				baseChoices.randomize(basePrng);
+				for (u64 i = 0; i < numOTs; ++i)
+					baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
+				mDpf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
+			}
+
+			co_await mDpf.expand(prodPolyTreePos, prodPolyCoefficient3, [&](u64 treeIdx, u64 leafIdx, block512 v) {
+				auto row = treeIdx / mT;
+				blocks512(row, leafIdx) ^= v;
+				}, prng, sock);
 
 			for (size_t j = 0; j < mC; j++)
 			{

@@ -326,7 +326,7 @@ namespace osuCrypto
 	{
 		std::array<block, 4> mVal;
 
-		block512 operator+(const block512& o) const
+		block512 operator^(const block512& o) const
 		{
 			block512 r;
 			r.mVal[0] = mVal[0] ^ o.mVal[0];
@@ -335,14 +335,23 @@ namespace osuCrypto
 			r.mVal[3] = mVal[3] ^ o.mVal[3];
 			return r;
 		}
-		block512 operator-(const block512& o) const { return *this + o; }
-		block512& operator+=(const block512& o)
+		//block512 operator-(const block512& o) const { return *this + o; }
+		block512& operator^=(const block512& o)
 		{
 			mVal[0] = mVal[0] ^ o.mVal[0];
 			mVal[1] = mVal[1] ^ o.mVal[1];
 			mVal[2] = mVal[2] ^ o.mVal[2];
 			mVal[3] = mVal[3] ^ o.mVal[3];
 			return *this;
+		}
+
+		bool operator==(const block512& o) const
+		{
+			return
+				mVal[0] == o.mVal[0] &&
+				mVal[1] == o.mVal[1] &&
+				mVal[2] == o.mVal[2] &&
+				mVal[3] == o.mVal[3];
 		}
 	};
 

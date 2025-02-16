@@ -62,10 +62,10 @@ namespace osuCrypto
 		Matrix<u64> mSparsePositions;
 
 		// a dpf used to construct the leaf value of the larger DPF.
-		TriDpf<u8> mDpfLeaf;
+		TriDpf<u8, CoeffCtxGF2> mDpfLeaf;
 
 		// the main DPF
-		TriDpf<block512> mDpf;
+		TriDpf<block512, CoeffCtxGF2> mDpf;
 
 		void init2(u64 partyIdx, u64 n, PRNG& prng);
 

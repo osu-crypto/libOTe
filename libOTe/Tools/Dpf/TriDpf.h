@@ -17,7 +17,7 @@ namespace osuCrypto
 	// The value is stored in 2 bits per Z_3 element.
 	struct Trit32
 	{
-		u64 mVal = 0;
+		u64 mVal;
 
 		Trit32() = default;
 		Trit32(const Trit32&) = default;
@@ -32,6 +32,7 @@ namespace osuCrypto
 		Trit32 operator+(const Trit32& t) const
 		{
 			Trit32 r;
+			r.mVal = 0;
 			for (u64 i = 0; i < 32; ++i)
 			{
 				auto a = t[i];
@@ -47,6 +48,7 @@ namespace osuCrypto
 		Trit32 operator-(const Trit32& t) const
 		{
 			Trit32 r;
+			r.mVal = 0;
 			for (u64 i = 0; i < 32; ++i)
 			{
 				auto a = t[i];
@@ -200,7 +202,12 @@ namespace osuCrypto
 				if (values.size())
 				{
 					for (u64 i = 0; i < mNumPoints; ++i)
-						output(i, 0, values[i], mPartyIdx);
+					{
+						if constexpr(std::is_invocable_v<Output, u64, u64, F, u8>)
+							output(i, 0, values[i], mPartyIdx);
+						else
+							output(i, 0, values[i]);
+					}
 				}
 				else
 				{
@@ -209,7 +216,10 @@ namespace osuCrypto
 					for (u64 i = 0; i < mNumPoints; ++i)
 					{
 						ctx.fromBlock(rand[0], prng.get<block>());
-						output(i, 0, rand[0], mPartyIdx);
+						if constexpr (std::is_invocable_v<Output, u64, u64, F, u8>)
+							output(i, 0, rand[0], mPartyIdx);
+						else
+							output(i, 0, rand[0]);
 					}
 				}
 				co_return;
