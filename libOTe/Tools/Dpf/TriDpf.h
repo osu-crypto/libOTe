@@ -89,6 +89,19 @@ namespace osuCrypto
 			}
 		}
 
+		Trit32 lower(u64 digits)
+		{
+			Trit32 r;
+			r.mVal = mVal & ((1ull << (2 * digits)) - 1);
+			return r;
+		}
+		Trit32 upper(u64 digits)
+		{
+			Trit32 r;
+			r.mVal = mVal >> (2 * digits);
+			return r;
+		}
+
 		// returns the i'th Z_3 element.
 		u8 operator[](u64 i) const
 		{

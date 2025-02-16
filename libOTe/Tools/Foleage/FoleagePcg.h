@@ -75,6 +75,7 @@ namespace osuCrypto
 			span<block> CLsb,
 			span<block> CMsb, PRNG& prng, coproto::Socket& sock);
 
+		macoro::task<> tensor(span<u8> coeffs, span<u8> prod, coproto::Socket& sock);
 
 		//macoro::task<> dpfEval(
 		//	u64 domain,

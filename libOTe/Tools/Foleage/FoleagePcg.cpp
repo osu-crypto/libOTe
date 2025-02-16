@@ -191,31 +191,18 @@ namespace osuCrypto
 			A[i] = a;
 		}
 		setTimePoint("copyOutX");
-		//std::cout << "compress " << hash(fftSparsePoly.data(), fftSparsePoly.size()) << std::endl;
 
-
-		std::vector<uint8_t> prodPolyCoefficient(mC * mC * mT * mT);
 		std::vector<uint8_t> prodPolyCoefficientShare(mC * mC * mT * mT);
-		//std::vector<block512> prodPolyCoefficient2(mC * mC * mT * mT);
 		std::vector<block512> prodPolyCoefficient3(mC * mC * mT * mT);
-		std::vector<size_t> prodPolyPosition(mC * mC * mT * mT);
 		std::vector<Trit32> prodPolyLeafPos(mC * mC * mT * mT);
 		std::vector<Trit32> prodPolyTreePos(mC * mC * mT * mT);
 
-		std::vector<u8> tritABlk(mLog3T), tritBBlk(mLog3T), tritsBlk(mLog3T);
-		std::vector<u8> tritAPos(mLog3N - mLog3T), tritBPos(mLog3N - mLog3T), tritsPos(mLog3N - mLog3T);
-
-		Matrix<u8> otherSparseCoefficients(mC, mT);
-		Matrix<u64> otherSparsePositions(mC, mT);
-		co_await sock.send(coproto::copy(mSparseCoefficients));
-		co_await sock.send(coproto::copy(mSparsePositions));
-		co_await sock.recv(otherSparseCoefficients);
-		co_await sock.recv(otherSparsePositions);
 		setTimePoint("sendRecv");
-		std::vector<u64> positionMap(mC * mC * mT * mT);
+
+		std::vector<u8> tensoredCoefficients(mC * mC * mT * mT);
+		co_await tensor(mSparseCoefficients, tensoredCoefficients, sock);
 
 		u64 polyOffset = 0;
-		u8 vA, vB;
 		for (u64 iA = 0, pointIdx = 0; iA < mC; ++iA)
 		{
 			for (u64 iB = 0; iB < mC; ++iB)
@@ -226,73 +213,16 @@ namespace osuCrypto
 				{
 					for (u64 jB = 0; jB < mT; ++jB, ++pointIdx)
 					{
-						int_to_trits(jA, tritABlk);
-						int_to_trits(jB, tritBBlk);
+						u64 i = mPartyIdx ? iB : iA;
+						u64 j = mPartyIdx ? jB : jA;
 
-						for (size_t k = 0; k < mLog3T; k++)
-						{
-							tritsBlk[k] = (tritABlk[k] + tritBBlk[k]) % 3;
-						}
-						u64 blockIdx = trits_to_int(tritsBlk);
-
-						u64 posA_;
-						u64 posB_;
-
-						if (mPartyIdx == 0)
-						{
-							vA = mSparseCoefficients(iA, jA);
-							vB = otherSparseCoefficients(iB, jB);
-							posA_ = mSparsePositions(iA, jA);
-							posB_ = otherSparsePositions(iB, jB);
-
-						}
-						else
-						{
-							vA = otherSparseCoefficients(iA, jA);
-							vB = mSparseCoefficients(iB, jB);
-							posA_ = otherSparsePositions(iA, jA);
-							posB_ = mSparsePositions(iB, jB);
-						}
-						int_to_trits(posA_, tritAPos);
-						int_to_trits(posB_, tritBPos);
-
-						for (u64 k = 0; k < tritBPos.size(); ++k)
-						{
-							tritsPos[k] = (tritAPos[k] + tritBPos[k]) % 3;
-						}
-
-						// the position within the leaf
-						std::vector<u8> leafPos(tritsPos.begin(), tritsPos.begin() + mDpfLeafDepth);
-
-						// the position within the tree
-						std::vector<u8> treePos(tritsPos.begin() + mDpfLeafDepth, tritsPos.begin() + mBlockDepth);
-
-						// the index of the value within the block
-						auto subblock_pos = trits_to_int(tritsPos);
-
-						auto leafPosInt = trits_to_int(leafPos);
-						auto treePosInt = trits_to_int(treePos);
-
-
+						auto pos = Trit32(mSparsePositions(i, j));
+						auto blockPos = Trit32(jA) + Trit32(jB);
+						auto blockIdx = blockPos.toInt();
 						size_t idx = polyOffset + blockIdx * mT + nextIdx[blockIdx]++;
-						prodPolyCoefficient[idx] = mult_f4(vA, vB);
-						prodPolyPosition[idx] = subblock_pos;
-
-						if (mPartyIdx)
-						{
-							prodPolyLeafPos[idx] = Trit32(73452343 % mDpfLeafSize);
-							prodPolyTreePos[idx] = Trit32(53423453 % mDpfTreeSize);
-							prodPolyCoefficientShare[idx] = (idx%4);
-
-						}
-						else
-						{
-							prodPolyLeafPos[idx] = Trit32(leafPosInt) - Trit32(73452343 % mDpfLeafSize);
-							prodPolyTreePos[idx] = Trit32(treePosInt) - Trit32(53423453 % mDpfTreeSize);
-
-							auto v = prodPolyCoefficient[idx];
-							prodPolyCoefficientShare[idx] = v ^ (idx % 4);
-						}
+						prodPolyLeafPos[idx] = pos.lower(mDpfLeafDepth);
+						prodPolyTreePos[idx] = pos.upper(mDpfLeafDepth);
+						prodPolyCoefficientShare[idx] = tensoredCoefficients[pointIdx];
 					}
 				}
 
@@ -306,314 +236,76 @@ namespace osuCrypto
 		setTimePoint("sparseProductCompute");
 
 
-		////oc::RandomOracle dpfHash(16);
 		std::vector<u32> fft(mN), fftRes(mN);
+		Matrix<block512> blocks512(mC * mC * mT, mDpfTreeSize);
 
-
-		if (oldDpf)
 		{
-			std::vector<DPFKey> Dpfs(mC * mC * mT * mT);
-
-			// Sample PRF keys for the DPFs
-			PRFKeys prf_keys;
-			PRNG prfSeedPrng(block(3412342134, 56453452362346));
-			prf_keys.gen(prfSeedPrng);
-			size_t packedBlockSize = divCeil(mBlockSize, 64);
-
-			// Sample DPF keys for each of the t errors in the t blocks
-			PRNG genPrng;
-
-			Matrix<uint128_t> blocks(mC * mC * mT, packedBlockSize);
-
-
-			for (u64 i = 0, index = 0; i < mC; i++)
-			{
-				for (u64 j = 0; j < mC; j++)
-				{
-					for (u64 k = 0; k < mT; k++)
-					{
-						for (u64 l = 0; l < mT; l++, ++index)
-						{
-							//size_t index = i * c * t * t + j * t * t + k * t + l;
-
-							// Parse the index into the right format
-							size_t alpha = prodPolyPosition[index];
-
-							// Output message index in the DPF output space
-							// which consists of 256 F4 elements
-							size_t alpha_0 = alpha / 256;
-
-							// Coeff index in the block of 256 coefficients
-							size_t alpha_1 = alpha % 256;
-
-							// Coeff index in the uint128_t output (64 elements of F4)
-							size_t packed_idx = alpha_1 / 64;
-
-							// Bit index in the uint128_t ouput
-							size_t bit_idx = alpha_1 % 64;
-
-							// Set the DPF message to the coefficient
-							uint128_t coeff = uint128_t(prodPolyCoefficient[index]);
-
-							// Position coefficient into the block
-							std::array<uint128_t, 4> beta; // init to zero
-							setBytes(beta, 0);
-							//beta[packed_idx] = coeff << (2 * (63 - bit_idx));
-							beta[packed_idx] = coeff << (2 * (bit_idx));
-
-							// Message (beta) is of size 4 blocks of 128 bits
-							genPrng.SetSeed(block(index, 542345234));
-							DPFKey _;
-							if (mPartyIdx)
-							{
-								DPFGen(prf_keys, _mDpfDomainDepth, alpha_0, beta, 4, _, Dpfs[index], genPrng);
-							}
-							else
-							{
-								DPFGen(prf_keys, _mDpfDomainDepth, alpha_0, beta, 4, Dpfs[index], _, genPrng);
-							}
-
-							//dpfHash.Update(Dpfs[index].k.data(), Dpfs[index].k.size());
-							//dpfHash.Update(Dpfs[index].msg_len);
-							//dpfHash.Update(Dpfs[index].size);
-
-						}
-					}
-				}
-			}
-			setTimePoint("dpfKeyGen");
-
-			//block dpfHashVal;
-			//dpfHash.Final(dpfHashVal);
-			//std::cout << "dpf " << dpfHashVal << std::endl;
-
-			std::vector<uint128_t> shares(_mDpfBlockSize);
-			std::vector<uint128_t> cache(_mDpfBlockSize);
-
-
-
-			auto dpfIter = Dpfs.begin();
-			//Matrix<u64> expPos(mC* mC* mT, mT);
-			//Matrix<u8> expCoeff(mC* mC* mT, mT);
-			//auto dpf_keys_B_iter = dpf_keys_B.begin();
-			for (size_t i = 0, q = 0; i < mC; i++)
-			{
-				for (size_t j = 0; j < mC; j++)
-				{
-					const size_t poly_index = i * mC + j;
-
-					oc::MatrixView<uint128_t> packed_polyA_(blocks.data(poly_index * mT), mT, blocks.cols());
-
-					for (size_t k = 0; k < mT; k++)
-					{
-						span<uint128_t> poly_blockA = packed_polyA_[k];
-
-						for (size_t l = 0; l < mT; l++, ++q)
-						{
-							DPFFullDomainEval(*dpfIter++, cache, shares);
-
-							// Sum all the DPFs for the current block together
-							// note that there is some extra "garbage" in the last
-							// block of uint128_t since 64 does not divide block_size.
-							// We deal with this slack later when packing the outputs
-							// into the parallel FFT matrix.
-							for (size_t w = 0; w < packedBlockSize; w++)
-							{
-								poly_blockA[w] ^= shares[w];
-							}
-						}
-					}
-				}
-			}
-
-
-			for (size_t j = 0; j < mC; j++)
-			{
-				for (size_t k = 0; k < mC; k++)
-				{
-					size_t poly_index = (j * mC + k);
-
-					oc::MatrixView<uint128_t> poly(blocks.data(poly_index * mT), mT, packedBlockSize);
-
-					u64 i = 0;
-					for (u64 block_idx = 0; block_idx < mT; ++block_idx)
-					{
-						for (u64 packed_idx = 0; packed_idx < packedBlockSize; ++packed_idx)
-						{
-							auto coeff = extractF4(poly(block_idx, packed_idx));
-							auto e = std::min<u64>(mBlockSize - packed_idx * 64, 64);
-
-							for (u64 element_idx = 0; element_idx < e; ++element_idx)
-							{
-								fft[i] |= u32{ coeff[element_idx] } << (2 * poly_index);
-								//fft[i] |= u32{ coeff[63 - element_idx] } << (2 * poly_index);
-								++i;
-							}
-						}
-					}
-				}
-			}
-
-			setTimePoint("transpose");
+			mDpfLeaf.init(mPartyIdx, mDpfLeafSize, prodPolyLeafPos.size());
+			auto numOTs = mDpfLeaf.baseOtCount();
+			std::vector<block> baseRecvOts(numOTs);
+			std::vector<std::array<block, 2>> baseSendOts(numOTs);
+			BitVector baseChoices(numOTs);
+			PRNG basePrng(block(324234, 234234));
+			basePrng.get(baseSendOts.data(), baseSendOts.size());
+			baseChoices.randomize(basePrng);
+			for (u64 i = 0; i < numOTs; ++i)
+				baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
+			mDpfLeaf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
 		}
-		else
+
+		co_await mDpfLeaf.expand(prodPolyLeafPos, prodPolyCoefficientShare, [&](u64 treeIdx, u64 leafIdx, u8 v) {
+			*BitIterator(&prodPolyCoefficient3[treeIdx], leafIdx * 2 + 0) = (v >> 0) & 1;
+			*BitIterator(&prodPolyCoefficient3[treeIdx], leafIdx * 2 + 1) = (v >> 1) & 1;
+			}, prng, sock);
+
+
 		{
-			Matrix<block512> blocks512(mC * mC * mT, mDpfTreeSize);
+			mDpf.init(mPartyIdx, mDpfTreeSize, prodPolyLeafPos.size());
+			auto numOTs = mDpf.baseOtCount();
+			std::vector<block> baseRecvOts(numOTs);
+			std::vector<std::array<block, 2>> baseSendOts(numOTs);
+			BitVector baseChoices(numOTs);
+			PRNG basePrng(block(324234, 234234));
+			basePrng.get(baseSendOts.data(), baseSendOts.size());
+			baseChoices.randomize(basePrng);
+			for (u64 i = 0; i < numOTs; ++i)
+				baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
+			mDpf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
+		}
 
+		co_await mDpf.expand(prodPolyTreePos, prodPolyCoefficient3, [&](u64 treeIdx, u64 leafIdx, block512 v) {
+			auto row = treeIdx / mT;
+			blocks512(row, leafIdx) ^= v;
+			}, prng, sock);
+
+		for (size_t j = 0; j < mC; j++)
+		{
+			for (size_t k = 0; k < mC; k++)
 			{
-				mDpfLeaf.init(mPartyIdx, mDpfLeafSize, prodPolyLeafPos.size());
-				auto numOTs = mDpfLeaf.baseOtCount();
-				std::vector<block> baseRecvOts(numOTs);
-				std::vector<std::array<block, 2>> baseSendOts(numOTs);
-				BitVector baseChoices(numOTs);
-				PRNG basePrng(block(324234, 234234));
-				basePrng.get(baseSendOts.data(), baseSendOts.size());
-				baseChoices.randomize(basePrng);
-				for (u64 i = 0; i < numOTs; ++i)
-					baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
-				mDpfLeaf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
-			}
+				size_t poly_index = (j * mC + k);
 
-			co_await mDpfLeaf.expand(prodPolyLeafPos, prodPolyCoefficientShare, [&](u64 treeIdx, u64 leafIdx, u8 v) {
-				*BitIterator(&prodPolyCoefficient3[treeIdx], leafIdx * 2 + 0) = (v >> 0) & 1;
-				*BitIterator(&prodPolyCoefficient3[treeIdx], leafIdx * 2 + 1) = (v >> 1) & 1;
-				}, prng, sock);
+				oc::MatrixView<block512> poly(blocks512.data(poly_index * mT), mT, mDpfTreeSize);
 
-
-			{
-				mDpf.init(mPartyIdx, mDpfTreeSize, prodPolyLeafPos.size());
-				auto numOTs = mDpf.baseOtCount();
-				std::vector<block> baseRecvOts(numOTs);
-				std::vector<std::array<block, 2>> baseSendOts(numOTs);
-				BitVector baseChoices(numOTs);
-				PRNG basePrng(block(324234, 234234));
-				basePrng.get(baseSendOts.data(), baseSendOts.size());
-				baseChoices.randomize(basePrng);
-				for (u64 i = 0; i < numOTs; ++i)
-					baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
-				mDpf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
-			}
-
-			co_await mDpf.expand(prodPolyTreePos, prodPolyCoefficient3, [&](u64 treeIdx, u64 leafIdx, block512 v) {
-				auto row = treeIdx / mT;
-				blocks512(row, leafIdx) ^= v;
-				}, prng, sock);
-
-			for (size_t j = 0; j < mC; j++)
-			{
-				for (size_t k = 0; k < mC; k++)
+				u64 i = 0;
+				for (u64 block_idx = 0; block_idx < mT; ++block_idx)
 				{
-					size_t poly_index = (j * mC + k);
-
-					oc::MatrixView<block512> poly(blocks512.data(poly_index * mT), mT, mDpfTreeSize);
-
-					u64 i = 0;
-					for (u64 block_idx = 0; block_idx < mT; ++block_idx)
+					for (u64 packed_idx = 0; packed_idx < mDpfTreeSize; ++packed_idx)
 					{
-						for (u64 packed_idx = 0; packed_idx < mDpfTreeSize; ++packed_idx)
-						{
-							auto coeff = extractF4(poly(block_idx, packed_idx));
-							auto e = std::min<u64>(mBlockSize - packed_idx * mDpfLeafSize, mDpfLeafSize);
+						auto coeff = extractF4(poly(block_idx, packed_idx));
+						auto e = std::min<u64>(mBlockSize - packed_idx * mDpfLeafSize, mDpfLeafSize);
 
-							for (u64 element_idx = 0; element_idx < e; ++element_idx)
-							{
-								fft[i] |= u32{ coeff[element_idx] } << (2 * poly_index);
-								//fft[i] |= u32{ coeff[63 - element_idx] } << (2 * poly_index);
-								++i;
-							}
+						for (u64 element_idx = 0; element_idx < e; ++element_idx)
+						{
+							fft[i] |= u32{ coeff[element_idx] } << (2 * poly_index);
+							//fft[i] |= u32{ coeff[63 - element_idx] } << (2 * poly_index);
+							++i;
 						}
 					}
 				}
 			}
-
 		}
+
 		setTimePoint("dpfKeyEval");
-
-		//if (1)
-		//{
-		//	auto F4Print = [](uint128_t v)->std::string
-		//		{
-		//			std::stringstream ss;
-		//			for (u64 i = 0; i < 64; ++i)
-		//			{
-		//				auto lsb = *BitIterator(&v, i * 2);
-		//				auto msb = *BitIterator(&v, i * 2 + 1);
-		//				ss << (lsb + 2 * msb);
-		//			}
-		//			return ss.str();
-		//		};
-
-		//	co_await sock.send(coproto::copy(blocks));
-		//	co_await sock.send(coproto::copy(blocks2));
-
-		//	Matrix<uint128_t> rBlocks(mC * mC * mT, packedBlockSize);
-		//	Matrix<uint128_t> rBlocks2(mC * mC * mT, packedBlockSize);
-
-		//	co_await sock.recv(rBlocks);
-		//	co_await sock.recv(rBlocks2);
-		//	for (u64 i = 0; i < rBlocks.rows(); ++i)
-		//	{
-		//		std::vector<uint128_t> exp(packedBlockSize);
-		//		std::vector<uint128_t> exp2(packedBlockSize);
-
-		//		for (u64 j = 0; j < packedBlockSize; ++j)
-		//		{
-		//			exp[j] = blocks(i, j) ^ rBlocks(i, j);
-		//		}
-		//		auto points = span(prodPolyPosition.data() + i * mT, mT);
-		//		auto coeffs = span(prodPolyCoefficient.data() + i * mT, mT);
-
-		//		for (u64 j = 0; j < mT; ++j)
-		//		{
-		//			auto blk = points[j] / 64;
-		//			auto offset = (2 * (points[j] % 64));
-		//			exp2[blk] ^= uint128_t(coeffs[j]) << offset;
-		//		}
-
-		//		if (exp != exp2)
-		//		{
-		//			std::cout << i << std::endl << "exp\n ";
-		//			for (u64 j = 0; j < packedBlockSize; ++j)
-		//			{
-		//				std::cout << F4Print(exp[j])<< " ";
-		//			}
-		//			std::cout << std::endl << "exp2\n ";
-		//			for (u64 j = 0; j < packedBlockSize; ++j)
-		//			{
-		//				std::cout << F4Print(exp2[j]) << " ";
-		//			}
-
-		//			throw RTE_LOC;
-		//		}
-
-		//		for (u64 j = 0; j < packedBlockSize; ++j)
-		//		{
-
-		//			auto act = blocks2(i, j) ^ rBlocks2(i, j);
-		//			if (exp[j] != act)
-		//			{
-		//				std::cout << i << std::endl << "exp\n ";
-		//				for (u64 j = 0; j < packedBlockSize; ++j)
-		//				{
-		//					auto v = (blocks(i, j) ^ rBlocks(i, j));
-		//					std::cout << *(block*)&v << " ";
-		//				}
-		//				std::cout << std::endl << "act\n ";
-		//				for (u64 j = 0; j < packedBlockSize; ++j)
-		//				{
-		//					auto v = (blocks2(i, j) ^ rBlocks2(i, j));
-		//					std::cout << *(block*)&v << " ";
-		//				}
-		//				throw RTE_LOC;
-		//			}
-		//		}
-		//	}
-		//}
-		////std::cout << "block " << hash(blocks.data(), blocks.size()) << std::endl;
-
-
-		//std::cout << "CIn " << hash(fft.data(), fft.size()) << std::endl;
-
 
 		fft_recursive_uint32(fft, mLog3N, mN / 3);
 		//std::cout << "Cfft " << hash(fft.data(), fft.size()) << std::endl;
@@ -654,5 +346,37 @@ namespace osuCrypto
 
 	//	co_return;
 	//}
+
+
+	macoro::task<> FoleageF4Ole::tensor(span<u8> coeffs, span<u8> prod, coproto::Socket& sock)
+	{
+		if (coeffs.size() * coeffs.size() != prod.size())
+			throw RTE_LOC;
+		std::vector<u8> other(coeffs.size());
+		co_await sock.send(coproto::copy(coeffs));
+		co_await sock.recv(other);
+
+		span<u8> A = coeffs, B = other;
+		if (mPartyIdx)
+			std::swap(A, B);
+
+		for (u64 iA = 0, pointIdx = 0; iA < mC; ++iA)
+		{
+			for (u64 iB = 0; iB < mC; ++iB)
+			{
+				for (u64 jA = 0; jA < mT; ++jA)
+				{
+					for (u64 jB = 0; jB < mT; ++jB, ++pointIdx)
+					{
+						auto pos = iA * mT + jA;
+						auto pos2 = iB * mT + jB;
+						prod[pointIdx] =
+							(mult_f4(A[pos], B[pos2]) * mPartyIdx) ^
+							(pointIdx % 4);
+					}
+				}
+			}
+		}
+	}
 
 }
