@@ -9,6 +9,7 @@ namespace osuCrypto
 	void foleage_dpf_test();
 	void foleage_pcg_test(const CLP& cmd);
 	void foleage_F4ole_test(const CLP& cmd);
+	void foleage_tensor_test(const CLP& cmd);
 
 
 }

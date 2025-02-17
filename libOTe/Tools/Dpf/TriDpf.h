@@ -585,7 +585,6 @@ namespace osuCrypto
 
 				co_await socks[0].send(std::move(sendBuffer));
 
-
 				};
 
 			auto recver = [&]() -> macoro::task<> {

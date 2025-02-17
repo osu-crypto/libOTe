@@ -67,7 +67,70 @@ namespace osuCrypto
 		// the main DPF
 		TriDpf<block512, CoeffCtxGF2> mDpf;
 
-		void init2(u64 partyIdx, u64 n, PRNG& prng);
+		std::vector<block> mRecvOts;
+		std::vector<std::array<block,2>> mSendOts;
+		BitVector mChoiceOts;
+
+		void init(u64 partyIdx, u64 n, PRNG& prng);
+
+		struct BaseOtCount
+		{
+			u64 mSendCount, mRecvCount;
+		};
+
+		BaseOtCount baseOtCount() const
+		{
+			BaseOtCount counts;
+			
+			counts.mSendCount = mDpfLeaf.baseOtCount() + mDpf.baseOtCount();
+			counts.mRecvCount = mDpfLeaf.baseOtCount() + mDpf.baseOtCount();
+			if(mPartyIdx)
+				counts.mSendCount += 2 * mC * mT;
+			else								
+				counts.mRecvCount += 2 * mC * mT;
+			return counts;
+		}
+
+
+		void setBaseOts(
+			span<const std::array<block, 2>> baseSendOts,
+			span<const block> recvBaseOts,
+			const oc::BitVector& baseChoices)
+		{
+			auto baseCounts = baseOtCount();
+			if (baseSendOts.size() != baseCounts.mSendCount)
+				throw RTE_LOC;
+			if (recvBaseOts.size() != baseCounts.mRecvCount)
+				throw RTE_LOC;
+			if (baseChoices.size() != baseCounts.mRecvCount)
+				throw RTE_LOC;
+			auto recvIter = recvBaseOts;
+			auto sendIter = baseSendOts;
+			auto choiceIter = baseChoices;
+
+			auto dpfLeafCount = mDpfLeaf.baseOtCount();
+			u64 offset = 0;
+			mDpfLeaf.setBaseOts(
+				sendIter.subspan(offset, dpfLeafCount),
+				recvIter.subspan(offset, dpfLeafCount),
+				BitVector(baseChoices.data(), dpfLeafCount, offset)
+			);
+			offset += dpfLeafCount;
+
+			auto dpfCount = mDpf.baseOtCount();
+			mDpf.setBaseOts(
+				sendIter.subspan(offset, dpfCount),
+				recvIter.subspan(offset, dpfCount),
+				BitVector(baseChoices.data(), dpfCount, offset)
+			);
+			offset += dpfCount;
+
+			auto sendOts = sendIter.subspan(offset);
+			auto recvOts = recvIter.subspan(offset);
+			mSendOts.insert(mSendOts.end(), sendOts.begin(), sendOts.end());
+			mRecvOts.insert(mRecvOts.end(), recvOts.begin(), recvOts.end());
+			mChoiceOts = BitVector(baseChoices.data(), baseChoices.size() - offset, offset);
+		}
 
 		macoro::task<> expand(
 			span<block> ALsb,
@@ -76,14 +139,6 @@ namespace osuCrypto
 			span<block> CMsb, PRNG& prng, coproto::Socket& sock);
 
 		macoro::task<> tensor(span<u8> coeffs, span<u8> prod, coproto::Socket& sock);
-
-		//macoro::task<> dpfEval(
-		//	u64 domain,
-		//	span<Trit32> points,
-		//	span<u8> coeffs,
-		//	MatrixView<uint128_t> output,
-		//	PRNG& prng,
-		//	coproto::Socket& sock);
 
 		void sampleA(block seed);
 	};

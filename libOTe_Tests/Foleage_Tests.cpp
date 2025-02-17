@@ -1401,8 +1401,37 @@ namespace osuCrypto
 		PRNG prng1(block(6474567454546, 567546754674345444));
 		Timer timer;
 		
-		oles[0].init2(0, n, prng0);
-		oles[1].init2(1, n, prng1);
+		oles[0].init(0, n, prng0);
+		oles[1].init(1, n, prng1);
+
+		{
+			auto otCount0 = oles[0].baseOtCount();
+			auto otCount1 = oles[1].baseOtCount();
+			if (otCount0.mRecvCount != otCount1.mSendCount ||
+				otCount0.mSendCount != otCount1.mRecvCount)
+				throw RTE_LOC;
+			std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+			baseSend[0].resize(otCount0.mSendCount);
+			baseSend[1].resize(otCount1.mSendCount);
+			std::array<std::vector<block>, 2> baseRecv;
+			std::array<BitVector, 2> baseChoice;
+
+			for (u64 i = 0; i < 2; ++i)
+			{
+				prng0.get(baseSend[i].data(), baseSend[i].size());
+				baseRecv[1 ^ i].resize(baseSend[i].size());
+				baseChoice[1^i].resize(baseSend[i].size());
+				baseChoice[1 ^ i].randomize(prng0);
+				for (u64 j = 0; j < baseSend[i].size(); ++j)
+				{
+					baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+				}
+			}
+
+			oles[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+			oles[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+		}
+
 		auto sock = coproto::LocalAsyncSocket::makePair();
 		std::vector<block>
 			ALsb(blocks),
@@ -1443,5 +1472,60 @@ namespace osuCrypto
 
 		if (verbose)
 			std::cout << "Time taken: \n" << timer << std::endl;
+	}
+	void foleage_tensor_test(const CLP& cmd)
+	{
+
+		std::array<FoleageF4Ole, 2> oles;
+
+		bool verbose = cmd.isSet("v");
+
+		PRNG prng0(block(2424523452345, 111124521521455324));
+		PRNG prng1(block(6474567454546, 567546754674345444));
+
+		oles[0].init(0, 1000, prng0);
+		oles[1].init(1, 1000, prng1);
+
+		u64 n = oles[0].mC* oles[0].mT;
+		u64 n2 = n * n;
+		auto sock = coproto::LocalAsyncSocket::makePair();
+		std::array<std::vector<u8>, 2> coeff, prod;
+		coeff[0].resize(n);
+		coeff[1].resize(n);
+		prod[0].resize(n2);
+		prod[1].resize(n2);
+
+		oles[1].mSendOts.resize(2 * n);
+		oles[0].mRecvOts.resize(2 * n);
+		oles[0].mChoiceOts.resize(2 * n);
+		for (u64 i = 0; i < 2 * n; ++i)
+		{
+			oles[1].mSendOts[i] = prng0.get();;
+			oles[0].mChoiceOts[i] = prng0.getBit();
+			oles[0].mRecvOts[i] = oles[1].mSendOts[i][oles[0].mChoiceOts[i]];
+		}
+		auto r = macoro::sync_wait(macoro::when_all_ready(
+			oles[0].tensor(coeff[0],prod[0], sock[0]),
+			oles[1].tensor(coeff[1],prod[1], sock[1])));
+		std::get<0>(r).result();
+		std::get<1>(r).result();
+
+		// Now we check that we got the correct OLE correlations and fail
+		// the test otherwise.
+		for (size_t i = 0; i < n; i++)
+		{
+			for (size_t j = 0; j < n; j++)
+			{
+				auto p = i * n + j;
+
+				u8 ci = coeff[0][i];
+				u8 cj = coeff[1][j];
+				auto exp = mult_f4(ci, cj);
+				auto act = prod[0][p] ^ prod[1][p];
+				if (exp != act)
+					throw RTE_LOC;
+			}
+		}
+
 	}
 }

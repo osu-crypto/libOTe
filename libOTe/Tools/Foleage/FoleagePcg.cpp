@@ -10,7 +10,7 @@ namespace osuCrypto
 {
 
 
-	void FoleageF4Ole::init2(u64 partyIdx, u64 n, PRNG& prng)
+	void FoleageF4Ole::init(u64 partyIdx, u64 n, PRNG& prng)
 	{
 		mPartyIdx = partyIdx;
 		mLog3N = log3ceil(n);
@@ -31,6 +31,9 @@ namespace osuCrypto
 		_mDpfDomainDepth = std::max<u64>(1, log3ceil(divCeil(mBlockSize, 256)));
 		_mDpfBlockSize = 4 * ipow(3, _mDpfDomainDepth);
 
+
+		mDpfLeaf.init(mPartyIdx, mDpfLeafSize, mC * mC * mT * mT);
+		mDpf.init(mPartyIdx, mDpfTreeSize, mC * mC * mT * mT);
 
 		if (mBlockSize < 2)
 			throw RTE_LOC;
@@ -128,49 +131,39 @@ namespace osuCrypto
 
 		mSparseCoefficients.resize(mC, mT);
 		mSparsePositions.resize(mC, mT);
+
+		std::vector<u8> tensoredCoefficients(mC * mC * mT * mT);
+		co_await tensor(mSparseCoefficients, tensoredCoefficients, sock);
+
 		for (u64 i = 0; i < mC * mT; ++i)
 		{
-			while (mSparseCoefficients(i) == 0)
-				mSparseCoefficients(i) = prng.get<u8>() & 3;
+			//while (mSparseCoefficients(i) == 0)
+			//	mSparseCoefficients(i) = prng.get<u8>() & 3;
 			mSparsePositions(i) = prng.get<u64>() % mBlockSize;
 		}
-
-
-		//std::cout << "pos " << hash(mSparsePositions.data(), mSparsePositions.size()) << std::endl;
-		//std::cout << "coeff " << hash(mSparseCoefficients.data(), mSparseCoefficients.size()) << std::endl;
-
 
 		if (mC != 4)
 			throw RTE_LOC;
 
 		// we pack 4 FFTs into a single u8. 
 		std::vector<u8> fftSparsePoly(mN);
-		//std::vector<u8> fftSparsePolyLsb(mN), fftSparsePolyMsb(mN);
 		for (u64 i = 0; i < mT; ++i)
 		{
 			for (u64 j = 0; j < mC; ++j)
 			{
 				auto pos = i * mBlockSize + mSparsePositions(j, i);
 				fftSparsePoly[pos] |= mSparseCoefficients(j, i) << (2 * j);
-
-				//fftSparsePolyLsb[pos] |= (mSparseCoefficients(j, i) & 1) << j;
-				//fftSparsePolyMsb[pos] |= ((mSparseCoefficients(j, i) >> 1) & 1) << j;
 			}
 		}
 
 		setTimePoint("sparsePolySample");
 
-		//std::cout << "sparse " << hash(fftSparsePoly.data(), fftSparsePoly.size()) << std::endl;
-
 		// switch from polynomial to FFT form
 		fft_recursive_uint8(fftSparsePoly, mLog3N, mN / 3);
-
-		//foleageFFT2<1>(fftSparsePolyLsb, fftSparsePolyMsb);
 
 		// multiply by the packed A polynomial
 		multiply_fft_8(mFftA, fftSparsePoly, fftSparsePoly, mN);
 
-		//std::cout << "mult " << hash(fftSparsePoly.data(), fftSparsePoly.size()) << std::endl;
 		setTimePoint("sparsePolyMul");
 
 
@@ -199,13 +192,10 @@ namespace osuCrypto
 
 		setTimePoint("sendRecv");
 
-		std::vector<u8> tensoredCoefficients(mC * mC * mT * mT);
-		co_await tensor(mSparseCoefficients, tensoredCoefficients, sock);
 
-		u64 polyOffset = 0;
-		for (u64 iA = 0, pointIdx = 0; iA < mC; ++iA)
+		for (u64 iA = 0, pointIdx = 0, polyOffset = 0; iA < mC; ++iA)
 		{
-			for (u64 iB = 0; iB < mC; ++iB)
+			for (u64 iB = 0; iB < mC; ++iB, polyOffset += mT * mT)
 			{
 				std::vector<uint8_t> nextIdx(mT);
 
@@ -222,14 +212,16 @@ namespace osuCrypto
 						size_t idx = polyOffset + blockIdx * mT + nextIdx[blockIdx]++;
 						prodPolyLeafPos[idx] = pos.lower(mDpfLeafDepth);
 						prodPolyTreePos[idx] = pos.upper(mDpfLeafDepth);
-						prodPolyCoefficientShare[idx] = tensoredCoefficients[pointIdx];
+
+
+						auto coeffIdx = (iA * mT + jA) * mC * mT + iB * mT + jB;
+
+						prodPolyCoefficientShare[idx] = tensoredCoefficients[coeffIdx];
 					}
 				}
 
 				if (nextIdx != std::vector<uint8_t>(mT, mT))
 					throw RTE_LOC;
-
-				polyOffset += mT * mT;
 			}
 		}
 
@@ -239,19 +231,18 @@ namespace osuCrypto
 		std::vector<u32> fft(mN), fftRes(mN);
 		Matrix<block512> blocks512(mC * mC * mT, mDpfTreeSize);
 
-		{
-			mDpfLeaf.init(mPartyIdx, mDpfLeafSize, prodPolyLeafPos.size());
-			auto numOTs = mDpfLeaf.baseOtCount();
-			std::vector<block> baseRecvOts(numOTs);
-			std::vector<std::array<block, 2>> baseSendOts(numOTs);
-			BitVector baseChoices(numOTs);
-			PRNG basePrng(block(324234, 234234));
-			basePrng.get(baseSendOts.data(), baseSendOts.size());
-			baseChoices.randomize(basePrng);
-			for (u64 i = 0; i < numOTs; ++i)
-				baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
-			mDpfLeaf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
-		}
+		//{
+		//	auto numOTs = mDpfLeaf.baseOtCount();
+		//	std::vector<block> baseRecvOts(numOTs);
+		//	std::vector<std::array<block, 2>> baseSendOts(numOTs);
+		//	BitVector baseChoices(numOTs);
+		//	PRNG basePrng(block(324234, 234234));
+		//	basePrng.get(baseSendOts.data(), baseSendOts.size());
+		//	baseChoices.randomize(basePrng);
+		//	for (u64 i = 0; i < numOTs; ++i)
+		//		baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
+		//	mDpfLeaf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
+		//}
 
 		co_await mDpfLeaf.expand(prodPolyLeafPos, prodPolyCoefficientShare, [&](u64 treeIdx, u64 leafIdx, u8 v) {
 			*BitIterator(&prodPolyCoefficient3[treeIdx], leafIdx * 2 + 0) = (v >> 0) & 1;
@@ -259,19 +250,18 @@ namespace osuCrypto
 			}, prng, sock);
 
 
-		{
-			mDpf.init(mPartyIdx, mDpfTreeSize, prodPolyLeafPos.size());
-			auto numOTs = mDpf.baseOtCount();
-			std::vector<block> baseRecvOts(numOTs);
-			std::vector<std::array<block, 2>> baseSendOts(numOTs);
-			BitVector baseChoices(numOTs);
-			PRNG basePrng(block(324234, 234234));
-			basePrng.get(baseSendOts.data(), baseSendOts.size());
-			baseChoices.randomize(basePrng);
-			for (u64 i = 0; i < numOTs; ++i)
-				baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
-			mDpf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
-		}
+		//{
+		//	auto numOTs = mDpf.baseOtCount();
+		//	std::vector<block> baseRecvOts(numOTs);
+		//	std::vector<std::array<block, 2>> baseSendOts(numOTs);
+		//	BitVector baseChoices(numOTs);
+		//	PRNG basePrng(block(324234, 234234));
+		//	basePrng.get(baseSendOts.data(), baseSendOts.size());
+		//	baseChoices.randomize(basePrng);
+		//	for (u64 i = 0; i < numOTs; ++i)
+		//		baseRecvOts[i] = baseSendOts[i][baseChoices[i]];
+		//	mDpf.setBaseOts(baseSendOts, baseRecvOts, baseChoices);
+		//}
 
 		co_await mDpf.expand(prodPolyTreePos, prodPolyCoefficient3, [&](u64 treeIdx, u64 leafIdx, block512 v) {
 			auto row = treeIdx / mT;
@@ -297,7 +287,6 @@ namespace osuCrypto
 						for (u64 element_idx = 0; element_idx < e; ++element_idx)
 						{
 							fft[i] |= u32{ coeff[element_idx] } << (2 * poly_index);
-							//fft[i] |= u32{ coeff[63 - element_idx] } << (2 * poly_index);
 							++i;
 						}
 					}
@@ -334,49 +323,168 @@ namespace osuCrypto
 
 	}
 
-	//macoro::task<> FoleageF4Ole::dpfEval(
-	//	u64 domain,
-	//	span<Trit32> points, 
-	//	span<u8> coeffs, 
-	//	MatrixView<uint128_t> output, 
-	//	PRNG& prng, 
-	//	coproto::Socket& sock)
-	//{
-
-
-	//	co_return;
-	//}
-
 
 	macoro::task<> FoleageF4Ole::tensor(span<u8> coeffs, span<u8> prod, coproto::Socket& sock)
 	{
+		//if (coeffs.size() != mC * mT)
+		//	throw RTE_LOC;
+
 		if (coeffs.size() * coeffs.size() != prod.size())
 			throw RTE_LOC;
-		std::vector<u8> other(coeffs.size());
-		co_await sock.send(coproto::copy(coeffs));
-		co_await sock.recv(other);
 
-		span<u8> A = coeffs, B = other;
-		if (mPartyIdx)
-			std::swap(A, B);
-
-		for (u64 iA = 0, pointIdx = 0; iA < mC; ++iA)
+		if (0)
 		{
-			for (u64 iB = 0; iB < mC; ++iB)
+			PRNG prng(CCBlock);
+			std::array<std::vector<u8>, 2> s;
+			s[0].resize(coeffs.size());
+			s[1].resize(coeffs.size());
+			//prng.get(s0.data(), s0.size());
+			for (u64 i = 0; i < s[0].size(); ++i)
 			{
-				for (u64 jA = 0; jA < mT; ++jA)
+				s[0][i] = prng.get<u8>() % 4;
+				s[1][i] = prng.get<u8>() % 4;
+			}
+			std::copy(s[mPartyIdx].begin(), s[mPartyIdx].end(), coeffs.begin());
+
+			for (u64 iA = 0, pointIdx = 0; iA < s[0].size(); ++iA)
+			{
+				for (u64 iB = 0; iB < s[1].size(); ++iB, ++pointIdx)
 				{
-					for (u64 jB = 0; jB < mT; ++jB, ++pointIdx)
-					{
-						auto pos = iA * mT + jA;
-						auto pos2 = iB * mT + jB;
-						prod[pointIdx] =
-							(mult_f4(A[pos], B[pos2]) * mPartyIdx) ^
-							(pointIdx % 4);
-					}
+					prod[pointIdx] =
+						(mult_f4(s[0][iA], s[1][iB]) * mPartyIdx);// ^
+						//(prng.get<u8>() % 4);
 				}
 			}
 		}
-	}
+		else
+		{
 
+			auto expand = [](block k, span<block> diff) {
+				AES aes(k);
+				for (u64 i = 0; i < diff.size(); ++i)
+					diff[i] = aes.ecbEncBlock(block(i));
+				};
+
+			if (divCeil(coeffs.size(), 128) != 1)
+				throw RTE_LOC; // not impl
+			auto size = 2 * divCeil(coeffs.size(), 128);
+
+
+			if (mPartyIdx)
+			{
+				if (mSendOts.size() < 2 * coeffs.size() - 1)
+					throw RTE_LOC; //base ots not set.
+				// b * a = (b0 * a +  b1 * (2 * a))
+				//auto getDiff = [](block k0, block k1, span<block> diff) {
+				//		AES aes0(k0);
+				//		AES aes1(k1);
+				//		for (u64 i = 0; i < diff.size(); ++i)
+				//			diff[i] = aes0.ecbEncBlock(block(i)) ^ aes1.ecbEncBlock(block(i) * 2);
+				//	};
+				std::array<std::vector<block>, 2> a; a[0].resize(size), a[1].resize(size);
+				std::vector<block> t0(size), t1(size);
+				expand(mSendOts[0][0], t0);
+				expand(mSendOts[0][1], t1);
+				for (u64 i = 0; i < size; ++i)
+					a[0][i] = t0[i] ^ t1[i];
+
+				// a[1] = 2 * a[0]
+				f4Mult(a[0][0], a[0][1], ZeroBlock, AllOneBlock, a[1][0], a[1][1]);
+
+				{
+					auto lsbIter = BitIterator(&a[0][0]);
+					auto msbIter = BitIterator(&a[0][1]);
+					for (u64 i = 0; i < coeffs.size(); ++i)
+						coeffs[i] = (*lsbIter++ & 1) | ((*msbIter++ & 1) << 1);
+				}
+
+				{
+					setBytes(prod, 0);
+					auto prodIter = prod.begin();
+					auto lsbIter = BitIterator(&t0[0]);
+					auto msbIter = BitIterator(&t0[1]);
+					for (u64 i = 0; i < coeffs.size(); ++i)
+						*prodIter++ = (*lsbIter++) | (u8(*msbIter++) << 1);
+				}
+
+
+				std::vector<block>  buffer((2 * coeffs.size() - 1) * size);
+				auto buffIter = buffer.begin();
+				for (u64 i = 1; i < 2 * coeffs.size(); ++i)
+				{
+					auto b = i & 1;
+					auto idx = i / 2;
+					auto prodIter = prod.begin() + idx * coeffs.size();
+
+					expand(mSendOts[i][0], t0);
+					expand(mSendOts[i][1], t1);
+
+					// prod  = mask
+					auto lsbIter = BitIterator(&t0[0]);
+					auto msbIter = BitIterator(&t0[1]);
+					for (u64 i = 0; i < coeffs.size(); ++i)
+						*prodIter++ ^= (*lsbIter++) | (u8(*msbIter++) << 1);
+
+					for (u64 i = 0; i < a.size(); ++i)
+					{   //        mask    key     value
+						*buffIter++ = t0[i] ^ t1[i] ^ a[b][i];
+						//*buffIter++ = diff[i];
+					}
+
+				}
+
+				co_await sock.send(std::move(buffer));
+			}
+			else
+			{
+
+				if (mChoiceOts.size() < 2 * coeffs.size() - 1)
+					throw RTE_LOC; //base ots not set.
+				if (mRecvOts.size() < 2 * coeffs.size() - 1)
+					throw RTE_LOC; //base ots not set.
+
+				for (u64 i = 0; i < coeffs.size(); ++i)
+					coeffs[i] = mChoiceOts[2 * i] | (u8(mChoiceOts[2 * i + 1] << 1));
+				std::vector<block> t(size);
+				expand(mRecvOts[0], t);
+
+				{
+					setBytes(prod, 0);
+					auto prodIter = prod.begin();
+					auto lsbIter = BitIterator(&t[0]);
+					auto msbIter = BitIterator(&t[1]);
+					for (u64 i = 0; i < coeffs.size(); ++i)
+						*prodIter++ = (*lsbIter++) | (u8(*msbIter++) << 1);
+				}
+
+				std::vector<block>  buffer((2 * coeffs.size() - 1) * size);
+				co_await sock.recv(buffer);
+
+				auto buffIter = buffer.begin();
+				for (u64 i = 1; i < 2 * coeffs.size(); ++i)
+				{
+					auto idx = i / 2;
+					auto prodIter = prod.begin() + idx * coeffs.size();
+
+					expand(mRecvOts[i], t);
+					if (mChoiceOts[i])
+					{
+						for (u64 i = 0; i < size; ++i)
+						{
+							t[i] = t[i] ^ *buffIter++;
+						}
+					}
+					else
+						buffIter += size;
+
+					// prod  = mask
+					auto lsbIter = BitIterator(&t[0]);
+					auto msbIter = BitIterator(&t[1]);
+					for (u64 i = 0; i < coeffs.size(); ++i)
+						*prodIter++ ^= (*lsbIter++) | (u8(*msbIter++) << 1);
+				}
+			}
+		}
+
+	}
 }
