@@ -42,7 +42,7 @@ namespace osuCrypto
     // Multiplies two packed matrices of F4 elements column-by-column.
     // Note that here the "columns" are packed into an element of uint8_t
     // resulting in a matrix with 4 columns.
-    inline void multiply_fft_8(
+    inline void F4Multiply(
         span<uint8_t> a_poly,
         span<uint8_t> b_poly,
         span<uint8_t> res_poly,

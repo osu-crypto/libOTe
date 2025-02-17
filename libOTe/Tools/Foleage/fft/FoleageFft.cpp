@@ -232,7 +232,7 @@ namespace osuCrypto {
 		}
 	}
 
-	void fft_recursive_uint8(
+	void foliageFftUint8(
 		span<uint8_t> coeffs,
 		const size_t num_vars,
 		const size_t num_coeffs)
@@ -242,19 +242,19 @@ namespace osuCrypto {
 		if (num_vars > 1)
 		{
 			// apply FFT on all left coefficients
-			fft_recursive_uint8(
+			foliageFftUint8(
 				coeffs,
 				num_vars - 1,
 				num_coeffs / 3);
 
 			// apply FFT on all middle coefficients
-			fft_recursive_uint8(
+			foliageFftUint8(
 				coeffs.subspan(num_coeffs),
 				num_vars - 1,
 				num_coeffs / 3);
 
 			// apply FFT on all right coefficients
-			fft_recursive_uint8(
+			foliageFftUint8(
 				coeffs.subspan(2 * num_coeffs),
 				num_vars - 1,
 				num_coeffs / 3);

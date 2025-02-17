@@ -80,7 +80,7 @@ namespace osuCrypto
 
         clock_t t;
         t = clock();
-        fft_recursive_uint8(coeffs, num_vars, num_coeffs / 3);
+        foliageFftUint8(coeffs, num_vars, num_coeffs / 3);
         t = clock() - t;
         double time_taken = ((double)t) / (CLOCKS_PER_SEC / 1000.0); // ms
 

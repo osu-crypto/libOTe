@@ -31,7 +31,7 @@ namespace osuCrypto {
 		const size_t num_coeffs);
 
 	// FFT for (up to) 4 polynomials over F4
-	void fft_recursive_uint8(
+	void foliageFftUint8(
 		span<uint8_t> coeffs,
 		const size_t num_vars,
 		const size_t num_coeffs);

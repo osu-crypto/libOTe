@@ -322,21 +322,23 @@ namespace osuCrypto
 		return ret;
 	}
 
-	struct block512
+	// A 512 bit value that is used to represent a vector of 3^5=243 F4 elements.
+	// We use this value because its greater than 128 bits and almost a power of 2.
+	// the last 26 bits are unused.
+	struct FoleageF4x243
 	{
 		std::array<block, 4> mVal;
 
-		block512 operator^(const block512& o) const
+		FoleageF4x243 operator^(const FoleageF4x243& o) const
 		{
-			block512 r;
+			FoleageF4x243 r;
 			r.mVal[0] = mVal[0] ^ o.mVal[0];
 			r.mVal[1] = mVal[1] ^ o.mVal[1];
 			r.mVal[2] = mVal[2] ^ o.mVal[2];
 			r.mVal[3] = mVal[3] ^ o.mVal[3];
 			return r;
 		}
-		//block512 operator-(const block512& o) const { return *this + o; }
-		block512& operator^=(const block512& o)
+		FoleageF4x243& operator^=(const FoleageF4x243& o)
 		{
 			mVal[0] = mVal[0] ^ o.mVal[0];
 			mVal[1] = mVal[1] ^ o.mVal[1];
@@ -345,7 +347,7 @@ namespace osuCrypto
 			return *this;
 		}
 
-		bool operator==(const block512& o) const
+		bool operator==(const FoleageF4x243& o) const
 		{
 			return
 				mVal[0] == o.mVal[0] &&
@@ -355,7 +357,7 @@ namespace osuCrypto
 		}
 	};
 
-	inline std::array<u8, 256> extractF4(const block512& val)
+	inline std::array<u8, 256> extractF4(const FoleageF4x243& val)
 	{
 		std::array<u8, 256> ret;
 		const char* ptr = (const char*)&val;

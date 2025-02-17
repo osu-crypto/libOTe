@@ -73,7 +73,7 @@ namespace osuCrypto
 			for (u64 i = 31; i < 32; --i)
 			{
 				r *= 3;
-				r |= (mVal >> (i * 2)) & 3;
+				r += (mVal >> (i * 2)) & 3;
 			}
 
 			return r;
@@ -509,12 +509,13 @@ namespace osuCrypto
 
 
 			auto H = [](const block& a, const block& b) -> block {
-				RandomOracle ro(sizeof(block));
-				ro.Update(a);
-				ro.Update(b);
-				block r;
-				ro.Final(r);
-				return r;
+				return mAesFixedKey.hashBlock(mAesFixedKey.hashBlock(a) ^ b) ^ a;
+				//RandomOracle ro(sizeof(block));
+				//ro.Update(a);
+				//ro.Update(b);
+				//block r;
+				//ro.Final(r);
+				//return r;
 				};
 
 			auto sender = [&]() -> macoro::task<> {

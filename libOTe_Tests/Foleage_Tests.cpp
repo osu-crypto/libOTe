@@ -470,7 +470,7 @@ namespace osuCrypto
 			}
 
 			timer.setTimePoint("begin");
-			fft_recursive_uint8(a, nn, n / 3);
+			foliageFftUint8(a, nn, n / 3);
 			timer.setTimePoint("fft_recursive_uint8");
 			foleageFFT(lsb.data(), msb.data(), nn, n / 3);
 			timer.setTimePoint("foleageFFT 8 bit");
@@ -846,8 +846,8 @@ namespace osuCrypto
 
 
 		// Evaluate the FFTs on the error polynomials eA and eB
-		fft_recursive_uint8(fft_eA, n, poly_size / 3);
-		fft_recursive_uint8(fft_eB, n, poly_size / 3);
+		foliageFftUint8(fft_eA, n, poly_size / 3);
+		foliageFftUint8(fft_eB, n, poly_size / 3);
 
 		printf("[.      ]Done with Step 1 (sampling error vectors)\n");
 
@@ -862,8 +862,8 @@ namespace osuCrypto
 		// Compute the coordinate-wise multiplication over the packed FFT result
 		std::vector<uint8_t> res_poly_A(poly_size);
 		std::vector<uint8_t> res_poly_B(poly_size);
-		multiply_fft_8(fft_a, fft_eA, res_poly_A, poly_size); // a*eA
-		multiply_fft_8(fft_a, fft_eB, res_poly_B, poly_size); // a*eB
+		F4Multiply(fft_a, fft_eA, res_poly_A, poly_size); // a*eA
+		F4Multiply(fft_a, fft_eB, res_poly_B, poly_size); // a*eB
 
 
 		//std::cout << "multA " << hash(res_poly_A.data(), res_poly_A.size()) << std::endl;
@@ -1396,13 +1396,16 @@ namespace osuCrypto
 		auto blocks = divCeil(n, 128);
 		bool verbose = cmd.isSet("v");
 
+		if(cmd.hasValue("t"))
+			oles[0].mT = oles[1].mT = cmd.get<u64>("t");
+
 		//PRNG prng(block(342342));
 		PRNG prng0(block(2424523452345, 111124521521455324));
 		PRNG prng1(block(6474567454546, 567546754674345444));
 		Timer timer;
 		
-		oles[0].init(0, n, prng0);
-		oles[1].init(1, n, prng1);
+		oles[0].init(0, n);
+		oles[1].init(1, n);
 
 		{
 			auto otCount0 = oles[0].baseOtCount();
@@ -1483,8 +1486,8 @@ namespace osuCrypto
 		PRNG prng0(block(2424523452345, 111124521521455324));
 		PRNG prng1(block(6474567454546, 567546754674345444));
 
-		oles[0].init(0, 1000, prng0);
-		oles[1].init(1, 1000, prng1);
+		oles[0].init(0, 1000);
+		oles[1].init(1, 1000);
 
 		u64 n = oles[0].mC* oles[0].mT;
 		u64 n2 = n * n;
