@@ -66,8 +66,21 @@ namespace osuCrypto
 		// a dpf used to construct the F4x243 leaf value of the larger DPF.
 		TriDpf<u8, CoeffCtxGF2> mDpfLeaf;
 
+
+		struct FoleageCoeffCtx : CoeffCtxGF2
+		{
+
+			OC_FORCEINLINE void fromBlock(FoleageF4x243& ret, const block& b) {
+				ret.mVal[0] = b;
+				ret.mVal[1] = b ^ block(2314523225322345310, 3520873105824273452);
+				ret.mVal[2] = b ^ block(3456459829022368567, 2452343456563201231);
+				ret.mVal[3] = b ^ block(2430734095872024920, 8425914932983749298);
+				mAesFixedKey.hashBlocks<4>(ret.mVal.data(), ret.mVal.data());
+			}
+		};
+
 		// the main DPF which outputs 243 F4 elements for each leaf.
-		TriDpf<FoleageF4x243, CoeffCtxGF2> mDpf;
+		TriDpf<FoleageF4x243, FoleageCoeffCtx> mDpf;
 
 		// The base OTs used to tensor the coefficients of the sparse polynomial.
 		std::vector<block> mRecvOts;

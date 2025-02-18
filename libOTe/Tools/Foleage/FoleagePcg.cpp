@@ -171,7 +171,7 @@ namespace osuCrypto
 
 		if (divCeil(mN, 128) < ALsb.size())
 			throw RTE_LOC;
-		if (ALsb.size() != AMsb.size() || 
+		if (ALsb.size() != AMsb.size() ||
 			ALsb.size() != CLsb.size() ||
 			ALsb.size() != CMsb.size())
 			throw RTE_LOC;
@@ -285,7 +285,7 @@ namespace osuCrypto
 						// next to each other. We do this by using nextIdx to
 						// keep track of the next index for each output block.
 						size_t idx = polyOffset + blockIdx * mT + nextIdx[blockIdx]++;
-						
+
 						// split the position into the portion that will position
 						// the F4 coefficient within the F4^243 coefficient and the
 						// portion that will position the F4^243 coefficient within
@@ -315,9 +315,18 @@ namespace osuCrypto
 		// current coefficients are single F4 elements. Expand them into
 		// 3^5=243 elements. These will be used as the new coefficients
 		// in the large tree.
-		co_await mDpfLeaf.expand(prodPolyLeafPos, prodPolyF4Coeffs, [&](u64 treeIdx, u64 leafIdx, u8 v) {
-			*BitIterator(&prodPolyF4x243Coeffs[treeIdx], leafIdx * 2 + 0) = (v >> 0) & 1;
-			*BitIterator(&prodPolyF4x243Coeffs[treeIdx], leafIdx * 2 + 1) = (v >> 1) & 1;
+		co_await mDpfLeaf.expand(prodPolyLeafPos, prodPolyF4Coeffs,
+			[&, byteIdx = 0, bitIdx = 0](u64 treeIdx, u64 leafIdx, u8 v) mutable {
+				if (treeIdx == 0)
+				{
+					byteIdx = leafIdx / 4;
+					bitIdx = leafIdx % 4;
+				}
+				assert(byteIdx == leafIdx / 4);
+				assert(bitIdx == leafIdx % 4);
+
+				auto ptr = (u8*)&prodPolyF4x243Coeffs.data()[treeIdx];
+				ptr[byteIdx] |= u8((v & 3) << (2 * bitIdx));
 			}, prng, sock);
 
 		setTimePoint("leafDpf");

@@ -29,7 +29,6 @@
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
-int H4main();
 
 using namespace osuCrypto;
 #ifdef ENABLE_IKNP
@@ -124,6 +123,10 @@ int main(int argc, char** argv)
 			AESBenchmark(cmd);
 		else if (cmd.isSet("dpf"))
 			RegularDpfBenchmark(cmd);
+		else if (cmd.isSet("triDpf"))
+			TriDpfBenchmark(cmd);
+		else if (cmd.isSet("foleage"))
+			FoleageBenchmark(cmd);
 		else
 		{
 			std::cout << "unknown benchmark" << std::endl;

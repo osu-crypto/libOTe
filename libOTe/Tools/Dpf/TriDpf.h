@@ -253,22 +253,35 @@ namespace osuCrypto
 			}
 
 			u64 numPoints8 = mNumPoints / 8 * 8;
+			auto pow3 = ipow(3, mDepth);
+
+			u64 allocSize =
+				sizeof(block) * mNumPoints * (pow3 + pow3 / 3 + pow3 / 9)/*seeds*/ +
+				sizeof(block) * mNumPoints * 3 * 2/*z, sigma*/; //+
+				//sizeof(u8) * mNumPoints * mDomain /*t*/
+				;
+			AlignedUnVector<u8> allocation(allocSize);
+			auto allocIter = allocation.data();
+
+			auto makeMatrix = [&]<typename T>(u64 rows, u64 cols, T) -> MatrixView<T>
+				{
+					auto ret = MatrixView<T>((T*)allocIter, rows, cols);
+					allocIter += sizeof(T) * ret.size();
+					if (allocIter > allocation.data() + allocSize)
+						throw std::runtime_error("TriDpf: allocation error. " LOCATION);
+					return ret;
+				};
 
 			// shares of S'
-			auto pow3 = ipow(3, mDepth);
-			std::array<Matrix<block>, 3> s;
+			std::array<MatrixView<block>, 3> s;
 			auto last = mDepth % 3;
-			s[last].resize(pow3, mNumPoints, oc::AllocType::Uninitialized);
-			s[(last + 2) % 3].resize(pow3 / 3, mNumPoints, oc::AllocType::Uninitialized);
-			s[(last + 1) % 3].resize(pow3 / 9, mNumPoints, oc::AllocType::Uninitialized);
+			s[(last + 0) % 3] = makeMatrix(pow3 / 1, mNumPoints, block{}); 
+			s[(last + 2) % 3] = makeMatrix(pow3 / 3, mNumPoints, block{}); 
+			s[(last + 1) % 3] = makeMatrix(pow3 / 9, mNumPoints, block{}); 
 
-#if defined(NDEBUG)
-			auto getRow = [](auto&& m, u64 i) {return m.data(i); };
-#else
 			auto getRow = [](auto&& m, u64 i) {return m[i]; };
-#endif
-			Matrix<block> z(3, mNumPoints);
-			Matrix<block> sigma(3, mNumPoints);
+			auto z = makeMatrix(3, mNumPoints, block{});
+			auto sigma = makeMatrix(3, mNumPoints, block{});
 
 
 			{
@@ -349,7 +362,30 @@ namespace osuCrypto
 
 						for (u64 j = 0; j < 3; ++j)
 						{
-							for (u64 k = 0; k < mNumPoints; ++k)
+							auto sig = sigma[j].data();
+							auto seedj = seed[j].data();
+
+							for (u64 k = 0; k < numPoints8; k += 8)
+							{
+								block s[8];//, w[8];
+								SIMD8(q, s[q] = seedj[k + q] ^ parentTag[k + q] & sig[k + q]);
+
+								for (u64 i = 0; i < 3; ++i)
+								{
+									auto child = childSeed[j * 3 + i].data();
+									auto zi = z.data(i);
+
+									auto w = &child[k];
+									aes[i].hashBlocks<8>(s, w);
+									//SIMD8(q, child[k + q] = w[q]);
+									SIMD8(q, zi[k + q] ^= w[q]);
+								}
+		
+								// replace the seed with the tag.
+								SIMD8(q, seed[j][k+q] = tagBit(s[q]));
+							}
+
+							for (u64 k = numPoints8; k < mNumPoints; ++k)
 							{
 								auto seedjk = seed[j][k] ^ parentTag[k] & sigma[j][k];
 
@@ -367,47 +403,61 @@ namespace osuCrypto
 					}
 				}
 			}
+
+			
 			//auto size = ipow(3, mDepth);
 			VecF sums, leafVals;
 			ctx.resize(sums, mNumPoints);
 			ctx.zero(sums.begin(), sums.end());
 			ctx.resize(leafVals, mNumPoints * mDomain);
+			Matrix<u8> t(mDomain, mNumPoints, AllocType::Uninitialized);
+			//auto t = makeMatrix(mDomain, mNumPoints, u8{});
 
-			Matrix<u8> t(mDomain, mNumPoints);
 			// fixing the last layer
 			{
 
 				auto& parentTags = s[(mDepth - 1) % 3];
 				auto& curSeed = s[mDepth % 3];
-				auto leafIter = leafVals.begin();
+				auto leafIter = leafVals.data();
 
 				for (u64 L = 0, L2 = 0; L2 < mDomain; ++L, L2 += 3)
 				{
 					// parent control bits
 					auto parentTag = getRow(parentTags, L);
-
-					// child seed
-					std::array scl{ getRow(curSeed, L2 + 0), getRow(curSeed, L2 + 1), getRow(curSeed, L2 + 2) };
-
 					auto m = std::min<u64>(3, mDomain - L2);
+
+
 					for (u64 j = 0; j < m; ++j)
 					{
-						for (u64 k = 0; k < mNumPoints; ++k)
+						auto cs = curSeed.data(L2 + j);
+						auto sig = sigma.data(j);
+						auto tt = t.data(L2 + j);
+
+						for (u64 k = 0; k < numPoints8; k+= 8)
 						{
-							auto s = curSeed[L2 + j][k] ^ parentTag[k] & sigma[j][k];
-							t[L2 + j][k] = lsb(s);
+							block s[8];
+
+							SIMD8(q, s[q] = cs[k + q] ^ parentTag[k+q] & sig[k+q]);
+							SIMD8(q, tt[k+q] = lsb(s[q]));
+							SIMD8(q, ctx.fromBlock(leafIter[q], AES::roundFn(s[q], s[q])));
+							SIMD8(q, ctx.plus(sums[k+q], sums[k+q], leafIter[q]));
+							leafIter += 8;;
+						}
+
+						for (u64 k = numPoints8; k < mNumPoints; ++k)
+						{
+							auto s = cs[k] ^ parentTag[k] & sig[k];
+							tt[k] = lsb(s);
 
 							ctx.fromBlock(*leafIter, AES::roundFn(s, s));
 							ctx.plus(sums[k], sums[k], *leafIter);
 							++leafIter;
-
-							//curSeed[L2 + j][k] = /*convert_G*/ AES::roundFn(s, s);//AES::roundFn is used to get rid of the correlation in the LSB.
-							//sums[k] = sums[k] ^ curSeed[L2 + j][k];
-							//std::cout << mPartyIdx << " " << Trit32(L2 + j) << " " << curSeed[L2 + j][k] << " " << int(curTag[L2 + j][k]) << std::endl;
 						}
 					}
 				}
 			}
+
+			allocation.clear();
 			//std::cout << "----------" << std::endl;
 
 			if (values.size())
@@ -420,23 +470,19 @@ namespace osuCrypto
 
 				for (u64 k = 0; k < mNumPoints; ++k)
 				{
-					//diff[k] = sums[k] + values[k];
 					ctx.plus(diff[k], values[k], sums[k]);
 				}
 				co_await sock.send(std::move(diff));
 				co_await sock.recv(gamma);
 				for (u64 k = 0; k < mNumPoints; ++k)
 				{
-					//gamma[k] = reveal(sums[k] + values[k]);
 					ctx.plus(gamma[k], gamma[k], sums[k]);
 					ctx.plus(gamma[k], gamma[k], values[k]);
 				}
 
-				auto leafIter = leafVals.begin();
+				auto leafIter = leafVals.data();
 				VecF temp;
 				ctx.resize(temp, 1);
-				//auto& sd = s[mDepth % 3];
-				//auto& td = t[mDepth & 1];
 				for (u64 i = 0; i < mDomain; ++i)
 				{
 					//auto sdi = getRow(sd, i);
@@ -460,15 +506,17 @@ namespace osuCrypto
 
 					}
 				}
+				if (leafIter != leafVals.data() + leafVals.size())
+					throw RTE_LOC;
 			}
 			else
 			{
 
-				auto leafIter = leafVals.begin();
-				auto tagIter = t.begin();
+				auto leafIter = leafVals.data();
+				auto tagIter = t.data();
 				for (u64 i = 0; i < mDomain; ++i)
 				{
-					for (u64 k = numPoints8; k < mNumPoints; ++k)
+					for (u64 k = 0; k < mNumPoints; ++k)
 					{
 						if constexpr (std::is_invocable_v<Output, u64, u64, F, u8>)
 							output(k, i, *leafIter++, *tagIter++);
@@ -477,6 +525,8 @@ namespace osuCrypto
 
 					}
 				}
+				if (leafIter != leafVals.data() + leafVals.size())
+					throw RTE_LOC;
 			}
 		}
 
@@ -497,9 +547,9 @@ namespace osuCrypto
 			//}
 			//std::cout << "=======" << iter << "======== " << std::endl;
 
-			Matrix<block> sigmaShares(3, mNumPoints);
-			AlignedUnVector<std::array<block, 3>> mask(mNumPoints);
-			AlignedUnVector<std::array<block, 3>> recvBuffer(mNumPoints * 2);
+			Matrix<block> sigmaShares(3, mNumPoints, AllocType::Uninitialized);
+			Matrix<block> mask(mNumPoints, 3, AllocType::Uninitialized);
+			Matrix<block> recvBuffer(mNumPoints * 2, 3, AllocType::Uninitialized);
 
 			std::array<coproto::Socket, 2> socks;
 			socks[0] = sock;
@@ -507,30 +557,28 @@ namespace osuCrypto
 			if (mPartyIdx)
 				std::swap(socks[0], socks[1]);
 
-
-			auto H = [](const block& a, const block& b) -> block {
-				return mAesFixedKey.hashBlock(mAesFixedKey.hashBlock(a) ^ b) ^ a;
-				//RandomOracle ro(sizeof(block));
-				//ro.Update(a);
-				//ro.Update(b);
-				//block r;
-				//ro.Final(r);
-				//return r;
+			auto expand3 = [](const block& k, span<block> r)  {
+				//r = PRNG(k, 3).get();
+				r[0] = k;
+				r[1] = k ^ block(3450136502437610243, 6108362938092146510);
+				r[2] = k ^ block(3428970074314387014, 2030711220607601239);
+				mAesFixedKey.hashBlocks<3>(r.data(), r.data());
 				};
+
 
 			auto sender = [&]() -> macoro::task<> {
 				PRNG prng(block(234134, 21452345 * mPartyIdx));
 
 				BitVector correction(mNumPoints * 2);
-				AlignedUnVector<std::array<block, 3>> sendBuffer(mNumPoints * 2);
+				AlignedUnVector<u8> sendBuffer(mNumPoints * 2 * sizeof(std::array<block, 3>));
+				auto sendIter = sendBuffer.data();
+
 				co_await socks[0].recv(correction);
-				//auto sendIter = mBaseSendOts.begin() + mOtIdx;
 				for (u64 i = 0; i < mNumPoints; ++i)
 				{
 					auto keys0 = mBaseSendOts[mOtIdx + i * 2 + 0];
 					auto keys1 = mBaseSendOts[mOtIdx + i * 2 + 1];
-					std::array<block, 3> k;// , m;
-					//std::cout << "p" << mPartyIdx << std::endl;// "\n " << k[0] << "\n  " << k[1] << "\n  " << k[2] << std::endl;
+					std::array<block, 3> k;
 					for (u64 j = 0; j < 3; ++j)
 					{
 						auto j0 = j & 1;
@@ -541,48 +589,31 @@ namespace osuCrypto
 						auto k0 = keys0[b0];
 						auto k1 = keys1[b1];
 
-						k[j] = H(k0, k1);
-						//std::cout << "k" << j << " " << k[j] << " = H( "
-						//	<< std::hex << k0.get<u32>(0) << " " << b0 << " "
-						//	<< std::hex << k1.get<u32>(0) << " " << b1 << " ) " << std::endl;
+						k[j] = k0 ^ k1;
 					}
 
 					block r = prng.get<block>();
 					*BitIterator(&r) = mPartyIdx;
 
-					//std::array<block, 3> mask;// = prng.get();
-					//mask[i] = prng.get();
 					auto a = points[i][mDepth - iter];
-					//std::cout << "a0 " << int(a) << std::endl;
-
-					{
-
-						// sendBuffer[i * 3 + 0] = kj ^ mask ^ unitVec(r, a);
-						//                     0 = kj ^ mask ^ unitVec(r, a);
-						//                  mask = kj ^ unitVec(r, a);
-
-						mask[i] = PRNG(k[0], 3).get();
-						//setBytes(mask[i], 0);
-						mask[i][a] ^= r;
-					}
+					expand3(k[0], mask[i]);
+					mask(i,a) ^= r;
 
 					for (u64 j = 0; j < 2; ++j)
 					{
-						std::array<block, 3> kj = PRNG(k[j + 1], 3).get();
-						//setBytes(kj, 0);
-
-						//sendBuffer[i * 3 + j] = PRNG(k[j], 3).get();
-						sendBuffer[i * 2 + j][0] = kj[0] ^ mask[i][0];
-						sendBuffer[i * 2 + j][1] = kj[1] ^ mask[i][1];
-						sendBuffer[i * 2 + j][2] = kj[2] ^ mask[i][2];
-						sendBuffer[i * 2 + j][(j + 1 + a) % 3] ^= r;
-
-						//std::cout << "buffer " << j << std::endl
-						//	<< " " << buffer[i * 3 + j][0] << "\n"
-						//	<< " " << buffer[i * 3 + j][1] << "\n"
-						//	<< " " << buffer[i * 3 + j][2] << "\n";
+						std::array<block, 3> kj;
+						expand3(k[j + 1], kj);
+;
+						kj[0] ^= mask(i,0);
+						kj[1] ^= mask(i,1);
+						kj[2] ^= mask(i,2);
+						kj[(j + 1 + a) % 3] ^= r;
+						memcpy(sendIter, &kj, sizeof(kj));
+						sendIter += sizeof(kj);
 					}
 				}
+				if (sendIter != sendBuffer.data() + sendBuffer.size())
+					throw RTE_LOC;
 
 				co_await socks[0].send(std::move(sendBuffer));
 
@@ -610,9 +641,8 @@ namespace osuCrypto
 			{
 				auto a = points[i][mDepth - iter];
 
-				auto k = H(
-					mBaseRecvOts[mOtIdx + i * 2 + 0],
-					mBaseRecvOts[mOtIdx + i * 2 + 1]);
+				auto k = 
+					mBaseRecvOts[mOtIdx + i * 2 + 0] ^ mBaseRecvOts[mOtIdx + i * 2 + 1];
 				//std::cout << "p" << mPartyIdx << " ka " << k << " = H( "
 				//	<< std::hex << mBaseRecvOts[i * 2 + 0].get<u32>(0) << "  " << int(mBaseChoice[i * 2 + 0]) << " "
 				//	<< std::hex << mBaseRecvOts[i * 2 + 1].get<u32>(0) << "  " << int(mBaseChoice[i * 2 + 0]) << " )" << " a1 " << int(a) << std::endl;
@@ -621,17 +651,17 @@ namespace osuCrypto
 				//	<< " " << buffer[i * 3 + a][0] << "\n"
 				//	<< " " << buffer[i * 3 + a][1] << "\n"
 				//	<< " " << buffer[i * 3 + a][2] << "\n";
-				std::array<block, 3> ka = PRNG(k, 3).get();
-				//setBytes(ka, 0);
+				std::array<block, 3> ka;
+				expand3(k, ka);
 
-				sigma[0][i] = ka[0] ^ mask[i][0] ^ z[0][i];
-				sigma[1][i] = ka[1] ^ mask[i][1] ^ z[1][i];
-				sigma[2][i] = ka[2] ^ mask[i][2] ^ z[2][i];
+				sigma(0,i) = ka[0] ^ mask(i,0) ^ z(0,i);
+				sigma(1,i) = ka[1] ^ mask(i,1) ^ z(1,i);
+				sigma(2,i) = ka[2] ^ mask(i,2) ^ z(2,i);
 				if (a)
 				{
-					sigma[0][i] ^= recvBuffer[i * 2 + a - 1][0];
-					sigma[1][i] ^= recvBuffer[i * 2 + a - 1][1];
-					sigma[2][i] ^= recvBuffer[i * 2 + a - 1][2];
+					sigma(0,i) ^= recvBuffer(i * 2 + a - 1,0);
+					sigma(1,i) ^= recvBuffer(i * 2 + a - 1,1);
+					sigma(2,i) ^= recvBuffer(i * 2 + a - 1,2);
 				}
 
 				//std::cout << "sigma " << std::endl
@@ -643,13 +673,9 @@ namespace osuCrypto
 
 			co_await sock.recv(sigmaShares);
 
-			for (u64 i = 0; i < mNumPoints; ++i)
+			for (u64 i = 0; i < sigma.size(); ++i)
 			{
-				for (u64 j = 0; j < 3; ++j)
-				{
-					//std::cout << "sigma = " << (sigma[j][i] ^ sigmaShares[j][i]) << " = " << sigma[j][i] << " ^ " << sigmaShares[j][i] << std::endl;
-					sigma[j][i] ^= sigmaShares[j][i];//^ mask[i][j];
-				}
+				sigma(i) ^= sigmaShares(i);//^ mask[i][j];
 			}
 
 			mOtIdx += mNumPoints * 2;
@@ -741,6 +767,15 @@ namespace osuCrypto
 				mBaseRecvOts[i] = recvBaseOts[i];
 				mBaseChoice[i] = baseChoices[i];
 			}
+		}
+
+
+		// extracts the lsb of b and returns a block saturated with that bit.
+		static block tagBit(const block& b)
+		{
+			auto bit = b & block(0, 1);
+			auto mask = _mm_sub_epi64(_mm_set1_epi64x(0), bit);
+			return _mm_unpacklo_epi64(mask, mask);
 		}
 	};
 

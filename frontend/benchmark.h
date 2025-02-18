@@ -16,6 +16,8 @@
 #include "libOTe/Tools/TungstenCode/TungstenCode.h"
 #include "libOTe/Tools/ExConvCodeOld/ExConvCodeOld.h"
 #include "libOTe/Tools/Dpf/RegularDpf.h"
+#include "libOTe/Tools/Dpf/TriDpf.h"
+#include "libOTe/Tools/Foleage/FoleagePcg.h"
 
 namespace osuCrypto
 {
@@ -763,5 +765,187 @@ namespace osuCrypto
 
 		if (cmd.isSet("v"))
 			std::cout << timer << std::endl;
+	}
+
+
+
+	void TriDpfBenchmark(const oc::CLP& cmd)
+	{
+		//using F = FoleageF4x243;
+		//using Ctx = FoleageCoeffCtx;
+		using F = block;
+		using Ctx = CoeffCtxGF2;
+		Timer timer;
+
+		PRNG prng(block(231234, 321312));
+		u64 depth = cmd.getOr("depth", 3);
+		u64 domain = ipow(3, depth) - 3;
+		u64 numPoints = cmd.getOr("numPoints", 1000);
+		u64 trials = cmd.getOr("trials", 1);
+
+		std::vector<Trit32> points0(numPoints);
+		std::vector<Trit32> points1(numPoints);
+		std::vector<Trit32> points(numPoints);
+		std::vector<F> values0(numPoints);
+		std::vector<F> values1(numPoints);
+		Ctx ctx;
+		for (u64 i = 0; i < numPoints; ++i)
+		{
+			points[i] = Trit32(prng.get<u64>() % domain);
+			points1[i] = Trit32(prng.get<u64>() % domain);
+			points0[i] = points[i] - points1[i];
+			//std::cout << points[i] << " = " << points0[i] <<" + "<< points1[i] << std::endl;
+			values0[i] = prng.get();
+			values1[i] = prng.get();
+			//ctx.minus(points0[i], points[i], points1[i];)
+		}
+
+
+		for (u64 i = 0; i < trials; ++i)
+		{
+
+			std::array<oc::TriDpf<F, Ctx>, 2> dpf;
+			dpf[0].init(0, domain, numPoints);
+			dpf[1].init(1, domain, numPoints);
+
+			auto baseCount = dpf[0].baseOtCount();
+
+			std::array<std::vector<block>, 2> baseRecv;
+			std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+			std::array<BitVector, 2> baseChoice;
+			baseRecv[0].resize(baseCount);
+			baseRecv[1].resize(baseCount);
+			baseSend[0].resize(baseCount);
+			baseSend[1].resize(baseCount);
+			baseChoice[0].resize(baseCount);
+			baseChoice[1].resize(baseCount);
+			baseChoice[0].randomize(prng);
+			baseChoice[1].randomize(prng);
+			for (u64 i = 0; i < baseCount; ++i)
+			{
+				baseSend[0][i] = prng.get();
+				baseSend[1][i] = prng.get();
+				baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+				baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+			}
+			dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+			dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+			std::array<Matrix<F>, 2> output;
+			//std::array<Matrix<u8>, 2> tags;
+			output[0].resize(domain, numPoints, AllocType::Uninitialized);
+			output[1].resize(domain, numPoints, AllocType::Uninitialized);
+			//		tags[0].resize(numPoints, domain, AllocType::Uninitialized);
+			//		tags[1].resize(numPoints, domain, AllocType::Uninitialized);
+
+			auto sock = coproto::LocalAsyncSocket::makePair();
+
+			timer.setTimePoint("beign");
+			auto out0 = output[0].data();
+			auto out1 = output[1].data();
+
+			macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].expand(points0, values0, [&](auto k, auto i, auto v) { *out0++ = v; }, prng, sock[0]),
+				dpf[1].expand(points1, values1, [&](auto k, auto i, auto v) { *out1++ = v; }, prng, sock[1])
+			));
+			timer.setTimePoint("end");
+		}
+
+		std::cout << timer << std::endl;
+
+	}
+
+
+
+
+	// This test evaluates the full PCG.Expand for both parties and
+	// checks correctness of the resulting OLE correlation.
+	void FoleageBenchmark(const CLP& cmd)
+	{
+	
+		auto logn = cmd.getOr("nn", 10);
+		u64 n = ipow(3, logn);
+		auto blocks = divCeil(n, 128);
+		bool verbose = cmd.isSet("v");
+
+
+		u64 trials = cmd.getOr("trials", 1);
+
+		//PRNG prng(block(342342));
+		PRNG prng0(block(2424523452345, 111124521521455324));
+		PRNG prng1(block(6474567454546, 567546754674345444));
+		Timer timer;
+
+		macoro::thread_pool::work work;
+		macoro::thread_pool pool(2, work);
+		auto sock = coproto::LocalAsyncSocket::makePair();
+		sock[0].setExecutor(pool);
+		sock[1].setExecutor(pool);
+
+		for (u64 ii = 0; ii < trials; ++ii)
+		{
+
+			std::array<FoleageF4Ole, 2> oles;
+			if (cmd.hasValue("t"))
+				oles[0].mT = oles[1].mT = cmd.get<u64>("t");
+			if (cmd.hasValue("c"))
+				oles[0].mC = oles[1].mC = cmd.get<u64>("c");
+
+			oles[0].init(0, n);
+			oles[1].init(1, n);
+
+			std::cout << "leaf " << oles[0].mDpfLeafDepth << " main " << oles[0].mDpfTreeDepth << std::endl;
+
+			{
+				auto otCount0 = oles[0].baseOtCount();
+				auto otCount1 = oles[1].baseOtCount();
+				if (otCount0.mRecvCount != otCount1.mSendCount ||
+					otCount0.mSendCount != otCount1.mRecvCount)
+					throw RTE_LOC;
+				std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+				baseSend[0].resize(otCount0.mSendCount);
+				baseSend[1].resize(otCount1.mSendCount);
+				std::array<std::vector<block>, 2> baseRecv;
+				std::array<BitVector, 2> baseChoice;
+
+				for (u64 i = 0; i < 2; ++i)
+				{
+					prng0.get(baseSend[i].data(), baseSend[i].size());
+					baseRecv[1 ^ i].resize(baseSend[i].size());
+					baseChoice[1 ^ i].resize(baseSend[i].size());
+					baseChoice[1 ^ i].randomize(prng0);
+					for (u64 j = 0; j < baseSend[i].size(); ++j)
+					{
+						baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+					}
+				}
+
+				oles[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+				oles[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+			}
+
+			std::vector<block>
+				ALsb(blocks),
+				AMsb(blocks),
+				BLsb(blocks),
+				BMsb(blocks),
+				C0Lsb(blocks),
+				C0Msb(blocks),
+				C1Lsb(blocks),
+				C1Msb(blocks);
+
+
+			oles[0].setTimer(timer);
+			timer.setTimePoint("start");
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				oles[0].expand(ALsb, AMsb, C0Lsb, C0Msb, prng0, sock[0]) | macoro::start_on(pool),
+				oles[1].expand(BLsb, BMsb, C1Lsb, C1Msb, prng1, sock[1]) | macoro::start_on(pool)));
+			timer.setTimePoint("end");
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+
+		}
+		work = {};
+		std::cout << "n="<<n<<", log2="<<log2ceil(n)<<"\n Time taken: \n" << timer << std::endl;
 	}
 }
