@@ -35,7 +35,10 @@ namespace osuCrypto
 		span<std::array<block, 2>> messages, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
-
+#ifdef ENABLE_SSE
+		if ((u64)messages.data() % 32)
+			throw std::runtime_error("SoftSpokenShOtSender: messages must point to 32 byte aligned memory. " LOCATION);
+#endif
 		auto numInstances = u64{};
 		auto numChunks = u64{};
 		auto chunkSize_ = u64{};
@@ -90,10 +93,10 @@ namespace osuCrypto
 				temp);
 		}
 
-	} MACORO_CATCH(eptr) {
-		if (!chl.closed()) co_await chl.close();
-		std::rethrow_exception(eptr);
-	}
+		} MACORO_CATCH(eptr) {
+			if (!chl.closed()) co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
 	}
 
 	template<typename SubspaceVole>
@@ -179,6 +182,10 @@ namespace osuCrypto
 		const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
+#ifdef ENABLE_SSE
+		if ((u64)messages.data() % 32)
+			throw std::runtime_error("SoftSpokenShOtReceiver: messages must point to 32 byte aligned memory. " LOCATION);
+#endif
 		auto numInstances = u64{};
 		auto numChunks = u64{};
 		auto nChunk = u64{};

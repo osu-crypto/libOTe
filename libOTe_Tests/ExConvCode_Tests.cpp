@@ -3,6 +3,7 @@
 #include <iomanip>
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe/Tools/ExConvCode/ExConvChecker.h"
+#include <cmath>
 
 namespace osuCrypto
 {

@@ -448,12 +448,12 @@ namespace osuCrypto {
 	do{}while(0)
 
 
-				SIMD8(q, coeffsL0[q] = _mm_loadu_epi8(ptrL0 + q * 16));
-				SIMD8(q, coeffsL1[q] = _mm_loadu_epi8(ptrL1 + q * 16));
-				SIMD8(q, coeffsM0[q] = _mm_loadu_epi8(ptrM0 + q * 16));
-				SIMD8(q, coeffsM1[q] = _mm_loadu_epi8(ptrM1 + q * 16));
-				SIMD8(q, coeffsR0[q] = _mm_loadu_epi8(ptrR0 + q * 16));
-				SIMD8(q, coeffsR1[q] = _mm_loadu_epi8(ptrR1 + q * 16));
+				SIMD8(q, coeffsL0[q] = _mm_loadu_si128((__m128i*)(ptrL0 + q * 16)));
+				SIMD8(q, coeffsL1[q] = _mm_loadu_si128((__m128i*)(ptrL1 + q * 16)));
+				SIMD8(q, coeffsM0[q] = _mm_loadu_si128((__m128i*)(ptrM0 + q * 16)));
+				SIMD8(q, coeffsM1[q] = _mm_loadu_si128((__m128i*)(ptrM1 + q * 16)));
+				SIMD8(q, coeffsR0[q] = _mm_loadu_si128((__m128i*)(ptrR0 + q * 16)));
+				SIMD8(q, coeffsR1[q] = _mm_loadu_si128((__m128i*)(ptrR1 + q * 16)));
 
 
 
@@ -488,19 +488,19 @@ namespace osuCrypto {
 				SIMD8(j, coeffsR0[j] = coeffsL0[j] ^ coeffsM0[j] ^ mult0[j]);
 				SIMD8(j, coeffsR1[j] = coeffsL1[j] ^ coeffsM1[j] ^ xor_l[j]);
 
-				SIMD8(j, _mm_storeu_epi8(ptrR0 + j * 16, coeffsR0[j]));
-				SIMD8(j, _mm_storeu_epi8(ptrR1 + j * 16, coeffsR1[j]));
+				
+				SIMD8(j, _mm_storeu_si128((__m128i*)(ptrR0 + j * 16), coeffsR0[j]));
+				SIMD8(j, _mm_storeu_si128((__m128i*)(ptrR1 + j * 16), coeffsR1[j]));
 				// Explanation:
 				// cL + cM*(\alpha+1) + cR(\alpha+1)^2
 				// = cL + cM + cM*\alpha + cR*(3\alpha + 2)
 				// = cL + cM + \alpha*(cM + cR)
 				// Note: we're in the F_2 field extension so 3\alpha+2 = \alpha+0.
 
-				SIMD8(j, _mm_storeu_epi8(ptrL0 + j * 16, tL0[j]));
-				SIMD8(j, _mm_storeu_epi8(ptrL1 + j * 16, tL1[j]));
-
-				SIMD8(j, _mm_storeu_epi8(ptrM0 + j * 16, tM0[j]));
-				SIMD8(j, _mm_storeu_epi8(ptrM1 + j * 16, tM1[j]));
+				SIMD8(j, _mm_storeu_si128((__m128i*)(ptrL0 + j * 16), tL0[j]));
+				SIMD8(j, _mm_storeu_si128((__m128i*)(ptrL1 + j * 16), tL1[j]));
+				SIMD8(j, _mm_storeu_si128((__m128i*)(ptrM0 + j * 16), tM0[j]));
+				SIMD8(j, _mm_storeu_si128((__m128i*)(ptrM1 + j * 16), tM1[j]));
 
 
 				ptrL0 += width * 16;

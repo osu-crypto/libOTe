@@ -56,7 +56,11 @@ git clone https://github.com/osu-crypto/libOTe.git
 cd libOTe
 python build.py --all --boost --sodium
 ```
-The main executable with examples is `frontend` and is located in the build directory, eg `out/build/linux/frontend/frontend, out/build/x64-Release/frontend/frontend.exe` depending on the OS. 
+The main executable with examples is
+```
+./out/build/<platform>/frontend/frontend_libOTe
+```
+where `<platform>` is the build directory, eg `linux`, `x64-Release`, `osx`, etc. **Unit Tests** and **example code** can be run with this excutable. Run the program with no options for a list of available options.
 
 ### Build Options
 LibOTe can be built with various only the selected protocols enabled. `-D ENABLE_ALL_OT=ON` will enable all available protocols depending on platform/dependencies. The `ON`/`OFF` options include
