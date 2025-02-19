@@ -273,7 +273,7 @@ namespace osuCrypto
 					densePoints[i] = points[i] >> depth;
 				Matrix<block> seeds(points.size(), 1ull << mDenseDepth);
 				Matrix<u8> tags(points.size(), 1ull << mDenseDepth);
-				co_await mRegDpf.expand(densePoints, {}, prng.get(), [&](auto treeIdx, auto leafIdx, auto seed, auto tag) {
+				co_await mRegDpf.expand(densePoints, {}, prng.get(), [&](auto treeIdx, auto leafIdx, auto seed, block tag) {
 					seeds(treeIdx, leafIdx) = seed;
 					tags(treeIdx, leafIdx) = tag.get<u8>(0)&1;
 					}, sock);
@@ -495,7 +495,6 @@ namespace osuCrypto
 			//std::cout << "-----------final-------------" << std::endl;
 			for (u64 r = 0; r < mNumPoints; ++r)
 			{
-				auto& tree = trees[r];
 				auto size = sparsePoints[r].size();
 				for (u64 i = 0; i < size; ++i)
 				{

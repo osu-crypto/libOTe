@@ -9,15 +9,15 @@
 #define LOG_BATCH_SIZE 6 // operate in smallish batches to maximize cache hits
 namespace osuCrypto
 {
+
 	// Naming conventions:
 	// - A,B refer to shares given to parties A and B
 	// - 0,1,2 refer to the branch index in the ternary tree
-
 	void DPFGen(
 		PRFKeys& prf_keys,
 		size_t domain_size,
 		size_t index,
-		span<uint128_t> msg_blocks,
+		span<block> msg_blocks,
 		size_t msg_block_len,
 		DPFKey& k0,
 		DPFKey& k1,
@@ -25,35 +25,35 @@ namespace osuCrypto
 	{
 
 		// starting seeds given to each party
-		uint128_t seedA = prng.get();
-		uint128_t seedB = prng.get();
+		block seedA = prng.get();
+		block seedB = prng.get();
 
 		// correction word provided to both parties
 		// (one correction word per level)
-		std::vector<uint128_t> sCW0(domain_size);
-		std::vector<uint128_t> sCW1(domain_size);
-		std::vector<uint128_t> sCW2(domain_size);
+		std::vector<block> sCW0(domain_size);
+		std::vector<block> sCW1(domain_size);
+		std::vector<block> sCW2(domain_size);
 
 		// variables for the intermediate values
-		uint128_t parent, parentA, parentB, sA0, sA1, sA2, sB0, sB1, sB2;
+		block parent, parentA, parentB, sA0, sA1, sA2, sB0, sB1, sB2;
 
 		// current parent value (xor of the two seeds)
 		parent = seedA ^ seedB;
 
 		// control bit of the parent on the special path must always be set to 1
 		// so as to apply the corresponding correction word
-		if (get_lsb(parent) == uint128_t{ 0 })
+		if (get_lsb(parent) == ZeroBlock)
 			seedA = flip_lsb(seedA);
 
 		parentA = seedA;
 		parentB = seedB;
 
-		uint8_t prev_control_bit_A, prev_control_bit_B;
+		block prev_control_bit_A, prev_control_bit_B;
 
 		for (size_t i = 0; i < domain_size; i++)
 		{
-			prev_control_bit_A = static_cast<u8>(get_lsb(parentA));
-			prev_control_bit_B = static_cast<u8>(get_lsb(parentB));
+			prev_control_bit_A = get_lsb(parentA);
+			prev_control_bit_B = get_lsb(parentB);
 
 			// expand the starting seeds of each party
 			PRFEval(prf_keys.prf_key0, parentA, sA0);
@@ -65,7 +65,7 @@ namespace osuCrypto
 
 			// on-path correction word is set to random
 			// so as to be indistinguishable from the real correction words
-			uint128_t r = prng.get();
+			block r = prng.get();
 
 			// get the current trit (ternary bit) of the special index
 			uint8_t trit = get_trit(index, domain_size, i);
@@ -74,14 +74,14 @@ namespace osuCrypto
 			{
 			case 0:
 				parent = sA0 ^ sB0 ^ r;
-				if (get_lsb(parent) == 0)
+				if (get_lsb(parent) == ZeroBlock)
 					r = flip_lsb(r);
 
 				sCW0[i] = r;
 				sCW1[i] = sA1 ^ sB1;
 				sCW2[i] = sA2 ^ sB2;
 
-				if (get_lsb(parentA) == 1)
+				if (get_lsb(parentA) == AllOneBlock)
 				{
 					parentA = sA0 ^ r;
 					parentB = sB0;
@@ -96,14 +96,14 @@ namespace osuCrypto
 
 			case 1:
 				parent = sA1 ^ sB1 ^ r;
-				if (get_lsb(parent) == 0)
+				if (get_lsb(parent) == ZeroBlock)
 					r = flip_lsb(r);
 
 				sCW0[i] = sA0 ^ sB0;
 				sCW1[i] = r;
 				sCW2[i] = sA2 ^ sB2;
 
-				if (get_lsb(parentA) == 1)
+				if (get_lsb(parentA) == AllOneBlock)
 				{
 					parentA = sA1 ^ r;
 					parentB = sB1;
@@ -118,14 +118,14 @@ namespace osuCrypto
 
 			case 2:
 				parent = sA2 ^ sB2 ^ r;
-				if (get_lsb(parent) == 0)
+				if (get_lsb(parent) == ZeroBlock)
 					r = flip_lsb(r);
 
 				sCW0[i] = sA0 ^ sB0;
 				sCW1[i] = sA1 ^ sB1;
 				sCW2[i] = r;
 
-				if (get_lsb(parentA) == 1)
+				if (get_lsb(parentA) == AllOneBlock)
 				{
 					parentA = sA2 ^ r;
 					parentB = sB2;
@@ -145,29 +145,29 @@ namespace osuCrypto
 		}
 
 		// set the last correction word to correct the output to msg
-		uint128_t leaf_seedA, leaf_seedB;
+		block leaf_seedA, leaf_seedB;
 		uint8_t last_trit = get_trit(index, domain_size, domain_size - 1);
 		if (last_trit == 0)
 		{
-			leaf_seedA = sA0 ^ uint128_t(prev_control_bit_A * sCW0[domain_size - 1]);
-			leaf_seedB = sB0 ^ uint128_t(prev_control_bit_B * sCW0[domain_size - 1]);
+			leaf_seedA = sA0 ^ prev_control_bit_A & sCW0[domain_size - 1];
+			leaf_seedB = sB0 ^ prev_control_bit_B & sCW0[domain_size - 1];
 		}
 		else if (last_trit == 1)
 		{
-			leaf_seedA = sA1 ^ uint128_t(prev_control_bit_A * sCW1[domain_size - 1]);
-			leaf_seedB = sB1 ^ uint128_t(prev_control_bit_B * sCW1[domain_size - 1]);
-		}
+			leaf_seedA = sA1 ^ prev_control_bit_A & sCW1[domain_size - 1];
+			leaf_seedB = sB1 ^ prev_control_bit_B & sCW1[domain_size - 1];
+		}					   
 
 		else if (last_trit == 2)
 		{
-			leaf_seedA = sA2 ^ uint128_t(prev_control_bit_A * sCW2[domain_size - 1]);
-			leaf_seedB = sB2 ^ uint128_t(prev_control_bit_B * sCW2[domain_size - 1]);
+			leaf_seedA = sA2 ^ prev_control_bit_A & sCW2[domain_size - 1];
+			leaf_seedB = sB2 ^ prev_control_bit_B & sCW2[domain_size - 1];
 		}
 
-		AlignedUnVector<uint128_t> outputA(msg_block_len);
-		AlignedUnVector<uint128_t> outputB(msg_block_len);
-		AlignedUnVector<uint128_t> cache(msg_block_len);
-		AlignedUnVector<uint128_t> outputCW(msg_block_len);
+		AlignedUnVector<block> outputA(msg_block_len);
+		AlignedUnVector<block> outputB(msg_block_len);
+		AlignedUnVector<block> cache(msg_block_len);
+		AlignedUnVector<block> outputCW(msg_block_len);
 
 		outputA[0] = leaf_seedA;
 		outputB[0] = leaf_seedB;
@@ -180,9 +180,9 @@ namespace osuCrypto
 
 		// memcpy all the generated values into two keys
 		// 16 = sizeof(uint128_t)
-		size_t key_size = sizeof(uint128_t);			 // initial seed size;
-		key_size += 3 * domain_size * sizeof(uint128_t); // correction words
-		key_size += sizeof(uint128_t) * msg_block_len;	 // output correction word
+		size_t key_size = sizeof(block);			 // initial seed size;
+		key_size += 3 * domain_size * sizeof(block); // correction words
+		key_size += sizeof(block) * msg_block_len;	 // output correction word
 
 		k0.prf_keys = &prf_keys;
 		k0.k.resize(key_size);
@@ -215,8 +215,8 @@ namespace osuCrypto
 	// is only expanded once.
 	void DPFFullDomainEval(
 		DPFKey& key,
-		span<uint128_t> cache,
-		span<uint128_t> output)
+		span<block> cache,
+		span<block> output)
 	{
 		size_t size = key.size;
 		span<u8> k = key.k;
@@ -233,15 +233,15 @@ namespace osuCrypto
 		const size_t num_leaves = ipow(3, size);
 
 		memcpy(&output[0], &k[0], 16); // output[0] is the start seed
-		const uint128_t* sCW0 = (uint128_t*)&k[16];
-		const uint128_t* sCW1 = (uint128_t*)&k[16 * size + 16];
-		const uint128_t* sCW2 = (uint128_t*)&k[16 * 2 * size + 16];
+		const block* sCW0 = (block*)&k[16];
+		const block* sCW1 = (block*)&k[16 * size + 16];
+		const block* sCW2 = (block*)&k[16 * 2 * size + 16];
 
 		// inner loop variables related to node expansion
 		// and correction word application
-		span<uint128_t> tmp;
+		span<block> tmp;
 		size_t idx0, idx1, idx2;
-		uint8_t cb = 0;
+		block cb = ZeroBlock;
 
 		// batching variables related to chunking of inner loop processing
 		// for the purpose of maximizing cache hits
@@ -275,10 +275,10 @@ namespace osuCrypto
 
 				while (idx0 < offset + batch_size)
 				{
-					cb = static_cast<u8>(output[idx0]) & 1; // gets the LSB of the parent
-					cache[idx0] ^= (cb * sCW0[i]);
-					cache[idx1] ^= (cb * sCW1[i]);
-					cache[idx2] ^= (cb * sCW2[i]);
+					cb = get_lsb(output[idx0]); // gets the LSB of the parent
+					cache[idx0] ^= (cb & sCW0[i]);
+					cache[idx1] ^= (cb & sCW1[i]);
+					cache[idx2] ^= (cb & sCW2[i]);
 
 					idx0++;
 					idx1++;
@@ -297,7 +297,7 @@ namespace osuCrypto
 
 		const size_t output_length = key.msg_len * num_leaves;
 		const size_t msg_len = key.msg_len;
-		uint128_t* outputCW = (uint128_t*)&k[16 * 3 * size + 16];
+		block* outputCW = (block*)&k[16 * 3 * size + 16];
 		ExtendOutput(prf_keys, output, cache, num_leaves, output_length);
 
 		size_t j = 0;
@@ -307,7 +307,7 @@ namespace osuCrypto
 			// which is the case internally in ExtendOutput. It would be good
 			// to remove this assumption however using memcpy is costly...
 
-			if (cache[i * msg_len] & uint128_t{ 1 }) // parent control bit
+			if (get_lsb(cache[i * msg_len]) != ZeroBlock) // parent control bit
 			{
 				for (j = 0; j < msg_len; j++)
 					output[i * msg_len + j] ^= outputCW[j];

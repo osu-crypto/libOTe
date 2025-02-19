@@ -21,7 +21,7 @@ namespace osuCrypto
         PRFKeys& prf_keys,
         size_t domain_size,
         size_t index,
-        span<uint128_t> msg_blocks,
+        span<block> msg_blocks,
         size_t msg_block_len,
         DPFKey& k0,
         DPFKey& k1, 
@@ -29,7 +29,7 @@ namespace osuCrypto
 
     void DPFFullDomainEval(
         DPFKey& k,
-        span<uint128_t> cache,
-        span<uint128_t> output);
+        span<block> cache,
+        span<block> output);
 
 }

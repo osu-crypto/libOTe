@@ -539,7 +539,7 @@ namespace osuCrypto
 				{
 					for (u64 j = 0; j < 2; ++j)
 					{
-						SIMD8(q, temp[q] = currentSeed[j][k + q] ^ parentTag[k + q] & sigma[j][k + q]);
+						SIMD8(q, temp[q] = currentSeed[j][k + q] ^ (parentTag[k + q] & sigma[j][k + q]));
 						SIMD8(q, tag[j][k + q] = tagBit(temp[q]));
 						SIMD8(q, currentSeed[j][k + q] = AES::roundFn(temp[q], temp[q]));
 						SIMD8(q, diff[k + q] ^= currentSeed[j][k + q]);
@@ -550,7 +550,7 @@ namespace osuCrypto
 				{
 					for (u64 j = 0; j < 2; ++j)
 					{
-						temp[0] = currentSeed[j][k] ^ parentTag[k] & sigma[j][k];
+						temp[0] = currentSeed[j][k] ^ (parentTag[k] & sigma[j][k]);
 						tag[j][k] = tagBit(temp[0]);
 						currentSeed[j][k] = AES::roundFn(temp[0], temp[0]);
 						diff[k] ^= currentSeed[j][k];
@@ -559,7 +559,7 @@ namespace osuCrypto
 			}
 		}
 
-		if (values.size() || inputKey && inputKey->mLeafVals.size())
+		if (values.size() || (inputKey && inputKey->mLeafVals.size()))
 		{
 			AlignedUnVector<block> gamma(mNumPoints);
 			if (inputKey)

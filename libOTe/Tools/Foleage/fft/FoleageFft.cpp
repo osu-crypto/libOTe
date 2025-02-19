@@ -53,7 +53,7 @@ namespace osuCrypto {
 			// computed as: mult_l = (h ^ l) and mult_h = l
 			// mult_l = (xor&mask_h>>1) ^ (xor & mask_l) [align h and l then xor]
 			// mult_h = (xor&mask_l) shifted left by 1 to put in h place [shift and OR into place]
-			mult = (xor_h >> 1) ^ (xor_l) | (xor_l << 1);
+			mult = ((xor_h >> 1) ^ xor_l) | (xor_l << 1);
 
 			// tL coefficient obtained by evaluating on X_i=1
 			tL = coeffsL[j] ^ coeffsM[j] ^ coeffsR[j];
@@ -129,7 +129,7 @@ namespace osuCrypto {
 			// computed as: mult_l = (h ^ l) and mult_h = l
 			// mult_l = (xor&mask_h>>1) ^ (xor & mask_l) [align h and l then xor]
 			// mult_h = (xor&mask_l) shifted left by 1 to put in h place [shift and OR into place]
-			mult = (xor_h >> 1) ^ (xor_l) | (xor_l << 1);
+			mult = ((xor_h >> 1) ^ xor_l) | (xor_l << 1);
 
 			// tL coefficient obtained by evaluating on X_i=1
 			tL = coeffsL[j] ^ coeffsM[j] ^ coeffsR[j];
@@ -205,7 +205,7 @@ namespace osuCrypto {
 			// computed as: mult_l = (h ^ l) and mult_h = l
 			// mult_l = (xor&mask_h>>1) ^ (xor & mask_l) [align h and l then xor]
 			// mult_h = (xor&mask_l) shifted left by 1 to put in h place [shift and OR into place]
-			mult = (xor_h >> 1) ^ (xor_l) | (xor_l << 1);
+			mult = ((xor_h >> 1) ^ xor_l) | (xor_l << 1);
 
 			// tL coefficient obtained by evaluating on X_i=1
 			tL = coeffsL[j] ^ coeffsM[j] ^ coeffsR[j];
@@ -281,7 +281,7 @@ namespace osuCrypto {
 			// computed as: mult_l = (h ^ l) and mult_h = l
 			// mult_l = (xor&mask_h>>1) ^ (xor & mask_l) [align h and l then xor]
 			// mult_h = (xor&mask_l) shifted left by 1 to put in h place [shift and OR into place]
-			mult = (xor_h >> 1) ^ (xor_l) | (xor_l << 1);
+			mult = ((xor_h >> 1) ^ xor_l) | (xor_l << 1);
 
 			// tL coefficient obtained by evaluating on X_i=1
 			tL = coeffsL[j] ^ coeffsM[j] ^ coeffsR[j];
@@ -435,13 +435,13 @@ namespace osuCrypto {
 				block coeffsR0[width];
 				block coeffsR1[width];
 
-				//{ constexpr u64 VAR = 1; STATEMENT; }\
-				//{ constexpr u64 VAR = 2; STATEMENT; }\
-				//{ constexpr u64 VAR = 3; STATEMENT; }\
-				//{ constexpr u64 VAR = 4; STATEMENT; }\
-				//{ constexpr u64 VAR = 5; STATEMENT; }\
-				//{ constexpr u64 VAR = 6; STATEMENT; }\
-				//{ constexpr u64 VAR = 7; STATEMENT; }\
+				//{ constexpr u64 VAR = 1; STATEMENT; }
+				//{ constexpr u64 VAR = 2; STATEMENT; }
+				//{ constexpr u64 VAR = 3; STATEMENT; }
+				//{ constexpr u64 VAR = 4; STATEMENT; }
+				//{ constexpr u64 VAR = 5; STATEMENT; }
+				//{ constexpr u64 VAR = 6; STATEMENT; }
+				//{ constexpr u64 VAR = 7; STATEMENT; }
 
 #define SIMD8(VAR, STATEMENT) \
 	{ constexpr u64 VAR = 0; STATEMENT; }\

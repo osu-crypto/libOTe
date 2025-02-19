@@ -306,9 +306,9 @@ namespace osuCrypto
 			}
 
 			std::array<AES, 3> aes{
-				AES(block(324532455457855483,3575765667434524523)),
-				AES(block(456475435444364534,9923458239234989843)),
-				AES(block(324532450985209453,5387987243989842789)) };
+				AES(block(324532455457855483ull,3575765667434524523ull)),
+				AES(block(456475435444364534ull,9923458239234989843ull)),
+				AES(block(324532450985209453ull,5387987243989842789ull)) };
 
 			// at each iteration we first correct the parent level.
 			// The parent level has two siblings which are random.
@@ -368,7 +368,7 @@ namespace osuCrypto
 							for (u64 k = 0; k < numPoints8; k += 8)
 							{
 								block s[8];//, w[8];
-								SIMD8(q, s[q] = seedj[k + q] ^ parentTag[k + q] & sig[k + q]);
+								SIMD8(q, s[q] = seedj[k + q] ^ (parentTag[k + q] & sig[k + q]));
 
 								for (u64 i = 0; i < 3; ++i)
 								{
@@ -387,7 +387,7 @@ namespace osuCrypto
 
 							for (u64 k = numPoints8; k < mNumPoints; ++k)
 							{
-								auto seedjk = seed[j][k] ^ parentTag[k] & sigma[j][k];
+								auto seedjk = seed[j][k] ^ (parentTag[k] & sigma[j][k]);
 
 								for (u64 i = 0; i < 3; ++i)
 								{
@@ -437,7 +437,7 @@ namespace osuCrypto
 						{
 							block s[8];
 
-							SIMD8(q, s[q] = cs[k + q] ^ parentTag[k+q] & sig[k+q]);
+							SIMD8(q, s[q] = cs[k + q] ^ (parentTag[k+q] & sig[k+q]));
 							SIMD8(q, tt[k+q] = lsb(s[q]));
 							SIMD8(q, ctx.fromBlock(leafIter[q], AES::roundFn(s[q], s[q])));
 							SIMD8(q, ctx.plus(sums[k+q], sums[k+q], leafIter[q]));
@@ -446,7 +446,7 @@ namespace osuCrypto
 
 						for (u64 k = numPoints8; k < mNumPoints; ++k)
 						{
-							auto s = cs[k] ^ parentTag[k] & sig[k];
+							auto s = cs[k] ^ (parentTag[k] & sig[k]);
 							tt[k] = lsb(s);
 
 							ctx.fromBlock(*leafIter, AES::roundFn(s, s));
@@ -466,7 +466,7 @@ namespace osuCrypto
 				ctx.resize(gamma, mNumPoints);
 				ctx.resize(diff, mNumPoints);
 
-				auto& curSeed = s[mDepth % 3];
+				//auto& curSeed = s[mDepth % 3];
 
 				for (u64 k = 0; k < mNumPoints; ++k)
 				{

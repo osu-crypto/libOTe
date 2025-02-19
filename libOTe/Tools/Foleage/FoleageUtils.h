@@ -9,7 +9,7 @@
 
 namespace osuCrypto
 {
-	using uint128_t = absl::uint128_t;
+	//using uint128_t = absl::uint128_t;
 	//using int128_t = block;
 	//using uint128_t = block;
 	//using uint128_t = __uint128_t;
@@ -301,14 +301,33 @@ namespace osuCrypto
 		return result;
 	}
 
-	inline int popcount(uint128_t x)
+	inline int popcount(block x)
 	{
-		std::array<u64, 2> xArr;
-		memcpy(xArr.data(), &x, 16);
-		return popcount(xArr[0]) + popcount(xArr[1]);
+		//std::array<u64, 2> xArr;
+		//memcpy(xArr.data(), &x, 16);
+		return popcount(x.get<u64>(0)) + popcount(x.get<u64>(1));
 	}
+	//inline int popcount(uint128_t x)
+	//{
+	//	std::array<u64, 2> xArr;
+	//	memcpy(xArr.data(), &x, 16);
+	//	return popcount(xArr[0]) + popcount(xArr[1]);
+	//}
 
-	inline std::array<u8, 64> extractF4(const uint128_t& val)
+	//inline std::array<u8, 64> extractF4(const uint128_t& val)
+	//{
+	//	std::array<u8, 64> ret;
+	//	const char* ptr = (const char*)&val;
+	//	for (u8 i = 0; i < 16; ++i)
+	//	{
+	//		ret[i * 4 + 0] = (ptr[i] >> 0) & 3;
+	//		ret[i * 4 + 1] = (ptr[i] >> 2) & 3;
+	//		ret[i * 4 + 2] = (ptr[i] >> 4) & 3;
+	//		ret[i * 4 + 3] = (ptr[i] >> 6) & 3;;
+	//	}
+	//	return ret;
+	//}
+	inline std::array<u8, 64> extractF4(const block& val)
 	{
 		std::array<u8, 64> ret;
 		const char* ptr = (const char*)&val;

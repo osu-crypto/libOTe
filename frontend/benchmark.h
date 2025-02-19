@@ -788,7 +788,7 @@ namespace osuCrypto
 		std::vector<Trit32> points(numPoints);
 		std::vector<F> values0(numPoints);
 		std::vector<F> values1(numPoints);
-		Ctx ctx;
+		//Ctx ctx;
 		for (u64 i = 0; i < numPoints; ++i)
 		{
 			points[i] = Trit32(prng.get<u64>() % domain);
@@ -866,7 +866,7 @@ namespace osuCrypto
 		auto logn = cmd.getOr("nn", 10);
 		u64 n = ipow(3, logn);
 		auto blocks = divCeil(n, 128);
-		bool verbose = cmd.isSet("v");
+		//bool verbose = cmd.isSet("v");
 
 
 		u64 trials = cmd.getOr("trials", 1);

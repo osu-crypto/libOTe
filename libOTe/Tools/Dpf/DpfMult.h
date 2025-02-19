@@ -128,7 +128,7 @@ namespace osuCrypto
 			{
 				auto Phi = block(-u64(phi[j]), -u64(phi[j]));
 				theta[j] ^= theta1[j];
-				xy[j] = C[j] ^ theta[j] & A0[j] ^ Phi & b1[j];
+				xy[j] = C[j] ^ (theta[j] & A0[j]) ^ (Phi & b1[j]);
 
 				if (mPartyIdx)
 					xy[j] ^= theta[j] & Phi;

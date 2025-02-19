@@ -36,18 +36,15 @@ namespace osuCrypto
 	//void DestroyPRFKey(struct PRFKeys* prf_keys);
 
 	// XOR with input to prevent inversion using Davies–Meyer construction
-	inline void PRFEval(EVP_CIPHER_CTX& ctx, uint128_t& input, uint128_t& outputs)
+	inline void PRFEval(EVP_CIPHER_CTX& ctx, block& input, block& outputs)
 	{
-		block in, out;
-		copyBytes(in, input);
-		out = ctx.hashBlock(in);
-		copyBytes(outputs, out);
+		outputs = ctx.hashBlock(input);
 	}
 
 	// PRF used to expand the DPF tree. Just a call to AES-ECB.
 	// Note: we use ECB-mode (instead of CTR) as we want to manage each block separately.
 	// XOR with input to prevent inversion using Davies–Meyer construction
-	inline void PRFBatchEval(EVP_CIPHER_CTX& ctx, span<uint128_t> input, span<uint128_t> outputs, u64 num_blocks)
+	inline void PRFBatchEval(EVP_CIPHER_CTX& ctx, span<block> input, span<block> outputs, u64 num_blocks)
 	{
 		if (num_blocks > input.size())
 			throw RTE_LOC;
@@ -59,8 +56,8 @@ namespace osuCrypto
 	// extends the output by the provided factor using the PRG
 	inline void ExtendOutput(
 		PRFKeys& prf_keys,
-		span<uint128_t> output,
-		span<uint128_t> cache,
+		span<block> output,
+		span<block> cache,
 		const size_t output_size,
 		const size_t new_output_size)
 	{
@@ -75,7 +72,7 @@ namespace osuCrypto
 		for (size_t i = 0; i < output_size; i++)
 		{
 			for (size_t j = 0; j < factor; j++)
-				cache[i * factor + j] = output[i] ^ uint128_t{ j };
+				cache[i * factor + j] = output[i] ^ block(0, j);
 		}
 
 		PRFBatchEval(prf_keys.prf_key_ext, cache, output, new_output_size);

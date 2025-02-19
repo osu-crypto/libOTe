@@ -316,7 +316,7 @@ namespace osuCrypto
 		// 3^5=243 elements. These will be used as the new coefficients
 		// in the large tree.
 		co_await mDpfLeaf.expand(prodPolyLeafPos, prodPolyF4Coeffs,
-			[&, byteIdx = 0, bitIdx = 0](u64 treeIdx, u64 leafIdx, u8 v) mutable {
+			[&, byteIdx = 0ull, bitIdx = 0ull](u64 treeIdx, u64 leafIdx, u8 v) mutable {
 				if (treeIdx == 0)
 				{
 					byteIdx = leafIdx / 4;
@@ -337,7 +337,7 @@ namespace osuCrypto
 		// to a block together. This will give us the coefficients of the
 		// the product polynomial.
 		co_await mDpf.expand(prodPolyTreePos, prodPolyF4x243Coeffs,
-			[&, count = 0, out = blocks.data(), end = blocks.data() + blocks.size()]
+			[&, count = 0ull, out = blocks.data(), end = blocks.data() + blocks.size()]
 			(u64 treeIdx, u64 leafIdx, FoleageF4x243 v) mutable {
 				// the callback is called in column major order but blocks
 				// is row major (leafIdx will be the same). So we need to compute 
@@ -405,7 +405,7 @@ namespace osuCrypto
 
 		// XOR the (packed) columns into the accumulator.
 		// Specifically, we perform column-wise XORs to get the result.
-		uint128_t lsbMask, msbMask;
+		u32 lsbMask, msbMask;
 		setBytes(lsbMask, 0b01010101);
 		setBytes(msbMask, 0b10101010);
 		for (size_t i = 0; i < outSize; i++)

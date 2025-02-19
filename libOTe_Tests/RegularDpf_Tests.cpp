@@ -165,8 +165,8 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 	macoro::sync_wait(macoro::when_all_ready(
-		dpf[0].expand(points0, values0, prng.get(), [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; }, sock[0]),
-		dpf[1].expand(points1, values1, prng.get(), [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; }, sock[1])
+		dpf[0].expand(points0, values0, prng.get(), [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; }, sock[0]),
+		dpf[1].expand(points1, values1, prng.get(), [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; }, sock[1])
 	));
 
 
@@ -271,8 +271,8 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 	}
 	if (key[1] != key2[1])
 		throw RTE_LOC;
-	RegularDpf::expand(0, domain, key2[0], [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; });
-	RegularDpf::expand(1, domain, key2[1], [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; });
+	RegularDpf::expand(0, domain, key2[0], [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; });
+	RegularDpf::expand(1, domain, key2[1], [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; });
 
 	for (u64 i = 0; i < domain; ++i)
 	{

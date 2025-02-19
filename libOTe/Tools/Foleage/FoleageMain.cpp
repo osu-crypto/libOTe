@@ -74,7 +74,7 @@ namespace osuCrypto
 						size_t alpha = random_index(block_size, prng);
 
 						// Pick a random output message for benchmarking purposes
-						uint128_t beta[DPF_MSG_SIZE];
+						block beta[DPF_MSG_SIZE];
 						prng.get(beta, DPF_MSG_SIZE);
 
 						// Message (beta) is of size 8 blocks of 128 bits
@@ -89,13 +89,13 @@ namespace osuCrypto
 		//************************************************
 
 		// Allocate memory for the DPF outputs (this is reused for each evaluation)
-		AlignedUnVector<uint128_t> shares(dpf_block_size);
-		AlignedUnVector<uint128_t> cache(dpf_block_size);
+		AlignedUnVector<block> shares(dpf_block_size);
+		AlignedUnVector<block> cache(dpf_block_size);
 
 		// Allocate memory for the concatenated DPF outputs
 		const size_t packed_block_size = ceil(block_size / 64.0);
 		const size_t packed_poly_size = t * packed_block_size;
-		AlignedUnVector<uint128_t> packed_polys(c * c * packed_poly_size);
+		AlignedUnVector<block> packed_polys(c * c * packed_poly_size);
 
 		// Allocate memory for the output FFT
 		AlignedUnVector<uint32_t> fft_u(poly_size);
@@ -112,14 +112,14 @@ namespace osuCrypto
 		time = clock();
 
 		size_t key_index;
-		uint128_t* poly_block;
+		block* poly_block;
 		size_t i, j, k, l, w;
 		for (i = 0; i < c; i++)
 		{
 			for (j = 0; j < c; j++)
 			{
 				const size_t poly_index = i * c + j;
-				uint128_t* packed_poly = &packed_polys[poly_index * packed_poly_size];
+				block* packed_poly = &packed_polys[poly_index * packed_poly_size];
 
 				for (k = 0; k < t; k++)
 				{
@@ -148,7 +148,7 @@ namespace osuCrypto
 		for (size_t i = 0; i < c * c; i++)
 		{
 			size_t poly_index = i * packed_poly_size;
-			const uint128_t* poly = &packed_polys[poly_index];
+			const block* poly = &packed_polys[poly_index];
 
 #ifdef ENABLE_SSE
 			_mm_prefetch((char*)poly, _MM_HINT_T2);
@@ -156,7 +156,7 @@ namespace osuCrypto
 
 			size_t block_idx, packed_coeff_idx, coeff_idx;
 			//uint8_t packed_bit_idx;
-			uint128_t packed_coeff;
+			block packed_coeff;
 
 			block_idx = 0;
 			packed_coeff_idx = 0;
@@ -175,7 +175,7 @@ namespace osuCrypto
 				for (size_t l = 0; l < 64; l++)
 				{
 					packed_coeff = packed_coeff >> 2;
-					fft_u[k + l] |= static_cast<u8>(packed_coeff) & 0b11;
+					fft_u[k + l] |= static_cast<u8>(packed_coeff.get<u8>(0)) & 0b11;
 					fft_u[k + l] = fft_u[k + l] << 2;
 				}
 
@@ -199,7 +199,7 @@ namespace osuCrypto
 			for (size_t k = poly_size - 64 + 1; k < poly_size; k++)
 			{
 				packed_coeff = packed_coeff >> 2;
-				fft_u[k] |= static_cast<u8>(packed_coeff) & 0b11 ;
+				fft_u[k] |= static_cast<u8>(packed_coeff.get<u8>(0)) & 0b11 ;
 				fft_u[k] = fft_u[k] << 2;
 			}
 		}

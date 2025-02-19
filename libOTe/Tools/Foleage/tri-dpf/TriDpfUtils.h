@@ -9,14 +9,14 @@
 namespace osuCrypto
 {
 
-    static inline uint128_t flip_lsb(uint128_t input)
+    static inline block flip_lsb(block input)
     {
-        return input ^ uint128_t{ 1 };
+        return input ^ block(0, 1);
     }
 
-    static inline uint128_t get_lsb(uint128_t input)
+    static inline block get_lsb(block input)
     {
-        return input & uint128_t{ 1 };
+        return block::allSame(-(input.get<u8>(0) & 1));
     }
 
     static inline int get_trit(uint64_t x, int size, int t)
@@ -31,7 +31,7 @@ namespace osuCrypto
         return ternary[t];
     }
 
-    static inline int get_bit(uint128_t x, int size, int b)
+    static inline int get_bit(block x, int size, int b)
     {
         return *oc::BitIterator((u8*)&x, (size - b));
         //return ((x) >> (size - b)) & 1;

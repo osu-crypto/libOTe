@@ -20,7 +20,7 @@ namespace osuCrypto
         return prng.get<size_t>() % (size_t)MAXRANDINDEX;
     }
     //using int128_t = uint128_t;
-    uint128_t randMsg(PRNG& prng)
+    block randMsg(PRNG& prng)
     {
         return prng.get();
         //uint128_t msg;
@@ -30,11 +30,11 @@ namespace osuCrypto
 
     double benchmark_dpfGen()
     {
-        size_t num_leaves = ipow(3, FULLEVALDOMAIN);
+        //size_t num_leaves = ipow(3, FULLEVALDOMAIN);
         size_t size = FULLEVALDOMAIN; // evaluation will result in 3^size points
         PRNG prng(block(3423423));
         size_t secret_index = randIndex(prng);
-        uint128_t secret_msg = randMsg(prng);
+        block secret_msg = randMsg(prng);
         size_t msg_len = 1;
 
         PRFKeys prf_keys;
@@ -45,7 +45,7 @@ namespace osuCrypto
 
         clock_t t;
         t = clock();
-        DPFGen(prf_keys, size, secret_index, span<uint128_t>(&secret_msg,1), msg_len, kA, kB, prng);
+        DPFGen(prf_keys, size, secret_index, span<block>(&secret_msg,1), msg_len, kA, kB, prng);
         t = clock() - t;
         double time_taken = ((double)t) / (CLOCKS_PER_SEC / 1000.0); // ms
 
@@ -63,14 +63,14 @@ namespace osuCrypto
         PRFKeys prf_keys;
         prf_keys.gen(prng);
 
-        AlignedUnVector<uint128_t> data_in(num_leaves * MESSAGESIZE);
-        AlignedUnVector<uint128_t> data_out(num_leaves * MESSAGESIZE);
-        AlignedUnVector<uint128_t> data_tmp(num_leaves * MESSAGESIZE);
-        AlignedUnVector<uint128_t> tmp;
+        AlignedUnVector<block> data_in(num_leaves * MESSAGESIZE);
+        AlignedUnVector<block> data_out(num_leaves * MESSAGESIZE);
+        AlignedUnVector<block> data_tmp(num_leaves * MESSAGESIZE);
+        AlignedUnVector<block> tmp;
 
         // fill with unique data
         for (size_t i = 0; i < num_leaves * MESSAGESIZE; i++)
-            data_tmp[i] = (uint128_t)i;
+            data_tmp[i] = block(i);
 
         // make the input data pseudorandom for correct timing
         PRFBatchEval(prf_keys.prf_key0, data_tmp, data_in, num_leaves * MESSAGESIZE);

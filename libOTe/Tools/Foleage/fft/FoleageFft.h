@@ -5,6 +5,7 @@
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/MatrixView.h"
 #include "libOTe/Tools/Foleage/FoleageUtils.h"
+#include <immintrin.h>
 
 //#include "libOTe/Tools/Foleage/utils.h"
 namespace osuCrypto {
@@ -328,7 +329,7 @@ namespace osuCrypto {
 
 
 
-	template<typename u64 stride, typename T>
+	template<u64 stride, typename T>
 	OC_FORCEINLINE void foleageFFTOne(
 		T* __restrict coeffsL0,
 		T* __restrict coeffsL1,
@@ -338,7 +339,6 @@ namespace osuCrypto {
 		T* __restrict coeffsR1)
 	{
 
-#pragma unroll(stride)
 		for (u64 i = 0; i < stride; ++i)
 		{
 

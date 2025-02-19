@@ -11,7 +11,7 @@
 #include "cryptoTools/Common/Timer.h"
 namespace osuCrypto
 {
-	//u8 extractF4(const uint128_t& val, u8 idx)
+	//u8 extractF4(const block& val, u8 idx)
 	//{
 	//	auto byteIdx = idx / 4;
 	//	auto bitIdx = idx % 4;
@@ -20,18 +20,18 @@ namespace osuCrypto
 	//}
 
 	void testOutputCorrectness(
-		span<uint128_t> shares0,
-		span<uint128_t> shares1,
+		span<block> shares0,
+		span<block> shares1,
 		size_t num_outputs,
 		size_t secret_index,
-		span<uint128_t> secret_msg,
+		span<block> secret_msg,
 		size_t msg_len)
 	{
 		for (size_t i = 0; i < msg_len; i++)
 		{
-			uint128_t shareA = shares0[secret_index * msg_len + i];
-			uint128_t shareB = shares1[secret_index * msg_len + i];
-			uint128_t res = shareA ^ shareB;
+			block shareA = shares0[secret_index * msg_len + i];
+			block shareB = shares1[secret_index * msg_len + i];
+			block res = shareA ^ shareB;
 
 			if (res != secret_msg[i])
 			{
@@ -47,11 +47,11 @@ namespace osuCrypto
 
 			for (size_t j = 0; j < msg_len; j++)
 			{
-				uint128_t shareA = shares0[i * msg_len + j];
-				uint128_t shareB = shares1[i * msg_len + j];
-				uint128_t res = shareA ^ shareB;
+				block shareA = shares0[i * msg_len + j];
+				block shareB = shares1[i * msg_len + j];
+				block res = shareA ^ shareB;
 
-				if (res != 0)
+				if (res != ZeroBlock)
 				{
 					printf("FAIL (non-zero) %zu\n", i);
 					printBytes(&shareA, 16);
@@ -64,8 +64,8 @@ namespace osuCrypto
 	}
 
 	void printOutputShares(
-		uint128_t* shares0,
-		uint128_t* shares1,
+		block* shares0,
+		block* shares1,
 		size_t num_outputs,
 		size_t msg_len)
 	{
@@ -73,9 +73,9 @@ namespace osuCrypto
 		{
 			for (size_t j = 0; j < msg_len; j++)
 			{
-				uint128_t shareA = shares0[i * msg_len + j];
-				uint128_t shareB = shares1[i * msg_len + j];
-				//uint128_t res = shareA ^ shareB;
+				block shareA = shares0[i * msg_len + j];
+				block shareB = shares1[i * msg_len + j];
+				//block res = shareA ^ shareB;
 
 				printf("(%zu, %zu) %zu\n", i, j, msg_len);
 				printBytes(&shareA, 16);
@@ -87,18 +87,18 @@ namespace osuCrypto
 
 
 	void testOutputCorrectness_spf(
-		span<uint128_t> shares0,
-		span<uint128_t> shares1,
+		span<block> shares0,
+		span<block> shares1,
 		size_t num_outputs,
 		size_t secret_index,
-		span<uint128_t> secret_msg,
+		span<block> secret_msg,
 		size_t msg_len)
 	{
 		for (size_t i = 0; i < msg_len; i++)
 		{
-			uint128_t shareA = shares0[secret_index * msg_len + i];
-			uint128_t shareB = shares1[secret_index * msg_len + i];
-			uint128_t res = shareA ^ shareB;
+			block shareA = shares0[secret_index * msg_len + i];
+			block shareB = shares1[secret_index * msg_len + i];
+			block res = shareA ^ shareB;
 
 			if (res != secret_msg[i])
 			{
@@ -114,11 +114,11 @@ namespace osuCrypto
 
 			for (size_t j = 0; j < msg_len; j++)
 			{
-				uint128_t shareA = shares0[i * msg_len + j];
-				uint128_t shareB = shares1[i * msg_len + j];
-				uint128_t res = shareA ^ shareB;
+				block shareA = shares0[i * msg_len + j];
+				block shareB = shares1[i * msg_len + j];
+				block res = shareA ^ shareB;
 
-				if (res != 0)
+				if (res != ZeroBlock)
 				{
 					printf("FAIL (non-zero) %zu\n", i);
 					printBytes(&shareA, 16);
@@ -131,8 +131,8 @@ namespace osuCrypto
 	}
 
 	void printOutputShares_spf(
-		uint128_t* shares0,
-		uint128_t* shares1,
+		block* shares0,
+		block* shares1,
 		size_t num_outputs,
 		size_t msg_len)
 	{
@@ -140,9 +140,9 @@ namespace osuCrypto
 		{
 			for (size_t j = 0; j < msg_len; j++)
 			{
-				uint128_t shareA = shares0[i * msg_len + j];
-				uint128_t shareB = shares1[i * msg_len + j];
-				//uint128_t res = shareA ^ shareB;	  
+				block shareA = shares0[i * msg_len + j];
+				block shareB = shares1[i * msg_len + j];
+				//block res = shareA ^ shareB;	  
 
 				printf("(%zu, %zu) %zu\n", i, j, msg_len);
 				printBytes(&shareA, 16);
@@ -300,7 +300,7 @@ namespace osuCrypto
 		}
 
 		{
-			int randomize =  241234123; // set to 1 to make debuggable
+			int randomize = 241234123; // set to 1 to make debuggable
 
 			std::vector<u16> v(9 * 8);
 			std::vector<u16> v2(9 * 8);
@@ -352,11 +352,11 @@ namespace osuCrypto
 			}
 		}
 
-		if(0)
+		if (0)
 		{
 
 			u64 trials = 1000000;
-			int randomize = 241234123; // set to 1 to make debuggable
+			//int randomize = 241234123; // set to 1 to make debuggable
 
 			u64 ss = 9;
 			std::vector<block> lsb(ss * trials), msb(ss * trials);
@@ -411,12 +411,12 @@ namespace osuCrypto
 				for (u64 j = 0; j < 3; ++j)
 				{
 
-					foleageTransposeLeaf<2>((u8*)& bLsb[j * 3], (__m128i*)& bLsb[j * 3]);
-					foleageTransposeLeaf<2>((u8*)& bMsb[j * 3], (__m128i*)& bMsb[j * 3]);
+					foleageTransposeLeaf<2>((u8*)&bLsb[j * 3], (__m128i*) & bLsb[j * 3]);
+					foleageTransposeLeaf<2>((u8*)&bMsb[j * 3], (__m128i*) & bMsb[j * 3]);
 					foleageFFTOne<1>(
-						&bLsb2[j * 3 + 0], &bLsb2[j * 3 + 0],
-						&bLsb2[j * 3 + 1], &bLsb2[j * 3 + 1],
-						&bLsb2[j * 3 + 2], &bLsb2[j * 3 + 2]
+						&bLsb2[j * 3 + 0], &bMsb2[j * 3 + 0],
+						&bLsb2[j * 3 + 1], &bMsb2[j * 3 + 1],
+						&bLsb2[j * 3 + 2], &bMsb2[j * 3 + 2]
 					);
 				}
 
@@ -424,7 +424,7 @@ namespace osuCrypto
 
 				foleageTranspose<2>((u8*)&bMsb2[0], (__m128i*)bMsb);
 
-				foleageFFTOne<3,block>(
+				foleageFFTOne<3, block>(
 					&bLsb[0], &bMsb[0],
 					&bLsb[3], &bMsb[3],
 					&bLsb[6], &bMsb[6]
@@ -457,16 +457,16 @@ namespace osuCrypto
 			for (u64 i = 0; i < n; ++i)
 			{
 				lsb[i] =
-					(a[i] >> 0) & 1 |
-					(a[i] >> 1) & 2 |
-					(a[i] >> 2) & 4 |
-					(a[i] >> 3) & 8;
+					((a[i] >> 0) & 1) |
+					((a[i] >> 1) & 2) |
+					((a[i] >> 2) & 4) |
+					((a[i] >> 3) & 8);
 				auto m = a[i] >> 1;
 				msb[i] =
-					(m >> 0) & 1 |
-					(m >> 1) & 2 |
-					(m >> 2) & 4 |
-					(m >> 3) & 8;
+					((m >> 0) & 1) |
+					((m >> 1) & 2) |
+					((m >> 2) & 4) |
+					((m >> 3) & 8);
 			}
 
 			timer.setTimePoint("begin");
@@ -478,16 +478,16 @@ namespace osuCrypto
 			for (u64 i = 0; i < n; ++i)
 			{
 				auto a0 =
-					(a[i] >> 0) & 1 |
-					(a[i] >> 1) & 2 |
-					(a[i] >> 2) & 4 |
-					(a[i] >> 3) & 8;
+					((a[i] >> 0) & 1) |
+					((a[i] >> 1) & 2) |
+					((a[i] >> 2) & 4) |
+					((a[i] >> 3) & 8);
 				auto m = a[i] >> 1;
 				auto a1 =
-					(m >> 0) & 1 |
-					(m >> 1) & 2 |
-					(m >> 2) & 4 |
-					(m >> 3) & 8;
+					((m >> 0) & 1) |
+					((m >> 1) & 2) |
+					((m >> 2) & 4) |
+					((m >> 3) & 8);
 
 				if (a0 != lsb[i] || a1 != msb[i])
 					throw RTE_LOC;
@@ -572,9 +572,9 @@ namespace osuCrypto
 		size_t secret_index = prng.get<u64>() % MAXRANDINDEX;
 
 		// sample a random message of size msg_len
-		std::vector<uint128_t> secret_msg(msg_len);
+		std::vector<block> secret_msg(msg_len);
 		for (size_t i = 0; i < msg_len; i++)
-			secret_msg[i] = prng.get<uint128_t>();
+			secret_msg[i] = prng.get<block>();
 
 		PRFKeys prf_keys;
 		prf_keys.gen(prng);
@@ -585,9 +585,9 @@ namespace osuCrypto
 		for (size_t i = 0; i < SUMT; i++)
 			DPFGen(prf_keys, size, secret_index, secret_msg, msg_len, kA[i], kB[i], prng);
 
-		std::vector<uint128_t> shares0(num_leaves * msg_len);
-		std::vector<uint128_t> shares1(num_leaves * msg_len);
-		std::vector<uint128_t> cache(num_leaves * msg_len);
+		std::vector<block> shares0(num_leaves * msg_len);
+		std::vector<block> shares1(num_leaves * msg_len);
+		std::vector<block> cache(num_leaves * msg_len);
 
 		//************************************************
 		// Test full domain evaluation
@@ -638,9 +638,9 @@ namespace osuCrypto
 		size_t secret_index = prng.get<size_t>() % ipow(3, size);
 
 		// sample a random message of size msg_len
-		std::vector<uint128_t> secret_msg(msg_len);
+		std::vector<block> secret_msg(msg_len);
 		for (size_t i = 0; i < msg_len; i++)
-			secret_msg[i] = prng.get<uint128_t>();
+			secret_msg[i] = prng.get<block>();
 
 		PRFKeys prf_keys;
 		prf_keys.gen(prng);
@@ -650,9 +650,9 @@ namespace osuCrypto
 
 		DPFGen(prf_keys, size, secret_index, secret_msg, msg_len, kA, kB, prng);
 
-		std::vector<uint128_t> shares0(num_leaves * msg_len);
-		std::vector<uint128_t> shares1(num_leaves * msg_len);
-		std::vector<uint128_t> cache(num_leaves * msg_len);
+		std::vector<block> shares0(num_leaves * msg_len);
+		std::vector<block> shares1(num_leaves * msg_len);
+		std::vector<block> cache(num_leaves * msg_len);
 
 		//************************************************
 		// Test full domain evaluation
@@ -704,7 +704,7 @@ namespace osuCrypto
 	void foleage_pcg_test(const CLP& cmd)
 	{
 		bool check = !cmd.isSet("noCheck");
-		auto N = 12; // 3^N number of OLEs generated in total
+		auto N = 5; // 3^N number of OLEs generated in total
 
 		// The C and T parameters are computed using the SageMath script that can be
 		// found in https://github.com/mbombar/estimator_folding
@@ -1024,19 +1024,36 @@ namespace osuCrypto
 						// Coeff index in the block of 256 coefficients
 						size_t alpha_1 = alpha % 256;
 
-						// Coeff index in the uint128_t output (64 elements of F4)
-						size_t packed_idx = floor(alpha_1 / 64.0);
+						// Coeff index in the block output (64 elements of F4)
+						size_t byte_idx = alpha_1 / 4;
 
-						// Bit index in the uint128_t ouput
-						size_t bit_idx = alpha_1 % 64;
+						// Bit index in the block ouput
+						size_t element_idx = alpha_1 % 4;
 
 						// Set the DPF message to the coefficient
-						uint128_t coeff = uint128_t(err_poly_cross_coeffs[index]);
+						u8 coeff = err_poly_cross_coeffs[index];//block(err_poly_cross_coeffs[index]);
 
 						// Position coefficient into the block
-						std::array<uint128_t, 4> beta; // init to zero
+						std::array<block, 4> beta; // init to zero
 						setBytes(beta, 0);
-						beta[packed_idx] = coeff << (2 * (63 - bit_idx));
+						
+						// Set the coefficient in the right position
+						((uint8_t*)&beta)[byte_idx] = coeff << (2 * element_idx);
+						//beta[packed_idx] = coeff << (2 * (63 - bit_idx));
+
+
+						// Coeff index in the block output (64 elements of F4)
+						size_t packed_idx = alpha_1 / 4;
+
+						//// Bit index in the block ouput
+						//size_t bit_idx = alpha_1 % 4;
+						//std::array<uint128_t, 4> beta2; // init to zero
+						//beta2[packed_idx] = uint128_t{ coeff } << (2 * (63 - bit_idx));
+						//if (memcmp(&beta, &beta2, sizeof(beta)) != 0)
+						//{
+						//	std::cout << "FAIL: beta != beta2" << std::endl;
+						//	throw RTE_LOC;
+						//}
 
 						// Message (beta) is of size 4 blocks of 128 bits
 						genPrng.SetSeed(block(index, 542345234));
@@ -1067,9 +1084,9 @@ namespace osuCrypto
 		//************************************************************************
 
 		// Allocate memory for the DPF outputs (this is reused for each evaluation)
-		std::vector<uint128_t> shares_A(dpf_block_size);
-		std::vector<uint128_t> shares_B(dpf_block_size);
-		std::vector<uint128_t> cache(dpf_block_size);
+		std::vector<block> shares_A(dpf_block_size);
+		std::vector<block> shares_B(dpf_block_size);
+		std::vector<block> cache(dpf_block_size);
 
 		// Allocate memory for the concatenated DPF outputs
 		size_t packed_block_size = divCeil(block_size, 64);
@@ -1079,10 +1096,10 @@ namespace osuCrypto
 		// printf("[DEBUG]: packed_poly_size = %zu\n", packed_poly_size);
 		// 
 		// each row is a block. every t rows is a polynomial.
-		Matrix<uint128_t> packed_polys_A_(c * c * t, packed_block_size);
-		Matrix<uint128_t> packed_polys_B_(c * c * t, packed_block_size);
-		//std::vector<uint128_t> packed_polys_A(c * c * packed_poly_size);
-		//std::vector<uint128_t> packed_polys_B(c * c * packed_poly_size);
+		Matrix<block> packed_polys_A_(c * c * t, packed_block_size);
+		Matrix<block> packed_polys_B_(c * c * t, packed_block_size);
+		//std::vector<block> packed_polys_A(c * c * packed_poly_size);
+		//std::vector<block> packed_polys_B(c * c * packed_poly_size);
 
 		// Allocate memory for the output FFT
 		std::vector<uint32_t>fft_uA(poly_size);
@@ -1105,15 +1122,15 @@ namespace osuCrypto
 			{
 				const size_t poly_index = i * c + j;
 
-				oc::MatrixView<uint128_t> packed_polyA_(packed_polys_A_.data(poly_index * t), t, packed_block_size);
-				oc::MatrixView<uint128_t> packed_polyB_(packed_polys_B_.data(poly_index * t), t, packed_block_size);
-				//uint128_t* packed_polyA = &packed_polys_A[poly_index * packed_poly_size];
-				//uint128_t* packed_polyB = &packed_polys_B[poly_index * packed_poly_size];
+				oc::MatrixView<block> packed_polyA_(packed_polys_A_.data(poly_index * t), t, packed_block_size);
+				oc::MatrixView<block> packed_polyB_(packed_polys_B_.data(poly_index * t), t, packed_block_size);
+				//block* packed_polyA = &packed_polys_A[poly_index * packed_poly_size];
+				//block* packed_polyB = &packed_polys_B[poly_index * packed_poly_size];
 
 				for (size_t k = 0; k < t; k++)
 				{
-					span<uint128_t> poly_blockA = packed_polyA_[k];
-					span<uint128_t> poly_blockB = packed_polyB_[k];
+					span<block> poly_blockA = packed_polyA_[k];
+					span<block> poly_blockB = packed_polyB_[k];
 
 					for (size_t l = 0; l < t; l++)
 					{
@@ -1126,7 +1143,7 @@ namespace osuCrypto
 
 						// Sum all the DPFs for the current block together
 						// note that there is some extra "garbage" in the last
-						// block of uint128_t since 64 does not divide block_size.
+						// block of block since 64 does not divide block_size.
 						// We deal with this slack later when packing the outputs
 						// into the parallel FFT matrix.
 						for (size_t w = 0; w < packed_block_size; w++)
@@ -1155,20 +1172,20 @@ namespace osuCrypto
 					size_t err_count = 0;
 					size_t poly_index = i * c + j;
 
-					oc::MatrixView<uint128_t> packed_polyA_(packed_polys_A_.data(poly_index * t), t, packed_block_size);
-					oc::MatrixView<uint128_t> packed_polyB_(packed_polys_B_.data(poly_index * t), t, packed_block_size);
-					//uint128_t* poly_A = &packed_polys_A[poly_index * packed_poly_size];
-					//uint128_t* poly_B = &packed_polys_B[poly_index * packed_poly_size];
+					oc::MatrixView<block> packed_polyA_(packed_polys_A_.data(poly_index * t), t, packed_block_size);
+					oc::MatrixView<block> packed_polyB_(packed_polys_B_.data(poly_index * t), t, packed_block_size);
+					//block* poly_A = &packed_polys_A[poly_index * packed_poly_size];
+					//block* poly_B = &packed_polys_B[poly_index * packed_poly_size];
 
 					for (size_t p = 0; p < packed_poly_size; p++)
 					{
-						uint128_t res = packed_polyA_(p) ^ packed_polyB_(p);
-						if (res)
+						block res = packed_polyA_(p) ^ packed_polyB_(p);
+						if (res != ZeroBlock)
 						{
 							auto e = extractF4(res);
 							for (size_t l = 0; l < 64; l++)
 							{
-								//if (((res >> (2 * (63 - l))) & uint128_t(0b11)) != uint128_t(0))
+								//if (((res >> (2 * (63 - l))) & block(0b11)) != block(0))
 								err_count += (e[l] | (e[l] >> 1)) & 1;
 								//if (e[l])
 								//	err_count++;
@@ -1215,14 +1232,13 @@ namespace osuCrypto
 
 					size_t poly_index = j * c + k;
 
-					oc::MatrixView<uint128_t> poly_A(packed_polys_A_.data(poly_index * t), t, packed_block_size);
-					oc::MatrixView<uint128_t> poly_B(packed_polys_B_.data(poly_index * t), t, packed_block_size);
+					oc::MatrixView<block> poly_A(packed_polys_A_.data(poly_index * t), t, packed_block_size);
+					oc::MatrixView<block> poly_B(packed_polys_B_.data(poly_index * t), t, packed_block_size);
 
-					//uint128_t* poly_A = &packed_polys_A[poly_index * packed_poly_size];
-					//uint128_t* poly_B = &packed_polys_B[poly_index * packed_poly_size];
+					//block* poly_A = &packed_polys_A[poly_index * packed_poly_size];
+					//block* poly_B = &packed_polys_B[poly_index * packed_poly_size];
 
-					u64 i = 0;
-					for (u64 block_idx = 0; block_idx < t; ++block_idx)
+					for (u64 block_idx = 0, i = 0; block_idx < t; ++block_idx)
 					{
 						for (u64 packed_idx = 0; packed_idx < packed_block_size; ++packed_idx)
 						{
@@ -1235,8 +1251,8 @@ namespace osuCrypto
 							auto e = std::min<u64>(block_size - packed_idx * 64, 64);
 							for (u64 element_idx = 0; element_idx < e; ++element_idx)
 							{
-								test_poly_A[i] = coeffA[63 - element_idx];
-								test_poly_B[i] = coeffB[63 - element_idx];
+								test_poly_A[i] = coeffA[/*63 - */element_idx];
+								test_poly_B[i] = coeffB[/*63 - */element_idx];
 								++i;
 							}
 						}
@@ -1250,6 +1266,23 @@ namespace osuCrypto
 						if (got_coeff != exp_coeff)
 						{
 							printf("FAIL: incorrect cross coefficient at index %zu (%i =/= %i)\n", i, got_coeff, exp_coeff);
+
+
+
+							for (size_t i = 0; i < poly_size; i++)
+							{
+								int exp_coeff = err_polys_cross[j * c * poly_size + k * poly_size + i];
+								std::cout << exp_coeff << " ";
+
+							}
+							std::cout << "\n";
+							for (size_t i = 0; i < poly_size; i++)
+							{
+								int got_coeff = test_poly_A[i] ^ test_poly_B[i];
+								std::cout << got_coeff << " ";
+							}
+							std::cout << "\n";
+
 							throw RTE_LOC;
 						}
 					}
@@ -1269,8 +1302,8 @@ namespace osuCrypto
 			{
 				size_t poly_index = (j * c + k);// *packed_poly_size;
 
-				oc::MatrixView<uint128_t> polyA(packed_polys_A_.data(poly_index * t), t, packed_block_size);
-				oc::MatrixView<uint128_t> polyB(packed_polys_B_.data(poly_index * t), t, packed_block_size);
+				oc::MatrixView<block> polyA(packed_polys_A_.data(poly_index * t), t, packed_block_size);
+				oc::MatrixView<block> polyB(packed_polys_B_.data(poly_index * t), t, packed_block_size);
 
 				u64 i = 0;
 				for (u64 block_idx = 0; block_idx < t; ++block_idx)
@@ -1287,8 +1320,8 @@ namespace osuCrypto
 
 						for (u64 element_idx = 0; element_idx < e; ++element_idx)
 						{
-							fft_uA[i] |= u32{ coeffA[63 - element_idx] } << (2 * poly_index);
-							fft_uB[i] |= u32{ coeffB[63 - element_idx] } << (2 * poly_index);
+							fft_uA[i] |= u32{ coeffA[/*63 - */element_idx] } << (2 * poly_index);
+							fft_uB[i] |= u32{ coeffB[/*63 - */element_idx] } << (2 * poly_index);
 							++i;
 						}
 					}
@@ -1320,7 +1353,7 @@ namespace osuCrypto
 
 		// XOR the (packed) columns into the accumulator.
 		// Specifically, we perform column-wise XORs to get the result.
-		uint128_t lsbMask, msbMask;
+		u32 lsbMask, msbMask;
 		setBytes(lsbMask, 0b01010101);
 		setBytes(msbMask, 0b10101010);
 		for (size_t i = 0; i < poly_size; i++)
@@ -1329,12 +1362,12 @@ namespace osuCrypto
 			//auto resB = extractF4(res_poly_mat_B[i]);
 
 			z_poly_A[i] =
-				popcount(res_poly_mat_A[i] & lsbMask) & 1 |
-				(popcount(res_poly_mat_A[i] & msbMask) & 1) << 1;
+				(popcount(res_poly_mat_A[i] & lsbMask) & 1) |
+				((popcount(res_poly_mat_A[i] & msbMask) & 1) << 1);
 
 			z_poly_B[i] =
-				popcount(res_poly_mat_B[i] & lsbMask) & 1 |
-				(popcount(res_poly_mat_B[i] & msbMask) & 1) << 1;
+				(popcount(res_poly_mat_B[i] & lsbMask) & 1) |
+				((popcount(res_poly_mat_B[i] & msbMask) & 1) << 1);
 
 			//u8 aSum = 0;
 
@@ -1396,14 +1429,14 @@ namespace osuCrypto
 		auto blocks = divCeil(n, 128);
 		bool verbose = cmd.isSet("v");
 
-		if(cmd.hasValue("t"))
+		if (cmd.hasValue("t"))
 			oles[0].mT = oles[1].mT = cmd.get<u64>("t");
 
 		//PRNG prng(block(342342));
 		PRNG prng0(block(2424523452345, 111124521521455324));
 		PRNG prng1(block(6474567454546, 567546754674345444));
 		Timer timer;
-		
+
 		oles[0].init(0, n);
 		oles[1].init(1, n);
 
@@ -1423,7 +1456,7 @@ namespace osuCrypto
 			{
 				prng0.get(baseSend[i].data(), baseSend[i].size());
 				baseRecv[1 ^ i].resize(baseSend[i].size());
-				baseChoice[1^i].resize(baseSend[i].size());
+				baseChoice[1 ^ i].resize(baseSend[i].size());
 				baseChoice[1 ^ i].randomize(prng0);
 				for (u64 j = 0; j < baseSend[i].size(); ++j)
 				{
@@ -1446,7 +1479,7 @@ namespace osuCrypto
 			C1Lsb(blocks),
 			C1Msb(blocks);
 
-		if(verbose)
+		if (verbose)
 			oles[0].setTimer(timer);
 
 		auto r = macoro::sync_wait(macoro::when_all_ready(
@@ -1481,7 +1514,7 @@ namespace osuCrypto
 
 		std::array<FoleageF4Ole, 2> oles;
 
-		bool verbose = cmd.isSet("v");
+		//bool verbose = cmd.isSet("v");
 
 		PRNG prng0(block(2424523452345, 111124521521455324));
 		PRNG prng1(block(6474567454546, 567546754674345444));
@@ -1489,7 +1522,7 @@ namespace osuCrypto
 		oles[0].init(0, 1000);
 		oles[1].init(1, 1000);
 
-		u64 n = oles[0].mC* oles[0].mT;
+		u64 n = oles[0].mC * oles[0].mT;
 		u64 n2 = n * n;
 		auto sock = coproto::LocalAsyncSocket::makePair();
 		std::array<std::vector<u8>, 2> coeff, prod;
@@ -1508,8 +1541,8 @@ namespace osuCrypto
 			oles[0].mRecvOts[i] = oles[1].mSendOts[i][oles[0].mChoiceOts[i]];
 		}
 		auto r = macoro::sync_wait(macoro::when_all_ready(
-			oles[0].tensor(coeff[0],prod[0], sock[0]),
-			oles[1].tensor(coeff[1],prod[1], sock[1])));
+			oles[0].tensor(coeff[0], prod[0], sock[0]),
+			oles[1].tensor(coeff[1], prod[1], sock[1])));
 		std::get<0>(r).result();
 		std::get<1>(r).result();
 
