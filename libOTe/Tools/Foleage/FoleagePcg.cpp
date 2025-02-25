@@ -253,12 +253,12 @@ namespace osuCrypto
 		// each prodPolyF4Coeffs is positioned at prodPolyLeafPos. This
 		// will allow the main DPF to be more efficient as we are outputting
 		// 243 F4 elements for each leaf.
-		std::vector<Trit32> prodPolyLeafPos(mC * mC * mT * mT);
+		std::vector<F3x32> prodPolyLeafPos(mC * mC * mT * mT);
 
 		// once we construct large F4^243 coefficients, we will expand them
 		// the main DPF to get the full shared polynomail. prodPolyTreePos
 		// is the location that the F4^243 coefficient should be mapped to.
-		std::vector<Trit32> prodPolyTreePos(mC * mC * mT * mT);
+		std::vector<F3x32> prodPolyTreePos(mC * mC * mT * mT);
 
 
 
@@ -278,7 +278,7 @@ namespace osuCrypto
 
 						// the block of the product coefficient is known
 						// purely using the block index of the input coefficients.
-						auto blockPos = Trit32(jA) + Trit32(jB);
+						auto blockPos = F3x32(jA) + F3x32(jB);
 						auto blockIdx = blockPos.toInt();
 
 						// We want to put all DPF that will be added together
@@ -290,7 +290,7 @@ namespace osuCrypto
 						// the F4 coefficient within the F4^243 coefficient and the
 						// portion that will position the F4^243 coefficient within
 						// the main DPF.
-						auto pos = Trit32(mSparsePositions(i, j));
+						auto pos = F3x32(mSparsePositions(i, j)); // (F_3)^n + (F_3)^n
 						prodPolyLeafPos[idx] = pos.lower(mDpfLeafDepth);
 						prodPolyTreePos[idx] = pos.upper(mDpfLeafDepth);
 

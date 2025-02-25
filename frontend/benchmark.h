@@ -783,16 +783,16 @@ namespace osuCrypto
 		u64 numPoints = cmd.getOr("numPoints", 1000);
 		u64 trials = cmd.getOr("trials", 1);
 
-		std::vector<Trit32> points0(numPoints);
-		std::vector<Trit32> points1(numPoints);
-		std::vector<Trit32> points(numPoints);
+		std::vector<F3x32> points0(numPoints);
+		std::vector<F3x32> points1(numPoints);
+		std::vector<F3x32> points(numPoints);
 		std::vector<F> values0(numPoints);
 		std::vector<F> values1(numPoints);
 		//Ctx ctx;
 		for (u64 i = 0; i < numPoints; ++i)
 		{
-			points[i] = Trit32(prng.get<u64>() % domain);
-			points1[i] = Trit32(prng.get<u64>() % domain);
+			points[i] = F3x32(prng.get<u64>() % domain);
+			points1[i] = F3x32(prng.get<u64>() % domain);
 			points0[i] = points[i] - points1[i];
 			//std::cout << points[i] << " = " << points0[i] <<" + "<< points1[i] << std::endl;
 			values0[i] = prng.get();

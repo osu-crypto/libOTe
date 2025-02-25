@@ -15,23 +15,23 @@ namespace osuCrypto
 {
 	// a value representing (Z_3)^32.
 	// The value is stored in 2 bits per Z_3 element.
-	struct Trit32
+	struct F3x32
 	{
 		u64 mVal;
 
-		Trit32() = default;
-		Trit32(const Trit32&) = default;
+		F3x32() = default;
+		F3x32(const F3x32&) = default;
 
-		Trit32(u64 v)
+		F3x32(u64 v)
 		{
 			fromInt(v);
 		}
 
-		Trit32& operator=(const Trit32&) = default;
+		F3x32& operator=(const F3x32&) = default;
 
-		Trit32 operator+(const Trit32& t) const
+		F3x32 operator+(const F3x32& t) const
 		{
-			Trit32 r;
+			F3x32 r;
 			r.mVal = 0;
 			for (u64 i = 0; i < 32; ++i)
 			{
@@ -45,9 +45,9 @@ namespace osuCrypto
 		}
 
 
-		Trit32 operator-(const Trit32& t) const
+		F3x32 operator-(const F3x32& t) const
 		{
-			Trit32 r;
+			F3x32 r;
 			r.mVal = 0;
 			for (u64 i = 0; i < 32; ++i)
 			{
@@ -61,7 +61,7 @@ namespace osuCrypto
 		}
 
 
-		bool operator==(const Trit32& t) const
+		bool operator==(const F3x32& t) const
 		{
 			return mVal == t.mVal;
 		}
@@ -89,15 +89,15 @@ namespace osuCrypto
 			}
 		}
 
-		Trit32 lower(u64 digits)
+		F3x32 lower(u64 digits)
 		{
-			Trit32 r;
+			F3x32 r;
 			r.mVal = mVal & ((1ull << (2 * digits)) - 1);
 			return r;
 		}
-		Trit32 upper(u64 digits)
+		F3x32 upper(u64 digits)
 		{
-			Trit32 r;
+			F3x32 r;
 			r.mVal = mVal >> (2 * digits);
 			return r;
 		}
@@ -109,7 +109,7 @@ namespace osuCrypto
 		}
 	};
 
-	inline std::ostream& operator<<(std::ostream& o, const Trit32& t)
+	inline std::ostream& operator<<(std::ostream& o, const F3x32& t)
 	{
 		u64 m = 0;
 		u64 v = t.mVal;
@@ -150,9 +150,9 @@ namespace osuCrypto
 
 		u64 mOtIdx = 0;
 
-		std::vector<std::array<block, 2>> mBaseSendOts;
-		std::vector<block> mBaseRecvOts;
-		std::vector<u8> mBaseChoice;
+		AlignedUnVector<std::array<block, 2>> mBaseSendOts;
+		AlignedUnVector<block> mBaseRecvOts;
+		AlignedUnVector<u8> mBaseChoice;
 
 		void init(
 			u64 partyIdx,
@@ -191,7 +191,7 @@ namespace osuCrypto
 
 		template<typename Output, typename Fs>
 		macoro::task<> expand(
-			span<Trit32> points,
+			span<F3x32> points,
 			Fs&& values,
 			Output&& output,
 			PRNG& prng,
@@ -320,7 +320,7 @@ namespace osuCrypto
 			for (u64 iter = 1; iter <= mDepth; ++iter)
 			{
 
-				co_await correctionWord(points, z, sigma, iter, sock);
+				co_await correctionWord(points, z, sigma, iter, prng, sock);
 
 				//std::cout << "sigma[" << iter << "] " << sigma[0][0] << " " << sigma[1][0] << " " << sigma[2][0] << std::endl;
 				//std::cout << "tau[" << iter << "]   " << int(tau[0][0]) << " " << int(tau[1][0]) << " " << int(tau[2][0]) << std::endl;
@@ -531,22 +531,14 @@ namespace osuCrypto
 		}
 
 
-		// we are going to create 3 ot message
-		//
-		// m0, m1, m2
-		//
-		// such that m_{-a0} = r || 1 for some random r.
-		//
-		// the receiver will use choice a1. 
-		macoro::task<> correctionWord(span<Trit32> points, MatrixView<block> z, MatrixView<block> sigma, u64 iter, coproto::Socket& sock)
+		macoro::task<> correctionWord(
+			span<F3x32> points, 
+			MatrixView<block> z, 
+			MatrixView<block> sigma, 
+			u64 iter, 
+			PRNG& prng,
+			coproto::Socket& sock)
 		{
-			//{
-			//	char x = 0;
-			//	co_await sock.send(char{ x });
-			//	co_await sock.recv(x);
-			//}
-			//std::cout << "=======" << iter << "======== " << std::endl;
-
 			Matrix<block> sigmaShares(3, mNumPoints, AllocType::Uninitialized);
 			Matrix<block> mask(mNumPoints, 3, AllocType::Uninitialized);
 			Matrix<block> recvBuffer(mNumPoints * 2, 3, AllocType::Uninitialized);
@@ -558,7 +550,6 @@ namespace osuCrypto
 				std::swap(socks[0], socks[1]);
 
 			auto expand3 = [](const block& k, span<block> r)  {
-				//r = PRNG(k, 3).get();
 				r[0] = k;
 				r[1] = k ^ block(3450136502437610243, 6108362938092146510);
 				r[2] = k ^ block(3428970074314387014, 2030711220607601239);
@@ -567,7 +558,6 @@ namespace osuCrypto
 
 
 			auto sender = [&]() -> macoro::task<> {
-				PRNG prng(block(234134, 21452345 * mPartyIdx));
 
 				BitVector correction(mNumPoints * 2);
 				AlignedUnVector<u8> sendBuffer(mNumPoints * 2 * sizeof(std::array<block, 3>));

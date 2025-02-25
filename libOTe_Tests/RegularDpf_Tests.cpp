@@ -402,16 +402,16 @@ void TritDpf_Proto_Test_(const oc::CLP& cmd)
 	u64 depth = cmd.getOr("depth", 3);
 	u64 domain = ipow(3, depth) - 3;
 	u64 numPoints = cmd.getOr("numPoints", 17);
-	std::vector<Trit32> points0(numPoints);
-	std::vector<Trit32> points1(numPoints);
-	std::vector<Trit32> points(numPoints);
+	std::vector<F3x32> points0(numPoints);
+	std::vector<F3x32> points1(numPoints);
+	std::vector<F3x32> points(numPoints);
 	std::vector<F> values0(numPoints);
 	std::vector<F> values1(numPoints);
 	Ctx ctx;
 	for (u64 i = 0; i < numPoints; ++i)
 	{
-		points[i] = Trit32(prng.get<u64>() % domain);
-		points1[i] = Trit32(prng.get<u64>() % domain);
+		points[i] = F3x32(prng.get<u64>() % domain);
+		points1[i] = F3x32(prng.get<u64>() % domain);
 		points0[i] = points[i] - points1[i];
 		//std::cout << points[i] << " = " << points0[i] <<" + "<< points1[i] << std::endl;
 		values0[i] = prng.get();
@@ -462,7 +462,7 @@ void TritDpf_Proto_Test_(const oc::CLP& cmd)
 
 	for (u64 i = 0; i < domain; ++i)
 	{
-		Trit32 I(i);
+		F3x32 I(i);
 		for (u64 k = 0; k < numPoints; ++k)
 		{
 			F act;
@@ -477,7 +477,7 @@ void TritDpf_Proto_Test_(const oc::CLP& cmd)
 
 			if (exp != act)
 			{
-				std::cout << "i " << i << "=" << Trit32(i) << " " << t << std::endl;
+				std::cout << "i " << i << "=" << F3x32(i) << " " << t << std::endl;
 				std::cout << "exp " << exp << std::endl;
 				std::cout << "act " << act << std::endl;
 				throw RTE_LOC;
