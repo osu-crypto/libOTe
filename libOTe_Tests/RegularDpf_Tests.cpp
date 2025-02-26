@@ -245,6 +245,7 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 	));
 
 
+	bool failed = false;
 	for (u64 i = 0; i < domain; ++i)
 	{
 		for (u64 k = 0; k < numPoints; ++k)
@@ -257,7 +258,7 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 				throw RTE_LOC;
 
 			if (t == 1 && act == ZeroBlock)
-				throw RTE_LOC;
+				failed = true;
 			if (t)
 			{
 				std::cout << act <<" " << output[0][k][i]<<" ^ "<<output[1][k][i] << std::endl;
@@ -267,6 +268,9 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 				throw RTE_LOC;
 		}
 	}
+
+	if (failed)
+		throw RTE_LOC;
 }
 
 void RegularDpf_keyGen_Test(const oc::CLP& cmd)
