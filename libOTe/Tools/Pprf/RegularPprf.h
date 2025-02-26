@@ -335,14 +335,14 @@ namespace osuCrypto
 					sums[0][7] = sums[0][7] ^ child0[7];
 
 					// child1 = AES(parent) + parent
-					child1[0] = child1[0] + parent[0];
-					child1[1] = child1[1] + parent[1];
-					child1[2] = child1[2] + parent[2];
-					child1[3] = child1[3] + parent[3];
-					child1[4] = child1[4] + parent[4];
-					child1[5] = child1[5] + parent[5];
-					child1[6] = child1[6] + parent[6];
-					child1[7] = child1[7] + parent[7];
+					child1[0] = child1[0].add_epi64(parent[0]);
+					child1[1] = child1[1].add_epi64(parent[1]);
+					child1[2] = child1[2].add_epi64(parent[2]);
+					child1[3] = child1[3].add_epi64(parent[3]);
+					child1[4] = child1[4].add_epi64(parent[4]);
+					child1[5] = child1[5].add_epi64(parent[5]);
+					child1[6] = child1[6].add_epi64(parent[6]);
+					child1[7] = child1[7].add_epi64(parent[7]);
 
 					sums[1][0] = sums[1][0] ^ child1[0];
 					sums[1][1] = sums[1][1] ^ child1[1];
@@ -953,14 +953,14 @@ namespace osuCrypto
 						mySums[0][7] = mySums[0][7] ^ child0[7];
 
 						// child1 = AES(parent) + parent
-						child1[0] = child1[0] + parent[0];
-						child1[1] = child1[1] + parent[1];
-						child1[2] = child1[2] + parent[2];
-						child1[3] = child1[3] + parent[3];
-						child1[4] = child1[4] + parent[4];
-						child1[5] = child1[5] + parent[5];
-						child1[6] = child1[6] + parent[6];
-						child1[7] = child1[7] + parent[7];
+						child1[0] = child1[0].add_epi64(parent[0]);
+						child1[1] = child1[1].add_epi64(parent[1]);
+						child1[2] = child1[2].add_epi64(parent[2]);
+						child1[3] = child1[3].add_epi64(parent[3]);
+						child1[4] = child1[4].add_epi64(parent[4]);
+						child1[5] = child1[5].add_epi64(parent[5]);
+						child1[6] = child1[6].add_epi64(parent[6]);
+						child1[7] = child1[7].add_epi64(parent[7]);
 
 						mySums[1][0] = mySums[1][0] ^ child1[0];
 						mySums[1][1] = mySums[1][1] ^ child1[1];

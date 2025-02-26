@@ -479,7 +479,7 @@ namespace osuCrypto
 							// (s0', s1') = H(s)
 							mAesFixedKey.ecbEncBlocks<8>(&currentSeed[j][k], &temp[0]);
 							SIMD8(q, childSeed[j * 2 + 0][k + q] = AES::roundEnc(temp[q], currentSeed[j][k + q]));
-							SIMD8(q, childSeed[j * 2 + 1][k + q] = temp[q] + currentSeed[j][k + q]);
+							SIMD8(q, childSeed[j * 2 + 1][k + q] = temp[q].add_epi64(currentSeed[j][k + q]));
 
 							// z = z ^ s'
 							SIMD8(q, z[0][k + q] ^= childSeed[j * 2 + 0][k + q]);
@@ -499,7 +499,7 @@ namespace osuCrypto
 
 							temp[0] = mAesFixedKey.ecbEncBlock(currentSeed[j][k]);
 							childSeed[j * 2 + 0][k] = AES::roundEnc(temp[0], currentSeed[j][k]);
-							childSeed[j * 2 + 1][k] = temp[0] + currentSeed[j][k];
+							childSeed[j * 2 + 1][k] = temp[0].add_epi64(currentSeed[j][k]);
 
 							z[0][k] ^= childSeed[j * 2 + 0][k];
 							z[1][k] ^= childSeed[j * 2 + 1][k];
