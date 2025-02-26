@@ -764,8 +764,8 @@ namespace osuCrypto
 		static block tagBit(const block& b)
 		{
 			auto bit = b & block(0, 1);
-			auto mask = _mm_sub_epi64(_mm_set1_epi64x(0), bit);
-			return _mm_unpacklo_epi64(mask, mask);
+			auto mask = block(0,0).sub_epi64(bit);
+			return mask.unpacklo_epi64(mask);
 		}
 	};
 
