@@ -238,11 +238,13 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 	output[1].resize(numPoints, domain);
 	tags[0].resize(numPoints, domain);
 	tags[1].resize(numPoints, domain);
+	auto seed0 = prng.get();
+	auto seed1 = prng.get();
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 	macoro::sync_wait(macoro::when_all_ready(
-		dpf[0].expand(points0, {}, prng.get(), [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; }, sock[0]),
-		dpf[1].expand(points1, {}, prng.get(), [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; }, sock[1])
+		dpf[0].expand(points0, {}, seed0, [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; }, sock[0]),
+		dpf[1].expand(points1, {}, seed1, [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; }, sock[1])
 	));
 
 
