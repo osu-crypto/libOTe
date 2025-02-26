@@ -715,7 +715,7 @@ namespace osuCrypto
 						auto seed = seeds[p][a];
 						auto temp = mAesFixedKey.ecbEncBlock(seed);
 						seeds[p][0] = AES::roundEnc(temp, seed);
-						seeds[p][1] = temp + seed;
+						seeds[p][1] = temp.add_epi64(seed);
 					}
 				}
 			}

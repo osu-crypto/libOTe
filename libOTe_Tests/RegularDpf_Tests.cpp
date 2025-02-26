@@ -258,6 +258,10 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 
 			if (t == 1 && act == ZeroBlock)
 				throw RTE_LOC;
+			if (t)
+			{
+				std::cout << act <<" " << output[0][k][i]<<" ^ "<<output[1][k][i] << std::endl;
+			}
 
 			if (t != tAct)
 				throw RTE_LOC;

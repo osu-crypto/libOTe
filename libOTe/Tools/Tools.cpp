@@ -691,7 +691,7 @@ namespace osuCrypto {
 				auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.stride() + w * 2;
 
 				out0 -= out.stride() * skip;
-				t.blks[0] = (t.blks[0] << int(skip));
+				t.blks[0] = t.blks[0].slli_epi64(skip);
 
 				for (int j = 0; j < rem; j++)
 				{
