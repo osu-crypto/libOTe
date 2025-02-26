@@ -361,7 +361,7 @@ namespace osuCrypto
 		setTimePoint("input Mult");
 
 		// compress the resume and set the output.
-		auto outSize = std::min(mN, ALsb.size() * 128);
+		auto outSize = std::min<u64>(mN, ALsb.size() * 128);
 		std::vector<u8> A(mN);
 		for (u64 i = 0; i < outSize; ++i)
 		{

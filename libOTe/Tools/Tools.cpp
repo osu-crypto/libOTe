@@ -706,7 +706,7 @@ namespace osuCrypto {
 
 					out0 -= out.stride();
 
-					t.blks[0] = (t.blks[0] << 1);
+					t.blks[0] = t.blks[0].slli_epi64(1);
 				}
 			}
 		}
