@@ -194,6 +194,7 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 {
 
 	PRNG prng(block(231234, 321312));
+	std::cout << "pp " << prng.get<block>() << std::endl;
 	u64 domain = cmd.getOr("domain", 8);
 	u64 numPoints = cmd.getOr("numPoints", 1);
 	std::vector<u64> points0(numPoints);
