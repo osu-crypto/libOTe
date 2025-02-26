@@ -5,9 +5,7 @@
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/MatrixView.h"
 #include "libOTe/Triple/Foleage/FoleageUtils.h"
-#include <immintrin.h>
 
-//#include "libOTe/Tools/Foleage/utils.h"
 namespace osuCrypto {
 
 	//typedef __int128 int128_t;
