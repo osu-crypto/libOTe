@@ -254,6 +254,9 @@ namespace osuCrypto
 		coproto::Socket& sock,
 		RegularDpfKey* outputKey)
 	{
+
+		std::cout <<"p " << mPartyIdx << " seed " << seed << std::endl;
+
 		if (inputKey == nullptr)
 		{
 			if (points.size() != mNumPoints)
@@ -316,6 +319,9 @@ namespace osuCrypto
 			{
 				sc0[k] = basePeng.get<block>();
 				sc1[k] = basePeng.get<block>();
+
+				std::cout << "p " << mPartyIdx << " k " << k << " root " << sc0[k] << " " << sc1[k] << std::endl;
+
 
 				tag[k] = block::allSame<u8>(-mPartyIdx);
 
