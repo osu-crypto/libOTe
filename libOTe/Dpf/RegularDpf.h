@@ -615,12 +615,9 @@ namespace osuCrypto
 			{
 				auto sdi = getRow(sd, i);
 				auto tdi = getRow(td, i);
-				for (u64 k = 0; k < numPoints8; k += 8)
+				for (u64 k = 0; k < mNumPoints; ++k)
 				{
-					SIMD8(q, output(k + q, i, sdi[k + q], tdi[k + q]));
-				}
-				for (u64 k = numPoints8; k < mNumPoints; ++k)
-				{
+					std::cout << "k " << k << " i " << i << " " << sdi[k] << std::endl;
 					output(k, i, sdi[k], tdi[k]);
 				}
 			}
