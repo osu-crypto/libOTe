@@ -190,6 +190,81 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 	}
 }
 
+void RegularDpf_Puncture_Test(const oc::CLP& cmd)
+{
+
+	PRNG prng(block(231234, 321312));
+	u64 domain = cmd.getOr("domain", 211);
+	u64 numPoints = cmd.getOr("numPoints", 7);
+	std::vector<u64> points0(numPoints);
+	std::vector<u64> points1(numPoints);
+	for (u64 i = 0; i < numPoints; ++i)
+	{
+		points1[i] = prng.get<u64>();
+		points0[i] = (prng.get<u64>() % domain) ^ points1[i];
+	}
+
+	std::array<oc::RegularDpf, 2> dpf;
+	dpf[0].init(0, domain, numPoints);
+	dpf[1].init(1, domain, numPoints);
+
+	auto baseCount = dpf[0].baseOtCount();
+
+	std::array<std::vector<block>, 2> baseRecv;
+	std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+	std::array<BitVector, 2> baseChoice;
+	baseRecv[0].resize(baseCount);
+	baseRecv[1].resize(baseCount);
+	baseSend[0].resize(baseCount);
+	baseSend[1].resize(baseCount);
+	baseChoice[0].resize(baseCount);
+	baseChoice[1].resize(baseCount);
+	baseChoice[0].randomize(prng);
+	baseChoice[1].randomize(prng);
+	for (u64 i = 0; i < baseCount; ++i)
+	{
+		baseSend[0][i] = prng.get();
+		baseSend[1][i] = prng.get();
+		baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+		baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+	}
+	dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+	dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+	std::array<Matrix<block>, 2> output;
+	std::array<Matrix<u8>, 2> tags;
+	output[0].resize(numPoints, domain);
+	output[1].resize(numPoints, domain);
+	tags[0].resize(numPoints, domain);
+	tags[1].resize(numPoints, domain);
+
+	auto sock = coproto::LocalAsyncSocket::makePair();
+	macoro::sync_wait(macoro::when_all_ready(
+		dpf[0].expand(points0, {}, prng.get(), [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; }, sock[0]),
+		dpf[1].expand(points1, {}, prng.get(), [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; }, sock[1])
+	));
+
+
+	for (u64 i = 0; i < domain; ++i)
+	{
+		for (u64 k = 0; k < numPoints; ++k)
+		{
+			auto p = points0[k] ^ points1[k];
+			auto act = output[0][k][i] ^ output[1][k][i];
+			auto t = i == p ? 1 : 0;
+			auto tAct = tags[0][k][i] ^ tags[1][k][i];
+			if (t == 0 && act != ZeroBlock)
+				throw RTE_LOC;
+
+			if (t == 1 && act == ZeroBlock)
+				throw RTE_LOC;
+
+			if (t != tAct)
+				throw RTE_LOC;
+		}
+	}
+}
+
 void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 {
 
@@ -327,7 +402,7 @@ void SparseDpf_Proto_Test(const oc::CLP& cmd)
 		std::sort(sparsePoints[i].begin(), sparsePoints[i].end());
 		index[i] = prng.get<u64>() % sparsePoints.cols();
 		value[i] = prng.get();
-		auto alpha = sparsePoints(i, index[i]);
+		//auto alpha = sparsePoints(i, index[i]);
 		//std::cout << "alpha " << alpha << " " << oc::BitVector((u8*)&alpha, log2ceil(domain)) << std::endl;
 		points[0][i] = prng.get();
 		points[1][i] = points[0][i] ^ sparsePoints(i, index[i]);

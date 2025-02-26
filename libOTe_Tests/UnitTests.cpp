@@ -61,6 +61,7 @@ namespace tests_libOTe
 
 			tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
 			tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
+			tc.add("RegularDpf_Puncture_Test                ", RegularDpf_Puncture_Test);
 			tc.add("RegularDpf_keyGen_Test                  ", RegularDpf_keyGen_Test);
 			tc.add("SparseDpf_Proto_Test                    ", SparseDpf_Proto_Test);
 			tc.add("TritDpf_Proto_Test                      ", TritDpf_Proto_Test);
@@ -68,6 +69,7 @@ namespace tests_libOTe
 			tc.add("foleage_tensor_test                     ", foleage_tensor_test);
 			tc.add("foleage_F4ole_test                      ", foleage_F4ole_test);
 			tc.add("foleage_Triple_test                     ", foleage_Triple_test);
+			
 			tc.add("foleage_GenBase_test                    ", foleage_GenBase_test);
 
 

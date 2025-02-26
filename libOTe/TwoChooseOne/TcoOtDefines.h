@@ -22,7 +22,7 @@ namespace osuCrypto
 	const u64 commStepSize(512); // TODO: try increasing this for optimization.
 	const u64 superBlkShift(3);
 	const u64 superBlkSize(1 << superBlkShift);
-	const u64 gKosChallengeRepititions(4);
+	const u64 gKosChallengeRepititions(1);
 
 	enum class SilentBaseType {
 		// Use a standalone base OT protocol to generate the required base OTs

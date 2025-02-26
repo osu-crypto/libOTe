@@ -609,7 +609,7 @@ namespace osuCrypto
 		}
 		else
 		{
-			auto& sd = s[mDepth & 1];
+			auto& sd = s[mDepth % 3];
 			auto& td = tags;
 			for (u64 i = 0; i < mDomain; ++i)
 			{

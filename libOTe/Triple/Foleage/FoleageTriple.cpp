@@ -144,7 +144,7 @@ namespace osuCrypto
 				co_await mOtExtSender->send(sendMsg, prng, sock);
 
 				choice = BitVector(choice.data(), choice.size() - extSenderCount, extSenderCount);
-				setBaseOts(sendMsg, span(recvMsg).subspan(extSenderCount), choice);
+				setBaseOts(sendMsg, span<block>(recvMsg).subspan(extSenderCount), choice);
 #else
 				throw std::runtime_error("ENABLE_SOFTSPOKEN_OT = false, must enable soft spoken. " LOCATION);
 #endif
@@ -207,7 +207,7 @@ namespace osuCrypto
 				std::vector<block> recvMsg(choice.size());
 				co_await mOtExtRecver->receive(choice, recvMsg, prng, sock);
 
-				setBaseOts(span(sendMsg).subspan(extRecverCount), recvMsg, choice);
+				setBaseOts(span<std::array<block, 2>>(sendMsg).subspan(extRecverCount), recvMsg, choice);
 #else
 				throw std::runtime_error("ENABLE_SOFTSPOKEN_OT = false, must enable soft spoken. " LOCATION);
 #endif
@@ -557,7 +557,7 @@ namespace osuCrypto
 		{
 			// XOR the (packed) columns into the accumulator.
 			// Specifically, we perform column-wise XORs to get the result.
-			u32 lsbMask, msbMask;
+			u32 lsbMask;
 			setBytes(lsbMask, 0b01010101);
 			for (size_t i = 0; i < outSize; i++)
 			{
