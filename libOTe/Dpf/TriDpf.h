@@ -8,7 +8,7 @@
 #include "cryptoTools/Common/Matrix.h"
 
 #include "DpfMult.h"
-#include "libOTe/Tools/Foleage/FoleageUtils.h"
+#include "libOTe/Triple/Foleage/FoleageUtils.h"
 #include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto

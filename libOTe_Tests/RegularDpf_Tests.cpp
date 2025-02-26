@@ -1,10 +1,10 @@
 #include "RegularDpf_Tests.h"
-#include "libOTe/Tools/Dpf/RegularDpf.h"
+#include "libOTe/Dpf/RegularDpf.h"
 #include "coproto/Socket/LocalAsyncSock.h"
-#include "libOTe/Tools/Dpf/SparseDpf.h"
+#include "libOTe/Dpf/SparseDpf.h"
 #include <algorithm>
 #include <numeric>
-#include "libOTe/Tools/Dpf/TriDpf.h"
+#include "libOTe/Dpf/TriDpf.h"
 
 using namespace oc;
 

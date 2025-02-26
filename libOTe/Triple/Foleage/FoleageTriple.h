@@ -5,12 +5,20 @@
 #include "coproto/Socket/Socket.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Common/Timer.h"
-#include "libOTe/Tools/Dpf/TriDpf.h"
+#include "libOTe/Dpf/TriDpf.h"
+#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
+
 namespace osuCrypto
 {
 
-
-	class FoleageF4Ole : public TimerAdapter
+	// The two party Foleage PCG protocol for generating F4 OLEs
+	// and Binary Beaver triples. The caller should call
+	//
+	// FoleageTriple::init(...)
+	// FoleageTriple::expand(...)
+	// 
+	// There are two expand function, one for OLEs and one for Triples.
+	class FoleageTriple : public TimerAdapter
 	{
 	public:
 		u64 mPartyIdx = 0;
@@ -66,10 +74,13 @@ namespace osuCrypto
 		// a dpf used to construct the F4x243 leaf value of the larger DPF.
 		TriDpf<u8, CoeffCtxGF2> mDpfLeaf;
 
+#ifdef ENABLE_SOFTSPOKEN_OT
+		std::optional<SoftSpokenShOtReceiver<>> mOtExtRecver;
+		std::optional<SoftSpokenShOtSender<>> mOtExtSender;
+#endif
 
 		struct FoleageCoeffCtx : CoeffCtxGF2
 		{
-
 			OC_FORCEINLINE void fromBlock(FoleageF4x243& ret, const block& b) {
 				ret.mVal[0] = b;
 				ret.mVal[1] = b ^ block(2314523225322345310, 3520873105824273452);
@@ -84,18 +95,20 @@ namespace osuCrypto
 
 		// The base OTs used to tensor the coefficients of the sparse polynomial.
 		std::vector<block> mRecvOts;
-		
+
 		// The base OTs used to tensor the coefficients of the sparse polynomial.
-		std::vector<std::array<block,2>> mSendOts;
+		std::vector<std::array<block, 2>> mSendOts;
 
 		// The base OTs used to tensor the coefficients of the sparse polynomial.
 		BitVector mChoiceOts;
 
 
-		// Intializes the protocol to generate n OLEs. Most efficient when n
+		// Intializes the protocol to generate n F4 OLEs. Most efficient when n
 		// is a power of 3. Once called, baseOtCount() can be called to 
 		// determine the required number of base OTs.
 		void init(u64 partyIdx, u64 n);
+
+		bool isInitialized() const { return mN > 0; }
 
 		struct BaseOtCount
 		{
@@ -118,6 +131,8 @@ namespace osuCrypto
 		// returns true of the base OTs have been set.
 		bool hasBaseOts() const;
 
+		macoro::task<> genBaseOts(PRNG& prng, Socket& sock, SilentBaseType baseType = SilentBaseType::BaseExtend);
+
 		// The F4 OLE protocol. This will generate n OLEs.
 		// the resulting OLEs are in bit decomposition form.
 		// A = (AMsb || ALsb), C = (CMsb || CLsb). This party will
@@ -127,9 +142,47 @@ namespace osuCrypto
 			span<block> ALsb,
 			span<block> AMsb,
 			span<block> CLsb,
-			span<block> CMsb, 
-			PRNG& prng, 
+			span<block> CMsb,
+			PRNG& prng,
 			coproto::Socket& sock);
+
+
+		// The F2 beaver triple protocol. This will generate n beaver triples.
+		macoro::task<> expand(
+			span<block> A,
+			span<block> B,
+			span<block> C,
+			PRNG& prng,
+			coproto::Socket& sock)
+		{
+			if (mPartyIdx)
+			{
+				co_await expand(B, A, C, {}, prng, sock);
+
+				for (u64 i = 0; i < A.size(); ++i)
+				{
+					// b(0)b(1)
+					auto bb = B[i] & A[i];
+					// b(0)b(1) + [ab]1(0)
+					C[i] ^= bb;
+				}
+			}
+			else
+			{
+				//auto bLsb = temp[0];
+				//auto bMsb = temp[1];
+				co_await expand(A, B, C, {}, prng, sock);
+
+				for (u64 i = 0; i < A.size(); ++i)
+				{
+					// a(0)a(1)
+					auto aa = A[i] & B[i];
+
+					// a(0)a(1) + [ab]0(0)
+					C[i] ^= aa;
+				}
+			}
+		}
 
 		// sample random coefficients for the sparse polynomial and tensor
 		// them with the other parties coefficients. The result is shared
@@ -142,4 +195,6 @@ namespace osuCrypto
 
 
 	};
+
+
 }

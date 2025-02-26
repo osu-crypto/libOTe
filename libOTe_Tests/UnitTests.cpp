@@ -65,15 +65,10 @@ namespace tests_libOTe
 			tc.add("SparseDpf_Proto_Test                    ", SparseDpf_Proto_Test);
 			tc.add("TritDpf_Proto_Test                      ", TritDpf_Proto_Test);
 
-
-			tc.add("foleage_transpose_test                  ", foleage_transpose_test);
-			tc.add("foleage_fft_test                        ", foleage_fft_test);
-			tc.add("foleage_dpf_test                        ", foleage_dpf_test);
-			tc.add("foleage_spfss_test                      ", foleage_spfss_test);
-			tc.add("foleage_pcg_test                        ", foleage_pcg_test);
-
 			tc.add("foleage_tensor_test                     ", foleage_tensor_test);
 			tc.add("foleage_F4ole_test                      ", foleage_F4ole_test);
+			tc.add("foleage_Triple_test                     ", foleage_Triple_test);
+			tc.add("foleage_GenBase_test                    ", foleage_GenBase_test);
 
 
 			tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);

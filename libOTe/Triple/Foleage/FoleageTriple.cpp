@@ -1,16 +1,14 @@
-#include "FoleagePcg.h"
-#include "libOTe/Tools/Foleage/FoleageUtils.h"
-#include "libOTe/Tools/Foleage/F4Ops.h"
-#include "libOTe/Tools/Foleage/fft/FoleageFft.h"
+#include "FoleageTriple.h"
+#include "libOTe/Triple/Foleage/FoleageUtils.h"
+#include "libOTe/Triple/Foleage/fft/FoleageFft.h"
 #include "cryptoTools/Common/BitIterator.h"
-#include "libOTe/Tools/Foleage/tri-dpf/FoleageDpf.h"
-#include "libOTe/Tools/Foleage/tri-dpf/FoleagePrf.h"
-#include "libOTe/Tools/Dpf/TriDpf.h"
+#include "libOTe/Dpf/TriDpf.h"
+#include "libOTe/Base/BaseOT.h"
 namespace osuCrypto
 {
 
 
-	void FoleageF4Ole::init(u64 partyIdx, u64 n)
+	void FoleageTriple::init(u64 partyIdx, u64 n)
 	{
 		mPartyIdx = partyIdx;
 		mLog3N = log3ceil(n);
@@ -27,8 +25,6 @@ namespace osuCrypto
 
 		mDpfLeafSize = ipow(3, mDpfLeafDepth);
 		mDpfTreeSize = ipow(3, mDpfTreeDepth);
-		//std::cout << "mLeafSize " << mDpfLeafSize << " " << mDpfLeafDepth << std::endl;
-		//std::cout << "mTreeSize " << mDpfTreeSize << " " << mDpfTreeDepth << std::endl;
 
 		mDpfLeaf.init(mPartyIdx, mDpfLeafSize, mC * mC * mT * mT);
 		mDpf.init(mPartyIdx, mDpfTreeSize, mC * mC * mT * mT);
@@ -36,11 +32,11 @@ namespace osuCrypto
 		if (mBlockSize < 2)
 			throw RTE_LOC;
 
-		sampleA(block(431234234, 213434234123));
+		sampleA(block(3127894527893612049, 240925987420932408));
 	}
 
 
-	FoleageF4Ole::BaseOtCount FoleageF4Ole::baseOtCount() const
+	FoleageTriple::BaseOtCount FoleageTriple::baseOtCount() const
 	{
 		BaseOtCount counts;
 
@@ -54,7 +50,7 @@ namespace osuCrypto
 	}
 
 
-	void FoleageF4Ole::setBaseOts(
+	void FoleageTriple::setBaseOts(
 		span<const std::array<block, 2>> baseSendOts,
 		span<const block> recvBaseOts,
 		const oc::BitVector& baseChoices)
@@ -94,13 +90,158 @@ namespace osuCrypto
 		mChoiceOts = BitVector(baseChoices.data(), baseChoices.size() - offset, offset);
 	}
 
-	bool FoleageF4Ole::hasBaseOts() const
+	bool FoleageTriple::hasBaseOts() const
 	{
 		return mSendOts.size() + mRecvOts.size() > 0;
 	}
 
+	macoro::task<> FoleageTriple::genBaseOts(
+		PRNG& prng,
+		Socket& sock,
+		SilentBaseType baseType)
+	{
+		if (isInitialized() == false)
+		{
+			throw std::runtime_error("init must be called first. " LOCATION);
+		}
+		auto baseCount = baseOtCount();
 
-	void FoleageF4Ole::sampleA(block seed)
+		setTimePoint("genBase.start");
+		if (mPartyIdx)
+		{
+			if (baseType == SilentBaseType::BaseExtend)
+			{
+#ifdef ENABLE_SOFTSPOKEN_OT
+				if (!mOtExtRecver)
+					mOtExtRecver.emplace();
+				if (!mOtExtSender)
+					mOtExtSender.emplace();
+
+				if (mOtExtRecver->hasBaseOts() == false)
+					co_await mOtExtRecver->genBaseOts(prng, sock);
+
+				u64 extSenderCount = 0;
+				if (mOtExtSender->hasBaseOts() == false)
+				{
+					extSenderCount = mOtExtSender->baseOtCount();
+					baseCount.mRecvCount += extSenderCount;
+				}
+
+
+				BitVector choice(baseCount.mRecvCount);
+				choice.randomize(prng);
+				std::vector<block> recvMsg(choice.size());
+				co_await mOtExtRecver->receive(choice, recvMsg, prng, sock);
+
+				if (extSenderCount)
+				{
+					BitVector senderChoice(choice.data(), extSenderCount);
+					span<block> senderMsg(recvMsg.data(), extSenderCount);
+					mOtExtSender->setBaseOts(senderMsg, senderChoice);
+				}
+
+				std::vector<std::array<block, 2>> sendMsg(baseCount.mSendCount);
+				co_await mOtExtSender->send(sendMsg, prng, sock);
+
+				choice = BitVector(choice.data(), choice.size() - extSenderCount, extSenderCount);
+				setBaseOts(sendMsg, span(recvMsg).subspan(extSenderCount), choice);
+#else
+				throw std::runtime_error("ENABLE_SOFTSPOKEN_OT = false, must enable soft spoken. " LOCATION);
+#endif
+			}
+			else
+			{
+#ifdef LIBOTE_HAS_BASE_OT
+				auto sock2 = sock.fork();
+				auto prng2 = prng.fork();
+				auto baseOt1 = DefaultBaseOT{};
+				auto baseOt2 = DefaultBaseOT{};
+				std::vector<block> recvMsg(baseCount.mRecvCount);
+				std::vector<std::array<block,2>> sendMsg(baseCount.mSendCount);
+				BitVector choice(baseCount.mRecvCount);
+				choice.randomize(prng);
+
+				co_await(
+					macoro::when_all_ready(
+						baseOt1.send(sendMsg, prng, sock),
+						baseOt2.receive(choice,recvMsg, prng2, sock2)));
+
+				setBaseOts(sendMsg, recvMsg, choice);
+#else
+				throw std::runtime_error("A base OT must be enabled. " LOCATION);
+#endif
+			}
+		}
+		else
+		{
+
+			if (baseType == SilentBaseType::BaseExtend)
+			{
+#ifdef ENABLE_SOFTSPOKEN_OT
+				if (!mOtExtRecver)
+					mOtExtRecver.emplace();
+				if (!mOtExtSender)
+					mOtExtSender.emplace();
+
+				if (mOtExtSender->hasBaseOts() == false)
+					co_await mOtExtSender->genBaseOts(prng, sock);
+
+				u64 extRecverCount = 0;
+				if (mOtExtRecver->hasBaseOts() == false)
+				{
+					extRecverCount = mOtExtRecver->baseOtCount();
+					baseCount.mSendCount += extRecverCount;
+				}
+
+				std::vector<std::array<block,2>> sendMsg(baseCount.mSendCount);
+				co_await mOtExtSender->send(sendMsg, prng, sock);
+
+				if (extRecverCount)
+				{
+					span<std::array<block,2>> recverMsg(sendMsg.data(), extRecverCount);
+					mOtExtRecver->setBaseOts(recverMsg);
+				}
+
+				BitVector choice(baseCount.mRecvCount);
+				choice.randomize(prng);
+				std::vector<block> recvMsg(choice.size());
+				co_await mOtExtRecver->receive(choice, recvMsg, prng, sock);
+
+				setBaseOts(span(sendMsg).subspan(extRecverCount), recvMsg, choice);
+#else
+				throw std::runtime_error("ENABLE_SOFTSPOKEN_OT = false, must enable soft spoken. " LOCATION);
+#endif
+			}
+			else
+			{
+#ifdef LIBOTE_HAS_BASE_OT
+				auto sock2 = sock.fork();
+				auto prng2 = prng.fork();
+				auto baseOt1 = DefaultBaseOT{};
+				auto baseOt2 = DefaultBaseOT{};
+				std::vector<block> recvMsg(baseCount.mRecvCount);
+				std::vector<std::array<block, 2>> sendMsg(baseCount.mSendCount);
+				BitVector choice(baseCount.mRecvCount);
+				choice.randomize(prng);
+
+				co_await(
+					macoro::when_all_ready(
+						baseOt1.receive(choice, recvMsg, prng, sock),
+						baseOt2.send(sendMsg, prng2, sock2)
+					));
+
+				setBaseOts(sendMsg, recvMsg, choice);
+#else
+				throw std::runtime_error("A base OT must be enabled. " LOCATION);
+#endif
+			}
+
+		}
+		setTimePoint("genBase.done");
+	}
+
+
+	void FoleageTriple::sampleA(block seed)
 	{
 
 		if (mC > 4)
@@ -118,12 +259,6 @@ namespace osuCrypto
 			mFftA[i] = (mFftA[i] & ~3) | 1;
 		}
 
-
-		// FOR DEBUGGING: set fft_a to the identity
-		// for (size_t i = 0; i < mN; i++)
-		// {
-		//     mFftA[i] = (0xaaaa >> 1);
-		// }
 		uint32_t prod;
 		for (size_t i = 0; i < mN; i++)
 		{
@@ -143,9 +278,7 @@ namespace osuCrypto
 						u8 tmp = (a2 & b2);
 						prod = tmp ^ ((a2 & (b1 << 1)) ^ ((a1 << 1) & b2));
 						prod |= (a1 & b1) ^ (tmp >> 1);
-						//return res;
 					}
-					//prod = mult_f4(, );
 					size_t slot = j * mC + k;
 					mFftASquared[i] |= prod << (2 * slot);
 				}
@@ -156,7 +289,7 @@ namespace osuCrypto
 
 
 
-	macoro::task<> FoleageF4Ole::expand(
+	macoro::task<> FoleageTriple::expand(
 		span<block> ALsb,
 		span<block> AMsb,
 		span<block> CLsb,
@@ -167,13 +300,16 @@ namespace osuCrypto
 		setTimePoint("expand start");
 
 		if (hasBaseOts() == false)
-			throw RTE_LOC;
+		{
+			co_await genBaseOts(prng, sock);
+		}
 
 		if (divCeil(mN, 128) < ALsb.size())
 			throw RTE_LOC;
 		if (ALsb.size() != AMsb.size() ||
-			ALsb.size() != CLsb.size() ||
-			ALsb.size() != CMsb.size())
+			ALsb.size() != CLsb.size())
+			throw RTE_LOC;
+		if (ALsb.size() != CMsb.size() && CMsb.size())
 			throw RTE_LOC;
 
 		// the coefficient of the sparse polynomial.
@@ -399,19 +535,34 @@ namespace osuCrypto
 
 		fft_recursive_uint32(fft, mLog3N, mN / 3);
 		setTimePoint("product fft");
-		multiply_fft_32(mFftASquared, fft, fftRes, mN);
+		F4Multiply(mFftASquared, fft, fftRes, mN);
 		setTimePoint("product mult");
 
 
-		// XOR the (packed) columns into the accumulator.
-		// Specifically, we perform column-wise XORs to get the result.
-		u32 lsbMask, msbMask;
-		setBytes(lsbMask, 0b01010101);
-		setBytes(msbMask, 0b10101010);
-		for (size_t i = 0; i < outSize; i++)
+		if (CMsb.size())
 		{
-			*BitIterator(CLsb.data(), i) = popcount(fftRes[i] & lsbMask) & 1;
-			*BitIterator(CMsb.data(), i) = popcount(fftRes[i] & msbMask) & 1;
+
+			// XOR the (packed) columns into the accumulator.
+			// Specifically, we perform column-wise XORs to get the result.
+			u32 lsbMask, msbMask;
+			setBytes(lsbMask, 0b01010101);
+			setBytes(msbMask, 0b10101010);
+			for (size_t i = 0; i < outSize; i++)
+			{
+				*BitIterator(CLsb.data(), i) = popcount(fftRes[i] & lsbMask) & 1;
+				*BitIterator(CMsb.data(), i) = popcount(fftRes[i] & msbMask) & 1;
+			}
+		}
+		else
+		{
+			// XOR the (packed) columns into the accumulator.
+			// Specifically, we perform column-wise XORs to get the result.
+			u32 lsbMask, msbMask;
+			setBytes(lsbMask, 0b01010101);
+			for (size_t i = 0; i < outSize; i++)
+			{
+				*BitIterator(CLsb.data(), i) = popcount(fftRes[i] & lsbMask) & 1;
+			}
 		}
 
 
@@ -420,7 +571,7 @@ namespace osuCrypto
 	}
 
 
-	macoro::task<> FoleageF4Ole::tensor(span<u8> coeffs, span<u8> prod, coproto::Socket& sock)
+	macoro::task<> FoleageTriple::tensor(span<u8> coeffs, span<u8> prod, coproto::Socket& sock)
 	{
 		if (coeffs.size() * coeffs.size() != prod.size())
 			throw RTE_LOC;
@@ -455,7 +606,7 @@ namespace osuCrypto
 				a[0][i] = t0[i] ^ t1[i];
 
 			// a[1] = 2 * a[0]
-			f4Mult(a[0][0], a[0][1], ZeroBlock, AllOneBlock, a[1][0], a[1][1]);
+			F4Multiply(a[0][0], a[0][1], ZeroBlock, AllOneBlock, a[1][0], a[1][1]);
 
 			{
 				auto lsbIter = BitIterator(&a[0][0]);
@@ -552,7 +703,7 @@ namespace osuCrypto
 		}
 	}
 
-	//macoro::task<> FoleageF4Ole::checkTensor(span<u8> coeffs, span<u8> tensoredCoefficients, coproto::Socket& sock)
+	//macoro::task<> FoleageTriple::checkTensor(span<u8> coeffs, span<u8> tensoredCoefficients, coproto::Socket& sock)
 	//{
 	//	std::array<std::vector<u8>, 2> pCoeffs;// (coeffs.size());
 	//	pCoeffs[mPartyIdx] = std::vector<u8>(coeffs.begin(), coeffs.end());
@@ -575,7 +726,7 @@ namespace osuCrypto
 	//		auto scaler = pCoeffs[0][i];
 	//		for (u64 j = 0; j < coeffs.size(); ++j)
 	//		{
-	//			u8 exp = mult_f4(scaler, pCoeffs[1][j]);
+	//			u8 exp = F4Multiply(scaler, pCoeffs[1][j]);
 	//			auto prod = pProd(i, j);
 	//			if (prod != exp)
 	//			{

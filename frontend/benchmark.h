@@ -15,9 +15,9 @@
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe/Tools/TungstenCode/TungstenCode.h"
 #include "libOTe/Tools/ExConvCodeOld/ExConvCodeOld.h"
-#include "libOTe/Tools/Dpf/RegularDpf.h"
-#include "libOTe/Tools/Dpf/TriDpf.h"
-#include "libOTe/Tools/Foleage/FoleagePcg.h"
+#include "libOTe/Dpf/RegularDpf.h"
+#include "libOTe/Dpf/TriDpf.h"
+#include "libOTe/Triple/Foleage/FoleageTriple.h"
 
 namespace osuCrypto
 {
@@ -885,7 +885,7 @@ namespace osuCrypto
 		for (u64 ii = 0; ii < trials; ++ii)
 		{
 
-			std::array<FoleageF4Ole, 2> oles;
+			std::array<FoleageTriple, 2> oles;
 			if (cmd.hasValue("t"))
 				oles[0].mT = oles[1].mT = cmd.get<u64>("t");
 			if (cmd.hasValue("c"))
