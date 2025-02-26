@@ -504,6 +504,9 @@ namespace osuCrypto
 							z[0][k] ^= childSeed[j * 2 + 0][k];
 							z[1][k] ^= childSeed[j * 2 + 1][k];
 
+							std::cout << "p " << mPartyIdx << " k " << k << " j " << j << " split " << childSeed[j * 2 + 0][k] << " " << childSeed[j * 2 + 1][k] << std::endl;
+
+
 							currentSeed[j][k] = tagBit(currentSeed[j][k]);
 						}
 					}
@@ -554,6 +557,9 @@ namespace osuCrypto
 						tag[j][k] = tagBit(temp[0]);
 						currentSeed[j][k] = AES::roundFn(temp[0], temp[0]);
 						diff[k] ^= currentSeed[j][k];
+
+						std::cout << "p " << mPartyIdx << " k " << k << " j " << j << " leaf " << currentSeed[j][k] << std::endl;
+
 					}
 				}
 			}
@@ -617,7 +623,7 @@ namespace osuCrypto
 				auto tdi = getRow(td, i);
 				for (u64 k = 0; k < mNumPoints; ++k)
 				{
-					std::cout << "k " << k << " i " << i << " " << sdi[k] << std::endl;
+					std::cout<<"p " << mPartyIdx << " k " << k << " i " << i << " out " << sdi[k] << std::endl;
 					output(k, i, sdi[k], tdi[k]);
 				}
 			}
