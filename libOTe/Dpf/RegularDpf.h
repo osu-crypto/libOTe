@@ -559,12 +559,16 @@ namespace osuCrypto
 				{
 					for (u64 j = 0; j < 2; ++j)
 					{
+						std::cout << "p " << mPartyIdx << " k " << k << " j " << j << " prnt " << currentSeed[j][k] << " ^ " << parentTag[k] << " & " << sigma[j][k] << std::endl;
 						temp[0] = currentSeed[j][k] ^ (parentTag[k] & sigma[j][k]);
 						tag[j][k] = tagBit(temp[0]);
+
+
 						currentSeed[j][k] = AES::roundFn(temp[0], temp[0]);
+
 						diff[k] ^= currentSeed[j][k];
 
-						std::cout << "p " << mPartyIdx << " k " << k << " j " << j << " leaf " << currentSeed[j][k] << std::endl;
+						std::cout << "p " << mPartyIdx << " k " << k << " j " << j << " leaf " << currentSeed[j][k] << " " << temp[0] << std::endl;
 
 					}
 				}
