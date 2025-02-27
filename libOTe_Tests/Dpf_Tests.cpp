@@ -1,15 +1,18 @@
-#include "RegularDpf_Tests.h"
+#include "Dpf_Tests.h"
 #include "libOTe/Dpf/RegularDpf.h"
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "libOTe/Dpf/SparseDpf.h"
 #include <algorithm>
 #include <numeric>
-#include "libOTe/Dpf/TriDpf.h"
+#include "libOTe/Dpf/TernaryDpf.h"
+#include "cryptoTools/Common/TestCollection.h"
+#include "libOTe/Tools/CoeffCtx.h"
 
 using namespace oc;
 
 void RegularDpf_Multiply_Test(const CLP& cmd)
 {
+#if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
 	u64 n = 13;
 	PRNG prng(block(231234, 321312));
 	std::array<oc::DpfMult, 2> dpf;
@@ -110,10 +113,15 @@ void RegularDpf_Multiply_Test(const CLP& cmd)
 			}
 		}
 	}
+#else
+	throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_SPARSE_DPF not defined.");
+#endif
 }
 
 void RegularDpf_Proto_Test(const CLP& cmd)
 {
+#ifdef ENABLE_REGULAR_DPF
+
 	PRNG prng(block(231234, 321312));
 	u64 domain = cmd.getOr("domain", 211);
 	u64 numPoints = cmd.getOr("numPoints", 11);
@@ -188,11 +196,14 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 				throw RTE_LOC;
 		}
 	}
+#else
+	throw UnitTestSkipped("ENABLE_REGULAR_DPF not defined.");
+#endif
 }
 
 void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 {
-
+#ifdef ENABLE_REGULAR_DPF
 	PRNG prng(block(231234, 321312));
 	u64 domain = cmd.getOr("domain", 8);
 	u64 numPoints = cmd.getOr("numPoints", 1);
@@ -269,10 +280,15 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 
 	if (failed)
 		throw RTE_LOC;
+
+#else
+	throw UnitTestSkipped("ENABLE_REGULAR_DPF not defined.");
+#endif
 }
 
 void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 {
+#ifdef ENABLE_REGULAR_DPF
 
 	PRNG prng(block(231234, 321312));
 	u64 domain = cmd.getOr("domain", 211);
@@ -373,10 +389,16 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 				throw RTE_LOC;
 		}
 	}
+
+#else
+	throw UnitTestSkipped("ENABLE_REGULAR_DPF not defined.");
+#endif
 }
 
 void SparseDpf_Proto_Test(const oc::CLP& cmd)
 {
+#ifdef ENABLE_SPARSE_DPF
+
 	PRNG prng(block(32324, 2342));
 	u64 numPoints = 1;
 	u64 domain = 1773;
@@ -473,11 +495,15 @@ void SparseDpf_Proto_Test(const oc::CLP& cmd)
 				throw RTE_LOC;
 		}
 	}
+#else
+	throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+#endif
 }
 
 template<typename F, typename Ctx>
-void TritDpf_Proto_Test_(const oc::CLP& cmd)
+void TernaryDpf_Proto_Test_(const oc::CLP& cmd)
 {
+#ifdef ENABLE_TERNARY_DPF
 
 	PRNG prng(block(231234, 321312));
 	u64 depth = cmd.getOr("depth", 3);
@@ -500,7 +526,7 @@ void TritDpf_Proto_Test_(const oc::CLP& cmd)
 		//ctx.minus(points0[i], points[i], points1[i];)
 	}
 
-	std::array<oc::TriDpf<F,Ctx>, 2> dpf;
+	std::array<oc::TernaryDpf<F,Ctx>, 2> dpf;
 	dpf[0].init(0, domain, numPoints);
 	dpf[1].init(1, domain, numPoints);
 
@@ -567,13 +593,13 @@ void TritDpf_Proto_Test_(const oc::CLP& cmd)
 				throw RTE_LOC;
 		}
 	}
-
+#else
+	throw UnitTestSkipped("ENABLE_TERNARY_DPF not defined.");
+#endif
 }
 void TritDpf_Proto_Test(const oc::CLP& cmd)
 {
-	TritDpf_Proto_Test_<block, CoeffCtxGF2>(cmd);
-	TritDpf_Proto_Test_<u8, CoeffCtxGF2>(cmd);
-	//TritDpf_Proto_Test_<u64, CoeffCtxInteger>(cmd);
-
+	TernaryDpf_Proto_Test_<block, CoeffCtxGF2>(cmd);
+	TernaryDpf_Proto_Test_<u8, CoeffCtxGF2>(cmd);
 }
 

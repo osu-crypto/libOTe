@@ -1,11 +1,25 @@
 #pragma once
+// © 2025 Peter Rindal.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+// Code partially authored by:
+// Maxime Bombar, Dung Bui, Geoffroy Couteau, Alain Couvreur, Clément Ducros, and Sacha Servan - Schreiber
+
+
+#include "libOTe/config.h"
+#if defined(ENABLE_FOLEAGE)
+
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/Matrix.h"
 #include "cryptoTools/Common/Aligned.h"
 #include "coproto/Socket/Socket.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Common/Timer.h"
-#include "libOTe/Dpf/TriDpf.h"
+#include "libOTe/Dpf/TernaryDpf.h"
 #include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
 
 namespace osuCrypto
@@ -72,7 +86,7 @@ namespace osuCrypto
 		Matrix<u64> mSparsePositions;
 
 		// a dpf used to construct the F4x243 leaf value of the larger DPF.
-		TriDpf<u8, CoeffCtxGF2> mDpfLeaf;
+		TernaryDpf<u8, CoeffCtxGF2> mDpfLeaf;
 
 #ifdef ENABLE_SOFTSPOKEN_OT
 		std::optional<SoftSpokenShOtReceiver<>> mOtExtRecver;
@@ -91,7 +105,7 @@ namespace osuCrypto
 		};
 
 		// the main DPF which outputs 243 F4 elements for each leaf.
-		TriDpf<FoleageF4x243, FoleageCoeffCtx> mDpf;
+		TernaryDpf<FoleageF4x243, FoleageCoeffCtx> mDpf;
 
 		// The base OTs used to tensor the coefficients of the sparse polynomial.
 		std::vector<block> mRecvOts;
@@ -198,3 +212,4 @@ namespace osuCrypto
 
 
 }
+#endif

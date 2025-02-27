@@ -40,6 +40,19 @@
 // build the library with SoftSpokenOT enabled
 #cmakedefine ENABLE_SOFTSPOKEN_OT @ENABLE_SOFTSPOKEN_OT@
 
+// build the library with Foleage enabled
+#cmakedefine ENABLE_FOLEAGE @ENABLE_FOLEAGE@
+
+// build the library with regular dpf enabled
+#cmakedefine ENABLE_REGULAR_DPF @ENABLE_REGULAR_DPF@
+
+// build the library with ternary dpf enabled
+#cmakedefine ENABLE_TERNARY_DPF @ENABLE_TERNARY_DPF@
+
+// build the library with sparse dpf enabled
+#cmakedefine ENABLE_SPARSE_DPF @ENABLE_SPARSE_DPF@
+
+
 
 
 // build the library with KOS Delta-OT-ext enabled

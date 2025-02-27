@@ -5,6 +5,9 @@
 #include "libOTe/Triple/Foleage/FoleageTriple.h"
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "cryptoTools/Common/Timer.h"
+#include "cryptoTools/Common/TestCollection.h"
+
+
 namespace osuCrypto
 {
 
@@ -12,6 +15,7 @@ namespace osuCrypto
 	// checks correctness of the resulting OLE correlation.
 	void foleage_F4ole_test(const CLP& cmd)
 	{
+#ifdef ENABLE_FOLEAGE
 		std::array<FoleageTriple, 2> oles;
 
 		auto logn = 6;
@@ -97,9 +101,16 @@ namespace osuCrypto
 
 		if (verbose)
 			std::cout << "Time taken: \n" << timer << std::endl;
+
+#else
+		throw UnitTestSkipped("ENABLE_FOLEAGE not defined.");
+#endif
 	}
+
 	void foleage_Triple_test(const CLP& cmd)
 	{
+#ifdef ENABLE_FOLEAGE
+
 		std::array<FoleageTriple, 2> oles;
 
 		auto logn = 5;
@@ -177,10 +188,16 @@ namespace osuCrypto
 
 		if (verbose)
 			std::cout << "Time taken: \n" << timer << std::endl;
+#else
+		throw UnitTestSkipped("ENABLE_FOLEAGE not defined.");
+#endif
 	}
 
 	void foleage_GenBase_test(const CLP& cmd)
 	{
+#ifdef ENABLE_FOLEAGE
+		// This test checks the base OTs are generated correctly.
+
 		for (auto type : { SilentBaseType::Base, SilentBaseType::BaseExtend })
 		{
 
@@ -243,14 +260,16 @@ namespace osuCrypto
 					throw RTE_LOC;
 			}
 		}
+#else
+		throw UnitTestSkipped("ENABLE_FOLEAGE not defined.");
+#endif
 	}
 
 	void foleage_tensor_test(const CLP& cmd)
 	{
+#ifdef ENABLE_FOLEAGE
 
 		std::array<FoleageTriple, 2> oles;
-
-		//bool verbose = cmd.isSet("v");
 
 		PRNG prng0(block(2424523452345, 111124521521455324));
 		PRNG prng1(block(6474567454546, 567546754674345444));
@@ -298,6 +317,8 @@ namespace osuCrypto
 					throw RTE_LOC;
 			}
 		}
-
+#else
+		throw UnitTestSkipped("ENABLE_FOLEAGE not defined.");
+#endif
 	}
 }

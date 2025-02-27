@@ -8,7 +8,7 @@ set(SRCS
     NcoOT_Tests.cpp
     OT_Tests.cpp
     Pprf_Tests.cpp
-    RegularDpf_Tests.cpp
+    Dpf_Tests.cpp
     SilentOT_Tests.cpp
     SoftSpoken_Tests.cpp
     TungstenCode_Tests.cpp

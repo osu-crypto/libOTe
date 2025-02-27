@@ -16,7 +16,7 @@
 #include "libOTe/Tools/TungstenCode/TungstenCode.h"
 #include "libOTe/Tools/ExConvCodeOld/ExConvCodeOld.h"
 #include "libOTe/Dpf/RegularDpf.h"
-#include "libOTe/Dpf/TriDpf.h"
+#include "libOTe/Dpf/TernaryDpf.h"
 #include "libOTe/Triple/Foleage/FoleageTriple.h"
 
 namespace osuCrypto
@@ -695,6 +695,7 @@ namespace osuCrypto
 
 	void RegularDpfBenchmark(const oc::CLP& cmd)
 	{
+#ifdef ENABLE_REGULAR_DPF
 		PRNG prng(block(231234, 321312));
 		u64 trials = cmd.getOr("t", 100);
 		u64 domain = 1ull << cmd.getOr("d", 10);
@@ -765,14 +766,15 @@ namespace osuCrypto
 
 		if (cmd.isSet("v"))
 			std::cout << timer << std::endl;
+#else
+		std::cout << "ENABLE_REGULAR_DPF = false" << std::endl;
+#endif
 	}
 
 
-
-	void TriDpfBenchmark(const oc::CLP& cmd)
+	void TernaryDpfBenchmark(const oc::CLP& cmd)
 	{
-		//using F = FoleageF4x243;
-		//using Ctx = FoleageCoeffCtx;
+#ifdef ENABLE_TERNARY_DPF
 		using F = block;
 		using Ctx = CoeffCtxGF2;
 		Timer timer;
@@ -804,7 +806,7 @@ namespace osuCrypto
 		for (u64 i = 0; i < trials; ++i)
 		{
 
-			std::array<oc::TriDpf<F, Ctx>, 2> dpf;
+			std::array<oc::TernaryDpf<F, Ctx>, 2> dpf;
 			dpf[0].init(0, domain, numPoints);
 			dpf[1].init(1, domain, numPoints);
 
@@ -852,6 +854,9 @@ namespace osuCrypto
 		}
 
 		std::cout << timer << std::endl;
+#else
+		std::cout << "ENABLE_TERNARY_DPF = false" << std::endl;
+#endif
 
 	}
 
@@ -862,7 +867,8 @@ namespace osuCrypto
 	// checks correctness of the resulting OLE correlation.
 	void FoleageBenchmark(const CLP& cmd)
 	{
-	
+#ifdef ENABLE_FOLEAGE
+
 		auto logn = cmd.getOr("nn", 10);
 		u64 n = ipow(3, logn);
 		auto blocks = divCeil(n, 128);
@@ -947,5 +953,8 @@ namespace osuCrypto
 		}
 		work = {};
 		std::cout << "n="<<n<<", log2="<<log2ceil(n)<<"\n Time taken: \n" << timer << std::endl;
+#else
+		std::cout << "ENABLE_FOLEAGE = false" << std::endl;
+#endif
 	}
 }

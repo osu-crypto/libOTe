@@ -1,6 +1,9 @@
 #pragma once
 
 
+#include "libOTe/config.h"
+#if defined(ENABLE_TERNARY_DPF) 
+
 #include "cryptoTools/Common/Defines.h"
 #include "coproto/Socket/Socket.h"
 #include "cryptoTools/Crypto/PRNG.h"
@@ -13,129 +16,12 @@
 
 namespace osuCrypto
 {
-	// a value representing (Z_3)^32.
-	// The value is stored in 2 bits per Z_3 element.
-	struct F3x32
-	{
-		u64 mVal;
-
-		F3x32() = default;
-		F3x32(const F3x32&) = default;
-
-		F3x32(u64 v)
-		{
-			fromInt(v);
-		}
-
-		F3x32& operator=(const F3x32&) = default;
-
-		F3x32 operator+(const F3x32& t) const
-		{
-			F3x32 r;
-			r.mVal = 0;
-			for (u64 i = 0; i < 32; ++i)
-			{
-				auto a = t[i];
-				auto b = (*this)[i];
-				auto c = (a + b) % 3;
-
-				r.mVal |= u64(c) << (i * 2);
-			}
-			return r;
-		}
-
-
-		F3x32 operator-(const F3x32& t) const
-		{
-			F3x32 r;
-			r.mVal = 0;
-			for (u64 i = 0; i < 32; ++i)
-			{
-				auto a = t[i];
-				auto b = (*this)[i];
-				auto c = (b + 3 - a) % 3;
-
-				r.mVal |= u64(c) << (i * 2);
-			}
-			return r;
-		}
-
-
-		bool operator==(const F3x32& t) const
-		{
-			return mVal == t.mVal;
-		}
-
-
-		u64 toInt() const
-		{
-			u64 r = 0;
-			for (u64 i = 31; i < 32; --i)
-			{
-				r *= 3;
-				r += (mVal >> (i * 2)) & 3;
-			}
-
-			return r;
-		}
-
-		void fromInt(u64 v)
-		{
-			mVal = 0;
-			for (u64 i = 0; i < 32; ++i)
-			{
-				mVal |= (v % 3) << (i * 2);
-				v /= 3;
-			}
-		}
-
-		F3x32 lower(u64 digits)
-		{
-			F3x32 r;
-			r.mVal = mVal & ((1ull << (2 * digits)) - 1);
-			return r;
-		}
-		F3x32 upper(u64 digits)
-		{
-			F3x32 r;
-			r.mVal = mVal >> (2 * digits);
-			return r;
-		}
-
-		// returns the i'th Z_3 element.
-		u8 operator[](u64 i) const
-		{
-			return (mVal >> (i * 2)) & 3;
-		}
-	};
-
-	inline std::ostream& operator<<(std::ostream& o, const F3x32& t)
-	{
-		u64 m = 0;
-		u64 v = t.mVal;
-		while (v)
-		{
-			++m;
-			v >>= 2;
-		}
-		if (!m)
-			o << "0";
-		else
-		{
-			for (u64 i = m - 1; i < m; --i)
-			{
-				o << int(t[i]);
-			}
-		}
-		return o;
-	}
-
 
 	template<
 		typename F,
 		typename CoeffCtx = DefaultCoeffCtx<F>
 	>
-	struct TriDpf
+	struct TernaryDpf
 	{
 		using VecF = typename CoeffCtx::template Vec<F>;
 
@@ -245,11 +131,11 @@ namespace osuCrypto
 				for (u64 j = 0; j < mDepth; ++j)
 				{
 					if ((v & 3) == 3)
-						throw std::runtime_error("TriDpf: invalid point sharing. Expects the input points to be shared over Z_3^D where each Z_3 elements takes up 2 bits of a the value. " LOCATION);
+						throw std::runtime_error("TernaryDpf: invalid point sharing. Expects the input points to be shared over Z_3^D where each Z_3 elements takes up 2 bits of a the value. " LOCATION);
 					v >>= 2;
 				}
 				if (v)
-					throw std::runtime_error("TriDpf: invalid point sharing. point is larger than 3^D " LOCATION);
+					throw std::runtime_error("TernaryDpf: invalid point sharing. point is larger than 3^D " LOCATION);
 			}
 
 			u64 numPoints8 = mNumPoints / 8 * 8;
@@ -268,7 +154,7 @@ namespace osuCrypto
 					auto ret = MatrixView<T>((T*)allocIter, rows, cols);
 					allocIter += sizeof(T) * ret.size();
 					if (allocIter > allocation.data() + allocSize)
-						throw std::runtime_error("TriDpf: allocation error. " LOCATION);
+						throw std::runtime_error("TernaryDpf: allocation error. " LOCATION);
 					return ret;
 				};
 
@@ -772,3 +658,4 @@ namespace osuCrypto
 }
 
 #undef SIMD8
+#endif

@@ -1,6 +1,9 @@
 #pragma once
 
 
+#include "libOTe/config.h"
+#if defined(ENABLE_SPARSE_DPF) 
+
 #include "cryptoTools/Common/Defines.h"
 #include "coproto/Socket/Socket.h"
 #include "cryptoTools/Crypto/PRNG.h"
@@ -611,3 +614,4 @@ namespace osuCrypto
 
 #undef SIMD8
 
+#endif

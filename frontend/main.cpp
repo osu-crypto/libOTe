@@ -123,7 +123,7 @@ int main(int argc, char** argv)
 		else if (cmd.isSet("dpf"))
 			RegularDpfBenchmark(cmd);
 		else if (cmd.isSet("triDpf"))
-			TriDpfBenchmark(cmd);
+			TernaryDpfBenchmark(cmd);
 		else if (cmd.isSet("foleage"))
 			FoleageBenchmark(cmd);
 		else

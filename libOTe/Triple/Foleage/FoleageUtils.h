@@ -1,4 +1,18 @@
 #pragma once
+// © 2025 Peter Rindal.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+// Code partially authored by:
+// Maxime Bombar, Dung Bui, Geoffroy Couteau, Alain Couvreur, Clément Ducros, and Sacha Servan - Schreiber
+
+
+#include "libOTe/config.h"
+#if defined(ENABLE_FOLEAGE) || defined(ENABLE_TERNARY_DPF)
+
 #include "cryptoTools/Crypto/AES.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Crypto/RandomOracle.h"
@@ -8,6 +22,125 @@
 
 namespace osuCrypto
 {
+
+
+	// a value representing (Z_3)^32.
+	// The value is stored in 2 bits per Z_3 element.
+	struct F3x32
+	{
+		u64 mVal;
+
+		F3x32() = default;
+		F3x32(const F3x32&) = default;
+
+		F3x32(u64 v)
+		{
+			fromInt(v);
+		}
+
+		F3x32& operator=(const F3x32&) = default;
+
+		F3x32 operator+(const F3x32& t) const
+		{
+			F3x32 r;
+			r.mVal = 0;
+			for (u64 i = 0; i < 32; ++i)
+			{
+				auto a = t[i];
+				auto b = (*this)[i];
+				auto c = (a + b) % 3;
+
+				r.mVal |= u64(c) << (i * 2);
+			}
+			return r;
+		}
+
+
+		F3x32 operator-(const F3x32& t) const
+		{
+			F3x32 r;
+			r.mVal = 0;
+			for (u64 i = 0; i < 32; ++i)
+			{
+				auto a = t[i];
+				auto b = (*this)[i];
+				auto c = (b + 3 - a) % 3;
+
+				r.mVal |= u64(c) << (i * 2);
+			}
+			return r;
+		}
+
+
+		bool operator==(const F3x32& t) const
+		{
+			return mVal == t.mVal;
+		}
+
+
+		u64 toInt() const
+		{
+			u64 r = 0;
+			for (u64 i = 31; i < 32; --i)
+			{
+				r *= 3;
+				r += (mVal >> (i * 2)) & 3;
+			}
+
+			return r;
+		}
+
+		void fromInt(u64 v)
+		{
+			mVal = 0;
+			for (u64 i = 0; i < 32; ++i)
+			{
+				mVal |= (v % 3) << (i * 2);
+				v /= 3;
+			}
+		}
+
+		F3x32 lower(u64 digits)
+		{
+			F3x32 r;
+			r.mVal = mVal & ((1ull << (2 * digits)) - 1);
+			return r;
+		}
+		F3x32 upper(u64 digits)
+		{
+			F3x32 r;
+			r.mVal = mVal >> (2 * digits);
+			return r;
+		}
+
+		// returns the i'th Z_3 element.
+		u8 operator[](u64 i) const
+		{
+			return (mVal >> (i * 2)) & 3;
+		}
+	};
+
+	inline std::ostream& operator<<(std::ostream& o, const F3x32& t)
+	{
+		u64 m = 0;
+		u64 v = t.mVal;
+		while (v)
+		{
+			++m;
+			v >>= 2;
+		}
+		if (!m)
+			o << "0";
+		else
+		{
+			for (u64 i = m - 1; i < m; --i)
+			{
+				o << int(t[i]);
+			}
+		}
+		return o;
+	}
+
 
 	// Multiplies two elements of F4
 	// and returns the result.
@@ -264,3 +397,4 @@ namespace osuCrypto
 		return ret;
 	}
 }
+#endif

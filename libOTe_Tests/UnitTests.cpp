@@ -16,7 +16,7 @@
 #include "libOTe/Tools/LDPC/Mtx.h"
 #include "libOTe_Tests/Pprf_Tests.h"
 #include "libOTe_Tests/TungstenCode_Tests.h"
-#include "libOTe_Tests/RegularDpf_Tests.h"
+#include "libOTe_Tests/Dpf_Tests.h"
 #include "libOTe_Tests/Foleage_Tests.h"
 
 using namespace osuCrypto;

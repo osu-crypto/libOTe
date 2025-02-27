@@ -68,7 +68,12 @@ set(ENABLE_DELTA_KOS      @ENABLE_DELTA_KOS@)
 set(ENABLE_OOS            @ENABLE_OOS@)
 set(ENABLE_KKRT           @ENABLE_KKRT@)
 set(ENABLE_SILENT_VOLE    @ENABLE_SILENT_VOLE@)
-set(NO_SILVER_WARNING     @NO_SILVER_WARNING@)
+
+set(ENABLE_FOLEAGE        @ENABLE_FOLEAGE@)
+
+set(ENABLE_REGULAR_DPF    @ENABLE_REGULAR_DPF@)
+set(ENABLE_SPARSE_DPF     @ENABLE_SPARSE_DPF@)
+set(ENABLE_TERNARY_DPF    @ENABLE_TERNARY_DPF@)
 
 set(ENABLE_PPRF           @ENABLE_PPRF@)
 
@@ -127,5 +132,9 @@ set(libOTe_delta_kos_FOUND		${ENABLE_DELTA_KOS})
 set(libOTe_silent_vole_FOUND	${ENABLE_SILENT_VOLE})
 set(libOTe_oos_FOUND			${ENABLE_OOS})
 set(libOTe_kkrt_FOUND			${ENABLE_KKRT})
+set(libOTe_foleage_FOUND		${ENABLE_FOLEAGE})
+set(libOTe_regular_dpf_FOUND	${ENABLE_REGULAR_DPF})
+set(libOTe_ternary_dpf_FOUND	${ENABLE_TERNARY_DPF})
+set(libOTe_sparse_dpf_FOUND		${ENABLE_SPARSE_DPF})
 
 

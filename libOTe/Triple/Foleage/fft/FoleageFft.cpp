@@ -1,32 +1,45 @@
+// © 2025 Peter Rindal.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+// Code partially authored by:
+// Maxime Bombar, Dung Bui, Geoffroy Couteau, Alain Couvreur, Clément Ducros, and Sacha Servan - Schreiber
+
+
+#include "libOTe/config.h"
+#if defined(ENABLE_FOLEAGE)
+
 #include <stdlib.h>
 #include <stdio.h>
 #include "libOTe/Triple/Foleage/fft/FoleageFft.h"
 
 namespace osuCrypto {
 
-	void fft_recursive_uint64(
+	void foleageFftUint64(
 		span<uint64_t> coeffs,
 		const size_t num_vars,
 		const size_t num_coeffs)
 	{
-		// coeffs (coeffs_h, coeffs_l) are parsed as L(left)|M(middle)|R(right)
 
 		if (num_vars > 1)
 		{
 			// apply FFT on all left coefficients
-			fft_recursive_uint64(
+			foleageFftUint64(
 				coeffs,
 				num_vars - 1,
 				num_coeffs / 3);
 
 			// apply FFT on all middle coefficients
-			fft_recursive_uint64(
+			foleageFftUint64(
 				coeffs.subspan(num_coeffs),
 				num_vars - 1,
 				num_coeffs / 3);
 
 			// apply FFT on all right coefficients
-			fft_recursive_uint64(
+			foleageFftUint64(
 				coeffs.subspan(2 * num_coeffs),
 				num_vars - 1,
 				num_coeffs / 3);
@@ -80,7 +93,7 @@ namespace osuCrypto {
 		}
 	}
 
-	void fft_recursive_uint32(
+	void foleageFftUint32(
 		span<uint32_t> coeffs,
 		const size_t num_vars,
 		const size_t num_coeffs)
@@ -90,19 +103,19 @@ namespace osuCrypto {
 		if (num_vars > 1)
 		{
 			// apply FFT on all left coefficients
-			fft_recursive_uint32(
+			foleageFftUint32(
 				coeffs,
 				num_vars - 1,
 				num_coeffs / 3);
 
 			// apply FFT on all middle coefficients
-			fft_recursive_uint32(
+			foleageFftUint32(
 				coeffs.subspan(num_coeffs),
 				num_vars - 1,
 				num_coeffs / 3);
 
 			// apply FFT on all right coefficients
-			fft_recursive_uint32(
+			foleageFftUint32(
 				coeffs.subspan(2 * num_coeffs),
 				num_vars - 1,
 				num_coeffs / 3);
@@ -156,7 +169,7 @@ namespace osuCrypto {
 		}
 	}
 
-	void fft_recursive_uint16(
+	void foleageFftUint16(
 		span<uint16_t> coeffs,
 		const size_t num_vars,
 		const size_t num_coeffs)
@@ -166,19 +179,19 @@ namespace osuCrypto {
 		if (num_vars > 1)
 		{
 			// apply FFT on all left coefficients
-			fft_recursive_uint16(
+			foleageFftUint16(
 				coeffs,
 				num_vars - 1,
 				num_coeffs / 3);
 
 			// apply FFT on all middle coefficients
-			fft_recursive_uint16(
+			foleageFftUint16(
 				coeffs.subspan(num_coeffs),
 				num_vars - 1,
 				num_coeffs / 3);
 
 			// apply FFT on all right coefficients
-			fft_recursive_uint16(
+			foleageFftUint16(
 				coeffs.subspan(2 * num_coeffs),
 				num_vars - 1,
 				num_coeffs / 3);
@@ -308,3 +321,4 @@ namespace osuCrypto {
 		}
 	}
 }
+#endif
