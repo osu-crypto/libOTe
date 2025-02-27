@@ -564,8 +564,8 @@ namespace osuCrypto
 						tag[j][k] = tagBit(temp[0]);
 
 
-						auto rr  = AES::roundFn(temp[0], temp[0]);
-
+						//auto rr  = AES::roundFn(temp[0], temp[0]);
+						auto rr = temp[0];
 						diff[k] ^= rr;
 
 						std::cout << "p " << mPartyIdx << " k " << k << " j " << j << " leaf " << rr << " " << temp[0] << std::endl;
