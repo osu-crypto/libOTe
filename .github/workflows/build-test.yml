@@ -151,7 +151,7 @@ jobs:
         run:  python3 build.py -DENABLE_BOOST=OFF -DVERBOSE_FETCH=ON -DENABLE_SSE=OFF -DENABLE_MOCK_OT=true -D ENABLE_ALL_OT=ON 
 
       - name: unit tests
-        run:  ./out/build/osx/frontend/frontend_libOTe -u RegularDpf_Puncture_Test
+        run:  ./out/build/osx/frontend/frontend_libOTe -u RegularDpf_Puncture_Test aes
        
 
       - name: find source tree
