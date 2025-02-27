@@ -24,20 +24,35 @@ Malicious OT extension:
 
 Vole:
 * Generic subfield noisy VOLE (semi-honest) [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf)
-* Generic subfield silent VOLE (malicious/semi-honest)  [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882).
+* Generic subfield silent VOLE (malicious/semi-honest) [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882).
  
+OLE and Beaver Triples:
+* Foleage Binary Beaver Triples and F4 OLE (semi-honest) [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf).
+
+Distributed Point Functions:
+* Distributed Point Function (DPF)[[BGI18]](https://eprint.iacr.org/2018/707.pdf) with [Distributed] Key Generation (DKG) [[Ds17]](https://eprint.iacr.org/2017/827.pdf).
+* Ternary Distributed Point Function (DPF)[[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) with Distributed Key Generation (DKG).
+* Sparse Distributed Point Function (DPF) with Distributed Key Generation (DKG).
+
 ## Introduction
  
-This library provides several different classes of OT protocols. First is the 
+This library provides several different classes of OT, VOLE and Beaver Triple generation protocols. First is the 
 base OT protocol of [CO15, MR19, MRR21]. These protocol bootstraps all the other
-OT extension protocols.  Within the OT extension protocols, we have 1-out-of-2,
-1-out-of-N, and VOLE both in the semi-honest and malicious settings. See The `frontend` or `libOTe_Tests` folder for examples.
+protocols.  Within the OT extension protocols, we have 1-out-of-2,
+1-out-of-N, and VOLE both in the semi-honest and malicious settings. Binary beaver triples can be
+generating using the Foleage protocol. The library also includes a distributed point function (DPF)
+protocol with distributed key generation (DKG) for secure computation. See The `frontend` or `libOTe_Tests` 
+folder for examples.
 
 All implementations are highly optimized using fast SSE instructions and vectorization
 to obtain optimal performance both in the single and multi-threaded setting. 
  
 Networking can be performed using both the sockets provided by the library and
-external socket classes. The simplest integration can be achieved via the [message passing interface](https://github.com/osu-crypto/libOTe/blob/master/frontend/ExampleMessagePassing.h) where the user is given the protocol messages that need to be sent/received. Users can also integrate their own socket type for maximum performance. See the [coproto](https://github.com/Visa-Research/coproto/blob/main/frontend/SocketTutorial.cpp) tutorial for examples.
+external socket classes. The simplest integration can be achieved via the 
+[message passing interface](https://github.com/osu-crypto/libOTe/blob/master/frontend/ExampleMessagePassing.h) 
+where the user is given the protocol messages that need to be sent/received. 
+Users can also integrate their own socket type for maximum performance. 
+See the [coproto](https://github.com/Visa-Research/coproto/blob/main/frontend/SocketTutorial.cpp) tutorial for examples.
 
 
 ## Build
@@ -47,7 +62,8 @@ There is one mandatory dependency on [coproto](https://github.com/Visa-Research/
 and three **optional dependencies** on [libsodium](https://doc.libsodium.org/),
 [Relic](https://github.com/relic-toolkit/relic), or
 [SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
-for Base OTs. [Boost Asio](https://www.boost.org/doc/libs/1_84_0/doc/html/boost_asio.html) tcp networking and [OpenSSL](https://www.openssl.org/) support can optionally be enabled.
+for Base OTs. [Boost Asio](https://www.boost.org/doc/libs/1_84_0/doc/html/boost_asio.html) 
+tcp networking and [OpenSSL](https://www.openssl.org/) support can optionally be enabled.
 CMake 3.15+ is required and the build script assumes python 3.
  
 The library can be built with libsodium, all OT protocols enabled and boost asio TCP networking as
@@ -60,10 +76,14 @@ The main executable with examples is
 ```
 ./out/build/<platform>/frontend/frontend_libOTe
 ```
-where `<platform>` is the build directory, eg `linux`, `x64-Release`, `osx`, etc. **Unit Tests** and **example code** can be run with this excutable. Run the program with no options for a list of available options.
+where `<platform>` is the build directory, eg `linux`, `x64-Release`, `osx`, etc.
+**Unit Tests** and **example code** can be run with this excutable. 
+Run the program with no options for a list of available options.
 
 ### Build Options
-LibOTe can be built with various only the selected protocols enabled. `-D ENABLE_ALL_OT=ON` will enable all available protocols depending on platform/dependencies. The `ON`/`OFF` options include
+LibOTe can be built with various only the selected protocols enabled. 
+`-D ENABLE_ALL_OT=ON` will enable all available protocols depending 
+on platform/dependencies. The `ON`/`OFF` options include
 
 **Malicious base OT:**
  * `ENABLE_SIMPLESTOT` the SimplestOT [[CO15]](https://eprint.iacr.org/2015/267.pdf) protocol (relic or sodium).
@@ -81,8 +101,21 @@ LibOTe can be built with various only the selected protocols enabled. `-D ENABLE
  * `ENABLE_SOFTSPOKEN_OT` the Roy [Roy22](https://eprint.iacr.org/2022/192) semi-honest/malicious protocol.
  * `ENABLE_SILENTOT` the [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol.
 
+ **1-out-of-N OT Extension:**
+ * `ENABLE_KKRT` the Kolesnikov et al [[KKRT16]](https://eprint.iacr.org/2016/799) semi-honest protocol.
+ * `ENABLE_OOS` the Orrù et al [[OOS16]](http://eprint.iacr.org/2016/933) semi-honest/malicious protocol.
+
  **Vole:**
  * `ENABLE_SILENT_VOLE` the [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol.
+
+ ** DPF:**
+ * `ENABLE_REGULAR_DPF` the Boyle et al [[BGI18]](https://eprint.iacr.org/2018/707.pdf) semi-honest protocol.
+ * `ENABLE_TERNARY_DPF` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
+ * `ENABLE_SPARSE_DPF` protocol allowing a sparse set of DPF leaf values.
+
+ **Beaver Triples:**
+ * `ENABLE_FOLEAGE` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
+
 
  Addition options can be set for cryptoTools. See the cmake output.
 
@@ -188,12 +221,18 @@ find_package(libOTe REQUIRED
         silent_vole
         oos
         kkrt
+
+        foleage
+
+        regular_dpf
+        ternary_dpf
+        sparse_dpf
 )
 ```
 
 ## Help
  
-Contact Peter Rindal peterrindal@gmail.com for any assistance on building 
+Create a github issue or contact Peter Rindal peterrindal@gmail.com for any assistance on building 
 or running the library.
 
 ## Citing
@@ -226,8 +265,14 @@ or running the library.
 
 [ALSZ15]  - Gilad Asharov and Yehuda Lindell and Thomas Schneider and Michael Zohner, _More Efficient Oblivious Transfer Extensions with Security for Malicious Adversaries_. [eprint/2015/061](https://eprint.iacr.org/2015/061)
 
+[BGI18] - Elette Boyle, Niv Gilboa, Yuval Ishai, _Function Secret Sharing: Improvements and Extensions_ [eprint/2018/707](https://eprint.iacr.org/2018/707.pdf)
+
+[Ds17] - Jack Doerner, abhi shelat, _Scaling ORAM for Secure Computation_ [eprint/2017/827](https://eprint.iacr.org/2017/827.pdf)
+
 [CRR21] - Geoffroy Couteau ,Srinivasan Raghuraman and Peter Rindal, _Silver: Silent VOLE and Oblivious Transfer from Hardness of Decoding Structured LDPC Codes_.
 
 [Roy22] - Lawrence Roy, SoftSpokenOT: Communication--Computation Tradeoffs in OT Extension. [eprint/2022/192](https://eprint.iacr.org/2022/192)
 
 [RRT23] - Srinivasan Raghuraman, Peter Rindal and  Titouan Tanguy, _Expand-Convolute Codes for Pseudorandom Correlation Generators from LPN_. [eeprint/2023/882](https://eprint.iacr.org/2023/882)
+
+[BBCCDS2024] - Maxime Bombar, Dung Bui, Geoffroy Couteau, Alain Couvreur, Clément Ducros, and Sacha Servan-Schreiber, _FOLEAGE: F4 OLE-Based Multi-Party Computation for Boolean Circuits_. [eprint/2024/429](https://eprint.iacr.org/2024/429.pdf)
