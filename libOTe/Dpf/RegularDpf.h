@@ -729,7 +729,7 @@ namespace osuCrypto
 
 				for (u64 p = 0; p < 2; ++p)
 				{
-					seeds[p][a] = AES::roundFn(seeds[p][a], seeds[p][a]);
+					seeds[p][a] = AES::roundEnc(seeds[p][a], seeds[p][a]);
 				}
 
 				auto diff = seeds[0][a] ^ seeds[1][a];
