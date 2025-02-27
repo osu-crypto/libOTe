@@ -456,7 +456,6 @@ namespace osuCrypto {
         }
     }
 
-
     template <typename T>
     void sparse_vector_matrix_mul_host_v2(
         const thrust::device_vector<T>& x,
@@ -473,7 +472,7 @@ namespace osuCrypto {
             thrust::raw_pointer_cast(mat.colIndices.data()),
             thrust::raw_pointer_cast(result.data()),
             mat.sigma, mat.e, mat.t
-            );
+        );
 
         cudaDeviceSynchronize();
 
@@ -562,7 +561,7 @@ namespace osuCrypto {
         initialize_random_block_matrix(
             mat,
             mulHelper.sigma, mulHelper.e, mulHelper.t);
-
+            
         int threadsPerBlock = 256;
         int numBlocks = (mulHelper.sigma * mulHelper.e * mulHelper.t + threadsPerBlock - 1) / threadsPerBlock;
 
@@ -997,8 +996,8 @@ namespace osuCrypto {
         BlockMatrix G, H;
         //initialize_block_matrix(G, sigma, k, n, dist, rngcpu);
         //initialize_block_matrix(H, sigma, k, n, dist, rngcpu);
-        initialize_block_matrix_v2(G, sigma, n/k, k/sigma);
-        initialize_block_matrix_v2(H, sigma, n/k, k/sigma);
+        initialize_block_matrix_v2(G, sigma, n/k, k/sigma); // sigma, e, t
+        initialize_block_matrix_v2(H, sigma, 1, n/sigma); // sigma, e, t
         
         auto start = std::chrono::high_resolution_clock::now();
         code_cuda<uint64_t>(d_x, G, H, d_xG);
@@ -1223,7 +1222,6 @@ namespace osuCrypto {
             std::cout 
                 << "Time to block-wise Feistel shuffle (our function) a thrust::device_vector (GPU) using chrono "
                 << "with block of size " << b << " is " << elapsed_device_chrono.count() << " ms" << std::endl;
-
         }
 
         //
@@ -1518,7 +1516,7 @@ namespace osuCrypto {
         // like the recursive approach above, but much more in parallel (reduces #kernel launches and fills gpu)
         // recursive but implemented iteratively
         // this is the approach we want to use
-        benchmark_iterative_code_cuda(2);
+        benchmark_iterative_code_cuda(2); // parameter depth
         benchmark_iterative_code_cuda(3);
 
         //
