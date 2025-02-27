@@ -550,7 +550,7 @@ namespace osuCrypto
 					{
 						SIMD8(q, temp[q] = currentSeed[j][k + q] ^ (parentTag[k + q] & sigma[j][k + q]));
 						SIMD8(q, tag[j][k + q] = tagBit(temp[q]));
-						SIMD8(q, currentSeed[j][k + q] = AES::roundFn(temp[q], temp[q]));
+						SIMD8(q, currentSeed[j][k + q] = AES::roundEnc(temp[q], temp[q]));
 						SIMD8(q, diff[k + q] ^= currentSeed[j][k + q]);
 					}
 				}
@@ -564,8 +564,8 @@ namespace osuCrypto
 						tag[j][k] = tagBit(temp[0]);
 
 
-						//auto rr  = AES::roundFn(temp[0], temp[0]);
-						auto rr = temp[0];
+						auto rr  = AES::roundEnc(temp[0], temp[0]);
+						//auto rr = temp[0];
 						diff[k] ^= rr;
 
 						std::cout << "p " << mPartyIdx << " k " << k << " j " << j << " leaf " << rr << " " << temp[0] << std::endl;
