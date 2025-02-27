@@ -238,8 +238,8 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 	output[1].resize(numPoints, domain);
 	tags[0].resize(numPoints, domain);
 	tags[1].resize(numPoints, domain);
-	auto seed0 = prng.get();
-	auto seed1 = prng.get();
+	auto seed0 = prng.get<block>();
+	auto seed1 = prng.get<block>();
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 	macoro::sync_wait(macoro::when_all_ready(
