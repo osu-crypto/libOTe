@@ -255,8 +255,6 @@ namespace osuCrypto
 		RegularDpfKey* outputKey)
 	{
 
-		std::cout <<"p " << mPartyIdx << " seed " << seed << std::endl;
-
 		if (inputKey == nullptr)
 		{
 			if (points.size() != mNumPoints)
@@ -319,10 +317,6 @@ namespace osuCrypto
 			{
 				sc0[k] = basePeng.get<block>();
 				sc1[k] = basePeng.get<block>();
-
-				std::cout << "p " << mPartyIdx << " k " << k << " root " << sc0[k] << " " << sc1[k] << std::endl;
-
-
 				tag[k] = block::allSame<u8>(-mPartyIdx);
 
 				z[0][k] = sc0[k];
@@ -510,9 +504,6 @@ namespace osuCrypto
 							z[0][k] ^= childSeed[j * 2 + 0][k];
 							z[1][k] ^= childSeed[j * 2 + 1][k];
 
-							std::cout << "p " << mPartyIdx << " k " << k << " j " << j << " split " << childSeed[j * 2 + 0][k] << " " << childSeed[j * 2 + 1][k] << std::endl;
-
-
 							currentSeed[j][k] = tagBit(currentSeed[j][k]);
 						}
 					}
@@ -559,16 +550,12 @@ namespace osuCrypto
 				{
 					for (u64 j = 0; j < 2; ++j)
 					{
-						std::cout << "p " << mPartyIdx << " k " << k << " j " << j << " prnt " << currentSeed[j][k] << " ^ " << parentTag[k] << " & " << sigma[j][k] << std::endl;
 						temp[0] = currentSeed[j][k] ^ (parentTag[k] & sigma[j][k]);
 						tag[j][k] = tagBit(temp[0]);
 
 
 						auto rr  = AES::roundEnc(temp[0], temp[0]);
-						//auto rr = temp[0];
 						diff[k] ^= rr;
-
-						std::cout << "p " << mPartyIdx << " k " << k << " j " << j << " leaf " << rr << " " << temp[0] << std::endl;
 						currentSeed[j][k] = rr;
 					}
 				}
@@ -633,7 +620,6 @@ namespace osuCrypto
 				auto tdi = getRow(td, i);
 				for (u64 k = 0; k < mNumPoints; ++k)
 				{
-					std::cout<<"p " << mPartyIdx << " k " << k << " i " << i << " out " << sdi[k] << std::endl;
 					output(k, i, sdi[k], tdi[k]);
 				}
 			}

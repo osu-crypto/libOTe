@@ -194,7 +194,6 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 {
 
 	PRNG prng(block(231234, 321312));
-	std::cout << "pp " << prng.get<block>() << std::endl;
 	u64 domain = cmd.getOr("domain", 8);
 	u64 numPoints = cmd.getOr("numPoints", 1);
 	std::vector<u64> points0(numPoints);
@@ -262,10 +261,6 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 
 			if (t == 1 && act == ZeroBlock)
 				failed = true;
-			if (t)
-			{
-				std::cout << act <<" " << output[0][k][i]<<" ^ "<<output[1][k][i] << std::endl;
-			}
 
 			if (t != tAct)
 				throw RTE_LOC;
