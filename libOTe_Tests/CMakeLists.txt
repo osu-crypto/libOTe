@@ -1,7 +1,22 @@
 
-#project(libOTe_Tests)
+set(SRCS 
+    BaseOT_Tests.cpp
+    bitpolymul_Tests.cpp
+    Common.cpp
+    EACode_Tests.cpp
+    ExConvCode_Tests.cpp
+    NcoOT_Tests.cpp
+    OT_Tests.cpp
+    Pprf_Tests.cpp
+    Dpf_Tests.cpp
+    SilentOT_Tests.cpp
+    SoftSpoken_Tests.cpp
+    TungstenCode_Tests.cpp
+    UnitTests.cpp
+    Vole_Tests.cpp
+    Foleage_Tests.cpp
+)
 
-file(GLOB SRCS *.cpp) 
 add_library(libOTe_Tests STATIC ${SRCS})
 
 target_link_libraries(libOTe_Tests libOTe)

@@ -6,9 +6,9 @@ name: CI
 on:
   # Triggers the workflow on push or pull request events but only for the master branch
   push:
-    branches: [ master, stage, components, cpp20 ]
+    branches: [ master, stage, foliage, cpp20 ]
   pull_request:
-    branches: [ master, stage, components ]
+    branches: [ master, stage, foliage ]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -151,7 +151,7 @@ jobs:
         run:  python3 build.py -DENABLE_BOOST=OFF -DVERBOSE_FETCH=ON -DENABLE_SSE=OFF -DENABLE_MOCK_OT=true -D ENABLE_ALL_OT=ON 
 
       - name: unit tests
-        run:  ./out/build/osx/frontend/frontend_libOTe -u
+        run:  ./out/build/osx/frontend/frontend_libOTe -u 
        
 
       - name: find source tree
@@ -210,7 +210,7 @@ jobs:
 
       # Runs a set of commands using the runners shell        
       - name: build libOTe
-        run:  python3 build.py --par=1 -D ENABLE_ALL_OT=ON -DENABLE_MOCK_OT=true -G Ninja  
+        run:  python3 build.py -D ENABLE_ALL_OT=ON -DENABLE_MOCK_OT=true -G Ninja  
 
         
       - name: unit test

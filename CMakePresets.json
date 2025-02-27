@@ -8,7 +8,7 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/out/build/${presetName}",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "FETCH_AUTO": true,
         "ENABLE_ALL_OT": true,
         "ENABLE_SSE": true,
@@ -36,9 +36,8 @@
         "microsoft.com/VisualStudioRemoteSettings/CMake/1.0": {
           "sourceDir": "$env{HOME}/.vs/$ms{projectDirName}",
           "copySourcesOptions": {
-            "exclusionList": [ ".vs", "out/build", "out/install", "out/boost*", "out/relic/build", ".git" ]
-          },
-          "rsyncCommandArgs": [ "-t", "--delete", "--include=${sourceDir}/out/macoro/*", "--verbose" ]
+            "exclusionList": [ ".vs", "out", ".git" ]
+          }
         }
       }
     },
@@ -64,15 +63,15 @@
         "ENABLE_MR": "ON",
         "ENABLE_SIMPLESTOT": "ON",
         "ENABLE_GMP": false,
-        "ENABLE_RELIC": true,
-        "ENABLE_SODIUM": false,
+        "ENABLE_RELIC": false,
+        "ENABLE_SODIUM": true,
         "ENABLE_BOOST": true,
         "ENABLE_BITPOLYMUL": true,
         "FETCH_AUTO": "ON",
         "ENABLE_CIRCUITS": true,
         "VERBOSE_FETCH": true,
-        "ENABLE_SSE": true,
-        "ENABLE_AVX": true,
+        "ENABLE_SSE": false,
+        "ENABLE_AVX": false,
         "ENABLE_ASAN": true,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install/${presetName}"

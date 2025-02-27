@@ -254,7 +254,7 @@ namespace tests_libOTe
 		for (u64 i = 0; i < 10000; ++i)
 		{
 			transpose128(data.data());
-			data[0] += block::allSame((u64)1);
+            data[0] = data[0].add_epi64(block::allSame((u64)1));
 		}
 
 		// Add a check just to make sure this doesn't get compiled out.

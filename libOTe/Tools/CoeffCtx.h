@@ -296,6 +296,25 @@ namespace osuCrypto {
             return ss.str();
         }
 
+        template<typename F>
+		void mask(F& ret, const F& x, const block& mask)
+		{
+            static_assert(std::is_trivially_copyable<F>::value, "memset is used so must be trivially_copyable.");
+            if constexpr (sizeof(F) <= sizeof(block))
+            {
+			    ret = x & mask.get<F>(0);
+            }
+            else
+            {
+                static_assert(sizeof(F) % sizeof(block) == 0, "we assume F is a multiple of block");
+                block temp[sizeof(F) / sizeof(block)];
+                memcpy(&temp, &x, sizeof(F));
+                for (u64 i = 0; i < sizeof(F) / sizeof(block); ++i)
+                    temp[i] &= mask;
+                memcpy(&ret, &temp, sizeof(F));
+            }
+		}
+
     };
 
 
