@@ -28,6 +28,7 @@ primary design goal of this library to obtain *high performance* while being
  
 **OLE and Beaver Triples:**
 * Foleage Binary Beaver Triples and F4 OLE (semi-honest) [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf).
+* Binary Beaver Triples and OLE from the Silent OT[[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol. 
 
 **Distributed Point Functions:**
 * Distributed Point Function (DPF)[[BGI18]](https://eprint.iacr.org/2018/707.pdf) with [Distributed] Key Generation (DKG) [[Ds17]](https://eprint.iacr.org/2017/827.pdf).
@@ -115,6 +116,7 @@ on platform/dependencies. The `ON`/`OFF` options include
 
  **Beaver Triples:**
  * `ENABLE_FOLEAGE` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
+ * `ENABLE_SILENTOT` the [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol. 
 
 
  Addition options can be set for cryptoTools. See the cmake output.

@@ -66,12 +66,6 @@ namespace tests_libOTe
 			tc.add("SparseDpf_Proto_Test                    ", SparseDpf_Proto_Test);
 			tc.add("TritDpf_Proto_Test                      ", TritDpf_Proto_Test);
 
-			tc.add("foleage_tensor_test                     ", foleage_tensor_test);
-			tc.add("foleage_F4ole_test                      ", foleage_F4ole_test);
-			tc.add("foleage_Triple_test                     ", foleage_Triple_test);
-			
-			tc.add("foleage_GenBase_test                    ", foleage_GenBase_test);
-
 
 			tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
 			tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);
@@ -126,6 +120,15 @@ namespace tests_libOTe
 			tc.add("NcoOt_Oos_Test                          ", NcoOt_Oos_Test);
 			tc.add("NcoOt_genBaseOts_Test                   ", NcoOt_genBaseOts_Test);
 
+
+			tc.add("foleage_tensor_test                     ", foleage_tensor_test);
+			tc.add("foleage_F4ole_test                      ", foleage_F4ole_test);
+			tc.add("foleage_Triple_test                     ", foleage_Triple_test);
+
+			tc.add("foleage_GenBase_test                    ", foleage_GenBase_test);
+
+			tc.add("SilentOtTriple_ole_test                 ", SilentOtTriple_ole_test);
+			tc.add("SilentOtTriple_triple_test              ", SilentOtTriple_triple_test);
 
 		});
 }

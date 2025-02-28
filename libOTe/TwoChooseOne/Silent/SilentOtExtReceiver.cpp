@@ -56,7 +56,7 @@ namespace osuCrypto
 #endif
 	};
 
-	void SilentOtExtReceiver::setSilentBaseOts(span<block> recvBaseOts)
+	void SilentOtExtReceiver::setSilentBaseOts(span<const block> recvBaseOts)
 	{
 		if (isConfigured() == false)
 			throw std::runtime_error("configure(...) must be called first.");
