@@ -147,7 +147,7 @@ namespace osuCrypto
 	}
 
 	void SilentOtExtSender::setSilentBaseOts(
-		span<std::array<block, 2>> sendBaseOts)
+		span<const std::array<block, 2>> sendBaseOts)
 	{
 
 		if ((u64)sendBaseOts.size() != silentBaseOtCount())
