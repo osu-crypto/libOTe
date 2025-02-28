@@ -15,6 +15,7 @@
 #include <cryptoTools/Crypto/PRNG.h>
 #include <array>
 #include <cryptoTools/Crypto/MultiKeyAES.h>
+#include "libOTe/TwoChooseOne/TcoOtDefines.h"
 
 namespace osuCrypto {
 
@@ -32,10 +33,6 @@ namespace osuCrypto {
 
         // the base ot choice bits
         BitVector mBaseChoiceBits;
-
-        // if false and malicious, the base OT choice bits will be randomized.
-        // This prevents the sender from forcing both OTs messages to be the same.
-        bool mUniformBase = false;
 
         // the type of hashing used to generate the messages.
         HashType mHashType = HashType::AesHash;
@@ -61,7 +58,6 @@ namespace osuCrypto {
             mGens = std::move(v.mGens);
             mPrngIdx = std::exchange(v.mPrngIdx, 0);
             mBaseChoiceBits = std::move(v.mBaseChoiceBits);
-            mUniformBase = std::exchange(v.mUniformBase, 0);
             mHashType = v.mHashType;
             mFiatShamir = v.mFiatShamir;
             mIsMalicious = v.mIsMalicious;
@@ -89,6 +85,7 @@ namespace osuCrypto {
             span<block> baseRecvOts,
             const BitVector& choices) override;
 
+		[[deprecated("use setBaseOts, base ots are no longer randomized.")]]
         void setUniformBaseOts(
             span<block> baseRecvOts,
             const BitVector& choices);
@@ -101,11 +98,10 @@ namespace osuCrypto {
             PRNG& prng,
             Socket& chl) override;
 
-
-        std::vector<block> hash(
-            span<std::array<block, 2>> messages, 
+        task<> check(
             block seed, 
-            span<std::array<block, 2>> extraMessages);
+            span<block> t,
+            coproto::Socket& sock);
     };
 }
 

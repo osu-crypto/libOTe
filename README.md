@@ -8,28 +8,28 @@ A fast and portable C++20 library for Oblivious Transfer extension (OTe). The
 primary design goal of this library to obtain *high performance* while being 
 *easy to use*. Checkout [version 1.6](https://github.com/osu-crypto/libOTe/releases/tag/v1.6.0) for the previous version.
  
-Semi-honest OT extension:
+**Semi-honest OT extension:**
 * 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882).
 * 1-out-of-2 OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf).
 * 1-out-of-2 Correlated-OT [[IKNP03]](https://www.iacr.org/archive/crypto2003/27290145/27290145.pdf),[[BLNNOOSS15]](https://eprint.iacr.org/2015/472.pdf).
 * 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
 * 1-out-of-N OT [[KKRT16]](https://eprint.iacr.org/2016/799). 
 
-Malicious OT extension:
+**Malicious OT extension:**
 * 1-out-of-2 Silent OT [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882).
 * 1-out-of-2 OT [[KOS15]](https://eprint.iacr.org/2015/546).
 * 1-out-of-2 Correlated-OT [[KOS15]](https://eprint.iacr.org/2015/546).
 * 1-out-of-2 OT [[Roy22]](https://eprint.iacr.org/2022/192).
 * 1-out-of-2 base OT, several protocols. 
 
-Vole:
+**Vole:**
 * Generic subfield noisy VOLE (semi-honest) [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf)
 * Generic subfield silent VOLE (malicious/semi-honest) [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882).
  
-OLE and Beaver Triples:
+**OLE and Beaver Triples:**
 * Foleage Binary Beaver Triples and F4 OLE (semi-honest) [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf).
 
-Distributed Point Functions:
+**Distributed Point Functions:**
 * Distributed Point Function (DPF)[[BGI18]](https://eprint.iacr.org/2018/707.pdf) with [Distributed] Key Generation (DKG) [[Ds17]](https://eprint.iacr.org/2017/827.pdf).
 * Ternary Distributed Point Function (DPF)[[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) with Distributed Key Generation (DKG).
 * Sparse Distributed Point Function (DPF) with Distributed Key Generation (DKG).
@@ -108,7 +108,7 @@ on platform/dependencies. The `ON`/`OFF` options include
  **Vole:**
  * `ENABLE_SILENT_VOLE` the [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol.
 
- ** DPF:**
+ **DPF:**
  * `ENABLE_REGULAR_DPF` the Boyle et al [[BGI18]](https://eprint.iacr.org/2018/707.pdf) semi-honest protocol.
  * `ENABLE_TERNARY_DPF` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
  * `ENABLE_SPARSE_DPF` protocol allowing a sparse set of DPF leaf values.

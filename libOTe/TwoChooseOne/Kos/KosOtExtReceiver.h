@@ -15,6 +15,7 @@
 #include <cryptoTools/Common/Timer.h>
 #include "libOTe/Tools/Coproto.h"
 #include <cryptoTools/Crypto/MultiKeyAES.h>
+#include "libOTe/TwoChooseOne/TcoOtDefines.h"
 
 namespace osuCrypto
 {
@@ -27,11 +28,6 @@ namespace osuCrypto
 
         // have the base ots been set
         bool mHasBase = false;
-
-        // true if the base OTs have uniform choice bits.
-        // if false, the choice bits will be randomized
-        // when malicious security is used.
-        bool mUniformBase = false;
 
         // the base OTs messages as the AES keys.
         std::vector<MultiKeyAES<gOtExtBaseOtCount>> mGens;
@@ -49,6 +45,7 @@ namespace osuCrypto
         // to generate the malicious security challenge.
         bool mFiatShamir = false;
 
+
         KosOtExtReceiver() = default;
         KosOtExtReceiver(const KosOtExtReceiver&) = delete;
         KosOtExtReceiver(KosOtExtReceiver&&) = default;
@@ -62,7 +59,6 @@ namespace osuCrypto
             mIsMalicious = v.mIsMalicious;
             mHashType = v.mHashType;
             mFiatShamir = v.mFiatShamir;
-            mUniformBase = std::exchange(v.mUniformBase, 0);
         }
 
         virtual ~KosOtExtReceiver() = default;
@@ -100,12 +96,12 @@ namespace osuCrypto
             Socket& chl) override;
 
         // internal, hashes and returns the malicious check message.
-        AlignedUnVector<block> hash(
+        task<> check(
             span<block> messages,
             BitVector const& choices,
+            BitVector const& extraChoices,
             block seed,
-            span<block> extraChoices,
-            span<block> extraBlocks);
+            coproto::Socket& sock);
 
     };
 
