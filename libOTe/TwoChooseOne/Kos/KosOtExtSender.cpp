@@ -334,7 +334,7 @@ namespace osuCrypto
 		{
 			block& received_x = u.back();
 			block& received_t = u[i];
-			auto tt = received_x & zeroAndAllOne[mBaseChoiceBits[i]] ^ q1[i];
+			auto tt = (received_x & zeroAndAllOne[mBaseChoiceBits[i]]) ^ q1[i];
 
 			if (tt != received_t)
 			{
