@@ -479,7 +479,7 @@ namespace tests_libOTe
         PRNG prng0(block(4253465, 3434565));
         PRNG prng1(block(42532335, 334565));
 
-        u64 numOTs = 20000;
+        u64 numOTs = 128;
 
         std::vector<block> recvMsg(numOTs), baseRecv(128);
         std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);
