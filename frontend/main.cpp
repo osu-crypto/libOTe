@@ -100,36 +100,9 @@ int main(int argc, char** argv)
 	
 
 	// various benchmarks
-	if (cmd.isSet("bench"))
+	if (cmd.isSet("bench") || cmd.isSet("benchmark"))
 	{
-		if (cmd.isSet("QC"))
-			QCCodeBench(cmd);
-		else if (cmd.isSet("silent"))
-			SilentOtBench(cmd);
-		else if (cmd.isSet("pprf"))
-			PprfBench(cmd);
-		else if (cmd.isSet("vole2"))
-			VoleBench2(cmd);
-		else if (cmd.isSet("ea"))
-			EACodeBench(cmd);
-		else if (cmd.isSet("ec"))
-			ExConvCodeBench(cmd);
-		else if (cmd.isSet("ecold"))
-			ExConvCodeOldBench(cmd);
-		else if (cmd.isSet("tungsten"))
-			TungstenCodeBench(cmd);
-		else if (cmd.isSet("aes"))
-			AESBenchmark(cmd);
-		else if (cmd.isSet("dpf"))
-			RegularDpfBenchmark(cmd);
-		else if (cmd.isSet("triDpf"))
-			TernaryDpfBenchmark(cmd);
-		else if (cmd.isSet("foleage"))
-			FoleageBenchmark(cmd);
-		else
-		{
-			std::cout << "unknown benchmark" << std::endl;
-		}
+		benchmark(cmd);
 
 		return 0;
 	}

@@ -347,7 +347,7 @@ namespace osuCrypto
 		for (u64 i = 0; i < mSparsePositions.size(); ++i)
 			mSparsePositions(i) = prng.get<u64>() % mBlockSize;
 
-		if (mC != 4)
+		if (mC > 4)
 			throw RTE_LOC;
 
 		// we pack 4 FFTs into a single u8. 

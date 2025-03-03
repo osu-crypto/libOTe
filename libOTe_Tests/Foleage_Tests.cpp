@@ -16,95 +16,103 @@ namespace osuCrypto
 	void foleage_F4ole_test(const CLP& cmd)
 	{
 #ifdef ENABLE_FOLEAGE
-		std::array<FoleageTriple, 2> oles;
 
 		auto logn = 6;
 		u64 n = ipow(3, logn) - 67;
 		auto blocks = divCeil(n, 128);
 		bool verbose = cmd.isSet("v");
+		std::vector<u64> cs{ 4,3 };
 
-		if (cmd.hasValue("t"))
-			oles[0].mT = oles[1].mT = cmd.get<u64>("t");
-
-		PRNG prng0(block(2424523452345, 111124521521455324));
-		PRNG prng1(block(6474567454546, 567546754674345444));
-		Timer timer;
-
-		oles[0].init(0, n);
-		oles[1].init(1, n);
-
+		for (auto c : cs)
 		{
-			auto otCount0 = oles[0].baseOtCount();
-			auto otCount1 = oles[1].baseOtCount();
-			if (otCount0.mRecvCount != otCount1.mSendCount ||
-				otCount0.mSendCount != otCount1.mRecvCount)
-				throw RTE_LOC;
-			std::array<std::vector<std::array<block, 2>>, 2> baseSend;
-			baseSend[0].resize(otCount0.mSendCount);
-			baseSend[1].resize(otCount1.mSendCount);
-			std::array<std::vector<block>, 2> baseRecv;
-			std::array<BitVector, 2> baseChoice;
 
-			for (u64 i = 0; i < 2; ++i)
+			std::array<FoleageTriple, 2> oles;
+			if (cmd.hasValue("t"))
+				oles[0].mT = oles[1].mT = cmd.get<u64>("t");
+
+			oles[0].mC = oles[1].mC = c;
+
+			PRNG prng0(block(2424523452345, 111124521521455324));
+			PRNG prng1(block(6474567454546, 567546754674345444));
+			Timer timer;
+
+			oles[0].init(0, n);
+			oles[1].init(1, n);
+
 			{
-				prng0.get(baseSend[i].data(), baseSend[i].size());
-				baseRecv[1 ^ i].resize(baseSend[i].size());
-				baseChoice[1 ^ i].resize(baseSend[i].size());
-				baseChoice[1 ^ i].randomize(prng0);
-				for (u64 j = 0; j < baseSend[i].size(); ++j)
+				auto otCount0 = oles[0].baseOtCount();
+				auto otCount1 = oles[1].baseOtCount();
+				if (otCount0.mRecvCount != otCount1.mSendCount ||
+					otCount0.mSendCount != otCount1.mRecvCount)
+					throw RTE_LOC;
+				std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+				baseSend[0].resize(otCount0.mSendCount);
+				baseSend[1].resize(otCount1.mSendCount);
+				std::array<std::vector<block>, 2> baseRecv;
+				std::array<BitVector, 2> baseChoice;
+
+				for (u64 i = 0; i < 2; ++i)
 				{
-					baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+					prng0.get(baseSend[i].data(), baseSend[i].size());
+					baseRecv[1 ^ i].resize(baseSend[i].size());
+					baseChoice[1 ^ i].resize(baseSend[i].size());
+					baseChoice[1 ^ i].randomize(prng0);
+					for (u64 j = 0; j < baseSend[i].size(); ++j)
+					{
+						baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+					}
 				}
+
+				oles[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+				oles[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 			}
 
-			oles[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
-			oles[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+			auto sock = coproto::LocalAsyncSocket::makePair();
+			std::vector<block>
+				ALsb(blocks),
+				AMsb(blocks),
+				BLsb(blocks),
+				BMsb(blocks),
+				C0Lsb(blocks),
+				C0Msb(blocks),
+				C1Lsb(blocks),
+				C1Msb(blocks);
+
+			if (verbose)
+				oles[0].setTimer(timer);
+
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				oles[0].expand(ALsb, AMsb, C0Lsb, C0Msb, prng0, sock[0]),
+				oles[1].expand(BLsb, BMsb, C1Lsb, C1Msb, prng1, sock[1])));
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+
+			// Now we check that we got the correct OLE correlations and fail
+			// the test otherwise.
+			for (size_t i = 0; i < blocks; i++)
+			{
+				auto Lsb = C0Lsb[i] ^ C1Lsb[i];
+				auto Msb = C0Msb[i] ^ C1Msb[i];
+				block mLsb, mMsb;
+				F4Multiply(
+					ALsb[i], AMsb[i],
+					BLsb[i], BMsb[i],
+					mLsb, mMsb);
+
+				if (Lsb != mLsb)
+					throw RTE_LOC;
+				if (Msb != mMsb)
+					throw RTE_LOC;
+			}
+
+			if (verbose)
+				std::cout << "Time taken: \n" << timer << std::endl;
 		}
-
-		auto sock = coproto::LocalAsyncSocket::makePair();
-		std::vector<block>
-			ALsb(blocks),
-			AMsb(blocks),
-			BLsb(blocks),
-			BMsb(blocks),
-			C0Lsb(blocks),
-			C0Msb(blocks),
-			C1Lsb(blocks),
-			C1Msb(blocks);
-
-		if (verbose)
-			oles[0].setTimer(timer);
-
-		auto r = macoro::sync_wait(macoro::when_all_ready(
-			oles[0].expand(ALsb, AMsb, C0Lsb, C0Msb, prng0, sock[0]),
-			oles[1].expand(BLsb, BMsb, C1Lsb, C1Msb, prng1, sock[1])));
-		std::get<0>(r).result();
-		std::get<1>(r).result();
-
-		// Now we check that we got the correct OLE correlations and fail
-		// the test otherwise.
-		for (size_t i = 0; i < blocks; i++)
-		{
-			auto Lsb = C0Lsb[i] ^ C1Lsb[i];
-			auto Msb = C0Msb[i] ^ C1Msb[i];
-			block mLsb, mMsb;
-			F4Multiply(
-				ALsb[i], AMsb[i],
-				BLsb[i], BMsb[i],
-				mLsb, mMsb);
-
-			if (Lsb != mLsb)
-				throw RTE_LOC;
-			if (Msb != mMsb)
-				throw RTE_LOC;
-		}
-
-		if (verbose)
-			std::cout << "Time taken: \n" << timer << std::endl;
 
 #else
 		throw UnitTestSkipped("ENABLE_FOLEAGE not defined.");
 #endif
+
 	}
 
 	void foleage_Triple_test(const CLP& cmd)

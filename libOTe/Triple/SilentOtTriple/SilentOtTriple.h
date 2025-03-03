@@ -11,7 +11,7 @@ namespace osuCrypto
 {
 
 
-	struct SilentOtTriple
+	struct SilentOtTriple : TimerAdapter
 	{
 		u64 mPartyIdx = 0;
 

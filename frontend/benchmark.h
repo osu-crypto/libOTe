@@ -18,9 +18,11 @@
 #include "libOTe/Dpf/RegularDpf.h"
 #include "libOTe/Dpf/TernaryDpf.h"
 #include "libOTe/Triple/Foleage/FoleageTriple.h"
+#include "libOTe/Triple/SilentOtTriple/SilentOtTriple.h"
 
 namespace osuCrypto
 {
+
 
 	inline void QCCodeBench(CLP& cmd)
 	{
@@ -887,6 +889,7 @@ namespace osuCrypto
 		auto sock = coproto::LocalAsyncSocket::makePair();
 		sock[0].setExecutor(pool);
 		sock[1].setExecutor(pool);
+		double tps = 0;
 
 		for (u64 ii = 0; ii < trials; ++ii)
 		{
@@ -900,8 +903,7 @@ namespace osuCrypto
 			oles[0].init(0, n);
 			oles[1].init(1, n);
 
-			std::cout << "leaf " << oles[0].mDpfLeafDepth << " main " << oles[0].mDpfTreeDepth << std::endl;
-
+			if(cmd.isSet("mockBase"))
 			{
 				auto otCount0 = oles[0].baseOtCount();
 				auto otCount1 = oles[1].baseOtCount();
@@ -931,30 +933,174 @@ namespace osuCrypto
 			}
 
 			std::vector<block>
-				ALsb(blocks),
-				AMsb(blocks),
-				BLsb(blocks),
-				BMsb(blocks),
-				C0Lsb(blocks),
-				C0Msb(blocks),
-				C1Lsb(blocks),
-				C1Msb(blocks);
-
+				A0(blocks),
+				A1(blocks),
+				B0(blocks),
+				B1(blocks),
+				C0(blocks),
+				C1(blocks);
 
 			oles[0].setTimer(timer);
-			timer.setTimePoint("start");
+			auto b = timer.setTimePoint("start");
+
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				oles[0].expand(ALsb, AMsb, C0Lsb, C0Msb, prng0, sock[0]) | macoro::start_on(pool),
-				oles[1].expand(BLsb, BMsb, C1Lsb, C1Msb, prng1, sock[1]) | macoro::start_on(pool)));
-			timer.setTimePoint("end");
+				oles[0].expand(A0,B0,C0, prng0, sock[0]) | macoro::start_on(pool),
+				oles[1].expand(A1,B1,C1, prng1, sock[1]) | macoro::start_on(pool)));
+			auto e=timer.setTimePoint("end");
+			tps = double(n) / (std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count() / 1000.0);
 			std::get<0>(r).result();
 			std::get<1>(r).result();
 
 		}
 		work = {};
-		std::cout << "n="<<n<<", log2="<<log2ceil(n)<<"\n Time taken: \n" << timer << std::endl;
+		std::cout << "foleage triple n="<<n<<", log2="<<log2ceil(n)
+			<< " triples/sec = " << u64(tps)
+			<<"\n Time taken: \n" << timer << std::endl;
 #else
 		std::cout << "ENABLE_FOLEAGE = false" << std::endl;
 #endif
+	}
+
+
+
+	void SilentOtTripleBenchmark(const CLP& cmd)
+	{
+#ifdef ENABLE_SILENTOT
+
+		auto logn = cmd.getOr("nn", 10);
+		u64 n = ipow(2, logn);
+		auto blocks = divCeil(n, 128);
+
+
+		u64 trials = cmd.getOr("trials", 1);
+
+		//PRNG prng(block(342342));
+		PRNG prng0(block(2424523452345, 111124521521455324));
+		PRNG prng1(block(6474567454546, 567546754674345444));
+		Timer timer;
+
+		macoro::thread_pool::work work;
+		macoro::thread_pool pool(2, work);
+		auto sock = coproto::LocalAsyncSocket::makePair();
+		sock[0].setExecutor(pool);
+		sock[1].setExecutor(pool);
+
+		double tps = 0;
+		for (u64 ii = 0; ii < trials; ++ii)
+		{
+
+			std::array<SilentOtTriple, 2> oles;
+
+			oles[0].init(0, n);
+			oles[1].init(1, n);
+
+			if(cmd.hasValue("mult"))
+				oles[0].mMultType = oles[1].mMultType = (MultType)cmd.get<u64>("mult");
+
+			if (cmd.isSet("mockBase"))
+			{
+				auto otCount0 = oles[0].baseOtCount(prng0);
+				auto otCount1 = oles[1].baseOtCount(prng0);
+				std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+				baseSend[0].resize(otCount0.mSendCount);
+				baseSend[1].resize(otCount1.mSendCount);
+				std::array<std::vector<block>, 2> baseRecv;
+				std::array<BitVector, 2> baseChoice
+				{
+					otCount0.mRecvChoice,
+					otCount1.mRecvChoice
+				};
+
+				for (u64 i = 0; i < 2; ++i)
+				{
+					prng0.get(baseSend[i].data(), baseSend[i].size());
+					baseRecv[1 ^ i].resize(baseSend[i].size());
+					for (u64 j = 0; j < baseSend[i].size(); ++j)
+					{
+						baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+					}
+				}
+
+				oles[0].setBaseOts(baseSend[0], baseRecv[0]);
+				oles[1].setBaseOts(baseSend[1], baseRecv[1]);
+			}
+
+			std::vector<block>
+				A0(blocks),
+				A1(blocks),
+				B0(blocks),
+				B1(blocks),
+				C0(blocks),
+				C1(blocks);
+
+			oles[0].setTimer(timer);
+
+			auto b = timer.setTimePoint("start");
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				oles[0].expand(A0, B0, C0, prng0, sock[0]) | macoro::start_on(pool),
+				oles[1].expand(A1, B1, C1, prng1, sock[1]) | macoro::start_on(pool)));
+			auto e = timer.setTimePoint("end");
+			tps = double(n) / (std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count() / 1000.0);
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+
+		}
+		work = {};
+		std::cout << "SilentOTTriple n=" << n << ", log2=" << log2ceil(n) 
+			<< " triples/sec = " << u64(tps)
+			<< "\n Time taken: \n" << timer << std::endl;
+#else
+		std::cout << "ENABLE_FOLEAGE = false" << std::endl;
+#endif
+	}
+
+
+
+	inline void benchmark(CLP& cmd)
+	{
+
+		if (cmd.isSet("QC"))
+			QCCodeBench(cmd);
+		else if (cmd.isSet("silent"))
+			SilentOtBench(cmd);
+		else if (cmd.isSet("pprf"))
+			PprfBench(cmd);
+		else if (cmd.isSet("vole2"))
+			VoleBench2(cmd);
+		else if (cmd.isSet("ea"))
+			EACodeBench(cmd);
+		else if (cmd.isSet("ec"))
+			ExConvCodeBench(cmd);
+		else if (cmd.isSet("ecold"))
+			ExConvCodeOldBench(cmd);
+		else if (cmd.isSet("tungsten"))
+			TungstenCodeBench(cmd);
+		else if (cmd.isSet("aes"))
+			AESBenchmark(cmd);
+		else if (cmd.isSet("dpf"))
+			RegularDpfBenchmark(cmd);
+		else if (cmd.isSet("triDpf"))
+			TernaryDpfBenchmark(cmd);
+		else if (cmd.isSet("foleage"))
+			FoleageBenchmark(cmd);
+		else if (cmd.isSet("silentTriple"))
+			SilentOtTripleBenchmark(cmd);
+		else
+		{
+			std::cout << "unknown benchmark, opts:" << std::endl;
+			std::cout << "  -QC" << std::endl;
+			std::cout << "  -silent" << std::endl;
+			std::cout << "  -pprf" << std::endl;
+			std::cout << "  -vole2" << std::endl;
+			std::cout << "  -ea" << std::endl;
+			std::cout << "  -ec" << std::endl;
+			std::cout << "  -ecold" << std::endl;
+			std::cout << "  -tungsten" << std::endl;
+			std::cout << "  -aes" << std::endl;
+			std::cout << "  -dpf" << std::endl;
+			std::cout << "  -triDpf" << std::endl;
+			std::cout << "  -foleage" << std::endl;
+			std::cout << "  -silentTriple" << std::endl;
+		}
 	}
 }

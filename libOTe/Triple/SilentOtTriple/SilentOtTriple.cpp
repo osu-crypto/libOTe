@@ -91,11 +91,24 @@ namespace osuCrypto
 		auto aIter8 = (u8*)A.data();
 		auto bIter8 = (u8*)B.data();
 
+		if (B.size())
+		{
+			if (C.size() * 256 != X.size())
+				throw RTE_LOC;
+			if (A.size() * 256 != X.size())
+				throw RTE_LOC;
+			if (A.size() * 256 != X.size())
+				throw RTE_LOC;
 
-		if (C.size() * 128 != X.size())
-			throw RTE_LOC;
-		if (A.size() * 128 != X.size())
-			throw RTE_LOC;
+		}
+		else
+		{
+
+			if (C.size() * 128 != X.size())
+				throw RTE_LOC;
+			if (A.size() * 128 != X.size())
+				throw RTE_LOC;
+		}
 
 		auto shuffle = std::array<block, 16>{};
 		memset(shuffle.data(), 1 << 7, sizeof(*shuffle.data()) * shuffle.size());
@@ -245,10 +258,24 @@ namespace osuCrypto
 		auto aIter8 = (u8*)A.data();
 		auto bIter8 = (u8*)B.data();
 
+		if (B.size())
+		{
+			if (C.size() * 256 != Y.size())
+				throw RTE_LOC;
+			if (A.size() * 256 != Y.size())
+				throw RTE_LOC;
+			if (A.size() * 256 != Y.size())
+				throw RTE_LOC;
+
+		}
+		else
+		{
+
 		if (C.size() * 128 != Y.size())
 			throw RTE_LOC;
 		if (A.size() * 128 != Y.size())
 			throw RTE_LOC;
+		}
 		using block = oc::block;
 
 		auto shuffle = std::array<block, 16>{};
@@ -510,12 +537,19 @@ namespace osuCrypto
 
 	macoro::task<> SilentOtTriple::expand(span<block> A, span<block> C, PRNG& prng, coproto::Socket& sock)
 	{
+
+		if (A.size() != divCeil(mN, 128))
+			throw RTE_LOC;
+		if (C.size() != divCeil(mN, 128))
+			throw RTE_LOC;
+
 		bool debug = false;
 		if (mSendRecv.index())
 		{
 			//return recvTask(std::get<1>(mSendRecv), mN, prng, sock, X, C);
 			auto& mReceiver = std::get<1>(mSendRecv);
-			assert(mReceiver.mGen.hasBaseOts());
+			if (mTimer)
+				mReceiver.setTimer(*mTimer);
 			mReceiver.mMultType = mMultType;
 			mReceiver.mGen.mEagerSend = false;
 
@@ -539,22 +573,26 @@ namespace osuCrypto
 
 			co_await mReceiver.silentReceiveInplace(mReceiver.mRequestNumOts, prng, sock, oc::ChoiceBitPacking::True);
 			compressRecver(mReceiver.mA, C, A, {});
+			setTimePoint("compressRecverDone");
+
 		}
 		else
 		{
 			auto& mSender = std::get<0>(mSendRecv);
-
+			if (mTimer)
+				mSender.setTimer(*mTimer);
 			if (debug)
 			{
 				co_await sock.send(coproto::copy(mSender.mGen.mBaseOTs));
 			}
 			assert(mSender.mGen.hasBaseOts());
 			mSender.mMultType = mMultType;
-
 			mSender.mGen.mEagerSend = false;
 
 			co_await mSender.silentSendInplace(prng.get(), mSender.mRequestNumOts, prng, sock);
 			compressSender(mSender.mDelta, mSender.mB, C, A, {});
+
+			setTimePoint("compressSenderDone");
 		}
 	}
 
@@ -562,26 +600,36 @@ namespace osuCrypto
 		span<block> A, span<block> B, span<block> C,
 		PRNG& prng, coproto::Socket& sock)
 	{
+		if (A.size() != divCeil(mN, 256))
+			throw RTE_LOC;
+		if (B.size() != divCeil(mN, 256))
+			throw RTE_LOC;
+		if (C.size() != divCeil(mN, 256))
+			throw RTE_LOC;
+
 		if (mSendRecv.index())
 		{
 			auto& mReceiver = std::get<1>(mSendRecv);
-			assert(mReceiver.mGen.hasBaseOts());
+			if (mTimer)
+				mReceiver.setTimer(*mTimer);
 			mReceiver.mMultType = mMultType;
 			mReceiver.mGen.mEagerSend = false;
 
 			co_await mReceiver.silentReceiveInplace(mReceiver.mRequestNumOts, prng, sock, oc::ChoiceBitPacking::True);
 			compressRecver(mReceiver.mA, C, A, B);
+			setTimePoint("compressRecverDone");
 		}
 		else
 		{
 			auto& mSender = std::get<0>(mSendRecv);
-			assert(mSender.mGen.hasBaseOts());
+			if (mTimer)
+				mSender.setTimer(*mTimer);
 			mSender.mMultType = mMultType;
-
 			mSender.mGen.mEagerSend = false;
 
 			co_await mSender.silentSendInplace(prng.get(), mSender.mRequestNumOts, prng, sock);
 			compressSender(mSender.mDelta, mSender.mB, C, A, B);
+			setTimePoint("compressSenderDone");
 		}
 	}
 
