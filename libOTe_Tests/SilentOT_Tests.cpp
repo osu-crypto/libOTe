@@ -420,8 +420,8 @@ void SilentOtTriple_triple_test(const oc::CLP& cmd)
     PRNG prng1(block(6474567454546, 567546754674345444));
     Timer timer;
 
-    oles[0].init(0, n, SilentSecType::SemiHonest, SilentOtTriple::Type::OLE);
-    oles[1].init(1, n, SilentSecType::SemiHonest, SilentOtTriple::Type::OLE);
+    oles[0].init(0, n, SilentSecType::SemiHonest, SilentOtTriple::Type::Triple);
+    oles[1].init(1, n, SilentSecType::SemiHonest, SilentOtTriple::Type::Triple);
 
     {
         auto otCount0 = oles[0].baseOtCount(prng0);
@@ -454,17 +454,17 @@ void SilentOtTriple_triple_test(const oc::CLP& cmd)
 
     auto sock = coproto::LocalAsyncSocket::makePair();
     std::vector<block>
-        A0(blocks),
-        A1(blocks),
-        B0(blocks),
-        B1(blocks),
-        C0(blocks),
-        C1(blocks);
+        Av0(blocks),
+        Av1(blocks),
+        Bv0(blocks),
+        Bv1(blocks),
+        Cv0(blocks),
+        Cv1(blocks);
 
 
     auto r = macoro::sync_wait(macoro::when_all_ready(
-        oles[0].expand(A0, B0, C0, prng0, sock[0]),
-        oles[1].expand(A1, B1, C1, prng1, sock[1])));
+        oles[0].expand(Av0, Bv0, Cv0, prng0, sock[0]),
+        oles[1].expand(Av1, Bv1, Cv1, prng1, sock[1])));
     std::get<0>(r).result();
     std::get<1>(r).result();
 
@@ -472,8 +472,8 @@ void SilentOtTriple_triple_test(const oc::CLP& cmd)
     // the test otherwise.
     for (size_t i = 0; i < blocks; i++)
     {
-        auto act = C0[i] ^ C1[i];
-        auto exp = (A0[i]^A1[i]) & (B0[i] ^ B1[i]);
+        auto act = Cv0[i] ^ Cv1[i];
+        auto exp = (Av0[i]^Av1[i]) & (Bv0[i] ^ Bv1[i]);
 
         if (act != exp)
         {

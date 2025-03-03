@@ -933,19 +933,19 @@ namespace osuCrypto
 			}
 
 			std::vector<block>
-				A0(blocks),
-				A1(blocks),
-				B0(blocks),
-				B1(blocks),
-				C0(blocks),
-				C1(blocks);
+				Av0(blocks),
+				Av1(blocks),
+				Bv0(blocks),
+				Bv1(blocks),
+				Cv0(blocks),
+				Cv1(blocks);
 
 			oles[0].setTimer(timer);
 			auto b = timer.setTimePoint("start");
 
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				oles[0].expand(A0,B0,C0, prng0, sock[0]) | macoro::start_on(pool),
-				oles[1].expand(A1,B1,C1, prng1, sock[1]) | macoro::start_on(pool)));
+				oles[0].expand(Av0,Bv0,Cv0, prng0, sock[0]) | macoro::start_on(pool),
+				oles[1].expand(Av1,Bv1,Cv1, prng1, sock[1]) | macoro::start_on(pool)));
 			auto e=timer.setTimePoint("end");
 			tps = double(n) / (std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count() / 1000.0);
 			std::get<0>(r).result();
@@ -1026,19 +1026,19 @@ namespace osuCrypto
 			}
 
 			std::vector<block>
-				A0(blocks),
-				A1(blocks),
-				B0(blocks),
-				B1(blocks),
-				C0(blocks),
-				C1(blocks);
+				Av0(blocks),
+				Av1(blocks),
+				Bv0(blocks),
+				Bv1(blocks),
+				Cv0(blocks),
+				Cv1(blocks);
 
 			oles[0].setTimer(timer);
 
 			auto b = timer.setTimePoint("start");
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				oles[0].expand(A0, B0, C0, prng0, sock[0]) | macoro::start_on(pool),
-				oles[1].expand(A1, B1, C1, prng1, sock[1]) | macoro::start_on(pool)));
+				oles[0].expand(Av0, Bv0, Cv0, prng0, sock[0]) | macoro::start_on(pool),
+				oles[1].expand(Av1, Bv1, Cv1, prng1, sock[1]) | macoro::start_on(pool)));
 			auto e = timer.setTimePoint("end");
 			tps = double(n) / (std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count() / 1000.0);
 			std::get<0>(r).result();
