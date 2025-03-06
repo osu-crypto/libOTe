@@ -165,6 +165,28 @@ namespace osuCrypto
 		}
 	}
 
+	void printMtx(u64 bits, MatrixView<u8> X, std::string name)
+	{
+		if (divCeil(bits, 8) != X.cols())
+			throw RTE_LOC;
+
+		std::cout << name<<" [\n";
+		for (u64 i = 0; i < X.rows(); ++i)
+		{
+			for (u64 j = 0; j < bits; ++j)
+			{
+				auto b = *BitIterator(X[i].data(), j);
+				if (b)
+					std::cout << Color::Green;
+				std::cout << b << " ";
+				if (b)
+					std::cout << Color::Default;
+			}
+			std::cout << "\n";
+		}
+		std::cout << "]\n";
+	}
+
 	void BinSolver_solve_test(const oc::CLP& cmd)
 	{
 
@@ -175,7 +197,7 @@ namespace osuCrypto
 		for (u64 tt = 0; tt < t; ++tt)
 		{
 
-			u64 m = cmd.getOr("m", 4);
+			u64 m = cmd.getOr("m", 10);
 			u64 c = cmd.getOr("ssp", 8) + m;
 			auto g = 1;
 			auto m8 = divCeil(m, 8);
@@ -186,7 +208,6 @@ namespace osuCrypto
 			s[0].init(0, m, c, g);
 			s[1].init(1, m, c, g);
 
-			Matrix<u8> M(m, c8);
 			std::array<Matrix<u8>, 2> Ms;
 			Ms[0].resize(m, c8);
 			Ms[1].resize(m, c8);
@@ -198,11 +219,41 @@ namespace osuCrypto
 			ys[0].resize(m, g8);
 			ys[1].resize(m, g8);
 
-			prng.get(Ms[0].data(), Ms[0].size());
-			prng.get(Ms[1].data(), Ms[1].size());
-			prng.get(ys[0].data(), ys[0].size());
-			prng.get(ys[1].data(), ys[1].size());
+			if (tt == 0)
+			{
+				for (u64 i = 0; i < m; ++i)
+				{
+					for (u64 j = 0; j < m; ++j)
+					{
+						*BitIterator(Ms[0][i].data(), j) = i == j;
+					}
+				}
+				setBytes(Ms[1], 0);
+			}
+			else
+			{
 
+				for (u64 i = 0; i < m; ++i)
+				{
+					for (u64 j = 0; j < c; ++j)
+					{
+						*BitIterator(Ms[0][i].data(), j) = prng.getBit();
+						*BitIterator(Ms[1][i].data(), j) = prng.getBit();
+					}
+
+
+					for (u64 j = 0; j < g; ++j)
+					{
+						*BitIterator(ys[0][i].data(), j) = prng.getBit();
+						*BitIterator(ys[1][i].data(), j) = prng.getBit();
+					}
+				}
+			}
+
+
+			Matrix<u8> M(m, c8);
+			for (auto i = 0; i < M.size(); ++i)
+				M(i) = Ms[0](i) ^ Ms[1](i);
 			Matrix<u8> y(m, g8);
 			for (u64 i = 0; i < m; ++i)
 				for (u64 j = 0; j < y.cols(); ++j)
@@ -238,7 +289,14 @@ namespace osuCrypto
 			}
 
 			if (act != y)
+			{
+				printMtx(c, M, "M");
+				printMtx(1, x, "x");
+				printMtx(8, act, "act");
+				printMtx(8, y, "y");
+
 				throw RTE_LOC;
+			}
 		}
 	}
 
@@ -264,15 +322,19 @@ namespace osuCrypto
 				std::vector<u8>(divCeil(c, 8)),
 				std::vector<u8>(divCeil(c, 8)) };
 
-			//prng.get(Mi[0].data(), Mi[0].size());
-			//prng.get(Mi[1].data(), Mi[1].size());
+			prng.get(Mi[0].data(), Mi[0].size());
+			prng.get(Mi[1].data(), Mi[1].size());
 
-			u64 v = 0b11010100100001000;
-			copyBytesMin(Mi[0], v);
-			setBytes(Mi[1], 0);
-			//for (u64 i = 0; i < Mi[0].size(); ++i)
-			//	Mi[0][i] ^= Mi[1][i];
+			//u64 v = 0b11010100100001000;
+			//copyBytesMin(Mi[0], v);
+			//setBytes(Mi[1], 0);
 
+			std::vector<u8> plainM(divCeil(c, 8));
+			std::vector<u8> plainR(divCeil(c, 8));
+			for (u64 i = 0; i < plainM.size();++i)
+				plainM[i] = Mi[0][i] ^ Mi[1][i];
+
+			//s[0].firstOneBit(plainM, plainR);
 
 			auto sock = coproto::LocalAsyncSocket::makePair();
 			macoro::sync_wait(macoro::when_all_ready(
@@ -281,26 +343,28 @@ namespace osuCrypto
 			));
 
 
-			std::cout << "m ";
-			for (u64 i = 0; i < c; ++i)
-			{
-				auto mm0 = BitIterator((u8*)Mi[0].data(), i);
-				auto mm1 = BitIterator((u8*)Mi[1].data(), i);
-				std::cout << (*mm0 ^ *mm1) << " ";
-			}
-			std::cout << std::endl;
-			std::cout << "s ";
-			for (u64 i = 0; i < c; ++i)
-			{
-				auto ss0 = BitIterator((u8*)r[0].data(), i);
-				auto ss1 = BitIterator((u8*)r[1].data(), i);
-				std::cout << (*ss0 ^ *ss1) << " ";
-			}
-			std::cout << std::endl;
+			//std::cout << "m ";
+			//for (u64 i = 0; i < c; ++i)
+			//{
+			//	auto mm0 = BitIterator((u8*)Mi[0].data(), i);
+			//	auto mm1 = BitIterator((u8*)Mi[1].data(), i);
+			//	std::cout << (*mm0 ^ *mm1) << " ";
+			//}
+			//std::cout << std::endl;
+			//std::cout << "s ";
+			//std::vector<u8> sv(c);
+			//for (u64 i = 0; i < c; ++i)
+			//{
+			//	auto ss0 = BitIterator((u8*)r[0].data(), i);
+			//	auto ss1 = BitIterator((u8*)r[1].data(), i);
+			//	sv[i] = (*ss0 ^ *ss1);
+			//	std::cout << (int)sv[i] << " ";
+			//}
+			//std::cout << std::endl;
 
 			bool found = false;
 			u64 cnt = 0;
-			for (u64 i = 0; i < m; ++i)
+			for (u64 i = 0; i < c; ++i)
 			{
 				auto mm0 = BitIterator((u8*)Mi[0].data(), i);
 				auto mm1 = BitIterator((u8*)Mi[1].data(), i);

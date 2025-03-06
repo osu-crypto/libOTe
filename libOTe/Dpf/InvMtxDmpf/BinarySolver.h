@@ -34,12 +34,22 @@ namespace osuCrypto
 
 		void firstOneBit(span<const u8> Mi, span<u8> s)
 		{
+
+
+			//std::cout << "plain\nM    = ";
+			//for (u64 i = 0; i < mC; ++i)
+			//{
+			//	auto mm = BitIterator((u8*)Mi.data(), i);
+			//	std::cout << *mm << " ";
+			//}
+			//std::cout << std::endl;
+
 			auto depth = log2ceil(mC);
-			std::vector<std::vector<u8>> M(depth);
-			std::vector<u64> sizes(depth);
+			std::vector<std::vector<u8>> M(depth+1);
+			std::vector<u64> sizes(depth+1);
 			sizes[0] = mC;
 			M[0].assign(Mi.begin(), Mi.end());
-			for (u64 d = 1; d < depth; ++d)
+			for (u64 d = 1; d <= depth; ++d)
 			{
 				sizes[d] = divCeil(sizes[d - 1], 2);
 				M[d].resize(sizes[d]);
@@ -48,8 +58,8 @@ namespace osuCrypto
 				auto cur = BitIterator(M[d].data());
 				for (u64 i = 0; i < sizes[d - 1]; i += 2)
 				{
-					u8 c0 = (*prev + 0);
-					u8 c1 = (*prev + 1);
+					u8 c0 = *(prev + 0);
+					u8 c1 = *(prev + 1);
 					auto both = c0 & c1;
 
 					assert((c0 ^ c1 ^ both) == (c0 | c1));
@@ -61,8 +71,23 @@ namespace osuCrypto
 					prev = prev + 2;
 				}
 
-				if (sizes[d] * 2 != sizes[d - 1])
-					*cur = *prev;
+
+				//std::cout << "----------" << std::endl;
+				//std::cout << "M[" << d -1<< "] = ";
+				//for (u64 i = 0; i < sizes[d-1]; ++i)
+				//{
+				//	auto mm = BitIterator((u8*)M[d-1].data(), i);
+				//	std::cout << *mm << " ";
+				//}
+				//std::cout << std::endl;
+
+				//std::cout << "M["<<d<<"] = ";
+				//for (u64 i = 0; i < sizes[d]; ++i)
+				//{
+				//	auto mm = BitIterator((u8*)M[d].data(), i);
+				//	std::cout<<" " << *mm << "  ";
+				//}
+				//std::cout << std::endl;
 			}
 
 			// compute the AND with each parent. 
@@ -79,17 +104,44 @@ namespace osuCrypto
 					++cur;
 					next = next + 2;
 				}
+
+
+				//std::cout << "----------" << std::endl;
+				//std::cout << "M[" << d  << "] = ";
+				//for (u64 i = 0; i < sizes[d]; ++i)
+				//{
+				//	auto mm = BitIterator((u8*)M[d].data(), i);
+				//	std::cout <<" " << *mm << "  ";
+				//}
+				//std::cout << std::endl;
+
+				//std::cout << "M[" << d-1 << "] = ";
+				//for (u64 i = 0; i < sizes[d - 1]; ++i)
+				//{
+				//	auto mm = BitIterator((u8*)M[d - 1].data(), i);
+				//	std::cout << *mm << " ";
+				//}
+				//std::cout << std::endl;
 			}
 
+
+			//std::cout << "S = " ;
+			//for (u64 i = 0; i < mC; ++i)
+			//{
+			//	auto ss = BitIterator((u8*)M[0].data(), i);
+			//	std::cout << *ss << " ";
+			//}
+			//std::cout << std::endl;
+
 			bool found = false;
-			for (u64 i = 0; i < mM; ++i)
+			for (u64 i = 0; i < mC; ++i)
 			{
 				auto mm = BitIterator((u8*)Mi.data(), i);
 				auto ss = BitIterator((u8*)M[0].data(), i);
-				if (*mm)
+				if (!found)
 				{
 					found = true;
-					if (*ss == 0)
+					if (*ss != *mm)
 						throw std::runtime_error(LOCATION);
 				}
 				else
@@ -240,14 +292,14 @@ namespace osuCrypto
 		task<> firstOneBit(span<const u8> Mi, span<u8> s, Socket& sock)
 		{
 			auto depth = log2ceil(mC);
-			std::vector<std::vector<u8>> M(depth);
-			std::vector<u64> sizes(depth);
+			std::vector<std::vector<u8>> M(depth+1);
+			std::vector<u64> sizes(depth+1);
 			sizes[0] = mC;
 			M[0].assign(Mi.begin(), Mi.end());
 
 			// compute A binary tree where each node is the OR of its children.
 			// If both children are set, set the second off.
-			for (u64 d = 1; d < depth; ++d)
+			for (u64 d = 1; d <= depth; ++d)
 			{
 				sizes[d] = divCeil(sizes[d - 1], 2);
 				M[d].resize(sizes[d]);
@@ -287,6 +339,13 @@ namespace osuCrypto
 
 				if (sizes[d] * 2 != sizes[d - 1])
 					*prnt = *child;
+
+				//std::cout << "---------" << std::endl;
+				//co_await print(sizes[d - 1], M[d-1],
+				//	(std::string("M[") + std::to_string(d-1) + "]").c_str(), sock);
+				//co_await print(sizes[d], M[d],
+				//	(std::string("M[") + std::to_string(d) + "]").c_str(), sock);
+
 			}
 
 			// We now have the guarantee that the at most one chold is set
@@ -298,6 +357,8 @@ namespace osuCrypto
 			{
 				auto cur = BitIterator(M[d].data());
 				auto next = BitIterator(M[d - 1].data());
+
+				//auto ss = sizes[d] + (sizes[d - 1] & 1);// divCeil(sizes[d - 1], 2);
 
 				BitVector a(sizes[d]);
 				Matrix<u8> b(a.size(), 1);
@@ -326,9 +387,6 @@ namespace osuCrypto
 			}
 
 			std::copy(M[0].begin(), M[0].end(), s.begin());
-
-			co_await print(mC, Mi, "Mi", sock);
-			co_await print(mC, s, "s", sock);
 		}
 
 		task<> printMtx(u64 bits, MatrixView<const u8> M, const char* name, Socket& sock)
@@ -352,23 +410,26 @@ namespace osuCrypto
 						if (bit)
 							std::cout << Color::Green;
 						std::cout << bit << " ";
-						if(bit) 
+						if (bit)
 							std::cout << Color::Default;
 					}
 
 					if (i + 1 < M.rows())
-						std::cout<<"," << std::endl;
+						std::cout << "," << std::endl;
 					else
 						std::cout << "]" << std::endl;
 				}
 			}
+
+			co_await sock.send(char(0));
+			co_await sock.recv<char>();
 		}
 
 		task<> print(u64 bits, span<const u8> M, const char* name, Socket& sock)
 		{
 			if (bits > M.size() * 8)
 				throw std::runtime_error((co_await macoro::get_trace{}).str());
-			
+
 
 			co_await sock.send(std::vector<u8>(M.begin(), M.end()));
 			std::vector<u8> r(M.size());
@@ -391,7 +452,7 @@ namespace osuCrypto
 						std::cout << Color::Default;
 
 				}
-				std::cout<<"]" << std::endl;
+				std::cout << "]" << std::endl;
 			}
 			co_await sock.send(char(0));
 			co_await sock.recv<char>();
@@ -399,12 +460,15 @@ namespace osuCrypto
 
 
 		task<> solve(
-			MatrixView<u8> M,
-			MatrixView<u8> Y,
+			MatrixView<u8> MM,
+			MatrixView<u8> YY,
 			MatrixView<u8> X,
 			PRNG& prng,
 			Socket& sock)
 		{
+
+			Matrix<u8> M = MM;
+			Matrix<u8> Y = YY;
 
 			auto m8 = divCeil(mM, 8);
 			auto c8 = divCeil(mC, 8);
@@ -432,14 +496,14 @@ namespace osuCrypto
 			Matrix<u8> s(mM, c8);
 			for (u64 i = 0; i < mM; ++i)
 			{
-				if (mPartyIdx)
-					std::cout << "iteration i=" << i << std::endl;
-				co_await printMtx(mC, M, "M", sock);
+				//if (mPartyIdx)
+				//	std::cout << "iteration i=" << i << std::endl;
+				//co_await printMtx(mC, M, "M", sock);
 
 
 				co_await firstOneBit(M[i], s[i], sock);
 
-				co_await print(mC, s[i], "s[i]", sock);
+				//co_await print(mC, s[i], "s[i]", sock);
 
 
 				// v = sum_{j in [C]} s[i,j] * M[*,j]
@@ -452,7 +516,7 @@ namespace osuCrypto
 						v[k] ^= V(j, k);
 				}
 
-				co_await print(mM, v, "v", sock);
+				//co_await print(mM, v, "v", sock);
 
 				// MY = M || Y
 				for (u64 j = 0; j < mM; ++j)
@@ -467,12 +531,12 @@ namespace osuCrypto
 				}
 
 
-				co_await printMtx(mC, MY, "MY", sock);
+				//co_await printMtx(mC, MY, "MY", sock);
 
 				// MY = v * MY
 				co_await multiply(MY.cols() * 8, v, MY, MY, sock);
 
-				co_await printMtx(mC, MY, "v * MY", sock);
+				//co_await printMtx(mC, MY, "v * MY", sock);
 
 				// M = M + v * M
 				// Y = Y + v * Y
@@ -486,7 +550,7 @@ namespace osuCrypto
 			}
 
 
-			co_await printMtx(mC, M, "final\nM", sock);
+			//co_await printMtx(mC, M, "final\nM", sock);
 
 			// sigma  = sum_{i in [m]} s[i]
 			std::vector<u8> sigma(s.cols()), negSigma(s.cols());
@@ -496,24 +560,43 @@ namespace osuCrypto
 					sigma[j] ^= s(i, j);
 			}
 			for (u64 j = 0; j < s.cols(); ++j)
-				negSigma[j] = ~sigma[j];
+				negSigma[j] = sigma[j] ^ -mPartyIdx;
 
+			//co_await print(mC, sigma, "sigma", sock);
 
 			// X <- G^C * sigma
 			prng.get(X.data(), X.size());
 			co_await multiply(mLogG, negSigma, X, X, sock);
 
+			//co_await printMtx(mLogG, X, "X", sock);
+
 			// Y = Y + M * X
 			Matrix<u8> Y2(mM, g8);
 			co_await multiplyMtx(mLogG, M, X, Y2, sock);
+
+			//co_await printMtx(mLogG, Y2, "Y2", sock);
+
 			for (u64 i = 0; i < Y.size(); ++i)
 				Y(i) ^= Y2(i);
 
 			// X = X + s * Y
+			Matrix<u8> YT(mLogG, m8);
+			transpose(Y, YT);
+			Matrix<u8> XT(mLogG, c8);
+			co_await multiplyMtx(mC, YT, s, XT, sock);
+
 			Matrix<u8> X2(mC, g8);
-			co_await multiplyMtx(mLogG, s, Y, X2, sock);
+			transpose(XT, X2);
 			for (u64 i = 0; i < X.size(); ++i)
 				X(i) ^= X2(i);
+			//co_await printMtx(mLogG, X, "X", sock);
+
+
+
+			co_await multiplyMtx(mLogG, M, X, Y2, sock);
+
+			//co_await printMtx(mLogG, Y2, "Y2", sock);
+			//co_await printMtx(mLogG, YY, "YY", sock);
 
 		}
 	};
