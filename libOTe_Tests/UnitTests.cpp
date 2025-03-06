@@ -18,6 +18,7 @@
 #include "libOTe_Tests/TungstenCode_Tests.h"
 #include "libOTe_Tests/Dpf_Tests.h"
 #include "libOTe_Tests/Foleage_Tests.h"
+#include "libOTe_Tests/InvMtxDmpf_Tests.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -65,7 +66,11 @@ namespace tests_libOTe
 			tc.add("RegularDpf_keyGen_Test                  ", RegularDpf_keyGen_Test);
 			tc.add("SparseDpf_Proto_Test                    ", SparseDpf_Proto_Test);
 			tc.add("TritDpf_Proto_Test                      ", TritDpf_Proto_Test);
-
+			tc.add("BinSolver_firstOneBit_test              ", BinSolver_firstOneBit_test);
+			tc.add("BinSolver_multiply_test                 ", BinSolver_multiply_test);
+			tc.add("BinSolver_multiplyMtx_test              ", BinSolver_multiplyMtx_test);
+			tc.add("BinSolver_solve_test                    ", BinSolver_solve_test);
+			
 
 			tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
 			tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);

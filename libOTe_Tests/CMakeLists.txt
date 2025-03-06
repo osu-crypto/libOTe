@@ -9,6 +9,7 @@ set(SRCS
     OT_Tests.cpp
     Pprf_Tests.cpp
     Dpf_Tests.cpp
+    InvMtxDmpf_Tests.cpp
     SilentOT_Tests.cpp
     SoftSpoken_Tests.cpp
     TungstenCode_Tests.cpp

@@ -345,7 +345,7 @@ namespace osuCrypto {
 		transpose(inn, outt);
 	}
 
-	void sse_transpose(const MatrixView<u8>& in, const MatrixView<u8>& out)
+	void sse_transpose(MatrixView<const u8> in, MatrixView<u8> out)
 	{
 		// the amount of work that we use to vectorize (hard code do not change)
 		static const u64 chunkSize = 8;
@@ -569,7 +569,7 @@ namespace osuCrypto {
 
 				auto start = in.data() + h * chunkSize + subBlockWidth * wStep;
 
-				std::array<u8*, 16> src{
+				std::array<const u8*, 16> src{
 					start, start + step01, start + step02, start + step03, start + step04, start + step05,
 					start + step06, start + step07, start + step08, start + step09, start + step10,
 					start + step11, start + step12, start + step13, start + step14, start + step15
@@ -675,7 +675,7 @@ namespace osuCrypto {
 
 				auto start = in.data() + subBlockHight * chunkSize + hh + w * wStep;
 
-				std::array<u8*, 16> src{
+				std::array<const u8*, 16> src{
 					start, start + step01, start + step02, start + step03, start + step04, start + step05,
 					start + step06, start + step07, start + step08, start + step09, start + step10,
 					start + step11, start + step12, start + step13, start + step14, start + step15
@@ -714,7 +714,7 @@ namespace osuCrypto {
 
 #ifdef ENABLE_AVX
 
-	void avx_transpose(const MatrixView<u8>& in, const MatrixView<u8>& out)
+	void avx_transpose(MatrixView<const u8> in, MatrixView<u8> out)
 	{
 		AlignedArray<block, 128> buff;
 		auto rBits = std::min<u64>(in.rows(), out.cols() * 8);
@@ -835,7 +835,7 @@ namespace osuCrypto {
 #endif
 
 
-	void transpose(const MatrixView<u8>& in, const MatrixView<u8>& out)
+	void transpose(MatrixView<const u8> in, MatrixView<u8> out)
 	{
 #if defined(ENABLE_AVX)
 		avx_transpose(in, out);
