@@ -61,14 +61,15 @@ namespace tests_libOTe
 			tc.add("Tools_Pprf_callback_test                ", Tools_Pprf_callback_test);
 
 			tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
+			tc.add("RegularDpf_MultByte_Test                ", RegularDpf_MultByte_Test);
 			tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
 			tc.add("RegularDpf_Puncture_Test                ", RegularDpf_Puncture_Test);
 			tc.add("RegularDpf_keyGen_Test                  ", RegularDpf_keyGen_Test);
 			tc.add("SparseDpf_Proto_Test                    ", SparseDpf_Proto_Test);
 			tc.add("TritDpf_Proto_Test                      ", TritDpf_Proto_Test);
-			tc.add("BinSolver_firstOneBit_test              ", BinSolver_firstOneBit_test);
 			tc.add("BinSolver_multiply_test                 ", BinSolver_multiply_test);
 			tc.add("BinSolver_multiplyMtx_test              ", BinSolver_multiplyMtx_test);
+			tc.add("BinSolver_firstOneBit_test              ", BinSolver_firstOneBit_test);
 			tc.add("BinSolver_solve_test                    ", BinSolver_solve_test);
 			
 

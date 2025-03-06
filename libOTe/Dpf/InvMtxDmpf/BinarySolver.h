@@ -5,6 +5,7 @@
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/Tools/Tools.h"
 #include "cryptoTools/Common/Log.h"
+#include "libOTe/Dpf/DpfMult.h"
 
 namespace osuCrypto
 {
@@ -22,31 +23,44 @@ namespace osuCrypto
 		// the bit count of the element.
 		u64 mLogG = 0;
 
+		DpfMult mMult;
+
 		void init(u64 partyIdx, u64 m, u64 c, u64 logG)
 		{
 			mPartyIdx = partyIdx;
 			mM = m;
 			mC = c;
 			mLogG = logG;
+			auto baseCount =
+				mM * mC * 3 +
+				mM * mC +
+				mM * mM +
+				mC +
+				mM * mC +
+				mM * mC +
+				mM * mC;
+				//std::min(mM * mC, mC * mLogG) +
+				//std::min(mM * mC, mC * mLogG) +
+				//std::min(mM * mC, mC * mLogG);
+
+			mMult.init(partyIdx, baseCount);
 		}
 
-		u64 baseOtCount() const;
+		u64 baseOtCount() const
+		{
+			return mMult.baseOtCount();
+		}
+
+		void setBaseOts(span<std::array<block, 2>> sendOts, span<block> recvOts, const BitVector& choices)
+		{
+			mMult.setBaseOts(sendOts, recvOts, choices);
+		}
 
 		void firstOneBit(span<const u8> Mi, span<u8> s)
 		{
-
-
-			//std::cout << "plain\nM    = ";
-			//for (u64 i = 0; i < mC; ++i)
-			//{
-			//	auto mm = BitIterator((u8*)Mi.data(), i);
-			//	std::cout << *mm << " ";
-			//}
-			//std::cout << std::endl;
-
 			auto depth = log2ceil(mC);
-			std::vector<std::vector<u8>> M(depth+1);
-			std::vector<u64> sizes(depth+1);
+			std::vector<std::vector<u8>> M(depth + 1);
+			std::vector<u64> sizes(depth + 1);
 			sizes[0] = mC;
 			M[0].assign(Mi.begin(), Mi.end());
 			for (u64 d = 1; d <= depth; ++d)
@@ -235,50 +249,59 @@ namespace osuCrypto
 			Socket& sock)
 		{
 			MACORO_TRY{
-			auto n = b.rows();
-			if (a.size() != divCeil(n, 8))
-				throw std::runtime_error(LOCATION);
-			if (c.cols() != divCeil(bitCount, 8))
-				throw std::runtime_error(LOCATION);
-			if (c.rows() != n)
-				throw std::runtime_error(LOCATION);
-			if (b.cols() != divCeil(bitCount, 8))
-				throw std::runtime_error(LOCATION);
 
-			std::vector<u8> a2(a.size());
-			Matrix<u8> b2(b.rows(), b.cols());
-
-			co_await sock.send(std::vector<u8>(a.begin(), a.end()));
-			co_await sock.send(std::vector<u8>(b.begin(), b.end()));
-
-			co_await sock.recv(a2);
-			co_await sock.recv(b2);
-
-			for (u64 i = 0; i < a2.size(); ++i)
-				a2[i] ^= a[i];
-			for (u64 i = 0; i < b2.size(); ++i)
-				b2(i) ^= b(i);
-
-			PRNG prng(block(34123213));
-			for (u64 i = 0; i < n; ++i)
-			{
-				auto aa = BitIterator(a2.data(), i);
-				auto bb = BitIterator(b2[i].data());
-				auto cc = BitIterator(c[i].data());
-				for (u64 j = 0; j < bitCount; ++j)
+				if (1)
 				{
-					auto v = (*aa & *bb);
-					//std::cout << i << "  " << j << " : A " << (int)*aa << " B " << (int)*bb << " C " << (int)v << std::endl;
-					if (mPartyIdx)
-						*cc = v ^ prng.getBit();
-					else
-						*cc = prng.getBit();
-
-					++bb;
-					++cc;
+					co_await mMult.multiply(bitCount, a, b, c, sock);
 				}
-			}
+				else
+				{
 
+					auto n = b.rows();
+					if (a.size() != divCeil(n, 8))
+						throw std::runtime_error(LOCATION);
+					if (c.cols() != divCeil(bitCount, 8))
+						throw std::runtime_error(LOCATION);
+					if (c.rows() != n)
+						throw std::runtime_error(LOCATION);
+					if (b.cols() != divCeil(bitCount, 8))
+						throw std::runtime_error(LOCATION);
+
+					std::vector<u8> a2(a.size());
+					Matrix<u8> b2(b.rows(), b.cols());
+
+					co_await sock.send(std::vector<u8>(a.begin(), a.end()));
+					co_await sock.send(std::vector<u8>(b.begin(), b.end()));
+
+					co_await sock.recv(a2);
+					co_await sock.recv(b2);
+
+					for (u64 i = 0; i < a2.size(); ++i)
+						a2[i] ^= a[i];
+					for (u64 i = 0; i < b2.size(); ++i)
+						b2(i) ^= b(i);
+
+					PRNG prng(block(34123213));
+					for (u64 i = 0; i < n; ++i)
+					{
+						auto aa = BitIterator(a2.data(), i);
+						auto bb = BitIterator(b2[i].data());
+						auto cc = BitIterator(c[i].data());
+						for (u64 j = 0; j < bitCount; ++j)
+						{
+							auto v = (*aa & *bb);
+							//std::cout << i << "  " << j << " : A " << (int)*aa << " B " << (int)*bb << " C " << (int)v << std::endl;
+							if (mPartyIdx)
+								*cc = v ^ prng.getBit();
+							else
+								*cc = prng.getBit();
+
+							++bb;
+							++cc;
+						}
+					}
+
+			}
 			}MACORO_CATCH(e)
 			{
 				if (!sock.closed())
@@ -292,8 +315,8 @@ namespace osuCrypto
 		task<> firstOneBit(span<const u8> Mi, span<u8> s, Socket& sock)
 		{
 			auto depth = log2ceil(mC);
-			std::vector<std::vector<u8>> M(depth+1);
-			std::vector<u64> sizes(depth+1);
+			std::vector<std::vector<u8>> M(depth + 1);
+			std::vector<u64> sizes(depth + 1);
 			sizes[0] = mC;
 			M[0].assign(Mi.begin(), Mi.end());
 
@@ -500,7 +523,6 @@ namespace osuCrypto
 				//	std::cout << "iteration i=" << i << std::endl;
 				//co_await printMtx(mC, M, "M", sock);
 
-
 				co_await firstOneBit(M[i], s[i], sock);
 
 				//co_await print(mC, s[i], "s[i]", sock);
@@ -574,6 +596,7 @@ namespace osuCrypto
 			Matrix<u8> Y2(mM, g8);
 			co_await multiplyMtx(mLogG, M, X, Y2, sock);
 
+			
 			//co_await printMtx(mLogG, Y2, "Y2", sock);
 
 			for (u64 i = 0; i < Y.size(); ++i)
@@ -590,7 +613,6 @@ namespace osuCrypto
 			for (u64 i = 0; i < X.size(); ++i)
 				X(i) ^= X2(i);
 			//co_await printMtx(mLogG, X, "X", sock);
-
 
 
 			co_await multiplyMtx(mLogG, M, X, Y2, sock);

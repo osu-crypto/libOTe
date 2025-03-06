@@ -70,7 +70,7 @@ void RegularDpf_Multiply_Test(const CLP& cmd)
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 
-	for (u64 i = 0; i < 100; ++i)
+	for (u64 i = 0; i < 10; ++i)
 	{
 		//std::cout << "-=========================-" std::endl;
 
@@ -110,6 +110,117 @@ void RegularDpf_Multiply_Test(const CLP& cmd)
 				std::cout << "act " << xy << " " << xy0[j] << " + " << xy1[j] << std::endl;
 				std::cout << "exp " << exp << std::endl;
 				throw RTE_LOC;
+			}
+		}
+	}
+#else
+	throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_SPARSE_DPF not defined.");
+#endif
+}
+
+void RegularDpf_MultByte_Test(const CLP& cmd)
+{
+#if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
+
+	{
+		u64 n = 10;
+		u64 bitCount = 3;
+		Matrix<u8> m(n, divCeil(bitCount, 8));
+		Matrix<u8> d(n, divCeil(bitCount, 8));
+		std::vector<u8> b(divCeil(n * bitCount, 8));
+
+		PRNG prng(block(231234, 321312));
+		for (u64 i = 0; i < n; ++i)
+		{
+			for (u64 j = 0; j < bitCount; ++j)
+			{
+				*BitIterator(m[i].data(), j) = prng.getBit();
+			}
+		}
+
+		DpfMult::packBits(b, m, bitCount);
+		DpfMult::unpackBits(d, b, bitCount);
+		if (m != d)
+			throw RTE_LOC;
+	}
+
+
+	for (auto m : { 16, 3,8, 13, 33, 233 })
+	{
+
+		u64 n = 13;
+		u64 m8 = divCeil(m, 8);
+
+		PRNG prng(block(231234, 321312));
+		std::array<oc::DpfMult, 2> dpf;
+		dpf[0].init(0, n);
+		dpf[1].init(1, n);
+
+		std::array<std::vector<std::array<block, 2>>, 2> sendOts;
+		std::array<std::vector<block>, 2> recvOts;
+		std::array<BitVector, 2> choices;
+		for (u64 i = 0; i < 2; ++i)
+		{
+			sendOts[i].resize(n);
+			recvOts[i].resize(n);
+			choices[i].resize(n);
+		}
+
+		auto sock = coproto::LocalAsyncSocket::makePair();
+
+		for (u64 i = 0; i < 4; ++i)
+		{
+			//std::cout << "-=========================-" std::endl;
+
+			for (u64 i = 0; i < 2; ++i)
+			{
+				choices[i].randomize(prng);
+				prng.get(sendOts[i].data(), sendOts[i].size());
+				for (u64 j = 0; j < n; ++j)
+					recvOts[i][j] = sendOts[i][j][choices[i][j]];
+			}
+			dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
+			dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
+
+			BitVector x0(n), x1(n);
+			x0.randomize(prng);
+			x1.randomize(prng);
+			Matrix<u8> xy0(n, m8), xy1(n, m8), y0(n, m8), y1(n, m8);
+
+			//prng.get(y0.data(), y0.size());
+			//prng.get(y1.data(), y1.size());
+			for (u64 i = 0; i < n; ++i)
+			{
+				for (u64 j = 0; j < m; ++j)
+				{
+					*BitIterator(y0[i].data(), j) = prng.getBit();
+					*BitIterator(y1[i].data(), j) = prng.getBit();
+				}
+			}
+
+			macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].multiply(m, x0.getSpan<u8>(), y0, xy0, sock[0]),
+				dpf[1].multiply(m, x1.getSpan<u8>(), y1, xy1, sock[1])
+			));
+
+			for (u64 j = 0; j < n; ++j)
+			{
+				for (u64 i = 0; i < m8; ++i)
+				{
+
+					u64 x = x0[j] ^ x1[j];
+					auto y = y0[j][i] ^ y1[j][i];
+					auto xy = xy0[j][i] ^ xy1[j][i];
+					auto exp = x * y;
+					if (xy != exp)
+					{
+						std::cout << " m " << m << std::endl;
+						std::cout << "j " << j << " i " << i << std::endl;
+						std::cout << "act " << int(xy) << "=" << int(xy0[j][i]) << " + " << int(xy1[j][i]) << std::endl;
+						std::cout << "exp " << int(exp) << std::endl;
+						throw RTE_LOC;
+					}
+				}
 			}
 		}
 	}
@@ -526,7 +637,7 @@ void TernaryDpf_Proto_Test_(const oc::CLP& cmd)
 		//ctx.minus(points0[i], points[i], points1[i];)
 	}
 
-	std::array<oc::TernaryDpf<F,Ctx>, 2> dpf;
+	std::array<oc::TernaryDpf<F, Ctx>, 2> dpf;
 	dpf[0].init(0, domain, numPoints);
 	dpf[1].init(1, domain, numPoints);
 

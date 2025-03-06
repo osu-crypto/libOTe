@@ -5,14 +5,41 @@ namespace osuCrypto
 {
 
 
+	void setBase(std::array<BinarySolver, 2>& s)
+	{
+		PRNG prng(block(342132135, 23512351235));
+		auto baseCount = s[0].baseOtCount();
+		std::array<std::vector<block>, 2> baseRecv;
+		std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+		std::array<BitVector, 2> baseChoice;
+		baseRecv[0].resize(baseCount);
+		baseRecv[1].resize(baseCount);
+		baseSend[0].resize(baseCount);
+		baseSend[1].resize(baseCount);
+		baseChoice[0].resize(baseCount);
+		baseChoice[1].resize(baseCount);
+		baseChoice[0].randomize(prng);
+		baseChoice[1].randomize(prng);
+		for (u64 i = 0; i < baseCount; ++i)
+		{
+			baseSend[0][i] = prng.get();
+			baseSend[1][i] = prng.get();
+			baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+			baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+		}
+		s[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+		s[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+	}
+
 	void BinSolver_multiply_test(const oc::CLP& cmd)
 	{
 		u64 m = 19;
 		u64 cc = 40 + m;
 		u64 bitCount = 11;
-		BinarySolver s[2];
+		std::array<BinarySolver, 2> s;
 		s[0].init(0, m, cc, 10);
 		s[1].init(1, m, cc, 10);
+		setBase(s);
 
 		PRNG prng(block(3423345222341334, 2394871239472938));
 
@@ -81,12 +108,11 @@ namespace osuCrypto
 		for (u64 tt = 0; tt < t; ++tt)
 		{
 
-
-			BinarySolver s[2];
+			std::array<BinarySolver, 2> s;
 			u64 cc = 40 + m;
 			s[0].init(0, m, cc, 10);
 			s[1].init(1, m, cc, 10);
-
+			setBase(s);
 
 
 			//     m         k		   k
@@ -170,7 +196,7 @@ namespace osuCrypto
 		if (divCeil(bits, 8) != X.cols())
 			throw RTE_LOC;
 
-		std::cout << name<<" [\n";
+		std::cout << name << " [\n";
 		for (u64 i = 0; i < X.rows(); ++i)
 		{
 			for (u64 j = 0; j < bits; ++j)
@@ -185,6 +211,105 @@ namespace osuCrypto
 			std::cout << "\n";
 		}
 		std::cout << "]\n";
+	}
+
+
+	void BinSolver_firstOneBit_test(const oc::CLP& cmd)
+	{
+		PRNG prng(block(3423345222341334, 2394871239472938));
+		u64 trials = cmd.getOr("t", 1);
+
+		for (u64 tt = 0; tt < trials; ++tt)
+		{
+
+			u64 m = cmd.getOr("m", 4);
+			u64 c = cmd.getOr("ssp", 8) + m;
+			std::array<BinarySolver, 2> s;
+			s[0].init(0, m, c, 10);
+			s[1].init(1, m, c, 10);
+
+			setBase(s);
+
+
+			std::array<std::vector<u8>, 2> Mi{
+				std::vector<u8>(divCeil(c, 8)),
+				std::vector<u8>(divCeil(c, 8)) };
+			std::array<std::vector<u8>, 2> r{
+				std::vector<u8>(divCeil(c, 8)),
+				std::vector<u8>(divCeil(c, 8)) };
+
+			prng.get(Mi[0].data(), Mi[0].size());
+			prng.get(Mi[1].data(), Mi[1].size());
+
+			//u64 v = 0b11010100100001000;
+			//copyBytesMin(Mi[0], v);
+			//setBytes(Mi[1], 0);
+
+			std::vector<u8> plainM(divCeil(c, 8));
+			std::vector<u8> plainR(divCeil(c, 8));
+			for (u64 i = 0; i < plainM.size(); ++i)
+				plainM[i] = Mi[0][i] ^ Mi[1][i];
+
+			//s[0].firstOneBit(plainM, plainR);
+
+			auto sock = coproto::LocalAsyncSocket::makePair();
+			auto res = macoro::sync_wait(macoro::when_all_ready(
+				s[0].firstOneBit(Mi[0], r[0], sock[0]),
+				s[1].firstOneBit(Mi[1], r[1], sock[1])
+			));
+			std::get<0>(res).result();
+			std::get<1>(res).result();
+
+
+			//std::cout << "m ";
+			//for (u64 i = 0; i < c; ++i)
+			//{
+			//	auto mm0 = BitIterator((u8*)Mi[0].data(), i);
+			//	auto mm1 = BitIterator((u8*)Mi[1].data(), i);
+			//	std::cout << (*mm0 ^ *mm1) << " ";
+			//}
+			//std::cout << std::endl;
+			//std::cout << "s ";
+			//std::vector<u8> sv(c);
+			//for (u64 i = 0; i < c; ++i)
+			//{
+			//	auto ss0 = BitIterator((u8*)r[0].data(), i);
+			//	auto ss1 = BitIterator((u8*)r[1].data(), i);
+			//	sv[i] = (*ss0 ^ *ss1);
+			//	std::cout << (int)sv[i] << " ";
+			//}
+			//std::cout << std::endl;
+
+			bool found = false;
+			u64 cnt = 0;
+			for (u64 i = 0; i < c; ++i)
+			{
+				auto mm0 = BitIterator((u8*)Mi[0].data(), i);
+				auto mm1 = BitIterator((u8*)Mi[1].data(), i);
+				auto ss0 = BitIterator((u8*)r[0].data(), i);
+				auto ss1 = BitIterator((u8*)r[1].data(), i);
+
+				auto ss = *ss0 ^ *ss1;
+				auto mm = *mm0 ^ *mm1;
+				cnt += ss;
+				if (!found)
+				{
+					if (mm)
+						found = true;
+
+					if (ss != mm)
+						throw std::runtime_error(LOCATION);
+				}
+				else
+				{
+					if (ss)
+						throw std::runtime_error(LOCATION);
+				}
+			}
+
+			if (cnt != 1)
+				throw std::runtime_error(LOCATION);
+		}
 	}
 
 	void BinSolver_solve_test(const oc::CLP& cmd)
@@ -204,9 +329,10 @@ namespace osuCrypto
 			auto c8 = divCeil(c, 8);
 			auto g8 = divCeil(g, 8);
 
-			BinarySolver s[2];
+			std::array<BinarySolver, 2> s;
 			s[0].init(0, m, c, g);
 			s[1].init(1, m, c, g);
+			setBase(s);
 
 			std::array<Matrix<u8>, 2> Ms;
 			Ms[0].resize(m, c8);
@@ -283,7 +409,7 @@ namespace osuCrypto
 					{
 						*BitIterator(act[i].data(), j) ^=
 							(*BitIterator(M[i].data(), l) &
-							 *BitIterator(x[l].data(), j));
+								*BitIterator(x[l].data(), j));
 					}
 				}
 			}
@@ -300,97 +426,4 @@ namespace osuCrypto
 		}
 	}
 
-
-	void BinSolver_firstOneBit_test(const oc::CLP& cmd)
-	{
-		PRNG prng(block(3423345222341334, 2394871239472938));
-		u64 trials = cmd.getOr("t",1);
-
-		for (u64 tt = 0; tt < trials; ++tt)
-		{
-
-			u64 m = cmd.getOr("m", 4);
-			u64 c = cmd.getOr("ssp", 8) + m;
-			BinarySolver s[2];
-			s[0].init(0, m, c, 10);
-			s[1].init(1, m, c, 10);
-
-			std::array<std::vector<u8>, 2> Mi{
-				std::vector<u8>(divCeil(c, 8)),
-				std::vector<u8>(divCeil(c, 8)) };
-			std::array<std::vector<u8>, 2> r{
-				std::vector<u8>(divCeil(c, 8)),
-				std::vector<u8>(divCeil(c, 8)) };
-
-			prng.get(Mi[0].data(), Mi[0].size());
-			prng.get(Mi[1].data(), Mi[1].size());
-
-			//u64 v = 0b11010100100001000;
-			//copyBytesMin(Mi[0], v);
-			//setBytes(Mi[1], 0);
-
-			std::vector<u8> plainM(divCeil(c, 8));
-			std::vector<u8> plainR(divCeil(c, 8));
-			for (u64 i = 0; i < plainM.size();++i)
-				plainM[i] = Mi[0][i] ^ Mi[1][i];
-
-			//s[0].firstOneBit(plainM, plainR);
-
-			auto sock = coproto::LocalAsyncSocket::makePair();
-			macoro::sync_wait(macoro::when_all_ready(
-				s[0].firstOneBit(Mi[0], r[0], sock[0]),
-				s[1].firstOneBit(Mi[1], r[1], sock[1])
-			));
-
-
-			//std::cout << "m ";
-			//for (u64 i = 0; i < c; ++i)
-			//{
-			//	auto mm0 = BitIterator((u8*)Mi[0].data(), i);
-			//	auto mm1 = BitIterator((u8*)Mi[1].data(), i);
-			//	std::cout << (*mm0 ^ *mm1) << " ";
-			//}
-			//std::cout << std::endl;
-			//std::cout << "s ";
-			//std::vector<u8> sv(c);
-			//for (u64 i = 0; i < c; ++i)
-			//{
-			//	auto ss0 = BitIterator((u8*)r[0].data(), i);
-			//	auto ss1 = BitIterator((u8*)r[1].data(), i);
-			//	sv[i] = (*ss0 ^ *ss1);
-			//	std::cout << (int)sv[i] << " ";
-			//}
-			//std::cout << std::endl;
-
-			bool found = false;
-			u64 cnt = 0;
-			for (u64 i = 0; i < c; ++i)
-			{
-				auto mm0 = BitIterator((u8*)Mi[0].data(), i);
-				auto mm1 = BitIterator((u8*)Mi[1].data(), i);
-				auto ss0 = BitIterator((u8*)r[0].data(), i);
-				auto ss1 = BitIterator((u8*)r[1].data(), i);
-
-				auto ss = *ss0 ^ *ss1;
-				auto mm = *mm0 ^ *mm1;
-				cnt += ss;
-				if (!found)
-				{
-					if(mm)
-						found = true;
-
-					if (ss != mm)
-						throw std::runtime_error(LOCATION);
-				}
-				else
-				{
-					if (ss)
-						throw std::runtime_error(LOCATION);
-				}
-			}
-
-			if (cnt != 1)
-				throw std::runtime_error(LOCATION);
-		}
-	}
 }
