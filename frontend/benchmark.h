@@ -968,7 +968,7 @@ namespace osuCrypto
 #ifdef ENABLE_SILENTOT
 
 		auto logn = cmd.getOr("nn", 10);
-		u64 n = ipow(2, logn);
+		u64 n = 1ull << logn;
 		auto blocks = divCeil(n, 128);
 
 
