@@ -1842,6 +1842,7 @@ namespace osuCrypto {
         // The code above computes xG
         // For PCG, we want to compute Ge
         benchmark_iterative_pcg_code_cuda(2);
+        benchmark_iterative_pcg_code_cuda(3);
 
         //
         // DIFFERENT TESTS
