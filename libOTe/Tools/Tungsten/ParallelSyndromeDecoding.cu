@@ -510,7 +510,7 @@ namespace osuCrypto {
                             -static_cast<int8_t>(
                                 blockData[data_start + row * block_num_cols + code_block_idx_within]
                                 )
-                            );
+                            ); // note that these casts ensure the value is 1111....1 if blockData is 1
                 }
                 result[col_start + code_block_idx_within] = temp;
             }
@@ -687,14 +687,14 @@ namespace osuCrypto {
         int start_result,
         thrust::device_vector<uint8_t>& mat,
         MulHelperV2& mulHelper) {
-
+        
         initialize_random_block_matrix(
             mat,
             mulHelper.sigma, mulHelper.e, mulHelper.t);
 
         int threadsPerBlock = 256;
         int numBlocks = (mulHelper.block_num_cols * mulHelper.t + threadsPerBlock - 1) / threadsPerBlock;
-
+        
         sparse_vector_matrix_mul_v3 << <numBlocks, threadsPerBlock >> > (
             thrust::raw_pointer_cast(x.data()) + start_x,
             thrust::raw_pointer_cast(mat.data()),
@@ -1624,7 +1624,7 @@ namespace osuCrypto {
         thrust::device_vector<uint8_t> mat_firsthalf(first_t * mul_sigma * mul_sigma); // also can be used for compressing
                                                                                        // as size equals last_t * e * sigma * sigma
         thrust::device_vector<uint8_t> mat_secondhalf(last_t * mul_sigma * mul_sigma);
-
+        
          // First multiplication separate because it uses x as input
         sparse_vector_matrix_mul_with_init_host_v4<T>(
             x,
@@ -1685,7 +1685,7 @@ namespace osuCrypto {
                 mat_secondhalf,
                 mul_helper_secondhalf);
         }
-
+        */
         return results_secondhalf[iter_half & 1];
     }
 
@@ -1840,7 +1840,7 @@ namespace osuCrypto {
         benchmark_iterative_code_cuda(3);
 
         // The code above computes xG
-        // For PCG, we want to compute Ge
+        // For PCG, we want to compute G\Delta\e
         benchmark_iterative_pcg_code_cuda(2);
         benchmark_iterative_pcg_code_cuda(3);
 
