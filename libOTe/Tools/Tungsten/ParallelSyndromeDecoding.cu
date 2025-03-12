@@ -793,8 +793,8 @@ namespace osuCrypto {
 
     template <typename T>
     void sparse_vector_matrix_mul_with_init_host_v5(
-        const thrust::device_vector<T>& x,
-        thrust::device_vector<T>& result,
+        thrust::device_ptr<T> x,
+        thrust::device_ptr<T> result,
         MulHelperV3& mulHelper) {
 
         unsigned int seed = 12345;
@@ -803,10 +803,10 @@ namespace osuCrypto {
         int numBlocks = (mulHelper.block_num_cols * mulHelper.t + threadsPerBlock - 1) / threadsPerBlock;
 
         sparse_vector_matrix_mul_v4 << <numBlocks, threadsPerBlock >> > (
-            thrust::raw_pointer_cast(x.data()),
+            thrust::raw_pointer_cast(x),
             thrust::raw_pointer_cast(mulHelper.rowIndices.data()),
             thrust::raw_pointer_cast(mulHelper.colIndices.data()),
-            thrust::raw_pointer_cast(result.data()),
+            thrust::raw_pointer_cast(result),
             mulHelper.t,
             mulHelper.block_num_rows, 
             mulHelper.block_num_cols,
@@ -1128,6 +1128,58 @@ namespace osuCrypto {
         cudaDeviceSynchronize();
 
         thrust::copy(result.begin(), result.end(), data.begin());
+    }
+
+
+    // Wrapper function to shuffle a thrust::device_vector containing T type data
+    template<typename T>
+    void shuffle_blocks_feistel_v2(
+        thrust::device_ptr<T> data, // The vector of T type (e.g. uint64_t) elements to shuffle
+        uint64_t block_size,
+        uint64_t n) { // Specifies the size of each block that will be independently shuffled
+        thrust::device_vector<T> result(n);
+        // block size must evenly divide the total number of elements
+        if (block_size == 0 || n % block_size != 0) {
+            throw std::invalid_argument("Block size must be a positive divisor of the input size.");
+        }
+        // ensure n is a power of 2
+        if ((n & (n - 1)) != 0) {
+            throw std::invalid_argument("n should be a power of 2");
+        }
+
+        uint32_t num_rounds = 24; // The number of Feistel rounds to use in the pseudorandom permutation
+        // same as in the thrust implementation
+        const int num_blocks = n / block_size;
+        const int num_keys = num_rounds * num_blocks; // for each round and each block, unique feistel keys
+        thrust::host_vector<uint32_t> h_keys(num_keys);
+        // NOTE need to generate fresh randomness for each block (look at feistel_bijection)
+        // so that each block is shuffled differently
+        // thrust::default_random_engine rng; // default seed (SAME each time)
+        thrust::default_random_engine rng(static_cast<unsigned int>(time(0)));
+
+        for (int i = 0; i < num_keys; ++i) {
+            h_keys[i] = rng(); // A random key is generated for each round/block using thrust::default_random_engine
+        }
+
+        thrust::device_vector<uint32_t> d_keys = h_keys; // Copy keys to device
+
+        FeistelParams feistel_params = initialize_feistel_params(block_size, num_rounds);
+
+        // Launch kernel
+        int threads_per_block = 256; //block_size; // Sets the number of threads in each block (exactly 8 warps)
+        int blocks_per_grid = (n + threads_per_block - 1) / threads_per_block;
+        // (n + block_size - 1) / block_size;
+        // Determines the total number of blocks 
+        // needed to cover all n elements
+        shuffle_blocks_feistel_kernel << <blocks_per_grid, threads_per_block >> > (
+            thrust::raw_pointer_cast(data), thrust::raw_pointer_cast(result.data()), n, block_size,
+            thrust::raw_pointer_cast(d_keys.data()), num_rounds,
+            feistel_params.left_side_bits, feistel_params.left_side_mask,
+            feistel_params.right_side_bits, feistel_params.right_side_mask);
+
+        cudaDeviceSynchronize();
+
+        thrust::copy(result.begin(), result.end(), data);
     }
 
     // block multiply function with cuda written kernels
@@ -1797,9 +1849,8 @@ namespace osuCrypto {
 
 
     template <typename T>
-    //thrust::device_ptr<T> iterative_pcg_code_cuda_v2(
-    thrust::device_vector<T> iterative_pcg_code_cuda_v2(
-        const thrust::device_vector<T>& x,
+    thrust::device_ptr<T> iterative_pcg_code_cuda_v2(
+        thrust::device_vector<T>& x,
         std::vector<int>& sigma,
         int k,
         int e) {
@@ -1849,16 +1900,14 @@ namespace osuCrypto {
         initialize_mul_helper_expandorequal_v2(mul_helper_secondhalf, mul_sigma, 1, last_t); // e=1
         
         // Each iteration (except first) will use one vector as input and the other as result:
-        //thrust::device_vector<T> results(2 * n); // in first half: one is 0...n and the other n...2n
+        thrust::device_vector<T> results(2 * n); // in first half: one is 0...n and the other n...2n
                                                  // in second half: one is 0...k and the other n...(n+k)
+                                                 // so in second half we just do not use the redundant elements
 
-        std::vector<thrust::device_vector<T>> results_firsthalf(2, thrust::device_vector<T>(n));
-        std::vector<thrust::device_vector<T>> results_secondhalf(2, thrust::device_vector<T>(k)); // after compressing
-        
         // First multiplication separate because it uses x as input
         sparse_vector_matrix_mul_with_init_host_v5<T>(
-            x,
-            results_firsthalf[0],
+            x.data(),
+            results.data(),
             mul_helper_firsthalf);
 
         //
@@ -1867,12 +1916,12 @@ namespace osuCrypto {
         for (size_t iter = 0; iter < iter_half; ++iter) {
 
             // Shuffle
-            shuffle_blocks_feistel<T>(results_firsthalf[iter & 1], sigma[perm_blocksize_idx[iter]]);
+            shuffle_blocks_feistel_v2<T>(results.data() + (iter & 1) * n, sigma[perm_blocksize_idx[iter]], n);
 
             // Multiply
             sparse_vector_matrix_mul_with_init_host_v5<T>(
-                results_firsthalf[iter & 1], // iter % 2
-                results_firsthalf[(iter + 1) & 1], // (iter+1) % 2
+                results.data() + (iter & 1) * n, // iter % 2
+                results.data() + ((~iter) & 1) * n, // (iter+1) % 2
                 mul_helper_firsthalf);
         }
 
@@ -1881,12 +1930,12 @@ namespace osuCrypto {
         //
 
         // Shuffle (full thing of size n)
-        shuffle_blocks_feistel<T>(results_firsthalf[iter_half & 1], sigma[0]);
+        shuffle_blocks_feistel_v2<T>(results.data() + (iter_half & 1) * n, sigma[0], n);
 
         // Multiply (compress to size n->k)
         sparse_vector_matrix_mul_with_init_host_v5<T>(
-            results_firsthalf[iter_half & 1], // iter % 2
-            results_secondhalf[0], // (iter+1) % 2
+            results.data() + (iter_half & 1) * n, // first half (n size), iter % 2
+            results.data() + ((~iter_half) & 1) * n, // second half (k size), (iter+1) % 2
             mul_helper_compress);
 
         //
@@ -1894,17 +1943,21 @@ namespace osuCrypto {
         //
         for (size_t iter = 0; iter < iter_half; ++iter) {
             // Shuffle
-            shuffle_blocks_feistel<T>(results_secondhalf[iter & 1], sigma[perm_blocksize_idx[iter]]);
+            shuffle_blocks_feistel_v2<T>(
+                results.data() + (((iter_half ^ iter) + 1) & 1) * n,
+                sigma[perm_blocksize_idx[iter]], k);
 
             // Multiply
             sparse_vector_matrix_mul_with_init_host_v5<T>(
-                results_secondhalf[iter & 1], // iter % 2
-                results_secondhalf[(iter + 1) & 1], // (iter+1) % 2
+                results.data() + (((iter_half ^ iter) + 1) & 1) * n, // iter % 2
+                results.data() + ((iter_half ^ iter) & 1) * n, // (iter+1) % 2
                 mul_helper_secondhalf);
         }
-        
-        //return results.data() + (iter_half & 1) * n;
-        return results_secondhalf[iter_half & 1];
+
+        //iter_half+iter_half-1+2
+        // = 2 * iter_half + 1
+        // 2 * iter_half + 1 == num_iters        
+        return results.data() + (num_iters & 1) * n;
     }
 
 
@@ -1944,8 +1997,7 @@ namespace osuCrypto {
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        //thrust::device_ptr<uint64_t> d_result = iterative_pcg_code_cuda_v2<uint64_t>(
-            thrust::device_vector<uint64_t> d_result = iterative_pcg_code_cuda_v2<uint64_t>(
+        thrust::device_ptr<uint64_t> d_result = iterative_pcg_code_cuda_v2<uint64_t>(
             d_x,
             sigmas,
             k,
