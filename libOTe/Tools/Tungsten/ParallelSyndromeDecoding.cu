@@ -578,16 +578,28 @@ namespace osuCrypto {
             // good memory coalescing
             if (code_block_idx_within < block_num_cols) {
                 T temp = 0;
-                for (int row = 0; row < block_num_rows; ++row) {
-                    // line below if both binary
-                    //temp ^= (x[row_start + row] & blockData[data_start + code_block_idx_within + row * (sigma * e)]);
-                    // but x is gf128
-                    temp += x[row_start + row] &
-                        static_cast<T>(
-                            -static_cast<int>(
-                                xorshifthash(seed ^ tid ^ row) & 1
-                                )
-                            ); // note that these casts ensure the value is 1111....1 if blockData is 1
+                //for (int row = 0; row < block_num_rows; ++row) {
+                //    // line below if both binary
+                //    //temp ^= (x[row_start + row] & blockData[data_start + code_block_idx_within + row * (sigma * e)]);
+                //    // but x is gf128
+                //    temp += x[row_start + row] &
+                //        static_cast<T>(
+                //            -static_cast<int>(
+                //                xorshifthash(seed ^ tid ^ row) & 1
+                //                )
+                //            ); // note that these casts ensure the value is 1111....1 if blockData is 1
+                //}
+
+                for (int row = 0; row < block_num_rows; row += 32) {
+                    unsigned int mask = xorshifthash(seed ^ tid ^ row); // 32-bit output
+                    for (int bit_pos = 0; bit_pos < 32; bit_pos++) {
+                        temp += x[row_start + row + bit_pos] &
+                            static_cast<T>(
+                                -static_cast<int>(
+                                    (mask >> bit_pos) & 1
+                                    )
+                                ); // note that these casts ensure the value is 1111....1 if blockData is 1
+                    }
                 }
                 result[col_start + code_block_idx_within] = temp;
             }
@@ -1956,6 +1968,7 @@ namespace osuCrypto {
 
         constexpr int k = 1 << 20; // 2^20
         constexpr int n = 1 << 21; // 2^21
+
         std::vector<int> sigmas;
         if (depth == 2) {
             sigmas = { n, 2048, 128 }; // ~2sqrt(n)
