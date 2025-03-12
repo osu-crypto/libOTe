@@ -555,7 +555,6 @@ namespace osuCrypto {
         }
     }
 
-
     template <typename T>
     __global__ void sparse_vector_matrix_mul_v4(
         const T* x, // field
@@ -578,17 +577,6 @@ namespace osuCrypto {
             // good memory coalescing
             if (code_block_idx_within < block_num_cols) {
                 T temp = 0;
-                //for (int row = 0; row < block_num_rows; ++row) {
-                //    // line below if both binary
-                //    //temp ^= (x[row_start + row] & blockData[data_start + code_block_idx_within + row * (sigma * e)]);
-                //    // but x is gf128
-                //    temp += x[row_start + row] &
-                //        static_cast<T>(
-                //            -static_cast<int>(
-                //                xorshifthash(seed ^ tid ^ row) & 1
-                //                )
-                //            ); // note that these casts ensure the value is 1111....1 if blockData is 1
-                //}
 
                 for (int row = 0; row < block_num_rows; row += 32) {
                     unsigned int mask = xorshifthash(seed ^ tid ^ row); // 32-bit output
@@ -599,6 +587,54 @@ namespace osuCrypto {
                                     (mask >> bit_pos) & 1
                                 )
                             ); // note that these casts ensure the value is 1111....1 if blockData is 1
+                    }
+                }
+                result[col_start + code_block_idx_within] = temp;
+            }
+        }
+    }
+
+    __device__ __host__ inline ulonglong2& operator^=(ulonglong2& a, const ulonglong2& b) {
+        a.x ^= b.x;
+        a.y ^= b.y;
+        return a;
+    }
+
+    __device__ __host__ inline ulonglong2 operator&(const ulonglong2& a, const ulonglong2& b) {
+        return make_ulonglong2(a.x & b.x, a.y & b.y);
+    }
+
+    __device__ __host__ inline ulonglong2 get_mask_value(int bit) {
+        uint64_t mask = static_cast<uint64_t>(-static_cast<int>(bit));  // Will be 0 or 0xFFFFFFFFFFFFFFFF
+        return make_ulonglong2(mask, mask);  // Apply to both components
+    }
+
+    __global__ void sparse_vector_matrix_mul_ulonglong2(
+        const ulonglong2* x, // field
+        const int* rowIndices,
+        const int* colIndices,
+        ulonglong2* result, // field
+        int t,
+        int block_num_rows,
+        int block_num_cols,
+        unsigned int seed) {
+
+        uint64_t tid = threadIdx.x + blockIdx.x * blockDim.x; // [0-n) if expanding or [0-k) if compressing: Compute global thread ID
+        uint64_t code_block_idx = tid / block_num_cols;  // [0,t): Identify the block (the chunk of the array i am multiplying)
+        int code_block_idx_within = tid % block_num_cols; // [0, sigma * e) if expanding or [0,sigma] if compressing
+
+        if (code_block_idx < t) {
+            int row_start = rowIndices[code_block_idx];
+            int col_start = colIndices[code_block_idx];
+
+            // good memory coalescing
+            if (code_block_idx_within < block_num_cols) {
+                ulonglong2 temp = make_ulonglong2(0, 0);
+
+                for (int row = 0; row < block_num_rows; row += 32) {
+                    unsigned int mask = xorshifthash(seed ^ tid ^ row); // 32-bit output
+                    for (int bit_pos = 0; bit_pos < 32; bit_pos++) {
+                        temp ^= x[row_start + row + bit_pos] & get_mask_value((mask >> bit_pos) & 1);
                     }
                 }
                 result[col_start + code_block_idx_within] = temp;
@@ -821,6 +857,35 @@ namespace osuCrypto {
             thrust::raw_pointer_cast(result),
             mulHelper.t,
             mulHelper.block_num_rows, 
+            mulHelper.block_num_cols,
+            seed
+            );
+
+        cudaDeviceSynchronize();
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error(cudaGetErrorString(err));
+        }
+    }
+
+    void sparse_vector_matrix_mul_with_init_host_ulonglong2(
+        thrust::device_ptr<ulonglong2> x,
+        thrust::device_ptr<ulonglong2> result,
+        MulHelperV3& mulHelper) {
+
+        unsigned int seed = 12345;
+
+        int threadsPerBlock = 256;
+        int numBlocks = (mulHelper.block_num_cols * mulHelper.t + threadsPerBlock - 1) / threadsPerBlock;
+
+        sparse_vector_matrix_mul_ulonglong2 << <numBlocks, threadsPerBlock >> > (
+            thrust::raw_pointer_cast(x),
+            thrust::raw_pointer_cast(mulHelper.rowIndices.data()),
+            thrust::raw_pointer_cast(mulHelper.colIndices.data()),
+            thrust::raw_pointer_cast(result),
+            mulHelper.t,
+            mulHelper.block_num_rows,
             mulHelper.block_num_cols,
             seed
             );
@@ -1957,6 +2022,102 @@ namespace osuCrypto {
     }
 
 
+    thrust::device_ptr<ulonglong2> iterative_pcg_code_cuda_ulonglong2(
+        thrust::device_vector<ulonglong2>& x,
+        std::vector<int>& sigma,
+        std::vector<int>& perm_blocksize_idx,
+        int k,
+        int e) {
+
+        int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
+        int num_iters = pow(2, depth) - 1;
+        int iter_half = num_iters / 2;
+
+        // We implement 2 cuda kernels that we keep invoking
+        // The current function is run on the host and invokes the kernels
+        // Iterate and keep doing one after the other these 2 operations:
+        // 1. Multiply a vector x = x1,...,xt by a bunch of base size blocks G=G1,...,Gt, 
+        //                      where t=k/sigma[depth] or t=n/sigma[depth])
+        // 2. Shuffle: split the vector resulting from multiplication in 1 into
+        //             same-size pieces of some size and shuffle each piece (in 1 kernel)
+        // Each iteration invokes 2 followed by 1
+
+        int n = k * e;
+        int mul_sigma = sigma[depth]; // all multiplications are done with sigma[depth]
+        int first_t = n / mul_sigma; // in the first half (in the second half it is k/mul_sigma)
+        int last_t = k / mul_sigma; // starting with compression and onto second half
+
+        MulHelperV3 mul_helper_firsthalf;
+        initialize_mul_helper_expandorequal_v2(mul_helper_firsthalf, mul_sigma, 1, first_t); // e=1 means non-expanding
+
+        MulHelperV3 mul_helper_compress;
+        initialize_mul_helper_compress_v2(mul_helper_compress, mul_sigma, e, last_t);
+
+        MulHelperV3 mul_helper_secondhalf;
+        initialize_mul_helper_expandorequal_v2(mul_helper_secondhalf, mul_sigma, 1, last_t); // e=1
+
+        // Each iteration (except first) will use one vector as input and the other as result:
+        thrust::device_vector<ulonglong2> results(2 * n); // in first half: one is 0...n and the other n...2n
+        // in second half: one is 0...k and the other n...(n+k)
+        // so in second half we just do not use the redundant elements
+
+        // First multiplication separate because it uses x as input
+        sparse_vector_matrix_mul_with_init_host_ulonglong2(
+            x.data(),
+            results.data(),
+            mul_helper_firsthalf);
+
+        //
+        // Do the first 1/2 iterations (on n-size vectors)
+        //        
+        for (size_t iter = 0; iter < iter_half; ++iter) {
+
+            // Shuffle
+            shuffle_blocks_feistel_v2<ulonglong2>(results.data() + (iter & 1) * n, sigma[perm_blocksize_idx[iter]], n);
+
+            // Multiply
+            sparse_vector_matrix_mul_with_init_host_ulonglong2(
+                results.data() + (iter & 1) * n, // iter % 2
+                results.data() + ((~iter) & 1) * n, // (iter+1) % 2
+                mul_helper_firsthalf);
+        }
+
+        //
+        // Do the middle iteration (shuffle and compress)
+        //
+
+        // Shuffle (full thing of size n)
+        shuffle_blocks_feistel_v2<ulonglong2>(results.data() + (iter_half & 1) * n, sigma[0], n);
+
+        // Multiply (compress to size n->k)
+        sparse_vector_matrix_mul_with_init_host_ulonglong2(
+            results.data() + (iter_half & 1) * n, // first half (n size), iter % 2
+            results.data() + ((~iter_half) & 1) * n, // second half (k size), (iter+1) % 2
+            mul_helper_compress);
+
+        //
+        // Do the remaining second half iterations (on k-size vectors)
+        //
+        for (size_t iter = 0; iter < iter_half; ++iter) {
+            // Shuffle
+            shuffle_blocks_feistel_v2<ulonglong2>(
+                results.data() + (((iter_half ^ iter) + 1) & 1) * n,
+                sigma[perm_blocksize_idx[iter]], k);
+
+            // Multiply
+            sparse_vector_matrix_mul_with_init_host_ulonglong2(
+                results.data() + (((iter_half ^ iter) + 1) & 1) * n, // iter % 2
+                results.data() + ((iter_half ^ iter) & 1) * n, // (iter+1) % 2
+                mul_helper_secondhalf);
+        }
+
+        //iter_half+iter_half-1+2
+        // = 2 * iter_half + 1
+        // 2 * iter_half + 1 == num_iters        
+        return results.data() + (num_iters & 1) * n;
+    }
+
+
     void benchmark_iterative_pcg_code_cuda(int depth) {
 
         std::cout << "Computing G[Delta e]..." << std::endl;
@@ -2003,15 +2164,15 @@ namespace osuCrypto {
 
         if (e <= 1) throw std::runtime_error("needs to be expanding");
 
-        std::vector<uint64_t> h_x(n); // h_x is the [Delta * e]
+        std::vector<ulonglong2> h_x(n); // h_x is the [Delta * e]
         for (auto& val : h_x) {
-            val = dist(rngcpu);
+            val = make_ulonglong2(dist(rngcpu), dist(rngcpu));
         }
-        thrust::device_vector<uint64_t> d_x = h_x; // move the [Delta e] on the device
+        thrust::device_vector<ulonglong2> d_x = h_x; // move the [Delta e] on the device
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        thrust::device_ptr<uint64_t> d_result = iterative_pcg_code_cuda_v2<uint64_t>(
+        thrust::device_ptr<ulonglong2> d_result = iterative_pcg_code_cuda_ulonglong2(
             d_x,
             sigmas,
             perm_blocksize_idx,
