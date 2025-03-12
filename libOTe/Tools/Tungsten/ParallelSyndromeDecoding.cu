@@ -1214,7 +1214,7 @@ namespace osuCrypto {
 
     // Wrapper function to shuffle a thrust::device_vector containing T type data
     template<typename T>
-    void shuffle_blocks_feistel_v2(
+    void shuffle_blocks_feistel_deviceptr(
         thrust::device_ptr<T> data, // The vector of T type (e.g. uint64_t) elements to shuffle
         uint64_t block_size,
         uint64_t n) { // Specifies the size of each block that will be independently shuffled
@@ -1981,7 +1981,7 @@ namespace osuCrypto {
         for (size_t iter = 0; iter < iter_half; ++iter) {
 
             // Shuffle
-            shuffle_blocks_feistel_v2<T>(results.data() + (iter & 1) * n, sigma[perm_blocksize_idx[iter]], n);
+            shuffle_blocks_feistel_deviceptr<T>(results.data() + (iter & 1) * n, sigma[perm_blocksize_idx[iter]], n);
 
             // Multiply
             sparse_vector_matrix_mul_with_init_host_v5<T>(
@@ -1995,7 +1995,7 @@ namespace osuCrypto {
         //
 
         // Shuffle (full thing of size n)
-        shuffle_blocks_feistel_v2<T>(results.data() + (iter_half & 1) * n, sigma[0], n);
+        shuffle_blocks_feistel_deviceptr<T>(results.data() + (iter_half & 1) * n, sigma[0], n);
 
         // Multiply (compress to size n->k)
         sparse_vector_matrix_mul_with_init_host_v5<T>(
@@ -2008,7 +2008,7 @@ namespace osuCrypto {
         //
         for (size_t iter = 0; iter < iter_half; ++iter) {
             // Shuffle
-            shuffle_blocks_feistel_v2<T>(
+            shuffle_blocks_feistel_deviceptr<T>(
                 results.data() + (((iter_half ^ iter) + 1) & 1) * n,
                 sigma[perm_blocksize_idx[iter]], k);
 
@@ -2051,14 +2051,14 @@ namespace osuCrypto {
         int firsthalf_t = n / mul_sigma; // in the first half
         int secondhalf_t = k / mul_sigma; // starting with compression and onto second half
 
-        GeneratorMatrixMeta mul_helper_firsthalf;
-        initialize_matrix_meta_expandorequal(mul_helper_firsthalf, mul_sigma, 1, firsthalf_t); // e=1 means non-expanding
+        GeneratorMatrixMeta matrix_meta_firsthalf;
+        initialize_matrix_meta_expandorequal(matrix_meta_firsthalf, mul_sigma, 1, firsthalf_t); // e=1 means non-expanding
 
-        GeneratorMatrixMeta mul_helper_compress;
-        initialize_matrix_meta_compress(mul_helper_compress, mul_sigma, e, secondhalf_t);
+        GeneratorMatrixMeta matrix_meta_compress;
+        initialize_matrix_meta_compress(matrix_meta_compress, mul_sigma, e, secondhalf_t);
 
-        GeneratorMatrixMeta mul_helper_secondhalf;
-        initialize_matrix_meta_expandorequal(mul_helper_secondhalf, mul_sigma, 1, secondhalf_t); // e=1
+        GeneratorMatrixMeta matrix_meta_secondhalf;
+        initialize_matrix_meta_expandorequal(matrix_meta_secondhalf, mul_sigma, 1, secondhalf_t); // e=1
 
         // Each iteration (except first) will use one vector as input and the other as result:
         thrust::device_vector<ulonglong2> results(2 * n); // in first half: one is 0...n and the other n...2n
@@ -2069,7 +2069,7 @@ namespace osuCrypto {
         sparse_vector_matrix_mul_with_init_host_ulonglong2(
             x.data(),
             results.data(),
-            mul_helper_firsthalf);
+            matrix_meta_firsthalf);
 
         //
         // Do the first 1/2 iterations (on n-size vectors)
@@ -2077,13 +2077,13 @@ namespace osuCrypto {
         for (size_t iter = 0; iter < iter_half; ++iter) {
 
             // Shuffle
-            shuffle_blocks_feistel_v2<ulonglong2>(results.data() + (iter & 1) * n, sigma[perm_blocksize_idx[iter]], n);
+            shuffle_blocks_feistel_deviceptr<ulonglong2>(results.data() + (iter & 1) * n, sigma[perm_blocksize_idx[iter]], n);
 
             // Multiply
             sparse_vector_matrix_mul_with_init_host_ulonglong2(
                 results.data() + (iter & 1) * n, // iter % 2
                 results.data() + ((~iter) & 1) * n, // (iter+1) % 2
-                mul_helper_firsthalf);
+                matrix_meta_firsthalf);
         }
 
         //
@@ -2091,20 +2091,20 @@ namespace osuCrypto {
         //
 
         // Shuffle (full thing of size n)
-        shuffle_blocks_feistel_v2<ulonglong2>(results.data() + (iter_half & 1) * n, sigma[0], n);
+        shuffle_blocks_feistel_deviceptr<ulonglong2>(results.data() + (iter_half & 1) * n, sigma[0], n);
 
         // Multiply (compress to size n->k)
         sparse_vector_matrix_mul_with_init_host_ulonglong2(
             results.data() + (iter_half & 1) * n, // first half (n size), iter % 2
             results.data() + ((~iter_half) & 1) * n, // second half (k size), (iter+1) % 2
-            mul_helper_compress);
+            matrix_meta_compress);
 
         //
         // Do the remaining second half iterations (on k-size vectors)
         //
         for (size_t iter = 0; iter < iter_half; ++iter) {
             // Shuffle
-            shuffle_blocks_feistel_v2<ulonglong2>(
+            shuffle_blocks_feistel_deviceptr<ulonglong2>(
                 results.data() + (((iter_half ^ iter) + 1) & 1) * n,
                 sigma[perm_blocksize_idx[iter]], k);
 
@@ -2112,7 +2112,7 @@ namespace osuCrypto {
             sparse_vector_matrix_mul_with_init_host_ulonglong2(
                 results.data() + (((iter_half ^ iter) + 1) & 1) * n, // iter % 2
                 results.data() + ((iter_half ^ iter) & 1) * n, // (iter+1) % 2
-                mul_helper_secondhalf);
+                matrix_meta_secondhalf);
         }
 
         //iter_half+iter_half-1+2
