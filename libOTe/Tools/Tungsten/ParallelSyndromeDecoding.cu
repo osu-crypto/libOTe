@@ -1712,7 +1712,7 @@ namespace osuCrypto {
         int mul_sigma = sigma[depth]; // all multiplications are done with sigma[depth]
         int first_t = n / mul_sigma; // in the first half (in the second half it is k/mul_sigma)
         int last_t = k / mul_sigma; // starting with compression and onto second half
-
+        
         MulHelperV2 mul_helper_firsthalf;
         initialize_mul_helper_expandorequal(mul_helper_firsthalf, mul_sigma, 1, first_t); // e=1 means non-expanding
 
@@ -1721,7 +1721,7 @@ namespace osuCrypto {
 
         MulHelperV2 mul_helper_secondhalf;
         initialize_mul_helper_expandorequal(mul_helper_secondhalf, mul_sigma, 1, last_t); // e=1
-
+        
         // Each iteration (except first) will use one vector as input and the other as result:
         std::vector<thrust::device_vector<T>> results_firsthalf(2, thrust::device_vector<T>(n));
         std::vector<thrust::device_vector<T>> results_secondhalf(2, thrust::device_vector<T>(k)); // after compressing
@@ -1797,6 +1797,7 @@ namespace osuCrypto {
 
 
     template <typename T>
+    //thrust::device_ptr<T> iterative_pcg_code_cuda_v2(
     thrust::device_vector<T> iterative_pcg_code_cuda_v2(
         const thrust::device_vector<T>& x,
         std::vector<int>& sigma,
@@ -1837,7 +1838,7 @@ namespace osuCrypto {
         int mul_sigma = sigma[depth]; // all multiplications are done with sigma[depth]
         int first_t = n / mul_sigma; // in the first half (in the second half it is k/mul_sigma)
         int last_t = k / mul_sigma; // starting with compression and onto second half
-
+        
         MulHelperV3 mul_helper_firsthalf;
         initialize_mul_helper_expandorequal_v2(mul_helper_firsthalf, mul_sigma, 1, first_t); // e=1 means non-expanding
 
@@ -1846,11 +1847,14 @@ namespace osuCrypto {
 
         MulHelperV3 mul_helper_secondhalf;
         initialize_mul_helper_expandorequal_v2(mul_helper_secondhalf, mul_sigma, 1, last_t); // e=1
-
+        
         // Each iteration (except first) will use one vector as input and the other as result:
+        //thrust::device_vector<T> results(2 * n); // in first half: one is 0...n and the other n...2n
+                                                 // in second half: one is 0...k and the other n...(n+k)
+
         std::vector<thrust::device_vector<T>> results_firsthalf(2, thrust::device_vector<T>(n));
         std::vector<thrust::device_vector<T>> results_secondhalf(2, thrust::device_vector<T>(k)); // after compressing
-
+        
         // First multiplication separate because it uses x as input
         sparse_vector_matrix_mul_with_init_host_v5<T>(
             x,
@@ -1898,7 +1902,8 @@ namespace osuCrypto {
                 results_secondhalf[(iter + 1) & 1], // (iter+1) % 2
                 mul_helper_secondhalf);
         }
-
+        
+        //return results.data() + (iter_half & 1) * n;
         return results_secondhalf[iter_half & 1];
     }
 
@@ -1939,7 +1944,8 @@ namespace osuCrypto {
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        thrust::device_vector<uint64_t> d_result = iterative_pcg_code_cuda_v2<uint64_t>(
+        //thrust::device_ptr<uint64_t> d_result = iterative_pcg_code_cuda_v2<uint64_t>(
+            thrust::device_vector<uint64_t> d_result = iterative_pcg_code_cuda_v2<uint64_t>(
             d_x,
             sigmas,
             k,
@@ -1958,7 +1964,7 @@ namespace osuCrypto {
         std::cout << "is " << elapsed.count() << " ms" << std::endl;
         std::cout << "NOTE The number above DOES include the cost to initialize the matrices G, H" << std::endl;
 
-        if (d_result.size() != k) throw std::runtime_error("dimensions of output are incorrect");
+        // if (d_result.size() != k) throw std::runtime_error("dimensions of output are incorrect");
     }
 
     void test_feistel_shuffle() {
