@@ -1852,30 +1852,14 @@ namespace osuCrypto {
     thrust::device_ptr<T> iterative_pcg_code_cuda_v2(
         thrust::device_vector<T>& x,
         std::vector<int>& sigma,
+        std::vector<int> &perm_blocksize_idx,
         int k,
         int e) {
 
         int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
         int num_iters = pow(2, depth) - 1;
         int iter_half = num_iters / 2;
-
-        std::vector<int> perm_blocksize_idx; // size of permutation block at a given iteration 
-        // i.e. index into the sigmas vector that has the size
-        // NOTE we can just use the first half (i.e. before 0) as the second half is identical
-        if (depth == 2) {
-            perm_blocksize_idx = { 1 }; // full: { 1, 0, 1 };
-        }
-        else if (depth == 3) {
-            perm_blocksize_idx = { 2, 1, 2 }; // full: { 2, 1, 2, 0, 2, 1, 2 };
-        }
-        else {
-            throw std::runtime_error("you can use the commented out function below but expensive "
-                "(do not uncomment for efficiency)");
-            // works for any depth, but it is a recursive function
-            // NOTE you can just use the first half as second half is same of the output vector
-            //perm_blocksize_idx = buildSequence(depth);
-        }
-
+        
         // We implement 2 cuda kernels that we keep invoking
         // The current function is run on the host and invokes the kernels
         // Iterate and keep doing one after the other these 2 operations:
@@ -1903,7 +1887,7 @@ namespace osuCrypto {
         thrust::device_vector<T> results(2 * n); // in first half: one is 0...n and the other n...2n
                                                  // in second half: one is 0...k and the other n...(n+k)
                                                  // so in second half we just do not use the redundant elements
-
+        
         // First multiplication separate because it uses x as input
         sparse_vector_matrix_mul_with_init_host_v5<T>(
             x.data(),
@@ -1953,7 +1937,7 @@ namespace osuCrypto {
                 results.data() + ((iter_half ^ iter) & 1) * n, // (iter+1) % 2
                 mul_helper_secondhalf);
         }
-
+        
         //iter_half+iter_half-1+2
         // = 2 * iter_half + 1
         // 2 * iter_half + 1 == num_iters        
@@ -1983,6 +1967,23 @@ namespace osuCrypto {
             throw std::runtime_error("need to define sigma vector to run for depth > 3");
         }
 
+        std::vector<int> perm_blocksize_idx; // size of permutation block at a given iteration 
+        // i.e. index into the sigmas vector that has the size
+        // NOTE we can just use the first half (i.e. before 0) as the second half is identical
+        if (depth == 2) {
+            perm_blocksize_idx = { 1 }; // full: { 1, 0, 1 };
+        }
+        else if (depth == 3) {
+            perm_blocksize_idx = { 2, 1, 2 }; // full: { 2, 1, 2, 0, 2, 1, 2 };
+        }
+        else {
+            throw std::runtime_error("you can use the commented out function below but expensive "
+                "(do not uncomment for efficiency)");
+            // works for any depth, but it is a recursive function
+            // NOTE you can just use the first half as second half is same of the output vector
+            //perm_blocksize_idx = buildSequence(depth);
+        }
+
         int e = n / k;
 
         if (k * e != n) throw std::runtime_error("invalid k, n");
@@ -2000,6 +2001,7 @@ namespace osuCrypto {
         thrust::device_ptr<uint64_t> d_result = iterative_pcg_code_cuda_v2<uint64_t>(
             d_x,
             sigmas,
+            perm_blocksize_idx,
             k,
             e
         );
