@@ -593,12 +593,12 @@ namespace osuCrypto {
                 for (int row = 0; row < block_num_rows; row += 32) {
                     unsigned int mask = xorshifthash(seed ^ tid ^ row); // 32-bit output
                     for (int bit_pos = 0; bit_pos < 32; bit_pos++) {
-                        temp += x[row_start + row + bit_pos] &
+                        temp ^= x[row_start + row + bit_pos] &
                             static_cast<T>(
                                 -static_cast<int>(
                                     (mask >> bit_pos) & 1
-                                    )
-                                ); // note that these casts ensure the value is 1111....1 if blockData is 1
+                                )
+                            ); // note that these casts ensure the value is 1111....1 if blockData is 1
                     }
                 }
                 result[col_start + code_block_idx_within] = temp;
