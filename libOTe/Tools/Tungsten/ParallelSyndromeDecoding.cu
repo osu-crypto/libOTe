@@ -254,10 +254,10 @@ namespace osuCrypto {
         int block_num_cols; // sigma * e if expanding, sigma if compressing
     };
 
-    struct MulHelperV3 {
-        thrust::device_vector<int> rowIndices;   // Row indices of non-zero blocks
-        thrust::device_vector<int> colIndices;   // Column indices of non-zero blocks
-        int t;     // Number of diagonal blocks (t = k / sigma at the beginning, n/sigma afterward)
+    struct GeneratorMatrixMeta {
+        thrust::device_vector<int> row_indices;   // Row indices of non-zero blocks
+        thrust::device_vector<int> col_indices;   // Column indices of non-zero blocks
+        int t;     // Number of diagonal blocks (t = n / sigma at the beginning, k/sigma after compressing)
         int block_num_rows; // sigma if expanding, sigma * e if compressing
         int block_num_cols; // sigma * e if expanding, sigma if compressing
     };
@@ -390,19 +390,21 @@ namespace osuCrypto {
         thrust::sequence(mul_helper.colIndices.begin(), mul_helper.colIndices.end(), 0, sigma * e);
     }
 
-    void initialize_mul_helper_expandorequal_v2(MulHelperV3& mul_helper, int sigma, int e, int t) {
-        mul_helper.t = t;
-        mul_helper.block_num_rows = sigma;
-        mul_helper.block_num_cols = sigma * e;
+    void initialize_matrix_meta_expandorequal(
+        GeneratorMatrixMeta& matrix_meta, int sigma, int e, int t) {
+
+        matrix_meta.t = t;
+        matrix_meta.block_num_rows = sigma;
+        matrix_meta.block_num_cols = sigma * e;
 
         // Allocate memory for block data
-        mul_helper.rowIndices.resize(t); // Row start for each block
-        mul_helper.colIndices.resize(t); // Col start for each block
+        matrix_meta.row_indices.resize(t); // Row start for each block
+        matrix_meta.col_indices.resize(t); // Col start for each block
 
         // 0, sigma, 2sigma, 3sigma, etc.
-        thrust::sequence(mul_helper.rowIndices.begin(), mul_helper.rowIndices.end(), 0, sigma);
+        thrust::sequence(matrix_meta.row_indices.begin(), matrix_meta.row_indices.end(), 0, sigma);
         // 0, sigma * e, 2sigma * e, 3sigma * e, etc.
-        thrust::sequence(mul_helper.colIndices.begin(), mul_helper.colIndices.end(), 0, sigma * e);
+        thrust::sequence(matrix_meta.col_indices.begin(), matrix_meta.col_indices.end(), 0, sigma * e);
     }
 
     void initialize_mul_helper_compress(MulHelperV2& mul_helper, int sigma, int e, int t) {
@@ -426,19 +428,21 @@ namespace osuCrypto {
         thrust::sequence(mul_helper.colIndices.begin(), mul_helper.colIndices.end(), 0, sigma);
     }
 
-    void initialize_mul_helper_compress_v2(MulHelperV3& mul_helper, int sigma, int e, int t) {
-        mul_helper.t = t;
-        mul_helper.block_num_rows = sigma * e;
-        mul_helper.block_num_cols = sigma;
+    void initialize_matrix_meta_compress(
+        GeneratorMatrixMeta& matrix_meta, int sigma, int e, int t) {
+
+        matrix_meta.t = t;
+        matrix_meta.block_num_rows = sigma * e;
+        matrix_meta.block_num_cols = sigma;
 
         // Allocate memory for block data
-        mul_helper.rowIndices.resize(t); // Row start for each block
-        mul_helper.colIndices.resize(t); // Col start for each block
+        matrix_meta.row_indices.resize(t); // Row start for each block
+        matrix_meta.col_indices.resize(t); // Col start for each block
 
         // 0, sigma * e, 2sigma * e, 3sigma * e, etc.
-        thrust::sequence(mul_helper.rowIndices.begin(), mul_helper.rowIndices.end(), 0, sigma * e);
+        thrust::sequence(matrix_meta.row_indices.begin(), matrix_meta.row_indices.end(), 0, sigma * e);
         // 0, sigma, 2sigma, 3sigma, etc.
-        thrust::sequence(mul_helper.colIndices.begin(), mul_helper.colIndices.end(), 0, sigma);
+        thrust::sequence(matrix_meta.col_indices.begin(), matrix_meta.col_indices.end(), 0, sigma);
     }
 
     template <typename T>
@@ -843,21 +847,21 @@ namespace osuCrypto {
     void sparse_vector_matrix_mul_with_init_host_v5(
         thrust::device_ptr<T> x,
         thrust::device_ptr<T> result,
-        MulHelperV3& mulHelper) {
+        GeneratorMatrixMeta& matrix_meta) {
 
         unsigned int seed = 12345;
 
         int threadsPerBlock = 256;
-        int numBlocks = (mulHelper.block_num_cols * mulHelper.t + threadsPerBlock - 1) / threadsPerBlock;
+        int numBlocks = (matrix_meta.block_num_cols * matrix_meta.t + threadsPerBlock - 1) / threadsPerBlock;
 
         sparse_vector_matrix_mul_v4 << <numBlocks, threadsPerBlock >> > (
             thrust::raw_pointer_cast(x),
-            thrust::raw_pointer_cast(mulHelper.rowIndices.data()),
-            thrust::raw_pointer_cast(mulHelper.colIndices.data()),
+            thrust::raw_pointer_cast(matrix_meta.row_indices.data()),
+            thrust::raw_pointer_cast(matrix_meta.col_indices.data()),
             thrust::raw_pointer_cast(result),
-            mulHelper.t,
-            mulHelper.block_num_rows, 
-            mulHelper.block_num_cols,
+            matrix_meta.t,
+            matrix_meta.block_num_rows,
+            matrix_meta.block_num_cols,
             seed
             );
 
@@ -872,21 +876,21 @@ namespace osuCrypto {
     void sparse_vector_matrix_mul_with_init_host_ulonglong2(
         thrust::device_ptr<ulonglong2> x,
         thrust::device_ptr<ulonglong2> result,
-        MulHelperV3& mulHelper) {
+        GeneratorMatrixMeta& matrix_meta) {
 
         unsigned int seed = 12345;
 
         int threadsPerBlock = 256;
-        int numBlocks = (mulHelper.block_num_cols * mulHelper.t + threadsPerBlock - 1) / threadsPerBlock;
+        int numBlocks = (matrix_meta.block_num_cols * matrix_meta.t + threadsPerBlock - 1) / threadsPerBlock;
 
         sparse_vector_matrix_mul_ulonglong2 << <numBlocks, threadsPerBlock >> > (
             thrust::raw_pointer_cast(x),
-            thrust::raw_pointer_cast(mulHelper.rowIndices.data()),
-            thrust::raw_pointer_cast(mulHelper.colIndices.data()),
+            thrust::raw_pointer_cast(matrix_meta.row_indices.data()),
+            thrust::raw_pointer_cast(matrix_meta.col_indices.data()),
             thrust::raw_pointer_cast(result),
-            mulHelper.t,
-            mulHelper.block_num_rows,
-            mulHelper.block_num_cols,
+            matrix_meta.t,
+            matrix_meta.block_num_rows,
+            matrix_meta.block_num_cols,
             seed
             );
 
@@ -1951,14 +1955,14 @@ namespace osuCrypto {
         int first_t = n / mul_sigma; // in the first half (in the second half it is k/mul_sigma)
         int last_t = k / mul_sigma; // starting with compression and onto second half
         
-        MulHelperV3 mul_helper_firsthalf;
-        initialize_mul_helper_expandorequal_v2(mul_helper_firsthalf, mul_sigma, 1, first_t); // e=1 means non-expanding
+        GeneratorMatrixMeta mul_helper_firsthalf;
+        initialize_matrix_meta_expandorequal(mul_helper_firsthalf, mul_sigma, 1, first_t); // e=1 means non-expanding
 
-        MulHelperV3 mul_helper_compress;
-        initialize_mul_helper_compress_v2(mul_helper_compress, mul_sigma, e, last_t);
+        GeneratorMatrixMeta mul_helper_compress;
+        initialize_matrix_meta_compress(mul_helper_compress, mul_sigma, e, last_t);
 
-        MulHelperV3 mul_helper_secondhalf;
-        initialize_mul_helper_expandorequal_v2(mul_helper_secondhalf, mul_sigma, 1, last_t); // e=1
+        GeneratorMatrixMeta mul_helper_secondhalf;
+        initialize_matrix_meta_expandorequal(mul_helper_secondhalf, mul_sigma, 1, last_t); // e=1
         
         // Each iteration (except first) will use one vector as input and the other as result:
         thrust::device_vector<T> results(2 * n); // in first half: one is 0...n and the other n...2n
@@ -2030,8 +2034,8 @@ namespace osuCrypto {
         int e) {
 
         int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
-        int num_iters = pow(2, depth) - 1;
-        int iter_half = num_iters / 2;
+        int num_iters = (1 << depth) - 1; // 2^depth - 1
+        int iter_half = num_iters >> 1; // num_iters / 2
 
         // We implement 2 cuda kernels that we keep invoking
         // The current function is run on the host and invokes the kernels
@@ -2044,17 +2048,17 @@ namespace osuCrypto {
 
         int n = k * e;
         int mul_sigma = sigma[depth]; // all multiplications are done with sigma[depth]
-        int first_t = n / mul_sigma; // in the first half (in the second half it is k/mul_sigma)
-        int last_t = k / mul_sigma; // starting with compression and onto second half
+        int firsthalf_t = n / mul_sigma; // in the first half
+        int secondhalf_t = k / mul_sigma; // starting with compression and onto second half
 
-        MulHelperV3 mul_helper_firsthalf;
-        initialize_mul_helper_expandorequal_v2(mul_helper_firsthalf, mul_sigma, 1, first_t); // e=1 means non-expanding
+        GeneratorMatrixMeta mul_helper_firsthalf;
+        initialize_matrix_meta_expandorequal(mul_helper_firsthalf, mul_sigma, 1, firsthalf_t); // e=1 means non-expanding
 
-        MulHelperV3 mul_helper_compress;
-        initialize_mul_helper_compress_v2(mul_helper_compress, mul_sigma, e, last_t);
+        GeneratorMatrixMeta mul_helper_compress;
+        initialize_matrix_meta_compress(mul_helper_compress, mul_sigma, e, secondhalf_t);
 
-        MulHelperV3 mul_helper_secondhalf;
-        initialize_mul_helper_expandorequal_v2(mul_helper_secondhalf, mul_sigma, 1, last_t); // e=1
+        GeneratorMatrixMeta mul_helper_secondhalf;
+        initialize_matrix_meta_expandorequal(mul_helper_secondhalf, mul_sigma, 1, secondhalf_t); // e=1
 
         // Each iteration (except first) will use one vector as input and the other as result:
         thrust::device_vector<ulonglong2> results(2 * n); // in first half: one is 0...n and the other n...2n
@@ -2120,6 +2124,7 @@ namespace osuCrypto {
 
     void benchmark_iterative_pcg_code_cuda(int depth) {
 
+        // G is binary, Delta e is 128-bit (ulonglong2)
         std::cout << "Computing G[Delta e]..." << std::endl;
 
         // Set up pseudorandom generator for generating x
@@ -2141,8 +2146,9 @@ namespace osuCrypto {
             throw std::runtime_error("need to define sigma vector to run for depth > 3");
         }
 
-        std::vector<int> perm_blocksize_idx; // size of permutation block at a given iteration 
-        // i.e. index into the sigmas vector that has the size
+        // size of 'permutation block' at a given iteration (array split into same-size blocks)
+        // More specifically, index into the 'sigmas' vector that has the block size
+        std::vector<int> perm_blocksize_idx;
         // NOTE we can just use the first half (i.e. before 0) as the second half is identical
         if (depth == 2) {
             perm_blocksize_idx = { 1 }; // full: { 1, 0, 1 };
@@ -2161,7 +2167,6 @@ namespace osuCrypto {
         int e = n / k;
 
         if (k * e != n) throw std::runtime_error("invalid k, n");
-
         if (e <= 1) throw std::runtime_error("needs to be expanding");
 
         std::vector<ulonglong2> h_x(n); // h_x is the [Delta * e]
@@ -2172,6 +2177,7 @@ namespace osuCrypto {
 
         auto start = std::chrono::high_resolution_clock::now();
 
+        // d_result equals \G\Delta\e
         thrust::device_ptr<ulonglong2> d_result = iterative_pcg_code_cuda_ulonglong2(
             d_x,
             sigmas,
@@ -2188,11 +2194,10 @@ namespace osuCrypto {
             << " n: " << n
             << " depth: " << depth
             << " sigmas: ";
-        for (const auto s : sigmas) std::cout << s << " ";
+        for (const auto& s : sigmas) std::cout << s << " ";
         std::cout << "is " << elapsed.count() << " ms" << std::endl;
-        std::cout << "NOTE The number above DOES include the cost to initialize the matrices G, H" << std::endl;
-
-        // if (d_result.size() != k) throw std::runtime_error("dimensions of output are incorrect");
+        std::cout << "NOTE The number above DOES include the cost to initialize the matrices G, H " 
+                     " and it generates the matrix elements on the fly." << std::endl;
     }
 
     void test_feistel_shuffle() {
