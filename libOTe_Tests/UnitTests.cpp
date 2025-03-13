@@ -19,6 +19,7 @@
 #include "libOTe_Tests/Dpf_Tests.h"
 #include "libOTe_Tests/Foleage_Tests.h"
 #include "libOTe_Tests/InvMtxDmpf_Tests.h"
+#include "libOTe_Tests/Cmp_Tests.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -26,7 +27,7 @@ namespace tests_libOTe
 	TestCollection Tests([](TestCollection& tc)
 		{
 
-
+			tc.add("Cmp_greaterThan_test                    ", Cmp_greaterThan_test);
 			tc.add("Tools_Transpose_Test                    ", Tools_Transpose_Test);
 			tc.add("Tools_Transpose_View_Test               ", Tools_Transpose_View_Test);
 			tc.add("Tools_Transpose_Bench                   ", Tools_Transpose_Bench);
