@@ -613,11 +613,12 @@ namespace osuCrypto {
         return make_ulonglong2(mask, mask);  // Apply to both components
     }
 
-    __global__ void sparse_vector_matrix_mul_ulonglong2(
-        const ulonglong2* x, // field
+    template <typename T>
+    __global__ void sparse_vector_matrix_mul_templated(
+        const T* x, // field
         const int* rowIndices,
         const int* colIndices,
-        ulonglong2* result, // field
+        T* result, // field
         int t,
         int block_num_rows,
         int block_num_cols,
@@ -633,7 +634,12 @@ namespace osuCrypto {
 
             // good memory coalescing
             if (code_block_idx_within < block_num_cols) {
-                ulonglong2 temp = make_ulonglong2(0, 0);
+                T temp = [] {
+                    if constexpr (std::is_same_v<T, ulonglong2>)
+                        return make_ulonglong2(0, 0);
+                    else
+                        return T(0);
+                } ();
 
                 for (int row = 0; row < block_num_rows; row += 32) {
                     unsigned int mask = xorshifthash(seed ^ tid ^ row); // 32-bit output
@@ -873,9 +879,10 @@ namespace osuCrypto {
         }
     }
 
-    void sparse_vector_matrix_mul_with_init_host_ulonglong2(
-        thrust::device_ptr<ulonglong2> x,
-        thrust::device_ptr<ulonglong2> result,
+    template <typename T>
+    void sparse_vector_matrix_mul_with_init_host_templated(
+        thrust::device_ptr<T> x,
+        thrust::device_ptr<T> result,
         GeneratorMatrixMeta& matrix_meta) {
 
         unsigned int seed = 12345;
@@ -883,7 +890,7 @@ namespace osuCrypto {
         int threadsPerBlock = 256;
         int numBlocks = (matrix_meta.block_num_cols * matrix_meta.t + threadsPerBlock - 1) / threadsPerBlock;
 
-        sparse_vector_matrix_mul_ulonglong2 << <numBlocks, threadsPerBlock >> > (
+        sparse_vector_matrix_mul_templated << <numBlocks, threadsPerBlock >> > (
             thrust::raw_pointer_cast(x),
             thrust::raw_pointer_cast(matrix_meta.row_indices.data()),
             thrust::raw_pointer_cast(matrix_meta.col_indices.data()),
@@ -2026,8 +2033,9 @@ namespace osuCrypto {
     }
 
 
-    thrust::device_ptr<ulonglong2> iterative_pcg_code_cuda_ulonglong2(
-        thrust::device_vector<ulonglong2>& x,
+    template <typename T>
+    thrust::device_ptr<T> iterative_pcg_code_cuda_templated(
+        thrust::device_vector<T>& x,
         std::vector<int>& sigma,
         std::vector<int>& perm_blocksize_idx,
         int k,
@@ -2061,12 +2069,12 @@ namespace osuCrypto {
         initialize_matrix_meta_expandorequal(matrix_meta_secondhalf, mul_sigma, 1, secondhalf_t); // e=1
 
         // Each iteration (except first) will use one vector as input and the other as result:
-        thrust::device_vector<ulonglong2> results(2 * n); // in first half: one is 0...n and the other n...2n
+        thrust::device_vector<T> results(2 * n); // in first half: one is 0...n and the other n...2n
         // in second half: one is 0...k and the other n...(n+k)
         // so in second half we just do not use the redundant elements
 
         // First multiplication separate because it uses x as input
-        sparse_vector_matrix_mul_with_init_host_ulonglong2(
+        sparse_vector_matrix_mul_with_init_host_templated<T>(
             x.data(),
             results.data(),
             matrix_meta_firsthalf);
@@ -2077,10 +2085,10 @@ namespace osuCrypto {
         for (size_t iter = 0; iter < iter_half; ++iter) {
 
             // Shuffle
-            shuffle_blocks_feistel_deviceptr<ulonglong2>(results.data() + (iter & 1) * n, sigma[perm_blocksize_idx[iter]], n);
+            shuffle_blocks_feistel_deviceptr<T>(results.data() + (iter & 1) * n, sigma[perm_blocksize_idx[iter]], n);
 
             // Multiply
-            sparse_vector_matrix_mul_with_init_host_ulonglong2(
+            sparse_vector_matrix_mul_with_init_host_templated<T>(
                 results.data() + (iter & 1) * n, // iter % 2
                 results.data() + ((~iter) & 1) * n, // (iter+1) % 2
                 matrix_meta_firsthalf);
@@ -2091,10 +2099,10 @@ namespace osuCrypto {
         //
 
         // Shuffle (full thing of size n)
-        shuffle_blocks_feistel_deviceptr<ulonglong2>(results.data() + (iter_half & 1) * n, sigma[0], n);
+        shuffle_blocks_feistel_deviceptr<T>(results.data() + (iter_half & 1) * n, sigma[0], n);
 
         // Multiply (compress to size n->k)
-        sparse_vector_matrix_mul_with_init_host_ulonglong2(
+        sparse_vector_matrix_mul_with_init_host_templated<T>(
             results.data() + (iter_half & 1) * n, // first half (n size), iter % 2
             results.data() + ((~iter_half) & 1) * n, // second half (k size), (iter+1) % 2
             matrix_meta_compress);
@@ -2104,12 +2112,12 @@ namespace osuCrypto {
         //
         for (size_t iter = 0; iter < iter_half; ++iter) {
             // Shuffle
-            shuffle_blocks_feistel_deviceptr<ulonglong2>(
+            shuffle_blocks_feistel_deviceptr<T>(
                 results.data() + (((iter_half ^ iter) + 1) & 1) * n,
                 sigma[perm_blocksize_idx[iter]], k);
 
             // Multiply
-            sparse_vector_matrix_mul_with_init_host_ulonglong2(
+            sparse_vector_matrix_mul_with_init_host_templated<T>(
                 results.data() + (((iter_half ^ iter) + 1) & 1) * n, // iter % 2
                 results.data() + ((iter_half ^ iter) & 1) * n, // (iter+1) % 2
                 matrix_meta_secondhalf);
@@ -2178,7 +2186,7 @@ namespace osuCrypto {
         auto start = std::chrono::high_resolution_clock::now();
 
         // d_result equals \G\Delta\e
-        thrust::device_ptr<ulonglong2> d_result = iterative_pcg_code_cuda_ulonglong2(
+        thrust::device_ptr<ulonglong2> d_result = iterative_pcg_code_cuda_templated<ulonglong2>(
             d_x,
             sigmas,
             perm_blocksize_idx,
