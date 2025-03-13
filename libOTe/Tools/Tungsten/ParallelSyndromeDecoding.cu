@@ -2043,7 +2043,7 @@ namespace osuCrypto {
 
         int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
         int num_iters = (1 << depth) - 1; // 2^depth - 1
-        int iter_half = num_iters >> 1; // num_iters / 2
+        int num_iters_minus_one = num_iters - 1; // we use several times
 
         // We implement 2 cuda kernels that we keep invoking
         // The current function is run on the host and invokes the kernels
@@ -2056,77 +2056,66 @@ namespace osuCrypto {
 
         int n = k * e;
         int mul_sigma = sigma[depth]; // all multiplications are done with sigma[depth]
-        int firsthalf_t = n / mul_sigma; // in the first half
-        int secondhalf_t = k / mul_sigma; // starting with compression and onto second half
+        int equal_t = n / mul_sigma; // t for all but the last compressing step
+        int compress_t = k / mul_sigma; // t for last compressing step
 
-        GeneratorMatrixMeta matrix_meta_firsthalf;
-        initialize_matrix_meta_expandorequal(matrix_meta_firsthalf, mul_sigma, 1, firsthalf_t); // e=1 means non-expanding
+        GeneratorMatrixMeta matrix_meta_equal;
+        initialize_matrix_meta_expandorequal(matrix_meta_equal, mul_sigma, 1, equal_t); // e=1 means non-expanding
 
         GeneratorMatrixMeta matrix_meta_compress;
-        initialize_matrix_meta_compress(matrix_meta_compress, mul_sigma, e, secondhalf_t);
+        initialize_matrix_meta_compress(matrix_meta_compress, mul_sigma, e, compress_t); // compress by e 
 
-        GeneratorMatrixMeta matrix_meta_secondhalf;
-        initialize_matrix_meta_expandorequal(matrix_meta_secondhalf, mul_sigma, 1, secondhalf_t); // e=1
-
-        // Each iteration (except first) will use one vector as input and the other as result:
-        thrust::device_vector<T> results(2 * n); // in first half: one is 0...n and the other n...2n
-        // in second half: one is 0...k and the other n...(n+k)
-        // so in second half we just do not use the redundant elements
+        // Each iteration (except first) will use one vector as input and the other as result
+        // all but compressing step: one is 0...n and the other n...2n
+        // compressing step: we either fill 0...k or n...(n+k)
+        thrust::device_vector<T> results(2 * n); 
 
         // First multiplication separate because it uses x as input
         sparse_vector_matrix_mul_with_init_host_templated<T>(
             x.data(),
             results.data(),
-            matrix_meta_firsthalf);
+            matrix_meta_equal);
 
         //
-        // Do the first 1/2 iterations (on n-size vectors)
-        //        
-        for (size_t iter = 0; iter < iter_half; ++iter) {
+        // Do all but the last compressing iteration (on n-size vectors)
+        //
+
+        for (size_t iter = 0; iter < num_iters_minus_one; ++iter) {
 
             // Shuffle
-            shuffle_blocks_feistel_deviceptr<T>(results.data() + (iter & 1) * n, sigma[perm_blocksize_idx[iter]], n);
+            shuffle_blocks_feistel_deviceptr<T>(
+                results.data() + (iter & 1) * n, 
+                sigma[perm_blocksize_idx[iter]], 
+                n
+            );
 
             // Multiply
             sparse_vector_matrix_mul_with_init_host_templated<T>(
                 results.data() + (iter & 1) * n, // iter % 2
                 results.data() + ((~iter) & 1) * n, // (iter+1) % 2
-                matrix_meta_firsthalf);
+                matrix_meta_equal);
         }
 
         //
-        // Do the middle iteration (shuffle and compress)
+        // Do the last compressing iteration (shuffle and compress to size k)
         //
 
         // Shuffle (full thing of size n)
-        shuffle_blocks_feistel_deviceptr<T>(results.data() + (iter_half & 1) * n, sigma[0], n);
+        shuffle_blocks_feistel_deviceptr<T>(
+            results.data() + (num_iters_minus_one & 1) * n,
+            sigma[perm_blocksize_idx[num_iters_minus_one]],
+            n
+        );
 
         // Multiply (compress to size n->k)
         sparse_vector_matrix_mul_with_init_host_templated<T>(
-            results.data() + (iter_half & 1) * n, // first half (n size), iter % 2
-            results.data() + ((~iter_half) & 1) * n, // second half (k size), (iter+1) % 2
+            results.data() + (num_iters_minus_one & 1) * n, // n size
+            results.data() + ((~num_iters_minus_one) & 1) * n, // k size
             matrix_meta_compress);
 
-        //
-        // Do the remaining second half iterations (on k-size vectors)
-        //
-        for (size_t iter = 0; iter < iter_half; ++iter) {
-            // Shuffle
-            shuffle_blocks_feistel_deviceptr<T>(
-                results.data() + (((iter_half ^ iter) + 1) & 1) * n,
-                sigma[perm_blocksize_idx[iter]], k);
-
-            // Multiply
-            sparse_vector_matrix_mul_with_init_host_templated<T>(
-                results.data() + (((iter_half ^ iter) + 1) & 1) * n, // iter % 2
-                results.data() + ((iter_half ^ iter) & 1) * n, // (iter+1) % 2
-                matrix_meta_secondhalf);
-        }
-
-        //iter_half+iter_half-1+2
-        // = 2 * iter_half + 1
-        // 2 * iter_half + 1 == num_iters        
-        return results.data() + (num_iters & 1) * n;
+        // return pointer to index 0 or n in results 
+        // (the output is in first k elements from the pointer)
+        return results.data() + ((~num_iters_minus_one) & 1) * n;
     }
 
 
@@ -2157,12 +2146,12 @@ namespace osuCrypto {
         // size of 'permutation block' at a given iteration (array split into same-size blocks)
         // More specifically, index into the 'sigmas' vector that has the block size
         std::vector<int> perm_blocksize_idx;
-        // NOTE we can just use the first half (i.e. before 0) as the second half is identical
+        // NOTE that first half (i.e. before 0) and the second half (after 0) are identical
         if (depth == 2) {
-            perm_blocksize_idx = { 1 }; // full: { 1, 0, 1 };
+            perm_blocksize_idx = { 1, 0, 1 };
         }
         else if (depth == 3) {
-            perm_blocksize_idx = { 2, 1, 2 }; // full: { 2, 1, 2, 0, 2, 1, 2 };
+            perm_blocksize_idx = { 2, 1, 2, 0, 2, 1, 2 };
         }
         else {
             throw std::runtime_error("you can use the commented out function below but expensive "
