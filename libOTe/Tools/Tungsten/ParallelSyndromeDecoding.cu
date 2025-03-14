@@ -8,6 +8,7 @@
 #include <vector>
 // TODO need to include cryptoTools
 //#include "cryptoTools/Common/Matrix.h"
+#include <cuda_profiler_api.h>
 #include <thrust/shuffle.h>
 #include <thrust/random.h>
 #include <thrust/device_vector.h>
@@ -655,6 +656,56 @@ namespace osuCrypto {
 	}
 
 
+	template <typename T>
+	__global__ void sparse_vector_matrix_mul_optimizedoutperm_templated(
+		const T* x, // extension field
+		const int* rowIndices,
+		const int* colIndices,
+		T* result, // extension field
+		int t,
+		int t_permblock,
+		int block_num_rows,
+		int block_num_cols,
+		int num_moved_per_block,
+		unsigned int seed) {
+
+		uint64_t tid = threadIdx.x + blockIdx.x * blockDim.x; // [0-n) if expanding (or equal) or [0-k) if compressing: Compute global thread ID
+		uint64_t code_block_idx = tid / block_num_cols;  // [0,t): Identify the block (the chunk of the array i am multiplying)
+		uint64_t perm_block_idx = code_block_idx / t_permblock; // [0, #permutation blocks): permutation block index
+		int code_block_idx_within = tid % block_num_cols; // [0, sigma * e) if expanding or [0,sigma] if compressing
+		int perm_block_idx_within = code_block_idx % t_permblock; // [0, t_permblock): which block in the permutation block
+
+		assert(code_block_idx < t);
+		assert(code_block_idx_within < block_num_cols);
+
+		int row_start = rowIndices[code_block_idx];
+		int col_start = colIndices[code_block_idx];
+
+		int output_idx = col_start + code_block_idx_within;
+		int permuted_output_idx = 
+			perm_block_idx * (block_num_cols * t_permblock) // skip full permutation blocks
+			+ (code_block_idx_within / num_moved_per_block) * block_num_cols // to which block in the permutation block we want to write
+			+ perm_block_idx_within * num_moved_per_block // skip the appropriate amount of spaces in the block of the permutation block
+			+ (code_block_idx_within % num_moved_per_block); // write to the proper offset
+
+		// good memory coalescing
+
+		T temp = [] {
+			if constexpr (std::is_same_v<T, ulonglong2>)
+				return make_ulonglong2(0, 0);
+			else
+				return T(0);
+			} ();
+
+		for (int row = 0; row < block_num_rows; row += 32) {
+			unsigned int mask = xorshifthash(seed ^ (output_idx * block_num_rows + row)); // 32-bit output
+			for (int bit_pos = 0; bit_pos < 32; bit_pos++) {
+				temp ^= x[row_start + row + bit_pos] & get_mask_value((mask >> bit_pos) & 1);
+			}
+		}
+		result[permuted_output_idx] = temp;
+	}
+
 	// DEPRECATED
 	template <typename T>
 	void sparse_vector_matrix_mul_host(
@@ -911,6 +962,44 @@ namespace osuCrypto {
 			throw std::runtime_error(cudaGetErrorString(err));
 		}
 	}
+
+	template <typename T>
+	void sparse_vector_matrix_mul_with_init_optimizedoutperm_host_templated(
+		thrust::device_ptr<T> x,
+		thrust::device_ptr<T> result,
+		int perm_blocksize,
+		GeneratorMatrixMeta& matrix_meta) {
+
+		// TODO generate randomly
+		unsigned int seed = 12345;
+		int t_permblock = perm_blocksize / matrix_meta.block_num_cols; // # blocks in a permutation block
+		int num_moved_per_block = matrix_meta.block_num_cols / t_permblock; // fraction of a block, how many elements moved to each block
+
+		// cuda blocks
+		int threadsPerBlock = 256;
+		int numBlocks = (matrix_meta.block_num_cols * matrix_meta.t + threadsPerBlock - 1) / threadsPerBlock;
+
+		sparse_vector_matrix_mul_optimizedoutperm_templated << <numBlocks, threadsPerBlock >> > (
+			thrust::raw_pointer_cast(x),
+			thrust::raw_pointer_cast(matrix_meta.row_indices.data()),
+			thrust::raw_pointer_cast(matrix_meta.col_indices.data()),
+			thrust::raw_pointer_cast(result),
+			matrix_meta.t,
+			t_permblock,
+			matrix_meta.block_num_rows,
+			matrix_meta.block_num_cols,
+			num_moved_per_block,
+			seed
+			);
+
+		cudaDeviceSynchronize();
+
+		cudaError_t err = cudaGetLastError();
+		if (err != cudaSuccess) {
+			throw std::runtime_error(cudaGetErrorString(err));
+		}
+	}
+
 
 	template <typename T>
 	void gpu_shuffle(thrust::device_vector<T>& data) {
@@ -2122,6 +2211,80 @@ namespace osuCrypto {
 	}
 
 
+	template <typename T>
+	thrust::device_ptr<T> iterative_pcg_code_cuda_optimizedoutperm_templated(
+		thrust::device_vector<T>& x, // Delta * e
+		std::vector<int>& sigma,
+		std::vector<int>& perm_blocksize_idx,
+		int k,
+		int e) {
+
+		int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
+		int num_iters = (1 << depth) - 1; // 2^depth - 1
+		int num_iters_minus_one = num_iters - 1; // we use several times
+
+		// We implement 2 cuda kernels that we keep invoking
+		// The current function is run on the host and invokes the kernels
+		// Iterate and keep doing one after the other these 2 operations:
+		// 1. Multiply a vector x = x1,...,xt by a bunch of base size blocks G=G1,...,Gt, 
+		//                      where t=k/sigma[depth] or t=n/sigma[depth])
+		// 2. Shuffle: split the vector resulting from multiplication in 1 into
+		//             same-size pieces of some size and shuffle each piece (in 1 kernel)
+		// Each iteration invokes 2 followed by 1
+
+		int n = k * e;
+		int mul_sigma = sigma[depth]; // all multiplications are done with sigma[depth]
+		int equal_t = n / mul_sigma; // t for all but the last compressing step
+		int compress_t = k / mul_sigma; // t for last compressing step
+
+		GeneratorMatrixMeta matrix_meta_equal;
+		initialize_matrix_meta_expandorequal(matrix_meta_equal, mul_sigma, 1, equal_t); // e=1 means non-expanding
+
+		GeneratorMatrixMeta matrix_meta_compress;
+		initialize_matrix_meta_compress(matrix_meta_compress, mul_sigma, e, compress_t); // compress by e 
+
+		// Each iteration (except first) will use one vector as input and the other as result
+		// all but compressing step: one is 0...n and the other n...2n
+		// compressing step: we either fill 0...k or n...(n+k)
+		thrust::device_vector<T> results(2 * n);  // TODO check if it is 0-initialized? can i just allocate data?
+
+		// First multiplication (and shuffle) separate because it uses x as input
+		sparse_vector_matrix_mul_with_init_optimizedoutperm_host_templated<T>(
+			x.data(),
+			results.data(),
+			sigma[perm_blocksize_idx[0]],
+			matrix_meta_equal);
+
+		//
+		// Do all but the last compressing iteration (on n-size vectors)
+		//
+
+		for (size_t iter = 0; iter < num_iters_minus_one; ++iter) {
+
+			// Multiply and 'shuffle'
+			sparse_vector_matrix_mul_with_init_optimizedoutperm_host_templated<T>(
+				results.data() + (iter & 1) * n, // iter % 2
+				results.data() + ((~iter) & 1) * n, // (iter+1) % 2
+				sigma[perm_blocksize_idx[iter + 1]],
+				matrix_meta_equal);
+		}
+
+		//
+		// Do the last compressing multiplication (compress to size k)
+		//
+
+		// Multiply (compress to size n->k) (no shuffle)
+		sparse_vector_matrix_mul_with_init_host_templated<T>(
+			results.data() + (num_iters_minus_one & 1) * n, // n size
+			results.data() + ((~num_iters_minus_one) & 1) * n, // k size
+			matrix_meta_compress);
+
+		// return pointer to index 0 or n in results 
+		// (the output is in first k elements from the pointer)
+		return results.data() + ((~num_iters_minus_one) & 1) * n;
+	}
+
+
 	void benchmark_iterative_pcg_code_cuda(int depth) {
 
 		// G is binary, Delta e is 128-bit (ulonglong2)
@@ -2185,6 +2348,92 @@ namespace osuCrypto {
 
 		// d_result equals \G\Delta\e
 		thrust::device_ptr<ulonglong2> d_result = iterative_pcg_code_cuda_templated<ulonglong2>(
+			d_x,
+			sigmas,
+			perm_blocksize_idx,
+			k,
+			e
+		);
+
+		auto stop = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double, std::milli> elapsed = stop - start;
+
+		std::cout << "Time to compute G[Delta e] iterative CUDA implementation (unrolled recursion) with "
+			<< " k: " << k
+			<< " n: " << n
+			<< " depth: " << depth
+			<< " sigmas: ";
+		for (const auto& s : sigmas) std::cout << s << " ";
+		std::cout << "is " << elapsed.count() << " ms" << std::endl;
+		std::cout << "NOTE The number above DOES include the cost to initialize the matrices G, H "
+			" and it generates the matrix elements on the fly." << std::endl;
+	}
+
+
+	void benchmark_iterative_pcg_code_cuda_optimizedoutperm(int depth) {
+
+		// G is binary, Delta e is 128-bit (ulonglong2)
+		std::cout << "Computing G[Delta e] for depth " << depth << 
+			" with permutation optimized out..." << std::endl;
+
+		// Set up pseudorandom generator for generating x
+		std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
+		// Uniform distribution over [0, UINT64_MAX]
+		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
+
+		constexpr int k = 1 << 20; // 2^20
+		constexpr int n = 1 << 21; // 2^21
+
+		std::vector<int> sigmas;
+		if (depth == 1) {
+			sigmas = { n, 2048 };
+		}
+		else if (depth == 2) {
+			sigmas = { n, 2048, 128 }; // ~2sqrt(n)
+		}
+		else if (depth == 3) {
+			sigmas = { n, 2048, 128, 32 }; // ~2sqrt(n)
+		}
+		else {
+			throw std::runtime_error("need to define sigma vector to run for depth > 3");
+		}
+
+		// size of 'permutation block' at a given iteration (array split into same-size blocks)
+		// More specifically, index into the 'sigmas' vector that has the block size
+		std::vector<int> perm_blocksize_idx;
+		// NOTE that first half (i.e. before 0) and the second half (after 0) are identical
+		if (depth == 1) {
+			perm_blocksize_idx = { 0 };
+		}
+		else if (depth == 2) {
+			perm_blocksize_idx = { 1, 0, 1 };
+		}
+		else if (depth == 3) {
+			perm_blocksize_idx = { 2, 1, 2, 0, 2, 1, 2 };
+		}
+		else {
+			throw std::runtime_error("you can use the commented out function below but expensive "
+				"(do not uncomment for efficiency)");
+			// works for any depth, but it is a recursive function
+			// NOTE you can just use the first half as second half is same of the output vector
+			//perm_blocksize_idx = buildSequence(depth);
+		}
+
+		int e = n / k;
+
+		if (k * e != n) throw std::runtime_error("invalid k, n");
+		if (e <= 1) throw std::runtime_error("needs to be expanding");
+
+		std::vector<ulonglong2> h_x(n); // h_x is the [Delta * e]
+		for (auto& val : h_x) {
+			val = make_ulonglong2(dist(rngcpu), dist(rngcpu));
+		}
+		thrust::device_vector<ulonglong2> d_x = h_x; // move the [Delta e] on the device
+
+		auto start = std::chrono::high_resolution_clock::now();
+
+		// d_result equals \G\Delta\e
+		thrust::device_ptr<ulonglong2> d_result = iterative_pcg_code_cuda_optimizedoutperm_templated<ulonglong2>(
 			d_x,
 			sigmas,
 			perm_blocksize_idx,
@@ -2299,9 +2548,16 @@ namespace osuCrypto {
 
 		// The code above computes xG
 		// For PCG, we want to compute G\Delta\e
+		// this is the one for paper benchmarks with real permutation
 		benchmark_iterative_pcg_code_cuda(1); // parameter: depth (how much do we recurse)
 		benchmark_iterative_pcg_code_cuda(2);
 		benchmark_iterative_pcg_code_cuda(3);
+
+		// For PCG, we want to compute G\Delta\e
+		// this is the one for paper benchmarks with optimized out permutation
+		benchmark_iterative_pcg_code_cuda_optimizedoutperm(1); // parameter: depth (how much do we recurse)
+		benchmark_iterative_pcg_code_cuda_optimizedoutperm(2);
+		benchmark_iterative_pcg_code_cuda_optimizedoutperm(3);
 
 		//
 		// DIFFERENT TESTS
