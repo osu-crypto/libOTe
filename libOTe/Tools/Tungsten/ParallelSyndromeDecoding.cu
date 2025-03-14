@@ -936,9 +936,11 @@ namespace osuCrypto {
 	void sparse_vector_matrix_mul_with_init_host_templated(
 		thrust::device_ptr<T> x,
 		thrust::device_ptr<T> result,
-		GeneratorMatrixMeta& matrix_meta) {
+		GeneratorMatrixMeta& matrix_meta,
+		std::mt19937& rngcpu, // 32-bit random number generator
+		std::uniform_int_distribution<uint32_t>& dist) {
 
-		unsigned int seed = 12345;
+		unsigned int seed = dist(rngcpu);
 
 		// cuda blocks
 		int threadsPerBlock = 256;
@@ -968,10 +970,11 @@ namespace osuCrypto {
 		thrust::device_ptr<T> x,
 		thrust::device_ptr<T> result,
 		int perm_blocksize,
-		GeneratorMatrixMeta& matrix_meta) {
+		GeneratorMatrixMeta& matrix_meta,
+		std::mt19937& rngcpu, // 32-bit random number generator
+		std::uniform_int_distribution<uint32_t>& dist) {
 
-		// TODO generate randomly
-		unsigned int seed = 12345;
+		unsigned int seed = dist(rngcpu);
 		int t_permblock = perm_blocksize / matrix_meta.block_num_cols; // # blocks in a permutation block
 		int num_moved_per_block = matrix_meta.block_num_cols / t_permblock; // fraction of a block, how many elements moved to each block
 
@@ -2131,7 +2134,9 @@ namespace osuCrypto {
 		std::vector<int>& sigma,
 		std::vector<int>& perm_blocksize_idx,
 		int k,
-		int e) {
+		int e,
+		std::mt19937& rngcpu, // 32-bit random number generator
+		std::uniform_int_distribution<uint32_t>& dist) {
 
 		int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
 		int num_iters = (1 << depth) - 1; // 2^depth - 1
@@ -2166,7 +2171,9 @@ namespace osuCrypto {
 		sparse_vector_matrix_mul_with_init_host_templated<T>(
 			x.data(),
 			results.data(),
-			matrix_meta_equal);
+			matrix_meta_equal,
+			rngcpu,
+			dist);
 
 		//
 		// Do all but the last compressing iteration (on n-size vectors)
@@ -2185,7 +2192,9 @@ namespace osuCrypto {
 			sparse_vector_matrix_mul_with_init_host_templated<T>(
 				results.data() + (iter & 1) * n, // iter % 2
 				results.data() + ((~iter) & 1) * n, // (iter+1) % 2
-				matrix_meta_equal);
+				matrix_meta_equal,
+				rngcpu,
+				dist);
 		}
 
 		//
@@ -2203,7 +2212,9 @@ namespace osuCrypto {
 		sparse_vector_matrix_mul_with_init_host_templated<T>(
 			results.data() + (num_iters_minus_one & 1) * n, // n size
 			results.data() + ((~num_iters_minus_one) & 1) * n, // k size
-			matrix_meta_compress);
+			matrix_meta_compress,
+			rngcpu,
+			dist);
 
 		// return pointer to index 0 or n in results 
 		// (the output is in first k elements from the pointer)
@@ -2217,7 +2228,9 @@ namespace osuCrypto {
 		std::vector<int>& sigma,
 		std::vector<int>& perm_blocksize_idx,
 		int k,
-		int e) {
+		int e,
+		std::mt19937 &rngcpu, // 32-bit random number generator
+		std::uniform_int_distribution<uint32_t> &dist) {
 
 		int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
 		int num_iters = (1 << depth) - 1; // 2^depth - 1
@@ -2253,7 +2266,9 @@ namespace osuCrypto {
 			x.data(),
 			results.data(),
 			sigma[perm_blocksize_idx[0]],
-			matrix_meta_equal);
+			matrix_meta_equal,
+			rngcpu,
+			dist);
 
 		//
 		// Do all but the last compressing iteration (on n-size vectors)
@@ -2266,7 +2281,9 @@ namespace osuCrypto {
 				results.data() + (iter & 1) * n, // iter % 2
 				results.data() + ((~iter) & 1) * n, // (iter+1) % 2
 				sigma[perm_blocksize_idx[iter + 1]],
-				matrix_meta_equal);
+				matrix_meta_equal,
+				rngcpu,
+				dist);
 		}
 
 		//
@@ -2277,7 +2294,9 @@ namespace osuCrypto {
 		sparse_vector_matrix_mul_with_init_host_templated<T>(
 			results.data() + (num_iters_minus_one & 1) * n, // n size
 			results.data() + ((~num_iters_minus_one) & 1) * n, // k size
-			matrix_meta_compress);
+			matrix_meta_compress,
+			rngcpu,
+			dist);
 
 		// return pointer to index 0 or n in results 
 		// (the output is in first k elements from the pointer)
@@ -2289,6 +2308,11 @@ namespace osuCrypto {
 
 		// G is binary, Delta e is 128-bit (ulonglong2)
 		std::cout << "Computing G[Delta e] for depth " << depth << "..." << std::endl;
+
+		// Set up pseudorandom generator for generating x
+		std::mt19937 rngcpu32(std::random_device{}()); // 32-bit random number generator
+		// Uniform distribution over [0, UINT32_MAX]
+		std::uniform_int_distribution<uint32_t> dist32(0, std::numeric_limits<uint32_t>::max());
 
 		// Set up pseudorandom generator for generating x
 		std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
@@ -2352,7 +2376,9 @@ namespace osuCrypto {
 			sigmas,
 			perm_blocksize_idx,
 			k,
-			e
+			e,
+			rngcpu32,
+			dist32
 		);
 
 		auto stop = std::chrono::high_resolution_clock::now();
@@ -2375,6 +2401,11 @@ namespace osuCrypto {
 		// G is binary, Delta e is 128-bit (ulonglong2)
 		std::cout << "Computing G[Delta e] for depth " << depth << 
 			" with permutation optimized out..." << std::endl;
+
+		// Set up pseudorandom generator for generating x
+		std::mt19937 rngcpu32(std::random_device{}()); // 32-bit random number generator
+		// Uniform distribution over [0, UINT32_MAX]
+		std::uniform_int_distribution<uint32_t> dist32(0, std::numeric_limits<uint32_t>::max());
 
 		// Set up pseudorandom generator for generating x
 		std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
@@ -2438,7 +2469,9 @@ namespace osuCrypto {
 			sigmas,
 			perm_blocksize_idx,
 			k,
-			e
+			e,
+			rngcpu32,
+			dist32
 		);
 
 		auto stop = std::chrono::high_resolution_clock::now();
