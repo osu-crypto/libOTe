@@ -646,9 +646,10 @@ namespace osuCrypto {
 				return T(0);
 			} ();
 
+#pragma unroll
 		for (int row = 0; row < block_num_rows; row += 32) {
 			unsigned int mask = xorshifthash(seed ^ (output_idx * block_num_rows + row)); // 32-bit output
-			for (int bit_pos = 0; bit_pos < 32 && bit_pos < block_num_rows; bit_pos++) {
+			for (int bit_pos = 0; bit_pos < 32; bit_pos++) {
 				temp ^= x[row_start + row + bit_pos] & get_mask_value((mask >> bit_pos) & 1);
 			}
 		}
@@ -700,7 +701,7 @@ namespace osuCrypto {
 
 		for (int row = 0; row < block_num_rows; row += 32) {
 			unsigned int mask = xorshifthash(seed ^ (output_idx * block_num_rows + row)); // 32-bit output
-			for (int bit_pos = 0; bit_pos < 32 && bit_pos < block_num_rows; bit_pos++) {
+			for (int bit_pos = 0; bit_pos < 32; bit_pos++) {
 				temp ^= x[row_start + row + bit_pos] & get_mask_value((mask >> bit_pos) & 1);
 			}
 		}
