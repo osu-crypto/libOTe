@@ -947,6 +947,10 @@ namespace osuCrypto {
 		int threadsPerBlock = 256;
 		int numBlocks = (matrix_meta.block_num_cols * matrix_meta.t + threadsPerBlock - 1) / threadsPerBlock;
 
+		if (matrix_meta.block_num_rows < 32) {
+			throw std::runtime_error("Will result in out of bounds error as kernel processes 32 rows at a time");
+		}
+
 		sparse_vector_matrix_mul_templated << <numBlocks, threadsPerBlock >> > (
 			thrust::raw_pointer_cast(x),
 			thrust::raw_pointer_cast(matrix_meta.row_indices.data()),
@@ -983,6 +987,10 @@ namespace osuCrypto {
 		// cuda blocks
 		int threadsPerBlock = 256;
 		int numBlocks = (matrix_meta.block_num_cols * matrix_meta.t + threadsPerBlock - 1) / threadsPerBlock;
+
+		if (matrix_meta.block_num_rows < 32) {
+			throw std::runtime_error("Will result in out of bounds error as kernel processes 32 rows at a time");
+		}
 
 		sparse_vector_matrix_mul_optimizedoutperm_templated << <numBlocks, threadsPerBlock >> > (
 			thrust::raw_pointer_cast(x),
@@ -2346,11 +2354,12 @@ namespace osuCrypto {
 		else if (depth == 3) {
 			sigmas = { n, 2048, 128, 32 }; // ~2sqrt(n)
 		}
-		else if (depth == 4) {
-			sigmas = { n, 2048, 128, 32, 16 }; // ~2sqrt(n)
-		}
+		//else if (depth == 4) {
+		//	sigmas = { n, 2048, 128, 32, 16 }; // ~2sqrt(n)
+		//}
 		else {
-			throw std::runtime_error("need to define sigma vector to run for depth > 4");
+			throw std::runtime_error("need to define sigma vector to run for depth > 4."
+			"Note that the cuda kernel processes 32 rows at a time so cannot have a smaller sigma");
 		}
 
 		// size of 'permutation block' at a given iteration (array split into same-size blocks)
@@ -2372,9 +2381,6 @@ namespace osuCrypto {
 			//throw std::runtime_error("you can use the commented out function below but expensive "
 			//	"(do not uncomment for efficiency)");
 			perm_blocksize_idx = buildSequence(depth);
-			for (const auto e : perm_blocksize_idx) {
-				std::cout << e << " ";
-			}
 		}
 
 		int e = n / k;
@@ -2447,11 +2453,12 @@ namespace osuCrypto {
 		else if (depth == 3) {
 			sigmas = { n, 2048, 128, 32 }; // ~2sqrt(n)
 		}
-		else if (depth == 4) {
-			sigmas = { n, 2048, 128, 32, 16 }; // ~2sqrt(n)
-		}
+		//else if (depth == 4) {
+		//	sigmas = { n, 2048, 128, 32, 16 }; // ~2sqrt(n)
+		//}
 		else {
-			throw std::runtime_error("need to define sigma vector to run for depth > 4");
+			throw std::runtime_error("need to define sigma vector to run for depth > 3."
+			"Note that the cuda kernel processes 32 rows at a time so cannot have a smaller sigma");
 		}
 
 		// size of 'permutation block' at a given iteration (array split into same-size blocks)
@@ -2612,14 +2619,12 @@ namespace osuCrypto {
 		benchmark_iterative_pcg_code_cuda(1); // parameter: depth (how much do we recurse)
 		benchmark_iterative_pcg_code_cuda(2);
 		benchmark_iterative_pcg_code_cuda(3);
-		benchmark_iterative_pcg_code_cuda(4);
 
 		// For PCG, we want to compute G\Delta\e
 		// this is the one for paper benchmarks with optimized out permutation
 		benchmark_iterative_pcg_code_cuda_optimizedoutperm(1); // parameter: depth (how much do we recurse)
 		benchmark_iterative_pcg_code_cuda_optimizedoutperm(2);
 		benchmark_iterative_pcg_code_cuda_optimizedoutperm(3);
-		benchmark_iterative_pcg_code_cuda_optimizedoutperm(4);
 
 		//
 		// DIFFERENT TESTS
