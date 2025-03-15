@@ -652,6 +652,7 @@ namespace osuCrypto {
 				temp ^= x[row_start + row + bit_pos] & get_mask_value((mask >> bit_pos) & 1);
 			}
 		}
+		
 		result[output_idx] = temp;
 	}
 
@@ -961,6 +962,7 @@ namespace osuCrypto {
 
 		cudaError_t err = cudaGetLastError();
 		if (err != cudaSuccess) {
+			std::cerr << "CUDA Error: " << cudaGetErrorString(err) << " (" << err << ")" << std::endl;
 			throw std::runtime_error(cudaGetErrorString(err));
 		}
 	}
@@ -2071,7 +2073,7 @@ namespace osuCrypto {
 		// in second half: one is 0...k and the other n...(n+k)
 		// so in second half we just do not use the redundant elements
 
-// First multiplication separate because it uses x as input
+		// First multiplication separate because it uses x as input
 		sparse_vector_matrix_mul_with_init_host_v5<T>(
 			x.data(),
 			results.data(),
@@ -2165,12 +2167,18 @@ namespace osuCrypto {
 		// Each iteration (except first) will use one vector as input and the other as result
 		// all but compressing step: one is 0...n and the other n...2n
 		// compressing step: we either fill 0...k or n...(n+k)
-		thrust::device_vector<T> results(2 * n);  // TODO check if it is 0-initialized? can i just allocate data?
+		//thrust::device_vector<T> results(2 * n);
+		T* result_ptr;
+		// NOTE I initialize to size 2n+1 instead of 2n. For some weird reason, it goes out of bounds
+		// for 2n even though the largest index i access is 2n-1.
+		cudaMalloc(reinterpret_cast<void**>(&result_ptr), sizeof(T) * (2 * n + 1));
+		thrust::device_ptr<T> results = thrust::device_pointer_cast(result_ptr);
+
 
 		// First multiplication separate because it uses x as input
 		sparse_vector_matrix_mul_with_init_host_templated<T>(
 			x.data(),
-			results.data(),
+			results,
 			matrix_meta_equal,
 			rngcpu,
 			dist);
@@ -2183,15 +2191,15 @@ namespace osuCrypto {
 
 			// Shuffle
 			shuffle_blocks_feistel_deviceptr<T>(
-				results.data() + (iter & 1) * n,
+				results + (iter & 1) * n,
 				sigma[perm_blocksize_idx[iter]],
 				n
 			);
 
 			// Multiply
 			sparse_vector_matrix_mul_with_init_host_templated<T>(
-				results.data() + (iter & 1) * n, // iter % 2
-				results.data() + ((~iter) & 1) * n, // (iter+1) % 2
+				results + (iter & 1) * n, // iter % 2
+				results + ((~iter) & 1) * n, // (iter+1) % 2
 				matrix_meta_equal,
 				rngcpu,
 				dist);
@@ -2203,22 +2211,25 @@ namespace osuCrypto {
 
 		// Shuffle
 		shuffle_blocks_feistel_deviceptr<T>(
-			results.data() + (num_iters_minus_one & 1) * n,
+			results + (num_iters_minus_one & 1) * n,
 			sigma[perm_blocksize_idx[num_iters_minus_one]],
 			n
 		);
 
 		// Multiply (compress to size n->k)
 		sparse_vector_matrix_mul_with_init_host_templated<T>(
-			results.data() + (num_iters_minus_one & 1) * n, // n size
-			results.data() + ((~num_iters_minus_one) & 1) * n, // k size
+			results + (num_iters_minus_one & 1) * n, // n size
+			results + ((~num_iters_minus_one) & 1) * n, // k size
 			matrix_meta_compress,
 			rngcpu,
 			dist);
 
 		// return pointer to index 0 or n in results 
-		// (the output is in first k elements from the pointer)
-		return results.data() + ((~num_iters_minus_one) & 1) * n;
+		// (the output is in first k elements from the pointer):
+		//return results + ((~num_iters_minus_one) & 1) * n;
+		// Just return the beginning of results and let the client retrieve the correct part
+		// so that i can easily cudaFree (cannot be offset)
+		return results;
 	}
 
 
@@ -2259,12 +2270,16 @@ namespace osuCrypto {
 		// Each iteration (except first) will use one vector as input and the other as result
 		// all but compressing step: one is 0...n and the other n...2n
 		// compressing step: we either fill 0...k or n...(n+k)
-		thrust::device_vector<T> results(2 * n);  // TODO check if it is 0-initialized? can i just allocate data?
+		T* result_ptr;
+		// NOTE I initialize to size 2n+1 instead of 2n. For some weird reason, it goes out of bounds
+		// for 2n even though the largest index i access is 2n-1.
+		cudaMalloc(reinterpret_cast<void**>(&result_ptr), sizeof(T) * (2 * n + 1));
+		thrust::device_ptr<T> results = thrust::device_pointer_cast(result_ptr);
 
 		// First multiplication (and shuffle) separate because it uses x as input
 		sparse_vector_matrix_mul_with_init_optimizedoutperm_host_templated<T>(
 			x.data(),
-			results.data(),
+			results,
 			sigma[perm_blocksize_idx[0]],
 			matrix_meta_equal,
 			rngcpu,
@@ -2278,8 +2293,8 @@ namespace osuCrypto {
 
 			// Multiply and 'shuffle'
 			sparse_vector_matrix_mul_with_init_optimizedoutperm_host_templated<T>(
-				results.data() + (iter & 1) * n, // iter % 2
-				results.data() + ((~iter) & 1) * n, // (iter+1) % 2
+				results + (iter & 1) * n, // iter % 2
+				results + ((~iter) & 1) * n, // (iter+1) % 2
 				sigma[perm_blocksize_idx[iter + 1]],
 				matrix_meta_equal,
 				rngcpu,
@@ -2292,15 +2307,18 @@ namespace osuCrypto {
 
 		// Multiply (compress to size n->k) (no shuffle)
 		sparse_vector_matrix_mul_with_init_host_templated<T>(
-			results.data() + (num_iters_minus_one & 1) * n, // n size
-			results.data() + ((~num_iters_minus_one) & 1) * n, // k size
+			results + (num_iters_minus_one & 1) * n, // n size
+			results + ((~num_iters_minus_one) & 1) * n, // k size
 			matrix_meta_compress,
 			rngcpu,
 			dist);
 
 		// return pointer to index 0 or n in results 
 		// (the output is in first k elements from the pointer)
-		return results.data() + ((~num_iters_minus_one) & 1) * n;
+		//return results + ((~num_iters_minus_one) & 1) * n;
+		// Just return the beginning of results and let the client retrieve the correct part
+		// so that i can easily cudaFree (cannot be offset)
+		return results;
 	}
 
 
@@ -2332,8 +2350,11 @@ namespace osuCrypto {
 		else if (depth == 3) {
 			sigmas = { n, 2048, 128, 32 }; // ~2sqrt(n)
 		}
+		else if (depth == 4) {
+			sigmas = { n, 2048, 128, 32, 16 }; // ~2sqrt(n)
+		}
 		else {
-			throw std::runtime_error("need to define sigma vector to run for depth > 3");
+			throw std::runtime_error("need to define sigma vector to run for depth > 4");
 		}
 
 		// size of 'permutation block' at a given iteration (array split into same-size blocks)
@@ -2350,11 +2371,14 @@ namespace osuCrypto {
 			perm_blocksize_idx = { 2, 1, 2, 0, 2, 1, 2 };
 		}
 		else {
-			throw std::runtime_error("you can use the commented out function below but expensive "
-				"(do not uncomment for efficiency)");
 			// works for any depth, but it is a recursive function
-			// NOTE you can just use the first half as second half is same of the output vector
-			//perm_blocksize_idx = buildSequence(depth);
+			// NOTE if you want to be efficient here, comment out buildSequence below, and uncomment error
+			//throw std::runtime_error("you can use the commented out function below but expensive "
+			//	"(do not uncomment for efficiency)");
+			perm_blocksize_idx = buildSequence(depth);
+			for (const auto e : perm_blocksize_idx) {
+				std::cout << e << " ";
+			}
 		}
 
 		int e = n / k;
@@ -2383,6 +2407,8 @@ namespace osuCrypto {
 
 		auto stop = std::chrono::high_resolution_clock::now();
 		std::chrono::duration<double, std::milli> elapsed = stop - start;
+
+		cudaFree(thrust::raw_pointer_cast(d_result));
 
 		std::cout << "Time to compute G[Delta e] iterative CUDA implementation (unrolled recursion) with "
 			<< " k: " << k
@@ -2425,8 +2451,11 @@ namespace osuCrypto {
 		else if (depth == 3) {
 			sigmas = { n, 2048, 128, 32 }; // ~2sqrt(n)
 		}
+		else if (depth == 4) {
+			sigmas = { n, 2048, 128, 32, 16 }; // ~2sqrt(n)
+		}
 		else {
-			throw std::runtime_error("need to define sigma vector to run for depth > 3");
+			throw std::runtime_error("need to define sigma vector to run for depth > 4");
 		}
 
 		// size of 'permutation block' at a given iteration (array split into same-size blocks)
@@ -2443,11 +2472,11 @@ namespace osuCrypto {
 			perm_blocksize_idx = { 2, 1, 2, 0, 2, 1, 2 };
 		}
 		else {
-			throw std::runtime_error("you can use the commented out function below but expensive "
-				"(do not uncomment for efficiency)");
 			// works for any depth, but it is a recursive function
-			// NOTE you can just use the first half as second half is same of the output vector
-			//perm_blocksize_idx = buildSequence(depth);
+			// NOTE if you want to be efficient here, comment out buildSequence below, and uncomment error
+			//throw std::runtime_error("you can use the commented out function below but expensive "
+			//	"(do not uncomment for efficiency)");
+			perm_blocksize_idx = buildSequence(depth);
 		}
 
 		int e = n / k;
@@ -2476,6 +2505,8 @@ namespace osuCrypto {
 
 		auto stop = std::chrono::high_resolution_clock::now();
 		std::chrono::duration<double, std::milli> elapsed = stop - start;
+
+		cudaFree(thrust::raw_pointer_cast(d_result));
 
 		std::cout << "Time to compute G[Delta e] iterative CUDA implementation (unrolled recursion) with "
 			<< " k: " << k
@@ -2585,12 +2616,14 @@ namespace osuCrypto {
 		benchmark_iterative_pcg_code_cuda(1); // parameter: depth (how much do we recurse)
 		benchmark_iterative_pcg_code_cuda(2);
 		benchmark_iterative_pcg_code_cuda(3);
+		benchmark_iterative_pcg_code_cuda(4);
 
 		// For PCG, we want to compute G\Delta\e
 		// this is the one for paper benchmarks with optimized out permutation
 		benchmark_iterative_pcg_code_cuda_optimizedoutperm(1); // parameter: depth (how much do we recurse)
 		benchmark_iterative_pcg_code_cuda_optimizedoutperm(2);
 		benchmark_iterative_pcg_code_cuda_optimizedoutperm(3);
+		benchmark_iterative_pcg_code_cuda_optimizedoutperm(4);
 
 		//
 		// DIFFERENT TESTS
