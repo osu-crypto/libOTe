@@ -648,7 +648,7 @@ namespace osuCrypto {
 
 		for (int row = 0; row < block_num_rows; row += 32) {
 			unsigned int mask = xorshifthash(seed ^ (output_idx * block_num_rows + row)); // 32-bit output
-			for (int bit_pos = 0; bit_pos < 32; bit_pos++) {
+			for (int bit_pos = 0; bit_pos < 32 && bit_pos < block_num_rows; bit_pos++) {
 				temp ^= x[row_start + row + bit_pos] & get_mask_value((mask >> bit_pos) & 1);
 			}
 		}
@@ -689,8 +689,6 @@ namespace osuCrypto {
 			+ perm_block_idx_within * num_moved_per_block // skip the appropriate amount of spaces in the block of the permutation block
 			+ (code_block_idx_within % num_moved_per_block); // write to the proper offset
 
-		// good memory coalescing
-
 		T temp = [] {
 			if constexpr (std::is_same_v<T, ulonglong2>)
 				return make_ulonglong2(0, 0);
@@ -698,9 +696,11 @@ namespace osuCrypto {
 				return T(0);
 			} ();
 
+		// good memory coalescing
+
 		for (int row = 0; row < block_num_rows; row += 32) {
 			unsigned int mask = xorshifthash(seed ^ (output_idx * block_num_rows + row)); // 32-bit output
-			for (int bit_pos = 0; bit_pos < 32; bit_pos++) {
+			for (int bit_pos = 0; bit_pos < 32 && bit_pos < block_num_rows; bit_pos++) {
 				temp ^= x[row_start + row + bit_pos] & get_mask_value((mask >> bit_pos) & 1);
 			}
 		}
@@ -2169,9 +2169,7 @@ namespace osuCrypto {
 		// compressing step: we either fill 0...k or n...(n+k)
 		//thrust::device_vector<T> results(2 * n);
 		T* result_ptr;
-		// NOTE I initialize to size 2n+1 instead of 2n. For some weird reason, it goes out of bounds
-		// for 2n even though the largest index i access is 2n-1.
-		cudaMalloc(reinterpret_cast<void**>(&result_ptr), sizeof(T) * (2 * n + 1));
+		cudaMalloc(reinterpret_cast<void**>(&result_ptr), sizeof(T) * (2 * n));
 		thrust::device_ptr<T> results = thrust::device_pointer_cast(result_ptr);
 
 
@@ -2271,9 +2269,7 @@ namespace osuCrypto {
 		// all but compressing step: one is 0...n and the other n...2n
 		// compressing step: we either fill 0...k or n...(n+k)
 		T* result_ptr;
-		// NOTE I initialize to size 2n+1 instead of 2n. For some weird reason, it goes out of bounds
-		// for 2n even though the largest index i access is 2n-1.
-		cudaMalloc(reinterpret_cast<void**>(&result_ptr), sizeof(T) * (2 * n + 1));
+		cudaMalloc(reinterpret_cast<void**>(&result_ptr), sizeof(T) * (2 * n));
 		thrust::device_ptr<T> results = thrust::device_pointer_cast(result_ptr);
 
 		// First multiplication (and shuffle) separate because it uses x as input
