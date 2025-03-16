@@ -609,10 +609,16 @@ namespace osuCrypto {
 		return make_ulonglong2(a.x & b.x, a.y & b.y);
 	}
 
+
 	__device__ __host__ inline ulonglong2 get_mask_value(int bit) {
 		uint64_t mask = static_cast<uint64_t>(-static_cast<int>(bit));  // Will be 0 or 0xFFFFFFFFFFFFFFFF
 		return make_ulonglong2(mask, mask);  // Apply to both components
 	}
+
+	__device__ inline ulonglong2 operator&(const ulonglong2& lhs, long long rhs) {
+		return make_ulonglong2(lhs.x & rhs, lhs.y & rhs);
+	}
+
 
 	template <typename T>
 	__global__ void sparse_vector_matrix_mul_templated(
@@ -645,15 +651,45 @@ namespace osuCrypto {
 			else
 				return T(0);
 			} ();
-
+		
 #pragma unroll
+		for (int row = 0; row < block_num_rows; row += 32) {
+			unsigned int mask = xorshifthash(seed ^ (output_idx * block_num_rows + row)); // 32-bit output
+
+			// Process 4 rows at a time
+#pragma unroll
+			for (int bit_pos = 0; bit_pos < 8; bit_pos++) {  // 8-bit chunks
+				unsigned int mask_4 = (mask >> bit_pos) & 0x01010101;  // Extract bit for 4 rows (1 per byte)
+
+				// Expand the 4 bits into full 64-bit masks efficiently
+				long long mask0 = -(long long)((mask_4) & 1);
+				long long mask1 = -(long long)((mask_4 >> 8) & 1);
+				long long mask2 = -(long long)((mask_4 >> 16) & 1);
+				long long mask3 = -(long long)((mask_4 >> 24) & 1);
+
+				// Preload memory into registers 
+				ulonglong2 x0 = x[row_start + row + bit_pos * 4];
+				ulonglong2 x1 = x[row_start + row + bit_pos * 4 + 1];
+				ulonglong2 x2 = x[row_start + row + bit_pos * 4 + 2];
+				ulonglong2 x3 = x[row_start + row + bit_pos * 4 + 3];
+
+				// Apply the mask efficiently in a single step
+				temp ^= (x0 & mask0);
+				temp ^= (x1 & mask1);
+				temp ^= (x2 & mask2);
+				temp ^= (x3 & mask3);
+
+			}
+		}
+
+		/*
 		for (int row = 0; row < block_num_rows; row += 32) {
 			unsigned int mask = xorshifthash(seed ^ (output_idx * block_num_rows + row)); // 32-bit output
 			for (int bit_pos = 0; bit_pos < 32; bit_pos++) {
 				temp ^= x[row_start + row + bit_pos] & get_mask_value((mask >> bit_pos) & 1);
 			}
-		}
-		
+		}*/
+	
 		result[output_idx] = temp;
 	}
 
@@ -699,12 +735,44 @@ namespace osuCrypto {
 
 		// good memory coalescing
 
+#pragma unroll
+		for (int row = 0; row < block_num_rows; row += 32) {
+			unsigned int mask = xorshifthash(seed ^ (output_idx * block_num_rows + row)); // 32-bit output
+
+			// Process 4 rows at a time
+#pragma unroll
+			for (int bit_pos = 0; bit_pos < 8; bit_pos++) {  // 8-bit chunks
+				unsigned int mask_4 = (mask >> bit_pos) & 0x01010101;  // Extract bit for 4 rows (1 per byte)
+
+				// Expand the 4 bits into full 64-bit masks efficiently
+				long long mask0 = -(long long)((mask_4) & 1);
+				long long mask1 = -(long long)((mask_4 >> 8) & 1);
+				long long mask2 = -(long long)((mask_4 >> 16) & 1);
+				long long mask3 = -(long long)((mask_4 >> 24) & 1);
+
+				// Preload memory into registers 
+				ulonglong2 x0 = x[row_start + row + bit_pos * 4];
+				ulonglong2 x1 = x[row_start + row + bit_pos * 4 + 1];
+				ulonglong2 x2 = x[row_start + row + bit_pos * 4 + 2];
+				ulonglong2 x3 = x[row_start + row + bit_pos * 4 + 3];
+
+				// Apply the mask efficiently in a single step
+				temp ^= (x0 & mask0);
+				temp ^= (x1 & mask1);
+				temp ^= (x2 & mask2);
+				temp ^= (x3 & mask3);
+
+			}
+		}
+
+		/*
 		for (int row = 0; row < block_num_rows; row += 32) {
 			unsigned int mask = xorshifthash(seed ^ (output_idx * block_num_rows + row)); // 32-bit output
 			for (int bit_pos = 0; bit_pos < 32; bit_pos++) {
 				temp ^= x[row_start + row + bit_pos] & get_mask_value((mask >> bit_pos) & 1);
 			}
-		}
+		}*/
+
 		result[permuted_output_idx] = temp;
 	}
 
