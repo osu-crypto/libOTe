@@ -143,7 +143,7 @@ namespace osuCrypto
 
 				BitVector choice(baseCount.mRecvCount);
 				choice.randomize(prng);
-				std::vector<block> recvMsg(choice.size());
+				AlignedUnVector<block> recvMsg(choice.size());
 				co_await mOtExtRecver->receive(choice, recvMsg, prng, sock);
 
 				if (extSenderCount)
@@ -153,7 +153,7 @@ namespace osuCrypto
 					mOtExtSender->setBaseOts(senderMsg, senderChoice);
 				}
 
-				std::vector<std::array<block, 2>> sendMsg(baseCount.mSendCount);
+				AlignedUnVector<std::array<block, 2>> sendMsg(baseCount.mSendCount);
 				co_await mOtExtSender->send(sendMsg, prng, sock);
 
 				choice = BitVector(choice.data(), choice.size() - extSenderCount, extSenderCount);
@@ -206,7 +206,7 @@ namespace osuCrypto
 					baseCount.mSendCount += extRecverCount;
 				}
 
-				std::vector<std::array<block,2>> sendMsg(baseCount.mSendCount);
+				AlignedUnVector<std::array<block,2>> sendMsg(baseCount.mSendCount);
 				co_await mOtExtSender->send(sendMsg, prng, sock);
 
 				if (extRecverCount)
@@ -217,7 +217,7 @@ namespace osuCrypto
 
 				BitVector choice(baseCount.mRecvCount);
 				choice.randomize(prng);
-				std::vector<block> recvMsg(choice.size());
+				AlignedUnVector<block> recvMsg(choice.size());
 				co_await mOtExtRecver->receive(choice, recvMsg, prng, sock);
 
 				setBaseOts(span<std::array<block, 2>>(sendMsg).subspan(extRecverCount), recvMsg, choice);
