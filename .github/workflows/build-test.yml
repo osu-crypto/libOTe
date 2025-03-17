@@ -27,15 +27,7 @@ jobs:
       - uses: actions/checkout@v2
         with:
             submodules: recursive
-
-      # Runs a set of commands using the runners shell
-      
-      #- name: build relic
-      #  run:  python3 build.py -DENABLE_BOOST=OFF -DENABLE_SODIUM=OFF -DENABLE_ASAN=ON  -DCMAKE_BUILD_TYPE=RelWithDebInfo
-        
-      #- name: build bitpolymul
-      #  run:  python3 build.py --bitpolymul --par=4  -DVERBOSE_FETCH=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          
+            
       - name: build libOTe
         run:  python3 build.py --par=4 -D ENABLE_ALL_OT=ON -DENABLE_CIRCUITS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_ASAN=ON -DENABLE_MOCK_OT=true 
 
@@ -83,7 +75,20 @@ jobs:
             rm -rf out/
             cd ../..
   
-                    
+               
+  # This workflow contains a single job called "build"
+  build-ubuntu-sodium:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+        with:
+            submodules: recursive
+                 
       - name: build libOTe w/ sodium
         run:  |
             rm ./out/build/linux/frontend/frontend_libOTe
@@ -131,6 +136,69 @@ jobs:
             ./out/main
             rm -rf out/
             cd ../..
+
+            
+               
+  # This workflow contains a single job called "build"
+  build-ubuntu-shared:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+        with:
+            submodules: recursive
+                 
+      - name: build libOTe
+        run:  |
+            python3 build.py --par=4  -D ENABLE_ALL_OT=ON -DENABLE_CIRCUITS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_MOCK_OT=true  -DENABLE_PIC=ON -DENABLE_SHARED=ON
+
+      - name: unit tests
+        run:  ./out/build/linux/frontend/frontend_libOTe -u
+       
+
+      - name: find source tree
+        run: |
+            cd libOTe_Tests/cmakeTests
+            cmake -S . -B out/  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSODIUM=ON -D CMAKE_PREFIX_PATH=../../
+            cmake --build out/
+            ./out/main
+            rm -rf out/
+            cd ../..
+            
+      - name: hint test
+        run: |
+            cd libOTe_Tests/cmakeTests
+            cmake -S . -B out/ -DSODIUM=ON -D LIBOTE_HINT=../..
+            cmake --build out/
+            ./out/main
+            rm -rf out/
+            cd ../..
+
+      - name: install prefix test
+        run: |
+            python3 build.py --install=~/install
+            cd libOTe_Tests/cmakeTests
+            cmake -S . -B out/ -DSODIUM=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=~/install
+            cmake --build out/
+            ./out/main
+            rm -rf out/
+            cd ../..
+            
+
+      - name: install test
+        run: |
+            python3 build.py --install --sudo 
+            cd libOTe_Tests/cmakeTests
+            cmake -S . -B out/  -DSODIUM=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+            cmake --build out/
+            ./out/main
+            rm -rf out/
+            cd ../..
+
 
   # This workflow contains a single job called "build"
   build-osx:
