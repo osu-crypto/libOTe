@@ -91,7 +91,6 @@ jobs:
                  
       - name: build libOTe w/ sodium
         run:  |
-            rm ./out/build/linux/frontend/frontend_libOTe
             python3 build.py --par=4 -D ENABLE_ALL_OT=ON -D ENABLE_SODIUM=ON -DENABLE_RELIC=OFF -DPRINT_LOG_ON_FAIL=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
       - name: unit tests
