@@ -52,7 +52,7 @@ if(DEFINED ENABLE_ALL_OT)
 
 
 	# requires linux
-	if(UNIX AND NOT(APPLE OR MSVC))
+	if(UNIX AND NOT(APPLE OR MSVC) AND NOT ENABLE_PIC)
 		set(oc_BB ${ENABLE_ALL_OT})
 	else()
 		set(oc_BB OFF)
@@ -180,7 +180,9 @@ message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}\n\n")
 
 
 message(STATUS "other \n=======================================================")
-message(STATUS "Option: NO_KOS_WARNING        = ${NO_KOS_WARNING}\n\n")
+message(STATUS "Option: NO_KOS_WARNING        = ${NO_KOS_WARNING}")
+message(STATUS "Option: LIBOTE_SHARED         = ${LIBOTE_SHARED}\n\n")
+
 
 #############################################
 #               Config Checks               #
@@ -225,6 +227,18 @@ if(ENABLE_IKNP AND NOT ENABLE_KOS)
 	message(FATAL_ERROR "ENABLE_IKNP requires ENABLE_KOS")
 endif()
 
+
+if(LIBOTE_SHARED AND NOT ENABLE_PIC AND NOT MSVC)
+	message(FATAL_ERROR " LIBOTE_SHARED requires ENABLE_PIC. Set ENABLE_PIC to true and recompile.")
+endif()
+
+
+if(ENABLE_SIMPLESTOT_ASM AND ENABLE_PIC)
+	message(FATAL_ERROR " ENABLE_SIMPLESTOT_ASM can not be compiled with ENABLE_PIC.")
+endif()
+if(ENABLE_MR_KYBER AND ENABLE_PIC)
+	message(FATAL_ERROR " ENABLE_MR_KYBER can not be compiled with ENABLE_PIC.")
+endif()
 
 
 #include(${CMAKE_CURRENT_LIST_DIR}/../cryptoTools/cmake/cryptoToolsBuildOptions.cmake)
