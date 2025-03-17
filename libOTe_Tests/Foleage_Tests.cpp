@@ -247,8 +247,20 @@ namespace osuCrypto
 			auto r = macoro::sync_wait(macoro::when_all_ready(
 				oles[0].expand(ALsb, AMsb, C0Lsb, C0Msb, prng0, sock[0]),
 				oles[1].expand(BLsb, BMsb, C1Lsb, C1Msb, prng1, sock[1])));
-			std::get<0>(r).result();
+			std::exception_ptr ep;
+			try{
+				std::get<0>(r).result();
+			}
+			catch (std::exception& e)
+			{
+				std::cout << e.what() << std::endl;
+				ep = std::current_exception();
+			}
+
 			std::get<1>(r).result();
+
+			if (ep)
+				std::rethrow_exception(ep);
 
 			// Now we check that we got the correct OLE correlations and fail
 			// the test otherwise.
