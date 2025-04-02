@@ -382,8 +382,8 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 
 	// send buffer...
 	// deserialize
-	key3[0].resize(domain, numPoints, true);
-	key3[1].resize(domain, numPoints, true);
+	key3[0].resize(domain, numPoints);
+	key3[1].resize(domain, numPoints);
 	key3[0].fromBytes(buff0);
 	key3[1].fromBytes(buff1);
 
