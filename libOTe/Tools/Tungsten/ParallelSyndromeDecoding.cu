@@ -1450,7 +1450,7 @@ namespace osuCrypto {
 		int threads_per_block = 256; //block_size; // Sets the number of threads in each block (exactly 8 warps)
 		int blocks_per_grid = (n + threads_per_block - 1) / threads_per_block;
 		// (n + block_size - 1) / block_size;
-		// Determines the total number of blocks 
+		// Determines the total number of blocks
 		// needed to cover all n elements
 		shuffle_blocks_feistel_kernel << <blocks_per_grid, threads_per_block >> > (
 			thrust::raw_pointer_cast(data), thrust::raw_pointer_cast(result.data()), n, block_size,
@@ -2684,7 +2684,7 @@ namespace osuCrypto {
 	};
 
 	template <typename T>
-	thrust::device_vector<T> expand_accumulate_cuda(
+	thrust::device_vector<T> expand_accumulate(
 		thrust::device_vector<T>& x, // [Delta * e]
 		int k,
 		int n,
@@ -2733,7 +2733,7 @@ namespace osuCrypto {
 		return out;
 	}
 
-	void benchmark_expand_accumulate_cuda() {
+	void benchmark_expand_accumulate() {
 
 		// G is binary, Delta e is 128-bit (ulonglong2)
 		std::cout << "Computing expand accumulate..." << std::endl;
@@ -2744,7 +2744,7 @@ namespace osuCrypto {
 		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
 
 		constexpr int k = 1 << 20; // 2^20
-		constexpr int n = 5 * k; // 2 * k is insecure for expand accumulate
+		constexpr int n = 5 * k; // 2 * k is insecure for expand accumulate, choice from expand-accumulate paper
 		int w = ceil(2.3 * log(n)); // expand accumulate's most aggressive param for provable security
 		                            // note that the log is natural
 
@@ -2761,8 +2761,8 @@ namespace osuCrypto {
 
 		auto start = std::chrono::high_resolution_clock::now();
 
-		// d_result equals \G\Delta\e
-		thrust::device_vector<ulonglong2> d_result = expand_accumulate_cuda<ulonglong2>(
+		// d_result is the compressed output
+		thrust::device_vector<ulonglong2> d_result = expand_accumulate<ulonglong2>(
 			d_x,
 			k,
 			n,
@@ -2776,6 +2776,99 @@ namespace osuCrypto {
 			<< " k: " << k
 			<< " n: " << n
 			<< " w: " << w
+			<< " is " << elapsed.count() << " ms" << std::endl;
+		std::cout << "NOTE The number above DOES include the cost to generate randomness." << std::endl;
+	}
+
+	template <typename T>
+	thrust::device_vector<T> repeat_accumulate(
+		thrust::device_vector<T>& x, // [Delta * e]
+		int k,
+		int n,
+		int e,
+		int num_accperm // the number of accumulate-permute
+	) {
+		if (x.size() != n) {
+			throw std::invalid_argument("x (i.e. Delta * e) should be of size n");
+		}
+
+		if (k * e != n) {
+			throw std::invalid_argument("invalid k,n,e combination");
+		}
+
+		// Set up a random number generator
+		unsigned int seed = static_cast<unsigned int>(time(0)); // Random seed
+		thrust::default_random_engine rng(seed);
+
+		for (int i = 0; i < num_accperm; i++) {
+			// Accumulate (with thrust's inclusive scan)
+			thrust::inclusive_scan(
+				x.begin(),
+				x.end(),
+				x.begin(), // output (can be inplace)
+				generic_xor<T>()
+			);
+
+			// Permute
+			thrust::shuffle(x.begin(), x.end(), rng);
+		}
+
+		//
+		// Compress
+		//
+
+		// XOR each e consecutive elements of x (of size n) to get out[i] (out is of size k)
+		// Segment-wise XOR reduction
+		thrust::device_vector<T> out(k);
+		compute_segment_xors<T>(x, out, k, e);
+
+		return out;
+	}
+
+	void benchmark_repeat_accumulate() {
+
+		// G is binary, Delta e is 128-bit (ulonglong2)
+		std::cout << "Computing repeat accumulate..." << std::endl;
+		std::wcout << "NOTE TODO: Need to figure out what n/k and #iterations is needed." << std::endl;
+
+		// Set up pseudorandom generator for generating x
+		std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
+		// Uniform distribution over [0, UINT64_MAX]
+		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
+
+		constexpr int k = 1 << 20; // 2^20
+		constexpr int n = 3 * k; // TODO figure out
+		int num_accperm = 3; // TODO figure out, number of accumulate-permutes
+
+		int e = n / k;
+
+		if (k * e != n) throw std::runtime_error("invalid k, n");
+		if (e <= 1) throw std::runtime_error("needs to be expanding");
+
+		std::vector<ulonglong2> h_x(n); // h_x is the [Delta * e]
+		for (auto& val : h_x) {
+			val = make_ulonglong2(dist(rngcpu), dist(rngcpu));
+		}
+		thrust::device_vector<ulonglong2> d_x = h_x; // move the [Delta e] on the device
+
+		auto start = std::chrono::high_resolution_clock::now();
+
+		// d_result is the compressed output
+		thrust::device_vector<ulonglong2> d_result = repeat_accumulate<ulonglong2>(
+			d_x,
+			k,
+			n,
+			e,
+			num_accperm
+		);
+
+		auto stop = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double, std::milli> elapsed = stop - start;
+
+		std::cout << "Time to compute repeat-accumulate with "
+			<< " k: " << k
+			<< " n: " << n
+			<< " num_accperm: " << num_accperm
 			<< " is " << elapsed.count() << " ms" << std::endl;
 		std::cout << "NOTE The number above DOES include the cost to generate randomness." << std::endl;
 	}
@@ -2901,10 +2994,10 @@ namespace osuCrypto {
 		// TODO systematic, heuristic, optimized out permutation
 
 		// Expand accumulate codes
-		benchmark_expand_accumulate_cuda();
+		benchmark_expand_accumulate();
 
 		// TODO Repeat-accumulate codes
-		//benchmark_repeat_accumulate_cuda();
+		benchmark_repeat_accumulate();
 
 		//
 		// DIFFERENT TESTS
