@@ -2414,12 +2414,14 @@ namespace osuCrypto {
 	}
 
 
-	void benchmark_heuristic_realpermutation(int depth) {
+	void benchmark_ourcode_realpermutation(int depth) {
 
 		// G is binary, Delta e is 128-bit (ulonglong2)
-		std::cout << "Computing heuristic, real perm, for depth " << depth << "..." << std::endl;
+		std::cout << "Computing " 
+			<<  ((depth > 1) ? "heuristic" : "nonheuristic")
+			<< ", real perm, for depth " << depth << "..." << std::endl;
 
-		// Set up pseudorandom generator for generating x
+		// Set up pseudorandom generator for xorshift seeds
 		std::mt19937 rngcpu32(std::random_device{}()); // 32-bit random number generator
 		// Uniform distribution over [0, UINT32_MAX]
 		std::uniform_int_distribution<uint32_t> dist32(0, std::numeric_limits<uint32_t>::max());
@@ -2500,22 +2502,23 @@ namespace osuCrypto {
 
 		cudaFree(thrust::raw_pointer_cast(d_result));
 
-		std::cout << "Time to compute G[Delta e] iterative CUDA implementation (unrolled recursion) with "
+		std::cout << "Time to compute our code with "
 			<< " k: " << k
 			<< " n: " << n
 			<< " depth: " << depth
 			<< " sigmas: ";
 		for (const auto& s : sigmas) std::cout << s << " ";
 		std::cout << "is " << elapsed.count() << " ms" << std::endl;
-		std::cout << "NOTE The number above DOES include the cost to initialize the matrices G, H "
-			" and it generates the matrix elements on the fly." << std::endl;
+		std::cout << "NOTE The number above DOES include generating randomness on the fly." << std::endl;
 	}
 
 
-	void benchmark_heuristic_optimizedpermutation(int depth) {
+	void benchmark_ourcode_optimizedpermutation(int depth) {
 
 		// G is binary, Delta e is 128-bit (ulonglong2)
-		std::cout << "Computing heuristic, optimized out perm, for depth " << depth << std::endl;
+		std::cout << "Computing "
+			<< ((depth > 1) ? "heuristic" : "nonheuristic")
+			<< ", optimized out perm, for depth " << depth << "..." << std::endl;
 
 		// Set up pseudorandom generator for generating the blocks (xorshift)
 		std::mt19937 rngcpu32(std::random_device{}()); // 32-bit random number generator
@@ -2532,7 +2535,7 @@ namespace osuCrypto {
 
 		std::vector<int> sigmas;
 		if (depth == 1) {
-			sigmas = { n, 2048 };
+			sigmas = { n, 2048 }; // ~2sqrt(n), nonheuristic (i.e. not recursive)
 		}
 		else if (depth == 2) {
 			sigmas = { n, 2048, 128 }; // ~2sqrt(n)
@@ -2598,15 +2601,14 @@ namespace osuCrypto {
 
 		cudaFree(thrust::raw_pointer_cast(d_result));
 
-		std::cout << "Time to compute G[Delta e] iterative CUDA implementation (unrolled recursion) with "
+		std::cout << "Time to compute our code with "
 			<< " k: " << k
 			<< " n: " << n
 			<< " depth: " << depth
 			<< " sigmas: ";
 		for (const auto& s : sigmas) std::cout << s << " ";
 		std::cout << "is " << elapsed.count() << " ms" << std::endl;
-		std::cout << "NOTE The number above DOES include the cost to initialize the matrices G, H "
-			" and it generates the matrix elements on the fly." << std::endl;
+		std::cout << "NOTE The number above DOES include generating randomness on the fly" << std::endl;
 	}
 
 	// Kernel that writes w samples into the device vector
@@ -2837,8 +2839,8 @@ namespace osuCrypto {
 		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
 
 		constexpr int k = 1 << 20; // 2^20
-		constexpr int n = 3 * k; // TODO figure out
-		int num_accperm = 3; // TODO figure out, number of accumulate-permutes
+		constexpr int n = 2 * k; // TODO figure out
+		int num_accperm = 4; // TODO figure out, number of accumulate-permutes
 
 		int e = n / k;
 
@@ -2973,25 +2975,31 @@ namespace osuCrypto {
 
 		// The codes above computes xG
 		// For PCG, we want to compute G\Delta\e
-
-		// TODO non-heuristic, real permutation
-		// TODO systematic, non-heuristic, real permutation
-		// TODO non-heuristic, optimized out permutation
-		// TODO systematic, non-heuristic, optimized out permutation
 				
-		// heuristic, real permutation
-		benchmark_heuristic_realpermutation(1); // parameter: depth (how much do we recurse)
-		benchmark_heuristic_realpermutation(2); // parameter: depth (how much do we recurse)
-		benchmark_heuristic_realpermutation(3); // parameter: depth (how much do we recurse)
+		// real permutation
+		// TODO
+		//benchmark_ourcode_nonheuristic_realpermutation(1); // nonheuristic, parameter: #multiply-permutes
+		//benchmark_ourcode_nonheuristic_realpermutation(2); // nonheuristic, parameter: #multiply-permutes
+		//benchmark_ourcode_nonheuristic_realpermutation(3); // nonheuristic, parameter: #multiply-permutes
+		//benchmark_ourcode_nonheuristic_realpermutation(4); // nonheuristic, parameter: #multiply-permutes
+		benchmark_ourcode_realpermutation(1); // nonheuristic, parameter: depth (how much do we recurse)
+		benchmark_ourcode_realpermutation(2); // heuristic, parameter: depth (how much do we recurse)
+		benchmark_ourcode_realpermutation(3); // heuristic, parameter: depth (how much do we recurse)
 
-		// TODO systematic, heuristic, real permutation
+		// TODO systematic, real permutation
+		// nonheuristic
+		// heuristic
+		// heuristic
 
-		// heuristic, optimized out permutation
-		benchmark_heuristic_optimizedpermutation(1); // parameter: depth (how much do we recurse)
-		benchmark_heuristic_optimizedpermutation(2); // parameter: depth (how much do we recurse)
-		benchmark_heuristic_optimizedpermutation(3); // parameter: depth (how much do we recurse)
+		// optimized out permutation
+		// TODO add nonheuristic with different number of multiply-permutes
+		benchmark_ourcode_optimizedpermutation(1); // nonheuristic, parameter: depth (how much do we recurse)
+		benchmark_ourcode_optimizedpermutation(2); // heuristic, parameter: depth (how much do we recurse)
+		benchmark_ourcode_optimizedpermutation(3); // heuristic, parameter: depth (how much do we recurse)
 
-		// TODO systematic, heuristic, optimized out permutation
+		// TODO systematic, optimized out permutation
+
+		// TODO extreme cases
 
 		// Expand accumulate codes
 		benchmark_expand_accumulate();
