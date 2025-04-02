@@ -2876,6 +2876,10 @@ namespace osuCrypto {
 		benchmark_iterative_code_cuda(2); // parameter: depth (how much do we recurse)
 		benchmark_iterative_code_cuda(3);
 
+		//
+		// Below are benchmarks for our paper
+		//
+
 		// The code above computes xG
 		// For PCG, we want to compute G\Delta\e
 		// this is the one for paper benchmarks with real permutation
