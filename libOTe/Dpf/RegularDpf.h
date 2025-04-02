@@ -16,7 +16,7 @@ namespace osuCrypto
 {
 	struct RegularDpfKey
 	{
-		void resize(u64 domain, u64 numTrees, bool programLeafVal)
+		void resize(u64 domain, u64 numTrees, bool programLeafVal = true)
 		{
 			auto depth = log2ceil(domain);
 			if (depth == 0)
