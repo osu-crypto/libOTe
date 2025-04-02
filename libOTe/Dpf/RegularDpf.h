@@ -38,6 +38,29 @@ namespace osuCrypto
 				mCorrectionBits == o.mCorrectionBits &&
 				mLeafVals == o.mLeafVals;
 		}
+
+		u64 sizeBytes() { return sizeof(block) * (1 + mCorrectionWords.size() + mLeafVals.size()) + mCorrectionBits.size(); }
+		void toBytes(u8* dest)
+		{
+			memcpy(dest, &mSeed, sizeof(block));
+			dest += sizeof(block);
+			memcpy(dest, mCorrectionWords.data(), mCorrectionWords.size() * sizeof(block));
+			dest += mCorrectionWords.size() * sizeof(block);
+			memcpy(dest, mCorrectionBits.data(), mCorrectionBits.size());
+			dest += mCorrectionBits.size();
+			memcpy(dest, mLeafVals.data(), mLeafVals.size() * sizeof(block));
+		}
+		void fromBytes(u8* src)
+		{
+			memcpy(&mSeed, src, sizeof(block));
+			src += sizeof(block);
+			memcpy(mCorrectionWords.data(), src, mCorrectionWords.size() * sizeof(block));
+			src += mCorrectionWords.size() * sizeof(block);
+			memcpy(mCorrectionBits.data(), src, mCorrectionBits.size());
+			src += mCorrectionBits.size();
+			memcpy(mLeafVals.data(), src, mLeafVals.size() * sizeof(block));
+		}
+
 	};
 
 	inline std::ostream& operator<<(std::ostream& o, const RegularDpfKey& k)
