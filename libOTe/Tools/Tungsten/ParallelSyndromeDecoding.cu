@@ -6,12 +6,14 @@
 #include <numeric>
 #include <random>
 #include <vector>
+#include <cmath>
 // TODO need to include cryptoTools
 //#include "cryptoTools/Common/Matrix.h"
 #include <cuda_profiler_api.h>
 #include <thrust/shuffle.h>
 #include <thrust/random.h>
 #include <thrust/device_vector.h>
+#include <thrust/gather.h>
 #include <thrust/host_vector.h>
 #include <thrust/transform.h>
 #include <thrust/for_each.h>
@@ -599,11 +601,28 @@ namespace osuCrypto {
 		}
 	}
 
-	__device__ __host__ inline ulonglong2& operator^=(ulonglong2& a, const ulonglong2& b) {
+	__host__ __device__ inline
+		ulonglong2& operator^=(ulonglong2& a, const ulonglong2& b) {
 		a.x ^= b.x;
 		a.y ^= b.y;
 		return a;
 	}
+
+	//__host__ __device__ inline
+	//	ulonglong2 operator^(const ulonglong2& a, const ulonglong2& b) {
+	//	ulonglong2 r = a;
+	//	r ^= b; // reuse operator^=
+	//	return r;
+	//}
+
+	__host__ __device__ inline
+		ulonglong2 operator^(const ulonglong2& a, const ulonglong2& b) {
+		ulonglong2 r;
+		r.x = a.x ^ b.x;
+		r.y = a.y ^ b.y;
+		return r;
+	}
+
 
 	__device__ __host__ inline ulonglong2 operator&(const ulonglong2& a, const ulonglong2& b) {
 		return make_ulonglong2(a.x & b.x, a.y & b.y);
@@ -2499,7 +2518,7 @@ namespace osuCrypto {
 		std::cout << "Computing G[Delta e] for depth " << depth << 
 			" with permutation optimized out..." << std::endl;
 
-		// Set up pseudorandom generator for generating x
+		// Set up pseudorandom generator for generating the blocks (xorshift)
 		std::mt19937 rngcpu32(std::random_device{}()); // 32-bit random number generator
 		// Uniform distribution over [0, UINT32_MAX]
 		std::uniform_int_distribution<uint32_t> dist32(0, std::numeric_limits<uint32_t>::max());
@@ -2588,6 +2607,181 @@ namespace osuCrypto {
 		for (const auto& s : sigmas) std::cout << s << " ";
 		std::cout << "is " << elapsed.count() << " ms" << std::endl;
 		std::cout << "NOTE The number above DOES include the cost to initialize the matrices G, H "
+			" and it generates the matrix elements on the fly." << std::endl;
+	}
+
+	// Kernel that writes w samples into the device vector
+	__global__ void sample_with_replacement_kernel(int* out, int w, int n, unsigned int seed) {
+		int tid = blockIdx.x * blockDim.x + threadIdx.x;
+		if (tid < w) {
+			unsigned int hash = xorshifthash(seed ^ tid);
+			out[tid] = hash & (n - 1); // modulo when n is a power of 2
+		}
+	}
+
+	// Host function to fill thrust::device_vector<int> with random samples
+	void sample_with_replacement(thrust::device_vector<int>& d_out, int n, unsigned int seed = 1337) {
+		int w = d_out.size();
+		int threads = 256;
+		int blocks = (w + threads - 1) / threads;
+
+		// Launch the kernel using the raw pointer from thrust::device_vector
+		sample_with_replacement_kernel << <blocks, threads >> > (
+			thrust::raw_pointer_cast(d_out.data()),
+			w,
+			n,
+			seed
+			);
+		cudaDeviceSynchronize(); // ensure the kernel completes
+	}
+
+	template<typename T>
+	__global__ void xor_reduce_segments(const T* __restrict__ gathered, T* __restrict__ out, int k, int w) { // __restrict__ for no memory overlap
+		int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+		if (idx < k) {
+			T acc = [] {
+				if constexpr (std::is_same_v<T, ulonglong2>)
+					return make_ulonglong2(0, 0);
+				else
+					return T(0);
+				} ();
+#pragma unroll
+			for (int j = 0; j < w; ++j) {
+				acc ^= gathered[idx * w + j];
+			}
+			out[idx] = acc;
+		}
+	}
+
+	template<typename T>
+	void compute_segment_xors(
+		const thrust::device_vector<T>& gathered, // k * w size
+		thrust::device_vector<T>& out, // k size
+		int k, int w) {
+		assert(gathered.size() == k * w);
+		assert(out.size() == k);
+
+		const T* d_gathered = thrust::raw_pointer_cast(gathered.data());
+		T* d_out = thrust::raw_pointer_cast(out.data());
+
+		int threads = 256;
+		int blocks = (k + threads - 1) / threads;
+
+		xor_reduce_segments << <blocks, threads >> > (d_gathered, d_out, k, w);
+		cudaDeviceSynchronize();
+	}
+
+
+
+	// Define a functor that XORs two T (including ulonglong2) values
+	template <typename T>
+	struct generic_xor {
+		__host__ __device__
+			T operator()(const T& a, const T& b) const {
+			return a ^ b;
+		}
+	};
+
+	template <typename T>
+	thrust::device_vector<T> expand_accumulate_cuda(
+		thrust::device_vector<T>& x, // [Delta * e]
+		int k,
+		int n,
+		int w // the expander matrix had weight w in rows/columns
+	) {
+		if (x.size() != n) {
+			throw std::invalid_argument("x (Delta * e) should be of size n");
+		}
+
+		// ensure n is a power of 2
+		if ((n & (n - 1)) != 0) {
+			throw std::invalid_argument("n should be a power of 2");
+		}
+
+		//
+		// accumulate (with thrust's inclusive scan)
+		//
+		thrust::inclusive_scan(
+			x.begin(),
+			x.end(),
+			x.begin(), // output (can be inplace)
+			generic_xor<T>()
+		);
+
+		//
+		// Compress (use k thrust gathers)
+		// Multiplying vector of size n by a nxk matrix
+		//
+
+		// Generate w indices in [0,n) (with replacement is fine)
+		// do it for each of the k columns
+		thrust::device_vector<int> sampled_indices(k * w);
+		sample_with_replacement(sampled_indices, n);
+
+		// Perform thrust gather
+		// do it for each of the k columns
+		thrust::device_vector<T> gathered(sampled_indices.size());
+		thrust::gather(
+			sampled_indices.begin(),       // map of indices to pull from
+			sampled_indices.end(),
+			x.begin(),                     // source data
+			gathered.begin()              // output
+		);
+
+		// XOR each consecutive w elements of gathered (of size k*w) to get out[i] (out is of size k)
+		// Segment-wise XOR reduction
+		// i.e. out[i] = gathered[i*w + 0] ^ gathered[i*w + 1] ^ ... ^ gathered[i*w + w - 1]
+		thrust::device_vector<T> out(k);
+		compute_segment_xors<T>(gathered, out, k, w);
+
+		return out;
+	}
+
+	void benchmark_expand_accumulate_cuda() {
+
+		// G is binary, Delta e is 128-bit (ulonglong2)
+		std::cout << "Computing G[Delta e] where G is expand accumulate " << std::endl;
+
+		// Set up pseudorandom generator for generating x
+		std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
+		// Uniform distribution over [0, UINT64_MAX]
+		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
+
+		constexpr int k = 1 << 20; // 2^20
+		constexpr int n = 1 << 21; // 2^21
+		int w = ceil(2.3 * std::log2(n)); // expand accumulate's most aggressive param for provable security
+		std::wcout << "w " << w << std::endl;
+
+		int e = n / k;
+
+		if (k * e != n) throw std::runtime_error("invalid k, n");
+		if (e <= 1) throw std::runtime_error("needs to be expanding");
+
+		std::vector<ulonglong2> h_x(n); // h_x is the [Delta * e]
+		for (auto& val : h_x) {
+			val = make_ulonglong2(dist(rngcpu), dist(rngcpu));
+		}
+		thrust::device_vector<ulonglong2> d_x = h_x; // move the [Delta e] on the device
+
+		auto start = std::chrono::high_resolution_clock::now();
+
+		// d_result equals \G\Delta\e
+		thrust::device_vector<ulonglong2> d_result = expand_accumulate_cuda<ulonglong2>(
+			d_x,
+			k,
+			n,
+			w
+		);
+
+		auto stop = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double, std::milli> elapsed = stop - start;
+
+		std::cout << "Time to compute G[Delta e] expand-accumulate CUDA implementation with "
+			<< " k: " << k
+			<< " n: " << n
+			<< "is " << elapsed.count() << " ms" << std::endl;
+		std::cout << "NOTE The number above DOES include the cost to initialize the matrix G "
 			" and it generates the matrix elements on the fly." << std::endl;
 	}
 
@@ -2688,12 +2882,26 @@ namespace osuCrypto {
 		benchmark_iterative_pcg_code_cuda(1); // parameter: depth (how much do we recurse)
 		benchmark_iterative_pcg_code_cuda(2);
 		benchmark_iterative_pcg_code_cuda(3);
+		// TODO systematic version of it
+		//benchmark_iterative_pcg_code_systematic_cuda(1); // parameter: depth (how much do we recurse)
+		//benchmark_iterative_pcg_code_systematic_cuda(2);
+		//benchmark_iterative_pcg_code_systematic_cuda(3);
 
 		// For PCG, we want to compute G\Delta\e
 		// this is the one for paper benchmarks with optimized out permutation
 		benchmark_iterative_pcg_code_cuda_optimizedoutperm(1); // parameter: depth (how much do we recurse)
 		benchmark_iterative_pcg_code_cuda_optimizedoutperm(2);
 		benchmark_iterative_pcg_code_cuda_optimizedoutperm(3);
+		// TODO systematic
+		//benchmark_iterative_pcg_code_systematic_cuda_optimizedoutperm(1); // parameter: depth (how much do we recurse)
+		//benchmark_iterative_pcg_code_systematic_cuda_optimizedoutperm(2);
+		//benchmark_iterative_pcg_code_systematic_cuda_optimizedoutperm(3);
+
+		// TODO expand accumulate codes
+		benchmark_expand_accumulate_cuda();
+
+		// TODO repeat accumulate
+		// benchmark_repeat_accumulate_cuda();
 
 		//
 		// DIFFERENT TESTS
