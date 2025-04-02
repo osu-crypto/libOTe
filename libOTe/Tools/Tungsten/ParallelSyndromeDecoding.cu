@@ -2615,7 +2615,8 @@ namespace osuCrypto {
 		int tid = blockIdx.x * blockDim.x + threadIdx.x;
 		if (tid < w) {
 			unsigned int hash = xorshifthash(seed ^ tid);
-			out[tid] = hash & (n - 1); // modulo when n is a power of 2
+			//out[tid] = hash & (n - 1); // modulo when n is a power of 2
+			out[tid] = hash % n;
 		}
 	}
 
@@ -2694,11 +2695,6 @@ namespace osuCrypto {
 			throw std::invalid_argument("x (Delta * e) should be of size n");
 		}
 
-		// ensure n is a power of 2
-		if ((n & (n - 1)) != 0) {
-			throw std::invalid_argument("n should be a power of 2");
-		}
-
 		//
 		// accumulate (with thrust's inclusive scan)
 		//
@@ -2749,9 +2745,8 @@ namespace osuCrypto {
 		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
 
 		constexpr int k = 1 << 20; // 2^20
-		constexpr int n = 1 << 21; // 2^21
+		constexpr int n = 5 * k; // 2 * k is insecure for expand accumulate
 		int w = ceil(2.3 * std::log2(n)); // expand accumulate's most aggressive param for provable security
-		std::wcout << "w " << w << std::endl;
 
 		int e = n / k;
 
