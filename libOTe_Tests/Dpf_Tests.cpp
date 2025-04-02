@@ -343,7 +343,7 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 	tags[0].resize(numPoints, domain);
 	tags[1].resize(numPoints, domain);
 
-	std::array<RegularDpfKey, 2> key, key2;
+	std::array<RegularDpfKey, 2> key, key2, key3;
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 
@@ -351,26 +351,52 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 	block seed0 = prng.get();
 	block seed1 = prng.get();
 
+	// generate the keys using MPC
 	macoro::sync_wait(macoro::when_all_ready(
 		dpf[0].keyGen(points0, values0, seed0, key[0], sock[0]),
 		dpf[1].keyGen(points1, values1, seed1, key[1], sock[1])
 	));
 
+
+
+
+
+
+	// real code should use:
+	//     prng.SetSeed(sysRandomSeed());
 	prng.SetSeed(block(214234, 2341234));
+
+	// generate the seeds.
 	RegularDpf::keyGen(domain, span<u64>(points), span<block>(values), prng, span<RegularDpfKey>(key2));
 
-
 	if (key[0] != key2[0])
-	{
-		std::cout << key[0] << std::endl;
-		std::cout << key2[0] << std::endl;
 		throw RTE_LOC;
-	}
 	if (key[1] != key2[1])
 		throw RTE_LOC;
-	RegularDpf::expand(0, domain, key2[0], [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; });
-	RegularDpf::expand(1, domain, key2[1], [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; });
 
+	// serialize the seeds.
+	std::vector<u8> buff0(key2[0].sizeBytes());
+	std::vector<u8> buff1(key2[1].sizeBytes());
+	key2[0].toBytes(buff0);
+	key2[1].toBytes(buff1);
+
+	// send buffer...
+	// deserialize
+	key3[0].resize(domain, numPoints, true);
+	key3[1].resize(domain, numPoints, true);
+	key3[0].fromBytes(buff0);
+	key3[1].fromBytes(buff1);
+
+	if (key[0] != key3[0])
+		throw RTE_LOC;
+	if (key[1] != key3[1])
+		throw RTE_LOC;
+
+	// expand the dpf
+	RegularDpf::expand(0, domain, key3[0], [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; });
+	RegularDpf::expand(1, domain, key3[1], [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; });
+
+	// check the results
 	for (u64 i = 0; i < domain; ++i)
 	{
 		for (u64 k = 0; k < numPoints; ++k)
