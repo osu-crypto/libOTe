@@ -2414,10 +2414,10 @@ namespace osuCrypto {
 	}
 
 
-	void benchmark_iterative_pcg_code_cuda(int depth) {
+	void benchmark_heuristic_realpermutation(int depth) {
 
 		// G is binary, Delta e is 128-bit (ulonglong2)
-		std::cout << "Computing G[Delta e] for depth " << depth << "..." << std::endl;
+		std::cout << "Computing heuristic, real perm, for depth " << depth << "..." << std::endl;
 
 		// Set up pseudorandom generator for generating x
 		std::mt19937 rngcpu32(std::random_device{}()); // 32-bit random number generator
@@ -2512,11 +2512,10 @@ namespace osuCrypto {
 	}
 
 
-	void benchmark_iterative_pcg_code_cuda_optimizedoutperm(int depth) {
+	void benchmark_heuristic_optimizedpermutation(int depth) {
 
 		// G is binary, Delta e is 128-bit (ulonglong2)
-		std::cout << "Computing G[Delta e] for depth " << depth << 
-			" with permutation optimized out..." << std::endl;
+		std::cout << "Computing heuristic, optimized out perm, for depth " << depth << std::endl;
 
 		// Set up pseudorandom generator for generating the blocks (xorshift)
 		std::mt19937 rngcpu32(std::random_device{}()); // 32-bit random number generator
@@ -2737,7 +2736,7 @@ namespace osuCrypto {
 	void benchmark_expand_accumulate_cuda() {
 
 		// G is binary, Delta e is 128-bit (ulonglong2)
-		std::cout << "Computing G[Delta e] where G is expand accumulate " << std::endl;
+		std::cout << "Computing expand accumulate..." << std::endl;
 
 		// Set up pseudorandom generator for generating x
 		std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
@@ -2746,7 +2745,8 @@ namespace osuCrypto {
 
 		constexpr int k = 1 << 20; // 2^20
 		constexpr int n = 5 * k; // 2 * k is insecure for expand accumulate
-		int w = ceil(2.3 * std::log2(n)); // expand accumulate's most aggressive param for provable security
+		int w = ceil(2.3 * log(n)); // expand accumulate's most aggressive param for provable security
+		                            // note that the log is natural
 
 		int e = n / k;
 
@@ -2772,12 +2772,12 @@ namespace osuCrypto {
 		auto stop = std::chrono::high_resolution_clock::now();
 		std::chrono::duration<double, std::milli> elapsed = stop - start;
 
-		std::cout << "Time to compute G[Delta e] expand-accumulate CUDA implementation with "
+		std::cout << "Time to compute expand-accumulate with "
 			<< " k: " << k
 			<< " n: " << n
-			<< "is " << elapsed.count() << " ms" << std::endl;
-		std::cout << "NOTE The number above DOES include the cost to initialize the matrix G "
-			" and it generates the matrix elements on the fly." << std::endl;
+			<< " w: " << w
+			<< " is " << elapsed.count() << " ms" << std::endl;
+		std::cout << "NOTE The number above DOES include the cost to generate randomness." << std::endl;
 	}
 
 	void test_feistel_shuffle() {
@@ -2855,6 +2855,7 @@ namespace osuCrypto {
 		// Benchmark different permutations
 		benchmark_permutations();
 
+		/*
 		std::cout << "BENCHMARKING OUR CODES:" << std::endl;
 
 		// benchmark code cuda (non recursive) with fixed sigma
@@ -2870,42 +2871,45 @@ namespace osuCrypto {
 		// this is the approach we want to use
 		benchmark_iterative_code_cuda(2); // parameter: depth (how much do we recurse)
 		benchmark_iterative_code_cuda(3);
+		*/
 
 		//
 		// Below are benchmarks for our paper
 		//
+		std::cout << "BENCHMARKS FOR OUR PAPER: " << std::endl;
 
-		// The code above computes xG
+		// The codes above computes xG
 		// For PCG, we want to compute G\Delta\e
-		// this is the one for paper benchmarks with real permutation
-		benchmark_iterative_pcg_code_cuda(1); // parameter: depth (how much do we recurse)
-		benchmark_iterative_pcg_code_cuda(2);
-		benchmark_iterative_pcg_code_cuda(3);
-		// TODO systematic version of it
-		//benchmark_iterative_pcg_code_systematic_cuda(1); // parameter: depth (how much do we recurse)
-		//benchmark_iterative_pcg_code_systematic_cuda(2);
-		//benchmark_iterative_pcg_code_systematic_cuda(3);
 
-		// For PCG, we want to compute G\Delta\e
-		// this is the one for paper benchmarks with optimized out permutation
-		benchmark_iterative_pcg_code_cuda_optimizedoutperm(1); // parameter: depth (how much do we recurse)
-		benchmark_iterative_pcg_code_cuda_optimizedoutperm(2);
-		benchmark_iterative_pcg_code_cuda_optimizedoutperm(3);
-		// TODO systematic
-		//benchmark_iterative_pcg_code_systematic_cuda_optimizedoutperm(1); // parameter: depth (how much do we recurse)
-		//benchmark_iterative_pcg_code_systematic_cuda_optimizedoutperm(2);
-		//benchmark_iterative_pcg_code_systematic_cuda_optimizedoutperm(3);
+		// TODO non-heuristic, real permutation
+		// TODO systematic, non-heuristic, real permutation
+		// TODO non-heuristic, optimized out permutation
+		// TODO systematic, non-heuristic, optimized out permutation
+				
+		// heuristic, real permutation
+		benchmark_heuristic_realpermutation(1); // parameter: depth (how much do we recurse)
+		benchmark_heuristic_realpermutation(2); // parameter: depth (how much do we recurse)
+		benchmark_heuristic_realpermutation(3); // parameter: depth (how much do we recurse)
 
-		// TODO expand accumulate codes
+		// TODO systematic, heuristic, real permutation
+
+		// heuristic, optimized out permutation
+		benchmark_heuristic_optimizedpermutation(1); // parameter: depth (how much do we recurse)
+		benchmark_heuristic_optimizedpermutation(2); // parameter: depth (how much do we recurse)
+		benchmark_heuristic_optimizedpermutation(3); // parameter: depth (how much do we recurse)
+
+		// TODO systematic, heuristic, optimized out permutation
+
+		// Expand accumulate codes
 		benchmark_expand_accumulate_cuda();
 
-		// TODO repeat accumulate
-		// benchmark_repeat_accumulate_cuda();
+		// TODO Repeat-accumulate codes
+		//benchmark_repeat_accumulate_cuda();
 
 		//
 		// DIFFERENT TESTS
 		//
-
+		/*
 		// test block multiply with thrust and cuda
 		test_thrust_block_multiply();
 		test_cuda_block_multiply();
@@ -2917,6 +2921,7 @@ namespace osuCrypto {
 		// Shuffle, split vector into equal sized blocks and shuffle each
 		// Use this shuffle
 		test_feistel_shuffle();
+		*/
 	}
 
 } // namespace osuCrypto
