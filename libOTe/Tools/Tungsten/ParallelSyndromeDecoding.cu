@@ -2227,14 +2227,19 @@ namespace osuCrypto {
 
 
 	template <typename T>
-	thrust::device_ptr<T> iterative_pcg_code_cuda_templated(
+	thrust::device_ptr<T> ourcode_heuristic_realpermutation(
 		thrust::device_vector<T>& x, // Delta * e
 		std::vector<int>& sigma,
 		std::vector<int>& perm_blocksize_idx,
 		int k,
+		int n,
 		int e,
 		std::mt19937& rngcpu, // 32-bit random number generator
 		std::uniform_int_distribution<uint32_t>& dist) {
+
+		if (k * e != n) {
+			throw std::invalid_argument("invalid k,n,e combination");
+		}
 
 		int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
 		int num_iters = (1 << depth) - 1; // 2^depth - 1
@@ -2249,7 +2254,6 @@ namespace osuCrypto {
 		//             same-size pieces of some size and shuffle each piece (in 1 kernel)
 		// Each iteration invokes 2 followed by 1
 
-		int n = k * e;
 		int mul_sigma = sigma[depth]; // all multiplications are done with sigma[depth]
 		int equal_t = n / mul_sigma; // t for all but the last compressing step
 		int compress_t = k / mul_sigma; // t for last compressing step
@@ -2326,16 +2330,132 @@ namespace osuCrypto {
 		return results;
 	}
 
+	template <typename T>
+	thrust::device_ptr<T> ourcode_nonheuristic_realpermutation(
+		thrust::device_vector<T>& x, // Delta * e
+		int sigma,
+		int num_mulperm,
+		int k,
+		int n,
+		int e,
+		std::mt19937& rngcpu, // 32-bit random number generator for xorshift in multiply
+		std::uniform_int_distribution<uint32_t>& dist) {
+
+		// NOTE this function is almost identical to the heuristic version.
+		// The main difference is we can directly use thrust::shuffle instead of our kernel
+		// which splits the vector into same-size blocks, and shuffles each block with feistel bijection
+		// note that the loop iterates over slightly different things (semantically, looks almost the same). 
+		// the nonheuristic one
+		// iterates over #perm-multiplies, whereas the heuristic one is on the outside just one 
+		// permute-multiplies, but iterates over the recursive steps
+		// On the outside, it looks almost the same
+
+		if (k * e != n) {
+			throw std::invalid_argument("invalid k,n,e combination");
+		}
+
+		// Set up a random number generator for thrust::shuffle
+		unsigned int seed = static_cast<unsigned int>(time(0)); // Random seed
+		thrust::default_random_engine rng(seed);
+
+		// We use 2 operations (1 cuda kernel and 1 thrust function)
+		// Iterate and keep doing one after the other these 2 operations:
+		// 1. Multiply a vector x = x1,...,xt by a bunch of base size blocks G=G1,...,Gt, 
+		//                      where t=n/sigma or t=k/sigma)
+		// 2. Thrust Shuffle
+		// Each iteration invokes 1 followed by 2
+
+		int num_mulperm_minus_one = num_mulperm - 1; // we use several times
+
+		int equal_t = n / sigma; // t for all but the last compressing step
+		int compress_t = k / sigma; // t for last compressing step
+
+		GeneratorMatrixMeta matrix_meta_equal;
+		initialize_matrix_meta_expandorequal(matrix_meta_equal, sigma, 1, equal_t); // e=1 means non-expanding
+
+		GeneratorMatrixMeta matrix_meta_compress;
+		initialize_matrix_meta_compress(matrix_meta_compress, sigma, e, compress_t); // compress by e 
+
+		// Each iteration (except first) will use one vector as input and the other as result
+		// all but compressing step: one is 0...n and the other n...2n
+		// compressing step: we either fill 0...k or n...(n+k)
+		//thrust::device_vector<T> results(2 * n);
+		T* result_ptr;
+		cudaMalloc(reinterpret_cast<void**>(&result_ptr), sizeof(T) * (2 * n));
+		thrust::device_ptr<T> results = thrust::device_pointer_cast(result_ptr);
+
+		// First multiplication separate because it uses x as input
+		sparse_vector_matrix_mul_with_init_host_templated<T>(
+			x.data(),
+			results,
+			matrix_meta_equal,
+			rngcpu,
+			dist);
+
+		//
+		// Do all but the last compressing permute-multiply (on n-size vectors)
+		//
+
+		for (size_t iter = 0; iter < num_mulperm_minus_one; ++iter) {
+
+			// Shuffle
+			thrust::shuffle(
+				results + (iter & 1) * n,
+				results + (iter & 1) * n + n,
+				rng
+			);
+
+			// Multiply
+			sparse_vector_matrix_mul_with_init_host_templated<T>(
+				results + (iter & 1) * n, // iter % 2
+				results + ((~iter) & 1) * n, // (iter+1) % 2
+				matrix_meta_equal,
+				rngcpu,
+				dist);
+		}
+
+		//
+		// Do the last compressing iteration (shuffle and compress to size k)
+		//
+
+		// Shuffle
+		thrust::shuffle(
+			results + (num_mulperm_minus_one & 1) * n,
+			results + (num_mulperm_minus_one & 1) * n + n,
+			rng
+		);
+
+		// Multiply (compress to size n->k)
+		sparse_vector_matrix_mul_with_init_host_templated<T>(
+			results + (num_mulperm_minus_one & 1) * n, // n size
+			results + ((~num_mulperm_minus_one) & 1) * n, // k size
+			matrix_meta_compress,
+			rngcpu,
+			dist);
+
+		// return pointer to index 0 or n in results 
+		// (the output is in first k elements from the pointer):
+		//return results + ((~num_iters_minus_one) & 1) * n;
+		// Just return the beginning of results and let the client retrieve the correct part
+		// so that i can easily cudaFree (cannot be offset)
+		return results;
+	}
+
 
 	template <typename T>
-	thrust::device_ptr<T> iterative_pcg_code_cuda_optimizedoutperm_templated(
+	thrust::device_ptr<T> ourcode_heuristic_optimizedpermutation(
 		thrust::device_vector<T>& x, // Delta * e
 		std::vector<int>& sigma,
 		std::vector<int>& perm_blocksize_idx,
 		int k,
+		int n,
 		int e,
 		std::mt19937 &rngcpu, // 32-bit random number generator
 		std::uniform_int_distribution<uint32_t> &dist) {
+
+		if (k * e != n) {
+			throw std::invalid_argument("invalid k,n,e combination");
+		}
 
 		int depth = sigma.size() - 1; // remember sigma includes n at sigma[0]
 		int num_iters = (1 << depth) - 1; // 2^depth - 1
@@ -2350,7 +2470,6 @@ namespace osuCrypto {
 		//             same-size pieces of some size and shuffle each piece (in 1 kernel)
 		// Each iteration invokes 2 followed by 1
 
-		int n = k * e;
 		int mul_sigma = sigma[depth]; // all multiplications are done with sigma[depth]
 		int equal_t = n / mul_sigma; // t for all but the last compressing step
 		int compress_t = k / mul_sigma; // t for last compressing step
@@ -2414,11 +2533,11 @@ namespace osuCrypto {
 	}
 
 
-	void benchmark_ourcode_realpermutation(int depth) {
+	void benchmark_ourcode_heuristic_realpermutation(int depth) {
 
 		// G is binary, Delta e is 128-bit (ulonglong2)
 		std::cout << "Computing " 
-			<<  ((depth > 1) ? "heuristic" : "nonheuristic")
+			<<  ((depth > 1) ? "heuristic" : "nonheuristic (but in heuristic function)")
 			<< ", real perm, for depth " << depth << "..." << std::endl;
 
 		// Set up pseudorandom generator for xorshift seeds
@@ -2487,11 +2606,12 @@ namespace osuCrypto {
 		auto start = std::chrono::high_resolution_clock::now();
 
 		// d_result equals \G\Delta\e
-		thrust::device_ptr<ulonglong2> d_result = iterative_pcg_code_cuda_templated<ulonglong2>(
+		thrust::device_ptr<ulonglong2> d_result = ourcode_heuristic_realpermutation<ulonglong2>(
 			d_x,
 			sigmas,
 			perm_blocksize_idx,
 			k,
+			n,
 			e,
 			rngcpu32,
 			dist32
@@ -2513,11 +2633,89 @@ namespace osuCrypto {
 	}
 
 
-	void benchmark_ourcode_optimizedpermutation(int depth) {
+	void benchmark_ourcode_nonheuristic_realpermutation(int num_mulperm) {
+
+		// G is binary, Delta e is 128-bit (ulonglong2)
+		std::cout << "Computing nonheuristic, real perm, with " << num_mulperm 
+			<< " multiply-permutes..." << std::endl;
+
+		// Set up pseudorandom generator for xorshift seeds
+		std::mt19937 rngcpu32(std::random_device{}()); // 32-bit random number generator
+		// Uniform distribution over [0, UINT32_MAX]
+		std::uniform_int_distribution<uint32_t> dist32(0, std::numeric_limits<uint32_t>::max());
+
+		// Set up pseudorandom generator for generating x
+		std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
+		// Uniform distribution over [0, UINT64_MAX]
+		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
+
+		constexpr int k = 1 << 20; // 2^20
+		constexpr int n = 1 << 21; // 2^21
+
+		int sigma;
+		// note these are ceilings to next power of 2
+		if (num_mulperm == 1) {
+			sigma = 2048; // ~2sqrt(k)
+		}
+		else if (num_mulperm == 2) {
+			sigma = 256; // ~2cubert(k)
+		}
+		else if (num_mulperm == 3) {
+			sigma = 64; // ~2fourthrt(k)
+		}
+		else if (num_mulperm == 4) {
+			sigma = 32; // ~2fifthrt(k)
+		}
+		else {
+			throw std::runtime_error("need to define sigma for > 4 multiply-permutes..."
+				"Note that the cuda kernel processes 32 rows at a time so cannot have a smaller sigma");
+		}
+
+		int e = n / k;
+
+		if (k * e != n) throw std::runtime_error("invalid k, n");
+		if (e <= 1) throw std::runtime_error("needs to be expanding");
+
+		std::vector<ulonglong2> h_x(n); // h_x is the [Delta * e]
+		for (auto& val : h_x) {
+			val = make_ulonglong2(dist(rngcpu), dist(rngcpu));
+		}
+		thrust::device_vector<ulonglong2> d_x = h_x; // move the [Delta e] on the device
+
+		auto start = std::chrono::high_resolution_clock::now();
+
+		// d_result equals \G\Delta\e
+		thrust::device_ptr<ulonglong2> d_result = ourcode_nonheuristic_realpermutation<ulonglong2>(
+			d_x,
+			sigma,
+			num_mulperm,
+			k,
+			n,
+			e,
+			rngcpu32,
+			dist32
+		);
+
+		auto stop = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double, std::milli> elapsed = stop - start;
+
+		cudaFree(thrust::raw_pointer_cast(d_result));
+
+		std::cout << "Time to compute our code with "
+			<< " k: " << k
+			<< " n: " << n
+			<< " sigma: " << sigma
+			<< " num_mulperm: " << num_mulperm
+		    << " is " << elapsed.count() << " ms" << std::endl;
+		std::cout << "NOTE The number above DOES include generating randomness on the fly." << std::endl;
+	}
+
+
+	void benchmark_ourcode_heuristic_optimizedpermutation(int depth) {
 
 		// G is binary, Delta e is 128-bit (ulonglong2)
 		std::cout << "Computing "
-			<< ((depth > 1) ? "heuristic" : "nonheuristic")
+			<< ((depth > 1) ? "heuristic" : "nonheuristic (but in heuristic function)")
 			<< ", optimized out perm, for depth " << depth << "..." << std::endl;
 
 		// Set up pseudorandom generator for generating the blocks (xorshift)
@@ -2586,11 +2784,12 @@ namespace osuCrypto {
 		auto start = std::chrono::high_resolution_clock::now();
 
 		// d_result equals \G\Delta\e
-		thrust::device_ptr<ulonglong2> d_result = iterative_pcg_code_cuda_optimizedoutperm_templated<ulonglong2>(
+		thrust::device_ptr<ulonglong2> d_result = ourcode_heuristic_optimizedpermutation<ulonglong2>(
 			d_x,
 			sigmas,
 			perm_blocksize_idx,
 			k,
+			n,
 			e,
 			rngcpu32,
 			dist32
@@ -2977,14 +3176,13 @@ namespace osuCrypto {
 		// For PCG, we want to compute G\Delta\e
 				
 		// real permutation
-		// TODO
-		//benchmark_ourcode_nonheuristic_realpermutation(1); // nonheuristic, parameter: #multiply-permutes
-		//benchmark_ourcode_nonheuristic_realpermutation(2); // nonheuristic, parameter: #multiply-permutes
-		//benchmark_ourcode_nonheuristic_realpermutation(3); // nonheuristic, parameter: #multiply-permutes
-		//benchmark_ourcode_nonheuristic_realpermutation(4); // nonheuristic, parameter: #multiply-permutes
-		benchmark_ourcode_realpermutation(1); // nonheuristic, parameter: depth (how much do we recurse)
-		benchmark_ourcode_realpermutation(2); // heuristic, parameter: depth (how much do we recurse)
-		benchmark_ourcode_realpermutation(3); // heuristic, parameter: depth (how much do we recurse)
+		benchmark_ourcode_nonheuristic_realpermutation(1); // nonheuristic, parameter: #multiply-permutes
+		benchmark_ourcode_nonheuristic_realpermutation(2); // nonheuristic, parameter: #multiply-permutes
+		benchmark_ourcode_nonheuristic_realpermutation(3); // nonheuristic, parameter: #multiply-permutes
+		benchmark_ourcode_nonheuristic_realpermutation(4); // nonheuristic, parameter: #multiply-permutes
+		benchmark_ourcode_heuristic_realpermutation(1); // same as nonheuristic, parameter: depth (how much do we recurse)
+		benchmark_ourcode_heuristic_realpermutation(2); // heuristic, parameter: depth (how much do we recurse)
+		benchmark_ourcode_heuristic_realpermutation(3); // heuristic, parameter: depth (how much do we recurse)
 
 		// TODO systematic, real permutation
 		// nonheuristic
@@ -2993,9 +3191,9 @@ namespace osuCrypto {
 
 		// optimized out permutation
 		// TODO add nonheuristic with different number of multiply-permutes
-		benchmark_ourcode_optimizedpermutation(1); // nonheuristic, parameter: depth (how much do we recurse)
-		benchmark_ourcode_optimizedpermutation(2); // heuristic, parameter: depth (how much do we recurse)
-		benchmark_ourcode_optimizedpermutation(3); // heuristic, parameter: depth (how much do we recurse)
+		benchmark_ourcode_heuristic_optimizedpermutation(1); // same as nonheuristic, parameter: depth (how much do we recurse)
+		benchmark_ourcode_heuristic_optimizedpermutation(2); // heuristic, parameter: depth (how much do we recurse)
+		benchmark_ourcode_heuristic_optimizedpermutation(3); // heuristic, parameter: depth (how much do we recurse)
 
 		// TODO systematic, optimized out permutation
 
