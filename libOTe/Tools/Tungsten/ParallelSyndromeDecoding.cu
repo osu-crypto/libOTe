@@ -1957,10 +1957,10 @@ namespace osuCrypto {
 		constexpr int n = 1 << 21; // 2^21
 		std::vector<int> sigmas;
 		if (depth == 2) {
-			sigmas = { n, 2048, 128 }; // ~2sqrt(n)
+			sigmas = { n, 2048, 128 }; // ~2sqrt(k)
 		}
 		else if (depth == 3) {
-			sigmas = { n, 2048, 128, 32 }; // ~2sqrt(n)
+			sigmas = { n, 2048, 128, 32 }; // ~2sqrt(k)
 		}
 		else {
 			throw std::runtime_error("need to define sigma vector to run for depth > 3");
@@ -2228,7 +2228,7 @@ namespace osuCrypto {
 
 	template <typename T>
 	thrust::device_ptr<T> ourcode_heuristic_realpermutation(
-		thrust::device_vector<T>& x, // Delta * e
+		thrust::device_ptr<T> x, // Delta * e
 		std::vector<int>& sigma,
 		std::vector<int>& perm_blocksize_idx,
 		int k,
@@ -2275,7 +2275,7 @@ namespace osuCrypto {
 
 		// First multiplication separate because it uses x as input
 		sparse_vector_matrix_mul_with_init_host_templated<T>(
-			x.data(),
+			x,
 			results,
 			matrix_meta_equal,
 			rngcpu,
@@ -2332,7 +2332,7 @@ namespace osuCrypto {
 
 	template <typename T>
 	thrust::device_ptr<T> ourcode_nonheuristic_realpermutation(
-		thrust::device_vector<T>& x, // Delta * e
+		thrust::device_ptr<T> x, // Delta * e
 		int sigma,
 		int num_mulperm,
 		int k,
@@ -2386,7 +2386,7 @@ namespace osuCrypto {
 
 		// First multiplication separate because it uses x as input
 		sparse_vector_matrix_mul_with_init_host_templated<T>(
-			x.data(),
+			x,
 			results,
 			matrix_meta_equal,
 			rngcpu,
@@ -2397,7 +2397,7 @@ namespace osuCrypto {
 		//
 
 		for (size_t iter = 0; iter < num_mulperm_minus_one; ++iter) {
-
+			
 			// Shuffle
 			thrust::shuffle(
 				results + (iter & 1) * n,
@@ -2444,7 +2444,7 @@ namespace osuCrypto {
 
 	template <typename T>
 	thrust::device_ptr<T> ourcode_heuristic_optimizedpermutation(
-		thrust::device_vector<T>& x, // Delta * e
+		thrust::device_ptr<T> x, // Delta * e
 		std::vector<int>& sigma,
 		std::vector<int>& perm_blocksize_idx,
 		int k,
@@ -2489,7 +2489,7 @@ namespace osuCrypto {
 
 		// First multiplication (and shuffle) separate because it uses x as input
 		sparse_vector_matrix_mul_with_init_optimizedoutperm_host_templated<T>(
-			x.data(),
+			x,
 			results,
 			sigma[perm_blocksize_idx[0]],
 			matrix_meta_equal,
@@ -2558,13 +2558,13 @@ namespace osuCrypto {
 			sigmas = { n, 2048 };
 		}
 		else if (depth == 2) {
-			sigmas = { n, 2048, 128 }; // ~2sqrt(n)
+			sigmas = { n, 2048, 128 }; // ~2sqrt(k)
 		}
 		else if (depth == 3) {
-			sigmas = { n, 2048, 128, 32 }; // ~2sqrt(n)
+			sigmas = { n, 2048, 128, 32 }; // ~2sqrt(k)
 		}
 		//else if (depth == 4) {
-		//	sigmas = { n, 2048, 128, 32, 16 }; // ~2sqrt(n)
+		//	sigmas = { n, 2048, 128, 32, 16 }; // ~2sqrt(k)
 		//}
 		else {
 			throw std::runtime_error("need to define sigma vector to run for depth > 4."
@@ -2607,7 +2607,7 @@ namespace osuCrypto {
 
 		// d_result equals \G\Delta\e
 		thrust::device_ptr<ulonglong2> d_result = ourcode_heuristic_realpermutation<ulonglong2>(
-			d_x,
+			d_x.data(),
 			sigmas,
 			perm_blocksize_idx,
 			k,
@@ -2686,7 +2686,7 @@ namespace osuCrypto {
 
 		// d_result equals \G\Delta\e
 		thrust::device_ptr<ulonglong2> d_result = ourcode_nonheuristic_realpermutation<ulonglong2>(
-			d_x,
+			d_x.data(),
 			sigma,
 			num_mulperm,
 			k,
@@ -2733,16 +2733,16 @@ namespace osuCrypto {
 
 		std::vector<int> sigmas;
 		if (depth == 1) {
-			sigmas = { n, 2048 }; // ~2sqrt(n), nonheuristic (i.e. not recursive)
+			sigmas = { n, 2048 }; // ~2sqrt(k), nonheuristic (i.e. not recursive)
 		}
 		else if (depth == 2) {
-			sigmas = { n, 2048, 128 }; // ~2sqrt(n)
+			sigmas = { n, 2048, 128 }; // ~2sqrt(k)
 		}
 		else if (depth == 3) {
-			sigmas = { n, 2048, 128, 32 }; // ~2sqrt(n)
+			sigmas = { n, 2048, 128, 32 }; // ~2sqrt(k)
 		}
 		//else if (depth == 4) {
-		//	sigmas = { n, 2048, 128, 32, 16 }; // ~2sqrt(n)
+		//	sigmas = { n, 2048, 128, 32, 16 }; // ~2sqrt(k)
 		//}
 		else {
 			throw std::runtime_error("need to define sigma vector to run for depth > 3."
@@ -2785,7 +2785,7 @@ namespace osuCrypto {
 
 		// d_result equals \G\Delta\e
 		thrust::device_ptr<ulonglong2> d_result = ourcode_heuristic_optimizedpermutation<ulonglong2>(
-			d_x,
+			d_x.data(),
 			sigmas,
 			perm_blocksize_idx,
 			k,
@@ -3174,7 +3174,7 @@ namespace osuCrypto {
 
 		// The codes above computes xG
 		// For PCG, we want to compute G\Delta\e
-				
+
 		// real permutation
 		benchmark_ourcode_nonheuristic_realpermutation(1); // nonheuristic, parameter: #multiply-permutes
 		benchmark_ourcode_nonheuristic_realpermutation(2); // nonheuristic, parameter: #multiply-permutes
