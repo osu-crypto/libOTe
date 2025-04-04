@@ -623,6 +623,15 @@ namespace osuCrypto {
 		return r;
 	}
 
+	// Define a functor that XORs two T (including ulonglong2) values
+	template <typename T>
+	struct generic_xor {
+		__host__ __device__
+			T operator()(const T& a, const T& b) const {
+			return a ^ b;
+		}
+	};
+
 
 	__device__ __host__ inline ulonglong2 operator&(const ulonglong2& a, const ulonglong2& b) {
 		return make_ulonglong2(a.x & b.x, a.y & b.y);
@@ -2441,6 +2450,42 @@ namespace osuCrypto {
 		return results;
 	}
 
+	template <typename T>
+	thrust::device_ptr<T> ourcode_nonheuristic_systematic_realpermutation(
+		thrust::device_ptr<T> x, // Delta * e
+		int sigma,
+		int num_mulperm,
+		int k,
+		int n,
+		std::mt19937& rngcpu, // 32-bit random number generator for xorshift in multiply
+		std::uniform_int_distribution<uint32_t>& dist) {
+
+		// Run on x from index k to n (thus size n-k and compress to k)
+		// result is at: d_result + ((~(num_mulperm - 1)) & 1) * (n - k)
+		thrust::device_ptr<T> d_result = ourcode_nonheuristic_realpermutation<T>(
+			x + k,
+			sigma,
+			num_mulperm,
+			k,
+			n - k,
+			(n - k) / k,
+			rngcpu,
+			dist
+		);
+
+		// XOR in the first k elements of x
+		thrust::device_ptr<T> d_result_start = d_result + ((~(num_mulperm - 1)) & 1) * (n - k);
+		thrust::transform(d_result_start,
+						  d_result_start + k,
+						  x, 
+						  d_result_start, 
+			              generic_xor<T>());
+
+		// remember I need to return d_result pointing to the beginning so that i can free easily
+		// so client needs to figure out where it starts (d_result_start)
+		return d_result;
+	}
+
 
 	template <typename T>
 	thrust::device_ptr<T> ourcode_heuristic_optimizedpermutation(
@@ -2711,6 +2756,84 @@ namespace osuCrypto {
 	}
 
 
+	void benchmark_ourcode_nonheuristic_systematic_realpermutation(int num_mulperm) {
+		// TODO
+		// G is binary, Delta e is 128-bit (ulonglong2)
+		std::cout << "Computing nonheuristic, real perm, systematic, with " << num_mulperm
+			<< " multiply-permutes..." << std::endl;
+
+		// Set up pseudorandom generator for xorshift seeds
+		std::mt19937 rngcpu32(std::random_device{}()); // 32-bit random number generator
+		// Uniform distribution over [0, UINT32_MAX]
+		std::uniform_int_distribution<uint32_t> dist32(0, std::numeric_limits<uint32_t>::max());
+
+		// Set up pseudorandom generator for generating x
+		std::mt19937_64 rngcpu(std::random_device{}()); // 64-bit random number generator
+		// Uniform distribution over [0, UINT64_MAX]
+		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
+
+		constexpr int k = 1 << 20; // 2^20
+		constexpr int n = 1 << 21; // 2^21
+
+		int sigma;
+		// note these are ceilings to next power of 2
+		// TODO Figure out the right sigma for systematic!!
+		if (num_mulperm == 1) {
+			sigma = 2048; // ~2sqrt(k)
+		}
+		else if (num_mulperm == 2) {
+			sigma = 256; // ~2cubert(k)
+		}
+		else if (num_mulperm == 3) {
+			sigma = 64; // ~2fourthrt(k)
+		}
+		else if (num_mulperm == 4) {
+			sigma = 32; // ~2fifthrt(k)
+		}
+		else {
+			throw std::runtime_error("need to define sigma for > 4 multiply-permutes..."
+				"Note that the cuda kernel processes 32 rows at a time so cannot have a smaller sigma");
+		}
+
+		int e = n / k;
+
+		if (k * e != n) throw std::runtime_error("invalid k, n");
+		if (e <= 1) throw std::runtime_error("needs to be expanding");
+
+		std::vector<ulonglong2> h_x(n); // h_x is the [Delta * e]
+		for (auto& val : h_x) {
+			val = make_ulonglong2(dist(rngcpu), dist(rngcpu));
+		}
+		thrust::device_vector<ulonglong2> d_x = h_x; // move the [Delta e] on the device
+
+		auto start = std::chrono::high_resolution_clock::now();
+
+		// d_result equals \G\Delta\e
+		thrust::device_ptr<ulonglong2> d_result = ourcode_nonheuristic_systematic_realpermutation<ulonglong2>(
+			d_x.data(),
+			sigma,
+			num_mulperm,
+			k,
+			n,
+			rngcpu32,
+			dist32
+		);
+
+		auto stop = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double, std::milli> elapsed = stop - start;
+
+		cudaFree(thrust::raw_pointer_cast(d_result));
+
+		std::cout << "Time to compute our code with "
+			<< " k: " << k
+			<< " n: " << n
+			<< " sigma: " << sigma
+			<< " num_mulperm: " << num_mulperm
+			<< " is " << elapsed.count() << " ms" << std::endl;
+		std::cout << "NOTE The number above DOES include generating randomness on the fly." << std::endl;
+	}
+
+
 	void benchmark_ourcode_heuristic_optimizedpermutation(int depth) {
 
 		// G is binary, Delta e is 128-bit (ulonglong2)
@@ -2873,17 +2996,6 @@ namespace osuCrypto {
 		cudaDeviceSynchronize();
 	}
 
-
-
-	// Define a functor that XORs two T (including ulonglong2) values
-	template <typename T>
-	struct generic_xor {
-		__host__ __device__
-			T operator()(const T& a, const T& b) const {
-			return a ^ b;
-		}
-	};
-
 	template <typename T>
 	thrust::device_vector<T> expand_accumulate(
 		thrust::device_vector<T>& x, // [Delta * e]
@@ -3039,7 +3151,7 @@ namespace osuCrypto {
 
 		constexpr int k = 1 << 20; // 2^20
 		constexpr int n = 2 * k; // TODO figure out
-		int num_accperm = 4; // TODO figure out, number of accumulate-permutes
+		int num_accperm = 3; // TODO figure out, number of accumulate-permutes
 
 		int e = n / k;
 
@@ -3185,9 +3297,13 @@ namespace osuCrypto {
 		benchmark_ourcode_heuristic_realpermutation(3); // heuristic, parameter: depth (how much do we recurse)
 
 		// TODO systematic, real permutation
-		// nonheuristic
-		// heuristic
-		// heuristic
+		// TODO nonheuristic
+		benchmark_ourcode_nonheuristic_systematic_realpermutation(1); // nonheuristic, parameter: #multiply-permutes
+		benchmark_ourcode_nonheuristic_systematic_realpermutation(2); // nonheuristic, parameter: #multiply-permutes
+		benchmark_ourcode_nonheuristic_systematic_realpermutation(3); // nonheuristic, parameter: #multiply-permutes
+		benchmark_ourcode_nonheuristic_systematic_realpermutation(4); // nonheuristic, parameter: #multiply-permutes
+		// TODO heuristic
+		// TODO heuristic
 
 		// optimized out permutation
 		// TODO add nonheuristic with different number of multiply-permutes
