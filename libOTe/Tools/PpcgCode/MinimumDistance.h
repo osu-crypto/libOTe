@@ -8,7 +8,7 @@
 
 #include "BlockEnumerator.h"
 #include "ExpandingBlockEnumerator.h"
-#include "NonrecConvEnumerator.h"
+//#include "NonrecConvEnumerator.h"
 #include "EnumeratorTools.h"
 #include "RepeaterEnumerator.h"
 #include "cryptoTools/Common/Matrix.h"
@@ -18,11 +18,14 @@
 #include <boost/multiprecision/cpp_dec_float.hpp>
 #include <future>
 #include <fstream>
+#include "libOTe/Tools/LDPC/Mtx.h"
+#include "libOTe/Tools/LDPC/Util.h"
+#include "cryptoTools/Crypto/PRNG.h"
 
 namespace osuCrypto
 {
 
-	bool old = false;
+	extern bool old;
 
 	struct LoadingBar
 	{
@@ -143,7 +146,7 @@ namespace osuCrypto
 	}
 
 	template<typename I, typename R>
-	void compute_repeater_distribution(
+	void repeaterEnumerator(
 		span<R> distribution,
 		u64 k,
 		u64 n,
@@ -170,7 +173,7 @@ namespace osuCrypto
 
 		/*// the method below is also correct
 		for (size_t h = 0; h <= n; h++) {
-			// note that for repeater, we do NOT need this loop, but used now for modularity
+			// note that for firstSubcode, we do NOT need this loop, but used now for modularity
 			// NOTE we exclude w=0 from the input x as it would always result in all zeros, so E_{w=0,h=0}=1
 			// but then minimum distance would always be 0 as the distribution would be 1 in the first entry!
 			// in the following iterations we care about w=0 as non-zero input could result in h=0
@@ -197,17 +200,74 @@ namespace osuCrypto
 	}
 
 
-	template<typename I, typename R, typename I2>
-	void compute_block_distribution_opt(
+	template<typename I, typename R, typename Full = int>
+	void accumulateEnumerator(
+		span<const R> inDist,
+		span<R> outDist,
+		bool systematic,
+		u64 k,
+		u64 n,
+		u64 numThreads,
+		const ChooseCache<I>& pascal_triangle,
+		Full&& full = {})
+	{
+
+		for (u64 h = 1; h <= n; ++h)
+		{
+			//out[h] = sum_w (in[w] / (k choose w) ) * enum_{w,h}
+			//         sum_w (in[w] / (k choose w) ) * (n - h choose w/2) (h-1 choose ceil(w/2)-1)
+
+			auto dh = R(0);
+			for (u64 w = 1; w <= k; ++w)
+			{
+				auto hh = systematic ? h - w : h;
+				if (hh > n || hh == 0)
+					continue;
+				auto enumWH = choose_pascal<I>(n - hh, w / 2, pascal_triangle) *
+					choose_pascal<I>(hh - 1, (w + 1) / 2 - 1, pascal_triangle);
+
+				if (inDist.size())
+				{
+					dh += (inDist[w] / choose_pascal<I>(k, w, pascal_triangle)) *
+						enumWH;
+				}
+				else
+					dh += enumWH;
+
+				if constexpr (std::is_same_v<Full, int> == false)
+					full(w, h) = enumWH;
+			}
+
+			outDist[h] = dh;
+		}
+	}
+
+	// optimized block enumerator
+	// 
+	// inputDist: input the input weight distribution, if empty, we assume (w choose k)
+	// outputDist: output distribution.
+	// systematic: replace E_{w,h} with E_{w,h-w}. This should be true
+	//    for the last subcode, e.g. G = (I ||(G1 G2 G3)), then G3 is systematic...
+	// k = input length (inputDist.size() - 1)
+	// n = output length (outputDist.size() - 1)
+	// sigma = the subblock size
+	// numThreads = number of threads to use
+	// pascal_triangle = pascal triangle cache for the integer/floating point type
+	// pascal_triangle2 = pascal triangle cache for the integer type (required for the labeledBallBinCap)
+	// full = either void and then not used, or a matrix of R and the full 
+	//    enumerator is written to it.
+	template<typename I, typename R, typename I2, typename Full = int>
+	void blockEnumerator(
 		span<const R> inputDist,
 		span<R> outputDist,
-		bool sysematic,
+		bool systematic,
 		u64 k,
 		u64 n,
 		u64 sigma,
 		u64 numThreads,
 		const ChooseCache<I>& pascal_triangle,
-		const ChooseCache<I2>& pascal_triangle2)
+		const ChooseCache<I2>& pascal_triangle2,
+		Full&& full = {})
 	{
 
 
@@ -224,7 +284,7 @@ namespace osuCrypto
 		if (numThreads < 1)
 			throw RTE_LOC;
 
-		auto nn = sysematic ? n - k : n;
+		auto nn = systematic ? n - k : n;
 		if (nn % k)
 			throw RTE_LOC;
 
@@ -289,7 +349,7 @@ namespace osuCrypto
 				std::vector<R> cqw(qMax + 1);
 				for (auto w = i; w < k + 1; w += numThreads)
 				{
-					if (sysematic && w == 0)
+					if (systematic && w == 0)
 						continue;
 
 					for (u64 q = 0; q <= qMax; ++q)
@@ -298,15 +358,20 @@ namespace osuCrypto
 						//cqw[q] = v[q] * labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
 					}
 
-					auto hBegin = sysematic ? w : 0;
+					auto hBegin = systematic ? w : 0;
 					for (u64 h_ = hBegin; h_ <= n; ++h_)
 					{
-						u64 h = sysematic ? h_ - w : h_;
+						u64 h = systematic ? h_ - w : h_;
 
 						R enumerator = 0;
 						for (u64 q = 0; q <= qMax; ++q)
 						{
 							enumerator += cqw[q] * choose_pascal<I>(e * sigma * q, h, pascal_triangle);
+						}
+
+						if constexpr (std::is_same_v<Full, int> == false)
+						{
+							full(w, h_) = enumerator;
 						}
 
 						if (inputDist.size())
@@ -328,7 +393,6 @@ namespace osuCrypto
 
 
 						}
-
 						else
 						{
 							Di[h_] += enumerator;
@@ -424,7 +488,7 @@ namespace osuCrypto
 
 			//auto nn = n - k;
 			//std::vector<R> distribution2(nn+1);
-			//compute_block_distribution_opt<I, R>(
+			//blockEnumerator<I, R>(
 			//	span<R>(), distribution2, k, nn, sigma, num_threads, pascal_triangle);
 			//
 			//for (u64 h = 0; h <= n; h++) {
@@ -497,7 +561,7 @@ namespace osuCrypto
 		/*
 		// compute_block_distribution<I, R>()
 		for (size_t h = 0; h <= n; h++) {
-			// note that for repeater, we do NOT need this loop, but used now for modularity
+			// note that for firstSubcode, we do NOT need this loop, but used now for modularity
 			// NOTE we exclude w=0 from the input x as it would always result in all zeros, so E_{w=0,h=0}=1
 			// but then minimum distance would always be 0 as the distribution would be 1 in the first entry!
 			// in the following iterations we care about w=0 as non-zero input could result in h=0
@@ -507,15 +571,92 @@ namespace osuCrypto
 		}*/
 	}
 
-	enum class ExpandType
+	enum class SubcodeType
 	{
+		// Perform a firstSubcode for G1 = (I || I || ...)
 		Repeater,
-		Block
+
+		// Perform a block enumerator for G1 = diag(G11,...,G1q)
+		Block,
+
+		// Perform a systematic enumerator for G1 = ( I || ... )
+		//Systematic,
+
+		Accumulate
 	};
+
+	struct Subcode
+	{
+		SubcodeType mType;
+		u64 mK = 0;
+		u64 mN = 0;
+		u64 mSigma = 0;
+
+		bool mSystematic = 0;
+
+		template<typename I, typename R>
+		void enumerate(
+			std::vector<R>& inDist,
+			std::vector<R>& outDist,
+			u64 numThreads,
+			ChooseCache<I>& pascal_triangle,
+			ChooseCache<Int>& pascal_triangle2)
+		{
+			if (inDist.size() && inDist.size() != mK + 1)
+				throw RTE_LOC;
+
+			if (outDist.size() == 0)
+			{
+				outDist.resize(mN + 1);
+			}
+			else
+			{
+				outDist.resize(mN + 1);
+				std::fill(outDist.begin(), outDist.end(), R(0));
+			}
+
+			switch (mType)
+			{
+			case SubcodeType::Repeater:
+				if (inDist.size())
+					throw std::runtime_error("repeater does not support an input distirbution. " LOCATION);
+
+				repeaterEnumerator<I, R>(outDist, mK, mN, pascal_triangle);
+
+				break;
+			case SubcodeType::Block:
+
+				blockEnumerator<I, R>(
+					inDist,
+					outDist,
+					mSystematic,
+					mK,
+					mN,
+					mSigma,
+					numThreads,
+					pascal_triangle,
+					pascal_triangle2);
+
+				break;
+			case SubcodeType::Accumulate:
+
+				accumulateEnumerator<I, R>(inDist, outDist, mSystematic,
+					mK, mN, numThreads,
+					pascal_triangle);
+				break;
+			default:
+				throw RTE_LOC;
+			}
+		}
+
+	};
+
+
+
 
 	template<typename I, typename R>
 	void compute_expanding_distribution(span<R> distribution,
-		ExpandType expander,
+		SubcodeType expander,
 		u64 k,
 		u64 n,
 		u64 sigma_expander,
@@ -523,11 +664,11 @@ namespace osuCrypto
 		//if (e != (n / k) < 0) {
 		//    throw std::invalid_argument("e is inconsistent with k, n");
 		//}
-		if (expander == ExpandType::Repeater) {
-			// repeater
-			compute_repeater_distribution<I, R>(distribution, k, n, pascal_triangle);
+		if (expander == SubcodeType::Repeater) {
+			// firstSubcode
+			repeaterEnumerator<I, R>(distribution, k, n, pascal_triangle);
 		}
-		else if (expander == ExpandType::Block) {
+		else if (expander == SubcodeType::Block) {
 			// expanding block
 			assert(sigma_expander > 0);
 			assert(sigma_expander <= k);
@@ -778,7 +919,7 @@ namespace osuCrypto
 		{
 			std::vector<R> temp(new_distribution.size());
 			throw RTE_LOC;
-			//compute_block_distribution_opt<I, R>(old_distribution, temp,
+			//blockEnumerator<I, R>(old_distribution, temp,
 			//	n, n, sigma, num_threads, pascal_triangle);
 
 			auto similiar = true;
@@ -839,12 +980,12 @@ namespace osuCrypto
 	}
 
 
-	auto log2_(const Rat& v) {
+	inline auto log2_(const Rat& v) {
 		auto f = v.convert_to<Float>();
 		return boost::multiprecision::log2(f);
 	}
 
-	auto log2_(const Float& f) {
+	inline auto log2_(const Float& f) {
 		return boost::multiprecision::log2(f);
 	}
 
@@ -889,7 +1030,7 @@ namespace osuCrypto
 		{
 			u64 h = 0;
 			for (const auto& d : distribution) {
-				out <<double(h++)/n<< " " << log2_(d) / total /*<< " " << d*/ << std::endl;
+				out << double(h++) / n << " " << log2_(d) / total /*<< " " << d*/ << std::endl;
 			}
 		}
 		else
@@ -918,7 +1059,7 @@ namespace osuCrypto
 					auto val = DL + diff * slope;
 					try {
 
-						out<< double(i) / numPoints <<" " << Float(val) << std::endl;
+						out << double(i) / numPoints << " " << Float(val) << std::endl;
 					}
 					catch (...)
 					{
@@ -945,6 +1086,96 @@ namespace osuCrypto
 		}
 		out << "------------" << std::endl;
 	}
+
+
+	template<typename R>
+	void print_enumerator(
+		MatrixView<R> E,
+		u64 numPoints,
+		std::ostream& out = std::cout) {
+		auto n = E.cols() - 1;
+		auto k = E.rows() - 1;
+		auto e = n / k;
+
+		out << "Printing log2 count enumerator: " << std::endl;
+
+		if (numPoints == 0)
+		{
+			u64 h = 0;
+			for (u64 w = 0; w <= k; ++w)
+			{
+
+				for (u64 h = 0; h <= n; ++h)
+					out << log2_(E(w, h)) << " ";
+				out << std::endl;
+			}
+		}
+		else
+		{
+			u64 wNumPoints = double(numPoints) / e;
+			auto wStep = k / double(numPoints);
+			for (u64 w = 1; w <= wNumPoints; ++w)
+			{
+				auto ww = u64(w * wStep);
+				if (ww > k)
+					continue;
+				out << double(w) / wNumPoints << ": ";
+				auto distribution = E[ww];
+				for (u64 i = 0; i < numPoints; ++i)
+				{
+					try {
+
+						double DS = E.size();
+						auto IPS = static_cast<double>(i) / numPoints;// in [0,1)
+						auto scaled = IPS * DS; // in [0,DS)
+						u64 lowIdx = std::floor(scaled); // in [0,DS)
+						u64 highIdx = std::min<u64>(std::ceil(scaled), distribution.size() - 1); // in [0,DS)
+
+						Float DL = log2_(Float(distribution[lowIdx]));
+						Float DH = log2_(Float(distribution[highIdx]));
+						auto LDS = lowIdx / DS; // in [0,1)
+						auto HDS = highIdx / DS;// in [0,1)
+
+						Float slope = 0;
+						auto d = (HDS - LDS);
+						if (d)
+							slope = (DH - DL) / d;
+
+						auto diff = IPS - LDS;
+						auto val = DL + diff * slope;
+						try {
+
+							out << Float(val) << std::endl;
+						}
+						catch (...)
+						{
+							auto p = [](auto v) {
+								std::stringstream ss;
+								try {
+									ss << v;
+								}
+								catch (...)
+								{
+									ss << "NaN";
+								}
+								return ss.str();
+								};
+							out << p(val) << " = " << p(DL) << " + " << p(diff) << " * " << p(slope)
+								<< ", DL = " << p(distribution[lowIdx]) << std::endl;
+						}
+					}
+					catch (...)
+					{
+						out << "error" << std::endl;
+					}
+				}
+
+				out << std::endl;
+			}
+		}
+		out << "------------" << std::endl;
+	}
+
 	struct OnExit
 	{
 		std::function<void()> mFunc;
@@ -952,7 +1183,7 @@ namespace osuCrypto
 	};
 	template<typename I, typename R>
 	std::vector<R> minimum_distance(
-		ExpandType et, u64 multiplier, u64 num_iters,
+		SubcodeType et, u64 multiplier, u64 num_iters,
 		u64 k, u64 n, u64 sigma, u64 sigma_expander,
 		u64 approximate,
 		u64 num_threads,
@@ -962,7 +1193,7 @@ namespace osuCrypto
 	) {
 		// TODO Assumes G's sigma is the same for all iterations (except expanding step)
 
-		if (!sigma || !k || (!sigma_expander && et == ExpandType::Block))
+		if (!sigma || !k || (!sigma_expander && et == SubcodeType::Block))
 			throw RTE_LOC;
 		if (num_threads < 1)
 			throw RTE_LOC;
@@ -1011,11 +1242,11 @@ namespace osuCrypto
 		 // 2 * (n + 1) space
 		Matrix<R> distributions(2, n + 1);
 
-		loadBar.start((n + 1) * num_iters + (n+1)/2, "Computing distribution");
+		loadBar.start((n + 1) * num_iters + (n + 1) / 2, "Computing distribution");
 		std::jthread printer([] {loadBar.print(); });
 		OnExit oe([&]() {loadBar.cancel(); });
 
-		if (et == ExpandType::Repeater)
+		if (et == SubcodeType::Repeater)
 		{
 			// Compute distribution for the expansion step
 			// Expansion step is slightly different from the iterations
@@ -1028,10 +1259,10 @@ namespace osuCrypto
 		}
 		else
 		{
-			compute_block_distribution_opt<I, R>(
+			blockEnumerator<I, R>(
 				{}, distributions[0], 1,
 				k, n, sigma_expander, num_threads,
-				pascal_triangle, 
+				pascal_triangle,
 				pascal_triangle2);
 
 		}
@@ -1056,7 +1287,8 @@ namespace osuCrypto
 			{
 				if (iter)
 					std::fill(distributions[(iter + 1) % 2].begin(), distributions[(iter + 1) % 2].end(), R(0));
-				compute_block_distribution_opt<I, R>(
+
+				blockEnumerator<I, R>(
 					distributions[iter % 2],
 					distributions[(iter + 1) % 2],
 					false,
@@ -1119,21 +1351,152 @@ namespace osuCrypto
 
 	}
 
-	void benchmarks(const oc::CLP& cmd) try {
+
+	inline double exactMD(span<Subcode> iters, u64 k, u64 n, u64 sigma, PRNG& prng)
+	{
+		if (k == 0 || n == 0)
+			return 0;
+		if (k == n)
+			return sigma;
+		if (k > n)
+			throw RTE_LOC;
 
 
-		//{
-		//	ChooseCache<Int> p(5000);
-		//	auto r = labeledBallBinCap<Int>(18, 99, 44, p);
+		DenseMtx G(k, n);
 
-		//	ChooseCache<Float> pp(5000);
-		//	auto rr = labeledBallBinCap<Float>(18, 99, 44, pp);
+		if ((n - k) % sigma)
+			throw RTE_LOC;
+		auto q = (n - k) / sigma;
 
-		//}
+		DenseMtx Gi;
+		for (u64 i = 0; i < k; i++)
+		{
+			G(i, i) = 1;
 
-		// expander (0: repeater, 1: block expander), 
+
+			auto b = k + (i / sigma) * sigma;
+			auto e = b + sigma;
+			for (u64 j = b; j < e; j++)
+			{
+				G(i, j) = prng.getBit();
+			}
+		}
+
+		std::cout << G << std::endl;
+		return minDist(G, std::thread::hardware_concurrency(), 1);
+		//minDist(G,)
+		return 0;
+	}
+
+
+
+
+	template<typename I, typename R>
+	std::vector<R> composeEnumerator(
+		span<Subcode> subcodes,
+		u64 num_threads,
+		bool verbose, // print the distribution
+		u64 numPoints,  // number of locations to print
+		bool normalizes // normalize the distribution to be a probability distribution when printing
+	) {
+		// TODO Assumes G's sigma is the same for all iterations (except expanding step)
+
+		u64 k = subcodes[0].mK;
+		u64 n = subcodes.back().mN;
+
+		if (num_threads < 1)
+			throw RTE_LOC;
+
+		if (n == k) throw RTE_LOC;
+
+		std::cout << "pascal I ";
+		auto start = std::chrono::steady_clock::now();
+		ChooseCache<I> pascal_triangle(n);
+		auto end = std::chrono::steady_clock::now();
+		auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+		std::cout << elapsed.count() << " ms" << std::endl;
+		start = std::chrono::steady_clock::now();
+		std::cout << "pascal Int ";
+		ChooseCache<Int> pascal_triangle2(n);
+		//auto& pascal_triangle2 = pascal_triangle;
+		end = std::chrono::steady_clock::now();
+		elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+		std::cout << elapsed.count() << " ms" << std::endl;
+
+
+		// 2 * (n + 1) space
+		std::array<std::vector<R>, 2> distributions;// (n + 1);
+
+		loadBar.start((n + 1) * subcodes.size() + (n + 1) / 2, "Computing distribution");
+		std::jthread printer([] {loadBar.print(); });
+		OnExit oe([&]() {loadBar.cancel(); });
+
+		//subcodes[0].enumerator({}, distributions[0], pascal_triangle, pascal_triangle2);
+
+		//print_distribution(distributions[0]);
+
+		// Sum initial distribution
+		R expectedSum = 0;
+		for (size_t w = 1; w <= k; w++) {
+			expectedSum += R(choose_pascal<I>(k, w, pascal_triangle));
+		}
+
+		// Compute distributions for iterations
+		for (size_t iter = 0; iter < subcodes.size(); iter++) {
+			subcodes[iter].enumerate<I, R>(
+				distributions[0],
+				distributions[1],
+				num_threads,
+				pascal_triangle,
+				pascal_triangle2);
+
+			// expand_and_interpolate(distributions[(iter + 1) % 2]);
+
+			// Check the sum of the final distribution is equal to the sum of the initial distribution
+			R sum = std::reduce(distributions[1].begin(), distributions[1].end()); // distribution_sum<R>(distributions[num_iters % 2]);
+
+			if constexpr (std::is_same_v<R, Float>)
+			{
+				if (boost::multiprecision::isinf(sum) ||
+					boost::multiprecision::isnan(sum))
+				{
+					throw std::runtime_error("NAN final sum. " LOCATION);
+				}
+			}
+
+			if (std::is_same_v<I, Int>)
+			{
+				if (sum != expectedSum)
+				{
+					std::cout << Color::Red
+						<< "Initial distribution sum: " << expectedSum << std::endl
+						<< "Final distribution sum  : " << sum << std::endl << Color::Default;
+				}
+			}
+			else
+			{
+				auto ratio = expectedSum / sum;
+				if (ratio > 1.0001 || ratio < 0.9999)
+				{
+					std::cout << Color::Red << "Initial distribution sum: " << expectedSum << std::endl;
+					std::cout << "Final distribution sum: " << sum << std::endl << Color::Default;
+				}
+			}
+
+			std::swap(distributions[0], distributions[1]);
+		}
+
+		return std::move(distributions[0]);
+	}
+
+
+	// the new enumerator code, this one is more modular
+	// in that you can specify the subcode type for each subcode
+	inline void enumerateCode(const oc::CLP& cmd) try {
+
+		// expander (0: firstSubcode, 1: block expander), 
 		// multiplier (0: block, 1: non recursive convolution), 
-		// num_iters, k, n, sigma, sigma_expander (0 if repeater),
+		// num_iters, k, n, sigma, sigma_expander (0 if firstSubcode),
 		// approximate - 1 if exact ie compute exactly all elements in the distribution, 2 means compute every other
 		//               element in the distribution and approximate the remaining, 4 means compute every 4th element
 		//               and approximate the rest
@@ -1145,18 +1508,18 @@ namespace osuCrypto
 		{
 			std::cout << "This function benchmarks the minimum distance computation for various parameters." << std::endl;
 			std::cout << "The parameters are: " << std::endl;
-			std::cout << "-repeater, " << std::endl;
-			std::cout << "-iters [list int] " << std::endl;
+			std::cout << "-subcode block block block, " << std::endl;
+			std::cout << "-subcode repeat acc acc, " << std::endl;
+			std::cout << "-systematic, " << std::endl;
 			std::cout << "-k [list int], " << std::endl;
 			std::cout << "-rate double " << std::endl;
-			std::cout << "-sigmas [list int] " << std::endl;
-			//std::cout << "-sigma_expander [list int] " << std::endl;
+			std::cout << "-sigma [list int] " << std::endl;
 			return;
 		}
 
-		auto repeater = cmd.isSet("repeater") ? ExpandType::Repeater : ExpandType::Block;
-		auto conv = cmd.isSet("conv");
-		auto num_iters = cmd.getManyOr("iters", std::vector<u64>{1});
+		auto subCodeTags = cmd.getManyOr("subcode", std::vector<std::string>{""});
+		if (subCodeTags.size() == 0)
+			throw std::runtime_error("subcodes must be specified {repeat, acc, block, ... }. " LOCATION);
 
 		// the input size
 		auto Ks = cmd.getManyOr("k", std::vector<u64>{512});
@@ -1167,6 +1530,7 @@ namespace osuCrypto
 		// block size
 		auto sigmas = cmd.getManyOr("sigma", std::vector<u64>{64});
 		bool verbose = cmd.isSet("verbose");
+		bool systematic = cmd.isSet("systematic");
 
 		// when printing the curve, how many points to show. 0=all n points.
 		u64 numPoints = cmd.getOr("numPoints", 0);
@@ -1184,59 +1548,100 @@ namespace osuCrypto
 		bool print_dist = cmd.isSet("printDist") || cmd.isSet("numPoints");
 
 		old = cmd.isSet("old");
-		//Int;
-		//boost::multiprecision::cpp_int
-		std::vector<std::vector<u64>> params;
-		for (auto i : num_iters)
+
+		std::vector<Subcode> subcodes(subCodeTags.size());
+
+		for (size_t i = 0; i < subCodeTags.size(); ++i)
 		{
-			for (auto k : Ks)
+			if (subCodeTags[i] == "repeat")
+				subcodes[i] = Subcode(SubcodeType::Repeater);
+			else if (subCodeTags[i] == "acc")
+				subcodes[i] = Subcode(SubcodeType::Accumulate);
+			else if (subCodeTags[i] == "block")
+				subcodes[i] = Subcode(SubcodeType::Block);
+			else
+				throw std::runtime_error("subcodes must be {repeat, accumulate, block, ... }. " LOCATION);
+
+		}
+
+
+		for (auto k : Ks)
+		{
+			for (auto sigma : sigmas)
 			{
-				for (auto sigma : sigmas)
-				{
-					//for (auto sigma_exp : sigma_expander)
-					{
 #if 1
-						using INT = Float;
-						using RAT = Float;
+				using INT = Float;
+				using RAT = Float;
 #else
-						using INT = Int;
-						using RAT = Rat;
+				using INT = Int;
+				using RAT = Rat;
 #endif
-						u64 n = k / rate;
-						if (k % sigma)
-						{
-							auto kk = k;
-							k = ((k + sigma / 2) / sigma) * sigma;
-							std::cout << Color::Red << "Rounding k to the nearest multiple of sigma. k = " << kk << " -> " << k << std::endl << Color::Default;
-						}
-						if (n % k)
-						{
-							auto nn = n;
-							n = ((n + k / 2) / k) * k;
-							std::cout << Color::Red << "rounding n to the nearest multiple of k. n = " << nn << " -> " << n << std::endl << Color::Default;
-						}
+
+				u64 n = k / rate;
+				if (k % sigma)
+				{
+					auto kk = k;
+					k = ((k + sigma / 2) / sigma) * sigma;
+					std::cout << Color::Red << "Rounding k to the nearest "
+						<< "multiple of sigma. k = " << kk << " -> " << k
+						<< std::endl << Color::Default;
+				}
+				if (n % k)
+				{
+					auto nn = n;
+					n = ((n + k / 2) / k) * k;
+					std::cout << Color::Red << "rounding n to the nearest "
+						<< "multiple of k. n = " << nn << " -> " << n
+						<< std::endl << Color::Default;
+				}
+
+				for (u64 j = 0; j < subcodes.size(); ++j)
+				{
+					if (subcodes[j].mType == SubcodeType::Block)
+						subcodes[j].mSigma = sigma;
+
+					subcodes[j].mK = j ? subcodes[j - 1].mN : k;
+					subcodes[j].mN = n - k * (systematic && j != subcodes.size() - 1);
+
+					if (systematic && j == subcodes.size() - 1)
+						subcodes.back().mSystematic = systematic;
+
+					//std::cout << subcodes[j].mK << " -> " << subcodes[j].mN << std::endl;
+				}
+
+				auto start = std::chrono::high_resolution_clock::now();
+				auto dist = composeEnumerator<INT, RAT>(
+					subcodes, num_threads, verbose, numPoints, normalizes);
+
+				auto expected_md = minimum_distance_from_distribution<RAT>(dist);
+				auto end = std::chrono::high_resolution_clock::now();
+
+				if (print_dist)
+				{
+					print_distribution<RAT>(dist, numPoints, normalizes);
+				}
+
+				std::ofstream out(
+					"dist_k" + std::to_string(k) + "_n" + std::to_string(n)
+					+ "_s" + std::to_string(sigma) + "_i" + std::to_string(subcodes.size()) + ".txt", std::ios::trunc);
+
+				out << "k:" << k << "_n:" << n << "_sigma:" << sigma << "_iters:"
+					<< subcodes.size() << std::endl;
+				print_distribution<RAT>(dist, 0, normalizes, out);
+
+				std::cout << "k: " << k << " n: " << n << " sigma: " << sigma
+					<< " iters: " << subcodes.size() << " rate: " << rate << " time: "
+					<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
+
+				std::cout << "MD: " << expected_md.mExpectMD << " zero: " << expected_md.mZeroIdx
+					<< " zeroVal: " << expected_md.mZeroValue << std::endl;
 
 
-						auto start = std::chrono::high_resolution_clock::now();
-						auto dist = minimum_distance<INT, RAT>(
-							repeater, conv, i, k, n, sigma, sigma, 1,
-							num_threads, verbose, numPoints, normalizes);
-						auto expected_md = minimum_distance_from_distribution<RAT>(dist);
-						auto end = std::chrono::high_resolution_clock::now();
-
-						if (print_dist)
-						{
-							print_distribution<RAT>(dist, numPoints, normalizes);
-						}
-						std::ofstream out(
-							"dist_k" + std::to_string(k) + "_n" + std::to_string(n) + "_s" + std::to_string(sigma) + "_i" + std::to_string(i) + ".txt", std::ios::trunc);
-						out << "k:" << k << "_n:" << n << "_sigma:" << sigma << "_iters:" << i << std::endl;
-						print_distribution<RAT>(dist, 0, normalizes, out);
-
-						std::cout << "k: " << k << " n: " << n << " sigma: " << sigma << " iters: " << i << " rate: " << rate << " time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
-
-						std::cout << "MD: " << expected_md.mExpectMD << " zero: " << expected_md.mZeroIdx << " zeroVal: " << expected_md.mZeroValue << std::endl;
-					}
+				if (cmd.isSet("exact"))
+				{
+					PRNG prng(block(421354523452343423ull, 2332453245234123421ull));
+					auto md = exactMD(subcodes, k, n, sigma, prng);
+					std::cout << "Exact MD: " << md << std::endl;
 				}
 			}
 		}
@@ -1245,11 +1650,332 @@ namespace osuCrypto
 		std::cout << e.what() << std::endl;
 	}
 
-	inline void minimumDistanceMain(oc::CLP& cmd)
-	{
-		benchmarks(cmd);
-		return;
+	inline void fullEnumerate(const oc::CLP& cmd)
+		try {
+
+		auto subcode = [&]() {
+			if (cmd.isSet("acc"))
+				return SubcodeType::Accumulate;
+			if (cmd.isSet("block"))
+				return SubcodeType::Block;
+			if (cmd.isSet("repeat"))
+				return SubcodeType::Repeater;
+			throw RTE_LOC;
+			}();
+
+		u64 k = cmd.getOr("k", 100);
+		u64 e = cmd.getOr("e", 2);
+		u64 n = k * e;
+		u64 sigma = cmd.getOr("sigma", 10);
+		bool systematic = cmd.isSet("systematic");
+		u64 numThreads = cmd.getOr("nt", std::thread::hardware_concurrency());
+
+		u64 numPoints = cmd.getOr("numPoints", 20);
+
+		Matrix<Float> E(k + 1, n + 1);
+		std::vector<Float> dist(n + 1);
+
+		ChooseCache<Float> pascal_triangle(n);
+		ChooseCache<Int> pascal_triangle2(n);
+
+		switch (subcode)
+		{
+		case osuCrypto::SubcodeType::Repeater:
+			throw RTE_LOC;
+			break;
+		case osuCrypto::SubcodeType::Block:
+			blockEnumerator<Float, Float>({}, dist,
+				systematic,
+				k,
+				n,
+				sigma,
+				numThreads,
+				pascal_triangle,
+				pascal_triangle2,
+				E);
+			break;
+		case osuCrypto::SubcodeType::Accumulate:
+
+			accumulateEnumerator<Float, Float>(
+				{},
+				dist,
+				systematic,
+				k, n, numThreads, pascal_triangle,
+				E);
+
+			break;
+		default:
+			throw RTE_LOC;
+		}
+
+		print_enumerator(E, numPoints);
+
 	}
-}
+	catch (std::exception& e) {
+		std::cout << e.what() << std::endl;
+	}
+
+
+	inline void fullEnumerate2(const oc::CLP& cmd)
+		try {
+
+//
+//		auto subCodeTags = cmd.getManyOr("subcode", std::vector<std::string>{""});
+//		if (subCodeTags.size() == 0)
+//			throw std::runtime_error("subcodes must be specified {repeat, acc, block, ... }. " LOCATION);
+//
+//		// the input size
+//		auto Ks = cmd.getManyOr("k", std::vector<u64>{512});
+//
+//		// n = k / rate
+//		auto rate = cmd.getOr("rate", 0.5);
+//
+//		// block size
+//		auto sigmas = cmd.getManyOr("sigma", std::vector<u64>{64});
+//		bool verbose = cmd.isSet("verbose");
+//		bool systematic = cmd.isSet("systematic");
+//
+//		// when printing the curve, how many points to show. 0=all n points.
+//		u64 numPoints = cmd.getOr("numPoints", 0);
+//
+//		u64 num_threads = cmd.getOr("threads", std::thread::hardware_concurrency());
+//		print_timings = verbose;
+//
+//		std::vector<Subcode> subcodes(subCodeTags.size());
+//
+//		for (size_t i = 0; i < subCodeTags.size(); ++i)
+//		{
+//			if (subCodeTags[i] == "repeat")
+//				subcodes[i] = Subcode(SubcodeType::Repeater);
+//			else if (subCodeTags[i] == "acc")
+//				subcodes[i] = Subcode(SubcodeType::Accumulate);
+//			else if (subCodeTags[i] == "block")
+//				subcodes[i] = Subcode(SubcodeType::Block);
+//			else
+//				throw std::runtime_error("subcodes must be {repeat, acc, block, ... }. " LOCATION);
+//
+//
+//			switch (subcodes[i])
+//			{
+//			case osuCrypto::SubcodeType::Repeater:
+//				throw RTE_LOC;
+//				break;
+//			case osuCrypto::SubcodeType::Block:
+//				blockEnumerator<Float, Float>({}, dist,
+//					systematic,
+//					k,
+//					n,
+//					sigma,
+//					numThreads,
+//					pascal_triangle,
+//					pascal_triangle2,
+//					E);
+//				break;
+//			case osuCrypto::SubcodeType::Accumulate:
+//
+//				accumulateEnumerator<Float, Float>(
+//					{},
+//					dist,
+//					systematic,
+//					k, n, numThreads, pascal_triangle,
+//					E);
+//
+//				break;
+//			default:
+//				throw RTE_LOC;
+//			}
+//
+//
+//		}
+//
+//
+//		for (auto k : Ks)
+//		{
+//			for (auto sigma : sigmas)
+//			{
+//#if 1
+//				using INT = Float;
+//				using RAT = Float;
+//#else
+//				using INT = Int;
+//				using RAT = Rat;
+//#endif
+//
+//				u64 n = k / rate;
+//				if (k % sigma)
+//				{
+//					auto kk = k;
+//					k = ((k + sigma / 2) / sigma) * sigma;
+//					std::cout << Color::Red << "Rounding k to the nearest "
+//						<< "multiple of sigma. k = " << kk << " -> " << k
+//						<< std::endl << Color::Default;
+//				}
+//				if (n % k)
+//				{
+//					auto nn = n;
+//					n = ((n + k / 2) / k) * k;
+//					std::cout << Color::Red << "rounding n to the nearest "
+//						<< "multiple of k. n = " << nn << " -> " << n
+//						<< std::endl << Color::Default;
+//				}
+//
+//				for (u64 j = 0; j < subcodes.size(); ++j)
+//				{
+//					if (subcodes[j].mType == SubcodeType::Block)
+//						subcodes[j].mSigma = sigma;
+//
+//					subcodes[j].mK = j ? subcodes[j - 1].mN : k;
+//					subcodes[j].mN = n - k * (systematic && j != subcodes.size() - 1);
+//
+//					if (systematic && j == subcodes.size() - 1)
+//						subcodes.back().mSystematic = systematic;
+//
+//					//std::cout << subcodes[j].mK << " -> " << subcodes[j].mN << std::endl;
+//				}
+//
+//			}
+//			print_enumerator(E, numPoints);
+
+		}
+		catch (std::exception& e) {
+			std::cout << e.what() << std::endl;
+		}
+
+
+		inline void benchmarks(const oc::CLP & cmd) try {
+
+			// expander (0: firstSubcode, 1: block expander), 
+			// multiplier (0: block, 1: non recursive convolution), 
+			// num_iters, k, n, sigma, sigma_expander (0 if firstSubcode),
+			// approximate - 1 if exact ie compute exactly all elements in the distribution, 2 means compute every other
+			//               element in the distribution and approximate the remaining, 4 means compute every 4th element
+			//               and approximate the rest
+
+			//
+			// varying iterations, everything else fixed
+			//
+			if (cmd.isSet("help"))
+			{
+				std::cout << "This function benchmarks the minimum distance computation for various parameters." << std::endl;
+				std::cout << "The parameters are: " << std::endl;
+				std::cout << "-repeater, " << std::endl;
+				std::cout << "-iters [list int] " << std::endl;
+				std::cout << "-k [list int], " << std::endl;
+				std::cout << "-rate double " << std::endl;
+				std::cout << "-sigmas [list int] " << std::endl;
+				//std::cout << "-sigma_expander [list int] " << std::endl;
+				return;
+			}
+
+			auto firstSubcode = cmd.isSet("repeater") ? SubcodeType::Repeater : SubcodeType::Block;
+			auto conv = cmd.isSet("conv");
+			auto num_iters = cmd.getManyOr("iters", std::vector<u64>{1});
+
+			// the input size
+			auto Ks = cmd.getManyOr("k", std::vector<u64>{512});
+
+			// n = k / rate
+			auto rate = cmd.getOr("rate", 0.5);
+
+			// block size
+			auto sigmas = cmd.getManyOr("sigma", std::vector<u64>{64});
+			bool verbose = cmd.isSet("verbose");
+
+			// when printing the curve, how many points to show. 0=all n points.
+			u64 numPoints = cmd.getOr("numPoints", 0);
+
+			// when printing the distribution, should we normalize it so the area under the
+			// curve is 1.
+			bool normalizes = cmd.getOr("normalize", 0);
+
+			// the number of "threshold distances". For `threshold in {1,2,4,...}`, we 
+			// print the weight just that `threshold` codewords are expected to exist.
+			u64 numMD = cmd.getOr("numMD", 1);
+
+			u64 num_threads = cmd.getOr("threads", std::thread::hardware_concurrency());
+			print_timings = verbose;
+			bool print_dist = cmd.isSet("printDist") || cmd.isSet("numPoints");
+
+			old = cmd.isSet("old");
+			//Int;
+			//boost::multiprecision::cpp_int
+			std::vector<std::vector<u64>> params;
+			for (auto i : num_iters)
+			{
+				for (auto k : Ks)
+				{
+					for (auto sigma : sigmas)
+					{
+						//for (auto sigma_exp : sigma_expander)
+						{
+#if 1
+							using INT = Float;
+							using RAT = Float;
+#else
+							using INT = Int;
+							using RAT = Rat;
+#endif
+							u64 n = k / rate;
+							if (k % sigma)
+							{
+								auto kk = k;
+								k = ((k + sigma / 2) / sigma) * sigma;
+								std::cout << Color::Red << "Rounding k to the nearest multiple of sigma. k = " << kk << " -> " << k << std::endl << Color::Default;
+							}
+							if (n % k)
+							{
+								auto nn = n;
+								n = ((n + k / 2) / k) * k;
+								std::cout << Color::Red << "rounding n to the nearest multiple of k. n = " << nn << " -> " << n << std::endl << Color::Default;
+							}
+
+
+							auto start = std::chrono::high_resolution_clock::now();
+							auto dist = minimum_distance<INT, RAT>(
+								firstSubcode, conv, i, k, n, sigma, sigma, 1,
+								num_threads, verbose, numPoints, normalizes);
+							auto expected_md = minimum_distance_from_distribution<RAT>(dist);
+							auto end = std::chrono::high_resolution_clock::now();
+
+							if (print_dist)
+							{
+								print_distribution<RAT>(dist, numPoints, normalizes);
+							}
+							std::ofstream out(
+								"dist_k" + std::to_string(k) + "_n" + std::to_string(n) + "_s" + std::to_string(sigma) + "_i" + std::to_string(i) + ".txt", std::ios::trunc);
+							out << "k:" << k << "_n:" << n << "_sigma:" << sigma << "_iters:" << i << std::endl;
+							print_distribution<RAT>(dist, 0, normalizes, out);
+
+							std::cout << "k: " << k << " n: " << n << " sigma: " << sigma << " iters: " << i << " rate: " << rate << " time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
+
+							std::cout << "MD: " << expected_md.mExpectMD << " zero: " << expected_md.mZeroIdx << " zeroVal: " << expected_md.mZeroValue << std::endl;
+						}
+					}
+				}
+			}
+
+		}
+		catch (std::exception& e) {
+			std::cout << e.what() << std::endl;
+		}
+
+		inline void minimumDistanceMain(oc::CLP & cmd)
+		{
+			if (cmd.isSet("benchmarks"))
+			{
+				benchmarks(cmd);
+				return;
+			}
+			else if (cmd.isSet("full"))
+			{
+				fullEnumerate(cmd);
+			}
+			else
+			{
+				enumerateCode(cmd);
+				return;
+			}
+		}
+	}
 
 #endif //LIBOTE_MINIMUMDISTANCE_H

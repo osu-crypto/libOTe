@@ -26,17 +26,17 @@
 #include "cryptoTools/Crypto/RandomOracle.h"
 #include "libOTe/Tools/EACode/EAChecker.h"
 #include "libOTe/Tools/Tungsten/accTest.h"
-#include "libOTe/Tools/Tungsten/EnumeratorTools.h"
+//#include "libOTe/Tools/Tungsten/EnumeratorTools.h"
 #include "libOTe/Tools/Tungsten/ConvEnumerator.h"
-#include "libOTe/Tools/Tungsten/ExpandingBlockEnumerator.h"
-#include "libOTe/Tools/Tungsten/BlockEnumerator.h"
-#include "libOTe/Tools/Tungsten/BlockEnumeratorTest.h"
-#include "libOTe/Tools/Tungsten/BinomialCoefficientTest.h"
-#include "libOTe/Tools/Tungsten/CompositionEnumerator.h"
-#include "libOTe/Tools/Tungsten/NonrecConvEnumerator.h"
-#include "libOTe/Tools/Tungsten/RepeaterEnumerator.h"
-#include "libOTe/Tools/Tungsten/MinimumDistance.h"
-#include "libOTe/Tools/Tungsten/MinimumDistanceTest.h"
+//#include "libOTe/Tools/Tungsten/ExpandingBlockEnumerator.h"
+//#include "libOTe/Tools/Tungsten/BlockEnumerator.h"
+//#include "libOTe/Tools/Tungsten/BlockEnumeratorTest.h"
+//#include "libOTe/Tools/Tungsten/BinomialCoefficientTest.h"
+//#include "libOTe/Tools/Tungsten/CompositionEnumerator.h"
+//#include "libOTe/Tools/Tungsten/NonrecConvEnumerator.h"
+//#include "libOTe/Tools/Tungsten/RepeaterEnumerator.h"
+#include "libOTe/Tools/PpcgCode/MinimumDistance.h"
+#include "libOTe/Tools/PpcgCode/Enumerator_Tests.h"
 #include "libOTe/Tools/Tungsten/ParallelSyndromeDecoding.h"
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
@@ -48,7 +48,7 @@ void minimal()
 {
 	// Setup networking. See cryptoTools\frontend_cryptoTools\Tutorials\Network.cpp
 	auto sockets = coproto::LocalAsyncSocket::makePair();
-
+	
 	// The number of OTs.
 	int n = 100;
 
@@ -84,6 +84,8 @@ void minimal()
 
 	auto r = coproto::sync_wait(macoro::wrap(proto));
 
+	macoro::sync_wait(sockets[0].close());
+
 	recverThread.join();
 
 	r.value();
@@ -110,7 +112,7 @@ int main(int argc, char** argv)
 		// blockEnumMain(cmd);
 		// repeaterEnumMain(cmd);
 		// expandingBlockEnumMain(cmd);
-		blockEnumTestMain(cmd);
+		//blockEnumTestMain(cmd);
 		// compositionEnumMain(cmd);
 		// TODO Uncomment when ready
 		// nonrecConvEnumMain(cmd);
@@ -123,11 +125,9 @@ int main(int argc, char** argv)
 			minimumDistanceMain(cmd);
 		return 0;
     }
-	if (cmd.isSet("binomial")) {
-		binomialCoefficientTestMain(cmd);
-	}
 	if (cmd.isSet("parallelsd")) {
 		parallelSD();
+		return 0;
 	}
 
 #endif

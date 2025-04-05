@@ -1,3 +1,6 @@
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+
 #include "ParallelSyndromeDecoding.h"
 #include <algorithm>
 #include <chrono>
@@ -23,6 +26,19 @@
 
 
 namespace osuCrypto {
+
+
+	template<typename T>
+	__device__ T make_zero()
+	{
+		return T(0);
+	}
+
+	template<>
+	__device__ ulonglong2 make_zero<ulonglong2>()
+	{
+		return make_ulonglong2(0, 0);
+	}
 
 	__global__ void test_kernel() {
 		printf("CUDA Kernel Executed\n");
@@ -99,12 +115,12 @@ namespace osuCrypto {
 	// block multiply function with thrust
 	// NOTE currently tests only for uint8_t as BlockVectorColumnMultiply is for uint8_t only
 	void test_thrust_block_multiply() {
-		constexpr int k = 9;// 1 << 20; // Total rows of G and size of vector x
-		constexpr int e = 2; // Scaling factor (n/k)
-		constexpr int n = e * k; // Total columns of G
-		constexpr int sigma = 3;// 32; // Block row size
-		constexpr int block_cols = sigma * e; // Block column size
-		constexpr int t = k / sigma; // Number of blocks
+		const int k = 9;// 1 << 20; // Total rows of G and size of vector x
+		const int e = 2; // Scaling factor (n/k)
+		const int n = e * k; // Total columns of G
+		const int sigma = 3;// 32; // Block row size
+		const int block_cols = sigma * e; // Block column size
+		const int t = k / sigma; // Number of blocks
 
 		//
 		// block multiply
@@ -673,12 +689,7 @@ namespace osuCrypto {
 
 		// good memory coalescing
 
-		T temp = [] {
-			if constexpr (std::is_same_v<T, ulonglong2>)
-				return make_ulonglong2(0, 0);
-			else
-				return T(0);
-			} ();
+		T temp = make_zero<T>();
 		
 #pragma unroll
 		for (int row = 0; row < block_num_rows; row += 32) {
@@ -754,12 +765,7 @@ namespace osuCrypto {
 			+ perm_block_idx_within * num_moved_per_block // skip the appropriate amount of spaces in the block of the permutation block
 			+ (code_block_idx_within % num_moved_per_block); // write to the proper offset
 
-		T temp = [] {
-			if constexpr (std::is_same_v<T, ulonglong2>)
-				return make_ulonglong2(0, 0);
-			else
-				return T(0);
-			} ();
+		T temp = make_zero<T>();
 
 		// good memory coalescing
 
@@ -1283,7 +1289,7 @@ namespace osuCrypto {
 		for (std::uint32_t i = 0; i < num_rounds; i++)
 		{
 			std::uint32_t hi, lo;
-			constexpr std::uint64_t M0 = UINT64_C(0xD2B74407B1CE6E93);
+			const std::uint64_t M0 = UINT64_C(0xD2B74407B1CE6E93);
 			mulhilo(M0, state[0], hi, lo);
 			lo = (lo << (right_side_bits - left_side_bits)) | state[1] >> left_side_bits;
 			state[0] = ((hi ^ key[i]) ^ state[1]) & left_side_mask;
@@ -1474,11 +1480,11 @@ namespace osuCrypto {
 
 	// block multiply function with cuda written kernels
 	void test_cuda_block_multiply() {
-		constexpr int k = 9;// 1 << 20; // Total rows of G and size of vector x
-		constexpr int e = 2; // Scaling factor (n/k)
-		constexpr int n = e * k; // Total columns of G
-		constexpr int sigma = 3;// 32; // Block row size
-		constexpr int t = k / sigma; // Number of blocks
+		const int k = 9;// 1 << 20; // Total rows of G and size of vector x
+		const int e = 2; // Scaling factor (n/k)
+		const int n = e * k; // Total columns of G
+		const int sigma = 3;// 32; // Block row size
+		const int t = k / sigma; // Number of blocks
 
 		//
 		// block multiply
@@ -1553,9 +1559,9 @@ namespace osuCrypto {
 		// Uniform distribution over [0, UINT64_MAX]
 		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
 
-		constexpr int k = 1 << 20; // 2^20
-		constexpr int n = 1 << 21; // 2^21
-		constexpr int sigma = 512;  // Block size (2 * sqrt(k))
+		const int k = 1 << 20; // 2^20
+		const int n = 1 << 21; // 2^21
+		const int sigma = 512;  // Block size (2 * sqrt(k))
 
 		//
 		// Initialize x, G, and empty xG, and move them from host to device
@@ -1604,8 +1610,8 @@ namespace osuCrypto {
 		// Uniform distribution over [0, UINT64_MAX]
 		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
 
-		constexpr int k = 1 << 20; // 2^20
-		constexpr int n = 1 << 21; // 2^21
+		const int k = 1 << 20; // 2^20
+		const int n = 1 << 21; // 2^21
 		std::vector<int> sigmas = { 2048, 128 };  // Block size ~ (2 * sqrt(k))
 		int baseRecursiveDepth = sigmas.size() - 1; // starts with 0
 
@@ -1962,8 +1968,8 @@ namespace osuCrypto {
 		// Uniform distribution over [0, UINT64_MAX]
 		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
 
-		constexpr int k = 1 << 20; // 2^20
-		constexpr int n = 1 << 21; // 2^21
+		const int k = 1 << 20; // 2^20
+		const int n = 1 << 21; // 2^21
 		std::vector<int> sigmas;
 		if (depth == 2) {
 			sigmas = { n, 2048, 128 }; // ~2sqrt(k)
@@ -2595,8 +2601,8 @@ namespace osuCrypto {
 		// Uniform distribution over [0, UINT64_MAX]
 		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
 
-		constexpr int k = 1 << 20; // 2^20
-		constexpr int n = 1 << 21; // 2^21
+		const int k = 1 << 20; // 2^20
+		const int n = 1 << 21; // 2^21
 
 		std::vector<int> sigmas;
 		if (depth == 1) {
@@ -2851,8 +2857,8 @@ namespace osuCrypto {
 		// Uniform distribution over [0, UINT64_MAX]
 		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
 
-		constexpr int k = 1 << 20; // 2^20
-		constexpr int n = 1 << 21; // 2^21
+		const int k = 1 << 20; // 2^20
+		const int n = 1 << 21; // 2^21
 
 		std::vector<int> sigmas;
 		if (depth == 1) {
@@ -2959,17 +2965,14 @@ namespace osuCrypto {
 		cudaDeviceSynchronize(); // ensure the kernel completes
 	}
 
+	
+
 	template<typename T>
 	__global__ void xor_reduce_segments(const T* __restrict__ gathered, T* __restrict__ out, int k, int w) { // __restrict__ for no memory overlap
 		int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
 		if (idx < k) {
-			T acc = [] {
-				if constexpr (std::is_same_v<T, ulonglong2>)
-					return make_ulonglong2(0, 0);
-				else
-					return T(0);
-				} ();
+			T acc = make_zero<T>();
 #pragma unroll
 			for (int j = 0; j < w; ++j) {
 				acc ^= gathered[idx * w + j];
@@ -3056,8 +3059,8 @@ namespace osuCrypto {
 		// Uniform distribution over [0, UINT64_MAX]
 		std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
 
-		constexpr int k = 1 << 20; // 2^20
-		constexpr int n = 5 * k; // 2 * k is insecure for expand accumulate, choice from expand-accumulate paper
+		const int k = 1 << 20; // 2^20
+		const int n = 5 * k; // 2 * k is insecure for expand accumulate, choice from expand-accumulate paper
 		int w = ceil(2.3 * log(n)); // expand accumulate's most aggressive param for provable security
 		                            // note that the log is natural
 

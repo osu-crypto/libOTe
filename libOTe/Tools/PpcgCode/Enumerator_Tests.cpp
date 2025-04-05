@@ -1,5 +1,3 @@
-#ifndef LIBOTE_MINIMUMDISTANCETEST_H
-#define LIBOTE_MINIMUMDISTANCETEST_H
 
 #include <bitset>
 #include <cassert>
@@ -221,9 +219,10 @@ namespace osuCrypto {
 		assert(num_perms_check == num_perms);
 	}
 
+	//
 	template<typename I, typename R>
-	std::vector<R> minimum_distance_approximate_true(
-		ExpandType expander,
+	std::vector<R> brute_force_block_minimum_distance(
+		SubcodeType expander,
 		u64 multiplier,
 		u64 num_iters,
 		u64 k, u64 n,
@@ -240,13 +239,13 @@ namespace osuCrypto {
 		std::vector<std::vector<short>> gis;
 		if (exact) {
 			gis = generate_all_gis_bool(n, n, sigma);
-			if (expander == ExpandType::Block) {
+			if (expander == SubcodeType::Block) {
 				assert(false); // TODO function does not yet exist
 			}
 		}
 		else { // approximate
 			gis = generate_random_gis_bool(n, n, sigma, num_random, gen);
-			if (expander == ExpandType::Block) {
+			if (expander == SubcodeType::Block) {
 				// Remember this is missing the identity, which is handled later
 				expanding_gis = generate_random_gis_bool(k, n - k, sigma_expander, num_random, gen);
 			}
@@ -263,7 +262,7 @@ namespace osuCrypto {
 			// for each G, iterate over all x's
 			for (const auto& x : xs) {
 				// expander
-				if (expander == ExpandType::Repeater) {
+				if (expander == SubcodeType::Repeater) {
 					// repeater
 					std::vector<short> expanded_x;
 					for (size_t i = 0; i < k; i++) {
@@ -275,7 +274,7 @@ namespace osuCrypto {
 					iterate_and_count<I, R>(expanded_x, g, count_weight_h_outputs,
 						n, sigma, 1);
 				}
-				else if (expander == ExpandType::Block) {
+				else if (expander == SubcodeType::Block) {
 					size_t num_expanding_gis = expanding_gis.size();
 					// expanding block
 					for (const auto& expanding_g : expanding_gis) {
@@ -334,14 +333,14 @@ namespace osuCrypto {
 			//	inputDist[i] = choose_pascal(k, i, pas);
 
 			timer.setTimePoint("start");
-			
-			compute_block_distribution_opt<INT, RAT>(
+
+			blockEnumerator<INT, RAT>(
 				{}, outputDist0,
 				systematic, k, n, sigma,
 				numThreads, pas, pas);
 			timer.setTimePoint("opt");
 
-			compute_expanding_block_distribution<INT, RAT>(outputDist1,k, n, sigma, pas);
+			compute_expanding_block_distribution<INT, RAT>(outputDist1, k, n, sigma, pas);
 			timer.setTimePoint("old");
 
 			if (std::is_same_v<INT, Float>)
@@ -402,7 +401,7 @@ namespace osuCrypto {
 				inputDist[i] = i;
 
 			timer.setTimePoint("start");
-			compute_block_distribution_opt<INT, RAT>(
+			blockEnumerator<INT, RAT>(
 				inputDist, outputDist0,
 				systematic, k, n, sigma,
 				numThreads, pas, pas);
@@ -461,7 +460,7 @@ namespace osuCrypto {
 				//{4,12,2},
 				//{6,6,3}
 		};
-		auto et = ExpandType::Repeater;
+		auto et = SubcodeType::Repeater;
 
 		for (const auto& param : params) {
 			// TODO remove when ready
@@ -483,7 +482,7 @@ namespace osuCrypto {
 			u64 seed = 24523452345234523;
 			std::mt19937 gen(seed); // Mersenne Twister engine
 			size_t num_random = cmd.getOr("trials", 1000);
-			std::vector<Rat> approximate_true_distribution = minimum_distance_approximate_true<Int, Rat>(
+			std::vector<Rat> approximate_true_distribution = brute_force_block_minimum_distance<Int, Rat>(
 				et,
 				param[0],
 				param[1],
@@ -519,13 +518,18 @@ namespace osuCrypto {
 		}
 	}
 
-	inline void minimumDistanceTestMain(oc::CLP& cmd) {
+	void minimumDistanceTestMain(oc::CLP& cmd) {
 		TestCollection tests;
+
+		tests.add("stirlingTest                        ", stirlingTest);
+		tests.add("chooseTest                          ", chooseTest);
 		tests.add("expanding_distribution_opt_test     ", expanding_distribution_opt_test);
 		tests.add("compute_block_distribution_opt_test ", compute_block_distribution_opt_test);
 		tests.add("minimum_distance_tests              ", minimum_distance_tests);
 		tests.runIf(cmd);
 	}
+	bool old = false;
+
+
 }
 
-#endif //LIBOTE_MINIMUMDISTANCETEST_H

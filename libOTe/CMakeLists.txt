@@ -22,8 +22,8 @@ set(SRCS "${SRCS}"
         #Tools/Tungsten/ParallelSyndromeDecoding.h
 )
 
-add_library(libOTe STATIC ${SRCS} ${CUDA_SRCS})
-#add_library(libOTeCUDA STATIC ${CUDA_SRCS})
+add_library(libOTe STATIC ${SRCS} )
+add_library(libOTeCUDA STATIC ${CUDA_SRCS})
 
 
 # make projects that include libOTe use this as an include folder
@@ -34,18 +34,23 @@ target_include_directories(libOTe PUBLIC
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
                     $<INSTALL_INTERFACE:include>)
                     
-target_link_libraries(libOTe cryptoTools)
+target_link_libraries(libOTeCUDA macoro)
+target_link_libraries(libOTe cryptoTools libOTeCUDA)
 #target_link_libraries(libOTeCUDA CUDAToolkit cryptoTools)
 
-#set(CMAKE_CUDA_ARCHITECTURES 86)
-#set_target_properties(libOTe PROPERTIES
-#    CUDA_ARCHITECTURES "86"
-#)
-
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES 86)
+endif()
+set_target_properties(libOTeCUDA PROPERTIES
+    CUDA_ARCHITECTURES "86"
+)
+set_property(TARGET libOTeCUDA PROPERTY CUDA_STANDARD ${LIBOTE_STD_VER})
 
 if(MSVC)
+    #target_compile_options(libOTeCUDA PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:/std:c++${LIBOTE_STD_VER}>)
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
 else()
+    #target_compile_options(libOTeCUDA PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-std=c++${LIBOTE_STD_VER}>)
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
 
     if(ENABLE_SSE)
@@ -59,8 +64,8 @@ else()
 endif()
 
 # Ensure consistent CUDA standard
-set(CMAKE_CUDA_STANDARD ${LIBOTE_STD_VER})
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+#set(CMAKE_CUDA_STANDARD ${LIBOTE_STD_VER})
+#set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 if (ENABLE_BITPOLYMUL)
 	target_link_libraries(libOTe bitpolymul)

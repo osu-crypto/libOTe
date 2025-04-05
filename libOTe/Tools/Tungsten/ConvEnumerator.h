@@ -3,7 +3,7 @@
 #include <vector>
 #include <unordered_map>
 #include "cryptoTools/Common/CLP.h"
-#include "EnumeratorTools.h"
+#include "../PpcgCode/EnumeratorTools.h"
 
 
 #ifdef ENABLE_BOOST

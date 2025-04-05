@@ -7,11 +7,12 @@
 #include <numeric>
 #include <iomanip>
 #include <future>
+#include "Util.h"
 #include <cmath>
 
 #include "Mtx.h"
 #include <deque>
-
+#define ENABLE_ALGO994
 #ifdef ENABLE_ALGO994
 extern "C" {
 #include "libOTe/Tools/LDPC/Algo994/utils.h"
@@ -24,7 +25,6 @@ extern "C" {
 
 namespace osuCrypto
 {
-
 
 
 
@@ -80,7 +80,7 @@ namespace osuCrypto
 #endif
     }
 
-    int minDist2(const DenseMtx& mtx, u64 nt, bool verbose)
+    int minDist(const DenseMtx& G, u64 nt, bool verbose)
     {
         std::string outPath("./deleteMe");
         std::fstream out(outPath, std::fstream::trunc | std::fstream::out);
@@ -92,7 +92,7 @@ namespace osuCrypto
         }
 
         std::vector<std::pair<u64, u64>> swaps;
-        auto G = computeGen(mtx, swaps);
+        //auto G = computeGen(mtx, swaps);
 
         out << G.rows() << " " << G.cols() << " matrix dimensions\n"
             << G << std::endl;

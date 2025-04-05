@@ -22,7 +22,7 @@ namespace osuCrypto
     DenseMtx computeGen(DenseMtx H, std::vector<std::pair<u64, u64>>& colSwaps);
 
     int minDist(std::string path, u64 numTHreads, bool verbose);
-    int minDist2(const DenseMtx& mtx, u64 numTHreads, bool verbose);
+    int minDist(const DenseMtx& mtx, u64 numTHreads, bool verbose);
 
 
     void ithCombination(u64 index, u64 n, std::vector<u64>& set);

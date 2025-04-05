@@ -58,7 +58,7 @@
         "ENABLE_PPRF": true,
         "ENABLE_SILENT_VOLE": true,
         "LIBOTE_STD_VER": "20",
-        "ENABLE_ALL_OT": true,
+        "ENABLE_BITPOLYMUL": false,
         "ENABLE_KKRT": true,
         "ENABLE_IKNP": true,
         "ENABLE_MOCK_OT": true,
@@ -74,7 +74,7 @@
         "VERBOSE_FETCH": true,
         "ENABLE_SSE": true,
         "ENABLE_AVX": true,
-        "ENABLE_ASAN": true,
+        "ENABLE_ASAN": false,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install/${presetName}"
       },

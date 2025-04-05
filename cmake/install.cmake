@@ -58,7 +58,7 @@ install(FILES
 )
 
 set(exportLibs 
-    "libOTe;libOTe_Tests;")
+    "libOTe;libOTeCUDA;libOTe_Tests;")
 
 if(ENABLE_MR_KYBER)
     set(exportLibs "${exportLibs}KyberOT;")

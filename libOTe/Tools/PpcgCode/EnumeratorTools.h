@@ -275,24 +275,24 @@ namespace osuCrypto {
 
 #endif
 	template<>
-	Float to<Float, Float>(const Float& v)
+	inline Float to<Float, Float>(const Float& v)
 	{
 		return v;
 	}
 
 	template<>
-	Int to<Int, Rat>(const Rat& v)
+	inline Int to<Int, Rat>(const Rat& v)
 	{
 		return v.convert_to<Int>();
 	}
 
 	// returns z/2^power.
-	Float divPow2(const Float& v, u64 power)
+	inline Float divPow2(const Float& v, u64 power)
 	{
 		return v / pow(Float(v), power);
 	}
 
-	Rat divPow2(const Int& v, u64 power)
+	inline Rat divPow2(const Int& v, u64 power)
 	{
 		Rat vv(v, Int(1) << power);
 		//mpq_set_num(vv, v.mVal.get_mpz_t());
@@ -319,7 +319,7 @@ namespace osuCrypto {
 
 
 	template<>
-	Float fact<Float>(u64 n)
+	inline Float fact<Float>(u64 n)
 	{
 		Float v = 1;
 		for (u64 i = 2; i <= n; ++i)
@@ -328,7 +328,7 @@ namespace osuCrypto {
 	}
 
 	template<>
-	Int fact<Int>(u64 n)
+	inline Int fact<Int>(u64 n)
 	{
 		Int v = 1;
 		for (u64 i = 2; i <= n; ++i)
@@ -336,7 +336,7 @@ namespace osuCrypto {
 		return v;
 	}
 
-	u64 log2floor(Int x)
+	inline u64 log2floor(Int x)
 	{
 		u64 r = 0;
 		while (x >= 2)
@@ -347,7 +347,7 @@ namespace osuCrypto {
 		return r;
 	}
 
-	u64 log2ceil(Int x)
+	inline u64 log2ceil(Int x)
 	{
 		auto r = log2floor(x);
 		if ((Int(1) << r) != x)
@@ -355,7 +355,7 @@ namespace osuCrypto {
 		return r;
 	}
 
-	double log2(Int x) {
+	inline double log2(Int x) {
 
 		if (x == 0)
 		{
@@ -425,7 +425,7 @@ namespace osuCrypto {
 	}
 
 	// approximation of the binomial coefficient using logarithmic properties
-	Float chooseApx(i64 n, i64 k)
+	inline Float chooseApx(i64 n, i64 k)
 	{
 		if (k < 0 || k > n)
 			return 0;
@@ -976,65 +976,65 @@ namespace osuCrypto {
 	}
 
 
-	inline void chooseMain(oc::CLP cmd)
-	{
-
-		auto n = cmd.getManyOr<u64>("n", { 10 });
-		auto k = cmd.getManyOr<u64>("k", { 10 });
-		ChooseCache<Float> fc;
-		ChooseCache<Int> ic;
-
-		for (auto nn : n)
-		{
-			for (auto kk : k)
-			{
-				std::cout << "n " << nn << " k " << kk << " : f ";
-				auto f = choose_pascal<Float>(nn, kk, fc);
-				auto fl = log2(f);
-				std::cout << fl << " ~ i ";
-
-				auto z = choose_pascal<Int>(nn, kk, ic);
-				auto zl = log2(z);
-				std::cout << zl << " @ ";
-#ifdef MPZ_ENABLE
-#endif
-			}
-			std::cout << std::endl;
-		}
-	}
-
-	inline void ballBinCapMain(oc::CLP cmd)
-	{
-		auto balls = cmd.getManyOr<u64>("n", { 10 });
-		auto bins = cmd.getManyOr<u64>("m", { 10 });
-		u64 cap = cmd.getOr("c", 12);
-
-		ChooseCache<Float> fc;
-		ChooseCache<Int> ic;
-		std::cout << "k _:";
-		for (auto bin : bins)
-			std::cout << bin << " ";
-		std::cout << std::endl;
-		for (auto ball : balls)
-		{
-			std::cout << "nn " << ball << ": f ";
-			for (auto bin : bins)
-			{
-				std::vector<std::vector<Float>> pascal_triangle_float;
-				auto f = ballBinCap<Float>(ball, bin, cap, fc);
-				auto fl = log2(f);
-				std::cout << fl << " i ";
-				std::vector<std::vector<Int>> pascal_triangle_int;
-				auto z = ballBinCap<Int>(ball, bin, cap, ic);
-				auto zl = log2(z);
-				std::cout << zl << ",  ";
-#ifdef MPZ_ENABLE
-#endif
-			}
-			std::cout << std::endl;
-		}
-
-	}
+//	inline void chooseMain(oc::CLP cmd)
+//	{
+//
+//		auto n = cmd.getManyOr<u64>("n", { 10 });
+//		auto k = cmd.getManyOr<u64>("k", { 10 });
+//		ChooseCache<Float> fc;
+//		ChooseCache<Int> ic;
+//
+//		for (auto nn : n)
+//		{
+//			for (auto kk : k)
+//			{
+//				std::cout << "n " << nn << " k " << kk << " : f ";
+//				auto f = choose_pascal<Float>(nn, kk, fc);
+//				auto fl = log2(f);
+//				std::cout << fl << " ~ i ";
+//
+//				auto z = choose_pascal<Int>(nn, kk, ic);
+//				auto zl = log2(z);
+//				std::cout << zl << " @ ";
+//#ifdef MPZ_ENABLE
+//#endif
+//			}
+//			std::cout << std::endl;
+//		}
+//	}
+//
+//	inline void ballBinCapMain(oc::CLP cmd)
+//	{
+//		auto balls = cmd.getManyOr<u64>("n", { 10 });
+//		auto bins = cmd.getManyOr<u64>("m", { 10 });
+//		u64 cap = cmd.getOr("c", 12);
+//
+//		ChooseCache<Float> fc;
+//		ChooseCache<Int> ic;
+//		std::cout << "k _:";
+//		for (auto bin : bins)
+//			std::cout << bin << " ";
+//		std::cout << std::endl;
+//		for (auto ball : balls)
+//		{
+//			std::cout << "nn " << ball << ": f ";
+//			for (auto bin : bins)
+//			{
+//				std::vector<std::vector<Float>> pascal_triangle_float;
+//				auto f = ballBinCap<Float>(ball, bin, cap, fc);
+//				auto fl = log2(f);
+//				std::cout << fl << " i ";
+//				std::vector<std::vector<Int>> pascal_triangle_int;
+//				auto z = ballBinCap<Int>(ball, bin, cap, ic);
+//				auto zl = log2(z);
+//				std::cout << zl << ",  ";
+//#ifdef MPZ_ENABLE
+//#endif
+//			}
+//			std::cout << std::endl;
+//		}
+//
+//	}
 
 	inline void stirlingTest(const oc::CLP& cmd)
 	{
@@ -1153,40 +1153,6 @@ namespace osuCrypto {
 
 	}
 
-	inline void test(oc::CLP& cmd)
-	{
-		TestCollection tests;
-		tests.add("stirlingTest      ", stirlingTest);
-		tests.add("chooseTest        ", chooseTest);
-		//tests.add("ballbincapTest    ", ballbincapTest);
-
-		tests.runIf(cmd);
-	}
-
-
-	inline void EnumToolsMain(oc::CLP& cmd)
-	{
-		if (cmd.isSet("u")) {
-			std::cout << "testing all..." << std::endl;
-			test(cmd);
-		}
-
-		if (cmd.isSet("stirling")) {
-			std::cout << "testing stirling..." << std::endl;
-			stirlingMain(cmd);
-		}
-
-
-		if (cmd.isSet("choose")) {
-			std::cout << "testing choose..." << std::endl;
-			chooseMain(cmd);
-		}
-
-		if (cmd.isSet("bbc")) {
-			std::cout << "testing balls bins cap..." << std::endl;
-			ballBinCapMain(cmd);
-		}
-	}
 }
 
 #endif
