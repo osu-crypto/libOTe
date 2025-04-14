@@ -18,6 +18,26 @@
 #endif
 
 namespace osuCrypto {
+
+
+	// check that each element in distribution1 is within 
+	// tolerance of the corresponding element in distribution2
+	template<typename R>
+	bool compareDistributions(
+		span<const R> distribution1,
+		span<const R> distribution2,
+		u64 l, double tolerance) {
+		assert(distribution1.size() == l);
+		assert(distribution2.size() == l);
+		for (size_t idx = 0; idx < l; idx++) {
+			if ((distribution1[idx] - distribution2[idx]) > tolerance) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+
 	template<typename T, typename R>
 	T to(const R&);
 
@@ -393,47 +413,82 @@ namespace osuCrypto {
 	}
 
 
-	inline Float stirlingApprox(u64 n)
+	//inline Float stirlingApprox(u64 n)
+	//{
+	//	if (n == 0)
+	//		return 1;
+
+	//	static Float pi = 3.141592653589793238462643383279502884197;
+	//	auto v = sqrt(2 * pi * n) * pow(n / exp(Float(1)), n);
+	//	//auto expansion_ =
+	//	//    double(1) +
+	//	//    double(1) / (12 * n) +
+	//	//    double(1) / (228 * std::pow(n, 2)) +
+	//	//    double(139) / (51840 * std::pow(n, 3)) +
+	//	//    double(571) / (3488320 * std::pow(n, 4));
+
+	//	std::array<Float, 16> dom{ {
+	//									   1, 1, -139, -571, 163879, 5246819,
+	//									   Float("-534703531"), Float("-4483131259"), Float("432261921612371"), Float("6232523202521089"), Float("-25834629665134204969.0"),
+	//									   Float("-1579029138854919086429.0"), Float("746590869962651602203151.0"),Float("1511513601028097903631961.0"), Float("-8849272268392873147705987190261.0"),  Float("-142801712490607530608130701097701.0")
+	//							   } };
+
+	//	std::array<Float, 16> num{ {
+	//									   12, 288, 51840, 2488320, 209018880,
+	//									   Float("75246796800"), Float("902961561600"), Float("86684309913600"), Float("514904800886784000"), Float("86504006548979712000.0"),
+	//									   Float("13494625021640835072000"), Float("9716130015581401251840000"), Float("116593560186976815022080000"), Float("2798245444487443560529920000"), Float("299692087104605205332754432000000"),
+	//									   Float("57540880724084199423888850944000000") } };
+	//	auto expansion = Float(1);
+	//	for (u64 i = 0; i < 14; ++i)
+	//		expansion += dom[i] / (num[i] * pow(Float(n), Float(i + 1)));
+	//	return v * expansion;
+	//}
+
+	//// approximation of the binomial coefficient using logarithmic properties
+	//inline Float chooseApx(i64 n, i64 k)
+	//{
+	//	if (k < 0 || k > n)
+	//		return 0;
+	//	if (k == 0 || k == n)
+	//		return 1;
+	//	auto b = (n - k) * log(Float(n) / (n - k)) + k * log(Float(n) / k);
+	//	return exp(b);
+	//}
+
+
+	template<typename I>
+	auto pow2_(u64 power)
 	{
-		if (n == 0)
-			return 1;
+		if constexpr (std::is_same_v<I, Int>)
+		{
+			//Int e = boost::multiprecision::pow(Int(2), power);
+			auto r = Int(1) << power;
+			//if (e != r)
+			//	throw RTE_LOC;
+			return r;
 
-		static Float pi = 3.141592653589793238462643383279502884197;
-		auto v = sqrt(2 * pi * n) * pow(n / exp(Float(1)), n);
-		//auto expansion_ =
-		//    double(1) +
-		//    double(1) / (12 * n) +
-		//    double(1) / (228 * std::pow(n, 2)) +
-		//    double(139) / (51840 * std::pow(n, 3)) +
-		//    double(571) / (3488320 * std::pow(n, 4));
+		}
+		else if constexpr (std::is_same_v<I, Float>)
+		{
+			Float v(2);
+			return Float(boost::multiprecision::pow(v, power));
 
-		std::array<Float, 16> dom{ {
-										   1, 1, -139, -571, 163879, 5246819,
-										   Float("-534703531"), Float("-4483131259"), Float("432261921612371"), Float("6232523202521089"), Float("-25834629665134204969.0"),
-										   Float("-1579029138854919086429.0"), Float("746590869962651602203151.0"),Float("1511513601028097903631961.0"), Float("-8849272268392873147705987190261.0"),  Float("-142801712490607530608130701097701.0")
-								   } };
-
-		std::array<Float, 16> num{ {
-										   12, 288, 51840, 2488320, 209018880,
-										   Float("75246796800"), Float("902961561600"), Float("86684309913600"), Float("514904800886784000"), Float("86504006548979712000.0"),
-										   Float("13494625021640835072000"), Float("9716130015581401251840000"), Float("116593560186976815022080000"), Float("2798245444487443560529920000"), Float("299692087104605205332754432000000"),
-										   Float("57540880724084199423888850944000000") } };
-		auto expansion = Float(1);
-		for (u64 i = 0; i < 14; ++i)
-			expansion += dom[i] / (num[i] * pow(Float(n), Float(i + 1)));
-		return v * expansion;
+		}
+		else
+		{
+			static_assert(std::is_same_v<I, Int> || std::is_same_v<I, Float>);
+		}
 	}
 
-	// approximation of the binomial coefficient using logarithmic properties
-	inline Float chooseApx(i64 n, i64 k)
-	{
-		if (k < 0 || k > n)
-			return 0;
-		if (k == 0 || k == n)
-			return 1;
-		auto b = (n - k) * log(Float(n) / (n - k)) + k * log(Float(n) / k);
-		return exp(b);
+	inline auto log2_(const Rat& v) {
+		auto f = v.convert_to<Float>();
+		return boost::multiprecision::log2(f);
 	}
+
+	inline auto log2_(const Float& f) {
+		return boost::multiprecision::log2(f);
+	}
+
 
 	// Computes n choose k using an efficient iterative approach.
 	// This avoids computing factorials directly, which can grow very large and cause overflow.
@@ -952,28 +1007,28 @@ namespace osuCrypto {
 		else
 			return 0;
 	}
-
-	inline void stirlingMain(CLP& cmd)
-	{
-		u64 n = cmd.getOr("n", 10);
-		for (u64 i = 0; i < n; ++i)
-		{
-			auto I = fact<Int>(i);
-			auto F = fact<Float>(i);
-			auto S = stirlingApprox(i);
-
-			std::cout << "n " << i << ": "
-#ifdef MPZ_ENABLE
-				<< fact<MPZ>(i) << " "
-#endif
-				<< I << " "
-				//<< F << " "
-				//<< S << " "
-				<< (I - F.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>() << " "
-				<< (I - S.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>()
-				<< std::endl;
-		}
-	}
+//
+//	inline void stirlingMain(CLP& cmd)
+//	{
+//		u64 n = cmd.getOr("n", 10);
+//		for (u64 i = 0; i < n; ++i)
+//		{
+//			auto I = fact<Int>(i);
+//			auto F = fact<Float>(i);
+//			auto S = stirlingApprox(i);
+//
+//			std::cout << "n " << i << ": "
+//#ifdef MPZ_ENABLE
+//				<< fact<MPZ>(i) << " "
+//#endif
+//				<< I << " "
+//				//<< F << " "
+//				//<< S << " "
+//				<< (I - F.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>() << " "
+//				<< (I - S.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>()
+//				<< std::endl;
+//		}
+//	}
 
 
 //	inline void chooseMain(oc::CLP cmd)
@@ -1036,24 +1091,24 @@ namespace osuCrypto {
 //
 //	}
 
-	inline void stirlingTest(const oc::CLP& cmd)
-	{
-		u64 n = cmd.getOr("n", 44);
-		for (u64 i = 0; i < n; ++i)
-		{
-			auto I = fact<Int>(i);
-			auto F = fact<Float>(i);
-			auto S = stirlingApprox(i);
+	//inline void stirlingTest(const oc::CLP& cmd)
+	//{
+	//	u64 n = cmd.getOr("n", 44);
+	//	for (u64 i = 0; i < n; ++i)
+	//	{
+	//		auto I = fact<Int>(i);
+	//		auto F = fact<Float>(i);
+	//		auto S = stirlingApprox(i);
 
-			auto d0 = abs((I - F.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>());
-			auto d1 = abs((I - S.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>());
+	//		auto d0 = abs((I - F.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>());
+	//		auto d1 = abs((I - S.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>());
 
-			if (d0 > 0.000001)
-				throw RTE_LOC;
-			if (d1 > 0.000001)
-				throw RTE_LOC;
-		}
-	}
+	//		if (d0 > 0.000001)
+	//			throw RTE_LOC;
+	//		if (d1 > 0.000001)
+	//			throw RTE_LOC;
+	//	}
+	//}
 
 	inline void chooseTest(const oc::CLP& cmd)
 	{

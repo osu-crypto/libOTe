@@ -407,7 +407,7 @@ namespace osuCrypto {
 				numThreads, pas, pas);
 			timer.setTimePoint("opt");
 
-			compute_block_distribution<INT, RAT>(inputDist, outputDist1,
+			blockEnumeratorOld<INT, RAT>(inputDist, outputDist1,
 				0, n, sigma, numThreads, pas);
 			timer.setTimePoint("old");
 
@@ -464,7 +464,7 @@ namespace osuCrypto {
 
 		for (const auto& param : params) {
 			// TODO remove when ready
-			if (param[1] != 0) assert(false);
+			//if (param[1] != 0) assert(false);
 			std::vector<Rat> expected_distribution =
 				minimum_distance<Int, Rat>(et,
 					param[0],// multipler
@@ -498,7 +498,7 @@ namespace osuCrypto {
 
 
 			// Compare the full distributions
-			bool similar = compare_distributions<Rat>(expected_distribution, approximate_true_distribution, param[4] + 1, 0.1); // last param is error tolerance
+			bool similar = compareDistributions<Rat>(expected_distribution, approximate_true_distribution, param[4] + 1, 0.1); // last param is error tolerance
 			if (!similar) {
 				print_distribution<Rat>(expected_distribution, approximate_true_distribution);
 
@@ -521,14 +521,17 @@ namespace osuCrypto {
 	void minimumDistanceTestMain(oc::CLP& cmd) {
 		TestCollection tests;
 
-		tests.add("stirlingTest                        ", stirlingTest);
+		
+		tests.add("accumulateEnum_exhaustive_Test      ", accumulateEnum_exhaustive_Test);
+		tests.add("blockEnum_exhaustive_Test           ", blockEnum_exhaustive_Test);
+		
 		tests.add("chooseTest                          ", chooseTest);
 		tests.add("expanding_distribution_opt_test     ", expanding_distribution_opt_test);
 		tests.add("compute_block_distribution_opt_test ", compute_block_distribution_opt_test);
 		tests.add("minimum_distance_tests              ", minimum_distance_tests);
 		tests.runIf(cmd);
 	}
-	bool old = false;
+	bool old = true;
 
 
 }

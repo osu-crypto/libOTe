@@ -3,7 +3,7 @@
 namespace osuCrypto {
 
     template<typename I>
-    I repeater_enum(u64 w, u64 h, u64 n, u64 k) {
+    I repeaterEnumerator(u64 w, u64 h, u64 n, u64 k) {
         assert(w <= n);
         assert(h <= k * n);
 
@@ -13,6 +13,6 @@ namespace osuCrypto {
         return choose_<I>(n, w);
     }
 
-    template Int repeater_enum<Int>(u64 w, u64 h, u64 n, u64 k);
+    template Int repeaterEnumerator<Int>(u64 w, u64 h, u64 n, u64 k);
 }
 */
