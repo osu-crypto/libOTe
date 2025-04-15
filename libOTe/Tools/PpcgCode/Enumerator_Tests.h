@@ -1,5 +1,4 @@
-#ifndef LIBOTE_MINIMUMDISTANCETEST_H
-#define LIBOTE_MINIMUMDISTANCETEST_H
+#pragma once
 
 #include <bitset>
 #include <cassert>
@@ -228,5 +227,3 @@ namespace osuCrypto {
 
 	void minimumDistanceTestMain(oc::CLP& cmd);
 }
-
-#endif //LIBOTE_MINIMUMDISTANCETEST_H

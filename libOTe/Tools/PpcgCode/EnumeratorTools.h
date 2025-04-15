@@ -52,7 +52,22 @@ namespace osuCrypto {
 
 
 	template <typename T>
-	inline T choose(i64 n, i64 k);
+	inline T choose_(i64 n, i64 k)
+	{
+		if (k < 0 || k > n)
+			return 0;
+		if (k == 0 || k == n)
+			return 1;
+
+		k = std::min<i64>(k, n - k);
+		T c = 1;
+		for (u64 i = 0; i < k; ++i)
+			c = c * (n - i) / (i + 1);
+		return c;
+	}
+
+	//template <typename T>
+	//inline T choose(i64 n, i64 k);
 
 	//using MPZ = mpz_class;
 //#define MPZ_ENABLE
@@ -841,12 +856,11 @@ namespace osuCrypto {
 
 		if (balls < bins)
 			return 0;
-		if (balls == bins)
+		if (balls == bins * cap)
 			return 1;
 
 		T d = 0;
 		for (u64 i = 0; i <= bins; ++i) {
-			//T v = (i & 1) ? -1 : 1;
 			auto mt = choose_pascal<T>(bins, i, pascal_triangle);
 
 			i64 bb = cap * (bins - i64(i));
@@ -855,18 +869,18 @@ namespace osuCrypto {
 			}
 
 			auto r = choose_pascal<T>(bb, balls, pascal_triangle);
-			//std::cout << i << " r " << r << " = C(" << bb << ", " << bins-1 << ")" << std::endl;
-
-			//if (mt != mt)
-			//    throw RTE_LOC;
-			//if (r != r)
-			//    throw RTE_LOC;
+			
 			if (i & 1)
 				d -= mt * r;
 			else
 				d += mt * r;
-			//std::cout << i << " d " << d << std::endl;
+			
+			//T v = (i & 1) ? -1 : 1;
+			//d += v * mt * r;
+
 		}
+		//std::cout << "labeledBallBinCap( " << balls << ", " << bins << ", " << cap << ") = " << d << std::endl;
+
 		//if (balls < cap)
 		//{
 		//	auto d2 = ballsBins<T>(balls, bins, pascal_triangle);

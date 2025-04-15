@@ -8,8 +8,129 @@
 #include "Print.h"
 #include "LoadingBar.h"
 #include "libOTe/Tools/LDPC/Mtx.h"
-
+#include "oldMinDistTest.h"
+#include "cryptoTools/Common/BitVector.h"
 namespace osuCrypto {
+
+	inline std::string toString(span<const u8> x)
+	{
+		std::stringstream ss;
+		for (auto xx : x)
+			ss << int(xx) << ' ';
+		return ss.str();
+	}
+
+	// Given a compact representation of the block matrix G,
+	// compute y = x * G.
+	//
+	// G should be in column major order with only sigmaK elements per column.
+	// We do not express G as the full k by n matrix.
+	inline void blockMtxMult(
+		span<const u8> G,
+		span<const u8> x,
+		span<u8> y,
+		u64 k, u64 n, u64 sigmaK, u64 sigmaN)
+	{
+		if (G.size() != sigmaK * n)
+			throw RTE_LOC;
+		if (G.size() != sigmaN * k)
+			throw RTE_LOC;
+		if (x.size() != k)
+			throw RTE_LOC;
+		if (y.size() != n)
+			throw RTE_LOC;
+
+		u64 blocks = n / sigmaN;
+
+		for (u64 i = 0; i < blocks; i++)
+		{
+			auto xi = x.subspan(i * sigmaK, sigmaK);
+			for (u64 j = 0; j < sigmaN; j++)
+			{
+				auto Gij = G.subspan((i * sigmaN + j) * sigmaK, sigmaK);
+				y[i * sigmaN + j] = std::inner_product(Gij.begin(), Gij.end(), xi.begin(), u8{ 0 }, std::bit_xor<u8>(), std::bit_and<u8>());
+				assert(y[i * sigmaN + j] <= 1);
+			}
+		}
+	}
+
+
+	// Given a bit-packed representation of the block matrix G,
+	// compute y = x * G.
+	//
+	// G should be in column major order with only sigmaK bits per column.
+	// We do not express G as the full k by n matrix.
+	template<typename T>
+	inline void blockMtxMultBit(
+		span<const T> G,
+		span<const T> x,
+		span<T> y,
+		u64 k, u64 n, u64 sigmaK, u64 sigmaN)
+	{
+		if (G.size() != n)
+			throw RTE_LOC;
+		if (x.size() != k / sigmaK)
+			throw RTE_LOC;
+		if (y.size() != n)
+			throw RTE_LOC;
+		if (sigmaK > sizeof(T) * 8)
+			throw RTE_LOC;
+
+		u64 blocks = n / sigmaN;
+		auto Giter = G.data();
+		auto yIter = y.data();
+		for (u64 i = 0; i < blocks; i++)
+		{
+			auto xi = x[i];
+			for (u64 j = 0; j < sigmaN; j++)
+			{
+				*yIter++ = popcount(*Giter++ & xi) % 2;
+			}
+		}
+	}
+
+
+	// Given a compact representation of the block matrix G,
+	// return a printable string of it 
+	//
+	// G should be in column major order with only sigmaK elements per column.
+	// We do not express G as the full k by n matrix.
+	template<typename T>
+	inline std::string blockMtxToString(std::vector<T>& G, u64 k, u64 n)
+	{
+		std::stringstream ss;
+		if (G.size() % k)
+			throw RTE_LOC;
+		if (n % k)
+			throw RTE_LOC;
+
+		auto e = n / k;
+		auto sigma = G.size() / k;
+
+		if (G.size() != n * sigma)
+			throw RTE_LOC;
+
+		MatrixView<T> GG(G.data(), n, sigma);
+		auto iter = G.begin();
+		for (u64 i = 0; i < k; ++i)
+		{
+			auto b = i / sigma;
+			auto jb = b * sigma * e;
+			auto je = (b + 1) * sigma * e;
+
+			for (u64 j = 0; j < jb; ++j)
+				ss << '0' << ' ';
+			for (u64 j = jb; j < je; ++j)
+				ss << int(GG(j, i % sigma)) << ' ';
+			for (u64 j = je; j < n; ++j)
+				ss << '0' << ' ';
+			ss << std::endl;
+		}
+		ss << std::endl;
+		return ss.str();
+	}
+
+
 
 	template<typename I, typename R>
 	R block_enum(u64 w, u64 h, u64 k, u64 n, u64 sigma, const ChooseCache<I>& pascal_triangle) {
@@ -20,6 +141,7 @@ namespace osuCrypto {
 		if (n % k)
 			throw RTE_LOC;
 
+		//std::cout << "block_enum " << w <<" "<<h<<" " <<k <<" "<<n <<"  " <<sigma << std::endl;
 		R enumerator = 0;
 		size_t k_over_sigma = k / sigma;
 		size_t e = n / k;
@@ -31,20 +153,21 @@ namespace osuCrypto {
 			// R scale = R(1.0) / boost::multiprecision::pow(boost::multiprecision::cpp_int(2), e * sigma * q); // R(1 << e * sigma * q);
 			//R scale(1, boost::multiprecision::cpp_int(1) << (e * sigma * q));
 			R scale = R(1) / pow2_<I>(e * sigma * q);
-			// std::cerr << "scale " << scale << std::endl;
+			//std::cout << "scale " << scale << std::endl;
 
 			// Part 2: E_{w,q}
 			// std::cout  << (w-q) << "," << q << "," << (sigma-1) << std::endl;
 			I E_wq = choose_pascal<I>(k_over_sigma, q, pascal_triangle) * labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
-			// std::cerr << "E_wq " << E_wq << std::endl;
+			//std::cout << "E_wq " << E_wq <<" = " << choose_pascal<I>(k_over_sigma, q, pascal_triangle) <<
+			   // " * " << labeledBallBinCap<I>(w, q, sigma, pascal_triangle) << std::endl;
 
-			// Part 3: E_{q,h} = e * sigma * q choose h
+		   // Part 3: E_{q,h} = e * sigma * q choose h
 			I E_qh = choose_pascal<I>(e * sigma * q, h, pascal_triangle);
-			// std::cerr << "E_qh " << E_qh << std::endl;
+			//std::cout << "E_qh " << E_qh << std::endl;
 
-			// Putting it all together
+		   // Putting it all together
 			enumerator += scale * E_wq * E_qh;
-			// std::cerr << "Enumerator " << enumerator << std::endl;
+			//std::cout << "Enumerator " << enumerator << std::endl;
 		}
 		return enumerator;
 	}
@@ -178,6 +301,12 @@ namespace osuCrypto {
 						{
 							enumerator += cqw[q] * choose_pascal<I>(e * sigma * q, h, pascal_triangle);
 						}
+
+#ifndef NDEBUG
+						auto e2 = block_enum<I, R>(w, h, k, n, sigma, pascal_triangle);
+						if (enumerator != e2)
+							throw RTE_LOC;
+#endif
 
 						if constexpr (std::is_same_v<Full, int> == false)
 						{
@@ -543,12 +672,50 @@ namespace osuCrypto {
 		return 0;
 	}
 
+	// print a row major represetnation of the block matrix in 
+	// compact form.
+	template<typename T>
+	inline std::string printStans(std::vector<T>& G, u64 k, u64 n)
+	{
+		std::stringstream ss;
+		if (G.size() % k)
+			throw RTE_LOC;
+		if (n % k)
+			throw RTE_LOC;
+
+		auto e = n / k;
+		auto sigma = G.size() / k;
+
+		if (G.size() != n * sigma)
+			throw RTE_LOC;
+
+		auto iter = G.begin();
+		for (u64 i = 0; i < k; ++i)
+		{
+			auto b = i / sigma;
+			auto jb = b * sigma * e;
+			auto je = (b + 1) * sigma * e;
+
+			for (u64 j = 0; j < jb; ++j)
+				ss << '0' << ' ';
+			for (u64 j = jb; j < je; ++j)
+				ss << int(*iter++) << ' ';
+			for (u64 j = je; j < n; ++j)
+				ss << '0' << ' ';
+			ss << std::endl;
+		}
+		ss << std::endl;
+		return ss.str();
+	}
 
 
+	// we will generate all G <- D and exhaustively
+	// encode all c = x G and construct the enumerator.
+	// We then compare this with the formula based enumerator.
 	inline void blockEnum_exhaustive_Test(const CLP& cmd)
 	{
 		u64 v = cmd.isSet("v");
-		u64 n = cmd.getOr("n", 10);
+		u64 n = cmd.getOr("n", 6);
 		u64 sigma = cmd.getOr("sigma", 2); // window size
 		u64 numThreads = cmd.getOr("nt", std::thread::hardware_concurrency());
 		std::cout << "n: " << n << std::endl;
@@ -563,57 +730,139 @@ namespace osuCrypto {
 			throw RTE_LOC;
 		auto q = n / sigma;
 
+
 		ChooseCache<Int> pas(n);
-		std::vector<u8> Gbv(q * sigma * sigma);
-		//DenseMtx mtx(k, n);
+		std::vector<u8> Gbv(n * sigma);
+
+		using T = u8;
+		if (sigma > 8)
+			throw std::runtime_error("we assume sigma bits it inside a T");
+		std::vector<T> Gm(n);
+		Matrix<T> Xs(1ull << k, k / sigma);
+		T mask = (1ull << sigma) - 1;
+		for (u64 i = 0; i < Xs.rows(); ++i)
+		{
+			for (u64 j = 0; j < Xs.cols(); ++j)
+				Xs(i, j) = (i >> (j * sigma)) & mask;
+		}
 
 		blockEnumerator<Int, Rat>(actIn, actOut, false, k, n, sigma, numThreads, pas, pas, actEnum);
 
+		//auto Gs = old_::generate_all_gis_bool(k, n, sigma);
+		u64 ii = 0;
+		auto z = std::vector<u8>(n);
+
 		do
 		{
-			PointList points(k, n);
-			for (u64 b = 0, k = 0; b < q; ++b)
+			if (v)
 			{
-				for (u64 i = 0; i < sigma; ++i)
+				// convert Gbv into a sparse matrix Mtx.
+				// we treat each contigous sigma-bit chunks of Gbv 
+				// as a column of the matrix.
+				PointList points(k, n);
+				for (u64 b = 0, k = 0; b < q; ++b)
 				{
-					for (u64 j = 0; j < sigma; ++j, ++k)
+					// column index
+					for (u64 j = 0; j < sigma; ++j)
 					{
-						if (Gbv[k])
+						// row index
+						for (u64 i = 0; i < sigma; ++i)
 						{
-							points.push_back(b * sigma + i, b * sigma + j);
-							//mtx(b * sigma + i, b * sigma + j) = 1;
+							if (Gbv[k++])
+							{
+								points.push_back(b * sigma + i, b * sigma + j);
+							}
 						}
 					}
 				}
-			}
-			SparseMtx mtx(points);
-			if (v)
-			{
+
+				SparseMtx mtx(points);
 				std::cout << mtx << std::endl;
 				std::cout << std::endl;
 			}
 
-			std::vector<u8> bv(k);
-			for (u64 v = 1; v < (1ull << k); ++v)
+			for (u64 i = 0; i < n; ++i)
 			{
-				for (u64 j = 0; j < k; ++j)
-				{
-					bv[j] = (v & (1ull << j)) ? 1 : 0;
-				}
+				Gm[i] = 0;
+				for (u64 j = 0; j < sigma; ++j)
+					Gm[i] |= Gbv[i * sigma + j] << j;
+			}
 
-				auto z = mtx.mult(bv);
+			//std::vector<u8> bv(k);
+			//std::vector<short> bv2(k);
+			for (u64 x = 0; x < (1ull << k); ++x)
+			{
+				//for (u64 j = 0; j < k; ++j)
+				//{
+				//	bv[j] = (x & (1ull << j)) ? 1 : 0;
+				//	//bv2[j] = bv[j];
+				//}
+
+				//auto z2 = old_::multiply_x_g_bool(bv2, Gs[ii], sigma, k, n);
+				//auto z2 = std::vector<u8>(n);
+				//mtx.leftMultAdd(bv, z2);
+
+				//auto z2 = std::vector<u8>(n);
+				//blockMtxMult(Gbv, bv, z2, n, k, sigma, sigma);
+
+				blockMtxMultBit<u8>(Gm, Xs[x], z, n, k, sigma, sigma);
+
+				//if (z != z2)
+				//{
+
+				//	//std::cout << mtx << std::endl;
+				//	//std::cout << std::endl;
+
+				//	std::cout << blockMtxToString(Gbv, n, k) << std::endl;;
+				//	//std::cout << blockMtxBitToString(Gm, n, k) << std::endl;;
+
+				//	for (u64 i = 0; i < n; ++i)
+				//	{
+				//		auto rev = [](auto bv) {
+				//			BitVector r(bv.size());
+				//			for (u64 i = 0; i < bv.size(); ++i)
+				//				r[i] = bv[bv.size() - 1 - i];
+				//			return r;
+				//			};
+
+				//		std::cout << rev(BitVector((u8*) & Gm[i], sigma)) << std::endl;;
+				//	}
+
+				//	std::cout << "v" << std::endl;
+				//	for (u64 j = 0; j < bv.size(); ++j)
+				//		std::cout << int(bv[j]) << " ";
+				//	std::cout << std::endl;
+				//	std::cout << "z" << std::endl;
+				//	for (u64 j = 0; j < z.size(); ++j)
+				//		std::cout << int(z[j]) << " ";
+				//	std::cout << std::endl;
+				//	std::cout << "z2" << std::endl;
+				//	for (u64 j = 0; j < z2.size(); ++j)
+				//		std::cout << int(z2[j]) << " ";
+				//	std::cout << std::endl;
+
+				//	//blockMtxMult(Gbv, bv, z2, n, k, sigma, sigma);
+				//	//std::cout << std::endl;
+
+
+				//	throw RTE_LOC;
+				//}
+
 				u64 h = 0;
 				for (u64 j = 0; j < n; ++j)
 				{
 					h += z[j];
 				}
-				auto w = popcount(v);
+				auto w = popcount(x);
 				expEnum(w, h) += 1;
 			}
+
+
+			++ii;
 		} while (increment(Gbv));
 
 		for (u64 i = 0; i < expEnum.size(); ++i)
-			if(expEnum(i))
+			if (expEnum(i))
 				expEnum(i) = expEnum(i) / (Int(1) << Gbv.size());
 
 		if (expEnum != actEnum)
@@ -626,6 +875,9 @@ namespace osuCrypto {
 					{
 						std::cout << Color::Red;
 					}
+					std::cout << "------------" << std::endl;
+					//auto old = old_::block_enum_old<Int, Rat>(i, j, k, n, sigma);
+					//auto v2 = block_enum<Int,Rat>(i, j, k, n, sigma, pas);
 					std::cout << "exp " << expEnum(i, j) << ", act " << actEnum(i, j) << std::endl;
 
 					if (expEnum(i, j) != actEnum(i, j))
