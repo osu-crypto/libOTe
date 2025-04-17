@@ -29,11 +29,6 @@
 namespace osuCrypto
 {
 
-	extern bool old;
-
-
-
-
 	struct MD
 	{
 		// the expected minimum distance
@@ -152,18 +147,19 @@ namespace osuCrypto
 
 		if (et == SubcodeType::Repeater)
 		{
+			throw RTE_LOC;
 			// Compute distribution for the expansion step
 			// Expansion step is slightly different from the iterations
 			// At the beginning there are c_w = k choose w inputs of weight w<=k
 			// After expansion, c_w (for w<=n) depends on what expander we use
-			compute_expanding_distribution<I, R>(
-				distributions[0],
-				et, k, n,
-				sigma_expander, pascal_triangle);
+			//compute_expanding_distribution<I, R>(
+			//	distributions[0],
+			//	et, k, n,
+			//	sigma_expander, pascal_triangle);
 		}
 		else
 		{
-			blockEnumerator<I, R>(
+			BlockEnumerator<I, R>::enumerate(
 				{}, distributions[0], 1,
 				k, n, sigma_expander, num_threads,
 				pascal_triangle,
@@ -177,32 +173,19 @@ namespace osuCrypto
 		for (size_t iter = 0; iter < num_iters; iter++) {
 
 
-			if (old)
-			{
+			if (iter)
+				std::fill(distributions[(iter + 1) % 2].begin(), distributions[(iter + 1) % 2].end(), R(0));
 
-				blockEnumeratorOld<I, R>(distributions[iter % 2],
-					distributions[(iter + 1) % 2],
-					multiplier,
-					n, sigma,
-					num_threads,
-					pascal_triangle);
-			}
-			else
-			{
-				if (iter)
-					std::fill(distributions[(iter + 1) % 2].begin(), distributions[(iter + 1) % 2].end(), R(0));
-
-				blockEnumerator<I, R>(
-					distributions[iter % 2],
-					distributions[(iter + 1) % 2],
-					false,
-					n,
-					n,
-					sigma,
-					num_threads,
-					pascal_triangle,
-					pascal_triangle2);
-			}
+			BlockEnumerator<I, R>::enumerate(
+				distributions[iter % 2],
+				distributions[(iter + 1) % 2],
+				false,
+				n,
+				n,
+				sigma,
+				num_threads,
+				pascal_triangle,
+				pascal_triangle2);
 			// expand_and_interpolate(distributions[(iter + 1) % 2]);
 
 		}
@@ -415,8 +398,6 @@ namespace osuCrypto
 		print_timings = verbose;
 		bool print_dist = cmd.isSet("printDist") || cmd.isSet("numPoints");
 
-		old = cmd.isSet("old");
-
 		std::vector<Subcode> subcodes(subCodeTags.size());
 
 		for (size_t i = 0; i < subCodeTags.size(); ++i)
@@ -552,7 +533,7 @@ namespace osuCrypto
 			throw RTE_LOC;
 			break;
 		case osuCrypto::SubcodeType::Block:
-			blockEnumerator<Float, Float>({}, dist,
+			BlockEnumerator<Float, Float>::enumerate({}, dist,
 				systematic,
 				k,
 				n,
@@ -564,7 +545,7 @@ namespace osuCrypto
 			break;
 		case osuCrypto::SubcodeType::Accumulate:
 
-			accumulateEnumerator<Float, Float>(
+			AccumulatorEnumerator<Float, Float>::enumerate(
 				{},
 				dist,
 				systematic,
@@ -764,7 +745,6 @@ namespace osuCrypto
 		print_timings = verbose;
 		bool print_dist = cmd.isSet("printDist") || cmd.isSet("numPoints");
 
-		old = cmd.isSet("old");
 		//Int;
 		//boost::multiprecision::cpp_int
 		std::vector<std::vector<u64>> params;

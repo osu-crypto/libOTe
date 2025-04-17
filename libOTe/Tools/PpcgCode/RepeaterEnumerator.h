@@ -1,94 +1,107 @@
-#ifndef LIBOTE_REPEATERENUMERATOR_H
-#define LIBOTE_REPEATERENUMERATOR_H
+#pragma once
 
 #include "EnumeratorTools.h"
-
+#include "Enumerator.h"
 #include <iostream>
+#include "libOTe/Tools/LDPC/Mtx.h"
 
 namespace osuCrypto {
 
-    //template<typename I>
-    //I repeaterEnumerator(u64 w, u64 h, u64 n, u64 k);
 
-    template<typename I>
-    I repeaterEnumerator(u64 w, u64 h, u64 k, u64 e, const ChooseCache<I>&pascal_triangle) {
-        assert(w <= k);
-        assert(h <= e * k);
+	template<typename I>
+	I repeaterEnumerator(u64 w, u64 h, u64 k, u64 e, const ChooseCache<I>& pascal_triangle) {
+		assert(w <= k);
+		assert(h <= e * k);
 
-        // for E_w,h to be nonzero, h must equal to w*e
-        if (h != w * e) {
-            return 0;
-        }
-        return choose_pascal<I>(k, w, pascal_triangle);
-    }
-
-
-	template<typename I, typename R>
-	void repeaterEnumerator(
-		span<R> distribution,
-		u64 k,
-		u64 n,
-		const ChooseCache<I>& pascal_triangle) {
-		auto e = n / k;
-		if (distribution.size() != n + 1)
-			throw RTE_LOC;
-		if (k * e != n)
-			throw RTE_LOC;
-
-		// NOTE we exclude w=0 from the input x as it would always result in all zeros, so E_{w=0,h=0}=1
-		// but then minimum distance would always be 0 as the distribution would be 1 in the first entry! 
-		// in the following iterations we do care about w=0 as non-zero input could result in h=0
-		distribution[0] = I(0);
-		for (u64 h = 1; h <= n; h++) {
-			u64 w = h / e; // all other w will result in 0 enumerator, only non-zero when h = w * e
-			if (w * e == h) {
-				distribution[h] = repeaterEnumerator<I>(w, h, k, e, pascal_triangle);
-			}
-			else {
-				distribution[h] = I(0);
-			}
+		// for E_w,h to be nonzero, h must equal to w*e
+		if (h != w * e) {
+			return 0;
 		}
-
-		/*// the method below is also correct
-		for (size_t h = 0; h <= n; h++) {
-			// note that for firstSubcode, we do NOT need this loop, but used now for modularity
-			// NOTE we exclude w=0 from the input x as it would always result in all zeros, so E_{w=0,h=0}=1
-			// but then minimum distance would always be 0 as the distribution would be 1 in the first entry!
-			// in the following iterations we care about w=0 as non-zero input could result in h=0
-			for (size_t w = 1; w <= k; w++) {
-				distribution[h] += repeaterEnumerator<I>(w, h, k, e, pascal_triangle);
-				assert(distribution[0] == 0);
-			}
-		}*/
+		return choose_pascal<I>(k, w, pascal_triangle);
 	}
 
 
-    //inline void repeaterEnumerator(oc::CLP& cmd) {
-    //    std::cout << "Computing enumerator for the repeater..." << std::endl;
+	template<typename I, typename R, typename Enum = int>
+	void repeaterEnumerator(
+		span<const R> inDist,
+		span<R> outDist,
+		u64 k,
+		u64 n,
+		const ChooseCache<I>& choose,
+		Enum&& full = {}) {
+		if (n % k)
+			throw RTE_LOC;
 
-    //    u64 w = cmd.getOr("w", 5); // input weight
-    //    u64 h = cmd.getOr("h", 15); // output weight
-    //    u64 k = cmd.getOr("k", 10); // msg length (note NOT codeword length, which is e * k)
-    //    u64 e = cmd.getOr("e", 3); // # of repetitions
+		auto e = n / k;
+		if (inDist.size() != k + 1)
+			throw RTE_LOC;
+		if (outDist.size() != n + 1)
+			throw RTE_LOC;
 
-    //    std::cout << "w: " << w << std::endl;
-    //    std::cout << "h: " << h << std::endl;
-    //    std::cout << "k: " << k << std::endl;
-    //    std::cout << "e: " << e << std::endl;
+		std::fill(outDist.begin(), outDist.end(), R(0));
+		outDist[0] = inDist[0];
+		if constexpr (std::is_same_v<Enum, int> == false)
+			full(0, 0) = 1;
 
-    //    ChooseCache<Int> pascal_triangle;
-    //    Int repeater_enumerator = repeaterEnumerator<Int>(w, h, k, e, pascal_triangle);
-    //    std::cout << "Repeater Enumerator: " << repeater_enumerator << std::endl;
+		for (u64 w = 1; w <= k; ++w)
+		{
+			auto h = w * e;
+			outDist[h] = inDist[w];
 
-    //    //assert(repeaterEnumerator<Int>(5, 15, 10, 3) == 252);
-    //    //assert(repeaterEnumerator<Int>(5, 15, 10, 2) == 0);
-    //}
+			if constexpr (std::is_same_v<Enum, int> == false)
+				full(w, h) = choose(k,w);
+		}
+	}
 
-    //inline void repeaterEnumMain(oc::CLP& cmd) {
-    //    // if (cmd.isSet("enum")) {
-    //    repeaterEnumerator(cmd);
-    //    // }
-    //}
+	template<typename I, typename R>
+	struct RepeaterEnumerator : Enumerator<R>
+	{
+		using Enumerator<R>::mK;
+		using Enumerator<R>::mN;
+
+		const ChooseCache<I>& mChoose;
+
+		RepeaterEnumerator(u64 k,
+			u64 n,
+			const ChooseCache<I>& choose)
+			: Enumerator<R>{ k, n }
+			, mChoose(choose)
+		{
+			if (n % k)
+				throw RTE_LOC;
+		}
+
+		void enumerate(
+			span<const R> inDist,
+			span<R> outDist) override
+		{
+			repeaterEnumerator(inDist, outDist, mK, mN, mChoose);
+		}
+		void enumerate(
+			span<const R> inDist,
+			span<R> outDist,
+			MatrixView<R> fullEnum) override
+		{
+			repeaterEnumerator(inDist, outDist, mK, mN, mChoose, fullEnum);
+		}
+
+		SparseMtx getMtx() const
+		{
+			PointList list(mK, mN);
+			for (u64 w = 0; w < mK; ++w)
+			{
+				for (u64 e = 0; e < mN / mK; ++e)
+				{
+					auto h = w + mK * e;
+					list.push_back(w, h);
+				}
+			}
+			return list;
+		}
+
+	};
+
+	void RepeaterEnum_exhaustive_Test(const CLP& cmd);
+
 }
 
-#endif //LIBOTE_REPEATERENUMERATOR_H

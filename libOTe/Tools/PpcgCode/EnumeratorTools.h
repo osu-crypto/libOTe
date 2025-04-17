@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include "cryptoTools/Common/CLP.h"
 #include "cryptoTools/Common/Log.h"
+#include "cryptoTools/Common/Matrix.h"
 
 #ifdef ENABLE_BOOST
 #include <boost/multiprecision/cpp_bin_float.hpp>
@@ -1053,6 +1054,57 @@ namespace osuCrypto {
 
 		for (u64 h = 0; h < enumerator.cols(); ++h)
 			outputDist[h].backend().normalize();
+	}
+
+	// Given the matrix enumerator e1 and e2 for matrices
+	// G1 and G2, compute the expected enumerator matrix E
+	// for
+	//
+	//  G = G1 pi G2
+	//
+	// where pi is the permutation matrix.
+	//
+	// E(w, h) = sum_h1 E1(w, h1) * E2(h1, h) / choose(n1, h1)
+	//
+	template<typename R, typename E1, typename E2, typename I>
+	Matrix<R> composeEnums(const E1& e1, const E2& e2, const ChooseCache<I>& choose)
+	{
+		auto k1 = e1.rows() - 1;
+		auto k2 = e2.rows() - 1;
+		auto n1 = e1.cols() - 1;
+		auto n2 = e2.cols() - 1;
+
+		if (n1 != k2)
+			throw RTE_LOC;
+
+		auto r = Matrix<R>(e1.rows(), e2.cols());
+		for (u64 w = 0; w <= k1; ++w)
+		{
+			for (u64 h = 0; h <= n2; ++h)
+			{
+				for (u64 h1 = 0; h1 <= n1; ++h1)
+				{
+					r(w, h) += e1(w, h1) * e2(h1, h) / choose(n1, h1);
+				}
+				r(w, h).backend().normalize();
+			}
+		}
+		return r;
+	}
+
+	template<typename Enum>
+	std::string enumToString(Enum&& e)
+	{
+		std::stringstream ss;
+		for (u64 i = 0; i < e.rows(); ++i)
+		{
+			for (u64 j = 0; j < e.cols(); ++j)
+			{
+				ss << e(i, j) << " ";
+			}
+			ss << std::endl;
+		}
+		return ss.str();
 	}
 
 //

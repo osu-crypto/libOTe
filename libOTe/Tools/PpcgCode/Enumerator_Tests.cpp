@@ -8,6 +8,8 @@
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "oldMinDistTest.h"
+#include "RepeaterEnumerator.h"
+#include "CompositionEnumerator.h"
 
 #define BITSET_SIZE 128
 
@@ -384,233 +386,165 @@ namespace osuCrypto {
 
 
 
-	void expanding_distribution_opt_test(const CLP& cmd)
-	{
+	//void expanding_distribution_opt_test(const CLP& cmd)
+	//{
 
-		using INT = Int;
-		using RAT = Rat;
-		//using INT = Float;
-		//using RAT = Float;
-		bool systematic = true;
-		u64 k = 1 << cmd.getOr("kk", 6);
-		u64 n = k + k * systematic;
-		u64 sigma = cmd.getOr("s", 16);
-		u64 numThreads = cmd.getOr("threads", 4);
-		ChooseCache<INT> pas(n);
-		u64 trials = cmd.getOr("trials", 1);
-		Timer timer;
-		print_timings = cmd.isSet("print_timings");
+	//	using INT = Int;
+	//	using RAT = Rat;
+	//	//using INT = Float;
+	//	//using RAT = Float;
+	//	bool systematic = true;
+	//	u64 k = 1 << cmd.getOr("kk", 6);
+	//	u64 n = k + k * systematic;
+	//	u64 sigma = cmd.getOr("s", 16);
+	//	u64 numThreads = cmd.getOr("threads", 4);
+	//	ChooseCache<INT> pas(n);
+	//	u64 trials = cmd.getOr("trials", 1);
+	//	Timer timer;
+	//	print_timings = cmd.isSet("print_timings");
 
-		for (u64 tt = 0; tt < trials; ++tt)
-		{
+	//	for (u64 tt = 0; tt < trials; ++tt)
+	//	{
 
-			std::vector<RAT>/* inputDist(k + 1), */outputDist0(n + 1), outputDist1(n + 1);
-			//for (u64 i = 1; i < inputDist.size(); ++i)
-			//	inputDist[i] = choose_pascal(k, i, pas);
+	//		std::vector<RAT>/* inputDist(k + 1), */outputDist0(n + 1), outputDist1(n + 1);
+	//		//for (u64 i = 1; i < inputDist.size(); ++i)
+	//		//	inputDist[i] = choose_pascal(k, i, pas);
 
-			timer.setTimePoint("start");
+	//		timer.setTimePoint("start");
 
-			blockEnumerator<INT, RAT>(
-				{}, outputDist0,
-				systematic, k, n, sigma,
-				numThreads, pas, pas);
-			timer.setTimePoint("opt");
+	//		BlockEnumerator<INT, RAT>::enumerate(
+	//			{}, outputDist0,
+	//			systematic, k, n, sigma,
+	//			numThreads, pas, pas);
+	//		timer.setTimePoint("opt");
 
-			compute_expanding_block_distribution<INT, RAT>(outputDist1, k, n, sigma, pas);
-			timer.setTimePoint("old");
+	//		compute_expanding_block_distribution<INT, RAT>(outputDist1, k, n, sigma, pas);
+	//		timer.setTimePoint("old");
 
-			if (std::is_same_v<INT, Float>)
-			{
-				for (u64 i = 0; i < outputDist0.size(); ++i)
-				{
-					auto f = (outputDist0[i] / outputDist1[i]);
-					if (f > 1.001 || f < 0.999)
-					{
-						std::cout << Color::Red;
-						std::cout << i << "  " << outputDist0[i] << "  " << outputDist1[i] << std::endl << Color::Default;
-						throw RTE_LOC;
-					}
-				}
-			}
-			else
-			{
+	//		if (std::is_same_v<INT, Float>)
+	//		{
+	//			for (u64 i = 0; i < outputDist0.size(); ++i)
+	//			{
+	//				auto f = (outputDist0[i] / outputDist1[i]);
+	//				if (f > 1.001 || f < 0.999)
+	//				{
+	//					std::cout << Color::Red;
+	//					std::cout << i << "  " << outputDist0[i] << "  " << outputDist1[i] << std::endl << Color::Default;
+	//					throw RTE_LOC;
+	//				}
+	//			}
+	//		}
+	//		else
+	//		{
 
-				if (outputDist0 != outputDist1)
-				{
-					std::cout << "opt vs old" << std::endl;
-					for (u64 i = 0; i < outputDist0.size(); ++i)
-					{
-						if (outputDist0[i] != outputDist1[i])
-							std::cout << Color::Red;
-						std::cout << i << "  " << outputDist0[i] << "  " << outputDist1[i] << std::endl << Color::Default;
-					}
-					throw RTE_LOC;
-				}
-			}
-		}
-		if (cmd.isSet("timing"))
-			std::cout << timer << std::endl;
-	}
+	//			if (outputDist0 != outputDist1)
+	//			{
+	//				std::cout << "opt vs old" << std::endl;
+	//				for (u64 i = 0; i < outputDist0.size(); ++i)
+	//				{
+	//					if (outputDist0[i] != outputDist1[i])
+	//						std::cout << Color::Red;
+	//					std::cout << i << "  " << outputDist0[i] << "  " << outputDist1[i] << std::endl << Color::Default;
+	//				}
+	//				throw RTE_LOC;
+	//			}
+	//		}
+	//	}
+	//	if (cmd.isSet("timing"))
+	//		std::cout << timer << std::endl;
+	//}
 
-	void compute_block_distribution_opt_test(const CLP& cmd)
-	{
-		using INT = Int;
-		using RAT = Rat;
-		//using INT = Float;
-		//using RAT = Float;
-		bool systematic = false;
-		u64 k = 1 << cmd.getOr("kk", 6);
-		u64 n = k + k * systematic;
-		u64 sigma = cmd.getOr("s", 16);
-		u64 numThreads = cmd.getOr("threads", 4);
-		ChooseCache<INT> pas(n);
-		u64 trials = cmd.getOr("trials", 1);
-		Timer timer;
-		PRNG prng(CCBlock);
-		print_timings = cmd.isSet("print_timings");
+	//void minimum_distance_tests(const CLP& cmd) {
 
-		for (u64 tt = 0; tt < trials; ++tt)
-		{
+	//	u64 numThreads = 16;
+	//	// expander, multiplier, num_iters, k, n, sigma, sigma_expander (0 if repeater), approximate (1 means compute all 
+	//	// elements in the distribution exactly)
+	//	std::vector<std::vector<u64>> params = {
+	//			{0, 1, 3, 6, 3, 0, 1}, // repeater and block enumerator
+	//			{0, 1, 4, 8, 2, 0, 1}, // repeater and block enumerator
+	//			{0, 1, 6, 12, 3, 0, 1}, // repeater and block enumerator
+	//			//{0, 1, 4, 8, 4, 2, 1}, // expanding block and block enumerator
+	//			//{0, 1, 3, 9, 3, 3, 1}, // expanding block and block enumerator
+	//			//{0, 1, 4, 8, 8, 2} // expanding block and block enumerator
+	//			// TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
+	//			//  TODO add more tests with different expander multiplier
+	//			//{4,12,2},
+	//			//{6,6,3}
+	//	};
+	//	auto et = SubcodeType::Repeater;
 
-			std::vector<RAT> inputDist(k + 1), outputDist0(n + 1), outputDist1(n + 1);
-			for (u64 i = 0; i < inputDist.size(); ++i)
-				inputDist[i] = i;
+	//	for (const auto& param : params) {
+	//		// TODO remove when ready
+	//		//if (param[1] != 0) assert(false);
+	//		std::vector<Rat> expected_distribution =
+	//			minimum_distance<Int, Rat>(et,
+	//				param[0],// multipler
+	//				param[1],// num_iters
+	//				param[2],// k
+	//				param[3],// n
+	//				param[4],// sigma
+	//				param[5],// sigma_expander
+	//				param[6],// approximate
+	//				numThreads,
+	//				0, 0, 0);// verbose, numpoints, normalize
+	//		double expected_md =
+	//			minimum_distance_from_distribution<Rat>(expected_distribution).mExpectMD;
 
-			timer.setTimePoint("start");
-			blockEnumerator<INT, RAT>(
-				inputDist, outputDist0,
-				systematic, k, n, sigma,
-				numThreads, pas, pas);
-			timer.setTimePoint("opt");
-
-			blockEnumeratorOld<INT, RAT>(inputDist, outputDist1,
-				0, n, sigma, numThreads, pas);
-			timer.setTimePoint("old");
-
-			if (std::is_same_v<INT, Float>)
-			{
-				for (u64 i = 0; i < outputDist0.size(); ++i)
-				{
-					auto f = (outputDist0[i] / outputDist1[i]);
-					if (f > 1.001 || f < 0.999)
-					{
-						std::cout << Color::Red;
-						std::cout << i << "  " << outputDist0[i] << "  " << outputDist1[i] << std::endl << Color::Default;
-						throw RTE_LOC;
-					}
-				}
-			}
-			else
-			{
-
-				if (outputDist0 != outputDist1)
-				{
-					for (u64 i = 0; i < outputDist0.size(); ++i)
-					{
-						if (outputDist0[i] != outputDist1[i])
-							std::cout << Color::Red;
-						std::cout << i << "  " << outputDist0[i] << "  " << outputDist1[i] << std::endl << Color::Default;
-					}
-					throw RTE_LOC;
-				}
-			}
-		}
-		if (cmd.isSet("timing"))
-			std::cout << timer << std::endl;
-	}
-
-	void minimum_distance_tests(const CLP& cmd) {
-
-		u64 numThreads = 16;
-		// expander, multiplier, num_iters, k, n, sigma, sigma_expander (0 if repeater), approximate (1 means compute all 
-		// elements in the distribution exactly)
-		std::vector<std::vector<u64>> params = {
-				{0, 1, 3, 6, 3, 0, 1}, // repeater and block enumerator
-				{0, 1, 4, 8, 2, 0, 1}, // repeater and block enumerator
-				{0, 1, 6, 12, 3, 0, 1}, // repeater and block enumerator
-				//{0, 1, 4, 8, 4, 2, 1}, // expanding block and block enumerator
-				//{0, 1, 3, 9, 3, 3, 1}, // expanding block and block enumerator
-				//{0, 1, 4, 8, 8, 2} // expanding block and block enumerator
-				// TODO add test with >1 iteration {0, 0, 1, 6, 12, 2},
-				//  TODO add more tests with different expander multiplier
-				//{4,12,2},
-				//{6,6,3}
-		};
-		auto et = SubcodeType::Repeater;
-
-		for (const auto& param : params) {
-			// TODO remove when ready
-			//if (param[1] != 0) assert(false);
-			std::vector<Rat> expected_distribution =
-				minimum_distance<Int, Rat>(et,
-					param[0],// multipler
-					param[1],// num_iters
-					param[2],// k
-					param[3],// n
-					param[4],// sigma
-					param[5],// sigma_expander
-					param[6],// approximate
-					numThreads,
-					0, 0, 0);// verbose, numpoints, normalize
-			double expected_md =
-				minimum_distance_from_distribution<Rat>(expected_distribution).mExpectMD;
-
-			u64 seed = 24523452345234523;
-			std::mt19937 gen(seed); // Mersenne Twister engine
-			size_t num_random = cmd.getOr("trials", 1000);
-			std::vector<Rat> approximate_true_distribution = brute_force_block_minimum_distance<Int, Rat>(
-				et,
-				param[0],
-				param[1],
-				param[2],
-				param[3],
-				param[4],
-				param[5],
-				num_random,
-				gen,
-				false,
-				cmd.isSet("v"));
-			double approximate_true_md = minimum_distance_from_distribution<Rat>(approximate_true_distribution).mExpectMD;
+	//		u64 seed = 24523452345234523;
+	//		std::mt19937 gen(seed); // Mersenne Twister engine
+	//		size_t num_random = cmd.getOr("trials", 1000);
+	//		std::vector<Rat> approximate_true_distribution = brute_force_block_minimum_distance<Int, Rat>(
+	//			et,
+	//			param[0],
+	//			param[1],
+	//			param[2],
+	//			param[3],
+	//			param[4],
+	//			param[5],
+	//			num_random,
+	//			gen,
+	//			false,
+	//			cmd.isSet("v"));
+	//		double approximate_true_md = minimum_distance_from_distribution<Rat>(approximate_true_distribution).mExpectMD;
 
 
-			// Compare the full distributions
-			bool similar = compareDistributions<Rat>(expected_distribution, approximate_true_distribution, param[4] + 1, 0.1); // last param is error tolerance
-			if (!similar) {
-				print_distribution<Rat>(expected_distribution, approximate_true_distribution);
+	//		// Compare the full distributions
+	//		bool similar = compareDistributions<Rat>(expected_distribution, approximate_true_distribution, param[4] + 1, 0.1); // last param is error tolerance
+	//		if (!similar) {
+	//			print_distribution<Rat>(expected_distribution, approximate_true_distribution);
 
-				throw RTE_LOC;
-			}
+	//			throw RTE_LOC;
+	//		}
 
-			if (expected_md != approximate_true_md) {
-				std::cout << "Expected minimum distance: " << expected_md << std::endl;
-				// std::cout << "True minimum distance: " << true_md << std::endl;
-				std::cout << "Approximate true minimum distance: " << approximate_true_md << std::endl;
+	//		if (expected_md != approximate_true_md) {
+	//			std::cout << "Expected minimum distance: " << expected_md << std::endl;
+	//			// std::cout << "True minimum distance: " << true_md << std::endl;
+	//			std::cout << "Approximate true minimum distance: " << approximate_true_md << std::endl;
 
-				print_distribution<Rat>(expected_distribution, approximate_true_distribution);
+	//			print_distribution<Rat>(expected_distribution, approximate_true_distribution);
 
-				throw RTE_LOC;
-			}
+	//			throw RTE_LOC;
+	//		}
 
-		}
-	}
+	//	}
+	//}
 
 	void minimumDistanceTestMain(oc::CLP& cmd) {
 		TestCollection tests;
 
-
+		tests.add("RepeaterEnum_exhaustive_Test        ", RepeaterEnum_exhaustive_Test);
 		tests.add("ballsBinsCap_Test                   ", ballsBinsCap_Test);
 		tests.add("minimumDistanceTestMain_old         ", minimumDistanceTestMain_old);
 		tests.add("accumulateEnum_exhaustive_Test      ", accumulateEnum_exhaustive_Test);
 		tests.add("blockEnum_exhaustive_Test           ", blockEnum_exhaustive_Test);
+		tests.add("composeEnum_exhaustive_Test         ", composeEnum_exhaustive_Test);
 		
 
 		tests.add("chooseTest                          ", chooseTest);
-		tests.add("expanding_distribution_opt_test     ", expanding_distribution_opt_test);
-		tests.add("compute_block_distribution_opt_test ", compute_block_distribution_opt_test);
-		tests.add("minimum_distance_tests              ", minimum_distance_tests);
+		//tests.add("expanding_distribution_opt_test     ", expanding_distribution_opt_test);
+		//tests.add("minimum_distance_tests              ", minimum_distance_tests);
 		tests.runIf(cmd);
 	}
-	bool old = true;
 
 
 }

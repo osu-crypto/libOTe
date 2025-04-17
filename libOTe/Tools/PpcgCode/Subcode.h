@@ -26,51 +26,54 @@ namespace osuCrypto
 			ChooseCache<I>& pascal_triangle,
 			ChooseCache<Int>& pascal_triangle2)
 		{
-			if (inDist.size() && inDist.size() != mK + 1)
-				throw RTE_LOC;
+			throw RTE_LOC;
 
-			if (outDist.size() == 0)
-			{
-				outDist.resize(mN + 1);
-			}
-			else
-			{
-				outDist.resize(mN + 1);
-				std::fill(outDist.begin(), outDist.end(), R(0));
-			}
+			//if (inDist.size() && inDist.size() != mK + 1)
+			//	throw RTE_LOC;
 
-			switch (mType)
-			{
-			case SubcodeType::Repeater:
-				if (inDist.size())
-					throw std::runtime_error("repeater does not support an input distirbution. " LOCATION);
+			//if (outDist.size() == 0)
+			//{
+			//	outDist.resize(mN + 1);
+			//}
+			//else
+			//{
+			//	outDist.resize(mN + 1);
+			//	std::fill(outDist.begin(), outDist.end(), R(0));
+			//}
 
-				repeaterEnumerator<I, R>(outDist, mK, mN, pascal_triangle);
+			//switch (mType)
+			//{
+			//case SubcodeType::Repeater:
+			//	if (inDist.size())
+			//		throw std::runtime_error("repeater does not support an input distirbution. " LOCATION);
 
-				break;
-			case SubcodeType::Block:
+			//	repeaterEnumerator<I, R>(outDist, mK, mN, pascal_triangle);
 
-				blockEnumerator<I, R>(
-					inDist,
-					outDist,
-					mSystematic,
-					mK,
-					mN,
-					mSigma,
-					numThreads,
-					pascal_triangle,
-					pascal_triangle2);
+			//	break;
+			//case SubcodeType::Block:
 
-				break;
-			case SubcodeType::Accumulate:
+			//	BlockEnumerator<I, R>::enumerate(
+			//		inDist,
+			//		outDist,
+			//		mSystematic,
+			//		mK,
+			//		mN,
+			//		mSigma,
+			//		numThreads,
+			//		pascal_triangle,
+			//		pascal_triangle2);
 
-				accumulateEnumerator<I, R>(inDist, outDist, mSystematic,
-					mK, mN, numThreads,
-					pascal_triangle);
-				break;
-			default:
-				throw RTE_LOC;
-			}
+			//	break;
+			//case SubcodeType::Accumulate:
+
+
+			//	AccumulatorEnumerator<I, R>::enumerate(inDist, outDist, mSystematic,
+			//		mK, mN, numThreads,
+			//		pascal_triangle);
+			//	break;
+			//default:
+			//	throw RTE_LOC;
+			//}
 		}
 
 	};
