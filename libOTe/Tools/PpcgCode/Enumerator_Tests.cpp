@@ -602,6 +602,7 @@ namespace osuCrypto {
 		tests.add("minimumDistanceTestMain_old         ", minimumDistanceTestMain_old);
 		tests.add("accumulateEnum_exhaustive_Test      ", accumulateEnum_exhaustive_Test);
 		tests.add("blockEnum_exhaustive_Test           ", blockEnum_exhaustive_Test);
+		
 
 		tests.add("chooseTest                          ", chooseTest);
 		tests.add("expanding_distribution_opt_test     ", expanding_distribution_opt_test);

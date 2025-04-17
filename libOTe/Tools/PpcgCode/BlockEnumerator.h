@@ -1,5 +1,4 @@
-#ifndef LIBOTE_BLOCKENUMERATOR_H
-#define LIBOTE_BLOCKENUMERATOR_H
+#pragma once
 
 #include "EnumeratorTools.h"
 #include "cryptoTools/Common/Matrix.h"
@@ -302,11 +301,11 @@ namespace osuCrypto {
 							enumerator += cqw[q] * choose_pascal<I>(e * sigma * q, h, pascal_triangle);
 						}
 
-#ifndef NDEBUG
-						auto e2 = block_enum<I, R>(w, h, k, n, sigma, pascal_triangle);
-						if (enumerator != e2)
-							throw RTE_LOC;
-#endif
+//#ifndef NDEBUG
+//						auto e2 = block_enum<I, R>(w, h, k, n, sigma, pascal_triangle);
+//						if (enumerator != e2)
+//							throw RTE_LOC;
+//#endif
 
 						if constexpr (std::is_same_v<Full, int> == false)
 						{
@@ -601,27 +600,6 @@ namespace osuCrypto {
 
 
 
-	inline void block_enum(oc::CLP& cmd) {
-		std::cout << "Computing enumerator for the block construction..." << std::endl;
-
-		u64 w = cmd.getOr("w", 5); // input weight
-		u64 h = cmd.getOr("h", 15); // output weight
-		u64 k = cmd.getOr("k", 10); // msg length
-		u64 n = cmd.getOr("n", 20); // codeword length
-		u64 sigma = cmd.getOr("sigma", 2); // window size
-
-		std::cout << "w: " << w << std::endl;
-		std::cout << "h: " << h << std::endl;
-		std::cout << "k: " << k << std::endl;
-		std::cout << "n: " << n << std::endl;
-		std::cout << "sigma: " << sigma << std::endl;
-
-		ChooseCache<Int> pascal_triangle;
-		Rat block_enumerator = block_enum<Int, Rat>(w, h, k, n, sigma, pascal_triangle);
-		std::cout << "Block Enumerator: " << block_enumerator << std::endl;
-	}
-
-
 	//std::vector<short> decimalToBinary_(uint64_t n, uint64_t bitsize) {
 	//	assert(bitsize < 64);
 	//	assert(n < (uint64_t(1) << bitsize));
@@ -715,190 +693,119 @@ namespace osuCrypto {
 	inline void blockEnum_exhaustive_Test(const CLP& cmd)
 	{
 		u64 v = cmd.isSet("v");
-		u64 n = cmd.getOr("n", 6);
-		u64 sigma = cmd.getOr("sigma", 2); // window size
+		auto Ns = cmd.getManyOr<u64>("n", { 8, 6 });
+		auto Ks = cmd.getManyOr<u64>("k", { 4, 6 });
+		auto sigmaKs = cmd.getManyOr<u64>("sigma", { 2,2 }); // window size
+		//auto systematics = cmd.getManyOr<u64>("sys", { false, true }); // window size
 		u64 numThreads = cmd.getOr("nt", std::thread::hardware_concurrency());
-		std::cout << "n: " << n << std::endl;
-		std::cout << "sigma: " << sigma << std::endl;
-		std::vector<Rat> actIn(n + 1);
-		std::vector<Rat> actOut(n + 1);
-		Matrix<Rat> actEnum(n + 1, n + 1);
-		Matrix<Rat> expEnum(n + 1, n + 1);
-		u64 k = n;
 
-		if (n % sigma)
+		if (Ns.size() != Ks.size() ||
+			Ns.size() != sigmaKs.size())
 			throw RTE_LOC;
-		auto q = n / sigma;
 
-
-		ChooseCache<Int> pas(n);
-		std::vector<u8> Gbv(n * sigma);
-
-		using T = u8;
-		if (sigma > 8)
-			throw std::runtime_error("we assume sigma bits it inside a T");
-		std::vector<T> Gm(n);
-		Matrix<T> Xs(1ull << k, k / sigma);
-		T mask = (1ull << sigma) - 1;
-		for (u64 i = 0; i < Xs.rows(); ++i)
+		for (u64 p = 0; p < Ns.size(); ++p)
 		{
-			for (u64 j = 0; j < Xs.cols(); ++j)
-				Xs(i, j) = (i >> (j * sigma)) & mask;
-		}
-
-		blockEnumerator<Int, Rat>(actIn, actOut, false, k, n, sigma, numThreads, pas, pas, actEnum);
-
-		//auto Gs = old_::generate_all_gis_bool(k, n, sigma);
-		u64 ii = 0;
-		auto z = std::vector<u8>(n);
-
-		do
-		{
-			if (v)
+			auto n = Ns[p];
+			auto k = Ks[p];
+			auto sigmaK = sigmaKs[p];
+			for (auto sys : { false/*, true*/ })
 			{
-				// convert Gbv into a sparse matrix Mtx.
-				// we treat each contigous sigma-bit chunks of Gbv 
-				// as a column of the matrix.
-				PointList points(k, n);
-				for (u64 b = 0, k = 0; b < q; ++b)
+
+				std::cout << "n: " << n << std::endl;
+				std::cout << "k: " << k << std::endl;
+				std::cout << "sigmaK: " << sigmaK << std::endl;
+				std::cout << "sys: " << sys << std::endl;
+
+				std::vector<Rat> actIn(k + 1);
+				std::vector<Rat> actOut(n + 1 + k * sys);
+				Matrix<Rat> actEnum(actIn.size(), actOut.size());
+				Matrix<Rat> expEnum(actIn.size(), actOut.size());
+
+				auto sigmaN = n / k * sigmaK;
+				auto q = n / sigmaK;
+
+				if (k % sigmaK)
+					throw RTE_LOC;
+				if (n % sigmaN)
+					throw RTE_LOC;
+
+				ChooseCache<Int> pas(n);
+				std::vector<u8> Gbv(n * sigmaK);
+
+				using T = u8;
+				if (sigmaK > 8)
+					throw std::runtime_error("we assume sigmaK bits it inside a T");
+				std::vector<T> Gm(n);
+				Matrix<T> Xs(1ull << k, k / sigmaK);
+				T mask = (1ull << sigmaK) - 1;
+				for (u64 i = 0; i < Xs.rows(); ++i)
 				{
-					// column index
-					for (u64 j = 0; j < sigma; ++j)
+					for (u64 j = 0; j < Xs.cols(); ++j)
+						Xs(i, j) = (i >> (j * sigmaK)) & mask;
+				}
+
+				blockEnumerator<Int, Rat>(actIn, actOut, sys, k, n + k * sys, sigmaK, numThreads, pas, pas, actEnum);
+
+				//auto Gs = old_::generate_all_gis_bool(k, n, sigmaK);
+				u64 ii = 0;
+				auto z = std::vector<u8>(n);
+
+				do
+				{
+
+					for (u64 i = 0; i < n; ++i)
 					{
-						// row index
-						for (u64 i = 0; i < sigma; ++i)
+						Gm[i] = 0;
+						for (u64 j = 0; j < sigmaK; ++j)
+							Gm[i] |= Gbv[i * sigmaK + j] << j;
+					}
+
+					for (u64 x = 0; x < (1ull << k); ++x)
+					{
+						blockMtxMultBit<u8>(Gm, Xs[x], z, k, n, sigmaK, sigmaN);
+						auto w = popcount(x);
+						u64 h = w * sys;
+						for (u64 j = 0; j < n; ++j)
 						{
-							if (Gbv[k++])
+							h += z[j];
+						}
+						expEnum(w, h) += 1;
+					}
+
+
+					++ii;
+				} while (increment(Gbv));
+
+				for (u64 i = 0; i < expEnum.size(); ++i)
+					if (expEnum(i))
+						expEnum(i) = expEnum(i) / (Int(1) << Gbv.size());
+
+				if (expEnum != actEnum)
+				{
+					for (u64 i = 0; i < expEnum.rows(); ++i)
+					{
+						for (u64 j = 0; j < expEnum.cols(); ++j)
+						{
+							if (expEnum(i, j) != actEnum(i, j))
 							{
-								points.push_back(b * sigma + i, b * sigma + j);
+								std::cout << Color::Red;
+							}
+							std::cout << "------------" << std::endl;
+							std::cout << "exp " << expEnum(i, j) << ", act " << actEnum(i, j) << std::endl;
+
+							if (expEnum(i, j) != actEnum(i, j))
+							{
+								std::cout << Color::Default;
 							}
 						}
 					}
-				}
 
-				SparseMtx mtx(points);
-				std::cout << mtx << std::endl;
-				std::cout << std::endl;
-			}
-
-			for (u64 i = 0; i < n; ++i)
-			{
-				Gm[i] = 0;
-				for (u64 j = 0; j < sigma; ++j)
-					Gm[i] |= Gbv[i * sigma + j] << j;
-			}
-
-			//std::vector<u8> bv(k);
-			//std::vector<short> bv2(k);
-			for (u64 x = 0; x < (1ull << k); ++x)
-			{
-				//for (u64 j = 0; j < k; ++j)
-				//{
-				//	bv[j] = (x & (1ull << j)) ? 1 : 0;
-				//	//bv2[j] = bv[j];
-				//}
-
-				//auto z2 = old_::multiply_x_g_bool(bv2, Gs[ii], sigma, k, n);
-				//auto z2 = std::vector<u8>(n);
-				//mtx.leftMultAdd(bv, z2);
-
-				//auto z2 = std::vector<u8>(n);
-				//blockMtxMult(Gbv, bv, z2, n, k, sigma, sigma);
-
-				blockMtxMultBit<u8>(Gm, Xs[x], z, n, k, sigma, sigma);
-
-				//if (z != z2)
-				//{
-
-				//	//std::cout << mtx << std::endl;
-				//	//std::cout << std::endl;
-
-				//	std::cout << blockMtxToString(Gbv, n, k) << std::endl;;
-				//	//std::cout << blockMtxBitToString(Gm, n, k) << std::endl;;
-
-				//	for (u64 i = 0; i < n; ++i)
-				//	{
-				//		auto rev = [](auto bv) {
-				//			BitVector r(bv.size());
-				//			for (u64 i = 0; i < bv.size(); ++i)
-				//				r[i] = bv[bv.size() - 1 - i];
-				//			return r;
-				//			};
-
-				//		std::cout << rev(BitVector((u8*) & Gm[i], sigma)) << std::endl;;
-				//	}
-
-				//	std::cout << "v" << std::endl;
-				//	for (u64 j = 0; j < bv.size(); ++j)
-				//		std::cout << int(bv[j]) << " ";
-				//	std::cout << std::endl;
-				//	std::cout << "z" << std::endl;
-				//	for (u64 j = 0; j < z.size(); ++j)
-				//		std::cout << int(z[j]) << " ";
-				//	std::cout << std::endl;
-				//	std::cout << "z2" << std::endl;
-				//	for (u64 j = 0; j < z2.size(); ++j)
-				//		std::cout << int(z2[j]) << " ";
-				//	std::cout << std::endl;
-
-				//	//blockMtxMult(Gbv, bv, z2, n, k, sigma, sigma);
-				//	//std::cout << std::endl;
-
-
-				//	throw RTE_LOC;
-				//}
-
-				u64 h = 0;
-				for (u64 j = 0; j < n; ++j)
-				{
-					h += z[j];
-				}
-				auto w = popcount(x);
-				expEnum(w, h) += 1;
-			}
-
-
-			++ii;
-		} while (increment(Gbv));
-
-		for (u64 i = 0; i < expEnum.size(); ++i)
-			if (expEnum(i))
-				expEnum(i) = expEnum(i) / (Int(1) << Gbv.size());
-
-		if (expEnum != actEnum)
-		{
-			for (u64 i = 0; i < expEnum.rows(); ++i)
-			{
-				for (u64 j = 0; j < expEnum.cols(); ++j)
-				{
-					if (expEnum(i, j) != actEnum(i, j))
-					{
-						std::cout << Color::Red;
-					}
-					std::cout << "------------" << std::endl;
-					//auto old = old_::block_enum_old<Int, Rat>(i, j, k, n, sigma);
-					//auto v2 = block_enum<Int,Rat>(i, j, k, n, sigma, pas);
-					std::cout << "exp " << expEnum(i, j) << ", act " << actEnum(i, j) << std::endl;
-
-					if (expEnum(i, j) != actEnum(i, j))
-					{
-						std::cout << Color::Default;
-					}
+					throw RTE_LOC;
 				}
 			}
-
-			throw RTE_LOC;
 		}
 	}
 
-	inline void blockEnumMain(oc::CLP& cmd) {
-		//assert(ballBinCap<Int>(2, 3, 1) == 3);
-		//assert(choose_<Int>(-2, 2) == 0);
-		// if (cmd.isSet("enum")) {
-		block_enum(cmd);
-		// }
-	}
 }
 
 
-#endif //LIBOTE_BLOCKENUMERATOR_H

@@ -454,8 +454,8 @@ namespace osuCrypto {
 	//									   Float("13494625021640835072000"), Float("9716130015581401251840000"), Float("116593560186976815022080000"), Float("2798245444487443560529920000"), Float("299692087104605205332754432000000"),
 	//									   Float("57540880724084199423888850944000000") } };
 	//	auto expansion = Float(1);
-	//	for (u64 i = 0; i < 14; ++i)
-	//		expansion += dom[i] / (num[i] * pow(Float(n), Float(i + 1)));
+	//	for (u64 w = 0; w < 14; ++w)
+	//		expansion += dom[w] / (num[w] * pow(Float(n), Float(w + 1)));
 	//	return v * expansion;
 	//}
 
@@ -543,6 +543,39 @@ namespace osuCrypto {
 			}
 		}
 
+		const T& operator()(u64 n, u64 k) const
+		{
+
+
+			if (k > n) return mZero;
+			if (k == 0 || k == n) return mOne;
+			k = std::min(k, n - k);
+
+			if (mStack.size() > n && mStack[n].size() > k && mStack[n][k] != -1)
+			{
+				return mStack[n][k];
+			}
+			else
+			{
+				std::lock_guard l(gIoStreamMtx);
+				std::cout << "missing n " << n << " k " << k << std::endl;
+				std::cout << "size()  " << mStack.size() << std::endl;
+				if (mStack.size() > n)
+				{
+					if (mStack[n].size() > k)
+					{
+						std::cout << "val " << mStack[n][k] << std::endl;
+					}
+					else
+						std::cout << "bad k" << std::endl;
+				}
+				else
+					std::cout << "bad n" << std::endl;
+
+				throw RTE_LOC;
+			}
+
+		}
 
 		/*
 		NEW BINOMIAL COEFFICIENT FUNCTION BASED ON PASCAL'S TRIANGLE WITH CACHING ACROSS CALLS
@@ -555,7 +588,7 @@ namespace osuCrypto {
 
 		Checking Cache: After resizing, the function first checks whether the required value "n choose k" is already in the cache. If the cache contains a previously computed value, the function simply returns it immediately, saving time and resources.
 
-		1D Row Calculation: The function calculates Pascal’s Triangle values up to the "n-th" row using a single row vector of size "k + 1." Each element row[j] represents the binomial coefficient for the current row "i choose j." For each row "i," it updates row[j] from right to left (starting from min(i, k) down to 1). This update pattern ensures that each row[j] value is based on the values from the previous row of Pascal’s Triangle, but only one row is stored at a time, making the calculation efficient in terms of memory.
+		1D Row Calculation: The function calculates Pascal’s Triangle values up to the "n-th" row using a single row vector of size "k + 1." Each element row[h] represents the binomial coefficient for the current row "w choose h." For each row "w," it updates row[h] from right to left (starting from min(w, k) down to 1). This update pattern ensures that each row[h] value is based on the values from the previous row of Pascal’s Triangle, but only one row is stored at a time, making the calculation efficient in terms of memory.
 
 		Cache Storage: After calculating the desired binomial coefficient, the function stores this value in cache[n][k] before returning it. Storing the value allows any future requests for "n choose k" to retrieve the result directly from the cache, avoiding recomputation.
 
@@ -593,10 +626,10 @@ namespace osuCrypto {
 			row[0] = 1; // C(n, 0) is always 1
 
 			// Build up Pascal's Triangle up to the nth row
-			for (int64_t i = 1; i <= n; ++i) {
+			for (int64_t w = 1; w <= n; ++w) {
 				// Update row from the end to the beginning to use only one array
-				for (int64_t j = std::min(i, k); j > 0; --j) {
-					row[j] += row[j - 1];
+				for (int64_t h = std::min(w, k); h > 0; --h) {
+					row[h] += row[h - 1];
 				}
 			}
 
@@ -665,10 +698,10 @@ namespace osuCrypto {
 					row[0] = 1; // C(n, 0) is always 1
 
 					// Build up Pascal's Triangle up to the nth row
-					for (int64_t i = 1; i <= n; ++i) {
+					for (int64_t w = 1; w <= n; ++w) {
 						// Update row from the end to the beginning to use only one array
-						for (int64_t j = std::min(i, k); j > 0; --j) {
-							row[j] += row[j - 1];
+						for (int64_t h = std::min(w, k); h > 0; --h) {
+							row[h] += row[h - 1];
 						}
 					}
 
@@ -716,34 +749,7 @@ namespace osuCrypto {
 
 	template <typename T>
 	const T& choose_pascal(int64_t n, int64_t k, const ChooseCache<T>& cache) {
-
-		if (k > n) return cache.mZero;
-		if (k == 0 || k == n) return cache.mOne;
-		k = std::min(k, n - k);
-
-		if (cache.mStack.size() > n && cache.mStack[n].size() > k && cache.mStack[n][k] != -1)
-		{
-			return cache.mStack[n][k];
-		}
-		else
-		{
-			std::lock_guard l(gIoStreamMtx);
-			std::cout << "missing n " << n << " k " << k << std::endl;
-			std::cout << "cache.size()  " << cache.mStack.size() << std::endl;
-			if (cache.mStack.size() > n)
-			{
-				if (cache.mStack[n].size() > k)
-				{
-					std::cout << "val " << cache.mStack[n][k] << std::endl;
-				}
-				else
-					std::cout << "bad k" << std::endl;
-			}
-			else
-				std::cout << "bad n" << std::endl;
-
-			throw RTE_LOC;
-		}
+		return cache(n, k);
 	}
 
 	template <typename T>
@@ -875,7 +881,7 @@ namespace osuCrypto {
 			else
 				d += mt * r;
 			
-			//T v = (i & 1) ? -1 : 1;
+			//T v = (w & 1) ? -1 : 1;
 			//d += v * mt * r;
 
 		}
@@ -893,8 +899,8 @@ namespace osuCrypto {
 		//{
 		//	std::lock_guard l(gIoStreamMtx);
 		//	std::cout << "ballBinCap(" << balls << ", " << bins << ", " << cap << ") = " << d << std::endl;
-		//	int i = 0;
-		//	std::cin >> i;
+		//	int w = 0;
+		//	std::cin >> w;
 		//}
 		return d;
 	}
@@ -924,8 +930,8 @@ namespace osuCrypto {
 
 	//	void operator++()
 	//	{
-	//		auto i = ++mBins;
-	//		T nextTerm = i&1 ? -1 : 1;
+	//		auto w = ++mBins;
+	//		T nextTerm = w&1 ? -1 : 1;
 	//		nextTerm *= choose_pascal<T>(mBins, 0);
 
 	//		auto exp = labeledBallBinCap(mBalls, mBins, mCap);
@@ -946,26 +952,26 @@ namespace osuCrypto {
 		 {
 
 			 T d = 0;
-			 for (u64 i = 0; i < bins; ++i)
+			 for (u64 w = 0; w < bins; ++w)
 			 {
-				 T v = (i & 1) ? -1 : 1;
-				 auto mt = choose_<T>(bins, i);
+				 T v = (w & 1) ? -1 : 1;
+				 auto mt = choose_<T>(bins, w);
 
-				 //std::cout << i << " mt " << mt << " = C("<< bins<<", " << i << ")" << std::endl;
+				 //std::cout << w << " mt " << mt << " = C("<< bins<<", " << w << ")" << std::endl;
 
-				 i64 bb = cap * (bins - i64(i));
+				 i64 bb = cap * (bins - i64(w));
 				 if (bb < balls || bb < 0)
 					 break;
 
 				 auto r = choose_<T>(bb, balls);
-				 //std::cout << i << " r " << r << " = C(" << bb << ", " << bins-1 << ")" << std::endl;
+				 //std::cout << w << " r " << r << " = C(" << bb << ", " << bins-1 << ")" << std::endl;
 
 				 //if (mt != mt)
 				 //    throw RTE_LOC;
 				 //if (r != r)
 				 //    throw RTE_LOC;
 				 d += v * mt * r;
-				 //std::cout << i << " d " << d << std::endl;
+				 //std::cout << w << " d " << d << std::endl;
 			 }
 			 return d;
 		 }
@@ -998,21 +1004,21 @@ namespace osuCrypto {
 				T v = (i & 1) ? -1 : 1;
 				auto mt = choose_pascal<T>(bins, i, pascal_triangle);
 
-				//std::cout << i << " mt " << mt << " = C("<< bins<<", " << i << ")" << std::endl;
+				//std::cout << w << " mt " << mt << " = C("<< bins<<", " << w << ")" << std::endl;
 
 				i64 bb = bins + balls - i64(i) * (cap + 1) - 1;
 				if (bb < bins - 1 || bb < 0)
 					break;
 
 				auto r = choose_pascal<T>(bb, bins - 1, pascal_triangle);
-				//std::cout << i << " r " << r << " = C(" << bb << ", " << bins-1 << ")" << std::endl;
+				//std::cout << w << " r " << r << " = C(" << bb << ", " << bins-1 << ")" << std::endl;
 
 				if (mt != mt)
 					throw RTE_LOC;
 				if (r != r)
 					throw RTE_LOC;
 				d += v * mt * r;
-				//std::cout << i << " d " << d << std::endl;
+				//std::cout << w << " d " << d << std::endl;
 			}
 			return d;
 		}
@@ -1021,19 +1027,47 @@ namespace osuCrypto {
 		else
 			return 0;
 	}
+
+
+
+	template<typename R, typename I, typename Enum>
+	inline void enumerate(Enum&& enumerator, span<R> inputDist, span<R> outputDist, ChooseCache<I>& choose)
+	{
+		if (enumerator.rows() != inputDist.size())
+			throw RTE_LOC;
+		if (enumerator.cols() != outputDist.size())
+			throw RTE_LOC;
+
+		std::fill_n(outputDist.begin(), outputDist.size(), 0);
+		auto k = inputDist.size() - 1;
+		for (u64 w = 0; w < enumerator.rows(); ++w)
+		{
+			auto& kcw = choose(k, w);
+			for (u64 h = 0; h < enumerator.cols(); ++h)
+			{
+				//std::cout<< w<<" " << h << " ~ " << inputDist[w] << " " << enumerator(w,h) << " / " << kcw << std::endl;
+
+				outputDist[h] += inputDist[w] * enumerator(w, h) / kcw;
+			}
+		}
+
+		for (u64 h = 0; h < enumerator.cols(); ++h)
+			outputDist[h].backend().normalize();
+	}
+
 //
 //	inline void stirlingMain(CLP& cmd)
 //	{
 //		u64 n = cmd.getOr("n", 10);
-//		for (u64 i = 0; i < n; ++i)
+//		for (u64 w = 0; w < n; ++w)
 //		{
-//			auto I = fact<Int>(i);
-//			auto F = fact<Float>(i);
-//			auto S = stirlingApprox(i);
+//			auto I = fact<Int>(w);
+//			auto F = fact<Float>(w);
+//			auto S = stirlingApprox(w);
 //
-//			std::cout << "n " << i << ": "
+//			std::cout << "n " << w << ": "
 //#ifdef MPZ_ENABLE
-//				<< fact<MPZ>(i) << " "
+//				<< fact<MPZ>(w) << " "
 //#endif
 //				<< I << " "
 //				//<< F << " "
@@ -1060,7 +1094,7 @@ namespace osuCrypto {
 //				std::cout << "n " << nn << " k " << kk << " : f ";
 //				auto f = choose_pascal<Float>(nn, kk, fc);
 //				auto fl = log2(f);
-//				std::cout << fl << " ~ i ";
+//				std::cout << fl << " ~ w ";
 //
 //				auto z = choose_pascal<Int>(nn, kk, ic);
 //				auto zl = log2(z);
@@ -1092,7 +1126,7 @@ namespace osuCrypto {
 //				std::vector<std::vector<Float>> pascal_triangle_float;
 //				auto f = ballBinCap<Float>(ball, bin, cap, fc);
 //				auto fl = log2(f);
-//				std::cout << fl << " i ";
+//				std::cout << fl << " w ";
 //				std::vector<std::vector<Int>> pascal_triangle_int;
 //				auto z = ballBinCap<Int>(ball, bin, cap, ic);
 //				auto zl = log2(z);
@@ -1108,11 +1142,11 @@ namespace osuCrypto {
 	//inline void stirlingTest(const oc::CLP& cmd)
 	//{
 	//	u64 n = cmd.getOr("n", 44);
-	//	for (u64 i = 0; i < n; ++i)
+	//	for (u64 w = 0; w < n; ++w)
 	//	{
-	//		auto I = fact<Int>(i);
-	//		auto F = fact<Float>(i);
-	//		auto S = stirlingApprox(i);
+	//		auto I = fact<Int>(w);
+	//		auto F = fact<Float>(w);
+	//		auto S = stirlingApprox(w);
 
 	//		auto d0 = abs((I - F.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>());
 	//		auto d1 = abs((I - S.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>());
@@ -1147,12 +1181,12 @@ namespace osuCrypto {
 
 				std::vector<std::vector<Float>> pascal_triangle_float;
 				auto F = fc.choose_pascal_recursive(i, j);
-				//auto S = chooseApx(i, j);
+				//auto S = chooseApx(w, h);
 				auto div = (I ? I.convert_to<Float>() : 1);
 				auto d0 = abs((I - F.convert_to<Int>()).convert_to<Float>() / div);
 				//auto d1 = (I - S.convert_to<Int>()).convert_to<Float>() / div;
 
-				//std::cout << i << " " << j << ": " << d0 << " " << d1 << std::endl;
+				//std::cout << w << " " << h << ": " << d0 << " " << d1 << std::endl;
 				if (d0 > 0.000001)
 				{
 					failed = true;
@@ -1169,11 +1203,11 @@ namespace osuCrypto {
 			throw std::runtime_error("choose Float failed." LOCATION);
 		//std::cout << "\n";
 		//std::cout << "\n";
-		//for (u64 i = 0; i < n; ++i)
+		//for (u64 w = 0; w < n; ++w)
 		//{
-		//    for (u64 j = 0; j < m; ++j)
+		//    for (u64 h = 0; h < m; ++h)
 		//    {
-		//        auto S = chooseApx(i, j);
+		//        auto S = chooseApx(w, h);
 		//        std::cout << S << " ";
 		//    }
 		//    std::cout << "\n";
@@ -1197,7 +1231,7 @@ namespace osuCrypto {
 					std::vector<std::vector<Float>> pascal_triangle_float;
 					auto f = ballBinCap<Float>(ball, bin, cap, fc);
 					auto fl = log2(f);
-					//std::cout << fl << " i ";
+					//std::cout << fl << " w ";
 					std::vector<std::vector<Int>> pascal_triangle_int;
 					auto z = ballBinCap<Int>(ball, bin, cap, ic);
 					auto zl = log2(z);
