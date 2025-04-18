@@ -41,7 +41,13 @@ namespace osuCrypto {
 		std::fill(outDist.begin(), outDist.end(), R(0));
 		outDist[0] = inDist[0];
 		if constexpr (std::is_same_v<Enum, int> == false)
+		{
+			if (full.rows() != inDist.size())
+				throw RTE_LOC;
+			if (full.cols() != outDist.size())
+				throw RTE_LOC;
 			full(0, 0) = 1;
+		}
 
 		for (u64 w = 1; w <= k; ++w)
 		{

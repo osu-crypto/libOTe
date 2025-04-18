@@ -31,7 +31,8 @@ namespace osuCrypto {
 			}
 
 
-			RepeaterEnumerator<Int, Rat>{k, n, pas}.enumerate(actIn, actOut, actEnum);
+			RepeaterEnumerator<Int, Rat> rep{ k, n, pas };
+			rep.enumerate(actIn, actOut, actEnum);
 
 			for (u64 w = 0; w <= k; ++w)
 			{

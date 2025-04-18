@@ -380,7 +380,7 @@ namespace osuCrypto {
 		}
 		// Compute the minimum distance
 		// Find at which index the sum >= 1. That is the minimum distance
-		// u64 minimum_distance = minimum_distance_from_distribution<R>(n, count_weight_h_outputs);
+		// u64 minimum_distance = minimumDistance<R>(n, count_weight_h_outputs);
 		return count_weight_h_outputs;
 	}
 
@@ -488,7 +488,7 @@ namespace osuCrypto {
 	//				numThreads,
 	//				0, 0, 0);// verbose, numpoints, normalize
 	//		double expected_md =
-	//			minimum_distance_from_distribution<Rat>(expected_distribution).mExpectMD;
+	//			minimumDistance<Rat>(expected_distribution).mExpectMD;
 
 	//		u64 seed = 24523452345234523;
 	//		std::mt19937 gen(seed); // Mersenne Twister engine
@@ -505,7 +505,7 @@ namespace osuCrypto {
 	//			gen,
 	//			false,
 	//			cmd.isSet("v"));
-	//		double approximate_true_md = minimum_distance_from_distribution<Rat>(approximate_true_distribution).mExpectMD;
+	//		double approximate_true_md = minimumDistance<Rat>(approximate_true_distribution).mExpectMD;
 
 
 	//		// Compare the full distributions
@@ -538,6 +538,7 @@ namespace osuCrypto {
 		tests.add("accumulateEnum_exhaustive_Test      ", accumulateEnum_exhaustive_Test);
 		tests.add("blockEnum_exhaustive_Test           ", blockEnum_exhaustive_Test);
 		tests.add("composeEnum_exhaustive_Test         ", composeEnum_exhaustive_Test);
+		tests.add("composeEnum_sysExhaustive_Test      ", composeEnum_sysExhaustive_Test);
 		
 
 		tests.add("chooseTest                          ", chooseTest);

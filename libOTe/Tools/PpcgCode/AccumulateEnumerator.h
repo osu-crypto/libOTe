@@ -81,6 +81,10 @@ namespace osuCrypto
 			Full&& full = {})
 		{
 
+			if (inDist.size() != k + 1)
+				throw RTE_LOC;
+			if (outDist.size() != n + 1)
+				throw RTE_LOC;
 			if (systematic == false && k != n)
 				throw RTE_LOC;
 			if (systematic == true && 2 * k != n)
@@ -89,7 +93,13 @@ namespace osuCrypto
 			outDist[0] = inDist[0];
 
 			if constexpr (std::is_same_v<Full, int> == false)
+			{
+				if (full.rows() != inDist.size())
+					throw RTE_LOC;
+				if (full.cols() != outDist.size())
+					throw RTE_LOC;
 				full(0, 0) = 1;
+			}
 
 			//if(systematic)
 			//	n -= k;

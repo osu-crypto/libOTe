@@ -198,11 +198,13 @@ namespace osuCrypto {
 				actIn[i] = pas(k, i);
 			}
 
-			BlockEnumerator<Int, Rat>::enumerate(actIn, actOut, false, k, n, sigmaK, numThreads, pas, pas, actEnum);
-			BlockEnumerator<Int, Rat>::enumerate(actIn, sysOut, true, k, n + k, sigmaK, numThreads, pas, pas, sysEnum);
+			BlockEnumerator<Int, Rat> blk(k, n, sigmaK, false, pas, pas);
+			BlockEnumerator<Int, Rat>sys(k, n + k, sigmaK, true, pas, pas);
+
+			blk.enumerate(actIn, actOut, false, k, n, sigmaK, numThreads, pas, pas, actEnum);
+			sys.enumerate(actIn, sysOut, true, k, n + k, sigmaK, numThreads, pas, pas, sysEnum);
 
 			std::vector<u8> Gbv(n * sigmaK);
-
 			using T = u8;
 			if (sigmaK > 8)
 				throw std::runtime_error("we assume sigmaK bits it inside a T");
@@ -271,28 +273,13 @@ namespace osuCrypto {
 				std::cout << enumToString(sysEnum) << std::endl;;
 			}
 
-			for (u64 i = 0; i <= k; ++i)
+			auto expSysEnum = makeSystematic<Rat>(expEnum);
+			if (expSysEnum != sysEnum)
 			{
-				for (u64 j = 0; j <= n + k; ++j)
-				{
-					if (j < i)
-					{
-						if (sysEnum(i, j))
-							throw RTE_LOC;
-					}
-					else if (j <= i + n)
-					{
-						if (sysEnum(i, j) != expEnum(i, j - i))
-							throw RTE_LOC;
-					}
-					else
-					{
-						if (sysEnum(i, j))
-							throw RTE_LOC;
-					}
-				}
+				std::cout << enumToString(expSysEnum) << std::endl;
+				std::cout << enumToString(sysEnum) << std::endl;
+				throw RTE_LOC;
 			}
-
 
 			enumerate<Rat>(actEnum, actIn, expOut, pas);
 

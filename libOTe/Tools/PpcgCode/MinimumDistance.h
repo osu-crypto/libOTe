@@ -40,8 +40,10 @@ namespace osuCrypto
 
 		double mZeroValue = 0;
 	};
+
+	// given a weight distribution, return the minimum distance.
 	template<typename R>
-	MD minimum_distance_from_distribution(span<R> distribution) {
+	MD minimumDistance(span<R> distribution) {
 		assert(distribution.size() > 0);
 		auto n = distribution.size() - 1;
 		R sum = 0;
@@ -462,7 +464,7 @@ namespace osuCrypto
 				auto dist = composeEnumerator<INT, RAT>(
 					subcodes, num_threads, verbose, numPoints, normalizes);
 
-				auto expected_md = minimum_distance_from_distribution<RAT>(dist);
+				auto expected_md = minimumDistance<RAT>(dist);
 				auto end = std::chrono::high_resolution_clock::now();
 
 				if (print_dist)
@@ -782,7 +784,7 @@ namespace osuCrypto
 						auto dist = minimum_distance<INT, RAT>(
 							firstSubcode, conv, i, k, n, sigma, sigma, 1,
 							num_threads, verbose, numPoints, normalizes);
-						auto expected_md = minimum_distance_from_distribution<RAT>(dist);
+						auto expected_md = minimumDistance<RAT>(dist);
 						auto end = std::chrono::high_resolution_clock::now();
 
 						if (print_dist)

@@ -16,6 +16,23 @@ namespace osuCrypto {
 	template<typename I, typename R>
 	struct BlockEnumerator : Enumerator<R>
 	{
+		BlockEnumerator(
+			u64 k, 
+			u64 n, 
+			u64 sigma, 
+			bool sys,
+			const ChooseCache<I>& choose, 
+			const ChooseCache<Int>& choose2,
+			u64 numThreads = 0)
+			: Enumerator<R>(k, n)
+			, mSigma(sigma)
+			, mSystematic(sys)
+			, mNumThreads(numThreads ? numThreads : std::thread::hardware_concurrency())
+			, mChoose(choose)
+			, mChoose2(choose2)
+		{
+		}
+
 		using Enumerator<R>::mK;
 		using Enumerator<R>::mN;
 
@@ -151,7 +168,13 @@ namespace osuCrypto {
 
 			// special case the zero weight input.
 			if constexpr (std::is_same_v<Full, int> == false)
+			{
+				if (full.rows() != k+1)
+					throw RTE_LOC;
+				if (full.cols() != n+1)
+					throw RTE_LOC;
 				full(0, 0) = 1;
+			}
 			outputDist[0] = inputDist.size() ? inputDist[0] : 1;
 
 			// precompute 2^{-e sigma}

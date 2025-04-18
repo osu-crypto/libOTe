@@ -32,10 +32,12 @@ namespace osuCrypto
 
 
 
-			AccumulatorEnumerator<Int, Rat>::enumerate(actIn, actOut, false, k, k, numThreads, pas, actEnum);
-			AccumulatorEnumerator<Int, Rat>::enumerate(actIn, sysOut, true, k, nSys, numThreads, pas, sysEnum);
+			AccumulatorEnumerator<Int, Rat> acc(k, k, pas);
+			AccumulatorEnumerator<Int, Rat> sys(k, nSys, pas);
+			acc.enumerate(actIn, actOut, actEnum);
+			sys.enumerate(actIn, sysOut, sysEnum);
 
-			auto mtx = AccumulatorEnumerator<Int, Rat>{ k, k, pas }.getMtx();
+			auto mtx = acc.getMtx();
 			for (u64 v = 0; v < (1ull << k); ++v)
 			{
 				auto w = popcount(v);
@@ -90,27 +92,13 @@ namespace osuCrypto
 
 			if (expEnum != actEnum)
 				throw RTE_LOC;
-
-			for (u64 i = 0; i <= k; ++i)
+			auto expSysEnum = makeSystematic<Rat>(expEnum);
+			if (expSysEnum != sysEnum)
 			{
-				for (u64 j = 0; j <= nSys; ++j)
-				{
-					if (j < i)
-					{
-						if (sysEnum(i, j))
-							throw RTE_LOC;
-					}
-					else if (j <= i + k)
-					{
-						if (sysEnum(i, j) != expEnum(i, j - i))
-							throw RTE_LOC;
-					}
-					else
-					{
-						if (sysEnum(i, j))
-							throw RTE_LOC;
-					}
-				}
+				std::cout << enumToString(expSysEnum) << std::endl << std::endl;
+				std::cout << enumToString(sysEnum) << std::endl;
+
+				throw RTE_LOC;
 			}
 
 			enumerate<Rat>(actEnum, actIn, expOut, pas);

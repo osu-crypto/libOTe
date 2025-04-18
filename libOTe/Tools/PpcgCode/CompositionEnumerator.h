@@ -13,9 +13,34 @@ namespace osuCrypto {
 	struct ComposeEnumerator : Enumerator<R>
 	{
 
+		using Enumerator<R>::mK;
+		using Enumerator<R>::mN;
+		bool mSystematic = false;
+
+		ComposeEnumerator() = default;
+		ComposeEnumerator(
+			std::vector<Enumerator<R>*> subcodes,
+			bool systematic,
+			const ChooseCache<I>& choose)
+			: mSubcodes(std::move(subcodes))
+			, mSystematic(systematic)
+			, mChoose(choose)
+		{
+			if (mSubcodes.size() == 0)
+				throw RTE_LOC;
+
+			mK = mSubcodes[0]->mK;
+			mN = mSubcodes.back()->mN + mSystematic * mK;
+
+			for (u64 i = 1; i < mSubcodes.size(); ++i)
+			{
+				if (mSubcodes[i - 1]->mN != mSubcodes[i]->mK)
+					throw RTE_LOC;
+			}
+		}
 
 		std::vector<Enumerator<R>*> mSubcodes;
-		ChooseCache<I> mChoose;
+		const ChooseCache<I>& mChoose;
 
 		void enumerate(
 			span<const R> inDist,
@@ -40,33 +65,29 @@ namespace osuCrypto {
 			Full&& fullEnum = {})
 		{
 
-			u64 k = mSubcodes[0].mK;
-			u64 n = mSubcodes.back().mN;
 
-			if (inDist.size() != k + 1)
+			if (inDist.size() != mK + 1)
 				throw RTE_LOC;
-			if (outDist.size() != n + 1)
+			if (outDist.size() != mN + 1)
 				throw RTE_LOC;
+
+			if constexpr (std::is_same_v<Full, int> == false)
+			{
+				if (fullEnum.rows() != mK + 1)
+					throw RTE_LOC;
+				if (fullEnum.cols() != mN + 1)
+					throw RTE_LOC;
+			}
+
 
 			std::array<std::vector<R>, 2> distributions;
-			distributions[0].resize(k + 1);
+			distributions[0].resize(mK + 1);
 
 			R expectedSum = 0;
-			if (inDist.size())
+			for (size_t w = 0; w <= mK; w++)
 			{
-				for (size_t w = 0; w <= k; w++)
-				{
-					distributions[0][w] = inDist[w];
-					expectedSum += inDist[w];
-				}
-			}
-			else
-			{
-				for (size_t w = 0; w <= k; w++)
-				{
-					distributions[0][w] = mChoose(k, w);
-					expectedSum += distributions[0][w];
-				}
+				distributions[0][w] = inDist[w];
+				expectedSum += inDist[w];
 			}
 
 			Matrix<R> curEnum;
@@ -74,23 +95,23 @@ namespace osuCrypto {
 			// Compute distributions for iterations
 			for (size_t iter = 0; iter < mSubcodes.size(); iter++)
 			{
-				distributions[1].resize(mSubcodes[iter].mN + 1);
+				distributions[1].resize(mSubcodes[iter]->mN + 1);
 				std::fill(distributions[1].begin(), distributions[1].end(), R(0));
 
 
-				if constexpr (std::is_same_v<Full, int>)
+				if (std::is_same_v<Full, int> && mSystematic == false)
 				{
-					mSubcodes[iter].enumerate(
+					mSubcodes[iter]->enumerate(
 						distributions[0],
 						distributions[1]);
 				}
 				else
 				{
 					Matrix<R> enumI(
-						distributions[0].size() + 1,
-						distributions[1].size() + 1);
+						distributions[0].size(),
+						distributions[1].size());
 
-					mSubcodes[iter].enumerate(
+					mSubcodes[iter]->enumerate(
 						distributions[0],
 						distributions[1],
 						enumI);
@@ -136,17 +157,21 @@ namespace osuCrypto {
 				std::swap(distributions[0], distributions[1]);
 			}
 
-			// Copy the final distribution to the output
-			std::copy(distributions[0].begin(),
-				distributions[0].end(),
-				outDist.begin());
+			if (mSystematic)
+			{
+				curEnum = makeSystematic<R>(curEnum);
+				osuCrypto::enumerate<R>(curEnum, inDist, outDist, mChoose);
+			}
+			else
+			{
+				// Copy the final distribution to the output
+				std::copy(distributions[0].begin(),
+					distributions[0].end(),
+					outDist.begin());
+			}
 
 			if constexpr (std::is_same_v<Full, int> == false)
 			{
-				if (curEnum.rows() != k + 1)
-					throw RTE_LOC;
-				if (curEnum.cols() != n + 1)
-					throw RTE_LOC;
 				std::copy(curEnum.begin(), curEnum.end(), fullEnum.begin());
 			}
 		}
@@ -154,6 +179,7 @@ namespace osuCrypto {
 	};
 
 	void composeEnum_exhaustive_Test(const CLP& cmd);
+	void composeEnum_sysExhaustive_Test(const CLP& cmd);
 
 }
 

@@ -1032,7 +1032,10 @@ namespace osuCrypto {
 
 
 	template<typename R, typename I, typename Enum>
-	inline void enumerate(Enum&& enumerator, span<R> inputDist, span<R> outputDist, ChooseCache<I>& choose)
+	inline void enumerate(Enum&& enumerator, 
+		span<const R> inputDist, 
+		span<R> outputDist, 
+		const ChooseCache<I>& choose)
 	{
 		if (enumerator.rows() != inputDist.size())
 			throw RTE_LOC;
@@ -1056,6 +1059,22 @@ namespace osuCrypto {
 			outputDist[h].backend().normalize();
 	}
 
+	// given an enumerator for matrix G, return the enumerator
+	// for G' = (I || G)
+	template<typename R, typename Enum>
+	inline Matrix<R> makeSystematic(Enum&& enumerator)
+	{
+		Matrix<R> r(enumerator.rows(), enumerator.cols() + enumerator.rows()-1);
+		for (u64 w = 0; w < enumerator.rows(); ++w)
+		{
+			for (u64 h = 0; h < enumerator.cols(); ++h)
+			{
+				r(w, w + h) = enumerator(w, h);
+			}
+		}
+		return r;
+	}
+
 	// Given the matrix enumerator e1 and e2 for matrices
 	// G1 and G2, compute the expected enumerator matrix E
 	// for
@@ -1074,6 +1093,7 @@ namespace osuCrypto {
 		auto n1 = e1.cols() - 1;
 		auto n2 = e2.cols() - 1;
 
+
 		if (n1 != k2)
 			throw RTE_LOC;
 
@@ -1089,6 +1109,10 @@ namespace osuCrypto {
 				r(w, h).backend().normalize();
 			}
 		}
+
+		//std::cout << "e1\n" << enumToString(e1) << std::endl;
+		//std::cout << "e2\n" << enumToString(e2) << std::endl;
+		//std::cout << "r\n" << enumToString(e2) << std::endl;
 		return r;
 	}
 
