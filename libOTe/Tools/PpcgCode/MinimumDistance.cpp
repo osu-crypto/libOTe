@@ -194,8 +194,8 @@ namespace osuCrypto
 				std::stringstream ss, sh;
 				if (systematic)
 				{
-					sh << "s";
-					ss << "s" << k << "." << k / rate;
+					sh << "S";
+					ss << "S" << k << "." << k / rate;
 				}
 
 				ChooseCache<I> choose;// (n, lb);
@@ -224,6 +224,13 @@ namespace osuCrypto
 						ss << "B" << kk << "." << n << "." << sigma;
 						if (skipH0) ss << "h1";
 						subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, false, choose, chooseInt, skipH0));
+					}
+					else if (subCodeTags[i] == "sysBlock")
+					{
+						sh << "sB";
+						ss << "sB" << kk << "." << n << "." << sigma;
+						if (skipH0) ss << "h1";
+						subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, true, choose, chooseInt, skipH0));
 					}
 					else
 						throw std::runtime_error("subcodes must be {repeat, accumulate, block, ... }. " LOCATION);
