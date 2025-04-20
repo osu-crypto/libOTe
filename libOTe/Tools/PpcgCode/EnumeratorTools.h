@@ -18,6 +18,8 @@
 #include "gmpxx.h"
 #endif
 
+#include "LoadingBar.h"
+
 namespace osuCrypto {
 
 
@@ -528,19 +530,28 @@ namespace osuCrypto {
 	{
 		T mZero = 0, mOne = 1;
 
-		ChooseCache() = default;	
-		ChooseCache(u64 n)
+		ChooseCache() = default;
+		ChooseCache(u64 n, LoadingBar* loadingBar = nullptr)
 		{
-			precompute(n);
+			precompute(n, loadingBar);
 		}
 		std::vector<std::vector<T>> mRec, mStack;
 
 
-		void precompute(u64 n)
+		static u64 numTicks(u64 n)
 		{
+			return n / 2 + 1;
+		}
+
+		void precompute(u64 n, LoadingBar* loadingBar = nullptr)
+		{
+			if (loadingBar)
+				loadingBar->name("ChooseCache");
 			for (u64 i = 0; i <= (n / 2); ++i)
 			{
 				choose_pascal_stack(n, i);
+				if (loadingBar)
+					loadingBar->tick();
 			}
 		}
 
@@ -640,7 +651,7 @@ namespace osuCrypto {
 			*/
 			// Option 2: avoids the issues in the first option
 			// Recursive computation: C(n, k) = C(n-1, k-1) + C(n-1, k)
-			mRec[n][k] = 
+			mRec[n][k] =
 				choose_pascal_recursive(n - 1, k - 1) +
 				choose_pascal_recursive(n - 1, k);
 			return mRec[n][k];
@@ -876,12 +887,12 @@ namespace osuCrypto {
 			}
 
 			auto r = choose_pascal<T>(bb, balls, pascal_triangle);
-			
+
 			if (i & 1)
 				d -= mt * r;
 			else
 				d += mt * r;
-			
+
 			//T v = (w & 1) ? -1 : 1;
 			//d += v * mt * r;
 
@@ -1032,15 +1043,19 @@ namespace osuCrypto {
 
 
 	template<typename R, typename I, typename Enum>
-	inline void enumerate(Enum&& enumerator, 
-		span<const R> inputDist, 
-		span<R> outputDist, 
-		const ChooseCache<I>& choose)
+	inline void enumerate(Enum&& enumerator,
+		span<const R> inputDist,
+		span<R> outputDist,
+		const ChooseCache<I>& choose,
+		LoadingBar* loadingBar = nullptr)
 	{
 		if (enumerator.rows() != inputDist.size())
 			throw RTE_LOC;
 		if (enumerator.cols() != outputDist.size())
 			throw RTE_LOC;
+
+		if (loadingBar)
+			loadingBar->name("enum");
 
 		std::fill_n(outputDist.begin(), outputDist.size(), 0);
 		auto k = inputDist.size() - 1;
@@ -1053,10 +1068,14 @@ namespace osuCrypto {
 
 				outputDist[h] += inputDist[w] * enumerator(w, h) / kcw;
 			}
+			if (loadingBar)
+				loadingBar->tick();
 		}
-
-		for (u64 h = 0; h < enumerator.cols(); ++h)
-			outputDist[h].backend().normalize();
+		if constexpr (std::is_same_v<std::remove_cvref_t<R>, Rat>)
+		{
+			for (u64 h = 0; h < enumerator.cols(); ++h)
+				outputDist[h].backend().normalize();
+		}
 	}
 
 	// given an enumerator for matrix G, return the enumerator
@@ -1064,7 +1083,7 @@ namespace osuCrypto {
 	template<typename R, typename Enum>
 	inline Matrix<R> makeSystematic(Enum&& enumerator)
 	{
-		Matrix<R> r(enumerator.rows(), enumerator.cols() + enumerator.rows()-1);
+		Matrix<R> r(enumerator.rows(), enumerator.cols() + enumerator.rows() - 1);
 		for (u64 w = 0; w < enumerator.rows(); ++w)
 		{
 			for (u64 h = 0; h < enumerator.cols(); ++h)
@@ -1086,7 +1105,12 @@ namespace osuCrypto {
 	// E(w, h) = sum_h1 E1(w, h1) * E2(h1, h) / choose(n1, h1)
 	//
 	template<typename R, typename E1, typename E2, typename I>
-	Matrix<R> composeEnums(const E1& e1, const E2& e2, const ChooseCache<I>& choose)
+	Matrix<R> composeEnums(
+		const E1& e1, 
+		const E2& e2,
+		const ChooseCache<I>& choose, 
+		u64 numThreads = 1, 
+		LoadingBar* loadingBar = nullptr)
 	{
 		auto k1 = e1.rows() - 1;
 		auto k2 = e2.rows() - 1;
@@ -1096,18 +1120,56 @@ namespace osuCrypto {
 
 		if (n1 != k2)
 			throw RTE_LOC;
+		if(loadingBar)
+			loadingBar->name("Compose");
 
 		auto r = Matrix<R>(e1.rows(), e2.cols());
-		for (u64 w = 0; w <= k1; ++w)
+
+		if (n1 * n2 * k1 < 1000 || numThreads < 2)
 		{
-			for (u64 h = 0; h <= n2; ++h)
+
+			for (u64 w = 0; w <= k1; ++w)
 			{
-				for (u64 h1 = 0; h1 <= n1; ++h1)
+				for (u64 h = 0; h <= n2; ++h)
 				{
-					r(w, h) += e1(w, h1) * e2(h1, h) / choose(n1, h1);
+					for (u64 h1 = 0; h1 <= n1; ++h1)
+					{
+						r(w, h) += e1(w, h1) * e2(h1, h) / choose(n1, h1);
+					}
+					if constexpr (std::is_same_v<std::remove_cvref_t<R>, Rat>)
+						r(w, h).backend().normalize();
+					if(loadingBar)
+						loadingBar->tick();
 				}
-				r(w, h).backend().normalize();
 			}
+		}
+		else
+		{
+			std::vector<std::jthread> thrds;
+			for (u64 i = 0; i < numThreads; ++i)
+			{
+				thrds.emplace_back([&, i] {
+
+					for (u64 w = i; w <= k1; w += numThreads)
+					{
+						for (u64 h = 0; h <= n2; ++h)
+						{
+							for (u64 h1 = 0; h1 <= n1; ++h1)
+							{
+								r(w, h) += e1(w, h1) * e2(h1, h) / choose(n1, h1);
+							}
+							if constexpr (std::is_same_v<std::remove_cvref_t<R>, Rat>)
+								r(w, h).backend().normalize();
+							if(loadingBar)
+								loadingBar->tick();
+						}
+
+					}
+					
+					});
+			}
+
+
 		}
 
 		//std::cout << "e1\n" << enumToString(e1) << std::endl;
@@ -1131,108 +1193,123 @@ namespace osuCrypto {
 		return ss.str();
 	}
 
-//
-//	inline void stirlingMain(CLP& cmd)
-//	{
-//		u64 n = cmd.getOr("n", 10);
-//		for (u64 w = 0; w < n; ++w)
-//		{
-//			auto I = fact<Int>(w);
-//			auto F = fact<Float>(w);
-//			auto S = stirlingApprox(w);
-//
-//			std::cout << "n " << w << ": "
-//#ifdef MPZ_ENABLE
-//				<< fact<MPZ>(w) << " "
-//#endif
-//				<< I << " "
-//				//<< F << " "
-//				//<< S << " "
-//				<< (I - F.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>() << " "
-//				<< (I - S.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>()
-//				<< std::endl;
-//		}
-//	}
+	template<typename Enum>
+	std::string logEnumToString(Enum&& e)
+	{
+		std::stringstream ss;
+		for (u64 i = 0; i < e.rows(); ++i)
+		{
+			for (u64 j = 0; j < e.cols(); ++j)
+			{
+				ss << log2_(e(i, j)) << " ";
+			}
+			ss << std::endl;
+		}
+		return ss.str();
+	}
 
-
-//	inline void chooseMain(oc::CLP cmd)
-//	{
-//
-//		auto n = cmd.getManyOr<u64>("n", { 10 });
-//		auto k = cmd.getManyOr<u64>("k", { 10 });
-//		ChooseCache<Float> fc;
-//		ChooseCache<Int> ic;
-//
-//		for (auto nn : n)
-//		{
-//			for (auto kk : k)
-//			{
-//				std::cout << "n " << nn << " k " << kk << " : f ";
-//				auto f = choose_pascal<Float>(nn, kk, fc);
-//				auto fl = log2(f);
-//				std::cout << fl << " ~ w ";
-//
-//				auto z = choose_pascal<Int>(nn, kk, ic);
-//				auto zl = log2(z);
-//				std::cout << zl << " @ ";
-//#ifdef MPZ_ENABLE
-//#endif
-//			}
-//			std::cout << std::endl;
-//		}
-//	}
-//
-//	inline void ballBinCapMain(oc::CLP cmd)
-//	{
-//		auto balls = cmd.getManyOr<u64>("n", { 10 });
-//		auto bins = cmd.getManyOr<u64>("m", { 10 });
-//		u64 cap = cmd.getOr("c", 12);
-//
-//		ChooseCache<Float> fc;
-//		ChooseCache<Int> ic;
-//		std::cout << "k _:";
-//		for (auto bin : bins)
-//			std::cout << bin << " ";
-//		std::cout << std::endl;
-//		for (auto ball : balls)
-//		{
-//			std::cout << "nn " << ball << ": f ";
-//			for (auto bin : bins)
-//			{
-//				std::vector<std::vector<Float>> pascal_triangle_float;
-//				auto f = ballBinCap<Float>(ball, bin, cap, fc);
-//				auto fl = log2(f);
-//				std::cout << fl << " w ";
-//				std::vector<std::vector<Int>> pascal_triangle_int;
-//				auto z = ballBinCap<Int>(ball, bin, cap, ic);
-//				auto zl = log2(z);
-//				std::cout << zl << ",  ";
-//#ifdef MPZ_ENABLE
-//#endif
-//			}
-//			std::cout << std::endl;
-//		}
-//
-//	}
-
-	//inline void stirlingTest(const oc::CLP& cmd)
-	//{
-	//	u64 n = cmd.getOr("n", 44);
-	//	for (u64 w = 0; w < n; ++w)
+	//
+	//	inline void stirlingMain(CLP& cmd)
 	//	{
-	//		auto I = fact<Int>(w);
-	//		auto F = fact<Float>(w);
-	//		auto S = stirlingApprox(w);
-
-	//		auto d0 = abs((I - F.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>());
-	//		auto d1 = abs((I - S.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>());
-
-	//		if (d0 > 0.000001)
-	//			throw RTE_LOC;
-	//		if (d1 > 0.000001)
-	//			throw RTE_LOC;
+	//		u64 n = cmd.getOr("n", 10);
+	//		for (u64 w = 0; w < n; ++w)
+	//		{
+	//			auto I = fact<Int>(w);
+	//			auto F = fact<Float>(w);
+	//			auto S = stirlingApprox(w);
+	//
+	//			std::cout << "n " << w << ": "
+	//#ifdef MPZ_ENABLE
+	//				<< fact<MPZ>(w) << " "
+	//#endif
+	//				<< I << " "
+	//				//<< F << " "
+	//				//<< S << " "
+	//				<< (I - F.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>() << " "
+	//				<< (I - S.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>()
+	//				<< std::endl;
+	//		}
 	//	}
-	//}
+
+
+	//	inline void chooseMain(oc::CLP cmd)
+	//	{
+	//
+	//		auto n = cmd.getManyOr<u64>("n", { 10 });
+	//		auto k = cmd.getManyOr<u64>("k", { 10 });
+	//		ChooseCache<Float> fc;
+	//		ChooseCache<Int> ic;
+	//
+	//		for (auto nn : n)
+	//		{
+	//			for (auto kk : k)
+	//			{
+	//				std::cout << "n " << nn << " k " << kk << " : f ";
+	//				auto f = choose_pascal<Float>(nn, kk, fc);
+	//				auto fl = log2(f);
+	//				std::cout << fl << " ~ w ";
+	//
+	//				auto z = choose_pascal<Int>(nn, kk, ic);
+	//				auto zl = log2(z);
+	//				std::cout << zl << " @ ";
+	//#ifdef MPZ_ENABLE
+	//#endif
+	//			}
+	//			std::cout << std::endl;
+	//		}
+	//	}
+	//
+	//	inline void ballBinCapMain(oc::CLP cmd)
+	//	{
+	//		auto balls = cmd.getManyOr<u64>("n", { 10 });
+	//		auto bins = cmd.getManyOr<u64>("m", { 10 });
+	//		u64 cap = cmd.getOr("c", 12);
+	//
+	//		ChooseCache<Float> fc;
+	//		ChooseCache<Int> ic;
+	//		std::cout << "k _:";
+	//		for (auto bin : bins)
+	//			std::cout << bin << " ";
+	//		std::cout << std::endl;
+	//		for (auto ball : balls)
+	//		{
+	//			std::cout << "nn " << ball << ": f ";
+	//			for (auto bin : bins)
+	//			{
+	//				std::vector<std::vector<Float>> pascal_triangle_float;
+	//				auto f = ballBinCap<Float>(ball, bin, cap, fc);
+	//				auto fl = log2(f);
+	//				std::cout << fl << " w ";
+	//				std::vector<std::vector<Int>> pascal_triangle_int;
+	//				auto z = ballBinCap<Int>(ball, bin, cap, ic);
+	//				auto zl = log2(z);
+	//				std::cout << zl << ",  ";
+	//#ifdef MPZ_ENABLE
+	//#endif
+	//			}
+	//			std::cout << std::endl;
+	//		}
+	//
+	//	}
+
+		//inline void stirlingTest(const oc::CLP& cmd)
+		//{
+		//	u64 n = cmd.getOr("n", 44);
+		//	for (u64 w = 0; w < n; ++w)
+		//	{
+		//		auto I = fact<Int>(w);
+		//		auto F = fact<Float>(w);
+		//		auto S = stirlingApprox(w);
+
+		//		auto d0 = abs((I - F.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>());
+		//		auto d1 = abs((I - S.convert_to<Int>()).convert_to<Float>() / I.convert_to<Float>());
+
+		//		if (d0 > 0.000001)
+		//			throw RTE_LOC;
+		//		if (d1 > 0.000001)
+		//			throw RTE_LOC;
+		//	}
+		//}
 
 	inline void chooseTest(const oc::CLP& cmd)
 	{

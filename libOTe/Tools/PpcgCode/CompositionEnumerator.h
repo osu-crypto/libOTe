@@ -15,15 +15,22 @@ namespace osuCrypto {
 
 		using Enumerator<R>::mK;
 		using Enumerator<R>::mN;
+		using Enumerator<R>::mLoadBar;
+
 		bool mSystematic = false;
+		u64 mNumThreads = 0;
+		const ChooseCache<I>& mChoose;
+		std::vector<Enumerator<R>*> mSubcodes;
 
 		ComposeEnumerator() = default;
 		ComposeEnumerator(
 			std::vector<Enumerator<R>*> subcodes,
 			bool systematic,
-			const ChooseCache<I>& choose)
+			const ChooseCache<I>& choose,
+			u64 numThreads = 0)
 			: mSubcodes(std::move(subcodes))
 			, mSystematic(systematic)
+			, mNumThreads(numThreads ? numThreads : std::thread::hardware_concurrency())
 			, mChoose(choose)
 		{
 			if (mSubcodes.size() == 0)
@@ -39,8 +46,6 @@ namespace osuCrypto {
 			}
 		}
 
-		std::vector<Enumerator<R>*> mSubcodes;
-		const ChooseCache<I>& mChoose;
 
 		void enumerate(
 			span<const R> inDist,
@@ -55,6 +60,24 @@ namespace osuCrypto {
 			MatrixView<R> fullEnum) override
 		{
 			enumerateImpl(inDist, outDist, fullEnum);
+		}
+
+		u64 numTicks() const override
+		{
+			u64 ticks = 0;
+			for (u64 i =0; i < mSubcodes.size(); ++i)
+			{
+				ticks += mSubcodes[i]->numTicks();
+				if (i && mSystematic)
+				{
+					// compose enumerator
+					ticks += mSubcodes[i]->mK * mSubcodes[i]->mK;
+				}
+
+				if (mSystematic)
+					ticks += mSubcodes[i]->mK;
+			}
+			return ticks;
 		}
 
 
@@ -117,7 +140,7 @@ namespace osuCrypto {
 						enumI);
 
 					if (curEnum.size())
-						curEnum = composeEnums<R>(curEnum, enumI, mChoose);
+						curEnum = composeEnums<R>(curEnum, enumI, mChoose, mNumThreads, mSystematic? mLoadBar: nullptr);
 					else
 						curEnum = std::move(enumI);
 				}
@@ -160,7 +183,7 @@ namespace osuCrypto {
 			if (mSystematic)
 			{
 				curEnum = makeSystematic<R>(curEnum);
-				osuCrypto::enumerate<R>(curEnum, inDist, outDist, mChoose);
+				osuCrypto::enumerate<R>(curEnum, inDist, outDist, mChoose, mLoadBar);
 			}
 			else
 			{

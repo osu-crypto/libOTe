@@ -12,6 +12,7 @@ namespace osuCrypto
 	{
 		using Enumerator<R>::mK;
 		using Enumerator<R>::mN;
+		using Enumerator<R>::mLoadBar;
 
 		AccumulatorEnumerator() = default;
 		AccumulatorEnumerator(u64 k, u64 n, const ChooseCache<I>& choose)
@@ -35,7 +36,7 @@ namespace osuCrypto
 			span<R> outDist) override
 		{
 			enumerate(inDist, outDist, mSystematic,
-				mK, mN, 1, mChoose);
+				mK, mN, 1, mChoose, {}, mLoadBar);
 		}
 
 		void enumerate(
@@ -44,8 +45,15 @@ namespace osuCrypto
 			MatrixView<R> fullEnum) override
 		{
 			enumerate(inDist, outDist, mSystematic,
-				mK, mN, 1, mChoose, fullEnum);
+				mK, mN, 1, mChoose, fullEnum, mLoadBar);
 		}
+
+
+		u64 numTicks() const override
+		{
+			return mN;
+		}
+
 
 		static I enumerate(
 			u64 w,
@@ -78,7 +86,8 @@ namespace osuCrypto
 			u64 n,
 			u64 numThreads,
 			const ChooseCache<I>& pascal_triangle,
-			Full&& full = {})
+			Full&& full = {},
+			LoadingBar* loadingBar = nullptr)
 		{
 
 			if (inDist.size() != k + 1)
@@ -89,6 +98,9 @@ namespace osuCrypto
 				throw RTE_LOC;
 			if (systematic == true && 2 * k != n)
 				throw RTE_LOC;
+
+			if (loadingBar)
+				loadingBar->name("AccumulatorEnumerator");
 
 			outDist[0] = inDist[0];
 
@@ -138,6 +150,9 @@ namespace osuCrypto
 				if constexpr (std::is_same_v<R, Rat>)
 					dh.backend().normalize();
 				outDist[h] = dh;
+
+				if (loadingBar)
+					loadingBar->tick();
 			}
 		}
 

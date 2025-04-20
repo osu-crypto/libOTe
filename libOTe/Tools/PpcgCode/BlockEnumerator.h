@@ -17,12 +17,13 @@ namespace osuCrypto {
 	struct BlockEnumerator : Enumerator<R>
 	{
 		BlockEnumerator(
-			u64 k, 
-			u64 n, 
-			u64 sigma, 
+			u64 k,
+			u64 n,
+			u64 sigma,
 			bool sys,
-			const ChooseCache<I>& choose, 
+			const ChooseCache<I>& choose,
 			const ChooseCache<Int>& choose2,
+			bool skipH0 = 0,
 			u64 numThreads = 0)
 			: Enumerator<R>(k, n)
 			, mSigma(sigma)
@@ -30,37 +31,63 @@ namespace osuCrypto {
 			, mNumThreads(numThreads ? numThreads : std::thread::hardware_concurrency())
 			, mChoose(choose)
 			, mChoose2(choose2)
+			, mSkipH0(skipH0)
 		{
 		}
 
+		// the number of rows
 		using Enumerator<R>::mK;
+		// the number of columns
 		using Enumerator<R>::mN;
+		using Enumerator<R>::mLoadBar;
 
+		// the number of rows of the block.
 		u64 mSigma = 0;
+
+		// the number threads for the enumerator computation.
 		u64 mNumThreads = 0;
+
+		// should the matrix be of the form G=(I||G') where G' contains the blocks.
 		bool mSystematic = false;
+
+		// The n choose k cache for the integer type I (might be Float)
 		const ChooseCache<I>& mChoose;
+
+		// The n choose k cache for the integer type Int. Needed for ballsBinCap.
 		const ChooseCache<Int>& mChoose2;
 
+		// if true, we will not count the codewords mapped to h=0
+		// from w>0. These are from if the submatrix is not invertible.
+		// Ideally we would derive the true enumerator for this case but 
+		// as a hack we can just ignore them.
+		bool mSkipH0 = 0;
 
+		u64 numTicks() const override
+		{
+			return mK;
+		}
+
+		// map the input dist to the output dist.
 		void enumerate(
 			span<const R> inDist,
 			span<R> outDist) override
 		{
 			enumerate(inDist, outDist, mSystematic,
-				mK, mN, mSigma, mNumThreads, mChoose, mChoose2);
+				mK, mN, mSigma, mSkipH0, mNumThreads, mChoose, mChoose2, {}, mLoadBar);
 		}
 
+		// map the input dist to the output dist.
+		// also outputs the full enumerator matrix.
 		void enumerate(
 			span<const R> inDist,
 			span<R> outDist,
 			MatrixView<R> full) override
 		{
 			enumerate(inDist, outDist, mSystematic,
-				mK, mN, mSigma, mNumThreads, mChoose, mChoose2, full);
+				mK, mN, mSigma, mSkipH0, mNumThreads, mChoose, mChoose2, full, mLoadBar);
 		}
 
-
+		// a helper function that computes the E_wh term in isolation.
 		static R enumerate(
 			u64 w, u64 h, 
 			u64 k, u64 n, u64 sigma, 
@@ -129,12 +156,15 @@ namespace osuCrypto {
 			u64 k,
 			u64 n,
 			u64 sigma,
+			bool skipH0,
 			u64 numThreads,
 			const ChooseCache<I>& pascal_triangle,
 			const ChooseCache<Int>& pascal_triangle2,
-			Full&& full = {})
+			Full&& full = {},
+			LoadingBar* laodingBar = nullptr)
 		{
-
+			if(laodingBar)
+				laodingBar->name("BlockEnumerator");
 
 			if (inputDist.size() != 0 && inputDist.size() != k + 1)
 				throw RTE_LOC;
@@ -230,7 +260,7 @@ namespace osuCrypto {
 							cqw[q] = v[q] * labeledBallBinCap(w, q, sigma, pascal_triangle2).convert_to<I>();
 						}
 
-						auto hBegin = systematic ? w : 0;
+						auto hBegin = std::max<u64>(systematic ? w : 0, skipH0);
 						for (u64 h_ = hBegin; h_ <= n; ++h_)
 						{
 							u64 h = systematic ? h_ - w : h_;
@@ -267,7 +297,8 @@ namespace osuCrypto {
 							}
 						}
 
-						loadBar.tick();
+						if(laodingBar)
+							laodingBar->tick();
 					}
 
 					cBarrier.decrementWait();

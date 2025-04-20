@@ -21,11 +21,27 @@ namespace osuCrypto
 		std::atomic<u64> mProgress;
 		std::promise<void> mProm;
 		u64 mTotal;
-		std::string mMessage;
+		std::string mMessage, mName;
 		//std::chrono::time_point<std::chrono::system_clock> mStart;
 		std::mutex mLock;
 		bool mPrint = true;
 		bool done = false;
+		std::thread mThrd;
+		void name(std::string n)
+		{
+			std::lock_guard<std::mutex> lg(mLock);
+			mName = n;
+		}
+
+		~LoadingBar()
+		{
+			if (mThrd.joinable())
+			{
+				cancel();
+				mThrd.join();
+			}
+		}
+
 		void cancel()
 		{
 			if (!done)
@@ -41,6 +57,7 @@ namespace osuCrypto
 			done = false;
 			//mStart = std::chrono::system_clock::now();
 			mProm = std::promise<void>();
+			mThrd = std::thread([&] {print(); });
 		}
 
 		void tick(u64 delta = 1)
@@ -91,7 +108,12 @@ namespace osuCrypto
 
 				u64 numBars = double(count) * mWidth / mTotal;
 				std::stringstream ss;
-				ss << "\r" << mMessage << " [" << std::string(numBars, '|') << std::string(mWidth - numBars, ' ') << "] "
+				ss << "\r" << mMessage;
+				
+				if (!mName.empty())
+					ss << " " << mName;
+
+				ss << " [" << std::string(numBars, '|') << std::string(mWidth - numBars, ' ') << "] "
 					<< count << "/" << mTotal << ", rate: " << u64(avgRate) << " ticks/sec,  ETA: ";
 
 				if (hour)
@@ -114,5 +136,4 @@ namespace osuCrypto
 		}
 
 	};
-	static LoadingBar loadBar;
 }

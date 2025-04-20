@@ -201,8 +201,8 @@ namespace osuCrypto {
 			BlockEnumerator<Int, Rat> blk(k, n, sigmaK, false, pas, pas);
 			BlockEnumerator<Int, Rat>sys(k, n + k, sigmaK, true, pas, pas);
 
-			blk.enumerate(actIn, actOut, false, k, n, sigmaK, numThreads, pas, pas, actEnum);
-			sys.enumerate(actIn, sysOut, true, k, n + k, sigmaK, numThreads, pas, pas, sysEnum);
+			blk.enumerate(actIn, actOut, actEnum);
+			sys.enumerate(actIn, sysOut, sysEnum);
 
 			std::vector<u8> Gbv(n * sigmaK);
 			using T = u8;

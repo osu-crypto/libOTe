@@ -32,7 +32,8 @@ namespace osuCrypto
 		span<R> distribution,
 		u64 numPoints,
 		bool normalize,
-		std::ostream& out = std::cout
+		std::ostream& out = std::cout,
+		std::string name = {}
 	) {
 		auto n = distribution.size() - 1;
 		//Int total = Int(0) << n;
@@ -49,6 +50,8 @@ namespace osuCrypto
 			out << "Printing log2 count distribution: " << std::endl;
 			total = 1;
 		}
+		if (name.size())
+			out << name << std::endl;
 
 		if (numPoints == 0)
 		{

@@ -91,6 +91,11 @@ namespace osuCrypto {
 			repeaterEnumerator(inDist, outDist, mK, mN, mChoose, fullEnum);
 		}
 
+		u64 numTicks() const override
+		{
+			return 0;
+		}
+
 		SparseMtx getMtx() const
 		{
 			PointList list(mK, mN);

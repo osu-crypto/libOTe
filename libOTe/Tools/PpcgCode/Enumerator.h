@@ -17,6 +17,9 @@ namespace osuCrypto
 		u64 mK = 0;
 		u64 mN = 0;
 
+		LoadingBar* mLoadBar = nullptr;
+
+
 		virtual void enumerate(
 			span<const R> inDist,
 			span<R> outDist) = 0;
@@ -25,6 +28,8 @@ namespace osuCrypto
 			span<const R> inDist,
 			span<R> outDist,
 			MatrixView<R> full) = 0;
+
+		virtual u64 numTicks() const = 0;
 
 	};
 }
