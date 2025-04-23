@@ -12,6 +12,7 @@
 #include "libOTe/Tools/LDPC/Util.h"
 #include "AccumulateEnumerator.h"
 #include "BlockEnumerator.h"
+#include "ExpandEnumerator.h"
 
 #define BITSET_SIZE 128
 
@@ -97,6 +98,8 @@ namespace osuCrypto {
 		tests.add("ballsBinsCap_Test                   ", ballsBinsCap_Test);
 		tests.add("accumulateEnum_exhaustive_Test      ", accumulateEnum_exhaustive_Test);
 		tests.add("blockEnum_exhaustive_Test           ", blockEnum_exhaustive_Test);
+		tests.add("expandEnum_exhaustive_Test          ", expandEnum_exhaustive_Test);
+		
 		tests.add("composeEnum_exhaustive_Test         ", composeEnum_exhaustive_Test);
 		tests.add("composeEnum_sysExhaustive_Test      ", composeEnum_sysExhaustive_Test);
 		

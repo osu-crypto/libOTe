@@ -302,7 +302,13 @@ namespace osuCrypto {
 
 	//using Float = boost::multiprecision::cpp_bin_float_double;
 	//using Float = boost::multiprecision::cpp_bin_float_quad;
-	using Float = boost::multiprecision::cpp_bin_float_oct;
+	//using Float = boost::multiprecision::cpp_bin_float_oct;
+	namespace mp = boost::multiprecision;
+
+	// unsigned Digits, digit_base_type DigitBase, class Allocator, class Exponent, Exponent MinExponent, Exponent MaxExponent
+	using Float = mp::number<
+		mp::backends::cpp_bin_float<237, mp::backends::digit_base_2, void, std::int64_t, -68719476734, 68719476735>, mp::et_off>;
+
 #ifdef ENABLE_GMP
 	using Int = boost::multiprecision::mpz_int;
 	using Rat = boost::multiprecision::mpq_rational;

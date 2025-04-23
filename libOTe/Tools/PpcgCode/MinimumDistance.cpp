@@ -23,6 +23,7 @@
 #include "LoadingBar.h"
 #include "AccumulateEnumerator.h"
 #include "Print.h"
+#include "ExpandEnumerator.h"
 
 namespace osuCrypto
 {
@@ -111,6 +112,7 @@ namespace osuCrypto
 			std::cout << "-k [list int], " << std::endl;
 			std::cout << "-rate double " << std::endl;
 			std::cout << "-sigma [list int] " << std::endl;
+			std::cout << "-exp [list int] " << std::endl;
 			return;
 		}
 
@@ -126,6 +128,7 @@ namespace osuCrypto
 
 		// block size
 		auto sigmas = cmd.getManyOr("sigma", std::vector<u64>{64});
+		auto exps = cmd.getManyOr("exp", std::vector<u64>{64});
 		bool verbose = cmd.isSet("verbose");
 		bool systematic = cmd.isSet("systematic");
 
@@ -172,145 +175,154 @@ namespace osuCrypto
 		{
 			for (auto sigma : sigmas)
 			{
+				for (auto exp : exps)
+				{
 
-				u64 n = k / rate - k * systematic;
-				if (k % sigma)
-				{
-					auto kk = k;
-					k = ((k + sigma / 2) / sigma) * sigma;
-					std::cout << Color::Red << "Rounding k to the nearest "
-						<< "multiple of sigma. k = " << kk << " -> " << k
-						<< std::endl << Color::Default;
-				}
-				if (n % k)
-				{
-					auto nn = n;
-					n = ((n + k / 2) / k) * k;
-					std::cout << Color::Red << "rounding n to the nearest "
-						<< "multiple of k. n = " << nn << " -> " << n
-						<< std::endl << Color::Default;
-				}
+					u64 n = k / rate - k * systematic;
+					if (k % sigma)
+					{
+						auto kk = k;
+						k = ((k + sigma / 2) / sigma) * sigma;
+						std::cout << Color::Red << "Rounding k to the nearest "
+							<< "multiple of sigma. k = " << kk << " -> " << k
+							<< std::endl << Color::Default;
+					}
+					if (n % k)
+					{
+						auto nn = n;
+						n = ((n + k / 2) / k) * k;
+						std::cout << Color::Red << "rounding n to the nearest "
+							<< "multiple of k. n = " << nn << " -> " << n
+							<< std::endl << Color::Default;
+					}
 
-				std::stringstream ss, sh;
-				if (systematic)
-				{
-					sh << "S";
-					ss << "S" << k << "." << k / rate;
-				}
+					std::stringstream ss, sh;
+					if (systematic)
+					{
+						sh << "S";
+						ss << "S" << k << "." << k / rate;
+					}
 
-				ChooseCache<I> choose;// (n, lb);
-				ChooseCache<Int> chooseInt;// (n);
-				LoadingBar lb;
-				u64 kk = k;
-				std::vector<std::unique_ptr<Enumerator<R>>> subcodes;
-				std::vector<Enumerator<R>*> subcodesParam;
-				for (u64 i = 0; i < subCodeTags.size(); ++i)
-				{
-					if (subCodeTags[i] == "repeat")
+					ChooseCache<I> choose;// (n, lb);
+					ChooseCache<Int> chooseInt;// (n);
+					LoadingBar lb;
+					u64 kk = k;
+					std::vector<std::unique_ptr<Enumerator<R>>> subcodes;
+					std::vector<Enumerator<R>*> subcodesParam;
+					for (u64 i = 0; i < subCodeTags.size(); ++i)
 					{
-						sh << "R";
-						ss << "r" << kk << "." << n;
-						subcodes.emplace_back(new RepeaterEnumerator<I, R>(kk, n, choose));
+						if (subCodeTags[i] == "repeat")
+						{
+							sh << "R";
+							ss << "r" << kk << "." << n;
+							subcodes.emplace_back(new RepeaterEnumerator<I, R>(kk, n, choose));
+						}
+						else if (subCodeTags[i] == "acc")
+						{
+							sh << "A";
+							ss << "A" << kk << "." << n;
+							subcodes.emplace_back(new AccumulatorEnumerator<I, R>(kk, n, choose));
+						}
+						else if (subCodeTags[i] == "block")
+						{
+							sh << "B";
+							ss << "B" << kk << "." << n << "." << sigma;
+							if (skipH0) ss << "h1";
+							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, false, choose, chooseInt, skipH0));
+						}
+						else if (subCodeTags[i] == "sysBlock")
+						{
+							sh << "sB";
+							ss << "sB" << kk << "." << n << "." << sigma;
+							if (skipH0) ss << "h1";
+							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, true, choose, chooseInt, skipH0));
+						}
+						else if (subCodeTags[i] == "exp")
+						{
+							sh << "E";
+							ss << "E" << kk << "." << n << "." << exp;
+							subcodes.emplace_back(new ExpandEnumerator<I, R>(kk, n, exp, choose));
+						}
+						else
+							throw std::runtime_error("subcodes must be {repeat, accumulate, block, ... }. " LOCATION);
+						subcodesParam.push_back(subcodes.back().get());
+						subcodes.back()->mLoadBar = &lb;
+
+						kk = n;
 					}
-					else if (subCodeTags[i] == "acc")
+
+
+
+					auto start = std::chrono::high_resolution_clock::now();
+					ComposeEnumerator<I, R> comp(
+						subcodesParam,
+						systematic, choose);
+					comp.mLoadBar = &lb;
+
+
+					std::vector<R> inDist(comp.mK + 1), outDist(comp.mN + 1);
+
+
+					lb.start(comp.numTicks() + choose.numTicks(n), sh.str());
+
+					choose.precompute(n, &lb);
+					chooseInt.precompute(n, &lb);
+
+					if (cmd.hasValue("w"))
 					{
-						sh << "A";
-						ss << "A" << kk << "." << n;
-						subcodes.emplace_back(new AccumulatorEnumerator<I, R>(kk, n, choose));
-					}
-					else if (subCodeTags[i] == "block")
-					{
-						sh << "B";
-						ss << "B" << kk << "." << n << "." << sigma;
-						if (skipH0) ss << "h1";
-						subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, false, choose, chooseInt, skipH0));
-					}
-					else if (subCodeTags[i] == "sysBlock")
-					{
-						sh << "sB";
-						ss << "sB" << kk << "." << n << "." << sigma;
-						if (skipH0) ss << "h1";
-						subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, true, choose, chooseInt, skipH0));
+						u64 w = cmd.get<u64>("w");
+						inDist[w] = choose(k, w);
 					}
 					else
-						throw std::runtime_error("subcodes must be {repeat, accumulate, block, ... }. " LOCATION);
-					subcodesParam.push_back(subcodes.back().get());
-					subcodes.back()->mLoadBar = &lb;
+					{
+						for (u64 w = 0; w < inDist.size(); ++w)
+							inDist[w] = choose(k, w);
+					}
 
-					kk = n;
+
+					Matrix<R> fullEnum;
+					if (full)
+					{
+						fullEnum.resize(inDist.size(), outDist.size());
+						comp.enumerate(inDist, outDist, fullEnum);
+					}
+					else
+						comp.enumerate(inDist, outDist);
+
+					lb.cancel();
+
+					auto expected_md = minimumDistance<R>(outDist);
+					auto end = std::chrono::high_resolution_clock::now();
+
+					sh << "_";
+					if (print_dist)
+					{
+						print_distribution<R>(outDist, numPoints, normalizes, std::cout, ". " + sh.str() + ss.str());
+					}
+
+					std::ofstream out(
+						"dist_" + sh.str() + ss.str() + ".txt", std::ios::trunc);
+
+					print_distribution<R>(outDist, 0, normalizes, out, ". " + sh.str() + ss.str());
+
+					std::cout << sh.str() << ss.str() << " time: "
+						<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
+
+					std::cout << "MD: " << expected_md.mExpectMD << " zero: " << expected_md.mZeroRelDist
+						<< " zeroVal: " << expected_md.mZeroValue << std::endl;
+
+					if (fullEnum.size())
+					{
+						std::cout << "log2(E)" << std::endl;
+						std::cout << logEnumToString(fullEnum) << std::endl;
+					}
+					//if (cmd.isSet("exact"))
+					//{
+					//	PRNG prng(block(421354523452343423ull, 2332453245234123421ull));
+					//	auto md = exactMD(subcodes, k, n, sigma, prng);
+					//	std::cout << "Exact MD: " << md << std::endl;
+					//}
 				}
-
-
-
-				auto start = std::chrono::high_resolution_clock::now();
-				ComposeEnumerator<I, R> comp(
-					subcodesParam,
-					systematic, choose);
-				comp.mLoadBar = &lb;
-
-
-				std::vector<R> inDist(comp.mK + 1), outDist(comp.mN + 1);
-
-
-				lb.start(comp.numTicks() + choose.numTicks(n), sh.str());
-
-				choose.precompute(n, &lb);
-				chooseInt.precompute(n, &lb);
-
-				if (cmd.hasValue("w"))
-				{
-					u64 w = cmd.get<u64>("w");
-					inDist[w] = choose(k, w);
-				}
-				else
-				{
-					for (u64 w = 0; w < inDist.size(); ++w)
-						inDist[w] = choose(k, w);
-				}
-
-
-				Matrix<R> fullEnum;
-				if (full)
-				{
-					fullEnum.resize(inDist.size(), outDist.size());
-					comp.enumerate(inDist, outDist, fullEnum);
-				}
-				else
-					comp.enumerate(inDist, outDist);
-
-				lb.cancel();
-
-				auto expected_md = minimumDistance<R>(outDist);
-				auto end = std::chrono::high_resolution_clock::now();
-
-				sh << "_";
-				if (print_dist)
-				{
-					print_distribution<R>(outDist, numPoints, normalizes, std::cout, ". " + sh.str() + ss.str());
-				}
-
-				std::ofstream out(
-					"dist_" + sh.str() + ss.str() + ".txt", std::ios::trunc);
-
-				print_distribution<R>(outDist, 0, normalizes, out, ". " + sh.str() + ss.str());
-
-				std::cout << sh.str() << ss.str() << " time: "
-					<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
-
-				std::cout << "MD: " << expected_md.mExpectMD << " zero: " << expected_md.mZeroRelDist
-					<< " zeroVal: " << expected_md.mZeroValue << std::endl;
-
-				if (fullEnum.size())
-				{
-					std::cout << "log2(E)" << std::endl;
-					std::cout << logEnumToString(fullEnum) << std::endl;
-				}
-				//if (cmd.isSet("exact"))
-				//{
-				//	PRNG prng(block(421354523452343423ull, 2332453245234123421ull));
-				//	auto md = exactMD(subcodes, k, n, sigma, prng);
-				//	std::cout << "Exact MD: " << md << std::endl;
-				//}
 			}
 		}
 	}

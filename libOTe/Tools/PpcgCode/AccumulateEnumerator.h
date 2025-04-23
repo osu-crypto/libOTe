@@ -14,6 +14,9 @@ namespace osuCrypto
 		using Enumerator<R>::mN;
 		using Enumerator<R>::mLoadBar;
 
+		bool mSystematic = false;
+		const ChooseCache<I>& mChoose;
+
 		AccumulatorEnumerator() = default;
 		AccumulatorEnumerator(u64 k, u64 n, const ChooseCache<I>& choose)
 			: Enumerator<R>(k, n)
@@ -27,9 +30,6 @@ namespace osuCrypto
 				throw RTE_LOC;
 		}
 
-
-		bool mSystematic = false;
-		const ChooseCache<I>& mChoose;
 
 		void enumerate(
 			span<const R> inDist,

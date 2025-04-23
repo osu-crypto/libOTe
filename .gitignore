@@ -38,6 +38,8 @@ bld/
 [Oo]bj/
 out/ 
 
+dist_*
+
 # Roslyn cache directories
 *.ide/
 

@@ -1,7 +1,7 @@
 #pragma once
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/Matrix.h"
-
+#include "LoadingBar.h"
 namespace osuCrypto
 {
 	/// Enumerator interface
