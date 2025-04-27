@@ -24,7 +24,7 @@ namespace osuCrypto {
 			Matrix<Rat> actEnum(k + 1, n + 1);
 			Matrix<Rat> expEnum(k + 1, n + 1);
 
-			ChooseCache<Int> pas(k);
+			Choose<Int> pas(k);
 			for (u64 i = 0; i < actIn.size(); ++i)
 			{
 				actIn[i] = pas(k, i);

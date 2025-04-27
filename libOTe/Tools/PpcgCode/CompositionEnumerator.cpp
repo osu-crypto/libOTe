@@ -52,7 +52,7 @@ namespace osuCrypto
 			Matrix<Rat> expEnum(k + 1, n + 1);
 			Matrix<Rat> comEnum(k + 1, n + 1);
 
-			ChooseCache<Int> pas(n);
+			Choose<Int> pas(n);
 			for (u64 i = 0; i < actIn.size(); ++i)
 			{
 				actIn[i] = pas(k, i);
@@ -237,7 +237,7 @@ namespace osuCrypto
 			Matrix<Rat> expEnum(k + 1, n + 1);
 			Matrix<Rat> comEnum(k + 1, n + 1);
 
-			ChooseCache<Int> pas(n);
+			Choose<Int> pas(n);
 			for (u64 i = 0; i < actIn.size(); ++i)
 			{
 				actIn[i] = pas(k, i);

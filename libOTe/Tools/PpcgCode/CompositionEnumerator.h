@@ -19,14 +19,14 @@ namespace osuCrypto {
 
 		bool mSystematic = false;
 		u64 mNumThreads = 0;
-		const ChooseCache<I>& mChoose;
+		const Choose<I>& mChoose;
 		std::vector<Enumerator<R>*> mSubcodes;
 
 		ComposeEnumerator() = default;
 		ComposeEnumerator(
 			std::vector<Enumerator<R>*> subcodes,
 			bool systematic,
-			const ChooseCache<I>& choose,
+			const Choose<I>& choose,
 			u64 numThreads = 0)
 			: mSubcodes(std::move(subcodes))
 			, mSystematic(systematic)

@@ -203,8 +203,8 @@ namespace osuCrypto
 						ss << "S" << k << "." << k / rate;
 					}
 
-					ChooseCache<I> choose;// (n, lb);
-					ChooseCache<Int> chooseInt;// (n);
+					Choose<I> choose;// (n, lb);
+					Choose<Int> chooseInt;// (n);
 					LoadingBar lb;
 					u64 kk = k;
 					std::vector<std::unique_ptr<Enumerator<R>>> subcodes;
@@ -355,8 +355,8 @@ namespace osuCrypto
 		//Matrix<Float> E(k + 1, n + 1);
 		//std::vector<Float> dist(n + 1);
 
-		//ChooseCache<Float> pascal_triangle(n);
-		//ChooseCache<Int> pascal_triangle2(n);
+		//Choose<Float> choose(n);
+		//Choose<Int> choose2(n);
 
 		//switch (subcode)
 		//{
@@ -370,8 +370,8 @@ namespace osuCrypto
 		//		n,
 		//		sigma,
 		//		numThreads,
-		//		pascal_triangle,
-		//		pascal_triangle2,
+		//		choose,
+		//		choose2,
 		//		E);
 		//	break;
 		//case osuCrypto::Subcode::Accumulate:
@@ -380,7 +380,7 @@ namespace osuCrypto
 		//		{},
 		//		dist,
 		//		systematic,
-		//		k, n, numThreads, pascal_triangle,
+		//		k, n, numThreads, choose,
 		//		E);
 
 		//	break;

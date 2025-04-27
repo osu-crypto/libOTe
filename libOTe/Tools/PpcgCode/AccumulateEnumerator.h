@@ -15,10 +15,10 @@ namespace osuCrypto
 		using Enumerator<R>::mLoadBar;
 
 		bool mSystematic = false;
-		const ChooseCache<I>& mChoose;
+		const Choose<I>& mChoose;
 
 		AccumulatorEnumerator() = default;
-		AccumulatorEnumerator(u64 k, u64 n, const ChooseCache<I>& choose)
+		AccumulatorEnumerator(u64 k, u64 n, const Choose<I>& choose)
 			: Enumerator<R>(k, n)
 			, mChoose(choose)
 		{
@@ -60,7 +60,7 @@ namespace osuCrypto
 			u64 h,
 			u64 k,
 			u64 n,
-			const ChooseCache<I>& pascal_triangle)
+			const Choose<I>& choose)
 		{
 			if (n != k)
 				throw RTE_LOC;
@@ -73,8 +73,8 @@ namespace osuCrypto
 			if (h == 0 || h > n)
 				return 0;
 
-			return choose_pascal<I>(n - h, w / 2, pascal_triangle) *
-				choose_pascal<I>(h - 1, (w + 1) / 2 - 1, pascal_triangle);
+			return choose(n - h, w / 2) *
+				choose(h - 1, (w + 1) / 2 - 1);
 		}
 
 		template<typename Full = int>
@@ -85,7 +85,7 @@ namespace osuCrypto
 			u64 k,
 			u64 n,
 			u64 numThreads,
-			const ChooseCache<I>& pascal_triangle,
+			const Choose<I>& choose,
 			Full&& full = {},
 			LoadingBar* loadingBar = nullptr)
 		{
@@ -130,14 +130,14 @@ namespace osuCrypto
 				for (u64 w = wb; w <= we; ++w)
 				{
 					auto hh = h - systematic * w;
-					I enumWH = enumerate(w, hh, k, nn, pascal_triangle);
+					I enumWH = enumerate(w, hh, k, nn, choose);
 
 					//std::cout << "(w,h,k) = " << w << ", " << i64(hh) << ", "<<k<<" -> " << enumWH << std::endl;
 
 					if (inDist.size())
 					{
-						//std::cout << w << " " << h << " ~ " << inDist[w] << " " << enumWH << " / " << choose_pascal<I>(k, w, pascal_triangle) << std::endl;
-						dh += (inDist[w] / choose_pascal<I>(k, w, pascal_triangle)) *
+						//std::cout << w << " " << h << " ~ " << inDist[w] << " " << enumWH << " / " << choose_pascal<I>(k, w, choose) << std::endl;
+						dh += (inDist[w] / choose(k, w)) *
 							enumWH;
 					}
 					else

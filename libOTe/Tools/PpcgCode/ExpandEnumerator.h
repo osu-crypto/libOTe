@@ -17,11 +17,11 @@ namespace osuCrypto
 		// the weight of the expander.
 		u64 mSigma = 0;
 
-		const ChooseCache<I>& mChoose;
+		const Choose<I>& mChoose;
 
 
 		ExpandEnumerator() = default;
-		ExpandEnumerator(u64 k, u64 n, u64 sigma, const ChooseCache<I>& choose)
+		ExpandEnumerator(u64 k, u64 n, u64 sigma, const Choose<I>& choose)
 			: Enumerator<R>(k, n)
 			, mSigma(sigma)
 			, mChoose(choose)
@@ -61,7 +61,7 @@ namespace osuCrypto
 			u64 n,
 			u64 sigma,
 			u64 numThreads,
-			const ChooseCache<I>& choose,
+			const Choose<I>& choose,
 			Full&& full = {},
 			LoadingBar* loadingBar = nullptr)
 		{

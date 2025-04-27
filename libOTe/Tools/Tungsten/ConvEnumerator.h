@@ -14,6 +14,7 @@
 #include "gmp.h"
 #include "gmpxx.h"
 #endif
+#include "libOTe/Tools/PpcgCode/BallsBins.h"
 
 namespace osuCrypto
 {
@@ -280,13 +281,13 @@ namespace osuCrypto
                 if (r + this->outOnesPerAlmostTerm * this->v + t1 != this->h)
                     throw RTE_LOC;
 
-                ChooseCache<T> pascal_triangle;
+                Choose<T> choose;
 
-                auto E1 = ballsBins<T>(z, terminatingRuns + 1, pascal_triangle);
-                auto E2 = choose_pascal<T>(f0 + f1, f0, pascal_triangle);
-                auto E3 = ballsBins<T>(this->v, t1 + 1, pascal_triangle);
-                auto E4 = ballBinCap<T>(t0, this->v + t1, this->stateSize - 2, pascal_triangle);
-                auto E5 = ballsBins<T>(t1 + this->v, terminatingRuns+1, pascal_triangle);
+                auto E1 = ballsBins<T>(z, terminatingRuns + 1, choose);
+                auto E2 = choose(f0 + f1, f0);
+                auto E3 = ballsBins<T>(this->v, t1 + 1, choose);
+                auto E4 = ballsBinsCap<T>(t0, this->v + t1, this->stateSize - 2, choose);
+                auto E5 = ballsBins<T>(t1 + this->v, terminatingRuns+1, choose);
                 auto eg = E1 * E2 * E3 * E4 * E5;
 
                 if (this->verbose > 1)
@@ -339,7 +340,7 @@ namespace osuCrypto
 
                 //// (2) output zeros that are one can be assigned anywhere so long
                 //// as we dont have stateSize zeros in a row. Balls in k with capacity.
-                //T enumOuptutZerosOn = ballBinCap<T>(g0p, numOutputZeroBinsWthCap, stateSize - 1);
+                //T enumOuptutZerosOn = ballsBinsCap<T>(g0p, numOutputZeroBinsWthCap, stateSize - 1);
 
                 //// (3) the remaining output zeros are assigned to before any run or after the 
                 //// last if it terminates.
@@ -486,9 +487,9 @@ namespace osuCrypto
     }
 
     template<typename T>
-    T accumulate(u64 n, u64 w, u64 h, ChooseCache<T> &pascal_triangle)
+    T accumulate(u64 n, u64 w, u64 h, Choose<T> &choose)
     {
-        return choose_pascal<T>(n - h, w / 2, pascal_triangle) * choose_pascal<T>(h - 1, divCeil(w, 2) - 1, pascal_triangle);
+        return choose(n - h, w / 2) * choose(h - 1, divCeil(w, 2) - 1);
     }
 
 
@@ -515,8 +516,8 @@ namespace osuCrypto
         //e.setB(b);
         //e.setR(r);
 
-        ChooseCache<Int> pascal_triangle;
-        auto exp = accumulate<Int>(n, w, h, pascal_triangle);
+        Choose<Int> choose;
+        auto exp = accumulate<Int>(n, w, h, choose);
 
         u64 f0 = 0;
         //u64 g = h;

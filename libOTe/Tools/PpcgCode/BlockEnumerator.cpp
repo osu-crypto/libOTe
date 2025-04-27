@@ -192,7 +192,7 @@ namespace osuCrypto {
 			if (n % sigmaN)
 				throw RTE_LOC;
 
-			ChooseCache<Int> pas(n);
+			Choose<Int> pas(n);
 			for (u64 i = 0; i < actIn.size(); ++i)
 			{
 				actIn[i] = pas(k, i);

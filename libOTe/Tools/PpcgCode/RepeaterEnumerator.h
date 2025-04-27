@@ -9,7 +9,7 @@ namespace osuCrypto {
 
 
 	template<typename I>
-	I repeaterEnumerator(u64 w, u64 h, u64 k, u64 e, const ChooseCache<I>& pascal_triangle) {
+	I repeaterEnumerator(u64 w, u64 h, u64 k, u64 e, const Choose<I>& choose) {
 		assert(w <= k);
 		assert(h <= e * k);
 
@@ -17,7 +17,7 @@ namespace osuCrypto {
 		if (h != w * e) {
 			return 0;
 		}
-		return choose_pascal<I>(k, w, pascal_triangle);
+		return choose_pascal<I>(k, w, choose);
 	}
 
 
@@ -27,7 +27,7 @@ namespace osuCrypto {
 		span<R> outDist,
 		u64 k,
 		u64 n,
-		const ChooseCache<I>& choose,
+		const Choose<I>& choose,
 		Enum&& full = {}) {
 		if (n % k)
 			throw RTE_LOC;
@@ -65,11 +65,11 @@ namespace osuCrypto {
 		using Enumerator<R>::mK;
 		using Enumerator<R>::mN;
 
-		const ChooseCache<I>& mChoose;
+		const Choose<I>& mChoose;
 
 		RepeaterEnumerator(u64 k,
 			u64 n,
-			const ChooseCache<I>& choose)
+			const Choose<I>& choose)
 			: Enumerator<R>{ k, n }
 			, mChoose(choose)
 		{

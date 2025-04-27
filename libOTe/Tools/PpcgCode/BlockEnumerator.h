@@ -10,6 +10,7 @@
 #include "libOTe/Tools/LDPC/Mtx.h"
 //#include "oldMinDistTest.h"
 #include "cryptoTools/Common/BitVector.h"
+#include "BallsBins.h"
 
 namespace osuCrypto {
 
@@ -21,8 +22,8 @@ namespace osuCrypto {
 			u64 n,
 			u64 sigma,
 			bool sys,
-			const ChooseCache<I>& choose,
-			const ChooseCache<Int>& choose2,
+			const Choose<I>& choose,
+			const Choose<Int>& choose2,
 			bool skipH0 = 0,
 			u64 numThreads = 0)
 			: Enumerator<R>(k, n)
@@ -51,10 +52,10 @@ namespace osuCrypto {
 		bool mSystematic = false;
 
 		// The n choose k cache for the integer type I (might be Float)
-		const ChooseCache<I>& mChoose;
+		const Choose<I>& mChoose;
 
 		// The n choose k cache for the integer type Int. Needed for ballsBinCap.
-		const ChooseCache<Int>& mChoose2;
+		const Choose<Int>& mChoose2;
 
 		// if true, we will not count the codewords mapped to h=0
 		// from w>0. These are from if the submatrix is not invertible.
@@ -91,7 +92,7 @@ namespace osuCrypto {
 		static R enumerate(
 			u64 w, u64 h, 
 			u64 k, u64 n, u64 sigma, 
-			const ChooseCache<I>& pascal_triangle)
+			const Choose<I>& choose)
 		{
 			if (!(w <= k && h <= n && sigma <= k))
 				throw RTE_LOC;
@@ -116,12 +117,12 @@ namespace osuCrypto {
 
 				// Part 2: E_{w,q}
 				// std::cout  << (w-q) << "," << q << "," << (sigma-1) << std::endl;
-				I E_wq = choose_pascal<I>(k_over_sigma, q, pascal_triangle) * labeledBallBinCap<I>(w, q, sigma, pascal_triangle);
-				//std::cout << "E_wq " << E_wq <<" = " << choose_pascal<I>(k_over_sigma, q, pascal_triangle) <<
-				   // " * " << labeledBallBinCap<I>(w, q, sigma, pascal_triangle) << std::endl;
+				I E_wq = choose(k_over_sigma, q) * labeledBallsBinsCap<I>(w, q, sigma, choose);
+				//std::cout << "E_wq " << E_wq <<" = " << choose_pascal<I>(k_over_sigma, q, choose) <<
+				   // " * " << labeledBallsBinsCap<I>(w, q, sigma, choose) << std::endl;
 
 			   // Part 3: E_{q,h} = e * sigma * q choose h
-				I E_qh = choose_pascal<I>(e * sigma * q, h, pascal_triangle);
+				I E_qh = choose(e * sigma * q, h);
 				//std::cout << "E_qh " << E_qh << std::endl;
 
 			   // Putting it all together
@@ -144,8 +145,8 @@ namespace osuCrypto {
 		// n = output length (outputDist.size() - 1)
 		// sigma = the subblock size
 		// numThreads = number of threads to use
-		// pascal_triangle = pascal triangle cache for the integer/floating point type
-		// pascal_triangle2 = pascal triangle cache for the integer type (required for the labeledBallBinCap)
+		// choose = pascal triangle cache for the integer/floating point type
+		// choose2 = pascal triangle cache for the integer type (required for the labeledBallsBinsCap)
 		// full = either void and then not used, or a matrix of R and the full 
 		//    enumerator is written to it.
 		template<typename Full = int>
@@ -158,8 +159,8 @@ namespace osuCrypto {
 			u64 sigma,
 			bool skipH0,
 			u64 numThreads,
-			const ChooseCache<I>& pascal_triangle,
-			const ChooseCache<Int>& pascal_triangle2,
+			const Choose<I>& choose,
+			const Choose<Int>& choose2,
 			Full&& full = {},
 			LoadingBar* laodingBar = nullptr)
 		{
@@ -225,7 +226,7 @@ namespace osuCrypto {
 					{
 						for (u64 w = wBegin; w < wEnd; ++w)
 						{
-							inputFrac[w] = inputDist[w] / choose_pascal(k, w, pascal_triangle);
+							inputFrac[w] = inputDist[w] / choose(k, w);
 						}
 					}
 
@@ -235,7 +236,7 @@ namespace osuCrypto {
 					for (u64 q = qBegin; q < qEnd; ++q)
 					{
 						// vq = 2^{-e sigma q} * C(k/sigma, q)
-						v[q] = twoESigmaQ * choose_pascal<I>(k_over_sigma, q, pascal_triangle);
+						v[q] = twoESigmaQ * choose(k_over_sigma, q);
 
 						// update 2^{-e sigma q} = 2^{-e sigma {q-1}} * 2^{-e sigma}
 						twoESigmaQ *= twoESigma;
@@ -257,7 +258,7 @@ namespace osuCrypto {
 
 						for (u64 q = 0; q <= qMax; ++q)
 						{
-							cqw[q] = v[q] * labeledBallBinCap(w, q, sigma, pascal_triangle2).convert_to<I>();
+							cqw[q] = v[q] * labeledBallsBinsCap(w, q, sigma, choose2).convert_to<I>();
 						}
 
 						auto hBegin = std::max<u64>(systematic ? w : 0, skipH0);
@@ -268,7 +269,7 @@ namespace osuCrypto {
 							R enumerator = 0;
 							for (u64 q = 0; q <= qMax; ++q)
 							{
-								enumerator += cqw[q] * choose_pascal<I>(e * sigma * q, h, pascal_triangle);
+								enumerator += cqw[q] * choose(e * sigma * q, h);
 							}
 
 							if constexpr (std::is_same_v<Full, int> == false)
