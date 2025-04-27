@@ -53,7 +53,7 @@ namespace osuCrypto {
 
 		// The n choose k cache for the integer type I (might be Float)
 		const Choose<I>& mChoose;
-		
+
 		// balls bin cap for cap=sigma-1.
 		const BallsBinsCap<I>& mBallsBinsCap;
 
@@ -133,40 +133,33 @@ namespace osuCrypto {
 
 			R enumerator = 0;
 
-			// each run requires
-			// * one 1 in the input
-			// * one 1 in the output
-			// * sigma zeros in the output
-			auto rMax = n;// std::min<i64>(std::min<i64>(w, h), 2 * ((n - h) / sigma) + 1);
+			// each on run must at with a 1 in the input and output.
+			// each on run must (except the last) must terminate with sigma zeros.
+			// we have (n-h) zeros, therefore we can have at most 2(n-h)/sigma runs.
+			auto rMax = std::min<i64>(
+				2 * std::min<i64>(w, h) + 1,
+				2 * ((n - h) / sigma) + 1);
 			for (i64 r = 1; r <= rMax; ++r)
 			{
+				auto r1 = divCeil(r, 2);
+				auto r0 = r - r1;
 
-				// the number of zeros in the runs is limited by
-				// * having at most n-h 0s in the output
-				// * out of these n-h 0s, r0 * sigma  are used for terminations.
-				// * every 1 in the output that is not followed by a termination 
-				//   can have at most sigma-1 0s. Therefore there can be at most
-				//   (h-r0)(sigma-1) free zeros.
-				auto t0Max = n - h;// std::min<i64>(n - h - r0 * sigma, (h - r0) * (sigma - 1));
+				// just looking at the number of output zeros available,
+				// we know there are (n-h) zeros, and (r1 - 1) * sigma
+				// are used for terminations. 
+				// We also have h-r1 bins, each with capacity sigma - 1.
+				i64 t0Max = std::min<i64>(
+					n - h - (r1 - 1) * sigma,
+					(h - r0) * (sigma - 1));
+
 				for (i64 t0 = 0; t0 <= t0Max; ++t0)
 				{
-					//i64 v = n - h - t0 - r0 * sigma;
-					//if (v < 0)
-					//	continue;
-
-					//auto E1 = choose(h - 1, r1 - 1);
-					//auto E2 = bbc(t0, h - r0, sigma - 1);
-					//auto E3 = ballsBins(v, r0 + 1, choose);
-					//auto E4 = choose(n - r1 - v, w - r1);
-
 					R Ewhrt = enumerate(w, h, r, t0, k, n, sigma, choose, bbc);
-					//R(E1 * E2 * E3 * E4) / pow2_<I>(v);
-
 					enumerator += Ewhrt;
 				}
 			}
 
-			if constexpr(std::is_same_v<R,Rat>)
+			if constexpr (std::is_same_v<R, Rat>)
 				enumerator.backend().normalize();
 
 			return enumerator;
@@ -218,21 +211,6 @@ namespace osuCrypto {
 			if (numThreads < 1)
 				throw RTE_LOC;
 
-			//auto nn = systematic ? n - k : n;
-			//if (nn % k)
-			//	throw RTE_LOC;
-
-			//auto e = nn / k;
-			//auto qMax = k / sigma;
-
-			// v[q] = 2^{-e sigma q} * C(k/sigma, q)
-			//std::vector<R> v(qMax + 1);
-			//Matrix<R> D(numThreads - 1, outputDist.size());
-			//std::vector<std::vector<R>> D(numThreads - 1); for (auto& d : D)d.resize(outputDist.size());;
-			//ThreadBarrier vBarrier(numThreads);
-			//ThreadBarrier cBarrier(numThreads);
-
-			std::vector<R> inputFrac(inputDist.size());
 			auto start = std::chrono::system_clock::now();
 
 			// special case the zero weight input.
@@ -247,44 +225,54 @@ namespace osuCrypto {
 			outputDist[0] = inputDist.size() ? inputDist[0] : 1;
 
 
-			//for (u64 w = 0; w < k; ++w)
-			//{
-			//	inputFrac[w] = inputDist[w] / choose(k, w);
-			//}
-
-
-			for (u64 h = 1; h <= n; ++h)
+			std::vector<R> inputFrac(inputDist.size());
+			for (u64 w = 0; w < k; ++w)
 			{
-				for (u64 w = 1; w <= k; ++w)
-				{
-					auto Ewh = enumerate(w, h, k, n, sigma, choose, bbc);
-					outputDist[h] += inputDist[w] * Ewh / choose(k,w);
-
-					if constexpr (std::is_same_v<Full, int> == false)
-					{
-						full(w, h) = Ewh;
-					}
-
-					if constexpr (std::is_same_v<Rat, Float>)
-					{
-						if (isnan(outputDist[h]))
-						{
-							std::lock_guard l(gIoStreamMtx);
-							std::cout << "outputDist[" << h << "] NAN " << std::endl;
-							int i = 0;
-							std::cin >> i;
-
-						}
-					}
-				}
-
-
-				if constexpr (std::is_same_v<std::remove_cvref_t<R>, Rat>)
-				{
-					outputDist[h].backend().normalize();
-				}
+				inputFrac[w] = inputDist[w] / choose(k, w);
 			}
 
+			std::vector<std::jthread> thrds(numThreads);
+			for (u64 i = 0; i < numThreads; ++i)
+			{
+				thrds[i] = std::jthread([&, i] {
+
+					for (u64 h = 1 + i; h <= n; h += numThreads)
+					{
+						R dh = 0;
+						for (u64 w = 1; w <= k; ++w)
+						{
+							auto Ewh = enumerate(w, h, k, n, sigma, choose, bbc);
+							dh += inputFrac[w] * Ewh;// / choose(k, w);
+
+							if constexpr (std::is_same_v<Full, int> == false)
+							{
+								full(w, h) = Ewh;
+							}
+
+							if constexpr (std::is_same_v<Rat, Float>)
+							{
+								if (isnan(dh))
+								{
+									std::lock_guard l(gIoStreamMtx);
+									std::cout << "outputDist[" << h << "] NAN " << std::endl;
+									int i = 0;
+									std::cin >> i;
+
+								}
+							}
+						}
+
+						if constexpr (std::is_same_v<std::remove_cvref_t<R>, Rat>)
+						{
+							dh.backend().normalize();
+						}
+
+						outputDist[h] = dh;
+
+					}
+
+					});
+			}
 
 		}
 
