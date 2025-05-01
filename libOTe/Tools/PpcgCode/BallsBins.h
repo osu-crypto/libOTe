@@ -15,6 +15,9 @@ namespace osuCrypto
 	{
 		if (n < 0 || k < 0)
 			return 0;
+		if (n == 0 && k == 0)
+			return 1;
+
 		return choose(n + k - 1, k - 1);
 	}
 
@@ -82,10 +85,12 @@ namespace osuCrypto
 		// TODO the special cases eg balls=0 are probably buggy, or at least they were in labeledballbincap
 		//std::cout << "debug before using" << std::endl;
 		//assert(false);
-		if (balls < 0 || bins < 0 || cap < 0)
+		if (balls < 0 || bins < 0)
 			return 0;
 		if (balls == 0)
 			return 1;
+		if (cap < 0 || bins == 0)
+			return 0;
 
 		if (balls * 2 > bins * cap)
 			balls = bins * cap - balls;
@@ -130,9 +135,9 @@ namespace osuCrypto
 	struct BallsBinsCap
 	{
 
-		u64 mBalls = 0;
-		u64 mBins = 0;
-		u64 mCap = 0;
+		i64 mBalls = 0;
+		i64 mBins = 0;
+		i64 mCap = 0;
 		I mZero = 0;
 		I mOne = 1;
 
@@ -155,7 +160,7 @@ namespace osuCrypto
 			mBalls = balls;
 			mBins = bins;
 			mCap = cap;
-			if (mCap == 0)
+			if (mCap <= 0)
 				return;
 
 			if (choose.mN < mBalls + mBins - 1)
@@ -180,11 +185,12 @@ namespace osuCrypto
 		const I& operator()(i64 balls, i64 bins) const
 		{
 			auto& r = [=]() mutable -> const I& {
+
 				if (balls < 0 || bins < 0)
 					return mZero;
 				if (balls == 0)
 					return mOne;
-				if (mCap == 0 || bins == 0)
+				if (mCap <= 0 || bins == 0)
 					return mZero;
 				if (balls * 2 > bins * mCap)
 					return (*this)(bins * mCap - balls, bins);

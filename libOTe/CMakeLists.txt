@@ -22,7 +22,7 @@ set(SRCS "${SRCS}"
         #Tools/Tungsten/ParallelSyndromeDecoding.h
 )
 
-add_library(libOTe STATIC ${SRCS} )
+add_library(libOTe STATIC ${SRCS})
 add_library(libOTeCUDA STATIC ${CUDA_SRCS})
 
 
