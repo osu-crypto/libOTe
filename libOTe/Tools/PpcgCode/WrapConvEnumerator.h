@@ -84,7 +84,8 @@ namespace osuCrypto {
 
 
 		// a helper function that computes the E_wh term in isolation.
-		template<bool verbose = false>
+		template<
+			bool verbose = false>
 		static R enumerate(
 			i64 w, i64 h,
 			i64 r, i64 t0,
@@ -95,6 +96,8 @@ namespace osuCrypto {
 			const BallsBinsCap<I>& bbc)
 		{
 			if (bbc.mCap != sigma - 2)
+				throw RTE_LOC;
+			if (sigma == 1)
 				throw RTE_LOC;
 
 			if (w == 0 && h == 0 && r == 0 && t0 == 0 && v == 0 && d == 0)
@@ -122,22 +125,22 @@ namespace osuCrypto {
 			auto negT1 = t1 < 0;
 			auto hrCheck = h - r0 - d < 0;
 			auto kCheck = k - r - v - f0 - f1 < 0;
-			//auto nCheck = n - h - (v + d) * (sigma - 1) - t0 < 0;
-			//auto cCheck = r + v + f0 + f1 != t1 + t0 + (v + d) * sigma + r0 * (sigma+1);
 			auto dCheck = d > (r1 - r0);
 
 			// there is a special case when sigma=1, we can have it where there 
 			// is no trailing zone but we have free output ones. These two cases 
 			// look the same. The fix is to skip if we have t1 for sigma=1
-			auto special = sigma == 1 && t1;
+			//auto special = sigma == 1 && t1;
 
 			// For the special case of sigma = 1, we have a problem that
 			// free output 1s look like trailing zones. In this case we disallow
 			//auto smallSigmaD = sigma <= 1 && d == 0 && t1;
 
 			bool skip =
-				(negZ || negF0 || negF1 || negT0 || negT1 || special || hrCheck || kCheck || dCheck);
-			
+				(negZ || negF0 || negF1 || negT0 || negT1 || hrCheck || kCheck || dCheck);
+			if (skip)
+				return 0;
+
 			// near terminations can come before or after any output freezone 1.
 			auto E1 = ballsBins<Int>(v, t1 + d + (r0 == r1), choose);
 
@@ -148,7 +151,7 @@ namespace osuCrypto {
 
 			// there are z zeros in the deadzones, and r0+1 bins to put them in.
 			auto E3 = ballsBins<Int>(z, r0 + 1, choose);
-			auto E4 = bbc(t0, t1 + v);
+			auto E4 = bbc(t0, t1);
 			auto E5 = choose(f0 + f1, f0);
 			auto P = E1 * E2 * E3 * E4 * E5;
 
@@ -168,26 +171,16 @@ namespace osuCrypto {
 				std::cout << "E1 " << E1 << " = B(" << v << ", " << t1 + d + (r0 == r1) << ") ways for near terminations" << std::endl;
 				std::cout << "E2 " << E2 << " = B(" << r1 - 1 << ", " << t1 + v + d << ") ways for terminations" << std::endl;
 				std::cout << "E3 " << E3 << " = B(" << z << ", " << r0 + 1 << ") ways deadzone 0s." << std::endl;
-				std::cout << "E4 " << E4 << " = C(" << t0 << ", " << t1 + v << ", " << i64(sigma - 2) << ") output freezone zeros" << std::endl;
+				std::cout << "E4 " << E4 << " = C(" << t0 << ", " << t1 << ", " << i64(sigma - 2) << ") output freezone zeros" << std::endl;
 				std::cout << "E5 " << E5 << " = " << f0 + f1 << " choose " << i64(f0) << " ways for freezones" << std::endl;
-				std::cout << "sk " << skip  << " = " << negZ << " " << negF0 << " " << negF1 << " " 
-					<< negT0 << " " << negT1  <<" " << special << " " << hrCheck << " " << kCheck << " "
+				std::cout << "sk " << skip << " = " << negZ << " " << negF0 << " " << negF1 << " "
+					<< negT0 << " " << negT1 << " " << hrCheck << " " << kCheck << " "
 					<< dCheck << std::endl;
 
 				std::cout << "Sc " << (s < 0 ? -1 : pow2_<Int>(s)) << " = 2^" << s << " scaling" << std::endl;
 
 
 			}
-			if (skip)
-			{
-				return 0;
-			}
-
-
-			if (t1 && sigma == 1 && P != 0)
-				return -1;
-			if (t0 && sigma == 1 && P != 0)
-				return -1;
 
 			return R(P) / pow2_<I>(s);
 		}
@@ -199,10 +192,6 @@ namespace osuCrypto {
 			const Choose<I>& choose,
 			const BallsBinsCap<I>& bbc)
 		{
-			if (!(w <= k && h <= n && sigma <= k))
-				throw RTE_LOC;
-			if (k % sigma)
-				throw RTE_LOC;
 			if (n % k)
 				throw RTE_LOC;
 			if (w == 0 && h == 0)
@@ -215,35 +204,68 @@ namespace osuCrypto {
 			// each on run must at with a 1 in the input and output.
 			// each on run must (except the last) must terminate with sigma zeros.
 			// we have (n-h) zeros, therefore we can have at most 2(n-h)/sigma runs.
-			auto rMax = n;
-			//std::min<i64>(
-			//2 * std::min<i64>(w, h) + 1,
-			//2 * ((n - h) / sigma) + 1);
+			auto rMax = std::min<u64>(n, h*2);
+			rMax = std::min<u64>(rMax, w);
+			rMax = std::min<u64>(rMax, 2 * (n - h) / sigma + 1);
+
 			for (i64 r = 1; r <= rMax; ++r)
 			{
 				auto r1 = divCeil(r, 2);
 				auto r0 = r - r1;
-				auto dMax = 1 - (r % 2);
 
-				// just looking at the number of output zeros available,
-				// we know there are (n-h) zeros, and (r1 - 1) * sigma
-				// are used for terminations. 
-				// We also have h-r1 bins, each with capacity sigma - 1.
-				i64 t0Max = n - h;
-				//std::min<i64>(
-				//n - h - (r1 - 1) * sigma,
-				//(h - r0) * (sigma - 1));
-
+				// n - h - t0 - r0 * sigma >= 0
+				// t0 <= n - h - r0 * sigma 
+				i64 t0Max = n - h - r0 * sigma;
 				for (i64 t0 = 0; t0 <= t0Max; ++t0)
 				{
-					auto vMax = n;
+					//i64 z = n - h - t0 - r0 * sigma;
+					//if (z < 0)
+					//	break;
+					//i64 f0 = n - w - z;
+					//if (f0 < 0)
+					//	break;
 
-					for (i64 v = 0; v < vMax; ++v)
+					// 0 <= t1
+					// 0 <= h - v - r0 
+					// v <= h - r0 
+					auto vMax = h - r0;
+
+					// 0 <= f0
+					// 0 <= n - h - v * (sigma - 1) - t0 - r0 * sigma;
+					// v * (sigma - 1) <= n - h - t0 - r0 * sigma
+					// v <= (n - h - t0 - r0 * sigma) / (sigma - 1)
+					vMax = std::min<i64>(vMax, (n - h - t0 - r0 * sigma) / (sigma - 1));
+					for (i64 v = 0; v <= vMax; ++v)
 					{
-						for (i64 d = 0; d <= dMax; ++d)
+
+						//i64 t1 = h - v - r0;
+						//if (t1 < 0)
+						//	break;
+						//i64 z = n - h - v * (sigma - 1) - t0 - r0 * sigma;
+						//if (z < 0)
+						//	break;
+						//i64 f0 = n - w - z - v;
+						//if (f0 < 0)
+						//	break;
+						
+
+						// 0 <= k - r - v - f0 - f1
+						// 0 <= k - r - v - (n - w - z - v) - ( w - r)
+						// 0 <= k - r - v - n + w + z + v -  w + r
+						// 0 <= k - n + z 
+						// 0 <= k - n + n - h - (v + d) * (sigma - 1) - t0 - r0 * sigma;
+						// 0 <= k - h - (v + d) * (sigma - 1) - t0 - r0 * sigma;
+						// (v + d) * (sigma - 1) <= k - h - t0 - r0 * sigma;
+						// d <= (k - h - t0 - r0 * sigma) / (sigma - 1) - v;
+
+
+						// 0 <= t1 = h - v - r0 - d;
+						// d <= h-v-r0
+						auto dMax = std::min<i64>((r % 2), h - v - r0);
+						dMax = std::min<i64>(dMax, (k - h - t0 - r0 * sigma) / (sigma - 1) - v);
+
+						for (i64 d = 0; d <= dMax; ++d) // 
 						{
-							if (v == 0 && d == 0)
-								continue;
 							auto Ewhrt = enumerate(w, h, r, t0, v, d, k, n, sigma, choose, bbc);
 							enumerator += Ewhrt;
 							if constexpr (std::is_same_v<Rat, Float>)
@@ -307,8 +329,6 @@ namespace osuCrypto {
 				throw RTE_LOC;
 			if (!sigma || !k)
 				throw RTE_LOC;
-			if (k % sigma)
-				throw RTE_LOC;
 			if (n % k)
 				throw RTE_LOC;
 			if (numThreads < 1)
@@ -334,47 +354,48 @@ namespace osuCrypto {
 				inputFrac[w] = inputDist[w] / choose(k, w);
 			}
 
+			numThreads = 1;
 			std::vector<std::jthread> thrds(numThreads);
 			for (u64 i = 0; i < numThreads; ++i)
 			{
-				thrds[i] = std::jthread([&, i] {
+				//thrds[i] = std::jthread([&, i] {
 
-					for (u64 h = 1 + i; h <= n; h += numThreads)
+				for (u64 h = 1 + i; h <= n; h += numThreads)
+				{
+					R dh = 0;
+					for (u64 w = 1; w <= k; ++w)
 					{
-						R dh = 0;
-						for (u64 w = 1; w <= k; ++w)
+						auto Ewh = enumerate(w, h, k, n, sigma, choose, bbc);
+						dh += inputFrac[w] * Ewh;// / choose(k, w);
+
+						if constexpr (std::is_same_v<Full, int> == false)
 						{
-							auto Ewh = enumerate(w, h, k, n, sigma, choose, bbc);
-							dh += inputFrac[w] * Ewh;// / choose(k, w);
-
-							if constexpr (std::is_same_v<Full, int> == false)
-							{
-								full(w, h) = Ewh;
-							}
-
-							if constexpr (std::is_same_v<Rat, Float>)
-							{
-								if (isnan(dh))
-								{
-									std::lock_guard l(gIoStreamMtx);
-									std::cout << "outputDist[" << h << "] NAN " << std::endl;
-									int i = 0;
-									std::cin >> i;
-
-								}
-							}
+							full(w, h) = Ewh;
 						}
 
-						if constexpr (std::is_same_v<std::remove_cvref_t<R>, Rat>)
+						if constexpr (std::is_same_v<Rat, Float>)
 						{
-							dh.backend().normalize();
+							if (isnan(dh))
+							{
+								std::lock_guard l(gIoStreamMtx);
+								std::cout << "outputDist[" << h << "] NAN " << std::endl;
+								int i = 0;
+								std::cin >> i;
+
+							}
 						}
-
-						outputDist[h] = dh;
-
 					}
 
-					});
+					if constexpr (std::is_same_v<std::remove_cvref_t<R>, Rat>)
+					{
+						dh.backend().normalize();
+					}
+
+					outputDist[h] = dh;
+
+				}
+
+				//});
 			}
 
 		}

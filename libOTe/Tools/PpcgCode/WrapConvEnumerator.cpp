@@ -204,9 +204,11 @@ namespace osuCrypto {
 
 
 		// the the next sigma positions contain pred
-		auto scan = [&](u64 i, auto&& pred) {
+		auto scan = [&](u64 i, auto&& pred, u64 size = 0) {
+			if (size == 0)
+				size = sigma + 1;
 			for (u64 j = i;
-				j < std::min<i64>(i + sigma + 1, y.size());
+				j < std::min<i64>(i + size, y.size());
 				++j)
 			{
 				if (pred(j))
@@ -221,7 +223,7 @@ namespace osuCrypto {
 				y[i] == 0 &&
 				!scan(i, isTerm) &&
 				!scan(i, isNearTerm) &&
-				!scan(i, isTrailing);
+				!scan(i, isTrailing, sigma);
 			};
 
 		r = isTerm(y.size() - 1) ||
@@ -354,21 +356,22 @@ namespace osuCrypto {
 	void WrapConvEnum_single_Test(const CLP& cmd)
 	{
 		u64 verbose = cmd.isSet("v");
-		auto Ns = cmd.getManyOr<u64>("n", { 4, 4, 6 });
-		auto Ks = cmd.getManyOr<u64>("k", { 4, 4, 6 });
-		auto sigmas = cmd.getManyOr<u64>("sigma", { 2,3,2 }); // window size
+		auto Ns = cmd.getManyOr<u64>("n", { 4, 6, 8 });
+		auto Ks = cmd.getManyOr<u64>("k", { 4, 6, 8 });
+		auto Ss = cmd.getManyOr<u64>("sigma", { 2, 3, 2 }); // window size
 		//auto systematics = cmd.getManyOr<u64>("sys", { false, true }); // window size
 		u64 numThreads = cmd.getOr("nt", std::thread::hardware_concurrency());
+		auto pp = cmd.getOr<u64>("pp", 0);
 
 		if (Ns.size() != Ks.size() ||
-			Ns.size() != sigmas.size())
+			Ns.size() != Ss.size())
 			throw RTE_LOC;
 
-		for (u64 p = 2; p < Ns.size(); ++p)
+		for (u64 p = pp; p < Ns.size(); ++p)
 		{
 			auto n = Ns[p];
 			auto k = Ks[p];
-			auto sigma = sigmas[p];
+			auto sigma = Ss[p];
 
 			if (verbose)
 			{
@@ -383,14 +386,14 @@ namespace osuCrypto {
 			u64 vMax = n;
 			for (auto& expEnumRT : expEnum)
 			{
-				expEnumRT.resize(rMax + 1, n);
+				expEnumRT.resize(rMax + 1, n+1);
 				for (auto& expEnumRTT : expEnumRT)
-					expEnumRTT.resize(vMax, 2);
+					expEnumRTT.resize(vMax+1, 2);
 			}
 
 			// in general its not needed but we will be evaluating outside the correct
 			// range which can result in bigger values.
-			Choose<Int> choose(3 * n);
+			Choose<Int> choose(n * n);
 			BallsBinsCap<Int> bbc(n, n, sigma - 2, choose);
 
 			u64 size = 0;
@@ -416,39 +419,46 @@ namespace osuCrypto {
 				copyBytesMin(Xs[i], i);
 			}
 
+			std::set<std::string> ss;
+
 			auto z = std::vector<u8>(n);
 			do
 			{
-				PointList pl(k, n);
-				auto G = DenseMtx::Identity(n);
-
 				for (u64 i = 0; i < n; ++i)
 				{
-					pl.push_back(i, i);
-					PointList pli(k, n);
-					for (u64 j = 0; j < n; ++j)
-						pli.push_back(j, j);
 					Gm[i] = 0;
 					for (u64 j = 0; j < Gbv[i].size(); ++j)
 					{
 						Gm[i] |= T(Gbv[i][j]) << j;
-						if (Gbv[i][j])
-						{
-							pl.push_back(i - j - 1, i);
-							pli.push_back(i - j - 1, i);
-						}
 					}
-
-					SparseMtx Gi(pli);
-					G = G * Gi.dense();
 				}
-				auto GG = G.sparse();
+				//PointList pl(k, n);
+				//auto G = DenseMtx::Identity(n);
 
-				if (verbose)
-				{
-					std::cout << "H: \n" << SparseMtx(pl) << std::endl;
-					std::cout << "G: \n" << G << std::endl;
-				}
+				//for (u64 i = 0; i < n; ++i)
+				//{
+				//	pl.push_back(i, i);
+				//	PointList pli(k, n);
+				//	for (u64 j = 0; j < n; ++j)
+				//		pli.push_back(j, j);
+				//	for (u64 j = 0; j < Gbv[i].size(); ++j)
+				//	{
+				//		if (Gbv[i][j])
+				//		{
+				//			pl.push_back(i - j - 1, i);
+				//			pli.push_back(i - j - 1, i);
+				//		}
+				//	}
+
+				//	SparseMtx Gi(pli);
+				//	G = G * Gi.dense();
+				//}
+				//auto GG = G.sparse();
+				//if (verbose)
+				//{
+				//	std::cout << "H: \n" << SparseMtx(pl) << std::endl;
+				//	std::cout << "G: \n" << G << std::endl;
+				//}
 
 				std::vector<u8> xx(k), yy(n);
 				for (u64 x = 0; x < (1ull << k); ++x)
@@ -484,57 +494,60 @@ namespace osuCrypto {
 						}
 					}
 
-					if (0)
-					{
-						for (u64 w = 0; w < k; ++w)
-						{
-							xx[w] = (x >> w) & 1;
-						}
+					//if (0)
+					//{
+					//	for (u64 w = 0; w < k; ++w)
+					//	{
+					//		xx[w] = (x >> w) & 1;
+					//	}
 
 
-						std::fill(yy.begin(), yy.end(), 0);
-						GG.leftMultAdd(xx, yy);
-						getRTVD(yy, sigma, r, t0, v, d, 1, xx);
+					//	std::fill(yy.begin(), yy.end(), 0);
+					//	GG.leftMultAdd(xx, yy);
+					//	getRTVD(yy, sigma, r, t0, v, d, 1, xx);
 
-						if (yy != z)
-						{
+					//	if (yy != z)
+					//	{
 
-							SparseMtx sp(pl);
-							std::cout << "-------" << std::endl;
-							std::cout << sp << std::endl << std::endl;
-							std::cout << G << std::endl << std::endl;
+					//		SparseMtx sp(pl);
+					//		std::cout << "-------" << std::endl;
+					//		std::cout << sp << std::endl << std::endl;
+					//		std::cout << G << std::endl << std::endl;
 
-							std::cout << "x ";
-							for (u64 j = 0; j < k; ++j)
-								std::cout << int(xx[j]) << " ";
-							std::cout << std::endl;
-							std::cout << "y ";
-							for (u64 j = 0; j < n; ++j)
-								std::cout << int(yy[j]) << " ";
-							std::cout << std::endl;
-							randConvMultBit(Gm, Xs[x], z, k, n, sigma, true);
+					//		std::cout << "x ";
+					//		for (u64 j = 0; j < k; ++j)
+					//			std::cout << int(xx[j]) << " ";
+					//		std::cout << std::endl;
+					//		std::cout << "y ";
+					//		for (u64 j = 0; j < n; ++j)
+					//			std::cout << int(yy[j]) << " ";
+					//		std::cout << std::endl;
+					//		randConvMultBit(Gm, Xs[x], z, k, n, sigma, true);
 
-							throw RTE_LOC;
-						}
-					}
+					//		throw RTE_LOC;
+					//	}
+					//}
 
-					if (w == 1 && h == 1 && r == 1 && t0 == 0 && v == 0 && d == 1)
-					{
-						std::cout << "x ";
-						for (u64 j = 0; j < k; ++j)
-							std::cout << int(xx[j]) << " ";
-						std::cout << std::endl;
-						std::cout << "y ";
-						for (u64 j = 0; j < n; ++j)
-							std::cout << int(z[j]) << " ";
-						std::cout << std::endl;
-					}
+					//if (w == 1 && h == 2 && r == 1 && t0 == 1 && v == 1 && d == 0)
+					//{
+					//	std::stringstream str;
+					//	for (auto x : xx)
+					//		str << int(x);
+					//	for (auto x : z)
+					//		str << int(x);
+					//	auto b  = ss.insert(str.str());
+					//	if (b.second)
+					//	{
+					//		getRTVD(z, sigma, r, t0, v, d, true, xx);
+					//	}
+					//}
 
 					expEnum(w, h)(r, t0)(v, d) += 1;
 
 				}
 			} while (increment(Gbv, sigma));
 
+			Rat sum = 0, expSum = 0;
 
 			for (auto& E : expEnum)
 			{
@@ -544,23 +557,78 @@ namespace osuCrypto {
 					{
 						ERTT = ERTT / (Int(1) << size);
 						ERTT.backend().normalize();
+						expSum += ERTT;
 					}
 				}
 			}
 
+			bool shortCircuit = true;
+
 			// input weight
-			for (u64 w = 0; w < k; ++w) {
+			for (u64 w = 0; w <= k; ++w) {
 				// output weight
-				for (u64 h = 0; h < n; ++h) {
+				for (u64 h = 0; h <= n; ++h) {
 					// number of runs
-					for (u64 r = 0; r < rMax; ++r) {
+					for (u64 r = 0; r <= rMax; ++r) {
+						auto r0 = r / 2;
+						if (shortCircuit)
+						{
+							i64 t1 = h - r0;
+							if (t1 < 0)
+								break;
+							i64 f1 = w - r;
+							if (f1 < 0)
+								break;
+
+							i64 z = n - h - r0 * sigma;
+							if (z < 0)
+								break;
+							//i64 f0 = n - w - z;
+							//if (f0 < 0)
+							//	break;
+						}
+
 						// number of zeros in the output freezone
-						for (u64 t0 = 0; t0 < n; ++t0) {
+						for (u64 t0 = 0; t0 <= n; ++t0) {
+							if (shortCircuit)
+							{
+
+								i64 z = n - h - t0 - r0 * sigma;
+								if (z < 0)
+									break;
+								//i64 f0 = n - w - z;
+								//if (f0 < 0)
+								//	break;
+							}
 							// number of almost terminations
-							for (u64 v = 0; v < vMax; ++v) {
+							for (u64 v = 0; v <= vMax; ++v)
+							{
+								if (shortCircuit)
+								{
+									i64 t1 = h - v - r0;
+									if (t1 < 0)
+										break;
+									i64 z = n - h - v * (sigma - 1) - t0 - r0 * sigma;
+									if (z < 0)
+										break;
+									//i64 f0 = n - w - z - v;
+									//if (f0 < 0)
+									//	break;
+								}
+
 								// number of trailing zones
 								for (u64 d = 0; d < 2; ++d)
 								{
+									if (shortCircuit)
+									{
+										i64 t1 = h - v - r0 - d;
+										if (t1 < 0)
+											break;
+
+										i64 z = n - h - (v + d) * (sigma - 1) - t0 - r0 * sigma;
+										if (z < 0)
+											break;
+									}
 
 									auto Ewhrt = WrapConvEnumerator<Int, Rat>::enumerate(
 										w, h,
@@ -568,6 +636,7 @@ namespace osuCrypto {
 										v, d,
 										k, n, sigma, choose, bbc);
 
+									sum += Ewhrt;
 									Ewhrt.backend().normalize();
 
 									if (Ewhrt != expEnum(w, h)(r, t0)(v, d))
@@ -578,7 +647,8 @@ namespace osuCrypto {
 											<< " v " << v << " d " << d
 											<< std::endl;
 
-										std::cout << "exhaustive " << expEnum(w, h)(r, t0)(v, d) << std::endl;
+										std::cout << "exhaustive " << expEnum(w, h)(r, t0)(v, d)
+											<< " = " << expEnum(w, h)(r, t0)(v, d) * (Int(1) << size) << " / " << (Int(1) << size) << std::endl;
 										std::cout << "formula    " << Ewhrt << std::endl;
 
 										auto Ewhrt = WrapConvEnumerator<Int, Rat>::enumerate<true>(
@@ -595,7 +665,17 @@ namespace osuCrypto {
 					}
 				}
 			}
+
+			sum.backend().normalize();
+			expSum.backend().normalize();
+			if (sum != expSum)
+			{
+				std::cout << "sum " << sum << std::endl;
+				std::cout << "expSum " << expSum << std::endl;
+				throw RTE_LOC;
+			}
 		}
+
 	}
 
 
@@ -604,10 +684,10 @@ namespace osuCrypto {
 	// We then compare this with the formula based enumerator.
 	void WrapConvEnum_exhaustive_Test(const CLP& cmd)
 	{
-		u64 v = cmd.isSet("v");
-		auto Ns = cmd.getManyOr<u64>("n", { 4, 6, 6 });
-		auto Ks = cmd.getManyOr<u64>("k", { 4, 6, 6 });
-		auto sigmas = cmd.getManyOr<u64>("sigma", { 1,2, 3 }); // window size
+		u64 verbose = cmd.isSet("v");
+		auto Ns = cmd.getManyOr<u64>("n", { 4, 6, 6, 8 });
+		auto Ks = cmd.getManyOr<u64>("k", { 4, 6, 6, 8 });
+		auto sigmas = cmd.getManyOr<u64>("sigma", { 2,2,3, 3 }); // window size
 		//auto systematics = cmd.getManyOr<u64>("sys", { false, true }); // window size
 		u64 numThreads = cmd.getOr("nt", std::thread::hardware_concurrency());
 
@@ -621,7 +701,7 @@ namespace osuCrypto {
 			auto k = Ks[p];
 			auto sigma = sigmas[p];
 
-			if (v)
+			if (verbose)
 			{
 				std::cout << "n: " << n << std::endl;
 				std::cout << "k: " << k << std::endl;
@@ -638,7 +718,7 @@ namespace osuCrypto {
 			Matrix<Rat> expEnum(actIn.size(), actOut.size());
 
 			Choose<Int> pas(2 * n);
-			BallsBinsCap<Int> bbc(n, n, sigma - 1, pas);
+			BallsBinsCap<Int> bbc(n, n, sigma - 2, pas);
 
 			WrapConvEnumerator<Int, Rat> blk(k, n, sigma, pas, bbc);
 			//RandConvEnumerator<Int, Rat>sys(k, n + k, sigma, choose, choose);
@@ -646,37 +726,32 @@ namespace osuCrypto {
 			blk.enumerate(actIn, actOut, actEnum);
 			//sys.enumerate(actIn, sysOut, sysEnum);
 
-			// 0
-			// 00
-			// xss
-			// 0xss
-			// 00xss
-			// 000xs
-			// 0000x
-
-
-			// s + s-1 +s -2 +...+s-(s-1)
-			// s^2 0 
-			u64 size = 0;// n* sigma - sigma * (sigma - 1) / 2;
+			u64 size = 0;
 			std::vector<BitVector> Gbv(n);
 			for (u64 i = 0; i < n; ++i)
 			{
 				Gbv[i].resize(std::min(i, sigma));
-				size += Gbv[i].size();
-				throw RTE_LOC;
+				size += std::max<i64>(0, std::min<i64>(Gbv[i].size(), sigma - 1));
+				if (Gbv[i].size() == sigma)
+				{
+					//Gbv[i][0] = 1;
+					Gbv[i].back() = 1;
+				}
 			}
 			using T = u8;
 			if (sigma > 8)
 				throw std::runtime_error("we assume sigma bits it inside a T");
 			std::vector<T> Gm(n);
 			Matrix<T> Xs(1ull << k, divCeil(sigma, 8));
-			T mask = (1ull << sigma) - 1;
+			T mask = (1ull << (sigma)) - 1;
 			for (u64 i = 0; i < Xs.rows(); ++i)
 			{
 				copyBytesMin(Xs[i], i);
 			}
 
-			auto y = std::vector<u8>(n);
+			std::set<std::string> ss;
+
+			auto z = std::vector<u8>(n);
 			do
 			{
 				for (u64 i = 0; i < n; ++i)
@@ -687,76 +762,30 @@ namespace osuCrypto {
 						Gm[i] |= T(Gbv[i][j]) << j;
 					}
 				}
-				//PointList pl(k, n);
-				//auto G = DenseMtx::Identity(n);
-				//for (u64 i = 0; i < n; ++i)
-				//{
-				//	pl.push_back(i, i);
-				//	PointList pli(k, n);
-				//	for (u64 j = 0; j < n; ++j)
-				//		pli.push_back(j, j);
-				//	for (u64 j = 0; j < Gbv[i].size(); ++j)
-				//	{
-				//		if (Gbv[i][j])
-				//		{
-				//			pl.push_back(i - j - 1, i);
-				//			pli.push_back(i - j - 1, i);
-				//		}
-				//	}
-				//	SparseMtx Gi(pli);
-				//	G = G * Gi.dense();
-				//}
-				//auto GG = G.sparse();
 
 				std::vector<u8> xx(k), yy(n);
 				for (u64 x = 0; x < (1ull << k); ++x)
 				{
 
-					randConvMultBit(Gm, Xs[x], y, k, n, sigma);
+					randConvMultBit(Gm, Xs[x], z, k, n, sigma);
 					auto w = popcount(x);
 					u64 h = 0;
 					for (u64 j = 0; j < n; ++j)
-						h += y[j];
+						h += z[j];
+
 					expEnum(w, h) += 1;
 
-					//{
-					//	for (u64 w = 0; w < k; ++w)
-					//	{
-					//		xx[w] = (x >> w) & 1;
-					//	}
-
-					//	std::fill(yy.begin(), yy.end(), 0);
-					//	GG.leftMultAdd(xx, yy);
-
-					//	if (yy != y)
-					//	{
-
-					//		SparseMtx sp(pl);
-					//		std::cout << "-------" << std::endl;
-					//		std::cout << sp << std::endl << std::endl;
-					//		std::cout << G << std::endl << std::endl;
-
-					//		std::cout << "x ";
-					//		for (u64 j = 0; j < k; ++j)
-					//			std::cout << int(xx[j]) << " ";
-					//		std::cout << std::endl;
-					//		std::cout << "y ";
-					//		for (u64 j = 0; j < n; ++j)
-					//			std::cout << int(yy[j]) << " ";
-					//		std::cout << std::endl;
-					//		randConvMultBit(Gm, Xs[x], y, k, n, sigma, true);
-
-					//		throw RTE_LOC;
-					//	}
-					//}
 				}
 			} while (increment(Gbv, sigma));
 
-			for (u64 i = 0; i < expEnum.size(); ++i)
+
+			for (auto& E : expEnum)
 			{
-				expEnum(i) = expEnum(i) / (Int(1) << size);
-				expEnum(i).backend().normalize();
+				E = E / (Int(1) << size);
+				E.backend().normalize();
 			}
+
+
 
 			if (expEnum != actEnum)
 			{
@@ -768,7 +797,7 @@ namespace osuCrypto {
 				throw RTE_LOC;
 			}
 
-			if (v)
+			if (verbose)
 			{
 
 				std::cout << "exp " << std::endl;

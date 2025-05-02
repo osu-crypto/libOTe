@@ -173,7 +173,7 @@ namespace osuCrypto
 				// we are symmetric on balls and (bins * cap - balls)
 				// therefore we only need to compute the first half.
 
-				u64 maxBalls = divCeil(bins * mCap, 2);
+				u64 maxBalls = divCeil(std::min<u64>(mBalls, bins * mCap), 2);
 				mCache[bins].resize(maxBalls + 1);
 				for (u64 balls = 0; balls < mCache[bins].size(); ++balls)
 				{
@@ -203,16 +203,16 @@ namespace osuCrypto
 				return mCache[bins][balls];
 				}();
 
-				{
-					Choose<Int> choose(10 + bins + mCap);
-					auto r2 = ballsBinsCap<Int>(balls, bins, mCap, choose);
-					if (r != r2)
-					{
-						std::cout << r << std::endl;
-						std::cout << r2 << std::endl;
-						throw RTE_LOC;
-					}
-				}
+				//{
+				//	Choose<Int> choose(10 + bins + mCap);
+				//	auto r2 = ballsBinsCap<Int>(balls, bins, mCap, choose);
+				//	if (r != r2)
+				//	{
+				//		std::cout << r << std::endl;
+				//		std::cout << r2 << std::endl;
+				//		throw RTE_LOC;
+				//	}
+				//}
 				return r;
 				//assert(r == ballsBinsCap(balls, bins, mCap, choose));
 		}
