@@ -24,6 +24,7 @@
 #include "AccumulateEnumerator.h"
 #include "Print.h"
 #include "ExpandEnumerator.h"
+#include "RandomEnumerator.h"
 
 namespace osuCrypto
 {
@@ -102,14 +103,14 @@ namespace osuCrypto
 		//
 		// varying iterations, everything else fixed
 		//
-		if (cmd.isSet("help"))
+		if (cmd.isSet("help") || !cmd.isSet("subcode"))
 		{
 			std::cout << "This function benchmarks the minimum distance computation for various parameters." << std::endl;
 			std::cout << "The parameters are: " << std::endl;
-			std::cout << "-subcode block block block, " << std::endl;
-			std::cout << "-subcode repeat acc acc, " << std::endl;
-			std::cout << "-systematic, " << std::endl;
-			std::cout << "-k [list int], " << std::endl;
+			std::cout << "-subcode [repeat, block, sysBlock, acc, exp, rand, sysRand]+ " << std::endl;
+			std::cout << "   e.g. -subcode repeat acc acc " << std::endl;
+			std::cout << "-systematic " << std::endl;
+			std::cout << "-k [list int] " << std::endl;
 			std::cout << "-rate double " << std::endl;
 			std::cout << "-sigma [list int] " << std::endl;
 			std::cout << "-exp [list int] " << std::endl;
@@ -137,7 +138,7 @@ namespace osuCrypto
 
 		// when printing the distribution, should we normalize it so the area under the
 		// curve is 1.
-		bool normalizes = cmd.getOr("normalize", 0);
+		bool percent = cmd.getOr("percent", 0);
 
 		// the number of "threshold distances". For `threshold in {1,2,4,...}`, we 
 		// print the weight just that `threshold` codewords are expected to exist.
@@ -147,7 +148,6 @@ namespace osuCrypto
 		print_timings = verbose;
 		bool print_dist = cmd.isSet("printDist") || cmd.isSet("numPoints");
 		bool full = cmd.isSet("full");
-		bool skipH0 = cmd.isSet("skipH0");
 		//std::vector<Subcode> subcodes(subCodeTags.size());
 
 		//for (size_t i = 0; i < subCodeTags.size(); ++i)
@@ -214,7 +214,7 @@ namespace osuCrypto
 						if (subCodeTags[i] == "repeat")
 						{
 							sh << "R";
-							ss << "r" << kk << "." << n;
+							ss << "R" << kk << "." << n;
 							subcodes.emplace_back(new RepeaterEnumerator<I, R>(kk, n, choose));
 						}
 						else if (subCodeTags[i] == "acc")
@@ -227,21 +227,31 @@ namespace osuCrypto
 						{
 							sh << "B";
 							ss << "B" << kk << "." << n << "." << sigma;
-							if (skipH0) ss << "h1";
-							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, false, choose, chooseInt, skipH0));
+							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, false, choose, chooseInt, false));
 						}
 						else if (subCodeTags[i] == "sysBlock")
 						{
 							sh << "sB";
 							ss << "sB" << kk << "." << n << "." << sigma;
-							if (skipH0) ss << "h1";
-							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, true, choose, chooseInt, skipH0));
+							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, true, choose, chooseInt, false));
 						}
 						else if (subCodeTags[i] == "exp")
 						{
 							sh << "E";
 							ss << "E" << kk << "." << n << "." << exp;
 							subcodes.emplace_back(new ExpandEnumerator<I, R>(kk, n, exp, choose));
+						}
+						else if (subCodeTags[i] == "rand")
+						{
+							sh << "Rnd";
+							ss << "Rnd" << kk << "." << n;
+							subcodes.emplace_back(new RandomEnumerator<I, R>(kk, n, false, choose));
+						}
+						else if (subCodeTags[i] == "sysRand")
+						{
+							sh << "sRnd";
+							ss << "sRnd" << kk << "." << n;
+							subcodes.emplace_back(new RandomEnumerator<I, R>(kk, n, true, choose));
 						}
 						else
 							throw std::runtime_error("subcodes must be {repeat, accumulate, block, ... }. " LOCATION);
@@ -275,7 +285,8 @@ namespace osuCrypto
 					}
 					else
 					{
-						for (u64 w = 0; w < inDist.size(); ++w)
+						auto wBegin = cmd.getOr("wBegin", 0);
+						for (u64 w = wBegin; w < inDist.size(); ++w)
 							inDist[w] = choose(k, w);
 					}
 
@@ -294,16 +305,27 @@ namespace osuCrypto
 					auto expected_md = minimumDistance<R>(outDist);
 					auto end = std::chrono::high_resolution_clock::now();
 
+
+
+					constexpr std::string_view path = __FILE__;
+					auto folder = path.substr(0, path.find_last_of("/\\"));
+					std::string scriptPath = std::string(folder) + "/plot.py";
+
 					sh << "_";
 					if (print_dist)
 					{
-						print_distribution<R>(outDist, numPoints, normalizes, std::cout, ". " + sh.str() + ss.str());
+						print_distribution<R>(outDist, numPoints, percent, std::cout, ". " + sh.str() + ss.str());
+						std::cout << "----------" << std::endl;
 					}
 
-					std::ofstream out(
-						"dist_" + sh.str() + ss.str() + ".txt", std::ios::trunc);
+					{
+						auto filename = "dist_" + sh.str() + ss.str() + ".txt";
+						std::ofstream out(filename, std::ios::trunc);
+						print_distribution<R>(outDist, 0, false, out, sh.str() + ss.str());
 
-					print_distribution<R>(outDist, 0, normalizes, out, ". " + sh.str() + ss.str());
+						std::string command = "python3 " + scriptPath + " dist " + filename;
+						int result = std::system(command.c_str());
+					}
 
 					std::cout << sh.str() << ss.str() << " time: "
 						<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
@@ -313,9 +335,23 @@ namespace osuCrypto
 
 					if (fullEnum.size())
 					{
-						std::cout << "log2(E)" << std::endl;
-						std::cout << logEnumToString(fullEnum) << std::endl;
+						if (print_dist)
+						{
+							std::cout << "log2(E)" << std::endl;
+							std::cout << logEnumToString(fullEnum) << std::endl;
+						}
+
+						auto filename = "enum_" + sh.str() + ss.str() + ".txt";
+						std::ofstream enumFile(
+							filename, std::ios::trunc);
+						print_enumerator<R>(fullEnum, outDist, 0, enumFile);
+
+						std::string command = "python3 "+ scriptPath +" enum " + filename;
+						int result = std::system(command.c_str());
+						
 					}
+
+
 					//if (cmd.isSet("exact"))
 					//{
 					//	PRNG prng(block(421354523452343423ull, 2332453245234123421ull));

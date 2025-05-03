@@ -94,19 +94,22 @@ namespace osuCrypto {
 
 
 
+	namespace
+	{
 
-	bool increment(span<u8> bv) {
-		for (size_t i = 0; i < bv.size(); ++i) {
-			if (bv[i] == 0) {
-				bv[i] = 1;
-				return 1;
+		bool increment(span<u8> bv) {
+			for (size_t i = 0; i < bv.size(); ++i) {
+				if (bv[i] == 0) {
+					bv[i] = 1;
+					return 1;
+				}
+				else {
+					bv[i] = 0;
+				}
 			}
-			else {
-				bv[i] = 0;
-			}
+
+			return 0;
 		}
-
-		return 0;
 	}
 
 	// print a row major represetnation of the block matrix in 

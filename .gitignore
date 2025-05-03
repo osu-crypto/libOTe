@@ -39,6 +39,7 @@ bld/
 out/ 
 
 dist_*
+enum_*
 
 # Roslyn cache directories
 *.ide/

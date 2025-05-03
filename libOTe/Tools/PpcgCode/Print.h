@@ -31,25 +31,12 @@ namespace osuCrypto
 	void print_distribution(
 		span<R> distribution,
 		u64 numPoints,
-		bool normalize,
+		bool percent,
 		std::ostream& out = std::cout,
 		std::string name = {}
 	) {
 		auto n = distribution.size() - 1;
-		//Int total = Int(0) << n;
-		Float total = 0;;
-		if (normalize)
-		{
-			out << "Printing normalized log2 counts distribution: " << std::endl;
-			for (size_t i = 0; i < distribution.size(); i++) {
-				total += boost::multiprecision::abs(log2(distribution[i]));
-			}
-		}
-		else
-		{
-			out << "Printing log2 count distribution: " << std::endl;
-			total = 1;
-		}
+
 		if (name.size())
 			out << name << std::endl;
 
@@ -57,7 +44,7 @@ namespace osuCrypto
 		{
 			u64 h = 0;
 			for (const auto& d : distribution) {
-				out << double(h++) / n << " " << log2_(d) / total /*<< " " << d*/ << std::endl;
+				out << double(h++) / n << " " << log2_(d) << std::endl;
 			}
 		}
 		else
@@ -72,8 +59,8 @@ namespace osuCrypto
 					u64 lowIdx = std::floor(scaled); // in [0,DS)
 					u64 highIdx = std::min<u64>(std::ceil(scaled), distribution.size() - 1); // in [0,DS)
 
-					Float DL = log2_(Float(distribution[lowIdx])) / total;
-					Float DH = log2_(Float(distribution[highIdx])) / total;
+					Float DL = log2_(Float(distribution[lowIdx])) ;
+					Float DH = log2_(Float(distribution[highIdx]));
 					auto LDS = lowIdx / DS; // in [0,1)
 					auto HDS = highIdx / DS;// in [0,1)
 
@@ -85,8 +72,10 @@ namespace osuCrypto
 					auto diff = IPS - LDS;
 					auto val = DL + diff * slope;
 					try {
-
-						out << double(i) / numPoints << " " << Float(val) << std::endl;
+						if (percent)
+							out << double(i) / numPoints << " " << Float(val) << std::endl;
+						else
+							out << Float(val) << std::endl;
 					}
 					catch (...)
 					{
@@ -118,24 +107,43 @@ namespace osuCrypto
 	template<typename R>
 	void print_enumerator(
 		MatrixView<R> E,
+		span<R> dist,
 		u64 numPoints,
 		std::ostream& out = std::cout) {
 		auto n = E.cols() - 1;
 		auto k = E.rows() - 1;
 		auto e = n / k;
 
-		out << "Printing log2 count enumerator: " << std::endl;
-
 		if (numPoints == 0)
 		{
 			u64 h = 0;
 			for (u64 w = 0; w <= k; ++w)
 			{
-
 				for (u64 h = 0; h <= n; ++h)
-					out << log2_(E(w, h)) << " ";
+				{
+					if (E(w, h) == 0)
+						out << "-inf,";
+					else
+						out << log2_(E(w, h)) << ",";
+				}
 				out << std::endl;
 			}
+			out << std::endl;
+			out << "-303" << std::endl;// checksum
+			out << log2_(dist[h]-1) << ",";
+			for (u64 h = 1; h <= n; ++h)
+			{
+				out << log2_(dist[h]) << ",";
+			}
+			out << std::endl;			
+			R sum = 0;
+			out << ",";
+			for (u64 h = 1; h <= n; ++h)
+			{
+				sum += dist[h];
+				out << log2_(sum) << ",";
+			}
+			out << std::endl;
 		}
 		else
 		{
@@ -200,6 +208,5 @@ namespace osuCrypto
 				out << std::endl;
 			}
 		}
-		out << "------------" << std::endl;
 	}
 }

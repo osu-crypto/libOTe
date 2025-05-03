@@ -16,7 +16,7 @@
 #include "RandConvEnumerator.h"
 #include "BallsBins.h"
 #include "WrapConvEnumerator.h"
-
+#include "RandomEnumerator.h"
 
 #define BITSET_SIZE 128
 
@@ -208,7 +208,8 @@ namespace osuCrypto {
 		tests.add("accumulateEnum_exhaustive_Test      ", accumulateEnum_exhaustive_Test);
 		tests.add("blockEnum_exhaustive_Test           ", blockEnum_exhaustive_Test);
 		tests.add("expandEnum_exhaustive_Test          ", expandEnum_exhaustive_Test);
-
+		tests.add("RandomEnum_exhaustive_Test          ", RandomEnum_exhaustive_Test);
+		
 		tests.add("RandConvEnum_single_Test            ", RandConvEnum_single_Test);;
 		tests.add("RandConvEnum_exhaustive_Test        ", RandConvEnum_exhaustive_Test);
 		tests.add("WrapConvEnum_single_Test            ", WrapConvEnum_single_Test);;
