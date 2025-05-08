@@ -1,30 +1,29 @@
 enable_language(ASM)
 enable_language(CUDA)
-find_package(CUDAToolkit REQUIRED)
+
+
 
 file(GLOB_RECURSE SRCS *.cpp *.c)
-
-set(CUDA_SRCS Tools/Tungsten/ParallelSyndromeDecoding.cu)
-
-set_source_files_properties(${CUDA_SRCS} PROPERTIES LANGUAGE CUDA)
-
-set(SRCS "${SRCS}"
-        #Tools/Tungsten/BinomialCoefficientTest.h
-        #Tools/Tungsten/NonrecConvEnumerator.h
-        #Tools/Tungsten/EnumeratorTools.h
-        #Tools/Tungsten/MinimumDistance.h
-        #Tools/Tungsten/RepeaterEnumerator.h
-        #Tools/Tungsten/ExpandingBlockEnumerator.h
-        #Tools/Tungsten/BlockEnumeratorTest.h
-        #Tools/Tungsten/CompositionEnumerator.h
-        #Tools/Tungsten/MinimumDistanceTest.h
-        #Tools/Tungsten/RepeaterEnumerator.cpp
-        #Tools/Tungsten/ParallelSyndromeDecoding.h
-)
-
 add_library(libOTe STATIC ${SRCS})
-add_library(libOTeCUDA STATIC ${CUDA_SRCS})
 
+if (ENCABLE_CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    set(CUDA_SRCS Tools/Tungsten/ParallelSyndromeDecoding.cu)
+    set_source_files_properties(${CUDA_SRCS} PROPERTIES LANGUAGE CUDA)
+    add_library(libOTeCUDA STATIC ${CUDA_SRCS})
+    
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        set(CMAKE_CUDA_ARCHITECTURES 86)
+    endif()
+    set_target_properties(libOTeCUDA PROPERTIES
+        CUDA_ARCHITECTURES "86"
+    )
+    set_property(TARGET libOTeCUDA PROPERTY CUDA_STANDARD ${LIBOTE_STD_VER})
+     
+    target_link_libraries(libOTeCUDA macoro)
+    target_link_libraries(libOTe libOTeCUDA)
+
+endif()
 
 # make projects that include libOTe use this as an include folder
 target_include_directories(libOTe PUBLIC
@@ -34,23 +33,11 @@ target_include_directories(libOTe PUBLIC
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
                     $<INSTALL_INTERFACE:include>)
                     
-target_link_libraries(libOTeCUDA macoro)
-target_link_libraries(libOTe cryptoTools libOTeCUDA)
-#target_link_libraries(libOTeCUDA CUDAToolkit cryptoTools)
-
-if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES 86)
-endif()
-set_target_properties(libOTeCUDA PROPERTIES
-    CUDA_ARCHITECTURES "86"
-)
-set_property(TARGET libOTeCUDA PROPERTY CUDA_STANDARD ${LIBOTE_STD_VER})
+target_link_libraries(libOTe cryptoTools)
 
 if(MSVC)
-    #target_compile_options(libOTeCUDA PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:/std:c++${LIBOTE_STD_VER}>)
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
 else()
-    #target_compile_options(libOTeCUDA PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-std=c++${LIBOTE_STD_VER}>)
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
 
     if(ENABLE_SSE)

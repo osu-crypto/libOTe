@@ -57,8 +57,10 @@ install(FILES
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/libOTe
 )
 
-set(exportLibs 
-    "libOTe;libOTeCUDA;libOTe_Tests;")
+set(exportLibs "libOTe;libOTe_Tests;")
+if(ENABLE_CUDA)
+    set(exportLibs "${exportLibs}libOTeCUDA;")
+endif()
 
 if(ENABLE_MR_KYBER)
     set(exportLibs "${exportLibs}KyberOT;")
