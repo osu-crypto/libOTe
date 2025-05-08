@@ -3,7 +3,7 @@ if (POLICY CMP0048)
   cmake_policy(SET CMP0048 NEW)
 endif (POLICY CMP0048)
 
-project(libOTe VERSION 2.2.0 LANGUAGES CXX C CUDA)
+project(libOTe VERSION 2.2.0 LANGUAGES CXX C)
 
 include(cmake/libOTePreamble.cmake)
 

@@ -1,5 +1,4 @@
 enable_language(ASM)
-enable_language(CUDA)
 
 
 
@@ -7,6 +6,11 @@ file(GLOB_RECURSE SRCS *.cpp *.c)
 add_library(libOTe STATIC ${SRCS})
 
 if (ENCABLE_CUDA)
+    find_package(CUDA REQUIRED)
+    # or use newer CMake
+    enable_language(CUDA)
+    # Add CUDA-specific targets or compile options
+
     find_package(CUDAToolkit REQUIRED)
     set(CUDA_SRCS Tools/Tungsten/ParallelSyndromeDecoding.cu)
     set_source_files_properties(${CUDA_SRCS} PROPERTIES LANGUAGE CUDA)
