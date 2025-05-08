@@ -13,7 +13,7 @@ namespace osuCrypto
     template<typename T, int NumBins>
     struct TungstenBinPerm
     {
-        static constexpr int c2 = 16;
+        static constexpr int c2 = 8;
         static constexpr int chunkSize = NumBins * c2;
 
         std::array<Perm, NumBins> mPerm;
