@@ -1,4 +1,4 @@
-#include "accumulateEnumerator.h"
+#include "AccumulateEnumerator.h"
 
 namespace osuCrypto
 {

@@ -32,7 +32,7 @@ namespace osuCrypto {
 				std::cout << std::endl;
 			}
 
-			y[i] = xi ^ (popcount(yPrev & C[i]) & 1);
+			y[i] = xi ^ (popcount<u8>(yPrev & C[i]) & 1);
 			yPrev <<= 1;
 			yPrev |= y[i];
 
@@ -324,7 +324,7 @@ namespace osuCrypto {
 				{
 
 					randConvMultBit(Gm, Xs[x], z, k, n, sigma);
-					auto w = popcount(x);
+					auto w = popcount<u8>(x);
 					u64 h = 0;
 					for (u64 j = 0; j < n; ++j)
 						h += z[j];
