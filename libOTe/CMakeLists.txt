@@ -29,6 +29,9 @@ if (ENCABLE_CUDA)
 
 endif()
 
+find_package(OpenMP REQUIRED)
+target_link_libraries(libOTe OpenMP::OpenMP_CXX)
+
 # make projects that include libOTe use this as an include folder
 target_include_directories(libOTe PUBLIC
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>

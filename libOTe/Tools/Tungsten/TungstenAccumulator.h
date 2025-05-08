@@ -656,7 +656,7 @@ namespace osuCrypto
         OC_FORCEINLINE void processBlock(T* xx, T* begin, T* end, Perm& perm)
         {
 
-            static_assert((blockSize % perm.chunkSize) == 0, "");
+            assert((blockSize % perm.chunkSize) == 0, "");
 
             auto xs = xx - blockSize;
             for (u64 i = 0; i < blockSize;)
