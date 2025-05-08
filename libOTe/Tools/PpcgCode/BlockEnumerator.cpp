@@ -45,7 +45,7 @@ namespace osuCrypto {
 			auto xi = x[i];
 			for (u64 j = 0; j < sigmaN; j++)
 			{
-				*yIter++ = popcount(*Giter++ & xi) % 2;
+				*yIter++ = popcount<u8>(*Giter++ & xi) % 2;
 			}
 		}
 	}
@@ -233,7 +233,7 @@ namespace osuCrypto {
 				for (u64 x = 0; x < (1ull << k); ++x)
 				{
 					blockMtxMultBit<u8>(Gm, Xs[x], z, k, n, sigmaK, sigmaN);
-					auto w = popcount(x);
+					auto w = popcount<u8>(x);
 					u64 h = 0;
 					for (u64 j = 0; j < n; ++j)
 						h += z[j];

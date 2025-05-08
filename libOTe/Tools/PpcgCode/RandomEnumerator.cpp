@@ -34,7 +34,7 @@ namespace osuCrypto {
 		{
 			for (u64 j = 0; j < x.size(); j++)
 			{
-				*yIter++ = popcount(*Giter++ & x[j]) % 2;
+				*yIter++ = popcount<u8>(*Giter++ & x[j]) % 2;
 			}
 		}
 	}
@@ -128,7 +128,7 @@ namespace osuCrypto {
 				for (u64 x = 0; x < (1ull << k); ++x)
 				{
 					RandomMtxMultBit(Gbv, Xs[x], y, k, n);
-					auto w = popcount(x);
+					auto w = popcount<u8>(x);
 					u64 h = 0;
 					for (u64 j = 0; j < n; ++j)
 						h += y[j];
