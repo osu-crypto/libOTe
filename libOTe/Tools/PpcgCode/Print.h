@@ -42,10 +42,10 @@ namespace osuCrypto
 
 		if (numPoints == 0)
 		{
-			u64 h = 0;
-			for (const auto& d : distribution) {
-				out << double(h++) / n << " " << log2_(d) << std::endl;
-			}
+			out << log2_(distribution[0]-1) << ",";
+			for(u64 h = 1; h < distribution.size(); ++h)
+				out << log2_(distribution[h]) << ",";
+			out << std::endl;
 		}
 		else
 		{
@@ -75,7 +75,7 @@ namespace osuCrypto
 						if (percent)
 							out << double(i) / numPoints << " " << Float(val) << std::endl;
 						else
-							out << Float(val) << std::endl;
+							out << i << " " << Float(val) << std::endl;
 					}
 					catch (...)
 					{
@@ -100,7 +100,6 @@ namespace osuCrypto
 				}
 			}
 		}
-		out << "------------" << std::endl;
 	}
 
 

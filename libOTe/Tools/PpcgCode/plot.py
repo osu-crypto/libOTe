@@ -1,16 +1,22 @@
+import plotly
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 import sys
 import numpy as np
 import math
+import argparse
+import os
+import time
+import kaleido
+#import dash
+#from dash import dcc, html
 
 
 def myMin(values):
     return min(v for v in values if v != float('-inf'))
 def myMax(values):
     m = max(v for v in values if not math.isnan(v))
-    print("myMax ",m)
     return m
 
 def roundUp(number, step):
@@ -18,9 +24,13 @@ def roundUp(number, step):
 def roundDown(number, step):
     return math.floor(number / step) * step
 
-def enum(values, filename):
+def enum(filename, percent, title, includeSum, pdf, fullDh,noMinor):
     
     print("enum")
+
+    df = pd.read_csv(filename, header=None)  # header=None if no column names
+    values = df.values#.tolist()  # convert to 2D list
+
     #print(values)
 
     #dist in on the last row
@@ -35,10 +45,12 @@ def enum(values, filename):
     #print(dist)
 
     #remove the last row
-    values.pop()
-    values.pop()
-    values.pop()
+    values = values[:-3]
 
+    
+    # values = values[::2, ::4]   # from (256,512) to (128,128)
+    # dist   = dist[::4]          # from (512,) to (128,)
+    # sDist  = sDist[::4]         # from (512,) to (128,)
 
     fig =  make_subplots(
         rows=2, cols=1,
@@ -48,19 +60,27 @@ def enum(values, filename):
     )
     fig.update_layout(
         title=dict(
-            text=filename,
+            text=title,
             font=dict(size=20),
             x=0.5,  # Center the title (0 = left, 1 = right)
             xanchor='center'
         )
     )
+    if percent:
+        # From 0 to 1 inclusive, with len(dist) points
+        bar_x = np.linspace(0, 1, len(dist))
+    else:
+        # Integer positions
+        bar_x = list(range(len(dist)))
+
 
     high = roundUp(myMax(dist), 10)
-    label = max(roundUp(high / 3, 10),1)
+    label = 50 #max(roundUp(high / 3, 10),1)
     low = roundDown(myMin(dist), label)
     step = max(math.ceil(label / 5), 1);
     fig.add_trace(go.Contour(
             z=values,
+            x=bar_x,
             # colorscale = [
             #           [0, 'blue'],      # start
             #           [0.5, 'white'],   # middle
@@ -73,16 +93,62 @@ def enum(values, filename):
                 end=100,
                 size=step,
             ),
+            # colorbar=dict(
+            #     title=dict(
+            #         text="$\mathsf{E}_{w,h}$",
+            #         side="right",   # or "top"
+            #     ),
+            #     x=1.02,  
+            #     thickness=20,
+            # ),
             line=dict(width=0),
     ), row=1, col=1)
+    fig.update_layout(
+        annotations=[
+            dict(
+                text=r"$\log_2 \mathsf{E}_{w,h}$",  # LaTeX-style math
+                x=1.135,                     # x position (0 = left, 1 = right)
+                y=0.5,                      # y position (0 = bottom, 1 = top)
+                xref="paper",              # relative to entire figure width
+                yref="paper",
+                showarrow=False,
+                font=dict(size=14),
+                xanchor="left",
+                yanchor="middle"
+            )
+        ]
+    )
+    fig.update_layout(
+        margin=dict(l=60, r=130, t=50, b=100)  # increase right margin to make room
+    )
 
+    if not noMinor:
+        fig.add_trace(go.Contour(
+            z=values,
+            x=bar_x,
+            contours=dict(
+                start=low,
+                end=1000,
+                size=step,  # Only half as many lines
+                showlabels=False,
+                coloring='none'
+            ),
+            line=dict(width=0.1),
+            colorscale='Greys',
+            showscale=False,
+            showlegend=False
+        ), row=1, col=1)
+
+
+    # Top layer: every other line, with labels
     fig.add_trace(go.Contour(
         z=values,
+        x=bar_x,
         contours=dict(
             start=low,
-            end=1000,
-            size=step,  # Only half as many lines
-            showlabels=False,
+            end=high,
+            size=label,       # Only half as many lines
+            showlabels=True,
             coloring='none'
         ),
         line=dict(width=1),
@@ -91,65 +157,178 @@ def enum(values, filename):
         showlegend=False
     ), row=1, col=1)
 
-
-    # Top layer: every other line, with labels
-    fig.add_trace(go.Contour(
-        z=values,
-        contours=dict(
-            start=low,
-            end=high,
-            size=label,       # Only half as many lines
-            showlabels=True,
-            coloring='none'
-        ),
-        line=dict(width=2),
-        colorscale='Greys',
-        showscale=False,
-        showlegend=False
-    ), row=1, col=1)
-
     bar_y = np.linspace(0, 1, len(dist))
     # Bottom: aligned scatter or bar plot
     fig.add_trace(go.Scatter(
-        x=[i for i in range(len(dist))],
+        x=bar_x,
         y=dist,
         mode='lines',
         name='X Projection',
         showlegend=False,
         line=dict(color='black', width=2),
     ), row=2, col=1)
-    fig.add_trace(go.Scatter(
-        x=[i for i in range(len(dist))],
-        y=sDist,
-        mode='lines',
-        name='X Projection',
-        showlegend=False,
-        line=dict(color='blue', width=2),
-    ), row=2, col=1)
 
-    yMin = min(-5, roundDown(myMin(dist[:len(dist)//2]), 5))
-    yMax = max(20, math.fabs(1.2 * myMin(dist[:len(dist)//2])))
-    fig.update_yaxes(range=[yMin,yMax], row=2, col=1)  # adjust 1.0 to your desired max
+    if includeSum:
+        fig.add_trace(go.Scatter(
+            x=bar_x,
+            y=sDist,
+            mode='lines',
+            name='X Projection',
+            showlegend=False,
+            line=dict(color='blue', width=2),
+        ), row=2, col=1)
 
-    fig.show()
+    if not fullDh:
+        yMin = min(-5, roundDown(myMin(dist[:len(dist)//2]), 5))
+        yMax = max(20, math.fabs(1.2 * myMin(dist[:len(dist)//2])))
+        fig.update_yaxes(
+            dtick=20, 
+            #tickvals=list(range(-40, 41, 20)),  # only show labels at every 10
+            #ticktext=[str(i) for i in range(-40, 41, 20)],  # labels
+            range=[yMin,yMax], 
+            row=2, col=1) 
 
 
-def dist(values, filename):
-    print("dist")
+        
+    
+    fig.update_yaxes(title=r"$w$",row=1, col=1) 
+    fig.update_yaxes(title_text=r"$\log_2 \delta_h$", row=2, col=1)
+    if percent:
+        fig.update_xaxes(
+            title_text=r"$h/n$", row=2, col=1
+        )
+    else:
+        fig.update_xaxes(
+            title_text=r"$h$", row=2, col=1
+        )
+
+    if pdf:
+        print("output: " + filename + ".pdf")
+        fig.write_image(filename +".pdf")
+    else:
+        print("show")
+        fig.show()
+
+
+def dist(filenames, percent, watch, pdf):
+    
+    fig = go.Figure()
+    fig.update_yaxes(range=[-60,60]) 
+    fig.update_xaxes(range=[0,0.2]) 
+    fig.update_yaxes(title_text=r"$\log_2 \delta_h$")
+    if percent:
+        fig.update_xaxes(
+            title_text=r"$h/n$"
+        )
+    else:
+        fig.update_xaxes(
+            title_text=r"$h$"
+        )
+    fig.update_layout(
+    legend=dict(
+        x=0.98,         # Horizontal position (0=left, 1=right)
+        y=0.98,         # Vertical position (0=bottom, 1=top)
+        xanchor='right',
+        yanchor='top',
+        bgcolor='rgba(255,255,255,0.7)',  # optional semi-transparent white background
+        bordercolor='black',
+        borderwidth=1
+    )
+)
+    existing_files = set()
+    if len(filenames) == 1 and os.path.isdir(filenames[0]):
+        folder = filenames[0]
+    else:
+        folder = None
+
+    while True:
+
+        if folder is not None:
+            filenames = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith('.txt')]
+
+        newFiles = [p for p in filenames if p not in existing_files]
+        if len(newFiles) != 0:
+
+            for filename in newFiles:
+                print("filename=",filename)
+                with open(filename, 'r') as f:
+                    lines = f.readlines()
+
+                name = lines[0].strip()  # First line: the name
+                raw_values = lines[1].strip().split(',')
+                dist = []
+                for i, val in enumerate(raw_values):
+                    val = val.strip()  # remove whitespace
+                    if val == '':
+                        print(f"Skipping empty string at position {i}")
+                        continue
+                    try:
+                        num = float(val)
+                        dist.append(num)
+                    except ValueError:
+                        print(f"Could not convert '{val}' to float at position {i}")
+
+                #print(dist)
+                if percent:
+                    # From 0 to 1 inclusive, with len(dist) points
+                    bar_x = np.linspace(0, 1, len(dist))
+                else:
+                    # Integer positions
+                    bar_x = list(range(len(dist)))
+
+                # Line 1
+                fig.add_trace(go.Scatter(
+                    x=bar_x,
+                    y=dist,
+                    mode='lines',
+                    name=name
+                ))
+
+
+            #fig.update_layout(title='Multiple Lines on One Scatter Plot')
+
+            if pdf:            
+                print("output: " + filename + ".pdf")
+                fig.write_image(filename +".pdf")
+            else:
+                fig.show()
+
+        # Check if the user wants to continue watching
+        if not watch:
+            break
+
+        # Update the set of existing files
+        existing_files.update(newFiles)
+        # Wait for a second before checking again
+        time.sleep(4)
+
+
+
+
+    
+parser = argparse.ArgumentParser(description="Process multiple input files.")
+parser.add_argument("--dist", nargs='+', help="List of input files")
+parser.add_argument("--enum", help="input file")
+parser.add_argument("--percent", help="List of input files", action='store_true')
+parser.add_argument("--watch", help="List of input files", action='store_true')
+parser.add_argument("--title", help="title (default filename)")
+parser.add_argument("--sum", help="include output sum", action='store_true')
+parser.add_argument("--pdf", help="make a pdf", action='store_true')
+parser.add_argument("--fullDh", help="full delta_h range", action='store_true')
+parser.add_argument("--noMinor", help="no minor lines", action='store_true')
+args = parser.parse_args()
 
 # main
-if len(sys.argv) < 3 or sys.argv[1] != "enum" and sys.argv[1] != "dist":
-    print("Usage: python script.py enum <filename.csv>")
-    print("Usage: python script.py dist <filename.csv>")
+if not args.dist and args.enum == None:
+    print("Usage: python script.py --enum <filename.csv>")
+    print("Usage: python script.py --dist <filename.csv> ...")
+    print("other options: --percent")
     sys.exit(1)
 
-filename = sys.argv[2]
-df = pd.read_csv(filename, header=None)  # header=None if no column names
-values = df.values.tolist()  # convert to 2D list
 
-if sys.argv[1] == "enum":
-    enum(values, filename)
-elif sys.argv[1] == "dist":
-    dist(values, filename)
+if not args.enum == None:
+    enum(args.enum, args.percent, args.title, args.sum, args.pdf, args.fullDh, args.noMinor)
+if args.dist:
+    dist(args.dist, args.percent, args.watch, args.pdf)
 
 #dist = go.Figure()

@@ -138,7 +138,7 @@ namespace osuCrypto
 
 		// when printing the distribution, should we normalize it so the area under the
 		// curve is 1.
-		bool percent = cmd.getOr("percent", 0);
+		bool percent = cmd.getOr("percent", 1);
 
 		// the number of "threshold distances". For `threshold in {1,2,4,...}`, we 
 		// print the weight just that `threshold` codewords are expected to exist.
@@ -148,20 +148,12 @@ namespace osuCrypto
 		print_timings = verbose;
 		bool print_dist = cmd.isSet("printDist") || cmd.isSet("numPoints");
 		bool full = cmd.isSet("full");
-		//std::vector<Subcode> subcodes(subCodeTags.size());
 
-		//for (size_t i = 0; i < subCodeTags.size(); ++i)
-		//{
-		//	if (subCodeTags[i] == "repeat")
-		//		subcodes[i] = Subcode(Subcode::Repeater);
-		//	else if (subCodeTags[i] == "acc")
-		//		subcodes[i] = Subcode(Subcode::Accumulator);
-		//	else if (subCodeTags[i] == "block")
-		//		subcodes[i] = Subcode(Subcode::Block);
-		//	else
-		//		throw std::runtime_error("subcodes must be {repeat, accumulate, block, ... }. " LOCATION);
 
-		//}
+		constexpr std::string_view path = __FILE__;
+		auto folder = path.substr(0, path.find_last_of("/\\"));
+		std::string scriptPath = std::string(folder) + "/plot.py";
+
 
 #if 1
 		using I = Float;
@@ -171,6 +163,7 @@ namespace osuCrypto
 		using R = Rat;
 #endif
 
+		std::vector<std::string> filenames;
 		for (auto k : Ks)
 		{
 			for (auto sigma : sigmas)
@@ -225,19 +218,19 @@ namespace osuCrypto
 						}
 						else if (subCodeTags[i] == "block")
 						{
-							sh << "B";
+							sh << "B"<< sigma;
 							ss << "B" << kk << "." << n << "." << sigma;
 							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, false, choose, chooseInt, false));
 						}
 						else if (subCodeTags[i] == "sysBlock")
 						{
-							sh << "sB";
+							sh << "sB"<< sigma;
 							ss << "sB" << kk << "." << n << "." << sigma;
 							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, true, choose, chooseInt, false));
 						}
 						else if (subCodeTags[i] == "exp")
 						{
-							sh << "E";
+							sh << "E"<< exp;
 							ss << "E" << kk << "." << n << "." << exp;
 							subcodes.emplace_back(new ExpandEnumerator<I, R>(kk, n, exp, choose));
 						}
@@ -307,10 +300,6 @@ namespace osuCrypto
 
 
 
-					constexpr std::string_view path = __FILE__;
-					auto folder = path.substr(0, path.find_last_of("/\\"));
-					std::string scriptPath = std::string(folder) + "/plot.py";
-
 					sh << "_";
 					if (print_dist)
 					{
@@ -321,10 +310,8 @@ namespace osuCrypto
 					{
 						auto filename = "dist_" + sh.str() + ss.str() + ".txt";
 						std::ofstream out(filename, std::ios::trunc);
-						print_distribution<R>(outDist, 0, false, out, sh.str() + ss.str());
-
-						std::string command = "python3 " + scriptPath + " dist " + filename;
-						int result = std::system(command.c_str());
+						print_distribution<R>(outDist, 0, false, out, sh.str() + ss.str());// 
+						filenames.push_back(filename);
 					}
 
 					std::cout << sh.str() << ss.str() << " time: "
@@ -346,20 +333,25 @@ namespace osuCrypto
 							filename, std::ios::trunc);
 						print_enumerator<R>(fullEnum, outDist, 0, enumFile);
 
-						std::string command = "python3 "+ scriptPath +" enum " + filename;
+						std::string command = "python3 " + scriptPath + " --enum " + filename;
+						if (percent)
+							command += " --percent ";
+						std::cout << command << std::endl;
 						int result = std::system(command.c_str());
-						
+
 					}
-
-
-					//if (cmd.isSet("exact"))
-					//{
-					//	PRNG prng(block(421354523452343423ull, 2332453245234123421ull));
-					//	auto md = exactMD(subcodes, k, n, sigma, prng);
-					//	std::cout << "Exact MD: " << md << std::endl;
-					//}
 				}
 			}
+		}
+
+		{
+			std::string command = "python3 " + scriptPath + " --dist ";
+			for (auto filename : filenames)
+				command += filename + " ";
+			if (percent)
+				command += " --percent ";
+			std::cout << command << std::endl;
+			int result = std::system(command.c_str());
 		}
 	}
 	catch (std::exception& e) {
