@@ -9,6 +9,7 @@ import argparse
 import os
 import time
 import kaleido
+import plotly.express as px
 #import dash
 #from dash import dcc, html
 
@@ -209,11 +210,26 @@ def enum(filename, percent, title, includeSum, pdf, fullDh,noMinor):
         print("show")
         fig.show()
 
+def parse_line(line):
+    raw_values = line.strip().split(',')
+    dist = []
+    for i, val in enumerate(raw_values):
+        val = val.strip()  # remove whitespace
+        if val == '':
+            print(f"Skipping empty string at position {i}")
+            continue
+        try:
+            num = float(val)
+            dist.append(num)
+        except ValueError:
+            print(f"Could not convert '{val}' to float at position {i}")
+    return dist
 
-def dist(filenames, percent, watch, pdf):
+
+def dist(filenames, percent, watch, pdf, includeSum):
     
     fig = go.Figure()
-    fig.update_yaxes(range=[-60,60]) 
+    fig.update_yaxes(range=[-30,20]) 
     fig.update_xaxes(range=[0,0.2]) 
     fig.update_yaxes(title_text=r"$\log_2 \delta_h$")
     if percent:
@@ -240,6 +256,9 @@ def dist(filenames, percent, watch, pdf):
         folder = filenames[0]
     else:
         folder = None
+    # Get a color from the default cycle
+    color_index = 0  # increment this manually if you add multiple traces
+
 
     while True:
 
@@ -255,18 +274,7 @@ def dist(filenames, percent, watch, pdf):
                     lines = f.readlines()
 
                 name = lines[0].strip()  # First line: the name
-                raw_values = lines[1].strip().split(',')
-                dist = []
-                for i, val in enumerate(raw_values):
-                    val = val.strip()  # remove whitespace
-                    if val == '':
-                        print(f"Skipping empty string at position {i}")
-                        continue
-                    try:
-                        num = float(val)
-                        dist.append(num)
-                    except ValueError:
-                        print(f"Could not convert '{val}' to float at position {i}")
+                dist = parse_line(lines[1])  # Parse the second line
 
                 #print(dist)
                 if percent:
@@ -275,14 +283,33 @@ def dist(filenames, percent, watch, pdf):
                 else:
                     # Integer positions
                     bar_x = list(range(len(dist)))
-
+                    
+                color = px.colors.qualitative.Plotly[color_index]
+                color_index = color_index + 1
                 # Line 1
-                fig.add_trace(go.Scatter(
+                trace1 = go.Scatter(
                     x=bar_x,
                     y=dist,
                     mode='lines',
-                    name=name
-                ))
+                    name=name,
+                    line=dict(color=color),
+                    legendgroup=name,  # same legend group
+                )
+                fig.add_trace(trace1)
+                if includeSum:
+                    sDist = parse_line(lines[2])  # Parse the second line
+
+                    trace2 = go.Scatter(
+                        x=bar_x,
+                        y=sDist,
+                        mode='lines',
+                        name=name+"_sum",
+                        line=dict(dash='dash', color=color),
+                        legendgroup=name,  # same legend group
+                        showlegend=False  # hide duplicate legend entry if desired
+                    )
+
+                    fig.add_trace(trace2)
 
 
             #fig.update_layout(title='Multiple Lines on One Scatter Plot')
@@ -329,6 +356,6 @@ if not args.dist and args.enum == None:
 if not args.enum == None:
     enum(args.enum, args.percent, args.title, args.sum, args.pdf, args.fullDh, args.noMinor)
 if args.dist:
-    dist(args.dist, args.percent, args.watch, args.pdf)
+    dist(args.dist, args.percent, args.watch, args.pdf, args.sum)
 
 #dist = go.Figure()

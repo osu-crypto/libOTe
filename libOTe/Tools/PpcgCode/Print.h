@@ -46,6 +46,14 @@ namespace osuCrypto
 			for(u64 h = 1; h < distribution.size(); ++h)
 				out << log2_(distribution[h]) << ",";
 			out << std::endl;
+			R sum = 0;
+			out << ",";
+			for (u64 h = 1; h <= n; ++h)
+			{
+				sum += distribution[h];
+				out << log2_(sum) << ",";
+			}
+			out << std::endl;
 		}
 		else
 		{
