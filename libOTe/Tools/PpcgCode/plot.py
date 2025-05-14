@@ -10,6 +10,22 @@ import os
 import time
 import kaleido
 import plotly.express as px
+
+from matplotlib.colors import to_rgb
+from matplotlib.colors import to_hex
+
+def lighten_color(color, factor=0.5):
+    """
+    Lightens the given color by blending it with white.
+    :param color: A string representing the color (e.g., "#1f77b4" or "blue").
+    :param factor: A float between 0 and 1. Higher values make the color lighter.
+    :return: A string representing the lightened color in hex format.
+    """
+    rgb = np.array(to_rgb(color))  # Convert color to RGB
+    white = np.array([1, 1, 1])    # RGB for white
+    lightened_rgb = rgb + (white - rgb) * factor  # Blend with white
+    return to_hex(lightened_rgb)  # Convert back to hex
+
 #import dash
 #from dash import dcc, html
 
@@ -226,10 +242,10 @@ def parse_line(line):
     return dist
 
 
-def dist(filenames, percent, watch, pdf, includeSum):
+def dist(filenames, percent, watch, pdf, showSum, both):
     
     fig = go.Figure()
-    fig.update_yaxes(range=[-30,20]) 
+    fig.update_yaxes(range=[-40,60]) 
     fig.update_xaxes(range=[0,0.2]) 
     fig.update_yaxes(title_text=r"$\log_2 \delta_h$")
     if percent:
@@ -274,7 +290,10 @@ def dist(filenames, percent, watch, pdf, includeSum):
                     lines = f.readlines()
 
                 name = lines[0].strip()  # First line: the name
-                dist = parse_line(lines[1])  # Parse the second line
+                if showSum:
+                    dist = parse_line(lines[2])  # Parse the second line
+                else:
+                    dist = parse_line(lines[1])
 
                 #print(dist)
                 if percent:
@@ -296,15 +315,16 @@ def dist(filenames, percent, watch, pdf, includeSum):
                     legendgroup=name,  # same legend group
                 )
                 fig.add_trace(trace1)
-                if includeSum:
+                if both:
                     sDist = parse_line(lines[2])  # Parse the second line
+                    lighter_color = lighten_color(color, factor=0.35)  # Make the color lighter
 
                     trace2 = go.Scatter(
                         x=bar_x,
                         y=sDist,
                         mode='lines',
                         name=name+"_sum",
-                        line=dict(dash='dash', color=color),
+                        line=dict(dash='dash', color=lighter_color),
                         legendgroup=name,  # same legend group
                         showlegend=False  # hide duplicate legend entry if desired
                     )
@@ -339,7 +359,8 @@ parser.add_argument("--enum", help="input file")
 parser.add_argument("--percent", help="List of input files", action='store_true')
 parser.add_argument("--watch", help="List of input files", action='store_true')
 parser.add_argument("--title", help="title (default filename)")
-parser.add_argument("--sum", help="include output sum", action='store_true')
+parser.add_argument("--sum", help="show output sum", action='store_true')
+parser.add_argument("--both", help="show both ", action='store_true')
 parser.add_argument("--pdf", help="make a pdf", action='store_true')
 parser.add_argument("--fullDh", help="full delta_h range", action='store_true')
 parser.add_argument("--noMinor", help="no minor lines", action='store_true')
@@ -356,6 +377,6 @@ if not args.dist and args.enum == None:
 if not args.enum == None:
     enum(args.enum, args.percent, args.title, args.sum, args.pdf, args.fullDh, args.noMinor)
 if args.dist:
-    dist(args.dist, args.percent, args.watch, args.pdf, args.sum)
+    dist(args.dist, args.percent, args.watch, args.pdf, args.sum, args.both)
 
 #dist = go.Figure()
