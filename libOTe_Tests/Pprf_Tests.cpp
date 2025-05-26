@@ -382,7 +382,7 @@ void Tools_Pprf_inter_test(const CLP& cmd)
     for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true, false }) for (auto e : { true, false })
     {
         Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, e, v);
-        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, e, v);
+        Tools_Pprf_test_impl<block, block, CoeffCtxGF2>(d, n, p, f, e, v);
     }
 }
 
@@ -397,7 +397,7 @@ void Tools_Pprf_ByLeafIndex_test(const CLP& cmd)
     for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true/*, false */}) for (auto e : { true/*, false */})
     {
         Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, e, v);
-        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, e, v);
+        Tools_Pprf_test_impl<block, block, CoeffCtxGF2>(d, n, p, f, e, v);
     }
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
@@ -416,7 +416,7 @@ void Tools_Pprf_ByTreeIndex_test(const oc::CLP& cmd)
     for (auto d : { 32,3242 }) for (auto n : { 8, 19}) for (auto p : { true/*, false*/ })
     {
         Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, false, v);
-        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, false, v);
+        Tools_Pprf_test_impl<block, block, CoeffCtxGF2>(d, n, p, f, false, v);
     }
 
 #else
@@ -435,7 +435,7 @@ void Tools_Pprf_callback_test(const oc::CLP& cmd)
     for (auto d : { 32,3242 }) for (auto n : { 8, 128 }) for (auto p : { true/*, false */})
     {
         Tools_Pprf_test_impl<u64, u64, CoeffCtxInteger>(d, n, p, f, false, v);
-        Tools_Pprf_test_impl<block, block, CoeffCtxInteger>(d, n, p, f, false, v);
+        Tools_Pprf_test_impl<block, block, CoeffCtxGF2>(d, n, p, f, false, v);
     }
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");

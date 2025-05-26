@@ -52,22 +52,13 @@ if(DEFINED ENABLE_ALL_OT)
 
 
 	# requires linux
-	if(UNIX AND NOT(APPLE OR MSVC))
+	if(UNIX AND NOT(APPLE OR MSVC) AND NOT ENABLE_PIC)
 		set(oc_BB ${ENABLE_ALL_OT})
 	else()
 		set(oc_BB OFF)
 	endif()
 	set(ENABLE_SIMPLESTOT_ASM ${oc_BB}						CACHE BOOL "" FORCE)
 	set(ENABLE_MR_KYBER       ${oc_BB}						CACHE BOOL "" FORCE)
-
-	# requires sse
-	if(ENABLE_SSE)
-		set(oc_BB ${ENABLE_ALL_OT})
-	else()
-		set(oc_BB OFF)
-	endif()
-	set(ENABLE_SILENTOT    ${oc_BB}						CACHE BOOL "" FORCE)
-
 
 	# general
 	set(ENABLE_KOS            ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
@@ -77,17 +68,18 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_OOS            ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_KKRT           ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_SILENTOT		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
-	set(ENABLE_SILENT_VOLE		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
+	set(ENABLE_SILENT_VOLE    ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
+	set(ENABLE_FOLEAGE		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
+	set(ENABLE_REGULAR_DPF	  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
+	set(ENABLE_TERNARY_DPF	  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
+	set(ENABLE_SPARSE_DPF	  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
+	
 	unset(ENABLE_ALL_OT CACHE)
 
 endif()
 
 
-if(APPLE)
-	option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" FALSE)
-else()
-	option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" TRUE)
-endif()
+option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" FALSE)
 
 option(ENABLE_MOCK_OT        "Build the insecure mock base OT" OFF)
 
@@ -111,11 +103,13 @@ option(ENABLE_KKRT           "Build the KKRT 1-oo-N OT-Ext protocol." OFF)
 option(ENABLE_PPRF           "Build the PPRF protocol." OFF)
 option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
 
-option(ENABLE_INSECURE_SILVER   "Build with silver codes." OFF)
-option(ENABLE_LDPC              "Build with ldpc functions." OFF)
-if(ENABLE_INSECURE_SILVER)
-	set(ENABLE_LDPC ON)
-endif()
+option(ENABLE_FOLEAGE        "Build the Foleage OLE protocol." OFF)
+
+
+option(ENABLE_REGULAR_DPF    "Build the Regular DPF protocol." OFF)
+option(ENABLE_TERNARY_DPF    "Build the Ternary DPF protocol." OFF)
+option(ENABLE_SPARSE_DPF     "Build the Sparse DPF protocol." OFF)
+
 option(NO_KOS_WARNING        "Build with no kos security warning." OFF)
 
 
@@ -131,6 +125,14 @@ option(VERBOSE_FETCH        "Print build info for fetched libraries" ON)
 
 if(ENABLE_IKNP)
 	set(ENABLE_KOS true)
+endif()
+
+if(ENABLE_FOLEAGE)
+	set(ENABLE_TERNARY_DPF true)
+endif()
+
+if(ENABLE_SPARSE_DPF)
+	set(ENABLE_REGULAR_DPF true)
 endif()
 
 message(STATUS "General Options\n=======================================================")
@@ -160,7 +162,17 @@ message(STATUS "1-out-of-2 Delta-OT Extension protocols\n=======================
 message(STATUS "Option: ENABLE_DELTA_KOS      = ${ENABLE_DELTA_KOS}\n\n")
 
 message(STATUS "Vole protocols\n=======================================================")
-message(STATUS "Option: ENABLE_SILENT_VOLE      = ${ENABLE_SILENT_VOLE}\n\n")
+message(STATUS "Option: ENABLE_SILENT_VOLE    = ${ENABLE_SILENT_VOLE}\n\n")
+
+
+message(STATUS "DPF protocols\n=======================================================")
+message(STATUS "Option: ENABLE_REGULAR_DPF    = ${ENABLE_REGULAR_DPF}")
+message(STATUS "Option: ENABLE_SPARSE_DPF     = ${ENABLE_SPARSE_DPF}")
+message(STATUS "Option: ENABLE_TERNARY_DPF    = ${ENABLE_TERNARY_DPF}")
+message(STATUS "Option: ENABLE_PPRF           = ${ENABLE_PPRF}\n\n")
+
+message(STATUS "OLE and Triple protocols\n=======================================================")
+message(STATUS "Option: ENABLE_FOLEAGE        = ${ENABLE_FOLEAGE}\n\n")
 
 message(STATUS "1-out-of-N OT Extension protocols\n=======================================================")
 message(STATUS "Option: ENABLE_OOS            = ${ENABLE_OOS}")
@@ -168,8 +180,9 @@ message(STATUS "Option: ENABLE_KKRT           = ${ENABLE_KKRT}\n\n")
 
 
 message(STATUS "other \n=======================================================")
-message(STATUS "Option: NO_KOS_WARNING       = ${NO_KOS_WARNING}")
-message(STATUS "Option: ENABLE_PPRF          = ${ENABLE_PPRF}\n\n")
+message(STATUS "Option: NO_KOS_WARNING        = ${NO_KOS_WARNING}")
+message(STATUS "Option: LIBOTE_SHARED         = ${LIBOTE_SHARED}\n\n")
+
 
 #############################################
 #               Config Checks               #
@@ -214,6 +227,18 @@ if(ENABLE_IKNP AND NOT ENABLE_KOS)
 	message(FATAL_ERROR "ENABLE_IKNP requires ENABLE_KOS")
 endif()
 
+
+if(LIBOTE_SHARED AND NOT ENABLE_PIC AND NOT MSVC)
+	message(FATAL_ERROR " LIBOTE_SHARED requires ENABLE_PIC. Set ENABLE_PIC to true and recompile.")
+endif()
+
+
+if(ENABLE_SIMPLESTOT_ASM AND ENABLE_PIC)
+	message(FATAL_ERROR " ENABLE_SIMPLESTOT_ASM can not be compiled with ENABLE_PIC.")
+endif()
+if(ENABLE_MR_KYBER AND ENABLE_PIC)
+	message(FATAL_ERROR " ENABLE_MR_KYBER can not be compiled with ENABLE_PIC.")
+endif()
 
 
 #include(${CMAKE_CURRENT_LIST_DIR}/../cryptoTools/cmake/cryptoToolsBuildOptions.cmake)

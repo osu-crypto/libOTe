@@ -22,7 +22,7 @@ namespace osuCrypto
         ExConv21x24 = 9, // conservative.
 
         // experimental
-        Tungsten // very fast, based on turbo codes. Unknown min distance. 
+        Tungsten = 10 // very fast, based on turbo codes. Unknown min distance. 
     };
 
     inline std::ostream& operator<<(std::ostream& o, MultType m)

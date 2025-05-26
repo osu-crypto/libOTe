@@ -4,16 +4,17 @@ set(SRCS
     bitpolymul_Tests.cpp
     Common.cpp
     EACode_Tests.cpp
-    ExCOnvCode_Tests.cpp
+    ExConvCode_Tests.cpp
     NcoOT_Tests.cpp
     OT_Tests.cpp
     Pprf_Tests.cpp
-    RegularDpf_Tests.cpp
+    Dpf_Tests.cpp
     SilentOT_Tests.cpp
-    Softspoken_Tests.cpp
+    SoftSpoken_Tests.cpp
     TungstenCode_Tests.cpp
     UnitTests.cpp
     Vole_Tests.cpp
+    Foleage_Tests.cpp
 )
 
 add_library(libOTe_Tests STATIC ${SRCS})

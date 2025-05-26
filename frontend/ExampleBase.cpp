@@ -75,6 +75,9 @@ namespace osuCrypto
 
         std::cout << tag << (role == Role::Receiver ? " (receiver)" : " (sender)")
             << " n=" << totalOTs << " " << milli << " ms" << std::endl;
+
+#else
+        std::cout << "This example requires coproto to enable boost support. Please build libOTe with `-DCOPROTO_ENABLE_BOOST=ON`. \n" << LOCATION << std::endl;
 #endif
     }
 

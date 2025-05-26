@@ -190,7 +190,7 @@ namespace osuCrypto
 
         // Set the externally generated base OTs. This choice
         // bits must be the one return by sampleBaseChoiceBits(...).
-        void setSilentBaseOts(span<std::array<block,2>> sendBaseOts);
+        void setSilentBaseOts(span<const std::array<block,2>> sendBaseOts);
 
 
         // Runs the silent random OT protocol and outputs b.

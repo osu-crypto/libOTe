@@ -100,6 +100,8 @@ namespace osuCrypto
 
 		// make sure all messages are sent.
 		cp::sync_wait(chl.flush());
+#else
+		std::cout << "This example requires coproto to enable boost support. Please build libOTe with `-DCOPROTO_ENABLE_BOOST=ON`. \n" << LOCATION << std::endl;
 #endif
 	}
 	bool Vole_Examples(const CLP& cmd)

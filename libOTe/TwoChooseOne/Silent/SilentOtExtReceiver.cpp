@@ -18,10 +18,6 @@
 namespace osuCrypto
 {
 
-
-	//u64 getPartitions(u64 scaler, u64 p, u64 secParam);
-
-
 	// sets the KOS base OTs that are then used to extend
 	void SilentOtExtReceiver::setBaseOts(
 		span<std::array<block, 2>> baseSendOts) {
@@ -30,7 +26,7 @@ namespace osuCrypto
 			mOtExtRecver.emplace();
 		mOtExtRecver->setBaseOts(baseSendOts);
 #else
-		throw std::runtime_error("soft spoken ot must be enabled");
+		throw std::runtime_error("softSpoken ot must be enabled. " LOCATION);
 #endif
 	}
 
@@ -45,7 +41,7 @@ namespace osuCrypto
 		}
 		return  mOtExtRecver->baseOtCount();
 #else
-		throw std::runtime_error("soft spoken ot must be enabled");
+		throw std::runtime_error("softSpoken ot must be enabled. " LOCATION);
 #endif
 	}
 
@@ -56,11 +52,11 @@ namespace osuCrypto
 			return false;
 		return mOtExtRecver->hasBaseOts();
 #else
-		throw std::runtime_error("soft spoken ot must be enabled");
+		throw std::runtime_error("softSpoken ot must be enabled. " LOCATION);
 #endif
 	};
 
-	void SilentOtExtReceiver::setSilentBaseOts(span<block> recvBaseOts)
+	void SilentOtExtReceiver::setSilentBaseOts(span<const block> recvBaseOts)
 	{
 		if (isConfigured() == false)
 			throw std::runtime_error("configure(...) must be called first.");
@@ -73,7 +69,6 @@ namespace osuCrypto
 
 		mGen.setBase(genOts);
 		std::copy(malOts.begin(), malOts.end(), mMalCheckOts.begin());
-
 	}
 
 	task<> SilentOtExtReceiver::genBaseOts(
@@ -82,16 +77,15 @@ namespace osuCrypto
 	{
 		setTimePoint("recver.gen.start");
 #ifdef ENABLE_SOFTSPOKEN_OT
-		//mOtExtRecver.mFiatShamir = true;
-
 		if (!mOtExtRecver)
 			mOtExtRecver.emplace();
 		co_await mOtExtRecver->genBaseOts(prng, chl);
 #else
-		throw std::runtime_error("soft spoken ot must be enabled");
+		throw std::runtime_error("softSpoken ot must be enabled. " LOCATION);
 		co_return;
 #endif
 	}
+
 	// Returns an independent copy of this extender.
 	std::unique_ptr<OtExtReceiver> SilentOtExtReceiver::split() {
 
@@ -104,7 +98,7 @@ namespace osuCrypto
 		ptr->mOtExtRecver = mOtExtRecver->splitBase();
 		return ret;
 #else
-		throw std::runtime_error("soft spoken ot must be enabled");
+		throw std::runtime_error("softSpoken ot must be enabled. " LOCATION);
 #endif
 	};
 

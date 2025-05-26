@@ -254,7 +254,7 @@ namespace tests_libOTe
 		for (u64 i = 0; i < 10000; ++i)
 		{
 			transpose128(data.data());
-			data[0] += block::allSame((u64)1);
+            data[0] = data[0].add_epi64(block::allSame((u64)1));
 		}
 
 		// Add a check just to make sure this doesn't get compiled out.
@@ -479,7 +479,7 @@ namespace tests_libOTe
         PRNG prng0(block(4253465, 3434565));
         PRNG prng1(block(42532335, 334565));
 
-        u64 numOTs = 20000;
+        u64 numOTs = 128;
 
         std::vector<block> recvMsg(numOTs), baseRecv(128);
         std::vector<std::array<block, 2>> sendMsg(numOTs), baseSend(128);

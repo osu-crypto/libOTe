@@ -7,6 +7,7 @@ set(SRCS "${SRCS}")
 add_library(libOTe STATIC ${SRCS} )
 
 
+
 # make projects that include libOTe use this as an include folder
 target_include_directories(libOTe PUBLIC
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
@@ -19,7 +20,6 @@ target_link_libraries(libOTe cryptoTools)
 
 if(MSVC)
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
-    #target_compile_options(libOTe PRIVATE -openmp:experimental)
 else()
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
 
@@ -35,7 +35,6 @@ if (ENABLE_BITPOLYMUL)
 endif ()
 if(ENABLE_SIMPLESTOT_ASM)
 	target_link_libraries(libOTe SimplestOT)
-    #target_compile_options(libOTe PRIVATE -fPIC -no-pie)
 endif()
 
 if(ENABLE_MR_KYBER)
@@ -43,6 +42,23 @@ if(ENABLE_MR_KYBER)
 endif()
 
 
+if(LIBOTE_SHARED)
+    
+    add_library(libOTeShared SHARED ${SRCS} )
+    target_link_libraries(libOTeShared libOTe)
+    if(MSVC)
+        target_compile_options(libOTeShared PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
+    else()
+        target_compile_options(libOTeShared PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
+
+        if(ENABLE_SSE)
+            target_compile_options(libOTeShared PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)
+        endif()
+        if(ENABLE_AVX)
+            target_compile_options(libOTeShared PRIVATE -mavx2)
+        endif()
+    endif()
+endif()
 
 #############################################
 #            Install                        #

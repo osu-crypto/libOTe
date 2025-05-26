@@ -60,12 +60,16 @@ install(FILES
 set(exportLibs 
     "libOTe;libOTe_Tests;")
 
+if(LIBOTE_SHARED)
+    set(exportLibs "${exportLibs}libOTeShared;")
+endif()
+
 if(ENABLE_MR_KYBER)
     set(exportLibs "${exportLibs}KyberOT;")
     
     # install headers
     install(
-        DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../KyberOT/ 
+        DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../thirdparty/KyberOT/ 
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/KyberOT 
         FILES_MATCHING PATTERN "*.h")
 endif()
@@ -74,7 +78,7 @@ if(ENABLE_SIMPLESTOT_ASM)
     set(exportLibs "${exportLibs}SimplestOT;")
     # install headers
     install(
-        DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../SimplestOT/ 
+        DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../thirdparty/SimplestOT/ 
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/SimplestOT 
         FILES_MATCHING PATTERN "*.h")
 endif()

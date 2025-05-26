@@ -28,7 +28,7 @@ namespace osuCrypto
 
 		mOtExtSender->setBaseOts(baseRecvOts, choices);
 #else
-		throw std::runtime_error("KOS must be enabled");
+		throw std::runtime_error("softspoken must be enabled. " LOCATION);
 #endif
 	}
 
@@ -44,7 +44,7 @@ namespace osuCrypto
 		ptr->mOtExtSender = mOtExtSender->splitBase();
 		return ret;
 #else
-		throw std::runtime_error("KOS must be enabled");
+		throw std::runtime_error("softspoken must be enabled. " LOCATION);
 #endif
 	}
 
@@ -57,7 +57,7 @@ namespace osuCrypto
 			mOtExtSender.emplace();
 		return mOtExtSender->genBaseOts(prng, chl);
 #else
-		throw std::runtime_error("KOS must be enabled");
+		throw std::runtime_error("softspoken must be enabled. " LOCATION);
 #endif
 	}
 
@@ -73,7 +73,7 @@ namespace osuCrypto
 		}
 		return mOtExtSender->baseOtCount();
 #else
-		throw std::runtime_error("KOS must be enabled");
+		throw std::runtime_error("softspoken must be enabled. " LOCATION);
 #endif
 	}
 
@@ -85,7 +85,7 @@ namespace osuCrypto
 			return false;
 		return mOtExtSender->hasBaseOts();
 #else
-		throw std::runtime_error("KOS must be enabled");
+		throw std::runtime_error("softspoken must be enabled. " LOCATION);
 #endif
 
 	}
@@ -147,7 +147,7 @@ namespace osuCrypto
 	}
 
 	void SilentOtExtSender::setSilentBaseOts(
-		span<std::array<block, 2>> sendBaseOts)
+		span<const std::array<block, 2>> sendBaseOts)
 	{
 
 		if ((u64)sendBaseOts.size() != silentBaseOtCount())

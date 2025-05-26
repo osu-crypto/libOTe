@@ -22,12 +22,8 @@ using std::array;
 namespace osuCrypto {
 
 
-	//bool gUseBgicksPprf(true);
-
-//using namespace std;
-
-// Utility function to do modular exponentiation.
-// It returns (x^y) % p
+	// Utility function to do modular exponentiation.
+	// It returns (x^y) % p
 	u64 power(u64 x, u64 y, u64 p)
 	{
 		u64 res = 1;      // Initialize result
@@ -105,14 +101,14 @@ namespace osuCrypto {
 
 	bool isPrime(u64 n)
 	{
-		PRNG prng(ZeroBlock);
+		PRNG prng(oc::sysRandomSeed());
 		return isPrime(n, prng);
 	}
 
 
 	u64 nextPrime(u64 n)
 	{
-		PRNG prng(ZeroBlock);
+		PRNG prng(oc::sysRandomSeed());
 
 		while (isPrime(n, prng) == false)
 			++n;
@@ -335,8 +331,8 @@ namespace osuCrypto {
 			outU16View[16 * x + 7 - j][y] = in[0].movemask_epi8();
 			outU16View[16 * x + 15 - j][y] = in[1].movemask_epi8();
 
-			in[0] = (in[0] << 1);
-			in[1] = (in[1] << 1);
+			in[0] = in[0].slli_epi64(1);
+			in[1] = in[1].slli_epi64(1);
 		}
 	}
 
@@ -494,14 +490,14 @@ namespace osuCrypto {
 					out7 -= out.stride();
 
 					// shift the 128 values so that the top bit is now the next one.
-					t.blks[0] = (t.blks[0] << 1);
-					t.blks[1] = (t.blks[1] << 1);
-					t.blks[2] = (t.blks[2] << 1);
-					t.blks[3] = (t.blks[3] << 1);
-					t.blks[4] = (t.blks[4] << 1);
-					t.blks[5] = (t.blks[5] << 1);
-					t.blks[6] = (t.blks[6] << 1);
-					t.blks[7] = (t.blks[7] << 1);
+					t.blks[0] = t.blks[0].slli_epi64(1);
+					t.blks[1] = t.blks[1].slli_epi64(1);
+					t.blks[2] = t.blks[2].slli_epi64(1);
+					t.blks[3] = t.blks[3].slli_epi64(1);
+					t.blks[4] = t.blks[4].slli_epi64(1);
+					t.blks[5] = t.blks[5].slli_epi64(1);
+					t.blks[6] = t.blks[6].slli_epi64(1);
+					t.blks[7] = t.blks[7].slli_epi64(1);
 				}
 			}
 		}
@@ -550,7 +546,7 @@ namespace osuCrypto {
 				auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.stride() + w * 2;
 
 				out0 -= out.stride() * skip;
-				t.blks[0] = (t.blks[0] << int(skip));
+				t.blks[0] = t.blks[0].slli_epi64(skip);
 
 				for (int j = 0; j < rem; j++)
 				{
@@ -558,7 +554,7 @@ namespace osuCrypto {
 
 					out0 -= out.stride();
 
-					t.blks[0] = (t.blks[0] << 1);
+					t.blks[0] = t.blks[0].slli_epi64(1);
 				}
 			}
 		}
@@ -623,14 +619,14 @@ namespace osuCrypto {
 						out6 -= out.stride();
 						out7 -= out.stride();
 
-						t.blks[0] = (t.blks[0] << 1);
-						t.blks[1] = (t.blks[1] << 1);
-						t.blks[2] = (t.blks[2] << 1);
-						t.blks[3] = (t.blks[3] << 1);
-						t.blks[4] = (t.blks[4] << 1);
-						t.blks[5] = (t.blks[5] << 1);
-						t.blks[6] = (t.blks[6] << 1);
-						t.blks[7] = (t.blks[7] << 1);
+						t.blks[0] = t.blks[0].slli_epi64(1);
+						t.blks[1] = t.blks[1].slli_epi64(1);
+						t.blks[2] = t.blks[2].slli_epi64(1);
+						t.blks[3] = t.blks[3].slli_epi64(1);
+						t.blks[4] = t.blks[4].slli_epi64(1);
+						t.blks[5] = t.blks[5].slli_epi64(1);
+						t.blks[6] = t.blks[6].slli_epi64(1);
+						t.blks[7] = t.blks[7].slli_epi64(1);
 					}
 				}
 				else
@@ -655,14 +651,14 @@ namespace osuCrypto {
 						out6 -= out.stride();
 						out7 -= out.stride();
 
-						t.blks[0] = (t.blks[0] << 1);
-						t.blks[1] = (t.blks[1] << 1);
-						t.blks[2] = (t.blks[2] << 1);
-						t.blks[3] = (t.blks[3] << 1);
-						t.blks[4] = (t.blks[4] << 1);
-						t.blks[5] = (t.blks[5] << 1);
-						t.blks[6] = (t.blks[6] << 1);
-						t.blks[7] = (t.blks[7] << 1);
+						t.blks[0] = t.blks[0].slli_epi64(1);
+						t.blks[1] = t.blks[1].slli_epi64(1);
+						t.blks[2] = t.blks[2].slli_epi64(1);
+						t.blks[3] = t.blks[3].slli_epi64(1);
+						t.blks[4] = t.blks[4].slli_epi64(1);
+						t.blks[5] = t.blks[5].slli_epi64(1);
+						t.blks[6] = t.blks[6].slli_epi64(1);
+						t.blks[7] = t.blks[7].slli_epi64(1);
 					}
 				}
 			}
@@ -695,7 +691,7 @@ namespace osuCrypto {
 				auto out0 = outStart + (chunkSize * subBlockHight + hh) * 8 * out.stride() + w * 2;
 
 				out0 -= out.stride() * skip;
-				t.blks[0] = (t.blks[0] << int(skip));
+				t.blks[0] = t.blks[0].slli_epi64(skip);
 
 				for (int j = 0; j < rem; j++)
 				{
@@ -710,7 +706,7 @@ namespace osuCrypto {
 
 					out0 -= out.stride();
 
-					t.blks[0] = (t.blks[0] << 1);
+					t.blks[0] = t.blks[0].slli_epi64(1);
 				}
 			}
 		}
@@ -936,14 +932,14 @@ namespace osuCrypto {
 		auto x16_7 = x * 16 + 7;
 		auto x16_15 = x * 16 + 15;
 
-		block b0 = (in[0] << 0);
-		block b1 = (in[0] << 1);
-		block b2 = (in[0] << 2);
-		block b3 = (in[0] << 3);
-		block b4 = (in[0] << 4);
-		block b5 = (in[0] << 5);
-		block b6 = (in[0] << 6);
-		block b7 = (in[0] << 7);
+		block b0 = in[0].slli_epi64(0);
+		block b1 = in[0].slli_epi64(1);
+		block b2 = in[0].slli_epi64(2);
+		block b3 = in[0].slli_epi64(3);
+		block b4 = in[0].slli_epi64(4);
+		block b5 = in[0].slli_epi64(5);
+		block b6 = in[0].slli_epi64(6);
+		block b7 = in[0].slli_epi64(7);
 
 		outU16View[x16_7 - 0][i8y] = b0.movemask_epi8();
 		outU16View[x16_7 - 1][i8y] = b1.movemask_epi8();
@@ -954,14 +950,14 @@ namespace osuCrypto {
 		outU16View[x16_7 - 6][i8y] = b6.movemask_epi8();
 		outU16View[x16_7 - 7][i8y] = b7.movemask_epi8();
 
-		b0 = (in[1] << 0);
-		b1 = (in[1] << 1);
-		b2 = (in[1] << 2);
-		b3 = (in[1] << 3);
-		b4 = (in[1] << 4);
-		b5 = (in[1] << 5);
-		b6 = (in[1] << 6);
-		b7 = (in[1] << 7);
+		b0 = in[1].slli_epi64(0);
+		b1 = in[1].slli_epi64(1);
+		b2 = in[1].slli_epi64(2);
+		b3 = in[1].slli_epi64(3);
+		b4 = in[1].slli_epi64(4);
+		b5 = in[1].slli_epi64(5);
+		b6 = in[1].slli_epi64(6);
+		b7 = in[1].slli_epi64(7);
 
 		outU16View[x16_15 - 0][i8y] = b0.movemask_epi8();
 		outU16View[x16_15 - 1][i8y] = b1.movemask_epi8();

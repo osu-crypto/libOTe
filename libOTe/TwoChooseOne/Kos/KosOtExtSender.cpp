@@ -13,19 +13,12 @@ namespace osuCrypto
 {
 	KosOtExtSender::KosOtExtSender(SetUniformOts, span<block> baseRecvOts, const BitVector& choices)
 	{
-		setUniformBaseOts(baseRecvOts, choices);
+		setBaseOts(baseRecvOts, choices);
 	}
 
 	void KosOtExtSender::setUniformBaseOts(span<block> baseRecvOts, const BitVector& choices)
 	{
-		if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
-			throw std::runtime_error("not supported/implemented");
-
-		mBaseChoiceBits = choices;
-		mGens.setKeys(baseRecvOts);
-		
-		mPrngIdx = 0;
-		mUniformBase = true;
+		setBaseOts(baseRecvOts, choices);
 	}
 
 	KosOtExtSender KosOtExtSender::splitBase()
@@ -48,8 +41,13 @@ namespace osuCrypto
 
 	void KosOtExtSender::setBaseOts(span<block> baseRecvOts, const BitVector& choices)
 	{
-		setUniformBaseOts(baseRecvOts, choices);
-		mUniformBase = false;
+		if (baseRecvOts.size() != gOtExtBaseOtCount || choices.size() != gOtExtBaseOtCount)
+			throw std::runtime_error("not supported/implemented");
+
+		mBaseChoiceBits = choices;
+		mGens.setKeys(baseRecvOts);
+
+		mPrngIdx = 0;
 	}
 
 	task<> KosOtExtSender::send(
@@ -59,6 +57,11 @@ namespace osuCrypto
 	{
 		MACORO_TRY{
 
+
+		if (mIsMalicious && mHashType == HashType::NoHash)
+			throw std::runtime_error("malicious no hash is not supported, use DotKos. " LOCATION);
+
+
 		if (hasBaseOts() == false)
 			co_await genBaseOts(prng, chl);
 
@@ -66,31 +69,17 @@ namespace osuCrypto
 		// to a random value or we will generate 
 		// it via Fiat Shamir.
 		auto fs = RandomOracle(sizeof(block));
-		auto theirSeedComm = Commit{};
+
+		// used to hash messages
+		RandomOracle sha(sizeof(block));
+		
+		u64 numExtra = 0;
+		auto hashType = mHashType;
+		auto mal = mIsMalicious;
 		if (mIsMalicious)
-		{
-
-			if (mUniformBase == false)
-			{
-				auto diff = BitVector{};
-				diff.resize(mBaseChoiceBits.size());
-				co_await chl.recv(diff.getSpan<u8>());
-				mBaseChoiceBits ^= diff;
-				mUniformBase = true;
-			}
-
-			if (mFiatShamir == false)
-				co_await(chl.recv(theirSeedComm));
-		}
+			numExtra = 128;
 
 		setTimePoint("Kos.send.start");
-
-
-		// extra OTs used in the KOS check.
-		// We do 4 sets of malicious checks instead of 1
-		// to mitigate the uncertainty surrounding the KOS security.
-		u64 numExtra = gKosChallengeRepititions * mIsMalicious;
-		auto extraMessages = AlignedUnVector<std::array<block, 2>>{ numExtra * 128 };
 
 		auto delta = *mBaseChoiceBits.blocks();
 		auto choiceMask = AlignedUnVector<block>{ 128 };
@@ -101,126 +90,167 @@ namespace osuCrypto
 		}
 
 		// get an array of blocks that we will fill.
-		auto t = AlignedUnVector<block>{ 128 };
+		u64 numBlocks = divCeil(messages.size() + numExtra, 128);
+		auto tSize = mIsMalicious ? numBlocks * 128ull : 128ull;
+		auto t = AlignedUnVector<block>{ tSize };
 		auto u = AlignedUnVector<block>{};
+		auto transBuff = AlignedUnVector<block>{ 128ull * mIsMalicious };
+
 		block* uIter = 0;
 		block* uEnd = 0;
-		u64 remaining = divCeil(messages.size(), 128) + numExtra;
 
+		auto mIter = messages.data();
+		auto tIter = t.data();
+		auto remaining = numBlocks;
 
-		for (auto extra : { false, true })
+		for (u64 i = 0; i < numBlocks; ++i)
 		{
-			// The next OT message to be computed
-			auto msgs = extra ?
-				span<std::array<block, 2>>(extraMessages) :
-				span<std::array<block, 2>>(messages);
 
-			auto mIter = msgs.data();
-
-			u64 numBlocks = divCeil(msgs.size(), 128);
-
-			for (u64 i = 0; i < numBlocks; ++i)
+			if (uIter == uEnd)
 			{
-				auto tIter = t.data();
-				auto cIter = choiceMask.data();
+				auto step = std::min<u64>(remaining, (u64)commStepSize);
+				remaining -= step;
+				u.resize(step * 128);
+				uIter = u.data();
+				uEnd = uIter + u.size();
 
-				if (uIter == uEnd)
+				co_await(chl.recv(u));
+
+				if (mFiatShamir)
+					fs.Update(u.data(), u.size());
+			}
+
+			mGens.ecbEncCounterMode(mPrngIdx, tIter);
+			++mPrngIdx;
+
+			auto cIter = choiceMask.data();
+			// transpose 128 columns at at time.
+			for (u64 colIdx = 0; colIdx < 16; ++colIdx)
+			{
+				uIter[0] = uIter[0] & cIter[0];
+				uIter[1] = uIter[1] & cIter[1];
+				uIter[2] = uIter[2] & cIter[2];
+				uIter[3] = uIter[3] & cIter[3];
+				uIter[4] = uIter[4] & cIter[4];
+				uIter[5] = uIter[5] & cIter[5];
+				uIter[6] = uIter[6] & cIter[6];
+				uIter[7] = uIter[7] & cIter[7];
+
+				tIter[0] = tIter[0] ^ uIter[0];
+				tIter[1] = tIter[1] ^ uIter[1];
+				tIter[2] = tIter[2] ^ uIter[2];
+				tIter[3] = tIter[3] ^ uIter[3];
+				tIter[4] = tIter[4] ^ uIter[4];
+				tIter[5] = tIter[5] ^ uIter[5];
+				tIter[6] = tIter[6] ^ uIter[6];
+				tIter[7] = tIter[7] ^ uIter[7];
+
+				cIter += 8;
+				uIter += 8;
+				tIter += 8;
+			}
+
+			assert(cIter == choiceMask.data() + choiceMask.size());
+			tIter -= 128;
+
+			// transpose our 128 columns of 1024 bits. We will have 1024 rows,
+			// each 128 bits wide.
+			block* trans = nullptr;
+			if (mal)
+			{
+				memcpy(transBuff.data(), tIter, 128 * sizeof(block));
+				transpose128(transBuff.data());
+				trans = transBuff.data();
+				tIter += 128;
+			}
+			else
+			{
+				transpose128(tIter);
+				trans = tIter;
+			}
+
+			auto size = std::min<u64>(128, messages.data() + messages.size() - mIter);
+
+			if (size == 128)
+			{
+				for (u64 j = 0; j < 128; j += 8)
 				{
-					auto step = std::min<u64>(remaining, (u64)commStepSize);
-					remaining -= step;
-					u.resize(step * 128);
-					uIter = u.data();
-					uEnd = uIter + u.size();
+					mIter[0][0] = trans[0];
+					mIter[1][0] = trans[1];
+					mIter[2][0] = trans[2];
+					mIter[3][0] = trans[3];
+					mIter[4][0] = trans[4];
+					mIter[5][0] = trans[5];
+					mIter[6][0] = trans[6];
+					mIter[7][0] = trans[7];
+					mIter[0][1] = trans[0] ^ delta;
+					mIter[1][1] = trans[1] ^ delta;
+					mIter[2][1] = trans[2] ^ delta;
+					mIter[3][1] = trans[3] ^ delta;
+					mIter[4][1] = trans[4] ^ delta;
+					mIter[5][1] = trans[5] ^ delta;
+					mIter[6][1] = trans[6] ^ delta;
+					mIter[7][1] = trans[7] ^ delta;
 
-					co_await(chl.recv(u));
-
-					if (mFiatShamir)
-						fs.Update(u.data(), u.size());
+					trans += 8;
+					mIter += 8;
 				}
-
-				mGens.ecbEncCounterMode(mPrngIdx, tIter);
-				++mPrngIdx;
-
-				// transpose 128 columns at at time.
-				for (u64 colIdx = 0; colIdx < 16; ++colIdx)
+			}
+			else
+			{
+				auto mEnd = mIter + size;
+				while (mIter != mEnd)
 				{
-					uIter[0] = uIter[0] & cIter[0];
-					uIter[1] = uIter[1] & cIter[1];
-					uIter[2] = uIter[2] & cIter[2];
-					uIter[3] = uIter[3] & cIter[3];
-					uIter[4] = uIter[4] & cIter[4];
-					uIter[5] = uIter[5] & cIter[5];
-					uIter[6] = uIter[6] & cIter[6];
-					uIter[7] = uIter[7] & cIter[7];
+					(*mIter)[0] = *trans;
+					(*mIter)[1] = *trans ^ delta;
 
-					tIter[0] = tIter[0] ^ uIter[0];
-					tIter[1] = tIter[1] ^ uIter[1];
-					tIter[2] = tIter[2] ^ uIter[2];
-					tIter[3] = tIter[3] ^ uIter[3];
-					tIter[4] = tIter[4] ^ uIter[4];
-					tIter[5] = tIter[5] ^ uIter[5];
-					tIter[6] = tIter[6] ^ uIter[6];
-					tIter[7] = tIter[7] ^ uIter[7];
-
-					cIter += 8;
-					uIter += 8;
-					tIter += 8;
+					trans += 1;
+					mIter += 1;
 				}
+			}
+			mIter -= size;
 
-				assert(cIter == choiceMask.data() + choiceMask.size());
-				assert(tIter == t.data() + t.size());
-
-				// transpose our 128 columns of 1024 bits. We will have 1024 rows,
-				// each 128 bits wide.
-				assert(t.size() == 128);
-				transpose128(t.data());
-
-				auto size = std::min<u64>(128, messages.data() + messages.size() - mIter);
-				tIter = t.data();
-
-				if (size == 128)
+			if (hashType == HashType::AesHash)
+			{
+				auto hh = span<block>(mIter->data(), size * 2);
+				mIter += size;
+				if (mIsMalicious)
 				{
-					for (u64 j = 0; j < 128; j += 8)
-					{
-						mIter[0][0] = tIter[0];
-						mIter[1][0] = tIter[1];
-						mIter[2][0] = tIter[2];
-						mIter[3][0] = tIter[3];
-						mIter[4][0] = tIter[4];
-						mIter[5][0] = tIter[5];
-						mIter[6][0] = tIter[6];
-						mIter[7][0] = tIter[7];
-						mIter[0][1] = tIter[0] ^ delta;
-						mIter[1][1] = tIter[1] ^ delta;
-						mIter[2][1] = tIter[2] ^ delta;
-						mIter[3][1] = tIter[3] ^ delta;
-						mIter[4][1] = tIter[4] ^ delta;
-						mIter[5][1] = tIter[5] ^ delta;
-						mIter[6][1] = tIter[6] ^ delta;
-						mIter[7][1] = tIter[7] ^ delta;
-
-						tIter += 8;
-						mIter += 8;
-					}
+					mAesFixedKey.TmmoHashBlocks(hh, hh, [mTweak = i * 256]() mutable {
+						return block(mTweak++ >> 1);
+						});
 				}
 				else
 				{
-					auto mEnd = mIter + size;
-					while (mIter != mEnd)
-					{
-						(*mIter)[0] = *tIter;
-						(*mIter)[1] = *tIter ^ delta;
-
-						tIter += 1;
-						mIter += 1;
-					}
+					mAesFixedKey.hashBlocks(hh, hh);
 				}
+			}
+			else if (hashType == HashType::RandomOracle)
+			{
+				for (u64 j = 0; j < size; ++j)
+				{
+					auto idx = i * 128 + j;
 
-				//auto m = mIter - size;
-				//for (u64 j = 0; j < size; ++j)
-				//	std::cout << "s[" << i + j << "] " << m[j][0] << " " << m[j][1] << std::endl;
+					// hash the message without delta
+					sha.Reset();
+					sha.Update(idx);
+					sha.Update((*mIter)[0]);
+					sha.Final((*mIter)[0]);
 
-				assert(tIter == t.data() + size);
+					// hash the message with delta
+					sha.Reset();
+					sha.Update(idx);
+					sha.Update((*mIter)[1]);
+					sha.Final((*mIter)[1]);
+
+					++mIter;
+				}
+			}
+
+			if (tIter > t.data() + t.size())
+			{
+				std::cout << "logic error " << LOCATION << std::endl;
+				std::terminate();
 			}
 		}
 
@@ -239,35 +269,9 @@ namespace osuCrypto
 			{
 				seed = prng.get<block>();
 				co_await chl.send(std::move(seed));
-				block theirSeed;
-				co_await chl.recv(theirSeed);
-				setTimePoint("Kos.send.cncSeed");
-				if (Commit(theirSeed) != theirSeedComm)
-					throw std::runtime_error("KOS, bad commit " LOCATION);
-				seed = seed ^ theirSeed;
 			}
-		}
 
-		auto q = hash(messages, seed, extraMessages);
-
-		if (mIsMalicious)
-		{
-			u.resize(2 * q.size());
-			co_await chl.recv(u);
-			setTimePoint("Kos.send.proofReceived");
-
-			for (u64 i = 0; i < q.size(); ++i)
-			{
-				block& received_x = u[i * 2 + 0];
-				block& received_t = u[i * 2 + 1];
-				auto tt = received_x.gf128Mul(delta) ^ q[i];
-
-				if (tt != received_t)
-				{
-					//std::cout << "OT Ext Failed Correlation check failed" << std::endl;
-					throw std::runtime_error("KOS, bad mal check " LOCATION);
-				}
-			}
+			co_await check(seed, t, chl);
 		}
 
 		setTimePoint("Kos.send.done");
@@ -278,101 +282,67 @@ namespace osuCrypto
 		}
 	}
 
-
-	std::vector<block> KosOtExtSender::hash(
-		span<std::array<block, 2>> message,
+	task<> KosOtExtSender::check(
 		block seed,
-		span<std::array<block, 2>> extraMessages)
+		span<block> t,
+		coproto::Socket& sock)
 	{
-		if (mIsMalicious && mHashType == HashType::NoHash)
-			throw std::runtime_error("malicious no hash is not supported, use DotKos. " LOCATION);
 
-		if (mHashType == HashType::NoHash)
-			return {};
-
-
-		assert(extraMessages.size() % 128 == 0);
-		auto numExtra = extraMessages.size() / 128;
-
-		PRNG commonPrng(seed, 128);
-
-		block  qi, qi2;
-		std::vector<block> q2(numExtra);
-		std::vector<block> q1(numExtra);
-
-		RandomOracle sha(sizeof(block));
+		block qi, qi2;
+		std::vector<block> q1(t.end()-128, t.end());
+		std::vector<block> q2(128);
 
 		setTimePoint("Kos.send.checkStart");
+	
+		if (t.size() % 128)
+			throw RTE_LOC;
+		PRNG commonPrng(seed, 128);
 
-		for (auto extra : { false, true })
+		u64 n = (t.size() - 128) / 128;
+		auto cIter = commonPrng.mBuffer.data();
+		auto cEnd = commonPrng.mBuffer.data() + commonPrng.mBuffer.size();
+		auto tIter = t.data();
+		for (u64 j = 0; j < n; ++j)
 		{
-
-			auto msgs = extra ?
-				extraMessages :
-				message;
-
-			u64 n = msgs.size();
-
-			for (u64 i = 0; i < n; )
+			for (u64 i = 0; i < 128; ++i)
 			{
-				auto size = std::min<u64>(msgs.size() - i, 128);
-				for (u64 r = 0; r < numExtra; ++r)
-				{
-					auto& challenges = commonPrng.mBuffer;
-					for (u64 j = 0; j < size; ++j)
-					{
-						mul128(msgs[i + j][0], challenges[j], qi, qi2);
-						q1[r] = q1[r] ^ qi;
-						q2[r] = q2[r] ^ qi2;
-					}
-					commonPrng.refillBuffer();
-				}
+				tIter[i].gf128Mul(*cIter, qi, qi2);
+				q1[i] = q1[i] ^ qi;
+				q2[i] = q2[i] ^ qi2;
+			}
 
-				if (mHashType == HashType::RandomOracle)
-				{
-					for (u64 j = 0; j < size; ++j)
-					{
-						auto idx = i + j;
+			++cIter;
+			tIter += 128;
 
-						// hash the message without delta
-						sha.Reset();
-						sha.Update(idx);
-						sha.Update(msgs[idx][0]);
-						sha.Final(msgs[idx][0]);
-
-						// hash the message with delta
-						sha.Reset();
-						sha.Update(idx);
-						sha.Update(msgs[idx][1]);
-						sha.Final(msgs[idx][1]);
-					}
-				}
-				else
-				{
-					assert(mHashType == HashType::AesHash);
-
-					auto hh = span<block>(msgs[i].data(), size * 2);
-					if (mIsMalicious)
-					{
-						mAesFixedKey.TmmoHashBlocks(hh, hh, [mTweak = i * 2]() mutable {
-							return block(mTweak++ >> 1);
-							});
-					}
-					else
-					{
-						mAesFixedKey.hashBlocks(hh, hh);
-					}
-				}
-
-				i += size;
+			if (cIter == cEnd)
+			{
+				commonPrng.refillBuffer();
+				cIter = commonPrng.mBuffer.data();
 			}
 		}
 
+		for (u64 r = 0; r < 128; ++r)
+			q1[r] = q1[r].cc_gf128Reduce(q2[r]);
+
 		setTimePoint("Kos.send.checkSummed");
 
-		for (u64 i = 0; i < q1.size(); ++i)
-			q1[i] = q1[i].gf128Reduce(q2[i]);
-		return q1;
+		std::vector<block>u(129);
+		co_await sock.recv(u);
+		setTimePoint("Kos.send.proofReceived");
+
+		for (u64 i = 0; i < 128; ++i)
+		{
+			block& received_x = u.back();
+			block& received_t = u[i];
+			auto tt = (received_x & zeroAndAllOne[mBaseChoiceBits[i]]) ^ q1[i];
+
+			if (tt != received_t)
+			{
+				//std::cout << "OT Ext Failed Correlation check failed" << std::endl;
+				throw std::runtime_error("KOS, bad mal check " LOCATION);
+			}
+		}
+		setTimePoint("Kos.send.proofDone");
 
 		static_assert(gOtExtBaseOtCount == 128, "expecting 128");
 	}

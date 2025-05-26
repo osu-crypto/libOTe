@@ -10,6 +10,8 @@
 #include "libOTe/Tools/Tools.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "Common.h"
+#include "libOTe/Triple/SilentOtTriple/SilentOtTriple.h"
+
 using namespace oc;
 
 void Tools_bitShift_test(const CLP& cmd)
@@ -277,11 +279,224 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd)
 #endif
 }
 
+void SilentOtTriple_ole_test(const oc::CLP& cmd)
+{
+#ifdef ENABLE_SILENTOT
+
+    std::array<SilentOtTriple, 2> oles;
+
+    u64 n = 4232;
+    auto blocks = divCeil(n, 128);
+    bool verbose = cmd.isSet("v");
+
+    PRNG prng0(block(2424523452345, 111124521521455324));
+    PRNG prng1(block(6474567454546, 567546754674345444));
+    Timer timer;
+
+    oles[0].init(0, n, SilentSecType::SemiHonest, SilentOtTriple::Type::OLE);
+    oles[1].init(1, n, SilentSecType::SemiHonest, SilentOtTriple::Type::OLE);
+
+    {
+        auto otCount0 = oles[0].baseOtCount(prng0);
+        auto otCount1 = oles[1].baseOtCount(prng1);
+        if (otCount0.mRecvChoice.size() != otCount1.mSendCount ||
+            otCount0.mSendCount != otCount1.mRecvChoice.size())
+            throw RTE_LOC;
+        std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+        baseSend[0].resize(otCount0.mSendCount);
+        baseSend[1].resize(otCount1.mSendCount);
+        std::array<std::vector<block>, 2> baseRecv;
+        std::array<BitVector, 2> baseChoice{
+			otCount0.mRecvChoice,
+			otCount1.mRecvChoice
+        };
+
+        for (u64 i = 0; i < 2; ++i)
+        {
+            prng0.get(baseSend[i].data(), baseSend[i].size());
+            baseRecv[1 ^ i].resize(baseSend[i].size());
+            for (u64 j = 0; j < baseSend[i].size(); ++j)
+            {
+                baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+            }
+        }
+
+        oles[0].setBaseOts(baseSend[1], baseRecv[0]);
+        oles[1].setBaseOts(baseSend[1], baseRecv[1]);
+    }
+
+    auto sock = coproto::LocalAsyncSocket::makePair();
+    std::vector<block>
+        A(blocks),
+        B(blocks),
+        C0(blocks),
+        C1(blocks);
+
+
+    auto r = macoro::sync_wait(macoro::when_all_ready(
+        oles[0].expand(A, C0, prng0, sock[0]),
+        oles[1].expand(B, C1, prng1, sock[1])));
+    std::get<0>(r).result();
+    std::get<1>(r).result();
+
+    // Now we check that we got the correct OLE correlations and fail
+    // the test otherwise.
+    for (size_t i = 0; i < blocks; i++)
+    {
+        auto act = C0[i] ^ C1[i];
+		auto exp = A[i] & B[i];
+
+		if (act != exp)
+		{
+			std::cout << "i " << i << std::endl;
+			std::cout << "act " << act << std::endl;
+			std::cout << "exp " << exp << std::endl;
+			throw RTE_LOC;
+		}
+
+        if (i == 0)
+        {
+
+            // triples
+
+            // want
+            // a0 + a1 = a
+            // b0 + b1 = b
+            // c0 + c1 = c
+            // a * b = c
+
+            // have
+            // x0 * y0 = [z0]
+            // x1 * y1 = [z1]
+
+            // transform
+            // a0 * b0 + a0 * b1 + a1 * b0 + a1 * b1 = c0 + c1
+            // 
+            //           a0 * b1 
+            //                     a1 * b0
+            //
+            // a0 = x0
+            // b0 = x1
+            // a1 = y0
+            // b1 = y1
+            // c0 = x0 * x1 + z00 + z01
+            // c1 = y0 * y1 + z10 + z11
+
+            auto a0 = A[0];
+            auto b0 = A[1];
+            auto a1 = B[1];
+            auto b1 = B[0];
+
+            auto c0 = (a0 & b0) ^ C0[0] ^ C0[1];
+            auto c1 = (a1 & b1) ^ C1[0] ^ C1[1];
+
+            if (((a0 ^ a1) & (b0 ^ b1)) != (c0 ^ c1))
+                throw RTE_LOC;
+
+        }
+    }
+
+    if (verbose)
+        std::cout << "Time taken: \n" << timer << std::endl;
+
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+
+#endif
+}
+
+
+void SilentOtTriple_triple_test(const oc::CLP& cmd)
+{
+#ifdef ENABLE_SILENTOT
+
+    std::array<SilentOtTriple, 2> oles;
+
+    u64 n = 4232;
+    auto blocks = divCeil(n, 128);
+    bool verbose = cmd.isSet("v");
+
+    PRNG prng0(block(2424523452345, 111124521521455324));
+    PRNG prng1(block(6474567454546, 567546754674345444));
+    Timer timer;
+
+    oles[0].init(0, n, SilentSecType::SemiHonest, SilentOtTriple::Type::Triple);
+    oles[1].init(1, n, SilentSecType::SemiHonest, SilentOtTriple::Type::Triple);
+
+    {
+        auto otCount0 = oles[0].baseOtCount(prng0);
+        auto otCount1 = oles[1].baseOtCount(prng1);
+        if (otCount0.mRecvChoice.size() != otCount1.mSendCount ||
+            otCount0.mSendCount != otCount1.mRecvChoice.size())
+            throw RTE_LOC;
+        std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+        baseSend[0].resize(otCount0.mSendCount);
+        baseSend[1].resize(otCount1.mSendCount);
+        std::array<std::vector<block>, 2> baseRecv;
+        std::array<BitVector, 2> baseChoice{
+            otCount0.mRecvChoice,
+            otCount1.mRecvChoice
+        };
+
+        for (u64 i = 0; i < 2; ++i)
+        {
+            prng0.get(baseSend[i].data(), baseSend[i].size());
+            baseRecv[1 ^ i].resize(baseSend[i].size());
+            for (u64 j = 0; j < baseSend[i].size(); ++j)
+            {
+                baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+            }
+        }
+
+        oles[0].setBaseOts(baseSend[1], baseRecv[0]);
+        oles[1].setBaseOts(baseSend[1], baseRecv[1]);
+    }
+
+    auto sock = coproto::LocalAsyncSocket::makePair();
+    std::vector<block>
+        Av0(blocks),
+        Av1(blocks),
+        Bv0(blocks),
+        Bv1(blocks),
+        Cv0(blocks),
+        Cv1(blocks);
+
+
+    auto r = macoro::sync_wait(macoro::when_all_ready(
+        oles[0].expand(Av0, Bv0, Cv0, prng0, sock[0]),
+        oles[1].expand(Av1, Bv1, Cv1, prng1, sock[1])));
+    std::get<0>(r).result();
+    std::get<1>(r).result();
+
+    // Now we check that we got the correct OLE correlations and fail
+    // the test otherwise.
+    for (size_t i = 0; i < blocks; i++)
+    {
+        auto act = Cv0[i] ^ Cv1[i];
+        auto exp = (Av0[i]^Av1[i]) & (Bv0[i] ^ Bv1[i]);
+
+        if (act != exp)
+        {
+            std::cout << "i " << i << std::endl;
+            std::cout << "act " << act << std::endl;
+            std::cout << "exp " << exp << std::endl;
+            throw RTE_LOC;
+        }
+    }
+
+    if (verbose)
+        std::cout << "Time taken: \n" << timer << std::endl;
+
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+
+#endif
+}
 
 #ifdef ENABLE_SILENTOT
+
 namespace {
 
-#ifdef ENABLE_SILENTOT
 
     void fakeBase(u64 n,
         u64 s,
@@ -450,7 +665,6 @@ namespace {
             throw RTE_LOC;
     }
 
-#endif
 }
 #endif
 using namespace tests_libOTe;
