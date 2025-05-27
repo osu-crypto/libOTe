@@ -559,25 +559,25 @@ namespace osuCrypto
 						auto coeff = extractF4(poly(block_idx, packed_idx));
 						auto e = std::min<u64>(mBlockSize - packed_idx * mDpfLeafSize, mDpfLeafSize);
 
-						for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
+						//for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
+						//{
+						//	*BitIterator(&fft[i], 2 * poly_index) = coeff[element_idx] & 1;
+						//	*BitIterator(&fft[i], 2 * poly_index + 1) = (coeff[element_idx] >> 1) & 1;
+						//}
+						if (poly_index < 32)
 						{
-							*BitIterator(&fft[i], 2 * poly_index) = coeff[element_idx] & 1;
-							*BitIterator(&fft[i], 2 * poly_index + 1) = (coeff[element_idx] >> 1) & 1;
+							for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
+							{
+								fft[i] |= block{ coeff[element_idx] } << (2 * poly_index);
+							}
 						}
-						//if (poly_index < 32)
-						//{
-						//	for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
-						//	{
-						//		fft[i] |= block{ coeff[element_idx] } << (2 * poly_index);
-						//	}
-						//}
-						//else
-						//{
-						//	for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
-						//	{
-						//		fft[i] |= block{ coeff[element_idx], 0 } << (2 * poly_index - 64);
-						//	}
-						//}
+						else
+						{
+							for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
+							{
+								fft[i] |= block{ coeff[element_idx], 0 } << (2 * poly_index - 64);
+							}
+						}
 					}
 				}
 			}
