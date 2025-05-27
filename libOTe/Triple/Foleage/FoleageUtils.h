@@ -290,9 +290,6 @@ namespace osuCrypto
 		}
 	}
 
-<<<<<<< HEAD
-=======
-
 	// Multiplies two packed matrices of F4 elements column-by-column.
 	// Note that here the "columns" are packed into an element of uint64_t
 	// resulting in a matrix with 32 columns.
@@ -325,7 +322,6 @@ namespace osuCrypto
 	}
 
 
->>>>>>> master
 	inline u64 log3ceil(u64 x)
 	{
 		if (x == 0) return 0;
