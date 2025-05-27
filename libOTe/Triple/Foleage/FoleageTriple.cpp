@@ -170,14 +170,14 @@ namespace osuCrypto
 				auto baseOt1 = DefaultBaseOT{};
 				auto baseOt2 = DefaultBaseOT{};
 				std::vector<block> recvMsg(baseCount.mRecvCount);
-				std::vector<std::array<block,2>> sendMsg(baseCount.mSendCount);
+				std::vector<std::array<block, 2>> sendMsg(baseCount.mSendCount);
 				BitVector choice(baseCount.mRecvCount);
 				choice.randomize(prng);
 
 				co_await(
 					macoro::when_all_ready(
 						baseOt1.send(sendMsg, prng, sock),
-						baseOt2.receive(choice,recvMsg, prng2, sock2)));
+						baseOt2.receive(choice, recvMsg, prng2, sock2)));
 
 				setBaseOts(sendMsg, recvMsg, choice);
 #else
@@ -206,12 +206,12 @@ namespace osuCrypto
 					baseCount.mSendCount += extRecverCount;
 				}
 
-				AlignedUnVector<std::array<block,2>> sendMsg(baseCount.mSendCount);
+				AlignedUnVector<std::array<block, 2>> sendMsg(baseCount.mSendCount);
 				co_await mOtExtSender->send(sendMsg, prng, sock);
 
 				if (extRecverCount)
 				{
-					span<std::array<block,2>> recverMsg(sendMsg.data(), extRecverCount);
+					span<std::array<block, 2>> recverMsg(sendMsg.data(), extRecverCount);
 					mOtExtRecver->setBaseOts(recverMsg);
 				}
 
@@ -257,7 +257,7 @@ namespace osuCrypto
 	void FoleageTriple::sampleA(block seed)
 	{
 
-		if (mC > 4)
+		if (mC > 8)
 			throw RTE_LOC;
 
 		PRNG prng(seed);
@@ -275,9 +275,11 @@ namespace osuCrypto
 		uint32_t prod;
 		for (size_t i = 0; i < mN; i++)
 		{
-			mFftASquared[i] = 0;
+			std::array<u16, 8> arr{ };
+			u64 pos = 0, off = 0;
 			for (size_t j = 0; j < mC; j++)
 			{
+				//u16 temp = 0;
 				for (size_t k = 0; k < mC; k++)
 				{
 					auto a = (mFftA[i] >> (2 * j)) & 0b11;
@@ -287,15 +289,25 @@ namespace osuCrypto
 					auto b1 = b & 1;
 					auto b2 = b & 2;
 
+					u8 prod;
 					{
 						u8 tmp = (a2 & b2);
 						prod = tmp ^ ((a2 & (b1 << 1)) ^ ((a1 << 1) & b2));
 						prod |= (a1 & b1) ^ (tmp >> 1);
 					}
-					size_t slot = j * mC + k;
-					mFftASquared[i] |= prod << (2 * slot);
+					arr[pos] |= u16(prod) << (2 * k);
+					++off;
+					if (off == 8)
+					{
+						off = 0;
+						++pos;
+					}
+					// Use bit operations to set the appropriate 2 bits in the block
+					//size_t slot = j * mC + k;
+					//mFftASquared[i] |= prod << (2 * slot);
 				}
 			}
+			mFftASquared[i] = arr;
 		}
 	}
 
@@ -330,8 +342,8 @@ namespace osuCrypto
 		mSparsePositions.resize(mC, mT);
 
 		// The mT coefficients of the mC sparse polynomials.
-		Matrix<u8> sparseCoefficients(mC, mT);
-		std::vector<u8> tensoredCoefficients(mC * mC * mT * mT);
+		Matrix<u16> sparseCoefficients(mC, mT);
+		std::vector<u16> tensoredCoefficients(mC * mC * mT * mT);
 
 		// generate random sparseCoefficients and tensor them with 
 		// the other parties sparse coefficients. The result is shared
@@ -347,11 +359,11 @@ namespace osuCrypto
 		for (u64 i = 0; i < mSparsePositions.size(); ++i)
 			mSparsePositions(i) = prng.get<u64>() % mBlockSize;
 
-		if (mC > 4)
+		if (mC > 8)
 			throw RTE_LOC;
 
-		// we pack 4 FFTs into a single u8. 
-		std::vector<u8> fftSparsePoly(mN);
+		// we pack 8 FFTs into a single u16. 
+		std::vector<u16> fftSparsePoly(mN);
 		for (u64 i = 0; i < mT; ++i)
 		{
 			for (u64 j = 0; j < mC; ++j)
@@ -364,7 +376,7 @@ namespace osuCrypto
 		setTimePoint("sparsePolySample");
 
 		// switch from polynomial to FFT form
-		foliageFftUint8(fftSparsePoly, mLog3N, mN / 3);
+		foleageFft<u16>(fftSparsePoly, mLog3N, mN / 3);
 
 		setTimePoint("input fft");
 
@@ -375,19 +387,31 @@ namespace osuCrypto
 
 		// compress the resume and set the output.
 		auto outSize = std::min<u64>(mN, ALsb.size() * 128);
-		std::vector<u8> A(mN);
+		//std::vector<u8> A(mN);
+
+		u16 msbMask = 0b1010101010101010,
+			lsbMask = 0b0101010101010101;
 		for (u64 i = 0; i < outSize; ++i)
 		{
 			auto a =
-				((fftSparsePoly[i] >> 0) ^
+				popcount<u16>(fftSparsePoly[i] & lsbMask) & 1 ^
+				(popcount<u16>(fftSparsePoly[i] & msbMask) & 1) << 1;
+
+			if (a !=
+				(((fftSparsePoly[i] >> 0) ^
 					(fftSparsePoly[i] >> 2) ^
 					(fftSparsePoly[i] >> 4) ^
-					(fftSparsePoly[i] >> 6)) & 3;
+					(fftSparsePoly[i] >> 6) ^
+					(fftSparsePoly[i] >> 8) ^
+					(fftSparsePoly[i] >> 10) ^
+					(fftSparsePoly[i] >> 12) ^
+					(fftSparsePoly[i] >> 14)) & 3))
+				throw RTE_LOC;
 
 			*BitIterator(ALsb.data(), i) = a & 1;
 			*BitIterator(AMsb.data(), i) = (a >> 1) & 1;
 
-			A[i] = a;
+			//A[i] = a;
 		}
 		setTimePoint("copyOutX");
 
@@ -512,12 +536,12 @@ namespace osuCrypto
 		setTimePoint("mainDpf");
 
 
-		std::vector<u32> fft(mN), fftRes(mN);
+		std::vector<block> fft(mN), fftRes(mN);
 
-		// We have mC*mC = 16 polynomials. We need to apply
-		// the FFT to each. We do this by packing the 16 polynomials
-		// into a single u32. We then apply the FFT to this u32.
-		// This is done for each of the mT blocks of each polynomail.
+		// We have mC*mC = 64 polynomials. We need to apply
+		// the FFT to each. We do this by packing the 64 polynomials
+		// into a single block. We then apply the FFT to this block.
+		// This is done for each of the mT blocks of each polynomial.
 		//
 		// The DPFs used 512 bits to represent mDpfLeafSize=243 F4 elements. 
 		// We need to skip the last 26 bits of each FoleageF4x243.
@@ -536,9 +560,24 @@ namespace osuCrypto
 						auto coeff = extractF4(poly(block_idx, packed_idx));
 						auto e = std::min<u64>(mBlockSize - packed_idx * mDpfLeafSize, mDpfLeafSize);
 
-						for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
+						//for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
+						//{
+						//	*BitIterator(&fft[i], 2 * poly_index) = coeff[element_idx] & 1;
+						//	*BitIterator(&fft[i], 2 * poly_index + 1) = (coeff[element_idx] >> 1) & 1;
+						//}
+						if (poly_index < 32)
 						{
-							fft[i] |= u32{ coeff[element_idx] } << (2 * poly_index);
+							for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
+							{
+								fft[i] |= block{ coeff[element_idx] } << (2 * poly_index);
+							}
+						}
+						else
+						{
+							for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
+							{
+								fft[i] |= block{ coeff[element_idx], 0 } << (2 * poly_index - 64);
+							}
 						}
 					}
 				}
@@ -546,7 +585,7 @@ namespace osuCrypto
 		}
 		setTimePoint("transpose");
 
-		foleageFftUint32(fft, mLog3N, mN / 3);
+		foleageFft<block>(fft, mLog3N, mN / 3);
 		setTimePoint("product fft");
 		F4Multiply(mFftASquared, fft, fftRes, mN);
 		setTimePoint("product mult");
@@ -557,7 +596,7 @@ namespace osuCrypto
 
 			// XOR the (packed) columns into the accumulator.
 			// Specifically, we perform column-wise XORs to get the result.
-			u32 lsbMask, msbMask;
+			block lsbMask, msbMask;
 			setBytes(lsbMask, 0b01010101);
 			setBytes(msbMask, 0b10101010);
 			for (size_t i = 0; i < outSize; i++)
@@ -570,7 +609,7 @@ namespace osuCrypto
 		{
 			// XOR the (packed) columns into the accumulator.
 			// Specifically, we perform column-wise XORs to get the result.
-			u32 lsbMask;
+			block lsbMask;
 			setBytes(lsbMask, 0b01010101);
 			for (size_t i = 0; i < outSize; i++)
 			{
@@ -584,7 +623,7 @@ namespace osuCrypto
 	}
 
 
-	macoro::task<> FoleageTriple::tensor(span<u8> coeffs, span<u8> prod, coproto::Socket& sock)
+	macoro::task<> FoleageTriple::tensor(span<u16> coeffs, span<u16> prod, coproto::Socket& sock)
 	{
 		if (coeffs.size() * coeffs.size() != prod.size())
 			throw RTE_LOC;

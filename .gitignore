@@ -9,6 +9,7 @@
 .vscode/
 plots/
 
+plots/
 CMakeFiles/*
 */CMakeFiles/*
 *cmake_install.cmake

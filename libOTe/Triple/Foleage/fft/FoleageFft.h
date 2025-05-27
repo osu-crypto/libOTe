@@ -18,6 +18,7 @@
 #include "cryptoTools/Common/MatrixView.h"
 #include "libOTe/Triple/Foleage/FoleageUtils.h"
 
+<<<<<<< HEAD
 namespace osuCrypto {
 
 	// FFT for (up to) 32 polynomials over F4
@@ -45,6 +46,89 @@ namespace osuCrypto {
 		const size_t num_coeffs);
 
 
+=======
+namespace osuCrypto 
+{
+
+	// FFT for (up to) 64 polynomials over F4
+	template<typename T>
+	void foleageFft(
+		span<T> coeffs,
+		const size_t num_vars,
+		const size_t num_coeffs)
+	{
+		// coeffs (coeffs_h, coeffs_l) are parsed as L(left)|M(middle)|R(right)
+
+		if (num_vars > 1)
+		{
+			// apply FFT on all left coefficients
+			foleageFft(
+				coeffs,
+				num_vars - 1,
+				num_coeffs / 3);
+
+			// apply FFT on all middle coefficients
+			foleageFft(
+				coeffs.subspan(num_coeffs),
+				num_vars - 1,
+				num_coeffs / 3);
+
+			// apply FFT on all right coefficients
+			foleageFft(
+				coeffs.subspan(2 * num_coeffs),
+				num_vars - 1,
+				num_coeffs / 3);
+		}
+
+		// temp variables to store intermediate values
+		T tL, tM;
+		T mult, xor_h, xor_l;
+
+		T* coeffsL = coeffs.data() + 0;
+		T* coeffsM = coeffs.data() + num_coeffs;
+		T* coeffsR = coeffs.data() + 2 * num_coeffs;
+
+		T mask_h; // 1010101001010
+		T mask_l; // 10101010100101
+		setBytes(mask_h, 0b10101010);
+		setBytes(mask_l, 0b01010101);
+
+		for (size_t j = 0; j < num_coeffs; j++)
+		{
+			xor_h = (coeffsM[j] ^ coeffsR[j]) & mask_h;
+			xor_l = (coeffsM[j] ^ coeffsR[j]) & mask_l;
+
+			// pre compute: \alpha * (cM[j] ^ cR[j])
+			// computed as: mult_l = (h ^ l) and mult_h = l
+			// mult_l = (xor&mask_h>>1) ^ (xor & mask_l) [align h and l then xor]
+			// mult_h = (xor&mask_l) shifted left by 1 to put in h place [shift and OR into place]
+			mult = ((xor_h >> 1) ^ xor_l) | (xor_l << 1);
+
+			// tL coefficient obtained by evaluating on X_i=1
+			tL = coeffsL[j] ^ coeffsM[j] ^ coeffsR[j];
+
+			// tM coefficient obtained by evaluating on X_i=\alpha
+			tM = coeffsL[j] ^ coeffsR[j] ^ mult;
+
+			// Explanation:
+			// cL + cM*\alpha + cR*\alpha^2
+			// = cL + cM*\alpha + cR*\alpha + cR
+			// = cL + cR + \alpha*(cM + cR)
+
+			// tR: coefficient obtained by evaluating on X_i=\alpha^2=\alpha + 1
+			coeffsR[j] = coeffsL[j] ^ coeffsM[j] ^ mult;
+
+			// Explanation:
+			// cL + cM*(\alpha+1) + cR(\alpha+1)^2
+			// = cL + cM + cM*\alpha + cR*(3\alpha + 2)
+			// = cL + cM + \alpha*(cM + cR)
+			// Note: we're in the F_2 field extension so 3\alpha+2 = \alpha+0.
+
+			coeffsL[j] = tL;
+			coeffsM[j] = tM;
+		}
+	}
+>>>>>>> master
 }
 
 #endif

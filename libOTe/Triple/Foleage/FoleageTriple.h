@@ -38,13 +38,21 @@ namespace osuCrypto
 		u64 mPartyIdx = 0;
 
 		// the number of noisy positions per polynomial
+<<<<<<< HEAD
 		u64 mT = 27;
+=======
+		u64 mT = 9;
+>>>>>>> master
 
 		// will be set to the log3 of mT.
 		u64 mLog3T = 0;
 
 		// the number of polynomials.
+<<<<<<< HEAD
 		u64 mC = 4;
+=======
+		u64 mC = 8;
+>>>>>>> master
 
 		// the size of a polynomial, 3^mLog3N. 
 		// We will produce this many OLEs.
@@ -55,10 +63,17 @@ namespace osuCrypto
 
 		// The A poly in FFT format. We pack mC FFTs into a single u8. The 
 		// first is hard coded to the identity polynomial.
+<<<<<<< HEAD
 		AlignedUnVector<u8> mFftA;
 
 		// The A^2 poly in FFT format. We pack mC^2 FFTs into a single u32.
 		AlignedVector<u32> mFftASquared;
+=======
+		AlignedUnVector<u16> mFftA;
+
+		// The A^2 poly in FFT format. We pack mC^2 FFTs into a single block.
+		AlignedVector<block> mFftASquared;
+>>>>>>> master
 
 		// the number of F4 values per block. Each block will have 1 non-zero.
 		// A polynomial will have mT blocks. i.e. mN = mT * mBlockSize.
@@ -201,7 +216,11 @@ namespace osuCrypto
 		// sample random coefficients for the sparse polynomial and tensor
 		// them with the other parties coefficients. The result is shared
 		// as tensoredCoefficients. We allow the coeff to be zero.
+<<<<<<< HEAD
 		macoro::task<> tensor(span<u8> coeffs, span<u8> prod, coproto::Socket& sock);
+=======
+		macoro::task<> tensor(span<u16> coeffs, span<u16> prod, coproto::Socket& sock);
+>>>>>>> master
 
 		// sample the A polynomial. This is the polynomial that will be
 		// multiplied the sparse polynomials by.

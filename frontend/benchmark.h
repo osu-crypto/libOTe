@@ -1058,6 +1058,7 @@ namespace osuCrypto
 
 	inline void benchmark(CLP& cmd)
 	{
+
 		if (cmd.isSet("QC"))
 			QCCodeBench(cmd);
 		else if (cmd.isSet("silent"))
