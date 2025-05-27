@@ -556,64 +556,64 @@ namespace osuCrypto
 
 			mOtIdx += mNumPoints * 2;
 
-			if (0)
-			{
-				std::vector<u8> alphaj(mNumPoints);
-				std::vector<block> zz(mNumPoints * 3); auto zzIter = zz.begin();
-				for (u64 k = 0; k < mNumPoints; ++k)
-				{
-					alphaj[k] = points[k][mDepth - iter];
-				}
-
-				for (u64 k = 0; k < 3; ++k)
-				{
-					copyBytes(span<block>(zzIter, zzIter + mNumPoints), z[k]); zzIter += mNumPoints;
-				}
-
-				co_await sock.send(coproto::copy(alphaj));
-				co_await sock.send(coproto::copy(zz));
-
-				auto recvAlphaj = co_await sock.recv<std::vector<u8>>();
-				co_await sock.recv(zz);
-
-				zzIter = zz.begin();
-				Matrix<block> sigma2(3, mNumPoints);
-				for (u64 k = 0; k < 3; ++k)
-				{
-					std::cout << "sigma2 \n";
-					for (u64 i = 0; i < mNumPoints; ++i)
-					{
-						std::cout << " " << (z[k][i] ^ *zzIter) << " = " << std::hex << z[k][i].get<u32>(0) << " ^ " << std::hex << zzIter->get<u32>(0) << std::endl;
-						sigma2[k][i] = z[k][i] ^ *zzIter++;
-						//sigma2[k][i] = ZeroBlock;
-					}
-				}
-
-				for (u64 i = 0; i < mNumPoints; ++i)
-				{
-					assert(recvAlphaj[i] < 3);
-					auto a = (alphaj[i] + recvAlphaj[i]) % 3;
-					//auto r = (oc::mAesFixedKey.ecbEncBlock(block(iter, i)) | OneBlock);
-					//sigma[a][i] ^= r;
-
-					std::cout << sigma[0][i] << (a == 0 ? '<' : ' ') << std::endl;
-					std::cout << sigma[1][i] << (a == 1 ? '<' : ' ') << std::endl;
-					std::cout << sigma[2][i] << (a == 2 ? '<' : ' ') << std::endl;
-
-					auto a1 = (a + 1) % 3;
-					auto a2 = (a + 2) % 3;
-
-					//if ((sigma[a][i].get<u8>(0) & 1) == 0)
-					//	throw RTE_LOC;
-					if (sigma[a1][i] != sigma2[a1][i])
-					{
-						std::cout << "sigma[" << a1 << "][" << i << "] " << sigma[a1][i] << " != exp " << sigma2[a1][i] << std::endl;
-						throw RTE_LOC;
-					}
-					if (sigma[a2][i] != sigma2[a2][i])
-						throw RTE_LOC;
-				}
-			}
+//			if (0)
+//			{
+//				std::vector<u8> alphaj(mNumPoints);
+//				std::vector<block> zz(mNumPoints * 3); auto zzIter = zz.begin();
+//				for (u64 k = 0; k < mNumPoints; ++k)
+//				{
+//					alphaj[k] = points[k][mDepth - iter];
+//				}
+//
+//				for (u64 k = 0; k < 3; ++k)
+//				{
+//					copyBytes(span<block>(zzIter, zzIter + mNumPoints), z[k]); zzIter += mNumPoints;
+//				}
+//
+//				co_await sock.send(coproto::copy(alphaj));
+//				co_await sock.send(coproto::copy(zz));
+//
+//				auto recvAlphaj = co_await sock.recv<std::vector<u8>>();
+//				co_await sock.recv(zz);
+//
+//				zzIter = zz.begin();
+//				Matrix<block> sigma2(3, mNumPoints);
+//				for (u64 k = 0; k < 3; ++k)
+//				{
+//					std::cout << "sigma2 \n";
+//					for (u64 i = 0; i < mNumPoints; ++i)
+//					{
+//						std::cout << " " << (z[k][i] ^ *zzIter) << " = " << std::hex << z[k][i].get<u32>(0) << " ^ " << std::hex << zzIter->get<u32>(0) << std::endl;
+//						sigma2[k][i] = z[k][i] ^ *zzIter++;
+//						//sigma2[k][i] = ZeroBlock;
+//					}
+//				}
+//
+//				for (u64 i = 0; i < mNumPoints; ++i)
+//				{
+//					assert(recvAlphaj[i] < 3);
+//					auto a = (alphaj[i] + recvAlphaj[i]) % 3;
+//					//auto r = (oc::mAesFixedKey.ecbEncBlock(block(iter, i)) | OneBlock);
+//					//sigma[a][i] ^= r;
+///
+//					std::cout << sigma[0][i] << (a == 0 ? '<' : ' ') << std::endl;
+//					std::cout << sigma[1][i] << (a == 1 ? '<' : ' ') << std::endl;
+//					std::cout << sigma[2][i] << (a == 2 ? '<' : ' ') << std::endl;
+//
+//					auto a1 = (a + 1) % 3;
+//					auto a2 = (a + 2) % 3;
+//
+			//		//if ((sigma[a][i].get<u8>(0) & 1) == 0)
+			//		//	throw RTE_LOC;
+			//		if (sigma[a1][i] != sigma2[a1][i])
+			//		{
+			//			std::cout << "sigma[" << a1 << "][" << i << "] " << sigma[a1][i] << " != exp " << sigma2[a1][i] << std::endl;
+			//			throw RTE_LOC;
+			//		}
+			//		if (sigma[a2][i] != sigma2[a2][i])
+			//			throw RTE_LOC;
+			//	}
+			//}
 		}
 
 		u64 baseOtCount() const

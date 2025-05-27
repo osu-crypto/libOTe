@@ -16,7 +16,7 @@ namespace osuCrypto
 {
 	struct RegularDpfKey
 	{
-		void resize(u64 domain, u64 numTrees)
+		void resize(u64 domain, u64 numTrees, bool programLeafVal = true)
 		{
 			auto depth = log2ceil(domain);
 			if (depth == 0)
@@ -24,6 +24,8 @@ namespace osuCrypto
 
 			mCorrectionWords.resize(depth, numTrees);
 			mCorrectionBits.resize(depth, numTrees);
+			if (programLeafVal)
+				mLeafVals.resize(numTrees);
 		}
 		block mSeed;
 		Matrix<block> mCorrectionWords;
@@ -38,6 +40,34 @@ namespace osuCrypto
 				mCorrectionBits == o.mCorrectionBits &&
 				mLeafVals == o.mLeafVals;
 		}
+
+		u64 sizeBytes() { return sizeof(block) * (1 + mCorrectionWords.size() + mLeafVals.size()) + mCorrectionBits.size(); }
+		void toBytes(span<u8> dest)
+		{
+			if (dest.size() != sizeBytes())
+				throw RTE_LOC;
+			copyBytesMin(dest, mSeed);
+			dest = dest.subspan(sizeof(block));
+			copyBytesMin(dest, mCorrectionWords);
+			dest = dest.subspan(mCorrectionWords.size() * sizeof(block));
+			copyBytesMin(dest, mCorrectionBits);
+			dest = dest.subspan(mCorrectionBits.size());
+			copyBytes(dest, mLeafVals);
+		}
+
+		void fromBytes(span<u8> src)
+		{
+			if (src.size() != sizeBytes())
+				throw RTE_LOC;
+			copyBytesMin(mSeed, src);
+			src = src.subspan(sizeof(block));
+			copyBytesMin(mCorrectionWords, src);
+			src = src.subspan(mCorrectionWords.size() * sizeof(block));
+			copyBytesMin(mCorrectionBits, src);
+			src = src.subspan(mCorrectionBits.size());
+			copyBytes(mLeafVals, src);
+		}
+
 	};
 
 	inline std::ostream& operator<<(std::ostream& o, const RegularDpfKey& k)
@@ -290,7 +320,7 @@ namespace osuCrypto
 
 		if (outputKey)
 		{
-			outputKey->resize(mDomain, numPoints);
+			outputKey->resize(mDomain, numPoints, false);
 		}
 
 		std::array<AlignedUnVector<block>, 2> z;
@@ -656,8 +686,8 @@ namespace osuCrypto
 			throw RTE_LOC;
 
 		auto depth = log2ceil(domain);
-		keys[0].resize(domain, values.size());
-		keys[1].resize(domain, values.size());
+		keys[0].resize(domain, values.size(), false);
+		keys[1].resize(domain, values.size(), false);
 
 		auto seed0 = prng.get<block>();
 		auto seed1 = prng.get<block>();

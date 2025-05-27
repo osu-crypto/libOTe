@@ -8,6 +8,7 @@
 *.vs
 .vscode/
 
+plots/
 CMakeFiles/*
 */CMakeFiles/*
 *cmake_install.cmake
