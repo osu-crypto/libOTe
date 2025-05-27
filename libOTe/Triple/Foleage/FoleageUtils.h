@@ -290,6 +290,39 @@ namespace osuCrypto
 		}
 	}
 
+
+	// Multiplies two packed matrices of F4 elements column-by-column.
+	// Note that here the "columns" are packed into an element of uint64_t
+	// resulting in a matrix with 32 columns.
+	inline void F4Multiply(
+		span<block> a_poly,
+		span<block> b_poly,
+		span<block> res_poly,
+		size_t poly_size)
+	{
+		const uint64_t pattern = 0xaaaaaaaaaaaaaaaa;
+		block mask_h = block(pattern, pattern);     // 0b101010101010101001010
+		block mask_l = block(pattern >> 1, pattern >> 1); // 0b010101010101010100101
+
+		block tmp;
+		block a_h, a_l, b_h, b_l;
+
+		for (size_t i = 0; i < poly_size; i++)
+		{
+			// multiplication over F4
+			a_h = (a_poly[i] & mask_h);
+			a_l = (a_poly[i] & mask_l);
+			b_h = (b_poly[i] & mask_h);
+			b_l = (b_poly[i] & mask_l);
+
+			tmp = (a_h & b_h);
+			res_poly[i] = tmp ^ (a_h & (b_l << 1));
+			res_poly[i] ^= ((a_l << 1) & b_h);
+			res_poly[i] |= (a_l & b_l) ^ (tmp >> 1);
+		}
+	}
+
+
 	inline u64 log3ceil(u64 x)
 	{
 		if (x == 0) return 0;

@@ -17,11 +17,14 @@ namespace osuCrypto
 	{
 #ifdef ENABLE_FOLEAGE
 
+
+
+
 		auto logn = 6;
 		u64 n = ipow(3, logn) - 67;
 		auto blocks = divCeil(n, 128);
 		bool verbose = cmd.isSet("v");
-		std::vector<u64> cs{ 4,3 };
+		std::vector<u64> cs{ 8 };
 
 		for (auto c : cs)
 		{
@@ -300,7 +303,7 @@ namespace osuCrypto
 		u64 n = oles[0].mC * oles[0].mT;
 		u64 n2 = n * n;
 		auto sock = coproto::LocalAsyncSocket::makePair();
-		std::array<std::vector<u8>, 2> coeff, prod;
+		std::array<std::vector<u16>, 2> coeff, prod;
 		coeff[0].resize(n);
 		coeff[1].resize(n);
 		prod[0].resize(n2);

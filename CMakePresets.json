@@ -20,6 +20,7 @@
         "ENABLE_MR_KYBER": false,
         "ENABLE_MRR": false,
         "ENABLE_MR": false,
+        "ENABLE_FOLEAGE": true,
         "ENABLE_RELIC": false,
         "ENABLE_SODIUM": false,
         "ENABLE_ASAN": true,
