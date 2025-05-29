@@ -7,6 +7,9 @@
 #include "libOTe/Dpf/TernaryDpf.h"
 #include "cryptoTools/Common/TestCollection.h"
 #include "libOTe/Tools/CoeffCtx.h"
+#include "libOTe/Dpf/InvMtxDmpf.h"
+#include "libOTe/Dpf/InvMtxDmpf/Equality.h"
+
 
 using namespace oc;
 
@@ -738,5 +741,11 @@ void TritDpf_Proto_Test(const oc::CLP& cmd)
 {
 	TernaryDpf_Proto_Test_<block, CoeffCtxGF2>(cmd);
 	TernaryDpf_Proto_Test_<u8, CoeffCtxGF2>(cmd);
+}
+
+
+void MtxDpf_Proto_Test(const oc::CLP& cmd)
+{
+
 }
 

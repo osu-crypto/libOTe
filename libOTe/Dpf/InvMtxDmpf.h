@@ -2,7 +2,7 @@
 
 #include "cryptoTools/Common/Defines.h"
 #include "libOTe/Dpf/SparseDpf.h"
-
+#include "InvMtxDmpf/Dedup.h"
 
 namespace osuCrypto
 {

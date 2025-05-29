@@ -25,7 +25,7 @@
         "ENABLE_SODIUM": false,
         "ENABLE_ASAN": true,
         "ENABLE_MOCK_OT": true,
-        "LIBOTE_SHARED": true,
+        "LIBOTE_SHARED": false,
         "ENABLE_PIC": true,
         "LIBOTE_STD_VER": "20",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install",
@@ -78,7 +78,7 @@
         "ENABLE_AVX": true,
         "ENABLE_ASAN": false,
         "BUILD_SHARED_LIBS": false,
-        "LIBOTE_SHARED": true,
+        "LIBOTE_SHARED": false,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install/${presetName}"
       },
