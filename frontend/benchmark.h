@@ -464,6 +464,12 @@ namespace osuCrypto
 			sTimer.setTimePoint("start");
 			auto s = sTimer.setTimePoint("start");
 
+			macoro::thread_pool pool0, pool1;
+			auto w0 = pool0.make_work();
+			auto w1 = pool1.make_work();
+			pool0.create_thread();
+			pool1.create_thread();
+
 			for (u64 t = 0; t < trials; ++t)
 			{
 				sender.configure(n);
@@ -478,9 +484,23 @@ namespace osuCrypto
 				auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
 				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1], ChoiceBitPacking::True);
 
-				rTimer.setTimePoint("r start");
-				coproto::sync_wait(macoro::when_all_ready(
-					std::move(p0), std::move(p1)));
+				if (cmd.isSet("mt"))
+				{
+					sock[0].setExecutor(pool0);
+					sock[1].setExecutor(pool1);
+					rTimer.setTimePoint("r start mt");
+					coproto::sync_wait(macoro::when_all_ready(
+						std::move(p0) | macoro::start_on(pool0),
+						std::move(p1) | macoro::start_on(pool1)));
+				}
+				else
+				{
+					rTimer.setTimePoint("r start");
+					coproto::sync_wait(macoro::when_all_ready(
+						std::move(p0),
+						std::move(p1)));
+
+				}
 				rTimer.setTimePoint("r done");
 
 			}
@@ -903,7 +923,7 @@ namespace osuCrypto
 			oles[0].init(0, n);
 			oles[1].init(1, n);
 
-			if(cmd.isSet("mockBase"))
+			if (cmd.isSet("mockBase"))
 			{
 				auto otCount0 = oles[0].baseOtCount();
 				auto otCount1 = oles[1].baseOtCount();
@@ -944,18 +964,18 @@ namespace osuCrypto
 			auto b = timer.setTimePoint("start");
 
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				oles[0].expand(Av0,Bv0,Cv0, prng0, sock[0]) | macoro::start_on(pool),
-				oles[1].expand(Av1,Bv1,Cv1, prng1, sock[1]) | macoro::start_on(pool)));
-			auto e=timer.setTimePoint("end");
+				oles[0].expand(Av0, Bv0, Cv0, prng0, sock[0]) | macoro::start_on(pool),
+				oles[1].expand(Av1, Bv1, Cv1, prng1, sock[1]) | macoro::start_on(pool)));
+			auto e = timer.setTimePoint("end");
 			tps = double(n) / (std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count() / 1000.0);
 			std::get<0>(r).result();
 			std::get<1>(r).result();
 
 		}
 		work = {};
-		std::cout << "foleage triple n="<<n<<", log2="<<log2ceil(n)
+		std::cout << "foleage triple n=" << n << ", log2=" << log2ceil(n)
 			<< " triples/sec = " << u64(tps)
-			<<"\n Time taken: \n" << timer << std::endl;
+			<< "\n Time taken: \n" << timer << std::endl;
 #else
 		std::cout << "ENABLE_FOLEAGE = false" << std::endl;
 #endif
@@ -994,7 +1014,7 @@ namespace osuCrypto
 			oles[0].init(0, n);
 			oles[1].init(1, n);
 
-			if(cmd.hasValue("mult"))
+			if (cmd.hasValue("mult"))
 				oles[0].mMultType = oles[1].mMultType = (MultType)cmd.get<u64>("mult");
 
 			if (cmd.isSet("mockBase"))
@@ -1046,7 +1066,7 @@ namespace osuCrypto
 
 		}
 		work = {};
-		std::cout << "SilentOTTriple n=" << n << ", log2=" << log2ceil(n) 
+		std::cout << "SilentOTTriple n=" << n << ", log2=" << log2ceil(n)
 			<< " triples/sec = " << u64(tps)
 			<< "\n Time taken: \n" << timer << std::endl;
 #else
