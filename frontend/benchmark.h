@@ -464,6 +464,12 @@ namespace osuCrypto
 			sTimer.setTimePoint("start");
 			auto s = sTimer.setTimePoint("start");
 
+			macoro::thread_pool pool0, pool1;
+			auto w0 = pool0.make_work();
+			auto w1 = pool1.make_work();
+			pool0.create_thread();
+			pool1.create_thread();
+
 			for (u64 t = 0; t < trials; ++t)
 			{
 				sender.configure(n);
@@ -479,8 +485,21 @@ namespace osuCrypto
 				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1], ChoiceBitPacking::True);
 
 				rTimer.setTimePoint("r start");
-				coproto::sync_wait(macoro::when_all_ready(
-					std::move(p0), std::move(p1)));
+				if (cmd.isSet("mt"))
+				{
+					sock[0].setExecutor(pool0);
+					sock[1].setExecutor(pool1);
+					coproto::sync_wait(macoro::when_all_ready(
+						std::move(p0) | macoro::start_on(pool0),
+						std::move(p1) | macoro::start_on(pool1)));
+				}
+				else
+				{
+					coproto::sync_wait(macoro::when_all_ready(
+						std::move(p0),
+						std::move(p1)));
+
+				}
 				rTimer.setTimePoint("r done");
 
 			}

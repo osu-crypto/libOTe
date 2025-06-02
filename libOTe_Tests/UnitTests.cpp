@@ -73,11 +73,13 @@ namespace tests_libOTe
 			tc.add("BinSolver_multiplyMtx_test              ", BinSolver_multiplyMtx_test);
 			tc.add("BinSolver_firstOneBit_test              ", BinSolver_firstOneBit_test);
 			tc.add("BinSolver_solve_test                    ", BinSolver_solve_test);
-			
+
 			tc.add("BitInject_basic_test                    ", BitInject_basic_test);;
 			tc.add("OtEquality_basic_Test                   ", OtEquality_basic_Test);
 			tc.add("HybEquality_basic_Test                  ", HybEquality_basic_Test);
-			
+
+			tc.add("Dedup_orTree_test                       ", Dedup_orTree_test);
+			tc.add("Dedup_protocol_test                     ", Dedup_protocol_test);
 
 			tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
 			tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);

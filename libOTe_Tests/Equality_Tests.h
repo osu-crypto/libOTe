@@ -6,4 +6,6 @@ namespace osuCrypto
 
 	void OtEquality_basic_Test(const CLP& cmd);
 	void HybEquality_basic_Test(const CLP& cmd);
+	void Dedup_orTree_test(const CLP& cmd);
+	void Dedup_protocol_test(const CLP& cmd);
 }

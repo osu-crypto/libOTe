@@ -85,9 +85,9 @@ namespace osuCrypto
 
 
 
-        void encode(const span<block>& plaintext,const span<block>& codeword);
-        void encode(const span<u8>& plaintext, const span<u8>& codeword);
-        void encode(u8* plaintext, u8* codeword);
+        void encode(const span<const block>& plaintext,const span<block>& codeword);
+        void encode(const span<const u8>& plaintext, const span<u8>& codeword);
+        void encode(const u8* plaintext, u8* codeword);
 
         void encode_bch511(u8* plaintext, u8* codeword);
 

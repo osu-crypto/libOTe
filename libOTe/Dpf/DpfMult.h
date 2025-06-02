@@ -257,6 +257,9 @@ namespace osuCrypto
 			if (hasBaseOts() == false)
 				throw RTE_LOC;
 
+			auto otIdx = mOtIdx;
+			mOtIdx += n;
+
 
 			auto expandSeed = [](span<u8> dst, block seed0, block seed1) {
 				if (dst.size() < 16)
@@ -279,7 +282,7 @@ namespace osuCrypto
 				};
 
 			// our a share of a * b = c.
-			BitVector a0; a0.append(mChoiceBits, n, mOtIdx);
+			BitVector a0; a0.append(mChoiceBits, n, otIdx);
 
 			// A0 = 11...1 * a , an expanded version of a used for masking.
 			std::vector<u8> A0(n);
@@ -298,9 +301,9 @@ namespace osuCrypto
 			{
 				A0[j] = -a0[j];
 				//A0[j] = block(-u64(a0[j]), -u64(a0[j]));
-				expandSeed(c00c10, mRecvOts[mOtIdx + j], mSendOts[mOtIdx + j][0]);
-				expandSeed(b1[j], mSendOts[mOtIdx + j][0], mSendOts[mOtIdx + j][1]);
-				//b1[j] = mSendOts[mOtIdx + j][0] ^ mSendOts[mOtIdx + j][1];
+				expandSeed(c00c10, mRecvOts[otIdx + j], mSendOts[otIdx + j][0]);
+				expandSeed(b1[j], mSendOts[otIdx + j][0], mSendOts[otIdx + j][1]);
+				//b1[j] = mSendOts[otIdx + j][0] ^ mSendOts[otIdx + j][1];
 
 				// C0' = c00+c10+a0b1
 				for (u64 i = 0; i < y.cols(); ++i)
@@ -397,7 +400,6 @@ namespace osuCrypto
 				}
 			}
 
-			mOtIdx += n;
 
 		}
 

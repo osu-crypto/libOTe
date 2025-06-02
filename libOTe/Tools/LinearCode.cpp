@@ -313,7 +313,7 @@ namespace osuCrypto
     //static std::array<block, 2> sBlockMasks{ { ZeroBlock, AllOneBlock } };
 
     void LinearCode::encode(
-        const span<block>& plaintxt,
+        const span<const block>& plaintxt,
         const span<block>& codeword)
     {
 #ifndef NDEBUG
@@ -422,7 +422,7 @@ namespace osuCrypto
 
 
     void LinearCode::encode(
-        const span<u8>& plaintxt,
+        const span<const u8>& plaintxt,
         const span<u8>& codeword)
     {
 #ifndef NDEBUG
@@ -433,7 +433,7 @@ namespace osuCrypto
         encode(plaintxt.data(), codeword.data());
     }
 
-    void LinearCode::encode(u8 * input, u8 * codeword)
+    void LinearCode::encode(const u8 * input, u8 * codeword)
     {
 
         // highlevel idea: For each byte of the input, we have preprocessed 

@@ -4,7 +4,7 @@ file(GLOB_RECURSE SRCS *.cpp *.c)
 
 set(SRCS "${SRCS}")
 
-add_library(libOTe STATIC ${SRCS} )
+add_library(libOTe STATIC ${SRCS}  "Dpf/InvMtxDmpf/GoldreichHash.h")
 
 
 
