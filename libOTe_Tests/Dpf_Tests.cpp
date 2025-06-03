@@ -9,6 +9,7 @@
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe/Dpf/InvMtxDmpf.h"
 #include "libOTe/Dpf/InvMtxDmpf/Equality.h"
+#include "libOTe/Dpf/InvMtxDmpf/GoldreichHash.h"
 
 
 using namespace oc;
@@ -148,82 +149,156 @@ void RegularDpf_MultByte_Test(const CLP& cmd)
 	}
 
 
-	for (auto m : { 16, 3,8, 13, 33, 233 })
+for (auto m : { 16, 3,8, 13, 33, 233 })
+{
+
+	u64 n = 13;
+	u64 m8 = divCeil(m, 8);
+
+	PRNG prng(block(231234, 321312));
+	std::array<oc::DpfMult, 2> dpf;
+	dpf[0].init(0, n);
+	dpf[1].init(1, n);
+
+	std::array<std::vector<std::array<block, 2>>, 2> sendOts;
+	std::array<std::vector<block>, 2> recvOts;
+	std::array<BitVector, 2> choices;
+	for (u64 i = 0; i < 2; ++i)
 	{
+		sendOts[i].resize(n);
+		recvOts[i].resize(n);
+		choices[i].resize(n);
+	}
 
-		u64 n = 13;
-		u64 m8 = divCeil(m, 8);
+	auto sock = coproto::LocalAsyncSocket::makePair();
 
-		PRNG prng(block(231234, 321312));
-		std::array<oc::DpfMult, 2> dpf;
-		dpf[0].init(0, n);
-		dpf[1].init(1, n);
+	for (u64 i = 0; i < 4; ++i)
+	{
+		//std::cout << "-=========================-" std::endl;
 
-		std::array<std::vector<std::array<block, 2>>, 2> sendOts;
-		std::array<std::vector<block>, 2> recvOts;
-		std::array<BitVector, 2> choices;
 		for (u64 i = 0; i < 2; ++i)
 		{
-			sendOts[i].resize(n);
-			recvOts[i].resize(n);
-			choices[i].resize(n);
+			choices[i].randomize(prng);
+			prng.get(sendOts[i].data(), sendOts[i].size());
+			for (u64 j = 0; j < n; ++j)
+				recvOts[i][j] = sendOts[i][j][choices[i][j]];
+		}
+		dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
+		dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
+
+		BitVector x0(n), x1(n);
+		x0.randomize(prng);
+		x1.randomize(prng);
+		Matrix<u8> xy0(n, m8), xy1(n, m8), y0(n, m8), y1(n, m8);
+
+		//prng.get(y0.data(), y0.size());
+		//prng.get(y1.data(), y1.size());
+		for (u64 i = 0; i < n; ++i)
+		{
+			for (u64 j = 0; j < m; ++j)
+			{
+				*BitIterator(y0[i].data(), j) = prng.getBit();
+				*BitIterator(y1[i].data(), j) = prng.getBit();
+			}
 		}
 
-		auto sock = coproto::LocalAsyncSocket::makePair();
+		macoro::sync_wait(macoro::when_all_ready(
+			dpf[0].multiply(m, x0.getSpan<u8>(), y0, xy0, sock[0]),
+			dpf[1].multiply(m, x1.getSpan<u8>(), y1, xy1, sock[1])
+		));
 
-		for (u64 i = 0; i < 4; ++i)
+		for (u64 j = 0; j < n; ++j)
 		{
-			//std::cout << "-=========================-" std::endl;
-
-			for (u64 i = 0; i < 2; ++i)
+			for (u64 i = 0; i < m8; ++i)
 			{
-				choices[i].randomize(prng);
-				prng.get(sendOts[i].data(), sendOts[i].size());
-				for (u64 j = 0; j < n; ++j)
-					recvOts[i][j] = sendOts[i][j][choices[i][j]];
-			}
-			dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
-			dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
 
-			BitVector x0(n), x1(n);
-			x0.randomize(prng);
-			x1.randomize(prng);
-			Matrix<u8> xy0(n, m8), xy1(n, m8), y0(n, m8), y1(n, m8);
-
-			//prng.get(y0.data(), y0.size());
-			//prng.get(y1.data(), y1.size());
-			for (u64 i = 0; i < n; ++i)
-			{
-				for (u64 j = 0; j < m; ++j)
+				u64 x = x0[j] ^ x1[j];
+				auto y = y0[j][i] ^ y1[j][i];
+				auto xy = xy0[j][i] ^ xy1[j][i];
+				auto exp = x * y;
+				if (xy != exp)
 				{
-					*BitIterator(y0[i].data(), j) = prng.getBit();
-					*BitIterator(y1[i].data(), j) = prng.getBit();
+					std::cout << " m " << m << std::endl;
+					std::cout << "j " << j << " i " << i << std::endl;
+					std::cout << "act " << int(xy) << "=" << int(xy0[j][i]) << " + " << int(xy1[j][i]) << std::endl;
+					std::cout << "exp " << int(exp) << std::endl;
+					throw RTE_LOC;
 				}
 			}
+		}
+	}
+}
+#else
+	throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_SPARSE_DPF not defined.");
+#endif
+}
 
-			macoro::sync_wait(macoro::when_all_ready(
-				dpf[0].multiply(m, x0.getSpan<u8>(), y0, xy0, sock[0]),
-				dpf[1].multiply(m, x1.getSpan<u8>(), y1, xy1, sock[1])
-			));
 
+void RegularDpf_MultBit_Test(const CLP& cmd)
+{
+#if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
+
+
+	u64 n = 1311;
+
+	PRNG prng(block(231234, 321312));
+	std::array<oc::DpfMult, 2> dpf;
+	dpf[0].init(0, n);
+	dpf[1].init(1, n);
+
+	std::array<std::vector<std::array<block, 2>>, 2> sendOts;
+	std::array<std::vector<block>, 2> recvOts;
+	std::array<BitVector, 2> choices;
+	for (u64 i = 0; i < 2; ++i)
+	{
+		sendOts[i].resize(n);
+		recvOts[i].resize(n);
+		choices[i].resize(n);
+	}
+
+	auto sock = coproto::LocalAsyncSocket::makePair();
+
+	for (u64 i = 0; i < 4; ++i)
+	{
+		//std::cout << "-=========================-" std::endl;
+
+		for (u64 i = 0; i < 2; ++i)
+		{
+			choices[i].randomize(prng);
+			prng.get(sendOts[i].data(), sendOts[i].size());
 			for (u64 j = 0; j < n; ++j)
-			{
-				for (u64 i = 0; i < m8; ++i)
-				{
+				recvOts[i][j] = sendOts[i][j][choices[i][j]];
+		}
+		dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
+		dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
 
-					u64 x = x0[j] ^ x1[j];
-					auto y = y0[j][i] ^ y1[j][i];
-					auto xy = xy0[j][i] ^ xy1[j][i];
-					auto exp = x * y;
-					if (xy != exp)
-					{
-						std::cout << " m " << m << std::endl;
-						std::cout << "j " << j << " i " << i << std::endl;
-						std::cout << "act " << int(xy) << "=" << int(xy0[j][i]) << " + " << int(xy1[j][i]) << std::endl;
-						std::cout << "exp " << int(exp) << std::endl;
-						throw RTE_LOC;
-					}
-				}
+		BitVector x0(n), x1(n);
+		BitVector xy0(n), xy1(n), y0(n), y1(n);
+		x0.randomize(prng);
+		x1.randomize(prng);
+		y0.randomize(prng);
+		y1.randomize(prng);
+
+		macoro::sync_wait(macoro::when_all_ready(
+			dpf[0].multiplyBits(x0, y0, xy0, sock[0]),
+			dpf[1].multiplyBits(x1, y1, xy1, sock[1])
+		));
+
+		for (u64 j = 0; j < n; ++j)
+		{
+
+			u64 x = x0[j] ^ x1[j];
+			auto y = y0[j] ^ y1[j];
+			auto xy = xy0[j] ^ xy1[j];
+			auto exp = x & y;
+			if (xy != exp)
+			{
+				std::cout << "j " << j << " i " << i << std::endl;
+				std::cout << "x   " << int(x) << "=" << int(x0[j]) << " + " << int(x1[j]) << std::endl;
+				std::cout << "y   " << int(y) << "=" << int(y0[j]) << " + " << int(y1[j]) << std::endl;
+				std::cout << "act " << int(xy) << "=" << int(xy0[j]) << " + " << int(xy1[j]) << std::endl;
+				std::cout << "exp " << int(exp) << std::endl;
+				throw RTE_LOC;
 			}
 		}
 	}
@@ -231,7 +306,6 @@ void RegularDpf_MultByte_Test(const CLP& cmd)
 	throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_SPARSE_DPF not defined.");
 #endif
 }
-
 void RegularDpf_Proto_Test(const CLP& cmd)
 {
 #ifdef ENABLE_REGULAR_DPF
@@ -749,3 +823,263 @@ void MtxDpf_Proto_Test(const oc::CLP& cmd)
 
 }
 
+
+void Goldreich_Proto_Test(const oc::CLP& cmd)
+{
+
+	std::array<GoldreichHash, 2> hash;
+	u64 n = 100; // Increased sample size for better statistical analysis
+	u64 in = 8;  // Increased input size
+	u64 out = 16; // Increased output size for better testing
+	bool v = cmd.isSet("v");
+	auto inBits = in * 8;
+	auto outBits = out * 8;
+
+	hash[0].init(0, n, in, out);
+	hash[1].init(1, n, in, out);
+
+	auto count0 = hash[0].baseOtCount();
+	auto count1 = hash[1].baseOtCount();
+	if (count0.mRecvCount != count1.mSendCount)
+		throw RTE_LOC;
+	if (count0.mSendCount != count1.mRecvCount)
+		throw RTE_LOC;
+
+	PRNG prng(block(231234, 321312));
+	std::array<std::vector<block>, 2> baseRecv;
+	std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+	std::array<BitVector, 2> baseChoice;
+	baseRecv[0].resize(count0.mRecvCount);
+	baseRecv[1].resize(count1.mRecvCount);
+	baseSend[0].resize(count0.mSendCount);
+	baseSend[1].resize(count1.mSendCount);
+	baseChoice[0].resize(count0.mRecvCount);
+	baseChoice[1].resize(count1.mRecvCount);
+	for (u64 i = 0; i < 2; ++i)
+	{
+		baseChoice[i].randomize(prng);
+		prng.get(baseSend[i ^ 1].data(), baseSend[i ^ 1].size());
+		for (u64 j = 0; j < baseChoice[i].size(); ++j)
+			baseRecv[i][j] = baseSend[i ^ 1][j][baseChoice[i][j]];
+	}
+
+	hash[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+	hash[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+	auto seed = prng.get<block>();
+
+	std::array<Matrix<u8>, 2> input, output;
+	input[0].resize(n, in);
+	input[1].resize(n, in);
+	prng.get(input[0].data(), input[0].size());
+	prng.get(input[1].data(), input[1].size());
+	output[0].resize(n, out);
+	output[1].resize(n, out);
+
+	auto sock = coproto::LocalAsyncSocket::makePair();
+	macoro::sync_wait(macoro::when_all_ready(
+		hash[0].hash(input[0], output[0], sock[0], seed),
+		hash[1].hash(input[1], output[1], sock[1], seed)
+	));
+
+	Matrix<u8> rIn(n, in), rOut(n, out);
+	for (u64 j = 0; j < n; ++j)
+	{
+		for (u64 k = 0; k < in; ++k)
+		{
+			rIn(j, k) = input[0](j, k) ^ input[1](j, k);
+		}
+	}
+
+	hash[0].hash(rIn, rOut, seed);
+	for (u64 j = 0; j < n; ++j)
+	{
+		std::vector<u8> act(out);
+		for (u64 k = 0; k < out; ++k)
+			act[k] = output[0](j, k) ^ output[1](j, k);
+		for (u64 k = 0; k < out; ++k)
+		{
+			if (act[k] != rOut[j][k])
+			{
+				std::cout << "j " << j << std::endl;
+				std::cout << "act " << toHex(act) << std::endl;
+				std::cout << "exp " << toHex(rOut[j]) << std::endl;
+				throw RTE_LOC;
+			}
+		}
+	}
+
+}
+
+void Goldreich_stat_Test(const oc::CLP& cmd)
+{
+
+	GoldreichHash hash;
+	u64 n = 100000; // Increased sample size for better statistical analysis
+	u64 in = 8;  // Increased input size
+	u64 out = 16; // Increased output size for better testing
+	bool v = cmd.isSet("v");
+	auto inBits = in * 8;
+	auto outBits = out * 8;
+
+	hash.init(0, n, in, out);
+	block seed = block(2342143213662143,4352452314532765);
+
+	Matrix<u8> rIn(n, in), rOut(n, out);
+	for (u64 j = 0; j < n; ++j)
+	{
+		copyBytesMin(rIn[j], j);
+	}
+
+	hash.hash(rIn, rOut, seed);
+	if (v)
+	{
+		// Print a sample of the output for inspection
+		std::cout << "\nSample of hash output (first 10 rows):" << std::endl;
+		for (u64 j = 0; j < std::min(n, 10ull); ++j)
+		{
+			std::cout << "Row " << j << ": ";
+			for (u64 k = 0; k < divCeil(outBits, 8); ++k)
+			{
+				auto act = rOut(j, k);
+				std::cout << std::hex << std::setw(2) << std::setfill('0') << int(act);
+			}
+			std::cout << std::endl;
+		}
+		std::cout << std::dec; // Reset output to decimal
+	}
+
+	// Let's now test the uniformity of the output
+	if (v)
+	{
+		std::cout << "\n==============================================" << std::endl;
+		std::cout << "Testing uniformity of GoldreichHash output" << std::endl;
+		std::cout << "==============================================" << std::endl;
+	}
+
+	// 1. Chi-Square Test for byte distribution
+	// We'll count occurrences of each byte value in the output and check if they're uniform
+	std::array<u64, 256> byteFrequencies{};
+	u64 totalBytes = 0;
+
+	// Count frequency of each byte value
+	for (u64 i = 0; i < n; ++i)
+	{
+		for (u64 j = 0; j < divCeil(outBits, 8); ++j)
+		{
+			u8 xorByte = rOut(i,j);
+			byteFrequencies[xorByte]++;
+			totalBytes++;
+		}
+	}
+
+	// Chi-square statistic for byte distribution
+	double expectedFreq = static_cast<double>(totalBytes) / 256.0;
+	double chiSquare = 0.0;
+
+	for (u64 i = 0; i < 256; ++i)
+	{
+		double diff = byteFrequencies[i] - expectedFreq;
+		chiSquare += (diff * diff) / expectedFreq;
+	}
+
+	// For 255 degrees of freedom at 0.05 significance level, critical value is around 293
+	const double chiSquareCritical = 293.25;
+	bool chiSquaredPassed = chiSquare < chiSquareCritical;
+
+	if (v)
+	{
+		std::cout << "Chi-Square Test for Byte Distribution:" << std::endl;
+		std::cout << "Chi-Square Value: " << chiSquare << std::endl;
+		std::cout << "Critical Value (α=0.05): " << chiSquareCritical << std::endl;
+		std::cout << "Result: " << (chiSquaredPassed ? "PASSED" : "FAILED") << std::endl;
+		std::cout << "Interpretation: " << (chiSquaredPassed ?
+			"Output bytes are uniformly distributed" :
+			"Output bytes are NOT uniformly distributed") << std::endl;
+		std::cout << std::endl;
+	}
+
+	// 2. Bit Distribution Test
+	// We'll check if each bit position is roughly 50% 0's and 50% 1's
+	std::vector<u64> bitOnes(outBits, 0);
+
+	for (u64 i = 0; i < n; ++i)
+	{
+		for (u64 j = 0; j < outBits; ++j)
+		{
+			u64 bytePos = j / 8;
+			u64 bitPos = j % 8;
+			u8 xorByte = rOut(i, bytePos);
+			bool bitValue = (xorByte >> bitPos) & 1;
+
+			if (bitValue)
+				bitOnes[j]++;
+		}
+	}
+
+	if (v)
+	{
+		std::cout << "Bit Distribution Test:" << std::endl;
+		std::cout << "Checking if each bit position is approximately 50% ones" << std::endl;
+	}
+
+	// Expected number of ones for a uniform distribution is n/2
+	double expectedOnes = static_cast<double>(n) / 2.0;
+
+	// Chi-square statistic for bit distribution (1 degree of freedom per bit)
+	double bitChiSquare = 0.0;
+	u64 failedBits = 0;
+
+	for (u64 j = 0; j < outBits; ++j)
+	{
+		double diff = bitOnes[j] - expectedOnes;
+		double bitChi = (diff * diff) / expectedOnes + (diff * diff) / (n - expectedOnes);
+
+		// Critical value for 1 degree of freedom at 0.05 significance is 3.84
+		bool bitPassed = bitChi < 3.84;
+
+		if (!bitPassed)
+			failedBits++;
+
+		if (v)
+		{
+			// Detailed bit analysis if verbose mode is on
+			std::cout << "Bit " << j << ": " << (bitOnes[j] * 100.0 / n) << "% ones, chi-square = "
+				<< bitChi << " - " << (bitPassed ? "PASSED" : "FAILED") << std::endl;
+		}
+	}
+
+	// We expect about 5% of bits to fail by random chance (at α=0.05)
+	double expectedFailRate = 0.05;
+	double actualFailRate = static_cast<double>(failedBits) / outBits;
+	bool bitDistributionPassed = actualFailRate <= expectedFailRate * 2;
+
+	if (v)
+	{
+		std::cout << "Failed Bits: " << failedBits << " out of " << outBits << " ("
+			<< (actualFailRate * 100.0) << "%)" << std::endl;
+		std::cout << "Expected Fail Rate: " << (expectedFailRate * 100.0) << "%" << std::endl;
+		std::cout << "Result: " << (bitDistributionPassed ? "PASSED" : "FAILED") << std::endl;
+		std::cout << "Interpretation: " << (bitDistributionPassed ?
+			"Bit positions show expected randomness" :
+			"Some bit positions show non-random distribution") << std::endl;
+
+		std::cout << "==============================================" << std::endl;
+	}
+
+	// 4. Overall result summary
+	if (v)
+	{
+		std::cout << "\nSummary of GoldreichHash Uniformity Tests:" << std::endl;
+		std::cout << "1. Chi-Square Test: " << (chiSquaredPassed ? "PASSED" : "FAILED") << std::endl;
+		std::cout << "2. Bit Distribution Test: " << (bitDistributionPassed ? "PASSED" : "FAILED") << std::endl;
+		std::cout << "Overall: " << ((chiSquaredPassed && bitDistributionPassed) ?
+			"PASSED - Output appears uniform" :
+			"FAILED - Output may not be uniform") << std::endl;
+	}
+
+	// Throw exception if any test fails
+	if (!chiSquaredPassed || !bitDistributionPassed)
+		throw RTE_LOC;
+
+}

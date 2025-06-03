@@ -64,6 +64,8 @@ namespace tests_libOTe
 
 			tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
 			tc.add("RegularDpf_MultByte_Test                ", RegularDpf_MultByte_Test);
+			tc.add("RegularDpf_MultBit_Test                 ", RegularDpf_MultBit_Test);
+			
 			tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
 			tc.add("RegularDpf_Puncture_Test                ", RegularDpf_Puncture_Test);
 			tc.add("RegularDpf_keyGen_Test                  ", RegularDpf_keyGen_Test);
@@ -77,7 +79,9 @@ namespace tests_libOTe
 			tc.add("BitInject_basic_test                    ", BitInject_basic_test);;
 			tc.add("OtEquality_basic_Test                   ", OtEquality_basic_Test);
 			tc.add("HybEquality_basic_Test                  ", HybEquality_basic_Test);
-
+			tc.add("Goldreich_Proto_Test                    ", Goldreich_Proto_Test);
+			tc.add("Goldreich_stat_Test                     ", Goldreich_stat_Test);
+			
 			tc.add("Dedup_orTree_test                       ", Dedup_orTree_test);
 			tc.add("Dedup_protocol_test                     ", Dedup_protocol_test);
 

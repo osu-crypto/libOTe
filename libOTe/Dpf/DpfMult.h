@@ -183,11 +183,11 @@ namespace osuCrypto
 				auto bytes = divCeil(bitCount, 8);
 				for (u64 i = 0; i < src.rows(); ++i)
 				{
-					copyBytes(dest.subspan(0,bytes), src[i].subspan(0,bytes));
+					copyBytes(dest.subspan(0, bytes), src[i].subspan(0, bytes));
 					dest = dest.subspan(src.cols());
 				}
 			}
-			else 
+			else
 			{
 				auto dIter = BitIterator(dest.data());
 				for (u64 i = 0; i < src.rows(); ++i)
@@ -212,7 +212,7 @@ namespace osuCrypto
 				auto bytes = divCeil(bitCount, 8);
 				for (u64 i = 0; i < dest.rows(); ++i)
 				{
-					copyBytes(dest[i].subspan(0, bytes), src.subspan(0,bytes));
+					copyBytes(dest[i].subspan(0, bytes), src.subspan(0, bytes));
 					src = src.subspan(dest.cols());
 				}
 			}
@@ -246,7 +246,7 @@ namespace osuCrypto
 		{
 			u64 n = y.rows();
 
-			if (x.size() != divCeil(y.rows(),8) || y.rows() != xy.rows())
+			if (x.size() != divCeil(y.rows(), 8) || y.rows() != xy.rows())
 				throw RTE_LOC;
 			if (y.cols() != xy.cols())
 				throw RTE_LOC;
@@ -317,9 +317,9 @@ namespace osuCrypto
 			}
 
 			std::vector<u8> phi(x.size());;
-			for(u64 i =0; i < phi.size(); ++i)
+			for (u64 i = 0; i < phi.size(); ++i)
 				phi[i] = x[i] ^ a0.getSpan<u8>()[i];
-			if (n%8)
+			if (n % 8)
 			{
 				u8 mask = (1 << (n % 8)) - 1;
 				phi.back() &= mask;
@@ -400,8 +400,144 @@ namespace osuCrypto
 				}
 			}
 
-
 		}
+
+
+		// given shared [x], [y], output [xy] = [x * y] where multiplication
+		// is perform component-wise, i.e. xi * yi = xyi, xi is a bit and yi 
+		// is a vector.
+		// This version generalizes to arbitrary length vector yi. Each row of
+		// y is one vector.
+		//
+		//
+		// given shared [x], [y], output [xy] = [x * y] where multiplication
+		// is perform component-wise, i.e. xi * yi = xyi, xi, yi are bits.
+		// 
+		// We are given two OTs, one in each direction. Let us denote them as
+		// 
+		//   a0                      b0
+		//   c00                     c01
+		// 
+		//   b1                      a1
+		//   c10                     c11
+		// 
+		// such that 
+		// 
+		//    a0 * b0 = (c00 + c01)
+		//    a1 * b1 = (c10 + c11)
+		// 
+		// Note that we write these OTs in OLE format, that is for OT (m0,m1),(g,mg)
+		// we have a0=g, b0=(m0+m1), c00=mg, c01=m0 and similar for the second 
+		// instance.
+		//
+		// We first convert these two "OTs/OLEs" into a random beaver triple
+		//
+		// [a] * [b] = [c']
+		// 
+		// We do this by computing
+		//
+		// [a] = (a0, a1)
+		// [b] = (b1, b0)
+		// [c'] = (c00+c10+a0b1, c01+c11+a1b0)
+		// 
+		// As you can see, all 4 cross terms are present. Given this beaver triple
+		// we can use the standard protocol. We reveal
+		// 
+		// phi   = [x] + [a]
+		// theta = [y] + [b]
+		// 
+		// [zy] = [c'] + theta [a] + phi [b] + theta phi
+		//      = ab + (y+b) a + (x+a) b + (y+b)(x+a)
+		//      = ab + ab + ya + xb + ab + yx + ya + xb + ab
+		//      = xy
+		//
+		macoro::task<> multiplyBits(
+			const BitVector& x,
+			const BitVector& y,
+			BitVector& xy,
+			coproto::Socket& sock)
+		{
+
+			auto n = x.size();
+			if (y.size() != n)
+				throw RTE_LOC;
+			if (xy.size() != n)
+				throw RTE_LOC;
+			return multiplyBits(n, x.getSpan<const u8>(), y.getSpan<const u8>(), xy.getSpan<u8>(), sock);
+		}
+
+
+		macoro::task<> multiplyBits(
+			u64 n,
+			span<const u8> x,
+			span<const u8> y,
+			span<u8> xy,
+			coproto::Socket& sock)
+		{
+			if (x.size() != divCeil(n, 8))
+				throw RTE_LOC;
+			if (y.size() != divCeil(n, 8))
+				throw RTE_LOC;
+			if (xy.size() != divCeil(n, 8))
+				throw RTE_LOC;
+			if (n + mOtIdx > mTotalMults)
+				throw RTE_LOC;
+			if (hasBaseOts() == false)
+				throw RTE_LOC;
+
+			u64 n8 = divCeil(n, 8);
+			auto otIdx = mOtIdx;
+			mOtIdx += n;
+
+			// our a share of a * b = c.
+			BitVector a0; a0.append(mChoiceBits, n, otIdx);
+			BitVector b1(n);
+			// our c share of a * b = c.
+			BitVector c(n);
+
+			auto a8 = a0.getSpan<u8>();
+			auto b8 = b1.getSpan<u8>();
+			auto c8 = c.getSpan<u8>();
+
+			u8 c00c10;
+			for (u64 j = 0; j < n; ++j)
+			{
+				b1[j] = lsb(mSendOts[otIdx + j][0] ^ mSendOts[otIdx + j][1]);
+				c00c10 = lsb(mRecvOts[otIdx + j] ^ mSendOts[otIdx + j][0]);
+				c[j] = c00c10 ^ (b1[j] & a0[j]);
+			}
+
+			AlignedUnVector<u8> phi(n8), theta(n8);
+			for (u64 i = 0; i < n8; ++i)
+			{
+				phi[i] = x[i] ^ a8[i];
+				theta[i] = y[i] ^ b8[i];
+			}
+			if (n % 8)
+			{
+				u8 mask = (1 << (n % 8)) - 1;
+				phi.back() &= mask;
+				theta.back() &= mask;
+			}
+
+			co_await sock.send(coproto::copy(theta));
+			co_await sock.send(coproto::copy(phi));
+
+			AlignedUnVector<u8> theta1(theta.size()), phi1(phi.size());
+			co_await sock.recv(theta1);
+			co_await sock.recv(phi1);
+			for (u64 i = 0; i < n8; ++i)
+			{
+				phi[i] ^= phi1[i];
+				theta[i] ^= theta1[i];
+				xy[i] =
+					c8[i] ^
+					(theta[i] & a8[i]) ^
+					(phi[i] & b8[i]) ^
+					(-mPartyIdx & theta[i] & phi[i]);
+			}
+		}
+
 
 		u64 baseOtCount() const { return mTotalMults; }
 

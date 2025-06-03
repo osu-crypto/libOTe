@@ -76,7 +76,7 @@
         "VERBOSE_FETCH": true,
         "ENABLE_SSE": true,
         "ENABLE_AVX": true,
-        "ENABLE_ASAN": false,
+        "ENABLE_ASAN": true,
         "BUILD_SHARED_LIBS": false,
         "LIBOTE_SHARED": false,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
