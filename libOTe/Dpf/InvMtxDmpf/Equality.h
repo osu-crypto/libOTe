@@ -483,19 +483,35 @@ namespace osuCrypto
 			coproto::Socket& sock,
 			PRNG& prng)
 		{
-			if (mBitCount > sizeof(T) * 8)
-				throw RTE_LOC;
-
+			MatrixView<u8> AView(reinterpret_cast<u8*>(A.data()), A.size(), sizeof(T));
+			MatrixView<u8> BView(reinterpret_cast<u8*>(B.data()), B.size(), sizeof(T));
 			if (A.size() != mN ||
-				B.size() != mN)
+				(B.size() != 0 && B.size() != mN))
+				throw std::runtime_error("input size mismatch. " LOCATION);
+
+			return equal(AView, BView, y, sock, prng);
+		}
+
+		macoro::task<> equal(
+			MatrixView<u8> A,
+			MatrixView<u8> B,
+			BitVector& y,
+			coproto::Socket& sock,
+			PRNG& prng)
+		{
+			if (mBitCount > A.cols() * 8)
+				throw RTE_LOC;
+			if (A.cols() != B.cols())
+				throw RTE_LOC;
+			if (A.rows() != mN ||
+				B.rows() != mN)
 				throw std::runtime_error("Matrix size mismatch. " LOCATION);
 			// C = A xor B
-			Matrix<u8> C(A.size(), sizeof(T));
+			Matrix<u8> C(A.rows(), A.cols());
 			y.resize(mN);
 			for (u64 i = 0; i < A.size(); ++i)
 			{
-				T ci = A[i] ^ B[i];
-				copyBytes(C[i], ci);
+				C(i) = A(i) ^ B(i);
 			}
 
 			Matrix<u8> bits(mN, mBitCount);

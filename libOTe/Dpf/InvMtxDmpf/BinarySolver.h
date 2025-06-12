@@ -25,6 +25,8 @@ namespace osuCrypto
 
 		DpfMult mMult;
 
+		bool mPrint = false;
+
 		void init(u64 partyIdx, u64 m, u64 c, u64 logG)
 		{
 			mPartyIdx = partyIdx;
@@ -39,9 +41,9 @@ namespace osuCrypto
 				mM * mC +
 				mM * mC +
 				mM * mC;
-				//std::min(mM * mC, mC * mLogG) +
-				//std::min(mM * mC, mC * mLogG) +
-				//std::min(mM * mC, mC * mLogG);
+			//std::min(mM * mC, mC * mLogG) +
+			//std::min(mM * mC, mC * mLogG) +
+			//std::min(mM * mC, mC * mLogG);
 
 			mMult.init(partyIdx, baseCount);
 		}
@@ -51,7 +53,10 @@ namespace osuCrypto
 			return mMult.baseOtCount();
 		}
 
-		void setBaseOts(span<std::array<block, 2>> sendOts, span<block> recvOts, const BitVector& choices)
+		void setBaseOts(
+			span<const std::array<block, 2>> sendOts,
+			span<const block> recvOts,
+			const BitVector& choices)
 		{
 			mMult.setBaseOts(sendOts, recvOts, choices);
 		}
@@ -596,7 +601,7 @@ namespace osuCrypto
 			Matrix<u8> Y2(mM, g8);
 			co_await multiplyMtx(mLogG, M, X, Y2, sock);
 
-			
+
 			//co_await printMtx(mLogG, Y2, "Y2", sock);
 
 			for (u64 i = 0; i < Y.size(); ++i)
@@ -620,6 +625,74 @@ namespace osuCrypto
 			//co_await printMtx(mLogG, Y2, "Y2", sock);
 			//co_await printMtx(mLogG, YY, "YY", sock);
 
+
+			if (mPrint)
+			{
+				Matrix<u8> M2(MM);
+				Matrix<u8> Y2(YY);
+				Matrix<u8> X2(X);
+				co_await sock.send(std::vector<u8>(M2.begin(), M2.end()));
+				co_await sock.send(std::vector<u8>(Y2.begin(), Y2.end()));
+				co_await sock.send(std::vector<u8>(X2.begin(), X2.end()));
+				co_await sock.recv(M2);
+				co_await sock.recv(Y2);
+				co_await sock.recv(X2);
+				for (u64 i = 0; i < M2.size(); ++i)
+					M2(i) ^= MM(i);
+				for (u64 i = 0; i < Y2.size(); ++i)
+					Y2(i) ^= YY(i);
+				for (u64 i = 0; i < X2.size(); ++i)
+					X2(i) ^= X(i);
+
+				if (mPartyIdx)
+				{
+					std::cout << "M = [\n";
+					for (u64 i = 0; i < M2.rows(); ++i)
+					{
+						if (0)
+						{
+							for (u64 j = 0; j < mC; ++j)
+							{
+
+								auto bit = *BitIterator(M2[i].data(), j);
+								if (bit)
+									std::cout << Color::Green;
+								std::cout << (int)bit << " ";
+								if (bit)
+									std::cout << Color::Default;
+							}
+						}
+						else
+							std::cout << toHex(M2[i]);
+
+						if (i + 1 < M2.rows())
+							std::cout << "," << std::endl;
+						else
+							std::cout << "]" << std::endl;
+					}
+
+					std::cout << "X = [\n";
+					for (u64 i = 0; i < X2.rows(); ++i)
+					{
+						std::cout << toHex(X2[i]);
+						if (i + 1 < X2.rows())
+							std::cout << "," << std::endl;
+						else
+							std::cout << "]" << std::endl;
+					}
+
+					std::cout << "Y = [\n";
+					for (u64 i = 0; i < Y2.rows(); ++i)
+					{
+						std::cout << toHex(Y2[i]);
+						if (i + 1 < Y2.rows())
+							std::cout << "," << std::endl;
+						else
+							std::cout << "]" << std::endl;
+					}
+
+				}
+			}
 		}
 	};
 

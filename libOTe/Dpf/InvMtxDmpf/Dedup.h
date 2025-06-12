@@ -29,7 +29,7 @@ namespace osuCrypto
 		u64 mPartyIdx = 0;
 		u64 mN = 0; // The number of input elements.
 		u64 mKeyBitCount = 0; // The bit count of the keys.
-		u64 mValueBitCount = 0; // The bit count of the values.
+		bool mPrint = false;
 
 		HybEquality mEq;
 		DpfMult mMult;
@@ -40,12 +40,11 @@ namespace osuCrypto
 
 
 		// Deduplicate the input data.
-		void init(u64 partyIdx, u64 n, u64 keyBitCount, u64 valueBitCount)
+		void init(u64 partyIdx, u64 n, u64 keyBitCount)
 		{
 			mPartyIdx = partyIdx;
 			mN = n;
 			mKeyBitCount = keyBitCount;
-			mValueBitCount = valueBitCount;
 
 			auto count = mN * (mN - 1) / 2;
 			// Initialize the equality component with keyBitCount
@@ -224,22 +223,38 @@ namespace osuCrypto
 
 
 		macoro::task<void> dedup(
-			span<u32> keys, // The input keys to deduplicate.
-			span<u32> values, // The input values to deduplicate.
-			span<u32> altKeys,  // The output indices of the deduplicated keys
+			MatrixView<u8> keys, // The input keys to deduplicate.
+			MatrixView<u8> values, // The input values to deduplicate.
+			MatrixView<u8> altKeys,  // The output indices of the deduplicated keys
 			PRNG& prng, Socket& socket)
 		{
-			std::vector<u32> Ai, Aj, BB;
-			Ai.reserve(mN * (mN - 1) / 2);
-			Aj.reserve(mN * (mN - 1) / 2);
-			BB.reserve(mN * (mN - 1) / 2);
-			for (u64 i = 0; i < mN; ++i)
+			if (keys.cols() != divCeil(mKeyBitCount, 8))
+				throw RTE_LOC;
+			if (altKeys.cols() != divCeil(mKeyBitCount, 8))
+				throw RTE_LOC;
+			if (keys.rows() != mN)
+				throw RTE_LOC;
+			if (values.rows() != mN)
+				throw RTE_LOC;
+			if (altKeys.rows() != mN)
+				throw RTE_LOC;
+
+
+			Matrix<u8> 
+				Ai(mN * (mN - 1) / 2, keys.cols()), 
+				Aj(mN * (mN - 1) / 2, keys.cols()),
+				BB(mN * (mN - 1) / 2, values.cols());
+
+			for (u64 i = 0, k = 0; i < mN; ++i)
 			{
-				for (u64 j = i + 1; j < mN; ++j)
+				for (u64 j = i + 1; j < mN; ++j, ++k)
 				{
-					Ai.push_back(keys[i]);
-					Aj.push_back(keys[j]);
-					BB.push_back(values[j]);
+					//Ai[k]  = keys[i];
+					//Aj[k]  = keys[j];
+					//BB[k]  = values[j];
+					copyBytes(Ai[k], keys[i]);
+					copyBytes(Aj[k], keys[j]);
+					copyBytes(BB[k], values[j]);
 				}
 			}
 
@@ -247,10 +262,10 @@ namespace osuCrypto
 
 			// cij = eq(Ai, Aj)
 			BitVector c(Ai.size());
-			co_await mEq.equal<u32>(Ai, Aj, c, socket, prng);
+			co_await mEq.equal(Ai, Aj, c, socket, prng);
 
-			const bool print = false;
-			if(print)
+			//const bool print = false;
+			if(mPrint)
 			{
 				BitVector C(c.size());
 				co_await socket.send(coproto::copy(c));
@@ -283,7 +298,7 @@ namespace osuCrypto
 				for (u64 i = 0; i < d.sizeBytes(); ++i)
 					d.getSpan<u8>()[i] ^= -1;
 
-			if(print)
+			if(mPrint)
 			{
 				co_await socket.send(coproto::copy(d));
 				BitVector D(mN - 1);
@@ -300,17 +315,21 @@ namespace osuCrypto
 
 
 			auto iter = c.begin() + (mN -1);
-			Matrix<u8> diff(mN - 1, sizeof(keys[0]) + sizeof(values[0]) + divCeil(mN - 2, 8));
+			Matrix<u8> diff(mN - 1, sizeof(keys[0]) + values.cols() + divCeil(mN - 2, 8));
 			for (u64 i = 1; i < mN; ++i)
 			{
-
-				auto k = keys[i] ^ altKeys[i];
-				auto v = values[i];
 				auto ddi = diff[i-1];
-				copyBytes(ddi.subspan(0, sizeof(k)), k);
-				ddi = ddi.subspan(sizeof(k));
-				copyBytes(ddi.subspan(0, sizeof(v)), v);
-				ddi = ddi.subspan(sizeof(v));
+				for(u64 j = 0; j < keys.cols(); ++j)
+				{
+					ddi[j] = keys(i, j) ^ altKeys(i, j);
+				}
+				ddi = ddi.subspan(keys.cols());
+
+				//u32 k = keys[i] ^ altKeys[i];
+				//copyBytes(ddi.subspan(0, sizeof(k)), k);
+				span<u8> v = values[i];
+				copyBytes(ddi.subspan(0, v.size()), v);
+				ddi = ddi.subspan(v.size());
 				for (u64 j = i + 1, k = 0; j < mN; ++j, ++k)
 					bit(ddi, k) = *iter++;
 
@@ -324,23 +343,26 @@ namespace osuCrypto
 			iter = c.begin() + (mN - 1);
 			for (u64 i = 1; i < mN; ++i)
 			{
-				u32 k, v;
 				auto ddi = diff[i-1];
-				copyBytes(k, ddi.subspan(0, sizeof(k)));
-				ddi = ddi.subspan(sizeof(k));
-				copyBytes(v, ddi.subspan(0, sizeof(v)));
-				ddi = ddi.subspan(sizeof(v));
+				for(u64 j = 0; j < keys.cols(); ++j)
+				{
+					keys(i, j) = ddi[j] ^ altKeys(i,j);
+				}
+				ddi = ddi.subspan(keys.cols());
+				//u32 k;
+				//copyBytes(k, ddi.subspan(0, sizeof(k)));
+				copyBytes(values[i], ddi.subspan(0, values.cols()));
+				ddi = ddi.subspan(values.cols());
 
 				for (u64 j = i + 1, k = 0; j < mN; ++j, ++k)
 					*iter++ = bit(ddi, k);
 
-				keys[i] = k ^ altKeys[i];
-				values[i] = v;
+				//keys[i] = k ^ altKeys[i];
 			}
 			if (iter != c.end())
 				throw RTE_LOC;
 
-			if (print)
+			if (mPrint)
 			{
 				BitVector C(c.size());
 				co_await socket.send(coproto::copy(c));
@@ -366,11 +388,10 @@ namespace osuCrypto
 
 			}
 
-			MatrixView<u8> BB8((u8*)BB.data(), BB.size(), sizeof(BB[0]));
-			co_await mMult.multiply(sizeof(values[0]) * 8,
-				c.getSpan<u8>(), BB8, BB8, socket);
+			co_await mMult.multiply(values.cols() * 8,
+				c.getSpan<u8>(), BB, BB, socket);
 
-			if (print)
+			if (mPrint)
 			{
 				auto B = BB;
 				co_await socket.send(coproto::copy(B));
@@ -394,12 +415,16 @@ namespace osuCrypto
 				}
 			}
 
-			auto BBIter = BB.begin();
-			for (u64 i = 0; i < mN; ++i)
+			//auto BBIter = BB.begin();
+			for (u64 i = 0, k = 0; i < mN; ++i)
 			{
-				//values[i] = 0;
-				for (u64 j = i + 1; j < mN; ++j)
-					values[i] ^= *BBIter++;
+				for (u64 j = i + 1; j < mN; ++j, ++k)
+				{
+					for(u64 h = 0; h < values.cols(); ++h)
+					{
+						values(i, h) ^= BB(k,h);
+					}
+				}
 			}
 
 		}

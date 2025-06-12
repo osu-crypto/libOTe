@@ -203,8 +203,8 @@ namespace osuCrypto
 		u64 keyBits = cmd.getOr("keyBits", 8);
 
 		std::array<Dedup, 2> dedup;
-		dedup[0].init(0, n, keyBits, keyBits);
-		dedup[1].init(1, n, keyBits, keyBits);
+		dedup[0].init(0, n, keyBits);
+		dedup[1].init(1, n, keyBits);
 
 		// Compute and set base OTs
 		auto count0 = dedup[0].baseOtCount();
@@ -314,11 +314,11 @@ namespace osuCrypto
 		using namespace osuCrypto;
 		u64 n = cmd.getOr("n", 16);
 		u64 keyBits = cmd.getOr("keyBits", 8);
-		u64 valueBits = cmd.getOr("valueBits", 8);
+		u64 valueBits = cmd.getOr("valueBits", 16);
 
 		std::array<Dedup, 2> dedup;
-		dedup[0].init(0, n, keyBits, valueBits);
-		dedup[1].init(1, n, keyBits, valueBits);
+		dedup[0].init(0, n, keyBits);
+		dedup[1].init(1, n, keyBits);
 		// Compute and set the required base OTs for the Dedup protocol.
 		auto count0 = dedup[0].baseOtCount();
 		auto count1 = dedup[1].baseOtCount();
@@ -354,20 +354,25 @@ namespace osuCrypto
 		dedup[1].setBaseOts(baseSend1, baseRecv1, baseChoice1);
 
 		// Generate random keys, values, and alternate keys
-		std::array<std::vector<u32>, 2> keys, values, altKeys;
+		std::array<std::vector<u32>, 2> keys, altKeys;
+		std::array<Matrix<u8>, 2> values;
 		for (int p = 0; p < 2; ++p) {
 			keys[p].resize(n);
-			values[p].resize(n);
+			values[p].resize(n, divCeil(valueBits, 8));
+		 	prng.get(values[p].data(), values[p].size());
 			altKeys[p].resize(n);
 		}
 
 		// Make the keys[0] and keys[1] add up to the real keys, same for values and altKeys
-		std::vector<u32> expKeys(n), expValues(n), rKeys(n), rVals(n), rAltKeys(n);
+		std::vector<u32> expKeys(n), expValues(n), rKeys(n), rAltKeys(n);
+		Matrix<u8> rVals(n, divCeil(valueBits, 8));
+		for(u64 i =0; i < rVals.size();++i)
+			rVals(i) ^= values[0](i) ^ values[1](i);
+
 		std::unordered_map<u32, u32> expSum;
 		for (u64 i = 0; i < n; ++i) {
 
 			rKeys[i] = i+1;
-			rVals[i] = i+1;
 			rAltKeys[i] = n + i + 1;
 
 			if (i && prng.getBit())
@@ -377,10 +382,8 @@ namespace osuCrypto
 			}
 
 			keys[0][i] = prng.get<u32>() & ((1u << keyBits) - 1);
-			values[0][i] = prng.get<u32>() & ((1u << valueBits) - 1);
 			altKeys[0][i] = prng.get<u32>() & ((1u << keyBits) - 1);
 			keys[1][i] = rKeys[i] ^ keys[0][i];
-			values[1][i] = rVals[i]^ values[0][i];
 			altKeys[1][i] = rAltKeys[i] ^ altKeys[0][i];
 
 			if (expSum.contains(rKeys[i]))
@@ -388,7 +391,9 @@ namespace osuCrypto
 			else
 				expKeys[i] = rKeys[i];
 
-			expSum[rKeys[i]] ^= rVals[i];
+			u64 v = 0;
+			copyBytesMin(v, rVals[i]);
+			expSum[rKeys[i]] ^= v;
 		}
 		for (u64 i = 0; i < n; ++i) {
 			auto key = keys[0][i] ^ keys[1][i];
@@ -398,25 +403,32 @@ namespace osuCrypto
 
 		// Setup sockets
 		auto sock = coproto::LocalAsyncSocket::makePair();
+		auto Mtx = [](auto& v) { return MatrixView<u8>((u8*)v.data(), v.size(), sizeof(v[0])); }; 
 
 		// Run protocol
 		auto res = macoro::sync_wait(
 			macoro::when_all_ready(
-				dedup[0].dedup(keys[0], values[0], altKeys[0], prng, sock[0]),
-				dedup[1].dedup(keys[1], values[1], altKeys[1], prng, sock[1])
+				dedup[0].dedup(Mtx(keys[0]), values[0], Mtx(altKeys[0]), prng, sock[0]),
+				dedup[1].dedup(Mtx(keys[1]), values[1], Mtx(altKeys[1]), prng, sock[1])
 			));
 
 		std::get<0>(res).result();
 		std::get<1>(res).result();
 
 		// Reconstruct outputs
+		std::vector<u8> vv(rVals.cols());
 		for (u64 i = 0; i < n; ++i) {
 			auto key = keys[0][i] ^ keys[1][i];
-			auto val = values[0][i] ^ values[1][i];
+			for(u64 j = 0; j < rVals.cols(); ++j) {
+				vv[j] = values[0][i][j] ^ values[1][i][j];
+			}
+			u64 v = 0;
+			copyBytesMin(v, vv.data());
+
 
 			if (key != expKeys[i])
 				throw RTE_LOC;
-			if (val != expValues[i])
+			if (v != expValues[i])
 				throw RTE_LOC;
 		}
 	}

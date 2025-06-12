@@ -17,6 +17,7 @@ set(SRCS
     Vole_Tests.cpp
     Foleage_Tests.cpp
     Cmp_Tests.cpp
+    Permute_Tests.cpp
 )
 
 add_library(libOTe_Tests STATIC ${SRCS} "Equality_Tests.cpp")

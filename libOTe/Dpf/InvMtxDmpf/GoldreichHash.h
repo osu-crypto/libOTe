@@ -9,13 +9,6 @@
 
 namespace osuCrypto
 {
-	inline std::string toHex(span<u8> data) 
-	{
-		std::stringstream ss;
-		for (auto b : data)
-			ss << std::hex << std::setw(2) << std::setfill('0') << (int)b;
-		return ss.str();
-	}
 
 	// This hash is inspired by the goldreich PRG.
 	// 
@@ -46,6 +39,8 @@ namespace osuCrypto
 
 		DpfMult mMult;
 
+		bool mPrint = false;
+
 		void init(u64 partyIdx, u64 n, u64 inBytes, u64 outBytes)
 		{
 			if (partyIdx > 1)
@@ -59,7 +54,7 @@ namespace osuCrypto
 			mOutBytes = outBytes;
 			mNumIntermediateBytes = mOutBytes * 1;
 
-			if (mNumIntermediateBytes > mInBytes * mInBytes)
+			if (mNumIntermediateBytes * 8 > mInBytes * mInBytes * 8 * 8)
 				throw std::runtime_error("GoldreichHash: mOutBytes * 2 <= mInBytes * mInBytes. " LOCATION);
 
 			mMult.init(mPartyIdx, mN * mNumIntermediateBytes * 8);
@@ -91,22 +86,27 @@ namespace osuCrypto
 			MatrixView<u8> y,
 			block seed)
 		{
-			if (x.rows() != mN || x.cols() != mInBytes)
+			if (x.rows() != y.rows())
+				throw std::runtime_error("GoldreichHash: x y size mismatch. " LOCATION);
+			if (x.cols() != mInBytes)
 				throw std::runtime_error("GoldreichHash: x size mismatch. " LOCATION);
-			if (y.rows() != mN || y.cols() != mOutBytes)
+			if (y.cols() != mOutBytes)
 				throw std::runtime_error("GoldreichHash: y size mismatch. " LOCATION);
 
 
 			PRNG fPrng(seed);
 			LinearCode f0; f0.random(fPrng, mInBytes * 8, mNumIntermediateBytes * 8);
 			LinearCode f1; f1.random(fPrng, mInBytes * 8, mNumIntermediateBytes * 8);
-			LinearCode f2; f2.random(fPrng, (mInBytes+mNumIntermediateBytes) * 8, mOutBytes * 8);
+			LinearCode f2; f2.random(fPrng, (mInBytes + mNumIntermediateBytes) * 8, mOutBytes * 8);
 
 			std::vector<u8> A(mNumIntermediateBytes), B(mNumIntermediateBytes);
 			std::vector<u8> buff(x.cols() + mNumIntermediateBytes);
-			const bool print = false;
 
-			for (u64 i = 0; i < mN; ++i)
+			if (mPrint)
+			{
+				std::cout << "GoldreichHash: " << seed << std::endl;
+			}
+			for (u64 i = 0; i < x.rows(); ++i)
 			{
 				f0.encode(x[i], A);
 				f1.encode(x[i], B);
@@ -115,24 +115,23 @@ namespace osuCrypto
 				for (u64 j = 0; j < B.size(); ++j)
 					B[j] &= A[j];
 
-				if (i < 2 && print)
-				{
-					std::cout << "&[" << i << "] = " << toHex(B) << " < " << std::endl;
-				}
-
 				memcpy(buff.data(), x.data(i), x.cols());
 				memcpy(buff.data() + x.cols(), B.data(), B.size());
 
 				buff[0] ^= 1;
 				f2.encode(buff, y[i]);
 
-				if (i < 2 && print)
+				if (mPrint)
 				{
-					std::cout << "b[" << i << "] = " << toHex(buff)  << " < " << std::endl;
-					std::cout << "y[" << i << "] = " << toHex(y[i]) << " < " << std::endl;
+					u64 xx = 0;
+					copyBytesMin(xx, x[i]);
+					std::cout << "H(" << std::setw(3) << xx << ") = " << toHex(y[i]) << std::endl;
 				}
 			}
+
 		}
+
+#define CO_TRACE (co_await macoro::get_trace()).str()
 
 		task<> hash(
 			MatrixView<const u8> x,
@@ -142,9 +141,9 @@ namespace osuCrypto
 		{
 
 			if (x.rows() != mN || x.cols() != mInBytes)
-				throw std::runtime_error("GoldreichHash: x size mismatch. " LOCATION);
+				throw std::runtime_error("GoldreichHash: x size mismatch. " + CO_TRACE);
 			if (y.rows() != mN || y.cols() != mOutBytes)
-				throw std::runtime_error("GoldreichHash: y size mismatch. " LOCATION);
+				throw std::runtime_error("GoldreichHash: y size mismatch. " + CO_TRACE);
 
 
 			PRNG fPrng(seed);
@@ -166,29 +165,28 @@ namespace osuCrypto
 			// B = A * B
 			co_await mMult.multiplyBits(A.size() * 8, A, B, B, sock);
 
-			const bool print = false;
-			if(print)
-			{
-				auto AA = A;
-				auto BB = B;
-				co_await sock.send(coproto::copy(AA));
-				co_await sock.send(coproto::copy(BB));
-				co_await sock.recv(AA);
-				co_await sock.recv(BB);
+			//if(mPrint)
+			//{
+			//	auto AA = A;
+			//	auto BB = B;
+			//	co_await sock.send(coproto::copy(AA));
+			//	co_await sock.send(coproto::copy(BB));
+			//	co_await sock.recv(AA);
+			//	co_await sock.recv(BB);
 
-				for (u64 i = 0; i < AA.size(); ++i)
-				{
-					AA(i) ^= A(i);
-					BB(i) ^= B(i);
-				}
+			//	for (u64 i = 0; i < AA.size(); ++i)
+			//	{
+			//		AA(i) ^= A(i);
+			//		BB(i) ^= B(i);
+			//	}
 
-				for (u64 i = 0; i < 2; ++i)
-				{
-					//std::cout << "A[" << i << "] = " << toHex(AA[i]) << std::endl;
-					if (mPartyIdx)
-						std::cout << "&[" << i << "] = " << toHex(BB[i]) << std::endl;
-				}
-			}
+			//	for (u64 i = 0; i < 2; ++i)
+			//	{
+			//		//std::cout << "A[" << i << "] = " << toHex(AA[i]) << std::endl;
+			//		if (mPartyIdx)
+			//			std::cout << "&[" << i << "] = " << toHex(BB[i]) << std::endl;
+			//	}
+			//}
 
 			// y[i] = f0 * (x[i] || B[i])
 			std::vector<u8> buff(x.cols() + mNumIntermediateBytes);
@@ -198,45 +196,45 @@ namespace osuCrypto
 				span<u8> bb(buff);
 				copyBytes(bb.subspan(0, x.cols()), x[i]);
 				copyBytes(bb.subspan(x.cols(), B.cols()), B[i]);
-				//memcpy(buff.data(), x.data(i), x.cols());
-				//memcpy(buff.data() + x.cols(), B[i].data(), B.cols());
-
 				buff[0] ^= mPartyIdx;
 				f0.encode(buff, y[i]);
+			}
 
-				if (i < 2 && print)
+			if (mPrint)
+			{
+				Matrix<u8> YY = y;
+				Matrix<u8> XX(x.rows(), x.cols());
+				copyBytes(XX, x);
+
+				//auto BB = buff;
+				co_await sock.send(coproto::copy(XX));
+				co_await sock.send(coproto::copy(YY));
+				co_await sock.recv(XX);
+				co_await sock.recv(YY);
+
+				for (u64 j = 0; j < YY.size(); ++j)
+					YY(j) = YY(j) ^ y(j);
+				for (u64 i = 0; i < XX.size(); ++i)
+					XX(i) ^= x(i);
+
+				if (mPartyIdx)
 				{
-					//std::cout << "yy[" << i << "] = " << toHex(y[i]) << std::endl;
-					Matrix<u8> YY = y;
-
-					auto BB = buff;
-					co_await sock.send(coproto::copy(BB));
-					co_await sock.send(coproto::copy(YY));
-					co_await sock.recv(BB);
-					co_await sock.recv(YY);
-
-					std::vector<u8> yi(YY.cols());
-					for (u64 j = 0; j < YY.cols(); ++j)
+					std::cout << "GoldreichHash: " << seed << std::endl;
+					for (u64 i = 0; i < mN; ++i)
 					{
-						yi[j] = YY[i][j] ^ y[i][j];
-					}
 
-					for (u64 i = 0; i < BB.size(); ++i)
-					{
-						BB[i] ^= buff[i];
-					}
-
-					//if (mPartyIdx)
-					{
-						std::cout << "p " << mPartyIdx << std::endl;
+						u64 x = 0;
+						copyBytesMin(x, XX[i]);
+						std::cout << "H(" << std::setw(3) << x << ") = " << toHex(YY[i]) << std::endl;
+						//std::cout << "p " << mPartyIdx << std::endl;
 						//std::cout << "f[" << i << "] = " << toHex(BB) << " " << toHex(buff) << std::endl;
-						std::cout << "b[" << i << "] = " << toHex(BB) << " " << toHex(buff) << std::endl;
-						std::cout << "y[" << i << "] = " << toHex(yi) << " = " 
-							<< toHex(y[i]) << " + " << toHex(YY[i]) << std::endl;
+						//std::cout << "b[" << i << "] = " << toHex(BB) << " " << toHex(buff) << std::endl;
+						//std::cout << "y[" << i << "] = " << toHex(yi) << " = " 
+						//	<< toHex(y[i]) << " + " << toHex(YY[i]) << std::endl;
 					}
 				}
-
 			}
+
 
 		}
 

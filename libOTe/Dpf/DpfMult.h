@@ -562,7 +562,18 @@ namespace osuCrypto
 
 	};
 
+	inline std::string toHex(span<u8> data)
+	{
+		std::stringstream ss;
+		for (auto b : data)
+			ss << std::hex << std::setw(2) << std::setfill('0') << (int)b;
+		return ss.str();
+	}
+
 }
 #undef SIMD8
 
+
 #endif // defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
+
+

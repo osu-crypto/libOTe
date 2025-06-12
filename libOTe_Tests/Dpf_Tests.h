@@ -9,10 +9,11 @@ void RegularDpf_MultBit_Test(const oc::CLP& cmd);
 void RegularDpf_Proto_Test(const oc::CLP& cmd);
 void RegularDpf_Puncture_Test(const oc::CLP& cmd);
 void RegularDpf_keyGen_Test(const oc::CLP& cmd);
-void SparseDpf_Proto_Test(const oc::CLP& cmd);
+void SparseDpf_Mtx_Test(const oc::CLP& cmd);
+void SparseDpf_Vec_Test(const oc::CLP& cmd);
 void TritDpf_Proto_Test(const oc::CLP& cmd);
 
-void MtxDpf_Proto_Test(const oc::CLP& cmd); 
+void MtxDmpf_Proto_Test(const oc::CLP& cmd); 
 void Goldreich_Proto_Test(const oc::CLP& cmd);
 void Goldreich_stat_Test(const oc::CLP& cmd);
 

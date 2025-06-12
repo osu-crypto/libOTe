@@ -218,16 +218,36 @@ namespace osuCrypto
 
 		};
 
-		template<typename Output>
+		// Helper template to detect if a type has a `rows()` method
+		template <typename T, typename = void>
+		struct has_rows : std::false_type {};
+
+		template <typename T>
+		struct has_rows<T, std::void_t<decltype(std::declval<T>().rows())>> : std::true_type {};
+
+
+		template<typename Output, typename SparsePoints>
 		macoro::task<> expand(
 			span<u64> points,
 			span<block> values,
 			Output&& output,
 			PRNG& prng,
-			MatrixView<u32> sparsePoints,
+			SparsePoints&& sparsePoints,
 			coproto::Socket& sock)
 		{
-			if (points.size() != sparsePoints.rows())
+			static_assert(std::is_invocable_v<Output, u64, u64, block, u8>);
+			static_assert(std::is_same_v<std::remove_cvref_t<decltype(sparsePoints[0][0])>, u32>);
+
+			// if we have sparsePoints.rows()  the call that.
+			// otherwise sparsePoints.size() is the number of points
+			auto rows = [&]() {
+				if constexpr (has_rows<SparsePoints>::value)
+					return sparsePoints.rows();
+				else
+					return sparsePoints.size();
+				};
+
+			if (points.size() != rows())
 				throw RTE_LOC;
 			u64 depth = log2ceil(mDomain) - mDenseDepth;
 
@@ -263,6 +283,7 @@ namespace osuCrypto
 			//		std::cout << p << " ";
 			//	std::cout << std::endl;
 			//}
+			std::vector<block> gamma(values.begin(), values.end());
 
 
 			if (mDenseDepth)
@@ -278,15 +299,29 @@ namespace osuCrypto
 				Matrix<u8> tags(points.size(), 1ull << mDenseDepth);
 				co_await mRegDpf.expand(densePoints, {}, prng.get(), [&](auto treeIdx, auto leafIdx, auto seed, block tag) {
 					seeds(treeIdx, leafIdx) = seed;
-					tags(treeIdx, leafIdx) = tag.get<u8>(0)&1;
+					tags(treeIdx, leafIdx) = tag.get<u8>(0) & 1;
 					}, sock);
 
-				for (u64 r = 0; r < sparsePoints.rows(); ++r)
+				//Matrix<block> pSeeds(seeds.rows(), seeds.cols());
+				//Matrix<u8> pTags(points.size(), 1ull << mDenseDepth);
+				//co_await sock.send(coproto::copy(seeds));
+				//co_await sock.send(coproto::copy(tags));
+				//co_await sock.recv(pSeeds);
+				//co_await sock.recv(pTags);
+				//{
+				//	for (i64 i = 0; i < seeds.size(); ++i)
+				//	{
+				//		pSeeds(i) ^= seeds(i);
+				//		pTags(i) ^= tags(i);
+				//	}
+				//}
+
+				for (u64 r = 0; r < points.size(); ++r)
 				{
 					//auto seed = seeds[i]
 					auto& tree = trees[r];
-					auto iter = sparsePoints[r].begin();
-					auto end = sparsePoints[r].end();
+					auto iter = sparsePoints[r].data();
+					auto end = iter + sparsePoints[r].size();
 					while (iter != end)
 					{
 						auto p = *iter;
@@ -298,10 +333,13 @@ namespace osuCrypto
 						auto points = span<u32>(iter, e);
 						if (points.size() == 1)
 						{
-							auto idx = std::distance(sparsePoints.data(r), &points[0]);
+							auto idx = std::distance(sparsePoints[r].data(), &points[0]);
 							leafValues[r][idx] = seed;
 							leafTags[r][idx] = tag;
-							//std::cout << "p " << mPartyIdx << " leaf " << idx << " seed " << seed << " " << int(tag) << std::endl;
+							gamma[r] = gamma[r] ^ leafValues[r][idx];
+
+							//if(mPartyIdx)
+							//	std::cout << "p " << mPartyIdx << " leaf " << idx << " seed " << pSeeds(r,bin) << " " << int(pTags(r,bin)) << std::endl;
 						}
 						else if (points.size())
 						{
@@ -311,13 +349,25 @@ namespace osuCrypto
 							cSeeds[0] = mAesFixedKey.hashBlock(seed ^ ZeroBlock);
 							cSeeds[1] = mAesFixedKey.hashBlock(seed ^ OneBlock);
 
+							//block pcSeeds[2];
+							//{
+							//	co_await sock.send(block(cSeeds[0]));
+							//	co_await sock.send(block(cSeeds[1]));
+							//	co_await sock.recv(pcSeeds[0]);
+							//	co_await sock.recv(pcSeeds[1]);
+							//	pcSeeds[0] ^= cSeeds[0];
+							//	pcSeeds[1] ^= cSeeds[1];
+							//}
+
 							auto children = root.children();
 							for (u64 j = 0; j < 2; ++j)
 							{
 								auto [delta2, b2] = partition(children[j], delta);
 								//if (!mPartyIdx)
 								//	std::cout << b2.print(delta2) << std::endl;
-								//std::cout << "p " << mPartyIdx << " d " << delta << " j " << j <<" bin " << bin << " seed " << cSeeds[j] << " " << int(tag) << std::endl;
+								//if (mPartyIdx)
+								//	std::cout << "p " << mPartyIdx << " d " << delta << " j " << j <<" bin " << bin << " seed " << pcSeeds[j] << " " << int(pTags(r, bin)) << std::endl;
+
 								tree[delta2].push_back(j, delta, b2, cSeeds[j], tag);
 								tree.mZ[delta][j] ^= cSeeds[j];
 								tree.mC[delta] = 1;
@@ -332,7 +382,7 @@ namespace osuCrypto
 
 				for (u64 r = 0; r < mNumPoints; ++r)
 				{
-					auto points = sparsePoints[r];
+					auto&& points = sparsePoints[r];
 					auto& tree = trees[r];
 					// range must be sorted and unique
 					//if (std::adjacent_find(points.begin(), points.end(), std::greater<u32>{}) != points.end())
@@ -440,8 +490,23 @@ namespace osuCrypto
 						//auto old = seed;
 						seed = seed ^ (pSigma & block::allSame<u8>(-tag));
 
-						//std::cout <<"p " << mPartyIdx << " d " << dNext << " i " << i << " "
-						//	<<old << " -> " << seed << " via >"<<  int(parent)<< "< " << pSigma << " t " << int(tag) << std::endl;
+						//if (r == 0)
+						//{
+						//	co_await sock.send(block(seed));
+						//	co_await sock.send(u8(tag));
+						//	block ss;
+						//	u8 tt;
+						//	co_await sock.recv(ss);
+						//	co_await sock.recv(tt);
+						//	ss ^= seed;
+						//	tt ^= tag;
+
+						//	if (mPartyIdx)
+						//	{
+						//		std::cout << " d " << dNext << " i " << i << " "
+						//			<< ss << " via >" << int(parent) << "< " << pSigma << " t " << int(tt) << std::endl;
+						//	}
+						//}
 
 						std::array<block, 2> cSeed;
 						cSeed[0] = mAesFixedKey.hashBlock(seed ^ ZeroBlock);
@@ -468,7 +533,6 @@ namespace osuCrypto
 				}
 			}
 
-			std::vector<block> gamma(values.begin(), values.end());
 			for (u64 r = 0; r < mNumPoints; ++r)
 			{
 				auto& tree = trees[r];
@@ -484,12 +548,23 @@ namespace osuCrypto
 					auto pTau = tree.mTau[parent][j];
 					auto pSigma = tree.mSigma[parent];
 
-					auto b = std::distance(sparsePoints.data(r), par.mRange.data());
+					auto b = std::distance(sparsePoints[r].data(), par.mRange.data());
 					leafTags[r][b] = lsb(seed) ^ tag * pTau;
 					leafValues[r][b] = seed ^ (pSigma & block::allSame<u8>(-tag));
 					gamma[r] = gamma[r] ^ leafValues[r][b];
-					//std::cout << "p " << mPartyIdx << " d " << 0 << " i " << i << " "
-					//	<< seed << " -> " << leafValues[r][b] << " via >" << int(parent) << "< " << pSigma << " t " << int(tag) << std::endl;
+
+					//{
+					//	block val;
+					//	co_await sock.send(block(leafValues[r][b]));
+					//	co_await sock.recv(val);
+					//	val ^= leafValues[r][b];
+					//	if (mPartyIdx)
+					//		std::cout << "leaf r " << r << " b " << val << std::endl;
+
+					//		//std::cout << "p " << mPartyIdx << " d " << 0 << " i " << i << " "
+					//		//	<< seed << " -> " << leafValues[r][b] << " via >" << int(parent) << "< " << pSigma << " t " << int(tag) << std::endl;
+
+					//}
 
 				}
 			}
@@ -507,6 +582,24 @@ namespace osuCrypto
 					//std::cout << "p " << mPartyIdx << " d " << 0 << " i " << i << " "
 					//	<< leafValues[r][i] << " -> " << val << " via " << gamma[r] << " t " << int(leafTags[r][i]) << std::endl;
 
+					//if (r == 0)
+					//{
+					//	co_await sock.send(block(val));
+					//	co_await sock.send(u8(leafTags[r][i]));
+					//	block ss;
+					//	u8 tt;
+					//	co_await sock.recv(ss);
+					//	co_await sock.recv(tt);
+					//	ss ^= val;
+					//	tt ^= leafTags[r][i];
+
+					//	if (mPartyIdx)
+					//	{
+					//		std::cout << " leaf i " << i << " "
+					//			<< ss << " t " << int(tt) << std::endl;
+					//	}
+
+					//}
 					output(r, i, val, leafTags[r][i]);
 				}
 			}
