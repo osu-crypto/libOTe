@@ -1,9 +1,9 @@
 ﻿#include "Equality_Tests.h"
-#include "libOTe/Dpf/InvMtxDmpf/Equality.h"
+#include "libOTe/Dpf/RevCuckoo/Equality.h"
 #include "macoro/sync_wait.h"
 #include "macoro/when_all.h"
 #include "coproto/Socket/LocalAsyncSock.h"
-#include "libOTe/Dpf/InvMtxDmpf/Dedup.h"
+#include "libOTe/Dpf/RevCuckoo/Dedup.h"
 
 namespace osuCrypto
 {

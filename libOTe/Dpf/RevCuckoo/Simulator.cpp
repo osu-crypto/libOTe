@@ -833,7 +833,7 @@ namespace osuCrypto
 		std::cout << std::endl;
 	}
 
-	void InvMtxDmpfSimulator(const CLP& cmd)
+	void RevCuckooSimulator(const CLP& cmd)
 	{
 
 		simpleTest(cmd);

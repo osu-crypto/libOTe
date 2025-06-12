@@ -9,7 +9,7 @@ set(SRCS
     OT_Tests.cpp
     Pprf_Tests.cpp
     Dpf_Tests.cpp
-    InvMtxDmpf_Tests.cpp
+    RevCuckoo_Tests.cpp
     SilentOT_Tests.cpp
     SoftSpoken_Tests.cpp
     TungstenCode_Tests.cpp
@@ -18,9 +18,10 @@ set(SRCS
     Foleage_Tests.cpp
     Cmp_Tests.cpp
     Permute_Tests.cpp
+    Equality_Tests.cpp
 )
 
-add_library(libOTe_Tests STATIC ${SRCS} "Equality_Tests.cpp")
+add_library(libOTe_Tests STATIC ${SRCS})
 
 target_link_libraries(libOTe_Tests libOTe)
 

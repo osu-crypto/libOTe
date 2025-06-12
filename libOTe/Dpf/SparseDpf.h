@@ -9,6 +9,7 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Matrix.h"
+#include "libOTe/Dpf/RegularDpf.h"
 
 namespace osuCrypto
 {

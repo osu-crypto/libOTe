@@ -2,15 +2,15 @@
 
 #include "cryptoTools/Common/Defines.h"
 #include "libOTe/Dpf/SparseDpf.h"
-#include "InvMtxDmpf/Dedup.h"
-#include "InvMtxDmpf/GoldreichHash.h"
-#include "InvMtxDmpf/WaksmanPermute.h"
-#include "InvMtxDmpf/BinarySolver.h"
+#include "RevCuckoo/Dedup.h"
+#include "RevCuckoo/GoldreichHash.h"
+#include "RevCuckoo/WaksmanPermute.h"
+#include "RevCuckoo/BinarySolver.h"
 #include "SparseDpf.h"
 namespace osuCrypto
 {
 
-	struct InvMtxDmpf
+	struct RevCuckooDmpf
 	{
 
 		u64 mPartyIdx = 0;

@@ -27,7 +27,7 @@
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
-#include "libOTe/Dpf/InvMtxDmpf/Simulator.h"
+#include "libOTe/Dpf/RevCuckoo/Simulator.h"
 
 using namespace osuCrypto;
 #ifdef ENABLE_IKNP
@@ -97,7 +97,7 @@ int main(int argc, char** argv)
 	}
 	if(cmd.isSet("invMtx"))
 	{
-		InvMtxDmpfSimulator(cmd);
+		RevCuckooSimulator(cmd);
 		return 0;
 	}
 

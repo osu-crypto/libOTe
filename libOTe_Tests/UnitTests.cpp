@@ -18,7 +18,7 @@
 #include "libOTe_Tests/TungstenCode_Tests.h"
 #include "libOTe_Tests/Dpf_Tests.h"
 #include "libOTe_Tests/Foleage_Tests.h"
-#include "libOTe_Tests/InvMtxDmpf_Tests.h"
+#include "libOTe_Tests/RevCuckoo_Tests.h"
 #include "libOTe_Tests/Cmp_Tests.h"
 #include "libOTe_Tests/Equality_Tests.h"
 #include "libOTe_Tests/Permute_Tests.h"
@@ -85,7 +85,7 @@ namespace tests_libOTe
 			tc.add("Goldreich_stat_Test                     ", Goldreich_stat_Test);
 			tc.add("WaksmanPermute_plain_Test               ", WaksmanPermute_plain_Test);
 			tc.add("WaksmanPermute_Proto_Test               ", WaksmanPermute_Proto_Test);
-			tc.add("MtxDmpf_Proto_Test                      ", MtxDmpf_Proto_Test);
+			tc.add("RevCuckoo_Proto_Test                      ", RevCuckoo_Proto_Test);
 			
 
 			tc.add("Dedup_orTree_test                       ", Dedup_orTree_test);

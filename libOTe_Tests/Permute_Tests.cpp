@@ -1,6 +1,6 @@
 ﻿#include "Permute_Tests.h"
 
-#include "libOTe/Dpf/InvMtxDmpf/WaksmanPermute.h"
+#include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
 #include "cryptoTools/Common/Matrix.h"
 #include "cryptoTools/Common/CLP.h"
 #include "cryptoTools/Crypto/PRNG.h"

@@ -7,6 +7,6 @@ namespace osuCrypto
 
 
 
-	void InvMtxDmpfSimulator(const CLP& cmd);
+	void RevCuckooSimulator(const CLP& cmd);
 
 }
