@@ -43,7 +43,6 @@ namespace osuCrypto
         typename F,
         typename CoeffCtx = DefaultCoeffCtx<F>
     >
-
     struct PprfSender : public TimerAdapter 
     {
 		virtual ~PprfSender() = default;

@@ -520,8 +520,8 @@ void StationaryPprf_test_impl(
 	ctx.resize(delta, numPoints * program);
 	for (u64 i = 0; i < delta.size(); ++i)
 	{
-		delta[i] = F(1);
-		//ctx.fromBlock(delta[i], seed);
+		//delta[i] = F(1);
+		ctx.fromBlock(delta[i], seed);
 	}
 
 	sender.configure(domain, numPoints);

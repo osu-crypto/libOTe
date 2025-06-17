@@ -393,8 +393,8 @@ namespace osuCrypto
 		for (u64 i = 0; i < outSize; ++i)
 		{
 			auto a =
-				popcount<u16>(fftSparsePoly[i] & lsbMask) & 1 ^
-				(popcount<u16>(fftSparsePoly[i] & msbMask) & 1) << 1;
+				(popcount<u16>(fftSparsePoly[i] & lsbMask) & 1) ^
+				((popcount<u16>(fftSparsePoly[i] & msbMask) & 1) << 1);
 
 			if (a !=
 				(((fftSparsePoly[i] >> 0) ^
@@ -568,14 +568,15 @@ namespace osuCrypto
 						{
 							for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
 							{
-								fft[i] |= block{ coeff[element_idx] } << (2 * poly_index);
+								fft[i] |= block{ coeff[element_idx] }.slli_epi64(2 * poly_index);
 							}
 						}
 						else
 						{
 							for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
 							{
-								fft[i] |= block{ coeff[element_idx], 0 } << (2 * poly_index - 64);
+								fft[i] |= 
+									block{ coeff[element_idx], 0 }.slli_epi64(2 * poly_index - 64);
 							}
 						}
 					}

@@ -604,12 +604,12 @@ namespace osuCrypto
 		// Initialize the appropriate PPRF based on noise distribution
 		if (noiseType == SdNoiseDistribution::Regular)
 		{
-			mGenVar.emplace<0>();// = RegularPprfReceiver<F, Ctx>{};
+			mGenVar.template emplace<0>();// = RegularPprfReceiver<F, Ctx>{};
 			mPprfFormat = PprfOutputFormat::Interleaved;
 		}
 		else if (noiseType == SdNoiseDistribution::Stationary)
 		{
-			mGenVar.emplace<1>();// = StationaryPprfReceiver<F, Ctx>{};
+			mGenVar.template emplace<1>();// = StationaryPprfReceiver<F, Ctx>{};
 			mPprfFormat = PprfOutputFormat::ByTreeIndex;
 		}
 		else

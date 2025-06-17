@@ -39,6 +39,8 @@ namespace osuCrypto
         {
             d = std::log2(1 - minDistRatio);
         }
+        else
+            throw RTE_LOC;
 
         auto t = std::max<u64>(40, -double(secParam) / d);
         if(N < 512)

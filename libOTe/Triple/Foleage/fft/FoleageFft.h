@@ -73,7 +73,10 @@ namespace osuCrypto
 			// computed as: mult_l = (h ^ l) and mult_h = l
 			// mult_l = (xor&mask_h>>1) ^ (xor & mask_l) [align h and l then xor]
 			// mult_h = (xor&mask_l) shifted left by 1 to put in h place [shift and OR into place]
-			mult = ((xor_h >> 1) ^ xor_l) | (xor_l << 1);
+			if constexpr(std::is_same_v<T,block>)
+				mult = (xor_h.srli_epi64(1) ^ xor_l) | xor_l.slli_epi64(1);
+			else
+				mult = ((xor_h >> 1) ^ xor_l) | (xor_l << 1);
 
 			// tL coefficient obtained by evaluating on X_i=1
 			tL = coeffsL[j] ^ coeffsM[j] ^ coeffsR[j];
