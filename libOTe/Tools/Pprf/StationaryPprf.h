@@ -133,7 +133,7 @@ namespace osuCrypto
 				for (; k < treeSize; ++k)
 				{
 					auto seed = aes.hashBlock(*shareIter++);
-					ctx.fromBlock<F>(val[0], seed);
+					ctx.template fromBlock<F>(val[0], seed);
 					ctx.plus(sum[0], sum[0], val[0]);
 					ctx.copy(*outIter++, val[0]);
 				}
