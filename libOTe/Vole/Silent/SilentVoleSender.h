@@ -137,6 +137,9 @@ namespace osuCrypto
 		// BaseExtend requires less compute but more rounds
 		SilentBaseType mBaseType = SilentBaseType::BaseExtend;
 
+		// Seed for syndrome decoding
+		block mCodeSeed = ZeroBlock; 
+
 		// The base VOLE correlation vector (sender's share)
 		// Used to initialize the non-zeros of the noisy vector
 		VecF mBaseB;
@@ -496,6 +499,7 @@ namespace osuCrypto
 		mNumPartitions = config.mNumPartitions;
 		mSizePer = config.mSizePer;
 		mNoiseVecSize = mNumPartitions * mSizePer;
+		mCodeSeed = block(12528943721987127, 98743297823479812);
 
 		// Initialize the appropriate PPRF based on noise distribution
 		if (SdNoiseDistribution::Regular == noiseType)
@@ -697,7 +701,10 @@ namespace osuCrypto
 				ExConvConfigure(mMultType, scaler, expanderWeight, accumulatorWeight, minDist);
 				assert(scaler == 2 && minDist < 1 && minDist > 0);
 
-				encoder.config(mRequestSize, mNoiseVecSize, expanderWeight, accumulatorWeight);
+				encoder.config(mRequestSize, mNoiseVecSize, 
+					expanderWeight, accumulatorWeight, true, true,
+					mCodeSeed);
+
 				if (mTimer)
 					encoder.setTimer(getTimer());
 				encoder.dualEncode<F, Ctx>(mB.begin(), mCtx);
@@ -713,7 +720,7 @@ namespace osuCrypto
 					std::is_same_v<Ctx, CoeffCtxGF128>)
 				{
 					QuasiCyclicCode encoder;
-					encoder.init2(mRequestSize, mNoiseVecSize);
+					encoder.init2(mRequestSize, mNoiseVecSize, mCodeSeed);
 					encoder.dualEncode(mB);
 				}
 				else
@@ -726,7 +733,9 @@ namespace osuCrypto
 			case osuCrypto::MultType::Tungsten:
 			{
 				experimental::TungstenCode encoder;
-				encoder.config(oc::roundUpTo(mRequestSize, 8), mNoiseVecSize);
+				encoder.config(
+					oc::roundUpTo(mRequestSize, 8),
+					mNoiseVecSize, mCodeSeed);
 				encoder.dualEncode<F, Ctx>(mB.begin(), mCtx);
 				break;
 			}
@@ -734,6 +743,8 @@ namespace osuCrypto
 				throw std::runtime_error("Code is not supported. " LOCATION);
 				break;
 			}
+
+			mCodeSeed = mAesFixedKey.hashBlock(mCodeSeed);
 
 			// Resize the buffer to only contain the requested elements
 			mCtx.resize(mB, mRequestSize);
