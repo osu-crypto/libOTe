@@ -110,7 +110,7 @@ namespace osuCrypto
     )
     {
         scaler = 2;
-        minDist = 0.2; // estimated psuedo min dist
+        minDist = 0.25; // estimated psuedo min dist
     }
 
 
@@ -119,7 +119,7 @@ namespace osuCrypto
         double& minDist)
     {
         mScaler = 2;
-        minDist = 0.2; // estimated psuedo min dist
+        minDist = 0.25; // estimated psuedo min dist
 
     }
 
