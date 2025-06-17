@@ -171,7 +171,7 @@ void Vole_Silent_test_impl(u64 n, MultType type, bool debug, bool doFakeBase, bo
 	if (doFakeBase)
 		fakeBase<G>(n, prng, d, recv, send, ctx);
 
-	auto l = noise == SdNoiseDistribution::Regular ? 1 : 3;
+	u64 l = noise == SdNoiseDistribution::Regular ? 1 : 3;
 	for (u64 t = 0; t < l; ++t)
 	{
 		if (t)
