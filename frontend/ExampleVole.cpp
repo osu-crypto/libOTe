@@ -31,7 +31,9 @@ namespace osuCrypto
 		if (role == Role::Receiver)
 		{
 			// construct a vector to stored the received messages.
-			// A = B + C * delta
+			// A = B + C * delta.
+			//
+			// can use std::vector if you modify the associated CoeffContext.
 			AlignedUnVector<G> C(numVole);
 			AlignedUnVector<F> A(numVole);
 			gTimer.setTimePoint("recver.msg.alloc");
