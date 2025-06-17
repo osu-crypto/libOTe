@@ -168,8 +168,6 @@ void Vole_Silent_test_impl(u64 n, MultType type, bool debug, bool doFakeBase, bo
 	send.configure(n, SilentBaseType::BaseExtend, noise);
 	recv.configure(n, SilentBaseType::BaseExtend, noise);
 
-	std::cout << "n " << n << " " << send.mNumPartitions << std::endl;
-
 	if (doFakeBase)
 		fakeBase<G>(n, prng, d, recv, send, ctx);
 
