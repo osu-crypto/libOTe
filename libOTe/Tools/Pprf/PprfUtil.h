@@ -43,8 +43,11 @@ namespace osuCrypto
         typename F,
         typename CoeffCtx = DefaultCoeffCtx<F>
     >
+
     struct PprfSender : public TimerAdapter 
     {
+		virtual ~PprfSender() = default;
+
         using VecF = typename CoeffCtx::template Vec<F>;
 
         virtual  void configure(u64 domainSize, u64 pointCount) = 0;
@@ -79,6 +82,8 @@ namespace osuCrypto
     struct PprfReceiver: public TimerAdapter
     {
         using VecF = typename CoeffCtx::template Vec<F>;
+
+		virtual ~PprfReceiver() = default;
 
         virtual void configure(u64 domainSize, u64 pointCount) = 0;
 

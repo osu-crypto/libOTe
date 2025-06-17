@@ -122,7 +122,7 @@ namespace osuCrypto
 				{
 					aes.hashBlocks<8>(shareIter, seeds.data());
 
-					SIMD8(q, ctx.fromBlock<F>(val[q], seeds[q]));
+					SIMD8(q, ctx.template fromBlock<F>(val[q], seeds[q]));
 					SIMD8(q, ctx.plus(sum[q], sum[q], val[q]));
 					SIMD8(q, ctx.copy(outIter[q], val[q]));
 
@@ -282,7 +282,7 @@ namespace osuCrypto
 				for (; k < treeSize8; k+=8)
 				{
 					aes.hashBlocks<8>(shareIter, seeds.data());
-					SIMD8(q, ctx.fromBlock<F>(val[q], seeds[q]));
+					SIMD8(q, ctx.template fromBlock<F>(val[q], seeds[q]));
 					SIMD8(q, ctx.minus(sum[q], sum[q], val[q]));
 					SIMD8(q, ctx.copy(outIter[q], val[q]));
 
@@ -293,7 +293,7 @@ namespace osuCrypto
 				for (; k < treeSize; ++k)
 				{
 					auto seed = aes.hashBlock(*shareIter++);
-					ctx.fromBlock<F>(val[0], seed);
+					ctx.template fromBlock<F>(val[0], seed);
 					ctx.minus(sum[0], sum[0], val[0]);
 					ctx.copy(*outIter++, val[0]);
 
