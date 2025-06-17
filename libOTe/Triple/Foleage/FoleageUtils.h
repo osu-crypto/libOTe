@@ -318,7 +318,7 @@ namespace osuCrypto
 			tmp = (a_h & b_h);
 			res_poly[i] = tmp ^ (a_h & b_l.slli_epi64(1));
 			res_poly[i] ^= (a_l.slli_epi64(1) & b_h);
-			res_poly[i] |= (a_l & b_l) ^ (tmp >> 1);
+			res_poly[i] |= (a_l & b_l) ^ tmp.srli_epi64(1);
 		}
 	}
 
