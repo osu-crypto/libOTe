@@ -14,22 +14,33 @@ namespace osuCrypto
 
     // We get e^{-2t d/N} security against linear attacks, 
     // with noise weight t and minDist d and code size N. 
+    // 
     // For regular we can be slightly more accurate with
     //    (1 − 2d/N)^t
     // which implies a bit security level of
     // k = -t * log2(1 - 2d/N)
     // t = -k / log2(1 - 2d/N)
     //
+    // For stationary, we get
+    //    (1-d/N)^t
+    // 
     // minDistRatio = d / N
     // where d is the min dist and N is the code size.
-    u64 getRegNoiseWeight(double minDistRatio, u64 N, u64 secParam)
+    u64 getRegNoiseWeight(double minDistRatio, u64 N, u64 secParam, SdNoiseDistribution nd)
     {
         if (minDistRatio > 0.5 || minDistRatio <= 0)
             throw RTE_LOC;
+        double d;
+        if (nd == SdNoiseDistribution::Regular)
+        {
+            d = std::log2(1 - 2 * minDistRatio);
+        }
+        else if (nd == SdNoiseDistribution::Stationary)
+        {
+            d = std::log2(1 - minDistRatio);
+        }
 
-        auto d = std::log2(1 - 2 * minDistRatio);
         auto t = std::max<u64>(40, -double(secParam) / d);
-
         if(N < 512)
             t = std::max<u64>(t, 64);
 

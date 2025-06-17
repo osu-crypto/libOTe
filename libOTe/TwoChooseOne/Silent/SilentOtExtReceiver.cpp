@@ -142,7 +142,7 @@ namespace osuCrypto
 	}
 
 
-	task<> SilentOtExtReceiver::genSilentBaseOts(
+	task<> SilentOtExtReceiver::genSilentCor(
 		PRNG& prng,
 		Socket& chl,
 		bool useOtExtension)
@@ -213,7 +213,10 @@ namespace osuCrypto
 		u64 secParam = 128;
 		mRequestNumOts = numOTs;
 
-		syndromeDecodingConfigure(mNumPartitions, mSizePer, mNoiseVecSize, secParam, mRequestNumOts, mMultType);
+		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mMultType, SdNoiseDistribution::Regular, 1);
+		mNumPartitions = param.mNumPartitions;
+		mSizePer = param.mSizePer;
+		mNoiseVecSize = param.mNumPartitions * param.mSizePer;
 
 		mS.resize(mNumPartitions);
 		mGen.configure(mSizePer, mS.size());
@@ -376,7 +379,7 @@ namespace osuCrypto
 		if (mGen.hasBaseOts() == false)
 		{
 			// recvs data
-			co_await(genSilentBaseOts(prng, chl));
+			co_await(genSilentCor(prng, chl));
 		}
 
 		setTimePoint("recver.expand.start");

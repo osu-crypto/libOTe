@@ -63,7 +63,10 @@ namespace osuCrypto {
         template<typename F>
         u64 bitSize()
         {
-            return sizeof(F) * 8;
+            if constexpr (std::is_same_v<F, bool>)
+                return 1;
+            else
+                return sizeof(F) * 8;
         }
 
         // return the binary decomposition of x. This will be used to 
@@ -82,10 +85,16 @@ namespace osuCrypto {
         OC_FORCEINLINE void fromBlock(F& ret, const block& b) {
             static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
 
-            if constexpr (std::is_same<F,block>::value)
+
+            if constexpr (std::is_same<F, block>::value)
             {
                 // if F is a block, just return the block.
                 ret = b;
+            }
+            else if constexpr (std::is_same<F, bool>::value)
+            {
+                // if F is a block, just return the block.
+                ret = b.get<u8>(0) & 1;
             }
             else if constexpr (sizeof(F) <= sizeof(block))
             {

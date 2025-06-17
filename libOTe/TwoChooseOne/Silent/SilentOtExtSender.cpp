@@ -90,7 +90,7 @@ namespace osuCrypto
 
 	}
 
-	task<> SilentOtExtSender::genSilentBaseOts(PRNG& prng, Socket& chl, bool useOtExtension)
+	task<> SilentOtExtSender::genSilentCor(PRNG& prng, Socket& chl, bool useOtExtension)
 	{
 		MACORO_TRY{
 
@@ -169,8 +169,10 @@ namespace osuCrypto
 		u64 secParam = 128;
 		mRequestNumOts = numOTs;;
 
-		syndromeDecodingConfigure(mNumPartitions, mSizePer, mNoiseVecSize, secParam, mRequestNumOts, mMultType);
-
+		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mMultType, SdNoiseDistribution::Regular, 1);
+		mNumPartitions = param.mNumPartitions;
+		mSizePer = param.mSizePer;
+		mNoiseVecSize = param.mNumPartitions * param.mSizePer;
 
 		mGen.configure(mSizePer, mNumPartitions);
 	}
@@ -348,7 +350,7 @@ namespace osuCrypto
 
 		if (hasSilentBaseOts() == false)
 		{
-			co_await(genSilentBaseOts(prng, chl));
+			co_await(genSilentCor(prng, chl));
 		}
 
 		setTimePoint("sender.expand.start");

@@ -252,8 +252,8 @@ namespace osuCrypto
 		try
 		{
 			using Ctx = CoeffCtxGF2;
-			RegularPprfReceiver<block, block, Ctx> recver;
-			RegularPprfSender<block, block, Ctx> sender;
+			RegularPprfReceiver<block, Ctx> recver;
+			RegularPprfSender<block, Ctx> sender;
 
 			u64 trials = cmd.getOr("t", 10);
 

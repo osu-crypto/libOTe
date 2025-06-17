@@ -527,11 +527,11 @@ namespace osuCrypto
 	{
 		if (mSendRecv.index())
 		{
-			return std::get<1>(mSendRecv).genSilentBaseOts(prng, sock, baseType == SilentBaseType::BaseExtend);
+			return std::get<1>(mSendRecv).genSilentCor(prng, sock, baseType == SilentBaseType::BaseExtend);
 		}
 		else
 		{
-			return std::get<0>(mSendRecv).genSilentBaseOts(prng, sock, baseType == SilentBaseType::BaseExtend);
+			return std::get<0>(mSendRecv).genSilentCor(prng, sock, baseType == SilentBaseType::BaseExtend);
 		}
 	}
 

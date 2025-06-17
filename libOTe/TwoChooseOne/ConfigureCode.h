@@ -1,10 +1,16 @@
 ﻿#pragma once
 #include "libOTe/config.h"
 #include "cryptoTools/Common/Defines.h"
-
+#include "libOTe/TwoChooseOne/TcoOtDefines.h"
 
 namespace osuCrypto
 {
+
+    enum class SdNoiseDistribution
+    {
+        Regular, // Use the regular noise generation method
+        Stationary, // use the stationary noise model
+    };
 
     enum class MultType
     {
@@ -73,9 +79,13 @@ namespace osuCrypto
     // k = -t * log2(1 - 2d/N)
     // t = -k / log2(1 - 2d/N)
     //
+    //
+    // For stationary, we get
+    //    (1-d/N)^t
+    // 
     // minDistRatio = d / N
     // where d is the min dist and N is the code size.
-    u64 getRegNoiseWeight(double minDistRatio, u64 N, u64 secParam);
+    u64 getRegNoiseWeight(double minDistRatio, u64 N, u64 secParam, SdNoiseDistribution noiseType);
 
 
     class EACode;
@@ -113,16 +123,31 @@ namespace osuCrypto
 
     }
 
-    inline void syndromeDecodingConfigure(
-        u64& mNumPartitions, u64& mSizePer, u64& mNoiseVecSize,
+    struct SdConfig
+    {
+        u64 mNumPartitions = 0;
+        u64 mSizePer = 0;
+	};
+
+    // routine for choosing SD parameters.
+    //
+    // * secParam is the desired computational security parameter.
+    // * requestSize the compressed vector size. 
+    // * multType the code to be used.
+    // * noiseType the choice distribution
+    // * groupBitCount the bit count of the subfield or smallest subgroup. 
+    //   For example, Z2k should be 1 because you have the Z2 subgroup.
+    inline SdConfig syndromeDecodingConfigure(
         u64 secParam,
-        u64 mRequestSize,
-        MultType mMultType)
+        u64 requestSize,
+        MultType multType, 
+        SdNoiseDistribution noiseType,
+        u64 groupBitCount)
     {
 
         double minDist = 0;
         u64 scaler = 0;
-        switch (mMultType)
+        switch (multType)
         {
         case osuCrypto::MultType::ExAcc7:
         case osuCrypto::MultType::ExAcc11:
@@ -130,14 +155,14 @@ namespace osuCrypto
         case osuCrypto::MultType::ExAcc40:
         {
             u64 _1;
-            EAConfigure(mMultType, scaler, _1, minDist);
+            EAConfigure(multType, scaler, _1, minDist);
             break;
         }
         case osuCrypto::MultType::ExConv7x24:
         case osuCrypto::MultType::ExConv21x24:
         {
             u64 _1, _2;
-            ExConvConfigure(mMultType, scaler, _1, _2, minDist);
+            ExConvConfigure(multType, scaler, _1, _2, minDist);
             break;
         }
         case MultType::QuasiCyclic:
@@ -145,7 +170,7 @@ namespace osuCrypto
             break;
         case osuCrypto::MultType::Tungsten:
         {
-            mRequestSize = roundUpTo(mRequestSize, 8);
+            requestSize = roundUpTo(requestSize, 8);
             TungstenConfigure(scaler, minDist);
             break;
         }
@@ -154,8 +179,14 @@ namespace osuCrypto
             break;
         }
 
-        mNumPartitions = getRegNoiseWeight(minDist, mRequestSize * scaler, secParam);
-        mSizePer = std::max<u64>(4, roundUpTo(divCeil(mRequestSize * scaler, mNumPartitions), 2));
-        mNoiseVecSize = mSizePer * mNumPartitions;
+        // for small fields and SD we use the conservative parameters.
+        // otherwise just use the normal SD parameters. 
+        if (groupBitCount > 4 && noiseType == SdNoiseDistribution::Stationary)
+            noiseType = SdNoiseDistribution::Regular;
+
+        SdConfig config;
+        config.mNumPartitions = getRegNoiseWeight(minDist, requestSize * scaler, secParam, noiseType);
+        config.mSizePer = std::max<u64>(4, roundUpTo(divCeil(requestSize * scaler, config.mNumPartitions), 2));
+        return config;
     }
 }

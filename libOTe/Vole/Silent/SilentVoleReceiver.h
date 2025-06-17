@@ -15,6 +15,7 @@
 #include <cryptoTools/Common/Timer.h>
 #include <libOTe/Tools/Tools.h>
 #include "libOTe/Tools/Pprf/RegularPprf.h"
+#include "libOTe/Tools/Pprf/StationaryPprf.h"
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
@@ -26,13 +27,58 @@
 #include <numeric>
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtUtil.h"
-#include <libOTe/Tools/QuasiCyclicCode.h>
 #include <libOTe/Tools/TungstenCode/TungstenCode.h>
+#include <libOTe/Vole/VoleUtil.h>
 
 namespace osuCrypto
 {
 
-
+	/**
+	 * @file SilentVoleReceiver.h
+	 * @brief Implements the SilentVOLE receiver functionality.
+	 *
+	 * This class implements the receiver side of the Silent Vector Oblivious Linear Evaluation (VOLE) protocol,
+	 * as described in the paper "Silver: Silent VOLE and Oblivious Transfer from Hardness of Decoding Structured LDPC Codes"
+	 * (https://eprint.iacr.org/2021/1150). The protocol allows two parties (sender and receiver) to generate correlated
+	 * random vectors a, b, and c such that a = b + c * delta, where the receiver learns a and c, and the sender learns b and delta.
+	 * This is done with minimal communication after an initial setup, making it suitable for high-performance applications.
+	 *
+	 * @tparam F The type of the field element for the VOLE values (a, b). Common choices are `block` (GF(2^128)), `u64` (integers).
+	 * @tparam G The type of the subfield element for the VOLE values (c). It can be the same as F or a subfield, eg G=GF2,F=(GF(2^128)).
+	 * @tparam Ctx The context class that provides arithmetic operations for F and G.
+	 *             Examples: `CoeffCtxGF128` (for GF(2^128)), `CoeffCtxInteger` (for integers), `CoeffCtxGF2` (for GF(2)), `CoeffCtxArray`.
+	 *
+	 * Usage:
+	 * 1.  Include the header: `#include <libOTe/Vole/Silent/SilentVoleReceiver.h>`
+	 * 2.  Instantiate the `SilentVoleReceiver` class with the desired field types and context:
+	 *     `SilentVoleReceiver<block, block, CoeffCtxGF128> receiver;`
+	 * 3.  Configure the receiver with the desired parameters:
+	 *     - `requestSize`: The number of VOLE correlations to generate.
+	 *     - `baseType`: The type of base OT to use (e.g., `SilentBaseType::BaseExtend`).
+	 *     - `noiseType`: The distribution of the noise vector (e.g., `SdNoiseDistribution::Regular`).
+	 *       if SdNoiseDistribution::Stationary is used, the base OTs only need to be set once.
+	 *     - `secParam`: The security parameter (e.g., 128).
+	 *     - `ctx`: The coefficient context object.
+	 *     `receiver.configure(requestSize, baseType, noiseType, secParam, ctx);`
+	 * 4.  Establish base correlations by generating base OTs and VOLE correlations:
+	 *     - Call `genBaseCors()` to generate the base correlations. This requires a PRNG and a communication channel (Socket).
+	 *     `receiver.genBaseCors(prng, chl);`
+	 *     - Alternatively, one can manually generate these and set the base correlations using
+	 *       setBaseCors(...). Use baseCount() to determine the required number of base correlations and
+	 *       sampleBaseChoiceBits(...) to get the required choice bits.
+	 * 5.  Perform the silent VOLE by calling `silentReceive()` or `silentReceiveInplace()`:
+	 *     - `silentReceive()` copies the result to a provided vector.
+	 *     - `silentReceiveInplace()` stores the result internally, which can be more efficient.
+	 *     `receiver.silentReceive(c, a, prng, chl);`
+	 *
+	 * Important notes:
+	 * - The `Socket` class is used for communication. You need to provide a concrete implementation for your networking environment.
+	 * - Error handling is done via exceptions. Wrap your VOLE calls in `try...catch` blocks.
+	 * - The `MultType` parameter selects the linear code used for compressing the noisy vector.
+	 * - The `clear()` method releases memory and resets the state.
+	 * - VecF, VecG are vector like types for F,G that are specified by the context object.
+	 *    These can be customized.
+	 */
 	template<
 		typename F,
 		typename G = F,
@@ -41,26 +87,29 @@ namespace osuCrypto
 	class SilentVoleReceiver : public TimerAdapter
 	{
 	public:
-		static constexpr u64 mScaler = 2;
 
+		// Indicates whether malicious security is supported for the given types
+		// Currently only supported for block types in GF(2^128)
 		static constexpr bool MaliciousSupported =
 			std::is_same_v<F, block>&& std::is_same_v<Ctx, CoeffCtxGF128>;
 
-
+		// The current state of the protocol
 		enum class State
 		{
-			Default,
-			Configured,
-			HasBase
+			Default,     // Initial state or after completion
+			Configured,  // After configure() has been called
+			HasBase      // After base correlations have been set
 		};
 
+
+		// Type aliases for vector types that hold F and G elements
 		using VecF = typename Ctx::template Vec<F>;
 		using VecG = typename Ctx::template Vec<G>;
 
 		// The current state of the protocol
 		State mState = State::Default;
 
-		// the context used to perform F, G operations
+		// The context used to perform arithmetic operations on F and G elements
 		Ctx mCtx;
 
 		// The number of correlations the user requested.
@@ -69,74 +118,314 @@ namespace osuCrypto
 		// the LPN security parameter
 		u64 mSecParam = 0;
 
-		// The length of the noisy vectors (2 * mN for the most codes).
+		// The length of the noisy vectors (typically 2 * mRequestSize but possibly slightly larger)
 		u64 mNoiseVecSize = 0;
 
-		// We perform regular LPN, so this is the
-		// size of the each chunk. 
+		// Size of each chunk in the regular LPN construction
 		u64 mSizePer = 0;
 
-		// the number of noisy positions
+		// The number of noisy positions (weight of the sparse vector)
 		u64 mNumPartitions = 0;
-
-		// The noisy coordinates.
-		std::vector<u64> mS;
 
 		// What type of Base OTs should be performed.
 		SilentBaseType mBaseType;
 
-		// The matrix multiplication type which compresses 
-		// the sparse vector.
+		// The matrix multiplication type which compresses the sparse vector
 		MultType mMultType = DefaultMultType;
 
-		// The multi-point punctured PRF for generating
-		// the sparse vectors.
-		RegularPprfReceiver<F, G, Ctx> mGen;
+		// The multi-point punctured PRF for generating the sparse vectors
+		// Variant allows selecting between Regular and Stationary PPRF
+		std::variant<
+			RegularPprfReceiver<F, Ctx>,
+			StationaryPprfReceiver<F, Ctx>
+		> mGenVar;
 
-		// The internal buffers for holding the expanded vectors.
-		// mA  = mB + mC * delta
+		// The receiver's share of the VOLE correlation (a = b + c * delta)
 		VecF mA;
 
-		// mA = mB + mC * delta
+		// The receiver's multiplication vector in the VOLE correlation
 		VecG mC;
 
+
+		// Number of threads to use for parallel operations (default: 1)
+		// this does not actually create multiple threads but determines how 
+		// many PPRFs are performed at once.
 		u64 mNumThreads = 1;
 
+		// Enable debugging output and consistency checks when true (insecure).
 		bool mDebug = false;
 
-		BitVector mIknpSendBaseChoice;
-
+		// Security type: SemiHonest or Malicious
 		SilentSecType mMalType = SilentSecType::SemiHonest;
 
-		block mMalCheckSeed, mMalCheckX, mMalBaseA;
+		// Format used for PPRF output organization 
+		PprfOutputFormat mPprfFormat = PprfOutputFormat::ByTreeIndex;
 
-		// we 
-		VecF mBaseA;
-		VecG mBaseC;
+		// Seed for malicious security checks
+		std::optional<block> mMalCheckSeed;
 
+		// True if we need to derandomize the last mBaseC value for the malicious security check
+		bool mDerandomizeMalCheck = false;
+
+		// Base VOLE correlation vectors
+		VecF mBaseA;  // Receiver's base VOLE share
+		VecG mBaseC;  // Receiver's base VOLE multiplication vector
 
 #ifdef ENABLE_SOFTSPOKEN_OT
+		// SoftSpoken OT instances for base OT extension
 		macoro::optional<SoftSpokenMalOtSender> mOtExtSender;
 		macoro::optional<SoftSpokenMalOtReceiver> mOtExtRecver;
 #endif
 
-		u64 baseVoleCount() const
+
+		/**
+		 * @brief Configure the silent VOLE protocol (optional).
+		 *
+		 * This sets the parameters and computes derived values needed for the protocol.
+		 * Must be called before generating base correlations but is optional for performing
+		 * the protocol.
+		 *
+		 * @param requestSize Number of VOLE correlations to generate
+		 * @param type Type of base OT to use (BaseExtend or Base)
+		 * @param noiseType Distribution of the noise vector (Regular or Stationary)
+		 * if stationary is used, the base OTs are reusable.
+		 * @param secParam Security parameter (typically 128)
+		 * @param ctx Context object for F, G operations (default constructed if not provided)
+		 */
+		void configure(
+			u64 requestSize,
+			SilentBaseType type = SilentBaseType::BaseExtend,
+			SdNoiseDistribution noiseType = SdNoiseDistribution::Regular,
+			u64 secParam = 128,
+			Ctx ctx = {});
+
+
+		/**
+		 * @brief Perform the silent VOLE protocol, copying results to provided vectors.
+		 *
+		 * This function produces vectors c and a such that a = b + c * delta,
+		 * where b and delta are held by the sender.
+		 * The results are copied to the provided vectors.
+		 *
+		 * @param c Output vector to store the multiplication values
+		 * @param a Output vector to store the receiver's share
+		 * @param prng Pseudorandom number generator
+		 * @param chl Communication channel to the sender
+		 * @return Coroutine task
+		 */
+		task<> silentReceive(
+			VecG& c,
+			VecF& a,
+			PRNG& prng,
+			Socket& chl);
+
+		/**
+		 * @brief Perform the silent VOLE protocol, storing results internally.
+		 *
+		 * Same as silentReceive() but the results are stored in mC and mA.
+		 * This is more efficient when the results will be used directly from
+		 * the SilentVoleReceiver object.
+		 *
+		 * @param n Number of VOLE correlations to generate
+		 * @param prng Pseudorandom number generator
+		 * @param chl Communication channel to the sender
+		 * @return Coroutine task
+		 */
+		task<> silentReceiveInplace(
+			u64 n,
+			PRNG& prng,
+			Socket& chl);
+
+		/**
+		 * @brief Check if base correlations have been set.
+		 *
+		 * Returns true if both the base OTs and the base VOLE correlations are set.
+		 *
+		 * @return True if base correlations are set, false otherwise
+		 */
+		bool hasBaseCors() const;
+
+		/**
+		 * @brief Generate the base correlations needed for the protocol.
+		 *
+		 * This performs base OTs and generates base VOLE correlations.
+		 * If the chosen method is BaseExtend, it will use SoftSpoken OT extension.
+		 * The vole correlation is generated using NoisyVole.
+		 *
+		 * @param prng Pseudorandom number generator
+		 * @param chl Communication channel to the sender
+		 * @return Coroutine task
+		 */
+		task<> genBaseCors(PRNG& prng, Socket& chl);
+
+		/**
+		 * @brief Check if the receiver has been configured.
+		 *
+		 * @return True if configure() has been called, false otherwise
+		 */
+		bool isConfigured() const;
+
+		/**
+		 * @brief Get the number of base OTs and VOLEs required.
+		 *
+		 * @return A VoleBaseCount struct with mBaseOtCount and mBaseVoleCount
+		 */
+		VoleBaseCount baseCount() const;
+
+		/**
+		 * @brief Sample the choice bits needed for base OTs.
+		 *
+		 * These choice bits determine which base OT messages the receiver gets.
+		 * Call this if you want to use a specific base OT protocol
+		 * and then pass the OT messages back using setBaseCors(...).
+		 *
+		 * @param prng Pseudorandom number generator
+		 * @return BitVector of choice bits
+		 */
+		BitVector sampleBaseChoiceBits(PRNG& prng);
+
+		/**
+		 * @brief Set externally generated base correlations.
+		 *
+		 * This allows manually setting the base OTs and VOLE correlations
+		 * instead of using genBaseCors().
+		 *
+		 * @param choice The choice bits used for base OTs (from sampleBaseChoiceBits)
+		 * @param recvBaseOts The received base OT messages
+		 * @param baseA The receiver's base VOLE shares
+		 * @param baseC The receiver's base VOLE multiplication values
+		 */
+		void setBaseCors(
+			const BitVector& choice,
+			span<block> recvBaseOts,
+			VecF& baseA,
+			VecG& baseC);
+
+		/**
+		 * @brief Clear internal state and free memory.
+		 *
+		 * Releases memory used by vectors and resets the generator.
+		 */
+		void clear();
+
+
+		/**
+		 * @brief Internal debug function to verify protocol correctness.
+		 *
+		 * @param chl Communication channel to the sender
+		 * @return Coroutine task
+		 */
+		task<> checkRT(Socket& chl);
+
+		/**
+		 * @brief Compute the hash for malicious security check.
+		 *
+		 * @return 32-byte hash array
+		 */
+		std::array<u8, 32> ferretMalCheck();
+
+
+		/**
+		 * @brief Compute the malicious security checksum.
+		 *
+		 * This computes a checksum of the base correlations for malicious security.
+		 * the checksum is computed as a linear combination of the base VOLE multiplication values
+		 * and is written to the last position of baseC.
+		 *
+		 * @param prng Pseudorandom number generator
+		 * @param baseC The base VOLE multiplication values to modify
+		 */
+		void malChecksum(PRNG& prng, VecG& baseC)
 		{
-			return mNumPartitions + 1 * (mMalType == SilentSecType::Malicious);
+			if (mMalType == SilentSecType::SemiHonest)
+				throw RTE_LOC;
+			if constexpr (!MaliciousSupported)
+				throw std::runtime_error("malicious is currently only supported for GF128 block. " LOCATION);
+
+			auto points = gen().getPoints(mPprfFormat);
+			if (mPprfFormat == PprfOutputFormat::ByTreeIndex)
+				for (u64 i = 0; i < mNumPartitions; ++i)
+					points[i] += i * mSizePer;
+
+			mMalCheckSeed = prng.get();
+			auto yIter = baseC.begin();
+			block sum = ZeroBlock;
+
+
+			for (u64 i = 0; i < mNumPartitions; ++i)
+			{
+				auto s = points[i];
+				auto xs = mMalCheckSeed->gf128Pow(s + 1);
+				sum = sum ^ xs.gf128Mul(*yIter);
+				++yIter;
+			}
+
+			baseC[mNumPartitions] = sum;
 		}
 
-		// returns true if the silent base OTs are set.
-		bool hasSilentBaseOts() const {
-			return mGen.hasBaseOts();
-		};
 
-		// Generate the silent base OTs. If the Iknp 
-		// base OTs are set then we do an IKNP extend,
-		// otherwise we perform a base OT protocol to
-		// generate the needed OTs.
-		task<> genSilentBaseOts(PRNG& prng, Socket& chl)
-		{
-			MACORO_TRY{
+		// Helper function to access the PPRF generator
+		PprfReceiver<F, Ctx>& gen() {
+			if (isConfigured() == false)
+				throw std::runtime_error("configure(...) must be called first.");
+			return std::visit([](auto& v) -> PprfReceiver<F, Ctx>&{ return v; }, mGenVar);
+		}
+
+		// Const version of the PPRF generator accessor
+		const PprfReceiver<F, Ctx>& gen() const {
+			if (isConfigured() == false)
+				throw std::runtime_error("configure(...) must be called first.");
+			return std::visit([](auto& v) -> const PprfReceiver<F, Ctx>&{ return v; }, mGenVar);
+		}
+
+	};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	template< typename F, typename G, typename Ctx >
+	bool SilentVoleReceiver<F, G, Ctx>::hasBaseCors() const
+	{
+		return
+			isConfigured() &&
+			gen().hasBaseOts() &&
+			mBaseA.size() == baseCount().mBaseVoleCount;
+	}
+
+
+
+	template< typename F, typename G, typename Ctx >
+	VoleBaseCount SilentVoleReceiver<F, G, Ctx>::baseCount() const
+	{
+		VoleBaseCount c;
+		c.mBaseOtCount = gen().baseOtCount();
+		c.mBaseVoleCount = mNumPartitions + 1 * (mMalType == SilentSecType::Malicious);
+		return c;
+	}
+
+	template< typename F, typename G, typename Ctx >
+	task<> SilentVoleReceiver<F, G, Ctx>::genBaseCors(PRNG& prng, Socket& chl)
+	{
+		MACORO_TRY{
 
 #ifdef LIBOTE_HAS_BASE_OT
 
@@ -155,31 +444,43 @@ namespace osuCrypto
 			if (isConfigured() == false)
 				throw std::runtime_error("configure must be called first");
 
-			auto choice = sampleBaseChoiceBits(prng);
-			AlignedUnVector<block> msg(choice.size());
+			auto count = baseCount();
+			BitVector choiceBits;
+			if(count.mBaseOtCount)
+				choiceBits = sampleBaseChoiceBits(prng);
+			AlignedUnVector<block> msg(count.mBaseOtCount);
 
-			// sample the noise vector noiseVals such that we will compute
-			//
+
+
+			// Sample the base VOLE values
+			// We will compute a noisy vector:
 			//  C = (000 noiseVals[0] 0000 ... 000 noiseVals[p] 000)
-			//
-			// and then we want secret shares of C * delta. As a first step
-			// we will compute secret shares of
-			//
-			// delta * noiseVals
-			//
-			// and store our share in voleDeltaShares. This party will then
-			// compute their share of delta * C as what comes out of the PPRF
-			// plus voleDeltaShares[i] added to the appreciate spot. Similarly, the
-			// other party will program the PPRF to output their share of delta * noiseVals.
-			//
-			auto noiseVals = sampleBaseVoleVals(prng);
-			auto baseAs = VecF{};
-			mCtx.resize(baseAs, noiseVals.size());
+			// and then generate secret shares of C * delta
+			VecF baseA;
+			VecG baseC;
+			mCtx.resize(baseA, count.mBaseVoleCount);
+			mCtx.resize(baseC, count.mBaseVoleCount);
+			for (u64 i = 0; i < count.mBaseVoleCount; ++i)
+				mCtx.fromBlock(baseC[i], prng.get<block>());
+
+
+			// For malicious security, compute checksum in the last position
+			if (mMalType == SilentSecType::Malicious)
+			{
+				if constexpr (MaliciousSupported)
+				{
+					malChecksum(prng, baseC);
+					mDerandomizeMalCheck = false;
+				}
+				else
+					throw RTE_LOC;
+			}
 
 			auto nv = NoisyVoleReceiver<F, G, Ctx>{};
 			if (mTimer)
 				nv.setTimer(*mTimer);
 
+			// Use OT extension for the base OTs if specified
 			if (mBaseType == SilentBaseType::BaseExtend)
 			{
 #ifdef ENABLE_SOFTSPOKEN_OT
@@ -189,34 +490,46 @@ namespace osuCrypto
 				if (!mOtExtSender)
 					mOtExtSender.emplace();
 
+				// If we don't have base OTs for the OT extension, generate them first
 				if (mOtExtSender->hasBaseOts() == false)
 				{
+					// Resize to accommodate additional base OTs for SoftSpoken
 					msg.resize(msg.size() + mOtExtSender->baseOtCount());
 					auto bb = BitVector{ mOtExtSender->baseOtCount() };
 					bb.randomize(prng);
-					choice.append(bb);
+					choiceBits.append(bb);
 
-					co_await mOtExtRecver->receive(choice, msg, prng, chl);
+					// Receive base OTs
+					co_await mOtExtRecver->receive(choiceBits, msg, prng, chl);
 
+					// Set the base OTs for the sender
 					mOtExtSender->setBaseOts(
 						span<block>(msg).subspan(
 							msg.size() - mOtExtSender->baseOtCount(),
 							mOtExtSender->baseOtCount()),
 						bb);
 
+					// Resize back and perform noisy VOLE
+					choiceBits.resize(choiceBits.size() - bb.size());
 					msg.resize(msg.size() - mOtExtSender->baseOtCount());
-					co_await nv.receive(noiseVals, baseAs, prng, *mOtExtSender, chl, mCtx);
+					co_await nv.receive(baseC, baseA, prng, *mOtExtSender, chl, mCtx);
 				}
 				else
 				{
+					// If we already have base OTs, run both operations in parallel
 					auto chl2 = chl.fork();
 					auto prng2 = prng.fork();
 
-					co_await
-						macoro::when_all_ready(
-							nv.receive(noiseVals, baseAs, prng2, *mOtExtSender, chl2, mCtx),
-							mOtExtRecver->receive(choice, msg, prng, chl)
-						);
+					if (choiceBits.size())
+					{
+						co_await
+							macoro::when_all_ready(
+								nv.receive(baseC, baseA, prng2, *mOtExtSender, chl2, mCtx),
+								mOtExtRecver->receive(choiceBits, msg, prng, chl)
+							);
+					}
+					else
+						co_await nv.receive(baseC, baseA, prng2, *mOtExtSender, chl2, mCtx);
 				}
 #else
 				throw std::runtime_error("soft spoken must be enabled");
@@ -224,534 +537,557 @@ namespace osuCrypto
 			}
 			else
 			{
+				// Use base OT protocol directly
 				auto chl2 = chl.fork();
 				auto prng2 = prng.fork();
 				BaseOT baseOt;
-
-				co_await
-					macoro::when_all_ready(
-						baseOt.receive(choice, msg, prng, chl),
-						nv.receive(noiseVals, baseAs, prng2, baseOt, chl2, mCtx))
-					;
+				if (choiceBits.size())
+				{
+					co_await
+						macoro::when_all_ready(
+							baseOt.receive(choiceBits, msg, prng, chl),
+							nv.receive(baseC, baseA, prng2, baseOt, chl2, mCtx));
+				}
+				else
+					co_await nv.receive(baseC, baseA, prng2, baseOt, chl2, mCtx);
 
 			}
 
-			setSilentBaseOts(msg, baseAs);
+			// Set the base correlations
+			setBaseCors(choiceBits, msg, baseA, baseC);
+
+			if (mMalType == SilentSecType::Malicious)
+				mDerandomizeMalCheck = false;
+
 			setTimePoint("SilentVoleReceiver.genSilent.done");
 #else
 			throw std::runtime_error("LIBOTE_HAS_BASE_OT = false, must enable relic, sodium or simplest ot asm." LOCATION);
 			co_return;
 #endif
 
-			} MACORO_CATCH(eptr) {
-				co_await chl.close();
-				std::rethrow_exception(eptr);
-			}
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
 		}
+	}
 
-		// configure the silent OT extension. This sets
-		// the parameters and figures out how many base OT
-		// will be needed. These can then be ganerated for
-		// a different OT extension or using a base OT protocol.
-		void configure(
-			u64 requestSize,
-			SilentBaseType type = SilentBaseType::BaseExtend,
-			u64 secParam = 128,
-			Ctx ctx = {})
+	// configure the silent OT extension. This sets
+	// the parameters and figures out how many base OT
+	// will be needed. These can then be ganerated for
+	// a different OT extension or using a base OT protocol.
+	template< typename F, typename G, typename Ctx >
+	void SilentVoleReceiver<F, G, Ctx>::configure(
+		u64 requestSize,
+		SilentBaseType type,
+		SdNoiseDistribution noiseType,
+		u64 secParam,
+		Ctx ctx)
+	{
+		mCtx = std::move(ctx);
+		mSecParam = secParam;
+		mRequestSize = requestSize;
+		mBaseType = type;
+
+		// Calculate the bit size for the subfield elements
+		// for non-fields we assume 1 which gives worse parameters for stationary.
+		u64 bitCount = 1;
+		if (mCtx.template isField<F>())
+			bitCount = mCtx.template bitSize<G>();
+
+		// Configure parameters for syndrome decoding
+		auto param = syndromeDecodingConfigure(secParam, requestSize, mMultType, noiseType, bitCount);
+		mNumPartitions = param.mNumPartitions;
+		mSizePer = param.mSizePer;
+		mNoiseVecSize = param.mNumPartitions * param.mSizePer;
+
+
+		// Initialize the appropriate PPRF based on noise distribution
+		if (noiseType == SdNoiseDistribution::Regular)
 		{
-			mCtx = std::move(ctx);
-			mSecParam = secParam;
-			mRequestSize = requestSize;
-			mState = State::Configured;
-			mBaseType = type;
-
-			syndromeDecodingConfigure(mNumPartitions, mSizePer, mNoiseVecSize, mSecParam, mRequestSize, mMultType);
-
-			mGen.configure(mSizePer, mNumPartitions);
+			mGenVar.emplace<0>();// = RegularPprfReceiver<F, Ctx>{};
+			mPprfFormat = PprfOutputFormat::Interleaved;
 		}
-
-		// return true if this instance has been configured.
-		bool isConfigured() const { return mState != State::Default; }
-
-		// Returns how many base OTs the silent OT extension
-		// protocol will needs.
-		u64 silentBaseOtCount() const
+		else if (noiseType == SdNoiseDistribution::Stationary)
 		{
-			if (isConfigured() == false)
-				throw std::runtime_error("configure must be called first");
-
-			return mGen.baseOtCount();
+			mGenVar.emplace<1>();// = StationaryPprfReceiver<F, Ctx>{};
+			mPprfFormat = PprfOutputFormat::ByTreeIndex;
 		}
-
-		// The silent base OTs must have specially set base OTs.
-		// This returns the choice bits that should be used.
-		// Call this is you want to use a specific base OT protocol
-		// and then pass the OT messages back using setSilentBaseOts(...).
-		BitVector sampleBaseChoiceBits(PRNG& prng) {
-
-			if (isConfigured() == false)
-				throw std::runtime_error("configure(...) must be called first");
-
-			auto choice = mGen.sampleChoiceBits(prng);
-
-			return choice;
-		}
-
-		VecG sampleBaseVoleVals(PRNG& prng)
+		else
 		{
-			if (isConfigured() == false)
-				throw std::runtime_error("configure must be called first. " LOCATION);
-
-			// sample the values of the noisy coordinate of c
-			// and perform a noicy vole to get a = b + mD * c
-
-
-			mCtx.resize(mBaseC, mNumPartitions + (mMalType == SilentSecType::Malicious));
-
-			if (mCtx.template bitSize<G>() == 1)
-			{
-				mCtx.one(mBaseC.begin(), mBaseC.begin() + mNumPartitions);
-			}
-			else
-			{
-				VecG zero, one;
-				mCtx.resize(zero, 1);
-				mCtx.resize(one, 1);
-				mCtx.zero(zero.begin(), zero.end());
-				mCtx.one(one.begin(), one.end());
-				for (size_t i = 0; i < mNumPartitions; i++)
-				{
-					mCtx.fromBlock(mBaseC[i], prng.get<block>());
-
-					// must not be zero.
-					while (mCtx.eq(zero[0], mBaseC[i]))
-						mCtx.fromBlock(mBaseC[i], prng.get<block>());
-
-					// if we are not a field, then the noise should be odd.
-					if (mCtx.template isField<F>() == false)
-					{
-						u8 odd = mCtx.binaryDecomposition(mBaseC[i])[0];
-						if (odd)
-							mCtx.plus(mBaseC[i], mBaseC[i], one[0]);
-					}
-				}
-			}
-
-
-			mS.resize(mNumPartitions);
-			mGen.getPoints(mS, PprfOutputFormat::Interleaved);
-
-			if (mMalType == SilentSecType::Malicious)
-			{
-				if constexpr (MaliciousSupported)
-				{
-					mMalCheckSeed = prng.get();
-
-					auto yIter = mBaseC.begin();
-					mCtx.zero(mBaseC.end() - 1, mBaseC.end());
-					for (u64 i = 0; i < mNumPartitions; ++i)
-					{
-						auto s = mS[i];
-						auto xs = mMalCheckSeed.gf128Pow(s + 1);
-						mBaseC[mNumPartitions] = mBaseC[mNumPartitions] ^ xs.gf128Mul(*yIter);
-						++yIter;
-					}
-				}
-				else
-				{
-					throw std::runtime_error("malicious is currently only supported for GF128 block. " LOCATION);
-				}
-			}
-
-			return mBaseC;
+			throw std::runtime_error("Unknown noise type. " LOCATION);
 		}
 
-		// Set the externally generated base OTs. This choice
-		// bits must be the one return by sampleBaseChoiceBits(...).
-		void setSilentBaseOts(
-			span<block> recvBaseOts,
-			VecF& baseA)
+		mState = State::Configured;
+		gen().configure(mSizePer, mNumPartitions);
+	}
+
+	template< typename F, typename G, typename Ctx >
+	bool SilentVoleReceiver<F, G, Ctx>::isConfigured() const { return mState != State::Default; }
+
+	template< typename F, typename G, typename Ctx >
+	auto SilentVoleReceiver<F, G, Ctx>::sampleBaseChoiceBits(PRNG& prng) -> BitVector {
+
+		if (isConfigured() == false)
+			throw std::runtime_error("configure(...) must be called first");
+		if (baseCount().mBaseOtCount)
+			return gen().sampleChoiceBits(prng);
+		else
+			return {};
+	}
+
+	// Set the externally generated base OTs. This choice
+	// bits must be the one return by sampleBaseChoiceBits(...).
+	template< typename F, typename G, typename Ctx >
+	void SilentVoleReceiver<F, G, Ctx>::setBaseCors(
+		BitVector const& choice,
+		span<block> recvBaseOts,
+		VecF& baseA,
+		VecG& baseC)
+	{
+		auto count = baseCount();
+		if (isConfigured() == false)
+			throw std::runtime_error("configure(...) must be called first.");
+
+		if (static_cast<u64>(recvBaseOts.size()) != count.mBaseOtCount)
+			throw std::runtime_error("wrong number of silent base OTs");
+
+		if (baseA.size() != count.mBaseVoleCount)
+			throw std::runtime_error("wrong number of silent base Vole values." LOCATION);
+		if (baseC.size() != count.mBaseVoleCount)
+			throw std::runtime_error("wrong number of silent base Vole values." LOCATION);
+
+		if (choice.size())
 		{
-			if (isConfigured() == false)
-				throw std::runtime_error("configure(...) must be called first.");
-
-			if (static_cast<u64>(recvBaseOts.size()) != silentBaseOtCount())
-				throw std::runtime_error("wrong number of silent base OTs");
-
-			mGen.setBase(recvBaseOts);
-
-			mCtx.resize(mBaseA, baseA.size());
-			mCtx.copy(baseA.begin(), baseA.end(), mBaseA.begin());
-			mState = State::HasBase;
+			gen().setChoiceBits(choice);
+			gen().setBase(recvBaseOts);
 		}
 
-		// Perform the actual OT extension. If silent
-		// base OTs have been generated or set, then
-		// this function is non-interactive. Otherwise
-		// the silent base OTs will automatically be performed.
-		task<> silentReceive(
-			VecG& c,
-			VecF& a,
-			PRNG& prng,
-			Socket& chl)
-		{
-			MACORO_TRY{
-			
+		// For malicious security, we'll need to derandomize
+		if (mMalType == SilentSecType::Malicious)
+			mDerandomizeMalCheck = true;
+
+		mCtx.resize(mBaseA, baseA.size());
+		mCtx.resize(mBaseC, baseC.size());
+		mCtx.copy(baseA.begin(), baseA.end(), mBaseA.begin());
+		mCtx.copy(baseC.begin(), baseC.end(), mBaseC.begin());
+		mState = State::HasBase;
+	}
+
+	template< typename F, typename G, typename Ctx >
+	task<> SilentVoleReceiver<F, G, Ctx>::silentReceive(
+		VecG& c,
+		VecF& a,
+		PRNG& prng,
+		Socket& chl)
+	{
+		MACORO_TRY{
+
+			// Validate input sizes match
 			if (c.size() != a.size())
 				throw std::runtime_error("input sizes do not match." LOCATION);
 
-			co_await silentReceiveInplace(c.size(), prng, chl);
+		// Run the main protocol
+		co_await silentReceiveInplace(c.size(), prng, chl);
 
-			mCtx.copy(mC.begin(), mC.begin() + c.size(), c.begin());
-			mCtx.copy(mA.begin(), mA.begin() + a.size(), a.begin());
+		// Copy results to the output vectors
+		mCtx.copy(mC.begin(), mC.begin() + c.size(), c.begin());
+		mCtx.copy(mA.begin(), mA.begin() + a.size(), a.begin());
 
+		// Free resources if we are using the regular PPRF
+		if (mGenVar.index() == 0)
 			clear();
 
 		} MACORO_CATCH(eptr) {
 			co_await chl.close();
 			std::rethrow_exception(eptr);
 		}
-		}
-		// Perform the actual OT extension. If silent
-		// base OTs have been generated or set, then
-		// this function is non-interactive. Otherwise
-		// the silent base OTs will automatically be performed.
-		task<> silentReceiveInplace(
-			u64 n,
-			PRNG& prng,
-			Socket& chl)
+	}
+
+	template< typename F, typename G, typename Ctx >
+	task<> SilentVoleReceiver<F, G, Ctx>::silentReceiveInplace(
+		u64 n,
+		PRNG& prng,
+		Socket& chl)
+	{
+		MACORO_TRY{
+		auto myHash = std::array<u8, 32>{};
+		auto theirHash = std::array<u8, 32>{};
+		gTimer.setTimePoint("SilentVoleReceiver.ot.enter");
+
+		// Configure if not already done
+		if (isConfigured() == false)
+			configure(n, SilentBaseType::BaseExtend);
+
+		// Validate requested size
+		if (mRequestSize < n)
+			throw std::invalid_argument("n does not match the requested number of OTs via configure(...). " LOCATION);
+
+		// Generate base correlations if needed
+		if (hasBaseCors() == false)
+			co_await genBaseCors(prng, chl);
+
+		// For malicious security, handle derandomization of the checksum
+		if (mMalType == SilentSecType::Malicious && mDerandomizeMalCheck)
 		{
-			MACORO_TRY{
-			auto myHash = std::array<u8, 32>{};
-			auto theirHash = std::array<u8, 32>{};
-			gTimer.setTimePoint("SilentVoleReceiver.ot.enter");
-			if (isConfigured() == false)
+			if constexpr (MaliciousSupported)
 			{
-				// first generate 128 normal base OTs
-				configure(n, SilentBaseType::BaseExtend);
+				// Create a copy to compute proper checksum
+				VecG  baseC = mBaseC;
+				malChecksum(prng, baseC);
+
+				// Calculate and send the difference
+				// currently have a = b + c' * d
+				// but want       a = b + c  * d
+				// lets send  (c' - c)
+				mCtx.minus(baseC[mNumPartitions], mBaseC[mNumPartitions], baseC[mNumPartitions]);
+				std::vector<u8> buffer(mCtx.template byteSize<G>());
+				mCtx.serialize(baseC.begin() + mNumPartitions, baseC.end(), buffer.begin());
+				co_await chl.send(std::move(buffer));
+			}
+			else throw RTE_LOC;
+		}
+
+
+		// Allocate and initialize mA
+		mCtx.resize(mA, 0);
+		mCtx.resize(mA, mNoiseVecSize);
+		setTimePoint("SilentVoleReceiver.alloc");
+
+		// Allocate and zero-initialize mC
+		mCtx.resize(mC, 0);
+		mCtx.resize(mC, mNoiseVecSize);
+		mCtx.zero(mC.begin(), mC.end());
+		setTimePoint("SilentVoleReceiver.alloc.zero");
+
+		if (mTimer)
+			gen().setTimer(*mTimer);
+
+		// PPRF expansion to generate share of mC * delta
+		// As part of the setup, we have generated 
+		//  
+		//  mBaseA + mBaseB = mBaseC * mDelta
+		// 
+		// We have   mBaseA, mBaseC, 
+		// they have mBaseB, mDelta
+		// 
+		// The PPRF expands this to full-sized vectors:
+		//   
+		//    mA' = mB + points(mBaseB)
+		//        = mB + points(mBaseC * mDelta - mBaseA)
+		//        = mB + points(mBaseC * mDelta) - points(mBaseA) 
+		// 
+		// We add points(mBaseA) to mA' to get:
+		// 
+		//    mA = mB + points(mBaseC * mDelta)
+		//
+		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, mCtx);
+
+		setTimePoint("SilentVoleReceiver.expand.pprf_transpose");
+
+		// Get the points where the noisy values should be placed
+		std::vector<u64> points = gen().getPoints(mPprfFormat);
+
+		// if ByTreeIndex, we need to adjust the points
+		// to the global index space instead of per-partition.
+		if (mPprfFormat == PprfOutputFormat::ByTreeIndex)
+			for (u64 i = 0; i < mNumPartitions; ++i)
+				points[i] += i * mSizePer;
+
+		// populate the noisy coordinates of mC and
+		// update mA to be a secret share of mC * delta
+		for (u64 i = 0; i < mNumPartitions; ++i)
+		{
+			auto pnt = points[i];
+			mCtx.copy(mC[pnt], mBaseC[i]);
+			mCtx.plus(mA[pnt], mA[pnt], mBaseA[i]);
+		}
+
+		// Debug consistency check
+		if (mDebug)
+		{
+			co_await checkRT(chl);
+			setTimePoint("SilentVoleReceiver.expand.checkRT");
+		}
+
+		// Malicious security check
+		if (mMalType == SilentSecType::Malicious)
+		{
+			// Send the seed for malicious check
+			co_await chl.send(std::move(*mMalCheckSeed));
+
+			// Compute our hash
+			if constexpr (MaliciousSupported)
+				myHash = ferretMalCheck();
+			else {
+				throw std::runtime_error("malicious is currently only supported for GF128 block. " LOCATION);
 			}
 
-			if (mRequestSize < n)
-				throw std::invalid_argument("n does not match the requested number of OTs via configure(...). " LOCATION);
+			// Receive and verify the sender's hash
+			co_await chl.recv(theirHash);
+			if (theirHash != myHash)
+				throw std::runtime_error("malicious security check failed. " LOCATION);
+		}
 
 
-			if (hasSilentBaseOts() == false)
-			{
-				co_await genSilentBaseOts(prng, chl);
-			}
-
-			// allocate mA
-			mCtx.resize(mA, 0);
-			mCtx.resize(mA, mNoiseVecSize);
-
-			setTimePoint("SilentVoleReceiver.alloc");
-
-			// allocate the space for mC
-			mCtx.resize(mC, 0);
-			mCtx.resize(mC, mNoiseVecSize);
-			mCtx.zero(mC.begin(), mC.end());
-			setTimePoint("SilentVoleReceiver.alloc.zero");
+		// Apply the appropriate linear code to compress the sparse vectors
+		switch (mMultType)
+		{
+		case osuCrypto::MultType::ExConv7x24:
+		case osuCrypto::MultType::ExConv21x24:
+		{
+			// Configure the expander code
+			u64 expanderWeight, accumulatorWeight, scaler;
+			double minDist;
+			ExConvConfigure(mMultType, scaler, expanderWeight, accumulatorWeight, minDist);
+			ExConvCode encoder;
+			assert(scaler == 2 && minDist < 1 && minDist > 0);
+			encoder.config(mRequestSize, mNoiseVecSize, expanderWeight, accumulatorWeight);
 
 			if (mTimer)
-				mGen.setTimer(*mTimer);
+				encoder.setTimer(getTimer());
 
-			// As part of the setup, we have generated 
-			//  
-			//  mBaseA + mBaseB = mBaseC * mDelta
-			// 
-			// We have   mBaseA, mBaseC, 
-			// they have mBaseB, mDelta
-			// This was done with a small (noisy) vole.
-			// 
-			// We use the Pprf to expand as
-			//   
-			//    mA' = mB + mS(mBaseB)
-			//        = mB + mS(mBaseC * mDelta - mBaseA)
-			//        = mB + mS(mBaseC * mDelta) - mS(mBaseA) 
-			// 
-			// Therefore if we add mS(mBaseA) to mA' we will get
-			// 
-			//    mA = mB + mS(mBaseC * mDelta)
-			//
-			co_await mGen.expand(chl, mA, PprfOutputFormat::Interleaved, true, mNumThreads);
-
-			setTimePoint("SilentVoleReceiver.expand.pprf_transpose");
-
-			// populate the noisy coordinates of mC and
-			// update mA to be a secret share of mC * delta
-			for (u64 i = 0; i < mNumPartitions; ++i)
-			{
-				auto pnt = mS[i];
-				mCtx.copy(mC[pnt], mBaseC[i]);
-				mCtx.plus(mA[pnt], mA[pnt], mBaseA[i]);
-			}
-
-			if (mDebug)
-			{
-				co_await checkRT(chl);
-				setTimePoint("SilentVoleReceiver.expand.checkRT");
-			}
-
-
-			if (mMalType == SilentSecType::Malicious)
-			{
-				co_await chl.send(std::move(mMalCheckSeed));
-
-				if constexpr (MaliciousSupported)
-					myHash = ferretMalCheck();
-				else {
-					throw std::runtime_error("malicious is currently only supported for GF128 block. " LOCATION);
-				}
-
-				co_await chl.recv(theirHash);
-
-				if (theirHash != myHash)
-				{
-					throw std::runtime_error("malcicious security check failed. " LOCATION);
-				}
-			}
-
-
-			switch (mMultType)
-			{
-			case osuCrypto::MultType::ExConv7x24:
-			case osuCrypto::MultType::ExConv21x24:
-			{
-				u64 expanderWeight, accumulatorWeight, scaler;
-				double minDist;
-				ExConvConfigure(mMultType, scaler, expanderWeight, accumulatorWeight, minDist);
-				ExConvCode encoder;
-				assert(scaler == 2 && minDist < 1 && minDist > 0);
-				encoder.config(mRequestSize, mNoiseVecSize, expanderWeight, accumulatorWeight);
-
-				if (mTimer)
-					encoder.setTimer(getTimer());
-
-				encoder.dualEncode2<F, G, Ctx>(
-					mA.begin(),
-					mC.begin(),
-					{}
-				);
-				break;
-			}
-			case osuCrypto::MultType::QuasiCyclic:
-			{
+			// Apply the dual encoding to both vectors
+			encoder.dualEncode2<F, G, Ctx>(
+				mA.begin(),
+				mC.begin(),
+				{}
+			);
+			break;
+		}
+		case osuCrypto::MultType::QuasiCyclic:
+		{
 #ifdef ENABLE_BITPOLYMUL
-				if constexpr (
-					std::is_same_v<F, block> &&
-					std::is_same_v<G, block> &&
-					std::is_same_v<Ctx, CoeffCtxGF128>)
-				{
-					QuasiCyclicCode encoder;
-					encoder.init2(mRequestSize, mNoiseVecSize);
-					encoder.dualEncode(mA);
-					encoder.dualEncode(mC);
-				}
-				else
-				{
-					throw std::runtime_error("QuasiCyclic is only supported for GF128, i.e. block. " LOCATION);
-				}
-#else
-				throw std::runtime_error("QuasiCyclic requires ENABLE_BITPOLYMUL = true. " LOCATION);
-#endif
-				break;
-			}
-			case osuCrypto::MultType::Tungsten:
+			// QuasiCyclic code is only supported for GF(2^128)
+			if constexpr (
+				std::is_same_v<F, block> &&
+				std::is_same_v<G, block> &&
+				std::is_same_v<Ctx, CoeffCtxGF128>)
 			{
-				experimental::TungstenCode encoder;
-				encoder.config(oc::roundUpTo(mRequestSize, 8), mNoiseVecSize);
-				encoder.dualEncode<F, Ctx>(mA.begin(), mCtx);
-				encoder.dualEncode<G, Ctx>(mC.begin(), mCtx);
-				break;
+				QuasiCyclicCode encoder;
+				encoder.init2(mRequestSize, mNoiseVecSize);
+				encoder.dualEncode(mA);
+				encoder.dualEncode(mC);
 			}
-			default:
-				throw std::runtime_error("Code is not supported. " LOCATION);
-				break;
+			else
+			{
+				throw std::runtime_error("QuasiCyclic is only supported for GF128, i.e. block. " LOCATION);
 			}
-
-			// resize the buffers down to only contain the real elements.
-			mCtx.resize(mA, mRequestSize);
-			mCtx.resize(mC, mRequestSize);
-
-			mBaseC = {};
-			mBaseA = {};
-
-			// make the protocol as done and that
-			// mA,mC are ready to be consumed.
-			mState = State::Default;
-
-			} MACORO_CATCH(eptr) {
-				co_await chl.close();
-				std::rethrow_exception(eptr);
-			}
+#else
+			throw std::runtime_error("QuasiCyclic requires ENABLE_BITPOLYMUL = true. " LOCATION);
+#endif
+			break;
+		}
+		case osuCrypto::MultType::Tungsten:
+		{
+			experimental::TungstenCode encoder;
+			encoder.config(oc::roundUpTo(mRequestSize, 8), mNoiseVecSize);
+			encoder.dualEncode<F, Ctx>(mA.begin(), mCtx);
+			encoder.dualEncode<G, Ctx>(mC.begin(), mCtx);
+			break;
+		}
+		default:
+			throw std::runtime_error("Code is not supported. " LOCATION);
+			break;
 		}
 
+		// resize the buffers down to only contain the real elements.
+		mCtx.resize(mA, mRequestSize);
+		mCtx.resize(mC, mRequestSize);
 
-		// internal.
-		task<> checkRT(Socket& chl)
+		// clear the base VOLE correlations.
+		mBaseC = {};
+		mBaseA = {};
+
+		// for regular we completely reset but
+		// for stationary we are configured and ready 
+		// to expand again given a new base VOLE.
+		if (mGenVar.index() == 0)
+			mState = State::Default;
+		else
+			mState = State::Configured;
+
+
+		} MACORO_CATCH(eptr) {
+			co_await chl.close();
+			std::rethrow_exception(eptr);
+		}
+	}
+
+
+	// internal.
+	template< typename F, typename G, typename Ctx >
+	task<> SilentVoleReceiver<F, G, Ctx>::checkRT(Socket& chl)
+	{
+		auto B = VecF{};
+		auto sparseNoiseDelta = VecF{};
+		auto baseB = VecF{};
+		auto delta = VecF{};
+		auto tempF = VecF{};
+		auto tempG = VecG{};
+		auto buffer = std::vector<u8>{};
+
+		// recv delta
+		buffer.resize(mCtx.template byteSize<F>());
+		mCtx.resize(delta, 1);
+		co_await chl.recv(buffer);
+		mCtx.deserialize(buffer.begin(), buffer.end(), delta.begin());
+
+		// recv B
+		buffer.resize(mCtx.template byteSize<F>() * mA.size());
+		mCtx.resize(B, mA.size());
+		co_await chl.recv(buffer);
+		mCtx.deserialize(buffer.begin(), buffer.end(), B.begin());
+
+		// recv the noisy values.
+		buffer.resize(mCtx.template byteSize<F>() * mBaseA.size());
+		mCtx.resize(baseB, mBaseA.size());
+		co_await chl.recvResize(buffer);
+		mCtx.deserialize(buffer.begin(), buffer.end(), baseB.begin());
+
+		auto points = gen().getPoints(mPprfFormat);
+		if (mPprfFormat == PprfOutputFormat::ByTreeIndex)
+			for (u64 i = 0; i < mNumPartitions; ++i)
+				points[i] += i * mSizePer;
+
+
+		// it should hold that 
+		// 
+		// mBaseA = baseB + mBaseC * mDelta
+		//
+		// and
+		// 
+		//  mA = mB + mC * mDelta
+		//
+		bool verbose = false;
+		bool failed = false;
+		std::vector<std::size_t> index(points.size());
+		std::iota(index.begin(), index.end(), 0);
+		std::sort(index.begin(), index.end(),
+			[&](std::size_t i, std::size_t j) { return points[i] < points[j]; });
+
+		mCtx.resize(tempF, 2);
+		mCtx.resize(tempG, 1);
+		mCtx.zero(tempG.begin(), tempG.end());
+
+
+		// check the correlation that
+		//
+		//  mBaseA + mBaseB = mBaseC * mDelta
+		for (auto i : rng(mBaseA.size()))
 		{
-			auto B = VecF{};
-			auto sparseNoiseDelta = VecF{};
-			auto baseB = VecF{};
-			auto delta = VecF{};
-			auto tempF = VecF{};
-			auto tempG = VecG{};
-			auto buffer = std::vector<u8>{};
+			// temp[0] = baseB[i] + mBaseA[i]
+			mCtx.plus(tempF[0], baseB[i], mBaseA[i]);
 
-			// recv delta
-			buffer.resize(mCtx.template byteSize<F>());
-			mCtx.resize(delta, 1);
-			co_await chl.recv(buffer);
-			mCtx.deserialize(buffer.begin(), buffer.end(), delta.begin());
+			// temp[1] =  mBaseC[i] * delta[0]
+			mCtx.mul(tempF[1], delta[0], mBaseC[i]);
 
-			// recv B
-			buffer.resize(mCtx.template byteSize<F>() * mA.size());
-			mCtx.resize(B, mA.size());
-			co_await chl.recv(buffer);
-			mCtx.deserialize(buffer.begin(), buffer.end(), B.begin());
-
-			// recv the noisy values.
-			buffer.resize(mCtx.template byteSize<F>() * mBaseA.size());
-			mCtx.resize(baseB, mBaseA.size());
-			co_await chl.recvResize(buffer);
-			mCtx.deserialize(buffer.begin(), buffer.end(), baseB.begin());
-
-			// it shoudl hold that 
-			// 
-			// mBaseA = baseB + mBaseC * mDelta
-			//
-			// and
-			// 
-			//  mA = mB + mC * mDelta
-			//
-			bool verbose = false;
-			bool failed = false;
-			std::vector<std::size_t> index(mS.size());
-			std::iota(index.begin(), index.end(), 0);
-			std::sort(index.begin(), index.end(),
-				[&](std::size_t i, std::size_t j) { return mS[i] < mS[j]; });
-
-			mCtx.resize(tempF, 2);
-			mCtx.resize(tempG, 1);
-			mCtx.zero(tempG.begin(), tempG.end());
-
-
-			// check the correlation that
-			//
-			//  mBaseA + mBaseB = mBaseC * mDelta
-			for (auto i : rng(mBaseA.size()))
-			{
-				// temp[0] = baseB[i] + mBaseA[i]
-				mCtx.plus(tempF[0], baseB[i], mBaseA[i]);
-
-				// temp[1] =  mBaseC[i] * delta[0]
-				mCtx.mul(tempF[1], delta[0], mBaseC[i]);
-
-				if (!mCtx.eq(tempF[0], tempF[1]))
-					throw RTE_LOC;
-
-				if (i < mNumPartitions)
-				{
-					//auto idx = index[i];
-					auto point = mS[i];
-					if (!mCtx.eq(mBaseC[i], mC[point]))
-						throw RTE_LOC;
-
-					if (i && mS[index[i - 1]] >= mS[index[i]])
-						throw RTE_LOC;
-				}
-			}
-
-
-			auto iIter = index.begin();
-			auto leafIdx = mS[*iIter];
-			F act = tempF[0];
-			G zero = tempG[0];
-			mCtx.zero(tempG.begin(), tempG.end());
-
-			for (u64 j = 0; j < mA.size(); ++j)
-			{
-				mCtx.mul(act, delta[0], mC[j]);
-				mCtx.plus(act, act, B[j]);
-
-				bool active = false;
-				if (j == leafIdx)
-				{
-					active = true;
-				}
-				else if (!mCtx.eq(zero, mC[j]))
-					throw RTE_LOC;
-
-				if (mA[j] != act)
-				{
-					failed = true;
-					if (verbose)
-						std::cout << Color::Red;
-				}
-
-				if (verbose)
-				{
-					std::cout << j << " act " << mCtx.str(act)
-						<< " a " << mCtx.str(mA[j]) << " b " << mCtx.str(B[j]);
-
-					if (active)
-						std::cout << " < " << mCtx.str(delta[0]);
-
-					std::cout << std::endl << Color::Default;
-				}
-
-				if (j == leafIdx)
-				{
-					++iIter;
-					if (iIter != index.end())
-					{
-						leafIdx = mS[*iIter];
-					}
-				}
-			}
-
-			if (failed)
+			if (!mCtx.eq(tempF[0], tempF[1]))
 				throw RTE_LOC;
 
+			if (i < mNumPartitions)
+			{
+				//auto idx = index[i];
+				auto point = points[i];
+				if (!mCtx.eq(mBaseC[i], mC[point]))
+					throw RTE_LOC;
+
+				if (i && points[index[i - 1]] >= points[index[i]])
+					throw RTE_LOC;
+			}
 		}
 
-		std::array<u8, 32> ferretMalCheck()
+
+		auto iIter = index.begin();
+		auto leafIdx = points[*iIter];
+		F act = tempF[0];
+		G zero = tempG[0];
+		mCtx.zero(tempG.begin(), tempG.end());
+
+		for (u64 j = 0; j < mA.size(); ++j)
 		{
+			mCtx.mul(act, delta[0], mC[j]);
+			mCtx.plus(act, act, B[j]);
 
-			block xx = mMalCheckSeed;
-			block sum0 = ZeroBlock;
-			block sum1 = ZeroBlock;
-
-
-			for (u64 i = 0; i < (u64)mA.size(); ++i)
+			bool active = false;
+			if (j == leafIdx)
 			{
-				block low, high;
-				xx.gf128Mul(mA[i], low, high);
-				sum0 = sum0 ^ low;
-				sum1 = sum1 ^ high;
-				//mySum = mySum ^ xx.gf128Mul(mA[i]);
+				active = true;
+			}
+			else if (!mCtx.eq(zero, mC[j]))
+				throw RTE_LOC;
 
-				// xx = mMalCheckSeed^{i+1}
-				xx = xx.gf128Mul(mMalCheckSeed);
+			if (mA[j] != act)
+			{
+				failed = true;
+				if (verbose)
+					std::cout << Color::Red;
 			}
 
-			// <A,X> = <
-			block mySum = sum0.gf128Reduce(sum1);
+			if (verbose)
+			{
+				std::cout << j << " act " << mCtx.str(act)
+					<< " a " << mCtx.str(mA[j]) << " b " << mCtx.str(B[j]);
 
-			std::array<u8, 32> myHash;
-			RandomOracle ro(32);
-			ro.Update(mySum ^ mBaseA.back());
-			ro.Final(myHash);
-			return myHash;
+				if (active)
+					std::cout << " < " << mCtx.str(delta[0]);
+
+				std::cout << std::endl << Color::Default;
+			}
+
+			if (j == leafIdx)
+			{
+				++iIter;
+				if (iIter != index.end())
+				{
+					leafIdx = points[*iIter];
+				}
+			}
 		}
 
-		void clear()
+		if (failed)
+			throw RTE_LOC;
+
+	}
+
+	template< typename F, typename G, typename Ctx >
+	std::array<u8, 32> SilentVoleReceiver<F, G, Ctx>::ferretMalCheck()
+	{
+		auto seed = *mMalCheckSeed;
+		block xx = seed;
+		block sum0 = ZeroBlock;
+		block sum1 = ZeroBlock;
+
+
+		for (u64 i = 0; i < (u64)mA.size(); ++i)
 		{
-			mS = {};
-			mA = {};
-			mC = {};
-			mGen.clear();
+			block low, high;
+			xx.gf128Mul(mA[i], low, high);
+			sum0 = sum0 ^ low;
+			sum1 = sum1 ^ high;
+
+			// xx = mMalCheckSeed^{i+1}
+			xx = xx.gf128Mul(seed);
 		}
-	};
+
+		// <A,X> = <
+		block mySum = sum0.gf128Reduce(sum1);
+
+		std::array<u8, 32> myHash;
+		RandomOracle ro(32);
+		ro.Update(mySum ^ mBaseA.back());
+		ro.Final(myHash);
+		return myHash;
+	}
+
+	template< typename F, typename G, typename Ctx >
+	void SilentVoleReceiver<F, G, Ctx>::clear()
+	{
+		mA = {};
+		mC = {};
+		mBaseA = {};
+		mBaseC = {};
+		std::visit([](auto& gen) {gen.clear(); }, mGenVar);
+	}
+
 }
 #endif

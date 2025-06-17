@@ -82,7 +82,7 @@ namespace osuCrypto
         block mMalCheckX = ZeroBlock;
 
         // The ggm tree thats used to generate the sparse vectors.
-        RegularPprfReceiver<block, block, CoeffCtxGF2> mGen;
+        RegularPprfReceiver<block, CoeffCtxGF2> mGen;
 
         // The type of compress we will use to generate the
         // dense vectors from the sparse vectors.
@@ -142,7 +142,7 @@ namespace osuCrypto
         // base OTs are set then we do an IKNP extend,
         // otherwise we perform a base OT protocol to
         // generate the needed OTs.
-        task<> genSilentBaseOts(PRNG& prng, Socket& chl, bool useOtExtension = true);
+        task<> genSilentCor(PRNG& prng, Socket& chl, bool useOtExtension = true);
         
         // configure the silent OT extension. This sets
         // the parameters and figures out how many base OT

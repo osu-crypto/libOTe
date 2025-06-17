@@ -62,7 +62,7 @@ namespace osuCrypto
     // can then be called which results in one message being sent
     // from the sender to the receiver. 
     //
-    // Also note that genSilentBaseOts(...) can be called which generates 
+    // Also note that genSilentCor(...) can be called which generates 
     // them. This has two behaviors. If the normal base OTs have previously
     // been set, i.e. the normal OT Ext interface, then and IKNP OT extension
     // is performed to generated the needed ~400 base OTs. If they have not
@@ -101,7 +101,7 @@ namespace osuCrypto
 #endif
 
         // The ggm tree thats used to generate the sparse vectors.
-        RegularPprfSender<block, block, CoeffCtxGF2> mGen;
+        RegularPprfSender<block, CoeffCtxGF2> mGen;
 
         // The type of compress we will use to generate the
         // dense vectors from the sparse vectors.
@@ -165,7 +165,7 @@ namespace osuCrypto
         // base OTs are set then we do an IKNP extend,
         // otherwise we perform a base OT protocol to
         // generate the needed OTs.
-        task<> genSilentBaseOts(PRNG& prng, Socket& chl, bool useOtExtension = true);
+        task<> genSilentCor(PRNG& prng, Socket& chl, bool useOtExtension = true);
 
         // configure the silent OT extension. This sets
         // the parameters and figures out how many base OT

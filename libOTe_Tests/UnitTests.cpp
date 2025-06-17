@@ -53,11 +53,12 @@ namespace tests_libOTe
 			tc.add("TungstenCode_encode_test                ", TungstenCode_encode_test);
 			tc.add("TungstenCode_weight_test                ", TungstenCode_weight_test);
 
-			tc.add("Tools_Pprf_expandOne_test               ", Tools_Pprf_expandOne_test);
-			tc.add("Tools_Pprf_inter_test                   ", Tools_Pprf_inter_test);
-			tc.add("Tools_Pprf_ByLeafIndex_test             ", Tools_Pprf_ByLeafIndex_test);
-			tc.add("Tools_Pprf_ByTreeIndex_test             ", Tools_Pprf_ByTreeIndex_test);
-			tc.add("Tools_Pprf_callback_test                ", Tools_Pprf_callback_test);
+			tc.add("RegularPprf_expandOne_test               ", RegularPprf_expandOne_test);
+			tc.add("RegularPprf_inter_test                   ", RegularPprf_inter_test);
+			tc.add("RegularPprf_ByLeafIndex_test             ", RegularPprf_ByLeafIndex_test);
+			tc.add("RegularPprf_ByTreeIndex_test             ", RegularPprf_ByTreeIndex_test);
+			tc.add("RegularPprf_callback_test                ", RegularPprf_callback_test);
+			tc.add("StationaryPprf_inter_test                ", StationaryPprf_inter_test);
 
 			tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
 			tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
@@ -110,6 +111,7 @@ namespace tests_libOTe
 
 			tc.add("Vole_Noisy_test                         ", Vole_Noisy_test);
 			tc.add("Vole_Silent_paramSweep_test             ", Vole_Silent_paramSweep_test);
+			tc.add("Vole_Silent_stationary_test             ", Vole_Silent_stationary_test);
 			tc.add("Vole_Silent_Tungsten_test               ", Vole_Silent_Tungsten_test);
 			tc.add("Vole_Silent_QuasiCyclic_test            ", Vole_Silent_QuasiCyclic_test);
 			tc.add("Vole_Silent_baseOT_test                 ", Vole_Silent_baseOT_test);
