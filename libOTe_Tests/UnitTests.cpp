@@ -59,8 +59,9 @@ namespace tests_libOTe
 			tc.add("Permutation_data                         ", Permutation_data_test);
 			tc.add("Permutation_chunk                        ", Permutation_chunk_test);
 
-			tc.add("BlkAccCode_paramSweep_test              ", BlkAccCode_paramSweep_test);
-		
+			tc.add("BlkAccCode_mtx_test                      ", BlkAccCode_mtx_test);
+			tc.add("BlkAccCode_paramSweep_test               ", BlkAccCode_paramSweep_test);
+			
 			tc.add("RegularPprf_expandOne_test               ", RegularPprf_expandOne_test);
 			tc.add("RegularPprf_inter_test                   ", RegularPprf_inter_test);
 			tc.add("RegularPprf_ByLeafIndex_test             ", RegularPprf_ByLeafIndex_test);

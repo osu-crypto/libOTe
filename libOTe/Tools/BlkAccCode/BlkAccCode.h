@@ -85,6 +85,13 @@ namespace osuCrypto
 			typename CoeffCtx::template Vec<F> temp;
 			ctx.resize(temp, mN);
 
+			//auto print = [&](auto iter, auto end) {
+			//	std::stringstream ss;
+			//	while(iter != end)
+			//		ss << ctx.str(*iter++) << " ";
+			//	return ss.str();
+			//	};
+			//std::cout << print(iter, iter + mN) << std::endl;;
 
 			auto round = [&](auto inputIter, auto outputIter, auto seed){
 				// Create the appropriate permutation type based on whether codeSize is power of 2
@@ -103,11 +110,12 @@ namespace osuCrypto
 					accumPerm.dualEncode<F>(inputIter, outputIter, ctx);
 				}
 
+				//std::cout << print(outputIter, outputIter + mN) << std::endl;;
 				};
 
 			// Apply the accumulate-permute pattern (mDepth - 1) times
 			for (u64 i = 0; i < mDepth - 1; ++i) {
-				block seed = AES(mSeed ^ block(i, 0)).hashBlock(CCBlock);
+				block seed = subseed(i);
 				if ((i & 1) == 0)
 					round(iter, temp.begin(), seed);
 				else
@@ -115,7 +123,7 @@ namespace osuCrypto
 			}
 
 
-			block seed = AES(~mSeed).hashBlock(CCBlock);
+			block seed = subseed(mDepth-1);
 			BlockDiagonal bd(mK, mN, mBlockSize, seed);
 
 			if (mDepth & 1)
@@ -123,13 +131,22 @@ namespace osuCrypto
 			else
 			{
 				bd.dualEncode<F>(temp.begin(), ctx);
-				ctx.copy(temp.begin(), temp.end(), iter);
+				ctx.copy(temp.begin(), temp.begin() + mK, iter);
 			}
+
+			//std::cout<<print(iter, iter + mK) << std::endl;
+
 		}
 
 		bool isPowerOfTwo(u64 n)
 		{
 			return (n != 0) && ((n & (n - 1)) == 0);
+		}
+
+
+		auto subseed(u64 i)
+		{
+			return mAesFixedKey.hashBlock(mSeed ^ block(i, 0));
 		}
 	};
 

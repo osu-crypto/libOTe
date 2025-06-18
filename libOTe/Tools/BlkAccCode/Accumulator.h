@@ -5,6 +5,7 @@
 #include "cryptoTools/Common/Aligned.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "Permutation.h"
+#include "libOTe/Tools/LDPC/Mtx.h"
 
 namespace osuCrypto
 {
@@ -56,7 +57,6 @@ namespace osuCrypto
             : mN(n)
             , mPerm(std::move(perm))
         {
-            mPerm.init(n);
         }
 
 
@@ -76,6 +76,8 @@ namespace osuCrypto
         template<typename F, typename InIter, typename OutIter, typename CoeffCtx>
         void dualEncode(InIter inIter, OutIter outIter, CoeffCtx ctx)
         {
+            mPerm.init(mN);
+
             if constexpr (HasChunkSize<Perm>::value == false)
             {
 
@@ -121,6 +123,22 @@ namespace osuCrypto
                     mPerm.chunk(permIter, chunk.begin());
 				}
             }
+        }
+
+        SparseMtx getMtx() 
+        {
+            mPerm.init(mN);
+            PointList pl(mN, mN);
+            auto iter = mPerm.begin();
+            for (u64 i = 0; i < mN; ++i)
+            {
+                auto pi = *iter; ++iter;
+                for (u64 j = 0; j <= i; ++j)
+                {
+                    pl.push_back(pi, j);
+                }
+            }
+            return pl;
         }
     };
 
