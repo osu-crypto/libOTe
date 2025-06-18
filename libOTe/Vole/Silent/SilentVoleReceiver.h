@@ -147,6 +147,8 @@ namespace osuCrypto
 		// The receiver's multiplication vector in the VOLE correlation
 		VecG mC;
 
+		// Seed for syndrome decoding
+		block mCodeSeed = ZeroBlock;
 
 		// Number of threads to use for parallel operations (default: 1)
 		// this does not actually create multiple threads but determines how 
@@ -600,6 +602,7 @@ namespace osuCrypto
 		mNumPartitions = param.mNumPartitions;
 		mSizePer = param.mSizePer;
 		mNoiseVecSize = param.mNumPartitions * param.mSizePer;
+		mCodeSeed = block(12528943721987127, 98743297823479812);
 
 
 		// Initialize the appropriate PPRF based on noise distribution
@@ -842,7 +845,8 @@ namespace osuCrypto
 			ExConvConfigure(mMultType, scaler, expanderWeight, accumulatorWeight, minDist);
 			ExConvCode encoder;
 			assert(scaler == 2 && minDist < 1 && minDist > 0);
-			encoder.config(mRequestSize, mNoiseVecSize, expanderWeight, accumulatorWeight);
+			encoder.config(mRequestSize, mNoiseVecSize,
+				expanderWeight, accumulatorWeight, true, true, mCodeSeed);
 
 			if (mTimer)
 				encoder.setTimer(getTimer());
@@ -879,7 +883,7 @@ namespace osuCrypto
 				std::is_same_v<Ctx, CoeffCtxGF128>)
 			{
 				QuasiCyclicCode encoder;
-				encoder.init2(mRequestSize, mNoiseVecSize);
+				encoder.init2(mRequestSize, mNoiseVecSize, mCodeSeed);
 				encoder.dualEncode(mA);
 				encoder.dualEncode(mC);
 			}
@@ -895,7 +899,7 @@ namespace osuCrypto
 		case osuCrypto::MultType::Tungsten:
 		{
 			experimental::TungstenCode encoder;
-			encoder.config(oc::roundUpTo(mRequestSize, 8), mNoiseVecSize);
+			encoder.config(oc::roundUpTo(mRequestSize, 8), mNoiseVecSize, mCodeSeed);
 			encoder.dualEncode<F, Ctx>(mA.begin(), mCtx);
 			encoder.dualEncode<G, Ctx>(mC.begin(), mCtx);
 			break;
@@ -904,6 +908,8 @@ namespace osuCrypto
 			throw std::runtime_error("Code is not supported. " LOCATION);
 			break;
 		}
+
+		mCodeSeed = mAesFixedKey.hashBlock(mCodeSeed);
 
 		// resize the buffers down to only contain the real elements.
 		mCtx.resize(mA, mRequestSize);

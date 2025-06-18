@@ -40,16 +40,21 @@ namespace osuCrypto
         // the next prime starting at mMessageSize. The 
         // real code size will in fact be of size mScaler * mPrimeMosulus
         u64 mPrimeModulus = 0;
+
+        // the randomness used to generate the code.
+		block mSeed = ZeroBlock;
+
     public:
 
         //size of the input
         u64 size() { return mCodeSize; }
 
-        void init2(u64 messageSize, u64 codeSize)
+        void init2(u64 messageSize, u64 codeSize, block seed = block(4321234327842623191,423723984231774321))
         {
             mMessageSize = messageSize;
             mPrimeModulus = nextPrime(messageSize);
             mCodeSize = codeSize;
+            mSeed = seed;
         }
 
         static void bitShiftXor(span<block> dest, span<block> in, u8 bitShift)
@@ -250,7 +255,7 @@ namespace osuCrypto
             for (u64 s = 0; s < scalerMinusOne; s += 1)
             {
                 auto a64 = spanCast<u64>(temp128).subspan(polyU64Size);
-                PRNG pubPrng(toBlock(s) ^ CCBlock);
+                PRNG pubPrng(toBlock(s) ^ mSeed);
                 pubPrng.get(a64.data(), a64.size());
                 a[s].encode(a64);
             }
