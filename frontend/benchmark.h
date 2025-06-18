@@ -7,6 +7,7 @@
 #include "libOTe/Tools/EACode/EACode.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
+#include "libOTe/Tools/BlkAccCode/BlkAccCode.h"
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
@@ -345,6 +346,57 @@ namespace osuCrypto
 		}
 
 		AlignedUnVector<block> x(code.mCodeSize);
+		Timer timer, verbose;
+
+
+		timer.setTimePoint("_____________________");
+		for (u64 i = 0; i < trials; ++i)
+		{
+			code.dualEncode<block, CoeffCtxGF2>(x.data(), {});
+
+			timer.setTimePoint("encode");
+		}
+
+		if (cmd.isSet("quiet") == false)
+		{
+			std::cout << "tungsten " << std::endl;
+			std::cout << timer << std::endl;
+		}
+		if (v)
+			std::cout << verbose << std::endl;
+	}
+
+	inline void BlkAccCodeBench(CLP& cmd)
+	{
+		u64 trials = cmd.getOr("t", 10);
+
+		// the message length of the code. 
+		// The noise vector will have size n=2*k.
+		// the user can use 
+		//   -k X 
+		// to state that exactly X rows should be used or
+		//   -kk X
+		// to state that 2^X rows should be used.
+		u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
+
+		u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
+
+		u64 sigma = cmd.getOr("sigma", 8);
+		u64 dpeth = cmd.getOr("depth", 3);
+
+		// verbose flag.
+		bool v = cmd.isSet("v");
+
+		BlkAccCode code;
+		code.init(k, n, sigma, dpeth);
+
+		if (v)
+		{
+			std::cout << "n: " << code.mN << std::endl;
+			std::cout << "k: " << code.mK << std::endl;
+		}
+
+		AlignedUnVector<block> x(code.mN);
 		Timer timer, verbose;
 
 
@@ -1095,6 +1147,8 @@ namespace osuCrypto
 			ExConvCodeOldBench(cmd);
 		else if (cmd.isSet("tungsten"))
 			TungstenCodeBench(cmd);
+		else if (cmd.isSet("blkacc"))
+			BlkAccCodeBench(cmd);
 		else if (cmd.isSet("aes"))
 			AESBenchmark(cmd);
 		else if (cmd.isSet("dpf"))
@@ -1116,6 +1170,7 @@ namespace osuCrypto
 			std::cout << "  -ec" << std::endl;
 			std::cout << "  -ecold" << std::endl;
 			std::cout << "  -tungsten" << std::endl;
+			std::cout << "  -blkacc" << std::endl;
 			std::cout << "  -aes" << std::endl;
 			std::cout << "  -dpf" << std::endl;
 			std::cout << "  -triDpf" << std::endl;

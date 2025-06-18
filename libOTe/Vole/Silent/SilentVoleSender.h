@@ -718,7 +718,7 @@ namespace osuCrypto
 				double md;
 				BlkAccConfigure(mMultType, scaler,sigma, depth, md);
 				BlkAccCode code;
-				code.init(mRequestSize, mNoiseVecSize, sigma, depth);
+				code.init(mRequestSize, mNoiseVecSize, sigma, depth, mCodeSeed);
 				code.dualEncode<F, Ctx>(mB.begin(), mCtx);
 
 

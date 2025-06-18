@@ -37,9 +37,9 @@ namespace osuCrypto
 			for (u64 i = 0; i < 8; ++i)
 			{
 				auto bits = mState.srli_epi64(i) & block::allSame<u8>(1);
-				memcpy(mBuffer.data() + i * 4, &bits, sizeof(mState));
+				memcpy(mBuffer.data() + i * 16, &bits, sizeof(mState));
 			}
-			return mBuffer;
+			return mBuffer.data();
 		}
 
 	};
@@ -110,12 +110,11 @@ namespace osuCrypto
 			ctx.resize(v, 8);
 			auto seed = mSeed;
 			Rand rand(seed);
-			auto randBits = rand();
-			auto bitIter = randBits.data();
+			auto bitIter = rand();
 
 			u64 idx = 0, count = 0;
 
-			for (u64 blkIdx = 0; blkIdx < numBlock-1; ++blkIdx)
+			for (u64 blkIdx = 0; blkIdx < numBlock - 1; ++blkIdx)
 			{
 				auto xBeing = xIter + blkIdx * sigmaK;
 				auto xEnd = xBeing + sigmaK;
@@ -124,23 +123,31 @@ namespace osuCrypto
 
 				for (auto yy = yBeing; yy < yEnd; ++yy)
 				{
-					if (idx == 128)
-					{
-						if (count++ == 128)
-						{
-							// rerandomize the seed as XorShift is not perfect.
-							seed = mAesFixedKey.hashBlock(seed);
-							rand = Rand(seed);
-							count = 0;
-						}
-
-						idx = 0;
-						randBits = rand();
-						bitIter = randBits.data();
-					}
-
 					for (auto xx = xBeing; xx < xEnd; xx += 8)
 					{
+						if (idx == 128)
+						{
+							if (count++ == 128)
+							{
+								// rerandomize the seed as XorShift is not perfect.
+								seed = mAesFixedKey.hashBlock(seed);
+								rand = Rand(seed);
+								count = 0;
+							}
+
+							idx = 0;
+							bitIter = rand();
+						}
+						if ((bitIter[0] |
+							bitIter[1] |
+							bitIter[2] |
+							bitIter[3] |
+							bitIter[4] |
+							bitIter[5] |
+							bitIter[6] |
+							bitIter[7]) > 1)
+							throw RTE_LOC;
+
 						// vi = xi * randBits[i]
 						ctx.template mask<F>(v[0], xx[0], zeroOne[bitIter[0]]);
 						ctx.template mask<F>(v[1], xx[1], zeroOne[bitIter[1]]);
@@ -179,23 +186,23 @@ namespace osuCrypto
 
 				for (auto yy = yBeing; yy < yEnd; ++yy)
 				{
-					if (idx == 128)
-					{
-						if (count++ == 128)
-						{
-							// rerandomize the seed as XorShift is not perfect.
-							seed = mAesFixedKey.hashBlock(seed);
-							rand = Rand(seed);
-							count = 0;
-						}
-
-						idx = 0;
-						randBits = rand();
-						bitIter = randBits.data();
-					}
 
 					for (auto xx = xBeing; xx < xEnd; ++xx)
 					{
+						if (idx == 128)
+						{
+							if (count++ == 128)
+							{
+								// rerandomize the seed as XorShift is not perfect.
+								seed = mAesFixedKey.hashBlock(seed);
+								rand = Rand(seed);
+								count = 0;
+							}
+
+							idx = 0;
+							bitIter = rand();
+						}
+
 						// vi = xi * randBits[i]
 						ctx.template mask<F>(v[0], xx[0], zeroOne[*bitIter]);
 

@@ -29,7 +29,7 @@ namespace osuCrypto
 
         // Block-Diagonal Codes: Accelerated Linear Codes for Pseudorandom Correlation Generators
         BlkAcc3x8 = 10, // fastest with known high minimum distance.
-        BlkAcc3x32 = 11,// almost fastest with known high minimum distance.
+        BlkAcc3x32 = 11,// almost fastest with very high minimum distance.
 
         // experimental
         Tungsten = 12 // very fast, based on turbo codes. Unknown min distance. 
@@ -78,7 +78,7 @@ namespace osuCrypto
         return o;
     }
 
-    constexpr MultType DefaultMultType = MultType::ExConv7x24;
+    constexpr MultType DefaultMultType = MultType::BlkAcc3x32;
 
 
     // We get e^{-2t d/N} security against linear attacks, 
@@ -136,7 +136,7 @@ namespace osuCrypto
             sigma = 8;
             depth = 3;
         }
-        else if (mult == MultType::BlkAcc3x8)
+        else if (mult == MultType::BlkAcc3x32)
         {
             sigma = 32;
             depth = 3;
