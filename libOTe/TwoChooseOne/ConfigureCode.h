@@ -27,8 +27,12 @@ namespace osuCrypto
         ExConv7x24 = 8, //fast
         ExConv21x24 = 9, // conservative.
 
+        // Block-Diagonal Codes: Accelerated Linear Codes for Pseudorandom Correlation Generators
+        BlkAcc3x8 = 10, // fastest with known high minimum distance.
+        BlkAcc3x32 = 11,// almost fastest with known high minimum distance.
+
         // experimental
-        Tungsten = 10 // very fast, based on turbo codes. Unknown min distance. 
+        Tungsten = 12 // very fast, based on turbo codes. Unknown min distance. 
     };
 
     inline std::ostream& operator<<(std::ostream& o, MultType m)
@@ -56,6 +60,12 @@ namespace osuCrypto
             break;
         case osuCrypto::MultType::ExConv7x24:
             o << "ExConv7x24";
+            break;
+        case MultType::BlkAcc3x8:
+            o << "BlkAcc3x8";
+            break;
+        case MultType::BlkAcc3x32:
+            o << "BlkAcc3x32";
             break;
         case osuCrypto::MultType::Tungsten:
             o << "Tungsten";
@@ -114,6 +124,29 @@ namespace osuCrypto
     }
 
 
+    inline void BlkAccConfigure(
+        MultType mult,
+        u64& scaler,
+        u64& sigma,
+        u64& depth,
+        double& minDist)
+    {
+        if (mult == MultType::BlkAcc3x8)
+        {
+            sigma = 8;
+            depth = 3;
+        }
+        else if (mult == MultType::BlkAcc3x8)
+        {
+            sigma = 32;
+            depth = 3;
+        }
+        else
+            throw RTE_LOC;
+        scaler = 2;
+        minDist = 0.25; // estimated psuedo min dist
+    }
+
     inline void TungstenConfigure(
         u64& mScaler,
         double& minDist)
@@ -168,6 +201,13 @@ namespace osuCrypto
         case MultType::QuasiCyclic:
             QuasiCyclicConfigure(scaler, minDist);
             break;
+        case MultType::BlkAcc3x8:
+        case MultType::BlkAcc3x32:
+        {
+            u64 sigma, depth;
+            BlkAccConfigure(multType,scaler, sigma, depth, minDist);
+            break;
+        }
         case osuCrypto::MultType::Tungsten:
         {
             requestSize = roundUpTo(requestSize, 8);

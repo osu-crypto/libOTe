@@ -1,0 +1,136 @@
+#pragma once
+#include "BaseCode.h"
+#include "BlkAccCode.h"
+#include "Permutation.h"
+#include "Accumulator.h"
+#include "BlockDiagonal.h"
+#include "cryptoTools/Common/Timer.h"
+#include "cryptoTools/Common/Aligned.h"
+#include "cryptoTools/Crypto/PRNG.h"
+
+namespace osuCrypto
+{
+
+	/**
+	 * @brief Block Accumulator Code implementation with high minimum distance.
+	 * see "Block-Diagonal Codes: Accelerated Linear Codes for Pseudorandom Correlation Generators"
+	 *
+	 * This class implements a block accumulator code that performs:
+	 * 1. Accumulate
+	 * 2. Permute
+	 * 3. (repeated depth-1 times)
+	 * 4. Systematic block diagonal compression
+	 *
+	 * The code maps from a codeword of size codeSize to a message of size messageSize .
+	 * The systematic block diagonal step compresses while the other operations map
+	 * codeSize vector to codeSize vector.
+	 */
+	struct BlkAccCode// : BaseCode<T>
+	{
+
+		u64 mK = 0;  // Size of output (message size)
+		u64 mN = 0;  // Size of input (code size)
+
+		// Seeds for randomness
+		block mSeed = ZeroBlock;
+
+		// Depth parameter for accumulation-permutation steps
+		u64 mDepth = 0;
+
+		// blockSize Size of processing blocks (default 8)
+		u64 mBlockSize = 0;
+
+		/**
+		 * @brief Initialize the block accumulator code
+		 *
+		 * @param msgSize Size of the output message
+		 * @param codeSize Size of the input codeword
+		 * @param blockSize Size of processing blocks (default 8)
+		 * @param depth Depth parameter for accumulation (default 3)
+		 */
+		void init(
+			u64 msgSize,
+			u64 codeSize,
+			u64 blockSize = 8,
+			u64 depth = 3,
+			block seed = block(239478123692759237ull, 256237497312390762ull))
+		{
+			if (codeSize < msgSize)
+				throw RTE_LOC;
+
+			if (depth < 3)
+				throw RTE_LOC; // Depth must be at least 3 for linear distance.
+
+			mN = codeSize;
+			mK = msgSize;
+			mBlockSize = blockSize;
+			mDepth = depth;
+			mSeed = seed;
+		}
+
+		/**
+		 * @brief Apply the block accumulator code to the input data
+		 *
+		 * Performs the sequence: accumulate, permute, accumulate, permute, ...
+		 * (repeated depth-1 times), then applies systematic block diagonal compression.
+		 *
+		 * @param input Input message
+		 * @param output Output codeword
+		 */
+		template<typename F, typename CoeffCtx>
+		void dualEncode(auto iter, CoeffCtx ctx) 
+		{
+
+			// Initialize the output with the input data (systematic part) and zero-pad
+			typename CoeffCtx::template Vec<F> temp;
+			ctx.resize(temp, mN);
+
+
+			auto round = [&](auto inputIter, auto outputIter, auto seed){
+				// Create the appropriate permutation type based on whether codeSize is power of 2
+				if (isPowerOfTwo(mN)) {
+					// For power of 2 sizes, use Feistel2KPerm
+					Accumulator<Feistel2KPerm> accumPerm(mN, Feistel2KPerm(mN, seed));
+
+					// Apply the accumulate-permute operation
+					accumPerm.dualEncode<F>(inputIter, outputIter, ctx);
+				}
+				else {
+					// For non-power of 2 sizes, use FeistelPerm
+					Accumulator<FeistelPerm> accumPerm(mN, FeistelPerm(mN, seed));
+
+					// Apply the accumulate-permute operation
+					accumPerm.dualEncode<F>(inputIter, outputIter, ctx);
+				}
+
+				};
+
+			// Apply the accumulate-permute pattern (mDepth - 1) times
+			for (u64 i = 0; i < mDepth - 1; ++i) {
+				block seed = AES(mSeed ^ block(i, 0)).hashBlock(CCBlock);
+				if ((i & 1) == 0)
+					round(iter, temp.begin(), seed);
+				else
+					round(temp.begin(), iter, seed);
+			}
+
+
+			block seed = AES(~mSeed).hashBlock(CCBlock);
+			BlockDiagonal bd(mK, mN, mBlockSize, seed);
+
+			if (mDepth & 1)
+				bd.dualEncode<F>(iter, ctx);
+			else
+			{
+				bd.dualEncode<F>(temp.begin(), ctx);
+				ctx.copy(temp.begin(), temp.end(), iter);
+			}
+		}
+
+		bool isPowerOfTwo(u64 n)
+		{
+			return (n != 0) && ((n & (n - 1)) == 0);
+		}
+	};
+
+}

@@ -29,6 +29,7 @@
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtUtil.h"
 #include <libOTe/Tools/TungstenCode/TungstenCode.h>
 #include <libOTe/Vole/VoleUtil.h>
+#include <libOTe/Tools/BlkAccCode/BlkAccCode.h>
 
 namespace osuCrypto
 {
@@ -852,6 +853,20 @@ namespace osuCrypto
 				mC.begin(),
 				{}
 			);
+			break;
+		}
+		case MultType::BlkAcc3x8:
+		case MultType::BlkAcc3x32:
+		{
+			u64 depth, sigma, scaler;
+			double md;
+			BlkAccConfigure(mMultType, scaler, sigma, depth, md);
+			BlkAccCode code;
+			code.init(mRequestSize, mNoiseVecSize, sigma, depth);
+			code.dualEncode<F, Ctx>(mA.begin(), mCtx);
+			code.dualEncode<G, Ctx>(mC.begin(), mCtx);
+
+
 			break;
 		}
 		case osuCrypto::MultType::QuasiCyclic:

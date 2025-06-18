@@ -243,6 +243,15 @@ void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd)
 	throw UnitTestSkipped("ENABLE_BITPOLYMUL not defined." LOCATION);
 #endif
 }
+
+void Vole_Silent_BlkAcc_test(const oc::CLP& cmd)
+{
+	auto noise = (SdNoiseDistribution)cmd.getOr("noise", 0);
+	auto debug = cmd.isSet("debug");
+	for (u64 n : {128, 33341})
+		Vole_Silent_test_impl<block, block, CoeffCtxGF128>(n, MultType::BlkAcc3x8, debug, false, false, noise);
+}
+
 void Vole_Silent_Tungsten_test(const oc::CLP& cmd)
 {
 	auto noise = (SdNoiseDistribution)cmd.getOr("noise", 0);

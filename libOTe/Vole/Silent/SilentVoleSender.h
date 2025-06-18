@@ -28,6 +28,7 @@
 #include <libOTe/Tools/TungstenCode/TungstenCode.h>
 #include <libOTe/Tools/Pprf/StationaryPprf.h>
 #include <libOTe/Vole/VoleUtil.h>
+#include <libOTe/Tools/BlkAccCode/BlkAccCode.h>
 
 namespace osuCrypto
 {
@@ -701,6 +702,19 @@ namespace osuCrypto
 				if (mTimer)
 					encoder.setTimer(getTimer());
 				encoder.dualEncode<F, Ctx>(mB.begin(), mCtx);
+				break;
+			}
+			case MultType::BlkAcc3x8:
+			case MultType::BlkAcc3x32:
+			{
+				u64 depth, sigma,scaler;
+				double md;
+				BlkAccConfigure(mMultType, scaler,sigma, depth, md);
+				BlkAccCode code;
+				code.init(mRequestSize, mNoiseVecSize, sigma, depth);
+				code.dualEncode<F, Ctx>(mB.begin(), mCtx);
+
+
 				break;
 			}
 			case MultType::QuasiCyclic:

@@ -1,5 +1,7 @@
 
-set(SRCS 
+
+add_library(libOTe_Tests STATIC 
+
     BaseOT_Tests.cpp
     bitpolymul_Tests.cpp
     Common.cpp
@@ -15,9 +17,8 @@ set(SRCS
     UnitTests.cpp
     Vole_Tests.cpp
     Foleage_Tests.cpp
-)
-
-add_library(libOTe_Tests STATIC ${SRCS})
+    Permutation_Tests.cpp
+    BlkAccCode_Tests.cpp)
 
 target_link_libraries(libOTe_Tests libOTe)
 
