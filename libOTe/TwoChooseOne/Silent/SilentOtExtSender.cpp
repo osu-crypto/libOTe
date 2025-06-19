@@ -12,6 +12,7 @@
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
 #include "libOTe/Tools/TungstenCode/TungstenCode.h"
+#include "libOTe/Tools/BlkAccCode/BlkAccCode.h"
 
 namespace osuCrypto
 {
@@ -473,6 +474,17 @@ namespace osuCrypto
 			exConvEncoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight, accWeight);
 
 			exConvEncoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
+			break;
+		}
+		case MultType::BlkAcc3x8:
+		case MultType::BlkAcc3x32:
+		{
+			u64 depth, sigma, scaler;
+			double md;
+			BlkAccConfigure(mMultType, scaler, sigma, depth, md);
+			BlkAccCode code;
+			code.init(mRequestNumOts, mNoiseVecSize, sigma, depth);
+			code.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
 			break;
 		}
 		case osuCrypto::MultType::Tungsten:

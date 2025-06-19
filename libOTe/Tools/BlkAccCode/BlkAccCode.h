@@ -138,6 +138,23 @@ namespace osuCrypto
 
 		}
 
+
+		/**
+		 * @brief Apply the block accumulator code to the input data
+		 *
+		 * Performs the sequence: accumulate, permute, accumulate, permute, ...
+		 * (repeated depth-1 times), then applies systematic block diagonal compression.
+		 *
+		 * @param input Input message
+		 * @param output Output codeword
+		 */
+		template<typename F, typename G, typename CoeffCtx>
+		void dualEncode2(auto iter0, auto iter1, CoeffCtx ctx)
+		{
+			dualEncode<F>(iter0, ctx);
+			dualEncode<G>(iter1, ctx);
+		}
+
 		bool isPowerOfTwo(u64 n)
 		{
 			return (n != 0) && ((n & (n - 1)) == 0);

@@ -101,9 +101,17 @@ namespace osuCrypto
 			auto xSize = mK;
 			auto ySize = mN - mK;
 
+			if (ySize < xSize)
+				throw RTE_LOC;// currently not implemented. Could be made to work.
+
 			auto sigmaK = mSigma;
-			auto sigmaN = roundUpTo(mSigma * (ySize / xSize), 8);
-			auto numBlock = xSize / sigmaK;
+			//auto sigmaN = divCeil(mSigma * ySize, xSize);
+			auto numBlock = divCeil(xSize, sigmaK);
+
+			// we are going to have numBlocks-1 full blocks.
+
+			if (xSize == 0)
+				return;
 
 			std::array<block, 2> zeroOne_;
 			setBytes(zeroOne_[0], 0);
@@ -116,18 +124,12 @@ namespace osuCrypto
 			auto bitIter = rand();
 
 			u64 idx = 0, count = 0;
-
-			{
-				auto ii = yIter;
-
-			}
-
 			for (u64 blkIdx = 0; blkIdx < numBlock - 1; ++blkIdx)
 			{
 				auto xBegin = xIter + blkIdx * sigmaK;
 				auto xEnd = xBegin + sigmaK;
-				auto yBegin = yIter + blkIdx * sigmaN;
-				auto yEnd = yBegin + sigmaN;
+				auto yBegin = yIter + blkIdx * ySize / numBlock;
+				auto yEnd = yIter + (blkIdx+1) * ySize / numBlock;
 
 				for (auto xx = xBegin; xx < xEnd; ++xx)
 				{
@@ -183,8 +185,9 @@ namespace osuCrypto
 				auto blkIdx = numBlock - 1;
 				auto xBegin = xIter + blkIdx * sigmaK;
 				auto xEnd = xIter + xSize;
-				auto yBegin = yIter + blkIdx * sigmaN;
-				auto yEnd = yIter + ySize;
+
+				auto yBegin = yIter + blkIdx * ySize / numBlock;
+				auto yEnd = yIter + (blkIdx + 1) * ySize / numBlock;
 
 				for (auto xx = xBegin; xx < xEnd; ++xx)
 				{
@@ -245,8 +248,9 @@ namespace osuCrypto
 			{
 				auto xBegin = xIter + blkIdx * sigmaK;
 				auto xEnd = xBegin + sigmaK;
-				auto yBegin = yIter + blkIdx * sigmaN;
-				auto yEnd = yBegin + sigmaN;
+
+				auto yBegin = yIter + blkIdx * ySize / numBlock;
+				auto yEnd = yIter + (blkIdx + 1) * ySize / numBlock;
 
 				for (auto xx = xBegin; xx < xEnd; ++xx)
 				{
@@ -280,8 +284,8 @@ namespace osuCrypto
 				auto blkIdx = numBlock - 1;
 				auto xBegin = xIter + blkIdx * sigmaK;
 				auto xEnd = xIter + xSize;
-				auto yBegin = yIter + blkIdx * sigmaN;
-				auto yEnd = yIter + ySize;
+				auto yBegin = yIter + blkIdx * ySize / numBlock;
+				auto yEnd = yIter + (blkIdx + 1) * ySize / numBlock;
 
 				for (auto xx = xBegin; xx < xEnd; ++xx)
 				{
