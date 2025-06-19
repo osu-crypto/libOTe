@@ -23,6 +23,11 @@ namespace osuCrypto {
     template<typename Inner, typename T>
     struct PermIterator
     {
+        PermIterator(Inner in, T base)
+            : mPermIter(std::move(in))
+            , mBase(std::move(base))
+        { }
+
         Inner mPermIter;
         T mBase;
 
@@ -239,13 +244,13 @@ namespace osuCrypto {
                 {
                     // F(k,x) = truncate(H(k + x) ^ x)
                     // L = L ^ F(k, R)
-                    L ^= (xorshifthash(mBlkKeys[i] + R) ^ R) & mLMask;
+                    L ^= (xorshifthash(mBlkKeys[i].add_epi32(R)) ^ R) & mLMask;
                 }
                 else
                 {
                     // F(k,x) = truncate(H(k + x) ^ x)
                     // R = R ^ F(k, L)
-                    R ^= (xorshifthash(mBlkKeys[i] + L) ^ L) & mRMask;
+                    R ^= (xorshifthash(mBlkKeys[i].add_epi32(L)) ^ L) & mRMask;
                 }
             }
 

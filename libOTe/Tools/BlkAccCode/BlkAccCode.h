@@ -100,14 +100,14 @@ namespace osuCrypto
 					Accumulator<Feistel2KPerm> accumPerm(mN, Feistel2KPerm(mN, seed));
 
 					// Apply the accumulate-permute operation
-					accumPerm.dualEncode<F>(inputIter, outputIter, ctx);
+					accumPerm.template dualEncode<F>(inputIter, outputIter, ctx);
 				}
 				else {
 					// For non-power of 2 sizes, use FeistelPerm
 					Accumulator<FeistelPerm> accumPerm(mN, FeistelPerm(mN, seed));
 
 					// Apply the accumulate-permute operation
-					accumPerm.dualEncode<F>(inputIter, outputIter, ctx);
+					accumPerm.template dualEncode<F>(inputIter, outputIter, ctx);
 				}
 
 				//std::cout << print(outputIter, outputIter + mN) << std::endl;;
@@ -127,10 +127,10 @@ namespace osuCrypto
 			BlockDiagonal bd(mK, mN, mBlockSize, seed);
 
 			if (mDepth & 1)
-				bd.dualEncode<F>(iter, ctx);
+				bd.template dualEncode<F>(iter, ctx);
 			else
 			{
-				bd.dualEncode<F>(temp.begin(), ctx);
+				bd.template dualEncode<F>(temp.begin(), ctx);
 				ctx.copy(temp.begin(), temp.begin() + mK, iter);
 			}
 
@@ -144,7 +144,7 @@ namespace osuCrypto
 		}
 
 
-		auto subseed(u64 i)
+		block subseed(u64 i)
 		{
 			return mAesFixedKey.hashBlock(mSeed ^ block(i, 0));
 		}
