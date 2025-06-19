@@ -229,7 +229,8 @@ namespace osuCrypto {
          */
         block feistelBijection(block vals) const 
         {
-            block L = _mm_srli_epi32(vals, mRightSideBits);
+            block L = vals.srl_epi32(mRightSideBits);
+            //block L = _mm_srli_epi32(vals, mRightSideBits);
             block R = vals & mRMask;
 
             for (u32 i = 0; i < mKeys.size(); i++)
@@ -249,7 +250,8 @@ namespace osuCrypto {
             }
 
             // Combine the left and right sides into a single value
-            return block(_mm_slli_epi32(L, mRightSideBits)) | R;
+            //return block(_mm_slli_epi32(L, mRightSideBits)) | R;
+            return L.sll_epi32(mRightSideBits) | R;
         }
 
 
@@ -336,10 +338,13 @@ namespace osuCrypto {
         inline void chunk(PermIterator<Iterator, T>& out, auto in)
         {
             std::array<block, 2> idxs;
-            __m128i increment = _mm_set_epi32(3, 2, 1, 0);
+            //__m128i increment = _mm_set_epi32(3, 2, 1, 0);
+            block increment(3, 2, 1, 0);
             auto idx = out.mPermIter.mIdx;
-            idxs[0] = _mm_add_epi32(_mm_set1_epi32(idx), increment);
-            idxs[1] = _mm_add_epi32(_mm_set1_epi32(idx + 4), increment);
+            idxs[0] = block::allSame<u32>(idx).add_epi32(increment);
+            idxs[1] = block::allSame<u32>(idx + 4).add_epi32(increment);
+            //idxs[0] = _mm_add_epi32(_mm_set1_epi32(idx), increment);
+            //idxs[1] = _mm_add_epi32(_mm_set1_epi32(idx + 4), increment);
 
             idxs[0] = feistelBijection(idxs[0]);
             idxs[1] = feistelBijection(idxs[1]);
