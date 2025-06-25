@@ -184,6 +184,9 @@ namespace osuCrypto
 		// [0,domain) and returns these as the choice bits.
 		BitVector sampleChoiceBits(PRNG& prng) override
 		{
+			if (mExpanded)
+				return {};
+
 			return mRecver.sampleChoiceBits(prng);
 		}
 
@@ -209,7 +212,7 @@ namespace osuCrypto
 			if (mExpanded)
 				return true;
 			else
-				return mRecver.baseOtCount();
+				return mRecver.hasBaseOts();
 		}
 
 		void setBase(span<const block> baseMessages) override
@@ -317,12 +320,12 @@ namespace osuCrypto
 		}
 
 
-		std::vector<u64> getPoints(PprfOutputFormat format) override
+		std::vector<u64> getPoints(PprfOutputFormat format) const override
 		{
 			return mRecver.getPoints(format);
 		}
 
-		void getPoints(span<u64> points, PprfOutputFormat format) override
+		void getPoints(span<u64> points, PprfOutputFormat format) const override
 		{
 			mRecver.getPoints(points, format);
 		}

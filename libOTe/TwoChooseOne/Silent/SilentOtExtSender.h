@@ -15,7 +15,7 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Common/Timer.h>
-#include <libOTe/Tools/Pprf/RegularPprf.h>
+#include <libOTe/Tools/Pprf/StationaryPprf.h>
 #include <libOTe/TwoChooseOne/TcoOtDefines.h>
 #include <libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h>
 #include <libOTe/TwoChooseOne/OTExtInterface.h>
@@ -62,7 +62,7 @@ namespace osuCrypto
     // can then be called which results in one message being sent
     // from the sender to the receiver. 
     //
-    // Also note that genSilentCor(...) can be called which generates 
+    // Also note that genBaseCors(...) can be called which generates 
     // them. This has two behaviors. If the normal base OTs have previously
     // been set, i.e. the normal OT Ext interface, then and IKNP OT extension
     // is performed to generated the needed ~400 base OTs. If they have not
@@ -90,7 +90,7 @@ namespace osuCrypto
         AlignedUnVector<block> mB;
 
         // The delta scaler in the relation A + B = C * delta
-        block mDelta;
+        std::optional<block> mDelta;
 
         // The number of threads that should be used (when applicable).
         u64 mNumThreads = 1;
@@ -100,8 +100,13 @@ namespace osuCrypto
         macoro::optional<SoftSpokenMalOtSender> mOtExtSender;
 #endif
 
-        // The ggm tree thats used to generate the sparse vectors.
-        RegularPprfSender<block, CoeffCtxGF2> mGen;
+
+        // The PPRF used to generate the noise vector
+        // Variant allows selecting between Regular and Stationary PPRF
+        std::variant<
+            RegularPprfSender<block, CoeffCtxGF2>,
+            StationaryPprfSender<block, CoeffCtxGF2>
+        > mGenVar;
 
         // The type of compress we will use to generate the
         // dense vectors from the sparse vectors.
@@ -110,12 +115,21 @@ namespace osuCrypto
         // The flag which controls whether the malicious check is performed.
         SilentSecType mMalType = SilentSecType::SemiHonest;
 
+        SdNoiseDistribution mNoiseDist = SdNoiseDistribution::Regular;
+
+        PprfOutputFormat mPprfFormat = PprfOutputFormat::ByTreeIndex;
+
+        block mCodeSeed = ZeroBlock; 
+
         // The OTs send msgs which will be used to create the 
         // secret share of xa * delta as described in ferret.
         std::vector<std::array<block, 2>> mMalCheckOts;
 
         // An temporary buffer used during LPN encoding.
         AlignedUnVector<block> mEncodeTemp;
+
+        // for stationary, this is used to store the B vector.
+        AlignedUnVector<block> mBaseB;
 
         // A flag that helps debug
         bool mDebug = false;
@@ -156,16 +170,18 @@ namespace osuCrypto
         /////////////////////////////////////////////////////
 
 
-        bool hasSilentBaseOts() const
+        bool hasBaseCors() const
         {
-            return mGen.hasBaseOts();
+            return gen().hasBaseOts() &&
+                (mNoiseDist == SdNoiseDistribution::Regular || 
+                    mBaseB.size() == mNumPartitions);
         }
 
         // Generate the silent base OTs. If the Iknp 
         // base OTs are set then we do an IKNP extend,
         // otherwise we perform a base OT protocol to
         // generate the needed OTs.
-        task<> genSilentCor(PRNG& prng, Socket& chl, bool useOtExtension = true);
+        task<> genBaseCors(std::optional<block> delta, PRNG& prng, Socket& chl, bool useOtExtension = true);
 
         // configure the silent OT extension. This sets
         // the parameters and figures out how many base OT
@@ -175,22 +191,32 @@ namespace osuCrypto
         // @scaler   [in] - the compression factor.
         // @nThreads [in] - the number of threads.
         // @mal      [in] - whether the malicious check is performed.
+        // @noise    [in] - the noise distribution to be used. If stationary, base OTs are reused.
         void configure(
             u64 n,
             u64 scaler = 2,
             u64 numThreads = 1,
-            SilentSecType malType = SilentSecType::SemiHonest);
+            SilentSecType malType = SilentSecType::SemiHonest,
+            SdNoiseDistribution noise = SdNoiseDistribution::Regular);
 
         // return true if this instance has been configured.
         bool isConfigured() const { return mRequestNumOts > 0; }
 
         // Returns how many base OTs the silent OT extension
         // protocol will needs.
-        u64 silentBaseOtCount() const;
+        SilentBaseCount baseCount() const;
 
-        // Set the externally generated base OTs. This choice
-        // bits must be the one return by sampleBaseChoiceBits(...).
-        void setSilentBaseOts(span<const std::array<block,2>> sendBaseOts);
+        // Set the externally generated base OTs and Voles. This choice
+        // bits for the OT must be the one return by sampleBaseChoiceBits(...).
+        // if stationary, baseB is the B value in the base vole correlation
+        // 
+        //   baseA = baseB + baseC * mDelta
+        //
+        // delta should be the same as mDelta used in this protocol.
+        void setBaseCors(
+            span<const std::array<block,2>> sendBaseOts,
+            span<const block> baseB,
+            block delta);
 
 
         // Runs the silent random OT protocol and outputs b.
@@ -213,7 +239,7 @@ namespace osuCrypto
         // @prng  [in] - randomness source.
         // @chl   [in] - the comm channel
 		task<> silentSend(
-            block d,
+            std::optional<block> d,
 			span<block> b,
 			PRNG& prng,
 			Socket& chl);
@@ -228,7 +254,7 @@ namespace osuCrypto
         // @prng  [in] - randomness source.
         // @chl   [in] - the comm channel
         task<> silentSendInplace(
-            block d,
+            std::optional<block> d,
             u64 n,
             PRNG& prng,
             Socket& chl);
@@ -250,6 +276,29 @@ namespace osuCrypto
 
         // clears the internal buffers.
         void clear();
+
+
+        /**
+         * @brief Helper function to access the PPRF generator.
+         *
+         * @return Reference to the PPRF sender
+         */
+        PprfSender<block, CoeffCtxGF2>& gen() {
+            if (isConfigured() == false)
+                throw std::runtime_error("configure(...) must be called first.");
+            return std::visit([](auto& v) -> PprfSender<block, CoeffCtxGF2>&{ return v; }, mGenVar);
+        }
+
+        /**
+         * @brief Const version of the PPRF generator accessor.
+         *
+         * @return Const reference to the PPRF sender
+         */
+        const PprfSender<block, CoeffCtxGF2>& gen() const {
+            if (isConfigured() == false)
+                throw std::runtime_error("configure(...) must be called first.");
+            return std::visit([](auto& v) -> const PprfSender<block, CoeffCtxGF2>&{ return v; }, mGenVar);
+        }
     };
     //extern bool gSilverWarning;
 

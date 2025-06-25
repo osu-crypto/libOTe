@@ -76,7 +76,7 @@ namespace osuCrypto
 						// optional. You can request that the base ot are generated either
 						// using just base OTs (few rounds, more computation) or 128 base OTs and then extend those.
 						// The default is the latter, base + extension.
-						cp::sync_wait(sender.genSilentCor(prng, chl, type == SilentBaseType::BaseExtend));
+						cp::sync_wait(sender.genBaseCors({}, prng, chl, type == SilentBaseType::BaseExtend));
 					}
 
 					std::vector<std::array<block, 2>> messages(numOTs);
@@ -125,7 +125,7 @@ namespace osuCrypto
 						// optional. You can request that the base ot are generated either
 						// using just base OTs (few rounds, more computation) or 128 base OTs and then extend those.
 						// The default is the latter, base + extension.
-						cp::sync_wait(recver.genSilentCor(prng, chl, type == SilentBaseType::BaseExtend));
+						cp::sync_wait(recver.genBaseCors(prng, chl, type == SilentBaseType::BaseExtend));
 					}
 
 					std::vector<block> messages(numOTs);

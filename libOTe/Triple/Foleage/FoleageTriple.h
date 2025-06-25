@@ -124,7 +124,7 @@ namespace osuCrypto
 
 		bool isInitialized() const { return mN > 0; }
 
-		struct BaseOtCount
+		struct BaseCount
 		{
 			// the number of base OTs as sender.
 			u64 mSendCount = 0;
@@ -134,7 +134,7 @@ namespace osuCrypto
 		};
 
 		// returns the number of base OTs required. 
-		BaseOtCount baseOtCount() const;
+		BaseCount baseOtCount() const;
 
 		// sets the base OTs that will be used.
 		void setBaseOts(

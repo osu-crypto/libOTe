@@ -649,14 +649,14 @@ namespace osuCrypto
 		}
 
 
-		std::vector<u64> getPoints(PprfOutputFormat format) override
+		std::vector<u64> getPoints(PprfOutputFormat format) const override
 		{
 			std::vector<u64> pnts(mPntCount);
 			getPoints(pnts, format);
 			return pnts;
 		}
 
-		void getPoints(span<u64> points, PprfOutputFormat format) override
+		void getPoints(span<u64> points, PprfOutputFormat format) const  override
 		{
 			if ((u64)points.size() != mPntCount)
 				throw RTE_LOC;

@@ -91,12 +91,15 @@ namespace osuCrypto
 
 	}
 
-	task<> SilentOtExtSender::genSilentCor(PRNG& prng, Socket& chl, bool useOtExtension)
+	task<> SilentOtExtSender::genBaseCors(std::optional<block> delta, PRNG& prng, Socket& chl, bool useOtExtension)
 	{
 		MACORO_TRY{
 
-		auto msg = AlignedUnVector<std::array<block, 2>>(silentBaseOtCount());
-
+		delta = delta.value_or(mDelta.value_or(prng.get()));
+			
+		auto count = baseCount();
+		auto msg = AlignedUnVector<std::array<block, 2>>(count.mBaseOtCount + count.mBaseVoleCount);
+		auto baseB = AlignedUnVector<block>(count.mBaseVoleCount);
 		if (isConfigured() == false)
 			throw std::runtime_error("configure must be called first");
 
@@ -107,9 +110,39 @@ namespace osuCrypto
 #ifdef ENABLE_SOFTSPOKEN_OT
 		if (useOtExtension)
 		{
+
+			BitVector choice;
+			choice.append((u8*)&*delta, 128);
+
 			if (!mOtExtSender)
+			{
 				mOtExtSender.emplace();
-			co_await(mOtExtSender->send(msg, prng, chl));
+				// false -> no hashing, delta OTs / VOLEs
+				mOtExtSender->init(2, false);
+				auto baseCount = mOtExtSender->baseOtCount();
+				DefaultBaseOT base;
+				std::vector<block> baseMsg(baseCount);
+				co_await base.receive(choice, baseMsg, prng, chl);
+				mOtExtSender->setBaseOts(baseMsg, choice);
+			}
+
+			// if mOtExtSender already has base OTs and we require base VOLEs,
+			// but the base OTs do not match, then throw. The caller must manually 
+			// handle this case as at this point we dont have a good way to inform 
+			// the receiver of this.
+			if (mOtExtSender->mBase.mSubVole.mVole.mDelta != choice && count.mBaseVoleCount)
+				throw std::runtime_error("genBaseCors does not implement the logic to generate the BaseCors for a different delta value. Caller must do this manually. " LOCATION);
+
+			co_await mOtExtSender->send(msg, prng, chl);
+
+			for (u64 i = 0; i < baseB.size(); ++i)
+				baseB[i] = msg[i + count.mBaseOtCount][0];
+			msg.resize(msg.size() - baseB.size());
+
+			// convert msg into random OTs
+			auto hasher = mOtExtSender->mBase.mAesMgr.useAES(msg.size());
+			for(auto& m : msg)
+				hasher.hashBlocks(m, m);
 		}
 		else
 #endif
@@ -117,14 +150,29 @@ namespace osuCrypto
 			auto base = DefaultBaseOT{};
 			// otherwise just generate the silent 
 			// base OTs directly.
-			co_await(base.send(msg, prng, chl));
+			co_await base.send(msg, prng, chl);
+
+			if (baseB.size())
+			{
+				// derandomize the VOLEs.
+				std::vector<block> offsets(baseB.size());
+				for (u64 i = 0; i < baseB.size(); ++i)
+				{
+					baseB[i] = msg[i + count.mBaseOtCount][0];
+					offsets[i] = msg[i + count.mBaseOtCount][0] ^ msg[i + count.mBaseOtCount][1] ^ *delta;
+				}
+				co_await chl.send(std::move(offsets));
+
+				msg.resize(msg.size() - baseB.size());
+			}
+
 			setTimePoint("sender.gen.baseOT");
 		}
 #else
 		throw std::runtime_error("KOS or base OTs must be enabled");
 #endif
 
-		setSilentBaseOts(msg);
+		setBaseCors(msg, baseB, *delta);
 
 		setTimePoint("sender.gen.done");
 
@@ -134,54 +182,88 @@ namespace osuCrypto
 	}
 	}
 
-	u64 SilentOtExtSender::silentBaseOtCount() const
+	SilentBaseCount SilentOtExtSender::baseCount() const
 	{
 		if (isConfigured() == false)
 			throw std::runtime_error("configure must be called first");
 
-		auto n = mGen.baseOtCount();
+		auto n = gen().baseOtCount();
 
 		if (mMalType == SilentSecType::Malicious)
 			n += 128;
 
-		return n;
+		auto v = mNoiseDist == SdNoiseDistribution::Stationary ? mNumPartitions : 0;
+
+		return { n, v };
 	}
 
-	void SilentOtExtSender::setSilentBaseOts(
-		span<const std::array<block, 2>> sendBaseOts)
+	void SilentOtExtSender::setBaseCors(
+		span<const std::array<block, 2>> sendBaseOts,
+		span<const block> baseB,
+		block delta)
 	{
 
-		if ((u64)sendBaseOts.size() != silentBaseOtCount())
+		if ((u64)sendBaseOts.size() != baseCount().mBaseOtCount)
+			throw RTE_LOC;
+		if ((u64)baseB.size() != baseCount().mBaseVoleCount)
 			throw RTE_LOC;
 
-		auto genOt = sendBaseOts.subspan(0, mGen.baseOtCount());
+
+		auto genOt = sendBaseOts.subspan(0, gen().baseOtCount());
 		auto malOt = sendBaseOts.subspan(genOt.size());
 		mMalCheckOts.resize((mMalType == SilentSecType::Malicious) * 128);
 
-		mGen.setBase(genOt);
+		if(genOt.size())
+			gen().setBase(genOt);
+
 		std::copy(malOt.begin(), malOt.end(), mMalCheckOts.begin());
+
+		mBaseB.resize(baseB.size());
+		std::copy(baseB.begin(), baseB.end(), mBaseB.begin());
+		mDelta = delta;
 	}
 
 	void SilentOtExtSender::configure(
-		u64 numOTs, u64 scaler, u64 numThreads, SilentSecType malType)
+		u64 numOTs, u64 scaler, u64 numThreads, 
+		SilentSecType malType, 
+		SdNoiseDistribution noiseType)
 	{
 		mMalType = malType;
 		mNumThreads = numThreads;
 		u64 secParam = 128;
 		mRequestNumOts = numOTs;;
+		mNoiseDist = noiseType;
 
-		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mMultType, SdNoiseDistribution::Regular, 1);
+		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mMultType, mNoiseDist, 1);
 		mNumPartitions = param.mNumPartitions;
 		mSizePer = param.mSizePer;
 		mNoiseVecSize = param.mNumPartitions * param.mSizePer;
+		mCodeSeed = block(12528943721987127, 98743297823479812);
 
-		mGen.configure(mSizePer, mNumPartitions);
+		// Initialize the appropriate PPRF based on noise distribution
+		if (SdNoiseDistribution::Regular == noiseType)
+		{
+			mGenVar.template emplace<0>();  // Use RegularPprfSender
+			mPprfFormat = PprfOutputFormat::Interleaved;
+		}
+		else if (SdNoiseDistribution::Stationary == noiseType)
+		{
+			mGenVar.template emplace<1>();  // Use StationaryPprfSender
+			mPprfFormat = PprfOutputFormat::ByTreeIndex;
+		}
+		else
+		{
+			throw std::invalid_argument("SilentNoiseType not supported. " LOCATION);
+		}
+
+
+		gen().configure(mSizePer, mNumPartitions);
 	}
 
 	task<> SilentOtExtSender::checkRT(Socket& chl)
 	{
-		co_await(chl.send(mB));
-		co_await(chl.send(mDelta));
+		co_await chl.send(mB);
+		co_await chl.send(*mDelta);
 
 		setTimePoint("sender.expand.checkRT");
 	}
@@ -196,9 +278,10 @@ namespace osuCrypto
 		mB = {};
 		mEncodeTemp = {};
 
-		mDelta = block(0, 0);
+		mDelta.reset();
 
-		mGen.clear();
+		if(isConfigured())
+			gen().clear();
 	}
 
 	task<> SilentOtExtSender::send(
@@ -211,8 +294,8 @@ namespace osuCrypto
 		auto iter = BitIterator{};
 		auto i = u64{};
 
-		co_await(silentSend(messages, prng, chl));
-		co_await(chl.recv(correction));
+		co_await silentSend(messages, prng, chl);
+		co_await chl.recv(correction);
 		iter = correction.begin();
 
 		for (i = 0; i < static_cast<u64>(messages.size()); ++i)
@@ -235,9 +318,12 @@ namespace osuCrypto
 		Socket& chl)
 	{
 		MACORO_TRY{
-		co_await(silentSendInplace(prng.get(), messages.size(), prng, chl));
+
+		co_await silentSendInplace(mDelta, messages.size(), prng, chl);
 		hash(messages, ChoiceBitPacking::True);
-		clear();
+
+		if(mGenVar.index() == 0)
+			clear();
 
 		} MACORO_CATCH(eptr) {
 			if (!chl.closed()) co_await chl.close();
@@ -252,7 +338,7 @@ namespace osuCrypto
 		if (type == ChoiceBitPacking::True)
 		{
 			block mask = OneBlock ^ AllOneBlock;
-			auto d = mDelta & mask;
+			auto d = *mDelta & mask;
 
 			auto n8 = (u64)messages.size() / 8 * 8;
 
@@ -318,12 +404,12 @@ namespace osuCrypto
 	}
 
 	task<> SilentOtExtSender::silentSend(
-		block d,
+		std::optional<block> d,
 		span<block> b,
 		PRNG& prng,
 		Socket& chl)
 	{
-		co_await(silentSendInplace(d, b.size(), prng, chl));
+		co_await silentSendInplace(d, b.size(), prng, chl);
 
 		std::memcpy(b.data(), mB.data(), b.size() * sizeof(block));
 		setTimePoint("sender.expand.ldpc.copy");
@@ -331,13 +417,12 @@ namespace osuCrypto
 	}
 
 	task<> SilentOtExtSender::silentSendInplace(
-		block d,
+		std::optional<block> d,
 		u64 n,
 		PRNG& prng,
 		Socket& chl)
 	{
 		MACORO_TRY{
-		auto delta = AlignedUnVector<block>{};
 
 		setTimePoint("sender.expand.enter");
 
@@ -349,41 +434,57 @@ namespace osuCrypto
 		if (n != mRequestNumOts)
 			throw std::invalid_argument("n != mRequestNumOts " LOCATION);
 
-		if (hasSilentBaseOts() == false)
+		if (hasBaseCors() == false)
 		{
-			co_await(genSilentCor(prng, chl));
+			co_await genBaseCors(d, prng, chl);
 		}
 
 		setTimePoint("sender.expand.start");
 
-		mDelta = d;
+		if (d.has_value() && d != mDelta && mNoiseDist == SdNoiseDistribution::Stationary)
+		{
+			throw std::runtime_error("SilentOtExtSender: delta must match the same value that was used in"
+				"setup when using stationary. It is possible to change delta but requires"
+				"computing a new base VOLE correlation and setting, mBaseA,mBaseB,mBaseC,mDelta"
+				LOCATION);
+		}
+		mDelta = mDelta.value_or(prng.get());
 
 		// allocate b
 		mB.resize(mNoiseVecSize);
 
-		delta.resize(1);
-		delta[0] = mDelta;
+		auto delta = AlignedUnVector<block>{};
+		if (mBaseB.size())
+		{
+			delta.resize(mBaseB.size()); 
+			std::copy(mBaseB.begin(), mBaseB.end(), delta.begin());
+		}
+		else
+		{
+			delta.resize(1);
+			delta[0] = *mDelta;
+		}
 
-		co_await(mGen.expand(chl, delta, prng.get(), mB, PprfOutputFormat::Interleaved, true, mNumThreads));
+		co_await gen().expand(chl, delta, prng.get(), mB, mPprfFormat, true, mNumThreads, CoeffCtxGF2{});
 
 		setTimePoint("sender.expand.pprf");
 
 		if (mMalType == SilentSecType::Malicious)
 		{
-			co_await(ferretMalCheck(chl, prng));
+			co_await ferretMalCheck(chl, prng);
 			setTimePoint("sender.expand.malcheck");
 		}
 
 
 		if (mDebug)
-			co_await(checkRT(chl));
+			co_await checkRT(chl);
 
 		compress();
 
 		setTimePoint("sender.expand.dualEncode");
 
 		mB.resize(mRequestNumOts);
-
+		mBaseB.resize(0);
 
 		} MACORO_CATCH(eptr) {
 			if (!chl.closed()) co_await chl.close();
@@ -406,7 +507,7 @@ namespace osuCrypto
 		auto myHash = std::array<u8, 32>{};
 		auto ro = RandomOracle(32);
 
-		co_await(chl.recv(X));
+		co_await chl.recv(X);
 
 		xx = X;
 		for (i = 0; i < (u64)mB.size(); ++i)
@@ -420,13 +521,13 @@ namespace osuCrypto
 
 		mySum = sum0.gf128Reduce(sum1);
 
-		c[0] = mDelta;
-		co_await(recver.receive(c, a, prng, mMalCheckOts, chl, {}));
+		c[0] = *mDelta;
+		co_await recver.receive(c, a, prng, mMalCheckOts, chl, {});
 
 		ro.Update(mySum ^ a[0]);
 		ro.Final(myHash);
 
-		co_await(chl.send(std::move(myHash)));
+		co_await chl.send(std::move(myHash));
 	}
 
 	void SilentOtExtSender::compress()
@@ -438,7 +539,7 @@ namespace osuCrypto
 
 #ifdef ENABLE_BITPOLYMUL
 			QuasiCyclicCode code;
-			code.init2(mRequestNumOts, mNoiseVecSize);
+			code.init2(mRequestNumOts, mNoiseVecSize, mCodeSeed);
 			code.dualEncode(mB.subspan(0, code.size()));
 #else
 			throw std::runtime_error("ENABLE_BITPOLYMUL");
@@ -454,7 +555,7 @@ namespace osuCrypto
 			u64 expanderWeight = 0, _1;
 			double _2;
 			EAConfigure(mMultType, _1, expanderWeight, _2);
-			encoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight);
+			encoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight, mCodeSeed);
 
 			AlignedUnVector<block> B2(encoder.mMessageSize);
 			encoder.dualEncode<block, CoeffCtxGF2>(mB, B2, {});
@@ -471,7 +572,7 @@ namespace osuCrypto
 			assert(scaler == 2 && minDist > 0 && minDist < 1);
 
 			ExConvCode exConvEncoder;
-			exConvEncoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight, accWeight);
+			exConvEncoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight, accWeight, true, true, mCodeSeed);
 
 			exConvEncoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
 			break;
@@ -483,14 +584,14 @@ namespace osuCrypto
 			double md;
 			BlkAccConfigure(mMultType, scaler, sigma, depth, md);
 			BlkAccCode code;
-			code.init(mRequestNumOts, mNoiseVecSize, sigma, depth);
+			code.init(mRequestNumOts, mNoiseVecSize, sigma, depth, mCodeSeed);
 			code.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});
 			break;
 		}
 		case osuCrypto::MultType::Tungsten:
 		{
 			experimental::TungstenCode encoder;
-			encoder.config(oc::roundUpTo(mRequestNumOts, 8), mNoiseVecSize);
+			encoder.config(oc::roundUpTo(mRequestNumOts, 8), mNoiseVecSize, mCodeSeed);
 
 			encoder.dualEncode<block, CoeffCtxGF2>(mB.begin(), {}, mEncodeTemp);
 			break;
@@ -500,6 +601,7 @@ namespace osuCrypto
 			break;
 		}
 
+		mCodeSeed = mAesFixedKey.hashBlock(mCodeSeed);
 
 	}
 }

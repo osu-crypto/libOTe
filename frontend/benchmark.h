@@ -528,10 +528,10 @@ namespace osuCrypto
 				recver.configure(n);
 
 				auto choice = recver.sampleBaseChoiceBits(prng0);
-				std::vector<std::array<block, 2>> sendBase(sender.silentBaseOtCount());
-				std::vector<block> recvBase(recver.silentBaseOtCount());
-				sender.setSilentBaseOts(sendBase);
-				recver.setSilentBaseOts(recvBase);
+				std::vector<std::array<block, 2>> sendBase(sender.baseCount().mBaseOtCount);
+				std::vector<block> recvBase(recver.baseCount().mBaseOtCount);
+				sender.setBaseCors(sendBase, {}, delta);
+				recver.setBaseCors(recvBase, {}, {});
 
 				auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
 				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1], ChoiceBitPacking::True);
@@ -1071,8 +1071,8 @@ namespace osuCrypto
 
 			if (cmd.isSet("mockBase"))
 			{
-				auto otCount0 = oles[0].baseOtCount(prng0);
-				auto otCount1 = oles[1].baseOtCount(prng0);
+				auto otCount0 = oles[0].baseCount(prng0);
+				auto otCount1 = oles[1].baseCount(prng0);
 				std::array<std::vector<std::array<block, 2>>, 2> baseSend;
 				baseSend[0].resize(otCount0.mSendCount);
 				baseSend[1].resize(otCount1.mSendCount);
