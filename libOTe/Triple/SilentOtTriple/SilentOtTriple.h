@@ -17,6 +17,8 @@ namespace osuCrypto
 
         macoro::variant<SilentOtExtSender, SilentOtExtReceiver> mSendRecv;
 
+		BitVector mChoice;
+
 		// the number of OTs/OLEs. Triples will be half this amount.
 		u64 mN;
 

@@ -18,7 +18,11 @@
 namespace osuCrypto
 {
 
-	// sets the KOS base OTs that are then used to extend
+	//--------------------------------------------------------------
+	// Standard OT Extension Interface Implementation
+	//--------------------------------------------------------------
+
+	// Sets the IKNP/SoftSpoken base OTs used for OT extension
 	void SilentOtExtReceiver::setBaseOts(
 		span<std::array<block, 2>> baseSendOts) {
 #ifdef ENABLE_SOFTSPOKEN_OT
@@ -30,8 +34,7 @@ namespace osuCrypto
 #endif
 	}
 
-
-	// return the number of base OTs soft spoken ot needs
+	// Returns the number of base OTs required for the IKNP/SoftSpoken protocol
 	u64 SilentOtExtReceiver::baseOtCount() const {
 #ifdef ENABLE_SOFTSPOKEN_OT
 		if (!mOtExtRecver)
@@ -45,7 +48,7 @@ namespace osuCrypto
 #endif
 	}
 
-	// returns true if the soft spoken ot base OTs are currently set.
+	// Checks if the required IKNP/SoftSpoken base OTs are set
 	bool SilentOtExtReceiver::hasBaseOts() const {
 #ifdef ENABLE_SOFTSPOKEN_OT
 		if (!mOtExtRecver)
@@ -56,31 +59,46 @@ namespace osuCrypto
 #endif
 	};
 
+	// Sets externally generated base OTs and VOLEs
 	void SilentOtExtReceiver::setBaseCors(
 		span<const block> recvBaseOts,
+		const BitVector& choices,
 		span<const block> baseA,
 		const BitVector& baseC)
 	{
 		if (isConfigured() == false)
 			throw std::runtime_error("configure(...) must be called first.");
 
+		// Validate input sizes
 		if (static_cast<u64>(recvBaseOts.size()) != baseCount().mBaseOtCount)
 			throw std::runtime_error("wrong number of silent base OTs");
 
 		if (baseA.size() != baseCount().mBaseVoleCount || baseC.size() != baseCount().mBaseVoleCount)
 			throw std::runtime_error("wrong number of silent base VOLEs");
 
+		// Split base OTs into PPRF OTs and malicious check OTs
 		auto genOts = recvBaseOts.subspan(0, gen().baseOtCount());
 		auto malOts = recvBaseOts.subspan(genOts.size());
 
-		if(genOts.size())
+		// Set PPRF base OTs
+		if (genOts.size())
+		{
+			auto c = choices.subvec(0, genOts.size());
+			gen().setChoiceBits(c);
 			gen().setBase(genOts);
+		}
+
+		// Set malicious check OTs
+		mMalCheckChoice = choices.subvec(genOts.size(), malOts.size());
+		mMalCheckOts.resize(malOts.size());
 		std::copy(malOts.begin(), malOts.end(), mMalCheckOts.begin());
 
+		// Set base VOLE values
 		mBaseA.assign(baseA.begin(), baseA.end());
 		mBaseC = baseC;
 	}
 
+	// Generates the required IKNP/SoftSpoken base OTs
 	task<> SilentOtExtReceiver::genBaseOts(
 		PRNG& prng,
 		Socket& chl)
@@ -96,9 +114,8 @@ namespace osuCrypto
 #endif
 	}
 
-	// Returns an independent copy of this extender.
+	// Creates an independent copy of this extender with shared base OTs
 	std::unique_ptr<OtExtReceiver> SilentOtExtReceiver::split() {
-
 #ifdef ENABLE_SOFTSPOKEN_OT
 		auto ptr = new SilentOtExtReceiver;
 		auto ret = std::unique_ptr<OtExtReceiver>(ptr);
@@ -112,44 +129,29 @@ namespace osuCrypto
 #endif
 	};
 
+	//--------------------------------------------------------------
+	// Native Silent OT Extension Interface Implementation
+	//--------------------------------------------------------------
 
+	// Checks if the required base correlations are available
 	bool SilentOtExtReceiver::hasBaseCors() const
 	{
 		return gen().hasBaseOts() && mBaseA.size() == baseCount().mBaseVoleCount;
 	}
 
+	// Samples the choice bits for base OTs
 	BitVector SilentOtExtReceiver::sampleBaseChoiceBits(PRNG& prng) {
 		if (isConfigured() == false)
 			throw std::runtime_error("configure(...) must be called first");
 
-		auto choice = gen().sampleChoiceBits(prng);
-
-		//mS.resize(mNumPartitions);
-		//gen().getPoints(mS, getPprfFormat());
-
-		if (mMalType == SilentSecType::Malicious)
-		{
-			mMalCheckSeed = prng.get();
-			mMalCheckX = ZeroBlock;
-
-			auto points = getPoints();
-			for (auto s : points)
-			{
-				auto xs = mMalCheckSeed.gf128Pow(s + 1);
-				mMalCheckX = mMalCheckX ^ xs;
-			}
-
-			mMalCheckChoice.resize(0);
-			mMalCheckChoice.append((u8*)&mMalCheckX, 128);
-
-			mMalCheckOts.resize(128);
-			choice.append(mMalCheckChoice);
-		}
-
-		return choice;
+		// Get choice bits for PPRF base OTs
+		if (gen().hasBaseOts() == false)
+			return gen().sampleChoiceBits(prng);
+		else
+			return {};
 	}
 
-
+	// Generates base correlations (OTs and VOLEs) for Silent OT
 	task<> SilentOtExtReceiver::genBaseCors(
 		PRNG& prng,
 		Socket& chl,
@@ -160,22 +162,26 @@ namespace osuCrypto
 		if (isConfigured() == false)
 			throw std::runtime_error("configure must be called first");
 
+		// Determine how many base OTs and base VOLEs we need
 		auto count = baseCount();
 		auto choice = sampleBaseChoiceBits(prng);
+		while (choice.size() < count.mBaseOtCount)
+			choice.pushBack(prng.getBit());
+
+		// Generate random bits for base VOLE C values
 		BitVector baseC(count.mBaseVoleCount);
 		baseC.randomize(prng);
 
+		// Combine all choice bits
 		choice.append(baseC);
 		std::vector<block> msg(choice.size());
 		std::vector<block> baseA(count.mBaseVoleCount);
-
-		// If we have soft spoken ot base OTs, use them
-		// to extend to get the silent base OTs.
 
 #if defined(LIBOTE_HAS_BASE_OT)
 #if defined(ENABLE_SOFTSPOKEN_OT) 
 		if (useOtExtension)
 		{
+			// Initialize OT extension if needed
 			if (!mOtExtRecver)
 			{
 				mOtExtRecver.emplace();
@@ -188,27 +194,33 @@ namespace osuCrypto
 				mOtExtRecver->setBaseOts(baseMsg);
 			}
 
+			// Use OT extension to generate the base OTs
 			co_await mOtExtRecver->receive(choice, msg, prng, chl);
 
+			// Extract base VOLE A values
 			std::copy(msg.begin() + msg.size() - baseA.size(), msg.end(), baseA.begin());
 			msg.resize(msg.size() - baseA.size());
 			choice.resize(msg.size());
 
-			// convert msg into random OTs
+			// Convert messages to random OTs by hashing
 			mOtExtRecver->mBase.mAesMgr.useAES(msg.size()).hashBlocks(msg, msg);
 		}
 		else
 #endif
 		{
+			// Use base OT protocol directly (more expensive but fewer rounds)
 			auto base = DefaultBaseOT{};
 			co_await base.receive(choice, msg, prng, chl);
 
+			// Extract base VOLE A values
 			std::copy(msg.begin() + msg.size() - baseA.size(), msg.end(), baseA.begin());
 			msg.resize(msg.size() - baseA.size());
 
+			// For stationary noise, we need to generate base VOLEs
 			if (baseA.size())
 			{
-				// derandomize the VOLEs.
+				// Derandomize the VOLEs to ensure they follow the correlation:
+				// baseA = baseB + baseC * delta
 				std::vector<block> offsets(baseA.size());
 				co_await chl.recv(offsets);
 				for (u64 i = 0; i < baseA.size(); ++i)
@@ -222,7 +234,8 @@ namespace osuCrypto
 #else
 		throw std::runtime_error("soft spoken ot or base OTs must be enabled");
 #endif
-		setBaseCors(msg, baseA, baseC);
+		// Set the generated base correlations
+		setBaseCors(msg, choice, baseA, baseC);
 		setTimePoint("recver.gen.done");
 
 		} MACORO_CATCH(eptr) {
@@ -231,6 +244,7 @@ namespace osuCrypto
 		}
 	}
 
+	// Returns how many base OTs and VOLEs are needed
 	SilentBaseCount SilentOtExtReceiver::baseCount() const
 	{
 		if (isConfigured() == false)
@@ -243,20 +257,23 @@ namespace osuCrypto
 		};
 	}
 
-
+	// Configures the Silent OT extension parameters
 	void SilentOtExtReceiver::configure(
 		u64 numOTs,
 		u64 scaler,
 		u64 numThreads,
 		SilentSecType malType,
-		SdNoiseDistribution noiseType)
+		SdNoiseDistribution noiseType,
+		MultType multType)
 	{
+		mMultType = multType;
 		mMalType = malType;
 		mNumThreads = numThreads;
 		u64 secParam = 128;
 		mRequestNumOts = numOTs;
 		mNoiseDist = noiseType;
 
+		// Configure based on syndrome decoding parameters
 		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mMultType, noiseType, 1);
 		mNumPartitions = param.mNumPartitions;
 		mSizePer = param.mSizePer;
@@ -279,10 +296,9 @@ namespace osuCrypto
 			throw std::invalid_argument("SilentNoiseType not supported. " LOCATION);
 		}
 
-		//mS.resize(mNumPartitions);
+		// Configure the PPRF generator
 		gen().configure(mSizePer, mNumPartitions);
 	}
-
 
 	//sigma = 0   Receiver
 	//
@@ -312,7 +328,7 @@ namespace osuCrypto
 	//
 	//    w = r * H
 
-
+	// Debug function to verify correctness with sender
 	task<> SilentOtExtReceiver::checkRT(Socket& chl, MatrixView<block> rT1)
 	{
 		auto rT2 = Matrix<block>(rT1.rows(), rT1.cols(), AllocType::Uninitialized);
@@ -322,9 +338,11 @@ namespace osuCrypto
 		auto exp = Matrix<block>{};
 		auto failed = false;
 
+		// Receive B vector and delta from sender
 		co_await chl.recv(rT2);
 		co_await chl.recv(delta);
 
+		// XOR to get A + B = C * delta
 		for (i = 0; i < rT1.size(); ++i)
 			rT2(i) = rT2(i) ^ rT1(i);
 
@@ -332,14 +350,16 @@ namespace osuCrypto
 			throw RTE_LOC;
 		R = rT2;
 
+		// Compute expected values at sparse coordinates
 		exp.resize(R.rows(), R.cols(), AllocType::Zeroed);
 		auto points = getPoints();
 		for (i = 0; i < points.size(); ++i)
 		{
-			if(mBaseC.size()== 0 || mBaseC[i])
+			if (mBaseC.size() == 0 || mBaseC[i])
 				exp(points[i]) = delta;
 		}
 
+		// Verify all values match expected
 		for (i = 0; i < R.rows(); ++i)
 		{
 			if (neq(R(i), exp(i)))
@@ -357,6 +377,7 @@ namespace osuCrypto
 		setTimePoint("recver.expand.checkRT");
 	}
 
+	// Standard OT extension interface - implement chosen choice bits
 	task<> SilentOtExtReceiver::receive(
 		const BitVector& choices,
 		span<block> messages,
@@ -364,10 +385,13 @@ namespace osuCrypto
 		Socket& chl)
 	{
 		MACORO_TRY{
-		auto randChoice = BitVector(messages.size());
-		co_await silentReceive(randChoice, messages, prng, chl, OTType::Random);
-		randChoice ^= choices;
-		co_await chl.send(std::move(randChoice));
+			// First perform random OT
+			auto randChoice = BitVector(messages.size());
+			co_await silentReceive(randChoice, messages, prng, chl, OTType::Random);
+
+			// Compute correction bits and send to sender
+			randChoice ^= choices;
+			co_await chl.send(std::move(randChoice));
 
 		} MACORO_CATCH(eptr) {
 			if (!chl.closed()) co_await chl.close();
@@ -375,6 +399,7 @@ namespace osuCrypto
 		}
 	}
 
+	// Performs Silent OT protocol and outputs choice bits and messages
 	task<> SilentOtExtReceiver::silentReceive(
 		BitVector& choices,
 		span<block> messages,
@@ -383,35 +408,42 @@ namespace osuCrypto
 		OTType type)
 	{
 		MACORO_TRY{
-		auto packing = (type == OTType::Random) ?
-			ChoiceBitPacking::True :
-			ChoiceBitPacking::False;
+			// Determine choice bit packing based on OT type
+			auto packing = (type == OTType::Random) ?
+				ChoiceBitPacking::True :
+				ChoiceBitPacking::False;
 
-		if (choices.size() != (u64)messages.size())
-			throw RTE_LOC;
+			if (choices.size() != (u64)messages.size())
+				throw RTE_LOC;
 
-		co_await silentReceiveInplace(messages.size(), prng, chl, packing);
+			// Generate OTs using inplace function
+			co_await silentReceiveInplace(messages.size(), prng, chl, packing);
 
-		if (type == OTType::Random)
-		{
-			hash(choices, messages, packing);
-		}
-		else
-		{
-			std::memcpy(messages.data(), mA.data(), messages.size() * sizeof(block));
-			setTimePoint("recver.expand.ldpc.copy");
-
-			auto cIter = choices.begin();
-			for (u64 i = 0; i < choices.size(); ++i)
+			if (type == OTType::Random)
 			{
-				*cIter = mC[i];
-				++cIter;
+				// Hash the messages and extract choice bits
+				hash(choices, messages, packing);
 			}
-			setTimePoint("recver.expand.ldpc.copyBits");
-		}
-		
-		if(mGenVar.index() == 0)
-			clear();
+			else
+			{
+				// For correlated OT, just copy the values directly
+				std::memcpy(messages.data(), mA.data(), messages.size() * sizeof(block));
+				setTimePoint("recver.expand.ldpc.copy");
+
+				// Extract choice bits
+				auto cIter = choices.begin();
+				for (u64 i = 0; i < choices.size(); ++i)
+				{
+					*cIter = mC[i];
+					++cIter;
+				}
+				setTimePoint("recver.expand.ldpc.copyBits");
+			}
+
+			// For regular noise, we can clear state after each use
+			// (Stationary noise allows reusing state)
+			if (mGenVar.index() == 0)
+				clear();
 
 		} MACORO_CATCH(eptr) {
 			if (!chl.closed()) co_await chl.close();
@@ -419,6 +451,7 @@ namespace osuCrypto
 		}
 	}
 
+	// Performs Silent OT protocol with internal storage
 	task<> SilentOtExtReceiver::silentReceiveInplace(
 		u64 n,
 		PRNG& prng,
@@ -431,18 +464,18 @@ namespace osuCrypto
 
 		setTimePoint("recver.expand.enter");
 
+		// Auto-configure if needed
 		if (isConfigured() == false)
 		{
-			// first generate 128 normal base OTs
 			configure(n, 2, mNumThreads, mMalType);
 		}
 
 		if (n != mRequestNumOts)
 			throw std::invalid_argument("messages.size() > n");
 
+		// Generate base correlations if not already available
 		if (hasBaseCors() == false)
 		{
-			// recvs data
 			co_await genBaseCors(prng, chl);
 		}
 
@@ -450,17 +483,18 @@ namespace osuCrypto
 		mA.resize(mNoiseVecSize);
 		mC.resize(0);
 
+		// Expand PPRF to generate sparse vector
 		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, {});
 
 		setTimePoint("recver.expand.pprf");
 
+		// For stationary noise, incorporate base VOLE correlations
 		if (mBaseA.size())
 		{
 			// Get the points where the noisy values should be placed
 			std::vector<u64> points = getPoints();
-			
-			// populate the noisy coordinates of mC and
-			// update mA to be a secret share of mC * delta
+
+			// Update mA with base VOLE A values at the noisy coordinates
 			for (u64 i = 0; i < mNumPartitions; ++i)
 			{
 				auto pnt = points[i];
@@ -468,20 +502,25 @@ namespace osuCrypto
 			}
 		}
 
+		// Perform malicious security check if needed
 		if (mMalType == SilentSecType::Malicious)
 		{
 			co_await ferretMalCheck(chl, prng);
 			setTimePoint("recver.expand.malCheck");
 		}
+
+		// Debug validation if enabled
 		if (mDebug)
 		{
 			rT = MatrixView<block>(mA.data(), mNoiseVecSize, 1);
 			co_await checkRT(chl, rT);
 		}
 
+		// Apply compression to convert sparse to dense vector
 		compress(type);
 		setTimePoint("recver.expand.dualEncode");
 
+		// Clean up base correlations and resize to requested size
 		mBaseA.resize(0);
 		mBaseC.resize(0);
 
@@ -496,6 +535,7 @@ namespace osuCrypto
 		}
 	}
 
+	// Performs malicious consistency check based on the Ferret paper
 	task<> SilentOtExtReceiver::ferretMalCheck(Socket& chl, PRNG& prng)
 	{
 		auto xx = block{};
@@ -509,9 +549,28 @@ namespace osuCrypto
 		auto myHash = std::array<u8, 32>{};
 		auto ro = RandomOracle(32);
 
-		co_await chl.send(std::move(mMalCheckSeed));
+		// Generate random seed for malicious check
+		block malCheckSeed = prng.get();
+		block malCheckX = ZeroBlock;
 
-		xx = mMalCheckSeed;
+		// Compute the challenge vector X using the sparse vector points
+		auto points = getPoints();
+		for (u64 i = 0; i < points.size(); ++i)
+		{
+			if (mNoiseDist == SdNoiseDistribution::Regular || mBaseC[i])
+			{
+				auto s = points[i];
+				auto xs = malCheckSeed.gf128Pow(s + 1);
+				malCheckX = malCheckX ^ xs;
+			}
+		}
+		auto diff = malCheckX ^ mMalCheckChoice.getSpan<block>()[0];
+
+		// Send the random challenge seed
+		co_await chl.send(std::array<block, 2>{malCheckSeed, diff});
+
+		// Compute polynomial evaluation at seed
+		xx = malCheckSeed;
 		sum0 = ZeroBlock;
 		sum1 = ZeroBlock;
 
@@ -521,20 +580,25 @@ namespace osuCrypto
 			xx.gf128Mul(mA[i], low, high);
 			sum0 = sum0 ^ low;
 			sum1 = sum1 ^ high;
-			xx = xx.gf128Mul(mMalCheckSeed);
+			xx = xx.gf128Mul(malCheckSeed);
 		}
 		mySum = sum0.gf128Reduce(sum1);
 
-		co_await sender.send(mMalCheckX, b, prng, mMalCheckOts, chl, {});
+		// Perform VOLE to obtain check value
+		co_await sender.send(malCheckX, b, prng, mMalCheckOts, chl, {});
+
+		// Hash the result for verification
 		ro.Update(mySum ^ b[0]);
 		ro.Final(myHash);
 
+		// Receive hash from sender and validate
 		co_await chl.recv(theirHash);
 
 		if (theirHash != myHash)
 			throw RTE_LOC;
 	}
 
+	// Hashes the OT messages for security and extracts choice bits
 	void SilentOtExtReceiver::hash(
 		BitVector& choices,
 		span<block> messages,
@@ -546,19 +610,19 @@ namespace osuCrypto
 			throw RTE_LOC;
 
 		auto cIter = choices.begin();
-
 		auto n8 = mRequestNumOts / 8 * 8;
 		auto m = &messages[0];
 		auto r = &mA[0];
 
 		if (type == ChoiceBitPacking::True)
 		{
-
+			// Mask to clear the least significant bit (used for choice bit)
 			block mask = OneBlock ^ AllOneBlock;
 
+			// Process in blocks of 8 for efficiency
 			for (u64 i = 0; i < n8; i += 8)
 			{
-				// extract the choice bit from the LSB of r
+				// Extract the choice bits from the LSB of each block
 				u32 b0 = r[0].testc(OneBlock);
 				u32 b1 = r[1].testc(OneBlock);
 				u32 b2 = r[2].testc(OneBlock);
@@ -568,7 +632,7 @@ namespace osuCrypto
 				u32 b6 = r[6].testc(OneBlock);
 				u32 b7 = r[7].testc(OneBlock);
 
-				// pack the choice bits.
+				// Pack the choice bits into a byte
 				choices.data()[i / 8] =
 					b0 ^
 					(b1 << 1) ^
@@ -579,7 +643,7 @@ namespace osuCrypto
 					(b6 << 6) ^
 					(b7 << 7);
 
-				// mask of the choice bit which is stored in the LSB
+				// Clear the LSB which contained the choice bit
 				m[0] = r[0] & mask;
 				m[1] = r[1] & mask;
 				m[2] = r[2] & mask;
@@ -589,44 +653,52 @@ namespace osuCrypto
 				m[6] = r[6] & mask;
 				m[7] = r[7] & mask;
 
+				// Hash the messages for security
 				mAesFixedKey.hashBlocks<8>(m, m);
 
 				m += 8;
 				r += 8;
 			}
 
+			// Process any remaining messages
 			cIter = cIter + n8;
 			for (u64 i = n8; i < (u64)messages.size(); ++i)
 			{
 				auto m = &messages[i];
 				auto r = &mA[i];
+
+				// Clear the LSB which contained the choice bit
 				m[0] = r[0] & mask;
 
+				// Hash the message for security
 				m[0] = mAesFixedKey.hashBlock(m[0]);
 
+				// Extract the choice bit
 				*cIter = r[0].testc(OneBlock);
 				++cIter;
 			}
 		}
 		else
 		{
-			// not implemented.
+			// Not implemented for other packing types
 			throw RTE_LOC;
 		}
 		setTimePoint("recver.expand.CopyHash");
-
 	}
 
-	void SilentOtExtReceiver::compress(ChoiceBitPacking packing)// )
+	// Compresses the sparse vector to generate dense vector
+	void SilentOtExtReceiver::compress(ChoiceBitPacking packing)
 	{
 		auto points = getPoints();
 
 		if (packing == ChoiceBitPacking::True)
 		{
-			// zero out the lsb of mA. We will store mC there.
+			// Zero out the LSB of mA to prepare for storing choice bits
 			block mask = OneBlock ^ AllOneBlock;
 			auto m8 = mNoiseVecSize / 8 * 8;
 			auto r = mA.data();
+
+			// Process in blocks of 8 for efficiency
 			for (u64 i = 0; i < m8; i += 8)
 			{
 				r[0] = r[0] & mask;
@@ -639,12 +711,14 @@ namespace osuCrypto
 				r[7] = r[7] & mask;
 				r += 8;
 			}
+
+			// Process any remaining values
 			for (u64 i = m8; i < mNoiseVecSize; ++i)
 			{
 				mA[i] = mA[i] & mask;
 			}
 
-			// set the lsb of mA to be mC.
+			// Set the LSB of mA at noise points to be the choice bit
 			for (u64 i = 0; i < points.size(); ++i)
 			{
 				auto ci = mBaseC.size() ? block(mBaseC[i]) : OneBlock;
@@ -653,6 +727,7 @@ namespace osuCrypto
 
 			setTimePoint("recver.expand.bitPacking");
 
+			// Apply appropriate compression method based on configuration
 			switch (mMultType)
 			{
 			case osuCrypto::MultType::QuasiCyclic:
@@ -674,6 +749,7 @@ namespace osuCrypto
 			case osuCrypto::MultType::ExAcc21:
 			case osuCrypto::MultType::ExAcc40:
 			{
+				// Use Expander-Accumulator code for compression
 				EACode mEAEncoder;
 				u64 expanderWeight = 0, _1;
 				double _2;
@@ -687,7 +763,7 @@ namespace osuCrypto
 			case osuCrypto::MultType::ExConv7x24:
 			case osuCrypto::MultType::ExConv21x24:
 			{
-
+				// Use Expander-Convolutional code for compression
 				u64 expanderWeight = 0, accWeight = 0, _1;
 				double _2;
 				ExConvConfigure(mMultType, _1, expanderWeight, accWeight, _2);
@@ -700,18 +776,18 @@ namespace osuCrypto
 			case MultType::BlkAcc3x8:
 			case MultType::BlkAcc3x32:
 			{
+				// Use Block-Accumulator code for compression
 				u64 depth, sigma, scaler;
 				double md;
 				BlkAccConfigure(mMultType, scaler, sigma, depth, md);
 				BlkAccCode code;
 				code.init(mRequestNumOts, mNoiseVecSize, sigma, depth, mCodeSeed);
 				code.dualEncode<block, CoeffCtxGF2>(mA.begin(), {});
-				//code.dualEncode<G, Ctx>(mC.begin(), mCtx);
 				break;
 			}
 			case osuCrypto::MultType::Tungsten:
 			{
-
+				// Use Tungsten code for compression
 				experimental::TungstenCode encoder;
 				encoder.config(oc::roundUpTo(mRequestNumOts, 8), mNoiseVecSize, mCodeSeed);
 				encoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {}, mEncodeTemp);
@@ -723,18 +799,18 @@ namespace osuCrypto
 			}
 
 			setTimePoint("recver.expand.dualEncode");
-
 		}
 		else
 		{
+			// For separate choice bits, create mC vector
 			mC.resize(mNoiseVecSize);
 			std::memset(mC.data(), 0, mNoiseVecSize);
-			// set the lsb of mA to be mC.
+
+			// Set choice bits at noise points
 			for (u64 i = 0; i < points.size(); ++i)
 				mC[points[i]] = mBaseC.size() ? mBaseC[i] : 1;
-			//auto cc = mC.data();
 
-
+			// Apply appropriate compression method based on configuration
 			switch (mMultType)
 			{
 			case osuCrypto::MultType::QuasiCyclic:
@@ -758,6 +834,7 @@ namespace osuCrypto
 			case osuCrypto::MultType::ExAcc21:
 			case osuCrypto::MultType::ExAcc40:
 			{
+				// Use Expander-Accumulator code for both A and C
 				EACode mEAEncoder;
 				u64 expanderWeight = 0, _1;
 				double _2;
@@ -779,6 +856,7 @@ namespace osuCrypto
 			case osuCrypto::MultType::ExConv7x24:
 			case osuCrypto::MultType::ExConv21x24:
 			{
+				// Use Expander-Convolutional code for both A and C
 				u64 expanderWeight = 0, accWeight = 0, _1;
 				double _2;
 				ExConvConfigure(mMultType, _1, expanderWeight, accWeight, _2);
@@ -793,10 +871,10 @@ namespace osuCrypto
 
 				break;
 			}
-
 			case MultType::BlkAcc3x8:
 			case MultType::BlkAcc3x32:
 			{
+				// Use Block-Accumulator code for both A and C
 				u64 depth, sigma, scaler;
 				double md;
 				BlkAccConfigure(mMultType, scaler, sigma, depth, md);
@@ -807,6 +885,7 @@ namespace osuCrypto
 			}
 			case osuCrypto::MultType::Tungsten:
 			{
+				// Use Tungsten code for both A and C
 				experimental::TungstenCode encoder;
 				encoder.config(roundUpTo(mRequestNumOts, 8), mNoiseVecSize, mCodeSeed);
 				encoder.dualEncode<block, CoeffCtxGF2>(mA.begin(), {}, mEncodeTemp);
@@ -821,10 +900,11 @@ namespace osuCrypto
 			setTimePoint("recver.expand.dualEncode2");
 		}
 
+		// Update code seed for next use
 		mCodeSeed = mAesFixedKey.hashBlock(mCodeSeed);
-
 	}
 
+	// Clears internal buffers and state
 	void SilentOtExtReceiver::clear()
 	{
 		mNoiseVecSize = 0;
@@ -837,7 +917,5 @@ namespace osuCrypto
 		if (isConfigured())
 			gen().clear();
 	}
-
-
 }
 #endif

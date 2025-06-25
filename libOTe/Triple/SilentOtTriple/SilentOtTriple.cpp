@@ -490,6 +490,10 @@ namespace osuCrypto
 		if (mSendRecv.index())
 		{
 			r.mRecvChoice = std::get<1>(mSendRecv).sampleBaseChoiceBits(prng);
+			auto count = std::get<1>(mSendRecv).baseCount();
+			while(count.mBaseOtCount < r.mRecvChoice.size())
+				r.mRecvChoice.pushBack(prng.getBit());
+			mChoice = r.mRecvChoice;
 		}
 		else
 		{
@@ -503,7 +507,7 @@ namespace osuCrypto
 	{
 		if (mSendRecv.index())
 		{
-			std::get<1>(mSendRecv).setBaseCors(recvBaseOts, {}, {});
+			std::get<1>(mSendRecv).setBaseCors(recvBaseOts, mChoice, {}, {});
 		}
 		else
 		{
@@ -544,7 +548,7 @@ namespace osuCrypto
 		if (C.size() != divCeil(mN, 128))
 			throw RTE_LOC;
 
-		bool debug = false;
+		//bool debug = false;
 		if (mSendRecv.index())
 		{
 			//return recvTask(std::get<1>(mSendRecv), mN, prng, sock, X, C);

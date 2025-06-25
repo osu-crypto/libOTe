@@ -46,7 +46,7 @@ void Tools_bitpolymul_test(const CLP& cmd)
 
 
     uint64_t TEST_RUN = cmd.getOr("t", 4);
-    uint64_t len = (1ull << cmd.getOr("n", 12));
+    uint64_t len = (1ull << cmd.getOr("nn", 12));
 
     aligned_vector<uint64_t>
         poly1(len),

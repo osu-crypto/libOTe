@@ -528,10 +528,11 @@ namespace osuCrypto
 				recver.configure(n);
 
 				auto choice = recver.sampleBaseChoiceBits(prng0);
+				choice.resize(sender.baseCount().mBaseOtCount);
 				std::vector<std::array<block, 2>> sendBase(sender.baseCount().mBaseOtCount);
 				std::vector<block> recvBase(recver.baseCount().mBaseOtCount);
 				sender.setBaseCors(sendBase, {}, delta);
-				recver.setBaseCors(recvBase, {}, {});
+				recver.setBaseCors(recvBase, choice, {}, {});
 
 				auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
 				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1], ChoiceBitPacking::True);
