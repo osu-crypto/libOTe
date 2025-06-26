@@ -6,7 +6,7 @@
 #include "libOTe/TwoChooseOne/KosDot/KosDotExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
-
+#include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.h"
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"

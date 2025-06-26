@@ -21,6 +21,8 @@
 #include "cryptoTools/Common/Timer.h"
 #include "libOTe/Dpf/TernaryDpf.h"
 #include "libOTe/TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.h"
+#include "libOTe/Tools/Coproto.h"
+#include "libOTe/TwoChooseOne/TcoOtDefines.h"
 
 namespace osuCrypto
 {

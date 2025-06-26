@@ -744,5 +744,6 @@ void RegularPprf_inter_test(const oc::CLP& cmd) { throwDisabled(); }
 void RegularPprf_ByLeafIndex_test(const oc::CLP& cmd) { throwDisabled(); }
 void RegularPprf_ByTreeIndex_test(const oc::CLP& cmd) { throwDisabled(); }
 void RegularPprf_callback_test(const oc::CLP& cmd) { throwDisabled(); }
+void StationaryPprf_inter_test(const oc::CLP& cmd) { throwDisabled(); }
 
 #endif
