@@ -174,7 +174,7 @@ namespace osuCrypto
 
 		// Combine all choice bits
 		choice.append(baseC);
-		std::vector<block> msg(choice.size());
+		AlignedUnVector<block> msg(choice.size());
 		std::vector<block> baseA(count.mBaseVoleCount);
 
 #if defined(LIBOTE_HAS_BASE_OT)
