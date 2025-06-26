@@ -467,6 +467,9 @@ namespace {
 	}
 }
 void Vole_Silent_Tungsten_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_BlkAcc_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_stationary_test(const oc::CLP& cmd) { throwDisabled(); }
+
 void Vole_Noisy_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_paramSweep_test(const oc::CLP& cmd) { throwDisabled(); }

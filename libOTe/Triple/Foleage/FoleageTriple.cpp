@@ -49,9 +49,9 @@ namespace osuCrypto
 	}
 
 
-	FoleageTriple::BaseOtCount FoleageTriple::baseOtCount() const
+	FoleageTriple::BaseCount FoleageTriple::baseOtCount() const
 	{
-		BaseOtCount counts;
+		BaseCount counts;
 
 		counts.mSendCount = mDpfLeaf.baseOtCount() + mDpf.baseOtCount();
 		counts.mRecvCount = mDpfLeaf.baseOtCount() + mDpf.baseOtCount();

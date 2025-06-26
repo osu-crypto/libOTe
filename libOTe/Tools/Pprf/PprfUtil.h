@@ -104,9 +104,9 @@ namespace osuCrypto
 
         virtual void setBase(span<const block> baseMessages) = 0;
 
-        virtual std::vector<u64> getPoints(PprfOutputFormat format) = 0;
+        virtual std::vector<u64> getPoints(PprfOutputFormat format) const = 0;
 
-        virtual void getPoints(span<u64> points, PprfOutputFormat format) = 0;
+        virtual void getPoints(span<u64> points, PprfOutputFormat format) const = 0;
 
         // programPuncturedPoint says whether the sender is trying to program the
         // active child to be its correct value XOR delta. If it is not, the

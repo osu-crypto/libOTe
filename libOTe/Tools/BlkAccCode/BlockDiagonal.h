@@ -233,7 +233,7 @@ namespace osuCrypto
 			auto ySize = mN - mK;
 
 			auto sigmaK = mSigma;
-			auto sigmaN = roundUpTo(mSigma * (ySize / xSize), 8);
+			//auto sigmaN = roundUpTo(mSigma * (ySize / xSize), 8);
 			auto numBlock = xSize / sigmaK;
 
 			auto seed = mSeed;
