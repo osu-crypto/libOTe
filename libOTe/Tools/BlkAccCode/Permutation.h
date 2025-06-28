@@ -360,12 +360,14 @@ namespace osuCrypto {
                 {
 					auto d = idxs[i].get<u32>(j);
                     assert(d < mN);
-                    out.mBase[d] = *in++;
+                    out.mBase[d] = *in;
+					++in;
                 }
             }
 
             out.mPermIter.mIdx += chunkSize;
         }
+
     };
 
     /**
@@ -610,6 +612,7 @@ namespace osuCrypto {
                 ++in;
             }
         }
+
     };
 
 }

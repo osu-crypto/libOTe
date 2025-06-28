@@ -21,6 +21,26 @@ namespace osuCrypto
         //MaliciousFS
     };
 
+
+    inline std::ostream& operator<<(std::ostream& o, SilentSecType m)
+    {
+        switch (m)
+        {
+        case osuCrypto::SilentSecType::SemiHonest:
+            o << "SemiHonest";
+            break;
+        case osuCrypto::SilentSecType::Malicious:
+            o << "Malicious";
+            break;
+        default:
+            throw RTE_LOC;
+            break;
+        }
+        return o;
+    }
+
+
+
     // the required base correlations 
     struct SilentBaseCount
     {

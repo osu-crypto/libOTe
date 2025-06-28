@@ -22,7 +22,7 @@ namespace osuCrypto
 		// the number of OTs/OLEs. Triples will be half this amount.
 		u64 mN;
 
-		MultType mMultType = DefaultMultType;
+		MultType mLpnMultType = DefaultMultType;
 
 		enum class Type
 		{

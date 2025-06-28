@@ -22,7 +22,18 @@ namespace osuCrypto
 		// get a random number generator seeded from the system
 		PRNG prng(sysRandomSeed());
 
-		auto mulType = (MultType)cmd.getOr("multType", (int)DefaultMultType);
+
+		// the LPN compression type.
+		MultType mulType = (MultType)cmd.getOr("multType", (int)DefaultMultType);
+
+		// regular noise or stationary noise.
+		SdNoiseDistribution noiseType = (SdNoiseDistribution)cmd.getOr("noise", (int)SdNoiseDistribution::Regular);
+
+		// the security type, semi-honest or malicious.
+		SilentSecType malType = (SilentSecType)cmd.getOr("mal", (int)SilentSecType::SemiHonest);
+
+		// should we use only base ots Base or a hybrid of base and extend BaseExtend.
+		SilentBaseType baseType = (SilentBaseType)cmd.getOr("base", (int)SilentBaseType::BaseExtend);
 
 		u64 milli;
 		Timer timer;
@@ -39,8 +50,7 @@ namespace osuCrypto
 			gTimer.setTimePoint("recver.msg.alloc");
 
 			SilentVoleReceiver<F, G> receiver;
-			receiver.mMultType = mulType;
-			receiver.configure(numVole);
+			receiver.configure(numVole, malType, mulType, baseType, noiseType);
 			gTimer.setTimePoint("recver.config");
 
 			// block until both parties are ready (optional).
@@ -68,8 +78,7 @@ namespace osuCrypto
 			gTimer.setTimePoint("sender.msg.alloc");
 
 			SilentVoleSender<F, G> sender;
-			sender.mMultType = mulType;
-			sender.configure(numVole);
+			sender.configure(numVole, malType, mulType, baseType, noiseType);
 			gTimer.setTimePoint("sender.config");
 			timer.setTimePoint("start");
 

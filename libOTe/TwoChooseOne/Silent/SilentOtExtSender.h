@@ -129,10 +129,10 @@ namespace osuCrypto
 
         // The type of compress we will use to generate the
         // dense vectors from the sparse vectors.
-        MultType mMultType = DefaultMultType;
+        MultType mLpnMultType = DefaultMultType;
 
         // The flag which controls whether the malicious check is performed.
-        SilentSecType mMalType = SilentSecType::SemiHonest;
+        SilentSecType mSecurityType = SilentSecType::SemiHonest;
 
         SdNoiseDistribution mNoiseDist = SdNoiseDistribution::Regular;
 

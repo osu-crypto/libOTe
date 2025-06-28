@@ -149,10 +149,10 @@ namespace osuCrypto
 		VecF mB;
 
 		// Security type: SemiHonest or Malicious
-		SilentSecType mMalType = SilentSecType::SemiHonest;
+		SilentSecType mSecurityType = SilentSecType::SemiHonest;
 
 		// The matrix multiplication type which compresses the sparse vector
-		MultType mMultType = DefaultMultType;
+		MultType mLpnMultType = DefaultMultType;
 
 		// Format used for PPRF output organization
 		PprfOutputFormat mPprfFormat = PprfOutputFormat::ByTreeIndex;
@@ -205,11 +205,11 @@ namespace osuCrypto
 		 * instead of using genBaseCors().
 		 *
 		 * @param sendBaseOts The base OT messages (sender's view)
-		 * @param b The sender's base VOLE shares
+		 * @param b The sender's base VOLE shares. Should be a vector like type of Fs
 		 */
 		void setBaseCors(
 			span<std::array<block, 2>> sendBaseOts,
-			const VecF& b);
+			const auto& b);
 
 		/**
 		 * @brief Configure the silent VOLE protocol.
@@ -218,13 +218,17 @@ namespace osuCrypto
 		 * Must be called before generating base correlations or performing the protocol.
 		 *
 		 * @param requestSize Number of VOLE correlations to generate
+		 * @param malType Security type (SemiHonest or Malicious)
 		 * @param type Type of base OT to use (BaseExtend or Base)
 		 * @param noiseType Distribution of the noise vector (Regular or Stationary)
 		 * @param secParam Security parameter (typically 128)
 		 * @param ctx Context object for F, G operations (default constructed if not provided)
+		 * @param mult the lpn compression matrix type to use (default DefaultMultType)
 		 */
 		void configure(
 			u64 requestSize,
+			SilentSecType malType = SilentSecType::SemiHonest,
+			MultType mult = DefaultMultType,
 			SilentBaseType type = SilentBaseType::BaseExtend,
 			SdNoiseDistribution noiseType = SdNoiseDistribution::Regular,
 			u64 secParam = 128,
@@ -350,7 +354,7 @@ namespace osuCrypto
 			throw std::runtime_error("configure must be called first");
 
 		auto ot = gen().baseOtCount();
-		auto vole = mNumPartitions + 1 * (mMalType == SilentSecType::Malicious);
+		auto vole = mNumPartitions + 1 * (mSecurityType == SilentSecType::Malicious);
 		return { ot, vole };
 	}
 
@@ -461,7 +465,7 @@ namespace osuCrypto
 
 			// Set the base correlations
 			setBaseCors(msg, b);
-			if (mMalType == SilentSecType::Malicious)
+			if (mSecurityType == SilentSecType::Malicious)
 				mDerandomizeMalCheck = false;
 
 			setTimePoint("SilentVoleSender.genSilent.done");
@@ -479,6 +483,8 @@ namespace osuCrypto
 	template<typename F, typename G, typename Ctx>
 	void SilentVoleSender<F, G, Ctx>::configure(
 		u64 requestSize,
+		SilentSecType malType,
+		MultType mult,
 		SilentBaseType type,
 		SdNoiseDistribution noiseType,
 		u64 secParam,
@@ -488,6 +494,8 @@ namespace osuCrypto
 		mSecParam = secParam;
 		mRequestSize = requestSize;
 		mBaseType = type;
+		mLpnMultType = mult;
+		mSecurityType = malType;
 
 		// Calculate the bit size for the field elements
 		u64 bitCount = 1;
@@ -496,7 +504,7 @@ namespace osuCrypto
 
 		// Configure parameters for syndrome decoding
 		auto config = syndromeDecodingConfigure(
-			mSecParam, mRequestSize, mMultType, noiseType, bitCount);
+			mSecParam, mRequestSize, mLpnMultType, noiseType, bitCount);
 		mNumPartitions = config.mNumPartitions;
 		mSizePer = config.mSizePer;
 		mNoiseVecSize = mNumPartitions * mSizePer;
@@ -530,7 +538,7 @@ namespace osuCrypto
 	template<typename F, typename G, typename Ctx>
 	void SilentVoleSender<F, G, Ctx>::setBaseCors(
 		span<std::array<block, 2>> sendBaseOts,
-		const VecF& b)
+		const auto& b)
 	{
 		if (!isConfigured())
 			throw RTE_LOC;
@@ -562,7 +570,7 @@ namespace osuCrypto
 			mCtx.minus(mBaseB[i], mBaseB[i], b[i]);
 
 		// For malicious security, we'll need to derandomize
-		if(mMalType == SilentSecType::Malicious)
+		if(mSecurityType == SilentSecType::Malicious)
 			mDerandomizeMalCheck = true;
 	}
 
@@ -602,7 +610,7 @@ namespace osuCrypto
 			// Configure if not already done
 			if (isConfigured() == false)
 			{
-				configure(n, SilentBaseType::BaseExtend);
+				configure(n, mSecurityType, mLpnMultType, SilentBaseType::BaseExtend);
 			}
 
 			// Validate requested size
@@ -616,7 +624,7 @@ namespace osuCrypto
 			}
 
 			// For malicious security, handle derandomization
-			if (mMalType == SilentSecType::Malicious && mDerandomizeMalCheck)
+			if (mSecurityType == SilentSecType::Malicious && mDerandomizeMalCheck)
 			{
 				if constexpr (MaliciousSupported)
 				{
@@ -674,7 +682,7 @@ namespace osuCrypto
 			}
 
 			// Malicious security check
-			if (mMalType == SilentSecType::Malicious)
+			if (mSecurityType == SilentSecType::Malicious)
 			{
 				// Receive challenge from receiver
 				co_await chl.recv(X);
@@ -690,7 +698,7 @@ namespace osuCrypto
 			}
 
 			// Apply the appropriate linear code to compress the sparse vector
-			switch (mMultType)
+			switch (mLpnMultType)
 			{
 			case osuCrypto::MultType::ExConv7x24:
 			case osuCrypto::MultType::ExConv21x24:
@@ -699,7 +707,7 @@ namespace osuCrypto
 				ExConvCode encoder;
 				u64 expanderWeight, accumulatorWeight, scaler;
 				double minDist;
-				ExConvConfigure(mMultType, scaler, expanderWeight, accumulatorWeight, minDist);
+				ExConvConfigure(mLpnMultType, scaler, expanderWeight, accumulatorWeight, minDist);
 				assert(scaler == 2 && minDist < 1 && minDist > 0);
 
 				encoder.config(mRequestSize, mNoiseVecSize, 
@@ -716,7 +724,7 @@ namespace osuCrypto
 			{
 				u64 depth, sigma,scaler;
 				double md;
-				BlkAccConfigure(mMultType, scaler,sigma, depth, md);
+				BlkAccConfigure(mLpnMultType, scaler,sigma, depth, md);
 				BlkAccCode code;
 				code.init(mRequestSize, mNoiseVecSize, sigma, depth, mCodeSeed);
 				code.dualEncode<F, Ctx>(mB.begin(), mCtx);

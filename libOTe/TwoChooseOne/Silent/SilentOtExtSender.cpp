@@ -201,7 +201,7 @@ namespace osuCrypto
 		auto n = gen().baseOtCount();
 
 		// Add additional OTs for malicious security if needed
-		if (mMalType == SilentSecType::Malicious)
+		if (mSecurityType == SilentSecType::Malicious)
 			n += 128;
 
 		// For stationary noise, we need base VOLEs (one per partition)
@@ -225,7 +225,7 @@ namespace osuCrypto
 		// Split base OTs into PPRF OTs and malicious check OTs
 		auto genOt = sendBaseOts.subspan(0, gen().baseOtCount());
 		auto malOt = sendBaseOts.subspan(genOt.size());
-		mMalCheckOts.resize((mMalType == SilentSecType::Malicious) * 128);
+		mMalCheckOts.resize((mSecurityType == SilentSecType::Malicious) * 128);
 
 		// Set PPRF base OTs
 		if (genOt.size())
@@ -247,15 +247,15 @@ namespace osuCrypto
 		SdNoiseDistribution noiseType,
 		MultType mult)
 	{
-		mMultType = mult;
-		mMalType = malType;
+		mLpnMultType = mult;
+		mSecurityType = malType;
 		mNumThreads = numThreads;
 		u64 secParam = 128;
 		mRequestNumOts = numOTs;
 		mNoiseDist = noiseType;
 
 		// Configure based on syndrome decoding parameters
-		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mMultType, mNoiseDist, 1);
+		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mLpnMultType, mNoiseDist, 1);
 		mNumPartitions = param.mNumPartitions;
 		mSizePer = param.mSizePer;
 		mNoiseVecSize = param.mNumPartitions * param.mSizePer;
@@ -471,7 +471,7 @@ namespace osuCrypto
 
 		// Auto-configure if needed
 		if (isConfigured() == false)
-			configure(n, 2, mNumThreads, mMalType);
+			configure(n, 2, mNumThreads, mSecurityType);
 
 		if (n != mRequestNumOts)
 			throw std::invalid_argument("n != mRequestNumOts " LOCATION);
@@ -526,7 +526,7 @@ namespace osuCrypto
 		setTimePoint("sender.expand.pprf");
 
 		// Perform malicious security check if needed
-		if (mMalType == SilentSecType::Malicious)
+		if (mSecurityType == SilentSecType::Malicious)
 		{
 			co_await ferretMalCheck(chl, prng);
 			setTimePoint("sender.expand.malcheck");
@@ -597,7 +597,7 @@ namespace osuCrypto
 	void SilentOtExtSender::compress()
 	{
 		// Apply appropriate compression method based on configuration
-		switch (mMultType)
+		switch (mLpnMultType)
 		{
 		case osuCrypto::MultType::QuasiCyclic:
 		{
@@ -620,7 +620,7 @@ namespace osuCrypto
 			EACode encoder;
 			u64 expanderWeight = 0, _1;
 			double _2;
-			EAConfigure(mMultType, _1, expanderWeight, _2);
+			EAConfigure(mLpnMultType, _1, expanderWeight, _2);
 			encoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight, mCodeSeed);
 
 			AlignedUnVector<block> B2(encoder.mMessageSize);
@@ -634,7 +634,7 @@ namespace osuCrypto
 			// Use Expander-Convolutional code for compression
 			u64 expanderWeight = 0, accWeight = 0, scaler = 0;
 			double minDist = 0;
-			ExConvConfigure(mMultType, scaler, expanderWeight, accWeight, minDist);
+			ExConvConfigure(mLpnMultType, scaler, expanderWeight, accWeight, minDist);
 			assert(scaler == 2 && minDist > 0 && minDist < 1);
 
 			ExConvCode exConvEncoder;
@@ -649,7 +649,7 @@ namespace osuCrypto
 			// Use Block-Accumulator code for compression
 			u64 depth, sigma, scaler;
 			double md;
-			BlkAccConfigure(mMultType, scaler, sigma, depth, md);
+			BlkAccConfigure(mLpnMultType, scaler, sigma, depth, md);
 			BlkAccCode code;
 			code.init(mRequestNumOts, mNoiseVecSize, sigma, depth, mCodeSeed);
 			code.dualEncode<block, CoeffCtxGF2>(mB.begin(), {});

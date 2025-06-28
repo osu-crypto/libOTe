@@ -555,7 +555,7 @@ namespace osuCrypto
 			auto& mReceiver = std::get<1>(mSendRecv);
 			if (mTimer)
 				mReceiver.setTimer(*mTimer);
-			mReceiver.mMultType = mMultType;
+			mReceiver.mLpnMultType = mLpnMultType;
 			//mReceiver.mGen.mEagerSend = false;
 
 			//if (debug)
@@ -591,7 +591,7 @@ namespace osuCrypto
 			//	co_await sock.send(coproto::copy(mSender.mGen.mBaseOTs));
 			//}
 			//assert(mSender.mGen.hasBaseOts());
-			mSender.mMultType = mMultType;
+			mSender.mLpnMultType = mLpnMultType;
 			//mSender.mGen.mEagerSend = false;
 
 			co_await mSender.silentSendInplace(mSender.mDelta, mSender.mRequestNumOts, prng, sock);
@@ -617,7 +617,7 @@ namespace osuCrypto
 			auto& mReceiver = std::get<1>(mSendRecv);
 			if (mTimer)
 				mReceiver.setTimer(*mTimer);
-			mReceiver.mMultType = mMultType;
+			mReceiver.mLpnMultType = mLpnMultType;
 			//mReceiver.mGen.mEagerSend = false;
 
 			co_await mReceiver.silentReceiveInplace(mReceiver.mRequestNumOts, prng, sock, oc::ChoiceBitPacking::True);
@@ -629,7 +629,7 @@ namespace osuCrypto
 			auto& mSender = std::get<0>(mSendRecv);
 			if (mTimer)
 				mSender.setTimer(*mTimer);
-			mSender.mMultType = mMultType;
+			mSender.mLpnMultType = mLpnMultType;
 			//mSender.mGen.mEagerSend = false;
 
 			co_await mSender.silentSendInplace(prng.get(), mSender.mRequestNumOts, prng, sock);

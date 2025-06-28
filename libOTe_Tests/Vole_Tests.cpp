@@ -151,22 +151,16 @@ void Vole_Silent_test_impl(u64 n, MultType type, bool debug, bool doFakeBase, bo
 
 	SilentVoleReceiver<F, G, Ctx> recv;
 	SilentVoleSender<F, G, Ctx> send;
-	recv.mMultType = type;
-	send.mMultType = type;
 	recv.mDebug = debug;
 	send.mDebug = debug;
-	if (mal)
-	{
-		recv.mMalType = SilentSecType::Malicious;
-		send.mMalType = SilentSecType::Malicious;
-	}
+	auto mt = mal ? SilentSecType::Malicious : SilentSecType::SemiHonest;
 
 	VecF a(n), b(n);
 	VecG c(n);
 	F d = prng.get();
 
-	send.configure(n, SilentBaseType::BaseExtend, noise);
-	recv.configure(n, SilentBaseType::BaseExtend, noise);
+	send.configure(n, mt, type, SilentBaseType::BaseExtend, noise);
+	recv.configure(n, mt, type, SilentBaseType::BaseExtend, noise);
 
 	if (doFakeBase)
 		fakeBase<G>(n, prng, d, recv, send, ctx);
@@ -353,13 +347,11 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 	SilentVoleReceiver<block, block, CoeffCtxGF128> recv;
 	SilentVoleSender<block, block, CoeffCtxGF128> send;
 
-	send.mMalType = SilentSecType::SemiHonest;
-	recv.mMalType = SilentSecType::SemiHonest;
 	for (u64 jj : {0, 1})
 	{
 
-		send.configure(n, SilentBaseType::Base);
-		recv.configure(n, SilentBaseType::Base);
+		send.configure(n,SilentSecType::SemiHonest, DefaultMultType, SilentBaseType::Base);
+		recv.configure(n,SilentSecType::SemiHonest, DefaultMultType, SilentBaseType::Base);
 		// c * x = z + m
 
 		//for (u64 n = 5000; n < 10000; ++n)

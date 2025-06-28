@@ -12,6 +12,25 @@ namespace osuCrypto
         Stationary, // use the stationary noise model
     };
 
+
+    inline std::ostream& operator<<(std::ostream& o, SdNoiseDistribution m)
+    {
+        switch (m)
+        {
+        case osuCrypto::SdNoiseDistribution::Regular:
+            o << "Regular";
+            break;
+        case osuCrypto::SdNoiseDistribution::Stationary:
+            o << "Stationary";
+            break;
+        default:
+            throw RTE_LOC;
+            break;
+        }
+        return o;
+    }
+
+
     enum class MultType
     {
         // https://eprint.iacr.org/2019/1159.pdf

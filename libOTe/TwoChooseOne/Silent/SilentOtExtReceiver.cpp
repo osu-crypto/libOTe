@@ -252,7 +252,7 @@ namespace osuCrypto
 
 		return
 		{
-			gen().baseOtCount() + (mMalType == SilentSecType::Malicious) * 128,
+			gen().baseOtCount() + (mSecurityType == SilentSecType::Malicious) * 128,
 			(mNoiseDist == SdNoiseDistribution::Stationary) * mNumPartitions
 		};
 	}
@@ -266,15 +266,15 @@ namespace osuCrypto
 		SdNoiseDistribution noiseType,
 		MultType multType)
 	{
-		mMultType = multType;
-		mMalType = malType;
+		mLpnMultType = multType;
+		mSecurityType = malType;
 		mNumThreads = numThreads;
 		u64 secParam = 128;
 		mRequestNumOts = numOTs;
 		mNoiseDist = noiseType;
 
 		// Configure based on syndrome decoding parameters
-		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mMultType, noiseType, 1);
+		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mLpnMultType, noiseType, 1);
 		mNumPartitions = param.mNumPartitions;
 		mSizePer = param.mSizePer;
 		mNoiseVecSize = param.mNumPartitions * param.mSizePer;
@@ -467,7 +467,7 @@ namespace osuCrypto
 		// Auto-configure if needed
 		if (isConfigured() == false)
 		{
-			configure(n, 2, mNumThreads, mMalType);
+			configure(n, 2, mNumThreads, mSecurityType);
 		}
 
 		if (n != mRequestNumOts)
@@ -503,7 +503,7 @@ namespace osuCrypto
 		}
 
 		// Perform malicious security check if needed
-		if (mMalType == SilentSecType::Malicious)
+		if (mSecurityType == SilentSecType::Malicious)
 		{
 			co_await ferretMalCheck(chl, prng);
 			setTimePoint("recver.expand.malCheck");
@@ -728,7 +728,7 @@ namespace osuCrypto
 			setTimePoint("recver.expand.bitPacking");
 
 			// Apply appropriate compression method based on configuration
-			switch (mMultType)
+			switch (mLpnMultType)
 			{
 			case osuCrypto::MultType::QuasiCyclic:
 			{
@@ -753,7 +753,7 @@ namespace osuCrypto
 				EACode mEAEncoder;
 				u64 expanderWeight = 0, _1;
 				double _2;
-				EAConfigure(mMultType, _1, expanderWeight, _2);
+				EAConfigure(mLpnMultType, _1, expanderWeight, _2);
 				mEAEncoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight, mCodeSeed);
 				AlignedUnVector<block> A2(mEAEncoder.mMessageSize);
 				mEAEncoder.dualEncode<block, CoeffCtxGF2>(mA, A2, {});
@@ -766,7 +766,7 @@ namespace osuCrypto
 				// Use Expander-Convolutional code for compression
 				u64 expanderWeight = 0, accWeight = 0, _1;
 				double _2;
-				ExConvConfigure(mMultType, _1, expanderWeight, accWeight, _2);
+				ExConvConfigure(mLpnMultType, _1, expanderWeight, accWeight, _2);
 
 				ExConvCode exConvEncoder;
 				exConvEncoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight, accWeight, true, true, mCodeSeed);
@@ -779,7 +779,7 @@ namespace osuCrypto
 				// Use Block-Accumulator code for compression
 				u64 depth, sigma, scaler;
 				double md;
-				BlkAccConfigure(mMultType, scaler, sigma, depth, md);
+				BlkAccConfigure(mLpnMultType, scaler, sigma, depth, md);
 				BlkAccCode code;
 				code.init(mRequestNumOts, mNoiseVecSize, sigma, depth, mCodeSeed);
 				code.dualEncode<block, CoeffCtxGF2>(mA.begin(), {});
@@ -811,7 +811,7 @@ namespace osuCrypto
 				mC[points[i]] = mBaseC.size() ? mBaseC[i] : 1;
 
 			// Apply appropriate compression method based on configuration
-			switch (mMultType)
+			switch (mLpnMultType)
 			{
 			case osuCrypto::MultType::QuasiCyclic:
 			{
@@ -838,7 +838,7 @@ namespace osuCrypto
 				EACode mEAEncoder;
 				u64 expanderWeight = 0, _1;
 				double _2;
-				EAConfigure(mMultType, _1, expanderWeight, _2);
+				EAConfigure(mLpnMultType, _1, expanderWeight, _2);
 				mEAEncoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight, mCodeSeed);
 
 				AlignedUnVector<block> A2(mEAEncoder.mMessageSize);
@@ -859,7 +859,7 @@ namespace osuCrypto
 				// Use Expander-Convolutional code for both A and C
 				u64 expanderWeight = 0, accWeight = 0, _1;
 				double _2;
-				ExConvConfigure(mMultType, _1, expanderWeight, accWeight, _2);
+				ExConvConfigure(mLpnMultType, _1, expanderWeight, accWeight, _2);
 
 				ExConvCode exConvEncoder;
 				exConvEncoder.config(mRequestNumOts, mNoiseVecSize, expanderWeight, accWeight, true, true, mCodeSeed);
@@ -877,7 +877,7 @@ namespace osuCrypto
 				// Use Block-Accumulator code for both A and C
 				u64 depth, sigma, scaler;
 				double md;
-				BlkAccConfigure(mMultType, scaler, sigma, depth, md);
+				BlkAccConfigure(mLpnMultType, scaler, sigma, depth, md);
 				BlkAccCode code;
 				code.init(mRequestNumOts, mNoiseVecSize, sigma, depth, mCodeSeed);
 				code.dualEncode2<block, u8, CoeffCtxGF2>(mA.begin(), mC.begin(), {});

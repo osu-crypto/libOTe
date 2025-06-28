@@ -143,7 +143,7 @@ namespace osuCrypto
 
 		// verbose flag.
 		bool v = cmd.isSet("v");
-		bool sys = cmd.isSet("sys");
+		bool sys = !cmd.isSet("nosys");
 
 		ExConvCode code;
 		code.config(k, n, w, a, sys);
@@ -384,6 +384,8 @@ namespace osuCrypto
 		u64 sigma = cmd.getOr("sigma", 8);
 		u64 dpeth = cmd.getOr("depth", 3);
 
+		auto blk = cmd.isSet("blk");
+
 		// verbose flag.
 		bool v = cmd.isSet("v");
 
@@ -403,7 +405,10 @@ namespace osuCrypto
 		timer.setTimePoint("_____________________");
 		for (u64 i = 0; i < trials; ++i)
 		{
-			code.dualEncode<block, CoeffCtxGF2>(x.data(), {});
+			//if(blk)
+			//	code.dualEncodeBlk(x.data());
+			//else
+				code.dualEncode<block, CoeffCtxGF2>(x.data(), {});
 
 			timer.setTimePoint("encode");
 		}
@@ -501,9 +506,6 @@ namespace osuCrypto
 			MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv7x24);
 			std::cout << multType << std::endl;
 
-			recver.mMultType = multType;
-			sender.mMultType = multType;
-
 			PRNG prng0(ZeroBlock), prng1(ZeroBlock);
 			block delta = prng0.get();
 
@@ -524,8 +526,8 @@ namespace osuCrypto
 
 			for (u64 t = 0; t < trials; ++t)
 			{
-				sender.configure(n);
-				recver.configure(n);
+				sender.configure(n, 2, 1, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, multType);
+				recver.configure(n, 2, 1, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, multType);
 
 				auto choice = recver.sampleBaseChoiceBits(prng0);
 				choice.resize(sender.baseCount().mBaseOtCount);
@@ -595,11 +597,11 @@ namespace osuCrypto
 			u64 trials = cmd.getOr("t", 10);
 
 			u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
-			MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv7x24);
-			std::cout << multType << std::endl;
+			MultType multType = (MultType)cmd.getOr("m", (int)DefaultMultType);
 
-			recver.mMultType = multType;
-			sender.mMultType = multType;
+			auto noise = (SdNoiseDistribution)cmd.getOr("noise", (int)SdNoiseDistribution::Regular);
+			auto mal = (SilentSecType)cmd.getOr("mal", (int)SilentSecType::SemiHonest);
+			std::cout<< n<< " " << multType << " " << noise << " " << mal << std::endl;
 
 			std::vector<std::array<block, 2>> baseSend(128);
 			std::vector<block> baseRecv(128);
@@ -611,6 +613,9 @@ namespace osuCrypto
 				baseSend[i] = prng.get();
 				baseRecv[i] = baseSend[i][baseChoice[i]];
 			}
+
+			sender.configure(n, mal, multType, SilentBaseType::BaseExtend, noise, 128, {});
+			recver.configure(n, mal, multType, SilentBaseType::BaseExtend, noise, 128, {});
 
 #ifdef ENABLE_SOFTSPOKEN_OT
 			sender.mOtExtRecver.emplace();
@@ -633,31 +638,66 @@ namespace osuCrypto
 			sTimer.setTimePoint("start");
 			rTimer.setTimePoint("start");
 
+			macoro::thread_pool pool0, pool1;
+			auto w0 = pool0.make_work();
+			auto w1 = pool1.make_work();
+			pool0.create_thread();
+			pool1.create_thread();
+			sock[0].setExecutor(pool0);
+			sock[1].setExecutor(pool1);
+			std::vector<u64> recved0, recved1;
+
 			auto t0 = std::thread([&] {
 				for (u64 t = 0; t < trials; ++t)
 				{
-					auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
+					if (t && noise == SdNoiseDistribution::Stationary)
+					{
+						auto count = sender.baseCount();
+						if (count.mBaseOtCount)
+							throw RTE_LOC;
+
+						auto voleCount = count.mBaseVoleCount;
+						// use the previously expanded vole as the base
+						span<block> baseB(sender.mB.subspan(0, voleCount));
+						sender.setBaseCors({}, baseB);
+					}
+
+					auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]) | macoro::start_on(pool0);
 
 					char c = 0;
 
-					coproto::sync_wait(sock[0].send(std::move(c)));
-					coproto::sync_wait(sock[0].recv(c));
 					sTimer.setTimePoint("__");
 					coproto::sync_wait(sock[0].send(std::move(c)));
 					coproto::sync_wait(sock[0].recv(c));
 					sTimer.setTimePoint("s start");
 					coproto::sync_wait(p0);
+					coproto::sync_wait(sock[0].send(std::move(c)));
+					coproto::sync_wait(sock[0].recv(c));
 					sTimer.setTimePoint("s done");
+
+					recved0.push_back(sock[0].bytesReceived());
 				}
 				});
 
 
 			for (u64 t = 0; t < trials; ++t)
 			{
-				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1]);
+
+				if (t && noise == SdNoiseDistribution::Stationary)
+				{
+					auto count = recver.baseCount();
+					if (count.mBaseOtCount)
+						throw RTE_LOC;
+
+					auto voleCount = count.mBaseVoleCount;
+					// use the previously expanded vole as the base
+					span<block> baseA(recver.mA.subspan(0, voleCount));
+					span<block> baseC(recver.mC.subspan(0, voleCount));
+					recver.setBaseCors({}, {}, baseA, baseC);
+				}
+
+				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1]) | macoro::start_on(pool0);
 				char c = 0;
-				coproto::sync_wait(sock[1].send(std::move(c)));
-				coproto::sync_wait(sock[1].recv(c));
 
 				rTimer.setTimePoint("__");
 				coproto::sync_wait(sock[1].send(std::move(c)));
@@ -665,16 +705,36 @@ namespace osuCrypto
 
 				rTimer.setTimePoint("r start");
 				coproto::sync_wait(p1);
+
+				coproto::sync_wait(sock[1].send(std::move(c)));
+				coproto::sync_wait(sock[1].recv(c));
 				rTimer.setTimePoint("r done");
 
+				recved1.push_back(sock[1].bytesReceived());
+				
 			}
 
 
 			t0.join();
 			std::cout << sTimer << std::endl;
 			std::cout << rTimer << std::endl;
+			u64 prev0 = 0, prev1 = 0;
+			for (u64 i = 0; i < trials; ++i)
+			{
+				//if(recved0[i] < prev0 || recved1[i] < prev1)
+				//{
+				//	std::cout << "Error: " << i << " " << recved0[i] << " " << recved1[i] << std::endl;
+				//	return;
+				//}
 
-			std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+				std::cout << "comm Trial " << i << ": "
+					<< recved0[i] - prev0 << " "
+					<< recved1[i] - prev1  << std::endl;
+				prev0 = recved0[i];
+				prev1 = recved1[i];
+			}
+				//std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+
 		}
 		catch (std::exception& e)
 		{
@@ -1068,7 +1128,7 @@ namespace osuCrypto
 			oles[1].init(1, n);
 
 			if (cmd.hasValue("mult"))
-				oles[0].mMultType = oles[1].mMultType = (MultType)cmd.get<u64>("mult");
+				oles[0].mLpnMultType = oles[1].mLpnMultType = (MultType)cmd.get<u64>("mult");
 
 			if (cmd.isSet("mockBase"))
 			{

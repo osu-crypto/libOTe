@@ -111,7 +111,7 @@
         "ENABLE_ALL_OT": true,
         "ENABLE_RELIC": false,
         "ENABLE_SODIUM": false,
-        "ENABLE_BOOST": false,
+        "ENABLE_BOOST": true,
         "ENABLE_OPENSSL": false,
         "FETCH_AUTO": true,
         "ENABLE_CIRCUITS": true,

@@ -7,6 +7,7 @@
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Common/Aligned.h"
 #include "cryptoTools/Crypto/PRNG.h"
+#include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto
 {
@@ -100,7 +101,10 @@ namespace osuCrypto
 					Accumulator<Feistel2KPerm> accumPerm(mN, Feistel2KPerm(mN, seed));
 
 					// Apply the accumulate-permute operation
-					accumPerm.template dualEncode<F>(inputIter, outputIter, ctx);
+					accumPerm.template dualEncode<F>(
+						ctx.template restrictPtr<F>(inputIter), 
+						ctx.template restrictPtr<F>(outputIter), 
+						ctx);
 				}
 				else {
 					// For non-power of 2 sizes, use FeistelPerm
@@ -117,9 +121,9 @@ namespace osuCrypto
 			for (u64 i = 0; i < mDepth - 1; ++i) {
 				block seed = subseed(i);
 				if ((i & 1) == 0)
-					round(iter, temp.begin(), seed);
+					round(ctx.template restrictPtr<F>(iter), ctx.template restrictPtr<F>(temp.data()), seed);
 				else
-					round(temp.begin(), iter, seed);
+					round(ctx.template restrictPtr<F>(temp.data()), ctx.template restrictPtr<F>(iter), seed);
 			}
 
 
@@ -127,16 +131,142 @@ namespace osuCrypto
 			BlockDiagonal bd(mK, mN, mBlockSize, seed);
 
 			if (mDepth & 1)
-				bd.template dualEncode<F>(iter, ctx);
+				bd.template dualEncode<F>(ctx.template restrictPtr<F>(iter), ctx);
 			else
 			{
-				bd.template dualEncode<F>(temp.begin(), ctx);
-				ctx.copy(temp.begin(), temp.begin() + mK, iter);
+				bd.template dualEncode<F>(ctx.template restrictPtr<F>(temp.data()), ctx);
+				ctx.copy(ctx.template restrictPtr<F>(temp.data()), ctx.template restrictPtr<F>(temp.data() + mK), ctx.template restrictPtr<F>(iter));
 			}
 
 			//std::cout<<print(iter, iter + mK) << std::endl;
 
 		}
+		
+
+
+		//void dualEncodeBlk(block* iter)
+		//{
+
+		//	// Initialize the output with the input data (systematic part) and zero-pad
+		//	AlignedUnVector<block> temp(mN);
+		//	auto ctx = CoeffCtxGF2{};
+		//	//auto print = [&](auto iter, auto end) {
+		//	//	std::stringstream ss;
+		//	//	while(iter != end)
+		//	//		ss << ctx.str(*iter++) << " ";
+		//	//	return ss.str();
+		//	//	};
+		//	//std::cout << print(iter, iter + mN) << std::endl;;
+
+		//	auto round = [&](auto inputIter, auto outputIter, auto seed) {
+		//		// Create the appropriate permutation type based on whether codeSize is power of 2
+		//		if (isPowerOfTwo(mN)) {
+		//			// For power of 2 sizes, use Feistel2KPerm
+		//			Accumulator<Feistel2KPerm> accumPerm(mN, Feistel2KPerm(mN, seed));
+
+		//			// Apply the accumulate-permute operation
+		//			accumPerm.dualEncodeBlk(
+		//				(block*__restrict)inputIter,
+		//				(block*__restrict)outputIter);
+		//		}
+		//		else {
+		//			// For non-power of 2 sizes, use FeistelPerm
+		//			Accumulator<FeistelPerm> accumPerm(mN, FeistelPerm(mN, seed));
+
+		//			// Apply the accumulate-permute operation
+		//			accumPerm.dualEncodeBlk(inputIter, outputIter);
+		//		}
+
+		//		//std::cout << print(outputIter, outputIter + mN) << std::endl;;
+		//		};
+
+		//	// Apply the accumulate-permute pattern (mDepth - 1) times
+		//	for (u64 i = 0; i < mDepth - 1; ++i) {
+		//		block seed = subseed(i);
+		//		if ((i & 1) == 0)
+		//			round(iter, temp.data(), seed);
+		//		else
+		//			round(temp.data(), iter, seed);
+		//	}
+
+
+		//	block seed = subseed(mDepth - 1);
+		//	BlockDiagonal bd(mK, mN, mBlockSize, seed);
+
+		//	if (mDepth & 1)
+		//		bd.dualEncode<block>(iter, ctx);
+		//	else
+		//	{
+		//		bd.dualEncode<block>(temp.data(), ctx);
+		//		ctx.copy(temp.data(), temp.data() + mK, iter);
+		//	}
+
+		//	//std::cout<<print(iter, iter + mK) << std::endl;
+
+		//}
+
+		//void dualEncodeSqrt(block* iter)
+		//{
+
+		//	// Initialize the output with the input data (systematic part) and zero-pad
+		//	AlignedUnVector<block> temp(mN);
+		//	auto ctx = CoeffCtxGF2{};
+		//	//auto print = [&](auto iter, auto end) {
+		//	//	std::stringstream ss;
+		//	//	while(iter != end)
+		//	//		ss << ctx.str(*iter++) << " ";
+		//	//	return ss.str();
+		//	//	};
+		//	//std::cout << print(iter, iter + mN) << std::endl;;
+
+		//	auto round = [&](auto inputIter, auto outputIter, auto seed) {
+		//		// Create the appropriate permutation type based on whether codeSize is power of 2
+		//		if (isPowerOfTwo(mN)) {
+		//			// For power of 2 sizes, use Feistel2KPerm
+		//			Accumulator<Feistel2KPerm> accumPerm(mN, Feistel2KPerm(mN, seed));
+
+		//			// Apply the accumulate-permute operation
+		//			accumPerm.dualEncodeBlk(
+		//				(block * __restrict)inputIter,
+		//				(block * __restrict)outputIter);
+		//		}
+		//		else {
+		//			// For non-power of 2 sizes, use FeistelPerm
+		//			Accumulator<FeistelPerm> accumPerm(mN, FeistelPerm(mN, seed));
+
+		//			// Apply the accumulate-permute operation
+		//			accumPerm.dualEncodeBlk(inputIter, outputIter);
+		//		}
+
+		//		//std::cout << print(outputIter, outputIter + mN) << std::endl;;
+		//		};
+
+		//	// Apply the accumulate-permute pattern (mDepth - 1) times
+		//	for (u64 i = 0; i < mDepth - 1; ++i) {
+		//		block seed = subseed(i);
+		//		if ((i & 1) == 0)
+		//			round(iter, temp.data(), seed);
+		//		else
+		//			round(temp.data(), iter, seed);
+		//	}
+
+
+		//	block seed = subseed(mDepth - 1);
+		//	BlockDiagonal bd(mK, mN, mBlockSize, seed);
+
+		//	if (mDepth & 1)
+		//		bd.dualEncode<block>(iter, ctx);
+		//	else
+		//	{
+		//		bd.dualEncode<block>(temp.data(), ctx);
+		//		ctx.copy(temp.data(), temp.data() + mK, iter);
+		//	}
+
+		//	//std::cout<<print(iter, iter + mK) << std::endl;
+
+		//}
+
+
 
 
 		/**
