@@ -19,6 +19,9 @@ set(SRCS
     Cmp_Tests.cpp
     Permute_Tests.cpp
     Equality_Tests.cpp
+    Field_Tests.cpp
+    Ntt_Tests.cpp
+    Poly_Tests.cpp
 )
 
 add_library(libOTe_Tests STATIC ${SRCS})

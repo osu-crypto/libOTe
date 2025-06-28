@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "cryptoTools/Common/Defines.h"
 
@@ -11,7 +11,7 @@ namespace osuCrypto
     };
 
     // reverse the first bitCount bits of x
-    inline u64 bitReveral(u64 bitCount, u64 x)
+    inline u64 bitReversal(u64 bitCount, u64 x)
     {
         u64 r = 0;
         for (u64 i = 0; i < bitCount; ++i)

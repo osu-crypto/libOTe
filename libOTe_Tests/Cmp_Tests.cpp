@@ -46,65 +46,65 @@ namespace osuCrypto
 			T A = prng.get();
 			T B = prng.get();
 
-			std::cout << "   a " << bits(A) << " " << u64(A) << std::endl;
-			std::cout << "   b " << bits(B) << " " << u64(B) << std::endl;
+			//std::cout << "   a " << bits(A) << " " << u64(A) << std::endl;
+			//std::cout << "   b " << bits(B) << " " << u64(B) << std::endl;
 			T e = A ^ B;
-			std::cout << " + e " << bits(e) << std::endl;
-			std::cout << "in d ";
+			//std::cout << " + e " << bits(e) << std::endl;
+			//std::cout << "in d ";
 			std::vector<u8> d(n);
 			for (u64 i = n-1; i < n; --i)
 			{
 				d[i] = (e >> i) & 1;
-				std::cout << int(d[i]);
+				//std::cout << int(d[i]);
 			}
-			std::cout << std::endl;
+			//std::cout << std::endl;
 
-			std::cout << "  s' ";
+			//std::cout << "  s' ";
 			std::vector<u8> sp(n);
 			for (u64 i = n - 1; i < n; --i)
 			{
 				if (i!= n-1)
 					sp[i] += sp[i + 1];
 				sp[i] += d[i];
-				std::cout << int(sp[i]);
+				//std::cout << int(sp[i]);
 			}
-			std::cout << std::endl;
+			//std::cout << std::endl;
 
-			std::cout << "  s  ";
+			//std::cout << "  s  ";
 			std::vector<u8> s(n);
 			for (u64 i = n - 1; i < n; --i)
 			{
 				s[i] = sp[i] - 2 * d[i] + 1;
-				std::cout << int(s[i]);
+				//std::cout << int(s[i]);
 			}
-			std::cout << std::endl;
+			//std::cout << std::endl;
 
 
-			std::cout << "   z ";
+			//std::cout << "   z ";
 			std::vector<u8> z(n);
 			for (u64 i = n - 1; i < n; --i)
 			{
 				z[i] = s[i] == 0 ? 1 : 0;
-				std::cout << int(z[i]);
+				//std::cout << int(z[i]);
 			}
-			std::cout << std::endl;
+			//std::cout << std::endl;
 
 
 			u8 y = 0;
-			std::cout << "   z ";
+			//std::cout << "   z ";
 			std::vector<u8> AA(n);
 			for (u64 i = n - 1; i < n; --i)
 			{
 				AA[i] = z[i] & ((A >> i) &1);
-				std::cout << int(AA[i]);
+				//std::cout << int(AA[i]);
 
 				y ^= AA[i];
 			}
-			std::cout << std::endl;
+			//std::cout << std::endl;
 
-			std::cout << "   y " << int(y) << std::endl;
-			std::cout << "   A > B " << (A > B) << std::endl;
-			std::cout << std::endl;
+			//std::cout << "   y " << int(y) << std::endl;
+			//std::cout << "   A > B " << (A > B) << std::endl;
+			//std::cout << std::endl;
 			if (bool(y) != (A > B))
 				throw UnitTestFail();
 

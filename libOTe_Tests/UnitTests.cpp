@@ -70,7 +70,7 @@ namespace tests_libOTe
 			tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
 			tc.add("RegularDpf_MultByte_Test                ", RegularDpf_MultByte_Test);
 			tc.add("RegularDpf_MultBit_Test                 ", RegularDpf_MultBit_Test);
-			
+
 			tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
 			tc.add("RegularDpf_Puncture_Test                ", RegularDpf_Puncture_Test);
 			tc.add("RegularDpf_keyGen_Test                  ", RegularDpf_keyGen_Test);
@@ -89,19 +89,23 @@ namespace tests_libOTe
 			tc.add("Goldreich_stat_Test                     ", Goldreich_stat_Test);
 			tc.add("WaksmanPermute_plain_Test               ", WaksmanPermute_plain_Test);
 			tc.add("WaksmanPermute_Proto_Test               ", WaksmanPermute_Proto_Test);
-			tc.add("RevCuckoo_Proto_Test                      ", RevCuckoo_Proto_Test);
-			
+			tc.add("RevCuckoo_Proto_Test                    ", RevCuckoo_Proto_Test);
+
 
 			tc.add("Dedup_orTree_test                       ", Dedup_orTree_test);
 			tc.add("Dedup_protocol_test                     ", Dedup_protocol_test);
 
-            tc.add("Field_F7681_Test                        ", Field_F7681_Test);
-            tc.add("Field_F12289_Test                       ", Field_F12289_Test);
-            tc.add("Poly_basics_Tests                       ", Poly_basics_Tests);
-            tc.add("Ntt_nttNegWrapMatrix_Test               ", Ntt_nttNegWrapMatrix_Test);
-            
-            tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
-            tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);
+			tc.add("Field_F7681_Test                        ", Field_F7681_Test);
+			tc.add("Field_F12289_Test                       ", Field_F12289_Test);
+			tc.add("Poly_basics_Tests                       ", Poly_basics_Tests);
+			tc.add("Poly_eval_root_test                     ", Poly_eval_root_test);
+			tc.add("Poly_scalar_test                        ", Poly_scalar_test);
+
+			tc.add("Ntt_nttNegWrapMatrix_normal_Test        ", Ntt_nttNegWrapMatrix_normal_Test);
+			tc.add("Ntt_nttNegWrapMatrix_Test               ", Ntt_nttNegWrapMatrix_Test);
+
+			tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
+			tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);
 
 			tc.add("Bot_McQuoidRR_Moeller_EKE_Test          ", Bot_McQuoidRR_Moeller_EKE_Test);
 			tc.add("Bot_McQuoidRR_Moeller_MR_Test           ", Bot_McQuoidRR_Moeller_MR_Test);

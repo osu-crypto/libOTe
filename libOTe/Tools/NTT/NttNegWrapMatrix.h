@@ -2,7 +2,7 @@
 #include "cryptoTools/Common/Defines.h"
 #include <vector>
 #include "NttOrder.h"
-
+#include <iomanip>
 namespace osuCrypto
 {
 
@@ -21,7 +21,8 @@ namespace osuCrypto
         span<F> aHat,
         span<const F> a,
         const F& psi,
-        NttOrder order)
+        NttOrder order, 
+        bool verbose = false)
     {
         auto n = a.size();
         auto ln = log2ceil(n);
@@ -36,33 +37,38 @@ namespace osuCrypto
         if (psi.pow(2 * n) != 1)
             throw RTE_LOC;
 
+        if(isPrimRootOfUnity(2 * n, psi) == false)
+			throw RTE_LOC;
+
         std::vector<F> powers(2 * n);
 
         for (u64 i = 0; i < powers.size(); ++i)
         {
             powers[i] = psi.pow(i);
-            //std::cout << "psi^" << i << " " << powers[i] << std::endl;
+            //std::cout << "psi^" << j << " " << powers[j] << std::endl;
             if (i && powers[i] == 1)
                 throw RTE_LOC;
         }
 
 
-        for (u64 i = 0; i < n; ++i)
+        for (u64 j = 0; j < n; ++j)
         {
 
             u64 idx = (order == NttOrder::NormalOrder) ?
-                i : bitReveral(ln, i);
+                j : bitReversal(ln, j);
 
-            auto& ai = aHat[idx];
-            ai = 0;
-            //std::cout << "aHat[" << i << "] = ";
-            for (u64 j = 0; j < n; ++j)
+            auto& aj = aHat[idx];
+            aj = 0;
+            //std::cout << "aHat[" << j << "] = ";
+            for (u64 i = 0; i < n; ++i)
             {
-                auto idx = (2 * i * j + j) % powers.size();
-                //std::cout << "psi^" << idx << " ";
-                ai += powers[idx] * a[j];
+                auto idx = (2 * j * i + i) % powers.size();
+                if(verbose)
+                    std::cout  << std::setw(2)<< idx << " ";
+                aj += powers[idx] * a[i];
             }
-            //std::cout << std::endl;
+            if(verbose)
+                std::cout << std::endl;
         }
     }
 
@@ -80,7 +86,8 @@ namespace osuCrypto
         span<F> a,
         span<const F> aHat_,
         const F& psi,
-        NttOrder order)
+        NttOrder order,
+        bool verbose = false)
     {
         auto n = a.size();
         auto ln = log2ceil(n);
@@ -94,7 +101,8 @@ namespace osuCrypto
             throw RTE_LOC;
         if (psi.pow(2 * n) != 1)
             throw RTE_LOC;
-
+        if (isPrimRootOfUnity(2 * n, psi) == false)
+            throw RTE_LOC;
 
         span<const F> aHat;
         std::vector<F> temp;
@@ -107,7 +115,7 @@ namespace osuCrypto
         {
             temp.resize(aHat_.size());
             for (u64 i = 0; i < aHat_.size(); ++i)
-                temp[i] = aHat_[bitReveral(ln, i)];
+                temp[i] = aHat_[bitReversal(ln, i)];
             aHat = temp;
         }
         
@@ -127,10 +135,12 @@ namespace osuCrypto
             for (u64 j = 0; j < n; ++j)
             {
                 auto idx = (2 * j * i + i) % powers.size();
-                //std::cout << "psi^" << idx << " ";
+                if(verbose)
+                    std::cout << idx << " ";
                 ai += powers[idx] * aHat[j];
             }
-            //std::cout << std::endl;
+            if (verbose)
+                std::cout << std::endl;
         }
 
         auto nInv = F(a.size()).inverse();
