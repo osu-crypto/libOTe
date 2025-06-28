@@ -126,77 +126,77 @@ namespace osuCrypto
 		}
 
 
-		void dualEncodeBlk(block* __restrict inIter, block* __restrict outIter)
-		{
-			mPerm.init(mN);
+		//void dualEncodeBlk(block* __restrict inIter, block* __restrict outIter)
+		//{
+		//	mPerm.init(mN);
 
-			if constexpr (HasChunkSize<Perm>::value == false)
-			{
+		//	if constexpr (HasChunkSize<Perm>::value == false)
+		//	{
 
-				auto n = mN;
-				//const T* __restrict inIter = in.data();
-				auto permIter = mPerm.begin(outIter);
-				block sum = ZeroBlock;
-				for (std::size_t i = 0; i < n; ++i)
-				{
-					sum ^= *inIter;
-					*permIter = sum[0];
-					++permIter;
-					++inIter;
-				}
-			}
-			else
-			{
-				if constexpr (std::is_same<Perm, Feistel2KPerm>::value)
-				{
+		//		auto n = mN;
+		//		//const T* __restrict inIter = in.data();
+		//		auto permIter = mPerm.begin(outIter);
+		//		block sum = ZeroBlock;
+		//		for (std::size_t i = 0; i < n; ++i)
+		//		{
+		//			sum ^= *inIter;
+		//			*permIter = sum[0];
+		//			++permIter;
+		//			++inIter;
+		//		}
+		//	}
+		//	else
+		//	{
+		//		if constexpr (std::is_same<Perm, Feistel2KPerm>::value)
+		//		{
 
-					constexpr u32 chunkSize = 8;
+		//			constexpr u32 chunkSize = 8;
 
-					block chunk[chunkSize];
-					block sum = ZeroBlock;
+		//			block chunk[chunkSize];
+		//			block sum = ZeroBlock;
 
-					auto n = mN;
-					auto main = n / chunkSize;
-					u64 idx = 0;
-					for (std::size_t i = 0; i < main; ++i)
-					{
-						{
-							std::array<block, 2> idxs;
-							//__m128i increment = _mm_set_epi32(3, 2, 1, 0);
-							block increment(3, 2, 1, 0);
-							idxs[0] = block::allSame<u32>(idx).add_epi32(increment);
-							idxs[1] = block::allSame<u32>(idx + 4).add_epi32(increment);
+		//			auto n = mN;
+		//			auto main = n / chunkSize;
+		//			u64 idx = 0;
+		//			for (std::size_t i = 0; i < main; ++i)
+		//			{
+		//				{
+		//					std::array<block, 2> idxs;
+		//					//__m128i increment = _mm_set_epi32(3, 2, 1, 0);
+		//					block increment(3, 2, 1, 0);
+		//					idxs[0] = block::allSame<u32>(idx).add_epi32(increment);
+		//					idxs[1] = block::allSame<u32>(idx + 4).add_epi32(increment);
 
-							idxs[0] = mPerm.feistelBijection(idxs[0]);
-							idxs[1] = mPerm.feistelBijection(idxs[1]);
+		//					idxs[0] = mPerm.feistelBijection(idxs[0]);
+		//					idxs[1] = mPerm.feistelBijection(idxs[1]);
 
-							for (u64 i = 0; i < 2; ++i)
-							{
-								for (u64 j = 0; j < 4; ++j)
-								{
-									auto d = idxs[i].get<u32>(j);
+		//					for (u64 i = 0; i < 2; ++i)
+		//					{
+		//						for (u64 j = 0; j < 4; ++j)
+		//						{
+		//							auto d = idxs[i].get<u32>(j);
 
-									sum ^= *inIter;
-									outIter[d] = sum;
-								}
-							}
+		//							sum ^= *inIter;
+		//							outIter[d] = sum;
+		//						}
+		//					}
 
-							idx += chunkSize;
-						}
+		//					idx += chunkSize;
+		//				}
 
-						//for (u64 j = 0; j < chunkSize; ++j)
-						//{
-						//    ++inIter;
-						//}
-						//mPerm.chunkBlk(permIter, chunk);
-					}
-				}
-				else
-				{
-					throw RTE_LOC;
-				}
-			}
-		}
+		//				//for (u64 j = 0; j < chunkSize; ++j)
+		//				//{
+		//				//    ++inIter;
+		//				//}
+		//				//mPerm.chunkBlk(permIter, chunk);
+		//			}
+		//		}
+		//		else
+		//		{
+		//			throw RTE_LOC;
+		//		}
+		//	}
+		//}
 
 		SparseMtx getMtx()
 		{
