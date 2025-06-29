@@ -202,11 +202,10 @@ namespace osuCrypto
 
 
 	template<typename F>
-	void nttNegWrapCt2(
+	void nttNegWrapCt(
 		span<F> a,
 		span<F> w,
-		F psi,
-		NttOrder order)
+		NttOrder order = NttOrder::BitReversedOrder)
 	{
 
 		auto n = a.size();

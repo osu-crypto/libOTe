@@ -70,6 +70,7 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_SILENTOT		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_SILENT_VOLE    ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_FOLEAGE		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
+	set(ENABLE_RINGLPN		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_REGULAR_DPF	  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_TERNARY_DPF	  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_SPARSE_DPF	  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
@@ -104,6 +105,7 @@ option(ENABLE_PPRF           "Build the PPRF protocol." OFF)
 option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
 
 option(ENABLE_FOLEAGE        "Build the Foleage OLE protocol." OFF)
+option(ENABLE_RINGLPN        "Build the Foleage OLE protocol." OFF)
 
 
 option(ENABLE_REGULAR_DPF    "Build the Regular DPF protocol." OFF)
@@ -172,7 +174,8 @@ message(STATUS "Option: ENABLE_TERNARY_DPF    = ${ENABLE_TERNARY_DPF}")
 message(STATUS "Option: ENABLE_PPRF           = ${ENABLE_PPRF}\n\n")
 
 message(STATUS "OLE and Triple protocols\n=======================================================")
-message(STATUS "Option: ENABLE_FOLEAGE        = ${ENABLE_FOLEAGE}\n\n")
+message(STATUS "Option: ENABLE_FOLEAGE        = ${ENABLE_FOLEAGE}")
+message(STATUS "Option: ENABLE_RINGLPN        = ${ENABLE_RINGLPN}\n\n")
 
 message(STATUS "1-out-of-N OT Extension protocols\n=======================================================")
 message(STATUS "Option: ENABLE_OOS            = ${ENABLE_OOS}")

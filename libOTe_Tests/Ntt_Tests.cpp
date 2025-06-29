@@ -130,7 +130,7 @@ namespace tests_libOTe
 			std::cout << "\n inplace:\n";
 
 			auto aa = a;
-			nttNegWrapCt2<F>(aa, psiPowers, psi, order);
+			nttNegWrapCt<F>(aa, psiPowers, order);
 			if (aa != aHat)
 			{
 				std::cout << "aHat " << aHat << std::endl;
@@ -139,34 +139,34 @@ namespace tests_libOTe
 			}
 			continue;
 
-			nttNegWrapMatrix<F>(bHat, b, psi, order);
-			nttNegWrapCt<F>(bHat2, b, psi, order);
-			if (bHat != bHat2)
-				throw RTE_LOC;
+			//nttNegWrapMatrix<F>(bHat, b, psi, order);
+			//nttNegWrapCt<F>(bHat2, b, psi, order);
+			//if (bHat != bHat2)
+			//	throw RTE_LOC;
 
-			// apply the NTT to c1.
-			nttNegWrapMatrix<F>(c1Hat, c1, psi, order);
-			c1Hat.compact();
+			//// apply the NTT to c1.
+			//nttNegWrapMatrix<F>(c1Hat, c1, psi, order);
+			//c1Hat.compact();
 
-			// compute the componetwise multplication of aHat and bHat
-			hadamarProd<F>(c2Hat, aHat, bHat);
+			//// compute the componetwise multplication of aHat and bHat
+			//hadamarProd<F>(c2Hat, aHat, bHat);
 
-			c1Hat.compact();
-			c2Hat.compact();
-			// check that we get the same evaluations.
-			if (c1Hat != c2Hat)
-			{
-				std::cout << c1Hat << std::endl;
-				std::cout << c2Hat << std::endl;
+			//c1Hat.compact();
+			//c2Hat.compact();
+			//// check that we get the same evaluations.
+			//if (c1Hat != c2Hat)
+			//{
+			//	std::cout << c1Hat << std::endl;
+			//	std::cout << c2Hat << std::endl;
 
-				throw RTE_LOC;
-			}
+			//	throw RTE_LOC;
+			//}
 
-			// convert back
-			inttNegWrapMatrix<F>(a2, aHat, psi, order);
+			//// convert back
+			//inttNegWrapMatrix<F>(a2, aHat, psi, order);
 
-			if (a != a2)
-				throw RTE_LOC;
+			//if (a != a2)
+			//	throw RTE_LOC;
 		}
 		//inttNegWrapGs<F>(a2, aHat, psi, order);
 	}

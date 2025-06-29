@@ -43,6 +43,9 @@
 // build the library with Foleage enabled
 #cmakedefine ENABLE_FOLEAGE @ENABLE_FOLEAGE@
 
+// build the library with RingLpn enabled
+#cmakedefine ENABLE_RINGLPN @ENABLE_RINGLPN@
+
 // build the library with regular dpf enabled
 #cmakedefine ENABLE_REGULAR_DPF @ENABLE_REGULAR_DPF@
 

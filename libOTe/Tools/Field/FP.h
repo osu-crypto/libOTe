@@ -159,7 +159,7 @@ namespace osuCrypto
 		}
 
 
-		static Fp barrettMul(const Fp& a, const Fp& b) const
+		static Fp barrettMul(const Fp& a, const Fp& b)
 		{
 			// Barrett reduction
 			// https://en.wikipedia.org/wiki/Barrett_reduction
@@ -312,12 +312,21 @@ namespace osuCrypto
 		return isPrimRootOfUnity<F>(factors, u);
 	}
 
+
 	// return a primitive n-root of unity given a generator.
 	template<typename F>
 	inline F primRootOfUnity(u64 n, F generator)
 	{
 		auto p = F::order();
 		return generator.pow((p - 1) / n);
+	}
+
+	template<typename F>
+	inline F primRootOfUnity(u64 n)
+	{
+		PRNG prng(CCBlock);
+		F G = findGenerator<F>(prng);
+		return primRootOfUnity<F>(n, G);
 	}
 
 	// returns true if u is an n-root of unity.
