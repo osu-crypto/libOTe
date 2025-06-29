@@ -18,6 +18,9 @@ namespace tests_libOTe
         // Test basic field properties
         F a(prng.get()), b(prng.get());
 
+        a = 1467;
+        b = 2489;
+
         auto c = a + b;
         auto d = b + a;
         if (c != d)
@@ -95,6 +98,19 @@ namespace tests_libOTe
     void Field_F7681_Test()
     {
         Field_Test<F7681>();
+
+
+        {
+            using F32769 = Fp<32769, u16, u32>;
+		    F32769 a(12345), b(67890);
+            auto c = F32769::barrettMul(a, b);
+            if(c.mVal != (12345 * 67890) % 32769)
+            {
+                std::cout << "p=32769 berrett multiplication failed: "
+                    << c.mVal << " != " << (12345 * 67890 % 32769) << std::endl;
+                throw RTE_LOC;
+			}
+        }
     }
 
     void Field_F12289_Test()

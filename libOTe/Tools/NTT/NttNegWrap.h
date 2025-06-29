@@ -3,6 +3,7 @@
 #include <vector>
 #include "NttOrder.h"
 #include <bit>
+#include <format>
 
 namespace osuCrypto
 {
@@ -43,18 +44,19 @@ namespace osuCrypto
 	// aHat are the evaluations
 	// psi is the 2n-th root of unity.
 
-	struct Range
+	struct NttRange
 	{
 		u64 mBaseIndex = 0;
 		u64 mStride;
 		u64 mSize;
 
-		std::pair<Range, Range> split() const
+		// split the range into even and odd elements
+		std::pair<NttRange, NttRange> split() const
 		{
 			auto half = mSize / 2;
 			return {
-				{ mBaseIndex, mStride, half },
-				{ mBaseIndex + half * mStride, mStride, half }
+				{ mBaseIndex, mStride * 2, half },
+				{ mBaseIndex + mStride, mStride * 2, half }
 			};
 		}
 
@@ -72,16 +74,13 @@ namespace osuCrypto
 		span<const F> a,
 		const F& psi,
 		const F& basePsi,
-		Range range,
+		NttRange range,
 		u64 depth,
 		NttOrder outputOrder)
 	{
 		auto n = a.size();
 		auto ln = log2ceil(n);
 		auto qq = F::order() - 1;
-
-		if (basePsi.pow(basePsiExp) != psi)
-			throw RTE_LOC;
 
 		if (n != 1ull << ln)
 			throw RTE_LOC;
@@ -114,64 +113,76 @@ namespace osuCrypto
 		// psi^{2} is primitive n‑th root
 		auto psi2 = psi * psi;
 		auto [aRange, bRange] = range.split();
-		nttNegWrapCt<F>(AHat, A, psi2, basePsi, aRange, depth + 1, outputOrder);
-		nttNegWrapCt<F>(BHat, B, psi2, basePsi, bRange, depth + 1, outputOrder);
+		nttNegWrapCt<F>(AHat, A, psi2, basePsi, aRange, depth + 1, NttOrder::NormalOrder);
+		nttNegWrapCt<F>(BHat, B, psi2, basePsi, bRange, depth + 1, NttOrder::NormalOrder);
 
 		// -------- combine ------------------------------------------------
 		// Pre‑compute successive powers  psi^{2i+1}  iteratively→ saves O(n log n)
 		F psiPow = psi;                      // i = 0  ⇒  psi^{1}
 		const F psiStep = psi2;              // multiply by psi^{2} each iteration
 
+		for (u64 i = 0; i < A.size(); ++i)
+		{
+			const F psiB = psiPow * BHat[i];   // psi^{2i+1} B̂_i
+
+			// psi = bPsi^bExp
+			// psiPow = psi^{2i+1}
+			//        = bPsi^{bExp * (2i + 1)}
+			auto basePsiExp = 1ull << depth;
+			auto index = basePsiExp * (2 * i + 1);
+
+			//	throw RTE_LOC;
+			if (psiPow != basePsi.pow(index))
+				throw RTE_LOC;
+
+			const u64 idx0 = i;
+			const u64 idx1 = i + n / 2;
+			aHat[idx0] = AHat[i] + psiB;
+			aHat[idx1] = AHat[i] - psiB;
+
+			std::cout << std::format("{0}({1}, {2}, {3} = {4} * (2 * {5} + 1), {6} {7})\n",
+				std::string(4 * depth, ' '),
+				range[idx0], range[idx1],
+				index, basePsiExp, i,
+				AHat[i].integer(), BHat[i].integer());
+
+			//std::cout << std::string(4*depth, ' ')
+			//	<< "(" << range[idx0] << "," << range[idx1] 
+			//	<< ", " << index << " ," << AHat[i] <<", " << BHat[i] << ")\n";
+
+			//std::cout
+			//	<< "aHat[" <<depth <<", " << range[idx0] << "] = " << aHat[idx0] << " = " <<
+			//	AHat[i] << " + " << psiB << "\n"
+			//	<< "aHat[" <<depth << ", " << range[idx1] << "] = " << aHat[idx1] << " = " <<
+			//	AHat[i] << " - " << psiB << "\n";
+
+			psiPow *= psiStep;              // next  psi^{2(i+1)+1}
+		}
 		if (outputOrder == NttOrder::NormalOrder)
 		{
-			for (u64 i = 0; i < A.size(); ++i)
-			{
-				const F psiB = psiPow * BHat[i];   // psi^{2i+1} B̂_i
-
-				// psi = bPsi^bExp
-				// psiPow = psi^{2i+1}
-				//        = bPsi^{bExp * (2i + 1)}
-				if (basePsiExp != 1ull << depth)
-					throw RTE_LOC;
-				auto index = basePsiExp * (2 * i + 1);
-				if (psiPow != basePsi.pow(index))
-					throw RTE_LOC;
-
-				const u64 idx0 = i;
-				const u64 idx1 = i + n / 2;
-				aHat[idx0] = AHat[i] + psiB;
-				aHat[idx1] = AHat[i] - psiB;
-
-				std::cout
-					<< "aHat[" << range[idx0] << "] = " << aHat[idx0] << " = " <<
-					AHat[i] << " + " << psiB << "\n"
-					<< "aHat[" << range[idx0] << "] = " << aHat[idx1] << " = " <<
-					AHat[i] << " - " << psiB << "\n";
-
-				psiPow *= psiStep;              // next  psi^{2(i+1)+1}
-			}
 		}
 		else
 		{
-			for (u64 i = 0; i < A.size(); ++i)
-			{
-				const F psiB = psiPow * BHat[i];   // psi^{2i+1} B̂_i
-				const u64 idx0 = bitReversal(ln, i);
-				const u64 idx1 = bitReversal(ln, i + 1);
-				aHat[idx0] = AHat[i] + psiB;
-				aHat[idx1] = AHat[i] - psiB;
+			bitReversePermute(aHat);
+			//for (u64 i = 0; i < A.size(); ++i)
+			//{
+			//	const F psiB = psiPow * BHat[i];   // psi^{2i+1} B̂_i
+			//	const u64 idx0 = bitReversal(ln, i);
+			//	const u64 idx1 = bitReversal(ln, i + 1);
+			//	aHat[idx0] = AHat[i] + psiB;
+			//	aHat[idx1] = AHat[i] - psiB;
 
-				//std::cout
-				//	<< "aHat[" << depth << ", " << idx0 << "] = "
-				//	<< "AHat[" << depth + 1 << ", " << i << "] + BHat[i] = " << aHat[idx0] << " = " 
-				//	<< AHat[i] << " + " << psiB << "\n"
+			//	//std::cout
+			//	//	<< "aHat[" << depth << ", " << idx0 << "] = "
+			//	//	<< "AHat[" << depth + 1 << ", " << i << "] + BHat[i] = " << aHat[idx0] << " = " 
+			//	//	<< AHat[i] << " + " << psiB << "\n"
 
-				//	<< "aHat[" << depth << ", " << idx1 << "] = "
-				//	<< "AHat[" << depth + 1 << ", " << i << "] - BHat[i] = " << aHat[idx1] << " = " 
-				//	<< AHat[i] << " - " << psiB << "\n";
+			//	//	<< "aHat[" << depth << ", " << idx1 << "] = "
+			//	//	<< "AHat[" << depth + 1 << ", " << i << "] - BHat[i] = " << aHat[idx1] << " = " 
+			//	//	<< AHat[i] << " - " << psiB << "\n";
 
-				psiPow *= psiStep;              // next  psi^{2(i+1)+1}
-			}
+			//	psiPow *= psiStep;              // next  psi^{2(i+1)+1}
+			//}
 		}
 	}
 
@@ -184,7 +195,79 @@ namespace osuCrypto
 		F psi,
 		NttOrder order)
 	{
-		nttNegWrapCt(aHat, a, psi, psi, 1, 0, order);
+		auto rng = NttRange{.mBaseIndex = 0, .mStride = 1, .mSize = a.size()};
+		nttNegWrapCt(aHat, a, psi, psi, rng, 0, order);
+	}
+
+
+
+	template<typename F>
+	void nttNegWrapCt2(
+		span<F> a,
+		span<F> w,
+		F psi,
+		NttOrder order)
+	{
+
+		auto n = a.size();
+		auto ln = log2ceil(n);
+		auto qq = F::order() - 1;
+		if (n != 1ull << ln)
+			throw RTE_LOC;
+		if (n > qq)
+			throw RTE_LOC;
+		if(w.size() != 2* n)
+			throw RTE_LOC;
+
+		u64 stride = n / 2;
+
+		u64 stage = 0;
+		while (stride)
+		{
+			u64 size = n / stride / 2;
+			//std::cout << " stride " << stride << " size " << size << " depth " << depth << ": \n";
+			u64 base = 0;
+			for(u64 j = 0; j < size; ++j)
+			{
+				for (u64 i = 0; i < stride; ++i)
+				{
+					u64 idx0 = base + i;
+					u64 idx1 = idx0 + stride;
+					if (idx1 >= n)
+						throw RTE_LOC;
+					F a0 = a[idx0];
+					F a1 = a[idx1];
+
+					//if (ln - depth - 1 != stage)
+					//	throw RTE_LOC;
+					auto index = stride * (2 * bitReversal(stage, j) + 1);
+					//auto psiPow = psi.pow(index);
+					auto psiPow = w[index]; // precomputed powers of psi
+					auto b = psiPow * a1;
+					a[idx0] = a0 + b;
+					a[idx1] = a0 - b;
+
+					//std::cout << "(" << idx0 << "," << idx1 << ", " << index << ", " <<a0 <<", " <<a1  <<") ";
+
+					//std::cout << std::format("{0}({1}, {2}, {3} = {4} * (2 * {5} + 1), {6} {7} )\n",
+					//	std::string(4 * depth, ' '),
+					//	idx0, idx1,
+					//	index, stride, bitReversal(stage, j),
+					//	a0.integer(), a1.integer());
+
+				}
+				base += stride * 2;
+			}
+			//std::cout << std::endl;
+
+			stride /= 2;
+			//--depth;
+			++stage;
+		}
+
+
+		if (order == NttOrder::NormalOrder)
+			bitReversePermute(a);
 	}
 
 	//---------------------------------------------------------------------------
@@ -538,17 +621,17 @@ namespace osuCrypto
 		}
 
 	private:
-		//----------------------------------------------------------------
-		//  Lazy bit‑reverse permutation (used only if NaturalOrder requested)
-		//----------------------------------------------------------------
-		void bitReversePermute(std::span<F> a) const
-		{
-			const u64 bits = log2ceil(n);
-			for (u64 i = 0; i < n; ++i) {
-				u64 j = bitReversal(bits, i);
-				if (i < j) std::swap(a[i], a[j]);
-			}
-		}
+		////----------------------------------------------------------------
+		////  Lazy bit‑reverse permutation (used only if NaturalOrder requested)
+		////----------------------------------------------------------------
+		//void bitReversePermute(std::span<F> a) const
+		//{
+		//	const u64 bits = log2ceil(n);
+		//	for (u64 i = 0; i < n; ++i) {
+		//		u64 j = bitReversal(bits, i);
+		//		if (i < j) std::swap(a[i], a[j]);
+		//	}
+		//}
 
 
 

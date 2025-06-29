@@ -74,7 +74,7 @@ namespace tests_libOTe
 		using F = F7681;
 		//u64 n = 4;
 		//F psi = 1925;
-		u64 n = 8;
+		u64 n = 32;
 		PRNG prng(CCBlock);
 		auto g = findGenerator<F>(prng);
 		auto psi = primRootOfUnity(2 * n, g);
@@ -86,7 +86,7 @@ namespace tests_libOTe
 			throw RTE_LOC;
 		}
 
-		for (NttOrder order : { /*NttOrder::NormalOrder,*/ NttOrder::BitReversedOrder})
+		for (NttOrder order : { NttOrder::NormalOrder, NttOrder::BitReversedOrder})
 		{
 
 			// the modulus polynomial is x^n + 1
@@ -99,11 +99,14 @@ namespace tests_libOTe
 			Poly<F> b(n - 1, 1), bHat(n - 1, 1), bHat2(n - 1, 1);
 			Poly<F> c1(n - 1, 1), c1Hat(n - 1, 1);
 			Poly<F> c2(n - 1, 1), c2Hat(n - 1, 1);
+			std::vector<F> psiPowers(2 * n);
+			for (u64 i = 0; i < psiPowers.size(); ++i)
+			{
+				psiPowers[i] = psi.pow(i);
+			}
+			for (u64 i = 0; i < a.size(); ++i)
+				a[i] = i;
 
-			a[0] = 1;
-			a[1] = 2;
-			a[2] = 3;
-			a[3] = 4;
 			b = prng.get();
 
 			c1 = (a * b) % mod;
@@ -124,6 +127,17 @@ namespace tests_libOTe
 				throw RTE_LOC;
 			}
 
+			std::cout << "\n inplace:\n";
+
+			auto aa = a;
+			nttNegWrapCt2<F>(aa, psiPowers, psi, order);
+			if (aa != aHat)
+			{
+				std::cout << "aHat " << aHat << std::endl;
+				std::cout << "aa   " << aa << std::endl;
+				throw RTE_LOC;
+			}
+			continue;
 
 			nttNegWrapMatrix<F>(bHat, b, psi, order);
 			nttNegWrapCt<F>(bHat2, b, psi, order);

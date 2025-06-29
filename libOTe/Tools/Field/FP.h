@@ -1,4 +1,4 @@
-#include "libOTe/config.h"
+﻿#include "libOTe/config.h"
 #include "cryptoTools/Common/block.h"
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Crypto/PRNG.h"
@@ -6,10 +6,11 @@
 
 namespace osuCrypto
 {
-	template<u64 modulus, typename T>
+	template<u64 modulus, typename T, typename TT = T>
 	struct Fp
 	{
 		static constexpr T mMod = modulus;
+		static_assert(log2ceil(mMod) * 2 <= 8 * sizeof(TT),"a double sized value must fit in TT ");
 		T mVal = 0;
 
 
@@ -74,9 +75,10 @@ namespace osuCrypto
 
 		Fp operator*(const Fp& o) const
 		{
-			Fp r;
-			r.mVal = (mVal * o.mVal) % mMod;
-			return r;
+			//Fp r;
+			//r.mVal = (mVal * o.mVal) % mMod;
+			return barrettMul(*this, o);
+			//return r;
 		};
 
 		Fp& operator*=(const Fp& o)
@@ -156,6 +158,53 @@ namespace osuCrypto
 			return pow(mMod - 2);
 		}
 
+
+		static Fp barrettMul(const Fp& a, const Fp& b) const
+		{
+			// Barrett reduction
+			// https://en.wikipedia.org/wiki/Barrett_reduction
+			constexpr unsigned TT_bits = std::numeric_limits<TT>::digits;
+			constexpr int k = log2ceil(mMod);
+			constexpr TT B = TT(1) << k; // b = 2^k
+			constexpr TT mu = [&]() {
+				/* mu = ⌊b² / p⌋
+				 *
+				 * If  2k < digits(TT)  we can form b*b safely.
+				 * Otherwise b² = 2^(digits(TT)) does not fit in TT,
+				 * so we compute  ⌊2^(digits(TT)) / p⌋  in two steps
+				 * using only values representable in TT.
+				 */
+				if constexpr (2 * k < TT_bits)
+				{
+					return (B * B) / mMod;
+				}
+				else                       // borderline: k == digits(T)
+				{
+					TT maxVal = std::numeric_limits<TT>::max();   // 2^TT_bits − 1
+					auto mu = maxVal / mMod;
+					TT rem = maxVal - mu * mMod;
+					if (rem + 1 >= mMod)          // did (maxVal+1)/p round up?
+						++mu;                  // yes – increase by one
+					return mu;
+				}
+				}();
+
+			static_assert(mu != 0, "overflow detected");
+
+			auto x = TT{ a.mVal } * TT{ b.mVal }; // x = a * b
+			TT x_hi = x >> k;                  // ⌊x / 2^k⌋   ( < 2^k = b )
+			TT q = (x_hi * mu) >> k;        // ⌊x_hi * μ / 2^k⌋  ≈ ⌊x/p⌋
+			TT r = x - q * mMod;               // provisional remainder
+
+			/*  r is guaranteed to lie in [0, 2p), so at most two
+			 *  subtractions bring it into [0, p).
+			 */
+			if (r >= mMod) r -= mMod;
+			if (r >= mMod) r -= mMod;
+			return Fp(static_cast<T>(r));
+		}
+
+		
 	};
 
 
@@ -285,13 +334,14 @@ namespace osuCrypto
 
 
 
-	template<u64 p, typename T>
-	std::ostream& operator<<(std::ostream& o, const Fp<p, T>& f)
+	template<u64 p, typename T, typename TT>
+	std::ostream& operator<<(std::ostream& o, const Fp<p, T, TT>& f)
 	{
 		o << f.mVal;
 		return o;
 	}
 
-	using F7681 = Fp<7681, u16>;
-	using F12289 = Fp<12289, u64>;
+	using F7681 = Fp<7681, u16, u32>;
+	using F12289 = Fp<12289, u16, u32>;
+	
 }
