@@ -12,20 +12,182 @@
 namespace osuCrypto
 {
 
-	// This test evaluates the full PCG.Expand for both parties and
-	// checks correctness of the resulting OLE correlation.
-	void RingLpn_Fole_test(const CLP& cmd)
+	void RingLpn_basic_test(const CLP& cmd)
 	{
-#ifdef ENABLE_RINGLPN
 
-		using F = Fp<0xFFFFFFFB, u32, u64>;
-
+		//using F = Fp<0xFFFFFFFB, u32, u64>;
+		using F = F12289;
 
 		auto logn = 6;
 		u64 n = 1ull << logn;
-		auto blocks = divCeil(n, 128);
 		bool verbose = cmd.isSet("v");
-		std::vector<u64> cs{ 8 };
+		std::vector<u64> cs{ 1 };
+		u64 t = cmd.getOr("t", 8);
+		u64 c = cmd.getOr("c", 1);
+		auto blockSize = n / t;
+
+		Poly<F> xnPlus1;
+		xnPlus1[n] = 1;
+		xnPlus1[0] = 1;
+
+		std::vector<Poly<F>> as(c);
+		std::vector<Poly<F>> bs(c);
+		std::vector<Poly<F>> rs(c);
+
+		PRNG prng(block(12345, 67890));
+
+		// Generate random coefficients rs[i]
+		for (u64 i = 0; i < c; ++i) {
+			//rs[i][0] = 1; 
+			for (u64 j = 0; j < n; ++j)
+				rs[i][j] = prng.get();
+		}
+
+		// Generate sparse polynomials a[i] and b[i] with weight t
+		for (u64 i = 0; i < c; ++i) {
+
+			// Generate t random positions for non-zero coefficients
+			for (u64 j = 0; j < t; ++j)
+			{
+				as[i][j * blockSize + prng.get<u64>() % blockSize] = prng.get();
+				bs[i][j * blockSize + prng.get<u64>() % blockSize] = prng.get();
+			}
+		}
+		// this test checks the following:
+		//
+		// a' = a[0] * r[0] + a[1] * r[1] + ... + a[c-1] * r[c-1]  mod xnPlus1
+		// b' = b[0] * r[0] + b[1] * r[1] + ... + b[c-1] * r[c-1]  mod xnPlus1
+		// c' = a' * b' mod xnPlus1
+		//    = (a[0] * r[0] + a[1] * r[1] + ... + a[c-1] * r[c-1]) *
+		//      (b[0] * r[0] + b[1] * r[1] + ... + b[c-1] * r[c-1]) mod xnPlus1
+		//    = a[0] * b[0] * r[0] * r[0] +
+		//      a[0] * b[1] * r[0] * r[1] + 
+		//      ... +
+		//      a[c-1] * b[c-1] * r[c-1] * r[c-1] mod xnPlus1
+
+
+		// to match the protocol, we will have each a[i], b[i] be a polynomial
+		// of max degree n-1 and weight t.
+		// this does is just a sanity check that the RingLpnTriple
+		// and only works with Poly<F>. It does not use the RingLpnTriple
+
+		// Compute a' = sum(a[i] * r[i]) mod x^n + 1
+		Poly<F> aPrime(n);
+		for (u64 i = 0; i < c; ++i) {
+			auto scaled = as[i] * rs[i];
+			aPrime = aPrime + scaled;
+		}
+		aPrime = aPrime % xnPlus1;
+
+		// Compute b' = sum(b[i] * r[i]) mod x^n + 1
+		Poly<F> bPrime(n);
+		for (u64 i = 0; i < c; ++i) {
+			auto scaled = bs[i] * rs[i];
+			bPrime = bPrime + scaled;
+		}
+		bPrime = bPrime % xnPlus1;
+
+		// Compute c' = a' * b' mod x^n + 1
+		Poly<F> cPrime = (aPrime * bPrime) % xnPlus1;
+
+		// Compute the expected result using the expanded form
+		Poly<F> expected(n);
+		for (u64 i = 0; i < c; ++i) {
+			for (u64 j = 0; j < c; ++j) {
+				auto term = (as[i] * bs[j]) * (rs[i] * rs[j]);
+				expected = expected + term;
+			}
+		}
+		expected = expected % xnPlus1;
+
+		// Verify that c' equals the expected result
+		if (cPrime != expected) {
+			if (verbose) {
+				std::cout << "Test failed!" << std::endl;
+				std::cout << "c' = " << cPrime << std::endl;
+				std::cout << "expected = " << expected << std::endl;
+			}
+			throw RTE_LOC;
+		}
+
+		// ============ FFT/Evaluation Domain Testing ============
+
+		// Find a primitive root of unity for NTT of size 2*n
+		auto psi = primRootOfUnity<F>(2 * n);
+		std::vector<F> w(2 * n);
+		for (u64 i = 0; i < 2 * n; ++i) {
+			w[i] = psi.pow(i);
+		}
+
+		// Convert polynomials to evaluation form using NTT
+		std::vector<F> aPrime_eval(n), bPrime_eval(n), cPrime_eval(n);
+
+		// Copy coefficients to evaluation vectors (ensure they're the right size)
+		for (u64 i = 0; i < n; ++i) {
+			aPrime_eval[i] = aPrime.getCoeff(i);
+			bPrime_eval[i] = bPrime.getCoeff(i);
+			cPrime_eval[i] = cPrime.getCoeff(i);
+		}
+
+		// Apply NTT (negative wrapped to handle x^n + 1 modulus)
+		nttNegWrapCt<F>(aPrime_eval, w);
+		nttNegWrapCt<F>(bPrime_eval, w);
+		nttNegWrapCt<F>(cPrime_eval, w);
+
+		// Compute componentwise product in evaluation domain
+		std::vector<F> expected_eval(n);
+		for (u64 i = 0; i < n; ++i) {
+			expected_eval[i] = aPrime_eval[i] * bPrime_eval[i];
+		}
+
+		// Verify that eval(c') = eval(a') * eval(b')
+		bool evalTest = true;
+		for (u64 i = 0; i < n; ++i) {
+			if (cPrime_eval[i] != expected_eval[i]) {
+				evalTest = false;
+				if (verbose) {
+					std::cout << "FFT domain test failed at position " << i << std::endl;
+					std::cout << "eval(c')[" << i << "] = " << cPrime_eval[i] << std::endl;
+					std::cout << "eval(a')[" << i << "] * eval(b')[" << i << "] = "
+						<< expected_eval[i] << std::endl;
+				}
+				break;
+			}
+		}
+
+		if (!evalTest) {
+			throw RTE_LOC;
+		}
+
+		// Additional verification: transform back and compare with polynomial result
+		//std::vector<F> cPrime_reconstructed = cPrime_eval;
+
+		// Inverse NTT to get back to coefficient form
+		// Note: We need the inverse NTT function - this might require implementing
+		// the inverse transformation or using a different approach
+
+		if (verbose) {
+			std::cout << "FFT domain test passed!" << std::endl;
+			std::cout << "RingLpn_basic_test completed successfully with c=" << c
+				<< ", t=" << t << ", n=" << n << std::endl;
+		}
+
+	}
+
+
+	// This test evaluates the full PCG.Expand for both parties and
+	// checks correctness of the resulting OLE correlation.
+	void RingLpn_ole_test(const CLP& cmd)
+	{
+#ifdef ENABLE_RINGLPN
+
+		//using F = Fp<0xFFFFFFFB, u32, u64>;
+		using F = F12289;
+
+		auto logn = 6;
+		u64 n = 1ull << logn;
+		bool verbose = cmd.isSet("v");
+		std::vector<u64> cs{ cmd.getManyOr<u64>("c", {4}) };
 
 		for (auto c : cs)
 		{
@@ -72,42 +234,27 @@ namespace osuCrypto
 			}
 
 			auto sock = coproto::LocalAsyncSocket::makePair();
-			std::vector<block>
-				ALsb(blocks),
-				AMsb(blocks),
-				BLsb(blocks),
-				BMsb(blocks),
-				C0Lsb(blocks),
-				C0Msb(blocks),
-				C1Lsb(blocks),
-				C1Msb(blocks);
+			std::vector<F>
+				A(n), B(n),
+				C0(n), C1(n);
 
 			if (verbose)
 				oles[0].setTimer(timer);
 
-			throw RTE_LOC;
-			//auto r = macoro::sync_wait(macoro::when_all_ready(
-			//	oles[0].expand(ALsb, AMsb, C0Lsb, C0Msb, prng0, sock[0]),
-			//	oles[1].expand(BLsb, BMsb, C1Lsb, C1Msb, prng1, sock[1])));
-			//std::get<0>(r).result();
-			//std::get<1>(r).result();
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				oles[0].expand(A, C0, prng0, sock[0]),
+				oles[1].expand(B, C1, prng1, sock[1])));
+			std::get<0>(r).result();
+			std::get<1>(r).result();
 
-			// Now we check that we got the correct OLE correlations and fail
-			// the test otherwise.
-			for (size_t i = 0; i < blocks; i++)
+			//Now we check that we got the correct OLE correlations and fail
+			//the test otherwise.
+			for (size_t i = 0; i < n; i++)
 			{
-				auto Lsb = C0Lsb[i] ^ C1Lsb[i];
-				auto Msb = C0Msb[i] ^ C1Msb[i];
-				block mLsb, mMsb;
-				throw RTE_LOC;
-				//F4Multiply(
-				//	ALsb[i], AMsb[i],
-				//	BLsb[i], BMsb[i],
-				//	mLsb, mMsb);
+				auto act = C0[i] + C1[i];
+				auto exp = A[i] * B[i];
 
-				if (Lsb != mLsb)
-					throw RTE_LOC;
-				if (Msb != mMsb)
+				if (exp != act)
 					throw RTE_LOC;
 			}
 

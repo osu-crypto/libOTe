@@ -25,6 +25,7 @@
 #include "libOTe_Tests/Field_Tests.h"
 #include "libOTe_Tests/Poly_Tests.h"
 #include "libOTe_Tests/Ntt_Tests.h"
+#include "libOTe_Tests/RingLpn_Tests.h"
 
 
 using namespace osuCrypto;
@@ -71,6 +72,8 @@ namespace tests_libOTe
 			tc.add("RegularDpf_MultByte_Test                ", RegularDpf_MultByte_Test);
 			tc.add("RegularDpf_MultBit_Test                 ", RegularDpf_MultBit_Test);
 
+
+			tc.add("SumDmpf_Proto_Test                      ", SumDmpf_Proto_Test);
 			tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
 			tc.add("RegularDpf_Puncture_Test                ", RegularDpf_Puncture_Test);
 			tc.add("RegularDpf_keyGen_Test                  ", RegularDpf_keyGen_Test);
@@ -166,6 +169,14 @@ namespace tests_libOTe
 
 			tc.add("SilentOtTriple_ole_test                 ", SilentOtTriple_ole_test);
 			tc.add("SilentOtTriple_triple_test              ", SilentOtTriple_triple_test);
+
+			tc.add("RingLpn_tensor_test                     ", RingLpn_tensor_test);
+			tc.add("RingLpn_basic_test                      ", RingLpn_basic_test);
+			tc.add("RingLpn_ole_test                        ", RingLpn_ole_test);
+			//tc.add("RingLpn_tensor_test                     ", RingLpn_tensor_test);
+			tc.add("RingLpn_GenBase_test                    ", RingLpn_GenBase_test);
+
+			//void RingLpn_Triple_test(const CLP& cmd);
 
 		});
 }

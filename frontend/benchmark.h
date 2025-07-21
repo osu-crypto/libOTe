@@ -738,7 +738,7 @@ namespace osuCrypto
 
 		Timer timer;
 
-		std::array<oc::RegularDpf, 2> dpf;
+		std::array<oc::RegularDpf<block>, 2> dpf;
 		dpf[0].init(0, domain, numPoints);
 		dpf[1].init(1, domain, numPoints);
 
@@ -774,8 +774,8 @@ namespace osuCrypto
 
 			timer.setTimePoint("start");
 			macoro::sync_wait(macoro::when_all_ready(
-				dpf[0].expand(points0, values0, prng.get(), [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; }, sock[0]),
-				dpf[1].expand(points1, values1, prng.get(), [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; }, sock[1])
+				dpf[0].expand(points0, values0, prng, sock[0], [&](auto k, auto i, auto v, auto t) { output[0](k, i) = v; }),
+				dpf[1].expand(points1, values1, prng, sock[1], [&](auto k, auto i, auto v, auto t) { output[1](k, i) = v; })
 			));
 			timer.setTimePoint("finish");
 
@@ -922,7 +922,7 @@ namespace osuCrypto
 			oles[0].init(0, n);
 			oles[1].init(1, n);
 
-			if(cmd.isSet("mockBase"))
+			if (cmd.isSet("mockBase"))
 			{
 				auto otCount0 = oles[0].baseOtCount();
 				auto otCount1 = oles[1].baseOtCount();
@@ -963,18 +963,18 @@ namespace osuCrypto
 			auto b = timer.setTimePoint("start");
 
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				oles[0].expand(Av0,Bv0,Cv0, prng0, sock[0]) | macoro::start_on(pool),
-				oles[1].expand(Av1,Bv1,Cv1, prng1, sock[1]) | macoro::start_on(pool)));
-			auto e=timer.setTimePoint("end");
+				oles[0].expand(Av0, Bv0, Cv0, prng0, sock[0]) | macoro::start_on(pool),
+				oles[1].expand(Av1, Bv1, Cv1, prng1, sock[1]) | macoro::start_on(pool)));
+			auto e = timer.setTimePoint("end");
 			tps = double(n) / (std::chrono::duration_cast<std::chrono::milliseconds>(e - b).count() / 1000.0);
 			std::get<0>(r).result();
 			std::get<1>(r).result();
 
 		}
 		work = {};
-		std::cout << "foleage triple n="<<n<<", log2="<<log2ceil(n)
+		std::cout << "foleage triple n=" << n << ", log2=" << log2ceil(n)
 			<< " triples/sec = " << u64(tps)
-			<<"\n Time taken: \n" << timer << std::endl;
+			<< "\n Time taken: \n" << timer << std::endl;
 #else
 		std::cout << "ENABLE_FOLEAGE = false" << std::endl;
 #endif
@@ -1013,7 +1013,7 @@ namespace osuCrypto
 			oles[0].init(0, n);
 			oles[1].init(1, n);
 
-			if(cmd.hasValue("mult"))
+			if (cmd.hasValue("mult"))
 				oles[0].mMultType = oles[1].mMultType = (MultType)cmd.get<u64>("mult");
 
 			if (cmd.isSet("mockBase"))
@@ -1065,7 +1065,7 @@ namespace osuCrypto
 
 		}
 		work = {};
-		std::cout << "SilentOTTriple n=" << n << ", log2=" << log2ceil(n) 
+		std::cout << "SilentOTTriple n=" << n << ", log2=" << log2ceil(n)
 			<< " triples/sec = " << u64(tps)
 			<< "\n Time taken: \n" << timer << std::endl;
 #else

@@ -10,7 +10,8 @@
 #include "libOTe/Dpf/RevCuckooDmpf.h"
 #include "libOTe/Dpf/RevCuckoo/Equality.h"
 #include "libOTe/Dpf/RevCuckoo/GoldreichHash.h"
-
+#include "libOTe/Tools/Field/Fp.h"
+#include "libOTe/Dpf/SumDmpf.h"
 
 using namespace oc;
 
@@ -306,26 +307,251 @@ void RegularDpf_MultBit_Test(const CLP& cmd)
 	throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_SPARSE_DPF not defined.");
 #endif
 }
-void RegularDpf_Proto_Test(const CLP& cmd)
+
+struct CoeffCtxOpaque;
+struct OpaqueCtr {};
+class Opaque
 {
+private:
+	Opaque() = default;
+	Opaque(const Opaque&) = default;
+	Opaque& operator=(const Opaque&) = default;
+
+	u32 mData;
+	friend class CoeffCtxOpaque;
+public:
+	Opaque(OpaqueCtr) {}
+};
+
+
+struct CoeffCtxOpaque
+{
+
+	void plus(Opaque& ret, const Opaque& lhs, const Opaque& rhs) { ret.mData = lhs.mData + rhs.mData; }
+	void minus(Opaque& ret, const Opaque& lhs, const Opaque& rhs) { ret.mData = lhs.mData - rhs.mData; }
+	void mul(Opaque& ret, const Opaque& lhs, const Opaque& rhs) { ret.mData = lhs.mData * rhs.mData; }
+	bool eq(Opaque& lhs, Opaque& rhs) { return lhs.mData == rhs.mData; }
+
+	template<typename F>
+	bool isField() { return false; }
+
+	// is G characteristic 2 where x+x = 0?
+	template<typename G>
+	bool characteristicTwo() { return false; }
+
+	void mulConst(Opaque& ret, const Opaque& x) { ret.mData = x.mData; }
+
+	template<typename F>
+	u64 bitSize() { return sizeof(F) * 8; }
+
+	BitVector binaryDecomposition(const Opaque& x) { return { (u8*)&x.mData, bitSize<Opaque>() }; }
+
+	bool active = true;
+	void fromBlock(Opaque& ret, const block& b) { ret.mData = b.get<u8>(0); }
+
+	// return the F element with value 2^power
+	OC_FORCEINLINE void powerOfTwo(Opaque& ret, u64 power) {
+		one(ret);
+		ret.mData <<= power;
+	}
+
+	template<typename T>
+	struct Vec
+	{
+		std::unique_ptr<T[]> mData;
+		u64 mSize = 0;
+		u64 size() const { return mSize; }
+		auto begin() { return mData.get(); }
+		auto end() { return mData.get() + size(); }
+		T& operator[](u64 i) { return mData[i]; }
+	};
+	// A vector like type that can be used to store
+	// temporaries. 
+	// 
+	// must have:
+	//  * size()
+	//  * operator[i] that returns the i'th F element reference.
+	//  * begin() iterator over the F elements
+	//  * end() iterator over the F elements
+	/*template<typename F>
+	using Vec = std::unique_ptr<F>;*/
+
+	// resize Vec<F>
+	void resize(Vec<Opaque>& f, u64 size) {
+		Vec<Opaque> ff;
+		ff.mSize = size;
+		ff.mData.reset(new Opaque[size]);
+		for (u64 i = 0; i < f.size(); ++i)
+			ff[i] = f[i];
+		f = std::move(ff);
+	}
+
+	template<typename F>
+	auto makeVec(u64 size) { Vec<F>f; resize(f, size); return f; }
+
+	template<typename F>
+	auto make() { return F{}; }
+
+	// the size of F when serialized.
+	template<typename F>
+	u64 byteSize() { return sizeof(F); }
+
+	// copy a single F element.
+	void copy(Opaque& dst, const Opaque& src) { dst.mData = src.mData; }
+
+
+	// copy [begin,...,end) into [dstBegin, ...)
+	// the iterators will point to the same types, i.e. F
+	template<typename SrcIter, typename DstIter>
+	void copy(
+		SrcIter begin,
+		SrcIter end,
+		DstIter dstBegin)
+	{
+		using F1 = std::remove_reference_t<decltype(*begin)>;
+		using F2 = std::remove_reference_t<decltype(*dstBegin)>;
+		static_assert(std::is_trivially_copyable<F1>::value, "memcpy is used so must be trivially_copyable.");
+		static_assert(std::is_same_v<F1, F2>, "src and destication types are not the same.");
+
+		memcpy((F2 * __restrict) & *dstBegin, (F1 * __restrict) & *begin, std::distance(begin, end) * sizeof(F1));
+	}
+
+	// deserialize [begin,...,end) into  [dstBegin, ...)
+	// begin will be a u8 pointer/iterator.
+	// dstBegin will be an F pointer/iterator
+	template<typename SrcIter, typename DstIter>
+	void deserialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin)
+	{
+		// as written this function is a bit more general than strictly neccessary
+		// due to serialize(...) redirecting here.
+		using SrcType = std::remove_reference_t<decltype(*begin)>;
+		using DstType = std::remove_reference_t<decltype(*dstBegin)>;
+
+		// how many source elem do we have?
+		auto srcN = std::distance(begin, end);
+		if (srcN)
+		{
+			// the source size in bytes
+			auto n = srcN * sizeof(SrcType);
+
+			// the number of destination elements.
+			auto dstN = n / sizeof(DstType);
+
+			// make sure the pointer math work with this iterator type.
+			auto beginU8 = (u8*)&*begin;
+			auto dstBeginU8 = (u8*)&*dstBegin;
+
+			auto dstBackPtr = dstBeginU8 + (n - sizeof(DstType));
+			auto dstBackIter = dstBegin + (dstN - 1);
+
+			auto srcBackPtr = beginU8 + (n - sizeof(SrcType));
+			auto srcBackIter = begin + (srcN - 1);
+
+			// memcpy the bytes
+			std::memcpy(dstBeginU8, beginU8, n);
+		}
+	}
+
+	// serialize [begin,...,end) into  [dstBegin, ...)
+	// begin will be an F pointer/iterator
+	// dstBegin will be a byte pointer/iterator.
+	template<typename SrcIter, typename DstIter>
+	void serialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin)
+	{
+		deserialize(begin, end, dstBegin);
+	}
+
+
+	template<typename F, typename Iter>
+	auto restrictPtr(Iter iter) { return iter; }
+
+
+	template<typename Iter>
+	void zero(Iter begin, Iter end)
+	{
+		while (begin != end)
+			zero(*begin++);
+	}
+	// fill the range [begin,..., end) with zeros. 
+	// begin will be an F pointer/iterator.
+	void zero(Opaque& x)
+	{
+		x.mData = 0;
+	}
+
+
+	// fill the range [begin,..., end) with ones. 
+	// begin will be an F pointer/iterator.
+	template<typename Iter>
+	void one(Iter begin, Iter end)
+	{
+		while (begin != end)
+			one(*begin++);
+	}
+
+	void one(Opaque& x)
+	{
+		x.mData = 1;
+	}
+
+	// convert F into a string
+	std::string str(Opaque& f)
+	{
+		std::stringstream ss;
+		ss << f.mData;
+		return ss.str();
+	}
+
+	void mask(Opaque& ret, const Opaque& x, const block& mask)
+	{
+		ret.mData = x.mData & mask.get<u32>(0);
+	}
+};
+
+template<typename T>
+void setActive(T&& t, bool b) {}
+void setActive(CoeffCtxOpaque& t, bool b) { t.active = b; }
+
+
+
+template<typename T, typename Ctx>
+void RegularDpf_Proto_Test_impl(const oc::CLP& cmd)
+{
+
 #ifdef ENABLE_REGULAR_DPF
 
-	PRNG prng(block(231234, 321312));
+	PRNG prng(block(231234, cmd.getOr("seed", 7645456)));
 	u64 domain = cmd.getOr("domain", 211);
 	u64 numPoints = cmd.getOr("numPoints", 11);
 	std::vector<u64> points0(numPoints);
 	std::vector<u64> points1(numPoints);
-	std::vector<block> values0(numPoints);
-	std::vector<block> values1(numPoints);
+	typename Ctx::template Vec<T> values0;
+	typename Ctx::template Vec<T> values1;
+	Ctx ctx;
+
+	ctx.resize(values0, numPoints);
+	ctx.resize(values1, numPoints);
 	for (u64 i = 0; i < numPoints; ++i)
 	{
 		points1[i] = prng.get<u64>();
 		points0[i] = (prng.get<u64>() % domain) ^ points1[i];
-		values0[i] = prng.get();
-		values1[i] = prng.get();
-	}
+		ctx.fromBlock(values0[i], prng.get());
+		ctx.fromBlock(values1[i], prng.get());
 
-	std::array<oc::RegularDpf, 2> dpf;
+		auto vv = ctx.make<T>();
+		auto zero = ctx.make<T>();
+		auto neg = ctx.make<T>();
+		ctx.zero(zero);
+		ctx.plus(vv, values0[i], values1[i]);
+		ctx.minus(neg, zero, vv);
+
+		//std::cout << "point " << i << " p = "
+		//	<< (points0[i] ^ points1[i]) << ", v = "
+		//	<< ctx.str(vv) << " = -"<< ctx.str(neg) << std::endl;
+	}
+	setActive(ctx, false);
+
+	std::array<oc::RegularDpf<T, Ctx>, 2> dpf;
 	dpf[0].init(0, domain, numPoints);
 	dpf[1].init(1, domain, numPoints);
 
@@ -352,32 +578,49 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 	dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
 	dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 
-	std::array<Matrix<block>, 2> output;
+	using Vec = typename Ctx::template Vec<T>;
+
+	std::array<Vec, 2> output;
 	std::array<Matrix<u8>, 2> tags;
-	output[0].resize(numPoints, domain);
-	output[1].resize(numPoints, domain);
+	ctx.resize(output[0], numPoints * domain);
+	ctx.resize(output[1], numPoints * domain);
+	//output[0].resize(numPoints, domain);
+	//output[1].resize(numPoints, domain);
 	tags[0].resize(numPoints, domain);
 	tags[1].resize(numPoints, domain);
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
-	macoro::sync_wait(macoro::when_all_ready(
-		dpf[0].expand(points0, values0, prng.get(), [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; }, sock[0]),
-		dpf[1].expand(points1, values1, prng.get(), [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; }, sock[1])
+	auto r = macoro::sync_wait(macoro::when_all_ready(
+		dpf[0].expand(points0, values0, prng, sock[0], [&](auto k, auto i, auto&& v, auto&& t) { ctx.copy(output[0][k * domain + i], v); tags[0](k, i) = t.get<u8>(0) & 1; }, ctx),
+		dpf[1].expand(points1, values1, prng, sock[1], [&](auto k, auto i, auto&& v, auto&& t) { ctx.copy(output[1][k * domain + i], v); tags[1](k, i) = t.get<u8>(0) & 1; }, ctx)
 	));
-
+	std::get<0>(r).result();
+	std::get<1>(r).result();
 
 	for (u64 i = 0; i < domain; ++i)
 	{
 		for (u64 k = 0; k < numPoints; ++k)
 		{
 			auto p = points0[k] ^ points1[k];
-			auto act = output[0][k][i] ^ output[1][k][i];
 			auto t = i == p ? 1 : 0;
 			auto tAct = tags[0][k][i] ^ tags[1][k][i];
-			auto exp = t ? (values0[k] ^ values1[k]) : ZeroBlock;
-			if (exp != act)
-			{
 
+			auto act = ctx.template make<T>();
+			ctx.plus(act, output[0][k* domain +i], output[1][k * domain + i]);
+			auto exp = ctx.template make<T>();
+			if(t)
+				ctx.plus(exp, values0[k], values1[k]);
+			else
+				ctx.zero(exp);
+
+			if (!ctx.eq(exp, act))
+			{
+				std::cout
+					<< k << " " <<i <<"\n"
+					<< ctx.str(output[0][k * domain + i]) << " + "
+					<< ctx.str(output[1][k * domain + i]) << " = "
+					<< ctx.str(act) << " != "
+					<< ctx.str(exp) << std::endl;
 				throw RTE_LOC;
 			}
 			if (t != tAct)
@@ -387,6 +630,16 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 #else
 	throw UnitTestSkipped("ENABLE_REGULAR_DPF not defined.");
 #endif
+}
+
+void RegularDpf_Proto_Test(const CLP& cmd)
+{
+	//RegularDpf_Proto_Test_impl<block, CoeffCtxGF2>(cmd);
+	//RegularDpf_Proto_Test_impl<u64, CoeffCtxInteger>(cmd);
+	using F = F12289;
+	RegularDpf_Proto_Test_impl<F, CoeffCtxFp>(cmd);
+
+	RegularDpf_Proto_Test_impl<Opaque, CoeffCtxOpaque>(cmd);
 }
 
 void RegularDpf_Puncture_Test(const oc::CLP& cmd)
@@ -403,7 +656,7 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 		points0[i] = (prng.get<u64>() % domain) ^ points1[i];
 	}
 
-	std::array<oc::RegularDpf, 2> dpf;
+	std::array<oc::RegularDpf<block>, 2> dpf;
 	dpf[0].init(0, domain, numPoints);
 	dpf[1].init(1, domain, numPoints);
 
@@ -441,8 +694,8 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 	macoro::sync_wait(macoro::when_all_ready(
-		dpf[0].expand(points0, {}, seed0, [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; }, sock[0]),
-		dpf[1].expand(points1, {}, seed1, [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; }, sock[1])
+		dpf[0].expand(points0, std::vector<block>{}, prng, sock[0], [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; }),
+		dpf[1].expand(points1, std::vector<block>{}, prng, sock[1], [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; })
 	));
 
 
@@ -497,7 +750,7 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 		values[i] = values0[i] ^ values1[i];
 	}
 
-	std::array<oc::RegularDpf, 2> dpf;
+	std::array<oc::RegularDpf<block>, 2> dpf;
 	dpf[0].init(0, domain, numPoints);
 	dpf[1].init(1, domain, numPoints);
 
@@ -541,8 +794,8 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 
 	// generate the keys using MPC
 	macoro::sync_wait(macoro::when_all_ready(
-		dpf[0].keyGen(points0, values0, seed0, key[0], sock[0]),
-		dpf[1].keyGen(points1, values1, seed1, key[1], sock[1])
+		dpf[0].keyGen(points0, values0, prng, key[0], sock[0]),
+		dpf[1].keyGen(points1, values1, prng, key[1], sock[1])
 	));
 
 
@@ -555,7 +808,7 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 	prng.SetSeed(block(214234, 2341234));
 
 	// generate the seeds.
-	RegularDpf::keyGen(domain, span<u64>(points), span<block>(values), prng, span<RegularDpfKey>(key2));
+	RegularDpf<block>::keyGen(domain, span<u64>(points), span<block>(values), prng, span<RegularDpfKey>(key2));
 
 	if (key[0] != key2[0])
 		throw RTE_LOC;
@@ -581,8 +834,8 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 		throw RTE_LOC;
 
 	// expand the dpf
-	RegularDpf::expand(0, domain, key3[0], [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; });
-	RegularDpf::expand(1, domain, key3[1], [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; });
+	RegularDpf<block>::expand(0, domain, key3[0], [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; });
+	RegularDpf<block>::expand(1, domain, key3[1], [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; });
 
 	// check the results
 	for (u64 i = 0; i < domain; ++i)
@@ -603,6 +856,130 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 				throw RTE_LOC;
 		}
 	}
+
+#else
+	throw UnitTestSkipped("ENABLE_REGULAR_DPF not defined.");
+#endif
+}
+
+void SumDmpf_Proto_Test(const oc::CLP& cmd)
+{
+
+#ifdef ENABLE_REGULAR_DPF
+
+	PRNG prng(block(231234, 321312));
+	u64 domain = cmd.getOr("domain", 211);
+	u64 numPoints = cmd.getOr("numPoints", 11);
+	u64 numSets = cmd.getOr("numSets", 3);
+	Matrix<u64> points(numSets, numPoints);
+	Matrix<u64> points0(numSets, numPoints);
+	Matrix<u64> points1(numSets, numPoints);
+	Matrix<block> values(numSets, numPoints);
+	Matrix<block> values0(numSets, numPoints);
+	Matrix<block> values1(numSets, numPoints);
+	for (u64 i = 0; i < points.size(); ++i)
+	{
+		points(i) = prng.get<u64>() % domain;
+		points1(i) = prng.get<u64>();
+		points0(i) = points(i) ^ points1(i);
+		values0(i) = prng.get();
+		values1(i) = prng.get();
+		values(i) = values0(i) ^ values1(i);
+	}
+
+	std::array<oc::SumDmpf<block>, 2> dpf;
+	dpf[0].init(0, domain, numPoints, numSets);
+	dpf[1].init(1, domain, numPoints, numSets);
+
+	auto baseCount = dpf[0].baseOtCount();
+
+	std::array<std::vector<block>, 2> baseRecv;
+	std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+	std::array<BitVector, 2> baseChoice;
+	baseRecv[0].resize(baseCount);
+	baseRecv[1].resize(baseCount);
+	baseSend[0].resize(baseCount);
+	baseSend[1].resize(baseCount);
+	baseChoice[0].resize(baseCount);
+	baseChoice[1].resize(baseCount);
+	baseChoice[0].randomize(prng);
+	baseChoice[1].randomize(prng);
+	for (u64 i = 0; i < baseCount; ++i)
+	{
+		baseSend[0][i] = prng.get();
+		baseSend[1][i] = prng.get();
+		baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+		baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+	}
+	dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+	dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+	std::array<Matrix<block>, 2> output;
+	std::array<Matrix<u8>, 2> tags;
+	output[0].resize(numSets, domain);
+	output[1].resize(numSets, domain);
+	tags[0].resize(numSets, domain);
+	tags[1].resize(numSets, domain);
+
+	auto sock = coproto::LocalAsyncSocket::makePair();
+
+
+	// Expand the DPF to generate numSets instances of secret shared vectors
+	auto r = macoro::sync_wait(macoro::when_all_ready(
+		dpf[0].expand(points0, values0, prng, sock[0],
+			[&](auto setIdx, auto i, auto&& v, auto&& t) {
+				output[0](setIdx, i) = v;
+				tags[0](setIdx, i) = t.get<u8>(0) & 1;
+			}),
+		dpf[1].expand(points1, values1, prng, sock[1],
+			[&](auto setIdx, auto i, auto&& v, auto&& t) {
+				output[1](setIdx, i) = v;
+				tags[1](setIdx, i) = t.get<u8>(0) & 1;
+			})
+	));
+	std::get<0>(r).result();
+	std::get<1>(r).result();
+
+	// Verify correctness for each set
+	for (u64 setIdx = 0; setIdx < numSets; ++setIdx)
+	{
+		std::vector<block> expectedValue(domain);
+
+		for (u64 pointIdx = 0; pointIdx < numPoints; ++pointIdx)
+		{
+			auto p = points0(setIdx, pointIdx) ^ points1(setIdx, pointIdx);
+			expectedValue[p] ^= values0(setIdx, pointIdx) ^ values1(setIdx, pointIdx);
+		}
+
+		for (u64 i = 0; i < domain; ++i)
+		{
+			// Check if this domain position should be active for any point in this set
+			bool isActive = expectedValue[i] != ZeroBlock;
+
+
+			auto actualValue = output[0](setIdx, i) ^ output[1](setIdx, i);
+			auto actualTag = tags[0](setIdx, i) ^ tags[1](setIdx, i);
+			auto expectedTag = isActive ? 1 : 0;
+
+			if (actualValue != expectedValue[i])
+			{
+				std::cout << "Value mismatch at set " << setIdx << ", position " << i << std::endl;
+				std::cout << "Expected: " << expectedValue[i] << std::endl;
+				std::cout << "Actual: " << actualValue << std::endl;
+				throw RTE_LOC;
+			}
+
+			if (actualTag != expectedTag)
+			{
+				std::cout << "Tag mismatch at set " << setIdx << ", position " << i << std::endl;
+				std::cout << "Expected: " << expectedTag << std::endl;
+				std::cout << "Actual: " << actualTag << std::endl;
+				throw RTE_LOC;
+			}
+		}
+	}
+
+
 
 #else
 	throw UnitTestSkipped("ENABLE_REGULAR_DPF not defined.");

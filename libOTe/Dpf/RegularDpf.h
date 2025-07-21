@@ -11,6 +11,7 @@
 #include "cryptoTools/Common/Matrix.h"
 
 #include "DpfMult.h"
+#include "libOTe/Tools/CoeffCtx.h" 
 
 namespace osuCrypto
 {
@@ -30,7 +31,7 @@ namespace osuCrypto
 		block mSeed;
 		Matrix<block> mCorrectionWords;
 		Matrix<u8> mCorrectionBits;
-		std::vector<block> mLeafVals;
+		std::vector<u8> mLeafVals;
 
 		bool operator==(const RegularDpfKey& o) const
 		{
@@ -41,7 +42,7 @@ namespace osuCrypto
 				mLeafVals == o.mLeafVals;
 		}
 
-		u64 sizeBytes() { return sizeof(block) * (1 + mCorrectionWords.size() + mLeafVals.size()) + mCorrectionBits.size(); }
+		u64 sizeBytes() { return sizeof(block) * (1 + mCorrectionWords.size()) + mLeafVals.size() + mCorrectionBits.size(); }
 		void toBytes(span<u8> dest)
 		{
 			if (dest.size() != sizeBytes())
@@ -85,6 +86,7 @@ namespace osuCrypto
 		return o;
 	}
 
+	template<typename T, typename CoeffCtx = DefaultCoeffCtx<T>>
 	struct RegularDpf
 	{
 		u64 mPartyIdx = 0;
@@ -117,18 +119,20 @@ namespace osuCrypto
 		// perform interactive full domain eval.
 		// - points should be a secret sharing of the locations.
 		// - values should be a secret sarhing of the values.
-		// - seed should be a random seed.
 		// - output should be a lambda of the form [](treeIdx, leadIdx, value, tag){...}
 		// this will be called for each leaf value produced. tag is a zero/one secret sharing
 		// indicating if this is the active leaf.
+		// - prng randomness.
 		// - sock is the network socket to the other party.
-		template<typename Output>
+		// - ctx context for F operations.
+		template<typename VecT, typename Output>
 		macoro::task<> expand(
 			span<u64> points,
-			span<block> values,
-			block seed,
+			VecT&& values,
+			PRNG& prng,
+			coproto::Socket& sock,
 			Output&& output,
-			coproto::Socket& sock);
+			CoeffCtx ctx = {});
 
 
 		// perform interactive key generation.
@@ -140,7 +144,7 @@ namespace osuCrypto
 		macoro::task<> keyGen(
 			span<u64> points,
 			span<block> values,
-			block seed,
+			PRNG& seed,
 			RegularDpfKey& outputKey,
 			coproto::Socket& sock);
 
@@ -189,15 +193,16 @@ namespace osuCrypto
 		// all ignored. inputKey should point to an existing dpf key. sock is ignored.
 		// output should be a lambda as above.
 		//
-		template<typename Output>
+		template<typename VecT, typename Output>
 		macoro::task<> implExpand(
 			span<u64> points,
-			span<block> values,
-			block seed,
+			VecT&& values,
+			PRNG& prng,
 			RegularDpfKey* inputKey,
 			Output&& output,
 			coproto::Socket& sock,
-			RegularDpfKey* outputKey);
+			RegularDpfKey* outputKey,
+			CoeffCtx ctx);
 
 
 		static u8 lsb(const block& b)
@@ -209,14 +214,14 @@ namespace osuCrypto
 		static block tagBit(const block& b)
 		{
 			auto bit = b & block(0, 1);
-			auto mask = block(0,0).sub_epi64(bit);
+			auto mask = block(0, 0).sub_epi64(bit);
 			return mask.unpacklo_epi64(mask);
 		}
 	};
 
 
-
-	inline void RegularDpf::init(
+	template<typename T, typename CoeffCtx>
+	inline void RegularDpf<T, CoeffCtx>::init(
 		u64 partyIdx,
 		u64 domain,
 		u64 numPoints)
@@ -236,15 +241,17 @@ namespace osuCrypto
 	}
 
 
-	template<typename Output >
-	macoro::task<> RegularDpf::expand(
+	template<typename T, typename CoeffCtx>
+	template<typename VecT, typename Output >
+	macoro::task<> RegularDpf<T, CoeffCtx>::expand(
 		span<u64> points,
-		span<block> values,
-		block seed,
+		VecT&& values,
+		PRNG& prng,
+		coproto::Socket& sock,
 		Output&& output,
-		coproto::Socket& sock)
+		CoeffCtx ctx)
 	{
-		return implExpand(points, values, seed, nullptr, output, sock, nullptr);
+		return implExpand(points, values, prng, nullptr, output, sock, nullptr, ctx);
 	}
 
 
@@ -252,14 +259,15 @@ namespace osuCrypto
 	// distributed keygen, points, values should be shared and seed is some 
 	// random see. inputKey == nullptr, output = anything, and outputKey
 	// should point to valid object. Base OTs must be set.
-	inline macoro::task<> RegularDpf::keyGen(
+	template<typename T, typename CoeffCtx>
+	inline macoro::task<> RegularDpf<T, CoeffCtx>::keyGen(
 		span<u64> points,
 		span<block> values,
-		block seed,
+		PRNG& prng,
 		RegularDpfKey& outputKey,
 		coproto::Socket& sock)
 	{
-		return implExpand(points, values, seed, nullptr, [](auto, auto, auto, auto) {}, sock, &outputKey);
+		return implExpand(points, values, prng, nullptr, [](auto, auto, auto, auto) {}, sock, &outputKey, {});
 	}
 
 	// the internal implementation. This function can be called with 
@@ -277,15 +285,17 @@ namespace osuCrypto
 	// all ignored. inputKey should point to an existing dpf key. sock is ignored.
 	// output should be a lambda as above.
 	//
-	template<typename Output>
-	macoro::task<> RegularDpf::implExpand(
+	template<typename T, typename CoeffCtx>
+	template<typename VecT, typename Output>
+	macoro::task<> RegularDpf<T, CoeffCtx>::implExpand(
 		span<u64> points,
-		span<block> values,
-		block seed,
+		VecT&& values,
+		PRNG& prng,
 		RegularDpfKey* inputKey,
 		Output&& output,
 		coproto::Socket& sock,
-		RegularDpfKey* outputKey)
+		RegularDpfKey* outputKey,
+		CoeffCtx ctx)
 	{
 
 		if (inputKey == nullptr)
@@ -335,21 +345,25 @@ namespace osuCrypto
 		std::array<block, 8> temp;
 
 		{
+			block seed;
 			if (inputKey)
 				seed = inputKey->mSeed;
+			else
+				seed = prng.get();
 
 			// we skip level 0 and set level 1 to be random
 			if (outputKey)
 				outputKey->mSeed = seed;
 
+
+			PRNG basePrng(seed, 2 * numPoints);
 			auto sc0 = s[1][0];
 			auto sc1 = s[1][1];
 			auto tag = s[0][0];
-			PRNG basePeng(seed);
 			for (u64 k = 0; k < numPoints; ++k)
 			{
-				sc0[k] = basePeng.get<block>();
-				sc1[k] = basePeng.get<block>();
+				sc0[k] = prng.get<block>();
+				sc1[k] = prng.get<block>();
 				tag[k] = block::allSame<u8>(-mPartyIdx);
 
 				z[0][k] = sc0[k];
@@ -472,7 +486,7 @@ namespace osuCrypto
 				}
 			}
 
-#define SIMD8(VAR, STATEMENT) \
+#define SIMD8(VAR, STATEMENT) do{\
 	{ constexpr u64 VAR = 0; STATEMENT; }\
 	{ constexpr u64 VAR = 1; STATEMENT; }\
 	{ constexpr u64 VAR = 2; STATEMENT; }\
@@ -481,7 +495,7 @@ namespace osuCrypto
 	{ constexpr u64 VAR = 5; STATEMENT; }\
 	{ constexpr u64 VAR = 6; STATEMENT; }\
 	{ constexpr u64 VAR = 7; STATEMENT; }\
-	do{}while(0)
+	}while(0)
 
 			if (iter != mDepth)
 			{
@@ -549,7 +563,12 @@ namespace osuCrypto
 
 		auto size = roundUpTo(mDomain, 2);
 		Matrix<block> tags(size, mNumPoints);
-		setBytes(diff, 0);
+		auto leafSums = ctx.template makeVec<T>(mNumPoints);
+		ctx.zero(leafSums.begin(), leafSums.end());
+
+		auto leaves = ctx.template makeVec<T>(mNumPoints * size);
+		auto zero = ctx.template make<T>();
+		ctx.zero(zero);
 
 		// fixing the last layer
 		{
@@ -565,6 +584,11 @@ namespace osuCrypto
 				// child seed
 				std::array currentSeed{ getRow(sc, L2 + 0), getRow(sc, L2 + 1) };
 
+				// the converted leaves.
+				std::array currentLeaves{
+					leaves.begin() + (L2 + 0) * numPoints,
+					leaves.begin() + (L2 + 1) * numPoints };
+
 				// child control bit
 				std::array tag{ getRow(tc, L2 + 0), getRow(tc, L2 + 1) };
 
@@ -574,8 +598,12 @@ namespace osuCrypto
 					{
 						SIMD8(q, temp[q] = currentSeed[j][k + q] ^ (parentTag[k + q] & sigma[j][k + q]));
 						SIMD8(q, tag[j][k + q] = tagBit(temp[q]));
-						SIMD8(q, currentSeed[j][k + q] = AES::roundEnc(temp[q], temp[q]));
-						SIMD8(q, diff[k + q] ^= currentSeed[j][k + q]);
+						SIMD8(q, temp[q] = AES::roundEnc(temp[q], temp[q]));
+						SIMD8(q, ctx.fromBlock(currentLeaves[j][k + q], temp[q]));
+						if (mPartyIdx)
+							SIMD8(q, ctx.minus(currentLeaves[j][k+q], zero, currentLeaves[j][k+q]));
+
+						SIMD8(q, ctx.plus(leafSums[k + q], leafSums[k + q], currentLeaves[j][k + q]));
 					}
 				}
 
@@ -586,70 +614,140 @@ namespace osuCrypto
 						temp[0] = currentSeed[j][k] ^ (parentTag[k] & sigma[j][k]);
 						tag[j][k] = tagBit(temp[0]);
 
-
-						auto rr  = AES::roundEnc(temp[0], temp[0]);
-						diff[k] ^= rr;
-						currentSeed[j][k] = rr;
+						ctx.fromBlock(currentLeaves[j][k], AES::roundEnc(temp[0], temp[0]));
+						if(mPartyIdx)
+							ctx.minus(currentLeaves[j][k], zero, currentLeaves[j][k]);
+						ctx.plus(leafSums[k], leafSums[k], currentLeaves[j][k]);
 					}
 				}
 			}
 		}
+		//std::cout << std::endl;
+		//std::cout << mPartyIdx << " " << mDomain << " " << mNumPoints << " " << mDepth << std::endl;
+		//for (u64 i = 0; i < mNumPoints; ++i)
+		//{
+		//	for(u64 j = 0; j < mDomain; ++j)
+		//	{
+		//		std::cout << ctx.str(leaves[i + j * mNumPoints]) << " ";
+		//	}
+		//	std::cout << std::endl;
+		//}
 
 		if (values.size() || (inputKey && inputKey->mLeafVals.size()))
 		{
-			AlignedUnVector<block> gamma(mNumPoints);
+			auto gamma = ctx.template makeVec<T>(mNumPoints);
+			//AlignedUnVector<block> gamma(mNumPoints);
 			if (inputKey)
 			{
-				std::copy(inputKey->mLeafVals.begin(), inputKey->mLeafVals.end(), gamma.begin());
+				ctx.deserialize(inputKey->mLeafVals.begin(), inputKey->mLeafVals.end(), gamma.begin());
 			}
 			else
 			{
+				//////////
+				// gamma = beta - sum_i y_i 
 				for (u64 k = 0; k < mNumPoints; ++k)
+					ctx.minus(leafSums[k], values[k], leafSums[k]);
+				
+				// if not charactristic two, we need to conditionally negate
+				// the leaf sums depending on the party with tag=1 on the
+				// active leaf.
+				if (ctx.template characteristicTwo<T>() == false)
 				{
-					diff[k] ^= values[k];
+					std::vector<u8> d(mNumPoints);
+					for (u64 i = 0; i < size; ++i)
+					{
+						for (u64 j = 0; j < d.size(); ++j)
+						{
+							auto t = lsb(tags(i, j));
+							d[j] += t;
+						}
+					}
+
+					// d = 1 if P1 is going to apply the update
+					// but p1 is going to substract the update.
+					// so we need to neagte the payload.
+					for (u64 j = 0; j < d.size(); ++j)
+						d[j] = ((d[j] / 2) % 2) ^ (mPartyIdx & d[j]);
+
+					// insecure version 
+					{
+						std::vector<u8> otherD(mNumPoints);
+						co_await sock.send(coproto::copy(d));
+						co_await sock.recv(otherD);
+						for (u64 j = 0; j < mNumPoints; ++j)
+						{
+							if ((d[j] ^ otherD[j]) == 1)
+								ctx.minus(leafSums[j], zero, leafSums[j]);
+						}
+					}
 				}
-				co_await sock.send(coproto::copy(diff));
-				co_await sock.recv(gamma);
+
+				///////////
+				// reveal gamma
+				std::vector<u8> buffer(leafSums.size() * ctx.template byteSize<T>());
+				ctx.serialize(leafSums.begin(), leafSums.end(), buffer.begin());
+				co_await sock.send(std::move(buffer));
+				buffer.resize(leafSums.size() * ctx.template byteSize<T>());
+				co_await sock.recv(buffer);
+				ctx.deserialize(buffer.begin(), buffer.end(), gamma.begin());
 				for (u64 k = 0; k < mNumPoints; ++k)
-				{
-					gamma[k] ^= diff[k];
-				}
+					ctx.plus(gamma[k], gamma[k], leafSums[k]);
 			}
 
 			if (outputKey)
 			{
-				outputKey->mLeafVals.insert(outputKey->mLeafVals.end(), gamma.begin(), gamma.end());
+				//outputKey->mLeafVals.insert(outputKey->mLeafVals.end(), gamma.begin(), gamma.end());
+				outputKey->mLeafVals.resize(mNumPoints * ctx.template byteSize<T>());
+				ctx.serialize(gamma.begin(), gamma.end(), outputKey->mLeafVals.begin());
 			}
 			else
 			{
-				auto& sd = s[mDepth % 3];
+				//auto& sd = s[mDepth % 3];
 				auto& td = tags;
+				auto temp = ctx.template makeVec<T>(8);
+
 				for (u64 i = 0; i < mDomain; ++i)
 				{
-					auto sdi = getRow(sd, i);
+					//auto sdi = getRow(sd, i);
+					auto sdi = leaves.begin() + i * mNumPoints;
 					auto tdi = getRow(td, i);
 
 					for (u64 k = 0; k < numPoints8; k += 8)
 					{
-						block T[8];
-						SIMD8(q, T[q] = tdi[k + q] & gamma[k + q]);
-						SIMD8(q, output(k + q, i, sdi[k + q] ^ T[q], tdi[k + q]));
+						SIMD8(q, ctx.mask(temp[q], gamma[k + q], tdi[k + q]));
+						if (mPartyIdx)
+							SIMD8(q, ctx.minus(temp[q], sdi[k + q], temp[q]));
+						else
+							SIMD8(q, ctx.plus(temp[q], sdi[k + q], temp[q]));
+						SIMD8(q, output(k + q, i, temp[q], tdi[k + q]));
 					}
 					for (u64 k = numPoints8; k < mNumPoints; ++k)
 					{
-						auto T = tdi[k] & gamma[k];
-						output(k, i, sdi[k] ^ T, tdi[k]);
+						//auto T = tdi[k] & gamma[k];
+						ctx.mask(temp[0], gamma[k], tdi[k]);
+						if (mPartyIdx)
+						{
+							ctx.minus(temp[0], sdi[k], temp[0]);
+						}
+						else
+						{
+							ctx.plus(temp[0], sdi[k], temp[0]);
+						}
+
+						output(k, i, temp[0], tdi[k]);
 					}
 				}
 			}
 		}
 		else
 		{
-			auto& sd = s[mDepth % 3];
+			//auto& sd = s[mDepth % 3];
 			auto& td = tags;
 			for (u64 i = 0; i < mDomain; ++i)
 			{
-				auto sdi = getRow(sd, i);
+				//auto sdi = getRow(sd, i);
+
+				auto sdi = leaves.begin() + i * mNumPoints;
 				auto tdi = getRow(td, i);
 				for (u64 k = 0; k < mNumPoints; ++k)
 				{
@@ -660,11 +758,13 @@ namespace osuCrypto
 	}
 
 
-	inline u64 RegularDpf::baseOtCount() const {
+	template<typename T, typename CoeffCtx>
+	inline u64 RegularDpf<T, CoeffCtx>::baseOtCount() const {
 		return mMultiplier.baseOtCount();
 	}
 
-	inline void RegularDpf::setBaseOts(
+	template<typename T, typename CoeffCtx>
+	inline void RegularDpf<T, CoeffCtx>::setBaseOts(
 		span<const std::array<block, 2>> baseSendOts,
 		span<const block> recvBaseOts,
 		const oc::BitVector& baseChoices)
@@ -673,7 +773,8 @@ namespace osuCrypto
 	}
 
 
-	inline void RegularDpf::keyGen(
+	template<typename T, typename CoeffCtx>
+	inline void RegularDpf<T, CoeffCtx>::keyGen(
 		u64 domain,
 		span<u64> points,
 		span<block> values,
@@ -767,14 +868,19 @@ namespace osuCrypto
 
 				auto diff = seeds[0][a] ^ seeds[1][a];
 				auto gamma = diff ^ values[i];
-				keys[0].mLeafVals.push_back(gamma);
-				keys[1].mLeafVals.push_back(gamma);
+				auto bytes = std::bit_cast<std::array<u8, sizeof(gamma)>>(gamma);
+				for (auto b : bytes)
+				{
+					keys[0].mLeafVals.push_back(b);
+					keys[1].mLeafVals.push_back(b);
+				}
 			}
 		}
 	}
 
+	template<typename T, typename CoeffCtx>
 	template<typename Output>
-	void RegularDpf::expand(
+	void RegularDpf<T, CoeffCtx>::expand(
 		u64 partyIdx,
 		u64 domain,
 		RegularDpfKey& key,
@@ -783,7 +889,8 @@ namespace osuCrypto
 		RegularDpf d;
 		d.init(partyIdx, domain, key.mCorrectionBits.cols());
 		coproto::Socket sock;
-		return macoro::sync_wait(d.implExpand({}, {}, {}, &key, output, sock, nullptr));
+		PRNG prng;
+		return macoro::sync_wait(d.implExpand({}, std::vector<T>{}, prng, & key, output, sock, nullptr, {}));
 	}
 
 }

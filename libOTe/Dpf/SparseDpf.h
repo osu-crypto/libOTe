@@ -25,7 +25,7 @@ namespace osuCrypto
 		u64 mDenseDepth = 0;
 
 
-		RegularDpf mRegDpf;
+		RegularDpf<block> mRegDpf;
 
 		DpfMult mMultiplier;
 
@@ -298,10 +298,10 @@ namespace osuCrypto
 					densePoints[i] = points[i] >> depth;
 				Matrix<block> seeds(points.size(), 1ull << mDenseDepth);
 				Matrix<u8> tags(points.size(), 1ull << mDenseDepth);
-				co_await mRegDpf.expand(densePoints, {}, prng.get(), [&](auto treeIdx, auto leafIdx, auto seed, block tag) {
+				co_await mRegDpf.expand(densePoints, std::vector<block>{}, prng, sock, [&](auto treeIdx, auto leafIdx, auto seed, block tag) {
 					seeds(treeIdx, leafIdx) = seed;
 					tags(treeIdx, leafIdx) = tag.get<u8>(0) & 1;
-					}, sock);
+					});
 
 				//Matrix<block> pSeeds(seeds.rows(), seeds.cols());
 				//Matrix<u8> pTags(points.size(), 1ull << mDenseDepth);

@@ -21,7 +21,13 @@ namespace osuCrypto
 		Poly& operator = (const Poly&) = default;
 		Poly& operator = (Poly&&) = default;
 
-		Poly(u64 deg, F coeff)
+		Poly(span<const F>f)
+		{
+			*this = f;
+		}
+
+
+		explicit Poly(u64 deg, F coeff = 0)
 		{
 			setCoeff(deg, coeff);
 		}
@@ -38,14 +44,29 @@ namespace osuCrypto
 			}
 
 			// spacial case, we represent the zero poly as size 0.
-			if (size() == 1 && back() == 0)
-				pop_back();
+			//if (size() == 1 && back() == 0)
+			//	pop_back();
 
 			return *this;
 		}
 
+		Poly& operator=(span<const F> coeffs)
+		{
+			for (u64 i = coeffs.size() - 1; i < coeffs.size(); --i)
+			{
+				setCoeff(i, coeffs[i]);
+			}
+			return *this;
+		}
+
 		bool isZero() const {
-			return mCoeffs.size() == 0 || (mCoeffs.size() == 1 && mCoeffs[0] == 0);
+			for(auto & c : mCoeffs)
+			{
+				if (c != 0)
+					return false;
+			}
+			return true;
+			//return mCoeffs.size() == 0 || (mCoeffs.size() == 1 && mCoeffs[0] == 0);
 		}
 
 		void setCoeff(u64 i, const F& f)
@@ -56,11 +77,11 @@ namespace osuCrypto
 			mCoeffs[i] = f;
 
 			// shrink to fit.
-			while (mCoeffs.size() && mCoeffs.back() == 0)
-				mCoeffs.pop_back();
+			//while (mCoeffs.size() && mCoeffs.back() == 0)
+			//	mCoeffs.pop_back();
 		}
 
-		F getCoeff(u64 i)
+		F getCoeff(u64 i) const
 		{
 			if (i < size())
 				return mCoeffs[i];
@@ -68,12 +89,18 @@ namespace osuCrypto
 				return 0;
 		}
 
+
 		F& operator[](u64 i)
 		{
+			if (mCoeffs.size() <= i)
+				mCoeffs.resize(i + 1);
 			return mCoeffs[i];
 		}
 		const F& operator[](u64 i)const
 		{
+			if (mCoeffs.size() <= i)
+				throw RTE_LOC;
+
 			return mCoeffs[i];
 		}
 
@@ -152,10 +179,11 @@ namespace osuCrypto
 
 		bool operator==(const Poly& o) const
 		{
-			if (size() != o.size())
+			if (degree() != o.degree())
 				return false;
 
-			for (u64 i = 0; i < size(); ++i)
+			auto d = degree();
+			for (u64 i = 0; i <= d; ++i)
 				if ((*this)[i] != o[i])
 					return false;
 
@@ -171,7 +199,13 @@ namespace osuCrypto
 		operator span<const F>() const { return mCoeffs; }
 
 		u64 size() const { return mCoeffs.size(); }
-		u64 degree()  const { return mCoeffs.size() ? mCoeffs.size() - 1 : 0; }
+		u64 degree()  const { 
+			for (u64 i = mCoeffs.size() - 1; i < mCoeffs.size(); --i)
+				if (mCoeffs[i] != 0)
+					return i;
+			return 0;
+			//return mCoeffs.size() ? mCoeffs.size() - 1 : 0; 
+		}
 
 
 		void pop_back() { mCoeffs.pop_back(); }
@@ -263,41 +297,148 @@ namespace osuCrypto
 			const Poly& mod)
 
 		{
-			if (mod.back() == 0)
+			// Edge case: division by zero polynomial
+			if (mod.isZero())
 				throw RTE_LOC;
-			if (a.size() && a.back() == 0)
-				throw RTE_LOC;
+
+			// Edge case: dividend is zero
+			if (a.isZero()) {
+				if (quo) {
+					quo->mCoeffs.clear();
+				}
+				if (rem) {
+					rem->mCoeffs.clear();
+				}
+				return;
+			}
+
+			// Safety check for aliasing
 			if (&mod == quo || &mod == rem)
 				throw RTE_LOC;
 
-			Poly remainder = a;
-			if (quo)
-				quo->mCoeffs.resize(a.size() - mod.size() + 1);
+			// Find actual degrees (highest non-zero coefficient)
+			auto aDegree = a.degree();
+			auto modDegree = mod.degree();
 
+			// Edge case: modulus degree is 0 (constant polynomial)
+			if (modDegree == 0) {
+				// Division by constant: quo = a / mod[0], rem = 0
+				if (quo) {
+					*quo = a;
+					auto divisor = mod.getCoeff(0);
+					if (divisor == 0)
+						throw RTE_LOC;
 
-			while (remainder.size() >= mod.size())
-			{
-				auto s = mod.back() == 1 ?
-					remainder.back() :
-					remainder.back() / mod.back();
-
-				if (quo)
-					(*quo)[remainder.size() - mod.size()] = s;
-
-				auto d = remainder.size() - mod.size();
-				for (u64 i = 0; i < mod.size(); ++i)
-				{
-					remainder[d + i] -= mod[i] * s;
+					for (u64 i = 0; i <= aDegree; ++i) 
+						(*quo)[i] = (*quo)[i] / divisor;
+					
+					quo->compact();
 				}
-				assert(remainder.back() == 0);
-
-				while (remainder.size() && remainder.back() == 0)
-					remainder.pop_back();
+				if (rem) 
+					rem->mCoeffs.clear(); // remainder is 0
+				
+				return;
 			}
 
-			if (rem)
+			// Edge case: dividend degree < modulus degree
+			if (aDegree < modDegree) {
+				if (quo) {
+					quo->mCoeffs.clear(); // quotient is 0
+				}
+				if (rem) {
+					*rem = a; // remainder is the dividend
+					rem->compact();
+				}
+				return;
+			}
+
+			// Get leading coefficient of modulus
+			auto modLeadCoeff = mod.getCoeff(modDegree);
+			if (modLeadCoeff == 0)
+				throw RTE_LOC;
+
+			// Initialize remainder as copy of dividend
+			Poly remainder = a;
+			remainder.compact(); // Remove leading zeros
+
+			// Initialize quotient if needed
+			if (quo) {
+				auto quoDegree = aDegree - modDegree;
+				quo->mCoeffs.clear();
+				quo->mCoeffs.resize(quoDegree + 1, F(0));
+			}
+
+			// Polynomial long division
+			while (!remainder.isZero() && remainder.degree() >= modDegree) {
+				auto remDegree = remainder.degree();
+				auto remLeadCoeff = remainder.getCoeff(remDegree);
+
+				// Calculate quotient coefficient
+				auto quotCoeff = remLeadCoeff / modLeadCoeff;
+				auto quotDegree = remDegree - modDegree;
+
+				// Store quotient coefficient
+				if (quo) {
+					(*quo)[quotDegree] = quotCoeff;
+				}
+
+				// Subtract mod * quotCoeff * x^quotDegree from remainder
+				for (u64 i = 0; i <= modDegree; ++i) {
+					auto modCoeff = mod.getCoeff(i);
+					if (modCoeff != 0) {
+						remainder[quotDegree + i] -= modCoeff * quotCoeff;
+					}
+				}
+
+				// Remove leading zeros from remainder
+				remainder.compact();
+			}
+
+			// Set outputs
+			if (quo) {
+				quo->compact();
+			}
+			if (rem) {
 				*rem = std::move(remainder);
+			}
 		}
+
+		//{
+
+		//	if (mod.back() == 0)
+		//		throw RTE_LOC;
+		//	//auto A = span<const F>(a.begin(), a.begin() + a.degree() + 1);
+		//	if (&mod == quo || &mod == rem)
+		//		throw RTE_LOC;
+
+		//	Poly remainder = a;
+		//	if (quo && a.degree() > mod.degree())
+		//		quo->mCoeffs.resize(a.size() - mod.size() + 1);
+
+
+		//	while (remainder.size() >= mod.size())
+		//	{
+		//		auto s = mod.back() == 1 ?
+		//			remainder.back() :
+		//			remainder.back() / mod.back();
+
+		//		if (quo)
+		//			(*quo)[remainder.size() - mod.size()] = s;
+
+		//		auto d = remainder.size() - mod.size();
+		//		for (u64 i = 0; i < mod.size(); ++i)
+		//		{
+		//			remainder[d + i] -= mod[i] * s;
+		//		}
+		//		assert(remainder.back() == 0);
+
+		//		while (remainder.size() && remainder.back() == 0)
+		//			remainder.pop_back();
+		//	}
+
+		//	if (rem)
+		//		*rem = std::move(remainder);
+		//}
 
 
 		static void modulo(Poly& ret, const Poly& a, const Poly& mod)

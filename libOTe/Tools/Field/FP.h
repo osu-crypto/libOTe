@@ -3,6 +3,7 @@
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include <ostream>
+#include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto
 {
@@ -10,7 +11,7 @@ namespace osuCrypto
 	struct Fp
 	{
 		static constexpr T mMod = modulus;
-		static_assert(log2ceil(mMod) * 2 <= 8 * sizeof(TT),"a double sized value must fit in TT ");
+		static_assert(log2ceil(mMod) * 2 <= 8 * sizeof(TT), "a double sized value must fit in TT ");
 		T mVal = 0;
 
 
@@ -34,6 +35,7 @@ namespace osuCrypto
 
 		Fp& operator+=(const Fp& o)
 		{
+			assert(mVal < mMod && o.mVal < mMod);
 			mVal = mVal + o.mVal;
 			if (mVal >= mMod)
 				mVal -= mMod;
@@ -41,6 +43,7 @@ namespace osuCrypto
 		}
 		Fp operator+(const Fp& o) const
 		{
+			assert(mVal < mMod && o.mVal < mMod);
 			Fp r;
 			r.mVal = mVal + o.mVal;
 			if (r.mVal >= mMod)
@@ -50,6 +53,7 @@ namespace osuCrypto
 
 		Fp& operator-=(const Fp& o)
 		{
+			assert(mVal < mMod && o.mVal < mMod);
 			mVal = mVal - o.mVal;
 			if (mVal >= mMod)
 				mVal += mMod;
@@ -57,6 +61,7 @@ namespace osuCrypto
 		}
 		Fp operator-(const Fp& o) const
 		{
+			assert(mVal < mMod && o.mVal < mMod);
 			Fp r;
 			r.mVal = mVal - o.mVal;
 			if (r.mVal >= mMod)
@@ -66,8 +71,9 @@ namespace osuCrypto
 
 		Fp operator-() const
 		{
+			assert(mVal < mMod);
 			Fp r = 0;
-			if(mVal)
+			if (mVal)
 				r.mVal = mMod - mVal;
 
 			return r;
@@ -75,6 +81,7 @@ namespace osuCrypto
 
 		Fp operator*(const Fp& o) const
 		{
+			assert(mVal < mMod && o.mVal < mMod);
 			//Fp r;
 			//r.mVal = (mVal * o.mVal) % mMod;
 			return barrettMul(*this, o);
@@ -83,6 +90,7 @@ namespace osuCrypto
 
 		Fp& operator*=(const Fp& o)
 		{
+			assert(mVal < mMod && o.mVal < mMod);
 			mVal = (mVal * o.mVal) % mMod;
 			return *this;
 		};
@@ -90,11 +98,13 @@ namespace osuCrypto
 
 		Fp operator/(const Fp& o) const
 		{
+			assert(mVal < mMod && o.mVal < mMod);
 			return *this * o.inverse();
 		}
 
 		Fp& operator/=(const Fp& o)
 		{
+			assert(mVal < mMod && o.mVal < mMod);
 			*this = *this * o.inverse();
 			return *this;
 		}
@@ -103,20 +113,24 @@ namespace osuCrypto
 		// comparison operators
 		bool operator<(const Fp& o) const
 		{
+			assert(mVal < mMod && o.mVal < mMod);
 			return mVal < o.mVal;
 		}
 		bool operator>=(const Fp& o) const
 		{
+			assert(mVal < mMod && o.mVal < mMod);
 			return mVal >= o.mVal;
 		}
 
 		u64 integer() const
 		{
+			assert(mVal < mMod);
 			return mVal;
 		}
 
 		Fp pow(i64 v) const
 		{
+			assert(mVal < mMod);
 			if (v < 0)
 				throw RTE_LOC;
 			if (v == 0)
@@ -191,7 +205,7 @@ namespace osuCrypto
 
 			static_assert(mu != 0, "overflow detected");
 
-			auto x = TT{ a.mVal } * TT{ b.mVal }; // x = a * b
+			auto x = TT{ a.mVal } *TT{ b.mVal }; // x = a * b
 			TT x_hi = x >> k;                  // ⌊x / 2^k⌋   ( < 2^k = b )
 			TT q = (x_hi * mu) >> k;        // ⌊x_hi * μ / 2^k⌋  ≈ ⌊x/p⌋
 			TT r = x - q * mMod;               // provisional remainder
@@ -204,7 +218,6 @@ namespace osuCrypto
 			return Fp(static_cast<T>(r));
 		}
 
-		
 	};
 
 
@@ -277,13 +290,13 @@ namespace osuCrypto
 	{
 		u64 p = F::order();
 		u64 n = 1;
-		for(auto fe : factors)
+		for (auto fe : factors)
 		{
-			for(u64 i = 0; i < fe.mExp; ++i)
+			for (u64 i = 0; i < fe.mExp; ++i)
 				n *= fe.mFactor;
 		}
 
-		if((p-1) % n)
+		if ((p - 1) % n)
 			throw RTE_LOC;
 
 		// make suer u is in Fp*
@@ -291,7 +304,7 @@ namespace osuCrypto
 			return false;
 
 		// make sure u is a root of unity.
-		if(u.pow(n) != 1)
+		if (u.pow(n) != 1)
 			return false;
 
 		// check that u is a primitive root of unity.
@@ -346,11 +359,74 @@ namespace osuCrypto
 	template<u64 p, typename T, typename TT>
 	std::ostream& operator<<(std::ostream& o, const Fp<p, T, TT>& f)
 	{
-		o << f.mVal;
+		// val = p-1
+		// val - p
+		if (f.mVal >= p / 2)
+			o << i64(f.mVal - p);
+		else
+			o << f.mVal;
 		return o;
 	}
 
+	// Primary template - not an Fp type
+	template<typename T>
+	struct FpTraits {
+		static constexpr bool is_fp = false;
+	};
+
+	// Specialization for Fp types to extract template parameters
+	template<u64 modulus, typename T, typename TT>
+	struct FpTraits<Fp<modulus, T, TT>> {
+		static constexpr bool is_fp = true;
+		static constexpr u64 modulus_value = modulus;
+		using value_type = T;
+		using double_type = TT;
+	};
+
+	struct CoeffCtxFp : CoeffCtxInteger
+	{
+		template<typename G>
+		bool characteristicTwo() {
+			static_assert(FpTraits<G>::is_fp, "G must be an Fp type.");
+			return false;
+		}
+
+		// is G a field?
+		template<typename G>
+		OC_FORCEINLINE bool isField() {
+			static_assert(FpTraits<G>::is_fp, "G must be an Fp type.");
+			true;
+		}
+
+		// the bit size require to prepresent F
+		// the protocol will perform binary decomposition
+		// of F using this many bits
+		template<typename F>
+		u64 bitSize()
+		{
+			using traits = FpTraits<F>;
+			static_assert(traits::is_fp, "G must be an Fp type.");
+			return log2ceil(traits::modulus_value);
+		}
+
+
+		template<typename F>
+		OC_FORCEINLINE void fromBlock(F& ret, const block& b) {
+
+			using traits = FpTraits<F>;
+			static_assert(traits::is_fp, "G must be an Fp type.");
+			ret.mVal = b.get<u64>(0) % traits::modulus_value;
+		}
+
+	};
+
+	// OT, gf2
+	template<u64 p, typename T, typename TT> 
+	struct DefaultCoeffCtx_t<Fp<p,T,TT>> {
+		using type = CoeffCtxFp;
+	};
+
 	using F7681 = Fp<7681, u16, u32>;
 	using F12289 = Fp<12289, u16, u32>;
-	
+
 }
