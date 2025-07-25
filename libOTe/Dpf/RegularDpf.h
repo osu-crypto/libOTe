@@ -105,6 +105,13 @@ namespace osuCrypto
 			u64 domain,
 			u64 numPoints);
 
+
+		bool hasBaseOts() const
+		{
+			return mMultiplier.hasBaseOts();
+		}
+
+
 		// returns the number of OTs required for the protocol.
 		// each party must have this many OTs as the sender and 
 		// as the receiver.

@@ -359,11 +359,10 @@ namespace osuCrypto
 	template<u64 p, typename T, typename TT>
 	std::ostream& operator<<(std::ostream& o, const Fp<p, T, TT>& f)
 	{
-		// val = p-1
-		// val - p
-		if (f.mVal >= p / 2)
-			o << i64(f.mVal - p);
-		else
+		// signed 
+		//if (f.mVal >= p / 2)
+		//	o << i64(f.mVal - p);
+		//else
 			o << f.mVal;
 		return o;
 	}
@@ -386,14 +385,14 @@ namespace osuCrypto
 	struct CoeffCtxFp : CoeffCtxInteger
 	{
 		template<typename G>
-		bool characteristicTwo() {
+		bool characteristicTwo() const {
 			static_assert(FpTraits<G>::is_fp, "G must be an Fp type.");
 			return false;
 		}
 
 		// is G a field?
 		template<typename G>
-		OC_FORCEINLINE bool isField() {
+		OC_FORCEINLINE bool isField()const {
 			static_assert(FpTraits<G>::is_fp, "G must be an Fp type.");
 			true;
 		}
@@ -402,16 +401,26 @@ namespace osuCrypto
 		// the protocol will perform binary decomposition
 		// of F using this many bits
 		template<typename F>
-		u64 bitSize()
+		u64 bitSize()const
 		{
 			using traits = FpTraits<F>;
 			static_assert(traits::is_fp, "G must be an Fp type.");
 			return log2ceil(traits::modulus_value);
 		}
 
+		// return the binary decomposition of x. This will be used to 
+		// reconstruct x as   
+		// 
+		//     x = sum_{i = 0,...,n} 2^i * binaryDecomposition(x)[i]
+		//
+		template<typename F>
+		OC_FORCEINLINE BitVector binaryDecomposition(F& x) const {
+			static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
+			return { (u8*)&x, bitSize<F>() };
+		}
 
 		template<typename F>
-		OC_FORCEINLINE void fromBlock(F& ret, const block& b) {
+		OC_FORCEINLINE void fromBlock(F& ret, const block& b) const {
 
 			using traits = FpTraits<F>;
 			static_assert(traits::is_fp, "G must be an Fp type.");

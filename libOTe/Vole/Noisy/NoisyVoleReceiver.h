@@ -46,20 +46,18 @@ namespace osuCrypto {
 		//  a = b + c * delta
 		//
 		template<typename VecG, typename VecF>
-		task<> receive(VecG& c, VecF& a, PRNG& prng,
+		static task<> receive(VecG& c, VecF& a, PRNG& prng,
 			OtSender& ot, Socket& chl, CoeffCtx ctx)
 		{
 			MACORO_TRY{
 
 			auto otMsg = AlignedUnVector<std::array<block, 2>>{};
 
-			setTimePoint("NoisyVoleReceiver.ot.begin");
 			otMsg.resize(ctx.template bitSize<F>());
-			co_await(ot.send(otMsg, prng, chl));
+			co_await ot.send(otMsg, prng, chl);
 
-			setTimePoint("NoisyVoleReceiver.ot.end");
 
-			co_await(receive(c, a, prng, otMsg, chl, ctx));
+			co_await receive(c, a, prng, otMsg, chl, ctx);
 
 			} MACORO_CATCH(eptr) {
 				if (!chl.closed()) co_await chl.close();
@@ -67,12 +65,12 @@ namespace osuCrypto {
 			}
 		}
 
-		// for chosen c, compute a such htat
+		// for chosen c, compute a such that
 		//
 		//  a = b + c * delta
 		//
 		template<typename VecG, typename VecF>
-		task<> receive(VecG& c, VecF& a, PRNG& _,
+		static task<> receive(VecG& c, VecF& a, PRNG& _,
 			span<std::array<block, 2>> otMsg,
 			Socket& chl, CoeffCtx ctx)
 		{
@@ -82,12 +80,13 @@ namespace osuCrypto {
 			auto temp = VecF{};
 			auto prng = PRNG{};
 
+			if (ctx.bitSize<F>() != otMsg.size())
+				throw RTE_LOC;
 			if (c.size() != a.size())
 				throw RTE_LOC;
 			if (a.size() == 0)
 				throw RTE_LOC;
 
-			setTimePoint("NoisyVoleReceiver.begin");
 
 			ctx.zero(a.begin(), a.end());
 			ctx.resize(msg, otMsg.size() * a.size());
@@ -141,8 +140,7 @@ namespace osuCrypto {
 			buff.resize(msg.size() * ctx.template byteSize<F>());
 			ctx.serialize(msg.begin(), msg.end(), buff.begin());
 
-			co_await(chl.send(std::move(buff)));
-			setTimePoint("NoisyVoleReceiver.done");
+			co_await chl.send(std::move(buff));
 
 			} MACORO_CATCH(eptr) {
 				if (!chl.closed()) co_await chl.close();

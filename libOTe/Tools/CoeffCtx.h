@@ -18,33 +18,33 @@ namespace osuCrypto {
 	struct CoeffCtxInteger
 	{
 		template<typename R, typename F1, typename F2>
-		OC_FORCEINLINE void plus(R&& ret, F1&& lhs, F2&& rhs) {
+		OC_FORCEINLINE void plus(R&& ret, F1&& lhs, F2&& rhs)const {
 			ret = lhs + rhs;
 		}
 
 		template<typename R, typename F1, typename F2>
-		OC_FORCEINLINE void minus(R&& ret, F1&& lhs, F2&& rhs) {
+		OC_FORCEINLINE void minus(R&& ret, F1&& lhs, F2&& rhs) const {
 			ret = lhs - rhs;
 		}
 		template<typename R, typename F1, typename F2>
-		OC_FORCEINLINE void mul(R&& ret, F1&& lhs, F2&& rhs) {
+		OC_FORCEINLINE void mul(R&& ret, F1&& lhs, F2&& rhs)const {
 			ret = lhs * rhs;
 		}
 
 		template<typename F>
-		OC_FORCEINLINE bool eq(F&& lhs, F&& rhs) {
+		OC_FORCEINLINE bool eq(F&& lhs, F&& rhs)const {
 			return lhs == rhs;
 		}
 
 		// is G a field?
 		template<typename G>
-		OC_FORCEINLINE bool isField() {
+		OC_FORCEINLINE bool isField() const {
 			return false; // default.
 		}
 
 		// is G characteristic 2 where x+x = 0?
 		template<typename G>
-		bool characteristicTwo()
+		bool characteristicTwo()const
 		{
 			auto v = make<G>();
 			auto z = make<G>();
@@ -64,7 +64,7 @@ namespace osuCrypto {
 		//
 		// If your type is a scaler, e.g. Fp or Z2k, just return x.
 		template<typename F>
-		OC_FORCEINLINE void mulConst(F& ret, const F& x)
+		OC_FORCEINLINE void mulConst(F& ret, const F& x)const
 		{
 			ret = x;
 		}
@@ -73,7 +73,7 @@ namespace osuCrypto {
 		// the protocol will perform binary decomposition
 		// of F using this many bits
 		template<typename F>
-		u64 bitSize()
+		u64 bitSize()const
 		{
 			return sizeof(F) * 8;
 		}
@@ -84,14 +84,14 @@ namespace osuCrypto {
 		//     x = sum_{i = 0,...,n} 2^i * binaryDecomposition(x)[i]
 		//
 		template<typename F>
-		OC_FORCEINLINE BitVector binaryDecomposition(F& x) {
+		OC_FORCEINLINE BitVector binaryDecomposition(F& x) const {
 			static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
 			return { (u8*)&x, bitSize<F>() };
 		}
 
 		// derive an F using the randomness b. 
 		template<typename F>
-		OC_FORCEINLINE void fromBlock(F& ret, const block& b) {
+		OC_FORCEINLINE void fromBlock(F& ret, const block& b) const {
 			static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
 
 			if constexpr (std::is_same<F, block>::value)
@@ -117,7 +117,7 @@ namespace osuCrypto {
 
 		// return the F element with value 2^power
 		template<typename F>
-		OC_FORCEINLINE void powerOfTwo(F& ret, u64 power) {
+		OC_FORCEINLINE void powerOfTwo(F& ret, u64 power)const {
 			static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
 			memset(&ret, 0, sizeof(F));
 			*BitIterator((u8*)&ret, power) = 1;
@@ -136,7 +136,7 @@ namespace osuCrypto {
 
 		// resize Vec<F>
 		template<typename VecF>
-		void resize(VecF& f, u64 size)
+		void resize(VecF& f, u64 size)const
 		{
 			f.resize(size);
 		}
@@ -144,28 +144,28 @@ namespace osuCrypto {
 
 		// return a new vector of F.
 		template<typename F>
-		auto makeVec(u64 size)
+		auto makeVec(u64 size)const
 		{
 			return Vec<F>(size);
 		}
 
 		// return a new F or something that is implicitly convertable to one.
 		template<typename F>
-		auto make()
+		auto make()const
 		{
 			return F{};
 		}
 
 		// the size of F when serialized.
 		template<typename F>
-		u64 byteSize()
+		u64 byteSize()const
 		{
 			return sizeof(F);
 		}
 
 		// copy a single F element.
 		template<typename F>
-		OC_FORCEINLINE void copy(F& dst, const F& src)
+		OC_FORCEINLINE void copy(F& dst, const F& src)const
 		{
 			dst = src;
 		}
@@ -176,7 +176,7 @@ namespace osuCrypto {
 		OC_FORCEINLINE void copy(
 			SrcIter begin,
 			SrcIter end,
-			DstIter dstBegin)
+			DstIter dstBegin)const
 		{
 			using F1 = std::remove_reference_t<decltype(*begin)>;
 			using F2 = std::remove_reference_t<decltype(*dstBegin)>;
@@ -191,7 +191,7 @@ namespace osuCrypto {
 		// begin will be a u8 pointer/iterator.
 		// dstBegin will be an F pointer/iterator
 		template<typename SrcIter, typename DstIter>
-		void deserialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin)
+		void deserialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin)const
 		{
 			// as written this function is a bit more general than strictly neccessary
 			// due to serialize(...) redirecting here.
@@ -251,7 +251,7 @@ namespace osuCrypto {
 		// begin will be an F pointer/iterator
 		// dstBegin will be a byte pointer/iterator.
 		template<typename SrcIter, typename DstIter>
-		void serialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin)
+		void serialize(SrcIter&& begin, SrcIter&& end, DstIter&& dstBegin)const
 		{
 			// for primitive types serialization and deserializaion 
 			// are the same, a memcpy.
@@ -266,7 +266,7 @@ namespace osuCrypto {
 		// attibute. If this does not make sense for your Vec<F>::iterator,
 		// just return the iterator.
 		template<typename F, typename Iter>
-		F* __restrict restrictPtr(Iter iter)
+		F* __restrict restrictPtr(Iter iter)const
 		{
 			return &*iter;
 		}
@@ -275,7 +275,7 @@ namespace osuCrypto {
 		// fill the range [begin,..., end) with zeros. 
 		// begin will be an F pointer/iterator.
 		template<typename Iter>
-		void zero(Iter begin, Iter end)
+		void zero(Iter begin, Iter end)const
 		{
 			using F = std::remove_reference_t<decltype(*begin)>;
 			static_assert(std::is_trivially_copyable<F>::value, "memset is used so must be trivially_copyable.");
@@ -290,7 +290,7 @@ namespace osuCrypto {
 		// fill the range [begin,..., end) with zeros. 
 		// begin will be an F pointer/iterator.
 		template<typename F>
-		void zero(F&& x)
+		void zero(F&& x)const
 		{
 			x = std::remove_cvref_t<F>(0);
 		}
@@ -299,7 +299,7 @@ namespace osuCrypto {
 		// fill the range [begin,..., end) with ones. 
 		// begin will be an F pointer/iterator.
 		template<typename Iter>
-		void one(Iter begin, Iter end)
+		void one(Iter begin, Iter end)const
 		{
 			using F = std::remove_reference_t<decltype(*begin)>;
 			static_assert(std::is_trivially_copyable<F>::value, "memset is used so must be trivially_copyable.");
@@ -322,14 +322,14 @@ namespace osuCrypto {
 		// fill the range [begin,..., end) with zeros. 
 		// begin will be an F pointer/iterator.
 		template<typename F>
-		void one(F&& x)
+		void one(F&& x)const
 		{
 			x = std::remove_cvref_t<F>(1);
 		}
 
 		// convert F into a string
 		template<typename F>
-		std::string str(F&& f)
+		std::string str(F&& f)const
 		{
 			std::stringstream ss;
 			if constexpr (std::is_same_v<std::remove_reference_t<F>, u8>)
@@ -344,7 +344,7 @@ namespace osuCrypto {
 		// given x and a masking block `mask` with value 0x0000...00 or 0xffff...ff,
 		// return F(0) if `mask` is 0 and otherwise return x.
 		template<typename F>
-		void mask(F& ret, const F& x, const block& mask)
+		void mask(F& ret, const F& x, const block& mask)const
 		{
 			if constexpr (std::is_standard_layout<F>::value &&
 				std::is_trivial<F>::value &&
@@ -386,20 +386,20 @@ namespace osuCrypto {
 	struct CoeffCtxGF2 : CoeffCtxInteger
 	{
 		template<typename F>
-		OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs) {
+		OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs)const {
 			ret = lhs ^ rhs;
 		}
 		template<typename F>
-		OC_FORCEINLINE void minus(F& ret, const F& lhs, const F& rhs) {
+		OC_FORCEINLINE void minus(F& ret, const F& lhs, const F& rhs)const {
 			ret = lhs ^ rhs;
 		}
 		template<typename F>
-		OC_FORCEINLINE void mul(F& ret, const F& lhs, const F& rhs) {
+		OC_FORCEINLINE void mul(F& ret, const F& lhs, const F& rhs) const {
 			ret = lhs & rhs;
 		}
 
 		template<typename F>
-		OC_FORCEINLINE void mul(F& ret, const F& lhs, const bool& rhs) {
+		OC_FORCEINLINE void mul(F& ret, const F& lhs, const bool& rhs) const {
 			ret = rhs ? lhs : zeroElem<F>();
 		}
 
@@ -407,7 +407,7 @@ namespace osuCrypto {
 		// the protocol will perform binary decomposition
 		// of F using this many bits
 		template<typename F>
-		u64 bitSize()
+		u64 bitSize()const
 		{
 			if (std::is_same<bool, F>::value)
 				return 1;
@@ -417,12 +417,12 @@ namespace osuCrypto {
 
 		// is F a field?
 		template<typename F>
-		OC_FORCEINLINE bool isField() {
+		OC_FORCEINLINE bool isField() const {
 			return true; // default.
 		}
 
 		template<typename G>
-		bool characteristicTwo()
+		bool characteristicTwo()const
 		{
 			return true; // GF2 is characteristic 2.
 		}
@@ -442,12 +442,12 @@ namespace osuCrypto {
 	struct CoeffCtxGF128 : CoeffCtxGF2
 	{
 
-		OC_FORCEINLINE void mul(block& ret, const block& lhs, const block& rhs) {
+		OC_FORCEINLINE void mul(block& ret, const block& lhs, const block& rhs) const {
 			ret = lhs.gf128Mul(rhs);
 		}
 
 		// ret = x * 4234123421 mod 2^127 - 135
-		OC_FORCEINLINE void mulConst(block& ret, const block& x)
+		OC_FORCEINLINE void mulConst(block& ret, const block& x)const
 		{
 			// multiplication y modulo mod
 			block y(0, 4234123421);
@@ -476,35 +476,35 @@ namespace osuCrypto {
 	{
 		using F = std::array<G, N>;
 
-		OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs) {
+		OC_FORCEINLINE void plus(F& ret, const F& lhs, const F& rhs) const {
 			for (u64 i = 0; i < lhs.size(); ++i) {
 				ret[i] = lhs[i] + rhs[i];
 			}
 		}
 
-		OC_FORCEINLINE void plus(G& ret, const  G& lhs, const G& rhs) {
+		OC_FORCEINLINE void plus(G& ret, const  G& lhs, const G& rhs) const {
 			ret = lhs + rhs;
 		}
 
-		OC_FORCEINLINE void minus(F& ret, const F& lhs, const F& rhs)
+		OC_FORCEINLINE void minus(F& ret, const F& lhs, const F& rhs)const
 		{
 			for (u64 i = 0; i < lhs.size(); ++i) {
 				ret[i] = lhs[i] - rhs[i];
 			}
 		}
 
-		OC_FORCEINLINE void minus(G& ret, const G& lhs, const G& rhs) {
+		OC_FORCEINLINE void minus(G& ret, const G& lhs, const G& rhs)const {
 			ret = lhs - rhs;
 		}
 
-		OC_FORCEINLINE void mul(F& ret, const F& lhs, const G& rhs)
+		OC_FORCEINLINE void mul(F& ret, const F& lhs, const G& rhs)const
 		{
 			for (u64 i = 0; i < lhs.size(); ++i) {
 				ret[i] = lhs[i] * rhs;
 			}
 		}
 
-		OC_FORCEINLINE bool eq(const F& lhs, const F& rhs)
+		OC_FORCEINLINE bool eq(const F& lhs, const F& rhs)const
 		{
 			for (u64 i = 0; i < lhs.size(); ++i) {
 				if (lhs[i] != rhs[i])
@@ -513,13 +513,13 @@ namespace osuCrypto {
 			return true;
 		}
 
-		OC_FORCEINLINE bool eq(const G& lhs, const G& rhs)
+		OC_FORCEINLINE bool eq(const G& lhs, const G& rhs)const
 		{
 			return lhs == rhs;
 		}
 
 		// convert F into a string
-		std::string str(const F& f)
+		std::string str(const F& f)const
 		{
 			auto delim = "{ ";
 			std::stringstream ss;
@@ -539,7 +539,7 @@ namespace osuCrypto {
 		}
 
 		// convert G into a string
-		std::string str(const G& g)
+		std::string str(const G& g)const
 		{
 			std::stringstream ss;
 			if constexpr (std::is_same_v<std::remove_reference_t<G>, u8>)

@@ -23,6 +23,7 @@ namespace osuCrypto
 
 		RegularDpf<T,CoeffCtx> mDpf;
 
+
 		void init(
 			u64 partyIdx,
 			u64 domain,
@@ -39,6 +40,11 @@ namespace osuCrypto
 		u64 baseOtCount() const
 		{
 			return mDpf.baseOtCount();
+		}
+
+		bool hasBaseOts() const
+		{
+			return mDpf.hasBaseOts();
 		}
 
 		void setBaseOts(

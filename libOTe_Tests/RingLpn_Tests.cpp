@@ -190,77 +190,121 @@ namespace osuCrypto
 		std::vector<u64> cs{ cmd.getManyOr<u64>("c", {4}) };
 
 		for (auto c : cs)
-		{
-
-			std::array<RingLpnTriple<F>, 2> oles;
-			if (cmd.hasValue("t"))
-				oles[0].mT = oles[1].mT = cmd.get<u64>("t");
-
-			oles[0].mC = oles[1].mC = c;
-
-			PRNG prng0(block(2424523452345, 111124521521455324));
-			PRNG prng1(block(6474567454546, 567546754674345444));
-			Timer timer;
-
-			oles[0].init(0, n);
-			oles[1].init(1, n);
-
+			for (auto base : { RingLpnTriple<F>::BaseCorType::Precomputed, RingLpnTriple<F>::BaseCorType::OtBased })
 			{
-				auto otCount0 = oles[0].baseOtCount();
-				auto otCount1 = oles[1].baseOtCount();
-				if (otCount0.mRecvCount != otCount1.mSendCount ||
-					otCount0.mSendCount != otCount1.mRecvCount)
-					throw RTE_LOC;
-				std::array<std::vector<std::array<block, 2>>, 2> baseSend;
-				baseSend[0].resize(otCount0.mSendCount);
-				baseSend[1].resize(otCount1.mSendCount);
-				std::array<std::vector<block>, 2> baseRecv;
-				std::array<BitVector, 2> baseChoice;
 
-				for (u64 i = 0; i < 2; ++i)
+				std::array<RingLpnTriple<F>, 2> oles;
+				if (cmd.hasValue("t"))
+					oles[0].mPolyWeight = oles[1].mPolyWeight = cmd.get<u64>("t");
+
+				oles[0].mNumPolys = oles[1].mNumPolys = c;
+
+				oles[0].mDebug = cmd.isSet("debug");
+				oles[1].mDebug = oles[0].mDebug;
+
+				PRNG prng0(block(2424523452345, 111124521521455324));
+				PRNG prng1(block(6474567454546, 567546754674345444));
+				Timer timer;
+
+				oles[0].init(0, n, base);
+				oles[1].init(1, n, base);
+
+
+
 				{
-					prng0.get(baseSend[i].data(), baseSend[i].size());
-					baseRecv[1 ^ i].resize(baseSend[i].size());
-					baseChoice[1 ^ i].resize(baseSend[i].size());
-					baseChoice[1 ^ i].randomize(prng0);
-					for (u64 j = 0; j < baseSend[i].size(); ++j)
+					auto otCount0 = oles[0].baseCorCount();
+					auto otCount1 = oles[1].baseCorCount();
+					if (otCount0.mRecvOtCount != otCount1.mSendOtCount ||
+						otCount0.mSendOtCount != otCount1.mRecvOtCount)
+						throw RTE_LOC;
+					std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+					baseSend[0].resize(otCount0.mSendOtCount);
+					baseSend[1].resize(otCount1.mSendOtCount);
+					std::array<std::vector<block>, 2> baseRecv, oleMult, oleAdd;
+					std::array<BitVector, 2> baseChoice;
+
+					for (u64 i = 0; i < 2; ++i)
 					{
-						baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+						prng0.get(baseSend[i].data(), baseSend[i].size());
+						baseRecv[1 ^ i].resize(baseSend[i].size());
+						baseChoice[1 ^ i].resize(baseSend[i].size());
+						baseChoice[1 ^ i].randomize(prng0);
+						for (u64 j = 0; j < baseSend[i].size(); ++j)
+						{
+							baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+						}
 					}
+
+					std::array<std::vector<F>, 2> coeffs, tensor;
+					coeffs[0].resize(otCount0.mCoeffCount);
+					coeffs[1].resize(otCount1.mCoeffCount);
+					tensor[0].resize(otCount0.mCoeffCount * otCount0.mCoeffCount);
+					tensor[1].resize(otCount1.mCoeffCount * otCount1.mCoeffCount);
+					for (u64 i = 0; i < coeffs[0].size(); ++i)
+					{
+						coeffs[0][i] = prng0.get();
+						coeffs[1][i] = prng1.get();
+					}
+					for (u64 i = 0; i < coeffs[0].size(); ++i)
+					{
+						for (u64 j = 0; j < coeffs[0].size(); ++j)
+						{
+							auto idx = i * coeffs[0].size() + j;
+							tensor[0][idx] = prng0.get();
+							tensor[1][idx] = coeffs[0][i] * coeffs[1][j] - tensor[0][idx];
+
+							//std::cout
+							//	<< coeffs[0][i] << " * " << coeffs[1][j] << " = "
+							//	<< tensor[0][idx] << " + " << tensor[1][idx]
+							//	<< std::endl;
+
+							if ((tensor[0][idx] + tensor[1][idx]) != (coeffs[0][i] * coeffs[1][j]))
+								throw RTE_LOC;
+						}
+					}
+
+					oleMult[0].resize(otCount0.mOleCount / 128);
+					oleMult[1].resize(otCount0.mOleCount / 128);
+					oleAdd[0].resize(otCount0.mOleCount / 128);
+					oleAdd[1].resize(otCount0.mOleCount / 128);
+					prng0.get(oleMult[0].data(), oleMult[0].size());
+					prng0.get(oleMult[1].data(), oleMult[1].size());
+					prng0.get(oleAdd[0].data(), oleAdd[0].size());
+					for (u64 i = 0; i < oleAdd[1].size(); ++i)
+						oleAdd[1][i] = (oleMult[1][i] & oleMult[0][i]) ^ oleAdd[0][i];
+
+					oles[0].setBaseCors(baseSend[0], baseRecv[0], baseChoice[0], oleMult[0], oleAdd[0], coeffs[0], tensor[0]);
+					oles[1].setBaseCors(baseSend[1], baseRecv[1], baseChoice[1], oleMult[1], oleAdd[1], coeffs[1], tensor[1]);
 				}
 
-				oles[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
-				oles[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+				auto sock = coproto::LocalAsyncSocket::makePair();
+				std::vector<F>
+					A(n), B(n),
+					C0(n), C1(n);
+
+				if (verbose)
+					oles[0].setTimer(timer);
+
+				auto r = macoro::sync_wait(macoro::when_all_ready(
+					oles[0].expand(A, C0, prng0, sock[0]),
+					oles[1].expand(B, C1, prng1, sock[1])));
+				std::get<0>(r).result();
+				std::get<1>(r).result();
+
+				//Now we check that we got the correct OLE correlations and fail
+				//the test otherwise.
+				for (size_t i = 0; i < n; i++)
+				{
+					auto act = C0[i] + C1[i];
+					auto exp = A[i] * B[i];
+
+					if (exp != act)
+						throw RTE_LOC;
+				}
+
+				if (verbose)
+					std::cout << "Time taken: \n" << timer << std::endl;
 			}
-
-			auto sock = coproto::LocalAsyncSocket::makePair();
-			std::vector<F>
-				A(n), B(n),
-				C0(n), C1(n);
-
-			if (verbose)
-				oles[0].setTimer(timer);
-
-			auto r = macoro::sync_wait(macoro::when_all_ready(
-				oles[0].expand(A, C0, prng0, sock[0]),
-				oles[1].expand(B, C1, prng1, sock[1])));
-			std::get<0>(r).result();
-			std::get<1>(r).result();
-
-			//Now we check that we got the correct OLE correlations and fail
-			//the test otherwise.
-			for (size_t i = 0; i < n; i++)
-			{
-				auto act = C0[i] + C1[i];
-				auto exp = A[i] * B[i];
-
-				if (exp != act)
-					throw RTE_LOC;
-			}
-
-			if (verbose)
-				std::cout << "Time taken: \n" << timer << std::endl;
-		}
 
 #else
 		throw UnitTestSkipped("ENABLE_RINGLPN not defined.");
@@ -281,7 +325,7 @@ namespace osuCrypto
 		bool verbose = cmd.isSet("v");
 
 		if (cmd.hasValue("t"))
-			oles[0].mT = oles[1].mT = cmd.get<u64>("t");
+			oles[0].mPolyWeight = oles[1].mPolyWeight = cmd.get<u64>("t");
 
 		PRNG prng0(block(2424523452345, 111124521521455324));
 		PRNG prng1(block(6474567454546, 567546754674345444));
@@ -290,33 +334,34 @@ namespace osuCrypto
 		oles[0].init(0, n);
 		oles[1].init(1, n);
 
-		{
-			auto otCount0 = oles[0].baseOtCount();
-			auto otCount1 = oles[1].baseOtCount();
-			if (otCount0.mRecvCount != otCount1.mSendCount ||
-				otCount0.mSendCount != otCount1.mRecvCount)
-				throw RTE_LOC;
-			std::array<std::vector<std::array<block, 2>>, 2> baseSend;
-			baseSend[0].resize(otCount0.mSendCount);
-			baseSend[1].resize(otCount1.mSendCount);
-			std::array<std::vector<block>, 2> baseRecv;
-			std::array<BitVector, 2> baseChoice;
+		throw RTE_LOC;
+		//{
+		//	auto otCount0 = oles[0].baseOtCount();
+		//	auto otCount1 = oles[1].baseOtCount();
+		//	if (otCount0.mRecvCount != otCount1.mSendCount ||
+		//		otCount0.mSendCount != otCount1.mRecvCount)
+		//		throw RTE_LOC;
+		//	std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+		//	baseSend[0].resize(otCount0.mSendCount);
+		//	baseSend[1].resize(otCount1.mSendCount);
+		//	std::array<std::vector<block>, 2> baseRecv;
+		//	std::array<BitVector, 2> baseChoice;
 
-			for (u64 i = 0; i < 2; ++i)
-			{
-				prng0.get(baseSend[i].data(), baseSend[i].size());
-				baseRecv[1 ^ i].resize(baseSend[i].size());
-				baseChoice[1 ^ i].resize(baseSend[i].size());
-				baseChoice[1 ^ i].randomize(prng0);
-				for (u64 j = 0; j < baseSend[i].size(); ++j)
-				{
-					baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
-				}
-			}
+		//	for (u64 i = 0; i < 2; ++i)
+		//	{
+		//		prng0.get(baseSend[i].data(), baseSend[i].size());
+		//		baseRecv[1 ^ i].resize(baseSend[i].size());
+		//		baseChoice[1 ^ i].resize(baseSend[i].size());
+		//		baseChoice[1 ^ i].randomize(prng0);
+		//		for (u64 j = 0; j < baseSend[i].size(); ++j)
+		//		{
+		//			baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+		//		}
+		//	}
 
-			oles[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
-			oles[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
-		}
+		//	oles[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+		//	oles[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+		//}
 
 		auto sock = coproto::LocalAsyncSocket::makePair();
 		std::array<std::vector<block>, 2>
@@ -370,8 +415,8 @@ namespace osuCrypto
 			PRNG prng1(block(6474567454546, 567546754674345444));
 
 			// insecure but makes the but makes the test run faster.
-			oles[0].mT = 3;
-			oles[1].mT = 3;
+			oles[0].mPolyWeight = 3;
+			oles[1].mPolyWeight = 3;
 
 			u64 n = 1000;
 			oles[0].init(0, n);
@@ -394,8 +439,8 @@ namespace osuCrypto
 			if (type == SilentBaseType::Base)
 			{
 				auto r = macoro::sync_wait(macoro::when_all_ready(
-					oles[0].genBaseOts(prng0, sock[0], type),
-					oles[1].genBaseOts(prng1, sock[1], type)));
+					oles[0].genBaseCors(prng0, sock[0]),
+					oles[1].genBaseCors(prng1, sock[1])));
 				std::get<0>(r).result();
 				std::get<1>(r).result();
 			}
@@ -447,17 +492,19 @@ namespace osuCrypto
 	void RingLpn_tensor_test(const CLP& cmd)
 	{
 #ifdef ENABLE_RINGLPN
-		using F = Fp<0xFFFFFFFB, u32, u64>;
+		//using F = Fp<0xFFFFFFFB, u32, u64>;
+		using F = Fp<17, u32, u32>;
+		using Ctx = DefaultCoeffCtx_t<F>::type;
+		Ctx ctx;
 
 		std::array<RingLpnTriple<F>, 2> oles;
 
-		PRNG prng0(block(2424523452345, 111124521521455324));
-		PRNG prng1(block(6474567454546, 567546754674345444));
+		PRNG prng(block(2424523452345, 111124521521455324));
 
 		oles[0].init(0, 1000);
 		oles[1].init(1, 1000);
 
-		u64 n = oles[0].mC * oles[0].mT;
+		u64 n = oles[0].mNumPolys * oles[0].mPolyWeight;
 		u64 n2 = n * n;
 		auto sock = coproto::LocalAsyncSocket::makePair();
 		std::array<std::vector<F>, 2> coeff, prod;
@@ -466,18 +513,50 @@ namespace osuCrypto
 		prod[0].resize(n2);
 		prod[1].resize(n2);
 
-		oles[1].mSendOts.resize(2 * n);
-		oles[0].mRecvOts.resize(2 * n);
-		oles[0].mChoiceOts.resize(2 * n);
-		for (u64 i = 0; i < 2 * n; ++i)
 		{
-			oles[1].mSendOts[i] = prng0.get();;
-			oles[0].mChoiceOts[i] = prng0.getBit();
-			oles[0].mRecvOts[i] = oles[1].mSendOts[i][oles[0].mChoiceOts[i]];
+			std::vector<F> c(n), a(n), b(n);
+
+			F d = prng.get();
+			for (auto& cc : c)
+				cc = prng.get();
+
+			DefaultBaseOT ot;
+			auto recv = NoisyVoleReceiver<F, F, Ctx>::receive(c, a, prng, ot, sock[0], ctx);
+			auto send = NoisyVoleSender<F, F, Ctx>::send(d, b, prng, ot, sock[1], ctx);
+			auto r = macoro::sync_wait(macoro::when_all_ready(std::move(recv), std::move(send)));
+
+			for (u64 i = 0; i < n; ++i)
+			{
+				//a = b + c * delta
+				if (b[i] + c[i] * d != a[i])
+				{
+					std::cout << "c[" << i << "] = " << c[i] << std::endl;
+					std::cout << "a[" << i << "] = " << a[i] << std::endl;
+					std::cout << "b[" << i << "] = " << b[i] << std::endl;
+					std::cout << "d = " << d << std::endl;
+					throw RTE_LOC;
+				}
+			}
 		}
+
+
+		std::vector<std::array<block, 2>> sendOts(n * ctx.bitSize<F>());
+		std::vector<block> recvOts(n * ctx.bitSize<F>());
+		BitVector choice(n * ctx.bitSize<F>());
+		for (u64 i = 0; i < sendOts.size(); ++i)
+		{
+			sendOts[i] = prng.get();
+			choice[i] = prng.getBit();
+			recvOts[i] = sendOts[i][choice[i]];
+		}
+
+		//auto r = macoro::sync_wait(macoro::when_all_ready(
+		//	oles[0].tensorSend(coeff[0], prod[0], sock[0], prng, sendOts),
+		//	oles[1].tensorRecv(coeff[1], prod[1], sock[1], prng, recvOts, choice)));
+
 		auto r = macoro::sync_wait(macoro::when_all_ready(
-			oles[0].tensor(coeff[0], prod[0], sock[0]),
-			oles[1].tensor(coeff[1], prod[1], sock[1])));
+			oles[0].tensorRecv(coeff[0], prod[0], sock[0], prng, recvOts, choice),
+			oles[1].tensorSend(coeff[1], prod[1], sock[1], prng, sendOts)));
 		std::get<0>(r).result();
 		std::get<1>(r).result();
 
@@ -487,14 +566,23 @@ namespace osuCrypto
 		{
 			for (size_t j = 0; j < n; j++)
 			{
-				auto p = i * n + j;
-
+				auto p = j * n + i;
 				auto ci = coeff[0][i];
 				auto cj = coeff[1][j];
 				auto exp = ci * cj;
 				auto act = prod[0][p] + prod[1][p];
 				if (exp != act)
+				{
+					std::cout << "i: " << i << ", j: " << j << std::endl;
+					std::cout << "coeff[0][" << i << "] = " << ci << std::endl;
+					std::cout << "coeff[1][" << j << "] = " << cj << std::endl;
+					std::cout << "prod[0][" << p << "] = " << prod[0][p] << std::endl;
+					std::cout << "prod[1][" << p << "] = " << prod[1][p] << std::endl;
+					std::cout << "exp = " << exp << std::endl;
+					std::cout << "act = " << act << std::endl;
+
 					throw RTE_LOC;
+				}
 			}
 		}
 #else

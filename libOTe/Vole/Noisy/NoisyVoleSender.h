@@ -52,7 +52,7 @@ namespace osuCrypto {
 		//  a = b + c * delta
 		//
 		template<typename FVec>
-		task<> send(F delta, FVec& b, PRNG& prng,
+		static task<> send(F delta, FVec& b, PRNG& prng,
 			OtReceiver& ot, Socket& chl, CoeffCtx ctx)
 		{
 			MACORO_TRY{
@@ -61,10 +61,8 @@ namespace osuCrypto {
 			auto otMsg = AlignedUnVector<block>{ };
 			otMsg.resize(bv.size());
 
-			setTimePoint("NoisyVoleSender.ot.begin");
 
 			co_await ot.receive(bv, otMsg, prng, chl);
-			setTimePoint("NoisyVoleSender.ot.end");
 
 			co_await send(delta, b, prng, otMsg, chl, ctx);
 
@@ -79,7 +77,7 @@ namespace osuCrypto {
 		//  a = b + c * delta
 		//
 		template<typename FVec>
-		task<> send(F delta, FVec& b, PRNG& _,
+		static task<> send(F delta, FVec& b, PRNG& _,
 			span<block> otMsg, Socket& chl, CoeffCtx ctx)
 		{
 			MACORO_TRY{
@@ -93,7 +91,6 @@ namespace osuCrypto {
 
 			if (otMsg.size() != xb.size())
 				throw RTE_LOC;
-			setTimePoint("NoisyVoleSender.main");
 
 			// b = 0;
 			ctx.zero(b.begin(), b.end());
@@ -104,7 +101,6 @@ namespace osuCrypto {
 			ctx.resize(msg, xb.size() * b.size());
 			ctx.deserialize(buffer.begin(), buffer.end(), msg.begin());
 
-			setTimePoint("NoisyVoleSender.recvMsg");
 
 			temp.resize(1);
 			for (size_t i = 0, k = 0; i < xb.size(); ++i)
@@ -132,7 +128,6 @@ namespace osuCrypto {
 					ctx.plus(b[j], b[j], temp[0]);
 				}
 			}
-			setTimePoint("NoisyVoleSender.done");
 
 
 			} MACORO_CATCH(eptr) {
