@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "cryptoTools/Common/CuckooIndex.h"
+#include <cmath>
 
 namespace osuCrypto
 {

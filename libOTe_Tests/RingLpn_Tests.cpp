@@ -6,7 +6,9 @@
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Common/TestCollection.h"
-#include "libOTe/Tools/Field/FP.h"
+#include "libOTe/Tools/Ntt/Poly.h"
+#include "libOTe/Tools/Ntt/NttNegWrap.h"
+#include "libOTe/Tools/Field/Fp.h"
 
 
 namespace osuCrypto

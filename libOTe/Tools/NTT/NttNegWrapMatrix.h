@@ -24,9 +24,9 @@ namespace osuCrypto
         NttOrder order, 
         bool verbose = false)
     {
-        auto n = a.size();
+        u64 n = a.size();
         auto ln = log2ceil(n);
-        auto qq = F::order() - 1;
+        auto qq = F::order(); qq = qq - 1;
 
         if (n != 1ull << ln)
             throw RTE_LOC;
@@ -91,7 +91,7 @@ namespace osuCrypto
     {
         auto n = a.size();
         auto ln = log2ceil(n);
-        auto qq = F::order() - 1;
+        auto qq = F::order(); qq = qq - 1;
 
         if (n != 1ull << ln)
             throw RTE_LOC;

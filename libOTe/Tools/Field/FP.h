@@ -12,7 +12,7 @@ namespace osuCrypto
 	{
 		static constexpr T mMod = modulus;
 		static_assert(log2ceil(mMod) * 2 <= 8 * sizeof(TT), "a double sized value must fit in TT ");
-		T mVal = 0;
+		T mVal;
 
 
 		Fp() = default;
@@ -179,7 +179,6 @@ namespace osuCrypto
 			// https://en.wikipedia.org/wiki/Barrett_reduction
 			constexpr unsigned TT_bits = std::numeric_limits<TT>::digits;
 			constexpr int k = log2ceil(mMod);
-			constexpr TT B = TT(1) << k; // b = 2^k
 			constexpr TT mu = [&]() {
 				/* mu = ⌊b² / p⌋
 				 *
@@ -190,6 +189,7 @@ namespace osuCrypto
 				 */
 				if constexpr (2 * k < TT_bits)
 				{
+					constexpr TT B = TT(1) << k; // b = 2^k
 					return (B * B) / mMod;
 				}
 				else                       // borderline: k == digits(T)
@@ -227,7 +227,6 @@ namespace osuCrypto
 	};
 	inline std::vector<Factor> uniqueFactor(u64 x)
 	{
-		auto sqrt = std::sqrt(x);
 		std::vector<Factor> r;
 		//r.push_back(1);
 
@@ -394,7 +393,7 @@ namespace osuCrypto
 		template<typename G>
 		OC_FORCEINLINE bool isField()const {
 			static_assert(FpTraits<G>::is_fp, "G must be an Fp type.");
-			true;
+			return true;
 		}
 
 		// the bit size require to prepresent F
@@ -425,6 +424,19 @@ namespace osuCrypto
 			using traits = FpTraits<F>;
 			static_assert(traits::is_fp, "G must be an Fp type.");
 			ret.mVal = b.get<u64>(0) % traits::modulus_value;
+		}
+
+
+
+		// given x and a masking block `mask` with value 0x0000...00 or 0xffff...ff,
+		// return F(0) if `mask` is 0 and otherwise return x.
+		template<typename F>
+		void mask(F& ret, const F& x, const block& mask)const
+		{
+			using traits = FpTraits<F>;
+			using value_type = traits::value_type;
+			value_type y = mask.get<value_type>(0);
+			ret.mVal = x.mVal & y;
 		}
 
 	};

@@ -80,7 +80,7 @@ namespace osuCrypto {
 			auto temp = VecF{};
 			auto prng = PRNG{};
 
-			if (ctx.bitSize<F>() != otMsg.size())
+			if (ctx.template bitSize<F>() != otMsg.size())
 				throw RTE_LOC;
 			if (c.size() != a.size())
 				throw RTE_LOC;

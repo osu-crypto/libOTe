@@ -351,7 +351,8 @@ namespace osuCrypto {
 				(sizeof(F) <= sizeof(block)) &&
 				(sizeof(block) % sizeof(F) == 0))
 			{
-				ret = x & mask.get<F>(0);
+				F y = mask.get<F>(0);;
+				ret = x & y;
 			}
 			else
 			{

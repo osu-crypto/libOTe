@@ -17,7 +17,8 @@ namespace osuCrypto
 {
 	struct RegularDpfKey
 	{
-		void resize(u64 domain, u64 numTrees, bool programLeafVal = true)
+		template<typename F, typename CoeffCtx = DefaultCoeffCtx<F>>
+		void resize(u64 domain, u64 numTrees, CoeffCtx ctx = {}, bool programLeafVal = true)
 		{
 			auto depth = log2ceil(domain);
 			if (depth == 0)
@@ -26,7 +27,7 @@ namespace osuCrypto
 			mCorrectionWords.resize(depth, numTrees);
 			mCorrectionBits.resize(depth, numTrees);
 			if (programLeafVal)
-				mLeafVals.resize(numTrees);
+				mLeafVals.resize(numTrees * ctx.template byteSize<F>());
 		}
 		block mSeed;
 		Matrix<block> mCorrectionWords;
@@ -42,7 +43,7 @@ namespace osuCrypto
 				mLeafVals == o.mLeafVals;
 		}
 
-		u64 sizeBytes() { return sizeof(block) * (1 + mCorrectionWords.size()) + mLeafVals.size() + mCorrectionBits.size(); }
+		u64 sizeBytes() { return sizeof(block) * (1 + mCorrectionWords.size()) + mCorrectionBits.size() + mLeafVals.size(); }
 		void toBytes(span<u8> dest)
 		{
 			if (dest.size() != sizeBytes())
@@ -125,7 +126,7 @@ namespace osuCrypto
 
 		// perform interactive full domain eval.
 		// - points should be a secret sharing of the locations.
-		// - values should be a secret sarhing of the values.
+		// - values should be a secret sharing of the values.
 		// - output should be a lambda of the form [](treeIdx, leadIdx, value, tag){...}
 		// this will be called for each leaf value produced. tag is a zero/one secret sharing
 		// indicating if this is the active leaf.
@@ -144,16 +145,17 @@ namespace osuCrypto
 
 		// perform interactive key generation.
 		// - points should be a secret sharing of the locations.
-		// - values should be a secret sarhing of the values.
+		// - values should be a secret sharing of the values.
 		// - seed should be a random seed.
 		// - outputKey is where the result is written to.
 		// - sock is the network socket to the other party.
 		macoro::task<> keyGen(
 			span<u64> points,
-			span<block> values,
+			auto&& values,
 			PRNG& seed,
 			RegularDpfKey& outputKey,
-			coproto::Socket& sock);
+			coproto::Socket& sock,
+			CoeffCtx ctx = {});
 
 
 		// A static function that can generate a pair of keys. 
@@ -165,9 +167,10 @@ namespace osuCrypto
 		static void keyGen(
 			u64 domain,
 			span<u64> points,
-			span<block> values,
+			auto&& values,
 			PRNG& prng,
-			span<RegularDpfKey> keys);
+			span<RegularDpfKey> keys,
+			CoeffCtx ctx = {});
 
 		// A static function that performs non-interative
 		// full domain evaluation. 
@@ -182,7 +185,8 @@ namespace osuCrypto
 			u64 partyIdx,
 			u64 domain,
 			RegularDpfKey& key,
-			Output&& output);
+			Output&& output,
+			CoeffCtx ctx = {});
 
 
 		// the internal implementation. This function can be called with 
@@ -269,12 +273,13 @@ namespace osuCrypto
 	template<typename T, typename CoeffCtx>
 	inline macoro::task<> RegularDpf<T, CoeffCtx>::keyGen(
 		span<u64> points,
-		span<block> values,
+		auto&& values,
 		PRNG& prng,
 		RegularDpfKey& outputKey,
-		coproto::Socket& sock)
+		coproto::Socket& sock,
+		CoeffCtx ctx)
 	{
-		return implExpand(points, values, prng, nullptr, [](auto, auto, auto, auto) {}, sock, &outputKey, {});
+		return implExpand(points, values, prng, nullptr, [](auto, auto, auto, auto) {}, sock, &outputKey, ctx);
 	}
 
 	// the internal implementation. This function can be called with 
@@ -337,7 +342,7 @@ namespace osuCrypto
 
 		if (outputKey)
 		{
-			outputKey->resize(mDomain, numPoints, false);
+			outputKey->resize<T>(mDomain, numPoints, ctx, false);
 		}
 
 		std::array<AlignedUnVector<block>, 2> z;
@@ -369,8 +374,8 @@ namespace osuCrypto
 			auto tag = s[0][0];
 			for (u64 k = 0; k < numPoints; ++k)
 			{
-				sc0[k] = prng.get<block>();
-				sc1[k] = prng.get<block>();
+				sc0[k] = basePrng.get<block>();
+				sc1[k] = basePrng.get<block>();
 				tag[k] = block::allSame<u8>(-mPartyIdx);
 
 				z[0][k] = sc0[k];
@@ -784,9 +789,10 @@ namespace osuCrypto
 	inline void RegularDpf<T, CoeffCtx>::keyGen(
 		u64 domain,
 		span<u64> points,
-		span<block> values,
+		auto&& values,
 		PRNG& prng,
-		span<RegularDpfKey> keys)
+		span<RegularDpfKey> keys, 
+		CoeffCtx ctx)
 	{
 		if (keys.size() != 2)
 			throw RTE_LOC;
@@ -794,8 +800,8 @@ namespace osuCrypto
 			throw RTE_LOC;
 
 		auto depth = log2ceil(domain);
-		keys[0].resize(domain, values.size(), false);
-		keys[1].resize(domain, values.size(), false);
+		keys[0].resize<T>(domain, values.size(), ctx, false);
+		keys[1].resize<T>(domain, values.size(), ctx, false);
 
 		auto seed0 = prng.get<block>();
 		auto seed1 = prng.get<block>();
@@ -868,19 +874,46 @@ namespace osuCrypto
 				if (seeds[0][na] != seeds[1][na])
 					throw RTE_LOC;
 
+				std::array<u8, 2> tags;
 				for (u64 p = 0; p < 2; ++p)
 				{
+					tags[p] = lsb(seeds[p][a]);
 					seeds[p][a] = AES::roundEnc(seeds[p][a], seeds[p][a]);
 				}
 
-				auto diff = seeds[0][a] ^ seeds[1][a];
-				auto gamma = diff ^ values[i];
-				auto bytes = std::bit_cast<std::array<u8, sizeof(gamma)>>(gamma);
-				for (auto b : bytes)
+				if(tags[0] == tags[1])
+					throw RTE_LOC;
+
+				auto leaf0 = ctx.template make<T>();
+				auto leaf1 = ctx.template make<T>();
+				auto leafVal = ctx.template make<T>();
+				auto gamma = ctx.template make<T>();
+
+				ctx.fromBlock(leaf0, seeds[0][a]);
+				ctx.fromBlock(leaf1, seeds[1][a]);
+				ctx.minus(leafVal, leaf0, leaf1);
+				ctx.minus(gamma, values[i], leafVal);
+
+				// if party 1 is going to apply gamma, then we
+				// need to negate the user provided value because
+				// party 1 subtracts gamma while party 0 adds it.
+				if (tags[1]) 
 				{
-					keys[0].mLeafVals.push_back(b);
-					keys[1].mLeafVals.push_back(b);
+					auto zero = ctx.template make<T>();
+					ctx.zero(zero);
+					ctx.minus(gamma, zero, gamma);
 				}
+
+				// Serialize the result using CoeffCtx
+				std::vector<u8> serialized(ctx.template byteSize<T>());
+				ctx.serialize(&gamma, &gamma + 1, serialized.begin());
+
+				keys[0].mLeafVals.insert(keys[0].mLeafVals.end(),
+					serialized.begin(),
+					serialized.end());
+				keys[1].mLeafVals.insert(keys[1].mLeafVals.end(),
+					serialized.begin(),
+					serialized.end());
 			}
 		}
 	}
@@ -891,13 +924,14 @@ namespace osuCrypto
 		u64 partyIdx,
 		u64 domain,
 		RegularDpfKey& key,
-		Output&& output)
+		Output&& output,
+		CoeffCtx ctx)
 	{
 		RegularDpf d;
 		d.init(partyIdx, domain, key.mCorrectionBits.cols());
 		coproto::Socket sock;
 		PRNG prng;
-		return macoro::sync_wait(d.implExpand({}, std::vector<T>{}, prng, & key, output, sock, nullptr, {}));
+		return macoro::sync_wait(d.implExpand({}, std::vector<T>{}, prng, & key, output, sock, nullptr, ctx));
 	}
 
 }

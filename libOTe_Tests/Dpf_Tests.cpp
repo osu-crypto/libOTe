@@ -1,4 +1,4 @@
-#include "Dpf_Tests.h"
+﻿#include "Dpf_Tests.h"
 #include "libOTe/Dpf/RegularDpf.h"
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "libOTe/Dpf/SparseDpf.h"
@@ -150,7 +150,7 @@ void RegularDpf_MultByte_Test(const CLP& cmd)
 	}
 
 
-for (auto m : { 16, 3,8, 13, 33, 233 })
+for (auto m : { 16ull, 3ull,8ull, 13ull, 33ull, 233ull })
 {
 
 	u64 n = 13;
@@ -215,7 +215,7 @@ for (auto m : { 16, 3,8, 13, 33, 233 })
 
 				u64 x = x0[j] ^ x1[j];
 				auto y = y0[j][i] ^ y1[j][i];
-				auto xy = xy0[j][i] ^ xy1[j][i];
+				u64 xy = xy0[j][i] ^ xy1[j][i];
 				auto exp = x * y;
 				if (xy != exp)
 				{
@@ -290,7 +290,7 @@ void RegularDpf_MultBit_Test(const CLP& cmd)
 
 			u64 x = x0[j] ^ x1[j];
 			auto y = y0[j] ^ y1[j];
-			auto xy = xy0[j] ^ xy1[j];
+			u64 xy = xy0[j] ^ xy1[j];
 			auto exp = x & y;
 			if (xy != exp)
 			{
@@ -425,7 +425,6 @@ struct CoeffCtxOpaque
 		// as written this function is a bit more general than strictly neccessary
 		// due to serialize(...) redirecting here.
 		using SrcType = std::remove_reference_t<decltype(*begin)>;
-		using DstType = std::remove_reference_t<decltype(*dstBegin)>;
 
 		// how many source elem do we have?
 		auto srcN = std::distance(begin, end);
@@ -434,18 +433,9 @@ struct CoeffCtxOpaque
 			// the source size in bytes
 			auto n = srcN * sizeof(SrcType);
 
-			// the number of destination elements.
-			auto dstN = n / sizeof(DstType);
-
 			// make sure the pointer math work with this iterator type.
 			auto beginU8 = (u8*)&*begin;
 			auto dstBeginU8 = (u8*)&*dstBegin;
-
-			auto dstBackPtr = dstBeginU8 + (n - sizeof(DstType));
-			auto dstBackIter = dstBegin + (dstN - 1);
-
-			auto srcBackPtr = beginU8 + (n - sizeof(SrcType));
-			auto srcBackIter = begin + (srcN - 1);
 
 			// memcpy the bytes
 			std::memcpy(dstBeginU8, beginU8, n);
@@ -538,9 +528,9 @@ void RegularDpf_Proto_Test_impl(const oc::CLP& cmd)
 		ctx.fromBlock(values0[i], prng.get());
 		ctx.fromBlock(values1[i], prng.get());
 
-		auto vv = ctx.make<T>();
-		auto zero = ctx.make<T>();
-		auto neg = ctx.make<T>();
+		auto vv = ctx.template make<T>();
+		auto zero = ctx.template make<T>();
+		auto neg = ctx.template make<T>();
 		ctx.zero(zero);
 		ctx.plus(vv, values0[i], values1[i]);
 		ctx.minus(neg, zero, vv);
@@ -591,8 +581,8 @@ void RegularDpf_Proto_Test_impl(const oc::CLP& cmd)
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 	auto r = macoro::sync_wait(macoro::when_all_ready(
-		dpf[0].expand(points0, values0, prng, sock[0], [&](auto k, auto i, auto&& v, auto&& t) { ctx.copy(output[0][k * domain + i], v); tags[0](k, i) = t.get<u8>(0) & 1; }, ctx),
-		dpf[1].expand(points1, values1, prng, sock[1], [&](auto k, auto i, auto&& v, auto&& t) { ctx.copy(output[1][k * domain + i], v); tags[1](k, i) = t.get<u8>(0) & 1; }, ctx)
+		dpf[0].expand(points0, values0, prng, sock[0], [&](auto k, auto i, auto&& v, auto&& t) { ctx.copy(output[0][k * domain + i], v); tags[0](k, i) = t.template get<u8>(0) & 1; }, ctx),
+		dpf[1].expand(points1, values1, prng, sock[1], [&](auto k, auto i, auto&& v, auto&& t) { ctx.copy(output[1][k * domain + i], v); tags[1](k, i) = t.template get<u8>(0) & 1; }, ctx)
 	));
 	std::get<0>(r).result();
 	std::get<1>(r).result();
@@ -689,8 +679,6 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 	output[1].resize(numPoints, domain);
 	tags[0].resize(numPoints, domain);
 	tags[1].resize(numPoints, domain);
-	auto seed0 = prng.get<block>();
-	auto seed1 = prng.get<block>();
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 	macoro::sync_wait(macoro::when_all_ready(
@@ -727,9 +715,11 @@ void RegularDpf_Puncture_Test(const oc::CLP& cmd)
 #endif
 }
 
-void RegularDpf_keyGen_Test(const oc::CLP& cmd)
+template<typename T, typename CoeffCtx>
+void RegularDpf_keyGen_impl(const oc::CLP& cmd)
 {
 #ifdef ENABLE_REGULAR_DPF
+
 
 	PRNG prng(block(231234, 321312));
 	u64 domain = cmd.getOr("domain", 211);
@@ -737,20 +727,29 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 	std::vector<u64> points(numPoints);
 	std::vector<u64> points0(numPoints);
 	std::vector<u64> points1(numPoints);
-	std::vector<block> values(numPoints);
-	std::vector<block> values0(numPoints);
-	std::vector<block> values1(numPoints);
+
+	// Convert to use CoeffCtx for value operations
+	CoeffCtx ctx;
+	typename CoeffCtx::template Vec<T> values;
+	typename CoeffCtx::template Vec<T> values0;
+	typename CoeffCtx::template Vec<T> values1;
+	ctx.resize(values, numPoints);
+	ctx.resize(values0, numPoints);
+	ctx.resize(values1, numPoints);
+
 	for (u64 i = 0; i < numPoints; ++i)
 	{
 		points[i] = prng.get<u64>() % domain;
 		points1[i] = prng.get<u64>();
 		points0[i] = points[i] ^ points1[i];
-		values0[i] = prng.get();
-		values1[i] = prng.get();
-		values[i] = values0[i] ^ values1[i];
+
+		// Use CoeffCtx for value operations instead of hardcoded block operations
+		ctx.fromBlock(values0[i], prng.get());
+		ctx.fromBlock(values1[i], prng.get());
+		ctx.plus(values[i], values0[i], values1[i]);
 	}
 
-	std::array<oc::RegularDpf<block>, 2> dpf;
+	std::array<oc::RegularDpf<T, CoeffCtx>, 2> dpf;
 	dpf[0].init(0, domain, numPoints);
 	dpf[1].init(1, domain, numPoints);
 
@@ -777,10 +776,12 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 	dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
 	dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 
-	std::array<Matrix<block>, 2> output;
+	// Convert output to use CoeffCtx
+	typename CoeffCtx::template Vec<T> output0;
+	typename CoeffCtx::template Vec<T> output1;
+	ctx.resize(output0, numPoints * domain);
+	ctx.resize(output1, numPoints * domain);
 	std::array<Matrix<u8>, 2> tags;
-	output[0].resize(numPoints, domain);
-	output[1].resize(numPoints, domain);
 	tags[0].resize(numPoints, domain);
 	tags[1].resize(numPoints, domain);
 
@@ -789,29 +790,49 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 	auto sock = coproto::LocalAsyncSocket::makePair();
 
 	prng.SetSeed(block(214234, 2341234));
-	block seed0 = prng.get();
-	block seed1 = prng.get();
 
 	// generate the keys using MPC
 	macoro::sync_wait(macoro::when_all_ready(
-		dpf[0].keyGen(points0, values0, prng, key[0], sock[0]),
-		dpf[1].keyGen(points1, values1, prng, key[1], sock[1])
+		dpf[0].keyGen(points0, values0, prng, key[0], sock[0], ctx),
+		dpf[1].keyGen(points1, values1, prng, key[1], sock[1], ctx)
 	));
-
-
-
-
-
 
 	// real code should use:
 	//     prng.SetSeed(sysRandomSeed());
 	prng.SetSeed(block(214234, 2341234));
 
 	// generate the seeds.
-	RegularDpf<block>::keyGen(domain, span<u64>(points), span<block>(values), prng, span<RegularDpfKey>(key2));
+	RegularDpf<T, CoeffCtx>::keyGen(domain, span<u64>(points), values, prng, span<RegularDpfKey>(key2), ctx);
 
 	if (key[0] != key2[0])
+	{
+		// print the keys
+		std::cout << "key[0] != key2[0]" << std::endl;
+		std::cout << "cw ";
+		for (u64 i = 0; i < key[0].mCorrectionWords.rows(); ++i)
+		{
+			for (u64 j = 0; j < key[0].mCorrectionWords.cols(); ++j)
+			{
+				if (key[0].mCorrectionWords(i, j) != key2[0].mCorrectionWords(i, j) || 
+					key[0].mCorrectionBits(i, j) != key2[0].mCorrectionBits(i, j))
+					std::cout << Color::Red;
+				std::cout
+					<< key[0].mCorrectionWords(i, j) << "." << int(key[0].mCorrectionBits(i, j)) << " v "
+					<< key2[0].mCorrectionWords(i, j) << "." << int(key2[0].mCorrectionBits(i, j)) << " " << Color::Default;
+			}
+			std::cout << std::endl;
+		}
+		std::cout << " leaf ";
+		for (u64 i = 0; i < key[0].mLeafVals.size(); ++i)
+		{
+
+			if (key[0].mLeafVals[i] != key2[0].mLeafVals[i])
+				std::cout << Color::Red;
+			std::cout << int(key[0].mLeafVals[i]) << " v " << int(key2[0].mLeafVals[i]) << " " << Color::Default;
+		}
+		std::cout << std::endl;
 		throw RTE_LOC;
+	}
 	if (key[1] != key2[1])
 		throw RTE_LOC;
 
@@ -823,8 +844,8 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 
 	// send buffer...
 	// deserialize
-	key3[0].resize(domain, numPoints);
-	key3[1].resize(domain, numPoints);
+	key3[0].resize<T>(domain, numPoints, ctx);
+	key3[1].resize<T>(domain, numPoints, ctx);
 	key3[0].fromBytes(buff0);
 	key3[1].fromBytes(buff1);
 
@@ -834,8 +855,14 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 		throw RTE_LOC;
 
 	// expand the dpf
-	RegularDpf<block>::expand(0, domain, key3[0], [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; });
-	RegularDpf<block>::expand(1, domain, key3[1], [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; });
+	RegularDpf<T, CoeffCtx>::expand(0, domain, key3[0], [&](auto k, auto i, auto&& v, block t) {
+		ctx.copy(output0[k * domain + i], v);
+		tags[0](k, i) = t.get<u8>(0) & 1;
+		}, ctx);
+	RegularDpf<T, CoeffCtx>::expand(1, domain, key3[1], [&](auto k, auto i, auto&& v, block t) {
+		ctx.copy(output1[k * domain + i], v);
+		tags[1](k, i) = t.get<u8>(0) & 1;
+		}, ctx);
 
 	// check the results
 	for (u64 i = 0; i < domain; ++i)
@@ -843,13 +870,21 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 		for (u64 k = 0; k < numPoints; ++k)
 		{
 			auto p = points0[k] ^ points1[k];
-			auto act = output[0][k][i] ^ output[1][k][i];
+
+			auto act = ctx.template make<T>();
+			ctx.plus(act, output0[k * domain + i], output1[k * domain + i]);
+
 			auto t = i == p ? 1 : 0;
 			auto tAct = tags[0][k][i] ^ tags[1][k][i];
-			auto exp = t ? (values0[k] ^ values1[k]) : ZeroBlock;
-			if (exp != act)
-			{
 
+			auto exp = ctx.template make<T>();
+			if (t)
+				ctx.plus(exp, values0[k], values1[k]);
+			else
+				ctx.zero(exp);
+
+			if (!ctx.eq(exp, act))
+			{
 				throw RTE_LOC;
 			}
 			if (t != tAct)
@@ -857,9 +892,161 @@ void RegularDpf_keyGen_Test(const oc::CLP& cmd)
 		}
 	}
 
+	//PRNG prng(block(231234, 321312));
+	//u64 domain = cmd.getOr("domain", 211);
+	//u64 numPoints = cmd.getOr("numPoints", 11);
+	//std::vector<u64> points(numPoints);
+	//std::vector<u64> points0(numPoints);
+	//std::vector<u64> points1(numPoints);
+	//std::vector<T> values(numPoints);
+	//std::vector<T> values0(numPoints);
+	//std::vector<T> values1(numPoints);
+	//for (u64 i = 0; i < numPoints; ++i)
+	//{
+	//	points[i] = prng.get<u64>() % domain;
+	//	points1[i] = prng.get<u64>();
+	//	points0[i] = points[i] ^ points1[i];
+	//	values0[i] = prng.get();
+	//	values1[i] = prng.get();
+	//	values[i] = values0[i] ^ values1[i];
+	//}
+
+	//std::array<oc::RegularDpf<block>, 2> dpf;
+	//dpf[0].init(0, domain, numPoints);
+	//dpf[1].init(1, domain, numPoints);
+
+	//auto baseCount = dpf[0].baseOtCount();
+
+	//std::array<std::vector<block>, 2> baseRecv;
+	//std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+	//std::array<BitVector, 2> baseChoice;
+	//baseRecv[0].resize(baseCount);
+	//baseRecv[1].resize(baseCount);
+	//baseSend[0].resize(baseCount);
+	//baseSend[1].resize(baseCount);
+	//baseChoice[0].resize(baseCount);
+	//baseChoice[1].resize(baseCount);
+	//baseChoice[0].randomize(prng);
+	//baseChoice[1].randomize(prng);
+	//for (u64 i = 0; i < baseCount; ++i)
+	//{
+	//	baseSend[0][i] = prng.get();
+	//	baseSend[1][i] = prng.get();
+	//	baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+	//	baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+	//}
+	//dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+	//dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+	//std::array<Matrix<block>, 2> output;
+	//std::array<Matrix<u8>, 2> tags;
+	//output[0].resize(numPoints, domain);
+	//output[1].resize(numPoints, domain);
+	//tags[0].resize(numPoints, domain);
+	//tags[1].resize(numPoints, domain);
+
+	//std::array<RegularDpfKey, 2> key, key2, key3;
+
+	//auto sock = coproto::LocalAsyncSocket::makePair();
+
+	//prng.SetSeed(block(214234, 2341234));
+
+	//// generate the keys using MPC
+	//macoro::sync_wait(macoro::when_all_ready(
+	//	dpf[0].keyGen(points0, values0, prng, key[0], sock[0]),
+	//	dpf[1].keyGen(points1, values1, prng, key[1], sock[1])
+	//));
+
+
+
+
+
+
+	//// real code should use:
+	////     prng.SetSeed(sysRandomSeed());
+	//prng.SetSeed(block(214234, 2341234));
+
+	//// generate the seeds.
+	//RegularDpf<block>::keyGen(domain, span<u64>(points), span<block>(values), prng, span<RegularDpfKey>(key2));
+
+	//if (key[0] != key2[0])
+	//{
+	//	// pritn the keys
+	//	std::cout << "key[0] != key2[0]" << std::endl;
+	//	std::cout << "cw ";
+	//	for (u64 i = 0; i < key[0].mCorrectionWords.rows(); ++i)
+	//	{
+	//		for (u64 j = 0; j < key[0].mCorrectionWords.cols(); ++j)
+	//		{
+	//			std::cout 
+	//				<< key[0].mCorrectionWords(i, j) << "." << int(key[0].mCorrectionBits(i,j)) << " v " 
+	//				<< key2[0].mCorrectionWords(i, j) << "." << int(key2[0].mCorrectionBits(i, j)) << " ";
+	//		}
+	//		std::cout << std::endl;
+	//	}
+	//	std::cout << " leaf ";
+	//	for (u64 i = 0; i < key[0].mLeafVals.size(); ++i)
+	//	{
+	//		std::cout << int(key[0].mLeafVals[i]) << " v " << int(key2[0].mLeafVals[i]) << " ";
+	//	}
+
+
+	//	throw RTE_LOC;
+	//}
+	//if (key[1] != key2[1])
+	//	throw RTE_LOC;
+
+	//// serialize the seeds.
+	//std::vector<u8> buff0(key2[0].sizeBytes());
+	//std::vector<u8> buff1(key2[1].sizeBytes());
+	//key2[0].toBytes(buff0);
+	//key2[1].toBytes(buff1);
+
+	//// send buffer...
+	//// deserialize
+	//key3[0].resize<block>(domain, numPoints);
+	//key3[1].resize<block>(domain, numPoints);
+	//key3[0].fromBytes(buff0);
+	//key3[1].fromBytes(buff1);
+
+	//if (key[0] != key3[0])
+	//	throw RTE_LOC;
+	//if (key[1] != key3[1])
+	//	throw RTE_LOC;
+
+	//// expand the dpf
+	//RegularDpf<block>::expand(0, domain, key3[0], [&](auto k, auto i, auto v, block t) { output[0](k, i) = v; tags[0](k, i) = t.get<u8>(0) & 1; });
+	//RegularDpf<block>::expand(1, domain, key3[1], [&](auto k, auto i, auto v, block t) { output[1](k, i) = v; tags[1](k, i) = t.get<u8>(0) & 1; });
+
+	//// check the results
+	//for (u64 i = 0; i < domain; ++i)
+	//{
+	//	for (u64 k = 0; k < numPoints; ++k)
+	//	{
+	//		auto p = points0[k] ^ points1[k];
+	//		auto act = output[0][k][i] ^ output[1][k][i];
+	//		auto t = i == p ? 1 : 0;
+	//		auto tAct = tags[0][k][i] ^ tags[1][k][i];
+	//		auto exp = t ? (values0[k] ^ values1[k]) : ZeroBlock;
+	//		if (exp != act)
+	//		{
+
+	//			throw RTE_LOC;
+	//		}
+	//		if (t != tAct)
+	//			throw RTE_LOC;
+	//	}
+	//}
+
 #else
 	throw UnitTestSkipped("ENABLE_REGULAR_DPF not defined.");
 #endif
+}
+
+void RegularDpf_keyGen_Test(const oc::CLP& cmd)
+{
+	RegularDpf_keyGen_impl<block, CoeffCtxGF2>(cmd);
+	RegularDpf_keyGen_impl<u64, CoeffCtxInteger>(cmd);
 }
 
 void SumDmpf_Proto_Test(const oc::CLP& cmd)
@@ -877,8 +1064,24 @@ void SumDmpf_Proto_Test(const oc::CLP& cmd)
 	Matrix<block> values(numSets, numPoints);
 	Matrix<block> values0(numSets, numPoints);
 	Matrix<block> values1(numSets, numPoints);
-	for (u64 i = 0; i < points.size(); ++i)
+	for (u64 i = 0; i < numSets; ++i)
 	{
+		std::set<u64> uniquePoints;
+		for(u64 j = 0; j < numPoints; ++j)
+		{
+			u64 p;
+			do {
+				p = prng.get<u64>() % domain;
+			}
+			while (!uniquePoints.insert(p).second);
+
+			points(i, j) = p;
+			points1(i, j) = prng.get<u64>();
+			points0(i, j) = points(i, j) ^ points1(i, j);
+			values0(i, j) = prng.get();
+			values1(i, j) = prng.get();
+			values(i, j) = values0(i, j) ^ values1(i, j);
+		}
 		points(i) = prng.get<u64>() % domain;
 		points1(i) = prng.get<u64>();
 		points0(i) = points(i) ^ points1(i);
@@ -929,12 +1132,12 @@ void SumDmpf_Proto_Test(const oc::CLP& cmd)
 		dpf[0].expand(points0, values0, prng, sock[0],
 			[&](auto setIdx, auto i, auto&& v, auto&& t) {
 				output[0](setIdx, i) = v;
-				tags[0](setIdx, i) = t.get<u8>(0) & 1;
+				tags[0](setIdx, i) = t.template get<u8>(0) & 1;
 			}),
 		dpf[1].expand(points1, values1, prng, sock[1],
 			[&](auto setIdx, auto i, auto&& v, auto&& t) {
 				output[1](setIdx, i) = v;
-				tags[1](setIdx, i) = t.get<u8>(0) & 1;
+				tags[1](setIdx, i) = t.template get<u8>(0) & 1;
 			})
 	));
 	std::get<0>(r).result();
@@ -1003,8 +1206,8 @@ u64 round(u64 a, span<u32> set, u64 bitCount)
 		// we want the second half but there is no second half or
 		// we want the first  half but there is no first  half.
 		// if so, then we need to round our index
-		if (aa && (mid == set.end()) ||
-			!aa && (mid== set.begin()))
+		if ((aa && (mid == set.end())) ||
+			(!aa && (mid== set.begin())))
 		{
 			a ^= mask;
 			aa ^= mask;
@@ -1166,7 +1369,7 @@ void SparseDpf_Vec_Test(const oc::CLP& cmd)
 					sparsePoints[6] = { 6, 10, 11, 13, 16, 19, 22, 23, 27, 30 };
 					sparsePoints[7] = { 2, 8, 18, 20, 24, 25 };
 				}
-				std::vector<u32> point = { ~0ul, 2ul,23ul, ~0ul , ~0ul, 9ul, ~0ul, 8ul };
+				std::vector<u32> point = { u32(~0ul), u32(2ul), u32(23ul), u32(~0ul), u32(~0ul), u32(9ul), u32(~0ul), u32(8ul) };
 
 				for (u64 i = 0; i < numPoints; ++i)
 				{

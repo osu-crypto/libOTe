@@ -1,8 +1,8 @@
 
 
-#include "libOTe/Tools/Field/FP.h"
+#include "libOTe/Tools/Field/Fp.h"
 #include "libOTe/Tools/Field/GF128.h"
-#include "libOTe/Tools/NTT/Poly.h"
+#include "libOTe/Tools/Ntt/Poly.h"
 #include "Field_Tests.h"
 using namespace osuCrypto;
 #include <vector>
@@ -121,7 +121,7 @@ namespace tests_libOTe
 
     void Field_GF128_Test()
     {
-        GF128 g;
+        //GF128 g;
     }
 
 }

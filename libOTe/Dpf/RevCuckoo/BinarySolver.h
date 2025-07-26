@@ -1,7 +1,7 @@
 #pragma once
 #include "cryptoTools/Circuit/MxCircuit.h"
 #include "cryptoTools/Common/Matrix.h"
-#include "macoro/Task.h"
+#include "macoro/task.h"
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/Tools/Tools.h"
 #include "cryptoTools/Common/Log.h"
@@ -188,7 +188,7 @@ namespace osuCrypto
 			auto n = A.rows();
 			auto m = B.rows();
 
-			auto n8 = divCeil(n, 8);
+			//auto n8 = divCeil(n, 8);
 			auto m8 = divCeil(m, 8);
 			auto k8 = divCeil(k, 8);
 			if (A.cols() != m8)
@@ -337,7 +337,6 @@ namespace osuCrypto
 				BitVector a(sizes[d - 1] / 2);
 				Matrix<u8> b(a.size(), 1);
 				Matrix<u8> c(a.size(), 1);
-				auto aIter = BitIterator(a.data());
 
 				for (u64 i = 0; i < a.size(); ++i)
 				{

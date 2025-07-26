@@ -4,6 +4,7 @@
 #include "macoro/when_all.h"
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "libOTe/Dpf/RevCuckoo/Dedup.h"
+#include "cryptoTools/Common/Log.h"
 
 namespace osuCrypto
 {
@@ -85,8 +86,8 @@ namespace osuCrypto
 		{
 			for (u64 j = 0; j < m; ++j)
 			{
-				auto aij = bit(A[0][i], j) ^ bit(A[1][i], j);
-				auto bij = (B[0](i, j) + B[1](i, j)) % mod;
+				u64 aij = bit(A[0][i], j) ^ bit(A[1][i], j);
+				u64 bij = (B[0](i, j) + B[1](i, j)) % mod;
 				if (aij != bij)
 					throw RTE_LOC;
 			}
@@ -167,8 +168,8 @@ namespace osuCrypto
 
 		auto res = macoro::sync_wait(
 			macoro::when_all_ready(
-				otEq[0].equal<T>(A[0], B[0], y[0], sock[0], prng),
-				otEq[1].equal<T>(A[1], B[1], y[1], sock[1], prng)
+				otEq[0].template equal<T>(A[0], B[0], y[0], sock[0], prng),
+				otEq[1].template equal<T>(A[1], B[1], y[1], sock[1], prng)
 			));
 
 		std::get<0>(res).result();
@@ -279,7 +280,7 @@ namespace osuCrypto
 		BitVector actualD(n-1), expectedD(n-1);
 		auto dIter0 = d[0].begin();
 		auto dIter1 = d[1].begin();
-		auto cIter0 = c[0].begin();
+		//auto cIter0 = c[0].begin();
 		auto cIter1 = c[1].begin();
 		for (u64 i = 0; i < n; ++i) {
 			if(i)
@@ -319,6 +320,8 @@ namespace osuCrypto
 		std::array<Dedup, 2> dedup;
 		dedup[0].init(0, n, keyBits);
 		dedup[1].init(1, n, keyBits);
+		dedup[0].mPrint = dedup[1].mPrint = cmd.isSet("print");
+
 		// Compute and set the required base OTs for the Dedup protocol.
 		auto count0 = dedup[0].baseOtCount();
 		auto count1 = dedup[1].baseOtCount();
@@ -416,20 +419,47 @@ namespace osuCrypto
 		std::get<1>(res).result();
 
 		// Reconstruct outputs
+		bool failed = false;
 		std::vector<u8> vv(rVals.cols());
+		std::vector<u32> actKeys(n), actVals(n);
 		for (u64 i = 0; i < n; ++i) {
-			auto key = keys[0][i] ^ keys[1][i];
+			actKeys[i] = keys[0][i] ^ keys[1][i];
 			for(u64 j = 0; j < rVals.cols(); ++j) {
 				vv[j] = values[0][i][j] ^ values[1][i][j];
 			}
-			u64 v = 0;
-			copyBytesMin(v, vv.data());
+			copyBytesMin(actVals[i], vv);
 
 
-			if (key != expKeys[i])
-				throw RTE_LOC;
-			if (v != expValues[i])
-				throw RTE_LOC;
+			if (actKeys[i] != expKeys[i])
+				failed = true;
+			if (actVals[i] != expValues[i])
+				failed = true;
 		}
+		if (failed)
+		{
+			// print everything
+
+			std::cout << "Keys: " << std::endl;
+			for (u64 i = 0; i < n; ++i) {
+				if (actKeys[i] != expKeys[i])
+					std::cout << Color::Red;
+				std::cout << "Key[" << i << "] = " << keys[0][i] << " ^ " << keys[1][i]
+					<< " = " << (keys[0][i] ^ keys[1][i])
+					<< " ?= " << expKeys[i] 
+					<< std::endl << Color::Default;
+				
+			}
+			std::cout << "Values: " << std::endl;
+			for (u64 i = 0; i < n; ++i) {
+				if (actVals[i] != expValues[i])
+					std::cout << Color::Red;
+
+				std::cout << "Value[" << i << "] = " << toHex(values[0][i]) << " ^ " << toHex(values[1][i]) << " = "
+					<< actVals[i] << " ?= " << expValues[i] << std::endl << Color::Default;
+			}
+
+			throw RTE_LOC;
+		}
+
 	}
 }

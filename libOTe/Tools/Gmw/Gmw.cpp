@@ -6,6 +6,7 @@
 #include "libOTe/Tools/Tools.h"
 #include "cryptoTools/Circuit/BetaLibrary.h"
 #include <array>
+#include "cryptoTools/Common/Log.h"
 
 namespace osuCrypto
 {

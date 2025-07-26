@@ -1,5 +1,7 @@
 #include "RingLpnTriple.h"
-
+#include "cryptoTools/Common/block.h"
+#include "cryptoTools/Common/Defines.h"
+#include "cryptoTools/Common/BitVector.h"
 
 namespace osuCrypto
 {
@@ -78,10 +80,10 @@ namespace osuCrypto
 
     // the LSB of A is the choice bit of the OT.
     void convertToOle(
-        span<oc::block> A,
+        span<block> A,
 		BitVector& choice,
-        span<oc::block> add,
-        span<oc::block> mult)
+        span<block> add,
+        span<block> mult)
     {
         auto aIter16 = (u16*)add.data();
         //auto bIter8 = (u8*)mult.data();
@@ -100,9 +102,6 @@ namespace osuCrypto
         for (u64 i = 0; i < 16; ++i)
             shuffle[i].set<u8>(i, 0);
 
-        auto OneBlock = block(1);
-        auto AllOneBlock = block(~0ull, ~0ull);
-        block mask = OneBlock ^ AllOneBlock;
 
         auto m = &A[0];
 
@@ -170,9 +169,9 @@ namespace osuCrypto
 
 
     void convertToOle(
-        span<std::array<oc::block,2>> B,
-        span<oc::block> add,
-        span<oc::block> mult)
+        span<std::array<block,2>> B,
+        span<block> add,
+        span<block> mult)
     {
 
         auto bIter16 = (u16*)add.data();
@@ -182,7 +181,7 @@ namespace osuCrypto
             throw RTE_LOC;
         if (mult.size() * 128 != B.size())
             throw RTE_LOC;
-        using block = oc::block;
+        using block = block;
 
         auto shuffle = std::array<block, 16>{};
         memset(shuffle.data(), 1 << 7, sizeof(*shuffle.data()) * shuffle.size());
@@ -191,9 +190,6 @@ namespace osuCrypto
 
         std::array<block, 16> sendMsg;
         auto m = B.data();
-
-        auto OneBlock = block(1);
-        auto AllOneBlock = block(~0ull, ~0ull);
 
         for (u64 i = 0; i < B.size(); i += 16)
         {

@@ -78,9 +78,9 @@ namespace osuCrypto
 		u64 depth,
 		NttOrder outputOrder)
 	{
-		auto n = a.size();
+		u64 n = a.size();
 		auto ln = log2ceil(n);
-		auto qq = F::order() - 1;
+		u64 qq = F::order() - 1;
 
 		if (n != 1ull << ln)
 			throw RTE_LOC;
@@ -140,11 +140,11 @@ namespace osuCrypto
 			aHat[idx0] = AHat[i] + psiB;
 			aHat[idx1] = AHat[i] - psiB;
 
-			std::cout << std::format("{0}({1}, {2}, {3} = {4} * (2 * {5} + 1), {6} {7})\n",
-				std::string(4 * depth, ' '),
-				range[idx0], range[idx1],
-				index, basePsiExp, i,
-				AHat[i].integer(), BHat[i].integer());
+			//std::cout << std::format("{0}({1}, {2}, {3} = {4} * (2 * {5} + 1), {6} {7})\n",
+			//	std::string(4 * depth, ' '),
+			//	range[idx0], range[idx1],
+			//	index, basePsiExp, i,
+			//	AHat[i].integer(), BHat[i].integer());
 
 			//std::cout << std::string(4*depth, ' ')
 			//	<< "(" << range[idx0] << "," << range[idx1] 
@@ -208,9 +208,9 @@ namespace osuCrypto
 		NttOrder order = NttOrder::BitReversedOrder)
 	{
 
-		auto n = a.size();
+		u64 n = a.size();
 		auto ln = log2ceil(n);
-		auto qq = F::order() - 1;
+		auto qq = F::order(); qq = qq - 1;
 		if (n != 1ull << ln)
 			throw RTE_LOC;
 		if (n > qq)

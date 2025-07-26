@@ -1,9 +1,9 @@
 
 #include "Ntt_Tests.h"
-#include "libOTe/Tools/NTT/NttNegWrapMatrix.h"
-#include "libOTe/Tools/NTT/NttNegWrap.h"
-#include "libOTe/Tools/Field/FP.h"
-#include "libOTe/Tools/NTT/Poly.h"
+#include "libOTe/Tools/Ntt/NttNegWrapMatrix.h"
+#include "libOTe/Tools/Ntt/NttNegWrap.h"
+#include "libOTe/Tools/Field/Fp.h"
+#include "libOTe/Tools/Ntt/Poly.h"
 
 using namespace oc;
 
@@ -78,7 +78,7 @@ namespace tests_libOTe
 		PRNG prng(CCBlock);
 		auto g = findGenerator<F>(prng);
 		auto psi = primRootOfUnity(2 * n, g);
-		std::cout << "phi " << psi << std::endl;
+		//std::cout << "phi " << psi << std::endl;
 
 		if (isPrimRootOfUnity<F>(2 * n, psi) == false)
 		{
@@ -111,9 +111,9 @@ namespace tests_libOTe
 
 			c1 = (a * b) % mod;
 
-			std::cout << "\n matrix:\n";
+			//std::cout << "\n matrix:\n";
 			nttNegWrapMatrix<F>(aHat, a, psi, order);
-			std::cout << "\n recurive:\n";
+			//std::cout << "\n recurive:\n";
 			nttNegWrapCt<F>(aHat2, a, psi, order);
 			//ntt_negacyclic_recursive_bitrev<F>(aHat2, a, psi);
 			// check that the niave and efficent methods give the 
@@ -127,7 +127,7 @@ namespace tests_libOTe
 				throw RTE_LOC;
 			}
 
-			std::cout << "\n inplace:\n";
+			//std::cout << "\n inplace:\n";
 
 			auto aa = a;
 			nttNegWrapCt<F>(aa, psiPowers, order);

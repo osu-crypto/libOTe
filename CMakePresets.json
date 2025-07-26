@@ -19,6 +19,7 @@
         "ENABLE_SIMPLESTOT_ASM": false,
         "ENABLE_MR_KYBER": false,
         "ENABLE_MRR": false,
+        "ENABLE_MRR_TWIST": false,
         "ENABLE_MR": false,
         "ENABLE_FOLEAGE": true,
         "ENABLE_RELIC": false,

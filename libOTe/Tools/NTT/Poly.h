@@ -1,4 +1,4 @@
-
+#pragma once
 
 #include "libOTe/config.h"
 #include <vector>
@@ -251,7 +251,6 @@ namespace osuCrypto
 			ret.mCoeffs.resize(max);
 
 
-			auto last = 0ull;
 			for (u64 i = 0; i < min; ++i)
 			{
 				ret[i] = a[i] + b[i];

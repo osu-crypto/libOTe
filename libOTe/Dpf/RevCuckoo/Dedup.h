@@ -228,9 +228,9 @@ namespace osuCrypto
 			MatrixView<u8> altKeys,  // The output indices of the deduplicated keys
 			PRNG& prng, Socket& socket)
 		{
-			if (keys.cols() != divCeil(mKeyBitCount, 8))
+			if (keys.cols() < divCeil(mKeyBitCount, 8))
 				throw RTE_LOC;
-			if (altKeys.cols() != divCeil(mKeyBitCount, 8))
+			if (altKeys.cols() < divCeil(mKeyBitCount, 8))
 				throw RTE_LOC;
 			if (keys.rows() != mN)
 				throw RTE_LOC;

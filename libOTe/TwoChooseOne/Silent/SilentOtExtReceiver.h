@@ -246,12 +246,12 @@ namespace osuCrypto
 
     inline u8 parity(block b)
     {
-        b = b ^ (b >> 1);
-        b = b ^ (b >> 2);
-        b = b ^ (b >> 4);
-        b = b ^ (b >> 8);
-        b = b ^ (b >> 16);
-        b = b ^ (b >> 32);
+        b = b ^ b.srli_epi64(1);
+        b = b ^ b.srli_epi64(2);
+        b = b ^ b.srli_epi64(4);
+        b = b ^ b.srli_epi64(8);
+        b = b ^ b.srli_epi64(16);
+        b = b ^ b.srli_epi64(32);
 
         union blocku64
         {

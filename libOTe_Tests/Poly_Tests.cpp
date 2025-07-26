@@ -1,6 +1,6 @@
 #include "Poly_Tests.h"
-#include "libOTe/Tools/NTT/Poly.h"
-#include "libOTe/Tools/Field/FP.h"
+#include "libOTe/Tools/Ntt/Poly.h"
+#include "libOTe/Tools/Field/Fp.h"
 #include "cryptoTools/Crypto/PRNG.h"
 
 using namespace oc;
@@ -9,8 +9,6 @@ namespace tests_libOTe
 {
     void Poly_basics_Tests()
     {
-        F12289 x;
-
         u64 n = 16;
         Poly<F12289> a, b, c, d;
 
