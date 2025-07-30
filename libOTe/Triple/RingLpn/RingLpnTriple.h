@@ -1,5 +1,5 @@
 #pragma once
-// � 2025 Peter Rindal.
+// © 2025 Peter Rindal.
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 // 
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
@@ -99,18 +99,18 @@ namespace osuCrypto
 		// run the insecure debug checks.
 		bool mDebug = false;
 
-		//RegularDpf<F, CoeffCtx> mDpf;
 		SumDmpf<F, CoeffCtx> mDpf;
 
 
 		using VecF = CoeffCtx::template Vec<F>;
-		//struct Tensor
-		//{
-		//	VecF mSparseCoeffs; // the sparse coefficients
-		//	VecF mTensoredCoeffs; // the tensored coefficients
-		//};
 
 		CoeffCtx mCtx;
+
+		enum Mode
+		{
+			Ole,
+			Triple
+		};
 
 		enum class BaseCorType
 		{
@@ -130,7 +130,7 @@ namespace osuCrypto
 		// Intializes the protocol to generate n F OLEs. Most efficient when n
 		// is a power of 2. Once called, baseOtCount() can be called to 
 		// determine the required number of base OTs.
-		void init(u64 partyIdx, u64 n, BaseCorType tensorPre = BaseCorType::OtBased, CoeffCtx ctx = {});
+		void init(u64 partyIdx, u64 n, Mode mode = Mode::Triple, BaseCorType tensorPre = BaseCorType::OtBased, CoeffCtx ctx = {});
 
 		bool isInitialized() const { return mN > 0; }
 
@@ -171,55 +171,25 @@ namespace osuCrypto
 		// output (A,C) while the other outputs (A',C') such that
 		// A * A' = C + C'.
 		macoro::task<> expand(
-			span<F> A,
-			span<F> C,
+			auto&& A,
+			auto&& C,
 			PRNG& prng,
 			coproto::Socket& sock);
-
-		task<> checkExpanded(
-			std::vector<osuCrypto::u64>& prodPolyTreePosArth, 
-			coproto::Socket& sock, 
-			std::vector<osuCrypto::u64>& prodPolyTreePosXor, 
-			osuCrypto::Matrix<F>& prodPolys);
 
 
 		// The F beaver triple protocol. This will generate n beaver triples.
 		macoro::task<> expand(
-			span<F> A,
-			span<F> B,
-			span<F> C,
+			auto&& A,
+			auto&& B,
+			auto&& C,
 			PRNG& prng,
-			coproto::Socket& sock)
-		{
-			throw RTE_LOC;
-			//if (mPartyIdx)
-			//{
-			//	co_await expand(B, A, C, {}, prng, sock);
+			coproto::Socket& sock);
 
-			//	for (u64 polyIdx = 0; polyIdx < A.size(); ++polyIdx)
-			//	{
-			//		// b(0)b(1)
-			//		auto bb = B[polyIdx] & A[polyIdx];
-			//		// b(0)b(1) + [ab]1(0)
-			//		C[polyIdx] ^= bb;
-			//	}
-			//}
-			//else
-			//{
-			//	//auto bLsb = temp[0];
-			//	//auto bMsb = temp[1];
-			//	co_await expand(A, B, C, {}, prng, sock);
 
-			//	for (u64 polyIdx = 0; polyIdx < A.size(); ++polyIdx)
-			//	{
-			//		// a(0)a(1)
-			//		auto aa = A[polyIdx] & B[polyIdx];
+		// ---------------------------------------
+		// internal functions
+		// ---------------------------------------
 
-			//		// a(0)a(1) + [ab]0(0)
-			//		C[polyIdx] ^= aa;
-			//	}
-			//}
-		}
 
 		// sample random coefficients for the sparse polynomial and tensor
 		// them with the other parties coefficients. The result is shared
@@ -250,13 +220,24 @@ namespace osuCrypto
 			BitVector& choice);
 
 
+		// check that the expended sparse polynomials are correct.
+		// and that the additive shares of the positions are the 
+		// same as the xor shares.
+		task<> checkExpanded(
+			std::vector<osuCrypto::u64>& prodPolyTreePosArth,
+			coproto::Socket& sock,
+			std::vector<osuCrypto::u64>& prodPolyTreePosXor,
+			osuCrypto::Matrix<F>& prodPolys);
+
+		// check that the tensored coefficients are correct.
 		task<> checkTensor(Socket& sock);
 
 		// sample the A polynomial. This is the polynomial that will be
 		// multiplied the sparse polynomials by.
 		void sampleA(block seed);
 
-
+		// converts the arithmetic of the positions into
+		// a binary representation of the positions.
 		macoro::task<> arithmeticToBinary(
 			span<u64> out,
 			span<const u64> in,
@@ -291,12 +272,12 @@ namespace osuCrypto
 
 
 
-
-
 	template<typename F, typename CoeffCtx>
-	void RingLpnTriple<F, CoeffCtx>::init(u64 partyIdx, u64 n, BaseCorType base, CoeffCtx ctx)
+	void RingLpnTriple<F, CoeffCtx>::init(u64 partyIdx, u64 n, Mode mode, BaseCorType base, CoeffCtx ctx)
 	{
 		mPartyIdx = partyIdx;
+		if (mode == Mode::Triple)
+			n *= 2;
 		mLogN = log2ceil(n);
 		auto logT = log2ceil(mPolyWeight);
 		mN = 1ull << mLogN;
@@ -308,14 +289,10 @@ namespace osuCrypto
 
 		mBlockSize = mN / mPolyWeight;
 		mBlockDepth = mLogN - logT;
-		//mDpfLeafDepth = std::min<u64>(5, mBlockDepth);
-		mDpfTreeDepth = mBlockDepth + 1;// -mDpfLeafDepth;
+		mDpfTreeDepth = mBlockDepth + 1;
 
-		//mDpfLeafSize = ipow(2, mDpfLeafDepth);
 		mDpfTreeSize = 1ull << mDpfTreeDepth;
 
-		//mDpfLeaf.init(mPartyIdx, mDpfLeafSize, mNumPolys * mNumPolys * mPolyWeight * mPolyWeight);
-		//mDpf.init(mPartyIdx, mDpfTreeSize, mPolyWeight * mNumPolys * mNumPolys * mPolyWeight);
 		mDpf.init(mPartyIdx, mDpfTreeSize, mPolyWeight, mNumPolys * mNumPolys * mPolyWeight);
 
 		BetaLibrary lib;
@@ -424,6 +401,8 @@ namespace osuCrypto
 		PRNG& prng,
 		Socket& sock)
 	{
+		MACORO_TRY{
+
 		if (isInitialized() == false)
 		{
 			throw std::runtime_error("init must be called first. " LOCATION);
@@ -447,8 +426,8 @@ namespace osuCrypto
 		choice.randomize(prng);
 		std::vector<block> recvMsg(choice.size());
 		std::vector<std::array<block, 2>> sendMsg(sendCount);
-		std::vector<block> oleMult(baseCount.mOleCount);
-		std::vector<block> oleAdd(baseCount.mOleCount);
+		std::vector<block> oleMult(divCeil(baseCount.mOleCount, 128));
+		std::vector<block> oleAdd(divCeil(baseCount.mOleCount, 128));
 
 		setTimePoint("genBase.start");
 		if (mPartyIdx)
@@ -553,11 +532,12 @@ namespace osuCrypto
 				auto offset = recvMsg.size() - baseCount.mOleCount;
 				span<block> recv(recvMsg.data() + offset, baseCount.mOleCount);
 				BitVector bits(choice.data(), baseCount.mOleCount, offset);
-				convertToOle(recv, bits, oleMult, oleAdd);
+				convertToOle(recv, bits, oleAdd, oleMult);
 				choice.resize(offset);
 				recvMsg.resize(offset);
 			}
 
+			if (baseCount.mCoeffCount)
 			{
 
 				auto tensorOtCount = mNumPolys * mPolyWeight * mCtx.bitSize<F>();
@@ -578,15 +558,15 @@ namespace osuCrypto
 			{
 				auto offset = sendMsg.size() - baseCount.mOleCount;
 				span<std::array<block, 2>> send(sendMsg.data() + offset, baseCount.mOleCount);
-				convertToOle(send, oleMult, oleAdd);
+				convertToOle(send, oleAdd, oleMult);
+				sendMsg.resize(offset);
 			}
 
-
+			if (baseCount.mCoeffCount)
 			{
 				auto tensorOtCount = mNumPolys * mPolyWeight * mCtx.bitSize<F>();
-				auto offset = recvMsg.size() - tensorOtCount;
+				auto offset = sendMsg.size() - tensorOtCount;
 				span<std::array<block, 2>> send(sendMsg.data() + offset, tensorOtCount);
-
 				co_await tensorSend(
 					coeffs,
 					tensoredCoeffs,
@@ -600,6 +580,11 @@ namespace osuCrypto
 
 
 		setTimePoint("genBase.done");
+		}MACORO_CATCH(ex)
+		{
+			co_await sock.close();
+			std::rethrow_exception(ex);
+		}
 	}
 
 
@@ -756,6 +741,34 @@ namespace osuCrypto
 		{
 			if (mGmw.mN != in.size())
 				throw RTE_LOC;
+
+			if (mDebug)
+			{
+
+				auto mult = mGmw.mOleMult;
+				auto add = mGmw.mOleAdd;
+				if (mult.size() != divCeil(mGmw.oleCount(), 128))
+					throw RTE_LOC;
+				if (add.size() != divCeil(mGmw.oleCount(), 128))
+					throw RTE_LOC;
+				std::vector<block> omult(mult.size());
+				std::vector<block> oadd(add.size());
+				co_await sock.send(coproto::copy(mult));
+				co_await sock.send(coproto::copy(add));
+				co_await sock.recv(omult);
+				co_await sock.recv(oadd);
+
+				for (u64 i = 0; i < mult.size(); ++i)
+				{
+					if ((add[i] ^ oadd[i]) != (mult[i] & omult[i]))
+					{
+						throw std::runtime_error(
+							"Failed to verify the GMW OLEs. " LOCATION);
+					}
+				}
+
+			}
+
 			MatrixView<const u64> inView(in.data(), in.size(), 1);
 			mGmw.setInput<const u64>(mPartyIdx, inView);
 			mGmw.setZeroInput(1 ^ mPartyIdx);
@@ -770,11 +783,21 @@ namespace osuCrypto
 
 
 
+	template<typename F, typename CoeffCtx>
+	macoro::task<> RingLpnTriple<F, CoeffCtx>::expand(
+		auto&& A,
+		auto&& B,
+		PRNG& prng,
+		coproto::Socket& sock)
+	{
+		return expand(A, B, std::monostate{}, prng, sock);
+	}
 
 	template<typename F, typename CoeffCtx>
 	macoro::task<> RingLpnTriple<F, CoeffCtx>::expand(
-		span<F> A,
-		span<F> B,
+		auto&& A,
+		auto&& B,
+		auto&& C,
 		PRNG& prng,
 		coproto::Socket& sock)
 	{
@@ -785,10 +808,26 @@ namespace osuCrypto
 			co_await genBaseCors(prng, sock);
 		}
 
-		if (mN < A.size())
-			throw RTE_LOC;
-		if (A.size() != B.size())
-			throw RTE_LOC;
+		// true if we are generating OLEs, false if we are generating triples.
+		constexpr bool ole = std::is_same_v<std::decay_t<decltype(C)>, std::monostate>;
+
+		if  constexpr (ole)
+		{
+			// OLE
+			if (mN < A.size())
+				throw RTE_LOC;
+			if (A.size() != B.size())
+				throw RTE_LOC;
+		}
+		else
+		{
+			if (mN / 2 < A.size())
+				throw RTE_LOC;
+			if (A.size() != B.size())
+				throw RTE_LOC;
+			if (A.size() != C.size())
+				throw RTE_LOC;
+		}
 
 		// the coefficient of the sparse polynomial.
 		// the polyIdx'th row contains the coeffs for the polyIdx'th poly.
@@ -862,7 +901,8 @@ namespace osuCrypto
 		// such that l
 		//   prodPolyTreePosXor[0] ^ prodPolyTreePosXor[1] = 
 		//   prodPolyTreePosArth[0] + prodPolyTreePosArth[1] (mod mDpfTreeSize)
-		auto converter = arithmeticToBinary(prodPolyTreePosXor, prodPolyTreePosArth, sock);
+		auto convSock = sock.fork();
+		auto converter = arithmeticToBinary(prodPolyTreePosXor, prodPolyTreePosArth, convSock);
 
 		// check if we need to generate the tensored coefficients.
 		if (mBaseCorType == BaseCorType::OtBased)
@@ -897,41 +937,6 @@ namespace osuCrypto
 
 		setTimePoint("tesnor");
 
-		// we pack 8 FFTs into a single u16. 
-		Matrix<F> fftSparsePoly(mNumPolys, mN);
-		for (u64 i = 0; i < mPolyWeight; ++i)
-		{
-			for (u64 j = 0; j < mNumPolys; ++j)
-			{
-				// actual position
-				auto pos = i * mBlockSize + mSparsePositions(j, i);
-				fftSparsePoly(j, pos) = mSparseCoefficients[j * mPolyWeight + i];
-			}
-		}
-
-		setTimePoint("sparsePolySample");
-
-		// switch from polynomial to FFT form
-		std::vector<F> w(mN * 2);
-		{
-			auto psi = primRootOfUnity<F>(mN * 2);
-			for (u64 i = 0; i < mN * 2; ++i)
-				w[i] = psi.pow(i);
-
-			for (u64 j = 0; j < mNumPolys; ++j)
-			{
-				nttNegWrapCt<F>(fftSparsePoly[j], w);
-				hadamarProd<F>(fftSparsePoly[j], mFftA[j], fftSparsePoly[j]);
-
-				// compress the result and set the output. TODO, fuze the multiply add.
-				auto outSize = std::min<u64>(mN, A.size());
-				for (u64 i = 0; i < outSize; ++i)
-					A[i] = A[i] + fftSparsePoly[j][i];
-			}
-		}
-
-		setTimePoint("input fft");
-		// multiply by the packed A polynomial
 
 		// sharing of the F coefficients of the product polynomials.
 		// these will just be the tensored coefficients but in permuted
@@ -987,9 +992,9 @@ namespace osuCrypto
 		setTimePoint("dpfParams");
 
 
-		// the full set of monomial blocks.
-		//Matrix<F> monomials(mNumPolys * mNumPolys * mPolyWeight * mPolyWeight, mDpfTreeSize);
-		Matrix<F> prodPolys(mNumPolys * mNumPolys, mN + mBlockSize);
+		auto numProdPolys = std::max<u64>(2, mNumPolys * mNumPolys);
+		Matrix<F> prodPolys(numProdPolys, mN + mBlockSize);
+
 		// expand the main tree and add the mPolyWeight point functions correspond 
 		// to a block together. This will give us the coefficients of the
 		// the product polynomial.
@@ -1021,23 +1026,152 @@ namespace osuCrypto
 		setTimePoint("mainDpf");
 
 
+		std::vector<F> w(mN * 2);
+		auto psi = primRootOfUnity<F>(mN * 2);
+		for (u64 i = 0; i < mN * 2; ++i)
+			w[i] = psi.pow(i);
+
+		// for OLEs, we write the result into A,B.
+		// For triples, A,B,C are half sized. So we
+		// write them result into prodPolys[0] and  prodPolys[1].
+		// We then compress these into A,B.
+		auto numOLEs = ole ? A.size() : A.size() * 2;
+		span<F> BB = ole ? B : prodPolys[0];
+		span<F> AA = ole ? A : prodPolys[1];
+
 		for (u64 i = 0, polyOffset = 0; i < mNumPolys * mNumPolys; ++i)
 		{
 			auto prod = prodPolys[i].subspan(0, mN);
 			nttNegWrapCt<F>(prod, w);
-			hadamarProd<F>(prod, mFftASquared[i], prod);
-			// compress the resume and set the output.
-			auto outSize = std::min<u64>(mN, B.size());
-			for (u64 k = 0; k < outSize; ++k)
-				B[k] = B[k] + prod[k];
+
+			if (i)
+			{
+				// BB += r^2 * prod
+				hadamarProdAdd<F>(
+					BB.subspan(0, numOLEs),
+					mFftASquared[i].subspan(0, numOLEs),
+					prod.subspan(0, numOLEs));
+			}
+			else
+			{
+				// BB = r^2 * prod
+				hadamarProd<F>(
+					BB.subspan(0, numOLEs),
+					mFftASquared[i].subspan(0, numOLEs),
+					prod.subspan(0, numOLEs));
+			}
 		}
+		setTimePoint("output fft");
+
+
+		std::vector<F> fftSparsePoly_(mN);
+		for (u64 j = 0; j < mNumPolys; ++j)
+		{
+			span<F> fftSparsePoly = fftSparsePoly_;
+			if (j)
+				std::fill(fftSparsePoly.begin(), fftSparsePoly.end(), F(0));
+
+			// actual position
+			for (u64 i = 0; i < mPolyWeight; ++i)
+			{
+				auto pos = i * mBlockSize + mSparsePositions(j, i);
+				fftSparsePoly[pos] = mSparseCoefficients[j * mPolyWeight + i];
+			}
+
+			nttNegWrapCt<F>(fftSparsePoly, w);
+
+			if (j)
+			{
+				// AA += r * fftSparsePoly
+				hadamarProdAdd<F>(
+					AA.subspan(0, numOLEs),
+					mFftA[j].subspan(0, numOLEs),
+					fftSparsePoly.subspan(0, numOLEs));
+			}
+			else
+			{
+				// AA = r * fftSparsePoly
+				hadamarProd<F>(
+					AA.subspan(0, numOLEs),
+					mFftA[j].subspan(0, numOLEs),
+					fftSparsePoly.subspan(0, numOLEs));
+			}
+		}
+
+
+		if constexpr (ole == false)
+		{
+			// Convert field OLEs to multiplication triples.
+			// 
+			// Ring-LPN generates 2n field OLEs (AA, BB) where AA[i] * AA[i] = BB[i] for each party.
+			// To create n multiplication triples (A, B, C) where (A₀+A₁) * (B₀+B₁) = C₀+C₁, we:
+			//
+			// 1. Use AA values as triple inputs: A comes from AA[2i+0], B from AA[2i+1]
+			// 2. Use BB values for cross-terms: C includes BB[2i+0] + BB[2i+1] 
+			// 3. Add local product: C += A * B to complete the multiplication relation
+			//
+			// Party 1 swaps A↔B assignment to ensure the cross-multiplication terms
+			// A₀*B₁ and A₁*B₀ align correctly with the underlying OLE correlations.
+			// 
+			// Below is the diagram of the multiplication triples. The area is the
+			// value of C₀[i] + C₁[i] = (A₀[i] + A₁[i]) * (B₀[i] + B₁[i]). The height 
+			// is B₀[i] + B₁[i] and the width is A₀[i] + A₁[i]. The area is the product 
+			// of the height and width. The missing areas can be computed locally by each 
+			// party while the areas for the cross terms are computed using the OLEs, i.e BB.
+			// 
+			//                         A₀[i] + A₁[i]     
+			//                     _____________________
+			//                    /					    \
+			//                      AA₀[2i]    AA₁[2i+1]
+			//                     _______________________
+			//       /            |          | BB₀[2i+1]+ |
+			// B₀[i] |  AA₀[2i+1] |          | BB₁[2i+1]  |
+			//       |            |__________|____________|
+			//  +    |            | BB₀[2i]+ |            |
+			// B₁[i] |  AA₁[2i]   | BB₁[2i]  |            |
+			//       \            |__________|____________|
+			//          
+
+			if (C.size() != A.size())
+				throw RTE_LOC;
+			if (mPartyIdx)
+			{
+				for (u64 i = 0; i < A.size(); ++i)
+				{
+					A[i] = AA[2 * i + 0];
+					B[i] = AA[2 * i + 1];
+
+					C[i] =
+						BB[2 * i + 0] +
+						BB[2 * i + 1] +
+						AA[2 * i + 0] * AA[2 * i + 1];
+				}
+			}
+			else
+			{
+				for (u64 i = 0; i < A.size(); ++i)
+				{
+					A[i] = AA[2 * i + 1];
+					B[i] = AA[2 * i + 0];
+
+					C[i] =
+						BB[2 * i + 0] +
+						BB[2 * i + 1] +
+						AA[2 * i + 0] * AA[2 * i + 1];
+
+				}
+			}
+		}
+
+
+		setTimePoint("input fft");
 
 		mSparseCoefficients.clear();
 		mTensoredCoefficients.clear();
 
-		setTimePoint("addCopyY");
 
 	}
+
 
 	template<typename F, typename CoeffCtx>
 	task<> RingLpnTriple<F, CoeffCtx>::checkExpanded(

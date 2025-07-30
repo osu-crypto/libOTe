@@ -102,7 +102,7 @@ namespace osuCrypto
         for (u64 i = 0; i < 16; ++i)
             shuffle[i].set<u8>(i, 0);
 
-
+            
         auto m = &A[0];
 
         for (u64 i = 0; i < A.size(); i += 16)

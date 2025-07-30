@@ -459,6 +459,16 @@ namespace osuCrypto
 	}
 
 	template<typename F>
+	void hadamarProdAdd(span<F> ret, span<const F> a, span<const F> b)
+	{
+		if (ret.size() != a.size() || ret.size() != b.size())
+			throw RTE_LOC;
+
+		for (u64 i = 0; i < ret.size(); ++i)
+			ret[i] += a[i] * b[i];
+	}
+
+	template<typename F>
 	std::ostream& operator<<(std::ostream& o, const Poly<F>& p)
 	{
 		o << "[ ";

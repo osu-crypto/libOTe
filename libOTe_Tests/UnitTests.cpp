@@ -173,6 +173,10 @@ namespace tests_libOTe
 			tc.add("RingLpn_tensor_test                     ", RingLpn_tensor_test);
 			tc.add("RingLpn_basic_test                      ", RingLpn_basic_test);
 			tc.add("RingLpn_ole_test                        ", RingLpn_ole_test);
+			tc.add("RingLpn_conversion_test                 ", RingLpn_conversion_test);
+			
+			tc.add("RingLpn_Triple_test                     ", RingLpn_Triple_test);
+			
 			//tc.add("RingLpn_tensor_test                     ", RingLpn_tensor_test);
 			tc.add("RingLpn_GenBase_test                    ", RingLpn_GenBase_test);
 
