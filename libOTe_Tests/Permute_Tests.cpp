@@ -1,4 +1,4 @@
-﻿#include "Permute_Tests.h"
+#include "Permute_Tests.h"
 
 #include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
 #include "cryptoTools/Common/Matrix.h"
@@ -48,7 +48,7 @@ namespace osuCrypto
 				block seed0 = prng.get<block>();
 				block seed1 = prng.get<block>();
 
-				permuter.apply(input, [&] {return prng.getBit(); });
+				permuter.applyPlain(input, [&] {return prng.getBit(); });
 
 				std::unordered_map<u64, u64> outSet;
 				for (u64 i = 0; i < n; ++i)
@@ -142,8 +142,8 @@ namespace osuCrypto
 				permuters[1].setBaseOts(baseSendOts[1], baseRecvOts[1], baseRecvBits[1]);
 
 				auto r = macoro::sync_wait(macoro::when_all_ready(
-					permuters[0].apply(inputs[0], seed0, sock[0]),
-					permuters[1].apply(inputs[1], seed1, sock[1])
+					permuters[0].apply(inputs[0], sock[0]),
+					permuters[1].apply(inputs[1], sock[1])
 				));
 
 				std::unordered_map<u64, u64> outSet;

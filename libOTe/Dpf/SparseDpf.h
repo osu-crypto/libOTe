@@ -24,7 +24,6 @@ namespace osuCrypto
 
 		u64 mDenseDepth = 0;
 
-
 		RegularDpf<block> mRegDpf;
 
 		DpfMult mMultiplier;
@@ -250,6 +249,11 @@ namespace osuCrypto
 
 			if (points.size() != rows())
 				throw RTE_LOC;
+
+			if (values.size() && values.size() != rows())
+				throw RTE_LOC;
+
+
 			u64 depth = log2ceil(mDomain) - mDenseDepth;
 
 			std::vector<Tree> trees(mNumPoints);
@@ -257,6 +261,7 @@ namespace osuCrypto
 			{
 				trees[i].resize(depth + 1);
 			}
+
 			using T = block;
 			std::unique_ptr<u8[]> mem;
 			std::vector<std::span<T>> leafValues(mNumPoints);
@@ -337,7 +342,9 @@ namespace osuCrypto
 							auto idx = std::distance(sparsePoints[r].data(), &points[0]);
 							leafValues[r][idx] = seed;
 							leafTags[r][idx] = tag;
-							gamma[r] = gamma[r] ^ leafValues[r][idx];
+
+							if (gamma.size())
+								gamma[r] = gamma[r] ^ leafValues[r][idx];
 
 							//if(mPartyIdx)
 							//	std::cout << "p " << mPartyIdx << " leaf " << idx << " seed " << pSeeds(r,bin) << " " << int(pTags(r,bin)) << std::endl;
@@ -552,7 +559,9 @@ namespace osuCrypto
 					auto b = std::distance(sparsePoints[r].data(), par.mRange.data());
 					leafTags[r][b] = lsb(seed) ^ tag * pTau;
 					leafValues[r][b] = seed ^ (pSigma & block::allSame<u8>(-tag));
-					gamma[r] = gamma[r] ^ leafValues[r][b];
+
+					if (gamma.size())
+						gamma[r] = gamma[r] ^ leafValues[r][b];
 
 					//{
 					//	block val;
@@ -570,38 +579,53 @@ namespace osuCrypto
 				}
 			}
 
-			co_await reveal(gamma, sock);
-			//std::cout << "-----------final-------------" << std::endl;
-			for (u64 r = 0; r < mNumPoints; ++r)
+			if (gamma.size())
 			{
-				auto size = sparsePoints[r].size();
-				for (u64 i = 0; i < size; ++i)
+
+				co_await reveal(gamma, sock);
+				//std::cout << "-----------final-------------" << std::endl;
+				for (u64 r = 0; r < mNumPoints; ++r)
 				{
-					assert(leafValues[r][i] != oc::ZeroBlock);
-					auto val = leafValues[r][i] ^ (gamma[r] & block::allSame<u8>(-leafTags[r][i]));
+					auto size = sparsePoints[r].size();
+					for (u64 i = 0; i < size; ++i)
+					{
+						assert(leafValues[r][i] != oc::ZeroBlock);
+						auto val = leafValues[r][i] ^ (gamma[r] & block::allSame<u8>(-leafTags[r][i]));
 
-					//std::cout << "p " << mPartyIdx << " d " << 0 << " i " << i << " "
-					//	<< leafValues[r][i] << " -> " << val << " via " << gamma[r] << " t " << int(leafTags[r][i]) << std::endl;
+						//std::cout << "p " << mPartyIdx << " d " << 0 << " i " << i << " "
+						//	<< leafValues[r][i] << " -> " << val << " via " << gamma[r] << " t " << int(leafTags[r][i]) << std::endl;
 
-					//if (r == 0)
-					//{
-					//	co_await sock.send(block(val));
-					//	co_await sock.send(u8(leafTags[r][i]));
-					//	block ss;
-					//	u8 tt;
-					//	co_await sock.recv(ss);
-					//	co_await sock.recv(tt);
-					//	ss ^= val;
-					//	tt ^= leafTags[r][i];
+						//if (r == 0)
+						//{
+						//	co_await sock.send(block(val));
+						//	co_await sock.send(u8(leafTags[r][i]));
+						//	block ss;
+						//	u8 tt;
+						//	co_await sock.recv(ss);
+						//	co_await sock.recv(tt);
+						//	ss ^= val;
+						//	tt ^= leafTags[r][i];
 
-					//	if (mPartyIdx)
-					//	{
-					//		std::cout << " leaf i " << i << " "
-					//			<< ss << " t " << int(tt) << std::endl;
-					//	}
+						//	if (mPartyIdx)
+						//	{
+						//		std::cout << " leaf i " << i << " "
+						//			<< ss << " t " << int(tt) << std::endl;
+						//	}
 
-					//}
-					output(r, i, val, leafTags[r][i]);
+						//}
+						output(r, i, val, leafTags[r][i]);
+					}
+				}
+			}
+			else
+			{
+				for (u64 r = 0; r < mNumPoints; ++r)
+				{
+					auto size = sparsePoints[r].size();
+					for (u64 i = 0; i < size; ++i)
+					{
+						output(r, i, leafValues[r][i], leafTags[r][i]);
+					}
 				}
 			}
 

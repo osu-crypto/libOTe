@@ -683,6 +683,7 @@ namespace osuCrypto
 
 					// insecure version 
 					{
+						throw RTE_LOC;
 						std::vector<u8> otherD(mNumPoints);
 						co_await sock.send(coproto::copy(d));
 						co_await sock.recv(otherD);

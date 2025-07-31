@@ -1,4 +1,4 @@
-﻿#include "Dpf_Tests.h"
+#include "Dpf_Tests.h"
 #include "libOTe/Dpf/RegularDpf.h"
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "libOTe/Dpf/SparseDpf.h"
@@ -115,6 +115,127 @@ void RegularDpf_Multiply_Test(const CLP& cmd)
 				std::cout << "act " << xy << " " << xy0[j] << " + " << xy1[j] << std::endl;
 				std::cout << "exp " << exp << std::endl;
 				throw RTE_LOC;
+			}
+		}
+	}
+#else
+	throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_SPARSE_DPF not defined.");
+#endif
+}
+void RegularDpf_MultSession_Test(const CLP& cmd)
+{
+#if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
+	u64 n = 13;
+	u64 vectorCols = 19;
+	auto trials = 5;
+	PRNG prng(block(231234, 321312));
+	std::array<oc::DpfMult, 2> dpf;
+	dpf[0].init(0, n * trials);
+	dpf[1].init(1, n * trials);
+
+	std::array<std::vector<std::array<block, 2>>, 2> sendOts;
+	std::array<std::vector<block>, 2> recvOts;
+	std::array<BitVector, 2> choices;
+	for (u64 i = 0; i < 2; ++i)
+	{
+		auto c = dpf[i].baseOtCount();
+		sendOts[i].resize(c);
+		recvOts[i].resize(c);
+		choices[i].resize(c);
+		choices[i].randomize(prng);
+		prng.get(sendOts[i].data(), sendOts[i].size());
+		for (u64 j = 0; j < c; ++j)
+			recvOts[i][j] = sendOts[i][j][choices[i][j]];
+	}
+
+	dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
+	dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
+
+	auto sock = coproto::LocalAsyncSocket::makePair();
+
+	for (u64 testIter = 0; testIter < trials; ++testIter)
+	{
+		//// Reset OT indices for fresh test
+		//for (u64 i = 0; i < 2; ++i)
+		//{
+		//	choices[i].randomize(prng);
+		//	prng.get(sendOts[i].data(), sendOts[i].size());
+		//	for (u64 j = 0; j < n; ++j)
+		//		recvOts[i][j] = sendOts[i][j][choices[i][j]];
+		//}
+		//dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
+		//dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
+
+		// Setup phase: create multiplication sessions
+		BitVector x0(n), x1(n);
+		x0.randomize(prng);
+		x1.randomize(prng);
+
+		// Create sessions for both parties
+		auto sessions = macoro::sync_wait(macoro::when_all_ready(
+			dpf[0].setupMultiply(n, x0.getSpan<u8>(), sock[0]),
+			dpf[1].setupMultiply(n, x1.getSpan<u8>(), sock[1])
+		));
+
+		auto session0 = std::get<0>(sessions).result();
+		auto session1 = std::get<1>(sessions).result();
+
+		// check that the base OTs in the sessions are correct
+		if (session0.mRecvOts.size() != n || 
+			session0.mSendOts.size() != n ||
+			session0.mChoiceBits.size() != n ||
+			session1.mRecvOts.size() != n ||
+			session1.mSendOts.size() != n ||
+			session1.mChoiceBits.size() != n)
+			throw RTE_LOC;
+		for(u64 i =0; i < n; ++i)
+		{
+			if (session0.mRecvOts[i] != session1.mSendOts[i][session0.mChoiceBits[i]])
+				throw RTE_LOC;
+
+			if (session1.mRecvOts[i] != session0.mSendOts[i][session1.mChoiceBits[i]])
+				throw RTE_LOC;
+		}
+
+
+		// Test multiple multiplications with the same x but different y vectors
+		for (u64 multIter = 0; multIter < 3; ++multIter)
+		{
+			Matrix<u8> y0(n, vectorCols), y1(n, vectorCols);
+			Matrix<u8> xy0(n, vectorCols), xy1(n, vectorCols);
+
+			// Generate random y vectors for both parties
+			prng.get(y0.data(), y0.size());
+			prng.get(y1.data(), y1.size());
+
+			// Perform multiplication using sessions
+			macoro::sync_wait(macoro::when_all_ready(
+				session0.multiply(y0, xy0, sock[0]),
+				session1.multiply(y1, xy1, sock[1])
+			));
+
+			// Verify correctness
+			for (u64 j = 0; j < n; ++j)
+			{
+				u64 x = x0[j] ^ x1[j]; // Reconstruct secret shared x
+
+				for (u64 k = 0; k < vectorCols; ++k)
+				{
+					auto y = y0[j][k] ^ y1[j][k]; // Reconstruct secret shared y
+					auto xy = xy0[j][k] ^ xy1[j][k]; // Reconstruct secret shared xy
+					auto exp = x * y; // Expected result: x[j] * y[j][k]
+
+					if (xy != exp)
+					{
+						std::cout << "testIter " << testIter << " multIter " << multIter << std::endl;
+						std::cout << "j " << j << " k " << k << std::endl;
+						std::cout << "x " << int(x) << " = " << int(x0[j]) << " ^ " << int(x1[j]) << std::endl;
+						std::cout << "y " << int(y) << " = " << int(y0[j][k]) << " ^ " << int(y1[j][k]) << std::endl;
+						std::cout << "act " << int(xy) << " = " << int(xy0[j][k]) << " ^ " << int(xy1[j][k]) << std::endl;
+						std::cout << "exp " << int(exp) << std::endl;
+						throw RTE_LOC;
+					}
+				}
 			}
 		}
 	}
@@ -596,9 +717,9 @@ void RegularDpf_Proto_Test_impl(const oc::CLP& cmd)
 			auto tAct = tags[0][k][i] ^ tags[1][k][i];
 
 			auto act = ctx.template make<T>();
-			ctx.plus(act, output[0][k* domain +i], output[1][k * domain + i]);
+			ctx.plus(act, output[0][k * domain + i], output[1][k * domain + i]);
 			auto exp = ctx.template make<T>();
-			if(t)
+			if (t)
 				ctx.plus(exp, values0[k], values1[k]);
 			else
 				ctx.zero(exp);
@@ -606,7 +727,7 @@ void RegularDpf_Proto_Test_impl(const oc::CLP& cmd)
 			if (!ctx.eq(exp, act))
 			{
 				std::cout
-					<< k << " " <<i <<"\n"
+					<< k << " " << i << "\n"
 					<< ctx.str(output[0][k * domain + i]) << " + "
 					<< ctx.str(output[1][k * domain + i]) << " = "
 					<< ctx.str(act) << " != "
@@ -813,7 +934,7 @@ void RegularDpf_keyGen_impl(const oc::CLP& cmd)
 		{
 			for (u64 j = 0; j < key[0].mCorrectionWords.cols(); ++j)
 			{
-				if (key[0].mCorrectionWords(i, j) != key2[0].mCorrectionWords(i, j) || 
+				if (key[0].mCorrectionWords(i, j) != key2[0].mCorrectionWords(i, j) ||
 					key[0].mCorrectionBits(i, j) != key2[0].mCorrectionBits(i, j))
 					std::cout << Color::Red;
 				std::cout
@@ -1067,13 +1188,12 @@ void SumDmpf_Proto_Test(const oc::CLP& cmd)
 	for (u64 i = 0; i < numSets; ++i)
 	{
 		std::set<u64> uniquePoints;
-		for(u64 j = 0; j < numPoints; ++j)
+		for (u64 j = 0; j < numPoints; ++j)
 		{
 			u64 p;
 			do {
 				p = prng.get<u64>() % domain;
-			}
-			while (!uniquePoints.insert(p).second);
+			} while (!uniquePoints.insert(p).second);
 
 			points(i, j) = p;
 			points1(i, j) = prng.get<u64>();
@@ -1207,7 +1327,7 @@ u64 round(u64 a, span<u32> set, u64 bitCount)
 		// we want the first  half but there is no first  half.
 		// if so, then we need to round our index
 		if ((aa && (mid == set.end())) ||
-			(!aa && (mid== set.begin())))
+			(!aa && (mid == set.begin())))
 		{
 			a ^= mask;
 			aa ^= mask;
@@ -1485,6 +1605,149 @@ void SparseDpf_Vec_Test(const oc::CLP& cmd)
 						std::cout << "act " << act << " " << int(tag) << std::endl;
 						std::cout << "exp " << exp << " " << int(active) << std::endl;
 						throw RTE_LOC;
+					}
+
+					if (tag != active)
+						throw RTE_LOC;
+				}
+			}
+		}
+	}
+#else
+	throw UnitTestSkipped("ENABLE_SPARSE_DPF not defined.");
+#endif
+}
+
+void SparseDpf_Punct_Test(const oc::CLP& cmd)
+{
+
+#ifdef ENABLE_SPARSE_DPF
+
+	PRNG prng(block(32324, 2342));
+	for (auto dense : { /*0,*/ 4 })
+	{
+
+		for (u64 t = 0; t < 2; ++t)
+		{
+
+			u64 numPoints = 8;
+			u64 domain = 1773;
+			u64 fraction = 16;
+
+			if (t == 0) {
+				domain = 32;
+				numPoints = 1;
+			}
+
+			auto index{ std::vector<u64>(numPoints) };
+			std::array points{ std::vector<u64>(numPoints),std::vector<u64>(numPoints) };
+			oc::SparseDpf dpf[2];
+			std::vector<std::vector<u32>> sparsePoints(numPoints);// , domain / fraction);
+
+
+			for (u64 j = 0; j < numPoints; ++j)
+			{
+				sparsePoints[j].resize(domain / fraction + prng.get<u8>() % 20);
+				std::vector<u32> set(domain);
+				std::iota(set.begin(), set.end(), 0);
+				for (u64 i = 0; i < sparsePoints[j].size(); ++i)
+				{
+					auto k = prng.get<u32>() % set.size();
+					std::swap(set[k], set.back());
+					sparsePoints[j][i] = set.back();
+					set.pop_back();
+				}
+			}
+
+			for (u64 i = 0; i < numPoints; ++i)
+			{
+				std::sort(sparsePoints[i].begin(), sparsePoints[i].end());
+				index[i] = prng.get<u64>() % sparsePoints[i].size();
+				//auto alpha = sparsePoints(i, index[i]);
+				//std::cout << "alpha " << alpha << " " << oc::BitVector((u8*)&alpha, log2ceil(domain)) << std::endl;
+				points[0][i] = prng.get();
+				points[1][i] = points[0][i] ^ sparsePoints[i][index[i]];
+			}
+
+
+
+			dpf[0].init(0, numPoints, domain, dense);
+			dpf[1].init(1, numPoints, domain, dense);
+			auto sock = coproto::LocalAsyncSocket::makePair();
+
+			auto baseCount = dpf[0].baseOtCount();
+
+			std::array<std::vector<std::array<block, 2>>, 2> sendOts;
+			std::array<std::vector<block>, 2> recvOts;
+			std::array<BitVector, 2> choices;
+			for (u64 i = 0; i < 2; ++i)
+			{
+				sendOts[i].resize(baseCount);
+				recvOts[i].resize(baseCount);
+				choices[i].resize(baseCount);
+				choices[i].randomize(prng);
+				prng.get(sendOts[i].data(), sendOts[i].size());
+				for (u64 j = 0; j < baseCount; ++j)
+					recvOts[i][j] = sendOts[i][j][choices[i][j]];
+			}
+
+			dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
+			dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
+
+
+			std::array<std::vector<std::vector<block>>, 2> out;
+			std::array<std::vector<std::vector<u8>>, 2> tags;
+			out[0].resize(numPoints);
+			out[1].resize(numPoints);
+			tags[0].resize(numPoints);
+			tags[1].resize(numPoints);
+			for (u64 i = 0; i < numPoints; ++i)
+			{
+				out[0][i].resize(sparsePoints[i].size());
+				out[1][i].resize(sparsePoints[i].size());
+				tags[0][i].resize(sparsePoints[i].size());
+				tags[1][i].resize(sparsePoints[i].size());
+			}
+
+			auto r = macoro::sync_wait(
+				macoro::when_all_ready(
+					dpf[0].expand(points[0], {}, [&](auto k, auto i, auto v, auto t) { out[0][k][i] = v; tags[0][k][i] = t; }, prng, sparsePoints, sock[0]),
+					dpf[1].expand(points[1], {}, [&](auto k, auto i, auto v, auto t) { out[1][k][i] = v; tags[1][k][i] = t; }, prng, sparsePoints, sock[1])
+				));
+
+
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+
+			for (u64 i = 0; i < numPoints; ++i)
+			{
+				for (u64 j = 0; j < sparsePoints[i].size(); ++j)
+				{
+					auto active = index[i] == j ? 1 : 0;
+
+					auto tag = tags[0][i][j] ^ tags[1][i][j];
+					auto act = out[0][i][j] ^ out[1][i][j];
+
+					if (active)
+					{
+						if (act == ZeroBlock)
+						{
+							std::cout << "idx " << index[i] << std::endl;
+							std::cout << "loc " << sparsePoints[i][index[i]] << std::endl;
+							std::cout << "act " << act << " " << int(tag) << std::endl;
+							throw RTE_LOC;
+						}
+					}
+					else
+					{
+
+						if (act != ZeroBlock)
+						{
+							std::cout << "idx " << index[i] << std::endl;
+							std::cout << "loc " << sparsePoints[i][index[i]] << std::endl;
+							std::cout << "act " << act << " " << int(tag) << std::endl;
+							throw RTE_LOC;
+						}
 					}
 
 					if (tag != active)

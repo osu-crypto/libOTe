@@ -71,7 +71,8 @@ namespace tests_libOTe
 			tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
 			tc.add("RegularDpf_MultByte_Test                ", RegularDpf_MultByte_Test);
 			tc.add("RegularDpf_MultBit_Test                 ", RegularDpf_MultBit_Test);
-
+			tc.add("RegularDpf_MultSession_Test             ", RegularDpf_MultSession_Test);
+			
 
 			tc.add("SumDmpf_Proto_Test                      ", SumDmpf_Proto_Test);
 			tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
@@ -79,6 +80,7 @@ namespace tests_libOTe
 			tc.add("RegularDpf_keyGen_Test                  ", RegularDpf_keyGen_Test);
 			tc.add("SparseDpf_Mtx_Test                      ", SparseDpf_Mtx_Test);
 			tc.add("SparseDpf_Vec_Test                      ", SparseDpf_Vec_Test);
+			tc.add("SparseDpf_Punct_Test                    ", SparseDpf_Punct_Test);
 			tc.add("TritDpf_Proto_Test                      ", TritDpf_Proto_Test);
 
 			tc.add("BinSolver_multiply_test                 ", BinSolver_multiply_test);
@@ -93,7 +95,8 @@ namespace tests_libOTe
 			tc.add("WaksmanPermute_plain_Test               ", WaksmanPermute_plain_Test);
 			tc.add("WaksmanPermute_Proto_Test               ", WaksmanPermute_Proto_Test);
 			tc.add("RevCuckoo_Proto_Test                    ", RevCuckoo_Proto_Test);
-
+			tc.add("RevCuckoo_iterative_Test                ", RevCuckoo_iterative_Test);
+			
 
 			tc.add("Dedup_orTree_test                       ", Dedup_orTree_test);
 			tc.add("Dedup_protocol_test                     ", Dedup_protocol_test);

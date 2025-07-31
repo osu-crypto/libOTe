@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/Matrix.h"
@@ -17,7 +17,16 @@ namespace osuCrypto
 
 		u64 mN = 0;
 
-		DpfMult mMult;
+		//DpfMult mMult;
+
+		u64 mTotalMults = 0;
+
+		oc::BitVector mChoiceBits;
+
+		std::vector<block> mRecvOts;
+		std::vector<std::array<block, 2>> mSendOts;
+
+		u64 mOtIdx = 0;
 
 		void init(u64 partyIdx, u64 n)
 		{
@@ -30,7 +39,13 @@ namespace osuCrypto
 			mN = n;
 
 			std::unordered_map<u64, u64> map;
-			mMult.init(mPartyIdx, switchCount(mN, map));
+			//mMult.init(mPartyIdx, switchCount(mN, map));
+
+			mTotalMults = switchCount(mN, map);
+			mOtIdx = 0;
+			mSendOts.clear();
+			mRecvOts.clear();
+			mChoiceBits.resize(0);
 		}
 
 		static u64 switchCount(u64 n, std::unordered_map<u64, u64>& map)
@@ -61,7 +76,7 @@ namespace osuCrypto
 
 		BaseOtCount baseOtCount() const
 		{
-			auto c = mMult.baseOtCount();
+			auto c = mTotalMults;// mMult.baseOtCount();
 			return { c, c };
 		}
 
@@ -71,13 +86,29 @@ namespace osuCrypto
 			span<const block> recvBaseOts,
 			const oc::BitVector& baseChoices)
 		{
-			mMult.setBaseOts(baseSendOts, recvBaseOts, baseChoices);
+			//mMult.setBaseOts(baseSendOts, recvBaseOts, baseChoices);
+
+			if (baseSendOts.size() != baseOtCount().mSendCount ||
+				recvBaseOts.size() != baseOtCount().mRecvCount ||
+				baseChoices.size() != baseOtCount().mRecvCount)
+				throw RTE_LOC;
+
+			mSendOts.clear();
+			mRecvOts.clear();
+			mSendOts.insert(mSendOts.end(), baseSendOts.begin(), baseSendOts.end());
+			mRecvOts.insert(mRecvOts.end(), recvBaseOts.begin(), recvBaseOts.end());
+			mChoiceBits = baseChoices;
+			mOtIdx = 0;
+		}
+
+		bool hasBaseOts() const
+		{
+			return !mRecvOts.empty() && !mSendOts.empty() && mChoiceBits.size();
 		}
 
 
-
 		template<typename R>
-		void apply(MatrixView<u8> data, R&& ctrl)
+		void applyPlain(MatrixView<u8> data, R&& ctrl)
 		{
 
 			u64 n = data.rows();
@@ -208,8 +239,9 @@ namespace osuCrypto
 
 
 
-		task<> apply(MatrixView<u8> data, block seed, Socket& sock)
+		task<> apply(MatrixView<u8> data, Socket& sock)
 		{
+			mOtIdx = 0;
 			auto print = false;
 			auto n = mN;
 			if (data.rows() != mN)
@@ -222,11 +254,11 @@ namespace osuCrypto
 			nextSubnetSizes.reserve(n);
 			Matrix<u8> temp(data.rows(), data.cols());
 			Matrix<u8> diff(data.rows() / 2, data.cols());
-			std::vector<u8> ctrlBits(divCeil(diff.rows(), 8));
+			//std::vector<u8> ctrlBits(divCeil(diff.rows(), 8));
 			MatrixView<u8> src = data;
 			MatrixView<u8> dst = temp;
 
-			PRNG prng(seed);
+			//PRNG prng(seed);
 
 			// process all left columns/stages
 			for (u64 stage = 0; stage < numStages; ++stage)
@@ -273,11 +305,11 @@ namespace osuCrypto
 
 
 				diff.resize(dIdx, diff.cols());
-				ctrlBits.resize(divCeil(diff.rows(), 8));
-				prng.get(ctrlBits.data(), ctrlBits.size());
-
+				//ctrlBits.resize(divCeil(diff.rows(), 8));
+				//prng.get(ctrlBits.data(), ctrlBits.size());
 				// diff = ctrl * (input[2i] ^ input[2i+1]);
-				co_await mMult.multiply(diff.cols() * 8, ctrlBits, diff, diff, sock);
+				//co_await mMult.multiply(diff.cols() * 8, ctrlBits, diff, diff, sock);
+				co_await randMultiply(diff.cols() * 8, diff, diff, sock);
 
 				idx = 0;
 				dIdx = 0;
@@ -394,16 +426,18 @@ namespace osuCrypto
 					}
 				}
 				diff.resize(dIdx, diff.cols());
-				ctrlBits.resize(divCeil(diff.rows(), 8));
-				prng.get(ctrlBits.data(), ctrlBits.size());
+				//ctrlBits.resize(divCeil(diff.rows(), 8));
+				//prng.get(ctrlBits.data(), ctrlBits.size());
 
 				//if (mPartyIdx == 0)
 				//	std::cout << "stage " << stage << " " << diff.rows() << std::endl;
 
-				if (diff.rows() + mMult.mOtIdx > mMult.mTotalMults)
+				if (diff.rows() + mOtIdx > mTotalMults)
 					throw RTE_LOC;
 
-				co_await mMult.multiply(diff.cols() * 8, ctrlBits, diff, diff, sock);
+				//co_await mMult.multiply(diff.cols() * 8, ctrlBits, diff, diff, sock);
+				co_await randMultiply(diff.cols() * 8, diff, diff, sock);
+
 				dIdx = 0;
 
 				for (u64 subnetIdx = 0, idx = 0;
@@ -483,6 +517,146 @@ namespace osuCrypto
 			}
 		}
 
+
+
+		// Multiply each input vector with a random bit using existing choice bits.
+		// Does not take control bits as input - uses internal mMult choice bits directly.
+		task<> randMultiply(
+			u64 bitCount,
+			MatrixView<const u8> y,
+			MatrixView<u8> xy,
+			coproto::Socket& sock)
+		{
+			u64 n = y.rows();
+
+			if (y.cols() != xy.cols())
+				throw RTE_LOC;
+			if (divCeil(bitCount, 8) != y.cols())
+				throw RTE_LOC;
+			if (n + mOtIdx > mTotalMults)
+				throw RTE_LOC;
+			if (hasBaseOts() == false)
+				throw RTE_LOC;
+
+			auto otIdx = mOtIdx;
+			mOtIdx += n;
+
+
+			auto expandSeed = [](span<u8> dst, block seed0, block seed1) {
+				if (dst.size() < 16)
+				{
+					auto v = seed0 ^ seed1;
+					copyBytesMin(dst, v);
+				}
+				else
+				{
+					AES aes0(seed0);
+					AES aes1(seed1);
+					for (u64 i = 0; dst.size(); ++i)
+					{
+						auto v = aes0.ecbEncBlock(block(i, i))
+							^ aes1.ecbEncBlock(block(i, i));
+						copyBytesMin(dst, v);
+						dst = dst.subspan(std::min<u64>(16, dst.size()));
+					}
+				}
+				};
+
+			// our a share of a * b = c.
+			BitVector a0; a0.append(mChoiceBits, n, otIdx);
+
+			// A0 = 11...1 * a , an expanded version of a used for masking.
+			std::vector<u8> A0(n);
+
+			// our c share of a * b = c.
+			Matrix<u8> C(n, y.cols());
+
+			// theta = y + b
+			Matrix<u8> theta(n, y.cols());
+
+			// our b share of a * b = c
+			Matrix<u8> b1(n, y.cols());
+
+			std::vector<u8> c00c10(y.cols());//, c10(y.cols());
+			for (u64 j = 0; j < n; ++j)
+			{
+				A0[j] = -a0[j];
+				//A0[j] = block(-u64(a0[j]), -u64(a0[j]));
+				expandSeed(c00c10, mRecvOts[otIdx + j], mSendOts[otIdx + j][0]);
+				expandSeed(b1[j], mSendOts[otIdx + j][0], mSendOts[otIdx + j][1]);
+				//b1[j] = mSendOts[otIdx + j][0] ^ mSendOts[otIdx + j][1];
+
+				// C0' = c00+c10+a0b1
+				for (u64 i = 0; i < y.cols(); ++i)
+				{
+					// C0' = c00+c10+a0b1
+					C[j][i] = c00c10[i] ^ (b1[j][i] & A0[j]);
+
+					// theta = y + b
+					theta[j][i] = y[j][i] ^ b1[j][i];
+				}
+			}
+
+			AlignedUnVector<u8> buffer;
+
+			if (bitCount < 16)
+			{
+				// we will back the bits as an optimization.
+				auto thetaSize = divCeil(n * bitCount, 8);
+				buffer.resize(thetaSize);
+
+				DpfMult::packBits(buffer.subspan(0, thetaSize), theta, bitCount);
+
+				co_await sock.send(std::move(buffer));
+
+				buffer.resize(thetaSize);
+				co_await sock.recv(buffer);
+
+				Matrix<u8> theta1(theta.rows(), theta.cols());
+				DpfMult::unpackBits(theta1, buffer.subspan(0, thetaSize), bitCount);
+
+				// reconstruct theta
+				for (u64 j = 0; j < theta.size(); ++j)
+					theta(j) ^= theta1(j);
+			}
+			else
+			{
+				buffer.resize(theta.size());
+
+				copyBytes(buffer.subspan(0, theta.size()), theta);
+
+				co_await sock.send(std::move(buffer));
+
+				buffer.resize(theta.size());
+				co_await sock.recv(buffer);
+				MatrixView<u8> theta1(buffer.data(), theta.rows(), theta.cols());
+
+				// reconstruct theta
+				for (u64 j = 0; j < theta.size(); ++j)
+					theta(j) ^= theta1(j);
+			}
+
+			u8 partyMask = -u8(mPartyIdx);
+			for (u64 j = 0; j < n; ++j)
+			{
+				// mask block of phi
+				u8 Phi = 0;// -*BitIterator(phi.data(), j);
+
+				for (u64 i = 0; i < y.cols(); ++i)
+				{
+					// [zy] = [c] + theta * [a] + phi * [b] + theta * phi
+					xy[j][i] = C[j][i] ^ (theta[j][i] & A0[j]) ^ (Phi & b1[j][i]) ^ (partyMask & theta[j][i] & Phi);
+
+				}
+
+				if (bitCount % 8)
+				{
+					u8 mask = (1 << (bitCount % 8)) - 1;
+					xy[j].back() &= mask;
+				}
+			}
+
+		}
 	};
 
 }

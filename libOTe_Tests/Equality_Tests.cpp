@@ -1,4 +1,4 @@
-﻿#include "Equality_Tests.h"
+#include "Equality_Tests.h"
 #include "libOTe/Dpf/RevCuckoo/Equality.h"
 #include "macoro/sync_wait.h"
 #include "macoro/when_all.h"
@@ -409,6 +409,9 @@ namespace osuCrypto
 		auto Mtx = [](auto& v) { return MatrixView<u8>((u8*)v.data(), v.size(), sizeof(v[0])); }; 
 
 		// Run protocol
+		if (cmd.isSet("old"))
+		{
+
 		auto res = macoro::sync_wait(
 			macoro::when_all_ready(
 				dedup[0].dedup(Mtx(keys[0]), values[0], Mtx(altKeys[0]), prng, sock[0]),
@@ -417,6 +420,19 @@ namespace osuCrypto
 
 		std::get<0>(res).result();
 		std::get<1>(res).result();
+		}
+		else
+		{
+
+			auto res = macoro::sync_wait(
+				macoro::when_all_ready(
+					dedup[0].dedup2(Mtx(keys[0]), values[0], Mtx(altKeys[0]), prng, sock[0]),
+					dedup[1].dedup2(Mtx(keys[1]), values[1], Mtx(altKeys[1]), prng, sock[1])
+				));
+
+			std::get<0>(res).result();
+			std::get<1>(res).result();
+		}
 
 		// Reconstruct outputs
 		bool failed = false;

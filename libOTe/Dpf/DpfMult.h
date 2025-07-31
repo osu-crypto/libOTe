@@ -261,6 +261,7 @@ namespace osuCrypto
 			mOtIdx += n;
 
 
+			// Helper function to expand OT seeds on demand
 			auto expandSeed = [](span<u8> dst, block seed0, block seed1) {
 				if (dst.size() < 16)
 				{
@@ -400,6 +401,210 @@ namespace osuCrypto
 				}
 			}
 
+		}
+
+
+
+
+		// Session struct for storing the setup phase results of multiplication
+		// the x shares have been fixed but can be multiplied with many different 
+		// y shares.
+		struct MultSession
+		{
+			u64 mPartyIdx = 0;
+			u64 mSize = 0;
+			u64 mExpandIdx = 0;
+
+			// Store raw OT data from DpfMult
+			std::vector<block> mRecvOts;
+			std::vector<std::array<block, 2>> mSendOts;
+			BitVector mChoiceBits;
+
+			std::vector<u8> mPhi;  // revealed phi = x + a
+
+			// Helper function to expand OT seeds on demand
+			void expandSeed(span<u8> dst, block seed0, block seed1) const
+			{
+				if (dst.size() < 16)
+				{
+					auto s0 = mAesFixedKey.hashBlock(seed0 + block(mExpandIdx, mExpandIdx));
+					auto s1 = mAesFixedKey.hashBlock(seed1 + block(mExpandIdx, mExpandIdx));
+					auto v = s0 ^ s1;
+					copyBytesMin(dst, v);
+				}
+				else
+				{
+					AES aes0(seed0);
+					AES aes1(seed1);
+					for (u64 i = 0; dst.size(); ++i)
+					{
+						auto v = 
+							aes0.ecbEncBlock(block(mExpandIdx, i)) ^ 
+							aes1.ecbEncBlock(block(mExpandIdx, i));
+						copyBytesMin(dst, v);
+						dst = dst.subspan(std::min<u64>(16, dst.size()));
+					}
+				}
+			}
+
+			// Multiply a new vector y with the stored x
+			// Returns xy as secret shares
+			macoro::task<> multiply(
+				MatrixView<const u8> y,
+				MatrixView<u8> xy,
+				coproto::Socket& sock)
+			{
+				if (y.rows() != mSize || xy.rows() != mSize)
+					throw RTE_LOC;
+				if (y.cols() != xy.cols())
+					throw RTE_LOC;
+
+				auto bitCount = y.cols() * 8;
+
+				// Extract choice bits for this session
+				BitVector a0;
+				a0 = mChoiceBits;
+
+				// Expand OTs on demand to create beaver triple components
+				std::vector<u8> A0(mSize);
+				Matrix<u8> C(mSize, y.cols());
+				Matrix<u8> b1(mSize, y.cols());
+				Matrix<u8> theta(mSize, y.cols());
+
+				std::vector<u8> c00c10(y.cols());
+				for (u64 j = 0; j < mSize; ++j)
+				{
+					A0[j] = -a0[j];
+
+					// Expand OT seeds on demand
+					expandSeed(c00c10, mRecvOts[j], mSendOts[j][0]);
+					expandSeed(b1[j], mSendOts[j][0], mSendOts[j][1]);
+
+					for (u64 i = 0; i < y.cols(); ++i)
+					{
+						// C = c00+c10+a0*b1
+						C[j][i] = c00c10[i] ^ (b1[j][i] & A0[j]);
+						// theta = y + b
+						theta[j][i] = y[j][i] ^ b1[j][i];
+					}
+				}
+
+				// Communication phase - send theta, receive theta from other party
+				AlignedUnVector<u8> buffer;
+
+				if (bitCount < 16)
+				{
+					// Optimized packing for small bit counts
+					auto thetaSize = divCeil(mSize * bitCount, 8);
+					buffer.resize(thetaSize);
+
+					packBits(buffer, theta, bitCount);
+					co_await sock.send(std::move(buffer));
+
+					buffer.resize(thetaSize);
+					co_await sock.recv(buffer);
+
+					Matrix<u8> theta1(theta.rows(), theta.cols());
+					unpackBits(theta1, buffer, bitCount);
+
+					// Reconstruct theta
+					for (u64 j = 0; j < theta.size(); ++j)
+						theta(j) ^= theta1(j);
+				}
+				else
+				{
+					// Standard communication for larger bit counts
+					buffer.resize(theta.size());
+					copyBytes(buffer, theta);
+
+					co_await sock.send(std::move(buffer));
+
+					buffer.resize(theta.size());
+					co_await sock.recv(buffer);
+
+					MatrixView<u8> theta1(buffer.data(), theta.rows(), theta.cols());
+
+					// Reconstruct theta
+					for (u64 j = 0; j < theta.size(); ++j)
+						theta(j) ^= theta1(j);
+				}
+
+				// Final computation: xy = C + theta*A + phi*b + theta*phi
+				u8 partyMask = -u8(mPartyIdx);
+				for (u64 j = 0; j < mSize; ++j)
+				{
+					u8 Phi = -*BitIterator(mPhi.data(), j);
+
+					for (u64 i = 0; i < y.cols(); ++i)
+					{
+						xy[j][i] = C[j][i] ^ (theta[j][i] & A0[j]) ^ (Phi & b1[j][i]) ^ (partyMask & theta[j][i] & Phi);
+					}
+
+					if (bitCount % 8)
+					{
+						u8 mask = (1 << (bitCount % 8)) - 1;
+						xy[j].back() &= mask;
+					}
+				}
+
+				//++mExpandIdx;
+			}
+		};
+
+		// Setup phase for multiplication session
+		// Input: shared bit vector x
+		// Returns: MultSession that can be used for multiple multiplications
+		macoro::task<MultSession> setupMultiply(
+			u64 n,
+			span<const u8> x,
+			coproto::Socket& sock)
+		{
+			if (x.size() != divCeil(n, 8))
+				throw RTE_LOC;
+			if (n + mOtIdx > mTotalMults)
+				throw RTE_LOC;
+			if (!hasBaseOts())
+				throw RTE_LOC;
+
+			auto otIdx = mOtIdx;
+			mOtIdx += n;
+
+			MultSession session;
+			session.mPartyIdx = mPartyIdx;
+			session.mSize = n;
+
+			// Copy the relevant OTs into the session (store seeds, don't expand)
+			session.mRecvOts.resize(n);
+			session.mSendOts.resize(n);
+			session.mChoiceBits.resize(n);
+			for (u64 i = 0; i < n; ++i)
+			{
+				session.mRecvOts[i] = mRecvOts[otIdx + i];
+				session.mSendOts[i] = mSendOts[otIdx + i];
+				session.mChoiceBits[i] = mChoiceBits[otIdx + i];
+			}
+
+			// Compute and exchange phi = x + a
+			session.mPhi.resize(divCeil(n, 8));
+			for (u64 i = 0; i < session.mPhi.size(); ++i)
+				session.mPhi[i] = x[i] ^ session.mChoiceBits.getSpan<u8>()[i];
+			if (n % 8)
+			{
+				u8 mask = (1 << (n % 8)) - 1;
+				session.mPhi.back() &= mask;
+			}
+
+			// Communication phase - exchange phi
+			co_await sock.send(coproto::copy(session.mPhi));
+
+			std::vector<u8> phi1(session.mPhi.size());
+			co_await sock.recv(phi1);
+
+			// Reconstruct phi
+			for (u64 j = 0; j < session.mPhi.size(); ++j)
+				session.mPhi[j] ^= phi1[j];
+
+			co_return session;
 		}
 
 

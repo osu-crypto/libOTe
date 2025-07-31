@@ -528,6 +528,187 @@ namespace osuCrypto
 
 	}
 
+	void RevCuckoo_iterative_Test(const oc::CLP& cmd)
+	{
+		// Initialize parameters
+		PRNG prng(block(231234, 321312));
+		u64 domain = cmd.getOr("domain", 32); // Domain size
+		u64 numPoints = cmd.getOr("numPoints", 4); // Number of points
+		u64 valueByteCount = cmd.getOr("valueByteCount", 16); // Byte count for values
+		u64 numPartitions = cmd.getOr("numPartitions", 2); // Number of partitions
+		u64 linearSecParam = cmd.getOr("linearSecParam", 40); // Security parameter
+		u64 cuckooSecParam = cmd.getOr("cuckooSecParam", 2); // Cuckoo security parameter
+		u64 numValueSets = cmd.getOr("numValueSets", 3); // Number of different value sets to test
+		bool print = cmd.isSet("print"); // Print flag
+
+		// Generate input points (fixed for all iterations)
+		std::vector<u64> points0(numPoints);
+		std::vector<u64> points1(numPoints);
+		std::vector<u64> actualPoints(numPoints);
+		for (u64 i = 0; i < numPoints; ++i)
+		{
+			points1[i] = prng.get<u64>();
+			points0[i] = (prng.get<u64>() % domain) ^ points1[i];
+			actualPoints[i] = points0[i] ^ points1[i];
+		}
+
+		// Initialize RevCuckooDmpf instances
+		std::array<RevCuckooDmpf, 2> dpf;
+		dpf[0].init(0, numPoints, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[1].init(1, numPoints, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[0].mPrint = print;
+		dpf[1].mPrint = print;
+
+		// Setup base OTs
+		auto baseCount0 = dpf[0].baseOtCount();
+		auto baseCount1 = dpf[1].baseOtCount();
+		std::array<std::vector<block>, 2> baseRecv;
+		std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+		std::array<BitVector, 2> baseChoice;
+		baseRecv[0].resize(baseCount0.mRecvCount);
+		baseRecv[1].resize(baseCount1.mRecvCount);
+		baseSend[0].resize(baseCount0.mSendCount);
+		baseSend[1].resize(baseCount1.mSendCount);
+		baseChoice[0].resize(baseCount0.mRecvCount);
+		baseChoice[1].resize(baseCount1.mRecvCount);
+		baseChoice[0].randomize(prng);
+		baseChoice[1].randomize(prng);
+		for (u64 i = 0; i < baseCount0.mRecvCount; ++i)
+		{
+			baseSend[1][i] = prng.get();
+			baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+		}
+		for (u64 i = 0; i < baseCount1.mRecvCount; ++i)
+		{
+			baseSend[0][i] = prng.get();
+			baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+		}
+		dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+		dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+		// Create sockets for communication
+		auto sock = coproto::LocalAsyncSocket::makePair();
+
+		// Phase 1: Setup points (called once)
+		if (print)
+		{
+			std::cout << "Setting up points..." << std::endl;
+		}
+		auto r = macoro::sync_wait(macoro::when_all_ready(
+			dpf[0].setPoints(points0, prng, sock[0]),
+			dpf[1].setPoints(points1, prng, sock[1])
+		));
+		std::get<0>(r).result();
+		std::get<1>(r).result();
+
+		// verify that the internal shares are correct.
+		{
+			std::set<u64> active;
+			// Verify the output for this iteration
+			for (u64 i = 0; i < dpf[0].mLeafShares.size(); ++i)
+			{
+				for (u64 j = 0; j < dpf[0].mLeafShares[i].size(); ++j)
+				{
+					auto val = dpf[0].mLeafShares[i][j] ^ dpf[1].mLeafShares[i][j];
+					bool tag = dpf[0].mLeafTags[i][j] ^ dpf[1].mLeafTags[i][j];
+
+					if (val != ZeroBlock)
+					{
+						active.insert(dpf[0].mSparseSets[i][j]);
+					}
+
+					if ((val != ZeroBlock) != bool(tag))
+						throw RTE_LOC;
+				}
+			}
+			if (active.size() != numPoints)
+				throw RTE_LOC;
+
+			for (auto p : actualPoints)
+			{
+				if (active.find(p) == active.end())
+				{
+					std::cout << "Point " << p << " not found in leaf shares." << std::endl;
+					throw RTE_LOC;
+				}
+			}
+		}
+
+		// Phase 2: Multiple value expansions (called multiple times)
+		for (u64 iteration = 0; iteration < numValueSets; ++iteration)
+		{
+			if (print)
+			{
+				std::cout << "Iteration " << iteration + 1 << " of " << numValueSets << std::endl;
+			}
+
+			// Generate different values for each iteration
+			std::vector<block> values0(numPoints);
+			std::vector<block> values1(numPoints);
+			std::unordered_map<u64, block> expectedMap;
+
+			for (u64 i = 0; i < numPoints; ++i)
+			{
+				values0[i] = prng.get();
+				values1[i] = prng.get();
+				auto p = actualPoints[i];
+				auto v = values0[i] ^ values1[i];
+				expectedMap[p] = v;
+			}
+
+			// Prepare output matrices for this iteration
+			std::array<std::vector<block>, 2> output;
+			output[0].resize(domain);
+			output[1].resize(domain);
+
+			// Expand values using the cached point setup
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].expandValues(values0, [&](auto i, auto v) { output[0][i] = v; }, prng, sock[0]),
+				dpf[1].expandValues(values1, [&](auto i, auto v) { output[1][i] = v; }, prng, sock[1])
+			));
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+
+
+			// Verify the output for this iteration
+			for (u64 i = 0; i < domain; ++i)
+			{
+				auto iter = expectedMap.find(i);
+				auto actual = output[0][i] ^ output[1][i];
+				auto expected = iter == expectedMap.end() ? ZeroBlock : iter->second;
+
+				if (actual != expected)
+				{
+					std::cout << "Iteration " << iteration << " failed at domain point " << i << std::endl;
+					std::cout << "Expected: " << expected << std::endl;
+					std::cout << "Actual: " << actual << std::endl;
+
+					// Show which input points map to this domain position
+					for (u64 j = 0; j < numPoints; ++j)
+					{
+						if (actualPoints[j] == i)
+						{
+							std::cout << "Input point " << j << " maps to domain position " << i
+								<< " with value " << (values0[j] ^ values1[j]) << std::endl;
+						}
+					}
+					throw RTE_LOC;
+				}
+			}
+
+			if (print)
+			{
+				std::cout << "Iteration " << iteration + 1 << " passed verification" << std::endl;
+			}
+		}
+
+
+		if (print)
+		{
+			std::cout << "Iterative and monolithic approaches produce identical results!" << std::endl;
+			std::cout << "RevCuckoo_iterative_Test passed all " << numValueSets + 1 << " iterations" << std::endl;
+		}
+	}
 
 	void Goldreich_Proto_Test(const oc::CLP& cmd)
 	{
