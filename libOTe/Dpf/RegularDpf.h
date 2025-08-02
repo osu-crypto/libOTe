@@ -96,7 +96,7 @@ namespace osuCrypto
 
 		u64 mDepth = 0;
 
-		u64 mNumPointsPerSet = 0;
+		u64 mNumPoints = 0;
 
 		DpfMult mMultiplier;
 
@@ -104,7 +104,8 @@ namespace osuCrypto
 		void init(
 			u64 partyIdx,
 			u64 domain,
-			u64 numPoints);
+			u64 numPoints,
+			CoeffCtx ctx = {});
 
 
 		bool hasBaseOts() const
@@ -235,7 +236,8 @@ namespace osuCrypto
 	inline void RegularDpf<T, CoeffCtx>::init(
 		u64 partyIdx,
 		u64 domain,
-		u64 numPoints)
+		u64 numPoints,
+		CoeffCtx ctx)
 	{
 		if (partyIdx > 1)
 			throw RTE_LOC;
@@ -247,8 +249,10 @@ namespace osuCrypto
 		mDepth = log2ceil(domain);
 		mPartyIdx = partyIdx;
 		mDomain = domain;
-		mNumPointsPerSet = numPoints;
-		mMultiplier.init(partyIdx, numPoints * mDepth);
+		mNumPoints = numPoints;
+
+		mMultiplier.init(partyIdx, 
+			numPoints * (mDepth + !ctx.template characteristicTwo<T>()));
 	}
 
 
@@ -312,9 +316,9 @@ namespace osuCrypto
 
 		if (inputKey == nullptr)
 		{
-			if (points.size() != mNumPointsPerSet)
+			if (points.size() != mNumPoints)
 				throw RTE_LOC;
-			if (values.size() && values.size() != mNumPointsPerSet)
+			if (values.size() && values.size() != mNumPoints)
 				throw RTE_LOC;
 		}
 		else
@@ -323,7 +327,7 @@ namespace osuCrypto
 				throw RTE_LOC;
 		}
 
-		u64 numPoints = mNumPointsPerSet;
+		u64 numPoints = mNumPoints;
 		u64 numPoints8 = numPoints / 8 * 8;
 
 
@@ -346,14 +350,14 @@ namespace osuCrypto
 		}
 
 		std::array<AlignedUnVector<block>, 2> z;
-		z[0].resize(mNumPointsPerSet);
-		z[1].resize(mNumPointsPerSet);
+		z[0].resize(mNumPoints);
+		z[1].resize(mNumPoints);
 		std::array<AlignedUnVector<block>, 2> sigma;
-		sigma[0].resize(mNumPointsPerSet);
-		sigma[1].resize(mNumPointsPerSet);
-		AlignedUnVector<block> sigmaMult(mNumPointsPerSet);
-		BitVector negAlphaj(mNumPointsPerSet);
-		AlignedUnVector<block> diff(mNumPointsPerSet);
+		sigma[0].resize(mNumPoints);
+		sigma[1].resize(mNumPoints);
+		AlignedUnVector<block> sigmaMult(mNumPoints);
+		BitVector negAlphaj(mNumPoints);
+		AlignedUnVector<block> diff(mNumPoints);
 		std::array<block, 8> temp;
 
 		{
@@ -406,7 +410,7 @@ namespace osuCrypto
 
 			if (inputKey)
 			{
-				for (u64 k = 0; k < mNumPointsPerSet; ++k)
+				for (u64 k = 0; k < mNumPoints; ++k)
 				{
 					sigma[0][k] = inputKey->mCorrectionWords(iter - 1, k);
 					sigma[1][k] = sigma[0][k];
@@ -416,7 +420,7 @@ namespace osuCrypto
 			}
 			else
 			{
-				for (u64 k = 0; k < mNumPointsPerSet; ++k)
+				for (u64 k = 0; k < mNumPoints; ++k)
 				{
 					u8 alphaj = *oc::BitIterator(&points[k], mDepth - iter);
 					diff[k] = z[0][k] ^ z[1][k];
@@ -427,9 +431,9 @@ namespace osuCrypto
 
 				co_await mMultiplier.multiply(negAlphaj, diff, diff, sock);
 				// sigma = z[1^alpha[j]]
-				std::vector<block> buff(mNumPointsPerSet + divCeil(mNumPointsPerSet, 128));
-				auto z1LsbIter = BitIterator(&buff[mNumPointsPerSet]);
-				for (u64 k = 0; k < mNumPointsPerSet; ++k)
+				std::vector<block> buff(mNumPoints + divCeil(mNumPoints, 128));
+				auto z1LsbIter = BitIterator(&buff[mNumPoints]);
+				for (u64 k = 0; k < mNumPoints; ++k)
 				{
 					u8 alphaj = *oc::BitIterator(&points[k], mDepth - iter);
 					sigmaMult[k] = diff[k] ^ z[0][k] ^ block(0, mPartyIdx ^ alphaj);
@@ -440,8 +444,8 @@ namespace osuCrypto
 				// reveal sigma and tau
 				co_await sock.send(coproto::copy(buff));
 				co_await sock.recv(buff);
-				z1LsbIter = BitIterator(&buff[mNumPointsPerSet]);
-				for (u64 k = 0; k < mNumPointsPerSet; ++k)
+				z1LsbIter = BitIterator(&buff[mNumPoints]);
+				for (u64 k = 0; k < mNumPoints; ++k)
 				{
 					u8 alphaj = *oc::BitIterator(&points[k], mDepth - iter);
 					auto sigma1Bit = *z1LsbIter++ ^ lsb(z[1][k]) ^ alphaj;
@@ -461,18 +465,18 @@ namespace osuCrypto
 				co_await sock.send(coproto::copy(negAlphaj));
 				co_await sock.send(coproto::copy(z[0]));
 				co_await sock.send(coproto::copy(z[1]));
-				BitVector negAlphaj2(mNumPointsPerSet);
+				BitVector negAlphaj2(mNumPoints);
 
 				std::array<AlignedUnVector<block>, 2> z2;
-				z2[0].resize(mNumPointsPerSet);
-				z2[1].resize(mNumPointsPerSet);
+				z2[0].resize(mNumPoints);
+				z2[1].resize(mNumPoints);
 
 				co_await sock.recv(negAlphaj2);
 				co_await sock.recv(z2[0]);
 				co_await sock.recv(z2[1]);
 
 				auto negA = negAlphaj ^ negAlphaj2;
-				for (u64 i = 0; i < mNumPointsPerSet; ++i)
+				for (u64 i = 0; i < mNumPoints; ++i)
 				{
 					auto na = negA[i];
 					auto a = na ^ 1;
@@ -550,7 +554,7 @@ namespace osuCrypto
 
 					}
 
-					for (u64 k = numPoints8; k < mNumPointsPerSet; ++k)
+					for (u64 k = numPoints8; k < mNumPoints; ++k)
 					{
 						for (u64 j = 0; j < 2; ++j)
 						{
@@ -574,11 +578,11 @@ namespace osuCrypto
 			co_return;
 
 		auto size = roundUpTo(mDomain, 2);
-		Matrix<block> tags(size, mNumPointsPerSet);
-		auto leafSums = ctx.template makeVec<T>(mNumPointsPerSet);
+		Matrix<block> tags(size, mNumPoints);
+		auto leafSums = ctx.template makeVec<T>(mNumPoints);
 		ctx.zero(leafSums.begin(), leafSums.end());
 
-		auto leaves = ctx.template makeVec<T>(mNumPointsPerSet * size);
+		auto leaves = ctx.template makeVec<T>(mNumPoints * size);
 		auto zero = ctx.template make<T>();
 		ctx.zero(zero);
 
@@ -619,7 +623,7 @@ namespace osuCrypto
 					}
 				}
 
-				for (u64 k = numPoints8; k < mNumPointsPerSet; ++k)
+				for (u64 k = numPoints8; k < mNumPoints; ++k)
 				{
 					for (u64 j = 0; j < 2; ++j)
 					{
@@ -635,20 +639,20 @@ namespace osuCrypto
 			}
 		}
 		//std::cout << std::endl;
-		//std::cout << mPartyIdx << " " << mDomain << " " << mNumPointsPerSet << " " << mDepth << std::endl;
-		//for (u64 i = 0; i < mNumPointsPerSet; ++i)
+		//std::cout << mPartyIdx << " " << mDomain << " " << mNumPoints << " " << mDepth << std::endl;
+		//for (u64 i = 0; i < mNumPoints; ++i)
 		//{
 		//	for(u64 j = 0; j < mDomain; ++j)
 		//	{
-		//		std::cout << ctx.str(leaves[i + j * mNumPointsPerSet]) << " ";
+		//		std::cout << ctx.str(leaves[i + j * mNumPoints]) << " ";
 		//	}
 		//	std::cout << std::endl;
 		//}
 
 		if (values.size() || (inputKey && inputKey->mLeafVals.size()))
 		{
-			auto gamma = ctx.template makeVec<T>(mNumPointsPerSet);
-			//AlignedUnVector<block> gamma(mNumPointsPerSet);
+			auto gamma = ctx.template makeVec<T>(mNumPoints);
+			//AlignedUnVector<block> gamma(mNumPoints);
 			if (inputKey)
 			{
 				ctx.deserialize(inputKey->mLeafVals.begin(), inputKey->mLeafVals.end(), gamma.begin());
@@ -657,7 +661,7 @@ namespace osuCrypto
 			{
 				//////////
 				// gamma = beta - sum_i y_i 
-				for (u64 k = 0; k < mNumPointsPerSet; ++k)
+				for (u64 k = 0; k < mNumPoints; ++k)
 					ctx.minus(leafSums[k], values[k], leafSums[k]);
 
 				// if not charactristic two, we need to conditionally negate
@@ -665,7 +669,7 @@ namespace osuCrypto
 				// active leaf.
 				if (ctx.template characteristicTwo<T>() == false)
 				{
-					std::vector<u8> d(mNumPointsPerSet);
+					std::vector<u8> d(mNumPoints);
 					for (u64 i = 0; i < size; ++i)
 					{
 						for (u64 j = 0; j < d.size(); ++j)
@@ -681,21 +685,33 @@ namespace osuCrypto
 					for (u64 j = 0; j < d.size(); ++j)
 						d[j] = ((d[j] / 2) % 2) ^ (mPartyIdx & d[j]);
 
-					// insecure version 
-					if(0)
+					// if d, then we need to negate the leaf sums.
+					// we will compute the difference between leafSums and -leafSums.
+					// diff = leafSums - (-leafSums)
+					//
+					// and then 
+					// 
+					// h = leafSums - d * diff
+					//   = leafSums - d * (leafSums - (-leafSums))
+					//   = (1-d) leafSums + d * (-leafSums)
+
+					auto diff = ctx.template makeVec<T>(mNumPoints);
+					BitVector dBits(mNumPoints);
+					for (u64 k = 0; k < mNumPoints; ++k)
 					{
-						std::vector<u8> otherD(mNumPointsPerSet);
-						co_await sock.send(coproto::copy(d));
-						co_await sock.recv(otherD);
-						for (u64 j = 0; j < mNumPointsPerSet; ++j)
-						{
-							if ((d[j] ^ otherD[j]) == 1)
-								ctx.minus(leafSums[j], zero, leafSums[j]);
-						}
+						assert(d[k] < 2);
+						dBits[k] = d[k];
+						ctx.plus(diff[k], leafSums[k], leafSums[k]);
 					}
-					else
+
+					co_await mMultiplier.multiply<T>(dBits.getSpan<u8>(), diff, diff, sock, ctx);
+
+					// now we have d * diff
+					for (u64 k = 0; k < mNumPoints; ++k)
 					{
-						throw RTE_LOC;
+						// leadSums[k] = leafSums[k] - diff[k];
+						//             = (1-d) leafSums[k] + d * (-leafSums[k])
+						ctx.minus(leafSums[k], leafSums[k], diff[k]);
 					}
 
 				}
@@ -708,14 +724,14 @@ namespace osuCrypto
 				buffer.resize(leafSums.size() * ctx.template byteSize<T>());
 				co_await sock.recv(buffer);
 				ctx.deserialize(buffer.begin(), buffer.end(), gamma.begin());
-				for (u64 k = 0; k < mNumPointsPerSet; ++k)
+				for (u64 k = 0; k < mNumPoints; ++k)
 					ctx.plus(gamma[k], gamma[k], leafSums[k]);
 			}
 
 			if (outputKey)
 			{
 				//outputKey->mLeafVals.insert(outputKey->mLeafVals.end(), gamma.begin(), gamma.end());
-				outputKey->mLeafVals.resize(mNumPointsPerSet * ctx.template byteSize<T>());
+				outputKey->mLeafVals.resize(mNumPoints * ctx.template byteSize<T>());
 				ctx.serialize(gamma.begin(), gamma.end(), outputKey->mLeafVals.begin());
 			}
 			else
@@ -727,7 +743,7 @@ namespace osuCrypto
 				for (u64 i = 0; i < mDomain; ++i)
 				{
 					//auto sdi = getRow(sd, i);
-					auto sdi = leaves.begin() + i * mNumPointsPerSet;
+					auto sdi = leaves.begin() + i * mNumPoints;
 					auto tdi = getRow(td, i);
 
 					for (u64 k = 0; k < numPoints8; k += 8)
@@ -739,7 +755,7 @@ namespace osuCrypto
 							SIMD8(q, ctx.plus(temp[q], sdi[k + q], temp[q]));
 						SIMD8(q, output(k + q, i, temp[q], tdi[k + q]));
 					}
-					for (u64 k = numPoints8; k < mNumPointsPerSet; ++k)
+					for (u64 k = numPoints8; k < mNumPoints; ++k)
 					{
 						//auto T = tdi[k] & gamma[k];
 						ctx.mask(temp[0], gamma[k], tdi[k]);
@@ -765,9 +781,9 @@ namespace osuCrypto
 			{
 				//auto sdi = getRow(sd, i);
 
-				auto sdi = leaves.begin() + i * mNumPointsPerSet;
+				auto sdi = leaves.begin() + i * mNumPoints;
 				auto tdi = getRow(td, i);
-				for (u64 k = 0; k < mNumPointsPerSet; ++k)
+				for (u64 k = 0; k < mNumPoints; ++k)
 				{
 					output(k, i, sdi[k], tdi[k]);
 				}

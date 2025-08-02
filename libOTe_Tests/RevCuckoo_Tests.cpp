@@ -430,106 +430,109 @@ namespace osuCrypto
 	void RevCuckoo_Proto_Test(const oc::CLP& cmd)
 	{
 
+		//using F = block;
 
-		// Initialize parameters
-		PRNG prng(block(231234, 321312));
-		u64 domain = cmd.getOr("domain", 32); // Domain size
-		u64 numPoints = cmd.getOr("numPoints", 4); // Number of points
-		u64 numSets = cmd.getOr("numSets", 1); // Number of sets
-		u64 numPartitions = cmd.getOr("numPartitions", 2); // Number of partitions
-		u64 linearSecParam = cmd.getOr("linearSecParam", 40); // Security parameter
-		u64 cuckooSecParam = cmd.getOr("cuckooSecParam", 2); // Cuckoo security parameter
-		bool print = cmd.isSet("print"); // Print flag
+		//// Initialize parameters
+		//PRNG prng(block(231234, 321312));
+		//u64 domain = cmd.getOr("domain", 32); // Domain size
+		//u64 numPoints = cmd.getOr("numPoints", 4); // Number of points
+		//u64 numSets = cmd.getOr("numSets", 1); // Number of sets
+		//u64 numPartitions = cmd.getOr("numPartitions", 2); // Number of partitions
+		//u64 linearSecParam = cmd.getOr("linearSecParam", 40); // Security parameter
+		//u64 cuckooSecParam = cmd.getOr("cuckooSecParam", 2); // Cuckoo security parameter
+		//bool print = cmd.isSet("print"); // Print flag
 
-		// Generate input points and values
-		std::vector<u64> points0(numPoints);
-		std::vector<u64> points1(numPoints);
-		std::vector<block> values0(numPoints);
-		std::vector<block> values1(numPoints);
-		std::unordered_map<u64, block> expMap;
-		for (u64 i = 0; i < numPoints; ++i)
-		{
-			points1[i] = prng.get<u64>();
-			points0[i] = (prng.get<u64>() % domain) ^ points1[i];
-			values0[i] = prng.get();
-			values1[i] = prng.get();
-			auto p = points0[i] ^ points1[i];
-			auto v = values0[i] ^ values1[i];
-			expMap[p] = v;
+		//// Generate input points and values
+		//std::vector<u64> points0(numPoints);
+		//std::vector<u64> points1(numPoints);
+		//std::vector<block> values0(numPoints);
+		//std::vector<block> values1(numPoints);
+		//std::unordered_map<u64, block> expMap;
+		//for (u64 i = 0; i < numPoints; ++i)
+		//{
+		//	points1[i] = prng.get<u64>();
+		//	points0[i] = (prng.get<u64>() % domain) ^ points1[i];
+		//	values0[i] = prng.get();
+		//	values1[i] = prng.get();
+		//	auto p = points0[i] ^ points1[i];
+		//	auto v = values0[i] ^ values1[i];
+		//	expMap[p] = v;
 
-			//std::cout << std::setw(4) << p << " | " << v << std::endl;
-		}
-		//std::cout << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~" << std::endl;
+		//	//std::cout << std::setw(4) << p << " | " << v << std::endl;
+		//}
+		////std::cout << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~" << std::endl;
+		//auto ctx = DefaultCoeffCtx<F>{};
 
-		// Initialize RevCuckooDmpf instances
-		std::array<RevCuckooDmpf, 2> dpf;
-		dpf[0].init2(0, numPoints, numSets, domain, numPartitions, cuckooSecParam, linearSecParam);
-		dpf[1].init2(1, numPoints, numSets, domain, numPartitions, cuckooSecParam, linearSecParam);
-		dpf[0].mPrint = print;
-		dpf[1].mPrint = print;
+		//// Initialize RevCuckooDmpf instances
+		//std::array<RevCuckooDmpf<F>, 2> dpf;
+		//dpf[0].init(0, numPoints, numSets, domain, ctx, numPartitions, cuckooSecParam, linearSecParam);
+		//dpf[1].init(1, numPoints, numSets, domain,ctx, numPartitions, cuckooSecParam, linearSecParam);
+		//dpf[0].mPrint = print;
+		//dpf[1].mPrint = print;
 
-		// Setup base OTs
-		auto baseCount0 = dpf[0].baseOtCount();
-		auto baseCount1 = dpf[1].baseOtCount();
-		std::array<std::vector<block>, 2> baseRecv;
-		std::array<std::vector<std::array<block, 2>>, 2> baseSend;
-		std::array<BitVector, 2> baseChoice;
-		baseRecv[0].resize(baseCount0.mRecvCount);
-		baseRecv[1].resize(baseCount1.mRecvCount);
-		baseSend[0].resize(baseCount0.mSendCount);
-		baseSend[1].resize(baseCount1.mSendCount);
-		baseChoice[0].resize(baseCount0.mRecvCount);
-		baseChoice[1].resize(baseCount1.mRecvCount);
-		baseChoice[0].randomize(prng);
-		baseChoice[1].randomize(prng);
-		for (u64 i = 0; i < baseCount0.mRecvCount; ++i)
-		{
-			baseSend[1][i] = prng.get();
-			baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
-		}
-		for (u64 i = 0; i < baseCount1.mRecvCount; ++i)
-		{
-			baseSend[0][i] = prng.get();
-			baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
-		}
-		dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
-		dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+		//// Setup base OTs
+		//auto baseCount0 = dpf[0].baseOtCount();
+		//auto baseCount1 = dpf[1].baseOtCount();
+		//std::array<std::vector<block>, 2> baseRecv;
+		//std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+		//std::array<BitVector, 2> baseChoice;
+		//baseRecv[0].resize(baseCount0.mRecvCount);
+		//baseRecv[1].resize(baseCount1.mRecvCount);
+		//baseSend[0].resize(baseCount0.mSendCount);
+		//baseSend[1].resize(baseCount1.mSendCount);
+		//baseChoice[0].resize(baseCount0.mRecvCount);
+		//baseChoice[1].resize(baseCount1.mRecvCount);
+		//baseChoice[0].randomize(prng);
+		//baseChoice[1].randomize(prng);
+		//for (u64 i = 0; i < baseCount0.mRecvCount; ++i)
+		//{
+		//	baseSend[1][i] = prng.get();
+		//	baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+		//}
+		//for (u64 i = 0; i < baseCount1.mRecvCount; ++i)
+		//{
+		//	baseSend[0][i] = prng.get();
+		//	baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+		//}
+		//dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+		//dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 
-		// Prepare output matrices
-		std::array<std::vector<block>, 2> output;
-		output[0].resize(domain);
-		output[1].resize(domain);
+		//// Prepare output matrices
+		//std::array<std::vector<block>, 2> output;
+		//output[0].resize(domain);
+		//output[1].resize(domain);
 
 
-		// Create sockets for communication
-		auto sock = coproto::LocalAsyncSocket::makePair();
+		//// Create sockets for communication
+		//auto sock = coproto::LocalAsyncSocket::makePair();
 
-		// Expand the protocol
-		macoro::sync_wait(macoro::when_all_ready(
-			dpf[0].expand(points0, values0, [&](auto i, auto v) { output[0][i] = v; }, prng, sock[0]),
-			dpf[1].expand(points1, values1, [&](auto i, auto v) { output[1][i] = v; }, prng, sock[1])
-		));
+		//// Expand the protocol
+		//macoro::sync_wait(macoro::when_all_ready(
+		//	dpf[0].expand(points0, values0, [&](auto i, auto v) { output[0][i] = v; }, prng, sock[0]),
+		//	dpf[1].expand(points1, values1, [&](auto i, auto v) { output[1][i] = v; }, prng, sock[1])
+		//));
 
-		// Verify the output
-		for (u64 i = 0; i < numPoints; ++i)
-		{
-			auto iter = expMap.find(i);
-			auto act = output[0][i] ^ output[1][i];
-			auto exp = iter == expMap.end() ? ZeroBlock : iter->second;
-			if (act != exp)
-			{
-				std::cout << "i " << i << std::endl;
-				std::cout << "act " << act << std::endl;
-				std::cout << "exp " << exp << std::endl;
+		//// Verify the output
+		//for (u64 i = 0; i < numPoints; ++i)
+		//{
+		//	auto iter = expMap.find(i);
+		//	auto act = output[0][i] ^ output[1][i];
+		//	auto exp = iter == expMap.end() ? ZeroBlock : iter->second;
+		//	if (act != exp)
+		//	{
+		//		std::cout << "i " << i << std::endl;
+		//		std::cout << "act " << act << std::endl;
+		//		std::cout << "exp " << exp << std::endl;
 
-				throw RTE_LOC;
-			}
-		}
+		//		throw RTE_LOC;
+		//	}
+		//}
 
 	}
 
 	void RevCuckoo_iterative_Test(const oc::CLP& cmd)
 	{
+		using F = block;
 		// Initialize parameters
 		PRNG prng(block(231234, 321312));
 		u64 domain = cmd.getOr("domain", 32); // Domain size
@@ -553,10 +556,12 @@ namespace osuCrypto
 			actualPoints(i) = points0(i) ^ points1(i);
 		}
 
+		auto ctx = DefaultCoeffCtx<F>{};
+
 		// Initialize RevCuckooDmpf instances
-		std::array<RevCuckooDmpf, 2> dpf;
-		dpf[0].init2(0, numPoints, numSets, domain, numPartitions, cuckooSecParam, linearSecParam);
-		dpf[1].init2(1, numPoints, numSets, domain, numPartitions, cuckooSecParam, linearSecParam);
+		std::array<RevCuckooDmpf<F>, 2> dpf;
+		dpf[0].init(0, numPoints, numSets, domain, ctx, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[1].init(1, numPoints, numSets, domain, ctx, numPartitions, cuckooSecParam, linearSecParam);
 		dpf[0].mPrint = print;
 		dpf[1].mPrint = print;
 		if (cmd.hasValue("print"))

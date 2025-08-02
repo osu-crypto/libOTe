@@ -278,161 +278,9 @@ namespace osuCrypto
 			const CoeffCtx& ctx)
 		{
 
-			// OT Setup:
-			// For each multiplication, we have:
-			// - mRecvOts0: A single block received from OT seed
-			// - mChoiceBit0: The choice bit used in OT, becomes our bit share a0
-			// - mSendOt0: Two blocks [seed0, seed1] sent in OT  
-			//
-			// such that 
-			//  - mRecvOts0 = mSendOts1[mChoiceBit0]
-			//  - mRecvOts1 = mSendOts0[mChoiceBit1]
-			//
-			// 
-			// Observe that if we performed the following OTs. The parites
-			// sample a random [t] of the field. Then they perform the following
-			// 
-			//                                (t1 + (0 ⊕ x1) * y1)
-			// x0 ---------->  OT  <--------- (t1 + (1 ⊕ x1) * y1)
-			//                 |
-			//      <----------/
-			// w0 = (t1 + (x0 ⊕ x1) * y1)
-			//    = (t1 +  x        * y1)
-			// 
-			// (t0 + (x0 ⊕ 0) * y0)
-			// (t0 + (x0 ⊕ 1) * y0)
-			//     ------------->  OT  <--------- x1
-			//                     |
-			//                     \------------> w1 = (t0 + (x0 ⊕ x1) * y0)
-			//                                       = (t0 +  x        * y0)
-			// 
-			// then we have 
-			//	[w]-[t] = (t1 + x * y1) + (t0 + x * y0) - (t1 + t0)
-			//          = (x * y1) + (x * y0)
-			//          = x * (y0 + y1)
-			//          = x * y
-			// 
-			// Currently we have random OTs but the above requires the 
-			// choice bit to be x0,x1. To fix this the parties will send
-			// the difference
-			//   phi0 = x0 ⊕ c0
-			//   phi1 = x1 ⊕ c1
-			// where c0,c1 are the choice bits used in the OTs. The other party
-			// will derandomize the OTs by computing
-			//   if (phi0) swap(mSendOts0[0], mSendOts0[1]);
-			//   if (phi1) swap(mSendOts1[0], mSendOts1[1]);
-			// 
-			// Then to reduce the communication, we dont want to send both 
-			// OT messages. Observe that [t] is chosen uniformly at random.
-			// Therefore we can define 
-			//
-			//  (t0 + (x0 ⊕ 0) * y0) = mSendOts0[0]
-			//   t0 = mSendOts0[0] - (x0 ⊕ 0) * y0
-			// 
-			//  (t1 + (0 ⊕ x1) * y1) = mSendOts1[0]
-			//   t1 = mSendOts1[0] - (0 ⊕ x1) * y1
-			// 
-			// This way we do not need to send (t1 + (0 ⊕ x1) * y1) as both parties
-			// can locally compute it given mSendOts0[0].
-
-			u64 n = y.size();
-			if (x.size() != divCeil(n, 8) || xy.size() != n)
-				throw RTE_LOC;
-			if (n + mOtIdx > mTotalMults)
-				throw RTE_LOC;
-			if (hasBaseOts() == false)
-				throw RTE_LOC;
-
-			auto otIdx = mOtIdx;
-			mOtIdx += n;
-
-
-			// Extract our a shares from choice bits
-			BitVector c0;
-			c0.append(mChoiceBits, n, otIdx);
-
-			// Compute phi0 = x0 + c0 (bit-wise XOR for bits)
-			std::vector<u8> phi0(x.size());
-			auto C0 = c0.getSpan<u8>();
-			for (u64 i = 0; i < phi0.size(); ++i)
-				phi0[i] = x[i] ^ C0[i];
-			if (n % 8)
-			{
-				u8 mask = (1 << (n % 8)) - 1;
-				phi0.back() &= mask;
-			}
-
-			co_await sock.send(std::move(phi0));
-			// Receive phi1 from the other party
-			std::vector<u8> phi1(x.size());
-			co_await sock.recv(phi1);
-
-			std::vector<u8> msg(n * ctx.template byteSize<F>());
-			auto mIter = msg.data();
-			auto zero = ctx.template make<F>();
-			ctx.zero(zero);
-			for (u64 i = 0; i < n; ++i)
-			{
-				if (bit(phi1, i))
-					std::swap(mSendOts[otIdx + i][0], mSendOts[otIdx + i][1]);
-
-				auto t0 = ctx.template make<F>();
-				ctx.fromBlock(t0, mSendOts[otIdx + i][0]);
-
-				auto xi = bit(x, i);
-				if (xi)
-					ctx.minus(t0, t0, y[i]);
-
-				// m1 = t0 + (x0 ⊕ 1) * y0
-				auto m1 = ctx.template make<F>();
-				ctx.fromBlock(m1, mSendOts[otIdx + i][1]); // mask the m1 message using the OT.
-				ctx.plus(m1, m1, t0);
-				if (xi == 0)
-					ctx.plus(m1, m1, y[i]);
-
-				ctx.serialize(&m1, &m1 + 1, mIter);
-				mIter += ctx.template byteSize<F>();
-
-				// xy = -t0
-				auto nt0 = ctx.template make<F>();
-				ctx.minus(xy[i], zero, t0);
-			}
-
-			co_await sock.send(std::move(msg));
-			msg.resize(n * ctx.template byteSize<F>());
-			co_await sock.recv(msg);
-			mIter = msg.data();
-			for (u64 i = 0; i < n; ++i)
-			{
-				auto m1 = ctx.template make<F>();
-				ctx.deserialize(mIter + 0, mIter + ctx.template byteSize<F>(), &m1);
-				mIter += ctx.template byteSize<F>();
-
-				auto mx = ctx.template make<F>();
-				ctx.fromBlock(mx, mRecvOts[otIdx + i]);
-
-				auto w0 = ctx.template make<F>();
-				auto xi = bit(x, i);
-				if (xi)
-				{
-					// m1 = mx + w0
-					//    = mx + (t1 + (1 ⊕ x1) * y1)
-					//    = mx + (t1 +  x       * y1)
-					// w0 = m1 - mx
-					//	  = (t1 + x * y1)
-					ctx.minus(w0, m1, mx);
-				}
-				else
-				{
-					// w0 = m0 = mx
-					//    = (t1 + (0 ⊕ x1) * y1)
-					//    = (t1 + x * y1)
-					ctx.copy(w0, mx);
-				}
-
-				// reconstruct xy
-				ctx.plus(xy[i], xy[i], w0);
-			}
+			auto session = co_await setupMultiply(y.size(), x, sock);
+			co_await session.template multiply<F, CoeffCtx>(y, xy, sock, ctx);
+			co_return;
 		}
 
 		// Custom CoeffCtx for byte-oriented matrix operations
@@ -609,6 +457,11 @@ namespace osuCrypto
 			if (hasBaseOts() == false)
 				throw RTE_LOC;
 
+			if (bitCount < 8)
+			{
+				std::cout << "DpfMult::multiply: bitCount < 8. " << LOCATION << std::endl;
+			}
+
 			// Create matrix coefficient context
 			BitMatrixCoeffCtx ctx(bitCount);
 
@@ -630,144 +483,171 @@ namespace osuCrypto
 		struct MultSession
 		{
 			u64 mPartyIdx = 0;
-			u64 mSize = 0;
 			u64 mExpandIdx = 0;
 
 			// Store raw OT data from DpfMult
 			std::vector<block> mRecvOts;
 			std::vector<std::array<block, 2>> mSendOts;
-			BitVector mChoiceBits;
-
-			std::vector<u8> mPhi;  // revealed phi = x + a
-
-			// Helper function to expand OT seeds on demand
-			void expandSeed(span<u8> dst, block seed0, block seed1) const
-			{
-				if (dst.size() < 16)
-				{
-					auto s0 = mAesFixedKey.hashBlock(seed0 + block(mExpandIdx, mExpandIdx));
-					auto s1 = mAesFixedKey.hashBlock(seed1 + block(mExpandIdx, mExpandIdx));
-					auto v = s0 ^ s1;
-					copyBytesMin(dst, v);
-				}
-				else
-				{
-					AES aes0(seed0);
-					AES aes1(seed1);
-					for (u64 i = 0; dst.size(); ++i)
-					{
-						auto v =
-							aes0.ecbEncBlock(block(mExpandIdx, i)) ^
-							aes1.ecbEncBlock(block(mExpandIdx, i));
-						copyBytesMin(dst, v);
-						dst = dst.subspan(std::min<u64>(16, dst.size()));
-					}
-				}
-			}
+			BitVector mX;
 
 			// Multiply a new vector y with the stored x
 			// Returns xy as secret shares
+			template<typename F, typename CoeffCtx>
 			macoro::task<> multiply(
+				auto&& y,
+				auto&& xy,
+				coproto::Socket& sock,
+				CoeffCtx ctx = {})
+			{
+				// OT Setup:
+				// For each multiplication, we have:
+				// - mRecvOts0: A single block received from OT seed
+				// - mChoiceBit0: The choice bit used in OT, becomes our bit share a0
+				// - mSendOt0: Two blocks [seed0, seed1] sent in OT  
+				//
+				// such that 
+				//  - mRecvOts0 = mSendOts1[mChoiceBit0]
+				//  - mRecvOts1 = mSendOts0[mChoiceBit1]
+				//
+				// 
+				// Observe that if we performed the following OTs. The parites
+				// sample a random [t] of the field. Then they perform the following
+				// 
+				//                                (t1 + (0 ⊕ x1) * y1)
+				// x0 ---------->  OT  <--------- (t1 + (1 ⊕ x1) * y1)
+				//                 |
+				//      <----------/
+				// w0 = (t1 + (x0 ⊕ x1) * y1)
+				//    = (t1 +  x        * y1)
+				// 
+				// (t0 + (x0 ⊕ 0) * y0)
+				// (t0 + (x0 ⊕ 1) * y0)
+				//     ------------->  OT  <--------- x1
+				//                     |
+				//                     \------------> w1 = (t0 + (x0 ⊕ x1) * y0)
+				//                                       = (t0 +  x        * y0)
+				// 
+				// then we have 
+				//	[w]-[t] = (t1 + x * y1) + (t0 + x * y0) - (t1 + t0)
+				//          = (x * y1) + (x * y0)
+				//          = x * (y0 + y1)
+				//          = x * y
+				// 
+				// setupMultiply derandomize the OTs so that the choice bits
+				// are x0,x1. This is done by sending the difference
+				//   phi0 = x0 ⊕ c0
+				//   phi1 = x1 ⊕ c1
+				// where c0,c1 are the choice bits used in the OTs. The other party
+				// will derandomize the OTs by computing
+				//   if (phi0) swap(mSendOts0[0], mSendOts0[1]);
+				//   if (phi1) swap(mSendOts1[0], mSendOts1[1]);
+				// 
+				// Then to reduce the communication, we dont want to send both 
+				// OT messages. Observe that [t] is chosen uniformly at random.
+				// Therefore we can define 
+				//
+				//  (t0 + (x0 ⊕ 0) * y0) = mSendOts0[0]
+				//   t0 = mSendOts0[0] - (x0 ⊕ 0) * y0
+				// 
+				//  (t1 + (0 ⊕ x1) * y1) = mSendOts1[0]
+				//   t1 = mSendOts1[0] - (0 ⊕ x1) * y1
+				// 
+				// This way we do not need to send (t1 + (0 ⊕ x1) * y1) as both parties
+				// can locally compute it given mSendOts0[0].
+
+				u64 n = mX.size();
+				if (y.size() != n || xy.size() != n)
+					throw RTE_LOC;
+
+				std::vector<u8> msg(n * ctx.template byteSize<F>());
+				auto mIter = msg.data();
+				auto zero = ctx.template make<F>();
+				ctx.zero(zero);
+				for (u64 i = 0; i < n; ++i)
+				{
+					auto t0 = ctx.template make<F>();
+					ctx.fromBlock(t0, mSendOts[i][0]);
+
+					auto xi = mX[i];
+					if (xi)
+						ctx.minus(t0, t0, y[i]);
+
+					// m1 = t0 + (x0 ⊕ 1) * y0
+					auto m1 = ctx.template make<F>();
+					ctx.fromBlock(m1, mSendOts[i][1]); // mask the m1 message using the OT.
+					ctx.plus(m1, m1, t0);
+					if (xi == 0)
+						ctx.plus(m1, m1, y[i]);
+
+					ctx.serialize(&m1, &m1 + 1, mIter);
+					mIter += ctx.template byteSize<F>();
+
+					// xy = -t0
+					auto nt0 = ctx.template make<F>();
+					ctx.minus(xy[i], zero, t0);
+				}
+
+				co_await sock.send(std::move(msg));
+				msg.resize(n * ctx.template byteSize<F>());
+				co_await sock.recv(msg);
+				mIter = msg.data();
+				for (u64 i = 0; i < n; ++i)
+				{
+					auto m1 = ctx.template make<F>();
+					ctx.deserialize(mIter + 0, mIter + ctx.template byteSize<F>(), &m1);
+					mIter += ctx.template byteSize<F>();
+
+					auto mx = ctx.template make<F>();
+					ctx.fromBlock(mx, mRecvOts[i]);
+
+					auto w0 = ctx.template make<F>();
+					auto xi = mX[i];
+					if (xi)
+					{
+						// m1 = mx + w0
+						//    = mx + (t1 + (1 ⊕ x1) * y1)
+						//    = mx + (t1 +  x       * y1)
+						// w0 = m1 - mx
+						//	  = (t1 + x * y1)
+						ctx.minus(w0, m1, mx);
+					}
+					else
+					{
+						// w0 = m0 = mx
+						//    = (t1 + (0 ⊕ x1) * y1)
+						//    = (t1 + x * y1)
+						ctx.copy(w0, mx);
+					}
+
+					// reconstruct xy
+					ctx.plus(xy[i], xy[i], w0);
+				}
+			}
+			macoro::task<> multiplyMtx(
 				MatrixView<const u8> y,
 				MatrixView<u8> xy,
 				coproto::Socket& sock)
 			{
-				if (y.rows() != mSize || xy.rows() != mSize)
+				if(y.cols() != xy.cols())
 					throw RTE_LOC;
-				if (y.cols() != xy.cols())
+				if (y.rows() != xy.rows())
+					throw RTE_LOC;
+				if (y.rows() != mX.size())
 					throw RTE_LOC;
 
-				auto bitCount = y.cols() * 8;
+				auto ctx = DpfMult::BitMatrixCoeffCtx(y.cols() * 8);
 
-				// Extract choice bits for this session
-				BitVector a0;
-				a0 = mChoiceBits;
-
-				// Expand OTs on demand to create beaver triple components
-				std::vector<u8> A0(mSize);
-				Matrix<u8> C(mSize, y.cols());
-				Matrix<u8> b1(mSize, y.cols());
-				Matrix<u8> theta(mSize, y.cols());
-
-				std::vector<u8> c00c10(y.cols());
-				for (u64 j = 0; j < mSize; ++j)
-				{
-					A0[j] = -a0[j];
-
-					// Expand OT seeds on demand
-					expandSeed(c00c10, mRecvOts[j], mSendOts[j][0]);
-					expandSeed(b1[j], mSendOts[j][0], mSendOts[j][1]);
-
-					for (u64 i = 0; i < y.cols(); ++i)
-					{
-						// C = c00+c10+a0*b1
-						C[j][i] = c00c10[i] ^ (b1[j][i] & A0[j]);
-						// theta = y + b
-						theta[j][i] = y[j][i] ^ b1[j][i];
-					}
-				}
-
-				// Communication phase - send theta, receive theta from other party
-				AlignedUnVector<u8> buffer;
-
-				if (bitCount < 16)
-				{
-					// Optimized packing for small bit counts
-					auto thetaSize = divCeil(mSize * bitCount, 8);
-					buffer.resize(thetaSize);
-
-					packBits(buffer, theta, bitCount);
-					co_await sock.send(std::move(buffer));
-
-					buffer.resize(thetaSize);
-					co_await sock.recv(buffer);
-
-					Matrix<u8> theta1(theta.rows(), theta.cols());
-					unpackBits(theta1, buffer, bitCount);
-
-					// Reconstruct theta
-					for (u64 j = 0; j < theta.size(); ++j)
-						theta(j) ^= theta1(j);
-				}
-				else
-				{
-					// Standard communication for larger bit counts
-					buffer.resize(theta.size());
-					copyBytes(buffer, theta);
-
-					co_await sock.send(std::move(buffer));
-
-					buffer.resize(theta.size());
-					co_await sock.recv(buffer);
-
-					MatrixView<u8> theta1(buffer.data(), theta.rows(), theta.cols());
-
-					// Reconstruct theta
-					for (u64 j = 0; j < theta.size(); ++j)
-						theta(j) ^= theta1(j);
-				}
-
-				// Final computation: xy = C + theta*A + phi*b + theta*phi
-				u8 partyMask = -u8(mPartyIdx);
-				for (u64 j = 0; j < mSize; ++j)
-				{
-					u8 Phi = -*BitIterator(mPhi.data(), j);
-
-					for (u64 i = 0; i < y.cols(); ++i)
-					{
-						xy[j][i] = C[j][i] ^ (theta[j][i] & A0[j]) ^ (Phi & b1[j][i]) ^ (partyMask & theta[j][i] & Phi);
-					}
-
-					if (bitCount % 8)
-					{
-						u8 mask = (1 << (bitCount % 8)) - 1;
-						xy[j].back() &= mask;
-					}
-				}
-
-				//++mExpandIdx;
+				co_await multiply<u8, DpfMult::BitMatrixCoeffCtx>(
+					DpfMult::BitMatrixCoeffCtx::View<const u8>(y),
+					DpfMult::BitMatrixCoeffCtx::View<u8>(xy),
+					sock,
+					ctx
+				);
 			}
 		};
+
+
+
 
 		// Setup phase for multiplication session
 		// Input: shared bit vector x
@@ -781,7 +661,7 @@ namespace osuCrypto
 				throw RTE_LOC;
 			if (n + mOtIdx > mTotalMults)
 				throw RTE_LOC;
-			if (!hasBaseOts())
+			if (hasBaseOts() == false)
 				throw RTE_LOC;
 
 			auto otIdx = mOtIdx;
@@ -789,40 +669,61 @@ namespace osuCrypto
 
 			MultSession session;
 			session.mPartyIdx = mPartyIdx;
-			session.mSize = n;
+			session.mExpandIdx = 0;
+			session.mRecvOts.assign(mRecvOts.data() + otIdx, mRecvOts.data() + otIdx + n);
+			session.mSendOts.assign(mSendOts.data() + otIdx, mSendOts.data() + otIdx + n);
+			session.mX = BitVector((u8*)x.data(), n, 0);
 
-			// Copy the relevant OTs into the session (store seeds, don't expand)
-			session.mRecvOts.resize(n);
-			session.mSendOts.resize(n);
-			session.mChoiceBits.resize(n);
-			for (u64 i = 0; i < n; ++i)
-			{
-				session.mRecvOts[i] = mRecvOts[otIdx + i];
-				session.mSendOts[i] = mSendOts[otIdx + i];
-				session.mChoiceBits[i] = mChoiceBits[otIdx + i];
-			}
+			// Extract our a shares from choice bits
+			BitVector c0;
+			c0.append(mChoiceBits, n, otIdx);
 
-			// Compute and exchange phi = x + a
-			session.mPhi.resize(divCeil(n, 8));
-			for (u64 i = 0; i < session.mPhi.size(); ++i)
-				session.mPhi[i] = x[i] ^ session.mChoiceBits.getSpan<u8>()[i];
+			// Compute phi0 = x0 + c0 (bit-wise XOR for bits)
+			std::vector<u8> phi0(x.size());
+			auto C0 = c0.getSpan<u8>();
+			for (u64 i = 0; i < phi0.size(); ++i)
+				phi0[i] = x[i] ^ C0[i];
 			if (n % 8)
 			{
 				u8 mask = (1 << (n % 8)) - 1;
-				session.mPhi.back() &= mask;
+				phi0.back() &= mask;
 			}
 
-			// Communication phase - exchange phi
-			co_await sock.send(coproto::copy(session.mPhi));
-
-			std::vector<u8> phi1(session.mPhi.size());
+			co_await sock.send(std::move(phi0));
+			// Receive phi1 from the other party
+			std::vector<u8> phi1(x.size());
 			co_await sock.recv(phi1);
 
-			// Reconstruct phi
-			for (u64 j = 0; j < session.mPhi.size(); ++j)
-				session.mPhi[j] ^= phi1[j];
+			for (u64 i = 0; i < n; ++i)
+			{
+				if (bit(phi1, i))
+					std::swap(session.mSendOts[i][0], session.mSendOts[i][1]);
+			}
 
 			co_return session;
+		}
+
+		// Setup phase for multiplication session
+		// Input: shared bit vector x
+		// Returns: MultSession that can be used for multiple multiplications
+		MultSession randMultiply(u64 n)
+		{
+			if (n + mOtIdx > mTotalMults)
+				throw RTE_LOC;
+			if (hasBaseOts() == false)
+				throw RTE_LOC;
+
+			auto otIdx = mOtIdx;
+			mOtIdx += n;
+
+			MultSession session;
+			session.mPartyIdx = mPartyIdx;
+			session.mExpandIdx = 0;
+			session.mRecvOts.assign(mRecvOts.data() + otIdx, mRecvOts.data() + otIdx + n);
+			session.mSendOts.assign(mSendOts.data() + otIdx, mSendOts.data() + otIdx + n);
+			session.mX.append(mChoiceBits, n, otIdx);
+
+			return session;
 		}
 
 

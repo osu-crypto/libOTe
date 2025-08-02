@@ -396,53 +396,12 @@ namespace osuCrypto
 
             }
 
-            if (0)
-            {
+            // Create MultSession using the c values for repeated value deduplication
+            auto session = co_await mMult.setupMultiply(
+                c.size(), c.getSpan<u8>(), socket
+            );
 
-                co_await mMult.multiply(values.cols() * 8,
-                    c.getSpan<u8>(), BB, BB, socket);
-            }
-            else
-            {
-                // Create MultSession using the c values for repeated value deduplication
-                auto session = co_await mMult.setupMultiply(
-                    c.size(), c.getSpan<u8>(), socket
-                );
-
-                {
-                    // check that the session has basic base ots.
-                    DpfMult::MultSession session1;
-                    auto n = c.size();
-                    session1.mSendOts.resize(n);
-                    session1.mRecvOts.resize(n);
-                    session1.mChoiceBits.resize(n);
-                    co_await socket.send(coproto::copy(session.mSendOts));
-                    co_await socket.send(coproto::copy(session.mRecvOts));
-                    co_await socket.send(coproto::copy(session.mChoiceBits));
-                    co_await socket.recv(session1.mSendOts);
-                    co_await socket.recv(session1.mRecvOts);
-                    co_await socket.recv(session1.mChoiceBits);
-
-                    if (session.mRecvOts.size() != n ||
-                        session.mSendOts.size() != n ||
-                        session.mChoiceBits.size() != n ||
-                        session1.mRecvOts.size() != n ||
-                        session1.mSendOts.size() != n ||
-                        session1.mChoiceBits.size() != n)
-                        throw RTE_LOC;
-                    for (u64 i = 0; i < n; ++i)
-                    {
-                        if (session.mRecvOts[i] != session1.mSendOts[i][session.mChoiceBits[i]])
-                            throw RTE_LOC;
-
-                        if (session1.mRecvOts[i] != session.mSendOts[i][session1.mChoiceBits[i]])
-                            throw RTE_LOC;
-                    }
-
-                }
-
-                co_await session.multiply(BB, BB, socket);
-            }
+            co_await session.multiplyMtx(BB, BB, socket);
 
             if (mPrint)
             {
@@ -581,7 +540,8 @@ namespace osuCrypto
 
             mMultSessionD = co_await mMult.setupMultiply(
                 d.size(), d.getSpan<u8>(), socket);
-            co_await mMultSessionD.multiply(diff, diff, socket );
+
+            co_await mMultSessionD.multiplyMtx(diff, diff, socket);
             //co_await mMult.multiply(diff.cols() * 8,
             //    d.getSpan<u8>(), diff, diff, socket);
 
@@ -632,11 +592,12 @@ namespace osuCrypto
                 }
             }
             
+
             // Use the MultSession to multiply di * values[i] and c_ij with BB[k]
             co_await macoro::when_all_ready(
-                mMultSessionD.multiply(
+                mMultSessionD.multiplyMtx(
 				values.submtx(1, mN-1), values.submtx(1, mN - 1), socket),
-                mMultSessionC.multiply(BB, BB, socket));
+                mMultSessionC.multiplyMtx(BB, BB, socket));
 
             if (mPrint)
             {

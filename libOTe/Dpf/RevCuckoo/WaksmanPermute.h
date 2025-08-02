@@ -6,6 +6,7 @@
 #include <algorithm>
 #include "libOTe/Tools/Coproto.h"
 #include "libOTe/Dpf/DpfMult.h"
+#include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto
 {
@@ -17,16 +18,12 @@ namespace osuCrypto
 
 		u64 mN = 0;
 
-		//DpfMult mMult;
-
-		u64 mTotalMults = 0;
-
-		oc::BitVector mChoiceBits;
-
-		std::vector<block> mRecvOts;
-		std::vector<std::array<block, 2>> mSendOts;
+		DpfMult mMult;
+		std::vector<DpfMult::MultSession> mMultSessions;
 
 		u64 mOtIdx = 0;
+
+		bool print = false;
 
 		void init(u64 partyIdx, u64 n)
 		{
@@ -39,13 +36,7 @@ namespace osuCrypto
 			mN = n;
 
 			std::unordered_map<u64, u64> map;
-			//mMult.init(mPartyIdx, switchCount(mN, map));
-
-			mTotalMults = switchCount(mN, map);
-			mOtIdx = 0;
-			mSendOts.clear();
-			mRecvOts.clear();
-			mChoiceBits.resize(0);
+			mMult.init(mPartyIdx, switchCount(mN, map));
 		}
 
 		static u64 switchCount(u64 n, std::unordered_map<u64, u64>& map)
@@ -76,7 +67,7 @@ namespace osuCrypto
 
 		BaseOtCount baseOtCount() const
 		{
-			auto c = mTotalMults;// mMult.baseOtCount();
+			auto c = mMult.baseOtCount();
 			return { c, c };
 		}
 
@@ -86,24 +77,25 @@ namespace osuCrypto
 			span<const block> recvBaseOts,
 			const oc::BitVector& baseChoices)
 		{
-			//mMult.setBaseOts(baseSendOts, recvBaseOts, baseChoices);
+			mMult.setBaseOts(baseSendOts, recvBaseOts, baseChoices);
 
-			if (baseSendOts.size() != baseOtCount().mSendCount ||
-				recvBaseOts.size() != baseOtCount().mRecvCount ||
-				baseChoices.size() != baseOtCount().mRecvCount)
-				throw RTE_LOC;
+			//if (baseSendOts.size() != baseOtCount().mSendCount ||
+			//	recvBaseOts.size() != baseOtCount().mRecvCount ||
+			//	baseChoices.size() != baseOtCount().mRecvCount)
+			//	throw RTE_LOC;
 
-			mSendOts.clear();
-			mRecvOts.clear();
-			mSendOts.insert(mSendOts.end(), baseSendOts.begin(), baseSendOts.end());
-			mRecvOts.insert(mRecvOts.end(), recvBaseOts.begin(), recvBaseOts.end());
-			mChoiceBits = baseChoices;
-			mOtIdx = 0;
+			//mSendOts.clear();
+			//mRecvOts.clear();
+			//mSendOts.insert(mSendOts.end(), baseSendOts.begin(), baseSendOts.end());
+			//mRecvOts.insert(mRecvOts.end(), recvBaseOts.begin(), recvBaseOts.end());
+			//mChoiceBits = baseChoices;
+			//mOtIdx = 0;
 		}
 
 		bool hasBaseOts() const
 		{
-			return !mRecvOts.empty() && !mSendOts.empty() && mChoiceBits.size();
+			return mMult.hasBaseOts();
+			//return !mRecvOts.empty() && !mSendOts.empty() && mChoiceBits.size();
 		}
 
 
@@ -235,16 +227,170 @@ namespace osuCrypto
 			}
 		}
 
+		template<typename F, typename CoeffCtx>
+		task<> left(auto&& src, auto&& dst, auto&& diff, CoeffCtx ctx,
+			std::vector<u64>& subnetSizes,
+			std::vector<u64>& nextSubnetSizes,
+			Socket& sock)
+		{
+			auto numSubnets = subnetSizes.size();
+			u64 idx = 0;
+			u64 dIdx = 0;
+
+			for (u64 subnetIdx = 0; subnetIdx < numSubnets; ++subnetIdx)
+			{
+				auto size = subnetSizes[subnetIdx];
+
+				auto inputBegin = src.begin() + idx;
+				auto output0Begin = dst.begin() + idx;
+				auto output1Begin = output0Begin + size / 2;
+
+				idx += size;
+				nextSubnetSizes.push_back(size / 2);
+				nextSubnetSizes.push_back(size - size / 2);
+
+				// Collect differences for this subnet
+				for (u64 i = 0; i + 1 < size; i += 2)
+				{
+					// Expand diff if needed
+					if (dIdx >= diff.size())
+					{
+						ctx.resize(diff, dIdx + 1);
+					}
+
+					// diff = input[1] - input[0]
+					ctx.minus(diff[dIdx++], inputBegin[i + 1], inputBegin[i]);
+				}
+			}
+
+			// Multiply differences with random bits
+			ctx.resize(diff, dIdx);
+			co_await randMultiply<F>(diff, diff, sock, ctx);
+
+			// Apply the multiplied differences
+			idx = 0;
+			dIdx = 0;
+			for (u64 subnetIdx = 0; subnetIdx < numSubnets; ++subnetIdx)
+			{
+				auto size = subnetSizes[subnetIdx];
+				auto inputBegin = src.begin() + idx;
+				auto output0Begin = dst.begin() + idx;
+				auto output1Begin = output0Begin + size / 2;
+
+				idx += size;
+
+				for (u64 i = 0; i + 1 < size; i += 2)
+				{
+					// output0 = ctrl * (input[1]-input[0]) + input[0]
+					//         = input[ctrl]
+					ctx.plus(output0Begin[i / 2], inputBegin[i], diff[dIdx]);
+
+					// output1 = (input[0]+input[1]) - output0
+					//         = input[!ctrl]
+					auto temp_val = ctx.template make<F>();
+					ctx.plus(temp_val, inputBegin[i], inputBegin[i + 1]);
+					ctx.minus(output1Begin[i / 2], temp_val, output0Begin[i / 2]);
+
+					dIdx++;
+				}
+
+				if (size & 1)
+				{
+					ctx.copy(output1Begin[size / 2], inputBegin[size - 1]);
+				}
+			}
+
+			if (print)
+			{
+				// Debug output - would need to be adapted for generic types
+				// Skipping for now as it requires type-specific serialization
+			}
+
+		}
 
 
+		template<typename F, typename CoeffCtx>
+		task<> right(auto&& src, auto&& dst, auto&& diff, CoeffCtx ctx,
+			std::vector<u64>& subnetSizes,
+			std::vector<u64>& nextSubnetSizes,
+			Socket& sock)
+		{
 
+			u64 dIdx = 0;
+			ctx.resize(diff, 0);
 
-		task<> apply(MatrixView<u8> data, Socket& sock)
+			auto numSubnets = subnetSizes.size();
+			for (u64 subnetIdx = 0, idx = 0; subnetIdx < numSubnets; subnetIdx += 2)
+			{
+				auto size0 = subnetSizes[subnetIdx];
+				auto size1 = subnetSizes[subnetIdx + 1];
+
+				auto input0Begin = src.begin() + idx;
+				auto input1Begin = input0Begin + size0;
+
+				idx += size0 + size1;
+				nextSubnetSizes.push_back(size0 + size1);
+
+				// Collect differences
+				for (u64 i = 0; i + 1 < size0 + size1; i += 2)
+				{
+					if (dIdx >= diff.size())
+					{
+						ctx.resize(diff, dIdx + 1);
+					}
+
+					ctx.minus(diff[dIdx++], input1Begin[i / 2], input0Begin[i / 2]);
+				}
+			}
+
+			ctx.resize(diff, dIdx);
+			co_await randMultiply<F>(diff, diff, sock, ctx);
+
+			dIdx = 0;
+			for (u64 subnetIdx = 0, idx = 0; subnetIdx < numSubnets; subnetIdx += 2)
+			{
+				auto size0 = subnetSizes[subnetIdx];
+				auto size1 = subnetSizes[subnetIdx + 1];
+
+				auto input0Begin = src.begin() + idx;
+				auto input1Begin = input0Begin + size0;
+				auto outputBegin = dst.begin() + idx;
+
+				idx += size0 + size1;
+
+				for (u64 i = 0; i + 1 < size0 + size1; i += 2)
+				{
+					// output[i] = ctrl * (input1[i/2] - input0[i/2]) + input0[i/2]
+					//           = input[ctrl][i/2]
+					ctx.plus(outputBegin[i], input0Begin[i / 2], diff[dIdx]);
+
+					// output[i+1] = (input0[i/2] + input1[i/2]) - output[i]
+					//             = input[!ctrl][i/2]
+					auto temp_val = ctx.template make<F>();
+					ctx.plus(temp_val, input0Begin[i / 2], input1Begin[i / 2]);
+					ctx.minus(outputBegin[i + 1], temp_val, outputBegin[i]);
+
+					dIdx++;
+				}
+
+				if (size0 != size1)
+				{
+					ctx.copy(outputBegin[size0 + size1 - 1], input1Begin[size1 - 1]);
+				}
+			}
+
+		}
+
+		template<typename F, typename CoeffCtx = DefaultCoeffCtx<F>>
+		task<> apply(
+			auto&& data,
+			Socket& sock,
+			CoeffCtx ctx = {})
 		{
 			mOtIdx = 0;
 			auto print = false;
 			auto n = mN;
-			if (data.rows() != mN)
+			if (data.size() != mN)
 				throw RTE_LOC;
 
 			u64 numStages = log2ceil(n);
@@ -252,268 +398,50 @@ namespace osuCrypto
 			std::vector<u64> nextSubnetSizes;
 			subnetSizes.reserve(n);
 			nextSubnetSizes.reserve(n);
-			Matrix<u8> temp(data.rows(), data.cols());
-			Matrix<u8> diff(data.rows() / 2, data.cols());
-			//std::vector<u8> ctrlBits(divCeil(diff.rows(), 8));
-			MatrixView<u8> src = data;
-			MatrixView<u8> dst = temp;
 
-			//PRNG prng(seed);
+			auto temp = ctx.template makeVec<F>(data.size());
+			ctx.resize(temp, data.size());
+
+			// diff = input[1] - input[0]
+			auto diff = ctx.template makeVec<F>(data.size());
+			u64 stageBit = 0;
+			//auto* src = data;
+			//auto* dst = temp;
 
 			// process all left columns/stages
 			for (u64 stage = 0; stage < numStages; ++stage)
 			{
-				diff.resize(data.rows(), data.cols());
-				//setBytes(dst, 0xcc * mPartyIdx);
-				auto numSubnets = subnetSizes.size();
-				u64 idx = 0;
-				u64 dIdx = 0;
-				for (u64 subnetIdx = 0;
-					subnetIdx < numSubnets;
-					++subnetIdx)
-				{
-					auto size = subnetSizes[subnetIdx];
-					MatrixView<u8> input(src.data(idx),
-						size,
-						src.cols());
+				if (stageBit == 0)
+					co_await left<F>(data, temp, diff, ctx, subnetSizes, nextSubnetSizes, sock);
+				else
+					co_await left<F>(temp, data, diff, ctx, subnetSizes, nextSubnetSizes, sock);
 
-					MatrixView<u8> output0(
-						dst.data(idx),
-						size / 2,
-						src.cols()
-					);
-
-					MatrixView<u8> output1(
-						dst.data(idx + size / 2),
-						size - size / 2,
-						src.cols()
-					);
-
-					idx += input.rows();
-					nextSubnetSizes.push_back(output0.rows());
-					nextSubnetSizes.push_back(output1.rows());
-
-					for (u64 i = 0; i + 1 < size; i += 2)
-					{
-						auto v0 = input[i];
-						auto v1 = input[i + 1];
-						auto d = diff[dIdx++];
-						for (u64 j = 0; j < v0.size(); ++j)
-							d[j] = v0[j] ^ v1[j];
-					}
-				}
-
-
-				diff.resize(dIdx, diff.cols());
-				//ctrlBits.resize(divCeil(diff.rows(), 8));
-				//prng.get(ctrlBits.data(), ctrlBits.size());
-				// diff = ctrl * (input[2i] ^ input[2i+1]);
-				//co_await mMult.multiply(diff.cols() * 8, ctrlBits, diff, diff, sock);
-				co_await randMultiply(diff.cols() * 8, diff, diff, sock);
-
-				idx = 0;
-				dIdx = 0;
-				for (u64 subnetIdx = 0;
-					subnetIdx < numSubnets;
-					++subnetIdx)
-				{
-					auto size = subnetSizes[subnetIdx];
-					MatrixView<u8> input(src.data(idx),
-						size,
-						src.cols());
-
-					MatrixView<u8> output0(
-						dst.data(idx),
-						size / 2,
-						src.cols()
-					);
-
-					MatrixView<u8> output1(
-						dst.data(idx + size / 2),
-						size - size / 2,
-						src.cols()
-					);
-					idx += input.rows();
-
-					for (u64 i = 0; i + 1 < size; i += 2)
-					{
-						auto v0 = input[i];
-						auto v1 = input[i + 1];
-						auto d = diff[dIdx++];
-						auto d0 = output0[i / 2];
-						auto d1 = output1[i / 2];
-						for (u64 j = 0; j < v0.size(); ++j)
-						{
-							// d0 = ctrl * (input[2i] ^ input[2i+1]) ^ input[2i]
-							//    = ctrl ? input[2i+1] : input[2i]
-							d0[j] = d[j] ^ v0[j];
-
-							// d1 = d0 ^ input[2i] ^ input[2i+1]
-							//    = ctrl ? input[2i] : input[2i+1]
-							d1[j] = v0[j] ^ v1[j] ^ d0[j];
-						}
-					}
-
-					if (size & 1)
-					{
-						copyBytes(output1[size / 2], input[size - 1]);
-					}
-				}
-
-				if(print)
-				{
-					Matrix<u8> D = dst;
-					co_await sock.send(coproto::copy(D));
-					co_await sock.recv(D);
-					for (u64 i = 0; i < data.size(); ++i)
-						D(i) ^= dst(i);
-					if (mPartyIdx == 0)
-					{
-						std::cout << "stage " << stage << " " << D.rows() << std::endl;
-						for (u64 i = 0; i < D.rows(); ++i)
-						{
-							std::cout << "D[" << i << "]: " << toHex(D[i]) << std::endl;
-						}
-					}
-				}
-
-				std::swap(src, dst);
+				stageBit ^= 1;
 				std::swap(subnetSizes, nextSubnetSizes);
 				nextSubnetSizes.clear();
 			}
 
+			// Right stages (reverse)
 			for (u64 stage = numStages - 2; stage < numStages; --stage)
 			{
-				diff.resize(data.rows(), data.cols());
-				u64 dIdx = 0;
-				//setBytes(dst, 0xcc * mPartyIdx);
 
-				auto numSubnets = subnetSizes.size();
-				for (u64 subnetIdx = 0, idx = 0;
-					subnetIdx < numSubnets;
-					subnetIdx += 2)
-				{
-					auto size0 = subnetSizes[subnetIdx];
-					auto size1 = subnetSizes[subnetIdx + 1];
-					MatrixView<u8> input0(
-						src.data(idx),
-						size0,
-						src.cols()
-					);
+				if (stageBit == 0)
+					co_await right<F>(data, temp, diff, ctx, subnetSizes, nextSubnetSizes, sock);
+				else
+					co_await right<F>(temp, data, diff, ctx, subnetSizes, nextSubnetSizes, sock);
 
-					MatrixView<u8> input1(
-						src.data(idx + size0),
-						size1,
-						src.cols()
-					);
-
-					MatrixView<u8> output(dst.data(idx),
-						size0 + size1,
-						src.cols());
-
-					idx += size0 + size1;
-					nextSubnetSizes.push_back(size0 + size1);
-
-					for (u64 i = 0; i + 1 < size0 + size1; i += 2)
-					{
-						auto v0 = input0[i / 2];
-						auto v1 = input1[i / 2];
-						auto d = diff[dIdx++];
-						for (u64 j = 0; j < v0.size(); ++j)
-						{
-							d[j] = v0[j] ^ v1[j];
-						}
-					}
-				}
-				diff.resize(dIdx, diff.cols());
-				//ctrlBits.resize(divCeil(diff.rows(), 8));
-				//prng.get(ctrlBits.data(), ctrlBits.size());
-
-				//if (mPartyIdx == 0)
-				//	std::cout << "stage " << stage << " " << diff.rows() << std::endl;
-
-				if (diff.rows() + mOtIdx > mTotalMults)
-					throw RTE_LOC;
-
-				//co_await mMult.multiply(diff.cols() * 8, ctrlBits, diff, diff, sock);
-				co_await randMultiply(diff.cols() * 8, diff, diff, sock);
-
-				dIdx = 0;
-
-				for (u64 subnetIdx = 0, idx = 0;
-					subnetIdx < numSubnets;
-					subnetIdx += 2)
-				{
-					auto size0 = subnetSizes[subnetIdx];
-					auto size1 = subnetSizes[subnetIdx + 1];
-					MatrixView<u8> input0(
-						src.data(idx),
-						size0,
-						src.cols()
-					);
-
-					MatrixView<u8> input1(
-						src.data(idx + size0),
-						size1,
-						src.cols()
-					);
-
-					MatrixView<u8> output(dst.data(idx),
-						size0 + size1,
-						src.cols());
-					idx += size0 + size1;
-
-					for (u64 i = 0; i + 1 < size0 + size1; i += 2)
-					{
-
-						auto v0 = input0[i / 2];
-						auto v1 = input1[i / 2];
-						auto d = diff[dIdx++];
-						auto d0 = output[i + 0];
-						auto d1 = output[i + 1];
-						for (u64 j = 0; j < v0.size(); ++j)
-						{
-							// d0 = ctrl * (input[2i] ^ input[2i+1]) ^ input[2i]
-							//    = ctrl ? input[2i+1] : input[2i]
-							d0[j] = d[j] ^ v0[j];
-
-							// d1 = d0 ^ input[2i] ^ input[2i+1]
-							//    = ctrl ? input[2i] : input[2i+1]
-							d1[j] = v0[j] ^ v1[j] ^ d0[j];
-						}
-					}
-
-					if (size0 != size1)
-					{
-						copyBytes(output[size1 + size0 - 1], input1[size1 - 1]);
-					}
-				}
-
-				if (print)
-				{
-					Matrix<u8> D = dst;
-					co_await sock.send(coproto::copy(D));
-					co_await sock.recv(D);
-					for (u64 i = 0; i < data.size(); ++i)
-						D(i) ^= dst(i);
-					if (mPartyIdx == 0)
-					{
-						std::cout << "stage " << stage << " " << D.rows() << std::endl;
-						for (u64 i = 0; i < D.rows(); ++i)
-						{
-							std::cout << "D[" << i << "]: " << toHex(D[i]) << std::endl;
-						}
-					}
-				}
-
-				std::swap(src, dst);
+				stageBit ^= 1;
 				std::swap(subnetSizes, nextSubnetSizes);
 				nextSubnetSizes.clear();
 			}
 
-			if (src.data() != data.data())
+			if (stageBit)
 			{
-				copyBytes(data, src);
+				// Copy final result back to data
+				for (u64 i = 0; i < data.size(); ++i)
+				{
+					ctx.copy(data[i], temp[i]);
+				}
 			}
 		}
 
@@ -521,140 +449,22 @@ namespace osuCrypto
 
 		// Multiply each input vector with a random bit using existing choice bits.
 		// Does not take control bits as input - uses internal mMult choice bits directly.
+		template<typename F>
 		task<> randMultiply(
-			u64 bitCount,
-			MatrixView<const u8> y,
-			MatrixView<u8> xy,
-			coproto::Socket& sock)
+			auto&& y,
+			auto&& xy,
+			coproto::Socket& sock,
+			auto&& ctx)
 		{
-			u64 n = y.rows();
-
-			if (y.cols() != xy.cols())
-				throw RTE_LOC;
-			if (divCeil(bitCount, 8) != y.cols())
-				throw RTE_LOC;
-			if (n + mOtIdx > mTotalMults)
-				throw RTE_LOC;
-			if (hasBaseOts() == false)
-				throw RTE_LOC;
-
-			auto otIdx = mOtIdx;
-			mOtIdx += n;
-
-
-			auto expandSeed = [](span<u8> dst, block seed0, block seed1) {
-				if (dst.size() < 16)
-				{
-					auto v = seed0 ^ seed1;
-					copyBytesMin(dst, v);
-				}
-				else
-				{
-					AES aes0(seed0);
-					AES aes1(seed1);
-					for (u64 i = 0; dst.size(); ++i)
-					{
-						auto v = aes0.ecbEncBlock(block(i, i))
-							^ aes1.ecbEncBlock(block(i, i));
-						copyBytesMin(dst, v);
-						dst = dst.subspan(std::min<u64>(16, dst.size()));
-					}
-				}
-				};
-
-			// our a share of a * b = c.
-			BitVector a0; a0.append(mChoiceBits, n, otIdx);
-
-			// A0 = 11...1 * a , an expanded version of a used for masking.
-			std::vector<u8> A0(n);
-
-			// our c share of a * b = c.
-			Matrix<u8> C(n, y.cols());
-
-			// theta = y + b
-			Matrix<u8> theta(n, y.cols());
-
-			// our b share of a * b = c
-			Matrix<u8> b1(n, y.cols());
-
-			std::vector<u8> c00c10(y.cols());//, c10(y.cols());
-			for (u64 j = 0; j < n; ++j)
+			if (mMultSessions.size() == mOtIdx)
 			{
-				A0[j] = -a0[j];
-				//A0[j] = block(-u64(a0[j]), -u64(a0[j]));
-				expandSeed(c00c10, mRecvOts[otIdx + j], mSendOts[otIdx + j][0]);
-				expandSeed(b1[j], mSendOts[otIdx + j][0], mSendOts[otIdx + j][1]);
-				//b1[j] = mSendOts[otIdx + j][0] ^ mSendOts[otIdx + j][1];
-
-				// C0' = c00+c10+a0b1
-				for (u64 i = 0; i < y.cols(); ++i)
-				{
-					// C0' = c00+c10+a0b1
-					C[j][i] = c00c10[i] ^ (b1[j][i] & A0[j]);
-
-					// theta = y + b
-					theta[j][i] = y[j][i] ^ b1[j][i];
-				}
+				mMultSessions.push_back(mMult.randMultiply(y.size()));
 			}
 
-			AlignedUnVector<u8> buffer;
+			if (mMultSessions.size() <= mOtIdx)
+				throw RTE_LOC;
 
-			if (bitCount < 16)
-			{
-				// we will back the bits as an optimization.
-				auto thetaSize = divCeil(n * bitCount, 8);
-				buffer.resize(thetaSize);
-
-				DpfMult::packBits(buffer.subspan(0, thetaSize), theta, bitCount);
-
-				co_await sock.send(std::move(buffer));
-
-				buffer.resize(thetaSize);
-				co_await sock.recv(buffer);
-
-				Matrix<u8> theta1(theta.rows(), theta.cols());
-				DpfMult::unpackBits(theta1, buffer.subspan(0, thetaSize), bitCount);
-
-				// reconstruct theta
-				for (u64 j = 0; j < theta.size(); ++j)
-					theta(j) ^= theta1(j);
-			}
-			else
-			{
-				buffer.resize(theta.size());
-
-				copyBytes(buffer.subspan(0, theta.size()), theta);
-
-				co_await sock.send(std::move(buffer));
-
-				buffer.resize(theta.size());
-				co_await sock.recv(buffer);
-				MatrixView<u8> theta1(buffer.data(), theta.rows(), theta.cols());
-
-				// reconstruct theta
-				for (u64 j = 0; j < theta.size(); ++j)
-					theta(j) ^= theta1(j);
-			}
-
-			u8 partyMask = -u8(mPartyIdx);
-			for (u64 j = 0; j < n; ++j)
-			{
-				// mask block of phi
-				u8 Phi = 0;// -*BitIterator(phi.data(), j);
-
-				for (u64 i = 0; i < y.cols(); ++i)
-				{
-					// [zy] = [c] + theta * [a] + phi * [b] + theta * phi
-					xy[j][i] = C[j][i] ^ (theta[j][i] & A0[j]) ^ (Phi & b1[j][i]) ^ (partyMask & theta[j][i] & Phi);
-
-				}
-
-				if (bitCount % 8)
-				{
-					u8 mask = (1 << (bitCount % 8)) - 1;
-					xy[j].back() &= mask;
-				}
-			}
+			co_await mMultSessions[mOtIdx++].multiply<F>(y, xy, sock, ctx);
 
 		}
 	};

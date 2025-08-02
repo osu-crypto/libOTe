@@ -299,17 +299,17 @@ void RegularDpf_MultSession_Test(const CLP& cmd)
 		// check that the base OTs in the sessions are correct
 		if (session0.mRecvOts.size() != n || 
 			session0.mSendOts.size() != n ||
-			session0.mChoiceBits.size() != n ||
+			session0.mX.size() != n ||
 			session1.mRecvOts.size() != n ||
 			session1.mSendOts.size() != n ||
-			session1.mChoiceBits.size() != n)
+			session1.mX.size() != n)
 			throw RTE_LOC;
 		for(u64 i =0; i < n; ++i)
 		{
-			if (session0.mRecvOts[i] != session1.mSendOts[i][session0.mChoiceBits[i]])
+			if (session0.mRecvOts[i] != session1.mSendOts[i][session0.mX[i]])
 				throw RTE_LOC;
 
-			if (session1.mRecvOts[i] != session0.mSendOts[i][session1.mChoiceBits[i]])
+			if (session1.mRecvOts[i] != session0.mSendOts[i][session1.mX[i]])
 				throw RTE_LOC;
 		}
 
@@ -326,8 +326,8 @@ void RegularDpf_MultSession_Test(const CLP& cmd)
 
 			// Perform multiplication using sessions
 			macoro::sync_wait(macoro::when_all_ready(
-				session0.multiply(y0, xy0, sock[0]),
-				session1.multiply(y1, xy1, sock[1])
+				session0.multiplyMtx(y0, xy0, sock[0]),
+				session1.multiplyMtx(y1, xy1, sock[1])
 			));
 
 			// Verify correctness
