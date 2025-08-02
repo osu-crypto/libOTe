@@ -436,7 +436,6 @@ namespace osuCrypto
 		u64 domain = cmd.getOr("domain", 32); // Domain size
 		u64 numPoints = cmd.getOr("numPoints", 4); // Number of points
 		u64 numSets = cmd.getOr("numSets", 1); // Number of sets
-		u64 valueByteCount = cmd.getOr("valueByteCount", 16); // Byte count for values
 		u64 numPartitions = cmd.getOr("numPartitions", 2); // Number of partitions
 		u64 linearSecParam = cmd.getOr("linearSecParam", 40); // Security parameter
 		u64 cuckooSecParam = cmd.getOr("cuckooSecParam", 2); // Cuckoo security parameter
@@ -464,8 +463,8 @@ namespace osuCrypto
 
 		// Initialize RevCuckooDmpf instances
 		std::array<RevCuckooDmpf, 2> dpf;
-		dpf[0].init2(0, numPoints, numSets, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
-		dpf[1].init2(1, numPoints, numSets, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[0].init2(0, numPoints, numSets, domain, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[1].init2(1, numPoints, numSets, domain, numPartitions, cuckooSecParam, linearSecParam);
 		dpf[0].mPrint = print;
 		dpf[1].mPrint = print;
 
@@ -536,7 +535,6 @@ namespace osuCrypto
 		u64 domain = cmd.getOr("domain", 32); // Domain size
 		u64 numPoints = cmd.getOr("numPoints", 4); // Number of points
 		u64 numSets = cmd.getOr("numSets", 6); // Number of sets
-		u64 valueByteCount = cmd.getOr("valueByteCount", 16); // Byte count for values
 		u64 numPartitions = cmd.getOr("numPartitions", 2); // Number of partitions
 		u64 linearSecParam = cmd.getOr("linearSecParam", 40); // Security parameter
 		u64 cuckooSecParam = cmd.getOr("cuckooSecParam", 2); // Cuckoo security parameter
@@ -557,8 +555,8 @@ namespace osuCrypto
 
 		// Initialize RevCuckooDmpf instances
 		std::array<RevCuckooDmpf, 2> dpf;
-		dpf[0].init2(0, numPoints, numSets, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
-		dpf[1].init2(1, numPoints, numSets, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[0].init2(0, numPoints, numSets, domain, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[1].init2(1, numPoints, numSets, domain, numPartitions, cuckooSecParam, linearSecParam);
 		dpf[0].mPrint = print;
 		dpf[1].mPrint = print;
 		if (cmd.hasValue("print"))

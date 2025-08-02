@@ -232,6 +232,358 @@ namespace osuCrypto
 			}
 		}
 
+		// Helper function to expand OT seeds on demand for generic types
+		void expandSeed(span<u8> dst, block seed0, block seed1) const
+		{
+			if (dst.size() < 16)
+			{
+				auto v = seed0 ^ seed1;
+				copyBytesMin(dst, v);
+			}
+			else
+			{
+				AES aes0(seed0);
+				AES aes1(seed1);
+				for (u64 i = 0; dst.size(); ++i)
+				{
+					auto v = aes0.ecbEncBlock(block(i, i))
+						^ aes1.ecbEncBlock(block(i, i));
+					copyBytesMin(dst, v);
+					dst = dst.subspan(std::min<u64>(16, dst.size()));
+				}
+			}
+		}
+
+		// Generic Bit-Field Multiplication Protocol
+		// 
+		// Performs secure computation of [xy] = [x] * [y] where [x] is a secret-shared
+		// bit vector and [y] is a secret-shared vector over an arbitrary field F.
+		// 
+		// @tparam F The field type for the y and xy vectors (e.g., u64, block, custom field types)
+		// @tparam CoeffCtx The coefficient context providing field operations for type F
+		// 
+		// @param x Secret-shared bit vector (packed as bytes, LSB first)
+		// @param y Secret-shared field vector of type F
+		// @param xy Output vector for the secret-shared product [x] * [y]
+		// @param sock Communication socket for the protocol
+		// @param ctx Coefficient context providing field arithmetic operations
+		// 
+		// @returns A coroutine task that completes when multiplication is finished
+		template<typename F, typename CoeffCtx>
+		macoro::task<> multiply(
+			span<const u8> x,
+			auto&& y,
+			auto&& xy,
+			coproto::Socket& sock,
+			const CoeffCtx& ctx)
+		{
+
+			// OT Setup:
+			// For each multiplication, we have:
+			// - mRecvOts0: A single block received from OT seed
+			// - mChoiceBit0: The choice bit used in OT, becomes our bit share a0
+			// - mSendOt0: Two blocks [seed0, seed1] sent in OT  
+			//
+			// such that 
+			//  - mRecvOts0 = mSendOts1[mChoiceBit0]
+			//  - mRecvOts1 = mSendOts0[mChoiceBit1]
+			//
+			// 
+			// Observe that if we performed the following OTs. The parites
+			// sample a random [t] of the field. Then they perform the following
+			// 
+			//                                (t1 + (0 ⊕ x1) * y1)
+			// x0 ---------->  OT  <--------- (t1 + (1 ⊕ x1) * y1)
+			//                 |
+			//      <----------/
+			// w0 = (t1 + (x0 ⊕ x1) * y1)
+			//    = (t1 +  x        * y1)
+			// 
+			// (t0 + (x0 ⊕ 0) * y0)
+			// (t0 + (x0 ⊕ 1) * y0)
+			//     ------------->  OT  <--------- x1
+			//                     |
+			//                     \------------> w1 = (t0 + (x0 ⊕ x1) * y0)
+			//                                       = (t0 +  x        * y0)
+			// 
+			// then we have 
+			//	[w]-[t] = (t1 + x * y1) + (t0 + x * y0) - (t1 + t0)
+			//          = (x * y1) + (x * y0)
+			//          = x * (y0 + y1)
+			//          = x * y
+			// 
+			// Currently we have random OTs but the above requires the 
+			// choice bit to be x0,x1. To fix this the parties will send
+			// the difference
+			//   phi0 = x0 ⊕ c0
+			//   phi1 = x1 ⊕ c1
+			// where c0,c1 are the choice bits used in the OTs. The other party
+			// will derandomize the OTs by computing
+			//   if (phi0) swap(mSendOts0[0], mSendOts0[1]);
+			//   if (phi1) swap(mSendOts1[0], mSendOts1[1]);
+			// 
+			// Then to reduce the communication, we dont want to send both 
+			// OT messages. Observe that [t] is chosen uniformly at random.
+			// Therefore we can define 
+			//
+			//  (t0 + (x0 ⊕ 0) * y0) = mSendOts0[0]
+			//   t0 = mSendOts0[0] - (x0 ⊕ 0) * y0
+			// 
+			//  (t1 + (0 ⊕ x1) * y1) = mSendOts1[0]
+			//   t1 = mSendOts1[0] - (0 ⊕ x1) * y1
+			// 
+			// This way we do not need to send (t1 + (0 ⊕ x1) * y1) as both parties
+			// can locally compute it given mSendOts0[0].
+
+			u64 n = y.size();
+			if (x.size() != divCeil(n, 8) || xy.size() != n)
+				throw RTE_LOC;
+			if (n + mOtIdx > mTotalMults)
+				throw RTE_LOC;
+			if (hasBaseOts() == false)
+				throw RTE_LOC;
+
+			auto otIdx = mOtIdx;
+			mOtIdx += n;
+
+
+			// Extract our a shares from choice bits
+			BitVector c0;
+			c0.append(mChoiceBits, n, otIdx);
+
+			// Compute phi0 = x0 + c0 (bit-wise XOR for bits)
+			std::vector<u8> phi0(x.size());
+			auto C0 = c0.getSpan<u8>();
+			for (u64 i = 0; i < phi0.size(); ++i)
+				phi0[i] = x[i] ^ C0[i];
+			if (n % 8)
+			{
+				u8 mask = (1 << (n % 8)) - 1;
+				phi0.back() &= mask;
+			}
+
+			co_await sock.send(std::move(phi0));
+			// Receive phi1 from the other party
+			std::vector<u8> phi1(x.size());
+			co_await sock.recv(phi1);
+
+			std::vector<u8> msg(n * ctx.template byteSize<F>());
+			auto mIter = msg.data();
+			auto zero = ctx.template make<F>();
+			ctx.zero(zero);
+			for (u64 i = 0; i < n; ++i)
+			{
+				if (bit(phi1, i))
+					std::swap(mSendOts[otIdx + i][0], mSendOts[otIdx + i][1]);
+
+				auto t0 = ctx.template make<F>();
+				ctx.fromBlock(t0, mSendOts[otIdx + i][0]);
+
+				auto xi = bit(x, i);
+				if (xi)
+					ctx.minus(t0, t0, y[i]);
+
+				// m1 = t0 + (x0 ⊕ 1) * y0
+				auto m1 = ctx.template make<F>();
+				ctx.fromBlock(m1, mSendOts[otIdx + i][1]); // mask the m1 message using the OT.
+				ctx.plus(m1, m1, t0);
+				if (xi == 0)
+					ctx.plus(m1, m1, y[i]);
+
+				ctx.serialize(&m1, &m1 + 1, mIter);
+				mIter += ctx.template byteSize<F>();
+
+				// xy = -t0
+				auto nt0 = ctx.template make<F>();
+				ctx.minus(xy[i], zero, t0);
+			}
+
+			co_await sock.send(std::move(msg));
+			msg.resize(n * ctx.template byteSize<F>());
+			co_await sock.recv(msg);
+			mIter = msg.data();
+			for (u64 i = 0; i < n; ++i)
+			{
+				auto m1 = ctx.template make<F>();
+				ctx.deserialize(mIter + 0, mIter + ctx.template byteSize<F>(), &m1);
+				mIter += ctx.template byteSize<F>();
+
+				auto mx = ctx.template make<F>();
+				ctx.fromBlock(mx, mRecvOts[otIdx + i]);
+
+				auto w0 = ctx.template make<F>();
+				auto xi = bit(x, i);
+				if (xi)
+				{
+					// m1 = mx + w0
+					//    = mx + (t1 + (1 ⊕ x1) * y1)
+					//    = mx + (t1 +  x       * y1)
+					// w0 = m1 - mx
+					//	  = (t1 + x * y1)
+					ctx.minus(w0, m1, mx);
+				}
+				else
+				{
+					// w0 = m0 = mx
+					//    = (t1 + (0 ⊕ x1) * y1)
+					//    = (t1 + x * y1)
+					ctx.copy(w0, mx);
+				}
+
+				// reconstruct xy
+				ctx.plus(xy[i], xy[i], w0);
+			}
+		}
+
+		// Custom CoeffCtx for byte-oriented matrix operations
+		struct BitMatrixCoeffCtx
+		{
+			// the number of bits each row will have
+			u64 mBitCount;
+
+			BitMatrixCoeffCtx(u64 bitCount) : mBitCount(bitCount) {}
+
+			// Matrix type for this context - each element is a row view
+			struct Vec
+			{
+				Matrix<u8> mData;
+
+				u64 size() const { return mData.rows(); }
+				span<const u8> operator[](u64 i) const
+				{
+					assert(i < mData.rows());
+					return mData[i];
+				}
+				span<u8> operator[](u64 i)
+				{
+					assert(i < mData.rows());
+					return mData[i];
+				}
+
+			};
+
+			template<typename T>
+			struct View
+			{
+				MatrixView<T> mData;
+				u64 size() const { return mData.rows(); }
+				span<const T> operator[](u64 i) const
+				{
+					assert(i < mData.rows());
+					return mData[i];
+				}
+				span<T> operator[](u64 i)
+				{
+					assert(i < mData.rows());
+					return mData[i];
+				}
+			};
+
+			//template<typename F>
+			//using Vec = Matrix<F>;
+
+			// The field type F is MatrixView<u8> (a single row)
+			template<typename F>
+			Vec makeVec(u64 size) const
+			{
+				static_assert(std::is_same_v<F, u8>, "F must be u8");
+
+				// Return a matrix with size rows and appropriate column count for bitCount
+				auto cols = divCeil(mBitCount, 8);
+				return Matrix<u8>(size, cols);
+			}
+
+			template<typename F>
+			auto make() const
+			{
+				auto cols = divCeil(mBitCount, 8 * sizeof(F));
+				return std::vector<F>(cols);
+			}
+
+			template<typename F>
+			u64 byteSize() const
+			{
+				return divCeil(mBitCount, 8);
+			}
+
+			void plus(auto&& ret, auto&& lhs, auto&& rhs) const
+			{
+				assert(ret.size() == lhs.size() && lhs.size() == rhs.size());
+				for (u64 i = 0; i < ret.size(); ++i)
+				{
+					ret[i] = lhs[i] ^ rhs[i];
+				}
+			}
+
+			void minus(auto&& ret,  auto&& lhs,  auto&&rhs) const
+			{
+				// Same as plus for GF(2)
+				plus(ret, lhs, rhs);
+			}
+
+			template<typename F>
+			void copy(F& dst, const F& src) const
+			{
+				assert(dst.size() == src.size());
+				std::copy(src.begin(), src.end(), dst.begin());
+			}
+
+			template<typename F>
+			void zero(F& x) const
+			{
+				std::fill(x.begin(), x.end(), 0);
+			}
+
+			template<typename F>
+			bool eq(const F& lhs, const F& rhs) const
+			{
+				if (lhs.size() != rhs.size()) return false;
+				return std::equal(lhs.begin(), lhs.end(), rhs.begin());
+			}
+
+			template<typename F>
+			void fromBlock(F& ret, const block& b) const
+			{
+				auto bytes = std::min(ret.size(), sizeof(block));
+				if (ret.size() > sizeof(block))
+				{
+					// If we need more bytes than a block provides, expand using AES
+					AES aes(b);
+					for (u64 i = 0; i < ret.size(); i += sizeof(block))
+					{
+						auto remaining = std::min(ret.size() - i, sizeof(block));
+						block expanded = aes.ecbEncBlock(block(i / sizeof(block), 0));
+						std::memcpy(ret.data() + i, &expanded, remaining);
+					}
+				}
+				else
+				{
+					std::memcpy(ret.data(), &b, bytes);
+				}
+			}
+
+			template<typename F>
+			void serialize(const F* begin, const F* end, u8* dst) const
+			{
+				for (auto it = begin; it != end; ++it)
+				{
+					std::memcpy(dst, it->data(), it->size());
+					dst += it->size();
+				}
+			}
+
+			void deserialize(const auto* src, const auto* srcEnd, auto dst) const
+			{
+				auto elementSize = byteSize<u8>();
+				while (src < srcEnd)
+				{
+					dst->resize(divCeil(mBitCount, 8));
+					std::memcpy(dst->data(), &*src, elementSize);
+					src += elementSize;
+				}
+			}
+		};
+
 		// given shared [x], [y], output [xy] = [x * y] where multiplication
 		// is perform component-wise, i.e. xi * yi = xyi, xi is a bit and yi 
 		// is a vector.
@@ -257,152 +609,18 @@ namespace osuCrypto
 			if (hasBaseOts() == false)
 				throw RTE_LOC;
 
-			auto otIdx = mOtIdx;
-			mOtIdx += n;
+			// Create matrix coefficient context
+			BitMatrixCoeffCtx ctx(bitCount);
 
-
-			// Helper function to expand OT seeds on demand
-			auto expandSeed = [](span<u8> dst, block seed0, block seed1) {
-				if (dst.size() < 16)
-				{
-					auto v = seed0 ^ seed1;
-					copyBytesMin(dst, v);
-				}
-				else
-				{
-					AES aes0(seed0);
-					AES aes1(seed1);
-					for (u64 i = 0; dst.size(); ++i)
-					{
-						auto v = aes0.ecbEncBlock(block(i, i))
-							^ aes1.ecbEncBlock(block(i, i));
-						copyBytesMin(dst, v);
-						dst = dst.subspan(std::min<u64>(16, dst.size()));
-					}
-				}
-				};
-
-			// our a share of a * b = c.
-			BitVector a0; a0.append(mChoiceBits, n, otIdx);
-
-			// A0 = 11...1 * a , an expanded version of a used for masking.
-			std::vector<u8> A0(n);
-
-			// our c share of a * b = c.
-			Matrix<u8> C(n, y.cols());
-
-			// theta = y + b
-			Matrix<u8> theta(n, y.cols());
-
-			// our b share of a * b = c
-			Matrix<u8> b1(n, y.cols());
-
-			std::vector<u8> c00c10(y.cols());//, c10(y.cols());
-			for (u64 j = 0; j < n; ++j)
-			{
-				A0[j] = -a0[j];
-				//A0[j] = block(-u64(a0[j]), -u64(a0[j]));
-				expandSeed(c00c10, mRecvOts[otIdx + j], mSendOts[otIdx + j][0]);
-				expandSeed(b1[j], mSendOts[otIdx + j][0], mSendOts[otIdx + j][1]);
-				//b1[j] = mSendOts[otIdx + j][0] ^ mSendOts[otIdx + j][1];
-
-				// C0' = c00+c10+a0b1
-				for (u64 i = 0; i < y.cols(); ++i)
-				{
-					// C0' = c00+c10+a0b1
-					C[j][i] = c00c10[i] ^ (b1[j][i] & A0[j]);
-
-					// theta = y + b
-					theta[j][i] = y[j][i] ^ b1[j][i];
-				}
-			}
-
-			std::vector<u8> phi(x.size());;
-			for (u64 i = 0; i < phi.size(); ++i)
-				phi[i] = x[i] ^ a0.getSpan<u8>()[i];
-			if (n % 8)
-			{
-				u8 mask = (1 << (n % 8)) - 1;
-				phi.back() &= mask;
-			}
-
-
-			AlignedUnVector<u8> buffer;
-
-			if (bitCount < 16)
-			{
-				// we will back the bits as an optimization.
-				auto thetaSize = divCeil(n * bitCount, 8);
-				buffer.resize(thetaSize + phi.size());
-
-				packBits(buffer.subspan(0, thetaSize), theta, bitCount);
-				copyBytes(buffer.subspan(thetaSize), phi);
-
-				co_await sock.send(std::move(buffer));
-
-				buffer.resize(thetaSize + phi.size());
-				co_await sock.recv(buffer);
-
-				Matrix<u8> theta1(theta.rows(), theta.cols());
-				unpackBits(theta1, buffer.subspan(0, thetaSize), bitCount);
-				std::vector<u8> phi1(phi.size());
-				copyBytes(phi1, buffer.subspan(thetaSize));
-
-				// reconstruct phi
-				for (u64 j = 0; j < phi.size(); ++j)
-					phi[j] ^= phi1[j];
-
-				// reconstruct theta
-				for (u64 j = 0; j < theta.size(); ++j)
-					theta(j) ^= theta1(j);
-
-			}
-			else
-			{
-				buffer.resize(theta.size() + phi.size());
-
-				copyBytes(buffer.subspan(0, theta.size()), theta);
-				copyBytes(buffer.subspan(theta.size()), phi);
-
-				co_await sock.send(std::move(buffer));
-
-				buffer.resize(theta.size() + phi.size());
-				co_await sock.recv(buffer);
-				MatrixView<u8> theta1(buffer.data(), theta.rows(), theta.cols());
-				std::vector<u8> phi1(phi.size());
-				copyBytes(phi1, buffer.subspan(theta.size()));
-
-				// reconstruct phi
-				for (u64 j = 0; j < phi.size(); ++j)
-					phi[j] ^= phi1[j];
-
-				// reconstruct theta
-				for (u64 j = 0; j < theta.size(); ++j)
-					theta(j) ^= theta1(j);
-			}
-
-			u8 partyMask = -u8(mPartyIdx);
-			for (u64 j = 0; j < n; ++j)
-			{
-				// mask block of phi
-				u8 Phi = -*BitIterator(phi.data(), j);
-
-				for (u64 i = 0; i < y.cols(); ++i)
-				{
-					// [zy] = [c] + theta * [a] + phi * [b] + theta * phi
-					xy[j][i] = C[j][i] ^ (theta[j][i] & A0[j]) ^ (Phi & b1[j][i]) ^ (partyMask & theta[j][i] & Phi);
-
-				}
-
-				if (bitCount % 8)
-				{
-					u8 mask = (1 << (bitCount % 8)) - 1;
-					xy[j].back() &= mask;
-				}
-			}
-
+			co_await multiply<u8, BitMatrixCoeffCtx>(
+				x,
+				BitMatrixCoeffCtx::View<const u8>(y),
+				BitMatrixCoeffCtx::View<u8>(xy),
+				sock,
+				ctx
+			);
+			co_return;
 		}
-
 
 
 
@@ -438,8 +656,8 @@ namespace osuCrypto
 					AES aes1(seed1);
 					for (u64 i = 0; dst.size(); ++i)
 					{
-						auto v = 
-							aes0.ecbEncBlock(block(mExpandIdx, i)) ^ 
+						auto v =
+							aes0.ecbEncBlock(block(mExpandIdx, i)) ^
 							aes1.ecbEncBlock(block(mExpandIdx, i));
 						copyBytesMin(dst, v);
 						dst = dst.subspan(std::min<u64>(16, dst.size()));

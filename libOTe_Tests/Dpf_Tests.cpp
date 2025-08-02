@@ -122,6 +122,122 @@ void RegularDpf_Multiply_Test(const CLP& cmd)
 	throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_SPARSE_DPF not defined.");
 #endif
 }
+
+void RegularDpf_MultGeneric_Test(const CLP& cmd)
+{
+#if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
+
+	// Test with different coefficient types
+	auto testGenericMultiply = [&]<typename F, typename CoeffCtx>(CoeffCtx ctx) {
+		u64 n = 13;
+		auto print = cmd.isSet("print");
+		PRNG prng(block(231234, 321312));
+		std::array<oc::DpfMult, 2> dpf;
+		dpf[0].init(0, n);
+		dpf[1].init(1, n);
+
+
+
+		std::array<std::vector<std::array<block, 2>>, 2> sendOts;
+		std::array<std::vector<block>, 2> recvOts;
+		std::array<BitVector, 2> choices;
+		for (u64 i = 0; i < 2; ++i)
+		{
+			sendOts[i].resize(n);
+			recvOts[i].resize(n);
+			choices[i].resize(n);
+		}
+
+		auto sock = coproto::LocalAsyncSocket::makePair();
+
+		for (u64 testIter = 0; testIter < 5; ++testIter)
+		{
+			// Setup fresh base OTs for each iteration
+			for (u64 i = 0; i < 2; ++i)
+			{
+				choices[i].randomize(prng);
+				prng.get(sendOts[i].data(), sendOts[i].size());
+				for (u64 j = 0; j < n; ++j)
+					recvOts[i][j] = sendOts[i][j][choices[i][j]];
+			}
+			dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
+			dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
+
+			// Generate secret shared inputs
+			BitVector x0(n), x1(n);
+			x0.randomize(prng);
+			x1.randomize(prng);
+
+			// Create coefficient vectors of type F
+			auto y0 = ctx.template makeVec<F>(n);
+			auto y1 = ctx.template makeVec<F>(n);
+			auto xy0 = ctx.template makeVec<F>(n);
+			auto xy1 = ctx.template makeVec<F>(n);
+
+			// Generate random coefficients
+			for (u64 i = 0; i < n; ++i)
+			{
+				ctx.fromBlock(y0[i], prng.get());
+				ctx.fromBlock(y1[i], prng.get());
+			}
+
+			// Perform multiplication using the generic function
+			macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].multiply<F, CoeffCtx>(x0.getSpan<u8>(), span<const F>(y0.begin(), y0.end()), span<F>(xy0.begin(), xy0.end()), sock[0], ctx),
+				dpf[1].multiply<F, CoeffCtx>(x1.getSpan<u8>(), span<const F>(y1.begin(), y1.end()), span<F>(xy1.begin(), xy1.end()), sock[1], ctx)
+			));
+
+			// Verify correctness
+			for (u64 j = 0; j < n; ++j)
+			{
+				// Reconstruct secret shared values
+				u64 x = x0[j] ^ x1[j]; // x bit
+				F y, xy, expected;
+				ctx.plus(y, y0[j], y1[j]); // reconstruct y
+				ctx.plus(xy, xy0[j], xy1[j]); // reconstruct xy
+
+				// Compute expected result: x * y (bit multiplication with coefficient)
+				if (x == 1)
+					ctx.copy(expected, y);
+				else
+					ctx.zero(expected);
+
+				if (!ctx.eq(expected, xy))
+				{
+					std::cout << "Generic multiply test failed at iteration " << testIter << ", position " << j << std::endl;
+					std::cout << "x = " << x << std::endl;
+					std::cout << "y = " << ctx.str(y) << std::endl;
+					std::cout << "expected = " << ctx.str(expected) << std::endl;
+					std::cout << "actual = " << ctx.str(xy) << std::endl;
+					throw RTE_LOC;
+				}
+				if (print)
+				{
+					std::cout << "Test Iteration: " << testIter << ", Position: " << j << std::endl;
+					std::cout 
+						<< "x = " << x << " (" << (x0[j] ? "1" : "0") << " + " << (x1[j] ? "1" : "0") << ")"
+						<< "\ny = " << ctx.str(y) << " (" << ctx.str(y0[j]) << " + " << ctx.str(y1[j]) << ")"
+						<< "\nxy = " << ctx.str(xy) << " (" << ctx.str(xy0[j]) << " + " << ctx.str(xy1[j]) << ")"
+						<< std::endl;
+				}
+			}
+		}
+	};
+
+	// Test with different coefficient contexts
+	testGenericMultiply.template operator() < block, CoeffCtxGF2 > (CoeffCtxGF2{});
+	testGenericMultiply.template operator() < u64, CoeffCtxInteger > (CoeffCtxInteger{});
+	testGenericMultiply.template operator() < u32, CoeffCtxInteger > (CoeffCtxInteger{});
+	testGenericMultiply.template operator() < block, CoeffCtxGF128 > (CoeffCtxGF128{});
+
+	// Test with the custom opaque type from the test file
+	//testGenericMultiply.template operator() < Opaque, CoeffCtxOpaque > (CoeffCtxOpaque{});
+
+#else
+	throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_SPARSE_DPF not defined.");
+#endif
+}
+
 void RegularDpf_MultSession_Test(const CLP& cmd)
 {
 #if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)

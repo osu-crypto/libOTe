@@ -66,7 +66,6 @@ namespace osuCrypto
 			u64 numPointsPerSet,
 			u64 numSets,
 			u64 domain,
-			u64 valueByteCount,
 			u64 numPartitions = 2,
 			u64 cuckooSecParam = 2,
 			u64 linearSecParam = 40)
@@ -79,7 +78,6 @@ namespace osuCrypto
 			mNumPartitions = numPartitions;
 			mCuckooSecParam = cuckooSecParam;
 			mLinearSecParam = linearSecParam;
-			mValueByteCount = valueByteCount;
 
 
 			switch (numPartitions)

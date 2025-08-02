@@ -613,7 +613,7 @@ namespace osuCrypto
 						SIMD8(q, temp[q] = AES::roundEnc(temp[q], temp[q]));
 						SIMD8(q, ctx.fromBlock(currentLeaves[j][k + q], temp[q]));
 						if (mPartyIdx)
-							SIMD8(q, ctx.minus(currentLeaves[j][k+q], zero, currentLeaves[j][k+q]));
+							SIMD8(q, ctx.minus(currentLeaves[j][k + q], zero, currentLeaves[j][k + q]));
 
 						SIMD8(q, ctx.plus(leafSums[k + q], leafSums[k + q], currentLeaves[j][k + q]));
 					}
@@ -627,7 +627,7 @@ namespace osuCrypto
 						tag[j][k] = tagBit(temp[0]);
 
 						ctx.fromBlock(currentLeaves[j][k], AES::roundEnc(temp[0], temp[0]));
-						if(mPartyIdx)
+						if (mPartyIdx)
 							ctx.minus(currentLeaves[j][k], zero, currentLeaves[j][k]);
 						ctx.plus(leafSums[k], leafSums[k], currentLeaves[j][k]);
 					}
@@ -659,7 +659,7 @@ namespace osuCrypto
 				// gamma = beta - sum_i y_i 
 				for (u64 k = 0; k < mNumPointsPerSet; ++k)
 					ctx.minus(leafSums[k], values[k], leafSums[k]);
-				
+
 				// if not charactristic two, we need to conditionally negate
 				// the leaf sums depending on the party with tag=1 on the
 				// active leaf.
@@ -682,8 +682,8 @@ namespace osuCrypto
 						d[j] = ((d[j] / 2) % 2) ^ (mPartyIdx & d[j]);
 
 					// insecure version 
+					if(0)
 					{
-						throw RTE_LOC;
 						std::vector<u8> otherD(mNumPointsPerSet);
 						co_await sock.send(coproto::copy(d));
 						co_await sock.recv(otherD);
@@ -693,6 +693,11 @@ namespace osuCrypto
 								ctx.minus(leafSums[j], zero, leafSums[j]);
 						}
 					}
+					else
+					{
+						throw RTE_LOC;
+					}
+
 				}
 
 				///////////
@@ -792,7 +797,7 @@ namespace osuCrypto
 		span<u64> points,
 		auto&& values,
 		PRNG& prng,
-		span<RegularDpfKey> keys, 
+		span<RegularDpfKey> keys,
 		CoeffCtx ctx)
 	{
 		if (keys.size() != 2)
@@ -882,7 +887,7 @@ namespace osuCrypto
 					seeds[p][a] = AES::roundEnc(seeds[p][a], seeds[p][a]);
 				}
 
-				if(tags[0] == tags[1])
+				if (tags[0] == tags[1])
 					throw RTE_LOC;
 
 				auto leaf0 = ctx.template make<T>();
@@ -898,7 +903,7 @@ namespace osuCrypto
 				// if party 1 is going to apply gamma, then we
 				// need to negate the user provided value because
 				// party 1 subtracts gamma while party 0 adds it.
-				if (tags[1]) 
+				if (tags[1])
 				{
 					auto zero = ctx.template make<T>();
 					ctx.zero(zero);

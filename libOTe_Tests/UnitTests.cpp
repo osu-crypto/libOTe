@@ -72,6 +72,7 @@ namespace tests_libOTe
 			tc.add("RegularDpf_MultByte_Test                ", RegularDpf_MultByte_Test);
 			tc.add("RegularDpf_MultBit_Test                 ", RegularDpf_MultBit_Test);
 			tc.add("RegularDpf_MultSession_Test             ", RegularDpf_MultSession_Test);
+			tc.add("RegularDpf_MultGeneric_Test             ", RegularDpf_MultGeneric_Test);
 			
 
 			tc.add("SumDmpf_Proto_Test                      ", SumDmpf_Proto_Test);
