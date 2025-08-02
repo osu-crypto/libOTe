@@ -18,7 +18,7 @@ namespace osuCrypto
 	{
 		u64 mPartyIdx = 0;
 
-		u64 mNumPoints = 0;
+		u64 mNumPointsPerSet = 0;
 
 		u64 mDomain = 0;
 
@@ -35,12 +35,12 @@ namespace osuCrypto
 			u64 denseDepth
 		)
 		{
-			mNumPoints = numPoints;
+			mNumPointsPerSet = numPoints;
 			mPartyIdx = partyIdx;
 			mDomain = domain;
 			mDenseDepth = std::min(denseDepth, log2ceil(mDomain));
 			auto depth = log2ceil(mDomain) - mDenseDepth;
-			mMultiplier.init(mPartyIdx, depth * mNumPoints);
+			mMultiplier.init(mPartyIdx, depth * mNumPointsPerSet);
 			if (mDenseDepth)
 				mRegDpf.init(mPartyIdx, 1ull << mDenseDepth, numPoints);
 		}
@@ -53,7 +53,7 @@ namespace osuCrypto
 
 		u64 baseOtCount() const
 		{
-			return log2ceil(mDomain) * mNumPoints;
+			return log2ceil(mDomain) * mNumPointsPerSet;
 		}
 
 
@@ -256,34 +256,34 @@ namespace osuCrypto
 
 			u64 depth = log2ceil(mDomain) - mDenseDepth;
 
-			std::vector<Tree> trees(mNumPoints);
-			for (u64 i = 0; i < mNumPoints; ++i)
+			std::vector<Tree> trees(mNumPointsPerSet);
+			for (u64 i = 0; i < mNumPointsPerSet; ++i)
 			{
 				trees[i].resize(depth + 1);
 			}
 
 			using T = block;
 			std::unique_ptr<u8[]> mem;
-			std::vector<std::span<T>> leafValues(mNumPoints);
-			std::vector<std::span<u8>> leafTags(mNumPoints);
+			std::vector<std::span<T>> leafValues(mNumPointsPerSet);
+			std::vector<std::span<u8>> leafTags(mNumPointsPerSet);
 			u64 totalSize = 0;
-			for (u64 i = 0; i < mNumPoints; ++i)
+			for (u64 i = 0; i < mNumPointsPerSet; ++i)
 				totalSize += sparsePoints[i].size();
 
 			mem.reset(new u8[totalSize * (sizeof(T) + 1)]());
 			auto iter = mem.get();
-			for (u64 i = 0; i < mNumPoints; ++i)
+			for (u64 i = 0; i < mNumPointsPerSet; ++i)
 			{
 				leafValues[i] = span<T>((T*)iter, sparsePoints[i].size());
 				iter += leafValues[i].size_bytes();
 			}
-			for (u64 i = 0; i < mNumPoints; ++i)
+			for (u64 i = 0; i < mNumPointsPerSet; ++i)
 			{
 				leafTags[i] = span<u8>(iter, sparsePoints[i].size());
 				iter += leafTags[i].size_bytes();
 			}
 
-			//for (u64 i = 0; i < mNumPoints; ++i)
+			//for (u64 i = 0; i < mNumPointsPerSet; ++i)
 			//{
 			//	for (auto p : sparsePoints[i])
 			//		std::cout << p << " ";
@@ -388,7 +388,7 @@ namespace osuCrypto
 			else
 			{
 
-				for (u64 r = 0; r < mNumPoints; ++r)
+				for (u64 r = 0; r < mNumPointsPerSet; ++r)
 				{
 					auto&& points = sparsePoints[r];
 					auto& tree = trees[r];
@@ -420,14 +420,14 @@ namespace osuCrypto
 			{
 				//std::cout << "-----" << d << "-----" << std::endl;
 
-				std::vector<block> z0(mNumPoints);
-				std::vector<block> z1(mNumPoints);
+				std::vector<block> z0(mNumPointsPerSet);
+				std::vector<block> z1(mNumPointsPerSet);
 
-				BitVector negAlpha(mNumPoints);
-				std::vector<std::array<u8, 2>> taus(mNumPoints);
-				std::vector<block>  sigmas(mNumPoints);
+				BitVector negAlpha(mNumPointsPerSet);
+				std::vector<std::array<u8, 2>> taus(mNumPointsPerSet);
+				std::vector<block>  sigmas(mNumPointsPerSet);
 				bool used = false;
-				for (u64 r = 0; r < mNumPoints; ++r)
+				for (u64 r = 0; r < mNumPointsPerSet; ++r)
 				{
 					auto& tree = trees[r];
 					if (tree.mC[d] == 0)
@@ -458,14 +458,14 @@ namespace osuCrypto
 
 
 					co_await mMultiplier.multiply(negAlpha, sigmas, sigmas, sock);
-					for (u64 r = 0; r < mNumPoints; ++r)
+					for (u64 r = 0; r < mNumPointsPerSet; ++r)
 						sigmas[r] = sigmas[r] ^ trees[r].mZ[d][0];
 					co_await reveal(sigmas, taus, sock);
 
 					//std::cout << "p " << mPartyIdx << " d " << d << " ~a " << negAlpha[0] << " s " << sigmas[0] << std::endl;
 					//std::cout << "        z  " << z0[0] << "   " << z1[0] << std::endl;
 
-					for (u64 r = 0; r < mNumPoints; ++r)
+					for (u64 r = 0; r < mNumPointsPerSet; ++r)
 					{
 						//std::cout << "setting >" << d << "<" << std::endl;
 						trees[r].mSigma[d] = sigmas[r];
@@ -479,7 +479,7 @@ namespace osuCrypto
 
 				//std::cout << "vvvvv" << dNext << "vvvvv" << std::endl;
 
-				for (u64 r = 0; r < mNumPoints; ++r)
+				for (u64 r = 0; r < mNumPointsPerSet; ++r)
 				{
 					auto& tree = trees[r];
 					auto size = tree.mSeeds[dNext].size();
@@ -541,7 +541,7 @@ namespace osuCrypto
 				}
 			}
 
-			for (u64 r = 0; r < mNumPoints; ++r)
+			for (u64 r = 0; r < mNumPointsPerSet; ++r)
 			{
 				auto& tree = trees[r];
 				auto size = tree.mSeeds[0].size();
@@ -584,7 +584,7 @@ namespace osuCrypto
 
 				co_await reveal(gamma, sock);
 				//std::cout << "-----------final-------------" << std::endl;
-				for (u64 r = 0; r < mNumPoints; ++r)
+				for (u64 r = 0; r < mNumPointsPerSet; ++r)
 				{
 					auto size = sparsePoints[r].size();
 					for (u64 i = 0; i < size; ++i)
@@ -619,7 +619,7 @@ namespace osuCrypto
 			}
 			else
 			{
-				for (u64 r = 0; r < mNumPoints; ++r)
+				for (u64 r = 0; r < mNumPointsPerSet; ++r)
 				{
 					auto size = sparsePoints[r].size();
 					for (u64 i = 0; i < size; ++i)
@@ -635,7 +635,7 @@ namespace osuCrypto
 
 
 		//std::vector<block> gamma(values.begin(), values.end());
-		//for (u64 r = 0; r < mNumPoints; ++r)
+		//for (u64 r = 0; r < mNumPointsPerSet; ++r)
 		//{
 		//	auto& tree = trees[r];
 		//	auto size = sparsePoints[r].size();
@@ -667,7 +667,7 @@ namespace osuCrypto
 
 		//co_await reveal(gamma, sock);
 		////std::cout << "-----------final-------------" << std::endl;
-		//for (u64 r = 0; r < mNumPoints; ++r)
+		//for (u64 r = 0; r < mNumPointsPerSet; ++r)
 		//{
 		//	//auto& tree = trees[r];
 		//	auto size = sparsePoints[r].size();

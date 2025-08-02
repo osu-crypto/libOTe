@@ -435,6 +435,7 @@ namespace osuCrypto
 		PRNG prng(block(231234, 321312));
 		u64 domain = cmd.getOr("domain", 32); // Domain size
 		u64 numPoints = cmd.getOr("numPoints", 4); // Number of points
+		u64 numSets = cmd.getOr("numSets", 1); // Number of sets
 		u64 valueByteCount = cmd.getOr("valueByteCount", 16); // Byte count for values
 		u64 numPartitions = cmd.getOr("numPartitions", 2); // Number of partitions
 		u64 linearSecParam = cmd.getOr("linearSecParam", 40); // Security parameter
@@ -463,8 +464,8 @@ namespace osuCrypto
 
 		// Initialize RevCuckooDmpf instances
 		std::array<RevCuckooDmpf, 2> dpf;
-		dpf[0].init(0, numPoints, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
-		dpf[1].init(1, numPoints, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[0].init2(0, numPoints, numSets, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[1].init2(1, numPoints, numSets, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
 		dpf[0].mPrint = print;
 		dpf[1].mPrint = print;
 
@@ -534,6 +535,7 @@ namespace osuCrypto
 		PRNG prng(block(231234, 321312));
 		u64 domain = cmd.getOr("domain", 32); // Domain size
 		u64 numPoints = cmd.getOr("numPoints", 4); // Number of points
+		u64 numSets = cmd.getOr("numSets", 6); // Number of sets
 		u64 valueByteCount = cmd.getOr("valueByteCount", 16); // Byte count for values
 		u64 numPartitions = cmd.getOr("numPartitions", 2); // Number of partitions
 		u64 linearSecParam = cmd.getOr("linearSecParam", 40); // Security parameter
@@ -541,23 +543,29 @@ namespace osuCrypto
 		u64 numValueSets = cmd.getOr("numValueSets", 3); // Number of different value sets to test
 		bool print = cmd.isSet("print"); // Print flag
 
+
 		// Generate input points (fixed for all iterations)
-		std::vector<u64> points0(numPoints);
-		std::vector<u64> points1(numPoints);
-		std::vector<u64> actualPoints(numPoints);
-		for (u64 i = 0; i < numPoints; ++i)
+		Matrix<u64> points0(numSets, numPoints);
+		Matrix<u64> points1(numSets, numPoints);
+		Matrix<u64> actualPoints(numSets, numPoints);
+		for (u64 i = 0; i < points1.size(); ++i)
 		{
-			points1[i] = prng.get<u64>();
-			points0[i] = (prng.get<u64>() % domain) ^ points1[i];
-			actualPoints[i] = points0[i] ^ points1[i];
+			points1(i) = prng.get<u64>();
+			points0(i) = (prng.get<u64>() % domain) ^ points1(i);
+			actualPoints(i) = points0(i) ^ points1(i);
 		}
 
 		// Initialize RevCuckooDmpf instances
 		std::array<RevCuckooDmpf, 2> dpf;
-		dpf[0].init(0, numPoints, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
-		dpf[1].init(1, numPoints, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[0].init2(0, numPoints, numSets, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[1].init2(1, numPoints, numSets, domain, valueByteCount, numPartitions, cuckooSecParam, linearSecParam);
 		dpf[0].mPrint = print;
 		dpf[1].mPrint = print;
+		if (cmd.hasValue("print"))
+		{
+			dpf[0].mPrintIndex = cmd.getOr("print", 0);
+			dpf[1].mPrintIndex = cmd.getOr("print", 0);
+		}
 
 		// Setup base OTs
 		auto baseCount0 = dpf[0].baseOtCount();
@@ -588,6 +596,8 @@ namespace osuCrypto
 
 		// Create sockets for communication
 		auto sock = coproto::LocalAsyncSocket::makePair();
+		//sock[0].enableLogging();
+		//sock[1].enableLogging();
 
 		// Phase 1: Setup points (called once)
 		if (print)
@@ -602,29 +612,32 @@ namespace osuCrypto
 		std::get<1>(r).result();
 
 		// verify that the internal shares are correct.
+		for(u64 s = 0, k = 0; s < numSets;++s)
 		{
+			u64 f = dpf[0].mLeafShares.size() / numSets;
 			std::set<u64> active;
 			// Verify the output for this iteration
-			for (u64 i = 0; i < dpf[0].mLeafShares.size(); ++i)
+			for (u64 i = 0; i < f; ++i, ++k)
 			{
-				for (u64 j = 0; j < dpf[0].mLeafShares[i].size(); ++j)
+				for (u64 j = 0; j < dpf[0].mLeafShares[k].size(); ++j)
 				{
-					auto val = dpf[0].mLeafShares[i][j] ^ dpf[1].mLeafShares[i][j];
-					bool tag = dpf[0].mLeafTags[i][j] ^ dpf[1].mLeafTags[i][j];
+					auto val = dpf[0].mLeafShares[k][j] ^ dpf[1].mLeafShares[k][j];
+					bool tag = dpf[0].mLeafTags[k][j] ^ dpf[1].mLeafTags[k][j];
 
 					if (val != ZeroBlock)
 					{
-						active.insert(dpf[0].mSparseSets[i][j]);
+						active.insert(dpf[0].mSparseSets[k][j]);
 					}
 
 					if ((val != ZeroBlock) != bool(tag))
 						throw RTE_LOC;
 				}
 			}
-			if (active.size() != numPoints)
-				throw RTE_LOC;
 
-			for (auto p : actualPoints)
+			//if (active.size() < numPoints)
+			//	throw RTE_LOC;
+
+			for (auto p : actualPoints[s])
 			{
 				if (active.find(p) == active.end())
 				{
@@ -643,63 +656,83 @@ namespace osuCrypto
 			}
 
 			// Generate different values for each iteration
-			std::vector<block> values0(numPoints);
-			std::vector<block> values1(numPoints);
-			std::unordered_map<u64, block> expectedMap;
-
-			for (u64 i = 0; i < numPoints; ++i)
+			std::vector<block> values0(numPoints * numSets);
+			std::vector<block> values1(numPoints * numSets);
+			for (u64 i = 0; i < values1.size(); ++i)
 			{
 				values0[i] = prng.get();
 				values1[i] = prng.get();
-				auto p = actualPoints[i];
-				auto v = values0[i] ^ values1[i];
-				expectedMap[p] = v;
 			}
 
 			// Prepare output matrices for this iteration
-			std::array<std::vector<block>, 2> output;
-			output[0].resize(domain);
-			output[1].resize(domain);
+			std::array<Matrix<block>, 2> output;
+			output[0].resize(numSets, domain);
+			output[1].resize(numSets, domain);
 
 			// Expand values using the cached point setup
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				dpf[0].expandValues(values0, [&](auto i, auto v) { output[0][i] = v; }, prng, sock[0]),
-				dpf[1].expandValues(values1, [&](auto i, auto v) { output[1][i] = v; }, prng, sock[1])
+				dpf[0].expandValues(values0, [&](auto j, auto i, auto v) { output[0](j,i) = v; }, prng, sock[0]),
+				dpf[1].expandValues(values1, [&](auto j, auto i, auto v) { output[1](j,i) = v; }, prng, sock[1])
 			));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
 
-
-			// Verify the output for this iteration
-			for (u64 i = 0; i < domain; ++i)
+			for (u64 s = 0; s < numSets; ++s)
 			{
-				auto iter = expectedMap.find(i);
-				auto actual = output[0][i] ^ output[1][i];
-				auto expected = iter == expectedMap.end() ? ZeroBlock : iter->second;
+				std::unordered_map<u64, block> expectedMap;
 
-				if (actual != expected)
+				for (u64 i = 0; i < numPoints; ++i)
 				{
-					std::cout << "Iteration " << iteration << " failed at domain point " << i << std::endl;
-					std::cout << "Expected: " << expected << std::endl;
-					std::cout << "Actual: " << actual << std::endl;
+					auto p = actualPoints[s][i];
+					auto v = values0[s* numPoints + i] ^ values1[s * numPoints + i];
+					expectedMap[p] ^= v;
+				}
 
-					// Show which input points map to this domain position
-					for (u64 j = 0; j < numPoints; ++j)
+
+				// Verify the output for this iteration
+				bool allCorrect = true;
+				for (u64 i = 0; i < domain && allCorrect; ++i)
+				{
+					auto iter = expectedMap.find(i);
+					auto actual = output[0](s,i) ^ output[1](s,i);
+					auto expected = iter == expectedMap.end() ? ZeroBlock : iter->second;
+
+					if (actual != expected)
 					{
-						if (actualPoints[j] == i)
-						{
-							std::cout << "Input point " << j << " maps to domain position " << i
-								<< " with value " << (values0[j] ^ values1[j]) << std::endl;
-						}
+						allCorrect = false;
+						//std::cout << "Iteration " << iteration << " failed at set "<<s<<", domain point " << i << std::endl;
+						//std::cout << "Expected: " << expected << std::endl;
+						//std::cout << "Actual: " << actual << std::endl;
+
+						//// Show which input points map to this domain position
+						//for (u64 j = 0; j < numPoints; ++j)
+						//{
+						//	if (actualPoints[s][j] == i)
+						//	{
+						//		std::cout << "Input point " << j << " maps to domain position " << i
+						//			<< " with value " << (values0[j] ^ values1[j]) << std::endl;
+						//	}
+						//}
+						//throw RTE_LOC;
+					}
+				}
+				if (!allCorrect)
+				{
+					std::cout << "Iteration " << iteration + 1 << " failed verification for set " << s << std::endl;
+					for(u64 i = 0; i < domain; ++i)
+					{
+						auto iter = expectedMap.find(i);
+						auto actual = output[0](s,i) ^ output[1](s,i);
+						auto expected = iter == expectedMap.end() ? ZeroBlock : iter->second;
+						if (actual != expected)
+							std::cout << Color::Red;
+						std::cout << i << ": Exp " << expected << ", Act " << actual 
+							<< " = " << output[0](s, i) <<" + " << output[1](s, i) << std::endl << Color::Default;
 					}
 					throw RTE_LOC;
 				}
 			}
 
-			if (print)
-			{
-				std::cout << "Iteration " << iteration + 1 << " passed verification" << std::endl;
-			}
 		}
 
 

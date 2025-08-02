@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "cryptoTools/Common/Defines.h"
 #include "RegularDpf.h"
@@ -12,7 +12,7 @@ namespace osuCrypto
 		u64 mPartyIdx = 0;
 
 		// t
-		u64 mNumPoints = 0;
+		u64 mNumPointsPerSet = 0;
 
 		u64 mNumSets = 0;
 
@@ -31,7 +31,7 @@ namespace osuCrypto
 			u64 numSets)
 		{
 			mPartyIdx = partyIdx;
-			mNumPoints = pointsPerSet;
+			mNumPointsPerSet = pointsPerSet;
 			mDomain = domain;
 			mNumSets = numSets;
 			mDpf.init(partyIdx, domain, pointsPerSet * numSets);
@@ -64,9 +64,9 @@ namespace osuCrypto
 			Output&& output,
 			CoeffCtx ctx = {})
 		{
-			if (points.size() != mNumSets * mNumPoints)
+			if (points.size() != mNumSets * mNumPointsPerSet)
 				throw RTE_LOC;
-			if (values.size() != mNumSets * mNumPoints)
+			if (values.size() != mNumSets * mNumPointsPerSet)
 				throw RTE_LOC;
 
 			T sum;
@@ -79,9 +79,9 @@ namespace osuCrypto
 				[&](u64 treeIdx, u64 pointIdx, auto value, block tag) {
 					ctx.plus(sum, sum, value);
 					t ^= tag;
-					if (++count == mNumPoints)
+					if (++count == mNumPointsPerSet)
 					{
-						output(treeIdx / mNumPoints, pointIdx, sum, t);
+						output(treeIdx / mNumPointsPerSet, pointIdx, sum, t);
 						ctx.zero(sum);
 						count = 0;
 						t = ZeroBlock;

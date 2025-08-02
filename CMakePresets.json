@@ -1,4 +1,4 @@
-﻿{
+{
   "version": 2,
   "configurePresets": [
     {
@@ -80,6 +80,7 @@
         "ENABLE_ASAN": true,
         "BUILD_SHARED_LIBS": false,
         "LIBOTE_SHARED": false,
+        "COPROTO_SOCK_LOGGING": true,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install/${presetName}"
       },
