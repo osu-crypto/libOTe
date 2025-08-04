@@ -5,6 +5,7 @@
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "libOTe/Dpf/RevCuckoo/Dedup.h"
 #include "cryptoTools/Common/Log.h"
+#include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto
 {
@@ -312,15 +313,17 @@ namespace osuCrypto
 
 	void Dedup_protocol_test(const CLP& cmd)
 	{
+		using F = block;
+
 		using namespace osuCrypto;
 		u64 n = cmd.getOr("n", 16);
 		u64 keyBits = cmd.getOr("keyBits", 8);
-		u64 valueBits = cmd.getOr("valueBits", 16);
+		auto print = cmd.isSet("print");
 
 		std::array<Dedup, 2> dedup;
 		dedup[0].init(0, n, keyBits);
 		dedup[1].init(1, n, keyBits);
-		dedup[0].mPrint = dedup[1].mPrint = cmd.isSet("print");
+		dedup[0].mPrint = dedup[1].mPrint = print;
 
 		// Compute and set the required base OTs for the Dedup protocol.
 		auto count0 = dedup[0].baseOtCount();
@@ -358,21 +361,23 @@ namespace osuCrypto
 
 		// Generate random keys, values, and alternate keys
 		std::array<std::vector<u32>, 2> keys, altKeys;
-		std::array<Matrix<u8>, 2> values;
+		std::array<std::vector<F>, 2> values;
 		for (int p = 0; p < 2; ++p) {
 			keys[p].resize(n);
-			values[p].resize(n, divCeil(valueBits, 8));
-		 	prng.get(values[p].data(), values[p].size());
+			values[p].resize(n);
 			altKeys[p].resize(n);
+		 	prng.get(values[p].data(), values[p].size());
 		}
 
-		// Make the keys[0] and keys[1] add up to the real keys, same for values and altKeys
-		std::vector<u32> expKeys(n), expValues(n), rKeys(n), rAltKeys(n);
-		Matrix<u8> rVals(n, divCeil(valueBits, 8));
-		for(u64 i =0; i < rVals.size();++i)
-			rVals(i) ^= values[0](i) ^ values[1](i);
+		using CoeffCtx = DefaultCoeffCtx<F>;
+		CoeffCtx ctx;
 
-		std::unordered_map<u32, u32> expSum;
+		// Make the keys[0] and keys[1] add up to the real keys, same for values and altKeys
+		std::vector<u32> expKeys(n), rKeys(n), rAltKeys(n);
+		std::vector<F> rVals(n), expValues(n);
+
+
+		std::unordered_map<u32, F> expSum;
 		for (u64 i = 0; i < n; ++i) {
 
 			rKeys[i] = i+1;
@@ -394,13 +399,20 @@ namespace osuCrypto
 			else
 				expKeys[i] = rKeys[i];
 
-			u64 v = 0;
-			copyBytesMin(v, rVals[i]);
-			expSum[rKeys[i]] ^= v;
+			ctx.plus(rVals[i], values[0][i], values[1][i]);
+
+			if (print)
+			{
+				auto key = keys[0][i] ^ keys[1][i];
+				std::cout << key << ", " << std::hex<<rVals[i].get<u32>(0)<<std::dec << std::endl;
+			}
+
+
+			ctx.plus(expSum[rKeys[i]], expSum[rKeys[i]], rVals[i]);
 		}
 		for (u64 i = 0; i < n; ++i) {
 			auto key = keys[0][i] ^ keys[1][i];
-			expValues[i] = std::exchange(expSum[key], 0);
+			expValues[i] = std::exchange(expSum[key], F(0));
 			//std::cout << "k " << rKeys[i] << " " << rVals[i] << " -> " << expKeys[i] << " " << expValues[i] << std::endl;
 		}
 
@@ -409,25 +421,25 @@ namespace osuCrypto
 		auto Mtx = [](auto& v) { return MatrixView<u8>((u8*)v.data(), v.size(), sizeof(v[0])); }; 
 
 		// Run protocol
-		if (cmd.isSet("old"))
-		{
+		//if (cmd.isSet("old"))
+		//{
 
-		auto res = macoro::sync_wait(
-			macoro::when_all_ready(
-				dedup[0].dedup(Mtx(keys[0]), values[0], Mtx(altKeys[0]), prng, sock[0]),
-				dedup[1].dedup(Mtx(keys[1]), values[1], Mtx(altKeys[1]), prng, sock[1])
-			));
+		//auto res = macoro::sync_wait(
+		//	macoro::when_all_ready(
+		//		dedup[0].dedup(Mtx(keys[0]), values[0], Mtx(altKeys[0]), prng, sock[0]),
+		//		dedup[1].dedup(Mtx(keys[1]), values[1], Mtx(altKeys[1]), prng, sock[1])
+		//	));
 
-		std::get<0>(res).result();
-		std::get<1>(res).result();
-		}
-		else
+		//std::get<0>(res).result();
+		//std::get<1>(res).result();
+		//}
+		//else
 		{
 
 			auto res = macoro::sync_wait(
 				macoro::when_all_ready(
-					dedup[0].dedup2(Mtx(keys[0]), values[0], Mtx(altKeys[0]), prng, sock[0]),
-					dedup[1].dedup2(Mtx(keys[1]), values[1], Mtx(altKeys[1]), prng, sock[1])
+					dedup[0].dedup2<F>(Mtx(keys[0]), values[0], Mtx(altKeys[0]), prng, sock[0]),
+					dedup[1].dedup2<F>(Mtx(keys[1]), values[1], Mtx(altKeys[1]), prng, sock[1])
 				));
 
 			std::get<0>(res).result();
@@ -436,19 +448,15 @@ namespace osuCrypto
 
 		// Reconstruct outputs
 		bool failed = false;
-		std::vector<u8> vv(rVals.cols());
-		std::vector<u32> actKeys(n), actVals(n);
+		std::vector<u32> actKeys(n);
 		for (u64 i = 0; i < n; ++i) {
 			actKeys[i] = keys[0][i] ^ keys[1][i];
-			for(u64 j = 0; j < rVals.cols(); ++j) {
-				vv[j] = values[0][i][j] ^ values[1][i][j];
-			}
-			copyBytesMin(actVals[i], vv);
-
-
+			F actVals;
+			ctx.plus(actVals, values[0][i], values[1][i]);
+			
 			if (actKeys[i] != expKeys[i])
 				failed = true;
-			if (actVals[i] != expValues[i])
+			if (actVals != expValues[i])
 				failed = true;
 		}
 		if (failed)
@@ -467,11 +475,15 @@ namespace osuCrypto
 			}
 			std::cout << "Values: " << std::endl;
 			for (u64 i = 0; i < n; ++i) {
-				if (actVals[i] != expValues[i])
+
+				F actVals;
+				ctx.plus(actVals, values[0][i], values[1][i]);
+				if (actVals != expValues[i])
 					std::cout << Color::Red;
 
-				std::cout << "Value[" << i << "] = " << toHex(values[0][i]) << " ^ " << toHex(values[1][i]) << " = "
-					<< actVals[i] << " ?= " << expValues[i] << std::endl << Color::Default;
+				std::cout << "Value[" << i << "] = " << values[0][i] << " + " << values[1][i]
+					<< " = "
+					<< actVals << " ?= exp " << expValues[i] << std::endl << Color::Default;
 			}
 
 			throw RTE_LOC;

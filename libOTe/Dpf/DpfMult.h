@@ -279,7 +279,7 @@ namespace osuCrypto
 		{
 
 			auto session = co_await setupMultiply(y.size(), x, sock);
-			co_await session.template multiply<F, CoeffCtx>(y, xy, sock, ctx);
+			co_await session.template multiply<F, CoeffCtx>(y.begin(), y.end(), xy.begin(), sock, ctx);
 			co_return;
 		}
 
@@ -290,6 +290,77 @@ namespace osuCrypto
 			u64 mBitCount;
 
 			BitMatrixCoeffCtx(u64 bitCount) : mBitCount(bitCount) {}
+
+
+			template<typename T>
+			struct Iter
+			{
+				MatrixView<T> mBase;
+				u64 mIdx = 0;
+
+				// Iterator traits for random access iterator
+				using iterator_category = std::random_access_iterator_tag;
+				using value_type = span<T>;
+				using difference_type = std::ptrdiff_t;
+				using pointer = span<T>*;
+				using reference = span<T>;
+
+				Iter() = default;
+				Iter(MatrixView<T> base, u64 idx) : mBase(base), mIdx(idx) {}
+
+				// Dereference operators
+				auto operator*() const { return mBase[mIdx]; }
+				auto operator->() const { return &mBase[mIdx]; }
+
+				// Subscript operator for random access
+				span<T> operator[](difference_type i) const { return mBase[mIdx + i]; }
+
+				// Prefix increment/decrement
+				Iter& operator++() { ++mIdx; return *this; }
+				Iter& operator--() { --mIdx; return *this; }
+
+				// Postfix increment/decrement
+				Iter operator++(int) { Iter tmp = *this; ++mIdx; return tmp; }
+				Iter operator--(int) { Iter tmp = *this; --mIdx; return tmp; }
+
+				// Arithmetic operators
+				Iter operator+(difference_type n) const { return Iter(mBase, mIdx + n); }
+				Iter operator-(difference_type n) const { return Iter(mBase, mIdx - n); }
+				
+				// Difference operator (required for std::distance)
+				difference_type operator-(const Iter& other) const {
+					if(mBase.data() != other.mBase.data())
+						throw std::runtime_error("Iterators from different bases cannot be subtracted.");
+					return static_cast<difference_type>(mIdx) - static_cast<difference_type>(other.mIdx);
+				}
+
+				// Compound assignment operators
+				Iter& operator+=(difference_type n) { mIdx += n; return *this; }
+				Iter& operator-=(difference_type n) { mIdx -= n; return *this; }
+
+				// Comparison operators
+				bool operator==(const Iter& other) const { 
+					return mBase.data() == other.mBase.data() && mIdx == other.mIdx; 
+				}
+				bool operator!=(const Iter& other) const { 
+					return !(*this == other);
+				}
+				bool operator<(const Iter& other) const {
+					if(mBase.data() != other.mBase.data())
+						throw std::runtime_error("Iterators from different bases cannot be compared.");
+					return mIdx < other.mIdx;
+				}
+				bool operator<=(const Iter& other) const {
+					return !(other < *this);
+				}
+				bool operator>(const Iter& other) const {
+					return other < *this;
+				}
+				bool operator>=(const Iter& other) const {
+					return !(*this < other);
+				}
+			};
+
 
 			// Matrix type for this context - each element is a row view
 			struct Vec
@@ -308,6 +379,8 @@ namespace osuCrypto
 					return mData[i];
 				}
 
+				auto begin() const { return Iter<u8>(mData, 0); }
+				auto end() const { return Iter<u8>(mData, mData.rows()); }
 			};
 
 			template<typename T>
@@ -325,10 +398,10 @@ namespace osuCrypto
 					assert(i < mData.rows());
 					return mData[i];
 				}
-			};
 
-			//template<typename F>
-			//using Vec = Matrix<F>;
+				auto begin() const { return Iter<T>(mData, 0); }
+				auto end() const { return Iter<T>(mData, mData.rows()); }
+			};
 
 			// The field type F is MatrixView<u8> (a single row)
 			template<typename F>
@@ -338,7 +411,13 @@ namespace osuCrypto
 
 				// Return a matrix with size rows and appropriate column count for bitCount
 				auto cols = divCeil(mBitCount, 8);
-				return Matrix<u8>(size, cols);
+				return Vec{ Matrix<u8>(size, cols) };
+			}
+
+			void resize(auto&& vec, u64 size) const
+			{
+				auto cols = divCeil(mBitCount, 8);
+				vec.mData.resize(size, cols);
 			}
 
 			template<typename F>
@@ -369,8 +448,7 @@ namespace osuCrypto
 				plus(ret, lhs, rhs);
 			}
 
-			template<typename F>
-			void copy(F& dst, const F& src) const
+			void copy(auto&& dst, auto&& src) const
 			{
 				assert(dst.size() == src.size());
 				std::copy(src.begin(), src.end(), dst.begin());
@@ -459,7 +537,8 @@ namespace osuCrypto
 
 			if (bitCount < 8)
 			{
-				std::cout << "DpfMult::multiply: bitCount < 8. " << LOCATION << std::endl;
+				//std::cout << "DpfMult::multiply: bitCount "<< bitCount << " < 8. " << LOCATION << std::endl;
+				//throw RTE_LOC;
 			}
 
 			// Create matrix coefficient context
@@ -494,8 +573,9 @@ namespace osuCrypto
 			// Returns xy as secret shares
 			template<typename F, typename CoeffCtx>
 			macoro::task<> multiply(
-				auto&& y,
-				auto&& xy,
+				auto&& yBegin,
+				auto&& yEnd,
+				auto&& xyBegin,
 				coproto::Socket& sock,
 				CoeffCtx ctx = {})
 			{
@@ -556,8 +636,11 @@ namespace osuCrypto
 				// can locally compute it given mSendOts0[0].
 
 				u64 n = mX.size();
-				if (y.size() != n || xy.size() != n)
+				if (std::distance(yBegin, yEnd) != n)
 					throw RTE_LOC;
+
+				// make sure we can deref xy
+				std::ignore = *(xyBegin + (n - 1));
 
 				std::vector<u8> msg(n * ctx.template byteSize<F>());
 				auto mIter = msg.data();
@@ -570,21 +653,21 @@ namespace osuCrypto
 
 					auto xi = mX[i];
 					if (xi)
-						ctx.minus(t0, t0, y[i]);
+						ctx.minus(t0, t0, yBegin[i]);
 
 					// m1 = t0 + (x0 ⊕ 1) * y0
 					auto m1 = ctx.template make<F>();
 					ctx.fromBlock(m1, mSendOts[i][1]); // mask the m1 message using the OT.
 					ctx.plus(m1, m1, t0);
 					if (xi == 0)
-						ctx.plus(m1, m1, y[i]);
+						ctx.plus(m1, m1, yBegin[i]);
 
 					ctx.serialize(&m1, &m1 + 1, mIter);
 					mIter += ctx.template byteSize<F>();
 
 					// xy = -t0
 					auto nt0 = ctx.template make<F>();
-					ctx.minus(xy[i], zero, t0);
+					ctx.minus(xyBegin[i], zero, t0);
 				}
 
 				co_await sock.send(std::move(msg));
@@ -620,9 +703,10 @@ namespace osuCrypto
 					}
 
 					// reconstruct xy
-					ctx.plus(xy[i], xy[i], w0);
+					ctx.plus(xyBegin[i], xyBegin[i], w0);
 				}
 			}
+
 			macoro::task<> multiplyMtx(
 				MatrixView<const u8> y,
 				MatrixView<u8> xy,
@@ -636,10 +720,11 @@ namespace osuCrypto
 					throw RTE_LOC;
 
 				auto ctx = DpfMult::BitMatrixCoeffCtx(y.cols() * 8);
-
+				auto vy = DpfMult::BitMatrixCoeffCtx::View<const u8>(y);
+				auto vxt = DpfMult::BitMatrixCoeffCtx::View<u8>(xy);
 				co_await multiply<u8, DpfMult::BitMatrixCoeffCtx>(
-					DpfMult::BitMatrixCoeffCtx::View<const u8>(y),
-					DpfMult::BitMatrixCoeffCtx::View<u8>(xy),
+					vy.begin(), vy.end(),
+					vxt.begin(),
 					sock,
 					ctx
 				);

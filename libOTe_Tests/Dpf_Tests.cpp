@@ -214,7 +214,7 @@ void RegularDpf_MultGeneric_Test(const CLP& cmd)
 				if (print)
 				{
 					std::cout << "Test Iteration: " << testIter << ", Position: " << j << std::endl;
-					std::cout 
+					std::cout
 						<< "x = " << x << " (" << (x0[j] ? "1" : "0") << " + " << (x1[j] ? "1" : "0") << ")"
 						<< "\ny = " << ctx.str(y) << " (" << ctx.str(y0[j]) << " + " << ctx.str(y1[j]) << ")"
 						<< "\nxy = " << ctx.str(xy) << " (" << ctx.str(xy0[j]) << " + " << ctx.str(xy1[j]) << ")"
@@ -297,14 +297,14 @@ void RegularDpf_MultSession_Test(const CLP& cmd)
 		auto session1 = std::get<1>(sessions).result();
 
 		// check that the base OTs in the sessions are correct
-		if (session0.mRecvOts.size() != n || 
+		if (session0.mRecvOts.size() != n ||
 			session0.mSendOts.size() != n ||
 			session0.mX.size() != n ||
 			session1.mRecvOts.size() != n ||
 			session1.mSendOts.size() != n ||
 			session1.mX.size() != n)
 			throw RTE_LOC;
-		for(u64 i =0; i < n; ++i)
+		for (u64 i = 0; i < n; ++i)
 		{
 			if (session0.mRecvOts[i] != session1.mSendOts[i][session0.mX[i]])
 				throw RTE_LOC;
@@ -387,85 +387,85 @@ void RegularDpf_MultByte_Test(const CLP& cmd)
 	}
 
 
-for (auto m : { 16ull, 3ull,8ull, 13ull, 33ull, 233ull })
-{
-
-	u64 n = 13;
-	u64 m8 = divCeil(m, 8);
-
-	PRNG prng(block(231234, 321312));
-	std::array<oc::DpfMult, 2> dpf;
-	dpf[0].init(0, n);
-	dpf[1].init(1, n);
-
-	std::array<std::vector<std::array<block, 2>>, 2> sendOts;
-	std::array<std::vector<block>, 2> recvOts;
-	std::array<BitVector, 2> choices;
-	for (u64 i = 0; i < 2; ++i)
+	for (auto m = 1ull; m < 16; ++m)
 	{
-		sendOts[i].resize(n);
-		recvOts[i].resize(n);
-		choices[i].resize(n);
-	}
 
-	auto sock = coproto::LocalAsyncSocket::makePair();
+		u64 n = 13;
+		u64 m8 = divCeil(m, 8);
 
-	for (u64 i = 0; i < 4; ++i)
-	{
-		//std::cout << "-=========================-" std::endl;
+		PRNG prng(block(231234, 321312));
+		std::array<oc::DpfMult, 2> dpf;
+		dpf[0].init(0, n);
+		dpf[1].init(1, n);
 
+		std::array<std::vector<std::array<block, 2>>, 2> sendOts;
+		std::array<std::vector<block>, 2> recvOts;
+		std::array<BitVector, 2> choices;
 		for (u64 i = 0; i < 2; ++i)
 		{
-			choices[i].randomize(prng);
-			prng.get(sendOts[i].data(), sendOts[i].size());
-			for (u64 j = 0; j < n; ++j)
-				recvOts[i][j] = sendOts[i][j][choices[i][j]];
+			sendOts[i].resize(n);
+			recvOts[i].resize(n);
+			choices[i].resize(n);
 		}
-		dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
-		dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
 
-		BitVector x0(n), x1(n);
-		x0.randomize(prng);
-		x1.randomize(prng);
-		Matrix<u8> xy0(n, m8), xy1(n, m8), y0(n, m8), y1(n, m8);
+		auto sock = coproto::LocalAsyncSocket::makePair();
 
-		//prng.get(y0.data(), y0.size());
-		//prng.get(y1.data(), y1.size());
-		for (u64 i = 0; i < n; ++i)
+		for (u64 i = 0; i < 4; ++i)
 		{
-			for (u64 j = 0; j < m; ++j)
+			//std::cout << "-=========================-" std::endl;
+
+			for (u64 i = 0; i < 2; ++i)
 			{
-				*BitIterator(y0[i].data(), j) = prng.getBit();
-				*BitIterator(y1[i].data(), j) = prng.getBit();
+				choices[i].randomize(prng);
+				prng.get(sendOts[i].data(), sendOts[i].size());
+				for (u64 j = 0; j < n; ++j)
+					recvOts[i][j] = sendOts[i][j][choices[i][j]];
 			}
-		}
+			dpf[0].setBaseOts(sendOts[0], recvOts[1], choices[1]);
+			dpf[1].setBaseOts(sendOts[1], recvOts[0], choices[0]);
 
-		macoro::sync_wait(macoro::when_all_ready(
-			dpf[0].multiply(m, x0.getSpan<u8>(), y0, xy0, sock[0]),
-			dpf[1].multiply(m, x1.getSpan<u8>(), y1, xy1, sock[1])
-		));
+			BitVector x0(n), x1(n);
+			x0.randomize(prng);
+			x1.randomize(prng);
+			Matrix<u8> xy0(n, m8), xy1(n, m8), y0(n, m8), y1(n, m8);
 
-		for (u64 j = 0; j < n; ++j)
-		{
-			for (u64 i = 0; i < m8; ++i)
+			//prng.get(y0.data(), y0.size());
+			//prng.get(y1.data(), y1.size());
+			for (u64 i = 0; i < n; ++i)
 			{
-
-				u64 x = x0[j] ^ x1[j];
-				auto y = y0[j][i] ^ y1[j][i];
-				u64 xy = xy0[j][i] ^ xy1[j][i];
-				auto exp = x * y;
-				if (xy != exp)
+				for (u64 j = 0; j < m; ++j)
 				{
-					std::cout << " m " << m << std::endl;
-					std::cout << "j " << j << " i " << i << std::endl;
-					std::cout << "act " << int(xy) << "=" << int(xy0[j][i]) << " + " << int(xy1[j][i]) << std::endl;
-					std::cout << "exp " << int(exp) << std::endl;
-					throw RTE_LOC;
+					*BitIterator(y0[i].data(), j) = prng.getBit();
+					*BitIterator(y1[i].data(), j) = prng.getBit();
+				}
+			}
+
+			macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].multiply(m, x0.getSpan<u8>(), y0, xy0, sock[0]),
+				dpf[1].multiply(m, x1.getSpan<u8>(), y1, xy1, sock[1])
+			));
+
+			for (u64 j = 0; j < n; ++j)
+			{
+				for (u64 i = 0; i < m8; ++i)
+				{
+
+					u64 x = x0[j] ^ x1[j];
+					auto y = y0[j][i] ^ y1[j][i];
+					u64 xy = xy0[j][i] ^ xy1[j][i];
+					auto exp = x * y;
+					if (xy != exp)
+					{
+						std::cout << " m " << m << std::endl;
+						std::cout << "j " << j << " i " << i << std::endl;
+						std::cout << "act " << int(xy) << "=" << int(xy0[j][i]) << " + " << int(xy1[j][i]) << std::endl;
+						std::cout << "exp " << int(exp) << std::endl;
+						throw RTE_LOC;
+					}
 				}
 			}
 		}
 	}
-}
 #else
 	throw UnitTestSkipped("ENABLE_REGULAR_DPF and ENABLE_SPARSE_DPF not defined.");
 #endif

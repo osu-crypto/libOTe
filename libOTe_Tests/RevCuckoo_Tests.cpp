@@ -325,7 +325,7 @@ namespace osuCrypto
 
 			u64 m = cmd.getOr("m", 10);
 			u64 c = cmd.getOr("ssp", 8) + m;
-			auto g = 1ull;
+			auto g = cmd.getOr("g", 2);
 			//auto m8 = divCeil(m, 8);
 			auto c8 = divCeil(c, 8);
 			auto g8 = divCeil(g, 8);
@@ -346,36 +346,28 @@ namespace osuCrypto
 			ys[0].resize(m, g8);
 			ys[1].resize(m, g8);
 
-			if (tt == 0)
-			{
-				for (u64 i = 0; i < m; ++i)
-				{
-					for (u64 j = 0; j < m; ++j)
-					{
-						*BitIterator(Ms[0][i].data(), j) = i == j;
-					}
-				}
-				setBytes(Ms[1], 0);
-			}
-			else
-			{
 
-				for (u64 i = 0; i < m; ++i)
+			std::vector<u8> skips(m);
+			for (u64 i = 0; i < m; ++i)
+			{
+				skips[i] = prng.get<u8>() % 2; // Randomly skip some rows
+				if (skips[i] == 0)
 				{
 					for (u64 j = 0; j < c; ++j)
 					{
 						*BitIterator(Ms[0][i].data(), j) = prng.getBit();
 						*BitIterator(Ms[1][i].data(), j) = prng.getBit();
 					}
+				}
 
 
-					for (u64 j = 0; j < g; ++j)
-					{
-						*BitIterator(ys[0][i].data(), j) = prng.getBit();
-						*BitIterator(ys[1][i].data(), j) = prng.getBit();
-					}
+				for (u64 j = 0; j < g; ++j)
+				{
+					*BitIterator(ys[0][i].data(), j) = prng.getBit();
+					*BitIterator(ys[1][i].data(), j) = prng.getBit();
 				}
 			}
+			
 
 
 			Matrix<u8> M(m, c8);
@@ -383,8 +375,13 @@ namespace osuCrypto
 				M(i) = Ms[0](i) ^ Ms[1](i);
 			Matrix<u8> y(m, g8);
 			for (u64 i = 0; i < m; ++i)
+			{
+				if (skips[i])
+					continue;
+
 				for (u64 j = 0; j < y.cols(); ++j)
 					y(i, j) = ys[0](i, j) ^ ys[1](i, j);
+			}
 
 			auto sock = coproto::LocalAsyncSocket::makePair();
 			auto r = macoro::sync_wait(macoro::when_all_ready(
@@ -403,6 +400,7 @@ namespace osuCrypto
 			Matrix<u8> act(m, g8);
 			for (u64 i = 0; i < m; ++i)
 			{
+
 				for (u64 j = 0; j < g; ++j)
 				{
 					//a[i,*] * b[*,j] = c[i,j]
@@ -530,9 +528,9 @@ namespace osuCrypto
 
 	}
 
-	void RevCuckoo_iterative_Test(const oc::CLP& cmd)
+	template<typename F, typename CoeffCtx>
+	void RevCuckoo_iterative_impl(const oc::CLP& cmd)
 	{
-		using F = block;
 		// Initialize parameters
 		PRNG prng(block(231234, 321312));
 		u64 domain = cmd.getOr("domain", 32); // Domain size
@@ -556,12 +554,12 @@ namespace osuCrypto
 			actualPoints(i) = points0(i) ^ points1(i);
 		}
 
-		auto ctx = DefaultCoeffCtx<F>{};
+		auto ctx = CoeffCtx{};
 
 		// Initialize RevCuckooDmpf instances
 		std::array<RevCuckooDmpf<F>, 2> dpf;
-		dpf[0].init(0, numPoints, numSets, domain, ctx, numPartitions, cuckooSecParam, linearSecParam);
-		dpf[1].init(1, numPoints, numSets, domain, ctx, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[0].init(0, numPoints, numSets, domain, numPartitions, cuckooSecParam, linearSecParam);
+		dpf[1].init(1, numPoints, numSets, domain, numPartitions, cuckooSecParam, linearSecParam);
 		dpf[0].mPrint = print;
 		dpf[1].mPrint = print;
 		if (cmd.hasValue("print"))
@@ -622,6 +620,7 @@ namespace osuCrypto
 			// Verify the output for this iteration
 			for (u64 i = 0; i < f; ++i, ++k)
 			{
+				u64 unit = 0;
 				for (u64 j = 0; j < dpf[0].mLeafShares[k].size(); ++j)
 				{
 					auto val = dpf[0].mLeafShares[k][j] ^ dpf[1].mLeafShares[k][j];
@@ -630,11 +629,15 @@ namespace osuCrypto
 					if (val != ZeroBlock)
 					{
 						active.insert(dpf[0].mSparseSets[k][j]);
+						++unit;
 					}
 
 					if ((val != ZeroBlock) != bool(tag))
 						throw RTE_LOC;
 				}
+
+				if (unit > 1)
+					throw RTE_LOC;
 			}
 
 			//if (active.size() < numPoints)
@@ -659,16 +662,16 @@ namespace osuCrypto
 			}
 
 			// Generate different values for each iteration
-			std::vector<block> values0(numPoints * numSets);
-			std::vector<block> values1(numPoints * numSets);
+			std::vector<F> values0(numPoints * numSets);
+			std::vector<F> values1(numPoints * numSets);
 			for (u64 i = 0; i < values1.size(); ++i)
 			{
-				values0[i] = prng.get();
-				values1[i] = prng.get();
+				//values0[i] = prng.get();
+				//values1[i] = prng.get();
 			}
 
 			// Prepare output matrices for this iteration
-			std::array<Matrix<block>, 2> output;
+			std::array<Matrix<F>, 2> output;
 			output[0].resize(numSets, domain);
 			output[1].resize(numSets, domain);
 
@@ -679,16 +682,19 @@ namespace osuCrypto
 			));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
+			F zero;
+			ctx.zero(zero);
 
 			for (u64 s = 0; s < numSets; ++s)
 			{
-				std::unordered_map<u64, block> expectedMap;
+				std::unordered_map<u64, F> expectedMap;
 
 				for (u64 i = 0; i < numPoints; ++i)
 				{
 					auto p = actualPoints[s][i];
-					auto v = values0[s* numPoints + i] ^ values1[s * numPoints + i];
-					expectedMap[p] ^= v;
+					F v;
+					ctx.plus(v, values0[s * numPoints + i], values1[s * numPoints + i]);
+					ctx.plus(expectedMap[p], expectedMap[p], v);
 				}
 
 
@@ -697,8 +703,11 @@ namespace osuCrypto
 				for (u64 i = 0; i < domain && allCorrect; ++i)
 				{
 					auto iter = expectedMap.find(i);
-					auto actual = output[0](s,i) ^ output[1](s,i);
-					auto expected = iter == expectedMap.end() ? ZeroBlock : iter->second;
+					F actual;
+					ctx.plus(actual, output[0](s, i), output[1](s, i));
+
+					auto expected = iter == expectedMap.end()
+						? zero : iter->second;
 
 					if (actual != expected)
 					{
@@ -725,12 +734,17 @@ namespace osuCrypto
 					for(u64 i = 0; i < domain; ++i)
 					{
 						auto iter = expectedMap.find(i);
-						auto actual = output[0](s,i) ^ output[1](s,i);
-						auto expected = iter == expectedMap.end() ? ZeroBlock : iter->second;
+						F actual, neg;
+						ctx.plus(actual, output[0](s, i), output[1](s, i));
+						auto expected = iter == expectedMap.end() ? zero : iter->second;
+						ctx.minus(neg, zero, expected);
+
 						if (actual != expected)
 							std::cout << Color::Red;
 						std::cout << i << ": Exp " << expected << ", Act " << actual 
-							<< " = " << output[0](s, i) <<" + " << output[1](s, i) << std::endl << Color::Default;
+							<< " = " << output[0](s, i) << " + " << output[1](s, i)
+							<< ", negExp " << neg
+							<< std::endl << Color::Default;
 					}
 					throw RTE_LOC;
 				}
@@ -745,6 +759,13 @@ namespace osuCrypto
 			std::cout << "RevCuckoo_iterative_Test passed all " << numValueSets + 1 << " iterations" << std::endl;
 		}
 	}
+	void RevCuckoo_iterative_Test(const oc::CLP& cmd)
+	{
+		//RevCuckoo_iterative_impl<block, CoeffCtxGF128>(cmd);
+		RevCuckoo_iterative_impl<u64, CoeffCtxInteger>(cmd);
+	}
+
+
 
 	void Goldreich_Proto_Test(const oc::CLP& cmd)
 	{

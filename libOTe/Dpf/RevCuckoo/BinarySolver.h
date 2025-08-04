@@ -255,58 +255,102 @@ namespace osuCrypto
 		{
 			MACORO_TRY{
 
-				if (1)
+				if (bitCount == 1)
 				{
-					co_await mMult.multiply(bitCount, a, b, c, sock);
+					BitVector B(b.size());
+					BitVector C(c.size());
+					for (u64 i = 0; i < b.size(); ++i)
+						B[i] = b(i, 0) & 1;
+					co_await mMult.multiplyBits(
+						b.rows(), a, B.getSpan<u8>(), C.getSpan<u8>(), sock);
+
+					for (u64 i = 0; i < c.size(); ++i)
+						c(i, 0) = C[i];
 				}
 				else
 				{
+					co_await mMult.multiply(bitCount, a, b, c, sock);
+					//auto last = bitCount % 8;
+					//if (last)
+					//{
+					//	auto mask = ~0ull << last;
+					//	for (u64 i = 0; i < c.rows(); ++i)
+					//	{
+					//		c(i, bitCount / 8) &= mask;
+					//	}
+					//}
 
-					auto n = b.rows();
-					if (a.size() != divCeil(n, 8))
-						throw std::runtime_error(LOCATION);
-					if (c.cols() != divCeil(bitCount, 8))
-						throw std::runtime_error(LOCATION);
-					if (c.rows() != n)
-						throw std::runtime_error(LOCATION);
-					if (b.cols() != divCeil(bitCount, 8))
-						throw std::runtime_error(LOCATION);
-
-					std::vector<u8> a2(a.size());
-					Matrix<u8> b2(b.rows(), b.cols());
-
-					co_await sock.send(std::vector<u8>(a.begin(), a.end()));
-					co_await sock.send(std::vector<u8>(b.begin(), b.end()));
-
-					co_await sock.recv(a2);
-					co_await sock.recv(b2);
-
-					for (u64 i = 0; i < a2.size(); ++i)
-						a2[i] ^= a[i];
-					for (u64 i = 0; i < b2.size(); ++i)
-						b2(i) ^= b(i);
-
-					PRNG prng(block(34123213));
-					for (u64 i = 0; i < n; ++i)
+					// check the result.
 					{
-						auto aa = BitIterator(a2.data(), i);
-						auto bb = BitIterator(b2[i].data());
-						auto cc = BitIterator(c[i].data());
-						for (u64 j = 0; j < bitCount; ++j)
+						std::vector<u8> aa(a.size());
+						Matrix<u8> bb(b.rows(), b.cols());
+						Matrix<u8> cc(c.rows(), c.cols());
+						std::copy(a.begin(), a.end(), aa.begin());
+						std::copy(b.begin(), b.end(), bb.begin());
+						std::copy(c.begin(), c.end(), cc.begin());
+
+						co_await sock.send(coproto::copy(aa));
+						co_await sock.send(coproto::copy(bb));
+						co_await sock.send(coproto::copy(cc));
+
+						co_await sock.recv(aa);
+						co_await sock.recv(bb);
+						co_await sock.recv(cc);
+
+						// Reconstruct the actual values
+						for (u64 i = 0; i < aa.size(); ++i)
+							aa[i] ^= a[i];
+						for (u64 i = 0; i < bb.size(); ++i)
+							bb(i) ^= b(i);
+						for (u64 i = 0; i < cc.size(); ++i)
+							cc(i) ^= c(i);
+
+						// Verify the multiplication results
+						bool allCorrect = true;
+						for (u64 i = 0; i < b.rows(); ++i)
 						{
-							auto v = (*aa & *bb);
-							//std::cout << i << "  " << j << " : A " << (int)*aa << " B " << (int)*bb << " C " << (int)v << std::endl;
-							if (mPartyIdx)
-								*cc = v ^ prng.getBit();
-							else
-								*cc = prng.getBit();
+							auto ai = bit(aa.data(), i);  // Get the i-th bit of a
+							std::vector<u8> expected(b.cols());
+							if (ai == 1)
+								for (u64 j = 0; j < b.cols(); ++j)
+									expected[j] = bb(i,j);
 
-							++bb;
-							++cc;
+							//// Apply bit count mask if needed
+							//if (bitCount % 8)
+							//{
+							//	u8 mask = (1 << (bitCount % 8)) - 1;
+							//	expected.back() &= mask;
+							//}
+
+							// Check if actual result matches expected
+							bool rowCorrect = true;
+							for (u64 j = 0; j < b.cols(); ++j)
+							{
+								if (cc(i,j) != expected[j])
+								{
+									rowCorrect = false;
+									break;
+								}
+							}
+
+							if (!rowCorrect)
+							{
+								allCorrect = false;
+								if (mPartyIdx)  // Only print from one party to avoid duplication
+								{
+									std::cout << Color::Red << "Multiplication error at row " << i << ":" << Color::Default << std::endl;
+									std::cout << "  a[" << i << "] = " << (int)ai << std::endl;
+									std::cout << "  b[" << i << "] = " << toHex(bb[i]) << std::endl;
+									std::cout << "  expected  = " << toHex(expected) << std::endl;
+									std::cout << "  actual    = " << toHex(cc[i]) << std::endl;
+								}
+							}
 						}
-					}
+						if (!allCorrect)
+							throw std::runtime_error(LOCATION);
 
-			}
+					}
+				}
 			}MACORO_CATCH(e)
 			{
 				if (!sock.closed())
@@ -416,36 +460,41 @@ namespace osuCrypto
 			std::copy(M[0].begin(), M[0].end(), s.begin());
 		}
 
+
+		void printMtx(u64 bits, MatrixView<const u8> M, const char* name)
+		{
+			std::cout << name << " = [\n";
+			for (u64 i = 0; i < M.rows(); ++i)
+			{
+				for (u64 j = 0; j < bits; ++j)
+				{
+					auto b = bit(M[i], j);
+					if (b)
+						std::cout << Color::Green;
+					std::cout << b << " ";
+					if (b)
+						std::cout << Color::Default;
+				}
+
+				if (i + 1 < M.rows())
+					std::cout << "," << std::endl;
+				else
+					std::cout << "]" << std::endl;
+			}
+		}
+
 		task<> printMtx(u64 bits, MatrixView<const u8> M, const char* name, Socket& sock)
 		{
 			co_await sock.send(std::vector<u8>(M.begin(), M.end()));
-			std::vector<u8> r(M.size());
+			Matrix<u8> r(M.rows(), M.cols());
 			co_await sock.recv(r);
+
+			for (u64 i = 0; i < r.size(); ++i)
+				r(i) ^= M(i);
 
 			if (mPartyIdx)
 			{
-
-				for (u64 i = 0; i < r.size(); ++i)
-					r[i] ^= M(i);
-
-				std::cout << name << " = [\n";
-				for (u64 i = 0; i < M.rows(); ++i)
-				{
-					for (u64 j = 0; j < bits; ++j)
-					{
-						auto bit = *BitIterator(&r[i * M.cols()], j);
-						if (bit)
-							std::cout << Color::Green;
-						std::cout << bit << " ";
-						if (bit)
-							std::cout << Color::Default;
-					}
-
-					if (i + 1 < M.rows())
-						std::cout << "," << std::endl;
-					else
-						std::cout << "]" << std::endl;
-				}
+				printMtx(bits, r, name);
 			}
 
 			co_await sock.send(char(0));
@@ -487,20 +536,24 @@ namespace osuCrypto
 
 
 		task<> solve(
-			MatrixView<u8> MM,
-			MatrixView<u8> YY,
+			MatrixView<const u8> MM,
+			MatrixView<const u8> YY,
 			MatrixView<u8> X,
 			PRNG& prng,
 			Socket& sock)
 		{
 
-			Matrix<u8> M = MM;
-			Matrix<u8> Y = YY;
+			// Initialize working copies of the input matrices
+			Matrix<u8> M(MM.rows(), MM.cols());  // Coefficient matrix (will be modified during elimination)
+			Matrix<u8> Y(YY.rows(), YY.cols());  // Right-hand side vector (will be modified during elimination)
+			std::copy(MM.begin(), MM.end(), M.begin());
+			std::copy(YY.begin(), YY.end(), Y.begin());
 
-			auto m8 = divCeil(mM, 8);
-			auto c8 = divCeil(mC, 8);
-			auto g8 = divCeil(mLogG, 8);
+			auto m8 = divCeil(mM, 8);   // Number of bytes needed to store mM bits
+			auto c8 = divCeil(mC, 8);   // Number of bytes needed to store mC bits  
+			auto g8 = divCeil(mLogG, 8); // Number of bytes needed to store mLogG bits
 
+			// Validate input dimensions
 			if (M.rows() != mM || M.cols() != c8)
 				throw std::runtime_error(LOCATION);
 			if (Y.rows() != mM || Y.cols() != g8)
@@ -508,31 +561,37 @@ namespace osuCrypto
 			if (X.rows() != mC || X.cols() != g8)
 				throw std::runtime_error(LOCATION);
 
-			// M transposed
-			Matrix<u8> MT(mC, m8);
+			// Pre-allocate working matrices for efficiency
+			Matrix<u8> MT(mC, m8);        // M transposed
+			Matrix<u8> MY(mM, c8 + g8);   // Concatenated matrix [M || Y] for row operations
+			Matrix<u8> V(mC, m8);         // s * M (active column computation)
+			std::vector<u8> v(m8);        // Sum of active columns (pivot elimination vector)
+			Matrix<u8> s(mM, c8);         // Support vectors (unit vectors for each pivot)
 
-			// M || Y
-			Matrix<u8> MY(mM, c8 + g8);
-
-			// s * M
-			Matrix<u8> V(mC, m8);
-
-			// sum s* M
-			std::vector<u8> v(m8);
-
-			Matrix<u8> s(mM, c8);
+			// ===================================================================
+			// STEP 1: ROW ELIMINATION - Gaussian elimination with pivot selection
+			// ===================================================================
 			for (u64 i = 0; i < mM; ++i)
 			{
-				//if (mPartyIdx)
-				//	std::cout << "iteration i=" << i << std::endl;
-				//co_await printMtx(mC, M, "M", sock);
+				if (mPartyIdx && mPrint)
+					std::cout << "\n\niteration i=" << i << std::endl;
+				if (mPrint)
+				{
+					co_await printMtx(mLogG, Y, "current Y", sock);
+					co_await printMtx(mC, M, "current M", sock);
+				}
 
+				// Step 1a: Find pivot column and create unit vector
+				// Find the first non-zero bit in row i and create a unit vector s_i
+				// such that s_i[j] = 1 only for the pivot column j, 0 elsewhere
 				co_await firstOneBit(M[i], s[i], sock);
 
-				//co_await print(mC, s[i], "s[i]", sock);
+				if (mPrint)
+					co_await print(mC, s[i], "selection vector s[i]", sock);
 
-
-				// v = sum_{j in [C]} s[i,j] * M[*,j]
+				// Step 1b: Compute active column v := M * s_i
+				// This gives us the column vector corresponding to the pivot column
+				// v[k] = 1 means row k has a 1 in the pivot column and needs elimination
 				transpose(M, MT);
 				co_await multiply(mM, s[i], MT, V, sock);
 				setBytes(v, 0);
@@ -542,30 +601,39 @@ namespace osuCrypto
 						v[k] ^= V(j, k);
 				}
 
-				//co_await print(mM, v, "v", sock);
+				if (mPrint)
+					co_await print(mM, v, "Active column v=M[*,j]", sock);
 
-				// MY = M || Y
+
+				// Step 1c: Prepare for row operations
+				// Create the augmented matrix [M || Y] for simultaneous operations
+				// Row i is set to zero since we don't subtract from the pivot row itself
 				for (u64 j = 0; j < mM; ++j)
 				{
 					if (j != i)
 					{
+						// Copy M[i] and Y[i] into MY[j] for row operations
 						std::copy(M[i].begin(), M[i].end(), MY[j].begin());
 						std::copy(Y[i].begin(), Y[i].end(), MY[j].begin() + M[j].size());
 					}
 					else
-						setBytes(MY[i], 0);
+						setBytes(MY[i], 0);// Zero out the pivot row in the working matrix
 				}
 
+				//if (mPrint)
+				//	co_await printMtx(MY.cols()*8, MY, " row updates [Mi || Yi]", sock);
 
-				//co_await printMtx(mC, MY, "MY", sock);
-
-				// MY = v * MY
+				// Step 1c: Perform row operations for pivot elimination
+				// For each row j ≠ i where v[j] = 1, subtract row i from row j
+				// This eliminates the pivot bit from all other rows
 				co_await multiply(MY.cols() * 8, v, MY, MY, sock);
 
-				//co_await printMtx(mC, MY, "v * MY", sock);
+				if (mPrint)
+					co_await printMtx(MY.cols() * 8, MY, "row updates v * [Mi || Yi]", sock);
 
-				// M = M + v * M
-				// Y = Y + v * Y
+				// Step 1c: Apply the elimination results back to M and Y
+				// M_j := M_j ⊕ v_j * M_i (row operation on coefficient matrix)
+				// Y_j := Y_j ⊕ v_j * Y_i (row operation on RHS vector)
 				for (u64 j = 0; j < mM; ++j)
 				{
 					for (u64 k = 0; k < M.cols(); ++k)
@@ -573,63 +641,105 @@ namespace osuCrypto
 					for (u64 k = 0; k < Y.cols(); ++k)
 						Y(j, k) ^= MY(j, k + M.cols());
 				}
+
+
+
+
 			}
 
 
-			//co_await printMtx(mC, M, "final\nM", sock);
+			if (mPrint)
+				co_await printMtx(mC, M, "Matrix M after elimination", sock);
 
-			// sigma  = sum_{i in [m]} s[i]
+			// ===================================================================
+			// STEP 2: COMBINE SUPPORT VECTORS
+			// ===================================================================
+			// Compute σ := ⊕_{i ∈ [m]} s_i
+			// σ[j] = 1 means column j is a pivot column (dependent variable)
+			// σ[j] = 0 means column j is a free variable
 			std::vector<u8> sigma(s.cols()), negSigma(s.cols());
 			for (u64 i = 0; i < s.rows(); ++i)
 			{
 				for (u64 j = 0; j < s.cols(); ++j)
 					sigma[j] ^= s(i, j);
 			}
+
+			// Compute σ̄ := (1)^c ⊕ σ (complement for free variables)
+			// negSigma represents the free variables that can be set randomly
 			for (u64 j = 0; j < s.cols(); ++j)
 				negSigma[j] = sigma[j] ^ -mPartyIdx;
 
-			//co_await print(mC, sigma, "sigma", sock);
+			if (mPrint)
+				co_await print(mC, sigma, "Support vector σ (pivot columns)", sock);
 
-			// X <- G^C * sigma
+			// ===================================================================
+			// STEP 3: SAMPLE FREE VARIABLES
+			// ===================================================================
+			// x ← G^c ⊙ σ̄ (assign random values to free variables)
+			// The free variables (where negSigma[j] = 1) get random values
 			prng.get(X.data(), X.size());
+			if (mLogG % 8)
+			{
+				// trim the last byte of X if mLogG is not a multiple of 8
+				auto trailMask = (1 << (mLogG % 8)) - 1;
+				for (u64 i = 0; i < X.rows(); ++i)
+					X[i].back() &= trailMask;
+			}
 			co_await multiply(mLogG, negSigma, X, X, sock);
 
-			//co_await printMtx(mLogG, X, "X", sock);
+			if (mPrint)
+				co_await printMtx(mLogG, X, "X after sampling free variables", sock);
 
-			// Y = Y + M * X
+			// ===================================================================
+			// STEP 4: BACK-SUBSTITUTE
+			// ===================================================================
+			// y := y ⊕ M * x (update RHS to cancel the effect of free variables)
 			Matrix<u8> Y2(mM, g8);
 			co_await multiplyMtx(mLogG, M, X, Y2, sock);
 
+			if (mPrint)
+				co_await printMtx(mLogG, Y2, "Y2=M * X (correction term)", sock);
 
-			//co_await printMtx(mLogG, Y2, "Y2", sock);
-
+			// Apply the correction: Y = Y + M*X
 			for (u64 i = 0; i < Y.size(); ++i)
 				Y(i) ^= Y2(i);
 
-			// X = X + s * Y
-			Matrix<u8> YT(mLogG, m8);
+			// ===================================================================
+			// STEP 5: RECOVER SOLUTION
+			// ===================================================================
+			// x := x ⊕ s · y (route final values using support vector permutation)
+			// The support vectors s tell us where to place the solved values from y
+			Matrix<u8> YT(mLogG, m8);// Y transposed for matrix multiplication
 			transpose(Y, YT);
-			Matrix<u8> XT(mLogG, c8);
+			Matrix<u8> XT(mLogG, c8);  // Result of s^T * Y^T
 			co_await multiplyMtx(mC, YT, s, XT, sock);
 
-			Matrix<u8> X2(mC, g8);
+			Matrix<u8> X2(mC, g8);// Final correction term
 			transpose(XT, X2);
+
+			// Apply the final correction: X = X + s * Y
 			for (u64 i = 0; i < X.size(); ++i)
 				X(i) ^= X2(i);
-			//co_await printMtx(mLogG, X, "X", sock);
+			if (mPrint)
+				co_await printMtx(mLogG, X, "Final solution X", sock);
 
 
-			co_await multiplyMtx(mLogG, M, X, Y2, sock);
 
-			//co_await printMtx(mLogG, Y2, "Y2", sock);
-			//co_await printMtx(mLogG, YY, "YY", sock);
-
+			//if (mPrint)
+			//{
+			//	//co_await multiplyMtx(mLogG, M, X, Y2, sock);
+			//	co_await printMtx(mLogG, Y2, "Y2", sock);
+			//	co_await printMtx(mLogG, YY, "YY", sock);
+			//}
 
 			if (mPrint)
 			{
-				Matrix<u8> M2(MM);
-				Matrix<u8> Y2(YY);
+				Matrix<u8> M2(MM.rows(), MM.cols());
+				Matrix<u8> Y2(YY.rows(), YY.cols());
 				Matrix<u8> X2(X);
+				std::copy(MM.begin(), MM.end(), M2.begin());
+				std::copy(YY.begin(), YY.end(), Y2.begin());
+
 				co_await sock.send(std::vector<u8>(M2.begin(), M2.end()));
 				co_await sock.send(std::vector<u8>(Y2.begin(), Y2.end()));
 				co_await sock.send(std::vector<u8>(X2.begin(), X2.end()));
@@ -645,52 +755,94 @@ namespace osuCrypto
 
 				if (mPartyIdx)
 				{
-					std::cout << "M = [\n";
-					for (u64 i = 0; i < M2.rows(); ++i)
-					{
-						if (0)
-						{
-							for (u64 j = 0; j < mC; ++j)
-							{
+					printMtx(mC, M2, "Final M");
+					printMtx(mLogG, X2, "Final X");
+					printMtx(mLogG, Y2, "Final Y");
+					std::cout << "\n" << Color::Blue << "=== Verifying M * X = Y ===" << Color::Default << std::endl;
+				}
 
-								auto bit = *BitIterator(M2[i].data(), j);
-								if (bit)
-									std::cout << Color::Green;
-								std::cout << (int)bit << " ";
-								if (bit)
-									std::cout << Color::Default;
+				// Compute M * X using bit-wise matrix multiplication
+				Matrix<u8> computed_Y(M2.rows(), Y.cols());
+				std::fill(computed_Y.begin(), computed_Y.end(), 0);
+				std::vector<u8> skips(M.rows(), true);
+
+				// For each row i of M and each column j of Y
+				for (u64 i = 0; i < M.rows(); ++i)
+				{
+					for (u64 j = 0; j < M2.cols(); ++j)
+						if (M2(i, j))
+							skips[i] = false;
+					if (skips[i])
+						continue;
+
+					for (u64 k = 0; k < mC; ++k)  // k iterates over columns of M / rows of X
+					{
+						// Get the k-th bit of M[i]
+						auto M_ik = *BitIterator(M2[i].data(), k);
+						if (mPartyIdx)
+							std::cout << M_ik << " ";
+
+						if (M_ik)  // Only add if the bit is set
+						{
+							// Add X[k] to computed_Y[i]
+							for (u64 j = 0; j < Y2.cols(); ++j)
+							{
+								computed_Y(i, j) ^= X2(k, j);
 							}
 						}
-						else
-							std::cout << toHex(M2[i]);
-
-						if (i + 1 < M2.rows())
-							std::cout << "," << std::endl;
-						else
-							std::cout << "]" << std::endl;
 					}
-
-					std::cout << "X = [\n";
-					for (u64 i = 0; i < X2.rows(); ++i)
-					{
-						std::cout << toHex(X2[i]);
-						if (i + 1 < X2.rows())
-							std::cout << "," << std::endl;
-						else
-							std::cout << "]" << std::endl;
-					}
-
-					std::cout << "Y = [\n";
-					for (u64 i = 0; i < Y2.rows(); ++i)
-					{
-						std::cout << toHex(Y2[i]);
-						if (i + 1 < Y2.rows())
-							std::cout << "," << std::endl;
-						else
-							std::cout << "]" << std::endl;
-					}
-
+					std::cout << "\n";
 				}
+
+				// Compare computed_Y with actual Y
+				bool isCorrect = true;
+				u64 errorCount = 0;
+				for (u64 i = 0; i < Y2.rows(); ++i)
+				{
+					BitVector ey(computed_Y[i].data(), mLogG);
+					BitVector ay(Y2[i].data(), mLogG);
+					if (ey != ay && !skips[i])
+					{
+						isCorrect = false;
+						errorCount++;
+						if (mPartyIdx && errorCount <= 10)  // Limit error output
+						{
+							std::cout << Color::Red << "Mismatch at " << i << "): \n"
+								<< "  act = " << ay << "\n"
+								<< "  exp = " << ey << "\n"
+								<< "      = " << BitVector(M2[i].data(), mC) << "\n"
+								<< "      * Y \n";
+
+							std::cout << Color::Default;
+						}
+					}
+				}
+
+
+				// Sync both parties
+				co_await sock.send(char(isCorrect ? 1 : 0));
+				char otherResult;
+				co_await sock.recv(otherResult);
+
+				if (mPartyIdx)
+				{
+					if (isCorrect && otherResult == 1)
+					{
+						std::cout << Color::Green << "Both parties agree: Verification PASSED"
+							<< Color::Default << std::endl;
+					}
+					else if (!isCorrect || otherResult == 0)
+					{
+						std::cout << Color::Red << "Verification FAILED (Party " << mPartyIdx
+							<< ": " << (isCorrect ? "PASS" : "FAIL")
+							<< ", Other party: " << (otherResult ? "PASS" : "FAIL") << ")"
+							<< Color::Default << std::endl;
+					}
+				}
+
+				if (!otherResult || !isCorrect)
+					throw RTE_LOC;
+
 			}
 		}
 	};

@@ -162,23 +162,31 @@ namespace osuCrypto
             while (std::max_element(C.begin(), C.end(), [](auto& a, auto& b) { return a.size() < b.size(); })->size() > 1)
             {
                 BitVector x;
-                std::vector<u8> y, z;
+                //std::vector<u8> y, z;
+                BitVector y, z;
                 for (u64 i = 0; i < C.size(); ++i)
                 {
                     for (u64 j = 0; j + 1 < C[i].size(); j += 2)
                     {
                         x.pushBack(C[i][j]);
-                        y.push_back(C[i][j + 1]);
+                        y.pushBack(C[i][j + 1]);
                     }
                 }
 
                 z.resize(y.size());
-                co_await mMult.multiply(
-                    1,
+                co_await mMult.multiplyBits(
+                    z.size(),
                     x.getSpan<u8>(),
-                    MatrixView<u8>(y.data(), y.size(), 1),
-                    MatrixView<u8>(z.data(), z.size(), 1),
+                    y.getSpan<u8>(),
+                    z.getSpan<u8>(),
                     socket);
+
+                //co_await mMult.multiply(
+                //    1,
+                //    x.getSpan<u8>(),
+                //    MatrixView<u8>(y.data(), y.size(), 1),
+                //    MatrixView<u8>(z.data(), z.size(), 1),
+                //    socket);
 
                 std::vector<std::vector<u8>> C2;
                 for (u64 i = 0, idx = 0; i < C.size(); ++i)
@@ -229,217 +237,217 @@ namespace osuCrypto
         }
 
 
-        macoro::task<void> dedup(
-            MatrixView<u8> keys, // The input keys to deduplicate.
-            MatrixView<u8> values, // The input values to deduplicate.
-            MatrixView<u8> altKeys,  // The output indices of the deduplicated keys
-            PRNG& prng, Socket& socket)
-        {
-            if (keys.cols() < divCeil(mKeyBitCount, 8))
-                throw RTE_LOC;
-            if (altKeys.cols() < divCeil(mKeyBitCount, 8))
-                throw RTE_LOC;
-            if (keys.rows() != mN)
-                throw RTE_LOC;
-            if (values.rows() != mN)
-                throw RTE_LOC;
-            if (altKeys.rows() != mN)
-                throw RTE_LOC;
+        //macoro::task<void> dedup(
+        //    MatrixView<u8> keys, // The input keys to deduplicate.
+        //    MatrixView<u8> values, // The input values to deduplicate.
+        //    MatrixView<u8> altKeys,  // The output indices of the deduplicated keys
+        //    PRNG& prng, Socket& socket)
+        //{
+        //    if (keys.cols() < divCeil(mKeyBitCount, 8))
+        //        throw RTE_LOC;
+        //    if (altKeys.cols() < divCeil(mKeyBitCount, 8))
+        //        throw RTE_LOC;
+        //    if (keys.rows() != mN)
+        //        throw RTE_LOC;
+        //    if (values.rows() != mN)
+        //        throw RTE_LOC;
+        //    if (altKeys.rows() != mN)
+        //        throw RTE_LOC;
 
 
-            Matrix<u8>
-                Ai(mN * (mN - 1) / 2, keys.cols()),
-                Aj(mN * (mN - 1) / 2, keys.cols()),
-                BB(mN * (mN - 1) / 2, values.cols());
+        //    Matrix<u8>
+        //        Ai(mN * (mN - 1) / 2, keys.cols()),
+        //        Aj(mN * (mN - 1) / 2, keys.cols()),
+        //        BB(mN * (mN - 1) / 2, values.cols());
 
-            for (u64 i = 0, k = 0; i < mN; ++i)
-            {
-                for (u64 j = i + 1; j < mN; ++j, ++k)
-                {
-                    //Ai[k]  = keys[i];
-                    //Aj[k]  = keys[j];
-                    //BB[k]  = values[j];
-                    copyBytes(Ai[k], keys[i]);
-                    copyBytes(Aj[k], keys[j]);
-                    copyBytes(BB[k], values[j]);
-                }
-            }
-
-
-
-            // cij = eq(Ai, Aj)
-            BitVector c(Ai.size());
-            co_await mEq.equal(Ai, Aj, c, socket, prng);
-
-            //const bool print = false;
-            if (mPrint)
-            {
-                BitVector C(c.size());
-                co_await socket.send(coproto::copy(c));
-                co_await socket.recv(C);
-                C ^= c;
-                auto b = C.begin();
-                if (mPartyIdx)
-                {
-                    for (u64 i = 0; i < mN; ++i)
-                    {
-                        for (u64 j = 0; j < i + 1; ++j)
-                        {
-                            std::cout << "  ";
-                        }
-                        for (u64 j = i + 1; j < mN; ++j)
-                        {
-                            std::cout << *b++ << " ";
-                        }
-                        std::cout << "\n";
-                    }
-                }
-
-            }
-
-            // is key[i] the first occurrence of key[i]?
-            // di =  OR_{k\in [i-1]} cki
-            BitVector d(mN - 1);
-            co_await orTree(c, d, prng, socket);
-
-            if (mPartyIdx)
-                for (u64 i = 0; i < d.sizeBytes(); ++i)
-                    d.getSpan<u8>()[i] ^= -1;
-
-            if (mPrint)
-            {
-                co_await socket.send(coproto::copy(d));
-                BitVector D(mN - 1);
-                co_await socket.recv(D);
-
-                D ^= d;
-                if (mPartyIdx)
-                {
-                    std::cout << "d\n1\n";
-                    for (u64 i = 0; i < D.size(); ++i)
-                        std::cout << D[i] << std::endl;
-                }
-            }
+        //    for (u64 i = 0, k = 0; i < mN; ++i)
+        //    {
+        //        for (u64 j = i + 1; j < mN; ++j, ++k)
+        //        {
+        //            //Ai[k]  = keys[i];
+        //            //Aj[k]  = keys[j];
+        //            //BB[k]  = values[j];
+        //            copyBytes(Ai[k], keys[i]);
+        //            copyBytes(Aj[k], keys[j]);
+        //            copyBytes(BB[k], values[j]);
+        //        }
+        //    }
 
 
-            auto iter = c.begin() + (mN - 1);
-            Matrix<u8> diff(mN - 1, keys.cols() + values.cols() + divCeil(mN - 2, 8));
-            for (u64 i = 1; i < mN; ++i)
-            {
-                auto ddi = diff[i - 1];
-                for (u64 j = 0; j < keys.cols(); ++j)
-                {
-                    ddi[j] = keys(i, j) ^ altKeys(i, j);
-                }
-                ddi = ddi.subspan(keys.cols());
 
-                //u32 k = keys[i] ^ altKeys[i];
-                //copyBytes(ddi.subspan(0, sizeof(k)), k);
-                span<u8> v = values[i];
-                copyBytes(ddi.subspan(0, v.size()), v);
-                ddi = ddi.subspan(v.size());
-                for (u64 j = i + 1, k = 0; j < mN; ++j, ++k)
-                    bit(ddi, k) = *iter++;
+        //    // cij = eq(Ai, Aj)
+        //    BitVector c(Ai.size());
+        //    co_await mEq.equal(Ai, Aj, c, socket, prng);
 
-            }
-            if (iter != c.end())
-                throw RTE_LOC;
+        //    //const bool print = false;
+        //    if (mPrint)
+        //    {
+        //        BitVector C(c.size());
+        //        co_await socket.send(coproto::copy(c));
+        //        co_await socket.recv(C);
+        //        C ^= c;
+        //        auto b = C.begin();
+        //        if (mPartyIdx)
+        //        {
+        //            for (u64 i = 0; i < mN; ++i)
+        //            {
+        //                for (u64 j = 0; j < i + 1; ++j)
+        //                {
+        //                    std::cout << "  ";
+        //                }
+        //                for (u64 j = i + 1; j < mN; ++j)
+        //                {
+        //                    std::cout << *b++ << " ";
+        //                }
+        //                std::cout << "\n";
+        //            }
+        //        }
 
-            co_await mMult.multiply(diff.cols() * 8,
-                d.getSpan<u8>(), diff, diff, socket);
+        //    }
 
-            iter = c.begin() + (mN - 1);
-            for (u64 i = 1; i < mN; ++i)
-            {
-                auto ddi = diff[i - 1];
-                for (u64 j = 0; j < keys.cols(); ++j)
-                {
-                    keys(i, j) = ddi[j] ^ altKeys(i, j);
-                }
-                ddi = ddi.subspan(keys.cols());
-                //u32 k;
-                //copyBytes(k, ddi.subspan(0, sizeof(k)));
-                copyBytes(values[i], ddi.subspan(0, values.cols()));
-                ddi = ddi.subspan(values.cols());
+        //    // is key[i] the first occurrence of key[i]?
+        //    // di =  OR_{k\in [i-1]} cki
+        //    BitVector d(mN - 1);
+        //    co_await orTree(c, d, prng, socket);
 
-                for (u64 j = i + 1, k = 0; j < mN; ++j, ++k)
-                    *iter++ = bit(ddi, k);
+        //    if (mPartyIdx)
+        //        for (u64 i = 0; i < d.sizeBytes(); ++i)
+        //            d.getSpan<u8>()[i] ^= -1;
 
-                //keys[i] = k ^ altKeys[i];
-            }
-            if (iter != c.end())
-                throw RTE_LOC;
+        //    if (mPrint)
+        //    {
+        //        co_await socket.send(coproto::copy(d));
+        //        BitVector D(mN - 1);
+        //        co_await socket.recv(D);
 
-            if (mPrint)
-            {
-                BitVector C(c.size());
-                co_await socket.send(coproto::copy(c));
-                co_await socket.recv(C);
-                C ^= c;
-                auto b = C.begin();
+        //        D ^= d;
+        //        if (mPartyIdx)
+        //        {
+        //            std::cout << "d\n1\n";
+        //            for (u64 i = 0; i < D.size(); ++i)
+        //                std::cout << D[i] << std::endl;
+        //        }
+        //    }
 
-                if (mPartyIdx)
-                {
-                    for (u64 i = 0; i < mN; ++i)
-                    {
-                        for (u64 j = 0; j < i + 1; ++j)
-                        {
-                            std::cout << "  ";
-                        }
-                        for (u64 j = i + 1; j < mN; ++j)
-                        {
-                            std::cout << *b++ << " ";
-                        }
-                        std::cout << "\n";
-                    }
-                }
 
-            }
+        //    auto iter = c.begin() + (mN - 1);
+        //    Matrix<u8> diff(mN - 1, keys.cols() + values.cols() + divCeil(mN - 2, 8));
+        //    for (u64 i = 1; i < mN; ++i)
+        //    {
+        //        auto ddi = diff[i - 1];
+        //        for (u64 j = 0; j < keys.cols(); ++j)
+        //        {
+        //            ddi[j] = keys(i, j) ^ altKeys(i, j);
+        //        }
+        //        ddi = ddi.subspan(keys.cols());
 
-            // Create MultSession using the c values for repeated value deduplication
-            auto session = co_await mMult.setupMultiply(
-                c.size(), c.getSpan<u8>(), socket
-            );
+        //        //u32 k = keys[i] ^ altKeys[i];
+        //        //copyBytes(ddi.subspan(0, sizeof(k)), k);
+        //        span<u8> v = values[i];
+        //        copyBytes(ddi.subspan(0, v.size()), v);
+        //        ddi = ddi.subspan(v.size());
+        //        for (u64 j = i + 1, k = 0; j < mN; ++j, ++k)
+        //            bit(ddi, k) = *iter++;
 
-            co_await session.multiplyMtx(BB, BB, socket);
+        //    }
+        //    if (iter != c.end())
+        //        throw RTE_LOC;
 
-            if (mPrint)
-            {
-                auto B = BB;
-                co_await socket.send(coproto::copy(B));
-                co_await socket.recv(B);
-                if (mPartyIdx)
-                {
-                    auto BIter = B.begin();
-                    auto BBIter = BB.begin();
-                    for (u64 i = 0; i < mN; ++i)
-                    {
-                        for (u64 j = 0; j < i + 1; ++j)
-                        {
-                            std::cout << "  ";
-                        }
-                        for (u64 j = i + 1; j < mN; ++j)
-                        {
-                            std::cout << (*BIter++ ^ *BBIter++) << " ";
-                        }
-                        std::cout << "\n";
-                    }
-                }
-            }
+        //    co_await mMult.multiply(diff.cols() * 8,
+        //        d.getSpan<u8>(), diff, diff, socket);
 
-            //auto BBIter = BB.begin();
-            for (u64 i = 0, k = 0; i < mN; ++i)
-            {
-                for (u64 j = i + 1; j < mN; ++j, ++k)
-                {
-                    for (u64 h = 0; h < values.cols(); ++h)
-                    {
-                        values(i, h) ^= BB(k, h);
-                    }
-                }
-            }
+        //    iter = c.begin() + (mN - 1);
+        //    for (u64 i = 1; i < mN; ++i)
+        //    {
+        //        auto ddi = diff[i - 1];
+        //        for (u64 j = 0; j < keys.cols(); ++j)
+        //        {
+        //            keys(i, j) = ddi[j] ^ altKeys(i, j);
+        //        }
+        //        ddi = ddi.subspan(keys.cols());
+        //        //u32 k;
+        //        //copyBytes(k, ddi.subspan(0, sizeof(k)));
+        //        copyBytes(values[i], ddi.subspan(0, values.cols()));
+        //        ddi = ddi.subspan(values.cols());
 
-        }
+        //        for (u64 j = i + 1, k = 0; j < mN; ++j, ++k)
+        //            *iter++ = bit(ddi, k);
+
+        //        //keys[i] = k ^ altKeys[i];
+        //    }
+        //    if (iter != c.end())
+        //        throw RTE_LOC;
+
+        //    if (mPrint)
+        //    {
+        //        BitVector C(c.size());
+        //        co_await socket.send(coproto::copy(c));
+        //        co_await socket.recv(C);
+        //        C ^= c;
+        //        auto b = C.begin();
+
+        //        if (mPartyIdx)
+        //        {
+        //            for (u64 i = 0; i < mN; ++i)
+        //            {
+        //                for (u64 j = 0; j < i + 1; ++j)
+        //                {
+        //                    std::cout << "  ";
+        //                }
+        //                for (u64 j = i + 1; j < mN; ++j)
+        //                {
+        //                    std::cout << *b++ << " ";
+        //                }
+        //                std::cout << "\n";
+        //            }
+        //        }
+
+        //    }
+
+        //    // Create MultSession using the c values for repeated value deduplication
+        //    auto session = co_await mMult.setupMultiply(
+        //        c.size(), c.getSpan<u8>(), socket
+        //    );
+
+        //    co_await session.multiplyMtx(BB, BB, socket);
+
+        //    if (mPrint)
+        //    {
+        //        auto B = BB;
+        //        co_await socket.send(coproto::copy(B));
+        //        co_await socket.recv(B);
+        //        if (mPartyIdx)
+        //        {
+        //            auto BIter = B.begin();
+        //            auto BBIter = BB.begin();
+        //            for (u64 i = 0; i < mN; ++i)
+        //            {
+        //                for (u64 j = 0; j < i + 1; ++j)
+        //                {
+        //                    std::cout << "  ";
+        //                }
+        //                for (u64 j = i + 1; j < mN; ++j)
+        //                {
+        //                    std::cout << (*BIter++ ^ *BBIter++) << " ";
+        //                }
+        //                std::cout << "\n";
+        //            }
+        //        }
+        //    }
+
+        //    //auto BBIter = BB.begin();
+        //    for (u64 i = 0, k = 0; i < mN; ++i)
+        //    {
+        //        for (u64 j = i + 1; j < mN; ++j, ++k)
+        //        {
+        //            for (u64 h = 0; h < values.cols(); ++h)
+        //            {
+        //                values(i, h) ^= BB(k, h);
+        //            }
+        //        }
+        //    }
+
+        //}
 
 
 
@@ -483,6 +491,7 @@ namespace osuCrypto
                 auto b = C.begin();
                 if (mPartyIdx)
                 {
+                    std::cout << "\n";
                     for (u64 i = 0; i < mN; ++i)
                     {
                         for (u64 j = 0; j < i + 1; ++j)
@@ -571,52 +580,67 @@ namespace osuCrypto
         }
 
         // Phase 2: Deduplicate values using cached intermediate values
+        template<typename T, typename CoeffCtx = DefaultCoeffCtx<T>>
         macoro::task<void> dedupValues(
-            MatrixView<u8> values,   // The input values to deduplicate (modified in-place)
-            Socket& socket)
+            auto&& values,   // The input values to deduplicate (modified in-place)
+            Socket& socket, 
+            CoeffCtx ctx = {})
         {
             if (!mKeysDeduped)
                 throw std::runtime_error("dedupKeys must be called before dedupValues. " LOCATION);
-            if (values.rows() != mN)
+            if (values.size() != mN)
                 throw RTE_LOC;
 
             // Create BB matrix for the multiplication step
-            Matrix<u8> BB(mN * (mN - 1) / 2, values.cols());
+            auto BB = ctx.template makeVec<T>(mN * (mN - 1) / 2);
 
             // Populate BB matrix: BB[k] = values[j] where k corresponds to pair (i,j)
             for (u64 i = 0, k = 0; i < mN; ++i)
             {
                 for (u64 j = i + 1; j < mN; ++j, ++k)
                 {
-                    copyBytes(BB[k], values[j]);
+                    ctx.copy(BB[k], values[j]);
                 }
             }
             
 
             // Use the MultSession to multiply di * values[i] and c_ij with BB[k]
             co_await macoro::when_all_ready(
-                mMultSessionD.multiplyMtx(
-				values.submtx(1, mN-1), values.submtx(1, mN - 1), socket),
-                mMultSessionC.multiplyMtx(BB, BB, socket));
+                mMultSessionD.multiply<T>(
+				values.begin() + 1, values.end(),  values.begin() + 1, socket, ctx),
+                mMultSessionC.multiply<T>(BB.begin(), BB.end(), BB.begin(), socket, ctx));
 
             if (mPrint)
             {
                 auto B = BB;
+                auto V = values;
                 co_await socket.send(coproto::copy(B));
+                co_await socket.send(coproto::copy(V));
                 co_await socket.recv(B);
+                co_await socket.recv(V);
                 if (mPartyIdx)
                 {
                     auto BIter = B.begin();
                     auto BBIter = BB.begin();
+					auto VIter = V.begin();
+					auto VVIter = values.begin();
                     for (u64 i = 0; i < mN; ++i)
                     {
-                        for (u64 j = 0; j < i + 1; ++j)
+
+                        for (u64 j = 0; j < i; ++j)
                         {
                             std::cout << "  ";
                         }
+
+                        auto v = ctx.template make<T>();
+                        ctx.plus(v, *VIter++, *VVIter++);
+                        std::cout <<  ctx.str(v) << " " ;
+
                         for (u64 j = i + 1; j < mN; ++j)
                         {
-                            std::cout << (*BIter++ ^ *BBIter++) << " ";
+                            auto b = ctx.template make<T>();
+                            ctx.plus(b, *BIter++, *BBIter++);
+                            std::cout << ctx.str(b) << " " ;
                         }
                         std::cout << "\n";
                     }
@@ -629,27 +653,26 @@ namespace osuCrypto
             {
                 for (u64 j = i + 1; j < mN; ++j, ++k)
                 {
-                    for (u64 h = 0; h < values.cols(); ++h)
-                    {
-                        values(i, h) ^= BB(k, h);
-                    }
+					ctx.plus(values[i], values[i], BB[k]);
                 }
             }
         }
 
         // Legacy interface: full dedup in one call (uses dedupKeys + dedupValues internally)
+		template<typename T, typename CoeffCtx = DefaultCoeffCtx<T>>
         macoro::task<void> dedup2(
             MatrixView<u8> keys,     // The input keys to deduplicate
-            MatrixView<u8> values,   // The input values to deduplicate
+            auto&& values,   // The input values to deduplicate
             MatrixView<u8> altKeys,  // The alternate keys for duplicates
             PRNG& prng,
-            Socket& socket)
+            Socket& socket,
+            CoeffCtx ctx = {})
         {
             // Phase 1: Deduplicate keys and cache intermediate values
             co_await dedupKeys(keys, altKeys, prng, socket);
 
             // Phase 2: Deduplicate values using cached values
-            co_await dedupValues(values, socket);
+            co_await dedupValues<T>(values, socket, ctx);
         }
 
     };

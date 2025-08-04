@@ -226,6 +226,11 @@ namespace osuCrypto
 				copyBytes(data, src);
 			}
 		}
+		template<typename T>
+		void print_type() {
+			// This will cause a compilation error that shows the type
+			static_assert(std::is_same_v<T, void>, "Type is:");
+		}
 
 		template<typename F, typename CoeffCtx>
 		task<> left(auto&& src, auto&& dst, auto&& diff, CoeffCtx ctx,
@@ -381,11 +386,11 @@ namespace osuCrypto
 
 		}
 
-		template<typename F, typename CoeffCtx = DefaultCoeffCtx<F>>
+		template<typename F, typename CoeffCtx>
 		task<> apply(
 			auto&& data,
 			Socket& sock,
-			CoeffCtx ctx = {})
+			CoeffCtx ctx)
 		{
 			mOtIdx = 0;
 			auto print = false;
@@ -400,7 +405,6 @@ namespace osuCrypto
 			nextSubnetSizes.reserve(n);
 
 			auto temp = ctx.template makeVec<F>(data.size());
-			ctx.resize(temp, data.size());
 
 			// diff = input[1] - input[0]
 			auto diff = ctx.template makeVec<F>(data.size());
@@ -464,7 +468,7 @@ namespace osuCrypto
 			if (mMultSessions.size() <= mOtIdx)
 				throw RTE_LOC;
 
-			co_await mMultSessions[mOtIdx++].multiply<F>(y, xy, sock, ctx);
+			co_await mMultSessions[mOtIdx++].multiply<F>(y.begin(), y.end(), xy.begin(), sock, ctx);
 
 		}
 	};

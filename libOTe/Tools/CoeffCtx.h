@@ -183,7 +183,9 @@ namespace osuCrypto {
 			static_assert(std::is_trivially_copyable<F1>::value, "memcpy is used so must be trivially_copyable.");
 			static_assert(std::is_same_v<F1, F2>, "src and destication types are not the same.");
 
-			memcpy((F2 * __restrict) & *dstBegin, (F1 * __restrict) & *begin, std::distance(begin, end) * sizeof(F1));
+			auto n = std::distance(begin, end);
+			if(n)
+				memcpy((F2 * __restrict) & *dstBegin, (F1 * __restrict) & *begin, n * sizeof(F1));
 			//std::copy(begin, end, dstBegin);
 		}
 
@@ -332,7 +334,11 @@ namespace osuCrypto {
 		std::string str(F&& f)const
 		{
 			std::stringstream ss;
-			if constexpr (std::is_same_v<std::remove_reference_t<F>, u8>)
+			if constexpr (std::is_same_v<std::remove_reference_t<F>, u64>)
+			{
+				ss << i64(f);
+			}
+			else if constexpr (std::is_same_v<std::remove_reference_t<F>, u8>)
 				ss << int(f);
 			else
 				ss << f;

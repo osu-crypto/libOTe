@@ -42,6 +42,9 @@ namespace osuCrypto
 		// |G|
 		u64 mValueByteCount = 0;
 
+		// arbitrary seed for the hash function
+		block mHashSeed = block(3498747860745238796ull, 2347966293789782347ull);
+
 		bool mPrint = false;
 
 		u64 mPrintIndex = ~0;
@@ -62,15 +65,19 @@ namespace osuCrypto
 
 		DpfMult mMultiplier;
 
+		DpfMult::MultSession mMultSession;
+
+		bool mCharacteristicTwo = true;
+
 		void init(
 			u64 partyIdx,
 			u64 numPointsPerSet,
 			u64 numSets,
 			u64 domain,
-			CoeffCtx ctx = {},
 			u64 numPartitions = 2,
 			u64 cuckooSecParam = 2,
-			u64 linearSecParam = 40)
+			u64 linearSecParam = 40,
+			bool characteristicTwo = false)
 		{
 			mPartyIdx = partyIdx;
 			mNumPointsPerSet = numPointsPerSet;
@@ -121,7 +128,8 @@ namespace osuCrypto
 			mSparseDpf.init(mPartyIdx, mNumSets * f, mDomain, denseDepth);
 
 
-			if (ctx.template characteristicTwo<T>())
+			mCharacteristicTwo = characteristicTwo;
+			if (mCharacteristicTwo == false)
 			{
 				mMultiplier.init(mPartyIdx, mNumSets * f);
 			}
@@ -213,7 +221,11 @@ namespace osuCrypto
 				set(hash);
 			for (auto& solver : mBinarySolver)
 				set(solver);
+
 			set(mSparseDpf);
+
+			if (mCharacteristicTwo == false)
+				set(mMultiplier);
 		}
 
 		// compute the inner product of h and s.
@@ -255,7 +267,7 @@ namespace osuCrypto
 				for (u64 s = 0; s < mNumSets; ++s)
 				{
 					if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
-						co_await print(points[s], {}, sock, "input*");
+						co_await print(points[s], sock, "input*");
 				}
 
 
@@ -281,7 +293,7 @@ namespace osuCrypto
 					}
 
 					if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
-						co_await print(A[s], {}, {}, sock, "input");
+						co_await print(A[s], {}, sock, "input");
 
 
 					// Step 2: Deduplication of [A], [B]
@@ -295,21 +307,22 @@ namespace osuCrypto
 				// Step 3-4: Apply hash functions and generate permutation
 				auto f = mNumPartitions * mPartitionSize;
 				auto c = mPartitionSize + mLinearSecParam;
-
+				auto piCtx = DpfMult::BitMatrixCoeffCtx(A[0].cols() * 8);
+				std::vector<decltype(piCtx)::View<u8>> av(mNumSets);
 				for (u64 s = 0; s < mNumSets; ++s)
 				{
 					if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
-						co_await print(A[s], {}, {}, sock, "dedup");
+						co_await print(A[s], {}, sock, "dedup");
 
 					// Step 5-6: Setup A and B matrices
 					A[s].resize(f, A[s].cols()); // Resize A to f rows
 					for (u64 i = mNumPointsPerSet; i < f; ++i)
 						copyBytesMin(A[s][i], mDomain * mPartyIdx); // default the extras 
 
-					throw RTE_LOC;
+					av[s] = decltype(piCtx)::View<u8>(A[s]);
 					// Step 7: Permute (A||b) by π
-					//tasks.push_back(
-					//	mWaksmanPermute[s].apply(A[s], socks[s]));
+					tasks.push_back(
+						mWaksmanPermute[s].apply<u8>(av[s], socks[s], piCtx));
 				}
 
 				// Step 7: Permute (A||b) by π
@@ -332,7 +345,7 @@ namespace osuCrypto
 				{
 
 					if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
-						co_await print(A[s], {}, {}, sock, "perm");
+						co_await print(A[s], {}, sock, "perm");
 
 
 					// Step 8: Construct M_i using hash functions
@@ -367,7 +380,7 @@ namespace osuCrypto
 				for (u64 s = 0, k = 0; s < mNumSets; ++s)
 				{
 					if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
-						co_await print(A[s], M[s], {}, sock, "hash*");
+						co_await print(A[s], M[s], sock, "hash*");
 
 
 					// Prepare y_i vector (0, 1, ..., m-1)
@@ -392,7 +405,8 @@ namespace osuCrypto
 								for (u64 k = 0; k < M_i.cols(); ++k)
 									M_i(j, k) ^= HDomain(i, k); // XOR the hash into M_i
 						}
-						//mBinarySolver[i].mPrint = mPrint;
+
+						//mBinarySolver[k].mPrint = (k == 0);
 
 						// Step 9: Binary solver to compute [s_i] = bin-solver([M_i], [y_i])
 						tasks.push_back(mBinarySolver[k].solve(M_i, Y_i[s], S_i, prng, socks[k]));
@@ -408,7 +422,7 @@ namespace osuCrypto
 				for (u64 s = 0; s < mNumSets; ++s)
 				{
 					if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
-						co_await print(A[s], M[s], {}, sock, "hash");
+						co_await print(A[s], M[s], sock, "hash");
 				}
 
 				// Step 10: Reveal([s_i]), implicit in step 11
@@ -470,6 +484,7 @@ namespace osuCrypto
 								Hij[k] ^= HDomain(j, k);
 
 							u64 h = innerProd(Hij, S[s].submtx(j * c, c)) + j * mPartitionSize;
+							assert(h < f);
 							//if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
 							//	std::cout << h << " = " << toHex(Hij) << " * Sj, ";
 							mSparseSets[h + s * f].push_back(i);
@@ -497,14 +512,28 @@ namespace osuCrypto
 					mLeafTags[j].resize(mSparseSets[j].size());
 
 					auto s = j / f;
-					if (mPartyIdx && mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
+					if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
 					{
-						std::cout << "set " << j / f << ", " << (j % f) << ": ";
-						for (u64 i = 0; i < mSparseSets[j].size(); ++i)
+						u64 actPoint;
+						co_await sock.send(coproto::copy(A64[j]));
+						co_await sock.recv(actPoint);
+						actPoint ^= A64[j];
+
+						if (mPartyIdx)
 						{
-							std::cout << mSparseSets[j][i] << ", ";
+							std::cout << "set " << j / f << ", " << (j % f) << ": ";
+							for (u64 i = 0; i < mSparseSets[j].size(); ++i)
+							{
+								if (actPoint == mSparseSets[j][i])
+									std::cout << Color::Green;
+
+								std::cout << mSparseSets[j][i] << ", ";
+
+								if (actPoint == mSparseSets[j][i])
+									std::cout << Color::Default;
+							}
+							std::cout << std::endl;
 						}
-						std::cout << std::endl;
 					}
 				}
 
@@ -524,6 +553,48 @@ namespace osuCrypto
 					mSparseSets,
 					sock
 				);
+
+
+				// if not charactristic two, we need to conditionally negate
+				// the leaf sums depending on the party with tag=1 on the
+				// active leaf.
+				if (mCharacteristicTwo == false)
+				{
+					std::vector<u8> d(mLeafTags.size());
+					for (u64 k = 0; k < mLeafTags.size(); ++k)
+					{
+						for (u64 j = 0; j < mLeafTags[k].size(); ++j)
+						{
+							assert(mLeafTags[k][j] < 2);
+							d[k] += mLeafTags[k][j];
+						}
+					}
+
+					// d = 1 if P1 is going to apply the update
+					// but p1 is going to substract the update.
+					// so we need to neagte the payload.
+					for (u64 j = 0; j < d.size(); ++j)
+						d[j] = ((d[j] / 2) % 2) ^ (mPartyIdx & d[j]);
+
+					// if d, then we need to negate the leaf sums.
+					// we will compute the difference between gamma and -gamma.
+					// diff = gamma - (-gamma)
+					//
+					// and then 
+					// 
+					// h = gamma - d * diff
+					//   = gamma - d * (gamma - (-gamma))
+					//   = (1-d) gamma + d * (-gamma)
+
+					BitVector dBits(d.size());
+					for (u64 k = 0; k < d.size(); ++k)
+					{
+						assert(d[k] < 2);
+						dBits[k] = d[k];
+					}
+
+					mMultSession = co_await mMultiplier.setupMultiply(dBits.size(), dBits.getSpan<u8>(), sock);
+				}
 
 				//if (mPrint)
 				//{
@@ -570,7 +641,7 @@ namespace osuCrypto
 
 		template<typename Output>
 		macoro::task<> expandValues(
-			span<block> values,
+			auto&& values,
 			Output&& output,
 			PRNG& prng,
 			coproto::Socket& sock,
@@ -581,22 +652,27 @@ namespace osuCrypto
 				throw std::runtime_error("points and values size mismatch. " LOCATION);
 
 			// Step 2: Deduplication
-			std::vector<Matrix<u8>> B(mNumSets);
+			using VecT = typename CoeffCtx::template Vec<T>;
+			std::vector<VecT> B(mNumSets);
 			std::vector<task<>> tasks;
 			std::vector<Socket> socks(mNumSets);
+			auto valIter = values.begin();
 			for (u64 s = 0; s < mNumSets; ++s)
 			{
 
-				B[s].resize(mNumPointsPerSet, sizeof(block));
-				copyBytes(B[s], values.subspan(s * mNumPointsPerSet, mNumPointsPerSet)); // Copy values to B
+				B[s] = ctx.template makeVec<T>(mNumPointsPerSet);
+				ctx.copy(valIter, valIter + mNumPointsPerSet, B[s].begin());
+				valIter += mNumPointsPerSet;
 
 				// Step 2: Deduplication of [A], [B]
+
 				tasks.push_back(
-					mDedup[s].dedupValues(B[s], socks[s] = sock.fork()));
+					mDedup[s].dedupValues<T>(B[s], socks[s] = sock.fork(), ctx)
+				);
 
 				if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
-					co_await print({}, values.subspan(s * mNumPointsPerSet, mNumPointsPerSet), 
-						sock, "input*");
+					co_await print({}, B[s],
+						sock, "input*", ctx);
 			}
 
 			auto res = co_await macoro::when_all_ready(std::move(tasks));
@@ -612,15 +688,15 @@ namespace osuCrypto
 			{
 
 				if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
-					co_await print({}, {}, B[s], sock, "dedup");
+					co_await print({}, {}, B[s], sock, "dedup", ctx);
 
 				// Step 5-6: Setup A and B matrices
-				B[s].resize(f, B[s].cols());
+				ctx.resize(B[s], f);
+				ctx.zero(B[s].begin() + mNumPointsPerSet, B[s].end());
 
-				throw RTE_LOC;	
 				// Step 7: Permute (A||b) by π
-				//tasks.push_back(
-				//	mWaksmanPermute[s].apply(B[s], socks[s]));
+				tasks.push_back(
+					mWaksmanPermute[s].apply<T>(B[s], socks[s], ctx));
 			}
 
 			// Step 7: Permute (A||b) by π
@@ -629,124 +705,112 @@ namespace osuCrypto
 				r.result();
 
 
-			std::vector<std::vector<block>> shares(f * mNumSets);
-			std::vector<block> leafSums(f * mNumSets);
+			std::vector<VecT> shares(f * mNumSets);
+			VecT leafSums(f * mNumSets);
+			ctx.zero(leafSums.begin(), leafSums.end());
 
 			for (u64 s = 0; s < mNumSets; ++s)
 			{
 				if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
-					co_await print({}, {}, B[s], sock, "perm");
+					co_await print({}, {}, B[s], sock, "perm", ctx);
 			}
 
 			// Step 15-16: Initialize and compute final output
-			std::vector<block> BB(shares.size());
-			//for (u64 i = 0; i < shares.size(); ++i)
-			//{
-			//	copyBytes(BB[i], B[i / f][i % f]);
-			//}
+			auto BB = ctx.template makeVec<T>(shares.size());
 
+			auto BBIter = BB.begin();
 			for (u64 s = 0, i = 0; s < mNumSets; ++s)
 			{
-				for (size_t j = 0; j < f; j++, ++i)
-				{
-					copyBytes(BB[i], B[s][j]);
-				}
+				ctx.copy(B[s].begin(), B[s].end(), BBIter);
+				BBIter += f;
 			}
 
-
+			auto zero = ctx.make<T>();
+			ctx.zero(zero);
 			for (u64 j = 0; j < shares.size(); ++j)
 			{
-				AES aes(block(523234789928736, 754378923479832796 * j));
-				shares[j].resize(mSparseSets[j].size());
+				AES aes(mHashSeed);
+				mHashSeed = aes.hashBlock(block(35434523452345, 2345324523452345234));
+
+				shares[j] = ctx.template makeVec<T>(mSparseSets[j].size());
+
 				for (u64 i = 0; i < mSparseSets[j].size(); ++i)
 				{
-					shares[j][i] = aes.hashBlock(mLeafShares[j][i]);
-					leafSums[j] ^= shares[j][i];
+					ctx.fromBlock(shares[j][i], aes.hashBlock(mLeafShares[j][i]));
+
+					if(mPartyIdx)
+						ctx.minus(shares[j][i], zero, shares[j][i]);
+
+					ctx.plus(leafSums[j], leafSums[j], shares[j][i]);
+
 				}
+
 			}
 
-			auto gamma = ctx.template makeVec<T>(shares.size());
 
 			//////////
 			// gamma = beta - sum_i y_i 
+			auto gamma = ctx.template makeVec<T>(shares.size());
 			for (u64 k = 0; k < shares.size(); ++k)
-				ctx.minus(leafSums[k], BB[k], leafSums[k]);
+				ctx.minus(gamma[k], BB[k], leafSums[k]);
+
 
 			// if not charactristic two, we need to conditionally negate
 			// the leaf sums depending on the party with tag=1 on the
 			// active leaf.
 			if (ctx.template characteristicTwo<T>() == false)
 			{
-				std::vector<u8> d(mLeafTags.size());
-				for (u64 k = 0; k < mLeafTags.size(); ++k)
-				{
-					for (u64 j = 0; j < mLeafTags[k].size(); ++j)
-					{
-						assert(mLeafTags[k][j] < 2);
-						d[j] += mLeafTags[k][j];
-					}
-				}
+				if (mMultSession.mX.size() == 0)
+					throw RTE_LOC; // characteristic two is false, but the multiplier session is not set.
 
+				// we previously computed d, which is a vector of 0s and 1s
 				// d = 1 if P1 is going to apply the update
 				// but p1 is going to substract the update.
 				// so we need to neagte the payload.
-				for (u64 j = 0; j < d.size(); ++j)
-					d[j] = ((d[j] / 2) % 2) ^ (mPartyIdx & d[j]);
-
 				// if d, then we need to negate the leaf sums.
-				// we will compute the difference between leafSums and -leafSums.
-				// diff = leafSums - (-leafSums)
+				// we will compute the difference between gamma and -gamma.
+				// diff = gamma - (-gamma)
 				//
 				// and then 
 				// 
-				// h = leafSums - d * diff
-				//   = leafSums - d * (leafSums - (-leafSums))
-				//   = (1-d) leafSums + d * (-leafSums)
+				// h = gamma - d * diff
+				//   = gamma - d * (gamma - (-gamma))
+				//   = (1-d) gamma + d * (-gamma)
 
-				auto diff = ctx.template makeVec<T>(d.size());
-				BitVector dBits(d.size());
-				for (u64 k = 0; k < d.size(); ++k)
+				auto diff = ctx.template makeVec<T>(mLeafTags.size());
+				for (u64 k = 0; k < mLeafTags.size(); ++k)
 				{
-					assert(d[k] < 2);
-					dBits[k] = d[k];
-					ctx.plus(diff[k], leafSums[k], leafSums[k]);
+					// diff[k] = gamma[k] - (-gamma[k]);
+					ctx.plus(diff[k], gamma[k], gamma[k]);
 				}
 
-				co_await mMultiplier.multiply<T>(dBits.getSpan<u8>(), diff, diff, sock, ctx);
+				co_await mMultSession.multiply<T>(diff.begin(), diff.end(), diff.begin(), sock, ctx);
 
 				// now we have d * diff
-				for (u64 k = 0; k < d.size(); ++k)
+				for (u64 k = 0; k < gamma.size(); ++k)
 				{
-					// leadSums[k] = leafSums[k] - diff[k];
-					//             = (1-d) leafSums[k] + d * (-leafSums[k])
-					ctx.minus(leafSums[k], leafSums[k], diff[k]);
+					// leadSums[k] = gamma[k] - diff[k];
+					//             = (1-d) gamma[k] + d * (-gamma[k])
+					ctx.minus(gamma[k], gamma[k], diff[k]);
 				}
 			}
 
 			///////////
 			// reveal gamma
-			std::vector<u8> buffer(leafSums.size() * ctx.template byteSize<T>());
-			ctx.serialize(leafSums.begin(), leafSums.end(), buffer.begin());
-			co_await sock.send(std::move(buffer));
-			buffer.resize(leafSums.size() * ctx.template byteSize<T>());
-			co_await sock.recv(buffer);
-			ctx.deserialize(buffer.begin(), buffer.end(), gamma.begin());
-			for (u64 k = 0; k < gamma.size(); ++k)
-				ctx.plus(gamma[k], gamma[k], leafSums[k]);
+			co_await reveal(gamma, sock, ctx);
 
-			//auto& sd = s[mDepth % 3];
-			//auto& td = tags;
 			auto temp = ctx.template makeVec<T>(8);
-
+			auto y = ctx.makeVec<T>(mDomain);
 
 			for (u64 s = 0, k = 0; s < mNumSets; ++s)
 			{
-				std::vector<block> y(mDomain);
+				//if (s)
+				ctx.zero(y.begin(), y.end());
+
 				for (u64 j = 0; j < f; ++j, ++k)
 				{
 					for (u64 i = 0; i < mLeafShares[k].size(); ++i)
 					{
-						//auto T = tdi[k] & gamma[k];
 						auto mask = block::allSame<u8>(-mLeafTags[k][i]);
 						ctx.mask(temp[0], gamma[k], mask);
 						if (mPartyIdx)
@@ -758,11 +822,14 @@ namespace osuCrypto
 							ctx.plus(temp[0], shares[k][i], temp[0]);
 						}
 
-
 						auto idx = mSparseSets[k][i];
-						y[idx] = y[idx] ^ temp[0];
-						//y[idx] = y[idx] ^ shares[k][i];
-						//output(k, i, temp[0], mLeafTags[k][i]);
+						ctx.plus(y[idx], y[idx], temp[0]);
+
+						//auto idx = mSparseSets[k][i];
+						//std::cout << "y[" << idx << "] += " <<k << " "<< i <<" " << ctx.str(shares[k][i]) 
+						//	<< " = " << ctx.str(y[idx]) << " + " << ctx.str(shares[k][i])
+						//	<< std::endl;
+						//ctx.plus(y[idx], y[idx], shares[k][i]);
 					}
 				}
 				for (u64 i = 0; i < y.size(); ++i)
@@ -776,12 +843,21 @@ namespace osuCrypto
 			co_return;
 		}
 
-
-		task<> print(MatrixView<u8> keys, MatrixView<u8> hash, MatrixView<u8> values, coproto::Socket& sock, const std::string& name) const
+		template<typename TT = T>
+		task<> print(
+			MatrixView<u8> keys,
+			MatrixView<u8> hash,
+			auto values,
+			coproto::Socket& sock,
+			const std::string& name,
+			auto ctx
+		) const
 		{
 			Matrix<u8> keysCopy = keys;
 			Matrix<u8> hashCopy = hash;
-			Matrix<u8> valuesCopy = values;
+			//Matrix<u8> valuesCopy = values;
+			auto valuesCopy = ctx.template makeVec<TT>(values.size());
+			ctx.copy(values.begin(), values.end(), valuesCopy.begin());
 			if (keysCopy.size())
 			{
 				co_await sock.send(coproto::copy(keysCopy));
@@ -801,7 +877,9 @@ namespace osuCrypto
 			for (u64 i = 0; i < keys.size(); ++i)
 				keysCopy(i) ^= keys(i);
 			for (u64 i = 0; i < values.size(); ++i)
-				valuesCopy(i) ^= values(i);
+			{
+				ctx.plus(valuesCopy[i], valuesCopy[i], values[i]);
+			}
 			for (u64 i = 0; i < hashCopy.size(); ++i)
 				hashCopy(i) ^= hash(i);
 
@@ -814,7 +892,7 @@ namespace osuCrypto
 			if (mPartyIdx)
 			{
 				std::cout << name << std::endl;
-				auto rows = std::max<u64>(values.rows(), keys.rows());
+				auto rows = std::max<u64>(values.size(), keys.rows());
 				for (u64 i = 0; i < rows; ++i)
 				{
 					std::cout << i << ": ";
@@ -823,9 +901,9 @@ namespace osuCrypto
 					{
 						u64 k = 0;
 						copyBytesMin(k, keysCopy[i]);
-						
+
 						std::cout << std::setw(4);
-						if(k == mDomain)
+						if (k == mDomain)
 							std::cout << "_";
 						else
 							std::cout << k;
@@ -838,7 +916,7 @@ namespace osuCrypto
 					std::cout << " | ";
 
 					if (valuesCopy.size())
-						std::cout << toHex(reverse(valuesCopy[i]));
+						std::cout << ctx.str(valuesCopy[i]);
 
 					std::cout << std::endl;
 
@@ -848,14 +926,30 @@ namespace osuCrypto
 		}
 
 
-		task<> print(span<u64> keys, span<block> values, coproto::Socket& sock, const std::string& name) const
+		task<> print(
+			MatrixView<u8> keys,
+			MatrixView<u8> hash,
+			coproto::Socket& sock,
+			const std::string& name
+		) const
+		{
+			return print<block>(keys, hash, span<block>{}, sock, name, CoeffCtxGF2{});
+		}
+
+
+		template<typename TT = T>
+		task<> print(span<u64> keys, auto values, coproto::Socket& sock, const std::string& name,
+			auto ctx) const
 		{
 			std::vector<u64> keysCopy(keys.begin(), keys.end());
-			std::vector<block> valuesCopy(values.begin(), values.end());
-			if(keysCopy.size())
+			auto valuesCopy = ctx.template makeVec<TT>(values.size());
+			if (keysCopy.size())
 				co_await sock.send(coproto::copy(keysCopy));
 			if (values.size())
+			{
+				ctx.copy(values.begin(), values.end(), valuesCopy.begin());
 				co_await sock.send(coproto::copy(valuesCopy));
+			}
 			if (keysCopy.size())
 				co_await sock.recv(keysCopy);
 			if (values.size())
@@ -864,7 +958,7 @@ namespace osuCrypto
 			for (u64 i = 0; i < keys.size(); ++i)
 				keysCopy[i] ^= keys[i];
 			for (u64 i = 0; i < values.size(); ++i)
-				valuesCopy[i] ^= values[i];
+				ctx.plus(valuesCopy[i], valuesCopy[i], values[i]);
 
 			if (mPartyIdx)
 			{
@@ -874,7 +968,7 @@ namespace osuCrypto
 				{
 
 					u64 k = 0;
-					if(keys.size())
+					if (keys.size())
 						copyBytesMin(k, keysCopy[i]);
 
 					std::cout << i << ": " << std::setw(4) << k << " | ";
@@ -887,6 +981,26 @@ namespace osuCrypto
 				std::cout << "------------------------" << std::endl;
 			}
 		}
+
+		task<> print(span<u64> keys, coproto::Socket& sock, const std::string& name) const
+		{
+			return print<block>(keys, span<block>{}, sock, name, CoeffCtxGF2{});
+		}
+
+
+		task<> reveal(auto&& gamma, Socket& sock, auto&& ctx)
+		{
+			auto other = ctx.template makeVec<T>(gamma.size());
+			std::vector<u8> buffer(gamma.size() * ctx.template byteSize<T>());
+			ctx.serialize(gamma.begin(), gamma.end(), buffer.begin());
+			co_await sock.send(std::move(buffer));
+			buffer.resize(gamma.size() * ctx.template byteSize<T>());
+			co_await sock.recv(buffer);
+			ctx.deserialize(buffer.begin(), buffer.end(), other.begin());
+			for (u64 k = 0; k < gamma.size(); ++k)
+				ctx.plus(gamma[k], gamma[k], other[k]);
+		}
+
 
 		//template<typename Output>
 //macoro::task<> expand(
