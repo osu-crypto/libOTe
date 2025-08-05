@@ -22,7 +22,7 @@ namespace osuCrypto
 	struct SparseDpf
 	{
 		u64 mPartyIdx = 0;           // Party index p ∈ {0,1}
-		u64 mNumPointsPerSet = 0;    // Number of parallel sparse DPF instances
+		u64 mNumPoints = 0;    // Number of parallel sparse DPF instances
 		u64 mDomain = 0;             // Domain size 2^D
 		u64 mDenseDepth = 0;         // Optimization: use regular DPF for dense levels
 
@@ -45,7 +45,7 @@ namespace osuCrypto
 			u64 denseDepth
 		)
 		{
-			mNumPointsPerSet = numPoints;
+			mNumPoints = numPoints;
 			mPartyIdx = partyIdx;
 			mDomain = domain;
 			mDenseDepth = std::min(denseDepth, log2ceil(mDomain));
@@ -57,7 +57,7 @@ namespace osuCrypto
 				throw RTE_LOC;
 
 			// Initialize multiplier for correction word computation at each level
-			mMultiplier.init(mPartyIdx, depth * mNumPointsPerSet);
+			mMultiplier.init(mPartyIdx, depth * mNumPoints);
 			if (mDenseDepth)
 				mRegDpf.init(mPartyIdx, 1ull << mDenseDepth, numPoints);
 		}
@@ -65,7 +65,7 @@ namespace osuCrypto
 		u8 lsb(const block& b) { return b.get<u8>(0) & 1; }
 
 		// the number of base OTs required for the protocol. Requires OTs in both directions.
-		u64 baseOtCount() const { return log2ceil(mDomain) * mNumPointsPerSet; }
+		u64 baseOtCount() const { return log2ceil(mDomain) * mNumPoints; }
 
 		/// Set the base OTs for the sparse DPF protocol.
 		void setBaseOts(
@@ -99,7 +99,15 @@ namespace osuCrypto
 
 			mMultiplier.setBaseOts(sRest, rRest, cRest);
 		}
-
+		//using Range = std::pair<u32*, u32*>;
+		struct Range
+		{
+			u32* mBegin;
+			u32* mEnd;
+			auto begin() const { return mBegin; }
+			auto end() const { return mEnd; }
+			auto size() const { return mEnd - mBegin; }
+		};
 
 		/// Partition structure representing node state in sparse tree.
 		/// The partition contains a range of points that live at this
@@ -108,24 +116,25 @@ namespace osuCrypto
 		struct Partition
 		{
 			// a span into the sparse set of points that live at this node.
-			span<u32> mRange;
-
 			// an iterator to the midpoint of the range. Left child contains
 			// mRange.begin() to mMid, and the right child contains
 			// mMid to mRange.end().
-			span<u32>::iterator mMid;
 
-			Partition() = default;
-			Partition(span<u32> range, span<u32>::iterator mid)
-				: mRange(range), mMid(mid)
-			{ }
+			u32* mBegin;
+			u32* mMid;
+			u32* mEnd;
 
+			//span<u32>::iterator mMid;
+
+			//Partition() = default;
+			//Partition(span<u32> range, span<u32>::iterator mid)
+			//	: mRange(range), mMid(mid)
+			//{ }
 			// Returns the left right children ranges of this partition.
 			// i.e. in the paper: [l₁,l₂] || [r₁,r₂] = [β₁,β₂]
-			std::array<span<u32>, 2>  children()
+			std::array<Range, 2>  children()
 			{
-				return
-				{ span<u32>(mRange.begin(), mMid), span<u32>(mMid, mRange.end()) };
+				return { Range{mBegin, mMid}, Range{mMid, mEnd} };
 			}
 
 			std::string print(u64 bitIdx)
@@ -133,7 +142,7 @@ namespace osuCrypto
 				std::stringstream ss;
 				ss << "bit " << bitIdx << " val " << (1 << bitIdx) << " {";
 				--bitIdx;
-				for (auto iter = mRange.begin(); iter != mRange.end(); ++iter)
+				for (auto iter =mBegin; iter != mEnd; ++iter)
 				{
 					if (iter == mMid)
 						ss << ",";
@@ -152,16 +161,16 @@ namespace osuCrypto
 		/// Finds the highest bit δ that splits S_{[β₁,β₂]} into non-empty parts.
 		/// Returns (δ, partition) where δ is the split level and partition
 		/// describes the left/right index ranges.
-		std::pair<u32, Partition> partition(span<u32> points, u32 upperBitsBegin)
+		std::pair<u32, Partition> partition(Range points, u32 upperBitsBegin)
 		{
 			// Step 1: if β₁ = β₂, return (0, (β, ⊥))
 			if (points.size() == 1)
-				return { 0, Partition{points, points.end()} };
+				return { 0, Partition{points.begin(), points.end(), points.end()}};
 #ifndef NDEBUG
 			if (std::adjacent_find(points.begin(), points.end(), std::greater<u32>{}) != points.end())
 				throw RTE_LOC;
 			if (std::any_of(points.begin(), points.end(),
-				[upperBitsBegin, prefix = points[0] >> (upperBitsBegin)](auto v) {return v >> (upperBitsBegin) != prefix; }))
+				[upperBitsBegin, prefix = *points.begin() >> (upperBitsBegin)](auto v) {return v >> (upperBitsBegin) != prefix; }))
 				throw RTE_LOC;
 			if (points.size() <= 1)
 				throw RTE_LOC;
@@ -178,7 +187,8 @@ namespace osuCrypto
 					[upperBitsBegin](auto, auto b) {return (b >> upperBitsBegin) & 1; });
 			} while (par.mMid == points.begin() || par.mMid == points.end());
 
-			par.mRange = points;
+			par.mBegin = points.mBegin;
+			par.mEnd = points.mEnd;
 			return { upperBitsBegin + 1, par };
 		}
 
@@ -191,16 +201,18 @@ namespace osuCrypto
 			{
 				Partition mPartition; // the child partitions
 				block mSeed; // current seed
-				u8 mTag : 1; // current tag, 1 bit;
-				u8 mChild : 1; // is this a left 0 or right 1 child?
-				u8 mParent : 6; // the depth of the parent. This tells us which sigma to use. in [0,64)
+				u8 mTag; // current tag, 1 bit;
+				u8 mChild; // is this a left 0 or right 1 child?
+				u8 mParent; // the depth of the parent. This tells us which sigma to use. in [0,64)
 			};
 
 			/// Level d state: bucket u_d and running sums z_d
 			struct Level
 			{
 				// the nodes for each level of the tree.
-				std::vector<Node> mNodes;
+				AlignedUnVector<Node> mNodes_;
+
+				u64 mNodeSize = 0;
 
 				// the left right sums for each level of the tree.
 				std::array<block, 2> mZ;
@@ -216,15 +228,19 @@ namespace osuCrypto
 
 				/// Add tuple (j,ρ,b',[s],[t]) to state bucket u_δ
 				void push_back(u8 child, u8 parentLevel, Partition& b, block seed, u8 tag) {
-					assert(mNodes.capacity() > mNodes.size() && "in resize(...) we reserved space so we shouldnt need to reallocate");
-					mNodes.push_back( Node{ b, seed, tag, child, parentLevel } );
+					auto idx = mNodeSize++;
+					assert(mNodeSize <= mNodes_.size() && "in resize(...) we reserved space so we shouldnt need to reallocate");
+					//if (mNodeSize > mNodes_.size())
+					//	throw RTE_LOC;
+					mNodes_[idx] = Node{ b, seed, tag, child, parentLevel };
 				}
 
-				u64 size() const { return mNodes.size(); }
+				u64 size() const { return mNodeSize; }
 
 				Node& operator[](u64 i)
 				{
-					return mNodes[i];
+					assert(i < mNodeSize && "index out of bounds");
+					return mNodes_[i];
 				}
 			};
 
@@ -235,12 +251,19 @@ namespace osuCrypto
 			void resize(u64 depth, u64 startingDepth, u64 setSize)
 			{
 				mLevels.resize(depth);
-				mLevels[0].mNodes.reserve(setSize);
+				mLevels[0].mNodes_.resize(setSize);
 
 				// we reserve space for the nodes in each level.
 				// we reserve the worse case of 2^depth nodes.
 				for (u64 j = 0; j < depth; ++j)
-					mLevels[mLevels.size() - j - 1].mNodes.reserve(std::min<u64>(setSize, 1ull << (startingDepth +j)));
+				{
+					auto size = std::min<u64>(setSize, 1ull << (startingDepth + j));
+					auto half = depth / 2;
+
+					// Linear scale from 1 to 2 once j >= half
+					//double scale = (j >= half) ? 1.0 + double(j - half) / double(depth - 1 - half) : 1.0;
+					mLevels[mLevels.size() - j - 1].mNodes_.resize(size);
+				}
 			}
 
 			Level& operator[](u64 i) { return mLevels[i]; }
@@ -301,29 +324,29 @@ namespace osuCrypto
 
 			// the number of levels in the sparse tree.
 			u64 depth = log2ceil(mDomain) - mDenseDepth;
-			std::vector<Tree> trees(mNumPointsPerSet);
+			std::vector<Tree> trees(mNumPoints);
 
 			// STEP 1: Book-keeping initialization
 			// Initialize state buckets u_d and running sums z_d for each level
-			for (u64 i = 0; i < mNumPointsPerSet; ++i)
+			for (u64 i = 0; i < mNumPoints; ++i)
 				trees[i].resize(depth + 1, mDenseDepth, sparsePoints[i].size());
 
 			// Allocate memory for leaf outputs
 			std::unique_ptr<u8[]> mem;
-			std::vector<std::span<block>> leafValues(mNumPointsPerSet);
-			std::vector<std::span<u8>> leafTags(mNumPointsPerSet);
+			std::vector<std::span<block>> leafValues(mNumPoints);
+			std::vector<std::span<u8>> leafTags(mNumPoints);
 			u64 totalSize = 0;
-			for (u64 i = 0; i < mNumPointsPerSet; ++i)
+			for (u64 i = 0; i < mNumPoints; ++i)
 				totalSize += sparsePoints[i].size();
 
 			mem.reset(new u8[totalSize * (sizeof(block) + 1)]());
 			auto iter = mem.get();
-			for (u64 i = 0; i < mNumPointsPerSet; ++i)
+			for (u64 i = 0; i < mNumPoints; ++i)
 			{
 				leafValues[i] = span<block>((block*)iter, sparsePoints[i].size());
 				iter += leafValues[i].size_bytes();
 			}
-			for (u64 i = 0; i < mNumPointsPerSet; ++i)
+			for (u64 i = 0; i < mNumPoints; ++i)
 			{
 				leafTags[i] = span<u8>(iter, sparsePoints[i].size());
 				iter += leafTags[i].size_bytes();
@@ -371,11 +394,11 @@ namespace osuCrypto
 
 						// Group sparse points by dense bin
 						auto e = std::find_if(iter, end, [bin, depth](auto v) {return (v >> depth) != bin; });
-						auto points = span<u32>(iter, e);
+						auto points = Range(iter, e);
 						if (points.size() == 1)
 						{
 							// Single point: direct leaf assignment
-							auto idx = std::distance(sparsePoints[r].data(), &points[0]);
+							auto idx = std::distance(sparsePoints[r].data(), points.begin());
 							leafValues[r][idx] = seed;
 							leafTags[r][idx] = tag;
 
@@ -408,9 +431,9 @@ namespace osuCrypto
 			else
 			{
 				// STEP 3,4: Partitioning the root (no dense optimization)
-				for (u64 r = 0; r < mNumPointsPerSet; ++r)
+				for (u64 r = 0; r < mNumPoints; ++r)
 				{
-					auto&& points = sparsePoints[r];
+					Range points{ sparsePoints[r].data(), sparsePoints[r].data() + sparsePoints[r].size() };
 					auto& tree = trees[r];
 					// (δ,b) := PARTITION((1,|S|), S)
 					auto [delta, b] = partition(points, depth);
@@ -433,14 +456,14 @@ namespace osuCrypto
 			for (u64 d = depth; d; --d)
 			{
 				// Collect correction data for all trees at level d
-				std::vector<block> z0(mNumPointsPerSet);
-				std::vector<block> z1(mNumPointsPerSet);
-				BitVector negAlpha(mNumPointsPerSet);
-				std::vector<std::array<u8, 2>> taus(mNumPointsPerSet);
-				std::vector<block>  sigmas(mNumPointsPerSet);
+				std::vector<block> z0(mNumPoints);
+				std::vector<block> z1(mNumPoints);
+				BitVector negAlpha(mNumPoints);
+				std::vector<std::array<u8, 2>> taus(mNumPoints);
+				std::vector<block>  sigmas(mNumPoints);
 				bool used = false;
 
-				for (u64 r = 0; r < mNumPointsPerSet; ++r)
+				for (u64 r = 0; r < mNumPoints; ++r)
 				{
 					auto& tree = trees[r];
 
@@ -471,12 +494,12 @@ namespace osuCrypto
 					co_await reveal(z0, sock);
 					co_await reveal(z1, sock);
 					co_await mMultiplier.multiply(negAlpha, sigmas, sigmas, sock);
-					for (u64 r = 0; r < mNumPointsPerSet; ++r)
+					for (u64 r = 0; r < mNumPoints; ++r)
 						sigmas[r] = sigmas[r] ^ trees[r][d].mZ[0];
 					co_await reveal(sigmas, taus, sock);
 
 					// Store correction words
-					for (u64 r = 0; r < mNumPointsPerSet; ++r)
+					for (u64 r = 0; r < mNumPoints; ++r)
 					{
 						trees[r][d].mSigma = sigmas[r];
 						trees[r][d].mTau = taus[r];
@@ -487,10 +510,10 @@ namespace osuCrypto
 				if (dNext == 0) break;// Stop before leaf processing
 
 				// 6c: Updating the shares and computing children
-				for (u64 r = 0; r < mNumPointsPerSet; ++r)
+				for (u64 r = 0; r < mNumPoints; ++r)
 				{
 					auto& tree = trees[r];
-					auto size = tree[dNext].mNodes.size();
+					auto size = tree[dNext].size();
 
 					// Process each tuple (j,ρ,b,[s],[t]) ∈ u_d
 					for (u64 i = 0; i < size; ++i)
@@ -535,7 +558,7 @@ namespace osuCrypto
 
 			// STEP 7: Leaf processing
 			// Process tuples in u_0 (leaf level)
-			for (u64 r = 0; r < mNumPointsPerSet; ++r)
+			for (u64 r = 0; r < mNumPoints; ++r)
 			{
 				auto& tree = trees[r];
 				auto size = tree[0].size();
@@ -555,7 +578,7 @@ namespace osuCrypto
 					// Convert to leaf values:
 					// [t_{b₁}] := lsb([s])
 					// [y_{b₁}] := (1-2p) · convert_G(msbs([s]))
-					auto b = std::distance(sparsePoints[r].data(), par.mRange.data());
+					auto b = std::distance(sparsePoints[r].data(), par.mBegin);
 					leafTags[r][b] = lsb(seed) ^ tag * pTau;
 					leafValues[r][b] = seed ^ (pSigma & block::allSame<u8>(-tag));
 
@@ -571,7 +594,7 @@ namespace osuCrypto
 			{
 				// Reveal γ and apply to convert random unit vector to desired values
 				co_await reveal(gamma, sock);
-				for (u64 r = 0; r < mNumPointsPerSet; ++r)
+				for (u64 r = 0; r < mNumPoints; ++r)
 				{
 					auto size = sparsePoints[r].size();
 					for (u64 i = 0; i < size; ++i)
@@ -586,7 +609,7 @@ namespace osuCrypto
 			else
 			{
 				// Punctured mode: output raw leaf values
-				for (u64 r = 0; r < mNumPointsPerSet; ++r)
+				for (u64 r = 0; r < mNumPoints; ++r)
 				{
 					auto size = sparsePoints[r].size();
 					for (u64 i = 0; i < size; ++i)
@@ -595,6 +618,21 @@ namespace osuCrypto
 					}
 				}
 			}
+
+
+			//u64 total = 0;
+			//u64 used = 0;
+			//for (u64 r = 0; r < mNumPoints; ++r)
+			//{
+			//	for(u64 j = 0; j < trees[r].mLevels.size(); ++j)
+			//	{
+			//		total += trees[r][j].mNodes_.size();
+			//		used += trees[r][j].mNodeSize;
+			//		std::cout << double(trees[r][j].mNodeSize) / double(trees[r][j].mNodes_.size()) << " ";
+			//	}
+			//	std::cout << std::endl;
+			//}
+			//std::cout << "SparseDpf: total nodes " << total << ", used nodes " << used << " ~ " << double(used) / total << std::endl;
 
 			co_return;
 		}

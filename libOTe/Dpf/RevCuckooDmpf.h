@@ -69,6 +69,13 @@ namespace osuCrypto
 
 		DpfMult::MultSession mMultSession;
 
+		// temp storage 
+		using VecT = typename CoeffCtx::template Vec<T>;
+
+		VecT mTempOutput;
+		std::vector<VecT> mExpanded;
+
+
 		bool mCharacteristicTwo = true;
 
 		void init(
@@ -254,7 +261,7 @@ namespace osuCrypto
 					auto hj = h[j];
 					u8 masks[8];
 
-					for (int k = 0; k < 8; ++k) 
+					for (int k = 0; k < 8; ++k)
 						masks[k] = -(int8_t)((hj >> k) & 1);
 
 					for (int k = 0; k < 8; ++k)
@@ -341,7 +348,7 @@ namespace osuCrypto
 					for (u64 i = 0; i < c; ++i)
 						Ssj[i] = S[s](j* c + i);
 
-					u8 HDOffset = 0; 
+					u8 HDOffset = 0;
 					innerProd(HDj, 1, Ssj.data(), stride, &HDOffset);
 
 					for (u64 i = 0; i < d32; i += stepSize)
@@ -392,7 +399,7 @@ namespace osuCrypto
 			}
 
 
-			for (u64 i =0; i < mSparseSets.size(); ++i)
+			for (u64 i = 0; i < mSparseSets.size(); ++i)
 				mSparseSets[i] = std::span<u32>(mSparseSetBuf.get() + i * maxLoad, sizes[i]);
 
 
@@ -851,8 +858,14 @@ namespace osuCrypto
 				r.result();
 			setTimePoint("perm done");
 
+			ctx.resize(mExpanded, f * mNumSets);
+			for (u64 j = 0; j < mExpanded.size(); ++j)
+			{
+				if (mExpanded[j].size() != mSparseSets[j].size())
+					ctx.resize(mExpanded[j], mSparseSets[j].size());
+			}
+			setTimePoint("expanded alloc done");
 
-			std::vector<VecT> shares(f * mNumSets);
 			VecT leafSums(f * mNumSets);
 			ctx.zero(leafSums.begin(), leafSums.end());
 
@@ -863,7 +876,7 @@ namespace osuCrypto
 			}
 
 			// Step 15-16: Initialize and compute final output
-			auto BB = ctx.template makeVec<T>(shares.size());
+			auto BB = ctx.template makeVec<T>(mExpanded.size());
 
 			auto BBIter = BB.begin();
 			for (u64 s = 0, i = 0; s < mNumSets; ++s)
@@ -872,24 +885,59 @@ namespace osuCrypto
 				BBIter += f;
 			}
 
+
+#define SIMD8(VAR, STATEMENT) do{\
+	{ constexpr u64 VAR = 0; STATEMENT; }\
+	{ constexpr u64 VAR = 1; STATEMENT; }\
+	{ constexpr u64 VAR = 2; STATEMENT; }\
+	{ constexpr u64 VAR = 3; STATEMENT; }\
+	{ constexpr u64 VAR = 4; STATEMENT; }\
+	{ constexpr u64 VAR = 5; STATEMENT; }\
+	{ constexpr u64 VAR = 6; STATEMENT; }\
+	{ constexpr u64 VAR = 7; STATEMENT; }\
+	}while(0)
+
 			auto zero = ctx.make<T>();
 			ctx.zero(zero);
-			for (u64 j = 0; j < shares.size(); ++j)
+			for (u64 j = 0; j < mExpanded.size(); ++j)
 			{
 				AES aes(mHashSeed);
 				mHashSeed = aes.hashBlock(block(35434523452345, 2345324523452345234));
 
-				shares[j] = ctx.template makeVec<T>(mSparseSets[j].size());
+				auto n8 = mSparseSets[j].size() / 8 * 8;
 
-				for (u64 i = 0; i < mSparseSets[j].size(); ++i)
+				auto sIter = mExpanded[j].begin();
+				auto lIter = mLeafShares[j].begin();
+				if (mPartyIdx)
 				{
-					ctx.fromBlock(shares[j][i], aes.hashBlock(mLeafShares[j][i]));
 
-					if (mPartyIdx)
-						ctx.minus(shares[j][i], zero, shares[j][i]);
+					for (u64 i = 0; i < n8; i+=8)
+					{
+						SIMD8(q, ctx.fromBlock(sIter[i+q], aes.hashBlock(lIter[i+q])));
+						SIMD8(q, ctx.minus(sIter[i+q], zero, sIter[i+q]));
+						SIMD8(q, ctx.plus(leafSums[j], leafSums[j], sIter[i+q]));
+					}
 
-					ctx.plus(leafSums[j], leafSums[j], shares[j][i]);
+					for (u64 i = n8; i < mSparseSets[j].size(); ++i)
+					{
+						ctx.fromBlock(sIter[i], aes.hashBlock(lIter[i]));
+						ctx.minus(sIter[i], zero, sIter[i]);
+						ctx.plus(leafSums[j], leafSums[j], sIter[i]);
+					}
+				}
+				else
+				{
 
+					for (u64 i = 0; i <n8; i+=8)
+					{
+						SIMD8(q, ctx.fromBlock(sIter[i+q], aes.hashBlock(lIter[i+q])));
+						SIMD8(q, ctx.plus(leafSums[j], leafSums[j], sIter[i+q]));
+					}
+					for (u64 i = n8; i < mSparseSets[j].size(); ++i)
+					{
+						ctx.fromBlock(sIter[i], aes.hashBlock(lIter[i]));
+						ctx.plus(leafSums[j], leafSums[j], sIter[i]);
+					}
 				}
 
 			}
@@ -898,8 +946,8 @@ namespace osuCrypto
 
 			//////////
 			// gamma = beta - sum_i y_i 
-			auto gamma = ctx.template makeVec<T>(shares.size());
-			for (u64 k = 0; k < shares.size(); ++k)
+			auto gamma = ctx.template makeVec<T>(mExpanded.size());
+			for (u64 k = 0; k < mExpanded.size(); ++k)
 				ctx.minus(gamma[k], BB[k], leafSums[k]);
 
 
@@ -950,41 +998,69 @@ namespace osuCrypto
 			setTimePoint("gamma done");
 
 			auto temp = ctx.template makeVec<T>(8);
-			auto y = ctx.makeVec<T>(mDomain);
+			if (mTempOutput.size() != mDomain)
+				ctx.resize(mTempOutput, mDomain);
 
 			for (u64 s = 0, k = 0; s < mNumSets; ++s)
 			{
 				//if (s)
-				ctx.zero(y.begin(), y.end());
+				ctx.zero(mTempOutput.begin(), mTempOutput.end());
+				auto out = mTempOutput.begin();;
 
 				for (u64 j = 0; j < f; ++j, ++k)
 				{
-					for (u64 i = 0; i < mLeafShares[k].size(); ++i)
+					auto n = mLeafShares[k].size();
+					auto n8 = n / 8 * 8;
+					auto sIter = mExpanded[k].begin();
+					auto gammaK = gamma[k];
+					auto setK = mSparseSets[k].data();
+					auto tagK = mLeafTags[k].data();
+
+					if (mPartyIdx)
 					{
-						auto mask = block::allSame<u8>(-mLeafTags[k][i]);
-						ctx.mask(temp[0], gamma[k], mask);
-						if (mPartyIdx)
+						for (u64 i = 0; i < n8; i += 8)
 						{
-							ctx.minus(temp[0], shares[k][i], temp[0]);
+							SIMD8(q, ctx.mask(temp[q], gammaK, block::allSame<u8>(-tagK[i + q])));
+							SIMD8(q, ctx.minus(temp[q], sIter[i + q], temp[q]));
+							//ctx.plus(temp[q], shares[k][i + q], temp[q]);
+							u32 idx[8];
+							SIMD8(q, idx[q] = setK[i + q]);
+							SIMD8(q, ctx.plus(out[idx[q]], out[idx[q]], temp[q]));
 						}
-						else
+						for (u64 i = n8; i < mLeafShares[k].size(); ++i)
 						{
-							ctx.plus(temp[0], shares[k][i], temp[0]);
+							auto mask = block::allSame<u8>(-tagK[i]);
+							ctx.mask(temp[0], gammaK, mask);
+							ctx.minus(temp[0], sIter[i], temp[0]);
+							//ctx.plus(temp[0], shares[k][i], temp[0]);
+							auto idx = setK[i];
+							ctx.plus(out[idx], out[idx], temp[0]);
 						}
-
-						auto idx = mSparseSets[k][i];
-						ctx.plus(y[idx], y[idx], temp[0]);
-
-						//auto idx = mSparseSets[k][i];
-						//std::cout << "y[" << idx << "] += " <<k << " "<< i <<" " << ctx.str(shares[k][i]) 
-						//	<< " = " << ctx.str(y[idx]) << " + " << ctx.str(shares[k][i])
-						//	<< std::endl;
-						//ctx.plus(y[idx], y[idx], shares[k][i]);
+					}
+					else
+					{
+						for (u64 i = 0; i < n8; i += 8)
+						{
+							SIMD8(q, ctx.mask(temp[q], gammaK, block::allSame<u8>(-tagK[i + q])));
+							SIMD8(q, ctx.plus(temp[q], sIter[i+q], temp[q]));
+							u32 idx[8];
+							SIMD8(q, idx[q] = setK[i + q]);
+							SIMD8(q, ctx.plus(out[idx[q]], out[idx[q]], temp[q]));
+						}
+						for (u64 i = n8; i < mLeafShares[k].size(); ++i)
+						{
+							auto mask = block::allSame<u8>(-tagK[i]);
+							ctx.mask(temp[0], gammaK, mask);
+							//ctx.minus(temp[0], shares[k][i], temp[0]);
+							ctx.plus(temp[0], sIter[i], temp[0]);
+							auto idx = setK[i];
+							ctx.plus(out[idx], out[idx], temp[0]);
+						}
 					}
 				}
-				for (u64 i = 0; i < y.size(); ++i)
+				for (u64 i = 0; i < mDomain; ++i)
 				{
-					output(s, i, y[i]);
+					output(s, i, out[i]);
 				}
 			}
 
@@ -1449,3 +1525,4 @@ namespace osuCrypto
 	};
 
 }
+#undef SIMD8

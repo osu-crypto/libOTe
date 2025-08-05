@@ -1149,9 +1149,17 @@ namespace osuCrypto
 		// Create sockets for communication
 		auto sock = coproto::LocalAsyncSocket::makePair();
 
+		std::array<macoro::thread_pool, 2> threadPools;
+		sock[0].setExecutor(threadPools[0]);
+		sock[1].setExecutor(threadPools[1]);
+		auto work0 = threadPools[0].make_work();
+		auto work1 = threadPools[1].make_work();
+		threadPools[0].create_thread();
+		threadPools[1].create_thread();
+
 		auto r = macoro::sync_wait(macoro::when_all_ready(
-			dpf[0].setPoints(points0, prng, sock[0]),
-			dpf[1].setPoints(points1, prng, sock[1])
+			dpf[0].setPoints(points0, prng, sock[0]) | macoro::start_on(threadPools[0]),
+			dpf[1].setPoints(points1, prng, sock[1]) | macoro::start_on(threadPools[1])
 		));
 		std::get<0>(r).result();
 		std::get<1>(r).result();
@@ -1180,8 +1188,8 @@ namespace osuCrypto
 
 			// Expand values using the cached point setup
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				dpf[0].expandValues(values0, [&](auto j, auto i, auto v) { output[0](j, i) = v; }, prng, sock[0]),
-				dpf[1].expandValues(values1, [&](auto j, auto i, auto v) { output[1](j, i) = v; }, prng, sock[1])
+				dpf[0].expandValues(values0, [&](auto j, auto i, auto v) { output[0](j, i) = v; }, prng, sock[0]) | macoro::start_on(threadPools[0]),
+				dpf[1].expandValues(values1, [&](auto j, auto i, auto v) { output[1](j, i) = v; }, prng, sock[1]) | macoro::start_on(threadPools[1])
 			));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
