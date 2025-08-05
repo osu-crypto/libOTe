@@ -541,7 +541,9 @@ namespace osuCrypto
 		u64 cuckooSecParam = cmd.getOr("cuckooSecParam", 2); // Cuckoo security parameter
 		u64 numValueSets = cmd.getOr("numValueSets", 3); // Number of different value sets to test
 		bool print = cmd.isSet("print"); // Print flag
+		bool printTimer = cmd.isSet("printTimer"); // Print timer flag
 
+		Timer timer[2];
 
 		// Generate input points (fixed for all iterations)
 		Matrix<u64> points0(numSets, numPoints);
@@ -562,6 +564,9 @@ namespace osuCrypto
 		dpf[1].init(1, numPoints, numSets, domain, numPartitions, cuckooSecParam, linearSecParam);
 		dpf[0].mPrint = print;
 		dpf[1].mPrint = print;
+		dpf[0].setTimer(timer[0]);
+		dpf[1].setTimer(timer[1]);
+
 		if (cmd.hasValue("print"))
 		{
 			dpf[0].mPrintIndex = cmd.getOr("print", 0);
@@ -666,8 +671,8 @@ namespace osuCrypto
 			std::vector<F> values1(numPoints * numSets);
 			for (u64 i = 0; i < values1.size(); ++i)
 			{
-				//values0[i] = prng.get();
-				//values1[i] = prng.get();
+				values0[i] = prng.get();
+				values1[i] = prng.get();
 			}
 
 			// Prepare output matrices for this iteration
@@ -753,15 +758,18 @@ namespace osuCrypto
 		}
 
 
-		if (print)
+		if (printTimer)
 		{
-			std::cout << "Iterative and monolithic approaches produce identical results!" << std::endl;
-			std::cout << "RevCuckoo_iterative_Test passed all " << numValueSets + 1 << " iterations" << std::endl;
+			for (u64 i = 0; i < 2; ++i)
+			{
+				std::cout << "Dpf " << i << " time: \n" << timer[i] << std::endl;
+			}
 		}
+
 	}
 	void RevCuckoo_iterative_Test(const oc::CLP& cmd)
 	{
-		//RevCuckoo_iterative_impl<block, CoeffCtxGF128>(cmd);
+		RevCuckoo_iterative_impl<block, CoeffCtxGF128>(cmd);
 		RevCuckoo_iterative_impl<u64, CoeffCtxInteger>(cmd);
 	}
 

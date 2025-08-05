@@ -6,6 +6,7 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Crypto/RandomOracle.h"
 #include "coproto/Socket/Socket.h"
+#include "cryptoTools/Common/CuckooIndex.h"
 
 namespace osuCrypto
 {
@@ -210,6 +211,7 @@ namespace osuCrypto
 		u64 mN = 0; // number of elements
 		u64 mM = 0;
 		u64 mModulus = 0;
+		Mod mMod; // modulus for the elements
 
 		std::vector<std::array<block, 2>> mSendMsg; // base OTs for the sender
 		std::vector<block> mRecvMsg; // base OTs for the receiver
@@ -220,6 +222,7 @@ namespace osuCrypto
 			mN = n;
 			mM = m;
 			mModulus = modulus;
+			mMod = Mod(mModulus);
 		}
 
 		struct BaseOtCount
@@ -256,10 +259,12 @@ namespace osuCrypto
 		{
 			U u;
 			static_assert(sizeof(block) >= sizeof(U));
-			copyBytesMin(u, b);
+			memcpy(&u, &b, sizeof(U));
 			return u;
 		}
 
+		// take a vector of bytes, each less that mModulus, and pack them into a byte array.
+		// each will take up log2(mModulus) bits.
 		std::vector<u8> pack(span<u8> data)
 		{
 			// Determine the number of bits required to represent mModulus.
@@ -294,6 +299,9 @@ namespace osuCrypto
 			}
 			return p;
 		}
+
+		// Unpack a byte array into a matrix of u8 values, each less than mModulus.
+		// Each value is packed into log2(mModulus) bits.
 		Matrix<u8> unpack(span<const u8> data)
 		{
 			// Determine the number of bits used for each packed value.
@@ -324,6 +332,41 @@ namespace osuCrypto
 			return result;
 		}
 
+		void bitsToBytes(
+			span<const u8> bits,
+			span<u8> bytes)
+		{
+			auto totalBits = bytes.size();
+			auto fullBytes = bytes.size() / 8;
+			auto totalBytes = divCeil(totalBits, 8);
+
+			if(bits.size() != totalBytes)
+				throw std::runtime_error("bad sizes. " LOCATION);
+
+			// Process 8 bytes (64 bits) at a time for SIMD optimization
+			for (u64 byteIdx = 0; byteIdx < fullBytes; byteIdx += 8)
+			{
+				u64 remainingBytes = std::min(8ull, fullBytes - byteIdx);
+				for (u64 k = 0; k < remainingBytes; ++k)
+				{
+					u8 packedByte = bits[byteIdx + k];
+					u64 bitOffset = (byteIdx + k) * 8;
+					// Unpack 8 bits into 8 bytes using bit manipulation
+					for (u64 bit = 0; bit < 8; ++bit)
+						bytes[bitOffset + bit] = (packedByte >> bit) & 1;
+				}
+			}
+			// Handle remaining bits
+			u64 remainingBits = totalBits % 8;
+			if (remainingBits > 0) {
+				u8 packedByte = bits[fullBytes];
+				u64 bitOffset = fullBytes * 8;
+
+				for (u64 bit = 0; bit < remainingBits; ++bit)
+					bytes[bitOffset + bit] = (packedByte >> bit) & 1;
+			}
+		}
+
 		macoro::task<> inject(
 			MatrixView<const u8> A,
 			MatrixView<u8> B,
@@ -337,66 +380,122 @@ namespace osuCrypto
 			if (B.cols() != mM)
 				throw RTE_LOC;
 
-
+			u64 totalBits = mN * mM;
+			u64 bytes = divCeil(totalBits, 8);
+			u64 fullBytes = totalBits / 8;
+			auto m8 = divCeil(mM, 8);
 
 			if (mPartyIdx)
 			{
 
-				BitVector c(mN * mM);
+
+				// Pack all bits from A into AA using direct byte access
+				// +1 to make sures its legal to access the byte after the last bit.
+				std::vector<u8> AA(bytes + 1, 0);
+
+				u64 outIndex = 0;
 				for (u64 i = 0; i < mN; ++i)
 				{
-					for (u64 j = 0; j < mM; ++j)
+					auto ai = A.data(i);
+					// Process full bytes first
+					for (u64 j = 0; j < m8; ++j)
 					{
-						auto aij = bit(A[i], j);
-						//std::cout << "a1(" << i << " " << j << ") = " << int(aij) << std::endl;
-						//std::cout << "c (" << i << " " << j << ") = " << int(mChoices[i * mM + j]) << std::endl;
-						c[i * mM + j] =
-							aij ^
-							mChoices[i * mM + j];
+						auto aij = ai[j];
+
+						auto outByteIdx = outIndex / 8;
+						auto outBitShift = outIndex % 8;
+
+						// outIndex might not a multiple of 8, so we need to handle the bits carefully
+						auto lowerBits = aij << outBitShift;
+						auto upperBits = aij >> (8 - outBitShift);
+
+						assert(outByteIdx + 1 < AA.size());
+						AA.data()[outByteIdx] |= lowerBits;
+						AA.data()[outByteIdx + 1] |= upperBits;
+
+						outIndex += 8;
 					}
+
+					// we might have over stepped at the end. move outIndex back
+					outIndex -= (m8 * 8 - mM);
 				}
+				AA.resize(bytes);
+
+				AlignedUnVector<u8> c(bytes);
+				auto choices = mChoices.getSpan<u8>();
+				for (u64 i = 0; i < bytes; ++i)
+					c[i] = AA[i] ^ choices[i];
+
 				//std::cout << "_--------" << std::endl;
 				co_await sock.send(std::move(c));
-				std::vector<u8> dd(divCeil(mN * mM * log2ceil(mModulus), 8));
+				std::vector<u8> dd(divCeil(totalBits * log2ceil(mModulus), 8));
+
+				std::vector<u8> ABits(totalBits);
+				// Convert packed AA to one-bit-per-byte ABits using SIMD-friendly approach
+				bitsToBytes(AA, ABits);
+
 				co_await sock.recv(dd);
 				auto D = unpack(dd);
-				for (u64 i = 0; i < mN; ++i)
+				for(u64 i = 0; i < totalBits; ++i)
 				{
-					for (u64 j = 0; j < mM; ++j)
-					{
-						auto mcc = as<u64>(mRecvMsg[i * mM + j]) % mModulus;
-						auto aij = bit(A[i], j);
-						B(i, j) = (mcc + D(i, j) * aij) % mModulus;
-						//std::cout << "B(" << i << " " << j << ") " << int(B(i, j)) << " = "
-						//	<< (mcc % mModulus) << " + " << int(D(i, j)) << " " << int(aij) << std::endl;
-					}
+					auto aij = ABits.data()[i]; 
+					auto mcc = mMod.mod(as<u64>(mRecvMsg.data()[i]));
+					auto d = D.data()[i];
+					auto v = mcc + d * aij;
+					// v = v % mModulus
+					v = v - (v >= mModulus) * mModulus;
+					//if (v != (mcc + d * aij) % mModulus)
+					//	throw RTE_LOC;
+					B(i) = v;
 				}
 			}
 			else
 			{
-				BitVector c(mN * mM);
-				co_await sock.recv(c);
-
-				Matrix<u8> D(mN, mM);
+				//BitVector c(mN * mM);
+				AlignedUnVector<u8> c(bytes);
+				std::vector<u8> CBits(totalBits), ABits(totalBits + 8);
+				
+				auto outIndex = 0;
 				for (u64 i = 0; i < mN; ++i)
 				{
-					for (u64 j = 0; j < mM; ++j)
+					auto Ai = A.data(i);
+					// Process 8 bytes (64 bits) at a time for SIMD optimization
+					for (u64 k = 0; k < m8; ++k, outIndex += 8)
 					{
-						auto cc = c[i * mM + j];
-						auto aij = bit(A[i], j);
-						auto m0 = as<u64>(mSendMsg[i * mM + j][cc]) % mModulus;
-						auto m1 = as<u64>(mSendMsg[i * mM + j][!cc]) % mModulus;
-
-
-						B(i, j) = (aij - m0 + mModulus) % mModulus;
-						D(i, j) = (m0 - m1 + (1 - 2 * aij) + mModulus) % mModulus;
-
-
-						//std::cout << "a1(" << i << " " << j << ") = " << int(aij) << std::endl;
-						//std::cout << "B (" << i << " " << j << ") = " << int(B(i,j)) << " = " << aij << " - " << (m0 % mModulus) << std::endl;
-						//std::cout << "D (" << i << " " << j << ") = " << int(D(i,j)) << " = " 
-						//	<< (m0 % mModulus) << " - " << (m1 % mModulus) << " + " << (1 - 2 * aij) << std::endl;
+						u8 packedByte = Ai[k];
+						// Unpack 8 bits into 8 bytes using bit manipulation
+						for (u64 bit = 0; bit < 8; ++bit)
+							ABits.data()[outIndex + bit] = (packedByte >> bit) & 1;
 					}
+
+					// go back if we over stepped
+					outIndex -= (m8 * 8 - mM);
+				}
+				ABits.resize(totalBits);
+
+				co_await sock.recv(c);
+
+				// Convert packed c to one-bit-per-byte ABits using SIMD-friendly approach
+				bitsToBytes(c, CBits);
+				Matrix<u8> D(mN, mM);
+				for(u64 i = 0; i < totalBits; ++i)
+				{
+					auto cc = CBits[i];
+					auto aij = ABits[i];//bit(A[i / mM], i % mM);//
+					auto m0 = mMod.mod(as<u64>(mSendMsg[i][cc]));
+					auto m1 = mMod.mod(as<u64>(mSendMsg[i][!cc]));
+
+					auto b = aij - m0 + mModulus;
+					b = b - (b >= mModulus) * mModulus; // b = b % mModulus
+					b = b - (b >= mModulus) * mModulus; // b = b % mModulus
+
+					auto d = m0 - m1 + (1 - 2 * aij) + mModulus;
+					d = d - (d >= mModulus) * mModulus; // d = d % mModulus
+					d = d - (d >= mModulus) * mModulus; // d = d % mModulus
+
+
+					B(i) = b;
+					D(i) = d;
 				}
 
 				co_await sock.send(pack(D));
@@ -524,17 +623,21 @@ namespace osuCrypto
 
 			for (u64 i = 0; i < mN; ++i)
 			{
+				u32 sum = 0;
 				for (u64 j = 0; j < mBitCount; ++j)
 				{
-					v[i] = (v[i] + bits(i, j)) % modulus;
+					sum = sum + bits(i, j);
 				}
+				v[i] = mBitInj.mMod.mod(sum);
 			}
 
 			if (mPartyIdx)
 			{
 				for (auto& vv : v)
 				{
-					vv = (modulus - vv) % modulus;
+					// v = -v mod modulus
+					vv = bool(vv) * (modulus - vv);
+					assert(vv < modulus);
 				}
 			}
 			co_await mOtEquality.equal<u8>(v, {}, y, sock, prng);

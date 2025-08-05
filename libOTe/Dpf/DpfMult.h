@@ -645,10 +645,15 @@ namespace osuCrypto
 				std::vector<u8> msg(n * ctx.template byteSize<F>());
 				auto mIter = msg.data();
 				auto zero = ctx.template make<F>();
+				auto t0 = ctx.template make<F>();
+				auto m1 = ctx.template make<F>();
+				auto nt0 = ctx.template make<F>();
+				auto mx = ctx.template make<F>();
+				auto w0 = ctx.template make<F>();
+
 				ctx.zero(zero);
 				for (u64 i = 0; i < n; ++i)
 				{
-					auto t0 = ctx.template make<F>();
 					ctx.fromBlock(t0, mSendOts[i][0]);
 
 					auto xi = mX[i];
@@ -656,7 +661,6 @@ namespace osuCrypto
 						ctx.minus(t0, t0, yBegin[i]);
 
 					// m1 = t0 + (x0 ⊕ 1) * y0
-					auto m1 = ctx.template make<F>();
 					ctx.fromBlock(m1, mSendOts[i][1]); // mask the m1 message using the OT.
 					ctx.plus(m1, m1, t0);
 					if (xi == 0)
@@ -666,7 +670,6 @@ namespace osuCrypto
 					mIter += ctx.template byteSize<F>();
 
 					// xy = -t0
-					auto nt0 = ctx.template make<F>();
 					ctx.minus(xyBegin[i], zero, t0);
 				}
 
@@ -676,14 +679,11 @@ namespace osuCrypto
 				mIter = msg.data();
 				for (u64 i = 0; i < n; ++i)
 				{
-					auto m1 = ctx.template make<F>();
 					ctx.deserialize(mIter + 0, mIter + ctx.template byteSize<F>(), &m1);
 					mIter += ctx.template byteSize<F>();
 
-					auto mx = ctx.template make<F>();
 					ctx.fromBlock(mx, mRecvOts[i]);
 
-					auto w0 = ctx.template make<F>();
 					auto xi = mX[i];
 					if (xi)
 					{

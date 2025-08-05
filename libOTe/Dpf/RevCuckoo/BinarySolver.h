@@ -281,6 +281,7 @@ namespace osuCrypto
 					//}
 
 					// check the result.
+					if(mPrint)
 					{
 						std::vector<u8> aa(a.size());
 						Matrix<u8> bb(b.rows(), b.cols());

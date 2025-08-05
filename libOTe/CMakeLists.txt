@@ -19,7 +19,7 @@ target_include_directories(libOTe PUBLIC
 target_link_libraries(libOTe cryptoTools)
 
 if(MSVC)
-    target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
+    target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}> /Zi )
 else()
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
 
