@@ -261,6 +261,7 @@ namespace osuCrypto
 
 		for (auto c : cs)
 			for (auto base : { RingLpnTriple<F>::BaseCorType::Precomputed, RingLpnTriple<F>::BaseCorType::OtBased })
+				for (auto dpf : { RingLpnTriple<F>::DpfType::RevCuckooDmpf,RingLpnTriple<F>::DpfType::SumDmpf })
 			{
 
 				std::array<RingLpnTriple<F>, 2> oles;
@@ -276,8 +277,8 @@ namespace osuCrypto
 				PRNG prng1(block(6474567454546, 567546754674345444));
 				Timer timer;
 
-				oles[0].init(0, n, mode, base);
-				oles[1].init(1, n, mode, base);
+				oles[0].init(0, n, mode, dpf, base);
+				oles[1].init(1, n, mode, dpf, base);
 
 
 				setBase(oles);

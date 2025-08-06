@@ -26,6 +26,9 @@
 #include "libOTe/Vole/Noisy/NoisyVoleSender.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include "libOTe/Base/BaseOT.h"
+
+#include "libOTe/Dpf/RevCuckooDmpf.h"
+
 namespace osuCrypto
 {
 
@@ -99,7 +102,9 @@ namespace osuCrypto
 		// run the insecure debug checks.
 		bool mDebug = false;
 
-		SumDmpf<F, CoeffCtx> mDpf;
+		std::variant<
+			RevCuckooDmpf<F, CoeffCtx>,
+			SumDmpf<F, CoeffCtx>> mDpf;
 
 
 		using VecF = CoeffCtx::template Vec<F>;
@@ -121,6 +126,11 @@ namespace osuCrypto
 			Precomputed
 		};
 
+		enum class DpfType
+		{
+			RevCuckooDmpf, // the default DPF type
+			SumDmpf
+		};
 		BaseCorType mBaseCorType;
 
 		BetaCircuit mAdder;
@@ -130,7 +140,14 @@ namespace osuCrypto
 		// Intializes the protocol to generate n F OLEs. Most efficient when n
 		// is a power of 2. Once called, baseOtCount() can be called to 
 		// determine the required number of base OTs.
-		void init(u64 partyIdx, u64 n, Mode mode = Mode::Triple, BaseCorType tensorPre = BaseCorType::OtBased, CoeffCtx ctx = {});
+		void init(
+			u64 partyIdx, 
+			u64 n, 
+			Mode mode = Mode::Triple, 
+			DpfType dpfType = DpfType::RevCuckooDmpf, 
+			BaseCorType tensorPre =
+			BaseCorType::OtBased, 
+			CoeffCtx ctx = {});
 
 		bool isInitialized() const { return mN > 0; }
 
@@ -273,7 +290,12 @@ namespace osuCrypto
 
 
 	template<typename F, typename CoeffCtx>
-	void RingLpnTriple<F, CoeffCtx>::init(u64 partyIdx, u64 n, Mode mode, BaseCorType base, CoeffCtx ctx)
+	void RingLpnTriple<F, CoeffCtx>::init(
+		u64 partyIdx, 
+		u64 n, 
+		Mode mode, 
+		DpfType dpfType,
+		BaseCorType base, CoeffCtx ctx)
 	{
 		mPartyIdx = partyIdx;
 		if (mode == Mode::Triple)
@@ -293,7 +315,23 @@ namespace osuCrypto
 
 		mDpfTreeSize = 1ull << mDpfTreeDepth;
 
-		mDpf.init(mPartyIdx, mDpfTreeSize, mPolyWeight, mNumPolys * mNumPolys * mPolyWeight);
+		if (dpfType == DpfType::RevCuckooDmpf)
+		{
+			mDpf = RevCuckooDmpf<F, CoeffCtx>();
+			std::get<0>(mDpf).init(
+				partyIdx,
+				mPolyWeight,
+				mNumPolys * mNumPolys * mPolyWeight,
+				mDpfTreeSize);
+		}
+		else if (dpfType == DpfType::SumDmpf)
+		{
+			mDpf = SumDmpf<F, CoeffCtx>();
+			std::get<1>(mDpf).init(mPartyIdx, mDpfTreeSize, mPolyWeight, mNumPolys * mNumPolys * mPolyWeight);
+		}
+		else
+			throw RTE_LOC;
+
 
 		BetaLibrary lib;
 		mAdder = *lib.int_int_add(mDpfTreeDepth, mDpfTreeDepth, mDpfTreeDepth, BetaLibrary::Optimized::Depth);
@@ -313,8 +351,12 @@ namespace osuCrypto
 	{
 		BaseCorCount counts;
 
-		counts.mSendOtCount = mDpf.baseOtCount();
-		counts.mRecvOtCount = mDpf.baseOtCount();
+		std::visit([&](auto& dpf) {
+			auto c = dpf.baseOtCount();
+			counts.mSendOtCount = c.mSendCount;
+			counts.mRecvOtCount = c.mRecvCount;
+			}, mDpf);
+
 		counts.mOleCount = mGmw.oleCount();
 
 		if (mBaseCorType == BaseCorType::OtBased)
@@ -365,24 +407,28 @@ namespace osuCrypto
 		auto recvIter = recvBaseOts;
 		auto sendIter = baseSendOts;
 		auto& choiceIter = baseChoices;
-
-		auto dpfCount = mDpf.baseOtCount();
-		if (dpfCount)
-		{
-			mDpf.setBaseOts(
-				sendIter.subspan(0, dpfCount),
-				recvIter.subspan(0, dpfCount),
-				baseChoices.subvec(0, dpfCount)
-			);
-		}
+		u64 recvIdx = 0, sendIdx = 0;
+		std::visit([&](auto& dpf) {
+			auto count = dpf.baseOtCount();
+			recvIdx += count.mRecvCount;
+			sendIdx += count.mSendCount;
+			if (count.mRecvCount || count.mSendCount)
+			{
+				dpf.setBaseOts(
+					sendIter.subspan(0, sendIdx),
+					recvIter.subspan(0,   recvIdx),
+					baseChoices.subvec(0, recvIdx)
+				);
+			}
+			}, mDpf);
 
 		mTensorRecvOts.assign(
-			recvIter.subspan(dpfCount).begin(),
-			recvIter.subspan(dpfCount).end());
+			recvIter.subspan(recvIdx).begin(),
+			recvIter.subspan(recvIdx).end());
 		mTensorSendOts.assign(
-			sendIter.subspan(dpfCount).begin(),
-			sendIter.subspan(dpfCount).end());
-		mTensorChoice = baseChoices.subvec(dpfCount);
+			sendIter.subspan(sendIdx).begin(),
+			sendIter.subspan(sendIdx).end());
+		mTensorChoice = baseChoices.subvec(recvIdx);
 
 		mGmw.setOle(oleMult, oleAdd);
 		mSparseCoefficients.assign(coeffs.begin(), coeffs.end());
@@ -393,7 +439,7 @@ namespace osuCrypto
 	template<typename F, typename CoeffCtx>
 	bool RingLpnTriple<F, CoeffCtx>::hasBaseCors() const
 	{
-		return mDpf.hasBaseOts();
+		return std::visit([](auto&& dpf) { return dpf.hasBaseOts(); }, mDpf);
 	}
 
 	template<typename F, typename CoeffCtx>
@@ -1004,13 +1050,35 @@ namespace osuCrypto
 		auto shift = log2ceil(mPolyWeight);
 		auto mask = mPolyWeight - 1;
 
-		co_await mDpf.expand(prodPolyTreePosXor, prodPolyFCoeffs, prng, sock,
-			[&/*, count = 0ull, out = prodPolys.data(), end = prodPolys.data() + prodPolys.size()*/]
-			(u64 treeIdx, u64 leafIdx, F v, auto t) mutable {
-				auto polyIdx = treeIdx >> shift;// / mPolyWeight;
-				auto blockIdx = treeIdx & mask;//% mPolyWeight;
-				prodPolys.data(polyIdx)[leafIdx + blockIdx * mBlockSize] += v;
-			}, mCtx);
+		if (mDpf.index())
+		{
+			// sum of point functions
+			SumDmpf<F, CoeffCtx>& sumDpf = std::get<1>(mDpf);
+			co_await sumDpf.expand(prodPolyTreePosXor, prodPolyFCoeffs, prng, sock,
+				[&]
+				(u64 groupIdx, u64 leafIdx, F v) mutable {
+					auto polyIdx = groupIdx >> shift;// / mPolyWeight;
+					auto blockIdx = groupIdx & mask;//% mPolyWeight;
+					prodPolys.data(polyIdx)[leafIdx + blockIdx * mBlockSize] += v;
+				}, mCtx);
+		}
+		else
+		{
+			RevCuckooDmpf<F, CoeffCtx>& rcDpf = std::get<0>(mDpf);
+			auto pos = MatrixView<const u64>(prodPolyTreePosXor.data(), 
+				mNumPolys * mNumPolys * mPolyWeight, mPolyWeight);
+			assert(pos.size() == prodPolyTreePosXor.size());
+
+			co_await rcDpf.setPoints(pos, prng, sock);
+			co_await rcDpf.expandValues(prodPolyFCoeffs, prng, sock,
+				[&]
+				(u64 groupIdx, u64 leafIdx, F v) mutable {
+					auto polyIdx = groupIdx >> shift;// / mPolyWeight;
+					auto blockIdx = groupIdx & mask;//% mPolyWeight;
+					prodPolys.data(polyIdx)[leafIdx + blockIdx * mBlockSize] += v;
+				}, mCtx);
+
+		}
 
 		// perform mod x^n+1 on the last block which overflows.
 		for (u64 i = 0; i < mNumPolys * mNumPolys; ++i)

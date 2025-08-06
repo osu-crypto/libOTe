@@ -569,6 +569,13 @@ namespace osuCrypto
 			std::vector<std::array<block, 2>> mSendOts;
 			BitVector mX;
 
+			void clear()
+			{
+				mRecvOts.clear();
+				mSendOts.clear();
+				mX = {};
+			}
+
 			// Multiply a new vector y with the stored x
 			// Returns xy as secret shares
 			template<typename F, typename CoeffCtx>

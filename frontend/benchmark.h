@@ -1076,7 +1076,7 @@ namespace osuCrypto
 
 
 	template<typename F, typename CoeffCtx>
-	void RevCuckoo_iterative_impl(const oc::CLP& cmd)
+	void RevCuckoo_bench_impl(const oc::CLP& cmd)
 	{
 		// Initialize parameters
 		PRNG prng(block(231234, 321312));
@@ -1122,6 +1122,10 @@ namespace osuCrypto
 		// Setup base OTs
 		auto baseCount0 = dpf[0].baseOtCount();
 		auto baseCount1 = dpf[1].baseOtCount();
+		if (baseCount0.mSendCount != baseCount1.mRecvCount)
+			throw RTE_LOC;
+		if (baseCount1.mSendCount != baseCount0.mRecvCount)
+			throw RTE_LOC;
 		std::array<std::vector<block>, 2> baseRecv;
 		std::array<std::vector<std::array<block, 2>>, 2> baseSend;
 		std::array<BitVector, 2> baseChoice;
@@ -1188,8 +1192,8 @@ namespace osuCrypto
 
 			// Expand values using the cached point setup
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				dpf[0].expandValues(values0, [&](auto j, auto i, auto v) { output[0](j, i) = v; }, prng, sock[0]) | macoro::start_on(threadPools[0]),
-				dpf[1].expandValues(values1, [&](auto j, auto i, auto v) { output[1](j, i) = v; }, prng, sock[1]) | macoro::start_on(threadPools[1])
+				dpf[0].expandValues(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }) | macoro::start_on(threadPools[0]),
+				dpf[1].expandValues(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; }) | macoro::start_on(threadPools[1])
 			));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
@@ -1205,9 +1209,9 @@ namespace osuCrypto
 	void RevCuckooBench(const oc::CLP& cmd)
 	{
 		if(cmd.isSet("block"))
-			RevCuckoo_iterative_impl<block, CoeffCtxGF128>(cmd);
+			RevCuckoo_bench_impl<block, CoeffCtxGF128>(cmd);
 		else
-			RevCuckoo_iterative_impl<u64, CoeffCtxInteger>(cmd);
+			RevCuckoo_bench_impl<u64, CoeffCtxInteger>(cmd);
 	}
 
 	inline void benchmark(CLP& cmd)

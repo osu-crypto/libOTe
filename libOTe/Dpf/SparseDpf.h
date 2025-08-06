@@ -64,6 +64,12 @@ namespace osuCrypto
 
 		u8 lsb(const block& b) { return b.get<u8>(0) & 1; }
 
+
+		bool hasBaseOts() const
+		{
+			return mRegDpf.hasBaseOts();
+		}
+
 		// the number of base OTs required for the protocol. Requires OTs in both directions.
 		u64 baseOtCount() const { return log2ceil(mDomain) * mNumPoints; }
 

@@ -37,9 +37,16 @@ namespace osuCrypto
 			mDpf.init(partyIdx, domain, pointsPerSet * numSets);
 		}
 
-		u64 baseOtCount() const
+		struct BaseCorCount
 		{
-			return mDpf.baseOtCount();
+			u64 mSendCount = 0;
+			u64 mRecvCount = 0;
+		};
+
+		BaseCorCount baseOtCount() const
+		{
+			auto c = mDpf.baseOtCount();
+			return { c, c };
 		}
 
 		bool hasBaseOts() const
@@ -72,19 +79,16 @@ namespace osuCrypto
 			T sum;
 			block t;
 			ctx.zero(sum);
-			t = ZeroBlock;
 			u64 count = 0;
 			co_await mDpf.expand(
 				points, values, prng, sock, 
 				[&](u64 treeIdx, u64 pointIdx, auto value, block tag) {
 					ctx.plus(sum, sum, value);
-					t ^= tag;
 					if (++count == mNumPointsPerSet)
 					{
-						output(treeIdx / mNumPointsPerSet, pointIdx, sum, t);
+						output(treeIdx / mNumPointsPerSet, pointIdx, sum);
 						ctx.zero(sum);
 						count = 0;
-						t = ZeroBlock;
 					}
 				}, ctx);
 			co_return;

@@ -1330,20 +1330,23 @@ void SumDmpf_Proto_Test(const oc::CLP& cmd)
 	dpf[0].init(0, domain, numPoints, numSets);
 	dpf[1].init(1, domain, numPoints, numSets);
 
-	auto baseCount = dpf[0].baseOtCount();
+	auto baseCount0 = dpf[0].baseOtCount();
+	auto baseCount1 = dpf[1].baseOtCount();
 
 	std::array<std::vector<block>, 2> baseRecv;
 	std::array<std::vector<std::array<block, 2>>, 2> baseSend;
 	std::array<BitVector, 2> baseChoice;
-	baseRecv[0].resize(baseCount);
-	baseRecv[1].resize(baseCount);
-	baseSend[0].resize(baseCount);
-	baseSend[1].resize(baseCount);
-	baseChoice[0].resize(baseCount);
-	baseChoice[1].resize(baseCount);
+	baseRecv[0].resize(baseCount0.mRecvCount);
+	baseRecv[1].resize(baseCount1.mRecvCount);
+	baseSend[0].resize(baseCount0.mSendCount);
+	baseSend[1].resize(baseCount1.mSendCount);
+	baseChoice[0].resize(baseCount0.mRecvCount);
+	baseChoice[1].resize(baseCount1.mRecvCount);
 	baseChoice[0].randomize(prng);
 	baseChoice[1].randomize(prng);
-	for (u64 i = 0; i < baseCount; ++i)
+	if(baseCount0.mRecvCount != baseCount1.mRecvCount)
+		throw RTE_LOC;
+	for (u64 i = 0; i < baseCount0.mRecvCount; ++i)
 	{
 		baseSend[0][i] = prng.get();
 		baseSend[1][i] = prng.get();
@@ -1354,11 +1357,11 @@ void SumDmpf_Proto_Test(const oc::CLP& cmd)
 	dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 
 	std::array<Matrix<block>, 2> output;
-	std::array<Matrix<u8>, 2> tags;
+	//std::array<Matrix<u8>, 2> tags;
 	output[0].resize(numSets, domain);
 	output[1].resize(numSets, domain);
-	tags[0].resize(numSets, domain);
-	tags[1].resize(numSets, domain);
+	//tags[0].resize(numSets, domain);
+	//tags[1].resize(numSets, domain);
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
 
@@ -1366,14 +1369,14 @@ void SumDmpf_Proto_Test(const oc::CLP& cmd)
 	// Expand the DPF to generate numSets instances of secret shared vectors
 	auto r = macoro::sync_wait(macoro::when_all_ready(
 		dpf[0].expand(points0, values0, prng, sock[0],
-			[&](auto setIdx, auto i, auto&& v, auto&& t) {
+			[&](auto setIdx, auto i, auto&& v) {
 				output[0](setIdx, i) = v;
-				tags[0](setIdx, i) = t.template get<u8>(0) & 1;
+				//tags[0](setIdx, i) = t.template get<u8>(0) & 1;
 			}),
 		dpf[1].expand(points1, values1, prng, sock[1],
-			[&](auto setIdx, auto i, auto&& v, auto&& t) {
+			[&](auto setIdx, auto i, auto&& v) {
 				output[1](setIdx, i) = v;
-				tags[1](setIdx, i) = t.template get<u8>(0) & 1;
+				//tags[1](setIdx, i) = t.template get<u8>(0) & 1;
 			})
 	));
 	std::get<0>(r).result();
@@ -1397,7 +1400,7 @@ void SumDmpf_Proto_Test(const oc::CLP& cmd)
 
 
 			auto actualValue = output[0](setIdx, i) ^ output[1](setIdx, i);
-			auto actualTag = tags[0](setIdx, i) ^ tags[1](setIdx, i);
+			//auto actualTag = tags[0](setIdx, i) ^ tags[1](setIdx, i);
 			auto expectedTag = isActive ? 1 : 0;
 
 			if (actualValue != expectedValue[i])
@@ -1408,13 +1411,13 @@ void SumDmpf_Proto_Test(const oc::CLP& cmd)
 				throw RTE_LOC;
 			}
 
-			if (actualTag != expectedTag)
-			{
-				std::cout << "Tag mismatch at set " << setIdx << ", position " << i << std::endl;
-				std::cout << "Expected: " << expectedTag << std::endl;
-				std::cout << "Actual: " << actualTag << std::endl;
-				throw RTE_LOC;
-			}
+			//if (actualTag != expectedTag)
+			//{
+			//	std::cout << "Tag mismatch at set " << setIdx << ", position " << i << std::endl;
+			//	std::cout << "Expected: " << expectedTag << std::endl;
+			//	std::cout << "Actual: " << actualTag << std::endl;
+			//	throw RTE_LOC;
+			//}
 		}
 	}
 

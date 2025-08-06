@@ -143,6 +143,8 @@ namespace osuCrypto
 				mMultiplier.init(mPartyIdx, mNumSets * f);
 			}
 
+			mMultSession.clear();
+
 		}
 
 		struct BaseCount
@@ -153,6 +155,10 @@ namespace osuCrypto
 
 		BaseCount baseOtCount() const
 		{
+
+			if (mMultSession.mX.size())
+				return { 0,0 };
+
 			auto count3 = mSparseDpf.baseOtCount();
 			auto recv = count3;
 			auto send = count3;
@@ -235,6 +241,11 @@ namespace osuCrypto
 
 			if (mCharacteristicTwo == false)
 				set(mMultiplier);
+		}
+
+		bool hasBaseOts() const
+		{
+			return mSparseDpf.hasBaseOts() || mMultSession.mX.size();
 		}
 
 
@@ -410,7 +421,7 @@ namespace osuCrypto
 
 
 		macoro::task<> setPoints(
-			Matrix<u64> points,
+			MatrixView<const u64> points,
 			PRNG& prng,
 			coproto::Socket& sock)
 		{
@@ -789,9 +800,9 @@ namespace osuCrypto
 		template<typename Output>
 		macoro::task<> expandValues(
 			auto&& values,
-			Output&& output,
 			PRNG& prng,
 			coproto::Socket& sock,
+			Output&& output,
 			CoeffCtx ctx = {})
 		{
 			setTimePoint("expandValue");
@@ -1165,7 +1176,7 @@ namespace osuCrypto
 
 
 		template<typename TT = T>
-		task<> print(span<u64> keys, auto values, coproto::Socket& sock, const std::string& name,
+		task<> print(span<const u64> keys, auto values, coproto::Socket& sock, const std::string& name,
 			auto ctx) const
 		{
 			std::vector<u64> keysCopy(keys.begin(), keys.end());
@@ -1209,7 +1220,7 @@ namespace osuCrypto
 			}
 		}
 
-		task<> print(span<u64> keys, coproto::Socket& sock, const std::string& name) const
+		task<> print(span<const u64> keys, coproto::Socket& sock, const std::string& name) const
 		{
 			return print<block>(keys, span<block>{}, sock, name, CoeffCtxGF2{});
 		}

@@ -268,6 +268,7 @@ namespace osuCrypto
 		bool debug = cmd.isSet("debug");              // Enable debug checks
 		bool manualCoeffs = cmd.isSet("manualCoeffs"); // Manual base correlations
 		bool manualBaseCors = cmd.isSet("manualBaseCors"); // Manual base OTs
+		auto dpf = cmd.getOr("dpf", 0); // Manual base OTs
 
 		// Ensure numTriples is a power of 2 for efficiency
 		u64 n = 1ull << logN;
@@ -315,8 +316,8 @@ namespace osuCrypto
 				RingLpnTriple<F>::BaseCorType::OtBased;
 
 			// Initialize both parties with their respective party indices (0 and 1)
-			ringLpn[0].init(0, numTriples, RingLpnTriple<F>::Mode::Triple, baseCorType);  // Party 0
-			ringLpn[1].init(1, numTriples, RingLpnTriple<F>::Mode::Triple, baseCorType);  // Party 1
+			ringLpn[0].init(0, numTriples, RingLpnTriple<F>::Mode::Triple, (RingLpnTriple<F>::DpfType)dpf, baseCorType);  // Party 0
+			ringLpn[1].init(1, numTriples, RingLpnTriple<F>::Mode::Triple, (RingLpnTriple<F>::DpfType)dpf, baseCorType);  // Party 1
 
 			auto corCount0 = ringLpn[0].baseCorCount();
 			auto corCount1 = ringLpn[1].baseCorCount();
