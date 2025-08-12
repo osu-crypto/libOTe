@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "cryptoTools/Common/Defines.h"
 #include <vector>
 #include "NttOrder.h"
@@ -210,11 +210,11 @@ namespace osuCrypto
 
 		u64 n = a.size();
 		auto ln = log2ceil(n);
-		auto qq = F::order(); qq = qq - 1;
+		//auto qq = F::order(); qq = qq - 1;
 		if (n != 1ull << ln)
 			throw RTE_LOC;
-		if (n > qq)
-			throw RTE_LOC;
+		//if (n > qq)
+			//throw RTE_LOC;
 		if(w.size() != 2* n)
 			throw RTE_LOC;
 
@@ -232,19 +232,17 @@ namespace osuCrypto
 				{
 					u64 idx0 = base + i;
 					u64 idx1 = idx0 + stride;
-					if (idx1 >= n)
-						throw RTE_LOC;
-					F a0 = a[idx0];
-					F a1 = a[idx1];
+					F a0 = a.data()[idx0];
+					F a1 = a.data()[idx1];
 
 					//if (ln - depth - 1 != stage)
 					//	throw RTE_LOC;
 					auto index = stride * (2 * bitReversal(stage, j) + 1);
 					//auto psiPow = psi.pow(index);
-					auto psiPow = w[index]; // precomputed powers of psi
+					auto psiPow = w.data()[index]; // precomputed powers of psi
 					auto b = psiPow * a1;
-					a[idx0] = a0 + b;
-					a[idx1] = a0 - b;
+					a.data()[idx0] = a0 + b;
+					a.data()[idx1] = a0 - b;
 
 					//std::cout << "(" << idx0 << "," << idx1 << ", " << index << ", " <<a0 <<", " <<a1  <<") ";
 

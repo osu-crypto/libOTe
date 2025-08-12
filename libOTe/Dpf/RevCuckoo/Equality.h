@@ -115,6 +115,7 @@ namespace osuCrypto
 			}
 		}
 
+		//  y[i] = (A[i] == B[i])
 		template<typename T>
 		macoro::task<> equal(
 			span<T> A,
@@ -218,11 +219,17 @@ namespace osuCrypto
 		BitVector mChoices; // choices for the base OTs
 		void init(u64 partyIdx, u64 n, u64 m, u64 modulus)
 		{
+			if (partyIdx > 1)
+				throw RTE_LOC;
+			if (!n || !m || !modulus)
+				throw RTE_LOC;
+					
 			mPartyIdx = partyIdx;
 			mN = n;
 			mM = m;
 			mModulus = modulus;
 			mMod = Mod(mModulus);
+
 		}
 
 		struct BaseOtCount
@@ -373,6 +380,7 @@ namespace osuCrypto
 			coproto::Socket& sock,
 			PRNG& prng)
 		{
+			MACORO_TRY{
 			if (A.rows() != mN || B.rows() != mN)
 				throw RTE_LOC;
 			if (A.cols() < divCeil(mM, 8))
@@ -436,9 +444,9 @@ namespace osuCrypto
 
 				co_await sock.recv(dd);
 				auto D = unpack(dd);
-				for(u64 i = 0; i < totalBits; ++i)
+				for (u64 i = 0; i < totalBits; ++i)
 				{
-					auto aij = ABits.data()[i]; 
+					auto aij = ABits.data()[i];
 					auto mcc = mMod.mod(as<u64>(mRecvMsg.data()[i]));
 					auto d = D.data()[i];
 					auto v = mcc + d * aij;
@@ -454,7 +462,7 @@ namespace osuCrypto
 				//BitVector c(mN * mM);
 				AlignedUnVector<u8> c(bytes);
 				std::vector<u8> CBits(totalBits), ABits(totalBits + 8);
-				
+
 				auto outIndex = 0;
 				for (u64 i = 0; i < mN; ++i)
 				{
@@ -478,7 +486,7 @@ namespace osuCrypto
 				// Convert packed c to one-bit-per-byte ABits using SIMD-friendly approach
 				bitsToBytes(c, CBits);
 				Matrix<u8> D(mN, mM);
-				for(u64 i = 0; i < totalBits; ++i)
+				for (u64 i = 0; i < totalBits; ++i)
 				{
 					auto cc = CBits[i];
 					auto aij = ABits[i];//bit(A[i / mM], i % mM);//
@@ -501,6 +509,24 @@ namespace osuCrypto
 				co_await sock.send(pack(D));
 
 			}
+			} MACORO_CATCH(e)
+			{
+				clear();
+				co_await sock.close();
+				std::rethrow_exception(e);
+			}
+		}
+
+		void clear()
+		{
+						mPartyIdx = 0;
+			mN = 0;
+			mM = 0;
+			mModulus = 0;
+			mMod = {};
+			mSendMsg.clear();
+			mRecvMsg.clear();
+			mChoices.resize(0);
 		}
 	};
 

@@ -92,13 +92,11 @@ namespace osuCrypto
 
 				// Create input data using coefficient context
 				auto input = ctx.template makeVec<F>(n);
-				ctx.resize(input, n);
 
 				std::array<decltype(input), 2> inputs;
 				for (u64 p = 0; p < 2; ++p)
 				{
 					inputs[p] = ctx.template makeVec<F>(n);
-					ctx.resize(inputs[p], n);
 				}
 
 				auto sock = coproto::LocalAsyncSocket::makePair();

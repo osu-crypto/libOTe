@@ -1364,23 +1364,26 @@ void SumDmpf_Proto_Test(const oc::CLP& cmd)
 	//tags[1].resize(numSets, domain);
 
 	auto sock = coproto::LocalAsyncSocket::makePair();
-
-
-	// Expand the DPF to generate numSets instances of secret shared vectors
 	auto r = macoro::sync_wait(macoro::when_all_ready(
-		dpf[0].expand(points0, values0, prng, sock[0],
-			[&](auto setIdx, auto i, auto&& v) {
-				output[0](setIdx, i) = v;
-				//tags[0](setIdx, i) = t.template get<u8>(0) & 1;
-			}),
-		dpf[1].expand(points1, values1, prng, sock[1],
-			[&](auto setIdx, auto i, auto&& v) {
-				output[1](setIdx, i) = v;
-				//tags[1](setIdx, i) = t.template get<u8>(0) & 1;
-			})
+		dpf[0].setPoints(points0, prng, sock[0]),
+		dpf[1].setPoints(points1, prng, sock[1])
 	));
 	std::get<0>(r).result();
 	std::get<1>(r).result();
+
+	// Expand the DPF to generate numSets instances of secret shared vectors
+	auto r2 = macoro::sync_wait(macoro::when_all_ready(
+		dpf[0].expand(values0, prng, sock[0],
+			[&](auto setIdx, auto i, auto&& v) {
+				output[0](setIdx, i) = v;
+			}),
+		dpf[1].expand(values1, prng, sock[1],
+			[&](auto setIdx, auto i, auto&& v) {
+				output[1](setIdx, i) = v;
+			})
+	));
+	std::get<0>(r2).result();
+	std::get<1>(r2).result();
 
 	// Verify correctness for each set
 	for (u64 setIdx = 0; setIdx < numSets; ++setIdx)

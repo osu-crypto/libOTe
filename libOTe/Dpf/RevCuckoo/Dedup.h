@@ -54,17 +54,20 @@ namespace osuCrypto
             mKeyBitCount = keyBitCount;
 
             auto count = mN * (mN - 1) / 2;
-            // Initialize the equality component with keyBitCount
-            mEq.init(partyIdx, count, keyBitCount);
+            if (count)
+            {
+                // Initialize the equality component with keyBitCount
+                mEq.init(partyIdx, count, keyBitCount);
 
-            // Compute the total number of multiplications needed.
-            // In findFirst, for each i from 1 to mN-2, we use (mN-i-1) multiplications.
-            // Total in findFirst is sum_{i=1}^{mN-2} (mN-i-1) = (mN-2)*(mN-1)/2.
-            // Additionally, dedup calls two multiplies on the full vector (mN each).
-            // So the total is ((mN-2)*(mN-1))/2 + 2*mN.
-            //u64 totalMults = ((n > 2) ? ((n - 2) * (n - 1) / 2) : 0) + 2 * n;
+                // Compute the total number of multiplications needed.
+                // In findFirst, for each i from 1 to mN-2, we use (mN-i-1) multiplications.
+                // Total in findFirst is sum_{i=1}^{mN-2} (mN-i-1) = (mN-2)*(mN-1)/2.
+                // Additionally, dedup calls two multiplies on the full vector (mN each).
+                // So the total is ((mN-2)*(mN-1))/2 + 2*mN.
+                //u64 totalMults = ((n > 2) ? ((n - 2) * (n - 1) / 2) : 0) + 2 * n;
 
-            mMult.init(partyIdx, 2 * count + n);
+                mMult.init(partyIdx, 2 * count + n);
+            }
         }
 
 

@@ -312,8 +312,8 @@ namespace osuCrypto
 			// the option to have only base OTs as the base correlation or to have 
 			// base OTs and coefficients distributed as above.
 			auto baseCorType = manualCoeffs ?
-				RingLpnTriple<F>::BaseCorType::Precomputed :
-				RingLpnTriple<F>::BaseCorType::OtBased;
+				RingLpnTriple<F>::TensorBaseCorType::Precomputed :
+				RingLpnTriple<F>::TensorBaseCorType::OtBased;
 
 			// Initialize both parties with their respective party indices (0 and 1)
 			ringLpn[0].init(0, numTriples, RingLpnTriple<F>::Mode::Triple, (RingLpnTriple<F>::DpfType)dpf, baseCorType);  // Party 0

@@ -975,6 +975,18 @@ namespace osuCrypto
 			mOtIdx = 0;
 		}
 
+		void clear()
+		{
+
+			mPartyIdx = 0;
+			mOtIdx = 0;
+			mTotalMults = 0;
+
+			mChoiceBits.resize(0);
+			mRecvOts.clear();
+			mSendOts.clear();
+		}
+
 
 	};
 

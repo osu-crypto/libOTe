@@ -20,6 +20,8 @@
 #include "libOTe/Triple/Foleage/FoleageTriple.h"
 #include "libOTe/Triple/SilentOtTriple/SilentOtTriple.h"
 #include "libOTe/Dpf/RevCuckooDmpf.h"
+#include "libOTe/Dpf/SumDmpf.h"
+#include "libOTe/Tools/Ntt/NttNegWrap.h"
 
 namespace osuCrypto
 {
@@ -1080,7 +1082,7 @@ namespace osuCrypto
 	{
 		// Initialize parameters
 		PRNG prng(block(231234, 321312));
-		u64 domain = cmd.getOr("domain", 1ull<<cmd.getOr("dd", 12)); // Domain size
+		u64 domain = cmd.getOr("domain", 1ull << cmd.getOr("dd", 12)); // Domain size
 		u64 numPoints = cmd.getOr("numPoints", 16); // Number of points
 		u64 numSets = cmd.getOr("numSets", 16 * 4); // Number of sets
 		u64 numPartitions = cmd.getOr("numPartitions", 2); // Number of partitions
@@ -1192,8 +1194,8 @@ namespace osuCrypto
 
 			// Expand values using the cached point setup
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				dpf[0].expandValues(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }) | macoro::start_on(threadPools[0]),
-				dpf[1].expandValues(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; }) | macoro::start_on(threadPools[1])
+				dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }) | macoro::start_on(threadPools[0]),
+				dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; }) | macoro::start_on(threadPools[1])
 			));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
@@ -1208,10 +1210,173 @@ namespace osuCrypto
 
 	void RevCuckooBench(const oc::CLP& cmd)
 	{
-		if(cmd.isSet("block"))
+		if (cmd.isSet("block"))
 			RevCuckoo_bench_impl<block, CoeffCtxGF128>(cmd);
 		else
 			RevCuckoo_bench_impl<u64, CoeffCtxInteger>(cmd);
+	}
+
+
+
+
+
+	template<typename F, typename CoeffCtx>
+	void SumDmpf_bench_impl(const oc::CLP& cmd)
+	{
+		// Initialize parameters
+		PRNG prng(block(231234, 321312));
+		u64 domain = cmd.getOr("domain", 1ull << cmd.getOr("dd", 12)); // Domain size
+		u64 numPoints = cmd.getOr("numPoints", 16); // Number of points
+		u64 numSets = cmd.getOr("numSets", 16 * 4); // Number of sets
+		u64 numPartitions = cmd.getOr("numPartitions", 2); // Number of partitions
+		u64 linearSecParam = cmd.getOr("linearSecParam", 40); // Security parameter
+		u64 cuckooSecParam = cmd.getOr("cuckooSecParam", 2); // Cuckoo security parameter
+		u64 iterations = cmd.getOr("iters", 3); // Number of different value sets to test
+		bool print = cmd.isSet("print"); // Print flag
+
+		Timer timer[2];
+
+		// Generate input points (fixed for all iterations)
+		Matrix<u64> points0(numSets, numPoints);
+		Matrix<u64> points1(numSets, numPoints);
+		Matrix<u64> actualPoints(numSets, numPoints);
+		for (u64 i = 0; i < points1.size(); ++i)
+		{
+			points1(i) = prng.get<u64>();
+			points0(i) = (prng.get<u64>() % domain) ^ points1(i);
+			actualPoints(i) = points0(i) ^ points1(i);
+		}
+
+		auto ctx = CoeffCtx{};
+
+		// Initialize RevCuckooDmpf instances
+		std::array<SumDmpf<F>, 2> dpf;
+		dpf[0].init(0, domain, numPoints, numSets);
+		dpf[1].init(1, domain, numPoints, numSets);
+		//dpf[0].mPrint = print;
+		//dpf[1].mPrint = print;
+		//dpf[0].setTimer(timer[0]);
+		//dpf[1].setTimer(timer[1]);
+
+
+		dpf[0].init(0, domain, numPoints, numSets);
+		dpf[1].init(1, domain, numPoints, numSets);
+
+		auto baseCount0 = dpf[0].baseOtCount();
+		auto baseCount1 = dpf[1].baseOtCount();
+
+		std::array<std::vector<block>, 2> baseRecv;
+		std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+		std::array<BitVector, 2> baseChoice;
+		baseRecv[0].resize(baseCount0.mRecvCount);
+		baseRecv[1].resize(baseCount1.mRecvCount);
+		baseSend[0].resize(baseCount0.mSendCount);
+		baseSend[1].resize(baseCount1.mSendCount);
+		baseChoice[0].resize(baseCount0.mRecvCount);
+		baseChoice[1].resize(baseCount1.mRecvCount);
+		baseChoice[0].randomize(prng);
+		baseChoice[1].randomize(prng);
+		if (baseCount0.mRecvCount != baseCount1.mRecvCount)
+			throw RTE_LOC;
+		for (u64 i = 0; i < baseCount0.mRecvCount; ++i)
+		{
+			baseSend[0][i] = prng.get();
+			baseSend[1][i] = prng.get();
+			baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+			baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+		}
+		dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+		dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+		// Create sockets for communication
+		auto sock = coproto::LocalAsyncSocket::makePair();
+
+		std::array<macoro::thread_pool, 2> threadPools;
+		sock[0].setExecutor(threadPools[0]);
+		sock[1].setExecutor(threadPools[1]);
+		auto work0 = threadPools[0].make_work();
+		auto work1 = threadPools[1].make_work();
+		threadPools[0].create_thread();
+		threadPools[1].create_thread();
+
+		// Generate different values for each iteration
+		std::vector<F> values0(numPoints * numSets);
+		std::vector<F> values1(numPoints * numSets);
+		for (u64 i = 0; i < values1.size(); ++i)
+		{
+			values0[i] = prng.get();
+			values1[i] = prng.get();
+		}
+
+		// Prepare output matrices for this iteration
+		std::array<Matrix<F>, 2> output;
+		output[0].resize(numSets, domain);
+		output[1].resize(numSets, domain);
+
+		timer->setTimePoint("begin");
+
+		// Phase 2: Multiple value expansions (called multiple times)
+		for (u64 iteration = 0; iteration < iterations; ++iteration)
+		{
+			if (print)
+			{
+				std::cout << "Iteration " << iteration << " of " << iterations << std::endl;
+			}
+
+			dpf[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+			dpf[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+			macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].setPoints(points0, prng, sock[0]) | macoro::start_on(threadPools[0]),
+				dpf[1].setPoints(points1, prng, sock[1]) | macoro::start_on(threadPools[1])
+			));
+
+			// Expand values using the cached point setup
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }) | macoro::start_on(threadPools[0]),
+				dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; }) | macoro::start_on(threadPools[1])
+			));
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+
+			timer->setTimePoint("done");
+		}
+
+
+		for (u64 i = 0; i < 2; ++i)
+		{
+			std::cout << "Dpf " << i << " time: \n" << timer[i] << std::endl;
+		}
+	}
+
+	void SumDmpfBench(const oc::CLP& cmd)
+	{
+		if (cmd.isSet("block"))
+			SumDmpf_bench_impl<block, CoeffCtxGF128>(cmd);
+		else
+			SumDmpf_bench_impl<u64, CoeffCtxInteger>(cmd);
+	}
+
+
+	void FftBench(const oc::CLP& cmd)
+	{
+		using F = u64;
+		u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 16));
+		u64 t = cmd.getOr("t", 10);
+		AlignedUnVector<F> a(n), w(n*2);
+
+		Timer timer;
+		timer.setTimePoint("begin");
+		for (u64 tt = 0; tt < t; ++tt)
+		{
+			nttNegWrapCt<F>(a, w);
+			timer.setTimePoint("done");
+
+		}
+
+		if(!cmd.isSet("quiet"))
+			std::cout << timer << std::endl;
+
 	}
 
 	inline void benchmark(CLP& cmd)
@@ -1245,6 +1410,10 @@ namespace osuCrypto
 			SilentOtTripleBenchmark(cmd);
 		else if (cmd.isSet("revCuckoo"))
 			RevCuckooBench(cmd);
+		else if (cmd.isSet("sum"))
+			SumDmpfBench(cmd);
+		else if (cmd.isSet("fft"))
+			FftBench(cmd);
 		else
 		{
 			std::cout << "unknown benchmark, opts:" << std::endl;
@@ -1262,6 +1431,7 @@ namespace osuCrypto
 			std::cout << "  -foleage" << std::endl;
 			std::cout << "  -silentTriple" << std::endl;
 			std::cout << "  -revCuckoo" << std::endl;
+			std::cout << "  -fft" << std::endl;
 		}
 	}
 }

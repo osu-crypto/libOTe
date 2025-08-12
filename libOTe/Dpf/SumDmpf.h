@@ -23,6 +23,7 @@ namespace osuCrypto
 
 		RegularDpf<T,CoeffCtx> mDpf;
 
+		std::vector<u64> mPoints;
 
 		void init(
 			u64 partyIdx,
@@ -62,16 +63,32 @@ namespace osuCrypto
 			mDpf.setBaseOts(baseSend, baseRecv, recvChoice);
 		}
 
-		template<typename Output>
+
+
+		macoro::task<> setPoints(
+			MatrixView<const u64> points,
+			PRNG& prng,
+			coproto::Socket& sock)
+		{
+			if (points.size() != mNumSets * mNumPointsPerSet)
+				throw RTE_LOC;
+			if (points.stride() != mNumPointsPerSet)
+				throw RTE_LOC;
+
+			mPoints.assign(points.data(), points.data() + points.size());
+			co_return;
+		}
+
+		template<typename Output, typename = std::enable_if_t<
+			std::is_lvalue_reference<Output>::value || std::is_object<Output>::value>>
 		macoro::task<> expand(
-			span<u64> points,
 			span<T> values,
 			PRNG& prng,
 			coproto::Socket& sock,
-			Output&& output,
+			Output output,
 			CoeffCtx ctx = {})
 		{
-			if (points.size() != mNumSets * mNumPointsPerSet)
+			if (mPoints.size() != mNumSets * mNumPointsPerSet)
 				throw RTE_LOC;
 			if (values.size() != mNumSets * mNumPointsPerSet)
 				throw RTE_LOC;
@@ -81,7 +98,7 @@ namespace osuCrypto
 			ctx.zero(sum);
 			u64 count = 0;
 			co_await mDpf.expand(
-				points, values, prng, sock, 
+				mPoints, values, prng, sock, 
 				[&](u64 treeIdx, u64 pointIdx, auto value, block tag) {
 					ctx.plus(sum, sum, value);
 					if (++count == mNumPointsPerSet)
@@ -94,7 +111,11 @@ namespace osuCrypto
 			co_return;
 		}
 
+		void clear() {
+			mPoints.clear();
+		}
 
 	};
+
 
 }

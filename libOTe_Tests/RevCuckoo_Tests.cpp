@@ -682,8 +682,8 @@ namespace osuCrypto
 
 			// Expand values using the cached point setup
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				dpf[0].expandValues(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }),
-				dpf[1].expandValues(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j,i) = v; })
+				dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }),
+				dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j,i) = v; })
 			));
 			std::get<0>(r).result();
 			std::get<1>(r).result();

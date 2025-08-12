@@ -40,9 +40,6 @@ namespace osuCrypto
 
 		u64 mCuckooSecParam = 0;
 
-		// |G|
-		u64 mValueByteCount = 0;
-
 		// arbitrary seed for the hash function
 		block mHashSeed = block(3498747860745238796ull, 2347966293789782347ull);
 
@@ -797,12 +794,14 @@ namespace osuCrypto
 
 
 
-		template<typename Output>
-		macoro::task<> expandValues(
+
+		template<typename Output, typename = std::enable_if_t<
+			std::is_lvalue_reference<Output>::value || std::is_object<Output>::value>>
+		macoro::task<> expand(
 			auto&& values,
 			PRNG& prng,
 			coproto::Socket& sock,
-			Output&& output,
+			Output output,
 			CoeffCtx ctx = {})
 		{
 			setTimePoint("expandValue");
@@ -1239,6 +1238,34 @@ namespace osuCrypto
 				ctx.plus(gamma[k], gamma[k], other[k]);
 		}
 
+
+		void clear()
+		{
+			// Clear the internal state of the DPF
+			mLeafShares.clear();
+			mLeafTags.clear();
+			mSparseSets.clear();
+			mExpanded.clear();
+			mMultSession.clear();
+			mGoldreichHash.clear();
+			mWaksmanPermute.clear();
+			mBinarySolver.clear();
+			mDedup.clear();
+			mSparseDpf.clear();
+			mTempOutput.clear();
+			mHashSeed = block(3498747860745238796ull, 2347966293789782347ull);
+			mPrint = false;
+			mPrintIndex = ~0ull;
+			mCharacteristicTwo = false;
+			mNumSets = 0;
+			mNumPointsPerSet = 0;
+			mNumPartitions = 0;
+			mPartitionSize = 0;
+			mIndexBitCount = 0;
+			mDomain = 0;
+			mLinearSecParam = 0;
+			mCuckooSecParam = 0;
+		}
 
 		//template<typename Output>
 //macoro::task<> expand(

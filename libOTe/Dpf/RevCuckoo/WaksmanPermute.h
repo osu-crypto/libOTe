@@ -386,6 +386,8 @@ namespace osuCrypto
 
 		}
 
+
+		// data is a vector of F, which is the type of the coefficients.
 		template<typename F, typename CoeffCtx>
 		task<> apply(
 			auto&& data,

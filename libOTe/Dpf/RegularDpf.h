@@ -229,7 +229,19 @@ namespace osuCrypto
 			auto mask = block(0, 0).sub_epi64(bit);
 			return mask.unpacklo_epi64(mask);
 		}
+
+
+		void clear()
+		{
+
+			mPartyIdx = 0;
+			mDomain = 0;
+			mDepth = 0;
+			mNumPoints = 0;
+			mMultiplier.clear();
+		}
 	};
+
 
 
 	template<typename T, typename CoeffCtx>

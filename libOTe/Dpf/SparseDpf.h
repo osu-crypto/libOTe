@@ -680,7 +680,18 @@ namespace osuCrypto
 				sigma[i] = sigma[i] ^ sBuff[i];
 			}
 		}
+		
 
+		void clear()
+		{
+			mPartyIdx = 0;           // Party index p ∈ {0,1}
+			mNumPoints = 0;    // Number of parallel sparse DPF instances
+			mDomain = 0;             // Domain size 2^D
+			mDenseDepth = 0;         // Optimization: use regular DPF for dense levels
+			mRegDpf.clear();
+			mMultiplier.clear();
+
+		}
 	};
 
 }

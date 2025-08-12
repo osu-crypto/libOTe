@@ -260,7 +260,7 @@ namespace osuCrypto
 		auto mode = RingLpnTriple<F>::Mode::Ole;
 
 		for (auto c : cs)
-			for (auto base : { RingLpnTriple<F>::BaseCorType::Precomputed, RingLpnTriple<F>::BaseCorType::OtBased })
+			for (auto base : { /*RingLpnTriple<F>::TensorBaseCorType::Precomputed,*/ RingLpnTriple<F>::TensorBaseCorType::OtBased })
 				for (auto dpf : { RingLpnTriple<F>::DpfType::RevCuckooDmpf,RingLpnTriple<F>::DpfType::SumDmpf })
 			{
 
