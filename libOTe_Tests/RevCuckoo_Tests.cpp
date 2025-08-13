@@ -267,6 +267,7 @@ namespace osuCrypto
 		//u64 c = cmd.getOr("ssp", 8) + m;
 		for (u64 c = 2; c < 20; ++c)
 		{
+			auto c8 = divCeil(c, 8);
 			auto m = c / 2;
 
 			for (u64 tt = 0; tt < trials; ++tt)
@@ -279,11 +280,11 @@ namespace osuCrypto
 
 
 				std::array<std::vector<u8>, 2> Mi{
-					std::vector<u8>(divCeil(c, 8)),
-					std::vector<u8>(divCeil(c, 8)) };
+					std::vector<u8>(c8),
+					std::vector<u8>(c8) };
 				std::array<std::vector<u8>, 2> r{
-					std::vector<u8>(divCeil(c, 8)),
-					std::vector<u8>(divCeil(c, 8)) };
+					std::vector<u8>(c8),
+					std::vector<u8>(c8) };
 
 				prng.get(Mi[0].data(), Mi[0].size());
 				prng.get(Mi[1].data(), Mi[1].size());
@@ -292,9 +293,9 @@ namespace osuCrypto
 				//copyBytesMin(Mi[0], v);
 				//setBytes(Mi[1], 0);
 
-				std::vector<u8> plainM(divCeil(c, 8));
-				std::vector<u8> plainR(divCeil(c, 8));
-				for (u64 i = 0; i < plainM.size(); ++i)
+				std::vector<u8> plainM(c8);
+				std::vector<u8> plainR(c8);
+				for (u64 i = 0; i < c8; ++i)
 					plainM[i] = Mi[0][i] ^ Mi[1][i];
 
 				//s[0].firstOneBit(plainM, plainR);

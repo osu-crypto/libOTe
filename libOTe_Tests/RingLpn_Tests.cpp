@@ -176,8 +176,8 @@ namespace osuCrypto
 
 	}
 #ifdef ENABLE_RINGLPN
-	template<typename F, typename C>
-	void setBase(std::array<RingLpnTriple<F, C>, 2>& oles)
+	template<typename F>
+	void ringSetBase(std::array<RingLpnTriple<F>, 2>& oles)
 	{
 		PRNG prng0(block(12345, 67890));
 		auto otCount0 = oles[0].baseCorCount();
@@ -283,7 +283,7 @@ namespace osuCrypto
 						oles[1].init(1, n, mode, dpf, base);
 
 
-						setBase(oles);
+						ringSetBase(oles);
 
 						auto sock = coproto::LocalAsyncSocket::makePair();
 						std::vector<F>
@@ -443,7 +443,7 @@ namespace osuCrypto
 		triples[0].init(0, n);
 		triples[1].init(1, n);
 
-		setBase(triples);
+		ringSetBase(triples);
 
 		if (triples[0].hasBaseCors() == false)
 			throw RTE_LOC;
@@ -538,7 +538,7 @@ namespace osuCrypto
 		oles[0].init(0, n, mode, dpf, tensor);
 		oles[1].init(1, n, mode, dpf, tensor);
 
-		setBase(oles);
+		ringSetBase(oles);
 
 		auto sock = coproto::LocalAsyncSocket::makePair();
 		std::vector<F>

@@ -1378,9 +1378,10 @@ namespace osuCrypto
 
 	}
 
-
+#ifdef ENABLE_RINGLPN
 	template<typename F>
-	void setBase(std::array<RingLpnTriple<F>, 2>& oles);
+	void ringSetBase(std::array<RingLpnTriple<F>, 2>& oles);
+#endif
 
 	void RingLpnBench(const CLP& cmd)
 	try{
@@ -1427,7 +1428,7 @@ namespace osuCrypto
 			oles[0].init(0, n, mode, dpf, tensor);
 			oles[1].init(1, n, mode, dpf, tensor);
 
-			setBase(oles);
+			ringSetBase(oles);
 			timer.setTimePoint("setBase");
 
 			oles[0].setTimer(timer);
