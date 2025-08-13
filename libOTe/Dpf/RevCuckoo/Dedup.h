@@ -5,6 +5,7 @@
 #include "Equality.h"
 #include "libOTe/Dpf/DpfMult.h"
 #include "libOTe/Tools/Coproto.h"
+#include "libOTe/Tools/CoeffCtx.h"
 
 namespace osuCrypto
 {

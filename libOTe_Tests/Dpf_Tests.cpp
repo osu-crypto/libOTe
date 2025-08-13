@@ -243,7 +243,7 @@ void RegularDpf_MultSession_Test(const CLP& cmd)
 #if defined(ENABLE_REGULAR_DPF) || defined(ENABLE_SPARSE_DPF)
 	u64 n = 13;
 	u64 vectorCols = 19;
-	auto trials = 5;
+	u64 trials = 5;
 	PRNG prng(block(231234, 321312));
 	std::array<oc::DpfMult, 2> dpf;
 	dpf[0].init(0, n * trials);
@@ -338,8 +338,8 @@ void RegularDpf_MultSession_Test(const CLP& cmd)
 				for (u64 k = 0; k < vectorCols; ++k)
 				{
 					auto y = y0[j][k] ^ y1[j][k]; // Reconstruct secret shared y
-					auto xy = xy0[j][k] ^ xy1[j][k]; // Reconstruct secret shared xy
-					auto exp = x * y; // Expected result: x[j] * y[j][k]
+					u64 xy = xy0[j][k] ^ xy1[j][k]; // Reconstruct secret shared xy
+					u64 exp = x * y; // Expected result: x[j] * y[j][k]
 
 					if (xy != exp)
 					{
@@ -1399,12 +1399,12 @@ void SumDmpf_Proto_Test(const oc::CLP& cmd)
 		for (u64 i = 0; i < domain; ++i)
 		{
 			// Check if this domain position should be active for any point in this set
-			bool isActive = expectedValue[i] != ZeroBlock;
+			//bool isActive = expectedValue[i] != ZeroBlock;
 
 
 			auto actualValue = output[0](setIdx, i) ^ output[1](setIdx, i);
 			//auto actualTag = tags[0](setIdx, i) ^ tags[1](setIdx, i);
-			auto expectedTag = isActive ? 1 : 0;
+			//auto expectedTag = isActive ? 1 : 0;
 
 			if (actualValue != expectedValue[i])
 			{

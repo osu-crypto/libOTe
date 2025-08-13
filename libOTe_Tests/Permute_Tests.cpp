@@ -45,8 +45,8 @@ namespace osuCrypto
 				}
 
 				// Generate random seeds for permutation
-				block seed0 = prng.get<block>();
-				block seed1 = prng.get<block>();
+				//block seed0 = prng.get<block>();
+				//block seed1 = prng.get<block>();
 
 				permuter.applyPlain(input, [&] {return prng.getBit(); });
 

@@ -175,8 +175,9 @@ namespace osuCrypto
 		}
 
 	}
-	template<typename F>
-	void setBase(std::array<RingLpnTriple<F>, 2>& oles)
+#ifdef ENABLE_RINGLPN
+	template<typename F, typename C>
+	void setBase(std::array<RingLpnTriple<F, C>, 2>& oles)
 	{
 		PRNG prng0(block(12345, 67890));
 		auto otCount0 = oles[0].baseCorCount();
@@ -243,6 +244,7 @@ namespace osuCrypto
 		oles[0].setBaseCors(baseSend[0], baseRecv[0], baseChoice[0], oleMult[0], oleAdd[0], coeffs[0], tensor[0]);
 		oles[1].setBaseCors(baseSend[1], baseRecv[1], baseChoice[1], oleMult[1], oleAdd[1], coeffs[1], tensor[1]);
 	}
+#endif
 
 	// This test evaluates the full PCG.Expand for both parties and
 	// checks correctness of the resulting OLE correlation.
@@ -428,7 +430,7 @@ namespace osuCrypto
 
 		auto logn = 5;
 		u64 n = 1ull << logn;
-		auto blocks = divCeil(n, 128);
+		//auto blocks = divCeil(n, 128);
 		bool verbose = cmd.isSet("v");
 
 		triples[0].mNumPolys = triples[1].mNumPolys = cmd.getOr("c", 2);
@@ -653,7 +655,7 @@ namespace osuCrypto
 			throw RTE_LOC;
 		}
 
-		std::array<F, 2> a, b, c;
+		std::array<F, 2> a;// , b, c;
 		a[0] = ole0.a[0];
 
 

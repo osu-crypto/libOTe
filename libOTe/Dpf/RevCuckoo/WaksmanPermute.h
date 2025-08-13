@@ -247,8 +247,8 @@ namespace osuCrypto
 				auto size = subnetSizes[subnetIdx];
 
 				auto inputBegin = src.begin() + idx;
-				auto output0Begin = dst.begin() + idx;
-				auto output1Begin = output0Begin + size / 2;
+				//auto output0Begin = dst.begin() + idx;
+				//auto output1Begin = output0Begin + size / 2;
 
 				idx += size;
 				nextSubnetSizes.push_back(size / 2);
@@ -395,7 +395,7 @@ namespace osuCrypto
 			CoeffCtx ctx)
 		{
 			mOtIdx = 0;
-			auto print = false;
+			//auto print = false;
 			auto n = mN;
 			if (data.size() != mN)
 				throw RTE_LOC;

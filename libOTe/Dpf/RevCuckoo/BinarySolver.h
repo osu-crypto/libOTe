@@ -403,7 +403,6 @@ namespace osuCrypto
 			std::vector<u64> sizes(depth + 1);
 			sizes[0] = mC;
 			M[0].assign(Mi.begin(), Mi.end());
-			auto idx = mMult.mOtIdx;
 
 			// compute A binary tree where each node is the OR of its children.
 			// If both children are set, set the second off.

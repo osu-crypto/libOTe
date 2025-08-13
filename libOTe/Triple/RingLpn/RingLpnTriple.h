@@ -22,6 +22,7 @@
 #include "libOTe/Tools/Ntt/Poly.h"
 #include "libOTe/Tools/CoeffCtx.h"
 #include "libOTe/Tools/Gmw/Gmw.h"
+#include "libOTe/Tools/Field/Fp.h"
 #include "cryptoTools/Circuit/BetaLibrary.h"
 #include "libOTe/Vole/Noisy/NoisyVoleSender.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
@@ -432,7 +433,7 @@ namespace osuCrypto
 		{
 			if (mBaseCorType == TensorBaseCorType::OtBased)
 			{
-				auto count = mNumPolys * mPolyWeight * mCtx.bitSize<F>();
+				auto count = mNumPolys * mPolyWeight * mCtx.template bitSize<F>();
 				if (mPartyIdx)
 					counts.mRecvOtCount += count;
 				else
@@ -478,7 +479,7 @@ namespace osuCrypto
 
 		auto recvIter = recvBaseOts;
 		auto sendIter = baseSendOts;
-		auto& choiceIter = baseChoices;
+		//auto& choiceIter = baseChoices;
 		u64 recvIdx = 0, sendIdx = 0;
 		std::visit([&](auto& dpf) {
 			auto count = dpf.baseOtCount();
@@ -672,7 +673,7 @@ namespace osuCrypto
 			if (baseCount.mCoeffCount)
 			{
 
-				auto tensorOtCount = mNumPolys * mPolyWeight * mCtx.bitSize<F>();
+				auto tensorOtCount = mNumPolys * mPolyWeight * mCtx.template bitSize<F>();
 				auto offset = recvMsg.size() - tensorOtCount;
 				span<block> recv(recvMsg.data() + offset, tensorOtCount);
 				BitVector bits(choice.data(), tensorOtCount, offset);
@@ -696,7 +697,7 @@ namespace osuCrypto
 
 			if (baseCount.mCoeffCount)
 			{
-				auto tensorOtCount = mNumPolys * mPolyWeight * mCtx.bitSize<F>();
+				auto tensorOtCount = mNumPolys * mPolyWeight * mCtx.template bitSize<F>();
 				auto offset = sendMsg.size() - tensorOtCount;
 				span<std::array<block, 2>> send(sendMsg.data() + offset, tensorOtCount);
 				co_await tensorSend(
@@ -1020,8 +1021,6 @@ namespace osuCrypto
 
 		if (1ull << log2ceil(mPolyWeight) != mPolyWeight)
 			throw RTE_LOC;
-		auto shift = log2ceil(mPolyWeight);
-		auto mask = mPolyWeight - 1;
 		auto pos = MatrixView<const u64>(mProdPolyTreePosXor.data(),
 			mNumPolys * mNumPolys * mPolyWeight, mPolyWeight);
 		assert(pos.size() == mProdPolyTreePosXor.size());
@@ -1219,7 +1218,7 @@ namespace osuCrypto
 		span<F> BB = ole ? B : prodPolys[0];
 		span<F> AA = ole ? A : prodPolys[1];
 
-		for (u64 i = 0, polyOffset = 0; i < mNumPolys * mNumPolys; ++i)
+		for (u64 i = 0; i < mNumPolys * mNumPolys; ++i)
 		{
 			auto prod = prodPolys[i].subspan(0, mN);
 			nttNegWrapCt<F>(prod, w);
@@ -1300,16 +1299,16 @@ namespace osuCrypto
 			// party while the areas for the cross terms are computed using the OLEs, i.e BB.
 			// 
 			//                         A₀[i] + A₁[i]     
-			//                     _____________________
-			//                    /					    \
+			//                    |_______________________|
+			//                     					      
 			//                      AA₀[2i]    AA₁[2i+1]
-			//                     _______________________
-			//       /            |          | BB₀[2i+1]+ |
+			//      __             _______________________
+			//       |            |          | BB₀[2i+1]+ |
 			// B₀[i] |  AA₀[2i+1] |          | BB₁[2i+1]  |
 			//       |            |__________|____________|
 			//  +    |            | BB₀[2i]+ |            |
 			// B₁[i] |  AA₁[2i]   | BB₁[2i]  |            |
-			//       \            |__________|____________|
+			//      __            |__________|____________|
 			//          
 
 			if (C.size() != A.size())
@@ -1539,7 +1538,7 @@ namespace osuCrypto
 
 		if (coeffs.size() * coeffs.size() != prod.size())
 			throw RTE_LOC;
-		if (recvOts.size() != n * mCtx.bitSize<F>())
+		if (recvOts.size() != n * mCtx.template bitSize<F>())
 			throw RTE_LOC;
 
 
@@ -1562,7 +1561,7 @@ namespace osuCrypto
 			auto bv = mCtx.binaryDecomposition(coeffs[i]);
 			for (u64 j = 0; j < bv.size(); ++j)
 				diff[i * bv.size() + j] ^= bv[j];
-			auto ots = recvOts.subspan(i * mCtx.bitSize<F>(), mCtx.bitSize<F>());
+			auto ots = recvOts.subspan(i * mCtx.template bitSize<F>(), mCtx.template bitSize<F>());
 			tasks[i] = NoisyVoleSender<F, F, CoeffCtx>::send(coeffs[i], voleResults[i], prngs[i], ots, sockets[i], mCtx);
 		}
 
@@ -1602,7 +1601,7 @@ namespace osuCrypto
 
 		if (coeffs.size() * coeffs.size() != prod.size())
 			throw RTE_LOC;
-		if (sendOts.size() != n * mCtx.bitSize<F>())
+		if (sendOts.size() != n * mCtx.template bitSize<F>())
 			throw RTE_LOC;
 
 		// Storage for intermediate results - each VOLE needs its own storage
@@ -1619,11 +1618,11 @@ namespace osuCrypto
 			sockets[i] = sock.fork();
 			prngs[i] = prng.fork();
 			mCtx.fromBlock(coeffs[i], prng.get());
-			auto ots = sendOts.subspan(i * mCtx.bitSize<F>(), mCtx.bitSize<F>());
+			auto ots = sendOts.subspan(i * mCtx.template bitSize<F>(), mCtx.template bitSize<F>());
 			tasks[i] = NoisyVoleReceiver<F, F, CoeffCtx>::receive(coeffs, voleResults[i], prngs[i], ots, sockets[i], mCtx);
 		}
 
-		BitVector diff(n * mCtx.bitSize<F>());
+		BitVector diff(n * mCtx.template bitSize<F>());
 		co_await sock.recv(diff);
 		for (u64 i = 0; i < diff.size(); ++i)
 		{

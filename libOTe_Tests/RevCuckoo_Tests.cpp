@@ -374,7 +374,7 @@ namespace osuCrypto
 
 			u64 m = cmd.getOr("m", 10);
 			u64 c = cmd.getOr("ssp", 8) + m;
-			auto g = cmd.getOr("g", 2);
+			u64 g = cmd.getOr("g", 2);
 			//auto m8 = divCeil(m, 8);
 			auto c8 = divCeil(c, 8);
 			auto g8 = divCeil(g, 8);

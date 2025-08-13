@@ -1,5 +1,5 @@
 #include "cryptoTools/Common/CLP.h"
-#include "libOTe/Config.h"
+#include "libOTe/config.h"
 
 #include "libOTe/Triple/Foleage/FoleageTriple.h"
 #include "libOTe/Triple/RingLpn/RingLpnTriple.h"
@@ -161,7 +161,7 @@ namespace osuCrypto
 		std::cout << "\nStep 5: Verifying correctness of generated triples...\n";
 
 		// Step 8: Verify the correctness of generated triples
-		u64 verificationCount = std::min(numTriples, 10ULL);  // Verify first 10 triples
+		u64 verificationCount = std::min<u64>(numTriples, 10ULL);  // Verify first 10 triples
 		bool allCorrect = true;
 
 		for (u64 blockIdx = 0; blockIdx < numBlocks && allCorrect; ++blockIdx)

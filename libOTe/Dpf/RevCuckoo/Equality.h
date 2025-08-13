@@ -360,7 +360,7 @@ namespace osuCrypto
 			// Process 8 bytes (64 bits) at a time for SIMD optimization
 			for (u64 byteIdx = 0; byteIdx < fullBytes; byteIdx += 8)
 			{
-				u64 remainingBytes = std::min(8ull, fullBytes - byteIdx);
+				u64 remainingBytes = std::min<u64>(8ull, fullBytes - byteIdx);
 				for (u64 k = 0; k < remainingBytes; ++k)
 				{
 					u8 packedByte = bits[byteIdx + k];
@@ -397,7 +397,7 @@ namespace osuCrypto
 
 			u64 totalBits = mN * mM;
 			u64 bytes = divCeil(totalBits, 8);
-			u64 fullBytes = totalBits / 8;
+			//u64 fullBytes = totalBits / 8;
 			auto m8 = divCeil(mM, 8);
 
 			if (mPartyIdx)

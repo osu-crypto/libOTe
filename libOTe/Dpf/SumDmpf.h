@@ -96,7 +96,6 @@ namespace osuCrypto
 				throw RTE_LOC;
 
 			T sum;
-			block t;
 			ctx.zero(sum);
 			u64 count = 0;
 			co_await mDpf.expand(

@@ -264,9 +264,9 @@ namespace osuCrypto
 				for (u64 j = 0; j < depth; ++j)
 				{
 					auto size = std::min<u64>(setSize, 1ull << (startingDepth + j));
-					auto half = depth / 2;
 
 					// Linear scale from 1 to 2 once j >= half
+					//auto half = depth / 2;
 					//double scale = (j >= half) ? 1.0 + double(j - half) / double(depth - 1 - half) : 1.0;
 					mLevels[mLevels.size() - j - 1].mNodes_.resize(size);
 				}

@@ -643,7 +643,7 @@ namespace osuCrypto
 				// can locally compute it given mSendOts0[0].
 
 				u64 n = mX.size();
-				if (std::distance(yBegin, yEnd) != n)
+				if (std::distance(yBegin, yEnd) != i64(n))
 					throw RTE_LOC;
 
 				// make sure we can deref xy
@@ -654,7 +654,7 @@ namespace osuCrypto
 				auto zero = ctx.template make<F>();
 				auto t0 = ctx.template make<F>();
 				auto m1 = ctx.template make<F>();
-				auto nt0 = ctx.template make<F>();
+				//auto nt0 = ctx.template make<F>();
 				auto mx = ctx.template make<F>();
 				auto w0 = ctx.template make<F>();
 

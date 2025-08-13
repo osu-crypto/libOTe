@@ -1106,7 +1106,7 @@ namespace osuCrypto
 			actualPoints(i) = points0(i) ^ points1(i);
 		}
 
-		auto ctx = CoeffCtx{};
+		//auto ctx = CoeffCtx{};
 
 		// Initialize RevCuckooDmpf instances
 		std::array<RevCuckooDmpf<F>, 2> dpf;
@@ -1230,9 +1230,6 @@ namespace osuCrypto
 		u64 domain = cmd.getOr("domain", 1ull << cmd.getOr("dd", 12)); // Domain size
 		u64 numPoints = cmd.getOr("numPoints", 16); // Number of points
 		u64 numSets = cmd.getOr("numSets", 16 * 4); // Number of sets
-		u64 numPartitions = cmd.getOr("numPartitions", 2); // Number of partitions
-		u64 linearSecParam = cmd.getOr("linearSecParam", 40); // Security parameter
-		u64 cuckooSecParam = cmd.getOr("cuckooSecParam", 2); // Cuckoo security parameter
 		u64 iterations = cmd.getOr("iters", 3); // Number of different value sets to test
 		bool print = cmd.isSet("print"); // Print flag
 
@@ -1249,7 +1246,7 @@ namespace osuCrypto
 			actualPoints(i) = points0(i) ^ points1(i);
 		}
 
-		auto ctx = CoeffCtx{};
+		//auto ctx = CoeffCtx{};
 
 		// Initialize RevCuckooDmpf instances
 		std::array<SumDmpf<F>, 2> dpf;
@@ -1440,7 +1437,7 @@ namespace osuCrypto
 				if (ee)
 				{
 					auto count0 = oles[0].baseCorCount();
-					auto count1 = oles[1].baseCorCount();
+					//auto count1 = oles[1].baseCorCount();
 					auto coeffs = count0.mCoeffCount;
 					std::vector<F> coeff0(coeffs), coeff1(coeffs);
 					for (auto& c : coeff0)

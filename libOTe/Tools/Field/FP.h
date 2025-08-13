@@ -1,4 +1,5 @@
-﻿#include "libOTe/config.h"
+#pragma once
+#include "libOTe/config.h"
 #include "cryptoTools/Common/block.h"
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Crypto/PRNG.h"

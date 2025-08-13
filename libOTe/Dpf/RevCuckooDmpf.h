@@ -850,7 +850,7 @@ namespace osuCrypto
 
 			// Step 3-4: Apply hash functions and generate permutation
 			auto f = mNumPartitions * mPartitionSize;
-			auto c = mPartitionSize + mLinearSecParam;
+			//auto c = mPartitionSize + mLinearSecParam;
 
 
 			for (u64 s = 0; s < mNumSets; ++s)
@@ -896,7 +896,7 @@ namespace osuCrypto
 			auto BB = ctx.template makeVec<T>(mExpanded.size());
 
 			auto BBIter = BB.begin();
-			for (u64 s = 0, i = 0; s < mNumSets; ++s)
+			for (u64 s = 0; s < mNumSets; ++s)
 			{
 				ctx.copy(B[s].begin(), B[s].end(), BBIter);
 				BBIter += f;
@@ -914,7 +914,7 @@ namespace osuCrypto
 	{ constexpr u64 VAR = 7; STATEMENT; }\
 	}while(0)
 
-			auto zero = ctx.make<T>();
+			auto zero = ctx.template make<T>();
 			ctx.zero(zero);
 			for (u64 j = 0; j < mExpanded.size(); ++j)
 			{
@@ -1127,11 +1127,11 @@ namespace osuCrypto
 			for (u64 i = 0; i < hashCopy.size(); ++i)
 				hashCopy(i) ^= hash(i);
 
-			auto reverse = [](span<u8> b) {
-				for (u64 i = 0; i < b.size() / 2; ++i)
-					std::swap(b[i], b[b.size() - 1 - i]);
-				return b;
-				};
+			//auto reverse = [](span<u8> b) {
+			//	for (u64 i = 0; i < b.size() / 2; ++i)
+			//		std::swap(b[i], b[b.size() - 1 - i]);
+			//	return b;
+			//	};
 
 			if (mPartyIdx)
 			{
