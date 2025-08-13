@@ -28,7 +28,7 @@
 #include "libOTe/Vole/Noisy/NoisyVoleSender.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include "libOTe/Base/BaseOT.h"
-
+#include "libOTe/Vole/Noisy/NoisyVole.h"
 #include "libOTe/Dpf/RevCuckooDmpf.h"
 
 namespace osuCrypto
