@@ -16,6 +16,7 @@
 #include <list>
 #include <vector>
 #include "libOTe/Tools/Coproto.h"
+#ifdef ENABLE_CIRCUITS
 
 namespace osuCrypto
 {
@@ -318,3 +319,4 @@ namespace osuCrypto
 
 	};
 }
+#endif

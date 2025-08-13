@@ -7,6 +7,7 @@
 #include "cryptoTools/Circuit/BetaLibrary.h"
 #include <array>
 #include "cryptoTools/Common/Log.h"
+#ifdef ENABLE_CIRCUITS
 
 namespace osuCrypto
 {
@@ -858,3 +859,4 @@ namespace osuCrypto
 
 
 }
+#endif
