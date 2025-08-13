@@ -77,39 +77,46 @@ namespace osuCrypto
 			{
 				mChoices.resize(mN);
 				mRecvMsg.resize(mN);
-				RandomOracle oracle(1);
+				//RandomOracle oracle(1);
 				for (u64 i = 0; i < mN; ++i)
 				{
 					mChoices[i] = 0;
-					oracle.Reset();
+					//oracle.Reset();
+					block sum = ZeroBlock;
 					for (u64 j = 0; j < mBitCount; ++j)
 					{
 						mChoices[i] |= baseChoices[i * mBitCount + j] << j;
-						oracle.Update(recvBaseOts[i * mBitCount + j]);
+						//oracle.Update(recvBaseOts[i * mBitCount + j]);
+						sum ^= recvBaseOts[i * mBitCount + j];
 					}
 
-					oracle.Final(mRecvMsg[i]);
-					mRecvMsg[i] &= 1; // ensure it is a bit
+					//oracle.Final(mRecvMsg[i]);
+					auto blk = mAesFixedKey.hashBlock(sum);
+					mRecvMsg[i] = blk.get<u8>(0) & 1; // ensure it is a bit
+					//mRecvMsg[i] &= 1; // ensure it is a bit
 				}
 			}
 			else
 			{
 				u64 N = 1ull << mBitCount;
-				RandomOracle oracle(1);
+				//RandomOracle oracle(1);
 				mSendMsg.resize(mN, N);
 
 				for (u64 i = 0; i < mN; ++i)
 				{
 					for (u64 j = 0; j < N; ++j)
 					{
-						oracle.Reset();
+						//oracle.Reset();
+						block sum = ZeroBlock;
 						for (u64 k = 0; k < mBitCount; ++k)
 						{
 							u8 b = (j >> k) & 1ull;
-							oracle.Update(baseSendOts[i * mBitCount + k][b]);
+							//oracle.Update(baseSendOts[i * mBitCount + k][b]);
+							sum ^= baseSendOts[i * mBitCount + k][b];
 						}
-						oracle.Final(mSendMsg(i, j));
-						mSendMsg(i, j) &= 1;
+						auto blk = mAesFixedKey.hashBlock(sum);
+						//oracle.Final(mSendMsg(i, j));
+						mSendMsg(i, j) = blk.get<u8>(0) & 1;
 					}
 				}
 			}

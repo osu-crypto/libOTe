@@ -256,61 +256,61 @@ namespace osuCrypto
 		auto logn = 6;
 		u64 n = 1ull << logn;
 		bool verbose = cmd.isSet("v");
-		std::vector<u64> cs{ cmd.getManyOr<u64>("c", {4}) };
+		std::vector<u64> cs{ cmd.getManyOr<u64>("c", {2,4}) };
+		std::vector<u64> ts{ cmd.getManyOr<u64>("t", {4,8}) };
 		auto mode = RingLpnTriple<F>::Mode::Ole;
 
-		for (auto c : cs)
-			for (auto base : { /*RingLpnTriple<F>::TensorBaseCorType::Precomputed,*/ RingLpnTriple<F>::TensorBaseCorType::OtBased })
-				for (auto dpf : { RingLpnTriple<F>::DpfType::RevCuckooDmpf,RingLpnTriple<F>::DpfType::SumDmpf })
-			{
+		for (auto t : ts)
+			for (auto c : cs)
+				for (auto base : { RingLpnTriple<F>::TensorBaseCorType::Precomputed, RingLpnTriple<F>::TensorBaseCorType::OtBased })
+					for (auto dpf : { RingLpnTriple<F>::DpfType::RevCuckooDmpf,RingLpnTriple<F>::DpfType::SumDmpf })
+					{
 
-				std::array<RingLpnTriple<F>, 2> oles;
-				if (cmd.hasValue("t"))
-					oles[0].mPolyWeight = oles[1].mPolyWeight = cmd.get<u64>("t");
+						std::array<RingLpnTriple<F>, 2> oles;
+						oles[0].mPolyWeight = oles[1].mPolyWeight = t;
+						oles[0].mNumPolys = oles[1].mNumPolys = c;
 
-				oles[0].mNumPolys = oles[1].mNumPolys = c;
+						oles[0].mDebug = cmd.isSet("debug");
+						oles[1].mDebug = oles[0].mDebug;
 
-				oles[0].mDebug = cmd.isSet("debug");
-				oles[1].mDebug = oles[0].mDebug;
+						PRNG prng0(block(2424523452345, 111124521521455324));
+						PRNG prng1(block(6474567454546, 567546754674345444));
+						Timer timer;
 
-				PRNG prng0(block(2424523452345, 111124521521455324));
-				PRNG prng1(block(6474567454546, 567546754674345444));
-				Timer timer;
-
-				oles[0].init(0, n, mode, dpf, base);
-				oles[1].init(1, n, mode, dpf, base);
+						oles[0].init(0, n, mode, dpf, base);
+						oles[1].init(1, n, mode, dpf, base);
 
 
-				setBase(oles);
+						setBase(oles);
 
-				auto sock = coproto::LocalAsyncSocket::makePair();
-				std::vector<F>
-					A(n), B(n),
-					C0(n), C1(n);
+						auto sock = coproto::LocalAsyncSocket::makePair();
+						std::vector<F>
+							A(n), B(n),
+							C0(n), C1(n);
 
-				if (verbose)
-					oles[0].setTimer(timer);
+						if (verbose)
+							oles[0].setTimer(timer);
 
-				auto r = macoro::sync_wait(macoro::when_all_ready(
-					oles[0].expand(A, C0, prng0, sock[0]),
-					oles[1].expand(B, C1, prng1, sock[1])));
-				std::get<0>(r).result();
-				std::get<1>(r).result();
+						auto r = macoro::sync_wait(macoro::when_all_ready(
+							oles[0].expand(A, C0, prng0, sock[0]),
+							oles[1].expand(B, C1, prng1, sock[1])));
+						std::get<0>(r).result();
+						std::get<1>(r).result();
 
-				//Now we check that we got the correct OLE correlations and fail
-				//the test otherwise.
-				for (size_t i = 0; i < n; i++)
-				{
-					auto act = C0[i] + C1[i];
-					auto exp = A[i] * B[i];
+						//Now we check that we got the correct OLE correlations and fail
+						//the test otherwise.
+						for (size_t i = 0; i < n; i++)
+						{
+							auto act = C0[i] + C1[i];
+							auto exp = A[i] * B[i];
 
-					if (exp != act)
-						throw RTE_LOC;
-				}
+							if (exp != act)
+								throw RTE_LOC;
+						}
 
-				if (verbose)
-					std::cout << "Time taken: \n" << timer << std::endl;
-			}
+						if (verbose)
+							std::cout << "Time taken: \n" << timer << std::endl;
+					}
 
 #else
 		throw UnitTestSkipped("ENABLE_RINGLPN not defined.");
@@ -376,6 +376,8 @@ namespace osuCrypto
 
 		oles[0].mDebug = cmd.isSet("debug");
 		oles[1].mDebug = oles[0].mDebug;
+		oles[0].mNumPolys = oles[1].mNumPolys = cmd.getOr("c", 4);
+		oles[0].mPolyWeight = oles[1].mPolyWeight = cmd.getOr("t", 2);
 
 		PRNG prng0(block(2424523452345, 111124521521455324));
 		PRNG prng1(block(6474567454546, 567546754674345444));
@@ -429,8 +431,8 @@ namespace osuCrypto
 		auto blocks = divCeil(n, 128);
 		bool verbose = cmd.isSet("v");
 
-		if (cmd.hasValue("t"))
-			triples[0].mPolyWeight = triples[1].mPolyWeight = cmd.get<u64>("t");
+		triples[0].mNumPolys = triples[1].mNumPolys = cmd.getOr("c", 2);
+		triples[0].mPolyWeight = triples[1].mPolyWeight = cmd.getOr("t", 2);
 
 		PRNG prng0(block(2424523452345, 111124521521455324));
 		PRNG prng1(block(6474567454546, 567546754674345444));
@@ -440,6 +442,11 @@ namespace osuCrypto
 		triples[1].init(1, n);
 
 		setBase(triples);
+
+		if (triples[0].hasBaseCors() == false)
+			throw RTE_LOC;
+		if (triples[1].hasBaseCors() == false)
+			throw RTE_LOC;
 
 		auto sock = coproto::LocalAsyncSocket::makePair();
 		std::vector<F> A0(n), B0(n), C0(n);
@@ -500,6 +507,110 @@ namespace osuCrypto
 #endif
 	}
 
+	void RingLpn_stationary_test(const CLP& cmd)
+	{
+
+#ifdef ENABLE_RINGLPN
+
+		//using F = Fp<0xFFFFFFFB, u32, u64>;
+		using F = F12289;
+
+		auto logn = 6;
+		u64 n = 1ull << logn;
+		bool verbose = cmd.isSet("v");
+		auto mode = RingLpnTriple<F>::Mode::Ole;
+		auto dpf = RingLpnTriple<F>::DpfType::RevCuckooDmpf;
+		auto tensor = RingLpnTriple<F>::TensorBaseCorType::Precomputed;
+		std::array<RingLpnTriple<F>, 2> oles;
+		u64 trials = cmd.getOr("trials", 10);
+
+		oles[0].mDebug = cmd.isSet("debug");
+		oles[1].mDebug = oles[0].mDebug;
+		oles[0].mNumPolys = oles[1].mNumPolys = cmd.getOr("c", 2);
+		oles[0].mPolyWeight = oles[1].mPolyWeight = cmd.getOr("t", 2);
+
+		PRNG prng0(block(2424523452345, 111124521521455324));
+		PRNG prng1(block(6474567454546, 567546754674345444));
+		Timer timer;
+
+		oles[0].init(0, n, mode, dpf, tensor);
+		oles[1].init(1, n, mode, dpf, tensor);
+
+		setBase(oles);
+
+		auto sock = coproto::LocalAsyncSocket::makePair();
+		std::vector<F>
+			A(n), B(n),
+			C0(n), C1(n);
+
+		if (verbose)
+			oles[0].setTimer(timer);
+
+		for (u64 tt = 0; tt < trials; ++tt)
+		{
+			if (tt)
+			{
+				auto count0 = oles[0].baseCorCount();
+				auto count1 = oles[1].baseCorCount();
+				if (count0.mOleCount != count1.mOleCount ||
+					count0.mRecvOtCount != count1.mSendOtCount ||
+					count0.mSendOtCount != count1.mRecvOtCount ||
+					count0.mCoeffCount != count1.mCoeffCount)
+				{
+					throw RTE_LOC;
+				}
+				if (count0.mOleCount || count0.mRecvOtCount)
+					throw RTE_LOC;
+				auto coeffs = count0.mCoeffCount;
+				std::vector<F> coeff0(coeffs), coeff1(coeffs);
+				for (auto& c : coeff0)
+					c = prng0.get();
+				for (auto& c : coeff1)
+					c = prng1.get();
+				std::vector<F> tensor0(coeffs * coeffs), tensor1(coeffs * coeffs);
+				for (u64 i = 0; i < coeffs; ++i)
+				{
+					for (u64 j = 0; j < coeffs; ++j)
+					{
+						auto idx = i * coeffs + j;
+						tensor0[idx] = prng0.get();
+						tensor1[idx] = coeff0[i] * coeff1[j] - tensor0[idx];
+						if ((tensor0[idx] + tensor1[idx]) != (coeff0[i] * coeff1[j]))
+							throw RTE_LOC;
+					}
+				}
+
+				oles[0].setBaseCors({}, {}, {}, {}, {}, coeff0, tensor0);
+				oles[1].setBaseCors({}, {}, {}, {}, {}, coeff1, tensor1);
+			}
+
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				oles[0].expand(A, C0, prng0, sock[0]),
+				oles[1].expand(B, C1, prng1, sock[1])));
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+
+			//Now we check that we got the correct OLE correlations and fail
+			//the test otherwise.
+			for (size_t i = 0; i < n; i++)
+			{
+				auto act = C0[i] + C1[i];
+				auto exp = A[i] * B[i];
+
+				if (exp != act)
+					throw RTE_LOC;
+			}
+		}
+
+		if (verbose)
+			std::cout << "Time taken: \n" << timer << std::endl;
+
+#else
+		throw UnitTestSkipped("ENABLE_RINGLPN not defined.");
+#endif
+
+	}
+
 
 	void RingLpn_conversion_test(const CLP& cmd)
 	{
@@ -524,7 +635,7 @@ namespace osuCrypto
 		auto ole0 = ole();
 		auto ole1 = ole();
 
-		if(ole0.a[0] * ole0.a[1] != ole0.b[0] + ole0.b[1])
+		if (ole0.a[0] * ole0.a[1] != ole0.b[0] + ole0.b[1])
 		{
 			std::cout << "ole0.a[0] = " << ole0.a[0] << std::endl;
 			std::cout << "ole0.a[1] = " << ole0.a[1] << std::endl;
@@ -533,7 +644,7 @@ namespace osuCrypto
 			throw RTE_LOC;
 		}
 
-		if(ole1.a[0] * ole1.a[1] != ole1.b[0] + ole1.b[1])
+		if (ole1.a[0] * ole1.a[1] != ole1.b[0] + ole1.b[1])
 		{
 			std::cout << "ole1.a[0] = " << ole1.a[0] << std::endl;
 			std::cout << "ole1.a[1] = " << ole1.a[1] << std::endl;

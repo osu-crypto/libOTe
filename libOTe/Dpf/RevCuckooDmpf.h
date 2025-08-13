@@ -82,7 +82,7 @@ namespace osuCrypto
 			u64 domain,
 			u64 numPartitions = 2,
 			u64 cuckooSecParam = 2,
-			u64 linearSecParam = 40,
+			u64 linearSecParam = 10,
 			bool characteristicTwo = false)
 		{
 			mPartyIdx = partyIdx;
@@ -157,41 +157,46 @@ namespace osuCrypto
 				return { 0,0 };
 
 			auto count3 = mSparseDpf.baseOtCount();
-			auto recv = count3;
-			auto send = count3;
 
+			u64 dedupRecv = 0;
+			u64 dedupSend = 0;
 			for (auto& dedup : mDedup)
 			{
 				auto count = dedup.baseOtCount();
-				recv += count.mRecvCount;
-				send += count.mSendCount;
+				dedupRecv += count.mRecvCount;
+				dedupSend += count.mSendCount;
 			}
 
+			u64 permRecv = 0;
+			u64 permSend = 0;
 			for (auto& permute : mWaksmanPermute)
 			{
 				auto count = permute.baseOtCount();
-				recv += count.mRecvCount;
-				send += count.mSendCount;
+				permRecv += count.mRecvCount;
+				permSend += count.mSendCount;
 			}
 
+			u64 hashRecv = 0;
+			u64 hashSend = 0;
 			for (auto& hash : mGoldreichHash)
 			{
 				auto count = hash.baseOtCount();
-				recv += count.mRecvCount;
-				send += count.mSendCount;
+				hashRecv += count.mRecvCount;
+				hashSend += count.mSendCount;
 			}
 
+			u64 solve = 0;
 			for (auto& solver : mBinarySolver)
 			{
-				auto count = solver.baseOtCount();
-				recv += count;
-				send += count;
+				solve += solver.baseOtCount();
 			}
 
-			recv += mMultiplier.baseOtCount();
-			send += mMultiplier.baseOtCount();
+			auto mult = mMultiplier.baseOtCount();
 
-			return { recv, send };
+			return { 
+				count3 + mult + dedupRecv + permRecv + hashRecv + solve,
+				count3 + mult + dedupSend + permSend + hashSend + solve
+				};
 		}
 
 		void setBaseOts(
@@ -502,12 +507,14 @@ namespace osuCrypto
 				r.result();
 			setTimePoint("perm done");
 
-			std::vector<block> hashSeed(mNumPartitions);
+			//std::vector<block> hashSeed(mNumPartitions);
+			std::vector<GoldreichHash::Cache> hashCache(mNumPartitions);
 			{
 				AES aes(block(523234789928736, 754378923479832796));
 				for (u64 i = 0; i < mNumPartitions; ++i)
 				{
-					aes.ecbEncBlock(block(i), hashSeed[i]);
+					auto seed = aes.ecbEncBlock(block(i));
+					hashCache[i] = mGoldreichHash[0].cache(seed);
 				}
 			}
 
@@ -530,7 +537,7 @@ namespace osuCrypto
 
 					//mGoldreichHash[i].mPrint = true;
 					tasks.push_back(mGoldreichHash[k].hash(
-						A_i, M_i, socks[k], hashSeed[i]));
+						A_i, M_i, socks[k], hashCache[i]));
 				}
 
 			}
@@ -547,7 +554,7 @@ namespace osuCrypto
 			copyBytesMin(ADomain, mDomain);
 			for (u64 i = 0; i < mNumPartitions; ++i)
 			{
-				mGoldreichHash[i].hash(ADomain, HDomain.submtx(i, 1), hashSeed[i]);
+				mGoldreichHash[i].hash(ADomain, HDomain.submtx(i, 1), hashCache[i]);
 			}
 
 			std::vector<Matrix<u8>> Y_i(mNumSets);
@@ -638,7 +645,7 @@ namespace osuCrypto
 
 			for (u64 j = 0; j < mNumPartitions; ++j)
 				mGoldreichHash[j].hash(I,
-					H.submtx(j * mDomain, mDomain), hashSeed[j]);
+					H.submtx(j * mDomain, mDomain), hashCache[j]);
 
 
 

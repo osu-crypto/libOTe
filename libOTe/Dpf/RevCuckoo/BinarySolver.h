@@ -33,17 +33,14 @@ namespace osuCrypto
 			mM = m;
 			mC = c;
 			mLogG = logG;
-			auto baseCount =
-				mM * mC * 3 +
-				mM * mC +
-				mM * mM +
-				mC +
-				mM * mC +
-				mM * mC +
-				mM * mC;
-			//std::min(mM * mC, mC * mLogG) +
-			//std::min(mM * mC, mC * mLogG) +
-			//std::min(mM * mC, mC * mLogG);
+
+			auto oneHot = mM * (2 * mC - 3);
+			auto v = mM * mC;
+			auto mUpdate = mM * mM;
+			auto randX = mC;
+			auto yy = std::min<u64>(mC * mM, mC * mLogG);
+			auto cc = std::min<u64>(mC * mM, mM * mLogG);
+			auto baseCount = cc + yy + randX + oneHot + v + mUpdate;
 
 			mMult.init(partyIdx, baseCount);
 		}
@@ -192,17 +189,32 @@ namespace osuCrypto
 			auto m8 = divCeil(m, 8);
 			auto k8 = divCeil(k, 8);
 			if (A.cols() != m8)
-				throw RTE_LOC;
+				throw RTE_TRACE;
 			if (B.cols() != k8)
-				throw RTE_LOC;
+				throw RTE_TRACE;
 			if (C.cols() != k8)
-				throw RTE_LOC;
+				throw RTE_TRACE;
 			if (C.rows() != n)
-				throw RTE_LOC;
+				throw RTE_TRACE;
 
-			//co_await printMtx(m, A, "A", sock);
-			//co_await printMtx(k, B, "B", sock);
+			// fewer OTs if we transpose the matrices.
+			if (n * m > m * k)
+			{
+				auto n8 = divCeil(n, 8);
+				Matrix<u8> At(m, n8);
+				Matrix<u8> Bt(k, m8);
+				Matrix<u8> Ct(k, n8);
 
+				//     m	     n         n
+				//   bbbbb     aaaaa     ccccc
+				// k bbbbb * m aaaaa = k ccccc
+				//   bbbbb     aaaaa     ccccc
+				transpose(A, At);
+				transpose(B, Bt);
+				co_await multiplyMtx(n, Bt, At, Ct, sock);
+				transpose(Ct, C);
+				co_return;
+			}
 
 			BitVector ABits(n * m);
 
@@ -362,6 +374,28 @@ namespace osuCrypto
 
 		// scans the Mi vector and sets s to be the unit vector with
 		// the same first non-zero bit as Mi.
+		//
+		// In the first pass we will have the following access patter
+		// 
+		// 0 1 2 3 4 5 6 7 8 9 10 11   | # 
+		// 0   2   4   6   8   10	   | 6
+		// 0       4       8		   | 3
+		// 0               8		   | 2
+		// 0						   | 1
+		//
+		// During this we will AND together children and then set the
+		// parent as the OR of the children. In addition, if both children
+		// are set, we will turn the second child off. This will require
+		// mC-1 AND gates.
+		//
+		// In the second pass we will have the following the same 
+		// access pattern except that we skip the root as its unnecessary.
+		// We will compute the AND of each parent with its children. We pack 
+		// the children into a single vector and do a scalar-vector and so
+		// this requires mC-2 AND gates.
+		// 
+		// In total we use 2 mC - 3 AND gates.
+		// 
 		task<> firstOneBit(span<const u8> Mi, span<u8> s, Socket& sock)
 		{
 			auto depth = log2ceil(mC);
@@ -369,13 +403,14 @@ namespace osuCrypto
 			std::vector<u64> sizes(depth + 1);
 			sizes[0] = mC;
 			M[0].assign(Mi.begin(), Mi.end());
+			auto idx = mMult.mOtIdx;
 
 			// compute A binary tree where each node is the OR of its children.
 			// If both children are set, set the second off.
 			for (u64 d = 1; d <= depth; ++d)
 			{
 				sizes[d] = divCeil(sizes[d - 1], 2);
-				M[d].resize(sizes[d]);
+				M[d].resize(divCeil(sizes[d], 8));
 
 				auto child = BitIterator(M[d - 1].data());
 				auto prnt = BitIterator(M[d].data());
@@ -390,8 +425,11 @@ namespace osuCrypto
 					child = child + 2;
 				}
 
+				auto idx2 = mMult.mOtIdx;
 				co_await multiply(1, a.getSpan<u8>(), b, c, sock);
 
+				if(idx2+ a.size() != mMult.mOtIdx)
+					throw std::runtime_error((co_await macoro::get_trace{}).str());
 
 				child = BitIterator(M[d - 1].data());
 				for (u64 i = 0; i < a.size(); ++i)
@@ -420,25 +458,26 @@ namespace osuCrypto
 
 			}
 
-			// We now have the guarantee that the at most one chold is set
+			// We now have the guarantee that the at most one child is set
 			// We will compute the AND of each parent with its child.
 			// This could probably be optimized A bit more.
 			//  - the levels could be computed in parallel.
 			//  - maybe the previous multiplication could reduce the number of AND gates.
-			for (u64 d = depth - 1; d != 0; --d)
+			for (u64 d = depth-1; d != 0; --d)
 			{
 				auto cur = BitIterator(M[d].data());
 				auto next = BitIterator(M[d - 1].data());
 
 				//auto ss = sizes[d] + (sizes[d - 1] & 1);// divCeil(sizes[d - 1], 2);
 
-				BitVector a(sizes[d]);
+				auto ss = sizes[d - 1] / 2;
+				BitVector a(ss);
 				Matrix<u8> b(a.size(), 1);
 				Matrix<u8> c(a.size(), 1);
 
 				// pack both children into A single vector and do
 				// scaler vector multiplication.
-				for (u64 i = 0; i < sizes[d]; ++i)
+				for (u64 i = 0; i < ss; ++i)
 				{
 					a[i] = *cur;
 					b(i) = *(next + 0) + 2 * *(next + 1);
@@ -450,12 +489,18 @@ namespace osuCrypto
 				co_await multiply(2, a.getSpan<u8>(), b, c, sock);
 
 				next = BitIterator(M[d - 1].data());
-				for (u64 i = 0; i < sizes[d]; ++i)
+				for (u64 i = 0; i < ss; ++i)
 				{
 					*(next + 0) = (c(i) >> 0) & 1;
 					*(next + 1) = (c(i) >> 1) & 1;
 					next = next + 2;
 				}
+
+				if (ss != sizes[d])
+				{
+					*next = *cur;
+				}
+
 			}
 
 			std::copy(M[0].begin(), M[0].end(), s.begin());
@@ -595,6 +640,7 @@ namespace osuCrypto
 				// v[k] = 1 means row k has a 1 in the pivot column and needs elimination
 				transpose(M, MT);
 				co_await multiply(mM, s[i], MT, V, sock);
+				
 				setBytes(v, 0);
 				for (u64 j = 0; j < mC; ++j)
 				{
@@ -624,10 +670,15 @@ namespace osuCrypto
 				//if (mPrint)
 				//	co_await printMtx(MY.cols()*8, MY, " row updates [Mi || Yi]", sock);
 
+				auto idx = mMult.mOtIdx;
+
 				// Step 1c: Perform row operations for pivot elimination
 				// For each row j ≠ i where v[j] = 1, subtract row i from row j
 				// This eliminates the pivot bit from all other rows
 				co_await multiply(MY.cols() * 8, v, MY, MY, sock);
+
+				if (idx + mM != mMult.mOtIdx)
+					throw std::runtime_error((co_await macoro::get_trace{}).str());
 
 				if (mPrint)
 					co_await printMtx(MY.cols() * 8, MY, "row updates v * [Mi || Yi]", sock);
@@ -642,11 +693,18 @@ namespace osuCrypto
 					for (u64 k = 0; k < Y.cols(); ++k)
 						Y(j, k) ^= MY(j, k + M.cols());
 				}
-
-
-
-
 			}
+
+
+			{
+
+				auto oneHot = mM * (2 * mC - 3);
+				auto v = mM * mC;
+				auto mUpdate = mM * mM;
+				if (mMult.mOtIdx != oneHot + v + mUpdate)
+					throw RTE_LOC;
+			}
+
 
 
 			if (mPrint)
@@ -688,6 +746,19 @@ namespace osuCrypto
 			}
 			co_await multiply(mLogG, negSigma, X, X, sock);
 
+
+
+			{
+
+				auto oneHot = mM * (2 * mC - 3);
+				auto v = mM * mC;
+				auto mUpdate = mM * mM;
+				auto randX = mC;
+				if (mMult.mOtIdx != randX + oneHot + v + mUpdate)
+					throw RTE_LOC;
+			}
+
+
 			if (mPrint)
 				co_await printMtx(mLogG, X, "X after sampling free variables", sock);
 
@@ -697,6 +768,18 @@ namespace osuCrypto
 			// y := y ⊕ M * x (update RHS to cancel the effect of free variables)
 			Matrix<u8> Y2(mM, g8);
 			co_await multiplyMtx(mLogG, M, X, Y2, sock);
+
+
+			{
+
+				auto oneHot = mM * (2 * mC - 3);
+				auto v = mM * mC;
+				auto mUpdate = mM * mM;
+				auto randX = mC;
+				auto yy = std::min<u64>(mC * mM, mC * mLogG);
+				if (mMult.mOtIdx != yy+randX + oneHot + v + mUpdate)
+					throw RTE_LOC;
+			}
 
 			if (mPrint)
 				co_await printMtx(mLogG, Y2, "Y2=M * X (correction term)", sock);
@@ -725,7 +808,8 @@ namespace osuCrypto
 				co_await printMtx(mLogG, X, "Final solution X", sock);
 
 
-
+			if (mMult.mOtIdx != mMult.mTotalMults)
+				throw RTE_LOC;
 			//if (mPrint)
 			//{
 			//	//co_await multiplyMtx(mLogG, M, X, Y2, sock);

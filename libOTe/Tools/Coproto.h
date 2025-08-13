@@ -16,7 +16,9 @@ namespace osuCrypto
 	namespace cp = coproto;
 	using coproto::task;
 	using Socket = coproto::Socket;
-
+#define RTE_TRACE std::runtime_error((co_await macoro::get_trace{}).str());
+	// This is a macro that will throw an exception with the location of the error.
+	// It is used to indicate that a function is not implemented or not supported.
 
 #ifdef ENABLE_BOOST
 

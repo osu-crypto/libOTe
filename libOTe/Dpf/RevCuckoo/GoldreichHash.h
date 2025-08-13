@@ -41,6 +41,26 @@ namespace osuCrypto
 
 		bool mPrint = false;
 
+		struct Cache
+		{
+
+			LinearCode f0; 
+			LinearCode f1; 
+			LinearCode f2;
+			Cache() = default;
+			Cache(const Cache&) = default;
+			Cache&operator=(const Cache&) = default;
+
+			Cache(block seed, u64 inBytes, u64 numIntermediateBytes, u64 outBytes)
+			{
+				PRNG fPrng(seed);
+				f0.random(fPrng, inBytes * 8, numIntermediateBytes * 8);
+				f1.random(fPrng, inBytes * 8, numIntermediateBytes * 8);
+				f2.random(fPrng, (inBytes + numIntermediateBytes) * 8, outBytes * 8);
+			}
+
+		};
+
 		void init(u64 partyIdx, u64 n, u64 inBytes, u64 outBytes)
 		{
 			if (partyIdx > 1)
@@ -58,6 +78,11 @@ namespace osuCrypto
 				throw std::runtime_error("GoldreichHash: mOutBytes * 2 <= mInBytes * mInBytes. " LOCATION);
 
 			mMult.init(mPartyIdx, mN * mNumIntermediateBytes * 8);
+		}
+
+		auto cache(block seed) const
+		{
+			return Cache(seed, mInBytes, mNumIntermediateBytes, mOutBytes);
 		}
 
 		struct BaseOtCount {
@@ -86,6 +111,16 @@ namespace osuCrypto
 			MatrixView<u8> y,
 			block seed)
 		{
+			auto c = cache(seed);
+			hash(x, y, c);
+		}
+
+
+		void hash(
+			MatrixView<const u8> x,
+			MatrixView<u8> y,
+			Cache& cache)
+		{
 			if (x.rows() != y.rows())
 				throw std::runtime_error("GoldreichHash: x y size mismatch. " LOCATION);
 			if (x.cols() != mInBytes)
@@ -94,22 +129,21 @@ namespace osuCrypto
 				throw std::runtime_error("GoldreichHash: y size mismatch. " LOCATION);
 
 
-			PRNG fPrng(seed);
-			LinearCode f0; f0.random(fPrng, mInBytes * 8, mNumIntermediateBytes * 8);
-			LinearCode f1; f1.random(fPrng, mInBytes * 8, mNumIntermediateBytes * 8);
-			LinearCode f2; f2.random(fPrng, (mInBytes + mNumIntermediateBytes) * 8, mOutBytes * 8);
+			//LinearCode f0; f0.random(fPrng, mInBytes * 8, mNumIntermediateBytes * 8);
+			//LinearCode f1; f1.random(fPrng, mInBytes * 8, mNumIntermediateBytes * 8);
+			//LinearCode f2; f2.random(fPrng, (mInBytes + mNumIntermediateBytes) * 8, mOutBytes * 8);
 
 			std::vector<u8> A(mNumIntermediateBytes), B(mNumIntermediateBytes);
 			std::vector<u8> buff(x.cols() + mNumIntermediateBytes);
 
-			if (mPrint)
-			{
-				std::cout << "GoldreichHash: " << seed << std::endl;
-			}
+			//if (mPrint)
+			//{
+			//	std::cout << "GoldreichHash: " << seed << std::endl;
+			//}
 			for (u64 i = 0; i < x.rows(); ++i)
 			{
-				f0.encode(x[i], A);
-				f1.encode(x[i], B);
+				cache.f0.encode(x[i], A);
+				cache.f1.encode(x[i], B);
 
 
 				for (u64 j = 0; j < B.size(); ++j)
@@ -119,7 +153,7 @@ namespace osuCrypto
 				memcpy(buff.data() + x.cols(), B.data(), B.size());
 
 				buff[0] ^= 1;
-				f2.encode(buff, y[i]);
+				cache.f2.encode(buff, y[i]);
 
 				if (mPrint)
 				{
@@ -132,12 +166,20 @@ namespace osuCrypto
 		}
 
 #define CO_TRACE (co_await macoro::get_trace()).str()
-
 		task<> hash(
 			MatrixView<const u8> x,
 			MatrixView<u8> y,
 			Socket& sock,
 			block seed)
+		{
+			auto c = cache(seed);
+			co_await hash(x, y, sock, c);
+		}
+		task<> hash(
+			MatrixView<const u8> x,
+			MatrixView<u8> y,
+			Socket& sock,
+			Cache& cache)
 		{
 
 			if (x.rows() != mN || x.cols() != mInBytes)
@@ -145,19 +187,14 @@ namespace osuCrypto
 			if (y.rows() != mN || y.cols() != mOutBytes)
 				throw std::runtime_error("GoldreichHash: y size mismatch. " + CO_TRACE);
 
-
-			PRNG fPrng(seed);
-			LinearCode f0; f0.random(fPrng, mInBytes * 8, mNumIntermediateBytes * 8);
-			LinearCode f1; f1.random(fPrng, mInBytes * 8, mNumIntermediateBytes * 8);
-
 			Matrix<u8>
 				A(mN, mNumIntermediateBytes),
 				B(mN, mNumIntermediateBytes);
 
 			for (u64 i = 0; i < mN; ++i)
 			{
-				f0.encode(x[i], A[i]);
-				f1.encode(x[i], B[i]);
+				cache.f0.encode(x[i], A[i]);
+				cache.f1.encode(x[i], B[i]);
 			}
 
 
@@ -190,14 +227,14 @@ namespace osuCrypto
 
 			// y[i] = f0 * (x[i] || B[i])
 			std::vector<u8> buff(x.cols() + mNumIntermediateBytes);
-			f0.random(fPrng, buff.size() * 8, mOutBytes * 8);
+			//cache.f2.random(fPrng, buff.size() * 8, mOutBytes * 8);
 			for (u64 i = 0; i < mN; ++i)
 			{
 				span<u8> bb(buff);
 				copyBytes(bb.subspan(0, x.cols()), x[i]);
 				copyBytes(bb.subspan(x.cols(), B.cols()), B[i]);
 				buff[0] ^= mPartyIdx;
-				f0.encode(buff, y[i]);
+				cache.f2.encode(buff, y[i]);
 			}
 
 			if (mPrint)
@@ -219,7 +256,7 @@ namespace osuCrypto
 
 				if (mPartyIdx)
 				{
-					std::cout << "GoldreichHash: " << seed << std::endl;
+					std::cout << "GoldreichHash: " << std::endl;
 					for (u64 i = 0; i < mN; ++i)
 					{
 

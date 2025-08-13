@@ -22,6 +22,8 @@
 #include "libOTe/Dpf/RevCuckooDmpf.h"
 #include "libOTe/Dpf/SumDmpf.h"
 #include "libOTe/Tools/Ntt/NttNegWrap.h"
+#include "libOTe/Triple/RingLpn/RingLpnTriple.h"
+#include "libOTe/Tools/Field/Fp.h"
 
 namespace osuCrypto
 {
@@ -1363,7 +1365,7 @@ namespace osuCrypto
 		using F = u64;
 		u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 16));
 		u64 t = cmd.getOr("t", 10);
-		AlignedUnVector<F> a(n), w(n*2);
+		AlignedUnVector<F> a(n), w(n * 2);
 
 		Timer timer;
 		timer.setTimePoint("begin");
@@ -1374,9 +1376,113 @@ namespace osuCrypto
 
 		}
 
-		if(!cmd.isSet("quiet"))
+		if (!cmd.isSet("quiet"))
 			std::cout << timer << std::endl;
 
+	}
+
+
+	template<typename F>
+	void setBase(std::array<RingLpnTriple<F>, 2>& oles);
+
+	void RingLpnBench(const CLP& cmd)
+	try{
+
+#ifdef ENABLE_RINGLPN
+
+		//using F = Fp<0xFFFFFFFB, u32, u64>;
+		using F = F12289;
+
+		auto logn = cmd.getOr("nn", 16);
+		u64 n = 1ull << logn;
+		bool quiet = cmd.isSet("quiet");
+		auto mode = RingLpnTriple<F>::Mode::Ole;
+		auto dpf = RingLpnTriple<F>::DpfType::RevCuckooDmpf;
+		auto tensor = RingLpnTriple<F>::TensorBaseCorType::Precomputed;
+		u64 trials = cmd.getOr("trials", 1);
+		u64 exp = cmd.getOr("exp", 10);
+
+
+		auto sock = coproto::LocalAsyncSocket::makePair();
+		std::vector<F>
+			A(n), B(n),
+			C0(n), C1(n);
+
+		PRNG prng0(block(2424523452345, 111124521521455324));
+		PRNG prng1(block(6474567454546, 567546754674345444));
+		Timer timer;
+
+		std::array<macoro::thread_pool, 2> threadPools;
+		sock[0].setExecutor(threadPools[0]);
+		sock[1].setExecutor(threadPools[1]);
+		auto work0 = threadPools[0].make_work();
+		auto work1 = threadPools[1].make_work();
+		threadPools[0].create_thread();
+		threadPools[1].create_thread();
+
+		for (u64 tt = 0; tt < trials; ++tt)
+		{
+			std::array<RingLpnTriple<F>, 2> oles;
+			oles[0].mDebug = cmd.isSet("debug");
+			oles[1].mDebug = oles[0].mDebug;
+			oles[0].mNumPolys = oles[1].mNumPolys = cmd.getOr("c", 4);
+			oles[0].mPolyWeight = oles[1].mPolyWeight = cmd.getOr("t", 16);
+			oles[0].init(0, n, mode, dpf, tensor);
+			oles[1].init(1, n, mode, dpf, tensor);
+
+			setBase(oles);
+			timer.setTimePoint("setBase");
+
+			oles[0].setTimer(timer);
+
+			for (u64 ee = 0; ee < exp; ++ee)
+			{
+				if (ee)
+				{
+					auto count0 = oles[0].baseCorCount();
+					auto count1 = oles[1].baseCorCount();
+					auto coeffs = count0.mCoeffCount;
+					std::vector<F> coeff0(coeffs), coeff1(coeffs);
+					for (auto& c : coeff0)
+						c = prng0.get();
+					for (auto& c : coeff1)
+						c = prng1.get();
+					std::vector<F> tensor0(coeffs * coeffs), tensor1(coeffs * coeffs);
+					for (u64 i = 0; i < coeffs; ++i)
+					{
+						for (u64 j = 0; j < coeffs; ++j)
+						{
+							auto idx = i * coeffs + j;
+							tensor0[idx] = prng0.get();
+							tensor1[idx] = coeff0[i] * coeff1[j] - tensor0[idx];
+						}
+					}
+
+					oles[0].setBaseCors({}, {}, {}, {}, {}, coeff0, tensor0);
+					oles[1].setBaseCors({}, {}, {}, {}, {}, coeff1, tensor1);
+					timer.setTimePoint("setBase**");
+				}
+
+				auto r = macoro::sync_wait(macoro::when_all_ready(
+					oles[0].expand(A, C0, prng0, sock[0]) | macoro::start_on(threadPools[0]) ,
+					oles[1].expand(B, C1, prng1, sock[1]) | macoro::start_on(threadPools[1]) ));
+				std::get<0>(r).result();
+				std::get<1>(r).result();
+				timer.setTimePoint("done______");
+
+			}
+		}
+
+		if (!quiet)
+			std::cout << "Time taken: \n" << timer << std::endl;
+#else
+		throw UnitTestSkipped("ENABLE_RINGLPN not defined.");
+#endif
+
+	}
+	catch(const std::exception& e)
+	{
+		std::cout << "RingLpnBench exception: " << e.what() << std::endl;
 	}
 
 	inline void benchmark(CLP& cmd)
@@ -1414,6 +1520,8 @@ namespace osuCrypto
 			SumDmpfBench(cmd);
 		else if (cmd.isSet("fft"))
 			FftBench(cmd);
+		else if (cmd.isSet("ring"))
+			RingLpnBench(cmd);
 		else
 		{
 			std::cout << "unknown benchmark, opts:" << std::endl;

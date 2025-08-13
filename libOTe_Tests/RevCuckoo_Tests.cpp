@@ -95,97 +95,140 @@ namespace osuCrypto
 
 	void BinSolver_multiplyMtx_test(const oc::CLP& cmd)
 	{
-		u64 m = cmd.getOr("m", 10);
-		u64 n = cmd.getOr("n", 10);
-		u64 k = cmd.getOr("k", 10);;
+		struct Param
+		{
+			u64 m, n, k;
+		};
+
+
+		//u64 m = cmd.getOr("m", 10);
+		//u64 n = cmd.getOr("n", 10);
+		//u64 k = cmd.getOr("k", 10);;
 		u64 t = cmd.getOr("t", 10);
 
-		auto m8 = divCeil(m, 8);
-		//auto n8 = divCeil(n, 8);
-		auto k8 = divCeil(k, 8);
-
-		PRNG prng(block(3423345222341334, 2394871239472938));
-
-		for (u64 tt = 0; tt < t; ++tt)
+		for (auto p : {
+			Param{ 10, 10, 10 },
+			Param{ 10, 20, 10 },
+			Param{ 20, 10, 10 },
+			Param{ 20, 20, 10 },
+			Param{ 10, 20, 20 },
+			Param{ 20, 10, 20 }
+			})
 		{
+			auto m = p.m;
+			auto n = p.n;
+			auto k = p.k;
 
-			std::array<BinarySolver, 2> s;
-			u64 cc = 40 + m;
-			s[0].init(0, m, cc, 10);
-			s[1].init(1, m, cc, 10);
-			setBase(s);
+			auto m8 = divCeil(m, 8);
+			//auto n8 = divCeil(n, 8);
+			auto k8 = divCeil(k, 8);
 
+			PRNG prng(block(3423345222341334, 2394871239472938));
 
-			//     m         k		   k
-			//   aaaaa     bbbbb     ccccc
-			// n aaaaa * m bbbbb = n ccccc
-			//   aaaaa     bbbbb     ccccc
-			Matrix<u8> a(n, m8), a0(n, m8), a1(n, m8);
-			Matrix<u8>
-				b(m, k8),
-				b0(m, k8), c0(n, k8),
-				b1(m, k8), c1(n, k8);
-
-			for (u64 i = 0; i < m; ++i)
+			for (u64 tt = 0; tt < t; ++tt)
 			{
-				for (u64 j = 0; j < k; ++j)
-				{
-					*BitIterator(b[i].data(), j) = prng.getBit();
-					*BitIterator(b0[i].data(), j) = prng.getBit();
-				}
-				for (u64 j = 0; j < b.cols(); ++j)
-					b1(i, j) = b(i, j) ^ b0(i, j);
-			}
-			for (u64 i = 0; i < n; ++i)
-			{
-				for (u64 j = 0; j < m; ++j)
-				{
-					*BitIterator(a[i].data(), j) = prng.getBit();
-					*BitIterator(a0[i].data(), j) = prng.getBit();
-				}
-				for (u64 j = 0; j < a.cols(); ++j)
-					a1(i, j) = a(i, j) ^ a0(i, j);
-			}
-			auto sock = coproto::LocalAsyncSocket::makePair();
 
-			auto r = macoro::sync_wait(macoro::when_all_ready(
-				s[0].multiplyMtx(k, a0, b0, c0, sock[0]),
-				s[1].multiplyMtx(k, a1, b1, c1, sock[1])
-			));
-			std::get<0>(r).result();
-			std::get<1>(r).result();
+				std::array<BinarySolver, 2> s;
+				auto numOts = std::min<u64>(n * m, m * k);
+				s[0].mMult.init(0, numOts);
+				s[1].mMult.init(1, numOts);
 
-			Matrix<u8> act(n, k8);
-			Matrix<u8> exp(n, k8);
-			for (u64 i = 0; i < n; ++i)
-			{
-				for (u64 j = 0; j < k; ++j)
 				{
-					//a[i,*] * b[*,j] = c[i,j]
-					for (u64 l = 0; l < m; ++l)
+					auto baseCount = s[0].mMult.baseOtCount();
+					auto baseRecv = std::vector<block>(baseCount);
+					auto baseSend = std::vector<std::array<block, 2>>(baseCount);
+					BitVector baseChoice;
+					baseRecv.resize(baseCount);
+					baseSend.resize(baseCount);
+					baseChoice.resize(baseCount);
+					baseChoice.randomize(prng);
+					for (u64 i = 0; i < baseCount; ++i)
 					{
-						*BitIterator(exp[i].data(), j) ^=
-							(*BitIterator(a[i].data(), l) &
-								*BitIterator(b[l].data(), j));
+						baseSend[i][0] = prng.get();
+						baseSend[i][1] = prng.get();
+						baseRecv[i] = baseSend[i][baseChoice[i]];
+					}
+					s[0].mMult.setBaseOts(baseSend, baseRecv, baseChoice);
+					s[1].mMult.setBaseOts(baseSend, baseRecv, baseChoice);
+				}
+
+				//u64 cc = 40 + m;
+				//s[0].init(0, m, cc, 10);
+				//s[1].init(1, m, cc, 10);
+				//setBase(s);
+
+
+				//     m         k		   k
+				//   aaaaa     bbbbb     ccccc
+				// n aaaaa * m bbbbb = n ccccc
+				//   aaaaa     bbbbb     ccccc
+				Matrix<u8> a(n, m8), a0(n, m8), a1(n, m8);
+				Matrix<u8>
+					b(m, k8),
+					b0(m, k8), c0(n, k8),
+					b1(m, k8), c1(n, k8);
+
+				for (u64 i = 0; i < m; ++i)
+				{
+					for (u64 j = 0; j < k; ++j)
+					{
+						*BitIterator(b[i].data(), j) = prng.getBit();
+						*BitIterator(b0[i].data(), j) = prng.getBit();
+					}
+					for (u64 j = 0; j < b.cols(); ++j)
+						b1(i, j) = b(i, j) ^ b0(i, j);
+				}
+				for (u64 i = 0; i < n; ++i)
+				{
+					for (u64 j = 0; j < m; ++j)
+					{
+						*BitIterator(a[i].data(), j) = prng.getBit();
+						*BitIterator(a0[i].data(), j) = prng.getBit();
+					}
+					for (u64 j = 0; j < a.cols(); ++j)
+						a1(i, j) = a(i, j) ^ a0(i, j);
+				}
+				auto sock = coproto::LocalAsyncSocket::makePair();
+
+				auto r = macoro::sync_wait(macoro::when_all_ready(
+					s[0].multiplyMtx(k, a0, b0, c0, sock[0]),
+					s[1].multiplyMtx(k, a1, b1, c1, sock[1])
+				));
+				std::get<0>(r).result();
+				std::get<1>(r).result();
+
+				Matrix<u8> act(n, k8);
+				Matrix<u8> exp(n, k8);
+				for (u64 i = 0; i < n; ++i)
+				{
+					for (u64 j = 0; j < k; ++j)
+					{
+						//a[i,*] * b[*,j] = c[i,j]
+						for (u64 l = 0; l < m; ++l)
+						{
+							*BitIterator(exp[i].data(), j) ^=
+								(*BitIterator(a[i].data(), l) &
+									*BitIterator(b[l].data(), j));
+						}
 					}
 				}
-			}
 
-			for (u64 i = 0; i < n; ++i)
-			{
-				for (u64 j = 0; j < b.cols(); ++j)
+				for (u64 i = 0; i < n; ++i)
 				{
-
-					//exp(i, j) = a[i] * b(i, j);
-					act(i, j) = c0(i, j) ^ c1(i, j);
-					if (act(i, j) != exp(i, j))
+					for (u64 j = 0; j < b.cols(); ++j)
 					{
-						std::cout << i << "  " << j << std::endl;
-						//std::cout << "a   " << a[i] << std::endl;
-						//std::cout << "b   " << int(b(i, j)) << std::endl;
-						std::cout << "act " << int(act(i, j)) << std::endl;
-						std::cout << "exp " << int(exp(i, j)) << std::endl;
-						throw RTE_LOC;
+
+						//exp(i, j) = a[i] * b(i, j);
+						act(i, j) = c0(i, j) ^ c1(i, j);
+						if (act(i, j) != exp(i, j))
+						{
+							std::cout << i << "  " << j << std::endl;
+							//std::cout << "a   " << a[i] << std::endl;
+							//std::cout << "b   " << int(b(i, j)) << std::endl;
+							std::cout << "act " << int(act(i, j)) << std::endl;
+							std::cout << "exp " << int(exp(i, j)) << std::endl;
+							throw RTE_LOC;
+						}
 					}
 				}
 			}
@@ -220,98 +263,104 @@ namespace osuCrypto
 		PRNG prng(block(3423345222341334, 2394871239472938));
 		u64 trials = cmd.getOr("t", 1);
 
-		for (u64 tt = 0; tt < trials; ++tt)
+		//u64 m = cmd.getOr("m", 4);
+		//u64 c = cmd.getOr("ssp", 8) + m;
+		for (u64 c = 2; c < 20; ++c)
 		{
+			auto m = c / 2;
 
-			u64 m = cmd.getOr("m", 4);
-			u64 c = cmd.getOr("ssp", 8) + m;
-			std::array<BinarySolver, 2> s;
-			s[0].init(0, m, c, 10);
-			s[1].init(1, m, c, 10);
-
-			setBase(s);
-
-
-			std::array<std::vector<u8>, 2> Mi{
-				std::vector<u8>(divCeil(c, 8)),
-				std::vector<u8>(divCeil(c, 8)) };
-			std::array<std::vector<u8>, 2> r{
-				std::vector<u8>(divCeil(c, 8)),
-				std::vector<u8>(divCeil(c, 8)) };
-
-			prng.get(Mi[0].data(), Mi[0].size());
-			prng.get(Mi[1].data(), Mi[1].size());
-
-			//u64 v = 0b11010100100001000;
-			//copyBytesMin(Mi[0], v);
-			//setBytes(Mi[1], 0);
-
-			std::vector<u8> plainM(divCeil(c, 8));
-			std::vector<u8> plainR(divCeil(c, 8));
-			for (u64 i = 0; i < plainM.size(); ++i)
-				plainM[i] = Mi[0][i] ^ Mi[1][i];
-
-			//s[0].firstOneBit(plainM, plainR);
-
-			auto sock = coproto::LocalAsyncSocket::makePair();
-			auto res = macoro::sync_wait(macoro::when_all_ready(
-				s[0].firstOneBit(Mi[0], r[0], sock[0]),
-				s[1].firstOneBit(Mi[1], r[1], sock[1])
-			));
-			std::get<0>(res).result();
-			std::get<1>(res).result();
-
-
-			//std::cout << "m ";
-			//for (u64 i = 0; i < c; ++i)
-			//{
-			//	auto mm0 = BitIterator((u8*)Mi[0].data(), i);
-			//	auto mm1 = BitIterator((u8*)Mi[1].data(), i);
-			//	std::cout << (*mm0 ^ *mm1) << " ";
-			//}
-			//std::cout << std::endl;
-			//std::cout << "s ";
-			//std::vector<u8> sv(c);
-			//for (u64 i = 0; i < c; ++i)
-			//{
-			//	auto ss0 = BitIterator((u8*)r[0].data(), i);
-			//	auto ss1 = BitIterator((u8*)r[1].data(), i);
-			//	sv[i] = (*ss0 ^ *ss1);
-			//	std::cout << (int)sv[i] << " ";
-			//}
-			//std::cout << std::endl;
-
-			bool found = false;
-			u64 cnt = 0;
-			for (u64 i = 0; i < c; ++i)
+			for (u64 tt = 0; tt < trials; ++tt)
 			{
-				auto mm0 = BitIterator((u8*)Mi[0].data(), i);
-				auto mm1 = BitIterator((u8*)Mi[1].data(), i);
-				auto ss0 = BitIterator((u8*)r[0].data(), i);
-				auto ss1 = BitIterator((u8*)r[1].data(), i);
+				std::array<BinarySolver, 2> s;
+				s[0].init(0, m, c, 10);
+				s[1].init(1, m, c, 10);
 
-				auto ss = *ss0 ^ *ss1;
-				auto mm = *mm0 ^ *mm1;
-				cnt += ss;
-				if (!found)
-				{
-					if (mm)
-						found = true;
+				setBase(s);
 
-					if (ss != mm)
-						throw std::runtime_error(LOCATION);
-				}
-				else
+
+				std::array<std::vector<u8>, 2> Mi{
+					std::vector<u8>(divCeil(c, 8)),
+					std::vector<u8>(divCeil(c, 8)) };
+				std::array<std::vector<u8>, 2> r{
+					std::vector<u8>(divCeil(c, 8)),
+					std::vector<u8>(divCeil(c, 8)) };
+
+				prng.get(Mi[0].data(), Mi[0].size());
+				prng.get(Mi[1].data(), Mi[1].size());
+
+				//u64 v = 0b11010100100001000;
+				//copyBytesMin(Mi[0], v);
+				//setBytes(Mi[1], 0);
+
+				std::vector<u8> plainM(divCeil(c, 8));
+				std::vector<u8> plainR(divCeil(c, 8));
+				for (u64 i = 0; i < plainM.size(); ++i)
+					plainM[i] = Mi[0][i] ^ Mi[1][i];
+
+				//s[0].firstOneBit(plainM, plainR);
+
+				auto sock = coproto::LocalAsyncSocket::makePair();
+				auto res = macoro::sync_wait(macoro::when_all_ready(
+					s[0].firstOneBit(Mi[0], r[0], sock[0]),
+					s[1].firstOneBit(Mi[1], r[1], sock[1])
+				));
+				std::get<0>(res).result();
+				std::get<1>(res).result();
+
+
+				//std::cout << "m ";
+				//for (u64 i = 0; i < c; ++i)
+				//{
+				//	auto mm0 = BitIterator((u8*)Mi[0].data(), i);
+				//	auto mm1 = BitIterator((u8*)Mi[1].data(), i);
+				//	std::cout << (*mm0 ^ *mm1) << " ";
+				//}
+				//std::cout << std::endl;
+				//std::cout << "s ";
+				//std::vector<u8> sv(c);
+				//for (u64 i = 0; i < c; ++i)
+				//{
+				//	auto ss0 = BitIterator((u8*)r[0].data(), i);
+				//	auto ss1 = BitIterator((u8*)r[1].data(), i);
+				//	sv[i] = (*ss0 ^ *ss1);
+				//	std::cout << (int)sv[i] << " ";
+				//}
+				//std::cout << std::endl;
+
+				bool found = false;
+				u64 cnt = 0;
+				for (u64 i = 0; i < c; ++i)
 				{
-					if (ss)
-						throw std::runtime_error(LOCATION);
+					auto mm0 = BitIterator((u8*)Mi[0].data(), i);
+					auto mm1 = BitIterator((u8*)Mi[1].data(), i);
+					auto ss0 = BitIterator((u8*)r[0].data(), i);
+					auto ss1 = BitIterator((u8*)r[1].data(), i);
+
+					auto ss = *ss0 ^ *ss1;
+					auto mm = *mm0 ^ *mm1;
+					cnt += ss;
+					if (!found)
+					{
+						if (mm)
+							found = true;
+
+						if (ss != mm)
+							throw std::runtime_error(LOCATION);
+					}
+					else
+					{
+						if (ss)
+							throw std::runtime_error(LOCATION);
+					}
 				}
+
+				if (cnt != u64(found))
+					throw std::runtime_error(LOCATION);
 			}
-
-			if (cnt != 1)
-				throw std::runtime_error(LOCATION);
 		}
 	}
+
+
 
 	void BinSolver_solve_test(const oc::CLP& cmd)
 	{
@@ -367,7 +416,7 @@ namespace osuCrypto
 					*BitIterator(ys[1][i].data(), j) = prng.getBit();
 				}
 			}
-			
+
 
 
 			Matrix<u8> M(m, c8);
@@ -618,7 +667,7 @@ namespace osuCrypto
 		std::get<1>(r).result();
 
 		// verify that the internal shares are correct.
-		for(u64 s = 0, k = 0; s < numSets;++s)
+		for (u64 s = 0, k = 0; s < numSets; ++s)
 		{
 			u64 f = dpf[0].mLeafShares.size() / numSets;
 			std::set<u64> active;
@@ -683,7 +732,7 @@ namespace osuCrypto
 			// Expand values using the cached point setup
 			auto r = macoro::sync_wait(macoro::when_all_ready(
 				dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }),
-				dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j,i) = v; })
+				dpf[1].expand(values1, prng, sock[1], [&](auto j, auto i, auto v) { output[1](j, i) = v; })
 			));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
@@ -736,7 +785,7 @@ namespace osuCrypto
 				if (!allCorrect)
 				{
 					std::cout << "Iteration " << iteration + 1 << " failed verification for set " << s << std::endl;
-					for(u64 i = 0; i < domain; ++i)
+					for (u64 i = 0; i < domain; ++i)
 					{
 						auto iter = expectedMap.find(i);
 						F actual, neg;
@@ -746,7 +795,7 @@ namespace osuCrypto
 
 						if (actual != expected)
 							std::cout << Color::Red;
-						std::cout << i << ": Exp " << expected << ", Act " << actual 
+						std::cout << i << ": Exp " << expected << ", Act " << actual
 							<< " = " << output[0](s, i) << " + " << output[1](s, i)
 							<< ", negExp " << neg
 							<< std::endl << Color::Default;

@@ -1,12 +1,14 @@
 #pragma once
 
 #include "cryptoTools/Common/Defines.h"
+#include "cryptoTools/Common/Timer.h"
 #include "RegularDpf.h"
+
 namespace osuCrypto
 {
 
 	template<typename T, typename CoeffCtx = DefaultCoeffCtx<T>>
-	struct SumDmpf
+	struct SumDmpf : public TimerAdapter
 	{
 
 		u64 mPartyIdx = 0;
