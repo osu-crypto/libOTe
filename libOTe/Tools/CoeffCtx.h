@@ -31,8 +31,7 @@ namespace osuCrypto {
 			ret = lhs * rhs;
 		}
 
-		template<typename F>
-		OC_FORCEINLINE bool eq(F&& lhs, F&& rhs)const {
+		OC_FORCEINLINE bool eq(auto&& lhs, auto&& rhs)const {
 			return lhs == rhs;
 		}
 

@@ -25,8 +25,8 @@ namespace osuCrypto
 
 		oc::BitVector mChoiceBits;
 
-		std::vector<block> mRecvOts;
-		std::vector<std::array<block, 2>> mSendOts;
+		AlignedUnVector<block> mRecvOts;
+		AlignedUnVector<std::array<block, 2>> mSendOts;
 
 		u64 mOtIdx = 0;
 
@@ -147,7 +147,7 @@ namespace osuCrypto
 			co_await sock.send(std::move(buffer));
 			buffer.resize(buffSize);
 			co_await sock.recv(buffer);
-			std::vector<block> theta1(theta.size());
+			AlignedUnVector<block> theta1(theta.size());
 			BitVector phi1(phi.size());
 			copyBytes(theta1, buffer.subspan(0, thetaSize));
 			copyBytes(phi1.getSpan<u8>(), buffer.subspan(thetaSize));
@@ -310,7 +310,7 @@ namespace osuCrypto
 
 				// Dereference operators
 				auto operator*() const { return mBase[mIdx]; }
-				auto operator->() const { return &mBase[mIdx]; }
+				//auto operator->() const { return &mBase[mIdx]; }
 
 				// Subscript operator for random access
 				span<T> operator[](difference_type i) const { return mBase[mIdx + i]; }
@@ -468,7 +468,7 @@ namespace osuCrypto
 			}
 
 			template<typename F>
-			void fromBlock(F& ret, const block& b) const
+			void fromBlock(F&& ret, const block& b) const
 			{
 				auto bytes = std::min(ret.size(), sizeof(block));
 				if (ret.size() > sizeof(block))
@@ -488,25 +488,47 @@ namespace osuCrypto
 				}
 			}
 
-			template<typename F>
-			void serialize(const F* begin, const F* end, u8* dst) const
+			// given x and a masking block `mask` with value 0x0000...00 or 0xffff...ff,
+			// return F(0) if `mask` is 0 and otherwise return x.
+			void mask(auto&& ret, auto&& x, const block& mask)const
 			{
-				for (auto it = begin; it != end; ++it)
+				auto maskValue = mask.get<u8>(0);
+				for(u64 i = 0; i < ret.size(); ++i)
 				{
-					std::memcpy(dst, it->data(), it->size());
-					dst += it->size();
+					ret[i] = x[i] & maskValue;
 				}
 			}
 
-			void deserialize(const auto* src, const auto* srcEnd, auto dst) const
+			void serialize(auto&& begin, auto&& end, u8* dst) const
 			{
-				auto elementSize = byteSize<u8>();
+				auto elementSize = divCeil(mBitCount, 8);
+				for (auto it = begin; it != end; ++it)
+				{
+					auto&& elem = *it;
+					std::memcpy(dst, elem.data(), elementSize);
+					dst += elementSize;
+				}
+			}
+
+			void deserialize(const u8* src, const u8* srcEnd, auto dst) const
+			{
+				auto elementSize = divCeil(mBitCount, 8);
 				while (src < srcEnd)
 				{
-					dst->resize(divCeil(mBitCount, 8));
-					std::memcpy(dst->data(), &*src, elementSize);
+					auto&& elem = *dst++;
+					std::memcpy(elem.data(), src, elementSize);
 					src += elementSize;
 				}
+			}
+
+			bool eq(auto&& lhs, auto&& rhs) const
+			{
+				if (lhs.size() != rhs.size()) return false;
+				for (u64 i = 0; i < lhs.size(); ++i)
+				{
+					if (lhs[i] != rhs[i]) return false;
+				}
+				return true;
 			}
 		};
 
@@ -565,14 +587,14 @@ namespace osuCrypto
 			u64 mExpandIdx = 0;
 
 			// Store raw OT data from DpfMult
-			std::vector<block> mRecvOts;
-			std::vector<std::array<block, 2>> mSendOts;
+			span<block> mRecvOts;
+			span<std::array<block, 2>> mSendOts;
 			BitVector mX;
 
 			void clear()
 			{
-				mRecvOts.clear();
-				mSendOts.clear();
+				mRecvOts = {};
+				mSendOts = {};
 				mX = {};
 			}
 
@@ -643,74 +665,143 @@ namespace osuCrypto
 				// can locally compute it given mSendOts0[0].
 
 				u64 n = mX.size();
+				auto n8 = n / 8 * 8;
 				if (std::distance(yBegin, yEnd) != i64(n))
 					throw RTE_LOC;
 
 				// make sure we can deref xy
 				std::ignore = *(xyBegin + (n - 1));
 
-				std::vector<u8> msg(n * ctx.template byteSize<F>());
+				AlignedUnVector<u8> msg(n * ctx.template byteSize<F>());
 				auto mIter = msg.data();
 				auto zero = ctx.template make<F>();
-				auto t0 = ctx.template make<F>();
-				auto m1 = ctx.template make<F>();
+				auto t0 = ctx.template makeVec<F>(8);
+				auto yx = ctx.template makeVec<F>(8);
+				auto ynx = ctx.template makeVec<F>(8);
+				auto m1 = ctx.template makeVec<F>(8);
 				//auto nt0 = ctx.template make<F>();
-				auto mx = ctx.template make<F>();
-				auto w0 = ctx.template make<F>();
+				auto mx = ctx.template makeVec<F>(8);
+				auto w0 = ctx.template makeVec<F>(8);
+#define SIMD8(VAR, STATEMENT) do{\
+	{ constexpr u64 VAR = 0; STATEMENT; }\
+	{ constexpr u64 VAR = 1; STATEMENT; }\
+	{ constexpr u64 VAR = 2; STATEMENT; }\
+	{ constexpr u64 VAR = 3; STATEMENT; }\
+	{ constexpr u64 VAR = 4; STATEMENT; }\
+	{ constexpr u64 VAR = 5; STATEMENT; }\
+	{ constexpr u64 VAR = 6; STATEMENT; }\
+	{ constexpr u64 VAR = 7; STATEMENT; }\
+	}while(0)
 
 				ctx.zero(zero);
-				for (u64 i = 0; i < n; ++i)
+
+				for (u64 i = 0; i < n8; i+= 8)
 				{
-					ctx.fromBlock(t0, mSendOts[i][0]);
+					SIMD8(q, ctx.fromBlock(t0[q], mSendOts.data()[i + q][0]));
+				
+					// xi = mX[i]
+					block xi[8];
+					u8 xx = mX.data()[i / 8];
+					SIMD8(q, xi[q] = block::allSame<u32>(-((xx >> q) & 1)));
+
+					//if (xi)
+					//	ctx.minus(t0, t0, yBegin[i]);
+					SIMD8(q, ctx.mask(yx[q], yBegin[i+q], xi[q])); // yx = y * x
+					SIMD8(q, ctx.minus(t0[q], t0[q], yx[q]));      // t0 = t0 - yx 
+
+					// m1 = t0 + (x0 ⊕ 1) * y0
+					SIMD8(q, ctx.fromBlock(m1[q], mSendOts.data()[i+q][1])); // mask the m1 message using the OT.
+					SIMD8(q, ctx.plus(m1[q], m1[q], t0[q]));
+					SIMD8(q, ctx.minus(ynx[q], yBegin[i + q], yx[q])); // if xi[q] == 0, then yBegin[i + q] is added to m1[q]
+					SIMD8(q, ctx.plus(m1[q], m1[q], ynx[q]));
+
+					ctx.serialize(m1.begin(), m1.end(), mIter);
+					mIter += ctx.template byteSize<F>() * 8;
+
+					// xy = -t0
+					SIMD8(q, ctx.minus(xyBegin[i + q], zero, t0[q]));
+				}
+
+				for (u64 i = n8; i < n; ++i)
+				{
+					ctx.fromBlock(t0[0], mSendOts.data()[i][0]);
 
 					auto xi = mX[i];
 					if (xi)
-						ctx.minus(t0, t0, yBegin[i]);
+						ctx.minus(t0[0], t0[0], yBegin[i]);
 
 					// m1 = t0 + (x0 ⊕ 1) * y0
-					ctx.fromBlock(m1, mSendOts[i][1]); // mask the m1 message using the OT.
-					ctx.plus(m1, m1, t0);
+					ctx.fromBlock(m1[0], mSendOts.data()[i][1]); // mask the m1 message using the OT.
+					ctx.plus(m1[0], m1[0], t0[0]);
 					if (xi == 0)
-						ctx.plus(m1, m1, yBegin[i]);
+						ctx.plus(m1[0], m1[0], yBegin[i]);
 
-					ctx.serialize(&m1, &m1 + 1, mIter);
+					ctx.serialize(m1.begin(), m1.begin()+1, mIter);
 					mIter += ctx.template byteSize<F>();
 
 					// xy = -t0
-					ctx.minus(xyBegin[i], zero, t0);
+					ctx.minus(xyBegin[i], zero, t0[0]);
 				}
 
 				co_await sock.send(std::move(msg));
 				msg.resize(n * ctx.template byteSize<F>());
 				co_await sock.recv(msg);
 				mIter = msg.data();
-				for (u64 i = 0; i < n; ++i)
+
+
+				for (u64 i = 0; i < n8; i+=8)
 				{
-					ctx.deserialize(mIter + 0, mIter + ctx.template byteSize<F>(), &m1);
+					ctx.deserialize(
+						mIter + 0, 
+						mIter + ctx.template byteSize<F>() * 8, 
+						m1.begin());
+					mIter += ctx.template byteSize<F>() * 8;
+
+
+					SIMD8(q, ctx.fromBlock(mx[q], mRecvOts.data()[i+q]));
+
+					//u8 xi = mX[i];
+					block xi[8];
+					u8 xx = mX.data()[i / 8];
+					SIMD8(q, xi[q] = block::allSame<u32>(-((xx >> q) & 1)));
+
+					// t0 = m1 - mx - mx
+					SIMD8(q, ctx.minus(t0[q], m1[q], mx[q]));
+					SIMD8(q, ctx.minus(t0[q], t0[q], mx[q]));
+					SIMD8(q, ctx.mask(t0[q], t0[q], xi[q]));
+					SIMD8(q, ctx.plus(w0[q], t0[q], mx[q]));
+					SIMD8(q, ctx.plus(xyBegin[i+q], xyBegin[i+q], w0[q]));
+				}
+
+				for (u64 i = n8; i < n; ++i)
+				{
+					ctx.deserialize(mIter + 0, mIter + ctx.template byteSize<F>(), m1.begin());
 					mIter += ctx.template byteSize<F>();
 
-					ctx.fromBlock(mx, mRecvOts[i]);
+					ctx.fromBlock(mx[0], mRecvOts.data()[i]);
 
-					auto xi = mX[i];
-					if (xi)
-					{
-						// m1 = mx + w0
-						//    = mx + (t1 + (1 ⊕ x1) * y1)
-						//    = mx + (t1 +  x       * y1)
-						// w0 = m1 - mx
-						//	  = (t1 + x * y1)
-						ctx.minus(w0, m1, mx);
-					}
-					else
-					{
-						// w0 = m0 = mx
-						//    = (t1 + (0 ⊕ x1) * y1)
-						//    = (t1 + x * y1)
-						ctx.copy(w0, mx);
-					}
+					//if (xi)
+					//{
+					//	 m1 = mx + w0
+					//	    = mx + (t1 + (1 ⊕ x1) * y1)
+					//	    = mx + (t1 +  x       * y1)
+					//	 w0 = m1 - mx
+					//		  = (t1 + x * y1)
+					//}
+					//else
+					//{
+					//	w0 = m0 = mx
+					//	   = (t1 + (0 ⊕ x1) * y1)
+					//	   = (t1 + x * y1)
+					//}
 
-					// reconstruct xy
-					ctx.plus(xyBegin[i], xyBegin[i], w0);
+					u8 xi = mX[i];
+					// t0 = m1 - mx - mx
+					ctx.minus(t0[0], m1[0], mx[0]);
+					ctx.minus(t0[0], t0[0], mx[0]);
+					ctx.mask(t0[0], t0[0], xi ? block::allSame<u32>(-1) : block::allSame<u32>(0));
+					ctx.plus(w0[0], t0[0], mx[0]);
+					ctx.plus(xyBegin[i], xyBegin[i], w0[0]);
 				}
 			}
 
@@ -762,8 +853,8 @@ namespace osuCrypto
 			MultSession session;
 			session.mPartyIdx = mPartyIdx;
 			session.mExpandIdx = 0;
-			session.mRecvOts.assign(mRecvOts.data() + otIdx, mRecvOts.data() + otIdx + n);
-			session.mSendOts.assign(mSendOts.data() + otIdx, mSendOts.data() + otIdx + n);
+			session.mRecvOts = span{ mRecvOts.data() + otIdx, n };
+			session.mSendOts = span{ mSendOts.data() + otIdx, n };
 			session.mX = BitVector((u8*)x.data(), n, 0);
 
 			// Extract our a shares from choice bits
@@ -771,7 +862,7 @@ namespace osuCrypto
 			c0.append(mChoiceBits, n, otIdx);
 
 			// Compute phi0 = x0 + c0 (bit-wise XOR for bits)
-			std::vector<u8> phi0(x.size());
+			AlignedUnVector<u8> phi0(x.size());
 			auto C0 = c0.getSpan<u8>();
 			for (u64 i = 0; i < phi0.size(); ++i)
 				phi0[i] = x[i] ^ C0[i];
@@ -783,7 +874,7 @@ namespace osuCrypto
 
 			co_await sock.send(std::move(phi0));
 			// Receive phi1 from the other party
-			std::vector<u8> phi1(x.size());
+			AlignedUnVector<u8> phi1(x.size());
 			co_await sock.recv(phi1);
 
 			for (u64 i = 0; i < n; ++i)
@@ -811,8 +902,8 @@ namespace osuCrypto
 			MultSession session;
 			session.mPartyIdx = mPartyIdx;
 			session.mExpandIdx = 0;
-			session.mRecvOts.assign(mRecvOts.data() + otIdx, mRecvOts.data() + otIdx + n);
-			session.mSendOts.assign(mSendOts.data() + otIdx, mSendOts.data() + otIdx + n);
+			session.mRecvOts = span{ mRecvOts.data() + otIdx, n };
+			session.mSendOts = span{ mSendOts.data() + otIdx, n };
 			session.mX.append(mChoiceBits, n, otIdx);
 
 			return session;
@@ -969,8 +1060,11 @@ namespace osuCrypto
 
 			mSendOts.clear();
 			mRecvOts.clear();
-			mSendOts.insert(mSendOts.end(), baseSendOts.begin(), baseSendOts.end());
-			mRecvOts.insert(mRecvOts.end(), recvBaseOts.begin(), recvBaseOts.end());
+			mSendOts.resize(baseSendOts.size());
+			mRecvOts.resize(recvBaseOts.size());
+			
+			std::copy(baseSendOts.begin(), baseSendOts.end(), mSendOts.begin());
+			std::copy(recvBaseOts.begin(), recvBaseOts.end(), mRecvOts.begin());
 			mChoiceBits = baseChoices;
 			mOtIdx = 0;
 		}

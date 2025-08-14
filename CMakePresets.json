@@ -116,6 +116,7 @@
         "FETCH_AUTO": true,
         "ENABLE_CIRCUITS": true,
         "ENABLE_BITPOLYMUL": false,
+        "ENABLE_RINGLPN":  true,
         "VERBOSE_FETCH": true,
         "ENABLE_PIC": false,
         "ENABLE_ASAN": false,

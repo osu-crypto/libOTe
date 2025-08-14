@@ -235,155 +235,148 @@ namespace osuCrypto
 		template<typename F, typename CoeffCtx>
 		task<> left(auto&& src, auto&& dst, auto&& diff, CoeffCtx ctx,
 			std::vector<u64>& subnetSizes,
+			u64& numSubnets,
 			std::vector<u64>& nextSubnetSizes,
+			u64& nextNumSubnets2,
 			Socket& sock)
 		{
-			auto numSubnets = subnetSizes.size();
-			u64 idx = 0;
-			u64 dIdx = 0;
+			nextNumSubnets2 = 0;
+			auto diffIter = diff.begin();
+			auto srcIter = src.begin();
 
 			for (u64 subnetIdx = 0; subnetIdx < numSubnets; ++subnetIdx)
 			{
-				auto size = subnetSizes[subnetIdx];
+				auto size = subnetSizes.data()[subnetIdx];
 
-				auto inputBegin = src.begin() + idx;
-				//auto output0Begin = dst.begin() + idx;
-				//auto output1Begin = output0Begin + size / 2;
-
-				idx += size;
-				nextSubnetSizes.push_back(size / 2);
-				nextSubnetSizes.push_back(size - size / 2);
+				auto inputBegin = srcIter;
+				srcIter += size;
+				
+				nextSubnetSizes.data()[nextNumSubnets2++] = size / 2;
+				nextSubnetSizes.data()[nextNumSubnets2++] = size - size / 2;
 
 				// Collect differences for this subnet
 				for (u64 i = 0; i + 1 < size; i += 2)
 				{
-					// Expand diff if needed
-					if (dIdx >= diff.size())
-					{
-						ctx.resize(diff, dIdx + 1);
-					}
-
 					// diff = input[1] - input[0]
-					ctx.minus(diff[dIdx++], inputBegin[i + 1], inputBegin[i]);
+					ctx.minus(*diffIter++, inputBegin[i + 1], inputBegin[i]);
 				}
 			}
 
-			// Multiply differences with random bits
-			ctx.resize(diff, dIdx);
-			co_await randMultiply<F>(diff, diff, sock, ctx);
+			co_await randMultiply2<F>(diff.begin(), diffIter, sock, ctx);
 
 			// Apply the multiplied differences
-			idx = 0;
-			dIdx = 0;
+			
+			diffIter = diff.begin();
+			srcIter = src.begin();
+			auto dstIter = dst.begin();
+			auto temp_val = ctx.template make<F>();
+
 			for (u64 subnetIdx = 0; subnetIdx < numSubnets; ++subnetIdx)
 			{
-				auto size = subnetSizes[subnetIdx];
-				auto inputBegin = src.begin() + idx;
-				auto output0Begin = dst.begin() + idx;
+				auto size = subnetSizes.data()[subnetIdx];
+				auto inputBegin = srcIter;
+				auto output0Begin = dstIter;
 				auto output1Begin = output0Begin + size / 2;
 
-				idx += size;
+				srcIter += size;
+				dstIter += size;
 
 				for (u64 i = 0; i + 1 < size; i += 2)
 				{
+					auto input0 = *inputBegin++;
+					auto input1 = *inputBegin++;
+
 					// output0 = ctrl * (input[1]-input[0]) + input[0]
 					//         = input[ctrl]
-					ctx.plus(output0Begin[i / 2], inputBegin[i], diff[dIdx]);
+					ctx.plus(*output0Begin, input0, *diffIter++);
 
 					// output1 = (input[0]+input[1]) - output0
 					//         = input[!ctrl]
-					auto temp_val = ctx.template make<F>();
-					ctx.plus(temp_val, inputBegin[i], inputBegin[i + 1]);
-					ctx.minus(output1Begin[i / 2], temp_val, output0Begin[i / 2]);
+					ctx.plus(temp_val, input0, input1);
+					ctx.minus(*output1Begin++, temp_val, *output0Begin++);
 
-					dIdx++;
 				}
 
 				if (size & 1)
 				{
-					ctx.copy(output1Begin[size / 2], inputBegin[size - 1]);
+					ctx.copy(*output1Begin, *inputBegin);
 				}
 			}
-
-			if (print)
-			{
-				// Debug output - would need to be adapted for generic types
-				// Skipping for now as it requires type-specific serialization
-			}
-
 		}
 
 
 		template<typename F, typename CoeffCtx>
 		task<> right(auto&& src, auto&& dst, auto&& diff, CoeffCtx ctx,
 			std::vector<u64>& subnetSizes,
+			u64 numSubnets,
 			std::vector<u64>& nextSubnetSizes,
+			u64& nextNumSubnets,
 			Socket& sock)
 		{
 
-			u64 dIdx = 0;
-			ctx.resize(diff, 0);
+			nextNumSubnets = 0;
+			auto diffIter = diff.begin();
+			auto srcIter = src.begin();
 
-			auto numSubnets = subnetSizes.size();
-			for (u64 subnetIdx = 0, idx = 0; subnetIdx < numSubnets; subnetIdx += 2)
+			//auto numSubnets = subnetSizes.size();
+			for (u64 subnetIdx = 0; subnetIdx < numSubnets; subnetIdx += 2)
 			{
-				auto size0 = subnetSizes[subnetIdx];
-				auto size1 = subnetSizes[subnetIdx + 1];
+				auto size0 = subnetSizes.data()[subnetIdx];
+				auto size1 = subnetSizes.data()[subnetIdx + 1];
 
-				auto input0Begin = src.begin() + idx;
+				auto input0Begin = srcIter;
 				auto input1Begin = input0Begin + size0;
+				srcIter = input1Begin + size1;
 
-				idx += size0 + size1;
-				nextSubnetSizes.push_back(size0 + size1);
+				//idx += size0 + size1;
+				nextSubnetSizes.data()[nextNumSubnets++] = size0 + size1;
 
 				// Collect differences
 				for (u64 i = 0; i + 1 < size0 + size1; i += 2)
 				{
-					if (dIdx >= diff.size())
-					{
-						ctx.resize(diff, dIdx + 1);
-					}
-
-					ctx.minus(diff[dIdx++], input1Begin[i / 2], input0Begin[i / 2]);
+					ctx.minus(*diffIter++, *input1Begin++, *input0Begin++);
 				}
 			}
 
-			ctx.resize(diff, dIdx);
-			co_await randMultiply<F>(diff, diff, sock, ctx);
+			co_await randMultiply2<F>(diff.begin(), diffIter, sock, ctx);
 
-			dIdx = 0;
+			auto temp_val = ctx.template make<F>();
+			diffIter = diff.begin();
+			srcIter = src.begin();
+			auto dstIter = dst.begin();
 			for (u64 subnetIdx = 0, idx = 0; subnetIdx < numSubnets; subnetIdx += 2)
 			{
-				auto size0 = subnetSizes[subnetIdx];
-				auto size1 = subnetSizes[subnetIdx + 1];
+				auto size0 = subnetSizes.data()[subnetIdx];
+				auto size1 = subnetSizes.data()[subnetIdx + 1];
 
-				auto input0Begin = src.begin() + idx;
+				auto input0Begin = srcIter;
 				auto input1Begin = input0Begin + size0;
-				auto outputBegin = dst.begin() + idx;
+				auto outputBegin = dstIter;
 
-				idx += size0 + size1;
+				auto size = size0 + size1;
+				srcIter += size;
+				dstIter += size;
 
-				for (u64 i = 0; i + 1 < size0 + size1; i += 2)
+				for (u64 i = 0; i + 1 < size; i += 2)
 				{
+					auto out0 = outputBegin++;
+					auto out1 = outputBegin++;
+
 					// output[i] = ctrl * (input1[i/2] - input0[i/2]) + input0[i/2]
 					//           = input[ctrl][i/2]
-					ctx.plus(outputBegin[i], input0Begin[i / 2], diff[dIdx]);
+					ctx.plus(*out0, *input0Begin, *diffIter++);
 
 					// output[i+1] = (input0[i/2] + input1[i/2]) - output[i]
 					//             = input[!ctrl][i/2]
-					auto temp_val = ctx.template make<F>();
-					ctx.plus(temp_val, input0Begin[i / 2], input1Begin[i / 2]);
-					ctx.minus(outputBegin[i + 1], temp_val, outputBegin[i]);
-
-					dIdx++;
+					ctx.plus(temp_val, *input0Begin++, *input1Begin++);
+					ctx.minus(*out1, temp_val, *out0);
 				}
 
 				if (size0 != size1)
 				{
-					ctx.copy(outputBegin[size0 + size1 - 1], input1Begin[size1 - 1]);
+					ctx.copy(*outputBegin, *input1Begin);
 				}
 			}
-
 		}
 
 
@@ -403,8 +396,13 @@ namespace osuCrypto
 			u64 numStages = log2ceil(n);
 			std::vector<u64> subnetSizes{ n };
 			std::vector<u64> nextSubnetSizes;
-			subnetSizes.reserve(n);
-			nextSubnetSizes.reserve(n);
+			subnetSizes.resize(1ull<< log2ceil(n));
+			nextSubnetSizes.resize(1ull << log2ceil(n));
+			u64 numSubnets = 1;
+			u64 nextNumSubnets = 0;
+
+			//subnetSizes.reserve(n);
+			//nextSubnetSizes.reserve(n);
 
 			auto temp = ctx.template makeVec<F>(data.size());
 
@@ -418,27 +416,40 @@ namespace osuCrypto
 			for (u64 stage = 0; stage < numStages; ++stage)
 			{
 				if (stageBit == 0)
-					co_await left<F>(data, temp, diff, ctx, subnetSizes, nextSubnetSizes, sock);
+					co_await left<F>(data, temp, diff, ctx, 
+						subnetSizes, numSubnets, 
+						nextSubnetSizes, nextNumSubnets, sock);
 				else
-					co_await left<F>(temp, data, diff, ctx, subnetSizes, nextSubnetSizes, sock);
+					co_await left<F>(temp, data, diff, ctx, 
+						subnetSizes, numSubnets,
+						nextSubnetSizes, nextNumSubnets, sock);
 
 				stageBit ^= 1;
 				std::swap(subnetSizes, nextSubnetSizes);
-				nextSubnetSizes.clear();
+				numSubnets = nextNumSubnets;
+				nextNumSubnets = 0;
 			}
 
+			//subnetSizes.resize(numSubnets);
+			//nextSubnetSizes.clear();
 			// Right stages (reverse)
 			for (u64 stage = numStages - 2; stage < numStages; --stage)
 			{
 
 				if (stageBit == 0)
-					co_await right<F>(data, temp, diff, ctx, subnetSizes, nextSubnetSizes, sock);
-				else
-					co_await right<F>(temp, data, diff, ctx, subnetSizes, nextSubnetSizes, sock);
+					co_await right<F>(data, temp, diff, ctx, 
+						subnetSizes, numSubnets, 
+						nextSubnetSizes, nextNumSubnets, sock);
+				else													  
+					co_await right<F>(temp, data, diff, ctx, 
+						subnetSizes, numSubnets, 
+						nextSubnetSizes, nextNumSubnets, sock);
 
 				stageBit ^= 1;
 				std::swap(subnetSizes, nextSubnetSizes);
-				nextSubnetSizes.clear();
+				numSubnets = nextNumSubnets;
+				nextNumSubnets = 0;
+				//nextSubnetSizes.clear();
 			}
 
 			if (stageBit)
@@ -456,21 +467,22 @@ namespace osuCrypto
 		// Multiply each input vector with a random bit using existing choice bits.
 		// Does not take control bits as input - uses internal mMult choice bits directly.
 		template<typename F>
-		task<> randMultiply(
-			auto&& y,
-			auto&& xy,
+		task<> randMultiply2(
+			auto&& begin,
+			auto&& end,
 			coproto::Socket& sock,
 			auto&& ctx)
 		{
 			if (mMultSessions.size() == mOtIdx)
 			{
-				mMultSessions.push_back(mMult.randMultiply(y.size()));
+				auto size = std::distance(begin, end);
+				mMultSessions.push_back(mMult.randMultiply(size));
 			}
 
 			if (mMultSessions.size() <= mOtIdx)
 				throw RTE_LOC;
 
-			co_await mMultSessions[mOtIdx++].multiply<F>(y.begin(), y.end(), xy.begin(), sock, ctx);
+			co_await mMultSessions[mOtIdx++].multiply<F>(begin, end, begin, sock, ctx);
 
 		}
 	};

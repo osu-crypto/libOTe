@@ -24,6 +24,7 @@
 #include "libOTe/Tools/Ntt/NttNegWrap.h"
 #include "libOTe/Triple/RingLpn/RingLpnTriple.h"
 #include "libOTe/Tools/Field/Fp.h"
+#include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
 
 namespace osuCrypto
 {
@@ -1384,7 +1385,7 @@ namespace osuCrypto
 #endif
 
 	void RingLpnBench(const CLP& cmd)
-	try{
+		try {
 
 #ifdef ENABLE_RINGLPN
 
@@ -1462,8 +1463,8 @@ namespace osuCrypto
 				}
 
 				auto r = macoro::sync_wait(macoro::when_all_ready(
-					oles[0].expand(A, C0, prng0, sock[0]) | macoro::start_on(threadPools[0]) ,
-					oles[1].expand(B, C1, prng1, sock[1]) | macoro::start_on(threadPools[1]) ));
+					oles[0].expand(A, C0, prng0, sock[0]) | macoro::start_on(threadPools[0]),
+					oles[1].expand(B, C1, prng1, sock[1]) | macoro::start_on(threadPools[1])));
 				std::get<0>(r).result();
 				std::get<1>(r).result();
 				timer.setTimePoint("done______");
@@ -1478,9 +1479,181 @@ namespace osuCrypto
 #endif
 
 	}
-	catch(const std::exception& e)
+	catch (const std::exception& e)
 	{
 		std::cout << "RingLpnBench exception: " << e.what() << std::endl;
+	}
+
+
+	inline void WaksmanPermuteBench(const CLP& cmd)
+	{
+		using coproto::LocalAsyncSocket;
+
+		u64 trials = cmd.getOr("t", 10);
+		u64 n = cmd.getOr<u64>("n", 1ull << cmd.getOr("nn", 16));
+		bool plain = cmd.isSet("plain");
+		bool verbose = cmd.isSet("v");
+
+		// Two-party protocol benchmark.
+		const bool useU64 = cmd.isSet("u64");
+		Timer timer, protoTimer;
+
+		macoro::thread_pool pool0, pool1;
+		auto w0 = pool0.make_work();
+		auto w1 = pool1.make_work();
+
+		auto sock = LocalAsyncSocket::makePair();
+		PRNG prng0(block(2424523452345, 111124521521455324));
+		PRNG prng1(block(5232345632, 5232345632));
+
+		pool0.create_thread();
+		pool1.create_thread();
+		sock[0].setExecutor(pool0);
+		sock[1].setExecutor(pool1);
+
+		if (!useU64)
+		{
+			// F = block with GF(2) semantics
+			using F = block;
+			CoeffCtxGF2 ctx;
+
+			std::array<WaksmanPermute, 2> perm;
+			perm[0].init(0, n);
+			perm[1].init(1, n);
+
+			// Base OTs
+			auto bc0 = perm[0].baseOtCount();
+			auto bc1 = perm[1].baseOtCount();
+
+			std::array<std::vector<block>, 2> baseRecv;
+			std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+			std::array<BitVector, 2> baseChoice;
+
+			baseRecv[0].resize(bc0.mRecvCount);
+			baseRecv[1].resize(bc1.mRecvCount);
+			baseSend[0].resize(bc0.mSendCount);
+			baseSend[1].resize(bc1.mSendCount);
+			baseChoice[0].resize(bc0.mRecvCount);
+			baseChoice[1].resize(bc1.mRecvCount);
+			baseChoice[0].randomize(prng0);
+			baseChoice[1].randomize(prng0);
+
+			for (u64 i = 0; i < bc0.mRecvCount; ++i)
+			{
+				baseSend[1][i] = prng0.get();
+				baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+			}
+			for (u64 i = 0; i < bc1.mRecvCount; ++i)
+			{
+				baseSend[0][i] = prng0.get();
+				baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+			}
+
+			perm[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+			perm[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+			auto in0 = ctx.makeVec<F>(n);
+			auto in1 = ctx.makeVec<F>(n);
+			for (u64 i = 0; i < n; ++i)
+			{
+				ctx.fromBlock(in0[i], prng0.get());
+				ctx.fromBlock(in1[i], prng1.get());
+			}
+
+			if (verbose)
+				std::cout << "Waksman apply (GF2/block): n=" << n << " trials=" << trials << (cmd.isSet("mt") ? " [mt]" : "") << std::endl;
+
+			timer.setTimePoint("begin");
+			for (u64 t = 0; t < trials; ++t)
+			{
+				timer.setTimePoint("b");
+				auto r = macoro::sync_wait(macoro::when_all_ready(
+					perm[0].apply<F, CoeffCtxGF2>(in0, sock[0], ctx) | macoro::start_on(pool0),
+					perm[1].apply<F, CoeffCtxGF2>(in1, sock[1], ctx) | macoro::start_on(pool1)));
+				std::get<0>(r).result();
+				std::get<1>(r).result();
+				timer.setTimePoint("apply");
+			}
+
+			if (!cmd.isSet("quiet"))
+			{
+				double msTotal = 0.0;
+				// Print timer and basic throughput
+				std::cout << "WaksmanPermute (proto, GF2/block) n=" << n << std::endl;
+				std::cout << timer << std::endl;
+				std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per trial" << std::endl;
+			}
+		}
+		else
+		{
+			// F = u64 with integer arithmetic
+			using F = u64;
+			CoeffCtxInteger ctx;
+
+			std::array<WaksmanPermute, 2> perm;
+			perm[0].init(0, n);
+			perm[1].init(1, n);
+
+			// Base OTs
+			auto bc0 = perm[0].baseOtCount();
+			auto bc1 = perm[1].baseOtCount();
+
+			std::array<std::vector<block>, 2> baseRecv;
+			std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+			std::array<BitVector, 2> baseChoice;
+
+			baseRecv[0].resize(bc0.mRecvCount);
+			baseRecv[1].resize(bc1.mRecvCount);
+			baseSend[0].resize(bc0.mSendCount);
+			baseSend[1].resize(bc1.mSendCount);
+			baseChoice[0].resize(bc0.mRecvCount);
+			baseChoice[1].resize(bc1.mRecvCount);
+			baseChoice[0].randomize(prng0);
+			baseChoice[1].randomize(prng0);
+
+			for (u64 i = 0; i < bc0.mRecvCount; ++i)
+			{
+				baseSend[1][i] = prng0.get();
+				baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+			}
+			for (u64 i = 0; i < bc1.mRecvCount; ++i)
+			{
+				baseSend[0][i] = prng0.get();
+				baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+			}
+
+			perm[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+			perm[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+			auto in0 = ctx.makeVec<F>(n);
+			auto in1 = ctx.makeVec<F>(n);
+			for (u64 i = 0; i < n; ++i)
+			{
+				ctx.fromBlock(in0[i], prng0.get());
+				ctx.fromBlock(in1[i], prng1.get());
+			}
+
+			if (verbose)
+				std::cout << "Waksman apply (u64/integer): n=" << n << " trials=" << trials << (cmd.isSet("mt") ? " [mt]" : "") << std::endl;
+
+			timer.setTimePoint("begin");
+			for (u64 t = 0; t < trials; ++t)
+			{
+				auto r = macoro::sync_wait(macoro::when_all_ready(
+					perm[0].apply<F, CoeffCtxInteger>(in0, sock[0], ctx) | macoro::start_on(pool0),
+					perm[1].apply<F, CoeffCtxInteger>(in1, sock[1], ctx) | macoro::start_on(pool1)));
+				std::get<0>(r).result();
+				std::get<1>(r).result();
+				timer.setTimePoint("apply");
+			}
+
+			if (!cmd.isSet("quiet"))
+			{
+				std::cout << "WaksmanPermute (proto, u64) n=" << n << std::endl;
+				std::cout << timer << std::endl;
+				std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per trial" << std::endl;
+			}
+		}
 	}
 
 	inline void benchmark(CLP& cmd)
@@ -1520,6 +1693,8 @@ namespace osuCrypto
 			FftBench(cmd);
 		else if (cmd.isSet("ring"))
 			RingLpnBench(cmd);
+		else if (cmd.isSet("waksman"))
+			WaksmanPermuteBench(cmd);
 		else
 		{
 			std::cout << "unknown benchmark, opts:" << std::endl;
@@ -1538,6 +1713,9 @@ namespace osuCrypto
 			std::cout << "  -silentTriple" << std::endl;
 			std::cout << "  -revCuckoo" << std::endl;
 			std::cout << "  -fft" << std::endl;
+			std::cout << "  -sum" << std::endl;
+			std::cout << "  -ring" << std::endl;
+			std::cout << "  -waksman" << std::endl;
 		}
 	}
 }
