@@ -1656,6 +1656,176 @@ namespace osuCrypto
 		}
 	}
 
+	inline void BinarySolverBench(const CLP& cmd)
+	{
+		using coproto::LocalAsyncSocket;
+
+		// Problem size and options
+		u64 rows = cmd.getOr<u64>("rows", 32);
+		u64 cols = cmd.getOr<u64>("cols", 64);
+		u64 gbits = cmd.getOr<u64>("g", 16);
+		u64 trials = cmd.getOr("t", 5);
+		bool doPrint = cmd.isSet("print");
+		bool doCheck = cmd.isSet("check");
+
+		auto m8 = divCeil(rows, 8);
+		auto c8 = divCeil(cols, 8);
+		auto g8 = divCeil(gbits, 8);
+
+		// Sockets and executors
+		macoro::thread_pool pool0, pool1;
+		auto w0 = pool0.make_work();
+		auto w1 = pool1.make_work();
+		pool0.create_thread();
+		pool1.create_thread();
+
+		auto sock = LocalAsyncSocket::makePair();
+		sock[0].setExecutor(pool0);
+		sock[1].setExecutor(pool1);
+
+		// RNGs
+		PRNG prng0(block(2424523452345, 111124521521455324));
+		PRNG prng1(block(6474567454546, 567546754674345444));
+
+		// Build clear problem: M * X = Y  over GF(2)
+		Matrix<u8> Mclear(rows, c8);
+		prng0.get(Mclear.data(), Mclear.size());
+
+		Matrix<u8> Xclear(cols, g8);
+		prng1.get(Xclear.data(), Xclear.size());
+		if (gbits % 8)
+		{
+			u8 mask = (1 << (gbits % 8)) - 1;
+			for (u64 i = 0; i < cols; ++i)
+				Xclear[i].back() &= mask;
+		}
+
+		Matrix<u8> Yclear(rows, g8);
+		setBytes(Yclear, 0);
+		// Y = M * X (XOR of selected rows in X)
+		for (u64 i = 0; i < rows; ++i)
+		{
+			for (u64 k = 0; k < cols; ++k)
+			{
+				if (*BitIterator(Mclear[i].data(), k))
+				{
+					for (u64 b = 0; b < g8; ++b)
+						Yclear(i, b) ^= Xclear(k, b);
+				}
+			}
+		}
+
+		// Secret-share M, Y
+		Matrix<u8> M0(rows, c8), M1(rows, c8);
+		prng0.get(M0.data(), M0.size());
+		for (u64 i = 0; i < M1.size(); ++i) M1(i) = Mclear(i) ^ M0(i);
+
+		Matrix<u8> Y0(rows, g8), Y1(rows, g8);
+		prng0.get(Y0.data(), Y0.size());
+		for (u64 i = 0; i < Y1.size(); ++i) Y1(i) = Yclear(i) ^ Y0(i);
+
+		// Prepare solvers and base OTs
+		std::array<BinarySolver, 2> solver;
+		solver[0].init(0, rows, cols, gbits);
+		solver[1].init(1, rows, cols, gbits);
+		solver[0].mPrint = doPrint;
+		solver[1].mPrint = doPrint;
+
+		u64 bc0 = solver[0].baseOtCount();
+		u64 bc1 = solver[1].baseOtCount();
+		if (bc0 != bc1) throw RTE_LOC;
+
+		std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+		std::array<std::vector<block>, 2> baseRecv;
+		std::array<BitVector, 2> baseChoice;
+
+		for (u64 p = 0; p < 2; ++p)
+		{
+			baseSend[p].resize(bc0);
+			baseRecv[p].resize(bc0);
+			baseChoice[p].resize(bc0);
+			baseChoice[p].randomize(prng0);
+		}
+
+		for (u64 i = 0; i < bc0; ++i)
+		{
+			baseSend[1][i] = prng0.get();
+			baseRecv[0][i] = baseSend[1][i][baseChoice[0][i]];
+			baseSend[0][i] = prng0.get();
+			baseRecv[1][i] = baseSend[0][i][baseChoice[1][i]];
+		}
+
+		solver[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+		solver[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+		Timer timer;
+		timer.setTimePoint("begin");
+
+		for (u64 t = 0; t < trials; ++t)
+		{
+			// Re-init to reset internal multiplier state each trial
+			solver[0].init(0, rows, cols, gbits);
+			solver[1].init(1, rows, cols, gbits);
+			solver[0].mPrint = doPrint;
+			solver[1].mPrint = doPrint;
+			solver[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
+			solver[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
+
+			Matrix<u8> X0(cols, g8), X1(cols, g8);
+			setBytes(X0, 0);
+			setBytes(X1, 0);
+
+			auto r = macoro::sync_wait(macoro::when_all_ready(
+				solver[0].solve(M0, Y0, X0, prng0, sock[0]) | macoro::start_on(pool0),
+				solver[1].solve(M1, Y1, X1, prng1, sock[1]) | macoro::start_on(pool1)
+			));
+			std::get<0>(r).result();
+			std::get<1>(r).result();
+
+			if (doCheck)
+			{
+				// Reconstruct X and verify M * X = Y
+				Matrix<u8> X(cols, g8);
+				for (u64 i = 0; i < X.size(); ++i) X(i) = X0(i) ^ X1(i);
+
+				Matrix<u8> Ychk(rows, g8);
+				setBytes(Ychk, 0);
+				for (u64 i = 0; i < rows; ++i)
+				{
+					for (u64 k = 0; k < cols; ++k)
+					{
+						if (*BitIterator(Mclear[i].data(), k))
+						{
+							for (u64 b = 0; b < g8; ++b)
+								Ychk(i, b) ^= X(k, b);
+						}
+					}
+				}
+				// Compare Ychk vs Yclear (respect trailing bit mask)
+				bool ok = true;
+				for (u64 i = 0; i < rows && ok; ++i)
+				{
+					for (u64 b = 0; b < g8; ++b)
+					{
+						u8 a = Ychk(i, b), e = Yclear(i, b);
+						if (gbits % 8 && b + 1 == g8) { u8 mask = (1 << (gbits % 8)) - 1; a &= mask; e &= mask; }
+						if (a != e) { ok = false; break; }
+					}
+				}
+				if (!ok) throw RTE_LOC;
+			}
+
+			timer.setTimePoint("solve");
+		}
+
+		if (!cmd.isSet("quiet"))
+		{
+			std::cout << "BinarySolver m=" << rows << " c=" << cols << " g=" << gbits << std::endl;
+			std::cout << timer << std::endl;
+			std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per trial" << std::endl;
+		}
+	}
+
 	inline void benchmark(CLP& cmd)
 	{
 
@@ -1695,6 +1865,8 @@ namespace osuCrypto
 			RingLpnBench(cmd);
 		else if (cmd.isSet("waksman"))
 			WaksmanPermuteBench(cmd);
+		else if (cmd.isSet("binSolve"))
+			BinarySolverBench(cmd);
 		else
 		{
 			std::cout << "unknown benchmark, opts:" << std::endl;
@@ -1716,6 +1888,7 @@ namespace osuCrypto
 			std::cout << "  -sum" << std::endl;
 			std::cout << "  -ring" << std::endl;
 			std::cout << "  -waksman" << std::endl;
+			std::cout << "  -binSolve" << std::endl;
 		}
 	}
 }

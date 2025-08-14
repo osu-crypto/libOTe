@@ -669,15 +669,10 @@ namespace osuCrypto
 				//if (mPrint)
 				//	co_await printMtx(MY.cols()*8, MY, " row updates [Mi || Yi]", sock);
 
-				auto idx = mMult.mOtIdx;
-
 				// Step 1c: Perform row operations for pivot elimination
 				// For each row j ≠ i where v[j] = 1, subtract row i from row j
 				// This eliminates the pivot bit from all other rows
 				co_await multiply(MY.cols() * 8, v, MY, MY, sock);
-
-				if (idx + mM != mMult.mOtIdx)
-					throw std::runtime_error((co_await macoro::get_trace{}).str());
 
 				if (mPrint)
 					co_await printMtx(MY.cols() * 8, MY, "row updates v * [Mi || Yi]", sock);
@@ -693,18 +688,6 @@ namespace osuCrypto
 						Y(j, k) ^= MY(j, k + M.cols());
 				}
 			}
-
-
-			{
-
-				auto oneHot = mM * (2 * mC - 3);
-				auto v = mM * mC;
-				auto mUpdate = mM * mM;
-				if (mMult.mOtIdx != oneHot + v + mUpdate)
-					throw RTE_LOC;
-			}
-
-
 
 			if (mPrint)
 				co_await printMtx(mC, M, "Matrix M after elimination", sock);
@@ -746,18 +729,6 @@ namespace osuCrypto
 			co_await multiply(mLogG, negSigma, X, X, sock);
 
 
-
-			{
-
-				auto oneHot = mM * (2 * mC - 3);
-				auto v = mM * mC;
-				auto mUpdate = mM * mM;
-				auto randX = mC;
-				if (mMult.mOtIdx != randX + oneHot + v + mUpdate)
-					throw RTE_LOC;
-			}
-
-
 			if (mPrint)
 				co_await printMtx(mLogG, X, "X after sampling free variables", sock);
 
@@ -768,17 +739,6 @@ namespace osuCrypto
 			Matrix<u8> Y2(mM, g8);
 			co_await multiplyMtx(mLogG, M, X, Y2, sock);
 
-
-			{
-
-				auto oneHot = mM * (2 * mC - 3);
-				auto v = mM * mC;
-				auto mUpdate = mM * mM;
-				auto randX = mC;
-				auto yy = std::min<u64>(mC * mM, mC * mLogG);
-				if (mMult.mOtIdx != yy+randX + oneHot + v + mUpdate)
-					throw RTE_LOC;
-			}
 
 			if (mPrint)
 				co_await printMtx(mLogG, Y2, "Y2=M * X (correction term)", sock);
@@ -809,12 +769,6 @@ namespace osuCrypto
 
 			if (mMult.mOtIdx != mMult.mTotalMults)
 				throw RTE_LOC;
-			//if (mPrint)
-			//{
-			//	//co_await multiplyMtx(mLogG, M, X, Y2, sock);
-			//	co_await printMtx(mLogG, Y2, "Y2", sock);
-			//	co_await printMtx(mLogG, YY, "YY", sock);
-			//}
 
 			if (mPrint)
 			{
