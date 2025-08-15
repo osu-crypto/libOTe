@@ -102,6 +102,8 @@ namespace tests_libOTe
 			tc.add("Goldreich_stat_Test                     ", Goldreich_stat_Test);
 			tc.add("WaksmanPermute_plain_Test               ", WaksmanPermute_plain_Test);
 			tc.add("WaksmanPermute_Proto_Test               ", WaksmanPermute_Proto_Test);
+			tc.add("WaksmanPermute_Many_Test                ", WaksmanPermute_Many_Test);
+			
 			tc.add("RevCuckoo_iterative_Test                ", RevCuckoo_iterative_Test);
 			
 

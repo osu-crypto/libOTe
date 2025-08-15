@@ -7,4 +7,5 @@ namespace osuCrypto
 {
 	void WaksmanPermute_plain_Test(const CLP& cmd);
 	void WaksmanPermute_Proto_Test(const CLP& cmd);
+	void WaksmanPermute_Many_Test(const CLP& cmd);
 }

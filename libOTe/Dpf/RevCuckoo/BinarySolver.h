@@ -355,7 +355,7 @@ namespace osuCrypto
 			//
 			// we will then need to add these together to get the result.
 
-			auto iter = BRows.begin();
+			auto iter = BRows.data();
 			for (u64 i = 0; i < n; ++i)
 			{
 				//std::copy(B.begin(), B.end(), iter);

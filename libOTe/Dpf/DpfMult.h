@@ -374,6 +374,7 @@ namespace osuCrypto
 
 
 			// Matrix type for this context - each element is a row view
+			template<typename T>
 			struct Vec
 			{
 				Matrix<u8> mData;
@@ -415,13 +416,13 @@ namespace osuCrypto
 
 			// The field type F is MatrixView<u8> (a single row)
 			template<typename F>
-			Vec makeVec(u64 size) const
+			Vec<F> makeVec(u64 size) const
 			{
 				static_assert(std::is_same_v<F, u8>, "F must be u8");
 
 				// Return a matrix with size rows and appropriate column count for bitCount
 				auto cols = mByteCount;
-				return Vec{ Matrix<u8>(size, cols) };
+				return Vec<F>{ Matrix<u8>(size, cols) };
 			}
 
 			void resize(auto&& vec, u64 size) const
@@ -698,9 +699,14 @@ namespace osuCrypto
 
 				ctx.zero(zero[0]);
 
+				AES hash(block(22523656326434, 4523453452346423 * mExpandIdx++));
+
+				block hashes[8];
 				for (u64 i = 0; i < n8; i+= 8)
 				{
-					SIMD8(q, ctx.fromBlock(t0[q], mSendOts.data()[i + q][0]));
+					SIMD8(q, hashes[q] = mSendOts.data()[i + q][0]);
+					hash.hashBlocks<8>(hashes, hashes);
+					SIMD8(q, ctx.fromBlock(t0[q], hashes[q]));
 				
 					// xi = mX[i]
 					block xi[8];
@@ -713,7 +719,9 @@ namespace osuCrypto
 					SIMD8(q, ctx.minus(t0[q], t0[q], yx[q]));      // t0 = t0 - yx 
 
 					// m1 = t0 + (x0 ⊕ 1) * y0
-					SIMD8(q, ctx.fromBlock(m1[q], mSendOts.data()[i+q][1])); // mask the m1 message using the OT.
+					SIMD8(q, hashes[q] = mSendOts.data()[i + q][1]);
+					hash.hashBlocks<8>(hashes, hashes);
+					SIMD8(q, ctx.fromBlock(m1[q], hashes[q])); // mask the m1 message using the OT.
 					SIMD8(q, ctx.plus(m1[q], m1[q], t0[q]));
 					SIMD8(q, ctx.minus(ynx[q], yBegin[i + q], yx[q])); // if xi[q] == 0, then yBegin[i + q] is added to m1[q]
 					SIMD8(q, ctx.plus(m1[q], m1[q], ynx[q]));
@@ -727,14 +735,14 @@ namespace osuCrypto
 
 				for (u64 i = n8; i < n; ++i)
 				{
-					ctx.fromBlock(t0[0], mSendOts.data()[i][0]);
+					ctx.fromBlock(t0[0], hash.hashBlock(mSendOts.data()[i][0]));
 
 					auto xi = mX[i];
 					if (xi)
 						ctx.minus(t0[0], t0[0], yBegin[i]);
 
 					// m1 = t0 + (x0 ⊕ 1) * y0
-					ctx.fromBlock(m1[0], mSendOts.data()[i][1]); // mask the m1 message using the OT.
+					ctx.fromBlock(m1[0], hash.hashBlock(mSendOts.data()[i][1])); // mask the m1 message using the OT.
 					ctx.plus(m1[0], m1[0], t0[0]);
 					if (xi == 0)
 						ctx.plus(m1[0], m1[0], yBegin[i]);
@@ -761,7 +769,9 @@ namespace osuCrypto
 					mIter += ctx.template byteSize<F>() * 8;
 
 
-					SIMD8(q, ctx.fromBlock(mx[q], mRecvOts.data()[i+q]));
+					SIMD8(q, hashes[q] = mRecvOts.data()[i + q]);
+					hash.hashBlocks<8>(hashes, hashes);
+					SIMD8(q, ctx.fromBlock(mx[q], hashes[q]));
 
 					//u8 xi = mX[i];
 					block xi[8];
@@ -781,7 +791,7 @@ namespace osuCrypto
 					ctx.deserialize(mIter + 0, mIter + ctx.template byteSize<F>(), m1.begin());
 					mIter += ctx.template byteSize<F>();
 
-					ctx.fromBlock(mx[0], mRecvOts.data()[i]);
+					ctx.fromBlock(mx[0], hash.hashBlock(mRecvOts.data()[i]));
 
 					//if (xi)
 					//{

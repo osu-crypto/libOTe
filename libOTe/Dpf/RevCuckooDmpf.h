@@ -49,7 +49,7 @@ namespace osuCrypto
 
 		std::vector<Dedup> mDedup;
 		std::vector<GoldreichHash> mGoldreichHash;
-		std::vector<WaksmanPermute> mWaksmanPermute;
+		WaksmanPermute mWaksmanPermute;
 		BinarySolver mBinarySolver;
 		SparseDpf mSparseDpf;
 
@@ -113,14 +113,13 @@ namespace osuCrypto
 			auto c = mPartitionSize + mLinearSecParam;
 
 			mDedup.resize(mNumSets);
-			mWaksmanPermute.resize(mNumSets);
 
 			for (u64 s = 0; s < mNumSets; ++s)
 			{
 				mDedup[s].init(mPartyIdx, mNumPointsPerSet, mIndexBitCount);
-				mWaksmanPermute[s].init(mPartyIdx, f);
-
 			}
+
+			mWaksmanPermute.init(mPartyIdx, f, mNumSets);
 
 			mGoldreichHash.resize(mNumPartitions * mNumSets);
 			for (auto& hash : mGoldreichHash)
@@ -167,14 +166,7 @@ namespace osuCrypto
 				dedupSend += count.mSendCount;
 			}
 
-			u64 permRecv = 0;
-			u64 permSend = 0;
-			for (auto& permute : mWaksmanPermute)
-			{
-				auto count = permute.baseOtCount();
-				permRecv += count.mRecvCount;
-				permSend += count.mSendCount;
-			}
+			auto perm = mWaksmanPermute.baseOtCount();
 
 			u64 hashRecv = 0;
 			u64 hashSend = 0;
@@ -189,8 +181,8 @@ namespace osuCrypto
 			auto mult = mMultiplier.baseOtCount();
 
 			return { 
-				count3 + mult + dedupRecv + permRecv + hashRecv + solve,
-				count3 + mult + dedupSend + permSend + hashSend + solve
+				count3 + mult + dedupRecv + perm.mRecvCount + hashRecv + solve,
+				count3 + mult + dedupSend + perm.mSendCount + hashSend + solve
 				};
 		}
 
@@ -227,11 +219,10 @@ namespace osuCrypto
 
 			for (auto& sub : mDedup)
 				set(sub);
-			for (auto& sub : mWaksmanPermute)
-				set(sub);
 			for (auto& hash : mGoldreichHash)
 				set(hash);
 
+			set(mWaksmanPermute);
 			set(mBinarySolver);
 			set(mSparseDpf);
 
@@ -476,7 +467,8 @@ namespace osuCrypto
 			auto f = mNumPartitions * mPartitionSize;
 			auto c = mPartitionSize + mLinearSecParam;
 			auto piCtx = DpfMult::BitMatrixCoeffCtx(A[0].cols() * 8);
-			std::vector<decltype(piCtx)::View<u8>> av(mNumSets);
+			using BitMtxVec = decltype(piCtx)::View<u8>;
+			std::vector<BitMtxVec> av(mNumSets);
 			for (u64 s = 0; s < mNumSets; ++s)
 			{
 				if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
@@ -487,18 +479,20 @@ namespace osuCrypto
 				for (u64 i = mNumPointsPerSet; i < f; ++i)
 					copyBytesMin(A[s][i], mDomain * mPartyIdx); // default the extras 
 
-				av[s] = decltype(piCtx)::View<u8>(A[s]);
+				av[s] = BitMtxVec(A[s]);
 				// Step 7: Permute (A||b) by π
-				tasks.push_back(
-					mWaksmanPermute[s].apply<u8>(av[s], socks[s], piCtx));
+				//tasks.push_back(
+				//	mWaksmanPermute[s].apply<u8>(av[s], socks[s], piCtx));
 			}
 
 			setTimePoint("perm Begin");
 
 			// Step 7: Permute (A||b) by π
-			res = co_await macoro::when_all_ready(std::move(tasks));
-			for (auto& r : res)
-				r.result();
+			//res = co_await macoro::when_all_ready(std::move(tasks));
+			//for (auto& r : res)
+			//	r.result();
+			co_await mWaksmanPermute.applyMany<u8, BitMtxVec>(av, sock, piCtx);
+
 			setTimePoint("perm done");
 
 			//std::vector<block> hashSeed(mNumPartitions);
@@ -859,15 +853,16 @@ namespace osuCrypto
 				ctx.zero(B[s].begin() + mNumPointsPerSet, B[s].end());
 
 				// Step 7: Permute (A||b) by π
-				tasks.push_back(
-					mWaksmanPermute[s].apply<T>(B[s], socks[s], ctx));
+				//tasks.push_back(
+				//	mWaksmanPermute[s].apply<T>(B[s], socks[s], ctx));
 			}
 			setTimePoint("perm begin");
 
 			// Step 7: Permute (A||b) by π
-			res = co_await macoro::when_all_ready(std::move(tasks));
-			for (auto& r : res)
-				r.result();
+			//res = co_await macoro::when_all_ready(std::move(tasks));
+			//for (auto& r : res)
+			//	r.result();
+			co_await mWaksmanPermute.applyMany<T, VecT>(B, sock, ctx);
 			setTimePoint("perm done");
 
 			ctx.resize(mExpanded, f * mNumSets);
