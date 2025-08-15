@@ -23,6 +23,7 @@ set(SRCS
     Ntt_Tests.cpp
     Poly_Tests.cpp
     RingLpn_Tests.cpp
+    BinarySolver_Tests.cpp
 )
 
 add_library(libOTe_Tests STATIC ${SRCS})

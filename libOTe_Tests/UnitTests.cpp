@@ -25,6 +25,7 @@
 #include "libOTe_Tests/Field_Tests.h"
 #include "libOTe_Tests/Poly_Tests.h"
 #include "libOTe_Tests/Ntt_Tests.h"
+#include "libOTe_Tests/BinarySolver_Tests.h"
 #include "libOTe_Tests/RingLpn_Tests.h"
 
 
@@ -87,7 +88,13 @@ namespace tests_libOTe
 			tc.add("BinSolver_multiply_test                 ", BinSolver_multiply_test);
 			tc.add("BinSolver_multiplyMtx_test              ", BinSolver_multiplyMtx_test);
 			tc.add("BinSolver_firstOneBit_test              ", BinSolver_firstOneBit_test);
+			tc.add("BinSolver_firstOneBitMany_test          ", BinSolver_firstOneBitMany_test);
 			tc.add("BinSolver_solve_test                    ", BinSolver_solve_test);
+
+			tc.add("BinSolver_multiplyMany_test             ", BinSolver_multiplyMany_test);
+			tc.add("BinSolver_multiplyMtxMany_test          ", BinSolver_multiplyMtxMany_test);
+			tc.add("BinSolver_solveMany_test                ", BinSolver_solveMany_test);
+
 			tc.add("BitInject_basic_test                    ", BitInject_basic_test);;
 			tc.add("OtEquality_basic_Test                   ", OtEquality_basic_Test);
 			tc.add("HybEquality_basic_Test                  ", HybEquality_basic_Test);
@@ -95,7 +102,6 @@ namespace tests_libOTe
 			tc.add("Goldreich_stat_Test                     ", Goldreich_stat_Test);
 			tc.add("WaksmanPermute_plain_Test               ", WaksmanPermute_plain_Test);
 			tc.add("WaksmanPermute_Proto_Test               ", WaksmanPermute_Proto_Test);
-			tc.add("RevCuckoo_Proto_Test                    ", RevCuckoo_Proto_Test);
 			tc.add("RevCuckoo_iterative_Test                ", RevCuckoo_iterative_Test);
 			
 
