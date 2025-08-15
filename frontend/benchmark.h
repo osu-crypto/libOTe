@@ -1665,8 +1665,8 @@ namespace osuCrypto
 		u64 cols = cmd.getOr<u64>("cols", 64);
 		u64 gbits = cmd.getOr<u64>("g", 16);
 		u64 trials = cmd.getOr("t", 5);
+		u64 batch = cmd.getOr<u64>("batch", 64);
 		bool doPrint = cmd.isSet("print");
-		bool doCheck = cmd.isSet("check");
 
 		auto m8 = divCeil(rows, 8);
 		auto c8 = divCeil(cols, 8);
@@ -1687,47 +1687,10 @@ namespace osuCrypto
 		PRNG prng0(block(2424523452345, 111124521521455324));
 		PRNG prng1(block(6474567454546, 567546754674345444));
 
-		// Build clear problem: M * X = Y  over GF(2)
-		Matrix<u8> Mclear(rows, c8);
-		prng0.get(Mclear.data(), Mclear.size());
-
-		Matrix<u8> Xclear(cols, g8);
-		prng1.get(Xclear.data(), Xclear.size());
-		if (gbits % 8)
-		{
-			u8 mask = (1 << (gbits % 8)) - 1;
-			for (u64 i = 0; i < cols; ++i)
-				Xclear[i].back() &= mask;
-		}
-
-		Matrix<u8> Yclear(rows, g8);
-		setBytes(Yclear, 0);
-		// Y = M * X (XOR of selected rows in X)
-		for (u64 i = 0; i < rows; ++i)
-		{
-			for (u64 k = 0; k < cols; ++k)
-			{
-				if (*BitIterator(Mclear[i].data(), k))
-				{
-					for (u64 b = 0; b < g8; ++b)
-						Yclear(i, b) ^= Xclear(k, b);
-				}
-			}
-		}
-
-		// Secret-share M, Y
-		Matrix<u8> M0(rows, c8), M1(rows, c8);
-		prng0.get(M0.data(), M0.size());
-		for (u64 i = 0; i < M1.size(); ++i) M1(i) = Mclear(i) ^ M0(i);
-
-		Matrix<u8> Y0(rows, g8), Y1(rows, g8);
-		prng0.get(Y0.data(), Y0.size());
-		for (u64 i = 0; i < Y1.size(); ++i) Y1(i) = Yclear(i) ^ Y0(i);
-
-		// Prepare solvers and base OTs
+		// Prepare solvers and base OTs (batched)
 		std::array<BinarySolver, 2> solver;
-		solver[0].init(0, rows, cols, gbits);
-		solver[1].init(1, rows, cols, gbits);
+		solver[0].init(0, rows, cols, gbits, batch);
+		solver[1].init(1, rows, cols, gbits, batch);
 		solver[0].mPrint = doPrint;
 		solver[1].mPrint = doPrint;
 
@@ -1758,69 +1721,69 @@ namespace osuCrypto
 		solver[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
 		solver[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 
+		// Allocate batched inputs/outputs once
+		std::vector<Matrix<u8>> M0(batch), M1(batch), Y0(batch), Y1(batch), X0(batch), X1(batch);
+		for (u64 b = 0; b < batch; ++b)
+		{
+			M0[b].resize(rows, c8);
+			M1[b].resize(rows, c8);
+			Y0[b].resize(rows, g8);
+			Y1[b].resize(rows, g8);
+			X0[b].resize(cols, g8);
+			X1[b].resize(cols, g8);
+		}
+
+		// Build MatrixView spans for batched call (reused across trials)
+		std::vector<MatrixView<const u8>> M0v, M1v, Y0v, Y1v;
+		std::vector<MatrixView<u8>> X0v, X1v;
+		M0v.reserve(batch); M1v.reserve(batch);
+		Y0v.reserve(batch); Y1v.reserve(batch);
+		X0v.reserve(batch); X1v.reserve(batch);
+		for (u64 b = 0; b < batch; ++b)
+		{
+			M0v.emplace_back(M0[b]); M1v.emplace_back(M1[b]);
+			Y0v.emplace_back(Y0[b]); Y1v.emplace_back(Y1[b]);
+			X0v.emplace_back(X0[b]); X1v.emplace_back(X1[b]);
+		}
+
 		Timer timer;
 		timer.setTimePoint("begin");
 
 		for (u64 t = 0; t < trials; ++t)
 		{
 			// Re-init to reset internal multiplier state each trial
-			solver[0].init(0, rows, cols, gbits);
-			solver[1].init(1, rows, cols, gbits);
+			solver[0].init(0, rows, cols, gbits, batch);
+			solver[1].init(1, rows, cols, gbits, batch);
 			solver[0].mPrint = doPrint;
 			solver[1].mPrint = doPrint;
 			solver[0].setBaseOts(baseSend[0], baseRecv[0], baseChoice[0]);
 			solver[1].setBaseOts(baseSend[1], baseRecv[1], baseChoice[1]);
 
-			Matrix<u8> X0(cols, g8), X1(cols, g8);
-			setBytes(X0, 0);
-			setBytes(X1, 0);
+			// Directly sample shares as random; no clear values, no checking.
+			for (u64 b = 0; b < batch; ++b)
+			{
+				prng0.get(M0[b].data(), M0[b].size());
+				prng1.get(M1[b].data(), M1[b].size());
+				prng0.get(Y0[b].data(), Y0[b].size());
+				prng1.get(Y1[b].data(), Y1[b].size());
+				setBytes(X0[b], 0);
+				setBytes(X1[b], 0);
+			}
 
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				solver[0].solve(M0, Y0, X0, prng0, sock[0]) | macoro::start_on(pool0),
-				solver[1].solve(M1, Y1, X1, prng1, sock[1]) | macoro::start_on(pool1)
+				solver[0].solve(M0v, Y0v, X0v, prng0, sock[0]) | macoro::start_on(pool0),
+				solver[1].solve(M1v, Y1v, X1v, prng1, sock[1]) | macoro::start_on(pool1)
 			));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
-
-			if (doCheck)
-			{
-				// Reconstruct X and verify M * X = Y
-				Matrix<u8> X(cols, g8);
-				for (u64 i = 0; i < X.size(); ++i) X(i) = X0(i) ^ X1(i);
-
-				Matrix<u8> Ychk(rows, g8);
-				setBytes(Ychk, 0);
-				for (u64 i = 0; i < rows; ++i)
-				{
-					for (u64 k = 0; k < cols; ++k)
-					{
-						if (*BitIterator(Mclear[i].data(), k))
-						{
-							for (u64 b = 0; b < g8; ++b)
-								Ychk(i, b) ^= X(k, b);
-						}
-					}
-				}
-				// Compare Ychk vs Yclear (respect trailing bit mask)
-				bool ok = true;
-				for (u64 i = 0; i < rows && ok; ++i)
-				{
-					for (u64 b = 0; b < g8; ++b)
-					{
-						u8 a = Ychk(i, b), e = Yclear(i, b);
-						if (gbits % 8 && b + 1 == g8) { u8 mask = (1 << (gbits % 8)) - 1; a &= mask; e &= mask; }
-						if (a != e) { ok = false; break; }
-					}
-				}
-				if (!ok) throw RTE_LOC;
-			}
 
 			timer.setTimePoint("solve");
 		}
 
 		if (!cmd.isSet("quiet"))
 		{
-			std::cout << "BinarySolver m=" << rows << " c=" << cols << " g=" << gbits << std::endl;
+			std::cout << "BinarySolver batched (no-check) m=" << rows << " c=" << cols << " g=" << gbits
+				<< " batch=" << batch << std::endl;
 			std::cout << timer << std::endl;
 			std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per trial" << std::endl;
 		}

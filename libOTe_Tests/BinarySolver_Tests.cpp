@@ -435,8 +435,8 @@ namespace osuCrypto
 
 			auto sock = coproto::LocalAsyncSocket::makePair();
 			auto r = macoro::sync_wait(macoro::when_all_ready(
-				s[0].solve(Ms[0], ys[0], xs[0], prng, sock[0]),
-				s[1].solve(Ms[1], ys[1], xs[1], prng, sock[1])
+				s[0].solveOne(Ms[0], ys[0], xs[0], prng, sock[0]),
+				s[1].solveOne(Ms[1], ys[1], xs[1], prng, sock[1])
 			));
 
 			std::get<0>(r).result();

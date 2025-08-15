@@ -259,12 +259,15 @@ namespace osuCrypto
 			}
 
 			// Fill BRowsAll with n copies of B[t] per instance t
-			auto iter = BRowsAll.begin();
+			auto iter = BRowsAll.data();
 			for (u64 t = 0; t < Bsz; ++t)
 			{
 				for (u64 i = 0; i < n; ++i)
 				{
-					std::copy(B[t].begin(), B[t].end(), iter);
+					//std::copy(B[t].begin(), B[t].end(), iter);
+					assert(BRowsAll.data() + BRowsAll.size() >= iter + B[t].size());
+					memcpy(&*iter, B[t].data(), B[t].size());
+
 					iter += B[t].size();
 				}
 			}
@@ -355,7 +358,9 @@ namespace osuCrypto
 			auto iter = BRows.begin();
 			for (u64 i = 0; i < n; ++i)
 			{
-				std::copy(B.begin(), B.end(), iter);
+				//std::copy(B.begin(), B.end(), iter);
+				assert(BRows.data() + BRows.size() >= iter + B.size());
+				memcpy(&*iter, B.data(), B.size());
 				iter += B.size();
 			}
 
@@ -406,7 +411,9 @@ namespace osuCrypto
 					throw std::runtime_error(LOCATION " c[i].rows() != c[0].rows() || c[i].cols() != c[0].cols()");
 
 				aa.append(a[i].data(), n);
-				std::copy(b[i].begin(), b[i].end(), bb.begin() + i * b[0].size());
+				auto bbi = bb.submtx(i * n, n);
+				copyBytes(bbi, b[i]);
+				//std::copy(b[i].begin(), b[i].end(), bb.begin() + i * b[0].size());
 			}
 
 			co_await mMult.multiply(
@@ -415,7 +422,9 @@ namespace osuCrypto
 			// copy the result back to c.
 			for (u64 i = 0; i < c.size(); ++i)
 			{
-				std::copy(cc.begin() + i * c[0].size(), cc.begin() + (i + 1) * c[0].size(), c[i].begin());
+				//std::copy(cc.begin() + i * c[0].size(), cc.begin() + (i + 1) * c[0].size(), c[i].begin());
+				auto cci = cc.submtx(i *n,n);
+				copyBytes(c[i], cci);
 			}
 		}
 
@@ -665,7 +674,8 @@ namespace osuCrypto
 
 			}
 
-			std::copy(M[0].begin(), M[0].end(), s.begin());
+			//std::copy(M[0].begin(), M[0].end(), s.begin());
+			copyBytes(s, M[0]);
 		}
 
 
@@ -823,7 +833,10 @@ namespace osuCrypto
 			}
 
 			for (u64 b = 0; b < mBatchSize; ++b)
-				std::copy(M[0][b].begin(), M[0][b].end(), s[b][i].begin());
+			{
+				//std::copy(M[0][b].begin(), M[0][b].end(), s[b][i].begin());
+				copyBytes(s[b][i], M[0][b]);
+			}
 		}
 
 
@@ -910,7 +923,7 @@ namespace osuCrypto
 			return print(bits, M[mPrintIdx], name, sock);
 		}
 
-		task<> solve(
+		task<> solveOne(
 			MatrixView<const u8> MM,
 			MatrixView<const u8> YY,
 			MatrixView<u8> X,
@@ -962,8 +975,10 @@ namespace osuCrypto
 					throw std::runtime_error(LOCATION);
 				M[i] = Matrix<u8>(MM[i].rows(), MM[i].cols());
 				Y[i] = Matrix<u8>(YY[i].rows(), YY[i].cols());
-				std::copy(MM[i].begin(), MM[i].end(), M[i].begin());
-				std::copy(YY[i].begin(), YY[i].end(), Y[i].begin());
+				//std::copy(MM[i].begin(), MM[i].end(), M[i].begin());
+				//std::copy(YY[i].begin(), YY[i].end(), Y[i].begin());
+				copyBytes(M[i], MM[i]);
+				copyBytes(Y[i], YY[i]);
 
 				MT[i] = Matrix<u8>(mC, m8);        // M transposed
 				MY[i] = Matrix<u8>(mM, c8 + g8);   // Concatenated matrix [M || Y] for row operations
@@ -1035,8 +1050,15 @@ namespace osuCrypto
 						if (j != i)
 						{
 							// Copy M[i] and Y[i] into MY[j] for row operations
-							std::copy(M[b][i].begin(), M[b][i].end(), MY[b][j].begin());
-							std::copy(Y[b][i].begin(), Y[b][i].end(), MY[b][j].begin() + M[b][j].size());
+							//std::copy(M[b][i].begin(), M[b][i].end(), MY[b][j].begin());
+							//std::copy(Y[b][i].begin(), Y[b][i].end(), MY[b][j].begin() + M[b][j].size());
+							auto dst = MY[b][j].data();
+							auto n1 = M[b][i].size();
+							auto n2 = Y[b][i].size();
+							assert(MY[b][j].size() == n1 + n2);
+							memcpy(dst, M[b][i].data(), n1);
+							memcpy(dst + n1, Y[b][i].data(), n2);
+
 						}
 						else
 							setBytes(MY[b][i], 0);// Zero out the pivot row in the working matrix
@@ -1302,6 +1324,17 @@ namespace osuCrypto
 
 				}
 			}
+		}
+
+		void clear()
+		{
+			mMult.clear();	
+			mPrint = false;
+			mPrintIdx = 0;
+			mBatchSize = 1;
+			mM = 0;
+			mC = 0;
+			mLogG = 0;
 		}
 	};
 

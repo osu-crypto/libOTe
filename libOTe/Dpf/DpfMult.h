@@ -287,10 +287,21 @@ namespace osuCrypto
 		struct BitMatrixCoeffCtx
 		{
 			// the number of bits each row will have
-			u64 mBitCount;
+			const u64 mBitCount;
+			const u64 mByteCount;
 
-			BitMatrixCoeffCtx(u64 bitCount) : mBitCount(bitCount) {}
+			BitMatrixCoeffCtx(u64 bitCount) 
+				: mBitCount(bitCount)
+				, mByteCount(divCeil(bitCount, 8))
+			{}
 
+			template<typename T>
+			struct Elem
+			{
+				T* mPtr;
+				 
+				T* data() { return mPtr; }
+			};
 
 			template<typename T>
 			struct Iter
@@ -309,11 +320,11 @@ namespace osuCrypto
 				Iter(MatrixView<T> base, u64 idx) : mBase(base), mIdx(idx) {}
 
 				// Dereference operators
-				auto operator*() const { return mBase[mIdx]; }
+				Elem<T> operator*() const { return { mBase.data(mIdx) }; }
 				//auto operator->() const { return &mBase[mIdx]; }
 
 				// Subscript operator for random access
-				span<T> operator[](difference_type i) const { return mBase[mIdx + i]; }
+				Elem<T> operator[](difference_type i) const { return { mBase.data(mIdx + i) }; }
 
 				// Prefix increment/decrement
 				Iter& operator++() { ++mIdx; return *this; }
@@ -368,15 +379,15 @@ namespace osuCrypto
 				Matrix<u8> mData;
 
 				u64 size() const { return mData.rows(); }
-				span<const u8> operator[](u64 i) const
+				Elem<const u8> operator[](u64 i) const
 				{
 					assert(i < mData.rows());
-					return mData[i];
+					return { mData.data(i) };
 				}
-				span<u8> operator[](u64 i)
+				Elem<u8> operator[](u64 i)
 				{
 					assert(i < mData.rows());
-					return mData[i];
+					return { mData.data(i) };
 				}
 
 				auto begin() const { return Iter<u8>(mData, 0); }
@@ -388,17 +399,16 @@ namespace osuCrypto
 			{
 				MatrixView<T> mData;
 				u64 size() const { return mData.rows(); }
-				span<const T> operator[](u64 i) const
+				Elem<const u8> operator[](u64 i) const
 				{
 					assert(i < mData.rows());
-					return mData[i];
+					return { mData.data(i) };
 				}
-				span<T> operator[](u64 i)
+				Elem<u8> operator[](u64 i)
 				{
 					assert(i < mData.rows());
-					return mData[i];
+					return { mData.data(i) };
 				}
-
 				auto begin() const { return Iter<T>(mData, 0); }
 				auto end() const { return Iter<T>(mData, mData.rows()); }
 			};
@@ -410,123 +420,116 @@ namespace osuCrypto
 				static_assert(std::is_same_v<F, u8>, "F must be u8");
 
 				// Return a matrix with size rows and appropriate column count for bitCount
-				auto cols = divCeil(mBitCount, 8);
+				auto cols = mByteCount;
 				return Vec{ Matrix<u8>(size, cols) };
 			}
 
 			void resize(auto&& vec, u64 size) const
 			{
-				auto cols = divCeil(mBitCount, 8);
+				auto cols = mByteCount;
 				vec.mData.resize(size, cols);
 			}
 
-			template<typename F>
-			auto make() const
-			{
-				auto cols = divCeil(mBitCount, 8 * sizeof(F));
-				return std::vector<F>(cols);
-			}
+			//template<typename F>
+			//auto make() const
+			//{
+			//	auto cols = divCeil(mBitCount, 8 * sizeof(F));
+			//	return std::vector<F>(cols);
+			//}
 
 			template<typename F>
 			u64 byteSize() const
 			{
-				return divCeil(mBitCount, 8);
+				return mByteCount;
 			}
 
-			void plus(auto&& ret, auto&& lhs, auto&& rhs) const
+			template<typename F, typename G, typename T >
+			void plus(Elem<F> ret, Elem<G> lhs, Elem<T> rhs) const
 			{
-				assert(ret.size() == lhs.size() && lhs.size() == rhs.size());
-				for (u64 i = 0; i < ret.size(); ++i)
+				for (u64 i = 0; i < mByteCount; ++i)
 				{
-					ret[i] = lhs[i] ^ rhs[i];
+					ret.data()[i] = lhs.data()[i] ^ rhs.data()[i];
 				}
 			}
 
-			void minus(auto&& ret,  auto&& lhs,  auto&&rhs) const
+			template<typename F, typename G, typename T>
+			void minus(Elem<F> ret, Elem<G> lhs, Elem<T> rhs) const
 			{
 				// Same as plus for GF(2)
 				plus(ret, lhs, rhs);
 			}
 
-			void copy(auto&& dst, auto&& src) const
+			template<typename F>
+			void copy(Elem<F> dst, Elem<F> src) const
 			{
-				assert(dst.size() == src.size());
-				std::copy(src.begin(), src.end(), dst.begin());
+				std::copy(src.data(), src.data() + mByteCount, dst.data());
 			}
 
 			template<typename F>
-			void zero(F& x) const
+			void zero(Elem<F> x) const
 			{
-				std::fill(x.begin(), x.end(), 0);
+				std::fill(x.data(), x.data() + mByteCount, 0);
 			}
 
-			template<typename F>
-			bool eq(const F& lhs, const F& rhs) const
-			{
-				if (lhs.size() != rhs.size()) return false;
-				return std::equal(lhs.begin(), lhs.end(), rhs.begin());
-			}
 
 			template<typename F>
-			void fromBlock(F&& ret, const block& b) const
+			void fromBlock(Elem<F> ret, const block& b) const
 			{
-				auto bytes = std::min(ret.size(), sizeof(block));
-				if (ret.size() > sizeof(block))
+				//auto bytes = std::min(ret.size(), sizeof(block));
+				if (mByteCount > sizeof(block))
 				{
 					// If we need more bytes than a block provides, expand using AES
 					AES aes(b);
-					for (u64 i = 0; i < ret.size(); i += sizeof(block))
+					for (u64 i = 0; i < mByteCount; i += sizeof(block))
 					{
-						auto remaining = std::min(ret.size() - i, sizeof(block));
+						auto remaining = std::min(mByteCount - i, sizeof(block));
 						block expanded = aes.ecbEncBlock(block(i / sizeof(block), 0));
 						std::memcpy(ret.data() + i, &expanded, remaining);
 					}
 				}
 				else
 				{
-					std::memcpy(ret.data(), &b, bytes);
+					std::memcpy(ret.data(), &b, mByteCount);
 				}
 			}
 
 			// given x and a masking block `mask` with value 0x0000...00 or 0xffff...ff,
 			// return F(0) if `mask` is 0 and otherwise return x.
-			void mask(auto&& ret, auto&& x, const block& mask)const
+			template<typename F, typename G>
+			void mask(Elem<F> ret, Elem<G> x, const block& mask)const
 			{
 				auto maskValue = mask.get<u8>(0);
-				for(u64 i = 0; i < ret.size(); ++i)
+				for(u64 i = 0; i < mByteCount; ++i)
 				{
-					ret[i] = x[i] & maskValue;
+					ret.data()[i] = x.data()[i] & maskValue;
 				}
 			}
 
 			void serialize(auto&& begin, auto&& end, u8* dst) const
 			{
-				auto elementSize = divCeil(mBitCount, 8);
 				for (auto it = begin; it != end; ++it)
 				{
 					auto&& elem = *it;
-					std::memcpy(dst, elem.data(), elementSize);
-					dst += elementSize;
+					std::memcpy(dst, elem.data(), mByteCount);
+					dst += mByteCount;
 				}
 			}
 
 			void deserialize(const u8* src, const u8* srcEnd, auto dst) const
 			{
-				auto elementSize = divCeil(mBitCount, 8);
 				while (src < srcEnd)
 				{
 					auto&& elem = *dst++;
-					std::memcpy(elem.data(), src, elementSize);
-					src += elementSize;
+					std::memcpy(elem.data(), src, mByteCount);
+					src += mByteCount;
 				}
 			}
 
 			bool eq(auto&& lhs, auto&& rhs) const
 			{
-				if (lhs.size() != rhs.size()) return false;
-				for (u64 i = 0; i < lhs.size(); ++i)
+				for (u64 i = 0; i < mByteCount; ++i)
 				{
-					if (lhs[i] != rhs[i]) return false;
+					if (lhs.data()[i] != rhs.data()[i]) return false;
 				}
 				return true;
 			}
@@ -674,7 +677,7 @@ namespace osuCrypto
 
 				AlignedUnVector<u8> msg(n * ctx.template byteSize<F>());
 				auto mIter = msg.data();
-				auto zero = ctx.template make<F>();
+				auto zero = ctx.template makeVec<F>(1);
 				auto t0 = ctx.template makeVec<F>(8);
 				auto yx = ctx.template makeVec<F>(8);
 				auto ynx = ctx.template makeVec<F>(8);
@@ -693,7 +696,7 @@ namespace osuCrypto
 	{ constexpr u64 VAR = 7; STATEMENT; }\
 	}while(0)
 
-				ctx.zero(zero);
+				ctx.zero(zero[0]);
 
 				for (u64 i = 0; i < n8; i+= 8)
 				{
@@ -719,7 +722,7 @@ namespace osuCrypto
 					mIter += ctx.template byteSize<F>() * 8;
 
 					// xy = -t0
-					SIMD8(q, ctx.minus(xyBegin[i + q], zero, t0[q]));
+					SIMD8(q, ctx.minus(xyBegin[i + q], zero[0], t0[q]));
 				}
 
 				for (u64 i = n8; i < n; ++i)
@@ -740,7 +743,7 @@ namespace osuCrypto
 					mIter += ctx.template byteSize<F>();
 
 					// xy = -t0
-					ctx.minus(xyBegin[i], zero, t0[0]);
+					ctx.minus(xyBegin[i], zero[0], t0[0]);
 				}
 
 				co_await sock.send(std::move(msg));
@@ -877,10 +880,24 @@ namespace osuCrypto
 			AlignedUnVector<u8> phi1(x.size());
 			co_await sock.recv(phi1);
 
-			for (u64 i = 0; i < n; ++i)
+			// if(phi1[i]) swap(mSendOts[i][0], mSendOts[i][1]);
+			auto n8 = n / 8 * 8;
+			for (u64 i = 0; i < n8; i += 8)
 			{
-				if (bit(phi1, i))
-					std::swap(session.mSendOts[i][0], session.mSendOts[i][1]);
+				u8 pb = phi1[i/8];
+				block diff[8];
+				SIMD8(q, diff[q] = session.mSendOts[i + q][0] ^ session.mSendOts[i + q][1]);
+				SIMD8(q, diff[q] &= block::allSame<i32>(-i32((pb >> q) & 1)));
+				SIMD8(q, session.mSendOts[i+q][0] ^= diff[q]);
+				SIMD8(q, session.mSendOts[i+q][1] ^= diff[q]);
+
+			}
+			for (u64 i = n8; i < n; ++i)
+			{
+				auto diff = session.mSendOts[i][0] ^ session.mSendOts[i][1];
+				diff &= block::allSame<u32>(-u32(bit(phi1, i)));
+				session.mSendOts[i][0] ^= diff;
+				session.mSendOts[i][1] ^= diff;
 			}
 
 			co_return session;
@@ -1051,7 +1068,7 @@ namespace osuCrypto
 		void setBaseOts(
 			span<const std::array<block, 2>> baseSendOts,
 			span<const block> recvBaseOts,
-			const oc::BitVector& baseChoices)
+			oc::BitVector baseChoices)
 		{
 			if (baseSendOts.size() != baseOtCount() ||
 				recvBaseOts.size() != baseOtCount() ||
@@ -1063,9 +1080,10 @@ namespace osuCrypto
 			mSendOts.resize(baseSendOts.size());
 			mRecvOts.resize(recvBaseOts.size());
 			
-			std::copy(baseSendOts.begin(), baseSendOts.end(), mSendOts.begin());
-			std::copy(recvBaseOts.begin(), recvBaseOts.end(), mRecvOts.begin());
-			mChoiceBits = baseChoices;
+			
+			copyBytes(mSendOts, baseSendOts);
+			copyBytes(mRecvOts, recvBaseOts);
+			mChoiceBits = std::move(baseChoices);
 			mOtIdx = 0;
 		}
 

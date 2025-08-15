@@ -269,7 +269,7 @@ namespace osuCrypto
 			diffIter = diff.begin();
 			srcIter = src.begin();
 			auto dstIter = dst.begin();
-			auto temp_val = ctx.template make<F>();
+			auto temp_val = ctx.template makeVec<F>(1);
 
 			for (u64 subnetIdx = 0; subnetIdx < numSubnets; ++subnetIdx)
 			{
@@ -292,8 +292,8 @@ namespace osuCrypto
 
 					// output1 = (input[0]+input[1]) - output0
 					//         = input[!ctrl]
-					ctx.plus(temp_val, input0, input1);
-					ctx.minus(*output1Begin++, temp_val, *output0Begin++);
+					ctx.plus(temp_val[0], input0, input1);
+					ctx.minus(*output1Begin++, temp_val[0], *output0Begin++);
 
 				}
 
@@ -340,7 +340,7 @@ namespace osuCrypto
 
 			co_await randMultiply2<F>(diff.begin(), diffIter, sock, ctx);
 
-			auto temp_val = ctx.template make<F>();
+			auto temp_val = ctx.template makeVec<F>(1);
 			diffIter = diff.begin();
 			srcIter = src.begin();
 			auto dstIter = dst.begin();
@@ -368,8 +368,8 @@ namespace osuCrypto
 
 					// output[i+1] = (input0[i/2] + input1[i/2]) - output[i]
 					//             = input[!ctrl][i/2]
-					ctx.plus(temp_val, *input0Begin++, *input1Begin++);
-					ctx.minus(*out1, temp_val, *out0);
+					ctx.plus(temp_val[0], *input0Begin++, *input1Begin++);
+					ctx.minus(*out1, temp_val[0], *out0);
 				}
 
 				if (size0 != size1)

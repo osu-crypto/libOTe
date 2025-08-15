@@ -50,7 +50,7 @@ namespace osuCrypto
 		std::vector<Dedup> mDedup;
 		std::vector<GoldreichHash> mGoldreichHash;
 		std::vector<WaksmanPermute> mWaksmanPermute;
-		std::vector<BinarySolver> mBinarySolver;
+		BinarySolver mBinarySolver;
 		SparseDpf mSparseDpf;
 
 		// the leaf values for the sparse DPFs.
@@ -126,9 +126,9 @@ namespace osuCrypto
 			for (auto& hash : mGoldreichHash)
 				hash.init(mPartyIdx, mPartitionSize, divCeil(mIndexBitCount, 8), divCeil(c, 8));
 
-			mBinarySolver.resize(mNumPartitions * mNumSets);
-			for (auto& solver : mBinarySolver)
-				solver.init(mPartyIdx, mPartitionSize, c, log2ceil(mPartitionSize));
+			//mBinarySolver.resize();
+			//for (auto& solver : mBinarySolver)
+			mBinarySolver.init(mPartyIdx, mPartitionSize, c, log2ceil(mPartitionSize), mNumPartitions * mNumSets);
 
 			auto denseDepth = log2ceil(f) + 2;
 			mSparseDpf.init(mPartyIdx, mNumSets * f, mDomain, denseDepth);
@@ -185,12 +185,7 @@ namespace osuCrypto
 				hashSend += count.mSendCount;
 			}
 
-			u64 solve = 0;
-			for (auto& solver : mBinarySolver)
-			{
-				solve += solver.baseOtCount();
-			}
-
+			u64 solve = mBinarySolver.baseOtCount();
 			auto mult = mMultiplier.baseOtCount();
 
 			return { 
@@ -236,9 +231,8 @@ namespace osuCrypto
 				set(sub);
 			for (auto& hash : mGoldreichHash)
 				set(hash);
-			for (auto& solver : mBinarySolver)
-				set(solver);
 
+			set(mBinarySolver);
 			set(mSparseDpf);
 
 			if (mCharacteristicTwo == false)
@@ -557,48 +551,49 @@ namespace osuCrypto
 				mGoldreichHash[i].hash(ADomain, HDomain.submtx(i, 1), hashCache[i]);
 			}
 
-			std::vector<Matrix<u8>> Y_i(mNumSets);
-			for (u64 s = 0, k = 0; s < mNumSets; ++s)
+			// Prepare y vector (0, 1, ..., m-1)
+			Matrix<u8> Y(mPartitionSize, divCeil(log2ceil(mPartitionSize), 8));
+			for (u64 j = 0; j < mPartitionSize; ++j)
+			{
+				auto val = j * mPartyIdx;
+				copyBytesMin(Y[j], val);
+			}
+
+			std::vector<MatrixView<const u8>> Y_si(mNumSets* mNumPartitions, Y);
+			std::vector<MatrixView<const u8>> M_si(mNumSets* mNumPartitions, Y);
+			std::vector<MatrixView<u8>> S_si(mNumSets * mNumPartitions, Y);
+			for (u64 s = 0, h = 0; s < mNumSets; ++s)
 			{
 				if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
 					co_await print(A[s], M[s], sock, "hash*");
 
-
-				// Prepare y_i vector (0, 1, ..., m-1)
-				Y_i[s].resize(mPartitionSize, divCeil(log2ceil(mPartitionSize), 8));
-				for (u64 j = 0; j < mPartitionSize; ++j)
-				{
-					auto val = j * mPartyIdx;
-					copyBytesMin(Y_i[s][j], val);
-				}
-
 				// Step 8-9: Create the matrices M_i and solve linear systems
-				copyBytesMin(ADomain, mDomain);
-				for (u64 i = 0; i < mNumPartitions; ++i, ++k)
+				for (u64 i = 0; i < mNumPartitions; ++i, ++h)
 				{
-					auto M_i = M[s].submtx(i * mPartitionSize, mPartitionSize);
-					auto S_i = S[s].submtx(i * c, c);
+					auto Msih = M[s].submtx(i * mPartitionSize, mPartitionSize);
 
 					//mGoldreichHash[i].mPrint = mPrint && mPartyIdx;
 					if (mPartyIdx)
 					{
-						for (u64 j = 0; j < M_i.rows(); ++j)
-							for (u64 k = 0; k < M_i.cols(); ++k)
-								M_i(j, k) ^= HDomain(i, k); // XOR the hash into M_i
+						for (u64 j = 0; j < Msih.rows(); ++j)
+							for (u64 k = 0; k < Msih.cols(); ++k)
+								Msih(j, k) ^= HDomain(i, k); // XOR the hash into M_i
 					}
 
-					//mBinarySolver[k].mPrint = (k == 0);
+					M_si[h] = Msih;
+					S_si[h] = S[s].submtx(i * c, c);
 
 					// Step 9: Binary solver to compute [s_i] = bin-solver([M_i], [y_i])
-					tasks.push_back(mBinarySolver[k].solve(M_i, Y_i[s], S_i, prng, socks[k]));
+					//tasks.push_back(mBinarySolver[k].solve(M_si, Y_i[s], S_si, prng, socks[k]));
 				}
 
 			}
 
 			setTimePoint("solver Begin");
-			res = co_await macoro::when_all_ready(std::move(tasks));
-			for (auto& r : res)
-				r.result();
+			co_await mBinarySolver.solve(M_si, Y_si, S_si, prng, sock);
+			//res = co_await macoro::when_all_ready(std::move(tasks));
+			//for (auto& r : res)
+			//	r.result();
 
 			setTimePoint("solver done");
 
