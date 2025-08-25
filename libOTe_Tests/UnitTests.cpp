@@ -27,6 +27,8 @@
 #include "libOTe_Tests/Ntt_Tests.h"
 #include "libOTe_Tests/BinarySolver_Tests.h"
 #include "libOTe_Tests/RingLpn_Tests.h"
+#include "libOTe_Tests/Goldilocks_Tests.h"
+#include "libOTe_Tests/UInt_Tests.h"
 
 
 using namespace osuCrypto;
@@ -112,6 +114,26 @@ namespace tests_libOTe
 
 			tc.add("Field_F7681_Test                        ", Field_F7681_Test);
 			tc.add("Field_F12289_Test                       ", Field_F12289_Test);
+
+
+			tc.add("UInt_Basics_Test                        ", UInt_Basics_Test);
+			tc.add("UInt_Bitwise_Test                       ", UInt_Bitwise_Test);
+			tc.add("UInt_Shifts_Test                        ", UInt_Shifts_Test);
+			tc.add("UInt_AddSub_Test                        ", UInt_AddSub_Test);
+			tc.add("UInt_MulU64_Test                        ", UInt_MulU64_Test);
+			tc.add("UInt_MulFull_Test                       ", UInt_MulFull_Test);
+			tc.add("UInt_DivBasic_Test                      ", UInt_DivBasic_Test);
+			tc.add("UInt_DivMultilimb_Test                  ", UInt_DivMultilimb_Test);
+			tc.add("UInt_Stream_Test                        ", UInt_Stream_Test);
+			tc.add("UInt_Conversions_Test                   ", UInt_Conversions_Test);
+
+
+			tc.add("Goldilocks_add_Test                     ", Goldilocks_add_Test);
+			tc.add("Goldilocks_Sub_Test                     ", Goldilocks_Sub_Test);
+			tc.add("Goldilocks_Mult_Test                    ", Goldilocks_Mult_Test);
+			tc.add("Goldilocks_Inverse_Test                 ", Goldilocks_Inverse_Test);
+			tc.add("Goldilocks_Exp_Test                     ", Goldilocks_Exp_Test);
+
 			tc.add("Poly_basics_Tests                       ", Poly_basics_Tests);
 			tc.add("Poly_eval_root_test                     ", Poly_eval_root_test);
 			tc.add("Poly_scalar_test                        ", Poly_scalar_test);
