@@ -738,7 +738,7 @@ namespace osuCrypto
 
 		// make a_0 the identity polynomial (in FFT space) polyIdx.e., all 1s
 		for (size_t i = 0; i < mN; i++) {
-			mFftA(0, i) = 1;
+			mFftA(0, i) = F(1);
 			for (u64 j = 1; j < mNumPolys; ++j)
 				mFftA(j, i) = prng.get();
 		}
@@ -1466,8 +1466,8 @@ namespace osuCrypto
 				//}
 
 				Poly<F> xnPlus1;
-				xnPlus1[mN] = 1;
-				xnPlus1[0] = 1;
+				xnPlus1[mN] = F(1);
+				xnPlus1[0] = F(1);
 
 				auto pp = (aPoly * bPoly);
 				auto exp = pp % xnPlus1;

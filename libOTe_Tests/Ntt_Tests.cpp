@@ -3,7 +3,9 @@
 #include "libOTe/Tools/Ntt/NttNegWrapMatrix.h"
 #include "libOTe/Tools/Ntt/NttNegWrap.h"
 #include "libOTe/Tools/Field/Fp.h"
+#include "libOTe/Tools/Field/Goldilocks.h"
 #include "libOTe/Tools/Ntt/Poly.h"
+
 
 using namespace oc;
 
@@ -35,14 +37,14 @@ namespace tests_libOTe
 
 
 			// the modulus polynomial is x^n + 1
-			Poly<F> mod(n, 1);
-			mod[n] = 1;
-			mod[0] = 1;
+			Poly<F> mod(n, F(1));
+			mod[n] = F(1);
+			mod[0] = F(1);
 
 			// x^{n-1}
-			Poly<F> a(n - 1, 1), aHat(n - 1, 1);
-			Poly<F> b(n - 1, 1), bHat(n - 1, 1);
-			Poly<F> c(n - 1, 1), cHat(n - 1, 1);
+			Poly<F> a(n - 1, F(1)), aHat(n - 1, F(1));
+			Poly<F> b(n - 1, F(1)), bHat(n - 1, F(1));
+			Poly<F> c(n - 1, F(1)), cHat(n - 1, F(1));
 
 			nttNegWrapMatrix<F>(aHat, a, psi, order, verbose);
 			nttNegWrapMatrix<F>(bHat, a, psi, order);
@@ -65,19 +67,13 @@ namespace tests_libOTe
 		}
 	}
 
-
-	void Ntt_nttNegWrapMatrix_Test()
+	template<typename F>
+	void Ntt_nttNegWrapMatrix_Test_impl()
 	{
-		//using F = F12289;
-		//u64 n = 1024;
-		//F psi = 12282;
-		using F = F7681;
-		//u64 n = 4;
-		//F psi = 1925;
+
 		u64 n = 32;
 		PRNG prng(CCBlock);
-		auto g = findGenerator<F>(prng);
-		auto psi = primRootOfUnity(2 * n, g);
+		auto psi = primRootOfUnity<F>(2 * n);
 		//std::cout << "phi " << psi << std::endl;
 
 		if (isPrimRootOfUnity<F>(2 * n, psi) == false)
@@ -90,22 +86,22 @@ namespace tests_libOTe
 		{
 
 			// the modulus polynomial is x^n + 1
-			Poly<F> mod(n, 1);
-			mod[n] = 1;
-			mod[0] = 1;
+			Poly<F> mod(n, F(1));
+			mod[n] = F(1);
+			mod[0] = F(1);
 
 			// x^{n-1}
-			Poly<F> a(n - 1, 1), a2(n - 1, 1), aHat(n - 1, 1), aHat2(n - 1, 1);
-			Poly<F> b(n - 1, 1), bHat(n - 1, 1), bHat2(n - 1, 1);
-			Poly<F> c1(n - 1, 1), c1Hat(n - 1, 1);
-			Poly<F> c2(n - 1, 1), c2Hat(n - 1, 1);
+			Poly<F> a(n - 1, F(1)), a2(n - 1, F(1)), aHat(n - 1, F(1)), aHat2(n - 1, F(1));
+			Poly<F> b(n - 1, F(1)), bHat(n - 1, F(1)), bHat2(n - 1, F(1));
+			Poly<F> c1(n - 1, F(1)), c1Hat(n - 1, F(1));
+			Poly<F> c2(n - 1, F(1)), c2Hat(n - 1, F(1));
 			std::vector<F> psiPowers(2 * n);
 			for (u64 i = 0; i < psiPowers.size(); ++i)
 			{
 				psiPowers[i] = psi.pow(i);
 			}
 			for (u64 i = 0; i < a.size(); ++i)
-				a[i] = i;
+				a[i] = F(i);
 
 			b = prng.get();
 
@@ -169,6 +165,19 @@ namespace tests_libOTe
 			//	throw RTE_LOC;
 		}
 		//inttNegWrapGs<F>(a2, aHat, psi, order);
+	}
+
+	void Ntt_nttNegWrapMatrix_Test()
+	{
+		//using F = F12289;
+		//u64 n = 1024;
+		//F psi = 12282;
+		using F = F7681;
+		//u64 n = 4;
+		//F psi = 1925;
+		Ntt_nttNegWrapMatrix_Test_impl<F7681>();
+		Ntt_nttNegWrapMatrix_Test_impl<F12289>();
+		Ntt_nttNegWrapMatrix_Test_impl<Goldilocks>();
 	}
 
 }

@@ -7,13 +7,44 @@
 #include <utility>
 #include <immintrin.h>
 #include "util.h"
+#include "UInt.h"
 
 namespace osuCrypto
 {
 
 
-	// Finite field Fp with p = 2^64 - 2^32 + 1. 
+	// Goldilocks: Finite field F_p with p = 2^64 - 2^32 + 1.
 	//
+	// Overview
+	// --------
+	// - This type models arithmetic in the "Goldilocks" prime field F_p frequently used
+	//   in NTT/FFT-based polynomial arithmetic and zk protocols.
+	// - Elements are stored in an "unreduced" representative mVal in [0, 2^64),
+	//   where values in [p, 2^64) are also allowed. The canonical() method maps an
+	//   element back to [0, p-1].
+	// - The add/sub implementations use a field-specific trick that adds/subtracts a fixed
+	//   "reducer" (= 2^32 - 1) after carry/borrow, avoiding branches on the critical path.
+	// - Multiplication uses an optimized reduction that leverages the Goldilocks congruences:
+	//     2^64 ≡ 2^32 - 1 (mod p), 2^96 ≡ -1 (mod p).
+	//
+	// API notes
+	// ---------
+	// - All operators (+, -, *, /) and helpers (add, sub, mul, inv, pow, increment, decrement, negate)
+	//   produce a valid unreduced representative (canonicality is not guaranteed unless stated).
+	// - operator u64() returns canonical().mVal.
+	// - inv(0) is defined to be 0 for convenience in some algorithms; consumers should treat 0 as non-invertible.
+	// - pow(result, x, e) computes x^e using square-and-multiply over the field.
+	//
+	// Roots of unity
+	// --------------
+	// - GoldilocksRootsOfUnity holds a table of primitive 2^k-th roots for k = 0..32.
+	// - primRootOfUnity<Goldilocks>(n) returns the primitive n-th root for n a power of two.
+	//
+	// Performance tips
+	// ----------------
+	// - This implementation is constexpr-friendly where practical, enabling compile-time folding in some cases.
+	// - The fast reduction paths in mulPzt22 rely on 64x64->128 multiplication via mul128 defined in util.h.
+	// 
 	// see 
 	// * EcGFp5: a Specialized Elliptic Curve
 	// * https://github.com/mir-protocol/plonky2/blob/main/plonky2/plonky2.pdf
@@ -23,59 +54,90 @@ namespace osuCrypto
 	// * https://xn--2-umb.com/23/gold-reduce/
 	struct Goldilocks
 	{
-		static constexpr u64 mModulus = 0xffffffff00000001ull;
+		// Field modulus p = 2^64 - 2^32 + 1.
+		// Using a two's-complement identity to keep it constexpr and obvious.
+		// the 2^64 is implicit in u64 arithmetic.
+		static constexpr u64 mModulus = -(1ull << 32) + 1; 
 
-		// we store the value in unreduced form.
-		// eg, mVal = mModulus is a valid representation of 0.
+		// Alias for the modulus, useful for generic code treating "order" as the field size.
+		static constexpr u128 order() { return (u128(1) << 64) + u128(mModulus); }
+
+		// Internal value (unreduced). Any u64 is accepted; interpreted modulo mModulus.
+		// Invariant: all arithmetic maintains a correct representative modulo p.
 		u64 mVal;
 
+		// Returns the canonical representative in [0, p-1].
 		constexpr Goldilocks canonical() const noexcept
 		{
-			auto res = mVal;
-			if (res >= mModulus)
-				res -= mModulus;
-			return { res };
+			return { (mVal < mModulus) ? mVal : mVal - mModulus };
 		}
 
+		// Returns the canonical representative in [0, p-1].
+		constexpr u64 integer() const noexcept
+		{
+			return canonical().mVal;
+		}
+
+		// Implicit cast to the canonical u64 value in [0, p-1].
 		constexpr operator u64() const noexcept
 		{
 			return canonical().mVal;
 		}
 
+		// Field addition (this + rhs).
 		constexpr Goldilocks operator+(const Goldilocks& rhs) const noexcept
 		{
 			Goldilocks result;
 			add(result, *this, rhs);
 			return result;
 		}
+
+		// In-place addition.
 		constexpr Goldilocks& operator+=(const Goldilocks& rhs) noexcept
 		{
 			add(*this, *this, rhs);
 			return *this;
 		}
+
+		// Field subtraction (this - rhs).
 		constexpr Goldilocks operator-(const Goldilocks& rhs) const noexcept
 		{
 			Goldilocks result;
 			sub(result, *this, rhs);
 			return result;
 		}
+
+		// In-place subtraction.
 		constexpr Goldilocks& operator-=(const Goldilocks& rhs) noexcept
 		{
 			sub(*this, *this, rhs);
 			return *this;
 		}
+
+		// Field negation (-this).
+		constexpr Goldilocks operator-() const noexcept
+		{
+			Goldilocks result;
+			negate(result, *this);
+			return result;
+		}
+
+		// Field multiplication (this * rhs).
 		constexpr Goldilocks operator*(const Goldilocks& rhs) const noexcept
 		{
 			Goldilocks result;
 			mul(result, *this, rhs);
 			return result;
 		}
+
+		// In-place multiplication.
 		constexpr Goldilocks& operator*=(const Goldilocks& rhs) noexcept
 		{
 			mul(*this, *this, rhs);
 			return *this;
 		}
 
+		// Field division (this / rhs) = this * inv(rhs). inv(0) := 0 by convention here.
 		constexpr Goldilocks operator/(const Goldilocks& rhs) const noexcept
 		{
 			Goldilocks result;
@@ -83,6 +145,8 @@ namespace osuCrypto
 			mul(result, *this, result);
 			return result;
 		}
+
+		// In-place division.
 		constexpr Goldilocks& operator/=(const Goldilocks& rhs) noexcept
 		{
 			Goldilocks inv_rhs;
@@ -91,14 +155,18 @@ namespace osuCrypto
 			return *this;
 		}
 
+		// Equality comparison uses canonical representatives.
 		constexpr bool operator==(const Goldilocks& rhs) const noexcept
 		{
 			return canonical().mVal == rhs.canonical().mVal;
 		}
+
+		// Equality comparison uses canonical representatives.
 		constexpr bool operator!=(const Goldilocks& rhs) const noexcept
 		{
 			return !(*this == rhs);
 		}
+
 		constexpr bool operator<(const Goldilocks& rhs) const noexcept
 		{
 			return canonical().mVal < rhs.canonical().mVal;
@@ -118,14 +186,54 @@ namespace osuCrypto
 
 		constexpr Goldilocks& operator=(const Goldilocks& other) noexcept = default;
 
-		//// increment operators
-		//constexpr Goldilocks& operator++()
-		//{
-		//	add(*this, *this, { 1 });
-		//	return *this;
-		//}
+		// Bitwise AND on unreduced representatives. This is not a field operation.
+		// Only used in select internal idioms; do not rely on it as a field operation.
+		constexpr Goldilocks operator&(const Goldilocks& rhs) const noexcept
+		{
+			return {mVal & rhs.mVal };
+		}
 
-		static constexpr void exp(
+		// Pre-increment: ++x  => x = x + 1 (mod p), returns reference to updated x.
+		constexpr Goldilocks& operator++() noexcept
+		{
+			increment(*this, *this);
+			return *this;
+		}
+
+		// Post-increment: x++  => returns old value, then x = x + 1 (mod p).
+		constexpr Goldilocks operator++(int) noexcept
+		{
+			Goldilocks tmp = *this;
+			increment(*this, *this);
+			return tmp;
+		}
+
+		// Pre-decrement: --x  => x = x - 1 (mod p), returns reference to updated x.
+		constexpr Goldilocks& operator--() noexcept
+		{
+			decrement(*this, *this);
+			return *this;
+		}
+
+		// Post-decrement: x--  => returns old value, then x = x - 1 (mod p).
+		constexpr Goldilocks operator--(int) noexcept
+		{
+			Goldilocks tmp = *this;
+			decrement(*this, *this);
+			return tmp;
+		}
+
+		// Returns x^exp in the field using square-and-multiply.
+		constexpr Goldilocks pow(u64 exp) const noexcept
+		{
+			Goldilocks result;
+			pow(result, *this, exp);
+			return result;
+		}
+
+		// pow(result, x, exps):
+		//   Compute x^exps via square-and-multiply with field multiplication.
+		static constexpr void pow(
 			Goldilocks& result,
 			const Goldilocks& x,
 			u64 exps) noexcept
@@ -143,43 +251,64 @@ namespace osuCrypto
 			}
 		}
 
+
+		// inv(result, in):
+		//   Compute the multiplicative inverse of in modulo p via an extended Euclidean algorithm.
+		//   Convention: inv(0) = 0. Callers should treat 0 as non-invertible in strict math contexts.
 		static constexpr void inv(
 			Goldilocks& result,
 			const Goldilocks& in);
 
 
+		// mul(result, in1, in2):
+		//   Field multiplication. Currently forwards to mulPzt22.
 		static constexpr void mul(
 			Goldilocks& result,
 			const Goldilocks& in1,
 			const Goldilocks& in2);
 
 
+
+		// mulPzt22(result, in1, in2):
+		//   Fast modular multiplication specialized for Goldilocks:
+		//     Let x = in1 * in2 = x_hi * 2^64 + x_lo.
+		//     Using congruences 2^64 ≡ 2^32 - 1 and 2^96 ≡ -1 (mod p),
+		//     reduce with:
+		//       x ≡ x0 - x2 + x1*(2^32 - 1)  (mod p),
+		//     where x1 = low32(x_hi), x2 = high32(x_hi), x0 = x_lo.
 		static constexpr void mulPzt22(
 			Goldilocks& result,
 			const Goldilocks& in1,
 			const Goldilocks& in2);
 
+		// Alternative multiplication variants (commented out). Kept as references for experimentation.
 		//static constexpr void mulBerrettV2(
 		//	Goldilocks& result,
 		//	const Goldilocks& in1,
 		//	const Goldilocks& in2);
-
-
 		//static constexpr void mulBerrettV1(
 		//	Goldilocks& result,
 		//	const Goldilocks& in1,
 		//	const Goldilocks& in2);
 
+		// add(result, in1, in2):
+		//   Field addition with branchless correction. If the 64-bit addition overflows, add (2^32 - 1),
+		//   and if that overflows, add (2^32 - 1) again. This leverages the Goldilocks modulus structure.
 		static constexpr void add(
 			Goldilocks& result,
 			const Goldilocks& in1,
 			const Goldilocks& in2);
 
+		// sub(result, in1, in2):
+		//   Field subtraction with branchless correction. If the subtraction borrows, subtract (2^32 - 1),
+		//   and if that borrows, subtract (2^32 - 1) again.
 		static constexpr void sub(
 			Goldilocks& result,
 			const Goldilocks& in1,
 			const Goldilocks& in2);
 
+		// increment(result, in1):
+		//   result = in1 + 1 (mod p).
 		static constexpr void increment(
 			Goldilocks& result,
 			const Goldilocks& in1)
@@ -188,6 +317,8 @@ namespace osuCrypto
 			result.mVal = v < mModulus ? v : v - mModulus;
 		}
 
+		// decrement(result, in1):
+		//   result = in1 - 1 (mod p).
 		static constexpr void decrement(
 			Goldilocks& result,
 			const Goldilocks& in1)
@@ -197,7 +328,15 @@ namespace osuCrypto
 			result.mVal = in1.mVal == 0 ? mModulus - 1 : v;
 		}
 
-
+		// negate(result, in1):
+		//   result = -in1 (mod p). Note that -0 = 0.
+		static constexpr void negate(
+			Goldilocks& result,
+			const Goldilocks& in1)
+		{
+			auto v = in1.canonical().mVal;
+			result.mVal = v == 0 ? 0 : mModulus - v;
+		}
 
 	};
 
@@ -488,6 +627,8 @@ namespace osuCrypto
 		result.mVal = diff;
 	}
 
+	// Table of primitive 2^k-th roots of unity for k=0..32, suitable for NTTs over F_p.
+	// Entry i is a primitive 2^i-th root. Consumers should ensure sizes are powers of two.
 	static constexpr std::array<Goldilocks, 33> GoldilocksRootsOfUnity =
 	{
 		Goldilocks{1ull},
@@ -526,6 +667,24 @@ namespace osuCrypto
 	};
 
 
+	// primRootOfUnity<F>(n):
+	//   Return a primitive n-th root of unity for the field type F.
+	//   For Goldilocks, n must be a power of two and is served from GoldilocksRootsOfUnity.
+	//   This primary template is declared for specialization by other fields.
+	template<typename F>
+	inline F primRootOfUnity(u64 n);
+
+	// Goldilocks specialization:
+	// - n must be a power of two (n = 2^k).
+	// - Returns the precomputed primitive n-th root from the table above.
+	template<>
+	inline Goldilocks primRootOfUnity<Goldilocks>(u64 n)
+	{
+		auto ln = log2ceil(n);
+		if (1ull << ln != n)
+			throw RTE_LOC;
+		return GoldilocksRootsOfUnity[ln];
+	}
 
 
 

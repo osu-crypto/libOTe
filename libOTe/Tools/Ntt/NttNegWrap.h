@@ -80,7 +80,7 @@ namespace osuCrypto
 	{
 		u64 n = a.size();
 		auto ln = log2ceil(n);
-		u64 qq = F::order() - 1;
+		auto qq = F::order() - 1;
 
 		if (n != 1ull << ln)
 			throw RTE_LOC;

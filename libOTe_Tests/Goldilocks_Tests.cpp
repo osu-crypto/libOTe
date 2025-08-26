@@ -494,48 +494,48 @@ namespace osuCrypto
         // Test basic exponentiation cases
 
         // Test x^0 = 1 for any x ≠ 0
-        Goldilocks::exp(result, base, 0);
+        Goldilocks::pow(result, base, 0);
         ThrowIfNotEqual((u64)result, 1, "x^0 = 1");
 
         // Test x^1 = x
-        Goldilocks::exp(result, base, 1);
+        Goldilocks::pow(result, base, 1);
         ThrowIfNotEqual((u64)result, 2, "x^1 = x");
 
         // Test x^2 = x*x
-        Goldilocks::exp(result, base, 2);
+        Goldilocks::pow(result, base, 2);
         ThrowIfNotEqual((u64)result, 4, "x^2 = x*x");
 
         // Test x^3 = x*x*x
-        Goldilocks::exp(result, base, 3);
+        Goldilocks::pow(result, base, 3);
         ThrowIfNotEqual((u64)result, 8, "x^3 = x*x*x");
 
         // Test larger exponents
-        Goldilocks::exp(result, base, 10);
+        Goldilocks::pow(result, base, 10);
         ThrowIfNotEqual((u64)result, 1024, "2^10 = 1024"); // 2^10 = 1024
 
         // Test exponentiation with a different base
         Goldilocks base3{ 3 };
 
         // 3^0 = 1
-        Goldilocks::exp(result, base3, 0);
+        Goldilocks::pow(result, base3, 0);
         ThrowIfNotEqual((u64)result, 1, "3^0 = 1");
 
         // 3^1 = 3
-        Goldilocks::exp(result, base3, 1);
+        Goldilocks::pow(result, base3, 1);
         ThrowIfNotEqual((u64)result, 3, "3^1 = 3");
 
         // 3^2 = 9
-        Goldilocks::exp(result, base3, 2);
+        Goldilocks::pow(result, base3, 2);
         ThrowIfNotEqual((u64)result, 9, "3^2 = 9");
 
         // 3^3 = 27
-        Goldilocks::exp(result, base3, 3);
+        Goldilocks::pow(result, base3, 3);
         ThrowIfNotEqual((u64)result, 27, "3^3 = 27");
 
         // Test modular behavior with large values that would overflow normal arithmetic
 
         // Test 2^63 which would be too large for normal 64-bit integers
-        Goldilocks::exp(result, base, 63);
+        Goldilocks::pow(result, base, 63);
         // Expected: (2^63) mod p
         // Should be 9223372036854775808 (2^63)
         ThrowIfNotEqual((u64)result, 9223372036854775808ULL, "2^63 in Goldilocks field");
@@ -544,26 +544,26 @@ namespace osuCrypto
         Goldilocks big_base{ Goldilocks::mModulus - 1 }; // Using p-1 as base
 
         // (p-1)^1 = p-1
-        Goldilocks::exp(result, big_base, 1);
+        Goldilocks::pow(result, big_base, 1);
         ThrowIfNotEqual((u64)result, Goldilocks::mModulus - 1, "(p-1)^1 = p-1");
 
         // (p-1)^2 = 1 in the field (by Fermat's little theorem)
-        Goldilocks::exp(result, big_base, 2);
+        Goldilocks::pow(result, big_base, 2);
         ThrowIfNotEqual((u64)result, 1, "(p-1)^2 = 1");
 
         // Test 0^exp = 0 for any exp > 0
         Goldilocks zero{ 0 };
-        Goldilocks::exp(result, zero, 10);
+        Goldilocks::pow(result, zero, 10);
         ThrowIfNotEqual((u64)result, 0, "0^10 = 0");
 
         // Test 0^0 = 1 (mathematical convention)
-        Goldilocks::exp(result, zero, 0);
+        Goldilocks::pow(result, zero, 0);
         ThrowIfNotEqual((u64)result, 1, "0^0 = 1");
 
         // Test large exponents
         // We know that for any element x in the field, x^(p-1) = 1
         // So 2^(p-1) = 1
-        Goldilocks::exp(result, base, Goldilocks::mModulus - 1);
+        Goldilocks::pow(result, base, Goldilocks::mModulus - 1);
         ThrowIfNotEqual((u64)result, 1, "2^(p-1) = 1 (Fermat's Little Theorem)");
 
         // Test exp using multiplication (verify implementation correctness)
@@ -576,7 +576,7 @@ namespace osuCrypto
         }
 
         // Compare with exp function
-        Goldilocks::exp(result, base, exponent);
+        Goldilocks::pow(result, base, exponent);
         ThrowIfNotEqual((u64)result, (u64)manual_result,
             "Exponential calculation consistency check with manual multiplication");
     }

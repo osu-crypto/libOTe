@@ -5,6 +5,9 @@
 
 using namespace osuCrypto;
 
+using u256 = UInt<256>;
+using u512 = UInt<512>;
+
 void fail(const std::string& msg) {
     throw std::runtime_error(msg);
 }

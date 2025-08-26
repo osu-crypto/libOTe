@@ -58,7 +58,7 @@ namespace osuCrypto
                 j : bitReversal(ln, j);
 
             auto& aj = aHat[idx];
-            aj = 0;
+            aj = F(0);
             //std::cout << "aHat[" << j << "] = ";
             for (u64 i = 0; i < n; ++i)
             {

@@ -288,7 +288,7 @@ namespace osuCrypto
 	template<typename F>
 	inline bool isPrimRootOfUnity(span<Factor> factors, const F& u)
 	{
-		u64 p = F::order();
+		auto p = F::order();
 		u64 n = 1;
 		for (auto fe : factors)
 		{

@@ -261,7 +261,5 @@ namespace osuCrypto
 
     // Aliases
     using u128 = UInt<128>;
-    using u256 = UInt<256>;
-    using u512 = UInt<512>;
 
-} // namespace fxw
+} 

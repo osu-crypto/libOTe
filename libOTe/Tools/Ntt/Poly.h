@@ -86,7 +86,7 @@ namespace osuCrypto
 			if (i < size())
 				return mCoeffs[i];
 			else
-				return 0;
+				return F(0);
 		}
 
 
@@ -273,7 +273,7 @@ namespace osuCrypto
 
 			auto size = a.size() + b.size();
 			dst.mCoeffs.resize(size ? size - 1 : 0);
-			std::fill(dst.begin(), dst.end(), 0);
+			std::fill(dst.begin(), dst.end(), F(0));
 
 			for (u64 i = 0; i < a.size(); ++i)
 			{

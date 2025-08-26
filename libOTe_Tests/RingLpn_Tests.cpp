@@ -10,6 +10,7 @@
 #include "libOTe/Tools/Ntt/NttNegWrap.h"
 #include "libOTe/Tools/Field/Fp.h"
 #include "cryptoTools/Common/Log.h"
+#include "libOTe/Tools/Field/Goldilocks.h"
 
 namespace osuCrypto
 {
@@ -515,7 +516,8 @@ namespace osuCrypto
 #ifdef ENABLE_RINGLPN
 
 		//using F = Fp<0xFFFFFFFB, u32, u64>;
-		using F = F12289;
+		//using F = F12289;
+		using F = Goldilocks;
 
 		auto logn = 6;
 		u64 n = 1ull << logn;
