@@ -31,6 +31,7 @@
 #include "libOTe/Vole/Noisy/NoisyVoleSender.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include "libOTe/Dpf/RevCuckooDmpf.h"
+#include "cryptoTools/Circuit/BetaCircuit.h"
 
 namespace osuCrypto
 {
