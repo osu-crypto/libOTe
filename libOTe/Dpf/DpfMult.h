@@ -483,7 +483,7 @@ namespace osuCrypto
 					AES aes(b);
 					for (u64 i = 0; i < mByteCount; i += sizeof(block))
 					{
-						auto remaining = std::min(mByteCount - i, sizeof(block));
+						auto remaining = std::min<u64>(mByteCount - i, sizeof(block));
 						block expanded = aes.ecbEncBlock(block(i / sizeof(block), 0));
 						std::memcpy(ret.data() + i, &expanded, remaining);
 					}
@@ -866,8 +866,8 @@ namespace osuCrypto
 			MultSession session;
 			session.mPartyIdx = mPartyIdx;
 			session.mExpandIdx = 0;
-			session.mRecvOts = span{ mRecvOts.data() + otIdx, n };
-			session.mSendOts = span{ mSendOts.data() + otIdx, n };
+			session.mRecvOts = span<block>{ mRecvOts.data() + otIdx, n };
+			session.mSendOts = span<std::array<block, 2>>{ mSendOts.data() + otIdx, n };
 			session.mX = BitVector((u8*)x.data(), n, 0);
 
 			// Extract our a shares from choice bits
