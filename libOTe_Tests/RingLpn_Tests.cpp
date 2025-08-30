@@ -118,9 +118,11 @@ namespace osuCrypto
 		// Find a primitive root of unity for NTT of size 2*n
 		auto psi = primRootOfUnity<F>(2 * n);
 		std::vector<F> w(2 * n);
-		for (u64 i = 0; i < 2 * n; ++i) {
-			w[i] = psi.pow(i);
-		}
+		nttPrecomputeRootsOfUnity<F>(psi, w);
+		auto nw = getNegWrapRoots<F>(w, n);
+		//for (u64 i = 0; i < 2 * n; ++i) {
+		//	w[i] = psi.pow(i);
+		//}
 
 		// Convert polynomials to evaluation form using NTT
 		std::vector<F> aPrime_eval(n), bPrime_eval(n), cPrime_eval(n);
@@ -133,9 +135,9 @@ namespace osuCrypto
 		}
 
 		// Apply NTT (negative wrapped to handle x^n + 1 modulus)
-		nttNegWrapCt<F>(aPrime_eval, w);
-		nttNegWrapCt<F>(bPrime_eval, w);
-		nttNegWrapCt<F>(cPrime_eval, w);
+		nttNegWrapCt<F>(aPrime_eval, nw);
+		nttNegWrapCt<F>(bPrime_eval, nw);
+		nttNegWrapCt<F>(cPrime_eval, nw);
 
 		// Compute componentwise product in evaluation domain
 		std::vector<F> expected_eval(n);

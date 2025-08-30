@@ -195,11 +195,103 @@ namespace osuCrypto
 		F psi,
 		NttOrder order)
 	{
-		auto rng = NttRange{.mBaseIndex = 0, .mStride = 1, .mSize = a.size()};
+		auto rng = NttRange{ .mBaseIndex = 0, .mStride = 1, .mSize = a.size() };
 		nttNegWrapCt(aHat, a, psi, psi, rng, 0, order);
 	}
 
 
+	template<typename F>
+	void nttPrecomputeRootsOfUnity(const F& psi, span<F> roots)
+	{
+		auto n = roots.size();
+		auto ln = log2ceil(n);
+		auto qq = F::order() - 1;
+		if (n != 1ull << ln)
+			throw RTE_LOC;
+		if (n > qq)
+			throw RTE_LOC;
+		if (qq % n != 0)
+			throw RTE_LOC;
+		if (psi.pow(2 * n) != 1)
+			throw RTE_LOC;
+#ifndef NDEBUG
+		if (isPrimRootOfUnity(2 * n, psi) == false)
+			throw RTE_LOC;
+#endif
+
+		//auto logn = log2ceil(n);
+		F root = F(1);
+		for (u64 i = 0; i < n; ++i)
+		{
+			roots[i] = root;
+			root *= psi;
+		}
+	}
+
+	// Build stage-major twiddles for radix-2 CT negacyclic NTT.
+	// w must be powers of ψ: w[k] = ψ^k, with size >= 2*n.
+	template<typename F>
+	void getNegWrapRoots(span<const F> w, span<F> T, uint64_t n) {
+		const uint64_t ln = log2ceil(n);
+		if ((1ull << ln) != n)           throw RTE_LOC;           // n must be power of two
+		if (w.size() < 2 * n)            throw RTE_LOC;           // need ψ^k for k∈[0,2n)
+
+		if (T.size() < n - 1)            throw RTE_LOC;           // need n-1 twiddles
+		//std::vector<F> T(n - 1);
+		auto pos = 0ull;
+
+		uint64_t stride = n / 2;
+		for (uint64_t s = 0; s < ln; ++s) {
+			const uint64_t size = n / stride / 2;  // == n >> (s+1)
+
+			//if (size >= 4)
+			//{
+			//	for (uint64_t j = 0; j < size; j+= 4) {
+
+			//		__m128i j4 = _mm_set_epi32(j + 3, j + 2, j + 1, j);
+			//		auto br4 = bitrev_k_4_ssse3(j4, s);
+			//		br4 = scale_bitrev4(br4, stride);
+			//		alignas(16) uint32_t r[4];
+			//		_mm_store_si128((__m128i*)r, br4);
+			//		T[pos++] = w[r[0]];
+			//		T[pos++] = w[r[1]];
+			//		T[pos++] = w[r[2]];
+			//		T[pos++] = w[r[3]];
+			//	}
+			//}
+			//else
+			{
+
+				for (uint64_t j = 0; j < size; ++j) {
+					const uint64_t r = bitReversal(static_cast<int>(s), j);
+					const uint64_t idx = stride * (2 * r + 1);   // odd ψ-exponents for negacyclic CT
+					T[pos++] = w[idx];
+				}
+			}
+			stride >>= 1;
+		}
+		//return T;
+	}
+
+
+	template<typename F>
+	std::vector<F> getNegWrapRoots(span<const F> w, uint64_t n)
+	{
+		std::vector<F> T(n - 1);
+		getNegWrapRoots<F>(w, T, n);
+		return T;
+	}
+
+#define SIMD8(VAR, STATEMENT) do{\
+	{ constexpr u64 VAR = 0; STATEMENT; }\
+	{ constexpr u64 VAR = 1; STATEMENT; }\
+	{ constexpr u64 VAR = 2; STATEMENT; }\
+	{ constexpr u64 VAR = 3; STATEMENT; }\
+	{ constexpr u64 VAR = 4; STATEMENT; }\
+	{ constexpr u64 VAR = 5; STATEMENT; }\
+	{ constexpr u64 VAR = 6; STATEMENT; }\
+	{ constexpr u64 VAR = 7; STATEMENT; }\
+	}while(0)
 
 	template<typename F>
 	void nttNegWrapCt(
@@ -208,52 +300,104 @@ namespace osuCrypto
 		NttOrder order = NttOrder::BitReversedOrder)
 	{
 
+		F* __restrict aPtr = a.data();
+		F* __restrict wPtr = w.data();
+
 		u64 n = a.size();
 		auto ln = log2ceil(n);
-		//auto qq = F::order(); qq = qq - 1;
 		if (n != 1ull << ln)
 			throw RTE_LOC;
-		//if (n > qq)
-			//throw RTE_LOC;
-		if(w.size() != 2* n)
-			throw RTE_LOC;
+		if (w.size() != n - 1)
+			throw std::runtime_error("expecting the n-1 roots that are specific to the negcyclic ntt. "
+				"obtain them by calling nttPrecomputeRootsOfUnity(...) and getNegWrapRoots(...)." LOCATION);
 
+#ifndef NDEBUG
+		{
+			auto psi = w[n / 2 - 1]; // the expected position of the 2n root of unity
+			if (isPrimRootOfUnity<F>(2 * n, psi) == false)
+				throw RTE_LOC;
+		}
+#endif
 		u64 stride = n / 2;
 
 		u64 stage = 0;
 		while (stride)
 		{
 			u64 size = n / stride / 2;
-			//std::cout << " stride " << stride << " size " << size << " depth " << depth << ": \n";
 			u64 base = 0;
-			for(u64 j = 0; j < size; ++j)
+//			if (0 && stride > 8)
+//			{
+//				for (u64 j = 0; j < size; ++j)
+//				{
+//					auto wi = *wPtr++;
+//#ifndef NDEBUG
+//					auto psi = w[n / 2 - 1];
+//					auto index = stride * (2 * bitReversal(stage, j) + 1);
+//					if (psi.pow(index) != wi) // check that the caller passed in the right roots.
+//						throw RTE_LOC;
+//#endif // !NDEBUG
+//
+//
+//					F a0[8], a1[8], b[8];
+//					
+//					for (u64 i = 0; i < stride; i += 8)
+//					{
+//						
+//						SIMD8(k, a0[k] = aPtr[base + k]);
+//						SIMD8(k, a1[k] = aPtr[base + k + stride]);
+//
+//						SIMD8(k, b[k] = wi * a1[k]);
+//						SIMD8(k, aPtr[base + k] = a0[k] + b[k]);
+//						SIMD8(k, aPtr[base + k + stride] = a0[k] - b[k]);
+//
+//						base += 8;
+//
+//						//std::cout << "(" << idx0 << "," << idx1 << ", " << index << ", " <<a0 <<", " <<a1  <<") ";
+//						//std::cout << std::format("{0}({1}, {2}, {3} = {4} * (2 * {5} + 1), {6} {7} )\n",
+//						//	std::string(4 * depth, ' '),
+//						//	idx0, idx1,
+//						//	index, stride, bitReversal(stage, j),
+//						//	a0.integer(), a1.integer());
+//					}
+//
+//					base += stride;
+//
+//				}
+//			}
+//			else
 			{
-				for (u64 i = 0; i < stride; ++i)
+				for (u64 j = 0; j < size; ++j)
 				{
-					u64 idx0 = base + i;
-					u64 idx1 = idx0 + stride;
-					F a0 = a.data()[idx0];
-					F a1 = a.data()[idx1];
-
-					//if (ln - depth - 1 != stage)
-					//	throw RTE_LOC;
+					auto wi = *wPtr++;
+#ifndef NDEBUG
+					auto psi = w[n / 2 - 1];
 					auto index = stride * (2 * bitReversal(stage, j) + 1);
-					//auto psiPow = psi.pow(index);
-					auto psiPow = w.data()[index]; // precomputed powers of psi
-					auto b = psiPow * a1;
-					a.data()[idx0] = a0 + b;
-					a.data()[idx1] = a0 - b;
+					if (psi.pow(index) != wi) // check that the caller passed in the right roots.
+						throw RTE_LOC;
+#endif // !NDEBUG
 
-					//std::cout << "(" << idx0 << "," << idx1 << ", " << index << ", " <<a0 <<", " <<a1  <<") ";
 
-					//std::cout << std::format("{0}({1}, {2}, {3} = {4} * (2 * {5} + 1), {6} {7} )\n",
-					//	std::string(4 * depth, ' '),
-					//	idx0, idx1,
-					//	index, stride, bitReversal(stage, j),
-					//	a0.integer(), a1.integer());
+					for (u64 i = 0; i < stride; ++i)
+					{
+						F a0 = aPtr[base];
+						F a1 = aPtr[base + stride];
 
+						auto b = wi * a1;
+						aPtr[base] = a0 + b;
+						aPtr[base + stride] = a0 - b;
+
+						++base;
+
+						//std::cout << "(" << idx0 << "," << idx1 << ", " << index << ", " <<a0 <<", " <<a1  <<") ";
+						//std::cout << std::format("{0}({1}, {2}, {3} = {4} * (2 * {5} + 1), {6} {7} )\n",
+						//	std::string(4 * depth, ' '),
+						//	idx0, idx1,
+						//	index, stride, bitReversal(stage, j),
+						//	a0.integer(), a1.integer());
+					}
+
+					base += stride;
 				}
-				base += stride * 2;
 			}
 			//std::cout << std::endl;
 
@@ -418,248 +562,225 @@ namespace osuCrypto
 	//  Iterative NTT / iNTT
 	// ============================================================================
 
-	template<typename F>
-	void nttPrecomputeRootsOfUnity(const F& psi, span<F> roots)
-	{
-		auto n = roots.size();
-		auto ln = log2ceil(n);
-		auto qq = F::order() - 1;
-		if (n != 1ull << ln)
-			throw RTE_LOC;
-		if (n > qq)
-			throw RTE_LOC;
-		if (qq % n != 0)
-			throw RTE_LOC;
-		if (psi.pow(2 * n) != 1)
-			throw RTE_LOC;
-#ifndef NDEBUG
-		if (isPrimRootOfUnity(2 * n, psi) == false)
-			throw RTE_LOC;
-#endif
 
-		auto logn = log2ceil(n);
-		for (u64 i = 0; i < n; ++i)
-		{
-			roots[bitReversal(i, logn)] = psi.pow(i);
-		}
-	}
 
-	template<typename F>
-	void inttPrecomputeRootsofUnity(const F& psi, span<F> invRoots)
-	{
-		auto n = invRoots.size();
-		auto psiInv = psi.inverse();
-		auto logn = log2ceil(n);
-		//F x = 1;
-		for (u64 i = 0; i < n; ++i)
-		{
-			invRoots[bitReversal(i, logn)] = psiInv.pow(i);
-		}
-	}
+	//template<typename F>
+	//void inttPrecomputeRootsofUnity(const F& psi, span<F> invRoots)
+	//{
+	//	auto n = invRoots.size();
+	//	auto psiInv = psi.inverse();
+	//	auto logn = log2ceil(n);
+	//	//F x = 1;
+	//	for (u64 i = 0; i < n; ++i)
+	//	{
+	//		invRoots[bitReversal(i, logn)] = psiInv.pow(i);
+	//	}
+	//}
 
-	// Iterative forward NTT (Cooley-Tukey, DIT).
-	// In-place, input in natural outputOrder, output in bit-reversed outputOrder.
-	template<typename F>
-	void nttNegacyclicIterative(span<F> a, span<const F> roots)
-	{
-		const u64 n = a.size();
-		u64 t = n;
-		for (u64 m = 1; m < n; m <<= 1)
-		{
-			u64 h = t >> 1;
-			for (u64 i = 0; i < m; ++i)
-			{
-				u64 j1 = i * t;
-				u64 j2 = j1 + h;
-				const F& S = roots[m + i];
-				for (u64 k = j1; k < j2; ++k)
-				{
-					auto u = a[k];
-					auto v = a[k + h] * S;
-					a[k] = u + v;
-					a[k + h] = u - v;
-				}
-			}
-			t >>= 1;
-		}
-	}
+	//// Iterative forward NTT (Cooley-Tukey, DIT).
+	//// In-place, input in natural outputOrder, output in bit-reversed outputOrder.
+	//template<typename F>
+	//void nttNegacyclicIterative(span<F> a, span<const F> roots)
+	//{
+	//	const u64 n = a.size();
+	//	u64 t = n;
+	//	for (u64 m = 1; m < n; m <<= 1)
+	//	{
+	//		u64 h = t >> 1;
+	//		for (u64 i = 0; i < m; ++i)
+	//		{
+	//			u64 j1 = i * t;
+	//			u64 j2 = j1 + h;
+	//			const F& S = roots[m + i];
+	//			for (u64 k = j1; k < j2; ++k)
+	//			{
+	//				auto u = a[k];
+	//				auto v = a[k + h] * S;
+	//				a[k] = u + v;
+	//				a[k + h] = u - v;
+	//			}
+	//		}
+	//		t >>= 1;
+	//	}
+	//}
 
-	// Iterative inverse NTT (Gentleman-Sande, DIF).
-	// In-place, input in bit-reversed outputOrder, output in natural outputOrder.
-	template<typename F>
-	void inttNegacyclicIterative(span<F> a, span<const F> inv_roots)
-	{
-		const u64 n = a.size();
-		u64 t = 2;
-		for (u64 m = n >> 1; m > 0; m >>= 1)
-		{
-			u64 h = t >> 1;
-			for (u64 i = 0; i < m; ++i)
-			{
-				u64 j1 = i * t;
-				u64 j2 = j1 + h;
-				const F& S = inv_roots[m + i];
-				for (u64 k = j1; k < j2; ++k)
-				{
-					auto u = a[k];
-					auto v = a[k + h];
-					a[k] = u + v;
-					a[k + h] = (u - v) * S;
-				}
-			}
-			t <<= 1;
-		}
+	//// Iterative inverse NTT (Gentleman-Sande, DIF).
+	//// In-place, input in bit-reversed outputOrder, output in natural outputOrder.
+	//template<typename F>
+	//void inttNegacyclicIterative(span<F> a, span<const F> inv_roots)
+	//{
+	//	const u64 n = a.size();
+	//	u64 t = 2;
+	//	for (u64 m = n >> 1; m > 0; m >>= 1)
+	//	{
+	//		u64 h = t >> 1;
+	//		for (u64 i = 0; i < m; ++i)
+	//		{
+	//			u64 j1 = i * t;
+	//			u64 j2 = j1 + h;
+	//			const F& S = inv_roots[m + i];
+	//			for (u64 k = j1; k < j2; ++k)
+	//			{
+	//				auto u = a[k];
+	//				auto v = a[k + h];
+	//				a[k] = u + v;
+	//				a[k + h] = (u - v) * S;
+	//			}
+	//		}
+	//		t <<= 1;
+	//	}
 
-		F inv_n = F(n).inverse();
-		for (u64 i = 0; i < n; ++i)
-		{
-			a[i] *= inv_n;
-		}
-	}
+	//	F inv_n = F(n).inverse();
+	//	for (u64 i = 0; i < n; ++i)
+	//	{
+	//		a[i] *= inv_n;
+	//	}
+	//}
 
-	// ---------------------------------------------------------------------------
-	//  Negacyclic NTT class template
-	// ---------------------------------------------------------------------------
+	//// ---------------------------------------------------------------------------
+	////  Negacyclic NTT class template
+	//// ---------------------------------------------------------------------------
 
-	template<typename F>
-	class NegacyclicNtt
-	{
+	//template<typename F>
+	//class NegacyclicNtt
+	//{
 
-	public:
-		enum class NttOrder { BitReversedOrder, NaturalOrder };
-		const u64 n;                 // transform length (power of two)
-		const F   psi;               // primitive 2n‑th root of unity
+	//public:
+	//	enum class NttOrder { BitReversedOrder, NaturalOrder };
+	//	const u64 n;                 // transform length (power of two)
+	//	const F   psi;               // primitive 2n‑th root of unity
 
-		// psiPows[k] = psi^{k}  for 0 ≤ k < 2n
-		std::vector<F> psiPows;
+	//	// psiPows[k] = psi^{k}  for 0 ≤ k < 2n
+	//	std::vector<F> psiPows;
 
-		//--------------------------------------------------------------------
-		//  Constructor: pre‑computes the twiddle table.
-		//--------------------------------------------------------------------
-		NegacyclicNtt(u64 n_, const F& psi_) : n(n_), psi(psi_)
-		{
-			const u64 ln = log2ceil(n);
-			assert(n == (1ull << ln));                    // n must be power of two
-			assert(psi.pow(2 * n) == F{ 1 });                // psi must be 2n‑th root
+	//	//--------------------------------------------------------------------
+	//	//  Constructor: pre‑computes the twiddle table.
+	//	//--------------------------------------------------------------------
+	//	NegacyclicNtt(u64 n_, const F& psi_) : n(n_), psi(psi_)
+	//	{
+	//		const u64 ln = log2ceil(n);
+	//		assert(n == (1ull << ln));                    // n must be power of two
+	//		assert(psi.pow(2 * n) == F{ 1 });                // psi must be 2n‑th root
 
-			psiPows.resize(2 * n);
-			psiPows[0] = F{ 1 };
-			for (u64 k = 1; k < 2 * n; ++k)
-				psiPows[k] = psiPows[k - 1] * psi;
-			//bitReversePermute(psiPows);
-		}
+	//		psiPows.resize(2 * n);
+	//		psiPows[0] = F{ 1 };
+	//		for (u64 k = 1; k < 2 * n; ++k)
+	//			psiPows[k] = psiPows[k - 1] * psi;
+	//		//bitReversePermute(psiPows);
+	//	}
 
-		//--------------------------------------------------------------------
-		//  In‑place forward NTT (DIF, bit‑reversed output order).
-		//--------------------------------------------------------------------
-		void forward(std::span<F> a, NttOrder order = NttOrder::BitReversedOrder) const
-		{
-			assert(a.size() == n);
-			u64 stage = 0;
-			for (u64 m = n; m > 1; m >>= 1, ++stage) {
-				const u64 half = m >> 1;
-				const u64 step = n / m;              // index stride inside psiPows
-				for (u64 k = 0; k < half; ++k) {
-					for (u64 j = k; j < n; j += m) {
-						const F tw = psiPows[(2 * j + 1) * step % (2 * n)];
-						F u = a[j];
-						F v = a[j + half] * tw;
-						a[j] = u + v;
-						a[j + half] = u - v;
+	//	//--------------------------------------------------------------------
+	//	//  In‑place forward NTT (DIF, bit‑reversed output order).
+	//	//--------------------------------------------------------------------
+	//	void forward(std::span<F> a, NttOrder order = NttOrder::BitReversedOrder) const
+	//	{
+	//		assert(a.size() == n);
+	//		u64 stage = 0;
+	//		for (u64 m = n; m > 1; m >>= 1, ++stage) {
+	//			const u64 half = m >> 1;
+	//			const u64 step = n / m;              // index stride inside psiPows
+	//			for (u64 k = 0; k < half; ++k) {
+	//				for (u64 j = k; j < n; j += m) {
+	//					const F tw = psiPows[(2 * j + 1) * step % (2 * n)];
+	//					F u = a[j];
+	//					F v = a[j + half] * tw;
+	//					a[j] = u + v;
+	//					a[j + half] = u - v;
 
-						std::cout << "a[" << j << "] = " << a[j] << " = " << u << " + " << v << " @ " << tw << "\n";
-						std::cout << "a[" << j + half << "] = " << a[j + half] << " = " << u << " - " << v << " @ " << tw << "\n";
-					}
-				}
-				//            std::cout << "stage " << stage << ": m=" << m
-							//	<< ", half=" << half << ", step=" << step << std::endl;
-				//            for (u64 i = 0; i < a.size(); ++i)
-				//            {
-							//	std::cout << "a[" << i << "] = " << a[i] << "\n";
-				//            }
-							//std::cout << std::endl;
-			}
+	//					std::cout << "a[" << j << "] = " << a[j] << " = " << u << " + " << v << " @ " << tw << "\n";
+	//					std::cout << "a[" << j + half << "] = " << a[j + half] << " = " << u << " - " << v << " @ " << tw << "\n";
+	//				}
+	//			}
+	//			//            std::cout << "stage " << stage << ": m=" << m
+	//						//	<< ", half=" << half << ", step=" << step << std::endl;
+	//			//            for (u64 i = 0; i < a.size(); ++i)
+	//			//            {
+	//						//	std::cout << "a[" << i << "] = " << a[i] << "\n";
+	//			//            }
+	//						//std::cout << std::endl;
+	//		}
 
-			if (order == NttOrder::NaturalOrder)
-				bitReversePermute(a);
-		}
+	//		if (order == NttOrder::NaturalOrder)
+	//			bitReversePermute(a);
+	//	}
 
-		//--------------------------------------------------------------------
-		//  In‑place inverse NTT (DIT, expects bit‑reversed *input* order).
-		//  Multiplies by n^{-1} so that forward ∘ inverse = identity.
-		//--------------------------------------------------------------------
-		void inverse(std::span<F> a, NttOrder order = NttOrder::BitReversedOrder) const
-		{
-			assert(a.size() == n);
-			u64 stage = 0;
+	//	//--------------------------------------------------------------------
+	//	//  In‑place inverse NTT (DIT, expects bit‑reversed *input* order).
+	//	//  Multiplies by n^{-1} so that forward ∘ inverse = identity.
+	//	//--------------------------------------------------------------------
+	//	void inverse(std::span<F> a, NttOrder order = NttOrder::BitReversedOrder) const
+	//	{
+	//		assert(a.size() == n);
+	//		u64 stage = 0;
 
-			for (u64 m = 1; m < n; m <<= 1, ++stage) {
-				const u64 half = m;
-				const u64 step = n / (2 * m);
-				for (u64 k = 0; k < half; ++k) {
-					// Gentleman–Sande uses the *inverse* twiddle: psi^{2n‑(2k+1)}
-					const u64 idx = (2 * n) - (2 * k + 1) * step;
-					const F twInv = psiPows[idx % (2 * n)];
-					for (u64 j = k; j < n; j += 2 * m) {
-						F u = a[j];
-						F v = a[j + half];
-						a[j] = (u + v) * twInv;
-						a[j + half] = (u - v) * twInv;
-					}
-				}
-			}
+	//		for (u64 m = 1; m < n; m <<= 1, ++stage) {
+	//			const u64 half = m;
+	//			const u64 step = n / (2 * m);
+	//			for (u64 k = 0; k < half; ++k) {
+	//				// Gentleman–Sande uses the *inverse* twiddle: psi^{2n‑(2k+1)}
+	//				const u64 idx = (2 * n) - (2 * k + 1) * step;
+	//				const F twInv = psiPows[idx % (2 * n)];
+	//				for (u64 j = k; j < n; j += 2 * m) {
+	//					F u = a[j];
+	//					F v = a[j + half];
+	//					a[j] = (u + v) * twInv;
+	//					a[j + half] = (u - v) * twInv;
+	//				}
+	//			}
+	//		}
 
-			// multiply by n^{-1}
-			const F nInv = F(n).inverse();
-			for (auto& x : a) x *= nInv;
+	//		// multiply by n^{-1}
+	//		const F nInv = F(n).inverse();
+	//		for (auto& x : a) x *= nInv;
 
-			if (order == NttOrder::NaturalOrder)
-				bitReversePermute(a);
-		}
+	//		if (order == NttOrder::NaturalOrder)
+	//			bitReversePermute(a);
+	//	}
 
-	private:
-		////----------------------------------------------------------------
-		////  Lazy bit‑reverse permutation (used only if NaturalOrder requested)
-		////----------------------------------------------------------------
-		//void bitReversePermute(std::span<F> a) const
-		//{
-		//	const u64 bits = log2ceil(n);
-		//	for (u64 i = 0; i < n; ++i) {
-		//		u64 j = bitReversal(bits, i);
-		//		if (i < j) std::swap(a[i], a[j]);
-		//	}
-		//}
+	//private:
+	//	////----------------------------------------------------------------
+	//	////  Lazy bit‑reverse permutation (used only if NaturalOrder requested)
+	//	////----------------------------------------------------------------
+	//	//void bitReversePermute(std::span<F> a) const
+	//	//{
+	//	//	const u64 bits = log2ceil(n);
+	//	//	for (u64 i = 0; i < n; ++i) {
+	//	//		u64 j = bitReversal(bits, i);
+	//	//		if (i < j) std::swap(a[i], a[j]);
+	//	//	}
+	//	//}
 
 
 
 
-		// ---------------------------------------------------------------------------
-		// Helper: next power‑of‑two exponent  (log2ceil)
-		// ---------------------------------------------------------------------------
-		//static inline u64 log2ceil(u64 n) { return 64 - std::countl_zero(n - 1); }
+	//	// ---------------------------------------------------------------------------
+	//	// Helper: next power‑of‑two exponent  (log2ceil)
+	//	// ---------------------------------------------------------------------------
+	//	//static inline u64 log2ceil(u64 n) { return 64 - std::countl_zero(n - 1); }
 
-		//static inline u64 bitReverse(u64 bits, u64 x)
-		//{
-		//    return std::rotr(x, bits) >> (64 - bits);
-		//}
+	//	//static inline u64 bitReverse(u64 bits, u64 x)
+	//	//{
+	//	//    return std::rotr(x, bits) >> (64 - bits);
+	//	//}
 
-	};
+	//};
 
 
-	// ----------------------------------------------------------------------------
-	//  TODO / Possible Improvements
-	// ----------------------------------------------------------------------------
-	//  • Replace recursion with an iterative breadth‑first loop + in‑place stockham
-	//    style butterflies: removes dynamic allocations and halves stack depth.
-	//  • Pre‑compute all psi^{k} into a table if many transforms of the same size
-	//    are required (trading O(n) memory for ~2× speed).
-	//  • Accept `NttOrder` for input as well (instead of enforcing bit‑reversed),
-	//    adding in‑place bit‑reverse permutations when needed.
-	//  • Provide constexpr‑enabled variant for compile‑time size transforms (useful
-	//    in micro‑kernel or constant‑time polynomial multipliers).
-	//  • Consider using a memory pool / arena for the temporary vectors `A, B`
-	//    to avoid per‑call `new/delete`.
-	// ============================================================================
+	//// ----------------------------------------------------------------------------
+	////  TODO / Possible Improvements
+	//// ----------------------------------------------------------------------------
+	////  • Replace recursion with an iterative breadth‑first loop + in‑place stockham
+	////    style butterflies: removes dynamic allocations and halves stack depth.
+	////  • Pre‑compute all psi^{k} into a table if many transforms of the same size
+	////    are required (trading O(n) memory for ~2× speed).
+	////  • Accept `NttOrder` for input as well (instead of enforcing bit‑reversed),
+	////    adding in‑place bit‑reverse permutations when needed.
+	////  • Provide constexpr‑enabled variant for compile‑time size transforms (useful
+	////    in micro‑kernel or constant‑time polynomial multipliers).
+	////  • Consider using a memory pool / arena for the temporary vectors `A, B`
+	////    to avoid per‑call `new/delete`.
+	//// ============================================================================
+#undef SIMD8
 
 
 }

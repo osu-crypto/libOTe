@@ -25,6 +25,7 @@
 #include "libOTe/Triple/RingLpn/RingLpnTriple.h"
 #include "libOTe/Tools/Field/Fp.h"
 #include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
+#include "libOTe/Tools/Field/Goldilocks.h"
 
 namespace osuCrypto
 {
@@ -1360,16 +1361,26 @@ namespace osuCrypto
 
 	void FftBench(const oc::CLP& cmd)
 	{
-		using F = u64;
+		using F = Goldilocks;
 		u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 16));
 		u64 t = cmd.getOr("t", 10);
 		AlignedUnVector<F> a(n), w(n * 2);
 
 		Timer timer;
 		timer.setTimePoint("begin");
+		auto psi = primRootOfUnity<F>(n * 2);
+		timer.setTimePoint("primRootOfUnity");
+
+		nttPrecomputeRootsOfUnity<F>(psi, w);
+		timer.setTimePoint("nttPrecomputeRootsOfUnity");
+		auto nw = getNegWrapRoots<F>(w, n);
+		timer.setTimePoint("getNegWrapRoots");
+
+
+		timer.setTimePoint("begin");
 		for (u64 tt = 0; tt < t; ++tt)
 		{
-			nttNegWrapCt<F>(a, w);
+			nttNegWrapCt<F>(a, nw);
 			timer.setTimePoint("done");
 
 		}
@@ -1390,7 +1401,8 @@ namespace osuCrypto
 #ifdef ENABLE_RINGLPN
 
 		//using F = Fp<0xFFFFFFFB, u32, u64>;
-		using F = F12289;
+		//using F = F12289;
+		using F = Goldilocks;
 
 		auto logn = cmd.getOr("nn", 16);
 		u64 n = 1ull << logn;
@@ -1419,13 +1431,14 @@ namespace osuCrypto
 		threadPools[0].create_thread();
 		threadPools[1].create_thread();
 
+		std::array<u64, 2> first{}, second{};
 		for (u64 tt = 0; tt < trials; ++tt)
 		{
 			std::array<RingLpnTriple<F>, 2> oles;
 			oles[0].mDebug = cmd.isSet("debug");
 			oles[1].mDebug = oles[0].mDebug;
-			oles[0].mNumPolys = oles[1].mNumPolys = cmd.getOr("c", 4);
-			oles[0].mPolyWeight = oles[1].mPolyWeight = cmd.getOr("t", 16);
+			oles[0].mNumPolys = oles[1].mNumPolys = cmd.getOr("c", 2);
+			oles[0].mPolyWeight = oles[1].mPolyWeight = cmd.getOr("t", 64);
 			oles[0].init(0, n, mode, dpf, tensor);
 			oles[1].init(1, n, mode, dpf, tensor);
 
@@ -1433,6 +1446,7 @@ namespace osuCrypto
 			timer.setTimePoint("setBase");
 
 			oles[0].setTimer(timer);
+
 
 			for (u64 ee = 0; ee < exp; ++ee)
 			{
@@ -1462,18 +1476,42 @@ namespace osuCrypto
 					timer.setTimePoint("setBase**");
 				}
 
+				auto before0 = sock[0].bytesReceived();
+				auto before1 = sock[1].bytesReceived();
+
 				auto r = macoro::sync_wait(macoro::when_all_ready(
 					oles[0].expand(A, C0, prng0, sock[0]) | macoro::start_on(threadPools[0]),
 					oles[1].expand(B, C1, prng1, sock[1]) | macoro::start_on(threadPools[1])));
 				std::get<0>(r).result();
 				std::get<1>(r).result();
+
 				timer.setTimePoint("done______");
+
+				auto after0 = sock[0].bytesReceived();
+				auto after1 = sock[1].bytesReceived();
+
+				if (ee)
+				{
+					first[0] += after0;
+					first[1] += after1;
+				}
+				else
+				{
+
+					second[0] += after0 - before0;
+					second[1] += after1 - before1;
+				}
 
 			}
 		}
 
 		if (!quiet)
+		{
 			std::cout << "Time taken: \n" << timer << std::endl;
+
+			std::cout << "setup  " << first[0] / trials << " " << first[1] / trials << std::endl;
+			std::cout << "expand " << second[0]/exp / trials << " " << second[1] / exp / trials << std::endl;
+		}
 #else
 		throw UnitTestSkipped("ENABLE_RINGLPN not defined.");
 #endif
@@ -1491,7 +1529,6 @@ namespace osuCrypto
 
 		u64 trials = cmd.getOr("t", 10);
 		u64 n = cmd.getOr<u64>("n", 1ull << cmd.getOr("nn", 16));
-		bool plain = cmd.isSet("plain");
 		bool verbose = cmd.isSet("v");
 
 		// Two-party protocol benchmark.
@@ -1577,7 +1614,6 @@ namespace osuCrypto
 
 			if (!cmd.isSet("quiet"))
 			{
-				double msTotal = 0.0;
 				// Print timer and basic throughput
 				std::cout << "WaksmanPermute (proto, GF2/block) n=" << n << std::endl;
 				std::cout << timer << std::endl;
@@ -1668,7 +1704,6 @@ namespace osuCrypto
 		u64 batch = cmd.getOr<u64>("batch", 64);
 		bool doPrint = cmd.isSet("print");
 
-		auto m8 = divCeil(rows, 8);
 		auto c8 = divCeil(cols, 8);
 		auto g8 = divCeil(gbits, 8);
 
@@ -1789,6 +1824,288 @@ namespace osuCrypto
 		}
 	}
 
+	void Goldilocks_Mul_Bench(const CLP& cmd)
+	{
+		using clock = std::chrono::steady_clock;
+
+
+		// Pre-generate inputs to avoid timing RNG/pack
+		const size_t V = 1ull << cmd.getOr("nn", 16);         // number of vectors
+		auto trials = cmd.getOr("t", 10ull);
+		const size_t R = cmd.getOr("r", 64ull);              // repeats
+		auto quiet = cmd.isSet("q");
+
+		auto benchScalar = [&](const char* name)
+			{
+				// Pre-generate scalar inputs (same magnitude as 4 lanes per vector)
+				const size_t S = V * 4;
+				std::vector<Goldilocks> a(S), b(S);
+				{
+					PRNG prng(CCBlock);
+					for (size_t i = 0; i < S; ++i)
+					{
+						a.data()[i] = prng.get<Goldilocks>();
+						b.data()[i] = prng.get<Goldilocks>();
+					}
+				}
+
+				double total = 0;
+				for (u64 jj = 0; jj < trials; ++jj)
+				{
+					volatile u64 sink = 0;
+
+					// warmup
+					for (size_t i = 0; i < std::min<size_t>(S, 1024); ++i)
+					{
+						osuCrypto::Goldilocks z;
+						osuCrypto::Goldilocks::mul(z, a.data()[i], b.data()[i]);
+						sink += z.mVal;
+					}
+
+					auto t0 = clock::now();
+					for (size_t r = 0; r < R; ++r)
+					{
+						for (size_t i = 0; i < S; ++i)
+						{
+							osuCrypto::Goldilocks z;
+							osuCrypto::Goldilocks::mul(z, a.data()[i], b.data()[i]);
+							sink += z.mVal;
+						}
+					}
+					auto t1 = clock::now();
+
+					double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+					const double ops = double(S) * double(R);
+					total += ms;
+
+					// giga multiplies per second
+					auto Gms = ops / (ms * 1e6);
+
+					if (!quiet)
+					{
+
+						std::cout << "[Goldilocks scalar mul bench] " << name
+							<< "  time: " << ms << " ms"
+							<< "  G muls/s: " << Gms
+							<< "  ops: " << ops
+							<< "  checksum: " << sink
+							<< std::endl;
+					}
+				}
+
+				if (!quiet)
+					std::cout << "avg " << total / trials << std::endl;
+			};
+
+
+		//auto benchBatch = [&](const char* name)
+		//	{
+		//		// Pre-generate scalar inputs (same magnitude as 4 lanes per vector)
+		//		constexpr int w = 2;
+		//		const size_t S = V * w;
+		//		std::vector<u64> a(S), b(S);
+		//		{
+		//			PRNG prng(CCBlock);
+		//			for (size_t i = 0; i < S; ++i)
+		//			{
+		//				a.data()[i] = prng.get<u64>();
+		//				b.data()[i] = prng.get<u64>();
+		//			}
+		//		}
+
+		//		double total = 0;
+		//		for (u64 jj = 0; jj < trials; ++jj)
+		//		{
+		//			u64 sink[w];
+		//			for (u64 jj = 0; jj < w; ++jj)
+		//				sink[jj] = 0;
+
+		//			// warmup
+		//			for (size_t i = 0; i < std::min<size_t>(S, 1024); i += w)
+		//			{
+		//				u64 z[w];
+		//				mulPzt22x4<w>(z, a.data() +i, b.data() + i);
+		//				for (u64 jj = 0; jj < w; ++jj)
+		//					sink[jj] += z[jj];
+		//				//sink[2] += z[2].mVal;
+		//				//sink[3] += z[3].mVal;
+		//			}
+
+		//			auto t0 = clock::now();
+		//			for (size_t r = 0; r < R; ++r)
+		//			{
+		//				for (size_t i = 0; i < S; i += w)
+		//				{
+		//					u64 z[w];
+		//					mulPzt22x4<w>(z, a.data() + i, b.data() + i);
+		//					for (u64 jj = 0; jj < w; ++jj)
+		//						sink[jj] += z[jj];
+		//				}
+		//			}
+		//			auto t1 = clock::now();
+
+		//			double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+		//			const double ops = double(S) * double(R);
+		//			total += ms;
+
+		//			// giga multiplies per second
+		//			auto Gms = ops / (ms * 1e6);
+
+		//			if (!quiet)
+		//			{
+
+		//				std::cout << "[Goldilocks batch mul bench] " << name
+		//					<< "  time: " << ms << " ms"
+		//					<< "  G muls/s: " << Gms
+		//					<< "  ops: " << ops
+		//					<< "  checksum: " << sink
+		//					<< std::endl;
+		//			}
+		//		}
+
+		//		if (!quiet)
+		//			std::cout << "avg " << total / trials << std::endl;
+		//	};
+
+		benchScalar("Scalar");
+		//benchBatch("batch");
+	}
+
+	inline void MulxThroughputBench(const CLP& cmd)
+	{
+#if !(defined(__BMI2__) || (defined(_MSC_VER) && defined(_M_X64)))
+		std::cout << "_mulx_u64 (BMI2) not enabled for this target." << std::endl;
+		return;
+#else
+		using clock = std::chrono::steady_clock;
+
+		const size_t V = 1ull << cmd.getOr("nn", 16); // number of operand pairs (must be >= 4 for K=4)
+		const size_t R = cmd.getOr("r", 64);          // repeats to amortize overhead
+		const u64 trials = cmd.getOr("t", 10);
+		const bool quiet = cmd.isSet("q");
+
+		std::vector<u64> A(V), B(V);
+		{
+			PRNG prng(CCBlock);
+			for (size_t i = 0; i < V; ++i) {
+				A[i] = prng.get<u64>();
+				B[i] = prng.get<u64>();
+			}
+		}
+
+		auto benchK = [&](int K)
+			{
+				double total_ms = 0.0;
+				for (u64 tt = 0; tt < trials; ++tt)
+				{
+					volatile u64 sink = 0;
+
+					// Warmup (1024 pairs or as many as we have)
+					{
+						size_t i = 0, W = std::min<size_t>(V, 1024);
+						if (K == 1) {
+							for (; i < W; ++i) {
+								unsigned long long hi0;
+								auto lo0 = _mulx_u64(A[i], B[i], &hi0);
+								sink += lo0 + hi0;
+							}
+						}
+						else if (K == 2) {
+							for (; i + 1 < W; i += 2) {
+								unsigned long long hi0, hi1;
+								auto lo0 = _mulx_u64(A[i + 0], B[i + 0], &hi0);
+								auto lo1 = _mulx_u64(A[i + 1], B[i + 1], &hi1);
+								sink += lo0 + hi0 + lo1 + hi1;
+							}
+							for (; i < W; ++i) {
+								unsigned long long hi0;
+								auto lo0 = _mulx_u64(A[i], B[i], &hi0);
+								sink += lo0 + hi0;
+							}
+						}
+						else { // K == 4
+							for (; i + 3 < W; i += 4) {
+								unsigned long long hi0, hi1, hi2, hi3;
+								auto lo0 = _mulx_u64(A[i + 0], B[i + 0], &hi0);
+								auto lo1 = _mulx_u64(A[i + 1], B[i + 1], &hi1);
+								auto lo2 = _mulx_u64(A[i + 2], B[i + 2], &hi2);
+								auto lo3 = _mulx_u64(A[i + 3], B[i + 3], &hi3);
+								sink += lo0 + hi0 + lo1 + hi1 + lo2 + hi2 + lo3 + hi3;
+							}
+							for (; i < W; ++i) {
+								unsigned long long hi0;
+								auto lo0 = _mulx_u64(A[i], B[i], &hi0);
+								sink += lo0 + hi0;
+							}
+						}
+					}
+
+					auto t0 = clock::now();
+					for (size_t r = 0; r < R; ++r)
+					{
+						size_t i = 0;
+						if (K == 1) {
+							for (; i < V; ++i) {
+								unsigned long long hi0;
+								auto lo0 = _mulx_u64(A[i], B[i], &hi0);
+								sink += lo0 + hi0;
+							}
+						}
+						else if (K == 2) {
+							for (; i + 1 < V; i += 2) {
+								unsigned long long hi0, hi1;
+								auto lo0 = _mulx_u64(A[i + 0], B[i + 0], &hi0);
+								auto lo1 = _mulx_u64(A[i + 1], B[i + 1], &hi1);
+								sink += lo0 + hi0 + lo1 + hi1;
+							}
+							for (; i < V; ++i) {
+								unsigned long long hi0;
+								auto lo0 = _mulx_u64(A[i], B[i], &hi0);
+								sink += lo0 + hi0;
+							}
+						}
+						else { // K == 4
+							for (; i + 3 < V; i += 4) {
+								unsigned long long hi0, hi1, hi2, hi3;
+								auto lo0 = _mulx_u64(A[i + 0], B[i + 0], &hi0);
+								auto lo1 = _mulx_u64(A[i + 1], B[i + 1], &hi1);
+								auto lo2 = _mulx_u64(A[i + 2], B[i + 2], &hi2);
+								auto lo3 = _mulx_u64(A[i + 3], B[i + 3], &hi3);
+								sink += lo0 + hi0 + lo1 + hi1 + lo2 + hi2 + lo3 + hi3;
+							}
+							for (; i < V; ++i) {
+								unsigned long long hi0;
+								auto lo0 = _mulx_u64(A[i], B[i], &hi0);
+								sink += lo0 + hi0;
+							}
+						}
+					}
+					auto t1 = clock::now();
+
+					double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+					const double muls = double(V) * double(R);     // total mulx ops
+					const double Gmuls_per_s = muls / (ms * 1e6);   // giga mulx per second
+
+					total_ms += ms;
+					if (!quiet) {
+						std::cout << "[_mulx_u64 throughput] K=" << K
+							<< "  time: " << ms << " ms"
+							<< "  G mulx/s: " << Gmuls_per_s
+							<< "  ops: " << muls
+							<< std::endl;
+					}
+				}
+				if (!quiet) {
+					std::cout << "avg(K=" << K << "): " << (total_ms / trials) << " ms" << std::endl;
+				}
+			};
+
+		benchK(1);
+		benchK(2);
+		benchK(4);
+#endif
+	}
+
 	inline void benchmark(CLP& cmd)
 	{
 
@@ -1830,6 +2147,10 @@ namespace osuCrypto
 			WaksmanPermuteBench(cmd);
 		else if (cmd.isSet("binSolve"))
 			BinarySolverBench(cmd);
+		else if (cmd.isSet("goldilocks"))
+			Goldilocks_Mul_Bench(cmd);
+		else if (cmd.isSet("mulx"))
+			MulxThroughputBench(cmd);
 		else
 		{
 			std::cout << "unknown benchmark, opts:" << std::endl;

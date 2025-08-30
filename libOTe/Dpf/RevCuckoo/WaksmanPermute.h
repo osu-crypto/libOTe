@@ -214,7 +214,7 @@ namespace osuCrypto
 			diffIter = diff.begin();
 			srcIter = src.begin();
 			auto dstIter = dst.begin();
-			for (u64 subnetIdx = 0, idx = 0; subnetIdx < numSubnets; subnetIdx += 2)
+			for (u64 subnetIdx = 0; subnetIdx < numSubnets; subnetIdx += 2)
 			{
 				auto size0 = subnetSizes.data()[subnetIdx];
 				auto size1 = subnetSizes.data()[subnetIdx + 1];
@@ -494,7 +494,7 @@ namespace osuCrypto
 			{
 				auto srcIter = src[batch].begin();
 				auto dstIter = dst[batch].begin();
-				for (u64 subnetIdx = 0, idx = 0; subnetIdx < numSubnets; subnetIdx += 2)
+				for (u64 subnetIdx = 0; subnetIdx < numSubnets; subnetIdx += 2)
 				{
 					auto size0 = subnetSizes.data()[subnetIdx];
 					auto size1 = subnetSizes.data()[subnetIdx + 1];

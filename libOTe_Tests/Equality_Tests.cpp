@@ -282,7 +282,7 @@ namespace osuCrypto
 		auto dIter0 = d[0].begin();
 		auto dIter1 = d[1].begin();
 		//auto cIter0 = c[0].begin();
-		auto cIter1 = c[1].begin();
+		//auto cIter1 = c[1].begin();
 		for (u64 i = 0; i < n; ++i) {
 			if(i)
 				actualD[i-1] = (*dIter0++) ^ (*dIter1++);

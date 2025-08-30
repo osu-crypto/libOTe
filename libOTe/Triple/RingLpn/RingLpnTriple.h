@@ -115,6 +115,7 @@ namespace osuCrypto
 		using VecF = CoeffCtx::template Vec<F>;
 
 		VecF mRootsOfUnity;
+		VecF mNegWrapRoots;
 
 		CoeffCtx mCtx;
 
@@ -1193,19 +1194,23 @@ namespace osuCrypto
 		setTimePoint("mainDpf");
 
 
-		if(mRootsOfUnity.size() != mN * 2)
+		if(mNegWrapRoots.size() != mN -1)
 		{
 			mRootsOfUnity.resize(mN * 2);
 			auto psi = primRootOfUnity<F>(mN * 2);
-			auto pow = mCtx.template make<F>();
-			mCtx.one(pow);
-			for (u64 i = 0; i < mN * 2; ++i)
-			{
-				mCtx.copy(mRootsOfUnity[i], pow);
-				mCtx.mul(pow, pow, psi);
-			}
+			mNegWrapRoots.resize(mN - 1);
+			nttPrecomputeRootsOfUnity<F>(psi, mRootsOfUnity);
+			getNegWrapRoots<F>(mRootsOfUnity, mNegWrapRoots, mN);
+			//auto pow = mCtx.template make<F>();
+			//mCtx.one(pow);
+			//for (u64 i = 0; i < mN * 2; ++i)
+			//{
+			//	mCtx.copy(mRootsOfUnity[i], pow);
+			//	mCtx.mul(pow, pow, psi);
+			//}
 		}
-		auto& w = mRootsOfUnity;
+		//auto& w = mRootsOfUnity;
+		auto& nw = mNegWrapRoots;
 
 		//std::vector<F> w(mN * 2);
 		//auto psi = primRootOfUnity<F>(mN * 2);
@@ -1223,7 +1228,7 @@ namespace osuCrypto
 		for (u64 i = 0; i < mNumPolys * mNumPolys; ++i)
 		{
 			auto prod = prodPolys[i].subspan(0, mN);
-			nttNegWrapCt<F>(prod, w);
+			nttNegWrapCt<F>(prod, nw);
 
 			if (i)
 			{
@@ -1259,7 +1264,7 @@ namespace osuCrypto
 				fftSparsePoly[pos] = mSparseCoefficients[j * mPolyWeight + i];
 			}
 
-			nttNegWrapCt<F>(fftSparsePoly, w);
+			nttNegWrapCt<F>(fftSparsePoly, nw);
 
 			if (j)
 			{

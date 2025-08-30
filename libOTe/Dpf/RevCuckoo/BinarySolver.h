@@ -244,7 +244,7 @@ namespace osuCrypto
 			Matrix<u8> BRowsAll(totalRows, k8);
 
 			// Fill ABitsAll
-			u64 bitPos = 0;
+			//u64 bitPos = 0;
 			for (u64 t = 0; t < Bsz; ++t)
 			{
 				for (u64 i = 0; i < n; ++i)
@@ -1210,7 +1210,7 @@ namespace osuCrypto
 
 			if (mPrint)
 			{
-				for (auto b = 0; b < B; ++b)
+				for (auto b = 0ull; b < B; ++b)
 				{
 
 					Matrix<u8> M2(MM[b].rows(), MM[b].cols());

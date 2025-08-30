@@ -133,11 +133,14 @@ namespace tests_libOTe
 			tc.add("Goldilocks_Mult_Test                    ", Goldilocks_Mult_Test);
 			tc.add("Goldilocks_Inverse_Test                 ", Goldilocks_Inverse_Test);
 			tc.add("Goldilocks_Exp_Test                     ", Goldilocks_Exp_Test);
+			tc.add("Goldilocks_SIMD_Mul_Test                ", Goldilocks_SIMD_Mul_Test);
+
 
 			tc.add("Poly_basics_Tests                       ", Poly_basics_Tests);
 			tc.add("Poly_eval_root_test                     ", Poly_eval_root_test);
 			tc.add("Poly_scalar_test                        ", Poly_scalar_test);
 
+			tc.add("Ntt_bitReverse_SIMD_Test                ", Ntt_bitReverse_SIMD_Test);
 			tc.add("Ntt_nttNegWrapMatrix_normal_Test        ", Ntt_nttNegWrapMatrix_normal_Test);
 			tc.add("Ntt_nttNegWrapMatrix_Test               ", Ntt_nttNegWrapMatrix_Test);
 

@@ -5,6 +5,7 @@ namespace osuCrypto
     void Goldilocks_Mult_Test();
     void Goldilocks_Inverse_Test();
     void Goldilocks_Exp_Test();
+    void Goldilocks_SIMD_Mul_Test();
 
 
 

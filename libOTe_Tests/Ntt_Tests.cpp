@@ -71,7 +71,7 @@ namespace tests_libOTe
 	void Ntt_nttNegWrapMatrix_Test_impl()
 	{
 
-		u64 n = 32;
+		u64 n = 128;
 		PRNG prng(CCBlock);
 		auto psi = primRootOfUnity<F>(2 * n);
 		//std::cout << "phi " << psi << std::endl;
@@ -95,11 +95,14 @@ namespace tests_libOTe
 			Poly<F> b(n - 1, F(1)), bHat(n - 1, F(1)), bHat2(n - 1, F(1));
 			Poly<F> c1(n - 1, F(1)), c1Hat(n - 1, F(1));
 			Poly<F> c2(n - 1, F(1)), c2Hat(n - 1, F(1));
+			
 			std::vector<F> psiPowers(2 * n);
-			for (u64 i = 0; i < psiPowers.size(); ++i)
-			{
-				psiPowers[i] = psi.pow(i);
-			}
+			nttPrecomputeRootsOfUnity<F>(psi, psiPowers);
+			std::vector<F> negWRapPowers = getNegWrapRoots<F>(psiPowers, n);
+			//for (u64 i = 0; i < psiPowers.size(); ++i)
+			//{
+			//	psiPowers[i] = psi.pow(i);
+			//}
 			for (u64 i = 0; i < a.size(); ++i)
 				a[i] = F(i);
 
@@ -126,7 +129,7 @@ namespace tests_libOTe
 			//std::cout << "\n inplace:\n";
 
 			auto aa = a;
-			nttNegWrapCt<F>(aa, psiPowers, order);
+			nttNegWrapCt<F>(aa, negWRapPowers, order);
 			if (aa != aHat)
 			{
 				std::cout << "aHat " << aHat << std::endl;
@@ -180,4 +183,56 @@ namespace tests_libOTe
 		Ntt_nttNegWrapMatrix_Test_impl<Goldilocks>();
 	}
 
+
+
+
+	void Ntt_bitReverse_SIMD_Test()
+	{
+#if !defined(OC_ENABLE_SSE2)
+		throw UnitTestSkipped("OC_ENABLE_SSE2 not defined.");
+#else
+		// Validate SIMD bit-reversal (bitrev_k_4_ssse3) against scalar bitReversal
+		// for multiple bit-widths and a representative set of inputs.
+		for (int k = 1; k <= 32; ++k)
+		{
+			// Keep runtime small: exhaustive for small k, sample for larger k.
+			uint64_t maxCount;
+			if (k <= 12)
+				maxCount = 1ull << k;          // full coverage
+			else
+				maxCount = 1ull << 12;         // sample 4096 values
+
+			// Drive j through a sequence to get coverage without PRNG deps.
+			uint32_t j = 0;
+			for (uint64_t i = 0; i < maxCount; i += 4)
+			{
+				// Pack 4 consecutive ints
+				__m128i j4 = _mm_set_epi32(j + 3, j + 2, j + 1, j);
+				__m128i r4 = oc::bitrev_k_4_ssse3(j4, k);
+
+				alignas(16) uint32_t got[4];
+				_mm_store_si128((__m128i*)got, r4);
+
+				for (int lane = 0; lane < 4; ++lane)
+				{
+					uint32_t x = j + lane;
+					// For k <= 31, limit x to [0, 2^k) for exhaustive passes
+					if (k <= 12 && x >= (1u << k))
+						continue;
+
+					auto exp = oc::bitReversal(k, x);
+					if (got[lane] != exp)
+					{
+						std::cout << "bitrev mismatch: k=" << k
+							<< " x=" << x
+							<< " simd=" << got[lane]
+							<< " scalar=" << exp << std::endl;
+						throw RTE_LOC;
+					}
+				}
+				j += 4;
+			}
+		}
+#endif
+	}
 }
