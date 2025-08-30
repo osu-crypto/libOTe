@@ -56,6 +56,8 @@ namespace osuCrypto
 		//return r;
 	}
 
+#ifdef ENABLE_SSE 
+
 	// Reverse bits in each byte via a 4-bit LUT, then reverse bytes within each 32-bit lane.
 	inline __m128i reverse_bits32_ssse3(__m128i x) {
 		// 4-bit reversal LUT: 0..15 -> reversed nibble
@@ -89,7 +91,7 @@ namespace osuCrypto
 		return _mm_srl_epi32(r, sh);
 	}
 
-	static inline __m128i scale_bitrev4(__m128i r4, uint32_t stride) {
+	inline __m128i scale_bitrev4(__m128i r4, uint32_t stride) {
 		// double: (2*r)
 		__m128i r2 = _mm_slli_epi32(r4, 1);
 
@@ -102,6 +104,7 @@ namespace osuCrypto
 		// multiply: stride*(2*r+1)
 		return _mm_mullo_epi32(two_r_plus1, stride4);
 	}
+#endif
 
 	template<typename F>
 	void bitReversePermute(std::span<F> a)
