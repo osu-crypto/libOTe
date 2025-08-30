@@ -83,6 +83,8 @@ namespace osuCrypto
 		// The log2 of mDpfTreeSize.
 		u64 mDpfTreeDepth = 0;
 
+		BetaCircuit mAdder;
+
 		// the locations of the non-zeros in the bPolyIdx'th block of the sparse polynomial.
 		// the polyIdx'th row containts the coeffs for the polyIdx'th poly.
 		Matrix<u64> mSparsePositions;
@@ -138,7 +140,6 @@ namespace osuCrypto
 
 		bool mHasDpf = false;
 
-		BetaCircuit mAdder;
 
 		Gmw mGmw;
 

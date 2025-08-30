@@ -399,6 +399,11 @@ namespace osuCrypto
 			struct View
 			{
 				MatrixView<T> mData;
+
+				View() = default;
+				View(const View&) = default;
+				View(MatrixView<T> data) : mData(data) {}
+
 				u64 size() const { return mData.rows(); }
 				Elem<const u8> operator[](u64 i) const
 				{
@@ -929,8 +934,8 @@ namespace osuCrypto
 			MultSession session;
 			session.mPartyIdx = mPartyIdx;
 			session.mExpandIdx = 0;
-			session.mRecvOts = span{ mRecvOts.data() + otIdx, n };
-			session.mSendOts = span{ mSendOts.data() + otIdx, n };
+			session.mRecvOts = span<block>{ mRecvOts.data() + otIdx, n };
+			session.mSendOts = span<std::array<block,2>>{ mSendOts.data() + otIdx, n };
 			session.mX.append(mChoiceBits, n, otIdx);
 
 			return session;
