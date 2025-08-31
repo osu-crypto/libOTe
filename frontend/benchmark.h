@@ -1852,7 +1852,7 @@ namespace osuCrypto
 				double total = 0;
 				for (u64 jj = 0; jj < trials; ++jj)
 				{
-					volatile u64 sink = 0;
+					u64 sink = 0;
 
 					// warmup
 					for (size_t i = 0; i < std::min<size_t>(S, 1024); ++i)
