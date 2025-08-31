@@ -5,7 +5,6 @@
 #include <iostream>
 #include <assert.h>
 #include <utility>
-#include <immintrin.h>
 #include "util.h"
 #include "UInt.h"
 

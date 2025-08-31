@@ -111,7 +111,7 @@ namespace osuCrypto
         {
             aHat = aHat_;
         }
-        else
+        else 
         {
             temp.resize(aHat_.size());
             for (u64 i = 0; i < aHat_.size(); ++i)

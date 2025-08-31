@@ -175,7 +175,7 @@ namespace tests_libOTe
 		//using F = F12289;
 		//u64 n = 1024;
 		//F psi = 12282;
-		using F = F7681;
+		//using F = F7681;
 		//u64 n = 4;
 		//F psi = 1925;
 		Ntt_nttNegWrapMatrix_Test_impl<F7681>();
