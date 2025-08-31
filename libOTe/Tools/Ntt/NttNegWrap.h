@@ -293,7 +293,7 @@ namespace osuCrypto
 #endif
 		u64 stride = n / 2;
 
-		u64 stage = 0;
+		//u64 stage = 0;
 		while (stride)
 		{
 			u64 size = n / stride / 2;
@@ -334,7 +334,6 @@ namespace osuCrypto
 			//std::cout << std::endl;
 
 			stride /= 2;
-			++stage;
 		}
 
 		if (order == NttOrder::NormalOrder)

@@ -325,7 +325,8 @@ namespace osuCrypto {
 		template<typename F>
 		void one(F&& x)const
 		{
-			x = std::remove_cvref_t<F>(1);
+			using FF = std::remove_cvref_t<F>;
+			x = FF(1);
 		}
 
 		// convert F into a string

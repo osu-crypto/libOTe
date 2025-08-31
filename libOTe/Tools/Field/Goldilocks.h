@@ -340,6 +340,13 @@ namespace osuCrypto
 	};
 
 
+	static_assert(std::is_trivially_copyable<Goldilocks>::value, "Trivially copyable");
+	static_assert(std::is_trivially_constructible_v<Goldilocks>, "Trivially constructible");
+	static_assert(sizeof(Goldilocks) == 8, "Expected size");
+	static_assert(std::is_constructible_v<Goldilocks, u64>, "Constructible from u64");
+	static_assert(std::is_constructible_v<Goldilocks, decltype(1)>, "Constructible from int");
+
+
 
 	// Function to prevent branch from being inlined/optimized away
 #if defined(__GNUC__) || defined(__clang__)

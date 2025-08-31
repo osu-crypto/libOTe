@@ -24,7 +24,10 @@ if(MSVC)
 else()
     target_compile_options(frontend_libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
     
-    # no-subobject-linkage =  GCC bug complaining about coroutines capturing lambdas
-    # which only have internal linkage. But this is expected.
-    target_compile_options(frontend_libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-subobject-linkage>)
+    if(NOT APPLE)
+
+        # no-subobject-linkage =  GCC bug complaining about coroutines capturing lambdas
+        # which only have internal linkage. But this is expected.
+        target_compile_options(frontend_libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-subobject-linkage>)
+    endif()    
 endif()

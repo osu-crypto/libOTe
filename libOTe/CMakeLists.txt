@@ -28,9 +28,13 @@ if(MSVC)
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}> /Zi )
 else()
 
-    # no-subobject-linkage =  GCC bug complaining about coroutines capturing lambdas
-    # which only have internal linkage. But this is expected.
-    target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER} -Wno-subobject-linkage>)
+    target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
+    
+    if(NOT APPLE)
+        # no-subobject-linkage =  GCC bug complaining about coroutines capturing lambdas
+        # which only have internal linkage. But this is expected.
+        target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER} -Wno-subobject-linkage>)
+    endif()
 
     if(ENABLE_SSE)
         target_compile_options(libOTe PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)
