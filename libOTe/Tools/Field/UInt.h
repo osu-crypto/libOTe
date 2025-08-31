@@ -28,10 +28,36 @@ namespace osuCrypto
 
         // ---- ctors ----
         constexpr UInt() = default;               // zero
-        constexpr UInt(int x) { v.fill(0); v[0] = x; }
-        constexpr UInt(u64 x) { v.fill(0); v[0] = x; }
+
+        template <class T>
+            requires std::is_integral_v<std::remove_cv_t<T>>
+        constexpr explicit(std::is_same_v<std::remove_cv_t<T>, bool>) 
+            UInt(T x)
+        {
+            v.fill(0);
+
+            using UT = std::make_unsigned_t<std::remove_cv_t<T>>;
+            UT ux = static_cast<UT>(x);
+
+            // low 64 bits
+            v[0] = static_cast<u64>(ux);
+
+            // spill remaining chunks if source wider than 64 bits (e.g., __int128)
+            if constexpr (sizeof(UT) > 8)
+            {
+                UT t = ux >> 64;
+                for (std::size_t i = 1; i < limbs && t != 0; ++i)
+                {
+                    v[i] = static_cast<u64>(t);
+                    t >>= 64;
+                }
+            }
+        }
+        //constexpr UInt(int x) { v.fill(0); v[0] = x; }
+        //constexpr UInt(u64 x) { v.fill(0); v[0] = x; }
         constexpr explicit UInt(bool b) : UInt(static_cast<u64>(b)) {}
 
+		
         // ---- inspectors ----
         static constexpr UInt zero() { return UInt{}; }
         static constexpr UInt one() { return UInt{ u64{1} }; }

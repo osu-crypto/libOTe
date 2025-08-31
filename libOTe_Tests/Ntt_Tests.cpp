@@ -5,7 +5,7 @@
 #include "libOTe/Tools/Field/Fp.h"
 #include "libOTe/Tools/Field/Goldilocks.h"
 #include "libOTe/Tools/Ntt/Poly.h"
-
+#include "cryptoTools/Common/TestCollection.h"
 
 using namespace oc;
 
