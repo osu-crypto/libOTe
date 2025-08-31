@@ -65,10 +65,17 @@ namespace osuCrypto
 		// Invariant: all arithmetic maintains a correct representative modulo p.
 		u64 mVal;
 
+
+		// Keep trivial default construction
+		constexpr Goldilocks() noexcept = default;
+
+		// Enable construction from u64 (and int via standard conversion)
+		constexpr explicit Goldilocks(u64 v) noexcept : mVal(v) {}
+
 		// Returns the canonical representative in [0, p-1].
 		constexpr Goldilocks canonical() const noexcept
 		{
-			return { (mVal < mModulus) ? mVal : mVal - mModulus };
+			return Goldilocks{ (mVal < mModulus) ? mVal : mVal - mModulus };
 		}
 
 		// Returns the canonical representative in [0, p-1].
@@ -189,7 +196,7 @@ namespace osuCrypto
 		// Only used in select internal idioms; do not rely on it as a field operation.
 		constexpr OC_FORCEINLINE Goldilocks operator&(const Goldilocks& rhs) const noexcept
 		{
-			return { mVal & rhs.mVal };
+			return Goldilocks{ mVal & rhs.mVal };
 		}
 
 		// Pre-increment: ++x  => x = x + 1 (mod p), returns reference to updated x.
