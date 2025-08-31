@@ -73,19 +73,19 @@ namespace osuCrypto
 		}
 
 		// Returns the canonical representative in [0, p-1].
-		constexpr u64 integer() const noexcept
+		constexpr OC_FORCEINLINE u64 integer() const noexcept
 		{
 			return canonical().mVal;
 		}
 
 		// Implicit cast to the canonical u64 value in [0, p-1].
-		constexpr operator u64() const noexcept
+		constexpr OC_FORCEINLINE operator u64() const noexcept
 		{
 			return canonical().mVal;
 		}
 
 		// Field addition (this + rhs).
-		constexpr Goldilocks operator+(const Goldilocks& rhs) const noexcept
+		constexpr OC_FORCEINLINE Goldilocks operator+(const Goldilocks& rhs) const noexcept
 		{
 			Goldilocks result;
 			add(result, *this, rhs);
@@ -93,14 +93,14 @@ namespace osuCrypto
 		}
 
 		// In-place addition.
-		constexpr Goldilocks& operator+=(const Goldilocks& rhs) noexcept
+		constexpr OC_FORCEINLINE Goldilocks& operator+=(const Goldilocks& rhs) noexcept
 		{
 			add(*this, *this, rhs);
 			return *this;
 		}
 
 		// Field subtraction (this - rhs).
-		constexpr Goldilocks operator-(const Goldilocks& rhs) const noexcept
+		constexpr OC_FORCEINLINE Goldilocks operator-(const Goldilocks& rhs) const noexcept
 		{
 			Goldilocks result;
 			sub(result, *this, rhs);
@@ -108,14 +108,14 @@ namespace osuCrypto
 		}
 
 		// In-place subtraction.
-		constexpr Goldilocks& operator-=(const Goldilocks& rhs) noexcept
+		constexpr OC_FORCEINLINE Goldilocks& operator-=(const Goldilocks& rhs) noexcept
 		{
 			sub(*this, *this, rhs);
 			return *this;
 		}
 
 		// Field negation (-this).
-		constexpr Goldilocks operator-() const noexcept
+		constexpr OC_FORCEINLINE Goldilocks operator-() const noexcept
 		{
 			Goldilocks result;
 			negate(result, *this);
@@ -123,7 +123,7 @@ namespace osuCrypto
 		}
 
 		// Field multiplication (this * rhs).
-		constexpr Goldilocks operator*(const Goldilocks& rhs) const noexcept
+		constexpr OC_FORCEINLINE Goldilocks operator*(const Goldilocks& rhs) const noexcept
 		{
 			Goldilocks result;
 			mul(result, *this, rhs);
@@ -131,14 +131,14 @@ namespace osuCrypto
 		}
 
 		// In-place multiplication.
-		constexpr Goldilocks& operator*=(const Goldilocks& rhs) noexcept
+		constexpr OC_FORCEINLINE Goldilocks& operator*=(const Goldilocks& rhs) noexcept
 		{
 			mul(*this, *this, rhs);
 			return *this;
 		}
 
 		// Field division (this / rhs) = this * inv(rhs). inv(0) := 0 by convention here.
-		constexpr Goldilocks operator/(const Goldilocks& rhs) const noexcept
+		constexpr OC_FORCEINLINE Goldilocks operator/(const Goldilocks& rhs) const noexcept
 		{
 			Goldilocks result;
 			inv(result, rhs);
@@ -147,7 +147,7 @@ namespace osuCrypto
 		}
 
 		// In-place division.
-		constexpr Goldilocks& operator/=(const Goldilocks& rhs) noexcept
+		constexpr  OC_FORCEINLINE Goldilocks& operator/=(const Goldilocks& rhs) noexcept
 		{
 			Goldilocks inv_rhs;
 			inv(inv_rhs, rhs);
@@ -156,52 +156,52 @@ namespace osuCrypto
 		}
 
 		// Equality comparison uses canonical representatives.
-		constexpr bool operator==(const Goldilocks& rhs) const noexcept
+		constexpr OC_FORCEINLINE bool operator==(const Goldilocks& rhs) const noexcept
 		{
 			return canonical().mVal == rhs.canonical().mVal;
 		}
 
 		// Equality comparison uses canonical representatives.
-		constexpr bool operator!=(const Goldilocks& rhs) const noexcept
+		constexpr OC_FORCEINLINE bool operator!=(const Goldilocks& rhs) const noexcept
 		{
 			return !(*this == rhs);
 		}
 
-		constexpr bool operator<(const Goldilocks& rhs) const noexcept
+		constexpr  OC_FORCEINLINE bool operator<(const Goldilocks& rhs) const noexcept
 		{
 			return canonical().mVal < rhs.canonical().mVal;
 		}
-		constexpr bool operator<=(const Goldilocks& rhs) const noexcept
+		constexpr OC_FORCEINLINE bool operator<=(const Goldilocks& rhs) const noexcept
 		{
 			return canonical().mVal <= rhs.canonical().mVal;
 		}
-		constexpr bool operator>(const Goldilocks& rhs) const noexcept
+		constexpr OC_FORCEINLINE bool operator>(const Goldilocks& rhs) const noexcept
 		{
 			return canonical().mVal > rhs.canonical().mVal;
 		}
-		constexpr bool operator>=(const Goldilocks& rhs) const noexcept
+		constexpr OC_FORCEINLINE bool operator>=(const Goldilocks& rhs) const noexcept
 		{
 			return canonical().mVal >= rhs.canonical().mVal;
 		}
 
-		constexpr Goldilocks& operator=(const Goldilocks& other) noexcept = default;
+		constexpr OC_FORCEINLINE Goldilocks& operator=(const Goldilocks& other) noexcept = default;
 
 		// Bitwise AND on unreduced representatives. This is not a field operation.
 		// Only used in select internal idioms; do not rely on it as a field operation.
-		constexpr Goldilocks operator&(const Goldilocks& rhs) const noexcept
+		constexpr OC_FORCEINLINE Goldilocks operator&(const Goldilocks& rhs) const noexcept
 		{
 			return { mVal & rhs.mVal };
 		}
 
 		// Pre-increment: ++x  => x = x + 1 (mod p), returns reference to updated x.
-		constexpr Goldilocks& operator++() noexcept
+		constexpr OC_FORCEINLINE Goldilocks& operator++() noexcept
 		{
 			increment(*this, *this);
 			return *this;
 		}
 
 		// Post-increment: x++  => returns old value, then x = x + 1 (mod p).
-		constexpr Goldilocks operator++(int) noexcept
+		constexpr OC_FORCEINLINE Goldilocks operator++(int) noexcept
 		{
 			Goldilocks tmp = *this;
 			increment(*this, *this);
@@ -209,14 +209,14 @@ namespace osuCrypto
 		}
 
 		// Pre-decrement: --x  => x = x - 1 (mod p), returns reference to updated x.
-		constexpr Goldilocks& operator--() noexcept
+		constexpr OC_FORCEINLINE Goldilocks& operator--() noexcept
 		{
 			decrement(*this, *this);
 			return *this;
 		}
 
 		// Post-decrement: x--  => returns old value, then x = x - 1 (mod p).
-		constexpr Goldilocks operator--(int) noexcept
+		constexpr OC_FORCEINLINE Goldilocks operator--(int) noexcept
 		{
 			Goldilocks tmp = *this;
 			decrement(*this, *this);
@@ -224,7 +224,7 @@ namespace osuCrypto
 		}
 
 		// Returns x^exp in the field using square-and-multiply.
-		constexpr Goldilocks pow(u64 exp) const noexcept
+		constexpr OC_FORCEINLINE Goldilocks pow(u64 exp) const noexcept
 		{
 			Goldilocks result;
 			pow(result, *this, exp);
@@ -233,9 +233,9 @@ namespace osuCrypto
 
 		// pow(result, x, exps):
 		//   Compute x^exps via square-and-multiply with field multiplication.
-		static constexpr void pow(
+		static constexpr OC_FORCEINLINE void pow(
 			Goldilocks& result,
-			const Goldilocks& x,
+			Goldilocks x,
 			u64 exps) noexcept
 		{
 			result = (exps & 1) ? x : Goldilocks{ 1 };
@@ -255,19 +255,19 @@ namespace osuCrypto
 		// inv(result, in):
 		//   Compute the multiplicative inverse of in modulo p via an extended Euclidean algorithm.
 		//   Convention: inv(0) = 0. Callers should treat 0 as non-invertible in strict math contexts.
-		static constexpr void inv(
+		static constexpr OC_FORCEINLINE void inv(
 			Goldilocks& result,
-			const Goldilocks& in);
+			Goldilocks in);
 
 
 		// mul(result, in1, in2):
 		//   Field multiplication. Currently forwards to mulPzt22.
-		static constexpr void mul(
+		static constexpr OC_FORCEINLINE void mul(
 			Goldilocks& result,
-			const Goldilocks& in1,
-			const Goldilocks& in2);
+			Goldilocks in1,
+			Goldilocks in2);
 
-		static constexpr void redPzt22(Goldilocks& result, u64 lo, u64 hi);
+		static constexpr OC_FORCEINLINE void redPzt22(Goldilocks& result, u64 lo, u64 hi);
 
 		// mulPzt22(result, in1, in2):
 		//   Fast modular multiplication specialized for Goldilocks:
@@ -276,42 +276,42 @@ namespace osuCrypto
 		//     reduce with:
 		//       x ≡ x0 - x2 + x1*(2^32 - 1)  (mod p),
 		//     where x1 = low32(x_hi), x2 = high32(x_hi), x0 = x_lo.
-		static constexpr void mulPzt22(
+		static constexpr OC_FORCEINLINE void mulPzt22(
 			Goldilocks& result,
-			const Goldilocks& in1,
-			const Goldilocks& in2);
+			Goldilocks in1,
+			Goldilocks in2);
 
 		// Alternative multiplication variants (commented out). Kept as references for experimentation.
 		//static constexpr void mulBerrettV2(
 		//	Goldilocks& result,
-		//	const Goldilocks& in1,
-		//	const Goldilocks& in2);
+		//	Goldilocks in1,
+		//	Goldilocks in2);
 		//static constexpr void mulBerrettV1(
 		//	Goldilocks& result,
-		//	const Goldilocks& in1,
-		//	const Goldilocks& in2);
+		//	Goldilocks in1,
+		//	Goldilocks in2);
 
 		// add(result, in1, in2):
 		//   Field addition with branchless correction. If the 64-bit addition overflows, add (2^32 - 1),
 		//   and if that overflows, add (2^32 - 1) again. This leverages the Goldilocks modulus structure.
-		static constexpr void add(
+		static constexpr OC_FORCEINLINE void add(
 			Goldilocks& result,
-			const Goldilocks& in1,
-			const Goldilocks& in2);
+			Goldilocks in1,
+			Goldilocks in2);
 
 		// sub(result, in1, in2):
 		//   Field subtraction with branchless correction. If the subtraction borrows, subtract (2^32 - 1),
 		//   and if that borrows, subtract (2^32 - 1) again.
-		static constexpr void sub(
+		static constexpr OC_FORCEINLINE void sub(
 			Goldilocks& result,
-			const Goldilocks& in1,
-			const Goldilocks& in2);
+			Goldilocks in1,
+			Goldilocks in2);
 
 		// increment(result, in1):
 		//   result = in1 + 1 (mod p).
-		static constexpr void increment(
+		static constexpr OC_FORCEINLINE void increment(
 			Goldilocks& result,
-			const Goldilocks& in1)
+			Goldilocks in1)
 		{
 			auto v = in1.mVal + 1;
 			result.mVal = v < mModulus ? v : v - mModulus;
@@ -319,9 +319,9 @@ namespace osuCrypto
 
 		// decrement(result, in1):
 		//   result = in1 - 1 (mod p).
-		static constexpr void decrement(
+		static constexpr OC_FORCEINLINE void decrement(
 			Goldilocks& result,
-			const Goldilocks& in1)
+			Goldilocks in1)
 		{
 
 			auto v = in1.mVal - 1;
@@ -330,9 +330,9 @@ namespace osuCrypto
 
 		// negate(result, in1):
 		//   result = -in1 (mod p). Note that -0 = 0.
-		static constexpr void negate(
+		static constexpr OC_FORCEINLINE void negate(
 			Goldilocks& result,
-			const Goldilocks& in1)
+			Goldilocks in1)
 		{
 			auto v = in1.canonical().mVal;
 			result.mVal = v == 0 ? 0 : mModulus - v;
@@ -360,9 +360,9 @@ namespace osuCrypto
 #endif
 
 
-	constexpr void Goldilocks::inv(
+	constexpr  OC_FORCEINLINE void Goldilocks::inv(
 		Goldilocks& result,
-		const Goldilocks& in)
+		Goldilocks in)
 	{
 		// Extended Euclidean algorithm to find modular inverse
 		if (in.mVal == 0)
@@ -393,7 +393,7 @@ namespace osuCrypto
 //     =[x1(2^32−1)+x0-x2]p
 //
 // due to 2^96 ≡ -1 (mod p) and 2^64 ≡ 2^32 - 1 (mod p)
-	constexpr void Goldilocks::redPzt22(
+	constexpr OC_FORCEINLINE void Goldilocks::redPzt22(
 		Goldilocks& result,
 		u64 lo,
 		u64 hi)
@@ -437,10 +437,10 @@ namespace osuCrypto
 	//     =[x1(2^32−1)+x0-x2]p
 	//
 	// due to 2^96 ≡ -1 (mod p) and 2^64 ≡ 2^32 - 1 (mod p)
-	constexpr void Goldilocks::mulPzt22(
+	constexpr OC_FORCEINLINE void Goldilocks::mulPzt22(
 		Goldilocks& result,
-		const Goldilocks& in1,
-		const Goldilocks& in2)
+		Goldilocks in1,
+		Goldilocks in2)
 	{
 
 		// 2^32 - 1
@@ -451,6 +451,7 @@ namespace osuCrypto
 
 #if !defined(NDEBUG) 
 		{
+			saf
 			auto prod = (u128(in1.mVal) * u128(in2.mVal)) % u128(mModulus);
 			auto vv = Goldilocks{ result.mVal }.canonical();
 			assert(vv.mVal == prod);
@@ -535,8 +536,8 @@ namespace osuCrypto
 
 	//	constexpr void Goldilocks::mulBerrettV1(
 	//		Goldilocks& result,
-	//		const Goldilocks& in1,
-	//		const Goldilocks& in2)
+	//		Goldilocks in1,
+	//		Goldilocks in2)
 	//	{
 	//		// p = 2^64 - 2^32 + 1, b = 2^32, EPSILON = b - 1
 	//		//constexpr u64 EPSILON = (1ull << 32) - 1; // 0x00000000FFFFFFFF
@@ -615,8 +616,8 @@ namespace osuCrypto
 
 		//	constexpr void Goldilocks::mulBerrettV2(
 		//		Goldilocks& result,
-		//		const Goldilocks& in1,
-		//		const Goldilocks& in2)
+		//		Goldilocks in1,
+		//		Goldilocks in2)
 		//	{
 		//		// p = 2^64 - 2^32 + 1, b = 2^32, EPSILON = b - 1
 		//		constexpr u64 EPSILON = (1ull << 32) - 1; // 0x00000000FFFFFFFF
@@ -664,19 +665,19 @@ namespace osuCrypto
 
 
 
-	constexpr void Goldilocks::mul(
+	constexpr OC_FORCEINLINE void Goldilocks::mul(
 		Goldilocks& result,
-		const Goldilocks& in1,
-		const Goldilocks& in2)
+		Goldilocks in1,
+		Goldilocks in2)
 	{
 		mulPzt22(result, in1, in2);
 	}
 
 
-	constexpr void Goldilocks::add(
+	constexpr OC_FORCEINLINE void Goldilocks::add(
 		Goldilocks& result,
-		const Goldilocks& in1,
-		const Goldilocks& in2)
+		Goldilocks in1,
+		Goldilocks in2)
 	{
 		constexpr u64 reducer = 0x00000000FFFFFFFFull;
 
@@ -712,10 +713,10 @@ namespace osuCrypto
 		result.mVal = sum;
 	}
 
-	constexpr inline void Goldilocks::sub(
+	constexpr  OC_FORCEINLINE void Goldilocks::sub(
 		Goldilocks& result,
-		const Goldilocks& in1,
-		const Goldilocks& in2)
+		Goldilocks in1,
+		Goldilocks in2)
 	{
 			constexpr u64 reducer = 0x00000000FFFFFFFFull;
 			//constexpr u64 masks[2]{ 0, reducer };

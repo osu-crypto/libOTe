@@ -9,6 +9,10 @@ include_directories(${CMAKE_SOURCE_DIR})
 
 add_executable(frontend_libOTe  ${SRCS} "ExampleTriples.h")
 
+target_compile_definitions(frontend_libOTe PRIVATE
+    $<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:NDEBUG>
+)
+
 target_link_libraries(frontend_libOTe libOTe_Tests tests_cryptoTools)
 
 

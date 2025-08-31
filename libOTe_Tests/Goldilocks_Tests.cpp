@@ -410,6 +410,7 @@ namespace osuCrypto
 
 			for (int i = 0; i < 10; i++) {
 				expected_product = (expected_product * 7) % Goldilocks::mModulus;
+
 				mulFn(running_product, running_product, factor);
 				ThrowIfNotEqual((u64)running_product, expected_product,
 					methodName + ": Consecutive multiplication " + std::to_string(i));

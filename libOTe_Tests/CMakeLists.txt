@@ -31,6 +31,12 @@ set(SRCS
 
 add_library(libOTe_Tests STATIC ${SRCS})
 
+
+target_compile_definitions(libOTe_Tests PRIVATE
+    $<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:NDEBUG>
+)
+
+
 target_link_libraries(libOTe_Tests libOTe)
 
 

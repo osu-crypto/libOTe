@@ -225,7 +225,6 @@ namespace osuCrypto
 	struct Factor {
 		Factor() = default;
 		Factor(const Factor&) = default;
-
 		Factor(u64 f, u64 e) :mFactor(f), mExp(e) {}
 
 		u64 mFactor;

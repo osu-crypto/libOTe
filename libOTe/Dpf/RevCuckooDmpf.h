@@ -822,7 +822,7 @@ namespace osuCrypto
 				// Step 2: Deduplication of [A], [B]
 
 				tasks.push_back(
-					mDedup[s].dedupValues<T>(B[s], socks[s] = sock.fork(), ctx)
+					mDedup[s].template dedupValues<T>(B[s], socks[s] = sock.fork(), ctx)
 				);
 
 				if (mPrint && (mPrintIndex == ~0ull || mPrintIndex == s))
