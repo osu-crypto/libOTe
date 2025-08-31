@@ -555,7 +555,7 @@ private:
 	Opaque& operator=(const Opaque&) = default;
 
 	u32 mData;
-	friend class CoeffCtxOpaque;
+	friend struct CoeffCtxOpaque;
 public:
 	Opaque(OpaqueCtr) {}
 };

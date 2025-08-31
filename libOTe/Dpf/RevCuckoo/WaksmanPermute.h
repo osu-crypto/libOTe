@@ -643,7 +643,8 @@ namespace osuCrypto
 			if (mMultSessions.size() <= mOtIdx)
 				throw RTE_LOC;
 
-			co_await mMultSessions[mOtIdx++].multiply<F>(begin, end, begin, sock, ctx);
+			auto idx = mOtIdx++;
+			co_await mMultSessions[idx].multiply<F>(begin, end, begin, sock, ctx);
 
 		}
 

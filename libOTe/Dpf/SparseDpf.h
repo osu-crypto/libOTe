@@ -110,6 +110,11 @@ namespace osuCrypto
 		{
 			u32* mBegin;
 			u32* mEnd;
+
+			Range() = default;
+			Range(const Range&) = default;
+			Range(u32* b, u32* e) : mBegin(b), mEnd(e) {}
+
 			auto begin() const { return mBegin; }
 			auto end() const { return mEnd; }
 			auto size() const { return mEnd - mBegin; }
