@@ -27,9 +27,6 @@
 #include "cryptoTools/Circuit/BetaLibrary.h"
 #include "libOTe/Vole/Noisy/NoisyVoleSender.h"
 #include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
-#include "libOTe/Base/BaseOT.h"
-#include "libOTe/Vole/Noisy/NoisyVoleSender.h"
-#include "libOTe/Vole/Noisy/NoisyVoleReceiver.h"
 #include "libOTe/Dpf/RevCuckooDmpf.h"
 #include "cryptoTools/Circuit/BetaCircuit.h"
 
@@ -113,10 +110,12 @@ namespace osuCrypto
 			SumDmpf<F, CoeffCtx>> mDpf;
 
 
+		using SF = ScalerOf<F>::type;
 		using VecF = CoeffCtx::template Vec<F>;
+		using VecSF = CoeffCtx::template Vec<SF>;
 
-		VecF mRootsOfUnity;
-		VecF mNegWrapRoots;
+		//VecF mRootsOfUnity;
+		VecSF mNegWrapRoots;
 
 		CoeffCtx mCtx;
 
@@ -741,7 +740,7 @@ namespace osuCrypto
 
 		// make a_0 the identity polynomial (in FFT space) polyIdx.e., all 1s
 		for (size_t i = 0; i < mN; i++) {
-			mFftA(0, i) = F(1);
+			mFftA(0, i) = F::one();
 			for (u64 j = 1; j < mNumPolys; ++j)
 				mFftA(j, i) = prng.get();
 		}
@@ -1198,26 +1197,14 @@ namespace osuCrypto
 
 		if(mNegWrapRoots.size() != mN -1)
 		{
-			mRootsOfUnity.resize(mN * 2);
-			auto psi = primRootOfUnity<F>(mN * 2);
+			auto psi = primRootOfUnity<SF>(mN * 2);
+			VecSF rootsOfUnity(mN * 2);
 			mNegWrapRoots.resize(mN - 1);
-			nttPrecomputeRootsOfUnity<F>(psi, mRootsOfUnity);
-			getNegWrapRoots<F>(mRootsOfUnity, mNegWrapRoots, mN);
-			//auto pow = mCtx.template make<F>();
-			//mCtx.one(pow);
-			//for (u64 i = 0; i < mN * 2; ++i)
-			//{
-			//	mCtx.copy(mRootsOfUnity[i], pow);
-			//	mCtx.mul(pow, pow, psi);
-			//}
+			nttPrecomputeRootsOfUnity<SF>(psi, rootsOfUnity);
+			getNegWrapRoots<SF>(rootsOfUnity, mNegWrapRoots, mN);
 		}
-		//auto& w = mRootsOfUnity;
 		auto& nw = mNegWrapRoots;
 
-		//std::vector<F> w(mN * 2);
-		//auto psi = primRootOfUnity<F>(mN * 2);
-		//for (u64 i = 0; i < mN * 2; ++i)
-		//	w[i] = psi.pow(i);
 
 		// for OLEs, we write the result into A,B.
 		// For triples, A,B,C are half sized. So we
@@ -1230,7 +1217,7 @@ namespace osuCrypto
 		for (u64 i = 0; i < mNumPolys * mNumPolys; ++i)
 		{
 			auto prod = prodPolys[i].subspan(0, mN);
-			nttNegWrapCt<F>(prod, nw);
+			nttNegWrapCt<F,SF>(prod, nw);
 
 			if (i)
 			{
@@ -1257,7 +1244,7 @@ namespace osuCrypto
 		{
 			span<F> fftSparsePoly = fftSparsePoly_;
 			if (j)
-				std::fill(fftSparsePoly.begin(), fftSparsePoly.end(), F(0));
+				std::fill(fftSparsePoly.begin(), fftSparsePoly.end(), F::zero());
 
 			// actual position
 			for (u64 i = 0; i < mPolyWeight; ++i)
@@ -1266,7 +1253,7 @@ namespace osuCrypto
 				fftSparsePoly[pos] = mSparseCoefficients[j * mPolyWeight + i];
 			}
 
-			nttNegWrapCt<F>(fftSparsePoly, nw);
+			nttNegWrapCt<F, SF>(fftSparsePoly, nw);
 
 			if (j)
 			{
@@ -1473,8 +1460,8 @@ namespace osuCrypto
 				//}
 
 				Poly<F> xnPlus1;
-				xnPlus1[mN] = F(1);
-				xnPlus1[0] = F(1);
+				xnPlus1[mN] = F::one();
+				xnPlus1[0] = F::one();
 
 				auto pp = (aPoly * bPoly);
 				auto exp = pp % xnPlus1;

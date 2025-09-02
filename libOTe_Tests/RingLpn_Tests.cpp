@@ -9,6 +9,7 @@
 #include "libOTe/Tools/Ntt/Poly.h"
 #include "libOTe/Tools/Ntt/NttNegWrap.h"
 #include "libOTe/Tools/Field/Fp.h"
+#include "libOTe/Tools/Field/FVec.h"
 #include "cryptoTools/Common/Log.h"
 #include "libOTe/Tools/Field/Goldilocks.h"
 
@@ -135,9 +136,9 @@ namespace osuCrypto
 		}
 
 		// Apply NTT (negative wrapped to handle x^n + 1 modulus)
-		nttNegWrapCt<F>(aPrime_eval, nw);
-		nttNegWrapCt<F>(bPrime_eval, nw);
-		nttNegWrapCt<F>(cPrime_eval, nw);
+		nttNegWrapCt<F, F>(aPrime_eval, nw);
+		nttNegWrapCt<F, F>(bPrime_eval, nw);
+		nttNegWrapCt<F, F>(cPrime_eval, nw);
 
 		// Compute componentwise product in evaluation domain
 		std::vector<F> expected_eval(n);
@@ -423,12 +424,13 @@ namespace osuCrypto
 #endif
 	}
 
-	void RingLpn_Triple_test(const CLP& cmd)
+	template<typename F>
+	void RingLpn_Triple_test_impl(const CLP& cmd)
 	{
 #ifdef ENABLE_RINGLPN
 
 		//using F = Fp<0xFFFFFFFB, u32, u64>;
-		using F = F12289;
+		//using F = F12289;
 		std::array<RingLpnTriple<F>, 2> triples;
 
 		auto logn = 5;
@@ -512,14 +514,28 @@ namespace osuCrypto
 #endif
 	}
 
-	void RingLpn_stationary_test(const CLP& cmd)
+
+	void RingLpn_Triple_test(const CLP& cmd)
+	{
+#ifdef ENABLE_RINGLPN
+
+		RingLpn_Triple_test_impl<F12289>(cmd);
+		RingLpn_Triple_test_impl<Fp31>(cmd);
+		RingLpn_Triple_test_impl<Goldilocks>(cmd);
+		RingLpn_Triple_test_impl<FVec<Goldilocks,2>>(cmd);
+
+#endif
+	}
+
+	template<typename F>
+	void RingLpn_stationary_test_impl(const CLP& cmd)
 	{
 
 #ifdef ENABLE_RINGLPN
 
 		//using F = Fp<0xFFFFFFFB, u32, u64>;
 		//using F = F12289;
-		using F = Goldilocks;
+		//using F = Goldilocks;
 
 		auto logn = 6;
 		u64 n = 1ull << logn;
@@ -616,6 +632,14 @@ namespace osuCrypto
 #endif
 
 	}
+
+	void RingLpn_stationary_test(const CLP& cmd)
+	{
+		RingLpn_stationary_test_impl<F12289>(cmd);
+		RingLpn_stationary_test_impl<Fp31>(cmd);
+		RingLpn_stationary_test_impl<Goldilocks>(cmd);
+	}
+
 
 
 	void RingLpn_conversion_test(const CLP& cmd)

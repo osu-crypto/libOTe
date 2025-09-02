@@ -3,6 +3,7 @@
 #include "libOTe/Tools/Ntt/NttNegWrapMatrix.h"
 #include "libOTe/Tools/Ntt/NttNegWrap.h"
 #include "libOTe/Tools/Field/Fp.h"
+#include "libOTe/Tools/Field/FVec.h"
 #include "libOTe/Tools/Field/Goldilocks.h"
 #include "libOTe/Tools/Ntt/Poly.h"
 #include "cryptoTools/Common/TestCollection.h"
@@ -37,14 +38,14 @@ namespace tests_libOTe
 
 
 			// the modulus polynomial is x^n + 1
-			Poly<F> mod(n, F(1));
-			mod[n] = F(1);
-			mod[0] = F(1);
+			Poly<F> mod(n, F::one());
+			mod[n] = F::one();
+			mod[0] = F::one();
 
 			// x^{n-1}
-			Poly<F> a(n - 1, F(1)), aHat(n - 1, F(1));
-			Poly<F> b(n - 1, F(1)), bHat(n - 1, F(1));
-			Poly<F> c(n - 1, F(1)), cHat(n - 1, F(1));
+			Poly<F> a(n - 1, F::one()), aHat(n - 1, F::one());
+			Poly<F> b(n - 1, F::one()), bHat(n - 1, F::one());
+			Poly<F> c(n - 1, F::one()), cHat(n - 1, F::one());
 
 			nttNegWrapMatrix<F>(aHat, a, psi, order, verbose);
 			nttNegWrapMatrix<F>(bHat, a, psi, order);
@@ -71,103 +72,105 @@ namespace tests_libOTe
 	void Ntt_nttNegWrapMatrix_Test_impl()
 	{
 
-		u64 n = 128;
-		PRNG prng(CCBlock);
-		auto psi = primRootOfUnity<F>(2 * n);
-		//std::cout << "phi " << psi << std::endl;
-
-		if (isPrimRootOfUnity<F>(2 * n, psi) == false)
+		for (u64 n = 32; n < 256; n *= 2)
 		{
-			std::cout << "psi is not a primitive (2n)-root of unity for n = " << n << std::endl;
-			throw RTE_LOC;
-		}
+			PRNG prng(CCBlock);
+			using SF = typename ScalerOf<F>::type;
 
-		for (NttOrder order : { NttOrder::NormalOrder, NttOrder::BitReversedOrder})
-		{
+			auto psi = primRootOfUnity<SF>(2 * n);
+			//std::cout << "phi " << psi << std::endl;
 
-			// the modulus polynomial is x^n + 1
-			Poly<F> mod(n, F(1));
-			mod[n] = F(1);
-			mod[0] = F(1);
-
-			// x^{n-1}
-			Poly<F> a(n - 1, F(1)), a2(n - 1, F(1)), aHat(n - 1, F(1)), aHat2(n - 1, F(1));
-			Poly<F> b(n - 1, F(1)), bHat(n - 1, F(1)), bHat2(n - 1, F(1));
-			Poly<F> c1(n - 1, F(1)), c1Hat(n - 1, F(1));
-			Poly<F> c2(n - 1, F(1)), c2Hat(n - 1, F(1));
-			
-			std::vector<F> psiPowers(2 * n);
-			nttPrecomputeRootsOfUnity<F>(psi, psiPowers);
-			std::vector<F> negWRapPowers = getNegWrapRoots<F>(psiPowers, n);
-			//for (u64 i = 0; i < psiPowers.size(); ++i)
-			//{
-			//	psiPowers[i] = psi.pow(i);
-			//}
-			for (u64 i = 0; i < a.size(); ++i)
-				a[i] = F(i);
-
-			b = prng.get();
-
-			c1 = (a * b) % mod;
-
-			//std::cout << "\n matrix:\n";
-			nttNegWrapMatrix<F>(aHat, a, psi, order);
-			//std::cout << "\n recurive:\n";
-			nttNegWrapCt<F>(aHat2, a, psi, order);
-			//ntt_negacyclic_recursive_bitrev<F>(aHat2, a, psi);
-			// check that the niave and efficent methods give the 
-			// same result.
-			if (aHat != aHat2)
+			if (isPrimRootOfUnity<SF>(2 * n, psi) == false)
 			{
-				for (u64 i = 0; i < aHat.size(); ++i)
+				std::cout << "psi is not a primitive (2n)-root of unity for n = " << n << std::endl;
+				throw RTE_LOC;
+			}
+
+			for (NttOrder order : { NttOrder::NormalOrder, NttOrder::BitReversedOrder})
+			{
+
+				// the modulus polynomial is x^n + 1
+				Poly<F> mod(n, F::one());
+				mod[n] = F::one();
+				mod[0] = F::one();
+
+				// x^{n-1}
+				Poly<F> a(n - 1, F::one()), a2(n - 1, F::one()), aHat(n - 1, F::one()), aHat2(n - 1, F::one());
+				Poly<F> b(n - 1, F::one()), bHat(n - 1, F::one()), bHat2(n - 1, F::one());
+				Poly<F> c1(n - 1, F::one()), c1Hat(n - 1, F::one());
+				Poly<F> c2(n - 1, F::one()), c2Hat(n - 1, F::one());
+
+				std::vector<SF> psiPowers(2 * n);
+				nttPrecomputeRootsOfUnity<SF>(psi, psiPowers);
+				std::vector<SF> negWRapPowers = getNegWrapRoots<SF>(psiPowers, n);
+				//for (u64 i = 0; i < psiPowers.size(); ++i)
+				//{
+				//	psiPowers[i] = psi.pow(i);
+				//}
+				a = prng.get();
+				b = prng.get();
+
+				c1 = (a * b) % mod;
+
+				//std::cout << "\n matrix:\n";
+				nttNegWrapMatrix<F>(aHat, a, psi, order);
+				//std::cout << "\n recurive:\n";
+				nttNegWrapCt<F>(aHat2, a, psi, order);
+				//ntt_negacyclic_recursive_bitrev<F>(aHat2, a, psi);
+				// check that the niave and efficent methods give the 
+				// same result.
+				if (aHat != aHat2)
 				{
-					std::cout << i << " " << aHat[i] << " " << aHat2[i] << (aHat[i] != aHat2[i] ? " <<<<<<" : "") << std::endl;
+					for (u64 i = 0; i < aHat.size(); ++i)
+					{
+						std::cout << i << " " << aHat[i] << " " << aHat2[i] << (aHat[i] != aHat2[i] ? " <<<<<<" : "") << std::endl;
+					}
+					throw RTE_LOC;
 				}
-				throw RTE_LOC;
+
+				//std::cout << "\n inplace:\n";
+
+				auto aa = a;
+				nttNegWrapCt<F, SF>(aa, negWRapPowers, order);
+				if (aa != aHat)
+				{
+					std::cout << "aHat " << aHat << std::endl;
+					std::cout << "aa   " << aa << std::endl;
+					throw RTE_LOC;
+				}
+				continue;
+
+				//nttNegWrapMatrix<F>(bHat, b, psi, order);
+				//nttNegWrapCt<F>(bHat2, b, psi, order);
+				//if (bHat != bHat2)
+				//	throw RTE_LOC;
+
+				//// apply the NTT to c1.
+				//nttNegWrapMatrix<F>(c1Hat, c1, psi, order);
+				//c1Hat.compact();
+
+				//// compute the componetwise multplication of aHat and bHat
+				//hadamarProd<F>(c2Hat, aHat, bHat);
+
+				//c1Hat.compact();
+				//c2Hat.compact();
+				//// check that we get the same evaluations.
+				//if (c1Hat != c2Hat)
+				//{
+				//	std::cout << c1Hat << std::endl;
+				//	std::cout << c2Hat << std::endl;
+
+				//	throw RTE_LOC;
+				//}
+
+				//// convert back
+				//inttNegWrapMatrix<F>(a2, aHat, psi, order);
+
+				//if (a != a2)
+				//	throw RTE_LOC;
 			}
-
-			//std::cout << "\n inplace:\n";
-
-			auto aa = a;
-			nttNegWrapCt<F>(aa, negWRapPowers, order);
-			if (aa != aHat)
-			{
-				std::cout << "aHat " << aHat << std::endl;
-				std::cout << "aa   " << aa << std::endl;
-				throw RTE_LOC;
-			}
-			continue;
-
-			//nttNegWrapMatrix<F>(bHat, b, psi, order);
-			//nttNegWrapCt<F>(bHat2, b, psi, order);
-			//if (bHat != bHat2)
-			//	throw RTE_LOC;
-
-			//// apply the NTT to c1.
-			//nttNegWrapMatrix<F>(c1Hat, c1, psi, order);
-			//c1Hat.compact();
-
-			//// compute the componetwise multplication of aHat and bHat
-			//hadamarProd<F>(c2Hat, aHat, bHat);
-
-			//c1Hat.compact();
-			//c2Hat.compact();
-			//// check that we get the same evaluations.
-			//if (c1Hat != c2Hat)
-			//{
-			//	std::cout << c1Hat << std::endl;
-			//	std::cout << c2Hat << std::endl;
-
-			//	throw RTE_LOC;
-			//}
-
-			//// convert back
-			//inttNegWrapMatrix<F>(a2, aHat, psi, order);
-
-			//if (a != a2)
-			//	throw RTE_LOC;
+			//inttNegWrapGs<F>(a2, aHat, psi, order);
 		}
-		//inttNegWrapGs<F>(a2, aHat, psi, order);
 	}
 
 	void Ntt_nttNegWrapMatrix_Test()
@@ -180,8 +183,91 @@ namespace tests_libOTe
 		//F psi = 1925;
 		Ntt_nttNegWrapMatrix_Test_impl<F7681>();
 		Ntt_nttNegWrapMatrix_Test_impl<F12289>();
+		Ntt_nttNegWrapMatrix_Test_impl<Fp31>();
 		Ntt_nttNegWrapMatrix_Test_impl<Goldilocks>();
+		Ntt_nttNegWrapMatrix_Test_impl<FVec<Fp31, 4>>();
+		Ntt_nttNegWrapMatrix_Test_impl<FVec<Goldilocks,2>>();
 	}
+
+
+	template<typename F>
+	void Ntt_nttNegWrapBatch_Test_impl()
+	{
+		constexpr u64 batchSize = 6;
+		for (u64 n = 32; n < 512; n *= 2)
+		{
+
+			PRNG prng(CCBlock);
+			auto psi = primRootOfUnity<F>(2 * n);
+			//std::cout << "phi " << psi << std::endl;
+
+			if (isPrimRootOfUnity<F>(2 * n, psi) == false)
+			{
+				std::cout << "psi is not a primitive (2n)-root of unity for n = " << n << std::endl;
+				throw RTE_LOC;
+			}
+
+
+			// Precompute w and stage-major twiddles once.
+			std::vector<F> psiPowers(2 * n);
+			nttPrecomputeRootsOfUnity<F>(psi, psiPowers);
+			std::vector<F> negWrapTwiddles = getNegWrapRoots<F>(psiPowers, n);
+
+			for (NttOrder order : { NttOrder::NormalOrder, NttOrder::BitReversedOrder })
+			{
+				std::array<Poly<F>, batchSize> src;
+				std::array<Poly<F>, batchSize> got;
+				std::array<Poly<F>, batchSize> exp;
+
+				// Prepare inputs and expected outputs via reference (psi-based) NTT.
+				for (size_t b = 0; b < batchSize; ++b)
+				{
+					src[b] = Poly<F>(n - 1, F(0));
+					got[b] = Poly<F>(n - 1, F(0));
+					exp[b] = Poly<F>(n - 1, F(0));
+
+					for (u64 i = 0; i < n; ++i)
+						src[b][i] = prng.get();
+
+					// Reference result using recursive psi-based NTT.
+					nttNegWrapCt<F>(exp[b], src[b], psi, order);
+
+					// Copy inputs for batched in-place run.
+					got[b] = src[b];
+				}
+
+				// Build span array for batched call.
+				std::array<span<F>, batchSize> spans;
+				for (size_t b = 0; b < batchSize; ++b)
+					spans[b] = got[b];
+
+				throw RTE_LOC;
+				// Run batched in-place NTT.
+				//nttNegWrapCt<F, batchSize>(spans, span<F>(negWrapTwiddles), order);
+
+				// Verify each polynomial matches the reference.
+				for (size_t b = 0; b < batchSize; ++b)
+				{
+					if (got[b] != exp[b])
+					{
+						std::cout << "Batched NTT mismatch at batch index " << b << std::endl;
+						std::cout << "exp " << exp[b] << std::endl;
+						std::cout << "got " << got[b] << std::endl;
+						throw RTE_LOC;
+					}
+				}
+			}
+		}
+	}
+
+	void Ntt_nttNegWrapBatch_Test()
+	{
+		Ntt_nttNegWrapBatch_Test_impl<F7681>();
+		Ntt_nttNegWrapBatch_Test_impl<F12289>();
+		Ntt_nttNegWrapBatch_Test_impl<Fp31>();
+		Ntt_nttNegWrapBatch_Test_impl<Goldilocks>();
+	}
+
 
 
 

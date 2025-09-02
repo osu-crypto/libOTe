@@ -183,7 +183,7 @@ namespace osuCrypto {
 			static_assert(std::is_same_v<F1, F2>, "src and destication types are not the same.");
 
 			auto n = std::distance(begin, end);
-			if(n)
+			if (n)
 				memcpy((F2 * __restrict) & *dstBegin, (F1 * __restrict) & *begin, n * sizeof(F1));
 			//std::copy(begin, end, dstBegin);
 		}
@@ -288,12 +288,17 @@ namespace osuCrypto {
 				memset(&*begin, 0, n * sizeof(F));
 			}
 		}
+
 		// fill the range [begin,..., end) with zeros. 
 		// begin will be an F pointer/iterator.
 		template<typename F>
 		void zero(F&& x)const
 		{
-			x = std::remove_cvref_t<F>(0);
+
+			if constexpr (requires(F x) { std::remove_cvref_t<F>::zero(); })
+				x = std::remove_cvref_t<F>::zero();
+			else
+				x = std::remove_cvref_t<F>(0);
 		}
 
 
@@ -303,18 +308,27 @@ namespace osuCrypto {
 		void one(Iter begin, Iter end)const
 		{
 			using F = std::remove_reference_t<decltype(*begin)>;
-			static_assert(std::is_trivially_copyable<F>::value, "memset is used so must be trivially_copyable.");
-
 
 			if (begin != end)
 			{
 				auto n = std::distance(begin, end);
 				assert(n > 0);
-				memset(&*begin, 0, n * sizeof(F));
-				while (begin != end)
+
+				if constexpr (requires(F x) { F::one(); })
 				{
-					auto& v = *begin++;
-					*(u8*)&v = 1;
+					for (u64 i = 0; i < n; ++i)
+						begin[i] = F::one();
+				}
+				else
+				{
+					static_assert(std::is_trivially_copyable<F>::value, "memset is used so must be trivially_copyable.");
+
+					memset(&*begin, 0, n * sizeof(F));
+					while (begin != end)
+					{
+						auto& v = *begin++;
+						*(u8*)&v = 1;
+					}
 				}
 			}
 		}
@@ -326,7 +340,12 @@ namespace osuCrypto {
 		void one(F&& x)const
 		{
 			using FF = std::remove_cvref_t<F>;
-			x = FF(1);
+			if constexpr (requires(FF x) { x = FF::one(); })
+			{
+				x = FF::one();
+			}
+			else
+				x = FF(1);
 		}
 
 		// convert F into a string
@@ -352,7 +371,9 @@ namespace osuCrypto {
 		template<typename F>
 		void mask(F& ret, const F& x, const block& mask)const
 		{
-			if constexpr (std::is_standard_layout<F>::value &&
+			if constexpr (
+				requires(F & x) { x = x & x; } &&
+				std::is_standard_layout<F>::value &&
 				std::is_trivial<F>::value &&
 				(sizeof(F) <= sizeof(block)) &&
 				(sizeof(block) % sizeof(F) == 0))

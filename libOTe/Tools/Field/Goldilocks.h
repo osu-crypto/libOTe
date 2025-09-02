@@ -344,6 +344,9 @@ namespace osuCrypto
 			result.mVal = v == 0 ? 0 : mModulus - v;
 		}
 
+
+		static Goldilocks zero() { return Goldilocks{ 0 }; }
+		static Goldilocks one() { return Goldilocks{ 1 }; }
 	};
 
 
@@ -464,7 +467,6 @@ namespace osuCrypto
 
 #if !defined(NDEBUG) 
 		{
-			saf
 			auto prod = (u128(in1.mVal) * u128(in2.mVal)) % u128(mModulus);
 			auto vv = Goldilocks{ result.mVal }.canonical();
 			assert(vv.mVal == prod);

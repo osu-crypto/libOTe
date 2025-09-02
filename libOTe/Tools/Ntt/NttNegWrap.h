@@ -74,8 +74,8 @@ namespace osuCrypto
 	void nttNegWrapCt(
 		span<F> aHat,
 		span<const F> a,
-		const F& psi,
-		const F& basePsi,
+		const auto& psi,
+		const auto& basePsi,
 		NttRange range,
 		u64 depth,
 		NttOrder outputOrder)
@@ -121,12 +121,11 @@ namespace osuCrypto
 
 		// -------- combine ------------------------------------------------
 		// Pre‑compute successive powers  psi^{2i+1}  iteratively→ saves O(n log n)
-		F psiPow = psi;                      // i = 0  ⇒  psi^{1}
-		const F psiStep = psi2;              // multiply by psi^{2} each iteration
+		auto psiPow = psi;                      // i = 0  ⇒  psi^{1}
+		const auto psiStep = psi2;              // multiply by psi^{2} each iteration
 
 		for (u64 i = 0; i < A.size(); ++i)
 		{
-			const F psiB = psiPow * BHat[i];   // psi^{2i+1} B̂_i
 
 			// psi = bPsi^bExp
 			// psiPow = psi^{2i+1}
@@ -138,6 +137,7 @@ namespace osuCrypto
 			if (psiPow != basePsi.pow(index))
 				throw RTE_LOC;
 
+			const auto psiB = BHat[i] * psiPow;   // psi^{2i+1} B̂_i
 			const u64 idx0 = i;
 			const u64 idx1 = i + n / 2;
 			aHat[idx0] = AHat[i] + psiB;
@@ -176,7 +176,7 @@ namespace osuCrypto
 	void nttNegWrapCt(
 		span<F> aHat,
 		span<const F> a,
-		F psi,
+		auto psi,
 		NttOrder order)
 	{
 		auto rng = NttRange{ .mBaseIndex = 0, .mStride = 1, .mSize = a.size() };
@@ -266,15 +266,15 @@ namespace osuCrypto
 	// - a are the coeffs,
 	// - w are the precomputed twiddles for each stage (see getNegWrapRoots)
 	// - order is the output order (normal or bit-reversed)
-	template<typename F>
+	template<typename F, typename SF = F>
 	void nttNegWrapCt(
 		span<F> a,
-		span<F> w,
+		span<SF> w,
 		NttOrder order = NttOrder::BitReversedOrder)
 	{
 
 		F* __restrict aPtr = a.data();
-		F* __restrict wPtr = w.data();
+		SF* __restrict wPtr = w.data();
 
 		u64 n = a.size();
 		auto ln = log2ceil(n);
@@ -287,13 +287,13 @@ namespace osuCrypto
 #ifndef NDEBUG
 		{
 			auto psi = w[n / 2 - 1]; // the expected position of the 2n root of unity
-			if (isPrimRootOfUnity<F>(2 * n, psi) == false)
+			if (isPrimRootOfUnity<SF>(2 * n, psi) == false)
 				throw RTE_LOC;
 		}
 #endif
 		u64 stride = n / 2;
 
-		//u64 stage = 0;
+		u64 stage = 0;
 		while (stride)
 		{
 			u64 size = n / stride / 2;
@@ -315,7 +315,7 @@ namespace osuCrypto
 					F a0 = aPtr[base];
 					F a1 = aPtr[base + stride];
 
-					auto b = wi * a1;
+					auto b = a1 * wi;
 					aPtr[base] = a0 + b;
 					aPtr[base + stride] = a0 - b;
 
@@ -333,12 +333,16 @@ namespace osuCrypto
 			}
 			//std::cout << std::endl;
 
+			++stage;
 			stride /= 2;
 		}
+
+		(void)stage;
 
 		if (order == NttOrder::NormalOrder)
 			bitReversePermute(a);
 	}
+
 
 	//---------------------------------------------------------------------------
 	//   (2) NEGACYCLIC iNTT  —  Gentleman‑Sande, decimation‑in‑time

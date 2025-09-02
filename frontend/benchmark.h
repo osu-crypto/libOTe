@@ -24,6 +24,7 @@
 #include "libOTe/Tools/Ntt/NttNegWrap.h"
 #include "libOTe/Triple/RingLpn/RingLpnTriple.h"
 #include "libOTe/Tools/Field/Fp.h"
+#include "libOTe/Tools/Field/FVec.h"
 #include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
 #include "libOTe/Tools/Field/Goldilocks.h"
 
@@ -1359,7 +1360,7 @@ namespace osuCrypto
 	}
 
 
-	void FftBench(const oc::CLP& cmd)
+	void NttBench(const oc::CLP& cmd)
 	{
 		using F = Goldilocks;
 		u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 16));
@@ -1380,29 +1381,106 @@ namespace osuCrypto
 		timer.setTimePoint("begin");
 		for (u64 tt = 0; tt < t; ++tt)
 		{
-			nttNegWrapCt<F>(a, nw);
+			nttNegWrapCt<F, F>(a, nw);
 			timer.setTimePoint("done");
-
 		}
+
+		AlignedUnVector<FVec<F,2>> aa(n);
+		for (u64 tt = 0; tt < t; ++tt)
+		{
+			nttNegWrapCt<FVec<F, 2>, F>(aa, nw);
+			timer.setTimePoint("batch");
+		}
+
+
+
 
 		if (!cmd.isSet("quiet"))
 			std::cout << timer << std::endl;
-
 	}
 
+
+
 #ifdef ENABLE_RINGLPN
-	template<typename F>
-	void ringSetBase(std::array<RingLpnTriple<F>, 2>& oles);
+	namespace
+	{
+
+		template<typename F>
+		void ringSetBase(std::array<RingLpnTriple<F>, 2>& oles)
+		{
+			PRNG prng0(block(12345, 67890));
+			auto otCount0 = oles[0].baseCorCount();
+			auto otCount1 = oles[1].baseCorCount();
+			if (otCount0.mRecvOtCount != otCount1.mSendOtCount ||
+				otCount0.mSendOtCount != otCount1.mRecvOtCount)
+				throw RTE_LOC;
+			std::array<std::vector<std::array<block, 2>>, 2> baseSend;
+			baseSend[0].resize(otCount0.mSendOtCount);
+			baseSend[1].resize(otCount1.mSendOtCount);
+			std::array<std::vector<block>, 2> baseRecv, oleMult, oleAdd;
+			std::array<BitVector, 2> baseChoice;
+
+			for (u64 i = 0; i < 2; ++i)
+			{
+				prng0.get(baseSend[i].data(), baseSend[i].size());
+				baseRecv[1 ^ i].resize(baseSend[i].size());
+				baseChoice[1 ^ i].resize(baseSend[i].size());
+				baseChoice[1 ^ i].randomize(prng0);
+				for (u64 j = 0; j < baseSend[i].size(); ++j)
+				{
+					baseRecv[1 ^ i][j] = baseSend[i][j][baseChoice[1 ^ i][j]];
+				}
+			}
+
+			std::array<std::vector<F>, 2> coeffs, tensor;
+			coeffs[0].resize(otCount0.mCoeffCount);
+			coeffs[1].resize(otCount1.mCoeffCount);
+			tensor[0].resize(otCount0.mCoeffCount * otCount0.mCoeffCount);
+			tensor[1].resize(otCount1.mCoeffCount * otCount1.mCoeffCount);
+			for (u64 i = 0; i < coeffs[0].size(); ++i)
+			{
+				coeffs[0][i] = prng0.get();
+				coeffs[1][i] = prng0.get();
+			}
+			for (u64 i = 0; i < coeffs[0].size(); ++i)
+			{
+				for (u64 j = 0; j < coeffs[0].size(); ++j)
+				{
+					auto idx = i * coeffs[0].size() + j;
+					tensor[0][idx] = prng0.get();
+					tensor[1][idx] = coeffs[0][i] * coeffs[1][j] - tensor[0][idx];
+
+					//std::cout
+					//	<< coeffs[0][i] << " * " << coeffs[1][j] << " = "
+					//	<< tensor[0][idx] << " + " << tensor[1][idx]
+					//	<< std::endl;
+
+					if ((tensor[0][idx] + tensor[1][idx]) != (coeffs[0][i] * coeffs[1][j]))
+						throw RTE_LOC;
+				}
+			}
+
+			oleMult[0].resize(otCount0.mOleCount / 128);
+			oleMult[1].resize(otCount0.mOleCount / 128);
+			oleAdd[0].resize(otCount0.mOleCount / 128);
+			oleAdd[1].resize(otCount0.mOleCount / 128);
+			prng0.get(oleMult[0].data(), oleMult[0].size());
+			prng0.get(oleMult[1].data(), oleMult[1].size());
+			prng0.get(oleAdd[0].data(), oleAdd[0].size());
+			for (u64 i = 0; i < oleAdd[1].size(); ++i)
+				oleAdd[1][i] = (oleMult[1][i] & oleMult[0][i]) ^ oleAdd[0][i];
+
+			oles[0].setBaseCors(baseSend[0], baseRecv[0], baseChoice[0], oleMult[0], oleAdd[0], coeffs[0], tensor[0]);
+			oles[1].setBaseCors(baseSend[1], baseRecv[1], baseChoice[1], oleMult[1], oleAdd[1], coeffs[1], tensor[1]);
+		}
+	}
 #endif
 
-	void RingLpnBench(const CLP& cmd)
-		try {
+	template<typename F>
+	void RingLpnBenchImpl(const CLP& cmd, std::string field)
+	{
 
 #ifdef ENABLE_RINGLPN
-
-		//using F = Fp<0xFFFFFFFB, u32, u64>;
-		//using F = F12289;
-		using F = Goldilocks;
 
 		auto logn = cmd.getOr("nn", 16);
 		u64 n = 1ull << logn;
@@ -1507,14 +1585,44 @@ namespace osuCrypto
 
 		if (!quiet)
 		{
-			std::cout << "Time taken: \n" << timer << std::endl;
+			std::cout << field<< " Time taken: \n" << timer << std::endl;
 
 			std::cout << "setup  " << first[0] / trials << " " << first[1] / trials << std::endl;
-			std::cout << "expand " << second[0]/exp / trials << " " << second[1] / exp / trials << std::endl;
+			std::cout << "expand " << second[0] / exp / trials << " " << second[1] / exp / trials << std::endl;
 		}
 #else
 		throw UnitTestSkipped("ENABLE_RINGLPN not defined.");
 #endif
+	}
+
+
+	void RingLpnBench(const CLP& cmd)
+	try {
+
+		bool gold = cmd.isSet("gold");
+		bool goldx = cmd.isSet("goldx");
+		bool f31 = cmd.isSet("f31");
+		bool f31x = cmd.isSet("f31x");
+
+		auto any = gold || goldx || f31 || f31x;
+		auto none = !any;
+
+		gold |= none;
+		goldx |= none;
+		f31 |= none;
+		f31x |= none;
+
+
+		if(gold)
+			RingLpnBenchImpl<Goldilocks>(cmd, "goldilocks");
+		if(goldx)
+			RingLpnBenchImpl<FVec<Goldilocks,2>>(cmd, "goldilocks x2");
+
+		std::cout << std::endl;
+		if(f31)
+			RingLpnBenchImpl<Fp31>(cmd, "Fp31");
+		if(f31x)
+			RingLpnBenchImpl<FVec<Fp31,4>>(cmd, "Fp31 x4");
 
 	}
 	catch (const std::exception& e)
@@ -2139,8 +2247,8 @@ namespace osuCrypto
 			RevCuckooBench(cmd);
 		else if (cmd.isSet("sum"))
 			SumDmpfBench(cmd);
-		else if (cmd.isSet("fft"))
-			FftBench(cmd);
+		else if (cmd.isSet("ntt"))
+			NttBench(cmd);
 		else if (cmd.isSet("ring"))
 			RingLpnBench(cmd);
 		else if (cmd.isSet("waksman"))
@@ -2168,7 +2276,7 @@ namespace osuCrypto
 			std::cout << "  -foleage" << std::endl;
 			std::cout << "  -silentTriple" << std::endl;
 			std::cout << "  -revCuckoo" << std::endl;
-			std::cout << "  -fft" << std::endl;
+			std::cout << "  -ntt" << std::endl;
 			std::cout << "  -sum" << std::endl;
 			std::cout << "  -ring" << std::endl;
 			std::cout << "  -waksman" << std::endl;

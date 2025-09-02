@@ -114,6 +114,7 @@ namespace tests_libOTe
 
 			tc.add("Field_F7681_Test                        ", Field_F7681_Test);
 			tc.add("Field_F12289_Test                       ", Field_F12289_Test);
+			tc.add("Field_Fp31_Test                         ", Field_Fp31_Test);
 
 
 			tc.add("UInt_Basics_Test                        ", UInt_Basics_Test);
@@ -143,7 +144,8 @@ namespace tests_libOTe
 			tc.add("Ntt_bitReverse_SIMD_Test                ", Ntt_bitReverse_SIMD_Test);
 			tc.add("Ntt_nttNegWrapMatrix_normal_Test        ", Ntt_nttNegWrapMatrix_normal_Test);
 			tc.add("Ntt_nttNegWrapMatrix_Test               ", Ntt_nttNegWrapMatrix_Test);
-
+			//tc.add("Ntt_nttNegWrapBatch_Test                ", Ntt_nttNegWrapBatch_Test);
+			
 			tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
 			tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);
 

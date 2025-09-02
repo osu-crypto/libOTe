@@ -20,7 +20,7 @@ namespace osuCrypto
     void nttNegWrapMatrix(
         span<F> aHat,
         span<const F> a,
-        const F& psi,
+        const auto& psi,
         NttOrder order, 
         bool verbose = false)
     {
@@ -40,7 +40,8 @@ namespace osuCrypto
         if(isPrimRootOfUnity(2 * n, psi) == false)
 			throw RTE_LOC;
 
-        std::vector<F> powers(2 * n);
+        using SF = std::remove_cvref_t<decltype(psi)>;
+        std::vector<SF> powers(2 * n);
 
         for (u64 i = 0; i < powers.size(); ++i)
         {
@@ -58,14 +59,14 @@ namespace osuCrypto
                 j : bitReversal(ln, j);
 
             auto& aj = aHat[idx];
-            aj = F(0);
+            aj = F::zero();
             //std::cout << "aHat[" << j << "] = ";
             for (u64 i = 0; i < n; ++i)
             {
                 auto idx = (2 * j * i + i) % powers.size();
                 if(verbose)
                     std::cout  << std::setw(2)<< idx << " ";
-                aj += powers[idx] * a[i];
+                aj += a[i] * powers[idx];
             }
             if(verbose)
                 std::cout << std::endl;
@@ -85,7 +86,7 @@ namespace osuCrypto
     void inttNegWrapMatrix(
         span<F> a,
         span<const F> aHat_,
-        const F& psi,
+        const auto& psi,
         NttOrder order,
         bool verbose = false)
     {
@@ -120,7 +121,7 @@ namespace osuCrypto
         }
         
         auto psiInv = psi.inverse();
-        std::vector<F> powers(2 * n);
+        std::vector<decltype(psiInv)> powers(2 * n);
         for (u64 i = 0; i < powers.size(); ++i)
         {
             powers[i] = psiInv.pow(i);

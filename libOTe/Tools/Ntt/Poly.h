@@ -27,7 +27,7 @@ namespace osuCrypto
 		}
 
 
-		explicit Poly(u64 deg, F coeff = 0)
+		explicit Poly(u64 deg, F coeff = F::zero())
 		{
 			setCoeff(deg, coeff);
 		}
@@ -38,7 +38,7 @@ namespace osuCrypto
 				mCoeffs[i] = prng.mPrng.get();
 
 			// the leading coeff can't be zero
-			while (size() > 1 && back() == 0)
+			while (size() > 1 && back() == F::zero())
 			{
 				back() = prng.mPrng.get();
 			}
@@ -62,7 +62,7 @@ namespace osuCrypto
 		bool isZero() const {
 			for(auto & c : mCoeffs)
 			{
-				if (c != 0)
+				if (c != F::zero())
 					return false;
 			}
 			return true;
@@ -86,7 +86,7 @@ namespace osuCrypto
 			if (i < size())
 				return mCoeffs[i];
 			else
-				return F(0);
+				return F::zero();
 		}
 
 
@@ -201,7 +201,7 @@ namespace osuCrypto
 		u64 size() const { return mCoeffs.size(); }
 		u64 degree()  const { 
 			for (u64 i = mCoeffs.size() - 1; i < mCoeffs.size(); --i)
-				if (mCoeffs[i] != 0)
+				if (mCoeffs[i] != F::zero())
 					return i;
 			return 0;
 			//return mCoeffs.size() ? mCoeffs.size() - 1 : 0; 
@@ -212,7 +212,7 @@ namespace osuCrypto
 
 		void compact()
 		{
-			while (size() && back() == 0)
+			while (size() && back() == F::zero())
 				pop_back();
 		}
 
@@ -273,7 +273,7 @@ namespace osuCrypto
 
 			auto size = a.size() + b.size();
 			dst.mCoeffs.resize(size ? size - 1 : 0);
-			std::fill(dst.begin(), dst.end(), F(0));
+			std::fill(dst.begin(), dst.end(), F::zero());
 
 			for (u64 i = 0; i < a.size(); ++i)
 			{
@@ -283,7 +283,7 @@ namespace osuCrypto
 				}
 			}
 
-			assert(dst.size() == 0 || dst.back() != 0);
+			assert(dst.size() == 0 || dst.back() != F::zero());
 
 			if (&dst == &t)
 				ret = std::move(t);
@@ -325,7 +325,7 @@ namespace osuCrypto
 				if (quo) {
 					*quo = a;
 					auto divisor = mod.getCoeff(0);
-					if (divisor == 0)
+					if (divisor == F::zero())
 						throw RTE_LOC;
 
 					for (u64 i = 0; i <= aDegree; ++i) 
@@ -353,7 +353,7 @@ namespace osuCrypto
 
 			// Get leading coefficient of modulus
 			auto modLeadCoeff = mod.getCoeff(modDegree);
-			if (modLeadCoeff == 0)
+			if (modLeadCoeff == F::zero())
 				throw RTE_LOC;
 
 			// Initialize remainder as copy of dividend
@@ -364,7 +364,7 @@ namespace osuCrypto
 			if (quo) {
 				auto quoDegree = aDegree - modDegree;
 				quo->mCoeffs.clear();
-				quo->mCoeffs.resize(quoDegree + 1, F(0));
+				quo->mCoeffs.resize(quoDegree + 1, F::zero());
 			}
 
 			// Polynomial long division
@@ -384,7 +384,7 @@ namespace osuCrypto
 				// Subtract mod * quotCoeff * x^quotDegree from remainder
 				for (u64 i = 0; i <= modDegree; ++i) {
 					auto modCoeff = mod.getCoeff(i);
-					if (modCoeff != 0) {
+					if (modCoeff != F::zero()) {
 						remainder[quotDegree + i] -= modCoeff * quotCoeff;
 					}
 				}

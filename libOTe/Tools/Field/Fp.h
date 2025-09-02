@@ -5,6 +5,7 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include <ostream>
 #include "libOTe/Tools/CoeffCtx.h"
+#include <array>
 
 namespace osuCrypto
 {
@@ -16,10 +17,10 @@ namespace osuCrypto
 		T mVal;
 
 
-		Fp() = default;
-		Fp(u64 v) : mVal(v >= mMod ? (v % mMod) : v) {}
-		Fp(const Fp&) = default;
-		Fp& operator=(const Fp&) = default;
+		constexpr Fp() = default;
+		constexpr Fp(u64 v) : mVal(v >= mMod ? (v % mMod) : v) {}
+		constexpr Fp(const Fp&) = default;
+		constexpr Fp& operator=(const Fp&) = default;
 
 
 		Fp(PRNG::Any prng)
@@ -34,76 +35,92 @@ namespace osuCrypto
 
 		static constexpr auto order() { return mMod; }
 
-		Fp& operator+=(const Fp& o)
+		constexpr Fp& operator+=(const Fp& o)
 		{
+
 			assert(mVal < mMod && o.mVal < mMod);
-			mVal = mVal + o.mVal;
-			if (mVal >= mMod)
-				mVal -= mMod;
+			T r = mVal + o.mVal;
+			if (r >= mMod)
+				r -= mMod;
+
+			assert(r == (TT(mVal) + TT(o.mVal)) % TT(mMod));
+
+			mVal = r;
 			return *this;
 		}
-		Fp operator+(const Fp& o) const
+		constexpr Fp operator+(const Fp& o) const
 		{
 			assert(mVal < mMod && o.mVal < mMod);
 			Fp r;
 			r.mVal = mVal + o.mVal;
 			if (r.mVal >= mMod)
 				r.mVal -= mMod;
+
+			assert(r.mVal == (TT(mVal) + TT(o.mVal)) % TT(mMod));
 			return r;
 		};
 
-		Fp& operator-=(const Fp& o)
+		constexpr Fp& operator-=(const Fp& o)
 		{
 			assert(mVal < mMod && o.mVal < mMod);
-			mVal = mVal - o.mVal;
-			if (mVal >= mMod)
-				mVal += mMod;
+			T r = mVal - o.mVal;
+			if (r >= mMod)
+				r += mMod;
+			assert(r == (TT(mVal) - TT(o.mVal) + mMod) % TT(mMod));
+
+			mVal = r;
 			return *this;
 		}
-		Fp operator-(const Fp& o) const
+		constexpr Fp operator-(const Fp& o) const
 		{
 			assert(mVal < mMod && o.mVal < mMod);
 			Fp r;
 			r.mVal = mVal - o.mVal;
 			if (r.mVal >= mMod)
 				r.mVal += mMod;
+
+			assert(r.mVal == (TT(mVal) - TT(o.mVal) + mMod) % TT(mMod));
+
 			return r;
 		};
 
-		Fp operator-() const
+		constexpr Fp operator-() const
 		{
 			assert(mVal < mMod);
 			Fp r = 0;
 			if (mVal)
 				r.mVal = mMod - mVal;
 
+			assert(r.mVal == (mMod - TT(mVal)) % TT(mMod));
+
 			return r;
 		};
 
-		Fp operator*(const Fp& o) const
+		constexpr Fp operator*(const Fp& o) const
 		{
 			assert(mVal < mMod && o.mVal < mMod);
 			//Fp r;
 			//r.mVal = (mVal * o.mVal) % mMod;
-			return barrettMul(*this, o);
-			//return r;
+			auto r =  barrettMul(*this, o);
+
+			return r;
 		};
 
-		Fp& operator*=(const Fp& o)
+		constexpr Fp& operator*=(const Fp& o)
 		{
 			assert(mVal < mMod && o.mVal < mMod);
-			mVal = (mVal * o.mVal) % mMod;
+			*this = barrettMul(*this, o);
 			return *this;
 		};
 
 
-		Fp operator/(const Fp& o) const
+		constexpr Fp operator/(const Fp& o) const
 		{
 			assert(mVal < mMod && o.mVal < mMod);
 			return *this * o.inverse();
 		}
 
-		Fp& operator/=(const Fp& o)
+		constexpr Fp& operator/=(const Fp& o)
 		{
 			assert(mVal < mMod && o.mVal < mMod);
 			*this = *this * o.inverse();
@@ -112,24 +129,24 @@ namespace osuCrypto
 
 
 		// comparison operators
-		bool operator<(const Fp& o) const
+		constexpr bool operator<(const Fp& o) const
 		{
 			assert(mVal < mMod && o.mVal < mMod);
 			return mVal < o.mVal;
 		}
-		bool operator>=(const Fp& o) const
+		constexpr bool operator>=(const Fp& o) const
 		{
 			assert(mVal < mMod && o.mVal < mMod);
 			return mVal >= o.mVal;
 		}
 
-		u64 integer() const
+		constexpr u64 integer() const
 		{
 			assert(mVal < mMod);
 			return mVal;
 		}
 
-		Fp pow(i64 v) const
+		constexpr Fp pow(i64 v) const
 		{
 			assert(mVal < mMod);
 			if (v < 0)
@@ -157,24 +174,26 @@ namespace osuCrypto
 		}
 
 
-		bool operator==(const Fp& o) const
+		constexpr bool operator==(const Fp& o) const
 		{
 			return mVal == o.mVal;
 		}
 
-		bool operator!=(const Fp& o) const
+		constexpr bool operator!=(const Fp& o) const
 		{
 			return !(*this == o);
 		}
 
-		Fp inverse() const
+		constexpr Fp inverse() const
 		{
 			// fermat's little theorem
-			return pow(mMod - 2);
+			auto p = pow(mMod - 2);
+			assert((*this * p).mVal == 1);
+			return p;
 		}
 
 
-		static Fp barrettMul(const Fp& a, const Fp& b)
+		constexpr static Fp barrettMul(const Fp& a, const Fp& b)
 		{
 			// Barrett reduction
 			// https://en.wikipedia.org/wiki/Barrett_reduction
@@ -216,8 +235,16 @@ namespace osuCrypto
 			 */
 			if (r >= mMod) r -= mMod;
 			if (r >= mMod) r -= mMod;
+
+			assert(r == (TT(a.mVal) * TT(b.mVal)) % TT(mMod));
+
+
 			return Fp(static_cast<T>(r));
 		}
+
+
+		static Fp zero() { return Fp{ 0 }; }
+		static Fp one() { return Fp{ 1 }; }
 
 	};
 
@@ -232,32 +259,61 @@ namespace osuCrypto
 	};
 	inline std::vector<Factor> uniqueFactor(u64 x)
 	{
-		std::vector<Factor> r;
-		//r.push_back(1);
+		//std::vector<Factor> r;
+		////r.push_back(1);
 
-		auto X = x;
-		for (u64 i = 2; i <= x / 2; ++i)
+		//auto X = x;
+		//for (u64 i = 2; i <= x / 2; ++i)
+		//{
+		//	if (X % i == 0)
+		//	{
+		//		//r.push_back(i);
+		//		//u64 f = i;
+		//		u64 e = 1;
+		//		X /= i;
+		//		while (X % i == 0)
+		//		{
+		//			X /= i;
+		//			++e;
+		//		}
+		//		r.push_back({ i, e });
+		//	}
+		//}
+		//return r;
+
+		std::vector<Factor> r;
+		u64 X = x;
+		if (X < 2) return r;
+
+		// Factor out powers of 2
+		if ((X & 1) == 0)
+		{
+			u64 e = 0;
+			do { X >>= 1; ++e; } while ((X & 1) == 0);
+			r.emplace_back(2, e);
+		}
+
+		// Trial divide by odd numbers up to sqrt(X)
+		for (u64 i = 3; i <= X / i; i += 2)
 		{
 			if (X % i == 0)
 			{
-				//r.push_back(i);
-				//u64 f = i;
-				u64 e = 1;
-				X /= i;
-				while (X % i == 0)
-				{
-					X /= i;
-					++e;
-				}
-				r.push_back({ i, e });
+				u64 e = 0;
+				do { X /= i; ++e; } while (X % i == 0);
+				r.emplace_back(i, e);
 			}
 		}
+
+		// Any remaining factor is prime
+		if (X > 1)
+			r.emplace_back(X, 1);
+
 		return r;
 	}
 
 	template<typename F>
 	F findGenerator(PRNG& prng) {
-		auto p = F::mMod;
+		auto p = F::order();
 
 		// we are interested in the range [2, p-2]
 		auto dist = [&]() {
@@ -346,6 +402,8 @@ namespace osuCrypto
 		return primRootOfUnity<F>(n, G);
 	}
 
+	
+
 	// returns true if u is an n-root of unity.
 	template<typename F>
 	inline bool isRootOfUnity(u64 n, const F& u)
@@ -357,6 +415,12 @@ namespace osuCrypto
 			return false;
 		return true;
 	}
+
+	template<typename F>
+	struct ScalerOf
+	{
+		using type = F;
+	};
 
 
 
@@ -455,4 +519,54 @@ namespace osuCrypto
 	using F7681 = Fp<7681, u16, u32>;
 	using F12289 = Fp<12289, u16, u32>;
 
+	// 15 * 2^27 + 1 ~= 2^31
+	using Fp31 = Fp<2013265921, u32, u64>;
+
+
+	// Table of primitive 2^k-th roots of unity for k=0..32, suitable for NTTs over F_p.
+	// Entry i is a primitive 2^i-th root. Consumers should ensure sizes are powers of two.
+	static constexpr std::array<Fp31, 28> Fp31RootsOfUnity =
+	{
+		Fp31{1ull},
+		Fp31{2013265920ull},
+		Fp31{284861408ull},
+		Fp31{1801542727ull},
+		Fp31{567209306ull},
+		Fp31{740045640ull},
+		Fp31{918899846ull},
+		Fp31{1881002012ull},
+		Fp31{1453957774ull},
+		Fp31{65325759ull},
+		Fp31{1538055801ull},
+		Fp31{515192888ull},
+		Fp31{483885487ull},
+		Fp31{1855872842ull},
+		Fp31{1696032120ull},
+		Fp31{411186671ull},
+		Fp31{1141908750ull},
+		Fp31{1428255116ull},
+		Fp31{1590358139ull},
+		Fp31{483847342ull},
+		Fp31{581370269ull},
+		Fp31{457897203ull},
+		Fp31{665793983ull},
+		Fp31{1444357277ull},
+		Fp31{1979936065ull},
+		Fp31{1718736189ull},
+		Fp31{548902408ull},
+		Fp31{2005737441ull}
+	};
+
+
+	// Goldilocks specialization:
+	// - n must be a power of two (n = 2^k).
+	// - Returns the precomputed primitive n-th root from the table above.
+	template<>
+	inline Fp31 primRootOfUnity<Fp31>(u64 n)
+	{
+		auto ln = log2ceil(n);
+		if (1ull << ln != n)
+			throw RTE_LOC;
+		return Fp31RootsOfUnity[ln];
+	}
 }
