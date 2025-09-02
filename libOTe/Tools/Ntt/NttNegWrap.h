@@ -262,6 +262,19 @@ namespace osuCrypto
 	}while(0)
 
 
+	// Generic butterfly: y0 = x0 + x1*w, y1 = x0 - x1*w
+	template<typename F, typename SF>
+	OC_FORCEINLINE void butterfly(F& __restrict x0, F& __restrict x1, const SF& w)
+	{
+		auto t = x1 * w;
+		auto y0 = x0 + t;
+		auto y1 = x0 - t;
+		x0 = y0;
+		x1 = y1;
+	}
+
+
+
 	// Iterative version of the negacyclic Cooley-Tukey NTT.
 	// - a are the coeffs,
 	// - w are the precomputed twiddles for each stage (see getNegWrapRoots)
@@ -309,17 +322,21 @@ namespace osuCrypto
 					throw RTE_LOC;
 #endif // !NDEBUG
 
+				F* __restrict aPtr0 = aPtr + base;
+				F* __restrict aPtr1 = aPtr + base + stride;
 
 				for (u64 i = 0; i < stride; ++i)
 				{
-					F a0 = aPtr[base];
-					F a1 = aPtr[base + stride];
+					//F a0 = *aPtr0;
+					//F a1 = *aPtr1;
 
-					auto b = a1 * wi;
-					aPtr[base] = a0 + b;
-					aPtr[base + stride] = a0 - b;
+					//auto b = a1 * wi;
+					//*aPtr0 = a0 + b;
+					//*aPtr1 = a0 - b;
+					butterfly(*aPtr0, *aPtr1, wi);
 
-					++base;
+					++aPtr0;
+					++aPtr1;
 
 					//std::cout << "(" << idx0 << "," << idx1 << ", " << index << ", " <<a0 <<", " <<a1  <<") ";
 					//std::cout << std::format("{0}({1}, {2}, {3} = {4} * (2 * {5} + 1), {6} {7} )\n",
@@ -329,7 +346,7 @@ namespace osuCrypto
 					//	a0.integer(), a1.integer());
 				}
 
-				base += stride;
+				base += 2 * stride;
 			}
 			//std::cout << std::endl;
 

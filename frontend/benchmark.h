@@ -1379,13 +1379,16 @@ namespace osuCrypto
 
 
 		timer.setTimePoint("begin");
-		for (u64 tt = 0; tt < t; ++tt)
+		if (cmd.isSet("batch") == false)
 		{
-			nttNegWrapCt<F, F>(a, nw);
-			timer.setTimePoint("done");
+			for (u64 tt = 0; tt < t; ++tt)
+			{
+				nttNegWrapCt<F, F>(a, nw);
+				timer.setTimePoint("done");
+			}
 		}
 
-		AlignedUnVector<FVec<F,2>> aa(n);
+		AlignedUnVector<FVec<F, 2>> aa(n);
 		for (u64 tt = 0; tt < t; ++tt)
 		{
 			nttNegWrapCt<FVec<F, 2>, F>(aa, nw);
@@ -1585,7 +1588,7 @@ namespace osuCrypto
 
 		if (!quiet)
 		{
-			std::cout << field<< " Time taken: \n" << timer << std::endl;
+			std::cout << field << " Time taken: \n" << timer << std::endl;
 
 			std::cout << "setup  " << first[0] / trials << " " << first[1] / trials << std::endl;
 			std::cout << "expand " << second[0] / exp / trials << " " << second[1] / exp / trials << std::endl;
@@ -1597,7 +1600,7 @@ namespace osuCrypto
 
 
 	void RingLpnBench(const CLP& cmd)
-	try {
+		try {
 
 		bool gold = cmd.isSet("gold");
 		bool goldx = cmd.isSet("goldx");
@@ -1613,16 +1616,16 @@ namespace osuCrypto
 		f31x |= none;
 
 
-		if(gold)
+		if (gold)
 			RingLpnBenchImpl<Goldilocks>(cmd, "goldilocks");
-		if(goldx)
-			RingLpnBenchImpl<FVec<Goldilocks,2>>(cmd, "goldilocks x2");
+		if (goldx)
+			RingLpnBenchImpl<FVec<Goldilocks, 2>>(cmd, "goldilocks x2");
 
 		std::cout << std::endl;
-		if(f31)
+		if (f31)
 			RingLpnBenchImpl<Fp31>(cmd, "Fp31");
-		if(f31x)
-			RingLpnBenchImpl<FVec<Fp31,4>>(cmd, "Fp31 x4");
+		if (f31x)
+			RingLpnBenchImpl<FVec<Fp31, 4>>(cmd, "Fp31 x4");
 
 	}
 	catch (const std::exception& e)
