@@ -465,7 +465,7 @@ namespace osuCrypto
 		mul128(in1.mVal, in2.mVal, x0, x_hi);
 		redPzt22(result, x0, x_hi);
 
-#if !defined(NDEBUG) 
+#if defined(GOLDILOCKS_DEBUG) 
 		{
 			auto prod = (u128(in1.mVal) * u128(in2.mVal)) % u128(mModulus);
 			auto vv = Goldilocks{ result.mVal }.canonical();

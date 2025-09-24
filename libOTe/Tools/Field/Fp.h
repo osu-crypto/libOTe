@@ -521,7 +521,7 @@ namespace osuCrypto
 
 	// 15 * 2^27 + 1 ~= 2^31
 	using Fp31 = Fp<2013265921, u32, u64>;
-
+	static_assert(sizeof(Fp31) == 4, "expecting 32 bits");
 
 	// Table of primitive 2^k-th roots of unity for k=0..32, suitable for NTTs over F_p.
 	// Entry i is a primitive 2^i-th root. Consumers should ensure sizes are powers of two.

@@ -144,8 +144,8 @@ namespace osuCrypto
 
 		enum class DpfType
 		{
-			RevCuckooDmpf, // the default DPF type
-			SumDmpf
+			RevCuckooDmpf = 0, // the default DPF type
+			SumDmpf = 1
 		};
 
 		// Intializes the protocol to generate n F OLEs. Most efficient when n

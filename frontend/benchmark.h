@@ -27,6 +27,7 @@
 #include "libOTe/Tools/Field/FVec.h"
 #include "libOTe/Dpf/RevCuckoo/WaksmanPermute.h"
 #include "libOTe/Tools/Field/Goldilocks.h"
+#include <format>
 
 namespace osuCrypto
 {
@@ -1095,6 +1096,48 @@ namespace osuCrypto
 		u64 cuckooSecParam = cmd.getOr("cuckooSecParam", 2); // Cuckoo security parameter
 		u64 iterations = cmd.getOr("iters", 3); // Number of different value sets to test
 		bool print = cmd.isSet("print"); // Print flag
+		bool quiet = cmd.isSet("quiet");
+
+		// Helper function to format bytes
+		auto formatBytes = [](u64 bytes) {
+			if (bytes < 1024)
+				return std::format("{} B", bytes);
+			else if (bytes < 1024 * 1024)
+				return std::format("{:.2f} KB", bytes / 1024.0);
+			else if (bytes < 1024 * 1024 * 1024)
+				return std::format("{:.2f} MB", bytes / (1024.0 * 1024.0));
+			else
+				return std::format("{:.2f} GB", bytes / (1024.0 * 1024.0 * 1024.0));
+			};
+
+		// Helper function to format throughput
+		auto formatThroughput = [](u64 operations, double timeMs) {
+			if (timeMs <= 0) return std::string("N/A");
+			double ops_per_sec = (operations * 1000.0) / timeMs;
+			if (ops_per_sec < 1000)
+				return std::format("{:.2f} ops/s", ops_per_sec);
+			else if (ops_per_sec < 1000000)
+				return std::format("{:.2f} K ops/s", ops_per_sec / 1000.0);
+			else if (ops_per_sec < 1000000000)
+				return std::format("{:.2f} M ops/s", ops_per_sec / 1000000.0);
+			else
+				return std::format("{:.2f} G ops/s", ops_per_sec / 1000000000.0);
+			};
+
+		if (!quiet) {
+			std::cout << "=== RevCuckoo DMPF Benchmark ===" << std::endl;
+			std::cout << "Field type: " << (std::is_same_v<F, block> ? "block (GF128)" : "u64 (integer)") << std::endl;
+			std::cout << "Parameters:" << std::endl;
+			std::cout << "  Domain size: " << domain << " (2^" << log2ceil(domain) << ")" << std::endl;
+			std::cout << "  Number of points per set: " << numPoints << std::endl;
+			std::cout << "  Number of sets: " << numSets << std::endl;
+			std::cout << "  Total points: " << (numPoints * numSets) << std::endl;
+			std::cout << "  Number of partitions: " << numPartitions << std::endl;
+			std::cout << "  Linear security parameter: " << linearSecParam << std::endl;
+			std::cout << "  Cuckoo security parameter: " << cuckooSecParam << std::endl;
+			std::cout << "  Expansion iterations: " << iterations << std::endl;
+			std::cout << std::endl;
+		}
 
 		Timer timer[2];
 
@@ -1108,8 +1151,6 @@ namespace osuCrypto
 			points0(i) = (prng.get<u64>() % domain) ^ points1(i);
 			actualPoints(i) = points0(i) ^ points1(i);
 		}
-
-		//auto ctx = CoeffCtx{};
 
 		// Initialize RevCuckooDmpf instances
 		std::array<RevCuckooDmpf<F>, 2> dpf;
@@ -1133,6 +1174,15 @@ namespace osuCrypto
 			throw RTE_LOC;
 		if (baseCount1.mSendCount != baseCount0.mRecvCount)
 			throw RTE_LOC;
+
+		if (!quiet) {
+			std::cout << "Base OT requirements:" << std::endl;
+			std::cout << "  Party 0 - Send: " << baseCount0.mSendCount << ", Recv: " << baseCount0.mRecvCount << std::endl;
+			std::cout << "  Party 1 - Send: " << baseCount1.mSendCount << ", Recv: " << baseCount1.mRecvCount << std::endl;
+			std::cout << "  Total base OTs: " << (baseCount0.mSendCount + baseCount0.mRecvCount) << std::endl;
+			std::cout << std::endl;
+		}
+
 		std::array<std::vector<block>, 2> baseRecv;
 		std::array<std::vector<std::array<block, 2>>, 2> baseSend;
 		std::array<BitVector, 2> baseChoice;
@@ -1168,12 +1218,42 @@ namespace osuCrypto
 		threadPools[0].create_thread();
 		threadPools[1].create_thread();
 
+		// Track communication for point setup phase
+		auto setupStartBytes0 = sock[0].bytesReceived();
+		auto setupStartBytes1 = sock[1].bytesReceived();
+		auto setupStartTime = std::chrono::high_resolution_clock::now();
+
 		auto r = macoro::sync_wait(macoro::when_all_ready(
 			dpf[0].setPoints(points0, prng, sock[0]) | macoro::start_on(threadPools[0]),
 			dpf[1].setPoints(points1, prng, sock[1]) | macoro::start_on(threadPools[1])
 		));
 		std::get<0>(r).result();
 		std::get<1>(r).result();
+
+		auto setupEndTime = std::chrono::high_resolution_clock::now();
+		auto setupEndBytes0 = sock[0].bytesReceived();
+		auto setupEndBytes1 = sock[1].bytesReceived();
+
+		auto setupTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(setupEndTime - setupStartTime).count();
+		auto setupBytes0 = setupEndBytes0 - setupStartBytes0;
+		auto setupBytes1 = setupEndBytes1 - setupStartBytes1;
+		auto totalSetupBytes = setupBytes0 + setupBytes1;
+
+		if (!quiet) {
+			std::cout << "Point Setup Phase Results:" << std::endl;
+			std::cout << "  Time: " << setupTimeMs << " ms" << std::endl;
+			std::cout << "  Communication - Party 0: " << formatBytes(setupBytes0) << std::endl;
+			std::cout << "  Communication - Party 1: " << formatBytes(setupBytes1) << std::endl;
+			std::cout << "  Total communication: " << formatBytes(totalSetupBytes) << std::endl;
+			std::cout << "  Setup throughput: " << formatThroughput(numPoints * numSets, setupTimeMs) << std::endl;
+			std::cout << "  Bytes per point: " << (totalSetupBytes / (numPoints * numSets)) << " B" << std::endl;
+			std::cout << std::endl;
+		}
+
+		// Track expansion phase metrics
+		std::vector<double> expansionTimes;
+		std::vector<u64> expansionBytes0, expansionBytes1;
+		u64 totalExpansionOps = 0;
 
 		// Phase 2: Multiple value expansions (called multiple times)
 		for (u64 iteration = 0; iteration < iterations; ++iteration)
@@ -1197,6 +1277,11 @@ namespace osuCrypto
 			output[0].resize(numSets, domain);
 			output[1].resize(numSets, domain);
 
+			// Track communication for this expansion
+			auto expStartBytes0 = sock[0].bytesReceived();
+			auto expStartBytes1 = sock[1].bytesReceived();
+			auto expStartTime = std::chrono::high_resolution_clock::now();
+
 			// Expand values using the cached point setup
 			auto r = macoro::sync_wait(macoro::when_all_ready(
 				dpf[0].expand(values0, prng, sock[0], [&](auto j, auto i, auto v) { output[0](j, i) = v; }) | macoro::start_on(threadPools[0]),
@@ -1204,12 +1289,92 @@ namespace osuCrypto
 			));
 			std::get<0>(r).result();
 			std::get<1>(r).result();
+
+			auto expEndTime = std::chrono::high_resolution_clock::now();
+			auto expEndBytes0 = sock[0].bytesReceived();
+			auto expEndBytes1 = sock[1].bytesReceived();
+
+			auto expTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(expEndTime - expStartTime).count();
+			auto expBytes0 = expEndBytes0 - expStartBytes0;
+			auto expBytes1 = expEndBytes1 - expStartBytes1;
+
+			expansionTimes.push_back(expTimeMs);
+			expansionBytes0.push_back(expBytes0);
+			expansionBytes1.push_back(expBytes1);
+			totalExpansionOps += numSets * domain; // Each expansion produces numSets x domain outputs
+
+			if (!quiet && print) {
+				std::cout << "  Expansion " << iteration << " time: " << expTimeMs << " ms" << std::endl;
+				std::cout << "  Communication: " << formatBytes(expBytes0 + expBytes1) << std::endl;
+			}
 		}
 
+		// Calculate expansion statistics
+		double avgExpansionTime = 0;
+		u64 totalExpansionBytes = 0;
+		for (size_t i = 0; i < expansionTimes.size(); ++i) {
+			avgExpansionTime += expansionTimes[i];
+			totalExpansionBytes += expansionBytes0[i] + expansionBytes1[i];
+		}
+		avgExpansionTime /= iterations;
+		double avgExpansionBytes = totalExpansionBytes / double(iterations);
+
+		// Calculate memory usage estimates
+		u64 pointsMemory = numPoints * numSets * 8; // 8 bytes per u64 point
+		u64 valuesMemory = numPoints * numSets * sizeof(F);
+		u64 outputMemory = numSets * domain * sizeof(F);
+		u64 totalMemory = pointsMemory + valuesMemory + outputMemory * 2; // times 2 for both parties
+
+		if (!quiet) {
+			std::cout << "Value Expansion Phase Results:" << std::endl;
+			std::cout << "  Total iterations: " << iterations << std::endl;
+			std::cout << "  Average expansion time: " << std::format("{:.2f}", avgExpansionTime) << " ms" << std::endl;
+			std::cout << "  Average expansion communication: " << formatBytes(u64(avgExpansionBytes)) << std::endl;
+			std::cout << "  Total expansion operations: " << totalExpansionOps << std::endl;
+			std::cout << "  Expansion throughput: " << formatThroughput(totalExpansionOps, avgExpansionTime * iterations) << std::endl;
+			std::cout << "  Operations per ms: " << std::format("{:.2f}", totalExpansionOps / (avgExpansionTime * iterations)) << std::endl;
+			std::cout << std::endl;
+
+			std::cout << "Overall Performance Summary:" << std::endl;
+			std::cout << "  Total time (setup + expansions): " << std::format("{:.2f}", setupTimeMs + avgExpansionTime * iterations) << " ms" << std::endl;
+			std::cout << "  Total communication: " << formatBytes(totalSetupBytes + totalExpansionBytes) << std::endl;
+			std::cout << "  Communication breakdown:" << std::endl;
+			std::cout << "    Setup: " << formatBytes(totalSetupBytes) << std::format(" ({:.1f}%)", 100.0 * totalSetupBytes / (totalSetupBytes + totalExpansionBytes)) << std::endl;
+			std::cout << "    Expansions: " << formatBytes(totalExpansionBytes) << std::format(" ({:.1f}%)", 100.0 * totalExpansionBytes / (totalSetupBytes + totalExpansionBytes)) << std::endl;
+			std::cout << std::endl;
+
+			std::cout << "Memory Usage Estimates:" << std::endl;
+			std::cout << "  Input points: " << formatBytes(pointsMemory) << std::endl;
+			std::cout << "  Input values: " << formatBytes(valuesMemory) << std::endl;
+			std::cout << "  Output matrices (per party): " << formatBytes(outputMemory) << std::endl;
+			std::cout << "  Total estimated memory: " << formatBytes(totalMemory) << std::endl;
+			std::cout << std::endl;
+
+			std::cout << "Performance Metrics:" << std::endl;
+			std::cout << "  Points processed per second: " << formatThroughput(numPoints * numSets, setupTimeMs) << std::endl;
+			std::cout << "  Domain evaluations per second: " << formatThroughput(totalExpansionOps, avgExpansionTime * iterations) << std::endl;
+			std::cout << "  Amortized bytes per point: " << std::format("{:.2f}", totalSetupBytes / double(numPoints * numSets)) << " B" << std::endl;
+			std::cout << "  Amortized bytes per evaluation: " << std::format("{:.6f}", totalExpansionBytes / double(totalExpansionOps)) << " B" << std::endl;
+			std::cout << "  Compression ratio: " << std::format("{:.2f}x", (double(outputMemory * 2) / avgExpansionBytes)) << std::endl;
+			std::cout << std::endl;
+		}
 
 		for (u64 i = 0; i < 2; ++i)
 		{
-			std::cout << "Dpf " << i << " time: \n" << timer[i] << std::endl;
+			if (!quiet) {
+				std::cout << "Party " << i << " detailed timing:" << std::endl;
+			}
+			std::cout << timer[i] << std::endl;
+		}
+
+		// Print final summary line for easy parsing
+		if (!quiet) {
+			std::cout << "SUMMARY: RevCuckoo DMPF - Domain: 2^" << log2ceil(domain)
+				<< ", Points: " << (numPoints * numSets)
+				<< ", Time: " << std::format("{:.2f}", setupTimeMs + avgExpansionTime * iterations) << "ms"
+				<< ", Communication: " << formatBytes(totalSetupBytes + totalExpansionBytes)
+				<< ", Throughput: " << formatThroughput(totalExpansionOps, avgExpansionTime * iterations)
+				<< std::endl;
 		}
 	}
 
@@ -1480,7 +1645,7 @@ namespace osuCrypto
 #endif
 
 	template<typename F>
-	void RingLpnBenchImpl(const CLP& cmd, std::string field)
+	void RingLpnBenchImpl(const CLP& cmd, std::string field, int extension)
 	{
 
 #ifdef ENABLE_RINGLPN
@@ -1489,7 +1654,8 @@ namespace osuCrypto
 		u64 n = 1ull << logn;
 		bool quiet = cmd.isSet("quiet");
 		auto mode = RingLpnTriple<F>::Mode::Ole;
-		auto dpf = RingLpnTriple<F>::DpfType::RevCuckooDmpf;
+		auto dpf = (typename RingLpnTriple<F>::DpfType)
+			cmd.getOr("dmpf", (int)RingLpnTriple<F>::DpfType::RevCuckooDmpf);
 		auto tensor = RingLpnTriple<F>::TensorBaseCorType::Precomputed;
 		u64 trials = cmd.getOr("trials", 1);
 		u64 exp = cmd.getOr("exp", 10);
@@ -1511,6 +1677,8 @@ namespace osuCrypto
 		auto work1 = threadPools[1].make_work();
 		threadPools[0].create_thread();
 		threadPools[1].create_thread();
+		auto start = timer.setTimePoint("start");
+		std::vector<u64> times;
 
 		std::array<u64, 2> first{}, second{};
 		for (u64 tt = 0; tt < trials; ++tt)
@@ -1531,29 +1699,39 @@ namespace osuCrypto
 
 			for (u64 ee = 0; ee < exp; ++ee)
 			{
+				auto beginTime = timer.setTimePoint("begin");
+
 				if (ee)
 				{
-					auto count0 = oles[0].baseCorCount();
-					//auto count1 = oles[1].baseCorCount();
-					auto coeffs = count0.mCoeffCount;
-					std::vector<F> coeff0(coeffs), coeff1(coeffs);
-					for (auto& c : coeff0)
-						c = prng0.get();
-					for (auto& c : coeff1)
-						c = prng1.get();
-					std::vector<F> tensor0(coeffs * coeffs), tensor1(coeffs * coeffs);
-					for (u64 i = 0; i < coeffs; ++i)
+					if (dpf == RingLpnTriple<F>::DpfType::RevCuckooDmpf)
 					{
-						for (u64 j = 0; j < coeffs; ++j)
-						{
-							auto idx = i * coeffs + j;
-							tensor0[idx] = prng0.get();
-							tensor1[idx] = coeff0[i] * coeff1[j] - tensor0[idx];
-						}
-					}
 
-					oles[0].setBaseCors({}, {}, {}, {}, {}, coeff0, tensor0);
-					oles[1].setBaseCors({}, {}, {}, {}, {}, coeff1, tensor1);
+						auto count0 = oles[0].baseCorCount();
+						//auto count1 = oles[1].baseCorCount();
+						auto coeffs = count0.mCoeffCount;
+						std::vector<F> coeff0(coeffs), coeff1(coeffs);
+						for (auto& c : coeff0)
+							c = prng0.get();
+						for (auto& c : coeff1)
+							c = prng1.get();
+						std::vector<F> tensor0(coeffs * coeffs), tensor1(coeffs * coeffs);
+						for (u64 i = 0; i < coeffs; ++i)
+						{
+							for (u64 j = 0; j < coeffs; ++j)
+							{
+								auto idx = i * coeffs + j;
+								tensor0[idx] = prng0.get();
+								tensor1[idx] = coeff0[i] * coeff1[j] - tensor0[idx];
+							}
+						}
+
+						oles[0].setBaseCors({}, {}, {}, {}, {}, coeff0, tensor0);
+						oles[1].setBaseCors({}, {}, {}, {}, {}, coeff1, tensor1);
+					}
+					else
+					{
+						ringSetBase(oles);
+					}
 					timer.setTimePoint("setBase**");
 				}
 
@@ -1566,12 +1744,13 @@ namespace osuCrypto
 				std::get<0>(r).result();
 				std::get<1>(r).result();
 
-				timer.setTimePoint("done______");
+				auto endTime = timer.setTimePoint("done______");
+				times.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(endTime - beginTime).count());
 
 				auto after0 = sock[0].bytesReceived();
 				auto after1 = sock[1].bytesReceived();
 
-				if (ee)
+				if (ee == 0)
 				{
 					first[0] += after0;
 					first[1] += after1;
@@ -1585,13 +1764,41 @@ namespace osuCrypto
 
 			}
 		}
+		auto finish = timer.setTimePoint("finish");
+
+		// median time
+		std::sort(times.begin(), times.end());
+		auto med = times[times.size() / 2];
+		u64 medTps = double(n) * extension / (med / 1000.0);
+
 
 		if (!quiet)
 		{
+			// sec
+			auto totalTime = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start).count() / 1000.0;
+			auto tps = double(n) * extension * exp * trials / totalTime;
 			std::cout << field << " Time taken: \n" << timer << std::endl;
 
-			std::cout << "setup  " << first[0] / trials << " " << first[1] / trials << std::endl;
-			std::cout << "expand " << second[0] / exp / trials << " " << second[1] / exp / trials << std::endl;
+			// compute the setup cost as the first expansion minus the average of the rest
+			// this is not exact since it includes some of the expansion cost, but it's close enough.
+			auto setup = times.size() > 1 ?
+				times[0] - (std::accumulate(times.begin() + 1, times.end(), 0ull) / (times.size() - 1)) :
+				times[0];
+
+			std::locale comma_locale(std::locale(), new std::numpunct<char>);
+			std::cout.imbue(std::locale("en_US.UTF-8")); // use U.S. formatting
+
+			std::cout << "RingLpnTriple<" << field << "> n=" << n << ", log2=" << logn
+				<< " exp=" << exp
+				<< " trials=" << trials
+				<< " total/sec = " << u64(tps)
+				<< " median time = " << medTps << " op/s "
+				<< " total time = " << (u64)totalTime << " sec"
+				<< std::endl;
+
+			std::cout << "setup  " << first[0] / trials << " bytes, " << first[1] / trials << " bytes " << std::endl;
+			if (exp > 1)
+				std::cout << "expand " << second[0] / (exp - 1) / trials << " bytes, " << second[1] / (exp - 1) / trials << " bytes " << std::endl;
 		}
 #else
 		throw UnitTestSkipped("ENABLE_RINGLPN not defined.");
@@ -1617,15 +1824,15 @@ namespace osuCrypto
 
 
 		if (gold)
-			RingLpnBenchImpl<Goldilocks>(cmd, "goldilocks");
+			RingLpnBenchImpl<Goldilocks>(cmd, "goldilocks", 1);
 		if (goldx)
-			RingLpnBenchImpl<FVec<Goldilocks, 2>>(cmd, "goldilocks x2");
+			RingLpnBenchImpl<FVec<Goldilocks, 2>>(cmd, "goldilocks x2", 2);
 
 		std::cout << std::endl;
 		if (f31)
-			RingLpnBenchImpl<Fp31>(cmd, "Fp31");
+			RingLpnBenchImpl<Fp31>(cmd, "Fp31", 1);
 		if (f31x)
-			RingLpnBenchImpl<FVec<Fp31, 4>>(cmd, "Fp31 x4");
+			RingLpnBenchImpl<FVec<Fp31, 4>>(cmd, "Fp31 x4", 4);
 
 	}
 	catch (const std::exception& e)
