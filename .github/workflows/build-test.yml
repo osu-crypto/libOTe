@@ -33,7 +33,7 @@ jobs:
 
       - name: unit tests
         run: |
-             ./out/build/linux/frontend/frontend_libOTe -u 13
+             ./out/build/linux/frontend/frontend_libOTe -u 10..13
        
 
       - name: find source tree
