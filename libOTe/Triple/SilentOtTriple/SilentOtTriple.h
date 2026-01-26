@@ -17,10 +17,12 @@ namespace osuCrypto
 
         macoro::variant<SilentOtExtSender, SilentOtExtReceiver> mSendRecv;
 
+		BitVector mChoice;
+
 		// the number of OTs/OLEs. Triples will be half this amount.
 		u64 mN;
 
-		MultType mMultType = MultType::ExConv7x24;
+		MultType mLpnMultType = DefaultMultType;
 
 		enum class Type
 		{
@@ -35,17 +37,23 @@ namespace osuCrypto
 
 		bool isInitialized() const { return mN > 0; }
 
-		struct BaseOtCount
+		struct BaseCount
 		{
 			// the number of base OTs as sender.
 			u64 mSendCount = 0;
 
 			// choice bits to be used for the receive OTs.
 			BitVector mRecvChoice;
+
+			//// required number of binary subfield voles
+			//u64 mSendVoleCount = 0;
+
+			//// required number of binary subfield voles
+			//u64 mRecvVoleCount = 0;
 		};
 
 		// returns the number of base OTs required. 
-		BaseOtCount baseOtCount(PRNG& prng) ;
+		BaseCount baseCount(PRNG& prng) ;
 
 		// sets the base OTs that will be used.
 		void setBaseOts(

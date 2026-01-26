@@ -39,6 +39,89 @@ namespace osuCrypto
         Callback
     };
 
+    template<
+        typename F,
+        typename CoeffCtx = DefaultCoeffCtx<F>
+    >
+    struct PprfSender : public TimerAdapter 
+    {
+		virtual ~PprfSender() = default;
+
+        using VecF = typename CoeffCtx::template Vec<F>;
+
+        virtual  void configure(u64 domainSize, u64 pointCount) = 0;
+
+        // the number of base OTs that should be set.
+        virtual u64 baseOtCount() const = 0;
+
+        // returns true if the base OTs are currently set.
+        virtual bool hasBaseOts() const = 0;
+
+
+        virtual void setBase(span<const std::array<block, 2>> baseMessages) = 0;
+
+        virtual task<> expand(
+            Socket& chl,
+            const VecF& value,
+            block seed,
+            VecF& output,
+            PprfOutputFormat oFormat,
+            bool programPuncturedPoint,
+            u64 numThreads,
+            CoeffCtx ctx) = 0;
+
+        virtual void clear() = 0;
+    };
+
+
+    template<
+        typename F,
+        typename CoeffCtx = DefaultCoeffCtx<F>
+    >
+    struct PprfReceiver: public TimerAdapter
+    {
+        using VecF = typename CoeffCtx::template Vec<F>;
+
+		virtual ~PprfReceiver() = default;
+
+        virtual void configure(u64 domainSize, u64 pointCount) = 0;
+
+
+        // this function sample mPntCount integers in the range
+        // [0,domain) and returns these as the choice bits.
+        virtual BitVector sampleChoiceBits(PRNG& prng) = 0;
+
+        // choices is in the same format as the output from sampleChoiceBits.
+        virtual void setChoiceBits(const BitVector& choices) = 0;
+
+
+        // the number of base OTs that should be set.
+        virtual  u64 baseOtCount() const = 0; 
+
+        // returns true if the base OTs are currently set.
+        virtual  bool hasBaseOts() const = 0;
+
+
+        virtual void setBase(span<const block> baseMessages) = 0;
+
+        virtual std::vector<u64> getPoints(PprfOutputFormat format) const = 0;
+
+        virtual void getPoints(span<u64> points, PprfOutputFormat format) const = 0;
+
+        // programPuncturedPoint says whether the sender is trying to program the
+        // active child to be its correct value XOR delta. If it is not, the
+        // active child will just take a random value.
+        virtual task<> expand(
+            Socket& chl,
+            VecF& output,
+            PprfOutputFormat oFormat,
+            bool programPuncturedPoint,
+            u64 numThreads,
+            CoeffCtx ctx) = 0;
+
+        virtual void clear() = 0;
+
+    };
 
 
     namespace pprf

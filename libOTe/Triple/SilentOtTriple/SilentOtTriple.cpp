@@ -484,16 +484,20 @@ namespace osuCrypto
 	}
 
 
-	SilentOtTriple::BaseOtCount SilentOtTriple::baseOtCount(PRNG& prng)
+	SilentOtTriple::BaseCount SilentOtTriple::baseCount(PRNG& prng)
 	{
-		SilentOtTriple::BaseOtCount r;
+		SilentOtTriple::BaseCount r;
 		if (mSendRecv.index())
 		{
 			r.mRecvChoice = std::get<1>(mSendRecv).sampleBaseChoiceBits(prng);
+			auto count = std::get<1>(mSendRecv).baseCount();
+			while(count.mBaseOtCount < r.mRecvChoice.size())
+				r.mRecvChoice.pushBack(prng.getBit());
+			mChoice = r.mRecvChoice;
 		}
 		else
 		{
-			r.mSendCount = std::get<0>(mSendRecv).silentBaseOtCount();
+			r.mSendCount = std::get<0>(mSendRecv).baseCount().mBaseOtCount;
 		}
 
 		return r;
@@ -503,11 +507,11 @@ namespace osuCrypto
 	{
 		if (mSendRecv.index())
 		{
-			std::get<1>(mSendRecv).setSilentBaseOts(recvBaseOts);
+			std::get<1>(mSendRecv).setBaseCors(recvBaseOts, mChoice, {}, {});
 		}
 		else
 		{
-			std::get<0>(mSendRecv).setSilentBaseOts(baseSendOts);
+			std::get<0>(mSendRecv).setBaseCors(baseSendOts, {}, {});
 		}
 	}
 
@@ -527,11 +531,12 @@ namespace osuCrypto
 	{
 		if (mSendRecv.index())
 		{
-			return std::get<1>(mSendRecv).genSilentBaseOts(prng, sock, baseType == SilentBaseType::BaseExtend);
+			return std::get<1>(mSendRecv).genBaseCors(prng, sock, baseType == SilentBaseType::BaseExtend);
 		}
 		else
 		{
-			return std::get<0>(mSendRecv).genSilentBaseOts(prng, sock, baseType == SilentBaseType::BaseExtend);
+			std::get<0>(mSendRecv).mDelta = prng.get<block>();
+			return std::get<0>(mSendRecv).genBaseCors(std::get<0>(mSendRecv).mDelta, prng, sock, baseType == SilentBaseType::BaseExtend);
 		}
 	}
 
@@ -543,33 +548,33 @@ namespace osuCrypto
 		if (C.size() != divCeil(mN, 128))
 			throw RTE_LOC;
 
-		bool debug = false;
+		//bool debug = false;
 		if (mSendRecv.index())
 		{
 			//return recvTask(std::get<1>(mSendRecv), mN, prng, sock, X, C);
 			auto& mReceiver = std::get<1>(mSendRecv);
 			if (mTimer)
 				mReceiver.setTimer(*mTimer);
-			mReceiver.mMultType = mMultType;
-			mReceiver.mGen.mEagerSend = false;
+			mReceiver.mLpnMultType = mLpnMultType;
+			//mReceiver.mGen.mEagerSend = false;
 
-			if (debug)
-			{
-				auto baseSend = std::vector<std::array<block, 2>>{};
-				baseSend.resize(mReceiver.silentBaseOtCount());
-				co_await sock.recv(baseSend);
+			//if (debug)
+			//{
+			//	auto baseSend = std::vector<std::array<block, 2>>{};
+			//	baseSend.resize(mReceiver.baseCount().mBaseOtCount);
+			//	co_await sock.recv(baseSend);
 
-				{
-					for (u64 i = 0; i < baseSend.size(); ++i)
-					{
-						if (mReceiver.mGen.mBaseOTs(i) != baseSend[i][mReceiver.mGen.mBaseChoices(i)])
-						{
-							std::cout << "base OTs do not match. " << LOCATION << std::endl;
-							std::terminate();
-						}
-					}
-				}
-			}
+			//	{
+			//		for (u64 i = 0; i < baseSend.size(); ++i)
+			//		{
+			//			if (mReceiver.gen().mBaseOTs(i) != baseSend[i][mReceiver.mGen.mBaseChoices(i)])
+			//			{
+			//				std::cout << "base OTs do not match. " << LOCATION << std::endl;
+			//				std::terminate();
+			//			}
+			//		}
+			//	}
+			//}
 
 			co_await mReceiver.silentReceiveInplace(mReceiver.mRequestNumOts, prng, sock, oc::ChoiceBitPacking::True);
 			compressRecver(mReceiver.mA, C, A, {});
@@ -581,16 +586,16 @@ namespace osuCrypto
 			auto& mSender = std::get<0>(mSendRecv);
 			if (mTimer)
 				mSender.setTimer(*mTimer);
-			if (debug)
-			{
-				co_await sock.send(coproto::copy(mSender.mGen.mBaseOTs));
-			}
-			assert(mSender.mGen.hasBaseOts());
-			mSender.mMultType = mMultType;
-			mSender.mGen.mEagerSend = false;
+			//if (debug)
+			//{
+			//	co_await sock.send(coproto::copy(mSender.mGen.mBaseOTs));
+			//}
+			//assert(mSender.mGen.hasBaseOts());
+			mSender.mLpnMultType = mLpnMultType;
+			//mSender.mGen.mEagerSend = false;
 
-			co_await mSender.silentSendInplace(prng.get(), mSender.mRequestNumOts, prng, sock);
-			compressSender(mSender.mDelta, mSender.mB, C, A, {});
+			co_await mSender.silentSendInplace(mSender.mDelta, mSender.mRequestNumOts, prng, sock);
+			compressSender(*mSender.mDelta, mSender.mB, C, A, {});
 
 			setTimePoint("compressSenderDone");
 		}
@@ -612,8 +617,8 @@ namespace osuCrypto
 			auto& mReceiver = std::get<1>(mSendRecv);
 			if (mTimer)
 				mReceiver.setTimer(*mTimer);
-			mReceiver.mMultType = mMultType;
-			mReceiver.mGen.mEagerSend = false;
+			mReceiver.mLpnMultType = mLpnMultType;
+			//mReceiver.mGen.mEagerSend = false;
 
 			co_await mReceiver.silentReceiveInplace(mReceiver.mRequestNumOts, prng, sock, oc::ChoiceBitPacking::True);
 			compressRecver(mReceiver.mA, C, A, B);
@@ -624,11 +629,11 @@ namespace osuCrypto
 			auto& mSender = std::get<0>(mSendRecv);
 			if (mTimer)
 				mSender.setTimer(*mTimer);
-			mSender.mMultType = mMultType;
-			mSender.mGen.mEagerSend = false;
+			mSender.mLpnMultType = mLpnMultType;
+			//mSender.mGen.mEagerSend = false;
 
 			co_await mSender.silentSendInplace(prng.get(), mSender.mRequestNumOts, prng, sock);
-			compressSender(mSender.mDelta, mSender.mB, C, A, B);
+			compressSender(*mSender.mDelta, mSender.mB, C, A, B);
 			setTimePoint("compressSenderDone");
 		}
 	}

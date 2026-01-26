@@ -68,14 +68,17 @@ namespace osuCrypto {
 			ret = x;
 		}
 
-		// the bit size require to prepresent F
-		// the protocol will perform binary decomposition
-		// of F using this many bits
-		template<typename F>
-		u64 bitSize()const
-		{
-			return sizeof(F) * 8;
-		}
+        // the bit size require to prepresent F
+        // the protocol will perform binary decomposition
+        // of F using this many bits
+        template<typename F>
+        u64 bitSize() const
+        {
+            if constexpr (std::is_same_v<F, bool>)
+                return 1;
+            else
+                return sizeof(F) * 8;
+        }
 
 		// return the binary decomposition of x. This will be used to 
 		// reconstruct x as   
@@ -93,26 +96,32 @@ namespace osuCrypto {
 		OC_FORCEINLINE void fromBlock(F& ret, const block& b) const {
 			static_assert(std::is_trivially_copyable<F>::value, "memcpy is used so must be trivially_copyable.");
 
-			if constexpr (std::is_same<F, block>::value)
-			{
-				// if F is a block, just return the block.
-				ret = b;
-			}
-			else if constexpr (sizeof(F) <= sizeof(block))
-			{
-				// if small, just return the bytes of b
-				memcpy(&ret, &b, sizeof(F));
-			}
-			else
-			{
-				// if large, we need to expand the seed. using fixed key AES in counter mode
-				// with b as the IV.
-				auto constexpr size = (sizeof(F) + sizeof(block) - 1) / sizeof(block);
-				std::array<block, size> buffer;
-				mAesFixedKey.ecbEncCounterMode(b, buffer);
-				memcpy(&ret, buffer.data(), sizeof(ret));
-			}
-		}
+
+            if constexpr (std::is_same<F, block>::value)
+            {
+                // if F is a block, just return the block.
+                ret = b;
+            }
+            else if constexpr (std::is_same<F, bool>::value)
+            {
+                // if F is a bit, just return a bit.
+                ret = b.get<u8>(0) & 1;
+            }
+            else if constexpr (sizeof(F) <= sizeof(block))
+            {
+                // if small, just return the bytes of b
+                memcpy(&ret, &b, sizeof(F));
+            }
+            else
+            {
+                // if large, we need to expand the seed. using fixed key AES in counter mode
+                // with b as the IV.
+                auto constexpr size = (sizeof(F) + sizeof(block) - 1) / sizeof(block);
+                std::array<block, size> buffer;
+                mAesFixedKey.ecbEncCounterMode(b, buffer);
+                memcpy(&ret, buffer.data(), sizeof(ret));
+            }
+        }
 
 		// return the F element with value 2^power
 		template<typename F>

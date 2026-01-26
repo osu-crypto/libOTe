@@ -7,6 +7,7 @@
 #include "libOTe/Tools/EACode/EACode.h"
 #include "libOTe/Tools/ExConvCode/ExConvCode.h"
 #include "libOTe/Tools/QuasiCyclicCode.h"
+#include "libOTe/Tools/BlkAccCode/BlkAccCode.h"
 
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
@@ -151,7 +152,7 @@ namespace osuCrypto
 
 		// verbose flag.
 		bool v = cmd.isSet("v");
-		bool sys = cmd.isSet("sys");
+		bool sys = !cmd.isSet("nosys");
 
 		ExConvCode code;
 		code.config(k, n, w, a, sys);
@@ -261,8 +262,8 @@ namespace osuCrypto
 		try
 		{
 			using Ctx = CoeffCtxGF2;
-			RegularPprfReceiver<block, block, Ctx> recver;
-			RegularPprfSender<block, block, Ctx> sender;
+			RegularPprfReceiver<block, Ctx> recver;
+			RegularPprfSender<block, Ctx> sender;
 
 			u64 trials = cmd.getOr("t", 10);
 
@@ -374,6 +375,62 @@ namespace osuCrypto
 			std::cout << verbose << std::endl;
 	}
 
+	inline void BlkAccCodeBench(CLP& cmd)
+	{
+		u64 trials = cmd.getOr("t", 10);
+
+		// the message length of the code. 
+		// The noise vector will have size n=2*k.
+		// the user can use 
+		//   -k X 
+		// to state that exactly X rows should be used or
+		//   -kk X
+		// to state that 2^X rows should be used.
+		u64 k = cmd.getOr("k", 1ull << cmd.getOr("kk", 10));
+
+		u64 n = cmd.getOr<u64>("n", k * cmd.getOr("R", 2.0));
+
+		u64 sigma = cmd.getOr("sigma", 8);
+		u64 dpeth = cmd.getOr("depth", 3);
+
+		auto blk = cmd.isSet("blk");
+
+		// verbose flag.
+		bool v = cmd.isSet("v");
+
+		BlkAccCode code;
+		code.init(k, n, sigma, dpeth);
+
+		if (v)
+		{
+			std::cout << "n: " << code.mN << std::endl;
+			std::cout << "k: " << code.mK << std::endl;
+		}
+
+		AlignedUnVector<block> x(code.mN);
+		Timer timer, verbose;
+
+
+		timer.setTimePoint("_____________________");
+		for (u64 i = 0; i < trials; ++i)
+		{
+			//if(blk)
+			//	code.dualEncodeBlk(x.data());
+			//else
+			code.dualEncode<block, CoeffCtxGF2>(x.data(), {});
+
+			timer.setTimePoint("encode");
+		}
+
+		if (cmd.isSet("quiet") == false)
+		{
+			std::cout << "tungsten " << std::endl;
+			std::cout << timer << std::endl;
+		}
+		if (v)
+			std::cout << verbose << std::endl;
+	}
+
 
 	inline void transpose(const CLP& cmd)
 	{
@@ -455,11 +512,8 @@ namespace osuCrypto
 			u64 trials = cmd.getOr("t", 10);
 
 			u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
-			MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv7x24);
+			MultType multType = (MultType)cmd.getOr("m", (int)MultType::BlkAcc3x32);
 			std::cout << multType << std::endl;
-
-			recver.mMultType = multType;
-			sender.mMultType = multType;
 
 			PRNG prng0(ZeroBlock), prng1(ZeroBlock);
 			block delta = prng0.get();
@@ -469,9 +523,9 @@ namespace osuCrypto
 			Timer sTimer;
 			Timer rTimer;
 			recver.setTimer(rTimer);
-			sender.setTimer(rTimer);
+			sender.setTimer(sTimer);
 			sTimer.setTimePoint("start");
-			auto s = sTimer.setTimePoint("start");
+			auto s = rTimer.setTimePoint("start");
 
 			macoro::thread_pool pool0, pool1;
 			auto w0 = pool0.make_work();
@@ -479,31 +533,52 @@ namespace osuCrypto
 			pool0.create_thread();
 			pool1.create_thread();
 
+			auto noise = cmd.isSet("stationary") ? SdNoiseDistribution::Stationary : SdNoiseDistribution::Regular;
+
+			sender.configure(n, 2, 1, SilentSecType::SemiHonest, noise, multType);
+			recver.configure(n, 2, 1, SilentSecType::SemiHonest, noise, multType);
+
+			std::cout << "sender " << sender.mNoiseVecSize << " " << sender.mNumPartitions << " " << sender.mSizePer << std::endl;
+			std::cout << "recver " << recver.mNoiseVecSize << " " << recver.mNumPartitions << " " << recver.mSizePer << std::endl;
+
 			for (u64 t = 0; t < trials; ++t)
 			{
-				sender.configure(n);
-				recver.configure(n);
 
 				auto choice = recver.sampleBaseChoiceBits(prng0);
-				std::vector<std::array<block, 2>> sendBase(sender.silentBaseOtCount());
-				std::vector<block> recvBase(recver.silentBaseOtCount());
-				sender.setSilentBaseOts(sendBase);
-				recver.setSilentBaseOts(recvBase);
+				choice.resize(sender.baseCount().mBaseOtCount);
+				std::vector<std::array<block, 2>> sendBase(sender.baseCount().mBaseOtCount);
+				std::vector<block> recvBase(recver.baseCount().mBaseOtCount);
+
+				if (noise == SdNoiseDistribution::Stationary)
+				{
+					BitVector baseC(recver.baseCount().mBaseVoleCount);
+					std::vector<block> baseB(sender.baseCount().mBaseVoleCount);
+					std::vector<block> baseA(recver.baseCount().mBaseVoleCount);
+
+					sender.setBaseCors(sendBase, baseB, delta);
+					recver.setBaseCors(recvBase, choice, baseA, baseC);
+				}
+				else
+				{
+					sender.setBaseCors(sendBase, {}, delta);
+					recver.setBaseCors(recvBase, choice, {}, {});
+				}
 
 				auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
 				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1], ChoiceBitPacking::True);
 
-				rTimer.setTimePoint("r start");
 				if (cmd.isSet("mt"))
 				{
 					sock[0].setExecutor(pool0);
 					sock[1].setExecutor(pool1);
+					rTimer.setTimePoint("r start mt");
 					coproto::sync_wait(macoro::when_all_ready(
 						std::move(p0) | macoro::start_on(pool0),
 						std::move(p1) | macoro::start_on(pool1)));
 				}
 				else
 				{
+					rTimer.setTimePoint("r start");
 					coproto::sync_wait(macoro::when_all_ready(
 						std::move(p0),
 						std::move(p1)));
@@ -513,6 +588,7 @@ namespace osuCrypto
 
 			}
 			auto e = rTimer.setTimePoint("end");
+			sTimer.setTimePoint("end");
 
 			if (cmd.isSet("quiet") == false)
 			{
@@ -550,11 +626,11 @@ namespace osuCrypto
 			u64 trials = cmd.getOr("t", 10);
 
 			u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
-			MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv7x24);
-			std::cout << multType << std::endl;
+			MultType multType = (MultType)cmd.getOr("m", (int)DefaultMultType);
 
-			recver.mMultType = multType;
-			sender.mMultType = multType;
+			auto noise = (SdNoiseDistribution)cmd.getOr("noise", (int)SdNoiseDistribution::Regular);
+			auto mal = (SilentSecType)cmd.getOr("mal", (int)SilentSecType::SemiHonest);
+			std::cout << n << " " << multType << " " << noise << " " << mal << std::endl;
 
 			std::vector<std::array<block, 2>> baseSend(128);
 			std::vector<block> baseRecv(128);
@@ -566,6 +642,9 @@ namespace osuCrypto
 				baseSend[i] = prng.get();
 				baseRecv[i] = baseSend[i][baseChoice[i]];
 			}
+
+			sender.configure(n, mal, multType, SilentBaseType::BaseExtend, noise, 128, {});
+			recver.configure(n, mal, multType, SilentBaseType::BaseExtend, noise, 128, {});
 
 #ifdef ENABLE_SOFTSPOKEN_OT
 			sender.mOtExtRecver.emplace();
@@ -588,31 +667,66 @@ namespace osuCrypto
 			sTimer.setTimePoint("start");
 			rTimer.setTimePoint("start");
 
+			macoro::thread_pool pool0, pool1;
+			auto w0 = pool0.make_work();
+			auto w1 = pool1.make_work();
+			pool0.create_thread();
+			pool1.create_thread();
+			sock[0].setExecutor(pool0);
+			sock[1].setExecutor(pool1);
+			std::vector<u64> recved0, recved1;
+
 			auto t0 = std::thread([&] {
 				for (u64 t = 0; t < trials; ++t)
 				{
-					auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
+					if (t && noise == SdNoiseDistribution::Stationary)
+					{
+						auto count = sender.baseCount();
+						if (count.mBaseOtCount)
+							throw RTE_LOC;
+
+						auto voleCount = count.mBaseVoleCount;
+						// use the previously expanded vole as the base
+						span<block> baseB(sender.mB.subspan(0, voleCount));
+						sender.setBaseCors({}, baseB);
+					}
+
+					auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]) | macoro::start_on(pool0);
 
 					char c = 0;
 
-					coproto::sync_wait(sock[0].send(std::move(c)));
-					coproto::sync_wait(sock[0].recv(c));
 					sTimer.setTimePoint("__");
 					coproto::sync_wait(sock[0].send(std::move(c)));
 					coproto::sync_wait(sock[0].recv(c));
 					sTimer.setTimePoint("s start");
 					coproto::sync_wait(p0);
+					coproto::sync_wait(sock[0].send(std::move(c)));
+					coproto::sync_wait(sock[0].recv(c));
 					sTimer.setTimePoint("s done");
+
+					recved0.push_back(sock[0].bytesReceived());
 				}
 				});
 
 
 			for (u64 t = 0; t < trials; ++t)
 			{
-				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1]);
+
+				if (t && noise == SdNoiseDistribution::Stationary)
+				{
+					auto count = recver.baseCount();
+					if (count.mBaseOtCount)
+						throw RTE_LOC;
+
+					auto voleCount = count.mBaseVoleCount;
+					// use the previously expanded vole as the base
+					span<block> baseA(recver.mA.subspan(0, voleCount));
+					span<block> baseC(recver.mC.subspan(0, voleCount));
+					recver.setBaseCors({}, {}, baseA, baseC);
+				}
+
+				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1]) | macoro::start_on(pool0);
 				char c = 0;
-				coproto::sync_wait(sock[1].send(std::move(c)));
-				coproto::sync_wait(sock[1].recv(c));
 
 				rTimer.setTimePoint("__");
 				coproto::sync_wait(sock[1].send(std::move(c)));
@@ -620,7 +734,12 @@ namespace osuCrypto
 
 				rTimer.setTimePoint("r start");
 				coproto::sync_wait(p1);
+
+				coproto::sync_wait(sock[1].send(std::move(c)));
+				coproto::sync_wait(sock[1].recv(c));
 				rTimer.setTimePoint("r done");
+
+				recved1.push_back(sock[1].bytesReceived());
 
 			}
 
@@ -628,8 +747,23 @@ namespace osuCrypto
 			t0.join();
 			std::cout << sTimer << std::endl;
 			std::cout << rTimer << std::endl;
+			u64 prev0 = 0, prev1 = 0;
+			for (u64 i = 0; i < trials; ++i)
+			{
+				//if(recved0[i] < prev0 || recved1[i] < prev1)
+				//{
+				//	std::cout << "Error: " << i << " " << recved0[i] << " " << recved1[i] << std::endl;
+				//	return;
+				//}
 
-			std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+				std::cout << "comm Trial " << i << ": "
+					<< recved0[i] - prev0 << " "
+					<< recved1[i] - prev1 << std::endl;
+				prev0 = recved0[i];
+				prev1 = recved1[i];
+			}
+			//std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+
 		}
 		catch (std::exception& e)
 		{
@@ -1023,12 +1157,12 @@ namespace osuCrypto
 			oles[1].init(1, n);
 
 			if (cmd.hasValue("mult"))
-				oles[0].mMultType = oles[1].mMultType = (MultType)cmd.get<u64>("mult");
+				oles[0].mLpnMultType = oles[1].mLpnMultType = (MultType)cmd.get<u64>("mult");
 
 			if (cmd.isSet("mockBase"))
 			{
-				auto otCount0 = oles[0].baseOtCount(prng0);
-				auto otCount1 = oles[1].baseOtCount(prng0);
+				auto otCount0 = oles[0].baseCount(prng0);
+				auto otCount1 = oles[1].baseCount(prng0);
 				std::array<std::vector<std::array<block, 2>>, 2> baseSend;
 				baseSend[0].resize(otCount0.mSendCount);
 				baseSend[1].resize(otCount1.mSendCount);
@@ -2443,6 +2577,8 @@ namespace osuCrypto
 			ExConvCodeOldBench(cmd);
 		else if (cmd.isSet("tungsten"))
 			TungstenCodeBench(cmd);
+		else if (cmd.isSet("blkacc"))
+			BlkAccCodeBench(cmd);
 		else if (cmd.isSet("aes"))
 			AESBenchmark(cmd);
 		else if (cmd.isSet("dpf"))
@@ -2480,6 +2616,7 @@ namespace osuCrypto
 			std::cout << "  -ec" << std::endl;
 			std::cout << "  -ecold" << std::endl;
 			std::cout << "  -tungsten" << std::endl;
+			std::cout << "  -blkacc" << std::endl;
 			std::cout << "  -aes" << std::endl;
 			std::cout << "  -dpf" << std::endl;
 			std::cout << "  -triDpf" << std::endl;

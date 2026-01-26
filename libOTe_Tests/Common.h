@@ -12,6 +12,7 @@
 #include "macoro/when_all.h"
 #include "macoro/sync_wait.h"
 #include "macoro/task.h"
+#include <string>
 namespace tests_libOTe
 {
     //
@@ -22,8 +23,30 @@ namespace tests_libOTe
     inline auto eval(macoro::task<>& t0, macoro::task<>& t1)
     {
         auto r = macoro::sync_wait(macoro::when_all_ready(std::move(t0), std::move(t1)));
-        std::get<0>(r).result();
-        std::get<1>(r).result();
+
+        std::string party0, party1;
+        bool throws = false;
+        try{
+            std::get<0>(r).result();
+        }
+        catch (const std::exception& e)
+        {
+            party0 = e.what();
+			throws = true;
+		}
+        try {
+            std::get<1>(r).result();
+        }
+        catch (const std::exception& e)
+        {
+            party1 = e.what();
+			throws = true;
+        }
+
+        if (throws)
+        {
+            throw std::runtime_error("threw an exception: P0:\n" + party0 + "\n\nP1:\n" + party1);
+        }
     }
 
 }

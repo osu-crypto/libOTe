@@ -22,10 +22,9 @@ namespace osuCrypto
 
 	template<
 		typename F,
-		typename G = F,
-		typename CoeffCtx = DefaultCoeffCtx<F, G>
+		typename CoeffCtx = DefaultCoeffCtx<F>
 	>
-	class RegularPprfSender : public TimerAdapter {
+	class RegularPprfSender : public PprfSender<F, CoeffCtx> {
 	public:
 
 		// the number of leaves in a single tree.
@@ -48,7 +47,6 @@ namespace osuCrypto
 		bool mEagerSend = true;
 
 		using VecF = typename CoeffCtx::template Vec<F>;
-		using VecG = typename CoeffCtx::template Vec<G>;
 
 		// a function that can be used to output the result of the PPRF.
 		std::function<void(u64 treeIdx, VecF& leaf)> mOutputFn;
@@ -66,7 +64,7 @@ namespace osuCrypto
 			configure(domainSize, pointCount);
 		}
 
-		void configure(u64 domainSize, u64 pointCount)
+		void configure(u64 domainSize, u64 pointCount) override
 		{
 			if (domainSize & 1)
 				throw std::runtime_error("Pprf domain must be even. " LOCATION);
@@ -82,17 +80,17 @@ namespace osuCrypto
 
 
 		// the number of base OTs that should be set.
-		u64 baseOtCount() const {
+		u64 baseOtCount() const override {
 			return mDepth * mPntCount;
 		}
 
 		// returns true if the base OTs are currently set.
-		bool hasBaseOts() const {
+		bool hasBaseOts() const override {
 			return mBaseOTs.size();
 		}
 
 
-		void setBase(span<const std::array<block, 2>> baseMessages) {
+		void setBase(span<const std::array<block, 2>> baseMessages) override {
 			if (baseOtCount() != static_cast<u64>(baseMessages.size()))
 				throw RTE_LOC;
 
@@ -109,13 +107,13 @@ namespace osuCrypto
 			PprfOutputFormat oFormat,
 			bool programPuncturedPoint,
 			u64 numThreads,
-			CoeffCtx ctx = {})
+			CoeffCtx ctx = {}) override 
 		{
 			MACORO_TRY{
 			if (programPuncturedPoint)
 				setValue(value);
 
-			setTimePoint("SilentMultiPprfSender.start");
+			this->setTimePoint("SilentMultiPprfSender.start");
 
 			pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
 
@@ -214,7 +212,7 @@ namespace osuCrypto
 
 			mBaseOTs = {};
 
-			setTimePoint("SilentMultiPprfSender.de-alloc");
+			this->setTimePoint("SilentMultiPprfSender.de-alloc");
 
 			} MACORO_CATCH(eptr) {
 				if (!chl.closed()) co_await chl.close();
@@ -237,7 +235,7 @@ namespace osuCrypto
 			}
 		}
 
-		void clear() {
+		void clear() override {
 			mBaseOTs.resize(0, 0);
 			mDomain = 0;
 			mDepth = 0;
@@ -525,10 +523,9 @@ namespace osuCrypto
 
 	template<
 		typename F,
-		typename G = F,
-		typename CoeffCtx = DefaultCoeffCtx<F, G>
+		typename CoeffCtx = DefaultCoeffCtx<F>
 	>
-	class RegularPprfReceiver : public TimerAdapter
+	class RegularPprfReceiver : public PprfReceiver<F, CoeffCtx>
 	{
 	public:
 
@@ -542,7 +539,6 @@ namespace osuCrypto
 		u64 mPntCount = 0;
 
 		using VecF = typename CoeffCtx::template Vec<F>;
-		using VecG = typename CoeffCtx::template Vec<G>;
 
 		// base ots that will be used to expand the tree.
 		Matrix<block> mBaseOTs;
@@ -564,7 +560,7 @@ namespace osuCrypto
 		RegularPprfReceiver(const RegularPprfReceiver&) = delete;
 		RegularPprfReceiver(RegularPprfReceiver&&) = delete;
 
-		void configure(u64 domainSize, u64 pointCount)
+		void configure(u64 domainSize, u64 pointCount) override
 		{
 			if (domainSize & 1)
 				throw std::runtime_error("Pprf domain must be even. " LOCATION);
@@ -581,7 +577,7 @@ namespace osuCrypto
 
 		// this function sample mPntCount integers in the range
 		// [0,domain) and returns these as the choice bits.
-		BitVector sampleChoiceBits(PRNG& prng)
+		BitVector sampleChoiceBits(PRNG& prng)override
 		{
 			BitVector choices(mPntCount * mDepth);
 
@@ -604,7 +600,7 @@ namespace osuCrypto
 		}
 
 		// choices is in the same format as the output from sampleChoiceBits.
-		void setChoiceBits(const BitVector& choices)
+		void setChoiceBits(const BitVector& choices)override
 		{
 			// Make sure we're given the right number of OTs.
 			if (choices.size() != baseOtCount())
@@ -627,19 +623,19 @@ namespace osuCrypto
 
 
 		// the number of base OTs that should be set.
-		u64 baseOtCount() const
+		u64 baseOtCount() const override
 		{
 			return mDepth * mPntCount;
 		}
 
 		// returns true if the base OTs are currently set.
-		bool hasBaseOts() const
+		bool hasBaseOts() const override
 		{
 			return mBaseOTs.size();
 		}
 
 
-		void setBase(span<const block> baseMessages)
+		void setBase(span<const block> baseMessages) override
 		{
 			if (baseOtCount() != static_cast<u64>(baseMessages.size()))
 				throw RTE_LOC;
@@ -652,13 +648,15 @@ namespace osuCrypto
 			memcpy(mBaseOTs.data(), baseMessages.data(), baseMessages.size() * sizeof(block));
 		}
 
-		std::vector<u64> getPoints(PprfOutputFormat format)
+
+		std::vector<u64> getPoints(PprfOutputFormat format) const override
 		{
 			std::vector<u64> pnts(mPntCount);
 			getPoints(pnts, format);
 			return pnts;
 		}
-		void getPoints(span<u64> points, PprfOutputFormat format)
+
+		void getPoints(span<u64> points, PprfOutputFormat format) const  override
 		{
 			if ((u64)points.size() != mPntCount)
 				throw RTE_LOC;
@@ -702,6 +700,7 @@ namespace osuCrypto
 			}
 		}
 
+
 		// programPuncturedPoint says whether the sender is trying to program the
 		// active child to be its correct value XOR delta. If it is not, the
 		// active child will just take a random value.
@@ -711,7 +710,7 @@ namespace osuCrypto
 			PprfOutputFormat oFormat,
 			bool programPuncturedPoint,
 			u64 numThreads,
-			CoeffCtx ctx = {})
+			CoeffCtx ctx = {}) override
 		{
 			MACORO_TRY{
 				pprf::validateExpandFormat(oFormat, output, mDomain, mPntCount);
@@ -730,7 +729,7 @@ namespace osuCrypto
 				auto encOffset = u64{};
 				auto leafOffset = u64{};
 
-				setTimePoint("SilentMultiPprfReceiver.start");
+				this->setTimePoint("SilentMultiPprfReceiver.start");
 				points.resize(mPntCount);
 				getPoints(points, PprfOutputFormat::ByLeafIndex);
 
@@ -807,11 +806,11 @@ namespace osuCrypto
 						pprf::copyOut<VecF, CoeffCtx>(leafLevel, output, mPntCount, treeIndex, oFormat, mOutputFn);
 				}
 
-				setTimePoint("SilentMultiPprfReceiver.join");
+				this->setTimePoint("SilentMultiPprfReceiver.join");
 
 				mBaseOTs = {};
 
-				setTimePoint("SilentMultiPprfReceiver.de-alloc");
+				this->setTimePoint("SilentMultiPprfReceiver.de-alloc");
 
 			} MACORO_CATCH(eptr) {
 				if (!chl.closed()) co_await chl.close();
@@ -819,7 +818,7 @@ namespace osuCrypto
 			}
 		}
 
-		void clear()
+		void clear() override
 		{
 			mBaseOTs.resize(0, 0);
 			mBaseChoices.resize(0, 0);

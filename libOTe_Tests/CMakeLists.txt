@@ -1,5 +1,5 @@
 
-set(SRCS 
+set(SRCS
     BaseOT_Tests.cpp
     bitpolymul_Tests.cpp
     Common.cpp
@@ -26,7 +26,8 @@ set(SRCS
     BinarySolver_Tests.cpp
     Goldilocks_Tests.cpp
     UInt_Tests.cpp
-    
+    Permutation_Tests.cpp
+    BlkAccCode_Tests.cpp
 )
 
 add_library(libOTe_Tests STATIC ${SRCS})
