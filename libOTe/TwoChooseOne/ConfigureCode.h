@@ -266,9 +266,9 @@ namespace osuCrypto
 
         if (preferPow2)
         {
-		    config.mNoiseVectorSize = baseSize;
-            config.mNumPartitions = getRegNoiseWeight(minDist, baseSize, secParam, noiseType);
-            config.mSizePer = std::max<u64>(4, config.mNoiseVectorSize / config.mNumPartitions);
+            config.mNumPartitions = roundUpTo(getRegNoiseWeight(minDist, baseSize, secParam, noiseType), 2);
+            config.mSizePer = std::max<u64>(4, roundUpTo(baseSize / config.mNumPartitions, 2));
+		    config.mNoiseVectorSize =  std::max(baseSize, config.mNumPartitions * config.mSizePer);
 
 			// mNumPartitions * mSizePer could be smaller than mNoiseVectorSize by as 
 			// much as (mNumPartitions - 1). This is to allow the noise vector to be a
@@ -283,7 +283,7 @@ namespace osuCrypto
 			(config.mNoiseVectorSize > (config.mNumPartitions * config.mSizePer * 1.05)))
         {
 			// non power of two case. 
-            config.mNumPartitions = getRegNoiseWeight(minDist, baseSize, secParam, noiseType);
+            config.mNumPartitions = roundUpTo(getRegNoiseWeight(minDist, baseSize, secParam, noiseType), 2);
             config.mSizePer = std::max<u64>(4, roundUpTo(divCeil(baseSize, config.mNumPartitions), 2));
 			config.mNoiseVectorSize = config.mNumPartitions * config.mSizePer;
         }
