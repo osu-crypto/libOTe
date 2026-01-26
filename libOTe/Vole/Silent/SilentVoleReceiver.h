@@ -610,7 +610,7 @@ namespace osuCrypto
 		auto param = syndromeDecodingConfigure(secParam, requestSize, mLpnMultType, noiseType, bitCount);
 		mNumPartitions = param.mNumPartitions;
 		mSizePer = param.mSizePer;
-		mNoiseVecSize = param.mNumPartitions * param.mSizePer;
+		mNoiseVecSize = param.mNoiseVectorSize;
 		mCodeSeed = block(12528943721987127, 98743297823479812);
 
 
@@ -794,6 +794,9 @@ namespace osuCrypto
 		//    mA = mB + points(mBaseC * mDelta)
 		//
 		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, mCtx);
+
+		// Zero out the remaining positions in mA
+		mCtx.zero(mA.begin() + mNumPartitions * mSizePer, mA.end());
 
 		setTimePoint("SilentVoleReceiver.expand.pprf_transpose");
 

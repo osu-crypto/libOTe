@@ -507,7 +507,7 @@ namespace osuCrypto
 			mSecParam, mRequestSize, mLpnMultType, noiseType, bitCount);
 		mNumPartitions = config.mNumPartitions;
 		mSizePer = config.mSizePer;
-		mNoiseVecSize = mNumPartitions * mSizePer;
+		mNoiseVecSize = config.mNoiseVectorSize;
 		mCodeSeed = block(12528943721987127, 98743297823479812);
 
 		// Initialize the appropriate PPRF based on noise distribution
@@ -673,6 +673,9 @@ namespace osuCrypto
 			co_await gen().expand(chl, baseB, prng.get(), mB,
 				mPprfFormat, true, 1, mCtx);
 			setTimePoint("SilentVoleSender.expand.pprf");
+
+			// Zero out the remaining positions in mB
+			mCtx.zero(mB.begin() + mNumPartitions * mSizePer, mB.end());
 
 			// Debug consistency check
 			if (mDebug)

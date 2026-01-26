@@ -76,10 +76,12 @@ namespace osuCrypto
 			u64 treeSize = mSender.mDomain;
 			if (mExpanded == false)
 			{
+				this->setTimePoint("StationaryPprfSender::expand.pprf start");
 				mShare.resize(numTrees * treeSize);
 				co_await mSender.expand(chl, {}, seed, mShare, PprfOutputFormat::ByTreeIndex, false, numThreads);
 				mExpanded = true;
 				mExpandCounter = 0;
+				this->setTimePoint("StationaryPprfSender::expand.pprf done");
 			}
 
 

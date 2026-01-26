@@ -258,7 +258,7 @@ namespace osuCrypto
 		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mLpnMultType, mNoiseDist, 1);
 		mNumPartitions = param.mNumPartitions;
 		mSizePer = param.mSizePer;
-		mNoiseVecSize = param.mNumPartitions * param.mSizePer;
+		mNoiseVecSize = param.mNoiseVectorSize;
 		mCodeSeed = block(12528943721987127, 98743297823479812);
 
 		// Initialize the appropriate PPRF based on noise distribution
@@ -519,9 +519,16 @@ namespace osuCrypto
 			delta[0] = *mDelta;
 		}
 
+		if(mTimer)
+			gen().setTimer(getTimer());
+
 		// Allocate and expand the B vector
 		mB.resize(mNoiseVecSize);
 		co_await gen().expand(chl, delta, prng.get(), mB, mPprfFormat, true, mNumThreads, CoeffCtxGF2{});
+
+		// fill remaining with zeros
+		for (u64 i = mNumPartitions * mSizePer; i < mB.size(); ++i)
+			mB[i] = ZeroBlock;
 
 		setTimePoint("sender.expand.pprf");
 

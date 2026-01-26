@@ -177,7 +177,20 @@ namespace osuCrypto
 
     struct SdConfig
     {
+        // the total size of the noise vector, this will
+        // be about mNumPartitions*mSizePer, might might be 
+        // slightly larger. This allows it to be a power of 
+        // two in size when its mNumPartitions*mSizePer. Some 
+        // codes prefer this.
+        u64 mNoiseVectorSize = 0;
+
+        // The number of partitions of regular noise. This
+        // can also be thought of as the weight of the 
+        // regular vector.
         u64 mNumPartitions = 0;
+
+        // The size of each partion, or unit vector in the 
+        // regular case.
         u64 mSizePer = 0;
 	};
 
@@ -244,8 +257,36 @@ namespace osuCrypto
             noiseType = SdNoiseDistribution::Regular;
 
         SdConfig config;
-        config.mNumPartitions = getRegNoiseWeight(minDist, requestSize * scaler, secParam, noiseType);
-        config.mSizePer = std::max<u64>(4, roundUpTo(divCeil(requestSize * scaler, config.mNumPartitions), 2));
+
+        auto baseSize = roundUpTo(requestSize * scaler, 2);
+
+        const bool preferPow2 =
+			(requestSize >= 1024) && // large request size
+			(baseSize && ((baseSize & (baseSize - 1)) == 0)); // power of 2
+
+        if (preferPow2)
+        {
+		    config.mNoiseVectorSize = baseSize;
+            config.mNumPartitions = getRegNoiseWeight(minDist, baseSize, secParam, noiseType);
+            config.mSizePer = std::max<u64>(4, config.mNoiseVectorSize / config.mNumPartitions);
+
+			// mNumPartitions * mSizePer could be smaller than mNoiseVectorSize by as 
+			// much as (mNumPartitions - 1). This is to allow the noise vector to be a
+			// power of two in size. The end should be filled with zeros in this case.
+        }
+
+		// if we are not power of two, or if the
+		// chosen parameters lead to a noise vector 
+		// significantly larger than baseSize, then
+		// we go the non-power of two route.
+        if(!preferPow2 || 
+			(config.mNoiseVectorSize > (config.mNumPartitions * config.mSizePer * 1.05)))
+        {
+			// non power of two case. 
+            config.mNumPartitions = getRegNoiseWeight(minDist, baseSize, secParam, noiseType);
+            config.mSizePer = std::max<u64>(4, roundUpTo(divCeil(baseSize, config.mNumPartitions), 2));
+			config.mNoiseVectorSize = config.mNumPartitions * config.mSizePer;
+        }
         return config;
     }
 }

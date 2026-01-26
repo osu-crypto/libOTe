@@ -277,7 +277,7 @@ namespace osuCrypto
 		auto param = syndromeDecodingConfigure(secParam, mRequestNumOts, mLpnMultType, noiseType, 1);
 		mNumPartitions = param.mNumPartitions;
 		mSizePer = param.mSizePer;
-		mNoiseVecSize = param.mNumPartitions * param.mSizePer;
+		mNoiseVecSize = param.mNoiseVectorSize;
 		mCodeSeed = block(12528943721987127, 98743297823479812);
 
 		// Initialize the appropriate PPRF based on noise distribution
@@ -485,6 +485,10 @@ namespace osuCrypto
 
 		// Expand PPRF to generate sparse vector
 		co_await gen().expand(chl, mA, mPprfFormat, true, mNumThreads, {});
+
+		// Zero out any excess values beyond the noise vector size
+		for (u64 i = mNumPartitions * mSizePer; i < mA.size(); ++i)
+			mA[i] = ZeroBlock;
 
 		setTimePoint("recver.expand.pprf");
 

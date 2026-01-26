@@ -408,7 +408,7 @@ namespace osuCrypto
 			//if(blk)
 			//	code.dualEncodeBlk(x.data());
 			//else
-				code.dualEncode<block, CoeffCtxGF2>(x.data(), {});
+			code.dualEncode<block, CoeffCtxGF2>(x.data(), {});
 
 			timer.setTimePoint("encode");
 		}
@@ -503,7 +503,7 @@ namespace osuCrypto
 			u64 trials = cmd.getOr("t", 10);
 
 			u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
-			MultType multType = (MultType)cmd.getOr("m", (int)MultType::ExConv7x24);
+			MultType multType = (MultType)cmd.getOr("m", (int)MultType::BlkAcc3x32);
 			std::cout << multType << std::endl;
 
 			PRNG prng0(ZeroBlock), prng1(ZeroBlock);
@@ -514,9 +514,9 @@ namespace osuCrypto
 			Timer sTimer;
 			Timer rTimer;
 			recver.setTimer(rTimer);
-			sender.setTimer(rTimer);
+			sender.setTimer(sTimer);
 			sTimer.setTimePoint("start");
-			auto s = sTimer.setTimePoint("start");
+			auto s = rTimer.setTimePoint("start");
 
 			macoro::thread_pool pool0, pool1;
 			auto w0 = pool0.make_work();
@@ -524,17 +524,36 @@ namespace osuCrypto
 			pool0.create_thread();
 			pool1.create_thread();
 
+			auto noise = cmd.isSet("stationary") ? SdNoiseDistribution::Stationary : SdNoiseDistribution::Regular;
+
+			sender.configure(n, 2, 1, SilentSecType::SemiHonest, noise, multType);
+			recver.configure(n, 2, 1, SilentSecType::SemiHonest, noise, multType);
+
+			std::cout << "sender " << sender.mNoiseVecSize << " " << sender.mNumPartitions << " " << sender.mSizePer << std::endl;
+			std::cout << "recver " << recver.mNoiseVecSize << " " << recver.mNumPartitions << " " << recver.mSizePer << std::endl;
+
 			for (u64 t = 0; t < trials; ++t)
 			{
-				sender.configure(n, 2, 1, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, multType);
-				recver.configure(n, 2, 1, SilentSecType::SemiHonest, SdNoiseDistribution::Regular, multType);
 
 				auto choice = recver.sampleBaseChoiceBits(prng0);
 				choice.resize(sender.baseCount().mBaseOtCount);
 				std::vector<std::array<block, 2>> sendBase(sender.baseCount().mBaseOtCount);
 				std::vector<block> recvBase(recver.baseCount().mBaseOtCount);
-				sender.setBaseCors(sendBase, {}, delta);
-				recver.setBaseCors(recvBase, choice, {}, {});
+
+				if (noise == SdNoiseDistribution::Stationary)
+				{
+					BitVector baseC(recver.baseCount().mBaseVoleCount);
+					std::vector<block> baseB(sender.baseCount().mBaseVoleCount);
+					std::vector<block> baseA(recver.baseCount().mBaseVoleCount);
+
+					sender.setBaseCors(sendBase, baseB, delta);
+					recver.setBaseCors(recvBase, choice, baseA, baseC);
+				}
+				else
+				{
+					sender.setBaseCors(sendBase, {}, delta);
+					recver.setBaseCors(recvBase, choice, {}, {});
+				}
 
 				auto p0 = sender.silentSendInplace(delta, n, prng0, sock[0]);
 				auto p1 = recver.silentReceiveInplace(n, prng1, sock[1], ChoiceBitPacking::True);
@@ -560,6 +579,7 @@ namespace osuCrypto
 
 			}
 			auto e = rTimer.setTimePoint("end");
+			sTimer.setTimePoint("end");
 
 			if (cmd.isSet("quiet") == false)
 			{
@@ -601,7 +621,7 @@ namespace osuCrypto
 
 			auto noise = (SdNoiseDistribution)cmd.getOr("noise", (int)SdNoiseDistribution::Regular);
 			auto mal = (SilentSecType)cmd.getOr("mal", (int)SilentSecType::SemiHonest);
-			std::cout<< n<< " " << multType << " " << noise << " " << mal << std::endl;
+			std::cout << n << " " << multType << " " << noise << " " << mal << std::endl;
 
 			std::vector<std::array<block, 2>> baseSend(128);
 			std::vector<block> baseRecv(128);
@@ -711,7 +731,7 @@ namespace osuCrypto
 				rTimer.setTimePoint("r done");
 
 				recved1.push_back(sock[1].bytesReceived());
-				
+
 			}
 
 
@@ -729,11 +749,11 @@ namespace osuCrypto
 
 				std::cout << "comm Trial " << i << ": "
 					<< recved0[i] - prev0 << " "
-					<< recved1[i] - prev1  << std::endl;
+					<< recved1[i] - prev1 << std::endl;
 				prev0 = recved0[i];
 				prev1 = recved1[i];
 			}
-				//std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
+			//std::cout << sock[0].bytesReceived() / trials << " " << sock[1].bytesReceived() / trials << " bytes per " << std::endl;
 
 		}
 		catch (std::exception& e)
