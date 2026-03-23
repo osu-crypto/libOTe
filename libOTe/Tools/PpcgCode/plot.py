@@ -246,7 +246,7 @@ def dist(filenames, percent, watch, pdf, showSum, both):
     
     fig = go.Figure()
     fig.update_yaxes(range=[-40,60]) 
-    fig.update_xaxes(range=[0,0.2]) 
+    fig.update_xaxes(range=[0,0.3]) 
     fig.update_yaxes(title_text=r"$\log_2 \delta_h$")
     if percent:
         fig.update_xaxes(

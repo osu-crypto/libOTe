@@ -22,6 +22,8 @@ namespace osuCrypto {
 		const Choose<I>& mChoose;
 		std::vector<Enumerator<R>*> mSubcodes;
 
+		u64 mTrim = 0;
+
 		ComposeEnumerator() = default;
 		ComposeEnumerator(
 			std::vector<Enumerator<R>*> subcodes,
@@ -143,6 +145,15 @@ namespace osuCrypto {
 						curEnum = composeEnums<R>(curEnum, enumI, mChoose, mNumThreads, mSystematic? mLoadBar: nullptr);
 					else
 						curEnum = std::move(enumI);
+				}
+
+				if (iter == 0 && mTrim)
+				{
+					for(u64 i = 0; i< mTrim; ++i)
+					{
+                        distributions[1][mTrim] += distributions[1][i];
+                        distributions[1][i] = R(0);
+                    }
 				}
 
 				// expand_and_interpolate(distributions[(iter + 1) % 2]);

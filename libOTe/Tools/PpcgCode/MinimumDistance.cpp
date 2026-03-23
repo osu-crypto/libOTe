@@ -149,11 +149,11 @@ namespace osuCrypto
 		bool print_dist = cmd.isSet("printDist") || cmd.isSet("numPoints");
 		bool full = cmd.isSet("full");
 
+        u64 trim = cmd.getOr("trim", 0);
 
 		constexpr std::string_view path = __FILE__;
 		auto folder = path.substr(0, path.find_last_of("/\\"));
 		std::string scriptPath = std::string(folder) + "/plot.py";
-
 
 #if 1
 		using I = Float;
@@ -262,6 +262,7 @@ namespace osuCrypto
 						systematic, choose);
 					comp.mLoadBar = &lb;
 
+					comp.mTrim = trim;
 
 					std::vector<R> inDist(comp.mK + 1), outDist(comp.mN + 1);
 
@@ -333,7 +334,7 @@ namespace osuCrypto
 							filename, std::ios::trunc);
 						print_enumerator<R>(fullEnum, outDist, 0, enumFile);
 
-						std::string command = "python3 " + scriptPath + " --enum " + filename;
+						std::string command = "py " + scriptPath + " --enum " + filename;
 						if (percent)
 							command += " --percent ";
 						std::cout << command << std::endl;
@@ -345,11 +346,11 @@ namespace osuCrypto
 		}
 
 		{
-			std::string command = "python3 " + scriptPath + " --dist ";
+			std::string command = "py " + scriptPath + " --dist ";
 			for (auto filename : filenames)
 				command += filename + " ";
 			if (percent)
-				command += " --percent ";
+				command += " --percent --both ";
 			std::cout << command << std::endl;
 			int result = std::system(command.c_str());
 		}
