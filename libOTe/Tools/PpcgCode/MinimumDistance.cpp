@@ -25,6 +25,8 @@
 #include "Print.h"
 #include "ExpandEnumerator.h"
 #include "RandomEnumerator.h"
+#include "BandedEnumerator.h"
+#include "RandConvEnumerator.h"
 
 namespace osuCrypto
 {
@@ -107,7 +109,7 @@ namespace osuCrypto
 		{
 			std::cout << "This function benchmarks the minimum distance computation for various parameters." << std::endl;
 			std::cout << "The parameters are: " << std::endl;
-			std::cout << "-subcode [repeat, block, sysBlock, acc, exp, rand, sysRand]+ " << std::endl;
+			std::cout << "-subcode [repeat, block, sysBlock, band, acc, exp, rand, sysRand, randConv]+ " << std::endl;
 			std::cout << "   e.g. -subcode repeat acc acc " << std::endl;
 			std::cout << "-systematic " << std::endl;
 			std::cout << "-k [list int] " << std::endl;
@@ -119,7 +121,7 @@ namespace osuCrypto
 
 		auto subCodeTags = cmd.getManyOr("subcode", std::vector<std::string>{""});
 		if (subCodeTags.size() == 0)
-			throw std::runtime_error("subcodes must be specified {repeat, acc, block, ... }. " LOCATION);
+			throw std::runtime_error("subcodes must be specified {repeat, acc, block, band, randConv, ... }. " LOCATION);
 
 		// the input size
 		auto Ks = cmd.getManyOr("k", std::vector<u64>{512});
@@ -132,6 +134,7 @@ namespace osuCrypto
 		auto exps = cmd.getManyOr("exp", std::vector<u64>{64});
 		bool verbose = cmd.isSet("verbose");
 		bool systematic = cmd.isSet("systematic");
+		bool doPlot = !cmd.isSet("noPlot");
 
 		// when printing the curve, how many points to show. 0=all n points.
 		u64 numPoints = cmd.getOr("numPoints", 0);
@@ -155,13 +158,8 @@ namespace osuCrypto
 		auto folder = path.substr(0, path.find_last_of("/\\"));
 		std::string scriptPath = std::string(folder) + "/plot.py";
 
-#if 1
-		using I = Float;
-		using R = Float;
-#else
 		using I = Int;
 		using R = Rat;
-#endif
 
 		std::vector<std::string> filenames;
 		for (auto k : Ks)
@@ -199,8 +197,13 @@ namespace osuCrypto
 					Choose<I> choose;// (n, lb);
 					Choose<Int> chooseInt;// (n);
 					LoadingBar lb;
+					auto chooseBound = 2 * n + std::max<u64>(sigma, exp) + 8;
+					choose.precompute(chooseBound);
+					chooseInt.precompute(chooseBound);
+
 					u64 kk = k;
 					std::vector<std::unique_ptr<Enumerator<R>>> subcodes;
+					std::vector<std::unique_ptr<BallsBinsCap<Int>>> ballsBinsCaps;
 					std::vector<Enumerator<R>*> subcodesParam;
 					for (u64 i = 0; i < subCodeTags.size(); ++i)
 					{
@@ -209,6 +212,15 @@ namespace osuCrypto
 							sh << "R";
 							ss << "R" << kk << "." << n;
 							subcodes.emplace_back(new RepeaterEnumerator<I, R>(kk, n, choose));
+						}
+						else if (subCodeTags[i] == "band")
+						{
+							sh << "Band" << sigma;
+							ss << "Band" << kk << "." << n << "." << sigma;
+							ballsBinsCaps.emplace_back(
+								new BallsBinsCap<Int>(n, kk, sigma > 1 ? sigma - 2 : 0, chooseInt));
+							subcodes.emplace_back(
+								new BandedEnumerator<I, R>(kk, n, sigma, choose, *ballsBinsCaps.back(), num_threads));
 						}
 						else if (subCodeTags[i] == "acc")
 						{
@@ -246,10 +258,18 @@ namespace osuCrypto
 							ss << "sRnd" << kk << "." << n;
 							subcodes.emplace_back(new RandomEnumerator<I, R>(kk, n, true, choose));
 						}
+						else if (subCodeTags[i] == "randConv")
+						{
+							sh << "RC" << sigma;
+							ss << "RC" << kk << "." << n << "." << sigma;
+							ballsBinsCaps.emplace_back(
+								new BallsBinsCap<Int>(n, n, sigma > 0 ? sigma - 1 : 0, chooseInt));
+							subcodes.emplace_back(
+								new RandConvEnumerator<I, R>(kk, n, sigma, choose, *ballsBinsCaps.back(), num_threads));
+						}
 						else
-							throw std::runtime_error("subcodes must be {repeat, accumulate, block, ... }. " LOCATION);
+							throw std::runtime_error("subcodes must be {repeat, accumulate, block, band, randConv, ... }. " LOCATION);
 						subcodesParam.push_back(subcodes.back().get());
-						subcodes.back()->mLoadBar = &lb;
 
 						kk = n;
 					}
@@ -260,17 +280,11 @@ namespace osuCrypto
 					ComposeEnumerator<I, R> comp(
 						subcodesParam,
 						systematic, choose);
-					comp.mLoadBar = &lb;
 
 					comp.mTrim = trim;
 
 					std::vector<R> inDist(comp.mK + 1), outDist(comp.mN + 1);
 
-
-					lb.start(comp.numTicks() + choose.numTicks(n), sh.str());
-
-					choose.precompute(n, &lb);
-					chooseInt.precompute(n, &lb);
 
 					if (cmd.hasValue("w"))
 					{
@@ -293,8 +307,6 @@ namespace osuCrypto
 					}
 					else
 						comp.enumerate(inDist, outDist);
-
-					lb.cancel();
 
 					auto expected_md = minimumDistance<R>(outDist);
 					auto end = std::chrono::high_resolution_clock::now();
@@ -334,17 +346,21 @@ namespace osuCrypto
 							filename, std::ios::trunc);
 						print_enumerator<R>(fullEnum, outDist, 0, enumFile);
 
-						std::string command = "py " + scriptPath + " --enum " + filename;
-						if (percent)
-							command += " --percent ";
-						std::cout << command << std::endl;
-						int result = std::system(command.c_str());
+						if (doPlot)
+						{
+							std::string command = "py " + scriptPath + " --enum " + filename;
+							if (percent)
+								command += " --percent ";
+							std::cout << command << std::endl;
+							int result = std::system(command.c_str());
+						}
 
 					}
 				}
 			}
 		}
 
+		if (doPlot)
 		{
 			std::string command = "py " + scriptPath + " --dist ";
 			for (auto filename : filenames)

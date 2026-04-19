@@ -12,6 +12,7 @@
 #include "libOTe/Tools/LDPC/Util.h"
 #include "AccumulateEnumerator.h"
 #include "BlockEnumerator.h"
+#include "BandedEnumerator.h"
 #include "ExpandEnumerator.h"
 #include "RandConvEnumerator.h"
 #include "BallsBins.h"
@@ -207,6 +208,7 @@ namespace osuCrypto {
 		tests.add("labeledBallsBinsCap_Test            ", labeledBallsBinsCap_Test);
 		tests.add("accumulateEnum_exhaustive_Test      ", accumulateEnum_exhaustive_Test);
 		tests.add("blockEnum_exhaustive_Test           ", blockEnum_exhaustive_Test);
+		tests.add("BandedEnum_exhaustive_Test          ", BandedEnum_exhaustive_Test);
 		tests.add("expandEnum_exhaustive_Test          ", expandEnum_exhaustive_Test);
 		tests.add("RandomEnum_exhaustive_Test          ", RandomEnum_exhaustive_Test);
 		

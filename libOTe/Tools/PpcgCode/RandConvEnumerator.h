@@ -23,7 +23,7 @@ namespace osuCrypto {
 			u64 n,
 			u64 sigma,
 			const Choose<I>& choose,
-			const BallsBinsCap<I>& bbc,
+			const BallsBinsCap<Int>& bbc,
 			u64 numThreads = 0)
 			: Enumerator<R>(k, n)
 			, mSigma(sigma)
@@ -55,7 +55,7 @@ namespace osuCrypto {
 		const Choose<I>& mChoose;
 
 		// balls bin cap for cap=sigma-1.
-		const BallsBinsCap<I>& mBallsBinsCap;
+		const BallsBinsCap<Int>& mBallsBinsCap;
 
 		u64 numTicks() const override
 		{
@@ -89,7 +89,7 @@ namespace osuCrypto {
 			u64 r, u64 t0,
 			u64 k, u64 n, u64 sigma,
 			const Choose<I>& choose,
-			const BallsBinsCap<I>& bbc)
+			const BallsBinsCap<Int>& bbc)
 		{
 			if (bbc.mCap != sigma - 1)
 				throw RTE_LOC;
@@ -118,7 +118,7 @@ namespace osuCrypto {
 			u64 w, u64 h,
 			u64 k, u64 n, u64 sigma,
 			const Choose<I>& choose,
-			const BallsBinsCap<I>& bbc)
+			const BallsBinsCap<Int>& bbc)
 		{
 			if (!(w <= k && h <= n && sigma <= k))
 				throw RTE_LOC;
@@ -191,7 +191,7 @@ namespace osuCrypto {
 			u64 sigma,
 			u64 numThreads,
 			const Choose<I>& choose,
-			const BallsBinsCap<I>& bbc,
+			const BallsBinsCap<Int>& bbc,
 			Full&& full = {},
 			LoadingBar* laodingBar = nullptr)
 		{

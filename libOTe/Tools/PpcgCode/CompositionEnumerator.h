@@ -171,7 +171,20 @@ namespace osuCrypto {
 
 				if (std::is_same_v<I, Int>)
 				{
-					if (sum != expectedSum)
+					if constexpr (std::is_same_v<R, Rat>)
+					{
+						auto sumN = sum;
+						auto expectedSumN = expectedSum;
+						sumN.backend().normalize();
+						expectedSumN.backend().normalize();
+						if (sumN != expectedSumN)
+						{
+							std::cout << Color::Red
+								<< "Initial distribution sum: " << expectedSumN << std::endl
+								<< "Final distribution sum  : " << sumN << std::endl << Color::Default;
+						}
+					}
+					else if (sum != expectedSum)
 					{
 						std::cout << Color::Red
 							<< "Initial distribution sum: " << expectedSum << std::endl

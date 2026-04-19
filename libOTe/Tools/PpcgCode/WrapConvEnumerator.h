@@ -23,7 +23,7 @@ namespace osuCrypto {
 			u64 n,
 			u64 sigma,
 			const Choose<I>& choose,
-			const BallsBinsCap<I>& bbc,
+			const BallsBinsCap<Int>& bbc,
 			u64 numThreads = 0)
 			: Enumerator<R>(k, n)
 			, mSigma(sigma)
@@ -55,7 +55,7 @@ namespace osuCrypto {
 		const Choose<I>& mChoose;
 
 		// balls bin cap for cap=sigma-1.
-		const BallsBinsCap<I>& mBallsBinsCap;
+		const BallsBinsCap<Int>& mBallsBinsCap;
 
 		u64 numTicks() const override
 		{
@@ -93,7 +93,7 @@ namespace osuCrypto {
 			i64 k, i64 n,
 			i64 sigma,
 			const Choose<I>& choose,
-			const BallsBinsCap<I>& bbc)
+			const BallsBinsCap<Int>& bbc)
 		{
 			if (bbc.mCap != sigma - 2)
 				throw RTE_LOC;
@@ -142,15 +142,15 @@ namespace osuCrypto {
 				return 0;
 
 			// near terminations can come before or after any output freezone 1.
-			auto E1 = ballsBins<Int>(v, t1 + d + (r0 == r1), choose);
+			auto E1 = ballsBins<I>(v, t1 + d + (r0 == r1), choose);
 
 			// terminations can come before or after any of the free output ones
 			// or terminations. There are t1 + v+1 places to put the terminations.
 			// we have r1-1 terminations to place (not counting the last if its mandatory).
-			auto E2 = ballsBins<Int>(r1 - 1, t1 + v + d + (r0 == r1), choose);
+			auto E2 = ballsBins<I>(r1 - 1, t1 + v + d + (r0 == r1), choose);
 
 			// there are z zeros in the deadzones, and r0+1 bins to put them in.
-			auto E3 = ballsBins<Int>(z, r0 + 1, choose);
+			auto E3 = ballsBins<I>(z, r0 + 1, choose);
 			auto E4 = bbc(t0, t1);
 			auto E5 = choose(f0 + f1, f0);
 			auto P = E1 * E2 * E3 * E4 * E5;
@@ -190,7 +190,7 @@ namespace osuCrypto {
 			u64 w, u64 h,
 			u64 k, u64 n, u64 sigma,
 			const Choose<I>& choose,
-			const BallsBinsCap<I>& bbc)
+			const BallsBinsCap<Int>& bbc)
 		{
 			if (n % k)
 				throw RTE_LOC;
@@ -316,7 +316,7 @@ namespace osuCrypto {
 			u64 sigma,
 			u64 numThreads,
 			const Choose<I>& choose,
-			const BallsBinsCap<I>& bbc,
+			const BallsBinsCap<Int>& bbc,
 			Full&& full = {},
 			LoadingBar* laodingBar = nullptr)
 		{
