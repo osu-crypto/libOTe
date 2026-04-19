@@ -97,7 +97,7 @@ def parse_stdout(stdout: str) -> dict[str, float | int | None]:
     return result
 
 
-def run_case(frontend: Path, k: int, sigma: int, rate: float, full: bool) -> dict[str, object]:
+def run_case(frontend: Path, k: int, sigma: int, rate: float, full: bool, threads: int) -> dict[str, object]:
     cmd = [
         str(frontend),
         "-minimumdistance",
@@ -110,6 +110,8 @@ def run_case(frontend: Path, k: int, sigma: int, rate: float, full: bool) -> dic
         str(rate),
         "-sigma",
         str(sigma),
+        "-threads",
+        str(threads),
         "-noPlot",
     ]
     if full:
@@ -131,6 +133,7 @@ def run_case(frontend: Path, k: int, sigma: int, rate: float, full: bool) -> dic
         "k_requested": k,
         "sigma": sigma,
         "rate": rate,
+        "threads": threads,
         "case_name": dist_info["name"],
         "dist_file": str(dist_path),
         "runtime_ms": stdout_info["runtime_ms"],
@@ -160,6 +163,7 @@ def main() -> int:
     parser.add_argument("--k", default="4,8,12,16,20,24,32")
     parser.add_argument("--sigma", default="2,3,4")
     parser.add_argument("--rate", type=float, default=0.5)
+    parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--full", action="store_true")
     parser.add_argument("--csv", type=Path, default=ROOT / "dense_exact_sweep.csv")
     parser.add_argument("--stop-on-error", action="store_true")
@@ -173,7 +177,7 @@ def main() -> int:
         for k in ks:
             print(f"running k={k}, sigma={sigma}...", flush=True)
             try:
-                row = run_case(args.frontend, k, sigma, args.rate, args.full)
+                row = run_case(args.frontend, k, sigma, args.rate, args.full, args.threads)
             except Exception as exc:
                 if args.stop_on_error:
                     raise
