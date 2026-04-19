@@ -11,6 +11,28 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FRONTEND = ROOT / "out" / "build" / "x64-Release" / "frontend" / "frontend_libOTe.exe"
+CSV_FIELDNAMES = [
+    "k_requested",
+    "sigma",
+    "rate",
+    "threads",
+    "case_name",
+    "dist_file",
+    "runtime_ms",
+    "kernel_h",
+    "kernel_weight",
+    "md_reported",
+    "zero_rel_reported",
+    "zero_val_reported",
+    "positive_count_h",
+    "positive_count_rel",
+    "positive_count_log2",
+    "positive_cum_h",
+    "positive_cum_rel",
+    "positive_cum_log2",
+    "enum_file",
+    "error",
+]
 
 
 def parse_int_list(text: str) -> list[int]:
@@ -172,41 +194,39 @@ def main() -> int:
     ks = parse_int_list(args.k)
     sigmas = parse_int_list(args.sigma)
 
-    rows: list[dict[str, object]] = []
-    for sigma in sigmas:
-        for k in ks:
-            print(f"running k={k}, sigma={sigma}...", flush=True)
-            try:
-                row = run_case(args.frontend, k, sigma, args.rate, args.full, args.threads)
-            except Exception as exc:
-                if args.stop_on_error:
-                    raise
-                row = {
-                    "k_requested": k,
-                    "sigma": sigma,
-                    "rate": args.rate,
-                    "error": str(exc),
-                }
-                rows.append(row)
-                print(f"  failed: {exc}", flush=True)
-                continue
-            rows.append(row)
-            print(
-                f"  positive cumulative threshold: h={row['positive_cum_h']} "
-                f"(rel={row['positive_cum_rel']}) runtime={row['runtime_ms']}ms",
-                flush=True,
-            )
-
-    fieldnames: list[str] = []
-    for row in rows:
-        for key in row.keys():
-            if key not in fieldnames:
-                fieldnames.append(key)
-
+    args.csv.parent.mkdir(parents=True, exist_ok=True)
     with args.csv.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
         writer.writeheader()
-        writer.writerows(rows)
+        f.flush()
+
+        for sigma in sigmas:
+            for k in ks:
+                print(f"running k={k}, sigma={sigma}...", flush=True)
+                try:
+                    row = run_case(args.frontend, k, sigma, args.rate, args.full, args.threads)
+                except Exception as exc:
+                    if args.stop_on_error:
+                        raise
+                    row = {
+                        "k_requested": k,
+                        "sigma": sigma,
+                        "rate": args.rate,
+                        "threads": args.threads,
+                        "error": str(exc),
+                    }
+                    writer.writerow(row)
+                    f.flush()
+                    print(f"  failed: {exc}", flush=True)
+                    continue
+
+                writer.writerow(row)
+                f.flush()
+                print(
+                    f"  positive cumulative threshold: h={row['positive_cum_h']} "
+                    f"(rel={row['positive_cum_rel']}) runtime={row['runtime_ms']}ms",
+                    flush=True,
+                )
 
     print(f"wrote {args.csv}")
     return 0
