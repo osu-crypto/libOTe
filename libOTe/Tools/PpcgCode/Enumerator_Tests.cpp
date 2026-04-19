@@ -198,6 +198,19 @@ namespace osuCrypto {
 				}
 			}
 		}
+
+		// Regression check: when bins*cap is even, the cache must include the midpoint.
+		{
+			Choose<Int> choose(64);
+			BallsBinsCap<Int> cache(16, 6, 3, choose);
+			auto cached = cache(9, 6);
+			auto direct = ballsBinsCap<Int>(9, 6, 3, choose);
+			if (cached != direct)
+			{
+				std::cout << "midpoint cache mismatch: " << cached << " != " << direct << std::endl;
+				throw RTE_LOC;
+			}
+		}
 	}
 
 	void minimumDistanceTestMain(oc::CLP& cmd) {

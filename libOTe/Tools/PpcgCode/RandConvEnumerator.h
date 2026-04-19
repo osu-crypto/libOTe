@@ -85,41 +85,44 @@ namespace osuCrypto {
 
 		// a helper function that computes the E_wh term in isolation.
 		static R enumerate(
-			u64 w, u64 h,
-			u64 r, u64 t0,
-			u64 k, u64 n, u64 sigma,
+			i64 w, i64 h,
+			i64 r, i64 t0,
+			i64 k, i64 n, i64 sigma,
 			const Choose<I>& choose,
 			const BallsBinsCap<Int>& bbc)
 		{
 			if (bbc.mCap != sigma - 1)
 				throw RTE_LOC;
+			if (w < 0 || h < 0 || r < 0 || t0 < 0 || k < 0 || n < 0 || sigma <= 0)
+				return 0;
 
 			if (w == 0 && h == 0 && r == 0 && t0 == 0)
 				return 1;
 
 			auto r1 = divCeil(r, 2);
 			auto r0 = r - r1;
-			i64 v = n - h - t0 - r0 * sigma;
-			i64 s = n - r1 - v;
-			if (s < 0)
+			auto v = n - h - t0 - r0 * sigma;
+			auto s = n - r1 - v;
+			if (v < 0 || s < 0)
 				return 0;
-			if (v < 0)
-				return 0;
-			auto E1 = choose(h - 1, r1 - 1);
+
+			auto E1 = choose_<I>(h - 1, r1 - 1);
 			auto E2 = bbc(t0, h - r0);
-			auto E3 = ballsBins(v, r0 + 1, choose);
-			auto E4 = choose(s, w - r1);
+			auto E3 = ballsBins<I>(v, r0 + 1, choose);
+			auto E4 = choose_<I>(s, w - r1);
 
 			return R(E1 * E2 * E3 * E4) / pow2_<I>(s);
 		}
 
 		// a helper function that computes the E_wh term in isolation.
 		static R enumerate(
-			u64 w, u64 h,
-			u64 k, u64 n, u64 sigma,
+			i64 w, i64 h,
+			i64 k, i64 n, i64 sigma,
 			const Choose<I>& choose,
 			const BallsBinsCap<Int>& bbc)
 		{
+			if (w < 0 || h < 0 || k < 0 || n < 0 || sigma <= 0)
+				throw RTE_LOC;
 			if (!(w <= k && h <= n && sigma <= k))
 				throw RTE_LOC;
 			if (k % sigma)
@@ -137,7 +140,7 @@ namespace osuCrypto {
 			// each on run must (except the last) must terminate with sigma zeros.
 			// we have (n-h) zeros, therefore we can have at most 2(n-h)/sigma runs.
 			auto rMax = std::min<i64>(
-				2 * std::min<i64>(w, h) + 1,
+				2 * std::min(w, h) + 1,
 				2 * ((n - h) / sigma) + 1);
 			for (i64 r = 1; r <= rMax; ++r)
 			{
@@ -151,6 +154,8 @@ namespace osuCrypto {
 				i64 t0Max = std::min<i64>(
 					n - h - (r1 - 1) * sigma,
 					(h - r0) * (sigma - 1));
+				if (t0Max < 0)
+					continue;
 
 				for (i64 t0 = 0; t0 <= t0Max; ++t0)
 				{
@@ -226,7 +231,7 @@ namespace osuCrypto {
 
 
 			std::vector<R> inputFrac(inputDist.size());
-			for (u64 w = 0; w < k; ++w)
+			for (u64 w = 0; w <= k; ++w)
 			{
 				inputFrac[w] = inputDist[w] / choose(k, w);
 			}
@@ -235,7 +240,6 @@ namespace osuCrypto {
 			for (u64 i = 0; i < numThreads; ++i)
 			{
 				thrds[i] = std::jthread([&, i] {
-
 					for (u64 h = 1 + i; h <= n; h += numThreads)
 					{
 						R dh = 0;
@@ -268,7 +272,6 @@ namespace osuCrypto {
 						}
 
 						outputDist[h] = dh;
-
 					}
 
 					});

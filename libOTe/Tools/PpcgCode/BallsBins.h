@@ -173,7 +173,9 @@ namespace osuCrypto
 				// we are symmetric on balls and (bins * cap - balls)
 				// therefore we only need to compute the first half.
 
-				u64 maxBalls = divCeil(std::min<u64>(mBalls, bins * mCap), 2);
+				// operator() folds values with balls > bins*cap/2 back by symmetry,
+				// but the exact midpoint remains in-range and must be cached.
+				u64 maxBalls = std::min<u64>(mBalls, (bins * mCap) / 2);
 				mCache[bins].resize(maxBalls + 1);
 				for (u64 balls = 0; balls < mCache[bins].size(); ++balls)
 				{
