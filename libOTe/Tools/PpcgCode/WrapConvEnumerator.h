@@ -32,7 +32,7 @@ namespace osuCrypto {
 			, mChoose(choose)
 			, mBallsBinsCap(bbc)
 		{
-			if (k != n)
+			if (k > n)
 				throw RTE_LOC;
 		}
 

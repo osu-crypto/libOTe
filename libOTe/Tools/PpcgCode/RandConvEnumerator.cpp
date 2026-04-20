@@ -9,14 +9,16 @@ namespace osuCrypto {
 	// i.e. y[i] = C[i] * y[i - [sigma]] + x[i].
 	void randConvMultBit(span<u8> C, span<u8> x, span<u8> y, u64 k, u64 n, u64 sigma, bool v = false)
 	{
-		if (k != n)
+		if (k > n)
 			throw RTE_LOC;
 		if (sigma > 8)
 			throw RTE_LOC;
 		u8 yPrev = 0;
 		for (u64 i = 0; i < n; ++i)
 		{
-			u8 xi = (x[i / 8] >> (i % 8)) & 1;
+			u8 xi = 0;
+			if (i < k)
+				xi = (x[i / 8] >> (i % 8)) & 1;
 
 			if (v)
 			{
