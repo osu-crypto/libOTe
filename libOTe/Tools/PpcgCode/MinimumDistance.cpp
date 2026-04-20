@@ -27,6 +27,7 @@
 #include "RandomEnumerator.h"
 #include "BandedEnumerator.h"
 #include "RandConvEnumerator.h"
+#include "WrapConvEnumerator.h"
 
 namespace osuCrypto
 {
@@ -109,7 +110,7 @@ namespace osuCrypto
 		{
 			std::cout << "This function benchmarks the minimum distance computation for various parameters." << std::endl;
 			std::cout << "The parameters are: " << std::endl;
-			std::cout << "-subcode [repeat, block, sysBlock, band, acc, exp, rand, sysRand, randConv]+ " << std::endl;
+			std::cout << "-subcode [repeat, block, sysBlock, band, acc, exp, rand, sysRand, randConv, wrapConv]+ " << std::endl;
 			std::cout << "   e.g. -subcode repeat acc acc " << std::endl;
 			std::cout << "-systematic " << std::endl;
 			std::cout << "-k [list int] " << std::endl;
@@ -121,7 +122,7 @@ namespace osuCrypto
 
 		auto subCodeTags = cmd.getManyOr("subcode", std::vector<std::string>{""});
 		if (subCodeTags.size() == 0)
-			throw std::runtime_error("subcodes must be specified {repeat, acc, block, band, randConv, ... }. " LOCATION);
+			throw std::runtime_error("subcodes must be specified {repeat, acc, block, band, randConv, wrapConv, ... }. " LOCATION);
 
 		// the input size
 		auto Ks = cmd.getManyOr("k", std::vector<u64>{512});
@@ -267,8 +268,17 @@ namespace osuCrypto
 							subcodes.emplace_back(
 								new RandConvEnumerator<I, R>(kk, n, sigma, choose, *ballsBinsCaps.back(), num_threads));
 						}
+						else if (subCodeTags[i] == "wrapConv")
+						{
+							sh << "WC" << sigma;
+							ss << "WC" << kk << "." << n << "." << sigma;
+							ballsBinsCaps.emplace_back(
+								new BallsBinsCap<Int>(n, n, sigma > 1 ? sigma - 2 : 0, chooseInt));
+							subcodes.emplace_back(
+								new WrapConvEnumerator<I, R>(kk, n, sigma, choose, *ballsBinsCaps.back(), num_threads));
+						}
 						else
-							throw std::runtime_error("subcodes must be {repeat, accumulate, block, band, randConv, ... }. " LOCATION);
+							throw std::runtime_error("subcodes must be {repeat, accumulate, block, band, randConv, wrapConv, ... }. " LOCATION);
 						subcodesParam.push_back(subcodes.back().get());
 
 						kk = n;
