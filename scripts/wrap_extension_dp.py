@@ -24,7 +24,9 @@ import argparse
 from collections import defaultdict
 from fractions import Fraction
 from itertools import product
+import math
 from math import comb
+from pathlib import Path
 
 
 def popcount(x: int) -> int:
@@ -110,6 +112,39 @@ def compare_iowe(lhs: list[list[Fraction]], rhs: list[list[Fraction]]) -> None:
                 )
 
 
+def parse_log_enum(path: Path) -> list[list[float]]:
+    rows: list[list[float]] = []
+    with path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                break
+            row = []
+            for entry in line.split(","):
+                if entry == "":
+                    continue
+                row.append(float("-inf") if entry == "-inf" else float(entry))
+            rows.append(row)
+    return rows
+
+
+def compare_log_enum(iowe: list[list[Fraction]], log_enum: list[list[float]], tol: float = 5e-5) -> None:
+    if len(iowe) != len(log_enum):
+        raise AssertionError(f"row mismatch: {len(iowe)} vs {len(log_enum)}")
+    for w, row in enumerate(iowe):
+        if len(row) != len(log_enum[w]):
+            raise AssertionError(f"col mismatch in row {w}: {len(row)} vs {len(log_enum[w])}")
+        for h, val in enumerate(row):
+            lhs = float("-inf") if val == 0 else math.log2(float(val))
+            rhs = log_enum[w][h]
+            if lhs == float("-inf") and rhs == float("-inf"):
+                continue
+            if lhs == float("-inf") or rhs == float("-inf") or abs(lhs - rhs) > tol:
+                raise AssertionError(
+                    f"log mismatch at (w={w}, h={h}): lhs={lhs} rhs={rhs}"
+                )
+
+
 def print_nonzero_rows(iowe: list[list[Fraction]]) -> None:
     for w, row in enumerate(iowe):
         nz = [(h, val) for h, val in enumerate(row) if val]
@@ -127,16 +162,23 @@ def main() -> int:
     parser.add_argument("--n", type=int, required=True)
     parser.add_argument("--sigma", type=int, required=True)
     parser.add_argument("--bruteforce", action="store_true")
+    parser.add_argument("--compare-enum", type=Path)
+    parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
     dp_iowe = dp_expected_iowe(args.k, args.n, args.sigma)
-    print(f"DP enumerator for k={args.k}, n={args.n}, sigma={args.sigma}")
-    print_nonzero_rows(dp_iowe)
+    if not args.quiet:
+        print(f"DP enumerator for k={args.k}, n={args.n}, sigma={args.sigma}")
+        print_nonzero_rows(dp_iowe)
 
     if args.bruteforce:
         brute_iowe = brute_force_expected_iowe(args.k, args.n, args.sigma)
         compare_iowe(dp_iowe, brute_iowe)
         print("bruteforce validation passed")
+
+    if args.compare_enum is not None:
+        compare_log_enum(dp_iowe, parse_log_enum(args.compare_enum))
+        print(f"enum comparison passed: {args.compare_enum}")
 
     return 0
 
