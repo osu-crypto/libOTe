@@ -133,6 +133,7 @@ namespace osuCrypto
 			std::cout << "-stageSigma [list int]   # optional, broadcast or one per subcode" << std::endl;
 			std::cout << "-exp [list int] " << std::endl;
 			std::cout << "-stageExp [list int]     # optional, broadcast or one per subcode" << std::endl;
+			std::cout << "-stageN [list int]       # optional exact output lengths, broadcast or one per subcode" << std::endl;
 			std::cout << "-clipMinWeight [list int] # optional surrogate hack, broadcast or one per subcode" << std::endl;
 			return;
 		}
@@ -153,6 +154,7 @@ namespace osuCrypto
 		auto stageSigmas = cmd.getMany<u64>("stageSigma");
 		auto exps = cmd.getManyOr("exp", std::vector<u64>{64});
 		auto stageExps = cmd.getMany<u64>("stageExp");
+		auto stageNsExact = cmd.getMany<u64>("stageN");
 		auto clipMinWeights = cmd.getMany<u64>("clipMinWeight");
 		bool verbose = cmd.isSet("verbose");
 		bool systematic = cmd.isSet("systematic");
@@ -221,24 +223,33 @@ namespace osuCrypto
 					{
 						auto sigmaI = stageSigmas.size() ? broadcastOrIndex(stageSigmas, i, subCodeTags.size(), "stageSigma") : sigma;
 						auto expI = stageExps.size() ? broadcastOrIndex(stageExps, i, subCodeTags.size(), "stageExp") : exp;
-						auto rateI = stageRates.size() ? broadcastOrIndex(stageRates, i, subCodeTags.size(), "stageRate") : rate;
-						if (rateI <= 0)
-							throw std::runtime_error("stageRate values must be positive. " LOCATION);
-
 						stageSigmasResolved[i] = sigmaI;
 						stageExpsResolved[i] = expI;
-
-						u64 n = kk / rateI;
-						if (i + 1 == subCodeTags.size())
-							n -= kk * systematic;
-
-						if (n % kk)
+						u64 n = 0;
+						if (stageNsExact.size())
 						{
-							auto nn = n;
-							n = ((n + kk / 2) / kk) * kk;
-							std::cout << Color::Red << "rounding n to the nearest "
-								<< "multiple of k. n = " << nn << " -> " << n
-								<< std::endl << Color::Default;
+							n = broadcastOrIndex(stageNsExact, i, subCodeTags.size(), "stageN");
+							if (n < kk)
+								throw std::runtime_error("stageN values must satisfy n >= current stage input length. " LOCATION);
+						}
+						else
+						{
+							auto rateI = stageRates.size() ? broadcastOrIndex(stageRates, i, subCodeTags.size(), "stageRate") : rate;
+							if (rateI <= 0)
+								throw std::runtime_error("stageRate values must be positive. " LOCATION);
+
+							n = kk / rateI;
+							if (i + 1 == subCodeTags.size())
+								n -= kk * systematic;
+
+							if (n % kk)
+							{
+								auto nn = n;
+								n = ((n + kk / 2) / kk) * kk;
+								std::cout << Color::Red << "rounding n to the nearest "
+									<< "multiple of k. n = " << nn << " -> " << n
+									<< std::endl << Color::Default;
+							}
 						}
 
 						stageNs[i] = n;
