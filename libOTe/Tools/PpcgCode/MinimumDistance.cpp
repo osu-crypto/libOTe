@@ -29,6 +29,7 @@
 #include "RandConvEnumerator.h"
 #include "WrapConvEnumerator.h"
 #include "WrapConvDPEnumerator.h"
+#include "SystematicEnumerator.h"
 
 namespace osuCrypto
 {
@@ -121,7 +122,7 @@ namespace osuCrypto
 		{
 			std::cout << "This function benchmarks the minimum distance computation for various parameters." << std::endl;
 			std::cout << "The parameters are: " << std::endl;
-			std::cout << "-subcode [repeat, block, sysBlock, band, acc, exp, rand, sysRand, randConv, wrapConv, wrapConvDp]+ " << std::endl;
+			std::cout << "-subcode [repeat, block, sysBlock, band, sysBand, acc, exp, rand, sysRand, randConv, wrapConv, wrapConvDp]+ " << std::endl;
 			std::cout << "   e.g. -subcode repeat acc acc " << std::endl;
 			std::cout << "-systematic " << std::endl;
 			std::cout << "-k [list int] " << std::endl;
@@ -136,7 +137,7 @@ namespace osuCrypto
 
 		auto subCodeTags = cmd.getManyOr("subcode", std::vector<std::string>{""});
 		if (subCodeTags.size() == 0)
-			throw std::runtime_error("subcodes must be specified {repeat, acc, block, band, randConv, wrapConv, wrapConvDp, ... }. " LOCATION);
+			throw std::runtime_error("subcodes must be specified {repeat, acc, block, band, sysBand, randConv, wrapConv, wrapConvDp, ... }. " LOCATION);
 
 		// the input size
 		auto Ks = cmd.getManyOr("k", std::vector<u64>{512});
@@ -274,6 +275,20 @@ namespace osuCrypto
 							subcodes.emplace_back(
 								new BandedEnumerator<I, R>(kk, n, sigmaI, choose, *ballsBinsCaps.back(), num_threads));
 						}
+						else if (subCodeTags[i] == "sysBand")
+						{
+							if (n < 2 * kk)
+								throw std::runtime_error("sysBand currently requires stage output length n >= 2k so the parity branch has length at least k. " LOCATION);
+							auto parityN = n - kk;
+							sh << "sBand" << sigmaI;
+							ss << "sBand" << kk << "." << n << "." << sigmaI;
+							ballsBinsCaps.emplace_back(
+								new BallsBinsCap<Int>(parityN, kk, sigmaI > 1 ? sigmaI - 2 : 0, chooseInt));
+							auto parity = std::make_unique<BandedEnumerator<I, R>>(
+								kk, parityN, sigmaI, choose, *ballsBinsCaps.back(), num_threads);
+							subcodes.emplace_back(
+								new SystematicEnumerator<I, R>(std::move(parity), choose));
+						}
 						else if (subCodeTags[i] == "acc")
 						{
 							sh << "A";
@@ -336,7 +351,7 @@ namespace osuCrypto
 								new WrapConvDPEnumerator<I, R>(kk, n, sigmaI, choose));
 						}
 						else
-							throw std::runtime_error("subcodes must be {repeat, accumulate, block, band, randConv, wrapConv, wrapConvDp, ... }. " LOCATION);
+							throw std::runtime_error("subcodes must be {repeat, accumulate, block, band, sysBand, randConv, wrapConv, wrapConvDp, ... }. " LOCATION);
 						subcodesParam.push_back(subcodes.back().get());
 
 						kk = n;

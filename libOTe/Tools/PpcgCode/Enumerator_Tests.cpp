@@ -18,6 +18,7 @@
 #include "BallsBins.h"
 #include "WrapConvEnumerator.h"
 #include "WrapConvDPEnumerator.h"
+#include "SystematicEnumerator.h"
 #include "RandomEnumerator.h"
 
 #define BITSET_SIZE 128
@@ -225,6 +226,44 @@ namespace osuCrypto {
 		tests.add("BandedEnum_exhaustive_Test          ", BandedEnum_exhaustive_Test);
 		tests.add("expandEnum_exhaustive_Test          ", expandEnum_exhaustive_Test);
 		tests.add("RandomEnum_exhaustive_Test          ", RandomEnum_exhaustive_Test);
+		tests.add("SystematicEnum_compare_Test        ", [](const CLP&)
+		{
+			Choose<Int> choose(40);
+			std::vector<Rat> inDist(9), outSys(17), outWrap(17);
+			for (u64 w = 0; w <= 8; ++w)
+				inDist[w] = choose(8, w);
+
+			Matrix<Rat> fullSys(9, 17), fullWrap(9, 17);
+			RandomEnumerator<Int, Rat> sysEnum(8, 16, true, choose);
+			sysEnum.enumerate(inDist, outSys, fullSys);
+
+			auto parity = std::make_unique<RandomEnumerator<Int, Rat>>(8, 8, false, choose);
+			SystematicEnumerator<Int, Rat> wrapEnum(std::move(parity), choose);
+			wrapEnum.enumerate(inDist, outWrap, fullWrap);
+
+			for (u64 w = 0; w < fullSys.rows(); ++w)
+			{
+				for (u64 h = 0; h < fullSys.cols(); ++h)
+				{
+					auto a = fullSys(w, h);
+					auto b = fullWrap(w, h);
+					a.backend().normalize();
+					b.backend().normalize();
+					if (a != b)
+						throw RTE_LOC;
+				}
+			}
+
+			for (u64 h = 0; h < outSys.size(); ++h)
+			{
+				auto a = outSys[h];
+				auto b = outWrap[h];
+				a.backend().normalize();
+				b.backend().normalize();
+				if (a != b)
+					throw RTE_LOC;
+			}
+		});
 		
 		tests.add("RandConvEnum_single_Test            ", RandConvEnum_single_Test);;
 		tests.add("RandConvEnum_exhaustive_Test        ", RandConvEnum_exhaustive_Test);
