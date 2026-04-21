@@ -55,10 +55,11 @@ def parse_stdout(stdout: str) -> dict[str, object]:
         "case_name": None,
     }
 
-    zero_match = re.search(r"zero\s+(\d+)\s+([^\s]+)", stdout)
-    if zero_match:
-        result["kernel_h"] = int(zero_match.group(1))
-        result["kernel_weight"] = zero_match.group(2)
+    zero_matches = re.findall(r"^zero\s+(\d+)\s+([^\s]+)", stdout, re.MULTILINE)
+    if zero_matches:
+        kernel_h, kernel_weight = zero_matches[-1]
+        result["kernel_h"] = int(kernel_h)
+        result["kernel_weight"] = kernel_weight
 
     md_match = re.search(r"MD:\s+([^\s]+)\s+zero:\s+([^\s]+)\s+zeroVal:\s+([^\s]+)", stdout)
     if md_match:
@@ -128,6 +129,29 @@ def run_case(frontend: Path, k: int, sigma: int, tau_frac: float, threads: int) 
     }
 
 
+def run_case_with_retries(
+    frontend: Path,
+    k: int,
+    sigma: int,
+    tau_frac: float,
+    threads: int,
+    retries: int,
+) -> dict[str, object]:
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            row = run_case(frontend, k, sigma, tau_frac, threads)
+            row["error"] = ""
+            return row
+        except Exception as exc:
+            last_exc = exc
+            if attempt == retries:
+                break
+            time.sleep(1.0)
+    assert last_exc is not None
+    raise last_exc
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sweep the sysBand + wrapConvDp regime with exact stage lengths.")
     parser.add_argument("--frontend", type=Path, default=DEFAULT_FRONTEND)
@@ -135,6 +159,7 @@ def main() -> int:
     parser.add_argument("--sigma", type=int, default=8)
     parser.add_argument("--tau-frac", type=float, default=0.1)
     parser.add_argument("--threads", type=int, default=os.cpu_count() or 1)
+    parser.add_argument("--retries", type=int, default=1)
     parser.add_argument("--csv", type=Path, default=ROOT / "sysband_regime_longrun.csv")
     parser.add_argument("--stop-on-error", action="store_true")
     args = parser.parse_args()
@@ -150,7 +175,14 @@ def main() -> int:
             print(f"running k={k}, sigma={args.sigma}, tau_frac={args.tau_frac}...", flush=True)
             start = time.time()
             try:
-                row = run_case(args.frontend, k, args.sigma, args.tau_frac, args.threads)
+                row = run_case_with_retries(
+                    args.frontend,
+                    k,
+                    args.sigma,
+                    args.tau_frac,
+                    args.threads,
+                    args.retries,
+                )
             except Exception as exc:
                 if args.stop_on_error:
                     raise
