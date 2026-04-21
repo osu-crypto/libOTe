@@ -19,6 +19,7 @@
 #include "WrapConvEnumerator.h"
 #include "WrapConvDPEnumerator.h"
 #include "SystematicEnumerator.h"
+#include "ClippedEnumerator.h"
 #include "RandomEnumerator.h"
 
 #define BITSET_SIZE 128
@@ -258,6 +259,50 @@ namespace osuCrypto {
 			{
 				auto a = outSys[h];
 				auto b = outWrap[h];
+				a.backend().normalize();
+				b.backend().normalize();
+				if (a != b)
+					throw RTE_LOC;
+			}
+		});
+		tests.add("ClippedEnum_compare_Test           ", [](const CLP&)
+		{
+			Choose<Int> choose(40);
+			std::vector<Rat> inDist(9), outClip(9), outManual(9);
+			for (u64 w = 0; w <= 8; ++w)
+				inDist[w] = choose(8, w);
+
+			Matrix<Rat> fullClip(9, 9), fullManual(9, 9), fullBase(9, 9);
+			RandomEnumerator<Int, Rat> baseEnum(8, 8, false, choose);
+			baseEnum.enumerate(inDist, outManual, fullBase);
+			for (u64 w = 1; w < fullBase.rows(); ++w)
+			{
+				for (u64 h = 0; h < 3; ++h)
+					fullBase(w, h) = Rat(0);
+			}
+			osuCrypto::enumerate<Rat>(fullBase, inDist, outManual, choose, nullptr);
+
+			auto inner = std::make_unique<RandomEnumerator<Int, Rat>>(8, 8, false, choose);
+			ClippedEnumerator<Int, Rat> clipEnum(std::move(inner), choose, 3);
+			clipEnum.enumerate(inDist, outClip, fullClip);
+
+			for (u64 w = 0; w < fullClip.rows(); ++w)
+			{
+				for (u64 h = 0; h < fullClip.cols(); ++h)
+				{
+					auto a = fullClip(w, h);
+					auto b = fullBase(w, h);
+					a.backend().normalize();
+					b.backend().normalize();
+					if (a != b)
+						throw RTE_LOC;
+				}
+			}
+
+			for (u64 h = 0; h < outClip.size(); ++h)
+			{
+				auto a = outClip[h];
+				auto b = outManual[h];
 				a.backend().normalize();
 				b.backend().normalize();
 				if (a != b)

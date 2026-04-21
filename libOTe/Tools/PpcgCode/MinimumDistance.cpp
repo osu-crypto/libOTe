@@ -30,6 +30,7 @@
 #include "WrapConvEnumerator.h"
 #include "WrapConvDPEnumerator.h"
 #include "SystematicEnumerator.h"
+#include "ClippedEnumerator.h"
 
 namespace osuCrypto
 {
@@ -132,6 +133,7 @@ namespace osuCrypto
 			std::cout << "-stageSigma [list int]   # optional, broadcast or one per subcode" << std::endl;
 			std::cout << "-exp [list int] " << std::endl;
 			std::cout << "-stageExp [list int]     # optional, broadcast or one per subcode" << std::endl;
+			std::cout << "-clipMinWeight [list int] # optional surrogate hack, broadcast or one per subcode" << std::endl;
 			return;
 		}
 
@@ -151,6 +153,7 @@ namespace osuCrypto
 		auto stageSigmas = cmd.getMany<u64>("stageSigma");
 		auto exps = cmd.getManyOr("exp", std::vector<u64>{64});
 		auto stageExps = cmd.getMany<u64>("stageExp");
+		auto clipMinWeights = cmd.getMany<u64>("clipMinWeight");
 		bool verbose = cmd.isSet("verbose");
 		bool systematic = cmd.isSet("systematic");
 		bool doPlot = !cmd.isSet("noPlot");
@@ -352,6 +355,15 @@ namespace osuCrypto
 						}
 						else
 							throw std::runtime_error("subcodes must be {repeat, accumulate, block, band, sysBand, randConv, wrapConv, wrapConvDp, ... }. " LOCATION);
+
+						auto clipMinWeight = clipMinWeights.size() ? broadcastOrIndex(clipMinWeights, i, subCodeTags.size(), "clipMinWeight") : 0ull;
+						if (clipMinWeight)
+						{
+							sh << "clip" << clipMinWeight;
+							ss << "clip" << clipMinWeight;
+							auto clipped = std::make_unique<ClippedEnumerator<I, R>>(std::move(subcodes.back()), choose, clipMinWeight);
+							subcodes.back() = std::move(clipped);
+						}
 						subcodesParam.push_back(subcodes.back().get());
 
 						kk = n;
