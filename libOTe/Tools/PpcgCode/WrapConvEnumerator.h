@@ -349,7 +349,7 @@ namespace osuCrypto {
 
 
 			std::vector<R> inputFrac(inputDist.size());
-			for (u64 w = 0; w < k; ++w)
+			for (u64 w = 0; w <= k; ++w)
 			{
 				inputFrac[w] = inputDist[w] / choose(k, w);
 			}
