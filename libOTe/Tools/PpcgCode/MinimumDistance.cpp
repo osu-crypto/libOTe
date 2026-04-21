@@ -97,6 +97,16 @@ namespace osuCrypto
 	// in that you can specify the subcode type for each subcode
 	void enumerateCode(const oc::CLP& cmd) try {
 
+		auto broadcastOrIndex = [&](auto const& values, u64 idx, u64 count, const char* name)
+		{
+			using T = std::decay_t<decltype(values[0])>;
+			if (values.size() == 1)
+				return values[0];
+			if (values.size() == count)
+				return values[idx];
+			throw std::runtime_error(std::string(name) + " must have size 1 or match -subcode count. " LOCATION);
+		};
+
 		// expander (0: firstSubcode, 1: block expander), 
 		// multiplier (0: block, 1: non recursive convolution), 
 		// num_iters, k, n, sigma, sigma_expander (0 if firstSubcode),
@@ -116,8 +126,11 @@ namespace osuCrypto
 			std::cout << "-systematic " << std::endl;
 			std::cout << "-k [list int] " << std::endl;
 			std::cout << "-rate double " << std::endl;
+			std::cout << "-stageRate [list double]  # optional, broadcast or one per subcode" << std::endl;
 			std::cout << "-sigma [list int] " << std::endl;
+			std::cout << "-stageSigma [list int]   # optional, broadcast or one per subcode" << std::endl;
 			std::cout << "-exp [list int] " << std::endl;
+			std::cout << "-stageExp [list int]     # optional, broadcast or one per subcode" << std::endl;
 			return;
 		}
 
@@ -130,10 +143,13 @@ namespace osuCrypto
 
 		// n = k / rate
 		auto rate = cmd.getOr("rate", 0.5);
+		auto stageRates = cmd.getMany<double>("stageRate");
 
 		// block size
 		auto sigmas = cmd.getManyOr("sigma", std::vector<u64>{64});
+		auto stageSigmas = cmd.getMany<u64>("stageSigma");
 		auto exps = cmd.getManyOr("exp", std::vector<u64>{64});
+		auto stageExps = cmd.getMany<u64>("stageExp");
 		bool verbose = cmd.isSet("verbose");
 		bool systematic = cmd.isSet("systematic");
 		bool doPlot = !cmd.isSet("noPlot");
@@ -163,29 +179,24 @@ namespace osuCrypto
 		using I = Int;
 		using R = Rat;
 
+		auto sigmaSweep = stageSigmas.size() ? std::vector<u64>{ stageSigmas[0] } : sigmas;
+		auto expSweep = stageExps.size() ? std::vector<u64>{ stageExps[0] } : exps;
+
 		std::vector<std::string> filenames;
 		for (auto k : Ks)
 		{
-			for (auto sigma : sigmas)
+			for (auto sigma : sigmaSweep)
 			{
-				for (auto exp : exps)
+				for (auto exp : expSweep)
 				{
-
-					u64 n = k / rate - k * systematic;
-					if (k % sigma)
+					auto initialK = k;
+					auto sigma0 = stageSigmas.size() ? broadcastOrIndex(stageSigmas, 0, subCodeTags.size(), "stageSigma") : sigma;
+					if (initialK % sigma0)
 					{
-						auto kk = k;
-						k = ((k + sigma / 2) / sigma) * sigma;
+						auto kk = initialK;
+						initialK = ((initialK + sigma0 / 2) / sigma0) * sigma0;
 						std::cout << Color::Red << "Rounding k to the nearest "
-							<< "multiple of sigma. k = " << kk << " -> " << k
-							<< std::endl << Color::Default;
-					}
-					if (n % k)
-					{
-						auto nn = n;
-						n = ((n + k / 2) / k) * k;
-						std::cout << Color::Red << "rounding n to the nearest "
-							<< "multiple of k. n = " << nn << " -> " << n
+							<< "multiple of sigma. k = " << kk << " -> " << initialK
 							<< std::endl << Color::Default;
 					}
 
@@ -193,22 +204,61 @@ namespace osuCrypto
 					if (systematic)
 					{
 						sh << "S";
-						ss << "S" << k << "." << k / rate;
+						ss << "S" << initialK << "." << initialK / rate;
+					}
+
+					std::vector<u64> stageNs(subCodeTags.size());
+					std::vector<u64> stageSigmasResolved(subCodeTags.size());
+					std::vector<u64> stageExpsResolved(subCodeTags.size());
+					u64 kk = initialK;
+					u64 maxN = initialK;
+					u64 maxLocal = 0;
+					for (u64 i = 0; i < subCodeTags.size(); ++i)
+					{
+						auto sigmaI = stageSigmas.size() ? broadcastOrIndex(stageSigmas, i, subCodeTags.size(), "stageSigma") : sigma;
+						auto expI = stageExps.size() ? broadcastOrIndex(stageExps, i, subCodeTags.size(), "stageExp") : exp;
+						auto rateI = stageRates.size() ? broadcastOrIndex(stageRates, i, subCodeTags.size(), "stageRate") : rate;
+						if (rateI <= 0)
+							throw std::runtime_error("stageRate values must be positive. " LOCATION);
+
+						stageSigmasResolved[i] = sigmaI;
+						stageExpsResolved[i] = expI;
+
+						u64 n = kk / rateI;
+						if (i + 1 == subCodeTags.size())
+							n -= kk * systematic;
+
+						if (n % kk)
+						{
+							auto nn = n;
+							n = ((n + kk / 2) / kk) * kk;
+							std::cout << Color::Red << "rounding n to the nearest "
+								<< "multiple of k. n = " << nn << " -> " << n
+								<< std::endl << Color::Default;
+						}
+
+						stageNs[i] = n;
+						maxN = std::max(maxN, n);
+						maxLocal = std::max(maxLocal, std::max(sigmaI, expI));
+						kk = n;
 					}
 
 					Choose<I> choose;// (n, lb);
 					Choose<Int> chooseInt;// (n);
 					LoadingBar lb;
-					auto chooseBound = 2 * n + std::max<u64>(sigma, exp) + 8;
+					auto chooseBound = 2 * maxN + maxLocal + 8;
 					choose.precompute(chooseBound);
 					chooseInt.precompute(chooseBound);
 
-					u64 kk = k;
+					kk = initialK;
 					std::vector<std::unique_ptr<Enumerator<R>>> subcodes;
 					std::vector<std::unique_ptr<BallsBinsCap<Int>>> ballsBinsCaps;
 					std::vector<Enumerator<R>*> subcodesParam;
 					for (u64 i = 0; i < subCodeTags.size(); ++i)
 					{
+						auto n = stageNs[i];
+						auto sigmaI = stageSigmasResolved[i];
+						auto expI = stageExpsResolved[i];
 						if (subCodeTags[i] == "repeat")
 						{
 							sh << "R";
@@ -217,12 +267,12 @@ namespace osuCrypto
 						}
 						else if (subCodeTags[i] == "band")
 						{
-							sh << "Band" << sigma;
-							ss << "Band" << kk << "." << n << "." << sigma;
+							sh << "Band" << sigmaI;
+							ss << "Band" << kk << "." << n << "." << sigmaI;
 							ballsBinsCaps.emplace_back(
-								new BallsBinsCap<Int>(n, kk, sigma > 1 ? sigma - 2 : 0, chooseInt));
+								new BallsBinsCap<Int>(n, kk, sigmaI > 1 ? sigmaI - 2 : 0, chooseInt));
 							subcodes.emplace_back(
-								new BandedEnumerator<I, R>(kk, n, sigma, choose, *ballsBinsCaps.back(), num_threads));
+								new BandedEnumerator<I, R>(kk, n, sigmaI, choose, *ballsBinsCaps.back(), num_threads));
 						}
 						else if (subCodeTags[i] == "acc")
 						{
@@ -232,21 +282,21 @@ namespace osuCrypto
 						}
 						else if (subCodeTags[i] == "block")
 						{
-							sh << "B"<< sigma;
-							ss << "B" << kk << "." << n << "." << sigma;
-							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, false, choose, chooseInt, false));
+							sh << "B"<< sigmaI;
+							ss << "B" << kk << "." << n << "." << sigmaI;
+							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigmaI, false, choose, chooseInt, false));
 						}
 						else if (subCodeTags[i] == "sysBlock")
 						{
-							sh << "sB"<< sigma;
-							ss << "sB" << kk << "." << n << "." << sigma;
-							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigma, true, choose, chooseInt, false));
+							sh << "sB"<< sigmaI;
+							ss << "sB" << kk << "." << n << "." << sigmaI;
+							subcodes.emplace_back(new BlockEnumerator<I, R>(kk, n, sigmaI, true, choose, chooseInt, false));
 						}
 						else if (subCodeTags[i] == "exp")
 						{
-							sh << "E"<< exp;
-							ss << "E" << kk << "." << n << "." << exp;
-							subcodes.emplace_back(new ExpandEnumerator<I, R>(kk, n, exp, choose));
+							sh << "E"<< expI;
+							ss << "E" << kk << "." << n << "." << expI;
+							subcodes.emplace_back(new ExpandEnumerator<I, R>(kk, n, expI, choose));
 						}
 						else if (subCodeTags[i] == "rand")
 						{
@@ -262,28 +312,28 @@ namespace osuCrypto
 						}
 						else if (subCodeTags[i] == "randConv")
 						{
-							sh << "RC" << sigma;
-							ss << "RC" << kk << "." << n << "." << sigma;
+							sh << "RC" << sigmaI;
+							ss << "RC" << kk << "." << n << "." << sigmaI;
 							ballsBinsCaps.emplace_back(
-								new BallsBinsCap<Int>(n, n, sigma > 0 ? sigma - 1 : 0, chooseInt));
+								new BallsBinsCap<Int>(n, n, sigmaI > 0 ? sigmaI - 1 : 0, chooseInt));
 							subcodes.emplace_back(
-								new RandConvEnumerator<I, R>(kk, n, sigma, choose, *ballsBinsCaps.back(), num_threads));
+								new RandConvEnumerator<I, R>(kk, n, sigmaI, choose, *ballsBinsCaps.back(), num_threads));
 						}
 						else if (subCodeTags[i] == "wrapConv")
 						{
-							sh << "WC" << sigma;
-							ss << "WC" << kk << "." << n << "." << sigma;
+							sh << "WC" << sigmaI;
+							ss << "WC" << kk << "." << n << "." << sigmaI;
 							ballsBinsCaps.emplace_back(
-								new BallsBinsCap<Int>(n, n, sigma > 1 ? sigma - 2 : 0, chooseInt));
+								new BallsBinsCap<Int>(n, n, sigmaI > 1 ? sigmaI - 2 : 0, chooseInt));
 							subcodes.emplace_back(
-								new WrapConvEnumerator<I, R>(kk, n, sigma, choose, *ballsBinsCaps.back(), num_threads));
+								new WrapConvEnumerator<I, R>(kk, n, sigmaI, choose, *ballsBinsCaps.back(), num_threads));
 						}
 						else if (subCodeTags[i] == "wrapConvDp")
 						{
-							sh << "WCDP" << sigma;
-							ss << "WCDP" << kk << "." << n << "." << sigma;
+							sh << "WCDP" << sigmaI;
+							ss << "WCDP" << kk << "." << n << "." << sigmaI;
 							subcodes.emplace_back(
-								new WrapConvDPEnumerator<I, R>(kk, n, sigma, choose));
+								new WrapConvDPEnumerator<I, R>(kk, n, sigmaI, choose));
 						}
 						else
 							throw std::runtime_error("subcodes must be {repeat, accumulate, block, band, randConv, wrapConv, wrapConvDp, ... }. " LOCATION);
@@ -313,7 +363,7 @@ namespace osuCrypto
 					{
 						auto wBegin = cmd.getOr("wBegin", 0);
 						for (u64 w = wBegin; w < inDist.size(); ++w)
-							inDist[w] = choose(k, w);
+							inDist[w] = choose(initialK, w);
 					}
 
 
