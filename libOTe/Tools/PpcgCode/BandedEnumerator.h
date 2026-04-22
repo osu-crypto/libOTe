@@ -112,7 +112,7 @@ namespace osuCrypto {
 			if (w == 0 || h > n || sigma == 0)
 				return 0;
 			if (sigma == 1)
-				return R(choose(k, w) * choose_<I>(w, h)) / pow2_<I>(w);
+				return to<R>(choose(k, w) * choose_<I>(w, h)) * invPow2<R>(w);
 
 			R enumerator = 0;
 			auto qMax = std::min<u64>(n, w * sigma);
@@ -129,11 +129,10 @@ namespace osuCrypto {
 				if (countWQ == 0)
 					continue;
 
-				enumerator += R(countWQ * chooseQH) / pow2_<I>(q);
+				enumerator += to<R>(countWQ * chooseQH) * invPow2<R>(q);
 			}
 
-			if constexpr (std::is_same_v<R, Rat>)
-				enumerator.backend().normalize();
+			normalizeIfNeeded(enumerator);
 
 			return enumerator;
 		}
@@ -178,7 +177,7 @@ namespace osuCrypto {
 
 			std::vector<R> inputFrac(inputDist.size());
 			for (u64 w = 0; w <= k; ++w)
-				inputFrac[w] = inputDist.size() ? inputDist[w] / choose(k, w) : R(1);
+				inputFrac[w] = inputDist.size() ? inputDist[w] / to<R>(choose(k, w)) : R(1);
 
 			for (u64 w = 1; w <= k; ++w)
 				outputDist[0] += inputFrac[w] * enumerate(w, 0, k, n, sigma, choose, bbc);

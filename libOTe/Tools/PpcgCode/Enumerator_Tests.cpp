@@ -26,6 +26,44 @@
 
 namespace osuCrypto {
 
+	template<typename R>
+	void ensureFiniteNonNegative(span<const R> dist)
+	{
+		for (u64 i = 0; i < dist.size(); ++i)
+		{
+			if (!isFiniteValue(dist[i]))
+			{
+				std::cout << "non-finite distribution value at " << i << ": " << dist[i] << std::endl;
+				throw RTE_LOC;
+			}
+			if (dist[i] < R(0))
+			{
+				std::cout << "negative distribution value at " << i << ": " << dist[i] << std::endl;
+				throw RTE_LOC;
+			}
+		}
+	}
+
+	template<typename R0, typename R1>
+	void compareFloatLike(const std::vector<R0>& a, const std::vector<R1>& b, double relTol, double absTol)
+	{
+		if (a.size() != b.size())
+			throw RTE_LOC;
+		for (u64 i = 0; i < a.size(); ++i)
+		{
+			auto aa = Float(a[i]);
+			auto bb = Float(b[i]);
+			auto diff = boost::multiprecision::abs(aa - bb);
+			auto scale = std::max(boost::multiprecision::abs(aa), boost::multiprecision::abs(bb));
+			auto limit = std::max(Float(absTol), Float(relTol) * scale);
+			if (diff > limit)
+			{
+				std::cout << "mismatch at " << i << ": " << aa << " vs " << bb << ", diff " << diff << std::endl;
+				throw RTE_LOC;
+			}
+		}
+	}
+
 	u64 labeledBallsBinsCapExhaustive(i64 balls, i64 bins, i64 cap)
 	{
 		if (balls < 0)
@@ -316,6 +354,70 @@ namespace osuCrypto {
 		tests.add("WrapConvEnum_exhaustive_Test        ", WrapConvEnum_exhaustive_Test);
 		tests.add("WrapConvDP_compare_Test            ", WrapConvDP_compare_Test);
 		tests.add("WrapConvDP_exhaustive_Test         ", WrapConvDP_exhaustive_Test);
+		tests.add("FloatEnum_compare_Test            ", [](const CLP&)
+		{
+			const u64 k = 8;
+			const u64 outerN = 18;
+			const u64 innerN = 20;
+			const u64 sigma = 2;
+
+			Choose<Int> choose(64);
+			BallsBinsCap<Int> bbc(outerN, k, sigma > 1 ? sigma - 2 : 0, choose);
+
+			std::vector<Rat> inExact(k + 1), outExact(innerN + 1);
+			std::vector<Float> inFloat(k + 1), outFloat(innerN + 1);
+			for (u64 w = 0; w <= k; ++w)
+			{
+				inExact[w] = choose(k, w);
+				inFloat[w] = to<Float>(choose(k, w));
+			}
+
+			auto parityExact = std::make_unique<BandedEnumerator<Int, Rat>>(k, outerN - k, sigma, choose, bbc, 1);
+			auto parityFloat = std::make_unique<BandedEnumerator<Int, Float>>(k, outerN - k, sigma, choose, bbc, 1);
+			SystematicEnumerator<Int, Rat> sysExact(std::move(parityExact), choose);
+			SystematicEnumerator<Int, Float> sysFloat(std::move(parityFloat), choose);
+			WrapConvDPEnumerator<Int, Rat> innerExact(outerN, innerN, sigma, choose);
+			WrapConvDPEnumerator<Int, Float> innerFloat(outerN, innerN, sigma, choose);
+
+			std::vector<Enumerator<Rat>*> subsExact{ &sysExact, &innerExact };
+			std::vector<Enumerator<Float>*> subsFloat{ &sysFloat, &innerFloat };
+			ComposeEnumerator<Int, Rat> compExact(subsExact, false, choose, 1);
+			ComposeEnumerator<Int, Float> compFloat(subsFloat, false, choose, 1);
+
+			compExact.enumerate(inExact, outExact);
+			compFloat.enumerate(inFloat, outFloat);
+
+			ensureFiniteNonNegative<Float>(outFloat);
+			compareFloatLike(outExact, outFloat, 1e-24, 1e-30);
+		});
+		tests.add("FloatEnum_smoke_Test              ", [](const CLP&)
+		{
+			const u64 k = 16;
+			const u64 sigma = 4;
+			const u64 outerN = 2 * k + sigma;
+			const u64 innerN = outerN + 4;
+
+			Choose<Int> choose(96);
+			BallsBinsCap<Int> bbc(outerN - k, k, sigma > 1 ? sigma - 2 : 0, choose);
+
+			std::vector<Float> in(k + 1), out(innerN + 1);
+			for (u64 w = 0; w <= k; ++w)
+				in[w] = to<Float>(choose(k, w));
+
+			auto parity = std::make_unique<BandedEnumerator<Int, Float>>(k, outerN - k, sigma, choose, bbc, 1);
+			SystematicEnumerator<Int, Float> sys(std::move(parity), choose);
+			WrapConvDPEnumerator<Int, Float> inner(outerN, innerN, sigma, choose);
+			std::vector<Enumerator<Float>*> subs{ &sys, &inner };
+			ComposeEnumerator<Int, Float> comp(subs, false, choose, 1);
+
+			comp.enumerate(in, out);
+			ensureFiniteNonNegative<Float>(out);
+			Float sum = 0;
+			for (auto& v : out)
+				sum += v;
+			if (!isFiniteValue(sum) || sum <= 0)
+				throw RTE_LOC;
+		});
 		
 		tests.add("composeEnum_exhaustive_Test         ", composeEnum_exhaustive_Test);
 		tests.add("composeEnum_sysExhaustive_Test      ", composeEnum_sysExhaustive_Test);

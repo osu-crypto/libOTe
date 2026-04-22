@@ -14,6 +14,12 @@ TODOS:
 3. implement non-recursive block enumerator
 4. test minimum distance with this non-recursive block enumerator
 5. work on the recursive enumerator
+6. Add a tail-only enumerator mode that computes only output weights h <= h_max for threshold finding
+7. Add approximate trimming with discarded-mass accounting so pruned work still has an explicit error budget
+8. In composition, prune intermediate j to an active window around the dominant mass instead of summing the full row
+9. In WrapConvDPEnumerator, add frontier/beam pruning in low-tail mode and track the discarded mass separately
+10. Add a wide floating-point backend (quad first, oct if needed) for fast approximate sweeps while keeping exact mode for validation
+11. Refactor hot loops so threshold sweeps can avoid building the full table when only the first crossing is needed
 
 
 

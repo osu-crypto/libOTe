@@ -42,7 +42,7 @@ namespace osuCrypto {
 
 
 	template<typename T, typename R>
-	T to(const R&);
+	T to(const R& v);
 
 	template<typename T>
 	T pow2(u64 pow);
@@ -72,10 +72,65 @@ namespace osuCrypto {
 	using Rat = boost::multiprecision::cpp_rational;
 
 #endif
+
+	template<typename T, typename R>
+	inline T to(const R& v)
+	{
+		if constexpr (std::is_same_v<T, Float>)
+		{
+			auto vv = v;
+			return vv.template convert_to<Float>();
+		}
+		else
+			return T(v);
+	}
+
+	template<typename T>
+	inline void normalizeIfNeeded(T&)
+	{
+	}
+
+	template<>
+	inline void normalizeIfNeeded<Rat>(Rat& v)
+	{
+		v.backend().normalize();
+	}
+
+	template<typename T>
+	inline bool isFiniteValue(const T&)
+	{
+		return true;
+	}
+
+	template<>
+	inline bool isFiniteValue<Float>(const Float& v)
+	{
+		return !boost::multiprecision::isnan(v) &&
+			!boost::multiprecision::isinf(v);
+	}
+
 	template<>
 	inline Float to<Float, Float>(const Float& v)
 	{
 		return v;
+	}
+
+	template<>
+	inline Float to<Float, Int>(const Int& v)
+	{
+		return v.convert_to<Float>();
+	}
+
+	template<>
+	inline Float to<Float, Rat>(const Rat& v)
+	{
+		return v.convert_to<Float>();
+	}
+
+	template<>
+	inline Rat to<Rat, Int>(const Int& v)
+	{
+		return Rat(v);
 	}
 
 	template<>
@@ -87,7 +142,8 @@ namespace osuCrypto {
 	// returns z/2^power.
 	inline Float divPow2(const Float& v, u64 power)
 	{
-		return v / pow(Float(v), power);
+		Float two(2);
+		return v / Float(boost::multiprecision::pow(two, power));
 	}
 
 	inline Rat divPow2(const Int& v, u64 power)
@@ -98,6 +154,17 @@ namespace osuCrypto {
 		//mpq_canonicalize(vv);
 		vv = vv.canonical_value(vv);
 		return vv;
+	}
+
+	template<typename R>
+	inline R invPow2(u64 power)
+	{
+		if constexpr (std::is_same_v<R, Float>)
+			return divPow2(Float(1), power);
+		else if constexpr (std::is_same_v<R, Rat>)
+			return divPow2(Int(1), power);
+		else
+			static_assert(std::is_same_v<R, Float> || std::is_same_v<R, Rat>);
 	}
 
 
@@ -249,7 +316,7 @@ namespace osuCrypto {
 			{
 				//std::cout<< w<<" " << h << " ~ " << inputDist[w] << " " << enumerator(w,h) << " / " << kcw << std::endl;
 
-				outputDist[h] += inputDist[w] * enumerator(w, h) / kcw;
+				outputDist[h] += inputDist[w] * enumerator(w, h) / to<R>(kcw);
 			}
 			if (loadingBar)
 				loadingBar->tick();
@@ -317,7 +384,7 @@ namespace osuCrypto {
 				{
 					for (u64 h1 = 0; h1 <= n1; ++h1)
 					{
-						r(w, h) += e1(w, h1) * e2(h1, h) / choose(n1, h1);
+						r(w, h) += e1(w, h1) * e2(h1, h) / to<R>(choose(n1, h1));
 					}
 					if constexpr (std::is_same_v<std::remove_cvref_t<R>, Rat>)
 						r(w, h).backend().normalize();
@@ -339,7 +406,7 @@ namespace osuCrypto {
 						{
 							for (u64 h1 = 0; h1 <= n1; ++h1)
 							{
-								r(w, h) += e1(w, h1) * e2(h1, h) / choose(n1, h1);
+								r(w, h) += e1(w, h1) * e2(h1, h) / to<R>(choose(n1, h1));
 							}
 							if constexpr (std::is_same_v<std::remove_cvref_t<R>, Rat>)
 								r(w, h).backend().normalize();

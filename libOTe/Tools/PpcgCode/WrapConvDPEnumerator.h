@@ -206,7 +206,7 @@ namespace osuCrypto
 			std::vector<R> inputFrac(inDist.size(), R(0));
 			for (u64 w = 0; w <= mK; ++w)
 			{
-				inputFrac[w] = inDist[w] / mChoose(mK, w);
+				inputFrac[w] = inDist[w] / to<R>(mChoose(mK, w));
 			}
 
 			for (u64 h = 0; h <= mN; ++h)

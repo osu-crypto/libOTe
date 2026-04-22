@@ -95,9 +95,31 @@ namespace osuCrypto
 		Accumulator
 	};
 
+	template<typename R>
+	void validateDistribution(span<const R> distribution, std::string_view label)
+	{
+		for (u64 i = 0; i < distribution.size(); ++i)
+		{
+			auto v = distribution[i];
+			if (!isFiniteValue(v))
+			{
+				std::stringstream ss;
+				ss << label << " contains non-finite value at h=" << i;
+				throw std::runtime_error(ss.str() + " " LOCATION);
+			}
+			if (v < R(0))
+			{
+				std::stringstream ss;
+				ss << label << " contains negative value at h=" << i << ": " << v;
+				throw std::runtime_error(ss.str() + " " LOCATION);
+			}
+		}
+	}
+
 	// the new enumerator code, this one is more modular
 	// in that you can specify the subcode type for each subcode
-	void enumerateCode(const oc::CLP& cmd) try {
+	template<typename R>
+	void enumerateCodeTyped(const oc::CLP& cmd) try {
 
 		auto broadcastOrIndex = [&](auto const& values, u64 idx, u64 count, const char* name)
 		{
@@ -135,6 +157,7 @@ namespace osuCrypto
 			std::cout << "-stageExp [list int]     # optional, broadcast or one per subcode" << std::endl;
 			std::cout << "-stageN [list int]       # optional exact output lengths, broadcast or one per subcode" << std::endl;
 			std::cout << "-clipMinWeight [list int] # optional surrogate hack, broadcast or one per subcode" << std::endl;
+			std::cout << "-numeric [float|exact]   # value backend, float uses multiprecision oct float" << std::endl;
 			return;
 		}
 
@@ -183,7 +206,6 @@ namespace osuCrypto
 		std::string scriptPath = std::string(folder) + "/plot.py";
 
 		using I = Int;
-		using R = Rat;
 
 		auto sigmaSweep = stageSigmas.size() ? std::vector<u64>{ stageSigmas[0] } : sigmas;
 		auto expSweep = stageExps.size() ? std::vector<u64>{ stageExps[0] } : exps;
@@ -274,7 +296,44 @@ namespace osuCrypto
 						auto n = stageNs[i];
 						auto sigmaI = stageSigmasResolved[i];
 						auto expI = stageExpsResolved[i];
-						if (subCodeTags[i] == "repeat")
+						if constexpr (std::is_same_v<R, Float>)
+						{
+							if (subCodeTags[i] == "band")
+							{
+								sh << "Band" << sigmaI;
+								ss << "Band" << kk << "." << n << "." << sigmaI;
+								ballsBinsCaps.emplace_back(
+									new BallsBinsCap<Int>(n, kk, sigmaI > 1 ? sigmaI - 2 : 0, chooseInt));
+								subcodes.emplace_back(
+									new BandedEnumerator<I, R>(kk, n, sigmaI, choose, *ballsBinsCaps.back(), num_threads));
+							}
+							else if (subCodeTags[i] == "sysBand")
+							{
+								if (n < 2 * kk)
+									throw std::runtime_error("sysBand currently requires stage output length n >= 2k so the parity branch has length at least k. " LOCATION);
+								auto parityN = n - kk;
+								sh << "sBand" << sigmaI;
+								ss << "sBand" << kk << "." << n << "." << sigmaI;
+								ballsBinsCaps.emplace_back(
+									new BallsBinsCap<Int>(parityN, kk, sigmaI > 1 ? sigmaI - 2 : 0, chooseInt));
+								auto parity = std::make_unique<BandedEnumerator<I, R>>(
+									kk, parityN, sigmaI, choose, *ballsBinsCaps.back(), num_threads);
+								subcodes.emplace_back(
+									new SystematicEnumerator<I, R>(std::move(parity), choose));
+							}
+							else if (subCodeTags[i] == "wrapConvDp")
+							{
+								sh << "WCDP" << sigmaI;
+								ss << "WCDP" << kk << "." << n << "." << sigmaI;
+								subcodes.emplace_back(
+									new WrapConvDPEnumerator<I, R>(kk, n, sigmaI, choose));
+							}
+							else
+							{
+								throw std::runtime_error("float backend currently supports {band, sysBand, wrapConvDp}. " LOCATION);
+							}
+						}
+						else if (subCodeTags[i] == "repeat")
 						{
 							sh << "R";
 							ss << "R" << kk << "." << n;
@@ -395,13 +454,13 @@ namespace osuCrypto
 					if (cmd.hasValue("w"))
 					{
 						u64 w = cmd.get<u64>("w");
-						inDist[w] = choose(k, w);
+						inDist[w] = to<R>(choose(k, w));
 					}
 					else
 					{
 						auto wBegin = cmd.getOr("wBegin", 0);
 						for (u64 w = wBegin; w < inDist.size(); ++w)
-							inDist[w] = choose(initialK, w);
+							inDist[w] = to<R>(choose(initialK, w));
 					}
 
 
@@ -414,6 +473,7 @@ namespace osuCrypto
 					else
 						comp.enumerate(inDist, outDist);
 
+					validateDistribution<R>(outDist, "output distribution");
 					auto expected_md = minimumDistance<R>(outDist);
 					auto end = std::chrono::high_resolution_clock::now();
 
@@ -479,6 +539,23 @@ namespace osuCrypto
 	}
 	catch (std::exception& e) {
 		std::cout << e.what() << std::endl;
+	}
+
+	void enumerateCode(const oc::CLP& cmd)
+	{
+		auto numeric = cmd.getOr<std::string>("numeric", "float");
+		if (numeric == "float")
+		{
+			enumerateCodeTyped<Float>(cmd);
+		}
+		else if (numeric == "exact")
+		{
+			enumerateCodeTyped<Rat>(cmd);
+		}
+		else
+		{
+			throw std::runtime_error("numeric must be one of {float, exact}. " LOCATION);
+		}
 	}
 
 	void fullEnumerate(const oc::CLP& cmd)
