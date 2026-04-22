@@ -418,6 +418,63 @@ namespace osuCrypto {
 			if (!isFiniteValue(sum) || sum <= 0)
 				throw RTE_LOC;
 		});
+		tests.add("WrapConvDP_tailCap_Test          ", [](const CLP&)
+		{
+			const u64 k = 8;
+			const u64 n = 10;
+			const u64 sigma = 3;
+			const u64 hMax = 4;
+
+			Choose<Int> choose(64);
+			std::vector<Rat> in(k + 1), outFull(n + 1), outTail(n + 1);
+			for (u64 w = 0; w <= k; ++w)
+				in[w] = choose(k, w);
+
+			WrapConvDPEnumerator<Int, Rat> fullEnum(k, n, sigma, choose);
+			WrapConvDPEnumerator<Int, Rat> tailEnum(k, n, sigma, choose);
+			tailEnum.mHMax = hMax;
+
+			fullEnum.enumerate(in, outFull);
+			tailEnum.enumerate(in, outTail);
+
+			for (u64 h = 0; h <= hMax; ++h)
+			{
+				auto a = outFull[h];
+				auto b = outTail[h];
+				a.backend().normalize();
+				b.backend().normalize();
+				if (a != b)
+					throw RTE_LOC;
+			}
+
+			for (u64 h = hMax + 1; h <= n; ++h)
+			{
+				if (outTail[h] != Rat(0))
+					throw RTE_LOC;
+			}
+
+			if (tailEnum.mDiscardedMassUpper <= Rat(0))
+				throw RTE_LOC;
+		});
+		tests.add("WrapConvDP_approxSmoke_Test      ", [](const CLP&)
+		{
+			const u64 k = 12;
+			const u64 n = 16;
+			const u64 sigma = 4;
+
+			Choose<Int> choose(96);
+			std::vector<Float> in(k + 1), out(n + 1);
+			for (u64 w = 0; w <= k; ++w)
+				in[w] = to<Float>(choose(k, w));
+
+			WrapConvDPEnumerator<Int, Float> approxEnum(k, n, sigma, choose);
+			approxEnum.mApproxRelEps = 1e-2;
+			approxEnum.enumerate(in, out);
+
+			ensureFiniteNonNegative<Float>(out);
+			if (!isFiniteValue(approxEnum.mDiscardedMassUpper) || approxEnum.mDiscardedMassUpper <= Float(0))
+				throw RTE_LOC;
+		});
 		
 		tests.add("composeEnum_exhaustive_Test         ", composeEnum_exhaustive_Test);
 		tests.add("composeEnum_sysExhaustive_Test      ", composeEnum_sysExhaustive_Test);

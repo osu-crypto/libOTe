@@ -32,6 +32,9 @@ namespace osuCrypto
 
 		u64 mSigma = 0;
 		const Choose<I>& mChoose;
+		u64 mHMax = 0;
+		double mApproxRelEps = 0;
+		R mDiscardedMassUpper = R(0);
 
 		u64 numTicks() const override
 		{
@@ -103,6 +106,8 @@ namespace osuCrypto
 					throw RTE_LOC;
 			}
 
+			mDiscardedMassUpper = R(0);
+
 			Matrix<R> localFull;
 			MatrixView<R> fullEnum = [&]() -> MatrixView<R>
 			{
@@ -133,9 +138,15 @@ namespace osuCrypto
 				return state * stateStride + w * rowStride + h;
 			};
 
+			std::vector<R> remainingInputMass(mN + 1, R(1));
+			for (u64 step = mK; step-- > 0;)
+				remainingInputMass[step] = remainingInputMass[step + 1] * R(2);
+
 			cur[idx(0, 0, 0)] = R(1);
 			auto stateMask = lowMask(mSigma);
 			auto half = R(1) / R(2);
+			auto totalPrefixMass = R(1);
+			auto hCap = mHMax ? std::min<u64>(mHMax, mN) : mN;
 
 			for (u64 step = 0; step < mN; ++step)
 			{
@@ -143,16 +154,26 @@ namespace osuCrypto
 
 				auto wMax = std::min<u64>(step, mK);
 				auto nextWMax = std::min<u64>(step + 1, mK);
+				auto stepHMax = std::min<u64>(step, hCap);
+				auto nextHMax = std::min<u64>(step + 1, hCap);
+				R pruneThreshold = R(0);
+				if (mApproxRelEps > 0)
+					pruneThreshold = totalPrefixMass * to<R>(mApproxRelEps);
 				for (u64 state = 0; state < states; ++state)
 				{
 					auto mode = parityMode(step, state, mSigma);
 					for (u64 w = 0; w <= wMax; ++w)
 					{
-						for (u64 h = 0; h <= step; ++h)
+						for (u64 h = 0; h <= stepHMax; ++h)
 						{
 							auto base = cur[idx(state, w, h)];
 							if (base == R(0))
 								continue;
+							if (pruneThreshold != R(0) && base < pruneThreshold)
+							{
+								mDiscardedMassUpper += base * remainingInputMass[step];
+								continue;
+							}
 
 							auto push = [&](u64 xBit, const R& mass)
 							{
@@ -160,23 +181,43 @@ namespace osuCrypto
 									return;
 								if (w + xBit > nextWMax)
 									return;
-
 								if (mode == 2)
 								{
 									auto massHalf = mass * half;
 									auto y0 = xBit;
-									auto s0 = ((state << 1) | y0) & stateMask;
-									nxt[idx(s0, w + xBit, h + y0)] += massHalf;
+									if (h + y0 <= nextHMax)
+									{
+										auto s0 = ((state << 1) | y0) & stateMask;
+										nxt[idx(s0, w + xBit, h + y0)] += massHalf;
+									}
+									else
+									{
+										mDiscardedMassUpper += massHalf * remainingInputMass[step + 1];
+									}
 
 									auto y1 = xBit ^ 1;
-									auto s1 = ((state << 1) | y1) & stateMask;
-									nxt[idx(s1, w + xBit, h + y1)] += massHalf;
+									if (h + y1 <= nextHMax)
+									{
+										auto s1 = ((state << 1) | y1) & stateMask;
+										nxt[idx(s1, w + xBit, h + y1)] += massHalf;
+									}
+									else
+									{
+										mDiscardedMassUpper += massHalf * remainingInputMass[step + 1];
+									}
 								}
 								else
 								{
 									auto y = xBit ^ mode;
-									auto s = ((state << 1) | y) & stateMask;
-									nxt[idx(s, w + xBit, h + y)] += mass;
+									if (h + y <= nextHMax)
+									{
+										auto s = ((state << 1) | y) & stateMask;
+										nxt[idx(s, w + xBit, h + y)] += mass;
+									}
+									else
+									{
+										mDiscardedMassUpper += mass * remainingInputMass[step + 1];
+									}
 								}
 							};
 
@@ -188,6 +229,8 @@ namespace osuCrypto
 				}
 
 				std::swap(cur, nxt);
+				if (step < mK)
+					totalPrefixMass *= R(2);
 				if (mLoadBar)
 					mLoadBar->tick();
 			}
@@ -196,7 +239,7 @@ namespace osuCrypto
 			{
 				for (u64 w = 0; w <= mK; ++w)
 				{
-					for (u64 h = 0; h <= mN; ++h)
+					for (u64 h = 0; h <= hCap; ++h)
 					{
 						fullEnum(w, h) += cur[idx(state, w, h)];
 					}

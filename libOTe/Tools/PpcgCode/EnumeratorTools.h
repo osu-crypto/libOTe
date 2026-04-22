@@ -78,8 +78,10 @@ namespace osuCrypto {
 	{
 		if constexpr (std::is_same_v<T, Float>)
 		{
-			auto vv = v;
-			return vv.template convert_to<Float>();
+			if constexpr (requires { v.template convert_to<Float>(); })
+				return v.template convert_to<Float>();
+			else
+				return Float(v);
 		}
 		else
 			return T(v);

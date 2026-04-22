@@ -158,6 +158,8 @@ namespace osuCrypto
 			std::cout << "-stageN [list int]       # optional exact output lengths, broadcast or one per subcode" << std::endl;
 			std::cout << "-clipMinWeight [list int] # optional surrogate hack, broadcast or one per subcode" << std::endl;
 			std::cout << "-numeric [float|exact]   # value backend, float uses multiprecision oct float" << std::endl;
+			std::cout << "-hMax int                # optional wrapConvDp low-tail cap" << std::endl;
+			std::cout << "-approxEps double        # optional experimental wrapConvDp relative prune threshold" << std::endl;
 			return;
 		}
 
@@ -200,6 +202,8 @@ namespace osuCrypto
 		bool full = cmd.isSet("full");
 
         u64 trim = cmd.getOr("trim", 0);
+		u64 hMax = cmd.getOr("hMax", 0);
+		double approxEps = cmd.getOr("approxEps", 0.0);
 
 		constexpr std::string_view path = __FILE__;
 		auto folder = path.substr(0, path.find_last_of("/\\"));
@@ -325,8 +329,10 @@ namespace osuCrypto
 							{
 								sh << "WCDP" << sigmaI;
 								ss << "WCDP" << kk << "." << n << "." << sigmaI;
-								subcodes.emplace_back(
-									new WrapConvDPEnumerator<I, R>(kk, n, sigmaI, choose));
+								auto inner = std::make_unique<WrapConvDPEnumerator<I, R>>(kk, n, sigmaI, choose);
+								inner->mHMax = hMax;
+								inner->mApproxRelEps = approxEps;
+								subcodes.emplace_back(std::move(inner));
 							}
 							else
 							{
@@ -420,8 +426,10 @@ namespace osuCrypto
 						{
 							sh << "WCDP" << sigmaI;
 							ss << "WCDP" << kk << "." << n << "." << sigmaI;
-							subcodes.emplace_back(
-								new WrapConvDPEnumerator<I, R>(kk, n, sigmaI, choose));
+							auto inner = std::make_unique<WrapConvDPEnumerator<I, R>>(kk, n, sigmaI, choose);
+							inner->mHMax = hMax;
+							inner->mApproxRelEps = approxEps;
+							subcodes.emplace_back(std::move(inner));
 						}
 						else
 							throw std::runtime_error("subcodes must be {repeat, accumulate, block, band, sysBand, randConv, wrapConv, wrapConvDp, ... }. " LOCATION);
@@ -476,6 +484,12 @@ namespace osuCrypto
 					validateDistribution<R>(outDist, "output distribution");
 					auto expected_md = minimumDistance<R>(outDist);
 					auto end = std::chrono::high_resolution_clock::now();
+					R discardedUpper = 0;
+					for (auto* subcode : subcodesParam)
+					{
+						if (auto* wcdp = dynamic_cast<WrapConvDPEnumerator<I, R>*>(subcode))
+							discardedUpper += wcdp->mDiscardedMassUpper;
+					}
 
 
 
@@ -498,6 +512,8 @@ namespace osuCrypto
 
 					std::cout << "MD: " << expected_md.mExpectMD << " zero: " << expected_md.mZeroRelDist
 						<< " zeroVal: " << expected_md.mZeroValue << std::endl;
+					if (discardedUpper != R(0))
+						std::cout << "discardedUpper: " << discardedUpper << std::endl;
 
 					if (fullEnum.size())
 					{
