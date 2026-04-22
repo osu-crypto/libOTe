@@ -26,7 +26,7 @@
         "ENABLE_RELIC": false,
         "ENABLE_SODIUM": true,
         "FETCH_SODIUM": true,
-        "ENABLE_ASAN": true,
+        "ENABLE_ASAN": false,
         "ENABLE_MOCK_OT": true,
         "LIBOTE_SHARED": false,
         "ENABLE_PIC": true,
