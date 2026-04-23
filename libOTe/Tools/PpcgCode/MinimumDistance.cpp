@@ -3,6 +3,7 @@
 #include <chrono>
 #include <numeric>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 #include "BlockEnumerator.h"
@@ -86,6 +87,14 @@ namespace osuCrypto
 	{
 		std::function<void()> mFunc;
 		~OnExit() { mFunc(); }
+	};
+
+	struct AutoHMaxSeed
+	{
+		bool mSet = false;
+		u64 mCap = 0;
+		u64 mZeroH = 0;
+		u64 mCumH = 0;
 	};
 
 	enum Subcode
@@ -237,6 +246,7 @@ namespace osuCrypto
 
 		auto sigmaSweep = stageSigmas.size() ? std::vector<u64>{ stageSigmas[0] } : sigmas;
 		auto expSweep = stageExps.size() ? std::vector<u64>{ stageExps[0] } : exps;
+		std::unordered_map<std::string, AutoHMaxSeed> autoHMaxSeeds;
 
 		std::vector<std::string> filenames;
 		for (auto k : Ks)
@@ -307,6 +317,19 @@ namespace osuCrypto
 						maxLocal = std::max(maxLocal, std::max(sigmaI, expI));
 						kk = n;
 					}
+
+					std::stringstream autoKey;
+					for (u64 i = 0; i < subCodeTags.size(); ++i)
+					{
+						if (i)
+							autoKey << "|";
+						autoKey << subCodeTags[i]
+							<< ":s" << stageSigmasResolved[i]
+							<< ":e" << stageExpsResolved[i];
+					}
+					auto& autoSeed = autoHMaxSeeds[autoKey.str()];
+					auto sigmaHint = *std::max_element(stageSigmasResolved.begin(), stageSigmasResolved.end());
+					auto slack = std::max<u64>(4, (sigmaHint + 1) / 2);
 
 					Choose<I> choose;// (n, lb);
 					Choose<Int> chooseInt;// (n);
@@ -537,7 +560,14 @@ namespace osuCrypto
 
 					if (autoHMax && hasTailCapSubcode)
 					{
-						auto currentCap = hMax ? std::min<u64>(hMax, comp.mN) : std::min<u64>(comp.mN, 32);
+						u64 currentCap = 0;
+						if (hMax)
+							currentCap = std::min<u64>(hMax, comp.mN);
+						else if (autoSeed.mSet)
+							currentCap = std::min<u64>(comp.mN, std::max(autoSeed.mCap, std::max(autoSeed.mZeroH, autoSeed.mCumH) + slack));
+						else
+							currentCap = std::min<u64>(comp.mN, std::max<u64>(1, 3 * sigmaHint));
+
 						while (true)
 						{
 							++autoAttempts;
@@ -552,10 +582,14 @@ namespace osuCrypto
 							if ((zeroCertified && cumCertified) || currentCap == comp.mN)
 							{
 								capUsed = currentCap;
+								autoSeed.mSet = true;
+								autoSeed.mCap = currentCap;
+								autoSeed.mZeroH = autoZeroH == ~u64(0) ? currentCap : autoZeroH;
+								autoSeed.mCumH = autoCumH == ~u64(0) ? currentCap : autoCumH;
 								break;
 							}
 
-							auto nextCap = std::min<u64>(comp.mN, std::max<u64>(currentCap + 1, currentCap * 2));
+							auto nextCap = std::min<u64>(comp.mN, std::max<u64>(currentCap + slack, currentCap + std::max<u64>(1, currentCap / 2)));
 							if (nextCap == currentCap)
 							{
 								capUsed = currentCap;
