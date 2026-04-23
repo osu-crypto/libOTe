@@ -116,6 +116,28 @@ namespace osuCrypto
 		}
 	}
 
+	template<typename R>
+	u64 firstPositiveWeightAtLeastOne(span<const R> distribution)
+	{
+		for (u64 h = 1; h < distribution.size(); ++h)
+			if (distribution[h] >= R(1))
+				return h;
+		return ~u64(0);
+	}
+
+	template<typename R>
+	u64 firstPositiveCumulativeAtLeastOne(span<const R> distribution)
+	{
+		R sum = 0;
+		for (u64 h = 1; h < distribution.size(); ++h)
+		{
+			sum += distribution[h];
+			if (sum >= R(1))
+				return h;
+		}
+		return ~u64(0);
+	}
+
 	// the new enumerator code, this one is more modular
 	// in that you can specify the subcode type for each subcode
 	template<typename R>
@@ -159,6 +181,7 @@ namespace osuCrypto
 			std::cout << "-clipMinWeight [list int] # optional surrogate hack, broadcast or one per subcode" << std::endl;
 			std::cout << "-numeric [float|exact]   # value backend, float uses multiprecision oct float" << std::endl;
 			std::cout << "-hMax int                # optional wrapConv / wrapConvDp low-tail cap" << std::endl;
+			std::cout << "-autoHMax                # adaptively grow hMax until the low-weight threshold is certified" << std::endl;
 			std::cout << "-approxEps double        # optional experimental wrapConvDp relative prune threshold" << std::endl;
 			return;
 		}
@@ -201,8 +224,9 @@ namespace osuCrypto
 		bool print_dist = cmd.isSet("printDist") || cmd.isSet("numPoints");
 		bool full = cmd.isSet("full");
 
-        u64 trim = cmd.getOr("trim", 0);
+		u64 trim = cmd.getOr("trim", 0);
 		u64 hMax = cmd.getOr("hMax", 0);
+		bool autoHMax = cmd.isSet("autoHMax");
 		double approxEps = cmd.getOr("approxEps", 0.0);
 
 		constexpr std::string_view path = __FILE__;
@@ -484,13 +508,82 @@ namespace osuCrypto
 
 
 					Matrix<R> fullEnum;
-					if (full)
+					auto setWrapTailCap = [&](u64 cap)
 					{
-						fullEnum.resize(inDist.size(), outDist.size());
-						comp.enumerate(inDist, outDist, fullEnum);
+						for (auto* subcode : subcodesParam)
+						{
+							if (auto* wc = dynamic_cast<WrapConvEnumerator<I, R>*>(subcode))
+								wc->mHMax = cap;
+							if (auto* wcdp = dynamic_cast<WrapConvDPEnumerator<I, R>*>(subcode))
+								wcdp->mHMax = cap;
+						}
+					};
+
+					bool hasTailCapSubcode = false;
+					for (auto* subcode : subcodesParam)
+					{
+						if (dynamic_cast<WrapConvEnumerator<I, R>*>(subcode) ||
+							dynamic_cast<WrapConvDPEnumerator<I, R>*>(subcode))
+						{
+							hasTailCapSubcode = true;
+							break;
+						}
+					}
+
+					u64 capUsed = hMax;
+					u64 autoAttempts = 0;
+					u64 autoZeroH = ~u64(0);
+					u64 autoCumH = ~u64(0);
+
+					if (autoHMax && hasTailCapSubcode)
+					{
+						auto currentCap = hMax ? std::min<u64>(hMax, comp.mN) : std::min<u64>(comp.mN, 32);
+						while (true)
+						{
+							++autoAttempts;
+							setWrapTailCap(currentCap);
+							comp.enumerate(inDist, outDist);
+							validateDistribution<R>(outDist, "output distribution");
+
+							autoZeroH = firstPositiveWeightAtLeastOne<R>(outDist);
+							autoCumH = firstPositiveCumulativeAtLeastOne<R>(outDist);
+							auto zeroCertified = autoZeroH != ~u64(0) && autoZeroH <= currentCap;
+							auto cumCertified = autoCumH != ~u64(0) && autoCumH <= currentCap;
+							if ((zeroCertified && cumCertified) || currentCap == comp.mN)
+							{
+								capUsed = currentCap;
+								break;
+							}
+
+							auto nextCap = std::min<u64>(comp.mN, std::max<u64>(currentCap + 1, currentCap * 2));
+							if (nextCap == currentCap)
+							{
+								capUsed = currentCap;
+								break;
+							}
+							currentCap = nextCap;
+						}
+
+						if (full)
+						{
+							setWrapTailCap(capUsed);
+							fullEnum.resize(inDist.size(), outDist.size());
+							comp.enumerate(inDist, outDist, fullEnum);
+						}
 					}
 					else
-						comp.enumerate(inDist, outDist);
+					{
+						if (hasTailCapSubcode)
+							setWrapTailCap(hMax);
+
+						if (full)
+						{
+							fullEnum.resize(inDist.size(), outDist.size());
+							comp.enumerate(inDist, outDist, fullEnum);
+						}
+						else
+							comp.enumerate(inDist, outDist);
+					}
 
 					validateDistribution<R>(outDist, "output distribution");
 					auto expected_md = minimumDistance<R>(outDist);
@@ -520,6 +613,16 @@ namespace osuCrypto
 
 					std::cout << sh.str() << ss.str() << " time: "
 						<< std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
+					if (autoHMax && hasTailCapSubcode)
+					{
+						std::cout << "autoHMax: attempts=" << autoAttempts
+							<< " cap=" << capUsed;
+						if (autoZeroH != ~u64(0))
+							std::cout << " zeroH=" << autoZeroH;
+						if (autoCumH != ~u64(0))
+							std::cout << " cumH=" << autoCumH;
+						std::cout << std::endl;
+					}
 
 					std::cout << "MD: " << expected_md.mExpectMD << " zero: " << expected_md.mZeroRelDist
 						<< " zeroVal: " << expected_md.mZeroValue << std::endl;
