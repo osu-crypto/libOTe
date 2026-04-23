@@ -230,6 +230,15 @@ namespace osuCrypto {
 			const BallsBinsCap<Int>& bbc,
 			Stats* stats = nullptr)
 		{
+			auto floorDiv = [](i64 numer, i64 denom) -> i64
+			{
+				if (denom <= 0)
+					throw RTE_LOC;
+				if (numer >= 0)
+					return numer / denom;
+				return -(((-numer) + denom - 1) / denom);
+			};
+
 			if (n % k)
 				throw RTE_LOC;
 			if (w == 0 && h == 0)
@@ -306,8 +315,22 @@ namespace osuCrypto {
 						// 0 <= t1 = h - v - r0 - d;
 						// d <= h-v-r0
 						auto dMax = std::min<i64>((r % 2), h - v - r0);
+						auto zBase = n - h - v * (sigma - 1) - t0 - r0 * sigma;
+						auto kBase = k - n + zBase;
+						auto f0Base = h - w + t0 + r0 * sigma + v * (sigma - 2);
 
-						for (i64 d = 0; d <= dMax; ++d) // 
+						dMax = std::min<i64>(dMax, floorDiv(zBase, i64(sigma - 1)));
+						dMax = std::min<i64>(dMax, floorDiv(kBase, i64(sigma - 1)));
+
+						i64 dMin = 0;
+						if (f0Base < 0)
+							dMin = 1;
+						if (dMin && f0Base + i64(sigma - 1) < 0)
+							continue;
+						if (dMin > dMax)
+							continue;
+
+						for (i64 d = dMin; d <= dMax; ++d) // 
 						{
 							if (stats)
 								++stats->mDVisited;
