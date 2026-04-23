@@ -64,6 +64,32 @@ namespace osuCrypto {
 		}
 	}
 
+	template<typename R0, typename R1>
+	Float tailL1(span<const R0> a, span<const R1> b, u64 hMax)
+	{
+		if (a.size() != b.size())
+			throw RTE_LOC;
+		Float err = 0;
+		for (u64 h = 0; h <= hMax; ++h)
+			err += boost::multiprecision::abs(Float(a[h]) - Float(b[h]));
+		return err;
+	}
+
+	template<typename R0, typename R1>
+	Float tailL1(const std::vector<R0>& a, const std::vector<R1>& b, u64 hMax)
+	{
+		return tailL1<R0, R1>(span<const R0>(a.data(), a.size()), span<const R1>(b.data(), b.size()), hMax);
+	}
+
+	template<typename R>
+	u64 firstWeightAtLeastOne(span<const R> dist)
+	{
+		for (u64 h = 0; h < dist.size(); ++h)
+			if (dist[h] >= R(1))
+				return h;
+		return ~u64(0);
+	}
+
 	u64 labeledBallsBinsCapExhaustive(i64 balls, i64 bins, i64 cap)
 	{
 		if (balls < 0)
@@ -474,6 +500,62 @@ namespace osuCrypto {
 			ensureFiniteNonNegative<Float>(out);
 			if (!isFiniteValue(approxEnum.mDiscardedMassUpper) || approxEnum.mDiscardedMassUpper <= Float(0))
 				throw RTE_LOC;
+		});
+		tests.add("WrapConvDP_approxBound_Test      ", [](const CLP&)
+		{
+			const u64 k = 16;
+			const u64 n = 20;
+			const u64 sigma = 4;
+			const u64 hMax = 8;
+
+			Choose<Int> choose(96);
+			std::vector<Float> in(k + 1), outFull(n + 1), outApprox(n + 1);
+			for (u64 w = 0; w <= k; ++w)
+				in[w] = to<Float>(choose(k, w));
+
+			WrapConvDPEnumerator<Int, Float> fullEnum(k, n, sigma, choose);
+			fullEnum.mHMax = hMax;
+			WrapConvDPEnumerator<Int, Float> approxEnum(k, n, sigma, choose);
+			approxEnum.mHMax = hMax;
+			approxEnum.mApproxRelEps = 1e-7;
+
+			fullEnum.enumerate(in, outFull);
+			approxEnum.enumerate(in, outApprox);
+
+			ensureFiniteNonNegative<Float>(outApprox);
+			if (approxEnum.mPrunedEntries == 0)
+				throw RTE_LOC;
+
+			auto err = tailL1(outFull, outApprox, hMax);
+			if (err > approxEnum.mDiscardedMassUpper)
+			{
+				std::cout << "tail error " << err
+					<< " exceeds discarded upper bound " << approxEnum.mDiscardedMassUpper << std::endl;
+				throw RTE_LOC;
+			}
+
+			auto hFull = firstWeightAtLeastOne<Float>(outFull);
+			auto hApprox = firstWeightAtLeastOne<Float>(outApprox);
+			if (hFull != hApprox)
+			{
+				std::cout << "threshold changed under approximation: "
+					<< hFull << " vs " << hApprox << std::endl;
+				throw RTE_LOC;
+			}
+
+			for (u64 h = 0; h <= hMax; ++h)
+			{
+				auto a = outFull[h];
+				auto b = outApprox[h];
+				auto diff = boost::multiprecision::abs(a - b);
+				auto limit = std::max(Float("1e-6"), boost::multiprecision::abs(a) * Float("1e-4"));
+				if (diff > limit)
+				{
+					std::cout << "unexpected low-tail drift at h=" << h << ": "
+						<< a << " vs " << b << std::endl;
+					throw RTE_LOC;
+				}
+			}
 		});
 		
 		tests.add("composeEnum_exhaustive_Test         ", composeEnum_exhaustive_Test);

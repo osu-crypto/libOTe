@@ -35,6 +35,8 @@ namespace osuCrypto
 		u64 mHMax = 0;
 		double mApproxRelEps = 0;
 		R mDiscardedMassUpper = R(0);
+		u64 mVisitedEntries = 0;
+		u64 mPrunedEntries = 0;
 
 		u64 numTicks() const override
 		{
@@ -107,6 +109,8 @@ namespace osuCrypto
 			}
 
 			mDiscardedMassUpper = R(0);
+			mVisitedEntries = 0;
+			mPrunedEntries = 0;
 
 			Matrix<R> localFull;
 			MatrixView<R> fullEnum = [&]() -> MatrixView<R>
@@ -169,8 +173,10 @@ namespace osuCrypto
 							auto base = cur[idx(state, w, h)];
 							if (base == R(0))
 								continue;
+							++mVisitedEntries;
 							if (pruneThreshold != R(0) && base < pruneThreshold)
 							{
+								++mPrunedEntries;
 								mDiscardedMassUpper += base * remainingInputMass[step];
 								continue;
 							}
