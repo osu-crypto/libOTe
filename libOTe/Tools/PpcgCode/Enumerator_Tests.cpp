@@ -378,6 +378,45 @@ namespace osuCrypto {
 		tests.add("RandConvEnum_exhaustive_Test        ", RandConvEnum_exhaustive_Test);
 		tests.add("WrapConvEnum_single_Test            ", WrapConvEnum_single_Test);;
 		tests.add("WrapConvEnum_exhaustive_Test        ", WrapConvEnum_exhaustive_Test);
+		tests.add("WrapConv_tailCap_Test             ", [](const CLP&)
+		{
+			const u64 k = 8;
+			const u64 n = 16;
+			const u64 sigma = 3;
+			const u64 hMax = 5;
+
+			Choose<Int> choose(64);
+			BallsBinsCap<Int> bbc(n, n, sigma - 2, choose);
+			std::vector<Rat> in(k + 1), outFull(n + 1), outTail(n + 1);
+			for (u64 w = 0; w <= k; ++w)
+				in[w] = choose(k, w);
+
+			WrapConvEnumerator<Int, Rat> fullEnum(k, n, sigma, choose, bbc, 2);
+			WrapConvEnumerator<Int, Rat> tailEnum(k, n, sigma, choose, bbc, 2);
+			tailEnum.mHMax = hMax;
+
+			fullEnum.enumerate(in, outFull);
+			tailEnum.enumerate(in, outTail);
+
+			for (u64 h = 0; h <= hMax; ++h)
+			{
+				auto a = outFull[h];
+				auto b = outTail[h];
+				a.backend().normalize();
+				b.backend().normalize();
+				if (a != b)
+					throw RTE_LOC;
+			}
+
+			for (u64 h = hMax + 1; h <= n; ++h)
+			{
+				if (outTail[h] != Rat(0))
+					throw RTE_LOC;
+			}
+
+			if (tailEnum.mStats.mWHCalls == 0 || tailEnum.mStats.mDVisited == 0)
+				throw RTE_LOC;
+		});
 		tests.add("WrapConvDP_compare_Test            ", WrapConvDP_compare_Test);
 		tests.add("WrapConvDP_exhaustive_Test         ", WrapConvDP_exhaustive_Test);
 		tests.add("FloatEnum_compare_Test            ", [](const CLP&)
@@ -415,6 +454,47 @@ namespace osuCrypto {
 
 			ensureFiniteNonNegative<Float>(outFloat);
 			compareFloatLike(outExact, outFloat, 1e-24, 1e-30);
+		});
+		tests.add("FloatWrapConv_compare_Test        ", [](const CLP&)
+		{
+			const u64 k = 16;
+			const u64 n = 16;
+			const u64 sigma = 4;
+
+			Choose<Int> choose(2 * n + 8);
+			BallsBinsCap<Int> bbc(n, n, sigma - 2, choose);
+
+			std::vector<Rat> inExact(k + 1), outExact(n + 1);
+			std::vector<Float> inFloat(k + 1), outFloat(n + 1);
+			for (u64 w = 0; w <= k; ++w)
+			{
+				inExact[w] = choose(k, w);
+				inFloat[w] = to<Float>(choose(k, w));
+			}
+
+			Matrix<Rat> fullExact(k + 1, n + 1);
+			Matrix<Float> fullFloat(k + 1, n + 1);
+			WrapConvEnumerator<Int, Rat> exactEnum(k, n, sigma, choose, bbc, 1);
+			WrapConvEnumerator<Int, Float> floatEnum(k, n, sigma, choose, bbc, 1);
+
+			exactEnum.enumerate(inExact, outExact, fullExact);
+			floatEnum.enumerate(inFloat, outFloat, fullFloat);
+
+			ensureFiniteNonNegative<Float>(outFloat);
+			compareFloatLike(outExact, outFloat, 1e-24, 1e-30);
+			for (u64 w = 0; w <= k; ++w)
+			{
+				for (u64 h = 0; h <= n; ++h)
+				{
+					auto a = fullExact(w, h);
+					auto b = fullFloat(w, h);
+					auto diff = boost::multiprecision::abs(Float(a) - b);
+					auto scale = std::max(boost::multiprecision::abs(Float(a)), boost::multiprecision::abs(b));
+					auto limit = std::max(Float("1e-30"), Float("1e-24") * scale);
+					if (diff > limit)
+						throw RTE_LOC;
+				}
+			}
 		});
 		tests.add("FloatEnum_smoke_Test              ", [](const CLP&)
 		{

@@ -18,6 +18,25 @@ namespace osuCrypto {
 	template<typename I, typename R>
 	struct WrapConvEnumerator : Enumerator<R>
 	{
+		struct Stats
+		{
+			u64 mHVisited = 0;
+			u64 mWHCalls = 0;
+			u64 mRVisited = 0;
+			u64 mT0Visited = 0;
+			u64 mVVisited = 0;
+			u64 mDVisited = 0;
+			u64 mNonZeroTerms = 0;
+			u64 mSkipNegZ = 0;
+			u64 mSkipNegF0 = 0;
+			u64 mSkipNegF1 = 0;
+			u64 mSkipNegT0 = 0;
+			u64 mSkipNegT1 = 0;
+			u64 mSkipHr = 0;
+			u64 mSkipK = 0;
+			u64 mSkipD = 0;
+		};
+
 		WrapConvEnumerator(
 			u64 k,
 			u64 n,
@@ -56,6 +75,8 @@ namespace osuCrypto {
 
 		// balls bin cap for cap=sigma-1.
 		const BallsBinsCap<Int>& mBallsBinsCap;
+		u64 mHMax = 0;
+		Stats mStats;
 
 		u64 numTicks() const override
 		{
@@ -67,8 +88,10 @@ namespace osuCrypto {
 			span<const R> inDist,
 			span<R> outDist) override
 		{
-			enumerate(inDist, outDist,
-				mK, mN, mSigma, mNumThreads, mChoose, mBallsBinsCap, {}, mLoadBar);
+			enumerateImpl(inDist, outDist,
+				mK, mN, mSigma, mNumThreads, mChoose, mBallsBinsCap,
+				mHMax ? mHMax : mN,
+				&mStats, {}, mLoadBar);
 		}
 
 		// map the input dist to the output dist.
@@ -78,8 +101,10 @@ namespace osuCrypto {
 			span<R> outDist,
 			MatrixView<R> full) override
 		{
-			enumerate(inDist, outDist,
-				mK, mN, mSigma, mNumThreads, mChoose, mBallsBinsCap, full, mLoadBar);
+			enumerateImpl(inDist, outDist,
+				mK, mN, mSigma, mNumThreads, mChoose, mBallsBinsCap,
+				mHMax ? mHMax : mN,
+				&mStats, full, mLoadBar);
 		}
 
 
@@ -93,7 +118,8 @@ namespace osuCrypto {
 			i64 k, i64 n,
 			i64 sigma,
 			const Choose<I>& choose,
-			const BallsBinsCap<Int>& bbc)
+			const BallsBinsCap<Int>& bbc,
+			Stats* stats = nullptr)
 		{
 			if (bbc.mCap != sigma - 2)
 				throw RTE_LOC;
@@ -138,6 +164,17 @@ namespace osuCrypto {
 
 			bool skip =
 				(negZ || negF0 || negF1 || negT0 || negT1 || hrCheck || kCheck || dCheck);
+			if (skip && stats)
+			{
+				stats->mSkipNegZ += negZ;
+				stats->mSkipNegF0 += negF0;
+				stats->mSkipNegF1 += negF1;
+				stats->mSkipNegT0 += negT0;
+				stats->mSkipNegT1 += negT1;
+				stats->mSkipHr += hrCheck;
+				stats->mSkipK += kCheck;
+				stats->mSkipD += dCheck;
+			}
 			if (skip)
 				return 0;
 
@@ -182,7 +219,7 @@ namespace osuCrypto {
 
 			}
 
-			return R(P) / pow2_<I>(s);
+			return R(P) / to<R>(pow2_<I>(s));
 		}
 
 		// a helper function that computes the E_wh term in isolation.
@@ -190,7 +227,8 @@ namespace osuCrypto {
 			u64 w, u64 h,
 			u64 k, u64 n, u64 sigma,
 			const Choose<I>& choose,
-			const BallsBinsCap<Int>& bbc)
+			const BallsBinsCap<Int>& bbc,
+			Stats* stats = nullptr)
 		{
 			if (n % k)
 				throw RTE_LOC;
@@ -210,6 +248,8 @@ namespace osuCrypto {
 
 			for (i64 r = 1; r <= rMax; ++r)
 			{
+				if (stats)
+					++stats->mRVisited;
 				auto r1 = divCeil(r, 2);
 				auto r0 = r - r1;
 
@@ -218,6 +258,8 @@ namespace osuCrypto {
 				i64 t0Max = n - h - r0 * sigma;
 				for (i64 t0 = 0; t0 <= t0Max; ++t0)
 				{
+					if (stats)
+						++stats->mT0Visited;
 					//i64 z = n - h - t0 - r0 * sigma;
 					//if (z < 0)
 					//	break;
@@ -237,6 +279,8 @@ namespace osuCrypto {
 					vMax = std::min<i64>(vMax, (n - h - t0 - r0 * sigma) / (sigma - 1));
 					for (i64 v = 0; v <= vMax; ++v)
 					{
+						if (stats)
+							++stats->mVVisited;
 
 						//i64 t1 = h - v - r0;
 						//if (t1 < 0)
@@ -262,12 +306,42 @@ namespace osuCrypto {
 						// 0 <= t1 = h - v - r0 - d;
 						// d <= h-v-r0
 						auto dMax = std::min<i64>((r % 2), h - v - r0);
-						dMax = std::min<i64>(dMax, (k - h - t0 - r0 * sigma) / (sigma - 1) - v);
 
 						for (i64 d = 0; d <= dMax; ++d) // 
 						{
-							auto Ewhrt = enumerate(w, h, r, t0, v, d, k, n, sigma, choose, bbc);
+							if (stats)
+								++stats->mDVisited;
+							auto z = n - h - (v + d) * (sigma - 1) - t0 - r0 * sigma;
+							if (z < 0)
+							{
+								if (stats)
+								{
+									++stats->mSkipNegZ;
+									if (k - n + z < 0)
+										++stats->mSkipK;
+								}
+								continue;
+							}
+
+							if (k - n + z < 0)
+							{
+								if (stats)
+									++stats->mSkipK;
+								continue;
+							}
+
+							auto f0 = n - w - z - v;
+							if (f0 < 0)
+							{
+								if (stats)
+									++stats->mSkipNegF0;
+								continue;
+							}
+
+							auto Ewhrt = enumerate(w, h, r, t0, v, d, k, n, sigma, choose, bbc, stats);
 							enumerator += Ewhrt;
+							if (stats && Ewhrt != R(0))
+								++stats->mNonZeroTerms;
 							if constexpr (std::is_same_v<Rat, Float>)
 							{
 								if (isnan(enumerator))
@@ -320,6 +394,30 @@ namespace osuCrypto {
 			Full&& full = {},
 			LoadingBar* laodingBar = nullptr)
 		{
+			enumerateImpl(
+				inputDist, outputDist,
+				k, n, sigma, numThreads,
+				choose, bbc,
+				n, nullptr,
+				std::forward<Full>(full),
+				laodingBar);
+		}
+
+		template<typename Full = int>
+		static void enumerateImpl(
+			span<const R> inputDist,
+			span<R> outputDist,
+			u64 k,
+			u64 n,
+			u64 sigma,
+			u64 numThreads,
+			const Choose<I>& choose,
+			const BallsBinsCap<Int>& bbc,
+			u64 hLimit,
+			Stats* statsOut,
+			Full&& full = {},
+			LoadingBar* laodingBar = nullptr)
+		{
 			if (laodingBar)
 				laodingBar->name("BlockEnumerator");
 
@@ -345,57 +443,91 @@ namespace osuCrypto {
 					throw RTE_LOC;
 				full(0, 0) = 1;
 			}
+			for (auto& v : outputDist)
+				v = R(0);
 			outputDist[0] = inputDist.size() ? inputDist[0] : 1;
+			if (statsOut)
+				*statsOut = Stats{};
 
 
-			std::vector<R> inputFrac(inputDist.size());
+			std::vector<R> inputFrac(k + 1);
 			for (u64 w = 0; w <= k; ++w)
 			{
-				inputFrac[w] = inputDist[w] / choose(k, w);
+				auto numer = inputDist.size() ? inputDist[w] : to<R>(choose(k, w));
+				inputFrac[w] = numer / to<R>(choose(k, w));
 			}
 
-			numThreads = 1;
+			auto hMax = std::min<u64>(hLimit, n);
+			std::vector<Stats> threadStats(numThreads);
 			std::vector<std::jthread> thrds(numThreads);
 			for (u64 i = 0; i < numThreads; ++i)
 			{
-				//thrds[i] = std::jthread([&, i] {
-
-				for (u64 h = 1 + i; h <= n; h += numThreads)
-				{
-					R dh = 0;
-					for (u64 w = 1; w <= k; ++w)
+				thrds[i] = std::jthread([&, i] {
+					auto& stats = threadStats[i];
+					for (u64 h = 1 + i; h <= hMax; h += numThreads)
 					{
-						auto Ewh = enumerate(w, h, k, n, sigma, choose, bbc);
-						dh += inputFrac[w] * Ewh;// / choose(k, w);
-
-						if constexpr (std::is_same_v<Full, int> == false)
+						++stats.mHVisited;
+						R dh = 0;
+						for (u64 w = 1; w <= k; ++w)
 						{
-							full(w, h) = Ewh;
-						}
+							++stats.mWHCalls;
+							auto Ewh = enumerate(w, h, k, n, sigma, choose, bbc, &stats);
+							dh += inputFrac[w] * Ewh;// / choose(k, w);
 
-						if constexpr (std::is_same_v<Rat, Float>)
-						{
-							if (isnan(dh))
+							if constexpr (std::is_same_v<Full, int> == false)
 							{
-								std::lock_guard l(gIoStreamMtx);
-								std::cout << "outputDist[" << h << "] NAN " << std::endl;
-								int i = 0;
-								std::cin >> i;
+								full(w, h) = Ewh;
+							}
 
+							if constexpr (std::is_same_v<Rat, Float>)
+							{
+								if (isnan(dh))
+								{
+									std::lock_guard l(gIoStreamMtx);
+									std::cout << "outputDist[" << h << "] NAN " << std::endl;
+									int i = 0;
+									std::cin >> i;
+
+								}
 							}
 						}
+
+						if constexpr (std::is_same_v<std::remove_cvref_t<R>, Rat>)
+						{
+							dh.backend().normalize();
+						}
+
+						outputDist[h] = dh;
+
 					}
 
-					if constexpr (std::is_same_v<std::remove_cvref_t<R>, Rat>)
-					{
-						dh.backend().normalize();
-					}
+				});
+			}
 
-					outputDist[h] = dh;
+			for (auto& thrd : thrds)
+				if (thrd.joinable())
+					thrd.join();
 
+			for (auto& stats : threadStats)
+			{
+				if (statsOut)
+				{
+					statsOut->mHVisited += stats.mHVisited;
+					statsOut->mWHCalls += stats.mWHCalls;
+					statsOut->mRVisited += stats.mRVisited;
+					statsOut->mT0Visited += stats.mT0Visited;
+					statsOut->mVVisited += stats.mVVisited;
+					statsOut->mDVisited += stats.mDVisited;
+					statsOut->mNonZeroTerms += stats.mNonZeroTerms;
+					statsOut->mSkipNegZ += stats.mSkipNegZ;
+					statsOut->mSkipNegF0 += stats.mSkipNegF0;
+					statsOut->mSkipNegF1 += stats.mSkipNegF1;
+					statsOut->mSkipNegT0 += stats.mSkipNegT0;
+					statsOut->mSkipNegT1 += stats.mSkipNegT1;
+					statsOut->mSkipHr += stats.mSkipHr;
+					statsOut->mSkipK += stats.mSkipK;
+					statsOut->mSkipD += stats.mSkipD;
 				}
-
-				//});
 			}
 
 		}

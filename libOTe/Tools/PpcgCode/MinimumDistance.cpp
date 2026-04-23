@@ -158,7 +158,7 @@ namespace osuCrypto
 			std::cout << "-stageN [list int]       # optional exact output lengths, broadcast or one per subcode" << std::endl;
 			std::cout << "-clipMinWeight [list int] # optional surrogate hack, broadcast or one per subcode" << std::endl;
 			std::cout << "-numeric [float|exact]   # value backend, float uses multiprecision oct float" << std::endl;
-			std::cout << "-hMax int                # optional wrapConvDp low-tail cap" << std::endl;
+			std::cout << "-hMax int                # optional wrapConv / wrapConvDp low-tail cap" << std::endl;
 			std::cout << "-approxEps double        # optional experimental wrapConvDp relative prune threshold" << std::endl;
 			return;
 		}
@@ -325,6 +325,16 @@ namespace osuCrypto
 								subcodes.emplace_back(
 									new SystematicEnumerator<I, R>(std::move(parity), choose));
 							}
+							else if (subCodeTags[i] == "wrapConv")
+							{
+								sh << "WC" << sigmaI;
+								ss << "WC" << kk << "." << n << "." << sigmaI;
+								ballsBinsCaps.emplace_back(
+									new BallsBinsCap<Int>(n, n, sigmaI > 1 ? sigmaI - 2 : 0, chooseInt));
+								auto inner = std::make_unique<WrapConvEnumerator<I, R>>(kk, n, sigmaI, choose, *ballsBinsCaps.back(), num_threads);
+								inner->mHMax = hMax;
+								subcodes.emplace_back(std::move(inner));
+							}
 							else if (subCodeTags[i] == "wrapConvDp")
 							{
 								sh << "WCDP" << sigmaI;
@@ -336,7 +346,7 @@ namespace osuCrypto
 							}
 							else
 							{
-								throw std::runtime_error("float backend currently supports {band, sysBand, wrapConvDp}. " LOCATION);
+								throw std::runtime_error("float backend currently supports {band, sysBand, wrapConv, wrapConvDp}. " LOCATION);
 							}
 						}
 						else if (subCodeTags[i] == "repeat")
@@ -419,8 +429,9 @@ namespace osuCrypto
 							ss << "WC" << kk << "." << n << "." << sigmaI;
 							ballsBinsCaps.emplace_back(
 								new BallsBinsCap<Int>(n, n, sigmaI > 1 ? sigmaI - 2 : 0, chooseInt));
-							subcodes.emplace_back(
-								new WrapConvEnumerator<I, R>(kk, n, sigmaI, choose, *ballsBinsCaps.back(), num_threads));
+							auto inner = std::make_unique<WrapConvEnumerator<I, R>>(kk, n, sigmaI, choose, *ballsBinsCaps.back(), num_threads);
+							inner->mHMax = hMax;
+							subcodes.emplace_back(std::move(inner));
 						}
 						else if (subCodeTags[i] == "wrapConvDp")
 						{
@@ -514,6 +525,32 @@ namespace osuCrypto
 						<< " zeroVal: " << expected_md.mZeroValue << std::endl;
 					if (discardedUpper != R(0))
 						std::cout << "discardedUpper: " << discardedUpper << std::endl;
+					if (verbose)
+					{
+						for (auto* subcode : subcodesParam)
+						{
+							if (auto* wc = dynamic_cast<WrapConvEnumerator<I, R>*>(subcode))
+							{
+								std::cout << "wrapConv stats: "
+									<< "h=" << wc->mStats.mHVisited
+									<< "wh=" << wc->mStats.mWHCalls
+									<< " r=" << wc->mStats.mRVisited
+									<< " t0=" << wc->mStats.mT0Visited
+									<< " v=" << wc->mStats.mVVisited
+									<< " d=" << wc->mStats.mDVisited
+									<< " nz=" << wc->mStats.mNonZeroTerms
+									<< " skipZ=" << wc->mStats.mSkipNegZ
+									<< " skipF0=" << wc->mStats.mSkipNegF0
+									<< " skipF1=" << wc->mStats.mSkipNegF1
+									<< " skipT0=" << wc->mStats.mSkipNegT0
+									<< " skipT1=" << wc->mStats.mSkipNegT1
+									<< " skipHr=" << wc->mStats.mSkipHr
+									<< " skipK=" << wc->mStats.mSkipK
+									<< " skipD=" << wc->mStats.mSkipD
+									<< std::endl;
+							}
+						}
+					}
 
 					if (fullEnum.size())
 					{
