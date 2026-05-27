@@ -48,10 +48,10 @@ cmake -S C:\Users\peter\repo\SEAL-stock-4.1.1 `
 | Commit stock-SEAL cleanup in `antilabel` | 100% | Done | Commit `d5664ff1` on `codex/logvole-stock-seal`: `logvole: build against stock seal`. |
 | Add libOTe integration plan | 100% | Done | This document tracks dependency and porting work. |
 | Add libOTe build option and SEAL dependency hook | 100% | Done | Added `ENABLE_LOGVOLE`, config export, and required `SEAL::seal` lookup/link when enabled; default configure, LogVole configure, and enabled `libOTe` build pass. |
-| Port LogVole arithmetic/protocol modules | 0% | Pending | Move cleaned LogVole code under `libOTe/Vole/LogVole/`, preserving hot-path structure. |
+| Port LogVole arithmetic/protocol modules | 100% | Done | Imported cleaned LogVole headers and sources under `libOTe/Vole/LogVole/`, preserving the old `loglabel` include/namespace shape for now. |
 | Replace LogVole communication layer | 0% | Pending | Replace current transport with coproto `Socket`, `task<>`, and libOTe-style `PRNG&` ownership. |
-| Add libOTe LogVole tests | 0% | Pending | Port correctness tests into `libOTe_Tests`, gated by `ENABLE_LOGVOLE`. |
-| Validate libOTe build and tests | 0% | Pending | Configure with `ENABLE_LOGVOLE=ON` and `CMAKE_PREFIX_PATH` pointing at stock SEAL. |
+| Add libOTe LogVole tests | 100% | Done | Imported original GTest correctness tests under `libOTe_Tests/LogVole/` and wired standalone CTest executables gated by `ENABLE_LOGVOLE`. |
+| Validate libOTe build and tests | 100% | Done | `ENABLE_LOGVOLE=ON` configure/build/tests pass with stock SEAL; `ENABLE_LOGVOLE=OFF` configure/build also passes. |
 | Decide benchmark landing path | 0% | Pending | Start with smoke tests only; never run two benchmarks at the same time. |
 
 ## Porting Order

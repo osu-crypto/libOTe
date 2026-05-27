@@ -95,6 +95,10 @@ include(cmake/libOTeDepHelper.cmake)
 file(REMOVE ${CMAKE_CURRENT_LIST_DIR}/libOTe/config.h)
 configure_file(libOTe/config.h.in libOTe/config.h)
 
+if(ENABLE_LOGVOLE)
+	enable_testing()
+endif()
+
 if(ENABLE_SIMPLESTOT_ASM AND (NOT MSVC))
 	add_subdirectory(thirdparty/SimplestOT)
 endif()
