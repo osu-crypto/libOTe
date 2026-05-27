@@ -115,6 +115,11 @@ add_subdirectory(libOTe_Tests)
 #############################################
 add_subdirectory(frontend)
 
+if(ENABLE_LOGVOLE)
+	add_test(NAME LogVoleNativeTests COMMAND frontend_libOTe -u LogVole)
+	set_tests_properties(LogVoleNativeTests PROPERTIES LABELS "logvole;logvole-native")
+endif()
+
 
 
 #############################################
