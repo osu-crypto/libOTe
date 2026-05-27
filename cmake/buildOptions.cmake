@@ -102,6 +102,7 @@ option(ENABLE_KKRT           "Build the KKRT 1-oo-N OT-Ext protocol." OFF)
 
 option(ENABLE_PPRF           "Build the PPRF protocol." OFF)
 option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
+option(ENABLE_LOGVOLE        "Build the LogVole protocol." OFF)
 
 option(ENABLE_FOLEAGE        "Build the Foleage OLE protocol." OFF)
 
@@ -162,7 +163,8 @@ message(STATUS "1-out-of-2 Delta-OT Extension protocols\n=======================
 message(STATUS "Option: ENABLE_DELTA_KOS      = ${ENABLE_DELTA_KOS}\n\n")
 
 message(STATUS "Vole protocols\n=======================================================")
-message(STATUS "Option: ENABLE_SILENT_VOLE    = ${ENABLE_SILENT_VOLE}\n\n")
+message(STATUS "Option: ENABLE_SILENT_VOLE    = ${ENABLE_SILENT_VOLE}")
+message(STATUS "Option: ENABLE_LOGVOLE        = ${ENABLE_LOGVOLE}\n\n")
 
 
 message(STATUS "DPF protocols\n=======================================================")

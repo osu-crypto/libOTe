@@ -33,6 +33,11 @@ endif()
 if (ENABLE_BITPOLYMUL)
 	target_link_libraries(libOTe bitpolymul)
 endif ()
+
+if(ENABLE_LOGVOLE)
+	target_link_libraries(libOTe SEAL::seal)
+endif()
+
 if(ENABLE_SIMPLESTOT_ASM)
 	target_link_libraries(libOTe SimplestOT)
 endif()

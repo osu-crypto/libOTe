@@ -61,6 +61,14 @@ if (ENABLE_BITPOLYMUL)
     endif()
 endif()
 
+if(ENABLE_LOGVOLE)
+    find_package(SEAL 4.1.1 EXACT REQUIRED)
+
+    if(NOT TARGET SEAL::seal)
+        message(FATAL_ERROR "ENABLE_LOGVOLE requires stock Microsoft SEAL target SEAL::seal")
+    endif()
+endif()
+
 
 
 # resort the previous prefix path
