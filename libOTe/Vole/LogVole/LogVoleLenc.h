@@ -1,5 +1,6 @@
 #pragma once
 
+#include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 
 #include <cryptoTools/Common/Defines.h>
@@ -77,6 +78,21 @@ namespace osuCrypto
     {
         std::vector<LogVoleRnsPoly> mM;
     };
+
+    bool logVolePrepareKeyDeriveRequest(
+        const LogVoleKeyDeriveReceiverInput& input,
+        LogVoleKeyDeriveRequest& out);
+
+    bool logVoleProcessKeyDeriveRequest(
+        const LogVoleKeyDeriveSenderInput& input,
+        const LogVoleKeyDeriveRequest& request,
+        LogVoleKeyDeriveResponse& response,
+        LogVoleKeyDeriveSenderOutput& output);
+
+    bool logVoleFinalizeKeyDeriveResponse(
+        const LogVoleKeyDeriveReceiverInput& input,
+        const LogVoleKeyDeriveResponse& response,
+        LogVoleKeyDeriveReceiverOutput& output);
 
     struct LogVoleShrinkExpandParams
     {

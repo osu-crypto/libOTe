@@ -13,6 +13,8 @@
     X(Encoding, KeyDeriveResponseRoundTrip) \
     X(Encoding, ShrinkExpandOfflineRoundTrip) \
     X(Encoding, MalformedPayloadRejected) \
+    X(KeyDeriveCore, AlgebraicRelation) \
+    X(KeyDeriveCore, MetadataMismatchRejected) \
     X(KeyderiveProtocol, HappyPathAndAlgebraicRelation) \
     X(KeyderiveProtocol, DeterministicRegressionSeeds) \
     X(KeyderiveValidation, PayloadTypeMismatchFails) \

@@ -250,6 +250,168 @@ namespace osuCrypto
         {
             return static_cast<std::size_t>(level) * width + leaf;
         }
+
+        bool logVoleValidateKeyDeriveSenderInput(const LogVoleKeyDeriveSenderInput& input)
+        {
+            return logVoleValidateRingParams(input.mParams) &&
+                   !input.mSk1.empty() &&
+                   input.mSk1.size() == input.mSk2.size() &&
+                   logVoleValidateRingBatchShape(input.mSk1, input.mParams) &&
+                   logVoleValidateRingBatchShape(input.mSk2, input.mParams);
+        }
+
+        bool logVoleValidateKeyDeriveReceiverInput(const LogVoleKeyDeriveReceiverInput& input)
+        {
+            return logVoleValidateRingParams(input.mParams) &&
+                   !input.mD.empty() &&
+                   logVoleValidateRingBatchShape(input.mD, input.mParams);
+        }
+    }
+
+    bool logVolePrepareKeyDeriveRequest(
+        const LogVoleKeyDeriveReceiverInput& input,
+        LogVoleKeyDeriveRequest& out)
+    {
+        if (!logVoleValidateKeyDeriveReceiverInput(input) ||
+            input.mD.size() > static_cast<std::size_t>(std::numeric_limits<u32>::max()))
+        {
+            return false;
+        }
+
+        LogVoleKeyDeriveRequest next{};
+        next.mPolyModulusDegree = input.mParams.mPolyModulusDegree;
+        next.mCoeffModulusCount = static_cast<u32>(input.mParams.mCoeffModulusBits.size());
+        next.mTau = static_cast<u32>(input.mD.size());
+        next.mDCoeffs = logVolePackRingBatch(input.mD);
+
+        out = std::move(next);
+        return true;
+    }
+
+    bool logVoleProcessKeyDeriveRequest(
+        const LogVoleKeyDeriveSenderInput& input,
+        const LogVoleKeyDeriveRequest& request,
+        LogVoleKeyDeriveResponse& response,
+        LogVoleKeyDeriveSenderOutput& output)
+    {
+        if (!logVoleValidateKeyDeriveSenderInput(input))
+        {
+            return false;
+        }
+
+        const u32 expectedModCount = static_cast<u32>(input.mParams.mCoeffModulusBits.size());
+        if (request.mPolyModulusDegree != input.mParams.mPolyModulusDegree ||
+            request.mCoeffModulusCount != expectedModCount ||
+            request.mTau != input.mSk1.size())
+        {
+            return false;
+        }
+
+        std::vector<LogVoleRnsPoly> dBatch;
+        if (!logVoleUnpackRingBatch(
+                request.mTau,
+                request.mPolyModulusDegree,
+                request.mCoeffModulusCount,
+                request.mDCoeffs,
+                dBatch))
+        {
+            return false;
+        }
+
+        LogVoleRingNttContext ctx{};
+        if (!logVoleMakeRingNttContext(input.mParams, ctx))
+        {
+            return false;
+        }
+
+        std::vector<LogVoleRnsPoly> mNttBatch;
+        mNttBatch.reserve(request.mTau);
+
+        for (std::size_t i = 0; i < request.mTau; ++i)
+        {
+            LogVoleRnsPoly sk1 = input.mSk1[i];
+            LogVoleRnsPoly sk2 = input.mSk2[i];
+            LogVoleRnsPoly d = dBatch[i];
+
+            if (!logVoleForwardNtt(sk1, ctx) ||
+                !logVoleForwardNtt(sk2, ctx) ||
+                !logVoleForwardNtt(d, ctx))
+            {
+                return false;
+            }
+
+            LogVoleRnsPoly mNtt{};
+            if (!logVoleDyadicMultiplyAddNtt(sk1, d, sk2, ctx, mNtt))
+            {
+                return false;
+            }
+            mNttBatch.push_back(std::move(mNtt));
+        }
+
+        LogVoleKeyDeriveResponse nextResponse{};
+        nextResponse.mPolyModulusDegree = request.mPolyModulusDegree;
+        nextResponse.mCoeffModulusCount = request.mCoeffModulusCount;
+        nextResponse.mTau = request.mTau;
+        nextResponse.mMNttCoeffs = logVolePackRingBatch(mNttBatch);
+
+        LogVoleKeyDeriveSenderOutput nextOutput{};
+        nextOutput.mK = input.mSk2;
+
+        response = std::move(nextResponse);
+        output = std::move(nextOutput);
+        return true;
+    }
+
+    bool logVoleFinalizeKeyDeriveResponse(
+        const LogVoleKeyDeriveReceiverInput& input,
+        const LogVoleKeyDeriveResponse& response,
+        LogVoleKeyDeriveReceiverOutput& output)
+    {
+        if (!logVoleValidateKeyDeriveReceiverInput(input))
+        {
+            return false;
+        }
+
+        const u32 expectedModCount = static_cast<u32>(input.mParams.mCoeffModulusBits.size());
+        if (response.mPolyModulusDegree != input.mParams.mPolyModulusDegree ||
+            response.mCoeffModulusCount != expectedModCount ||
+            response.mTau != input.mD.size())
+        {
+            return false;
+        }
+
+        std::vector<LogVoleRnsPoly> mNttBatch;
+        if (!logVoleUnpackRingBatch(
+                response.mTau,
+                response.mPolyModulusDegree,
+                response.mCoeffModulusCount,
+                response.mMNttCoeffs,
+                mNttBatch))
+        {
+            return false;
+        }
+
+        LogVoleRingNttContext ctx{};
+        if (!logVoleMakeRingNttContext(input.mParams, ctx))
+        {
+            return false;
+        }
+
+        LogVoleKeyDeriveReceiverOutput next{};
+        next.mM.reserve(response.mTau);
+
+        for (auto& poly : mNttBatch)
+        {
+            if (!logVoleCanonicalizePoly(poly, ctx) ||
+                !logVoleInverseNtt(poly, ctx))
+            {
+                return false;
+            }
+            next.mM.push_back(std::move(poly));
+        }
+
+        output = std::move(next);
+        return true;
     }
 
     bool logVoleLencEnc(
