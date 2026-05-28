@@ -5,7 +5,7 @@
 #include "seal/seal.h"
 #include "seal/util/uintarithsmallmod.h"
 
-#include "gtest/gtest.h"
+#include "libOTe_Tests/LogVole_TestUtil.h"
 
 #include <chrono>
 #include <cstddef>
@@ -136,13 +136,13 @@ namespace
 
     void expect_ring_batch_equal(const std::vector<ring_rns_poly> &a, const std::vector<ring_rns_poly> &b)
     {
-        ASSERT_EQ(a.size(), b.size());
+        LOGVOLE_REQUIRE_EQ(a.size(), b.size());
         for (std::size_t i = 0; i < a.size(); ++i)
         {
-            ASSERT_EQ(a[i].coeffs.size(), b[i].coeffs.size()) << "at batch index " << i;
+            LOGVOLE_REQUIRE_EQ(a[i].coeffs.size(), b[i].coeffs.size()) << "at batch index " << i;
             for (std::size_t j = 0; j < a[i].coeffs.size(); ++j)
             {
-                EXPECT_EQ(a[i].coeffs[j], b[i].coeffs[j]) << "at batch=" << i << ", coeff=" << j;
+                LOGVOLE_EXPECT_EQ(a[i].coeffs[j], b[i].coeffs[j]) << "at batch=" << i << ", coeff=" << j;
             }
         }
     }
@@ -185,7 +185,7 @@ namespace
 
 } // namespace
 
-TEST(KeyderiveProtocol, HappyPathAndAlgebraicRelation)
+void LogVole_KeyderiveProtocol_HappyPathAndAlgebraicRelation(const oc::CLP&)
 {
     const auto start = std::chrono::steady_clock::now();
     const auto params = make_test_params();
@@ -204,7 +204,7 @@ TEST(KeyderiveProtocol, HappyPathAndAlgebraicRelation)
 
     auto pair_result = make_in_memory_channel_pair(
         /*protocol_id=*/0x4B44u, /*version=*/1u, /*session_id=*/0x99u, std::chrono::milliseconds(1000));
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -228,8 +228,8 @@ TEST(KeyderiveProtocol, HappyPathAndAlgebraicRelation)
     sender_thread.join();
     receiver_thread.join();
 
-    ASSERT_TRUE(sender_result) << sender_result.message();
-    ASSERT_TRUE(receiver_result) << receiver_result.message();
+    LOGVOLE_REQUIRE_TRUE(sender_result) << sender_result.message();
+    LOGVOLE_REQUIRE_TRUE(receiver_result) << receiver_result.message();
 
     expect_ring_batch_equal(sender_result.value().k, sender_input.sk2);
 
@@ -238,7 +238,7 @@ TEST(KeyderiveProtocol, HappyPathAndAlgebraicRelation)
     print_test_elapsed("KeyderiveProtocol.HappyPathAndAlgebraicRelation", start);
 }
 
-TEST(KeyderiveProtocol, DeterministicRegressionSeeds)
+void LogVole_KeyderiveProtocol_DeterministicRegressionSeeds(const oc::CLP&)
 {
     const auto start = std::chrono::steady_clock::now();
     const auto params = make_test_params();
@@ -263,7 +263,7 @@ TEST(KeyderiveProtocol, DeterministicRegressionSeeds)
 
         auto pair_result = make_in_memory_channel_pair(
             /*protocol_id=*/0x4B44u, /*version=*/1u, /*session_id=*/seed + 99u, std::chrono::milliseconds(1000));
-        ASSERT_TRUE(pair_result) << pair_result.message();
+        LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
         auto channels = std::move(pair_result.value());
         any_channel sender_channel = std::move(channels.first);
@@ -285,8 +285,8 @@ TEST(KeyderiveProtocol, DeterministicRegressionSeeds)
         sender_thread.join();
         receiver_thread.join();
 
-        ASSERT_TRUE(sender_result) << sender_result.message();
-        ASSERT_TRUE(receiver_result) << receiver_result.message();
+        LOGVOLE_REQUIRE_TRUE(sender_result) << sender_result.message();
+        LOGVOLE_REQUIRE_TRUE(receiver_result) << receiver_result.message();
 
         auto expected_m = reference_mul_add_batch(sender_input.sk1, receiver_input.d, sender_input.sk2, params, moduli);
         expect_ring_batch_equal(receiver_result.value().m, expected_m);
@@ -294,7 +294,7 @@ TEST(KeyderiveProtocol, DeterministicRegressionSeeds)
     print_test_elapsed("KeyderiveProtocol.DeterministicRegressionSeeds", start);
 }
 
-TEST(KeyderiveValidation, PayloadTypeMismatchFails)
+void LogVole_KeyderiveValidation_PayloadTypeMismatchFails(const oc::CLP&)
 {
     const auto start = std::chrono::steady_clock::now();
     const auto params = make_test_params();
@@ -307,7 +307,7 @@ TEST(KeyderiveValidation, PayloadTypeMismatchFails)
 
     auto pair_result = make_in_memory_channel_pair(
         /*protocol_id=*/0x888u, /*version=*/1u, /*session_id=*/0x123u, std::chrono::milliseconds(1000));
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -322,11 +322,11 @@ TEST(KeyderiveValidation, PayloadTypeMismatchFails)
     });
 
     auto req_frame = sender_channel.recv_frame();
-    ASSERT_TRUE(req_frame) << req_frame.message();
+    LOGVOLE_REQUIRE_TRUE(req_frame) << req_frame.message();
 
     auto response = make_zero_response(1u, params);
     auto payload = encode_message(response);
-    ASSERT_TRUE(payload) << payload.message();
+    LOGVOLE_REQUIRE_TRUE(payload) << payload.message();
 
     message_envelope envelope{};
     envelope.protocol_id = sender_channel.config().protocol_id;
@@ -339,19 +339,19 @@ TEST(KeyderiveValidation, PayloadTypeMismatchFails)
     envelope.payload_crc = crc32(payload.value().data(), payload.value().size());
 
     auto frame_result = serialize_frame(envelope, payload.value());
-    ASSERT_TRUE(frame_result) << frame_result.message();
+    LOGVOLE_REQUIRE_TRUE(frame_result) << frame_result.message();
 
     auto send_result = sender_channel.send_frame(std::move(frame_result.value()));
-    ASSERT_TRUE(send_result) << send_result.message();
+    LOGVOLE_REQUIRE_TRUE(send_result) << send_result.message();
 
     receiver_thread.join();
 
-    ASSERT_FALSE(receiver_result);
-    EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);
+    LOGVOLE_REQUIRE_FALSE(receiver_result);
+    LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);
     print_test_elapsed("KeyderiveValidation.PayloadTypeMismatchFails", start);
 }
 
-TEST(KeyderiveValidation, MalformedPayloadFails)
+void LogVole_KeyderiveValidation_MalformedPayloadFails(const oc::CLP&)
 {
     const auto start = std::chrono::steady_clock::now();
     const auto params = make_test_params();
@@ -364,7 +364,7 @@ TEST(KeyderiveValidation, MalformedPayloadFails)
 
     auto pair_result = make_in_memory_channel_pair(
         /*protocol_id=*/0x889u, /*version=*/1u, /*session_id=*/0x124u, std::chrono::milliseconds(1000));
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -379,14 +379,14 @@ TEST(KeyderiveValidation, MalformedPayloadFails)
     });
 
     auto req_frame = sender_channel.recv_frame();
-    ASSERT_TRUE(req_frame) << req_frame.message();
+    LOGVOLE_REQUIRE_TRUE(req_frame) << req_frame.message();
 
     auto response = make_zero_response(1u, params);
     auto payload = encode_message(response);
-    ASSERT_TRUE(payload) << payload.message();
+    LOGVOLE_REQUIRE_TRUE(payload) << payload.message();
 
     auto malformed = payload.value();
-    ASSERT_FALSE(malformed.empty());
+    LOGVOLE_REQUIRE_FALSE(malformed.empty());
     malformed.pop_back();
 
     message_envelope envelope{};
@@ -400,19 +400,19 @@ TEST(KeyderiveValidation, MalformedPayloadFails)
     envelope.payload_crc = crc32(malformed.data(), malformed.size());
 
     auto frame_result = serialize_frame(envelope, malformed);
-    ASSERT_TRUE(frame_result) << frame_result.message();
+    LOGVOLE_REQUIRE_TRUE(frame_result) << frame_result.message();
 
     auto send_result = sender_channel.send_frame(std::move(frame_result.value()));
-    ASSERT_TRUE(send_result) << send_result.message();
+    LOGVOLE_REQUIRE_TRUE(send_result) << send_result.message();
 
     receiver_thread.join();
 
-    ASSERT_FALSE(receiver_result);
-    EXPECT_EQ(receiver_result.error(), protocol_errc::decode_validation_failure);
+    LOGVOLE_REQUIRE_FALSE(receiver_result);
+    LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::decode_validation_failure);
     print_test_elapsed("KeyderiveValidation.MalformedPayloadFails", start);
 }
 
-TEST(KeyderiveValidation, VersionMismatchFails)
+void LogVole_KeyderiveValidation_VersionMismatchFails(const oc::CLP&)
 {
     const auto start = std::chrono::steady_clock::now();
     const auto params = make_test_params();
@@ -425,7 +425,7 @@ TEST(KeyderiveValidation, VersionMismatchFails)
 
     auto pair_result = make_in_memory_channel_pair(
         /*protocol_id=*/0x88Au, /*version=*/1u, /*session_id=*/0x125u, std::chrono::milliseconds(1000));
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -440,11 +440,11 @@ TEST(KeyderiveValidation, VersionMismatchFails)
     });
 
     auto req_frame = sender_channel.recv_frame();
-    ASSERT_TRUE(req_frame) << req_frame.message();
+    LOGVOLE_REQUIRE_TRUE(req_frame) << req_frame.message();
 
     auto response = make_zero_response(1u, params);
     auto payload = encode_message(response);
-    ASSERT_TRUE(payload) << payload.message();
+    LOGVOLE_REQUIRE_TRUE(payload) << payload.message();
 
     message_envelope envelope{};
     envelope.protocol_id = sender_channel.config().protocol_id;
@@ -457,19 +457,19 @@ TEST(KeyderiveValidation, VersionMismatchFails)
     envelope.payload_crc = crc32(payload.value().data(), payload.value().size());
 
     auto frame_result = serialize_frame(envelope, payload.value());
-    ASSERT_TRUE(frame_result) << frame_result.message();
+    LOGVOLE_REQUIRE_TRUE(frame_result) << frame_result.message();
 
     auto send_result = sender_channel.send_frame(std::move(frame_result.value()));
-    ASSERT_TRUE(send_result) << send_result.message();
+    LOGVOLE_REQUIRE_TRUE(send_result) << send_result.message();
 
     receiver_thread.join();
 
-    ASSERT_FALSE(receiver_result);
-    EXPECT_EQ(receiver_result.error(), protocol_errc::unsupported_protocol_version);
+    LOGVOLE_REQUIRE_FALSE(receiver_result);
+    LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::unsupported_protocol_version);
     print_test_elapsed("KeyderiveValidation.VersionMismatchFails", start);
 }
 
-TEST(KeyderiveValidation, SessionMismatchFails)
+void LogVole_KeyderiveValidation_SessionMismatchFails(const oc::CLP&)
 {
     const auto start = std::chrono::steady_clock::now();
     const auto params = make_test_params();
@@ -482,7 +482,7 @@ TEST(KeyderiveValidation, SessionMismatchFails)
 
     auto pair_result = make_in_memory_channel_pair(
         /*protocol_id=*/0x88Bu, /*version=*/1u, /*session_id=*/0x126u, std::chrono::milliseconds(1000));
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -497,11 +497,11 @@ TEST(KeyderiveValidation, SessionMismatchFails)
     });
 
     auto req_frame = sender_channel.recv_frame();
-    ASSERT_TRUE(req_frame) << req_frame.message();
+    LOGVOLE_REQUIRE_TRUE(req_frame) << req_frame.message();
 
     auto response = make_zero_response(1u, params);
     auto payload = encode_message(response);
-    ASSERT_TRUE(payload) << payload.message();
+    LOGVOLE_REQUIRE_TRUE(payload) << payload.message();
 
     message_envelope envelope{};
     envelope.protocol_id = sender_channel.config().protocol_id;
@@ -514,14 +514,14 @@ TEST(KeyderiveValidation, SessionMismatchFails)
     envelope.payload_crc = crc32(payload.value().data(), payload.value().size());
 
     auto frame_result = serialize_frame(envelope, payload.value());
-    ASSERT_TRUE(frame_result) << frame_result.message();
+    LOGVOLE_REQUIRE_TRUE(frame_result) << frame_result.message();
 
     auto send_result = sender_channel.send_frame(std::move(frame_result.value()));
-    ASSERT_TRUE(send_result) << send_result.message();
+    LOGVOLE_REQUIRE_TRUE(send_result) << send_result.message();
 
     receiver_thread.join();
 
-    ASSERT_FALSE(receiver_result);
-    EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);
+    LOGVOLE_REQUIRE_FALSE(receiver_result);
+    LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);
     print_test_elapsed("KeyderiveValidation.SessionMismatchFails", start);
 }
