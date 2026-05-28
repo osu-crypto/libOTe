@@ -1,6 +1,6 @@
 #include "loglabel/ring_ops.hpp"
 
-#include "gtest/gtest.h"
+#include "libOTe_Tests/LogVole_TestUtil.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -19,92 +19,92 @@ namespace
 
     void expect_poly_equal(const ring_rns_poly &a, const ring_rns_poly &b)
     {
-        ASSERT_EQ(a.coeffs.size(), b.coeffs.size());
+        LOGVOLE_REQUIRE_EQ(a.coeffs.size(), b.coeffs.size());
         for (std::size_t i = 0; i < a.coeffs.size(); ++i)
         {
-            EXPECT_EQ(a.coeffs[i], b.coeffs[i]) << "coeff index " << i;
+            LOGVOLE_EXPECT_EQ(a.coeffs[i], b.coeffs[i]) << "coeff index " << i;
         }
     }
 
 } // namespace
 
-TEST(RingOps, NttRoundTrip)
+void LogVole_RingOps_NttRoundTrip(const oc::CLP&)
 {
     const auto params = make_params();
     auto ctx_result = make_ring_ntt_context(params);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     ring_rns_poly poly = derive_uniform_poly_from_nonce(ctx, 0x1234u, 0x5678u, 0);
     ring_rns_poly expected = poly;
 
     auto canonical_ok = canonicalize_poly_inplace(expected, ctx);
-    ASSERT_TRUE(canonical_ok) << canonical_ok.message();
+    LOGVOLE_REQUIRE_TRUE(canonical_ok) << canonical_ok.message();
 
     auto fwd_ok = forward_ntt_inplace(poly, ctx);
-    ASSERT_TRUE(fwd_ok) << fwd_ok.message();
+    LOGVOLE_REQUIRE_TRUE(fwd_ok) << fwd_ok.message();
 
     auto inv_ok = inverse_ntt_inplace(poly, ctx);
-    ASSERT_TRUE(inv_ok) << inv_ok.message();
+    LOGVOLE_REQUIRE_TRUE(inv_ok) << inv_ok.message();
 
     expect_poly_equal(poly, expected);
 }
 
-TEST(RingOps, GadgetDecomposeRecompose)
+void LogVole_RingOps_GadgetDecomposeRecompose(const oc::CLP&)
 {
     const auto params = make_params();
     auto ctx_result = make_ring_ntt_context(params);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     ring_rns_poly poly = derive_uniform_poly_from_nonce(ctx, 0x55AAu, 0xCCDDu, 0);
 
     auto digits = gadget_decompose(poly, /*base=*/(1u << 10u), /*tau=*/4u, ctx);
-    ASSERT_TRUE(digits) << digits.message();
-    ASSERT_EQ(digits.value().size(), 4u);
+    LOGVOLE_REQUIRE_TRUE(digits) << digits.message();
+    LOGVOLE_REQUIRE_EQ(digits.value().size(), 4u);
 
     auto recomposed = gadget_recompose(digits.value(), /*base=*/(1u << 10u), ctx);
-    ASSERT_TRUE(recomposed) << recomposed.message();
+    LOGVOLE_REQUIRE_TRUE(recomposed) << recomposed.message();
 
     auto canonical_poly = canonicalize_poly_inplace(poly, ctx);
-    ASSERT_TRUE(canonical_poly) << canonical_poly.message();
+    LOGVOLE_REQUIRE_TRUE(canonical_poly) << canonical_poly.message();
 
     auto canonical_recomposed = canonicalize_poly_inplace(recomposed.value(), ctx);
-    ASSERT_TRUE(canonical_recomposed) << canonical_recomposed.message();
+    LOGVOLE_REQUIRE_TRUE(canonical_recomposed) << canonical_recomposed.message();
 
     expect_poly_equal(poly, recomposed.value());
 }
 
-TEST(RingOps, GadgetDecomposeRecomposeBits)
+void LogVole_RingOps_GadgetDecomposeRecomposeBits(const oc::CLP&)
 {
     const auto params = make_params();
     auto ctx_result = make_ring_ntt_context(params);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     ring_rns_poly poly = derive_uniform_poly_from_nonce(ctx, 0xAA55u, 0x11EEu, 0);
 
     auto digits = gadget_decompose_bits(poly, /*digit_bits=*/20u, /*levels=*/4u, ctx);
-    ASSERT_TRUE(digits) << digits.message();
-    ASSERT_EQ(digits.value().size(), 4u);
+    LOGVOLE_REQUIRE_TRUE(digits) << digits.message();
+    LOGVOLE_REQUIRE_EQ(digits.value().size(), 4u);
 
     auto recomposed = gadget_recompose_bits(digits.value(), /*digit_bits=*/20u, ctx);
-    ASSERT_TRUE(recomposed) << recomposed.message();
+    LOGVOLE_REQUIRE_TRUE(recomposed) << recomposed.message();
 
     auto canonical_poly = canonicalize_poly_inplace(poly, ctx);
-    ASSERT_TRUE(canonical_poly) << canonical_poly.message();
+    LOGVOLE_REQUIRE_TRUE(canonical_poly) << canonical_poly.message();
 
     auto canonical_recomposed = canonicalize_poly_inplace(recomposed.value(), ctx);
-    ASSERT_TRUE(canonical_recomposed) << canonical_recomposed.message();
+    LOGVOLE_REQUIRE_TRUE(canonical_recomposed) << canonical_recomposed.message();
 
     expect_poly_equal(poly, recomposed.value());
 }
 
-TEST(RingOps, TensorPackUnpack)
+void LogVole_RingOps_TensorPackUnpack(const oc::CLP&)
 {
     const auto params = make_params();
     auto ctx_result = make_ring_ntt_context(params);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     ring_tensor tensor{};
@@ -124,10 +124,10 @@ TEST(RingOps, TensorPackUnpack)
         packed,
         "tensor");
 
-    ASSERT_TRUE(unpacked) << unpacked.message();
-    ASSERT_EQ(unpacked.value().rows, tensor.rows);
-    ASSERT_EQ(unpacked.value().cols, tensor.cols);
-    ASSERT_EQ(unpacked.value().polys.size(), tensor.polys.size());
+    LOGVOLE_REQUIRE_TRUE(unpacked) << unpacked.message();
+    LOGVOLE_REQUIRE_EQ(unpacked.value().rows, tensor.rows);
+    LOGVOLE_REQUIRE_EQ(unpacked.value().cols, tensor.cols);
+    LOGVOLE_REQUIRE_EQ(unpacked.value().polys.size(), tensor.polys.size());
 
     for (std::size_t i = 0; i < tensor.polys.size(); ++i)
     {
