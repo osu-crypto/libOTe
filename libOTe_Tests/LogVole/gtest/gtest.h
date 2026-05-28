@@ -10,9 +10,9 @@
 #define EXPECT_FALSE(expr) LOGVOLE_EXPECT_FALSE(expr)
 #define ASSERT_EQ(lhs, rhs) LOGVOLE_REQUIRE_EQ(lhs, rhs)
 #define EXPECT_EQ(lhs, rhs) LOGVOLE_EXPECT_EQ(lhs, rhs)
-#define ASSERT_GT(lhs, rhs) LOGVOLE_EXPECT_GT(lhs, rhs)
+#define ASSERT_GT(lhs, rhs) LOGVOLE_REQUIRE_GT(lhs, rhs)
 #define EXPECT_GT(lhs, rhs) LOGVOLE_EXPECT_GT(lhs, rhs)
-#define ASSERT_LT(lhs, rhs) LOGVOLE_EXPECT_LT(lhs, rhs)
+#define ASSERT_LT(lhs, rhs) LOGVOLE_REQUIRE_LT(lhs, rhs)
 #define EXPECT_LT(lhs, rhs) LOGVOLE_EXPECT_LT(lhs, rhs)
 
 #define GTEST_SKIP() ::tests_libOTe::logvole_test::skip(__FILE__, __LINE__)

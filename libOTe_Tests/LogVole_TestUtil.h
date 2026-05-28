@@ -159,10 +159,32 @@ namespace tests_libOTe::logvole_test
     }
 
     template<typename L, typename R>
+    assertion require_gt(const L& lhs, const R& rhs, const char* expr, const char* file, int line)
+    {
+        auto result = assertion(lhs > rhs, "require_gt", expr, file, line);
+        if (!(lhs > rhs))
+        {
+            result << " (" << value_to_string(lhs) << " vs " << value_to_string(rhs) << ")";
+        }
+        return result;
+    }
+
+    template<typename L, typename R>
     assertion expect_gt(const L& lhs, const R& rhs, const char* expr, const char* file, int line)
     {
         auto result = assertion(lhs > rhs, "expect_gt", expr, file, line);
         if (!(lhs > rhs))
+        {
+            result << " (" << value_to_string(lhs) << " vs " << value_to_string(rhs) << ")";
+        }
+        return result;
+    }
+
+    template<typename L, typename R>
+    assertion require_lt(const L& lhs, const R& rhs, const char* expr, const char* file, int line)
+    {
+        auto result = assertion(lhs < rhs, "require_lt", expr, file, line);
+        if (!(lhs < rhs))
         {
             result << " (" << value_to_string(lhs) << " vs " << value_to_string(rhs) << ")";
         }
@@ -193,7 +215,11 @@ namespace tests_libOTe::logvole_test
     ::tests_libOTe::logvole_test::require_eq((lhs), (rhs), #lhs " == " #rhs, __FILE__, __LINE__)
 #define LOGVOLE_EXPECT_EQ(lhs, rhs) \
     ::tests_libOTe::logvole_test::expect_eq((lhs), (rhs), #lhs " == " #rhs, __FILE__, __LINE__)
+#define LOGVOLE_REQUIRE_GT(lhs, rhs) \
+    ::tests_libOTe::logvole_test::require_gt((lhs), (rhs), #lhs " > " #rhs, __FILE__, __LINE__)
 #define LOGVOLE_EXPECT_GT(lhs, rhs) \
     ::tests_libOTe::logvole_test::expect_gt((lhs), (rhs), #lhs " > " #rhs, __FILE__, __LINE__)
+#define LOGVOLE_REQUIRE_LT(lhs, rhs) \
+    ::tests_libOTe::logvole_test::require_lt((lhs), (rhs), #lhs " < " #rhs, __FILE__, __LINE__)
 #define LOGVOLE_EXPECT_LT(lhs, rhs) \
     ::tests_libOTe::logvole_test::expect_lt((lhs), (rhs), #lhs " < " #rhs, __FILE__, __LINE__)

@@ -10,7 +10,7 @@
 #include <thread>
 #include <vector>
 #include "../src/protocol/shrinkexpand_shared_ops.hpp"
-#include "gtest/gtest.h"
+#include "libOTe_Tests/LogVole_TestUtil.h"
 #include "loglabel/comm/codec.hpp"
 #include "loglabel/ring_ops.hpp"
 #include "loglabel/shrinkexpand_protocol.hpp"
@@ -21,6 +21,33 @@ using namespace loglabel::comm;
 
 namespace
 {
+    class thread_join_guard
+    {
+    public:
+        explicit thread_join_guard(std::thread &thread)
+            : thread_(thread)
+        {}
+
+        thread_join_guard(const thread_join_guard &) = delete;
+        thread_join_guard &operator=(const thread_join_guard &) = delete;
+
+        ~thread_join_guard()
+        {
+            join();
+        }
+
+        void join()
+        {
+            if (thread_.joinable())
+            {
+                thread_.join();
+            }
+        }
+
+    private:
+        std::thread &thread_;
+    };
+
     shrinkexpand_params make_params(shrinkexpand_mode mode)
     {
         shrinkexpand_params params{};
@@ -55,16 +82,16 @@ namespace
 
     void expect_poly_equal(const ring_rns_poly &a, const ring_rns_poly &b)
     {
-        ASSERT_EQ(a.coeffs.size(), b.coeffs.size());
+        LOGVOLE_REQUIRE_EQ(a.coeffs.size(), b.coeffs.size());
         for (std::size_t i = 0; i < a.coeffs.size(); ++i)
         {
-            EXPECT_EQ(a.coeffs[i], b.coeffs[i]) << "coeff idx " << i;
+            LOGVOLE_EXPECT_EQ(a.coeffs[i], b.coeffs[i]) << "coeff idx " << i;
         }
     }
 
     void expect_batch_equal(const std::vector<ring_rns_poly> &a, const std::vector<ring_rns_poly> &b)
     {
-        ASSERT_EQ(a.size(), b.size());
+        LOGVOLE_REQUIRE_EQ(a.size(), b.size());
         for (std::size_t i = 0; i < a.size(); ++i)
         {
             expect_poly_equal(a[i], b[i]);
@@ -243,7 +270,7 @@ namespace
 
 } // namespace
 
-TEST(ShrinkExpandOps, DenoiseCombExactness)
+void LogVole_ShrinkExpandOps_DenoiseCombExactness(const oc::CLP&)
 {
     constexpr const char *test_name = "ShrinkExpandOps.DenoiseCombExactness";
     constexpr std::uint64_t seed_x = 0x8888;
@@ -251,7 +278,7 @@ TEST(ShrinkExpandOps, DenoiseCombExactness)
 
     auto params = make_params(shrinkexpand_mode::full_noise);
     auto ctx_result = make_ring_ntt_context(params.ring);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     const std::size_t n = params.ring.poly_modulus_degree;
@@ -327,10 +354,10 @@ TEST(ShrinkExpandOps, DenoiseCombExactness)
     }
 
     auto out_result = shrinkexpand_denoise_comb(ctx, tba_prime);
-    ASSERT_TRUE(out_result) << out_result.message();
+    LOGVOLE_REQUIRE_TRUE(out_result) << out_result.message();
 
     const auto &out_batch = out_result.value();
-    ASSERT_EQ(out_batch.size(), w_prime);
+    LOGVOLE_REQUIRE_EQ(out_batch.size(), w_prime);
 
     for (std::size_t i = 0; i < w_prime; ++i)
     {
@@ -338,14 +365,14 @@ TEST(ShrinkExpandOps, DenoiseCombExactness)
         {
             for (std::size_t k = 0; k < n; ++k)
             {
-                ASSERT_EQ(out_batch[i].coeffs[j * n + k], x_batch[i].coeffs[j * n + k])
+                LOGVOLE_REQUIRE_EQ(out_batch[i].coeffs[j * n + k], x_batch[i].coeffs[j * n + k])
                     << "Mismatch at i=" << i << ", j=" << j << ", k=" << k;
             }
         }
     }
 }
 
-TEST(ShrinkExpandOffline, HappyPathAndCounters)
+void LogVole_ShrinkExpandOffline_HappyPathAndCounters(const oc::CLP&)
 {
     constexpr const char *test_name = "ShrinkExpandOffline.HappyPathAndCounters";
     constexpr std::uint64_t protocol_id = 0x51u;
@@ -359,7 +386,7 @@ TEST(ShrinkExpandOffline, HappyPathAndCounters)
     print_hex_value(test_name, "seed_s", seed_s);
 
     auto ctx_result = make_ring_ntt_context(params.ring);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     shrinkexpand_sender_offline_input sender_input{};
@@ -370,7 +397,7 @@ TEST(ShrinkExpandOffline, HappyPathAndCounters)
     receiver_input.params = params;
 
     auto pair_result = make_in_memory_channel_pair(protocol_id, version, session_id, timeout);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -386,32 +413,34 @@ TEST(ShrinkExpandOffline, HappyPathAndCounters)
     std::thread receiver_thread([&]() mutable {
         receiver_result = run_shrinkexpand_receiver(std::move(receiver_channel), receiver_input, backend);
     });
+    thread_join_guard receiver_guard(receiver_thread);
 
     std::thread sender_thread(
         [&]() mutable { sender_result = run_shrinkexpand_sender(std::move(sender_channel), sender_input, backend); });
+    thread_join_guard sender_guard(sender_thread);
 
-    sender_thread.join();
-    receiver_thread.join();
+    sender_guard.join();
+    receiver_guard.join();
 
-    ASSERT_TRUE(sender_result) << sender_result.message();
-    ASSERT_TRUE(receiver_result) << receiver_result.message();
+    LOGVOLE_REQUIRE_TRUE(sender_result) << sender_result.message();
+    LOGVOLE_REQUIRE_TRUE(receiver_result) << receiver_result.message();
 
-    EXPECT_EQ(sender_result.value().counters.frames_s2r_sent, 1u);
-    EXPECT_EQ(sender_result.value().counters.frames_r2s_sent, 0u);
-    EXPECT_EQ(sender_result.value().counters.rounds_completed, 1u);
+    LOGVOLE_EXPECT_EQ(sender_result.value().counters.frames_s2r_sent, 1u);
+    LOGVOLE_EXPECT_EQ(sender_result.value().counters.frames_r2s_sent, 0u);
+    LOGVOLE_EXPECT_EQ(sender_result.value().counters.rounds_completed, 1u);
 
-    EXPECT_EQ(receiver_result.value().counters.frames_s2r_recv, 1u);
-    EXPECT_EQ(receiver_result.value().counters.frames_r2s_recv, 0u);
-    EXPECT_EQ(receiver_result.value().counters.rounds_completed, 1u);
+    LOGVOLE_EXPECT_EQ(receiver_result.value().counters.frames_s2r_recv, 1u);
+    LOGVOLE_EXPECT_EQ(receiver_result.value().counters.frames_r2s_recv, 0u);
+    LOGVOLE_EXPECT_EQ(receiver_result.value().counters.rounds_completed, 1u);
 
-    EXPECT_EQ(sender_result.value().counters.wire_bytes_s2r_sent, receiver_result.value().counters.wire_bytes_s2r_recv);
-    EXPECT_GT(sender_result.value().counters.wire_bytes_s2r_sent, 0u);
+    LOGVOLE_EXPECT_EQ(sender_result.value().counters.wire_bytes_s2r_sent, receiver_result.value().counters.wire_bytes_s2r_recv);
+    LOGVOLE_EXPECT_GT(sender_result.value().counters.wire_bytes_s2r_sent, 0u);
 
     print_dec_value(test_name, "wire_bytes_s2r_sent", sender_result.value().counters.wire_bytes_s2r_sent);
     print_dec_value(test_name, "rounds_completed", sender_result.value().counters.rounds_completed);
 }
 
-TEST(ShrinkExpandOnline, DeterministicRelationExact)
+void LogVole_ShrinkExpandOnline_DeterministicRelationExact(const oc::CLP&)
 {
     constexpr const char *test_name = "ShrinkExpandOnline.DeterministicRelationExact";
     constexpr std::uint64_t protocol_id = 0x52u;
@@ -431,7 +460,7 @@ TEST(ShrinkExpandOnline, DeterministicRelationExact)
     print_hex_value(test_name, "nonce", nonce);
 
     auto ctx_result = make_ring_ntt_context(params.ring);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     shrinkexpand_sender_offline_input sender_input{};
@@ -442,7 +471,7 @@ TEST(ShrinkExpandOnline, DeterministicRelationExact)
     receiver_input.params = params;
 
     auto pair_result = make_in_memory_channel_pair(protocol_id, version, session_id, timeout);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -458,23 +487,25 @@ TEST(ShrinkExpandOnline, DeterministicRelationExact)
     std::thread receiver_thread([&]() mutable {
         receiver_offline = run_shrinkexpand_receiver(std::move(receiver_channel), receiver_input, backend);
     });
+    thread_join_guard receiver_guard(receiver_thread);
 
     std::thread sender_thread(
         [&]() mutable { sender_offline = run_shrinkexpand_sender(std::move(sender_channel), sender_input, backend); });
+    thread_join_guard sender_guard(sender_thread);
 
-    sender_thread.join();
-    receiver_thread.join();
+    sender_guard.join();
+    receiver_guard.join();
 
-    ASSERT_TRUE(sender_offline) << sender_offline.message();
-    ASSERT_TRUE(receiver_offline) << receiver_offline.message();
+    LOGVOLE_REQUIRE_TRUE(sender_offline) << sender_offline.message();
+    LOGVOLE_REQUIRE_TRUE(receiver_offline) << receiver_offline.message();
 
     auto x = sample_batch(ctx, params.mu, seed_x);
     auto digest = shrinkexpand_shrink(receiver_offline.value().state, x, backend);
-    ASSERT_TRUE(digest) << digest.message();
+    LOGVOLE_REQUIRE_TRUE(digest) << digest.message();
 
     auto tbk_prime = sample_scalar_poly(ctx, seed_tbk_prime);
     auto sk_x = build_sk_x(sender_offline.value().state, digest.value(), tbk_prime);
-    ASSERT_TRUE(sk_x) << sk_x.message();
+    LOGVOLE_REQUIRE_TRUE(sk_x) << sk_x.message();
 
     shrinkexpand_expand_sender_input sender_expand_input{};
     sender_expand_input.nonce = nonce;
@@ -487,22 +518,22 @@ TEST(ShrinkExpandOnline, DeterministicRelationExact)
     receiver_expand_input.sk_x = sk_x.value();
 
     auto sender_expand = shrinkexpand_expand_sender(sender_offline.value().state, sender_expand_input, backend);
-    ASSERT_TRUE(sender_expand) << sender_expand.message();
+    LOGVOLE_REQUIRE_TRUE(sender_expand) << sender_expand.message();
 
     auto receiver_expand = shrinkexpand_expand_receiver(receiver_offline.value().state, receiver_expand_input, backend);
-    ASSERT_TRUE(receiver_expand) << receiver_expand.message();
+    LOGVOLE_REQUIRE_TRUE(receiver_expand) << receiver_expand.message();
 
     auto tbm_minus_tbk = subtract_batches(ctx, receiver_expand.value().tbm, sender_expand.value().tbk);
-    ASSERT_TRUE(tbm_minus_tbk) << tbm_minus_tbk.message();
+    LOGVOLE_REQUIRE_TRUE(tbm_minus_tbk) << tbm_minus_tbk.message();
 
     auto expected = compute_expected_s_mul_x(ctx, sender_input.s, x);
-    ASSERT_TRUE(expected) << expected.message();
+    LOGVOLE_REQUIRE_TRUE(expected) << expected.message();
 
     expect_batch_equal(tbm_minus_tbk.value(), expected.value());
     // std::cout << "INFO " << test_name << ": relation tbm-tbk==s*x verified exactly" << std::endl;
 }
 
-TEST(ShrinkExpandOnline, FullNoiseTolerance)
+void LogVole_ShrinkExpandOnline_FullNoiseTolerance(const oc::CLP&)
 {
     constexpr const char *test_name = "ShrinkExpandOnline.FullNoiseTolerance";
     constexpr std::uint64_t protocol_id = 0x53u;
@@ -523,7 +554,7 @@ TEST(ShrinkExpandOnline, FullNoiseTolerance)
     print_hex_value(test_name, "nonce", nonce);
 
     auto ctx_result = make_ring_ntt_context(params.ring);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     shrinkexpand_sender_offline_input sender_input{};
@@ -534,7 +565,7 @@ TEST(ShrinkExpandOnline, FullNoiseTolerance)
     receiver_input.params = params;
 
     auto pair_result = make_in_memory_channel_pair(protocol_id, version, session_id, timeout);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -550,31 +581,33 @@ TEST(ShrinkExpandOnline, FullNoiseTolerance)
     std::thread receiver_thread([&]() mutable {
         receiver_offline = run_shrinkexpand_receiver(std::move(receiver_channel), receiver_input, backend);
     });
+    thread_join_guard receiver_guard(receiver_thread);
 
     std::thread sender_thread(
         [&]() mutable { sender_offline = run_shrinkexpand_sender(std::move(sender_channel), sender_input, backend); });
+    thread_join_guard sender_guard(sender_thread);
 
-    sender_thread.join();
-    receiver_thread.join();
+    sender_guard.join();
+    receiver_guard.join();
 
-    ASSERT_TRUE(sender_offline) << sender_offline.message();
-    ASSERT_TRUE(receiver_offline) << receiver_offline.message();
+    LOGVOLE_REQUIRE_TRUE(sender_offline) << sender_offline.message();
+    LOGVOLE_REQUIRE_TRUE(receiver_offline) << receiver_offline.message();
     const std::int64_t expected_base_noise = base_noise_floor(params);
     print_dec_value(test_name, "noise_base_q_pow_01_floor", static_cast<std::uint64_t>(expected_base_noise));
-    ASSERT_GT(expected_base_noise, params.noise_bound);
-    ASSERT_EQ(sender_offline.value().state.effective_noise_bound, expected_base_noise);
-    ASSERT_EQ(receiver_offline.value().state.effective_noise_bound, expected_base_noise);
+    LOGVOLE_REQUIRE_GT(expected_base_noise, params.noise_bound);
+    LOGVOLE_REQUIRE_EQ(sender_offline.value().state.effective_noise_bound, expected_base_noise);
+    LOGVOLE_REQUIRE_EQ(receiver_offline.value().state.effective_noise_bound, expected_base_noise);
     print_dec_value(
         test_name, "effective_noise_bound",
         static_cast<std::uint64_t>(receiver_offline.value().state.effective_noise_bound));
 
     auto x = sample_batch(ctx, params.mu, seed_x);
     auto digest = shrinkexpand_shrink(receiver_offline.value().state, x, backend);
-    ASSERT_TRUE(digest) << digest.message();
+    LOGVOLE_REQUIRE_TRUE(digest) << digest.message();
 
     auto tbk_prime = sample_scalar_poly(ctx, seed_tbk_prime);
     auto sk_x = build_sk_x(sender_offline.value().state, digest.value(), tbk_prime);
-    ASSERT_TRUE(sk_x) << sk_x.message();
+    LOGVOLE_REQUIRE_TRUE(sk_x) << sk_x.message();
 
     shrinkexpand_expand_sender_input sender_expand_input{};
     sender_expand_input.nonce = nonce;
@@ -587,19 +620,19 @@ TEST(ShrinkExpandOnline, FullNoiseTolerance)
     receiver_expand_input.sk_x = sk_x.value();
 
     auto sender_expand = shrinkexpand_expand_sender(sender_offline.value().state, sender_expand_input, backend);
-    ASSERT_TRUE(sender_expand) << sender_expand.message();
+    LOGVOLE_REQUIRE_TRUE(sender_expand) << sender_expand.message();
 
     auto receiver_expand = shrinkexpand_expand_receiver(receiver_offline.value().state, receiver_expand_input, backend);
-    ASSERT_TRUE(receiver_expand) << receiver_expand.message();
+    LOGVOLE_REQUIRE_TRUE(receiver_expand) << receiver_expand.message();
 
     auto tbm_minus_tbk = subtract_batches(ctx, receiver_expand.value().tbm, sender_expand.value().tbk);
-    ASSERT_TRUE(tbm_minus_tbk) << tbm_minus_tbk.message();
+    LOGVOLE_REQUIRE_TRUE(tbm_minus_tbk) << tbm_minus_tbk.message();
 
     auto expected = compute_expected_s_mul_x(ctx, sender_input.s, x);
-    ASSERT_TRUE(expected) << expected.message();
+    LOGVOLE_REQUIRE_TRUE(expected) << expected.message();
 
     auto residual = subtract_batches(ctx, tbm_minus_tbk.value(), expected.value());
-    ASSERT_TRUE(residual) << residual.message();
+    LOGVOLE_REQUIRE_TRUE(residual) << residual.message();
 
     const std::size_t n = params.ring.poly_modulus_degree;
     const std::size_t coeff_mod_count = params.ring.coeff_modulus_bits.size();
@@ -651,11 +684,11 @@ TEST(ShrinkExpandOnline, FullNoiseTolerance)
     // std::cout << "INFO " << test_name << ": estimated_final_noise_log2_max=" << max_log2 << std::endl;
 
     double max_noise_allowed = log_q_bits(params) - params.ring.coeff_modulus_bits.back();
-    EXPECT_GT(max_log2, 0);
-    EXPECT_LT(max_log2, max_noise_allowed);
+    LOGVOLE_EXPECT_GT(max_log2, 0);
+    LOGVOLE_EXPECT_LT(max_log2, max_noise_allowed);
 }
 
-TEST(ShrinkExpandValidation, PayloadTypeMismatchRejected)
+void LogVole_ShrinkExpandValidation_PayloadTypeMismatchRejected(const oc::CLP&)
 {
     constexpr std::uint64_t protocol_id = 0x54u;
     constexpr std::uint64_t version = 1u;
@@ -667,7 +700,7 @@ TEST(ShrinkExpandValidation, PayloadTypeMismatchRejected)
     const auto params = make_params(shrinkexpand_mode::deterministic);
 
     auto ctx_result = make_ring_ntt_context(params.ring);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     shrinkexpand_sender_offline_input sender_input{};
@@ -678,7 +711,7 @@ TEST(ShrinkExpandValidation, PayloadTypeMismatchRejected)
     receiver_input.params = params;
 
     auto pair_result = make_in_memory_channel_pair(protocol_id, version, session_id, timeout);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
     any_channel receiver_channel = std::move(channels.second);
@@ -691,13 +724,14 @@ TEST(ShrinkExpandValidation, PayloadTypeMismatchRejected)
     std::thread receiver_thread([&]() mutable {
         receiver_result = run_shrinkexpand_receiver(std::move(receiver_channel), receiver_input, backend);
     });
+    thread_join_guard receiver_guard(receiver_thread);
 
     shrinkexpand_sender_state sender_state{};
     auto message = backend.prepare_offline_sender(sender_input, sender_state);
-    ASSERT_TRUE(message) << message.message();
+    LOGVOLE_REQUIRE_TRUE(message) << message.message();
 
     auto payload = encode_message(message.value());
-    ASSERT_TRUE(payload) << payload.message();
+    LOGVOLE_REQUIRE_TRUE(payload) << payload.message();
 
     message_envelope envelope{};
     envelope.protocol_id = sender_channel.config().protocol_id;
@@ -710,18 +744,18 @@ TEST(ShrinkExpandValidation, PayloadTypeMismatchRejected)
     envelope.payload_crc = crc32(payload.value().data(), payload.value().size());
 
     auto frame = serialize_frame(envelope, payload.value());
-    ASSERT_TRUE(frame) << frame.message();
+    LOGVOLE_REQUIRE_TRUE(frame) << frame.message();
 
     auto send = sender_channel.send_frame(std::move(frame.value()));
-    ASSERT_TRUE(send) << send.message();
+    LOGVOLE_REQUIRE_TRUE(send) << send.message();
 
-    receiver_thread.join();
+    receiver_guard.join();
 
-    ASSERT_FALSE(receiver_result);
-    EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);
+    LOGVOLE_REQUIRE_FALSE(receiver_result);
+    LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);
 }
 
-TEST(ShrinkExpandValidation, MalformedPayloadRejected)
+void LogVole_ShrinkExpandValidation_MalformedPayloadRejected(const oc::CLP&)
 {
     constexpr std::uint64_t protocol_id = 0x55u;
     constexpr std::uint64_t version = 1u;
@@ -732,7 +766,7 @@ TEST(ShrinkExpandValidation, MalformedPayloadRejected)
     const auto params = make_params(shrinkexpand_mode::deterministic);
 
     auto ctx_result = make_ring_ntt_context(params.ring);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     shrinkexpand_sender_offline_input sender_input{};
@@ -743,7 +777,7 @@ TEST(ShrinkExpandValidation, MalformedPayloadRejected)
     receiver_input.params = params;
 
     auto pair_result = make_in_memory_channel_pair(protocol_id, version, session_id, timeout);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
     any_channel receiver_channel = std::move(channels.second);
@@ -756,16 +790,17 @@ TEST(ShrinkExpandValidation, MalformedPayloadRejected)
     std::thread receiver_thread([&]() mutable {
         receiver_result = run_shrinkexpand_receiver(std::move(receiver_channel), receiver_input, backend);
     });
+    thread_join_guard receiver_guard(receiver_thread);
 
     shrinkexpand_sender_state sender_state{};
     auto message = backend.prepare_offline_sender(sender_input, sender_state);
-    ASSERT_TRUE(message) << message.message();
+    LOGVOLE_REQUIRE_TRUE(message) << message.message();
 
     auto payload = encode_message(message.value());
-    ASSERT_TRUE(payload) << payload.message();
+    LOGVOLE_REQUIRE_TRUE(payload) << payload.message();
 
     auto malformed = payload.value();
-    ASSERT_FALSE(malformed.empty());
+    LOGVOLE_REQUIRE_FALSE(malformed.empty());
     malformed.pop_back();
 
     message_envelope envelope{};
@@ -779,18 +814,18 @@ TEST(ShrinkExpandValidation, MalformedPayloadRejected)
     envelope.payload_crc = crc32(malformed.data(), malformed.size());
 
     auto frame = serialize_frame(envelope, malformed);
-    ASSERT_TRUE(frame) << frame.message();
+    LOGVOLE_REQUIRE_TRUE(frame) << frame.message();
 
     auto send = sender_channel.send_frame(std::move(frame.value()));
-    ASSERT_TRUE(send) << send.message();
+    LOGVOLE_REQUIRE_TRUE(send) << send.message();
 
-    receiver_thread.join();
+    receiver_guard.join();
 
-    ASSERT_FALSE(receiver_result);
-    EXPECT_EQ(receiver_result.error(), protocol_errc::decode_validation_failure);
+    LOGVOLE_REQUIRE_FALSE(receiver_result);
+    LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::decode_validation_failure);
 }
 
-TEST(ShrinkExpandValidation, VersionMismatchRejected)
+void LogVole_ShrinkExpandValidation_VersionMismatchRejected(const oc::CLP&)
 {
     constexpr std::uint64_t protocol_id = 0x56u;
     constexpr std::uint64_t version = 1u;
@@ -802,7 +837,7 @@ TEST(ShrinkExpandValidation, VersionMismatchRejected)
     const auto params = make_params(shrinkexpand_mode::deterministic);
 
     auto ctx_result = make_ring_ntt_context(params.ring);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     shrinkexpand_sender_offline_input sender_input{};
@@ -813,7 +848,7 @@ TEST(ShrinkExpandValidation, VersionMismatchRejected)
     receiver_input.params = params;
 
     auto pair_result = make_in_memory_channel_pair(protocol_id, version, session_id, timeout);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
     any_channel receiver_channel = std::move(channels.second);
@@ -826,13 +861,14 @@ TEST(ShrinkExpandValidation, VersionMismatchRejected)
     std::thread receiver_thread([&]() mutable {
         receiver_result = run_shrinkexpand_receiver(std::move(receiver_channel), receiver_input, backend);
     });
+    thread_join_guard receiver_guard(receiver_thread);
 
     shrinkexpand_sender_state sender_state{};
     auto message = backend.prepare_offline_sender(sender_input, sender_state);
-    ASSERT_TRUE(message) << message.message();
+    LOGVOLE_REQUIRE_TRUE(message) << message.message();
 
     auto payload = encode_message(message.value());
-    ASSERT_TRUE(payload) << payload.message();
+    LOGVOLE_REQUIRE_TRUE(payload) << payload.message();
 
     message_envelope envelope{};
     envelope.protocol_id = sender_channel.config().protocol_id;
@@ -845,18 +881,18 @@ TEST(ShrinkExpandValidation, VersionMismatchRejected)
     envelope.payload_crc = crc32(payload.value().data(), payload.value().size());
 
     auto frame = serialize_frame(envelope, payload.value());
-    ASSERT_TRUE(frame) << frame.message();
+    LOGVOLE_REQUIRE_TRUE(frame) << frame.message();
 
     auto send = sender_channel.send_frame(std::move(frame.value()));
-    ASSERT_TRUE(send) << send.message();
+    LOGVOLE_REQUIRE_TRUE(send) << send.message();
 
-    receiver_thread.join();
+    receiver_guard.join();
 
-    ASSERT_FALSE(receiver_result);
-    EXPECT_EQ(receiver_result.error(), protocol_errc::unsupported_protocol_version);
+    LOGVOLE_REQUIRE_FALSE(receiver_result);
+    LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::unsupported_protocol_version);
 }
 
-TEST(ShrinkExpandValidation, SessionMismatchRejected)
+void LogVole_ShrinkExpandValidation_SessionMismatchRejected(const oc::CLP&)
 {
     constexpr std::uint64_t protocol_id = 0x57u;
     constexpr std::uint64_t version = 1u;
@@ -867,7 +903,7 @@ TEST(ShrinkExpandValidation, SessionMismatchRejected)
     const auto params = make_params(shrinkexpand_mode::deterministic);
 
     auto ctx_result = make_ring_ntt_context(params.ring);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     shrinkexpand_sender_offline_input sender_input{};
@@ -878,7 +914,7 @@ TEST(ShrinkExpandValidation, SessionMismatchRejected)
     receiver_input.params = params;
 
     auto pair_result = make_in_memory_channel_pair(protocol_id, version, session_id, timeout);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
     any_channel receiver_channel = std::move(channels.second);
@@ -891,13 +927,14 @@ TEST(ShrinkExpandValidation, SessionMismatchRejected)
     std::thread receiver_thread([&]() mutable {
         receiver_result = run_shrinkexpand_receiver(std::move(receiver_channel), receiver_input, backend);
     });
+    thread_join_guard receiver_guard(receiver_thread);
 
     shrinkexpand_sender_state sender_state{};
     auto message = backend.prepare_offline_sender(sender_input, sender_state);
-    ASSERT_TRUE(message) << message.message();
+    LOGVOLE_REQUIRE_TRUE(message) << message.message();
 
     auto payload = encode_message(message.value());
-    ASSERT_TRUE(payload) << payload.message();
+    LOGVOLE_REQUIRE_TRUE(payload) << payload.message();
 
     message_envelope envelope{};
     envelope.protocol_id = sender_channel.config().protocol_id;
@@ -910,18 +947,18 @@ TEST(ShrinkExpandValidation, SessionMismatchRejected)
     envelope.payload_crc = crc32(payload.value().data(), payload.value().size());
 
     auto frame = serialize_frame(envelope, payload.value());
-    ASSERT_TRUE(frame) << frame.message();
+    LOGVOLE_REQUIRE_TRUE(frame) << frame.message();
 
     auto send = sender_channel.send_frame(std::move(frame.value()));
-    ASSERT_TRUE(send) << send.message();
+    LOGVOLE_REQUIRE_TRUE(send) << send.message();
 
-    receiver_thread.join();
+    receiver_guard.join();
 
-    ASSERT_FALSE(receiver_result);
-    EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);
+    LOGVOLE_REQUIRE_FALSE(receiver_result);
+    LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);
 }
 
-TEST(ShrinkExpandValidation, RingMetadataMismatchRejected)
+void LogVole_ShrinkExpandValidation_RingMetadataMismatchRejected(const oc::CLP&)
 {
     constexpr std::uint64_t protocol_id = 0x58u;
     constexpr std::uint64_t version = 1u;
@@ -934,7 +971,7 @@ TEST(ShrinkExpandValidation, RingMetadataMismatchRejected)
     receiver_params.ring.coeff_modulus_bits = { 30, 29 };
 
     auto sender_ctx_result = make_ring_ntt_context(sender_params.ring);
-    ASSERT_TRUE(sender_ctx_result) << sender_ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(sender_ctx_result) << sender_ctx_result.message();
 
     shrinkexpand_sender_offline_input sender_input{};
     sender_input.params = sender_params;
@@ -944,7 +981,7 @@ TEST(ShrinkExpandValidation, RingMetadataMismatchRejected)
     receiver_input.params = receiver_params;
 
     auto pair_result = make_in_memory_channel_pair(protocol_id, version, session_id, timeout);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -960,19 +997,21 @@ TEST(ShrinkExpandValidation, RingMetadataMismatchRejected)
     std::thread receiver_thread([&]() mutable {
         receiver_result = run_shrinkexpand_receiver(std::move(receiver_channel), receiver_input, backend);
     });
+    thread_join_guard receiver_guard(receiver_thread);
 
     std::thread sender_thread(
         [&]() mutable { sender_result = run_shrinkexpand_sender(std::move(sender_channel), sender_input, backend); });
+    thread_join_guard sender_guard(sender_thread);
 
-    sender_thread.join();
-    receiver_thread.join();
+    sender_guard.join();
+    receiver_guard.join();
 
-    ASSERT_TRUE(sender_result) << sender_result.message();
-    ASSERT_FALSE(receiver_result);
-    EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);
+    LOGVOLE_REQUIRE_TRUE(sender_result) << sender_result.message();
+    LOGVOLE_REQUIRE_FALSE(receiver_result);
+    LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);
 }
 
-TEST(ShrinkExpandOnline, OfflineStateReuseAcrossQueries)
+void LogVole_ShrinkExpandOnline_OfflineStateReuseAcrossQueries(const oc::CLP&)
 {
     constexpr std::uint64_t protocol_id = 0x59u;
     constexpr std::uint64_t version = 1u;
@@ -983,7 +1022,7 @@ TEST(ShrinkExpandOnline, OfflineStateReuseAcrossQueries)
     const auto params = make_params(shrinkexpand_mode::deterministic);
 
     auto ctx_result = make_ring_ntt_context(params.ring);
-    ASSERT_TRUE(ctx_result) << ctx_result.message();
+    LOGVOLE_REQUIRE_TRUE(ctx_result) << ctx_result.message();
     const auto &ctx = ctx_result.value();
 
     shrinkexpand_sender_offline_input sender_input{};
@@ -994,7 +1033,7 @@ TEST(ShrinkExpandOnline, OfflineStateReuseAcrossQueries)
     receiver_input.params = params;
 
     auto pair_result = make_in_memory_channel_pair(protocol_id, version, session_id, timeout);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -1010,15 +1049,17 @@ TEST(ShrinkExpandOnline, OfflineStateReuseAcrossQueries)
     std::thread receiver_thread([&]() mutable {
         receiver_offline = run_shrinkexpand_receiver(std::move(receiver_channel), receiver_input, backend);
     });
+    thread_join_guard receiver_guard(receiver_thread);
 
     std::thread sender_thread(
         [&]() mutable { sender_offline = run_shrinkexpand_sender(std::move(sender_channel), sender_input, backend); });
+    thread_join_guard sender_guard(sender_thread);
 
-    sender_thread.join();
-    receiver_thread.join();
+    sender_guard.join();
+    receiver_guard.join();
 
-    ASSERT_TRUE(sender_offline) << sender_offline.message();
-    ASSERT_TRUE(receiver_offline) << receiver_offline.message();
+    LOGVOLE_REQUIRE_TRUE(sender_offline) << sender_offline.message();
+    LOGVOLE_REQUIRE_TRUE(receiver_offline) << receiver_offline.message();
 
     for (std::uint64_t iter = 0; iter < 3; ++iter)
     {
@@ -1028,11 +1069,11 @@ TEST(ShrinkExpandOnline, OfflineStateReuseAcrossQueries)
 
         auto x = sample_batch(ctx, params.mu, seed_x);
         auto digest = shrinkexpand_shrink(receiver_offline.value().state, x, backend);
-        ASSERT_TRUE(digest) << digest.message();
+        LOGVOLE_REQUIRE_TRUE(digest) << digest.message();
 
         auto tbk_prime = sample_scalar_poly(ctx, seed_tbk_prime);
         auto sk_x = build_sk_x(sender_offline.value().state, digest.value(), tbk_prime);
-        ASSERT_TRUE(sk_x) << sk_x.message();
+        LOGVOLE_REQUIRE_TRUE(sk_x) << sk_x.message();
 
         shrinkexpand_expand_sender_input sender_expand_input{};
         sender_expand_input.nonce = nonce;
@@ -1045,17 +1086,17 @@ TEST(ShrinkExpandOnline, OfflineStateReuseAcrossQueries)
         receiver_expand_input.sk_x = sk_x.value();
 
         auto sender_expand = shrinkexpand_expand_sender(sender_offline.value().state, sender_expand_input, backend);
-        ASSERT_TRUE(sender_expand) << sender_expand.message();
+        LOGVOLE_REQUIRE_TRUE(sender_expand) << sender_expand.message();
 
         auto receiver_expand =
             shrinkexpand_expand_receiver(receiver_offline.value().state, receiver_expand_input, backend);
-        ASSERT_TRUE(receiver_expand) << receiver_expand.message();
+        LOGVOLE_REQUIRE_TRUE(receiver_expand) << receiver_expand.message();
 
         auto tbm_minus_tbk = subtract_batches(ctx, receiver_expand.value().tbm, sender_expand.value().tbk);
-        ASSERT_TRUE(tbm_minus_tbk) << tbm_minus_tbk.message();
+        LOGVOLE_REQUIRE_TRUE(tbm_minus_tbk) << tbm_minus_tbk.message();
 
         auto expected = compute_expected_s_mul_x(ctx, sender_input.s, x);
-        ASSERT_TRUE(expected) << expected.message();
+        LOGVOLE_REQUIRE_TRUE(expected) << expected.message();
 
         expect_batch_equal(tbm_minus_tbk.value(), expected.value());
     }
