@@ -49,21 +49,57 @@ cmake -S C:\Users\peter\repo\SEAL-stock-4.1.1 `
 | Add libOTe integration plan | 100% | Done | This document tracks dependency and porting work. |
 | Add libOTe build option and SEAL dependency hook | 100% | Done | Added `ENABLE_LOGVOLE`, config export, and required `SEAL::seal` lookup/link when enabled; default configure, LogVole configure, and enabled `libOTe` build pass. |
 | Port LogVole arithmetic/protocol modules | 100% | Done | Imported cleaned LogVole headers and sources under `libOTe/Vole/LogVole/`, preserving the old `loglabel` include/namespace shape for now. |
-| Replace LogVole communication layer | 0% | Pending | Replace current transport with coproto `Socket`, `task<>`, and libOTe-style `PRNG&` ownership. |
+| Freeze imported LogVole reference | 100% | Done | Current stock-SEAL import and native tests are the known-good reference. New libOTe-facing code should copy behavior, not preserve the old callback/transport architecture. |
+| Rewrite LogVole libOTe integration shell | 0% | Pending | Replace the imported callback/DSL networking stack with straight-line sender/receiver coroutine code using coproto `Socket&` and `task<>`. |
 | Add libOTe LogVole tests | 100% | Done | Imported original correctness tests under `libOTe_Tests/LogVole/`, compiled them into libOTe's native `TestCollection`, and kept the old test bodies through a small local compatibility shim. |
 | Validate libOTe build and tests | 100% | Done | `ENABLE_LOGVOLE=ON` configure/build/native tests pass with stock SEAL; `ENABLE_LOGVOLE=OFF` configure/build also passes. |
 | Harden native LogVole tests | 100% | Done | Factored native assertions and skips into `LogVole_TestUtil.h`; ported all compiled LogVole tests off the GTest shim; added join guards around threaded protocol tests; removed the unused shim and standalone GTest main. |
 | Decide benchmark landing path | 0% | Pending | Start with smoke tests only; never run two benchmarks at the same time. |
 
-## Porting Order
+## Rewrite Target
 
-1. Add the CMake/config option and required SEAL lookup.
-2. Copy the cleaned LogVole core into `libOTe/Vole/LogVole/` with minimal renaming.
-3. Keep arithmetic local and direct: SEAL util calls, fixed-size/batched loops, no virtual ring backend.
-4. Separate pure protocol state from transport.
-5. Replace the old LogVole communication API with coproto integration.
-6. Port correctness tests before changing algorithm structure.
-7. Add focused benchmark smoke coverage after correctness is stable.
+The imported LogLabel-shaped code is frozen as a reference implementation. The libOTe landing code should use a compact LogVole layout:
+
+```text
+libOTe/Vole/LogVole/
+  LogVoleSender.h
+  LogVoleSender.cpp
+  LogVoleReceiver.h
+  LogVoleReceiver.cpp
+  LogVoleEncoding.h
+  LogVoleEncoding.cpp
+  LogVoleRing.h
+  LogVoleRing.cpp
+  LogVoleLenc.h
+  LogVoleLenc.cpp
+```
+
+Top-level protocol code is split by role. Lower layers stay compact:
+
+- `LogVoleSender.*`: sender-facing inputs, outputs, and straight-line coroutine entrypoints.
+- `LogVoleReceiver.*`: receiver-facing inputs, outputs, and straight-line coroutine entrypoints.
+- `LogVoleEncoding.*`: typed message structs and encode/decode helpers. Malformed payload tests target this directly.
+- `LogVoleRing.*`: concrete SEAL/RNS polynomial machinery and hot arithmetic.
+- `LogVoleLenc.*`: LENC, key-derivation, and shrink/expand arithmetic above raw ring ops.
+
+Do not recreate the imported `protocol/backend/spec/type` split. Do not adapt the callback `protocol_engine` to coproto. Delete or stop compiling the old `comm/` stack, `round_dsl.hpp`, `protocol_engine.hpp`, and `*_spec.hpp` when the coroutine cutover lands.
+
+## Rewrite Order
+
+1. Commit this freeze/rewrite plan.
+2. Add the new lower-layer files (`LogVoleEncoding.*`, `LogVoleRing.*`, `LogVoleLenc.*`) while the old reference still compiles.
+3. Move/copy behavior into the new lower-layer files and point arithmetic/encoding tests at them.
+4. Add `LogVoleSender.*` and `LogVoleReceiver.*` coroutine entrypoints using `coproto::Socket&`.
+5. In one networking cutover commit, rewrite keyderive/shrinkexpand protocol tests to coproto sockets and delete the old imported comm/callback stack.
+6. Keep algebraic correctness tests continuous. Let old comm-only tests die with the old networking layer unless the new API has an equivalent behavior.
+7. Add benchmark smoke coverage only after the coroutine integration is stable. Never run two benchmarks at the same time.
+
+## Rewrite Validation Story
+
+- Every rewrite commit: configure/build with `ENABLE_LOGVOLE=ON` and run `LogVoleNativeTests`.
+- Lower-layer rewrite commit: ring, lenc, encoding/malformed-decode tests plus full old native tests as regression.
+- Networking cutover commit: full native LogVole tests over coproto local sockets, plus direct malformed decode tests.
+- Before broader review: also validate `ENABLE_LOGVOLE=OFF` configure/build.
 
 ## Current Validation From `antilabel`
 
