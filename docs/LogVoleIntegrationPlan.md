@@ -50,7 +50,7 @@ cmake -S C:\Users\peter\repo\SEAL-stock-4.1.1 `
 | Add libOTe build option and SEAL dependency hook | 100% | Done | Added `ENABLE_LOGVOLE`, config export, and required `SEAL::seal` lookup/link when enabled; default configure, LogVole configure, and enabled `libOTe` build pass. |
 | Port LogVole arithmetic/protocol modules | 100% | Done | Imported cleaned LogVole headers and sources under `libOTe/Vole/LogVole/`, preserving the old `loglabel` include/namespace shape for now. |
 | Freeze imported LogVole reference | 100% | Done | Current stock-SEAL import and native tests are the known-good reference. New libOTe-facing code should copy behavior, not preserve the old callback/transport architecture. |
-| Rewrite LogVole libOTe integration shell | 0% | Pending | Replace the imported callback/DSL networking stack with straight-line sender/receiver coroutine code using coproto `Socket&` and `task<>`. |
+| Rewrite LogVole libOTe integration shell | 5% | In progress | Added initial fresh lower-layer skeleton files for encoding, ring, and LENC under `osuCrypto`, with no aliases or includes into the frozen `loglabel` reference. |
 | Add libOTe LogVole tests | 100% | Done | Imported original correctness tests under `libOTe_Tests/LogVole/`, compiled them into libOTe's native `TestCollection`, and kept the old test bodies through a small local compatibility shim. |
 | Validate libOTe build and tests | 100% | Done | `ENABLE_LOGVOLE=ON` configure/build/native tests pass with stock SEAL; `ENABLE_LOGVOLE=OFF` configure/build also passes. |
 | Harden native LogVole tests | 100% | Done | Factored native assertions and skips into `LogVole_TestUtil.h`; ported all compiled LogVole tests off the GTest shim; added join guards around threaded protocol tests; removed the unused shim and standalone GTest main. |
@@ -82,7 +82,7 @@ Top-level protocol code is split by role. Lower layers stay compact:
 - `LogVoleRing.*`: concrete SEAL/RNS polynomial machinery and hot arithmetic.
 - `LogVoleLenc.*`: LENC, key-derivation, and shrink/expand arithmetic above raw ring ops.
 
-Do not recreate the imported `protocol/backend/spec/type` split. Do not adapt the callback `protocol_engine` to coproto. Delete or stop compiling the old `comm/` stack, `round_dsl.hpp`, `protocol_engine.hpp`, and `*_spec.hpp` when the coroutine cutover lands.
+Do not recreate the imported `protocol/backend/spec/type` split. Do not adapt the callback `protocol_engine` to coproto. New rewrite files should use `namespace osuCrypto` directly and must not include or alias the frozen `loglabel` implementation. Delete or stop compiling the old `comm/` stack, `round_dsl.hpp`, `protocol_engine.hpp`, and `*_spec.hpp` when the coroutine cutover lands.
 
 ## Rewrite Order
 
