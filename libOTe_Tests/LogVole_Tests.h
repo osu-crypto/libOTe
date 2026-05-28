@@ -9,6 +9,10 @@
     X(CommUds, PingPongOverUnixDomainSocket) \
     X(CommValidation, PayloadTypeMismatchFails) \
     X(CommValidation, WrongRoundIndexFails) \
+    X(Encoding, KeyDeriveRequestRoundTrip) \
+    X(Encoding, KeyDeriveResponseRoundTrip) \
+    X(Encoding, ShrinkExpandOfflineRoundTrip) \
+    X(Encoding, MalformedPayloadRejected) \
     X(KeyderiveProtocol, HappyPathAndAlgebraicRelation) \
     X(KeyderiveProtocol, DeterministicRegressionSeeds) \
     X(KeyderiveValidation, PayloadTypeMismatchFails) \

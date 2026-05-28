@@ -38,6 +38,7 @@ if(ENABLE_LOGVOLE)
         LogVole/tests/test_comm_tcp.cpp
         LogVole/tests/test_comm_uds.cpp
         LogVole/tests/test_comm_validation.cpp
+        LogVole/tests/test_encoding.cpp
         LogVole/tests/test_keyderive.cpp
         LogVole/tests/test_lenc.cpp
         LogVole/tests/test_ring_ops.cpp

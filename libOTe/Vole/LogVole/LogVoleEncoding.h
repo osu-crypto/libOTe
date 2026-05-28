@@ -2,6 +2,7 @@
 
 #include <cryptoTools/Common/Defines.h>
 
+#include <span>
 #include <vector>
 
 namespace osuCrypto
@@ -48,4 +49,12 @@ namespace osuCrypto
         u32 mLacctCtCols = 0;
         std::vector<u64> mLacctCtCoeffs;
     };
+
+    LogVoleBuffer logVoleEncode(const LogVoleKeyDeriveRequest& message);
+    LogVoleBuffer logVoleEncode(const LogVoleKeyDeriveResponse& message);
+    LogVoleBuffer logVoleEncode(const LogVoleShrinkExpandOfflineMessage& message);
+
+    bool logVoleDecode(std::span<const u8> payload, LogVoleKeyDeriveRequest& message);
+    bool logVoleDecode(std::span<const u8> payload, LogVoleKeyDeriveResponse& message);
+    bool logVoleDecode(std::span<const u8> payload, LogVoleShrinkExpandOfflineMessage& message);
 }
