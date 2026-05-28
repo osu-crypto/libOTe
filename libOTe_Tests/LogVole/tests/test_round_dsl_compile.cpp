@@ -1,18 +1,18 @@
 #include "test_protocol_defs.hpp"
 
-#include "gtest/gtest.h"
+#include "libOTe_Tests/LogVole_TestUtil.h"
 
 #include <thread>
 
 using namespace loglabel::comm;
 using namespace loglabel::comm::test_defs;
 
-TEST(RoundDslCompile, ScriptShapeAndHandlersCompile)
+void LogVole_RoundDslCompile_ScriptShapeAndHandlersCompile(const oc::CLP&)
 {
     static_assert(round_script_traits<ping_pong_spec::script>::round_count == 2, "unexpected round count");
 
     auto pair_result = make_in_memory_channel_pair(/*protocol_id=*/10, /*version=*/1, /*session_id=*/101);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -27,6 +27,7 @@ TEST(RoundDslCompile, ScriptShapeAndHandlersCompile)
             on_recv<0>([](const ping_msg &) {}),
             on_send<1>([]() { return pong_msg{ 1 }; }));
     });
+    tests_libOTe::logvole_test::thread_join_guard receiver_guard(receiver_thread);
 
     std::thread sender_thread([ch = std::move(sender_channel), &sender_result]() mutable {
         protocol_engine<ping_pong_spec, role_t::sender> engine(std::move(ch));
@@ -34,10 +35,11 @@ TEST(RoundDslCompile, ScriptShapeAndHandlersCompile)
             on_send<0>([]() { return ping_msg{ 9 }; }),
             on_recv<1>([](const pong_msg &) {}));
     });
+    tests_libOTe::logvole_test::thread_join_guard sender_guard(sender_thread);
 
-    sender_thread.join();
-    receiver_thread.join();
+    sender_guard.join();
+    receiver_guard.join();
 
-    ASSERT_TRUE(sender_result) << sender_result.message();
-    ASSERT_TRUE(receiver_result) << receiver_result.message();
+    LOGVOLE_REQUIRE_TRUE(sender_result) << sender_result.message();
+    LOGVOLE_REQUIRE_TRUE(receiver_result) << receiver_result.message();
 }

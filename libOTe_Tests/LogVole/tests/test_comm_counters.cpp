@@ -1,16 +1,16 @@
 #include "test_protocol_defs.hpp"
 
-#include "gtest/gtest.h"
+#include "libOTe_Tests/LogVole_TestUtil.h"
 
 #include <thread>
 
 using namespace loglabel::comm;
 using namespace loglabel::comm::test_defs;
 
-TEST(CommCounters, ExactByteAndBitAccounting)
+void LogVole_CommCounters_ExactByteAndBitAccounting(const oc::CLP&)
 {
     auto pair_result = make_in_memory_channel_pair(/*protocol_id=*/88, /*version=*/1, /*session_id=*/444);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -29,6 +29,7 @@ TEST(CommCounters, ExactByteAndBitAccounting)
             on_send<1>([]() { return pong_msg{ 7 }; }));
         receiver_counters = engine.counters();
     });
+    tests_libOTe::logvole_test::thread_join_guard receiver_guard(receiver_thread);
 
     std::thread sender_thread([ch = std::move(sender_channel), &sender_result, &sender_counters]() mutable {
         protocol_engine<ping_pong_spec, role_t::sender> engine(std::move(ch));
@@ -37,29 +38,30 @@ TEST(CommCounters, ExactByteAndBitAccounting)
             on_recv<1>([](const pong_msg &) {}));
         sender_counters = engine.counters();
     });
+    tests_libOTe::logvole_test::thread_join_guard sender_guard(sender_thread);
 
-    sender_thread.join();
-    receiver_thread.join();
+    sender_guard.join();
+    receiver_guard.join();
 
-    ASSERT_TRUE(sender_result) << sender_result.message();
-    ASSERT_TRUE(receiver_result) << receiver_result.message();
+    LOGVOLE_REQUIRE_TRUE(sender_result) << sender_result.message();
+    LOGVOLE_REQUIRE_TRUE(receiver_result) << receiver_result.message();
 
     const std::uint64_t expected_wire_s2r = envelope_wire_size + sizeof(ping_msg);
     const std::uint64_t expected_wire_r2s = envelope_wire_size + sizeof(pong_msg);
 
-    EXPECT_EQ(sender_counters.wire_bytes_s2r_sent, expected_wire_s2r);
-    EXPECT_EQ(sender_counters.wire_bytes_r2s_recv, expected_wire_r2s);
-    EXPECT_EQ(receiver_counters.wire_bytes_s2r_recv, expected_wire_s2r);
-    EXPECT_EQ(receiver_counters.wire_bytes_r2s_sent, expected_wire_r2s);
+    LOGVOLE_EXPECT_EQ(sender_counters.wire_bytes_s2r_sent, expected_wire_s2r);
+    LOGVOLE_EXPECT_EQ(sender_counters.wire_bytes_r2s_recv, expected_wire_r2s);
+    LOGVOLE_EXPECT_EQ(receiver_counters.wire_bytes_s2r_recv, expected_wire_s2r);
+    LOGVOLE_EXPECT_EQ(receiver_counters.wire_bytes_r2s_sent, expected_wire_r2s);
 
-    EXPECT_EQ(sender_counters.payload_bytes_s2r_sent, sizeof(ping_msg));
-    EXPECT_EQ(sender_counters.payload_bytes_r2s_recv, sizeof(pong_msg));
-    EXPECT_EQ(receiver_counters.payload_bytes_s2r_recv, sizeof(ping_msg));
-    EXPECT_EQ(receiver_counters.payload_bytes_r2s_sent, sizeof(pong_msg));
+    LOGVOLE_EXPECT_EQ(sender_counters.payload_bytes_s2r_sent, sizeof(ping_msg));
+    LOGVOLE_EXPECT_EQ(sender_counters.payload_bytes_r2s_recv, sizeof(pong_msg));
+    LOGVOLE_EXPECT_EQ(receiver_counters.payload_bytes_s2r_recv, sizeof(ping_msg));
+    LOGVOLE_EXPECT_EQ(receiver_counters.payload_bytes_r2s_sent, sizeof(pong_msg));
 
-    EXPECT_EQ(sender_counters.bits_s2r_sent(), expected_wire_s2r * 8);
-    EXPECT_EQ(receiver_counters.bits_r2s_sent(), expected_wire_r2s * 8);
+    LOGVOLE_EXPECT_EQ(sender_counters.bits_s2r_sent(), expected_wire_s2r * 8);
+    LOGVOLE_EXPECT_EQ(receiver_counters.bits_r2s_sent(), expected_wire_r2s * 8);
 
-    EXPECT_EQ(sender_counters.rounds_completed, 2u);
-    EXPECT_EQ(receiver_counters.rounds_completed, 2u);
+    LOGVOLE_EXPECT_EQ(sender_counters.rounds_completed, 2u);
+    LOGVOLE_EXPECT_EQ(receiver_counters.rounds_completed, 2u);
 }

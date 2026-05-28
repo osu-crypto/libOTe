@@ -52,7 +52,7 @@ cmake -S C:\Users\peter\repo\SEAL-stock-4.1.1 `
 | Replace LogVole communication layer | 0% | Pending | Replace current transport with coproto `Socket`, `task<>`, and libOTe-style `PRNG&` ownership. |
 | Add libOTe LogVole tests | 100% | Done | Imported original correctness tests under `libOTe_Tests/LogVole/`, compiled them into libOTe's native `TestCollection`, and kept the old test bodies through a small local compatibility shim. |
 | Validate libOTe build and tests | 100% | Done | `ENABLE_LOGVOLE=ON` configure/build/native tests pass with stock SEAL; `ENABLE_LOGVOLE=OFF` configure/build also passes. |
-| Harden native LogVole tests | 70% | In progress | Factored native assertions into `LogVole_TestUtil.h`; ported keyderive, shrink/expand, lenc, and ring-ops tests off the GTest shim; added join guards around threaded protocol tests. |
+| Harden native LogVole tests | 100% | Done | Factored native assertions and skips into `LogVole_TestUtil.h`; ported all compiled LogVole tests off the GTest shim; added join guards around threaded protocol tests; removed the unused shim and standalone GTest main. |
 | Decide benchmark landing path | 0% | Pending | Start with smoke tests only; never run two benchmarks at the same time. |
 
 ## Porting Order

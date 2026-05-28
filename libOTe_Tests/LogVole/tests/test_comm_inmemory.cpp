@@ -1,6 +1,6 @@
 #include "test_protocol_defs.hpp"
 
-#include "gtest/gtest.h"
+#include "libOTe_Tests/LogVole_TestUtil.h"
 
 #include <atomic>
 #include <thread>
@@ -8,10 +8,10 @@
 using namespace loglabel::comm;
 using namespace loglabel::comm::test_defs;
 
-TEST(CommInMemory, PingPongHappyPath)
+void LogVole_CommInMemory_PingPongHappyPath(const oc::CLP&)
 {
     auto pair_result = make_in_memory_channel_pair(/*protocol_id=*/42, /*version=*/1, /*session_id=*/777);
-    ASSERT_TRUE(pair_result) << pair_result.message();
+    LOGVOLE_REQUIRE_TRUE(pair_result) << pair_result.message();
 
     auto channels = std::move(pair_result.value());
     any_channel sender_channel = std::move(channels.first);
@@ -33,6 +33,7 @@ TEST(CommInMemory, PingPongHappyPath)
             on_send<1>([]() { return pong_msg{ 1 }; }));
         receiver_counters = engine.counters();
     });
+    tests_libOTe::logvole_test::thread_join_guard receiver_guard(receiver_thread);
 
     std::thread sender_thread([ch = std::move(sender_channel), &sender_result, &sender_counters, &observed_ack]() mutable {
         protocol_engine<ping_pong_spec, role_t::sender> engine(std::move(ch));
@@ -41,18 +42,19 @@ TEST(CommInMemory, PingPongHappyPath)
             on_recv<1>([&observed_ack](const pong_msg &message) { observed_ack.store(message.ok); }));
         sender_counters = engine.counters();
     });
+    tests_libOTe::logvole_test::thread_join_guard sender_guard(sender_thread);
 
-    sender_thread.join();
-    receiver_thread.join();
+    sender_guard.join();
+    receiver_guard.join();
 
-    ASSERT_TRUE(sender_result) << sender_result.message();
-    ASSERT_TRUE(receiver_result) << receiver_result.message();
+    LOGVOLE_REQUIRE_TRUE(sender_result) << sender_result.message();
+    LOGVOLE_REQUIRE_TRUE(receiver_result) << receiver_result.message();
 
-    EXPECT_EQ(observed_nonce.load(), 1234u);
-    EXPECT_EQ(observed_ack.load(), 1u);
+    LOGVOLE_EXPECT_EQ(observed_nonce.load(), 1234u);
+    LOGVOLE_EXPECT_EQ(observed_ack.load(), 1u);
 
-    EXPECT_EQ(sender_counters.frames_s2r_sent, 1u);
-    EXPECT_EQ(receiver_counters.frames_s2r_recv, 1u);
-    EXPECT_EQ(sender_counters.frames_r2s_recv, 1u);
-    EXPECT_EQ(receiver_counters.frames_r2s_sent, 1u);
+    LOGVOLE_EXPECT_EQ(sender_counters.frames_s2r_sent, 1u);
+    LOGVOLE_EXPECT_EQ(receiver_counters.frames_s2r_recv, 1u);
+    LOGVOLE_EXPECT_EQ(sender_counters.frames_r2s_recv, 1u);
+    LOGVOLE_EXPECT_EQ(receiver_counters.frames_r2s_sent, 1u);
 }

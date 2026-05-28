@@ -1,6 +1,6 @@
 #include "test_protocol_defs.hpp"
 
-#include "gtest/gtest.h"
+#include "libOTe_Tests/LogVole_TestUtil.h"
 
 #include <cstring>
 #include <thread>
@@ -54,15 +54,15 @@ namespace
 #endif
 } // namespace
 
-TEST(CommTcp, PingPongOverLoopbackTcp)
+void LogVole_CommTcp_PingPongOverLoopbackTcp(const oc::CLP&)
 {
 #if defined(_WIN32)
-    GTEST_SKIP() << "TCP test helper is POSIX-only in this module";
+    LOGVOLE_SKIP() << "TCP test helper is POSIX-only in this module";
 #else
     const auto port = find_free_port();
     if (port == 0u)
     {
-        GTEST_SKIP() << "TCP loopback unavailable in this environment";
+        LOGVOLE_SKIP() << "TCP loopback unavailable in this environment";
     }
 
     auto pair_result = make_tcp_channel_pair(
@@ -70,7 +70,7 @@ TEST(CommTcp, PingPongOverLoopbackTcp)
         std::chrono::milliseconds(2000));
     if (!pair_result)
     {
-        GTEST_SKIP() << "TCP unavailable in this environment: " << pair_result.message();
+        LOGVOLE_SKIP() << "TCP unavailable in this environment: " << pair_result.message();
     }
 
     auto channels = std::move(pair_result.value());
@@ -86,6 +86,7 @@ TEST(CommTcp, PingPongOverLoopbackTcp)
             on_recv<0>([](const ping_msg &) {}),
             on_send<1>([]() { return pong_msg{ 1 }; }));
     });
+    tests_libOTe::logvole_test::thread_join_guard receiver_guard(receiver_thread);
 
     std::thread sender_thread([ch = std::move(sender_channel), &sender_result]() mutable {
         protocol_engine<ping_pong_spec, role_t::sender> engine(std::move(ch));
@@ -93,11 +94,12 @@ TEST(CommTcp, PingPongOverLoopbackTcp)
             on_send<0>([]() { return ping_msg{ 77 }; }),
             on_recv<1>([](const pong_msg &) {}));
     });
+    tests_libOTe::logvole_test::thread_join_guard sender_guard(sender_thread);
 
-    sender_thread.join();
-    receiver_thread.join();
+    sender_guard.join();
+    receiver_guard.join();
 
-    ASSERT_TRUE(sender_result) << sender_result.message();
-    ASSERT_TRUE(receiver_result) << receiver_result.message();
+    LOGVOLE_REQUIRE_TRUE(sender_result) << sender_result.message();
+    LOGVOLE_REQUIRE_TRUE(receiver_result) << receiver_result.message();
 #endif
 }

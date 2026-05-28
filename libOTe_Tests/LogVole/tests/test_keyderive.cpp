@@ -220,13 +220,15 @@ void LogVole_KeyderiveProtocol_HappyPathAndAlgebraicRelation(const oc::CLP&)
     std::thread receiver_thread([ch = std::move(receiver_channel), &receiver_result, &receiver_input, &backend]() mutable {
         receiver_result = run_keyderive_receiver(std::move(ch), receiver_input, backend);
     });
+    tests_libOTe::logvole_test::thread_join_guard receiver_guard(receiver_thread);
 
     std::thread sender_thread([ch = std::move(sender_channel), &sender_result, &sender_input, &backend]() mutable {
         sender_result = run_keyderive_sender(std::move(ch), sender_input, backend);
     });
+    tests_libOTe::logvole_test::thread_join_guard sender_guard(sender_thread);
 
-    sender_thread.join();
-    receiver_thread.join();
+    sender_guard.join();
+    receiver_guard.join();
 
     LOGVOLE_REQUIRE_TRUE(sender_result) << sender_result.message();
     LOGVOLE_REQUIRE_TRUE(receiver_result) << receiver_result.message();
@@ -277,13 +279,15 @@ void LogVole_KeyderiveProtocol_DeterministicRegressionSeeds(const oc::CLP&)
         std::thread receiver_thread([ch = std::move(receiver_channel), &receiver_result, &receiver_input, &backend]() mutable {
             receiver_result = run_keyderive_receiver(std::move(ch), receiver_input, backend);
         });
+        tests_libOTe::logvole_test::thread_join_guard receiver_guard(receiver_thread);
 
         std::thread sender_thread([ch = std::move(sender_channel), &sender_result, &sender_input, &backend]() mutable {
             sender_result = run_keyderive_sender(std::move(ch), sender_input, backend);
         });
+        tests_libOTe::logvole_test::thread_join_guard sender_guard(sender_thread);
 
-        sender_thread.join();
-        receiver_thread.join();
+        sender_guard.join();
+        receiver_guard.join();
 
         LOGVOLE_REQUIRE_TRUE(sender_result) << sender_result.message();
         LOGVOLE_REQUIRE_TRUE(receiver_result) << receiver_result.message();
@@ -320,6 +324,7 @@ void LogVole_KeyderiveValidation_PayloadTypeMismatchFails(const oc::CLP&)
     std::thread receiver_thread([ch = std::move(receiver_channel), &receiver_result, &receiver_input, &backend]() mutable {
         receiver_result = run_keyderive_receiver(std::move(ch), receiver_input, backend);
     });
+    tests_libOTe::logvole_test::thread_join_guard receiver_guard(receiver_thread);
 
     auto req_frame = sender_channel.recv_frame();
     LOGVOLE_REQUIRE_TRUE(req_frame) << req_frame.message();
@@ -344,7 +349,7 @@ void LogVole_KeyderiveValidation_PayloadTypeMismatchFails(const oc::CLP&)
     auto send_result = sender_channel.send_frame(std::move(frame_result.value()));
     LOGVOLE_REQUIRE_TRUE(send_result) << send_result.message();
 
-    receiver_thread.join();
+    receiver_guard.join();
 
     LOGVOLE_REQUIRE_FALSE(receiver_result);
     LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);
@@ -377,6 +382,7 @@ void LogVole_KeyderiveValidation_MalformedPayloadFails(const oc::CLP&)
     std::thread receiver_thread([ch = std::move(receiver_channel), &receiver_result, &receiver_input, &backend]() mutable {
         receiver_result = run_keyderive_receiver(std::move(ch), receiver_input, backend);
     });
+    tests_libOTe::logvole_test::thread_join_guard receiver_guard(receiver_thread);
 
     auto req_frame = sender_channel.recv_frame();
     LOGVOLE_REQUIRE_TRUE(req_frame) << req_frame.message();
@@ -405,7 +411,7 @@ void LogVole_KeyderiveValidation_MalformedPayloadFails(const oc::CLP&)
     auto send_result = sender_channel.send_frame(std::move(frame_result.value()));
     LOGVOLE_REQUIRE_TRUE(send_result) << send_result.message();
 
-    receiver_thread.join();
+    receiver_guard.join();
 
     LOGVOLE_REQUIRE_FALSE(receiver_result);
     LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::decode_validation_failure);
@@ -438,6 +444,7 @@ void LogVole_KeyderiveValidation_VersionMismatchFails(const oc::CLP&)
     std::thread receiver_thread([ch = std::move(receiver_channel), &receiver_result, &receiver_input, &backend]() mutable {
         receiver_result = run_keyderive_receiver(std::move(ch), receiver_input, backend);
     });
+    tests_libOTe::logvole_test::thread_join_guard receiver_guard(receiver_thread);
 
     auto req_frame = sender_channel.recv_frame();
     LOGVOLE_REQUIRE_TRUE(req_frame) << req_frame.message();
@@ -462,7 +469,7 @@ void LogVole_KeyderiveValidation_VersionMismatchFails(const oc::CLP&)
     auto send_result = sender_channel.send_frame(std::move(frame_result.value()));
     LOGVOLE_REQUIRE_TRUE(send_result) << send_result.message();
 
-    receiver_thread.join();
+    receiver_guard.join();
 
     LOGVOLE_REQUIRE_FALSE(receiver_result);
     LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::unsupported_protocol_version);
@@ -495,6 +502,7 @@ void LogVole_KeyderiveValidation_SessionMismatchFails(const oc::CLP&)
     std::thread receiver_thread([ch = std::move(receiver_channel), &receiver_result, &receiver_input, &backend]() mutable {
         receiver_result = run_keyderive_receiver(std::move(ch), receiver_input, backend);
     });
+    tests_libOTe::logvole_test::thread_join_guard receiver_guard(receiver_thread);
 
     auto req_frame = sender_channel.recv_frame();
     LOGVOLE_REQUIRE_TRUE(req_frame) << req_frame.message();
@@ -519,7 +527,7 @@ void LogVole_KeyderiveValidation_SessionMismatchFails(const oc::CLP&)
     auto send_result = sender_channel.send_frame(std::move(frame_result.value()));
     LOGVOLE_REQUIRE_TRUE(send_result) << send_result.message();
 
-    receiver_thread.join();
+    receiver_guard.join();
 
     LOGVOLE_REQUIRE_FALSE(receiver_result);
     LOGVOLE_EXPECT_EQ(receiver_result.error(), protocol_errc::flow_violation);

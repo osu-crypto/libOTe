@@ -4,6 +4,7 @@
 
 #include <sstream>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -116,6 +117,33 @@ namespace tests_libOTe::logvole_test
         bool mActive = true;
     };
 
+    class thread_join_guard
+    {
+    public:
+        explicit thread_join_guard(std::thread& thread)
+            : mThread(thread)
+        {}
+
+        thread_join_guard(const thread_join_guard&) = delete;
+        thread_join_guard& operator=(const thread_join_guard&) = delete;
+
+        ~thread_join_guard()
+        {
+            join();
+        }
+
+        void join()
+        {
+            if (mThread.joinable())
+            {
+                mThread.join();
+            }
+        }
+
+    private:
+        std::thread& mThread;
+    };
+
     inline assertion require_true(bool value, const char* expr, const char* file, int line)
     {
         return assertion(value, "require_true", expr, file, line);
@@ -223,3 +251,4 @@ namespace tests_libOTe::logvole_test
     ::tests_libOTe::logvole_test::require_lt((lhs), (rhs), #lhs " < " #rhs, __FILE__, __LINE__)
 #define LOGVOLE_EXPECT_LT(lhs, rhs) \
     ::tests_libOTe::logvole_test::expect_lt((lhs), (rhs), #lhs " < " #rhs, __FILE__, __LINE__)
+#define LOGVOLE_SKIP() ::tests_libOTe::logvole_test::skip(__FILE__, __LINE__)
