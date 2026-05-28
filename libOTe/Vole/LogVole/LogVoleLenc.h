@@ -27,6 +27,34 @@ namespace osuCrypto
         LogVoleLencLacct mLacct;
     };
 
+    bool logVoleLencEnc(
+        const LogVoleRingNttContext& ctx,
+        const std::vector<LogVoleRnsPoly>& s,
+        u32 tau,
+        u32 gadgetLogBase,
+        u64 seed,
+        LogVoleLencEncodeOutput& out,
+        double noiseStandardDeviation = 0.0,
+        double noiseMaxDeviation = 0.0,
+        u64 encryptionNoiseSeed = 0);
+
+    bool logVoleLencDigest(
+        const LogVoleRingNttContext& ctx,
+        const std::vector<LogVoleRnsPoly>& x,
+        u32 tau,
+        u32 gadgetLogBase,
+        LogVoleRnsPoly& out,
+        u32 widthPadded = 0);
+
+    bool logVoleLencEval(
+        const LogVoleRingNttContext& ctx,
+        const LogVoleLencLacct& lacct,
+        const std::vector<LogVoleRnsPoly>& x,
+        u32 mu,
+        u32 tau,
+        u32 gadgetLogBase,
+        std::vector<LogVoleRnsPoly>& out);
+
     struct LogVoleKeyDeriveSenderInput
     {
         LogVoleRingParams mParams;
