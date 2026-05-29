@@ -40,10 +40,13 @@ if(ENABLE_LOGVOLE)
         LogVole/tests/test_ring_ops.cpp
         LogVole/tests/test_shrinkexpand_coproto.cpp
         LogVole/tests/test_shrinkexpand_core.cpp
+        LogVole2/tests/test_ring_ops.cpp
     )
     target_include_directories(libOTe_Tests PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/LogVole
         ${CMAKE_CURRENT_LIST_DIR}/LogVole/tests
+        ${CMAKE_CURRENT_LIST_DIR}/LogVole2
+        ${CMAKE_CURRENT_LIST_DIR}/LogVole2/tests
     )
 endif()
 

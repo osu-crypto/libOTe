@@ -4,6 +4,7 @@ file(GLOB_RECURSE SRCS *.cpp *.c)
 
 if(NOT ENABLE_LOGVOLE)
     list(FILTER SRCS EXCLUDE REGEX ".*/Vole/LogVole/.*")
+    list(FILTER SRCS EXCLUDE REGEX ".*/Vole/LogVole2/.*")
 endif()
 
 set(SRCS "${SRCS}")
