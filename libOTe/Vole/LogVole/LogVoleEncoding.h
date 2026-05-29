@@ -50,11 +50,20 @@ namespace osuCrypto::LogVole
         std::vector<u64> mLacctCtCoeffs;
     };
 
+    struct PolyMessage
+    {
+        u32 mPolyModulusDegree = 0;
+        u32 mCoeffModulusCount = 0;
+        std::vector<u64> mCoeffs;
+    };
+
     Buffer encode(const KeyDeriveRequest& message);
     Buffer encode(const KeyDeriveResponse& message);
     Buffer encode(const ShrinkExpandOfflineMessage& message);
+    Buffer encode(const PolyMessage& message);
 
     bool decode(std::span<const u8> payload, KeyDeriveRequest& message);
     bool decode(std::span<const u8> payload, KeyDeriveResponse& message);
     bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message);
+    bool decode(std::span<const u8> payload, PolyMessage& message);
 }

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace osuCrypto::LogVole
 {
@@ -60,6 +61,48 @@ namespace osuCrypto::LogVole
 
             co_return payload;
         }
+
+        PolyMessage makePolyMessage(const RingParams& params, const RnsPoly& poly)
+        {
+            PolyMessage message{};
+            message.mPolyModulusDegree = params.mPolyModulusDegree;
+            message.mCoeffModulusCount = static_cast<u32>(params.mCoeffModulusBits.size());
+            message.mCoeffs = poly.mCoeffs;
+            return message;
+        }
+
+        bool readPolyMessage(const RingParams& params, PolyMessage& message, RnsPoly& out)
+        {
+            if (message.mPolyModulusDegree != params.mPolyModulusDegree ||
+                message.mCoeffModulusCount != params.mCoeffModulusBits.size() ||
+                message.mCoeffs.size() !=
+                    static_cast<std::size_t>(params.mPolyModulusDegree) * params.mCoeffModulusBits.size())
+            {
+                return false;
+            }
+
+            out.mCoeffs = std::move(message.mCoeffs);
+            return true;
+        }
+    }
+
+    task<> Receiver::offline(
+        const ShrinkExpandReceiverOfflineInput& input,
+        ShrinkExpandReceiverState& state,
+        Socket& sock)
+    {
+        const auto payload = co_await recvFrame(sock);
+
+        ShrinkExpandOfflineMessage message{};
+        if (!decode(payload, message))
+        {
+            throw std::runtime_error("LogVole receiver received malformed shrink/expand offline message");
+        }
+
+        if (!finalizeReceiverOffline(input, message, state))
+        {
+            throw std::runtime_error("LogVole receiver rejected shrink/expand offline message");
+        }
     }
 
     task<> Receiver::keyDerive(
@@ -86,6 +129,45 @@ namespace osuCrypto::LogVole
         if (!finalizeKeyDeriveResponse(input, response, output))
         {
             throw std::runtime_error("LogVole receiver rejected key-derive response");
+        }
+    }
+
+    task<> Receiver::expand(
+        const ShrinkExpandReceiverState& state,
+        const ReceiverExpandInput& input,
+        ShrinkExpandReceiverExpandOutput& output,
+        Socket& sock)
+    {
+        RnsPoly digest{};
+        if (!shrink(state, input.mX, digest))
+        {
+            throw std::runtime_error("LogVole receiver could not shrink");
+        }
+
+        co_await sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, digest)));
+
+        const auto skXPayload = co_await recvFrame(sock);
+        PolyMessage skXMessage{};
+        if (!decode(skXPayload, skXMessage))
+        {
+            throw std::runtime_error("LogVole receiver received malformed shrink/expand key");
+        }
+
+        RnsPoly skX{};
+        if (!readPolyMessage(state.mParams.mRing, skXMessage, skX))
+        {
+            throw std::runtime_error("LogVole receiver rejected shrink/expand key metadata");
+        }
+
+        ShrinkExpandReceiverExpandInput coreInput{};
+        coreInput.mNonce = input.mNonce;
+        coreInput.mX = input.mX;
+        coreInput.mDigest = std::move(digest);
+        coreInput.mSkX = std::move(skX);
+
+        if (!expandReceiver(state, coreInput, output))
+        {
+            throw std::runtime_error("LogVole receiver could not expand");
         }
     }
 }

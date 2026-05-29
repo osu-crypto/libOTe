@@ -56,6 +56,15 @@ namespace
         message.mLacctCtCoeffs = { 2, 7, 1, 8, 2, 8, 1, 8 };
         return message;
     }
+
+    PolyMessage makePolyMessage()
+    {
+        PolyMessage message{};
+        message.mPolyModulusDegree = 1024;
+        message.mCoeffModulusCount = 2;
+        message.mCoeffs = { 0, 1, 0x0102030405060708ull, 0x8877665544332211ull };
+        return message;
+    }
 }
 
 void LogVole_Encoding_KeyDeriveRequestRoundTrip(const oc::CLP&)
@@ -108,6 +117,18 @@ void LogVole_Encoding_ShrinkExpandOfflineRoundTrip(const oc::CLP&)
     LOGVOLE_EXPECT_EQ(decoded.mLacctCtRows, message.mLacctCtRows);
     LOGVOLE_EXPECT_EQ(decoded.mLacctCtCols, message.mLacctCtCols);
     LOGVOLE_EXPECT_EQ(decoded.mLacctCtCoeffs, message.mLacctCtCoeffs);
+}
+
+void LogVole_Encoding_PolyMessageRoundTrip(const oc::CLP&)
+{
+    const auto message = makePolyMessage();
+    const auto encoded = encode(message);
+
+    PolyMessage decoded{};
+    LOGVOLE_REQUIRE_TRUE(decodeMessage(encoded, decoded));
+    LOGVOLE_EXPECT_EQ(decoded.mPolyModulusDegree, message.mPolyModulusDegree);
+    LOGVOLE_EXPECT_EQ(decoded.mCoeffModulusCount, message.mCoeffModulusCount);
+    LOGVOLE_EXPECT_EQ(decoded.mCoeffs, message.mCoeffs);
 }
 
 void LogVole_Encoding_MalformedPayloadRejected(const oc::CLP&)

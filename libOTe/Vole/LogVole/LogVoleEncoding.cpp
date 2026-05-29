@@ -237,6 +237,17 @@ namespace osuCrypto::LogVole
         return out;
     }
 
+    Buffer encode(const PolyMessage& message)
+    {
+        Buffer out;
+        out.reserve(3 * sizeof(u32) + message.mCoeffs.size() * sizeof(u64));
+
+        appendU32(out, message.mPolyModulusDegree);
+        appendU32(out, message.mCoeffModulusCount);
+        appendU64Vector(out, message.mCoeffs);
+        return out;
+    }
+
     bool decode(std::span<const u8> payload, KeyDeriveRequest& message)
     {
         return decodeKeyDerive(
@@ -278,6 +289,19 @@ namespace osuCrypto::LogVole
             !readU32(payload, offset, message.mLacctCtRows) ||
             !readU32(payload, offset, message.mLacctCtCols) ||
             !readU64Vector(payload, offset, message.mLacctCtCoeffs))
+        {
+            return false;
+        }
+
+        return offset == payload.size();
+    }
+
+    bool decode(std::span<const u8> payload, PolyMessage& message)
+    {
+        u64 offset = 0;
+        if (!readU32(payload, offset, message.mPolyModulusDegree) ||
+            !readU32(payload, offset, message.mCoeffModulusCount) ||
+            !readU64Vector(payload, offset, message.mCoeffs))
         {
             return false;
         }

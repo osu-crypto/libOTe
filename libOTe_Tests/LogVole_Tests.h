@@ -12,6 +12,7 @@
     X(Encoding, KeyDeriveRequestRoundTrip) \
     X(Encoding, KeyDeriveResponseRoundTrip) \
     X(Encoding, ShrinkExpandOfflineRoundTrip) \
+    X(Encoding, PolyMessageRoundTrip) \
     X(Encoding, MalformedPayloadRejected) \
     X(KeyDeriveCore, AlgebraicRelation) \
     X(KeyDeriveCore, MetadataMismatchRejected) \
@@ -31,6 +32,7 @@
     X(RingOps, GadgetDecomposeRecomposeBits) \
     X(RingOps, TensorPackUnpack) \
     X(RoundDslCompile, ScriptShapeAndHandlersCompile) \
+    X(ShrinkExpandCoproto, OfflineAndExpandDeterministicRelation) \
     X(ShrinkExpandCore, DenoiseCombExactness) \
     X(ShrinkExpandCore, DeterministicRelationExact) \
     X(ShrinkExpandCore, FullNoiseTolerance) \

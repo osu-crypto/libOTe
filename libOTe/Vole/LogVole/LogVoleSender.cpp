@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace osuCrypto::LogVole
 {
@@ -60,6 +61,43 @@ namespace osuCrypto::LogVole
 
             co_return payload;
         }
+
+        PolyMessage makePolyMessage(const RingParams& params, const RnsPoly& poly)
+        {
+            PolyMessage message{};
+            message.mPolyModulusDegree = params.mPolyModulusDegree;
+            message.mCoeffModulusCount = static_cast<u32>(params.mCoeffModulusBits.size());
+            message.mCoeffs = poly.mCoeffs;
+            return message;
+        }
+
+        bool readPolyMessage(const RingParams& params, PolyMessage& message, RnsPoly& out)
+        {
+            if (message.mPolyModulusDegree != params.mPolyModulusDegree ||
+                message.mCoeffModulusCount != params.mCoeffModulusBits.size() ||
+                message.mCoeffs.size() !=
+                    static_cast<std::size_t>(params.mPolyModulusDegree) * params.mCoeffModulusBits.size())
+            {
+                return false;
+            }
+
+            out.mCoeffs = std::move(message.mCoeffs);
+            return true;
+        }
+    }
+
+    task<> Sender::offline(
+        const ShrinkExpandSenderOfflineInput& input,
+        ShrinkExpandSenderState& state,
+        Socket& sock)
+    {
+        ShrinkExpandOfflineMessage message{};
+        if (!prepareSenderOffline(input, message, state))
+        {
+            throw std::runtime_error("LogVole sender could not prepare shrink/expand offline message");
+        }
+
+        co_await sendFrame(sock, encode(message));
     }
 
     task<> Sender::keyDerive(
@@ -82,5 +120,39 @@ namespace osuCrypto::LogVole
         }
 
         co_await sendFrame(sock, encode(response));
+    }
+
+    task<> Sender::expand(
+        const ShrinkExpandSenderState& state,
+        const ShrinkExpandSenderExpandInput& input,
+        ShrinkExpandSenderExpandOutput& output,
+        Socket& sock)
+    {
+        const auto digestPayload = co_await recvFrame(sock);
+
+        PolyMessage digestMessage{};
+        if (!decode(digestPayload, digestMessage))
+        {
+            throw std::runtime_error("LogVole sender received malformed shrink digest");
+        }
+
+        RnsPoly digest{};
+        if (!readPolyMessage(state.mParams.mRing, digestMessage, digest))
+        {
+            throw std::runtime_error("LogVole sender rejected shrink digest metadata");
+        }
+
+        RnsPoly skX{};
+        if (!deriveSkX(state, digest, input.mTbkPrime, skX))
+        {
+            throw std::runtime_error("LogVole sender could not derive shrink/expand key");
+        }
+
+        co_await sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, skX)));
+
+        if (!expandSender(state, input, output))
+        {
+            throw std::runtime_error("LogVole sender could not expand");
+        }
     }
 }
