@@ -19,6 +19,11 @@ namespace osuCrypto::LogVole2
             ShrinkExpandReceiverState& state,
             Socket& sock);
 
+        task<> keyDerive(
+            const KeyDeriveReceiverInput& input,
+            KeyDeriveReceiverOutput& output,
+            Socket& sock);
+
         task<> expand(
             const ShrinkExpandReceiverState& state,
             const ReceiverExpandInput& input,

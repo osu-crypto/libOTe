@@ -21,6 +21,45 @@ namespace osuCrypto::LogVole2
         LencLacct mLacct;
     };
 
+    struct KeyDeriveRequest
+    {
+        u32 mPolyModulusDegree = 0;
+        u32 mCoeffModulusCount = 0;
+        u32 mTau = 0;
+        std::vector<u64> mDCoeffs;
+    };
+
+    struct KeyDeriveResponse
+    {
+        u32 mPolyModulusDegree = 0;
+        u32 mCoeffModulusCount = 0;
+        u32 mTau = 0;
+        std::vector<u64> mMNttCoeffs;
+    };
+
+    struct KeyDeriveSenderInput
+    {
+        RingParams mParams;
+        std::vector<RnsPoly> mSk1;
+        std::vector<RnsPoly> mSk2;
+    };
+
+    struct KeyDeriveReceiverInput
+    {
+        RingParams mParams;
+        std::vector<RnsPoly> mD;
+    };
+
+    struct KeyDeriveSenderOutput
+    {
+        std::vector<RnsPoly> mK;
+    };
+
+    struct KeyDeriveReceiverOutput
+    {
+        std::vector<RnsPoly> mM;
+    };
+
     struct DigestTree
     {
         u32 mWidthPadded = 0;
@@ -30,6 +69,21 @@ namespace osuCrypto::LogVole2
     };
 
     std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau);
+
+    bool prepareKeyDeriveRequest(
+        const KeyDeriveReceiverInput& input,
+        KeyDeriveRequest& out);
+
+    bool processKeyDeriveRequest(
+        const KeyDeriveSenderInput& input,
+        const KeyDeriveRequest& request,
+        KeyDeriveResponse& response,
+        KeyDeriveSenderOutput& output);
+
+    bool finalizeKeyDeriveResponse(
+        const KeyDeriveReceiverInput& input,
+        const KeyDeriveResponse& response,
+        KeyDeriveReceiverOutput& output);
 
     bool buildDigestTree(
         const RingNttContext& ctx,

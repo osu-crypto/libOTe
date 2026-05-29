@@ -13,6 +13,11 @@ namespace osuCrypto::LogVole2
             ShrinkExpandSenderState& state,
             Socket& sock);
 
+        task<> keyDerive(
+            const KeyDeriveSenderInput& input,
+            KeyDeriveSenderOutput& output,
+            Socket& sock);
+
         task<> expand(
             const ShrinkExpandSenderState& state,
             const ShrinkExpandExpandSenderInput& input,

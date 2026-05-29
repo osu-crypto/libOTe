@@ -84,6 +84,33 @@ namespace osuCrypto::LogVole2
         }
     }
 
+    task<> Receiver::keyDerive(
+        const KeyDeriveReceiverInput& input,
+        KeyDeriveReceiverOutput& output,
+        Socket& sock)
+    {
+        KeyDeriveRequest request{};
+        if (!prepareKeyDeriveRequest(input, request))
+        {
+            throw std::runtime_error("LogVole2 receiver could not prepare key-derive request");
+        }
+
+        co_await sendFrame(sock, encode(request));
+
+        const auto responsePayload = co_await recvFrame(sock);
+
+        KeyDeriveResponse response{};
+        if (!decode(responsePayload, response))
+        {
+            throw std::runtime_error("LogVole2 receiver could not decode key-derive response");
+        }
+
+        if (!finalizeKeyDeriveResponse(input, response, output))
+        {
+            throw std::runtime_error("LogVole2 receiver rejected key-derive response");
+        }
+    }
+
     task<> Receiver::expand(
         const ShrinkExpandReceiverState& state,
         const ReceiverExpandInput& input,

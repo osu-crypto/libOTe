@@ -62,6 +62,22 @@ namespace osuCrypto::LogVole2
             return true;
         }
 
+        bool validateKeyDeriveSenderInput(const KeyDeriveSenderInput& input)
+        {
+            return validateRingParams(input.mParams) &&
+                   !input.mSk1.empty() &&
+                   input.mSk1.size() == input.mSk2.size() &&
+                   validateRingBatchShape(input.mSk1, input.mParams) &&
+                   validateRingBatchShape(input.mSk2, input.mParams);
+        }
+
+        bool validateKeyDeriveReceiverInput(const KeyDeriveReceiverInput& input)
+        {
+            return validateRingParams(input.mParams) &&
+                   !input.mD.empty() &&
+                   validateRingBatchShape(input.mD, input.mParams);
+        }
+
         RnsPoly zeroPolyRaw(const RingNttContext& ctx)
         {
             RnsPoly out{};
@@ -640,6 +656,152 @@ namespace osuCrypto::LogVole2
         {
             return static_cast<std::size_t>(level) * width + leaf;
         }
+    }
+
+    bool prepareKeyDeriveRequest(
+        const KeyDeriveReceiverInput& input,
+        KeyDeriveRequest& out)
+    {
+        if (!validateKeyDeriveReceiverInput(input) ||
+            input.mD.size() > static_cast<std::size_t>(std::numeric_limits<u32>::max()))
+        {
+            return false;
+        }
+
+        KeyDeriveRequest next{};
+        next.mPolyModulusDegree = input.mParams.mPolyModulusDegree;
+        next.mCoeffModulusCount = static_cast<u32>(input.mParams.mCoeffModulusBits.size());
+        next.mTau = static_cast<u32>(input.mD.size());
+        next.mDCoeffs = packRingBatch(input.mD);
+
+        out = std::move(next);
+        return true;
+    }
+
+    bool processKeyDeriveRequest(
+        const KeyDeriveSenderInput& input,
+        const KeyDeriveRequest& request,
+        KeyDeriveResponse& response,
+        KeyDeriveSenderOutput& output)
+    {
+        if (!validateKeyDeriveSenderInput(input))
+        {
+            return false;
+        }
+
+        const u32 expectedModCount = static_cast<u32>(input.mParams.mCoeffModulusBits.size());
+        if (request.mPolyModulusDegree != input.mParams.mPolyModulusDegree ||
+            request.mCoeffModulusCount != expectedModCount ||
+            request.mTau != input.mSk1.size())
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> dBatch;
+        if (!unpackRingBatch(
+                request.mTau,
+                request.mPolyModulusDegree,
+                request.mCoeffModulusCount,
+                request.mDCoeffs,
+                dBatch))
+        {
+            return false;
+        }
+
+        RingNttContext ctx{};
+        if (!makeRingNttContext(input.mParams, ctx))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> mNttBatch;
+        mNttBatch.reserve(request.mTau);
+
+        for (std::size_t i = 0; i < request.mTau; ++i)
+        {
+            RnsPoly sk1 = input.mSk1[i];
+            RnsPoly sk2 = input.mSk2[i];
+            RnsPoly d = dBatch[i];
+
+            if (!forwardNtt(sk1, ctx) ||
+                !forwardNtt(sk2, ctx) ||
+                !forwardNtt(d, ctx))
+            {
+                return false;
+            }
+
+            RnsPoly mNtt{};
+            if (!dyadicMultiplyAddNtt(sk1, d, sk2, ctx, mNtt))
+            {
+                return false;
+            }
+            mNttBatch.push_back(std::move(mNtt));
+        }
+
+        KeyDeriveResponse nextResponse{};
+        nextResponse.mPolyModulusDegree = request.mPolyModulusDegree;
+        nextResponse.mCoeffModulusCount = request.mCoeffModulusCount;
+        nextResponse.mTau = request.mTau;
+        nextResponse.mMNttCoeffs = packRingBatch(mNttBatch);
+
+        KeyDeriveSenderOutput nextOutput{};
+        nextOutput.mK = input.mSk2;
+
+        response = std::move(nextResponse);
+        output = std::move(nextOutput);
+        return true;
+    }
+
+    bool finalizeKeyDeriveResponse(
+        const KeyDeriveReceiverInput& input,
+        const KeyDeriveResponse& response,
+        KeyDeriveReceiverOutput& output)
+    {
+        if (!validateKeyDeriveReceiverInput(input))
+        {
+            return false;
+        }
+
+        const u32 expectedModCount = static_cast<u32>(input.mParams.mCoeffModulusBits.size());
+        if (response.mPolyModulusDegree != input.mParams.mPolyModulusDegree ||
+            response.mCoeffModulusCount != expectedModCount ||
+            response.mTau != input.mD.size())
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> mNttBatch;
+        if (!unpackRingBatch(
+                response.mTau,
+                response.mPolyModulusDegree,
+                response.mCoeffModulusCount,
+                response.mMNttCoeffs,
+                mNttBatch))
+        {
+            return false;
+        }
+
+        RingNttContext ctx{};
+        if (!makeRingNttContext(input.mParams, ctx))
+        {
+            return false;
+        }
+
+        KeyDeriveReceiverOutput next{};
+        next.mM.reserve(response.mTau);
+
+        for (auto& poly : mNttBatch)
+        {
+            if (!canonicalizePoly(poly, ctx) ||
+                !inverseNtt(poly, ctx))
+            {
+                return false;
+            }
+            next.mM.push_back(std::move(poly));
+        }
+
+        output = std::move(next);
+        return true;
     }
 
     std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau)

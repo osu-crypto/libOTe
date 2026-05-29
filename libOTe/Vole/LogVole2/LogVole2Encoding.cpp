@@ -182,6 +182,41 @@ namespace osuCrypto::LogVole2
             return true;
         }
 
+        Buffer encodeKeyDerive(
+            u32 polyModulusDegree,
+            u32 coeffModulusCount,
+            u32 tau,
+            const std::vector<u64>& coeffs)
+        {
+            Buffer out;
+            out.reserve(4 * sizeof(u32) + coeffs.size() * sizeof(u64));
+
+            appendU32(out, polyModulusDegree);
+            appendU32(out, coeffModulusCount);
+            appendU32(out, tau);
+            appendU64Vector(out, coeffs);
+            return out;
+        }
+
+        bool decodeKeyDerive(
+            std::span<const u8> payload,
+            u32& polyModulusDegree,
+            u32& coeffModulusCount,
+            u32& tau,
+            std::vector<u64>& coeffs)
+        {
+            u64 offset = 0;
+            if (!readU32(payload, offset, polyModulusDegree) ||
+                !readU32(payload, offset, coeffModulusCount) ||
+                !readU32(payload, offset, tau) ||
+                !readU64Vector(payload, offset, coeffs))
+            {
+                return false;
+            }
+
+            return offset == payload.size();
+        }
+
         void appendParams(Buffer& out, const ShrinkExpandParams& params)
         {
             appendU32(out, params.mRing.mPolyModulusDegree);
@@ -243,6 +278,24 @@ namespace osuCrypto::LogVole2
         }
     }
 
+    Buffer encode(const KeyDeriveRequest& message)
+    {
+        return encodeKeyDerive(
+            message.mPolyModulusDegree,
+            message.mCoeffModulusCount,
+            message.mTau,
+            message.mDCoeffs);
+    }
+
+    Buffer encode(const KeyDeriveResponse& message)
+    {
+        return encodeKeyDerive(
+            message.mPolyModulusDegree,
+            message.mCoeffModulusCount,
+            message.mTau,
+            message.mMNttCoeffs);
+    }
+
     Buffer encode(const ShrinkExpandOfflineMessage& message)
     {
         Buffer out;
@@ -267,6 +320,26 @@ namespace osuCrypto::LogVole2
         appendU32(out, message.mCoeffModulusCount);
         appendU64Vector(out, message.mCoeffs);
         return out;
+    }
+
+    bool decode(std::span<const u8> payload, KeyDeriveRequest& message)
+    {
+        return decodeKeyDerive(
+            payload,
+            message.mPolyModulusDegree,
+            message.mCoeffModulusCount,
+            message.mTau,
+            message.mDCoeffs);
+    }
+
+    bool decode(std::span<const u8> payload, KeyDeriveResponse& message)
+    {
+        return decodeKeyDerive(
+            payload,
+            message.mPolyModulusDegree,
+            message.mCoeffModulusCount,
+            message.mTau,
+            message.mMNttCoeffs);
     }
 
     bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message)

@@ -26,6 +26,13 @@
     X(ShrinkExpandCore, OfflineMetadataMismatchRejected)
 
 #define LIBOTE_LOGVOLE2_TESTS(X) \
+    X(Encoding, KeyDeriveRequestRoundTrip) \
+    X(Encoding, KeyDeriveResponseRoundTrip) \
+    X(KeyDeriveCore, AlgebraicRelation) \
+    X(KeyDeriveCore, DeterministicRegressionSeeds) \
+    X(KeyDeriveCore, MetadataMismatchRejected) \
+    X(KeyDeriveCoproto, HappyPathAndAlgebraicRelation) \
+    X(KeyDeriveCoproto, DeterministicRegressionSeeds) \
     X(LheOps, PublicADeterministic) \
     X(LheOps, Enc1ShapeDeterminismAndColumnDecrypt) \
     X(LheOps, ApplyCt1AndDeriveSkxRelation) \
