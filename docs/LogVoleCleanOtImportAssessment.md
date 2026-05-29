@@ -51,3 +51,56 @@ Keep this import frozen. Next, either:
 2. Add a small Windows portability patch on top of the frozen baseline before using it as the local executable reference.
 
 Do not start the coproto/libOTe refactor until one of those two reference paths passes.
+
+## WSL reference build
+
+The frozen baseline does build and test successfully in WSL with GCC after installing Boost headers and building stock SEAL locally for Linux.
+
+Additional WSL dependency:
+
+```text
+sudo apt-get install -y libboost-dev
+```
+
+Local WSL SEAL configure/install:
+
+```text
+cmake -S /mnt/c/Users/peter/repo/SEAL-stock-4.1.1 \
+  -B out/wsl-build/seal-4.1.1 \
+  -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=/mnt/c/Users/peter/.codex/worktrees/9b1a/libOTe/out/wsl-install/seal-4.1.1 \
+  -DSEAL_BUILD_DEPS=ON \
+  -DSEAL_BUILD_EXAMPLES=OFF \
+  -DSEAL_BUILD_TESTS=OFF \
+  -DSEAL_BUILD_BENCH=OFF
+
+cmake --build out/wsl-build/seal-4.1.1 --target install --config Release
+```
+
+Frozen clean-ot configure/build/test:
+
+```text
+cmake -S thirdparty/logvole-clean-ot \
+  -B out/wsl-build/logvole-clean-ot \
+  -G Ninja \
+  -DSEAL_DIR=/mnt/c/Users/peter/.codex/worktrees/9b1a/libOTe/out/wsl-install/seal-4.1.1/lib/cmake/SEAL-4.1 \
+  -DLOGVOLE_BUILD_BENCH=OFF \
+  -DLOGVOLE_BUILD_TESTS=ON \
+  -DLOGVOLE_BUILD_EXAMPLES=ON \
+  -DLOGVOLE_GTEST_SOURCE_DIR=/mnt/c/Users/peter/repo/antilabel/thirdparty/googletest-src \
+  -DCMAKE_BUILD_TYPE=Release
+
+cmake --build out/wsl-build/logvole-clean-ot --target logvole_correctness_tests civole_example civole_socket_example --config Release -- -j4
+
+ctest --test-dir out/wsl-build/logvole-clean-ot --output-on-failure -R LogVOLECorrectnessTests
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 1
+LogVOLECorrectnessTests Passed in 2.43 sec
+```
+
+This gives us a passing frozen reference. The remaining Windows failures should be treated as portability work, not protocol-correctness blockers.
