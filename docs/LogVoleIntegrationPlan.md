@@ -1,5 +1,11 @@
 # LogVole Integration Plan
 
+## Current status note
+
+This document records the earlier integration path and the first fresh-port checkpoint. After auditing `origin/clean-ot`, the current source of truth for the port decision and remaining work is `docs/LogVoleCleanOtAudit.md`.
+
+The important change is that the existing libOTe LogVole scaffold is no longer considered the final implementation path. It should be treated as partial/stale scaffold code while the complete clean-ot protocol is ported into libOTe.
+
 ## Goal
 
 Port the LWE-based VOLE protocol from `C:\Users\peter\repo\antilabel\native\loglabel` into libOTe as **LogVole**.
