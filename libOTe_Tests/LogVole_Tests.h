@@ -26,6 +26,13 @@
     X(ShrinkExpandCore, OfflineMetadataMismatchRejected)
 
 #define LIBOTE_LOGVOLE2_TESTS(X) \
+    X(Core, ModeSelection) \
+    X(Core, SeedLabelAggSumsTauBlocks) \
+    X(Core, GdecompHiUnbundleLiftsOneLimbPerOutput) \
+    X(Core, RepOfflineSenderInputGammaOneRepeats) \
+    X(Core, RepOfflineSenderInputGammaTauUnbundlesLimbs) \
+    X(Core, SeedLabelSampleCt2FromSeedDeterministic) \
+    X(Core, SeedLabelDenoiseMatchesShrinkExpandComb) \
     X(Encoding, KeyDeriveRequestRoundTrip) \
     X(Encoding, KeyDeriveResponseRoundTrip) \
     X(KeyDeriveCore, AlgebraicRelation) \
