@@ -85,4 +85,9 @@ namespace osuCrypto::LogVole2
         const ShrinkExpandReceiverState& state,
         const ShrinkExpandExpandReceiverInput& input,
         ShrinkExpandReceiverExpandOutput& out);
+
+    bool shrinkExpandDenoiseComb(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& tbaPrime,
+        std::vector<RnsPoly>& out);
 }

@@ -1,5 +1,8 @@
 #include "libOTe/Vole/LogVole2/LogVole2ShrinkExpand.h"
 
+#include "seal/util/rns.h"
+#include "seal/util/uintarithsmallmod.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -23,16 +26,95 @@ namespace osuCrypto::LogVole2
             return logQ;
         }
 
+        double etaEpsilonRing(double n, double lambdaSec)
+        {
+            constexpr double pi = 3.141592653589793238462643383279502884;
+            return std::sqrt((lambdaSec * std::log(2.0) + std::log(n)) / pi);
+        }
+
+        struct LeakyLweNoiseShape
+        {
+            double mS = -std::numeric_limits<double>::infinity();
+            double mSbarOverLeakageNorm = -std::numeric_limits<double>::infinity();
+        };
+
+        LeakyLweNoiseShape computeLeakyLweNoiseShape(
+            double sStar,
+            double etaEpsR,
+            double linearCoeff,
+            double leakCoeff)
+        {
+            if (!(linearCoeff > 0.0) || !(leakCoeff > 0.0))
+            {
+                return {};
+            }
+
+            const double leakyA = sStar * sStar + 2.0 * etaEpsR * etaEpsR;
+            if (!(leakyA > 0.0))
+            {
+                return {};
+            }
+
+            const double threshold = std::sqrt(leakyA);
+            const double minimizerK = leakCoeff / linearCoeff;
+            const double sMultiplier = std::sqrt(1.0 + std::pow(minimizerK, 2.0 / 3.0));
+            if (!std::isfinite(sMultiplier) || !(sMultiplier > 1.0))
+            {
+                return {};
+            }
+
+            LeakyLweNoiseShape out{};
+            out.mS = threshold * sMultiplier;
+            out.mSbarOverLeakageNorm = threshold * sMultiplier / std::sqrt(sMultiplier * sMultiplier - 1.0);
+            return out;
+        }
+
         bool computeBaseNoiseFloor(const ShrinkExpandParams& params, i64& out)
         {
-            const double logQ = static_cast<double>(logQBits(params.mRing));
-            const double baseNoise = std::pow(2.0, 0.1 * logQ);
-            if (!std::isfinite(baseNoise) || baseNoise > static_cast<double>(std::numeric_limits<i64>::max()))
+            const double sStar = 8.0;
+            const double T = 32768.0;
+            const double lambdaSec = 128.0;
+            const double L = 10.0;
+
+            const double n = static_cast<double>(params.mRing.mPolyModulusDegree);
+            const double m = static_cast<double>(params.mTau);
+            const double g = std::pow(2.0, static_cast<double>(params.mGadgetLogBase));
+            const double gammaR = n;
+
+            const double etaEpsR = etaEpsilonRing(n, lambdaSec);
+            if (!std::isfinite(etaEpsR))
             {
                 return false;
             }
 
-            const auto floor = static_cast<i64>(std::ceil(baseNoise));
+            const double pref = 2.0 * std::sqrt(lambdaSec);
+            const double sqrt2mT = std::sqrt(2.0 * m * T);
+            const double linearCoeff = pref * m * gammaR * L;
+            const double leakCoeff = pref * 2.0 * n * sqrt2mT;
+            const auto noiseShape = computeLeakyLweNoiseShape(sStar, etaEpsR, linearCoeff, leakCoeff);
+            if (!std::isfinite(noiseShape.mS) || !std::isfinite(noiseShape.mSbarOverLeakageNorm))
+            {
+                return false;
+            }
+
+            const double s = noiseShape.mS;
+            const double sBar = noiseShape.mSbarOverLeakageNorm * g * n * sqrt2mT;
+            const double termA = g * m * gammaR * s * L;
+            const double termB = 2.0 * sBar;
+            const double total = 2.0 * std::sqrt(lambdaSec) * (termA + termB);
+            if (!std::isfinite(total))
+            {
+                return false;
+            }
+
+            const double roundedUp = std::ceil(total);
+            if (roundedUp > static_cast<double>(std::numeric_limits<i64>::max()))
+            {
+                out = std::numeric_limits<i64>::max();
+                return true;
+            }
+
+            const auto floor = static_cast<i64>(roundedUp);
             out = (floor > 0) ? floor : 1;
             return true;
         }
@@ -127,6 +209,15 @@ namespace osuCrypto::LogVole2
                    expected.mSamplingSeeds.mNoiseRoot == actual.mSamplingSeeds.mNoiseRoot &&
                    expected.mSamplingSeeds.mCt2Root == actual.mSamplingSeeds.mCt2Root &&
                    expected.mNoiseBound == actual.mNoiseBound;
+        }
+
+        unsigned __int128 reciprocal2Pow128(u64 modulus)
+        {
+            const unsigned __int128 two64 = static_cast<unsigned __int128>(1) << 64;
+            const u64 hi = static_cast<u64>(two64 / modulus);
+            const u64 rem = static_cast<u64>(two64 % modulus);
+            const u64 lo = static_cast<u64>((static_cast<unsigned __int128>(rem) << 64) / modulus);
+            return (static_cast<unsigned __int128>(hi) << 64) | lo;
         }
     }
 
@@ -587,6 +678,210 @@ namespace osuCrypto::LogVole2
         }
 
         out = std::move(next);
+        return true;
+    }
+
+    bool shrinkExpandDenoiseComb(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& tbaPrime,
+        std::vector<RnsPoly>& out)
+    {
+        if (ctx.mParams.mCoeffModulusBits.empty() ||
+            tbaPrime.size() % ctx.mParams.mCoeffModulusBits.size() != 0 ||
+            !validateRingBatchShape(tbaPrime, ctx.mParams))
+        {
+            return false;
+        }
+
+        auto keyContextData = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
+        if (!keyContextData)
+        {
+            return false;
+        }
+
+        const std::size_t rho = ctx.mParams.mCoeffModulusBits.size();
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        const std::size_t wPrime = tbaPrime.size() / rho;
+
+        auto pool = seal::MemoryManager::GetPool();
+        seal::util::RNSBase fullBase(keyContextData->parms().coeff_modulus(), pool);
+
+        std::vector<u64> q(rho);
+        for (std::size_t i = 0; i < rho; ++i)
+        {
+            q[i] = fullBase.base()[i].value();
+        }
+
+        struct RecoveryConstants
+        {
+            std::vector<std::size_t> mSrcLimbIndices;
+            std::vector<u64> mCrtInvPunctured;
+            std::vector<u64> mPuncturedProdModTarget;
+            std::vector<unsigned __int128> mFracInvModulus;
+            u64 mDeltaModTarget = 1;
+            u64 mInvDeltaModTarget = 1;
+        };
+
+        std::vector<RecoveryConstants> recovery(rho);
+        for (std::size_t j = 0; j < rho; ++j)
+        {
+            const auto& modJ = ctx.mModuli[j];
+            auto& constants = recovery[j];
+            constants.mSrcLimbIndices.reserve((rho > 0) ? (rho - 1) : 0);
+
+            std::vector<seal::Modulus> baseExcludingJ;
+            baseExcludingJ.reserve((rho > 0) ? (rho - 1) : 0);
+
+            u64 deltaModQj = 1;
+            for (std::size_t w = 0; w < rho; ++w)
+            {
+                if (w == j)
+                {
+                    continue;
+                }
+                constants.mSrcLimbIndices.push_back(w);
+                baseExcludingJ.push_back(ctx.mModuli[w]);
+                deltaModQj = seal::util::multiply_uint_mod(deltaModQj, q[w], modJ);
+            }
+            constants.mDeltaModTarget = deltaModQj;
+
+            u64 invDeltaModQj = 0;
+            if (!seal::util::try_invert_uint_mod(deltaModQj, modJ, invDeltaModQj))
+            {
+                return false;
+            }
+            constants.mInvDeltaModTarget = invDeltaModQj;
+
+            if (baseExcludingJ.empty())
+            {
+                continue;
+            }
+
+            seal::util::RNSBase reducedBase(baseExcludingJ, pool);
+            auto reducedInvPunct = reducedBase.inv_punctured_prod_mod_base_array();
+
+            const std::size_t reducedCount = constants.mSrcLimbIndices.size();
+            constants.mCrtInvPunctured.resize(reducedCount, 0);
+            constants.mPuncturedProdModTarget.resize(reducedCount, 0);
+            constants.mFracInvModulus.resize(reducedCount, 0);
+
+            for (std::size_t idx = 0; idx < reducedCount; ++idx)
+            {
+                const std::size_t w = constants.mSrcLimbIndices[idx];
+                constants.mCrtInvPunctured[idx] = reducedInvPunct[idx].operand;
+                constants.mFracInvModulus[idx] = reciprocal2Pow128(q[w]);
+
+                u64 puncturedModQj = 1;
+                for (std::size_t u = 0; u < rho; ++u)
+                {
+                    if (u == j || u == w)
+                    {
+                        continue;
+                    }
+                    puncturedModQj = seal::util::multiply_uint_mod(puncturedModQj, q[u], modJ);
+                }
+                constants.mPuncturedProdModTarget[idx] = puncturedModQj;
+            }
+        }
+
+        std::vector<RnsPoly> result(wPrime);
+        const unsigned __int128 half = static_cast<unsigned __int128>(1) << 127;
+
+        for (std::size_t i = 0; i < wPrime; ++i)
+        {
+            RnsPoly polyOut{};
+            polyOut.mCoeffs.resize(n * rho, 0);
+
+            for (std::size_t j = 0; j < rho; ++j)
+            {
+                const auto& polyIn = tbaPrime[i * rho + j];
+                const u64 qj = q[j];
+                const auto& modJ = ctx.mModuli[j];
+                const auto& constants = recovery[j];
+                const std::size_t reducedCount = constants.mSrcLimbIndices.size();
+
+                for (std::size_t k = 0; k < n; ++k)
+                {
+                    unsigned __int128 sumFrac = half;
+                    u64 alpha = 0;
+                    u64 eModQj = 0;
+
+                    auto consumeIdx = [&](std::size_t idx) {
+                        const std::size_t w = constants.mSrcLimbIndices[idx];
+                        const u64 vw = polyIn.mCoeffs[w * n + k];
+                        const u64 xw = seal::util::multiply_uint_mod(vw, constants.mCrtInvPunctured[idx], ctx.mModuli[w]);
+
+                        const unsigned __int128 term =
+                            static_cast<unsigned __int128>(xw) * constants.mFracInvModulus[idx];
+                        const unsigned __int128 oldFrac = sumFrac;
+                        sumFrac += term;
+                        if (sumFrac < oldFrac)
+                        {
+                            ++alpha;
+                        }
+
+                        const u64 xwModQj = seal::util::barrett_reduce_64(xw, modJ);
+                        const u64 proj =
+                            seal::util::multiply_uint_mod(xwModQj, constants.mPuncturedProdModTarget[idx], modJ);
+                        eModQj += proj;
+                        if (eModQj >= qj)
+                        {
+                            eModQj -= qj;
+                        }
+                    };
+
+                    switch (reducedCount)
+                    {
+                    case 0:
+                        break;
+                    case 1:
+                        consumeIdx(0);
+                        break;
+                    case 2:
+                        consumeIdx(0);
+                        consumeIdx(1);
+                        break;
+                    case 3:
+                        consumeIdx(0);
+                        consumeIdx(1);
+                        consumeIdx(2);
+                        break;
+                    case 4:
+                        consumeIdx(0);
+                        consumeIdx(1);
+                        consumeIdx(2);
+                        consumeIdx(3);
+                        break;
+                    default:
+                        for (std::size_t idx = 0; idx < reducedCount; ++idx)
+                        {
+                            consumeIdx(idx);
+                        }
+                        break;
+                    }
+
+                    const u64 alphaTerm =
+                        seal::util::multiply_uint_mod(alpha, constants.mDeltaModTarget, modJ);
+                    if (eModQj >= alphaTerm)
+                    {
+                        eModQj -= alphaTerm;
+                    }
+                    else
+                    {
+                        eModQj += qj - alphaTerm;
+                    }
+
+                    const u64 vj = polyIn.mCoeffs[j * n + k];
+                    const u64 diff = (vj >= eModQj) ? (vj - eModQj) : (vj + qj - eModQj);
+                    polyOut.mCoeffs[j * n + k] =
+                        seal::util::multiply_uint_mod(diff, constants.mInvDeltaModTarget, modJ);
+                }
+            }
+
+            result[i] = std::move(polyOut);
+        }
+
+        out = std::move(result);
         return true;
     }
 }

@@ -52,7 +52,9 @@
     X(ShrinkExpandCore, OfflineStateShapes) \
     X(ShrinkExpandCore, DeterministicRelationExact) \
     X(ShrinkExpandCore, TruncDeterministicRelationBounded) \
-    X(ShrinkExpandCore, OfflineMetadataMismatchRejected)
+    X(ShrinkExpandCore, OfflineMetadataMismatchRejected) \
+    X(ShrinkExpandCore, DenoiseCombExactness) \
+    X(ShrinkExpandCore, FullNoiseTolerance)
 
 #define LIBOTE_LOGVOLE_DECLARE_TEST(suite, name) void LogVole_##suite##_##name(const oc::CLP& cmd);
 LIBOTE_LOGVOLE_TESTS(LIBOTE_LOGVOLE_DECLARE_TEST)
