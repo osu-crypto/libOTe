@@ -1,7 +1,11 @@
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
 
+#include "seal/util/polycore.h"
+#include "seal/util/rns.h"
+#include "seal/util/uintarith.h"
 #include "seal/util/uintarithsmallmod.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -1046,6 +1050,94 @@ namespace osuCrypto::LogVole
         }
 
         output = std::move(next);
+        return true;
+    }
+
+    bool denoiseComb(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& tbaPrime,
+        std::vector<RnsPoly>& out)
+    {
+        if (ctx.mParams.mCoeffModulusBits.empty() ||
+            tbaPrime.size() % ctx.mParams.mCoeffModulusBits.size() != 0)
+        {
+            return false;
+        }
+
+        const std::size_t rho = ctx.mParams.mCoeffModulusBits.size();
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        const std::size_t wPrime = tbaPrime.size() / rho;
+
+        for (const auto& poly : tbaPrime)
+        {
+            if (poly.mCoeffs.size() != n * rho)
+            {
+                return false;
+            }
+        }
+
+        auto keyContextData = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
+        if (!keyContextData)
+        {
+            return false;
+        }
+
+        seal::util::RNSBase fullBase(keyContextData->parms().coeff_modulus(), seal::MemoryManager::GetPool());
+        auto pool = seal::MemoryManager::GetPool();
+
+        auto composedPoly = seal::util::allocate_poly(n, rho, pool);
+        auto termMpi = seal::util::allocate_uint(rho, pool);
+        auto pJMpi = seal::util::allocate_uint(rho, pool);
+        auto pJHalfMpi = seal::util::allocate_uint(rho, pool);
+        auto modJMpi = seal::util::allocate_uint(rho, pool);
+        auto quotientMpi = seal::util::allocate_uint(rho, pool);
+        auto remainderMpi = seal::util::allocate_uint(rho, pool);
+
+        std::vector<RnsPoly> result;
+        result.reserve(wPrime);
+
+        for (std::size_t i = 0; i < wPrime; ++i)
+        {
+            RnsPoly polyOut{};
+            polyOut.mCoeffs.resize(n * rho, 0);
+
+            for (std::size_t j = 0; j < rho; ++j)
+            {
+                const auto& polyIn = tbaPrime[i * rho + j];
+                std::copy(polyIn.mCoeffs.begin(), polyIn.mCoeffs.end(), composedPoly.get());
+
+                fullBase.compose_array(composedPoly.get(), n, pool);
+
+                const auto modulusJ = fullBase.base()[j];
+                seal::util::set_uint(modulusJ.value(), rho, modJMpi.get());
+
+                seal::util::divide_uint(
+                    fullBase.base_prod(), modJMpi.get(), rho, pJMpi.get(), remainderMpi.get(), pool);
+
+                seal::util::right_shift_uint(pJMpi.get(), 1, rho, pJHalfMpi.get());
+
+                for (std::size_t k = 0; k < n; ++k)
+                {
+                    const u64* valPtr = composedPoly.get() + k * rho;
+
+                    seal::util::add_uint(valPtr, pJHalfMpi.get(), rho, termMpi.get());
+                    seal::util::divide_uint(
+                        termMpi.get(), pJMpi.get(), rho, quotientMpi.get(), remainderMpi.get(), pool);
+
+                    u64 scaled = quotientMpi.get()[0];
+                    if (scaled >= modulusJ.value())
+                    {
+                        scaled %= modulusJ.value();
+                    }
+
+                    polyOut.mCoeffs[j * n + k] = scaled;
+                }
+            }
+
+            result.push_back(std::move(polyOut));
+        }
+
+        out = std::move(result);
         return true;
     }
 

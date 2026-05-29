@@ -30,7 +30,9 @@
     X(RingOps, GadgetDecomposeRecomposeBits) \
     X(RingOps, TensorPackUnpack) \
     X(RoundDslCompile, ScriptShapeAndHandlersCompile) \
+    X(ShrinkExpandCore, DenoiseCombExactness) \
     X(ShrinkExpandCore, DeterministicRelationExact) \
+    X(ShrinkExpandCore, FullNoiseTolerance) \
     X(ShrinkExpandCore, OfflineMetadataMismatchRejected) \
     X(ShrinkExpandOps, DenoiseCombExactness) \
     X(ShrinkExpandOffline, HappyPathAndCounters) \
