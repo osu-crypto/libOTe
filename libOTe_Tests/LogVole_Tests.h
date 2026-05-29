@@ -33,6 +33,11 @@
     X(Core, RepOfflineSenderInputGammaTauUnbundlesLimbs) \
     X(Core, SeedLabelSampleCt2FromSeedDeterministic) \
     X(Core, SeedLabelDenoiseMatchesShrinkExpandComb) \
+    X(Core, RootTruncParamsAndKeyReplication) \
+    X(Core, RootScaledNttAddMatchesCoeffDomain) \
+    X(Core, RootTopCtNoiselessRelation) \
+    X(Core, RootZetaShapeAndBounds) \
+    X(Core, RootInnerProductMatchesCoeffDomain) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \

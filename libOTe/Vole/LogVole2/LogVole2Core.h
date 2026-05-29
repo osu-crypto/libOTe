@@ -24,8 +24,69 @@ namespace osuCrypto::LogVole2
         std::vector<RnsPoly> mTbkPerSampledPoly;
     };
 
+    u32 rootRandomizerWidth(u32 tauFull);
+    u32 rootLeftWidth(u32 tauHi, u32 rho);
+    double rootNoiseSigma(const ShrinkExpandParams& params, double factor);
+    double rootNoiseMaxDeviation(double sigma);
+
     SeedLabelMode evalSeedLabelMode(u32 w, u32 alpha, u32 tau, u32 rho);
     RecursiveMode evalRecursiveMode(u32 w, u32 alpha, u32 tau, u32 rho);
+
+    bool makeTruncShrinkExpandParams(
+        const Params& params,
+        bool leafInputsAreGadget,
+        ShrinkExpandParams& out);
+
+    bool replicateRootHiKeyByLimb(
+        const std::vector<RnsPoly>& skHi,
+        u32 tauHi,
+        const RingParams& ring,
+        std::vector<RnsPoly>& out);
+
+    bool sampleRootErrorBatch(
+        const RingNttContext& ctx,
+        u32 count,
+        const SamplingSeedConfig& samplingSeeds,
+        u64 domain,
+        double sigma,
+        double maxDeviation,
+        bool outputNtt,
+        std::vector<RnsPoly>& out);
+
+    bool addScaledNttInplace(
+        RnsPoly& accNtt,
+        const RnsPoly& polyNtt,
+        u32 gadgetLogBase,
+        u32 power,
+        const RingNttContext& ctx,
+        bool subtract);
+
+    bool negateNttInplace(RnsPoly& polyNtt, const RingNttContext& ctx);
+
+    bool buildRootTopCt(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& r1,
+        const std::vector<RnsPoly>& r2Ntt,
+        const std::vector<RnsPoly>& publicBRootNtt,
+        const std::vector<RnsPoly>& publicBStarNtt,
+        u32 gadgetLogBase,
+        u32 gadgetPowerOffset,
+        const SamplingSeedConfig& samplingSeeds,
+        double noiseStandardDeviation,
+        double noiseMaxDeviation,
+        RingTensor& out);
+
+    bool sampleRootZeta(
+        const RingNttContext& ctx,
+        u32 randomizerWidth,
+        u32 gadgetLogBase,
+        std::vector<RnsPoly>& out);
+
+    bool rootInnerProductNtt(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& leftNtt,
+        const std::vector<RnsPoly>& rightCoeff,
+        RnsPoly& out);
 
     bool seedLabelAgg(
         const std::vector<RnsPoly>& inputHat,

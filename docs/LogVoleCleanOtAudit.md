@@ -205,18 +205,13 @@ Current gaps relative to clean-ot:
 
 - No recursive LogVole protocol.
 - No CI-VOLE public API.
-- No root randomized digest path.
-- No golden seed path.
+- Root helper math and golden-seed search are present, but not wired into sender/receiver state transitions.
+- No root randomized digest exchange or derandomization path.
 - No sender precompute path.
 - No cached-root reuse path.
-- No seed-label backend.
-- No LHE helper layer.
-- No digest tree in shrink/expand public state.
-- No public `A/B` NTT cache pointers in shrink/expand state.
-- No clean-ot sampling seed split between noise and `ct2`.
-- No `truncate_one_gadget_digit`.
-- No `leaf_inputs_are_gadget`.
-- No worker-thread parameter in core params.
+- Seed-label helpers are partial; the recursive seed-label protocol path is not wired yet.
+- LHE/LENC/shrink-expand helper layers are substantially ported, but still need recursive wrapper integration.
+- Runtime cache scoping/per-role cache behavior is not at clean-ot parity yet.
 - No clean-ot message set.
 - Contains stale key-derive API and tests that should not drive the final design.
 
@@ -227,17 +222,17 @@ Current gaps relative to clean-ot:
 | Frozen clean-ot oracle | Imported and passing in WSL | Keep as reference while porting; do not compile into final libOTe | 100% |
 | Build option/dependency | `ENABLE_LOGVOLE` and stock `SEAL::seal` hook exist | Keep SEAL mandatory when LogVole is enabled; add Windows portability fixes as port code lands | 80% |
 | Current scaffold cleanup | Still compiled as LogVole | Quarantine or replace stale key-derive/shrink-only scaffold; do not extend it as final protocol | 20% |
-| Ring ops | Partial libOTe implementation exists | Replace with clean-ot superset while preserving hot-path batching and memory layout | 35% |
-| Portable 128-bit math | Current code avoids some clean-ot portability failures | Add focused helper for `__int128` use on MSVC/GCC/Clang | 10% |
+| Ring ops | Partial libOTe implementation exists | Replace with clean-ot superset while preserving hot-path batching and memory layout | 55% |
+| Portable 128-bit math | Current code avoids some clean-ot portability failures | Add focused helper for `__int128` use on MSVC/GCC/Clang | 25% |
 | Boost/cpp_int dependency | Clean-ot uses Boost in ring ops | Audit exact need and either remove/replace or make it private and justified | 0% |
-| LENC/LHE | Partial LENC exists; LHE missing | Port clean-ot LENC/LHE helpers, digest tree, truncation, public cache behavior | 25% |
-| Shrink/expand | Partial older path exists | Port clean-ot params/state/backend behavior; remove key-derive assumptions | 25% |
-| Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 0% |
-| Recursive LogVole | Missing | Implement offline/online recursion, root wrapper, golden seed, precompute, cached root | 0% |
+| LENC/LHE | Partial LENC exists; LHE missing | Port clean-ot LENC/LHE helpers, digest tree, truncation, public cache behavior | 55% |
+| Shrink/expand | Partial older path exists | Port clean-ot params/state/backend behavior; remove key-derive assumptions | 55% |
+| Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 45% |
+| Recursive LogVole | Missing | Implement offline/online recursion, root wrapper, golden seed, precompute, cached root | 15% |
 | CI-VOLE API | Missing | Port `Zp` wrapper, CRT helpers, SID state, default params | 0% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 20% |
 | Networking | Simple coproto wrappers for stale protocol exist | Rewrite sender/receiver exchanges directly in coproto; do not port clean-ot comm layer | 20% |
-| Tests | Scaffold tests exist; clean-ot reference tests pass separately | Port recursive and CI-VOLE tests to libOTe API; retire stale key-derive tests | 30% |
+| Tests | Scaffold tests exist; clean-ot reference tests pass separately | Port recursive and CI-VOLE tests to libOTe API; retire stale key-derive tests | 45% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout

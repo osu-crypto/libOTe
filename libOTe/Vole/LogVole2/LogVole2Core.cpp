@@ -4,6 +4,8 @@
 #include "seal/util/uintarithsmallmod.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -17,6 +19,54 @@ namespace osuCrypto::LogVole2
         bool makeContext(const RingParams& ring, RingNttContext& ctx)
         {
             return makeRingNttContext(ring, ctx);
+        }
+
+        u64 pow2Mod(u64 exp, u64 mod)
+        {
+            u64 result = 1;
+            u64 base = 2 % mod;
+            while (exp > 0)
+            {
+                if ((exp & 1) != 0)
+                {
+                    const auto mul = static_cast<unsigned __int128>(result) * base;
+                    result = static_cast<u64>(mul % mod);
+                }
+
+                const auto sq = static_cast<unsigned __int128>(base) * base;
+                base = static_cast<u64>(sq % mod);
+                exp >>= 1;
+            }
+
+            return result;
+        }
+
+        u64 uint128Mod(unsigned __int128 value, const seal::Modulus& modulus)
+        {
+            const u64 mod = modulus.value();
+            const u64 lo = static_cast<u64>(value);
+            const u64 hi = static_cast<u64>(value >> 64);
+            const u64 two64Mod = static_cast<u64>((static_cast<unsigned __int128>(1) << 64) % mod);
+            const auto hiTerm = static_cast<unsigned __int128>(hi % mod) * two64Mod;
+            return static_cast<u64>((hiTerm + (lo % mod)) % mod);
+        }
+
+        u64 freshRootZetaSeed()
+        {
+            static std::atomic<u64> counter{ 0 };
+            u64 seed = combineSeedPublic(counter.fetch_add(1, std::memory_order_relaxed));
+            seed ^= combineSeedPublic(
+                static_cast<u64>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+
+            std::random_device rd;
+            for (u32 idx = 0; idx < 4; ++idx)
+            {
+                const u64 lo = static_cast<u64>(rd());
+                const u64 hi = static_cast<u64>(rd());
+                seed = combineSeedPublic(seed ^ (hi << 32) ^ lo ^ static_cast<u64>(idx));
+            }
+
+            return seed;
         }
 
         double safeLog2(double value)
@@ -349,6 +399,33 @@ namespace osuCrypto::LogVole2
         }
     }
 
+    u32 rootRandomizerWidth(u32 tauFull)
+    {
+        return std::max<u32>(3, tauFull + 1);
+    }
+
+    u32 rootLeftWidth(u32 tauHi, u32 rho)
+    {
+        return tauHi * rho;
+    }
+
+    double rootNoiseSigma(const ShrinkExpandParams& params, double factor)
+    {
+        if (params.mMode != ShrinkExpandMode::FullNoise)
+        {
+            return 0.0;
+        }
+
+        constexpr double stdS = 3.19;
+        return stdS * ((factor > 1.0) ? factor : 1.0);
+    }
+
+    double rootNoiseMaxDeviation(double sigma)
+    {
+        constexpr double lambda = 128.0;
+        return (sigma > 0.0) ? (std::sqrt(lambda) * sigma) : 0.0;
+    }
+
     SeedLabelMode evalSeedLabelMode(u32 w, u32 alpha, u32 tau, u32 rho)
     {
         (void)alpha;
@@ -358,6 +435,353 @@ namespace osuCrypto::LogVole2
     RecursiveMode evalRecursiveMode(u32 w, u32 alpha, u32 tau, u32 rho)
     {
         return (w <= alpha * tau * rho) ? RecursiveMode::Root : RecursiveMode::Internal;
+    }
+
+    bool makeTruncShrinkExpandParams(
+        const Params& params,
+        bool leafInputsAreGadget,
+        ShrinkExpandParams& out)
+    {
+        if (params.mShrinkExpand.mTau < 2 || params.mShrinkExpand.mAlpha == 0 ||
+            params.mShrinkExpand.mRing.mCoeffModulusBits.empty())
+        {
+            return false;
+        }
+
+        const u32 tauHi = params.mShrinkExpand.mTau - 1;
+        const u32 rho = static_cast<u32>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        ShrinkExpandParams next = params.mShrinkExpand;
+        next.mTau = tauHi;
+        next.mMu = next.mAlpha * tauHi * rho;
+        next.mTruncateOneGadgetDigit = true;
+        next.mLeafInputsAreGadget = leafInputsAreGadget;
+        out = std::move(next);
+        return true;
+    }
+
+    bool replicateRootHiKeyByLimb(
+        const std::vector<RnsPoly>& skHi,
+        u32 tauHi,
+        const RingParams& ring,
+        std::vector<RnsPoly>& out)
+    {
+        if (tauHi == 0 || skHi.size() != tauHi || ring.mCoeffModulusBits.empty() ||
+            !validateRingBatchShape(skHi, ring))
+        {
+            return false;
+        }
+
+        const std::size_t rho = ring.mCoeffModulusBits.size();
+        std::vector<RnsPoly> next;
+        next.reserve(static_cast<std::size_t>(tauHi) * rho);
+        for (u32 digit = 0; digit < tauHi; ++digit)
+        {
+            for (std::size_t limb = 0; limb < rho; ++limb)
+            {
+                (void)limb;
+                next.push_back(skHi[digit]);
+            }
+        }
+
+        out = std::move(next);
+        return true;
+    }
+
+    bool sampleRootErrorBatch(
+        const RingNttContext& ctx,
+        u32 count,
+        const SamplingSeedConfig& samplingSeeds,
+        u64 domain,
+        double sigma,
+        double maxDeviation,
+        bool outputNtt,
+        std::vector<RnsPoly>& out)
+    {
+        if (count == 0 || sigma < 0.0 || maxDeviation < 0.0)
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> next(count);
+        for (u32 idx = 0; idx < count; ++idx)
+        {
+            RnsPoly poly{};
+            poly.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+            if (sigma > 0.0)
+            {
+                const u64 noiseSeed =
+                    deriveNoiseSeed(samplingSeeds, domain, idx, count, ctx.mModuli.size());
+                if (!addPolyError(poly, sigma, maxDeviation, noiseSeed, 0, ctx))
+                {
+                    return false;
+                }
+            }
+
+            if (outputNtt && !forwardNtt(poly, ctx))
+            {
+                return false;
+            }
+
+            next[idx] = std::move(poly);
+        }
+
+        out = std::move(next);
+        return true;
+    }
+
+    bool addScaledNttInplace(
+        RnsPoly& accNtt,
+        const RnsPoly& polyNtt,
+        u32 gadgetLogBase,
+        u32 power,
+        const RingNttContext& ctx,
+        bool subtract)
+    {
+        if (!validateRingPolyShape(accNtt, ctx.mParams) ||
+            !validateRingPolyShape(polyNtt, ctx.mParams))
+        {
+            return false;
+        }
+
+        const u64 shift = static_cast<u64>(gadgetLogBase) * power;
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
+        {
+            const auto& modulus = ctx.mModuli[modIdx];
+            const u64 mod = modulus.value();
+            const u64 factor = pow2Mod(shift, mod);
+            const std::size_t offset = modIdx * n;
+            for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
+            {
+                const std::size_t idx = offset + coeffIdx;
+                const u64 scaled = seal::util::multiply_uint_mod(polyNtt.mCoeffs[idx], factor, modulus);
+                if (subtract)
+                {
+                    accNtt.mCoeffs[idx] = (accNtt.mCoeffs[idx] >= scaled)
+                                               ? (accNtt.mCoeffs[idx] - scaled)
+                                               : (accNtt.mCoeffs[idx] + mod - scaled);
+                }
+                else
+                {
+                    u64 sum = accNtt.mCoeffs[idx] + scaled;
+                    if (sum >= mod)
+                    {
+                        sum -= mod;
+                    }
+                    accNtt.mCoeffs[idx] = sum;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    bool negateNttInplace(RnsPoly& polyNtt, const RingNttContext& ctx)
+    {
+        if (!validateRingPolyShape(polyNtt, ctx.mParams))
+        {
+            return false;
+        }
+
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
+        {
+            const u64 mod = ctx.mModuli[modIdx].value();
+            const std::size_t offset = modIdx * n;
+            for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
+            {
+                const std::size_t idx = offset + coeffIdx;
+                if (polyNtt.mCoeffs[idx] != 0)
+                {
+                    polyNtt.mCoeffs[idx] = mod - polyNtt.mCoeffs[idx];
+                }
+            }
+        }
+
+        return true;
+    }
+
+    bool buildRootTopCt(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& r1,
+        const std::vector<RnsPoly>& r2Ntt,
+        const std::vector<RnsPoly>& publicBRootNtt,
+        const std::vector<RnsPoly>& publicBStarNtt,
+        u32 gadgetLogBase,
+        u32 gadgetPowerOffset,
+        const SamplingSeedConfig& samplingSeeds,
+        double noiseStandardDeviation,
+        double noiseMaxDeviation,
+        RingTensor& out)
+    {
+        const u32 leftWidth = static_cast<u32>(r1.size());
+        const u32 tauHi = static_cast<u32>(publicBRootNtt.size());
+        const u32 randomizer = static_cast<u32>(publicBStarNtt.size());
+        if (leftWidth == 0 || r2Ntt.size() != leftWidth || tauHi == 0 || randomizer == 0 ||
+            !validateRingBatchShape(r1, ctx.mParams) ||
+            !validateRingBatchShape(r2Ntt, ctx.mParams) ||
+            !validateRingBatchShape(publicBRootNtt, ctx.mParams) ||
+            !validateRingBatchShape(publicBStarNtt, ctx.mParams))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> r1Ntt = r1;
+        for (auto& poly : r1Ntt)
+        {
+            if (!forwardNtt(poly, ctx))
+            {
+                return false;
+            }
+        }
+
+        RingTensor next{};
+        next.mRows = leftWidth;
+        next.mCols = tauHi + randomizer;
+        next.mPolys.resize(ringTensorSize(next));
+
+        for (u32 row = 0; row < leftWidth; ++row)
+        {
+            for (u32 col = 0; col < next.mCols; ++col)
+            {
+                const RnsPoly& bNtt = (col < tauHi) ? publicBRootNtt[col] : publicBStarNtt[col - tauHi];
+                RnsPoly cellNtt{};
+                cellNtt.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+                if (!dyadicMultiplyAddNttInplace(r1Ntt[row], bNtt, cellNtt, ctx) ||
+                    !negateNttInplace(cellNtt, ctx))
+                {
+                    return false;
+                }
+
+                if (col < tauHi &&
+                    !addScaledNttInplace(cellNtt, r2Ntt[row], gadgetLogBase, gadgetPowerOffset + col, ctx, true))
+                {
+                    return false;
+                }
+
+                if (noiseStandardDeviation > 0.0)
+                {
+                    const u64 streamId = (static_cast<u64>(row) << 32) ^ col;
+                    const u64 noiseSeed =
+                        deriveNoiseSeed(samplingSeeds, 0x5254544F504E5A45ull, streamId, leftWidth, next.mCols);
+                    RnsPoly noise{};
+                    noise.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+                    if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, noiseSeed, 0, ctx) ||
+                        !forwardNtt(noise, ctx) ||
+                        !ringAddInplace(cellNtt, noise, ctx))
+                    {
+                        return false;
+                    }
+                }
+
+                next.mPolys[ringTensorIndex(next, row, col)] = std::move(cellNtt);
+            }
+        }
+
+        out = std::move(next);
+        return true;
+    }
+
+    bool sampleRootZeta(
+        const RingNttContext& ctx,
+        u32 randomizerWidth,
+        u32 gadgetLogBase,
+        std::vector<RnsPoly>& out)
+    {
+        if (randomizerWidth == 0 || gadgetLogBase == 0 || gadgetLogBase > 127)
+        {
+            return false;
+        }
+
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        const std::size_t rho = ctx.mModuli.size();
+        u64 seed = deriveDeterministicSeedMaterial(
+            freshRootZetaSeed(),
+            0x52544E5A455441ull,
+            ctx.mParams.mPolyModulusDegree,
+            randomizerWidth,
+            gadgetLogBase,
+            rho);
+        const unsigned __int128 eta = (static_cast<unsigned __int128>(1) << gadgetLogBase) - 1;
+        const u32 sampleBits = gadgetLogBase + 1;
+        const unsigned __int128 sampleMask = (sampleBits == 128)
+                                                 ? ~static_cast<unsigned __int128>(0)
+                                                 : ((static_cast<unsigned __int128>(1) << sampleBits) - 1);
+
+        std::vector<RnsPoly> zeta(randomizerWidth);
+        for (u32 polyIdx = 0; polyIdx < randomizerWidth; ++polyIdx)
+        {
+            RnsPoly poly{};
+            poly.mCoeffs.assign(n * rho, 0);
+            for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
+            {
+                unsigned __int128 raw = 0;
+                do
+                {
+                    seed = combineSeedPublic(seed ^ (static_cast<u64>(polyIdx) << 32) ^ coeffIdx);
+                    const u64 lo = seed;
+                    seed = combineSeedPublic(seed + 0x9E3779B97F4A7C15ull);
+                    const u64 hi = seed;
+                    raw = ((static_cast<unsigned __int128>(hi) << 64) | lo) & sampleMask;
+                } while (raw == sampleMask);
+
+                const bool negative = raw <= eta;
+                const unsigned __int128 magnitude = negative ? (eta - raw) : (raw - eta);
+                for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
+                {
+                    const std::size_t outIdx = modIdx * n + coeffIdx;
+                    const u64 mod = ctx.mModuli[modIdx].value();
+                    const u64 reduced = uint128Mod(magnitude, ctx.mModuli[modIdx]);
+                    poly.mCoeffs[outIdx] = (negative && reduced != 0) ? (mod - reduced) : reduced;
+                }
+            }
+
+            zeta[polyIdx] = std::move(poly);
+        }
+
+        out = std::move(zeta);
+        return true;
+    }
+
+    bool rootInnerProductNtt(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& leftNtt,
+        const std::vector<RnsPoly>& rightCoeff,
+        RnsPoly& out)
+    {
+        if (leftNtt.size() != rightCoeff.size() || leftNtt.empty() ||
+            !validateRingBatchShape(leftNtt, ctx.mParams) ||
+            !validateRingBatchShape(rightCoeff, ctx.mParams))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> rightNtt = rightCoeff;
+        for (auto& poly : rightNtt)
+        {
+            if (!forwardNtt(poly, ctx))
+            {
+                return false;
+            }
+        }
+
+        RnsPoly accNtt{};
+        accNtt.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+        for (std::size_t idx = 0; idx < leftNtt.size(); ++idx)
+        {
+            if (!dyadicMultiplyAddNttInplace(leftNtt[idx], rightNtt[idx], accNtt, ctx))
+            {
+                return false;
+            }
+        }
+
+        if (!inverseNtt(accNtt, ctx))
+        {
+            return false;
+        }
+
+        out = std::move(accNtt);
+        return true;
     }
 
     bool seedLabelAgg(
