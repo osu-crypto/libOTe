@@ -43,6 +43,7 @@ if(ENABLE_LOGVOLE)
         LogVole2/tests/test_lhe.cpp
         LogVole2/tests/test_lenc.cpp
         LogVole2/tests/test_ring_ops.cpp
+        LogVole2/tests/test_shrinkexpand_coproto.cpp
         LogVole2/tests/test_shrinkexpand.cpp
     )
     target_include_directories(libOTe_Tests PRIVATE

@@ -20,6 +20,13 @@ namespace osuCrypto::LogVole2
         ShrinkExpandParams mParams;
     };
 
+    struct ShrinkExpandOfflineMessage
+    {
+        ShrinkExpandParams mParams;
+        RingTensor mCt1;
+        ShrinkExpandLacct mLacct;
+    };
+
     struct ShrinkExpandShrinkOutput
     {
         RnsPoly mDigest;
@@ -64,7 +71,17 @@ namespace osuCrypto::LogVole2
 
     bool prepareShrinkExpandSenderOffline(
         const ShrinkExpandSenderOfflineInput& input,
+        ShrinkExpandOfflineMessage& message,
         ShrinkExpandSenderState& senderState);
+
+    bool prepareShrinkExpandSenderOffline(
+        const ShrinkExpandSenderOfflineInput& input,
+        ShrinkExpandSenderState& senderState);
+
+    bool finalizeShrinkExpandReceiverOffline(
+        const ShrinkExpandReceiverOfflineInput& input,
+        const ShrinkExpandOfflineMessage& message,
+        ShrinkExpandReceiverState& receiverState);
 
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,

@@ -48,6 +48,7 @@
     X(RingOps, CenteredGadgetDecomposeRecomposeBits) \
     X(RingOps, TensorPackUnpack) \
     X(RingOps, NonceBatchDeterminism) \
+    X(ShrinkExpandCoproto, OfflineAndExpandDeterministicRelation) \
     X(ShrinkExpandCore, ParamsValidation) \
     X(ShrinkExpandCore, OfflineStateShapes) \
     X(ShrinkExpandCore, DeterministicRelationExact) \

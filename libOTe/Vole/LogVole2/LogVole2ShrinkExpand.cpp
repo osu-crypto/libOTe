@@ -307,6 +307,7 @@ namespace osuCrypto::LogVole2
 
     bool prepareShrinkExpandSenderOffline(
         const ShrinkExpandSenderOfflineInput& input,
+        ShrinkExpandOfflineMessage& message,
         ShrinkExpandSenderState& senderState)
     {
         if (!validateShrinkExpandSenderOfflineInput(input))
@@ -437,17 +438,31 @@ namespace osuCrypto::LogVole2
             return false;
         }
 
+        ShrinkExpandOfflineMessage nextMessage{};
+        nextMessage.mParams = next.mParams;
+        nextMessage.mCt1 = next.mCt1;
+        nextMessage.mLacct = next.mLacct;
+
+        message = std::move(nextMessage);
         senderState = std::move(next);
         return true;
     }
 
+    bool prepareShrinkExpandSenderOffline(
+        const ShrinkExpandSenderOfflineInput& input,
+        ShrinkExpandSenderState& senderState)
+    {
+        ShrinkExpandOfflineMessage ignored{};
+        return prepareShrinkExpandSenderOffline(input, ignored, senderState);
+    }
+
     bool finalizeShrinkExpandReceiverOffline(
         const ShrinkExpandReceiverOfflineInput& input,
-        const ShrinkExpandSenderState& senderState,
+        const ShrinkExpandOfflineMessage& message,
         ShrinkExpandReceiverState& receiverState)
     {
         if (!validateShrinkExpandReceiverOfflineInput(input) ||
-            !validateStateParamsMatch(input.mParams, senderState.mParams))
+            !validateStateParamsMatch(input.mParams, message.mParams))
         {
             return false;
         }
@@ -465,9 +480,25 @@ namespace osuCrypto::LogVole2
             return false;
         }
 
-        next.mPublicANtt = senderState.mPublicANtt;
-        next.mPublicBNtt = senderState.mPublicBNtt;
-        next.mCt1 = senderState.mCt1;
+        std::vector<RnsPoly> publicA;
+        if (!buildLhePublicANtt(ctx, input.mParams.mMu, publicA))
+        {
+            return false;
+        }
+        next.mPublicANtt = std::make_shared<const std::vector<RnsPoly>>(std::move(publicA));
+
+        const u32 publicBTau = input.mParams.mTruncateOneGadgetDigit ? (input.mParams.mTau + 1u) : input.mParams.mTau;
+        next.mPublicBNtt = std::make_shared<const std::vector<RnsPoly>>(buildLencPublicBNtt(ctx, publicBTau));
+
+        next.mCt1 = message.mCt1;
+        if (next.mCt1.mRows != input.mParams.mMu ||
+            next.mCt1.mCols != input.mParams.mTau ||
+            ringTensorSize(next.mCt1) != next.mCt1.mPolys.size() ||
+            !validateRingBatchShape(next.mCt1.mPolys, input.mParams.mRing))
+        {
+            return false;
+        }
+
         for (auto& poly : next.mCt1.mPolys)
         {
             if (!forwardNtt(poly, ctx))
@@ -475,10 +506,30 @@ namespace osuCrypto::LogVole2
                 return false;
             }
         }
-        next.mLacct = senderState.mLacct;
+        next.mLacct = message.mLacct;
+        if (next.mLacct.mWidthPadded == 0 ||
+            next.mLacct.mLevels == 0 ||
+            next.mLacct.mCt.mRows != next.mLacct.mLevels * next.mLacct.mWidthPadded ||
+            ringTensorSize(next.mLacct.mCt) != next.mLacct.mCt.mPolys.size() ||
+            !validateRingBatchShape(next.mLacct.mCt.mPolys, input.mParams.mRing))
+        {
+            return false;
+        }
 
         receiverState = std::move(next);
         return true;
+    }
+
+    bool finalizeShrinkExpandReceiverOffline(
+        const ShrinkExpandReceiverOfflineInput& input,
+        const ShrinkExpandSenderState& senderState,
+        ShrinkExpandReceiverState& receiverState)
+    {
+        ShrinkExpandOfflineMessage message{};
+        message.mParams = senderState.mParams;
+        message.mCt1 = senderState.mCt1;
+        message.mLacct = senderState.mLacct;
+        return finalizeShrinkExpandReceiverOffline(input, message, receiverState);
     }
 
     bool shrinkExpandShrink(
