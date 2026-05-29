@@ -31,6 +31,11 @@
     X(LencOps, EvalMatchesRmulDigestMinusSmulX) \
     X(LencOps, EvalFromPrebuiltTreeMatchesEvalFromX) \
     X(LencOps, EvalRejectsMuMismatch) \
+    X(LencOps, TruncEncShapeAndDeterminism) \
+    X(LencOps, TruncDigestTreeDeterministic) \
+    X(LencOps, TruncEvalFromPrebuiltTreeMatchesEvalFromX) \
+    X(LencOps, TruncEvalRejectsMuMismatch) \
+    X(LencOps, TruncLeafInputsAreGadgetPath) \
     X(RingOps, NttRoundTrip) \
     X(RingOps, GadgetDecomposeRecompose) \
     X(RingOps, GadgetDecomposeRecomposeBits) \

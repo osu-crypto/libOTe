@@ -84,4 +84,68 @@ namespace osuCrypto::LogVole2
         std::vector<RnsPoly>& out,
         bool outputNtt = false,
         u32 requestedWorkers = 1);
+
+    bool buildDigestTreeTrunc(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& x,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        DigestTree& out,
+        u32 requestedWidthPadded = 0,
+        bool leafInputsAreGadget = false,
+        const std::vector<RnsPoly>* publicBNtt = nullptr,
+        u32 requestedWorkers = 1);
+
+    bool lencEncTrunc(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& s,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        const SamplingSeedConfig& samplingSeeds,
+        LencEncodeOutput& out,
+        double noiseStandardDeviation = 0.0,
+        double noiseMaxDeviation = 0.0,
+        u32 requestedWidthPadded = 0,
+        bool emitRCoeffDomain = true,
+        bool leafInputsAreGadget = false,
+        const std::vector<RnsPoly>* publicBNtt = nullptr,
+        u32 requestedWorkers = 1);
+
+    bool lencDigestTrunc(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& x,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        RnsPoly& out,
+        u32 widthPadded = 0,
+        bool leafInputsAreGadget = false);
+
+    bool lencEvalTrunc(
+        const RingNttContext& ctx,
+        const LencLacct& lacct,
+        const std::vector<RnsPoly>& x,
+        u32 mu,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        std::vector<RnsPoly>& out,
+        bool outputNtt = false,
+        u32 requestedWorkers = 1,
+        bool leafInputsAreGadget = false);
+
+    bool lencEvalTrunc(
+        const RingNttContext& ctx,
+        const LencLacct& lacct,
+        const DigestTree& tree,
+        u32 mu,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        std::vector<RnsPoly>& out,
+        bool outputNtt = false,
+        u32 requestedWorkers = 1,
+        bool leafInputsAreGadget = false);
 }
