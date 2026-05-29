@@ -26,6 +26,11 @@
     X(ShrinkExpandCore, OfflineMetadataMismatchRejected)
 
 #define LIBOTE_LOGVOLE2_TESTS(X) \
+    X(LheOps, PublicADeterministic) \
+    X(LheOps, Enc1ShapeDeterminismAndColumnDecrypt) \
+    X(LheOps, ApplyCt1AndDeriveSkxRelation) \
+    X(LheOps, TruncApplyCt1AndDeriveSkxRelation) \
+    X(LheOps, HashedCt2Deterministic) \
     X(LencOps, EncShapeAndDeterminism) \
     X(LencOps, DigestTreeDeterministic) \
     X(LencOps, EvalMatchesRmulDigestMinusSmulX) \
