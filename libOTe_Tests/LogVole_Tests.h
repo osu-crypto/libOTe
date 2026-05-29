@@ -26,6 +26,11 @@
     X(ShrinkExpandCore, OfflineMetadataMismatchRejected)
 
 #define LIBOTE_LOGVOLE2_TESTS(X) \
+    X(LencOps, EncShapeAndDeterminism) \
+    X(LencOps, DigestTreeDeterministic) \
+    X(LencOps, EvalMatchesRmulDigestMinusSmulX) \
+    X(LencOps, EvalFromPrebuiltTreeMatchesEvalFromX) \
+    X(LencOps, EvalRejectsMuMismatch) \
     X(RingOps, NttRoundTrip) \
     X(RingOps, GadgetDecomposeRecompose) \
     X(RingOps, GadgetDecomposeRecomposeBits) \
