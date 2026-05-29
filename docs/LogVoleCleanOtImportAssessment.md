@@ -104,3 +104,49 @@ LogVOLECorrectnessTests Passed in 2.43 sec
 ```
 
 This gives us a passing frozen reference. The remaining Windows failures should be treated as portability work, not protocol-correctness blockers.
+
+## Expanded reference tests
+
+The richer direct recursive LogVOLE tests from `origin/clean-ot:clean-submission/tests/test_logvole.cpp` were added as `thirdparty/logvole-clean-ot/tests/test_logvole_recursive.cpp` and wired into the same WSL test binary. The only adaptation was removing three stale assertions against `global_timing_stats.keyderive_time_us`, because `clean-ot` intentionally removed the old keyderive path and timing counter.
+
+Expanded test list now includes the shipped CI-VOLE public API tests plus:
+
+```text
+LogVOLETest.TwoLevelExecution
+LogVOLETest.ThreeLevelExecution
+LogVOLETest.ThreeLevelExecutionUsesRecursiveOnlineRounds
+LogVOLETest.ThreeLevelExecutionMultiThread
+LogVOLETest.ThreeLevelExecutionWithSenderPrecompute
+LogVOLETest.ThreeLevelExecutionReusesCachedRootSeed
+LogVOLETest.ThreeLevelOfflineReusesInternalSetup
+LogVOLETest.RecursiveGadgetInputSubproblemW8
+LogVOLETest.RecursiveGadgetInputSubproblemW8FullNoise
+LogVOLETest.RejectsWidthsBelowRandomizedRootBlock
+LogVOLETest.DISABLED_FiveLevelExecutionW256
+```
+
+Normal expanded suite result:
+
+```text
+100% tests passed, 0 tests failed out of 1
+LogVOLECorrectnessTests Passed in 9.43 sec
+```
+
+The disabled five-level `W256` correctness test was also run explicitly:
+
+```text
+LogVOLETest.DISABLED_FiveLevelExecutionW256 passed in 2256 ms
+```
+
+The standalone examples were also checked in WSL:
+
+```text
+civole_example:
+CI-VOLE relation holds for 16 Zp values modulo 18014398508400641.
+
+civole_socket_example over loopback:
+sender: release_int complete for 16 Zp values modulo 18014398508400641.
+receiver: setx_int produced 16 macs modulo 18014398508400641.
+```
+
+This gives us a much stronger reference: public CI-VOLE behavior, direct recursive LogVOLE behavior, multithreaded path, precompute/cached-root path, internal setup reuse, full-noise recursive gadget input, width rejection, five-level stress, and socket transport all pass under WSL.

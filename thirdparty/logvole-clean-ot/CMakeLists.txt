@@ -76,6 +76,7 @@ if(LOGVOLE_BUILD_TESTS)
     add_executable(logvole_correctness_tests
         ${CMAKE_CURRENT_LIST_DIR}/tests/test_main.cpp
         ${CMAKE_CURRENT_LIST_DIR}/tests/test_logvole.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/tests/test_logvole_recursive.cpp
     )
     target_link_libraries(logvole_correctness_tests PRIVATE logvole::logvole GTest::gtest)
     target_compile_features(logvole_correctness_tests PRIVATE cxx_std_17)
