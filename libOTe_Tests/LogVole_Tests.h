@@ -49,6 +49,9 @@
     X(RingOps, TensorPackUnpack) \
     X(RingOps, NonceBatchDeterminism) \
     X(ShrinkExpandCoproto, OfflineAndExpandDeterministicRelation) \
+    X(ShrinkExpandCoproto, TruncOfflineAndExpandBoundedRelation) \
+    X(ShrinkExpandCoproto, FullNoiseTolerance) \
+    X(ShrinkExpandCoproto, OfflineStateReuseAcrossQueries) \
     X(ShrinkExpandCore, ParamsValidation) \
     X(ShrinkExpandCore, OfflineStateShapes) \
     X(ShrinkExpandCore, DeterministicRelationExact) \
