@@ -2,6 +2,7 @@
 
 #include "seal/util/uintarithsmallmod.h"
 
+#include <cmath>
 #include <cstddef>
 #include <limits>
 
@@ -266,6 +267,247 @@ namespace osuCrypto::LogVole
                    !input.mD.empty() &&
                    validateRingBatchShape(input.mD, input.mParams);
         }
+
+        u64 mix64(u64 x)
+        {
+            x += 0x9E3779B97F4A7C15ull;
+            x = (x ^ (x >> 30u)) * 0xBF58476D1CE4E5B9ull;
+            x = (x ^ (x >> 27u)) * 0x94D049BB133111EBull;
+            return x ^ (x >> 31u);
+        }
+
+        u32 logQBits(const RingParams& params)
+        {
+            u32 logQ = 0u;
+            for (const int bits : params.mCoeffModulusBits)
+            {
+                logQ += static_cast<u32>(bits);
+            }
+            return logQ;
+        }
+
+        bool computeBaseNoiseFloor(const RingParams& params, i64& out)
+        {
+            constexpr long double kBaseNoiseExponent = 0.1L;
+            const auto logQ = static_cast<long double>(logQBits(params));
+            const long double baseNoise = std::pow(2.0L, kBaseNoiseExponent * logQ);
+
+            if (!std::isfinite(baseNoise) ||
+                baseNoise > static_cast<long double>(std::numeric_limits<i64>::max()))
+            {
+                return false;
+            }
+
+            const auto floor = static_cast<i64>(std::ceil(baseNoise));
+            out = (floor > 0) ? floor : 1;
+            return true;
+        }
+
+        double computeSigma(const ShrinkExpandParams& params)
+        {
+            return 3.0 * std::pow(2.0, static_cast<double>(logQBits(params.mRing)) * 0.1);
+        }
+
+        std::vector<RnsPoly> sampleUniformBatch(
+            const RingNttContext& ctx,
+            u32 count,
+            u64 seed,
+            u64 domainTag)
+        {
+            std::vector<RnsPoly> out;
+            out.reserve(count);
+            for (u32 i = 0; i < count; ++i)
+            {
+                const u64 nonce = seed ^ (static_cast<u64>(i) << 1u);
+                out.push_back(deriveUniformPolyFromNonce(ctx, nonce, domainTag, i));
+            }
+            return out;
+        }
+
+        bool polysEqual(const RnsPoly& a, const RnsPoly& b)
+        {
+            return a.mCoeffs == b.mCoeffs;
+        }
+
+        bool buildLhePublicA(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out)
+        {
+            if (mu == 0u)
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> a;
+            a.reserve(mu);
+            for (u32 i = 0; i < mu; ++i)
+            {
+                a.push_back(deriveUniformPolyFromNonce(ctx, 0xA11ACE5Eull, 0xA110CA7Aull, i));
+            }
+
+            out = std::move(a);
+            return true;
+        }
+
+        bool lheEnc1(
+            const RingNttContext& ctx,
+            const std::vector<RnsPoly>& r,
+            const std::vector<RnsPoly>& sk1,
+            u32 gadgetLogBase,
+            RingTensor& out,
+            double noiseStandardDeviation = 0.0,
+            double noiseMaxDeviation = 0.0,
+            u64 encryptionNoiseSeed = 0)
+        {
+            if (r.empty() || sk1.empty() || noiseStandardDeviation < 0 ||
+                !validateRingBatchShape(r, ctx.mParams) ||
+                !validateRingBatchShape(sk1, ctx.mParams))
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> a;
+            if (!buildLhePublicA(ctx, static_cast<u32>(r.size()), a))
+            {
+                return false;
+            }
+
+            RingTensor ct1{};
+            ct1.mRows = static_cast<u32>(r.size());
+            ct1.mCols = static_cast<u32>(sk1.size());
+            ct1.mPolys.reserve(static_cast<std::size_t>(ct1.mRows) * ct1.mCols);
+
+            for (u32 row = 0; row < ct1.mRows; ++row)
+            {
+                for (u32 col = 0; col < ct1.mCols; ++col)
+                {
+                    RnsPoly ask{};
+                    RnsPoly rg{};
+                    RnsPoly c{};
+                    if (!ringMultiply(a[row], sk1[col], ctx, ask) ||
+                        !multiplyByGPower(ctx, r[row], gadgetLogBase, col, rg) ||
+                        !ringAdd(ask, rg, ctx, c))
+                    {
+                        return false;
+                    }
+
+                    if (noiseStandardDeviation > 0)
+                    {
+                        const u64 streamId = (static_cast<u64>(row) << 32u) ^ static_cast<u64>(col);
+                        if (!addPolyError(c, noiseStandardDeviation, noiseMaxDeviation, encryptionNoiseSeed, streamId, ctx))
+                        {
+                            return false;
+                        }
+                    }
+
+                    ct1.mPolys.push_back(std::move(c));
+                }
+            }
+
+            out = std::move(ct1);
+            return true;
+        }
+
+        bool lheApplyCt1(
+            const RingNttContext& ctx,
+            const RingTensor& ct1,
+            const RnsPoly& digest,
+            u32 gadgetLogBase,
+            u32 tau,
+            std::vector<RnsPoly>& out)
+        {
+            if (ct1.mRows == 0u || ct1.mCols == 0u || ct1.mCols != tau ||
+                tensorSize(ct1) != ct1.mPolys.size() ||
+                !validateRingPolyShape(digest, ctx.mParams) ||
+                !validateRingBatchShape(ct1.mPolys, ctx.mParams))
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> u;
+            if (!gadgetDecomposeBits(digest, gadgetLogBase, tau, ctx, u))
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> result;
+            result.reserve(ct1.mRows);
+            for (u32 row = 0; row < ct1.mRows; ++row)
+            {
+                RnsPoly acc{};
+                zeroPoly(ctx, acc);
+
+                for (u32 col = 0; col < tau; ++col)
+                {
+                    const auto& c = ct1.mPolys[tensorIndex(ct1, row, col)];
+                    RnsPoly term{};
+                    RnsPoly next{};
+                    if (!ringMultiply(c, u[col], ctx, term) ||
+                        !ringAdd(acc, term, ctx, next))
+                    {
+                        return false;
+                    }
+                    acc = std::move(next);
+                }
+                result.push_back(std::move(acc));
+            }
+
+            out = std::move(result);
+            return true;
+        }
+
+        bool buildHashedCt2(const RingNttContext& ctx, u32 mu, u64 nonce, std::vector<RnsPoly>& out)
+        {
+            if (mu == 0u)
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> result;
+            result.reserve(mu);
+            for (u32 j = 0; j < mu; ++j)
+            {
+                result.push_back(deriveUniformPolyFromNonce(ctx, nonce, 0xC720AA55u, j));
+            }
+
+            out = std::move(result);
+            return true;
+        }
+
+        bool lheDec(
+            const RingNttContext& ctx,
+            const std::vector<RnsPoly>& cipher,
+            const RnsPoly& sk,
+            std::vector<RnsPoly>& out)
+        {
+            if (cipher.empty() ||
+                !validateRingBatchShape(cipher, ctx.mParams) ||
+                !validateRingPolyShape(sk, ctx.mParams))
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> a;
+            if (!buildLhePublicA(ctx, static_cast<u32>(cipher.size()), a))
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> result;
+            result.reserve(cipher.size());
+            for (std::size_t i = 0; i < cipher.size(); ++i)
+            {
+                RnsPoly ask{};
+                RnsPoly dec{};
+                if (!ringMultiply(a[i], sk, ctx, ask) ||
+                    !ringSub(cipher[i], ask, ctx, dec))
+                {
+                    return false;
+                }
+                result.push_back(std::move(dec));
+            }
+
+            out = std::move(result);
+            return true;
+        }
     }
 
     bool prepareKeyDeriveRequest(
@@ -408,6 +650,399 @@ namespace osuCrypto::LogVole
                 return false;
             }
             next.mM.push_back(std::move(poly));
+        }
+
+        output = std::move(next);
+        return true;
+    }
+
+    bool validateParams(const ShrinkExpandParams& params)
+    {
+        if (!validateRingParams(params.mRing) ||
+            params.mAlpha == 0u ||
+            params.mMu == 0u ||
+            params.mTau == 0u ||
+            params.mPlaintextModulusBits == 0u ||
+            params.mGadgetLogBase == 0u ||
+            params.mNoiseBound < 0)
+        {
+            return false;
+        }
+
+        if (logQBits(params.mRing) <= params.mPlaintextModulusBits)
+        {
+            return false;
+        }
+
+        i64 ignored = 0;
+        return resolveEffectiveNoiseBound(params, ignored);
+    }
+
+    bool resolveEffectiveNoiseBound(const ShrinkExpandParams& params, i64& out)
+    {
+        if (params.mMode != ShrinkExpandMode::FullNoise)
+        {
+            out = params.mNoiseBound;
+            return true;
+        }
+
+        i64 baseFloor = 0;
+        if (!computeBaseNoiseFloor(params.mRing, baseFloor))
+        {
+            return false;
+        }
+
+        out = (params.mNoiseBound > baseFloor) ? params.mNoiseBound : baseFloor;
+        return true;
+    }
+
+    u64 metadataFingerprint(const ShrinkExpandParams& params)
+    {
+        u64 acc = mix64(params.mRing.mPolyModulusDegree);
+        acc ^= mix64(params.mPlaintextModulusBits);
+        acc ^= mix64(params.mAlpha);
+        acc ^= mix64(params.mMu);
+        acc ^= mix64(params.mTau);
+        acc ^= mix64(params.mGadgetLogBase);
+        acc ^= mix64(static_cast<u64>(params.mMode));
+
+        for (std::size_t i = 0; i < params.mRing.mCoeffModulusBits.size(); ++i)
+        {
+            acc ^= mix64(static_cast<u64>(i + 1u) * static_cast<u64>(params.mRing.mCoeffModulusBits[i]));
+        }
+
+        return acc;
+    }
+
+    bool prepareSenderOffline(
+        const ShrinkExpandSenderOfflineInput& input,
+        ShrinkExpandOfflineMessage& message,
+        ShrinkExpandSenderState& state)
+    {
+        if (!validateParams(input.mParams) ||
+            input.mS.size() != input.mParams.mMu ||
+            !validateRingBatchShape(input.mS, input.mParams.mRing))
+        {
+            return false;
+        }
+
+        RingNttContext ctx{};
+        if (!makeRingNttContext(input.mParams.mRing, ctx))
+        {
+            return false;
+        }
+
+        ShrinkExpandSenderState nextState{};
+        nextState.mParams = input.mParams;
+        if (!resolveEffectiveNoiseBound(input.mParams, nextState.mEffectiveNoiseBound))
+        {
+            return false;
+        }
+
+        nextState.mS = input.mS;
+        nextState.mSk1 = sampleUniformBatch(ctx, input.mParams.mTau, input.mParams.mNoiseSeed, 0xA002u);
+
+        constexpr double kNoiseLambda = 128.0;
+        const bool fullNoise = input.mParams.mMode == ShrinkExpandMode::FullNoise;
+        const double lencSigma = fullNoise ? computeSigma(input.mParams) : 0.0;
+        const double lencMaxDev = fullNoise ? std::sqrt(kNoiseLambda) * lencSigma : 0.0;
+
+        LencEncodeOutput lenc{};
+        if (!lencEnc(
+                ctx,
+                input.mS,
+                input.mParams.mTau,
+                input.mParams.mGadgetLogBase,
+                input.mParams.mNoiseSeed ^ 0x1A2B3C4Dull,
+                lenc,
+                lencSigma,
+                lencMaxDev,
+                input.mParams.mNoiseSeed ^ 0x1EC0DEC0ull))
+        {
+            return false;
+        }
+
+        nextState.mR = std::move(lenc.mR);
+        nextState.mLacct = std::move(lenc.mLacct);
+
+        const double lheSigma = fullNoise ? computeSigma(input.mParams) : 0.0;
+        const double lheMaxDev = fullNoise ? std::sqrt(kNoiseLambda) * lheSigma : 0.0;
+        if (!lheEnc1(
+                ctx,
+                nextState.mR,
+                nextState.mSk1,
+                input.mParams.mGadgetLogBase,
+                nextState.mCt1,
+                lheSigma,
+                lheMaxDev,
+                input.mParams.mNoiseSeed ^ 0x1A1100E5ull))
+        {
+            return false;
+        }
+
+        ShrinkExpandOfflineMessage nextMessage{};
+        nextMessage.mPolyModulusDegree = input.mParams.mRing.mPolyModulusDegree;
+        nextMessage.mCoeffModulusBits.reserve(input.mParams.mRing.mCoeffModulusBits.size());
+        for (const int bit : input.mParams.mRing.mCoeffModulusBits)
+        {
+            nextMessage.mCoeffModulusBits.push_back(static_cast<u16>(bit));
+        }
+        nextMessage.mPlaintextModulusBits = input.mParams.mPlaintextModulusBits;
+        nextMessage.mAlpha = input.mParams.mAlpha;
+        nextMessage.mMu = input.mParams.mMu;
+        nextMessage.mTau = input.mParams.mTau;
+        nextMessage.mGadgetLogBase = input.mParams.mGadgetLogBase;
+        nextMessage.mMode = static_cast<u8>(input.mParams.mMode);
+        nextMessage.mMetadataFingerprint = metadataFingerprint(input.mParams);
+        nextMessage.mCt1Rows = nextState.mCt1.mRows;
+        nextMessage.mCt1Cols = nextState.mCt1.mCols;
+        nextMessage.mCt1Coeffs = packRingTensor(nextState.mCt1);
+        nextMessage.mLacctWidthPadded = nextState.mLacct.mWidthPadded;
+        nextMessage.mLacctLevels = nextState.mLacct.mLevels;
+        nextMessage.mLacctCtRows = nextState.mLacct.mCt.mRows;
+        nextMessage.mLacctCtCols = nextState.mLacct.mCt.mCols;
+        nextMessage.mLacctCtCoeffs = packRingTensor(nextState.mLacct.mCt);
+
+        state = std::move(nextState);
+        message = std::move(nextMessage);
+        return true;
+    }
+
+    bool finalizeReceiverOffline(
+        const ShrinkExpandReceiverOfflineInput& input,
+        const ShrinkExpandOfflineMessage& message,
+        ShrinkExpandReceiverState& state)
+    {
+        if (!validateParams(input.mParams) ||
+            message.mPolyModulusDegree != input.mParams.mRing.mPolyModulusDegree ||
+            message.mCoeffModulusBits.size() != input.mParams.mRing.mCoeffModulusBits.size() ||
+            message.mPlaintextModulusBits != input.mParams.mPlaintextModulusBits ||
+            message.mAlpha != input.mParams.mAlpha ||
+            message.mMu != input.mParams.mMu ||
+            message.mTau != input.mParams.mTau ||
+            message.mGadgetLogBase != input.mParams.mGadgetLogBase ||
+            message.mMode != static_cast<u8>(input.mParams.mMode) ||
+            message.mMetadataFingerprint != metadataFingerprint(input.mParams))
+        {
+            return false;
+        }
+
+        for (std::size_t i = 0; i < message.mCoeffModulusBits.size(); ++i)
+        {
+            if (static_cast<int>(message.mCoeffModulusBits[i]) != input.mParams.mRing.mCoeffModulusBits[i])
+            {
+                return false;
+            }
+        }
+
+        const u32 coeffModCount = static_cast<u32>(input.mParams.mRing.mCoeffModulusBits.size());
+        RingTensor ct1{};
+        RingTensor lacctCt{};
+        if (!unpackRingTensor(
+                message.mCt1Rows,
+                message.mCt1Cols,
+                message.mPolyModulusDegree,
+                coeffModCount,
+                message.mCt1Coeffs,
+                ct1) ||
+            ct1.mRows != message.mMu ||
+            ct1.mCols != message.mTau ||
+            !unpackRingTensor(
+                message.mLacctCtRows,
+                message.mLacctCtCols,
+                message.mPolyModulusDegree,
+                coeffModCount,
+                message.mLacctCtCoeffs,
+                lacctCt))
+        {
+            return false;
+        }
+
+        if (message.mLacctWidthPadded == 0u ||
+            (message.mLacctWidthPadded & (message.mLacctWidthPadded - 1u)) != 0u ||
+            message.mLacctLevels == 0u ||
+            lacctCt.mRows != message.mLacctLevels * message.mLacctWidthPadded ||
+            lacctCt.mCols != 2u * message.mTau)
+        {
+            return false;
+        }
+
+        ShrinkExpandReceiverState next{};
+        next.mParams = input.mParams;
+        if (!resolveEffectiveNoiseBound(input.mParams, next.mEffectiveNoiseBound))
+        {
+            return false;
+        }
+        next.mCt1 = std::move(ct1);
+        next.mLacct.mWidthPadded = message.mLacctWidthPadded;
+        next.mLacct.mLevels = message.mLacctLevels;
+        next.mLacct.mCt = std::move(lacctCt);
+
+        state = std::move(next);
+        return true;
+    }
+
+    bool shrink(
+        const ShrinkExpandReceiverState& state,
+        const std::vector<RnsPoly>& x,
+        RnsPoly& digest)
+    {
+        if (x.size() != state.mParams.mMu)
+        {
+            return false;
+        }
+
+        RingNttContext ctx{};
+        return makeRingNttContext(state.mParams.mRing, ctx) &&
+               lencDigest(ctx, x, state.mParams.mTau, state.mParams.mGadgetLogBase, digest, state.mLacct.mWidthPadded);
+    }
+
+    bool deriveSkX(
+        const ShrinkExpandSenderState& state,
+        const RnsPoly& digest,
+        const RnsPoly& tbkPrime,
+        RnsPoly& out)
+    {
+        if (state.mSk1.size() != state.mParams.mTau)
+        {
+            return false;
+        }
+
+        RingNttContext ctx{};
+        if (!makeRingNttContext(state.mParams.mRing, ctx) ||
+            !validateRingBatchShape(state.mSk1, state.mParams.mRing) ||
+            !validateRingPolyShape(digest, state.mParams.mRing) ||
+            !validateRingPolyShape(tbkPrime, state.mParams.mRing))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> u;
+        if (!gadgetDecomposeBits(digest, state.mParams.mGadgetLogBase, state.mParams.mTau, ctx, u))
+        {
+            return false;
+        }
+
+        RnsPoly acc = tbkPrime;
+        for (u32 i = 0; i < state.mParams.mTau; ++i)
+        {
+            RnsPoly term{};
+            RnsPoly next{};
+            if (!ringMultiply(state.mSk1[i], u[i], ctx, term) ||
+                !ringAdd(acc, term, ctx, next))
+            {
+                return false;
+            }
+            acc = std::move(next);
+        }
+
+        out = std::move(acc);
+        return true;
+    }
+
+    bool expandSender(
+        const ShrinkExpandSenderState& state,
+        const ShrinkExpandSenderExpandInput& input,
+        ShrinkExpandSenderExpandOutput& output)
+    {
+        RingNttContext ctx{};
+        if (!makeRingNttContext(state.mParams.mRing, ctx) ||
+            !validateRingPolyShape(input.mTbkPrime, state.mParams.mRing))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> ct2;
+        std::vector<RnsPoly> tbk;
+        if (!buildHashedCt2(ctx, state.mParams.mMu, input.mNonce, ct2) ||
+            !lheDec(ctx, ct2, input.mTbkPrime, tbk))
+        {
+            return false;
+        }
+
+        ShrinkExpandSenderExpandOutput next{};
+        next.mTbk = std::move(tbk);
+        output = std::move(next);
+        return true;
+    }
+
+    bool expandReceiver(
+        const ShrinkExpandReceiverState& state,
+        const ShrinkExpandReceiverExpandInput& input,
+        ShrinkExpandReceiverExpandOutput& output)
+    {
+        if (input.mX.size() != state.mParams.mMu)
+        {
+            return false;
+        }
+
+        RingNttContext ctx{};
+        if (!makeRingNttContext(state.mParams.mRing, ctx) ||
+            !validateRingBatchShape(input.mX, state.mParams.mRing) ||
+            !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
+            !validateRingPolyShape(input.mSkX, state.mParams.mRing))
+        {
+            return false;
+        }
+
+        RnsPoly digestRecomputed{};
+        if (!lencDigest(
+                ctx,
+                input.mX,
+                state.mParams.mTau,
+                state.mParams.mGadgetLogBase,
+                digestRecomputed,
+                state.mLacct.mWidthPadded) ||
+            !polysEqual(digestRecomputed, input.mDigest))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> ct2;
+        std::vector<RnsPoly> ct1Applied;
+        if (!buildHashedCt2(ctx, state.mParams.mMu, input.mNonce, ct2) ||
+            !lheApplyCt1(ctx, state.mCt1, input.mDigest, state.mParams.mGadgetLogBase, state.mParams.mTau, ct1Applied))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> ctRes;
+        ctRes.reserve(state.mParams.mMu);
+        for (std::size_t i = 0; i < state.mParams.mMu; ++i)
+        {
+            RnsPoly c{};
+            if (!ringAdd(ct1Applied[i], ct2[i], ctx, c))
+            {
+                return false;
+            }
+            ctRes.push_back(std::move(c));
+        }
+
+        std::vector<RnsPoly> decCtRes;
+        std::vector<RnsPoly> eval;
+        if (!lheDec(ctx, ctRes, input.mSkX, decCtRes) ||
+            !lencEval(
+                ctx,
+                state.mLacct,
+                input.mX,
+                state.mParams.mMu,
+                state.mParams.mTau,
+                state.mParams.mGadgetLogBase,
+                eval))
+        {
+            return false;
+        }
+
+        ShrinkExpandReceiverExpandOutput next{};
+        next.mTbm.reserve(state.mParams.mMu);
+        for (std::size_t row = 0; row < state.mParams.mMu; ++row)
+        {
+            RnsPoly tbm{};
+            if (!ringSub(decCtRes[row], eval[row], ctx, tbm))
+            {
+                return false;
+            }
+            next.mTbm.push_back(std::move(tbm));
         }
 
         output = std::move(next);

@@ -44,6 +44,7 @@ if(ENABLE_LOGVOLE)
         LogVole/tests/test_lenc.cpp
         LogVole/tests/test_ring_ops.cpp
         LogVole/tests/test_round_dsl_compile.cpp
+        LogVole/tests/test_shrinkexpand_core.cpp
         LogVole/tests/test_shrinkexpand.cpp
     )
     target_include_directories(libOTe_Tests PRIVATE

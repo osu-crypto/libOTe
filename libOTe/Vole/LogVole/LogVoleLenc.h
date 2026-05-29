@@ -136,4 +136,63 @@ namespace osuCrypto::LogVole
         RingTensor mCt1;
         LencLacct mLacct;
     };
+
+    struct ShrinkExpandSenderExpandInput
+    {
+        u64 mNonce = 0;
+        RnsPoly mTbkPrime;
+    };
+
+    struct ShrinkExpandReceiverExpandInput
+    {
+        u64 mNonce = 0;
+        std::vector<RnsPoly> mX;
+        RnsPoly mDigest;
+        RnsPoly mSkX;
+    };
+
+    struct ShrinkExpandSenderExpandOutput
+    {
+        std::vector<RnsPoly> mTbk;
+    };
+
+    struct ShrinkExpandReceiverExpandOutput
+    {
+        std::vector<RnsPoly> mTbm;
+    };
+
+    bool validateParams(const ShrinkExpandParams& params);
+    bool resolveEffectiveNoiseBound(const ShrinkExpandParams& params, i64& out);
+    u64 metadataFingerprint(const ShrinkExpandParams& params);
+
+    bool prepareSenderOffline(
+        const ShrinkExpandSenderOfflineInput& input,
+        ShrinkExpandOfflineMessage& message,
+        ShrinkExpandSenderState& state);
+
+    bool finalizeReceiverOffline(
+        const ShrinkExpandReceiverOfflineInput& input,
+        const ShrinkExpandOfflineMessage& message,
+        ShrinkExpandReceiverState& state);
+
+    bool shrink(
+        const ShrinkExpandReceiverState& state,
+        const std::vector<RnsPoly>& x,
+        RnsPoly& digest);
+
+    bool deriveSkX(
+        const ShrinkExpandSenderState& state,
+        const RnsPoly& digest,
+        const RnsPoly& tbkPrime,
+        RnsPoly& out);
+
+    bool expandSender(
+        const ShrinkExpandSenderState& state,
+        const ShrinkExpandSenderExpandInput& input,
+        ShrinkExpandSenderExpandOutput& output);
+
+    bool expandReceiver(
+        const ShrinkExpandReceiverState& state,
+        const ShrinkExpandReceiverExpandInput& input,
+        ShrinkExpandReceiverExpandOutput& output);
 }
