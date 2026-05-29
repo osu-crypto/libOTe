@@ -6,13 +6,13 @@
 #include <cstdint>
 #include <vector>
 
-using namespace osuCrypto;
+using namespace osuCrypto::LogVole;
 
 namespace
 {
     struct LencParams
     {
-        LogVoleRingParams mRing{};
+        RingParams mRing{};
         std::uint32_t mMu = 3;
         std::uint32_t mTau = 3;
         std::uint32_t mGadgetLogBase = 126;
@@ -26,21 +26,21 @@ namespace
         return p;
     }
 
-    std::vector<LogVoleRnsPoly> sample_batch(
-        const LogVoleRingNttContext& ctx,
+    std::vector<RnsPoly> sample_batch(
+        const RingNttContext& ctx,
         std::uint32_t count,
         std::uint64_t seed)
     {
-        std::vector<LogVoleRnsPoly> out;
+        std::vector<RnsPoly> out;
         out.reserve(count);
         for (std::uint32_t i = 0; i < count; ++i)
         {
-            out.push_back(logVoleDeriveUniformPolyFromNonce(ctx, seed, 0x1E2C0001u, i));
+            out.push_back(deriveUniformPolyFromNonce(ctx, seed, 0x1E2C0001u, i));
         }
         return out;
     }
 
-    void expect_poly_equal(const LogVoleRnsPoly& a, const LogVoleRnsPoly& b)
+    void expect_poly_equal(const RnsPoly& a, const RnsPoly& b)
     {
         LOGVOLE_REQUIRE_EQ(a.mCoeffs.size(), b.mCoeffs.size());
         for (std::size_t i = 0; i < a.mCoeffs.size(); ++i)
@@ -49,7 +49,7 @@ namespace
         }
     }
 
-    void expect_batch_equal(const std::vector<LogVoleRnsPoly>& a, const std::vector<LogVoleRnsPoly>& b)
+    void expect_batch_equal(const std::vector<RnsPoly>& a, const std::vector<RnsPoly>& b)
     {
         LOGVOLE_REQUIRE_EQ(a.size(), b.size());
         for (std::size_t i = 0; i < a.size(); ++i)
@@ -58,7 +58,7 @@ namespace
         }
     }
 
-    void expect_tensor_equal(const LogVoleRingTensor& a, const LogVoleRingTensor& b)
+    void expect_tensor_equal(const RingTensor& a, const RingTensor& b)
     {
         LOGVOLE_EXPECT_EQ(a.mRows, b.mRows);
         LOGVOLE_EXPECT_EQ(a.mCols, b.mCols);
@@ -71,16 +71,16 @@ void LogVole_LencOps_EncShapeAndDeterminism(const oc::CLP&)
 {
     const auto params = make_params();
 
-    LogVoleRingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(logVoleMakeRingNttContext(params.mRing, ctx));
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x1111u);
 
-    LogVoleLencEncodeOutput enc1{};
-    LOGVOLE_REQUIRE_TRUE(logVoleLencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0xABCDEF01u, enc1));
+    LencEncodeOutput enc1{};
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0xABCDEF01u, enc1));
 
-    LogVoleLencEncodeOutput enc2{};
-    LOGVOLE_REQUIRE_TRUE(logVoleLencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0xABCDEF01u, enc2));
+    LencEncodeOutput enc2{};
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0xABCDEF01u, enc2));
 
     LOGVOLE_EXPECT_EQ(enc1.mR.size(), params.mMu);
     LOGVOLE_EXPECT_EQ(enc1.mLacct.mWidthPadded, 4u);
@@ -96,16 +96,16 @@ void LogVole_LencOps_DigestDeterministic(const oc::CLP&)
 {
     const auto params = make_params();
 
-    LogVoleRingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(logVoleMakeRingNttContext(params.mRing, ctx));
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
     auto x = sample_batch(ctx, params.mMu, 0x2222u);
 
-    LogVoleRnsPoly digest1{};
-    LOGVOLE_REQUIRE_TRUE(logVoleLencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest1));
+    RnsPoly digest1{};
+    LOGVOLE_REQUIRE_TRUE(lencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest1));
 
-    LogVoleRnsPoly digest2{};
-    LOGVOLE_REQUIRE_TRUE(logVoleLencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest2));
+    RnsPoly digest2{};
+    LOGVOLE_REQUIRE_TRUE(lencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest2));
 
     expect_poly_equal(digest1, digest2);
 }
@@ -114,32 +114,32 @@ void LogVole_LencOps_EvalMatchesRmulDigestMinusSmulX(const oc::CLP&)
 {
     const auto params = make_params();
 
-    LogVoleRingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(logVoleMakeRingNttContext(params.mRing, ctx));
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x3333u);
     auto x = sample_batch(ctx, params.mMu, 0x4444u);
 
-    LogVoleLencEncodeOutput enc{};
-    LOGVOLE_REQUIRE_TRUE(logVoleLencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0x5555u, enc));
+    LencEncodeOutput enc{};
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0x5555u, enc));
 
-    LogVoleRnsPoly digest{};
-    LOGVOLE_REQUIRE_TRUE(logVoleLencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest, enc.mLacct.mWidthPadded));
+    RnsPoly digest{};
+    LOGVOLE_REQUIRE_TRUE(lencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest, enc.mLacct.mWidthPadded));
 
-    std::vector<LogVoleRnsPoly> eval;
-    LOGVOLE_REQUIRE_TRUE(logVoleLencEval(ctx, enc.mLacct, x, params.mMu, params.mTau, params.mGadgetLogBase, eval));
+    std::vector<RnsPoly> eval;
+    LOGVOLE_REQUIRE_TRUE(lencEval(ctx, enc.mLacct, x, params.mMu, params.mTau, params.mGadgetLogBase, eval));
 
     LOGVOLE_REQUIRE_EQ(eval.size(), params.mMu);
     for (std::size_t i = 0; i < params.mMu; ++i)
     {
-        LogVoleRnsPoly r_mul_digest{};
-        LOGVOLE_REQUIRE_TRUE(logVoleRingMultiply(enc.mR[i], digest, ctx, r_mul_digest));
+        RnsPoly r_mul_digest{};
+        LOGVOLE_REQUIRE_TRUE(ringMultiply(enc.mR[i], digest, ctx, r_mul_digest));
 
-        LogVoleRnsPoly s_mul_x{};
-        LOGVOLE_REQUIRE_TRUE(logVoleRingMultiply(s[i], x[i], ctx, s_mul_x));
+        RnsPoly s_mul_x{};
+        LOGVOLE_REQUIRE_TRUE(ringMultiply(s[i], x[i], ctx, s_mul_x));
 
-        LogVoleRnsPoly expected{};
-        LOGVOLE_REQUIRE_TRUE(logVoleRingSub(r_mul_digest, s_mul_x, ctx, expected));
+        RnsPoly expected{};
+        LOGVOLE_REQUIRE_TRUE(ringSub(r_mul_digest, s_mul_x, ctx, expected));
 
         expect_poly_equal(eval[i], expected);
     }
@@ -149,17 +149,17 @@ void LogVole_LencOps_EvalRejectsMuMismatch(const oc::CLP&)
 {
     const auto params = make_params();
 
-    LogVoleRingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(logVoleMakeRingNttContext(params.mRing, ctx));
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x6666u);
     auto x = sample_batch(ctx, params.mMu, 0x7777u);
 
-    LogVoleLencEncodeOutput enc{};
-    LOGVOLE_REQUIRE_TRUE(logVoleLencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0x8888u, enc));
+    LencEncodeOutput enc{};
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0x8888u, enc));
 
-    std::vector<LogVoleRnsPoly> eval;
-    LOGVOLE_REQUIRE_FALSE(logVoleLencEval(
+    std::vector<RnsPoly> eval;
+    LOGVOLE_REQUIRE_FALSE(lencEval(
         ctx,
         enc.mLacct,
         x,

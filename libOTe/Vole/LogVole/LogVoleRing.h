@@ -7,150 +7,150 @@
 #include <memory>
 #include <vector>
 
-namespace osuCrypto
+namespace osuCrypto::LogVole
 {
-    struct LogVoleRingParams
+    struct RingParams
     {
         u32 mPolyModulusDegree = 0;
         std::vector<int> mCoeffModulusBits;
     };
 
-    struct LogVoleRnsPoly
+    struct RnsPoly
     {
         std::vector<u64> mCoeffs;
     };
 
-    struct LogVoleRingTensor
+    struct RingTensor
     {
         u32 mRows = 0;
         u32 mCols = 0;
-        std::vector<LogVoleRnsPoly> mPolys;
+        std::vector<RnsPoly> mPolys;
     };
 
-    struct LogVoleRingNttContext
+    struct RingNttContext
     {
-        LogVoleRingParams mParams;
+        RingParams mParams;
         std::vector<seal::Modulus> mModuli;
         std::shared_ptr<seal::SEALContext> mContext;
     };
 
-    inline u64 logVolePolyCoeffCount(const LogVoleRingParams& params)
+    inline u64 polyCoeffCount(const RingParams& params)
     {
         return static_cast<u64>(params.mPolyModulusDegree) * params.mCoeffModulusBits.size();
     }
 
-    inline u64 logVoleTensorSize(const LogVoleRingTensor& tensor)
+    inline u64 tensorSize(const RingTensor& tensor)
     {
         return static_cast<u64>(tensor.mRows) * tensor.mCols;
     }
 
-    inline u64 logVoleTensorIndex(const LogVoleRingTensor& tensor, u32 row, u32 col)
+    inline u64 tensorIndex(const RingTensor& tensor, u32 row, u32 col)
     {
         return static_cast<u64>(row) * tensor.mCols + col;
     }
 
-    bool logVoleValidateRingParams(const LogVoleRingParams& params);
-    bool logVoleValidateRingPolyShape(const LogVoleRnsPoly& poly, const LogVoleRingParams& params);
-    bool logVoleValidateRingBatchShape(const std::vector<LogVoleRnsPoly>& polys, const LogVoleRingParams& params);
-    bool logVoleMakeRingNttContext(const LogVoleRingParams& params, LogVoleRingNttContext& ctx);
+    bool validateRingParams(const RingParams& params);
+    bool validateRingPolyShape(const RnsPoly& poly, const RingParams& params);
+    bool validateRingBatchShape(const std::vector<RnsPoly>& polys, const RingParams& params);
+    bool makeRingNttContext(const RingParams& params, RingNttContext& ctx);
 
-    bool logVoleCanonicalizePoly(LogVoleRnsPoly& poly, const LogVoleRingNttContext& ctx);
-    bool logVoleForwardNtt(LogVoleRnsPoly& poly, const LogVoleRingNttContext& ctx);
-    bool logVoleInverseNtt(LogVoleRnsPoly& poly, const LogVoleRingNttContext& ctx);
+    bool canonicalizePoly(RnsPoly& poly, const RingNttContext& ctx);
+    bool forwardNtt(RnsPoly& poly, const RingNttContext& ctx);
+    bool inverseNtt(RnsPoly& poly, const RingNttContext& ctx);
 
-    bool logVoleDyadicMultiplyAddNtt(
-        const LogVoleRnsPoly& aNtt,
-        const LogVoleRnsPoly& bNtt,
-        const LogVoleRnsPoly& cNtt,
-        const LogVoleRingNttContext& ctx,
-        LogVoleRnsPoly& out);
+    bool dyadicMultiplyAddNtt(
+        const RnsPoly& aNtt,
+        const RnsPoly& bNtt,
+        const RnsPoly& cNtt,
+        const RingNttContext& ctx,
+        RnsPoly& out);
 
-    bool logVoleRingAdd(
-        const LogVoleRnsPoly& a,
-        const LogVoleRnsPoly& b,
-        const LogVoleRingNttContext& ctx,
-        LogVoleRnsPoly& out);
+    bool ringAdd(
+        const RnsPoly& a,
+        const RnsPoly& b,
+        const RingNttContext& ctx,
+        RnsPoly& out);
 
-    bool logVoleRingSub(
-        const LogVoleRnsPoly& a,
-        const LogVoleRnsPoly& b,
-        const LogVoleRingNttContext& ctx,
-        LogVoleRnsPoly& out);
+    bool ringSub(
+        const RnsPoly& a,
+        const RnsPoly& b,
+        const RingNttContext& ctx,
+        RnsPoly& out);
 
-    bool logVoleRingMultiply(
-        const LogVoleRnsPoly& a,
-        const LogVoleRnsPoly& b,
-        const LogVoleRingNttContext& ctx,
-        LogVoleRnsPoly& out);
+    bool ringMultiply(
+        const RnsPoly& a,
+        const RnsPoly& b,
+        const RingNttContext& ctx,
+        RnsPoly& out);
 
-    bool logVoleRingMultiplyScalar(
-        const LogVoleRnsPoly& a,
+    bool ringMultiplyScalar(
+        const RnsPoly& a,
         u64 scalar,
-        const LogVoleRingNttContext& ctx,
-        LogVoleRnsPoly& out);
+        const RingNttContext& ctx,
+        RnsPoly& out);
 
-    bool logVoleGadgetDecompose(
-        const LogVoleRnsPoly& poly,
+    bool gadgetDecompose(
+        const RnsPoly& poly,
         u32 base,
         u32 tau,
-        const LogVoleRingNttContext& ctx,
-        std::vector<LogVoleRnsPoly>& out);
+        const RingNttContext& ctx,
+        std::vector<RnsPoly>& out);
 
-    bool logVoleGadgetRecompose(
-        const std::vector<LogVoleRnsPoly>& digits,
+    bool gadgetRecompose(
+        const std::vector<RnsPoly>& digits,
         u32 base,
-        const LogVoleRingNttContext& ctx,
-        LogVoleRnsPoly& out);
+        const RingNttContext& ctx,
+        RnsPoly& out);
 
-    bool logVoleGadgetDecomposeBits(
-        const LogVoleRnsPoly& poly,
+    bool gadgetDecomposeBits(
+        const RnsPoly& poly,
         u32 digitBits,
         u32 levels,
-        const LogVoleRingNttContext& ctx,
-        std::vector<LogVoleRnsPoly>& out);
+        const RingNttContext& ctx,
+        std::vector<RnsPoly>& out);
 
-    bool logVoleGadgetRecomposeBits(
-        const std::vector<LogVoleRnsPoly>& digits,
+    bool gadgetRecomposeBits(
+        const std::vector<RnsPoly>& digits,
         u32 digitBits,
-        const LogVoleRingNttContext& ctx,
-        LogVoleRnsPoly& out);
+        const RingNttContext& ctx,
+        RnsPoly& out);
 
-    std::vector<u64> logVolePackRingBatch(const std::vector<LogVoleRnsPoly>& polys);
-    bool logVoleUnpackRingBatch(
+    std::vector<u64> packRingBatch(const std::vector<RnsPoly>& polys);
+    bool unpackRingBatch(
         u32 count,
         u32 polyModulusDegree,
         u32 coeffModulusCount,
         const std::vector<u64>& flat,
-        std::vector<LogVoleRnsPoly>& out);
+        std::vector<RnsPoly>& out);
 
-    std::vector<u64> logVolePackRingTensor(const LogVoleRingTensor& tensor);
-    bool logVoleUnpackRingTensor(
+    std::vector<u64> packRingTensor(const RingTensor& tensor);
+    bool unpackRingTensor(
         u32 rows,
         u32 cols,
         u32 polyModulusDegree,
         u32 coeffModulusCount,
         const std::vector<u64>& flat,
-        LogVoleRingTensor& out);
+        RingTensor& out);
 
-    LogVoleRnsPoly logVoleDeriveUniformPolyFromNonce(
-        const LogVoleRingNttContext& ctx,
+    RnsPoly deriveUniformPolyFromNonce(
+        const RingNttContext& ctx,
         u64 nonce,
         u64 domainTag,
         u32 index);
 
-    bool logVoleAddGaussianNoise(
-        LogVoleRnsPoly& poly,
+    bool addGaussianNoise(
+        RnsPoly& poly,
         double noiseStandardDeviation,
         double noiseMaxDeviation,
         u64 seed,
         u64 streamId,
-        const LogVoleRingNttContext& ctx);
+        const RingNttContext& ctx);
 
-    bool logVoleAddPolyError(
-        LogVoleRnsPoly& poly,
+    bool addPolyError(
+        RnsPoly& poly,
         double noiseStandardDeviation,
         double noiseMaxDeviation,
         u64 seed,
         u64 streamId,
-        const LogVoleRingNttContext& ctx);
+        const RingNttContext& ctx);
 }

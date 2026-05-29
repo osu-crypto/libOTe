@@ -4,22 +4,22 @@
 #include <stdexcept>
 #include <utility>
 
-namespace osuCrypto
+namespace osuCrypto::LogVole
 {
     namespace
     {
-        void logVoleAppendU8(LogVoleBuffer& buffer, u8 value)
+        void appendU8(Buffer& buffer, u8 value)
         {
             buffer.push_back(value);
         }
 
-        void logVoleAppendU16(LogVoleBuffer& buffer, u16 value)
+        void appendU16(Buffer& buffer, u16 value)
         {
             buffer.push_back(static_cast<u8>(value & 0xFFu));
             buffer.push_back(static_cast<u8>((value >> 8u) & 0xFFu));
         }
 
-        void logVoleAppendU32(LogVoleBuffer& buffer, u32 value)
+        void appendU32(Buffer& buffer, u32 value)
         {
             for (u64 i = 0; i < sizeof(u32); ++i)
             {
@@ -27,7 +27,7 @@ namespace osuCrypto
             }
         }
 
-        void logVoleAppendU64(LogVoleBuffer& buffer, u64 value)
+        void appendU64(Buffer& buffer, u64 value)
         {
             for (u64 i = 0; i < sizeof(u64); ++i)
             {
@@ -35,7 +35,7 @@ namespace osuCrypto
             }
         }
 
-        bool logVoleReadU8(std::span<const u8> payload, u64& offset, u8& value)
+        bool readU8(std::span<const u8> payload, u64& offset, u8& value)
         {
             if (offset + sizeof(u8) > payload.size())
                 return false;
@@ -45,7 +45,7 @@ namespace osuCrypto
             return true;
         }
 
-        bool logVoleReadU16(std::span<const u8> payload, u64& offset, u16& value)
+        bool readU16(std::span<const u8> payload, u64& offset, u16& value)
         {
             if (offset + sizeof(u16) > payload.size())
                 return false;
@@ -56,7 +56,7 @@ namespace osuCrypto
             return true;
         }
 
-        bool logVoleReadU32(std::span<const u8> payload, u64& offset, u32& value)
+        bool readU32(std::span<const u8> payload, u64& offset, u32& value)
         {
             if (offset + sizeof(u32) > payload.size())
                 return false;
@@ -70,7 +70,7 @@ namespace osuCrypto
             return true;
         }
 
-        bool logVoleReadU64(std::span<const u8> payload, u64& offset, u64& value)
+        bool readU64(std::span<const u8> payload, u64& offset, u64& value)
         {
             if (offset + sizeof(u64) > payload.size())
                 return false;
@@ -85,7 +85,7 @@ namespace osuCrypto
         }
 
         template<typename T>
-        u32 logVoleCheckedVectorSize(const std::vector<T>& values)
+        u32 checkedVectorSize(const std::vector<T>& values)
         {
             if (values.size() > std::numeric_limits<u32>::max())
                 throw std::length_error("LogVole vector is too large to encode");
@@ -93,28 +93,28 @@ namespace osuCrypto
             return static_cast<u32>(values.size());
         }
 
-        void logVoleAppendU16Vector(LogVoleBuffer& buffer, const std::vector<u16>& values)
+        void appendU16Vector(Buffer& buffer, const std::vector<u16>& values)
         {
-            logVoleAppendU32(buffer, logVoleCheckedVectorSize(values));
+            appendU32(buffer, checkedVectorSize(values));
             for (auto value : values)
             {
-                logVoleAppendU16(buffer, value);
+                appendU16(buffer, value);
             }
         }
 
-        void logVoleAppendU64Vector(LogVoleBuffer& buffer, const std::vector<u64>& values)
+        void appendU64Vector(Buffer& buffer, const std::vector<u64>& values)
         {
-            logVoleAppendU32(buffer, logVoleCheckedVectorSize(values));
+            appendU32(buffer, checkedVectorSize(values));
             for (auto value : values)
             {
-                logVoleAppendU64(buffer, value);
+                appendU64(buffer, value);
             }
         }
 
-        bool logVoleReadU16Vector(std::span<const u8> payload, u64& offset, std::vector<u16>& values)
+        bool readU16Vector(std::span<const u8> payload, u64& offset, std::vector<u16>& values)
         {
             u32 count = 0;
-            if (!logVoleReadU32(payload, offset, count))
+            if (!readU32(payload, offset, count))
                 return false;
 
             if (static_cast<u64>(count) > (payload.size() - offset) / sizeof(u16))
@@ -125,7 +125,7 @@ namespace osuCrypto
             for (u32 i = 0; i < count; ++i)
             {
                 u16 value = 0;
-                if (!logVoleReadU16(payload, offset, value))
+                if (!readU16(payload, offset, value))
                     return false;
                 values.push_back(value);
             }
@@ -133,10 +133,10 @@ namespace osuCrypto
             return true;
         }
 
-        bool logVoleReadU64Vector(std::span<const u8> payload, u64& offset, std::vector<u64>& values)
+        bool readU64Vector(std::span<const u8> payload, u64& offset, std::vector<u64>& values)
         {
             u32 count = 0;
-            if (!logVoleReadU32(payload, offset, count))
+            if (!readU32(payload, offset, count))
                 return false;
 
             if (static_cast<u64>(count) > (payload.size() - offset) / sizeof(u64))
@@ -147,7 +147,7 @@ namespace osuCrypto
             for (u32 i = 0; i < count; ++i)
             {
                 u64 value = 0;
-                if (!logVoleReadU64(payload, offset, value))
+                if (!readU64(payload, offset, value))
                     return false;
                 values.push_back(value);
             }
@@ -155,23 +155,23 @@ namespace osuCrypto
             return true;
         }
 
-        LogVoleBuffer logVoleEncodeKeyDerive(
+        Buffer encodeKeyDerive(
             u32 polyModulusDegree,
             u32 coeffModulusCount,
             u32 tau,
             const std::vector<u64>& coeffs)
         {
-            LogVoleBuffer out;
+            Buffer out;
             out.reserve(4 * sizeof(u32) + coeffs.size() * sizeof(u64));
 
-            logVoleAppendU32(out, polyModulusDegree);
-            logVoleAppendU32(out, coeffModulusCount);
-            logVoleAppendU32(out, tau);
-            logVoleAppendU64Vector(out, coeffs);
+            appendU32(out, polyModulusDegree);
+            appendU32(out, coeffModulusCount);
+            appendU32(out, tau);
+            appendU64Vector(out, coeffs);
             return out;
         }
 
-        bool logVoleDecodeKeyDerive(
+        bool decodeKeyDerive(
             std::span<const u8> payload,
             u32& polyModulusDegree,
             u32& coeffModulusCount,
@@ -179,10 +179,10 @@ namespace osuCrypto
             std::vector<u64>& coeffs)
         {
             u64 offset = 0;
-            if (!logVoleReadU32(payload, offset, polyModulusDegree) ||
-                !logVoleReadU32(payload, offset, coeffModulusCount) ||
-                !logVoleReadU32(payload, offset, tau) ||
-                !logVoleReadU64Vector(payload, offset, coeffs))
+            if (!readU32(payload, offset, polyModulusDegree) ||
+                !readU32(payload, offset, coeffModulusCount) ||
+                !readU32(payload, offset, tau) ||
+                !readU64Vector(payload, offset, coeffs))
             {
                 return false;
             }
@@ -191,55 +191,55 @@ namespace osuCrypto
         }
     }
 
-    LogVoleBuffer logVoleEncode(const LogVoleKeyDeriveRequest& message)
+    Buffer encode(const KeyDeriveRequest& message)
     {
-        return logVoleEncodeKeyDerive(
+        return encodeKeyDerive(
             message.mPolyModulusDegree,
             message.mCoeffModulusCount,
             message.mTau,
             message.mDCoeffs);
     }
 
-    LogVoleBuffer logVoleEncode(const LogVoleKeyDeriveResponse& message)
+    Buffer encode(const KeyDeriveResponse& message)
     {
-        return logVoleEncodeKeyDerive(
+        return encodeKeyDerive(
             message.mPolyModulusDegree,
             message.mCoeffModulusCount,
             message.mTau,
             message.mMNttCoeffs);
     }
 
-    LogVoleBuffer logVoleEncode(const LogVoleShrinkExpandOfflineMessage& message)
+    Buffer encode(const ShrinkExpandOfflineMessage& message)
     {
-        LogVoleBuffer out;
+        Buffer out;
 
-        logVoleAppendU32(out, message.mPolyModulusDegree);
-        logVoleAppendU16Vector(out, message.mCoeffModulusBits);
+        appendU32(out, message.mPolyModulusDegree);
+        appendU16Vector(out, message.mCoeffModulusBits);
 
-        logVoleAppendU32(out, message.mPlaintextModulusBits);
-        logVoleAppendU32(out, message.mAlpha);
-        logVoleAppendU32(out, message.mMu);
-        logVoleAppendU32(out, message.mTau);
-        logVoleAppendU32(out, message.mGadgetLogBase);
-        logVoleAppendU8(out, message.mMode);
-        logVoleAppendU64(out, message.mMetadataFingerprint);
+        appendU32(out, message.mPlaintextModulusBits);
+        appendU32(out, message.mAlpha);
+        appendU32(out, message.mMu);
+        appendU32(out, message.mTau);
+        appendU32(out, message.mGadgetLogBase);
+        appendU8(out, message.mMode);
+        appendU64(out, message.mMetadataFingerprint);
 
-        logVoleAppendU32(out, message.mCt1Rows);
-        logVoleAppendU32(out, message.mCt1Cols);
-        logVoleAppendU64Vector(out, message.mCt1Coeffs);
+        appendU32(out, message.mCt1Rows);
+        appendU32(out, message.mCt1Cols);
+        appendU64Vector(out, message.mCt1Coeffs);
 
-        logVoleAppendU32(out, message.mLacctWidthPadded);
-        logVoleAppendU32(out, message.mLacctLevels);
-        logVoleAppendU32(out, message.mLacctCtRows);
-        logVoleAppendU32(out, message.mLacctCtCols);
-        logVoleAppendU64Vector(out, message.mLacctCtCoeffs);
+        appendU32(out, message.mLacctWidthPadded);
+        appendU32(out, message.mLacctLevels);
+        appendU32(out, message.mLacctCtRows);
+        appendU32(out, message.mLacctCtCols);
+        appendU64Vector(out, message.mLacctCtCoeffs);
 
         return out;
     }
 
-    bool logVoleDecode(std::span<const u8> payload, LogVoleKeyDeriveRequest& message)
+    bool decode(std::span<const u8> payload, KeyDeriveRequest& message)
     {
-        return logVoleDecodeKeyDerive(
+        return decodeKeyDerive(
             payload,
             message.mPolyModulusDegree,
             message.mCoeffModulusCount,
@@ -247,9 +247,9 @@ namespace osuCrypto
             message.mDCoeffs);
     }
 
-    bool logVoleDecode(std::span<const u8> payload, LogVoleKeyDeriveResponse& message)
+    bool decode(std::span<const u8> payload, KeyDeriveResponse& message)
     {
-        return logVoleDecodeKeyDerive(
+        return decodeKeyDerive(
             payload,
             message.mPolyModulusDegree,
             message.mCoeffModulusCount,
@@ -257,27 +257,27 @@ namespace osuCrypto
             message.mMNttCoeffs);
     }
 
-    bool logVoleDecode(std::span<const u8> payload, LogVoleShrinkExpandOfflineMessage& message)
+    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message)
     {
         u64 offset = 0;
 
-        if (!logVoleReadU32(payload, offset, message.mPolyModulusDegree) ||
-            !logVoleReadU16Vector(payload, offset, message.mCoeffModulusBits) ||
-            !logVoleReadU32(payload, offset, message.mPlaintextModulusBits) ||
-            !logVoleReadU32(payload, offset, message.mAlpha) ||
-            !logVoleReadU32(payload, offset, message.mMu) ||
-            !logVoleReadU32(payload, offset, message.mTau) ||
-            !logVoleReadU32(payload, offset, message.mGadgetLogBase) ||
-            !logVoleReadU8(payload, offset, message.mMode) ||
-            !logVoleReadU64(payload, offset, message.mMetadataFingerprint) ||
-            !logVoleReadU32(payload, offset, message.mCt1Rows) ||
-            !logVoleReadU32(payload, offset, message.mCt1Cols) ||
-            !logVoleReadU64Vector(payload, offset, message.mCt1Coeffs) ||
-            !logVoleReadU32(payload, offset, message.mLacctWidthPadded) ||
-            !logVoleReadU32(payload, offset, message.mLacctLevels) ||
-            !logVoleReadU32(payload, offset, message.mLacctCtRows) ||
-            !logVoleReadU32(payload, offset, message.mLacctCtCols) ||
-            !logVoleReadU64Vector(payload, offset, message.mLacctCtCoeffs))
+        if (!readU32(payload, offset, message.mPolyModulusDegree) ||
+            !readU16Vector(payload, offset, message.mCoeffModulusBits) ||
+            !readU32(payload, offset, message.mPlaintextModulusBits) ||
+            !readU32(payload, offset, message.mAlpha) ||
+            !readU32(payload, offset, message.mMu) ||
+            !readU32(payload, offset, message.mTau) ||
+            !readU32(payload, offset, message.mGadgetLogBase) ||
+            !readU8(payload, offset, message.mMode) ||
+            !readU64(payload, offset, message.mMetadataFingerprint) ||
+            !readU32(payload, offset, message.mCt1Rows) ||
+            !readU32(payload, offset, message.mCt1Cols) ||
+            !readU64Vector(payload, offset, message.mCt1Coeffs) ||
+            !readU32(payload, offset, message.mLacctWidthPadded) ||
+            !readU32(payload, offset, message.mLacctLevels) ||
+            !readU32(payload, offset, message.mLacctCtRows) ||
+            !readU32(payload, offset, message.mLacctCtCols) ||
+            !readU64Vector(payload, offset, message.mLacctCtCoeffs))
         {
             return false;
         }

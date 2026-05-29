@@ -4,19 +4,19 @@
 #include <span>
 #include <vector>
 
-using namespace osuCrypto;
+using namespace osuCrypto::LogVole;
 
 namespace
 {
     template<typename Message>
-    bool decodeMessage(const LogVoleBuffer& payload, Message& message)
+    bool decodeMessage(const Buffer& payload, Message& message)
     {
-        return logVoleDecode(std::span<const u8>(payload.data(), payload.size()), message);
+        return decode(std::span<const osuCrypto::u8>(payload.data(), payload.size()), message);
     }
 
-    LogVoleKeyDeriveRequest makeKeyDeriveRequest()
+    KeyDeriveRequest makeKeyDeriveRequest()
     {
-        LogVoleKeyDeriveRequest message{};
+        KeyDeriveRequest message{};
         message.mPolyModulusDegree = 16384;
         message.mCoeffModulusCount = 7;
         message.mTau = 3;
@@ -24,9 +24,9 @@ namespace
         return message;
     }
 
-    LogVoleKeyDeriveResponse makeKeyDeriveResponse()
+    KeyDeriveResponse makeKeyDeriveResponse()
     {
-        LogVoleKeyDeriveResponse message{};
+        KeyDeriveResponse message{};
         message.mPolyModulusDegree = 8192;
         message.mCoeffModulusCount = 4;
         message.mTau = 2;
@@ -34,9 +34,9 @@ namespace
         return message;
     }
 
-    LogVoleShrinkExpandOfflineMessage makeShrinkExpandOfflineMessage()
+    ShrinkExpandOfflineMessage makeShrinkExpandOfflineMessage()
     {
-        LogVoleShrinkExpandOfflineMessage message{};
+        ShrinkExpandOfflineMessage message{};
         message.mPolyModulusDegree = 16384;
         message.mCoeffModulusBits = { 54, 54, 50 };
         message.mPlaintextModulusBits = 20;
@@ -61,9 +61,9 @@ namespace
 void LogVole_Encoding_KeyDeriveRequestRoundTrip(const oc::CLP&)
 {
     const auto message = makeKeyDeriveRequest();
-    const auto encoded = logVoleEncode(message);
+    const auto encoded = encode(message);
 
-    LogVoleKeyDeriveRequest decoded{};
+    KeyDeriveRequest decoded{};
     LOGVOLE_REQUIRE_TRUE(decodeMessage(encoded, decoded));
     LOGVOLE_EXPECT_EQ(decoded.mPolyModulusDegree, message.mPolyModulusDegree);
     LOGVOLE_EXPECT_EQ(decoded.mCoeffModulusCount, message.mCoeffModulusCount);
@@ -74,9 +74,9 @@ void LogVole_Encoding_KeyDeriveRequestRoundTrip(const oc::CLP&)
 void LogVole_Encoding_KeyDeriveResponseRoundTrip(const oc::CLP&)
 {
     const auto message = makeKeyDeriveResponse();
-    const auto encoded = logVoleEncode(message);
+    const auto encoded = encode(message);
 
-    LogVoleKeyDeriveResponse decoded{};
+    KeyDeriveResponse decoded{};
     LOGVOLE_REQUIRE_TRUE(decodeMessage(encoded, decoded));
     LOGVOLE_EXPECT_EQ(decoded.mPolyModulusDegree, message.mPolyModulusDegree);
     LOGVOLE_EXPECT_EQ(decoded.mCoeffModulusCount, message.mCoeffModulusCount);
@@ -87,9 +87,9 @@ void LogVole_Encoding_KeyDeriveResponseRoundTrip(const oc::CLP&)
 void LogVole_Encoding_ShrinkExpandOfflineRoundTrip(const oc::CLP&)
 {
     const auto message = makeShrinkExpandOfflineMessage();
-    const auto encoded = logVoleEncode(message);
+    const auto encoded = encode(message);
 
-    LogVoleShrinkExpandOfflineMessage decoded{};
+    ShrinkExpandOfflineMessage decoded{};
     LOGVOLE_REQUIRE_TRUE(decodeMessage(encoded, decoded));
     LOGVOLE_EXPECT_EQ(decoded.mPolyModulusDegree, message.mPolyModulusDegree);
     LOGVOLE_EXPECT_EQ(decoded.mCoeffModulusBits, message.mCoeffModulusBits);
@@ -112,21 +112,21 @@ void LogVole_Encoding_ShrinkExpandOfflineRoundTrip(const oc::CLP&)
 
 void LogVole_Encoding_MalformedPayloadRejected(const oc::CLP&)
 {
-    auto encoded = logVoleEncode(makeKeyDeriveRequest());
+    auto encoded = encode(makeKeyDeriveRequest());
     LOGVOLE_REQUIRE_FALSE(encoded.empty());
 
     auto truncated = encoded;
     truncated.pop_back();
-    LogVoleKeyDeriveRequest decoded_request{};
+    KeyDeriveRequest decoded_request{};
     LOGVOLE_EXPECT_FALSE(decodeMessage(truncated, decoded_request));
 
     auto with_trailing = encoded;
     with_trailing.push_back(0x42);
     LOGVOLE_EXPECT_FALSE(decodeMessage(with_trailing, decoded_request));
 
-    auto offline = logVoleEncode(makeShrinkExpandOfflineMessage());
+    auto offline = encode(makeShrinkExpandOfflineMessage());
     LOGVOLE_REQUIRE_FALSE(offline.empty());
     offline.resize(offline.size() - 1);
-    LogVoleShrinkExpandOfflineMessage decoded_offline{};
+    ShrinkExpandOfflineMessage decoded_offline{};
     LOGVOLE_EXPECT_FALSE(decodeMessage(offline, decoded_offline));
 }

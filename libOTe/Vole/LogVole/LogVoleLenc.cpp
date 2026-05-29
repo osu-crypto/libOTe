@@ -5,11 +5,11 @@
 #include <cstddef>
 #include <limits>
 
-namespace osuCrypto
+namespace osuCrypto::LogVole
 {
     namespace
     {
-        u32 logVoleNextPowerOfTwo(u32 value)
+        u32 nextPowerOfTwo(u32 value)
         {
             u32 out = 1u;
             while (out < value)
@@ -19,7 +19,7 @@ namespace osuCrypto
             return out;
         }
 
-        u32 logVoleIlog2Exact(u32 powerOfTwo)
+        u32 ilog2Exact(u32 powerOfTwo)
         {
             u32 out = 0u;
             while ((1u << out) < powerOfTwo)
@@ -29,7 +29,7 @@ namespace osuCrypto
             return out;
         }
 
-        u64 logVolePow2Mod(u64 exp, u64 mod)
+        u64 pow2Mod(u64 exp, u64 mod)
         {
             seal::Modulus modulus(mod);
             u64 result = 1u;
@@ -47,54 +47,54 @@ namespace osuCrypto
             return result;
         }
 
-        bool logVoleZeroPoly(const LogVoleRingNttContext& ctx, LogVoleRnsPoly& out)
+        bool zeroPoly(const RingNttContext& ctx, RnsPoly& out)
         {
-            out.mCoeffs.assign(logVolePolyCoeffCount(ctx.mParams), 0u);
+            out.mCoeffs.assign(polyCoeffCount(ctx.mParams), 0u);
             return true;
         }
 
-        bool logVoleNegatePoly(const LogVoleRingNttContext& ctx, const LogVoleRnsPoly& poly, LogVoleRnsPoly& out)
+        bool negatePoly(const RingNttContext& ctx, const RnsPoly& poly, RnsPoly& out)
         {
-            LogVoleRnsPoly zero{};
-            logVoleZeroPoly(ctx, zero);
-            return logVoleRingSub(zero, poly, ctx, out);
+            RnsPoly zero{};
+            zeroPoly(ctx, zero);
+            return ringSub(zero, poly, ctx, out);
         }
 
-        std::vector<LogVoleRnsPoly> logVolePadBatch(
-            const LogVoleRingNttContext& ctx,
-            const std::vector<LogVoleRnsPoly>& in,
+        std::vector<RnsPoly> padBatch(
+            const RingNttContext& ctx,
+            const std::vector<RnsPoly>& in,
             u32 widthPadded)
         {
-            std::vector<LogVoleRnsPoly> out = in;
+            std::vector<RnsPoly> out = in;
             out.reserve(widthPadded);
             for (u32 i = static_cast<u32>(out.size()); i < widthPadded; ++i)
             {
-                LogVoleRnsPoly zero{};
-                zero.mCoeffs.assign(logVolePolyCoeffCount(ctx.mParams), 0u);
+                RnsPoly zero{};
+                zero.mCoeffs.assign(polyCoeffCount(ctx.mParams), 0u);
                 out.push_back(std::move(zero));
             }
             return out;
         }
 
-        std::vector<LogVoleRnsPoly> logVoleDeriveLencPublicB(const LogVoleRingNttContext& ctx, u32 tau)
+        std::vector<RnsPoly> deriveLencPublicB(const RingNttContext& ctx, u32 tau)
         {
-            std::vector<LogVoleRnsPoly> b;
+            std::vector<RnsPoly> b;
             b.reserve(2u * tau);
             for (u32 i = 0; i < 2u * tau; ++i)
             {
-                b.push_back(logVoleDeriveUniformPolyFromNonce(ctx, 0xC0DEC0DEull, 0x1EEC0DEu, i));
+                b.push_back(deriveUniformPolyFromNonce(ctx, 0xC0DEC0DEull, 0x1EEC0DEu, i));
             }
             return b;
         }
 
-        bool logVoleMultiplyByGPower(
-            const LogVoleRingNttContext& ctx,
-            const LogVoleRnsPoly& poly,
+        bool multiplyByGPower(
+            const RingNttContext& ctx,
+            const RnsPoly& poly,
             u32 gadgetLogBase,
             u32 power,
-            LogVoleRnsPoly& out)
+            RnsPoly& out)
         {
-            if (!logVoleValidateRingPolyShape(poly, ctx.mParams))
+            if (!validateRingPolyShape(poly, ctx.mParams))
             {
                 return false;
             }
@@ -105,13 +105,13 @@ namespace osuCrypto
                 return false;
             }
 
-            LogVoleRnsPoly next = poly;
+            RnsPoly next = poly;
             const std::size_t n = ctx.mParams.mPolyModulusDegree;
             for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
             {
                 const auto& modulus = ctx.mModuli[modIdx];
                 const u64 mod = modulus.value();
-                const u64 factor = logVolePow2Mod(shift, mod);
+                const u64 factor = pow2Mod(shift, mod);
                 const std::size_t offset = modIdx * n;
                 for (std::size_t i = 0; i < n; ++i)
                 {
@@ -124,28 +124,28 @@ namespace osuCrypto
             return true;
         }
 
-        bool logVoleInnerProduct(
-            const LogVoleRingNttContext& ctx,
-            const std::vector<LogVoleRnsPoly>& left,
-            const std::vector<LogVoleRnsPoly>& right,
-            LogVoleRnsPoly& out)
+        bool innerProduct(
+            const RingNttContext& ctx,
+            const std::vector<RnsPoly>& left,
+            const std::vector<RnsPoly>& right,
+            RnsPoly& out)
         {
             if (left.size() != right.size() || left.empty() ||
-                !logVoleValidateRingBatchShape(left, ctx.mParams) ||
-                !logVoleValidateRingBatchShape(right, ctx.mParams))
+                !validateRingBatchShape(left, ctx.mParams) ||
+                !validateRingBatchShape(right, ctx.mParams))
             {
                 return false;
             }
 
-            LogVoleRnsPoly acc{};
-            logVoleZeroPoly(ctx, acc);
+            RnsPoly acc{};
+            zeroPoly(ctx, acc);
 
             for (std::size_t i = 0; i < left.size(); ++i)
             {
-                LogVoleRnsPoly mul{};
-                LogVoleRnsPoly next{};
-                if (!logVoleRingMultiply(left[i], right[i], ctx, mul) ||
-                    !logVoleRingAdd(acc, mul, ctx, next))
+                RnsPoly mul{};
+                RnsPoly next{};
+                if (!ringMultiply(left[i], right[i], ctx, mul) ||
+                    !ringAdd(acc, mul, ctx, next))
                 {
                     return false;
                 }
@@ -156,23 +156,23 @@ namespace osuCrypto
             return true;
         }
 
-        struct LogVoleDigestTree
+        struct DigestTree
         {
             u32 mWidthPadded = 0;
             u32 mLevels = 0;
-            LogVoleRnsPoly mDigest;
-            std::vector<std::vector<LogVoleRnsPoly>> mNodeDecomp;
+            RnsPoly mDigest;
+            std::vector<std::vector<RnsPoly>> mNodeDecomp;
         };
 
-        bool logVoleBuildDigestTree(
-            const LogVoleRingNttContext& ctx,
-            const std::vector<LogVoleRnsPoly>& x,
+        bool buildDigestTree(
+            const RingNttContext& ctx,
+            const std::vector<RnsPoly>& x,
             u32 tau,
             u32 gadgetLogBase,
             u32 requestedWidthPadded,
-            LogVoleDigestTree& out)
+            DigestTree& out)
         {
-            if (x.empty() || tau == 0u || !logVoleValidateRingBatchShape(x, ctx.mParams))
+            if (x.empty() || tau == 0u || !validateRingBatchShape(x, ctx.mParams))
             {
                 return false;
             }
@@ -180,7 +180,7 @@ namespace osuCrypto
             u32 width = requestedWidthPadded;
             if (width == 0u)
             {
-                width = logVoleNextPowerOfTwo(static_cast<u32>(x.size()));
+                width = nextPowerOfTwo(static_cast<u32>(x.size()));
             }
 
             if (width < x.size() || (width & (width - 1u)) != 0u)
@@ -188,12 +188,12 @@ namespace osuCrypto
                 return false;
             }
 
-            const u32 levels = logVoleIlog2Exact(width);
+            const u32 levels = ilog2Exact(width);
             const u32 nodeCount = (2u * width) - 1u;
-            const auto b = logVoleDeriveLencPublicB(ctx, tau);
-            auto xPad = logVolePadBatch(ctx, x, width);
+            const auto b = deriveLencPublicB(ctx, tau);
+            auto xPad = padBatch(ctx, x, width);
 
-            LogVoleDigestTree tree{};
+            DigestTree tree{};
             tree.mWidthPadded = width;
             tree.mLevels = levels;
             tree.mNodeDecomp.resize(nodeCount);
@@ -201,7 +201,7 @@ namespace osuCrypto
             for (u32 leaf = 0; leaf < width; ++leaf)
             {
                 const u32 node = (width - 1u) + leaf;
-                if (!logVoleGadgetDecomposeBits(xPad[leaf], gadgetLogBase, tau, ctx, tree.mNodeDecomp[node]))
+                if (!gadgetDecomposeBits(xPad[leaf], gadgetLogBase, tau, ctx, tree.mNodeDecomp[node]))
                 {
                     return false;
                 }
@@ -213,7 +213,7 @@ namespace osuCrypto
                 const u32 left = (2u * p) + 1u;
                 const u32 right = left + 1u;
 
-                std::vector<LogVoleRnsPoly> pair;
+                std::vector<RnsPoly> pair;
                 pair.reserve(2u * tau);
                 for (u32 i = 0; i < tau; ++i)
                 {
@@ -224,10 +224,10 @@ namespace osuCrypto
                     pair.push_back(tree.mNodeDecomp[right][i]);
                 }
 
-                LogVoleRnsPoly dot{};
-                LogVoleRnsPoly nodeValue{};
-                if (!logVoleInnerProduct(ctx, b, pair, dot) ||
-                    !logVoleNegatePoly(ctx, dot, nodeValue))
+                RnsPoly dot{};
+                RnsPoly nodeValue{};
+                if (!innerProduct(ctx, b, pair, dot) ||
+                    !negatePoly(ctx, dot, nodeValue))
                 {
                     return false;
                 }
@@ -236,7 +236,7 @@ namespace osuCrypto
                 {
                     tree.mDigest = std::move(nodeValue);
                 }
-                else if (!logVoleGadgetDecomposeBits(nodeValue, gadgetLogBase, tau, ctx, tree.mNodeDecomp[p]))
+                else if (!gadgetDecomposeBits(nodeValue, gadgetLogBase, tau, ctx, tree.mNodeDecomp[p]))
                 {
                     return false;
                 }
@@ -246,55 +246,55 @@ namespace osuCrypto
             return true;
         }
 
-        std::size_t logVoleCtRowIndex(u32 level, u32 leaf, u32 width)
+        std::size_t ctRowIndex(u32 level, u32 leaf, u32 width)
         {
             return static_cast<std::size_t>(level) * width + leaf;
         }
 
-        bool logVoleValidateKeyDeriveSenderInput(const LogVoleKeyDeriveSenderInput& input)
+        bool validateKeyDeriveSenderInput(const KeyDeriveSenderInput& input)
         {
-            return logVoleValidateRingParams(input.mParams) &&
+            return validateRingParams(input.mParams) &&
                    !input.mSk1.empty() &&
                    input.mSk1.size() == input.mSk2.size() &&
-                   logVoleValidateRingBatchShape(input.mSk1, input.mParams) &&
-                   logVoleValidateRingBatchShape(input.mSk2, input.mParams);
+                   validateRingBatchShape(input.mSk1, input.mParams) &&
+                   validateRingBatchShape(input.mSk2, input.mParams);
         }
 
-        bool logVoleValidateKeyDeriveReceiverInput(const LogVoleKeyDeriveReceiverInput& input)
+        bool validateKeyDeriveReceiverInput(const KeyDeriveReceiverInput& input)
         {
-            return logVoleValidateRingParams(input.mParams) &&
+            return validateRingParams(input.mParams) &&
                    !input.mD.empty() &&
-                   logVoleValidateRingBatchShape(input.mD, input.mParams);
+                   validateRingBatchShape(input.mD, input.mParams);
         }
     }
 
-    bool logVolePrepareKeyDeriveRequest(
-        const LogVoleKeyDeriveReceiverInput& input,
-        LogVoleKeyDeriveRequest& out)
+    bool prepareKeyDeriveRequest(
+        const KeyDeriveReceiverInput& input,
+        KeyDeriveRequest& out)
     {
-        if (!logVoleValidateKeyDeriveReceiverInput(input) ||
+        if (!validateKeyDeriveReceiverInput(input) ||
             input.mD.size() > static_cast<std::size_t>(std::numeric_limits<u32>::max()))
         {
             return false;
         }
 
-        LogVoleKeyDeriveRequest next{};
+        KeyDeriveRequest next{};
         next.mPolyModulusDegree = input.mParams.mPolyModulusDegree;
         next.mCoeffModulusCount = static_cast<u32>(input.mParams.mCoeffModulusBits.size());
         next.mTau = static_cast<u32>(input.mD.size());
-        next.mDCoeffs = logVolePackRingBatch(input.mD);
+        next.mDCoeffs = packRingBatch(input.mD);
 
         out = std::move(next);
         return true;
     }
 
-    bool logVoleProcessKeyDeriveRequest(
-        const LogVoleKeyDeriveSenderInput& input,
-        const LogVoleKeyDeriveRequest& request,
-        LogVoleKeyDeriveResponse& response,
-        LogVoleKeyDeriveSenderOutput& output)
+    bool processKeyDeriveRequest(
+        const KeyDeriveSenderInput& input,
+        const KeyDeriveRequest& request,
+        KeyDeriveResponse& response,
+        KeyDeriveSenderOutput& output)
     {
-        if (!logVoleValidateKeyDeriveSenderInput(input))
+        if (!validateKeyDeriveSenderInput(input))
         {
             return false;
         }
@@ -307,8 +307,8 @@ namespace osuCrypto
             return false;
         }
 
-        std::vector<LogVoleRnsPoly> dBatch;
-        if (!logVoleUnpackRingBatch(
+        std::vector<RnsPoly> dBatch;
+        if (!unpackRingBatch(
                 request.mTau,
                 request.mPolyModulusDegree,
                 request.mCoeffModulusCount,
@@ -318,43 +318,43 @@ namespace osuCrypto
             return false;
         }
 
-        LogVoleRingNttContext ctx{};
-        if (!logVoleMakeRingNttContext(input.mParams, ctx))
+        RingNttContext ctx{};
+        if (!makeRingNttContext(input.mParams, ctx))
         {
             return false;
         }
 
-        std::vector<LogVoleRnsPoly> mNttBatch;
+        std::vector<RnsPoly> mNttBatch;
         mNttBatch.reserve(request.mTau);
 
         for (std::size_t i = 0; i < request.mTau; ++i)
         {
-            LogVoleRnsPoly sk1 = input.mSk1[i];
-            LogVoleRnsPoly sk2 = input.mSk2[i];
-            LogVoleRnsPoly d = dBatch[i];
+            RnsPoly sk1 = input.mSk1[i];
+            RnsPoly sk2 = input.mSk2[i];
+            RnsPoly d = dBatch[i];
 
-            if (!logVoleForwardNtt(sk1, ctx) ||
-                !logVoleForwardNtt(sk2, ctx) ||
-                !logVoleForwardNtt(d, ctx))
+            if (!forwardNtt(sk1, ctx) ||
+                !forwardNtt(sk2, ctx) ||
+                !forwardNtt(d, ctx))
             {
                 return false;
             }
 
-            LogVoleRnsPoly mNtt{};
-            if (!logVoleDyadicMultiplyAddNtt(sk1, d, sk2, ctx, mNtt))
+            RnsPoly mNtt{};
+            if (!dyadicMultiplyAddNtt(sk1, d, sk2, ctx, mNtt))
             {
                 return false;
             }
             mNttBatch.push_back(std::move(mNtt));
         }
 
-        LogVoleKeyDeriveResponse nextResponse{};
+        KeyDeriveResponse nextResponse{};
         nextResponse.mPolyModulusDegree = request.mPolyModulusDegree;
         nextResponse.mCoeffModulusCount = request.mCoeffModulusCount;
         nextResponse.mTau = request.mTau;
-        nextResponse.mMNttCoeffs = logVolePackRingBatch(mNttBatch);
+        nextResponse.mMNttCoeffs = packRingBatch(mNttBatch);
 
-        LogVoleKeyDeriveSenderOutput nextOutput{};
+        KeyDeriveSenderOutput nextOutput{};
         nextOutput.mK = input.mSk2;
 
         response = std::move(nextResponse);
@@ -362,12 +362,12 @@ namespace osuCrypto
         return true;
     }
 
-    bool logVoleFinalizeKeyDeriveResponse(
-        const LogVoleKeyDeriveReceiverInput& input,
-        const LogVoleKeyDeriveResponse& response,
-        LogVoleKeyDeriveReceiverOutput& output)
+    bool finalizeKeyDeriveResponse(
+        const KeyDeriveReceiverInput& input,
+        const KeyDeriveResponse& response,
+        KeyDeriveReceiverOutput& output)
     {
-        if (!logVoleValidateKeyDeriveReceiverInput(input))
+        if (!validateKeyDeriveReceiverInput(input))
         {
             return false;
         }
@@ -380,8 +380,8 @@ namespace osuCrypto
             return false;
         }
 
-        std::vector<LogVoleRnsPoly> mNttBatch;
-        if (!logVoleUnpackRingBatch(
+        std::vector<RnsPoly> mNttBatch;
+        if (!unpackRingBatch(
                 response.mTau,
                 response.mPolyModulusDegree,
                 response.mCoeffModulusCount,
@@ -391,19 +391,19 @@ namespace osuCrypto
             return false;
         }
 
-        LogVoleRingNttContext ctx{};
-        if (!logVoleMakeRingNttContext(input.mParams, ctx))
+        RingNttContext ctx{};
+        if (!makeRingNttContext(input.mParams, ctx))
         {
             return false;
         }
 
-        LogVoleKeyDeriveReceiverOutput next{};
+        KeyDeriveReceiverOutput next{};
         next.mM.reserve(response.mTau);
 
         for (auto& poly : mNttBatch)
         {
-            if (!logVoleCanonicalizePoly(poly, ctx) ||
-                !logVoleInverseNtt(poly, ctx))
+            if (!canonicalizePoly(poly, ctx) ||
+                !inverseNtt(poly, ctx))
             {
                 return false;
             }
@@ -414,57 +414,57 @@ namespace osuCrypto
         return true;
     }
 
-    bool logVoleLencEnc(
-        const LogVoleRingNttContext& ctx,
-        const std::vector<LogVoleRnsPoly>& s,
+    bool lencEnc(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& s,
         u32 tau,
         u32 gadgetLogBase,
         u64 seed,
-        LogVoleLencEncodeOutput& out,
+        LencEncodeOutput& out,
         double noiseStandardDeviation,
         double noiseMaxDeviation,
         u64 encryptionNoiseSeed)
     {
         if (s.empty() || tau == 0u || noiseStandardDeviation < 0 ||
-            !logVoleValidateRingBatchShape(s, ctx.mParams))
+            !validateRingBatchShape(s, ctx.mParams))
         {
             return false;
         }
 
         const u32 mu = static_cast<u32>(s.size());
-        const u32 width = logVoleNextPowerOfTwo(mu);
-        const u32 levels = logVoleIlog2Exact(width);
-        const auto b = logVoleDeriveLencPublicB(ctx, tau);
-        auto sPad = logVolePadBatch(ctx, s, width);
+        const u32 width = nextPowerOfTwo(mu);
+        const u32 levels = ilog2Exact(width);
+        const auto b = deriveLencPublicB(ctx, tau);
+        auto sPad = padBatch(ctx, s, width);
 
-        std::vector<std::vector<LogVoleRnsPoly>> rLayers(levels);
+        std::vector<std::vector<RnsPoly>> rLayers(levels);
         for (u32 level = 0; level < levels; ++level)
         {
             rLayers[level].reserve(width);
             for (u32 leaf = 0; leaf < width; ++leaf)
             {
                 const u64 nonce = seed ^ (static_cast<u64>(level) << 32u) ^ static_cast<u64>(leaf);
-                rLayers[level].push_back(logVoleDeriveUniformPolyFromNonce(ctx, nonce, 0x1EC0DEDu, leaf));
+                rLayers[level].push_back(deriveUniformPolyFromNonce(ctx, nonce, 0x1EC0DEDu, leaf));
             }
         }
 
-        LogVoleRingTensor ct{};
+        RingTensor ct{};
         ct.mRows = levels * width;
         ct.mCols = 2u * tau;
-        ct.mPolys.reserve(logVoleTensorSize(ct));
+        ct.mPolys.reserve(tensorSize(ct));
 
         for (u32 level = 0; level < levels; ++level)
         {
             for (u32 leaf = 0; leaf < width; ++leaf)
             {
-                const LogVoleRnsPoly& rCur = rLayers[level][leaf];
-                std::vector<LogVoleRnsPoly> row;
+                const RnsPoly& rCur = rLayers[level][leaf];
+                std::vector<RnsPoly> row;
                 row.reserve(2u * tau);
 
                 for (u32 k = 0; k < (2u * tau); ++k)
                 {
-                    LogVoleRnsPoly mul{};
-                    if (!logVoleRingMultiply(rCur, b[k], ctx, mul))
+                    RnsPoly mul{};
+                    if (!ringMultiply(rCur, b[k], ctx, mul))
                     {
                         return false;
                     }
@@ -472,15 +472,15 @@ namespace osuCrypto
                 }
 
                 const u32 bit = (leaf >> (levels - 1u - level)) & 1u;
-                const LogVoleRnsPoly& ri = (level == levels - 1u) ? sPad[leaf] : rLayers[level + 1u][leaf];
+                const RnsPoly& ri = (level == levels - 1u) ? sPad[leaf] : rLayers[level + 1u][leaf];
 
                 for (u32 t = 0; t < tau; ++t)
                 {
-                    LogVoleRnsPoly gpow{};
-                    LogVoleRnsPoly add{};
+                    RnsPoly gpow{};
+                    RnsPoly add{};
                     const u32 idx = (bit * tau) + t;
-                    if (!logVoleMultiplyByGPower(ctx, ri, gadgetLogBase, t, gpow) ||
-                        !logVoleRingAdd(row[idx], gpow, ctx, add))
+                    if (!multiplyByGPower(ctx, ri, gadgetLogBase, t, gpow) ||
+                        !ringAdd(row[idx], gpow, ctx, add))
                     {
                         return false;
                     }
@@ -489,12 +489,12 @@ namespace osuCrypto
 
                 for (u32 k = 0; k < static_cast<u32>(row.size()); ++k)
                 {
-                    LogVoleRnsPoly poly = std::move(row[k]);
+                    RnsPoly poly = std::move(row[k]);
                     if (noiseStandardDeviation > 0)
                     {
                         const u64 streamId =
                             (static_cast<u64>(level) << 48u) ^ (static_cast<u64>(leaf) << 16u) ^ static_cast<u64>(k);
-                        if (!logVoleAddPolyError(
+                        if (!addPolyError(
                                 poly,
                                 noiseStandardDeviation,
                                 noiseMaxDeviation,
@@ -510,7 +510,7 @@ namespace osuCrypto
             }
         }
 
-        LogVoleLencEncodeOutput next{};
+        LencEncodeOutput next{};
         next.mR.reserve(mu);
         for (u32 i = 0; i < mu; ++i)
         {
@@ -524,16 +524,16 @@ namespace osuCrypto
         return true;
     }
 
-    bool logVoleLencDigest(
-        const LogVoleRingNttContext& ctx,
-        const std::vector<LogVoleRnsPoly>& x,
+    bool lencDigest(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& x,
         u32 tau,
         u32 gadgetLogBase,
-        LogVoleRnsPoly& out,
+        RnsPoly& out,
         u32 widthPadded)
     {
-        LogVoleDigestTree tree{};
-        if (!logVoleBuildDigestTree(ctx, x, tau, gadgetLogBase, widthPadded, tree))
+        DigestTree tree{};
+        if (!buildDigestTree(ctx, x, tau, gadgetLogBase, widthPadded, tree))
         {
             return false;
         }
@@ -542,37 +542,37 @@ namespace osuCrypto
         return true;
     }
 
-    bool logVoleLencEval(
-        const LogVoleRingNttContext& ctx,
-        const LogVoleLencLacct& lacct,
-        const std::vector<LogVoleRnsPoly>& x,
+    bool lencEval(
+        const RingNttContext& ctx,
+        const LencLacct& lacct,
+        const std::vector<RnsPoly>& x,
         u32 mu,
         u32 tau,
         u32 gadgetLogBase,
-        std::vector<LogVoleRnsPoly>& out)
+        std::vector<RnsPoly>& out)
     {
         if (mu == 0u || tau == 0u || lacct.mWidthPadded == 0u || x.size() != mu ||
             lacct.mCt.mRows != lacct.mLevels * lacct.mWidthPadded || lacct.mCt.mCols != 2u * tau ||
-            logVoleTensorSize(lacct.mCt) != lacct.mCt.mPolys.size() ||
-            !logVoleValidateRingBatchShape(lacct.mCt.mPolys, ctx.mParams))
+            tensorSize(lacct.mCt) != lacct.mCt.mPolys.size() ||
+            !validateRingBatchShape(lacct.mCt.mPolys, ctx.mParams))
         {
             return false;
         }
 
-        LogVoleDigestTree tree{};
-        if (!logVoleBuildDigestTree(ctx, x, tau, gadgetLogBase, lacct.mWidthPadded, tree) ||
+        DigestTree tree{};
+        if (!buildDigestTree(ctx, x, tau, gadgetLogBase, lacct.mWidthPadded, tree) ||
             tree.mLevels != lacct.mLevels)
         {
             return false;
         }
 
-        std::vector<LogVoleRnsPoly> nextOut;
+        std::vector<RnsPoly> nextOut;
         nextOut.reserve(mu);
 
         for (u32 leaf = 0; leaf < mu; ++leaf)
         {
-            LogVoleRnsPoly acc{};
-            logVoleZeroPoly(ctx, acc);
+            RnsPoly acc{};
+            zeroPoly(ctx, acc);
 
             u32 parent = 0u;
             for (u32 level = 0; level < lacct.mLevels; ++level)
@@ -580,7 +580,7 @@ namespace osuCrypto
                 const u32 left = (2u * parent) + 1u;
                 const u32 right = left + 1u;
 
-                std::vector<LogVoleRnsPoly> pair;
+                std::vector<RnsPoly> pair;
                 pair.reserve(2u * tau);
                 for (u32 i = 0; i < tau; ++i)
                 {
@@ -591,19 +591,19 @@ namespace osuCrypto
                     pair.push_back(tree.mNodeDecomp[right][i]);
                 }
 
-                std::vector<LogVoleRnsPoly> ctRow;
+                std::vector<RnsPoly> ctRow;
                 ctRow.reserve(2u * tau);
-                const auto row = logVoleCtRowIndex(level, leaf, lacct.mWidthPadded);
+                const auto row = ctRowIndex(level, leaf, lacct.mWidthPadded);
                 for (u32 c = 0; c < 2u * tau; ++c)
                 {
-                    ctRow.push_back(lacct.mCt.mPolys[logVoleTensorIndex(
+                    ctRow.push_back(lacct.mCt.mPolys[tensorIndex(
                         lacct.mCt, static_cast<u32>(row), c)]);
                 }
 
-                LogVoleRnsPoly dot{};
-                LogVoleRnsPoly next{};
-                if (!logVoleInnerProduct(ctx, ctRow, pair, dot) ||
-                    !logVoleRingAdd(acc, dot, ctx, next))
+                RnsPoly dot{};
+                RnsPoly next{};
+                if (!innerProduct(ctx, ctRow, pair, dot) ||
+                    !ringAdd(acc, dot, ctx, next))
                 {
                     return false;
                 }
@@ -613,8 +613,8 @@ namespace osuCrypto
                 parent = (bit == 0u) ? left : right;
             }
 
-            LogVoleRnsPoly neg{};
-            if (!logVoleNegatePoly(ctx, acc, neg))
+            RnsPoly neg{};
+            if (!negatePoly(ctx, acc, neg))
             {
                 return false;
             }

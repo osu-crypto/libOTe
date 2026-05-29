@@ -5,11 +5,11 @@
 #include <span>
 #include <vector>
 
-namespace osuCrypto
+namespace osuCrypto::LogVole
 {
-    using LogVoleBuffer = std::vector<u8>;
+    using Buffer = std::vector<u8>;
 
-    struct LogVoleKeyDeriveRequest
+    struct KeyDeriveRequest
     {
         u32 mPolyModulusDegree = 0;
         u32 mCoeffModulusCount = 0;
@@ -17,7 +17,7 @@ namespace osuCrypto
         std::vector<u64> mDCoeffs;
     };
 
-    struct LogVoleKeyDeriveResponse
+    struct KeyDeriveResponse
     {
         u32 mPolyModulusDegree = 0;
         u32 mCoeffModulusCount = 0;
@@ -25,7 +25,7 @@ namespace osuCrypto
         std::vector<u64> mMNttCoeffs;
     };
 
-    struct LogVoleShrinkExpandOfflineMessage
+    struct ShrinkExpandOfflineMessage
     {
         u32 mPolyModulusDegree = 0;
         std::vector<u16> mCoeffModulusBits;
@@ -50,11 +50,11 @@ namespace osuCrypto
         std::vector<u64> mLacctCtCoeffs;
     };
 
-    LogVoleBuffer logVoleEncode(const LogVoleKeyDeriveRequest& message);
-    LogVoleBuffer logVoleEncode(const LogVoleKeyDeriveResponse& message);
-    LogVoleBuffer logVoleEncode(const LogVoleShrinkExpandOfflineMessage& message);
+    Buffer encode(const KeyDeriveRequest& message);
+    Buffer encode(const KeyDeriveResponse& message);
+    Buffer encode(const ShrinkExpandOfflineMessage& message);
 
-    bool logVoleDecode(std::span<const u8> payload, LogVoleKeyDeriveRequest& message);
-    bool logVoleDecode(std::span<const u8> payload, LogVoleKeyDeriveResponse& message);
-    bool logVoleDecode(std::span<const u8> payload, LogVoleShrinkExpandOfflineMessage& message);
+    bool decode(std::span<const u8> payload, KeyDeriveRequest& message);
+    bool decode(std::span<const u8> payload, KeyDeriveResponse& message);
+    bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message);
 }

@@ -76,6 +76,7 @@ libOTe/Vole/LogVole/
 
 Top-level protocol code is split by role. Lower layers stay compact:
 
+- Fresh code lives in `namespace osuCrypto::LogVole`; names inside the namespace should not repeat `LogVole`.
 - `LogVoleSender.*`: sender-facing inputs, outputs, and straight-line coroutine entrypoints.
 - `LogVoleReceiver.*`: receiver-facing inputs, outputs, and straight-line coroutine entrypoints.
 - `LogVoleEncoding.*`: typed message structs and encode/decode helpers. Malformed payload tests target this directly.

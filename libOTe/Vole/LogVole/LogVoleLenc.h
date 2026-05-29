@@ -7,133 +7,133 @@
 
 #include <vector>
 
-namespace osuCrypto
+namespace osuCrypto::LogVole
 {
-    enum class LogVoleShrinkExpandMode : u8
+    enum class ShrinkExpandMode : u8
     {
         Deterministic = 0,
         FullNoise = 1
     };
 
-    struct LogVoleLencLacct
+    struct LencLacct
     {
         u32 mWidthPadded = 0;
         u32 mLevels = 0;
-        LogVoleRingTensor mCt;
+        RingTensor mCt;
     };
 
-    struct LogVoleLencEncodeOutput
+    struct LencEncodeOutput
     {
-        std::vector<LogVoleRnsPoly> mR;
-        LogVoleLencLacct mLacct;
+        std::vector<RnsPoly> mR;
+        LencLacct mLacct;
     };
 
-    bool logVoleLencEnc(
-        const LogVoleRingNttContext& ctx,
-        const std::vector<LogVoleRnsPoly>& s,
+    bool lencEnc(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& s,
         u32 tau,
         u32 gadgetLogBase,
         u64 seed,
-        LogVoleLencEncodeOutput& out,
+        LencEncodeOutput& out,
         double noiseStandardDeviation = 0.0,
         double noiseMaxDeviation = 0.0,
         u64 encryptionNoiseSeed = 0);
 
-    bool logVoleLencDigest(
-        const LogVoleRingNttContext& ctx,
-        const std::vector<LogVoleRnsPoly>& x,
+    bool lencDigest(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& x,
         u32 tau,
         u32 gadgetLogBase,
-        LogVoleRnsPoly& out,
+        RnsPoly& out,
         u32 widthPadded = 0);
 
-    bool logVoleLencEval(
-        const LogVoleRingNttContext& ctx,
-        const LogVoleLencLacct& lacct,
-        const std::vector<LogVoleRnsPoly>& x,
+    bool lencEval(
+        const RingNttContext& ctx,
+        const LencLacct& lacct,
+        const std::vector<RnsPoly>& x,
         u32 mu,
         u32 tau,
         u32 gadgetLogBase,
-        std::vector<LogVoleRnsPoly>& out);
+        std::vector<RnsPoly>& out);
 
-    struct LogVoleKeyDeriveSenderInput
+    struct KeyDeriveSenderInput
     {
-        LogVoleRingParams mParams;
-        std::vector<LogVoleRnsPoly> mSk1;
-        std::vector<LogVoleRnsPoly> mSk2;
+        RingParams mParams;
+        std::vector<RnsPoly> mSk1;
+        std::vector<RnsPoly> mSk2;
     };
 
-    struct LogVoleKeyDeriveReceiverInput
+    struct KeyDeriveReceiverInput
     {
-        LogVoleRingParams mParams;
-        std::vector<LogVoleRnsPoly> mD;
+        RingParams mParams;
+        std::vector<RnsPoly> mD;
     };
 
-    struct LogVoleKeyDeriveSenderOutput
+    struct KeyDeriveSenderOutput
     {
-        std::vector<LogVoleRnsPoly> mK;
+        std::vector<RnsPoly> mK;
     };
 
-    struct LogVoleKeyDeriveReceiverOutput
+    struct KeyDeriveReceiverOutput
     {
-        std::vector<LogVoleRnsPoly> mM;
+        std::vector<RnsPoly> mM;
     };
 
-    bool logVolePrepareKeyDeriveRequest(
-        const LogVoleKeyDeriveReceiverInput& input,
-        LogVoleKeyDeriveRequest& out);
+    bool prepareKeyDeriveRequest(
+        const KeyDeriveReceiverInput& input,
+        KeyDeriveRequest& out);
 
-    bool logVoleProcessKeyDeriveRequest(
-        const LogVoleKeyDeriveSenderInput& input,
-        const LogVoleKeyDeriveRequest& request,
-        LogVoleKeyDeriveResponse& response,
-        LogVoleKeyDeriveSenderOutput& output);
+    bool processKeyDeriveRequest(
+        const KeyDeriveSenderInput& input,
+        const KeyDeriveRequest& request,
+        KeyDeriveResponse& response,
+        KeyDeriveSenderOutput& output);
 
-    bool logVoleFinalizeKeyDeriveResponse(
-        const LogVoleKeyDeriveReceiverInput& input,
-        const LogVoleKeyDeriveResponse& response,
-        LogVoleKeyDeriveReceiverOutput& output);
+    bool finalizeKeyDeriveResponse(
+        const KeyDeriveReceiverInput& input,
+        const KeyDeriveResponse& response,
+        KeyDeriveReceiverOutput& output);
 
-    struct LogVoleShrinkExpandParams
+    struct ShrinkExpandParams
     {
-        LogVoleRingParams mRing;
+        RingParams mRing;
         u32 mPlaintextModulusBits = 0;
         u32 mAlpha = 2;
         u32 mMu = 0;
         u32 mGadgetLogBase = 0;
         u32 mTau = 0;
-        LogVoleShrinkExpandMode mMode = LogVoleShrinkExpandMode::Deterministic;
+        ShrinkExpandMode mMode = ShrinkExpandMode::Deterministic;
         u64 mNoiseSeed = 0x5EEDBEEF1234ull;
         i64 mNoiseBound = 2;
     };
 
-    struct LogVoleShrinkExpandSenderOfflineInput
+    struct ShrinkExpandSenderOfflineInput
     {
-        LogVoleShrinkExpandParams mParams;
-        std::vector<LogVoleRnsPoly> mS;
+        ShrinkExpandParams mParams;
+        std::vector<RnsPoly> mS;
     };
 
-    struct LogVoleShrinkExpandReceiverOfflineInput
+    struct ShrinkExpandReceiverOfflineInput
     {
-        LogVoleShrinkExpandParams mParams;
+        ShrinkExpandParams mParams;
     };
 
-    struct LogVoleShrinkExpandSenderState
+    struct ShrinkExpandSenderState
     {
-        LogVoleShrinkExpandParams mParams;
+        ShrinkExpandParams mParams;
         i64 mEffectiveNoiseBound = 0;
-        std::vector<LogVoleRnsPoly> mS;
-        std::vector<LogVoleRnsPoly> mR;
-        std::vector<LogVoleRnsPoly> mSk1;
-        LogVoleRingTensor mCt1;
-        LogVoleLencLacct mLacct;
+        std::vector<RnsPoly> mS;
+        std::vector<RnsPoly> mR;
+        std::vector<RnsPoly> mSk1;
+        RingTensor mCt1;
+        LencLacct mLacct;
     };
 
-    struct LogVoleShrinkExpandReceiverState
+    struct ShrinkExpandReceiverState
     {
-        LogVoleShrinkExpandParams mParams;
+        ShrinkExpandParams mParams;
         i64 mEffectiveNoiseBound = 0;
-        LogVoleRingTensor mCt1;
-        LogVoleLencLacct mLacct;
+        RingTensor mCt1;
+        LencLacct mLacct;
     };
 }
