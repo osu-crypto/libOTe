@@ -1,5 +1,6 @@
 #include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
 
+#include <cstddef>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -182,6 +183,37 @@ namespace osuCrypto::LogVole2
             return true;
         }
 
+        void appendRingParams(Buffer& out, const RingParams& params)
+        {
+            appendU32(out, params.mPolyModulusDegree);
+
+            std::vector<u16> coeffBits;
+            coeffBits.reserve(params.mCoeffModulusBits.size());
+            for (auto bits : params.mCoeffModulusBits)
+            {
+                coeffBits.push_back(static_cast<u16>(bits));
+            }
+            appendU16Vector(out, coeffBits);
+        }
+
+        bool readRingParams(std::span<const u8> payload, u64& offset, RingParams& params)
+        {
+            std::vector<u16> coeffBits;
+            if (!readU32(payload, offset, params.mPolyModulusDegree) ||
+                !readU16Vector(payload, offset, coeffBits))
+            {
+                return false;
+            }
+
+            params.mCoeffModulusBits.clear();
+            params.mCoeffModulusBits.reserve(coeffBits.size());
+            for (auto bits : coeffBits)
+            {
+                params.mCoeffModulusBits.push_back(static_cast<int>(bits));
+            }
+            return true;
+        }
+
         Buffer encodeKeyDerive(
             u32 polyModulusDegree,
             u32 coeffModulusCount,
@@ -219,15 +251,7 @@ namespace osuCrypto::LogVole2
 
         void appendParams(Buffer& out, const ShrinkExpandParams& params)
         {
-            appendU32(out, params.mRing.mPolyModulusDegree);
-
-            std::vector<u16> coeffBits;
-            coeffBits.reserve(params.mRing.mCoeffModulusBits.size());
-            for (auto bits : params.mRing.mCoeffModulusBits)
-            {
-                coeffBits.push_back(static_cast<u16>(bits));
-            }
-            appendU16Vector(out, coeffBits);
+            appendRingParams(out, params.mRing);
 
             appendU32(out, params.mPlaintextModulusBits);
             appendU32(out, params.mAlpha);
@@ -244,12 +268,10 @@ namespace osuCrypto::LogVole2
 
         bool readParams(std::span<const u8> payload, u64& offset, ShrinkExpandParams& params)
         {
-            std::vector<u16> coeffBits;
             u8 truncate = 0;
             u8 leafInputsAreGadget = 0;
             u8 mode = 0;
-            if (!readU32(payload, offset, params.mRing.mPolyModulusDegree) ||
-                !readU16Vector(payload, offset, coeffBits) ||
+            if (!readRingParams(payload, offset, params.mRing) ||
                 !readU32(payload, offset, params.mPlaintextModulusBits) ||
                 !readU32(payload, offset, params.mAlpha) ||
                 !readU32(payload, offset, params.mMu) ||
@@ -265,12 +287,6 @@ namespace osuCrypto::LogVole2
                 return false;
             }
 
-            params.mRing.mCoeffModulusBits.clear();
-            params.mRing.mCoeffModulusBits.reserve(coeffBits.size());
-            for (auto bits : coeffBits)
-            {
-                params.mRing.mCoeffModulusBits.push_back(static_cast<int>(bits));
-            }
             params.mTruncateOneGadgetDigit = truncate != 0;
             params.mLeafInputsAreGadget = leafInputsAreGadget != 0;
             params.mMode = static_cast<ShrinkExpandMode>(mode);
@@ -319,6 +335,64 @@ namespace osuCrypto::LogVole2
         appendU32(out, message.mPolyModulusDegree);
         appendU32(out, message.mCoeffModulusCount);
         appendU64Vector(out, message.mCoeffs);
+        return out;
+    }
+
+    Buffer encode(const SeedMessage& message)
+    {
+        Buffer out;
+        out.reserve(message.mSeed.size());
+        out.insert(out.end(), message.mSeed.begin(), message.mSeed.end());
+        return out;
+    }
+
+    Buffer encode(const RootOfflineMessage& message)
+    {
+        Buffer out;
+        appendRingParams(out, message.mRing);
+        appendU32(out, message.mTauHi);
+        appendU32(out, message.mGadgetLogBase);
+        appendU32(out, message.mPlaintextModulusBits);
+        appendU32(out, message.mLeftWidth);
+        appendU32(out, message.mRandomizerWidth);
+
+        appendU32(out, message.mCtR.mRows);
+        appendU32(out, message.mCtR.mCols);
+        appendU64Vector(out, packRingTensor(message.mCtR));
+
+        appendU32(out, message.mLacctLeft.mWidthPadded);
+        appendU32(out, message.mLacctLeft.mLevels);
+        appendU32(out, message.mLacctLeft.mCt.mRows);
+        appendU32(out, message.mLacctLeft.mCt.mCols);
+        appendU64Vector(out, packRingTensor(message.mLacctLeft.mCt));
+
+        appendU32(out, message.mTopCt.mRows);
+        appendU32(out, message.mTopCt.mCols);
+        appendU64Vector(out, packRingTensor(message.mTopCt));
+
+        appendU32(out, checkedVectorSize(message.mPublicBStarNtt));
+        appendU64Vector(out, packRingBatch(message.mPublicBStarNtt));
+        return out;
+    }
+
+    Buffer encode(const RootDigestMessage& message)
+    {
+        Buffer out;
+        appendU64Vector(out, message.mDPrimeCoeffs);
+        return out;
+    }
+
+    Buffer encode(const RootResponseMessage& message)
+    {
+        Buffer out;
+        out.reserve(
+            sizeof(u32) +
+            message.mSeed.size() +
+            sizeof(u32) +
+            message.mSkPrimeCoeffs.size() * sizeof(u64));
+        appendU32(out, checkedVectorSize(message.mSeed));
+        out.insert(out.end(), message.mSeed.begin(), message.mSeed.end());
+        appendU64Vector(out, message.mSkPrimeCoeffs);
         return out;
     }
 
@@ -394,6 +468,122 @@ namespace osuCrypto::LogVole2
             return false;
         }
         return offset == payload.size();
+    }
+
+    bool decode(std::span<const u8> payload, SeedMessage& message)
+    {
+        if (payload.empty())
+        {
+            return false;
+        }
+
+        message.mSeed.assign(payload.begin(), payload.end());
+        return true;
+    }
+
+    bool decode(std::span<const u8> payload, RootOfflineMessage& message)
+    {
+        u64 offset = 0;
+        std::vector<u64> ctRCoeffs;
+        std::vector<u64> lacctCoeffs;
+        std::vector<u64> topCtCoeffs;
+        std::vector<u64> publicBStarCoeffs;
+        u32 publicBStarCount = 0;
+
+        if (!readRingParams(payload, offset, message.mRing) ||
+            !readU32(payload, offset, message.mTauHi) ||
+            !readU32(payload, offset, message.mGadgetLogBase) ||
+            !readU32(payload, offset, message.mPlaintextModulusBits) ||
+            !readU32(payload, offset, message.mLeftWidth) ||
+            !readU32(payload, offset, message.mRandomizerWidth) ||
+            !readU32(payload, offset, message.mCtR.mRows) ||
+            !readU32(payload, offset, message.mCtR.mCols) ||
+            !readU64Vector(payload, offset, ctRCoeffs) ||
+            !readU32(payload, offset, message.mLacctLeft.mWidthPadded) ||
+            !readU32(payload, offset, message.mLacctLeft.mLevels) ||
+            !readU32(payload, offset, message.mLacctLeft.mCt.mRows) ||
+            !readU32(payload, offset, message.mLacctLeft.mCt.mCols) ||
+            !readU64Vector(payload, offset, lacctCoeffs) ||
+            !readU32(payload, offset, message.mTopCt.mRows) ||
+            !readU32(payload, offset, message.mTopCt.mCols) ||
+            !readU64Vector(payload, offset, topCtCoeffs) ||
+            !readU32(payload, offset, publicBStarCount) ||
+            !readU64Vector(payload, offset, publicBStarCoeffs) ||
+            offset != payload.size())
+        {
+            return false;
+        }
+
+        const u32 coeffCount = static_cast<u32>(message.mRing.mCoeffModulusBits.size());
+        if (!unpackRingTensor(
+                message.mCtR.mRows,
+                message.mCtR.mCols,
+                message.mRing.mPolyModulusDegree,
+                coeffCount,
+                ctRCoeffs,
+                message.mCtR) ||
+            !unpackRingTensor(
+                message.mLacctLeft.mCt.mRows,
+                message.mLacctLeft.mCt.mCols,
+                message.mRing.mPolyModulusDegree,
+                coeffCount,
+                lacctCoeffs,
+                message.mLacctLeft.mCt) ||
+            !unpackRingTensor(
+                message.mTopCt.mRows,
+                message.mTopCt.mCols,
+                message.mRing.mPolyModulusDegree,
+                coeffCount,
+                topCtCoeffs,
+                message.mTopCt) ||
+            !unpackRingBatch(
+                publicBStarCount,
+                message.mRing.mPolyModulusDegree,
+                coeffCount,
+                publicBStarCoeffs,
+                message.mPublicBStarNtt))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    bool decode(std::span<const u8> payload, RootDigestMessage& message)
+    {
+        u64 offset = 0;
+        if (!readU64Vector(payload, offset, message.mDPrimeCoeffs) ||
+            offset != payload.size() ||
+            message.mDPrimeCoeffs.empty())
+        {
+            return false;
+        }
+        return true;
+    }
+
+    bool decode(std::span<const u8> payload, RootResponseMessage& message)
+    {
+        u64 offset = 0;
+        u32 seedSize = 0;
+        if (!readU32(payload, offset, seedSize) ||
+            offset + seedSize > payload.size())
+        {
+            return false;
+        }
+
+        message.mSeed.assign(
+            payload.begin() + static_cast<std::ptrdiff_t>(offset),
+            payload.begin() + static_cast<std::ptrdiff_t>(offset + seedSize));
+        offset += seedSize;
+
+        if (!readU64Vector(payload, offset, message.mSkPrimeCoeffs) ||
+            offset != payload.size() ||
+            message.mSeed.empty() ||
+            message.mSkPrimeCoeffs.empty())
+        {
+            return false;
+        }
+        return true;
     }
 
     PolyMessage makePolyMessage(const RingParams& params, const RnsPoly& poly)

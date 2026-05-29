@@ -42,6 +42,9 @@
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \
     X(Encoding, KeyDeriveResponseRoundTrip) \
+    X(Encoding, SeedMessageRoundTrip) \
+    X(Encoding, RootOfflineMessageRoundTrip) \
+    X(Encoding, RootDigestAndResponseRoundTrip) \
     X(KeyDeriveCore, AlgebraicRelation) \
     X(KeyDeriveCore, DeterministicRegressionSeeds) \
     X(KeyDeriveCore, MetadataMismatchRejected) \

@@ -212,7 +212,7 @@ Current gaps relative to clean-ot:
 - Seed-label helpers are partial; the recursive seed-label protocol path is not wired yet.
 - LHE/LENC/shrink-expand helper layers are substantially ported, but still need recursive wrapper integration.
 - Runtime cache scoping/per-role cache behavior is not at clean-ot parity yet.
-- No clean-ot message set.
+- Root/seed message encoding is present; coproto root protocol wiring is not.
 - Contains stale key-derive API and tests that should not drive the final design.
 
 ## Required libOTe changes
@@ -230,9 +230,9 @@ Current gaps relative to clean-ot:
 | Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 45% |
 | Recursive LogVole | Missing | Implement offline/online recursion, root wrapper, golden seed, precompute, cached root | 15% |
 | CI-VOLE API | Missing | Port `Zp` wrapper, CRT helpers, SID state, default params | 0% |
-| Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 20% |
+| Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
 | Networking | Simple coproto wrappers for stale protocol exist | Rewrite sender/receiver exchanges directly in coproto; do not port clean-ot comm layer | 20% |
-| Tests | Scaffold tests exist; clean-ot reference tests pass separately | Port recursive and CI-VOLE tests to libOTe API; retire stale key-derive tests | 45% |
+| Tests | Scaffold tests exist; clean-ot reference tests pass separately | Port recursive and CI-VOLE tests to libOTe API; retire stale key-derive tests | 48% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout
