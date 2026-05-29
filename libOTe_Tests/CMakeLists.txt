@@ -33,21 +33,13 @@ target_include_directories(libOTe_Tests PUBLIC
 
 if(ENABLE_LOGVOLE)
     target_sources(libOTe_Tests PRIVATE
-        LogVole/tests/test_comm_counters.cpp
-        LogVole/tests/test_comm_inmemory.cpp
-        LogVole/tests/test_comm_tcp.cpp
-        LogVole/tests/test_comm_uds.cpp
-        LogVole/tests/test_comm_validation.cpp
         LogVole/tests/test_encoding.cpp
         LogVole/tests/test_keyderive_coproto.cpp
         LogVole/tests/test_keyderive_core.cpp
-        LogVole/tests/test_keyderive.cpp
         LogVole/tests/test_lenc.cpp
         LogVole/tests/test_ring_ops.cpp
-        LogVole/tests/test_round_dsl_compile.cpp
         LogVole/tests/test_shrinkexpand_coproto.cpp
         LogVole/tests/test_shrinkexpand_core.cpp
-        LogVole/tests/test_shrinkexpand.cpp
     )
     target_include_directories(libOTe_Tests PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/LogVole

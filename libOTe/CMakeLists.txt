@@ -20,11 +20,6 @@ target_include_directories(libOTe PUBLIC
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
                     $<INSTALL_INTERFACE:include>)
 
-if(ENABLE_LOGVOLE)
-    target_include_directories(libOTe PUBLIC
-                    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Vole/LogVole/include>
-                    $<INSTALL_INTERFACE:include>)
-endif()
                     
 target_link_libraries(libOTe cryptoTools)
 
@@ -61,11 +56,6 @@ if(LIBOTE_SHARED)
     
     add_library(libOTeShared SHARED ${SRCS} )
     target_link_libraries(libOTeShared libOTe)
-    if(ENABLE_LOGVOLE)
-        target_include_directories(libOTeShared PUBLIC
-                        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Vole/LogVole/include>
-                        $<INSTALL_INTERFACE:include>)
-    endif()
     if(MSVC)
         target_compile_options(libOTeShared PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
     else()
