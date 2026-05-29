@@ -18,6 +18,12 @@ namespace osuCrypto::LogVole2
         Internal = 1
     };
 
+    struct GoldenSeedSearchOutput
+    {
+        std::vector<u8> mSeed;
+        std::vector<RnsPoly> mTbkPerSampledPoly;
+    };
+
     SeedLabelMode evalSeedLabelMode(u32 w, u32 alpha, u32 tau, u32 rho);
     RecursiveMode evalRecursiveMode(u32 w, u32 alpha, u32 tau, u32 rho);
 
@@ -64,4 +70,16 @@ namespace osuCrypto::LogVole2
         u32 coeffCount,
         const RingParams& ring,
         std::vector<RnsPoly>& out);
+
+    bool validateGoldenSeedSearch(const Params& params);
+
+    bool validateGoldenSeedCandidate(
+        const Params& params,
+        const std::vector<RnsPoly>& tbkPerSampledPoly,
+        bool& out);
+
+    bool findGoldenSeed(
+        const Params& params,
+        const std::vector<RnsPoly>& sk2PerInstance,
+        GoldenSeedSearchOutput& out);
 }

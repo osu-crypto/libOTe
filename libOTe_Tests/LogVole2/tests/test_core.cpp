@@ -20,6 +20,28 @@ namespace
         return params;
     }
 
+    Params make_golden_params()
+    {
+        Params params{};
+        params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
+        params.mShrinkExpand.mRing.mCoeffModulusBits = { 54, 54, 54, 54, 54, 54, 54 };
+        params.mShrinkExpand.mPlaintextModulusBits = 54;
+        params.mShrinkExpand.mAlpha = 2;
+        params.mShrinkExpand.mTau = 3;
+        params.mShrinkExpand.mMu =
+            params.mShrinkExpand.mAlpha *
+            params.mShrinkExpand.mTau *
+            static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        params.mShrinkExpand.mGadgetLogBase = 126;
+        params.mShrinkExpand.mMode = ShrinkExpandMode::FullNoise;
+        params.mShrinkExpand.mNoiseBound = 2;
+        params.mShrinkExpand.mSamplingSeeds.mNoiseRoot = 0xBAD5EEDu;
+        params.mShrinkExpand.mSamplingSeeds.mCt2Root = 0xC72C72u;
+        params.mW = params.mShrinkExpand.mMu;
+        params.mGamma = 1;
+        return params;
+    }
+
     std::vector<RnsPoly> sample_batch(
         const RingNttContext& ctx,
         std::uint32_t count,
@@ -238,4 +260,58 @@ void LogVole2_Core_SeedLabelDenoiseMatchesShrinkExpandComb(const oc::CLP&)
     std::vector<RnsPoly> actual;
     LOGVOLE_REQUIRE_TRUE(seedLabelDenoiseTbm(input, outCount, tau, params, actual));
     expect_batch_equal(actual, expected);
+}
+
+void LogVole2_Core_GoldenSeedSearchAcceptsFeasibleParams(const oc::CLP&)
+{
+    auto params = make_golden_params();
+    LOGVOLE_REQUIRE_TRUE(validateGoldenSeedSearch(params));
+
+    params.mShrinkExpand.mMu += 1;
+    LOGVOLE_REQUIRE_FALSE(validateGoldenSeedSearch(params));
+}
+
+void LogVole2_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
+{
+    const auto params = make_golden_params();
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+
+    const auto sk2 = sample_batch(ctx, 1, 0x6006u);
+
+    GoldenSeedSearchOutput found{};
+    LOGVOLE_REQUIRE_TRUE(findGoldenSeed(params, sk2, found));
+    LOGVOLE_EXPECT_EQ(found.mSeed.size(), std::size_t{ 16 });
+    LOGVOLE_REQUIRE_EQ(found.mTbkPerSampledPoly.size(), params.mShrinkExpand.mMu);
+
+    bool candidateOk = false;
+    LOGVOLE_REQUIRE_TRUE(validateGoldenSeedCandidate(params, found.mTbkPerSampledPoly, candidateOk));
+    LOGVOLE_EXPECT_TRUE(candidateOk);
+
+    std::vector<RnsPoly> repeatCt2;
+    LOGVOLE_REQUIRE_TRUE(seedLabelSampleCt2FromSeed(
+        params.mShrinkExpand.mSamplingSeeds,
+        found.mSeed,
+        0,
+        params.mShrinkExpand.mMu,
+        params.mShrinkExpand.mRing,
+        repeatCt2));
+    LOGVOLE_REQUIRE_EQ(repeatCt2.size(), params.mShrinkExpand.mMu);
+
+    std::vector<RnsPoly> publicANtt;
+    LOGVOLE_REQUIRE_TRUE(buildLhePublicANtt(ctx, params.mShrinkExpand.mMu, publicANtt));
+    RnsPoly sk2Ntt = sk2[0];
+    LOGVOLE_REQUIRE_TRUE(forwardNtt(sk2Ntt, ctx));
+
+    for (std::uint32_t row = 0; row < params.mShrinkExpand.mMu; ++row)
+    {
+        RnsPoly ask{};
+        ask.mCoeffs.assign(ringPolyCoeffCount(params.mShrinkExpand.mRing), 0);
+        LOGVOLE_REQUIRE_TRUE(dyadicMultiplyAddNttInplace(publicANtt[row], sk2Ntt, ask, ctx));
+        LOGVOLE_REQUIRE_TRUE(inverseNtt(ask, ctx));
+
+        RnsPoly expected{};
+        LOGVOLE_REQUIRE_TRUE(ringSub(repeatCt2[row], ask, ctx, expected));
+        expect_poly_equal(found.mTbkPerSampledPoly[row], expected);
+    }
 }

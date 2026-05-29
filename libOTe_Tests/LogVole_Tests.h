@@ -33,6 +33,8 @@
     X(Core, RepOfflineSenderInputGammaTauUnbundlesLimbs) \
     X(Core, SeedLabelSampleCt2FromSeedDeterministic) \
     X(Core, SeedLabelDenoiseMatchesShrinkExpandComb) \
+    X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
+    X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \
     X(Encoding, KeyDeriveResponseRoundTrip) \
     X(KeyDeriveCore, AlgebraicRelation) \
