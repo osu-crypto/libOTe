@@ -15,6 +15,7 @@
     X(Encoding, MalformedPayloadRejected) \
     X(KeyDeriveCore, AlgebraicRelation) \
     X(KeyDeriveCore, MetadataMismatchRejected) \
+    X(KeyDeriveCoproto, HappyPathAndAlgebraicRelation) \
     X(KeyderiveProtocol, HappyPathAndAlgebraicRelation) \
     X(KeyderiveProtocol, DeterministicRegressionSeeds) \
     X(KeyderiveValidation, PayloadTypeMismatchFails) \

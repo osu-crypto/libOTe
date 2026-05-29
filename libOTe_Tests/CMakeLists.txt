@@ -39,6 +39,7 @@ if(ENABLE_LOGVOLE)
         LogVole/tests/test_comm_uds.cpp
         LogVole/tests/test_comm_validation.cpp
         LogVole/tests/test_encoding.cpp
+        LogVole/tests/test_keyderive_coproto.cpp
         LogVole/tests/test_keyderive_core.cpp
         LogVole/tests/test_keyderive.cpp
         LogVole/tests/test_lenc.cpp
