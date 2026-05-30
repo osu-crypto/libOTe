@@ -1087,7 +1087,9 @@ namespace osuCrypto::LogVole2
 
     RnsPoly deriveUniformPolyFromNonceNtt(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index)
     {
-        return deriveUniformPolyFromNonce(ctx, nonce, domainTag, index);
+        RnsPoly out = deriveUniformPolyFromNonce(ctx, nonce, domainTag, index);
+        (void)forwardNtt(out, ctx);
+        return out;
     }
 
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count)

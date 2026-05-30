@@ -54,7 +54,7 @@ namespace
             params.mShrinkExpand.mAlpha *
             params.mShrinkExpand.mTau *
             static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
-        params.mShrinkExpand.mGadgetLogBase = 7;
+        params.mShrinkExpand.mGadgetLogBase = 10;
         params.mShrinkExpand.mMode = ShrinkExpandMode::Deterministic;
         params.mShrinkExpand.mNoiseBound = 2;
         params.mShrinkExpand.mSamplingSeeds.mNoiseRoot = 0xCAFE1234u;
@@ -540,7 +540,7 @@ void LogVole2_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
 {
     const Params params = make_root_params();
     ShrinkExpandParams trunc{};
-    LOGVOLE_REQUIRE_TRUE(makeTruncShrinkExpandParams(params, true, trunc));
+    LOGVOLE_REQUIRE_TRUE(makeTruncShrinkExpandParams(params, false, trunc));
 
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx));
@@ -595,7 +595,7 @@ void LogVole2_Core_RootOfflineRejectsMetadataMismatch(const oc::CLP&)
 {
     const Params params = make_root_params();
     ShrinkExpandParams trunc{};
-    LOGVOLE_REQUIRE_TRUE(makeTruncShrinkExpandParams(params, true, trunc));
+    LOGVOLE_REQUIRE_TRUE(makeTruncShrinkExpandParams(params, false, trunc));
 
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx));
@@ -618,6 +618,88 @@ void LogVole2_Core_RootOfflineRejectsMetadataMismatch(const oc::CLP&)
     ReceiverState receiver{};
     receiver.mParams = params;
     LOGVOLE_EXPECT_FALSE(finalizeRootOfflineReceiver(receiver, message));
+}
+
+void LogVole2_Core_RootOnlineLocalFlow(const oc::CLP&)
+{
+    const Params params = make_root_params();
+    ShrinkExpandParams trunc{};
+    LOGVOLE_REQUIRE_TRUE(makeTruncShrinkExpandParams(params, true, trunc));
+
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx));
+
+    ShrinkExpandSenderOfflineInput seInput{};
+    seInput.mParams = trunc;
+    seInput.mS = sample_batch(ctx, trunc.mMu, 0x7601u);
+
+    ShrinkExpandSenderState seSender{};
+    LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(seInput, seSender));
+
+    SenderState sender{};
+    sender.mParams = params;
+    sender.mShrinkExpandState = seSender;
+    sender.mGoldenSeed = { 0, 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225 };
+
+    RootOfflineMessage offlineMessage{};
+    LOGVOLE_REQUIRE_TRUE(prepareRootOfflineSender(sender, offlineMessage));
+
+    ShrinkExpandReceiverOfflineInput seReceiverInput{};
+    seReceiverInput.mParams = trunc;
+
+    ShrinkExpandReceiverState seReceiver{};
+    LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(seReceiverInput, seSender, seReceiver));
+
+    ReceiverState receiver{};
+    receiver.mParams = params;
+    receiver.mShrinkExpandState = seReceiver;
+    LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(receiver, offlineMessage));
+
+    const auto x = sample_batch(ctx, params.mW, 0x7602u);
+
+    RootDigestState digestState{};
+    RootDigestMessage digestMessage{};
+    LOGVOLE_REQUIRE_TRUE(prepareRootDigestReceiver(receiver, x, digestState, digestMessage));
+    LOGVOLE_REQUIRE_EQ(digestMessage.mDPrimeCoeffs.size(), ringPolyCoeffCount(params.mShrinkExpand.mRing));
+
+    RootResponseMessage response{};
+    LOGVOLE_REQUIRE_TRUE(prepareRootResponseSender(sender, digestMessage, response));
+    LOGVOLE_EXPECT_TRUE(response.mSeed == sender.mGoldenSeed);
+    LOGVOLE_REQUIRE_EQ(response.mSkPrimeCoeffs.size(), ringPolyCoeffCount(params.mShrinkExpand.mRing));
+
+    RnsPoly senderKey{};
+    RnsPoly receiverKey{};
+    LOGVOLE_REQUIRE_TRUE(computeRootSenderKey(sender, response.mSeed, senderKey));
+    LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(receiver, digestState, response, receiverKey));
+    LOGVOLE_EXPECT_TRUE(receiver.mGoldenSeed == response.mSeed);
+
+    ShrinkExpandExpandSenderInput senderExpandInput{};
+    senderExpandInput.mNonce = deriveSeedInstanceNonce(
+        params.mShrinkExpand.mSamplingSeeds,
+        response.mSeed,
+        0);
+    senderExpandInput.mTbkPrime = senderKey;
+
+    ShrinkExpandSenderExpandOutput senderExpand{};
+    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(sender.mShrinkExpandState, senderExpandInput, senderExpand));
+
+    ShrinkExpandExpandReceiverInput receiverExpandInput{};
+    receiverExpandInput.mNonce = senderExpandInput.mNonce;
+    receiverExpandInput.mX = x;
+    receiverExpandInput.mDigest = digestState.mDRt;
+    receiverExpandInput.mSkX = receiverKey;
+    receiverExpandInput.mTree = digestState.mRootTree;
+
+    ShrinkExpandReceiverExpandOutput receiverExpand{};
+    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiver.mShrinkExpandState, receiverExpandInput, receiverExpand));
+    LOGVOLE_REQUIRE_EQ(senderExpand.mTbk.size(), x.size());
+    LOGVOLE_REQUIRE_EQ(receiverExpand.mTbm.size(), x.size());
+
+    for (std::size_t idx = 0; idx < x.size(); ++idx)
+    {
+        LOGVOLE_REQUIRE_TRUE(validateRingPolyShape(senderExpand.mTbk[idx], params.mShrinkExpand.mRing));
+        LOGVOLE_REQUIRE_TRUE(validateRingPolyShape(receiverExpand.mTbm[idx], params.mShrinkExpand.mRing));
+    }
 }
 
 void LogVole2_Core_GoldenSeedSearchAcceptsFeasibleParams(const oc::CLP&)

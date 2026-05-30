@@ -428,6 +428,154 @@ namespace osuCrypto::LogVole2
                    message.mLeftWidth == rootLeftWidth(tauHi, rho) &&
                    message.mRandomizerWidth == rootRandomizerWidth(tauFull);
         }
+
+        RnsPoly makeZeroPoly(const RingParams& ring)
+        {
+            RnsPoly zero{};
+            zero.mCoeffs.assign(ringPolyCoeffCount(ring), 0);
+            return zero;
+        }
+
+        LencLacct toLencLacct(const ShrinkExpandLacct& in)
+        {
+            LencLacct out{};
+            out.mWidthPadded = in.mWidthPadded;
+            out.mLevels = in.mLevels;
+            out.mCt = in.mCt;
+            return out;
+        }
+
+        u64 deriveRootDerandNonce(const SamplingSeedConfig& samplingSeeds, const std::vector<u8>& seed)
+        {
+            return deriveSeedInstanceNonce(samplingSeeds, seed, 0, 0xD37A4D5EEDull);
+        }
+
+        bool unpackSinglePoly(
+            const RingParams& ring,
+            const std::vector<u64>& coeffs,
+            RnsPoly& out)
+        {
+            if (coeffs.size() != static_cast<std::size_t>(ringPolyCoeffCount(ring)))
+            {
+                return false;
+            }
+
+            out.mCoeffs = coeffs;
+            return true;
+        }
+
+        bool ensureRootKPrime(const SenderState& state, RnsPoly& out)
+        {
+            if (state.mRootKPrimeRt)
+            {
+                out = *state.mRootKPrimeRt;
+                return true;
+            }
+
+            RingNttContext ctx{};
+            if (!makeContext(state.mParams.mShrinkExpand.mRing, ctx))
+            {
+                return false;
+            }
+
+            const u64 rootSkHead =
+                (!state.mRootSkRRt.empty() && !state.mRootSkRRt[0].mCoeffs.empty())
+                    ? state.mRootSkRRt[0].mCoeffs[0]
+                    : 0;
+            const u64 seedMaterial = deriveDeterministicSeedMaterial(
+                state.mParams.mShrinkExpand.mSamplingSeeds.mCt2Root,
+                0x52544B5052494D45ull,
+                state.mParams.mW,
+                state.mRootRandomizerWidth,
+                state.mRootSkRRt.size(),
+                rootSkHead);
+            out = deriveUniformPolyFromNonce(ctx, seedMaterial, 0x52544B50u, 0);
+            state.mRootKPrimeRt = std::make_shared<RnsPoly>(out);
+            return true;
+        }
+
+        bool denoiseAndAggRootKey(
+            const RingNttContext& ctx,
+            const std::vector<RnsPoly>& input,
+            u32 tauHi,
+            RnsPoly& out)
+        {
+            std::vector<RnsPoly> denoised;
+            if (!shrinkExpandDenoiseComb(ctx, input, denoised))
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> aggregated;
+            if (!seedLabelAgg(denoised, 1, tauHi, ctx.mParams, aggregated) ||
+                aggregated.size() != 1)
+            {
+                return false;
+            }
+
+            out = std::move(aggregated[0]);
+            return true;
+        }
+
+        bool evalRootTopCtNtt(
+            const ReceiverState& state,
+            const RingNttContext& ctx,
+            const RnsPoly& yLeft,
+            const std::vector<RnsPoly>& zeta,
+            std::vector<RnsPoly>& out)
+        {
+            u32 tauHi = 0;
+            if (!computeTauHi(state.mParams, tauHi) ||
+                state.mRootTopCt.mRows == 0 ||
+                state.mRootTopCt.mCols != tauHi + state.mRootRandomizerWidth ||
+                zeta.size() != state.mRootRandomizerWidth ||
+                !validateRingBatchShape(state.mRootTopCt.mPolys, ctx.mParams))
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> yDecomp;
+            if (!gadgetDecomposeBitsRangeCentered(
+                    yLeft,
+                    state.mParams.mShrinkExpand.mGadgetLogBase,
+                    1,
+                    tauHi,
+                    ctx,
+                    yDecomp,
+                    state.mShrinkExpandState.mParams.mNumWorkerThreads))
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> inputs = std::move(yDecomp);
+            inputs.insert(inputs.end(), zeta.begin(), zeta.end());
+            for (auto& poly : inputs)
+            {
+                if (!forwardNtt(poly, ctx))
+                {
+                    return false;
+                }
+            }
+
+            std::vector<RnsPoly> next(state.mRootTopCt.mRows);
+            for (u32 row = 0; row < state.mRootTopCt.mRows; ++row)
+            {
+                RnsPoly acc{};
+                acc.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+                for (u32 col = 0; col < state.mRootTopCt.mCols; ++col)
+                {
+                    const auto& ctPoly = state.mRootTopCt.mPolys[ringTensorIndex(state.mRootTopCt, row, col)];
+                    if (!dyadicMultiplyAddNttInplace(ctPoly, inputs[col], acc, ctx))
+                    {
+                        return false;
+                    }
+                }
+                next[row] = std::move(acc);
+            }
+
+            out = std::move(next);
+            return true;
+        }
     }
 
     u32 rootRandomizerWidth(u32 tauFull)
@@ -1030,6 +1178,340 @@ namespace osuCrypto::LogVole2
         state.mRootPublicBStarNtt = message.mPublicBStarNtt;
         state.mRootRandomizerWidth = randomizer;
         return true;
+    }
+
+    bool prepareRootDigestReceiver(
+        const ReceiverState& state,
+        const std::vector<RnsPoly>& x,
+        RootDigestState& digestState,
+        RootDigestMessage& message)
+    {
+        u32 tauHi = 0;
+        if (!computeTauHi(state.mParams, tauHi))
+        {
+            return false;
+        }
+
+        const u32 tauFull = tauHi + 1;
+        const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        const u32 muHi = state.mParams.mShrinkExpand.mAlpha * tauHi * rho;
+        if (rho == 0 ||
+            state.mParams.mW != muHi ||
+            x.size() > muHi ||
+            state.mRootRandomizerWidth != rootRandomizerWidth(tauFull))
+        {
+            return false;
+        }
+
+        RingNttContext ctx{};
+        if (!makeContext(state.mParams.mShrinkExpand.mRing, ctx))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> xRoot = x;
+        while (xRoot.size() < muHi)
+        {
+            xRoot.push_back(makeZeroPoly(state.mParams.mShrinkExpand.mRing));
+        }
+
+        ShrinkExpandShrinkOutput shrink{};
+        if (!shrinkExpandShrink(state.mShrinkExpandState, xRoot, shrink))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> hatD;
+        if (!seedLabelGadgetDecomposeHiAndUnbundle(
+                shrink.mDigest,
+                state.mParams.mShrinkExpand.mGadgetLogBase,
+                tauHi,
+                state.mParams.mShrinkExpand.mRing,
+                hatD))
+        {
+            return false;
+        }
+
+        const u32 leftWidth = rootLeftWidth(tauHi, rho);
+        if (hatD.size() != leftWidth)
+        {
+            return false;
+        }
+
+        RnsPoly yLeft{};
+        if (!lencDigestTrunc(
+                ctx,
+                hatD,
+                tauHi,
+                state.mParams.mShrinkExpand.mGadgetLogBase,
+                state.mParams.mShrinkExpand.mPlaintextModulusBits,
+                yLeft,
+                state.mRootLacctLeft.mWidthPadded,
+                true))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> yDecomp;
+        if (!gadgetDecomposeBitsRangeCentered(
+                yLeft,
+                state.mParams.mShrinkExpand.mGadgetLogBase,
+                1,
+                tauHi,
+                ctx,
+                yDecomp,
+                state.mShrinkExpandState.mParams.mNumWorkerThreads))
+        {
+            return false;
+        }
+
+        const auto publicBFullNtt = buildLencPublicBNtt(ctx, tauFull);
+        if (publicBFullNtt.size() < static_cast<std::size_t>(2) * tauFull)
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> publicBRootNtt;
+        publicBRootNtt.reserve(tauHi);
+        for (u32 idx = 0; idx < tauHi; ++idx)
+        {
+            publicBRootNtt.push_back(publicBFullNtt[1 + idx]);
+        }
+
+        RnsPoly leftTerm{};
+        if (!rootInnerProductNtt(ctx, publicBRootNtt, yDecomp, leftTerm))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> zeta;
+        if (!sampleRootZeta(
+                ctx,
+                state.mRootRandomizerWidth,
+                state.mParams.mShrinkExpand.mGadgetLogBase,
+                zeta))
+        {
+            return false;
+        }
+
+        RnsPoly rightTerm{};
+        if (!rootInnerProductNtt(ctx, state.mRootPublicBStarNtt, zeta, rightTerm))
+        {
+            return false;
+        }
+
+        RnsPoly dPrime{};
+        RnsPoly negDPrime{};
+        RnsPoly zero = makeZeroPoly(state.mParams.mShrinkExpand.mRing);
+        if (!ringAdd(leftTerm, rightTerm, ctx, dPrime) ||
+            !ringSub(zero, dPrime, ctx, negDPrime))
+        {
+            return false;
+        }
+
+        RootDigestState nextState{};
+        nextState.mDRt = std::move(shrink.mDigest);
+        nextState.mRootTree = std::move(shrink.mTree);
+        nextState.mHatDRt = std::move(hatD);
+        nextState.mYLeft = std::move(yLeft);
+        nextState.mZeta = std::move(zeta);
+        nextState.mDPrime = std::move(negDPrime);
+
+        RootDigestMessage nextMessage{};
+        nextMessage.mDPrimeCoeffs = packRingBatch(std::vector<RnsPoly>{ nextState.mDPrime });
+
+        digestState = std::move(nextState);
+        message = std::move(nextMessage);
+        return true;
+    }
+
+    bool prepareRootResponseSender(
+        const SenderState& state,
+        const RootDigestMessage& request,
+        RootResponseMessage& response)
+    {
+        u32 tauHi = 0;
+        if (!computeTauHi(state.mParams, tauHi) ||
+            state.mGoldenSeed.empty() ||
+            state.mRootSkRRt.size() != tauHi ||
+            !validateRingBatchShape(state.mRootSkRRt, state.mParams.mShrinkExpand.mRing))
+        {
+            return false;
+        }
+
+        RingNttContext ctx{};
+        if (!makeContext(state.mParams.mShrinkExpand.mRing, ctx))
+        {
+            return false;
+        }
+
+        RnsPoly dPrime{};
+        RnsPoly kPrime{};
+        RnsPoly skPrime{};
+        if (!unpackSinglePoly(state.mParams.mShrinkExpand.mRing, request.mDPrimeCoeffs, dPrime) ||
+            !ensureRootKPrime(state, kPrime) ||
+            !deriveSkxTrunc(
+                ctx,
+                state.mRootSkRRt,
+                dPrime,
+                kPrime,
+                state.mParams.mShrinkExpand.mGadgetLogBase,
+                tauHi,
+                skPrime))
+        {
+            return false;
+        }
+
+        RootResponseMessage next{};
+        next.mSeed = state.mGoldenSeed;
+        next.mSkPrimeCoeffs = packRingBatch(std::vector<RnsPoly>{ std::move(skPrime) });
+        response = std::move(next);
+        return true;
+    }
+
+    bool computeRootSenderKey(
+        const SenderState& state,
+        const std::vector<u8>& seed,
+        RnsPoly& rootKey)
+    {
+        u32 tauHi = 0;
+        if (!computeTauHi(state.mParams, tauHi) ||
+            seed.empty())
+        {
+            return false;
+        }
+
+        const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        const u32 leftWidth = rootLeftWidth(tauHi, rho);
+        RingNttContext ctx{};
+        if (rho == 0 ||
+            !makeContext(state.mParams.mShrinkExpand.mRing, ctx))
+        {
+            return false;
+        }
+
+        RnsPoly kPrime{};
+        std::vector<RnsPoly> ctK;
+        std::vector<RnsPoly> tbkRt;
+        if (!ensureRootKPrime(state, kPrime) ||
+            !buildHashedCt2(
+                ctx,
+                leftWidth,
+                state.mParams.mShrinkExpand.mSamplingSeeds,
+                deriveRootDerandNonce(state.mParams.mShrinkExpand.mSamplingSeeds, seed),
+                ctK) ||
+            !lheDec(
+                ctx,
+                ctK,
+                kPrime,
+                tbkRt,
+                nullptr,
+                false,
+                false,
+                state.mShrinkExpandState.mParams.mNumWorkerThreads))
+        {
+            return false;
+        }
+
+        return denoiseAndAggRootKey(ctx, tbkRt, tauHi, rootKey);
+    }
+
+    bool finalizeRootResponseReceiver(
+        ReceiverState& state,
+        const RootDigestState& digestState,
+        const RootResponseMessage& response,
+        RnsPoly& rootKey)
+    {
+        u32 tauHi = 0;
+        if (!computeTauHi(state.mParams, tauHi) ||
+            response.mSeed.empty())
+        {
+            return false;
+        }
+
+        const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        const u32 leftWidth = rootLeftWidth(tauHi, rho);
+        RingNttContext ctx{};
+        if (rho == 0 ||
+            digestState.mHatDRt.size() != leftWidth ||
+            !makeContext(state.mParams.mShrinkExpand.mRing, ctx))
+        {
+            return false;
+        }
+
+        RnsPoly skPrime{};
+        std::vector<RnsPoly> ctRApplied;
+        std::vector<RnsPoly> decPartialNtt;
+        std::vector<RnsPoly> topEvalNtt;
+        std::vector<RnsPoly> leftEvalNtt;
+        std::vector<RnsPoly> ctK;
+        if (!unpackSinglePoly(state.mParams.mShrinkExpand.mRing, response.mSkPrimeCoeffs, skPrime) ||
+            !lheApplyCt1Trunc(
+                ctx,
+                state.mRootCtRRt,
+                digestState.mDPrime,
+                state.mParams.mShrinkExpand.mGadgetLogBase,
+                tauHi,
+                ctRApplied,
+                true,
+                state.mShrinkExpandState.mParams.mNumWorkerThreads) ||
+            !lheDec(
+                ctx,
+                ctRApplied,
+                skPrime,
+                decPartialNtt,
+                nullptr,
+                true,
+                true,
+                state.mShrinkExpandState.mParams.mNumWorkerThreads) ||
+            !evalRootTopCtNtt(state, ctx, digestState.mYLeft, digestState.mZeta, topEvalNtt) ||
+            !lencEvalTrunc(
+                ctx,
+                toLencLacct(state.mRootLacctLeft),
+                digestState.mHatDRt,
+                leftWidth,
+                tauHi,
+                state.mParams.mShrinkExpand.mGadgetLogBase,
+                state.mParams.mShrinkExpand.mPlaintextModulusBits,
+                leftEvalNtt,
+                true,
+                state.mShrinkExpandState.mParams.mNumWorkerThreads,
+                true) ||
+            !buildHashedCt2(
+                ctx,
+                leftWidth,
+                state.mParams.mShrinkExpand.mSamplingSeeds,
+                deriveRootDerandNonce(state.mParams.mShrinkExpand.mSamplingSeeds, response.mSeed),
+                ctK))
+        {
+            return false;
+        }
+
+        if (decPartialNtt.size() != leftWidth ||
+            topEvalNtt.size() != leftWidth ||
+            leftEvalNtt.size() != leftWidth ||
+            ctK.size() != leftWidth)
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> tbmVec(leftWidth);
+        for (u32 row = 0; row < leftWidth; ++row)
+        {
+            RnsPoly phiNtt = std::move(topEvalNtt[row]);
+            RnsPoly tbmNtt = std::move(decPartialNtt[row]);
+            if (!ringAddInplace(phiNtt, leftEvalNtt[row], ctx) ||
+                !ringSubInplace(tbmNtt, phiNtt, ctx) ||
+                !inverseNtt(tbmNtt, ctx) ||
+                !ringAddInplace(tbmNtt, ctK[row], ctx))
+            {
+                return false;
+            }
+            tbmVec[row] = std::move(tbmNtt);
+        }
+
+        state.mGoldenSeed = response.mSeed;
+        return denoiseAndAggRootKey(ctx, tbmVec, tauHi, rootKey);
     }
 
     bool seedLabelAgg(

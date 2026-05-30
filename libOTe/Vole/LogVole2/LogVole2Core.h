@@ -7,6 +7,8 @@
 namespace osuCrypto::LogVole2
 {
     struct RootOfflineMessage;
+    struct RootDigestMessage;
+    struct RootResponseMessage;
 
     enum class SeedLabelMode : u8
     {
@@ -24,6 +26,16 @@ namespace osuCrypto::LogVole2
     {
         std::vector<u8> mSeed;
         std::vector<RnsPoly> mTbkPerSampledPoly;
+    };
+
+    struct RootDigestState
+    {
+        RnsPoly mDRt;
+        RnsPoly mYLeft;
+        RnsPoly mDPrime;
+        std::vector<RnsPoly> mHatDRt;
+        std::vector<RnsPoly> mZeta;
+        std::shared_ptr<DigestTree> mRootTree;
     };
 
     u32 rootRandomizerWidth(u32 tauFull);
@@ -97,6 +109,28 @@ namespace osuCrypto::LogVole2
     bool finalizeRootOfflineReceiver(
         ReceiverState& state,
         const RootOfflineMessage& message);
+
+    bool prepareRootDigestReceiver(
+        const ReceiverState& state,
+        const std::vector<RnsPoly>& x,
+        RootDigestState& digestState,
+        RootDigestMessage& message);
+
+    bool prepareRootResponseSender(
+        const SenderState& state,
+        const RootDigestMessage& request,
+        RootResponseMessage& response);
+
+    bool finalizeRootResponseReceiver(
+        ReceiverState& state,
+        const RootDigestState& digestState,
+        const RootResponseMessage& response,
+        RnsPoly& rootKey);
+
+    bool computeRootSenderKey(
+        const SenderState& state,
+        const std::vector<u8>& seed,
+        RnsPoly& rootKey);
 
     bool seedLabelAgg(
         const std::vector<RnsPoly>& inputHat,

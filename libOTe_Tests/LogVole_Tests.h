@@ -40,6 +40,7 @@
     X(Core, RootInnerProductMatchesCoeffDomain) \
     X(Core, RootOfflineSetupFinalizeShapes) \
     X(Core, RootOfflineRejectsMetadataMismatch) \
+    X(Core, RootOnlineLocalFlow) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \
