@@ -205,7 +205,7 @@ Current gaps relative to clean-ot:
 
 - No recursive LogVole protocol.
 - No CI-VOLE public API.
-- Root helper math and golden-seed search are present, but not wired into sender/receiver state transitions.
+- Root helper math, golden-seed search, and root offline sender/receiver state setup are present.
 - No root randomized digest exchange or derandomization path.
 - No sender precompute path.
 - No cached-root reuse path.
@@ -228,11 +228,11 @@ Current gaps relative to clean-ot:
 | LENC/LHE | Partial LENC exists; LHE missing | Port clean-ot LENC/LHE helpers, digest tree, truncation, public cache behavior | 55% |
 | Shrink/expand | Partial older path exists | Port clean-ot params/state/backend behavior; remove key-derive assumptions | 55% |
 | Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 45% |
-| Recursive LogVole | Missing | Implement offline/online recursion, root wrapper, golden seed, precompute, cached root | 15% |
+| Recursive LogVole | Missing | Implement offline/online recursion, root wrapper, golden seed, precompute, cached root | 22% |
 | CI-VOLE API | Missing | Port `Zp` wrapper, CRT helpers, SID state, default params | 0% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
 | Networking | Simple coproto wrappers for stale protocol exist | Rewrite sender/receiver exchanges directly in coproto; do not port clean-ot comm layer | 20% |
-| Tests | Scaffold tests exist; clean-ot reference tests pass separately | Port recursive and CI-VOLE tests to libOTe API; retire stale key-derive tests | 48% |
+| Tests | Scaffold tests exist; clean-ot reference tests pass separately | Port recursive and CI-VOLE tests to libOTe API; retire stale key-derive tests | 50% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout

@@ -1,5 +1,7 @@
 #include "libOTe/Vole/LogVole2/LogVole2Core.h"
 
+#include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
+
 #include "seal/util/rns.h"
 #include "seal/util/uintarithsmallmod.h"
 
@@ -397,6 +399,35 @@ namespace osuCrypto::LogVole2
             out = std::move(rounding);
             return true;
         }
+
+        bool computeTauHi(const Params& params, u32& out)
+        {
+            if (params.mShrinkExpand.mTau < 2)
+            {
+                return false;
+            }
+
+            out = params.mShrinkExpand.mTau - 1;
+            return true;
+        }
+
+        bool rootMetadataMatches(const ReceiverState& state, const RootOfflineMessage& message)
+        {
+            u32 tauHi = 0;
+            if (!computeTauHi(state.mParams, tauHi))
+            {
+                return false;
+            }
+
+            const u32 tauFull = tauHi + 1;
+            const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            return message.mRing == state.mParams.mShrinkExpand.mRing &&
+                   message.mTauHi == tauHi &&
+                   message.mGadgetLogBase == state.mParams.mShrinkExpand.mGadgetLogBase &&
+                   message.mPlaintextModulusBits == state.mParams.mShrinkExpand.mPlaintextModulusBits &&
+                   message.mLeftWidth == rootLeftWidth(tauHi, rho) &&
+                   message.mRandomizerWidth == rootRandomizerWidth(tauFull);
+        }
     }
 
     u32 rootRandomizerWidth(u32 tauFull)
@@ -781,6 +812,223 @@ namespace osuCrypto::LogVole2
         }
 
         out = std::move(accNtt);
+        return true;
+    }
+
+    bool prepareRootOfflineSender(
+        SenderState& state,
+        RootOfflineMessage& message)
+    {
+        u32 tauHi = 0;
+        if (!computeTauHi(state.mParams, tauHi))
+        {
+            return false;
+        }
+
+        const u32 tauFull = tauHi + 1;
+        const auto& se = state.mParams.mShrinkExpand;
+        const u32 rho = static_cast<u32>(se.mRing.mCoeffModulusBits.size());
+        const u32 leftWidth = rootLeftWidth(tauHi, rho);
+        const u32 randomizer = rootRandomizerWidth(tauFull);
+        const u32 workerThreads = state.mShrinkExpandState.mParams.mNumWorkerThreads;
+
+        if (rho == 0 ||
+            state.mShrinkExpandState.mSk1.size() != tauHi ||
+            !validateRingBatchShape(state.mShrinkExpandState.mSk1, se.mRing))
+        {
+            return false;
+        }
+
+        RingNttContext ctx{};
+        if (!makeContext(se.mRing, ctx))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> rootSkHi;
+        if (!replicateRootHiKeyByLimb(state.mShrinkExpandState.mSk1, tauHi, se.mRing, rootSkHi) ||
+            rootSkHi.size() != leftWidth)
+        {
+            return false;
+        }
+
+        const auto publicBFullNtt = buildLencPublicBNtt(ctx, tauFull);
+        if (publicBFullNtt.size() < static_cast<std::size_t>(2) * tauFull)
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> publicBRootNtt;
+        publicBRootNtt.reserve(tauHi);
+        for (u32 idx = 0; idx < tauHi; ++idx)
+        {
+            publicBRootNtt.push_back(publicBFullNtt[1 + idx]);
+        }
+
+        const double lencSigma = rootNoiseSigma(se, std::sqrt(static_cast<double>(tauHi)));
+        const double lencMaxDev = rootNoiseMaxDeviation(lencSigma);
+        LencEncodeOutput leftLenc{};
+        if (!lencEncTrunc(
+                ctx,
+                rootSkHi,
+                tauHi,
+                se.mGadgetLogBase,
+                se.mPlaintextModulusBits,
+                se.mSamplingSeeds,
+                leftLenc,
+                lencSigma,
+                lencMaxDev,
+                0,
+                false,
+                true,
+                &publicBFullNtt,
+                workerThreads))
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> publicBStarNtt;
+        publicBStarNtt.reserve(randomizer);
+        for (u32 idx = 0; idx < randomizer; ++idx)
+        {
+            publicBStarNtt.push_back(deriveUniformPolyFromNonceNtt(ctx, 0x52544E43524F4F54ull, 0xB57A52u, idx));
+        }
+
+        std::vector<RnsPoly> r1;
+        if (!sampleRootErrorBatch(
+                ctx,
+                leftWidth,
+                se.mSamplingSeeds,
+                0x5254523154524E43ull,
+                lencSigma,
+                lencMaxDev,
+                false,
+                r1))
+        {
+            return false;
+        }
+
+        const u64 skRSeed = deriveNoiseSeed(se.mSamplingSeeds, 0x5254534B52544Dull, leftWidth, tauHi, randomizer);
+        std::vector<RnsPoly> skRRt = sampleUniformBatch(ctx, tauHi, skRSeed, 0x5254534Bu);
+        if (!validateRingBatchShape(skRRt, se.mRing))
+        {
+            return false;
+        }
+
+        const double lheSigma =
+            rootNoiseSigma(se, std::sqrt(static_cast<double>(leftLenc.mLacct.mWidthPadded)));
+        const double lheMaxDev = rootNoiseMaxDeviation(lheSigma);
+        RingTensor ctR{};
+        if (!lheEnc1Trunc(
+                ctx,
+                r1,
+                skRRt,
+                se.mGadgetLogBase,
+                ctR,
+                lheSigma,
+                lheMaxDev,
+                se.mSamplingSeeds,
+                false,
+                nullptr,
+                workerThreads))
+        {
+            return false;
+        }
+
+        RingTensor topCt{};
+        if (!buildRootTopCt(
+                ctx,
+                r1,
+                leftLenc.mRNtt,
+                publicBRootNtt,
+                publicBStarNtt,
+                se.mGadgetLogBase,
+                1,
+                se.mSamplingSeeds,
+                lencSigma,
+                lencMaxDev,
+                topCt))
+        {
+            return false;
+        }
+
+        state.mRootSkRRt = std::move(skRRt);
+        state.mRootR1Rt = std::move(r1);
+        state.mRootRandomizerWidth = randomizer;
+
+        RootOfflineMessage next{};
+        next.mRing = se.mRing;
+        next.mTauHi = tauHi;
+        next.mGadgetLogBase = se.mGadgetLogBase;
+        next.mPlaintextModulusBits = se.mPlaintextModulusBits;
+        next.mLeftWidth = leftWidth;
+        next.mRandomizerWidth = randomizer;
+        next.mCtR = std::move(ctR);
+        next.mLacctLeft.mWidthPadded = leftLenc.mLacct.mWidthPadded;
+        next.mLacctLeft.mLevels = leftLenc.mLacct.mLevels;
+        next.mLacctLeft.mCt = std::move(leftLenc.mLacct.mCt);
+        next.mTopCt = std::move(topCt);
+        next.mPublicBStarNtt = std::move(publicBStarNtt);
+        message = std::move(next);
+        return true;
+    }
+
+    bool finalizeRootOfflineReceiver(
+        ReceiverState& state,
+        const RootOfflineMessage& message)
+    {
+        u32 tauHi = 0;
+        if (!computeTauHi(state.mParams, tauHi) ||
+            !rootMetadataMatches(state, message))
+        {
+            return false;
+        }
+
+        const u32 tauFull = tauHi + 1;
+        const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        const u32 leftWidth = rootLeftWidth(tauHi, rho);
+        const u32 randomizer = rootRandomizerWidth(tauFull);
+
+        if (rho == 0 ||
+            message.mCtR.mRows != leftWidth ||
+            message.mCtR.mCols != tauHi ||
+            ringTensorSize(message.mCtR) != message.mCtR.mPolys.size() ||
+            !validateRingBatchShape(message.mCtR.mPolys, message.mRing) ||
+            message.mLacctLeft.mWidthPadded == 0 ||
+            (message.mLacctLeft.mWidthPadded & (message.mLacctLeft.mWidthPadded - 1)) != 0 ||
+            message.mLacctLeft.mCt.mRows != message.mLacctLeft.mWidthPadded * message.mLacctLeft.mLevels ||
+            ringTensorSize(message.mLacctLeft.mCt) != message.mLacctLeft.mCt.mPolys.size() ||
+            !validateRingBatchShape(message.mLacctLeft.mCt.mPolys, message.mRing) ||
+            message.mTopCt.mRows != leftWidth ||
+            message.mTopCt.mCols != tauHi + randomizer ||
+            ringTensorSize(message.mTopCt) != message.mTopCt.mPolys.size() ||
+            !validateRingBatchShape(message.mTopCt.mPolys, message.mRing) ||
+            message.mPublicBStarNtt.size() != randomizer ||
+            !validateRingBatchShape(message.mPublicBStarNtt, message.mRing))
+        {
+            return false;
+        }
+
+        RingNttContext ctx{};
+        if (!makeContext(message.mRing, ctx))
+        {
+            return false;
+        }
+
+        RingTensor ctR = message.mCtR;
+        for (auto& poly : ctR.mPolys)
+        {
+            if (!forwardNtt(poly, ctx))
+            {
+                return false;
+            }
+        }
+
+        state.mRootCtRRt = std::move(ctR);
+        state.mRootLacctLeft = message.mLacctLeft;
+        state.mRootTopCt = message.mTopCt;
+        state.mRootPublicBStarNtt = message.mPublicBStarNtt;
+        state.mRootRandomizerWidth = randomizer;
         return true;
     }
 

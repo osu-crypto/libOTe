@@ -6,6 +6,8 @@
 
 namespace osuCrypto::LogVole2
 {
+    struct RootOfflineMessage;
+
     enum class SeedLabelMode : u8
     {
         Leaf = 0,
@@ -87,6 +89,14 @@ namespace osuCrypto::LogVole2
         const std::vector<RnsPoly>& leftNtt,
         const std::vector<RnsPoly>& rightCoeff,
         RnsPoly& out);
+
+    bool prepareRootOfflineSender(
+        SenderState& state,
+        RootOfflineMessage& message);
+
+    bool finalizeRootOfflineReceiver(
+        ReceiverState& state,
+        const RootOfflineMessage& message);
 
     bool seedLabelAgg(
         const std::vector<RnsPoly>& inputHat,

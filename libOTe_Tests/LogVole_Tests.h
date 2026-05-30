@@ -38,6 +38,8 @@
     X(Core, RootTopCtNoiselessRelation) \
     X(Core, RootZetaShapeAndBounds) \
     X(Core, RootInnerProductMatchesCoeffDomain) \
+    X(Core, RootOfflineSetupFinalizeShapes) \
+    X(Core, RootOfflineRejectsMetadataMismatch) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \
