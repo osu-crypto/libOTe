@@ -3,10 +3,16 @@
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
+#include "seal/util/rns.h"
+#include "seal/util/uintarith.h"
 #include "seal/util/uintarithsmallmod.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <random>
 #include <vector>
 
 using namespace osuCrypto::LogVole2;
@@ -168,6 +174,293 @@ namespace
             }
         }
         return true;
+    }
+
+    std::uint64_t mix_public_seed(std::uint64_t value)
+    {
+        value += 0x9E3779B97F4A7C15ull;
+        value = (value ^ (value >> 30u)) * 0xBF58476D1CE4E5B9ull;
+        value = (value ^ (value >> 27u)) * 0x94D049BB133111EBull;
+        return value ^ (value >> 31u);
+    }
+
+    RnsPoly sample_small_plain_poly(
+        const RingNttContext& ctx,
+        std::uint64_t seed,
+        std::uint32_t polyIdx,
+        std::uint32_t bitCount)
+    {
+        RnsPoly out{};
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        const std::size_t rho = ctx.mModuli.size();
+        out.mCoeffs.assign(n * rho, 0u);
+
+        const std::uint64_t mask =
+            (bitCount >= 63u)
+                ? std::numeric_limits<std::uint64_t>::max()
+                : ((std::uint64_t{ 1 } << bitCount) - 1u);
+        std::uint64_t state = mix_public_seed(seed ^ static_cast<std::uint64_t>(polyIdx));
+        for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
+        {
+            state = mix_public_seed(state + static_cast<std::uint64_t>(coeffIdx));
+            const std::uint64_t value = state & mask;
+            for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
+            {
+                out.mCoeffs[modIdx * n + coeffIdx] = value % ctx.mModuli[modIdx].value();
+            }
+        }
+
+        return out;
+    }
+
+    std::vector<RnsPoly> sample_small_plain_batch(
+        const RingNttContext& ctx,
+        std::uint32_t count,
+        std::uint64_t seed,
+        std::uint32_t bitCount)
+    {
+        std::vector<RnsPoly> out;
+        out.reserve(count);
+        for (std::uint32_t i = 0; i < count; ++i)
+        {
+            out.push_back(sample_small_plain_poly(ctx, seed, i, bitCount));
+        }
+        return out;
+    }
+
+    bool compute_expected_s_mul_x(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& s,
+        const std::vector<RnsPoly>& x,
+        std::vector<RnsPoly>& out)
+    {
+        if (s.size() != x.size())
+        {
+            return false;
+        }
+
+        out.clear();
+        out.reserve(s.size());
+        for (std::size_t i = 0; i < s.size(); ++i)
+        {
+            RnsPoly prod{};
+            if (!ringMultiply(s[i], x[i], ctx, prod))
+            {
+                return false;
+            }
+            out.push_back(std::move(prod));
+        }
+        return true;
+    }
+
+    bool subtract_batches(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& a,
+        const std::vector<RnsPoly>& b,
+        std::vector<RnsPoly>& out)
+    {
+        if (a.size() != b.size())
+        {
+            return false;
+        }
+
+        out.clear();
+        out.reserve(a.size());
+        for (std::size_t i = 0; i < a.size(); ++i)
+        {
+            RnsPoly diff{};
+            if (!ringSub(a[i], b[i], ctx, diff))
+            {
+                return false;
+            }
+            out.push_back(std::move(diff));
+        }
+        return true;
+    }
+
+    bool negate_batch(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& in,
+        std::vector<RnsPoly>& out)
+    {
+        out.clear();
+        out.reserve(in.size());
+        const RnsPoly zero = zero_poly(ctx);
+        for (const auto& poly : in)
+        {
+            RnsPoly neg{};
+            if (!ringSub(zero, poly, ctx, neg))
+            {
+                return false;
+            }
+            out.push_back(std::move(neg));
+        }
+        return true;
+    }
+
+    long double max_centered_log2(const RingNttContext& ctx, const std::vector<RnsPoly>& polys)
+    {
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        const std::size_t rho = ctx.mParams.mCoeffModulusBits.size();
+        auto contextData = ctx.mContext->key_context_data();
+        seal::util::RNSBase fullBase(contextData->parms().coeff_modulus(), seal::MemoryManager::GetPool());
+
+        auto composedPoly = seal::util::allocate_poly(n, rho, seal::MemoryManager::GetPool());
+        auto coeffMpi = seal::util::allocate_uint(rho, seal::MemoryManager::GetPool());
+
+        long double maxLog2 = 0.0L;
+        for (const auto& poly : polys)
+        {
+            std::copy(poly.mCoeffs.begin(), poly.mCoeffs.end(), composedPoly.get());
+            fullBase.compose_array(composedPoly.get(), n, seal::MemoryManager::GetPool());
+
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                const std::uint64_t* valPtr = composedPoly.get() + i * rho;
+                const int bitCountPos = seal::util::get_significant_bit_count_uint(valPtr, rho);
+
+                seal::util::sub_uint(fullBase.base_prod(), valPtr, rho, coeffMpi.get());
+                const int bitCountNeg = seal::util::get_significant_bit_count_uint(coeffMpi.get(), rho);
+
+                const int bitCount = std::min(bitCountPos, bitCountNeg);
+                maxLog2 = std::max<long double>(maxLog2, bitCount);
+            }
+        }
+        return maxLog2;
+    }
+
+    std::uint32_t log_q_bits(const RingParams& params)
+    {
+        std::uint32_t out = 0;
+        for (const auto bits : params.mCoeffModulusBits)
+        {
+            out += static_cast<std::uint32_t>(bits);
+        }
+        return out;
+    }
+
+    bool check_logvole_noise_tolerance(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& actual,
+        const std::vector<RnsPoly>& expected,
+        const Params& params,
+        long double& maxLog2)
+    {
+        std::vector<RnsPoly> residual;
+        if (!subtract_batches(ctx, actual, expected, residual))
+        {
+            return false;
+        }
+        const long double maxLog2Pos = max_centered_log2(ctx, residual);
+
+        std::vector<RnsPoly> expectedNeg;
+        std::vector<RnsPoly> residualNeg;
+        if (!negate_batch(ctx, expected, expectedNeg) ||
+            !subtract_batches(ctx, actual, expectedNeg, residualNeg))
+        {
+            return false;
+        }
+        const long double maxLog2Neg = max_centered_log2(ctx, residualNeg);
+        maxLog2 = std::min(maxLog2Pos, maxLog2Neg);
+
+        const std::uint32_t logQ = log_q_bits(params.mShrinkExpand.mRing);
+        if (params.mShrinkExpand.mPlaintextModulusBits >= logQ)
+        {
+            return false;
+        }
+
+        if (params.mShrinkExpand.mMode == ShrinkExpandMode::Deterministic)
+        {
+            const std::uint32_t tauHi =
+                (params.mShrinkExpand.mTau > 0u) ? (params.mShrinkExpand.mTau - 1u) : 0u;
+            const std::uint32_t rho =
+                static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
+            const long double pathLen =
+                1.0L + std::log2((muHi > 1u) ? static_cast<long double>(muHi) : 1.0L);
+            const long double truncationBoundLog2 =
+                static_cast<long double>(params.mShrinkExpand.mGadgetLogBase) +
+                std::log2(static_cast<long double>(params.mShrinkExpand.mRing.mPolyModulusDegree)) +
+                std::log2(pathLen);
+            return maxLog2 < truncationBoundLog2 + 1.0L;
+        }
+
+        return maxLog2 > 0.0L &&
+               maxLog2 < static_cast<long double>(logQ - params.mShrinkExpand.mPlaintextModulusBits);
+    }
+
+    bool find_root_golden_seed_for_test(
+        const Params& params,
+        const SenderState& sender,
+        std::vector<std::uint8_t>& seedOut)
+    {
+        Params candidateParams = params;
+        candidateParams.mShrinkExpand = sender.mShrinkExpandState.mParams;
+
+        if (!validateGoldenSeedSearch(candidateParams))
+        {
+            return false;
+        }
+
+        const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
+        const std::uint32_t rho =
+            static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
+        const std::uint64_t skHead =
+            (!sender.mSk1.empty() && !sender.mSk1[0].mCoeffs.empty())
+                ? sender.mSk1[0].mCoeffs[0]
+                : 0;
+        const std::uint64_t seedMaterial = deriveDeterministicSeedMaterial(
+            params.mShrinkExpand.mSamplingSeeds.mCt2Root,
+            0x54524E4353454544ull,
+            1,
+            params.mW,
+            muHi,
+            skHead);
+        std::mt19937_64 gen(seedMaterial);
+        std::uniform_int_distribution<int> distBytes(0, 255);
+
+        constexpr int maxSeedAttempts = 100;
+        std::vector<std::uint8_t> seed(16);
+        for (int attempt = 0; attempt < maxSeedAttempts; ++attempt)
+        {
+            for (auto& byte : seed)
+            {
+                byte = static_cast<std::uint8_t>(distBytes(gen));
+            }
+
+            RnsPoly rootKey{};
+            if (!computeRootSenderKey(sender, seed, rootKey))
+            {
+                return false;
+            }
+
+            ShrinkExpandExpandSenderInput senderExpandInput{};
+            senderExpandInput.mNonce = deriveSeedInstanceNonce(
+                params.mShrinkExpand.mSamplingSeeds,
+                seed,
+                0);
+            senderExpandInput.mTbkPrime = rootKey;
+
+            ShrinkExpandSenderExpandOutput senderExpand{};
+            if (!shrinkExpandExpandSender(sender.mShrinkExpandState, senderExpandInput, senderExpand))
+            {
+                return false;
+            }
+
+            bool candidateOk = false;
+            if (!validateGoldenSeedCandidate(candidateParams, senderExpand.mTbk, candidateOk))
+            {
+                return false;
+            }
+            if (candidateOk)
+            {
+                seedOut = std::move(seed);
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 
@@ -700,6 +993,123 @@ void LogVole2_Core_RootOnlineLocalFlow(const oc::CLP&)
         LOGVOLE_REQUIRE_TRUE(validateRingPolyShape(senderExpand.mTbk[idx], params.mShrinkExpand.mRing));
         LOGVOLE_REQUIRE_TRUE(validateRingPolyShape(receiverExpand.mTbm[idx], params.mShrinkExpand.mRing));
     }
+}
+
+void LogVole2_Core_RootOnlineLocalRelation(const oc::CLP&)
+{
+    Params params = make_golden_params();
+    params.mW =
+        params.mShrinkExpand.mAlpha *
+        (params.mShrinkExpand.mTau - 1) *
+        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+    ShrinkExpandParams trunc{};
+    LOGVOLE_REQUIRE_TRUE(makeTruncShrinkExpandParams(params, false, trunc));
+
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(trunc.mRing, ctx));
+
+    const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
+    const auto sk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7611u);
+
+    std::vector<RnsPoly> sRep;
+    LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
+        sk1,
+        params.mGamma,
+        params.mShrinkExpand.mAlpha,
+        tauHi,
+        params.mShrinkExpand.mRing,
+        sRep));
+    LOGVOLE_REQUIRE_EQ(sRep.size(), params.mW);
+
+    ShrinkExpandSenderOfflineInput seInput{};
+    seInput.mParams = trunc;
+    seInput.mS = sRep;
+
+    ShrinkExpandSenderState seSender{};
+    LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(seInput, seSender));
+
+    SenderState sender{};
+    sender.mParams = params;
+    sender.mSk1 = sk1;
+    sender.mShrinkExpandState = seSender;
+
+    RootOfflineMessage offlineMessage{};
+    LOGVOLE_REQUIRE_TRUE(prepareRootOfflineSender(sender, offlineMessage));
+    LOGVOLE_REQUIRE_TRUE(find_root_golden_seed_for_test(params, sender, sender.mGoldenSeed));
+
+    ShrinkExpandReceiverOfflineInput seReceiverInput{};
+    seReceiverInput.mParams = trunc;
+
+    ShrinkExpandReceiverState seReceiver{};
+    LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(seReceiverInput, seSender, seReceiver));
+
+    ReceiverState receiver{};
+    receiver.mParams = params;
+    receiver.mShrinkExpandState = seReceiver;
+    LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(receiver, offlineMessage));
+
+    const std::uint32_t plainSampleBits =
+        std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
+    const auto x = sample_small_plain_batch(ctx, params.mW, 0x7622u, plainSampleBits);
+
+    RootDigestState digestState{};
+    RootDigestMessage digestMessage{};
+    LOGVOLE_REQUIRE_TRUE(prepareRootDigestReceiver(receiver, x, digestState, digestMessage));
+
+    RootResponseMessage response{};
+    LOGVOLE_REQUIRE_TRUE(prepareRootResponseSender(sender, digestMessage, response));
+
+    RnsPoly senderKey{};
+    RnsPoly receiverKey{};
+    LOGVOLE_REQUIRE_TRUE(computeRootSenderKey(sender, response.mSeed, senderKey));
+    LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(receiver, digestState, response, receiverKey));
+
+    RnsPoly directReceiverKey{};
+    LOGVOLE_REQUIRE_TRUE(deriveSkxTrunc(
+        ctx,
+        sender.mShrinkExpandState.mSk1,
+        digestState.mDRt,
+        senderKey,
+        params.mShrinkExpand.mGadgetLogBase,
+        tauHi,
+        directReceiverKey));
+    std::vector<RnsPoly> receiverKeyDiff;
+    LOGVOLE_REQUIRE_TRUE(subtract_batches(
+        ctx,
+        std::vector<RnsPoly>{ receiverKey },
+        std::vector<RnsPoly>{ directReceiverKey },
+        receiverKeyDiff));
+    const auto receiverKeyResidual = max_centered_log2(ctx, receiverKeyDiff);
+
+    ShrinkExpandExpandSenderInput senderExpandInput{};
+    senderExpandInput.mNonce = deriveSeedInstanceNonce(
+        params.mShrinkExpand.mSamplingSeeds,
+        response.mSeed,
+        0);
+    senderExpandInput.mTbkPrime = senderKey;
+
+    ShrinkExpandSenderExpandOutput senderExpand{};
+    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(sender.mShrinkExpandState, senderExpandInput, senderExpand));
+
+    ShrinkExpandExpandReceiverInput receiverExpandInput{};
+    receiverExpandInput.mNonce = senderExpandInput.mNonce;
+    receiverExpandInput.mX = x;
+    receiverExpandInput.mDigest = digestState.mDRt;
+    receiverExpandInput.mSkX = receiverKey;
+    receiverExpandInput.mTree = digestState.mRootTree;
+
+    ShrinkExpandReceiverExpandOutput receiverExpand{};
+    LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(receiver.mShrinkExpandState, receiverExpandInput, receiverExpand));
+
+    std::vector<RnsPoly> actual;
+    std::vector<RnsPoly> expected;
+    LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, receiverExpand.mTbm, senderExpand.mTbk, actual));
+    LOGVOLE_REQUIRE_TRUE(compute_expected_s_mul_x(ctx, sRep, x, expected));
+
+    long double maxLog2 = 0.0L;
+    LOGVOLE_EXPECT_TRUE(check_logvole_noise_tolerance(ctx, actual, expected, params, maxLog2))
+        << "max centered log2 residual " << static_cast<double>(maxLog2)
+        << ", root sk_x residual " << static_cast<double>(receiverKeyResidual);
 }
 
 void LogVole2_Core_GoldenSeedSearchAcceptsFeasibleParams(const oc::CLP&)

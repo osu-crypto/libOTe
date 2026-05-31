@@ -482,12 +482,20 @@ namespace osuCrypto::LogVole2
                 (!state.mRootSkRRt.empty() && !state.mRootSkRRt[0].mCoeffs.empty())
                     ? state.mRootSkRRt[0].mCoeffs[0]
                     : 0;
+            u32 tauHi = 0;
+            if (!computeTauHi(state.mParams, tauHi))
+            {
+                return false;
+            }
+            const u32 rho =
+                static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            const u32 muHi = state.mParams.mShrinkExpand.mAlpha * tauHi * rho;
             const u64 seedMaterial = deriveDeterministicSeedMaterial(
                 state.mParams.mShrinkExpand.mSamplingSeeds.mCt2Root,
                 0x52544B5052494D45ull,
                 state.mParams.mW,
+                muHi,
                 state.mRootRandomizerWidth,
-                state.mRootSkRRt.size(),
                 rootSkHead);
             out = deriveUniformPolyFromNonce(ctx, seedMaterial, 0x52544B50u, 0);
             state.mRootKPrimeRt = std::make_shared<RnsPoly>(out);

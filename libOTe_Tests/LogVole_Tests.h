@@ -41,6 +41,7 @@
     X(Core, RootOfflineSetupFinalizeShapes) \
     X(Core, RootOfflineRejectsMetadataMismatch) \
     X(Core, RootOnlineLocalFlow) \
+    X(Core, RootOnlineLocalRelation) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \

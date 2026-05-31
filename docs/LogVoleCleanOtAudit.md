@@ -206,6 +206,7 @@ Current gaps relative to clean-ot:
 - No recursive LogVole protocol.
 - No CI-VOLE public API.
 - Root helper math, golden-seed search, root offline setup, and local root online digest/response flow are present.
+- Top-level root local relation is covered with clean-ot-style small plaintext inputs, golden-root seed selection, and CRT-centered noise tolerance.
 - No coproto root randomized digest exchange is wired yet.
 - Full recursive VOLE relation tests are not ported yet.
 - No sender precompute path.
@@ -226,14 +227,14 @@ Current gaps relative to clean-ot:
 | Ring ops | Partial libOTe implementation exists | Replace with clean-ot superset while preserving hot-path batching and memory layout | 60% |
 | Portable 128-bit math | Current code avoids some clean-ot portability failures | Add focused helper for `__int128` use on MSVC/GCC/Clang | 25% |
 | Boost/cpp_int dependency | Clean-ot uses Boost in ring ops | Audit exact need and either remove/replace or make it private and justified | 0% |
-| LENC/LHE | Partial LENC exists; LHE missing | Port clean-ot LENC/LHE helpers, digest tree, truncation, public cache behavior | 55% |
-| Shrink/expand | Partial older path exists | Port clean-ot params/state/backend behavior; remove key-derive assumptions | 55% |
+| LENC/LHE | LENC and LHE helpers are substantially ported | Finish parity around recursive gadget-leaf use and cache behavior | 70% |
+| Shrink/expand | Deterministic/full-noise shrink-expand and truncation tests pass | Add recursive gadget-leaf relation coverage through the LogVole parent path | 70% |
 | Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 45% |
-| Recursive LogVole | Missing | Implement offline/online recursion, root wrapper, golden seed, precompute, cached root | 30% |
+| Recursive LogVole | Root wrapper setup, digest/response, derandomization, and top-level local relation are present | Implement internal recursive sender/receiver flow, sender precompute, cached-root reuse, and coproto root exchange | 42% |
 | CI-VOLE API | Missing | Port `Zp` wrapper, CRT helpers, SID state, default params | 0% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
 | Networking | Simple coproto wrappers for stale protocol exist | Rewrite sender/receiver exchanges directly in coproto; do not port clean-ot comm layer | 20% |
-| Tests | Scaffold tests exist; clean-ot reference tests pass separately | Port recursive and CI-VOLE tests to libOTe API; retire stale key-derive tests | 52% |
+| Tests | LogVole2 has 61 passing tests, including root local relation with golden seed and clean-ot tolerance | Port internal recursive, precompute/cache, repeated online, and CI-VOLE tests | 58% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout
@@ -270,9 +271,9 @@ Use `namespace osuCrypto::LogVole`. Inside that namespace, avoid repeating `LogV
 3. Port clean-ot data types into `LogVoleTypes.h`, merging with existing names only where the semantics match exactly.
 4. Port ring ops and portability helpers first. Validate with ring and decomposition tests.
 5. Port LENC/LHE and shrink/expand math next. Validate deterministic and full-noise shrink/expand tests against clean-ot behavior.
-6. Port seed-label and root wrapper helpers. Add focused local tests for golden seed and root digest helpers where possible.
-7. Implement recursive sender/receiver offline and online with coproto directly.
-8. Port clean-ot recursive tests into `libOTe_Tests`.
+6. Finish seed-label/root wrapper parity for the internal recursive path, especially gadget-leaf inputs.
+7. Implement recursive sender/receiver offline and online locally first, then wire the same flow with coproto.
+8. Port clean-ot recursive tests into `libOTe_Tests`, starting with one-level root, then two-level recursion, then cached/precompute cases.
 9. Port CI-VOLE wrapper and public API tests.
 10. Remove stale key-derive API/tests and any leftover scaffold-only behavior.
 11. Only then add benchmark smoke coverage, with serial execution.
@@ -285,4 +286,4 @@ The recommended path is a controlled rewrite of the LogVole directory, using the
 
 ## Next concrete work
 
-The next coding step should be to replace the current type surface with clean-ot-compatible `LogVoleTypes.h` and port the complete ring operation surface behind it, including the MSVC portability helper. That gives us a stable base for LENC/LHE and prevents the stale key-derive API from continuing to shape the port.
+The next coding step should be to add the local recursive sender/receiver flow above the now-tested root wrapper: first one-level root as a top-level API, then the two-level path where the parent feeds gadget-leaf inputs to the child root. Keep this local and algebraic until the relation tests pass, then expose the same exchange over coproto.
