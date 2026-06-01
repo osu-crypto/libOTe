@@ -207,6 +207,7 @@ Current gaps relative to clean-ot:
 - No CI-VOLE public API.
 - Root helper math, golden-seed search, root offline setup, and local root online digest/response flow are present.
 - Top-level root local relation is covered with clean-ot-style small plaintext inputs, golden-root seed selection, and CRT-centered noise tolerance.
+- Top-level root local sender/receiver API helpers are present and relation-tested.
 - No coproto root randomized digest exchange is wired yet.
 - Full recursive VOLE relation tests are not ported yet.
 - No sender precompute path.
@@ -230,11 +231,11 @@ Current gaps relative to clean-ot:
 | LENC/LHE | LENC and LHE helpers are substantially ported | Finish parity around recursive gadget-leaf use and cache behavior | 70% |
 | Shrink/expand | Deterministic/full-noise shrink-expand and truncation tests pass | Add recursive gadget-leaf relation coverage through the LogVole parent path | 70% |
 | Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 45% |
-| Recursive LogVole | Root wrapper setup, digest/response, derandomization, and top-level local relation are present | Implement internal recursive sender/receiver flow, sender precompute, cached-root reuse, and coproto root exchange | 42% |
+| Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, and root precompute are present | Implement internal recursive sender/receiver flow, cached-root reuse, and coproto root exchange | 46% |
 | CI-VOLE API | Missing | Port `Zp` wrapper, CRT helpers, SID state, default params | 0% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
 | Networking | Simple coproto wrappers for stale protocol exist | Rewrite sender/receiver exchanges directly in coproto; do not port clean-ot comm layer | 20% |
-| Tests | LogVole2 has 61 passing tests, including root local relation with golden seed and clean-ot tolerance | Port internal recursive, precompute/cache, repeated online, and CI-VOLE tests | 58% |
+| Tests | LogVole2 has 62 passing tests, including root local API relation with golden seed and clean-ot tolerance | Port internal recursive, precompute/cache, repeated online, and CI-VOLE tests | 60% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout
@@ -286,4 +287,4 @@ The recommended path is a controlled rewrite of the LogVole directory, using the
 
 ## Next concrete work
 
-The next coding step should be to add the local recursive sender/receiver flow above the now-tested root wrapper: first one-level root as a top-level API, then the two-level path where the parent feeds gadget-leaf inputs to the child root. Keep this local and algebraic until the relation tests pass, then expose the same exchange over coproto.
+The next coding step should be to add the two-level local recursive sender/receiver flow where the parent feeds gadget-leaf inputs to the child root. Keep this local and algebraic until the relation test passes, then expose the same exchange over coproto.

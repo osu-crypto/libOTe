@@ -1,15 +1,12 @@
 #pragma once
 
+#include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
 #include "libOTe/Vole/LogVole2/LogVole2ShrinkExpand.h"
 
 #include <vector>
 
 namespace osuCrypto::LogVole2
 {
-    struct RootOfflineMessage;
-    struct RootDigestMessage;
-    struct RootResponseMessage;
-
     enum class SeedLabelMode : u8
     {
         Leaf = 0,
@@ -36,6 +33,48 @@ namespace osuCrypto::LogVole2
         std::vector<RnsPoly> mHatDRt;
         std::vector<RnsPoly> mZeta;
         std::shared_ptr<DigestTree> mRootTree;
+    };
+
+    struct SenderOfflineInput
+    {
+        Params mParams;
+        std::vector<RnsPoly> mSk1;
+        bool mLeafInputsAreGadget = false;
+    };
+
+    struct SenderOfflineOutput
+    {
+        SenderState mState;
+        ShrinkExpandOfflineMessage mShrinkExpandMessage;
+        RootOfflineMessage mRootMessage;
+    };
+
+    struct ReceiverOfflineInput
+    {
+        Params mParams;
+        bool mLeafInputsAreGadget = false;
+    };
+
+    struct ReceiverOfflineOutput
+    {
+        ReceiverState mState;
+    };
+
+    struct SenderOnlineOutput
+    {
+        std::vector<RnsPoly> mTbk;
+        std::vector<u8> mSeed;
+    };
+
+    struct ReceiverOnlineInput
+    {
+        std::vector<RnsPoly> mX;
+    };
+
+    struct ReceiverOnlineOutput
+    {
+        std::vector<RnsPoly> mTbm;
+        std::vector<u8> mSeed;
     };
 
     u32 rootRandomizerWidth(u32 tauFull);
@@ -131,6 +170,32 @@ namespace osuCrypto::LogVole2
         const SenderState& state,
         const std::vector<u8>& seed,
         RnsPoly& rootKey);
+
+    bool prepareSenderOffline(
+        const SenderOfflineInput& input,
+        SenderOfflineOutput& out);
+
+    bool finalizeReceiverOffline(
+        const ReceiverOfflineInput& input,
+        const ShrinkExpandOfflineMessage& shrinkExpandMessage,
+        const RootOfflineMessage& rootMessage,
+        ReceiverOfflineOutput& out);
+
+    bool ensureRootSenderPrecompute(
+        const SenderState& state);
+
+    bool prepareRootOnlineSender(
+        SenderState& state,
+        const RootDigestMessage& request,
+        RootResponseMessage& response,
+        SenderOnlineOutput& out);
+
+    bool finalizeRootOnlineReceiver(
+        ReceiverState& state,
+        const ReceiverOnlineInput& input,
+        const RootDigestState& digestState,
+        const RootResponseMessage& response,
+        ReceiverOnlineOutput& out);
 
     bool seedLabelAgg(
         const std::vector<RnsPoly>& inputHat,

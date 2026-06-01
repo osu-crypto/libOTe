@@ -525,6 +525,24 @@ namespace osuCrypto::LogVole2
             return true;
         }
 
+        bool computeMuHi(const Params& params, u32& out)
+        {
+            u32 tauHi = 0;
+            if (!computeTauHi(params, tauHi))
+            {
+                return false;
+            }
+
+            const u32 rho = static_cast<u32>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            if (rho == 0)
+            {
+                return false;
+            }
+
+            out = params.mShrinkExpand.mAlpha * tauHi * rho;
+            return true;
+        }
+
         bool evalRootTopCtNtt(
             const ReceiverState& state,
             const RingNttContext& ctx,
@@ -1422,6 +1440,284 @@ namespace osuCrypto::LogVole2
         }
 
         return denoiseAndAggRootKey(ctx, tbkRt, tauHi, rootKey);
+    }
+
+    bool prepareSenderOffline(
+        const SenderOfflineInput& input,
+        SenderOfflineOutput& out)
+    {
+        u32 tauHi = 0;
+        u32 muHi = 0;
+        const u32 rho = static_cast<u32>(input.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        if (!computeTauHi(input.mParams, tauHi) ||
+            !computeMuHi(input.mParams, muHi) ||
+            evalRecursiveMode(input.mParams.mW, input.mParams.mShrinkExpand.mAlpha, tauHi, rho) !=
+                RecursiveMode::Root ||
+            input.mParams.mW != muHi ||
+            input.mSk1.empty() ||
+            !validateRingBatchShape(input.mSk1, input.mParams.mShrinkExpand.mRing))
+        {
+            return false;
+        }
+
+        ShrinkExpandParams seParams{};
+        std::vector<RnsPoly> sRep;
+        if (!makeTruncShrinkExpandParams(input.mParams, input.mLeafInputsAreGadget, seParams) ||
+            !seedLabelRepOfflineSenderInput(
+                input.mSk1,
+                input.mParams.mGamma,
+                input.mParams.mShrinkExpand.mAlpha,
+                tauHi,
+                input.mParams.mShrinkExpand.mRing,
+                sRep))
+        {
+            return false;
+        }
+
+        ShrinkExpandSenderOfflineInput seInput{};
+        seInput.mParams = seParams;
+        seInput.mS = std::move(sRep);
+        if (input.mLeafInputsAreGadget)
+        {
+            seInput.mFixedSk1 = input.mSk1;
+        }
+
+        ShrinkExpandOfflineMessage seMessage{};
+        ShrinkExpandSenderState seState{};
+        if (!prepareShrinkExpandSenderOffline(seInput, seMessage, seState))
+        {
+            return false;
+        }
+
+        SenderState sender{};
+        sender.mParams = input.mParams;
+        sender.mSk1 = input.mSk1;
+        sender.mShrinkExpandState = std::move(seState);
+
+        RootOfflineMessage rootMessage{};
+        if (!prepareRootOfflineSender(sender, rootMessage))
+        {
+            return false;
+        }
+
+        SenderOfflineOutput next{};
+        next.mState = std::move(sender);
+        next.mShrinkExpandMessage = std::move(seMessage);
+        next.mRootMessage = std::move(rootMessage);
+        out = std::move(next);
+        return true;
+    }
+
+    bool finalizeReceiverOffline(
+        const ReceiverOfflineInput& input,
+        const ShrinkExpandOfflineMessage& shrinkExpandMessage,
+        const RootOfflineMessage& rootMessage,
+        ReceiverOfflineOutput& out)
+    {
+        u32 tauHi = 0;
+        u32 muHi = 0;
+        const u32 rho = static_cast<u32>(input.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        if (!computeTauHi(input.mParams, tauHi) ||
+            !computeMuHi(input.mParams, muHi) ||
+            evalRecursiveMode(input.mParams.mW, input.mParams.mShrinkExpand.mAlpha, tauHi, rho) !=
+                RecursiveMode::Root ||
+            input.mParams.mW != muHi)
+        {
+            return false;
+        }
+
+        ShrinkExpandParams seParams{};
+        if (!makeTruncShrinkExpandParams(input.mParams, input.mLeafInputsAreGadget, seParams))
+        {
+            return false;
+        }
+
+        ShrinkExpandReceiverOfflineInput seInput{};
+        seInput.mParams = seParams;
+
+        ShrinkExpandReceiverState seState{};
+        if (!finalizeShrinkExpandReceiverOffline(seInput, shrinkExpandMessage, seState))
+        {
+            return false;
+        }
+
+        ReceiverState receiver{};
+        receiver.mParams = input.mParams;
+        receiver.mShrinkExpandState = std::move(seState);
+        if (!finalizeRootOfflineReceiver(receiver, rootMessage))
+        {
+            return false;
+        }
+
+        ReceiverOfflineOutput next{};
+        next.mState = std::move(receiver);
+        out = std::move(next);
+        return true;
+    }
+
+    bool ensureRootSenderPrecompute(
+        const SenderState& state)
+    {
+        if (state.mPrecomputedTbk && !state.mGoldenSeed.empty())
+        {
+            return true;
+        }
+
+        u32 tauHi = 0;
+        u32 muHi = 0;
+        const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        if (!computeTauHi(state.mParams, tauHi) ||
+            !computeMuHi(state.mParams, muHi) ||
+            state.mParams.mW != muHi ||
+            evalRecursiveMode(state.mParams.mW, state.mParams.mShrinkExpand.mAlpha, tauHi, rho) !=
+                RecursiveMode::Root ||
+            state.mRootSkRRt.empty())
+        {
+            return false;
+        }
+
+        Params candidateParams = state.mParams;
+        candidateParams.mShrinkExpand = state.mShrinkExpandState.mParams;
+        if (!validateGoldenSeedSearch(candidateParams))
+        {
+            return false;
+        }
+
+        auto evaluate = [&](const std::vector<u8>& seed, RnsPoly& rootKey, std::vector<RnsPoly>& tbk, bool& valid) {
+            if (!computeRootSenderKey(state, seed, rootKey))
+            {
+                return false;
+            }
+
+            ShrinkExpandExpandSenderInput expandInput{};
+            expandInput.mNonce = deriveSeedInstanceNonce(state.mParams.mShrinkExpand.mSamplingSeeds, seed, 0);
+            expandInput.mTbkPrime = rootKey;
+
+            ShrinkExpandSenderExpandOutput expandOutput{};
+            if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
+                !validateGoldenSeedCandidate(candidateParams, expandOutput.mTbk, valid))
+            {
+                return false;
+            }
+
+            tbk = std::move(expandOutput.mTbk);
+            return true;
+        };
+
+        if (!state.mGoldenSeed.empty())
+        {
+            RnsPoly rootKey{};
+            std::vector<RnsPoly> tbk;
+            bool valid = false;
+            if (!evaluate(state.mGoldenSeed, rootKey, tbk, valid) || !valid)
+            {
+                return false;
+            }
+
+            state.mRootKRt = std::make_shared<RnsPoly>(std::move(rootKey));
+            state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(std::move(tbk));
+            return true;
+        }
+
+        const u64 skHead =
+            (!state.mSk1.empty() && !state.mSk1[0].mCoeffs.empty()) ? state.mSk1[0].mCoeffs[0] : 0;
+        const u64 seedMaterial = deriveDeterministicSeedMaterial(
+            state.mParams.mShrinkExpand.mSamplingSeeds.mCt2Root,
+            0x54524E4353454544ull,
+            1,
+            state.mParams.mW,
+            muHi,
+            skHead);
+        std::mt19937_64 gen(seedMaterial);
+        std::uniform_int_distribution<int> distBytes(0, 255);
+
+        constexpr int maxSeedAttempts = 100;
+        std::vector<u8> seed(16);
+        for (int attempt = 0; attempt < maxSeedAttempts; ++attempt)
+        {
+            for (u8& byte : seed)
+            {
+                byte = static_cast<u8>(distBytes(gen));
+            }
+
+            RnsPoly rootKey{};
+            std::vector<RnsPoly> tbk;
+            bool valid = false;
+            if (!evaluate(seed, rootKey, tbk, valid))
+            {
+                return false;
+            }
+            if (!valid)
+            {
+                continue;
+            }
+
+            state.mGoldenSeed = std::move(seed);
+            state.mRootKRt = std::make_shared<RnsPoly>(std::move(rootKey));
+            state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(std::move(tbk));
+            return true;
+        }
+
+        return false;
+    }
+
+    bool prepareRootOnlineSender(
+        SenderState& state,
+        const RootDigestMessage& request,
+        RootResponseMessage& response,
+        SenderOnlineOutput& out)
+    {
+        if (!ensureRootSenderPrecompute(state) ||
+            !prepareRootResponseSender(state, request, response) ||
+            !state.mPrecomputedTbk)
+        {
+            return false;
+        }
+
+        SenderOnlineOutput next{};
+        next.mSeed = response.mSeed;
+        next.mTbk = *state.mPrecomputedTbk;
+        out = std::move(next);
+        return true;
+    }
+
+    bool finalizeRootOnlineReceiver(
+        ReceiverState& state,
+        const ReceiverOnlineInput& input,
+        const RootDigestState& digestState,
+        const RootResponseMessage& response,
+        ReceiverOnlineOutput& out)
+    {
+        RnsPoly receiverKey{};
+        if (!finalizeRootResponseReceiver(state, digestState, response, receiverKey))
+        {
+            return false;
+        }
+
+        ShrinkExpandExpandReceiverInput expandInput{};
+        expandInput.mNonce = deriveSeedInstanceNonce(state.mParams.mShrinkExpand.mSamplingSeeds, response.mSeed, 0);
+        expandInput.mX = input.mX;
+        expandInput.mDigest = digestState.mDRt;
+        expandInput.mSkX = std::move(receiverKey);
+        expandInput.mTree = digestState.mRootTree;
+
+        ShrinkExpandReceiverExpandOutput expandOutput{};
+        if (!shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput, expandOutput) ||
+            expandOutput.mTbm.size() < input.mX.size())
+        {
+            return false;
+        }
+
+        if (expandOutput.mTbm.size() > input.mX.size())
+        {
+            expandOutput.mTbm.resize(input.mX.size());
+        }
+
+        ReceiverOnlineOutput next{};
+        next.mSeed = response.mSeed;
+        next.mTbm = std::move(expandOutput.mTbm);
+        out = std::move(next);
+        return true;
     }
 
     bool finalizeRootResponseReceiver(
