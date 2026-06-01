@@ -2,6 +2,7 @@
 
 #include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <limits>
@@ -63,6 +64,117 @@ namespace osuCrypto::LogVole2
 
             co_return payload;
         }
+
+        bool computeTauHi(const Params& params, u32& out)
+        {
+            if (params.mShrinkExpand.mTau < 2)
+            {
+                return false;
+            }
+            out = params.mShrinkExpand.mTau - 1;
+            return true;
+        }
+
+        bool recursiveMode(const Params& params, RecursiveMode& out)
+        {
+            u32 tauHi = 0;
+            if (!computeTauHi(params, tauHi))
+            {
+                return false;
+            }
+
+            const u32 rho = static_cast<u32>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            out = evalRecursiveMode(params.mW, params.mShrinkExpand.mAlpha, tauHi, rho);
+            return true;
+        }
+
+        bool childParams(const Params& params, Params& out)
+        {
+            u32 tauHi = 0;
+            if (!computeTauHi(params, tauHi))
+            {
+                return false;
+            }
+
+            const u32 rho = static_cast<u32>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            const u32 muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
+            if (rho == 0 || muHi == 0)
+            {
+                return false;
+            }
+
+            const u32 wDoublePrime = (params.mW + muHi - 1u) / muHi;
+            if (wDoublePrime == 0)
+            {
+                return false;
+            }
+
+            out = params;
+            out.mW = wDoublePrime * tauHi * rho;
+            out.mGamma = tauHi;
+            return true;
+        }
+
+        u64 countSeedInstances(const ReceiverState& state)
+        {
+            u32 tauHi = 0;
+            if (!computeTauHi(state.mParams, tauHi))
+            {
+                return 0;
+            }
+
+            const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            const u32 muHi = state.mParams.mShrinkExpand.mAlpha * tauHi * rho;
+            if (evalRecursiveMode(state.mParams.mW, state.mParams.mShrinkExpand.mAlpha, tauHi, rho) ==
+                RecursiveMode::Root)
+            {
+                return 1;
+            }
+            if (!state.mNextLevelState || muHi == 0)
+            {
+                return 0;
+            }
+
+            const u32 wDoublePrime = (state.mParams.mW + muHi - 1u) / muHi;
+            return countSeedInstances(*state.mNextLevelState) + wDoublePrime;
+        }
+
+        task<> recvOfflineMessage(
+            const Params& params,
+            OfflineMessage& message,
+            Socket& sock)
+        {
+            RecursiveMode mode{};
+            if (!recursiveMode(params, mode))
+            {
+                throw std::runtime_error("LogVole2 receiver has invalid recursive offline parameters");
+            }
+
+            const auto shrinkExpandPayload = co_await recvFrame(sock);
+            if (!decode(shrinkExpandPayload, message.mShrinkExpandMessage))
+            {
+                throw std::runtime_error("LogVole2 receiver could not decode shrink/expand offline message");
+            }
+
+            if (mode == RecursiveMode::Root)
+            {
+                const auto rootPayload = co_await recvFrame(sock);
+                if (!decode(rootPayload, message.mRootMessage))
+                {
+                    throw std::runtime_error("LogVole2 receiver could not decode root offline message");
+                }
+                co_return;
+            }
+
+            Params child{};
+            if (!childParams(params, child))
+            {
+                throw std::runtime_error("LogVole2 receiver could not derive child parameters");
+            }
+
+            message.mNextLevel = std::make_unique<OfflineMessage>();
+            co_await recvOfflineMessage(child, *message.mNextLevel, sock);
+        }
     }
 
     task<> Receiver::offline(
@@ -82,6 +194,23 @@ namespace osuCrypto::LogVole2
         {
             throw std::runtime_error("LogVole2 receiver rejected shrink/expand offline message");
         }
+    }
+
+    task<> Receiver::offline(
+        const ReceiverOfflineInput& input,
+        ReceiverState& state,
+        Socket& sock)
+    {
+        OfflineMessage message{};
+        co_await recvOfflineMessage(input.mParams, message, sock);
+
+        ReceiverOfflineOutput output{};
+        if (!finalizeReceiverOffline(input, message, output))
+        {
+            throw std::runtime_error("LogVole2 receiver rejected recursive offline message");
+        }
+
+        state = std::move(output.mState);
     }
 
     task<> Receiver::keyDerive(
@@ -109,6 +238,164 @@ namespace osuCrypto::LogVole2
         {
             throw std::runtime_error("LogVole2 receiver rejected key-derive response");
         }
+    }
+
+    task<> Receiver::online(
+        ReceiverState& state,
+        const ReceiverOnlineInput& input,
+        ReceiverOnlineOutput& output,
+        Socket& sock)
+    {
+        u32 tauHi = 0;
+        if (!computeTauHi(state.mParams, tauHi))
+        {
+            throw std::runtime_error("LogVole2 receiver has invalid recursive online parameters");
+        }
+
+        const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        const u32 muHi = state.mParams.mShrinkExpand.mAlpha * tauHi * rho;
+        RecursiveMode mode{};
+        if (rho == 0 || muHi == 0 || !recursiveMode(state.mParams, mode))
+        {
+            throw std::runtime_error("LogVole2 receiver has invalid recursive online shape");
+        }
+
+        if (mode == RecursiveMode::Root)
+        {
+            RootDigestState digestState{};
+            RootDigestMessage digest{};
+            if (!prepareRootDigestReceiver(state, input.mX, digestState, digest))
+            {
+                throw std::runtime_error("LogVole2 receiver could not prepare root digest");
+            }
+
+            co_await sendFrame(sock, encode(digest));
+
+            const auto responsePayload = co_await recvFrame(sock);
+            RootResponseMessage response{};
+            if (!decode(responsePayload, response))
+            {
+                throw std::runtime_error("LogVole2 receiver could not decode root response");
+            }
+
+            if (!finalizeRootOnlineReceiver(state, input, digestState, response, output))
+            {
+                throw std::runtime_error("LogVole2 receiver could not finalize root online");
+            }
+            co_return;
+        }
+
+        if (!state.mNextLevelState || input.mX.size() != state.mParams.mW)
+        {
+            throw std::runtime_error("LogVole2 receiver missing recursive child state");
+        }
+
+        const u32 wDoublePrime = (state.mParams.mW + muHi - 1u) / muHi;
+        const u32 wNext = wDoublePrime * tauHi * rho;
+        const u32 wPrime =
+            (state.mParams.mW + state.mParams.mShrinkExpand.mAlpha - 1u) /
+            state.mParams.mShrinkExpand.mAlpha;
+
+        std::vector<RnsPoly> dHat;
+        dHat.reserve(wNext);
+        std::vector<RnsPoly> digests;
+        digests.reserve(wDoublePrime);
+        std::vector<std::shared_ptr<DigestTree>> trees;
+        trees.reserve(wDoublePrime);
+
+        for (u32 chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+        {
+            const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
+            const std::size_t end = std::min(start + static_cast<std::size_t>(muHi), input.mX.size());
+
+            std::vector<RnsPoly> chunk(input.mX.begin() + start, input.mX.begin() + end);
+            while (chunk.size() < muHi)
+            {
+                RnsPoly zero{};
+                zero.mCoeffs.assign(ringPolyCoeffCount(state.mParams.mShrinkExpand.mRing), 0);
+                chunk.push_back(std::move(zero));
+            }
+
+            ShrinkExpandShrinkOutput shrink{};
+            std::vector<RnsPoly> decomposed;
+            if (!shrinkExpandShrink(state.mShrinkExpandState, chunk, shrink) ||
+                !seedLabelGadgetDecomposeHiAndUnbundle(
+                    shrink.mDigest,
+                    state.mParams.mShrinkExpand.mGadgetLogBase,
+                    tauHi,
+                    state.mParams.mShrinkExpand.mRing,
+                    decomposed) ||
+                decomposed.size() != static_cast<std::size_t>(tauHi) * rho)
+            {
+                throw std::runtime_error("LogVole2 receiver could not prepare recursive child input");
+            }
+
+            digests.push_back(std::move(shrink.mDigest));
+            trees.push_back(std::move(shrink.mTree));
+            for (auto& poly : decomposed)
+            {
+                dHat.push_back(std::move(poly));
+            }
+        }
+
+        ReceiverOnlineInput childInput{};
+        childInput.mX = std::move(dHat);
+
+        ReceiverOnlineOutput childOutput{};
+        co_await online(*state.mNextLevelState, childInput, childOutput, sock);
+
+        std::vector<RnsPoly> skXHat;
+        std::vector<RnsPoly> skX;
+        if (!seedLabelDenoiseTbm(
+                childOutput.mTbm,
+                wPrime,
+                tauHi,
+                state.mParams.mShrinkExpand.mRing,
+                skXHat) ||
+            !seedLabelAgg(
+                skXHat,
+                wDoublePrime,
+                tauHi,
+                state.mParams.mShrinkExpand.mRing,
+                skX) ||
+            skX.size() != wDoublePrime)
+        {
+            throw std::runtime_error("LogVole2 receiver could not derive recursive expansion keys");
+        }
+
+        const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
+        std::vector<RnsPoly> finalTbm(state.mParams.mW);
+        for (u32 chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+        {
+            const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
+            const std::size_t end = std::min(start + static_cast<std::size_t>(muHi), input.mX.size());
+
+            ShrinkExpandExpandReceiverInput expandInput{};
+            expandInput.mNonce = deriveSeedInstanceNonce(
+                state.mParams.mShrinkExpand.mSamplingSeeds,
+                childOutput.mSeed,
+                instanceBase + chunkIdx);
+            expandInput.mDigest = digests[chunkIdx];
+            expandInput.mSkX = skX[chunkIdx];
+            expandInput.mTree = trees[chunkIdx];
+
+            ShrinkExpandReceiverExpandOutput expandOutput{};
+            if (!shrinkExpandExpandReceiver(state.mShrinkExpandState, expandInput, expandOutput) ||
+                expandOutput.mTbm.size() < end - start)
+            {
+                throw std::runtime_error("LogVole2 receiver could not expand recursive chunk");
+            }
+
+            for (std::size_t itemIdx = 0; itemIdx < end - start; ++itemIdx)
+            {
+                finalTbm[start + itemIdx] = std::move(expandOutput.mTbm[itemIdx]);
+            }
+        }
+
+        ReceiverOnlineOutput next{};
+        next.mSeed = childOutput.mSeed;
+        next.mTbm = std::move(finalTbm);
+        output = std::move(next);
     }
 
     task<> Receiver::expand(

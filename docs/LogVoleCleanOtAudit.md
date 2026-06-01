@@ -231,11 +231,11 @@ Current gaps relative to clean-ot:
 | LENC/LHE | LENC and LHE helpers are substantially ported | Finish parity around recursive gadget-leaf use and cache behavior | 70% |
 | Shrink/expand | Deterministic/full-noise shrink-expand and truncation tests pass | Add recursive gadget-leaf relation coverage through the LogVole parent path | 70% |
 | Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 45% |
-| Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, root precompute/cache reuse, repeated local online, internal setup reuse, recursive gadget subproblem coverage, and clean-ot-profile two-/three-level local recursion are present | Add cached-root transmission semantics and translate the existing callback send/receive flow to coproto awaits | 69% |
+| Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, root precompute/cache reuse, repeated local online, internal setup reuse, recursive gadget subproblem coverage, clean-ot-profile two-/three-level local recursion, and recursive coproto offline/online are present | Audit clean-ot reuse/counter semantics exactly, then port the remaining CI-VOLE-facing protocol surface | 78% |
 | CI-VOLE API | Missing | Port `Zp` wrapper, CRT helpers, SID state, default params | 0% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
-| Networking | Simple coproto wrappers for stale protocol exist | Rewrite sender/receiver exchanges directly in coproto; do not port clean-ot comm layer | 20% |
-| Tests | LogVole2 has 69 expected tests after this checkpoint, including clean-ot-profile two-/three-level local recursive API, sender precompute cache, repeated-online, internal setup reuse, and recursive gadget-input subproblem coverage | Port the remaining clean-ot cached-root transmission and CI-VOLE tests without changing their parameter profiles | 76% |
+| Networking | Coproto wrappers exist for key-derive, shrink/expand, and recursive LogVole offline/online | Continue direct coproto translation for the remaining clean-ot-facing APIs; do not port clean-ot comm layer | 70% |
+| Tests | LogVole2 has 70 expected tests after this checkpoint, including clean-ot-profile two-/three-level local recursive API, sender precompute cache, repeated-online, internal setup reuse, recursive gadget-input subproblem coverage, and recursive coproto relation coverage | Port the remaining clean-ot communication/reuse accounting and CI-VOLE tests without changing their parameter profiles | 81% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout
@@ -291,4 +291,4 @@ Clean-ot is the oracle. Porting should preserve its parameter profiles, tests, s
 
 ## Next concrete work
 
-The next coding step should be cached-root transmission, which depends on communication semantics and should be implemented as part of the direct callback-to-coproto translation. After that, port the CI-VOLE tests without changing their parameter profiles.
+The next coding step should be an exact clean-ot audit of reuse/counter behavior around `golden_seed_transmitted`, sender precompute, and repeated online calls, followed by CI-VOLE test porting without changing parameter profiles.

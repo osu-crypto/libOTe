@@ -1,7 +1,13 @@
 #include "libOTe/Vole/LogVole2/LogVole2Core.h"
 #include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
+#include "libOTe/Vole/LogVole2/LogVole2Receiver.h"
+#include "libOTe/Vole/LogVole2/LogVole2Sender.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
+
+#include "coproto/Socket/LocalAsyncSock.h"
+#include "macoro/sync_wait.h"
+#include "macoro/when_all.h"
 
 #include "seal/util/rns.h"
 #include "seal/util/uintarith.h"
@@ -13,6 +19,7 @@
 #include <cstdint>
 #include <limits>
 #include <random>
+#include <tuple>
 #include <vector>
 
 using namespace osuCrypto::LogVole2;
@@ -1648,6 +1655,89 @@ void LogVole2_Core_RecursiveGadgetInputSubproblem(const oc::CLP&)
 void LogVole2_Core_RecursiveGadgetInputSubproblemFullNoise(const oc::CLP&)
 {
     run_recursive_gadget_subproblem_test(false);
+}
+
+void LogVole2_Core_ThreeLevelCoprotoRelation(const oc::CLP&)
+{
+    Params params = make_recursive_params(3);
+    const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
+    const std::uint32_t rho =
+        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+    const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
+
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+
+    SenderOfflineInput senderInput{};
+    senderInput.mParams = params;
+    senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7D51u);
+
+    ReceiverOfflineInput receiverInput{};
+    receiverInput.mParams = params;
+
+    Sender sender{};
+    Receiver receiver{};
+    SenderState senderState{};
+    ReceiverState receiverState{};
+
+    auto offlineSockets = coproto::LocalAsyncSocket::makePair();
+    auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
+        sender.offline(senderInput, senderState, offlineSockets[0]),
+        receiver.offline(receiverInput, receiverState, offlineSockets[1])));
+    std::get<0>(offlineResult).result();
+    std::get<1>(offlineResult).result();
+
+    const std::uint32_t plainSampleBits =
+        std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
+    ReceiverOnlineInput receiverOnlineInput{};
+    receiverOnlineInput.mX = sample_small_plain_batch(ctx, params.mW, 0x7D62u, plainSampleBits);
+
+    SenderOnlineOutput senderOnline{};
+    ReceiverOnlineOutput receiverOnline{};
+
+    auto onlineSockets = coproto::LocalAsyncSocket::makePair();
+    auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
+        sender.online(senderState, senderOnline, onlineSockets[0]),
+        receiver.online(receiverState, receiverOnlineInput, receiverOnline, onlineSockets[1])));
+    std::get<0>(onlineResult).result();
+    std::get<1>(onlineResult).result();
+
+    LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
+    LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
+    LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
+    LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == receiverOnline.mSeed);
+
+    std::vector<RnsPoly> sRep;
+    LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
+        senderInput.mSk1,
+        params.mGamma,
+        params.mShrinkExpand.mAlpha,
+        tauHi,
+        params.mShrinkExpand.mRing,
+        sRep));
+
+    const std::uint32_t wDoublePrime = (params.mW + muHi - 1u) / muHi;
+    std::vector<RnsPoly> sW;
+    sW.reserve(params.mW);
+    for (std::uint32_t chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+    {
+        for (const auto& poly : sRep)
+        {
+            if (sW.size() < params.mW)
+            {
+                sW.push_back(poly);
+            }
+        }
+    }
+
+    std::vector<RnsPoly> actual;
+    std::vector<RnsPoly> expected;
+    LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, receiverOnline.mTbm, senderOnline.mTbk, actual));
+    LOGVOLE_REQUIRE_TRUE(compute_expected_s_mul_x(ctx, sW, receiverOnlineInput.mX, expected));
+
+    long double maxLog2 = 0.0L;
+    LOGVOLE_EXPECT_TRUE(check_logvole_noise_tolerance(ctx, actual, expected, params, maxLog2))
+        << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
 void LogVole2_Core_GoldenSeedSearchAcceptsFeasibleParams(const oc::CLP&)
