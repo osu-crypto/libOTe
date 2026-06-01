@@ -45,6 +45,7 @@
     X(Core, RootLocalApiRelation) \
     X(Core, TwoLevelLocalRelation) \
     X(Core, TwoLevelLocalApiRelation) \
+    X(Core, ThreeLevelLocalApiRelation) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \
