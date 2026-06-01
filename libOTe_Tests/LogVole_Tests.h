@@ -56,6 +56,7 @@
     X(Core, ThreeLevelOfflineReusesInternalSetup) \
     X(Core, RecursiveGadgetInputSubproblem) \
     X(Core, RecursiveGadgetInputSubproblemFullNoise) \
+    X(Core, RejectsWidthsBelowRandomizedRootBlock) \
     X(Core, ThreeLevelCoprotoRelation) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedFindAndValidateCandidate) \

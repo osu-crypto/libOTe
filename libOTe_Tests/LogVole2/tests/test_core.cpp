@@ -94,6 +94,35 @@ namespace
         return params;
     }
 
+    Params make_leaf_tau_one_params()
+    {
+        Params params{};
+        params.mShrinkExpand.mRing.mPolyModulusDegree = 16384;
+        params.mShrinkExpand.mRing.mCoeffModulusBits = { 55, 55, 55, 55, 55 };
+        params.mShrinkExpand.mPlaintextModulusBits = 55;
+        params.mShrinkExpand.mMode = ShrinkExpandMode::Deterministic;
+        params.mShrinkExpand.mNoiseBound = 0;
+        params.mShrinkExpand.mSamplingSeeds.mNoiseRoot = 0xBAD5EEDu;
+        params.mShrinkExpand.mAlpha = 2;
+        params.mShrinkExpand.mGadgetLogBase = 110;
+
+        std::uint32_t logQ = 0;
+        for (const auto bits : params.mShrinkExpand.mRing.mCoeffModulusBits)
+        {
+            logQ += static_cast<std::uint32_t>(bits);
+        }
+        params.mShrinkExpand.mTau =
+            (logQ + params.mShrinkExpand.mGadgetLogBase - 1u) /
+            params.mShrinkExpand.mGadgetLogBase;
+        params.mShrinkExpand.mMu =
+            params.mShrinkExpand.mAlpha *
+            params.mShrinkExpand.mTau *
+            static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        params.mW = 6;
+        params.mGamma = 1;
+        return params;
+    }
+
     Params make_root_params()
     {
         Params params{};
@@ -1655,6 +1684,33 @@ void LogVole2_Core_RecursiveGadgetInputSubproblem(const oc::CLP&)
 void LogVole2_Core_RecursiveGadgetInputSubproblemFullNoise(const oc::CLP&)
 {
     run_recursive_gadget_subproblem_test(false);
+}
+
+void LogVole2_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
+{
+    const Params params = make_leaf_tau_one_params();
+    const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
+    const std::uint32_t rho =
+        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+    const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
+    LOGVOLE_REQUIRE_LT(params.mW, muHi);
+
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+
+    SenderOfflineInput senderInput{};
+    senderInput.mParams = params;
+    senderInput.mSk1 = sample_batch(ctx, 1, 0x7D01u);
+
+    SenderOfflineOutput senderOutput{};
+    LOGVOLE_EXPECT_FALSE(prepareSenderOffline(senderInput, senderOutput));
+
+    ReceiverOfflineInput receiverInput{};
+    receiverInput.mParams = params;
+
+    OfflineMessage emptyMessage{};
+    ReceiverOfflineOutput receiverOutput{};
+    LOGVOLE_EXPECT_FALSE(finalizeReceiverOffline(receiverInput, emptyMessage, receiverOutput));
 }
 
 void LogVole2_Core_ThreeLevelCoprotoRelation(const oc::CLP&)

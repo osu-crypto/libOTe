@@ -235,7 +235,7 @@ Current gaps relative to clean-ot:
 | CI-VOLE API | Default params, `Zp` CRT wrapper, SID state, releasek/release/setx flows, and clean-ot public API tests are ported over coproto | Add any missing example/benchmark smoke surfaces only after final API naming settles | 80% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
 | Networking | Coproto wrappers exist for key-derive, shrink/expand, recursive LogVole offline/online, and CI-VOLE public API flows | Continue direct coproto translation for any remaining clean-ot-facing API; do not port clean-ot comm layer | 82% |
-| Tests | LogVole2 has 76 expected tests after this checkpoint, including clean-ot-profile recursive coverage, recursive coproto relation coverage, and the six clean-ot CI-VOLE public API tests | Port any remaining clean-ot communication/reuse accounting tests without changing their parameter profiles | 87% |
+| Tests | LogVole2 has 77 expected tests after this checkpoint, including clean-ot-profile recursive coverage, recursive coproto relation coverage, root-width rejection, and the six clean-ot CI-VOLE public API tests | Port any remaining clean-ot communication/reuse accounting tests without changing their parameter profiles | 88% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout
