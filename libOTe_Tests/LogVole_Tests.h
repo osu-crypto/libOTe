@@ -45,6 +45,8 @@
     X(Core, RootLocalApiRelation) \
     X(Core, TwoLevelLocalApiRelation) \
     X(Core, ThreeLevelLocalApiRelation) \
+    X(Core, ThreeLevelLocalPrecomputeCache) \
+    X(Core, ThreeLevelLocalRepeatedOnline) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \

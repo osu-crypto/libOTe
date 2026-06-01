@@ -231,11 +231,11 @@ Current gaps relative to clean-ot:
 | LENC/LHE | LENC and LHE helpers are substantially ported | Finish parity around recursive gadget-leaf use and cache behavior | 70% |
 | Shrink/expand | Deterministic/full-noise shrink-expand and truncation tests pass | Add recursive gadget-leaf relation coverage through the LogVole parent path | 70% |
 | Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 45% |
-| Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, root precompute, and clean-ot-profile two-/three-level local recursion are present | Add cached-root reuse and translate the existing callback send/receive flow to coproto awaits | 63% |
+| Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, root precompute/cache reuse, repeated local online, and clean-ot-profile two-/three-level local recursion are present | Add cached-root transmission semantics and translate the existing callback send/receive flow to coproto awaits | 66% |
 | CI-VOLE API | Missing | Port `Zp` wrapper, CRT helpers, SID state, default params | 0% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
 | Networking | Simple coproto wrappers for stale protocol exist | Rewrite sender/receiver exchanges directly in coproto; do not port clean-ot comm layer | 20% |
-| Tests | LogVole2 has clean-ot-profile two-/three-level local recursive API coverage | Port the existing clean-ot recursive/precompute/cache/repeated-online/CI-VOLE tests without changing their parameter profiles | 68% |
+| Tests | LogVole2 has 66 passing tests, including clean-ot-profile two-/three-level local recursive API, sender precompute cache, and repeated-online coverage | Port the remaining clean-ot cached-root transmission, internal setup reuse, recursive gadget subproblem, and CI-VOLE tests without changing their parameter profiles | 72% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout
@@ -291,4 +291,4 @@ Clean-ot is the oracle. Porting should preserve its parameter profiles, tests, s
 
 ## Next concrete work
 
-The next coding step should be cached/precomputed sender and repeated-online coverage, copied from the existing clean-ot tests and parameter builders. Once those are green, translate the callback networking directly to coproto sender/receiver flows in one cutover.
+The next coding step should be the remaining clean-ot recursive protocol tests whose assertions depend on communication behavior: cached-root transmission, internal setup reuse counters, and the recursive gadget-input subproblem. Then translate the callback networking directly to coproto sender/receiver flows in one cutover.

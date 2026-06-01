@@ -1645,6 +1645,123 @@ void LogVole2_Core_ThreeLevelLocalApiRelation(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
+void LogVole2_Core_ThreeLevelLocalPrecomputeCache(const oc::CLP&)
+{
+    Params params = make_recursive_params(3);
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+
+    SenderOfflineInput senderInput{};
+    senderInput.mParams = params;
+    senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7951u);
+
+    SenderOfflineOutput senderOffline{};
+    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(senderInput, senderOffline));
+
+    LOGVOLE_REQUIRE_TRUE(ensureSenderPrecompute(senderOffline.mState));
+    LOGVOLE_REQUIRE_FALSE(senderOffline.mState.mGoldenSeed.empty());
+    LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mPrecomputedTbk != nullptr);
+    LOGVOLE_REQUIRE_EQ(senderOffline.mState.mPrecomputedTbk->size(), params.mW);
+
+    const auto seed = senderOffline.mState.mGoldenSeed;
+    const auto cachedTbk = senderOffline.mState.mPrecomputedTbk.get();
+    LOGVOLE_REQUIRE_TRUE(ensureSenderPrecompute(senderOffline.mState));
+    LOGVOLE_EXPECT_TRUE(senderOffline.mState.mGoldenSeed == seed);
+    LOGVOLE_EXPECT_TRUE(senderOffline.mState.mPrecomputedTbk.get() == cachedTbk);
+}
+
+void LogVole2_Core_ThreeLevelLocalRepeatedOnline(const oc::CLP&)
+{
+    Params params = make_recursive_params(3);
+    const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
+    const std::uint32_t rho =
+        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+    const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
+
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+
+    SenderOfflineInput senderInput{};
+    senderInput.mParams = params;
+    senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7A51u);
+
+    SenderOfflineOutput senderOffline{};
+    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(senderInput, senderOffline));
+
+    ReceiverOfflineInput receiverInput{};
+    receiverInput.mParams = params;
+
+    ReceiverOfflineOutput receiverOffline{};
+    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, receiverOffline));
+
+    std::vector<RnsPoly> sRep;
+    LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
+        senderInput.mSk1,
+        params.mGamma,
+        params.mShrinkExpand.mAlpha,
+        tauHi,
+        params.mShrinkExpand.mRing,
+        sRep));
+
+    const std::uint32_t wDoublePrime = (params.mW + muHi - 1u) / muHi;
+    std::vector<RnsPoly> sW;
+    sW.reserve(params.mW);
+    for (std::uint32_t chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+    {
+        for (const auto& poly : sRep)
+        {
+            if (sW.size() < params.mW)
+            {
+                sW.push_back(poly);
+            }
+        }
+    }
+
+    std::vector<std::uint8_t> firstSeed;
+    const std::uint32_t plainSampleBits =
+        std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
+    const auto verifyOnline = [&](std::uint64_t inputSeed) {
+        ReceiverOnlineInput receiverInputOnline{};
+        receiverInputOnline.mX = sample_small_plain_batch(ctx, params.mW, inputSeed, plainSampleBits);
+
+        SenderOnlineOutput senderOnline{};
+        ReceiverOnlineOutput receiverOnline{};
+        LOGVOLE_REQUIRE_TRUE(runLocalOnline(
+            senderOffline.mState,
+            receiverOffline.mState,
+            receiverInputOnline,
+            senderOnline,
+            receiverOnline));
+        LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
+        LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
+        LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
+        LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == receiverOnline.mSeed);
+
+        if (firstSeed.empty())
+        {
+            firstSeed = senderOnline.mSeed;
+        }
+        else
+        {
+            LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == firstSeed);
+        }
+
+        std::vector<RnsPoly> actual;
+        std::vector<RnsPoly> expected;
+        LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, receiverOnline.mTbm, senderOnline.mTbk, actual));
+        LOGVOLE_REQUIRE_TRUE(compute_expected_s_mul_x(ctx, sW, receiverInputOnline.mX, expected));
+
+        long double maxLog2 = 0.0L;
+        LOGVOLE_EXPECT_TRUE(check_logvole_noise_tolerance(ctx, actual, expected, params, maxLog2))
+            << "max centered log2 residual " << static_cast<double>(maxLog2);
+    };
+
+    verifyOnline(0x7A62u);
+    const auto cachedTbk = senderOffline.mState.mPrecomputedTbk.get();
+    verifyOnline(0x7A63u);
+    LOGVOLE_EXPECT_TRUE(senderOffline.mState.mPrecomputedTbk.get() == cachedTbk);
+}
+
 void LogVole2_Core_GoldenSeedSearchAcceptsFeasibleParams(const oc::CLP&)
 {
     auto params = make_golden_params();
