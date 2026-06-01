@@ -41,6 +41,7 @@ if(ENABLE_LOGVOLE)
         LogVole/tests/test_shrinkexpand_coproto.cpp
         LogVole/tests/test_shrinkexpand_core.cpp
         LogVole2/tests/test_core.cpp
+        LogVole2/tests/test_civole.cpp
         LogVole2/tests/test_encoding.cpp
         LogVole2/tests/test_keyderive_coproto.cpp
         LogVole2/tests/test_keyderive_core.cpp

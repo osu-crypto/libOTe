@@ -1,0 +1,881 @@
+#include "libOTe/Vole/LogVole2/LogVole2Civole.h"
+
+#include "seal/util/rns.h"
+#include "seal/util/uintarith.h"
+#include "seal/util/uintarithsmallmod.h"
+#include "seal/util/uintcore.h"
+
+#include <algorithm>
+#include <array>
+#include <limits>
+#include <stdexcept>
+#include <string>
+
+namespace osuCrypto::LogVole2
+{
+    namespace
+    {
+        constexpr u64 kCivoleSidDomain = 0x4349564F4C455349ull;
+
+        unsigned __int128 reciprocal2Pow128(u64 modulus)
+        {
+            const unsigned __int128 two64 = static_cast<unsigned __int128>(1) << 64;
+            const u64 hi = static_cast<u64>(two64 / modulus);
+            const u64 rem = static_cast<u64>(two64 % modulus);
+            const u64 lo = static_cast<u64>((static_cast<unsigned __int128>(rem) << 64) / modulus);
+            return (static_cast<unsigned __int128>(hi) << 64) | lo;
+        }
+
+        bool validateZpValue(const ZpCrtContext& ctx, u64 value)
+        {
+            return ctx.mPlaintextModulus != 0 && value < ctx.mPlaintextModulus;
+        }
+
+        bool validateZpValues(const ZpCrtContext& ctx, const std::vector<u64>& values)
+        {
+            for (u64 value : values)
+            {
+                if (!validateZpValue(ctx, value))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        bool validateZpContext(const ZpCrtContext& ctx)
+        {
+            return ctx.mPlaintextModulus != 0 &&
+                   !ctx.mRing.mModuli.empty() &&
+                   ctx.mDeltaModQj.size() == ctx.mRing.mModuli.size() &&
+                   ctx.mBatchingContext &&
+                   ctx.mBatchingContext->first_context_data();
+        }
+
+        bool encodeSlotsToRingCrt(
+            const ZpCrtContext& ctx,
+            const std::vector<u64>& slots,
+            seal::BatchEncoder& encoder,
+            bool multiplyByDelta,
+            RnsPoly& out)
+        {
+            const u64 slotCount = zpSlotCount(ctx);
+            if (slots.size() != slotCount)
+            {
+                return false;
+            }
+
+            seal::Plaintext plain;
+            try
+            {
+                encoder.encode(slots, plain);
+            }
+            catch (const std::exception&)
+            {
+                return false;
+            }
+
+            const std::size_t n = ctx.mRing.mParams.mPolyModulusDegree;
+            const std::size_t rho = ctx.mRing.mModuli.size();
+            out.mCoeffs.assign(n * rho, 0);
+
+            const u64* plainCoeffs = plain.data();
+            const std::size_t plainCoeffCount = std::min<std::size_t>(n, plain.coeff_count());
+
+            if (!multiplyByDelta)
+            {
+                for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
+                {
+                    std::copy_n(plainCoeffs, plainCoeffCount, out.mCoeffs.data() + modIdx * n);
+                }
+                return true;
+            }
+
+            for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
+            {
+                u64* limbCoeffs = out.mCoeffs.data() + modIdx * n;
+                const u64 deltaModQj = ctx.mDeltaModQj[modIdx];
+                const auto& modulus = ctx.mRing.mModuli[modIdx];
+                for (std::size_t coeffIdx = 0; coeffIdx < plainCoeffCount; ++coeffIdx)
+                {
+                    limbCoeffs[coeffIdx] =
+                        seal::util::multiply_uint_mod(plainCoeffs[coeffIdx], deltaModQj, modulus);
+                }
+            }
+            return true;
+        }
+
+        RnsPoly makeZeroPoly(const RingParams& ring)
+        {
+            RnsPoly zero{};
+            zero.mCoeffs.assign(ringPolyCoeffCount(ring), 0);
+            return zero;
+        }
+
+        bool computeMuHi(const Params& params, u32& out)
+        {
+            if (params.mShrinkExpand.mTau < 2)
+            {
+                return false;
+            }
+            const u32 rho = static_cast<u32>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            if (rho == 0)
+            {
+                return false;
+            }
+            out = params.mShrinkExpand.mAlpha * (params.mShrinkExpand.mTau - 1) * rho;
+            return out != 0;
+        }
+
+        bool computeInternalRingWidth(
+            const Params& params,
+            const ZpCrtContext& ctx,
+            u64 labelCount,
+            u32& out)
+        {
+            if (labelCount == 0)
+            {
+                return false;
+            }
+
+            const u64 packedWidth = zpRingLabelCount(ctx, labelCount);
+            u32 muHi = 0;
+            if (packedWidth == 0 || !computeMuHi(params, muHi))
+            {
+                return false;
+            }
+
+            const u64 paddedWidth = std::max<u64>(packedWidth, muHi);
+            if (paddedWidth > std::numeric_limits<u32>::max())
+            {
+                return false;
+            }
+            out = static_cast<u32>(paddedWidth);
+            return true;
+        }
+
+        SamplingSeedConfig deriveSidSamplingSeeds(const SamplingSeedConfig& base, CivoleSid sid)
+        {
+            SamplingSeedConfig out = base;
+            out.mCt2Root = deriveDeterministicSeedMaterial(base.mCt2Root, kCivoleSidDomain, sid, 0, 0, 0);
+            return out;
+        }
+
+        void applySamplingSeeds(SenderState& state, const SamplingSeedConfig& seeds)
+        {
+            state.mParams.mShrinkExpand.mSamplingSeeds = seeds;
+            state.mShrinkExpandState.mParams.mSamplingSeeds = seeds;
+            if (state.mNextLevelState)
+            {
+                applySamplingSeeds(*state.mNextLevelState, seeds);
+            }
+        }
+
+        void applySamplingSeeds(ReceiverState& state, const SamplingSeedConfig& seeds)
+        {
+            state.mParams.mShrinkExpand.mSamplingSeeds = seeds;
+            state.mShrinkExpandState.mParams.mSamplingSeeds = seeds;
+            if (state.mNextLevelState)
+            {
+                applySamplingSeeds(*state.mNextLevelState, seeds);
+            }
+        }
+
+        void clearSenderCachedOutputs(SenderState& state)
+        {
+            state.mGoldenSeed.clear();
+            state.mRootKPrimeRt.reset();
+            state.mRootKRt.reset();
+            state.mPrecomputedTbk.reset();
+            state.mGoldenSeedTransmitted = false;
+            if (state.mNextLevelState)
+            {
+                clearSenderCachedOutputs(*state.mNextLevelState);
+            }
+        }
+
+        void clearReceiverCachedOutputs(ReceiverState& state)
+        {
+            state.mGoldenSeed.clear();
+            if (state.mNextLevelState)
+            {
+                clearReceiverCachedOutputs(*state.mNextLevelState);
+            }
+        }
+
+        bool containsSid(const std::vector<CivoleSid>& sids, CivoleSid sid)
+        {
+            return std::find(sids.begin(), sids.end(), sid) != sids.end();
+        }
+
+        bool prepareSenderSidForReleaseK(CivoleSenderState& state, CivoleSid sid)
+        {
+            if (containsSid(state.mUsedSids, sid))
+            {
+                return false;
+            }
+            if (state.mHasActiveSid &&
+                state.mActiveSid != sid &&
+                state.mKeyReleased &&
+                !state.mReleaseIntUsed)
+            {
+                return false;
+            }
+            if (state.mHasActiveSid && state.mActiveSid == sid)
+            {
+                return true;
+            }
+
+            clearSenderCachedOutputs(state.mLogVoleState);
+            const auto seeds = deriveSidSamplingSeeds(state.mBaseSamplingSeeds, sid);
+            applySamplingSeeds(state.mLogVoleState, seeds);
+            state.mHasActiveSid = true;
+            state.mActiveSid = sid;
+            state.mKeyReleased = false;
+            state.mReleaseIntUsed = false;
+            state.mReleasedKeys.clear();
+            return true;
+        }
+
+        bool prepareReceiverSidForSetX(CivoleReceiverState& state, CivoleSid sid)
+        {
+            if (containsSid(state.mUsedSids, sid))
+            {
+                return false;
+            }
+
+            state.mUsedSids.push_back(sid);
+            clearReceiverCachedOutputs(state.mLogVoleState);
+            const auto seeds = deriveSidSamplingSeeds(state.mBaseSamplingSeeds, sid);
+            applySamplingSeeds(state.mLogVoleState, seeds);
+            return true;
+        }
+
+        void writeU64(std::array<u8, 8>& out, u64 value)
+        {
+            for (u32 i = 0; i < 8; ++i)
+            {
+                out[i] = static_cast<u8>((value >> (8 * i)) & 0xFF);
+            }
+        }
+
+        u64 readU64(const std::array<u8, 8>& in)
+        {
+            u64 value = 0;
+            for (u32 i = 0; i < 8; ++i)
+            {
+                value |= static_cast<u64>(in[i]) << (8 * i);
+            }
+            return value;
+        }
+
+        task<> sendU64(Socket& sock, u64 value)
+        {
+            std::array<u8, 8> payload{};
+            writeU64(payload, value);
+            co_await sock.send(coproto::copy(payload));
+        }
+
+        task<u64> recvU64(Socket& sock)
+        {
+            std::array<u8, 8> payload{};
+            co_await sock.recv(payload);
+            co_return readU64(payload);
+        }
+    }
+
+    bool makeDefaultCivoleParams(CivoleParams& out, u32 workerThreads)
+    {
+        CivoleParams params{};
+        params.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree = 8192;
+        params.mLogVole.mShrinkExpand.mRing.mCoeffModulusBits = { 55, 55, 55, 55 };
+        params.mLogVole.mShrinkExpand.mPlaintextModulusBits = 55;
+        params.mLogVole.mShrinkExpand.mMode = ShrinkExpandMode::FullNoise;
+        params.mLogVole.mShrinkExpand.mSamplingSeeds.mNoiseRoot = 0xBAD5EEDu;
+        params.mLogVole.mShrinkExpand.mNoiseBound = 2;
+        params.mLogVole.mShrinkExpand.mAlpha = 2;
+        params.mLogVole.mShrinkExpand.mGadgetLogBase = 110;
+        params.mLogVole.mShrinkExpand.mNumWorkerThreads = workerThreads;
+
+        u32 logQ = 0;
+        for (int bits : params.mLogVole.mShrinkExpand.mRing.mCoeffModulusBits)
+        {
+            logQ += static_cast<u32>(bits);
+        }
+        params.mLogVole.mShrinkExpand.mTau =
+            (logQ + params.mLogVole.mShrinkExpand.mGadgetLogBase - 1) /
+            params.mLogVole.mShrinkExpand.mGadgetLogBase;
+        const u32 rho = static_cast<u32>(params.mLogVole.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        params.mLogVole.mShrinkExpand.mMu =
+            params.mLogVole.mShrinkExpand.mAlpha * params.mLogVole.mShrinkExpand.mTau * rho;
+        params.mLogVole.mGamma = 1;
+        out = std::move(params);
+        return true;
+    }
+
+    bool resolveCivoleModulus(const CivoleParams& params, u64& out)
+    {
+        ZpCrtContext ctx{};
+        if (!makeZpCrtContext(
+                params.mLogVole.mShrinkExpand.mRing,
+                params.mLogVole.mShrinkExpand.mPlaintextModulusBits,
+                ctx))
+        {
+            return false;
+        }
+        out = ctx.mPlaintextModulus;
+        return true;
+    }
+
+    u64 zpSlotCount(const ZpCrtContext& ctx)
+    {
+        return ctx.mRing.mParams.mPolyModulusDegree;
+    }
+
+    u64 zpRingLabelCount(const ZpCrtContext& ctx, u64 zpLabelCount)
+    {
+        const u64 slots = zpSlotCount(ctx);
+        if (slots == 0)
+        {
+            return 0;
+        }
+        return (zpLabelCount + slots - 1) / slots;
+    }
+
+    bool makeZpCrtContext(const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out)
+    {
+        if (plaintextModulusBits == 0)
+        {
+            return false;
+        }
+
+        RingNttContext ringCtx{};
+        if (!makeRingNttContext(ring, ringCtx))
+        {
+            return false;
+        }
+
+        const auto minModulusIt = std::min_element(
+            ringCtx.mModuli.begin(),
+            ringCtx.mModuli.end(),
+            [](const seal::Modulus& lhs, const seal::Modulus& rhs) { return lhs.value() < rhs.value(); });
+        if (minModulusIt == ringCtx.mModuli.end())
+        {
+            return false;
+        }
+
+        seal::Modulus batchingPlainModulus{};
+        u32 selectedPlaintextBits = 0;
+        for (u32 bits = plaintextModulusBits; bits >= 2; --bits)
+        {
+            try
+            {
+                auto candidate = seal::PlainModulus::Batching(ring.mPolyModulusDegree, bits);
+                if (candidate.value() < minModulusIt->value())
+                {
+                    batchingPlainModulus = candidate;
+                    selectedPlaintextBits = bits;
+                    break;
+                }
+            }
+            catch (const std::exception&)
+            {
+            }
+        }
+
+        if (selectedPlaintextBits == 0)
+        {
+            return false;
+        }
+
+        seal::EncryptionParameters batchingParams(seal::scheme_type::bgv);
+        batchingParams.set_poly_modulus_degree(ring.mPolyModulusDegree);
+        batchingParams.set_coeff_modulus(ringCtx.mModuli);
+        batchingParams.set_plain_modulus(batchingPlainModulus);
+
+        auto batchingContext = std::make_shared<seal::SEALContext>(batchingParams, true, seal::sec_level_type::none);
+        if (!batchingContext || !batchingContext->first_context_data())
+        {
+            return false;
+        }
+
+        auto ringContextData = ringCtx.mContext ? ringCtx.mContext->key_context_data() : nullptr;
+        if (!ringContextData || !ringContextData->rns_tool() || !ringContextData->rns_tool()->base_q())
+        {
+            return false;
+        }
+
+        const std::size_t rho = ringCtx.mModuli.size();
+        auto pool = seal::MemoryManager::GetPool();
+        auto numerator = seal::util::allocate_uint(rho, pool);
+        seal::util::set_uint(ringContextData->rns_tool()->base_q()->base_prod(), rho, numerator.get());
+        auto denominator = seal::util::allocate_zero_uint(rho, pool);
+        denominator[0] = batchingPlainModulus.value();
+        auto delta = seal::util::allocate_zero_uint(rho, pool);
+        seal::util::divide_uint_inplace(numerator.get(), denominator.get(), rho, delta.get(), pool);
+
+        ZpCrtContext next{};
+        next.mRing = std::move(ringCtx);
+        next.mPlaintextModulusBits = selectedPlaintextBits;
+        next.mPlaintextModulus = batchingPlainModulus.value();
+        next.mBatchingContext = std::move(batchingContext);
+        next.mDeltaModQj.reserve(rho);
+        for (const auto& modulus : next.mRing.mModuli)
+        {
+            next.mDeltaModQj.push_back(seal::util::modulo_uint(delta.get(), rho, modulus));
+        }
+
+        out = std::move(next);
+        return true;
+    }
+
+    bool wrapZpBatchCrt(
+        const ZpCrtContext& ctx,
+        const std::vector<u64>& labels,
+        bool multiplyByDelta,
+        u64 padValue,
+        u32,
+        RnsPoly& out)
+    {
+        if (!validateZpContext(ctx) ||
+            labels.size() > zpSlotCount(ctx) ||
+            !validateZpValues(ctx, labels) ||
+            !validateZpValue(ctx, padValue))
+        {
+            return false;
+        }
+
+        std::vector<u64> slots(zpSlotCount(ctx), padValue);
+        std::copy(labels.begin(), labels.end(), slots.begin());
+
+        seal::BatchEncoder encoder(*ctx.mBatchingContext);
+        return encodeSlotsToRingCrt(ctx, slots, encoder, multiplyByDelta, out);
+    }
+
+    bool wrapZpConstantCrt(
+        const ZpCrtContext& ctx,
+        u64 value,
+        bool multiplyByDelta,
+        u32 requestedWorkers,
+        RnsPoly& out)
+    {
+        if (!validateZpContext(ctx) || !validateZpValue(ctx, value))
+        {
+            return false;
+        }
+
+        std::vector<u64> slots(zpSlotCount(ctx), value);
+        seal::BatchEncoder encoder(*ctx.mBatchingContext);
+        (void)requestedWorkers;
+        return encodeSlotsToRingCrt(ctx, slots, encoder, multiplyByDelta, out);
+    }
+
+    bool wrapZpLabelsCrt(
+        const ZpCrtContext& ctx,
+        const std::vector<u64>& labels,
+        bool multiplyByDelta,
+        u64 padValue,
+        u32 requestedWorkers,
+        std::vector<RnsPoly>& out)
+    {
+        if (!validateZpContext(ctx) ||
+            !validateZpValues(ctx, labels) ||
+            !validateZpValue(ctx, padValue))
+        {
+            return false;
+        }
+
+        const u64 slotCount = zpSlotCount(ctx);
+        const u64 chunkCount = zpRingLabelCount(ctx, labels.size());
+        out.resize(chunkCount);
+        for (u64 chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx)
+        {
+            const u64 offset = chunkIdx * slotCount;
+            const u64 chunkSize = std::min<u64>(slotCount, labels.size() - offset);
+            std::vector<u64> chunk(labels.begin() + offset, labels.begin() + offset + chunkSize);
+            if (!wrapZpBatchCrt(ctx, chunk, multiplyByDelta, padValue, requestedWorkers, out[chunkIdx]))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool unwrapRingLabelsCrt(
+        const ZpCrtContext& ctx,
+        const std::vector<RnsPoly>& labels,
+        u64 zpLabelCount,
+        bool scaleAndRound,
+        u32,
+        std::vector<u64>& out)
+    {
+        if (!validateZpContext(ctx) || !validateRingBatchShape(labels, ctx.mRing.mParams))
+        {
+            return false;
+        }
+
+        const u64 slotCount = zpSlotCount(ctx);
+        if (zpLabelCount > labels.size() * slotCount)
+        {
+            return false;
+        }
+
+        auto batchingContextData = ctx.mBatchingContext->first_context_data();
+        auto ringContextData = ctx.mRing.mContext ? ctx.mRing.mContext->key_context_data() : nullptr;
+        if (!batchingContextData ||
+            !batchingContextData->rns_tool() ||
+            !ringContextData ||
+            !ringContextData->rns_tool() ||
+            !ringContextData->rns_tool()->base_q())
+        {
+            return false;
+        }
+
+        auto pool = seal::MemoryManager::GetPool();
+        const auto& plainModulus = batchingContextData->parms().plain_modulus();
+        const u64 plainModulusValue = plainModulus.value();
+        const std::size_t n = ctx.mRing.mParams.mPolyModulusDegree;
+        const std::size_t rho = ctx.mRing.mModuli.size();
+        seal::util::RNSBase fullBase(ringContextData->parms().coeff_modulus(), pool);
+        auto invPunctProd = fullBase.inv_punctured_prod_mod_base_array();
+        std::vector<u64> crtInvPunctured(rho, 0);
+        std::vector<u64> qI(rho, 0);
+        std::vector<unsigned __int128> fracInvModulus(rho, 0);
+        for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
+        {
+            qI[modIdx] = fullBase.base()[modIdx].value();
+            crtInvPunctured[modIdx] = invPunctProd[modIdx].operand;
+            fracInvModulus[modIdx] = reciprocal2Pow128(qI[modIdx]);
+        }
+        const unsigned __int128 half = static_cast<unsigned __int128>(1) << 127;
+
+        const u64 chunkCount = zpRingLabelCount(ctx, zpLabelCount);
+        std::vector<std::vector<u64>> decodedChunks(chunkCount);
+        for (std::size_t labelIdx = 0; labelIdx < chunkCount; ++labelIdx)
+        {
+            RnsPoly canonical = labels[labelIdx];
+            if (!canonicalizePoly(canonical, ctx.mRing))
+            {
+                return false;
+            }
+
+            seal::Plaintext plain;
+            plain.resize(slotCount);
+
+            if (scaleAndRound)
+            {
+                for (std::size_t coeffIdx = 0; coeffIdx < slotCount; ++coeffIdx)
+                {
+                    u64 scaledCoeff = 0;
+                    unsigned __int128 fracSum = half;
+                    for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
+                    {
+                        const u64 vI = canonical.mCoeffs[modIdx * n + coeffIdx];
+                        const u64 xI = seal::util::multiply_uint_mod(
+                            vI,
+                            crtInvPunctured[modIdx],
+                            ctx.mRing.mModuli[modIdx]);
+
+                        const unsigned __int128 scaledNumerator =
+                            static_cast<unsigned __int128>(xI) * plainModulusValue;
+                        u64 scaledWords[2] = {
+                            static_cast<u64>(scaledNumerator),
+                            static_cast<u64>(scaledNumerator >> 64)
+                        };
+                        u64 quotientWords[2] = { 0, 0 };
+                        seal::util::divide_uint128_inplace(scaledWords, qI[modIdx], quotientWords);
+
+                        scaledCoeff += quotientWords[0];
+                        if (scaledCoeff >= plainModulusValue)
+                        {
+                            scaledCoeff -= plainModulusValue;
+                        }
+
+                        const unsigned __int128 term =
+                            static_cast<unsigned __int128>(scaledWords[0]) * fracInvModulus[modIdx];
+                        const unsigned __int128 oldFrac = fracSum;
+                        fracSum += term;
+                        if (fracSum < oldFrac)
+                        {
+                            ++scaledCoeff;
+                            if (scaledCoeff == plainModulusValue)
+                            {
+                                scaledCoeff = 0;
+                            }
+                        }
+                    }
+                    plain[coeffIdx] = scaledCoeff;
+                }
+            }
+            else
+            {
+                auto composedLocal = seal::util::allocate_poly(n, rho, pool);
+                std::copy(canonical.mCoeffs.begin(), canonical.mCoeffs.end(), composedLocal.get());
+                ringContextData->rns_tool()->base_q()->compose_array(composedLocal.get(), n, pool);
+
+                for (std::size_t coeffIdx = 0; coeffIdx < slotCount; ++coeffIdx)
+                {
+                    plain[coeffIdx] =
+                        seal::util::modulo_uint(composedLocal.get() + coeffIdx * rho, rho, plainModulus);
+                }
+            }
+
+            std::vector<u64> slots;
+            try
+            {
+                seal::BatchEncoder encoder(*ctx.mBatchingContext);
+                encoder.decode(plain, slots);
+            }
+            catch (const std::exception&)
+            {
+                return false;
+            }
+
+            const u64 offset = labelIdx * slotCount;
+            const u64 remaining = zpLabelCount - offset;
+            const u64 copyCount = std::min<u64>(remaining, slots.size());
+            decodedChunks[labelIdx].assign(slots.begin(), slots.begin() + copyCount);
+        }
+
+        out.clear();
+        out.reserve(zpLabelCount);
+        for (const auto& chunk : decodedChunks)
+        {
+            out.insert(out.end(), chunk.begin(), chunk.end());
+        }
+        return true;
+    }
+
+    task<> civoleSenderOffline(
+        const CivoleSenderOfflineInput& input,
+        CivoleSenderState& state,
+        Socket& sock)
+    {
+        ZpCrtContext ctx{};
+        if (!makeZpCrtContext(
+                input.mParams.mLogVole.mShrinkExpand.mRing,
+                input.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
+                ctx) ||
+            input.mDelta == 0 ||
+            input.mDelta >= ctx.mPlaintextModulus)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender offline input is invalid");
+        }
+
+        u32 ringWidth = 0;
+        if (!computeInternalRingWidth(input.mParams.mLogVole, ctx, input.mW, ringWidth))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender could not compute ring width");
+        }
+
+        Params params = input.mParams.mLogVole;
+        params.mW = ringWidth;
+        params.mTotalLabelCount = input.mW;
+
+        RnsPoly wrappedDelta{};
+        if (!wrapZpConstantCrt(
+                ctx,
+                input.mDelta,
+                true,
+                input.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
+                wrappedDelta))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender could not wrap delta");
+        }
+
+        co_await sendU64(sock, input.mW);
+
+        SenderOfflineInput offlineInput{};
+        offlineInput.mParams = params;
+        offlineInput.mSk1.resize(params.mGamma, std::move(wrappedDelta));
+
+        Sender sender{};
+        SenderState logVoleState{};
+        co_await sender.offline(offlineInput, logVoleState, sock);
+
+        CivoleSenderState next{};
+        next.mParams = input.mParams;
+        next.mModulus = ctx.mPlaintextModulus;
+        next.mDelta = input.mDelta;
+        next.mW = input.mW;
+        next.mRingWidth = params.mW;
+        next.mBaseSamplingSeeds = params.mShrinkExpand.mSamplingSeeds;
+        next.mLogVoleState = std::move(logVoleState);
+        state = std::move(next);
+    }
+
+    task<> civoleReceiverOffline(
+        const CivoleReceiverOfflineInput& input,
+        CivoleReceiverState& state,
+        Socket& sock)
+    {
+        const u64 labelCount = co_await recvU64(sock);
+
+        ZpCrtContext ctx{};
+        if (!makeZpCrtContext(
+                input.mParams.mLogVole.mShrinkExpand.mRing,
+                input.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
+                ctx))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver could not build CRT context");
+        }
+
+        u32 ringWidth = 0;
+        if (!computeInternalRingWidth(input.mParams.mLogVole, ctx, labelCount, ringWidth))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver could not compute ring width");
+        }
+
+        Params params = input.mParams.mLogVole;
+        params.mW = ringWidth;
+        params.mTotalLabelCount = labelCount;
+
+        ReceiverOfflineInput offlineInput{};
+        offlineInput.mParams = params;
+
+        Receiver receiver{};
+        ReceiverState logVoleState{};
+        co_await receiver.offline(offlineInput, logVoleState, sock);
+
+        CivoleReceiverState next{};
+        next.mParams = input.mParams;
+        next.mModulus = ctx.mPlaintextModulus;
+        next.mW = labelCount;
+        next.mRingWidth = params.mW;
+        next.mBaseSamplingSeeds = params.mShrinkExpand.mSamplingSeeds;
+        next.mLogVoleState = std::move(logVoleState);
+        state = std::move(next);
+    }
+
+    bool civoleSenderReleaseK(
+        CivoleSenderState& state,
+        CivoleSid sid,
+        CivoleReleaseKOutput& output)
+    {
+        if (!prepareSenderSidForReleaseK(state, sid) ||
+            !ensureSenderPrecompute(state.mLogVoleState) ||
+            !state.mLogVoleState.mPrecomputedTbk)
+        {
+            return false;
+        }
+
+        ZpCrtContext ctx{};
+        std::vector<u64> keys;
+        if (!makeZpCrtContext(
+                state.mParams.mLogVole.mShrinkExpand.mRing,
+                state.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
+                ctx) ||
+            !unwrapRingLabelsCrt(
+                ctx,
+                *state.mLogVoleState.mPrecomputedTbk,
+                state.mW,
+                true,
+                state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
+                keys))
+        {
+            return false;
+        }
+
+        state.mKeyReleased = true;
+        state.mUsedSids.push_back(sid);
+        state.mReleasedKeys = std::move(keys);
+
+        CivoleReleaseKOutput next{};
+        next.mSid = sid;
+        next.mModulus = state.mModulus;
+        next.mKeys = state.mReleasedKeys;
+        output = std::move(next);
+        return true;
+    }
+
+    task<> civoleSenderRelease(
+        CivoleSenderState& state,
+        CivoleSid sid,
+        CivoleSenderReleaseOutput& output,
+        Socket& sock)
+    {
+        if (!state.mHasActiveSid ||
+            state.mActiveSid != sid ||
+            !state.mKeyReleased ||
+            state.mReleaseIntUsed)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE release requires prior releasek");
+        }
+        state.mReleaseIntUsed = true;
+
+        Sender sender{};
+        SenderOnlineOutput online{};
+        co_await sender.online(state.mLogVoleState, online, sock);
+
+        CivoleSenderReleaseOutput next{};
+        next.mSid = sid;
+        output = next;
+    }
+
+    task<> civoleReceiverSetX(
+        CivoleReceiverState& state,
+        CivoleSid sid,
+        const std::vector<u64>& x,
+        CivoleReceiverSetXOutput& output,
+        Socket& sock)
+    {
+        if (x.size() != state.mW)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE setx size does not match offline width");
+        }
+
+        ZpCrtContext ctx{};
+        if (!makeZpCrtContext(
+                state.mParams.mLogVole.mShrinkExpand.mRing,
+                state.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
+                ctx) ||
+            !validateZpValues(ctx, x) ||
+            !prepareReceiverSidForSetX(state, sid))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver setx input is invalid");
+        }
+
+        std::vector<RnsPoly> wrapped;
+        if (!wrapZpLabelsCrt(
+                ctx,
+                x,
+                false,
+                0,
+                state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
+                wrapped))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver could not wrap inputs");
+        }
+
+        while (wrapped.size() < state.mLogVoleState.mParams.mW)
+        {
+            wrapped.push_back(makeZeroPoly(state.mLogVoleState.mParams.mShrinkExpand.mRing));
+        }
+
+        ReceiverOnlineInput onlineInput{};
+        onlineInput.mX = std::move(wrapped);
+
+        Receiver receiver{};
+        ReceiverOnlineOutput online{};
+        co_await receiver.online(state.mLogVoleState, onlineInput, online, sock);
+
+        std::vector<u64> macs;
+        if (!unwrapRingLabelsCrt(
+                ctx,
+                online.mTbm,
+                state.mW,
+                true,
+                state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
+                macs))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver could not unwrap MACs");
+        }
+
+        CivoleReceiverSetXOutput next{};
+        next.mSid = sid;
+        next.mModulus = state.mModulus;
+        next.mValues = x;
+        next.mMacs = std::move(macs);
+        output = std::move(next);
+    }
+}

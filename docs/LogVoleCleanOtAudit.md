@@ -204,7 +204,7 @@ Current capabilities:
 Current gaps relative to clean-ot:
 
 - No recursive LogVole protocol.
-- No CI-VOLE public API.
+- CI-VOLE public API, CRT wrapping/unwrapping, SID state, and default params are present in the fresh LogVole2 port.
 - Root helper math, golden-seed search, root offline setup, and local root online digest/response flow are present.
 - Top-level root local relation is covered with clean-ot-style small plaintext inputs, golden-root seed selection, and CRT-centered noise tolerance.
 - Top-level root local sender/receiver API helpers are present and relation-tested.
@@ -231,11 +231,11 @@ Current gaps relative to clean-ot:
 | LENC/LHE | LENC and LHE helpers are substantially ported | Finish parity around recursive gadget-leaf use and cache behavior | 70% |
 | Shrink/expand | Deterministic/full-noise shrink-expand and truncation tests pass | Add recursive gadget-leaf relation coverage through the LogVole parent path | 70% |
 | Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 45% |
-| Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, root precompute/cache reuse, repeated local online, internal setup reuse, recursive gadget subproblem coverage, clean-ot-profile two-/three-level local recursion, and recursive coproto offline/online are present | Audit clean-ot reuse/counter semantics exactly, then port the remaining CI-VOLE-facing protocol surface | 78% |
-| CI-VOLE API | Missing | Port `Zp` wrapper, CRT helpers, SID state, default params | 0% |
+| Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, root precompute/cache reuse, repeated local online, internal setup reuse, recursive gadget subproblem coverage, clean-ot-profile two-/three-level local recursion, and recursive coproto offline/online are present | Audit clean-ot reuse/counter semantics exactly and remove staging-only API once parity is confirmed | 82% |
+| CI-VOLE API | Default params, `Zp` CRT wrapper, SID state, releasek/release/setx flows, and clean-ot public API tests are ported over coproto | Add any missing example/benchmark smoke surfaces only after final API naming settles | 80% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
-| Networking | Coproto wrappers exist for key-derive, shrink/expand, and recursive LogVole offline/online | Continue direct coproto translation for the remaining clean-ot-facing APIs; do not port clean-ot comm layer | 70% |
-| Tests | LogVole2 has 70 expected tests after this checkpoint, including clean-ot-profile two-/three-level local recursive API, sender precompute cache, repeated-online, internal setup reuse, recursive gadget-input subproblem coverage, and recursive coproto relation coverage | Port the remaining clean-ot communication/reuse accounting and CI-VOLE tests without changing their parameter profiles | 81% |
+| Networking | Coproto wrappers exist for key-derive, shrink/expand, recursive LogVole offline/online, and CI-VOLE public API flows | Continue direct coproto translation for any remaining clean-ot-facing API; do not port clean-ot comm layer | 82% |
+| Tests | LogVole2 has 76 expected tests after this checkpoint, including clean-ot-profile recursive coverage, recursive coproto relation coverage, and the six clean-ot CI-VOLE public API tests | Port any remaining clean-ot communication/reuse accounting tests without changing their parameter profiles | 87% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout
@@ -291,4 +291,4 @@ Clean-ot is the oracle. Porting should preserve its parameter profiles, tests, s
 
 ## Next concrete work
 
-The next coding step should be an exact clean-ot audit of reuse/counter behavior around `golden_seed_transmitted`, sender precompute, and repeated online calls, followed by CI-VOLE test porting without changing parameter profiles.
+The next coding step should be an exact clean-ot audit of reuse/counter behavior around `golden_seed_transmitted`, sender precompute, repeated online calls, and example/benchmark smoke expectations. After that, remove or rename staging-only `LogVole2` surfaces once final parity is confirmed.

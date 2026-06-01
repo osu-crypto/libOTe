@@ -26,6 +26,12 @@
     X(ShrinkExpandCore, OfflineMetadataMismatchRejected)
 
 #define LIBOTE_LOGVOLE2_TESTS(X) \
+    X(Civole, PublicApiInvariant) \
+    X(Civole, ReleaseRequiresPriorReleaseK) \
+    X(Civole, RejectsZeroDelta) \
+    X(Civole, RejectsOutOfFieldReceiverValue) \
+    X(Civole, SupportsSequentialSids) \
+    X(Civole, RejectsSameSidReuseByEitherParty) \
     X(Core, ModeSelection) \
     X(Core, SeedLabelAggSumsTauBlocks) \
     X(Core, GdecompHiUnbundleLiftsOneLimbPerOutput) \
