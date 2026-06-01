@@ -1,4 +1,5 @@
 #include "libOTe/Vole/LogVole2/LogVole2Lhe.h"
+#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -42,10 +43,11 @@ namespace osuCrypto::LogVole2
         {
             RingParams mRing;
             u32 mCount = 0;
+            u64 mRunId = 0;
 
             bool operator==(const PublicACacheKey& other) const
             {
-                return mRing == other.mRing && mCount == other.mCount;
+                return mRing == other.mRing && mCount == other.mCount && mRunId == other.mRunId;
             }
         };
 
@@ -55,6 +57,7 @@ namespace osuCrypto::LogVole2
             {
                 std::size_t h = std::hash<u32>{}(key.mRing.mPolyModulusDegree);
                 h ^= std::hash<u32>{}(key.mCount) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+                h ^= std::hash<u64>{}(key.mRunId) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
                 for (int bits : key.mRing.mCoeffModulusBits)
                 {
                     const std::size_t b = std::hash<int>{}(bits);
@@ -78,6 +81,7 @@ namespace osuCrypto::LogVole2
             PublicACacheKey key{};
             key.mRing = ctx.mParams;
             key.mCount = mu;
+            key.mRunId = currentProtocolCacheScope().mRunId;
 
             {
                 std::lock_guard<std::mutex> lock(publicACacheMutex);

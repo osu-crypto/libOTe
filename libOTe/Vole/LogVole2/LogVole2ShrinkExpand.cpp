@@ -1,4 +1,5 @@
 #include "libOTe/Vole/LogVole2/LogVole2ShrinkExpand.h"
+#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
 
 #include "seal/util/rns.h"
 #include "seal/util/uintarithsmallmod.h"
@@ -37,6 +38,64 @@ namespace osuCrypto::LogVole2
             double mS = -std::numeric_limits<double>::infinity();
             double mSbarOverLeakageNorm = -std::numeric_limits<double>::infinity();
         };
+
+        struct Ct2CacheEntry
+        {
+            bool mValid = false;
+            RingParams mRing;
+            u32 mMu = 0;
+            u64 mNonce = 0;
+            u64 mCt2Root = 0;
+            u64 mRunId = 0;
+            ProtocolCacheRole mRole = ProtocolCacheRole::Unspecified;
+            std::vector<RnsPoly> mCt2;
+        };
+
+        bool matchesCt2Cache(
+            const Ct2CacheEntry& cache,
+            const RingParams& ring,
+            u32 mu,
+            u64 nonce,
+            u64 ct2Root,
+            ProtocolCacheScope scope)
+        {
+            return cache.mValid &&
+                   cache.mRing == ring &&
+                   cache.mMu == mu &&
+                   cache.mNonce == nonce &&
+                   cache.mCt2Root == ct2Root &&
+                   cache.mRunId == scope.mRunId &&
+                   cache.mRole == scope.mRole;
+        }
+
+        bool getOrBuildCachedCt2(
+            const RingNttContext& ctx,
+            const ShrinkExpandParams& params,
+            u64 nonce,
+            Ct2CacheEntry& cache)
+        {
+            const auto scope = currentProtocolCacheScope();
+            if (matchesCt2Cache(cache, params.mRing, params.mMu, nonce, params.mSamplingSeeds.mCt2Root, scope))
+            {
+                return true;
+            }
+
+            std::vector<RnsPoly> ct2;
+            if (!buildHashedCt2(ctx, params.mMu, params.mSamplingSeeds, nonce, ct2))
+            {
+                return false;
+            }
+
+            cache.mValid = true;
+            cache.mRing = params.mRing;
+            cache.mMu = params.mMu;
+            cache.mNonce = nonce;
+            cache.mCt2Root = params.mSamplingSeeds.mCt2Root;
+            cache.mRunId = scope.mRunId;
+            cache.mRole = scope.mRole;
+            cache.mCt2 = std::move(ct2);
+            return true;
+        }
 
         LeakyLweNoiseShape computeLeakyLweNoiseShape(
             double sStar,
@@ -577,8 +636,8 @@ namespace osuCrypto::LogVole2
             return false;
         }
 
-        std::vector<RnsPoly> ct2;
-        if (!buildHashedCt2(ctx, state.mParams.mMu, state.mParams.mSamplingSeeds, input.mNonce, ct2))
+        thread_local Ct2CacheEntry senderCt2Cache{};
+        if (!getOrBuildCachedCt2(ctx, state.mParams, input.mNonce, senderCt2Cache))
         {
             return false;
         }
@@ -586,7 +645,7 @@ namespace osuCrypto::LogVole2
         ShrinkExpandSenderExpandOutput next{};
         if (!lheDec(
                 ctx,
-                ct2,
+                senderCt2Cache.mCt2,
                 input.mTbkPrime,
                 next.mTbk,
                 state.mPublicANtt ? state.mPublicANtt.get() : nullptr,
@@ -625,8 +684,8 @@ namespace osuCrypto::LogVole2
             return false;
         }
 
-        std::vector<RnsPoly> ct2;
-        if (!buildHashedCt2(ctx, state.mParams.mMu, state.mParams.mSamplingSeeds, input.mNonce, ct2))
+        thread_local Ct2CacheEntry receiverCt2Cache{};
+        if (!getOrBuildCachedCt2(ctx, state.mParams, input.mNonce, receiverCt2Cache))
         {
             return false;
         }
@@ -709,7 +768,7 @@ namespace osuCrypto::LogVole2
         if (!evalOk ||
             decPartialNtt.size() != state.mParams.mMu ||
             evalNtt.size() != state.mParams.mMu ||
-            ct2.size() != state.mParams.mMu)
+            receiverCt2Cache.mCt2.size() != state.mParams.mMu)
         {
             return false;
         }
@@ -721,7 +780,7 @@ namespace osuCrypto::LogVole2
             RnsPoly tbm = std::move(decPartialNtt[row]);
             if (!ringSubInplace(tbm, evalNtt[row], ctx) ||
                 !inverseNtt(tbm, ctx) ||
-                !ringAddInplace(tbm, ct2[row], ctx))
+                !ringAddInplace(tbm, receiverCt2Cache.mCt2[row], ctx))
             {
                 return false;
             }

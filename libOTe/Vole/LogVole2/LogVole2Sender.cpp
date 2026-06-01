@@ -1,6 +1,7 @@
 #include "libOTe/Vole/LogVole2/LogVole2Sender.h"
 
 #include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
+#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
 
 #include <array>
 #include <cstddef>
@@ -119,9 +120,11 @@ namespace osuCrypto::LogVole2
         task<> runSenderPrecomputeTask(
             const SenderState& state,
             macoro::thread_pool& pool,
-            std::promise<bool>& promise)
+            std::promise<bool>& promise,
+            ProtocolCacheScope cacheScope)
         {
             co_await pool.schedule();
+            ScopedProtocolCacheScope scopedCache(cacheScope);
 
             try
             {
@@ -309,12 +312,20 @@ namespace osuCrypto::LogVole2
         SenderOnlineOutput& output,
         Socket& sock)
     {
+        ProtocolCacheScope cacheScope = currentProtocolCacheScope();
+        if (cacheScope.mRunId == 0)
+        {
+            cacheScope.mRunId = allocateProtocolCacheRunId();
+            cacheScope.mRole = ProtocolCacheRole::Sender;
+        }
+        ScopedProtocolCacheScope scopedCache(cacheScope);
+
         std::promise<bool> precomputePromise{};
         auto precomputeFuture = precomputePromise.get_future().share();
         macoro::thread_pool::work precomputeWork;
         macoro::thread_pool precomputePool(1, precomputeWork);
         auto precomputeTask =
-            runSenderPrecomputeTask(state, precomputePool, precomputePromise) | macoro::make_eager();
+            runSenderPrecomputeTask(state, precomputePool, precomputePromise, cacheScope) | macoro::make_eager();
 
         std::exception_ptr serviceException{};
         try

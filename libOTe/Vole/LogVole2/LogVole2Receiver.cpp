@@ -2,6 +2,7 @@
 
 #include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
 #include "libOTe/Vole/LogVole2/LogVole2Parallel.h"
+#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
 
 #include <algorithm>
 #include <array>
@@ -265,6 +266,14 @@ namespace osuCrypto::LogVole2
         ReceiverOnlineOutput& output,
         Socket& sock)
     {
+        ProtocolCacheScope cacheScope = currentProtocolCacheScope();
+        if (cacheScope.mRunId == 0)
+        {
+            cacheScope.mRunId = allocateProtocolCacheRunId();
+            cacheScope.mRole = ProtocolCacheRole::Receiver;
+        }
+        ScopedProtocolCacheScope scopedCache(cacheScope);
+
         u32 tauHi = 0;
         if (!computeTauHi(state.mParams, tauHi))
         {

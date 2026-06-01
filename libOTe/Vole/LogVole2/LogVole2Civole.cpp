@@ -1,6 +1,7 @@
 #include "libOTe/Vole/LogVole2/LogVole2Civole.h"
 
 #include "libOTe/Vole/LogVole2/LogVole2Parallel.h"
+#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
 
 #include "seal/util/rns.h"
 #include "seal/util/uintarith.h"
@@ -764,6 +765,8 @@ namespace osuCrypto::LogVole2
         CivoleSid sid,
         CivoleReleaseKOutput& output)
     {
+        ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Sender, sid);
+
         if (!prepareSenderSidForReleaseK(state, sid) ||
             !ensureSenderPrecompute(state.mLogVoleState) ||
             !state.mLogVoleState.mPrecomputedTbk)
@@ -815,6 +818,8 @@ namespace osuCrypto::LogVole2
         }
         state.mReleaseIntUsed = true;
 
+        ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Sender, sid);
+
         Sender sender{};
         SenderOnlineOutput online{};
         SenderOnlineOptions options{};
@@ -865,6 +870,8 @@ namespace osuCrypto::LogVole2
         {
             wrapped.push_back(makeZeroPoly(state.mLogVoleState.mParams.mShrinkExpand.mRing));
         }
+
+        ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Receiver, sid);
 
         ReceiverOnlineInput onlineInput{};
         onlineInput.mX = std::move(wrapped);

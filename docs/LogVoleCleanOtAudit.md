@@ -211,7 +211,9 @@ Current gaps relative to clean-ot:
 - Sender online now starts precompute on `macoro::thread_pool` while the coproto service waits for the receiver digest, matching clean-ot's service-thread/precompute-future structure.
 - Hot recursive online, sender seed-candidate expansion, and CI CRT chunk loops now use a clean-ot-style worker-slot helper backed by `macoro::thread_pool`.
 - `golden_seed_transmitted` exists in the current clean-ot type but is not used by the LogVole online path; no libOTe behavior is currently gated on it.
-- Runtime cache scoping/per-role cache behavior still needs a final clean-ot audit, especially around local helper behavior, counters, and example/benchmark expectations.
+- The high-level clean-ot sender online nonce is treated as stale API surface: the paper's online API uses `id=(sid, mode)`, and lower-level CT labels are derived from `(id, seed, level, index)`.
+- Runtime cache scoping, public-A run-id cache keys, shrink/expand CT2 role/run-id caches, and macoro worker scope propagation are now present.
+- Communication counters and example/benchmark expectations still need final clean-ot audit.
 - Contains stale key-derive API and tests that should not drive the final design.
 
 ## Required libOTe changes
@@ -224,14 +226,14 @@ Current gaps relative to clean-ot:
 | Ring ops | Partial libOTe implementation exists | Replace with clean-ot superset while preserving hot-path batching and memory layout | 60% |
 | Portable 128-bit math | Current code avoids some clean-ot portability failures | Add focused helper for `__int128` use on MSVC/GCC/Clang | 25% |
 | Boost/cpp_int dependency | Clean-ot uses Boost in ring ops | Audit exact need and either remove/replace or make it private and justified | 0% |
-| LENC/LHE | LENC and LHE helpers are substantially ported | Finish parity around recursive gadget-leaf use and cache behavior | 70% |
-| Shrink/expand | Deterministic/full-noise shrink-expand and truncation tests pass | Add recursive gadget-leaf relation coverage through the LogVole parent path | 70% |
+| LENC/LHE | LENC and LHE helpers are substantially ported with public-A cache keyed by runtime run id | Finish final parity audit around recursive gadget-leaf use | 82% |
+| Shrink/expand | Deterministic/full-noise shrink-expand, truncation tests, and role/run-scoped CT2 cache are present | Add any missing benchmark-facing cache/counter surfaces after API settles | 86% |
 | Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 45% |
-| Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, root precompute/cache reuse, repeated local online, internal setup reuse without a reused offline message, recursive gadget subproblem coverage, clean-ot-profile two-/three-level local recursion, recursive coproto offline/online, forked coproto lanes, async sender precompute/service overlap, and macoro-backed recursive online chunk parallelism are present | Audit clean-ot reuse/counter semantics exactly and remove staging-only API once parity is confirmed | 92% |
+| Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, root precompute/cache reuse, repeated local online, internal setup reuse without a reused offline message, recursive gadget subproblem coverage, clean-ot-profile two-/three-level local recursion, recursive coproto offline/online, forked coproto lanes, async sender precompute/service overlap, macoro-backed recursive online chunk parallelism, and runtime cache scoping are present | Audit clean-ot communication counter semantics exactly and remove staging-only API once parity is confirmed | 94% |
 | CI-VOLE API | Default params, `Zp` CRT wrapper, SID state, releasek/release/setx flows, clean-ot public API tests, forked metadata/offline lanes, skip-TBK sender release, and macoro-backed CRT chunk parallelism are ported over coproto | Add any missing example/benchmark smoke surfaces only after final API naming settles | 88% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
 | Networking | Coproto wrappers exist for key-derive, shrink/expand, recursive LogVole offline/online, and CI-VOLE public API flows; recursive and CI flows now use deterministic `Socket::fork()` lanes instead of the clean-ot comm stack | Continue direct coproto translation for any remaining clean-ot-facing API; do not port clean-ot comm layer | 92% |
-| Tests | LogVole2 has 79 expected tests after this checkpoint, including clean-ot-profile recursive coverage, recursive coproto relation coverage, multithread recursive coproto coverage, skip-TBK sender online coverage, root-width rejection, direct reused-offline-message coverage, and the six clean-ot CI-VOLE public API tests | Port any remaining clean-ot communication/reuse accounting tests without changing their parameter profiles | 92% |
+| Tests | LogVole2 has 80 expected tests after this checkpoint, including clean-ot-profile recursive coverage, recursive coproto relation coverage, multithread recursive coproto coverage, skip-TBK sender online coverage, runtime cache-scope propagation, root-width rejection, direct reused-offline-message coverage, and the six clean-ot CI-VOLE public API tests | Port any remaining clean-ot communication/reuse accounting tests without changing their parameter profiles | 93% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout
@@ -287,4 +289,4 @@ Clean-ot is the oracle. Porting should preserve its parameter profiles, tests, s
 
 ## Next concrete work
 
-The next coding step should be an exact clean-ot audit of local-helper cache scoping, communication counters, worker-count behavior under deeper nested calls, and example/benchmark smoke expectations. After that, remove or rename staging-only `LogVole2` surfaces once final parity is confirmed.
+The next coding step should be an exact clean-ot audit of communication counters and example/benchmark smoke expectations. After that, remove or rename staging-only `LogVole2` surfaces once final parity is confirmed.

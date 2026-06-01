@@ -1,6 +1,8 @@
 #include "libOTe/Vole/LogVole2/LogVole2Core.h"
 #include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
+#include "libOTe/Vole/LogVole2/LogVole2Parallel.h"
 #include "libOTe/Vole/LogVole2/LogVole2Receiver.h"
+#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
 #include "libOTe/Vole/LogVole2/LogVole2Sender.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
@@ -14,6 +16,7 @@
 #include "seal/util/uintarithsmallmod.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -545,6 +548,35 @@ void LogVole2_Core_ModeSelection(const oc::CLP&)
 
     LOGVOLE_EXPECT_TRUE(evalRecursiveMode(8, 2, 2, 2) == RecursiveMode::Root);
     LOGVOLE_EXPECT_TRUE(evalRecursiveMode(9, 2, 2, 2) == RecursiveMode::Internal);
+}
+
+void LogVole2_Core_RuntimeCacheScopePropagatesToParallelWorkers(const oc::CLP&)
+{
+    const ProtocolCacheScope outerScope = currentProtocolCacheScope();
+    const std::uint64_t runId = allocateProtocolCacheRunId();
+    std::atomic<std::uint32_t> observed{ 0 };
+
+    {
+        ScopedProtocolCacheScope scoped(ProtocolCacheRole::Sender, runId);
+        LOGVOLE_REQUIRE_TRUE(detail::runParallelTasks(
+            16,
+            4,
+            [&](std::size_t) {
+                const auto scope = currentProtocolCacheScope();
+                if (scope.mRole == ProtocolCacheRole::Sender && scope.mRunId == runId)
+                {
+                    observed.fetch_add(1, std::memory_order_relaxed);
+                    return true;
+                }
+                return false;
+            }));
+    }
+
+    LOGVOLE_EXPECT_EQ(observed.load(std::memory_order_relaxed), 16u);
+
+    const ProtocolCacheScope restoredScope = currentProtocolCacheScope();
+    LOGVOLE_EXPECT_EQ(restoredScope.mRunId, outerScope.mRunId);
+    LOGVOLE_EXPECT_TRUE(restoredScope.mRole == outerScope.mRole);
 }
 
 void LogVole2_Core_SeedLabelAggSumsTauBlocks(const oc::CLP&)

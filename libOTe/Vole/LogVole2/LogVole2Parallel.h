@@ -2,6 +2,8 @@
 
 #include <cryptoTools/Common/Defines.h>
 
+#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
+
 #include "macoro/task.h"
 #include "macoro/trace.h"
 #include "macoro/sync_wait.h"
@@ -139,9 +141,13 @@ namespace osuCrypto::LogVole2::detail
     }
 
     template<typename Worker>
-    macoro::task<> runPoolWorker(macoro::thread_pool& pool, Worker& worker)
+    macoro::task<> runPoolWorker(
+        macoro::thread_pool& pool,
+        Worker& worker,
+        ProtocolCacheScope cacheScope)
     {
         co_await pool.schedule();
+        ScopedProtocolCacheScope scopedCache(cacheScope);
         worker();
     }
 
@@ -173,7 +179,9 @@ namespace osuCrypto::LogVole2::detail
         std::atomic<bool> failed{ false };
         const std::size_t batchSize = (taskCount >= workerCount * 8) ? 4 : 1;
 
+        const ProtocolCacheScope cacheScope = currentProtocolCacheScope();
         auto worker = [&]() {
+            ScopedProtocolCacheScope scopedCache(cacheScope);
             while (!failed.load(std::memory_order_acquire))
             {
                 const std::size_t batchStart = nextTaskIdx.fetch_add(batchSize, std::memory_order_relaxed);
@@ -204,7 +212,7 @@ namespace osuCrypto::LogVole2::detail
         tasks.reserve(workerCount - 1);
         for (std::size_t i = 1; i < workerCount; ++i)
         {
-            tasks.push_back(runPoolWorker(pool, worker) | macoro::make_eager());
+            tasks.push_back(runPoolWorker(pool, worker, cacheScope) | macoro::make_eager());
         }
 
         worker();

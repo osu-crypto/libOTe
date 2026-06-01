@@ -33,6 +33,7 @@
     X(Civole, SupportsSequentialSids) \
     X(Civole, RejectsSameSidReuseByEitherParty) \
     X(Core, ModeSelection) \
+    X(Core, RuntimeCacheScopePropagatesToParallelWorkers) \
     X(Core, SeedLabelAggSumsTauBlocks) \
     X(Core, GdecompHiUnbundleLiftsOneLimbPerOutput) \
     X(Core, RepOfflineSenderInputGammaOneRepeats) \
