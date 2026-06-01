@@ -47,6 +47,9 @@
     X(Core, ThreeLevelLocalApiRelation) \
     X(Core, ThreeLevelLocalPrecomputeCache) \
     X(Core, ThreeLevelLocalRepeatedOnline) \
+    X(Core, ThreeLevelOfflineReusesInternalSetup) \
+    X(Core, RecursiveGadgetInputSubproblem) \
+    X(Core, RecursiveGadgetInputSubproblemFullNoise) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \
