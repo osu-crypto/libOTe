@@ -67,6 +67,11 @@ namespace osuCrypto::LogVole2
             co_return payload;
         }
 
+        u64 frameBytes(const Buffer& payload)
+        {
+            return kFrameHeaderSize + static_cast<u64>(payload.size());
+        }
+
         bool computeTauHi(const Params& params, u32& out)
         {
             if (params.mShrinkExpand.mTau < 2)
@@ -290,27 +295,34 @@ namespace osuCrypto::LogVole2
 
         if (mode == RecursiveMode::Root)
         {
-            auto rootSock = sock.fork();
-            RootDigestState digestState{};
-            RootDigestMessage digest{};
-            if (!prepareRootDigestReceiver(state, input.mX, digestState, digest))
+            Buffer digestPayload;
+            Buffer responsePayload;
             {
-                throw std::runtime_error("LogVole2 receiver could not prepare root digest");
-            }
+                auto rootSock = sock.fork();
+                RootDigestState digestState{};
+                RootDigestMessage digest{};
+                if (!prepareRootDigestReceiver(state, input.mX, digestState, digest))
+                {
+                    throw std::runtime_error("LogVole2 receiver could not prepare root digest");
+                }
 
-            co_await sendFrame(rootSock, encode(digest));
+                digestPayload = encode(digest);
+                co_await sendFrame(rootSock, digestPayload);
 
-            const auto responsePayload = co_await recvFrame(rootSock);
-            RootResponseMessage response{};
-            if (!decode(responsePayload, response))
-            {
-                throw std::runtime_error("LogVole2 receiver could not decode root response");
-            }
+                responsePayload = co_await recvFrame(rootSock);
+                RootResponseMessage response{};
+                if (!decode(responsePayload, response))
+                {
+                    throw std::runtime_error("LogVole2 receiver could not decode root response");
+                }
 
-            if (!finalizeRootOnlineReceiver(state, input, digestState, response, output))
-            {
-                throw std::runtime_error("LogVole2 receiver could not finalize root online");
+                if (!finalizeRootOnlineReceiver(state, input, digestState, response, output))
+                {
+                    throw std::runtime_error("LogVole2 receiver could not finalize root online");
+                }
             }
+            output.mComm.mBytesSent = frameBytes(digestPayload);
+            output.mComm.mBytesReceived = frameBytes(responsePayload);
             co_return;
         }
 
@@ -445,6 +457,7 @@ namespace osuCrypto::LogVole2
         ReceiverOnlineOutput next{};
         next.mSeed = childOutput.mSeed;
         next.mTbm = std::move(finalTbm);
+        next.mComm = childOutput.mComm;
         output = std::move(next);
     }
 

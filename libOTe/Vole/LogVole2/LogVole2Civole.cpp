@@ -828,6 +828,7 @@ namespace osuCrypto::LogVole2
 
         CivoleSenderReleaseOutput next{};
         next.mSid = sid;
+        next.mComm = online.mComm;
         output = next;
     }
 
@@ -897,6 +898,7 @@ namespace osuCrypto::LogVole2
         next.mModulus = state.mModulus;
         next.mValues = x;
         next.mMacs = std::move(macs);
+        next.mComm = online.mComm;
         output = std::move(next);
     }
 }

@@ -70,10 +70,17 @@ namespace osuCrypto::LogVole2
         ReceiverState mState;
     };
 
+    struct CommunicationStats
+    {
+        u64 mBytesSent = 0;
+        u64 mBytesReceived = 0;
+    };
+
     struct SenderOnlineOutput
     {
         std::vector<RnsPoly> mTbk;
         std::vector<u8> mSeed;
+        CommunicationStats mComm;
     };
 
     struct SenderOnlineOptions
@@ -90,6 +97,7 @@ namespace osuCrypto::LogVole2
     {
         std::vector<RnsPoly> mTbm;
         std::vector<u8> mSeed;
+        CommunicationStats mComm;
     };
 
     u32 rootRandomizerWidth(u32 tauFull);

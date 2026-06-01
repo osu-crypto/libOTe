@@ -67,6 +67,11 @@ namespace osuCrypto::LogVole2
             co_return payload;
         }
 
+        u64 frameBytes(const Buffer& payload)
+        {
+            return kFrameHeaderSize + static_cast<u64>(payload.size());
+        }
+
         bool computeTauHi(const Params& params, u32& out)
         {
             if (params.mShrinkExpand.mTau < 2)
@@ -205,7 +210,8 @@ namespace osuCrypto::LogVole2
         task<> senderOnlineService(
             const SenderState& state,
             Socket& sock,
-            const std::shared_future<bool>& precomputeFuture)
+            const std::shared_future<bool>& precomputeFuture,
+            CommunicationStats& comm)
         {
             RecursiveMode mode{};
             if (!recursiveMode(state.mParams, mode))
@@ -215,24 +221,31 @@ namespace osuCrypto::LogVole2
 
             if (mode == RecursiveMode::Root)
             {
-                auto rootSock = sock.fork();
-                const auto digestPayload = co_await recvFrame(rootSock);
-
-                RootDigestMessage digest{};
-                if (!decode(digestPayload, digest))
+                Buffer digestPayload;
+                Buffer responsePayload;
                 {
-                    throw std::runtime_error("LogVole2 sender could not decode root digest");
+                    auto rootSock = sock.fork();
+                    digestPayload = co_await recvFrame(rootSock);
+
+                    RootDigestMessage digest{};
+                    if (!decode(digestPayload, digest))
+                    {
+                        throw std::runtime_error("LogVole2 sender could not decode root digest");
+                    }
+
+                    requireSenderPrecompute(precomputeFuture);
+
+                    RootResponseMessage response{};
+                    if (!prepareRootResponseSender(state, digest, response))
+                    {
+                        throw std::runtime_error("LogVole2 sender could not prepare root response");
+                    }
+
+                    responsePayload = encode(response);
+                    co_await sendFrame(rootSock, responsePayload);
                 }
-
-                requireSenderPrecompute(precomputeFuture);
-
-                RootResponseMessage response{};
-                if (!prepareRootResponseSender(state, digest, response))
-                {
-                    throw std::runtime_error("LogVole2 sender could not prepare root response");
-                }
-
-                co_await sendFrame(rootSock, encode(response));
+                comm.mBytesSent += frameBytes(responsePayload);
+                comm.mBytesReceived += frameBytes(digestPayload);
                 co_return;
             }
 
@@ -242,7 +255,7 @@ namespace osuCrypto::LogVole2
             }
 
             auto childSock = sock.fork();
-            co_await senderOnlineService(*state.mNextLevelState, childSock, precomputeFuture);
+            co_await senderOnlineService(*state.mNextLevelState, childSock, precomputeFuture, comm);
         }
     }
 
@@ -328,9 +341,10 @@ namespace osuCrypto::LogVole2
             runSenderPrecomputeTask(state, precomputePool, precomputePromise, cacheScope) | macoro::make_eager();
 
         std::exception_ptr serviceException{};
+        CommunicationStats comm{};
         try
         {
-            co_await senderOnlineService(state, sock, precomputeFuture);
+            co_await senderOnlineService(state, sock, precomputeFuture, comm);
         }
         catch (...)
         {
@@ -368,6 +382,7 @@ namespace osuCrypto::LogVole2
         {
             next.mTbk = *state.mPrecomputedTbk;
         }
+        next.mComm = comm;
         output = std::move(next);
     }
 

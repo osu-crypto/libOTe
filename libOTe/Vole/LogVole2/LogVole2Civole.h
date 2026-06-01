@@ -79,6 +79,7 @@ namespace osuCrypto::LogVole2
     struct CivoleSenderReleaseOutput
     {
         CivoleSid mSid = 0;
+        CommunicationStats mComm;
     };
 
     struct CivoleReceiverSetXOutput
@@ -87,6 +88,7 @@ namespace osuCrypto::LogVole2
         u64 mModulus = 0;
         std::vector<u64> mValues;
         std::vector<u64> mMacs;
+        CommunicationStats mComm;
     };
 
     bool makeDefaultCivoleParams(CivoleParams& out, u32 workerThreads = 1);

@@ -1789,16 +1789,44 @@ void LogVole2_Core_ThreeLevelCoprotoRelation(const oc::CLP&)
     ReceiverOnlineOutput receiverOnline{};
 
     auto onlineSockets = coproto::LocalAsyncSocket::makePair();
+    const auto senderSentBefore = onlineSockets[0].bytesSent();
+    const auto senderReceivedBefore = onlineSockets[0].bytesReceived();
+    const auto receiverSentBefore = onlineSockets[1].bytesSent();
+    const auto receiverReceivedBefore = onlineSockets[1].bytesReceived();
     auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
         sender.online(senderState, senderOnline, onlineSockets[0]),
         receiver.online(receiverState, receiverOnlineInput, receiverOnline, onlineSockets[1])));
     std::get<0>(onlineResult).result();
     std::get<1>(onlineResult).result();
+    const auto senderBytesSent = onlineSockets[0].bytesSent() - senderSentBefore;
+    const auto senderBytesReceived = onlineSockets[0].bytesReceived() - senderReceivedBefore;
+    const auto receiverBytesSent = onlineSockets[1].bytesSent() - receiverSentBefore;
+    const auto receiverBytesReceived = onlineSockets[1].bytesReceived() - receiverReceivedBefore;
 
     LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
     LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
     LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
     LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == receiverOnline.mSeed);
+    LOGVOLE_EXPECT_EQ(senderOnline.mComm.mBytesSent, receiverOnline.mComm.mBytesReceived);
+    LOGVOLE_EXPECT_EQ(senderOnline.mComm.mBytesReceived, receiverOnline.mComm.mBytesSent);
+    LOGVOLE_EXPECT_GT(senderOnline.mComm.mBytesSent, 0ull);
+    LOGVOLE_EXPECT_GT(senderOnline.mComm.mBytesReceived, 0ull);
+    LOGVOLE_EXPECT_GT(senderBytesSent, senderOnline.mComm.mBytesSent);
+    LOGVOLE_EXPECT_GT(senderBytesReceived, senderOnline.mComm.mBytesReceived);
+    LOGVOLE_EXPECT_GT(receiverBytesSent, receiverOnline.mComm.mBytesSent);
+    LOGVOLE_EXPECT_GT(receiverBytesReceived, receiverOnline.mComm.mBytesReceived);
+    LOGVOLE_EXPECT_LT(senderBytesSent - senderOnline.mComm.mBytesSent, 128ull);
+    LOGVOLE_EXPECT_LT(senderBytesReceived - senderOnline.mComm.mBytesReceived, 128ull);
+    LOGVOLE_EXPECT_LT(receiverBytesSent - receiverOnline.mComm.mBytesSent, 128ull);
+    LOGVOLE_EXPECT_LT(receiverBytesReceived - receiverOnline.mComm.mBytesReceived, 128ull);
+
+    const auto rootPolyBytes =
+        static_cast<std::uint64_t>(params.mShrinkExpand.mRing.mPolyModulusDegree) *
+        static_cast<std::uint64_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size()) *
+        static_cast<std::uint64_t>(sizeof(std::uint64_t));
+    const auto onlineBytesBound = rootPolyBytes * 3 + 4096;
+    LOGVOLE_EXPECT_LT(senderOnline.mComm.mBytesSent, onlineBytesBound);
+    LOGVOLE_EXPECT_LT(receiverOnline.mComm.mBytesSent, onlineBytesBound);
 
     std::vector<RnsPoly> sRep;
     LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
