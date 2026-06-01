@@ -49,6 +49,21 @@ namespace
         return params;
     }
 
+    Params make_recursive_params()
+    {
+        Params params = make_golden_params();
+        params.mShrinkExpand.mRing.mCoeffModulusBits = { 55, 55, 55, 55 };
+        params.mShrinkExpand.mPlaintextModulusBits = 55;
+        params.mShrinkExpand.mTau = 2;
+        params.mShrinkExpand.mGadgetLogBase = 110;
+        params.mShrinkExpand.mMu =
+            params.mShrinkExpand.mAlpha *
+            params.mShrinkExpand.mTau *
+            static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        params.mW = params.mShrinkExpand.mMu;
+        return params;
+    }
+
     Params make_root_params()
     {
         Params params{};
@@ -1182,6 +1197,348 @@ void LogVole2_Core_RootLocalApiRelation(const oc::CLP&)
         senderOffline.mState.mShrinkExpandState.mS,
         receiverOnlineInput.mX,
         expected));
+
+    long double maxLog2 = 0.0L;
+    LOGVOLE_EXPECT_TRUE(check_logvole_noise_tolerance(ctx, actual, expected, params, maxLog2))
+        << "max centered log2 residual " << static_cast<double>(maxLog2);
+}
+
+void LogVole2_Core_TwoLevelLocalRelation(const oc::CLP&)
+{
+    Params params = make_recursive_params();
+    const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
+    const std::uint32_t rho =
+        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+    const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
+    params.mW = params.mShrinkExpand.mAlpha * muHi;
+
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+
+    SenderOfflineInput senderInput{};
+    senderInput.mParams = params;
+    senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7651u);
+
+    SenderOfflineOutput senderOffline{};
+    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(senderInput, senderOffline));
+    LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mNextLevelState != nullptr);
+    LOGVOLE_REQUIRE_TRUE(senderOffline.mMessage.mNextLevel != nullptr);
+
+    ReceiverOfflineInput receiverInput{};
+    receiverInput.mParams = params;
+
+    ReceiverOfflineOutput receiverOffline{};
+    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, receiverOffline));
+    LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState != nullptr);
+
+    LOGVOLE_REQUIRE_TRUE(ensureSenderPrecompute(senderOffline.mState));
+    LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mPrecomputedTbk != nullptr);
+    LOGVOLE_REQUIRE_EQ(senderOffline.mState.mPrecomputedTbk->size(), params.mW);
+    LOGVOLE_REQUIRE_FALSE(senderOffline.mState.mGoldenSeed.empty());
+
+    const std::uint32_t plainSampleBits =
+        std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
+    const auto x = sample_small_plain_batch(ctx, params.mW, 0x7662u, plainSampleBits);
+
+    const std::uint32_t wDoublePrime = (params.mW + muHi - 1u) / muHi;
+    const std::uint32_t wNext = wDoublePrime * tauHi * rho;
+    std::vector<RnsPoly> dHat;
+    dHat.reserve(wNext);
+    std::vector<RnsPoly> digests;
+    digests.reserve(wDoublePrime);
+    std::vector<std::shared_ptr<DigestTree>> trees;
+    trees.reserve(wDoublePrime);
+
+    for (std::uint32_t chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+    {
+        const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
+        const std::size_t end = std::min(start + static_cast<std::size_t>(muHi), x.size());
+        std::vector<RnsPoly> chunk(x.begin() + start, x.begin() + end);
+        while (chunk.size() < muHi)
+        {
+            chunk.push_back(zero_poly(ctx));
+        }
+
+        ShrinkExpandShrinkOutput shrink{};
+        LOGVOLE_REQUIRE_TRUE(shrinkExpandShrink(receiverOffline.mState.mShrinkExpandState, chunk, shrink));
+
+        std::vector<RnsPoly> decomposed;
+        LOGVOLE_REQUIRE_TRUE(seedLabelGadgetDecomposeHiAndUnbundle(
+            shrink.mDigest,
+            params.mShrinkExpand.mGadgetLogBase,
+            tauHi,
+            params.mShrinkExpand.mRing,
+            decomposed));
+        LOGVOLE_REQUIRE_EQ(decomposed.size(), static_cast<std::size_t>(tauHi) * rho);
+
+        digests.push_back(std::move(shrink.mDigest));
+        trees.push_back(std::move(shrink.mTree));
+        for (auto& poly : decomposed)
+        {
+            dHat.push_back(std::move(poly));
+        }
+    }
+    LOGVOLE_REQUIRE_EQ(dHat.size(), wNext);
+
+    RootDigestState childDigestState{};
+    RootDigestMessage childDigestMessage{};
+    LOGVOLE_REQUIRE_TRUE(prepareRootDigestReceiver(
+        *receiverOffline.mState.mNextLevelState,
+        dHat,
+        childDigestState,
+        childDigestMessage));
+
+    RootResponseMessage childResponse{};
+    LOGVOLE_REQUIRE_TRUE(prepareRootResponseSender(
+        *senderOffline.mState.mNextLevelState,
+        childDigestMessage,
+        childResponse));
+    LOGVOLE_EXPECT_TRUE(childResponse.mSeed == senderOffline.mState.mGoldenSeed);
+
+    ReceiverOnlineInput childReceiverInput{};
+    childReceiverInput.mX = dHat;
+
+    ReceiverOnlineOutput childReceiverOutput{};
+    LOGVOLE_REQUIRE_TRUE(finalizeRootOnlineReceiver(
+        *receiverOffline.mState.mNextLevelState,
+        childReceiverInput,
+        childDigestState,
+        childResponse,
+        childReceiverOutput));
+    LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mNextLevelState->mPrecomputedTbk != nullptr);
+
+    std::vector<RnsPoly> childActual;
+    std::vector<RnsPoly> childExpected;
+    LOGVOLE_REQUIRE_TRUE(subtract_batches(
+        ctx,
+        childReceiverOutput.mTbm,
+        *senderOffline.mState.mNextLevelState->mPrecomputedTbk,
+        childActual));
+    LOGVOLE_REQUIRE_TRUE(compute_expected_s_mul_x(
+        ctx,
+        senderOffline.mState.mNextLevelState->mShrinkExpandState.mS,
+        dHat,
+        childExpected));
+    std::vector<RnsPoly> childResidualPos;
+    std::vector<RnsPoly> childExpectedNeg;
+    std::vector<RnsPoly> childResidualNeg;
+    LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, childActual, childExpected, childResidualPos));
+    LOGVOLE_REQUIRE_TRUE(negate_batch(ctx, childExpected, childExpectedNeg));
+    LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, childActual, childExpectedNeg, childResidualNeg));
+    const auto childPosLog2 = max_centered_log2(ctx, childResidualPos);
+    const auto childNegLog2 = max_centered_log2(ctx, childResidualNeg);
+    long double childMaxLog2 = 0.0L;
+    const bool childRelationOk = check_logvole_noise_tolerance(
+        ctx,
+        childActual,
+        childExpected,
+        senderOffline.mState.mNextLevelState->mParams,
+        childMaxLog2);
+
+    const std::uint32_t wPrime =
+        (params.mW + params.mShrinkExpand.mAlpha - 1u) / params.mShrinkExpand.mAlpha;
+    std::vector<RnsPoly> skXHat;
+    std::vector<RnsPoly> skX;
+    LOGVOLE_REQUIRE_TRUE(seedLabelDenoiseTbm(
+        childReceiverOutput.mTbm,
+        wPrime,
+        tauHi,
+        params.mShrinkExpand.mRing,
+        skXHat));
+    LOGVOLE_REQUIRE_TRUE(seedLabelAgg(skXHat, wDoublePrime, tauHi, params.mShrinkExpand.mRing, skX));
+    LOGVOLE_REQUIRE_EQ(skX.size(), wDoublePrime);
+
+    std::vector<RnsPoly> kPrimeHat;
+    std::vector<RnsPoly> kPrime;
+    LOGVOLE_REQUIRE_TRUE(seedLabelDenoiseTbm(
+        *senderOffline.mState.mNextLevelState->mPrecomputedTbk,
+        wPrime,
+        tauHi,
+        params.mShrinkExpand.mRing,
+        kPrimeHat));
+    LOGVOLE_REQUIRE_TRUE(seedLabelAgg(kPrimeHat, wDoublePrime, tauHi, params.mShrinkExpand.mRing, kPrime));
+    LOGVOLE_REQUIRE_EQ(kPrime.size(), wDoublePrime);
+
+    long double skXResidual = 0.0L;
+    long double skXNegResidual = 0.0L;
+    long double expectedAggResidual = 0.0L;
+    for (std::uint32_t chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+    {
+        RnsPoly directSkX{};
+        LOGVOLE_REQUIRE_TRUE(deriveSkxTrunc(
+            ctx,
+            senderOffline.mState.mShrinkExpandState.mSk1,
+            digests[chunkIdx],
+            kPrime[chunkIdx],
+            params.mShrinkExpand.mGadgetLogBase,
+            tauHi,
+            directSkX));
+        std::vector<RnsPoly> diff;
+        LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, std::vector<RnsPoly>{ skX[chunkIdx] }, std::vector<RnsPoly>{ directSkX }, diff));
+        skXResidual = std::max(skXResidual, max_centered_log2(ctx, diff));
+
+        std::vector<RnsPoly> directNeg;
+        std::vector<RnsPoly> diffNeg;
+        LOGVOLE_REQUIRE_TRUE(negate_batch(ctx, std::vector<RnsPoly>{ directSkX }, directNeg));
+        LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, std::vector<RnsPoly>{ skX[chunkIdx] }, directNeg, diffNeg));
+        skXNegResidual = std::max(skXNegResidual, max_centered_log2(ctx, diffNeg));
+    }
+
+    std::vector<RnsPoly> expectedHat;
+    std::vector<RnsPoly> expectedAgg;
+    LOGVOLE_REQUIRE_TRUE(seedLabelDenoiseTbm(childExpected, wPrime, tauHi, params.mShrinkExpand.mRing, expectedHat));
+    LOGVOLE_REQUIRE_TRUE(seedLabelAgg(expectedHat, wDoublePrime, tauHi, params.mShrinkExpand.mRing, expectedAgg));
+    LOGVOLE_REQUIRE_EQ(expectedAgg.size(), wDoublePrime);
+    RnsPoly zeroKey = zero_poly(ctx);
+    for (std::uint32_t chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+    {
+        RnsPoly directNoK{};
+        LOGVOLE_REQUIRE_TRUE(deriveSkxTrunc(
+            ctx,
+            senderOffline.mState.mShrinkExpandState.mSk1,
+            digests[chunkIdx],
+            zeroKey,
+            params.mShrinkExpand.mGadgetLogBase,
+            tauHi,
+            directNoK));
+        std::vector<RnsPoly> diff;
+        LOGVOLE_REQUIRE_TRUE(subtract_batches(
+            ctx,
+            std::vector<RnsPoly>{ expectedAgg[chunkIdx] },
+            std::vector<RnsPoly>{ directNoK },
+            diff));
+        expectedAggResidual = std::max(expectedAggResidual, max_centered_log2(ctx, diff));
+    }
+
+    std::vector<RnsPoly> finalTbm(params.mW);
+    constexpr std::uint64_t rootSeedInstances = 1u;
+    for (std::uint32_t chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+    {
+        const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
+        const std::size_t end = std::min(start + static_cast<std::size_t>(muHi), x.size());
+
+        ShrinkExpandExpandReceiverInput expandInput{};
+        expandInput.mNonce = deriveSeedInstanceNonce(
+            params.mShrinkExpand.mSamplingSeeds,
+            childResponse.mSeed,
+            rootSeedInstances + chunkIdx);
+        expandInput.mDigest = digests[chunkIdx];
+        expandInput.mSkX = skX[chunkIdx];
+        expandInput.mTree = trees[chunkIdx];
+
+        ShrinkExpandReceiverExpandOutput expandOutput{};
+        LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandReceiver(
+            receiverOffline.mState.mShrinkExpandState,
+            expandInput,
+            expandOutput));
+        LOGVOLE_REQUIRE_TRUE(expandOutput.mTbm.size() >= end - start);
+
+        for (std::size_t itemIdx = 0; itemIdx < end - start; ++itemIdx)
+        {
+            finalTbm[start + itemIdx] = std::move(expandOutput.mTbm[itemIdx]);
+        }
+    }
+
+    std::vector<RnsPoly> sW;
+    sW.reserve(params.mW);
+    for (std::uint32_t chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+    {
+        for (const auto& poly : senderOffline.mState.mShrinkExpandState.mS)
+        {
+            if (sW.size() < params.mW)
+            {
+                sW.push_back(poly);
+            }
+        }
+    }
+
+    std::vector<RnsPoly> actual;
+    std::vector<RnsPoly> expected;
+    LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, finalTbm, *senderOffline.mState.mPrecomputedTbk, actual));
+    LOGVOLE_REQUIRE_TRUE(compute_expected_s_mul_x(ctx, sW, x, expected));
+
+    long double maxLog2 = 0.0L;
+    LOGVOLE_EXPECT_TRUE(check_logvole_noise_tolerance(ctx, actual, expected, params, maxLog2))
+        << "max centered log2 residual " << static_cast<double>(maxLog2)
+        << ", child residual " << static_cast<double>(childMaxLog2)
+        << ", child pos " << static_cast<double>(childPosLog2)
+        << ", child neg " << static_cast<double>(childNegLog2)
+        << ", child relation ok " << childRelationOk
+        << ", sk_x residual " << static_cast<double>(skXResidual)
+        << ", sk_x neg residual " << static_cast<double>(skXNegResidual)
+        << ", expected agg residual " << static_cast<double>(expectedAggResidual);
+}
+
+void LogVole2_Core_TwoLevelLocalApiRelation(const oc::CLP&)
+{
+    Params params = make_recursive_params();
+    const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
+    const std::uint32_t rho =
+        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+    const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
+    params.mW = params.mShrinkExpand.mAlpha * muHi;
+
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+
+    SenderOfflineInput senderInput{};
+    senderInput.mParams = params;
+    senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7751u);
+
+    SenderOfflineOutput senderOffline{};
+    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(senderInput, senderOffline));
+
+    ReceiverOfflineInput receiverInput{};
+    receiverInput.mParams = params;
+
+    ReceiverOfflineOutput receiverOffline{};
+    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, receiverOffline));
+
+    const std::uint32_t plainSampleBits =
+        std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
+    ReceiverOnlineInput receiverInputOnline{};
+    receiverInputOnline.mX = sample_small_plain_batch(ctx, params.mW, 0x7762u, plainSampleBits);
+
+    SenderOnlineOutput senderOnline{};
+    ReceiverOnlineOutput receiverOnline{};
+    LOGVOLE_REQUIRE_TRUE(runLocalOnline(
+        senderOffline.mState,
+        receiverOffline.mState,
+        receiverInputOnline,
+        senderOnline,
+        receiverOnline));
+    LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
+    LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
+    LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
+    LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == receiverOnline.mSeed);
+
+    std::vector<RnsPoly> sRep;
+    LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
+        senderInput.mSk1,
+        params.mGamma,
+        params.mShrinkExpand.mAlpha,
+        tauHi,
+        params.mShrinkExpand.mRing,
+        sRep));
+
+    const std::uint32_t wDoublePrime = (params.mW + muHi - 1u) / muHi;
+    std::vector<RnsPoly> sW;
+    sW.reserve(params.mW);
+    for (std::uint32_t chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+    {
+        for (const auto& poly : sRep)
+        {
+            if (sW.size() < params.mW)
+            {
+                sW.push_back(poly);
+            }
+        }
+    }
+
+    std::vector<RnsPoly> actual;
+    std::vector<RnsPoly> expected;
+    LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, receiverOnline.mTbm, senderOnline.mTbk, actual));
+    LOGVOLE_REQUIRE_TRUE(compute_expected_s_mul_x(ctx, sW, receiverInputOnline.mX, expected));
 
     long double maxLog2 = 0.0L;
     LOGVOLE_EXPECT_TRUE(check_logvole_noise_tolerance(ctx, actual, expected, params, maxLog2))

@@ -231,11 +231,11 @@ Current gaps relative to clean-ot:
 | LENC/LHE | LENC and LHE helpers are substantially ported | Finish parity around recursive gadget-leaf use and cache behavior | 70% |
 | Shrink/expand | Deterministic/full-noise shrink-expand and truncation tests pass | Add recursive gadget-leaf relation coverage through the LogVole parent path | 70% |
 | Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 45% |
-| Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, and root precompute are present | Implement internal recursive sender/receiver flow, cached-root reuse, and coproto root exchange | 46% |
+| Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, root precompute, and clean-ot-profile two-level local recursion are present | Add deeper recursion coverage, cached-root reuse, and coproto root/recursive exchange | 58% |
 | CI-VOLE API | Missing | Port `Zp` wrapper, CRT helpers, SID state, default params | 0% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
 | Networking | Simple coproto wrappers for stale protocol exist | Rewrite sender/receiver exchanges directly in coproto; do not port clean-ot comm layer | 20% |
-| Tests | LogVole2 has 62 passing tests, including root local API relation with golden seed and clean-ot tolerance | Port internal recursive, precompute/cache, repeated online, and CI-VOLE tests | 60% |
+| Tests | LogVole2 has 64 passing tests, including root local API relation and clean-ot-profile two-level local recursive relation/API coverage | Port deeper recursion, precompute/cache, repeated online, and CI-VOLE tests | 66% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout
@@ -285,6 +285,10 @@ Do not refactor the current libOTe scaffold into the final implementation.
 
 The recommended path is a controlled rewrite of the LogVole directory, using the existing scaffold only for small pieces that match clean-ot exactly. In practice that means some mechanical reuse in ring encoding or basic polynomial operations may survive, but the protocol structure should come from clean-ot. This keeps us accurate to the passing branch Lucian prepared while still landing in libOTe's architecture: stock SEAL, no TinyLabels, no clean-ot networking stack, no broad SEAL abstraction, and coproto-native sender/receiver code.
 
+## Current parity note
+
+The two-level recursive local flow now passes against the clean-ot test profile (`tau = 2`, `tau_hi = 1`, `alpha = 2`). A separate experiment with the earlier libOTe golden profile (`tau_hi = 2`) exposed a denoise/aggregate identity mismatch, so that should be treated as a future parameter-generalization issue rather than part of clean-ot parity until the reference branch is shown to cover it.
+
 ## Next concrete work
 
-The next coding step should be to add the two-level local recursive sender/receiver flow where the parent feeds gadget-leaf inputs to the child root. Keep this local and algebraic until the relation test passes, then expose the same exchange over coproto.
+The next coding step should be to add three-level local recursion and cached/precomputed sender coverage, still using the clean-ot profile. Once those are green, the same recursive exchange can be split into coproto sender/receiver flows in one networking cutover.

@@ -3,6 +3,7 @@
 #include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
 #include "libOTe/Vole/LogVole2/LogVole2ShrinkExpand.h"
 
+#include <memory>
 #include <vector>
 
 namespace osuCrypto::LogVole2
@@ -42,9 +43,17 @@ namespace osuCrypto::LogVole2
         bool mLeafInputsAreGadget = false;
     };
 
+    struct OfflineMessage
+    {
+        ShrinkExpandOfflineMessage mShrinkExpandMessage;
+        RootOfflineMessage mRootMessage;
+        std::unique_ptr<OfflineMessage> mNextLevel;
+    };
+
     struct SenderOfflineOutput
     {
         SenderState mState;
+        OfflineMessage mMessage;
         ShrinkExpandOfflineMessage mShrinkExpandMessage;
         RootOfflineMessage mRootMessage;
     };
@@ -177,12 +186,27 @@ namespace osuCrypto::LogVole2
 
     bool finalizeReceiverOffline(
         const ReceiverOfflineInput& input,
+        const OfflineMessage& message,
+        ReceiverOfflineOutput& out);
+
+    bool finalizeReceiverOffline(
+        const ReceiverOfflineInput& input,
         const ShrinkExpandOfflineMessage& shrinkExpandMessage,
         const RootOfflineMessage& rootMessage,
         ReceiverOfflineOutput& out);
 
+    bool ensureSenderPrecompute(
+        const SenderState& state);
+
     bool ensureRootSenderPrecompute(
         const SenderState& state);
+
+    bool runLocalOnline(
+        const SenderState& sender,
+        ReceiverState& receiver,
+        const ReceiverOnlineInput& input,
+        SenderOnlineOutput& senderOut,
+        ReceiverOnlineOutput& receiverOut);
 
     bool prepareRootOnlineSender(
         SenderState& state,
