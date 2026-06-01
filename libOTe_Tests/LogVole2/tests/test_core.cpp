@@ -49,18 +49,41 @@ namespace
         return params;
     }
 
-    Params make_recursive_params()
+    Params make_recursive_params(std::uint32_t numLevels)
     {
-        Params params = make_golden_params();
+        Params params{};
+        params.mShrinkExpand.mRing.mPolyModulusDegree = 8192;
         params.mShrinkExpand.mRing.mCoeffModulusBits = { 55, 55, 55, 55 };
         params.mShrinkExpand.mPlaintextModulusBits = 55;
-        params.mShrinkExpand.mTau = 2;
+        params.mShrinkExpand.mMode = ShrinkExpandMode::FullNoise;
+        params.mShrinkExpand.mNoiseBound = 2;
+        params.mShrinkExpand.mSamplingSeeds.mNoiseRoot = 0xBAD5EEDu;
+        params.mShrinkExpand.mAlpha = 2;
         params.mShrinkExpand.mGadgetLogBase = 110;
+        std::uint32_t logQ = 0;
+        for (const auto bits : params.mShrinkExpand.mRing.mCoeffModulusBits)
+        {
+            logQ += static_cast<std::uint32_t>(bits);
+        }
+        params.mShrinkExpand.mTau =
+            (logQ + params.mShrinkExpand.mGadgetLogBase - 1u) /
+            params.mShrinkExpand.mGadgetLogBase;
         params.mShrinkExpand.mMu =
             params.mShrinkExpand.mAlpha *
             params.mShrinkExpand.mTau *
             static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
-        params.mW = params.mShrinkExpand.mMu;
+
+        const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
+        const std::uint32_t rho =
+            static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
+        std::uint32_t wPrime = 1;
+        for (std::uint32_t i = 1; i < numLevels; ++i)
+        {
+            wPrime *= params.mShrinkExpand.mAlpha;
+        }
+        params.mW = wPrime * muHi;
+        params.mGamma = 1;
         return params;
     }
 
@@ -1205,12 +1228,11 @@ void LogVole2_Core_RootLocalApiRelation(const oc::CLP&)
 
 void LogVole2_Core_TwoLevelLocalRelation(const oc::CLP&)
 {
-    Params params = make_recursive_params();
+    Params params = make_recursive_params(2);
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
     const std::uint32_t rho =
         static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
     const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
-    params.mW = params.mShrinkExpand.mAlpha * muHi;
 
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
@@ -1471,12 +1493,11 @@ void LogVole2_Core_TwoLevelLocalRelation(const oc::CLP&)
 
 void LogVole2_Core_TwoLevelLocalApiRelation(const oc::CLP&)
 {
-    Params params = make_recursive_params();
+    Params params = make_recursive_params(2);
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
     const std::uint32_t rho =
         static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
     const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
-    params.mW = params.mShrinkExpand.mAlpha * muHi;
 
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
@@ -1547,12 +1568,11 @@ void LogVole2_Core_TwoLevelLocalApiRelation(const oc::CLP&)
 
 void LogVole2_Core_ThreeLevelLocalApiRelation(const oc::CLP&)
 {
-    Params params = make_recursive_params();
+    Params params = make_recursive_params(3);
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
     const std::uint32_t rho =
         static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
     const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
-    params.mW = params.mShrinkExpand.mAlpha * params.mShrinkExpand.mAlpha * muHi;
 
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
