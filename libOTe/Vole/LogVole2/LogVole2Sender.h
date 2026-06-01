@@ -29,6 +29,12 @@ namespace osuCrypto::LogVole2
             SenderOnlineOutput& output,
             Socket& sock);
 
+        task<> online(
+            const SenderState& state,
+            const SenderOnlineOptions& options,
+            SenderOnlineOutput& output,
+            Socket& sock);
+
         task<> expand(
             const ShrinkExpandSenderState& state,
             const ShrinkExpandExpandSenderInput& input,

@@ -45,6 +45,7 @@ namespace osuCrypto::LogVole2
 
     struct OfflineMessage
     {
+        bool mHasShrinkExpandMessage = true;
         ShrinkExpandOfflineMessage mShrinkExpandMessage;
         RootOfflineMessage mRootMessage;
         std::unique_ptr<OfflineMessage> mNextLevel;
@@ -73,6 +74,11 @@ namespace osuCrypto::LogVole2
     {
         std::vector<RnsPoly> mTbk;
         std::vector<u8> mSeed;
+    };
+
+    struct SenderOnlineOptions
+    {
+        bool mSkipTbkOutput = false;
     };
 
     struct ReceiverOnlineInput

@@ -1,5 +1,7 @@
 #include "libOTe/Vole/LogVole2/LogVole2Civole.h"
 
+#include "libOTe/Vole/LogVole2/LogVole2Parallel.h"
+
 #include "seal/util/rns.h"
 #include "seal/util/uintarith.h"
 #include "seal/util/uintarithsmallmod.h"
@@ -488,17 +490,16 @@ namespace osuCrypto::LogVole2
         const u64 slotCount = zpSlotCount(ctx);
         const u64 chunkCount = zpRingLabelCount(ctx, labels.size());
         out.resize(chunkCount);
-        for (u64 chunkIdx = 0; chunkIdx < chunkCount; ++chunkIdx)
-        {
-            const u64 offset = chunkIdx * slotCount;
-            const u64 chunkSize = std::min<u64>(slotCount, labels.size() - offset);
-            std::vector<u64> chunk(labels.begin() + offset, labels.begin() + offset + chunkSize);
-            if (!wrapZpBatchCrt(ctx, chunk, multiplyByDelta, padValue, requestedWorkers, out[chunkIdx]))
-            {
-                return false;
-            }
-        }
-        return true;
+        return detail::runParallelTasks(
+            static_cast<std::size_t>(chunkCount),
+            requestedWorkers,
+            [&](std::size_t taskIdx) {
+                const u64 chunkIdx = static_cast<u64>(taskIdx);
+                const u64 offset = chunkIdx * slotCount;
+                const u64 chunkSize = std::min<u64>(slotCount, labels.size() - offset);
+                std::vector<u64> chunk(labels.begin() + offset, labels.begin() + offset + chunkSize);
+                return wrapZpBatchCrt(ctx, chunk, multiplyByDelta, padValue, requestedWorkers, out[chunkIdx]);
+            });
     }
 
     bool unwrapRingLabelsCrt(
@@ -506,7 +507,7 @@ namespace osuCrypto::LogVole2
         const std::vector<RnsPoly>& labels,
         u64 zpLabelCount,
         bool scaleAndRound,
-        u32,
+        u32 requestedWorkers,
         std::vector<u64>& out)
     {
         if (!validateZpContext(ctx) || !validateRingBatchShape(labels, ctx.mRing.mParams))
@@ -551,90 +552,97 @@ namespace osuCrypto::LogVole2
 
         const u64 chunkCount = zpRingLabelCount(ctx, zpLabelCount);
         std::vector<std::vector<u64>> decodedChunks(chunkCount);
-        for (std::size_t labelIdx = 0; labelIdx < chunkCount; ++labelIdx)
-        {
-            RnsPoly canonical = labels[labelIdx];
-            if (!canonicalizePoly(canonical, ctx.mRing))
-            {
-                return false;
-            }
-
-            seal::Plaintext plain;
-            plain.resize(slotCount);
-
-            if (scaleAndRound)
-            {
-                for (std::size_t coeffIdx = 0; coeffIdx < slotCount; ++coeffIdx)
-                {
-                    u64 scaledCoeff = 0;
-                    unsigned __int128 fracSum = half;
-                    for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
+        if (!detail::runParallelTasks(
+                static_cast<std::size_t>(chunkCount),
+                requestedWorkers,
+                [&](std::size_t labelIdx) {
+                    RnsPoly canonical = labels[labelIdx];
+                    if (!canonicalizePoly(canonical, ctx.mRing))
                     {
-                        const u64 vI = canonical.mCoeffs[modIdx * n + coeffIdx];
-                        const u64 xI = seal::util::multiply_uint_mod(
-                            vI,
-                            crtInvPunctured[modIdx],
-                            ctx.mRing.mModuli[modIdx]);
+                        return false;
+                    }
 
-                        const unsigned __int128 scaledNumerator =
-                            static_cast<unsigned __int128>(xI) * plainModulusValue;
-                        u64 scaledWords[2] = {
-                            static_cast<u64>(scaledNumerator),
-                            static_cast<u64>(scaledNumerator >> 64)
-                        };
-                        u64 quotientWords[2] = { 0, 0 };
-                        seal::util::divide_uint128_inplace(scaledWords, qI[modIdx], quotientWords);
+                    seal::Plaintext plain;
+                    plain.resize(slotCount);
 
-                        scaledCoeff += quotientWords[0];
-                        if (scaledCoeff >= plainModulusValue)
+                    if (scaleAndRound)
+                    {
+                        for (std::size_t coeffIdx = 0; coeffIdx < slotCount; ++coeffIdx)
                         {
-                            scaledCoeff -= plainModulusValue;
-                        }
-
-                        const unsigned __int128 term =
-                            static_cast<unsigned __int128>(scaledWords[0]) * fracInvModulus[modIdx];
-                        const unsigned __int128 oldFrac = fracSum;
-                        fracSum += term;
-                        if (fracSum < oldFrac)
-                        {
-                            ++scaledCoeff;
-                            if (scaledCoeff == plainModulusValue)
+                            u64 scaledCoeff = 0;
+                            unsigned __int128 fracSum = half;
+                            for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
                             {
-                                scaledCoeff = 0;
+                                const u64 vI = canonical.mCoeffs[modIdx * n + coeffIdx];
+                                const u64 xI = seal::util::multiply_uint_mod(
+                                    vI,
+                                    crtInvPunctured[modIdx],
+                                    ctx.mRing.mModuli[modIdx]);
+
+                                const unsigned __int128 scaledNumerator =
+                                    static_cast<unsigned __int128>(xI) * plainModulusValue;
+                                u64 scaledWords[2] = {
+                                    static_cast<u64>(scaledNumerator),
+                                    static_cast<u64>(scaledNumerator >> 64)
+                                };
+                                u64 quotientWords[2] = { 0, 0 };
+                                seal::util::divide_uint128_inplace(scaledWords, qI[modIdx], quotientWords);
+
+                                scaledCoeff += quotientWords[0];
+                                if (scaledCoeff >= plainModulusValue)
+                                {
+                                    scaledCoeff -= plainModulusValue;
+                                }
+
+                                const unsigned __int128 term =
+                                    static_cast<unsigned __int128>(scaledWords[0]) * fracInvModulus[modIdx];
+                                const unsigned __int128 oldFrac = fracSum;
+                                fracSum += term;
+                                if (fracSum < oldFrac)
+                                {
+                                    ++scaledCoeff;
+                                    if (scaledCoeff == plainModulusValue)
+                                    {
+                                        scaledCoeff = 0;
+                                    }
+                                }
                             }
+                            plain[coeffIdx] = scaledCoeff;
                         }
                     }
-                    plain[coeffIdx] = scaledCoeff;
-                }
-            }
-            else
-            {
-                auto composedLocal = seal::util::allocate_poly(n, rho, pool);
-                std::copy(canonical.mCoeffs.begin(), canonical.mCoeffs.end(), composedLocal.get());
-                ringContextData->rns_tool()->base_q()->compose_array(composedLocal.get(), n, pool);
+                    else
+                    {
+                        auto localPool = seal::MemoryManager::GetPool();
+                        auto composedLocal = seal::util::allocate_poly(n, rho, localPool);
+                        std::copy(canonical.mCoeffs.begin(), canonical.mCoeffs.end(), composedLocal.get());
+                        ringContextData->rns_tool()->base_q()->compose_array(composedLocal.get(), n, localPool);
 
-                for (std::size_t coeffIdx = 0; coeffIdx < slotCount; ++coeffIdx)
-                {
-                    plain[coeffIdx] =
-                        seal::util::modulo_uint(composedLocal.get() + coeffIdx * rho, rho, plainModulus);
-                }
-            }
+                        for (std::size_t coeffIdx = 0; coeffIdx < slotCount; ++coeffIdx)
+                        {
+                            plain[coeffIdx] =
+                                seal::util::modulo_uint(composedLocal.get() + coeffIdx * rho, rho, plainModulus);
+                        }
+                    }
 
-            std::vector<u64> slots;
-            try
-            {
-                seal::BatchEncoder encoder(*ctx.mBatchingContext);
-                encoder.decode(plain, slots);
-            }
-            catch (const std::exception&)
-            {
-                return false;
-            }
+                    std::vector<u64> slots;
+                    try
+                    {
+                        seal::BatchEncoder encoder(*ctx.mBatchingContext);
+                        encoder.decode(plain, slots);
+                    }
+                    catch (const std::exception&)
+                    {
+                        return false;
+                    }
 
-            const u64 offset = labelIdx * slotCount;
-            const u64 remaining = zpLabelCount - offset;
-            const u64 copyCount = std::min<u64>(remaining, slots.size());
-            decodedChunks[labelIdx].assign(slots.begin(), slots.begin() + copyCount);
+                    const u64 offset = static_cast<u64>(labelIdx) * slotCount;
+                    const u64 remaining = zpLabelCount - offset;
+                    const u64 copyCount = std::min<u64>(remaining, slots.size());
+                    decodedChunks[labelIdx].assign(slots.begin(), slots.begin() + copyCount);
+                    return true;
+                }))
+        {
+            return false;
         }
 
         out.clear();
@@ -683,7 +691,8 @@ namespace osuCrypto::LogVole2
             throw std::runtime_error("LogVole2 CI-VOLE sender could not wrap delta");
         }
 
-        co_await sendU64(sock, input.mW);
+        auto metaSock = sock.fork();
+        co_await sendU64(metaSock, input.mW);
 
         SenderOfflineInput offlineInput{};
         offlineInput.mParams = params;
@@ -691,7 +700,8 @@ namespace osuCrypto::LogVole2
 
         Sender sender{};
         SenderState logVoleState{};
-        co_await sender.offline(offlineInput, logVoleState, sock);
+        auto logVoleSock = sock.fork();
+        co_await sender.offline(offlineInput, logVoleState, logVoleSock);
 
         CivoleSenderState next{};
         next.mParams = input.mParams;
@@ -709,7 +719,8 @@ namespace osuCrypto::LogVole2
         CivoleReceiverState& state,
         Socket& sock)
     {
-        const u64 labelCount = co_await recvU64(sock);
+        auto metaSock = sock.fork();
+        const u64 labelCount = co_await recvU64(metaSock);
 
         ZpCrtContext ctx{};
         if (!makeZpCrtContext(
@@ -735,7 +746,8 @@ namespace osuCrypto::LogVole2
 
         Receiver receiver{};
         ReceiverState logVoleState{};
-        co_await receiver.offline(offlineInput, logVoleState, sock);
+        auto logVoleSock = sock.fork();
+        co_await receiver.offline(offlineInput, logVoleState, logVoleSock);
 
         CivoleReceiverState next{};
         next.mParams = input.mParams;
@@ -805,7 +817,9 @@ namespace osuCrypto::LogVole2
 
         Sender sender{};
         SenderOnlineOutput online{};
-        co_await sender.online(state.mLogVoleState, online, sock);
+        SenderOnlineOptions options{};
+        options.mSkipTbkOutput = true;
+        co_await sender.online(state.mLogVoleState, options, online, sock);
 
         CivoleSenderReleaseOutput next{};
         next.mSid = sid;

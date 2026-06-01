@@ -1,6 +1,7 @@
 #include "libOTe/Vole/LogVole2/LogVole2Core.h"
 
 #include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
+#include "libOTe/Vole/LogVole2/LogVole2Parallel.h"
 
 #include "seal/util/rns.h"
 #include "seal/util/uintarithsmallmod.h"
@@ -1495,10 +1496,50 @@ namespace osuCrypto::LogVole2
 
     namespace
     {
+        bool samplingSeedsEqual(const SamplingSeedConfig& lhs, const SamplingSeedConfig& rhs)
+        {
+            return lhs.mNoiseRoot == rhs.mNoiseRoot &&
+                   lhs.mCt2Root == rhs.mCt2Root;
+        }
+
+        bool shrinkExpandParamsEqual(const ShrinkExpandParams& lhs, const ShrinkExpandParams& rhs)
+        {
+            return lhs.mRing == rhs.mRing &&
+                   lhs.mPlaintextModulusBits == rhs.mPlaintextModulusBits &&
+                   lhs.mAlpha == rhs.mAlpha &&
+                   lhs.mMu == rhs.mMu &&
+                   lhs.mGadgetLogBase == rhs.mGadgetLogBase &&
+                   lhs.mTau == rhs.mTau &&
+                   lhs.mNumWorkerThreads == rhs.mNumWorkerThreads &&
+                   lhs.mTruncateOneGadgetDigit == rhs.mTruncateOneGadgetDigit &&
+                   lhs.mLeafInputsAreGadget == rhs.mLeafInputsAreGadget &&
+                   lhs.mMode == rhs.mMode &&
+                   lhs.mNoiseBound == rhs.mNoiseBound &&
+                   samplingSeedsEqual(lhs.mSamplingSeeds, rhs.mSamplingSeeds);
+        }
+
+        bool rnsBatchEqual(const std::vector<RnsPoly>& lhs, const std::vector<RnsPoly>& rhs)
+        {
+            if (lhs.size() != rhs.size())
+            {
+                return false;
+            }
+            for (std::size_t idx = 0; idx < lhs.size(); ++idx)
+            {
+                if (lhs[idx].mCoeffs != rhs[idx].mCoeffs)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         bool prepareSenderOfflineImpl(
             const SenderOfflineInput& input,
             SenderState& state,
-            OfflineMessage& message)
+            OfflineMessage& message,
+            bool isTopLevel,
+            const ShrinkExpandSenderState* reusableInternalState)
         {
             u32 tauHi = 0;
             u32 muHi = 0;
@@ -1515,41 +1556,63 @@ namespace osuCrypto::LogVole2
                 evalRecursiveMode(input.mParams.mW, input.mParams.mShrinkExpand.mAlpha, tauHi, rho);
 
             ShrinkExpandParams seParams{};
-            std::vector<RnsPoly> sRep;
-            if (!makeTruncShrinkExpandParams(input.mParams, input.mLeafInputsAreGadget, seParams) ||
-                !seedLabelRepOfflineSenderInput(
-                    input.mSk1,
-                    input.mParams.mGamma,
-                    input.mParams.mShrinkExpand.mAlpha,
-                    tauHi,
-                    input.mParams.mShrinkExpand.mRing,
-                    sRep))
+            if (!makeTruncShrinkExpandParams(input.mParams, input.mLeafInputsAreGadget, seParams))
             {
                 return false;
             }
 
-            ShrinkExpandSenderOfflineInput seInput{};
-            seInput.mParams = seParams;
-            seInput.mS = std::move(sRep);
-            if (input.mLeafInputsAreGadget)
-            {
-                seInput.mFixedSk1 = input.mSk1;
-            }
-
-            ShrinkExpandOfflineMessage seMessage{};
             ShrinkExpandSenderState seState{};
-            if (!prepareShrinkExpandSenderOffline(seInput, seMessage, seState))
+            const ShrinkExpandSenderState* childReusableState = reusableInternalState;
+            OfflineMessage nextMessage{};
+            if (reusableInternalState != nullptr)
             {
-                return false;
+                if (!shrinkExpandParamsEqual(reusableInternalState->mParams, seParams) ||
+                    !rnsBatchEqual(reusableInternalState->mSk1, input.mSk1))
+                {
+                    return false;
+                }
+                seState = *reusableInternalState;
+                nextMessage.mHasShrinkExpandMessage = false;
+            }
+            else
+            {
+                std::vector<RnsPoly> sRep;
+                if (!seedLabelRepOfflineSenderInput(
+                        input.mSk1,
+                        input.mParams.mGamma,
+                        input.mParams.mShrinkExpand.mAlpha,
+                        tauHi,
+                        input.mParams.mShrinkExpand.mRing,
+                        sRep))
+                {
+                    return false;
+                }
+
+                ShrinkExpandSenderOfflineInput seInput{};
+                seInput.mParams = seParams;
+                seInput.mS = std::move(sRep);
+                if (!isTopLevel)
+                {
+                    seInput.mFixedSk1 = input.mSk1;
+                }
+
+                ShrinkExpandOfflineMessage seMessage{};
+                if (!prepareShrinkExpandSenderOffline(seInput, seMessage, seState))
+                {
+                    return false;
+                }
+
+                nextMessage.mShrinkExpandMessage = std::move(seMessage);
             }
 
             SenderState nextState{};
             nextState.mParams = input.mParams;
             nextState.mSk1 = input.mSk1;
             nextState.mShrinkExpandState = std::move(seState);
-
-            OfflineMessage nextMessage{};
-            nextMessage.mShrinkExpandMessage = std::move(seMessage);
+            if (reusableInternalState == nullptr && !isTopLevel)
+            {
+                childReusableState = &nextState.mShrinkExpandState;
+            }
 
             if (mode == RecursiveMode::Root)
             {
@@ -1574,7 +1637,7 @@ namespace osuCrypto::LogVole2
 
                 auto childMessage = std::make_unique<OfflineMessage>();
                 auto childState = std::make_unique<SenderState>();
-                if (!prepareSenderOfflineImpl(childInput, *childState, *childMessage))
+                if (!prepareSenderOfflineImpl(childInput, *childState, *childMessage, false, childReusableState))
                 {
                     return false;
                 }
@@ -1591,7 +1654,9 @@ namespace osuCrypto::LogVole2
         bool finalizeReceiverOfflineImpl(
             const ReceiverOfflineInput& input,
             const OfflineMessage& message,
-            ReceiverState& state)
+            ReceiverState& state,
+            bool isTopLevel,
+            const ShrinkExpandReceiverState* reusableInternalState)
         {
             u32 tauHi = 0;
             u32 muHi = 0;
@@ -1611,18 +1676,40 @@ namespace osuCrypto::LogVole2
                 return false;
             }
 
-            ShrinkExpandReceiverOfflineInput seInput{};
-            seInput.mParams = seParams;
-
             ShrinkExpandReceiverState seState{};
-            if (!finalizeShrinkExpandReceiverOffline(seInput, message.mShrinkExpandMessage, seState))
+            const ShrinkExpandReceiverState* childReusableState = reusableInternalState;
+            if (reusableInternalState != nullptr)
             {
-                return false;
+                if (message.mHasShrinkExpandMessage ||
+                    !shrinkExpandParamsEqual(reusableInternalState->mParams, seParams))
+                {
+                    return false;
+                }
+                seState = *reusableInternalState;
+            }
+            else
+            {
+                if (!message.mHasShrinkExpandMessage)
+                {
+                    return false;
+                }
+
+                ShrinkExpandReceiverOfflineInput seInput{};
+                seInput.mParams = seParams;
+
+                if (!finalizeShrinkExpandReceiverOffline(seInput, message.mShrinkExpandMessage, seState))
+                {
+                    return false;
+                }
             }
 
             ReceiverState nextState{};
             nextState.mParams = input.mParams;
             nextState.mShrinkExpandState = std::move(seState);
+            if (reusableInternalState == nullptr && !isTopLevel)
+            {
+                childReusableState = &nextState.mShrinkExpandState;
+            }
 
             if (mode == RecursiveMode::Root)
             {
@@ -1645,7 +1732,7 @@ namespace osuCrypto::LogVole2
                 childInput.mLeafInputsAreGadget = true;
 
                 auto childState = std::make_unique<ReceiverState>();
-                if (!finalizeReceiverOfflineImpl(childInput, *message.mNextLevel, *childState))
+                if (!finalizeReceiverOfflineImpl(childInput, *message.mNextLevel, *childState, false, childReusableState))
                 {
                     return false;
                 }
@@ -1664,7 +1751,7 @@ namespace osuCrypto::LogVole2
     {
         SenderState state{};
         OfflineMessage message{};
-        if (!prepareSenderOfflineImpl(input, state, message))
+        if (!prepareSenderOfflineImpl(input, state, message, true, nullptr))
         {
             return false;
         }
@@ -1684,7 +1771,7 @@ namespace osuCrypto::LogVole2
         ReceiverOfflineOutput& out)
     {
         ReceiverState state{};
-        if (!finalizeReceiverOfflineImpl(input, message, state))
+        if (!finalizeReceiverOfflineImpl(input, message, state, true, nullptr))
         {
             return false;
         }
@@ -1816,35 +1903,43 @@ namespace osuCrypto::LogVole2
             const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
             std::vector<RnsPoly> finalTbk(state.mParams.mW);
             std::vector<RnsPoly> sampledTbk(static_cast<std::size_t>(wDoublePrime) * muHi);
-            for (u32 chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+            if (!detail::runParallelTasks(
+                    wDoublePrime,
+                    state.mShrinkExpandState.mParams.mNumWorkerThreads,
+                    [&](std::size_t taskIdx) {
+                        const auto chunkIdx = static_cast<u32>(taskIdx);
+                        ShrinkExpandExpandSenderInput expandInput{};
+                        expandInput.mNonce = deriveSeedInstanceNonce(
+                            state.mParams.mShrinkExpand.mSamplingSeeds,
+                            seed,
+                            instanceBase + chunkIdx);
+                        expandInput.mTbkPrime = kPrime[chunkIdx];
+
+                        ShrinkExpandSenderExpandOutput expandOutput{};
+                        if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
+                            expandOutput.mTbk.size() != muHi)
+                        {
+                            return false;
+                        }
+
+                        const std::size_t sampledStart = static_cast<std::size_t>(chunkIdx) * muHi;
+                        for (std::size_t idx = 0; idx < expandOutput.mTbk.size(); ++idx)
+                        {
+                            sampledTbk[sampledStart + idx] = expandOutput.mTbk[idx];
+                        }
+
+                        const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
+                        const std::size_t end = std::min(
+                            start + static_cast<std::size_t>(muHi),
+                            static_cast<std::size_t>(state.mParams.mW));
+                        for (std::size_t idx = 0; idx < end - start; ++idx)
+                        {
+                            finalTbk[start + idx] = std::move(expandOutput.mTbk[idx]);
+                        }
+                        return true;
+                    }))
             {
-                ShrinkExpandExpandSenderInput expandInput{};
-                expandInput.mNonce = deriveSeedInstanceNonce(
-                    state.mParams.mShrinkExpand.mSamplingSeeds,
-                    seed,
-                    instanceBase + chunkIdx);
-                expandInput.mTbkPrime = kPrime[chunkIdx];
-
-                ShrinkExpandSenderExpandOutput expandOutput{};
-                if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
-                    expandOutput.mTbk.size() != muHi)
-                {
-                    return false;
-                }
-
-                const std::size_t sampledStart = static_cast<std::size_t>(chunkIdx) * muHi;
-                for (std::size_t idx = 0; idx < expandOutput.mTbk.size(); ++idx)
-                {
-                    sampledTbk[sampledStart + idx] = expandOutput.mTbk[idx];
-                }
-
-                const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
-                const std::size_t end =
-                    std::min(start + static_cast<std::size_t>(muHi), static_cast<std::size_t>(state.mParams.mW));
-                for (std::size_t idx = 0; idx < end - start; ++idx)
-                {
-                    finalTbk[start + idx] = std::move(expandOutput.mTbk[idx]);
-                }
+                return false;
             }
 
             bool candidateOk = false;
@@ -2120,46 +2215,57 @@ namespace osuCrypto::LogVole2
             (sender.mParams.mW + sender.mParams.mShrinkExpand.mAlpha - 1u) /
             sender.mParams.mShrinkExpand.mAlpha;
 
+        std::vector<std::vector<RnsPoly>> dHatChunks(wDoublePrime);
+        std::vector<RnsPoly> digests(wDoublePrime);
+        std::vector<std::shared_ptr<DigestTree>> trees(wDoublePrime);
+
+        if (!detail::runParallelTasks(
+                wDoublePrime,
+                sender.mParams.mShrinkExpand.mNumWorkerThreads,
+                [&](std::size_t taskIdx) {
+                    const auto chunkIdx = static_cast<u32>(taskIdx);
+                    const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
+                    const std::size_t end =
+                        std::min(start + static_cast<std::size_t>(muHi), input.mX.size());
+                    if (start > end)
+                    {
+                        return false;
+                    }
+
+                    std::vector<RnsPoly> chunk(input.mX.begin() + start, input.mX.begin() + end);
+                    while (chunk.size() < muHi)
+                    {
+                        chunk.push_back(makeZeroPoly(sender.mParams.mShrinkExpand.mRing));
+                    }
+
+                    ShrinkExpandShrinkOutput shrink{};
+                    std::vector<RnsPoly> decomposed;
+                    if (!shrinkExpandShrink(receiver.mShrinkExpandState, chunk, shrink) ||
+                        !seedLabelGadgetDecomposeHiAndUnbundle(
+                            shrink.mDigest,
+                            sender.mParams.mShrinkExpand.mGadgetLogBase,
+                            tauHi,
+                            sender.mParams.mShrinkExpand.mRing,
+                            decomposed) ||
+                        decomposed.size() != static_cast<std::size_t>(tauHi) * rho)
+                    {
+                        return false;
+                    }
+
+                    digests[chunkIdx] = std::move(shrink.mDigest);
+                    trees[chunkIdx] = std::move(shrink.mTree);
+                    dHatChunks[chunkIdx] = std::move(decomposed);
+                    return true;
+                }))
+        {
+            return false;
+        }
+
         std::vector<RnsPoly> dHat;
         dHat.reserve(wNext);
-        std::vector<RnsPoly> digests;
-        digests.reserve(wDoublePrime);
-        std::vector<std::shared_ptr<DigestTree>> trees;
-        trees.reserve(wDoublePrime);
-
-        for (u32 chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+        for (auto& chunk : dHatChunks)
         {
-            const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
-            const std::size_t end =
-                std::min(start + static_cast<std::size_t>(muHi), input.mX.size());
-            if (start > end)
-            {
-                return false;
-            }
-
-            std::vector<RnsPoly> chunk(input.mX.begin() + start, input.mX.begin() + end);
-            while (chunk.size() < muHi)
-            {
-                chunk.push_back(makeZeroPoly(sender.mParams.mShrinkExpand.mRing));
-            }
-
-            ShrinkExpandShrinkOutput shrink{};
-            std::vector<RnsPoly> decomposed;
-            if (!shrinkExpandShrink(receiver.mShrinkExpandState, chunk, shrink) ||
-                !seedLabelGadgetDecomposeHiAndUnbundle(
-                    shrink.mDigest,
-                    sender.mParams.mShrinkExpand.mGadgetLogBase,
-                    tauHi,
-                    sender.mParams.mShrinkExpand.mRing,
-                    decomposed) ||
-                decomposed.size() != static_cast<std::size_t>(tauHi) * rho)
-            {
-                return false;
-            }
-
-            digests.push_back(std::move(shrink.mDigest));
-            trees.push_back(std::move(shrink.mTree));
-            for (auto& poly : decomposed)
+            for (auto& poly : chunk)
             {
                 dHat.push_back(std::move(poly));
             }
@@ -2206,32 +2312,39 @@ namespace osuCrypto::LogVole2
 
         const u64 instanceBase = countSeedInstances(*sender.mNextLevelState);
         std::vector<RnsPoly> finalTbm(sender.mParams.mW);
-        for (u32 chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
+        if (!detail::runParallelTasks(
+                wDoublePrime,
+                sender.mParams.mShrinkExpand.mNumWorkerThreads,
+                [&](std::size_t taskIdx) {
+                    const auto chunkIdx = static_cast<u32>(taskIdx);
+                    const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
+                    const std::size_t end =
+                        std::min(start + static_cast<std::size_t>(muHi), input.mX.size());
+
+                    ShrinkExpandExpandReceiverInput expandInput{};
+                    expandInput.mNonce = deriveSeedInstanceNonce(
+                        sender.mParams.mShrinkExpand.mSamplingSeeds,
+                        childReceiverOut.mSeed,
+                        instanceBase + chunkIdx);
+                    expandInput.mDigest = digests[chunkIdx];
+                    expandInput.mSkX = skX[chunkIdx];
+                    expandInput.mTree = trees[chunkIdx];
+
+                    ShrinkExpandReceiverExpandOutput expandOutput{};
+                    if (!shrinkExpandExpandReceiver(receiver.mShrinkExpandState, expandInput, expandOutput) ||
+                        expandOutput.mTbm.size() < end - start)
+                    {
+                        return false;
+                    }
+
+                    for (std::size_t itemIdx = 0; itemIdx < end - start; ++itemIdx)
+                    {
+                        finalTbm[start + itemIdx] = std::move(expandOutput.mTbm[itemIdx]);
+                    }
+                    return true;
+                }))
         {
-            const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
-            const std::size_t end =
-                std::min(start + static_cast<std::size_t>(muHi), input.mX.size());
-
-            ShrinkExpandExpandReceiverInput expandInput{};
-            expandInput.mNonce = deriveSeedInstanceNonce(
-                sender.mParams.mShrinkExpand.mSamplingSeeds,
-                childReceiverOut.mSeed,
-                instanceBase + chunkIdx);
-            expandInput.mDigest = digests[chunkIdx];
-            expandInput.mSkX = skX[chunkIdx];
-            expandInput.mTree = trees[chunkIdx];
-
-            ShrinkExpandReceiverExpandOutput expandOutput{};
-            if (!shrinkExpandExpandReceiver(receiver.mShrinkExpandState, expandInput, expandOutput) ||
-                expandOutput.mTbm.size() < end - start)
-            {
-                return false;
-            }
-
-            for (std::size_t itemIdx = 0; itemIdx < end - start; ++itemIdx)
-            {
-                finalTbm[start + itemIdx] = std::move(expandOutput.mTbm[itemIdx]);
-            }
+            return false;
         }
 
         SenderOnlineOutput nextSender{};

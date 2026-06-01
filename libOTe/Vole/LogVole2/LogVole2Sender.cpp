@@ -4,6 +4,8 @@
 
 #include <array>
 #include <cstddef>
+#include <exception>
+#include <future>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -114,10 +116,37 @@ namespace osuCrypto::LogVole2
             return true;
         }
 
+        task<> runSenderPrecomputeTask(
+            const SenderState& state,
+            macoro::thread_pool& pool,
+            std::promise<bool>& promise)
+        {
+            co_await pool.schedule();
+
+            try
+            {
+                promise.set_value(ensureSenderPrecompute(state) && state.mPrecomputedTbk != nullptr);
+            }
+            catch (...)
+            {
+                promise.set_exception(std::current_exception());
+            }
+        }
+
+        void requireSenderPrecompute(const std::shared_future<bool>& precomputeFuture)
+        {
+            if (!precomputeFuture.get())
+            {
+                throw std::runtime_error("LogVole2 sender could not prepare recursive online cache");
+            }
+        }
+
         task<> sendOfflineMessage(
             const Params& params,
             const OfflineMessage& message,
-            Socket& sock)
+            Socket& sock,
+            bool isTopLevel,
+            bool hasReusableState)
         {
             RecursiveMode mode{};
             if (!recursiveMode(params, mode))
@@ -125,10 +154,33 @@ namespace osuCrypto::LogVole2
                 throw std::runtime_error("LogVole2 sender has invalid recursive offline parameters");
             }
 
-            co_await sendFrame(sock, encode(message.mShrinkExpandMessage));
+            bool childHasReusableState = hasReusableState;
+            if (hasReusableState)
+            {
+                if (message.mHasShrinkExpandMessage)
+                {
+                    throw std::runtime_error("LogVole2 sender has unexpected reusable offline message");
+                }
+            }
+            else
+            {
+                if (!message.mHasShrinkExpandMessage)
+                {
+                    throw std::runtime_error("LogVole2 sender missing shrink/expand offline message");
+                }
+
+                auto shrinkExpandSock = sock.fork();
+                co_await sendFrame(shrinkExpandSock, encode(message.mShrinkExpandMessage));
+                if (!isTopLevel)
+                {
+                    childHasReusableState = true;
+                }
+            }
+
             if (mode == RecursiveMode::Root)
             {
-                co_await sendFrame(sock, encode(message.mRootMessage));
+                auto rootSock = sock.fork();
+                co_await sendFrame(rootSock, encode(message.mRootMessage));
                 co_return;
             }
 
@@ -143,7 +195,51 @@ namespace osuCrypto::LogVole2
                 throw std::runtime_error("LogVole2 sender could not derive child parameters");
             }
 
-            co_await sendOfflineMessage(child, *message.mNextLevel, sock);
+            auto childSock = sock.fork();
+            co_await sendOfflineMessage(child, *message.mNextLevel, childSock, false, childHasReusableState);
+        }
+
+        task<> senderOnlineService(
+            const SenderState& state,
+            Socket& sock,
+            const std::shared_future<bool>& precomputeFuture)
+        {
+            RecursiveMode mode{};
+            if (!recursiveMode(state.mParams, mode))
+            {
+                throw std::runtime_error("LogVole2 sender has invalid recursive online parameters");
+            }
+
+            if (mode == RecursiveMode::Root)
+            {
+                auto rootSock = sock.fork();
+                const auto digestPayload = co_await recvFrame(rootSock);
+
+                RootDigestMessage digest{};
+                if (!decode(digestPayload, digest))
+                {
+                    throw std::runtime_error("LogVole2 sender could not decode root digest");
+                }
+
+                requireSenderPrecompute(precomputeFuture);
+
+                RootResponseMessage response{};
+                if (!prepareRootResponseSender(state, digest, response))
+                {
+                    throw std::runtime_error("LogVole2 sender could not prepare root response");
+                }
+
+                co_await sendFrame(rootSock, encode(response));
+                co_return;
+            }
+
+            if (!state.mNextLevelState)
+            {
+                throw std::runtime_error("LogVole2 sender missing recursive child state");
+            }
+
+            auto childSock = sock.fork();
+            co_await senderOnlineService(*state.mNextLevelState, childSock, precomputeFuture);
         }
     }
 
@@ -172,7 +268,7 @@ namespace osuCrypto::LogVole2
             throw std::runtime_error("LogVole2 sender could not prepare recursive offline state");
         }
 
-        co_await sendOfflineMessage(input.mParams, output.mMessage, sock);
+        co_await sendOfflineMessage(input.mParams, output.mMessage, sock, true, false);
         state = std::move(output.mState);
     }
 
@@ -203,53 +299,64 @@ namespace osuCrypto::LogVole2
         SenderOnlineOutput& output,
         Socket& sock)
     {
-        RecursiveMode mode{};
-        if (!recursiveMode(state.mParams, mode))
+        SenderOnlineOptions options{};
+        co_await online(state, options, output, sock);
+    }
+
+    task<> Sender::online(
+        const SenderState& state,
+        const SenderOnlineOptions& options,
+        SenderOnlineOutput& output,
+        Socket& sock)
+    {
+        std::promise<bool> precomputePromise{};
+        auto precomputeFuture = precomputePromise.get_future().share();
+        macoro::thread_pool::work precomputeWork;
+        macoro::thread_pool precomputePool(1, precomputeWork);
+        auto precomputeTask =
+            runSenderPrecomputeTask(state, precomputePool, precomputePromise) | macoro::make_eager();
+
+        std::exception_ptr serviceException{};
+        try
         {
-            throw std::runtime_error("LogVole2 sender has invalid recursive online parameters");
+            co_await senderOnlineService(state, sock, precomputeFuture);
+        }
+        catch (...)
+        {
+            serviceException = std::current_exception();
         }
 
-        if (!ensureSenderPrecompute(state) || !state.mPrecomputedTbk)
+        bool precomputeOk = false;
+        try
+        {
+            precomputeOk = precomputeFuture.get();
+        }
+        catch (...)
+        {
+            if (!serviceException)
+            {
+                serviceException = std::current_exception();
+            }
+        }
+
+        precomputeWork.reset();
+        co_await precomputeTask;
+
+        if (serviceException)
+        {
+            std::rethrow_exception(serviceException);
+        }
+        if (!precomputeOk || !state.mPrecomputedTbk)
         {
             throw std::runtime_error("LogVole2 sender could not prepare recursive online cache");
         }
 
-        if (mode == RecursiveMode::Root)
-        {
-            const auto digestPayload = co_await recvFrame(sock);
-
-            RootDigestMessage digest{};
-            if (!decode(digestPayload, digest))
-            {
-                throw std::runtime_error("LogVole2 sender could not decode root digest");
-            }
-
-            RootResponseMessage response{};
-            if (!prepareRootResponseSender(state, digest, response))
-            {
-                throw std::runtime_error("LogVole2 sender could not prepare root response");
-            }
-
-            co_await sendFrame(sock, encode(response));
-
-            SenderOnlineOutput next{};
-            next.mSeed = response.mSeed;
-            next.mTbk = *state.mPrecomputedTbk;
-            output = std::move(next);
-            co_return;
-        }
-
-        if (!state.mNextLevelState)
-        {
-            throw std::runtime_error("LogVole2 sender missing recursive child state");
-        }
-
-        SenderOnlineOutput childOutput{};
-        co_await online(*state.mNextLevelState, childOutput, sock);
-
         SenderOnlineOutput next{};
         next.mSeed = state.mGoldenSeed;
-        next.mTbk = *state.mPrecomputedTbk;
+        if (!options.mSkipTbkOutput)
+        {
+            next.mTbk = *state.mPrecomputedTbk;
+        }
         output = std::move(next);
     }
 

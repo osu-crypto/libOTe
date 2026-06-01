@@ -58,6 +58,8 @@
     X(Core, RecursiveGadgetInputSubproblemFullNoise) \
     X(Core, RejectsWidthsBelowRandomizedRootBlock) \
     X(Core, ThreeLevelCoprotoRelation) \
+    X(Core, ThreeLevelCoprotoMultiThread) \
+    X(Core, ThreeLevelCoprotoSkipTbkOutput) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \
