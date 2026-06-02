@@ -1,5 +1,6 @@
 #include "libOTe/Vole/LogVole/LogVole.h"
 
+#include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
@@ -19,15 +20,6 @@ namespace osuCrypto::LogVole
     namespace
     {
         constexpr u64 kCivoleSidDomain = 0x4349564F4C455349ull;
-
-        unsigned __int128 reciprocal2Pow128(u64 modulus)
-        {
-            const unsigned __int128 two64 = static_cast<unsigned __int128>(1) << 64;
-            const u64 hi = static_cast<u64>(two64 / modulus);
-            const u64 rem = static_cast<u64>(two64 % modulus);
-            const u64 lo = static_cast<u64>((static_cast<unsigned __int128>(rem) << 64) / modulus);
-            return (static_cast<unsigned __int128>(hi) << 64) | lo;
-        }
 
         bool validateZpValue(const ZpCrtContext& ctx, u64 value)
         {
@@ -794,7 +786,7 @@ namespace osuCrypto::LogVole
         auto invPunctProd = fullBase.inv_punctured_prod_mod_base_array();
         AlignedUnVec<u64> crtInvPunctured;
         AlignedUnVec<u64> qI;
-        AlignedUnVec<unsigned __int128> fracInvModulus;
+        AlignedUnVec<wideU64> fracInvModulus;
         resizeZero(crtInvPunctured, rho);
         resizeZero(qI, rho);
         resizeZero(fracInvModulus, rho);
@@ -802,9 +794,9 @@ namespace osuCrypto::LogVole
         {
             qI[modIdx] = fullBase.base()[modIdx].value();
             crtInvPunctured[modIdx] = invPunctProd[modIdx].operand;
-            fracInvModulus[modIdx] = reciprocal2Pow128(qI[modIdx]);
+            fracInvModulus[modIdx] = reciprocal2Pow128Wide(qI[modIdx]);
         }
-        const unsigned __int128 half = static_cast<unsigned __int128>(1) << 127;
+        const wideU64 half = wideU64OneShift(127);
 
         const u64 chunkCount = zpRingLabelCount(ctx, zpLabelCount);
         std::vector<AlignedUnVec<u64>> decodedChunks(chunkCount);
@@ -826,7 +818,7 @@ namespace osuCrypto::LogVole
                         for (std::size_t coeffIdx = 0; coeffIdx < slotCount; ++coeffIdx)
                         {
                             u64 scaledCoeff = 0;
-                            unsigned __int128 fracSum = half;
+                            wideU64 fracSum = half;
                             for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
                             {
                                 const u64 vI = canonical.mCoeffs[modIdx * n + coeffIdx];
@@ -835,11 +827,10 @@ namespace osuCrypto::LogVole
                                     crtInvPunctured[modIdx],
                                     ctx.mRing.mModuli[modIdx]);
 
-                                const unsigned __int128 scaledNumerator =
-                                    static_cast<unsigned __int128>(xI) * plainModulusValue;
+                                const wideU64 scaledNumerator = wideU64Mul(xI, plainModulusValue);
                                 u64 scaledWords[2] = {
-                                    static_cast<u64>(scaledNumerator),
-                                    static_cast<u64>(scaledNumerator >> 64)
+                                    scaledNumerator.mLo,
+                                    scaledNumerator.mHi
                                 };
                                 u64 quotientWords[2] = { 0, 0 };
                                 seal::util::divide_uint128_inplace(scaledWords, qI[modIdx], quotientWords);
@@ -850,11 +841,12 @@ namespace osuCrypto::LogVole
                                     scaledCoeff -= plainModulusValue;
                                 }
 
-                                const unsigned __int128 term =
-                                    static_cast<unsigned __int128>(scaledWords[0]) * fracInvModulus[modIdx];
-                                const unsigned __int128 oldFrac = fracSum;
-                                fracSum += term;
-                                if (fracSum < oldFrac)
+                                unsigned char carry = 0;
+                                fracSum = wideU64Add(
+                                    fracSum,
+                                    wideU64MulLow(scaledWords[0], fracInvModulus[modIdx]),
+                                    &carry);
+                                if (carry)
                                 {
                                     ++scaledCoeff;
                                     if (scaledCoeff == plainModulusValue)

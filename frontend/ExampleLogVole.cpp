@@ -10,6 +10,7 @@
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "cryptoTools/Common/Timer.h"
 #include "libOTe/Vole/LogVole/LogVole.h"
+#include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "macoro/sync_wait.h"
 #include "macoro/when_all.h"
 
@@ -62,10 +63,10 @@ namespace osuCrypto
             if (keys.size() != x.size() || macs.size() != x.size())
                 throw std::runtime_error("LogVole CI-VOLE example returned an unexpected output size");
 
+            const seal::Modulus mod(modulus);
             for (u64 i = 0; i < x.size(); ++i)
             {
-                const auto prod = static_cast<unsigned __int128>(x[i]) * delta;
-                const auto expected = static_cast<u64>((keys[i] + prod) % modulus);
+                const auto expected = LogVole::mulAddMod(x[i], delta, keys[i], mod);
                 if (macs[i] != expected)
                     throw std::runtime_error("LogVole CI-VOLE example relation check failed");
             }

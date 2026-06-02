@@ -1,4 +1,5 @@
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
+#include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include <algorithm>
@@ -16,6 +17,7 @@ namespace osuCrypto::LogVole
 
         u64 pow2Mod(u64 exp, u64 mod)
         {
+            const seal::Modulus modulus(mod);
             u64 result = 1;
             u64 base = 2 % mod;
             u64 e = exp;
@@ -23,11 +25,9 @@ namespace osuCrypto::LogVole
             {
                 if ((e & 1u) != 0)
                 {
-                    const auto mul = static_cast<unsigned __int128>(result) * base;
-                    result = static_cast<u64>(mul % mod);
+                    result = mulMod(result, base, modulus);
                 }
-                const auto sq = static_cast<unsigned __int128>(base) * base;
-                base = static_cast<u64>(sq % mod);
+                base = mulMod(base, base, modulus);
                 e >>= 1;
             }
             return result;
@@ -122,8 +122,7 @@ namespace osuCrypto::LogVole
                 for (std::size_t i = 0; i < n; ++i)
                 {
                     const std::size_t idx = offset + i;
-                    const auto product = static_cast<unsigned __int128>(poly.mCoeffs[idx] % mod) * factor;
-                    poly.mCoeffs[idx] = static_cast<u64>(product % mod);
+                    poly.mCoeffs[idx] = mulMod(poly.mCoeffs[idx] % mod, factor, ctx.mModuli[modIdx]);
                 }
             }
             return true;

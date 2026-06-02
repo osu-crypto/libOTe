@@ -1,5 +1,6 @@
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
 
+#include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 
@@ -27,32 +28,21 @@ namespace osuCrypto::LogVole
 
         u64 pow2Mod(u64 exp, u64 mod)
         {
+            const seal::Modulus modulus(mod);
             u64 result = 1;
             u64 base = 2 % mod;
             while (exp > 0)
             {
                 if ((exp & 1) != 0)
                 {
-                    const auto mul = static_cast<unsigned __int128>(result) * base;
-                    result = static_cast<u64>(mul % mod);
+                    result = mulMod(result, base, modulus);
                 }
 
-                const auto sq = static_cast<unsigned __int128>(base) * base;
-                base = static_cast<u64>(sq % mod);
+                base = mulMod(base, base, modulus);
                 exp >>= 1;
             }
 
             return result;
-        }
-
-        u64 uint128Mod(unsigned __int128 value, const seal::Modulus& modulus)
-        {
-            const u64 mod = modulus.value();
-            const u64 lo = static_cast<u64>(value);
-            const u64 hi = static_cast<u64>(value >> 64);
-            const u64 two64Mod = static_cast<u64>((static_cast<unsigned __int128>(1) << 64) % mod);
-            const auto hiTerm = static_cast<unsigned __int128>(hi % mod) * two64Mod;
-            return static_cast<u64>((hiTerm + (lo % mod)) % mod);
         }
 
         u64 freshRootZetaSeed()
@@ -243,35 +233,6 @@ namespace osuCrypto::LogVole
             return log2B;
         }
 
-        unsigned __int128 reciprocal2Pow128(u64 modulus)
-        {
-            const unsigned __int128 two64 = static_cast<unsigned __int128>(1) << 64;
-            const u64 hi = static_cast<u64>(two64 / modulus);
-            const u64 rem = static_cast<u64>(two64 % modulus);
-            const u64 lo = static_cast<u64>((static_cast<unsigned __int128>(rem) << 64) / modulus);
-            return (static_cast<unsigned __int128>(hi) << 64) | lo;
-        }
-
-        unsigned __int128 floorToU128(long double value)
-        {
-            if (!(value > 0.0L))
-            {
-                return 0;
-            }
-
-            constexpr long double two64 = 18446744073709551616.0L;
-            const long double hiLd = std::floor(value / two64);
-            if (hiLd >= two64)
-            {
-                return ~static_cast<unsigned __int128>(0);
-            }
-
-            const u64 hi = static_cast<u64>(hiLd);
-            const long double loLd = std::floor(value - hiLd * two64);
-            const u64 lo = static_cast<u64>((loLd > 0.0L) ? loLd : 0.0L);
-            return (static_cast<unsigned __int128>(hi) << 64) | static_cast<unsigned __int128>(lo);
-        }
-
         bool validateGoldenSeedSearchBudget(const Params& params, const RingNttContext& ctx)
         {
             const std::size_t rho = ctx.mModuli.size();
@@ -327,8 +288,8 @@ namespace osuCrypto::LogVole
             std::size_t mTargetLimbIndex = 0;
             AlignedUnVec<std::size_t> mSrcLimbIndices;
             AlignedUnVec<u64> mCrtInvPunctured;
-            AlignedUnVec<unsigned __int128> mFracInvModulus;
-            unsigned __int128 mMargin = 0;
+            AlignedUnVec<wideU64> mFracInvModulus;
+            wideU64 mMargin{};
         };
 
         bool buildRoundingCheckConstants(
@@ -391,12 +352,12 @@ namespace osuCrypto::LogVole
                     {
                         const std::size_t w = constants.mSrcLimbIndices[idx];
                         constants.mCrtInvPunctured[idx] = reducedInvPunct[idx].operand;
-                        constants.mFracInvModulus[idx] = reciprocal2Pow128(fullBase.base()[w].value());
+                        constants.mFracInvModulus[idx] = reciprocal2Pow128Wide(fullBase.base()[w].value());
                     }
                 }
 
                 const long double marginExp = static_cast<long double>(log2B - log2DeltaJ + 128.0);
-                constants.mMargin = floorToU128(std::exp2(marginExp));
+                constants.mMargin = floorToWideU64(std::exp2(marginExp));
             }
 
             out = std::move(rounding);
@@ -968,11 +929,9 @@ namespace osuCrypto::LogVole
             randomizerWidth,
             gadgetLogBase,
             rho);
-        const unsigned __int128 eta = (static_cast<unsigned __int128>(1) << gadgetLogBase) - 1;
+        const wideU64 eta = wideU64Sub(wideU64OneShift(gadgetLogBase), makeWideU64(1, 0));
         const u32 sampleBits = gadgetLogBase + 1;
-        const unsigned __int128 sampleMask = (sampleBits == 128)
-                                                 ? ~static_cast<unsigned __int128>(0)
-                                                 : ((static_cast<unsigned __int128>(1) << sampleBits) - 1);
+        const wideU64 sampleMask = wideU64Mask(sampleBits);
 
         std::vector<RnsPoly> zeta(randomizerWidth);
         for (u32 polyIdx = 0; polyIdx < randomizerWidth; ++polyIdx)
@@ -981,23 +940,23 @@ namespace osuCrypto::LogVole
             resizeZero(poly.mCoeffs, n * rho);
             for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
             {
-                unsigned __int128 raw = 0;
+                wideU64 raw{};
                 do
                 {
                     seed = combineSeedPublic(seed ^ (static_cast<u64>(polyIdx) << 32) ^ coeffIdx);
                     const u64 lo = seed;
                     seed = combineSeedPublic(seed + 0x9E3779B97F4A7C15ull);
                     const u64 hi = seed;
-                    raw = ((static_cast<unsigned __int128>(hi) << 64) | lo) & sampleMask;
-                } while (raw == sampleMask);
+                    raw = wideU64And(makeWideU64(lo, hi), sampleMask);
+                } while (wideU64Equal(raw, sampleMask));
 
-                const bool negative = raw <= eta;
-                const unsigned __int128 magnitude = negative ? (eta - raw) : (raw - eta);
+                const bool negative = wideU64LessEq(raw, eta);
+                const wideU64 magnitude = negative ? wideU64Sub(eta, raw) : wideU64Sub(raw, eta);
                 for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
                 {
                     const std::size_t outIdx = modIdx * n + coeffIdx;
                     const u64 mod = ctx.mModuli[modIdx].value();
-                    const u64 reduced = uint128Mod(magnitude, ctx.mModuli[modIdx]);
+                    const u64 reduced = wideU64Mod(magnitude, ctx.mModuli[modIdx]);
                     poly.mCoeffs[outIdx] = (negative && reduced != 0) ? (mod - reduced) : reduced;
                 }
             }
@@ -2839,7 +2798,7 @@ namespace osuCrypto::LogVole
 
         const std::size_t n = params.mShrinkExpand.mRing.mPolyModulusDegree;
         const std::size_t rho = ctx.mModuli.size();
-        const unsigned __int128 half = static_cast<unsigned __int128>(1) << 127;
+        const wideU64 half = wideU64OneShift(127);
         AlignedUnVec<const RoundingCheckConstants*> roundingByLimb;
         resizeFill<const RoundingCheckConstants*>(
             roundingByLimb,
@@ -2866,7 +2825,7 @@ namespace osuCrypto::LogVole
             const auto& constants = *roundingByLimb[targetLimb];
             for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
             {
-                unsigned __int128 sumFrac = half;
+                wideU64 sumFrac = half;
                 const std::size_t reducedCount = constants.mSrcLimbIndices.size();
                 for (std::size_t idx = 0; idx < reducedCount; ++idx)
                 {
@@ -2874,11 +2833,12 @@ namespace osuCrypto::LogVole
                     const u64 vw = values[w * n + coeffIdx];
                     const u64 xw =
                         seal::util::multiply_uint_mod(vw, constants.mCrtInvPunctured[idx], ctx.mModuli[w]);
-                    sumFrac += static_cast<unsigned __int128>(xw) * constants.mFracInvModulus[idx];
+                    sumFrac = wideU64Add(sumFrac, wideU64MulLow(xw, constants.mFracInvModulus[idx]));
                 }
 
-                const unsigned __int128 distanceToTop = -sumFrac;
-                if (sumFrac < constants.mMargin || distanceToTop < constants.mMargin)
+                const wideU64 distanceToTop = wideU64Negate(sumFrac);
+                if (wideU64Less(sumFrac, constants.mMargin) ||
+                    wideU64Less(distanceToTop, constants.mMargin))
                 {
                     ok = false;
                     break;

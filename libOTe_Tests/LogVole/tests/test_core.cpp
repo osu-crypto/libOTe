@@ -7,6 +7,8 @@
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
+#include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
+
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "macoro/sync_wait.h"
 #include "macoro/when_all.h"
@@ -187,16 +189,16 @@ namespace
 
     std::uint64_t pow2_mod(std::uint64_t exp, std::uint64_t mod)
     {
+        const seal::Modulus modulus(mod);
         std::uint64_t result = 1;
         std::uint64_t base = 2 % mod;
         while (exp > 0)
         {
             if ((exp & 1) != 0)
             {
-                result = static_cast<std::uint64_t>(
-                    (static_cast<unsigned __int128>(result) * base) % mod);
+                result = mulMod(result, base, modulus);
             }
-            base = static_cast<std::uint64_t>((static_cast<unsigned __int128>(base) * base) % mod);
+            base = mulMod(base, base, modulus);
             exp >>= 1;
         }
         return result;

@@ -1,4 +1,5 @@
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
+#include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include "seal/util/rns.h"
@@ -270,14 +271,6 @@ namespace osuCrypto::LogVole
                    expected.mNoiseBound == actual.mNoiseBound;
         }
 
-        unsigned __int128 reciprocal2Pow128(u64 modulus)
-        {
-            const unsigned __int128 two64 = static_cast<unsigned __int128>(1) << 64;
-            const u64 hi = static_cast<u64>(two64 / modulus);
-            const u64 rem = static_cast<u64>(two64 % modulus);
-            const u64 lo = static_cast<u64>((static_cast<unsigned __int128>(rem) << 64) / modulus);
-            return (static_cast<unsigned __int128>(hi) << 64) | lo;
-        }
     }
 
     bool validateShrinkExpandParams(const ShrinkExpandParams& params)
@@ -834,7 +827,7 @@ namespace osuCrypto::LogVole
             AlignedUnVec<std::size_t> mSrcLimbIndices;
             AlignedUnVec<u64> mCrtInvPunctured;
             AlignedUnVec<u64> mPuncturedProdModTarget;
-            AlignedUnVec<unsigned __int128> mFracInvModulus;
+            AlignedUnVec<wideU64> mFracInvModulus;
             u64 mDeltaModTarget = 1;
             u64 mInvDeltaModTarget = 1;
         };
@@ -887,7 +880,7 @@ namespace osuCrypto::LogVole
             {
                 const std::size_t w = constants.mSrcLimbIndices[idx];
                 constants.mCrtInvPunctured[idx] = reducedInvPunct[idx].operand;
-                constants.mFracInvModulus[idx] = reciprocal2Pow128(q[w]);
+                constants.mFracInvModulus[idx] = reciprocal2Pow128Wide(q[w]);
 
                 u64 puncturedModQj = 1;
                 for (std::size_t u = 0; u < rho; ++u)
@@ -903,7 +896,7 @@ namespace osuCrypto::LogVole
         }
 
         std::vector<RnsPoly> result(wPrime);
-        const unsigned __int128 half = static_cast<unsigned __int128>(1) << 127;
+        const wideU64 half = wideU64OneShift(127);
 
         for (std::size_t i = 0; i < wPrime; ++i)
         {
@@ -920,7 +913,7 @@ namespace osuCrypto::LogVole
 
                 for (std::size_t k = 0; k < n; ++k)
                 {
-                    unsigned __int128 sumFrac = half;
+                    wideU64 sumFrac = half;
                     u64 alpha = 0;
                     u64 eModQj = 0;
 
@@ -929,11 +922,12 @@ namespace osuCrypto::LogVole
                         const u64 vw = polyIn.mCoeffs[w * n + k];
                         const u64 xw = seal::util::multiply_uint_mod(vw, constants.mCrtInvPunctured[idx], ctx.mModuli[w]);
 
-                        const unsigned __int128 term =
-                            static_cast<unsigned __int128>(xw) * constants.mFracInvModulus[idx];
-                        const unsigned __int128 oldFrac = sumFrac;
-                        sumFrac += term;
-                        if (sumFrac < oldFrac)
+                        unsigned char carry = 0;
+                        sumFrac = wideU64Add(
+                            sumFrac,
+                            wideU64MulLow(xw, constants.mFracInvModulus[idx]),
+                            &carry);
+                        if (carry)
                         {
                             ++alpha;
                         }

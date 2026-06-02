@@ -1,4 +1,5 @@
 #include "libOTe/Vole/LogVole/LogVole.h"
+#include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
@@ -83,10 +84,10 @@ namespace
     {
         LOGVOLE_REQUIRE_EQ(keys.size(), x.size());
         LOGVOLE_REQUIRE_EQ(macs.size(), x.size());
+        const seal::Modulus mod(modulus);
         for (std::size_t idx = 0; idx < x.size(); ++idx)
         {
-            const auto prod = static_cast<unsigned __int128>(x[idx]) * delta;
-            const u64 expected = static_cast<u64>((keys[idx] + prod) % modulus);
+            const u64 expected = mulAddMod(x[idx], delta, keys[idx], mod);
             LOGVOLE_EXPECT_EQ(macs[idx], expected) << "VOLE relation mismatch at index " << idx;
         }
     }

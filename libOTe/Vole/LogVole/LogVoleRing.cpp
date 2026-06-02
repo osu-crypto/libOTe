@@ -1,5 +1,7 @@
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 
+#include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
+
 #include "seal/util/clipnormal.h"
 #include "seal/util/iterator.h"
 #include "seal/util/ntt.h"
@@ -9,7 +11,6 @@
 #include "seal/util/uintcore.h"
 
 #include <algorithm>
-#include <boost/multiprecision/cpp_int.hpp>
 #include <cstddef>
 #include <cstring>
 #include <exception>
@@ -22,8 +23,6 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        using boost::multiprecision::cpp_int;
-
         constexpr u64 kNoiseFamilyDomain = 0x4E4F495345F10001ull;
         constexpr u64 kCt2FamilyDomain = 0x435432F100010001ull;
         constexpr u64 kSeedBytesDomain = 0x5345454442595445ull;
@@ -38,29 +37,9 @@ namespace osuCrypto::LogVole
             return poly.mCoeffs.size() == ringPolyCoeffCount(ctx.mParams);
         }
 
-        cpp_int limbsToCppInt(const u64* limbs, std::size_t limbCount)
-        {
-            cpp_int value = 0;
-            for (std::size_t limbIdx = limbCount; limbIdx > 0; --limbIdx)
-            {
-                value <<= 64;
-                value += limbs[limbIdx - 1];
-            }
-            return value;
-        }
-
-        u64 cppIntModU64(const cpp_int& value, u64 modulus)
-        {
-            cpp_int reduced = value % modulus;
-            if (reduced < 0)
-            {
-                reduced += modulus;
-            }
-            return static_cast<u64>(reduced);
-        }
-
         u64 basePowMod(u64 base, u32 exp, u64 mod)
         {
+            seal::Modulus modulus(mod);
             u64 result = 1;
             u64 power = base % mod;
             u32 e = exp;
@@ -68,14 +47,88 @@ namespace osuCrypto::LogVole
             {
                 if ((e & 1u) != 0)
                 {
-                    const auto mul = static_cast<unsigned __int128>(result) * power;
-                    result = static_cast<u64>(mul % mod);
+                    result = mulMod(result, power, modulus);
                 }
-                const auto sq = static_cast<unsigned __int128>(power) * power;
-                power = static_cast<u64>(sq % mod);
+                power = mulMod(power, power, modulus);
                 e >>= 1;
             }
             return result;
+        }
+
+        bool highBitSet(const u64* value, std::size_t limbCount)
+        {
+            return limbCount != 0 && ((value[limbCount - 1] >> 63) != 0);
+        }
+
+        void arithmeticRightShift(u64* value, u32 shift, std::size_t limbCount)
+        {
+            if (limbCount == 0 || shift == 0)
+            {
+                return;
+            }
+
+            const bool negative = highBitSet(value, limbCount);
+            const u64 totalBits = static_cast<u64>(limbCount) * 64;
+            if (shift >= totalBits)
+            {
+                std::fill(value, value + limbCount, negative ? ~u64(0) : u64(0));
+                return;
+            }
+
+            seal::util::right_shift_uint(value, static_cast<int>(shift), limbCount, value);
+            if (!negative)
+            {
+                return;
+            }
+
+            const u64 firstFillBit = totalBits - shift;
+            const std::size_t firstFillLimb = static_cast<std::size_t>(firstFillBit / 64);
+            const u32 firstFillOffset = static_cast<u32>(firstFillBit % 64);
+            if (firstFillLimb < limbCount)
+            {
+                if (firstFillOffset != 0)
+                {
+                    value[firstFillLimb] |= ~u64(0) << firstFillOffset;
+                    for (std::size_t limbIdx = firstFillLimb + 1; limbIdx < limbCount; ++limbIdx)
+                    {
+                        value[limbIdx] = ~u64(0);
+                    }
+                }
+                else
+                {
+                    for (std::size_t limbIdx = firstFillLimb; limbIdx < limbCount; ++limbIdx)
+                    {
+                        value[limbIdx] = ~u64(0);
+                    }
+                }
+            }
+        }
+
+        void maskLowBits(u64* value, std::size_t limbCount, u32 bitCount)
+        {
+            for (std::size_t limbIdx = 0; limbIdx < limbCount; ++limbIdx)
+            {
+                const u64 bitOffset = static_cast<u64>(limbIdx) * 64;
+                if (bitOffset >= bitCount)
+                {
+                    value[limbIdx] = 0;
+                }
+                else if (bitOffset + 64 > bitCount)
+                {
+                    const u32 remainingBits = bitCount - static_cast<u32>(bitOffset);
+                    value[limbIdx] &= (u64(1) << remainingBits) - 1;
+                }
+            }
+        }
+
+        void setPowerOfTwo(u64* value, std::size_t limbCount, u32 bit)
+        {
+            std::fill(value, value + limbCount, u64(0));
+            const std::size_t limbIdx = bit / 64;
+            if (limbIdx < limbCount)
+            {
+                value[limbIdx] = u64(1) << (bit % 64);
+            }
         }
 
         void samplePolyNormal(
@@ -268,32 +321,43 @@ namespace osuCrypto::LogVole
             std::copy(canonical.mCoeffs.begin(), canonical.mCoeffs.end(), composedPoly.get());
             contextData->rns_tool()->base_q()->compose_array(composedPoly.get(), n, seal::MemoryManager::GetPool());
 
-            cpp_int q = 1;
-            for (const auto& modulus : ctx.mModuli)
-            {
-                q *= modulus.value();
-            }
-            const cpp_int qHalf = q >> 1;
-            const cpp_int base = cpp_int(1) << digitBits;
-            const cpp_int halfBase = cpp_int(1) << (digitBits - 1);
-            const cpp_int digitMask = base - 1;
+            auto pool = seal::MemoryManager::GetPool();
+            const u64* q = contextData->rns_tool()->base_q()->base_prod();
+            auto qHalf = seal::util::allocate_uint(coeffModCount, pool);
+            seal::util::right_shift_uint(q, 1, coeffModCount, qHalf.get());
+            auto value = seal::util::allocate_uint(coeffModCount, pool);
+            auto digit = seal::util::allocate_uint(coeffModCount, pool);
+            auto digitAbs = seal::util::allocate_uint(coeffModCount, pool);
+            auto base = seal::util::allocate_uint(coeffModCount, pool);
+            auto halfBase = seal::util::allocate_uint(coeffModCount, pool);
+
+            setPowerOfTwo(base.get(), coeffModCount, digitBits);
+            setPowerOfTwo(halfBase.get(), coeffModCount, digitBits - 1);
 
             for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
             {
-                cpp_int value = limbsToCppInt(composedPoly.get() + (coeffIdx * coeffModCount), coeffModCount);
-                if (value > qHalf)
+                seal::util::set_uint(composedPoly.get() + (coeffIdx * coeffModCount), coeffModCount, value.get());
+                if (seal::util::is_greater_than_uint(value.get(), qHalf.get(), coeffModCount))
                 {
-                    value -= q;
+                    seal::util::sub_uint(value.get(), q, coeffModCount, value.get());
                 }
 
                 for (u32 level = 0; level < (startLevel + levels); ++level)
                 {
-                    cpp_int digit = value & digitMask;
-                    value >>= digitBits;
-                    if (digit >= halfBase)
+                    seal::util::set_uint(value.get(), coeffModCount, digit.get());
+                    maskLowBits(digit.get(), coeffModCount, digitBits);
+                    arithmeticRightShift(value.get(), digitBits, coeffModCount);
+
+                    const bool digitIsNegative =
+                        seal::util::is_greater_than_or_equal_uint(digit.get(), halfBase.get(), coeffModCount);
+                    if (digitIsNegative)
                     {
-                        digit -= base;
-                        value += 1;
+                        seal::util::sub_uint(base.get(), digit.get(), coeffModCount, digitAbs.get());
+                        seal::util::add_uint(value.get(), coeffModCount, u64(1), value.get());
+                    }
+                    else
+                    {
+                        seal::util::set_uint(digit.get(), coeffModCount, digitAbs.get());
                     }
 
                     if (level < startLevel)
@@ -304,8 +368,10 @@ namespace osuCrypto::LogVole
                     const std::size_t outLevel = level - startLevel;
                     for (std::size_t modIdx = 0; modIdx < coeffModCount; ++modIdx)
                     {
+                        const u64 reduced =
+                            seal::util::modulo_uint(digitAbs.get(), coeffModCount, ctx.mModuli[modIdx]);
                         out[outLevel].mCoeffs[modIdx * n + coeffIdx] =
-                            cppIntModU64(digit, ctx.mModuli[modIdx].value());
+                            (digitIsNegative && reduced != 0) ? (ctx.mModuli[modIdx].value() - reduced) : reduced;
                     }
                 }
             }
@@ -603,9 +669,12 @@ namespace osuCrypto::LogVole
             for (std::size_t i = 0; i < n; ++i)
             {
                 const std::size_t idx = offset + i;
-                const auto mul = static_cast<unsigned __int128>(aNtt.mCoeffs[idx] % mod) * (bNtt.mCoeffs[idx] % mod);
-                const auto sum = static_cast<unsigned __int128>(cNtt.mCoeffs[idx] % mod) + (mul % mod);
-                cNtt.mCoeffs[idx] = static_cast<u64>(sum % mod);
+                cNtt.mCoeffs[idx] =
+                    mulAddMod(
+                        aNtt.mCoeffs[idx] % mod,
+                        bNtt.mCoeffs[idx] % mod,
+                        cNtt.mCoeffs[idx] % mod,
+                        modulus);
             }
         }
 
@@ -700,8 +769,7 @@ namespace osuCrypto::LogVole
             for (std::size_t i = 0; i < n; ++i)
             {
                 const std::size_t idx = offset + i;
-                const auto mul = static_cast<unsigned __int128>(a.mCoeffs[idx] % mod) * scalarMod;
-                a.mCoeffs[idx] = static_cast<u64>(mul % mod);
+                a.mCoeffs[idx] = mulMod(a.mCoeffs[idx] % mod, scalarMod, modulus);
             }
         }
 
@@ -789,8 +857,11 @@ namespace osuCrypto::LogVole
                 u64 acc = 0;
                 for (std::size_t j = 0; j < digits.size(); ++j)
                 {
-                    const auto term = static_cast<unsigned __int128>(digits[j].mCoeffs[offset + i] % mod) * basePows[j];
-                    acc = static_cast<u64>((static_cast<unsigned __int128>(acc) + term) % mod);
+                    acc = mulAddMod(
+                        digits[j].mCoeffs[offset + i] % mod,
+                        basePows[j],
+                        acc,
+                        ctx.mModuli[modIdx]);
                 }
                 out.mCoeffs[offset + i] = acc;
             }
@@ -963,9 +1034,11 @@ namespace osuCrypto::LogVole
                 u64 acc = 0;
                 for (std::size_t level = 0; level < digits.size(); ++level)
                 {
-                    const auto term =
-                        static_cast<unsigned __int128>(digits[level].mCoeffs[offset + i] % mod) * pow2Shifts[level];
-                    acc = static_cast<u64>((static_cast<unsigned __int128>(acc) + term) % mod);
+                    acc = mulAddMod(
+                        digits[level].mCoeffs[offset + i] % mod,
+                        pow2Shifts[level],
+                        acc,
+                        ctx.mModuli[modIdx]);
                 }
                 out.mCoeffs[offset + i] = acc;
             }
@@ -1192,8 +1265,8 @@ namespace osuCrypto::LogVole
                 const u64 value = poly.mCoeffs[idx] % mod;
                 if (noise >= 0)
                 {
-                    const auto sum = static_cast<unsigned __int128>(value) + static_cast<u64>(noise);
-                    poly.mCoeffs[idx] = static_cast<u64>(sum % mod);
+                    const u64 noiseMod = seal::util::barrett_reduce_64(static_cast<u64>(noise), ctx.mModuli[modIdx]);
+                    poly.mCoeffs[idx] = addMod(value, noiseMod, ctx.mModuli[modIdx]);
                 }
                 else
                 {
