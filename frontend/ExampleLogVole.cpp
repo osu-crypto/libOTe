@@ -31,6 +31,9 @@ namespace osuCrypto
         const std::vector<std::string> logvoleTags{ "lv", "logvole", "LogVole" };
 
 #if defined(ENABLE_LOGVOLE)
+        // The example exposes the public CI-VOLE wrapper. It chooses the
+        // batching prime by bit count and reports the concrete prime with
+        // sender.modulus()/receiver.modulus().
         u32 logVoleCivoleExamplePlaintextModulusBits(const CLP& cmd)
         {
             const auto plaintextModulusBits = cmd.getOr("p", 55);
@@ -47,6 +50,8 @@ namespace osuCrypto
             return x;
         }
 
+        // CI-VOLE relation: sender receives b, receiver receives a, and
+        // a[i] = b[i] + x[i] * Delta mod p.
         void checkLogVoleExampleRelation(
             span<const u64> x,
             u64 delta,
@@ -93,6 +98,8 @@ namespace osuCrypto
 
             Timer timer;
             const auto begin = timer.setTimePoint("logvole.local.begin");
+            // The offline phase fixes Delta and prepares reusable state for
+            // sequential online calls with auto-incremented SIDs.
             auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
                 sender.offline(delta, offlineSockets[0]),
                 receiver.offline(offlineSockets[1])));
@@ -102,6 +109,8 @@ namespace osuCrypto
             auto onlineSockets = coproto::LocalAsyncSocket::makePair();
             std::vector<u64> b(w);
             std::vector<u64> a(w);
+            // The online phase sends the receiver's digest and returns the
+            // matching sender key. The parties then locally expand to w labels.
             auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
                 sender.send(b, onlineSockets[0]),
                 receiver.receive(x, a, onlineSockets[1])));
@@ -161,6 +170,8 @@ namespace osuCrypto
         if (role == Role::Sender)
         {
             std::vector<u64> b(w);
+            // Split-role mode mirrors the local example over an asio socket.
+            // The receiver must use the same n, plaintext bit count and port.
             cp::sync_wait(sender.offline(delta, chl));
             cp::sync_wait(sender.send(b, chl));
 
@@ -178,6 +189,8 @@ namespace osuCrypto
         {
             auto x = makeLogVoleExampleX(w, modulus);
             std::vector<u64> a(w);
+            // The receiver chooses x locally; the sender receives only the
+            // corresponding keys for its Delta.
             cp::sync_wait(receiver.offline(chl));
             cp::sync_wait(receiver.receive(x, a, chl));
 
@@ -213,6 +226,10 @@ namespace osuCrypto
             return runIf(LogVole_Civole_example, cmd, logvoleTags);
 
 #if defined(ENABLE_LOGVOLE)
+        // Local default:
+        //   frontend_libOTe -logvole -n 16 [-p 55] [-delta 7] [-t 1]
+        // Use -r 0/1 for the split sender/receiver asio example when
+        // COPROTO_ENABLE_BOOST is available.
         const auto n = cmd.isSet("nn")
             ? (1 << cmd.get<int>("nn"))
             : cmd.getOr("n", 0);
