@@ -1,4 +1,4 @@
-#include "libOTe/Vole/LogVole/LogVoleReceiver.h"
+#include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
 
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
@@ -203,7 +203,7 @@ namespace osuCrypto::LogVole
         }
     }
 
-    task<> Receiver::offline(
+    task<> LogVoleRingReceiver::offline(
         const ShrinkExpandReceiverOfflineInput& input,
         ShrinkExpandReceiverState& state,
         Socket& sock)
@@ -222,7 +222,7 @@ namespace osuCrypto::LogVole
         }
     }
 
-    task<> Receiver::offline(
+    task<> LogVoleRingReceiver::offline(
         const ReceiverOfflineInput& input,
         ReceiverState& state,
         Socket& sock)
@@ -239,7 +239,7 @@ namespace osuCrypto::LogVole
         state = std::move(output.mState);
     }
 
-    task<> Receiver::keyDerive(
+    task<> LogVoleRingReceiver::keyDerive(
         const KeyDeriveReceiverInput& input,
         KeyDeriveReceiverOutput& output,
         Socket& sock)
@@ -266,7 +266,7 @@ namespace osuCrypto::LogVole
         }
     }
 
-    task<> Receiver::online(
+    task<> LogVoleRingReceiver::online(
         ReceiverState& state,
         const ReceiverOnlineInput& input,
         ReceiverOnlineOutput& output,
@@ -491,7 +491,7 @@ namespace osuCrypto::LogVole
         output = std::move(next);
     }
 
-    task<> Receiver::expand(
+    task<> LogVoleRingReceiver::expand(
         const ShrinkExpandReceiverState& state,
         const ReceiverExpandInput& input,
         ShrinkExpandReceiverExpandOutput& output,

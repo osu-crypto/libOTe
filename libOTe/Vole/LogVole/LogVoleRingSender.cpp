@@ -1,4 +1,4 @@
-#include "libOTe/Vole/LogVole/LogVoleSender.h"
+#include "libOTe/Vole/LogVole/LogVoleRingSender.h"
 
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
@@ -259,7 +259,7 @@ namespace osuCrypto::LogVole
         }
     }
 
-    task<> Sender::offline(
+    task<> LogVoleRingSender::offline(
         const ShrinkExpandSenderOfflineInput& input,
         ShrinkExpandSenderState& state,
         Socket& sock)
@@ -273,7 +273,7 @@ namespace osuCrypto::LogVole
         co_await sendFrame(sock, encode(message));
     }
 
-    task<> Sender::offline(
+    task<> LogVoleRingSender::offline(
         const SenderOfflineInput& input,
         SenderState& state,
         Socket& sock)
@@ -288,7 +288,7 @@ namespace osuCrypto::LogVole
         state = std::move(output.mState);
     }
 
-    task<> Sender::keyDerive(
+    task<> LogVoleRingSender::keyDerive(
         const KeyDeriveSenderInput& input,
         KeyDeriveSenderOutput& output,
         Socket& sock)
@@ -310,7 +310,7 @@ namespace osuCrypto::LogVole
         co_await sendFrame(sock, encode(response));
     }
 
-    task<> Sender::online(
+    task<> LogVoleRingSender::online(
         const SenderState& state,
         SenderOnlineOutput& output,
         Socket& sock)
@@ -319,7 +319,7 @@ namespace osuCrypto::LogVole
         co_await online(state, options, output, sock);
     }
 
-    task<> Sender::online(
+    task<> LogVoleRingSender::online(
         const SenderState& state,
         const SenderOnlineOptions& options,
         SenderOnlineOutput& output,
@@ -386,7 +386,7 @@ namespace osuCrypto::LogVole
         output = std::move(next);
     }
 
-    task<> Sender::expand(
+    task<> LogVoleRingSender::expand(
         const ShrinkExpandSenderState& state,
         const ShrinkExpandExpandSenderInput& input,
         ShrinkExpandSenderExpandOutput& output,

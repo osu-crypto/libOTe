@@ -1,9 +1,9 @@
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
-#include "libOTe/Vole/LogVole/LogVoleReceiver.h"
+#include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
-#include "libOTe/Vole/LogVole/LogVoleSender.h"
+#include "libOTe/Vole/LogVole/LogVoleRingSender.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
@@ -1770,8 +1770,8 @@ void LogVole_Core_ThreeLevelCoprotoRelation(const oc::CLP&)
     ReceiverOfflineInput receiverInput{};
     receiverInput.mParams = params;
 
-    Sender sender{};
-    Receiver receiver{};
+    LogVoleRingSender sender{};
+    LogVoleRingReceiver receiver{};
     SenderState senderState{};
     ReceiverState receiverState{};
 
@@ -1882,8 +1882,8 @@ void LogVole_Core_ThreeLevelCoprotoMultiThread(const oc::CLP&)
     ReceiverOfflineInput receiverInput{};
     receiverInput.mParams = params;
 
-    Sender sender{};
-    Receiver receiver{};
+    LogVoleRingSender sender{};
+    LogVoleRingReceiver receiver{};
     SenderState senderState{};
     ReceiverState receiverState{};
 
@@ -1961,8 +1961,8 @@ void LogVole_Core_ThreeLevelCoprotoSkipTbkOutput(const oc::CLP&)
     ReceiverOfflineInput receiverInput{};
     receiverInput.mParams = params;
 
-    Sender sender{};
-    Receiver receiver{};
+    LogVoleRingSender sender{};
+    LogVoleRingReceiver receiver{};
     SenderState senderState{};
     ReceiverState receiverState{};
 

@@ -9,7 +9,7 @@
 #if defined(ENABLE_LOGVOLE)
 #include "coproto/Socket/LocalAsyncSock.h"
 #include "cryptoTools/Common/Timer.h"
-#include "libOTe/Vole/LogVole/LogVoleCivole.h"
+#include "libOTe/Vole/LogVole/LogVole.h"
 #include "macoro/sync_wait.h"
 #include "macoro/when_all.h"
 
@@ -39,7 +39,7 @@ namespace osuCrypto
             return static_cast<u32>(plaintextModulusBits);
         }
 
-        std::vector<u64> makeLogVoleCivoleExampleX(u64 w, u64 modulus)
+        std::vector<u64> makeLogVoleExampleX(u64 w, u64 modulus)
         {
             std::vector<u64> x(w);
             for (u64 i = 0; i < w; ++i)
@@ -47,7 +47,7 @@ namespace osuCrypto
             return x;
         }
 
-        void checkLogVoleCivoleExampleRelation(
+        void checkLogVoleExampleRelation(
             span<const u64> x,
             u64 delta,
             span<const u64> keys,
@@ -76,8 +76,8 @@ namespace osuCrypto
             if (numVole < 0)
                 throw std::runtime_error("LogVole CI-VOLE example requires non-negative -n");
 
-            CivoleSender sender{};
-            CivoleReceiver receiver{};
+            LogVoleSender sender{};
+            LogVoleReceiver receiver{};
             const auto plaintextModulusBits = logVoleCivoleExamplePlaintextModulusBits(cmd);
             const auto workerThreads = static_cast<u32>(std::max(numThreads, 1));
             sender.configure(static_cast<u64>(numVole), plaintextModulusBits, workerThreads);
@@ -88,7 +88,7 @@ namespace osuCrypto
             if (delta == 0)
                 throw std::runtime_error("LogVole CI-VOLE example requires nonzero delta modulo p");
 
-            auto x = makeLogVoleCivoleExampleX(w, modulus);
+            auto x = makeLogVoleExampleX(w, modulus);
             auto offlineSockets = coproto::LocalAsyncSocket::makePair();
 
             Timer timer;
@@ -108,7 +108,7 @@ namespace osuCrypto
             std::get<0>(onlineResult).result();
             std::get<1>(onlineResult).result();
 
-            checkLogVoleCivoleExampleRelation(x, delta, b, a, modulus);
+            checkLogVoleExampleRelation(x, delta, b, a, modulus);
 
             const auto end = timer.setTimePoint("logvole.local.end");
             const auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
@@ -140,8 +140,8 @@ namespace osuCrypto
         const auto w = static_cast<u64>(numVole);
         const auto workerThreads = static_cast<u32>(std::max(numThreads, 1));
 
-        CivoleSender sender{};
-        CivoleReceiver receiver{};
+        LogVoleSender sender{};
+        LogVoleReceiver receiver{};
         if (role == Role::Sender)
             sender.configure(w, plaintextModulusBits, workerThreads);
         else
@@ -176,7 +176,7 @@ namespace osuCrypto
         }
         else
         {
-            auto x = makeLogVoleCivoleExampleX(w, modulus);
+            auto x = makeLogVoleExampleX(w, modulus);
             std::vector<u64> a(w);
             cp::sync_wait(receiver.offline(chl));
             cp::sync_wait(receiver.receive(x, a, chl));

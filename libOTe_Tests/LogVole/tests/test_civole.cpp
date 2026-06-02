@@ -1,4 +1,4 @@
-#include "libOTe/Vole/LogVole/LogVoleCivole.h"
+#include "libOTe/Vole/LogVole/LogVole.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
@@ -12,6 +12,8 @@
 #include <vector>
 
 using namespace osuCrypto::LogVole;
+using osuCrypto::LogVoleReceiver;
+using osuCrypto::LogVoleSender;
 using osuCrypto::u64;
 
 namespace
@@ -211,8 +213,8 @@ void LogVole_Civole_SupportsSequentialSids(const oc::CLP&)
 
 void LogVole_Civole_StateMachineAutoSidSequential(const oc::CLP&)
 {
-    CivoleSender sender{};
-    CivoleReceiver receiver{};
+    LogVoleSender sender{};
+    LogVoleReceiver receiver{};
 
     constexpr u64 n = 8;
     sender.configure(n);
@@ -264,8 +266,8 @@ void LogVole_Civole_StateMachineAutoSidSequential(const oc::CLP&)
 
 void LogVole_Civole_StateMachineOneShotAutoOffline(const oc::CLP&)
 {
-    CivoleSender sender{};
-    CivoleReceiver receiver{};
+    LogVoleSender sender{};
+    LogVoleReceiver receiver{};
 
     const std::vector<u64> x{ 2, 4, 6, 8, 10, 12, 14, 16 };
     std::vector<u64> b(x.size());

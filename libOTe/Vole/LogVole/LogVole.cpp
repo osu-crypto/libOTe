@@ -1,4 +1,4 @@
-#include "libOTe/Vole/LogVole/LogVoleCivole.h"
+#include "libOTe/Vole/LogVole/LogVole.h"
 
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
@@ -332,7 +332,13 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    void CivoleSender::configure(u64 n, u32 plaintextModulusBits, u32 numThreads)
+}
+
+namespace osuCrypto
+{
+    using namespace LogVole;
+
+    void LogVoleSender::configure(u64 n, u32 plaintextModulusBits, u32 numThreads)
     {
         if (n == 0)
         {
@@ -371,7 +377,7 @@ namespace osuCrypto::LogVole
         mState = State::Configured;
     }
 
-    task<> CivoleSender::offline(u64 delta, Socket& sock)
+    task<> LogVoleSender::offline(u64 delta, Socket& sock)
     {
         if (!isConfigured())
         {
@@ -394,7 +400,7 @@ namespace osuCrypto::LogVole
         mState = State::Offline;
     }
 
-    task<> CivoleSender::send(span<u64> b, Socket& sock)
+    task<> LogVoleSender::send(span<u64> b, Socket& sock)
     {
         if (!hasOffline())
         {
@@ -423,7 +429,7 @@ namespace osuCrypto::LogVole
         mLastOnlineComm = release.mComm;
     }
 
-    task<> CivoleSender::send(u64 delta, span<u64> b, Socket& sock)
+    task<> LogVoleSender::send(u64 delta, span<u64> b, Socket& sock)
     {
         if (!isConfigured())
         {
@@ -445,7 +451,7 @@ namespace osuCrypto::LogVole
         co_await send(b, sock);
     }
 
-    void CivoleSender::clear()
+    void LogVoleSender::clear()
     {
         mRequestSize = 0;
         mPlaintextModulusBits = 55;
@@ -459,7 +465,7 @@ namespace osuCrypto::LogVole
         mState = State::Default;
     }
 
-    void CivoleReceiver::configure(u64 n, u32 plaintextModulusBits, u32 numThreads)
+    void LogVoleReceiver::configure(u64 n, u32 plaintextModulusBits, u32 numThreads)
     {
         if (n == 0)
         {
@@ -497,7 +503,7 @@ namespace osuCrypto::LogVole
         mState = State::Configured;
     }
 
-    task<> CivoleReceiver::offline(Socket& sock)
+    task<> LogVoleReceiver::offline(Socket& sock)
     {
         if (!isConfigured())
         {
@@ -521,7 +527,7 @@ namespace osuCrypto::LogVole
         mState = State::Offline;
     }
 
-    task<> CivoleReceiver::receive(span<const u64> x, span<u64> a, Socket& sock)
+    task<> LogVoleReceiver::receive(span<const u64> x, span<u64> a, Socket& sock)
     {
         if (x.size() != a.size())
         {
@@ -553,7 +559,7 @@ namespace osuCrypto::LogVole
         mLastOnlineComm = setX.mComm;
     }
 
-    void CivoleReceiver::clear()
+    void LogVoleReceiver::clear()
     {
         mRequestSize = 0;
         mPlaintextModulusBits = 55;
@@ -565,6 +571,10 @@ namespace osuCrypto::LogVole
         mOfflineState = {};
         mState = State::Default;
     }
+}
+
+namespace osuCrypto::LogVole
+{
 
     u64 zpSlotCount(const ZpCrtContext& ctx)
     {
@@ -944,7 +954,7 @@ namespace osuCrypto::LogVole
         offlineInput.mParams = params;
         offlineInput.mSk1.resize(params.mGamma, std::move(wrappedDelta));
 
-        Sender sender{};
+        LogVoleRingSender sender{};
         SenderState logVoleState{};
         auto logVoleSock = sock.fork();
         co_await sender.offline(offlineInput, logVoleState, logVoleSock);
@@ -990,7 +1000,7 @@ namespace osuCrypto::LogVole
         ReceiverOfflineInput offlineInput{};
         offlineInput.mParams = params;
 
-        Receiver receiver{};
+        LogVoleRingReceiver receiver{};
         ReceiverState logVoleState{};
         auto logVoleSock = sock.fork();
         co_await receiver.offline(offlineInput, logVoleState, logVoleSock);
@@ -1067,7 +1077,7 @@ namespace osuCrypto::LogVole
 
         ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Sender, sid);
 
-        Sender sender{};
+        LogVoleRingSender sender{};
         SenderOnlineOutput online{};
         SenderOnlineOptions options{};
         options.mSkipTbkOutput = true;
@@ -1130,7 +1140,7 @@ namespace osuCrypto::LogVole
         ReceiverOnlineInput onlineInput{};
         onlineInput.mX = std::move(wrapped);
 
-        Receiver receiver{};
+        LogVoleRingReceiver receiver{};
         ReceiverOnlineOutput online{};
         co_await receiver.online(state.mLogVoleState, onlineInput, online, sock);
 

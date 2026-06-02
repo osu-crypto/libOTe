@@ -1,8 +1,6 @@
 # LogVole staging area
 
-`LogVole` is the parallel port of the complete `origin/clean-ot` LogVole implementation.
-
-The final landing step is intended to be a mechanical rename from `LogVole` to `LogVole` after the recursive protocol and CI-VOLE tests pass in libOTe.
+`LogVole` is the libOTe port of the complete `origin/clean-ot` LogVole implementation.
 
 Initial order:
 

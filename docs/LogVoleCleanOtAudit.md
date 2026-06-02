@@ -129,7 +129,7 @@ Porting notes:
 
 - This is the largest missing piece in the current libOTe code.
 - The current libOTe sender/receiver only run local key-derive and shrink/expand wrappers. They do not implement the recursive state machine.
-- This layer should be split by top-level role in libOTe: `LogVoleSender.*` and `LogVoleReceiver.*`.
+- This layer is split by top-level role in libOTe as `LogVoleRingSender.*` and `LogVoleRingReceiver.*`.
 - Helper functions shared by both roles can live in one compact lower-level pair rather than recreating clean-ot's `protocol/backend/spec/type` spread.
 
 ### CI-VOLE wrapper
@@ -187,8 +187,8 @@ Files:
 - `libOTe/Vole/LogVole/LogVoleRing.{h,cpp}`
 - `libOTe/Vole/LogVole/LogVoleLenc.{h,cpp}`
 - `libOTe/Vole/LogVole/LogVoleEncoding.{h,cpp}`
-- `libOTe/Vole/LogVole/LogVoleSender.{h,cpp}`
-- `libOTe/Vole/LogVole/LogVoleReceiver.{h,cpp}`
+- `libOTe/Vole/LogVole/LogVoleRingSender.{h,cpp}`
+- `libOTe/Vole/LogVole/LogVoleRingReceiver.{h,cpp}`
 - `libOTe_Tests/LogVole/tests/*`
 
 Current capabilities:
@@ -230,7 +230,7 @@ Current gaps relative to clean-ot:
 | Shrink/expand | Deterministic/full-noise shrink-expand, truncation tests, and role/run-scoped CT2 cache are present | Add any missing benchmark-facing cache surfaces after API settles | 86% |
 | Seed-label backend | Missing | Port concrete SEAL seed-label operations without virtual abstraction in hot path | 45% |
 | Recursive LogVole | Root wrapper setup, digest/response, derandomization, top-level local API, golden seed, root precompute/cache reuse, repeated local online, internal setup reuse without a reused offline message, recursive gadget subproblem coverage, clean-ot-profile two-/three-level local recursion, recursive coproto offline/online, forked coproto lanes, async sender precompute/service overlap, macoro-backed recursive online chunk parallelism, runtime cache scoping, and lightweight online byte accounting are present | Remove staging-only API once parity is confirmed | 96% |
-| CI-VOLE API | Default params, `Zp` CRT wrapper, SID state, releasek/release/setx flows, clean-ot public API tests, forked metadata/offline lanes, skip-TBK sender release, macoro-backed CRT chunk parallelism, libOTe-style `CivoleSender`/`CivoleReceiver` wrappers with hidden auto-incrementing `mNextSid`, and a frontend CI-VOLE smoke example are ported over coproto | Final naming cleanup after parity is confirmed | 94% |
+| CI-VOLE API | Default params, `Zp` CRT wrapper, SID state, releasek/release/setx flows, clean-ot public API tests, forked metadata/offline lanes, skip-TBK sender release, macoro-backed CRT chunk parallelism, libOTe-style `LogVoleSender`/`LogVoleReceiver` wrappers with hidden auto-incrementing `mNextSid`, and a frontend CI-VOLE smoke example are ported over coproto | Final naming cleanup after parity is confirmed | 94% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
 | Networking | Coproto wrappers exist for key-derive, shrink/expand, recursive LogVole offline/online, and CI-VOLE public API flows; recursive and CI flows now use deterministic `Socket::fork()` lanes instead of the clean-ot comm stack, with no frame/round logger port | Continue direct coproto translation for any remaining clean-ot-facing API; do not port clean-ot comm layer | 95% |
 | Tests | LogVole has 82 expected tests after this checkpoint, including clean-ot-profile recursive coverage, recursive coproto relation coverage with online byte accounting bounds, multithread recursive coproto coverage, skip-TBK sender online coverage, runtime cache-scope propagation, root-width rejection, direct reused-offline-message coverage, the six clean-ot CI-VOLE public API tests, two libOTe-style CI-VOLE wrapper tests, and a frontend local CI-VOLE relation smoke run | Add benchmark smoke coverage only after final API naming settles | 99% |
@@ -251,12 +251,12 @@ libOTe/Vole/LogVole/
   LogVoleCore.cpp
   LogVoleEncoding.h
   LogVoleEncoding.cpp
-  LogVoleSender.h
-  LogVoleSender.cpp
-  LogVoleReceiver.h
-  LogVoleReceiver.cpp
-  LogVoleCivole.h
-  LogVoleCivole.cpp
+  LogVoleRingSender.h
+  LogVoleRingSender.cpp
+  LogVoleRingReceiver.h
+  LogVoleRingReceiver.cpp
+  LogVole.h
+  LogVole.cpp
 ```
 
 `LogVoleCore` is the escape hatch for shared seed-label, root wrapper, LHE, and recursive helpers. If it becomes too large, split by actual pressure after the port is compiling and tested, not preemptively into clean-ot's `protocol/backend/spec/type` layout.

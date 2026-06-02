@@ -1,5 +1,5 @@
-#include "libOTe/Vole/LogVole/LogVoleReceiver.h"
-#include "libOTe/Vole/LogVole/LogVoleSender.h"
+#include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
+#include "libOTe/Vole/LogVole/LogVoleRingSender.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
@@ -71,8 +71,8 @@ namespace
         receiverInput.mParams = params;
         receiverInput.mD = sample_batch(ctx, tau, seed + 3u);
 
-        Sender sender{};
-        Receiver receiver{};
+        LogVoleRingSender sender{};
+        LogVoleRingReceiver receiver{};
         KeyDeriveSenderOutput senderOutput{};
         KeyDeriveReceiverOutput receiverOutput{};
 

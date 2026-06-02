@@ -60,7 +60,7 @@ cmake -S C:\Users\peter\repo\SEAL-stock-4.1.1 `
 | Add libOTe LogVole tests | 100% | Done | Imported original correctness tests under `libOTe_Tests/LogVole/`, compiled them into libOTe's native `TestCollection`, and kept the old test bodies through a small local compatibility shim. |
 | Validate libOTe build and tests | 100% | Done | `ENABLE_LOGVOLE=ON` configure/build/native tests pass with stock SEAL; `ENABLE_LOGVOLE=OFF` configure/build also passes. |
 | Harden native LogVole tests | 100% | Done | Factored native assertions and skips into `LogVole_TestUtil.h`; ported all compiled LogVole tests off the GTest shim; added join guards around threaded protocol tests; removed the unused shim and standalone GTest main. |
-| Add coproto protocol entrypoints | 99% | In progress | Added fresh `Sender`/`Receiver` coroutine wrappers over `coproto::Socket&` for key-derive, shrink/expand offline setup, deterministic shrink/expand online expansion, recursive LogVole offline/online, and CI-VOLE flows. Recursive and CI flows now use deterministic `Socket::fork()` lanes rather than importing clean-ot networking, sender online overlaps service with precompute, runtime cache scopes are applied around online/CI release flows, online outputs expose only byte totals, and CI-VOLE now has libOTe-style `CivoleSender`/`CivoleReceiver` state-machine wrappers with `mNextSid`. Remaining work is final naming and benchmark policy. |
+| Add coproto protocol entrypoints | 99% | In progress | Added fresh `LogVoleRingSender`/`LogVoleRingReceiver` coroutine wrappers over `coproto::Socket&` for key-derive, shrink/expand offline setup, deterministic shrink/expand online expansion, recursive LogVole offline/online, and CI-VOLE flows. Recursive and CI flows now use deterministic `Socket::fork()` lanes rather than importing clean-ot networking, sender online overlaps service with precompute, runtime cache scopes are applied around online/CI release flows, online outputs expose only byte totals, and CI-VOLE now has libOTe-style `LogVoleSender`/`LogVoleReceiver` state-machine wrappers with `mNextSid`. Remaining work is final naming and benchmark policy. |
 | Add frontend LogVole example | 100% | Done | Added `frontend_libOTe -logvole` for the CI-VOLE public API. The default path uses local coproto sockets, checks the VOLE relation, and now drives the libOTe-style sender/receiver wrappers; split-role `-r 0/1` maps to the asio socket example when coproto boost support is enabled. |
 | Primitive storage and span cleanup | 95% | In progress | Large primitive-owned buffers now use `AlignedUnVec` locally, including ring coefficients, flat packed ring/tensor data, seeds, CI-VOLE scalar arrays, and encoded byte buffers. Borrowed primitive/object inputs use `std::span` where useful. Recursive shrink full chunks now borrow `input.mX` directly and allocate only for padded tails. Message encoding now computes final byte sizes up front, allocates once, and writes ring/tensor coefficients directly instead of using incremental buffer growth or packed temporaries. Recursive `dHat`, LENC/key-derive outputs, root helper batches, seed-label aggregation/unbundling, and CI receiver padding now pre-size and direct-fill. Digest-tree inner-product pointer scratch is allocated once per tree build instead of per node/depth. Final scan removed single-poly pack temporaries and the extra padded LENC batch copy; remaining dynamic growth is limited to small SEAL setup vectors and the parallel task list. |
 | Decide benchmark landing path | 0% | Pending | Start with smoke tests only; never run two benchmarks at the same time. |
@@ -71,10 +71,10 @@ The imported LogLabel-shaped code is frozen as a reference implementation. The l
 
 ```text
 libOTe/Vole/LogVole/
-  LogVoleSender.h
-  LogVoleSender.cpp
-  LogVoleReceiver.h
-  LogVoleReceiver.cpp
+  LogVoleRingSender.h
+  LogVoleRingSender.cpp
+  LogVoleRingReceiver.h
+  LogVoleRingReceiver.cpp
   LogVoleEncoding.h
   LogVoleEncoding.cpp
   LogVoleRing.h
@@ -86,8 +86,8 @@ libOTe/Vole/LogVole/
 Top-level protocol code is split by role. Lower layers stay compact:
 
 - Fresh code lives in `namespace osuCrypto::LogVole`; names inside the namespace should not repeat `LogVole`.
-- `LogVoleSender.*`: sender-facing inputs, outputs, and straight-line coroutine entrypoints.
-- `LogVoleReceiver.*`: receiver-facing inputs, outputs, and straight-line coroutine entrypoints.
+- `LogVoleRingSender.*`: internal recursive sender inputs, outputs, and straight-line coroutine entrypoints.
+- `LogVoleRingReceiver.*`: internal recursive receiver inputs, outputs, and straight-line coroutine entrypoints.
 - `LogVoleEncoding.*`: typed message structs and encode/decode helpers. Malformed payload tests target this directly.
 - `LogVoleRing.*`: concrete SEAL/RNS polynomial machinery and hot arithmetic.
 - `LogVoleLenc.*`: LENC, key-derivation, and shrink/expand arithmetic above raw ring ops.
@@ -99,7 +99,7 @@ Do not recreate the imported `protocol/backend/spec/type` split. Do not adapt th
 1. Commit this freeze/rewrite plan.
 2. Add the new lower-layer files (`LogVoleEncoding.*`, `LogVoleRing.*`, `LogVoleLenc.*`) while the old reference still compiles.
 3. Move/copy behavior into the new lower-layer files and point arithmetic/encoding tests at them.
-4. Add `LogVoleSender.*` and `LogVoleReceiver.*` coroutine entrypoints using `coproto::Socket&`.
+4. Add `LogVoleRingSender.*` and `LogVoleRingReceiver.*` coroutine entrypoints using `coproto::Socket&`.
 5. In one networking cutover commit, translate the existing clean-ot callback send/receive flow to coproto sockets and delete the old imported comm/callback stack.
 6. Keep algebraic correctness tests continuous. Let old comm-only tests die with the old networking layer unless the new API has an equivalent behavior.
 7. Add benchmark smoke coverage only after the coroutine integration is stable. Never run two benchmarks at the same time.

@@ -1,5 +1,5 @@
-#include "libOTe/Vole/LogVole/LogVoleReceiver.h"
-#include "libOTe/Vole/LogVole/LogVoleSender.h"
+#include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
+#include "libOTe/Vole/LogVole/LogVoleRingSender.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
@@ -185,8 +185,8 @@ namespace
     void run_offline(
         const ShrinkExpandParams& params,
         const std::vector<RnsPoly>& s,
-        Sender& sender,
-        Receiver& receiver,
+        LogVoleRingSender& sender,
+        LogVoleRingReceiver& receiver,
         ShrinkExpandSenderState& senderState,
         ShrinkExpandReceiverState& receiverState)
     {
@@ -206,8 +206,8 @@ namespace
     }
 
     void run_expand(
-        Sender& sender,
-        Receiver& receiver,
+        LogVoleRingSender& sender,
+        LogVoleRingReceiver& receiver,
         const ShrinkExpandSenderState& senderState,
         const ShrinkExpandReceiverState& receiverState,
         std::uint64_t nonce,
@@ -276,8 +276,8 @@ void LogVole_ShrinkExpandCoproto_OfflineAndExpandDeterministicRelation(const oc:
 
     const auto s = sample_batch(ctx, params.mMu, 0x2001u);
 
-    Sender sender{};
-    Receiver receiver{};
+    LogVoleRingSender sender{};
+    LogVoleRingReceiver receiver{};
     ShrinkExpandSenderState senderState{};
     ShrinkExpandReceiverState receiverState{};
     run_offline(params, s, sender, receiver, senderState, receiverState);
@@ -300,8 +300,8 @@ void LogVole_ShrinkExpandCoproto_TruncOfflineAndExpandBoundedRelation(const oc::
 
     const auto s = sample_batch(ctx, params.mMu, 0x2101u);
 
-    Sender sender{};
-    Receiver receiver{};
+    LogVoleRingSender sender{};
+    LogVoleRingReceiver receiver{};
     ShrinkExpandSenderState senderState{};
     ShrinkExpandReceiverState receiverState{};
     run_offline(params, s, sender, receiver, senderState, receiverState);
@@ -328,8 +328,8 @@ void LogVole_ShrinkExpandCoproto_FullNoiseTolerance(const oc::CLP&)
 
     const auto s = sample_batch(ctx, params.mMu, 0x5001u);
 
-    Sender sender{};
-    Receiver receiver{};
+    LogVoleRingSender sender{};
+    LogVoleRingReceiver receiver{};
     ShrinkExpandSenderState senderState{};
     ShrinkExpandReceiverState receiverState{};
     run_offline(params, s, sender, receiver, senderState, receiverState);
@@ -354,8 +354,8 @@ void LogVole_ShrinkExpandCoproto_OfflineStateReuseAcrossQueries(const oc::CLP&)
 
     const auto s = sample_batch(ctx, params.mMu, 0xA001u);
 
-    Sender sender{};
-    Receiver receiver{};
+    LogVoleRingSender sender{};
+    LogVoleRingReceiver receiver{};
     ShrinkExpandSenderState senderState{};
     ShrinkExpandReceiverState receiverState{};
     run_offline(params, s, sender, receiver, senderState, receiverState);

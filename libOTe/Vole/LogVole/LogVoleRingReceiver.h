@@ -12,7 +12,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> mX;
     };
 
-    class Receiver
+    class LogVoleRingReceiver
     {
     public:
         task<> offline(

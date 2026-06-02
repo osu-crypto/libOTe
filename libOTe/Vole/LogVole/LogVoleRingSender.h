@@ -6,7 +6,7 @@
 
 namespace osuCrypto::LogVole
 {
-    class Sender
+    class LogVoleRingSender
     {
     public:
         task<> offline(

@@ -1,9 +1,9 @@
 #pragma once
 
 #include "libOTe/Tools/Coproto.h"
-#include "libOTe/Vole/LogVole/LogVoleReceiver.h"
+#include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
-#include "libOTe/Vole/LogVole/LogVoleSender.h"
+#include "libOTe/Vole/LogVole/LogVoleRingSender.h"
 
 #include "cryptoTools/Common/Timer.h"
 
@@ -93,7 +93,11 @@ namespace osuCrypto::LogVole
         CommunicationStats mComm;
     };
 
-    class CivoleSender : public TimerAdapter
+}
+
+namespace osuCrypto
+{
+    class LogVoleSender : public TimerAdapter
     {
     public:
         enum class State
@@ -108,11 +112,11 @@ namespace osuCrypto::LogVole
         u64 mModulus = 0;
         u64 mDelta = 0;
         u32 mNumThreads = 1;
-        CivoleSid mNextSid = 0;
-        CommunicationStats mLastOnlineComm;
+        LogVole::CivoleSid mNextSid = 0;
+        LogVole::CommunicationStats mLastOnlineComm;
         State mState = State::Default;
-        CivoleParams mParams;
-        CivoleSenderState mOfflineState;
+        LogVole::CivoleParams mParams;
+        LogVole::CivoleSenderState mOfflineState;
 
         void configure(
             u64 n,
@@ -139,7 +143,7 @@ namespace osuCrypto::LogVole
         void clear();
     };
 
-    class CivoleReceiver : public TimerAdapter
+    class LogVoleReceiver : public TimerAdapter
     {
     public:
         enum class State
@@ -153,11 +157,11 @@ namespace osuCrypto::LogVole
         u32 mPlaintextModulusBits = 55;
         u64 mModulus = 0;
         u32 mNumThreads = 1;
-        CivoleSid mNextSid = 0;
-        CommunicationStats mLastOnlineComm;
+        LogVole::CivoleSid mNextSid = 0;
+        LogVole::CommunicationStats mLastOnlineComm;
         State mState = State::Default;
-        CivoleParams mParams;
-        CivoleReceiverState mOfflineState;
+        LogVole::CivoleParams mParams;
+        LogVole::CivoleReceiverState mOfflineState;
 
         void configure(
             u64 n,
@@ -177,6 +181,10 @@ namespace osuCrypto::LogVole
 
         void clear();
     };
+}
+
+namespace osuCrypto::LogVole
+{
 
     bool makeDefaultCivoleParams(CivoleParams& out, u32 workerThreads = 1);
     bool resolveCivoleModulus(const CivoleParams& params, u64& out);
