@@ -74,6 +74,13 @@ macro(FIND_SEAL)
     endif()
 
     find_package(SEAL 4.1.1 EXACT ${SEAL_DP} ${ARGN})
+
+    if(TARGET SEAL::seal)
+        set_target_properties(SEAL::seal PROPERTIES
+            MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
+            MAP_IMPORTED_CONFIG_MINSIZEREL Release
+            MAP_IMPORTED_CONFIG_DEBUG Release)
+    endif()
 endmacro()
 
 if(FETCH_SEAL_IMPL)
