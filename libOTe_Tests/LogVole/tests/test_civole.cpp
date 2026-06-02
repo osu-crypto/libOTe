@@ -1,4 +1,4 @@
-#include "libOTe/Vole/LogVole2/LogVole2Civole.h"
+#include "libOTe/Vole/LogVole/LogVoleCivole.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
@@ -11,7 +11,7 @@
 #include <tuple>
 #include <vector>
 
-using namespace osuCrypto::LogVole2;
+using namespace osuCrypto::LogVole;
 using osuCrypto::u64;
 
 namespace
@@ -90,7 +90,7 @@ namespace
     }
 }
 
-void LogVole2_Civole_PublicApiInvariant(const oc::CLP&)
+void LogVole_Civole_PublicApiInvariant(const oc::CLP&)
 {
     const auto params = make_params();
     const u64 modulus = resolve_modulus(params);
@@ -112,7 +112,7 @@ void LogVole2_Civole_PublicApiInvariant(const oc::CLP&)
     expect_vole_relation(x, delta, releaseK.mKeys, receiverSetX.mMacs, modulus);
 }
 
-void LogVole2_Civole_ReleaseRequiresPriorReleaseK(const oc::CLP&)
+void LogVole_Civole_ReleaseRequiresPriorReleaseK(const oc::CLP&)
 {
     const auto params = make_params();
     const u64 modulus = resolve_modulus(params);
@@ -135,7 +135,7 @@ void LogVole2_Civole_ReleaseRequiresPriorReleaseK(const oc::CLP&)
     LOGVOLE_EXPECT_TRUE(threw);
 }
 
-void LogVole2_Civole_RejectsZeroDelta(const oc::CLP&)
+void LogVole_Civole_RejectsZeroDelta(const oc::CLP&)
 {
     const auto params = make_params();
 
@@ -158,7 +158,7 @@ void LogVole2_Civole_RejectsZeroDelta(const oc::CLP&)
     LOGVOLE_EXPECT_TRUE(threw);
 }
 
-void LogVole2_Civole_RejectsOutOfFieldReceiverValue(const oc::CLP&)
+void LogVole_Civole_RejectsOutOfFieldReceiverValue(const oc::CLP&)
 {
     const auto params = make_params();
     const u64 modulus = resolve_modulus(params);
@@ -184,7 +184,7 @@ void LogVole2_Civole_RejectsOutOfFieldReceiverValue(const oc::CLP&)
     LOGVOLE_EXPECT_TRUE(threw);
 }
 
-void LogVole2_Civole_SupportsSequentialSids(const oc::CLP&)
+void LogVole_Civole_SupportsSequentialSids(const oc::CLP&)
 {
     const auto params = make_params();
     const u64 modulus = resolve_modulus(params);
@@ -209,7 +209,7 @@ void LogVole2_Civole_SupportsSequentialSids(const oc::CLP&)
     expect_vole_relation(x2, delta, releaseK2.mKeys, receiverSetX2.mMacs, modulus);
 }
 
-void LogVole2_Civole_StateMachineAutoSidSequential(const oc::CLP&)
+void LogVole_Civole_StateMachineAutoSidSequential(const oc::CLP&)
 {
     CivoleSender sender{};
     CivoleReceiver receiver{};
@@ -262,7 +262,7 @@ void LogVole2_Civole_StateMachineAutoSidSequential(const oc::CLP&)
     LOGVOLE_EXPECT_EQ(receiver.mNextSid, 2ull);
 }
 
-void LogVole2_Civole_StateMachineOneShotAutoOffline(const oc::CLP&)
+void LogVole_Civole_StateMachineOneShotAutoOffline(const oc::CLP&)
 {
     CivoleSender sender{};
     CivoleReceiver receiver{};
@@ -287,7 +287,7 @@ void LogVole2_Civole_StateMachineOneShotAutoOffline(const oc::CLP&)
     expect_vole_relation(x, delta, b, a, sender.modulus());
 }
 
-void LogVole2_Civole_RejectsSameSidReuseByEitherParty(const oc::CLP&)
+void LogVole_Civole_RejectsSameSidReuseByEitherParty(const oc::CLP&)
 {
     const auto params = make_params();
     const u64 modulus = resolve_modulus(params);

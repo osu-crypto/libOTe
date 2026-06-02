@@ -1,9 +1,9 @@
-#include "libOTe/Vole/LogVole2/LogVole2Core.h"
-#include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
-#include "libOTe/Vole/LogVole2/LogVole2Parallel.h"
-#include "libOTe/Vole/LogVole2/LogVole2Receiver.h"
-#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
-#include "libOTe/Vole/LogVole2/LogVole2Sender.h"
+#include "libOTe/Vole/LogVole/LogVoleCore.h"
+#include "libOTe/Vole/LogVole/LogVoleEncoding.h"
+#include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "libOTe/Vole/LogVole/LogVoleReceiver.h"
+#include "libOTe/Vole/LogVole/LogVoleRuntime.h"
+#include "libOTe/Vole/LogVole/LogVoleSender.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
@@ -25,7 +25,7 @@
 #include <tuple>
 #include <vector>
 
-using namespace osuCrypto::LogVole2;
+using namespace osuCrypto::LogVole;
 
 namespace
 {
@@ -541,7 +541,7 @@ namespace
     }
 }
 
-void LogVole2_Core_ModeSelection(const oc::CLP&)
+void LogVole_Core_ModeSelection(const oc::CLP&)
 {
     LOGVOLE_EXPECT_TRUE(evalSeedLabelMode(4, 2, 2, 2) == SeedLabelMode::Leaf);
     LOGVOLE_EXPECT_TRUE(evalSeedLabelMode(5, 2, 2, 2) == SeedLabelMode::Internal);
@@ -550,7 +550,7 @@ void LogVole2_Core_ModeSelection(const oc::CLP&)
     LOGVOLE_EXPECT_TRUE(evalRecursiveMode(9, 2, 2, 2) == RecursiveMode::Internal);
 }
 
-void LogVole2_Core_RuntimeCacheScopePropagatesToParallelWorkers(const oc::CLP&)
+void LogVole_Core_RuntimeCacheScopePropagatesToParallelWorkers(const oc::CLP&)
 {
     const ProtocolCacheScope outerScope = currentProtocolCacheScope();
     const std::uint64_t runId = allocateProtocolCacheRunId();
@@ -579,7 +579,7 @@ void LogVole2_Core_RuntimeCacheScopePropagatesToParallelWorkers(const oc::CLP&)
     LOGVOLE_EXPECT_TRUE(restoredScope.mRole == outerScope.mRole);
 }
 
-void LogVole2_Core_SeedLabelAggSumsTauBlocks(const oc::CLP&)
+void LogVole_Core_SeedLabelAggSumsTauBlocks(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -601,7 +601,7 @@ void LogVole2_Core_SeedLabelAggSumsTauBlocks(const oc::CLP&)
     }
 }
 
-void LogVole2_Core_GdecompHiUnbundleLiftsOneLimbPerOutput(const oc::CLP&)
+void LogVole_Core_GdecompHiUnbundleLiftsOneLimbPerOutput(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -643,7 +643,7 @@ void LogVole2_Core_GdecompHiUnbundleLiftsOneLimbPerOutput(const oc::CLP&)
     }
 }
 
-void LogVole2_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP&)
+void LogVole_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -659,7 +659,7 @@ void LogVole2_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP&)
     }
 }
 
-void LogVole2_Core_RepOfflineSenderInputGammaTauUnbundlesLimbs(const oc::CLP&)
+void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesLimbs(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -703,7 +703,7 @@ void LogVole2_Core_RepOfflineSenderInputGammaTauUnbundlesLimbs(const oc::CLP&)
     }
 }
 
-void LogVole2_Core_SeedLabelSampleCt2FromSeedDeterministic(const oc::CLP&)
+void LogVole_Core_SeedLabelSampleCt2FromSeedDeterministic(const oc::CLP&)
 {
     const auto params = make_params();
     SamplingSeedConfig seeds{};
@@ -721,7 +721,7 @@ void LogVole2_Core_SeedLabelSampleCt2FromSeedDeterministic(const oc::CLP&)
     LOGVOLE_EXPECT_FALSE(rangesEqual(a[0].mCoeffs, c[0].mCoeffs));
 }
 
-void LogVole2_Core_SeedLabelDenoiseMatchesShrinkExpandComb(const oc::CLP&)
+void LogVole_Core_SeedLabelDenoiseMatchesShrinkExpandComb(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -739,7 +739,7 @@ void LogVole2_Core_SeedLabelDenoiseMatchesShrinkExpandComb(const oc::CLP&)
     expect_batch_equal(actual, expected);
 }
 
-void LogVole2_Core_RootTruncParamsAndKeyReplication(const oc::CLP&)
+void LogVole_Core_RootTruncParamsAndKeyReplication(const oc::CLP&)
 {
     Params params{};
     params.mShrinkExpand.mRing = make_params();
@@ -771,7 +771,7 @@ void LogVole2_Core_RootTruncParamsAndKeyReplication(const oc::CLP&)
     }
 }
 
-void LogVole2_Core_RootScaledNttAddMatchesCoeffDomain(const oc::CLP&)
+void LogVole_Core_RootScaledNttAddMatchesCoeffDomain(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -796,7 +796,7 @@ void LogVole2_Core_RootScaledNttAddMatchesCoeffDomain(const oc::CLP&)
     expect_poly_equal(accNtt, expected);
 }
 
-void LogVole2_Core_RootTopCtNoiselessRelation(const oc::CLP&)
+void LogVole_Core_RootTopCtNoiselessRelation(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -875,7 +875,7 @@ void LogVole2_Core_RootTopCtNoiselessRelation(const oc::CLP&)
     }
 }
 
-void LogVole2_Core_RootZetaShapeAndBounds(const oc::CLP&)
+void LogVole_Core_RootZetaShapeAndBounds(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -905,7 +905,7 @@ void LogVole2_Core_RootZetaShapeAndBounds(const oc::CLP&)
     }
 }
 
-void LogVole2_Core_RootInnerProductMatchesCoeffDomain(const oc::CLP&)
+void LogVole_Core_RootInnerProductMatchesCoeffDomain(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -935,7 +935,7 @@ void LogVole2_Core_RootInnerProductMatchesCoeffDomain(const oc::CLP&)
     expect_poly_equal(actual, expected);
 }
 
-void LogVole2_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
+void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
 {
     const Params params = make_root_params();
     ShrinkExpandParams trunc{};
@@ -990,7 +990,7 @@ void LogVole2_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
     expect_poly_equal(roundTrip, message.mCtR.mPolys[0]);
 }
 
-void LogVole2_Core_RootOfflineRejectsMetadataMismatch(const oc::CLP&)
+void LogVole_Core_RootOfflineRejectsMetadataMismatch(const oc::CLP&)
 {
     const Params params = make_root_params();
     ShrinkExpandParams trunc{};
@@ -1019,7 +1019,7 @@ void LogVole2_Core_RootOfflineRejectsMetadataMismatch(const oc::CLP&)
     LOGVOLE_EXPECT_FALSE(finalizeRootOfflineReceiver(receiver, message));
 }
 
-void LogVole2_Core_RootOnlineLocalFlow(const oc::CLP&)
+void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
 {
     const Params params = make_root_params();
     ShrinkExpandParams trunc{};
@@ -1103,7 +1103,7 @@ void LogVole2_Core_RootOnlineLocalFlow(const oc::CLP&)
     }
 }
 
-void LogVole2_Core_RootOnlineLocalRelation(const oc::CLP&)
+void LogVole_Core_RootOnlineLocalRelation(const oc::CLP&)
 {
     Params params = make_golden_params();
     params.mW =
@@ -1220,7 +1220,7 @@ void LogVole2_Core_RootOnlineLocalRelation(const oc::CLP&)
         << ", root sk_x residual " << static_cast<double>(receiverKeyResidual);
 }
 
-void LogVole2_Core_RootLocalApiRelation(const oc::CLP&)
+void LogVole_Core_RootLocalApiRelation(const oc::CLP&)
 {
     Params params = make_golden_params();
     params.mW =
@@ -1296,7 +1296,7 @@ void LogVole2_Core_RootLocalApiRelation(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole2_Core_TwoLevelLocalApiRelation(const oc::CLP&)
+void LogVole_Core_TwoLevelLocalApiRelation(const oc::CLP&)
 {
     Params params = make_recursive_params(2);
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
@@ -1371,7 +1371,7 @@ void LogVole2_Core_TwoLevelLocalApiRelation(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole2_Core_ThreeLevelLocalApiRelation(const oc::CLP&)
+void LogVole_Core_ThreeLevelLocalApiRelation(const oc::CLP&)
 {
     Params params = make_recursive_params(3);
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
@@ -1455,7 +1455,7 @@ void LogVole2_Core_ThreeLevelLocalApiRelation(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole2_Core_ThreeLevelLocalPrecomputeCache(const oc::CLP&)
+void LogVole_Core_ThreeLevelLocalPrecomputeCache(const oc::CLP&)
 {
     Params params = make_recursive_params(3);
     RingNttContext ctx{};
@@ -1480,7 +1480,7 @@ void LogVole2_Core_ThreeLevelLocalPrecomputeCache(const oc::CLP&)
     LOGVOLE_EXPECT_TRUE(senderOffline.mState.mPrecomputedTbk.get() == cachedTbk);
 }
 
-void LogVole2_Core_ThreeLevelLocalRepeatedOnline(const oc::CLP&)
+void LogVole_Core_ThreeLevelLocalRepeatedOnline(const oc::CLP&)
 {
     Params params = make_recursive_params(3);
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
@@ -1572,7 +1572,7 @@ void LogVole2_Core_ThreeLevelLocalRepeatedOnline(const oc::CLP&)
     LOGVOLE_EXPECT_TRUE(senderOffline.mState.mPrecomputedTbk.get() == cachedTbk);
 }
 
-void LogVole2_Core_ThreeLevelOfflineReusesInternalSetup(const oc::CLP&)
+void LogVole_Core_ThreeLevelOfflineReusesInternalSetup(const oc::CLP&)
 {
     Params params = make_recursive_params(3);
     RingNttContext ctx{};
@@ -1715,17 +1715,17 @@ void run_recursive_gadget_subproblem_test(bool deterministic)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole2_Core_RecursiveGadgetInputSubproblem(const oc::CLP&)
+void LogVole_Core_RecursiveGadgetInputSubproblem(const oc::CLP&)
 {
     run_recursive_gadget_subproblem_test(true);
 }
 
-void LogVole2_Core_RecursiveGadgetInputSubproblemFullNoise(const oc::CLP&)
+void LogVole_Core_RecursiveGadgetInputSubproblemFullNoise(const oc::CLP&)
 {
     run_recursive_gadget_subproblem_test(false);
 }
 
-void LogVole2_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
+void LogVole_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
 {
     const Params params = make_leaf_tau_one_params();
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
@@ -1752,7 +1752,7 @@ void LogVole2_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
     LOGVOLE_EXPECT_FALSE(finalizeReceiverOffline(receiverInput, emptyMessage, receiverOutput));
 }
 
-void LogVole2_Core_ThreeLevelCoprotoRelation(const oc::CLP&)
+void LogVole_Core_ThreeLevelCoprotoRelation(const oc::CLP&)
 {
     Params params = make_recursive_params(3);
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
@@ -1863,7 +1863,7 @@ void LogVole2_Core_ThreeLevelCoprotoRelation(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole2_Core_ThreeLevelCoprotoMultiThread(const oc::CLP&)
+void LogVole_Core_ThreeLevelCoprotoMultiThread(const oc::CLP&)
 {
     Params params = make_recursive_params(3);
     params.mShrinkExpand.mNumWorkerThreads = 4;
@@ -1947,7 +1947,7 @@ void LogVole2_Core_ThreeLevelCoprotoMultiThread(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole2_Core_ThreeLevelCoprotoSkipTbkOutput(const oc::CLP&)
+void LogVole_Core_ThreeLevelCoprotoSkipTbkOutput(const oc::CLP&)
 {
     Params params = make_recursive_params(3);
 
@@ -1999,7 +1999,7 @@ void LogVole2_Core_ThreeLevelCoprotoSkipTbkOutput(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(senderState.mPrecomputedTbk->size(), params.mW);
 }
 
-void LogVole2_Core_GoldenSeedSearchAcceptsFeasibleParams(const oc::CLP&)
+void LogVole_Core_GoldenSeedSearchAcceptsFeasibleParams(const oc::CLP&)
 {
     auto params = make_golden_params();
     LOGVOLE_REQUIRE_TRUE(validateGoldenSeedSearch(params));
@@ -2008,7 +2008,7 @@ void LogVole2_Core_GoldenSeedSearchAcceptsFeasibleParams(const oc::CLP&)
     LOGVOLE_REQUIRE_FALSE(validateGoldenSeedSearch(params));
 }
 
-void LogVole2_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
+void LogVole_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
 {
     const auto params = make_golden_params();
     RingNttContext ctx{};

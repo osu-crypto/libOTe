@@ -1,13 +1,13 @@
 #pragma once
 
-#include "libOTe/Vole/LogVole2/LogVole2Lenc.h"
-#include "libOTe/Vole/LogVole2/LogVole2Lhe.h"
+#include "libOTe/Vole/LogVole/LogVoleLenc.h"
+#include "libOTe/Vole/LogVole/LogVoleLhe.h"
 
 #include <memory>
 #include <span>
 #include <vector>
 
-namespace osuCrypto::LogVole2
+namespace osuCrypto::LogVole
 {
     struct ShrinkExpandSenderOfflineInput
     {

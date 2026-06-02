@@ -4,7 +4,7 @@
 
 #include <atomic>
 
-namespace osuCrypto::LogVole2
+namespace osuCrypto::LogVole
 {
     enum class ProtocolCacheRole : u8
     {

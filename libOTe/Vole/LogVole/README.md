@@ -1,8 +1,8 @@
-# LogVole2 staging area
+# LogVole staging area
 
-`LogVole2` is the parallel port of the complete `origin/clean-ot` LogVole implementation.
+`LogVole` is the parallel port of the complete `origin/clean-ot` LogVole implementation.
 
-The final landing step is intended to be a mechanical rename from `LogVole2` to `LogVole` after the recursive protocol and CI-VOLE tests pass in libOTe.
+The final landing step is intended to be a mechanical rename from `LogVole` to `LogVole` after the recursive protocol and CI-VOLE tests pass in libOTe.
 
 Initial order:
 

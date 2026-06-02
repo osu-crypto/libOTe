@@ -1,10 +1,10 @@
 #pragma once
 
-#include "libOTe/Vole/LogVole2/LogVole2Ring.h"
+#include "libOTe/Vole/LogVole/LogVoleRing.h"
 
 #include <vector>
 
-namespace osuCrypto::LogVole2
+namespace osuCrypto::LogVole
 {
     bool buildLhePublicANtt(const RingNttContext& ctx, u32 mu, std::vector<RnsPoly>& out);
 

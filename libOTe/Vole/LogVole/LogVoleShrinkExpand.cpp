@@ -1,5 +1,5 @@
-#include "libOTe/Vole/LogVole2/LogVole2ShrinkExpand.h"
-#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
+#include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
+#include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include "seal/util/rns.h"
 #include "seal/util/uintarithsmallmod.h"
@@ -10,7 +10,7 @@
 #include <limits>
 #include <memory>
 
-namespace osuCrypto::LogVole2
+namespace osuCrypto::LogVole
 {
     namespace
     {

@@ -203,7 +203,7 @@ Current capabilities:
 
 Current gaps relative to clean-ot:
 
-- CI-VOLE public API, CRT wrapping/unwrapping, SID state, and default params are present in the fresh LogVole2 port.
+- CI-VOLE public API, CRT wrapping/unwrapping, SID state, and default params are present in the fresh LogVole port.
 - Root helper math, golden-seed search, root offline setup, sender precompute, cached repeated online, and root digest/response flow are present.
 - Clean-ot-profile two-/three-level recursive LogVole flows are present locally and over coproto.
 - Recursive coproto now uses deterministic `Socket::fork()` lanes instead of depth-first frames on a single stream.
@@ -213,7 +213,7 @@ Current gaps relative to clean-ot:
 - `golden_seed_transmitted` exists in the current clean-ot type but is not used by the LogVole online path; no libOTe behavior is currently gated on it.
 - The high-level clean-ot sender online nonce is treated as stale API surface: the paper's online API uses `id=(sid, mode)`, and lower-level CT labels are derived from `(id, seed, level, index)`.
 - Runtime cache scoping, public-A run-id cache keys, shrink/expand CT2 role/run-id caches, and macoro worker scope propagation are now present.
-- Clean-ot's frame/payload/round logging is intentionally not being ported; LogVole2 now exposes lightweight online protocol-byte totals and tests that the online path stays near one root digest plus one root response.
+- Clean-ot's frame/payload/round logging is intentionally not being ported; LogVole now exposes lightweight online protocol-byte totals and tests that the online path stays near one root digest plus one root response.
 - Contains stale key-derive API and tests that should not drive the final design.
 
 ## Required libOTe changes
@@ -233,7 +233,7 @@ Current gaps relative to clean-ot:
 | CI-VOLE API | Default params, `Zp` CRT wrapper, SID state, releasek/release/setx flows, clean-ot public API tests, forked metadata/offline lanes, skip-TBK sender release, macoro-backed CRT chunk parallelism, libOTe-style `CivoleSender`/`CivoleReceiver` wrappers with hidden auto-incrementing `mNextSid`, and a frontend CI-VOLE smoke example are ported over coproto | Final naming cleanup after parity is confirmed | 94% |
 | Serialization | Stale message set exists | Replace with clean-ot message set in libOTe byte encoding style | 40% |
 | Networking | Coproto wrappers exist for key-derive, shrink/expand, recursive LogVole offline/online, and CI-VOLE public API flows; recursive and CI flows now use deterministic `Socket::fork()` lanes instead of the clean-ot comm stack, with no frame/round logger port | Continue direct coproto translation for any remaining clean-ot-facing API; do not port clean-ot comm layer | 95% |
-| Tests | LogVole2 has 82 expected tests after this checkpoint, including clean-ot-profile recursive coverage, recursive coproto relation coverage with online byte accounting bounds, multithread recursive coproto coverage, skip-TBK sender online coverage, runtime cache-scope propagation, root-width rejection, direct reused-offline-message coverage, the six clean-ot CI-VOLE public API tests, two libOTe-style CI-VOLE wrapper tests, and a frontend local CI-VOLE relation smoke run | Add benchmark smoke coverage only after final API naming settles | 99% |
+| Tests | LogVole has 82 expected tests after this checkpoint, including clean-ot-profile recursive coverage, recursive coproto relation coverage with online byte accounting bounds, multithread recursive coproto coverage, skip-TBK sender online coverage, runtime cache-scope propagation, root-width rejection, direct reused-offline-message coverage, the six clean-ot CI-VOLE public API tests, two libOTe-style CI-VOLE wrapper tests, and a frontend local CI-VOLE relation smoke run | Add benchmark smoke coverage only after final API naming settles | 99% |
 | Benchmarks | Not started | Add only after correctness and coproto integration are stable; run serially | 0% |
 
 ## Recommended file layout
@@ -289,4 +289,4 @@ Clean-ot is the oracle. Porting should preserve its parameter profiles, tests, s
 
 ## Next concrete work
 
-The next coding step should be the final staging cleanup: decide when to do the mechanical `LogVole2` to `LogVole` rename, then remove or quarantine stale scaffold surfaces. Benchmark smoke coverage remains separate and should run serially only.
+The next coding step should be the final staging cleanup: decide when to do the mechanical `LogVole` to `LogVole` rename, then remove or quarantine stale scaffold surfaces. Benchmark smoke coverage remains separate and should run serially only.

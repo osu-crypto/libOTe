@@ -1,4 +1,4 @@
-#include "libOTe/Vole/LogVole2/LogVole2ShrinkExpand.h"
+#include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
@@ -12,7 +12,7 @@
 #include <random>
 #include <vector>
 
-using namespace osuCrypto::LogVole2;
+using namespace osuCrypto::LogVole;
 
 namespace
 {
@@ -311,7 +311,7 @@ namespace
     }
 }
 
-void LogVole2_ShrinkExpandCore_ParamsValidation(const oc::CLP&)
+void LogVole_ShrinkExpandCore_ParamsValidation(const oc::CLP&)
 {
     auto params = make_params();
     LOGVOLE_REQUIRE_TRUE(validateShrinkExpandParams(params));
@@ -320,7 +320,7 @@ void LogVole2_ShrinkExpandCore_ParamsValidation(const oc::CLP&)
     LOGVOLE_REQUIRE_FALSE(validateShrinkExpandParams(params));
 }
 
-void LogVole2_ShrinkExpandCore_OfflineStateShapes(const oc::CLP&)
+void LogVole_ShrinkExpandCore_OfflineStateShapes(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -350,17 +350,17 @@ void LogVole2_ShrinkExpandCore_OfflineStateShapes(const oc::CLP&)
     LOGVOLE_EXPECT_EQ(receiverState.mLacct.mCt.mRows, senderState.mLacct.mCt.mRows);
 }
 
-void LogVole2_ShrinkExpandCore_DeterministicRelationExact(const oc::CLP&)
+void LogVole_ShrinkExpandCore_DeterministicRelationExact(const oc::CLP&)
 {
     LOGVOLE_REQUIRE_TRUE(run_relation(false));
 }
 
-void LogVole2_ShrinkExpandCore_TruncDeterministicRelationBounded(const oc::CLP&)
+void LogVole_ShrinkExpandCore_TruncDeterministicRelationBounded(const oc::CLP&)
 {
     LOGVOLE_REQUIRE_TRUE(run_relation(true));
 }
 
-void LogVole2_ShrinkExpandCore_OfflineMetadataMismatchRejected(const oc::CLP&)
+void LogVole_ShrinkExpandCore_OfflineMetadataMismatchRejected(const oc::CLP&)
 {
     auto params = make_params();
     RingNttContext ctx{};
@@ -382,7 +382,7 @@ void LogVole2_ShrinkExpandCore_OfflineMetadataMismatchRejected(const oc::CLP&)
     LOGVOLE_REQUIRE_FALSE(finalizeShrinkExpandReceiverOffline(receiverInput, senderState, receiverState));
 }
 
-void LogVole2_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
+void LogVole_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
 {
     constexpr std::uint64_t seedX = 0x8888;
     constexpr std::uint64_t seedNoise = 0x9999;
@@ -459,7 +459,7 @@ void LogVole2_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
     expect_batch_equal(outBatch, xBatch);
 }
 
-void LogVole2_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
+void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
 {
     auto params = make_full_noise_params();
     RingNttContext ctx{};

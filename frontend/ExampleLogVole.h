@@ -4,5 +4,5 @@
 
 namespace osuCrypto
 {
-    bool LogVole2_Examples(const CLP& cmd);
+    bool LogVole_Examples(const CLP& cmd);
 }

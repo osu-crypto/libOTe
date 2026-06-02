@@ -1,20 +1,13 @@
 #pragma once
 
-#include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 
-#include <cryptoTools/Common/Defines.h>
-
+#include <memory>
+#include <span>
 #include <vector>
 
 namespace osuCrypto::LogVole
 {
-    enum class ShrinkExpandMode : u8
-    {
-        Deterministic = 0,
-        FullNoise = 1
-    };
-
     struct LencLacct
     {
         u32 mWidthPadded = 0;
@@ -25,36 +18,25 @@ namespace osuCrypto::LogVole
     struct LencEncodeOutput
     {
         std::vector<RnsPoly> mR;
+        std::vector<RnsPoly> mRNtt;
         LencLacct mLacct;
     };
 
-    bool lencEnc(
-        const RingNttContext& ctx,
-        const std::vector<RnsPoly>& s,
-        u32 tau,
-        u32 gadgetLogBase,
-        u64 seed,
-        LencEncodeOutput& out,
-        double noiseStandardDeviation = 0.0,
-        double noiseMaxDeviation = 0.0,
-        u64 encryptionNoiseSeed = 0);
+    struct KeyDeriveRequest
+    {
+        u32 mPolyModulusDegree = 0;
+        u32 mCoeffModulusCount = 0;
+        u32 mTau = 0;
+        AlignedUnVec<u64> mDCoeffs;
+    };
 
-    bool lencDigest(
-        const RingNttContext& ctx,
-        const std::vector<RnsPoly>& x,
-        u32 tau,
-        u32 gadgetLogBase,
-        RnsPoly& out,
-        u32 widthPadded = 0);
-
-    bool lencEval(
-        const RingNttContext& ctx,
-        const LencLacct& lacct,
-        const std::vector<RnsPoly>& x,
-        u32 mu,
-        u32 tau,
-        u32 gadgetLogBase,
-        std::vector<RnsPoly>& out);
+    struct KeyDeriveResponse
+    {
+        u32 mPolyModulusDegree = 0;
+        u32 mCoeffModulusCount = 0;
+        u32 mTau = 0;
+        AlignedUnVec<u64> mMNttCoeffs;
+    };
 
     struct KeyDeriveSenderInput
     {
@@ -79,6 +61,16 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> mM;
     };
 
+    struct DigestTree
+    {
+        u32 mWidthPadded = 0;
+        u32 mLevels = 0;
+        RnsPoly mDigest;
+        std::vector<std::vector<RnsPoly>> mNodeDecompNtt;
+    };
+
+    std::vector<RnsPoly> buildLencPublicBNtt(const RingNttContext& ctx, u32 tau);
+
     bool prepareKeyDeriveRequest(
         const KeyDeriveReceiverInput& input,
         KeyDeriveRequest& out);
@@ -94,110 +86,143 @@ namespace osuCrypto::LogVole
         const KeyDeriveResponse& response,
         KeyDeriveReceiverOutput& output);
 
-    struct ShrinkExpandParams
-    {
-        RingParams mRing;
-        u32 mPlaintextModulusBits = 0;
-        u32 mAlpha = 2;
-        u32 mMu = 0;
-        u32 mGadgetLogBase = 0;
-        u32 mTau = 0;
-        ShrinkExpandMode mMode = ShrinkExpandMode::Deterministic;
-        u64 mNoiseSeed = 0x5EEDBEEF1234ull;
-        i64 mNoiseBound = 2;
-    };
-
-    struct ShrinkExpandSenderOfflineInput
-    {
-        ShrinkExpandParams mParams;
-        std::vector<RnsPoly> mS;
-    };
-
-    struct ShrinkExpandReceiverOfflineInput
-    {
-        ShrinkExpandParams mParams;
-    };
-
-    struct ShrinkExpandSenderState
-    {
-        ShrinkExpandParams mParams;
-        i64 mEffectiveNoiseBound = 0;
-        std::vector<RnsPoly> mS;
-        std::vector<RnsPoly> mR;
-        std::vector<RnsPoly> mSk1;
-        RingTensor mCt1;
-        LencLacct mLacct;
-    };
-
-    struct ShrinkExpandReceiverState
-    {
-        ShrinkExpandParams mParams;
-        i64 mEffectiveNoiseBound = 0;
-        RingTensor mCt1;
-        LencLacct mLacct;
-    };
-
-    struct ShrinkExpandSenderExpandInput
-    {
-        u64 mNonce = 0;
-        RnsPoly mTbkPrime;
-    };
-
-    struct ShrinkExpandReceiverExpandInput
-    {
-        u64 mNonce = 0;
-        std::vector<RnsPoly> mX;
-        RnsPoly mDigest;
-        RnsPoly mSkX;
-    };
-
-    struct ShrinkExpandSenderExpandOutput
-    {
-        std::vector<RnsPoly> mTbk;
-    };
-
-    struct ShrinkExpandReceiverExpandOutput
-    {
-        std::vector<RnsPoly> mTbm;
-    };
-
-    bool validateParams(const ShrinkExpandParams& params);
-    bool resolveEffectiveNoiseBound(const ShrinkExpandParams& params, i64& out);
-    u64 metadataFingerprint(const ShrinkExpandParams& params);
-
-    bool prepareSenderOffline(
-        const ShrinkExpandSenderOfflineInput& input,
-        ShrinkExpandOfflineMessage& message,
-        ShrinkExpandSenderState& state);
-
-    bool finalizeReceiverOffline(
-        const ShrinkExpandReceiverOfflineInput& input,
-        const ShrinkExpandOfflineMessage& message,
-        ShrinkExpandReceiverState& state);
-
-    bool shrink(
-        const ShrinkExpandReceiverState& state,
-        const std::vector<RnsPoly>& x,
-        RnsPoly& digest);
-
-    bool deriveSkX(
-        const ShrinkExpandSenderState& state,
-        const RnsPoly& digest,
-        const RnsPoly& tbkPrime,
-        RnsPoly& out);
-
-    bool expandSender(
-        const ShrinkExpandSenderState& state,
-        const ShrinkExpandSenderExpandInput& input,
-        ShrinkExpandSenderExpandOutput& output);
-
-    bool expandReceiver(
-        const ShrinkExpandReceiverState& state,
-        const ShrinkExpandReceiverExpandInput& input,
-        ShrinkExpandReceiverExpandOutput& output);
-
-    bool denoiseComb(
+    bool buildDigestTree(
         const RingNttContext& ctx,
-        const std::vector<RnsPoly>& tbaPrime,
-        std::vector<RnsPoly>& out);
+        const std::vector<RnsPoly>& x,
+        u32 tau,
+        u32 gadgetLogBase,
+        DigestTree& out,
+        u32 requestedWidthPadded = 0,
+        const std::vector<RnsPoly>* publicBNtt = nullptr,
+        u32 requestedWorkers = 1);
+
+    bool buildDigestTree(
+        const RingNttContext& ctx,
+        std::span<const RnsPoly> x,
+        u32 tau,
+        u32 gadgetLogBase,
+        DigestTree& out,
+        u32 requestedWidthPadded = 0,
+        const std::vector<RnsPoly>* publicBNtt = nullptr,
+        u32 requestedWorkers = 1);
+
+    bool lencEnc(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& s,
+        u32 tau,
+        u32 gadgetLogBase,
+        const SamplingSeedConfig& samplingSeeds,
+        LencEncodeOutput& out,
+        double noiseStandardDeviation = 0.0,
+        double noiseMaxDeviation = 0.0,
+        u32 requestedWidthPadded = 0,
+        bool emitRCoeffDomain = true,
+        const std::vector<RnsPoly>* publicBNtt = nullptr,
+        u32 requestedWorkers = 1);
+
+    bool lencDigest(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& x,
+        u32 tau,
+        u32 gadgetLogBase,
+        RnsPoly& out,
+        u32 widthPadded = 0);
+
+    bool lencEval(
+        const RingNttContext& ctx,
+        const LencLacct& lacct,
+        const std::vector<RnsPoly>& x,
+        u32 mu,
+        u32 tau,
+        u32 gadgetLogBase,
+        std::vector<RnsPoly>& out,
+        bool outputNtt = false,
+        u32 requestedWorkers = 1);
+
+    bool lencEval(
+        const RingNttContext& ctx,
+        const LencLacct& lacct,
+        const DigestTree& tree,
+        u32 mu,
+        u32 tau,
+        u32 gadgetLogBase,
+        std::vector<RnsPoly>& out,
+        bool outputNtt = false,
+        u32 requestedWorkers = 1);
+
+    bool buildDigestTreeTrunc(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& x,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        DigestTree& out,
+        u32 requestedWidthPadded = 0,
+        bool leafInputsAreGadget = false,
+        const std::vector<RnsPoly>* publicBNtt = nullptr,
+        u32 requestedWorkers = 1);
+
+    bool buildDigestTreeTrunc(
+        const RingNttContext& ctx,
+        std::span<const RnsPoly> x,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        DigestTree& out,
+        u32 requestedWidthPadded = 0,
+        bool leafInputsAreGadget = false,
+        const std::vector<RnsPoly>* publicBNtt = nullptr,
+        u32 requestedWorkers = 1);
+
+    bool lencEncTrunc(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& s,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        const SamplingSeedConfig& samplingSeeds,
+        LencEncodeOutput& out,
+        double noiseStandardDeviation = 0.0,
+        double noiseMaxDeviation = 0.0,
+        u32 requestedWidthPadded = 0,
+        bool emitRCoeffDomain = true,
+        bool leafInputsAreGadget = false,
+        const std::vector<RnsPoly>* publicBNtt = nullptr,
+        u32 requestedWorkers = 1);
+
+    bool lencDigestTrunc(
+        const RingNttContext& ctx,
+        const std::vector<RnsPoly>& x,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        RnsPoly& out,
+        u32 widthPadded = 0,
+        bool leafInputsAreGadget = false);
+
+    bool lencEvalTrunc(
+        const RingNttContext& ctx,
+        const LencLacct& lacct,
+        const std::vector<RnsPoly>& x,
+        u32 mu,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        std::vector<RnsPoly>& out,
+        bool outputNtt = false,
+        u32 requestedWorkers = 1,
+        bool leafInputsAreGadget = false);
+
+    bool lencEvalTrunc(
+        const RingNttContext& ctx,
+        const LencLacct& lacct,
+        const DigestTree& tree,
+        u32 mu,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        std::vector<RnsPoly>& out,
+        bool outputNtt = false,
+        u32 requestedWorkers = 1,
+        bool leafInputsAreGadget = false);
 }

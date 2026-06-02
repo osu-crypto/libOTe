@@ -151,10 +151,6 @@ namespace tests_libOTe
 			tc.add("LogVole_" #suite "_" #name, LogVole_##suite##_##name);
 			LIBOTE_LOGVOLE_TESTS(LIBOTE_LOGVOLE_ADD_TEST)
 #undef LIBOTE_LOGVOLE_ADD_TEST
-#define LIBOTE_LOGVOLE2_ADD_TEST(suite, name) \
-			tc.add("LogVole2_" #suite "_" #name, LogVole2_##suite##_##name);
-			LIBOTE_LOGVOLE2_TESTS(LIBOTE_LOGVOLE2_ADD_TEST)
-#undef LIBOTE_LOGVOLE2_ADD_TEST
 #endif
 		});
 }

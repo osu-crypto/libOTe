@@ -1,7 +1,7 @@
-#include "libOTe/Vole/LogVole2/LogVole2Civole.h"
+#include "libOTe/Vole/LogVole/LogVoleCivole.h"
 
-#include "libOTe/Vole/LogVole2/LogVole2Parallel.h"
-#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
+#include "libOTe/Vole/LogVole/LogVoleParallel.h"
+#include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include "seal/util/rns.h"
 #include "seal/util/uintarith.h"
@@ -14,7 +14,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace osuCrypto::LogVole2
+namespace osuCrypto::LogVole
 {
     namespace
     {
@@ -336,11 +336,11 @@ namespace osuCrypto::LogVole2
     {
         if (n == 0)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender requires a nonzero request size");
+            throw std::runtime_error("LogVole CI-VOLE sender requires a nonzero request size");
         }
         if (plaintextModulusBits < 2 || plaintextModulusBits > 61)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE plaintext modulus bit count is invalid");
+            throw std::runtime_error("LogVole CI-VOLE plaintext modulus bit count is invalid");
         }
         if (numThreads == 0)
         {
@@ -351,12 +351,12 @@ namespace osuCrypto::LogVole2
         u64 modulus = 0;
         if (!makeDefaultCivoleParams(params, numThreads))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender could not create default parameters");
+            throw std::runtime_error("LogVole CI-VOLE sender could not create default parameters");
         }
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         if (!resolveCivoleModulus(params, modulus))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender could not resolve plaintext modulus");
+            throw std::runtime_error("LogVole CI-VOLE sender could not resolve plaintext modulus");
         }
 
         mRequestSize = n;
@@ -375,7 +375,7 @@ namespace osuCrypto::LogVole2
     {
         if (!isConfigured())
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender must be configured before offline");
+            throw std::runtime_error("LogVole CI-VOLE sender must be configured before offline");
         }
 
         CivoleSenderOfflineInput input{};
@@ -398,22 +398,22 @@ namespace osuCrypto::LogVole2
     {
         if (!hasOffline())
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender requires offline state before send");
+            throw std::runtime_error("LogVole CI-VOLE sender requires offline state before send");
         }
         if (b.size() != mRequestSize)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender output size does not match configured size");
+            throw std::runtime_error("LogVole CI-VOLE sender output size does not match configured size");
         }
 
         const CivoleSid sid = mNextSid++;
         CivoleReleaseKOutput releaseK{};
         if (!civoleSenderReleaseK(mOfflineState, sid, releaseK))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender could not release keys");
+            throw std::runtime_error("LogVole CI-VOLE sender could not release keys");
         }
         if (releaseK.mKeys.size() != b.size())
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender key output size is invalid");
+            throw std::runtime_error("LogVole CI-VOLE sender key output size is invalid");
         }
 
         std::copy(releaseK.mKeys.begin(), releaseK.mKeys.end(), b.begin());
@@ -431,7 +431,7 @@ namespace osuCrypto::LogVole2
         }
         if (b.size() != mRequestSize)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender output size does not match configured size");
+            throw std::runtime_error("LogVole CI-VOLE sender output size does not match configured size");
         }
         if (!hasOffline())
         {
@@ -439,7 +439,7 @@ namespace osuCrypto::LogVole2
         }
         else if (delta != mDelta)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender offline delta does not match requested delta");
+            throw std::runtime_error("LogVole CI-VOLE sender offline delta does not match requested delta");
         }
 
         co_await send(b, sock);
@@ -463,11 +463,11 @@ namespace osuCrypto::LogVole2
     {
         if (n == 0)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver requires a nonzero request size");
+            throw std::runtime_error("LogVole CI-VOLE receiver requires a nonzero request size");
         }
         if (plaintextModulusBits < 2 || plaintextModulusBits > 61)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE plaintext modulus bit count is invalid");
+            throw std::runtime_error("LogVole CI-VOLE plaintext modulus bit count is invalid");
         }
         if (numThreads == 0)
         {
@@ -478,12 +478,12 @@ namespace osuCrypto::LogVole2
         u64 modulus = 0;
         if (!makeDefaultCivoleParams(params, numThreads))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver could not create default parameters");
+            throw std::runtime_error("LogVole CI-VOLE receiver could not create default parameters");
         }
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
         if (!resolveCivoleModulus(params, modulus))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver could not resolve plaintext modulus");
+            throw std::runtime_error("LogVole CI-VOLE receiver could not resolve plaintext modulus");
         }
 
         mRequestSize = n;
@@ -501,7 +501,7 @@ namespace osuCrypto::LogVole2
     {
         if (!isConfigured())
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver must be configured before offline");
+            throw std::runtime_error("LogVole CI-VOLE receiver must be configured before offline");
         }
 
         CivoleReceiverOfflineInput input{};
@@ -511,7 +511,7 @@ namespace osuCrypto::LogVole2
         co_await civoleReceiverOffline(input, state, sock);
         if (state.mW != mRequestSize)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver offline size does not match configured size");
+            throw std::runtime_error("LogVole CI-VOLE receiver offline size does not match configured size");
         }
 
         mOfflineState = std::move(state);
@@ -525,7 +525,7 @@ namespace osuCrypto::LogVole2
     {
         if (x.size() != a.size())
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver input and output sizes do not match");
+            throw std::runtime_error("LogVole CI-VOLE receiver input and output sizes do not match");
         }
         if (!isConfigured())
         {
@@ -533,7 +533,7 @@ namespace osuCrypto::LogVole2
         }
         if (x.size() != mRequestSize)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver input size does not match configured size");
+            throw std::runtime_error("LogVole CI-VOLE receiver input size does not match configured size");
         }
         if (!hasOffline())
         {
@@ -546,7 +546,7 @@ namespace osuCrypto::LogVole2
         co_await civoleReceiverSetX(mOfflineState, sid, x, setX, sock);
         if (setX.mMacs.size() != a.size())
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver MAC output size is invalid");
+            throw std::runtime_error("LogVole CI-VOLE receiver MAC output size is invalid");
         }
 
         std::copy(setX.mMacs.begin(), setX.mMacs.end(), a.begin());
@@ -913,13 +913,13 @@ namespace osuCrypto::LogVole2
             input.mDelta == 0 ||
             input.mDelta >= ctx.mPlaintextModulus)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender offline input is invalid");
+            throw std::runtime_error("LogVole CI-VOLE sender offline input is invalid");
         }
 
         u32 ringWidth = 0;
         if (!computeInternalRingWidth(input.mParams.mLogVole, ctx, input.mW, ringWidth))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender could not compute ring width");
+            throw std::runtime_error("LogVole CI-VOLE sender could not compute ring width");
         }
 
         Params params = input.mParams.mLogVole;
@@ -934,7 +934,7 @@ namespace osuCrypto::LogVole2
                 input.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
                 wrappedDelta))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE sender could not wrap delta");
+            throw std::runtime_error("LogVole CI-VOLE sender could not wrap delta");
         }
 
         auto metaSock = sock.fork();
@@ -974,13 +974,13 @@ namespace osuCrypto::LogVole2
                 input.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
                 ctx))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver could not build CRT context");
+            throw std::runtime_error("LogVole CI-VOLE receiver could not build CRT context");
         }
 
         u32 ringWidth = 0;
         if (!computeInternalRingWidth(input.mParams.mLogVole, ctx, labelCount, ringWidth))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver could not compute ring width");
+            throw std::runtime_error("LogVole CI-VOLE receiver could not compute ring width");
         }
 
         Params params = input.mParams.mLogVole;
@@ -1061,7 +1061,7 @@ namespace osuCrypto::LogVole2
             !state.mKeyReleased ||
             state.mReleaseIntUsed)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE release requires prior releasek");
+            throw std::runtime_error("LogVole CI-VOLE release requires prior releasek");
         }
         state.mReleaseIntUsed = true;
 
@@ -1088,7 +1088,7 @@ namespace osuCrypto::LogVole2
     {
         if (x.size() != state.mW)
         {
-            throw std::runtime_error("LogVole2 CI-VOLE setx size does not match offline width");
+            throw std::runtime_error("LogVole CI-VOLE setx size does not match offline width");
         }
 
         ZpCrtContext ctx{};
@@ -1099,7 +1099,7 @@ namespace osuCrypto::LogVole2
             !validateZpValues(ctx, x) ||
             !prepareReceiverSidForSetX(state, sid))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver setx input is invalid");
+            throw std::runtime_error("LogVole CI-VOLE receiver setx input is invalid");
         }
 
         std::vector<RnsPoly> wrapped;
@@ -1111,7 +1111,7 @@ namespace osuCrypto::LogVole2
                 state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
                 wrapped))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver could not wrap inputs");
+            throw std::runtime_error("LogVole CI-VOLE receiver could not wrap inputs");
         }
 
         const auto paddedSize = static_cast<std::size_t>(state.mLogVoleState.mParams.mW);
@@ -1143,7 +1143,7 @@ namespace osuCrypto::LogVole2
                 state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
                 macs))
         {
-            throw std::runtime_error("LogVole2 CI-VOLE receiver could not unwrap MACs");
+            throw std::runtime_error("LogVole CI-VOLE receiver could not unwrap MACs");
         }
 
         CivoleReceiverSetXOutput next{};

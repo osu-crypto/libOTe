@@ -1,7 +1,7 @@
-#include "libOTe/Vole/LogVole2/LogVole2Core.h"
+#include "libOTe/Vole/LogVole/LogVoleCore.h"
 
-#include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
-#include "libOTe/Vole/LogVole2/LogVole2Parallel.h"
+#include "libOTe/Vole/LogVole/LogVoleEncoding.h"
+#include "libOTe/Vole/LogVole/LogVoleParallel.h"
 
 #include "seal/util/rns.h"
 #include "seal/util/uintarithsmallmod.h"
@@ -16,7 +16,7 @@
 #include <span>
 #include <utility>
 
-namespace osuCrypto::LogVole2
+namespace osuCrypto::LogVole
 {
     namespace
     {

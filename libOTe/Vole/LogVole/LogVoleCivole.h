@@ -1,9 +1,9 @@
 #pragma once
 
 #include "libOTe/Tools/Coproto.h"
-#include "libOTe/Vole/LogVole2/LogVole2Receiver.h"
-#include "libOTe/Vole/LogVole2/LogVole2Ring.h"
-#include "libOTe/Vole/LogVole2/LogVole2Sender.h"
+#include "libOTe/Vole/LogVole/LogVoleReceiver.h"
+#include "libOTe/Vole/LogVole/LogVoleRing.h"
+#include "libOTe/Vole/LogVole/LogVoleSender.h"
 
 #include "cryptoTools/Common/Timer.h"
 
@@ -12,7 +12,7 @@
 #include <memory>
 #include <vector>
 
-namespace osuCrypto::LogVole2
+namespace osuCrypto::LogVole
 {
     using CivoleSid = u64;
 

@@ -1,5 +1,5 @@
-#include "libOTe/Vole/LogVole2/LogVole2Lhe.h"
-#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
+#include "libOTe/Vole/LogVole/LogVoleLhe.h"
+#include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -8,7 +8,7 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace osuCrypto::LogVole2
+namespace osuCrypto::LogVole
 {
     namespace
     {

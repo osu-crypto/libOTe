@@ -2,7 +2,7 @@
 
 #include <cryptoTools/Common/Defines.h>
 
-#include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
+#include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include "macoro/task.h"
 #include "macoro/sync_wait.h"
@@ -15,7 +15,7 @@
 #include <thread>
 #include <vector>
 
-namespace osuCrypto::LogVole2::detail
+namespace osuCrypto::LogVole::detail
 {
     inline std::size_t hardwareWorkerSlots()
     {

@@ -1,7 +1,8 @@
 #pragma once
 
 #include "libOTe/Tools/Coproto.h"
-#include "libOTe/Vole/LogVole/LogVoleLenc.h"
+#include "libOTe/Vole/LogVole/LogVoleCore.h"
+#include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
 
 namespace osuCrypto::LogVole
 {
@@ -19,9 +20,20 @@ namespace osuCrypto::LogVole
             ShrinkExpandReceiverState& state,
             Socket& sock);
 
+        task<> offline(
+            const ReceiverOfflineInput& input,
+            ReceiverState& state,
+            Socket& sock);
+
         task<> keyDerive(
             const KeyDeriveReceiverInput& input,
             KeyDeriveReceiverOutput& output,
+            Socket& sock);
+
+        task<> online(
+            ReceiverState& state,
+            const ReceiverOnlineInput& input,
+            ReceiverOnlineOutput& output,
             Socket& sock);
 
         task<> expand(

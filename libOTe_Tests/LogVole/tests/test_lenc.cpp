@@ -15,21 +15,20 @@ namespace
         RingParams mRing{};
         std::uint32_t mMu = 3;
         std::uint32_t mTau = 3;
-        std::uint32_t mGadgetLogBase = 126;
+        std::uint32_t mTauHi = 2;
+        std::uint32_t mGadgetLogBase = 20;
+        std::uint32_t mPlaintextModulusBits = 20;
     };
 
     LencParams make_params()
     {
         LencParams p{};
-        p.mRing.mPolyModulusDegree = 16384;
-        p.mRing.mCoeffModulusBits = { 54, 54, 54, 54, 54, 54, 54 };
+        p.mRing.mPolyModulusDegree = 1024;
+        assignValues<int>(p.mRing.mCoeffModulusBits, { 30, 30 });
         return p;
     }
 
-    std::vector<RnsPoly> sample_batch(
-        const RingNttContext& ctx,
-        std::uint32_t count,
-        std::uint64_t seed)
+    std::vector<RnsPoly> sample_batch(const RingNttContext& ctx, std::uint32_t count, std::uint64_t seed)
     {
         std::vector<RnsPoly> out;
         out.reserve(count);
@@ -45,7 +44,7 @@ namespace
         LOGVOLE_REQUIRE_EQ(a.mCoeffs.size(), b.mCoeffs.size());
         for (std::size_t i = 0; i < a.mCoeffs.size(); ++i)
         {
-            LOGVOLE_EXPECT_EQ(a.mCoeffs[i], b.mCoeffs[i]) << "coeff idx " << i;
+            LOGVOLE_EXPECT_EQ(a.mCoeffs[i], b.mCoeffs[i]) << " coeff idx " << i;
         }
     }
 
@@ -64,64 +63,78 @@ namespace
         LOGVOLE_EXPECT_EQ(a.mCols, b.mCols);
         expect_batch_equal(a.mPolys, b.mPolys);
     }
-
-} // namespace
+}
 
 void LogVole_LencOps_EncShapeAndDeterminism(const oc::CLP&)
 {
     const auto params = make_params();
-
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x1111u);
+    SamplingSeedConfig seeds{};
+    seeds.mNoiseRoot = 0xABCDEF01u;
 
     LencEncodeOutput enc1{};
-    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0xABCDEF01u, enc1));
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, seeds, enc1));
 
     LencEncodeOutput enc2{};
-    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0xABCDEF01u, enc2));
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, seeds, enc2));
 
     LOGVOLE_EXPECT_EQ(enc1.mR.size(), params.mMu);
+    LOGVOLE_EXPECT_EQ(enc1.mRNtt.size(), params.mMu);
     LOGVOLE_EXPECT_EQ(enc1.mLacct.mWidthPadded, 4u);
     LOGVOLE_EXPECT_EQ(enc1.mLacct.mLevels, 2u);
     LOGVOLE_EXPECT_EQ(enc1.mLacct.mCt.mRows, enc1.mLacct.mLevels * enc1.mLacct.mWidthPadded);
     LOGVOLE_EXPECT_EQ(enc1.mLacct.mCt.mCols, 2u * params.mTau);
 
     expect_batch_equal(enc1.mR, enc2.mR);
+    expect_batch_equal(enc1.mRNtt, enc2.mRNtt);
     expect_tensor_equal(enc1.mLacct.mCt, enc2.mLacct.mCt);
 }
 
-void LogVole_LencOps_DigestDeterministic(const oc::CLP&)
+void LogVole_LencOps_DigestTreeDeterministic(const oc::CLP&)
 {
     const auto params = make_params();
-
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
     auto x = sample_batch(ctx, params.mMu, 0x2222u);
 
-    RnsPoly digest1{};
-    LOGVOLE_REQUIRE_TRUE(lencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest1));
+    DigestTree tree1{};
+    LOGVOLE_REQUIRE_TRUE(buildDigestTree(ctx, x, params.mTau, params.mGadgetLogBase, tree1));
 
-    RnsPoly digest2{};
-    LOGVOLE_REQUIRE_TRUE(lencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest2));
+    DigestTree tree2{};
+    LOGVOLE_REQUIRE_TRUE(buildDigestTree(ctx, x, params.mTau, params.mGadgetLogBase, tree2));
 
-    expect_poly_equal(digest1, digest2);
+    LOGVOLE_EXPECT_EQ(tree1.mWidthPadded, 4u);
+    LOGVOLE_EXPECT_EQ(tree1.mLevels, 2u);
+    expect_poly_equal(tree1.mDigest, tree2.mDigest);
+    LOGVOLE_REQUIRE_EQ(tree1.mNodeDecompNtt.size(), tree2.mNodeDecompNtt.size());
+    for (std::size_t i = 1; i < tree1.mNodeDecompNtt.size(); ++i)
+    {
+        expect_batch_equal(tree1.mNodeDecompNtt[i], tree2.mNodeDecompNtt[i]);
+    }
+
+    RnsPoly digest{};
+    LOGVOLE_REQUIRE_TRUE(lencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest));
+    expect_poly_equal(digest, tree1.mDigest);
 }
 
 void LogVole_LencOps_EvalMatchesRmulDigestMinusSmulX(const oc::CLP&)
 {
     const auto params = make_params();
-
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x3333u);
     auto x = sample_batch(ctx, params.mMu, 0x4444u);
 
+    SamplingSeedConfig seeds{};
+    seeds.mNoiseRoot = 0x5555u;
+
     LencEncodeOutput enc{};
-    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0x5555u, enc));
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, seeds, enc));
 
     RnsPoly digest{};
     LOGVOLE_REQUIRE_TRUE(lencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest, enc.mLacct.mWidthPadded));
@@ -132,31 +145,60 @@ void LogVole_LencOps_EvalMatchesRmulDigestMinusSmulX(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(eval.size(), params.mMu);
     for (std::size_t i = 0; i < params.mMu; ++i)
     {
-        RnsPoly r_mul_digest{};
-        LOGVOLE_REQUIRE_TRUE(ringMultiply(enc.mR[i], digest, ctx, r_mul_digest));
+        RnsPoly rMulDigest{};
+        LOGVOLE_REQUIRE_TRUE(ringMultiply(enc.mR[i], digest, ctx, rMulDigest));
 
-        RnsPoly s_mul_x{};
-        LOGVOLE_REQUIRE_TRUE(ringMultiply(s[i], x[i], ctx, s_mul_x));
+        RnsPoly sMulX{};
+        LOGVOLE_REQUIRE_TRUE(ringMultiply(s[i], x[i], ctx, sMulX));
 
         RnsPoly expected{};
-        LOGVOLE_REQUIRE_TRUE(ringSub(r_mul_digest, s_mul_x, ctx, expected));
+        LOGVOLE_REQUIRE_TRUE(ringSub(rMulDigest, sMulX, ctx, expected));
 
         expect_poly_equal(eval[i], expected);
     }
 }
 
-void LogVole_LencOps_EvalRejectsMuMismatch(const oc::CLP&)
+void LogVole_LencOps_EvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
 {
     const auto params = make_params();
-
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x6666u);
     auto x = sample_batch(ctx, params.mMu, 0x7777u);
 
+    SamplingSeedConfig seeds{};
+    seeds.mNoiseRoot = 0x8888u;
+
     LencEncodeOutput enc{};
-    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, 0x8888u, enc));
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, seeds, enc));
+
+    std::vector<RnsPoly> evalFromX;
+    LOGVOLE_REQUIRE_TRUE(lencEval(ctx, enc.mLacct, x, params.mMu, params.mTau, params.mGadgetLogBase, evalFromX));
+
+    DigestTree tree{};
+    LOGVOLE_REQUIRE_TRUE(buildDigestTree(ctx, x, params.mTau, params.mGadgetLogBase, tree, enc.mLacct.mWidthPadded));
+
+    std::vector<RnsPoly> evalFromTree;
+    LOGVOLE_REQUIRE_TRUE(lencEval(ctx, enc.mLacct, tree, params.mMu, params.mTau, params.mGadgetLogBase, evalFromTree));
+
+    expect_batch_equal(evalFromX, evalFromTree);
+}
+
+void LogVole_LencOps_EvalRejectsMuMismatch(const oc::CLP&)
+{
+    const auto params = make_params();
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+
+    auto s = sample_batch(ctx, params.mMu, 0x9999u);
+    auto x = sample_batch(ctx, params.mMu, 0xAAAAu);
+
+    SamplingSeedConfig seeds{};
+    seeds.mNoiseRoot = 0xBBBBu;
+
+    LencEncodeOutput enc{};
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, seeds, enc));
 
     std::vector<RnsPoly> eval;
     LOGVOLE_REQUIRE_FALSE(lencEval(
@@ -167,4 +209,242 @@ void LogVole_LencOps_EvalRejectsMuMismatch(const oc::CLP&)
         params.mTau,
         params.mGadgetLogBase,
         eval));
+}
+
+void LogVole_LencOps_TruncEncShapeAndDeterminism(const oc::CLP&)
+{
+    const auto params = make_params();
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+
+    auto s = sample_batch(ctx, params.mMu, 0x110011u);
+    SamplingSeedConfig seeds{};
+    seeds.mNoiseRoot = 0x221122u;
+
+    LencEncodeOutput enc1{};
+    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
+        ctx,
+        s,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        seeds,
+        enc1));
+
+    LencEncodeOutput enc2{};
+    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
+        ctx,
+        s,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        seeds,
+        enc2));
+
+    LOGVOLE_EXPECT_EQ(enc1.mR.size(), params.mMu);
+    LOGVOLE_EXPECT_EQ(enc1.mRNtt.size(), params.mMu);
+    LOGVOLE_EXPECT_EQ(enc1.mLacct.mWidthPadded, 4u);
+    LOGVOLE_EXPECT_EQ(enc1.mLacct.mLevels, 2u);
+    LOGVOLE_EXPECT_EQ(enc1.mLacct.mCt.mRows, enc1.mLacct.mLevels * enc1.mLacct.mWidthPadded);
+    LOGVOLE_EXPECT_EQ(enc1.mLacct.mCt.mCols, 2u * params.mTauHi);
+
+    expect_batch_equal(enc1.mR, enc2.mR);
+    expect_batch_equal(enc1.mRNtt, enc2.mRNtt);
+    expect_tensor_equal(enc1.mLacct.mCt, enc2.mLacct.mCt);
+}
+
+void LogVole_LencOps_TruncDigestTreeDeterministic(const oc::CLP&)
+{
+    const auto params = make_params();
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+
+    auto x = sample_batch(ctx, params.mMu, 0x330033u);
+
+    DigestTree tree1{};
+    LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(
+        ctx,
+        x,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        tree1));
+
+    DigestTree tree2{};
+    LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(
+        ctx,
+        x,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        tree2));
+
+    LOGVOLE_EXPECT_EQ(tree1.mWidthPadded, 4u);
+    LOGVOLE_EXPECT_EQ(tree1.mLevels, 2u);
+    expect_poly_equal(tree1.mDigest, tree2.mDigest);
+    LOGVOLE_REQUIRE_EQ(tree1.mNodeDecompNtt.size(), tree2.mNodeDecompNtt.size());
+    for (std::size_t i = 1; i < tree1.mNodeDecompNtt.size(); ++i)
+    {
+        expect_batch_equal(tree1.mNodeDecompNtt[i], tree2.mNodeDecompNtt[i]);
+    }
+
+    RnsPoly digest{};
+    LOGVOLE_REQUIRE_TRUE(lencDigestTrunc(
+        ctx,
+        x,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        digest));
+    expect_poly_equal(digest, tree1.mDigest);
+}
+
+void LogVole_LencOps_TruncEvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
+{
+    const auto params = make_params();
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+
+    auto s = sample_batch(ctx, params.mMu, 0x440044u);
+    auto x = sample_batch(ctx, params.mMu, 0x550055u);
+
+    SamplingSeedConfig seeds{};
+    seeds.mNoiseRoot = 0x660066u;
+
+    LencEncodeOutput enc{};
+    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
+        ctx,
+        s,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        seeds,
+        enc));
+
+    std::vector<RnsPoly> evalFromX;
+    LOGVOLE_REQUIRE_TRUE(lencEvalTrunc(
+        ctx,
+        enc.mLacct,
+        x,
+        params.mMu,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        evalFromX));
+
+    DigestTree tree{};
+    LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(
+        ctx,
+        x,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        tree,
+        enc.mLacct.mWidthPadded));
+
+    std::vector<RnsPoly> evalFromTree;
+    LOGVOLE_REQUIRE_TRUE(lencEvalTrunc(
+        ctx,
+        enc.mLacct,
+        tree,
+        params.mMu,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        evalFromTree));
+
+    expect_batch_equal(evalFromX, evalFromTree);
+}
+
+void LogVole_LencOps_TruncEvalRejectsMuMismatch(const oc::CLP&)
+{
+    const auto params = make_params();
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+
+    auto s = sample_batch(ctx, params.mMu, 0x770077u);
+    auto x = sample_batch(ctx, params.mMu, 0x880088u);
+
+    SamplingSeedConfig seeds{};
+    seeds.mNoiseRoot = 0x990099u;
+
+    LencEncodeOutput enc{};
+    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
+        ctx,
+        s,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        seeds,
+        enc));
+
+    std::vector<RnsPoly> eval;
+    LOGVOLE_REQUIRE_FALSE(lencEvalTrunc(
+        ctx,
+        enc.mLacct,
+        x,
+        params.mMu + 1u,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        eval));
+}
+
+void LogVole_LencOps_TruncLeafInputsAreGadgetPath(const oc::CLP&)
+{
+    auto params = make_params();
+    params.mMu = 4;
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
+
+    auto s = sample_batch(ctx, params.mMu, 0xAA00AAu);
+    auto x = sample_batch(ctx, params.mMu, 0xBB00BBu);
+
+    SamplingSeedConfig seeds{};
+    seeds.mNoiseRoot = 0xCC00CCu;
+
+    LencEncodeOutput enc{};
+    LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
+        ctx,
+        s,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        seeds,
+        enc,
+        0.0,
+        0.0,
+        0,
+        true,
+        true));
+
+    DigestTree tree{};
+    LOGVOLE_REQUIRE_TRUE(buildDigestTreeTrunc(
+        ctx,
+        x,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        tree,
+        enc.mLacct.mWidthPadded,
+        true));
+
+    const std::uint32_t firstLeaf = tree.mWidthPadded - 1u;
+    LOGVOLE_REQUIRE_EQ(tree.mNodeDecompNtt[firstLeaf].size(), 1u);
+
+    std::vector<RnsPoly> eval;
+    LOGVOLE_REQUIRE_TRUE(lencEvalTrunc(
+        ctx,
+        enc.mLacct,
+        tree,
+        params.mMu,
+        params.mTauHi,
+        params.mGadgetLogBase,
+        params.mPlaintextModulusBits,
+        eval,
+        false,
+        1,
+        true));
+    LOGVOLE_EXPECT_EQ(eval.size(), params.mMu);
+    LOGVOLE_EXPECT_EQ(enc.mLacct.mCt.mCols, 2u * params.mTauHi);
 }

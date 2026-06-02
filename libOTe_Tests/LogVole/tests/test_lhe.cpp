@@ -1,4 +1,4 @@
-#include "libOTe/Vole/LogVole2/LogVole2Lhe.h"
+#include "libOTe/Vole/LogVole/LogVoleLhe.h"
 
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-using namespace osuCrypto::LogVole2;
+using namespace osuCrypto::LogVole;
 
 namespace
 {
@@ -108,7 +108,7 @@ namespace
     }
 }
 
-void LogVole2_LheOps_PublicADeterministic(const oc::CLP&)
+void LogVole_LheOps_PublicADeterministic(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -124,7 +124,7 @@ void LogVole2_LheOps_PublicADeterministic(const oc::CLP&)
     expect_batch_equal(a1, a2);
 }
 
-void LogVole2_LheOps_Enc1ShapeDeterminismAndColumnDecrypt(const oc::CLP&)
+void LogVole_LheOps_Enc1ShapeDeterminismAndColumnDecrypt(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -170,7 +170,7 @@ void LogVole2_LheOps_Enc1ShapeDeterminismAndColumnDecrypt(const oc::CLP&)
     }
 }
 
-void LogVole2_LheOps_ApplyCt1AndDeriveSkxRelation(const oc::CLP&)
+void LogVole_LheOps_ApplyCt1AndDeriveSkxRelation(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -207,7 +207,7 @@ void LogVole2_LheOps_ApplyCt1AndDeriveSkxRelation(const oc::CLP&)
     }
 }
 
-void LogVole2_LheOps_TruncApplyCt1AndDeriveSkxRelation(const oc::CLP&)
+void LogVole_LheOps_TruncApplyCt1AndDeriveSkxRelation(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -247,7 +247,7 @@ void LogVole2_LheOps_TruncApplyCt1AndDeriveSkxRelation(const oc::CLP&)
     }
 }
 
-void LogVole2_LheOps_HashedCt2Deterministic(const oc::CLP&)
+void LogVole_LheOps_HashedCt2Deterministic(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};

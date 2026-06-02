@@ -1,12 +1,12 @@
 #pragma once
 
-#include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
-#include "libOTe/Vole/LogVole2/LogVole2ShrinkExpand.h"
+#include "libOTe/Vole/LogVole/LogVoleEncoding.h"
+#include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
 
 #include <memory>
 #include <vector>
 
-namespace osuCrypto::LogVole2
+namespace osuCrypto::LogVole
 {
     enum class SeedLabelMode : u8
     {

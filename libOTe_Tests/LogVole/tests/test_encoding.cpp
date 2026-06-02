@@ -1,6 +1,9 @@
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
+
 #include "libOTe_Tests/LogVole_TestUtil.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <span>
 #include <vector>
 
@@ -8,146 +11,183 @@ using namespace osuCrypto::LogVole;
 
 namespace
 {
-    template<typename Message>
-    bool decodeMessage(const Buffer& payload, Message& message)
-    {
-        return decode(std::span<const osuCrypto::u8>(payload.data(), payload.size()), message);
-    }
-
-    KeyDeriveRequest makeKeyDeriveRequest()
+    KeyDeriveRequest make_keyderive_request()
     {
         KeyDeriveRequest message{};
-        message.mPolyModulusDegree = 16384;
-        message.mCoeffModulusCount = 7;
-        message.mTau = 3;
-        message.mDCoeffs = { 0, 1, 0x0102030405060708ull, 0xFFFFFFFFFFFFFFFFull };
-        return message;
-    }
-
-    KeyDeriveResponse makeKeyDeriveResponse()
-    {
-        KeyDeriveResponse message{};
-        message.mPolyModulusDegree = 8192;
-        message.mCoeffModulusCount = 4;
-        message.mTau = 2;
-        message.mMNttCoeffs = { 17, 23, 42, 99, 0x8877665544332211ull };
-        return message;
-    }
-
-    ShrinkExpandOfflineMessage makeShrinkExpandOfflineMessage()
-    {
-        ShrinkExpandOfflineMessage message{};
-        message.mPolyModulusDegree = 16384;
-        message.mCoeffModulusBits = { 54, 54, 50 };
-        message.mPlaintextModulusBits = 20;
-        message.mAlpha = 2;
-        message.mMu = 3;
-        message.mTau = 4;
-        message.mGadgetLogBase = 126;
-        message.mMode = 1;
-        message.mMetadataFingerprint = 0x1020304050607080ull;
-        message.mCt1Rows = 2;
-        message.mCt1Cols = 3;
-        message.mCt1Coeffs = { 3, 1, 4, 1, 5, 9 };
-        message.mLacctWidthPadded = 4;
-        message.mLacctLevels = 2;
-        message.mLacctCtRows = 8;
-        message.mLacctCtCols = 6;
-        message.mLacctCtCoeffs = { 2, 7, 1, 8, 2, 8, 1, 8 };
-        return message;
-    }
-
-    PolyMessage makePolyMessage()
-    {
-        PolyMessage message{};
         message.mPolyModulusDegree = 1024;
         message.mCoeffModulusCount = 2;
-        message.mCoeffs = { 0, 1, 0x0102030405060708ull, 0x8877665544332211ull };
+        message.mTau = 3;
+        assignValues<std::uint64_t>(message.mDCoeffs, { 1, 2, 3, 4, 5 });
         return message;
+    }
+
+    KeyDeriveResponse make_keyderive_response()
+    {
+        KeyDeriveResponse message{};
+        message.mPolyModulusDegree = 2048;
+        message.mCoeffModulusCount = 3;
+        message.mTau = 4;
+        assignValues<std::uint64_t>(message.mMNttCoeffs, { 9, 8, 7, 6 });
+        return message;
+    }
+
+    RingParams make_ring()
+    {
+        RingParams ring{};
+        ring.mPolyModulusDegree = 8;
+        assignValues<int>(ring.mCoeffModulusBits, { 30, 31 });
+        return ring;
+    }
+
+    RnsPoly make_poly(const RingParams& ring, std::uint64_t seed)
+    {
+        RnsPoly poly{};
+        poly.mCoeffs.resize(ringPolyCoeffCount(ring));
+        for (std::size_t idx = 0; idx < poly.mCoeffs.size(); ++idx)
+        {
+            poly.mCoeffs[idx] = seed + static_cast<std::uint64_t>(idx * 17);
+        }
+        return poly;
+    }
+
+    RingTensor make_tensor(const RingParams& ring, std::uint32_t rows, std::uint32_t cols, std::uint64_t seed)
+    {
+        RingTensor tensor{};
+        tensor.mRows = rows;
+        tensor.mCols = cols;
+        tensor.mPolys.reserve(static_cast<std::size_t>(rows) * cols);
+        for (std::uint32_t idx = 0; idx < rows * cols; ++idx)
+        {
+            tensor.mPolys.push_back(make_poly(ring, seed + idx * 101));
+        }
+        return tensor;
+    }
+
+    void expect_poly_equal(const RnsPoly& lhs, const RnsPoly& rhs)
+    {
+        LOGVOLE_REQUIRE_EQ(lhs.mCoeffs.size(), rhs.mCoeffs.size());
+        for (std::size_t idx = 0; idx < lhs.mCoeffs.size(); ++idx)
+        {
+            LOGVOLE_EXPECT_EQ(lhs.mCoeffs[idx], rhs.mCoeffs[idx]);
+        }
+    }
+
+    void expect_tensor_equal(const RingTensor& lhs, const RingTensor& rhs)
+    {
+        LOGVOLE_EXPECT_EQ(lhs.mRows, rhs.mRows);
+        LOGVOLE_EXPECT_EQ(lhs.mCols, rhs.mCols);
+        LOGVOLE_REQUIRE_EQ(lhs.mPolys.size(), rhs.mPolys.size());
+        for (std::size_t idx = 0; idx < lhs.mPolys.size(); ++idx)
+        {
+            expect_poly_equal(lhs.mPolys[idx], rhs.mPolys[idx]);
+        }
     }
 }
 
 void LogVole_Encoding_KeyDeriveRequestRoundTrip(const oc::CLP&)
 {
-    const auto message = makeKeyDeriveRequest();
+    const auto message = make_keyderive_request();
     const auto encoded = encode(message);
 
     KeyDeriveRequest decoded{};
-    LOGVOLE_REQUIRE_TRUE(decodeMessage(encoded, decoded));
+    LOGVOLE_REQUIRE_TRUE(decode(encoded, decoded));
     LOGVOLE_EXPECT_EQ(decoded.mPolyModulusDegree, message.mPolyModulusDegree);
     LOGVOLE_EXPECT_EQ(decoded.mCoeffModulusCount, message.mCoeffModulusCount);
     LOGVOLE_EXPECT_EQ(decoded.mTau, message.mTau);
-    LOGVOLE_EXPECT_EQ(decoded.mDCoeffs, message.mDCoeffs);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decoded.mDCoeffs, message.mDCoeffs));
 }
 
 void LogVole_Encoding_KeyDeriveResponseRoundTrip(const oc::CLP&)
 {
-    const auto message = makeKeyDeriveResponse();
+    const auto message = make_keyderive_response();
     const auto encoded = encode(message);
 
     KeyDeriveResponse decoded{};
-    LOGVOLE_REQUIRE_TRUE(decodeMessage(encoded, decoded));
+    LOGVOLE_REQUIRE_TRUE(decode(encoded, decoded));
     LOGVOLE_EXPECT_EQ(decoded.mPolyModulusDegree, message.mPolyModulusDegree);
     LOGVOLE_EXPECT_EQ(decoded.mCoeffModulusCount, message.mCoeffModulusCount);
     LOGVOLE_EXPECT_EQ(decoded.mTau, message.mTau);
-    LOGVOLE_EXPECT_EQ(decoded.mMNttCoeffs, message.mMNttCoeffs);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decoded.mMNttCoeffs, message.mMNttCoeffs));
 }
 
-void LogVole_Encoding_ShrinkExpandOfflineRoundTrip(const oc::CLP&)
+void LogVole_Encoding_SeedMessageRoundTrip(const oc::CLP&)
 {
-    const auto message = makeShrinkExpandOfflineMessage();
-    const auto encoded = encode(message);
+    SeedMessage message{};
+    assignValues<std::uint8_t>(message.mSeed, { 1, 3, 5, 7, 9, 11 });
 
-    ShrinkExpandOfflineMessage decoded{};
-    LOGVOLE_REQUIRE_TRUE(decodeMessage(encoded, decoded));
-    LOGVOLE_EXPECT_EQ(decoded.mPolyModulusDegree, message.mPolyModulusDegree);
-    LOGVOLE_EXPECT_EQ(decoded.mCoeffModulusBits, message.mCoeffModulusBits);
-    LOGVOLE_EXPECT_EQ(decoded.mPlaintextModulusBits, message.mPlaintextModulusBits);
-    LOGVOLE_EXPECT_EQ(decoded.mAlpha, message.mAlpha);
-    LOGVOLE_EXPECT_EQ(decoded.mMu, message.mMu);
-    LOGVOLE_EXPECT_EQ(decoded.mTau, message.mTau);
+    const auto encoded = encode(message);
+    SeedMessage decoded{};
+    LOGVOLE_REQUIRE_TRUE(decode(encoded, decoded));
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decoded.mSeed, message.mSeed));
+
+    SeedMessage empty{};
+    LOGVOLE_EXPECT_FALSE(decode(std::span<const std::uint8_t>{}, empty));
+}
+
+void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
+{
+    const RingParams ring = make_ring();
+
+    RootOfflineMessage message{};
+    message.mRing = ring;
+    message.mTauHi = 2;
+    message.mGadgetLogBase = 7;
+    message.mPlaintextModulusBits = 18;
+    message.mLeftWidth = 4;
+    message.mRandomizerWidth = 3;
+    message.mCtR = make_tensor(ring, 4, 2, 1000);
+    message.mLacctLeft.mWidthPadded = 8;
+    message.mLacctLeft.mLevels = 3;
+    message.mLacctLeft.mCt = make_tensor(ring, 3, 4, 2000);
+    message.mTopCt = make_tensor(ring, 4, 5, 3000);
+    message.mPublicBStarNtt = {
+        make_poly(ring, 4000),
+        make_poly(ring, 5000),
+        make_poly(ring, 6000),
+    };
+
+    const auto encoded = encode(message);
+    RootOfflineMessage decoded{};
+    LOGVOLE_REQUIRE_TRUE(decode(encoded, decoded));
+
+    LOGVOLE_EXPECT_TRUE(decoded.mRing == message.mRing);
+    LOGVOLE_EXPECT_EQ(decoded.mTauHi, message.mTauHi);
     LOGVOLE_EXPECT_EQ(decoded.mGadgetLogBase, message.mGadgetLogBase);
-    LOGVOLE_EXPECT_EQ(decoded.mMode, message.mMode);
-    LOGVOLE_EXPECT_EQ(decoded.mMetadataFingerprint, message.mMetadataFingerprint);
-    LOGVOLE_EXPECT_EQ(decoded.mCt1Rows, message.mCt1Rows);
-    LOGVOLE_EXPECT_EQ(decoded.mCt1Cols, message.mCt1Cols);
-    LOGVOLE_EXPECT_EQ(decoded.mCt1Coeffs, message.mCt1Coeffs);
-    LOGVOLE_EXPECT_EQ(decoded.mLacctWidthPadded, message.mLacctWidthPadded);
-    LOGVOLE_EXPECT_EQ(decoded.mLacctLevels, message.mLacctLevels);
-    LOGVOLE_EXPECT_EQ(decoded.mLacctCtRows, message.mLacctCtRows);
-    LOGVOLE_EXPECT_EQ(decoded.mLacctCtCols, message.mLacctCtCols);
-    LOGVOLE_EXPECT_EQ(decoded.mLacctCtCoeffs, message.mLacctCtCoeffs);
+    LOGVOLE_EXPECT_EQ(decoded.mPlaintextModulusBits, message.mPlaintextModulusBits);
+    LOGVOLE_EXPECT_EQ(decoded.mLeftWidth, message.mLeftWidth);
+    LOGVOLE_EXPECT_EQ(decoded.mRandomizerWidth, message.mRandomizerWidth);
+    expect_tensor_equal(decoded.mCtR, message.mCtR);
+    LOGVOLE_EXPECT_EQ(decoded.mLacctLeft.mWidthPadded, message.mLacctLeft.mWidthPadded);
+    LOGVOLE_EXPECT_EQ(decoded.mLacctLeft.mLevels, message.mLacctLeft.mLevels);
+    expect_tensor_equal(decoded.mLacctLeft.mCt, message.mLacctLeft.mCt);
+    expect_tensor_equal(decoded.mTopCt, message.mTopCt);
+    LOGVOLE_REQUIRE_EQ(decoded.mPublicBStarNtt.size(), message.mPublicBStarNtt.size());
+    for (std::size_t idx = 0; idx < decoded.mPublicBStarNtt.size(); ++idx)
+    {
+        expect_poly_equal(decoded.mPublicBStarNtt[idx], message.mPublicBStarNtt[idx]);
+    }
 }
 
-void LogVole_Encoding_PolyMessageRoundTrip(const oc::CLP&)
+void LogVole_Encoding_RootDigestAndResponseRoundTrip(const oc::CLP&)
 {
-    const auto message = makePolyMessage();
-    const auto encoded = encode(message);
+    RootDigestMessage digest{};
+    assignValues<std::uint64_t>(digest.mDPrimeCoeffs, { 1, 4, 9, 16, 25 });
 
-    PolyMessage decoded{};
-    LOGVOLE_REQUIRE_TRUE(decodeMessage(encoded, decoded));
-    LOGVOLE_EXPECT_EQ(decoded.mPolyModulusDegree, message.mPolyModulusDegree);
-    LOGVOLE_EXPECT_EQ(decoded.mCoeffModulusCount, message.mCoeffModulusCount);
-    LOGVOLE_EXPECT_EQ(decoded.mCoeffs, message.mCoeffs);
-}
+    const auto encodedDigest = encode(digest);
+    RootDigestMessage decodedDigest{};
+    LOGVOLE_REQUIRE_TRUE(decode(encodedDigest, decodedDigest));
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decodedDigest.mDPrimeCoeffs, digest.mDPrimeCoeffs));
 
-void LogVole_Encoding_MalformedPayloadRejected(const oc::CLP&)
-{
-    auto encoded = encode(makeKeyDeriveRequest());
-    LOGVOLE_REQUIRE_FALSE(encoded.empty());
+    RootResponseMessage response{};
+    assignValues<std::uint8_t>(response.mSeed, { 2, 4, 6, 8 });
+    assignValues<std::uint64_t>(response.mSkPrimeCoeffs, { 10, 20, 30, 40 });
 
-    auto truncated = encoded;
-    truncated.pop_back();
-    KeyDeriveRequest decoded_request{};
-    LOGVOLE_EXPECT_FALSE(decodeMessage(truncated, decoded_request));
+    const auto encodedResponse = encode(response);
+    RootResponseMessage decodedResponse{};
+    LOGVOLE_REQUIRE_TRUE(decode(encodedResponse, decodedResponse));
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decodedResponse.mSeed, response.mSeed));
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decodedResponse.mSkPrimeCoeffs, response.mSkPrimeCoeffs));
 
-    auto with_trailing = encoded;
-    with_trailing.push_back(0x42);
-    LOGVOLE_EXPECT_FALSE(decodeMessage(with_trailing, decoded_request));
-
-    auto offline = encode(makeShrinkExpandOfflineMessage());
-    LOGVOLE_REQUIRE_FALSE(offline.empty());
-    offline.resize(offline.size() - 1);
-    ShrinkExpandOfflineMessage decoded_offline{};
-    LOGVOLE_EXPECT_FALSE(decodeMessage(offline, decoded_offline));
+    RootDigestMessage emptyDigest{};
+    LOGVOLE_EXPECT_FALSE(decode(encode(emptyDigest), emptyDigest));
 }

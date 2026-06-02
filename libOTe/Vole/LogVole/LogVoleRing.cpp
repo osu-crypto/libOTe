@@ -4,18 +4,30 @@
 #include "seal/util/iterator.h"
 #include "seal/util/ntt.h"
 #include "seal/util/polyarithsmallmod.h"
+#include "seal/util/rlwe.h"
 #include "seal/util/uintarithsmallmod.h"
+#include "seal/util/uintcore.h"
 
 #include <algorithm>
+#include <boost/multiprecision/cpp_int.hpp>
 #include <cstddef>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <random>
+#include <string>
+#include <tuple>
 
 namespace osuCrypto::LogVole
 {
     namespace
     {
+        using boost::multiprecision::cpp_int;
+
+        constexpr u64 kNoiseFamilyDomain = 0x4E4F495345F10001ull;
+        constexpr u64 kCt2FamilyDomain = 0x435432F100010001ull;
+        constexpr u64 kSeedBytesDomain = 0x5345454442595445ull;
+
         bool isPowerOfTwo(u32 value)
         {
             return value > 0 && (value & (value - 1u)) == 0u;
@@ -23,39 +35,47 @@ namespace osuCrypto::LogVole
 
         bool validateShapeAgainstContext(const RnsPoly& poly, const RingNttContext& ctx)
         {
-            return poly.mCoeffs.size() == polyCoeffCount(ctx.mParams);
+            return poly.mCoeffs.size() == ringPolyCoeffCount(ctx.mParams);
         }
 
-        u64 combineSeed(u64 value)
+        cpp_int limbsToCppInt(const u64* limbs, std::size_t limbCount)
         {
-            value += 0x9E3779B97F4A7C15ull;
-            value = (value ^ (value >> 30u)) * 0xBF58476D1CE4E5B9ull;
-            value = (value ^ (value >> 27u)) * 0x94D049BB133111EBull;
-            return value ^ (value >> 31u);
+            cpp_int value = 0;
+            for (std::size_t limbIdx = limbCount; limbIdx > 0; --limbIdx)
+            {
+                value <<= 64;
+                value += limbs[limbIdx - 1];
+            }
+            return value;
+        }
+
+        u64 cppIntModU64(const cpp_int& value, u64 modulus)
+        {
+            cpp_int reduced = value % modulus;
+            if (reduced < 0)
+            {
+                reduced += modulus;
+            }
+            return static_cast<u64>(reduced);
         }
 
         u64 basePowMod(u64 base, u32 exp, u64 mod)
         {
-            seal::Modulus modulus(mod);
-            u64 result = 1u;
+            u64 result = 1;
             u64 power = base % mod;
             u32 e = exp;
-            while (e > 0u)
+            while (e > 0)
             {
-                if ((e & 1u) != 0u)
+                if ((e & 1u) != 0)
                 {
-                    result = seal::util::multiply_uint_mod(result, power, modulus);
+                    const auto mul = static_cast<unsigned __int128>(result) * power;
+                    result = static_cast<u64>(mul % mod);
                 }
-                power = seal::util::multiply_uint_mod(power, power, modulus);
-                e >>= 1u;
+                const auto sq = static_cast<unsigned __int128>(power) * power;
+                power = static_cast<u64>(sq % mod);
+                e >>= 1;
             }
             return result;
-        }
-
-        u64 addMod(u64 lhs, u64 rhs, u64 mod)
-        {
-            const u64 sum = lhs + rhs;
-            return (sum >= mod) ? (sum - mod) : sum;
         }
 
         void samplePolyNormal(
@@ -83,11 +103,333 @@ namespace osuCrypto::LogVole
                     });
             });
         }
+
+        std::shared_ptr<seal::UniformRandomGeneratorFactory> polySamplingPrngFactory()
+        {
+#ifdef SEAL_USE_AES_CTR_DRBG
+            static const auto factory = std::make_shared<seal::AesCtrDrbgPRNGFactory>();
+#else
+            static const auto factory = seal::UniformRandomGeneratorFactory::DefaultFactory();
+#endif
+            return factory;
+        }
+
+        struct PendingRingOpsStats
+        {
+            u64 mEpoch = 0;
+            bool mEpochInitialized = false;
+            u64 mNttCount = 0;
+            u64 mInttCount = 0;
+            u64 mAddCount = 0;
+            u64 mSubCount = 0;
+            u64 mMulCount = 0;
+            u64 mMulScalarCount = 0;
+            u64 mDyadicMulAddCount = 0;
+            u64 mGadgetDecomposeCount = 0;
+            u64 mGadgetRecomposeCount = 0;
+            u64 mPrngPolyCount = 0;
+            u64 mErrorAddCount = 0;
+
+            void clear()
+            {
+                mNttCount = 0;
+                mInttCount = 0;
+                mAddCount = 0;
+                mSubCount = 0;
+                mMulCount = 0;
+                mMulScalarCount = 0;
+                mDyadicMulAddCount = 0;
+                mGadgetDecomposeCount = 0;
+                mGadgetRecomposeCount = 0;
+                mPrngPolyCount = 0;
+                mErrorAddCount = 0;
+            }
+
+            void syncEpoch()
+            {
+                const u64 globalEpoch = RingOpsStats::resetEpoch.load(std::memory_order_relaxed);
+                if (!mEpochInitialized)
+                {
+                    mEpoch = globalEpoch;
+                    mEpochInitialized = true;
+                    return;
+                }
+
+                if (mEpoch != globalEpoch)
+                {
+                    clear();
+                    mEpoch = globalEpoch;
+                }
+            }
+
+            void flush()
+            {
+                if (mNttCount)
+                {
+                    globalRingOpsStats.mNttCount.fetch_add(mNttCount, std::memory_order_relaxed);
+                    mNttCount = 0;
+                }
+                if (mInttCount)
+                {
+                    globalRingOpsStats.mInttCount.fetch_add(mInttCount, std::memory_order_relaxed);
+                    mInttCount = 0;
+                }
+                if (mAddCount)
+                {
+                    globalRingOpsStats.mAddCount.fetch_add(mAddCount, std::memory_order_relaxed);
+                    mAddCount = 0;
+                }
+                if (mSubCount)
+                {
+                    globalRingOpsStats.mSubCount.fetch_add(mSubCount, std::memory_order_relaxed);
+                    mSubCount = 0;
+                }
+                if (mMulCount)
+                {
+                    globalRingOpsStats.mMulCount.fetch_add(mMulCount, std::memory_order_relaxed);
+                    mMulCount = 0;
+                }
+                if (mMulScalarCount)
+                {
+                    globalRingOpsStats.mMulScalarCount.fetch_add(mMulScalarCount, std::memory_order_relaxed);
+                    mMulScalarCount = 0;
+                }
+                if (mDyadicMulAddCount)
+                {
+                    globalRingOpsStats.mDyadicMulAddCount.fetch_add(mDyadicMulAddCount, std::memory_order_relaxed);
+                    mDyadicMulAddCount = 0;
+                }
+                if (mGadgetDecomposeCount)
+                {
+                    globalRingOpsStats.mGadgetDecomposeCount.fetch_add(mGadgetDecomposeCount, std::memory_order_relaxed);
+                    mGadgetDecomposeCount = 0;
+                }
+                if (mGadgetRecomposeCount)
+                {
+                    globalRingOpsStats.mGadgetRecomposeCount.fetch_add(mGadgetRecomposeCount, std::memory_order_relaxed);
+                    mGadgetRecomposeCount = 0;
+                }
+                if (mPrngPolyCount)
+                {
+                    globalRingOpsStats.mPrngPolyCount.fetch_add(mPrngPolyCount, std::memory_order_relaxed);
+                    mPrngPolyCount = 0;
+                }
+                if (mErrorAddCount)
+                {
+                    globalRingOpsStats.mErrorAddCount.fetch_add(mErrorAddCount, std::memory_order_relaxed);
+                    mErrorAddCount = 0;
+                }
+            }
+
+            ~PendingRingOpsStats()
+            {
+                flush();
+            }
+        };
+
+        thread_local PendingRingOpsStats tlsRingOpsStats{};
+
+        void bumpRingStat(std::atomic<u64>& global, u64& local)
+        {
+            constexpr u64 flushThreshold = 256;
+            tlsRingOpsStats.syncEpoch();
+            ++local;
+            if (local >= flushThreshold)
+            {
+                global.fetch_add(local, std::memory_order_relaxed);
+                local = 0;
+            }
+        }
+
+        bool centeredDecomposeSlow(
+            const RnsPoly& canonical,
+            u32 digitBits,
+            u32 startLevel,
+            u32 levels,
+            const RingNttContext& ctx,
+            std::vector<RnsPoly>& out)
+        {
+            out.assign(levels, {});
+            for (auto& digit : out)
+            {
+                resizeZero(digit.mCoeffs, canonical.mCoeffs.size());
+            }
+
+            const std::size_t n = ctx.mParams.mPolyModulusDegree;
+            const std::size_t coeffModCount = ctx.mModuli.size();
+            auto contextData = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
+            if (!contextData)
+            {
+                return false;
+            }
+
+            seal::util::Pointer<u64> composedPoly =
+                seal::util::allocate_poly(n, coeffModCount, seal::MemoryManager::GetPool());
+            std::copy(canonical.mCoeffs.begin(), canonical.mCoeffs.end(), composedPoly.get());
+            contextData->rns_tool()->base_q()->compose_array(composedPoly.get(), n, seal::MemoryManager::GetPool());
+
+            cpp_int q = 1;
+            for (const auto& modulus : ctx.mModuli)
+            {
+                q *= modulus.value();
+            }
+            const cpp_int qHalf = q >> 1;
+            const cpp_int base = cpp_int(1) << digitBits;
+            const cpp_int halfBase = cpp_int(1) << (digitBits - 1);
+            const cpp_int digitMask = base - 1;
+
+            for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
+            {
+                cpp_int value = limbsToCppInt(composedPoly.get() + (coeffIdx * coeffModCount), coeffModCount);
+                if (value > qHalf)
+                {
+                    value -= q;
+                }
+
+                for (u32 level = 0; level < (startLevel + levels); ++level)
+                {
+                    cpp_int digit = value & digitMask;
+                    value >>= digitBits;
+                    if (digit >= halfBase)
+                    {
+                        digit -= base;
+                        value += 1;
+                    }
+
+                    if (level < startLevel)
+                    {
+                        continue;
+                    }
+
+                    const std::size_t outLevel = level - startLevel;
+                    for (std::size_t modIdx = 0; modIdx < coeffModCount; ++modIdx)
+                    {
+                        out[outLevel].mCoeffs[modIdx * n + coeffIdx] =
+                            cppIntModU64(digit, ctx.mModuli[modIdx].value());
+                    }
+                }
+            }
+
+            return true;
+        }
+    }
+
+    void RingOpsStats::reset()
+    {
+        mNttCount.store(0, std::memory_order_relaxed);
+        mInttCount.store(0, std::memory_order_relaxed);
+        mAddCount.store(0, std::memory_order_relaxed);
+        mSubCount.store(0, std::memory_order_relaxed);
+        mMulCount.store(0, std::memory_order_relaxed);
+        mMulScalarCount.store(0, std::memory_order_relaxed);
+        mDyadicMulAddCount.store(0, std::memory_order_relaxed);
+        mGadgetDecomposeCount.store(0, std::memory_order_relaxed);
+        mGadgetRecomposeCount.store(0, std::memory_order_relaxed);
+        mPrngPolyCount.store(0, std::memory_order_relaxed);
+        mErrorAddCount.store(0, std::memory_order_relaxed);
+        resetEpoch.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void flushRingOpsThreadLocalStats()
+    {
+        tlsRingOpsStats.syncEpoch();
+        tlsRingOpsStats.flush();
+    }
+
+    void TimingStats::reset()
+    {
+        mSenderWaitTimeUs.store(0, std::memory_order_relaxed);
+        mReceiverWaitTimeUs.store(0, std::memory_order_relaxed);
+        mSenderAsyncWaitTimeUs.store(0, std::memory_order_relaxed);
+        mReceiverAsyncWaitTimeUs.store(0, std::memory_order_relaxed);
+        mSenderComputeTimeUs.store(0, std::memory_order_relaxed);
+        mReceiverComputeTimeUs.store(0, std::memory_order_relaxed);
+        mLencEncTimeUs.store(0, std::memory_order_relaxed);
+        mLencDecTimeUs.store(0, std::memory_order_relaxed);
+        mLheEncTimeUs.store(0, std::memory_order_relaxed);
+        mLheDecTimeUs.store(0, std::memory_order_relaxed);
+        mShrinkTimeUs.store(0, std::memory_order_relaxed);
+        mExpandTimeUs.store(0, std::memory_order_relaxed);
+        mPolySamplingTimeUs.store(0, std::memory_order_relaxed);
+        mGoldSamplingTimeUs.store(0, std::memory_order_relaxed);
+        mSeedSamplingTimeUs.store(0, std::memory_order_relaxed);
+        mSeedAttemptTimeUs.store(0, std::memory_order_relaxed);
+        mSeedAttemptCount.store(0, std::memory_order_relaxed);
+        mGdecompUnbundleTimeUs.store(0, std::memory_order_relaxed);
+        mDenoiseTbmTimeUs.store(0, std::memory_order_relaxed);
+        mAggTimeUs.store(0, std::memory_order_relaxed);
+    }
+
+    AutoTimer::AutoTimer(std::atomic<u64>& stat)
+        : mStat(stat),
+          mStart(std::chrono::steady_clock::now())
+    {}
+
+    AutoTimer::~AutoTimer()
+    {
+        const auto end = std::chrono::steady_clock::now();
+        mStat.fetch_add(
+            static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(end - mStart).count()),
+            std::memory_order_relaxed);
+    }
+
+    u64 combineSeedPublic(u64 value)
+    {
+        value += 0x9E3779B97F4A7C15ull;
+        value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ull;
+        value = (value ^ (value >> 27)) * 0x94D049BB133111EBull;
+        return value ^ (value >> 31);
+    }
+
+    u64 deriveDeterministicSeedMaterial(u64 root, u64 domainTag, u64 value0, u64 value1, u64 value2, u64 value3)
+    {
+        u64 mixed = combineSeedPublic(root);
+        mixed = combineSeedPublic(mixed ^ combineSeedPublic(domainTag));
+        mixed = combineSeedPublic(mixed ^ combineSeedPublic(value0));
+        mixed = combineSeedPublic(mixed ^ combineSeedPublic(value1));
+        mixed = combineSeedPublic(mixed ^ combineSeedPublic(value2));
+        mixed = combineSeedPublic(mixed ^ combineSeedPublic(value3));
+        return mixed;
+    }
+
+    u64 deriveNoiseSeed(const SamplingSeedConfig& config, u64 domainTag, u64 streamId, u64 salt0, u64 salt1)
+    {
+        return deriveDeterministicSeedMaterial(
+            config.mNoiseRoot, domainTag ^ kNoiseFamilyDomain, streamId, salt0, salt1, 0);
+    }
+
+    u64 deriveCt2Nonce(const SamplingSeedConfig& config, u64 nonce, u64 coeffCount)
+    {
+        return deriveDeterministicSeedMaterial(
+            config.mCt2Root, 0xC720AA55ull ^ kCt2FamilyDomain, nonce, coeffCount, 0, 0);
+    }
+
+    u64 deriveSeedInstanceNonce(
+        const SamplingSeedConfig& config,
+        std::span<const u8> seed,
+        u64 instanceIdx,
+        u64 fallbackNonce)
+    {
+        u64 mixedSeed = deriveDeterministicSeedMaterial(
+            config.mCt2Root, kSeedBytesDomain, fallbackNonce, seed.size(), 0, 0);
+        constexpr std::size_t chunkBytes = sizeof(u64);
+        for (std::size_t offset = 0, chunkIdx = 0; offset < seed.size(); offset += chunkBytes, ++chunkIdx)
+        {
+            u64 chunk = 0;
+            const std::size_t available = std::min(chunkBytes, seed.size() - offset);
+            std::memcpy(&chunk, seed.data() + offset, available);
+            const u64 chunkTag =
+                deriveDeterministicSeedMaterial(config.mCt2Root, kSeedBytesDomain, chunkIdx, 0, 0, 0);
+            mixedSeed = combineSeedPublic(mixedSeed ^ combineSeedPublic(chunk ^ chunkTag));
+        }
+
+        return deriveDeterministicSeedMaterial(
+            config.mCt2Root, 0xC720AA55ull ^ kCt2FamilyDomain, mixedSeed, instanceIdx, fallbackNonce, 0);
     }
 
     bool validateRingParams(const RingParams& params)
     {
-        if (!isPowerOfTwo(params.mPolyModulusDegree) || params.mPolyModulusDegree < 1024u)
+        if (!isPowerOfTwo(params.mPolyModulusDegree) || params.mPolyModulusDegree < 1024)
         {
             return false;
         }
@@ -115,10 +457,15 @@ namespace osuCrypto::LogVole
 
     bool validateRingPolyShape(const RnsPoly& poly, const RingParams& params)
     {
-        return poly.mCoeffs.size() == polyCoeffCount(params);
+        return poly.mCoeffs.size() == ringPolyCoeffCount(params);
     }
 
     bool validateRingBatchShape(const std::vector<RnsPoly>& polys, const RingParams& params)
+    {
+        return validateRingBatchShape(std::span<const RnsPoly>(polys.data(), polys.size()), params);
+    }
+
+    bool validateRingBatchShape(std::span<const RnsPoly> polys, const RingParams& params)
     {
         for (const auto& poly : polys)
         {
@@ -130,7 +477,7 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    bool makeRingNttContext(const RingParams& params, RingNttContext& ctx)
+    bool makeRingNttContext(const RingParams& params, RingNttContext& out)
     {
         if (!validateRingParams(params))
         {
@@ -140,7 +487,10 @@ namespace osuCrypto::LogVole
         std::vector<seal::Modulus> moduli;
         try
         {
-            moduli = seal::CoeffModulus::Create(params.mPolyModulusDegree, params.mCoeffModulusBits);
+            std::vector<int> coeffModulusBits(
+                params.mCoeffModulusBits.begin(),
+                params.mCoeffModulusBits.end());
+            moduli = seal::CoeffModulus::Create(params.mPolyModulusDegree, coeffModulusBits);
         }
         catch (const std::exception&)
         {
@@ -155,6 +505,7 @@ namespace osuCrypto::LogVole
         seal::EncryptionParameters parms(seal::scheme_type::ckks);
         parms.set_poly_modulus_degree(params.mPolyModulusDegree);
         parms.set_coeff_modulus(moduli);
+        parms.set_random_generator(polySamplingPrngFactory());
 
         RingNttContext next{};
         next.mParams = params;
@@ -170,7 +521,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        ctx = std::move(next);
+        out = std::move(next);
         return true;
     }
 
@@ -182,16 +533,8 @@ namespace osuCrypto::LogVole
         }
 
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
-        for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
-        {
-            const u64 mod = ctx.mModuli[modIdx].value();
-            const std::size_t offset = modIdx * n;
-            for (std::size_t i = 0; i < n; ++i)
-            {
-                poly.mCoeffs[offset + i] %= mod;
-            }
-        }
-
+        seal::util::PolyIter polyIter(poly.mCoeffs.data(), n, ctx.mModuli.size());
+        seal::util::modulo_poly_coeffs(polyIter[0], ctx.mModuli.size(), ctx.mModuli, polyIter[0]);
         return true;
     }
 
@@ -209,6 +552,7 @@ namespace osuCrypto::LogVole
             seal::util::ntt_negacyclic_harvey(poly.mCoeffs.data() + (modIdx * n), tables[modIdx]);
         }
 
+        bumpRingStat(globalRingOpsStats.mNttCount, tlsRingOpsStats.mNttCount);
         return true;
     }
 
@@ -226,6 +570,7 @@ namespace osuCrypto::LogVole
             seal::util::inverse_ntt_negacyclic_harvey(poly.mCoeffs.data() + (modIdx * n), tables[modIdx]);
         }
 
+        bumpRingStat(globalRingOpsStats.mInttCount, tlsRingOpsStats.mInttCount);
         return canonicalizePoly(poly, ctx);
     }
 
@@ -236,15 +581,18 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx,
         RnsPoly& out)
     {
+        out = cNtt;
+        return dyadicMultiplyAddNttInplace(aNtt, bNtt, out, ctx);
+    }
+
+    bool dyadicMultiplyAddNttInplace(const RnsPoly& aNtt, const RnsPoly& bNtt, RnsPoly& cNtt, const RingNttContext& ctx)
+    {
         if (!validateShapeAgainstContext(aNtt, ctx) ||
             !validateShapeAgainstContext(bNtt, ctx) ||
             !validateShapeAgainstContext(cNtt, ctx))
         {
             return false;
         }
-
-        RnsPoly next{};
-        next.mCoeffs.resize(aNtt.mCoeffs.size(), 0u);
 
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
@@ -254,84 +602,60 @@ namespace osuCrypto::LogVole
             const std::size_t offset = modIdx * n;
             for (std::size_t i = 0; i < n; ++i)
             {
-                const std::size_t index = offset + i;
-                const u64 mulMod =
-                    seal::util::multiply_uint_mod(aNtt.mCoeffs[index] % mod, bNtt.mCoeffs[index] % mod, modulus);
-                next.mCoeffs[index] = addMod(mulMod, cNtt.mCoeffs[index], mod);
+                const std::size_t idx = offset + i;
+                const auto mul = static_cast<unsigned __int128>(aNtt.mCoeffs[idx] % mod) * (bNtt.mCoeffs[idx] % mod);
+                const auto sum = static_cast<unsigned __int128>(cNtt.mCoeffs[idx] % mod) + (mul % mod);
+                cNtt.mCoeffs[idx] = static_cast<u64>(sum % mod);
             }
         }
 
-        out = std::move(next);
+        bumpRingStat(globalRingOpsStats.mDyadicMulAddCount, tlsRingOpsStats.mDyadicMulAddCount);
         return true;
     }
 
-    bool ringAdd(
-        const RnsPoly& a,
-        const RnsPoly& b,
-        const RingNttContext& ctx,
-        RnsPoly& out)
+    bool ringAddInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx)
     {
         if (!validateShapeAgainstContext(a, ctx) || !validateShapeAgainstContext(b, ctx))
         {
             return false;
         }
 
-        RnsPoly next{};
-        next.mCoeffs.resize(a.mCoeffs.size(), 0u);
-
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
-        for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
-        {
-            const u64 mod = ctx.mModuli[modIdx].value();
-            const std::size_t offset = modIdx * n;
-            for (std::size_t i = 0; i < n; ++i)
-            {
-                const std::size_t idx = offset + i;
-                next.mCoeffs[idx] = addMod(a.mCoeffs[idx], b.mCoeffs[idx], mod);
-            }
-        }
-
-        out = std::move(next);
+        seal::util::PolyIter aIter(a.mCoeffs.data(), n, ctx.mModuli.size());
+        seal::util::ConstPolyIter bIter(b.mCoeffs.data(), n, ctx.mModuli.size());
+        seal::util::add_poly_coeffmod(aIter[0], bIter[0], ctx.mModuli.size(), ctx.mModuli, aIter[0]);
+        bumpRingStat(globalRingOpsStats.mAddCount, tlsRingOpsStats.mAddCount);
         return true;
     }
 
-    bool ringSub(
-        const RnsPoly& a,
-        const RnsPoly& b,
-        const RingNttContext& ctx,
-        RnsPoly& out)
+    bool ringAdd(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out)
+    {
+        out = a;
+        return ringAddInplace(out, b, ctx);
+    }
+
+    bool ringSubInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx)
     {
         if (!validateShapeAgainstContext(a, ctx) || !validateShapeAgainstContext(b, ctx))
         {
             return false;
         }
 
-        RnsPoly next{};
-        next.mCoeffs.resize(a.mCoeffs.size(), 0u);
-
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
-        for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
-        {
-            const u64 mod = ctx.mModuli[modIdx].value();
-            const std::size_t offset = modIdx * n;
-            for (std::size_t i = 0; i < n; ++i)
-            {
-                const std::size_t idx = offset + i;
-                const u64 av = a.mCoeffs[idx] % mod;
-                const u64 bv = b.mCoeffs[idx] % mod;
-                next.mCoeffs[idx] = (av >= bv) ? (av - bv) : static_cast<u64>(mod - (bv - av));
-            }
-        }
-
-        out = std::move(next);
+        seal::util::PolyIter aIter(a.mCoeffs.data(), n, ctx.mModuli.size());
+        seal::util::ConstPolyIter bIter(b.mCoeffs.data(), n, ctx.mModuli.size());
+        seal::util::sub_poly_coeffmod(aIter[0], bIter[0], ctx.mModuli.size(), ctx.mModuli, aIter[0]);
+        bumpRingStat(globalRingOpsStats.mSubCount, tlsRingOpsStats.mSubCount);
         return true;
     }
 
-    bool ringMultiply(
-        const RnsPoly& a,
-        const RnsPoly& b,
-        const RingNttContext& ctx,
-        RnsPoly& out)
+    bool ringSub(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out)
+    {
+        out = a;
+        return ringSubInplace(out, b, ctx);
+    }
+
+    bool ringMultiplyInplace(RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx)
     {
         if (!validateShapeAgainstContext(a, ctx) || !validateShapeAgainstContext(b, ctx))
         {
@@ -340,37 +664,32 @@ namespace osuCrypto::LogVole
 
         RnsPoly aNtt = a;
         RnsPoly bNtt = b;
-        if (!forwardNtt(aNtt, ctx) || !forwardNtt(bNtt, ctx))
-        {
-            return false;
-        }
-
         RnsPoly zero{};
-        zero.mCoeffs.assign(aNtt.mCoeffs.size(), 0u);
-
-        RnsPoly productNtt{};
-        if (!dyadicMultiplyAddNtt(aNtt, bNtt, zero, ctx, productNtt) ||
-            !inverseNtt(productNtt, ctx))
+        resizeZero(zero.mCoeffs, a.mCoeffs.size());
+        if (!forwardNtt(aNtt, ctx) || !forwardNtt(bNtt, ctx) ||
+            !dyadicMultiplyAddNtt(aNtt, bNtt, zero, ctx, a) ||
+            !inverseNtt(a, ctx))
         {
             return false;
         }
 
-        out = std::move(productNtt);
+        bumpRingStat(globalRingOpsStats.mMulCount, tlsRingOpsStats.mMulCount);
         return true;
     }
 
-    bool ringMultiplyScalar(
-        const RnsPoly& a,
-        u64 scalar,
-        const RingNttContext& ctx,
-        RnsPoly& out)
+    bool ringMultiply(const RnsPoly& a, const RnsPoly& b, const RingNttContext& ctx, RnsPoly& out)
+    {
+        out = a;
+        return ringMultiplyInplace(out, b, ctx);
+    }
+
+    bool ringMultiplyScalarInplace(RnsPoly& a, u64 scalar, const RingNttContext& ctx)
     {
         if (!validateShapeAgainstContext(a, ctx))
         {
             return false;
         }
 
-        RnsPoly next = a;
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
         {
@@ -381,22 +700,24 @@ namespace osuCrypto::LogVole
             for (std::size_t i = 0; i < n; ++i)
             {
                 const std::size_t idx = offset + i;
-                next.mCoeffs[idx] = seal::util::multiply_uint_mod(next.mCoeffs[idx] % mod, scalarMod, modulus);
+                const auto mul = static_cast<unsigned __int128>(a.mCoeffs[idx] % mod) * scalarMod;
+                a.mCoeffs[idx] = static_cast<u64>(mul % mod);
             }
         }
 
-        out = std::move(next);
+        bumpRingStat(globalRingOpsStats.mMulScalarCount, tlsRingOpsStats.mMulScalarCount);
         return true;
     }
 
-    bool gadgetDecompose(
-        const RnsPoly& poly,
-        u32 base,
-        u32 tau,
-        const RingNttContext& ctx,
-        std::vector<RnsPoly>& out)
+    bool ringMultiplyScalar(const RnsPoly& a, u64 scalar, const RingNttContext& ctx, RnsPoly& out)
     {
-        if (base < 2u || tau == 0u || !validateShapeAgainstContext(poly, ctx))
+        out = a;
+        return ringMultiplyScalarInplace(out, scalar, ctx);
+    }
+
+    bool gadgetDecompose(const RnsPoly& poly, u32 base, u32 tau, const RingNttContext& ctx, std::vector<RnsPoly>& out)
+    {
+        if (base < 2 || tau == 0 || !validateShapeAgainstContext(poly, ctx))
         {
             return false;
         }
@@ -407,14 +728,14 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        std::vector<RnsPoly> next(tau);
-        for (auto& digit : next)
+        out.assign(tau, {});
+        for (auto& digit : out)
         {
-            digit.mCoeffs.assign(canonical.mCoeffs.size(), 0u);
+            resizeZero(digit.mCoeffs, canonical.mCoeffs.size());
         }
 
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
-        const u64 baseU64 = static_cast<u64>(base);
+        const u64 baseU64 = base;
         for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
         {
             const u64 mod = ctx.mModuli[modIdx].value();
@@ -424,23 +745,19 @@ namespace osuCrypto::LogVole
                 u64 value = canonical.mCoeffs[offset + i] % mod;
                 for (u32 j = 0; j < tau; ++j)
                 {
-                    next[j].mCoeffs[offset + i] = value % baseU64;
+                    out[j].mCoeffs[offset + i] = value % baseU64;
                     value /= baseU64;
                 }
             }
         }
 
-        out = std::move(next);
+        bumpRingStat(globalRingOpsStats.mGadgetDecomposeCount, tlsRingOpsStats.mGadgetDecomposeCount);
         return true;
     }
 
-    bool gadgetRecompose(
-        const std::vector<RnsPoly>& digits,
-        u32 base,
-        const RingNttContext& ctx,
-        RnsPoly& out)
+    bool gadgetRecompose(const std::vector<RnsPoly>& digits, u32 base, const RingNttContext& ctx, RnsPoly& out)
     {
-        if (digits.empty() || base < 2u)
+        if (digits.empty() || base < 2)
         {
             return false;
         }
@@ -453,46 +770,46 @@ namespace osuCrypto::LogVole
             }
         }
 
-        RnsPoly next{};
-        next.mCoeffs.assign(digits[0].mCoeffs.size(), 0u);
-
+        resizeZero(out.mCoeffs, digits[0].mCoeffs.size());
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
         {
             const u64 mod = ctx.mModuli[modIdx].value();
             const std::size_t offset = modIdx * n;
 
-            std::vector<u64> basePows(digits.size(), 1u);
+            AlignedUnVec<u64> basePows;
+            resizeFill<u64>(basePows, digits.size(), 1);
             for (std::size_t j = 0; j < digits.size(); ++j)
             {
-                basePows[j] = basePowMod(static_cast<u64>(base), static_cast<u32>(j), mod);
+                basePows[j] = basePowMod(base, static_cast<u32>(j), mod);
             }
 
             for (std::size_t i = 0; i < n; ++i)
             {
-                u64 acc = 0u;
+                u64 acc = 0;
                 for (std::size_t j = 0; j < digits.size(); ++j)
                 {
-                    const u64 term = seal::util::multiply_uint_mod(
-                        digits[j].mCoeffs[offset + i] % mod, basePows[j], ctx.mModuli[modIdx]);
-                    acc = addMod(acc, term, mod);
+                    const auto term = static_cast<unsigned __int128>(digits[j].mCoeffs[offset + i] % mod) * basePows[j];
+                    acc = static_cast<u64>((static_cast<unsigned __int128>(acc) + term) % mod);
                 }
-                next.mCoeffs[offset + i] = acc;
+                out.mCoeffs[offset + i] = acc;
             }
         }
 
-        out = std::move(next);
+        bumpRingStat(globalRingOpsStats.mGadgetRecomposeCount, tlsRingOpsStats.mGadgetRecomposeCount);
         return true;
     }
 
-    bool gadgetDecomposeBits(
+    bool gadgetDecomposeBitsRange(
         const RnsPoly& poly,
         u32 digitBits,
+        u32 startLevel,
         u32 levels,
         const RingNttContext& ctx,
-        std::vector<RnsPoly>& out)
+        std::vector<RnsPoly>& out,
+        u32)
     {
-        if (digitBits == 0u || levels == 0u || !validateShapeAgainstContext(poly, ctx))
+        if (digitBits == 0 || levels == 0 || !validateShapeAgainstContext(poly, ctx))
         {
             return false;
         }
@@ -509,10 +826,17 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        std::vector<RnsPoly> next(levels);
-        for (auto& digit : next)
+        const u64 startShift = static_cast<u64>(startLevel) * digitBits;
+        const u64 endShift = static_cast<u64>(startLevel + levels - 1) * digitBits;
+        if (startShift > std::numeric_limits<int>::max() || endShift > std::numeric_limits<int>::max())
         {
-            digit.mCoeffs.assign(canonical.mCoeffs.size(), 0u);
+            return false;
+        }
+
+        out.assign(levels, {});
+        for (auto& digit : out)
+        {
+            resizeZero(digit.mCoeffs, canonical.mCoeffs.size());
         }
 
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
@@ -526,46 +850,83 @@ namespace osuCrypto::LogVole
         for (std::size_t i = 0; i < n; ++i)
         {
             u64* valuePtr = composedPoly.get() + i * coeffModCount;
+            seal::util::right_shift_uint(valuePtr, static_cast<int>(startShift), coeffModCount, valuePtr);
+
             for (u32 level = 0; level < levels; ++level)
             {
                 seal::util::set_uint(valuePtr, coeffModCount, tempMpi.get());
 
                 for (std::size_t w = 0; w < coeffModCount; ++w)
                 {
-                    const u32 bitOffset = static_cast<u32>(w * 64u);
+                    const u64 bitOffset = static_cast<u64>(w) * 64;
                     if (bitOffset >= digitBits)
                     {
                         tempMpi[w] = 0;
                     }
-                    else if (bitOffset + 64u > digitBits)
+                    else if (bitOffset + 64 > digitBits)
                     {
-                        const u32 remainingBits = digitBits - bitOffset;
-                        const u64 mask = (static_cast<u64>(1u) << remainingBits) - 1u;
+                        const u32 remainingBits = digitBits - static_cast<u32>(bitOffset);
+                        const u64 mask = remainingBits == 64 ? ~u64(0) : ((u64(1) << remainingBits) - 1);
                         tempMpi[w] &= mask;
                     }
                 }
 
                 for (std::size_t modIdx = 0; modIdx < coeffModCount; ++modIdx)
                 {
-                    next[level].mCoeffs[modIdx * n + i] =
+                    out[level].mCoeffs[modIdx * n + i] =
                         seal::util::modulo_uint(tempMpi.get(), coeffModCount, ctx.mModuli[modIdx]);
                 }
 
-                seal::util::right_shift_uint(valuePtr, digitBits, coeffModCount, valuePtr);
+                seal::util::right_shift_uint(valuePtr, static_cast<int>(digitBits), coeffModCount, valuePtr);
             }
         }
 
-        out = std::move(next);
+        bumpRingStat(globalRingOpsStats.mGadgetDecomposeCount, tlsRingOpsStats.mGadgetDecomposeCount);
         return true;
     }
 
-    bool gadgetRecomposeBits(
-        const std::vector<RnsPoly>& digits,
+    bool gadgetDecomposeBits(
+        const RnsPoly& poly,
         u32 digitBits,
+        u32 levels,
         const RingNttContext& ctx,
-        RnsPoly& out)
+        std::vector<RnsPoly>& out,
+        u32 requestedWorkers)
     {
-        if (digits.empty() || digitBits == 0u)
+        return gadgetDecomposeBitsRange(poly, digitBits, 0, levels, ctx, out, requestedWorkers);
+    }
+
+    bool gadgetDecomposeBitsRangeCentered(
+        const RnsPoly& poly,
+        u32 digitBits,
+        u32 startLevel,
+        u32 levels,
+        const RingNttContext& ctx,
+        std::vector<RnsPoly>& out,
+        u32)
+    {
+        if (digitBits == 0 || levels == 0 || !validateShapeAgainstContext(poly, ctx))
+        {
+            return false;
+        }
+
+        RnsPoly canonical = poly;
+        if (!canonicalizePoly(canonical, ctx))
+        {
+            return false;
+        }
+
+        const bool ok = centeredDecomposeSlow(canonical, digitBits, startLevel, levels, ctx, out);
+        if (ok)
+        {
+            bumpRingStat(globalRingOpsStats.mGadgetDecomposeCount, tlsRingOpsStats.mGadgetDecomposeCount);
+        }
+        return ok;
+    }
+
+    bool gadgetRecomposeBits(const std::vector<RnsPoly>& digits, u32 digitBits, const RingNttContext& ctx, RnsPoly& out)
+    {
+        if (digits.empty() || digitBits == 0)
         {
             return false;
         }
@@ -578,44 +939,43 @@ namespace osuCrypto::LogVole
             }
         }
 
-        RnsPoly next{};
-        next.mCoeffs.assign(digits[0].mCoeffs.size(), 0u);
-
+        resizeZero(out.mCoeffs, digits[0].mCoeffs.size());
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
         {
             const u64 mod = ctx.mModuli[modIdx].value();
             const std::size_t offset = modIdx * n;
 
-            std::vector<u64> pow2Shifts(digits.size(), 0u);
+            AlignedUnVec<u64> pow2Shifts;
+            resizeZero(pow2Shifts, digits.size());
             for (std::size_t level = 0; level < digits.size(); ++level)
             {
-                const u64 shiftU64 = static_cast<u64>(level) * static_cast<u64>(digitBits);
-                if (shiftU64 > static_cast<u64>(std::numeric_limits<u32>::max()))
+                const u64 shiftU64 = static_cast<u64>(level) * digitBits;
+                if (shiftU64 > std::numeric_limits<u32>::max())
                 {
                     return false;
                 }
-                pow2Shifts[level] = basePowMod(2u, static_cast<u32>(shiftU64), mod);
+                pow2Shifts[level] = basePowMod(2, static_cast<u32>(shiftU64), mod);
             }
 
             for (std::size_t i = 0; i < n; ++i)
             {
-                u64 acc = 0u;
+                u64 acc = 0;
                 for (std::size_t level = 0; level < digits.size(); ++level)
                 {
-                    const u64 term = seal::util::multiply_uint_mod(
-                        digits[level].mCoeffs[offset + i] % mod, pow2Shifts[level], ctx.mModuli[modIdx]);
-                    acc = addMod(acc, term, mod);
+                    const auto term =
+                        static_cast<unsigned __int128>(digits[level].mCoeffs[offset + i] % mod) * pow2Shifts[level];
+                    acc = static_cast<u64>((static_cast<unsigned __int128>(acc) + term) % mod);
                 }
-                next.mCoeffs[offset + i] = acc;
+                out.mCoeffs[offset + i] = acc;
             }
         }
 
-        out = std::move(next);
+        bumpRingStat(globalRingOpsStats.mGadgetRecomposeCount, tlsRingOpsStats.mGadgetRecomposeCount);
         return true;
     }
 
-    std::vector<u64> packRingBatch(const std::vector<RnsPoly>& polys)
+    AlignedUnVec<u64> packRingBatch(const std::vector<RnsPoly>& polys)
     {
         std::size_t total = 0;
         for (const auto& poly : polys)
@@ -623,13 +983,12 @@ namespace osuCrypto::LogVole
             total += poly.mCoeffs.size();
         }
 
-        std::vector<u64> out;
-        out.reserve(total);
+        AlignedUnVec<u64> out(total);
+        auto* outIter = out.data();
         for (const auto& poly : polys)
         {
-            out.insert(out.end(), poly.mCoeffs.begin(), poly.mCoeffs.end());
+            outIter = std::copy(poly.mCoeffs.begin(), poly.mCoeffs.end(), outIter);
         }
-
         return out;
     }
 
@@ -637,16 +996,17 @@ namespace osuCrypto::LogVole
         u32 count,
         u32 polyModulusDegree,
         u32 coeffModulusCount,
-        const std::vector<u64>& flat,
-        std::vector<RnsPoly>& out)
+        std::span<const u64> flat,
+        std::vector<RnsPoly>& out,
+        u32)
     {
-        if (count == 0u || polyModulusDegree == 0u || coeffModulusCount == 0u)
+        if (polyModulusDegree == 0 || coeffModulusCount == 0)
         {
             return false;
         }
 
         const std::size_t perPoly = static_cast<std::size_t>(polyModulusDegree) * coeffModulusCount;
-        if (perPoly == 0u || count > std::numeric_limits<std::size_t>::max() / perPoly)
+        if (perPoly == 0 || count > std::numeric_limits<std::size_t>::max() / perPoly)
         {
             return false;
         }
@@ -657,20 +1017,17 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        std::vector<RnsPoly> next;
-        next.reserve(count);
+        out.resize(count);
         for (std::size_t i = 0; i < count; ++i)
         {
             const auto begin = flat.begin() + static_cast<std::ptrdiff_t>(i * perPoly);
             const auto end = begin + static_cast<std::ptrdiff_t>(perPoly);
-            next.push_back(RnsPoly{ std::vector<u64>(begin, end) });
+            assignRange(out[i].mCoeffs, begin, end);
         }
-
-        out = std::move(next);
         return true;
     }
 
-    std::vector<u64> packRingTensor(const RingTensor& tensor)
+    AlignedUnVec<u64> packRingTensor(const RingTensor& tensor)
     {
         return packRingBatch(tensor.mPolys);
     }
@@ -680,54 +1037,128 @@ namespace osuCrypto::LogVole
         u32 cols,
         u32 polyModulusDegree,
         u32 coeffModulusCount,
-        const std::vector<u64>& flat,
-        RingTensor& out)
+        std::span<const u64> flat,
+        RingTensor& out,
+        u32 requestedWorkers)
     {
-        if (rows == 0u || cols == 0u || rows > std::numeric_limits<u32>::max() / cols)
+        if (rows > 0 && cols > std::numeric_limits<u32>::max() / rows)
         {
             return false;
         }
 
         std::vector<RnsPoly> polys;
-        if (!unpackRingBatch(rows * cols, polyModulusDegree, coeffModulusCount, flat, polys))
+        if (!unpackRingBatch(rows * cols, polyModulusDegree, coeffModulusCount, flat, polys, requestedWorkers))
         {
             return false;
         }
 
-        RingTensor next{};
-        next.mRows = rows;
-        next.mCols = cols;
-        next.mPolys = std::move(polys);
-        out = std::move(next);
+        out.mRows = rows;
+        out.mCols = cols;
+        out.mPolys = std::move(polys);
         return true;
     }
 
-    RnsPoly deriveUniformPolyFromNonce(
-        const RingNttContext& ctx,
-        u64 nonce,
-        u64 domainTag,
-        u32 index)
+    RnsPoly deriveUniformPolyFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index)
     {
-        const u64 rawSeed = combineSeed(nonce) ^ combineSeed(domainTag) ^
-                            combineSeed(index) ^ combineSeed(ctx.mParams.mPolyModulusDegree) ^
-                            combineSeed(static_cast<u64>(ctx.mParams.mCoeffModulusBits.size()));
+        AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
+        AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
+
+        const u64 rawSeed = combineSeedPublic(nonce) ^ combineSeedPublic(domainTag) ^ combineSeedPublic(index) ^
+                            combineSeedPublic(ctx.mParams.mPolyModulusDegree) ^
+                            combineSeedPublic(static_cast<u64>(ctx.mParams.mCoeffModulusBits.size()));
+
+        RnsPoly out{};
+        resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+
+        auto contextData = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
+        if (contextData)
+        {
+            auto prng = polySamplingPrngFactory()->create({ rawSeed, 0 });
+            seal::util::sample_poly_uniform(prng, contextData->parms(), out.mCoeffs.data());
+            bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
+            return out;
+        }
 
         std::mt19937_64 rng(rawSeed);
-        RnsPoly out{};
-        out.mCoeffs.resize(polyCoeffCount(ctx.mParams), 0u);
-
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
         {
             const u64 mod = ctx.mModuli[modIdx].value();
-            std::uniform_int_distribution<u64> dist(0u, mod - 1u);
+            std::uniform_int_distribution<u64> dist(0, mod - 1);
             const std::size_t offset = modIdx * n;
             for (std::size_t i = 0; i < n; ++i)
             {
                 out.mCoeffs[offset + i] = dist(rng);
             }
         }
+        bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
+        return out;
+    }
 
+    RnsPoly deriveUniformPolyFromNonceNtt(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index)
+    {
+        RnsPoly out = deriveUniformPolyFromNonce(ctx, nonce, domainTag, index);
+        (void)forwardNtt(out, ctx);
+        return out;
+    }
+
+    std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 count)
+    {
+        AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
+        AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
+
+        std::vector<RnsPoly> out(count);
+        for (u32 i = 0; i < count; ++i)
+        {
+            out[i] = deriveUniformPolyFromNonce(ctx, nonce, domainTag, i);
+        }
+        return out;
+    }
+
+    std::vector<RnsPoly> deriveUniformPolyBatchFromNonceNtt(
+        const RingNttContext& ctx,
+        u64 nonce,
+        u64 domainTag,
+        u32 count)
+    {
+        return deriveUniformPolyBatchFromNonce(ctx, nonce, domainTag, count);
+    }
+
+    bool deriveUniformPolyBatchFromNonceListInplace(
+        const RingNttContext& ctx,
+        std::span<const u64> nonces,
+        u64 domainTag,
+        u32 perNonceCount,
+        std::vector<RnsPoly>& out,
+        u32)
+    {
+        if (perNonceCount != 0 && nonces.size() > std::numeric_limits<std::size_t>::max() / perNonceCount)
+        {
+            return false;
+        }
+
+        const std::size_t totalCount = nonces.size() * static_cast<std::size_t>(perNonceCount);
+        out.resize(totalCount);
+        for (std::size_t nonceIdx = 0; nonceIdx < nonces.size(); ++nonceIdx)
+        {
+            for (u32 polyIdx = 0; polyIdx < perNonceCount; ++polyIdx)
+            {
+                out[nonceIdx * perNonceCount + polyIdx] =
+                    deriveUniformPolyFromNonce(ctx, nonces[nonceIdx], domainTag, polyIdx);
+            }
+        }
+        return true;
+    }
+
+    std::vector<RnsPoly> deriveUniformPolyBatchFromNonceList(
+        const RingNttContext& ctx,
+        std::span<const u64> nonces,
+        u64 domainTag,
+        u32 perNonceCount,
+        u32 requestedWorkers)
+    {
+        std::vector<RnsPoly> out;
+        (void)deriveUniformPolyBatchFromNonceListInplace(ctx, nonces, domainTag, perNonceCount, out, requestedWorkers);
         return out;
     }
 
@@ -744,7 +1175,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        const u64 rawSeed = combineSeed(seed) ^ combineSeed(streamId);
+        const u64 rawSeed = combineSeedPublic(seed) ^ combineSeedPublic(streamId);
         auto prng = seal::UniformRandomGeneratorFactory::DefaultFactory()->create({ rawSeed, 0 });
         seal::RandomToStandardAdapter engine(prng);
         seal::util::ClippedNormalDistribution dist(0, noiseStandardDeviation, noiseMaxDeviation);
@@ -761,17 +1192,18 @@ namespace osuCrypto::LogVole
                 const u64 value = poly.mCoeffs[idx] % mod;
                 if (noise >= 0)
                 {
-                    poly.mCoeffs[idx] = addMod(value, static_cast<u64>(noise), mod);
+                    const auto sum = static_cast<unsigned __int128>(value) + static_cast<u64>(noise);
+                    poly.mCoeffs[idx] = static_cast<u64>(sum % mod);
                 }
                 else
                 {
                     const u64 absNoise = static_cast<u64>(-noise) % mod;
-                    poly.mCoeffs[idx] = (value >= absNoise) ? static_cast<u64>(value - absNoise)
-                                                            : static_cast<u64>(mod - (absNoise - value));
+                    poly.mCoeffs[idx] = (value >= absNoise) ? (value - absNoise) : (mod - (absNoise - value));
                 }
             }
         }
 
+        bumpRingStat(globalRingOpsStats.mErrorAddCount, tlsRingOpsStats.mErrorAddCount);
         return true;
     }
 
@@ -794,7 +1226,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        const u64 rawSeed = combineSeed(seed) ^ combineSeed(streamId);
+        const u64 rawSeed = combineSeedPublic(seed) ^ combineSeedPublic(streamId);
         auto prng = seal::UniformRandomGeneratorFactory::DefaultFactory()->create({ rawSeed, 0 });
 
         auto& contextData = *contextDataPtr;
@@ -810,9 +1242,9 @@ namespace osuCrypto::LogVole
         samplePolyNormal(prng, parms, temp.get(), noiseStandardDeviation, noiseMaxDeviation);
 
         seal::util::PolyIter destinationIter(poly.mCoeffs.data(), coeffCount, coeffModulusSize);
-        seal::util::add_poly_coeffmod(
-            destinationIter[0], tempIter, coeffModulusSize, coeffModulus, destinationIter[0]);
+        seal::util::add_poly_coeffmod(destinationIter[0], tempIter, coeffModulusSize, coeffModulus, destinationIter[0]);
 
+        bumpRingStat(globalRingOpsStats.mErrorAddCount, tlsRingOpsStats.mErrorAddCount);
         return true;
     }
 }

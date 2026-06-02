@@ -10,7 +10,7 @@
 #include <span>
 #include <vector>
 
-namespace osuCrypto::LogVole2
+namespace osuCrypto::LogVole
 {
     template<typename T>
     using AlignedUnVec = AlignedUnVector<T>;

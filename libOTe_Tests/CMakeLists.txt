@@ -33,29 +33,20 @@ target_include_directories(libOTe_Tests PUBLIC
 
 if(ENABLE_LOGVOLE)
     target_sources(libOTe_Tests PRIVATE
+        LogVole/tests/test_core.cpp
+        LogVole/tests/test_civole.cpp
         LogVole/tests/test_encoding.cpp
         LogVole/tests/test_keyderive_coproto.cpp
         LogVole/tests/test_keyderive_core.cpp
+        LogVole/tests/test_lhe.cpp
         LogVole/tests/test_lenc.cpp
         LogVole/tests/test_ring_ops.cpp
         LogVole/tests/test_shrinkexpand_coproto.cpp
-        LogVole/tests/test_shrinkexpand_core.cpp
-        LogVole2/tests/test_core.cpp
-        LogVole2/tests/test_civole.cpp
-        LogVole2/tests/test_encoding.cpp
-        LogVole2/tests/test_keyderive_coproto.cpp
-        LogVole2/tests/test_keyderive_core.cpp
-        LogVole2/tests/test_lhe.cpp
-        LogVole2/tests/test_lenc.cpp
-        LogVole2/tests/test_ring_ops.cpp
-        LogVole2/tests/test_shrinkexpand_coproto.cpp
-        LogVole2/tests/test_shrinkexpand.cpp
+        LogVole/tests/test_shrinkexpand.cpp
     )
     target_include_directories(libOTe_Tests PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/LogVole
         ${CMAKE_CURRENT_LIST_DIR}/LogVole/tests
-        ${CMAKE_CURRENT_LIST_DIR}/LogVole2
-        ${CMAKE_CURRENT_LIST_DIR}/LogVole2/tests
     )
 endif()
 
