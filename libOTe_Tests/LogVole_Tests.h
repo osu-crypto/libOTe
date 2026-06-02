@@ -9,6 +9,7 @@
     X(Core, RootOnlineLocalRelation) \
     X(Core, TwoLevelCoprotoRelation) \
     X(Core, ThreeLevelOfflineReuseAndInvalidWidth) \
+    X(Core, TwoLevelCoprotoMultiThreadSkipTbkOutput) \
     X(Encoding, AllMessageRoundTrips) \
     X(KeyDeriveCore, AlgebraicRelation) \
     X(KeyDeriveCore, DeterministicRegressionSeeds) \
@@ -26,7 +27,6 @@
     X(RingOps, NttRoundTrip) \
     X(RingOps, GadgetDecomposeRecomposeBits) \
     X(RingOps, CenteredGadgetDecomposeRecomposeBits) \
-    X(RingOps, TensorPackUnpack) \
     X(ShrinkExpandCoproto, OfflineAndExpandDeterministicRelation) \
     X(ShrinkExpandCoproto, FullNoiseTolerance) \
     X(ShrinkExpandCore, ParamsValidation) \
