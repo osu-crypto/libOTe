@@ -81,6 +81,9 @@ if(SEAL_FETCH_BUILD_AVAILABLE)
                 RESULT_VARIABLE RESULT
                 COMMAND_ECHO STDOUT
             )
+            if(NOT RESULT EQUAL 0)
+                message(FATAL_ERROR \"Installing ${DEP_NAME} failed: \${RESULT}\")
+            endif()
         endif()
     ")
 endif()

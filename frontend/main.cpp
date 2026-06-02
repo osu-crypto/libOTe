@@ -182,7 +182,7 @@ int main(int argc, char** argv)
             << Color::Green << "  -smalicious     " << Color::Default << "  : to run the SoftSpoken      active secure       1-out-of-2       OT      " << Color::Red << (softSpokenEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
             << Color::Green << "  -oos            " << Color::Default << "  : to run the OOS             active secure       1-out-of-N OT for N=2^76 " << Color::Red << (oosEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
 			<< Color::Green << "  -kkrt           " << Color::Default << "  : to run the KKRT            passive secure      1-out-of-N OT for N=2^128" << Color::Red << (kkrtEnabled ? "" : "(disabled)") << "\n" << Color::Default
-			<< Color::Green << "  -logvole        " << Color::Default << "  : to run the LogVole         passive secure      CI-VOLE over Zp          " << Color::Red << (logVoleEnabled ? "" : "(disabled)") << "\n" << Color::Default
+			<< Color::Green << "  -logvole        " << Color::Default << "  : to run the LogVole         passive secure      chosen-input VOLE over Zp" << Color::Red << (logVoleEnabled ? "" : "(disabled)") << "\n" << Color::Default
 			<< Color::Green << "  -messagePassing " << Color::Default << "  : to run the message passing example                                      " << Color::Red << (silentEnabled ? "" : "(disabled)")            << "\n\n" << Color::Default
 
 			<< "POPF Options:\n"

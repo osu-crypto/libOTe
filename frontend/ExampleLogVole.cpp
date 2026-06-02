@@ -32,14 +32,14 @@ namespace osuCrypto
         const std::vector<std::string> logvoleTags{ "lv", "logvole", "LogVole" };
 
 #if defined(ENABLE_LOGVOLE)
-        // The example exposes the public CI-VOLE wrapper. It chooses the
+        // The example exposes the public LogVole wrapper. It chooses the
         // batching prime by bit count and reports the concrete prime with
         // sender.modulus()/receiver.modulus().
-        u32 logVoleCivoleExamplePlaintextModulusBits(const CLP& cmd)
+        u32 logVoleExamplePlaintextModulusBits(const CLP& cmd)
         {
             const auto plaintextModulusBits = cmd.getOr("p", 55);
             if (plaintextModulusBits < 2 || plaintextModulusBits > 61)
-                throw std::runtime_error("LogVole CI-VOLE example requires -p in [2, 61]");
+                throw std::runtime_error("LogVole example requires -p in [2, 61]");
             return static_cast<u32>(plaintextModulusBits);
         }
 
@@ -51,7 +51,7 @@ namespace osuCrypto
             return x;
         }
 
-        // CI-VOLE relation: sender receives b, receiver receives a, and
+        // LogVole relation: sender receives b, receiver receives a, and
         // a[i] = b[i] + x[i] * Delta mod p.
         void checkLogVoleExampleRelation(
             span<const u64> x,
@@ -61,18 +61,18 @@ namespace osuCrypto
             u64 modulus)
         {
             if (keys.size() != x.size() || macs.size() != x.size())
-                throw std::runtime_error("LogVole CI-VOLE example returned an unexpected output size");
+                throw std::runtime_error("LogVole example returned an unexpected output size");
 
             const seal::Modulus mod(modulus);
             for (u64 i = 0; i < x.size(); ++i)
             {
                 const auto expected = LogVole::mulAddMod(x[i], delta, keys[i], mod);
                 if (macs[i] != expected)
-                    throw std::runtime_error("LogVole CI-VOLE example relation check failed");
+                    throw std::runtime_error("LogVole example relation check failed");
             }
         }
 
-        void LogVole_Civole_local_example(int numVole, int numThreads, std::string tag, const CLP& cmd)
+        void LogVole_local_example(int numVole, int numThreads, std::string tag, const CLP& cmd)
         {
             using namespace LogVole;
 
@@ -80,11 +80,11 @@ namespace osuCrypto
                 numVole = 16;
 
             if (numVole < 0)
-                throw std::runtime_error("LogVole CI-VOLE example requires non-negative -n");
+                throw std::runtime_error("LogVole example requires non-negative -n");
 
             LogVoleSender sender{};
             LogVoleReceiver receiver{};
-            const auto plaintextModulusBits = logVoleCivoleExamplePlaintextModulusBits(cmd);
+            const auto plaintextModulusBits = logVoleExamplePlaintextModulusBits(cmd);
             const auto workerThreads = static_cast<u32>(std::max(numThreads, 1));
             sender.configure(static_cast<u64>(numVole), plaintextModulusBits, workerThreads);
             receiver.configure(static_cast<u64>(numVole), plaintextModulusBits, workerThreads);
@@ -92,7 +92,7 @@ namespace osuCrypto
             const auto w = static_cast<u64>(numVole);
             const auto delta = static_cast<u64>(cmd.getOr("delta", 7)) % modulus;
             if (delta == 0)
-                throw std::runtime_error("LogVole CI-VOLE example requires nonzero delta modulo p");
+                throw std::runtime_error("LogVole example requires nonzero delta modulo p");
 
             auto x = makeLogVoleExampleX(w, modulus);
             auto offlineSockets = coproto::LocalAsyncSocket::makePair();
@@ -135,7 +135,7 @@ namespace osuCrypto
 #endif
     }
 
-    void LogVole_Civole_example(Role role, int numVole, int numThreads, std::string ip, std::string tag, const CLP& cmd)
+    void LogVole_example(Role role, int numVole, int numThreads, std::string ip, std::string tag, const CLP& cmd)
     {
 #if defined(ENABLE_LOGVOLE) && defined(COPROTO_ENABLE_BOOST)
         using namespace LogVole;
@@ -144,9 +144,9 @@ namespace osuCrypto
             numVole = 16;
 
         if (numVole < 0)
-            throw std::runtime_error("LogVole CI-VOLE example requires non-negative -n");
+            throw std::runtime_error("LogVole example requires non-negative -n");
 
-        const auto plaintextModulusBits = logVoleCivoleExamplePlaintextModulusBits(cmd);
+        const auto plaintextModulusBits = logVoleExamplePlaintextModulusBits(cmd);
         const auto w = static_cast<u64>(numVole);
         const auto workerThreads = static_cast<u32>(std::max(numThreads, 1));
 
@@ -160,7 +160,7 @@ namespace osuCrypto
         const u64 modulus = role == Role::Sender ? sender.modulus() : receiver.modulus();
         const auto delta = static_cast<u64>(cmd.getOr("delta", 7)) % modulus;
         if (delta == 0)
-            throw std::runtime_error("LogVole CI-VOLE example requires nonzero delta modulo p");
+            throw std::runtime_error("LogVole example requires nonzero delta modulo p");
 
         auto chl = cp::asioConnect(ip, role == Role::Sender);
         cp::sync_wait(sync(chl, role));
@@ -224,7 +224,7 @@ namespace osuCrypto
             return false;
 
         if (cmd.hasValue("r"))
-            return runIf(LogVole_Civole_example, cmd, logvoleTags);
+            return runIf(LogVole_example, cmd, logvoleTags);
 
 #if defined(ENABLE_LOGVOLE)
         // Local default:
@@ -235,7 +235,7 @@ namespace osuCrypto
             ? (1 << cmd.get<int>("nn"))
             : cmd.getOr("n", 0);
         const auto t = cmd.getOr("t", 1);
-        LogVole_Civole_local_example(n, t, logvoleTags.back(), cmd);
+        LogVole_local_example(n, t, logvoleTags.back(), cmd);
 #else
         std::cout << "This example requires LogVole. Please build libOTe with `-DENABLE_LOGVOLE=ON`. \n" << LOCATION << std::endl;
 #endif
