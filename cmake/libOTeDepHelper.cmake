@@ -61,8 +61,29 @@ if (ENABLE_BITPOLYMUL)
     endif()
 endif()
 
+## SEAL
+###########################################################################
+
+macro(FIND_SEAL)
+    if(FETCH_SEAL)
+        set(SEAL_DP NO_DEFAULT_PATH PATHS ${OC_THIRDPARTY_HINT})
+    elseif(${NO_CMAKE_SYSTEM_PATH})
+        set(SEAL_DP NO_DEFAULT_PATH PATHS ${CMAKE_PREFIX_PATH})
+    else()
+        unset(SEAL_DP)
+    endif()
+
+    find_package(SEAL 4.1.1 EXACT ${SEAL_DP} ${ARGN})
+endmacro()
+
+if(FETCH_SEAL_IMPL)
+    FIND_SEAL(QUIET)
+
+    include(${CMAKE_CURRENT_LIST_DIR}/../thirdparty/getSeal.cmake)
+endif()
+
 if(ENABLE_LOGVOLE)
-    find_package(SEAL 4.1.1 EXACT REQUIRED)
+    FIND_SEAL(REQUIRED)
 
     if(NOT TARGET SEAL::seal)
         message(FATAL_ERROR "ENABLE_LOGVOLE requires stock Microsoft SEAL target SEAL::seal")
