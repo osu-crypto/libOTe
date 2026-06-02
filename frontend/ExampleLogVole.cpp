@@ -42,9 +42,9 @@ namespace osuCrypto
             return static_cast<u32>(plaintextModulusBits);
         }
 
-        std::vector<u64> makeLogVoleExampleX(u64 w, u64 modulus)
+        LogVole::AlignedUnVec<u64> makeLogVoleExampleX(u64 w, u64 modulus)
         {
-            std::vector<u64> x(w);
+            LogVole::AlignedUnVec<u64> x(w);
             for (u64 i = 0; i < w; ++i)
                 x[i] = (3 * i + 5) % modulus;
             return x;
@@ -107,8 +107,8 @@ namespace osuCrypto
             std::get<1>(offlineResult).result();
 
             auto onlineSockets = coproto::LocalAsyncSocket::makePair();
-            std::vector<u64> b(w);
-            std::vector<u64> a(w);
+            LogVole::AlignedUnVec<u64> b(w);
+            LogVole::AlignedUnVec<u64> a(w);
             // The online phase sends the receiver's digest and returns the
             // matching sender key. The parties then locally expand to w labels.
             auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
@@ -169,7 +169,7 @@ namespace osuCrypto
 
         if (role == Role::Sender)
         {
-            std::vector<u64> b(w);
+            LogVole::AlignedUnVec<u64> b(w);
             // Split-role mode mirrors the local example over an asio socket.
             // The receiver must use the same n, plaintext bit count and port.
             cp::sync_wait(sender.offline(delta, chl));
@@ -188,7 +188,7 @@ namespace osuCrypto
         else
         {
             auto x = makeLogVoleExampleX(w, modulus);
-            std::vector<u64> a(w);
+            LogVole::AlignedUnVec<u64> a(w);
             // The receiver chooses x locally; the sender receives only the
             // corresponding keys for its Delta.
             cp::sync_wait(receiver.offline(chl));
