@@ -27,9 +27,9 @@ target_link_libraries(libOTe_Tests libOTe)
 target_include_directories(libOTe_Tests PUBLIC 
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
                     $<INSTALL_INTERFACE:include>) 
-target_include_directories(libOTe_Tests PUBLIC 
+target_include_directories(libOTe_Tests PUBLIC
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
-                    $<INSTALL_INTERFACE:include>) 
+                    $<INSTALL_INTERFACE:include>)
 
 if(ENABLE_LOGVOLE)
     target_sources(libOTe_Tests PRIVATE
@@ -53,7 +53,7 @@ endif()
 
 if(MSVC)
     target_compile_options(libOTe_Tests PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
-    
+
 else()
     target_compile_options(libOTe_Tests PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
 endif()
