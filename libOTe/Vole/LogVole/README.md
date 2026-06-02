@@ -25,11 +25,11 @@ top of the LogVole protocol.
 
 ## Dependencies
 
-Build with `-D ENABLE_LOGVOLE=ON`. LogVole commits to stock Microsoft SEAL 4.1.1
-through the `SEAL::seal` CMake target. With the default libOTe fetch flow,
-`FETCH_AUTO=ON` fetches and installs SEAL into the local third-party prefix; use
-`-DFETCH_SEAL=OFF` or `--noauto` with `SEAL_DIR` to provide an existing stock
-SEAL install instead.
+LogVole is enabled by default and commits to stock Microsoft SEAL 4.1.1 through
+the `SEAL::seal` CMake target. With the default libOTe fetch flow,
+`FETCH_AUTO=ON` fetches and installs SEAL into the local third-party prefix. Use
+`-DENABLE_LOGVOLE=OFF` to omit LogVole, or use `-DFETCH_SEAL=OFF` / `--noauto`
+with `SEAL_DIR` to provide an existing stock SEAL install instead.
 
 The coproto socket interface is used for all protocol communication; the
 frontend split-role example also needs coproto Boost socket support.
