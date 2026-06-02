@@ -20,6 +20,7 @@
 #include "ExampleNChooseOne.h"
 #include "ExampleSilent.h"
 #include "ExampleVole.h"
+#include "ExampleLogVole2.h"
 #include "ExampleMessagePassing.h"
 #include "libOTe/Tools/LDPC/Util.h"
 #include "libOTe/Tools/EACode/EAChecker.h"
@@ -30,6 +31,13 @@
 
 
 using namespace osuCrypto;
+
+#ifdef ENABLE_LOGVOLE
+constexpr bool logVoleEnabled = true;
+#else
+constexpr bool logVoleEnabled = false;
+#endif
+
 #ifdef ENABLE_IKNP
 void minimal()
 {
@@ -134,6 +142,7 @@ int main(int argc, char** argv)
 	flagSet |= NChooseOne_Examples(cmd);
 	flagSet |= Silent_Examples(cmd);
 	flagSet |= Vole_Examples(cmd);
+	flagSet |= LogVole2_Examples(cmd);
 
 	if (cmd.isSet("messagePassing"))
 	{
@@ -173,6 +182,7 @@ int main(int argc, char** argv)
             << Color::Green << "  -smalicious     " << Color::Default << "  : to run the SoftSpoken      active secure       1-out-of-2       OT      " << Color::Red << (softSpokenEnabled ? "" : "(disabled)")            << "\n"   << Color::Default
             << Color::Green << "  -oos            " << Color::Default << "  : to run the OOS             active secure       1-out-of-N OT for N=2^76 " << Color::Red << (oosEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
 			<< Color::Green << "  -kkrt           " << Color::Default << "  : to run the KKRT            passive secure      1-out-of-N OT for N=2^128" << Color::Red << (kkrtEnabled ? "" : "(disabled)") << "\n" << Color::Default
+			<< Color::Green << "  -logvole2       " << Color::Default << "  : to run the LogVole2        passive secure      CI-VOLE over Zp          " << Color::Red << (logVoleEnabled ? "" : "(disabled)") << "\n" << Color::Default
 			<< Color::Green << "  -messagePassing " << Color::Default << "  : to run the message passing example                                      " << Color::Red << (silentEnabled ? "" : "(disabled)")            << "\n\n" << Color::Default
 
 			<< "POPF Options:\n"
@@ -189,6 +199,7 @@ int main(int argc, char** argv)
             << Color::Green << "  -r 0/1          " << Color::Default << ": Do not play both OT roles. r 1 -> OT sender and network server. r 0 -> OT receiver and network client.\n"
             << Color::Green << "  -ip             " << Color::Default << ": the IP and port of the netowrk server, default = localhost:1212\n"
             << Color::Green << "  -t              " << Color::Default << ": the number of threads that should be used\n"
+            << Color::Green << "  -p              " << Color::Default << ": LogVole plaintext modulus bit count\n"
             << Color::Green << "  -u              " << Color::Default << ": to run the unit tests\n"
             << Color::Green << "  -u -list        " << Color::Default << ": to list the unit tests\n"
             << Color::Green << "  -u 1 2 15       " << Color::Default << ": to run the unit tests indexed by {1, 2, 15}.\n"

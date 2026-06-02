@@ -20,7 +20,7 @@ namespace
     {
         ShrinkExpandParams params{};
         params.mRing.mPolyModulusDegree = 1024;
-        params.mRing.mCoeffModulusBits = { 30, 30 };
+        assignValues<int>(params.mRing.mCoeffModulusBits, { 30, 30 });
         params.mPlaintextModulusBits = 20;
         params.mAlpha = 2;
         params.mMu = trunc ? 4u : 3u;
@@ -37,7 +37,7 @@ namespace
     ShrinkExpandParams make_full_noise_params()
     {
         auto params = make_params();
-        params.mRing.mCoeffModulusBits = { 54, 54, 54, 54, 54, 54, 54 };
+        assignValues<int>(params.mRing.mCoeffModulusBits, { 54, 54, 54, 54, 54, 54, 54 });
         params.mPlaintextModulusBits = 54;
         params.mGadgetLogBase = 126;
         params.mMode = ShrinkExpandMode::FullNoise;
@@ -289,7 +289,7 @@ namespace
         {
             for (std::size_t i = 0; i < diff.size(); ++i)
             {
-                if (diff[i].mCoeffs != expected[i].mCoeffs)
+                if (!rangesEqual(diff[i].mCoeffs, expected[i].mCoeffs))
                 {
                     return false;
                 }
@@ -418,7 +418,7 @@ void LogVole2_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
         for (std::size_t j = 0; j < rho; ++j)
         {
             RnsPoly polyJ{};
-            polyJ.mCoeffs.resize(n * rho, 0);
+            resizeZero(polyJ.mCoeffs, n * rho);
 
             const auto modulusJ = fullBase.base()[j];
             seal::util::set_uint(modulusJ.value(), rho, modJMpi.get());

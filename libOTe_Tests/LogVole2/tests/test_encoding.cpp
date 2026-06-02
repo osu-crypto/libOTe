@@ -17,7 +17,7 @@ namespace
         message.mPolyModulusDegree = 1024;
         message.mCoeffModulusCount = 2;
         message.mTau = 3;
-        message.mDCoeffs = { 1, 2, 3, 4, 5 };
+        assignValues<std::uint64_t>(message.mDCoeffs, { 1, 2, 3, 4, 5 });
         return message;
     }
 
@@ -27,7 +27,7 @@ namespace
         message.mPolyModulusDegree = 2048;
         message.mCoeffModulusCount = 3;
         message.mTau = 4;
-        message.mMNttCoeffs = { 9, 8, 7, 6 };
+        assignValues<std::uint64_t>(message.mMNttCoeffs, { 9, 8, 7, 6 });
         return message;
     }
 
@@ -35,7 +35,7 @@ namespace
     {
         RingParams ring{};
         ring.mPolyModulusDegree = 8;
-        ring.mCoeffModulusBits = { 30, 31 };
+        assignValues<int>(ring.mCoeffModulusBits, { 30, 31 });
         return ring;
     }
 
@@ -94,7 +94,7 @@ void LogVole2_Encoding_KeyDeriveRequestRoundTrip(const oc::CLP&)
     LOGVOLE_EXPECT_EQ(decoded.mPolyModulusDegree, message.mPolyModulusDegree);
     LOGVOLE_EXPECT_EQ(decoded.mCoeffModulusCount, message.mCoeffModulusCount);
     LOGVOLE_EXPECT_EQ(decoded.mTau, message.mTau);
-    LOGVOLE_EXPECT_TRUE(decoded.mDCoeffs == message.mDCoeffs);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decoded.mDCoeffs, message.mDCoeffs));
 }
 
 void LogVole2_Encoding_KeyDeriveResponseRoundTrip(const oc::CLP&)
@@ -107,18 +107,18 @@ void LogVole2_Encoding_KeyDeriveResponseRoundTrip(const oc::CLP&)
     LOGVOLE_EXPECT_EQ(decoded.mPolyModulusDegree, message.mPolyModulusDegree);
     LOGVOLE_EXPECT_EQ(decoded.mCoeffModulusCount, message.mCoeffModulusCount);
     LOGVOLE_EXPECT_EQ(decoded.mTau, message.mTau);
-    LOGVOLE_EXPECT_TRUE(decoded.mMNttCoeffs == message.mMNttCoeffs);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decoded.mMNttCoeffs, message.mMNttCoeffs));
 }
 
 void LogVole2_Encoding_SeedMessageRoundTrip(const oc::CLP&)
 {
     SeedMessage message{};
-    message.mSeed = { 1, 3, 5, 7, 9, 11 };
+    assignValues<std::uint8_t>(message.mSeed, { 1, 3, 5, 7, 9, 11 });
 
     const auto encoded = encode(message);
     SeedMessage decoded{};
     LOGVOLE_REQUIRE_TRUE(decode(encoded, decoded));
-    LOGVOLE_EXPECT_TRUE(decoded.mSeed == message.mSeed);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decoded.mSeed, message.mSeed));
 
     SeedMessage empty{};
     LOGVOLE_EXPECT_FALSE(decode(std::span<const std::uint8_t>{}, empty));
@@ -171,22 +171,22 @@ void LogVole2_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
 void LogVole2_Encoding_RootDigestAndResponseRoundTrip(const oc::CLP&)
 {
     RootDigestMessage digest{};
-    digest.mDPrimeCoeffs = { 1, 4, 9, 16, 25 };
+    assignValues<std::uint64_t>(digest.mDPrimeCoeffs, { 1, 4, 9, 16, 25 });
 
     const auto encodedDigest = encode(digest);
     RootDigestMessage decodedDigest{};
     LOGVOLE_REQUIRE_TRUE(decode(encodedDigest, decodedDigest));
-    LOGVOLE_EXPECT_TRUE(decodedDigest.mDPrimeCoeffs == digest.mDPrimeCoeffs);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decodedDigest.mDPrimeCoeffs, digest.mDPrimeCoeffs));
 
     RootResponseMessage response{};
-    response.mSeed = { 2, 4, 6, 8 };
-    response.mSkPrimeCoeffs = { 10, 20, 30, 40 };
+    assignValues<std::uint8_t>(response.mSeed, { 2, 4, 6, 8 });
+    assignValues<std::uint64_t>(response.mSkPrimeCoeffs, { 10, 20, 30, 40 });
 
     const auto encodedResponse = encode(response);
     RootResponseMessage decodedResponse{};
     LOGVOLE_REQUIRE_TRUE(decode(encodedResponse, decodedResponse));
-    LOGVOLE_EXPECT_TRUE(decodedResponse.mSeed == response.mSeed);
-    LOGVOLE_EXPECT_TRUE(decodedResponse.mSkPrimeCoeffs == response.mSkPrimeCoeffs);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decodedResponse.mSeed, response.mSeed));
+    LOGVOLE_EXPECT_TRUE(rangesEqual(decodedResponse.mSkPrimeCoeffs, response.mSkPrimeCoeffs));
 
     RootDigestMessage emptyDigest{};
     LOGVOLE_EXPECT_FALSE(decode(encode(emptyDigest), emptyDigest));

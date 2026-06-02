@@ -24,7 +24,7 @@ namespace
     {
         LencParams p{};
         p.mRing.mPolyModulusDegree = 1024;
-        p.mRing.mCoeffModulusBits = { 30, 30 };
+        assignValues<int>(p.mRing.mCoeffModulusBits, { 30, 30 });
         return p;
     }
 

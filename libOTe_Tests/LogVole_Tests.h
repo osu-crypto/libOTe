@@ -31,6 +31,8 @@
     X(Civole, RejectsZeroDelta) \
     X(Civole, RejectsOutOfFieldReceiverValue) \
     X(Civole, SupportsSequentialSids) \
+    X(Civole, StateMachineAutoSidSequential) \
+    X(Civole, StateMachineOneShotAutoOffline) \
     X(Civole, RejectsSameSidReuseByEitherParty) \
     X(Core, ModeSelection) \
     X(Core, RuntimeCacheScopePropagatesToParallelWorkers) \

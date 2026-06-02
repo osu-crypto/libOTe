@@ -7,6 +7,7 @@
 #include "macoro/when_all.h"
 
 #include <stdexcept>
+#include <span>
 #include <tuple>
 #include <vector>
 
@@ -72,10 +73,10 @@ namespace
     }
 
     void expect_vole_relation(
-        const std::vector<u64>& x,
+        std::span<const u64> x,
         u64 delta,
-        const std::vector<u64>& keys,
-        const std::vector<u64>& macs,
+        std::span<const u64> keys,
+        std::span<const u64> macs,
         u64 modulus)
     {
         LOGVOLE_REQUIRE_EQ(keys.size(), x.size());
@@ -206,6 +207,84 @@ void LogVole2_Civole_SupportsSequentialSids(const oc::CLP&)
     CivoleReceiverSetXOutput receiverSetX2{};
     run_online_pair(senderState, receiverState, 502, x2, releaseK2, senderRelease2, receiverSetX2);
     expect_vole_relation(x2, delta, releaseK2.mKeys, receiverSetX2.mMacs, modulus);
+}
+
+void LogVole2_Civole_StateMachineAutoSidSequential(const oc::CLP&)
+{
+    CivoleSender sender{};
+    CivoleReceiver receiver{};
+
+    constexpr u64 n = 8;
+    sender.configure(n);
+    receiver.configure(n);
+    const u64 modulus = sender.modulus();
+    LOGVOLE_EXPECT_EQ(receiver.modulus(), modulus);
+
+    const u64 delta = 11 % modulus;
+    auto offlineSockets = coproto::LocalAsyncSocket::makePair();
+    auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
+        sender.offline(delta, offlineSockets[0]),
+        receiver.offline(offlineSockets[1])));
+    std::get<0>(offlineResult).result();
+    std::get<1>(offlineResult).result();
+
+    LOGVOLE_EXPECT_TRUE(sender.hasOffline());
+    LOGVOLE_EXPECT_TRUE(receiver.hasOffline());
+    LOGVOLE_EXPECT_EQ(sender.mNextSid, 0ull);
+    LOGVOLE_EXPECT_EQ(receiver.mNextSid, 0ull);
+
+    const std::vector<u64> x1{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    std::vector<u64> b1(n);
+    std::vector<u64> a1(n);
+    auto onlineSockets1 = coproto::LocalAsyncSocket::makePair();
+    auto onlineResult1 = macoro::sync_wait(macoro::when_all_ready(
+        sender.send(b1, onlineSockets1[0]),
+        receiver.receive(x1, a1, onlineSockets1[1])));
+    std::get<0>(onlineResult1).result();
+    std::get<1>(onlineResult1).result();
+
+    expect_vole_relation(x1, delta, b1, a1, modulus);
+    LOGVOLE_EXPECT_EQ(sender.mNextSid, 1ull);
+    LOGVOLE_EXPECT_EQ(receiver.mNextSid, 1ull);
+
+    const std::vector<u64> x2{ 8, 7, 6, 5, 4, 3, 2, 1 };
+    std::vector<u64> b2(n);
+    std::vector<u64> a2(n);
+    auto onlineSockets2 = coproto::LocalAsyncSocket::makePair();
+    auto onlineResult2 = macoro::sync_wait(macoro::when_all_ready(
+        sender.send(b2, onlineSockets2[0]),
+        receiver.receive(x2, a2, onlineSockets2[1])));
+    std::get<0>(onlineResult2).result();
+    std::get<1>(onlineResult2).result();
+
+    expect_vole_relation(x2, delta, b2, a2, modulus);
+    LOGVOLE_EXPECT_EQ(sender.mNextSid, 2ull);
+    LOGVOLE_EXPECT_EQ(receiver.mNextSid, 2ull);
+}
+
+void LogVole2_Civole_StateMachineOneShotAutoOffline(const oc::CLP&)
+{
+    CivoleSender sender{};
+    CivoleReceiver receiver{};
+
+    const std::vector<u64> x{ 2, 4, 6, 8, 10, 12, 14, 16 };
+    std::vector<u64> b(x.size());
+    std::vector<u64> a(x.size());
+
+    const u64 delta = 7;
+    auto sockets = coproto::LocalAsyncSocket::makePair();
+    auto result = macoro::sync_wait(macoro::when_all_ready(
+        sender.send(delta, b, sockets[0]),
+        receiver.receive(x, a, sockets[1])));
+    std::get<0>(result).result();
+    std::get<1>(result).result();
+
+    LOGVOLE_EXPECT_TRUE(sender.hasOffline());
+    LOGVOLE_EXPECT_TRUE(receiver.hasOffline());
+    LOGVOLE_EXPECT_EQ(sender.mNextSid, 1ull);
+    LOGVOLE_EXPECT_EQ(receiver.mNextSid, 1ull);
+    LOGVOLE_EXPECT_EQ(sender.modulus(), receiver.modulus());
+    expect_vole_relation(x, delta, b, a, sender.modulus());
 }
 
 void LogVole2_Civole_RejectsSameSidReuseByEitherParty(const oc::CLP&)

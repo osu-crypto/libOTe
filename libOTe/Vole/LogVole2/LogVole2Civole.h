@@ -5,6 +5,8 @@
 #include "libOTe/Vole/LogVole2/LogVole2Ring.h"
 #include "libOTe/Vole/LogVole2/LogVole2Sender.h"
 
+#include "cryptoTools/Common/Timer.h"
+
 #include "seal/seal.h"
 
 #include <memory>
@@ -19,7 +21,7 @@ namespace osuCrypto::LogVole2
         RingNttContext mRing;
         u32 mPlaintextModulusBits = 0;
         u64 mPlaintextModulus = 0;
-        std::vector<u64> mDeltaModQj;
+        AlignedUnVec<u64> mDeltaModQj;
         std::shared_ptr<seal::SEALContext> mBatchingContext;
     };
 
@@ -54,8 +56,8 @@ namespace osuCrypto::LogVole2
         CivoleSid mActiveSid = 0;
         bool mKeyReleased = false;
         bool mReleaseIntUsed = false;
-        std::vector<CivoleSid> mUsedSids;
-        std::vector<u64> mReleasedKeys;
+        AlignedUnVec<CivoleSid> mUsedSids;
+        AlignedUnVec<u64> mReleasedKeys;
     };
 
     struct CivoleReceiverState
@@ -66,14 +68,14 @@ namespace osuCrypto::LogVole2
         u32 mRingWidth = 0;
         SamplingSeedConfig mBaseSamplingSeeds;
         ReceiverState mLogVoleState;
-        std::vector<CivoleSid> mUsedSids;
+        AlignedUnVec<CivoleSid> mUsedSids;
     };
 
     struct CivoleReleaseKOutput
     {
         CivoleSid mSid = 0;
         u64 mModulus = 0;
-        std::vector<u64> mKeys;
+        AlignedUnVec<u64> mKeys;
     };
 
     struct CivoleSenderReleaseOutput
@@ -86,9 +88,94 @@ namespace osuCrypto::LogVole2
     {
         CivoleSid mSid = 0;
         u64 mModulus = 0;
-        std::vector<u64> mValues;
-        std::vector<u64> mMacs;
+        AlignedUnVec<u64> mValues;
+        AlignedUnVec<u64> mMacs;
         CommunicationStats mComm;
+    };
+
+    class CivoleSender : public TimerAdapter
+    {
+    public:
+        enum class State
+        {
+            Default,
+            Configured,
+            Offline
+        };
+
+        u64 mRequestSize = 0;
+        u32 mPlaintextModulusBits = 55;
+        u64 mModulus = 0;
+        u64 mDelta = 0;
+        u32 mNumThreads = 1;
+        CivoleSid mNextSid = 0;
+        CommunicationStats mLastOnlineComm;
+        State mState = State::Default;
+        CivoleParams mParams;
+        CivoleSenderState mOfflineState;
+
+        void configure(
+            u64 n,
+            u32 plaintextModulusBits = 55,
+            u32 numThreads = 1);
+
+        bool isConfigured() const { return mState != State::Default; }
+        bool hasOffline() const { return mState == State::Offline; }
+        u64 modulus() const { return mModulus; }
+
+        task<> offline(
+            u64 delta,
+            Socket& sock);
+
+        task<> send(
+            span<u64> b,
+            Socket& sock);
+
+        task<> send(
+            u64 delta,
+            span<u64> b,
+            Socket& sock);
+
+        void clear();
+    };
+
+    class CivoleReceiver : public TimerAdapter
+    {
+    public:
+        enum class State
+        {
+            Default,
+            Configured,
+            Offline
+        };
+
+        u64 mRequestSize = 0;
+        u32 mPlaintextModulusBits = 55;
+        u64 mModulus = 0;
+        u32 mNumThreads = 1;
+        CivoleSid mNextSid = 0;
+        CommunicationStats mLastOnlineComm;
+        State mState = State::Default;
+        CivoleParams mParams;
+        CivoleReceiverState mOfflineState;
+
+        void configure(
+            u64 n,
+            u32 plaintextModulusBits = 55,
+            u32 numThreads = 1);
+
+        bool isConfigured() const { return mState != State::Default; }
+        bool hasOffline() const { return mState == State::Offline; }
+        u64 modulus() const { return mModulus; }
+
+        task<> offline(Socket& sock);
+
+        task<> receive(
+            span<const u64> x,
+            span<u64> a,
+            Socket& sock);
+
+        void clear();
     };
 
     bool makeDefaultCivoleParams(CivoleParams& out, u32 workerThreads = 1);
@@ -100,7 +187,7 @@ namespace osuCrypto::LogVole2
 
     bool wrapZpBatchCrt(
         const ZpCrtContext& ctx,
-        const std::vector<u64>& labels,
+        std::span<const u64> labels,
         bool multiplyByDelta,
         u64 padValue,
         u32 requestedWorkers,
@@ -115,7 +202,7 @@ namespace osuCrypto::LogVole2
 
     bool wrapZpLabelsCrt(
         const ZpCrtContext& ctx,
-        const std::vector<u64>& labels,
+        std::span<const u64> labels,
         bool multiplyByDelta,
         u64 padValue,
         u32 requestedWorkers,
@@ -127,7 +214,7 @@ namespace osuCrypto::LogVole2
         u64 zpLabelCount,
         bool scaleAndRound,
         u32 requestedWorkers,
-        std::vector<u64>& out);
+        AlignedUnVec<u64>& out);
 
     task<> civoleSenderOffline(
         const CivoleSenderOfflineInput& input,
@@ -153,7 +240,7 @@ namespace osuCrypto::LogVole2
     task<> civoleReceiverSetX(
         CivoleReceiverState& state,
         CivoleSid sid,
-        const std::vector<u64>& x,
+        std::span<const u64> x,
         CivoleReceiverSetXOutput& output,
         Socket& sock);
 }

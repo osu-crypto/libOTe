@@ -33,7 +33,7 @@ namespace
     {
         RingParams params{};
         params.mPolyModulusDegree = 1024;
-        params.mCoeffModulusBits = { 30, 30 };
+        assignValues<int>(params.mCoeffModulusBits, { 30, 30 });
         return params;
     }
 
@@ -41,7 +41,7 @@ namespace
     {
         Params params{};
         params.mShrinkExpand.mRing.mPolyModulusDegree = 1024;
-        params.mShrinkExpand.mRing.mCoeffModulusBits = { 54, 54, 54, 54, 54, 54, 54 };
+        assignValues<int>(params.mShrinkExpand.mRing.mCoeffModulusBits, { 54, 54, 54, 54, 54, 54, 54 });
         params.mShrinkExpand.mPlaintextModulusBits = 54;
         params.mShrinkExpand.mAlpha = 2;
         params.mShrinkExpand.mTau = 3;
@@ -63,7 +63,7 @@ namespace
     {
         Params params{};
         params.mShrinkExpand.mRing.mPolyModulusDegree = 8192;
-        params.mShrinkExpand.mRing.mCoeffModulusBits = { 55, 55, 55, 55 };
+        assignValues<int>(params.mShrinkExpand.mRing.mCoeffModulusBits, { 55, 55, 55, 55 });
         params.mShrinkExpand.mPlaintextModulusBits = 55;
         params.mShrinkExpand.mMode = ShrinkExpandMode::FullNoise;
         params.mShrinkExpand.mNoiseBound = 2;
@@ -101,7 +101,7 @@ namespace
     {
         Params params{};
         params.mShrinkExpand.mRing.mPolyModulusDegree = 16384;
-        params.mShrinkExpand.mRing.mCoeffModulusBits = { 55, 55, 55, 55, 55 };
+        assignValues<int>(params.mShrinkExpand.mRing.mCoeffModulusBits, { 55, 55, 55, 55, 55 });
         params.mShrinkExpand.mPlaintextModulusBits = 55;
         params.mShrinkExpand.mMode = ShrinkExpandMode::Deterministic;
         params.mShrinkExpand.mNoiseBound = 0;
@@ -203,7 +203,7 @@ namespace
     RnsPoly zero_poly(const RingNttContext& ctx)
     {
         RnsPoly out{};
-        out.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+        resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
         return out;
     }
 
@@ -270,7 +270,7 @@ namespace
         RnsPoly out{};
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         const std::size_t rho = ctx.mModuli.size();
-        out.mCoeffs.assign(n * rho, 0u);
+        resizeZero(out.mCoeffs, n * rho);
 
         const std::uint64_t mask =
             (bitCount >= 63u)
@@ -469,7 +469,7 @@ namespace
     bool find_root_golden_seed_for_test(
         const Params& params,
         const SenderState& sender,
-        std::vector<std::uint8_t>& seedOut)
+        AlignedUnVec<std::uint8_t>& seedOut)
     {
         Params candidateParams = params;
         candidateParams.mShrinkExpand = sender.mShrinkExpandState.mParams;
@@ -498,7 +498,7 @@ namespace
         std::uniform_int_distribution<int> distBytes(0, 255);
 
         constexpr int maxSeedAttempts = 100;
-        std::vector<std::uint8_t> seed(16);
+        AlignedUnVec<std::uint8_t> seed(16);
         for (int attempt = 0; attempt < maxSeedAttempts; ++attempt)
         {
             for (auto& byte : seed)
@@ -718,7 +718,7 @@ void LogVole2_Core_SeedLabelSampleCt2FromSeedDeterministic(const oc::CLP&)
 
     std::vector<RnsPoly> c;
     LOGVOLE_REQUIRE_TRUE(seedLabelSampleCt2FromSeed(seeds, seed, 3, 3, params, c));
-    LOGVOLE_EXPECT_FALSE(a[0].mCoeffs == c[0].mCoeffs);
+    LOGVOLE_EXPECT_FALSE(rangesEqual(a[0].mCoeffs, c[0].mCoeffs));
 }
 
 void LogVole2_Core_SeedLabelDenoiseMatchesShrinkExpandComb(const oc::CLP&)
@@ -1038,7 +1038,9 @@ void LogVole2_Core_RootOnlineLocalFlow(const oc::CLP&)
     SenderState sender{};
     sender.mParams = params;
     sender.mShrinkExpandState = seSender;
-    sender.mGoldenSeed = { 0, 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225 };
+    assignValues<std::uint8_t>(
+        sender.mGoldenSeed,
+        { 0, 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225 });
 
     RootOfflineMessage offlineMessage{};
     LOGVOLE_REQUIRE_TRUE(prepareRootOfflineSender(sender, offlineMessage));
@@ -1063,14 +1065,14 @@ void LogVole2_Core_RootOnlineLocalFlow(const oc::CLP&)
 
     RootResponseMessage response{};
     LOGVOLE_REQUIRE_TRUE(prepareRootResponseSender(sender, digestMessage, response));
-    LOGVOLE_EXPECT_TRUE(response.mSeed == sender.mGoldenSeed);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(response.mSeed, sender.mGoldenSeed));
     LOGVOLE_REQUIRE_EQ(response.mSkPrimeCoeffs.size(), ringPolyCoeffCount(params.mShrinkExpand.mRing));
 
     RnsPoly senderKey{};
     RnsPoly receiverKey{};
     LOGVOLE_REQUIRE_TRUE(computeRootSenderKey(sender, response.mSeed, senderKey));
     LOGVOLE_REQUIRE_TRUE(finalizeRootResponseReceiver(receiver, digestState, response, receiverKey));
-    LOGVOLE_EXPECT_TRUE(receiver.mGoldenSeed == response.mSeed);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(receiver.mGoldenSeed, response.mSeed));
 
     ShrinkExpandExpandSenderInput senderExpandInput{};
     senderExpandInput.mNonce = deriveSeedInstanceNonce(
@@ -1278,7 +1280,7 @@ void LogVole2_Core_RootLocalApiRelation(const oc::CLP&)
         digestState,
         response,
         receiverOnline));
-    LOGVOLE_EXPECT_TRUE(receiverOnline.mSeed == senderOnline.mSeed);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(receiverOnline.mSeed, senderOnline.mSeed));
 
     std::vector<RnsPoly> actual;
     std::vector<RnsPoly> expected;
@@ -1334,7 +1336,7 @@ void LogVole2_Core_TwoLevelLocalApiRelation(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
     LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
     LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
-    LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == receiverOnline.mSeed);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
 
     std::vector<RnsPoly> sRep;
     LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
@@ -1418,7 +1420,7 @@ void LogVole2_Core_ThreeLevelLocalApiRelation(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
     LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
     LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
-    LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == receiverOnline.mSeed);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
 
     std::vector<RnsPoly> sRep;
     LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
@@ -1474,7 +1476,7 @@ void LogVole2_Core_ThreeLevelLocalPrecomputeCache(const oc::CLP&)
     const auto seed = senderOffline.mState.mGoldenSeed;
     const auto cachedTbk = senderOffline.mState.mPrecomputedTbk.get();
     LOGVOLE_REQUIRE_TRUE(ensureSenderPrecompute(senderOffline.mState));
-    LOGVOLE_EXPECT_TRUE(senderOffline.mState.mGoldenSeed == seed);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(senderOffline.mState.mGoldenSeed, seed));
     LOGVOLE_EXPECT_TRUE(senderOffline.mState.mPrecomputedTbk.get() == cachedTbk);
 }
 
@@ -1525,7 +1527,7 @@ void LogVole2_Core_ThreeLevelLocalRepeatedOnline(const oc::CLP&)
         }
     }
 
-    std::vector<std::uint8_t> firstSeed;
+    AlignedUnVec<std::uint8_t> firstSeed;
     const std::uint32_t plainSampleBits =
         std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
     const auto verifyOnline = [&](std::uint64_t inputSeed) {
@@ -1543,7 +1545,7 @@ void LogVole2_Core_ThreeLevelLocalRepeatedOnline(const oc::CLP&)
         LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
         LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
         LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
-        LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == receiverOnline.mSeed);
+        LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
 
         if (firstSeed.empty())
         {
@@ -1551,7 +1553,7 @@ void LogVole2_Core_ThreeLevelLocalRepeatedOnline(const oc::CLP&)
         }
         else
         {
-            LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == firstSeed);
+            LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, firstSeed));
         }
 
         std::vector<RnsPoly> actual;
@@ -1806,7 +1808,7 @@ void LogVole2_Core_ThreeLevelCoprotoRelation(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
     LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
     LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
-    LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == receiverOnline.mSeed);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
     LOGVOLE_EXPECT_EQ(senderOnline.mComm.mBytesSent, receiverOnline.mComm.mBytesReceived);
     LOGVOLE_EXPECT_EQ(senderOnline.mComm.mBytesReceived, receiverOnline.mComm.mBytesSent);
     LOGVOLE_EXPECT_GT(senderOnline.mComm.mBytesSent, 0ull);
@@ -1910,7 +1912,7 @@ void LogVole2_Core_ThreeLevelCoprotoMultiThread(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
     LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
     LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
-    LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == receiverOnline.mSeed);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
 
     std::vector<RnsPoly> sRep;
     LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
@@ -1992,7 +1994,7 @@ void LogVole2_Core_ThreeLevelCoprotoSkipTbkOutput(const oc::CLP&)
     LOGVOLE_EXPECT_TRUE(senderOnline.mTbk.empty());
     LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
     LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
-    LOGVOLE_EXPECT_TRUE(senderOnline.mSeed == receiverOnline.mSeed);
+    LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
     LOGVOLE_REQUIRE_TRUE(senderState.mPrecomputedTbk != nullptr);
     LOGVOLE_REQUIRE_EQ(senderState.mPrecomputedTbk->size(), params.mW);
 }
@@ -2041,7 +2043,7 @@ void LogVole2_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
     for (std::uint32_t row = 0; row < params.mShrinkExpand.mMu; ++row)
     {
         RnsPoly ask{};
-        ask.mCoeffs.assign(ringPolyCoeffCount(params.mShrinkExpand.mRing), 0);
+        resizeZero(ask.mCoeffs, ringPolyCoeffCount(params.mShrinkExpand.mRing));
         LOGVOLE_REQUIRE_TRUE(dyadicMultiplyAddNttInplace(publicANtt[row], sk2Ntt, ask, ctx));
         LOGVOLE_REQUIRE_TRUE(inverseNtt(ask, ctx));
 

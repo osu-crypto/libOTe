@@ -1,5 +1,6 @@
 #include "libOTe/Vole/LogVole2/LogVole2Encoding.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
@@ -9,38 +10,6 @@ namespace osuCrypto::LogVole2
 {
     namespace
     {
-        void appendU8(Buffer& buffer, u8 value)
-        {
-            buffer.push_back(value);
-        }
-
-        void appendU16(Buffer& buffer, u16 value)
-        {
-            buffer.push_back(static_cast<u8>(value & 0xFFu));
-            buffer.push_back(static_cast<u8>((value >> 8u) & 0xFFu));
-        }
-
-        void appendU32(Buffer& buffer, u32 value)
-        {
-            for (u32 i = 0; i < sizeof(u32); ++i)
-            {
-                buffer.push_back(static_cast<u8>((value >> (8u * i)) & 0xFFu));
-            }
-        }
-
-        void appendU64(Buffer& buffer, u64 value)
-        {
-            for (u32 i = 0; i < sizeof(u64); ++i)
-            {
-                buffer.push_back(static_cast<u8>((value >> (8u * i)) & 0xFFu));
-            }
-        }
-
-        void appendI64(Buffer& buffer, i64 value)
-        {
-            appendU64(buffer, static_cast<u64>(value));
-        }
-
         bool readU8(std::span<const u8> payload, u64& offset, u8& value)
         {
             if (offset + sizeof(u8) > payload.size())
@@ -109,8 +78,8 @@ namespace osuCrypto::LogVole2
             return true;
         }
 
-        template<typename T>
-        u32 checkedVectorSize(const std::vector<T>& values)
+        template<typename Vec>
+        u32 checkedVectorSize(const Vec& values)
         {
             if (values.size() > std::numeric_limits<u32>::max())
             {
@@ -119,25 +88,156 @@ namespace osuCrypto::LogVole2
             return static_cast<u32>(values.size());
         }
 
-        void appendU16Vector(Buffer& buffer, const std::vector<u16>& values)
+        template<typename Vec>
+        std::size_t u64VectorByteSize(const Vec& values)
         {
-            appendU32(buffer, checkedVectorSize(values));
-            for (auto value : values)
-            {
-                appendU16(buffer, value);
-            }
+            checkedVectorSize(values);
+            return sizeof(u32) + values.size() * sizeof(u64);
         }
 
-        void appendU64Vector(Buffer& buffer, const std::vector<u64>& values)
+        std::size_t ringBatchCoeffCount(const std::vector<RnsPoly>& polys)
         {
-            appendU32(buffer, checkedVectorSize(values));
-            for (auto value : values)
+            std::size_t total = 0;
+            for (const auto& poly : polys)
             {
-                appendU64(buffer, value);
+                if (poly.mCoeffs.size() > std::numeric_limits<u32>::max() - total)
+                {
+                    throw std::length_error("LogVole2 ring batch is too large to encode");
+                }
+                total += poly.mCoeffs.size();
             }
+            return total;
         }
 
-        bool readU16Vector(std::span<const u8> payload, u64& offset, std::vector<u16>& values)
+        std::size_t ringBatchByteSize(const std::vector<RnsPoly>& polys)
+        {
+            const auto coeffCount = ringBatchCoeffCount(polys);
+            return sizeof(u32) + coeffCount * sizeof(u64);
+        }
+
+        std::size_t ringParamsByteSize(const RingParams& params)
+        {
+            return sizeof(u32) + sizeof(u32) + params.mCoeffModulusBits.size() * sizeof(u16);
+        }
+
+        std::size_t paramsByteSize(const ShrinkExpandParams& params)
+        {
+            return ringParamsByteSize(params.mRing) +
+                   5u * sizeof(u32) +
+                   3u * sizeof(u8) +
+                   2u * sizeof(u64) +
+                   sizeof(i64);
+        }
+
+        struct BufferWriter
+        {
+            Buffer mBuffer;
+            std::size_t mOffset = 0;
+
+            explicit BufferWriter(std::size_t size)
+                : mBuffer(size)
+            {
+            }
+
+            void writeU8(u8 value)
+            {
+                mBuffer[mOffset++] = value;
+            }
+
+            void writeU16(u16 value)
+            {
+                mBuffer[mOffset++] = static_cast<u8>(value & 0xFFu);
+                mBuffer[mOffset++] = static_cast<u8>((value >> 8u) & 0xFFu);
+            }
+
+            void writeU32(u32 value)
+            {
+                for (u32 i = 0; i < sizeof(u32); ++i)
+                {
+                    mBuffer[mOffset + i] = static_cast<u8>((value >> (8u * i)) & 0xFFu);
+                }
+                mOffset += sizeof(u32);
+            }
+
+            void writeU64(u64 value)
+            {
+                for (u32 i = 0; i < sizeof(u64); ++i)
+                {
+                    mBuffer[mOffset + i] = static_cast<u8>((value >> (8u * i)) & 0xFFu);
+                }
+                mOffset += sizeof(u64);
+            }
+
+            void writeI64(i64 value)
+            {
+                writeU64(static_cast<u64>(value));
+            }
+
+            void writeBytes(std::span<const u8> values)
+            {
+                std::copy(values.begin(), values.end(), mBuffer.begin() + static_cast<std::ptrdiff_t>(mOffset));
+                mOffset += values.size();
+            }
+
+            template<typename Vec>
+            void writeU64Vector(const Vec& values)
+            {
+                writeU32(checkedVectorSize(values));
+                for (auto value : values)
+                {
+                    writeU64(static_cast<u64>(value));
+                }
+            }
+
+            void writeRingBatch(const std::vector<RnsPoly>& polys)
+            {
+                writeU32(static_cast<u32>(ringBatchCoeffCount(polys)));
+                for (const auto& poly : polys)
+                {
+                    for (auto coeff : poly.mCoeffs)
+                    {
+                        writeU64(coeff);
+                    }
+                }
+            }
+
+            void writeRingParams(const RingParams& params)
+            {
+                writeU32(params.mPolyModulusDegree);
+                writeU32(checkedVectorSize(params.mCoeffModulusBits));
+                for (auto bits : params.mCoeffModulusBits)
+                {
+                    writeU16(static_cast<u16>(bits));
+                }
+            }
+
+            void writeParams(const ShrinkExpandParams& params)
+            {
+                writeRingParams(params.mRing);
+                writeU32(params.mPlaintextModulusBits);
+                writeU32(params.mAlpha);
+                writeU32(params.mMu);
+                writeU32(params.mGadgetLogBase);
+                writeU32(params.mTau);
+                writeU8(static_cast<u8>(params.mTruncateOneGadgetDigit ? 1 : 0));
+                writeU8(static_cast<u8>(params.mLeafInputsAreGadget ? 1 : 0));
+                writeU8(static_cast<u8>(params.mMode));
+                writeU64(params.mSamplingSeeds.mNoiseRoot);
+                writeU64(params.mSamplingSeeds.mCt2Root);
+                writeI64(params.mNoiseBound);
+            }
+
+            Buffer finish()
+            {
+                if (mOffset != mBuffer.size())
+                {
+                    throw std::logic_error("LogVole2 encoding size mismatch");
+            }
+                return std::move(mBuffer);
+            }
+        };
+
+        bool readU16Vector(std::span<const u8> payload, u64& offset, AlignedUnVec<u16>& values)
         {
             u32 count = 0;
             if (!readU32(payload, offset, count) ||
@@ -146,8 +246,7 @@ namespace osuCrypto::LogVole2
                 return false;
             }
 
-            values.clear();
-            values.reserve(count);
+            values.resize(count);
             for (u32 i = 0; i < count; ++i)
             {
                 u16 value = 0;
@@ -155,12 +254,12 @@ namespace osuCrypto::LogVole2
                 {
                     return false;
                 }
-                values.push_back(value);
+                values[i] = value;
             }
             return true;
         }
 
-        bool readU64Vector(std::span<const u8> payload, u64& offset, std::vector<u64>& values)
+        bool readU64Vector(std::span<const u8> payload, u64& offset, AlignedUnVec<u64>& values)
         {
             u32 count = 0;
             if (!readU32(payload, offset, count) ||
@@ -169,8 +268,7 @@ namespace osuCrypto::LogVole2
                 return false;
             }
 
-            values.clear();
-            values.reserve(count);
+            values.resize(count);
             for (u32 i = 0; i < count; ++i)
             {
                 u64 value = 0;
@@ -178,56 +276,42 @@ namespace osuCrypto::LogVole2
                 {
                     return false;
                 }
-                values.push_back(value);
+                values[i] = value;
             }
             return true;
         }
 
-        void appendRingParams(Buffer& out, const RingParams& params)
-        {
-            appendU32(out, params.mPolyModulusDegree);
-
-            std::vector<u16> coeffBits;
-            coeffBits.reserve(params.mCoeffModulusBits.size());
-            for (auto bits : params.mCoeffModulusBits)
-            {
-                coeffBits.push_back(static_cast<u16>(bits));
-            }
-            appendU16Vector(out, coeffBits);
-        }
-
         bool readRingParams(std::span<const u8> payload, u64& offset, RingParams& params)
         {
-            std::vector<u16> coeffBits;
+            AlignedUnVec<u16> coeffBits;
             if (!readU32(payload, offset, params.mPolyModulusDegree) ||
                 !readU16Vector(payload, offset, coeffBits))
             {
                 return false;
             }
 
-            params.mCoeffModulusBits.clear();
-            params.mCoeffModulusBits.reserve(coeffBits.size());
+            params.mCoeffModulusBits.resize(coeffBits.size());
+            u64 idx = 0;
             for (auto bits : coeffBits)
             {
-                params.mCoeffModulusBits.push_back(static_cast<int>(bits));
+                params.mCoeffModulusBits[idx++] = static_cast<int>(bits);
             }
             return true;
         }
 
+        template<typename Vec>
         Buffer encodeKeyDerive(
             u32 polyModulusDegree,
             u32 coeffModulusCount,
             u32 tau,
-            const std::vector<u64>& coeffs)
+            const Vec& coeffs)
         {
-            Buffer out;
-            out.reserve(4 * sizeof(u32) + coeffs.size() * sizeof(u64));
-
-            appendU32(out, polyModulusDegree);
-            appendU32(out, coeffModulusCount);
-            appendU32(out, tau);
-            appendU64Vector(out, coeffs);
-            return out;
+            BufferWriter writer(3u * sizeof(u32) + u64VectorByteSize(coeffs));
+            writer.writeU32(polyModulusDegree);
+            writer.writeU32(coeffModulusCount);
+            writer.writeU32(tau);
+            writer.writeU64Vector(coeffs);
+            return writer.finish();
         }
 
         bool decodeKeyDerive(
@@ -235,7 +319,7 @@ namespace osuCrypto::LogVole2
             u32& polyModulusDegree,
             u32& coeffModulusCount,
             u32& tau,
-            std::vector<u64>& coeffs)
+            AlignedUnVec<u64>& coeffs)
         {
             u64 offset = 0;
             if (!readU32(payload, offset, polyModulusDegree) ||
@@ -247,23 +331,6 @@ namespace osuCrypto::LogVole2
             }
 
             return offset == payload.size();
-        }
-
-        void appendParams(Buffer& out, const ShrinkExpandParams& params)
-        {
-            appendRingParams(out, params.mRing);
-
-            appendU32(out, params.mPlaintextModulusBits);
-            appendU32(out, params.mAlpha);
-            appendU32(out, params.mMu);
-            appendU32(out, params.mGadgetLogBase);
-            appendU32(out, params.mTau);
-            appendU8(out, static_cast<u8>(params.mTruncateOneGadgetDigit ? 1 : 0));
-            appendU8(out, static_cast<u8>(params.mLeafInputsAreGadget ? 1 : 0));
-            appendU8(out, static_cast<u8>(params.mMode));
-            appendU64(out, params.mSamplingSeeds.mNoiseRoot);
-            appendU64(out, params.mSamplingSeeds.mCt2Root);
-            appendI64(out, params.mNoiseBound);
         }
 
         bool readParams(std::span<const u8> payload, u64& offset, ShrinkExpandParams& params)
@@ -314,86 +381,92 @@ namespace osuCrypto::LogVole2
 
     Buffer encode(const ShrinkExpandOfflineMessage& message)
     {
-        Buffer out;
-        appendParams(out, message.mParams);
-
-        appendU32(out, message.mCt1.mRows);
-        appendU32(out, message.mCt1.mCols);
-        appendU64Vector(out, packRingTensor(message.mCt1));
-
-        appendU32(out, message.mLacct.mWidthPadded);
-        appendU32(out, message.mLacct.mLevels);
-        appendU32(out, message.mLacct.mCt.mRows);
-        appendU32(out, message.mLacct.mCt.mCols);
-        appendU64Vector(out, packRingTensor(message.mLacct.mCt));
-        return out;
+        BufferWriter writer(
+            paramsByteSize(message.mParams) +
+            2u * sizeof(u32) +
+            ringBatchByteSize(message.mCt1.mPolys) +
+            4u * sizeof(u32) +
+            ringBatchByteSize(message.mLacct.mCt.mPolys));
+        writer.writeParams(message.mParams);
+        writer.writeU32(message.mCt1.mRows);
+        writer.writeU32(message.mCt1.mCols);
+        writer.writeRingBatch(message.mCt1.mPolys);
+        writer.writeU32(message.mLacct.mWidthPadded);
+        writer.writeU32(message.mLacct.mLevels);
+        writer.writeU32(message.mLacct.mCt.mRows);
+        writer.writeU32(message.mLacct.mCt.mCols);
+        writer.writeRingBatch(message.mLacct.mCt.mPolys);
+        return writer.finish();
     }
 
     Buffer encode(const PolyMessage& message)
     {
-        Buffer out;
-        appendU32(out, message.mPolyModulusDegree);
-        appendU32(out, message.mCoeffModulusCount);
-        appendU64Vector(out, message.mCoeffs);
-        return out;
+        BufferWriter writer(2u * sizeof(u32) + u64VectorByteSize(message.mCoeffs));
+        writer.writeU32(message.mPolyModulusDegree);
+        writer.writeU32(message.mCoeffModulusCount);
+        writer.writeU64Vector(message.mCoeffs);
+        return writer.finish();
     }
 
     Buffer encode(const SeedMessage& message)
     {
-        Buffer out;
-        out.reserve(message.mSeed.size());
-        out.insert(out.end(), message.mSeed.begin(), message.mSeed.end());
-        return out;
+        BufferWriter writer(message.mSeed.size());
+        writer.writeBytes(std::span<const u8>(message.mSeed.data(), message.mSeed.size()));
+        return writer.finish();
     }
 
     Buffer encode(const RootOfflineMessage& message)
     {
-        Buffer out;
-        appendRingParams(out, message.mRing);
-        appendU32(out, message.mTauHi);
-        appendU32(out, message.mGadgetLogBase);
-        appendU32(out, message.mPlaintextModulusBits);
-        appendU32(out, message.mLeftWidth);
-        appendU32(out, message.mRandomizerWidth);
-
-        appendU32(out, message.mCtR.mRows);
-        appendU32(out, message.mCtR.mCols);
-        appendU64Vector(out, packRingTensor(message.mCtR));
-
-        appendU32(out, message.mLacctLeft.mWidthPadded);
-        appendU32(out, message.mLacctLeft.mLevels);
-        appendU32(out, message.mLacctLeft.mCt.mRows);
-        appendU32(out, message.mLacctLeft.mCt.mCols);
-        appendU64Vector(out, packRingTensor(message.mLacctLeft.mCt));
-
-        appendU32(out, message.mTopCt.mRows);
-        appendU32(out, message.mTopCt.mCols);
-        appendU64Vector(out, packRingTensor(message.mTopCt));
-
-        appendU32(out, checkedVectorSize(message.mPublicBStarNtt));
-        appendU64Vector(out, packRingBatch(message.mPublicBStarNtt));
-        return out;
+        BufferWriter writer(
+            ringParamsByteSize(message.mRing) +
+            5u * sizeof(u32) +
+            2u * sizeof(u32) +
+            ringBatchByteSize(message.mCtR.mPolys) +
+            4u * sizeof(u32) +
+            ringBatchByteSize(message.mLacctLeft.mCt.mPolys) +
+            2u * sizeof(u32) +
+            ringBatchByteSize(message.mTopCt.mPolys) +
+            sizeof(u32) +
+            ringBatchByteSize(message.mPublicBStarNtt));
+        writer.writeRingParams(message.mRing);
+        writer.writeU32(message.mTauHi);
+        writer.writeU32(message.mGadgetLogBase);
+        writer.writeU32(message.mPlaintextModulusBits);
+        writer.writeU32(message.mLeftWidth);
+        writer.writeU32(message.mRandomizerWidth);
+        writer.writeU32(message.mCtR.mRows);
+        writer.writeU32(message.mCtR.mCols);
+        writer.writeRingBatch(message.mCtR.mPolys);
+        writer.writeU32(message.mLacctLeft.mWidthPadded);
+        writer.writeU32(message.mLacctLeft.mLevels);
+        writer.writeU32(message.mLacctLeft.mCt.mRows);
+        writer.writeU32(message.mLacctLeft.mCt.mCols);
+        writer.writeRingBatch(message.mLacctLeft.mCt.mPolys);
+        writer.writeU32(message.mTopCt.mRows);
+        writer.writeU32(message.mTopCt.mCols);
+        writer.writeRingBatch(message.mTopCt.mPolys);
+        writer.writeU32(checkedVectorSize(message.mPublicBStarNtt));
+        writer.writeRingBatch(message.mPublicBStarNtt);
+        return writer.finish();
     }
 
     Buffer encode(const RootDigestMessage& message)
     {
-        Buffer out;
-        appendU64Vector(out, message.mDPrimeCoeffs);
-        return out;
+        BufferWriter writer(u64VectorByteSize(message.mDPrimeCoeffs));
+        writer.writeU64Vector(message.mDPrimeCoeffs);
+        return writer.finish();
     }
 
     Buffer encode(const RootResponseMessage& message)
     {
-        Buffer out;
-        out.reserve(
+        BufferWriter writer(
             sizeof(u32) +
             message.mSeed.size() +
-            sizeof(u32) +
-            message.mSkPrimeCoeffs.size() * sizeof(u64));
-        appendU32(out, checkedVectorSize(message.mSeed));
-        out.insert(out.end(), message.mSeed.begin(), message.mSeed.end());
-        appendU64Vector(out, message.mSkPrimeCoeffs);
-        return out;
+            u64VectorByteSize(message.mSkPrimeCoeffs));
+        writer.writeU32(checkedVectorSize(message.mSeed));
+        writer.writeBytes(std::span<const u8>(message.mSeed.data(), message.mSeed.size()));
+        writer.writeU64Vector(message.mSkPrimeCoeffs);
+        return writer.finish();
     }
 
     bool decode(std::span<const u8> payload, KeyDeriveRequest& message)
@@ -419,8 +492,8 @@ namespace osuCrypto::LogVole2
     bool decode(std::span<const u8> payload, ShrinkExpandOfflineMessage& message)
     {
         u64 offset = 0;
-        std::vector<u64> ct1Coeffs;
-        std::vector<u64> lacctCoeffs;
+        AlignedUnVec<u64> ct1Coeffs;
+        AlignedUnVec<u64> lacctCoeffs;
 
         if (!readParams(payload, offset, message.mParams) ||
             !readU32(payload, offset, message.mCt1.mRows) ||
@@ -477,17 +550,17 @@ namespace osuCrypto::LogVole2
             return false;
         }
 
-        message.mSeed.assign(payload.begin(), payload.end());
+        assignRange(message.mSeed, payload.begin(), payload.end());
         return true;
     }
 
     bool decode(std::span<const u8> payload, RootOfflineMessage& message)
     {
         u64 offset = 0;
-        std::vector<u64> ctRCoeffs;
-        std::vector<u64> lacctCoeffs;
-        std::vector<u64> topCtCoeffs;
-        std::vector<u64> publicBStarCoeffs;
+        AlignedUnVec<u64> ctRCoeffs;
+        AlignedUnVec<u64> lacctCoeffs;
+        AlignedUnVec<u64> topCtCoeffs;
+        AlignedUnVec<u64> publicBStarCoeffs;
         u32 publicBStarCount = 0;
 
         if (!readRingParams(payload, offset, message.mRing) ||
@@ -571,7 +644,8 @@ namespace osuCrypto::LogVole2
             return false;
         }
 
-        message.mSeed.assign(
+        assignRange(
+            message.mSeed,
             payload.begin() + static_cast<std::ptrdiff_t>(offset),
             payload.begin() + static_cast<std::ptrdiff_t>(offset + seedSize));
         offset += seedSize;

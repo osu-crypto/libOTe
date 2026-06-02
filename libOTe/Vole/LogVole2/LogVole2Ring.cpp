@@ -252,7 +252,7 @@ namespace osuCrypto::LogVole2
             out.assign(levels, {});
             for (auto& digit : out)
             {
-                digit.mCoeffs.assign(canonical.mCoeffs.size(), 0);
+                resizeZero(digit.mCoeffs, canonical.mCoeffs.size());
             }
 
             const std::size_t n = ctx.mParams.mPolyModulusDegree;
@@ -406,7 +406,7 @@ namespace osuCrypto::LogVole2
 
     u64 deriveSeedInstanceNonce(
         const SamplingSeedConfig& config,
-        const std::vector<u8>& seed,
+        std::span<const u8> seed,
         u64 instanceIdx,
         u64 fallbackNonce)
     {
@@ -462,6 +462,11 @@ namespace osuCrypto::LogVole2
 
     bool validateRingBatchShape(const std::vector<RnsPoly>& polys, const RingParams& params)
     {
+        return validateRingBatchShape(std::span<const RnsPoly>(polys.data(), polys.size()), params);
+    }
+
+    bool validateRingBatchShape(std::span<const RnsPoly> polys, const RingParams& params)
+    {
         for (const auto& poly : polys)
         {
             if (!validateRingPolyShape(poly, params))
@@ -482,7 +487,10 @@ namespace osuCrypto::LogVole2
         std::vector<seal::Modulus> moduli;
         try
         {
-            moduli = seal::CoeffModulus::Create(params.mPolyModulusDegree, params.mCoeffModulusBits);
+            std::vector<int> coeffModulusBits(
+                params.mCoeffModulusBits.begin(),
+                params.mCoeffModulusBits.end());
+            moduli = seal::CoeffModulus::Create(params.mPolyModulusDegree, coeffModulusBits);
         }
         catch (const std::exception&)
         {
@@ -657,7 +665,7 @@ namespace osuCrypto::LogVole2
         RnsPoly aNtt = a;
         RnsPoly bNtt = b;
         RnsPoly zero{};
-        zero.mCoeffs.assign(a.mCoeffs.size(), 0);
+        resizeZero(zero.mCoeffs, a.mCoeffs.size());
         if (!forwardNtt(aNtt, ctx) || !forwardNtt(bNtt, ctx) ||
             !dyadicMultiplyAddNtt(aNtt, bNtt, zero, ctx, a) ||
             !inverseNtt(a, ctx))
@@ -723,7 +731,7 @@ namespace osuCrypto::LogVole2
         out.assign(tau, {});
         for (auto& digit : out)
         {
-            digit.mCoeffs.assign(canonical.mCoeffs.size(), 0);
+            resizeZero(digit.mCoeffs, canonical.mCoeffs.size());
         }
 
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
@@ -762,14 +770,15 @@ namespace osuCrypto::LogVole2
             }
         }
 
-        out.mCoeffs.assign(digits[0].mCoeffs.size(), 0);
+        resizeZero(out.mCoeffs, digits[0].mCoeffs.size());
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
         {
             const u64 mod = ctx.mModuli[modIdx].value();
             const std::size_t offset = modIdx * n;
 
-            std::vector<u64> basePows(digits.size(), 1);
+            AlignedUnVec<u64> basePows;
+            resizeFill<u64>(basePows, digits.size(), 1);
             for (std::size_t j = 0; j < digits.size(); ++j)
             {
                 basePows[j] = basePowMod(base, static_cast<u32>(j), mod);
@@ -827,7 +836,7 @@ namespace osuCrypto::LogVole2
         out.assign(levels, {});
         for (auto& digit : out)
         {
-            digit.mCoeffs.assign(canonical.mCoeffs.size(), 0);
+            resizeZero(digit.mCoeffs, canonical.mCoeffs.size());
         }
 
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
@@ -930,14 +939,15 @@ namespace osuCrypto::LogVole2
             }
         }
 
-        out.mCoeffs.assign(digits[0].mCoeffs.size(), 0);
+        resizeZero(out.mCoeffs, digits[0].mCoeffs.size());
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
         {
             const u64 mod = ctx.mModuli[modIdx].value();
             const std::size_t offset = modIdx * n;
 
-            std::vector<u64> pow2Shifts(digits.size(), 0);
+            AlignedUnVec<u64> pow2Shifts;
+            resizeZero(pow2Shifts, digits.size());
             for (std::size_t level = 0; level < digits.size(); ++level)
             {
                 const u64 shiftU64 = static_cast<u64>(level) * digitBits;
@@ -965,7 +975,7 @@ namespace osuCrypto::LogVole2
         return true;
     }
 
-    std::vector<u64> packRingBatch(const std::vector<RnsPoly>& polys)
+    AlignedUnVec<u64> packRingBatch(const std::vector<RnsPoly>& polys)
     {
         std::size_t total = 0;
         for (const auto& poly : polys)
@@ -973,11 +983,11 @@ namespace osuCrypto::LogVole2
             total += poly.mCoeffs.size();
         }
 
-        std::vector<u64> out;
-        out.reserve(total);
+        AlignedUnVec<u64> out(total);
+        auto* outIter = out.data();
         for (const auto& poly : polys)
         {
-            out.insert(out.end(), poly.mCoeffs.begin(), poly.mCoeffs.end());
+            outIter = std::copy(poly.mCoeffs.begin(), poly.mCoeffs.end(), outIter);
         }
         return out;
     }
@@ -986,7 +996,7 @@ namespace osuCrypto::LogVole2
         u32 count,
         u32 polyModulusDegree,
         u32 coeffModulusCount,
-        const std::vector<u64>& flat,
+        std::span<const u64> flat,
         std::vector<RnsPoly>& out,
         u32)
     {
@@ -1012,12 +1022,12 @@ namespace osuCrypto::LogVole2
         {
             const auto begin = flat.begin() + static_cast<std::ptrdiff_t>(i * perPoly);
             const auto end = begin + static_cast<std::ptrdiff_t>(perPoly);
-            out[i].mCoeffs.assign(begin, end);
+            assignRange(out[i].mCoeffs, begin, end);
         }
         return true;
     }
 
-    std::vector<u64> packRingTensor(const RingTensor& tensor)
+    AlignedUnVec<u64> packRingTensor(const RingTensor& tensor)
     {
         return packRingBatch(tensor.mPolys);
     }
@@ -1027,7 +1037,7 @@ namespace osuCrypto::LogVole2
         u32 cols,
         u32 polyModulusDegree,
         u32 coeffModulusCount,
-        const std::vector<u64>& flat,
+        std::span<const u64> flat,
         RingTensor& out,
         u32 requestedWorkers)
     {
@@ -1058,7 +1068,7 @@ namespace osuCrypto::LogVole2
                             combineSeedPublic(static_cast<u64>(ctx.mParams.mCoeffModulusBits.size()));
 
         RnsPoly out{};
-        out.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+        resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
         auto contextData = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
         if (contextData)
@@ -1116,7 +1126,7 @@ namespace osuCrypto::LogVole2
 
     bool deriveUniformPolyBatchFromNonceListInplace(
         const RingNttContext& ctx,
-        const std::vector<u64>& nonces,
+        std::span<const u64> nonces,
         u64 domainTag,
         u32 perNonceCount,
         std::vector<RnsPoly>& out,
@@ -1142,7 +1152,7 @@ namespace osuCrypto::LogVole2
 
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonceList(
         const RingNttContext& ctx,
-        const std::vector<u64>& nonces,
+        std::span<const u64> nonces,
         u64 domainTag,
         u32 perNonceCount,
         u32 requestedWorkers)

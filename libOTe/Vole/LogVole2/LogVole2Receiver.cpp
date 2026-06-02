@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <utility>
 
@@ -349,12 +350,32 @@ namespace osuCrypto::LogVole2
                 const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
                 const std::size_t end = std::min(start + static_cast<std::size_t>(muHi), input.mX.size());
 
-                std::vector<RnsPoly> chunk(input.mX.begin() + start, input.mX.begin() + end);
-                while (chunk.size() < muHi)
+                if (start > end)
                 {
-                    RnsPoly zero{};
-                    zero.mCoeffs.assign(ringPolyCoeffCount(state.mParams.mShrinkExpand.mRing), 0);
-                    chunk.push_back(std::move(zero));
+                    return false;
+                }
+
+                const std::size_t chunkSize = end - start;
+                std::vector<RnsPoly> paddedChunk;
+                std::span<const RnsPoly> chunk;
+                if (chunkSize == static_cast<std::size_t>(muHi))
+                {
+                    chunk = std::span<const RnsPoly>(input.mX.data() + start, chunkSize);
+                }
+                else
+                {
+                    paddedChunk.resize(muHi);
+                    for (std::size_t i = 0; i < chunkSize; ++i)
+                    {
+                        paddedChunk[i] = input.mX[start + i];
+                    }
+                    for (std::size_t i = chunkSize; i < paddedChunk.size(); ++i)
+                    {
+                        resizeZero(
+                            paddedChunk[i].mCoeffs,
+                            ringPolyCoeffCount(state.mParams.mShrinkExpand.mRing));
+                    }
+                    chunk = std::span<const RnsPoly>(paddedChunk.data(), paddedChunk.size());
                 }
 
                 ShrinkExpandShrinkOutput shrink{};
@@ -381,14 +402,23 @@ namespace osuCrypto::LogVole2
             throw std::runtime_error("LogVole2 receiver could not prepare recursive child input");
         }
 
-        std::vector<RnsPoly> dHat;
-        dHat.reserve(wNext);
+        std::vector<RnsPoly> dHat(wNext);
+        std::size_t dHatIdx = 0;
         for (auto& chunk : dHatChunks)
         {
+            if (chunk.size() != static_cast<std::size_t>(tauHi) * rho ||
+                dHatIdx + chunk.size() > dHat.size())
+            {
+                throw std::runtime_error("LogVole2 receiver recursive child input shape mismatch");
+            }
             for (auto& poly : chunk)
             {
-                dHat.push_back(std::move(poly));
+                dHat[dHatIdx++] = std::move(poly);
             }
+        }
+        if (dHatIdx != dHat.size())
+        {
+            throw std::runtime_error("LogVole2 receiver recursive child input size mismatch");
         }
 
         ReceiverOnlineInput childInput{};

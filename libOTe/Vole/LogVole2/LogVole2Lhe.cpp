@@ -35,7 +35,7 @@ namespace osuCrypto::LogVole2
 
         bool zeroPoly(const RingNttContext& ctx, RnsPoly& out)
         {
-            out.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+            resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             return true;
         }
 
@@ -278,16 +278,13 @@ namespace osuCrypto::LogVole2
             return false;
         }
 
-        std::vector<RnsPoly> shiftedR;
-        shiftedR.reserve(r.size());
-        for (const auto& poly : r)
+        std::vector<RnsPoly> shiftedR(r.size());
+        for (std::size_t i = 0; i < r.size(); ++i)
         {
-            RnsPoly shifted{};
-            if (!multiplyByGPower(ctx, poly, gadgetLogBase, 1, shifted))
+            if (!multiplyByGPower(ctx, r[i], gadgetLogBase, 1, shiftedR[i]))
             {
                 return false;
             }
-            shiftedR.push_back(std::move(shifted));
         }
 
         return lheEnc1(

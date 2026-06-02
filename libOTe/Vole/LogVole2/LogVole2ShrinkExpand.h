@@ -4,6 +4,7 @@
 #include "libOTe/Vole/LogVole2/LogVole2Lhe.h"
 
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace osuCrypto::LogVole2
@@ -91,6 +92,11 @@ namespace osuCrypto::LogVole2
     bool shrinkExpandShrink(
         const ShrinkExpandReceiverState& state,
         const std::vector<RnsPoly>& x,
+        ShrinkExpandShrinkOutput& out);
+
+    bool shrinkExpandShrink(
+        const ShrinkExpandReceiverState& state,
+        std::span<const RnsPoly> x,
         ShrinkExpandShrinkOutput& out);
 
     bool shrinkExpandExpandSender(

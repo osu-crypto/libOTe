@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace osuCrypto::LogVole2
@@ -81,6 +82,7 @@ namespace osuCrypto::LogVole2
     bool validateRingParams(const RingParams& params);
     bool validateRingPolyShape(const RnsPoly& poly, const RingParams& params);
     bool validateRingBatchShape(const std::vector<RnsPoly>& polys, const RingParams& params);
+    bool validateRingBatchShape(std::span<const RnsPoly> polys, const RingParams& params);
     bool makeRingNttContext(const RingParams& params, RingNttContext& out);
 
     bool canonicalizePoly(RnsPoly& poly, const RingNttContext& ctx);
@@ -154,22 +156,22 @@ namespace osuCrypto::LogVole2
         const RingNttContext& ctx,
         RnsPoly& out);
 
-    std::vector<u64> packRingBatch(const std::vector<RnsPoly>& polys);
+    AlignedUnVec<u64> packRingBatch(const std::vector<RnsPoly>& polys);
     bool unpackRingBatch(
         u32 count,
         u32 polyModulusDegree,
         u32 coeffModulusCount,
-        const std::vector<u64>& flat,
+        std::span<const u64> flat,
         std::vector<RnsPoly>& out,
         u32 requestedWorkers = 1);
 
-    std::vector<u64> packRingTensor(const RingTensor& tensor);
+    AlignedUnVec<u64> packRingTensor(const RingTensor& tensor);
     bool unpackRingTensor(
         u32 rows,
         u32 cols,
         u32 polyModulusDegree,
         u32 coeffModulusCount,
-        const std::vector<u64>& flat,
+        std::span<const u64> flat,
         RingTensor& out,
         u32 requestedWorkers = 1);
 
@@ -187,13 +189,13 @@ namespace osuCrypto::LogVole2
         u32 count);
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonceList(
         const RingNttContext& ctx,
-        const std::vector<u64>& nonces,
+        std::span<const u64> nonces,
         u64 domainTag,
         u32 perNonceCount,
         u32 requestedWorkers = 0);
     bool deriveUniformPolyBatchFromNonceListInplace(
         const RingNttContext& ctx,
-        const std::vector<u64>& nonces,
+        std::span<const u64> nonces,
         u64 domainTag,
         u32 perNonceCount,
         std::vector<RnsPoly>& out,
@@ -216,7 +218,7 @@ namespace osuCrypto::LogVole2
     u64 deriveCt2Nonce(const SamplingSeedConfig& config, u64 nonce, u64 coeffCount = 0);
     u64 deriveSeedInstanceNonce(
         const SamplingSeedConfig& config,
-        const std::vector<u8>& seed,
+        std::span<const u8> seed,
         u64 instanceIdx,
         u64 fallbackNonce = 0);
 

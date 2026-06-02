@@ -22,7 +22,7 @@ namespace osuCrypto::LogVole2
 
     struct GoldenSeedSearchOutput
     {
-        std::vector<u8> mSeed;
+        AlignedUnVec<u8> mSeed;
         std::vector<RnsPoly> mTbkPerSampledPoly;
     };
 
@@ -79,7 +79,7 @@ namespace osuCrypto::LogVole2
     struct SenderOnlineOutput
     {
         std::vector<RnsPoly> mTbk;
-        std::vector<u8> mSeed;
+        AlignedUnVec<u8> mSeed;
         CommunicationStats mComm;
     };
 
@@ -96,7 +96,7 @@ namespace osuCrypto::LogVole2
     struct ReceiverOnlineOutput
     {
         std::vector<RnsPoly> mTbm;
-        std::vector<u8> mSeed;
+        AlignedUnVec<u8> mSeed;
         CommunicationStats mComm;
     };
 
@@ -191,7 +191,7 @@ namespace osuCrypto::LogVole2
 
     bool computeRootSenderKey(
         const SenderState& state,
-        const std::vector<u8>& seed,
+        std::span<const u8> seed,
         RnsPoly& rootKey);
 
     bool prepareSenderOffline(
@@ -273,7 +273,7 @@ namespace osuCrypto::LogVole2
 
     bool seedLabelSampleCt2FromSeed(
         const SamplingSeedConfig& samplingSeeds,
-        const std::vector<u8>& seed,
+        std::span<const u8> seed,
         u32 instanceIdx,
         u32 coeffCount,
         const RingParams& ring,

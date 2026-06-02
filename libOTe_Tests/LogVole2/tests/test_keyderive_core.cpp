@@ -14,7 +14,7 @@ namespace
     {
         RingParams params{};
         params.mPolyModulusDegree = 1024;
-        params.mCoeffModulusBits = { 30, 30 };
+        assignValues<int>(params.mCoeffModulusBits, { 30, 30 });
         return params;
     }
 

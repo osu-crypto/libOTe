@@ -34,7 +34,7 @@ namespace osuCrypto::LogVole2
             return ctx.mPlaintextModulus != 0 && value < ctx.mPlaintextModulus;
         }
 
-        bool validateZpValues(const ZpCrtContext& ctx, const std::vector<u64>& values)
+        bool validateZpValues(const ZpCrtContext& ctx, std::span<const u64> values)
         {
             for (u64 value : values)
             {
@@ -80,7 +80,7 @@ namespace osuCrypto::LogVole2
 
             const std::size_t n = ctx.mRing.mParams.mPolyModulusDegree;
             const std::size_t rho = ctx.mRing.mModuli.size();
-            out.mCoeffs.assign(n * rho, 0);
+            resizeZero(out.mCoeffs, n * rho);
 
             const u64* plainCoeffs = plain.data();
             const std::size_t plainCoeffCount = std::min<std::size_t>(n, plain.coeff_count());
@@ -111,7 +111,7 @@ namespace osuCrypto::LogVole2
         RnsPoly makeZeroPoly(const RingParams& ring)
         {
             RnsPoly zero{};
-            zero.mCoeffs.assign(ringPolyCoeffCount(ring), 0);
+            resizeZero(zero.mCoeffs, ringPolyCoeffCount(ring));
             return zero;
         }
 
@@ -206,7 +206,7 @@ namespace osuCrypto::LogVole2
             }
         }
 
-        bool containsSid(const std::vector<CivoleSid>& sids, CivoleSid sid)
+        bool containsSid(const AlignedUnVec<CivoleSid>& sids, CivoleSid sid)
         {
             return std::find(sids.begin(), sids.end(), sid) != sids.end();
         }
@@ -247,7 +247,9 @@ namespace osuCrypto::LogVole2
                 return false;
             }
 
-            state.mUsedSids.push_back(sid);
+            const auto usedSidCount = state.mUsedSids.size();
+            state.mUsedSids.resize(usedSidCount + 1);
+            state.mUsedSids[usedSidCount] = sid;
             clearReceiverCachedOutputs(state.mLogVoleState);
             const auto seeds = deriveSidSamplingSeeds(state.mBaseSamplingSeeds, sid);
             applySamplingSeeds(state.mLogVoleState, seeds);
@@ -291,7 +293,7 @@ namespace osuCrypto::LogVole2
     {
         CivoleParams params{};
         params.mLogVole.mShrinkExpand.mRing.mPolyModulusDegree = 8192;
-        params.mLogVole.mShrinkExpand.mRing.mCoeffModulusBits = { 55, 55, 55, 55 };
+        resizeFill<int>(params.mLogVole.mShrinkExpand.mRing.mCoeffModulusBits, 4, 55);
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = 55;
         params.mLogVole.mShrinkExpand.mMode = ShrinkExpandMode::FullNoise;
         params.mLogVole.mShrinkExpand.mSamplingSeeds.mNoiseRoot = 0xBAD5EEDu;
@@ -328,6 +330,240 @@ namespace osuCrypto::LogVole2
         }
         out = ctx.mPlaintextModulus;
         return true;
+    }
+
+    void CivoleSender::configure(u64 n, u32 plaintextModulusBits, u32 numThreads)
+    {
+        if (n == 0)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender requires a nonzero request size");
+        }
+        if (plaintextModulusBits < 2 || plaintextModulusBits > 61)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE plaintext modulus bit count is invalid");
+        }
+        if (numThreads == 0)
+        {
+            numThreads = 1;
+        }
+
+        CivoleParams params{};
+        u64 modulus = 0;
+        if (!makeDefaultCivoleParams(params, numThreads))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender could not create default parameters");
+        }
+        params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
+        if (!resolveCivoleModulus(params, modulus))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender could not resolve plaintext modulus");
+        }
+
+        mRequestSize = n;
+        mPlaintextModulusBits = plaintextModulusBits;
+        mModulus = modulus;
+        mDelta = 0;
+        mNumThreads = numThreads;
+        mNextSid = 0;
+        mLastOnlineComm = {};
+        mParams = std::move(params);
+        mOfflineState = {};
+        mState = State::Configured;
+    }
+
+    task<> CivoleSender::offline(u64 delta, Socket& sock)
+    {
+        if (!isConfigured())
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender must be configured before offline");
+        }
+
+        CivoleSenderOfflineInput input{};
+        input.mParams = mParams;
+        input.mDelta = delta;
+        input.mW = mRequestSize;
+
+        CivoleSenderState state{};
+        co_await civoleSenderOffline(input, state, sock);
+
+        mOfflineState = std::move(state);
+        mModulus = mOfflineState.mModulus;
+        mDelta = delta;
+        mNextSid = 0;
+        mLastOnlineComm = {};
+        mState = State::Offline;
+    }
+
+    task<> CivoleSender::send(span<u64> b, Socket& sock)
+    {
+        if (!hasOffline())
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender requires offline state before send");
+        }
+        if (b.size() != mRequestSize)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender output size does not match configured size");
+        }
+
+        const CivoleSid sid = mNextSid++;
+        CivoleReleaseKOutput releaseK{};
+        if (!civoleSenderReleaseK(mOfflineState, sid, releaseK))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender could not release keys");
+        }
+        if (releaseK.mKeys.size() != b.size())
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender key output size is invalid");
+        }
+
+        std::copy(releaseK.mKeys.begin(), releaseK.mKeys.end(), b.begin());
+
+        CivoleSenderReleaseOutput release{};
+        co_await civoleSenderRelease(mOfflineState, sid, release, sock);
+        mLastOnlineComm = release.mComm;
+    }
+
+    task<> CivoleSender::send(u64 delta, span<u64> b, Socket& sock)
+    {
+        if (!isConfigured())
+        {
+            configure(b.size(), mPlaintextModulusBits, mNumThreads);
+        }
+        if (b.size() != mRequestSize)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender output size does not match configured size");
+        }
+        if (!hasOffline())
+        {
+            co_await offline(delta, sock);
+        }
+        else if (delta != mDelta)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE sender offline delta does not match requested delta");
+        }
+
+        co_await send(b, sock);
+    }
+
+    void CivoleSender::clear()
+    {
+        mRequestSize = 0;
+        mPlaintextModulusBits = 55;
+        mModulus = 0;
+        mDelta = 0;
+        mNumThreads = 1;
+        mNextSid = 0;
+        mLastOnlineComm = {};
+        mParams = {};
+        mOfflineState = {};
+        mState = State::Default;
+    }
+
+    void CivoleReceiver::configure(u64 n, u32 plaintextModulusBits, u32 numThreads)
+    {
+        if (n == 0)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver requires a nonzero request size");
+        }
+        if (plaintextModulusBits < 2 || plaintextModulusBits > 61)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE plaintext modulus bit count is invalid");
+        }
+        if (numThreads == 0)
+        {
+            numThreads = 1;
+        }
+
+        CivoleParams params{};
+        u64 modulus = 0;
+        if (!makeDefaultCivoleParams(params, numThreads))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver could not create default parameters");
+        }
+        params.mLogVole.mShrinkExpand.mPlaintextModulusBits = plaintextModulusBits;
+        if (!resolveCivoleModulus(params, modulus))
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver could not resolve plaintext modulus");
+        }
+
+        mRequestSize = n;
+        mPlaintextModulusBits = plaintextModulusBits;
+        mModulus = modulus;
+        mNumThreads = numThreads;
+        mNextSid = 0;
+        mLastOnlineComm = {};
+        mParams = std::move(params);
+        mOfflineState = {};
+        mState = State::Configured;
+    }
+
+    task<> CivoleReceiver::offline(Socket& sock)
+    {
+        if (!isConfigured())
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver must be configured before offline");
+        }
+
+        CivoleReceiverOfflineInput input{};
+        input.mParams = mParams;
+
+        CivoleReceiverState state{};
+        co_await civoleReceiverOffline(input, state, sock);
+        if (state.mW != mRequestSize)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver offline size does not match configured size");
+        }
+
+        mOfflineState = std::move(state);
+        mModulus = mOfflineState.mModulus;
+        mNextSid = 0;
+        mLastOnlineComm = {};
+        mState = State::Offline;
+    }
+
+    task<> CivoleReceiver::receive(span<const u64> x, span<u64> a, Socket& sock)
+    {
+        if (x.size() != a.size())
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver input and output sizes do not match");
+        }
+        if (!isConfigured())
+        {
+            configure(x.size(), mPlaintextModulusBits, mNumThreads);
+        }
+        if (x.size() != mRequestSize)
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver input size does not match configured size");
+        }
+        if (!hasOffline())
+        {
+            co_await offline(sock);
+        }
+
+        const CivoleSid sid = mNextSid++;
+
+        CivoleReceiverSetXOutput setX{};
+        co_await civoleReceiverSetX(mOfflineState, sid, x, setX, sock);
+        if (setX.mMacs.size() != a.size())
+        {
+            throw std::runtime_error("LogVole2 CI-VOLE receiver MAC output size is invalid");
+        }
+
+        std::copy(setX.mMacs.begin(), setX.mMacs.end(), a.begin());
+        mLastOnlineComm = setX.mComm;
+    }
+
+    void CivoleReceiver::clear()
+    {
+        mRequestSize = 0;
+        mPlaintextModulusBits = 55;
+        mModulus = 0;
+        mNumThreads = 1;
+        mNextSid = 0;
+        mLastOnlineComm = {};
+        mParams = {};
+        mOfflineState = {};
+        mState = State::Default;
     }
 
     u64 zpSlotCount(const ZpCrtContext& ctx)
@@ -422,10 +658,11 @@ namespace osuCrypto::LogVole2
         next.mPlaintextModulusBits = selectedPlaintextBits;
         next.mPlaintextModulus = batchingPlainModulus.value();
         next.mBatchingContext = std::move(batchingContext);
-        next.mDeltaModQj.reserve(rho);
-        for (const auto& modulus : next.mRing.mModuli)
+        next.mDeltaModQj.resize(rho);
+        for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
         {
-            next.mDeltaModQj.push_back(seal::util::modulo_uint(delta.get(), rho, modulus));
+            next.mDeltaModQj[modIdx] =
+                seal::util::modulo_uint(delta.get(), rho, next.mRing.mModuli[modIdx]);
         }
 
         out = std::move(next);
@@ -434,7 +671,7 @@ namespace osuCrypto::LogVole2
 
     bool wrapZpBatchCrt(
         const ZpCrtContext& ctx,
-        const std::vector<u64>& labels,
+        std::span<const u64> labels,
         bool multiplyByDelta,
         u64 padValue,
         u32,
@@ -475,7 +712,7 @@ namespace osuCrypto::LogVole2
 
     bool wrapZpLabelsCrt(
         const ZpCrtContext& ctx,
-        const std::vector<u64>& labels,
+        std::span<const u64> labels,
         bool multiplyByDelta,
         u64 padValue,
         u32 requestedWorkers,
@@ -498,8 +735,13 @@ namespace osuCrypto::LogVole2
                 const u64 chunkIdx = static_cast<u64>(taskIdx);
                 const u64 offset = chunkIdx * slotCount;
                 const u64 chunkSize = std::min<u64>(slotCount, labels.size() - offset);
-                std::vector<u64> chunk(labels.begin() + offset, labels.begin() + offset + chunkSize);
-                return wrapZpBatchCrt(ctx, chunk, multiplyByDelta, padValue, requestedWorkers, out[chunkIdx]);
+                return wrapZpBatchCrt(
+                    ctx,
+                    labels.subspan(static_cast<std::size_t>(offset), static_cast<std::size_t>(chunkSize)),
+                    multiplyByDelta,
+                    padValue,
+                    requestedWorkers,
+                    out[chunkIdx]);
             });
     }
 
@@ -509,7 +751,7 @@ namespace osuCrypto::LogVole2
         u64 zpLabelCount,
         bool scaleAndRound,
         u32 requestedWorkers,
-        std::vector<u64>& out)
+        AlignedUnVec<u64>& out)
     {
         if (!validateZpContext(ctx) || !validateRingBatchShape(labels, ctx.mRing.mParams))
         {
@@ -540,9 +782,12 @@ namespace osuCrypto::LogVole2
         const std::size_t rho = ctx.mRing.mModuli.size();
         seal::util::RNSBase fullBase(ringContextData->parms().coeff_modulus(), pool);
         auto invPunctProd = fullBase.inv_punctured_prod_mod_base_array();
-        std::vector<u64> crtInvPunctured(rho, 0);
-        std::vector<u64> qI(rho, 0);
-        std::vector<unsigned __int128> fracInvModulus(rho, 0);
+        AlignedUnVec<u64> crtInvPunctured;
+        AlignedUnVec<u64> qI;
+        AlignedUnVec<unsigned __int128> fracInvModulus;
+        resizeZero(crtInvPunctured, rho);
+        resizeZero(qI, rho);
+        resizeZero(fracInvModulus, rho);
         for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
         {
             qI[modIdx] = fullBase.base()[modIdx].value();
@@ -552,7 +797,7 @@ namespace osuCrypto::LogVole2
         const unsigned __int128 half = static_cast<unsigned __int128>(1) << 127;
 
         const u64 chunkCount = zpRingLabelCount(ctx, zpLabelCount);
-        std::vector<std::vector<u64>> decodedChunks(chunkCount);
+        std::vector<AlignedUnVec<u64>> decodedChunks(chunkCount);
         if (!detail::runParallelTasks(
                 static_cast<std::size_t>(chunkCount),
                 requestedWorkers,
@@ -639,18 +884,18 @@ namespace osuCrypto::LogVole2
                     const u64 offset = static_cast<u64>(labelIdx) * slotCount;
                     const u64 remaining = zpLabelCount - offset;
                     const u64 copyCount = std::min<u64>(remaining, slots.size());
-                    decodedChunks[labelIdx].assign(slots.begin(), slots.begin() + copyCount);
+                    assignRange(decodedChunks[labelIdx], slots.begin(), slots.begin() + copyCount);
                     return true;
                 }))
         {
             return false;
         }
 
-        out.clear();
-        out.reserve(zpLabelCount);
+        out.resize(static_cast<std::size_t>(zpLabelCount));
+        auto* outIter = out.data();
         for (const auto& chunk : decodedChunks)
         {
-            out.insert(out.end(), chunk.begin(), chunk.end());
+            outIter = std::copy(chunk.begin(), chunk.end(), outIter);
         }
         return true;
     }
@@ -775,7 +1020,7 @@ namespace osuCrypto::LogVole2
         }
 
         ZpCrtContext ctx{};
-        std::vector<u64> keys;
+        AlignedUnVec<u64> keys;
         if (!makeZpCrtContext(
                 state.mParams.mLogVole.mShrinkExpand.mRing,
                 state.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
@@ -792,7 +1037,9 @@ namespace osuCrypto::LogVole2
         }
 
         state.mKeyReleased = true;
-        state.mUsedSids.push_back(sid);
+        const auto usedSidCount = state.mUsedSids.size();
+        state.mUsedSids.resize(usedSidCount + 1);
+        state.mUsedSids[usedSidCount] = sid;
         state.mReleasedKeys = std::move(keys);
 
         CivoleReleaseKOutput next{};
@@ -835,7 +1082,7 @@ namespace osuCrypto::LogVole2
     task<> civoleReceiverSetX(
         CivoleReceiverState& state,
         CivoleSid sid,
-        const std::vector<u64>& x,
+        std::span<const u64> x,
         CivoleReceiverSetXOutput& output,
         Socket& sock)
     {
@@ -867,9 +1114,15 @@ namespace osuCrypto::LogVole2
             throw std::runtime_error("LogVole2 CI-VOLE receiver could not wrap inputs");
         }
 
-        while (wrapped.size() < state.mLogVoleState.mParams.mW)
+        const auto paddedSize = static_cast<std::size_t>(state.mLogVoleState.mParams.mW);
+        const auto inputSize = wrapped.size();
+        if (inputSize < paddedSize)
         {
-            wrapped.push_back(makeZeroPoly(state.mLogVoleState.mParams.mShrinkExpand.mRing));
+            wrapped.resize(paddedSize);
+            for (std::size_t idx = inputSize; idx < paddedSize; ++idx)
+            {
+                wrapped[idx] = makeZeroPoly(state.mLogVoleState.mParams.mShrinkExpand.mRing);
+            }
         }
 
         ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Receiver, sid);
@@ -881,7 +1134,7 @@ namespace osuCrypto::LogVole2
         ReceiverOnlineOutput online{};
         co_await receiver.online(state.mLogVoleState, onlineInput, online, sock);
 
-        std::vector<u64> macs;
+        AlignedUnVec<u64> macs;
         if (!unwrapRingLabelsCrt(
                 ctx,
                 online.mTbm,
@@ -896,7 +1149,7 @@ namespace osuCrypto::LogVole2
         CivoleReceiverSetXOutput next{};
         next.mSid = sid;
         next.mModulus = state.mModulus;
-        next.mValues = x;
+        assignSpan(next.mValues, x);
         next.mMacs = std::move(macs);
         next.mComm = online.mComm;
         output = std::move(next);

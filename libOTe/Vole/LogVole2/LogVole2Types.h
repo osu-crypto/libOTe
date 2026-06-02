@@ -1,21 +1,74 @@
 #pragma once
 
 #include <cryptoTools/Common/Defines.h>
+#include <cryptoTools/Common/Aligned.h>
 
+#include <algorithm>
+#include <initializer_list>
+#include <iterator>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace osuCrypto::LogVole2
 {
+    template<typename T>
+    using AlignedUnVec = AlignedUnVector<T>;
+
+    template<typename T>
+    void resizeZero(AlignedUnVec<T>& value, u64 size)
+    {
+        value.resize(static_cast<std::size_t>(size), AllocType::Zeroed);
+    }
+
+    template<typename T>
+    void resizeFill(AlignedUnVec<T>& value, u64 size, const T& fill)
+    {
+        value.resize(static_cast<std::size_t>(size));
+        std::fill(value.begin(), value.end(), fill);
+    }
+
+    template<typename T, typename It>
+    void assignRange(AlignedUnVec<T>& value, It begin, It end)
+    {
+        const auto size = static_cast<std::size_t>(std::distance(begin, end));
+        value.resize(size);
+        std::copy(begin, end, value.begin());
+    }
+
+    template<typename T>
+    void assignSpan(AlignedUnVec<T>& value, std::span<const T> input)
+    {
+        value.resize(input.size());
+        std::copy(input.begin(), input.end(), value.begin());
+    }
+
+    template<typename T>
+    void assignValues(AlignedUnVec<T>& value, std::initializer_list<T> input)
+    {
+        value.resize(input.size());
+        std::copy(input.begin(), input.end(), value.begin());
+    }
+
+    template<typename L, typename R>
+    bool rangesEqual(const L& lhs, const R& rhs)
+    {
+        return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
+    }
+
     struct RingParams
     {
         u32 mPolyModulusDegree = 0;
-        std::vector<int> mCoeffModulusBits;
+        AlignedUnVec<int> mCoeffModulusBits;
 
         bool operator==(const RingParams& other) const
         {
-            return mPolyModulusDegree == other.mPolyModulusDegree &&
-                   mCoeffModulusBits == other.mCoeffModulusBits;
+            return mPolyModulusDegree == other.mPolyModulusDegree
+                && mCoeffModulusBits.size() == other.mCoeffModulusBits.size()
+                && std::equal(
+                    mCoeffModulusBits.begin(),
+                    mCoeffModulusBits.end(),
+                    other.mCoeffModulusBits.begin());
         }
 
         bool operator!=(const RingParams& other) const
@@ -26,7 +79,7 @@ namespace osuCrypto::LogVole2
 
     struct RnsPoly
     {
-        std::vector<u64> mCoeffs;
+        AlignedUnVec<u64> mCoeffs;
     };
 
     struct RingTensor
@@ -130,7 +183,7 @@ namespace osuCrypto::LogVole2
         std::vector<RnsPoly> mRootSkRRt;
         std::vector<RnsPoly> mRootR1Rt;
         u32 mRootRandomizerWidth = 0;
-        mutable std::vector<u8> mGoldenSeed;
+        mutable AlignedUnVec<u8> mGoldenSeed;
         mutable std::shared_ptr<RnsPoly> mRootKPrimeRt;
         mutable std::shared_ptr<RnsPoly> mRootKRt;
         mutable std::shared_ptr<std::vector<RnsPoly>> mPrecomputedTbk;
@@ -147,7 +200,7 @@ namespace osuCrypto::LogVole2
         RingTensor mRootTopCt;
         std::vector<RnsPoly> mRootPublicBStarNtt;
         u32 mRootRandomizerWidth = 0;
-        mutable std::vector<u8> mGoldenSeed;
+        mutable AlignedUnVec<u8> mGoldenSeed;
         std::unique_ptr<ReceiverState> mNextLevelState;
     };
 }

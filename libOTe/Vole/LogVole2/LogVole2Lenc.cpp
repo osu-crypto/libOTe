@@ -58,7 +58,7 @@ namespace osuCrypto::LogVole2
 
         bool zeroPoly(const RingNttContext& ctx, RnsPoly& out)
         {
-            out.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+            resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             return true;
         }
 
@@ -81,7 +81,7 @@ namespace osuCrypto::LogVole2
         RnsPoly zeroPolyRaw(const RingNttContext& ctx)
         {
             RnsPoly out{};
-            out.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+            resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             return out;
         }
 
@@ -91,26 +91,44 @@ namespace osuCrypto::LogVole2
             return zeroPoly(ctx, zero) && ringSub(zero, poly, ctx, out);
         }
 
-        std::vector<RnsPoly> padBatch(const RingNttContext& ctx, const std::vector<RnsPoly>& in, u32 widthPadded)
+        bool buildPaddedNttBatch(
+            const RingNttContext& ctx,
+            const std::vector<RnsPoly>& in,
+            u32 widthPadded,
+            std::vector<RnsPoly>& out)
         {
-            std::vector<RnsPoly> out = in;
-            out.reserve(widthPadded);
-            for (u32 i = static_cast<u32>(out.size()); i < widthPadded; ++i)
+            if (in.size() > widthPadded)
             {
-                RnsPoly zero{};
-                zero.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
-                out.push_back(std::move(zero));
+                return false;
             }
-            return out;
+
+            std::vector<RnsPoly> next(widthPadded);
+            for (std::size_t i = 0; i < in.size(); ++i)
+            {
+                next[i] = in[i];
+            }
+            for (u32 i = static_cast<u32>(in.size()); i < widthPadded; ++i)
+            {
+                resizeZero(next[i].mCoeffs, ringPolyCoeffCount(ctx.mParams));
+            }
+            for (auto& poly : next)
+            {
+                if (!forwardNtt(poly, ctx))
+                {
+                    return false;
+                }
+            }
+
+            out = std::move(next);
+            return true;
         }
 
         std::vector<RnsPoly> buildLencPublicBNttImpl(const RingNttContext& ctx, u32 tau)
         {
-            std::vector<RnsPoly> b;
-            b.reserve(2u * tau);
+            std::vector<RnsPoly> b(2u * tau);
             for (u32 i = 0; i < 2u * tau; ++i)
             {
-                b.push_back(deriveUniformPolyFromNonceNtt(ctx, 0xC0DEC0DEull, 0x1EEC0DEu, i));
+                b[i] = deriveUniformPolyFromNonceNtt(ctx, 0xC0DEC0DEull, 0x1EEC0DEu, i);
             }
             return b;
         }
@@ -228,16 +246,16 @@ namespace osuCrypto::LogVole2
 
         struct RecursiveLeafScaling
         {
-            std::vector<u64> mDeltaModQj;
-            std::vector<u64> mInvDeltaModQj;
+            AlignedUnVec<u64> mDeltaModQj;
+            AlignedUnVec<u64> mInvDeltaModQj;
         };
 
         bool buildRecursiveLeafScaling(const RingNttContext& ctx, RecursiveLeafScaling& out)
         {
             const std::size_t rho = ctx.mModuli.size();
             RecursiveLeafScaling scaling{};
-            scaling.mDeltaModQj.resize(rho, 1);
-            scaling.mInvDeltaModQj.resize(rho, 1);
+            resizeFill<u64>(scaling.mDeltaModQj, rho, 1);
+            resizeFill<u64>(scaling.mInvDeltaModQj, rho, 1);
 
             for (std::size_t j = 0; j < rho; ++j)
             {
@@ -268,7 +286,7 @@ namespace osuCrypto::LogVole2
         RnsPoly selectAndScaleLimbNtt(const RingNttContext& ctx, const RnsPoly& polyNtt, u32 limbIdx, u64 scaleModQj)
         {
             RnsPoly out{};
-            out.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+            resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
             const std::size_t n = ctx.mParams.mPolyModulusDegree;
             const auto& modulus = ctx.mModuli[limbIdx];
@@ -303,7 +321,7 @@ namespace osuCrypto::LogVole2
             }
 
             RnsPoly accNtt{};
-            accNtt.mCoeffs.assign(coeffCount, 0);
+            resizeZero(accNtt.mCoeffs, coeffCount);
 
             const std::size_t n = ctx.mParams.mPolyModulusDegree;
             auto accumulateLimb = [&](const RnsPoly& bNtt, u32 limb, u64 scaleModQj, const RnsPoly& digitNtt) {
@@ -333,15 +351,14 @@ namespace osuCrypto::LogVole2
         std::vector<RnsPoly> makePublicBInternalHi(const std::vector<RnsPoly>& publicBFullNtt, u32 tauHi)
         {
             const u32 fullTau = tauHi + 1u;
-            std::vector<RnsPoly> out;
-            out.reserve(2u * tauHi);
+            std::vector<RnsPoly> out(2u * tauHi);
             for (u32 i = 0; i < tauHi; ++i)
             {
-                out.push_back(publicBFullNtt[1u + i]);
+                out[i] = publicBFullNtt[1u + i];
             }
             for (u32 i = 0; i < tauHi; ++i)
             {
-                out.push_back(publicBFullNtt[fullTau + 1u + i]);
+                out[tauHi + i] = publicBFullNtt[fullTau + 1u + i];
             }
             return out;
         }
@@ -375,8 +392,7 @@ namespace osuCrypto::LogVole2
                 return false;
             }
 
-            out.clear();
-            out.reserve(tauHi);
+            out.resize(tauHi);
             for (u32 i = 0; i < tauHi; ++i)
             {
                 RnsPoly digitNtt = std::move(hiDec[i]);
@@ -384,7 +400,7 @@ namespace osuCrypto::LogVole2
                 {
                     return false;
                 }
-                out.push_back(std::move(digitNtt));
+                out[i] = std::move(digitNtt);
             }
             return true;
         }
@@ -403,21 +419,20 @@ namespace osuCrypto::LogVole2
                 return false;
             }
 
-            out.clear();
-            out.reserve(tauHi);
+            out.resize(tauHi);
             for (u32 i = 0; i < tauLeaf; ++i)
             {
-                RnsPoly digitNtt = leafDec[i];
+                RnsPoly digitNtt = std::move(leafDec[i]);
                 if (!forwardNtt(digitNtt, ctx))
                 {
                     return false;
                 }
-                out.push_back(std::move(digitNtt));
+                out[i] = std::move(digitNtt);
             }
 
-            while (out.size() < tauHi)
+            for (u32 i = tauLeaf; i < tauHi; ++i)
             {
-                out.push_back(zeroPolyRaw(ctx));
+                out[i] = zeroPolyRaw(ctx);
             }
             return true;
         }
@@ -430,7 +445,7 @@ namespace osuCrypto::LogVole2
             std::vector<RnsPoly>& out)
         {
             RnsPoly plainPoly{};
-            plainPoly.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+            resizeZero(plainPoly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
             const std::size_t n = ctx.mParams.mPolyModulusDegree;
             const auto& modulus = ctx.mModuli[limbIdx];
@@ -463,8 +478,8 @@ namespace osuCrypto::LogVole2
                 return false;
             }
 
-            out.clear();
-            out.push_back(std::move(plainPoly));
+            out.resize(1);
+            out[0] = std::move(plainPoly);
             return true;
         }
 
@@ -477,7 +492,7 @@ namespace osuCrypto::LogVole2
             RnsPoly& out)
         {
             RnsPoly noise{};
-            noise.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+            resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, seed, streamId, ctx) ||
                 !forwardNtt(noise, ctx))
             {
@@ -556,7 +571,7 @@ namespace osuCrypto::LogVole2
             RnsPoly zeroPadding{};
             if (width > xCount)
             {
-                zeroPadding.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+                resizeZero(zeroPadding.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             }
 
             for (u32 leaf = 0; leaf < width; ++leaf)
@@ -578,19 +593,25 @@ namespace osuCrypto::LogVole2
                 }
             }
 
+            const u32 maxActiveTau = std::max(tauLeaf, tauHi);
+            AlignedUnVec<const RnsPoly*> bPtrs(2u * maxActiveTau);
+            AlignedUnVec<const RnsPoly*> pairPtrs(2u * maxActiveTau);
+
             for (int depth = static_cast<int>(levels) - 1; depth >= 0; --depth)
             {
                 const bool useLeafLevel = depth == static_cast<int>(levels) - 1;
                 const auto& bLevel = useLeafLevel ? publicBLeaf : publicBInternalHi;
                 const u32 activeTau = useLeafLevel ? tauLeaf : tauHi;
 
-                std::vector<const RnsPoly*> bPtrs;
                 if (!(useLeafLevel && leafInputsAreGadget))
                 {
-                    bPtrs.reserve(2u * activeTau);
-                    for (const auto& poly : bLevel)
+                    if (bLevel.size() != 2u * activeTau)
                     {
-                        bPtrs.push_back(&poly);
+                        return false;
+                    }
+                    for (std::size_t idx = 0; idx < bLevel.size(); ++idx)
+                    {
+                        bPtrs[idx] = &bLevel[idx];
                     }
                 }
 
@@ -602,7 +623,6 @@ namespace osuCrypto::LogVole2
                     const u32 left = (2u * p) + 1u;
                     const u32 right = left + 1u;
 
-                    std::vector<const RnsPoly*> pairPtrs(2u * activeTau, nullptr);
                     for (u32 i = 0; i < activeTau; ++i)
                     {
                         pairPtrs[i] = &tree.mNodeDecompNtt[left][i];
@@ -714,14 +734,13 @@ namespace osuCrypto::LogVole2
             return false;
         }
 
-        std::vector<RnsPoly> mNttBatch;
-        mNttBatch.reserve(request.mTau);
+        std::vector<RnsPoly> mNttBatch(request.mTau);
 
         for (std::size_t i = 0; i < request.mTau; ++i)
         {
             RnsPoly sk1 = input.mSk1[i];
             RnsPoly sk2 = input.mSk2[i];
-            RnsPoly d = dBatch[i];
+            RnsPoly d = std::move(dBatch[i]);
 
             if (!forwardNtt(sk1, ctx) ||
                 !forwardNtt(sk2, ctx) ||
@@ -735,7 +754,7 @@ namespace osuCrypto::LogVole2
             {
                 return false;
             }
-            mNttBatch.push_back(std::move(mNtt));
+            mNttBatch[i] = std::move(mNtt);
         }
 
         KeyDeriveResponse nextResponse{};
@@ -788,16 +807,17 @@ namespace osuCrypto::LogVole2
         }
 
         KeyDeriveReceiverOutput next{};
-        next.mM.reserve(response.mTau);
+        next.mM.resize(response.mTau);
 
-        for (auto& poly : mNttBatch)
+        for (std::size_t i = 0; i < mNttBatch.size(); ++i)
         {
+            auto& poly = mNttBatch[i];
             if (!canonicalizePoly(poly, ctx) ||
                 !inverseNtt(poly, ctx))
             {
                 return false;
             }
-            next.mM.push_back(std::move(poly));
+            next.mM[i] = std::move(poly);
         }
 
         output = std::move(next);
@@ -813,6 +833,27 @@ namespace osuCrypto::LogVole2
     bool buildDigestTree(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& x,
+        u32 tau,
+        u32 gadgetLogBase,
+        DigestTree& out,
+        u32 requestedWidthPadded,
+        const std::vector<RnsPoly>* publicBNtt,
+        u32 requestedWorkers)
+    {
+        return buildDigestTree(
+            ctx,
+            std::span<const RnsPoly>(x.data(), x.size()),
+            tau,
+            gadgetLogBase,
+            out,
+            requestedWidthPadded,
+            publicBNtt,
+            requestedWorkers);
+    }
+
+    bool buildDigestTree(
+        const RingNttContext& ctx,
+        std::span<const RnsPoly> x,
         u32 tau,
         u32 gadgetLogBase,
         DigestTree& out,
@@ -857,17 +898,16 @@ namespace osuCrypto::LogVole2
         tree.mLevels = levels;
         tree.mNodeDecompNtt.resize(nodeCount);
 
-        std::vector<const RnsPoly*> bPtrs;
-        bPtrs.reserve(2u * tau);
-        for (const auto& poly : *publicBNtt)
+        AlignedUnVec<const RnsPoly*> bPtrs(2u * tau);
+        for (std::size_t idx = 0; idx < publicBNtt->size(); ++idx)
         {
-            bPtrs.push_back(&poly);
+            bPtrs[idx] = &(*publicBNtt)[idx];
         }
 
         RnsPoly zeroPadding{};
         if (width > x.size())
         {
-            zeroPadding.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+            resizeZero(zeroPadding.mCoeffs, ringPolyCoeffCount(ctx.mParams));
         }
 
         for (u32 leaf = 0; leaf < width; ++leaf)
@@ -887,6 +927,7 @@ namespace osuCrypto::LogVole2
             }
         }
 
+        AlignedUnVec<const RnsPoly*> pairPtrs(2u * tau);
         for (int depth = static_cast<int>(levels) - 1; depth >= 0; --depth)
         {
             const u32 nodesAtDepth = static_cast<u32>(1u << depth);
@@ -897,7 +938,6 @@ namespace osuCrypto::LogVole2
                 const u32 left = (2u * p) + 1u;
                 const u32 right = left + 1u;
 
-                std::vector<const RnsPoly*> pairPtrs(2u * tau, nullptr);
                 for (u32 i = 0; i < tau; ++i)
                 {
                     pairPtrs[i] = &tree.mNodeDecompNtt[left][i];
@@ -997,14 +1037,10 @@ namespace osuCrypto::LogVole2
             }
         }
 
-        auto sPad = padBatch(ctx, s, width);
-        std::vector<RnsPoly> sPadNtt = sPad;
-        for (auto& poly : sPadNtt)
+        std::vector<RnsPoly> sPadNtt;
+        if (!buildPaddedNttBatch(ctx, s, width, sPadNtt))
         {
-            if (!forwardNtt(poly, ctx))
-            {
-                return false;
-            }
+            return false;
         }
 
         RingTensor ct{};
@@ -1024,7 +1060,7 @@ namespace osuCrypto::LogVole2
                 for (u32 k = 0; k < (2u * tau); ++k)
                 {
                     RnsPoly rowKNtt{};
-                    rowKNtt.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+                    resizeZero(rowKNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                     if (!dyadicMultiplyAddNttInplace(rNtt, (*publicBNtt)[k], rowKNtt, ctx))
                     {
                         return false;
@@ -1057,7 +1093,7 @@ namespace osuCrypto::LogVole2
                         const u64 noiseSeed =
                             deriveNoiseSeed(samplingSeeds, kLencCtNoiseDomain, streamId, width, tau);
                         RnsPoly noise{};
-                        noise.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+                        resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                         if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, noiseSeed, 0, ctx) ||
                             !forwardNtt(noise, ctx) ||
                             !ringAddInplace(rowKNtt, noise, ctx))
@@ -1072,15 +1108,15 @@ namespace osuCrypto::LogVole2
         }
 
         LencEncodeOutput next{};
-        next.mRNtt.reserve(mu);
+        next.mRNtt.resize(mu);
         for (u32 i = 0; i < mu; ++i)
         {
-            next.mRNtt.push_back(std::move(rLayersNtt[0][i]));
+            next.mRNtt[i] = std::move(rLayersNtt[0][i]);
         }
 
         if (emitRCoeffDomain)
         {
-            next.mR.reserve(mu);
+            next.mR.resize(mu);
             for (u32 i = 0; i < mu; ++i)
             {
                 RnsPoly r = next.mRNtt[i];
@@ -1088,7 +1124,7 @@ namespace osuCrypto::LogVole2
                 {
                     return false;
                 }
-                next.mR.push_back(std::move(r));
+                next.mR[i] = std::move(r);
             }
         }
 
@@ -1190,7 +1226,7 @@ namespace osuCrypto::LogVole2
         for (u32 leaf = 0; leaf < mu; ++leaf)
         {
             RnsPoly accNtt{};
-            accNtt.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+            resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
             u32 parent = 0;
             for (u32 level = 0; level < lacct.mLevels; ++level)
@@ -1251,6 +1287,31 @@ namespace osuCrypto::LogVole2
     bool buildDigestTreeTrunc(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& x,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        DigestTree& out,
+        u32 requestedWidthPadded,
+        bool leafInputsAreGadget,
+        const std::vector<RnsPoly>* publicBNtt,
+        u32 requestedWorkers)
+    {
+        return buildDigestTreeTrunc(
+            ctx,
+            std::span<const RnsPoly>(x.data(), x.size()),
+            tauHi,
+            gadgetLogBase,
+            plaintextModulusBits,
+            out,
+            requestedWidthPadded,
+            leafInputsAreGadget,
+            publicBNtt,
+            requestedWorkers);
+    }
+
+    bool buildDigestTreeTrunc(
+        const RingNttContext& ctx,
+        std::span<const RnsPoly> x,
         u32 tauHi,
         u32 gadgetLogBase,
         u32 plaintextModulusBits,
@@ -1358,14 +1419,10 @@ namespace osuCrypto::LogVole2
             }
         }
 
-        auto sPad = padBatch(ctx, s, width);
-        std::vector<RnsPoly> sPadNtt = sPad;
-        for (auto& poly : sPadNtt)
+        std::vector<RnsPoly> sPadNtt;
+        if (!buildPaddedNttBatch(ctx, s, width, sPadNtt))
         {
-            if (!forwardNtt(poly, ctx))
-            {
-                return false;
-            }
+            return false;
         }
 
         RingTensor ct{};
@@ -1395,7 +1452,7 @@ namespace osuCrypto::LogVole2
                     for (u32 t = 0; t < ctTauMax; ++t)
                     {
                         RnsPoly rowKNtt{};
-                        rowKNtt.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+                        resizeZero(rowKNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
                         if (t < activeTau)
                         {
@@ -1456,7 +1513,7 @@ namespace osuCrypto::LogVole2
                             const u64 noiseSeed = deriveNoiseSeed(
                                 samplingSeeds, kLencTruncCtNoiseDomain, streamId, plaintextModulusBits, ctTauMax);
                             RnsPoly noise{};
-                            noise.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+                            resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                             if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, noiseSeed, 0, ctx) ||
                                 !forwardNtt(noise, ctx) ||
                                 !ringAddInplace(rowKNtt, noise, ctx))
@@ -1473,15 +1530,15 @@ namespace osuCrypto::LogVole2
         }
 
         LencEncodeOutput next{};
-        next.mRNtt.reserve(mu);
+        next.mRNtt.resize(mu);
         for (u32 i = 0; i < mu; ++i)
         {
-            next.mRNtt.push_back(std::move(rLayersNtt[0][i]));
+            next.mRNtt[i] = std::move(rLayersNtt[0][i]);
         }
 
         if (emitRCoeffDomain)
         {
-            next.mR.reserve(mu);
+            next.mR.resize(mu);
             for (u32 i = 0; i < mu; ++i)
             {
                 RnsPoly r = next.mRNtt[i];
@@ -1489,7 +1546,7 @@ namespace osuCrypto::LogVole2
                 {
                     return false;
                 }
-                next.mR.push_back(std::move(r));
+                next.mR[i] = std::move(r);
             }
         }
 
@@ -1611,7 +1668,7 @@ namespace osuCrypto::LogVole2
         for (u32 leaf = 0; leaf < mu; ++leaf)
         {
             RnsPoly accNtt{};
-            accNtt.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+            resizeZero(accNtt.mCoeffs, ringPolyCoeffCount(ctx.mParams));
 
             u32 parent = 0;
             for (u32 level = 0; level < lacct.mLevels; ++level)

@@ -3,6 +3,7 @@
 #include "libOTe/Vole/LogVole2/LogVole2Ring.h"
 
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace osuCrypto::LogVole2
@@ -26,7 +27,7 @@ namespace osuCrypto::LogVole2
         u32 mPolyModulusDegree = 0;
         u32 mCoeffModulusCount = 0;
         u32 mTau = 0;
-        std::vector<u64> mDCoeffs;
+        AlignedUnVec<u64> mDCoeffs;
     };
 
     struct KeyDeriveResponse
@@ -34,7 +35,7 @@ namespace osuCrypto::LogVole2
         u32 mPolyModulusDegree = 0;
         u32 mCoeffModulusCount = 0;
         u32 mTau = 0;
-        std::vector<u64> mMNttCoeffs;
+        AlignedUnVec<u64> mMNttCoeffs;
     };
 
     struct KeyDeriveSenderInput
@@ -95,6 +96,16 @@ namespace osuCrypto::LogVole2
         const std::vector<RnsPoly>* publicBNtt = nullptr,
         u32 requestedWorkers = 1);
 
+    bool buildDigestTree(
+        const RingNttContext& ctx,
+        std::span<const RnsPoly> x,
+        u32 tau,
+        u32 gadgetLogBase,
+        DigestTree& out,
+        u32 requestedWidthPadded = 0,
+        const std::vector<RnsPoly>* publicBNtt = nullptr,
+        u32 requestedWorkers = 1);
+
     bool lencEnc(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& s,
@@ -142,6 +153,18 @@ namespace osuCrypto::LogVole2
     bool buildDigestTreeTrunc(
         const RingNttContext& ctx,
         const std::vector<RnsPoly>& x,
+        u32 tauHi,
+        u32 gadgetLogBase,
+        u32 plaintextModulusBits,
+        DigestTree& out,
+        u32 requestedWidthPadded = 0,
+        bool leafInputsAreGadget = false,
+        const std::vector<RnsPoly>* publicBNtt = nullptr,
+        u32 requestedWorkers = 1);
+
+    bool buildDigestTreeTrunc(
+        const RingNttContext& ctx,
+        std::span<const RnsPoly> x,
         u32 tauHi,
         u32 gadgetLogBase,
         u32 plaintextModulusBits,

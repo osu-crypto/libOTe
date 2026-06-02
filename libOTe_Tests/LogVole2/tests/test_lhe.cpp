@@ -23,7 +23,7 @@ namespace
     {
         LheParams p{};
         p.mRing.mPolyModulusDegree = 1024;
-        p.mRing.mCoeffModulusBits = { 30, 30 };
+        assignValues<int>(p.mRing.mCoeffModulusBits, { 30, 30 });
         return p;
     }
 
@@ -77,7 +77,7 @@ namespace
 
     bool zero_poly(const RingNttContext& ctx, RnsPoly& out)
     {
-        out.mCoeffs.assign(ringPolyCoeffCount(ctx.mParams), 0);
+        resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
         return true;
     }
 

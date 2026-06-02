@@ -7,18 +7,18 @@
 
 namespace osuCrypto::LogVole2
 {
-    using Buffer = std::vector<u8>;
+    using Buffer = AlignedUnVec<u8>;
 
     struct PolyMessage
     {
         u32 mPolyModulusDegree = 0;
         u32 mCoeffModulusCount = 0;
-        std::vector<u64> mCoeffs;
+        AlignedUnVec<u64> mCoeffs;
     };
 
     struct SeedMessage
     {
-        std::vector<u8> mSeed;
+        AlignedUnVec<u8> mSeed;
     };
 
     struct RootOfflineMessage
@@ -37,13 +37,13 @@ namespace osuCrypto::LogVole2
 
     struct RootDigestMessage
     {
-        std::vector<u64> mDPrimeCoeffs;
+        AlignedUnVec<u64> mDPrimeCoeffs;
     };
 
     struct RootResponseMessage
     {
-        std::vector<u8> mSeed;
-        std::vector<u64> mSkPrimeCoeffs;
+        AlignedUnVec<u8> mSeed;
+        AlignedUnVec<u64> mSkPrimeCoeffs;
     };
 
     Buffer encode(const KeyDeriveRequest& message);

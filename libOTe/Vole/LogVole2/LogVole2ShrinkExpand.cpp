@@ -196,7 +196,7 @@ namespace osuCrypto::LogVole2
         bool buildReceiverDigestTree(
             const RingNttContext& ctx,
             const ShrinkExpandReceiverState& state,
-            const std::vector<RnsPoly>& x,
+            std::span<const RnsPoly> x,
             DigestTree& out)
         {
             const std::vector<RnsPoly>* publicBNtt = state.mPublicBNtt ? state.mPublicBNtt.get() : nullptr;
@@ -245,7 +245,7 @@ namespace osuCrypto::LogVole2
 
             DigestTree tree{};
             if (!buildReceiverDigestTree(ctx, state, input.mX, tree) ||
-                tree.mDigest.mCoeffs != input.mDigest.mCoeffs)
+                !rangesEqual(tree.mDigest.mCoeffs, input.mDigest.mCoeffs))
             {
                 return false;
             }
@@ -354,12 +354,11 @@ namespace osuCrypto::LogVole2
 
     std::vector<RnsPoly> sampleUniformBatch(const RingNttContext& ctx, u32 count, u64 seed, u64 domainTag)
     {
-        std::vector<RnsPoly> out;
-        out.reserve(count);
+        std::vector<RnsPoly> out(count);
         for (u32 i = 0; i < count; ++i)
         {
             const u64 nonce = seed ^ (static_cast<u64>(i) << 1u);
-            out.push_back(deriveUniformPolyFromNonce(ctx, nonce, domainTag, i));
+            out[i] = deriveUniformPolyFromNonce(ctx, nonce, domainTag, i);
         }
         return out;
     }
@@ -596,6 +595,14 @@ namespace osuCrypto::LogVole2
         const std::vector<RnsPoly>& x,
         ShrinkExpandShrinkOutput& out)
     {
+        return shrinkExpandShrink(state, std::span<const RnsPoly>(x.data(), x.size()), out);
+    }
+
+    bool shrinkExpandShrink(
+        const ShrinkExpandReceiverState& state,
+        std::span<const RnsPoly> x,
+        ShrinkExpandShrinkOutput& out)
+    {
         if (x.size() != state.mParams.mMu || !validateRingBatchShape(x, state.mParams.mRing))
         {
             return false;
@@ -816,7 +823,7 @@ namespace osuCrypto::LogVole2
         auto pool = seal::MemoryManager::GetPool();
         seal::util::RNSBase fullBase(keyContextData->parms().coeff_modulus(), pool);
 
-        std::vector<u64> q(rho);
+        AlignedUnVec<u64> q(rho);
         for (std::size_t i = 0; i < rho; ++i)
         {
             q[i] = fullBase.base()[i].value();
@@ -824,10 +831,10 @@ namespace osuCrypto::LogVole2
 
         struct RecoveryConstants
         {
-            std::vector<std::size_t> mSrcLimbIndices;
-            std::vector<u64> mCrtInvPunctured;
-            std::vector<u64> mPuncturedProdModTarget;
-            std::vector<unsigned __int128> mFracInvModulus;
+            AlignedUnVec<std::size_t> mSrcLimbIndices;
+            AlignedUnVec<u64> mCrtInvPunctured;
+            AlignedUnVec<u64> mPuncturedProdModTarget;
+            AlignedUnVec<unsigned __int128> mFracInvModulus;
             u64 mDeltaModTarget = 1;
             u64 mInvDeltaModTarget = 1;
         };
@@ -837,7 +844,8 @@ namespace osuCrypto::LogVole2
         {
             const auto& modJ = ctx.mModuli[j];
             auto& constants = recovery[j];
-            constants.mSrcLimbIndices.reserve((rho > 0) ? (rho - 1) : 0);
+            constants.mSrcLimbIndices.resize((rho > 0) ? (rho - 1) : 0);
+            std::size_t srcLimbIdx = 0;
 
             std::vector<seal::Modulus> baseExcludingJ;
             baseExcludingJ.reserve((rho > 0) ? (rho - 1) : 0);
@@ -849,7 +857,7 @@ namespace osuCrypto::LogVole2
                 {
                     continue;
                 }
-                constants.mSrcLimbIndices.push_back(w);
+                constants.mSrcLimbIndices[srcLimbIdx++] = w;
                 baseExcludingJ.push_back(ctx.mModuli[w]);
                 deltaModQj = seal::util::multiply_uint_mod(deltaModQj, q[w], modJ);
             }
@@ -871,9 +879,9 @@ namespace osuCrypto::LogVole2
             auto reducedInvPunct = reducedBase.inv_punctured_prod_mod_base_array();
 
             const std::size_t reducedCount = constants.mSrcLimbIndices.size();
-            constants.mCrtInvPunctured.resize(reducedCount, 0);
-            constants.mPuncturedProdModTarget.resize(reducedCount, 0);
-            constants.mFracInvModulus.resize(reducedCount, 0);
+            resizeZero(constants.mCrtInvPunctured, reducedCount);
+            resizeZero(constants.mPuncturedProdModTarget, reducedCount);
+            resizeZero(constants.mFracInvModulus, reducedCount);
 
             for (std::size_t idx = 0; idx < reducedCount; ++idx)
             {
@@ -900,7 +908,7 @@ namespace osuCrypto::LogVole2
         for (std::size_t i = 0; i < wPrime; ++i)
         {
             RnsPoly polyOut{};
-            polyOut.mCoeffs.resize(n * rho, 0);
+            resizeZero(polyOut.mCoeffs, n * rho);
 
             for (std::size_t j = 0; j < rho; ++j)
             {

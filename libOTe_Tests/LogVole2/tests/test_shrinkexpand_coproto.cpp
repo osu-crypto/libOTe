@@ -25,7 +25,7 @@ namespace
     {
         ShrinkExpandParams params{};
         params.mRing.mPolyModulusDegree = 1024;
-        params.mRing.mCoeffModulusBits = { 30, 30 };
+        assignValues<int>(params.mRing.mCoeffModulusBits, { 30, 30 });
         params.mPlaintextModulusBits = 20;
         params.mAlpha = 2;
         params.mMu = trunc ? 4u : 3u;
@@ -42,7 +42,7 @@ namespace
     ShrinkExpandParams make_full_noise_params()
     {
         auto params = make_params();
-        params.mRing.mCoeffModulusBits = { 54, 54, 54, 54, 54, 54, 54 };
+        assignValues<int>(params.mRing.mCoeffModulusBits, { 54, 54, 54, 54, 54, 54, 54 });
         params.mPlaintextModulusBits = 54;
         params.mGadgetLogBase = 126;
         params.mMode = ShrinkExpandMode::FullNoise;
