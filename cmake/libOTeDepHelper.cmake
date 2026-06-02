@@ -64,6 +64,32 @@ endif()
 ## SEAL
 ###########################################################################
 
+function(CONFIGURE_SEAL_IMPORTED_CONFIGS)
+    if(NOT TARGET SEAL::seal)
+        return()
+    endif()
+
+    get_target_property(SEAL_IMPORTED_CONFIGS SEAL::seal IMPORTED_CONFIGURATIONS)
+    if(NOT SEAL_IMPORTED_CONFIGS)
+        return()
+    endif()
+
+    if(RELWITHDEBINFO IN_LIST SEAL_IMPORTED_CONFIGS)
+        set(SEAL_IMPORTED_FALLBACK RELWITHDEBINFO)
+    elseif(RELEASE IN_LIST SEAL_IMPORTED_CONFIGS)
+        set(SEAL_IMPORTED_FALLBACK RELEASE)
+    else()
+        list(GET SEAL_IMPORTED_CONFIGS 0 SEAL_IMPORTED_FALLBACK)
+    endif()
+
+    foreach(SEAL_CONFIG DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+        if(NOT SEAL_CONFIG IN_LIST SEAL_IMPORTED_CONFIGS)
+            set_property(TARGET SEAL::seal PROPERTY
+                MAP_IMPORTED_CONFIG_${SEAL_CONFIG} ${SEAL_IMPORTED_FALLBACK})
+        endif()
+    endforeach()
+endfunction()
+
 macro(FIND_SEAL)
     if(FETCH_SEAL)
         set(SEAL_DP NO_DEFAULT_PATH PATHS ${OC_THIRDPARTY_HINT})
@@ -75,12 +101,7 @@ macro(FIND_SEAL)
 
     find_package(SEAL 4.1.1 EXACT ${SEAL_DP} ${ARGN})
 
-    if(TARGET SEAL::seal)
-        set_target_properties(SEAL::seal PROPERTIES
-            MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
-            MAP_IMPORTED_CONFIG_MINSIZEREL Release
-            MAP_IMPORTED_CONFIG_DEBUG Release)
-    endif()
+    CONFIGURE_SEAL_IMPORTED_CONFIGS()
 endmacro()
 
 if(FETCH_SEAL_IMPL)
