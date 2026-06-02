@@ -5,7 +5,6 @@
 #include "libOTe/Vole/LogVole2/LogVole2Runtime.h"
 
 #include "macoro/task.h"
-#include "macoro/trace.h"
 #include "macoro/sync_wait.h"
 #include "macoro/thread_pool.h"
 #include "macoro/when_all.h"
@@ -144,11 +143,12 @@ namespace osuCrypto::LogVole2::detail
     macoro::task<> runPoolWorker(
         macoro::thread_pool& pool,
         Worker& worker,
+        std::size_t workerIdx,
         ProtocolCacheScope cacheScope)
     {
         co_await pool.schedule();
         ScopedProtocolCacheScope scopedCache(cacheScope);
-        worker();
+        worker(workerIdx);
     }
 
     template<typename TaskFn>
@@ -175,33 +175,23 @@ namespace osuCrypto::LogVole2::detail
         }
 
         ParallelWorkerCapScope capScope(workerCount);
-        std::atomic<std::size_t> nextTaskIdx{ 0 };
         std::atomic<bool> failed{ false };
-        const std::size_t batchSize = (taskCount >= workerCount * 8) ? 4 : 1;
 
         const ProtocolCacheScope cacheScope = currentProtocolCacheScope();
-        auto worker = [&]() {
+        auto worker = [&](std::size_t workerIdx) {
             ScopedProtocolCacheScope scopedCache(cacheScope);
-            while (!failed.load(std::memory_order_acquire))
+            const std::size_t taskBegin = workerIdx * taskCount / workerCount;
+            const std::size_t taskEnd = (workerIdx + 1) * taskCount / workerCount;
+            for (std::size_t taskIdx = taskBegin; taskIdx < taskEnd; ++taskIdx)
             {
-                const std::size_t batchStart = nextTaskIdx.fetch_add(batchSize, std::memory_order_relaxed);
-                if (batchStart >= taskCount)
+                if (failed.load(std::memory_order_acquire))
                 {
                     break;
                 }
-
-                const std::size_t batchEnd = std::min(batchStart + batchSize, taskCount);
-                for (std::size_t taskIdx = batchStart; taskIdx < batchEnd; ++taskIdx)
+                if (!taskFn(taskIdx))
                 {
-                    if (failed.load(std::memory_order_acquire))
-                    {
-                        break;
-                    }
-                    if (!taskFn(taskIdx))
-                    {
-                        failed.store(true, std::memory_order_release);
-                        break;
-                    }
+                    failed.store(true, std::memory_order_release);
+                    break;
                 }
             }
         };
@@ -212,10 +202,10 @@ namespace osuCrypto::LogVole2::detail
         tasks.reserve(workerCount - 1);
         for (std::size_t i = 1; i < workerCount; ++i)
         {
-            tasks.push_back(runPoolWorker(pool, worker, cacheScope) | macoro::make_eager());
+            tasks.push_back(runPoolWorker(pool, worker, i, cacheScope) | macoro::make_eager());
         }
 
-        worker();
+        worker(0);
 
         auto results = macoro::sync_wait(macoro::when_all_ready(std::move(tasks)));
         work.reset();
