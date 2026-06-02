@@ -86,6 +86,22 @@ function(CONFIGURE_SEAL_IMPORTED_CONFIGS)
         if(NOT SEAL_CONFIG IN_LIST SEAL_IMPORTED_CONFIGS)
             set_property(TARGET SEAL::seal PROPERTY
                 MAP_IMPORTED_CONFIG_${SEAL_CONFIG} ${SEAL_IMPORTED_FALLBACK})
+
+            foreach(SEAL_PROPERTY
+                    IMPORTED_LOCATION
+                    IMPORTED_IMPLIB
+                    IMPORTED_LINK_INTERFACE_LANGUAGES)
+                get_target_property(SEAL_PROPERTY_VALUE SEAL::seal
+                    ${SEAL_PROPERTY}_${SEAL_IMPORTED_FALLBACK})
+
+                if(NOT SEAL_PROPERTY_VALUE STREQUAL "SEAL_PROPERTY_VALUE-NOTFOUND")
+                    set_property(TARGET SEAL::seal PROPERTY
+                        ${SEAL_PROPERTY}_${SEAL_CONFIG} "${SEAL_PROPERTY_VALUE}")
+                endif()
+            endforeach()
+
+            set_property(TARGET SEAL::seal APPEND PROPERTY
+                IMPORTED_CONFIGURATIONS ${SEAL_CONFIG})
         endif()
     endforeach()
 endfunction()
