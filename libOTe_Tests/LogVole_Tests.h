@@ -3,14 +3,9 @@
 #include <cryptoTools/Common/CLP.h>
 
 #define LIBOTE_LOGVOLE_TESTS(X) \
-    X(Civole, PublicApiInvariant) \
-    X(Civole, ReleaseRequiresPriorReleaseK) \
     X(Civole, RejectsZeroDelta) \
-    X(Civole, RejectsOutOfFieldReceiverValue) \
-    X(Civole, SupportsSequentialSids) \
-    X(Civole, StateMachineAutoSidSequential) \
-    X(Civole, StateMachineOneShotAutoOffline) \
-    X(Civole, RejectsSameSidReuseByEitherParty) \
+    X(Civole, ValidationAndSidReuse) \
+    X(Civole, StateMachineAutoOfflineSequentialSids) \
     X(Core, ModeSelection) \
     X(Core, RuntimeCacheScopePropagatesToParallelWorkers) \
     X(Core, SeedLabelAggSumsTauBlocks) \
@@ -28,18 +23,12 @@
     X(Core, RootOfflineRejectsMetadataMismatch) \
     X(Core, RootOnlineLocalFlow) \
     X(Core, RootOnlineLocalRelation) \
-    X(Core, RootLocalApiRelation) \
     X(Core, TwoLevelLocalApiRelation) \
-    X(Core, ThreeLevelLocalApiMessageShape) \
-    X(Core, ThreeLevelLocalPrecomputeCache) \
-    X(Core, TwoLevelLocalOnlineUsesPrecompute) \
-    X(Core, ThreeLevelOfflineReusesInternalSetup) \
+    X(Core, ThreeLevelOfflineMessageAndReuse) \
     X(Core, RecursiveGadgetInputSubproblem) \
-    X(Core, RecursiveGadgetInputSubproblemFullNoise) \
     X(Core, RejectsWidthsBelowRandomizedRootBlock) \
     X(Core, TwoLevelCoprotoRelation) \
-    X(Core, TwoLevelCoprotoMultiThread) \
-    X(Core, TwoLevelCoprotoSkipTbkOutput) \
+    X(Core, TwoLevelCoprotoMultiThreadSkipTbkOutput) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \

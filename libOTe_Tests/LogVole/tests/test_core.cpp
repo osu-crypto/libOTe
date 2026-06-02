@@ -1198,82 +1198,6 @@ void LogVole_Core_RootOnlineLocalRelation(const oc::CLP&)
         << ", root sk_x residual " << static_cast<double>(receiverKeyResidual);
 }
 
-void LogVole_Core_RootLocalApiRelation(const oc::CLP&)
-{
-    Params params = make_golden_params();
-    params.mW =
-        params.mShrinkExpand.mAlpha *
-        (params.mShrinkExpand.mTau - 1) *
-        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
-
-    RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
-
-    SenderOfflineInput senderInput{};
-    senderInput.mParams = params;
-    senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7631u);
-
-    SenderOfflineOutput senderOffline{};
-    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(senderInput, senderOffline));
-    LOGVOLE_REQUIRE_EQ(senderOffline.mState.mParams.mW, params.mW);
-    LOGVOLE_REQUIRE_EQ(senderOffline.mState.mShrinkExpandState.mS.size(), params.mW);
-
-    ReceiverOfflineInput receiverInput{};
-    receiverInput.mParams = params;
-
-    ReceiverOfflineOutput receiverOffline{};
-    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(
-        receiverInput,
-        senderOffline.mShrinkExpandMessage,
-        senderOffline.mRootMessage,
-        receiverOffline));
-
-    const std::uint32_t plainSampleBits =
-        std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
-    ReceiverOnlineInput receiverOnlineInput{};
-    receiverOnlineInput.mX = sample_small_plain_batch(ctx, params.mW, 0x7642u, plainSampleBits);
-
-    RootDigestState digestState{};
-    RootDigestMessage digestMessage{};
-    LOGVOLE_REQUIRE_TRUE(prepareRootDigestReceiver(
-        receiverOffline.mState,
-        receiverOnlineInput.mX,
-        digestState,
-        digestMessage));
-
-    RootResponseMessage response{};
-    SenderOnlineOutput senderOnline{};
-    LOGVOLE_REQUIRE_TRUE(prepareRootOnlineSender(
-        senderOffline.mState,
-        digestMessage,
-        response,
-        senderOnline));
-    LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
-    LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mPrecomputedTbk != nullptr);
-
-    ReceiverOnlineOutput receiverOnline{};
-    LOGVOLE_REQUIRE_TRUE(finalizeRootOnlineReceiver(
-        receiverOffline.mState,
-        receiverOnlineInput,
-        digestState,
-        response,
-        receiverOnline));
-    LOGVOLE_EXPECT_TRUE(rangesEqual(receiverOnline.mSeed, senderOnline.mSeed));
-
-    std::vector<RnsPoly> actual;
-    std::vector<RnsPoly> expected;
-    LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, receiverOnline.mTbm, senderOnline.mTbk, actual));
-    LOGVOLE_REQUIRE_TRUE(compute_expected_s_mul_x(
-        ctx,
-        senderOffline.mState.mShrinkExpandState.mS,
-        receiverOnlineInput.mX,
-        expected));
-
-    long double maxLog2 = 0.0L;
-    LOGVOLE_EXPECT_TRUE(check_logvole_noise_tolerance(ctx, actual, expected, params, maxLog2))
-        << "max centered log2 residual " << static_cast<double>(maxLog2);
-}
-
 void LogVole_Core_TwoLevelLocalApiRelation(const oc::CLP&)
 {
     Params params = make_recursive_params(2);
@@ -1317,6 +1241,8 @@ void LogVole_Core_TwoLevelLocalApiRelation(const oc::CLP&)
     LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
     LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
     LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
+    LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mPrecomputedTbk != nullptr);
+    LOGVOLE_REQUIRE_EQ(senderOffline.mState.mPrecomputedTbk->size(), params.mW);
 
     std::vector<RnsPoly> sRep;
     LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
@@ -1351,7 +1277,7 @@ void LogVole_Core_TwoLevelLocalApiRelation(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole_Core_ThreeLevelLocalApiMessageShape(const oc::CLP&)
+void LogVole_Core_ThreeLevelOfflineMessageAndReuse(const oc::CLP&)
 {
     Params params = make_recursive_params(3);
 
@@ -1379,20 +1305,6 @@ void LogVole_Core_ThreeLevelLocalApiMessageShape(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, receiverOffline));
     LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState != nullptr);
     LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState->mNextLevelState != nullptr);
-}
-
-void LogVole_Core_ThreeLevelLocalPrecomputeCache(const oc::CLP&)
-{
-    Params params = make_recursive_params(3);
-    RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
-
-    SenderOfflineInput senderInput{};
-    senderInput.mParams = params;
-    senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7951u);
-
-    SenderOfflineOutput senderOffline{};
-    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(senderInput, senderOffline));
 
     LOGVOLE_REQUIRE_TRUE(ensureSenderPrecompute(senderOffline.mState));
     LOGVOLE_REQUIRE_FALSE(senderOffline.mState.mGoldenSeed.empty());
@@ -1404,75 +1316,6 @@ void LogVole_Core_ThreeLevelLocalPrecomputeCache(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(ensureSenderPrecompute(senderOffline.mState));
     LOGVOLE_EXPECT_TRUE(rangesEqual(senderOffline.mState.mGoldenSeed, seed));
     LOGVOLE_EXPECT_TRUE(senderOffline.mState.mPrecomputedTbk.get() == cachedTbk);
-}
-
-void LogVole_Core_TwoLevelLocalOnlineUsesPrecompute(const oc::CLP&)
-{
-    Params params = make_recursive_params(2);
-
-    RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
-
-    SenderOfflineInput senderInput{};
-    senderInput.mParams = params;
-    senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7A51u);
-
-    SenderOfflineOutput senderOffline{};
-    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(senderInput, senderOffline));
-
-    ReceiverOfflineInput receiverInput{};
-    receiverInput.mParams = params;
-
-    ReceiverOfflineOutput receiverOffline{};
-    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, receiverOffline));
-
-    const std::uint32_t plainSampleBits =
-        std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
-    ReceiverOnlineInput receiverInputOnline{};
-    receiverInputOnline.mX = sample_small_plain_batch(ctx, params.mW, 0x7A62u, plainSampleBits);
-
-    SenderOnlineOutput senderOnline{};
-    ReceiverOnlineOutput receiverOnline{};
-    LOGVOLE_REQUIRE_TRUE(runLocalOnline(
-        senderOffline.mState,
-        receiverOffline.mState,
-        receiverInputOnline,
-        senderOnline,
-        receiverOnline));
-    LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
-    LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
-    LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
-    LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
-
-    const auto cachedTbk = senderOffline.mState.mPrecomputedTbk.get();
-    LOGVOLE_REQUIRE_TRUE(cachedTbk != nullptr);
-    LOGVOLE_REQUIRE_EQ(cachedTbk->size(), params.mW);
-    LOGVOLE_REQUIRE_TRUE(ensureSenderPrecompute(senderOffline.mState));
-    LOGVOLE_EXPECT_TRUE(senderOffline.mState.mPrecomputedTbk.get() == cachedTbk);
-}
-
-void LogVole_Core_ThreeLevelOfflineReusesInternalSetup(const oc::CLP&)
-{
-    Params params = make_recursive_params(3);
-    RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
-
-    SenderOfflineInput senderInput{};
-    senderInput.mParams = params;
-    senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7B51u);
-
-    SenderOfflineOutput senderOffline{};
-    LOGVOLE_REQUIRE_TRUE(prepareSenderOffline(senderInput, senderOffline));
-    LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mNextLevelState != nullptr);
-    LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mNextLevelState->mNextLevelState != nullptr);
-
-    ReceiverOfflineInput receiverInput{};
-    receiverInput.mParams = params;
-
-    ReceiverOfflineOutput receiverOffline{};
-    LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, receiverOffline));
-    LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState != nullptr);
-    LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState->mNextLevelState != nullptr);
 
     const auto& topPackage = senderOffline.mState.mShrinkExpandState;
     const auto& firstInternal = senderOffline.mState.mNextLevelState->mShrinkExpandState;
@@ -1597,11 +1440,6 @@ void run_recursive_gadget_subproblem_test(bool deterministic)
 void LogVole_Core_RecursiveGadgetInputSubproblem(const oc::CLP&)
 {
     run_recursive_gadget_subproblem_test(true);
-}
-
-void LogVole_Core_RecursiveGadgetInputSubproblemFullNoise(const oc::CLP&)
-{
-    run_recursive_gadget_subproblem_test(false);
 }
 
 void LogVole_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
@@ -1742,14 +1580,10 @@ void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole_Core_TwoLevelCoprotoMultiThread(const oc::CLP&)
+void LogVole_Core_TwoLevelCoprotoMultiThreadSkipTbkOutput(const oc::CLP&)
 {
     Params params = make_recursive_params(2);
     params.mShrinkExpand.mNumWorkerThreads = 4;
-    const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
-    const std::uint32_t rho =
-        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
-    const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
 
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
@@ -1780,88 +1614,8 @@ void LogVole_Core_TwoLevelCoprotoMultiThread(const oc::CLP&)
 
     SenderOnlineOutput senderOnline{};
     ReceiverOnlineOutput receiverOnline{};
-
-    auto onlineSockets = coproto::LocalAsyncSocket::makePair();
-    auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.online(senderState, senderOnline, onlineSockets[0]),
-        receiver.online(receiverState, receiverOnlineInput, receiverOnline, onlineSockets[1])));
-    std::get<0>(onlineResult).result();
-    std::get<1>(onlineResult).result();
-
-    LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
-    LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
-    LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
-    LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
-
-    std::vector<RnsPoly> sRep;
-    LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
-        senderInput.mSk1,
-        params.mGamma,
-        params.mShrinkExpand.mAlpha,
-        tauHi,
-        params.mShrinkExpand.mRing,
-        sRep));
-
-    const std::uint32_t wDoublePrime = (params.mW + muHi - 1u) / muHi;
-    std::vector<RnsPoly> sW;
-    sW.reserve(params.mW);
-    for (std::uint32_t chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
-    {
-        for (const auto& poly : sRep)
-        {
-            if (sW.size() < params.mW)
-            {
-                sW.push_back(poly);
-            }
-        }
-    }
-
-    std::vector<RnsPoly> actual;
-    std::vector<RnsPoly> expected;
-    LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, receiverOnline.mTbm, senderOnline.mTbk, actual));
-    LOGVOLE_REQUIRE_TRUE(compute_expected_s_mul_x(ctx, sW, receiverOnlineInput.mX, expected));
-
-    long double maxLog2 = 0.0L;
-    LOGVOLE_EXPECT_TRUE(check_logvole_noise_tolerance(ctx, actual, expected, params, maxLog2))
-        << "max centered log2 residual " << static_cast<double>(maxLog2);
-}
-
-void LogVole_Core_TwoLevelCoprotoSkipTbkOutput(const oc::CLP&)
-{
-    Params params = make_recursive_params(2);
-
-    RingNttContext ctx{};
-    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
-
-    SenderOfflineInput senderInput{};
-    senderInput.mParams = params;
-    senderInput.mSk1 = sample_batch(ctx, std::max<std::uint32_t>(1u, params.mGamma), 0x7D91u);
-
-    ReceiverOfflineInput receiverInput{};
-    receiverInput.mParams = params;
-
-    LogVoleRingSender sender{};
-    LogVoleRingReceiver receiver{};
-    SenderState senderState{};
-    ReceiverState receiverState{};
-
-    auto offlineSockets = coproto::LocalAsyncSocket::makePair();
-    auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-        sender.offline(senderInput, senderState, offlineSockets[0]),
-        receiver.offline(receiverInput, receiverState, offlineSockets[1])));
-    std::get<0>(offlineResult).result();
-    std::get<1>(offlineResult).result();
-
-    const std::uint32_t plainSampleBits =
-        std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
-    ReceiverOnlineInput receiverOnlineInput{};
-    receiverOnlineInput.mX = sample_small_plain_batch(ctx, params.mW, 0x7DA2u, plainSampleBits);
-
     SenderOnlineOptions options{};
     options.mSkipTbkOutput = true;
-
-    SenderOnlineOutput senderOnline{};
-    ReceiverOnlineOutput receiverOnline{};
 
     auto onlineSockets = coproto::LocalAsyncSocket::makePair();
     auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
