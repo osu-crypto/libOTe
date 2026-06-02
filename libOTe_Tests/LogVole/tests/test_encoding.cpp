@@ -191,3 +191,12 @@ void LogVole_Encoding_RootDigestAndResponseRoundTrip(const oc::CLP&)
     RootDigestMessage emptyDigest{};
     LOGVOLE_EXPECT_FALSE(decode(encode(emptyDigest), emptyDigest));
 }
+
+void LogVole_Encoding_AllMessageRoundTrips(const oc::CLP& cmd)
+{
+    LogVole_Encoding_KeyDeriveRequestRoundTrip(cmd);
+    LogVole_Encoding_KeyDeriveResponseRoundTrip(cmd);
+    LogVole_Encoding_SeedMessageRoundTrip(cmd);
+    LogVole_Encoding_RootOfflineMessageRoundTrip(cmd);
+    LogVole_Encoding_RootDigestAndResponseRoundTrip(cmd);
+}

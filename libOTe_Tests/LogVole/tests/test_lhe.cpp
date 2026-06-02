@@ -247,6 +247,12 @@ void LogVole_LheOps_TruncApplyCt1AndDeriveSkxRelation(const oc::CLP&)
     }
 }
 
+void LogVole_LheOps_ApplyCt1AndDeriveSkxRelations(const oc::CLP& cmd)
+{
+    LogVole_LheOps_ApplyCt1AndDeriveSkxRelation(cmd);
+    LogVole_LheOps_TruncApplyCt1AndDeriveSkxRelation(cmd);
+}
+
 void LogVole_LheOps_HashedCt2Deterministic(const oc::CLP&)
 {
     const auto params = make_params();

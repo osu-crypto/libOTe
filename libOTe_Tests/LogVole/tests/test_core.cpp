@@ -1277,7 +1277,7 @@ void LogVole_Core_TwoLevelLocalApiRelation(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole_Core_ThreeLevelOfflineMessageAndReuse(const oc::CLP&)
+void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
 {
     Params params = make_recursive_params(3);
 
@@ -1324,6 +1324,30 @@ void LogVole_Core_ThreeLevelOfflineMessageAndReuse(const oc::CLP&)
 
     expect_batch_equal(topPackage.mSk1, firstInternal.mSk1);
     expect_batch_equal(firstInternal.mSk1, reusedRootPackage.mSk1);
+
+    const Params rejectedParams = make_rejected_root_width_params();
+    const std::uint32_t tauHi = rejectedParams.mShrinkExpand.mTau - 1u;
+    const std::uint32_t rho =
+        static_cast<std::uint32_t>(rejectedParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+    const std::uint32_t muHi = rejectedParams.mShrinkExpand.mAlpha * tauHi * rho;
+    LOGVOLE_REQUIRE_LT(rejectedParams.mW, muHi);
+
+    RingNttContext rejectedCtx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(rejectedParams.mShrinkExpand.mRing, rejectedCtx));
+
+    SenderOfflineInput rejectedSenderInput{};
+    rejectedSenderInput.mParams = rejectedParams;
+    rejectedSenderInput.mSk1 = sample_batch(rejectedCtx, 1, 0x7D01u);
+
+    SenderOfflineOutput rejectedSenderOutput{};
+    LOGVOLE_EXPECT_FALSE(prepareSenderOffline(rejectedSenderInput, rejectedSenderOutput));
+
+    ReceiverOfflineInput rejectedReceiverInput{};
+    rejectedReceiverInput.mParams = rejectedParams;
+
+    OfflineMessage emptyMessage{};
+    ReceiverOfflineOutput rejectedReceiverOutput{};
+    LOGVOLE_EXPECT_FALSE(finalizeReceiverOffline(rejectedReceiverInput, emptyMessage, rejectedReceiverOutput));
 }
 
 void run_recursive_gadget_subproblem_test(bool deterministic)
