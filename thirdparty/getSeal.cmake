@@ -8,6 +8,27 @@ set(BUILD_DIR "${CLONE_DIR}/out/build/${OC_CONFIG}")
 set(LOG_FILE  "${CMAKE_CURRENT_LIST_DIR}/log-${DEP_NAME}.txt")
 set(CONFIG    --config ${CMAKE_BUILD_TYPE})
 
+function(GET_SEAL_INSTALL_CONFIG OUT_VAR)
+    set(SEAL_INSTALL_CONFIG "${CMAKE_BUILD_TYPE}")
+    set(SEAL_CACHE_FILE "${BUILD_DIR}/CMakeCache.txt")
+
+    if(EXISTS "${SEAL_CACHE_FILE}")
+        file(STRINGS "${SEAL_CACHE_FILE}" SEAL_CACHE_BUILD_TYPE
+            REGEX "^CMAKE_BUILD_TYPE:[^=]*=")
+
+        if(SEAL_CACHE_BUILD_TYPE)
+            string(REGEX REPLACE "^CMAKE_BUILD_TYPE:[^=]*=" ""
+                SEAL_INSTALL_CONFIG "${SEAL_CACHE_BUILD_TYPE}")
+        endif()
+    endif()
+
+    if(SEAL_INSTALL_CONFIG)
+        set(${OUT_VAR} --config ${SEAL_INSTALL_CONFIG} PARENT_SCOPE)
+    else()
+        set(${OUT_VAR} PARENT_SCOPE)
+    endif()
+endfunction()
+
 include("${CMAKE_CURRENT_LIST_DIR}/fetch.cmake")
 
 set(SEAL_FETCH_BUILD_AVAILABLE OFF)
@@ -50,10 +71,12 @@ else()
 endif()
 
 if(SEAL_FETCH_BUILD_AVAILABLE)
+    get_seal_install_config(SEAL_INSTALL_CONFIG)
+
     install(CODE "
         if(NOT CMAKE_INSTALL_PREFIX STREQUAL \"${OC_THIRDPARTY_INSTALL_PREFIX}\")
             execute_process(
-                COMMAND ${SUDO} \${CMAKE_COMMAND} --install \"${BUILD_DIR}\" ${CONFIG} --prefix \${CMAKE_INSTALL_PREFIX}
+                COMMAND ${SUDO} \${CMAKE_COMMAND} --install \"${BUILD_DIR}\" ${SEAL_INSTALL_CONFIG} --prefix \${CMAKE_INSTALL_PREFIX}
                 WORKING_DIRECTORY ${CLONE_DIR}
                 RESULT_VARIABLE RESULT
                 COMMAND_ECHO STDOUT
