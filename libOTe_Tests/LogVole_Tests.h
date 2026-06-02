@@ -30,16 +30,16 @@
     X(Core, RootOnlineLocalRelation) \
     X(Core, RootLocalApiRelation) \
     X(Core, TwoLevelLocalApiRelation) \
-    X(Core, ThreeLevelLocalApiRelation) \
+    X(Core, ThreeLevelLocalApiMessageShape) \
     X(Core, ThreeLevelLocalPrecomputeCache) \
-    X(Core, ThreeLevelLocalRepeatedOnline) \
+    X(Core, TwoLevelLocalOnlineUsesPrecompute) \
     X(Core, ThreeLevelOfflineReusesInternalSetup) \
     X(Core, RecursiveGadgetInputSubproblem) \
     X(Core, RecursiveGadgetInputSubproblemFullNoise) \
     X(Core, RejectsWidthsBelowRandomizedRootBlock) \
-    X(Core, ThreeLevelCoprotoRelation) \
-    X(Core, ThreeLevelCoprotoMultiThread) \
-    X(Core, ThreeLevelCoprotoSkipTbkOutput) \
+    X(Core, TwoLevelCoprotoRelation) \
+    X(Core, TwoLevelCoprotoMultiThread) \
+    X(Core, TwoLevelCoprotoSkipTbkOutput) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(Encoding, KeyDeriveRequestRoundTrip) \

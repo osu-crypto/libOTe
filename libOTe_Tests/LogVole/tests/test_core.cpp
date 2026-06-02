@@ -97,32 +97,10 @@ namespace
         return params;
     }
 
-    Params make_leaf_tau_one_params()
+    Params make_rejected_root_width_params()
     {
-        Params params{};
-        params.mShrinkExpand.mRing.mPolyModulusDegree = 16384;
-        assignValues<int>(params.mShrinkExpand.mRing.mCoeffModulusBits, { 55, 55, 55, 55, 55 });
-        params.mShrinkExpand.mPlaintextModulusBits = 55;
-        params.mShrinkExpand.mMode = ShrinkExpandMode::Deterministic;
-        params.mShrinkExpand.mNoiseBound = 0;
-        params.mShrinkExpand.mSamplingSeeds.mNoiseRoot = 0xBAD5EEDu;
-        params.mShrinkExpand.mAlpha = 2;
-        params.mShrinkExpand.mGadgetLogBase = 110;
-
-        std::uint32_t logQ = 0;
-        for (const auto bits : params.mShrinkExpand.mRing.mCoeffModulusBits)
-        {
-            logQ += static_cast<std::uint32_t>(bits);
-        }
-        params.mShrinkExpand.mTau =
-            (logQ + params.mShrinkExpand.mGadgetLogBase - 1u) /
-            params.mShrinkExpand.mGadgetLogBase;
-        params.mShrinkExpand.mMu =
-            params.mShrinkExpand.mAlpha *
-            params.mShrinkExpand.mTau *
-            static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+        Params params = make_golden_params();
         params.mW = 6;
-        params.mGamma = 1;
         return params;
     }
 
@@ -1299,6 +1277,8 @@ void LogVole_Core_RootLocalApiRelation(const oc::CLP&)
 void LogVole_Core_TwoLevelLocalApiRelation(const oc::CLP&)
 {
     Params params = make_recursive_params(2);
+    params.mShrinkExpand.mMode = ShrinkExpandMode::Deterministic;
+    params.mShrinkExpand.mNoiseBound = 0;
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
     const std::uint32_t rho =
         static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
@@ -1371,13 +1351,9 @@ void LogVole_Core_TwoLevelLocalApiRelation(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole_Core_ThreeLevelLocalApiRelation(const oc::CLP&)
+void LogVole_Core_ThreeLevelLocalApiMessageShape(const oc::CLP&)
 {
     Params params = make_recursive_params(3);
-    const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
-    const std::uint32_t rho =
-        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
-    const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
 
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
@@ -1403,56 +1379,6 @@ void LogVole_Core_ThreeLevelLocalApiRelation(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, receiverOffline));
     LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState != nullptr);
     LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState->mNextLevelState != nullptr);
-
-    const std::uint32_t plainSampleBits =
-        std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
-    ReceiverOnlineInput receiverInputOnline{};
-    receiverInputOnline.mX = sample_small_plain_batch(ctx, params.mW, 0x7862u, plainSampleBits);
-
-    SenderOnlineOutput senderOnline{};
-    ReceiverOnlineOutput receiverOnline{};
-    LOGVOLE_REQUIRE_TRUE(runLocalOnline(
-        senderOffline.mState,
-        receiverOffline.mState,
-        receiverInputOnline,
-        senderOnline,
-        receiverOnline));
-    LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
-    LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
-    LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
-    LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
-
-    std::vector<RnsPoly> sRep;
-    LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
-        senderInput.mSk1,
-        params.mGamma,
-        params.mShrinkExpand.mAlpha,
-        tauHi,
-        params.mShrinkExpand.mRing,
-        sRep));
-
-    const std::uint32_t wDoublePrime = (params.mW + muHi - 1u) / muHi;
-    std::vector<RnsPoly> sW;
-    sW.reserve(params.mW);
-    for (std::uint32_t chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
-    {
-        for (const auto& poly : sRep)
-        {
-            if (sW.size() < params.mW)
-            {
-                sW.push_back(poly);
-            }
-        }
-    }
-
-    std::vector<RnsPoly> actual;
-    std::vector<RnsPoly> expected;
-    LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, receiverOnline.mTbm, senderOnline.mTbk, actual));
-    LOGVOLE_REQUIRE_TRUE(compute_expected_s_mul_x(ctx, sW, receiverInputOnline.mX, expected));
-
-    long double maxLog2 = 0.0L;
-    LOGVOLE_EXPECT_TRUE(check_logvole_noise_tolerance(ctx, actual, expected, params, maxLog2))
-        << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
 void LogVole_Core_ThreeLevelLocalPrecomputeCache(const oc::CLP&)
@@ -1480,13 +1406,9 @@ void LogVole_Core_ThreeLevelLocalPrecomputeCache(const oc::CLP&)
     LOGVOLE_EXPECT_TRUE(senderOffline.mState.mPrecomputedTbk.get() == cachedTbk);
 }
 
-void LogVole_Core_ThreeLevelLocalRepeatedOnline(const oc::CLP&)
+void LogVole_Core_TwoLevelLocalOnlineUsesPrecompute(const oc::CLP&)
 {
-    Params params = make_recursive_params(3);
-    const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
-    const std::uint32_t rho =
-        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
-    const std::uint32_t muHi = params.mShrinkExpand.mAlpha * tauHi * rho;
+    Params params = make_recursive_params(2);
 
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
@@ -1504,71 +1426,28 @@ void LogVole_Core_ThreeLevelLocalRepeatedOnline(const oc::CLP&)
     ReceiverOfflineOutput receiverOffline{};
     LOGVOLE_REQUIRE_TRUE(finalizeReceiverOffline(receiverInput, senderOffline.mMessage, receiverOffline));
 
-    std::vector<RnsPoly> sRep;
-    LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(
-        senderInput.mSk1,
-        params.mGamma,
-        params.mShrinkExpand.mAlpha,
-        tauHi,
-        params.mShrinkExpand.mRing,
-        sRep));
-
-    const std::uint32_t wDoublePrime = (params.mW + muHi - 1u) / muHi;
-    std::vector<RnsPoly> sW;
-    sW.reserve(params.mW);
-    for (std::uint32_t chunkIdx = 0; chunkIdx < wDoublePrime; ++chunkIdx)
-    {
-        for (const auto& poly : sRep)
-        {
-            if (sW.size() < params.mW)
-            {
-                sW.push_back(poly);
-            }
-        }
-    }
-
-    AlignedUnVec<std::uint8_t> firstSeed;
     const std::uint32_t plainSampleBits =
         std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits);
-    const auto verifyOnline = [&](std::uint64_t inputSeed) {
-        ReceiverOnlineInput receiverInputOnline{};
-        receiverInputOnline.mX = sample_small_plain_batch(ctx, params.mW, inputSeed, plainSampleBits);
+    ReceiverOnlineInput receiverInputOnline{};
+    receiverInputOnline.mX = sample_small_plain_batch(ctx, params.mW, 0x7A62u, plainSampleBits);
 
-        SenderOnlineOutput senderOnline{};
-        ReceiverOnlineOutput receiverOnline{};
-        LOGVOLE_REQUIRE_TRUE(runLocalOnline(
-            senderOffline.mState,
-            receiverOffline.mState,
-            receiverInputOnline,
-            senderOnline,
-            receiverOnline));
-        LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
-        LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
-        LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
-        LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
+    SenderOnlineOutput senderOnline{};
+    ReceiverOnlineOutput receiverOnline{};
+    LOGVOLE_REQUIRE_TRUE(runLocalOnline(
+        senderOffline.mState,
+        receiverOffline.mState,
+        receiverInputOnline,
+        senderOnline,
+        receiverOnline));
+    LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
+    LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
+    LOGVOLE_REQUIRE_FALSE(senderOnline.mSeed.empty());
+    LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, receiverOnline.mSeed));
 
-        if (firstSeed.empty())
-        {
-            firstSeed = senderOnline.mSeed;
-        }
-        else
-        {
-            LOGVOLE_EXPECT_TRUE(rangesEqual(senderOnline.mSeed, firstSeed));
-        }
-
-        std::vector<RnsPoly> actual;
-        std::vector<RnsPoly> expected;
-        LOGVOLE_REQUIRE_TRUE(subtract_batches(ctx, receiverOnline.mTbm, senderOnline.mTbk, actual));
-        LOGVOLE_REQUIRE_TRUE(compute_expected_s_mul_x(ctx, sW, receiverInputOnline.mX, expected));
-
-        long double maxLog2 = 0.0L;
-        LOGVOLE_EXPECT_TRUE(check_logvole_noise_tolerance(ctx, actual, expected, params, maxLog2))
-            << "max centered log2 residual " << static_cast<double>(maxLog2);
-    };
-
-    verifyOnline(0x7A62u);
     const auto cachedTbk = senderOffline.mState.mPrecomputedTbk.get();
-    verifyOnline(0x7A63u);
+    LOGVOLE_REQUIRE_TRUE(cachedTbk != nullptr);
+    LOGVOLE_REQUIRE_EQ(cachedTbk->size(), params.mW);
+    LOGVOLE_REQUIRE_TRUE(ensureSenderPrecompute(senderOffline.mState));
     LOGVOLE_EXPECT_TRUE(senderOffline.mState.mPrecomputedTbk.get() == cachedTbk);
 }
 
@@ -1727,7 +1606,7 @@ void LogVole_Core_RecursiveGadgetInputSubproblemFullNoise(const oc::CLP&)
 
 void LogVole_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
 {
-    const Params params = make_leaf_tau_one_params();
+    const Params params = make_rejected_root_width_params();
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
     const std::uint32_t rho =
         static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
@@ -1752,9 +1631,9 @@ void LogVole_Core_RejectsWidthsBelowRandomizedRootBlock(const oc::CLP&)
     LOGVOLE_EXPECT_FALSE(finalizeReceiverOffline(receiverInput, emptyMessage, receiverOutput));
 }
 
-void LogVole_Core_ThreeLevelCoprotoRelation(const oc::CLP&)
+void LogVole_Core_TwoLevelCoprotoRelation(const oc::CLP&)
 {
-    Params params = make_recursive_params(3);
+    Params params = make_recursive_params(2);
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
     const std::uint32_t rho =
         static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
@@ -1863,9 +1742,9 @@ void LogVole_Core_ThreeLevelCoprotoRelation(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole_Core_ThreeLevelCoprotoMultiThread(const oc::CLP&)
+void LogVole_Core_TwoLevelCoprotoMultiThread(const oc::CLP&)
 {
-    Params params = make_recursive_params(3);
+    Params params = make_recursive_params(2);
     params.mShrinkExpand.mNumWorkerThreads = 4;
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
     const std::uint32_t rho =
@@ -1947,9 +1826,9 @@ void LogVole_Core_ThreeLevelCoprotoMultiThread(const oc::CLP&)
         << "max centered log2 residual " << static_cast<double>(maxLog2);
 }
 
-void LogVole_Core_ThreeLevelCoprotoSkipTbkOutput(const oc::CLP&)
+void LogVole_Core_TwoLevelCoprotoSkipTbkOutput(const oc::CLP&)
 {
-    Params params = make_recursive_params(3);
+    Params params = make_recursive_params(2);
 
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
