@@ -1,13 +1,14 @@
 #include "libOTe/Vole/LogVole/LogVoleRingSender.h"
 
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
+#include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
 #include <array>
 #include <cstddef>
 #include <exception>
-#include <future>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <utility>
 
@@ -122,31 +123,143 @@ namespace osuCrypto::LogVole
             return true;
         }
 
-        task<> runSenderPrecomputeTask(
-            const SenderState& state,
-            macoro::thread_pool& pool,
-            std::promise<bool>& promise,
-            ProtocolCacheScope cacheScope)
+        bool computeMuHi(const Params& params, u32& out)
         {
-            co_await pool.schedule();
-            ScopedProtocolCacheScope scopedCache(cacheScope);
-
-            try
+            u32 tauHi = 0;
+            if (!computeTauHi(params, tauHi))
             {
-                promise.set_value(ensureSenderPrecompute(state) && state.mPrecomputedTbk != nullptr);
+                return false;
             }
-            catch (...)
+
+            const u32 rho = static_cast<u32>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            if (rho == 0)
             {
-                promise.set_exception(std::current_exception());
+                return false;
+            }
+
+            out = params.mShrinkExpand.mAlpha * tauHi * rho;
+            return out != 0;
+        }
+
+        u64 countSeedInstances(const SenderState& state)
+        {
+            u32 muHi = 0;
+            if (!computeMuHi(state.mParams, muHi))
+            {
+                return 0;
+            }
+
+            RecursiveMode mode{};
+            if (!recursiveMode(state.mParams, mode))
+            {
+                return 0;
+            }
+            if (mode == RecursiveMode::Root)
+            {
+                return 1;
+            }
+            if (!state.mNextLevelState)
+            {
+                return 0;
+            }
+
+            const u32 wDoublePrime = (state.mParams.mW + muHi - 1u) / muHi;
+            return countSeedInstances(*state.mNextLevelState) + wDoublePrime;
+        }
+
+        void applySessionId(SenderState& state, u64 sid)
+        {
+            state.mParams.mSessionId = sid;
+            if (state.mNextLevelState)
+            {
+                applySessionId(*state.mNextLevelState, sid);
             }
         }
 
-        void requireSenderPrecompute(const std::shared_future<bool>& precomputeFuture)
+        bool prepareRecursiveSenderExpansion(
+            SenderState& state,
+            std::span<const RnsPoly> digests)
         {
-            if (!precomputeFuture.get())
+            u32 tauHi = 0;
+            u32 muHi = 0;
+            if (!computeTauHi(state.mParams, tauHi) ||
+                !computeMuHi(state.mParams, muHi) ||
+                !state.mNextLevelState ||
+                !state.mNextLevelState->mPrecomputedTbk)
             {
-                throw std::runtime_error("LogVole sender could not prepare recursive online cache");
+                return false;
             }
+
+            const u32 wDoublePrime = (state.mParams.mW + muHi - 1u) / muHi;
+            const u32 wPrime =
+                (state.mParams.mW + state.mParams.mShrinkExpand.mAlpha - 1u) /
+                state.mParams.mShrinkExpand.mAlpha;
+            if (digests.size() != wDoublePrime)
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> kPrimeHat;
+            std::vector<RnsPoly> kPrime;
+            if (!seedLabelDenoiseTbm(
+                    *state.mNextLevelState->mPrecomputedTbk,
+                    wPrime,
+                    tauHi,
+                    state.mParams.mShrinkExpand.mRing,
+                    kPrimeHat) ||
+                !seedLabelAgg(
+                    kPrimeHat,
+                    wDoublePrime,
+                    tauHi,
+                    state.mParams.mShrinkExpand.mRing,
+                    kPrime) ||
+                kPrime.size() != wDoublePrime)
+            {
+                return false;
+            }
+
+            const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
+            std::vector<RnsPoly> finalTbk(state.mParams.mW);
+            if (!detail::runParallelTasks(
+                    wDoublePrime,
+                    state.mShrinkExpandState.mParams.mNumWorkerThreads,
+                    [&](std::size_t taskIdx) {
+                        const auto chunkIdx = static_cast<u32>(taskIdx);
+                        const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
+                        const std::size_t end =
+                            std::min(start + static_cast<std::size_t>(muHi), static_cast<std::size_t>(state.mParams.mW));
+
+                        ShrinkExpandExpandSenderInput expandInput{};
+                        expandInput.mSeed = state.mNextLevelState->mGoldenSeed;
+                        expandInput.mSid = state.mParams.mSessionId;
+                        expandInput.mNonce = deriveSeedInstanceNonce(
+                            expandInput.mSeed,
+                            expandInput.mSid,
+                            digests[chunkIdx],
+                            instanceBase + chunkIdx);
+                        expandInput.mDigest = digests[chunkIdx];
+                        expandInput.mTbkPrime = kPrime[chunkIdx];
+
+                        ShrinkExpandSenderExpandOutput expandOutput{};
+                        if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
+                            expandOutput.mTbk.size() < end - start)
+                        {
+                            return false;
+                        }
+
+                        for (std::size_t idx = 0; idx < end - start; ++idx)
+                        {
+                            finalTbk[start + idx] = std::move(expandOutput.mTbk[idx]);
+                        }
+                        return true;
+                    }))
+            {
+                return false;
+            }
+
+            state.mGoldenSeed = state.mNextLevelState->mGoldenSeed;
+            state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(std::move(finalTbk));
+            return true;
         }
 
         task<> sendOfflineMessage(
@@ -208,9 +321,9 @@ namespace osuCrypto::LogVole
         }
 
         task<> senderOnlineService(
-            const SenderState& state,
+            SenderState& state,
             Socket& sock,
-            const std::shared_future<bool>& precomputeFuture,
+            PRNG& prng,
             CommunicationStats& comm)
         {
             RecursiveMode mode{};
@@ -233,10 +346,8 @@ namespace osuCrypto::LogVole
                         throw std::runtime_error("LogVole sender could not decode root digest");
                     }
 
-                    requireSenderPrecompute(precomputeFuture);
-
                     RootResponseMessage response{};
-                    if (!prepareRootResponseSender(state, digest, response))
+                    if (!prepareRootResponseSender(state, digest, prng, response))
                     {
                         throw std::runtime_error("LogVole sender could not prepare root response");
                     }
@@ -254,18 +365,45 @@ namespace osuCrypto::LogVole
                 throw std::runtime_error("LogVole sender missing recursive child state");
             }
 
+            u32 muHi = 0;
+            if (!computeMuHi(state.mParams, muHi))
+            {
+                throw std::runtime_error("LogVole sender has invalid recursive online shape");
+            }
+            const u32 wDoublePrime = (state.mParams.mW + muHi - 1u) / muHi;
+            std::vector<RnsPoly> digests(wDoublePrime);
+            {
+                auto digestSock = sock.fork();
+                for (u32 idx = 0; idx < wDoublePrime; ++idx)
+                {
+                    const auto digestPayload = co_await recvFrame(digestSock);
+                    PolyMessage digestMessage{};
+                    if (!decode(digestPayload, digestMessage) ||
+                        !readPolyMessage(state.mParams.mShrinkExpand.mRing, digestMessage, digests[idx]))
+                    {
+                        throw std::runtime_error("LogVole sender could not decode recursive chunk digest");
+                    }
+                    comm.mBytesReceived += frameBytes(digestPayload);
+                }
+            }
+
             auto childSock = sock.fork();
-            co_await senderOnlineService(*state.mNextLevelState, childSock, precomputeFuture, comm);
+            co_await senderOnlineService(*state.mNextLevelState, childSock, prng, comm);
+            if (!prepareRecursiveSenderExpansion(state, digests))
+            {
+                throw std::runtime_error("LogVole sender could not prepare recursive online cache");
+            }
         }
     }
 
     task<> LogVoleRingSender::offline(
         const ShrinkExpandSenderOfflineInput& input,
         ShrinkExpandSenderState& state,
+        PRNG& prng,
         Socket& sock)
     {
         ShrinkExpandOfflineMessage message{};
-        if (!prepareShrinkExpandSenderOffline(input, message, state))
+        if (!prepareShrinkExpandSenderOffline(input, prng, message, state))
         {
             throw std::runtime_error("LogVole sender could not prepare shrink/expand offline message");
         }
@@ -276,10 +414,11 @@ namespace osuCrypto::LogVole
     task<> LogVoleRingSender::offline(
         const SenderOfflineInput& input,
         SenderState& state,
+        PRNG& prng,
         Socket& sock)
     {
         SenderOfflineOutput output{};
-        if (!prepareSenderOffline(input, output))
+        if (!prepareSenderOffline(input, prng, output))
         {
             throw std::runtime_error("LogVole sender could not prepare recursive offline state");
         }
@@ -311,18 +450,20 @@ namespace osuCrypto::LogVole
     }
 
     task<> LogVoleRingSender::online(
-        const SenderState& state,
+        SenderState& state,
         SenderOnlineOutput& output,
+        PRNG& prng,
         Socket& sock)
     {
         SenderOnlineOptions options{};
-        co_await online(state, options, output, sock);
+        co_await online(state, options, output, prng, sock);
     }
 
     task<> LogVoleRingSender::online(
-        const SenderState& state,
+        SenderState& state,
         const SenderOnlineOptions& options,
         SenderOnlineOutput& output,
+        PRNG& prng,
         Socket& sock)
     {
         ProtocolCacheScope cacheScope = currentProtocolCacheScope();
@@ -332,46 +473,24 @@ namespace osuCrypto::LogVole
             cacheScope.mRole = ProtocolCacheRole::Sender;
         }
         ScopedProtocolCacheScope scopedCache(cacheScope);
-
-        std::promise<bool> precomputePromise{};
-        auto precomputeFuture = precomputePromise.get_future().share();
-        macoro::thread_pool::work precomputeWork;
-        macoro::thread_pool precomputePool(1, precomputeWork);
-        auto precomputeTask =
-            runSenderPrecomputeTask(state, precomputePool, precomputePromise, cacheScope) | macoro::make_eager();
+        applySessionId(state, options.mSid);
 
         std::exception_ptr serviceException{};
         CommunicationStats comm{};
         try
         {
-            co_await senderOnlineService(state, sock, precomputeFuture, comm);
+            co_await senderOnlineService(state, sock, prng, comm);
         }
         catch (...)
         {
             serviceException = std::current_exception();
         }
 
-        bool precomputeOk = false;
-        try
-        {
-            precomputeOk = precomputeFuture.get();
-        }
-        catch (...)
-        {
-            if (!serviceException)
-            {
-                serviceException = std::current_exception();
-            }
-        }
-
-        precomputeWork.reset();
-        co_await precomputeTask;
-
         if (serviceException)
         {
             std::rethrow_exception(serviceException);
         }
-        if (!precomputeOk || !state.mPrecomputedTbk)
+        if (!state.mPrecomputedTbk)
         {
             throw std::runtime_error("LogVole sender could not prepare recursive online cache");
         }
@@ -443,7 +562,9 @@ namespace osuCrypto::LogVole
 
         co_await sendFrame(sock, encode(makePolyMessage(state.mParams.mRing, skX)));
 
-        if (!shrinkExpandExpandSender(state, input, output))
+        ShrinkExpandExpandSenderInput expandInput = input;
+        expandInput.mDigest = std::move(digest);
+        if (!shrinkExpandExpandSender(state, expandInput, output))
         {
             throw std::runtime_error("LogVole sender could not expand");
         }

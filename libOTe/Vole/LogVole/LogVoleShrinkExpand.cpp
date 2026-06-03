@@ -46,7 +46,7 @@ namespace osuCrypto::LogVole
             RingParams mRing;
             u32 mMu = 0;
             u64 mNonce = 0;
-            u64 mCt2Root = 0;
+            u64 mSid = 0;
             u64 mRunId = 0;
             ProtocolCacheRole mRole = ProtocolCacheRole::Unspecified;
             std::vector<RnsPoly> mCt2;
@@ -57,32 +57,45 @@ namespace osuCrypto::LogVole
             const RingParams& ring,
             u32 mu,
             u64 nonce,
-            u64 ct2Root,
+            u64 sid,
             ProtocolCacheScope scope)
         {
+            (void)cache;
+            (void)ring;
+            (void)mu;
+            (void)nonce;
+            (void)sid;
+            (void)scope;
+            return false;
+#if 0
             return cache.mValid &&
                    cache.mRing == ring &&
                    cache.mMu == mu &&
                    cache.mNonce == nonce &&
-                   cache.mCt2Root == ct2Root &&
+                   cache.mSid == sid &&
                    cache.mRunId == scope.mRunId &&
                    cache.mRole == scope.mRole;
+#endif
         }
 
         bool getOrBuildCachedCt2(
             const RingNttContext& ctx,
             const ShrinkExpandParams& params,
+            std::span<const u8> seed,
+            u64 sid,
+            const RnsPoly& digest,
+            u64 instanceIdx,
             u64 nonce,
             Ct2CacheEntry& cache)
         {
             const auto scope = currentProtocolCacheScope();
-            if (matchesCt2Cache(cache, params.mRing, params.mMu, nonce, params.mSamplingSeeds.mCt2Root, scope))
+            if (matchesCt2Cache(cache, params.mRing, params.mMu, nonce, sid, scope))
             {
                 return true;
             }
 
             std::vector<RnsPoly> ct2;
-            if (!buildHashedCt2(ctx, params.mMu, params.mSamplingSeeds, nonce, ct2))
+            if (!buildHashedCt2(ctx, params.mMu, seed, sid, digest, instanceIdx, ct2))
             {
                 return false;
             }
@@ -91,7 +104,7 @@ namespace osuCrypto::LogVole
             cache.mRing = params.mRing;
             cache.mMu = params.mMu;
             cache.mNonce = nonce;
-            cache.mCt2Root = params.mSamplingSeeds.mCt2Root;
+            cache.mSid = sid;
             cache.mRunId = scope.mRunId;
             cache.mRole = scope.mRole;
             cache.mCt2 = std::move(ct2);
@@ -266,7 +279,6 @@ namespace osuCrypto::LogVole
                    expected.mTruncateOneGadgetDigit == actual.mTruncateOneGadgetDigit &&
                    expected.mLeafInputsAreGadget == actual.mLeafInputsAreGadget &&
                    expected.mMode == actual.mMode &&
-                   expected.mSamplingSeeds.mCt2Root == actual.mSamplingSeeds.mCt2Root &&
                    expected.mNoiseBound == actual.mNoiseBound;
         }
 
@@ -344,12 +356,12 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    std::vector<RnsPoly> sampleUniformBatch(const RingNttContext& ctx, u32 count, u64 seed, u64 domainTag)
+    std::vector<RnsPoly> sampleUniformBatch(const RingNttContext& ctx, u32 count, PRNG& prng, u64 domainTag)
     {
         std::vector<RnsPoly> out(count);
         for (u32 i = 0; i < count; ++i)
         {
-            const u64 nonce = seed ^ (static_cast<u64>(i) << 1u);
+            const u64 nonce = prng.get<u64>();
             out[i] = deriveUniformPolyFromNonce(ctx, nonce, domainTag, i);
         }
         return out;
@@ -357,6 +369,7 @@ namespace osuCrypto::LogVole
 
     bool prepareShrinkExpandSenderOffline(
         const ShrinkExpandSenderOfflineInput& input,
+        PRNG& prng,
         ShrinkExpandOfflineMessage& message,
         ShrinkExpandSenderState& senderState)
     {
@@ -385,8 +398,7 @@ namespace osuCrypto::LogVole
         }
         else
         {
-            const u64 sk1Seed = deriveNoiseSeed(input.mParams.mSamplingSeeds, 0xA002u, input.mParams.mTau, input.mParams.mMu);
-            next.mSk1 = sampleUniformBatch(ctx, input.mParams.mTau, sk1Seed, 0xA002u);
+            next.mSk1 = sampleUniformBatch(ctx, input.mParams.mTau, prng, 0xA002u);
         }
 
         std::vector<RnsPoly> publicA;
@@ -413,7 +425,7 @@ namespace osuCrypto::LogVole
                 input.mParams.mTau,
                 input.mParams.mGadgetLogBase,
                 input.mParams.mPlaintextModulusBits,
-                input.mParams.mSamplingSeeds,
+                prng,
                 lenc,
                 lencSigma,
                 lencMaxDev,
@@ -430,7 +442,7 @@ namespace osuCrypto::LogVole
                 input.mS,
                 input.mParams.mTau,
                 input.mParams.mGadgetLogBase,
-                input.mParams.mSamplingSeeds,
+                prng,
                 lenc,
                 lencSigma,
                 lencMaxDev,
@@ -463,7 +475,7 @@ namespace osuCrypto::LogVole
                 next.mCt1,
                 lheSigma,
                 lheMaxDev,
-                input.mParams.mSamplingSeeds,
+                &prng,
                 true,
                 next.mPublicANtt.get(),
                 input.mParams.mNumWorkerThreads);
@@ -478,7 +490,7 @@ namespace osuCrypto::LogVole
                 next.mCt1,
                 lheSigma,
                 lheMaxDev,
-                input.mParams.mSamplingSeeds,
+                &prng,
                 true,
                 next.mPublicANtt.get(),
                 input.mParams.mNumWorkerThreads);
@@ -500,10 +512,11 @@ namespace osuCrypto::LogVole
 
     bool prepareShrinkExpandSenderOffline(
         const ShrinkExpandSenderOfflineInput& input,
+        PRNG& prng,
         ShrinkExpandSenderState& senderState)
     {
         ShrinkExpandOfflineMessage ignored{};
-        return prepareShrinkExpandSenderOffline(input, ignored, senderState);
+        return prepareShrinkExpandSenderOffline(input, prng, ignored, senderState);
     }
 
     bool finalizeShrinkExpandReceiverOffline(
@@ -624,7 +637,11 @@ namespace osuCrypto::LogVole
         const ShrinkExpandExpandSenderInput& input,
         ShrinkExpandSenderExpandOutput& out)
     {
-        if (!validateRingPolyShape(input.mTbkPrime, state.mParams.mRing))
+        if (!validateRingPolyShape(input.mTbkPrime, state.mParams.mRing) ||
+            !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
+            (!input.mMaskDigest.mCoeffs.empty() &&
+                !validateRingPolyShape(input.mMaskDigest, state.mParams.mRing)) ||
+            input.mSeed.empty())
         {
             return false;
         }
@@ -635,8 +652,18 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+        const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
+        const u64 ct2Nonce = deriveSeedInstanceNonce(input.mSeed, input.mSid, maskDigest, 0);
         thread_local Ct2CacheEntry senderCt2Cache{};
-        if (!getOrBuildCachedCt2(ctx, state.mParams, input.mNonce, senderCt2Cache))
+        if (!getOrBuildCachedCt2(
+                ctx,
+                state.mParams,
+                input.mSeed,
+                input.mSid,
+                maskDigest,
+                0,
+                ct2Nonce,
+                senderCt2Cache))
         {
             return false;
         }
@@ -666,7 +693,10 @@ namespace osuCrypto::LogVole
     {
         if ((!input.mTree && input.mX.size() != state.mParams.mMu) ||
             !validateRingPolyShape(input.mDigest, state.mParams.mRing) ||
-            !validateRingPolyShape(input.mSkX, state.mParams.mRing))
+            (!input.mMaskDigest.mCoeffs.empty() &&
+                !validateRingPolyShape(input.mMaskDigest, state.mParams.mRing)) ||
+            !validateRingPolyShape(input.mSkX, state.mParams.mRing) ||
+            input.mSeed.empty())
         {
             return false;
         }
@@ -683,8 +713,18 @@ namespace osuCrypto::LogVole
             return false;
         }
 
+        const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
+        const u64 ct2Nonce = deriveSeedInstanceNonce(input.mSeed, input.mSid, maskDigest, 0);
         thread_local Ct2CacheEntry receiverCt2Cache{};
-        if (!getOrBuildCachedCt2(ctx, state.mParams, input.mNonce, receiverCt2Cache))
+        if (!getOrBuildCachedCt2(
+                ctx,
+                state.mParams,
+                input.mSeed,
+                input.mSid,
+                maskDigest,
+                0,
+                ct2Nonce,
+                receiverCt2Cache))
         {
             return false;
         }

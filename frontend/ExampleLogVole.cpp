@@ -96,13 +96,15 @@ namespace osuCrypto
 
             auto x = makeLogVoleExampleX(w, modulus);
             auto offlineSockets = coproto::LocalAsyncSocket::makePair();
+            PRNG senderPrng(block(0x4C6F67566F6C6541ull, 0));
+            PRNG receiverPrng(block(0x4C6F67566F6C6542ull, 0));
 
             Timer timer;
             const auto begin = timer.setTimePoint("logvole.local.begin");
             // The offline phase fixes Delta and prepares reusable state for
             // sequential online calls with auto-incremented SIDs.
             auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-                sender.offline(delta, offlineSockets[0]),
+                sender.offline(delta, senderPrng, offlineSockets[0]),
                 receiver.offline(offlineSockets[1])));
             std::get<0>(offlineResult).result();
             std::get<1>(offlineResult).result();
@@ -113,8 +115,8 @@ namespace osuCrypto
             // The online phase sends the receiver's digest and returns the
             // matching sender key. The parties then locally expand to w labels.
             auto onlineResult = macoro::sync_wait(macoro::when_all_ready(
-                sender.send(b, onlineSockets[0]),
-                receiver.receive(x, a, onlineSockets[1])));
+                sender.send(b, senderPrng, onlineSockets[0]),
+                receiver.receive(x, a, receiverPrng, onlineSockets[1])));
             std::get<0>(onlineResult).result();
             std::get<1>(onlineResult).result();
 
@@ -171,10 +173,11 @@ namespace osuCrypto
         if (role == Role::Sender)
         {
             LogVole::AlignedUnVec<u64> b(w);
+            PRNG prng(block(0x4C6F67566F6C6553ull, 0));
             // Split-role mode mirrors the local example over an asio socket.
             // The receiver must use the same n, plaintext bit count and port.
-            cp::sync_wait(sender.offline(delta, chl));
-            cp::sync_wait(sender.send(b, chl));
+            cp::sync_wait(sender.offline(delta, prng, chl));
+            cp::sync_wait(sender.send(b, prng, chl));
 
             const auto end = timer.setTimePoint("logvole.end");
             const auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
@@ -190,10 +193,11 @@ namespace osuCrypto
         {
             auto x = makeLogVoleExampleX(w, modulus);
             LogVole::AlignedUnVec<u64> a(w);
+            PRNG prng(block(0x4C6F67566F6C6552ull, 0));
             // The receiver chooses x locally; the sender receives only the
             // corresponding keys for its Delta.
             cp::sync_wait(receiver.offline(chl));
-            cp::sync_wait(receiver.receive(x, a, chl));
+            cp::sync_wait(receiver.receive(x, a, prng, chl));
 
             const auto end = timer.setTimePoint("logvole.end");
             const auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();

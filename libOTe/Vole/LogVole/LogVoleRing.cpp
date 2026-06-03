@@ -2,6 +2,8 @@
 
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 
+#include "cryptoTools/Crypto/PRNG.h"
+
 #include "seal/util/clipnormal.h"
 #include "seal/util/iterator.h"
 #include "seal/util/ntt.h"
@@ -15,7 +17,6 @@
 #include <cstring>
 #include <exception>
 #include <limits>
-#include <random>
 #include <string>
 #include <tuple>
 
@@ -23,8 +24,6 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        constexpr u64 kNoiseFamilyDomain = 0x4E4F495345F10001ull;
-        constexpr u64 kCt2FamilyDomain = 0x435432F100010001ull;
         constexpr u64 kSeedBytesDomain = 0x5345454442595445ull;
 
         bool isPowerOfTwo(u32 value)
@@ -458,26 +457,15 @@ namespace osuCrypto::LogVole
         return mixed;
     }
 
-    u64 deriveNoiseSeed(const SamplingSeedConfig& config, u64 domainTag, u64 streamId, u64 salt0, u64 salt1)
-    {
-        return deriveDeterministicSeedMaterial(
-            config.mNoiseRoot, domainTag ^ kNoiseFamilyDomain, streamId, salt0, salt1, 0);
-    }
-
-    u64 deriveCt2Nonce(const SamplingSeedConfig& config, u64 nonce, u64 coeffCount)
-    {
-        return deriveDeterministicSeedMaterial(
-            config.mCt2Root, 0xC720AA55ull ^ kCt2FamilyDomain, nonce, coeffCount, 0, 0);
-    }
-
     u64 deriveSeedInstanceNonce(
-        const SamplingSeedConfig& config,
         std::span<const u8> seed,
+        u64 sid,
+        const RnsPoly& digest,
         u64 instanceIdx,
         u64 fallbackNonce)
     {
         u64 mixedSeed = deriveDeterministicSeedMaterial(
-            config.mCt2Root, kSeedBytesDomain, fallbackNonce, seed.size(), 0, 0);
+            sid, kSeedBytesDomain, fallbackNonce, seed.size(), digest.mCoeffs.size(), 0);
         constexpr std::size_t chunkBytes = sizeof(u64);
         for (std::size_t offset = 0, chunkIdx = 0; offset < seed.size(); offset += chunkBytes, ++chunkIdx)
         {
@@ -485,12 +473,19 @@ namespace osuCrypto::LogVole
             const std::size_t available = std::min(chunkBytes, seed.size() - offset);
             std::memcpy(&chunk, seed.data() + offset, available);
             const u64 chunkTag =
-                deriveDeterministicSeedMaterial(config.mCt2Root, kSeedBytesDomain, chunkIdx, 0, 0, 0);
+                deriveDeterministicSeedMaterial(sid, kSeedBytesDomain, chunkIdx, 0, 0, 0);
             mixedSeed = combineSeedPublic(mixedSeed ^ combineSeedPublic(chunk ^ chunkTag));
+        }
+        for (std::size_t idx = 0; idx < digest.mCoeffs.size(); ++idx)
+        {
+            mixedSeed = combineSeedPublic(
+                mixedSeed ^
+                combineSeedPublic(digest.mCoeffs[idx]) ^
+                combineSeedPublic(static_cast<u64>(idx)));
         }
 
         return deriveDeterministicSeedMaterial(
-            config.mCt2Root, 0xC720AA55ull ^ kCt2FamilyDomain, mixedSeed, instanceIdx, fallbackNonce, 0);
+            sid, 0xC720AA55ull, mixedSeed, instanceIdx, fallbackNonce, 0);
     }
 
     bool validateRingParams(const RingParams& params)
@@ -1152,16 +1147,15 @@ namespace osuCrypto::LogVole
             return out;
         }
 
-        std::mt19937_64 rng(rawSeed);
+        PRNG rng(block(rawSeed, domainTag ^ index));
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
         {
             const u64 mod = ctx.mModuli[modIdx].value();
-            std::uniform_int_distribution<u64> dist(0, mod - 1);
             const std::size_t offset = modIdx * n;
             for (std::size_t i = 0; i < n; ++i)
             {
-                out.mCoeffs[offset + i] = dist(rng);
+                out.mCoeffs[offset + i] = rng.get<u64>() % mod;
             }
         }
         bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);

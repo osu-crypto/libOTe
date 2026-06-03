@@ -12,11 +12,13 @@ namespace osuCrypto::LogVole
         task<> offline(
             const ShrinkExpandSenderOfflineInput& input,
             ShrinkExpandSenderState& state,
+            PRNG& prng,
             Socket& sock);
 
         task<> offline(
             const SenderOfflineInput& input,
             SenderState& state,
+            PRNG& prng,
             Socket& sock);
 
         task<> keyDerive(
@@ -25,14 +27,16 @@ namespace osuCrypto::LogVole
             Socket& sock);
 
         task<> online(
-            const SenderState& state,
+            SenderState& state,
             SenderOnlineOutput& output,
+            PRNG& prng,
             Socket& sock);
 
         task<> online(
-            const SenderState& state,
+            SenderState& state,
             const SenderOnlineOptions& options,
             SenderOnlineOutput& output,
+            PRNG& prng,
             Socket& sock);
 
         task<> expand(

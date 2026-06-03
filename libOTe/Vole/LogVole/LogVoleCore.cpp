@@ -8,12 +8,9 @@
 #include "seal/util/uintarithsmallmod.h"
 
 #include <algorithm>
-#include <atomic>
-#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
-#include <random>
 #include <span>
 #include <utility>
 
@@ -43,24 +40,6 @@ namespace osuCrypto::LogVole
             }
 
             return result;
-        }
-
-        u64 freshRootZetaSeed()
-        {
-            static std::atomic<u64> counter{ 0 };
-            u64 seed = combineSeedPublic(counter.fetch_add(1, std::memory_order_relaxed));
-            seed ^= combineSeedPublic(
-                static_cast<u64>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
-
-            std::random_device rd;
-            for (u32 idx = 0; idx < 4; ++idx)
-            {
-                const u64 lo = static_cast<u64>(rd());
-                const u64 hi = static_cast<u64>(rd());
-                seed = combineSeedPublic(seed ^ (hi << 32) ^ lo ^ static_cast<u64>(idx));
-            }
-
-            return seed;
         }
 
         double safeLog2(double value)
@@ -409,11 +388,6 @@ namespace osuCrypto::LogVole
             return out;
         }
 
-        u64 deriveRootDerandNonce(const SamplingSeedConfig& samplingSeeds, std::span<const u8> seed)
-        {
-            return deriveSeedInstanceNonce(samplingSeeds, seed, 0, 0xD37A4D5EEDull);
-        }
-
         bool unpackSinglePoly(
             const RingParams& ring,
             std::span<const u64> coeffs,
@@ -428,41 +402,15 @@ namespace osuCrypto::LogVole
             return true;
         }
 
-        bool ensureRootKPrime(const SenderState& state, RnsPoly& out)
+        bool sampleRootKPrime(const SenderState& state, PRNG& prng, RnsPoly& out)
         {
-            if (state.mRootKPrimeRt)
-            {
-                out = *state.mRootKPrimeRt;
-                return true;
-            }
-
             RingNttContext ctx{};
             if (!makeContext(state.mParams.mShrinkExpand.mRing, ctx))
             {
                 return false;
             }
 
-            const u64 rootSkHead =
-                (!state.mRootSkRRt.empty() && !state.mRootSkRRt[0].mCoeffs.empty())
-                    ? state.mRootSkRRt[0].mCoeffs[0]
-                    : 0;
-            u32 tauHi = 0;
-            if (!computeTauHi(state.mParams, tauHi))
-            {
-                return false;
-            }
-            const u32 rho =
-                static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
-            const u32 muHi = state.mParams.mShrinkExpand.mAlpha * tauHi * rho;
-            const u64 seedMaterial = deriveDeterministicSeedMaterial(
-                state.mParams.mShrinkExpand.mSamplingSeeds.mCt2Root,
-                0x52544B5052494D45ull,
-                state.mParams.mW,
-                muHi,
-                state.mRootRandomizerWidth,
-                rootSkHead);
-            out = deriveUniformPolyFromNonce(ctx, seedMaterial, 0x52544B50u, 0);
-            state.mRootKPrimeRt = std::make_shared<RnsPoly>(out);
+            out = deriveUniformPolyFromNonce(ctx, prng.get<u64>(), 0x52544B50u, 0);
             return true;
         }
 
@@ -556,6 +504,24 @@ namespace osuCrypto::LogVole
             }
 
             return countSeedInstances(*state.mNextLevelState) + computeWDoublePrime(state.mParams, muHi);
+        }
+
+        void applySessionId(SenderState& state, u64 sid)
+        {
+            state.mParams.mSessionId = sid;
+            if (state.mNextLevelState)
+            {
+                applySessionId(*state.mNextLevelState, sid);
+            }
+        }
+
+        void applySessionId(ReceiverState& state, u64 sid)
+        {
+            state.mParams.mSessionId = sid;
+            if (state.mNextLevelState)
+            {
+                applySessionId(*state.mNextLevelState, sid);
+            }
         }
 
         bool evalRootTopCtNtt(
@@ -717,8 +683,7 @@ namespace osuCrypto::LogVole
     bool sampleRootErrorBatch(
         const RingNttContext& ctx,
         u32 count,
-        const SamplingSeedConfig& samplingSeeds,
-        u64 domain,
+        PRNG& prng,
         double sigma,
         double maxDeviation,
         bool outputNtt,
@@ -736,8 +701,7 @@ namespace osuCrypto::LogVole
             resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             if (sigma > 0.0)
             {
-                const u64 noiseSeed =
-                    deriveNoiseSeed(samplingSeeds, domain, idx, count, ctx.mModuli.size());
+                const u64 noiseSeed = prng.get<u64>();
                 if (!addPolyError(poly, sigma, maxDeviation, noiseSeed, 0, ctx))
                 {
                     return false;
@@ -836,7 +800,7 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>& publicBStarNtt,
         u32 gadgetLogBase,
         u32 gadgetPowerOffset,
-        const SamplingSeedConfig& samplingSeeds,
+        PRNG& prng,
         double noiseStandardDeviation,
         double noiseMaxDeviation,
         RingTensor& out)
@@ -888,9 +852,7 @@ namespace osuCrypto::LogVole
 
                 if (noiseStandardDeviation > 0.0)
                 {
-                    const u64 streamId = (static_cast<u64>(row) << 32) ^ col;
-                    const u64 noiseSeed =
-                        deriveNoiseSeed(samplingSeeds, 0x5254544F504E5A45ull, streamId, leftWidth, next.mCols);
+                    const u64 noiseSeed = prng.get<u64>();
                     RnsPoly noise{};
                     resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                     if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, noiseSeed, 0, ctx) ||
@@ -913,6 +875,7 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx,
         u32 randomizerWidth,
         u32 gadgetLogBase,
+        PRNG& prng,
         std::vector<RnsPoly>& out)
     {
         if (randomizerWidth == 0 || gadgetLogBase == 0 || gadgetLogBase > 127)
@@ -922,13 +885,6 @@ namespace osuCrypto::LogVole
 
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         const std::size_t rho = ctx.mModuli.size();
-        u64 seed = deriveDeterministicSeedMaterial(
-            freshRootZetaSeed(),
-            0x52544E5A455441ull,
-            ctx.mParams.mPolyModulusDegree,
-            randomizerWidth,
-            gadgetLogBase,
-            rho);
         const wideU64 eta = wideU64Sub(wideU64OneShift(gadgetLogBase), makeWideU64(1, 0));
         const u32 sampleBits = gadgetLogBase + 1;
         const wideU64 sampleMask = wideU64Mask(sampleBits);
@@ -943,10 +899,8 @@ namespace osuCrypto::LogVole
                 wideU64 raw{};
                 do
                 {
-                    seed = combineSeedPublic(seed ^ (static_cast<u64>(polyIdx) << 32) ^ coeffIdx);
-                    const u64 lo = seed;
-                    seed = combineSeedPublic(seed + 0x9E3779B97F4A7C15ull);
-                    const u64 hi = seed;
+                    const u64 lo = prng.get<u64>();
+                    const u64 hi = prng.get<u64>();
                     raw = wideU64And(makeWideU64(lo, hi), sampleMask);
                 } while (wideU64Equal(raw, sampleMask));
 
@@ -1011,6 +965,7 @@ namespace osuCrypto::LogVole
 
     bool prepareRootOfflineSender(
         SenderState& state,
+        PRNG& prng,
         RootOfflineMessage& message)
     {
         u32 tauHi = 0;
@@ -1067,7 +1022,7 @@ namespace osuCrypto::LogVole
                 tauHi,
                 se.mGadgetLogBase,
                 se.mPlaintextModulusBits,
-                se.mSamplingSeeds,
+                prng,
                 leftLenc,
                 lencSigma,
                 lencMaxDev,
@@ -1090,8 +1045,7 @@ namespace osuCrypto::LogVole
         if (!sampleRootErrorBatch(
                 ctx,
                 leftWidth,
-                se.mSamplingSeeds,
-                0x5254523154524E43ull,
+                prng,
                 lencSigma,
                 lencMaxDev,
                 false,
@@ -1100,8 +1054,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        const u64 skRSeed = deriveNoiseSeed(se.mSamplingSeeds, 0x5254534B52544Dull, leftWidth, tauHi, randomizer);
-        std::vector<RnsPoly> skRRt = sampleUniformBatch(ctx, tauHi, skRSeed, 0x5254534Bu);
+        std::vector<RnsPoly> skRRt = sampleUniformBatch(ctx, tauHi, prng, 0x5254534Bu);
         if (!validateRingBatchShape(skRRt, se.mRing))
         {
             return false;
@@ -1119,7 +1072,7 @@ namespace osuCrypto::LogVole
                 ctR,
                 lheSigma,
                 lheMaxDev,
-                se.mSamplingSeeds,
+                &prng,
                 false,
                 nullptr,
                 workerThreads))
@@ -1136,7 +1089,7 @@ namespace osuCrypto::LogVole
                 publicBStarNtt,
                 se.mGadgetLogBase,
                 1,
-                se.mSamplingSeeds,
+                prng,
                 lencSigma,
                 lencMaxDev,
                 topCt))
@@ -1227,6 +1180,7 @@ namespace osuCrypto::LogVole
     bool prepareRootDigestReceiver(
         const ReceiverState& state,
         const std::vector<RnsPoly>& x,
+        PRNG& prng,
         RootDigestState& digestState,
         RootDigestMessage& message)
     {
@@ -1336,6 +1290,7 @@ namespace osuCrypto::LogVole
                 ctx,
                 state.mRootRandomizerWidth,
                 state.mParams.mShrinkExpand.mGadgetLogBase,
+                prng,
                 zeta))
         {
             return false;
@@ -1375,11 +1330,11 @@ namespace osuCrypto::LogVole
     bool prepareRootResponseSender(
         const SenderState& state,
         const RootDigestMessage& request,
+        PRNG& prng,
         RootResponseMessage& response)
     {
         u32 tauHi = 0;
         if (!computeTauHi(state.mParams, tauHi) ||
-            state.mGoldenSeed.empty() ||
             state.mRootSkRRt.size() != tauHi ||
             !validateRingBatchShape(state.mRootSkRRt, state.mParams.mShrinkExpand.mRing))
         {
@@ -1396,7 +1351,7 @@ namespace osuCrypto::LogVole
         RnsPoly kPrime{};
         RnsPoly skPrime{};
         if (!unpackSinglePoly(state.mParams.mShrinkExpand.mRing, request.mDPrimeCoeffs, dPrime) ||
-            !ensureRootKPrime(state, kPrime) ||
+            !sampleRootKPrime(state, prng, kPrime) ||
             !deriveSkxTrunc(
                 ctx,
                 state.mRootSkRRt,
@@ -1408,6 +1363,37 @@ namespace osuCrypto::LogVole
         {
             return false;
         }
+
+        GoldenSeedSearchOutput seedSearch{};
+        if (!findGoldenSeed(state.mParams, std::vector<RnsPoly>{ kPrime }, dPrime, prng, seedSearch))
+        {
+            return false;
+        }
+
+        state.mRootKPrimeRt = std::make_shared<RnsPoly>(kPrime);
+        state.mRootDPrimeRt = std::make_shared<RnsPoly>(dPrime);
+
+        RnsPoly rootKey{};
+        if (!computeRootSenderKey(state, seedSearch.mSeed, rootKey))
+        {
+            return false;
+        }
+
+        ShrinkExpandExpandSenderInput expandInput{};
+        expandInput.mSeed = seedSearch.mSeed;
+        expandInput.mSid = state.mParams.mSessionId;
+        expandInput.mDigest = dPrime;
+        expandInput.mMaskDigest = dPrime;
+        expandInput.mTbkPrime = std::move(rootKey);
+
+        ShrinkExpandSenderExpandOutput expandOutput{};
+        if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput))
+        {
+            return false;
+        }
+
+        state.mGoldenSeed = seedSearch.mSeed;
+        state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(std::move(expandOutput.mTbk));
 
         RootResponseMessage next{};
         assignRange(next.mSeed, state.mGoldenSeed.begin(), state.mGoldenSeed.end());
@@ -1437,20 +1423,25 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        RnsPoly kPrime{};
         std::vector<RnsPoly> ctK;
         std::vector<RnsPoly> tbkRt;
-        if (!ensureRootKPrime(state, kPrime) ||
+        if (!state.mRootKPrimeRt || !state.mRootDPrimeRt)
+        {
+            return false;
+        }
+        if (
             !buildHashedCt2(
                 ctx,
                 leftWidth,
-                state.mParams.mShrinkExpand.mSamplingSeeds,
-                deriveRootDerandNonce(state.mParams.mShrinkExpand.mSamplingSeeds, seed),
+                seed,
+                state.mParams.mSessionId,
+                *state.mRootDPrimeRt,
+                0,
                 ctK) ||
             !lheDec(
                 ctx,
                 ctK,
-                kPrime,
+                *state.mRootKPrimeRt,
                 tbkRt,
                 nullptr,
                 false,
@@ -1465,12 +1456,6 @@ namespace osuCrypto::LogVole
 
     namespace
     {
-        bool samplingSeedsEqual(const SamplingSeedConfig& lhs, const SamplingSeedConfig& rhs)
-        {
-            return lhs.mNoiseRoot == rhs.mNoiseRoot &&
-                   lhs.mCt2Root == rhs.mCt2Root;
-        }
-
         bool shrinkExpandParamsEqual(const ShrinkExpandParams& lhs, const ShrinkExpandParams& rhs)
         {
             return lhs.mRing == rhs.mRing &&
@@ -1483,8 +1468,7 @@ namespace osuCrypto::LogVole
                    lhs.mTruncateOneGadgetDigit == rhs.mTruncateOneGadgetDigit &&
                    lhs.mLeafInputsAreGadget == rhs.mLeafInputsAreGadget &&
                    lhs.mMode == rhs.mMode &&
-                   lhs.mNoiseBound == rhs.mNoiseBound &&
-                   samplingSeedsEqual(lhs.mSamplingSeeds, rhs.mSamplingSeeds);
+                   lhs.mNoiseBound == rhs.mNoiseBound;
         }
 
         bool rnsBatchEqual(const std::vector<RnsPoly>& lhs, const std::vector<RnsPoly>& rhs)
@@ -1505,6 +1489,7 @@ namespace osuCrypto::LogVole
 
         bool prepareSenderOfflineImpl(
             const SenderOfflineInput& input,
+            PRNG& prng,
             SenderState& state,
             OfflineMessage& message,
             bool isTopLevel,
@@ -1566,7 +1551,7 @@ namespace osuCrypto::LogVole
                 }
 
                 ShrinkExpandOfflineMessage seMessage{};
-                if (!prepareShrinkExpandSenderOffline(seInput, seMessage, seState))
+                if (!prepareShrinkExpandSenderOffline(seInput, prng, seMessage, seState))
                 {
                     return false;
                 }
@@ -1586,7 +1571,7 @@ namespace osuCrypto::LogVole
             if (mode == RecursiveMode::Root)
             {
                 if (input.mParams.mW != muHi ||
-                    !prepareRootOfflineSender(nextState, nextMessage.mRootMessage))
+                    !prepareRootOfflineSender(nextState, prng, nextMessage.mRootMessage))
                 {
                     return false;
                 }
@@ -1606,7 +1591,7 @@ namespace osuCrypto::LogVole
 
                 auto childMessage = std::make_unique<OfflineMessage>();
                 auto childState = std::make_unique<SenderState>();
-                if (!prepareSenderOfflineImpl(childInput, *childState, *childMessage, false, childReusableState))
+                if (!prepareSenderOfflineImpl(childInput, prng, *childState, *childMessage, false, childReusableState))
                 {
                     return false;
                 }
@@ -1716,11 +1701,12 @@ namespace osuCrypto::LogVole
 
     bool prepareSenderOffline(
         const SenderOfflineInput& input,
+        PRNG& prng,
         SenderOfflineOutput& out)
     {
         SenderState state{};
         OfflineMessage message{};
-        if (!prepareSenderOfflineImpl(input, state, message, true, nullptr))
+        if (!prepareSenderOfflineImpl(input, prng, state, message, true, nullptr))
         {
             return false;
         }
@@ -1763,353 +1749,29 @@ namespace osuCrypto::LogVole
         return finalizeReceiverOffline(input, message, out);
     }
 
-    namespace
-    {
-        struct SeedEvalOutput
-        {
-            bool mValid = false;
-            std::vector<RnsPoly> mTbk;
-        };
-
-        bool evaluateSenderSeedCandidate(
-            const SenderState& state,
-            std::span<const u8> seed,
-            SeedEvalOutput& out)
-        {
-            u32 tauHi = 0;
-            u32 muHi = 0;
-            if (!computeTauHi(state.mParams, tauHi) || !computeMuHi(state.mParams, muHi))
-            {
-                return false;
-            }
-
-            const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
-            const u32 wDoublePrime = computeWDoublePrime(state.mParams, muHi);
-            const RecursiveMode mode =
-                evalRecursiveMode(state.mParams.mW, state.mParams.mShrinkExpand.mAlpha, tauHi, rho);
-
-            Params candidateParams = state.mParams;
-            candidateParams.mShrinkExpand = state.mShrinkExpandState.mParams;
-
-            if (mode == RecursiveMode::Root)
-            {
-                if (state.mParams.mW != muHi)
-                {
-                    return false;
-                }
-
-                RnsPoly rootKey{};
-                if (!computeRootSenderKey(state, seed, rootKey))
-                {
-                    return false;
-                }
-
-                ShrinkExpandExpandSenderInput expandInput{};
-                expandInput.mNonce = deriveSeedInstanceNonce(state.mParams.mShrinkExpand.mSamplingSeeds, seed, 0);
-                expandInput.mTbkPrime = rootKey;
-
-                ShrinkExpandSenderExpandOutput expandOutput{};
-                bool candidateOk = false;
-                if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
-                    !validateGoldenSeedCandidate(candidateParams, expandOutput.mTbk, candidateOk))
-                {
-                    return false;
-                }
-
-                if (candidateOk)
-                {
-                    assignSpan(state.mGoldenSeed, seed);
-                    state.mRootKRt = std::make_shared<RnsPoly>(std::move(rootKey));
-                    state.mPrecomputedTbk =
-                        std::make_shared<std::vector<RnsPoly>>(expandOutput.mTbk);
-                }
-
-                SeedEvalOutput next{};
-                next.mValid = candidateOk;
-                next.mTbk = std::move(expandOutput.mTbk);
-                out = std::move(next);
-                return true;
-            }
-
-            if (!state.mNextLevelState || wDoublePrime == 0)
-            {
-                return false;
-            }
-
-            SeedEvalOutput childEval{};
-            if (!evaluateSenderSeedCandidate(*state.mNextLevelState, seed, childEval))
-            {
-                return false;
-            }
-            if (!childEval.mValid)
-            {
-                out = {};
-                return true;
-            }
-
-            const u32 wPrime =
-                (state.mParams.mW + state.mParams.mShrinkExpand.mAlpha - 1u) /
-                state.mParams.mShrinkExpand.mAlpha;
-            std::vector<RnsPoly> kPrimeHat;
-            std::vector<RnsPoly> kPrime;
-            if (!seedLabelDenoiseTbm(
-                    childEval.mTbk,
-                    wPrime,
-                    tauHi,
-                    state.mParams.mShrinkExpand.mRing,
-                    kPrimeHat) ||
-                !seedLabelAgg(
-                    kPrimeHat,
-                    wDoublePrime,
-                    tauHi,
-                    state.mParams.mShrinkExpand.mRing,
-                    kPrime) ||
-                kPrime.size() != wDoublePrime)
-            {
-                return false;
-            }
-
-            const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
-            std::vector<RnsPoly> finalTbk(state.mParams.mW);
-            std::vector<RnsPoly> sampledTbk(static_cast<std::size_t>(wDoublePrime) * muHi);
-            if (!detail::runParallelTasks(
-                    wDoublePrime,
-                    state.mShrinkExpandState.mParams.mNumWorkerThreads,
-                    [&](std::size_t taskIdx) {
-                        const auto chunkIdx = static_cast<u32>(taskIdx);
-                        ShrinkExpandExpandSenderInput expandInput{};
-                        expandInput.mNonce = deriveSeedInstanceNonce(
-                            state.mParams.mShrinkExpand.mSamplingSeeds,
-                            seed,
-                            instanceBase + chunkIdx);
-                        expandInput.mTbkPrime = kPrime[chunkIdx];
-
-                        ShrinkExpandSenderExpandOutput expandOutput{};
-                        if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
-                            expandOutput.mTbk.size() != muHi)
-                        {
-                            return false;
-                        }
-
-                        const std::size_t sampledStart = static_cast<std::size_t>(chunkIdx) * muHi;
-                        for (std::size_t idx = 0; idx < expandOutput.mTbk.size(); ++idx)
-                        {
-                            sampledTbk[sampledStart + idx] = expandOutput.mTbk[idx];
-                        }
-
-                        const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
-                        const std::size_t end = std::min(
-                            start + static_cast<std::size_t>(muHi),
-                            static_cast<std::size_t>(state.mParams.mW));
-                        for (std::size_t idx = 0; idx < end - start; ++idx)
-                        {
-                            finalTbk[start + idx] = std::move(expandOutput.mTbk[idx]);
-                        }
-                        return true;
-                    }))
-            {
-                return false;
-            }
-
-            bool candidateOk = false;
-            if (!validateGoldenSeedCandidate(candidateParams, sampledTbk, candidateOk))
-            {
-                return false;
-            }
-
-            if (candidateOk)
-            {
-                assignSpan(state.mGoldenSeed, seed);
-                state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(finalTbk);
-            }
-
-            SeedEvalOutput next{};
-            next.mValid = candidateOk;
-            next.mTbk = std::move(finalTbk);
-            out = std::move(next);
-            return true;
-        }
-    }
-
     bool ensureSenderPrecompute(
         const SenderState& state)
     {
-        if (state.mPrecomputedTbk && !state.mGoldenSeed.empty())
-        {
-            return true;
-        }
-
-        u32 tauHi = 0;
-        u32 muHi = 0;
-        if (!computeTauHi(state.mParams, tauHi) || !computeMuHi(state.mParams, muHi))
-        {
-            return false;
-        }
-
-        Params candidateParams = state.mParams;
-        candidateParams.mShrinkExpand = state.mShrinkExpandState.mParams;
-        if (!validateGoldenSeedSearch(candidateParams))
-        {
-            return false;
-        }
-
-        if (!state.mGoldenSeed.empty())
-        {
-            SeedEvalOutput eval{};
-            return evaluateSenderSeedCandidate(state, state.mGoldenSeed, eval) && eval.mValid;
-        }
-
-        const u64 skHead =
-            (!state.mSk1.empty() && !state.mSk1[0].mCoeffs.empty()) ? state.mSk1[0].mCoeffs[0] : 0;
-        const u64 seedMaterial = deriveDeterministicSeedMaterial(
-            state.mParams.mShrinkExpand.mSamplingSeeds.mCt2Root,
-            0x54524E4353454544ull,
-            countSeedInstances(state),
-            state.mParams.mW,
-            muHi,
-            skHead);
-        std::mt19937_64 gen(seedMaterial);
-        std::uniform_int_distribution<int> distBytes(0, 255);
-
-        constexpr int maxSeedAttempts = 100;
-        AlignedUnVec<u8> seed(16);
-        for (int attempt = 0; attempt < maxSeedAttempts; ++attempt)
-        {
-            for (u8& byte : seed)
-            {
-                byte = static_cast<u8>(distBytes(gen));
-            }
-
-            SeedEvalOutput eval{};
-            if (!evaluateSenderSeedCandidate(state, seed, eval))
-            {
-                return false;
-            }
-            if (eval.mValid)
-            {
-                state.mGoldenSeed = std::move(seed);
-                state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(std::move(eval.mTbk));
-                return true;
-            }
-        }
-
-        return false;
+        (void)state;
+        return true;
     }
 
     bool ensureRootSenderPrecompute(
         const SenderState& state)
     {
-        if (state.mPrecomputedTbk && !state.mGoldenSeed.empty())
-        {
-            return true;
-        }
-
-        u32 tauHi = 0;
-        u32 muHi = 0;
-        const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
-        if (!computeTauHi(state.mParams, tauHi) ||
-            !computeMuHi(state.mParams, muHi) ||
-            state.mParams.mW != muHi ||
-            evalRecursiveMode(state.mParams.mW, state.mParams.mShrinkExpand.mAlpha, tauHi, rho) !=
-                RecursiveMode::Root ||
-            state.mRootSkRRt.empty())
-        {
-            return false;
-        }
-
-        Params candidateParams = state.mParams;
-        candidateParams.mShrinkExpand = state.mShrinkExpandState.mParams;
-        if (!validateGoldenSeedSearch(candidateParams))
-        {
-            return false;
-        }
-
-        auto evaluate = [&](std::span<const u8> seed, RnsPoly& rootKey, std::vector<RnsPoly>& tbk, bool& valid) {
-            if (!computeRootSenderKey(state, seed, rootKey))
-            {
-                return false;
-            }
-
-            ShrinkExpandExpandSenderInput expandInput{};
-            expandInput.mNonce = deriveSeedInstanceNonce(state.mParams.mShrinkExpand.mSamplingSeeds, seed, 0);
-            expandInput.mTbkPrime = rootKey;
-
-            ShrinkExpandSenderExpandOutput expandOutput{};
-            if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
-                !validateGoldenSeedCandidate(candidateParams, expandOutput.mTbk, valid))
-            {
-                return false;
-            }
-
-            tbk = std::move(expandOutput.mTbk);
-            return true;
-        };
-
-        if (!state.mGoldenSeed.empty())
-        {
-            RnsPoly rootKey{};
-            std::vector<RnsPoly> tbk;
-            bool valid = false;
-            if (!evaluate(state.mGoldenSeed, rootKey, tbk, valid) || !valid)
-            {
-                return false;
-            }
-
-            state.mRootKRt = std::make_shared<RnsPoly>(std::move(rootKey));
-            state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(std::move(tbk));
-            return true;
-        }
-
-        const u64 skHead =
-            (!state.mSk1.empty() && !state.mSk1[0].mCoeffs.empty()) ? state.mSk1[0].mCoeffs[0] : 0;
-        const u64 seedMaterial = deriveDeterministicSeedMaterial(
-            state.mParams.mShrinkExpand.mSamplingSeeds.mCt2Root,
-            0x54524E4353454544ull,
-            1,
-            state.mParams.mW,
-            muHi,
-            skHead);
-        std::mt19937_64 gen(seedMaterial);
-        std::uniform_int_distribution<int> distBytes(0, 255);
-
-        constexpr int maxSeedAttempts = 100;
-        AlignedUnVec<u8> seed(16);
-        for (int attempt = 0; attempt < maxSeedAttempts; ++attempt)
-        {
-            for (u8& byte : seed)
-            {
-                byte = static_cast<u8>(distBytes(gen));
-            }
-
-            RnsPoly rootKey{};
-            std::vector<RnsPoly> tbk;
-            bool valid = false;
-            if (!evaluate(seed, rootKey, tbk, valid))
-            {
-                return false;
-            }
-            if (!valid)
-            {
-                continue;
-            }
-
-            state.mGoldenSeed = std::move(seed);
-            state.mRootKRt = std::make_shared<RnsPoly>(std::move(rootKey));
-            state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(std::move(tbk));
-            return true;
-        }
-
-        return false;
+        (void)state;
+        return true;
     }
 
     bool prepareRootOnlineSender(
         SenderState& state,
         const RootDigestMessage& request,
+        PRNG& prng,
         RootResponseMessage& response,
         SenderOnlineOutput& out)
     {
         if (!ensureRootSenderPrecompute(state) ||
-            !prepareRootResponseSender(state, request, response) ||
+            !prepareRootResponseSender(state, request, prng, response) ||
             !state.mPrecomputedTbk)
         {
             return false;
@@ -2123,9 +1785,11 @@ namespace osuCrypto::LogVole
     }
 
     bool runLocalOnline(
-        const SenderState& sender,
+        SenderState& sender,
         ReceiverState& receiver,
         const ReceiverOnlineInput& input,
+        PRNG& senderPrng,
+        PRNG& receiverPrng,
         SenderOnlineOutput& senderOut,
         ReceiverOnlineOutput& receiverOut)
     {
@@ -2143,7 +1807,10 @@ namespace osuCrypto::LogVole
         const RecursiveMode mode =
             evalRecursiveMode(sender.mParams.mW, sender.mParams.mShrinkExpand.mAlpha, tauHi, rho);
 
-        if (!ensureSenderPrecompute(sender) || !sender.mPrecomputedTbk)
+        applySessionId(sender, input.mSid);
+        applySessionId(receiver, input.mSid);
+
+        if (!ensureSenderPrecompute(sender))
         {
             return false;
         }
@@ -2153,8 +1820,8 @@ namespace osuCrypto::LogVole
             RootDigestState digestState{};
             RootDigestMessage digestMessage{};
             RootResponseMessage response{};
-            if (!prepareRootDigestReceiver(receiver, input.mX, digestState, digestMessage) ||
-                !prepareRootResponseSender(sender, digestMessage, response) ||
+            if (!prepareRootDigestReceiver(receiver, input.mX, receiverPrng, digestState, digestMessage) ||
+                !prepareRootResponseSender(sender, digestMessage, senderPrng, response) ||
                 !finalizeRootOnlineReceiver(receiver, input, digestState, response, receiverOut))
             {
                 return false;
@@ -2268,6 +1935,7 @@ namespace osuCrypto::LogVole
         }
 
         ReceiverOnlineInput childInput{};
+        childInput.mSid = input.mSid;
         childInput.mX = std::move(dHat);
 
         SenderOnlineOutput childSenderOut{};
@@ -2276,6 +1944,8 @@ namespace osuCrypto::LogVole
                 *sender.mNextLevelState,
                 *receiver.mNextLevelState,
                 childInput,
+                senderPrng,
+                receiverPrng,
                 childSenderOut,
                 childReceiverOut))
         {
@@ -2313,9 +1983,12 @@ namespace osuCrypto::LogVole
                         std::min(start + static_cast<std::size_t>(muHi), input.mX.size());
 
                     ShrinkExpandExpandReceiverInput expandInput{};
+                    expandInput.mSeed = childReceiverOut.mSeed;
+                    expandInput.mSid = input.mSid;
                     expandInput.mNonce = deriveSeedInstanceNonce(
-                        sender.mParams.mShrinkExpand.mSamplingSeeds,
                         childReceiverOut.mSeed,
+                        input.mSid,
+                        digests[chunkIdx],
                         instanceBase + chunkIdx);
                     expandInput.mDigest = digests[chunkIdx];
                     expandInput.mSkX = skX[chunkIdx];
@@ -2365,9 +2038,12 @@ namespace osuCrypto::LogVole
         }
 
         ShrinkExpandExpandReceiverInput expandInput{};
-        expandInput.mNonce = deriveSeedInstanceNonce(state.mParams.mShrinkExpand.mSamplingSeeds, response.mSeed, 0);
+        expandInput.mSeed = response.mSeed;
+        expandInput.mSid = input.mSid;
+        expandInput.mNonce = deriveSeedInstanceNonce(response.mSeed, input.mSid, digestState.mDPrime, 0);
         expandInput.mX = input.mX;
         expandInput.mDigest = digestState.mDRt;
+        expandInput.mMaskDigest = digestState.mDPrime;
         expandInput.mSkX = std::move(receiverKey);
         expandInput.mTree = digestState.mRootTree;
 
@@ -2454,8 +2130,10 @@ namespace osuCrypto::LogVole
             !buildHashedCt2(
                 ctx,
                 leftWidth,
-                state.mParams.mShrinkExpand.mSamplingSeeds,
-                deriveRootDerandNonce(state.mParams.mShrinkExpand.mSamplingSeeds, response.mSeed),
+                response.mSeed,
+                state.mParams.mSessionId,
+                digestState.mDPrime,
+                0,
                 ctK))
         {
             return false;
@@ -2737,8 +2415,9 @@ namespace osuCrypto::LogVole
     }
 
     bool seedLabelSampleCt2FromSeed(
-        const SamplingSeedConfig& samplingSeeds,
         std::span<const u8> seed,
+        u64 sid,
+        const RnsPoly& digest,
         u32 instanceIdx,
         u32 coeffCount,
         const RingParams& ring,
@@ -2750,9 +2429,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        const u64 instanceNonce =
-            deriveSeedInstanceNonce(samplingSeeds, seed, static_cast<u64>(instanceIdx));
-        return buildHashedCt2(ctx, coeffCount, samplingSeeds, instanceNonce, out);
+        return buildHashedCt2(ctx, coeffCount, seed, sid, digest, static_cast<u64>(instanceIdx), out);
     }
 
     bool validateGoldenSeedSearch(const Params& params)
@@ -2853,10 +2530,13 @@ namespace osuCrypto::LogVole
     bool findGoldenSeed(
         const Params& params,
         const std::vector<RnsPoly>& sk2PerInstance,
+        const RnsPoly& digest,
+        PRNG& prng,
         GoldenSeedSearchOutput& out)
     {
         if (sk2PerInstance.empty() ||
-            !validateRingBatchShape(sk2PerInstance, params.mShrinkExpand.mRing))
+            !validateRingBatchShape(sk2PerInstance, params.mShrinkExpand.mRing) ||
+            !validateRingPolyShape(digest, params.mShrinkExpand.mRing))
         {
             return false;
         }
@@ -2921,37 +2601,23 @@ namespace osuCrypto::LogVole
             }
         }
 
-        AlignedUnVec<u8> seed(16);
-        const u64 sk2Head = !sk2PerInstance[0].mCoeffs.empty() ? sk2PerInstance[0].mCoeffs[0] : 0;
-        const u64 seedMaterial = deriveDeterministicSeedMaterial(
-            params.mShrinkExpand.mSamplingSeeds.mCt2Root,
-            0x5345414C47534544ull,
-            sampledPolyCount,
-            mu,
-            wDoublePrime,
-            sk2Head);
-        std::mt19937_64 gen(seedMaterial);
-        std::uniform_int_distribution<int> distBytes(0, 255);
-
         constexpr int maxSeedAttempts = 100;
         std::vector<RnsPoly> attemptCt2PerSampledPoly(sampledPolyCountSize);
         AlignedUnVec<u64> attemptInstanceNonces(sk2PerInstance.size());
 
         for (int attempt = 0; attempt < maxSeedAttempts; ++attempt)
         {
-            for (u8& byte : seed)
-            {
-                byte = static_cast<u8>(distBytes(gen));
-            }
+            AlignedUnVec<u8> seed(16);
+            prng.get(seed.data(), seed.size());
 
             for (std::size_t instanceIdx = 0; instanceIdx < sk2PerInstance.size(); ++instanceIdx)
             {
                 const u64 seedNonce = deriveSeedInstanceNonce(
-                    params.mShrinkExpand.mSamplingSeeds,
                     seed,
+                    params.mSessionId,
+                    digest,
                     static_cast<u64>(instanceIdx));
-                attemptInstanceNonces[instanceIdx] =
-                    deriveCt2Nonce(params.mShrinkExpand.mSamplingSeeds, seedNonce, mu);
+                attemptInstanceNonces[instanceIdx] = seedNonce;
             }
 
             if (!deriveUniformPolyBatchFromNonceListInplace(

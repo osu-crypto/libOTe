@@ -106,20 +106,10 @@ namespace osuCrypto::LogVole
 
     enum class ShrinkExpandMode : u8
     {
+#ifdef LIBOTE_LOGVOLE_ENABLE_INSECURE_NOISELESS
         Deterministic = 0,
+#endif
         FullNoise = 1
-    };
-
-    struct SamplingSeedConfig
-    {
-        static constexpr u64 DefaultNoiseRoot = 0x5EEDBEEF1234ull;
-        static constexpr u64 DefaultCt2Root = 0xB720AA55D1CE5EEDull;
-
-        // Sender-private root for LacE/LHE masks and noise. This value must not
-        // be sent to the receiver.
-        u64 mNoiseRoot = DefaultNoiseRoot;
-        // Public/session-shared root for hash-derived ct2 material.
-        u64 mCt2Root = DefaultCt2Root;
     };
 
     struct ShrinkExpandParams
@@ -133,8 +123,7 @@ namespace osuCrypto::LogVole
         u32 mNumWorkerThreads = 1;
         bool mTruncateOneGadgetDigit = false;
         bool mLeafInputsAreGadget = false;
-        ShrinkExpandMode mMode = ShrinkExpandMode::Deterministic;
-        SamplingSeedConfig mSamplingSeeds;
+        ShrinkExpandMode mMode = ShrinkExpandMode::FullNoise;
         i64 mNoiseBound = 2;
     };
 
@@ -176,6 +165,7 @@ namespace osuCrypto::LogVole
         u32 mW = 0;
         u32 mGamma = 0;
         u64 mTotalLabelCount = 0;
+        u64 mSessionId = 0;
     };
 
     struct SenderState
@@ -189,6 +179,7 @@ namespace osuCrypto::LogVole
         mutable AlignedUnVec<u8> mGoldenSeed;
         mutable std::shared_ptr<RnsPoly> mRootKPrimeRt;
         mutable std::shared_ptr<RnsPoly> mRootKRt;
+        mutable std::shared_ptr<RnsPoly> mRootDPrimeRt;
         mutable std::shared_ptr<std::vector<RnsPoly>> mPrecomputedTbk;
         mutable bool mGoldenSeedTransmitted = false;
         std::unique_ptr<SenderState> mNextLevelState;

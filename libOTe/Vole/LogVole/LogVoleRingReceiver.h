@@ -9,6 +9,8 @@ namespace osuCrypto::LogVole
     struct ReceiverExpandInput
     {
         u64 mNonce = 0;
+        u64 mSid = 0;
+        AlignedUnVec<u8> mSeed;
         std::vector<RnsPoly> mX;
     };
 
@@ -34,6 +36,7 @@ namespace osuCrypto::LogVole
             ReceiverState& state,
             const ReceiverOnlineInput& input,
             ReceiverOnlineOutput& output,
+            PRNG& prng,
             Socket& sock);
 
         task<> expand(

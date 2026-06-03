@@ -981,7 +981,7 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>& s,
         u32 tau,
         u32 gadgetLogBase,
-        const SamplingSeedConfig& samplingSeeds,
+        PRNG& prng,
         LencEncodeOutput& out,
         double noiseStandardDeviation,
         double noiseMaxDeviation,
@@ -1027,12 +1027,7 @@ namespace osuCrypto::LogVole
         {
             for (u32 leaf = 0; leaf < width; ++leaf)
             {
-                const u64 nonce = deriveNoiseSeed(
-                    samplingSeeds,
-                    kLencRDomain,
-                    (static_cast<u64>(level) << 32u) ^ static_cast<u64>(leaf),
-                    width,
-                    tau);
+                const u64 nonce = prng.get<u64>();
                 rLayersNtt[level][leaf] = deriveUniformPolyFromNonceNtt(ctx, nonce, 0x1EC0DEDu, leaf);
             }
         }
@@ -1090,11 +1085,7 @@ namespace osuCrypto::LogVole
 
                     if (noiseStandardDeviation > 0)
                     {
-                        const u64 streamId = (static_cast<u64>(level) << 48u) ^
-                                             (static_cast<u64>(leaf) << 16u) ^
-                                             static_cast<u64>(k);
-                        const u64 noiseSeed =
-                            deriveNoiseSeed(samplingSeeds, kLencCtNoiseDomain, streamId, width, tau);
+                        const u64 noiseSeed = prng.get<u64>();
                         RnsPoly noise{};
                         resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                         if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, noiseSeed, 0, ctx) ||
@@ -1349,7 +1340,7 @@ namespace osuCrypto::LogVole
         u32 tauHi,
         u32 gadgetLogBase,
         u32 plaintextModulusBits,
-        const SamplingSeedConfig& samplingSeeds,
+        PRNG& prng,
         LencEncodeOutput& out,
         double noiseStandardDeviation,
         double noiseMaxDeviation,
@@ -1412,9 +1403,7 @@ namespace osuCrypto::LogVole
         {
             for (u32 leaf = 0; leaf < width; ++leaf)
             {
-                const u64 streamId = (static_cast<u64>(level) << 32u) ^ static_cast<u64>(leaf);
-                const u64 seed =
-                    deriveNoiseSeed(samplingSeeds, kLencTruncRDomain, streamId, plaintextModulusBits, tauHi);
+                const u64 seed = prng.get<u64>();
                 if (!deriveErrorPolyFromNonceNtt(ctx, seed, 0, noiseStandardDeviation, noiseMaxDeviation, rLayersNtt[level][leaf]))
                 {
                     return false;
@@ -1509,12 +1498,7 @@ namespace osuCrypto::LogVole
 
                         if (noiseStandardDeviation > 0 && t < activeTau)
                         {
-                            const u64 slot = side * static_cast<u64>(ctTauMax) + t;
-                            const u64 streamId = (static_cast<u64>(level) << 48u) ^
-                                                 (static_cast<u64>(leaf) << 16u) ^
-                                                 slot;
-                            const u64 noiseSeed = deriveNoiseSeed(
-                                samplingSeeds, kLencTruncCtNoiseDomain, streamId, plaintextModulusBits, ctTauMax);
+                            const u64 noiseSeed = prng.get<u64>();
                             RnsPoly noise{};
                             resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
                             if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, noiseSeed, 0, ctx) ||

@@ -3,6 +3,8 @@
 #include "libOTe/Vole/LogVole/LogVoleLenc.h"
 #include "libOTe/Vole/LogVole/LogVoleLhe.h"
 
+#include "cryptoTools/Crypto/PRNG.h"
+
 #include <memory>
 #include <span>
 #include <vector>
@@ -37,14 +39,21 @@ namespace osuCrypto::LogVole
     struct ShrinkExpandExpandSenderInput
     {
         u64 mNonce = 0;
+        u64 mSid = 0;
+        AlignedUnVec<u8> mSeed;
+        RnsPoly mDigest;
+        RnsPoly mMaskDigest;
         RnsPoly mTbkPrime;
     };
 
     struct ShrinkExpandExpandReceiverInput
     {
         u64 mNonce = 0;
+        u64 mSid = 0;
+        AlignedUnVec<u8> mSeed;
         std::vector<RnsPoly> mX;
         RnsPoly mDigest;
+        RnsPoly mMaskDigest;
         RnsPoly mSkX;
         std::shared_ptr<DigestTree> mTree;
     };
@@ -67,16 +76,18 @@ namespace osuCrypto::LogVole
     std::vector<RnsPoly> sampleUniformBatch(
         const RingNttContext& ctx,
         u32 count,
-        u64 seed,
+        PRNG& prng,
         u64 domainTag);
 
     bool prepareShrinkExpandSenderOffline(
         const ShrinkExpandSenderOfflineInput& input,
+        PRNG& prng,
         ShrinkExpandOfflineMessage& message,
         ShrinkExpandSenderState& senderState);
 
     bool prepareShrinkExpandSenderOffline(
         const ShrinkExpandSenderOfflineInput& input,
+        PRNG& prng,
         ShrinkExpandSenderState& senderState);
 
     bool finalizeShrinkExpandReceiverOffline(

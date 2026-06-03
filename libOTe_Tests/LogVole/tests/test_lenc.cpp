@@ -72,14 +72,13 @@ void LogVole_LencOps_EncShapeAndDeterminism(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x1111u);
-    SamplingSeedConfig seeds{};
-    seeds.mNoiseRoot = 0xABCDEF01u;
-
     LencEncodeOutput enc1{};
-    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, seeds, enc1));
+    oc::PRNG prng1(oc::block(0xABCDEF01u, 0));
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, prng1, enc1));
 
     LencEncodeOutput enc2{};
-    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, seeds, enc2));
+    oc::PRNG prng2(oc::block(0xABCDEF01u, 0));
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, prng2, enc2));
 
     LOGVOLE_EXPECT_EQ(enc1.mR.size(), params.mMu);
     LOGVOLE_EXPECT_EQ(enc1.mRNtt.size(), params.mMu);
@@ -130,11 +129,9 @@ void LogVole_LencOps_EvalMatchesRmulDigestMinusSmulX(const oc::CLP&)
     auto s = sample_batch(ctx, params.mMu, 0x3333u);
     auto x = sample_batch(ctx, params.mMu, 0x4444u);
 
-    SamplingSeedConfig seeds{};
-    seeds.mNoiseRoot = 0x5555u;
-
     LencEncodeOutput enc{};
-    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, seeds, enc));
+    oc::PRNG prng(oc::block(0x5555u, 0));
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, prng, enc));
 
     RnsPoly digest{};
     LOGVOLE_REQUIRE_TRUE(lencDigest(ctx, x, params.mTau, params.mGadgetLogBase, digest, enc.mLacct.mWidthPadded));
@@ -167,11 +164,9 @@ void LogVole_LencOps_EvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
     auto s = sample_batch(ctx, params.mMu, 0x6666u);
     auto x = sample_batch(ctx, params.mMu, 0x7777u);
 
-    SamplingSeedConfig seeds{};
-    seeds.mNoiseRoot = 0x8888u;
-
     LencEncodeOutput enc{};
-    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, seeds, enc));
+    oc::PRNG prng(oc::block(0x8888u, 0));
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, prng, enc));
 
     std::vector<RnsPoly> evalFromX;
     LOGVOLE_REQUIRE_TRUE(lencEval(ctx, enc.mLacct, x, params.mMu, params.mTau, params.mGadgetLogBase, evalFromX));
@@ -194,11 +189,9 @@ void LogVole_LencOps_EvalRejectsMuMismatch(const oc::CLP&)
     auto s = sample_batch(ctx, params.mMu, 0x9999u);
     auto x = sample_batch(ctx, params.mMu, 0xAAAAu);
 
-    SamplingSeedConfig seeds{};
-    seeds.mNoiseRoot = 0xBBBBu;
-
     LencEncodeOutput enc{};
-    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, seeds, enc));
+    oc::PRNG prng(oc::block(0xBBBBu, 0));
+    LOGVOLE_REQUIRE_TRUE(lencEnc(ctx, s, params.mTau, params.mGadgetLogBase, prng, enc));
 
     std::vector<RnsPoly> eval;
     LOGVOLE_REQUIRE_FALSE(lencEval(
@@ -218,27 +211,26 @@ void LogVole_LencOps_TruncEncShapeAndDeterminism(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
     auto s = sample_batch(ctx, params.mMu, 0x110011u);
-    SamplingSeedConfig seeds{};
-    seeds.mNoiseRoot = 0x221122u;
-
     LencEncodeOutput enc1{};
+    oc::PRNG prng1(oc::block(0x221122u, 0));
     LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
         ctx,
         s,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
-        seeds,
+        prng1,
         enc1));
 
     LencEncodeOutput enc2{};
+    oc::PRNG prng2(oc::block(0x221122u, 0));
     LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
         ctx,
         s,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
-        seeds,
+        prng2,
         enc2));
 
     LOGVOLE_EXPECT_EQ(enc1.mR.size(), params.mMu);
@@ -308,17 +300,15 @@ void LogVole_LencOps_TruncEvalFromPrebuiltTreeMatchesEvalFromX(const oc::CLP&)
     auto s = sample_batch(ctx, params.mMu, 0x440044u);
     auto x = sample_batch(ctx, params.mMu, 0x550055u);
 
-    SamplingSeedConfig seeds{};
-    seeds.mNoiseRoot = 0x660066u;
-
     LencEncodeOutput enc{};
+    oc::PRNG prng(oc::block(0x660066u, 0));
     LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
         ctx,
         s,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
-        seeds,
+        prng,
         enc));
 
     std::vector<RnsPoly> evalFromX;
@@ -365,17 +355,15 @@ void LogVole_LencOps_TruncEvalRejectsMuMismatch(const oc::CLP&)
     auto s = sample_batch(ctx, params.mMu, 0x770077u);
     auto x = sample_batch(ctx, params.mMu, 0x880088u);
 
-    SamplingSeedConfig seeds{};
-    seeds.mNoiseRoot = 0x990099u;
-
     LencEncodeOutput enc{};
+    oc::PRNG prng(oc::block(0x990099u, 0));
     LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
         ctx,
         s,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
-        seeds,
+        prng,
         enc));
 
     std::vector<RnsPoly> eval;
@@ -400,17 +388,15 @@ void LogVole_LencOps_TruncLeafInputsAreGadgetPath(const oc::CLP&)
     auto s = sample_batch(ctx, params.mMu, 0xAA00AAu);
     auto x = sample_batch(ctx, params.mMu, 0xBB00BBu);
 
-    SamplingSeedConfig seeds{};
-    seeds.mNoiseRoot = 0xCC00CCu;
-
     LencEncodeOutput enc{};
+    oc::PRNG prng(oc::block(0xCC00CCu, 0));
     LOGVOLE_REQUIRE_TRUE(lencEncTrunc(
         ctx,
         s,
         params.mTauHi,
         params.mGadgetLogBase,
         params.mPlaintextModulusBits,
-        seeds,
+        prng,
         enc,
         0.0,
         0.0,

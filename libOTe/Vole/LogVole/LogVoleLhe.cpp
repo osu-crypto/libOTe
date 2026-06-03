@@ -174,12 +174,13 @@ namespace osuCrypto::LogVole
         RingTensor& out,
         double noiseStandardDeviation,
         double noiseMaxDeviation,
-        const SamplingSeedConfig& samplingSeeds,
+        PRNG* prng,
         bool rInputIsNtt,
         const std::vector<RnsPoly>* publicANtt,
         u32)
     {
         if (r.empty() || sk1.empty() || noiseStandardDeviation < 0 ||
+            (noiseStandardDeviation > 0 && !prng) ||
             !validateRingBatchShape(r, ctx.mParams) ||
             !validateRingBatchShape(sk1, ctx.mParams))
         {
@@ -242,9 +243,7 @@ namespace osuCrypto::LogVole
 
                 if (noiseStandardDeviation > 0)
                 {
-                    const u64 streamId = (static_cast<u64>(row) << 32u) ^ static_cast<u64>(col);
-                    const u64 noiseSeed =
-                        deriveNoiseSeed(samplingSeeds, kLheNoiseDomain, streamId, gadgetLogBase, ct1.mCols);
+                    const u64 noiseSeed = prng->get<u64>();
                     if (!addPolyError(cNtt, noiseStandardDeviation, noiseMaxDeviation, noiseSeed, 0, ctx))
                     {
                         return false;
@@ -267,7 +266,7 @@ namespace osuCrypto::LogVole
         RingTensor& out,
         double noiseStandardDeviation,
         double noiseMaxDeviation,
-        const SamplingSeedConfig& samplingSeeds,
+        PRNG* prng,
         bool rInputIsNtt,
         const std::vector<RnsPoly>* publicANtt,
         u32 requestedWorkers)
@@ -294,7 +293,7 @@ namespace osuCrypto::LogVole
             out,
             noiseStandardDeviation,
             noiseMaxDeviation,
-            samplingSeeds,
+            prng,
             rInputIsNtt,
             publicANtt,
             requestedWorkers);
@@ -417,16 +416,18 @@ namespace osuCrypto::LogVole
     bool buildHashedCt2(
         const RingNttContext& ctx,
         u32 mu,
-        const SamplingSeedConfig& samplingSeeds,
-        u64 nonce,
+        std::span<const u8> seed,
+        u64 sid,
+        const RnsPoly& digest,
+        u64 instanceIdx,
         std::vector<RnsPoly>& out)
     {
-        if (mu == 0)
+        if (mu == 0 || !validateRingPolyShape(digest, ctx.mParams))
         {
             return false;
         }
 
-        const u64 ct2Nonce = deriveCt2Nonce(samplingSeeds, nonce, mu);
+        const u64 ct2Nonce = deriveSeedInstanceNonce(seed, sid, digest, instanceIdx, mu);
         out = deriveUniformPolyBatchFromNonce(ctx, ct2Nonce, 0xC720AA55u, mu);
         return true;
     }

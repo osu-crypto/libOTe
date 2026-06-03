@@ -182,8 +182,6 @@ void LogVole_Encoding_ShrinkExpandOfflineMessageDoesNotLeakNoiseRoot(const oc::C
     message.mParams.mTruncateOneGadgetDigit = true;
     message.mParams.mLeafInputsAreGadget = true;
     message.mParams.mMode = ShrinkExpandMode::FullNoise;
-    message.mParams.mSamplingSeeds.mNoiseRoot = 0x1122334455667788ull;
-    message.mParams.mSamplingSeeds.mCt2Root = 0x8877665544332211ull;
     message.mParams.mNoiseBound = 5;
     message.mCt1 = make_tensor(ring, message.mParams.mMu, message.mParams.mTau, 7000);
     message.mLacct.mWidthPadded = 4;
@@ -203,8 +201,6 @@ void LogVole_Encoding_ShrinkExpandOfflineMessageDoesNotLeakNoiseRoot(const oc::C
     LOGVOLE_EXPECT_TRUE(decoded.mParams.mTruncateOneGadgetDigit);
     LOGVOLE_EXPECT_TRUE(decoded.mParams.mLeafInputsAreGadget);
     LOGVOLE_EXPECT_EQ(static_cast<std::uint8_t>(decoded.mParams.mMode), static_cast<std::uint8_t>(message.mParams.mMode));
-    LOGVOLE_EXPECT_EQ(decoded.mParams.mSamplingSeeds.mCt2Root, message.mParams.mSamplingSeeds.mCt2Root);
-    LOGVOLE_EXPECT_FALSE(decoded.mParams.mSamplingSeeds.mNoiseRoot == message.mParams.mSamplingSeeds.mNoiseRoot);
     LOGVOLE_EXPECT_EQ(decoded.mParams.mNoiseBound, message.mParams.mNoiseBound);
     expect_tensor_equal(decoded.mCt1, message.mCt1);
     LOGVOLE_EXPECT_EQ(decoded.mLacct.mWidthPadded, message.mLacct.mWidthPadded);

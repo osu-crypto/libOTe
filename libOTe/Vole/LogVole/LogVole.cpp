@@ -21,12 +21,9 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        constexpr u64 kCivoleSidDomain = 0x4349564F4C455349ull;
-
         struct CivoleOfflineMeta
         {
             u64 mLabelCount = 0;
-            u64 mCt2Root = 0;
         };
 
         bool validateZpValue(const ZpCrtContext& ctx, u64 value)
@@ -157,30 +154,21 @@ namespace osuCrypto::LogVole
             return true;
         }
 
-        SamplingSeedConfig deriveSidSamplingSeeds(const SamplingSeedConfig& base, CivoleSid sid)
+        void applySessionId(SenderState& state, CivoleSid sid)
         {
-            SamplingSeedConfig out = base;
-            out.mCt2Root = deriveDeterministicSeedMaterial(base.mCt2Root, kCivoleSidDomain, sid, 0, 0, 0);
-            return out;
-        }
-
-        void applySamplingSeeds(SenderState& state, const SamplingSeedConfig& seeds)
-        {
-            state.mParams.mShrinkExpand.mSamplingSeeds = seeds;
-            state.mShrinkExpandState.mParams.mSamplingSeeds = seeds;
+            state.mParams.mSessionId = sid;
             if (state.mNextLevelState)
             {
-                applySamplingSeeds(*state.mNextLevelState, seeds);
+                applySessionId(*state.mNextLevelState, sid);
             }
         }
 
-        void applySamplingSeeds(ReceiverState& state, const SamplingSeedConfig& seeds)
+        void applySessionId(ReceiverState& state, CivoleSid sid)
         {
-            state.mParams.mShrinkExpand.mSamplingSeeds = seeds;
-            state.mShrinkExpandState.mParams.mSamplingSeeds = seeds;
+            state.mParams.mSessionId = sid;
             if (state.mNextLevelState)
             {
-                applySamplingSeeds(*state.mNextLevelState, seeds);
+                applySessionId(*state.mNextLevelState, sid);
             }
         }
 
@@ -189,6 +177,7 @@ namespace osuCrypto::LogVole
             state.mGoldenSeed.clear();
             state.mRootKPrimeRt.reset();
             state.mRootKRt.reset();
+            state.mRootDPrimeRt.reset();
             state.mPrecomputedTbk.reset();
             state.mGoldenSeedTransmitted = false;
             if (state.mNextLevelState)
@@ -230,8 +219,7 @@ namespace osuCrypto::LogVole
             }
 
             clearSenderCachedOutputs(state.mLogVoleState);
-            const auto seeds = deriveSidSamplingSeeds(state.mBaseSamplingSeeds, sid);
-            applySamplingSeeds(state.mLogVoleState, seeds);
+            applySessionId(state.mLogVoleState, sid);
             state.mHasActiveSid = true;
             state.mActiveSid = sid;
             state.mKeyReleased = false;
@@ -251,8 +239,7 @@ namespace osuCrypto::LogVole
             state.mUsedSids.resize(usedSidCount + 1);
             state.mUsedSids[usedSidCount] = sid;
             clearReceiverCachedOutputs(state.mLogVoleState);
-            const auto seeds = deriveSidSamplingSeeds(state.mBaseSamplingSeeds, sid);
-            applySamplingSeeds(state.mLogVoleState, seeds);
+            applySessionId(state.mLogVoleState, sid);
             return true;
         }
 
@@ -283,31 +270,20 @@ namespace osuCrypto::LogVole
             return value;
         }
 
-        SamplingSeedConfig sampleCivoleSamplingSeeds()
-        {
-            PRNG prng(sysRandomSeed());
-            SamplingSeedConfig seeds{};
-            seeds.mNoiseRoot = prng.get<u64>();
-            seeds.mCt2Root = prng.get<u64>();
-            return seeds;
-        }
-
         task<> sendCivoleOfflineMeta(Socket& sock, const CivoleOfflineMeta& meta)
         {
-            std::array<u8, 16> payload{};
+            std::array<u8, 8> payload{};
             writeU64(std::span<u8>(payload).subspan(0, 8), meta.mLabelCount);
-            writeU64(std::span<u8>(payload).subspan(8, 8), meta.mCt2Root);
             co_await sock.send(coproto::copy(payload));
         }
 
         task<CivoleOfflineMeta> recvCivoleOfflineMeta(Socket& sock)
         {
-            std::array<u8, 16> payload{};
+            std::array<u8, 8> payload{};
             co_await sock.recv(payload);
 
             CivoleOfflineMeta meta{};
             meta.mLabelCount = readU64(std::span<const u8>(payload).subspan(0, 8));
-            meta.mCt2Root = readU64(std::span<const u8>(payload).subspan(8, 8));
             co_return meta;
         }
     }
@@ -319,7 +295,6 @@ namespace osuCrypto::LogVole
         resizeFill<int>(params.mLogVole.mShrinkExpand.mRing.mCoeffModulusBits, 4, 55);
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = 55;
         params.mLogVole.mShrinkExpand.mMode = ShrinkExpandMode::FullNoise;
-        params.mLogVole.mShrinkExpand.mSamplingSeeds = sampleCivoleSamplingSeeds();
         params.mLogVole.mShrinkExpand.mNoiseBound = 2;
         params.mLogVole.mShrinkExpand.mAlpha = 2;
         params.mLogVole.mShrinkExpand.mGadgetLogBase = 110;
@@ -400,7 +375,7 @@ namespace osuCrypto
         mState = State::Configured;
     }
 
-    task<> LogVoleSender::offline(u64 delta, Socket& sock)
+    task<> LogVoleSender::offline(u64 delta, PRNG& prng, Socket& sock)
     {
         if (!isConfigured())
         {
@@ -413,7 +388,7 @@ namespace osuCrypto
         input.mW = mRequestSize;
 
         CivoleSenderState state{};
-        co_await civoleSenderOffline(input, state, sock);
+        co_await civoleSenderOffline(input, state, prng, sock);
 
         mOfflineState = std::move(state);
         mModulus = mOfflineState.mModulus;
@@ -423,7 +398,7 @@ namespace osuCrypto
         mState = State::Offline;
     }
 
-    task<> LogVoleSender::send(span<u64> b, Socket& sock)
+    task<> LogVoleSender::send(span<u64> b, PRNG& prng, Socket& sock)
     {
         if (!hasOffline())
         {
@@ -435,24 +410,18 @@ namespace osuCrypto
         }
 
         const CivoleSid sid = mNextSid++;
-        CivoleReleaseKOutput releaseK{};
-        if (!civoleSenderReleaseK(mOfflineState, sid, releaseK))
-        {
-            throw std::runtime_error("LogVole CI-VOLE sender could not release keys");
-        }
-        if (releaseK.mKeys.size() != b.size())
+        CivoleSenderReleaseOutput release{};
+        co_await civoleSenderRelease(mOfflineState, sid, release, prng, sock);
+        if (mOfflineState.mReleasedKeys.size() != b.size())
         {
             throw std::runtime_error("LogVole CI-VOLE sender key output size is invalid");
         }
 
-        std::copy(releaseK.mKeys.begin(), releaseK.mKeys.end(), b.begin());
-
-        CivoleSenderReleaseOutput release{};
-        co_await civoleSenderRelease(mOfflineState, sid, release, sock);
+        std::copy(mOfflineState.mReleasedKeys.begin(), mOfflineState.mReleasedKeys.end(), b.begin());
         mLastOnlineComm = release.mComm;
     }
 
-    task<> LogVoleSender::send(u64 delta, span<u64> b, Socket& sock)
+    task<> LogVoleSender::send(u64 delta, span<u64> b, PRNG& prng, Socket& sock)
     {
         if (!isConfigured())
         {
@@ -464,14 +433,14 @@ namespace osuCrypto
         }
         if (!hasOffline())
         {
-            co_await offline(delta, sock);
+            co_await offline(delta, prng, sock);
         }
         else if (delta != mDelta)
         {
             throw std::runtime_error("LogVole CI-VOLE sender offline delta does not match requested delta");
         }
 
-        co_await send(b, sock);
+        co_await send(b, prng, sock);
     }
 
     void LogVoleSender::clear()
@@ -550,7 +519,7 @@ namespace osuCrypto
         mState = State::Offline;
     }
 
-    task<> LogVoleReceiver::receive(span<const u64> x, span<u64> a, Socket& sock)
+    task<> LogVoleReceiver::receive(span<const u64> x, span<u64> a, PRNG& prng, Socket& sock)
     {
         if (x.size() != a.size())
         {
@@ -572,7 +541,7 @@ namespace osuCrypto
         const CivoleSid sid = mNextSid++;
 
         CivoleReceiverSetXOutput setX{};
-        co_await civoleReceiverSetX(mOfflineState, sid, x, setX, sock);
+        co_await civoleReceiverSetX(mOfflineState, sid, x, setX, prng, sock);
         if (setX.mMacs.size() != a.size())
         {
             throw std::runtime_error("LogVole CI-VOLE receiver MAC output size is invalid");
@@ -936,10 +905,10 @@ namespace osuCrypto::LogVole
     task<> civoleSenderOffline(
         const CivoleSenderOfflineInput& input,
         CivoleSenderState& state,
+        PRNG& prng,
         Socket& sock)
     {
         CivoleParams sessionParams = input.mParams;
-        sessionParams.mLogVole.mShrinkExpand.mSamplingSeeds = sampleCivoleSamplingSeeds();
 
         ZpCrtContext ctx{};
         if (!makeZpCrtContext(
@@ -976,7 +945,6 @@ namespace osuCrypto::LogVole
         auto metaSock = sock.fork();
         CivoleOfflineMeta meta{};
         meta.mLabelCount = input.mW;
-        meta.mCt2Root = sessionParams.mLogVole.mShrinkExpand.mSamplingSeeds.mCt2Root;
         co_await sendCivoleOfflineMeta(metaSock, meta);
 
         SenderOfflineInput offlineInput{};
@@ -986,7 +954,7 @@ namespace osuCrypto::LogVole
         LogVoleRingSender sender{};
         SenderState logVoleState{};
         auto logVoleSock = sock.fork();
-        co_await sender.offline(offlineInput, logVoleState, logVoleSock);
+        co_await sender.offline(offlineInput, logVoleState, prng, logVoleSock);
 
         CivoleSenderState next{};
         next.mParams = sessionParams;
@@ -994,7 +962,6 @@ namespace osuCrypto::LogVole
         next.mDelta = input.mDelta;
         next.mW = input.mW;
         next.mRingWidth = params.mW;
-        next.mBaseSamplingSeeds = params.mShrinkExpand.mSamplingSeeds;
         next.mLogVoleState = std::move(logVoleState);
         state = std::move(next);
     }
@@ -1007,7 +974,6 @@ namespace osuCrypto::LogVole
         auto metaSock = sock.fork();
         const CivoleOfflineMeta meta = co_await recvCivoleOfflineMeta(metaSock);
         CivoleParams sessionParams = input.mParams;
-        sessionParams.mLogVole.mShrinkExpand.mSamplingSeeds.mCt2Root = meta.mCt2Root;
 
         ZpCrtContext ctx{};
         if (!makeZpCrtContext(
@@ -1041,7 +1007,6 @@ namespace osuCrypto::LogVole
         next.mModulus = ctx.mPlaintextModulus;
         next.mW = meta.mLabelCount;
         next.mRingWidth = params.mW;
-        next.mBaseSamplingSeeds = params.mShrinkExpand.mSamplingSeeds;
         next.mLogVoleState = std::move(logVoleState);
         state = std::move(next);
     }
@@ -1095,14 +1060,13 @@ namespace osuCrypto::LogVole
         CivoleSenderState& state,
         CivoleSid sid,
         CivoleSenderReleaseOutput& output,
+        PRNG& prng,
         Socket& sock)
     {
-        if (!state.mHasActiveSid ||
-            state.mActiveSid != sid ||
-            !state.mKeyReleased ||
+        if (!prepareSenderSidForReleaseK(state, sid) ||
             state.mReleaseIntUsed)
         {
-            throw std::runtime_error("LogVole CI-VOLE release requires prior releasek");
+            throw std::runtime_error("LogVole CI-VOLE release input is invalid");
         }
         state.mReleaseIntUsed = true;
 
@@ -1111,8 +1075,32 @@ namespace osuCrypto::LogVole
         LogVoleRingSender sender{};
         SenderOnlineOutput online{};
         SenderOnlineOptions options{};
-        options.mSkipTbkOutput = true;
-        co_await sender.online(state.mLogVoleState, options, online, sock);
+        options.mSid = sid;
+        options.mSkipTbkOutput = false;
+        co_await sender.online(state.mLogVoleState, options, online, prng, sock);
+
+        ZpCrtContext ctx{};
+        AlignedUnVec<u64> keys;
+        if (!makeZpCrtContext(
+                state.mParams.mLogVole.mShrinkExpand.mRing,
+                state.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
+                ctx) ||
+            !unwrapRingLabelsCrt(
+                ctx,
+                online.mTbk,
+                state.mW,
+                true,
+                state.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
+                keys))
+        {
+            throw std::runtime_error("LogVole CI-VOLE sender could not unwrap keys");
+        }
+
+        state.mKeyReleased = true;
+        const auto usedSidCount = state.mUsedSids.size();
+        state.mUsedSids.resize(usedSidCount + 1);
+        state.mUsedSids[usedSidCount] = sid;
+        state.mReleasedKeys = std::move(keys);
 
         CivoleSenderReleaseOutput next{};
         next.mSid = sid;
@@ -1125,6 +1113,7 @@ namespace osuCrypto::LogVole
         CivoleSid sid,
         std::span<const u64> x,
         CivoleReceiverSetXOutput& output,
+        PRNG& prng,
         Socket& sock)
     {
         if (x.size() != state.mW)
@@ -1169,11 +1158,12 @@ namespace osuCrypto::LogVole
         ScopedProtocolCacheScope scopedCache(ProtocolCacheRole::Receiver, sid);
 
         ReceiverOnlineInput onlineInput{};
+        onlineInput.mSid = sid;
         onlineInput.mX = std::move(wrapped);
 
         LogVoleRingReceiver receiver{};
         ReceiverOnlineOutput online{};
-        co_await receiver.online(state.mLogVoleState, onlineInput, online, sock);
+        co_await receiver.online(state.mLogVoleState, onlineInput, online, prng, sock);
 
         AlignedUnVec<u64> macs;
         if (!unwrapRingLabelsCrt(

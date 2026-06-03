@@ -26,10 +26,8 @@ namespace
         params.mMu = trunc ? 4u : 3u;
         params.mTau = trunc ? 2u : 3u;
         params.mGadgetLogBase = 20;
-        params.mMode = ShrinkExpandMode::Deterministic;
+        params.mMode = ShrinkExpandMode::FullNoise;
         params.mNoiseBound = 2;
-        params.mSamplingSeeds.mNoiseRoot = 0xBAD5EEDu;
-        params.mSamplingSeeds.mCt2Root = 0xC72C72u;
         params.mTruncateOneGadgetDigit = trunc;
         return params;
     }
@@ -218,7 +216,8 @@ namespace
         senderInput.mFixedSk1 = sk1;
 
         ShrinkExpandSenderState senderState{};
-        if (!prepareShrinkExpandSenderOffline(senderInput, senderState))
+        oc::PRNG offlinePrng(oc::block(trunc ? 0xA101u : 0xA100u, 0));
+        if (!prepareShrinkExpandSenderOffline(senderInput, offlinePrng, senderState))
         {
             return false;
         }
@@ -254,7 +253,16 @@ namespace
         }
 
         ShrinkExpandExpandSenderInput senderExpandInput{};
-        senderExpandInput.mNonce = trunc ? 0x5501u : 0x5500u;
+        resizeFill<std::uint8_t>(
+            senderExpandInput.mSeed,
+            16,
+            static_cast<std::uint8_t>(trunc ? 0x51u : 0x50u));
+        senderExpandInput.mDigest = shrink.mDigest;
+        senderExpandInput.mNonce = deriveSeedInstanceNonce(
+            senderExpandInput.mSeed,
+            senderExpandInput.mSid,
+            senderExpandInput.mDigest,
+            0);
         senderExpandInput.mTbkPrime = tbkPrime;
 
         ShrinkExpandSenderExpandOutput senderExpand{};
@@ -264,6 +272,8 @@ namespace
         }
 
         ShrinkExpandExpandReceiverInput receiverExpandInput{};
+        receiverExpandInput.mSid = senderExpandInput.mSid;
+        receiverExpandInput.mSeed = senderExpandInput.mSeed;
         receiverExpandInput.mNonce = senderExpandInput.mNonce;
         receiverExpandInput.mX = x;
         receiverExpandInput.mDigest = shrink.mDigest;
@@ -285,7 +295,7 @@ namespace
             return false;
         }
 
-        if (!trunc)
+        if (!trunc && params.mMode != ShrinkExpandMode::FullNoise)
         {
             for (std::size_t i = 0; i < diff.size(); ++i)
             {
@@ -301,6 +311,12 @@ namespace
         if (!subtract_batches(ctx, diff, expected, residual))
         {
             return false;
+        }
+
+        if (params.mMode == ShrinkExpandMode::FullNoise)
+        {
+            const auto maxLog2 = max_centered_log2(ctx, residual);
+            return maxLog2 > 0 && maxLog2 < static_cast<long double>(log_q_bits(params));
         }
 
         const long double pathLen = 1.0L + std::log2(static_cast<long double>(params.mMu));
@@ -332,7 +348,8 @@ void LogVole_ShrinkExpandCore_OfflineStateShapes(const oc::CLP&)
     senderInput.mFixedSk1 = sample_batch(ctx, params.mTau, 0x7700u);
 
     ShrinkExpandSenderState senderState{};
-    LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(senderInput, senderState));
+    oc::PRNG prng(oc::block(0x7701u, 0));
+    LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(senderInput, prng, senderState));
 
     LOGVOLE_EXPECT_EQ(senderState.mS.size(), params.mMu);
     LOGVOLE_EXPECT_EQ(senderState.mR.size(), params.mMu);
@@ -372,7 +389,8 @@ void LogVole_ShrinkExpandCore_OfflineMetadataMismatchRejected(const oc::CLP&)
     senderInput.mFixedSk1 = sample_batch(ctx, params.mTau, 0x9900u);
 
     ShrinkExpandSenderState senderState{};
-    LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(senderInput, senderState));
+    oc::PRNG prng(oc::block(0x9901u, 0));
+    LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(senderInput, prng, senderState));
 
     ShrinkExpandReceiverOfflineInput receiverInput{};
     receiverInput.mParams = params;
@@ -411,7 +429,7 @@ void LogVole_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
     auto valMpi = seal::util::allocate_uint(rho, pool);
     auto noiseMpi = seal::util::allocate_uint(rho, pool);
 
-    std::mt19937_64 prng(seedNoise);
+    oc::PRNG prng(oc::block(seedNoise, 0));
 
     for (std::size_t i = 0; i < wPrime; ++i)
     {
@@ -431,8 +449,8 @@ void LogVole_ShrinkExpandCore_DenoiseCombExactness(const oc::CLP&)
                 seal::util::set_uint(xKJ, rho, valMpi.get());
                 seal::util::multiply_uint(valMpi.get(), pJMpi.get(), rho, valMpi.get());
 
-                const std::uint64_t noiseVal = (prng() % 1000) + 1;
-                const bool negative = (prng() % 2) == 1;
+                const std::uint64_t noiseVal = (prng.get<std::uint64_t>() % 1000) + 1;
+                const bool negative = (prng.get<std::uint64_t>() % 2) == 1;
                 seal::util::set_uint(noiseVal, rho, noiseMpi.get());
                 if (negative)
                 {
@@ -474,7 +492,8 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
     senderInput.mS = sample_batch(ctx, params.mMu, 0x5001u);
 
     ShrinkExpandSenderState senderState{};
-    LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(senderInput, senderState));
+    oc::PRNG offlinePrng(oc::block(0x5002u, 0));
+    LOGVOLE_REQUIRE_TRUE(prepareShrinkExpandSenderOffline(senderInput, offlinePrng, senderState));
 
     ShrinkExpandReceiverOfflineInput receiverInput{};
     receiverInput.mParams = params;
@@ -499,13 +518,21 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
         skX));
 
     ShrinkExpandExpandSenderInput senderExpandInput{};
-    senderExpandInput.mNonce = 0xAAA1u;
+    resizeFill<std::uint8_t>(senderExpandInput.mSeed, 16, static_cast<std::uint8_t>(0xA1u));
+    senderExpandInput.mDigest = shrink.mDigest;
+    senderExpandInput.mNonce = deriveSeedInstanceNonce(
+        senderExpandInput.mSeed,
+        senderExpandInput.mSid,
+        senderExpandInput.mDigest,
+        0);
     senderExpandInput.mTbkPrime = tbkPrime;
 
     ShrinkExpandSenderExpandOutput senderExpand{};
     LOGVOLE_REQUIRE_TRUE(shrinkExpandExpandSender(senderState, senderExpandInput, senderExpand));
 
     ShrinkExpandExpandReceiverInput receiverExpandInput{};
+    receiverExpandInput.mSid = senderExpandInput.mSid;
+    receiverExpandInput.mSeed = senderExpandInput.mSeed;
     receiverExpandInput.mNonce = senderExpandInput.mNonce;
     receiverExpandInput.mX = x;
     receiverExpandInput.mDigest = shrink.mDigest;

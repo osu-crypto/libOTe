@@ -6,6 +6,7 @@
 #include "libOTe/Vole/LogVole/LogVoleRingSender.h"
 
 #include "cryptoTools/Common/Timer.h"
+#include "cryptoTools/Crypto/PRNG.h"
 
 #include "seal/seal.h"
 
@@ -59,7 +60,6 @@ namespace osuCrypto::LogVole
         u64 mDelta = 0;
         u64 mW = 0;
         u32 mRingWidth = 0;
-        SamplingSeedConfig mBaseSamplingSeeds;
         SenderState mLogVoleState;
 
         bool mHasActiveSid = false;
@@ -76,7 +76,6 @@ namespace osuCrypto::LogVole
         u64 mModulus = 0;
         u64 mW = 0;
         u32 mRingWidth = 0;
-        SamplingSeedConfig mBaseSamplingSeeds;
         ReceiverState mLogVoleState;
         AlignedUnVec<CivoleSid> mUsedSids;
     };
@@ -150,11 +149,13 @@ namespace osuCrypto
         // Run reusable offline setup for this sender's Delta.
         task<> offline(
             u64 delta,
+            PRNG& prng,
             Socket& sock);
 
         // Online phase after offline(). Writes sender keys b.
         task<> send(
             span<u64> b,
+            PRNG& prng,
             Socket& sock);
 
         // One-shot convenience entrypoint. If needed, this configures from
@@ -162,6 +163,7 @@ namespace osuCrypto
         task<> send(
             u64 delta,
             span<u64> b,
+            PRNG& prng,
             Socket& sock);
 
         void clear();
@@ -211,6 +213,7 @@ namespace osuCrypto
         task<> receive(
             span<const u64> x,
             span<u64> a,
+            PRNG& prng,
             Socket& sock);
 
         void clear();
@@ -265,6 +268,7 @@ namespace osuCrypto::LogVole
     task<> civoleSenderOffline(
         const CivoleSenderOfflineInput& input,
         CivoleSenderState& state,
+        PRNG& prng,
         Socket& sock);
 
     task<> civoleReceiverOffline(
@@ -281,6 +285,7 @@ namespace osuCrypto::LogVole
         CivoleSenderState& state,
         CivoleSid sid,
         CivoleSenderReleaseOutput& output,
+        PRNG& prng,
         Socket& sock);
 
     task<> civoleReceiverSetX(
@@ -288,5 +293,6 @@ namespace osuCrypto::LogVole
         CivoleSid sid,
         std::span<const u64> x,
         CivoleReceiverSetXOutput& output,
+        PRNG& prng,
         Socket& sock);
 }

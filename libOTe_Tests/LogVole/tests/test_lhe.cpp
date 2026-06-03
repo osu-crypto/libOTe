@@ -136,14 +136,11 @@ void LogVole_LheOps_Enc1ShapeDeterminismAndColumnDecrypt(const oc::CLP&)
     std::vector<RnsPoly> publicA;
     LOGVOLE_REQUIRE_TRUE(buildLhePublicANtt(ctx, params.mMu, publicA));
 
-    SamplingSeedConfig seeds{};
-    seeds.mNoiseRoot = 0x3030u;
-
     RingTensor ct1{};
-    LOGVOLE_REQUIRE_TRUE(lheEnc1(ctx, r, sk1, params.mGadgetLogBase, ct1, 0.0, 0.0, seeds, false, &publicA));
+    LOGVOLE_REQUIRE_TRUE(lheEnc1(ctx, r, sk1, params.mGadgetLogBase, ct1, 0.0, 0.0, nullptr, false, &publicA));
 
     RingTensor ct2{};
-    LOGVOLE_REQUIRE_TRUE(lheEnc1(ctx, r, sk1, params.mGadgetLogBase, ct2, 0.0, 0.0, seeds, false, &publicA));
+    LOGVOLE_REQUIRE_TRUE(lheEnc1(ctx, r, sk1, params.mGadgetLogBase, ct2, 0.0, 0.0, nullptr, false, &publicA));
 
     LOGVOLE_EXPECT_EQ(ct1.mRows, params.mMu);
     LOGVOLE_EXPECT_EQ(ct1.mCols, params.mTau);
@@ -184,7 +181,7 @@ void LogVole_LheOps_ApplyCt1AndDeriveSkxRelation(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(buildLhePublicANtt(ctx, params.mMu, publicA));
 
     RingTensor ct1{};
-    LOGVOLE_REQUIRE_TRUE(lheEnc1(ctx, r, sk1, params.mGadgetLogBase, ct1, 0.0, 0.0, {}, false, &publicA));
+    LOGVOLE_REQUIRE_TRUE(lheEnc1(ctx, r, sk1, params.mGadgetLogBase, ct1, 0.0, 0.0, nullptr, false, &publicA));
     LOGVOLE_REQUIRE_TRUE(forward_tensor(ct1, ctx));
 
     std::vector<RnsPoly> applied;
@@ -221,7 +218,7 @@ void LogVole_LheOps_TruncApplyCt1AndDeriveSkxRelation(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(buildLhePublicANtt(ctx, params.mMu, publicA));
 
     RingTensor ct1{};
-    LOGVOLE_REQUIRE_TRUE(lheEnc1Trunc(ctx, r, sk1, params.mGadgetLogBase, ct1, 0.0, 0.0, {}, false, &publicA));
+    LOGVOLE_REQUIRE_TRUE(lheEnc1Trunc(ctx, r, sk1, params.mGadgetLogBase, ct1, 0.0, 0.0, nullptr, false, &publicA));
     LOGVOLE_REQUIRE_TRUE(forward_tensor(ct1, ctx));
 
     std::vector<RnsPoly> applied;
@@ -259,14 +256,18 @@ void LogVole_LheOps_HashedCt2Deterministic(const oc::CLP&)
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
-    SamplingSeedConfig seeds{};
-    seeds.mCt2Root = 0xC0FFEEu;
+    AlignedUnVec<std::uint8_t> seed(16);
+    for (std::size_t idx = 0; idx < seed.size(); ++idx)
+    {
+        seed[idx] = static_cast<std::uint8_t>(idx + 1);
+    }
+    const auto digest = deriveUniformPolyFromNonce(ctx, 0xD1CEu, 0xC720u, 0);
 
     std::vector<RnsPoly> ct2A;
-    LOGVOLE_REQUIRE_TRUE(buildHashedCt2(ctx, params.mMu, seeds, 17, ct2A));
+    LOGVOLE_REQUIRE_TRUE(buildHashedCt2(ctx, params.mMu, seed, 17, digest, 2, ct2A));
 
     std::vector<RnsPoly> ct2B;
-    LOGVOLE_REQUIRE_TRUE(buildHashedCt2(ctx, params.mMu, seeds, 17, ct2B));
+    LOGVOLE_REQUIRE_TRUE(buildHashedCt2(ctx, params.mMu, seed, 17, digest, 2, ct2B));
 
     expect_batch_equal(ct2A, ct2B);
 }

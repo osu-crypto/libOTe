@@ -40,6 +40,7 @@ namespace
         CivoleSenderState& senderState,
         CivoleReceiverState& receiverState)
     {
+        oc::PRNG senderPrng(oc::block(11, 22));
         CivoleSenderOfflineInput senderInput{};
         senderInput.mParams = params;
         senderInput.mDelta = delta;
@@ -50,7 +51,7 @@ namespace
 
         auto sockets = coproto::LocalAsyncSocket::makePair();
         auto result = macoro::sync_wait(macoro::when_all_ready(
-            civoleSenderOffline(senderInput, senderState, sockets[0]),
+            civoleSenderOffline(senderInput, senderState, senderPrng, sockets[0]),
             civoleReceiverOffline(receiverInput, receiverState, sockets[1])));
         std::get<0>(result).result();
         std::get<1>(result).result();
@@ -65,14 +66,18 @@ namespace
         CivoleSenderReleaseOutput& senderRelease,
         CivoleReceiverSetXOutput& receiverSetX)
     {
-        LOGVOLE_REQUIRE_TRUE(civoleSenderReleaseK(senderState, sid, releaseK));
-
+        oc::PRNG senderPrng(oc::block(33, sid));
+        oc::PRNG receiverPrng(oc::block(44, sid));
         auto sockets = coproto::LocalAsyncSocket::makePair();
         auto result = macoro::sync_wait(macoro::when_all_ready(
-            civoleSenderRelease(senderState, sid, senderRelease, sockets[0]),
-            civoleReceiverSetX(receiverState, sid, x, receiverSetX, sockets[1])));
+            civoleSenderRelease(senderState, sid, senderRelease, senderPrng, sockets[0]),
+            civoleReceiverSetX(receiverState, sid, x, receiverSetX, receiverPrng, sockets[1])));
         std::get<0>(result).result();
         std::get<1>(result).result();
+
+        releaseK.mSid = sid;
+        releaseK.mModulus = senderState.mModulus;
+        releaseK.mKeys = senderState.mReleasedKeys;
     }
 
     void expect_vole_relation(
@@ -104,10 +109,11 @@ void LogVole_Civole_RejectsZeroDelta(const oc::CLP&)
 
     CivoleSenderState senderState{};
     auto sockets = coproto::LocalAsyncSocket::makePair();
+    oc::PRNG prng(oc::block(55, 66));
     bool threw = false;
     try
     {
-        macoro::sync_wait(civoleSenderOffline(senderInput, senderState, sockets[0]));
+        macoro::sync_wait(civoleSenderOffline(senderInput, senderState, prng, sockets[0]));
     }
     catch (const std::runtime_error&)
     {
@@ -131,27 +137,14 @@ void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
     LOGVOLE_EXPECT_EQ(senderState.mModulus, modulus);
     LOGVOLE_EXPECT_EQ(receiverState.mModulus, modulus);
 
-    auto releaseBeforeKeySockets = coproto::LocalAsyncSocket::makePair();
-    bool releaseBeforeKeyThrew = false;
-    try
-    {
-        CivoleSenderReleaseOutput senderRelease{};
-        macoro::sync_wait(civoleSenderRelease(senderState, 899, senderRelease, releaseBeforeKeySockets[0]));
-    }
-    catch (const std::runtime_error&)
-    {
-        releaseBeforeKeyThrew = true;
-    }
-    LOGVOLE_EXPECT_TRUE(releaseBeforeKeyThrew);
-
-    std::vector<u64> invalidX(8, 1);
-    invalidX[0] = modulus;
+    std::vector<u64> invalidX(7, 1);
     auto invalidSockets = coproto::LocalAsyncSocket::makePair();
     bool invalidXThrew = false;
     try
     {
         CivoleReceiverSetXOutput receiverSetX{};
-        macoro::sync_wait(civoleReceiverSetX(receiverState, 900, invalidX, receiverSetX, invalidSockets[1]));
+        oc::PRNG receiverPrng(oc::block(77, 88));
+        macoro::sync_wait(civoleReceiverSetX(receiverState, 900, invalidX, receiverSetX, receiverPrng, invalidSockets[1]));
     }
     catch (const std::runtime_error&)
     {
@@ -174,7 +167,8 @@ void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
     try
     {
         CivoleSenderReleaseOutput releaseAgain{};
-        macoro::sync_wait(civoleSenderRelease(senderState, sid, releaseAgain, senderSockets[0]));
+        oc::PRNG senderPrng(oc::block(99, 100));
+        macoro::sync_wait(civoleSenderRelease(senderState, sid, releaseAgain, senderPrng, senderSockets[0]));
     }
     catch (const std::runtime_error&)
     {
@@ -188,7 +182,8 @@ void LogVole_Civole_ValidationAndSidReuse(const oc::CLP&)
     {
         const std::vector<u64> x2{ 21, 13, 8, 5, 3, 2, 1, 1 };
         CivoleReceiverSetXOutput setXAgain{};
-        macoro::sync_wait(civoleReceiverSetX(receiverState, sid, x2, setXAgain, receiverSockets[1]));
+        oc::PRNG receiverPrng(oc::block(101, 102));
+        macoro::sync_wait(civoleReceiverSetX(receiverState, sid, x2, setXAgain, receiverPrng, receiverSockets[1]));
     }
     catch (const std::runtime_error&)
     {
@@ -206,10 +201,12 @@ void LogVole_Civole_StateMachineAutoOfflineSequentialSids(const oc::CLP&)
     std::vector<u64> b1(x1.size());
     std::vector<u64> a1(x1.size());
     const u64 delta = 11;
+    oc::PRNG senderPrng(oc::block(121, 122));
+    oc::PRNG receiverPrng(oc::block(123, 124));
     auto onlineSockets1 = coproto::LocalAsyncSocket::makePair();
     auto onlineResult1 = macoro::sync_wait(macoro::when_all_ready(
-        sender.send(delta, b1, onlineSockets1[0]),
-        receiver.receive(x1, a1, onlineSockets1[1])));
+        sender.send(delta, b1, senderPrng, onlineSockets1[0]),
+        receiver.receive(x1, a1, receiverPrng, onlineSockets1[1])));
     std::get<0>(onlineResult1).result();
     std::get<1>(onlineResult1).result();
 
@@ -225,8 +222,8 @@ void LogVole_Civole_StateMachineAutoOfflineSequentialSids(const oc::CLP&)
     std::vector<u64> a2(x2.size());
     auto onlineSockets2 = coproto::LocalAsyncSocket::makePair();
     auto onlineResult2 = macoro::sync_wait(macoro::when_all_ready(
-        sender.send(b2, onlineSockets2[0]),
-        receiver.receive(x2, a2, onlineSockets2[1])));
+        sender.send(b2, senderPrng, onlineSockets2[0]),
+        receiver.receive(x2, a2, receiverPrng, onlineSockets2[1])));
     std::get<0>(onlineResult2).result();
     std::get<1>(onlineResult2).result();
 

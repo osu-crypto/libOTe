@@ -2,6 +2,8 @@
 
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 
+#include "cryptoTools/Crypto/PRNG.h"
+
 #include <vector>
 
 namespace osuCrypto::LogVole
@@ -23,7 +25,7 @@ namespace osuCrypto::LogVole
         RingTensor& out,
         double noiseStandardDeviation = 0.0,
         double noiseMaxDeviation = 0.0,
-        const SamplingSeedConfig& samplingSeeds = SamplingSeedConfig{},
+        PRNG* prng = nullptr,
         bool rInputIsNtt = false,
         const std::vector<RnsPoly>* publicANtt = nullptr,
         u32 requestedWorkers = 1);
@@ -36,7 +38,7 @@ namespace osuCrypto::LogVole
         RingTensor& out,
         double noiseStandardDeviation = 0.0,
         double noiseMaxDeviation = 0.0,
-        const SamplingSeedConfig& samplingSeeds = SamplingSeedConfig{},
+        PRNG* prng = nullptr,
         bool rInputIsNtt = false,
         const std::vector<RnsPoly>* publicANtt = nullptr,
         u32 requestedWorkers = 1);
@@ -64,8 +66,10 @@ namespace osuCrypto::LogVole
     bool buildHashedCt2(
         const RingNttContext& ctx,
         u32 mu,
-        const SamplingSeedConfig& samplingSeeds,
-        u64 nonce,
+        std::span<const u8> seed,
+        u64 sid,
+        const RnsPoly& digest,
+        u64 instanceIdx,
         std::vector<RnsPoly>& out);
 
     bool lheDec(

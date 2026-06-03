@@ -209,16 +209,10 @@ namespace osuCrypto::LogVole
         u64 value1 = 0,
         u64 value2 = 0,
         u64 value3 = 0);
-    u64 deriveNoiseSeed(
-        const SamplingSeedConfig& config,
-        u64 domainTag,
-        u64 streamId = 0,
-        u64 salt0 = 0,
-        u64 salt1 = 0);
-    u64 deriveCt2Nonce(const SamplingSeedConfig& config, u64 nonce, u64 coeffCount = 0);
     u64 deriveSeedInstanceNonce(
-        const SamplingSeedConfig& config,
         std::span<const u8> seed,
+        u64 sid,
+        const RnsPoly& digest,
         u64 instanceIdx,
         u64 fallbackNonce = 0);
 

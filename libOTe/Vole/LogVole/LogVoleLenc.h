@@ -2,6 +2,8 @@
 
 #include "libOTe/Vole/LogVole/LogVoleRing.h"
 
+#include "cryptoTools/Crypto/PRNG.h"
+
 #include <memory>
 #include <span>
 #include <vector>
@@ -111,7 +113,7 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>& s,
         u32 tau,
         u32 gadgetLogBase,
-        const SamplingSeedConfig& samplingSeeds,
+        PRNG& prng,
         LencEncodeOutput& out,
         double noiseStandardDeviation = 0.0,
         double noiseMaxDeviation = 0.0,
@@ -180,7 +182,7 @@ namespace osuCrypto::LogVole
         u32 tauHi,
         u32 gadgetLogBase,
         u32 plaintextModulusBits,
-        const SamplingSeedConfig& samplingSeeds,
+        PRNG& prng,
         LencEncodeOutput& out,
         double noiseStandardDeviation = 0.0,
         double noiseMaxDeviation = 0.0,

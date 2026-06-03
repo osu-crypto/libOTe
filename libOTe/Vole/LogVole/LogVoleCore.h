@@ -3,6 +3,8 @@
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
 #include "libOTe/Vole/LogVole/LogVoleShrinkExpand.h"
 
+#include "cryptoTools/Crypto/PRNG.h"
+
 #include <memory>
 #include <vector>
 
@@ -85,11 +87,13 @@ namespace osuCrypto::LogVole
 
     struct SenderOnlineOptions
     {
+        u64 mSid = 0;
         bool mSkipTbkOutput = false;
     };
 
     struct ReceiverOnlineInput
     {
+        u64 mSid = 0;
         std::vector<RnsPoly> mX;
     };
 
@@ -122,8 +126,7 @@ namespace osuCrypto::LogVole
     bool sampleRootErrorBatch(
         const RingNttContext& ctx,
         u32 count,
-        const SamplingSeedConfig& samplingSeeds,
-        u64 domain,
+        PRNG& prng,
         double sigma,
         double maxDeviation,
         bool outputNtt,
@@ -147,7 +150,7 @@ namespace osuCrypto::LogVole
         const std::vector<RnsPoly>& publicBStarNtt,
         u32 gadgetLogBase,
         u32 gadgetPowerOffset,
-        const SamplingSeedConfig& samplingSeeds,
+        PRNG& prng,
         double noiseStandardDeviation,
         double noiseMaxDeviation,
         RingTensor& out);
@@ -156,6 +159,7 @@ namespace osuCrypto::LogVole
         const RingNttContext& ctx,
         u32 randomizerWidth,
         u32 gadgetLogBase,
+        PRNG& prng,
         std::vector<RnsPoly>& out);
 
     bool rootInnerProductNtt(
@@ -166,6 +170,7 @@ namespace osuCrypto::LogVole
 
     bool prepareRootOfflineSender(
         SenderState& state,
+        PRNG& prng,
         RootOfflineMessage& message);
 
     bool finalizeRootOfflineReceiver(
@@ -175,12 +180,14 @@ namespace osuCrypto::LogVole
     bool prepareRootDigestReceiver(
         const ReceiverState& state,
         const std::vector<RnsPoly>& x,
+        PRNG& prng,
         RootDigestState& digestState,
         RootDigestMessage& message);
 
     bool prepareRootResponseSender(
         const SenderState& state,
         const RootDigestMessage& request,
+        PRNG& prng,
         RootResponseMessage& response);
 
     bool finalizeRootResponseReceiver(
@@ -196,6 +203,7 @@ namespace osuCrypto::LogVole
 
     bool prepareSenderOffline(
         const SenderOfflineInput& input,
+        PRNG& prng,
         SenderOfflineOutput& out);
 
     bool finalizeReceiverOffline(
@@ -216,15 +224,18 @@ namespace osuCrypto::LogVole
         const SenderState& state);
 
     bool runLocalOnline(
-        const SenderState& sender,
+        SenderState& sender,
         ReceiverState& receiver,
         const ReceiverOnlineInput& input,
+        PRNG& senderPrng,
+        PRNG& receiverPrng,
         SenderOnlineOutput& senderOut,
         ReceiverOnlineOutput& receiverOut);
 
     bool prepareRootOnlineSender(
         SenderState& state,
         const RootDigestMessage& request,
+        PRNG& prng,
         RootResponseMessage& response,
         SenderOnlineOutput& out);
 
@@ -272,8 +283,9 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly>& out);
 
     bool seedLabelSampleCt2FromSeed(
-        const SamplingSeedConfig& samplingSeeds,
         std::span<const u8> seed,
+        u64 sid,
+        const RnsPoly& digest,
         u32 instanceIdx,
         u32 coeffCount,
         const RingParams& ring,
@@ -289,5 +301,7 @@ namespace osuCrypto::LogVole
     bool findGoldenSeed(
         const Params& params,
         const std::vector<RnsPoly>& sk2PerInstance,
+        const RnsPoly& digest,
+        PRNG& prng,
         GoldenSeedSearchOutput& out);
 }

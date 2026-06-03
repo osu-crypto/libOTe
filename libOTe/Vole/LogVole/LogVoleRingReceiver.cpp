@@ -147,6 +147,15 @@ namespace osuCrypto::LogVole
             return countSeedInstances(*state.mNextLevelState) + wDoublePrime;
         }
 
+        void applySessionId(ReceiverState& state, u64 sid)
+        {
+            state.mParams.mSessionId = sid;
+            if (state.mNextLevelState)
+            {
+                applySessionId(*state.mNextLevelState, sid);
+            }
+        }
+
         task<> recvOfflineMessage(
             const Params& params,
             OfflineMessage& message,
@@ -270,6 +279,7 @@ namespace osuCrypto::LogVole
         ReceiverState& state,
         const ReceiverOnlineInput& input,
         ReceiverOnlineOutput& output,
+        PRNG& prng,
         Socket& sock)
     {
         ProtocolCacheScope cacheScope = currentProtocolCacheScope();
@@ -279,6 +289,7 @@ namespace osuCrypto::LogVole
             cacheScope.mRole = ProtocolCacheRole::Receiver;
         }
         ScopedProtocolCacheScope scopedCache(cacheScope);
+        applySessionId(state, input.mSid);
 
         u32 tauHi = 0;
         if (!computeTauHi(state.mParams, tauHi))
@@ -302,7 +313,7 @@ namespace osuCrypto::LogVole
                 auto rootSock = sock.fork();
                 RootDigestState digestState{};
                 RootDigestMessage digest{};
-                if (!prepareRootDigestReceiver(state, input.mX, digestState, digest))
+                if (!prepareRootDigestReceiver(state, input.mX, prng, digestState, digest))
                 {
                     throw std::runtime_error("LogVole receiver could not prepare root digest");
                 }
@@ -422,11 +433,23 @@ namespace osuCrypto::LogVole
         }
 
         ReceiverOnlineInput childInput{};
+        childInput.mSid = input.mSid;
         childInput.mX = std::move(dHat);
+
+        CommunicationStats digestComm{};
+        {
+            auto digestSock = sock.fork();
+            for (const auto& digest : digests)
+            {
+                const auto payload = encode(makePolyMessage(state.mParams.mShrinkExpand.mRing, digest));
+                co_await sendFrame(digestSock, payload);
+                digestComm.mBytesSent += frameBytes(payload);
+            }
+        }
 
         ReceiverOnlineOutput childOutput{};
         auto childSock = sock.fork();
-        co_await online(*state.mNextLevelState, childInput, childOutput, childSock);
+        co_await online(*state.mNextLevelState, childInput, childOutput, prng, childSock);
 
         std::vector<RnsPoly> skXHat;
         std::vector<RnsPoly> skX;
@@ -458,9 +481,12 @@ namespace osuCrypto::LogVole
                 const std::size_t end = std::min(start + static_cast<std::size_t>(muHi), input.mX.size());
 
                 ShrinkExpandExpandReceiverInput expandInput{};
+                expandInput.mSeed = childOutput.mSeed;
+                expandInput.mSid = input.mSid;
                 expandInput.mNonce = deriveSeedInstanceNonce(
-                    state.mParams.mShrinkExpand.mSamplingSeeds,
                     childOutput.mSeed,
+                    input.mSid,
+                    digests[chunkIdx],
                     instanceBase + chunkIdx);
                 expandInput.mDigest = digests[chunkIdx];
                 expandInput.mSkX = skX[chunkIdx];
@@ -488,6 +514,7 @@ namespace osuCrypto::LogVole
         next.mSeed = childOutput.mSeed;
         next.mTbm = std::move(finalTbm);
         next.mComm = childOutput.mComm;
+        next.mComm.mBytesSent += digestComm.mBytesSent;
         output = std::move(next);
     }
 
@@ -521,6 +548,8 @@ namespace osuCrypto::LogVole
 
         ShrinkExpandExpandReceiverInput coreInput{};
         coreInput.mNonce = input.mNonce;
+        coreInput.mSeed = input.mSeed;
+        coreInput.mSid = input.mSid;
         coreInput.mX = input.mX;
         coreInput.mDigest = std::move(shrink.mDigest);
         coreInput.mSkX = std::move(skX);

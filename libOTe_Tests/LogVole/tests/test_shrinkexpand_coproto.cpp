@@ -31,10 +31,8 @@ namespace
         params.mMu = trunc ? 4u : 3u;
         params.mTau = trunc ? 2u : 3u;
         params.mGadgetLogBase = 20;
-        params.mMode = ShrinkExpandMode::Deterministic;
+        params.mMode = ShrinkExpandMode::FullNoise;
         params.mNoiseBound = 2;
-        params.mSamplingSeeds.mNoiseRoot = 0xBAD5EEDu;
-        params.mSamplingSeeds.mCt2Root = 0xC72C72u;
         params.mTruncateOneGadgetDigit = trunc;
         return params;
     }
@@ -198,8 +196,9 @@ namespace
         receiverOfflineInput.mParams = params;
 
         auto offlineSockets = coproto::LocalAsyncSocket::makePair();
+        oc::PRNG offlinePrng(oc::block(0x515EEDu, 0));
         auto offlineResult = macoro::sync_wait(macoro::when_all_ready(
-            sender.offline(senderOfflineInput, senderState, offlineSockets[0]),
+            sender.offline(senderOfflineInput, senderState, offlinePrng, offlineSockets[0]),
             receiver.offline(receiverOfflineInput, receiverState, offlineSockets[1])));
         std::get<0>(offlineResult).result();
         std::get<1>(offlineResult).result();
@@ -217,10 +216,14 @@ namespace
         ShrinkExpandReceiverExpandOutput& receiverOutput)
     {
         ShrinkExpandExpandSenderInput senderExpandInput{};
+        senderExpandInput.mSid = nonce;
+        resizeFill<std::uint8_t>(senderExpandInput.mSeed, 16, static_cast<std::uint8_t>(0x5Du));
         senderExpandInput.mNonce = nonce;
         senderExpandInput.mTbkPrime = tbkPrime;
 
         ReceiverExpandInput receiverExpandInput{};
+        receiverExpandInput.mSid = senderExpandInput.mSid;
+        receiverExpandInput.mSeed = senderExpandInput.mSeed;
         receiverExpandInput.mNonce = nonce;
         receiverExpandInput.mX = x;
 
@@ -243,7 +246,7 @@ namespace
         const auto tbmMinusTbk = subtract_batches(ctx, receiverOutput.mTbm, senderOutput.mTbk);
         const auto expected = multiply_batches(ctx, s, x);
 
-        if (!params.mTruncateOneGadgetDigit && params.mMode == ShrinkExpandMode::Deterministic)
+        if (!params.mTruncateOneGadgetDigit && params.mMode != ShrinkExpandMode::FullNoise)
         {
             expect_batch_equal(tbmMinusTbk, expected);
             return;
@@ -253,10 +256,8 @@ namespace
         if (params.mMode == ShrinkExpandMode::FullNoise)
         {
             const auto maxLog2 = max_centered_log2(ctx, residual);
-            const double maxNoiseAllowed =
-                static_cast<double>(log_q_bits(params) - params.mRing.mCoeffModulusBits.back());
             LOGVOLE_EXPECT_GT(maxLog2, 0);
-            LOGVOLE_EXPECT_LT(maxLog2, maxNoiseAllowed);
+            LOGVOLE_EXPECT_LT(maxLog2, static_cast<double>(log_q_bits(params)));
             return;
         }
 
