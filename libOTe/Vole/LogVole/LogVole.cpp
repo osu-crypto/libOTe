@@ -4,6 +4,8 @@
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
 
+#include "cryptoTools/Crypto/PRNG.h"
+
 #include "seal/util/rns.h"
 #include "seal/util/uintarith.h"
 #include "seal/util/uintarithsmallmod.h"
@@ -20,6 +22,12 @@ namespace osuCrypto::LogVole
     namespace
     {
         constexpr u64 kCivoleSidDomain = 0x4349564F4C455349ull;
+
+        struct CivoleOfflineMeta
+        {
+            u64 mLabelCount = 0;
+            SamplingSeedConfig mSamplingSeeds;
+        };
 
         bool validateZpValue(const ZpCrtContext& ctx, u64 value)
         {
@@ -248,16 +256,25 @@ namespace osuCrypto::LogVole
             return true;
         }
 
-        void writeU64(std::array<u8, 8>& out, u64 value)
+        void writeU64(std::span<u8> out, u64 value)
         {
+            if (out.size() != 8)
+            {
+                throw std::runtime_error("LogVole CI-VOLE metadata field has invalid size");
+            }
             for (u32 i = 0; i < 8; ++i)
             {
                 out[i] = static_cast<u8>((value >> (8 * i)) & 0xFF);
             }
         }
 
-        u64 readU64(const std::array<u8, 8>& in)
+        u64 readU64(std::span<const u8> in)
         {
+            if (in.size() != 8)
+            {
+                throw std::runtime_error("LogVole CI-VOLE metadata field has invalid size");
+            }
+
             u64 value = 0;
             for (u32 i = 0; i < 8; ++i)
             {
@@ -266,18 +283,34 @@ namespace osuCrypto::LogVole
             return value;
         }
 
-        task<> sendU64(Socket& sock, u64 value)
+        SamplingSeedConfig sampleCivoleSamplingSeeds()
         {
-            std::array<u8, 8> payload{};
-            writeU64(payload, value);
+            PRNG prng(sysRandomSeed());
+            SamplingSeedConfig seeds{};
+            seeds.mNoiseRoot = prng.get<u64>();
+            seeds.mCt2Root = prng.get<u64>();
+            return seeds;
+        }
+
+        task<> sendCivoleOfflineMeta(Socket& sock, const CivoleOfflineMeta& meta)
+        {
+            std::array<u8, 24> payload{};
+            writeU64(std::span<u8>(payload).subspan(0, 8), meta.mLabelCount);
+            writeU64(std::span<u8>(payload).subspan(8, 8), meta.mSamplingSeeds.mNoiseRoot);
+            writeU64(std::span<u8>(payload).subspan(16, 8), meta.mSamplingSeeds.mCt2Root);
             co_await sock.send(coproto::copy(payload));
         }
 
-        task<u64> recvU64(Socket& sock)
+        task<CivoleOfflineMeta> recvCivoleOfflineMeta(Socket& sock)
         {
-            std::array<u8, 8> payload{};
+            std::array<u8, 24> payload{};
             co_await sock.recv(payload);
-            co_return readU64(payload);
+
+            CivoleOfflineMeta meta{};
+            meta.mLabelCount = readU64(std::span<const u8>(payload).subspan(0, 8));
+            meta.mSamplingSeeds.mNoiseRoot = readU64(std::span<const u8>(payload).subspan(8, 8));
+            meta.mSamplingSeeds.mCt2Root = readU64(std::span<const u8>(payload).subspan(16, 8));
+            co_return meta;
         }
     }
 
@@ -907,10 +940,13 @@ namespace osuCrypto::LogVole
         CivoleSenderState& state,
         Socket& sock)
     {
+        CivoleParams sessionParams = input.mParams;
+        sessionParams.mLogVole.mShrinkExpand.mSamplingSeeds = sampleCivoleSamplingSeeds();
+
         ZpCrtContext ctx{};
         if (!makeZpCrtContext(
-                input.mParams.mLogVole.mShrinkExpand.mRing,
-                input.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
+                sessionParams.mLogVole.mShrinkExpand.mRing,
+                sessionParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
                 ctx) ||
             input.mDelta == 0 ||
             input.mDelta >= ctx.mPlaintextModulus)
@@ -919,12 +955,12 @@ namespace osuCrypto::LogVole
         }
 
         u32 ringWidth = 0;
-        if (!computeInternalRingWidth(input.mParams.mLogVole, ctx, input.mW, ringWidth))
+        if (!computeInternalRingWidth(sessionParams.mLogVole, ctx, input.mW, ringWidth))
         {
             throw std::runtime_error("LogVole CI-VOLE sender could not compute ring width");
         }
 
-        Params params = input.mParams.mLogVole;
+        Params params = sessionParams.mLogVole;
         params.mW = ringWidth;
         params.mTotalLabelCount = input.mW;
 
@@ -933,14 +969,17 @@ namespace osuCrypto::LogVole
                 ctx,
                 input.mDelta,
                 true,
-                input.mParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
+                sessionParams.mLogVole.mShrinkExpand.mNumWorkerThreads,
                 wrappedDelta))
         {
             throw std::runtime_error("LogVole CI-VOLE sender could not wrap delta");
         }
 
         auto metaSock = sock.fork();
-        co_await sendU64(metaSock, input.mW);
+        CivoleOfflineMeta meta{};
+        meta.mLabelCount = input.mW;
+        meta.mSamplingSeeds = sessionParams.mLogVole.mShrinkExpand.mSamplingSeeds;
+        co_await sendCivoleOfflineMeta(metaSock, meta);
 
         SenderOfflineInput offlineInput{};
         offlineInput.mParams = params;
@@ -952,7 +991,7 @@ namespace osuCrypto::LogVole
         co_await sender.offline(offlineInput, logVoleState, logVoleSock);
 
         CivoleSenderState next{};
-        next.mParams = input.mParams;
+        next.mParams = sessionParams;
         next.mModulus = ctx.mPlaintextModulus;
         next.mDelta = input.mDelta;
         next.mW = input.mW;
@@ -968,26 +1007,28 @@ namespace osuCrypto::LogVole
         Socket& sock)
     {
         auto metaSock = sock.fork();
-        const u64 labelCount = co_await recvU64(metaSock);
+        const CivoleOfflineMeta meta = co_await recvCivoleOfflineMeta(metaSock);
+        CivoleParams sessionParams = input.mParams;
+        sessionParams.mLogVole.mShrinkExpand.mSamplingSeeds = meta.mSamplingSeeds;
 
         ZpCrtContext ctx{};
         if (!makeZpCrtContext(
-                input.mParams.mLogVole.mShrinkExpand.mRing,
-                input.mParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
+                sessionParams.mLogVole.mShrinkExpand.mRing,
+                sessionParams.mLogVole.mShrinkExpand.mPlaintextModulusBits,
                 ctx))
         {
             throw std::runtime_error("LogVole CI-VOLE receiver could not build CRT context");
         }
 
         u32 ringWidth = 0;
-        if (!computeInternalRingWidth(input.mParams.mLogVole, ctx, labelCount, ringWidth))
+        if (!computeInternalRingWidth(sessionParams.mLogVole, ctx, meta.mLabelCount, ringWidth))
         {
             throw std::runtime_error("LogVole CI-VOLE receiver could not compute ring width");
         }
 
-        Params params = input.mParams.mLogVole;
+        Params params = sessionParams.mLogVole;
         params.mW = ringWidth;
-        params.mTotalLabelCount = labelCount;
+        params.mTotalLabelCount = meta.mLabelCount;
 
         ReceiverOfflineInput offlineInput{};
         offlineInput.mParams = params;
@@ -998,9 +1039,9 @@ namespace osuCrypto::LogVole
         co_await receiver.offline(offlineInput, logVoleState, logVoleSock);
 
         CivoleReceiverState next{};
-        next.mParams = input.mParams;
+        next.mParams = sessionParams;
         next.mModulus = ctx.mPlaintextModulus;
-        next.mW = labelCount;
+        next.mW = meta.mLabelCount;
         next.mRingWidth = params.mW;
         next.mBaseSamplingSeeds = params.mShrinkExpand.mSamplingSeeds;
         next.mLogVoleState = std::move(logVoleState);
