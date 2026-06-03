@@ -50,7 +50,7 @@ namespace osuCrypto::LogVole
         {
             return ctx.mPlaintextModulus != 0 &&
                    !ctx.mRing.mModuli.empty() &&
-                   ctx.mDeltaModQj.size() == ctx.mRing.mModuli.size() &&
+                   ctx.mPlaintextLiftModQj.size() == ctx.mRing.mModuli.size() &&
                    ctx.mBatchingContext &&
                    ctx.mBatchingContext->first_context_data();
         }
@@ -97,12 +97,12 @@ namespace osuCrypto::LogVole
             for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
             {
                 u64* limbCoeffs = out.mCoeffs.data() + modIdx * n;
-                const u64 deltaModQj = ctx.mDeltaModQj[modIdx];
+                const u64 plaintextLiftModQj = ctx.mPlaintextLiftModQj[modIdx];
                 const auto& modulus = ctx.mRing.mModuli[modIdx];
                 for (std::size_t coeffIdx = 0; coeffIdx < plainCoeffCount; ++coeffIdx)
                 {
                     limbCoeffs[coeffIdx] =
-                        seal::util::multiply_uint_mod(plainCoeffs[coeffIdx], deltaModQj, modulus);
+                        seal::util::multiply_uint_mod(plainCoeffs[coeffIdx], plaintextLiftModQj, modulus);
                 }
             }
             return true;
@@ -685,19 +685,19 @@ namespace osuCrypto::LogVole
         seal::util::set_uint(ringContextData->rns_tool()->base_q()->base_prod(), rho, numerator.get());
         auto denominator = seal::util::allocate_zero_uint(rho, pool);
         denominator[0] = batchingPlainModulus.value();
-        auto delta = seal::util::allocate_zero_uint(rho, pool);
-        seal::util::divide_uint_inplace(numerator.get(), denominator.get(), rho, delta.get(), pool);
+        auto plaintextLift = seal::util::allocate_zero_uint(rho, pool);
+        seal::util::divide_uint_inplace(numerator.get(), denominator.get(), rho, plaintextLift.get(), pool);
 
         ZpCrtContext next{};
         next.mRing = std::move(ringCtx);
         next.mPlaintextModulusBits = selectedPlaintextBits;
         next.mPlaintextModulus = batchingPlainModulus.value();
         next.mBatchingContext = std::move(batchingContext);
-        next.mDeltaModQj.resize(rho);
+        next.mPlaintextLiftModQj.resize(rho);
         for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
         {
-            next.mDeltaModQj[modIdx] =
-                seal::util::modulo_uint(delta.get(), rho, next.mRing.mModuli[modIdx]);
+            next.mPlaintextLiftModQj[modIdx] =
+                seal::util::modulo_uint(plaintextLift.get(), rho, next.mRing.mModuli[modIdx]);
         }
 
         out = std::move(next);

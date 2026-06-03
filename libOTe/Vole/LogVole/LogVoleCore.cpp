@@ -2568,19 +2568,19 @@ namespace osuCrypto::LogVole
         const std::size_t rho = ctx.mModuli.size();
         const std::size_t n = ring.mPolyModulusDegree;
 
-        AlignedUnVec<u64> deltaJModQj;
-        resizeFill<u64>(deltaJModQj, rho, 1);
+        AlignedUnVec<u64> crtLiftJModQj;
+        resizeFill<u64>(crtLiftJModQj, rho, 1);
         for (std::size_t j = 0; j < rho; ++j)
         {
-            u64 delta = 1;
+            u64 crtLift = 1;
             for (std::size_t k = 0; k < rho; ++k)
             {
                 if (k != j)
                 {
-                    delta = seal::util::multiply_uint_mod(delta, ctx.mModuli[k].value(), ctx.mModuli[j]);
+                    crtLift = seal::util::multiply_uint_mod(crtLift, ctx.mModuli[k].value(), ctx.mModuli[j]);
                 }
             }
-            deltaJModQj[j] = delta;
+            crtLiftJModQj[j] = crtLift;
         }
 
         std::vector<RnsPoly> unbundled(digits.size() * rho);
@@ -2600,7 +2600,7 @@ namespace osuCrypto::LogVole
                 {
                     const u64 value = digitCoeffs[limbOffset + c];
                     liftedCoeffs[limbOffset + c] =
-                        seal::util::multiply_uint_mod(value, deltaJModQj[j], ctx.mModuli[j]);
+                        seal::util::multiply_uint_mod(value, crtLiftJModQj[j], ctx.mModuli[j]);
                 }
 
                 unbundled[outIdx++] = std::move(lifted);
@@ -2676,19 +2676,19 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        AlignedUnVec<u64> deltaJModQj;
-        resizeFill<u64>(deltaJModQj, rho, 1);
+        AlignedUnVec<u64> crtLiftJModQj;
+        resizeFill<u64>(crtLiftJModQj, rho, 1);
         for (std::size_t j = 0; j < rho; ++j)
         {
-            u64 delta = 1;
+            u64 crtLift = 1;
             for (std::size_t k = 0; k < rho; ++k)
             {
                 if (k != j)
                 {
-                    delta = seal::util::multiply_uint_mod(delta, ctx.mModuli[k].value(), ctx.mModuli[j]);
+                    crtLift = seal::util::multiply_uint_mod(crtLift, ctx.mModuli[k].value(), ctx.mModuli[j]);
                 }
             }
-            deltaJModQj[j] = delta;
+            crtLiftJModQj[j] = crtLift;
         }
 
         std::vector<RnsPoly> inner(static_cast<std::size_t>(rho) * tau);
@@ -2715,7 +2715,7 @@ namespace osuCrypto::LogVole
                         {
                             const std::size_t idx = offset + c;
                             coeffs[idx] =
-                                seal::util::multiply_uint_mod(coeffs[idx], deltaJModQj[j], ctx.mModuli[j]);
+                                seal::util::multiply_uint_mod(coeffs[idx], crtLiftJModQj[j], ctx.mModuli[j]);
                         }
                     }
                 }

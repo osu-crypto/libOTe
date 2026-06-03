@@ -246,37 +246,37 @@ namespace osuCrypto::LogVole
 
         struct RecursiveLeafScaling
         {
-            AlignedUnVec<u64> mDeltaModQj;
-            AlignedUnVec<u64> mInvDeltaModQj;
+            AlignedUnVec<u64> mCrtLiftModQj;
+            AlignedUnVec<u64> mInvCrtLiftModQj;
         };
 
         bool buildRecursiveLeafScaling(const RingNttContext& ctx, RecursiveLeafScaling& out)
         {
             const std::size_t rho = ctx.mModuli.size();
             RecursiveLeafScaling scaling{};
-            resizeFill<u64>(scaling.mDeltaModQj, rho, 1);
-            resizeFill<u64>(scaling.mInvDeltaModQj, rho, 1);
+            resizeFill<u64>(scaling.mCrtLiftModQj, rho, 1);
+            resizeFill<u64>(scaling.mInvCrtLiftModQj, rho, 1);
 
             for (std::size_t j = 0; j < rho; ++j)
             {
                 const auto& modJ = ctx.mModuli[j];
-                u64 deltaModQj = 1;
+                u64 crtLiftModQj = 1;
                 for (std::size_t w = 0; w < rho; ++w)
                 {
                     if (w == j)
                     {
                         continue;
                     }
-                    deltaModQj = seal::util::multiply_uint_mod(deltaModQj, ctx.mModuli[w].value(), modJ);
+                    crtLiftModQj = seal::util::multiply_uint_mod(crtLiftModQj, ctx.mModuli[w].value(), modJ);
                 }
-                scaling.mDeltaModQj[j] = deltaModQj;
+                scaling.mCrtLiftModQj[j] = crtLiftModQj;
 
-                u64 invDeltaModQj = 0;
-                if (!seal::util::try_invert_uint_mod(deltaModQj, modJ, invDeltaModQj))
+                u64 invCrtLiftModQj = 0;
+                if (!seal::util::try_invert_uint_mod(crtLiftModQj, modJ, invCrtLiftModQj))
                 {
                     return false;
                 }
-                scaling.mInvDeltaModQj[j] = invDeltaModQj;
+                scaling.mInvCrtLiftModQj[j] = invCrtLiftModQj;
             }
 
             out = std::move(scaling);
@@ -441,7 +441,7 @@ namespace osuCrypto::LogVole
             const RingNttContext& ctx,
             const RnsPoly& liftedPoly,
             u32 limbIdx,
-            u64 invDeltaModQj,
+            u64 invCrtLiftModQj,
             std::vector<RnsPoly>& out)
         {
             RnsPoly plainPoly{};
@@ -453,7 +453,7 @@ namespace osuCrypto::LogVole
             for (std::size_t c = 0; c < n; ++c)
             {
                 const u64 reduced =
-                    seal::util::multiply_uint_mod(liftedPoly.mCoeffs[offset + c], invDeltaModQj, modulus);
+                    seal::util::multiply_uint_mod(liftedPoly.mCoeffs[offset + c], invCrtLiftModQj, modulus);
                 const i64 centered = (reduced > (modulus.value() >> 1u))
                                          ? -static_cast<i64>(modulus.value() - reduced)
                                          : static_cast<i64>(reduced);
@@ -582,7 +582,7 @@ namespace osuCrypto::LogVole
                 if (leafInputsAreGadget)
                 {
                     if (!decomposeRecursiveLeafSingleDigitNtt(
-                            ctx, leafPoly, limb, leafScaling.mInvDeltaModQj[limb], tree.mNodeDecompNtt[node]))
+                            ctx, leafPoly, limb, leafScaling.mInvCrtLiftModQj[limb], tree.mNodeDecompNtt[node]))
                     {
                         return false;
                     }
@@ -637,8 +637,8 @@ namespace osuCrypto::LogVole
                         const u32 leftLimb = leftLeaf % static_cast<u32>(ctx.mModuli.size());
                         const u32 rightLimb = rightLeaf % static_cast<u32>(ctx.mModuli.size());
                         if (!recursiveLeafPairInnerProductNttToStd(
-                                ctx, (*publicBNtt)[0], leftLimb, leafScaling.mDeltaModQj[leftLimb], *pairPtrs[0],
-                                (*publicBNtt)[fullTau], rightLimb, leafScaling.mDeltaModQj[rightLimb], *pairPtrs[1],
+                                ctx, (*publicBNtt)[0], leftLimb, leafScaling.mCrtLiftModQj[leftLimb], *pairPtrs[0],
+                                (*publicBNtt)[fullTau], rightLimb, leafScaling.mCrtLiftModQj[rightLimb], *pairPtrs[1],
                                 dot))
                         {
                             return false;
@@ -1467,7 +1467,7 @@ namespace osuCrypto::LogVole
                                 const u32 limb = (side == 0) ? leftLimb : rightLimb;
                                 const u32 fullTauSideOffset = (side == 0) ? 0u : fullTau;
                                 scaledBPoly = selectAndScaleLimbNtt(
-                                    ctx, (*publicBNtt)[fullTauSideOffset], limb, leafScaling.mDeltaModQj[limb]);
+                                    ctx, (*publicBNtt)[fullTauSideOffset], limb, leafScaling.mCrtLiftModQj[limb]);
                                 bPolyPtr = &scaledBPoly;
                             }
 
@@ -1485,7 +1485,7 @@ namespace osuCrypto::LogVole
                                 {
                                     const u32 limb = (side == 0) ? leftLimb : rightLimb;
                                     scaledRiNtt =
-                                        selectAndScaleLimbNtt(ctx, riNtt, limb, leafScaling.mDeltaModQj[limb]);
+                                        selectAndScaleLimbNtt(ctx, riNtt, limb, leafScaling.mCrtLiftModQj[limb]);
                                     riPolyPtr = &scaledRiNtt;
                                 }
 

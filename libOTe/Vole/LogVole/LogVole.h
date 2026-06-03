@@ -27,7 +27,7 @@ namespace osuCrypto::LogVole
         RingNttContext mRing;
         u32 mPlaintextModulusBits = 0;
         u64 mPlaintextModulus = 0;
-        AlignedUnVec<u64> mDeltaModQj;
+        AlignedUnVec<u64> mPlaintextLiftModQj;
         std::shared_ptr<seal::SEALContext> mBatchingContext;
     };
 

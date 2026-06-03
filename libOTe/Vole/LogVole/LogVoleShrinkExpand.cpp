@@ -828,8 +828,8 @@ namespace osuCrypto::LogVole
             AlignedUnVec<u64> mCrtInvPunctured;
             AlignedUnVec<u64> mPuncturedProdModTarget;
             AlignedUnVec<wideU64> mFracInvModulus;
-            u64 mDeltaModTarget = 1;
-            u64 mInvDeltaModTarget = 1;
+            u64 mCrtLiftModTarget = 1;
+            u64 mInvCrtLiftModTarget = 1;
         };
 
         std::vector<RecoveryConstants> recovery(rho);
@@ -843,7 +843,7 @@ namespace osuCrypto::LogVole
             std::vector<seal::Modulus> baseExcludingJ;
             baseExcludingJ.reserve((rho > 0) ? (rho - 1) : 0);
 
-            u64 deltaModQj = 1;
+            u64 crtLiftModQj = 1;
             for (std::size_t w = 0; w < rho; ++w)
             {
                 if (w == j)
@@ -852,16 +852,16 @@ namespace osuCrypto::LogVole
                 }
                 constants.mSrcLimbIndices[srcLimbIdx++] = w;
                 baseExcludingJ.push_back(ctx.mModuli[w]);
-                deltaModQj = seal::util::multiply_uint_mod(deltaModQj, q[w], modJ);
+                crtLiftModQj = seal::util::multiply_uint_mod(crtLiftModQj, q[w], modJ);
             }
-            constants.mDeltaModTarget = deltaModQj;
+            constants.mCrtLiftModTarget = crtLiftModQj;
 
-            u64 invDeltaModQj = 0;
-            if (!seal::util::try_invert_uint_mod(deltaModQj, modJ, invDeltaModQj))
+            u64 invCrtLiftModQj = 0;
+            if (!seal::util::try_invert_uint_mod(crtLiftModQj, modJ, invCrtLiftModQj))
             {
                 return false;
             }
-            constants.mInvDeltaModTarget = invDeltaModQj;
+            constants.mInvCrtLiftModTarget = invCrtLiftModQj;
 
             if (baseExcludingJ.empty())
             {
@@ -973,7 +973,7 @@ namespace osuCrypto::LogVole
                     }
 
                     const u64 alphaTerm =
-                        seal::util::multiply_uint_mod(alpha, constants.mDeltaModTarget, modJ);
+                        seal::util::multiply_uint_mod(alpha, constants.mCrtLiftModTarget, modJ);
                     if (eModQj >= alphaTerm)
                     {
                         eModQj -= alphaTerm;
@@ -986,7 +986,7 @@ namespace osuCrypto::LogVole
                     const u64 vj = polyIn.mCoeffs[j * n + k];
                     const u64 diff = (vj >= eModQj) ? (vj - eModQj) : (vj + qj - eModQj);
                     polyOut.mCoeffs[j * n + k] =
-                        seal::util::multiply_uint_mod(diff, constants.mInvDeltaModTarget, modJ);
+                        seal::util::multiply_uint_mod(diff, constants.mInvCrtLiftModTarget, modJ);
                 }
             }
 
