@@ -26,7 +26,7 @@ namespace osuCrypto::LogVole
         struct CivoleOfflineMeta
         {
             u64 mLabelCount = 0;
-            SamplingSeedConfig mSamplingSeeds;
+            u64 mCt2Root = 0;
         };
 
         bool validateZpValue(const ZpCrtContext& ctx, u64 value)
@@ -294,22 +294,20 @@ namespace osuCrypto::LogVole
 
         task<> sendCivoleOfflineMeta(Socket& sock, const CivoleOfflineMeta& meta)
         {
-            std::array<u8, 24> payload{};
+            std::array<u8, 16> payload{};
             writeU64(std::span<u8>(payload).subspan(0, 8), meta.mLabelCount);
-            writeU64(std::span<u8>(payload).subspan(8, 8), meta.mSamplingSeeds.mNoiseRoot);
-            writeU64(std::span<u8>(payload).subspan(16, 8), meta.mSamplingSeeds.mCt2Root);
+            writeU64(std::span<u8>(payload).subspan(8, 8), meta.mCt2Root);
             co_await sock.send(coproto::copy(payload));
         }
 
         task<CivoleOfflineMeta> recvCivoleOfflineMeta(Socket& sock)
         {
-            std::array<u8, 24> payload{};
+            std::array<u8, 16> payload{};
             co_await sock.recv(payload);
 
             CivoleOfflineMeta meta{};
             meta.mLabelCount = readU64(std::span<const u8>(payload).subspan(0, 8));
-            meta.mSamplingSeeds.mNoiseRoot = readU64(std::span<const u8>(payload).subspan(8, 8));
-            meta.mSamplingSeeds.mCt2Root = readU64(std::span<const u8>(payload).subspan(16, 8));
+            meta.mCt2Root = readU64(std::span<const u8>(payload).subspan(8, 8));
             co_return meta;
         }
     }
@@ -321,7 +319,7 @@ namespace osuCrypto::LogVole
         resizeFill<int>(params.mLogVole.mShrinkExpand.mRing.mCoeffModulusBits, 4, 55);
         params.mLogVole.mShrinkExpand.mPlaintextModulusBits = 55;
         params.mLogVole.mShrinkExpand.mMode = ShrinkExpandMode::FullNoise;
-        params.mLogVole.mShrinkExpand.mSamplingSeeds.mNoiseRoot = 0xBAD5EEDu;
+        params.mLogVole.mShrinkExpand.mSamplingSeeds = sampleCivoleSamplingSeeds();
         params.mLogVole.mShrinkExpand.mNoiseBound = 2;
         params.mLogVole.mShrinkExpand.mAlpha = 2;
         params.mLogVole.mShrinkExpand.mGadgetLogBase = 110;
@@ -978,7 +976,7 @@ namespace osuCrypto::LogVole
         auto metaSock = sock.fork();
         CivoleOfflineMeta meta{};
         meta.mLabelCount = input.mW;
-        meta.mSamplingSeeds = sessionParams.mLogVole.mShrinkExpand.mSamplingSeeds;
+        meta.mCt2Root = sessionParams.mLogVole.mShrinkExpand.mSamplingSeeds.mCt2Root;
         co_await sendCivoleOfflineMeta(metaSock, meta);
 
         SenderOfflineInput offlineInput{};
@@ -1009,7 +1007,7 @@ namespace osuCrypto::LogVole
         auto metaSock = sock.fork();
         const CivoleOfflineMeta meta = co_await recvCivoleOfflineMeta(metaSock);
         CivoleParams sessionParams = input.mParams;
-        sessionParams.mLogVole.mShrinkExpand.mSamplingSeeds = meta.mSamplingSeeds;
+        sessionParams.mLogVole.mShrinkExpand.mSamplingSeeds.mCt2Root = meta.mCt2Root;
 
         ZpCrtContext ctx{};
         if (!makeZpCrtContext(

@@ -266,7 +266,6 @@ namespace osuCrypto::LogVole
                    expected.mTruncateOneGadgetDigit == actual.mTruncateOneGadgetDigit &&
                    expected.mLeafInputsAreGadget == actual.mLeafInputsAreGadget &&
                    expected.mMode == actual.mMode &&
-                   expected.mSamplingSeeds.mNoiseRoot == actual.mSamplingSeeds.mNoiseRoot &&
                    expected.mSamplingSeeds.mCt2Root == actual.mSamplingSeeds.mCt2Root &&
                    expected.mNoiseBound == actual.mNoiseBound;
         }

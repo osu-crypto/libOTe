@@ -168,6 +168,50 @@ void LogVole_Encoding_RootOfflineMessageRoundTrip(const oc::CLP&)
     }
 }
 
+void LogVole_Encoding_ShrinkExpandOfflineMessageDoesNotLeakNoiseRoot(const oc::CLP&)
+{
+    const RingParams ring = make_ring();
+
+    ShrinkExpandOfflineMessage message{};
+    message.mParams.mRing = ring;
+    message.mParams.mPlaintextModulusBits = 18;
+    message.mParams.mAlpha = 2;
+    message.mParams.mMu = 3;
+    message.mParams.mGadgetLogBase = 7;
+    message.mParams.mTau = 2;
+    message.mParams.mTruncateOneGadgetDigit = true;
+    message.mParams.mLeafInputsAreGadget = true;
+    message.mParams.mMode = ShrinkExpandMode::FullNoise;
+    message.mParams.mSamplingSeeds.mNoiseRoot = 0x1122334455667788ull;
+    message.mParams.mSamplingSeeds.mCt2Root = 0x8877665544332211ull;
+    message.mParams.mNoiseBound = 5;
+    message.mCt1 = make_tensor(ring, message.mParams.mMu, message.mParams.mTau, 7000);
+    message.mLacct.mWidthPadded = 4;
+    message.mLacct.mLevels = 2;
+    message.mLacct.mCt = make_tensor(ring, 8, 4, 8000);
+
+    const auto encoded = encode(message);
+    ShrinkExpandOfflineMessage decoded{};
+    LOGVOLE_REQUIRE_TRUE(decode(encoded, decoded));
+
+    LOGVOLE_EXPECT_TRUE(decoded.mParams.mRing == message.mParams.mRing);
+    LOGVOLE_EXPECT_EQ(decoded.mParams.mPlaintextModulusBits, message.mParams.mPlaintextModulusBits);
+    LOGVOLE_EXPECT_EQ(decoded.mParams.mAlpha, message.mParams.mAlpha);
+    LOGVOLE_EXPECT_EQ(decoded.mParams.mMu, message.mParams.mMu);
+    LOGVOLE_EXPECT_EQ(decoded.mParams.mGadgetLogBase, message.mParams.mGadgetLogBase);
+    LOGVOLE_EXPECT_EQ(decoded.mParams.mTau, message.mParams.mTau);
+    LOGVOLE_EXPECT_TRUE(decoded.mParams.mTruncateOneGadgetDigit);
+    LOGVOLE_EXPECT_TRUE(decoded.mParams.mLeafInputsAreGadget);
+    LOGVOLE_EXPECT_EQ(static_cast<std::uint8_t>(decoded.mParams.mMode), static_cast<std::uint8_t>(message.mParams.mMode));
+    LOGVOLE_EXPECT_EQ(decoded.mParams.mSamplingSeeds.mCt2Root, message.mParams.mSamplingSeeds.mCt2Root);
+    LOGVOLE_EXPECT_FALSE(decoded.mParams.mSamplingSeeds.mNoiseRoot == message.mParams.mSamplingSeeds.mNoiseRoot);
+    LOGVOLE_EXPECT_EQ(decoded.mParams.mNoiseBound, message.mParams.mNoiseBound);
+    expect_tensor_equal(decoded.mCt1, message.mCt1);
+    LOGVOLE_EXPECT_EQ(decoded.mLacct.mWidthPadded, message.mLacct.mWidthPadded);
+    LOGVOLE_EXPECT_EQ(decoded.mLacct.mLevels, message.mLacct.mLevels);
+    expect_tensor_equal(decoded.mLacct.mCt, message.mLacct.mCt);
+}
+
 void LogVole_Encoding_RootDigestAndResponseRoundTrip(const oc::CLP&)
 {
     RootDigestMessage digest{};
@@ -197,6 +241,7 @@ void LogVole_Encoding_AllMessageRoundTrips(const oc::CLP& cmd)
     LogVole_Encoding_KeyDeriveRequestRoundTrip(cmd);
     LogVole_Encoding_KeyDeriveResponseRoundTrip(cmd);
     LogVole_Encoding_SeedMessageRoundTrip(cmd);
+    LogVole_Encoding_ShrinkExpandOfflineMessageDoesNotLeakNoiseRoot(cmd);
     LogVole_Encoding_RootOfflineMessageRoundTrip(cmd);
     LogVole_Encoding_RootDigestAndResponseRoundTrip(cmd);
 }

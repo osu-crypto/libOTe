@@ -125,7 +125,7 @@ namespace osuCrypto::LogVole
             return ringParamsByteSize(params.mRing) +
                    5u * sizeof(u32) +
                    3u * sizeof(u8) +
-                   2u * sizeof(u64) +
+                   sizeof(u64) +
                    sizeof(i64);
         }
 
@@ -222,7 +222,6 @@ namespace osuCrypto::LogVole
                 writeU8(static_cast<u8>(params.mTruncateOneGadgetDigit ? 1 : 0));
                 writeU8(static_cast<u8>(params.mLeafInputsAreGadget ? 1 : 0));
                 writeU8(static_cast<u8>(params.mMode));
-                writeU64(params.mSamplingSeeds.mNoiseRoot);
                 writeU64(params.mSamplingSeeds.mCt2Root);
                 writeI64(params.mNoiseBound);
             }
@@ -347,7 +346,6 @@ namespace osuCrypto::LogVole
                 !readU8(payload, offset, truncate) ||
                 !readU8(payload, offset, leafInputsAreGadget) ||
                 !readU8(payload, offset, mode) ||
-                !readU64(payload, offset, params.mSamplingSeeds.mNoiseRoot) ||
                 !readU64(payload, offset, params.mSamplingSeeds.mCt2Root) ||
                 !readI64(payload, offset, params.mNoiseBound))
             {

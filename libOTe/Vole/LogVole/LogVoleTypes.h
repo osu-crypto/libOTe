@@ -115,7 +115,10 @@ namespace osuCrypto::LogVole
         static constexpr u64 DefaultNoiseRoot = 0x5EEDBEEF1234ull;
         static constexpr u64 DefaultCt2Root = 0xB720AA55D1CE5EEDull;
 
+        // Sender-private root for LacE/LHE masks and noise. This value must not
+        // be sent to the receiver.
         u64 mNoiseRoot = DefaultNoiseRoot;
+        // Public/session-shared root for hash-derived ct2 material.
         u64 mCt2Root = DefaultCt2Root;
     };
 
