@@ -614,7 +614,7 @@ void LogVole_Core_RepOfflineSenderInputGammaOneRepeats(const oc::CLP&)
     }
 }
 
-void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesLimbs(const oc::CLP&)
+void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesResidues(const oc::CLP&)
 {
     const auto params = make_params();
     RingNttContext ctx{};
@@ -628,7 +628,6 @@ void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesLimbs(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(s, tau, alpha, tau, params, actual));
     LOGVOLE_REQUIRE_EQ(actual.size(), static_cast<std::size_t>(alpha * tau * params.mCoeffModulusBits.size()));
 
-    const auto delta = delta_per_limb(ctx);
     const std::size_t n = params.mPolyModulusDegree;
     const std::size_t rho = ctx.mModuli.size();
     for (std::size_t alphaIdx = 0; alphaIdx < alpha; ++alphaIdx)
@@ -644,12 +643,7 @@ void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesLimbs(const oc::CLP&)
                     for (std::size_t c = 0; c < n; ++c)
                     {
                         const auto expected =
-                            (modIdx == limb)
-                                ? seal::util::multiply_uint_mod(
-                                      s[digit].mCoeffs[offset + c],
-                                      delta[limb],
-                                      ctx.mModuli[limb])
-                                : 0u;
+                            (modIdx == limb) ? s[digit].mCoeffs[offset + c] : 0u;
                         LOGVOLE_EXPECT_EQ(poly.mCoeffs[offset + c], expected);
                     }
                 }
@@ -978,7 +972,11 @@ void LogVole_Core_RootOfflineRejectsMetadataMismatch(const oc::CLP&)
 
 void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
 {
-    const Params params = make_root_params();
+    Params params = make_golden_params();
+    params.mW =
+        params.mShrinkExpand.mAlpha *
+        (params.mShrinkExpand.mTau - 1) *
+        static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
     ShrinkExpandParams trunc{};
     LOGVOLE_REQUIRE_TRUE(makeTruncShrinkExpandParams(params, true, trunc));
 
@@ -1013,7 +1011,9 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     receiver.mShrinkExpandState = seReceiver;
     LOGVOLE_REQUIRE_TRUE(finalizeRootOfflineReceiver(receiver, offlineMessage));
 
-    const auto x = sample_batch(ctx, params.mW, 0x7602u);
+    const std::uint32_t plainSampleBits =
+        std::min<std::uint32_t>(12u, params.mShrinkExpand.mPlaintextModulusBits);
+    const auto x = sample_small_plain_batch(ctx, params.mW, 0x7602u, plainSampleBits);
 
     RootDigestState digestState{};
     RootDigestMessage digestMessage{};
@@ -1187,7 +1187,7 @@ void LogVole_Core_TwoLevelLocalApiRelation(const oc::CLP&)
 {
     Params params = make_recursive_params(2);
     params.mShrinkExpand.mMode = ShrinkExpandMode::FullNoise;
-    params.mShrinkExpand.mNoiseBound = 0;
+    params.mShrinkExpand.mNoiseBound = 2;
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1u;
     const std::uint32_t rho =
         static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());

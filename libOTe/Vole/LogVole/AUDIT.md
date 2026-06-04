@@ -200,29 +200,31 @@ Recommended targeted test:
 - A negative extended test, kept out of normal CI, can demonstrate that using a
   uniform `r1` violates the truncation noise budget for ordinary parameters.
 
-## LV-AUDIT-005: Possible double CRT lift in recursive digest/key handling
+## LV-AUDIT-005: Double CRT lift in recursive digest/key handling
 
-Status: open
+Status: fixed
 
 Concern:
 
 The receiver-side digest unbundle currently multiplies each RNS limb by the CRT
 lift factor `q / q_j`. The sender-side recursive offline input also applies the
-same lift convention to the retained limb. Denoise/recombine appears to remove
-one lift factor. This raises a paper-vs-implementation question: are both lifts
-intentional representation choices, or is one extra?
+same lift convention to the retained limb. That gives an extra uncompensated
+lift factor in the recursive `gamma == tau` path.
 
 Lucian's concern:
 
-If the receiver lifts its input, then the receiver is multiplying a ciphertext
-by a polynomial with large coefficients. That can overflow the intended noise
-budget. Normal correctness tests passing does not rule this out because they
-mostly test implementation self-consistency and use small/friendly inputs.
+Lucian confirmed that clean-ot has the same issue. The receiver-side lift is
+accounted for by the LENC leaf scaling/de-lift and denoise path. The
+sender-side lift in `rep_offline_sender_input` is not matched for the
+recursive `gamma == tau` branch, giving an unintended extra factor. The issue
+was mostly invisible because the default recursive tests used `tau_hi == 1`.
 
 Current state:
 
-The current port matches clean-ot's apparent convention. We have not changed it
-while waiting for Lucian's read.
+The receiver-side unbundle still lifts one limb, matching the current
+LENC/denoise representation. The sender-side recursive input no longer applies
+the CRT lift in the `gamma == tau` branch; it isolates the selected RNS limb and
+leaves that residue unscaled.
 
 Relevant files:
 
@@ -231,73 +233,69 @@ Relevant files:
   - `seedLabelRepOfflineSenderInput(...)`
 - `LogVoleShrinkExpand.cpp`
   - `shrinkExpandDenoiseComb(...)`
+- `libOTe_Tests/LogVole/tests/test_core.cpp`
+- `libOTe_Tests/LogVole_Tests.h`
 - clean-ot reference: `goldlabel_backend_seal.cpp`
 
 Evidence:
 
-- clean-ot appears to apply the lift in both analogous places.
-- Current tests pass, including recursive tests, but expected-value paths reuse
-  implementation helpers and therefore do not independently validate the TeX
-  representation.
-- A dedicated structural test currently encodes the receiver-side lift
-  convention; that test should be treated as implementation-observation, not as
-  proof that the convention is correct.
+- clean-ot applies the lift in both analogous places.
+- Removing the receiver-side lift breaks the root relation immediately,
+  including the `tau_hi == 1` path.
+- Removing the sender-side recursive lift keeps the protocol tests passing and
+  matches Lucian's assessment that the sender recursive lift was unmatched.
+- A default regression test now checks that
+  `seedLabelRepOfflineSenderInput(..., gamma == tau, ...)` unbundles residues
+  without CRT scaling.
 
 What would close it:
 
-- Lucian confirms that the receiver lift is intended and gives the exact noise
-  argument, or
-- a targeted test demonstrates that the residue-only receiver representation
-  is the TeX-correct one and the current lifted version has inflated noise.
+- Normal LogVole tests pass after the fix.
+- Extended-test build compiles after the fix.
 
-Recommended targeted test:
+Regression tests to keep:
 
-- Under `ENABLE_LOGVOLE_EXTENDED_TESTS`, construct one recursive level with
-  `rho > 1`.
-- Build receiver digest input in two ways:
-  - current lifted RNS representation,
-  - residue-only representation with no `q / q_j` multiplication.
-- Compare both against an independent paper-style recombination/noise
-  calculation that does not call `seedLabelGadgetDecomposeHiAndUnbundle(...)`
-  or `seedLabelRepOfflineSenderInput(...)`.
-- Include larger receiver coefficients, not just the small plaintext-like
-  samples used by normal correctness tests.
+- `LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesResidues`.
+- `LogVole_Core_GdecompHiUnbundleLiftsOneLimbPerOutput`, kept as an extended
+  implementation-shape test for the receiver-side convention.
 
-## LV-AUDIT-006: Golden-seed search must match clean-ot performance semantics
+## LV-AUDIT-006: Golden-seed search domain parity
 
-Status: watch
+Status: fixed
 
 Concern:
 
 The clean-ot implementation searches for sender seed candidates with recursive
 validation. The port should preserve that behavior closely because it affects
-performance and correctness margins.
+performance and correctness margins. The port must also derive candidate ct2
+masks with the same public domain tuple used by online reconstruction.
 
 Current state:
 
 The current port contains recursive golden-seed candidate machinery and was
-audited against clean-ot's structure. Randomness feeding that machinery has been
-changed to avoid small/public secret seeds, but the search shape should remain
-mechanically close to clean-ot.
+audited against clean-ot's structure. Randomness feeding that machinery uses
+public seed material and digest/SID domain separation. Candidate generation now
+passes the same `mu` domain material into `deriveSeedInstanceBlock(...)` as
+`buildHashedCt2(...)`, so `findGoldenSeed(...)` and online ct2 reconstruction
+agree.
 
 Relevant files:
 
 - `LogVoleCore.cpp`
 - clean-ot reference: `goldlabel_protocol.cpp`
 
-What would close it:
+Closure evidence:
 
-- A focused clean-ot parity review of:
-  - candidate ordering,
-  - recursive parent checks,
-  - chunk/instance indexing,
-  - failure behavior,
-  - communication accounting if we choose to expose it.
+- Extended `LogVole_Core_GoldenSeedFindAndValidateCandidate` reconstructs the
+  accepted candidate through `seedLabelSampleCt2FromSeed(...)` and checks it
+  against the stored `mTbkPerSampledPoly`.
+- Extended LogVole suite passes.
 
-Recommended targeted test:
+Regression tests to keep:
 
-- A deterministic public-seed test that forces multiple candidate attempts and
-  checks that accepted candidates match the recursive validity predicate.
+- `LogVole_Core_GoldenSeedFindAndValidateCandidate`.
+- A future stress test can still force multiple candidate attempts and check
+  recursive parent validity under larger instance counts.
 
 ## LV-AUDIT-007: Tests can pass while algebra/noise representation is wrong
 

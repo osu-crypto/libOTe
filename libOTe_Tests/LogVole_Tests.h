@@ -15,6 +15,7 @@
     X(KeyDeriveCore, DeterministicRegressionSeeds) \
     X(KeyDeriveCore, MetadataMismatchRejected) \
     X(KeyDeriveCoproto, HappyPathAndAlgebraicRelation) \
+    X(Core, RepOfflineSenderInputGammaTauUnbundlesResidues) \
     X(LheOps, PublicADeterministic) \
     X(LheOps, Enc1ShapeDeterminismAndColumnDecrypt) \
     X(LheOps, ApplyCt1AndDeriveSkxRelations) \
@@ -41,7 +42,6 @@
     X(Core, SeedLabelAggSumsTauBlocks) \
     X(Core, GdecompHiUnbundleLiftsOneLimbPerOutput) \
     X(Core, RepOfflineSenderInputGammaOneRepeats) \
-    X(Core, RepOfflineSenderInputGammaTauUnbundlesLimbs) \
     X(Core, SeedLabelSampleCt2FromSeedDeterministic) \
     X(Core, SeedLabelDenoiseMatchesShrinkExpandComb) \
     X(Core, RootTruncParamsAndKeyReplication) \

@@ -1761,6 +1761,88 @@ namespace osuCrypto::LogVole
         return true;
     }
 
+    bool prepareRecursiveSenderExpansionLocal(
+        SenderState& state,
+        std::span<const RnsPoly> digests)
+    {
+        u32 tauHi = 0;
+        u32 muHi = 0;
+        if (!computeTauHi(state.mParams, tauHi) ||
+            !computeMuHi(state.mParams, muHi) ||
+            !state.mNextLevelState ||
+            !state.mNextLevelState->mPrecomputedTbk)
+        {
+            return false;
+        }
+
+        const u32 wDoublePrime = computeWDoublePrime(state.mParams, muHi);
+        const u32 wPrime =
+            (state.mParams.mW + state.mParams.mShrinkExpand.mAlpha - 1u) /
+            state.mParams.mShrinkExpand.mAlpha;
+        if (digests.size() != wDoublePrime)
+        {
+            return false;
+        }
+
+        std::vector<RnsPoly> kPrimeHat;
+        std::vector<RnsPoly> kPrime;
+        if (!seedLabelDenoiseTbm(
+                *state.mNextLevelState->mPrecomputedTbk,
+                wPrime,
+                tauHi,
+                state.mParams.mShrinkExpand.mRing,
+                kPrimeHat) ||
+            !seedLabelAgg(
+                kPrimeHat,
+                wDoublePrime,
+                tauHi,
+                state.mParams.mShrinkExpand.mRing,
+                kPrime) ||
+            kPrime.size() != wDoublePrime)
+        {
+            return false;
+        }
+
+        const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
+        std::vector<RnsPoly> finalTbk(state.mParams.mW);
+        if (!detail::runParallelTasks(
+                wDoublePrime,
+                state.mShrinkExpandState.mParams.mNumWorkerThreads,
+                [&](std::size_t taskIdx) {
+                    const auto chunkIdx = static_cast<u32>(taskIdx);
+                    const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
+                    const std::size_t end =
+                        std::min(start + static_cast<std::size_t>(muHi), static_cast<std::size_t>(state.mParams.mW));
+
+                    ShrinkExpandExpandSenderInput expandInput{};
+                    expandInput.mSeed = state.mNextLevelState->mGoldenSeed;
+                    expandInput.mSid = state.mParams.mSessionId;
+                    expandInput.mNonce = instanceBase + chunkIdx;
+                    expandInput.mDigest = digests[chunkIdx];
+                    expandInput.mTbkPrime = kPrime[chunkIdx];
+
+                    ShrinkExpandSenderExpandOutput expandOutput{};
+                    if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
+                        expandOutput.mTbk.size() < end - start)
+                    {
+                        return false;
+                    }
+
+                    for (std::size_t idx = 0; idx < end - start; ++idx)
+                    {
+                        finalTbk[start + idx] = std::move(expandOutput.mTbk[idx]);
+                    }
+                    return true;
+                }))
+        {
+            return false;
+        }
+
+        state.mGoldenSeed = state.mNextLevelState->mGoldenSeed;
+        state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(std::move(finalTbk));
+        return true;
+    }
+
     bool prepareRootOnlineSender(
         SenderState& state,
         const RootDigestMessage& request,
@@ -1946,6 +2028,11 @@ namespace osuCrypto::LogVole
                 receiverPrng,
                 childSenderOut,
                 childReceiverOut))
+        {
+            return false;
+        }
+
+        if (!prepareRecursiveSenderExpansionLocal(sender, digests))
         {
             return false;
         }
@@ -2342,27 +2429,6 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        RingNttContext ctx{};
-        if (!makeContext(ring, ctx))
-        {
-            return false;
-        }
-
-        AlignedUnVec<u64> crtLiftJModQj;
-        resizeFill<u64>(crtLiftJModQj, rho, 1);
-        for (std::size_t j = 0; j < rho; ++j)
-        {
-            u64 crtLift = 1;
-            for (std::size_t k = 0; k < rho; ++k)
-            {
-                if (k != j)
-                {
-                    crtLift = seal::util::multiply_uint_mod(crtLift, ctx.mModuli[k].value(), ctx.mModuli[j]);
-                }
-            }
-            crtLiftJModQj[j] = crtLift;
-        }
-
         std::vector<RnsPoly> inner(static_cast<std::size_t>(rho) * tau);
         std::size_t innerIdx = 0;
         for (u32 i = 0; i < tau; ++i)
@@ -2380,15 +2446,6 @@ namespace osuCrypto::LogVole
                             coeffs + offset,
                             0,
                             static_cast<std::size_t>(ring.mPolyModulusDegree) * sizeof(u64));
-                    }
-                    else
-                    {
-                        for (std::size_t c = 0; c < ring.mPolyModulusDegree; ++c)
-                        {
-                            const std::size_t idx = offset + c;
-                            coeffs[idx] =
-                                seal::util::multiply_uint_mod(coeffs[idx], crtLiftJModQj[j], ctx.mModuli[j]);
-                        }
                     }
                 }
                 inner[innerIdx++] = std::move(poly);
@@ -2610,7 +2667,8 @@ namespace osuCrypto::LogVole
                     seed,
                     params.mSessionId,
                     digest,
-                    static_cast<u64>(instanceIdx));
+                    static_cast<u64>(instanceIdx),
+                    mu);
             }
 
             if (!deriveUniformPolyBatchFromSeedListInplace(
