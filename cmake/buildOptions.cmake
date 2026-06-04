@@ -103,6 +103,7 @@ option(ENABLE_KKRT           "Build the KKRT 1-oo-N OT-Ext protocol." OFF)
 option(ENABLE_PPRF           "Build the PPRF protocol." OFF)
 option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
 option(ENABLE_LOGVOLE        "Build the LogVole protocol." ON)
+option(ENABLE_LOGVOLE_EXTENDED_TESTS "Build extended LogVole protocol tests." OFF)
 
 option(ENABLE_FOLEAGE        "Build the Foleage OLE protocol." OFF)
 

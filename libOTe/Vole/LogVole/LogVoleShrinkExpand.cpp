@@ -358,11 +358,11 @@ namespace osuCrypto::LogVole
 
     std::vector<RnsPoly> sampleUniformBatch(const RingNttContext& ctx, u32 count, PRNG& prng, u64 domainTag)
     {
+        (void)domainTag;
         std::vector<RnsPoly> out(count);
         for (u32 i = 0; i < count; ++i)
         {
-            const u64 nonce = prng.get<u64>();
-            out[i] = deriveUniformPolyFromNonce(ctx, nonce, domainTag, i);
+            out[i] = sampleUniformPoly(ctx, prng);
         }
         return out;
     }
@@ -653,7 +653,6 @@ namespace osuCrypto::LogVole
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        const u64 ct2Nonce = deriveSeedInstanceNonce(input.mSeed, input.mSid, maskDigest, 0);
         thread_local Ct2CacheEntry senderCt2Cache{};
         if (!getOrBuildCachedCt2(
                 ctx,
@@ -661,8 +660,8 @@ namespace osuCrypto::LogVole
                 input.mSeed,
                 input.mSid,
                 maskDigest,
-                0,
-                ct2Nonce,
+                input.mNonce,
+                input.mNonce,
                 senderCt2Cache))
         {
             return false;
@@ -714,7 +713,6 @@ namespace osuCrypto::LogVole
         }
 
         const RnsPoly& maskDigest = input.mMaskDigest.mCoeffs.empty() ? input.mDigest : input.mMaskDigest;
-        const u64 ct2Nonce = deriveSeedInstanceNonce(input.mSeed, input.mSid, maskDigest, 0);
         thread_local Ct2CacheEntry receiverCt2Cache{};
         if (!getOrBuildCachedCt2(
                 ctx,
@@ -722,8 +720,8 @@ namespace osuCrypto::LogVole
                 input.mSeed,
                 input.mSid,
                 maskDigest,
-                0,
-                ct2Nonce,
+                input.mNonce,
+                input.mNonce,
                 receiverCt2Cache))
         {
             return false;

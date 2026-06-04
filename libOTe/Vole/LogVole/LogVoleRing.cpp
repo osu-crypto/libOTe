@@ -3,6 +3,7 @@
 #include "libOTe/Vole/LogVole/LogVoleArithmetic.h"
 
 #include "cryptoTools/Crypto/PRNG.h"
+#include "cryptoTools/Crypto/RandomOracle.h"
 
 #include "seal/util/clipnormal.h"
 #include "seal/util/iterator.h"
@@ -164,6 +165,40 @@ namespace osuCrypto::LogVole
             static const auto factory = seal::UniformRandomGeneratorFactory::DefaultFactory();
 #endif
             return factory;
+        }
+
+        seal::prng_seed_type sealSeedFromPrng(PRNG& prng)
+        {
+            seal::prng_seed_type seed{};
+            prng.get(seed.data(), seed.size());
+            return seed;
+        }
+
+        seal::prng_seed_type sealSeedFromBlock(block seedBlock)
+        {
+            PRNG prng(seedBlock);
+            return sealSeedFromPrng(prng);
+        }
+
+        template<typename T>
+        void roUpdatePod(RandomOracle& ro, const T& value)
+        {
+            ro.Update(&value, 1);
+        }
+
+        block derivePublicSeedBlock(u64 domainTag, u64 value0, u64 value1, u64 value2, u64 value3)
+        {
+            block out{};
+            RandomOracle ro(sizeof(out));
+            constexpr u64 label = 0x4C4F47564F4C4552ull;
+            roUpdatePod(ro, label);
+            roUpdatePod(ro, domainTag);
+            roUpdatePod(ro, value0);
+            roUpdatePod(ro, value1);
+            roUpdatePod(ro, value2);
+            roUpdatePod(ro, value3);
+            ro.Final(out);
+            return out;
         }
 
         struct PendingRingOpsStats
@@ -457,35 +492,34 @@ namespace osuCrypto::LogVole
         return mixed;
     }
 
-    u64 deriveSeedInstanceNonce(
+    block deriveSeedInstanceBlock(
         std::span<const u8> seed,
         u64 sid,
         const RnsPoly& digest,
         u64 instanceIdx,
         u64 fallbackNonce)
     {
-        u64 mixedSeed = deriveDeterministicSeedMaterial(
-            sid, kSeedBytesDomain, fallbackNonce, seed.size(), digest.mCoeffs.size(), 0);
-        constexpr std::size_t chunkBytes = sizeof(u64);
-        for (std::size_t offset = 0, chunkIdx = 0; offset < seed.size(); offset += chunkBytes, ++chunkIdx)
+        block out{};
+        RandomOracle ro(sizeof(out));
+        constexpr u64 label = 0x4C4F47564F4C4354ull;
+        roUpdatePod(ro, label);
+        roUpdatePod(ro, sid);
+        roUpdatePod(ro, fallbackNonce);
+        roUpdatePod(ro, instanceIdx);
+        const u64 seedSize = static_cast<u64>(seed.size());
+        const u64 coeffSize = static_cast<u64>(digest.mCoeffs.size());
+        roUpdatePod(ro, seedSize);
+        roUpdatePod(ro, coeffSize);
+        if (!seed.empty())
         {
-            u64 chunk = 0;
-            const std::size_t available = std::min(chunkBytes, seed.size() - offset);
-            std::memcpy(&chunk, seed.data() + offset, available);
-            const u64 chunkTag =
-                deriveDeterministicSeedMaterial(sid, kSeedBytesDomain, chunkIdx, 0, 0, 0);
-            mixedSeed = combineSeedPublic(mixedSeed ^ combineSeedPublic(chunk ^ chunkTag));
+            ro.Update(seed.data(), seed.size());
         }
-        for (std::size_t idx = 0; idx < digest.mCoeffs.size(); ++idx)
+        if (!digest.mCoeffs.empty())
         {
-            mixedSeed = combineSeedPublic(
-                mixedSeed ^
-                combineSeedPublic(digest.mCoeffs[idx]) ^
-                combineSeedPublic(static_cast<u64>(idx)));
+            ro.Update(digest.mCoeffs.data(), digest.mCoeffs.size());
         }
-
-        return deriveDeterministicSeedMaterial(
-            sid, 0xC720AA55ull, mixedSeed, instanceIdx, fallbackNonce, 0);
+        ro.Final(out);
+        return out;
     }
 
     bool validateRingParams(const RingParams& params)
@@ -1126,28 +1160,36 @@ namespace osuCrypto::LogVole
         return true;
     }
 
-    RnsPoly deriveUniformPolyFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index)
+    RnsPoly deriveUniformPolyFromSeed(const RingNttContext& ctx, block seed, u64 domainTag, u32 index)
     {
         AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
         AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
 
-        const u64 rawSeed = combineSeedPublic(nonce) ^ combineSeedPublic(domainTag) ^ combineSeedPublic(index) ^
-                            combineSeedPublic(ctx.mParams.mPolyModulusDegree) ^
-                            combineSeedPublic(static_cast<u64>(ctx.mParams.mCoeffModulusBits.size()));
-
         RnsPoly out{};
         resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+
+        block polySeed{};
+        RandomOracle ro(sizeof(polySeed));
+        constexpr u64 label = 0x4C4F47564F4C5059ull;
+        roUpdatePod(ro, label);
+        roUpdatePod(ro, seed);
+        roUpdatePod(ro, domainTag);
+        roUpdatePod(ro, index);
+        roUpdatePod(ro, ctx.mParams.mPolyModulusDegree);
+        const u64 modulusCount = static_cast<u64>(ctx.mParams.mCoeffModulusBits.size());
+        roUpdatePod(ro, modulusCount);
+        ro.Final(polySeed);
 
         auto contextData = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
         if (contextData)
         {
-            auto prng = polySamplingPrngFactory()->create({ rawSeed, 0 });
+            auto prng = polySamplingPrngFactory()->create(sealSeedFromBlock(polySeed));
             seal::util::sample_poly_uniform(prng, contextData->parms(), out.mCoeffs.data());
             bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
             return out;
         }
 
-        PRNG rng(block(rawSeed, domainTag ^ index));
+        PRNG rng(polySeed);
         const std::size_t n = ctx.mParams.mPolyModulusDegree;
         for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
         {
@@ -1162,10 +1204,83 @@ namespace osuCrypto::LogVole
         return out;
     }
 
+    RnsPoly deriveUniformPolyFromSeedNtt(const RingNttContext& ctx, block seed, u64 domainTag, u32 index)
+    {
+        RnsPoly out = deriveUniformPolyFromSeed(ctx, seed, domainTag, index);
+        (void)forwardNtt(out, ctx);
+        return out;
+    }
+
+    RnsPoly sampleUniformPoly(const RingNttContext& ctx, PRNG& prng)
+    {
+        RnsPoly out{};
+        resizeZero(out.mCoeffs, ringPolyCoeffCount(ctx.mParams));
+
+        auto contextData = ctx.mContext ? ctx.mContext->key_context_data() : nullptr;
+        if (contextData)
+        {
+            auto sealPrng = polySamplingPrngFactory()->create(sealSeedFromPrng(prng));
+            seal::util::sample_poly_uniform(sealPrng, contextData->parms(), out.mCoeffs.data());
+            bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
+            return out;
+        }
+
+        const std::size_t n = ctx.mParams.mPolyModulusDegree;
+        for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
+        {
+            const u64 mod = ctx.mModuli[modIdx].value();
+            const std::size_t offset = modIdx * n;
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                out.mCoeffs[offset + i] = prng.get<u64>() % mod;
+            }
+        }
+        bumpRingStat(globalRingOpsStats.mPrngPolyCount, tlsRingOpsStats.mPrngPolyCount);
+        return out;
+    }
+
+    RnsPoly sampleUniformPolyNtt(const RingNttContext& ctx, PRNG& prng)
+    {
+        RnsPoly out = sampleUniformPoly(ctx, prng);
+        (void)forwardNtt(out, ctx);
+        return out;
+    }
+
+    RnsPoly deriveUniformPolyFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index)
+    {
+        return deriveUniformPolyFromSeed(
+            ctx,
+            derivePublicSeedBlock(
+                domainTag,
+                nonce,
+                index,
+                ctx.mParams.mPolyModulusDegree,
+                static_cast<u64>(ctx.mParams.mCoeffModulusBits.size())),
+            domainTag,
+            index);
+    }
+
     RnsPoly deriveUniformPolyFromNonceNtt(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index)
     {
         RnsPoly out = deriveUniformPolyFromNonce(ctx, nonce, domainTag, index);
         (void)forwardNtt(out, ctx);
+        return out;
+    }
+
+    std::vector<RnsPoly> deriveUniformPolyBatchFromSeed(
+        const RingNttContext& ctx,
+        block seed,
+        u64 domainTag,
+        u32 count)
+    {
+        AutoTimer totalSamplingTimer(globalTimingStats.mSeedSamplingTimeUs);
+        AutoTimer polySamplingTimer(globalTimingStats.mPolySamplingTimeUs);
+
+        std::vector<RnsPoly> out(count);
+        for (u32 i = 0; i < count; ++i)
+        {
+            out[i] = deriveUniformPolyFromSeed(ctx, seed, domainTag, i);
+        }
         return out;
     }
 
@@ -1182,6 +1297,15 @@ namespace osuCrypto::LogVole
         return out;
     }
 
+    std::vector<RnsPoly> deriveUniformPolyBatchFromSeedNtt(
+        const RingNttContext& ctx,
+        block seed,
+        u64 domainTag,
+        u32 count)
+    {
+        return deriveUniformPolyBatchFromSeed(ctx, seed, domainTag, count);
+    }
+
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonceNtt(
         const RingNttContext& ctx,
         u64 nonce,
@@ -1189,6 +1313,45 @@ namespace osuCrypto::LogVole
         u32 count)
     {
         return deriveUniformPolyBatchFromNonce(ctx, nonce, domainTag, count);
+    }
+
+    bool deriveUniformPolyBatchFromSeedListInplace(
+        const RingNttContext& ctx,
+        std::span<const block> seeds,
+        u64 domainTag,
+        u32 perSeedCount,
+        std::vector<RnsPoly>& out,
+        u32 requestedWorkers)
+    {
+        if (perSeedCount != 0 && seeds.size() > std::numeric_limits<std::size_t>::max() / perSeedCount)
+        {
+            return false;
+        }
+
+        const std::size_t totalCount = seeds.size() * static_cast<std::size_t>(perSeedCount);
+        out.resize(totalCount);
+        (void)requestedWorkers;
+        for (std::size_t seedIdx = 0; seedIdx < seeds.size(); ++seedIdx)
+        {
+            for (u32 polyIdx = 0; polyIdx < perSeedCount; ++polyIdx)
+            {
+                out[seedIdx * static_cast<std::size_t>(perSeedCount) + polyIdx] =
+                    deriveUniformPolyFromSeed(ctx, seeds[seedIdx], domainTag, polyIdx);
+            }
+        }
+        return true;
+    }
+
+    std::vector<RnsPoly> deriveUniformPolyBatchFromSeedList(
+        const RingNttContext& ctx,
+        std::span<const block> seeds,
+        u64 domainTag,
+        u32 perSeedCount,
+        u32 requestedWorkers)
+    {
+        std::vector<RnsPoly> out;
+        (void)deriveUniformPolyBatchFromSeedListInplace(ctx, seeds, domainTag, perSeedCount, out, requestedWorkers);
+        return out;
     }
 
     bool deriveUniformPolyBatchFromNonceListInplace(
@@ -1242,8 +1405,8 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        const u64 rawSeed = combineSeedPublic(seed) ^ combineSeedPublic(streamId);
-        auto prng = seal::UniformRandomGeneratorFactory::DefaultFactory()->create({ rawSeed, 0 });
+        auto prng = seal::UniformRandomGeneratorFactory::DefaultFactory()->create(
+            sealSeedFromBlock(derivePublicSeedBlock(0x4552524F52505247ull, seed, streamId, 0, 0)));
         seal::RandomToStandardAdapter engine(prng);
         seal::util::ClippedNormalDistribution dist(0, noiseStandardDeviation, noiseMaxDeviation);
 
@@ -1278,8 +1441,7 @@ namespace osuCrypto::LogVole
         RnsPoly& poly,
         double noiseStandardDeviation,
         double noiseMaxDeviation,
-        u64 seed,
-        u64 streamId,
+        PRNG& prng,
         const RingNttContext& ctx)
     {
         if (noiseStandardDeviation < 0 || !canonicalizePoly(poly, ctx))
@@ -1293,8 +1455,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        const u64 rawSeed = combineSeedPublic(seed) ^ combineSeedPublic(streamId);
-        auto prng = seal::UniformRandomGeneratorFactory::DefaultFactory()->create({ rawSeed, 0 });
+        auto sealPrng = seal::UniformRandomGeneratorFactory::DefaultFactory()->create(sealSeedFromPrng(prng));
 
         auto& contextData = *contextDataPtr;
         auto& parms = contextData.parms();
@@ -1306,7 +1467,7 @@ namespace osuCrypto::LogVole
             seal::util::allocate_poly(coeffCount, coeffModulusSize, seal::MemoryManager::GetPool());
         seal::util::RNSIter tempIter(temp.get(), coeffCount);
 
-        samplePolyNormal(prng, parms, temp.get(), noiseStandardDeviation, noiseMaxDeviation);
+        samplePolyNormal(sealPrng, parms, temp.get(), noiseStandardDeviation, noiseMaxDeviation);
 
         seal::util::PolyIter destinationIter(poly.mCoeffs.data(), coeffCount, coeffModulusSize);
         seal::util::add_poly_coeffmod(destinationIter[0], tempIter, coeffModulusSize, coeffModulus, destinationIter[0]);

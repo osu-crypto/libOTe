@@ -483,17 +483,16 @@ namespace osuCrypto::LogVole
             return true;
         }
 
-        bool deriveErrorPolyFromNonceNtt(
+        bool sampleErrorPolyNtt(
             const RingNttContext& ctx,
-            u64 seed,
-            u64 streamId,
+            PRNG& prng,
             double noiseStandardDeviation,
             double noiseMaxDeviation,
             RnsPoly& out)
         {
             RnsPoly noise{};
             resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-            if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, seed, streamId, ctx) ||
+            if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, prng, ctx) ||
                 !forwardNtt(noise, ctx))
             {
                 return false;
@@ -1027,8 +1026,7 @@ namespace osuCrypto::LogVole
         {
             for (u32 leaf = 0; leaf < width; ++leaf)
             {
-                const u64 nonce = prng.get<u64>();
-                rLayersNtt[level][leaf] = deriveUniformPolyFromNonceNtt(ctx, nonce, 0x1EC0DEDu, leaf);
+                rLayersNtt[level][leaf] = sampleUniformPolyNtt(ctx, prng);
             }
         }
 
@@ -1085,10 +1083,9 @@ namespace osuCrypto::LogVole
 
                     if (noiseStandardDeviation > 0)
                     {
-                        const u64 noiseSeed = prng.get<u64>();
                         RnsPoly noise{};
                         resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-                        if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, noiseSeed, 0, ctx) ||
+                        if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, prng, ctx) ||
                             !forwardNtt(noise, ctx) ||
                             !ringAddInplace(rowKNtt, noise, ctx))
                         {
@@ -1403,8 +1400,7 @@ namespace osuCrypto::LogVole
         {
             for (u32 leaf = 0; leaf < width; ++leaf)
             {
-                const u64 seed = prng.get<u64>();
-                if (!deriveErrorPolyFromNonceNtt(ctx, seed, 0, noiseStandardDeviation, noiseMaxDeviation, rLayersNtt[level][leaf]))
+                if (!sampleErrorPolyNtt(ctx, prng, noiseStandardDeviation, noiseMaxDeviation, rLayersNtt[level][leaf]))
                 {
                     return false;
                 }
@@ -1498,10 +1494,9 @@ namespace osuCrypto::LogVole
 
                         if (noiseStandardDeviation > 0 && t < activeTau)
                         {
-                            const u64 noiseSeed = prng.get<u64>();
                             RnsPoly noise{};
                             resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-                            if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, noiseSeed, 0, ctx) ||
+                            if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, prng, ctx) ||
                                 !forwardNtt(noise, ctx) ||
                                 !ringAddInplace(rowKNtt, noise, ctx))
                             {

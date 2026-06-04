@@ -254,15 +254,11 @@ namespace
 
         ShrinkExpandExpandSenderInput senderExpandInput{};
         resizeFill<std::uint8_t>(
-            senderExpandInput.mSeed,
+        senderExpandInput.mSeed,
             16,
             static_cast<std::uint8_t>(trunc ? 0x51u : 0x50u));
         senderExpandInput.mDigest = shrink.mDigest;
-        senderExpandInput.mNonce = deriveSeedInstanceNonce(
-            senderExpandInput.mSeed,
-            senderExpandInput.mSid,
-            senderExpandInput.mDigest,
-            0);
+        senderExpandInput.mNonce = 0;
         senderExpandInput.mTbkPrime = tbkPrime;
 
         ShrinkExpandSenderExpandOutput senderExpand{};
@@ -520,11 +516,7 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
     ShrinkExpandExpandSenderInput senderExpandInput{};
     resizeFill<std::uint8_t>(senderExpandInput.mSeed, 16, static_cast<std::uint8_t>(0xA1u));
     senderExpandInput.mDigest = shrink.mDigest;
-    senderExpandInput.mNonce = deriveSeedInstanceNonce(
-        senderExpandInput.mSeed,
-        senderExpandInput.mSid,
-        senderExpandInput.mDigest,
-        0);
+    senderExpandInput.mNonce = 0;
     senderExpandInput.mTbkPrime = tbkPrime;
 
     ShrinkExpandSenderExpandOutput senderExpand{};

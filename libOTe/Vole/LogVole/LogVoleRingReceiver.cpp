@@ -483,11 +483,7 @@ namespace osuCrypto::LogVole
                 ShrinkExpandExpandReceiverInput expandInput{};
                 expandInput.mSeed = childOutput.mSeed;
                 expandInput.mSid = input.mSid;
-                expandInput.mNonce = deriveSeedInstanceNonce(
-                    childOutput.mSeed,
-                    input.mSid,
-                    digests[chunkIdx],
-                    instanceBase + chunkIdx);
+                expandInput.mNonce = instanceBase + chunkIdx;
                 expandInput.mDigest = digests[chunkIdx];
                 expandInput.mSkX = skX[chunkIdx];
                 expandInput.mTree = trees[chunkIdx];

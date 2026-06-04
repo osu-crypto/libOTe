@@ -1036,7 +1036,7 @@ void LogVole_Core_RootOnlineLocalFlow(const oc::CLP&)
     senderExpandInput.mSeed = response.mSeed;
     senderExpandInput.mDigest = digestState.mDRt;
     senderExpandInput.mMaskDigest = digestState.mDPrime;
-    senderExpandInput.mNonce = deriveSeedInstanceNonce(response.mSeed, params.mSessionId, digestState.mDPrime, 0);
+    senderExpandInput.mNonce = 0;
     senderExpandInput.mTbkPrime = senderKey;
 
     ShrinkExpandSenderExpandOutput senderExpand{};
@@ -1153,7 +1153,7 @@ void LogVole_Core_RootOnlineLocalRelation(const oc::CLP&)
     senderExpandInput.mSeed = response.mSeed;
     senderExpandInput.mDigest = digestState.mDRt;
     senderExpandInput.mMaskDigest = digestState.mDPrime;
-    senderExpandInput.mNonce = deriveSeedInstanceNonce(response.mSeed, params.mSessionId, digestState.mDPrime, 0);
+    senderExpandInput.mNonce = 0;
     senderExpandInput.mTbkPrime = senderKey;
 
     ShrinkExpandSenderExpandOutput senderExpand{};

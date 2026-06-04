@@ -2,6 +2,8 @@
 
 #include "libOTe/Vole/LogVole/LogVoleTypes.h"
 
+#include "cryptoTools/Crypto/PRNG.h"
+
 #include "seal/seal.h"
 
 #include <atomic>
@@ -175,11 +177,25 @@ namespace osuCrypto::LogVole
         RingTensor& out,
         u32 requestedWorkers = 1);
 
+    RnsPoly deriveUniformPolyFromSeed(const RingNttContext& ctx, block seed, u64 domainTag, u32 index);
+    RnsPoly deriveUniformPolyFromSeedNtt(const RingNttContext& ctx, block seed, u64 domainTag, u32 index);
+    RnsPoly sampleUniformPoly(const RingNttContext& ctx, PRNG& prng);
+    RnsPoly sampleUniformPolyNtt(const RingNttContext& ctx, PRNG& prng);
     RnsPoly deriveUniformPolyFromNonce(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index);
     RnsPoly deriveUniformPolyFromNonceNtt(const RingNttContext& ctx, u64 nonce, u64 domainTag, u32 index);
+    std::vector<RnsPoly> deriveUniformPolyBatchFromSeed(
+        const RingNttContext& ctx,
+        block seed,
+        u64 domainTag,
+        u32 count);
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonce(
         const RingNttContext& ctx,
         u64 nonce,
+        u64 domainTag,
+        u32 count);
+    std::vector<RnsPoly> deriveUniformPolyBatchFromSeedNtt(
+        const RingNttContext& ctx,
+        block seed,
         u64 domainTag,
         u32 count);
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonceNtt(
@@ -187,6 +203,19 @@ namespace osuCrypto::LogVole
         u64 nonce,
         u64 domainTag,
         u32 count);
+    std::vector<RnsPoly> deriveUniformPolyBatchFromSeedList(
+        const RingNttContext& ctx,
+        std::span<const block> seeds,
+        u64 domainTag,
+        u32 perSeedCount,
+        u32 requestedWorkers = 0);
+    bool deriveUniformPolyBatchFromSeedListInplace(
+        const RingNttContext& ctx,
+        std::span<const block> seeds,
+        u64 domainTag,
+        u32 perSeedCount,
+        std::vector<RnsPoly>& out,
+        u32 requestedWorkers = 0);
     std::vector<RnsPoly> deriveUniformPolyBatchFromNonceList(
         const RingNttContext& ctx,
         std::span<const u64> nonces,
@@ -209,7 +238,7 @@ namespace osuCrypto::LogVole
         u64 value1 = 0,
         u64 value2 = 0,
         u64 value3 = 0);
-    u64 deriveSeedInstanceNonce(
+    block deriveSeedInstanceBlock(
         std::span<const u8> seed,
         u64 sid,
         const RnsPoly& digest,
@@ -227,7 +256,6 @@ namespace osuCrypto::LogVole
         RnsPoly& poly,
         double noiseStandardDeviation,
         double noiseMaxDeviation,
-        u64 seed,
-        u64 streamId,
+        PRNG& prng,
         const RingNttContext& ctx);
 }

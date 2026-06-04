@@ -410,7 +410,7 @@ namespace osuCrypto::LogVole
                 return false;
             }
 
-            out = deriveUniformPolyFromNonce(ctx, prng.get<u64>(), 0x52544B50u, 0);
+            out = sampleUniformPoly(ctx, prng);
             return true;
         }
 
@@ -701,8 +701,7 @@ namespace osuCrypto::LogVole
             resizeZero(poly.mCoeffs, ringPolyCoeffCount(ctx.mParams));
             if (sigma > 0.0)
             {
-                const u64 noiseSeed = prng.get<u64>();
-                if (!addPolyError(poly, sigma, maxDeviation, noiseSeed, 0, ctx))
+                if (!addPolyError(poly, sigma, maxDeviation, prng, ctx))
                 {
                     return false;
                 }
@@ -852,10 +851,9 @@ namespace osuCrypto::LogVole
 
                 if (noiseStandardDeviation > 0.0)
                 {
-                    const u64 noiseSeed = prng.get<u64>();
                     RnsPoly noise{};
                     resizeZero(noise.mCoeffs, ringPolyCoeffCount(ctx.mParams));
-                    if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, noiseSeed, 0, ctx) ||
+                    if (!addPolyError(noise, noiseStandardDeviation, noiseMaxDeviation, prng, ctx) ||
                         !forwardNtt(noise, ctx) ||
                         !ringAddInplace(cellNtt, noise, ctx))
                     {
@@ -1985,11 +1983,7 @@ namespace osuCrypto::LogVole
                     ShrinkExpandExpandReceiverInput expandInput{};
                     expandInput.mSeed = childReceiverOut.mSeed;
                     expandInput.mSid = input.mSid;
-                    expandInput.mNonce = deriveSeedInstanceNonce(
-                        childReceiverOut.mSeed,
-                        input.mSid,
-                        digests[chunkIdx],
-                        instanceBase + chunkIdx);
+                    expandInput.mNonce = instanceBase + chunkIdx;
                     expandInput.mDigest = digests[chunkIdx];
                     expandInput.mSkX = skX[chunkIdx];
                     expandInput.mTree = trees[chunkIdx];
@@ -2040,7 +2034,7 @@ namespace osuCrypto::LogVole
         ShrinkExpandExpandReceiverInput expandInput{};
         expandInput.mSeed = response.mSeed;
         expandInput.mSid = input.mSid;
-        expandInput.mNonce = deriveSeedInstanceNonce(response.mSeed, input.mSid, digestState.mDPrime, 0);
+        expandInput.mNonce = 0;
         expandInput.mX = input.mX;
         expandInput.mDigest = digestState.mDRt;
         expandInput.mMaskDigest = digestState.mDPrime;
@@ -2603,7 +2597,7 @@ namespace osuCrypto::LogVole
 
         constexpr int maxSeedAttempts = 100;
         std::vector<RnsPoly> attemptCt2PerSampledPoly(sampledPolyCountSize);
-        AlignedUnVec<u64> attemptInstanceNonces(sk2PerInstance.size());
+        std::vector<block> attemptInstanceSeeds(sk2PerInstance.size());
 
         for (int attempt = 0; attempt < maxSeedAttempts; ++attempt)
         {
@@ -2612,17 +2606,16 @@ namespace osuCrypto::LogVole
 
             for (std::size_t instanceIdx = 0; instanceIdx < sk2PerInstance.size(); ++instanceIdx)
             {
-                const u64 seedNonce = deriveSeedInstanceNonce(
+                attemptInstanceSeeds[instanceIdx] = deriveSeedInstanceBlock(
                     seed,
                     params.mSessionId,
                     digest,
                     static_cast<u64>(instanceIdx));
-                attemptInstanceNonces[instanceIdx] = seedNonce;
             }
 
-            if (!deriveUniformPolyBatchFromNonceListInplace(
+            if (!deriveUniformPolyBatchFromSeedListInplace(
                     ctx,
-                    attemptInstanceNonces,
+                    attemptInstanceSeeds,
                     0xC720AA55u,
                     mu,
                     attemptCt2PerSampledPoly,

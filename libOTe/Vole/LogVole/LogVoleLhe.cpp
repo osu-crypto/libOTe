@@ -243,8 +243,7 @@ namespace osuCrypto::LogVole
 
                 if (noiseStandardDeviation > 0)
                 {
-                    const u64 noiseSeed = prng->get<u64>();
-                    if (!addPolyError(cNtt, noiseStandardDeviation, noiseMaxDeviation, noiseSeed, 0, ctx))
+                    if (!addPolyError(cNtt, noiseStandardDeviation, noiseMaxDeviation, *prng, ctx))
                     {
                         return false;
                     }
@@ -427,8 +426,8 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        const u64 ct2Nonce = deriveSeedInstanceNonce(seed, sid, digest, instanceIdx, mu);
-        out = deriveUniformPolyBatchFromNonce(ctx, ct2Nonce, 0xC720AA55u, mu);
+        const block ct2Seed = deriveSeedInstanceBlock(seed, sid, digest, instanceIdx, mu);
+        out = deriveUniformPolyBatchFromSeed(ctx, ct2Seed, 0xC720AA55u, mu);
         return true;
     }
 

@@ -232,11 +232,7 @@ namespace osuCrypto::LogVole
                         ShrinkExpandExpandSenderInput expandInput{};
                         expandInput.mSeed = state.mNextLevelState->mGoldenSeed;
                         expandInput.mSid = state.mParams.mSessionId;
-                        expandInput.mNonce = deriveSeedInstanceNonce(
-                            expandInput.mSeed,
-                            expandInput.mSid,
-                            digests[chunkIdx],
-                            instanceBase + chunkIdx);
+                        expandInput.mNonce = instanceBase + chunkIdx;
                         expandInput.mDigest = digests[chunkIdx];
                         expandInput.mTbkPrime = kPrime[chunkIdx];
 
