@@ -188,7 +188,8 @@ namespace osuCrypto::LogVole
         const SenderState& state,
         const RootDigestMessage& request,
         PRNG& prng,
-        RootResponseMessage& response);
+        RootResponseMessage& response,
+        const SenderState* precomputeRoot = nullptr);
 
     bool finalizeRootResponseReceiver(
         ReceiverState& state,

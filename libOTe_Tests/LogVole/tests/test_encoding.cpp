@@ -208,6 +208,42 @@ void LogVole_Encoding_ShrinkExpandOfflineMessageDoesNotLeakNoiseRoot(const oc::C
     expect_tensor_equal(decoded.mLacct.mCt, message.mLacct.mCt);
 }
 
+void LogVole_Encoding_ShrinkExpandOfflineMessageRejectsInvalidMode(const oc::CLP&)
+{
+    const RingParams ring = make_ring();
+
+    ShrinkExpandOfflineMessage message{};
+    message.mParams.mRing = ring;
+    message.mParams.mPlaintextModulusBits = 18;
+    message.mParams.mAlpha = 2;
+    message.mParams.mMu = 3;
+    message.mParams.mGadgetLogBase = 7;
+    message.mParams.mTau = 2;
+    message.mParams.mTruncateOneGadgetDigit = true;
+    message.mParams.mLeafInputsAreGadget = true;
+    message.mParams.mMode = ShrinkExpandMode::FullNoise;
+    message.mParams.mNoiseBound = 5;
+    message.mCt1 = make_tensor(ring, message.mParams.mMu, message.mParams.mTau, 7000);
+    message.mLacct.mWidthPadded = 4;
+    message.mLacct.mLevels = 2;
+    message.mLacct.mCt = make_tensor(ring, 8, 4, 8000);
+
+    auto encoded = encode(message);
+    const std::size_t ringParamsSize =
+        sizeof(std::uint32_t) +
+        sizeof(std::uint32_t) +
+        ring.mCoeffModulusBits.size() * sizeof(std::uint16_t);
+    const std::size_t modeOffset =
+        ringParamsSize +
+        5u * sizeof(std::uint32_t) +
+        2u * sizeof(std::uint8_t);
+    LOGVOLE_REQUIRE_LT(modeOffset, encoded.size());
+    encoded[modeOffset] = 0xFF;
+
+    ShrinkExpandOfflineMessage decoded{};
+    LOGVOLE_EXPECT_FALSE(decode(encoded, decoded));
+}
+
 void LogVole_Encoding_RootDigestAndResponseRoundTrip(const oc::CLP&)
 {
     RootDigestMessage digest{};
@@ -238,6 +274,7 @@ void LogVole_Encoding_AllMessageRoundTrips(const oc::CLP& cmd)
     LogVole_Encoding_KeyDeriveResponseRoundTrip(cmd);
     LogVole_Encoding_SeedMessageRoundTrip(cmd);
     LogVole_Encoding_ShrinkExpandOfflineMessageDoesNotLeakNoiseRoot(cmd);
+    LogVole_Encoding_ShrinkExpandOfflineMessageRejectsInvalidMode(cmd);
     LogVole_Encoding_RootOfflineMessageRoundTrip(cmd);
     LogVole_Encoding_RootDigestAndResponseRoundTrip(cmd);
 }

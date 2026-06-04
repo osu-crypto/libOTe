@@ -96,8 +96,8 @@ namespace osuCrypto
 
             auto x = makeLogVoleExampleX(w, modulus);
             auto offlineSockets = coproto::LocalAsyncSocket::makePair();
-            PRNG senderPrng(block(0x4C6F67566F6C6541ull, 0));
-            PRNG receiverPrng(block(0x4C6F67566F6C6542ull, 0));
+            PRNG senderPrng(sysRandomSeed());
+            PRNG receiverPrng(sysRandomSeed());
 
             Timer timer;
             const auto begin = timer.setTimePoint("logvole.local.begin");
@@ -173,7 +173,7 @@ namespace osuCrypto
         if (role == Role::Sender)
         {
             LogVole::AlignedUnVec<u64> b(w);
-            PRNG prng(block(0x4C6F67566F6C6553ull, 0));
+            PRNG prng(sysRandomSeed());
             // Split-role mode mirrors the local example over an asio socket.
             // The receiver must use the same n, plaintext bit count and port.
             cp::sync_wait(sender.offline(delta, prng, chl));
@@ -193,7 +193,7 @@ namespace osuCrypto
         {
             auto x = makeLogVoleExampleX(w, modulus);
             LogVole::AlignedUnVec<u64> a(w);
-            PRNG prng(block(0x4C6F67566F6C6552ull, 0));
+            PRNG prng(sysRandomSeed());
             // The receiver chooses x locally; the sender receives only the
             // corresponding keys for its Delta.
             cp::sync_wait(receiver.offline(chl));

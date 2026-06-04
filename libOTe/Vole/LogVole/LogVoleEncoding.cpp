@@ -330,6 +330,23 @@ namespace osuCrypto::LogVole
             return offset == payload.size();
         }
 
+        bool readShrinkExpandMode(u8 value, ShrinkExpandMode& mode)
+        {
+            switch (value)
+            {
+            case static_cast<u8>(ShrinkExpandMode::FullNoise):
+                mode = ShrinkExpandMode::FullNoise;
+                return true;
+#ifdef LIBOTE_LOGVOLE_ENABLE_INSECURE_NOISELESS
+            case static_cast<u8>(ShrinkExpandMode::Deterministic):
+                mode = ShrinkExpandMode::Deterministic;
+                return true;
+#endif
+            default:
+                return false;
+            }
+        }
+
         bool readParams(std::span<const u8> payload, u64& offset, ShrinkExpandParams& params)
         {
             u8 truncate = 0;
@@ -351,8 +368,7 @@ namespace osuCrypto::LogVole
 
             params.mTruncateOneGadgetDigit = truncate != 0;
             params.mLeafInputsAreGadget = leafInputsAreGadget != 0;
-            params.mMode = static_cast<ShrinkExpandMode>(mode);
-            return true;
+            return readShrinkExpandMode(mode, params.mMode);
         }
     }
 

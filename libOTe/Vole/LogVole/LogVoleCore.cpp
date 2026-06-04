@@ -506,6 +506,43 @@ namespace osuCrypto::LogVole
             return countSeedInstances(*state.mNextLevelState) + computeWDoublePrime(state.mParams, muHi);
         }
 
+        const RnsPoly* resolveRootMaskDigest(const SenderState& state)
+        {
+            if (state.mRootDPrimeRt)
+            {
+                return state.mRootDPrimeRt.get();
+            }
+
+            return state.mNextLevelState ? resolveRootMaskDigest(*state.mNextLevelState) : nullptr;
+        }
+
+        const RnsPoly* resolveRootMaskDigest(const ReceiverState& state)
+        {
+            if (state.mRootDPrimeRt)
+            {
+                return state.mRootDPrimeRt.get();
+            }
+
+            return state.mNextLevelState ? resolveRootMaskDigest(*state.mNextLevelState) : nullptr;
+        }
+
+        struct RecursiveSeedEvalOutput
+        {
+            bool mValid = false;
+            std::vector<RnsPoly> mTbk;
+        };
+
+        bool ensureSenderPrecomputeImpl(
+            const SenderState& state,
+            PRNG& prng);
+
+        Params makeSeedParams(const Params& params, const ShrinkExpandParams& seParams)
+        {
+            Params seedParams = params;
+            seedParams.mShrinkExpand = seParams;
+            return seedParams;
+        }
+
         void applySessionId(SenderState& state, u64 sid)
         {
             state.mParams.mSessionId = sid;
@@ -604,10 +641,14 @@ namespace osuCrypto::LogVole
 
     double rootNoiseSigma(const ShrinkExpandParams& params, double factor)
     {
+#ifdef LIBOTE_LOGVOLE_ENABLE_INSECURE_NOISELESS
         if (params.mMode != ShrinkExpandMode::FullNoise)
         {
             return 0.0;
         }
+#else
+        (void)params;
+#endif
 
         constexpr double stdS = 3.19;
         return stdS * ((factor > 1.0) ? factor : 1.0);
@@ -1329,7 +1370,8 @@ namespace osuCrypto::LogVole
         const SenderState& state,
         const RootDigestMessage& request,
         PRNG& prng,
-        RootResponseMessage& response)
+        RootResponseMessage& response,
+        const SenderState* precomputeRoot)
     {
         u32 tauHi = 0;
         if (!computeTauHi(state.mParams, tauHi) ||
@@ -1362,36 +1404,15 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        GoldenSeedSearchOutput seedSearch{};
-        if (!findGoldenSeed(state.mParams, std::vector<RnsPoly>{ kPrime }, dPrime, prng, seedSearch))
-        {
-            return false;
-        }
-
         state.mRootKPrimeRt = std::make_shared<RnsPoly>(kPrime);
         state.mRootDPrimeRt = std::make_shared<RnsPoly>(dPrime);
 
-        RnsPoly rootKey{};
-        if (!computeRootSenderKey(state, seedSearch.mSeed, rootKey))
+        const SenderState& precomputeState = precomputeRoot ? *precomputeRoot : state;
+        if (!ensureSenderPrecomputeImpl(precomputeState, prng) ||
+            state.mGoldenSeed.empty())
         {
             return false;
         }
-
-        ShrinkExpandExpandSenderInput expandInput{};
-        expandInput.mSeed = seedSearch.mSeed;
-        expandInput.mSid = state.mParams.mSessionId;
-        expandInput.mDigest = dPrime;
-        expandInput.mMaskDigest = dPrime;
-        expandInput.mTbkPrime = std::move(rootKey);
-
-        ShrinkExpandSenderExpandOutput expandOutput{};
-        if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput))
-        {
-            return false;
-        }
-
-        state.mGoldenSeed = seedSearch.mSeed;
-        state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(std::move(expandOutput.mTbk));
 
         RootResponseMessage next{};
         assignRange(next.mSeed, state.mGoldenSeed.begin(), state.mGoldenSeed.end());
@@ -1454,6 +1475,233 @@ namespace osuCrypto::LogVole
 
     namespace
     {
+        bool evaluateSenderSeedCandidate(
+            const SenderState& state,
+            std::span<const u8> seed,
+            RecursiveSeedEvalOutput& out)
+        {
+            u32 tauHi = 0;
+            u32 muHi = 0;
+            if (!computeTauHi(state.mParams, tauHi) ||
+                !computeMuHi(state.mParams, muHi) ||
+                seed.empty())
+            {
+                return false;
+            }
+
+            const u32 alpha = state.mParams.mShrinkExpand.mAlpha;
+            const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
+            if (rho == 0)
+            {
+                return false;
+            }
+
+            const RecursiveMode mode =
+                evalRecursiveMode(state.mParams.mW, alpha, tauHi, rho);
+            if (mode == RecursiveMode::Root)
+            {
+                if (state.mParams.mW != muHi ||
+                    !state.mRootKPrimeRt ||
+                    !state.mRootDPrimeRt)
+                {
+                    return false;
+                }
+
+                RnsPoly rootKey{};
+                if (!computeRootSenderKey(state, seed, rootKey))
+                {
+                    return false;
+                }
+
+                ShrinkExpandExpandSenderInput expandInput{};
+                assignRange(expandInput.mSeed, seed.begin(), seed.end());
+                expandInput.mSid = state.mParams.mSessionId;
+                expandInput.mDigest = *state.mRootDPrimeRt;
+                expandInput.mMaskDigest = *state.mRootDPrimeRt;
+                expandInput.mTbkPrime = rootKey;
+
+                ShrinkExpandSenderExpandOutput expandOutput{};
+                const Params seedParams = makeSeedParams(state.mParams, state.mShrinkExpandState.mParams);
+                bool candidateOk = false;
+                if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
+                    !validateGoldenSeedCandidate(seedParams, expandOutput.mTbk, candidateOk))
+                {
+                    return false;
+                }
+
+                RecursiveSeedEvalOutput next{};
+                if (!candidateOk)
+                {
+                    out = std::move(next);
+                    return true;
+                }
+
+                state.mGoldenSeed = expandInput.mSeed;
+                next.mValid = true;
+                next.mTbk = std::move(expandOutput.mTbk);
+                out = std::move(next);
+                return true;
+            }
+
+            if (!state.mNextLevelState)
+            {
+                return false;
+            }
+
+            RecursiveSeedEvalOutput childEval{};
+            if (!evaluateSenderSeedCandidate(*state.mNextLevelState, seed, childEval))
+            {
+                return false;
+            }
+            if (!childEval.mValid)
+            {
+                out = RecursiveSeedEvalOutput{};
+                return true;
+            }
+
+            const u32 wPrime =
+                (state.mParams.mW + state.mParams.mShrinkExpand.mAlpha - 1u) /
+                state.mParams.mShrinkExpand.mAlpha;
+            const u32 wDoublePrime = computeWDoublePrime(state.mParams, muHi);
+            const RnsPoly* rootMaskDigest = resolveRootMaskDigest(state);
+            if (wDoublePrime == 0 || rootMaskDigest == nullptr)
+            {
+                return false;
+            }
+
+            std::vector<RnsPoly> kPrimeHat;
+            std::vector<RnsPoly> kPrime;
+            if (!seedLabelDenoiseTbm(
+                    childEval.mTbk,
+                    wPrime,
+                    tauHi,
+                    state.mParams.mShrinkExpand.mRing,
+                    kPrimeHat) ||
+                !seedLabelAgg(
+                    kPrimeHat,
+                    wDoublePrime,
+                    tauHi,
+                    state.mParams.mShrinkExpand.mRing,
+                    kPrime) ||
+                kPrime.size() != wDoublePrime)
+            {
+                return false;
+            }
+
+            const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
+            std::vector<RnsPoly> finalTbk(state.mParams.mW);
+            std::vector<RnsPoly> sampledTbk(static_cast<std::size_t>(wDoublePrime) * muHi);
+            if (!detail::runParallelTasks(
+                    wDoublePrime,
+                    state.mShrinkExpandState.mParams.mNumWorkerThreads,
+                    [&](std::size_t taskIdx) {
+                        const auto chunkIdx = static_cast<u32>(taskIdx);
+                        const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
+                        const std::size_t end =
+                            std::min(start + static_cast<std::size_t>(muHi), static_cast<std::size_t>(state.mParams.mW));
+
+                        ShrinkExpandExpandSenderInput expandInput{};
+                        assignRange(expandInput.mSeed, seed.begin(), seed.end());
+                        expandInput.mSid = state.mParams.mSessionId;
+                        expandInput.mNonce = instanceBase + chunkIdx;
+                        expandInput.mDigest = *rootMaskDigest;
+                        expandInput.mMaskDigest = *rootMaskDigest;
+                        expandInput.mTbkPrime = kPrime[chunkIdx];
+
+                        ShrinkExpandSenderExpandOutput expandOutput{};
+                        if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
+                            expandOutput.mTbk.size() != muHi)
+                        {
+                            return false;
+                        }
+
+                        const std::size_t sampledStart = static_cast<std::size_t>(chunkIdx) * muHi;
+                        for (std::size_t idx = 0; idx < expandOutput.mTbk.size(); ++idx)
+                        {
+                            sampledTbk[sampledStart + idx] = expandOutput.mTbk[idx];
+                        }
+
+                        for (std::size_t idx = 0; idx < end - start; ++idx)
+                        {
+                            finalTbk[start + idx] = std::move(expandOutput.mTbk[idx]);
+                        }
+                        return true;
+                    }))
+            {
+                return false;
+            }
+
+            bool candidateOk = false;
+            const Params seedParams = makeSeedParams(state.mParams, state.mShrinkExpandState.mParams);
+            if (!validateGoldenSeedCandidate(seedParams, sampledTbk, candidateOk))
+            {
+                return false;
+            }
+
+            RecursiveSeedEvalOutput next{};
+            if (!candidateOk)
+            {
+                out = std::move(next);
+                return true;
+            }
+
+            next.mValid = true;
+            next.mTbk = std::move(finalTbk);
+            out = std::move(next);
+            return true;
+        }
+
+        bool findRecursiveGoldenSeedAndEvaluate(
+            const SenderState& state,
+            PRNG& prng,
+            RecursiveSeedEvalOutput& out)
+        {
+            constexpr int maxSeedAttempts = 100;
+            for (int attempt = 0; attempt < maxSeedAttempts; ++attempt)
+            {
+                AlignedUnVec<u8> seed(16);
+                prng.get(seed.data(), seed.size());
+
+                RecursiveSeedEvalOutput eval{};
+                if (!evaluateSenderSeedCandidate(state, seed, eval))
+                {
+                    return false;
+                }
+                if (!eval.mValid)
+                {
+                    continue;
+                }
+
+                state.mGoldenSeed = std::move(seed);
+                out = std::move(eval);
+                return true;
+            }
+
+            return false;
+        }
+
+        bool ensureSenderPrecomputeImpl(
+            const SenderState& state,
+            PRNG& prng)
+        {
+            if (state.mPrecomputedTbk)
+            {
+                return true;
+            }
+
+            RecursiveSeedEvalOutput eval{};
+            const bool ok = state.mGoldenSeed.empty() ?
+                findRecursiveGoldenSeedAndEvaluate(state, prng, eval) :
+                evaluateSenderSeedCandidate(state, state.mGoldenSeed, eval);
+            if (!ok || !eval.mValid)
+            {
+                return false;
+            }
+
+            state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(std::move(eval.mTbk));
+            return true;
+        }
+
         bool shrinkExpandParamsEqual(const ShrinkExpandParams& lhs, const ShrinkExpandParams& rhs)
         {
             return lhs.mRing == rhs.mRing &&
@@ -1765,81 +2013,20 @@ namespace osuCrypto::LogVole
         SenderState& state,
         std::span<const RnsPoly> digests)
     {
-        u32 tauHi = 0;
         u32 muHi = 0;
-        if (!computeTauHi(state.mParams, tauHi) ||
-            !computeMuHi(state.mParams, muHi) ||
-            !state.mNextLevelState ||
-            !state.mNextLevelState->mPrecomputedTbk)
+        if (!computeMuHi(state.mParams, muHi) ||
+            !state.mNextLevelState)
         {
             return false;
         }
 
         const u32 wDoublePrime = computeWDoublePrime(state.mParams, muHi);
-        const u32 wPrime =
-            (state.mParams.mW + state.mParams.mShrinkExpand.mAlpha - 1u) /
-            state.mParams.mShrinkExpand.mAlpha;
-        if (digests.size() != wDoublePrime)
+        if (digests.size() != wDoublePrime ||
+            !state.mPrecomputedTbk)
         {
             return false;
         }
 
-        std::vector<RnsPoly> kPrimeHat;
-        std::vector<RnsPoly> kPrime;
-        if (!seedLabelDenoiseTbm(
-                *state.mNextLevelState->mPrecomputedTbk,
-                wPrime,
-                tauHi,
-                state.mParams.mShrinkExpand.mRing,
-                kPrimeHat) ||
-            !seedLabelAgg(
-                kPrimeHat,
-                wDoublePrime,
-                tauHi,
-                state.mParams.mShrinkExpand.mRing,
-                kPrime) ||
-            kPrime.size() != wDoublePrime)
-        {
-            return false;
-        }
-
-        const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
-        std::vector<RnsPoly> finalTbk(state.mParams.mW);
-        if (!detail::runParallelTasks(
-                wDoublePrime,
-                state.mShrinkExpandState.mParams.mNumWorkerThreads,
-                [&](std::size_t taskIdx) {
-                    const auto chunkIdx = static_cast<u32>(taskIdx);
-                    const std::size_t start = static_cast<std::size_t>(chunkIdx) * muHi;
-                    const std::size_t end =
-                        std::min(start + static_cast<std::size_t>(muHi), static_cast<std::size_t>(state.mParams.mW));
-
-                    ShrinkExpandExpandSenderInput expandInput{};
-                    expandInput.mSeed = state.mNextLevelState->mGoldenSeed;
-                    expandInput.mSid = state.mParams.mSessionId;
-                    expandInput.mNonce = instanceBase + chunkIdx;
-                    expandInput.mDigest = digests[chunkIdx];
-                    expandInput.mTbkPrime = kPrime[chunkIdx];
-
-                    ShrinkExpandSenderExpandOutput expandOutput{};
-                    if (!shrinkExpandExpandSender(state.mShrinkExpandState, expandInput, expandOutput) ||
-                        expandOutput.mTbk.size() < end - start)
-                    {
-                        return false;
-                    }
-
-                    for (std::size_t idx = 0; idx < end - start; ++idx)
-                    {
-                        finalTbk[start + idx] = std::move(expandOutput.mTbk[idx]);
-                    }
-                    return true;
-                }))
-        {
-            return false;
-        }
-
-        state.mGoldenSeed = state.mNextLevelState->mGoldenSeed;
-        state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(std::move(finalTbk));
         return true;
     }
 
@@ -1864,6 +2051,19 @@ namespace osuCrypto::LogVole
         return true;
     }
 
+    namespace
+    {
+        bool runLocalOnlineImpl(
+            SenderState& sender,
+            SenderState& precomputeRoot,
+            ReceiverState& receiver,
+            const ReceiverOnlineInput& input,
+            PRNG& senderPrng,
+            PRNG& receiverPrng,
+            SenderOnlineOutput& senderOut,
+            ReceiverOnlineOutput& receiverOut);
+    }
+
     bool runLocalOnline(
         SenderState& sender,
         ReceiverState& receiver,
@@ -1872,6 +2072,21 @@ namespace osuCrypto::LogVole
         PRNG& receiverPrng,
         SenderOnlineOutput& senderOut,
         ReceiverOnlineOutput& receiverOut)
+    {
+        return runLocalOnlineImpl(sender, sender, receiver, input, senderPrng, receiverPrng, senderOut, receiverOut);
+    }
+
+    namespace
+    {
+        bool runLocalOnlineImpl(
+            SenderState& sender,
+            SenderState& precomputeRoot,
+            ReceiverState& receiver,
+            const ReceiverOnlineInput& input,
+            PRNG& senderPrng,
+            PRNG& receiverPrng,
+            SenderOnlineOutput& senderOut,
+            ReceiverOnlineOutput& receiverOut)
     {
         u32 tauHi = 0;
         u32 muHi = 0;
@@ -1901,7 +2116,7 @@ namespace osuCrypto::LogVole
             RootDigestMessage digestMessage{};
             RootResponseMessage response{};
             if (!prepareRootDigestReceiver(receiver, input.mX, receiverPrng, digestState, digestMessage) ||
-                !prepareRootResponseSender(sender, digestMessage, senderPrng, response) ||
+                !prepareRootResponseSender(sender, digestMessage, senderPrng, response, &precomputeRoot) ||
                 !finalizeRootOnlineReceiver(receiver, input, digestState, response, receiverOut))
             {
                 return false;
@@ -1909,10 +2124,17 @@ namespace osuCrypto::LogVole
 
             SenderOnlineOutput nextSender{};
             nextSender.mSeed = response.mSeed;
-            nextSender.mTbk = *sender.mPrecomputedTbk;
-            if (nextSender.mTbk.size() > receiverOut.mTbm.size())
+            if (sender.mPrecomputedTbk)
             {
-                nextSender.mTbk.resize(receiverOut.mTbm.size());
+                nextSender.mTbk = *sender.mPrecomputedTbk;
+                if (nextSender.mTbk.size() > receiverOut.mTbm.size())
+                {
+                    nextSender.mTbk.resize(receiverOut.mTbm.size());
+                }
+            }
+            else if (&sender == &precomputeRoot)
+            {
+                return false;
             }
             senderOut = std::move(nextSender);
             return true;
@@ -2020,8 +2242,9 @@ namespace osuCrypto::LogVole
 
         SenderOnlineOutput childSenderOut{};
         ReceiverOnlineOutput childReceiverOut{};
-        if (!runLocalOnline(
+        if (!runLocalOnlineImpl(
                 *sender.mNextLevelState,
+                precomputeRoot,
                 *receiver.mNextLevelState,
                 childInput,
                 senderPrng,
@@ -2057,6 +2280,12 @@ namespace osuCrypto::LogVole
         }
 
         const u64 instanceBase = countSeedInstances(*sender.mNextLevelState);
+        const RnsPoly* rootMaskDigest = resolveRootMaskDigest(receiver);
+        if (rootMaskDigest == nullptr)
+        {
+            return false;
+        }
+
         std::vector<RnsPoly> finalTbm(sender.mParams.mW);
         if (!detail::runParallelTasks(
                 wDoublePrime,
@@ -2072,6 +2301,7 @@ namespace osuCrypto::LogVole
                     expandInput.mSid = input.mSid;
                     expandInput.mNonce = instanceBase + chunkIdx;
                     expandInput.mDigest = digests[chunkIdx];
+                    expandInput.mMaskDigest = *rootMaskDigest;
                     expandInput.mSkX = skX[chunkIdx];
                     expandInput.mTree = trees[chunkIdx];
 
@@ -2103,6 +2333,7 @@ namespace osuCrypto::LogVole
         senderOut = std::move(nextSender);
         receiverOut = std::move(nextReceiver);
         return true;
+    }
     }
 
     bool finalizeRootOnlineReceiver(
@@ -2139,6 +2370,8 @@ namespace osuCrypto::LogVole
         {
             expandOutput.mTbm.resize(input.mX.size());
         }
+
+        state.mRootDPrimeRt = std::make_shared<RnsPoly>(digestState.mDPrime);
 
         ReceiverOnlineOutput next{};
         next.mSeed = response.mSeed;

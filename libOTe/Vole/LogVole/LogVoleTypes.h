@@ -178,10 +178,8 @@ namespace osuCrypto::LogVole
         u32 mRootRandomizerWidth = 0;
         mutable AlignedUnVec<u8> mGoldenSeed;
         mutable std::shared_ptr<RnsPoly> mRootKPrimeRt;
-        mutable std::shared_ptr<RnsPoly> mRootKRt;
         mutable std::shared_ptr<RnsPoly> mRootDPrimeRt;
         mutable std::shared_ptr<std::vector<RnsPoly>> mPrecomputedTbk;
-        mutable bool mGoldenSeedTransmitted = false;
         std::unique_ptr<SenderState> mNextLevelState;
     };
 
@@ -195,6 +193,7 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> mRootPublicBStarNtt;
         u32 mRootRandomizerWidth = 0;
         mutable AlignedUnVec<u8> mGoldenSeed;
+        mutable std::shared_ptr<RnsPoly> mRootDPrimeRt;
         std::unique_ptr<ReceiverState> mNextLevelState;
     };
 }

@@ -198,6 +198,31 @@ namespace osuCrypto::LogVole
             return kNoiseStdS * normalizedFactor;
         }
 
+        bool isValidShrinkExpandMode(ShrinkExpandMode mode)
+        {
+            switch (mode)
+            {
+            case ShrinkExpandMode::FullNoise:
+                return true;
+#ifdef LIBOTE_LOGVOLE_ENABLE_INSECURE_NOISELESS
+            case ShrinkExpandMode::Deterministic:
+                return true;
+#endif
+            default:
+                return false;
+            }
+        }
+
+        bool usesFullNoise(const ShrinkExpandParams& params)
+        {
+#ifdef LIBOTE_LOGVOLE_ENABLE_INSECURE_NOISELESS
+            return params.mMode == ShrinkExpandMode::FullNoise;
+#else
+            (void)params;
+            return true;
+#endif
+        }
+
         LencLacct toLencLacct(const ShrinkExpandLacct& in)
         {
             LencLacct out{};
@@ -292,6 +317,7 @@ namespace osuCrypto::LogVole
             params.mTau == 0 ||
             params.mPlaintextModulusBits == 0 ||
             params.mGadgetLogBase == 0 ||
+            !isValidShrinkExpandMode(params.mMode) ||
             params.mNoiseBound < 0)
         {
             return false;
@@ -341,11 +367,18 @@ namespace osuCrypto::LogVole
 
     bool resolveShrinkExpandEffectiveNoiseBound(const ShrinkExpandParams& params, i64& out)
     {
-        if (params.mMode != ShrinkExpandMode::FullNoise)
+        if (!isValidShrinkExpandMode(params.mMode))
+        {
+            return false;
+        }
+
+#ifdef LIBOTE_LOGVOLE_ENABLE_INSECURE_NOISELESS
+        if (!usesFullNoise(params))
         {
             out = params.mNoiseBound;
             return true;
         }
+#endif
 
         i64 baseFloor = 0;
         if (!computeBaseNoiseFloor(params, baseFloor))
@@ -411,7 +444,7 @@ namespace osuCrypto::LogVole
         const u32 publicBTau = input.mParams.mTruncateOneGadgetDigit ? (input.mParams.mTau + 1u) : input.mParams.mTau;
         next.mPublicBNtt = std::make_shared<const std::vector<RnsPoly>>(buildLencPublicBNtt(ctx, publicBTau));
 
-        const bool fullNoise = input.mParams.mMode == ShrinkExpandMode::FullNoise;
+        const bool fullNoise = usesFullNoise(input.mParams);
         const double lencSigma = fullNoise ? computeSigma(std::sqrt(static_cast<double>(input.mParams.mTau))) : 0.0;
         const double lencMaxDev = fullNoise ? std::sqrt(kNoiseLambda) * lencSigma : 0.0;
 

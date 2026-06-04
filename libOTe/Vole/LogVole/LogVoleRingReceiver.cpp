@@ -147,12 +147,32 @@ namespace osuCrypto::LogVole
             return countSeedInstances(*state.mNextLevelState) + wDoublePrime;
         }
 
+        const RnsPoly* resolveRootMaskDigest(const ReceiverState& state)
+        {
+            if (state.mRootDPrimeRt)
+            {
+                return state.mRootDPrimeRt.get();
+            }
+
+            return state.mNextLevelState ? resolveRootMaskDigest(*state.mNextLevelState) : nullptr;
+        }
+
         void applySessionId(ReceiverState& state, u64 sid)
         {
             state.mParams.mSessionId = sid;
             if (state.mNextLevelState)
             {
                 applySessionId(*state.mNextLevelState, sid);
+            }
+        }
+
+        void clearReceiverOnlineCache(ReceiverState& state)
+        {
+            state.mGoldenSeed.clear();
+            state.mRootDPrimeRt.reset();
+            if (state.mNextLevelState)
+            {
+                clearReceiverOnlineCache(*state.mNextLevelState);
             }
         }
 
@@ -289,6 +309,7 @@ namespace osuCrypto::LogVole
             cacheScope.mRole = ProtocolCacheRole::Receiver;
         }
         ScopedProtocolCacheScope scopedCache(cacheScope);
+        clearReceiverOnlineCache(state);
         applySessionId(state, input.mSid);
 
         u32 tauHi = 0;
@@ -436,17 +457,6 @@ namespace osuCrypto::LogVole
         childInput.mSid = input.mSid;
         childInput.mX = std::move(dHat);
 
-        CommunicationStats digestComm{};
-        {
-            auto digestSock = sock.fork();
-            for (const auto& digest : digests)
-            {
-                const auto payload = encode(makePolyMessage(state.mParams.mShrinkExpand.mRing, digest));
-                co_await sendFrame(digestSock, payload);
-                digestComm.mBytesSent += frameBytes(payload);
-            }
-        }
-
         ReceiverOnlineOutput childOutput{};
         auto childSock = sock.fork();
         co_await online(*state.mNextLevelState, childInput, childOutput, prng, childSock);
@@ -471,6 +481,12 @@ namespace osuCrypto::LogVole
         }
 
         const u64 instanceBase = countSeedInstances(*state.mNextLevelState);
+        const RnsPoly* rootMaskDigest = resolveRootMaskDigest(state);
+        if (rootMaskDigest == nullptr)
+        {
+            throw std::runtime_error("LogVole receiver missing root mask digest");
+        }
+
         std::vector<RnsPoly> finalTbm(state.mParams.mW);
         const bool expandOk = detail::runParallelTasks(
             wDoublePrime,
@@ -485,6 +501,7 @@ namespace osuCrypto::LogVole
                 expandInput.mSid = input.mSid;
                 expandInput.mNonce = instanceBase + chunkIdx;
                 expandInput.mDigest = digests[chunkIdx];
+                expandInput.mMaskDigest = *rootMaskDigest;
                 expandInput.mSkX = skX[chunkIdx];
                 expandInput.mTree = trees[chunkIdx];
 
@@ -510,7 +527,6 @@ namespace osuCrypto::LogVole
         next.mSeed = childOutput.mSeed;
         next.mTbm = std::move(finalTbm);
         next.mComm = childOutput.mComm;
-        next.mComm.mBytesSent += digestComm.mBytesSent;
         output = std::move(next);
     }
 

@@ -176,10 +176,8 @@ namespace osuCrypto::LogVole
         {
             state.mGoldenSeed.clear();
             state.mRootKPrimeRt.reset();
-            state.mRootKRt.reset();
             state.mRootDPrimeRt.reset();
             state.mPrecomputedTbk.reset();
-            state.mGoldenSeedTransmitted = false;
             if (state.mNextLevelState)
             {
                 clearSenderCachedOutputs(*state.mNextLevelState);
@@ -189,6 +187,7 @@ namespace osuCrypto::LogVole
         void clearReceiverCachedOutputs(ReceiverState& state)
         {
             state.mGoldenSeed.clear();
+            state.mRootDPrimeRt.reset();
             if (state.mNextLevelState)
             {
                 clearReceiverCachedOutputs(*state.mNextLevelState);
