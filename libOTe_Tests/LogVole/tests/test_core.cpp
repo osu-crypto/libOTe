@@ -652,6 +652,70 @@ void LogVole_Core_RepOfflineSenderInputGammaTauUnbundlesResidues(const oc::CLP&)
     }
 }
 
+void LogVole_Core_RecursiveLiftOracleKeepsSenderResiduesUnscaled(const oc::CLP&)
+{
+    const auto params = make_params();
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params, ctx));
+
+    const std::uint32_t alpha = 2;
+    const std::uint32_t tauHi = 2;
+    const std::size_t n = params.mPolyModulusDegree;
+    const std::size_t rho = ctx.mModuli.size();
+    LOGVOLE_REQUIRE_TRUE(rho >= 2);
+
+    std::vector<RnsPoly> s(tauHi);
+    for (std::uint32_t digit = 0; digit < tauHi; ++digit)
+    {
+        resizeZero(s[digit].mCoeffs, ringPolyCoeffCount(params));
+        for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
+        {
+            const auto& modulus = ctx.mModuli[modIdx];
+            const std::size_t offset = modIdx * n;
+            for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
+            {
+                s[digit].mCoeffs[offset + coeffIdx] =
+                    (13u + 17u * digit + 19u * modIdx + coeffIdx) % modulus.value();
+            }
+        }
+    }
+
+    std::vector<RnsPoly> actual;
+    LOGVOLE_REQUIRE_TRUE(seedLabelRepOfflineSenderInput(s, tauHi, alpha, tauHi, params, actual));
+    LOGVOLE_REQUIRE_EQ(actual.size(), static_cast<std::size_t>(alpha) * tauHi * rho);
+
+    const auto delta = delta_per_limb(ctx);
+    bool wouldCatchDoubleLift = false;
+    for (std::size_t alphaIdx = 0; alphaIdx < alpha; ++alphaIdx)
+    {
+        for (std::size_t digit = 0; digit < tauHi; ++digit)
+        {
+            for (std::size_t limb = 0; limb < rho; ++limb)
+            {
+                const auto& poly = actual[(alphaIdx * tauHi + digit) * rho + limb];
+                for (std::size_t modIdx = 0; modIdx < rho; ++modIdx)
+                {
+                    const std::size_t offset = modIdx * n;
+                    for (std::size_t coeffIdx = 0; coeffIdx < n; ++coeffIdx)
+                    {
+                        const auto expected =
+                            (modIdx == limb) ? s[digit].mCoeffs[offset + coeffIdx] : 0u;
+                        LOGVOLE_EXPECT_EQ(poly.mCoeffs[offset + coeffIdx], expected);
+
+                        if (modIdx == limb)
+                        {
+                            const auto oldDoubleLift =
+                                seal::util::multiply_uint_mod(expected, delta[limb], ctx.mModuli[limb]);
+                            wouldCatchDoubleLift |= oldDoubleLift != expected;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    LOGVOLE_EXPECT_TRUE(wouldCatchDoubleLift);
+}
+
 void LogVole_Core_SeedLabelSampleCt2FromSeedDeterministic(const oc::CLP&)
 {
     const auto params = make_params();

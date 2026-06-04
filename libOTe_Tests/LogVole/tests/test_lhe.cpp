@@ -56,6 +56,24 @@ namespace
         }
     }
 
+    bool batches_equal(const std::vector<RnsPoly>& a, const std::vector<RnsPoly>& b)
+    {
+        if (a.size() != b.size())
+        {
+            return false;
+        }
+
+        for (std::size_t i = 0; i < a.size(); ++i)
+        {
+            if (!rangesEqual(a[i].mCoeffs, b[i].mCoeffs))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     void expect_tensor_equal(const RingTensor& a, const RingTensor& b)
     {
         LOGVOLE_EXPECT_EQ(a.mRows, b.mRows);
@@ -270,4 +288,17 @@ void LogVole_LheOps_HashedCt2Deterministic(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(buildHashedCt2(ctx, params.mMu, seed, 17, digest, 2, ct2B));
 
     expect_batch_equal(ct2A, ct2B);
+
+    std::vector<RnsPoly> ct2Sid;
+    LOGVOLE_REQUIRE_TRUE(buildHashedCt2(ctx, params.mMu, seed, 18, digest, 2, ct2Sid));
+    LOGVOLE_EXPECT_FALSE(batches_equal(ct2A, ct2Sid));
+
+    const auto otherDigest = deriveUniformPolyFromNonce(ctx, 0xD1CEu, 0xC720u, 1);
+    std::vector<RnsPoly> ct2Digest;
+    LOGVOLE_REQUIRE_TRUE(buildHashedCt2(ctx, params.mMu, seed, 17, otherDigest, 2, ct2Digest));
+    LOGVOLE_EXPECT_FALSE(batches_equal(ct2A, ct2Digest));
+
+    std::vector<RnsPoly> ct2Instance;
+    LOGVOLE_REQUIRE_TRUE(buildHashedCt2(ctx, params.mMu, seed, 17, digest, 3, ct2Instance));
+    LOGVOLE_EXPECT_FALSE(batches_equal(ct2A, ct2Instance));
 }

@@ -16,6 +16,7 @@
     X(KeyDeriveCore, MetadataMismatchRejected) \
     X(KeyDeriveCoproto, HappyPathAndAlgebraicRelation) \
     X(Core, RepOfflineSenderInputGammaTauUnbundlesResidues) \
+    X(Core, RecursiveLiftOracleKeepsSenderResiduesUnscaled) \
     X(LheOps, PublicADeterministic) \
     X(LheOps, Enc1ShapeDeterminismAndColumnDecrypt) \
     X(LheOps, ApplyCt1AndDeriveSkxRelations) \
