@@ -48,9 +48,6 @@ if(ENABLE_LOGVOLE)
         ${CMAKE_CURRENT_LIST_DIR}/LogVole
         ${CMAKE_CURRENT_LIST_DIR}/LogVole/tests
     )
-    if(ENABLE_LOGVOLE_EXTENDED_TESTS)
-        target_compile_definitions(libOTe_Tests PRIVATE ENABLE_LOGVOLE_EXTENDED_TESTS)
-    endif()
 endif()
 
 

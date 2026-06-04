@@ -36,7 +36,6 @@
     X(ShrinkExpandCore, TruncDeterministicRelationBounded) \
     X(ShrinkExpandCore, FullNoiseTolerance)
 
-#ifdef ENABLE_LOGVOLE_EXTENDED_TESTS
 #define LIBOTE_LOGVOLE_EXTENDED_TESTS(X) \
     X(Core, ModeSelection) \
     X(Core, RuntimeCacheScopePropagatesToParallelWorkers) \
@@ -74,9 +73,6 @@
     X(ShrinkExpandCore, OfflineStateShapes) \
     X(ShrinkExpandCore, OfflineMetadataMismatchRejected) \
     X(ShrinkExpandCore, DenoiseCombExactness)
-#else
-#define LIBOTE_LOGVOLE_EXTENDED_TESTS(X)
-#endif
 
 #define LIBOTE_LOGVOLE_DECLARE_TEST(suite, name) void LogVole_##suite##_##name(const oc::CLP& cmd);
 LIBOTE_LOGVOLE_TESTS(LIBOTE_LOGVOLE_DECLARE_TEST)

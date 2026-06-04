@@ -149,8 +149,11 @@ namespace tests_libOTe
 #ifdef ENABLE_LOGVOLE
 #define LIBOTE_LOGVOLE_ADD_TEST(suite, name) \
 			tc.add("LogVole_" #suite "_" #name, LogVole_##suite##_##name);
+#define LIBOTE_LOGVOLE_ADD_EXTENDED_TEST(suite, name) \
+			tc.addExtended("LogVole_" #suite "_" #name, LogVole_##suite##_##name);
 			LIBOTE_LOGVOLE_TESTS(LIBOTE_LOGVOLE_ADD_TEST)
-			LIBOTE_LOGVOLE_EXTENDED_TESTS(LIBOTE_LOGVOLE_ADD_TEST)
+			LIBOTE_LOGVOLE_EXTENDED_TESTS(LIBOTE_LOGVOLE_ADD_EXTENDED_TEST)
+#undef LIBOTE_LOGVOLE_ADD_EXTENDED_TEST
 #undef LIBOTE_LOGVOLE_ADD_TEST
 #endif
 		});

@@ -201,7 +201,9 @@ int main(int argc, char** argv)
             << Color::Green << "  -t              " << Color::Default << ": the number of threads that should be used\n"
             << Color::Green << "  -p              " << Color::Default << ": LogVole plaintext modulus bit count\n"
             << Color::Green << "  -u              " << Color::Default << ": to run the unit tests\n"
+            << Color::Green << "  -u -extended    " << Color::Default << ": to run the unit tests, including extended tests\n"
             << Color::Green << "  -u -list        " << Color::Default << ": to list the unit tests\n"
+            << Color::Green << "  -u -list -extended" << Color::Default << ": to list the unit tests, including extended tests\n"
             << Color::Green << "  -u 1 2 15       " << Color::Default << ": to run the unit tests indexed by {1, 2, 15}.\n"
             << std::endl;
     }
