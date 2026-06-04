@@ -1718,6 +1718,37 @@ void LogVole_Core_GoldenSeedSearchAcceptsFeasibleParams(const oc::CLP&)
     LOGVOLE_REQUIRE_FALSE(validateGoldenSeedSearch(params));
 }
 
+void LogVole_Core_GoldenSeedRejectsMalformedCandidate(const oc::CLP&)
+{
+    const Params params = make_golden_params();
+    RingNttContext ctx{};
+    LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mShrinkExpand.mRing, ctx));
+    LOGVOLE_REQUIRE_TRUE(validateGoldenSeedSearch(params));
+
+    const std::size_t expectedCount =
+        static_cast<std::size_t>((params.mW + params.mShrinkExpand.mMu - 1u) / params.mShrinkExpand.mMu) *
+        static_cast<std::size_t>(params.mShrinkExpand.mMu);
+    LOGVOLE_REQUIRE_TRUE(expectedCount > 0);
+
+    std::vector<RnsPoly> wrongCount(expectedCount - 1);
+    for (auto& poly : wrongCount)
+    {
+        resizeZero(poly.mCoeffs, ringPolyCoeffCount(params.mShrinkExpand.mRing));
+    }
+    bool candidateOk = true;
+    LOGVOLE_EXPECT_FALSE(validateGoldenSeedCandidate(params, wrongCount, candidateOk));
+
+    std::vector<RnsPoly> wrongShape(expectedCount);
+    for (auto& poly : wrongShape)
+    {
+        resizeZero(poly.mCoeffs, ringPolyCoeffCount(params.mShrinkExpand.mRing));
+    }
+    wrongShape[0].mCoeffs.resize(wrongShape[0].mCoeffs.size() - 1);
+
+    candidateOk = true;
+    LOGVOLE_EXPECT_FALSE(validateGoldenSeedCandidate(params, wrongShape, candidateOk));
+}
+
 void LogVole_Core_GoldenSeedFindAndValidateCandidate(const oc::CLP&)
 {
     const auto params = make_golden_params();

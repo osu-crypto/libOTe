@@ -57,6 +57,7 @@
     X(Core, RecursiveGadgetInputSubproblem) \
     X(Core, RejectsWidthsBelowRandomizedRootBlock) \
     X(Core, GoldenSeedSearchAcceptsFeasibleParams) \
+    X(Core, GoldenSeedRejectsMalformedCandidate) \
     X(Core, GoldenSeedFindAndValidateCandidate) \
     X(LencOps, EvalFromPrebuiltTreeMatchesEvalFromX) \
     X(LencOps, EvalRejectsMuMismatch) \
