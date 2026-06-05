@@ -362,14 +362,13 @@ namespace osuCrypto::LogVole
                 return false;
             }
 
-            const u32 tauFull = tauHi + 1;
             const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
             return message.mRing == state.mParams.mShrinkExpand.mRing &&
                    message.mTauHi == tauHi &&
                    message.mGadgetLogBase == state.mParams.mShrinkExpand.mGadgetLogBase &&
                    message.mPlaintextModulusBits == state.mParams.mShrinkExpand.mPlaintextModulusBits &&
                    message.mLeftWidth == rootLeftWidth(tauHi, rho) &&
-                   message.mRandomizerWidth == rootRandomizerWidth(tauFull);
+                   message.mRandomizerWidth == rootRandomizerWidth(state.mParams.mShrinkExpand);
         }
 
         RnsPoly makeZeroPoly(const RingParams& ring)
@@ -629,9 +628,20 @@ namespace osuCrypto::LogVole
         }
     }
 
-    u32 rootRandomizerWidth(u32 tauFull)
+    u32 rootRandomizerWidth(const ShrinkExpandParams& params)
     {
-        return std::max<u32>(3, tauFull + 1);
+        constexpr u32 statSec = 40;
+        const double n = static_cast<double>(params.mRing.mPolyModulusDegree);
+        const double gadgetBits = static_cast<double>(params.mGadgetLogBase);
+        if (!(n > 1.0) || !(gadgetBits > 0.0))
+        {
+            return 0;
+        }
+
+        const double requiredSlack =
+            (2.0 * static_cast<double>(statSec) + std::ceil(std::log2(n)) + 1.0) / gadgetBits;
+        const u32 slack = std::max<u32>(1, static_cast<u32>(std::ceil(requiredSlack)));
+        return params.mTau + slack;
     }
 
     u32 rootLeftWidth(u32 tauHi, u32 rho)
@@ -1017,7 +1027,7 @@ namespace osuCrypto::LogVole
         const auto& se = state.mParams.mShrinkExpand;
         const u32 rho = static_cast<u32>(se.mRing.mCoeffModulusBits.size());
         const u32 leftWidth = rootLeftWidth(tauHi, rho);
-        const u32 randomizer = rootRandomizerWidth(tauFull);
+        const u32 randomizer = rootRandomizerWidth(se);
         const u32 workerThreads = state.mShrinkExpandState.mParams.mNumWorkerThreads;
 
         if (rho == 0 ||
@@ -1093,7 +1103,7 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        std::vector<RnsPoly> skRRt = sampleUniformBatch(ctx, tauHi, prng, 0x5254534Bu);
+        std::vector<RnsPoly> skRRt = sampleUniformBatch(ctx, tauHi, prng);
         if (!validateRingBatchShape(skRRt, se.mRing))
         {
             return false;
@@ -1168,10 +1178,9 @@ namespace osuCrypto::LogVole
             return false;
         }
 
-        const u32 tauFull = tauHi + 1;
         const u32 rho = static_cast<u32>(state.mParams.mShrinkExpand.mRing.mCoeffModulusBits.size());
         const u32 leftWidth = rootLeftWidth(tauHi, rho);
-        const u32 randomizer = rootRandomizerWidth(tauFull);
+        const u32 randomizer = rootRandomizerWidth(state.mParams.mShrinkExpand);
 
         if (rho == 0 ||
             message.mCtR.mRows != leftWidth ||
@@ -1235,7 +1244,7 @@ namespace osuCrypto::LogVole
         if (rho == 0 ||
             state.mParams.mW != muHi ||
             x.size() > muHi ||
-            state.mRootRandomizerWidth != rootRandomizerWidth(tauFull))
+            state.mRootRandomizerWidth != rootRandomizerWidth(state.mParams.mShrinkExpand))
         {
             return false;
         }

@@ -139,7 +139,6 @@ namespace osuCrypto::LogVole
     struct ShrinkExpandSenderState
     {
         ShrinkExpandParams mParams;
-        i64 mEffectiveNoiseBound = 0;
         std::vector<RnsPoly> mS;
         std::vector<RnsPoly> mR;
         std::vector<RnsPoly> mSk1;
@@ -152,7 +151,6 @@ namespace osuCrypto::LogVole
     struct ShrinkExpandReceiverState
     {
         ShrinkExpandParams mParams;
-        i64 mEffectiveNoiseBound = 0;
         std::shared_ptr<const std::vector<RnsPoly>> mPublicANtt;
         std::shared_ptr<const std::vector<RnsPoly>> mPublicBNtt;
         RingTensor mCt1;

@@ -13,11 +13,6 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        constexpr u64 kLencRDomain = 0x4C454E43525F4E43ull;
-        constexpr u64 kLencCtNoiseDomain = 0x4C454E4343544552ull;
-        constexpr u64 kLencTruncRDomain = 0x4C454E4354524E43ull;
-        constexpr u64 kLencTruncCtNoiseDomain = 0x4C454E4354544552ull;
-
         u64 pow2Mod(u64 exp, u64 mod)
         {
             const seal::Modulus modulus(mod);

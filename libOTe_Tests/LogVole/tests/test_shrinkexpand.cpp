@@ -479,10 +479,6 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
     RingNttContext ctx{};
     LOGVOLE_REQUIRE_TRUE(makeRingNttContext(params.mRing, ctx));
 
-    osuCrypto::i64 effectiveNoiseBound = 0;
-    LOGVOLE_REQUIRE_TRUE(resolveShrinkExpandEffectiveNoiseBound(params, effectiveNoiseBound));
-    LOGVOLE_REQUIRE_GT(effectiveNoiseBound, params.mNoiseBound);
-
     ShrinkExpandSenderOfflineInput senderInput{};
     senderInput.mParams = params;
     senderInput.mS = sample_batch(ctx, params.mMu, 0x5001u);
@@ -495,8 +491,6 @@ void LogVole_ShrinkExpandCore_FullNoiseTolerance(const oc::CLP&)
     receiverInput.mParams = params;
     ShrinkExpandReceiverState receiverState{};
     LOGVOLE_REQUIRE_TRUE(finalizeShrinkExpandReceiverOffline(receiverInput, senderState, receiverState));
-    LOGVOLE_REQUIRE_EQ(senderState.mEffectiveNoiseBound, effectiveNoiseBound);
-    LOGVOLE_REQUIRE_EQ(receiverState.mEffectiveNoiseBound, effectiveNoiseBound);
 
     auto x = sample_batch(ctx, params.mMu, 0x6001u);
     ShrinkExpandShrinkOutput shrink{};

@@ -104,7 +104,7 @@ namespace osuCrypto::LogVole
         CommunicationStats mComm;
     };
 
-    u32 rootRandomizerWidth(u32 tauFull);
+    u32 rootRandomizerWidth(const ShrinkExpandParams& params);
     u32 rootLeftWidth(u32 tauHi, u32 rho);
     double rootNoiseSigma(const ShrinkExpandParams& params, double factor);
     double rootNoiseMaxDeviation(double sigma);

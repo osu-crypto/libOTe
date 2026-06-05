@@ -50,6 +50,7 @@
     X(Core, RootZetaShapeAndBounds) \
     X(Core, RootInnerProductMatchesCoeffDomain) \
     X(Core, RootOfflineSetupFinalizeShapes) \
+    X(Core, RootRandomizerWidthTracksGadgetBase) \
     X(Core, RootOfflineRejectsMetadataMismatch) \
     X(Core, RootOnlineLocalFlow) \
     X(Core, TwoLevelLocalApiRelation) \

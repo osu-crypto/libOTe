@@ -245,13 +245,6 @@ namespace osuCrypto::LogVole
         u64 instanceIdx,
         u64 fallbackNonce = 0);
 
-    bool addGaussianNoise(
-        RnsPoly& poly,
-        double noiseStandardDeviation,
-        double noiseMaxDeviation,
-        u64 seed,
-        u64 streamId,
-        const RingNttContext& ctx);
     bool addPolyError(
         RnsPoly& poly,
         double noiseStandardDeviation,

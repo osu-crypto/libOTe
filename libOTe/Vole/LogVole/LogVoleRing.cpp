@@ -25,8 +25,6 @@ namespace osuCrypto::LogVole
 {
     namespace
     {
-        constexpr u64 kSeedBytesDomain = 0x5345454442595445ull;
-
         bool isPowerOfTwo(u32 value)
         {
             return value > 0 && (value & (value - 1u)) == 0u;
@@ -1390,51 +1388,6 @@ namespace osuCrypto::LogVole
         std::vector<RnsPoly> out;
         (void)deriveUniformPolyBatchFromNonceListInplace(ctx, nonces, domainTag, perNonceCount, out, requestedWorkers);
         return out;
-    }
-
-    bool addGaussianNoise(
-        RnsPoly& poly,
-        double noiseStandardDeviation,
-        double noiseMaxDeviation,
-        u64 seed,
-        u64 streamId,
-        const RingNttContext& ctx)
-    {
-        if (noiseStandardDeviation < 0 || !canonicalizePoly(poly, ctx))
-        {
-            return false;
-        }
-
-        auto prng = seal::UniformRandomGeneratorFactory::DefaultFactory()->create(
-            sealSeedFromBlock(derivePublicSeedBlock(0x4552524F52505247ull, seed, streamId, 0, 0)));
-        seal::RandomToStandardAdapter engine(prng);
-        seal::util::ClippedNormalDistribution dist(0, noiseStandardDeviation, noiseMaxDeviation);
-
-        const std::size_t n = ctx.mParams.mPolyModulusDegree;
-        for (std::size_t modIdx = 0; modIdx < ctx.mModuli.size(); ++modIdx)
-        {
-            const u64 mod = ctx.mModuli[modIdx].value();
-            const std::size_t offset = modIdx * n;
-            for (std::size_t i = 0; i < n; ++i)
-            {
-                const std::size_t idx = offset + i;
-                const i64 noise = static_cast<i64>(dist(engine));
-                const u64 value = poly.mCoeffs[idx] % mod;
-                if (noise >= 0)
-                {
-                    const u64 noiseMod = seal::util::barrett_reduce_64(static_cast<u64>(noise), ctx.mModuli[modIdx]);
-                    poly.mCoeffs[idx] = addMod(value, noiseMod, ctx.mModuli[modIdx]);
-                }
-                else
-                {
-                    const u64 absNoise = static_cast<u64>(-noise) % mod;
-                    poly.mCoeffs[idx] = (value >= absNoise) ? (value - absNoise) : (mod - (absNoise - value));
-                }
-            }
-        }
-
-        bumpRingStat(globalRingOpsStats.mErrorAddCount, tlsRingOpsStats.mErrorAddCount);
-        return true;
     }
 
     bool addPolyError(

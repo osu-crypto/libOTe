@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <limits>
 #include <memory>
 
 namespace osuCrypto::LogVole
@@ -27,18 +26,6 @@ namespace osuCrypto::LogVole
             }
             return logQ;
         }
-
-        double etaEpsilonRing(double n, double lambdaSec)
-        {
-            constexpr double pi = 3.141592653589793238462643383279502884;
-            return std::sqrt((lambdaSec * std::log(2.0) + std::log(n)) / pi);
-        }
-
-        struct LeakyLweNoiseShape
-        {
-            double mS = -std::numeric_limits<double>::infinity();
-            double mSbarOverLeakageNorm = -std::numeric_limits<double>::infinity();
-        };
 
         struct Ct2CacheEntry
         {
@@ -108,87 +95,6 @@ namespace osuCrypto::LogVole
             cache.mRunId = scope.mRunId;
             cache.mRole = scope.mRole;
             cache.mCt2 = std::move(ct2);
-            return true;
-        }
-
-        LeakyLweNoiseShape computeLeakyLweNoiseShape(
-            double sStar,
-            double etaEpsR,
-            double linearCoeff,
-            double leakCoeff)
-        {
-            if (!(linearCoeff > 0.0) || !(leakCoeff > 0.0))
-            {
-                return {};
-            }
-
-            const double leakyA = sStar * sStar + 2.0 * etaEpsR * etaEpsR;
-            if (!(leakyA > 0.0))
-            {
-                return {};
-            }
-
-            const double threshold = std::sqrt(leakyA);
-            const double minimizerK = leakCoeff / linearCoeff;
-            const double sMultiplier = std::sqrt(1.0 + std::pow(minimizerK, 2.0 / 3.0));
-            if (!std::isfinite(sMultiplier) || !(sMultiplier > 1.0))
-            {
-                return {};
-            }
-
-            LeakyLweNoiseShape out{};
-            out.mS = threshold * sMultiplier;
-            out.mSbarOverLeakageNorm = threshold * sMultiplier / std::sqrt(sMultiplier * sMultiplier - 1.0);
-            return out;
-        }
-
-        bool computeBaseNoiseFloor(const ShrinkExpandParams& params, i64& out)
-        {
-            const double sStar = 8.0;
-            const double T = 32768.0;
-            const double lambdaSec = 128.0;
-            const double L = 10.0;
-
-            const double n = static_cast<double>(params.mRing.mPolyModulusDegree);
-            const double m = static_cast<double>(params.mTau);
-            const double g = std::pow(2.0, static_cast<double>(params.mGadgetLogBase));
-            const double gammaR = n;
-
-            const double etaEpsR = etaEpsilonRing(n, lambdaSec);
-            if (!std::isfinite(etaEpsR))
-            {
-                return false;
-            }
-
-            const double pref = 2.0 * std::sqrt(lambdaSec);
-            const double sqrt2mT = std::sqrt(2.0 * m * T);
-            const double linearCoeff = pref * m * gammaR * L;
-            const double leakCoeff = pref * 2.0 * n * sqrt2mT;
-            const auto noiseShape = computeLeakyLweNoiseShape(sStar, etaEpsR, linearCoeff, leakCoeff);
-            if (!std::isfinite(noiseShape.mS) || !std::isfinite(noiseShape.mSbarOverLeakageNorm))
-            {
-                return false;
-            }
-
-            const double s = noiseShape.mS;
-            const double sBar = noiseShape.mSbarOverLeakageNorm * g * n * sqrt2mT;
-            const double termA = g * m * gammaR * s * L;
-            const double termB = 2.0 * sBar;
-            const double total = 2.0 * std::sqrt(lambdaSec) * (termA + termB);
-            if (!std::isfinite(total))
-            {
-                return false;
-            }
-
-            const double roundedUp = std::ceil(total);
-            if (roundedUp > static_cast<double>(std::numeric_limits<i64>::max()))
-            {
-                out = std::numeric_limits<i64>::max();
-                return true;
-            }
-
-            const auto floor = static_cast<i64>(roundedUp);
-            out = (floor > 0) ? floor : 1;
             return true;
         }
 
@@ -337,8 +243,7 @@ namespace osuCrypto::LogVole
             }
         }
 
-        i64 ignored = 0;
-        return resolveShrinkExpandEffectiveNoiseBound(params, ignored);
+        return true;
     }
 
     bool validateShrinkExpandSenderOfflineInput(const ShrinkExpandSenderOfflineInput& input)
@@ -365,33 +270,8 @@ namespace osuCrypto::LogVole
         return validateShrinkExpandParams(input.mParams);
     }
 
-    bool resolveShrinkExpandEffectiveNoiseBound(const ShrinkExpandParams& params, i64& out)
+    std::vector<RnsPoly> sampleUniformBatch(const RingNttContext& ctx, u32 count, PRNG& prng)
     {
-        if (!isValidShrinkExpandMode(params.mMode))
-        {
-            return false;
-        }
-
-#ifdef LIBOTE_LOGVOLE_ENABLE_INSECURE_NOISELESS
-        if (!usesFullNoise(params))
-        {
-            out = params.mNoiseBound;
-            return true;
-        }
-#endif
-
-        i64 baseFloor = 0;
-        if (!computeBaseNoiseFloor(params, baseFloor))
-        {
-            return false;
-        }
-        out = (params.mNoiseBound > baseFloor) ? params.mNoiseBound : baseFloor;
-        return true;
-    }
-
-    std::vector<RnsPoly> sampleUniformBatch(const RingNttContext& ctx, u32 count, PRNG& prng, u64 domainTag)
-    {
-        (void)domainTag;
         std::vector<RnsPoly> out(count);
         for (u32 i = 0; i < count; ++i)
         {
@@ -419,11 +299,6 @@ namespace osuCrypto::LogVole
 
         ShrinkExpandSenderState next{};
         next.mParams = input.mParams;
-        if (!resolveShrinkExpandEffectiveNoiseBound(input.mParams, next.mEffectiveNoiseBound))
-        {
-            return false;
-        }
-
         next.mS = input.mS;
         if (!input.mFixedSk1.empty())
         {
@@ -431,7 +306,7 @@ namespace osuCrypto::LogVole
         }
         else
         {
-            next.mSk1 = sampleUniformBatch(ctx, input.mParams.mTau, prng, 0xA002u);
+            next.mSk1 = sampleUniformBatch(ctx, input.mParams.mTau, prng);
         }
 
         std::vector<RnsPoly> publicA;
@@ -571,11 +446,6 @@ namespace osuCrypto::LogVole
 
         ShrinkExpandReceiverState next{};
         next.mParams = input.mParams;
-        if (!resolveShrinkExpandEffectiveNoiseBound(input.mParams, next.mEffectiveNoiseBound))
-        {
-            return false;
-        }
-
         std::vector<RnsPoly> publicA;
         if (!buildLhePublicANtt(ctx, input.mParams.mMu, publicA))
         {

@@ -71,13 +71,11 @@ namespace osuCrypto::LogVole
     bool validateShrinkExpandParams(const ShrinkExpandParams& params);
     bool validateShrinkExpandSenderOfflineInput(const ShrinkExpandSenderOfflineInput& input);
     bool validateShrinkExpandReceiverOfflineInput(const ShrinkExpandReceiverOfflineInput& input);
-    bool resolveShrinkExpandEffectiveNoiseBound(const ShrinkExpandParams& params, i64& out);
 
     std::vector<RnsPoly> sampleUniformBatch(
         const RingNttContext& ctx,
         u32 count,
-        PRNG& prng,
-        u64 domainTag);
+        PRNG& prng);
 
     bool prepareShrinkExpandSenderOffline(
         const ShrinkExpandSenderOfflineInput& input,

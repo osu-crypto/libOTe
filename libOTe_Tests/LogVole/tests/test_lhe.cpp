@@ -301,4 +301,14 @@ void LogVole_LheOps_HashedCt2Deterministic(const oc::CLP&)
     std::vector<RnsPoly> ct2Instance;
     LOGVOLE_REQUIRE_TRUE(buildHashedCt2(ctx, params.mMu, seed, 17, digest, 3, ct2Instance));
     LOGVOLE_EXPECT_FALSE(batches_equal(ct2A, ct2Instance));
+
+    AlignedUnVec<std::uint8_t> otherSeed = seed;
+    otherSeed[0] ^= 0x80;
+    std::vector<RnsPoly> ct2Seed;
+    LOGVOLE_REQUIRE_TRUE(buildHashedCt2(ctx, params.mMu, otherSeed, 17, digest, 2, ct2Seed));
+    LOGVOLE_EXPECT_FALSE(batches_equal(ct2A, ct2Seed));
+
+    const auto seedBlock = deriveSeedInstanceBlock(seed, 17, digest, 2, params.mMu);
+    const auto otherMuSeedBlock = deriveSeedInstanceBlock(seed, 17, digest, 2, params.mMu + 1);
+    LOGVOLE_EXPECT_FALSE(seedBlock == otherMuSeedBlock);
 }

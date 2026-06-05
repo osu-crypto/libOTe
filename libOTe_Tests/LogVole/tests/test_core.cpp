@@ -976,7 +976,7 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
     const std::uint32_t tauHi = params.mShrinkExpand.mTau - 1;
     const std::uint32_t rho = static_cast<std::uint32_t>(params.mShrinkExpand.mRing.mCoeffModulusBits.size());
     const std::uint32_t leftWidth = tauHi * rho;
-    const std::uint32_t randomizer = rootRandomizerWidth(params.mShrinkExpand.mTau);
+    const std::uint32_t randomizer = rootRandomizerWidth(params.mShrinkExpand);
 
     LOGVOLE_EXPECT_TRUE(message.mRing == params.mShrinkExpand.mRing);
     LOGVOLE_EXPECT_EQ(message.mTauHi, tauHi);
@@ -1003,6 +1003,18 @@ void LogVole_Core_RootOfflineSetupFinalizeShapes(const oc::CLP&)
     RnsPoly roundTrip = receiver.mRootCtRRt.mPolys[0];
     LOGVOLE_REQUIRE_TRUE(inverseNtt(roundTrip, ctx));
     expect_poly_equal(roundTrip, message.mCtR.mPolys[0]);
+}
+
+void LogVole_Core_RootRandomizerWidthTracksGadgetBase(const oc::CLP&)
+{
+    Params params = make_root_params();
+    params.mShrinkExpand.mRing.mPolyModulusDegree = 8192;
+    params.mShrinkExpand.mTau = 2;
+    params.mShrinkExpand.mGadgetLogBase = 110;
+    LOGVOLE_EXPECT_EQ(rootRandomizerWidth(params.mShrinkExpand), 3);
+
+    params.mShrinkExpand.mGadgetLogBase = 30;
+    LOGVOLE_EXPECT_TRUE(rootRandomizerWidth(params.mShrinkExpand) >= 6);
 }
 
 void LogVole_Core_RootOfflineRejectsMetadataMismatch(const oc::CLP&)
