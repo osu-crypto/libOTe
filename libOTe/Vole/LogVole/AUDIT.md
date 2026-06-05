@@ -1141,7 +1141,14 @@ Recommended targeted test:
 
 ## LV-AUDIT-022: `wideU64OneShift` has latent shift-by->=64 UB for `bit >= 128`
 
-Status: watch
+Status: fixed
+
+Update 2026-06-05:
+
+`wideU64OneShift` now returns zero for `bit >= 128` before evaluating the
+native shift. The default test `LogVole_Core_WideU64OneShiftBounds` covers
+`0, 63, 64, 127, 128, 255`, pinning both boundary behavior and the saturation
+case.
 
 Concern:
 
@@ -1179,17 +1186,6 @@ Evidence:
 - Direct read of `LogVoleArithmetic.h:30-33` confirms the `bit >= 64` branch
   shifts by `bit-64` with no internal clamp; safety depends on the
   `sampleRootZeta` guard.
-
-What would close it:
-
-- Add a defensive internal assert/clamp inside `wideU64OneShift` for `bit >= 128`
-  (return 0 / saturate) and document the precondition `bit < 128` alongside the
-  function, so the helper is self-defending rather than relying on caller guards.
-
-Recommended targeted test:
-
-- A unit assertion that `wideU64OneShift` saturates/asserts for `bit >= 128`
-  (after the defensive clamp is added).
 
 ## LV-AUDIT-023: No independent test of the `gdecompHi` high-part identity or the Z_p CRT wrap/unwrap round-trip
 
@@ -1365,6 +1361,14 @@ Recommended targeted test:
 
 Status: watch
 
+Update 2026-06-05:
+
+The `zpRingLabelCount` overflow path is fixed. It now computes ceiling division
+as `zpLabelCount / slots + (zpLabelCount % slots != 0)`, avoiding the overflowing
+`zpLabelCount + slots - 1` numerator. The default test
+`LogVole_Core_ZpRingLabelCountCeilNoOverflow` covers ordinary boundaries and
+`U64_MAX`.
+
 Concern:
 
 Three transport/robustness gaps against a non-honest peer or transport. All are
@@ -1379,7 +1383,7 @@ hardening gaps if the transport is untrusted:
    header and `recv` fills exactly that), but the allocation attempt happens
    first.
 
-2. **`u64` overflow in `zpRingLabelCount`.** `civoleReceiverOffline` reads
+2. **`u64` overflow in `zpRingLabelCount` (fixed).** `civoleReceiverOffline` reads
    `meta.mLabelCount` from the sender over the socket and feeds it to
    `zpRingLabelCount`, which computes `(zpLabelCount + slots - 1)/slots`. For
    `zpLabelCount` near `2^64` the numerator wraps, producing a small
@@ -1418,17 +1422,16 @@ Relevant files:
 
 Evidence:
 
-- `recvFrame` allocates from the header before `recv`; `zpRingLabelCount` uses a
-  plain `u64` ceil-div; `mUsedSids` is append-only with a linear membership scan.
+- `recvFrame` allocates from the header before `recv`; `zpRingLabelCount` no
+  longer has the overflowing ceil-div; `mUsedSids` is append-only with a linear
+  membership scan.
 
 What would close it:
 
 - Clamp the frame length to a protocol-derived maximum (a small multiple of the
   largest legitimate message size from the configured params) before allocating,
   and reject larger frames.
-- Use a saturating/overflow-checked ceil-div in `zpRingLabelCount` (reject if
-  `zpLabelCount > U64_MAX - slots`, or compute via 128-bit/checked arithmetic),
-  and have `civoleReceiverOffline` validate `meta.mLabelCount` against an expected
+- Have `civoleReceiverOffline` validate `meta.mLabelCount` against an expected
   bound rather than trusting it unconditionally.
 - Optional: replace `mUsedSids` with a hash set, or track a monotonic-SID
   high-water mark, if very high session counts on a single offline state are
@@ -1641,9 +1644,8 @@ Recommended next work items (incorporating the recommended oracle tests):
      lieu of explicit `chi_lenc` smudging.
    - LV-AUDIT-018 / LV-AUDIT-019: confirm `EstimateNoiseBound`/`B_lhe` were
      derived with the `sqrt(width)`-scaled LHE noise (not fixed `s=8`).
-5. **LV-AUDIT-022, -026, -027 (defensive hardening, lower priority):** add the
-   `wideU64OneShift` clamp/assert for `bit >= 128`, the `recvFrame` length clamp
-   and overflow-checked `zpRingLabelCount`, and the `ringAdd`/`ringSub`
-   canonical-input precondition.
+5. **LV-AUDIT-026, -027 (defensive hardening, lower priority):** add the
+   `recvFrame` length clamp, bounded `meta.mLabelCount` validation, and the
+   `ringAdd`/`ringSub` canonical-input precondition.
 6. Re-run the default LogVole suite and the extended build after each batch of
    tests/cleanups lands.

@@ -1,5 +1,6 @@
 #include "libOTe/Vole/LogVole/LogVoleCore.h"
 #include "libOTe/Vole/LogVole/LogVoleEncoding.h"
+#include "libOTe/Vole/LogVole/LogVole.h"
 #include "libOTe/Vole/LogVole/LogVoleParallel.h"
 #include "libOTe/Vole/LogVole/LogVoleRingReceiver.h"
 #include "libOTe/Vole/LogVole/LogVoleRuntime.h"
@@ -494,6 +495,33 @@ namespace
                maxLog2 < static_cast<long double>(logQ - params.mShrinkExpand.mPlaintextModulusBits);
     }
 
+}
+
+void LogVole_Core_WideU64OneShiftBounds(const oc::CLP&)
+{
+    LOGVOLE_EXPECT_TRUE(wideU64Equal(wideU64OneShift(0), makeWideU64(1, 0)));
+    LOGVOLE_EXPECT_TRUE(wideU64Equal(wideU64OneShift(63), makeWideU64(std::uint64_t{ 1 } << 63, 0)));
+    LOGVOLE_EXPECT_TRUE(wideU64Equal(wideU64OneShift(64), makeWideU64(0, 1)));
+    LOGVOLE_EXPECT_TRUE(wideU64Equal(wideU64OneShift(127), makeWideU64(0, std::uint64_t{ 1 } << 63)));
+    LOGVOLE_EXPECT_TRUE(wideU64Equal(wideU64OneShift(128), makeWideU64(0, 0)));
+    LOGVOLE_EXPECT_TRUE(wideU64Equal(wideU64OneShift(255), makeWideU64(0, 0)));
+}
+
+void LogVole_Core_ZpRingLabelCountCeilNoOverflow(const oc::CLP&)
+{
+    ZpCrtContext ctx{};
+    ctx.mRing.mParams.mPolyModulusDegree = 1024;
+
+    LOGVOLE_EXPECT_EQ(zpRingLabelCount(ctx, 0), 0ull);
+    LOGVOLE_EXPECT_EQ(zpRingLabelCount(ctx, 1), 1ull);
+    LOGVOLE_EXPECT_EQ(zpRingLabelCount(ctx, 1024), 1ull);
+    LOGVOLE_EXPECT_EQ(zpRingLabelCount(ctx, 1025), 2ull);
+
+    constexpr std::uint64_t maxLabels = std::numeric_limits<std::uint64_t>::max();
+    constexpr std::uint64_t slots = 1024;
+    LOGVOLE_EXPECT_EQ(
+        zpRingLabelCount(ctx, maxLabels),
+        maxLabels / slots + static_cast<std::uint64_t>((maxLabels % slots) != 0));
 }
 
 void LogVole_Core_ModeSelection(const oc::CLP&)

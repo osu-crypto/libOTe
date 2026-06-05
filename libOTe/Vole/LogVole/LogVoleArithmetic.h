@@ -29,6 +29,10 @@ namespace osuCrypto::LogVole
 
     inline wideU64 wideU64OneShift(u32 bit)
     {
+        if (bit >= 128)
+        {
+            return {};
+        }
         return bit < 64 ? wideU64{ u64(1) << bit, 0 } : wideU64{ 0, u64(1) << (bit - 64) };
     }
 

@@ -579,7 +579,7 @@ namespace osuCrypto::LogVole
         {
             return 0;
         }
-        return (zpLabelCount + slots - 1) / slots;
+        return zpLabelCount / slots + static_cast<u64>((zpLabelCount % slots) != 0);
     }
 
     bool makeZpCrtContext(const RingParams& ring, u32 plaintextModulusBits, ZpCrtContext& out)

@@ -6,6 +6,8 @@
     X(Civole, RejectsZeroDelta) \
     X(Civole, ValidationAndSidReuse) \
     X(Civole, StateMachineAutoOfflineSequentialSids) \
+    X(Core, WideU64OneShiftBounds) \
+    X(Core, ZpRingLabelCountCeilNoOverflow) \
     X(Core, RootOnlineLocalRelation) \
     X(Core, TwoLevelCoprotoRelation) \
     X(Core, ThreeLevelOfflineReuseAndInvalidWidth) \
