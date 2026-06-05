@@ -1612,6 +1612,33 @@ paper-full-variant vs implemented-truncated-variant convention mismatch that is
 documented (LV-AUDIT-005), matches the reference, and is exercised end-to-end by a
 passing standard relation test at `tau_hi > 1`. Dropped.
 
+## LV-AUDIT-029: Depth-3 sender online cache was not populated on intermediate recursive levels
+
+Status: fixed
+
+Concern:
+
+For recursive online runs with at least one non-root intermediate level, the
+sender unwind expects every non-root level to have `mPrecomputedTbk` populated.
+`evaluateSenderSeedCandidate` computed each intermediate level's accepted
+`finalTbk`, but only returned it upward as `next.mTbk`; it did not cache that
+same value on the intermediate `SenderState`. The sender online service then
+aborted when unwinding through that level.
+
+Fix:
+
+The accepted recursive branch now stores `finalTbk` into
+`state.mPrecomputedTbk` before moving it into the returned evaluation output.
+The default test `LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth` now runs
+three-level local online and asserts both the top-level and intermediate sender
+precompute caches are populated.
+
+Relevant files:
+
+- `LogVoleCore.cpp` (`evaluateSenderSeedCandidate`, recursive branch)
+- `LogVoleRingSender.cpp` (`senderOnlineService` unwind cache requirement)
+- `test_core.cpp` (`LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth`)
+
 ## Next audit pass
 
 Recommended next work items (incorporating the recommended oracle tests):

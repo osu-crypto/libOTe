@@ -1395,9 +1395,32 @@ void LogVole_Core_ThreeLevelOfflineReuseAndInvalidWidth(const oc::CLP&)
     LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState != nullptr);
     LOGVOLE_REQUIRE_TRUE(receiverOffline.mState.mNextLevelState->mNextLevelState != nullptr);
 
-    LOGVOLE_REQUIRE_TRUE(ensureSenderPrecompute(senderOffline.mState));
     LOGVOLE_EXPECT_TRUE(senderOffline.mState.mGoldenSeed.empty());
     LOGVOLE_EXPECT_TRUE(senderOffline.mState.mPrecomputedTbk == nullptr);
+
+    ReceiverOnlineInput receiverInputOnline{};
+    receiverInputOnline.mX = sample_small_plain_batch(
+        ctx,
+        params.mW,
+        0x7862u,
+        std::min<std::uint32_t>(20u, params.mShrinkExpand.mPlaintextModulusBits));
+
+    SenderOnlineOutput senderOnline{};
+    ReceiverOnlineOutput receiverOnline{};
+    LOGVOLE_REQUIRE_TRUE(run_local_online_for_test(
+        senderOffline.mState,
+        receiverOffline.mState,
+        receiverInputOnline,
+        senderOnline,
+        receiverOnline));
+    LOGVOLE_REQUIRE_EQ(senderOnline.mTbk.size(), params.mW);
+    LOGVOLE_REQUIRE_EQ(receiverOnline.mTbm.size(), params.mW);
+    LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mPrecomputedTbk != nullptr);
+    LOGVOLE_REQUIRE_EQ(senderOffline.mState.mPrecomputedTbk->size(), params.mW);
+    LOGVOLE_REQUIRE_TRUE(senderOffline.mState.mNextLevelState->mPrecomputedTbk != nullptr);
+    LOGVOLE_REQUIRE_EQ(
+        senderOffline.mState.mNextLevelState->mPrecomputedTbk->size(),
+        senderOffline.mState.mNextLevelState->mParams.mW);
 
     const auto& topPackage = senderOffline.mState.mShrinkExpandState;
     const auto& firstInternal = senderOffline.mState.mNextLevelState->mShrinkExpandState;

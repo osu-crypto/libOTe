@@ -1655,6 +1655,7 @@ namespace osuCrypto::LogVole
             }
 
             next.mValid = true;
+            state.mPrecomputedTbk = std::make_shared<std::vector<RnsPoly>>(finalTbk);
             next.mTbk = std::move(finalTbk);
             out = std::move(next);
             return true;
