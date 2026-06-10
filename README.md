@@ -25,6 +25,7 @@ primary design goal of this library to obtain *high performance* while being
 **Vole:**
 * Generic subfield noisy VOLE (semi-honest) [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf)
 * Generic subfield silent VOLE (malicious/semi-honest) [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882).
+* LogVole chosen-input VOLE (semi-honest, Ring-LWE) [[NRS26]](#citation).
  
 **OLE and Beaver Triples:**
 * Foleage Binary Beaver Triples and F4 OLE (semi-honest) [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf).
@@ -108,6 +109,7 @@ on platform/dependencies. The `ON`/`OFF` options include
 
  **Vole:**
  * `ENABLE_SILENT_VOLE` the [[BCGIKRS19]](https://eprint.iacr.org/2019/1159.pdf),[[RRT23]](https://eprint.iacr.org/2023/882) semi-honest/malicious protocol.
+ * `ENABLE_LOGVOLE` the LogVole chosen-input VOLE protocol [[NRS26]](#citation). This option requires stock Microsoft SEAL 4.1.1.
 
  **DPF:**
  * `ENABLE_REGULAR_DPF` the Boyle et al [[BGI18]](https://eprint.iacr.org/2018/707.pdf) semi-honest protocol.
@@ -272,6 +274,8 @@ or running the library.
 [Ds17] - Jack Doerner, abhi shelat, _Scaling ORAM for Secure Computation_ [eprint/2017/827](https://eprint.iacr.org/2017/827.pdf)
 
 [CRR21] - Geoffroy Couteau ,Srinivasan Raghuraman and Peter Rindal, _Silver: Silent VOLE and Oblivious Transfer from Hardness of Decoding Structured LDPC Codes_.
+
+[NRS26] - Lucien K. L. Ng, Peter Rindal and Akash Shah, _LogVOLE: Succinct and Efficient Chosen-Input VOLE for ZK and Beyond_.
 
 [Roy22] - Lawrence Roy, SoftSpokenOT: Communication--Computation Tradeoffs in OT Extension. [eprint/2022/192](https://eprint.iacr.org/2022/192)
 

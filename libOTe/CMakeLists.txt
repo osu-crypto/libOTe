@@ -2,6 +2,10 @@ enable_language(ASM)
 
 file(GLOB_RECURSE SRCS *.cpp *.c)
 
+if(NOT ENABLE_LOGVOLE)
+    list(FILTER SRCS EXCLUDE REGEX ".*/Vole/LogVole/.*")
+endif()
+
 set(SRCS "${SRCS}")
 
 add_library(libOTe STATIC ${SRCS} )
@@ -15,6 +19,7 @@ target_include_directories(libOTe PUBLIC
 target_include_directories(libOTe PUBLIC
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
                     $<INSTALL_INTERFACE:include>)
+
                     
 target_link_libraries(libOTe cryptoTools)
 
@@ -33,6 +38,11 @@ endif()
 if (ENABLE_BITPOLYMUL)
 	target_link_libraries(libOTe bitpolymul)
 endif ()
+
+if(ENABLE_LOGVOLE)
+	target_link_libraries(libOTe SEAL::seal)
+endif()
+
 if(ENABLE_SIMPLESTOT_ASM)
 	target_link_libraries(libOTe SimplestOT)
 endif()

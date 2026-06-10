@@ -102,6 +102,7 @@ option(ENABLE_KKRT           "Build the KKRT 1-oo-N OT-Ext protocol." OFF)
 
 option(ENABLE_PPRF           "Build the PPRF protocol." OFF)
 option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
+option(ENABLE_LOGVOLE        "Build the LogVole protocol." ON)
 
 option(ENABLE_FOLEAGE        "Build the Foleage OLE protocol." OFF)
 
@@ -116,6 +117,10 @@ option(NO_KOS_WARNING        "Build with no kos security warning." OFF)
 EVAL(FETCH_BITPOLYMUL_IMPL 
 	(DEFINED FETCH_BITPOLYMUL AND FETCH_BITPOLYMUL) OR
 	((NOT DEFINED FETCH_BITPOLYMUL) AND (FETCH_AUTO AND ENABLE_BITPOLYMUL)))
+
+EVAL(FETCH_SEAL_IMPL
+	(DEFINED FETCH_SEAL AND FETCH_SEAL) OR
+	((NOT DEFINED FETCH_SEAL) AND (FETCH_AUTO AND ENABLE_LOGVOLE)))
 
 if(ENABLE_SILENT_VOLE OR ENABLE_SILENTOT OR ENABLE_SOFTSPOKEN_OT)
 	set(ENABLE_PPRF true)
@@ -139,6 +144,7 @@ message(STATUS "General Options\n===============================================
 
 message(STATUS "Option: VERBOSE_FETCH         = ${VERBOSE_FETCH}")
 message(STATUS "Option: FETCH_BITPOLYMUL      = ${FETCH_BITPOLYMUL_IMPL}\n")
+message(STATUS "Option: FETCH_SEAL            = ${FETCH_SEAL_IMPL}\n")
 
 message(STATUS "Option: ENABLE_ALL_OT         = ON/OFF")
 message(STATUS "Option: ENABLE_BITPOLYMUL     = ${ENABLE_BITPOLYMUL}")
@@ -162,7 +168,8 @@ message(STATUS "1-out-of-2 Delta-OT Extension protocols\n=======================
 message(STATUS "Option: ENABLE_DELTA_KOS      = ${ENABLE_DELTA_KOS}\n\n")
 
 message(STATUS "Vole protocols\n=======================================================")
-message(STATUS "Option: ENABLE_SILENT_VOLE    = ${ENABLE_SILENT_VOLE}\n\n")
+message(STATUS "Option: ENABLE_SILENT_VOLE    = ${ENABLE_SILENT_VOLE}")
+message(STATUS "Option: ENABLE_LOGVOLE        = ${ENABLE_LOGVOLE}\n\n")
 
 
 message(STATUS "DPF protocols\n=======================================================")

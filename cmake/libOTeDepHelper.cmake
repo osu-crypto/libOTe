@@ -61,6 +61,79 @@ if (ENABLE_BITPOLYMUL)
     endif()
 endif()
 
+## SEAL
+###########################################################################
+
+function(CONFIGURE_SEAL_IMPORTED_CONFIGS)
+    if(NOT TARGET SEAL::seal)
+        return()
+    endif()
+
+    get_target_property(SEAL_IMPORTED_CONFIGS SEAL::seal IMPORTED_CONFIGURATIONS)
+    if(NOT SEAL_IMPORTED_CONFIGS)
+        return()
+    endif()
+
+    if(RELWITHDEBINFO IN_LIST SEAL_IMPORTED_CONFIGS)
+        set(SEAL_IMPORTED_FALLBACK RELWITHDEBINFO)
+    elseif(RELEASE IN_LIST SEAL_IMPORTED_CONFIGS)
+        set(SEAL_IMPORTED_FALLBACK RELEASE)
+    else()
+        list(GET SEAL_IMPORTED_CONFIGS 0 SEAL_IMPORTED_FALLBACK)
+    endif()
+
+    foreach(SEAL_CONFIG DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+        if(NOT SEAL_CONFIG IN_LIST SEAL_IMPORTED_CONFIGS)
+            set_property(TARGET SEAL::seal PROPERTY
+                MAP_IMPORTED_CONFIG_${SEAL_CONFIG} ${SEAL_IMPORTED_FALLBACK})
+
+            foreach(SEAL_PROPERTY
+                    IMPORTED_LOCATION
+                    IMPORTED_IMPLIB
+                    IMPORTED_LINK_INTERFACE_LANGUAGES)
+                get_target_property(SEAL_PROPERTY_VALUE SEAL::seal
+                    ${SEAL_PROPERTY}_${SEAL_IMPORTED_FALLBACK})
+
+                if(NOT SEAL_PROPERTY_VALUE STREQUAL "SEAL_PROPERTY_VALUE-NOTFOUND")
+                    set_property(TARGET SEAL::seal PROPERTY
+                        ${SEAL_PROPERTY}_${SEAL_CONFIG} "${SEAL_PROPERTY_VALUE}")
+                endif()
+            endforeach()
+
+            set_property(TARGET SEAL::seal APPEND PROPERTY
+                IMPORTED_CONFIGURATIONS ${SEAL_CONFIG})
+        endif()
+    endforeach()
+endfunction()
+
+macro(FIND_SEAL)
+    if(FETCH_SEAL)
+        set(SEAL_DP NO_DEFAULT_PATH PATHS ${OC_THIRDPARTY_HINT})
+    elseif(${NO_CMAKE_SYSTEM_PATH})
+        set(SEAL_DP NO_DEFAULT_PATH PATHS ${CMAKE_PREFIX_PATH})
+    else()
+        unset(SEAL_DP)
+    endif()
+
+    find_package(SEAL 4.1.1 EXACT ${SEAL_DP} ${ARGN})
+
+    CONFIGURE_SEAL_IMPORTED_CONFIGS()
+endmacro()
+
+if(FETCH_SEAL_IMPL)
+    FIND_SEAL(QUIET)
+
+    include(${CMAKE_CURRENT_LIST_DIR}/../thirdparty/getSeal.cmake)
+endif()
+
+if(ENABLE_LOGVOLE)
+    FIND_SEAL(REQUIRED)
+
+    if(NOT TARGET SEAL::seal)
+        message(FATAL_ERROR "ENABLE_LOGVOLE requires stock Microsoft SEAL target SEAL::seal")
+    endif()
+endif()
+
 
 
 # resort the previous prefix path

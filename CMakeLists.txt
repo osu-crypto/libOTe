@@ -95,6 +95,10 @@ include(cmake/libOTeDepHelper.cmake)
 file(REMOVE ${CMAKE_CURRENT_LIST_DIR}/libOTe/config.h)
 configure_file(libOTe/config.h.in libOTe/config.h)
 
+if(ENABLE_LOGVOLE)
+	enable_testing()
+endif()
+
 if(ENABLE_SIMPLESTOT_ASM AND (NOT MSVC))
 	add_subdirectory(thirdparty/SimplestOT)
 endif()
@@ -110,6 +114,11 @@ add_subdirectory(libOTe_Tests)
 #              Build Frontend               #
 #############################################
 add_subdirectory(frontend)
+
+if(ENABLE_LOGVOLE)
+	add_test(NAME LogVoleNativeTests COMMAND frontend_libOTe -u LogVole)
+	set_tests_properties(LogVoleNativeTests PROPERTIES LABELS "logvole;logvole-native")
+endif()
 
 
 

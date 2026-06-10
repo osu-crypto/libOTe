@@ -1,5 +1,6 @@
 #include "UnitTests.h"
 
+#include <libOTe/config.h>
 #include <cryptoTools/Common/Log.h>
 #include <functional>
 
@@ -20,6 +21,7 @@
 #include "libOTe_Tests/Foleage_Tests.h"
 #include "libOTe_Tests/Permutation_Tests.h"
 #include "libOTe_Tests/BlkAccCode_Tests.h"
+#include "libOTe_Tests/LogVole_Tests.h"
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -144,5 +146,15 @@ namespace tests_libOTe
 			tc.add("SilentOtTriple_ole_test                 ", SilentOtTriple_ole_test);
 			tc.add("SilentOtTriple_triple_test              ", SilentOtTriple_triple_test);
 
+#ifdef ENABLE_LOGVOLE
+#define LIBOTE_LOGVOLE_ADD_TEST(suite, name) \
+			tc.add("LogVole_" #suite "_" #name, LogVole_##suite##_##name);
+#define LIBOTE_LOGVOLE_ADD_EXTENDED_TEST(suite, name) \
+			tc.addExtended("LogVole_" #suite "_" #name, LogVole_##suite##_##name);
+			LIBOTE_LOGVOLE_TESTS(LIBOTE_LOGVOLE_ADD_TEST)
+			LIBOTE_LOGVOLE_EXTENDED_TESTS(LIBOTE_LOGVOLE_ADD_EXTENDED_TEST)
+#undef LIBOTE_LOGVOLE_ADD_EXTENDED_TEST
+#undef LIBOTE_LOGVOLE_ADD_TEST
+#endif
 		});
 }
