@@ -271,53 +271,54 @@ namespace osuCrypto
 			auto shareIter = share.data();
 			auto outIter = output.begin();
 			auto treeSize8 = treeSize / 8 * 8;
-
-			co_await chl.recv(buffer);
 			
 			auto points = getPoints(PprfOutputFormat::ByTreeIndex);
-			for (u64 j = 0; j < numTrees; ++j)
-			{
-				span<u8> buff = leafMsgs.subspan(0, ctx.template byteSize<F>());
-				leafMsgs = leafMsgs.subspan(buff.size());
-				ctx.zero(sum.begin(), sum.end());
-				ctx.deserialize(buff.begin(), buff.end(), sum.begin());
+			for (u64 j = 0; j < numTrees; ++j) {
+                // span<u8> buff = leafMsgs.subspan(0, ctx.template byteSize<F>());
+                // leafMsgs = leafMsgs.subspan(buff.size());
+                ctx.zero(sum.begin(), sum.end());
+                // ctx.deserialize(buff.begin(), buff.end(), sum.begin());
 
-				u64 k = 0;
+                u64 k = 0;
 
-				for (; k < treeSize8; k+=8)
-				{
-					aes.hashBlocks<8>(shareIter, seeds.data());
-					SIMD8(q, ctx.template fromBlock<F>(val[q], seeds[q]));
-					SIMD8(q, ctx.minus(sum[q], sum[q], val[q]));
-					SIMD8(q, ctx.copy(outIter[q], val[q]));
+                for (; k < treeSize8; k += 8) {
+                    aes.hashBlocks<8>(shareIter, seeds.data());
+                    SIMD8(q, ctx.template fromBlock<F>(val[q], seeds[q]));
+                    SIMD8(q, ctx.minus(sum[q], sum[q], val[q]));
+                    SIMD8(q, ctx.copy(outIter[q], val[q]));
 
-					shareIter += 8;
-					outIter += 8;
-				}
+                    shareIter += 8;
+                    outIter += 8;
+                }
 
-				for (; k < treeSize; ++k)
-				{
-					auto seed = aes.hashBlock(*shareIter++);
-					ctx.template fromBlock<F>(val[0], seed);
-					ctx.minus(sum[0], sum[0], val[0]);
-					ctx.copy(*outIter++, val[0]);
+                for (; k < treeSize; ++k) {
+                    auto seed = aes.hashBlock(*shareIter++);
+                    ctx.template fromBlock<F>(val[0], seed);
+                    ctx.minus(sum[0], sum[0], val[0]);
+                    ctx.copy(*outIter++, val[0]);
+                }
 
-				}
+                for (u64 i = 1; i < 8; ++i)
+                    ctx.plus(sum[0], sum[0], sum[i]);
 
-				for (u64 i = 1; i < 8; ++i)
-					ctx.plus(sum[0], sum[0], sum[i]);
+                // out = s1,s2,s3,...,rp,...,sn
+                // sum = v+s1+s2+s3+...+sp+...+sn
+                //        -s1-s2-s3-...-rp-...-sn
+                //     = v+sp-rp
+                // out[p] = sum + rp
+                //        = v+sp
+                ctx.plus(output[j * treeSize + points[j]], sum[0], output[j * treeSize + points[j]]);
+            }
 
-				// out = s1,s2,s3,...,rp,...,sn
-				// sum = v+s1+s2+s3+...+sp+...+sn 
-				//        -s1-s2-s3-...-rp-...-sn
-				//     = v+sp-rp
-				// out[p] = sum + rp
-				//        = v+sp
-				ctx.plus(
-					output[j * treeSize + points[j]],
-					sum[0],
-					output[j * treeSize + points[j]]);
-			}
+            co_await chl.recv(buffer);
+
+            for (u64 j = 0; j < numTrees; ++j) {
+                span<u8> buff = leafMsgs.subspan(0, ctx.template byteSize<F>());
+                leafMsgs = leafMsgs.subspan(buff.size());
+                ctx.deserialize(buff.begin(), buff.end(), sum.begin());
+
+                ctx.plus(output[j * treeSize + points[j]], sum[0], output[j * treeSize + points[j]]);
+            }
 
 		}
 
