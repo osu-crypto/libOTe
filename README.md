@@ -245,7 +245,7 @@ or running the library.
 
 ```
 @misc{libOTe,
-    author = {Peter Rindal, Lance Roy},
+    author = {Peter Rindal, Lance Roy, Lucien K. L. Ng},
     title = {{libOTe: an efficient, portable, and easy to use Oblivious Transfer Library}},
     howpublished = {\url{https://github.com/osu-crypto/libOTe}},
 }
