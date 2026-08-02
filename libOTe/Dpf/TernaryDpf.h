@@ -32,7 +32,7 @@ namespace osuCrypto
 
 		u64 mDepth = 0;
 
-		u64 mNumPoints = 0;
+		u64 mNumPointsPerSet = 0;
 
 		u64 mOtIdx = 0;
 
@@ -55,7 +55,7 @@ namespace osuCrypto
 			mDepth = log3ceil(domain);
 			mPartyIdx = partyIdx;
 			mDomain = domain;
-			mNumPoints = numPoints;
+			mNumPointsPerSet = numPoints;
 			mOtIdx = 0;
 		}
 
@@ -90,9 +90,9 @@ namespace osuCrypto
 				std::is_invocable_v<Output, u64, u64, F>
 				, "output must be a callback/lambda that callable with (u64 treeIdx, u64 leafIdx, F value, u8 tag) or  (u64 treeIdx, u64 leafIdx, F value) ");
 
-			if (points.size() != mNumPoints)
+			if (points.size() != mNumPointsPerSet)
 				throw RTE_LOC;
-			if (values.size() && values.size() != mNumPoints)
+			if (values.size() && values.size() != mNumPointsPerSet)
 				throw RTE_LOC;
 
 			if (mDomain == 1)
@@ -100,7 +100,7 @@ namespace osuCrypto
 				// trivial case where the domain is 1.
 				if (values.size())
 				{
-					for (u64 i = 0; i < mNumPoints; ++i)
+					for (u64 i = 0; i < mNumPointsPerSet; ++i)
 					{
 						if constexpr(std::is_invocable_v<Output, u64, u64, F, u8>)
 							output(i, 0, values[i], mPartyIdx);
@@ -112,7 +112,7 @@ namespace osuCrypto
 				{
 					VecF rand;
 					ctx.resize(rand, 1);
-					for (u64 i = 0; i < mNumPoints; ++i)
+					for (u64 i = 0; i < mNumPointsPerSet; ++i)
 					{
 						ctx.fromBlock(rand[0], prng.get<block>());
 						if constexpr (std::is_invocable_v<Output, u64, u64, F, u8>)
@@ -125,7 +125,7 @@ namespace osuCrypto
 			}
 
 
-			for (u64 i = 0; i < mNumPoints; ++i)
+			for (u64 i = 0; i < mNumPointsPerSet; ++i)
 			{
 				u64 v = points[i].mVal;
 				for (u64 j = 0; j < mDepth; ++j)
@@ -138,13 +138,13 @@ namespace osuCrypto
 					throw std::runtime_error("TernaryDpf: invalid point sharing. point is larger than 3^D " LOCATION);
 			}
 
-			u64 numPoints8 = mNumPoints / 8 * 8;
+			u64 numPoints8 = mNumPointsPerSet / 8 * 8;
 			auto pow3 = ipow(3, mDepth);
 
 			u64 allocSize =
-				sizeof(block) * mNumPoints * (pow3 + pow3 / 3 + pow3 / 9)/*seeds*/ +
-				sizeof(block) * mNumPoints * 3 * 2/*z, sigma*/; //+
-				//sizeof(u8) * mNumPoints * mDomain /*t*/
+				sizeof(block) * mNumPointsPerSet * (pow3 + pow3 / 3 + pow3 / 9)/*seeds*/ +
+				sizeof(block) * mNumPointsPerSet * 3 * 2/*z, sigma*/; //+
+				//sizeof(u8) * mNumPointsPerSet * mDomain /*t*/
 				;
 			AlignedUnVector<u8> allocation(allocSize);
 			auto allocIter = allocation.data();
@@ -161,13 +161,13 @@ namespace osuCrypto
 			// shares of S'
 			std::array<MatrixView<block>, 3> s;
 			auto last = mDepth % 3;
-			s[(last + 0) % 3] = makeMatrix(pow3 / 1, mNumPoints, block{}); 
-			s[(last + 2) % 3] = makeMatrix(pow3 / 3, mNumPoints, block{}); 
-			s[(last + 1) % 3] = makeMatrix(pow3 / 9, mNumPoints, block{}); 
+			s[(last + 0) % 3] = makeMatrix(pow3 / 1, mNumPointsPerSet, block{}); 
+			s[(last + 2) % 3] = makeMatrix(pow3 / 3, mNumPointsPerSet, block{}); 
+			s[(last + 1) % 3] = makeMatrix(pow3 / 9, mNumPointsPerSet, block{}); 
 
 			auto getRow = [](auto&& m, u64 i) {return m[i]; };
-			auto z = makeMatrix(3, mNumPoints, block{});
-			auto sigma = makeMatrix(3, mNumPoints, block{});
+			auto z = makeMatrix(3, mNumPointsPerSet, block{});
+			auto sigma = makeMatrix(3, mNumPointsPerSet, block{});
 
 
 			{
@@ -176,7 +176,7 @@ namespace osuCrypto
 				auto sc0 = s[1][0];
 				auto sc1 = s[1][1];
 				auto sc2 = s[1][2];
-				for (u64 k = 0; k < mNumPoints; ++k)
+				for (u64 k = 0; k < mNumPointsPerSet; ++k)
 				{
 					t[k] = block::allSame<u8>(-mPartyIdx);
 					sc0[k] = prng.get<block>();
@@ -271,7 +271,7 @@ namespace osuCrypto
 								SIMD8(q, seed[j][k+q] = tagBit(s[q]));
 							}
 
-							for (u64 k = numPoints8; k < mNumPoints; ++k)
+							for (u64 k = numPoints8; k < mNumPointsPerSet; ++k)
 							{
 								auto seedjk = seed[j][k] ^ (parentTag[k] & sigma[j][k]);
 
@@ -293,11 +293,11 @@ namespace osuCrypto
 			
 			//auto size = ipow(3, mDepth);
 			VecF sums, leafVals;
-			ctx.resize(sums, mNumPoints);
+			ctx.resize(sums, mNumPointsPerSet);
 			ctx.zero(sums.begin(), sums.end());
-			ctx.resize(leafVals, mNumPoints * mDomain);
-			Matrix<u8> t(mDomain, mNumPoints, AllocType::Uninitialized);
-			//auto t = makeMatrix(mDomain, mNumPoints, u8{});
+			ctx.resize(leafVals, mNumPointsPerSet * mDomain);
+			Matrix<u8> t(mDomain, mNumPointsPerSet, AllocType::Uninitialized);
+			//auto t = makeMatrix(mDomain, mNumPointsPerSet, u8{});
 
 			// fixing the last layer
 			{
@@ -330,7 +330,7 @@ namespace osuCrypto
 							leafIter += 8;;
 						}
 
-						for (u64 k = numPoints8; k < mNumPoints; ++k)
+						for (u64 k = numPoints8; k < mNumPointsPerSet; ++k)
 						{
 							auto s = cs[k] ^ (parentTag[k] & sig[k]);
 							tt[k] = lsb(s);
@@ -349,18 +349,18 @@ namespace osuCrypto
 			if (values.size())
 			{
 				VecF gamma, diff;
-				ctx.resize(gamma, mNumPoints);
-				ctx.resize(diff, mNumPoints);
+				ctx.resize(gamma, mNumPointsPerSet);
+				ctx.resize(diff, mNumPointsPerSet);
 
 				//auto& curSeed = s[mDepth % 3];
 
-				for (u64 k = 0; k < mNumPoints; ++k)
+				for (u64 k = 0; k < mNumPointsPerSet; ++k)
 				{
 					ctx.plus(diff[k], values[k], sums[k]);
 				}
 				co_await sock.send(std::move(diff));
 				co_await sock.recv(gamma);
-				for (u64 k = 0; k < mNumPoints; ++k)
+				for (u64 k = 0; k < mNumPointsPerSet; ++k)
 				{
 					ctx.plus(gamma[k], gamma[k], sums[k]);
 					ctx.plus(gamma[k], gamma[k], values[k]);
@@ -380,7 +380,7 @@ namespace osuCrypto
 					//	SIMD8(q, T[q] = block::allSame<u64>(-tdi[k + q]) & gamma[k + q]);
 					//	SIMD8(q, output(k + q, i, sdi[k + q] ^ T[q], tdi[k + q]));
 					//}
-					for (u64 k = 0; k < mNumPoints; ++k)
+					for (u64 k = 0; k < mNumPointsPerSet; ++k)
 					{
 						ctx.mask(temp[0], gamma[k], block::allSame<u8>(-tdi[k]));
 						ctx.plus(temp[0], temp[0], *leafIter++);
@@ -402,7 +402,7 @@ namespace osuCrypto
 				auto tagIter = t.data();
 				for (u64 i = 0; i < mDomain; ++i)
 				{
-					for (u64 k = 0; k < mNumPoints; ++k)
+					for (u64 k = 0; k < mNumPointsPerSet; ++k)
 					{
 						if constexpr (std::is_invocable_v<Output, u64, u64, F, u8>)
 							output(k, i, *leafIter++, *tagIter++);
@@ -425,9 +425,9 @@ namespace osuCrypto
 			PRNG& prng,
 			coproto::Socket& sock)
 		{
-			Matrix<block> sigmaShares(3, mNumPoints, AllocType::Uninitialized);
-			Matrix<block> mask(mNumPoints, 3, AllocType::Uninitialized);
-			Matrix<block> recvBuffer(mNumPoints * 2, 3, AllocType::Uninitialized);
+			Matrix<block> sigmaShares(3, mNumPointsPerSet, AllocType::Uninitialized);
+			Matrix<block> mask(mNumPointsPerSet, 3, AllocType::Uninitialized);
+			Matrix<block> recvBuffer(mNumPointsPerSet * 2, 3, AllocType::Uninitialized);
 
 			std::array<coproto::Socket, 2> socks;
 			socks[0] = sock;
@@ -445,12 +445,12 @@ namespace osuCrypto
 
 			auto sender = [&]() -> macoro::task<> {
 
-				BitVector correction(mNumPoints * 2);
-				AlignedUnVector<u8> sendBuffer(mNumPoints * 2 * sizeof(std::array<block, 3>));
+				BitVector correction(mNumPointsPerSet * 2);
+				AlignedUnVector<u8> sendBuffer(mNumPointsPerSet * 2 * sizeof(std::array<block, 3>));
 				auto sendIter = sendBuffer.data();
 
 				co_await socks[0].recv(correction);
-				for (u64 i = 0; i < mNumPoints; ++i)
+				for (u64 i = 0; i < mNumPointsPerSet; ++i)
 				{
 					auto keys0 = mBaseSendOts[mOtIdx + i * 2 + 0];
 					auto keys1 = mBaseSendOts[mOtIdx + i * 2 + 1];
@@ -496,8 +496,8 @@ namespace osuCrypto
 				};
 
 			auto recver = [&]() -> macoro::task<> {
-				BitVector correction(mNumPoints * 2);
-				for (u64 i = 0; i < mNumPoints; ++i)
+				BitVector correction(mNumPointsPerSet * 2);
+				for (u64 i = 0; i < mNumPointsPerSet; ++i)
 				{
 					auto a = points[i][mDepth - iter];
 					correction[i * 2 + 0] = ((a >> 0) & 1) ^ mBaseChoice[mOtIdx + i * 2 + 0];
@@ -513,7 +513,7 @@ namespace osuCrypto
 				recver()
 			);
 
-			for (u64 i = 0; i < mNumPoints; ++i)
+			for (u64 i = 0; i < mNumPointsPerSet; ++i)
 			{
 				auto a = points[i][mDepth - iter];
 
@@ -554,20 +554,20 @@ namespace osuCrypto
 				sigma(i) ^= sigmaShares(i);//^ mask[i][j];
 			}
 
-			mOtIdx += mNumPoints * 2;
+			mOtIdx += mNumPointsPerSet * 2;
 
 //			if (0)
 //			{
-//				std::vector<u8> alphaj(mNumPoints);
-//				std::vector<block> zz(mNumPoints * 3); auto zzIter = zz.begin();
-//				for (u64 k = 0; k < mNumPoints; ++k)
+//				std::vector<u8> alphaj(mNumPointsPerSet);
+//				std::vector<block> zz(mNumPointsPerSet * 3); auto zzIter = zz.begin();
+//				for (u64 k = 0; k < mNumPointsPerSet; ++k)
 //				{
 //					alphaj[k] = points[k][mDepth - iter];
 //				}
 //
 //				for (u64 k = 0; k < 3; ++k)
 //				{
-//					copyBytes(span<block>(zzIter, zzIter + mNumPoints), z[k]); zzIter += mNumPoints;
+//					copyBytes(span<block>(zzIter, zzIter + mNumPointsPerSet), z[k]); zzIter += mNumPointsPerSet;
 //				}
 //
 //				co_await sock.send(coproto::copy(alphaj));
@@ -577,11 +577,11 @@ namespace osuCrypto
 //				co_await sock.recv(zz);
 //
 //				zzIter = zz.begin();
-//				Matrix<block> sigma2(3, mNumPoints);
+//				Matrix<block> sigma2(3, mNumPointsPerSet);
 //				for (u64 k = 0; k < 3; ++k)
 //				{
 //					std::cout << "sigma2 \n";
-//					for (u64 i = 0; i < mNumPoints; ++i)
+//					for (u64 i = 0; i < mNumPointsPerSet; ++i)
 //					{
 //						std::cout << " " << (z[k][i] ^ *zzIter) << " = " << std::hex << z[k][i].get<u32>(0) << " ^ " << std::hex << zzIter->get<u32>(0) << std::endl;
 //						sigma2[k][i] = z[k][i] ^ *zzIter++;
@@ -589,7 +589,7 @@ namespace osuCrypto
 //					}
 //				}
 //
-//				for (u64 i = 0; i < mNumPoints; ++i)
+//				for (u64 i = 0; i < mNumPointsPerSet; ++i)
 //				{
 //					assert(recvAlphaj[i] < 3);
 //					auto a = (alphaj[i] + recvAlphaj[i]) % 3;
@@ -618,7 +618,7 @@ namespace osuCrypto
 
 		u64 baseOtCount() const
 		{
-			return mDepth * mNumPoints * 2;
+			return mDepth * mNumPointsPerSet * 2;
 		}
 
 		void setBaseOts(

@@ -8,7 +8,7 @@ endif()
 
 set(SRCS "${SRCS}")
 
-add_library(libOTe STATIC ${SRCS} )
+add_library(libOTe STATIC ${SRCS})
 
 
 
@@ -23,10 +23,23 @@ target_include_directories(libOTe PUBLIC
                     
 target_link_libraries(libOTe cryptoTools)
 
+
+target_compile_definitions(libOTe PRIVATE
+    $<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:NDEBUG>
+)
+
+
 if(MSVC)
-    target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
+    target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}> /Zi )
 else()
+
     target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
+    
+    if(NOT APPLE)
+        # no-subobject-linkage =  GCC bug complaining about coroutines capturing lambdas
+        # which only have internal linkage. But this is expected.
+        target_compile_options(libOTe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER} -Wno-subobject-linkage>)
+    endif()
 
     if(ENABLE_SSE)
         target_compile_options(libOTe PRIVATE -maes -msse2 -msse3 -msse4.1 -mpclmul)

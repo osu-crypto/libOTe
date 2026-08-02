@@ -70,6 +70,7 @@ if(DEFINED ENABLE_ALL_OT)
 	set(ENABLE_SILENTOT		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_SILENT_VOLE    ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_FOLEAGE		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
+	set(ENABLE_RINGLPN		  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_REGULAR_DPF	  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_TERNARY_DPF	  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
 	set(ENABLE_SPARSE_DPF	  ${ENABLE_ALL_OT}						CACHE BOOL "" FORCE)
@@ -105,6 +106,7 @@ option(ENABLE_SILENT_VOLE    "Build the Silent Vole protocol." OFF)
 option(ENABLE_LOGVOLE        "Build the LogVole protocol." ON)
 
 option(ENABLE_FOLEAGE        "Build the Foleage OLE protocol." OFF)
+option(ENABLE_RINGLPN        "Build the Foleage OLE protocol." OFF)
 
 
 option(ENABLE_REGULAR_DPF    "Build the Regular DPF protocol." OFF)
@@ -179,7 +181,8 @@ message(STATUS "Option: ENABLE_TERNARY_DPF    = ${ENABLE_TERNARY_DPF}")
 message(STATUS "Option: ENABLE_PPRF           = ${ENABLE_PPRF}\n\n")
 
 message(STATUS "OLE and Triple protocols\n=======================================================")
-message(STATUS "Option: ENABLE_FOLEAGE        = ${ENABLE_FOLEAGE}\n\n")
+message(STATUS "Option: ENABLE_FOLEAGE        = ${ENABLE_FOLEAGE}")
+message(STATUS "Option: ENABLE_RINGLPN        = ${ENABLE_RINGLPN}\n\n")
 
 message(STATUS "1-out-of-N OT Extension protocols\n=======================================================")
 message(STATUS "Option: ENABLE_OOS            = ${ENABLE_OOS}")
@@ -226,8 +229,8 @@ if (ENABLE_MRR_TWIST AND NOT SODIUM_MONTGOMERY)
 	message(FATAL_ERROR "ENABLE_MRR_TWIST requires libsodium to support Montgomery curve noclamp operations. get sodium from https://github.com/osu-crypto/libsodium to enable.")
 endif()
 
-if ((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_NP OR ENABLE_MRR) AND NOT (ENABLE_SODIUM OR ENABLE_RELIC))
-	message(FATAL_ERROR "ENABLE_SIMPLESTOT, ENABLE_MR, ENABLE_NP, and ENABLE_MRR require ENABLE_SODIUM or ENABLE_RELIC")
+if ((ENABLE_SIMPLESTOT OR ENABLE_MR  OR ENABLE_MRR) AND NOT (ENABLE_SODIUM OR ENABLE_RELIC))
+	message(FATAL_ERROR "ENABLE_SIMPLESTOT=${ENABLE_SIMPLESTOT}, ENABLE_MR=${ENABLE_MR}, and ENABLE_MRR=${ENABLE_MRR} require ENABLE_SODIUM=${ENABLE_SODIUM} or ENABLE_RELIC=${ENABLE_RELIC}")
 endif()
 
 if(ENABLE_IKNP AND NOT ENABLE_KOS)

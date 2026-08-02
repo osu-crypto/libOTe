@@ -273,8 +273,9 @@ namespace osuCrypto
         MatrixView<block> g(mG.begin(), mG.end(), codewordBlkSize());
         MatrixView<block> g8(mG8.begin(), mG8.end(), mPow2CodeSize * 256);
 
-
-        for (u64 i = 0; i < g8.bounds()[0]; ++i)
+        auto g8rows = g8.bounds()[0];
+        auto grows = g.bounds()[0];
+        for (u64 i = 0; i < g8rows; ++i)
         {
             auto vv = g8[i];
             MatrixView<block> g8Block(vv.begin(), vv.end(), mPow2CodeSize);
@@ -288,7 +289,7 @@ namespace osuCrypto
                 {
                     do
                     {
-                        if (i * 8 + gRow < g.bounds()[0])
+                        if (i * 8 + gRow < grows)
                         {
 
                             for (u64 wordIdx = 0; wordIdx < codewordBlkSize(); ++wordIdx)
@@ -313,7 +314,7 @@ namespace osuCrypto
     //static std::array<block, 2> sBlockMasks{ { ZeroBlock, AllOneBlock } };
 
     void LinearCode::encode(
-        const span<block>& plaintxt,
+        const span<const block>& plaintxt,
         const span<block>& codeword)
     {
 #ifndef NDEBUG
@@ -422,7 +423,7 @@ namespace osuCrypto
 
 
     void LinearCode::encode(
-        const span<u8>& plaintxt,
+        const span<const u8>& plaintxt,
         const span<u8>& codeword)
     {
 #ifndef NDEBUG
@@ -433,7 +434,7 @@ namespace osuCrypto
         encode(plaintxt.data(), codeword.data());
     }
 
-    void LinearCode::encode(u8 * input, u8 * codeword)
+    void LinearCode::encode(const u8 * input, u8 * codeword)
     {
 
         // highlevel idea: For each byte of the input, we have preprocessed 

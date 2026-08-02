@@ -1,7 +1,5 @@
 
-
-add_library(libOTe_Tests STATIC 
-
+set(SRCS
     BaseOT_Tests.cpp
     bitpolymul_Tests.cpp
     Common.cpp
@@ -11,14 +9,34 @@ add_library(libOTe_Tests STATIC
     OT_Tests.cpp
     Pprf_Tests.cpp
     Dpf_Tests.cpp
+    RevCuckoo_Tests.cpp
     SilentOT_Tests.cpp
     SoftSpoken_Tests.cpp
     TungstenCode_Tests.cpp
     UnitTests.cpp
     Vole_Tests.cpp
     Foleage_Tests.cpp
+    Cmp_Tests.cpp
+    Permute_Tests.cpp
+    Equality_Tests.cpp
+    Field_Tests.cpp
+    Ntt_Tests.cpp
+    Poly_Tests.cpp
+    RingLpn_Tests.cpp
+    BinarySolver_Tests.cpp
+    Goldilocks_Tests.cpp
+    UInt_Tests.cpp
     Permutation_Tests.cpp
-    BlkAccCode_Tests.cpp)
+    BlkAccCode_Tests.cpp
+)
+
+add_library(libOTe_Tests STATIC ${SRCS})
+
+
+target_compile_definitions(libOTe_Tests PRIVATE
+    $<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:NDEBUG>
+)
+
 
 target_link_libraries(libOTe_Tests libOTe)
 
@@ -52,8 +70,15 @@ endif()
 
 
 if(MSVC)
-    target_compile_options(libOTe_Tests PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER}>)
+    target_compile_options(libOTe_Tests PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/std:c++${LIBOTE_STD_VER} /bigobj>)
 
 else()
     target_compile_options(libOTe_Tests PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++${LIBOTE_STD_VER}>)
+
+    if(NOT APPLE)
+        # no-subobject-linkage =  GCC bug complaining about coroutines capturing lambdas
+        # which only have internal linkage. But this is expected.
+        target_compile_options(libOTe_Tests PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-subobject-linkage>)
+
+    endif()
 endif()

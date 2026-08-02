@@ -28,7 +28,7 @@
 
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtSender.h"
 #include "libOTe/TwoChooseOne/Iknp/IknpOtExtReceiver.h"
-
+#include "libOTe/Dpf/RevCuckoo/Simulator.h"
 
 using namespace osuCrypto;
 
@@ -88,8 +88,6 @@ void minimal()
 
 int main(int argc, char** argv)
 {
-	//H4main();
-	//return 0;
 	CLP cmd;
 	cmd.parse(argc, argv);
 
@@ -105,7 +103,11 @@ int main(int argc, char** argv)
 		ExConvChecker(cmd);
 		return 0;
 	}
-	
+	if(cmd.isSet("invMtx"))
+	{
+		RevCuckooSimulator(cmd);
+		return 0;
+	}
 
 	// various benchmarks
 	if (cmd.isSet("bench") || cmd.isSet("benchmark"))

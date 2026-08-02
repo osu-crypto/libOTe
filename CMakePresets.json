@@ -1,4 +1,4 @@
-﻿{
+{
   "version": 2,
   "configurePresets": [
     {
@@ -13,6 +13,7 @@
         "FETCH_AUTO": true,
         "ENABLE_SSE": true,
         "ENABLE_AVX": true,
+        "ENABLE_BMI2": true,
         "ENABLE_BOOST": false,
         "ENABLE_BITPOLYMUL": false,
         "ENABLE_CIRCUITS": true,
@@ -22,6 +23,7 @@
         "ENABLE_MR_KYBER": false,
         "ENABLE_MRR": true,
         "ENABLE_MR": false,
+        "ENABLE_RINGLPN": true,
         "ENABLE_FOLEAGE": true,
         "ENABLE_RELIC": false,
         "ENABLE_SODIUM": true,
@@ -82,6 +84,7 @@
         "ENABLE_ASAN": true,
         "BUILD_SHARED_LIBS": false,
         "LIBOTE_SHARED": false,
+        "COPROTO_SOCK_LOGGING": false,
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
         "CMAKE_PREFIX_PATH": "${sourceDir}/../out/install/${presetName}"
       },
@@ -116,7 +119,9 @@
         "FETCH_AUTO": true,
         "ENABLE_CIRCUITS": true,
         "ENABLE_BITPOLYMUL": false,
+        "ENABLE_RINGLPN": true,
         "VERBOSE_FETCH": true,
+        "ENABLE_BMI2": true,
         "ENABLE_PIC": false,
         "ENABLE_ASAN": false,
         "ENABLE_MOCK_OT": true,

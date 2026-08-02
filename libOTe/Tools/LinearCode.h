@@ -7,7 +7,7 @@
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <cryptoTools/Common/Defines.h>
-#include <cryptoTools/Common/Defines.h>
+#include <cryptoTools/Common/Aligned.h>
 #include <string>
 #include <vector>
 
@@ -52,8 +52,8 @@ namespace osuCrypto
 
         u64 mU8RowCount, mPow2CodeSize, mPlaintextU8Size;
         u64 mCodewordBitSize;
-        std::vector<block> mG;
-        std::vector<block> mG8;
+        AlignedUnVector<block> mG;
+        AlignedUnVector<block> mG8;
 
         inline u64 codewordBitSize() const
         {
@@ -85,9 +85,9 @@ namespace osuCrypto
 
 
 
-        void encode(const span<block>& plaintext,const span<block>& codeword);
-        void encode(const span<u8>& plaintext, const span<u8>& codeword);
-        void encode(u8* plaintext, u8* codeword);
+        void encode(const span<const block>& plaintext,const span<block>& codeword);
+        void encode(const span<const u8>& plaintext, const span<u8>& codeword);
+        void encode(const u8* plaintext, u8* codeword);
 
         void encode_bch511(u8* plaintext, u8* codeword);
 

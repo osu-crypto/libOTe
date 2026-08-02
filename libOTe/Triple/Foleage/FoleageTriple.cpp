@@ -575,8 +575,7 @@ namespace osuCrypto
 						{
 							for (u64 element_idx = 0; element_idx < e; ++element_idx, ++i)
 							{
-								fft[i] |= 
-									block{ coeff[element_idx], 0 }.slli_epi64(2 * poly_index - 64);
+								fft[i] |= block{ coeff[element_idx], 0 }.slli_epi64(2 * poly_index - 64);
 							}
 						}
 					}

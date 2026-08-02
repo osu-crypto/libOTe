@@ -78,6 +78,7 @@ endif()
 #############################################
 #    Build cryptoTools (common utilities)   #
 #############################################
+set(ENABLE_CIRCUITS true)
 add_subdirectory(cryptoTools)
 
 #############################################

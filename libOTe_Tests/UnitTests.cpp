@@ -19,9 +19,21 @@
 #include "libOTe_Tests/TungstenCode_Tests.h"
 #include "libOTe_Tests/Dpf_Tests.h"
 #include "libOTe_Tests/Foleage_Tests.h"
+#include "libOTe_Tests/RevCuckoo_Tests.h"
+#include "libOTe_Tests/Cmp_Tests.h"
+#include "libOTe_Tests/Equality_Tests.h"
+#include "libOTe_Tests/Permute_Tests.h"
+#include "libOTe_Tests/Field_Tests.h"
+#include "libOTe_Tests/Poly_Tests.h"
+#include "libOTe_Tests/Ntt_Tests.h"
+#include "libOTe_Tests/BinarySolver_Tests.h"
+#include "libOTe_Tests/RingLpn_Tests.h"
+#include "libOTe_Tests/Goldilocks_Tests.h"
+#include "libOTe_Tests/UInt_Tests.h"
 #include "libOTe_Tests/Permutation_Tests.h"
 #include "libOTe_Tests/BlkAccCode_Tests.h"
 #include "libOTe_Tests/LogVole_Tests.h"
+
 
 using namespace osuCrypto;
 namespace tests_libOTe
@@ -29,7 +41,7 @@ namespace tests_libOTe
 	TestCollection Tests([](TestCollection& tc)
 		{
 
-
+			tc.add("Cmp_greaterThan_test                    ", Cmp_greaterThan_test);
 			tc.add("Tools_Transpose_Test                    ", Tools_Transpose_Test);
 			tc.add("Tools_Transpose_View_Test               ", Tools_Transpose_View_Test);
 			tc.add("Tools_Transpose_Bench                   ", Tools_Transpose_Bench);
@@ -61,6 +73,98 @@ namespace tests_libOTe
 			tc.add("Permutation_data                         ", Permutation_data_test);
 			tc.add("Permutation_chunk                        ", Permutation_chunk_test);
 
+			tc.add("RegularDpf_Multiply_Test                ", RegularDpf_Multiply_Test);
+			tc.add("RegularDpf_MultByte_Test                ", RegularDpf_MultByte_Test);
+			tc.add("RegularDpf_MultBit_Test                 ", RegularDpf_MultBit_Test);
+			tc.add("RegularDpf_MultSession_Test             ", RegularDpf_MultSession_Test);
+			tc.add("RegularDpf_MultGeneric_Test             ", RegularDpf_MultGeneric_Test);
+			
+
+			tc.add("SumDmpf_Proto_Test                      ", SumDmpf_Proto_Test);
+			tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
+			tc.add("RegularDpf_Puncture_Test                ", RegularDpf_Puncture_Test);
+			tc.add("RegularDpf_keyGen_Test                  ", RegularDpf_keyGen_Test);
+			tc.add("SparseDpf_Mtx_Test                      ", SparseDpf_Mtx_Test);
+			tc.add("SparseDpf_Vec_Test                      ", SparseDpf_Vec_Test);
+			tc.add("SparseDpf_Punct_Test                    ", SparseDpf_Punct_Test);
+			tc.add("TritDpf_Proto_Test                      ", TritDpf_Proto_Test);
+
+			tc.add("BinSolver_multiply_test                 ", BinSolver_multiply_test);
+			tc.add("BinSolver_multiplyMtx_test              ", BinSolver_multiplyMtx_test);
+			tc.add("BinSolver_firstOneBit_test              ", BinSolver_firstOneBit_test);
+			tc.add("BinSolver_firstOneBitMany_test          ", BinSolver_firstOneBitMany_test);
+			tc.add("BinSolver_solve_test                    ", BinSolver_solve_test);
+
+			tc.add("BinSolver_multiplyMany_test             ", BinSolver_multiplyMany_test);
+			tc.add("BinSolver_multiplyMtxMany_test          ", BinSolver_multiplyMtxMany_test);
+			tc.add("BinSolver_solveMany_test                ", BinSolver_solveMany_test);
+
+			tc.add("BitInject_basic_test                    ", BitInject_basic_test);;
+			tc.add("OtEquality_basic_Test                   ", OtEquality_basic_Test);
+			tc.add("HybEquality_basic_Test                  ", HybEquality_basic_Test);
+			tc.add("Goldreich_Proto_Test                    ", Goldreich_Proto_Test);
+			tc.add("Goldreich_stat_Test                     ", Goldreich_stat_Test);
+			tc.add("WaksmanPermute_plain_Test               ", WaksmanPermute_plain_Test);
+			tc.add("WaksmanPermute_Proto_Test               ", WaksmanPermute_Proto_Test);
+			tc.add("WaksmanPermute_Many_Test                ", WaksmanPermute_Many_Test);
+			
+			tc.add("RevCuckoo_iterative_Test                ", RevCuckoo_iterative_Test);
+			
+
+			tc.add("Dedup_orTree_test                       ", Dedup_orTree_test);
+			tc.add("Dedup_protocol_test                     ", Dedup_protocol_test);
+
+			tc.add("Field_F7681_Test                        ", Field_F7681_Test);
+			tc.add("Field_F12289_Test                       ", Field_F12289_Test);
+			tc.add("Field_Fp31_Test                         ", Field_Fp31_Test);
+
+
+			tc.add("UInt_Basics_Test                        ", UInt_Basics_Test);
+			tc.add("UInt_Bitwise_Test                       ", UInt_Bitwise_Test);
+			tc.add("UInt_Shifts_Test                        ", UInt_Shifts_Test);
+			tc.add("UInt_AddSub_Test                        ", UInt_AddSub_Test);
+			tc.add("UInt_MulU64_Test                        ", UInt_MulU64_Test);
+			tc.add("UInt_MulFull_Test                       ", UInt_MulFull_Test);
+			tc.add("UInt_DivBasic_Test                      ", UInt_DivBasic_Test);
+			tc.add("UInt_DivMultilimb_Test                  ", UInt_DivMultilimb_Test);
+			tc.add("UInt_Stream_Test                        ", UInt_Stream_Test);
+			tc.add("UInt_Conversions_Test                   ", UInt_Conversions_Test);
+
+
+			tc.add("Goldilocks_add_Test                     ", Goldilocks_add_Test);
+			tc.add("Goldilocks_Sub_Test                     ", Goldilocks_Sub_Test);
+			tc.add("Goldilocks_Mult_Test                    ", Goldilocks_Mult_Test);
+			tc.add("Goldilocks_Inverse_Test                 ", Goldilocks_Inverse_Test);
+			tc.add("Goldilocks_Exp_Test                     ", Goldilocks_Exp_Test);
+			tc.add("Goldilocks_SIMD_Mul_Test                ", Goldilocks_SIMD_Mul_Test);
+
+
+			tc.add("Poly_basics_Tests                       ", Poly_basics_Tests);
+			tc.add("Poly_eval_root_test                     ", Poly_eval_root_test);
+			tc.add("Poly_scalar_test                        ", Poly_scalar_test);
+
+			tc.add("Ntt_bitReverse_SIMD_Test                ", Ntt_bitReverse_SIMD_Test);
+			tc.add("Ntt_nttNegWrapMatrix_normal_Test        ", Ntt_nttNegWrapMatrix_normal_Test);
+			tc.add("Ntt_nttNegWrapMatrix_Test               ", Ntt_nttNegWrapMatrix_Test);
+			//tc.add("Ntt_nttNegWrapBatch_Test                ", Ntt_nttNegWrapBatch_Test);
+			
+			tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
+			tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);
+
+			tc.add("Bot_McQuoidRR_Moeller_EKE_Test          ", Bot_McQuoidRR_Moeller_EKE_Test);
+			tc.add("Bot_McQuoidRR_Moeller_MR_Test           ", Bot_McQuoidRR_Moeller_MR_Test);
+			tc.add("Bot_McQuoidRR_Moeller_F_Test            ", Bot_McQuoidRR_Moeller_F_Test);
+			tc.add("Bot_McQuoidRR_Moeller_FM_Test           ", Bot_McQuoidRR_Moeller_FM_Test);
+
+			tc.add("Bot_McQuoidRR_Ristrestto_F_Test         ", Bot_McQuoidRR_Ristrestto_F_Test);
+			tc.add("Bot_McQuoidRR_Ristrestto_FM_Test        ", Bot_McQuoidRR_Ristrestto_FM_Test);
+
+			tc.add("Bot_MasnyRindal_Test                    ", Bot_MasnyRindal_Test);
+			tc.add("Bot_MasnyRindal_Kyber_Test              ", Bot_MasnyRindal_Kyber_Test);
+
+			tc.add("Vole_SoftSpokenSmall_Test               ", Vole_SoftSpokenSmall_Test);
+			tc.add("DotExt_Kos_Test                         ", DotExt_Kos_Test);
+			tc.add("DotExt_Iknp_Test                        ", DotExt_Iknp_Test);
 			tc.add("BlkAccCode_mtx_test                      ", BlkAccCode_mtx_test);
 			tc.add("BlkAccCode_paramSweep_test               ", BlkAccCode_paramSweep_test);
 			
@@ -75,8 +179,14 @@ namespace tests_libOTe
 			tc.add("RegularDpf_Proto_Test                    ", RegularDpf_Proto_Test);
 			tc.add("RegularDpf_Puncture_Test                 ", RegularDpf_Puncture_Test);
 			tc.add("RegularDpf_keyGen_Test                   ", RegularDpf_keyGen_Test);
-			tc.add("SparseDpf_Proto_Test                     ", SparseDpf_Proto_Test);
+
+			tc.add("SumDmpf_Proto_Test                       ", SumDmpf_Proto_Test);
+			tc.add("SparseDpf_Mtx_Test                       ", SparseDpf_Mtx_Test);
+			tc.add("SparseDpf_Vec_Test                       ", SparseDpf_Vec_Test);
+			tc.add("SparseDpf_Punct_Test                     ", SparseDpf_Punct_Test);
+			
 			tc.add("TritDpf_Proto_Test                       ", TritDpf_Proto_Test);
+														   
 														   
 														   
 			tc.add("Bot_Simplest_Test                        ", Bot_Simplest_Test);
@@ -145,6 +255,14 @@ namespace tests_libOTe
 
 			tc.add("SilentOtTriple_ole_test                 ", SilentOtTriple_ole_test);
 			tc.add("SilentOtTriple_triple_test              ", SilentOtTriple_triple_test);
+
+			tc.add("RingLpn_tensor_test                     ", RingLpn_tensor_test);
+			tc.add("RingLpn_basic_test                      ", RingLpn_basic_test);
+			tc.add("RingLpn_ole_test                        ", RingLpn_ole_test);
+			tc.add("RingLpn_conversion_test                 ", RingLpn_conversion_test);
+			tc.add("RingLpn_Triple_test                     ", RingLpn_Triple_test);
+			tc.add("RingLpn_GenBase_test                    ", RingLpn_GenBase_test);
+			tc.add("RingLpn_stationary_test                 ", RingLpn_stationary_test);
 
 #ifdef ENABLE_LOGVOLE
 #define LIBOTE_LOGVOLE_ADD_TEST(suite, name) \
