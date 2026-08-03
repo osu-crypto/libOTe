@@ -168,6 +168,16 @@ namespace osuCrypto
 		std::get<0>(r).result();
 		std::get<1>(r).result();
 
+		if (dpf[0].mPublicHashSeed != dpf[1].mPublicHashSeed ||
+			dpf[0].mGoldreichHashSeeds != dpf[1].mGoldreichHashSeeds)
+			throw std::runtime_error("RevCuckoo public hash seeds disagree. " LOCATION);
+		if (dpf[0].mGoldreichHashSeeds.size() != numPartitions)
+			throw std::runtime_error("RevCuckoo public hash seed count mismatch. " LOCATION);
+		for (u64 i = 0; i < dpf[0].mGoldreichHashSeeds.size(); ++i)
+			for (u64 j = 0; j < i; ++j)
+				if (dpf[0].mGoldreichHashSeeds[i] == dpf[0].mGoldreichHashSeeds[j])
+					throw std::runtime_error("RevCuckoo public hash seeds overlap. " LOCATION);
+
 		// verify that the internal shares are correct.
 		for (u64 s = 0, k = 0; s < numSets; ++s)
 		{

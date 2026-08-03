@@ -43,6 +43,10 @@ namespace osuCrypto
 		// arbitrary seed for the hash function
 		block mHashSeed = block(3498747860745238796ull, 2347966293789782347ull);
 
+		// Jointly sampled public root and the per-partition hash seeds.
+		block mPublicHashSeed = ZeroBlock;
+		std::vector<block> mGoldreichHashSeeds;
+
 		bool mPrint = false;
 
 		u64 mPrintIndex = ~0;
@@ -504,14 +508,26 @@ namespace osuCrypto
 
 			setTimePoint("perm done");
 
-			//std::vector<block> hashSeed(mNumPartitions);
-			std::vector<GoldreichHash::Cache> hashCache(mNumPartitions);
+			// Jointly sample a fresh public root after the inputs have been fixed,
+			// then domain-separate every partition hash instance. The same public
+			// partition hash is reused across the sets in this batch.
+			block localHashSeed = prng.get();
+			block remoteHashSeed;
+			co_await sock.send(coproto::copy(localHashSeed));
+			co_await sock.recv(remoteHashSeed);
+			mPublicHashSeed = localHashSeed ^ remoteHashSeed;
+
+			auto hashCount = mNumPartitions;
+			mGoldreichHashSeeds.resize(hashCount);
+			std::vector<GoldreichHash::Cache> hashCache(hashCount);
 			{
-				AES aes(block(523234789928736, 754378923479832796));
-				for (u64 i = 0; i < mNumPartitions; ++i)
+				AES aes(mPublicHashSeed);
+				for (u64 i = 0; i < hashCount; ++i)
 				{
-					auto seed = aes.ecbEncBlock(block(i));
-					hashCache[i] = mGoldreichHash[0].cache(seed);
+					// AES is a permutation, so distinct inputs give distinct seeds.
+					auto seed = aes.ecbEncBlock(block(i, 0x5243564841534801ull));
+					mGoldreichHashSeeds[i] = seed;
+					hashCache[i] = mGoldreichHash[i].cache(seed);
 				}
 			}
 
@@ -1266,6 +1282,8 @@ namespace osuCrypto
 			mSparseDpf.clear();
 			mTempOutput.clear();
 			mHashSeed = block(3498747860745238796ull, 2347966293789782347ull);
+			mPublicHashSeed = ZeroBlock;
+			mGoldreichHashSeeds.clear();
 			mPrint = false;
 			mPrintIndex = ~0ull;
 			mCharacteristicTwo = false;
