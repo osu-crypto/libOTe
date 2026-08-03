@@ -183,6 +183,12 @@ namespace osuCrypto
 			ws.mCandidates = { 0, 3, 6, 1, 3, 6, 2, 4, 6, 2, 5, 7 };
 			if (!ws.hasMatching(4, 9))
 				throw std::runtime_error("exact cuckoo self-test rejected a valid matching");
+
+			ws.resize(5, 4, 2);
+			ws.mCandidates = { 0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6,
+				0, 2, 4, 6, 0, 2, 4, 6 };
+			if (ws.hasMatching(5, 8))
+				throw std::runtime_error("exact cuckoo self-test missed a four-choice Hall obstruction");
 		}
 
 		double quantile(const std::vector<double>& sorted, double q)
@@ -199,16 +205,20 @@ namespace osuCrypto
 
 			const auto numItems = cmd.getOr<u64>("n", 16);
 			const auto numChoices = cmd.getOr<u64>("w", 2);
-			if (numChoices != 2 && numChoices != 3)
-				throw std::runtime_error("exact cuckoo experiment supports w=2 or w=3");
+			if (numChoices < 2)
+				throw std::runtime_error("exact cuckoo experiment requires w >= 2");
 			if (numItems == 0)
 				throw std::runtime_error("exact cuckoo experiment requires n > 0");
 
 			u64 defaultPartitionSize;
 			if (numChoices == 2)
 				defaultPartitionSize = 1ull << log2ceil(divCeil(2 * numItems, numChoices));
-			else
+			else if (numChoices == 3)
 				defaultPartitionSize = 1ull << log2ceil(divCeil(3 * numItems, 2 * numChoices));
+			else if (cmd.hasValue("d"))
+				defaultPartitionSize = cmd.get<u64>("d");
+			else
+				throw std::runtime_error("exact cuckoo experiment requires explicit d when w > 3");
 			const auto partitionSize = cmd.getOr<u64>("d", defaultPartitionSize);
 			const auto trials = cmd.getOr<u64>("trials", 1ull << 20);
 			const auto seed = cmd.getOr<u64>("seed", 0);
