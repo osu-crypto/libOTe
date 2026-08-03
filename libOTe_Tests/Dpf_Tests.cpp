@@ -863,10 +863,13 @@ void RegularDpf_Proto_Test(const CLP& cmd)
 {
 	//RegularDpf_Proto_Test_impl<block, CoeffCtxGF2>(cmd);
 	//RegularDpf_Proto_Test_impl<u64, CoeffCtxInteger>(cmd);
+	RegularDpf_Proto_Test_impl<Opaque, CoeffCtxOpaque>(cmd);
+}
+
+void MsvcAesHashCoroutine_Regression_Test(const CLP& cmd)
+{
 	using F = F12289;
 	RegularDpf_Proto_Test_impl<F, CoeffCtxFp>(cmd);
-
-	RegularDpf_Proto_Test_impl<Opaque, CoeffCtxOpaque>(cmd);
 }
 
 void RegularDpf_Puncture_Test(const oc::CLP& cmd)

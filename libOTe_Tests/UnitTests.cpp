@@ -81,6 +81,7 @@ namespace tests_libOTe
 			
 
 			tc.add("SumDmpf_Proto_Test                      ", SumDmpf_Proto_Test);
+			tc.add("MsvcAesHashCoroutine_Regression_Test     ", MsvcAesHashCoroutine_Regression_Test);
 			tc.add("RegularDpf_Proto_Test                   ", RegularDpf_Proto_Test);
 			tc.add("RegularDpf_Puncture_Test                ", RegularDpf_Puncture_Test);
 			tc.add("RegularDpf_keyGen_Test                  ", RegularDpf_keyGen_Test);
@@ -176,6 +177,7 @@ namespace tests_libOTe
 			tc.add("StationaryPprf_inter_test                ", StationaryPprf_inter_test);
 
 			tc.add("RegularDpf_Multiply_Test                 ", RegularDpf_Multiply_Test);
+			tc.add("MsvcAesHashCoroutine_Regression_Test      ", MsvcAesHashCoroutine_Regression_Test);
 			tc.add("RegularDpf_Proto_Test                    ", RegularDpf_Proto_Test);
 			tc.add("RegularDpf_Puncture_Test                 ", RegularDpf_Puncture_Test);
 			tc.add("RegularDpf_keyGen_Test                   ", RegularDpf_keyGen_Test);
