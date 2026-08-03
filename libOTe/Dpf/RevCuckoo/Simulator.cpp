@@ -8,12 +8,321 @@
 #include <atomic>
 #include <fstream>
 #include <vector>
+#include <algorithm>
+#include <chrono>
+#include <limits>
+#include <numeric>
 
 #include "cryptoTools/Common/CuckooIndex.h"
 #include <cmath>
 
 namespace osuCrypto
 {
+	namespace
+	{
+		struct ExactCuckooWorkspace
+		{
+			std::vector<u64> mParent, mVertices, mEdges;
+			std::vector<i64> mBinToItem;
+			std::vector<u64> mCandidates;
+			std::vector<u32> mSeen;
+			u32 mVisit = 0;
+			u64 mNumChoices = 0;
+
+			void resize(u64 numItems, u64 numChoices, u64 partitionSize)
+			{
+				auto numBins = numChoices * partitionSize;
+				mParent.resize(numBins);
+				mVertices.resize(numBins);
+				mEdges.resize(numBins);
+				mBinToItem.resize(numBins);
+				mCandidates.resize(numItems * numChoices);
+				mSeen.resize(numBins);
+				mNumChoices = numChoices;
+			}
+
+			u64 find(u64 v)
+			{
+				auto root = v;
+				while (mParent[root] != root)
+					root = mParent[root];
+				while (mParent[v] != v)
+				{
+					auto next = mParent[v];
+					mParent[v] = root;
+					v = next;
+				}
+				return root;
+			}
+
+			// For two choices the cuckoo graph is a bipartite multigraph. A
+			// placement exists iff every connected component has |E| <= |V|.
+			// The number of placements is |V| for a tree and 2 for a unicycle.
+			bool twoChoiceLogMatchingCount(u64 numItems, u64 partitionSize, double& log2Count)
+			{
+				auto numBins = 2 * partitionSize;
+				std::iota(mParent.begin(), mParent.begin() + numBins, 0);
+				std::fill(mVertices.begin(), mVertices.begin() + numBins, 1);
+				std::fill(mEdges.begin(), mEdges.begin() + numBins, 0);
+
+				for (u64 item = 0; item < numItems; ++item)
+				{
+					auto a = find(mCandidates[2 * item]);
+					auto b = find(mCandidates[2 * item + 1]);
+					if (a == b)
+						++mEdges[a];
+					else
+					{
+						if (mVertices[a] < mVertices[b])
+							std::swap(a, b);
+						mParent[b] = a;
+						mVertices[a] += mVertices[b];
+						mEdges[a] += mEdges[b] + 1;
+					}
+				}
+
+				log2Count = 0;
+				for (u64 v = 0; v < numBins; ++v)
+				{
+					if (mParent[v] != v || mEdges[v] == 0)
+						continue;
+					if (mEdges[v] > mVertices[v])
+						return false;
+					if (mEdges[v] + 1 == mVertices[v])
+						log2Count += std::log2(static_cast<double>(mVertices[v]));
+					else if (mEdges[v] == mVertices[v])
+						log2Count += 1;
+					else
+						throw std::runtime_error("invalid cuckoo component");
+				}
+				return true;
+			}
+
+			bool augment(u64 item)
+			{
+				for (u64 choice = 0; choice < mNumChoices; ++choice)
+				{
+					auto bin = mCandidates[item * mNumChoices + choice];
+					if (mSeen[bin] == mVisit)
+						continue;
+					mSeen[bin] = mVisit;
+					if (mBinToItem[bin] == -1 || augment(static_cast<u64>(mBinToItem[bin])))
+					{
+						mBinToItem[bin] = static_cast<i64>(item);
+						return true;
+					}
+				}
+				return false;
+			}
+
+			bool hasMatching(u64 numItems, u64 numBins)
+			{
+				std::fill(mBinToItem.begin(), mBinToItem.begin() + numBins, -1);
+				std::fill(mSeen.begin(), mSeen.begin() + numBins, 0);
+				mVisit = 0;
+				for (u64 item = 0; item < numItems; ++item)
+				{
+					if (++mVisit == 0)
+					{
+						std::fill(mSeen.begin(), mSeen.begin() + numBins, 0);
+						++mVisit;
+					}
+					if (!augment(item))
+						return false;
+				}
+				return true;
+			}
+		};
+
+		u64 uniformBelow(PRNG& prng, u64 bound)
+		{
+			if (bound == 0)
+				throw std::runtime_error("uniformBelow requires a positive bound");
+			const auto threshold = (0ull - bound) % bound;
+			for (;;)
+			{
+				auto x = prng.get<u64>();
+				if (x >= threshold)
+					return x % bound;
+			}
+		}
+
+		double log2ExpectedTwoChoiceMatchings(u64 numItems, u64 partitionSize)
+		{
+			const auto numBins = 2 * partitionSize;
+			if (numItems > numBins)
+				return -std::numeric_limits<double>::infinity();
+			double result = 0;
+			for (u64 i = 0; i < numItems; ++i)
+				result += std::log2(static_cast<double>(numBins - i)) -
+					std::log2(static_cast<double>(partitionSize));
+			return result;
+		}
+
+		void validateExactCuckoo()
+		{
+			ExactCuckooWorkspace ws;
+			double logCount = 0;
+
+			ws.resize(3, 2, 3);
+			ws.mCandidates = { 0, 3, 0, 3, 0, 3 };
+			if (ws.twoChoiceLogMatchingCount(3, 3, logCount))
+				throw std::runtime_error("exact cuckoo self-test accepted three parallel edges");
+			ws.mCandidates = { 0, 3, 0, 4, 1, 4 };
+			if (!ws.twoChoiceLogMatchingCount(3, 3, logCount) || logCount != 2)
+				throw std::runtime_error("exact cuckoo self-test rejected a tree");
+			ws.resize(4, 2, 2);
+			ws.mCandidates = { 0, 2, 0, 3, 1, 2, 1, 3 };
+			if (!ws.twoChoiceLogMatchingCount(4, 2, logCount) || logCount != 1)
+				throw std::runtime_error("exact cuckoo self-test miscounted a cycle");
+
+			ws.resize(4, 3, 3);
+			ws.mCandidates = { 0, 3, 6, 0, 3, 6, 0, 3, 6, 0, 3, 6 };
+			if (ws.hasMatching(4, 9))
+				throw std::runtime_error("exact cuckoo self-test missed a Hall obstruction");
+			ws.mCandidates = { 0, 3, 6, 1, 3, 6, 2, 4, 6, 2, 5, 7 };
+			if (!ws.hasMatching(4, 9))
+				throw std::runtime_error("exact cuckoo self-test rejected a valid matching");
+		}
+
+		double quantile(const std::vector<double>& sorted, double q)
+		{
+			if (sorted.empty())
+				return std::numeric_limits<double>::quiet_NaN();
+			auto idx = static_cast<u64>(q * static_cast<double>(sorted.size() - 1));
+			return sorted[idx];
+		}
+
+		void exactLeakageExperiment(CLP cmd)
+		{
+			validateExactCuckoo();
+
+			const auto numItems = cmd.getOr<u64>("n", 16);
+			const auto numChoices = cmd.getOr<u64>("w", 2);
+			if (numChoices != 2 && numChoices != 3)
+				throw std::runtime_error("exact cuckoo experiment supports w=2 or w=3");
+			if (numItems == 0)
+				throw std::runtime_error("exact cuckoo experiment requires n > 0");
+
+			u64 defaultPartitionSize;
+			if (numChoices == 2)
+				defaultPartitionSize = 1ull << log2ceil(divCeil(2 * numItems, numChoices));
+			else
+				defaultPartitionSize = 1ull << log2ceil(divCeil(3 * numItems, 2 * numChoices));
+			const auto partitionSize = cmd.getOr<u64>("d", defaultPartitionSize);
+			const auto trials = cmd.getOr<u64>("trials", 1ull << 20);
+			const auto seed = cmd.getOr<u64>("seed", 0);
+			const auto sampleReal = cmd.isSet("real");
+			if (partitionSize == 0 || numItems > numChoices * partitionSize)
+				throw std::runtime_error("invalid cuckoo dimensions");
+			if (trials == 0)
+				throw std::runtime_error("exact cuckoo experiment requires trials > 0");
+			if (sampleReal && numChoices != 2)
+				throw std::runtime_error("real-distribution leakage metrics currently require w=2");
+
+			PRNG prng(block(seed, 0x4355434b4f4f4c4bull));
+			ExactCuckooWorkspace ws;
+			ws.resize(numItems, numChoices, partitionSize);
+			std::vector<u64> injection(numChoices * partitionSize);
+			std::vector<double> informationDensity;
+			if (sampleReal)
+				informationDensity.reserve(trials);
+
+			const auto log2Expected = numChoices == 2 ?
+				log2ExpectedTwoChoiceMatchings(numItems, partitionSize) :
+				std::numeric_limits<double>::quiet_NaN();
+			u64 failures = 0;
+			double infoSum = 0, infoSquareSum = 0, tvSum = 0;
+			auto begin = std::chrono::steady_clock::now();
+			for (u64 trial = 0; trial < trials; ++trial)
+			{
+				if (sampleReal)
+				{
+					std::iota(injection.begin(), injection.end(), 0);
+					for (u64 item = 0; item < numItems; ++item)
+					{
+						auto j = item + uniformBelow(prng, injection.size() - item);
+						std::swap(injection[item], injection[j]);
+						auto target = injection[item];
+						if (target < partitionSize)
+						{
+							ws.mCandidates[2 * item] = target;
+							ws.mCandidates[2 * item + 1] = partitionSize + uniformBelow(prng, partitionSize);
+						}
+						else
+						{
+							ws.mCandidates[2 * item] = uniformBelow(prng, partitionSize);
+							ws.mCandidates[2 * item + 1] = target;
+						}
+					}
+				}
+				else
+				{
+					for (u64 item = 0; item < numItems; ++item)
+						for (u64 choice = 0; choice < numChoices; ++choice)
+							ws.mCandidates[item * numChoices + choice] =
+								choice * partitionSize + uniformBelow(prng, partitionSize);
+				}
+
+				bool success;
+				double log2Count = 0;
+				if (numChoices == 2)
+					success = ws.twoChoiceLogMatchingCount(numItems, partitionSize, log2Count);
+				else
+					success = ws.hasMatching(numItems, numChoices * partitionSize);
+				if (!success)
+				{
+					++failures;
+					if (sampleReal)
+						throw std::runtime_error("real cuckoo sampler produced an invalid placement");
+				}
+				else if (sampleReal)
+				{
+					auto info = log2Count - log2Expected;
+					informationDensity.push_back(info);
+					infoSum += info;
+					infoSquareSum += info * info;
+					if (info > 0)
+						tvSum += 1 - std::exp2(-info);
+				}
+			}
+			auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::steady_clock::now() - begin).count();
+
+			const auto p = static_cast<double>(failures) / static_cast<double>(trials);
+			constexpr double z = 1.959963984540054;
+			const auto denom = 1 + z * z / trials;
+			const auto center = (p + z * z / (2 * trials)) / denom;
+			const auto radius = z * std::sqrt((p * (1 - p) + z * z / (4 * trials)) / trials) / denom;
+			const auto ciLow = std::max(0.0, center - radius);
+			const auto ciHigh = std::min(1.0, center + radius);
+
+			double infoMean = std::numeric_limits<double>::quiet_NaN();
+			double infoStdErr = std::numeric_limits<double>::quiet_NaN();
+			double tv = std::numeric_limits<double>::quiet_NaN();
+			if (sampleReal)
+			{
+				std::sort(informationDensity.begin(), informationDensity.end());
+				infoMean = infoSum / trials;
+				auto variance = std::max(0.0, infoSquareSum / trials - infoMean * infoMean);
+				infoStdErr = std::sqrt(variance / trials);
+				tv = tvSum / trials;
+			}
+
+			std::cout << "distribution,n,w,d,total_bins,load,trials,failures,failure_rate,ci95_low,ci95_high,"
+				"log2_expected_matchings,kl_bits,kl_stderr,tv,q01_info,q05_info,q50_info,q95_info,q99_info,elapsed_ms\n";
+			std::cout << std::setprecision(17)
+				<< (sampleReal ? "real" : "uniform") << ','
+				<< numItems << ',' << numChoices << ',' << partitionSize << ','
+				<< numChoices * partitionSize << ','
+				<< static_cast<double>(numItems) / (numChoices * partitionSize) << ','
+				<< trials << ',' << failures << ',' << p << ',' << ciLow << ',' << ciHigh << ','
+				<< log2Expected << ',' << infoMean << ',' << infoStdErr << ',' << tv << ','
+				<< quantile(informationDensity, .01) << ',' << quantile(informationDensity, .05) << ','
+				<< quantile(informationDensity, .50) << ',' << quantile(informationDensity, .95) << ','
+				<< quantile(informationDensity, .99) << ',' << elapsedMs << std::endl;
+		}
+	}
 
 	class PartitionedCuckoo
 	{
@@ -836,7 +1145,9 @@ namespace osuCrypto
 
 	void RevCuckooSimulator(const CLP& cmd)
 	{
-
-		simpleTest(cmd);
+		if (cmd.isSet("cuckooLeak"))
+			exactLeakageExperiment(cmd);
+		else
+			simpleTest(cmd);
 	}
 }
