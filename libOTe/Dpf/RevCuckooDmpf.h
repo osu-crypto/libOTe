@@ -215,6 +215,8 @@ namespace osuCrypto
 				auto bits = recvChoice.subvec(rIdx, rc);
 				auto send = baseSend.subspan(sIdx, sc);
 				sub.setBaseOts(send, recv, bits);
+				rIdx += rc;
+				sIdx += sc;
 				};
 
 			for (auto& sub : mDedup)
@@ -228,6 +230,9 @@ namespace osuCrypto
 
 			if (mCharacteristicTwo == false)
 				set(mMultiplier);
+
+			if (rIdx != baseRecv.size() || sIdx != baseSend.size())
+				throw std::runtime_error("base OT count mismatch. " LOCATION);
 		}
 
 		bool hasBaseOts() const
@@ -369,8 +374,10 @@ namespace osuCrypto
 							assert(h[k] < mPartitionSize && "bad sparse set index ");
 
 							auto setjh = setj + h[k] * maxLoad;
-							auto idx = sizej[h[k]]++;
-							assert(idx < maxLoad && "Sparse set overflow. ");
+							auto idx = sizej[h[k]];
+							if (idx >= maxLoad)
+								throw std::runtime_error("Sparse set overflow. " LOCATION);
+							sizej[h[k]] = idx + 1;
 							setjh[idx] = i + k;
 
 
@@ -389,8 +396,10 @@ namespace osuCrypto
 						//setj[h[0]].push_back(i);
 
 						auto setjh = setj + h[0] * maxLoad;
-						auto idx = sizej[h[0]]++;
-						assert(idx < maxLoad && "Sparse set overflow. ");
+						auto idx = sizej[h[0]];
+						if (idx >= maxLoad)
+							throw std::runtime_error("Sparse set overflow. " LOCATION);
+						sizej[h[0]] = idx + 1;
 						setjh[idx] = i;
 					}
 				}
@@ -508,6 +517,7 @@ namespace osuCrypto
 
 			std::vector<Matrix<u8>> M(mNumSets);
 			std::vector<Matrix<u8>> S(mNumSets);
+			auto positionBytes = std::max<u64>(1, divCeil(log2ceil(mPartitionSize), 8));
 			for (u64 s = 0, k = 0; s < mNumSets; ++s)
 			{
 
@@ -517,7 +527,9 @@ namespace osuCrypto
 
 				// Step 8: Construct M_i using hash functions
 				M[s].resize(A[s].rows(), divCeil(c, 8));
-				S[s].resize(c * mNumPartitions, divCeil(log2ceil(mPartitionSize), 8));
+				S[s].resize(c * mNumPartitions, positionBytes);
+				if (mPartitionSize == 1)
+					std::fill(S[s].begin(), S[s].end(), 0);
 				for (u64 i = 0; i < mNumPartitions; ++i, ++k)
 				{
 					auto M_i = M[s].submtx(i * mPartitionSize, mPartitionSize);
@@ -546,7 +558,7 @@ namespace osuCrypto
 			}
 
 			// Prepare y vector (0, 1, ..., m-1)
-			Matrix<u8> Y(mPartitionSize, divCeil(log2ceil(mPartitionSize), 8));
+			Matrix<u8> Y(mPartitionSize, positionBytes);
 			for (u64 j = 0; j < mPartitionSize; ++j)
 			{
 				auto val = j * mPartyIdx;
@@ -584,7 +596,10 @@ namespace osuCrypto
 			}
 
 			setTimePoint("solver Begin");
-			co_await mBinarySolver.solve(M_si, Y_si, S_si, prng, sock);
+			// A size-one partition always maps to position zero. Keeping S zero
+			// avoids a meaningless zero-bit linear system and its random free variables.
+			if (mPartitionSize > 1)
+				co_await mBinarySolver.solve(M_si, Y_si, S_si, prng, sock);
 			//res = co_await macoro::when_all_ready(std::move(tasks));
 			//for (auto& r : res)
 			//	r.result();

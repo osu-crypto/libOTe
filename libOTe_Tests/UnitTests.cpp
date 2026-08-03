@@ -109,7 +109,9 @@ namespace tests_libOTe
 			tc.add("WaksmanPermute_Proto_Test               ", WaksmanPermute_Proto_Test);
 			tc.add("WaksmanPermute_Many_Test                ", WaksmanPermute_Many_Test);
 			
+			tc.add("RevCuckoo_baseOtSlicing_Test             ", RevCuckoo_baseOtSlicing_Test);
 			tc.add("RevCuckoo_iterative_Test                ", RevCuckoo_iterative_Test);
+			tc.add("RevCuckoo_singlePoint_Test              ", RevCuckoo_singlePoint_Test);
 			
 
 			tc.add("Dedup_orTree_test                       ", Dedup_orTree_test);

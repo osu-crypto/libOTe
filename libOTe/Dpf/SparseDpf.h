@@ -467,8 +467,6 @@ namespace osuCrypto
 			for (u64 d = depth; d; --d)
 			{
 				// Collect correction data for all trees at level d
-				std::vector<block> z0(mNumPoints);
-				std::vector<block> z1(mNumPoints);
 				BitVector negAlpha(mNumPoints);
 				std::vector<std::array<u8, 2>> taus(mNumPoints);
 				std::vector<block>  sigmas(mNumPoints);
@@ -493,17 +491,12 @@ namespace osuCrypto
 					taus[r][1] = lsb(tree[d].mZ[1]) ^ alphaD;
 					negAlpha[r] = alphaD ^ mPartyIdx;
 					sigmas[r] = tree[d].mZ[0] ^ tree[d].mZ[1];
-
-					z0[r] = tree[d].mZ[0];
-					z1[r] = tree[d].mZ[1];
 				}
 
 				if (used)
 				{
 					// 6b: Compute and reveal correction words
 					// σ := correctionWord(z_d, α_d)
-					co_await reveal(z0, sock);
-					co_await reveal(z1, sock);
 					co_await mMultiplier.multiply(negAlpha, sigmas, sigmas, sock);
 					for (u64 r = 0; r < mNumPoints; ++r)
 						sigmas[r] = sigmas[r] ^ trees[r][d].mZ[0];

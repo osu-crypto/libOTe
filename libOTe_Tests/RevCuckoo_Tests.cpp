@@ -4,6 +4,80 @@
 namespace osuCrypto
 {
 
+	void RevCuckoo_baseOtSlicing_Test(const oc::CLP&)
+	{
+		RevCuckooDmpf<block> dpf;
+		dpf.init(0, 4, 2, 32, 2, 2, 10, false);
+
+		auto count = dpf.baseOtCount();
+		std::vector<std::array<block, 2>> baseSend(count.mSendCount);
+		std::vector<block> baseRecv(count.mRecvCount);
+		BitVector baseChoice(count.mRecvCount);
+
+		for (u64 i = 0; i < baseSend.size(); ++i)
+		{
+			baseSend[i][0] = block(i, 0x1111111111111111ull);
+			baseSend[i][1] = block(i, 0x2222222222222222ull);
+		}
+		for (u64 i = 0; i < baseRecv.size(); ++i)
+			baseRecv[i] = block(i, 0x3333333333333333ull);
+
+		dpf.setBaseOts(baseSend, baseRecv, baseChoice);
+
+		u64 sendIdx = 0;
+		u64 recvIdx = 0;
+		auto check = [&](const DpfMult& mult, u64 expectedSend, u64 expectedRecv)
+		{
+			if (mult.baseOtCount() == 0)
+				return;
+			if (mult.mSendOts[0][0] != baseSend[expectedSend][0] ||
+				mult.mRecvOts[0] != baseRecv[expectedRecv])
+				throw std::runtime_error("RevCuckoo base OTs overlap. " LOCATION);
+		};
+
+		for (auto& dedup : dpf.mDedup)
+		{
+			auto eqCount = dedup.mEq.baseOtCount();
+			check(dedup.mMult, sendIdx + eqCount.mSendCount, recvIdx + eqCount.mRecvCount);
+			auto subCount = dedup.baseOtCount();
+			sendIdx += subCount.mSendCount;
+			recvIdx += subCount.mRecvCount;
+		}
+
+		for (auto& hash : dpf.mGoldreichHash)
+		{
+			check(hash.mMult, sendIdx, recvIdx);
+			auto subCount = hash.baseOtCount();
+			sendIdx += subCount.mSendCount;
+			recvIdx += subCount.mRecvCount;
+		}
+
+		check(dpf.mWaksmanPermute.mMult, sendIdx, recvIdx);
+		auto permCount = dpf.mWaksmanPermute.baseOtCount();
+		sendIdx += permCount.mSendCount;
+		recvIdx += permCount.mRecvCount;
+
+		check(dpf.mBinarySolver.mMult, sendIdx, recvIdx);
+		auto solverCount = dpf.mBinarySolver.baseOtCount();
+		sendIdx += solverCount;
+		recvIdx += solverCount;
+
+		auto denseCount = dpf.mSparseDpf.mRegDpf.baseOtCount();
+		check(dpf.mSparseDpf.mRegDpf.mMultiplier, sendIdx, recvIdx);
+		check(dpf.mSparseDpf.mMultiplier, sendIdx + denseCount, recvIdx + denseCount);
+		auto sparseCount = dpf.mSparseDpf.baseOtCount();
+		sendIdx += sparseCount;
+		recvIdx += sparseCount;
+
+		check(dpf.mMultiplier, sendIdx, recvIdx);
+		auto multCount = dpf.mMultiplier.baseOtCount();
+		sendIdx += multCount;
+		recvIdx += multCount;
+
+		if (sendIdx != baseSend.size() || recvIdx != baseRecv.size())
+			throw std::runtime_error("RevCuckoo base OT regression miscount. " LOCATION);
+	}
+
 
 	template<typename F, typename CoeffCtx>
 	void RevCuckoo_iterative_impl(const oc::CLP& cmd)
@@ -246,6 +320,17 @@ namespace osuCrypto
 	}
 	void RevCuckoo_iterative_Test(const oc::CLP& cmd)
 	{
+		RevCuckoo_iterative_impl<block, CoeffCtxGF128>(cmd);
+		RevCuckoo_iterative_impl<u64, CoeffCtxInteger>(cmd);
+	}
+
+	void RevCuckoo_singlePoint_Test(const oc::CLP&)
+	{
+		CLP cmd;
+		cmd.setDefault("domain", 32);
+		cmd.setDefault("numPoints", 1);
+		cmd.setDefault("numSets", 1);
+		cmd.setDefault("numValueSets", 1);
 		RevCuckoo_iterative_impl<block, CoeffCtxGF128>(cmd);
 		RevCuckoo_iterative_impl<u64, CoeffCtxInteger>(cmd);
 	}

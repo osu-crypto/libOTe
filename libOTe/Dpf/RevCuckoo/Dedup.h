@@ -135,6 +135,10 @@ namespace osuCrypto
                 throw RTE_LOC;
             if (d.size() != mN - 1)
                 throw RTE_LOC;
+
+            if (mN == 1)
+                co_return;
+
             std::vector<std::vector<u8>> C(mN - 1);
             auto iter = c.begin();
             for (u64 i = 0; i < mN; ++i)
@@ -234,6 +238,12 @@ namespace osuCrypto
                 throw RTE_LOC;
             if (keys.rows() != mN || altKeys.rows() != mN)
                 throw RTE_LOC;
+
+            if (mN == 1)
+            {
+                mKeysDeduped = true;
+                co_return;
+            }
 
             // Create pairs for equality checking
             Matrix<u8> Ai(mN * (mN - 1) / 2, keys.cols());
@@ -360,6 +370,9 @@ namespace osuCrypto
                 throw std::runtime_error("dedupKeys must be called before dedupValues. " LOCATION);
             if (values.size() != mN)
                 throw RTE_LOC;
+
+            if (mN == 1)
+                co_return;
 
             // Create BB matrix for the multiplication step
             auto BB = ctx.template makeVec<T>(mN * (mN - 1) / 2);
