@@ -34,7 +34,7 @@ primary design goal of this library to obtain *high performance* while being
 **Distributed Point Functions:**
 * Distributed Point Function (DPF)[[BGI18]](https://eprint.iacr.org/2018/707.pdf) with [Distributed] Key Generation (DKG) [[Ds17]](https://eprint.iacr.org/2017/827.pdf).
 * Ternary Distributed Point Function (DPF)[[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) with Distributed Key Generation (DKG).
-* Sparse Distributed Point Function (DPF) with Distributed Key Generation (DKG).
+* Sparse Distributed Point Function (DPF) with Distributed Key Generation (DKG) (**experimental**).
 
 ## Introduction
  
@@ -114,7 +114,7 @@ on platform/dependencies. The `ON`/`OFF` options include
  **DPF:**
  * `ENABLE_REGULAR_DPF` the Boyle et al [[BGI18]](https://eprint.iacr.org/2018/707.pdf) semi-honest protocol.
  * `ENABLE_TERNARY_DPF` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
- * `ENABLE_SPARSE_DPF` protocol allowing a sparse set of DPF leaf values.
+ * `ENABLE_SPARSE_DPF` experimental protocol allowing a sparse set of DPF leaf values.
 
  **Beaver Triples:**
  * `ENABLE_FOLEAGE` the Bombar et al [[BBCCDS2024]](https://eprint.iacr.org/2024/429.pdf) semi-honest protocol.
