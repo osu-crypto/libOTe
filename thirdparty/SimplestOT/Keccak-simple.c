@@ -90,6 +90,29 @@ int crypto_hash( unsigned char *out, const unsigned char *in, unsigned long long
     return ( 0 );
 }
 
+void ge4x_hash(unsigned char * k,
+               unsigned char * sp,
+               unsigned char * q,
+               ge4x * p)
+{
+    int i, j;
+
+    unsigned char r[128];
+    unsigned char in[96];
+
+    ge4x_pack(r, p);
+
+    for (j = 0; j < 32; j++) in[j] = sp[j];
+
+    for (i = 0; i < 4; i++)
+    {
+        for (j = 0; j < 32; j++) in[j + 32] = q[i * 32 + j];
+        for (j = 0; j < 32; j++) in[j + 64] = r[i * 32 + j];
+
+        crypto_hash(k + i * 32, in, sizeof(in));
+    }
+}
+
 
 const tKeccakLane KeccakF_RoundConstants[cKeccakNumberOfRounds] = 
 {

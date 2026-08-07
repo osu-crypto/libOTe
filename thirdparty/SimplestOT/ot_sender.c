@@ -2,8 +2,9 @@
 
 #include <stdlib.h>
 
-#include "ge25519.h"
-#include "ge4x.h"
+#include "cryptoTools/Crypto/Edwards25519/ge25519.h"
+#include "cryptoTools/Crypto/Edwards25519/ge4x.h"
+#include "crypto_hash.h"
 #include "to_4x.h"
 
 void sender_genS(SENDER * s, unsigned char * S_pack, rand_source rand)

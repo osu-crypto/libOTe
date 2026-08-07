@@ -78,6 +78,12 @@ endif()
 #############################################
 #    Build cryptoTools (common utilities)   #
 #############################################
+if(ENABLE_SIMPLESTOT_ASM OR
+   (DEFINED ENABLE_ALL_OT AND ENABLE_ALL_OT AND
+    UNIX AND NOT APPLE AND NOT MSVC))
+    set(ENABLE_EDWARDS25519_ASM ON CACHE BOOL "" FORCE)
+endif()
+
 set(ENABLE_CIRCUITS true)
 add_subdirectory(cryptoTools)
 

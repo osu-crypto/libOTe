@@ -3,8 +3,9 @@
 
 #include <stdio.h>
 
-#include "ge4x.h"
-#include "sc25519.h"
+#include "cryptoTools/Crypto/Edwards25519/ge4x.h"
+#include "cryptoTools/Crypto/Edwards25519/sc25519.h"
+#include "randombytes.h"
 #include "ot_config.h"
 
 struct ot_sender

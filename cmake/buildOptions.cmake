@@ -52,7 +52,7 @@ if(DEFINED ENABLE_ALL_OT)
 
 
 	# requires linux
-	if(UNIX AND NOT(APPLE OR MSVC) AND NOT ENABLE_PIC)
+	if(UNIX AND NOT(APPLE OR MSVC))
 		set(oc_BB ${ENABLE_ALL_OT})
 	else()
 		set(oc_BB OFF)
@@ -243,9 +243,6 @@ if(LIBOTE_SHARED AND NOT ENABLE_PIC AND NOT MSVC)
 endif()
 
 
-if(ENABLE_SIMPLESTOT_ASM AND ENABLE_PIC)
-	message(FATAL_ERROR " ENABLE_SIMPLESTOT_ASM can not be compiled with ENABLE_PIC.")
-endif()
 if(ENABLE_MR_KYBER AND ENABLE_PIC)
 	message(FATAL_ERROR " ENABLE_MR_KYBER can not be compiled with ENABLE_PIC.")
 endif()
