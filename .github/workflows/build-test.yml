@@ -82,7 +82,15 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
 
       - name: Build libOTe
-        run: python build.py --par=4 -DENABLE_ALL_OT=ON -DENABLE_MOCK_OT=ON -G Ninja
+        run: python build.py --par=4 -DENABLE_ALL_OT=ON -DENABLE_MOCK_OT=ON -DENABLE_EDWARDS25519_ASM=ON -G Ninja
+
+      - name: Verify Win64 Edwards25519 assembly backend
+        shell: pwsh
+        run: |
+          $cacheEntry = Select-String -Path out/build/x64-Release/CMakeCache.txt -Pattern '^ENABLE_EDWARDS25519_ASM:BOOL=ON$'
+          if (-not $cacheEntry) {
+            throw 'The Win64 Edwards25519 assembly backend was not selected.'
+          }
 
       - name: Unit tests
         run: ./out/build/x64-Release/frontend/frontend_libOTe.exe -u
