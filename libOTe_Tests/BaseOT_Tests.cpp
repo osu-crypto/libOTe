@@ -244,7 +244,8 @@ namespace tests_libOTe
 
         PRNG prng0(block(4253465, 3434565));
         PRNG prng1(block(42532335, 334565));
-        constexpr std::array<u64, 9> sizes = { 0, 1, 3, 4, 5, 15, 16, 17, 50 };
+        constexpr std::array<u64, 12> sizes = {
+            0, 1, 3, 4, 5, 7, 8, 9, 15, 16, 17, 50};
         for (const auto numOTs : sizes)
         {
             auto sock = cp::LocalAsyncSocket::makePair();

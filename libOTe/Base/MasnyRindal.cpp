@@ -25,7 +25,7 @@ namespace osuCrypto
 	namespace
 	{
 		using Edwards25519::Point;
-		using Edwards25519::Point4;
+		using Edwards25519::Point8;
 		using Edwards25519::Scalar;
 
 		constexpr u64 step = 16;
@@ -50,7 +50,7 @@ namespace osuCrypto
 			return point.doubled();
 		}
 
-		Point4 clearCofactor(Point4 points) noexcept
+		Point8 clearCofactor(Point8 points) noexcept
 		{
 			points = points.doubled();
 			points = points.doubled();
@@ -96,7 +96,7 @@ namespace osuCrypto
 			BatchEncoding choiceEncoded;
 		};
 
-		// Point4 is 32-byte aligned in the assembly backend. Keep it out of
+		// Point8 is 32-byte aligned in the assembly backend. Keep it out of
 		// coroutine frames, whose allocation is not guaranteed to preserve that
 		// alignment on every compiler, by placing each batch on a normal stack.
 		LIBOTE_NOINLINE ReceiverBatch makeReceiverBatch(PRNG& prng)
@@ -109,13 +109,13 @@ namespace osuCrypto
 				output.choiceScalars[lane] = randomScalar(prng);
 			}
 
-			const auto notPoints = Point4::mulGenerator(notScalars);
+			const auto notPoints = Point8::mulGenerator(notScalars);
 			notPoints.toBytes(output.notEncoded.data());
-			const auto hashed = Point4::hashToCurveElligator2(
+			const auto hashed = Point8::hashToCurveElligator2(
 				output.notEncoded.data(), Edwards25519::encodedSize,
 				reinterpret_cast<const u8*>(hashDomain), sizeof(hashDomain) - 1);
 			const auto choicePoints =
-				Point4::mulGenerator(output.choiceScalars) - hashed;
+				Point8::mulGenerator(output.choiceScalars) - hashed;
 			choicePoints.toBytes(output.choiceEncoded.data());
 			return output;
 		}
@@ -125,7 +125,7 @@ namespace osuCrypto
 			const std::array<Scalar, Edwards25519::lanes>& scalars)
 		{
 			BatchEncoding encoded;
-			Point4::broadcast(senderPoint).mul(scalars).toBytes(encoded.data());
+			Point8::broadcast(senderPoint).mul(scalars).toBytes(encoded.data());
 			return encoded;
 		}
 
@@ -140,16 +140,16 @@ namespace osuCrypto
 			const BatchEncoding& encoded1,
 			const Scalar& secretKey)
 		{
-			Point4 points0, points1;
+			Point8 points0, points1;
 			if (!points0.fromBytes(encoded0.data()) ||
 				!points1.fromBytes(encoded1.data()))
 				throw std::runtime_error(
 					"MasnyRindal received an invalid receiver point");
 
-			const auto hash0 = Point4::hashToCurveElligator2(
+			const auto hash0 = Point8::hashToCurveElligator2(
 				encoded1.data(), Edwards25519::encodedSize,
 				reinterpret_cast<const u8*>(hashDomain), sizeof(hashDomain) - 1);
-			const auto hash1 = Point4::hashToCurveElligator2(
+			const auto hash1 = Point8::hashToCurveElligator2(
 				encoded0.data(), Edwards25519::encodedSize,
 				reinterpret_cast<const u8*>(hashDomain), sizeof(hashDomain) - 1);
 			const auto shared0 = clearCofactor(points0 + hash0).mul(secretKey);
