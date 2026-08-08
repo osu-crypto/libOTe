@@ -10,34 +10,75 @@
 #include "libOTe/config.h"
 #ifdef ENABLE_MRR
 
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <stdexcept>
 #include <type_traits>
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/PRNG.h>
-#include <cryptoTools/Crypto/RCurve.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 
 #include "libOTe/Tools/Popf/FeistelRistPopf.h"
 #include "libOTe/Tools/Popf/FeistelMulRistPopf.h"
 
-#if !(defined(ENABLE_SODIUM) || defined(ENABLE_RELIC))
-static_assert(0, "ENABLE_SODIUM or ENABLE_RELIC must be defined to build McRosRoy");
-#endif
-#include "libOTe/Tools/DefaultCurve.h"
+#include "libOTe/Tools/MrrCurve.h"
 
 namespace osuCrypto
 {
 	namespace details
 	{
+		namespace mrr
+		{
+			using BatchEncoding = std::array<u8,
+				Ristretto255::lanes * Ristretto255::encodedSize>;
+			using UniformBatch = std::array<u8,
+				Ristretto255::lanes * Ristretto255::uniformSize>;
+
+			inline BatchEncoding programPoints(
+				const std::array<MrrCurve::Number, Ristretto255::lanes>& scalars,
+				const UniformBatch& uniform)
+			{
+				BatchEncoding encoded;
+				const auto points = MrrCurve::Point8::mulGenerator(scalars) -
+					MrrCurve::Point8::fromUniformBytes(uniform.data());
+				points.toBytes(encoded.data());
+				return encoded;
+			}
+
+			inline BatchEncoding sharedPoints(
+				const MrrCurve::Point& point,
+				const std::array<MrrCurve::Number, Ristretto255::lanes>& scalars)
+			{
+				BatchEncoding encoded;
+				MrrCurve::Point8::broadcast(point).mul(scalars).toBytes(encoded.data());
+				return encoded;
+			}
+
+			inline BatchEncoding evaluatePoints(
+				const BatchEncoding& encodedPoints,
+				const UniformBatch& uniform,
+				const MrrCurve::Number& scalar)
+			{
+				MrrCurve::Point8 points;
+				if (!points.fromBytes(encodedPoints.data()))
+					throw std::runtime_error("invalid Ristretto255 POPF point " LOCATION);
+				BatchEncoding result;
+				(points + MrrCurve::Point8::fromUniformBytes(uniform.data()))
+					.mul(scalar).toBytes(result.data());
+				return result;
+			}
+		}
+
 		// The Popf's PopfFunc must be plain old data, PopfIn must be convertible from an integer, and
-		// PopfOut must be a DefaultCurve::Point.
+		// PopfOut must be a MrrCurve::Point.
 		template<typename DSPopf>
 		class McRosRoy : public OtReceiver, public OtSender
 		{
-			using Curve = DefaultCurve::Curve;
-			using Point = DefaultCurve::Point;
-			using Number = DefaultCurve::Number;
+			using Point = MrrCurve::Point;
+			using Number = MrrCurve::Number;
 
 		public:
 			typedef DSPopf PopfFactory;
@@ -93,11 +134,11 @@ namespace osuCrypto
 
 	}
 
-	// The McQuoid Rosulek Roy OT protocol over the main and twisted curve 
+	// The McQuoid--Rosulek--Roy OT protocol over Ristretto255
 	// with the Feistel Popf impl. See https://eprint.iacr.org/2021/682
 	using McRosRoy = details::McRosRoy<DomainSepFeistelRistPopf>;
 
-	// The McQuoid Rosulek Roy OT protocol over the main and twisted curve 
+	// The streamlined McQuoid--Rosulek--Roy OT protocol over Ristretto255
 	// with the streamlined Feistel Popf impl. See https://eprint.iacr.org/2021/682
 	using McRosRoyMul = details::McRosRoy<DomainSepFeistelMulRistPopf>;
 
@@ -123,40 +164,65 @@ namespace osuCrypto
 			auto sk = std::vector<Number>{};
 			auto buff = std::vector<u8>(Point::size);
 			auto sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{ };
-
-			Curve{}; // init relic
 			auto n = choices.size();
-			sk.reserve(n);
+			if (n == 0)
+				co_return;
+			sk.resize(n);
 			sendBuff.resize(n);
 
-			for (u64 i = 0; i < n; ++i)
+			for (u64 base = 0; base < n; base += Ristretto255::lanes)
 			{
-				auto factory = popfFactory;
-				factory.Update(i);
-				auto popf = factory.construct();
+				const auto count = std::min<u64>(Ristretto255::lanes, n - base);
+				std::array<Number, Ristretto255::lanes> scalars;
+				std::array<u8, Ristretto255::lanes * Point::fromHashLength> uniform{};
+				for (u64 lane = 0; lane != Ristretto255::lanes; ++lane)
+				{
+					scalars[lane].randomize(prng);
+					if (lane >= count)
+						continue;
+					sk[base + lane] = scalars[lane];
+					auto factory = popfFactory;
+					factory.Update(base + lane);
+					auto popf = factory.construct();
+					auto& f = sendBuff[base + lane];
+					popf.batchProgramBegin(f, choices[base + lane], prng);
+					popf.batchHashPoint(f, choices[base + lane],
+						uniform.data() + lane * Point::fromHashLength);
+				}
 
-				sk.emplace_back(prng);
-				Point B = Point::mulGenerator(sk[i]);
-
-				sendBuff[i] = popf.program(choices[i], std::move(B), prng);
+				const auto encoded = mrr::programPoints(scalars, uniform);
+				for (u64 lane = 0; lane != count; ++lane)
+				{
+					auto factory = popfFactory;
+					factory.Update(base + lane);
+					auto popf = factory.construct();
+					auto& f = sendBuff[base + lane];
+					std::memcpy(f.t, encoded.data() + lane * Point::size, Point::size);
+					popf.batchProgramEnd(f, choices[base + lane]);
+				}
 			}
 
 			co_await chl.send(std::move(sendBuff));
 
 			co_await chl.recv(buff);
-			Curve{}; // init relic on this thread.
+			if (!A.fromBytes(buff.data()))
+				throw std::runtime_error("invalid Ristretto255 sender point " LOCATION);
 
-			A.fromBytes(buff.data());
-
-			for (u64 i = 0; i < n; ++i)
+			for (u64 base = 0; base < n; base += Ristretto255::lanes)
 			{
-				Point B = A * sk[i];
-
-				RandomOracle ro(sizeof(block));
-				ro.Update(B);
-				ro.Update(i);
-				ro.Update((bool)choices[i]);
-				ro.Final(messages[i]);
+				const auto count = std::min<u64>(Ristretto255::lanes, n - base);
+				std::array<Number, Ristretto255::lanes> scalars{};
+				for (u64 lane = 0; lane != count; ++lane)
+					scalars[lane] = sk[base + lane];
+				const auto encoded = mrr::sharedPoints(A, scalars);
+				for (u64 lane = 0; lane != count; ++lane)
+				{
+					RandomOracle ro(sizeof(block));
+					ro.Update(encoded.data() + lane * Point::size, Point::size);
+					ro.Update(base + lane);
+					ro.Update((bool)choices[base + lane]);
+					ro.Final(messages[base + lane]);
+				}
 			}
 
 			} MACORO_CATCH(eptr) {
@@ -173,13 +239,14 @@ namespace osuCrypto
 		{
 			MACORO_TRY{
 
-			Curve{}; // init relic
 			auto A = Point{};
 			auto sk = Number{};
 			auto buff = std::vector<u8>(Point::size);
 			auto recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
 
 			auto n = static_cast<u64>(msg.size());
+			if (n == 0)
+				co_return;
 			sk.randomize(prng);
 			A = Point::mulGenerator(sk);
 
@@ -190,31 +257,34 @@ namespace osuCrypto
 
 			recvBuff.resize(n);
 			co_await chl.recv(recvBuff);
-			Curve{}; // init relic on this thread
-
-			for (u64 i = 0; i < n; ++i)
+			for (u64 base = 0; base < n; base += Ristretto255::lanes)
 			{
-				auto factory = popfFactory;
-				factory.Update(i);
-				auto popf = factory.construct();
-
-				Point Bz = popf.eval(recvBuff[i], 0);
-				Point Bo = popf.eval(recvBuff[i], 1);
-
-				Bz *= sk;
-				Bo *= sk;
-
-				RandomOracle ro(sizeof(block));
-				ro.Update(Bz);
-				ro.Update(i);
-				ro.Update((bool)0);
-				ro.Final(msg[i][0]);
-
-				ro.Reset();
-				ro.Update(Bo);
-				ro.Update(i);
-				ro.Update((bool)1);
-				ro.Final(msg[i][1]);
+				const auto count = std::min<u64>(Ristretto255::lanes, n - base);
+				for (u8 branch = 0; branch != 2; ++branch)
+				{
+					mrr::UniformBatch uniform{};
+					mrr::BatchEncoding encoded{};
+					for (u64 lane = 0; lane != count; ++lane)
+					{
+						auto factory = popfFactory;
+						factory.Update(base + lane);
+						auto popf = factory.construct();
+						auto f = recvBuff[base + lane];
+						popf.batchEvalBegin(f, branch != 0);
+						std::memcpy(encoded.data() + lane * Point::size, f.t, Point::size);
+						popf.batchHashPoint(f, branch != 0,
+							uniform.data() + lane * Point::fromHashLength);
+					}
+					encoded = mrr::evaluatePoints(encoded, uniform, sk);
+					for (u64 lane = 0; lane != count; ++lane)
+					{
+						RandomOracle ro(sizeof(block));
+						ro.Update(encoded.data() + lane * Point::size, Point::size);
+						ro.Update(base + lane);
+						ro.Update(branch != 0);
+						ro.Final(msg[base + lane][branch]);
+					}
+				}
 			}
 
 			} MACORO_CATCH(eptr) {

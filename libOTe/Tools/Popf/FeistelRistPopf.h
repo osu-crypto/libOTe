@@ -12,13 +12,14 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
-#include "libOTe/Tools/DefaultCurve.h"
+#include <stdexcept>
+#include "libOTe/Tools/MrrCurve.h"
 
 namespace osuCrypto
 {
     class FeistelRistPopf
     {
-        using Point = DefaultCurve::Point;
+        using Point = MrrCurve::Point;
         friend class DomainSepFeistelRistPopf;
 
         const static size_t hashLength =
@@ -44,7 +45,8 @@ namespace osuCrypto
             xorHPrime(f, h);
 
             Point t;
-            t.fromBytes(f.t);
+            if (!t.fromBytes(f.t))
+                throw std::runtime_error("invalid Ristretto255 POPF point " LOCATION);
             addH(t, f.s, h, false);
 
             return t;
@@ -63,6 +65,33 @@ namespace osuCrypto
             xorHPrime(f, h);
 
             return f;
+        }
+
+        void batchProgramBegin(PopfFunc& f, PopfIn, PRNG& prng) const
+        {
+            prng.get(f.s, 3);
+        }
+
+        void batchHashPoint(const PopfFunc& f, PopfIn x,
+                            unsigned char out[Point::fromHashLength]) const
+        {
+            RandomOracle h = ro;
+            h.Update(x);
+            h.Update((unsigned char)0);
+            h.Update(f.s, 3);
+            h.Final(out);
+        }
+
+        void batchProgramEnd(PopfFunc& f, PopfIn x) const
+        {
+            RandomOracle h = ro;
+            h.Update(x);
+            xorHPrime(f, h);
+        }
+
+        void batchEvalBegin(PopfFunc& f, PopfIn x) const
+        {
+            batchProgramEnd(f, x);
         }
 
     private:
@@ -98,7 +127,7 @@ namespace osuCrypto
     {
         using RandomOracle::Final;
         using RandomOracle::outputLength;
-        using Point = DefaultCurve::Point;
+        using Point = MrrCurve::Point;
 
     public:
         typedef FeistelRistPopf ConstructedPopf;

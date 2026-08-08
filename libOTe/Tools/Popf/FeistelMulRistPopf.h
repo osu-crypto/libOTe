@@ -12,14 +12,15 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
+#include <stdexcept>
 
-#include "libOTe/Tools/DefaultCurve.h"
+#include "libOTe/Tools/MrrCurve.h"
 
 namespace osuCrypto
 {
     class FeistelMulRistPopf
     {
-        using Point = DefaultCurve::Point;
+        using Point = MrrCurve::Point;
 
     public:
         struct PopfFunc
@@ -39,7 +40,8 @@ namespace osuCrypto
             mulXor(f, x);
 
             Point t;
-            t.fromBytes(f.t);
+            if (!t.fromBytes(f.t))
+                throw std::runtime_error("invalid Ristretto255 POPF point " LOCATION);
             addH(t, f.s, x, false);
 
             return t;
@@ -56,6 +58,25 @@ namespace osuCrypto
 
             return f;
         }
+
+        // Internal fixed-width batching interface used by McRosRoy. These
+        // stages preserve the scalar POPF wire format exactly.
+        void batchProgramBegin(PopfFunc& f, PopfIn, PRNG& prng) const
+        {
+            prng.get(f.s, Point::size);
+        }
+
+        void batchHashPoint(const PopfFunc& f, PopfIn x,
+                            unsigned char out[Point::fromHashLength]) const
+        {
+            RandomOracle h = ro;
+            h.Update(x);
+            h.Update(f.s, Point::size);
+            h.Final(out);
+        }
+
+        void batchProgramEnd(PopfFunc& f, PopfIn x) const { mulXor(f, x); }
+        void batchEvalBegin(PopfFunc& f, PopfIn x) const { mulXor(f, x); }
 
     private:
         void addH(Point& t, const unsigned char s[], PopfIn x, bool negate) const
@@ -88,7 +109,7 @@ namespace osuCrypto
 
     public:
         typedef FeistelMulRistPopf ConstructedPopf;
-        const static size_t hashLength = DefaultCurve::Point::fromHashLength;
+        const static size_t hashLength = MrrCurve::Point::fromHashLength;
         DomainSepFeistelMulRistPopf() : RandomOracle(hashLength) {}
 
         ConstructedPopf construct()

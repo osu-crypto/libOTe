@@ -36,13 +36,8 @@ if(DEFINED ENABLE_ALL_OT)
 	# uses cryptoTools Edwards25519 and has a portable fallback
 	set(ENABLE_MR ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 
-	# requires sodium
-	if(${ENABLE_SODIUM} OR ${ENABLE_RELIC})
-		set(oc_BB ${ENABLE_ALL_OT})
-	else()
-		set(oc_BB OFF)
-	endif()
-	set(ENABLE_MRR ${oc_BB} CACHE BOOL "" FORCE)
+	# uses cryptoTools Ristretto255 and has a portable fallback
+	set(ENABLE_MRR ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 
 	# requires sodium
 	if(${ENABLE_SODIUM} AND SODIUM_MONTGOMERY)
@@ -231,8 +226,8 @@ if (ENABLE_MRR_TWIST AND NOT SODIUM_MONTGOMERY)
 	message(FATAL_ERROR "ENABLE_MRR_TWIST requires libsodium to support Montgomery curve noclamp operations. get sodium from https://github.com/osu-crypto/libsodium to enable.")
 endif()
 
-if ((ENABLE_SIMPLESTOT OR ENABLE_MRR) AND NOT (ENABLE_SODIUM OR ENABLE_RELIC))
-	message(FATAL_ERROR "ENABLE_SIMPLESTOT=${ENABLE_SIMPLESTOT} and ENABLE_MRR=${ENABLE_MRR} require ENABLE_SODIUM=${ENABLE_SODIUM} or ENABLE_RELIC=${ENABLE_RELIC}")
+if (ENABLE_SIMPLESTOT AND NOT (ENABLE_SODIUM OR ENABLE_RELIC))
+	message(FATAL_ERROR "ENABLE_SIMPLESTOT=${ENABLE_SIMPLESTOT} requires ENABLE_SODIUM=${ENABLE_SODIUM} or ENABLE_RELIC=${ENABLE_RELIC}")
 endif()
 
 if(ENABLE_IKNP AND NOT ENABLE_KOS)
