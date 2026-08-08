@@ -40,8 +40,8 @@ namespace osuCrypto
             mulXor(f, x);
 
             Point t;
-            if (!t.fromBytes(f.t))
-                throw std::runtime_error("invalid Ristretto255 POPF point " LOCATION);
+            if (!MrrCurve::fromBytes(t, f.t))
+                throw std::runtime_error("invalid McRosRoy POPF point " LOCATION);
             addH(t, f.s, x, false);
 
             return t;

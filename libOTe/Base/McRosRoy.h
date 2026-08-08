@@ -33,12 +33,12 @@ namespace osuCrypto
 		namespace mrr
 		{
 			using BatchEncoding = std::array<u8,
-				Ristretto255::lanes * Ristretto255::encodedSize>;
+				MrrCurve::lanes * MrrCurve::Point::size>;
 			using UniformBatch = std::array<u8,
-				Ristretto255::lanes * Ristretto255::uniformSize>;
+				MrrCurve::lanes * MrrCurve::Point::fromHashLength>;
 
 			inline BatchEncoding programPoints(
-				const std::array<MrrCurve::Number, Ristretto255::lanes>& scalars,
+				const std::array<MrrCurve::Number, MrrCurve::lanes>& scalars,
 				const UniformBatch& uniform)
 			{
 				BatchEncoding encoded;
@@ -50,7 +50,7 @@ namespace osuCrypto
 
 			inline BatchEncoding sharedPoints(
 				const MrrCurve::Point& point,
-				const std::array<MrrCurve::Number, Ristretto255::lanes>& scalars)
+				const std::array<MrrCurve::Number, MrrCurve::lanes>& scalars)
 			{
 				BatchEncoding encoded;
 				MrrCurve::Point8::broadcast(point).mul(scalars).toBytes(encoded.data());
@@ -64,7 +64,7 @@ namespace osuCrypto
 			{
 				MrrCurve::Point8 points;
 				if (!points.fromBytes(encodedPoints.data()))
-					throw std::runtime_error("invalid Ristretto255 POPF point " LOCATION);
+					throw std::runtime_error("invalid McRosRoy POPF point " LOCATION);
 				BatchEncoding result;
 				(points + MrrCurve::Point8::fromUniformBytes(uniform.data()))
 					.mul(scalar).toBytes(result.data());
@@ -160,6 +160,7 @@ namespace osuCrypto
 		{
 			MACORO_TRY{
 
+			MrrCurve::init();
 			auto A = Point{};
 			auto sk = std::vector<Number>{};
 			auto buff = std::vector<u8>(Point::size);
@@ -170,12 +171,12 @@ namespace osuCrypto
 			sk.resize(n);
 			sendBuff.resize(n);
 
-			for (u64 base = 0; base < n; base += Ristretto255::lanes)
+			for (u64 base = 0; base < n; base += MrrCurve::lanes)
 			{
-				const auto count = std::min<u64>(Ristretto255::lanes, n - base);
-				std::array<Number, Ristretto255::lanes> scalars;
-				std::array<u8, Ristretto255::lanes * Point::fromHashLength> uniform{};
-				for (u64 lane = 0; lane != Ristretto255::lanes; ++lane)
+				const auto count = std::min<u64>(MrrCurve::lanes, n - base);
+				std::array<Number, MrrCurve::lanes> scalars;
+				std::array<u8, MrrCurve::lanes * Point::fromHashLength> uniform{};
+				for (u64 lane = 0; lane != MrrCurve::lanes; ++lane)
 				{
 					scalars[lane].randomize(prng);
 					if (lane >= count)
@@ -205,13 +206,16 @@ namespace osuCrypto
 			co_await chl.send(std::move(sendBuff));
 
 			co_await chl.recv(buff);
-			if (!A.fromBytes(buff.data()))
-				throw std::runtime_error("invalid Ristretto255 sender point " LOCATION);
+			MrrCurve::init();
+			if (!MrrCurve::fromBytes(A, buff.data()))
+				throw std::runtime_error("invalid McRosRoy sender point " LOCATION);
 
-			for (u64 base = 0; base < n; base += Ristretto255::lanes)
+			for (u64 base = 0; base < n; base += MrrCurve::lanes)
 			{
-				const auto count = std::min<u64>(Ristretto255::lanes, n - base);
-				std::array<Number, Ristretto255::lanes> scalars{};
+				const auto count = std::min<u64>(MrrCurve::lanes, n - base);
+				std::array<Number, MrrCurve::lanes> scalars;
+				for (u64 lane = 0; lane != MrrCurve::lanes; ++lane)
+					scalars[lane] = sk[base];
 				for (u64 lane = 0; lane != count; ++lane)
 					scalars[lane] = sk[base + lane];
 				const auto encoded = mrr::sharedPoints(A, scalars);
@@ -239,6 +243,7 @@ namespace osuCrypto
 		{
 			MACORO_TRY{
 
+			MrrCurve::init();
 			auto A = Point{};
 			auto sk = Number{};
 			auto buff = std::vector<u8>(Point::size);
@@ -257,9 +262,10 @@ namespace osuCrypto
 
 			recvBuff.resize(n);
 			co_await chl.recv(recvBuff);
-			for (u64 base = 0; base < n; base += Ristretto255::lanes)
+			MrrCurve::init();
+			for (u64 base = 0; base < n; base += MrrCurve::lanes)
 			{
-				const auto count = std::min<u64>(Ristretto255::lanes, n - base);
+				const auto count = std::min<u64>(MrrCurve::lanes, n - base);
 				for (u8 branch = 0; branch != 2; ++branch)
 				{
 					mrr::UniformBatch uniform{};
@@ -274,6 +280,13 @@ namespace osuCrypto
 						std::memcpy(encoded.data() + lane * Point::size, f.t, Point::size);
 						popf.batchHashPoint(f, branch != 0,
 							uniform.data() + lane * Point::fromHashLength);
+					}
+					for (u64 lane = count; lane != MrrCurve::lanes; ++lane)
+					{
+						std::memcpy(encoded.data() + lane * Point::size,
+							encoded.data(), Point::size);
+						std::memcpy(uniform.data() + lane * Point::fromHashLength,
+							uniform.data(), Point::fromHashLength);
 					}
 					encoded = mrr::evaluatePoints(encoded, uniform, sk);
 					for (u64 lane = 0; lane != count; ++lane)
