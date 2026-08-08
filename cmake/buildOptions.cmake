@@ -22,6 +22,10 @@ if(DEFINED COPROTO_ENABLE_OPENSSL)
     unset(COPROTO_ENABLE_OPENSSL)
 endif()
 
+if(DEFINED ENABLE_SIMPLESTOT_ASM)
+	set(LIBOTE_SIMPLESTOT_ASM_EXPLICIT ON)
+endif()
+
 if(DEFINED ENABLE_ALL_OT)
 
 	# requires sodium or relic
@@ -54,7 +58,9 @@ if(DEFINED ENABLE_ALL_OT)
 	else()
 		set(oc_BB OFF)
 	endif()
-	set(ENABLE_SIMPLESTOT_ASM ${oc_BB}						CACHE BOOL "" FORCE)
+	if(NOT LIBOTE_SIMPLESTOT_ASM_EXPLICIT)
+		set(ENABLE_SIMPLESTOT_ASM ${oc_BB}					CACHE BOOL "" FORCE)
+	endif()
 	set(ENABLE_MR_KYBER       ${oc_BB}						CACHE BOOL "" FORCE)
 
 	# general

@@ -74,6 +74,7 @@ jobs:
           -DENABLE_ALL_OT=ON
           -DENABLE_EDWARDS25519_ASM=OFF
           -DENABLE_EDWARDS25519_IFMA=OFF
+          -DENABLE_SIMPLESTOT_ASM=OFF
           -DENABLE_SODIUM=ON
           -DSODIUM_MONTGOMERY=OFF
 
@@ -81,6 +82,7 @@ jobs:
         run: |
           grep -q '^ENABLE_EDWARDS25519_ASM:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_EDWARDS25519_IFMA:BOOL=OFF$' out/build/linux/CMakeCache.txt
+          grep -q '^ENABLE_SIMPLESTOT_ASM:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_SODIUM:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^SODIUM_MONTGOMERY:BOOL=OFF$' out/build/linux/CMakeCache.txt
 
