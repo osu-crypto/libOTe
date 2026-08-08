@@ -84,7 +84,7 @@ if(ENABLE_SIMPLESTOT_ASM OR
     set(ENABLE_EDWARDS25519_ASM ON CACHE BOOL "" FORCE)
 elseif((ENABLE_MR OR (DEFINED ENABLE_ALL_OT AND ENABLE_ALL_OT)) AND
        NOT DEFINED ENABLE_EDWARDS25519_ASM)
-    # Masny--Rindal uses the four-lane Edwards25519 backend. Prefer assembly
+    # Masny--Rindal uses the batched Edwards25519 backend. Prefer assembly
     # where cryptoTools supports it, while preserving an explicit OFF choice.
     set(ENABLE_EDWARDS25519_ASM ON CACHE BOOL
         "use the x86-64 Edwards25519 assembly backend")

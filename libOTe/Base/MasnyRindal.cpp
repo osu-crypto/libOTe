@@ -96,9 +96,10 @@ namespace osuCrypto
 			BatchEncoding choiceEncoded;
 		};
 
-		// Point8 is 32-byte aligned in the assembly backend. Keep it out of
-		// coroutine frames, whose allocation is not guaranteed to preserve that
-		// alignment on every compiler, by placing each batch on a normal stack.
+		// Point8 is over-aligned by the vector backends (32 bytes for AVX and
+		// 64 bytes for IFMA). Keep it out of coroutine frames, whose allocation
+		// is not guaranteed to preserve that alignment on every compiler, by
+		// placing each batch on a normal stack.
 		LIBOTE_NOINLINE ReceiverBatch makeReceiverBatch(PRNG& prng)
 		{
 			ReceiverBatch output;
