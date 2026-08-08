@@ -3,8 +3,8 @@
 
 #include <stdio.h>
 
-#include "cryptoTools/Crypto/Edwards25519/sc25519.h"
-#include "cryptoTools/Crypto/Edwards25519/ge4x.h"
+#include "cryptoTools/Crypto/Edwards25519/portable/sc25519.h"
+#include "cryptoTools/Crypto/Edwards25519/batch/ge4x.h"
 #include "randombytes.h"
 #include "ot_config.h"
 

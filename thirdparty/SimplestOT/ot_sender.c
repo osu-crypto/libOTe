@@ -2,8 +2,8 @@
 
 #include <stdlib.h>
 
-#include "cryptoTools/Crypto/Edwards25519/ge25519.h"
-#include "cryptoTools/Crypto/Edwards25519/ge4x.h"
+#include "cryptoTools/Crypto/Edwards25519/portable/ge25519.h"
+#include "cryptoTools/Crypto/Edwards25519/batch/ge4x.h"
 #include "crypto_hash.h"
 #include "to_4x.h"
 

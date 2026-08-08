@@ -1,4 +1,4 @@
-#include "cryptoTools/Crypto/Edwards25519/sc25519.h"
+#include "cryptoTools/Crypto/Edwards25519/portable/sc25519.h"
 #include "randombytes.h"
 
 void sc25519_random(sc25519 *r, int c, rand_source rand)

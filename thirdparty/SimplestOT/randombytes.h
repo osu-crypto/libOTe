@@ -7,7 +7,7 @@ Public domain.
 #ifndef randombytes_devurandom_H
 #define randombytes_devurandom_H
 
-#include "cryptoTools/Crypto/Edwards25519/sc25519.h"
+#include "cryptoTools/Crypto/Edwards25519/portable/sc25519.h"
 
 #ifdef __cplusplus
 extern "C" {

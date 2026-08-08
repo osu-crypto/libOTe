@@ -1,7 +1,7 @@
 #ifndef CRYPTO_HASH_H
 #define CRYPTO_HASH_H
 
-#include "cryptoTools/Crypto/Edwards25519/ge4x.h"
+#include "cryptoTools/Crypto/Edwards25519/batch/ge4x.h"
 
 #define crypto_hash_BYTES 32
 
