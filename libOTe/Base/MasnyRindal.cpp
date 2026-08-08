@@ -5,7 +5,7 @@
 #include "libOTe/Tools/Coproto.h"
 
 #include <cryptoTools/Common/BitVector.h>
-#include <cryptoTools/Crypto/Edwards25519/Edwards25519.h>
+#include <cryptoTools/Crypto/Edwards25519/Curve25519Backend.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 
 #include <algorithm>
@@ -24,19 +24,20 @@ namespace osuCrypto
 {
 	namespace
 	{
-		using Edwards25519::Point;
-		using Edwards25519::Point8;
-		using Edwards25519::Scalar;
+		using Edwards25519::Backend::Point;
+		using Edwards25519::Backend::Point8;
+		using Edwards25519::Backend::Scalar;
 
 		constexpr u64 step = 16;
 		constexpr char hashDomain[] = "libOTe-MasnyRindal-v1";
 		constexpr char kdfDomain[] = "libOTe-MasnyRindal-v1-KDF";
 		using BatchEncoding =
-			std::array<u8, Edwards25519::lanes * Edwards25519::encodedSize>;
+			std::array<u8, Edwards25519::Backend::lanes *
+				Edwards25519::Backend::encodedSize>;
 
 		Scalar randomScalar(PRNG& prng)
 		{
-			std::array<u8, Edwards25519::encodedSize> bytes;
+			std::array<u8, Edwards25519::Backend::encodedSize> bytes;
 			prng.get(bytes.data(), bytes.size());
 			return Scalar(bytes.data());
 		}
@@ -59,7 +60,7 @@ namespace osuCrypto
 
 		void deriveKey(
 			block& output,
-			const u8 point[Edwards25519::encodedSize],
+			const u8 point[Edwards25519::Backend::encodedSize],
 			u64 otIndex,
 			u8 branch)
 		{
@@ -71,27 +72,29 @@ namespace osuCrypto
 			hash.Update(kdfDomain, sizeof(kdfDomain) - 1);
 			hash.Update(indexBytes.data(), indexBytes.size());
 			hash.Update(&branch, 1);
-			hash.Update(point, Edwards25519::encodedSize);
+			hash.Update(point, Edwards25519::Backend::encodedSize);
 			hash.Final(output);
 		}
 
-		std::array<u8, Edwards25519::lanes * Edwards25519::encodedSize>
+		std::array<u8, Edwards25519::Backend::lanes *
+			Edwards25519::Backend::encodedSize>
 		neutralBatchEncoding()
 		{
-			std::array<u8, Edwards25519::encodedSize> neutral;
+			std::array<u8, Edwards25519::Backend::encodedSize> neutral;
 			Point{}.toBytes(neutral.data());
 
-			std::array<u8, Edwards25519::lanes * Edwards25519::encodedSize> batch;
-			for (u64 lane = 0; lane != Edwards25519::lanes; ++lane)
+			std::array<u8, Edwards25519::Backend::lanes *
+				Edwards25519::Backend::encodedSize> batch;
+			for (u64 lane = 0; lane != Edwards25519::Backend::lanes; ++lane)
 				std::memcpy(
-					batch.data() + lane * Edwards25519::encodedSize,
+					batch.data() + lane * Edwards25519::Backend::encodedSize,
 					neutral.data(), neutral.size());
 			return batch;
 		}
 
 		struct ReceiverBatch
 		{
-			std::array<Scalar, Edwards25519::lanes> choiceScalars;
+			std::array<Scalar, Edwards25519::Backend::lanes> choiceScalars;
 			BatchEncoding notEncoded;
 			BatchEncoding choiceEncoded;
 		};
@@ -103,8 +106,8 @@ namespace osuCrypto
 		LIBOTE_NOINLINE ReceiverBatch makeReceiverBatch(PRNG& prng)
 		{
 			ReceiverBatch output;
-			std::array<Scalar, Edwards25519::lanes> notScalars;
-			for (u64 lane = 0; lane != Edwards25519::lanes; ++lane)
+			std::array<Scalar, Edwards25519::Backend::lanes> notScalars;
+			for (u64 lane = 0; lane != Edwards25519::Backend::lanes; ++lane)
 			{
 				notScalars[lane] = randomScalar(prng);
 				output.choiceScalars[lane] = randomScalar(prng);
@@ -113,7 +116,7 @@ namespace osuCrypto
 			const auto notPoints = Point8::mulGenerator(notScalars);
 			notPoints.toBytes(output.notEncoded.data());
 			const auto hashed = Point8::hashToCurveElligator2(
-				output.notEncoded.data(), Edwards25519::encodedSize,
+				output.notEncoded.data(), Edwards25519::Backend::encodedSize,
 				reinterpret_cast<const u8*>(hashDomain), sizeof(hashDomain) - 1);
 			const auto choicePoints =
 				Point8::mulGenerator(output.choiceScalars) - hashed;
@@ -123,7 +126,7 @@ namespace osuCrypto
 
 		LIBOTE_NOINLINE BatchEncoding makeReceiverSharedBatch(
 			const Point& senderPoint,
-			const std::array<Scalar, Edwards25519::lanes>& scalars)
+			const std::array<Scalar, Edwards25519::Backend::lanes>& scalars)
 		{
 			BatchEncoding encoded;
 			Point8::broadcast(senderPoint).mul(scalars).toBytes(encoded.data());
@@ -148,10 +151,10 @@ namespace osuCrypto
 					"MasnyRindal received an invalid receiver point");
 
 			const auto hash0 = Point8::hashToCurveElligator2(
-				encoded1.data(), Edwards25519::encodedSize,
+				encoded1.data(), Edwards25519::Backend::encodedSize,
 				reinterpret_cast<const u8*>(hashDomain), sizeof(hashDomain) - 1);
 			const auto hash1 = Point8::hashToCurveElligator2(
-				encoded0.data(), Edwards25519::encodedSize,
+				encoded0.data(), Edwards25519::Backend::encodedSize,
 				reinterpret_cast<const u8*>(hashDomain), sizeof(hashDomain) - 1);
 			const auto shared0 = clearCofactor(points0 + hash0).mul(secretKey);
 			const auto shared1 = clearCofactor(points1 + hash1).mul(secretKey);
@@ -170,6 +173,7 @@ namespace osuCrypto
 		Socket& chl)
 	{
 		MACORO_TRY{
+		Edwards25519::Backend::init();
 		if (messages.size() != choices.size())
 			throw std::invalid_argument(
 				"MasnyRindal receiver choices and messages have different sizes");
@@ -182,12 +186,12 @@ namespace osuCrypto
 		for (u64 i = 0; i < n;)
 		{
 			const auto curStep = std::min<u64>(n - i, step);
-			buff.resize(Edwards25519::encodedSize * 2 * curStep);
+			buff.resize(Edwards25519::Backend::encodedSize * 2 * curStep);
 
-			for (u64 batch = 0; batch < curStep; batch += Edwards25519::lanes)
+			for (u64 batch = 0; batch < curStep; batch += Edwards25519::Backend::lanes)
 			{
 				const auto active = std::min<u64>(
-					Edwards25519::lanes, curStep - batch);
+					Edwards25519::Backend::lanes, curStep - batch);
 				const auto points = makeReceiverBatch(prng);
 				for (u64 lane = 0; lane != active; ++lane)
 					secretKeys.emplace_back(points.choiceScalars[lane]);
@@ -197,15 +201,15 @@ namespace osuCrypto
 					const auto ot = i + batch + lane;
 					const auto choice = static_cast<u64>(choices[ot]);
 					auto* pair = buff.data() +
-						2 * (batch + lane) * Edwards25519::encodedSize;
+						2 * (batch + lane) * Edwards25519::Backend::encodedSize;
 					std::memcpy(
-						pair + (choice ^ 1) * Edwards25519::encodedSize,
-						points.notEncoded.data() + lane * Edwards25519::encodedSize,
-						Edwards25519::encodedSize);
+						pair + (choice ^ 1) * Edwards25519::Backend::encodedSize,
+						points.notEncoded.data() + lane * Edwards25519::Backend::encodedSize,
+						Edwards25519::Backend::encodedSize);
 					std::memcpy(
-						pair + choice * Edwards25519::encodedSize,
-						points.choiceEncoded.data() + lane * Edwards25519::encodedSize,
-						Edwards25519::encodedSize);
+						pair + choice * Edwards25519::Backend::encodedSize,
+						points.choiceEncoded.data() + lane * Edwards25519::Backend::encodedSize,
+						Edwards25519::Backend::encodedSize);
 				}
 			}
 
@@ -213,18 +217,19 @@ namespace osuCrypto
 			co_await chl.send(std::move(buff));
 		}
 
-		buff.resize(Edwards25519::encodedSize);
+		buff.resize(Edwards25519::Backend::encodedSize);
 		co_await chl.recv(buff);
+		Edwards25519::Backend::init();
 		Point senderPoint;
 		if (!senderPoint.fromBytes(buff.data()))
 			throw std::runtime_error("MasnyRindal received an invalid sender point");
 		senderPoint = clearCofactor(senderPoint);
 
-		for (u64 i = 0; i < n; i += Edwards25519::lanes)
+		for (u64 i = 0; i < n; i += Edwards25519::Backend::lanes)
 		{
-			const auto active = std::min<u64>(Edwards25519::lanes, n - i);
-			std::array<Scalar, Edwards25519::lanes> scalars;
-			for (u64 lane = 0; lane != Edwards25519::lanes; ++lane)
+			const auto active = std::min<u64>(Edwards25519::Backend::lanes, n - i);
+			std::array<Scalar, Edwards25519::Backend::lanes> scalars;
+			for (u64 lane = 0; lane != Edwards25519::Backend::lanes; ++lane)
 				scalars[lane] = secretKeys[i + std::min<u64>(lane, active - 1)];
 
 			const auto sharedEncoded =
@@ -232,7 +237,7 @@ namespace osuCrypto
 			for (u64 lane = 0; lane != active; ++lane)
 				deriveKey(
 					messages[i + lane],
-					sharedEncoded.data() + lane * Edwards25519::encodedSize,
+					sharedEncoded.data() + lane * Edwards25519::Backend::encodedSize,
 					i + lane,
 					static_cast<u8>(choices[i + lane]));
 		}
@@ -249,10 +254,11 @@ namespace osuCrypto
 		Socket& chl)
 	{
 		MACORO_TRY{
+		Edwards25519::Backend::init();
 		const auto n = static_cast<u64>(messages.size());
 		const auto secretKey = randomScalar(prng);
 
-		auto buff = std::vector<u8>(Edwards25519::encodedSize);
+		auto buff = std::vector<u8>(Edwards25519::Backend::encodedSize);
 		Point::mulGenerator(secretKey).toBytes(buff.data());
 		co_await chl.send(std::move(buff));
 
@@ -260,26 +266,27 @@ namespace osuCrypto
 		for (u64 i = 0; i < n;)
 		{
 			const auto curStep = std::min<u64>(n - i, step);
-			buff.resize(Edwards25519::encodedSize * 2 * curStep);
+			buff.resize(Edwards25519::Backend::encodedSize * 2 * curStep);
 			co_await chl.recv(buff);
+			Edwards25519::Backend::init();
 
-			for (u64 batch = 0; batch < curStep; batch += Edwards25519::lanes)
+			for (u64 batch = 0; batch < curStep; batch += Edwards25519::Backend::lanes)
 			{
 				const auto active = std::min<u64>(
-					Edwards25519::lanes, curStep - batch);
+					Edwards25519::Backend::lanes, curStep - batch);
 				auto encoded0 = neutral;
 				auto encoded1 = neutral;
 				for (u64 lane = 0; lane != active; ++lane)
 				{
 					const auto* pair = buff.data() +
-						2 * (batch + lane) * Edwards25519::encodedSize;
+						2 * (batch + lane) * Edwards25519::Backend::encodedSize;
 					std::memcpy(
-						encoded0.data() + lane * Edwards25519::encodedSize,
-						pair, Edwards25519::encodedSize);
+						encoded0.data() + lane * Edwards25519::Backend::encodedSize,
+						pair, Edwards25519::Backend::encodedSize);
 					std::memcpy(
-						encoded1.data() + lane * Edwards25519::encodedSize,
-						pair + Edwards25519::encodedSize,
-						Edwards25519::encodedSize);
+						encoded1.data() + lane * Edwards25519::Backend::encodedSize,
+						pair + Edwards25519::Backend::encodedSize,
+						Edwards25519::Backend::encodedSize);
 				}
 
 				const auto shared =
@@ -290,11 +297,11 @@ namespace osuCrypto
 					const auto ot = i + batch + lane;
 					deriveKey(
 						messages[ot][0],
-						shared.sharedEncoded0.data() + lane * Edwards25519::encodedSize,
+						shared.sharedEncoded0.data() + lane * Edwards25519::Backend::encodedSize,
 						ot, 0);
 					deriveKey(
 						messages[ot][1],
-						shared.sharedEncoded1.data() + lane * Edwards25519::encodedSize,
+						shared.sharedEncoded1.data() + lane * Edwards25519::Backend::encodedSize,
 						ot, 1);
 				}
 			}

@@ -24,7 +24,7 @@
 #include "libOTe/Tools/Popf/FeistelRistPopf.h"
 #include "libOTe/Tools/Popf/FeistelMulRistPopf.h"
 
-#include "libOTe/Tools/MrrCurve.h"
+#include <cryptoTools/Crypto/Edwards25519/Curve25519Backend.h>
 
 namespace osuCrypto
 {
@@ -33,52 +33,55 @@ namespace osuCrypto
 		namespace mrr
 		{
 			using BatchEncoding = std::array<u8,
-				MrrCurve::lanes * MrrCurve::Point::size>;
+				Ristretto255::Backend::lanes * Ristretto255::Backend::Point::size>;
 			using UniformBatch = std::array<u8,
-				MrrCurve::lanes * MrrCurve::Point::fromHashLength>;
+				Ristretto255::Backend::lanes * Ristretto255::Backend::Point::fromHashLength>;
 
 			inline BatchEncoding programPoints(
-				const std::array<MrrCurve::Number, MrrCurve::lanes>& scalars,
+				const std::array<Ristretto255::Backend::Scalar,
+					Ristretto255::Backend::lanes>& scalars,
 				const UniformBatch& uniform)
 			{
 				BatchEncoding encoded;
-				const auto points = MrrCurve::Point8::mulGenerator(scalars) -
-					MrrCurve::Point8::fromUniformBytes(uniform.data());
+				const auto points = Ristretto255::Backend::Point8::mulGenerator(scalars) -
+					Ristretto255::Backend::Point8::fromUniformBytes(uniform.data());
 				points.toBytes(encoded.data());
 				return encoded;
 			}
 
 			inline BatchEncoding sharedPoints(
-				const MrrCurve::Point& point,
-				const std::array<MrrCurve::Number, MrrCurve::lanes>& scalars)
+				const Ristretto255::Backend::Point& point,
+				const std::array<Ristretto255::Backend::Scalar,
+					Ristretto255::Backend::lanes>& scalars)
 			{
 				BatchEncoding encoded;
-				MrrCurve::Point8::broadcast(point).mul(scalars).toBytes(encoded.data());
+				Ristretto255::Backend::Point8::broadcast(point)
+					.mul(scalars).toBytes(encoded.data());
 				return encoded;
 			}
 
 			inline BatchEncoding evaluatePoints(
 				const BatchEncoding& encodedPoints,
 				const UniformBatch& uniform,
-				const MrrCurve::Number& scalar)
+				const Ristretto255::Backend::Scalar& scalar)
 			{
-				MrrCurve::Point8 points;
+				Ristretto255::Backend::Point8 points;
 				if (!points.fromBytes(encodedPoints.data()))
 					throw std::runtime_error("invalid McRosRoy POPF point " LOCATION);
 				BatchEncoding result;
-				(points + MrrCurve::Point8::fromUniformBytes(uniform.data()))
+				(points + Ristretto255::Backend::Point8::fromUniformBytes(uniform.data()))
 					.mul(scalar).toBytes(result.data());
 				return result;
 			}
 		}
 
 		// The Popf's PopfFunc must be plain old data, PopfIn must be convertible from an integer, and
-		// PopfOut must be a MrrCurve::Point.
+		// PopfOut must be a Ristretto255 backend point.
 		template<typename DSPopf>
 		class McRosRoy : public OtReceiver, public OtSender
 		{
-			using Point = MrrCurve::Point;
-			using Number = MrrCurve::Number;
+			using Point = Ristretto255::Backend::Point;
+			using Number = Ristretto255::Backend::Scalar;
 
 		public:
 			typedef DSPopf PopfFactory;
@@ -160,7 +163,7 @@ namespace osuCrypto
 		{
 			MACORO_TRY{
 
-			MrrCurve::init();
+			Ristretto255::Backend::init();
 			auto A = Point{};
 			auto sk = std::vector<Number>{};
 			auto buff = std::vector<u8>(Point::size);
@@ -171,12 +174,12 @@ namespace osuCrypto
 			sk.resize(n);
 			sendBuff.resize(n);
 
-			for (u64 base = 0; base < n; base += MrrCurve::lanes)
+			for (u64 base = 0; base < n; base += Ristretto255::Backend::lanes)
 			{
-				const auto count = std::min<u64>(MrrCurve::lanes, n - base);
-				std::array<Number, MrrCurve::lanes> scalars;
-				std::array<u8, MrrCurve::lanes * Point::fromHashLength> uniform{};
-				for (u64 lane = 0; lane != MrrCurve::lanes; ++lane)
+				const auto count = std::min<u64>(Ristretto255::Backend::lanes, n - base);
+				std::array<Number, Ristretto255::Backend::lanes> scalars;
+				std::array<u8, Ristretto255::Backend::lanes * Point::fromHashLength> uniform{};
+				for (u64 lane = 0; lane != Ristretto255::Backend::lanes; ++lane)
 				{
 					scalars[lane].randomize(prng);
 					if (lane >= count)
@@ -206,15 +209,15 @@ namespace osuCrypto
 			co_await chl.send(std::move(sendBuff));
 
 			co_await chl.recv(buff);
-			MrrCurve::init();
-			if (!MrrCurve::fromBytes(A, buff.data()))
+			Ristretto255::Backend::init();
+			if (!A.fromBytes(buff.data()))
 				throw std::runtime_error("invalid McRosRoy sender point " LOCATION);
 
-			for (u64 base = 0; base < n; base += MrrCurve::lanes)
+			for (u64 base = 0; base < n; base += Ristretto255::Backend::lanes)
 			{
-				const auto count = std::min<u64>(MrrCurve::lanes, n - base);
-				std::array<Number, MrrCurve::lanes> scalars;
-				for (u64 lane = 0; lane != MrrCurve::lanes; ++lane)
+				const auto count = std::min<u64>(Ristretto255::Backend::lanes, n - base);
+				std::array<Number, Ristretto255::Backend::lanes> scalars;
+				for (u64 lane = 0; lane != Ristretto255::Backend::lanes; ++lane)
 					scalars[lane] = sk[base];
 				for (u64 lane = 0; lane != count; ++lane)
 					scalars[lane] = sk[base + lane];
@@ -243,7 +246,7 @@ namespace osuCrypto
 		{
 			MACORO_TRY{
 
-			MrrCurve::init();
+			Ristretto255::Backend::init();
 			auto A = Point{};
 			auto sk = Number{};
 			auto buff = std::vector<u8>(Point::size);
@@ -262,10 +265,10 @@ namespace osuCrypto
 
 			recvBuff.resize(n);
 			co_await chl.recv(recvBuff);
-			MrrCurve::init();
-			for (u64 base = 0; base < n; base += MrrCurve::lanes)
+			Ristretto255::Backend::init();
+			for (u64 base = 0; base < n; base += Ristretto255::Backend::lanes)
 			{
-				const auto count = std::min<u64>(MrrCurve::lanes, n - base);
+				const auto count = std::min<u64>(Ristretto255::Backend::lanes, n - base);
 				for (u8 branch = 0; branch != 2; ++branch)
 				{
 					mrr::UniformBatch uniform{};
@@ -281,7 +284,7 @@ namespace osuCrypto
 						popf.batchHashPoint(f, branch != 0,
 							uniform.data() + lane * Point::fromHashLength);
 					}
-					for (u64 lane = count; lane != MrrCurve::lanes; ++lane)
+					for (u64 lane = count; lane != Ristretto255::Backend::lanes; ++lane)
 					{
 						std::memcpy(encoded.data() + lane * Point::size,
 							encoded.data(), Point::size);

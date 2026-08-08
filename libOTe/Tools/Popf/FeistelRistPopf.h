@@ -13,13 +13,13 @@
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <stdexcept>
-#include "libOTe/Tools/MrrCurve.h"
+#include <cryptoTools/Crypto/Edwards25519/Curve25519Backend.h>
 
 namespace osuCrypto
 {
     class FeistelRistPopf
     {
-        using Point = MrrCurve::Point;
+        using Point = Ristretto255::Backend::Point;
         friend class DomainSepFeistelRistPopf;
 
         const static size_t hashLength =
@@ -45,7 +45,7 @@ namespace osuCrypto
             xorHPrime(f, h);
 
             Point t;
-            if (!MrrCurve::fromBytes(t, f.t))
+            if (!t.fromBytes(f.t))
                 throw std::runtime_error("invalid McRosRoy POPF point " LOCATION);
             addH(t, f.s, h, false);
 
@@ -127,7 +127,7 @@ namespace osuCrypto
     {
         using RandomOracle::Final;
         using RandomOracle::outputLength;
-        using Point = MrrCurve::Point;
+        using Point = Ristretto255::Backend::Point;
 
     public:
         typedef FeistelRistPopf ConstructedPopf;
