@@ -242,37 +242,74 @@ namespace tests_libOTe
 #ifdef ENABLE_MR
         setThreadName("Sender");
 
-
-        auto sock = cp::LocalAsyncSocket::makePair();
-
         PRNG prng0(block(4253465, 3434565));
         PRNG prng1(block(42532335, 334565));
-
-        u64 numOTs = 50;
-        std::vector<block> recvMsg(numOTs);
-        std::vector<std::array<block, 2>> sendMsg(numOTs);
-        BitVector choices(numOTs);
-        choices.randomize(prng0);
-
-
-        MasnyRindal baseOTs0;
-        auto p0 = baseOTs0.send(sendMsg, prng1, sock[0]);
-
-        MasnyRindal baseOTs1;
-        auto p1 = baseOTs1.receive(choices, recvMsg, prng0, sock[1]);
-
-        eval(p0, p1);
-
-        for (u64 i = 0; i < numOTs; ++i)
+        constexpr std::array<u64, 9> sizes = { 0, 1, 3, 4, 5, 15, 16, 17, 50 };
+        for (const auto numOTs : sizes)
         {
-            if (neq(recvMsg[i], sendMsg[i][choices[i]]))
+            auto sock = cp::LocalAsyncSocket::makePair();
+            std::vector<block> recvMsg(numOTs);
+            std::vector<std::array<block, 2>> sendMsg(numOTs);
+            BitVector choices(numOTs);
+            choices.randomize(prng0);
+
+            MasnyRindal sender;
+            auto p0 = sender.send(sendMsg, prng1, sock[0]);
+            MasnyRindal receiver;
+            auto p1 = receiver.receive(choices, recvMsg, prng0, sock[1]);
+            eval(p0, p1);
+
+            for (u64 i = 0; i < numOTs; ++i)
             {
-                std::cout << "failed " << i << " exp = m[" << int(choices[i]) << "], act = " << recvMsg[i] << " true = " << sendMsg[i][0] << ", " << sendMsg[i][1] << std::endl;
-                throw UnitTestFail();
+                if (neq(recvMsg[i], sendMsg[i][choices[i]]))
+                {
+                    std::cout << "failed size=" << numOTs << ", OT=" << i
+                        << " exp=m[" << int(choices[i]) << "], act=" << recvMsg[i]
+                        << " true=" << sendMsg[i][0] << ", " << sendMsg[i][1]
+                        << std::endl;
+                    throw UnitTestFail();
+                }
             }
         }
+
+        // Both wire directions reject non-canonical Edwards25519 encodings.
+        {
+            auto sock = cp::LocalAsyncSocket::makePair();
+            std::vector<std::array<block, 2>> sendMsg(1);
+            MasnyRindal sender;
+            auto honest = sender.send(sendMsg, prng1, sock[0]);
+            auto malformed = [&]() -> task<> {
+                std::vector<u8> senderPoint(32);
+                co_await sock[1].recv(senderPoint);
+                std::vector<u8> invalidPair(64, 0xff);
+                co_await sock[1].send(std::move(invalidPair));
+            }();
+
+            bool rejected = false;
+            try { eval(honest, malformed); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail("MasnyRindal sender accepted an invalid point");
+        }
+        {
+            auto sock = cp::LocalAsyncSocket::makePair();
+            std::vector<block> recvMsg;
+            BitVector choices;
+            MasnyRindal receiver;
+            auto honest = receiver.receive(choices, recvMsg, prng0, sock[1]);
+            auto malformed = [&]() -> task<> {
+                std::vector<u8> invalidPoint(32, 0xff);
+                co_await sock[0].send(std::move(invalidPoint));
+            }();
+
+            bool rejected = false;
+            try { eval(honest, malformed); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail("MasnyRindal receiver accepted an invalid point");
+        }
 #else
-        throw UnitTestSkipped("MasnyRindal not enabled. Requires libsodium or Relic.");
+        throw UnitTestSkipped("MasnyRindal not enabled (ENABLE_MR).");
 #endif
     }
 

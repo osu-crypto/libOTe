@@ -2,23 +2,164 @@
 
 #ifdef ENABLE_MR
 
-#include <cryptoTools/Common/BitVector.h>
-#include <cryptoTools/Common/Log.h>
-#include <cryptoTools/Crypto/RandomOracle.h>
-#include <cryptoTools/Network/Channel.h>
-#include "libOTe/Tools/DefaultCurve.h"
 #include "libOTe/Tools/Coproto.h"
 
-#if !(defined(ENABLE_SODIUM) || defined(ENABLE_RELIC))
-static_assert(0, "ENABLE_SODIUM or ENABLE_RELIC must be defined to build MasnyRindal");
-#endif
+#include <cryptoTools/Common/BitVector.h>
+#include <cryptoTools/Crypto/Edwards25519/Edwards25519.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
 
-#include <libOTe/Base/SimplestOT.h>
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <stdexcept>
+#include <vector>
+
+#ifdef _MSC_VER
+#define LIBOTE_NOINLINE __declspec(noinline)
+#else
+#define LIBOTE_NOINLINE __attribute__((noinline))
+#endif
 
 namespace osuCrypto
 {
-	namespace {
-		const u64 step = 16;
+	namespace
+	{
+		using Edwards25519::Point;
+		using Edwards25519::Point4;
+		using Edwards25519::Scalar;
+
+		constexpr u64 step = 16;
+		constexpr char hashDomain[] = "libOTe-MasnyRindal-v1";
+		constexpr char kdfDomain[] = "libOTe-MasnyRindal-v1-KDF";
+		using BatchEncoding =
+			std::array<u8, Edwards25519::lanes * Edwards25519::encodedSize>;
+
+		Scalar randomScalar(PRNG& prng)
+		{
+			std::array<u8, Edwards25519::encodedSize> bytes;
+			prng.get(bytes.data(), bytes.size());
+			return Scalar(bytes.data());
+		}
+
+		// Edwards25519 has cofactor 8. Clear it explicitly whenever a point
+		// enters through the protocol wire so torsion cannot affect the key.
+		Point clearCofactor(Point point) noexcept
+		{
+			point = point.doubled();
+			point = point.doubled();
+			return point.doubled();
+		}
+
+		Point4 clearCofactor(Point4 points) noexcept
+		{
+			points = points.doubled();
+			points = points.doubled();
+			return points.doubled();
+		}
+
+		void deriveKey(
+			block& output,
+			const u8 point[Edwards25519::encodedSize],
+			u64 otIndex,
+			u8 branch)
+		{
+			std::array<u8, sizeof(u64)> indexBytes;
+			for (u64 i = 0; i != indexBytes.size(); ++i)
+				indexBytes[i] = static_cast<u8>(otIndex >> (8 * i));
+
+			RandomOracle hash(sizeof(block));
+			hash.Update(kdfDomain, sizeof(kdfDomain) - 1);
+			hash.Update(indexBytes.data(), indexBytes.size());
+			hash.Update(&branch, 1);
+			hash.Update(point, Edwards25519::encodedSize);
+			hash.Final(output);
+		}
+
+		std::array<u8, Edwards25519::lanes * Edwards25519::encodedSize>
+		neutralBatchEncoding()
+		{
+			std::array<u8, Edwards25519::encodedSize> neutral;
+			Point{}.toBytes(neutral.data());
+
+			std::array<u8, Edwards25519::lanes * Edwards25519::encodedSize> batch;
+			for (u64 lane = 0; lane != Edwards25519::lanes; ++lane)
+				std::memcpy(
+					batch.data() + lane * Edwards25519::encodedSize,
+					neutral.data(), neutral.size());
+			return batch;
+		}
+
+		struct ReceiverBatch
+		{
+			std::array<Scalar, Edwards25519::lanes> choiceScalars;
+			BatchEncoding notEncoded;
+			BatchEncoding choiceEncoded;
+		};
+
+		// Point4 is 32-byte aligned in the assembly backend. Keep it out of
+		// coroutine frames, whose allocation is not guaranteed to preserve that
+		// alignment on every compiler, by placing each batch on a normal stack.
+		LIBOTE_NOINLINE ReceiverBatch makeReceiverBatch(PRNG& prng)
+		{
+			ReceiverBatch output;
+			std::array<Scalar, Edwards25519::lanes> notScalars;
+			for (u64 lane = 0; lane != Edwards25519::lanes; ++lane)
+			{
+				notScalars[lane] = randomScalar(prng);
+				output.choiceScalars[lane] = randomScalar(prng);
+			}
+
+			const auto notPoints = Point4::mulGenerator(notScalars);
+			notPoints.toBytes(output.notEncoded.data());
+			const auto hashed = Point4::hashToCurveElligator2(
+				output.notEncoded.data(), Edwards25519::encodedSize,
+				reinterpret_cast<const u8*>(hashDomain), sizeof(hashDomain) - 1);
+			const auto choicePoints =
+				Point4::mulGenerator(output.choiceScalars) - hashed;
+			choicePoints.toBytes(output.choiceEncoded.data());
+			return output;
+		}
+
+		LIBOTE_NOINLINE BatchEncoding makeReceiverSharedBatch(
+			const Point& senderPoint,
+			const std::array<Scalar, Edwards25519::lanes>& scalars)
+		{
+			BatchEncoding encoded;
+			Point4::broadcast(senderPoint).mul(scalars).toBytes(encoded.data());
+			return encoded;
+		}
+
+		struct SenderBatch
+		{
+			BatchEncoding sharedEncoded0;
+			BatchEncoding sharedEncoded1;
+		};
+
+		LIBOTE_NOINLINE SenderBatch makeSenderBatch(
+			const BatchEncoding& encoded0,
+			const BatchEncoding& encoded1,
+			const Scalar& secretKey)
+		{
+			Point4 points0, points1;
+			if (!points0.fromBytes(encoded0.data()) ||
+				!points1.fromBytes(encoded1.data()))
+				throw std::runtime_error(
+					"MasnyRindal received an invalid receiver point");
+
+			const auto hash0 = Point4::hashToCurveElligator2(
+				encoded1.data(), Edwards25519::encodedSize,
+				reinterpret_cast<const u8*>(hashDomain), sizeof(hashDomain) - 1);
+			const auto hash1 = Point4::hashToCurveElligator2(
+				encoded0.data(), Edwards25519::encodedSize,
+				reinterpret_cast<const u8*>(hashDomain), sizeof(hashDomain) - 1);
+			const auto shared0 = clearCofactor(points0 + hash0).mul(secretKey);
+			const auto shared1 = clearCofactor(points1 + hash1).mul(secretKey);
+
+			SenderBatch output;
+			shared0.toBytes(output.sharedEncoded0.data());
+			shared1.toBytes(output.sharedEncoded1.data());
+			return output;
+		}
 	}
 
 	task<> MasnyRindal::receive(
@@ -28,67 +169,71 @@ namespace osuCrypto
 		Socket& chl)
 	{
 		MACORO_TRY{
-		using namespace DefaultCurve;
+		if (messages.size() != choices.size())
+			throw std::invalid_argument(
+				"MasnyRindal receiver choices and messages have different sizes");
 
-		//MC_BEGIN(task<>, &choices, messages, &prng, &chl,            
-		//    n = u64{},
-		//    i = u64{},
-		//    sk = std::vector<Number>{},
-		//    buff = std::vector<u8>{},
-		//    rrNot = Point{}, rr = Point{}, hPoint = Point{}
-		//    );
-
-		auto n = choices.size();
-
-		Curve{}; // required to init relic
+		const auto n = static_cast<u64>(choices.size());
 		auto buff = std::vector<u8>{};
-		auto sk = std::vector<Number>{};
-		sk.reserve(n);
+		auto secretKeys = std::vector<Scalar>{};
+		secretKeys.reserve(n);
 
 		for (u64 i = 0; i < n;)
 		{
-				Curve{};// required to init relic (might be on new thread here)
-				auto curStep = std::min<u64>(n - i, step);
+			const auto curStep = std::min<u64>(n - i, step);
+			buff.resize(Edwards25519::encodedSize * 2 * curStep);
 
-				buff.resize(Point::size * 2 * curStep);
+			for (u64 batch = 0; batch < curStep; batch += Edwards25519::lanes)
+			{
+				const auto active = std::min<u64>(
+					Edwards25519::lanes, curStep - batch);
+				const auto points = makeReceiverBatch(prng);
+				for (u64 lane = 0; lane != active; ++lane)
+					secretKeys.emplace_back(points.choiceScalars[lane]);
 
-				for (u64 k = 0; k < curStep; ++k, ++i)
+				for (u64 lane = 0; lane != active; ++lane)
 				{
-					Point rrNot;
-					rrNot.randomize(prng);
-
-					u8* rrNotPtr = &buff[Point::size * (2 * k + (choices[i] ^ 1))];
-					rrNot.toBytes(rrNotPtr);
-
-					// TODO: Ought to do domain separation.
-					auto hPoint = Point{};
-					hPoint.fromHash(rrNotPtr, Point::size);
-
-					sk.emplace_back(prng);
-					auto rr = Point::mulGenerator(sk[i]);
-					rr -= hPoint;
-					rr.toBytes(&buff[Point::size * (2 * k + choices[i])]);
+					const auto ot = i + batch + lane;
+					const auto choice = static_cast<u64>(choices[ot]);
+					auto* pair = buff.data() +
+						2 * (batch + lane) * Edwards25519::encodedSize;
+					std::memcpy(
+						pair + (choice ^ 1) * Edwards25519::encodedSize,
+						points.notEncoded.data() + lane * Edwards25519::encodedSize,
+						Edwards25519::encodedSize);
+					std::memcpy(
+						pair + choice * Edwards25519::encodedSize,
+						points.choiceEncoded.data() + lane * Edwards25519::encodedSize,
+						Edwards25519::encodedSize);
 				}
+			}
 
+			i += curStep;
 			co_await chl.send(std::move(buff));
 		}
 
-		buff.resize(Point::size);
+		buff.resize(Edwards25519::encodedSize);
 		co_await chl.recv(buff);
+		Point senderPoint;
+		if (!senderPoint.fromBytes(buff.data()))
+			throw std::runtime_error("MasnyRindal received an invalid sender point");
+		senderPoint = clearCofactor(senderPoint);
 
-		Curve{};// required to init relic (might be on new thread here)
-		Point Mb, k;
-		Mb.fromBytes(buff.data());
-
-		for (u64 i = 0; i < n; ++i)
+		for (u64 i = 0; i < n; i += Edwards25519::lanes)
 		{
-			k = Mb;
-			k *= sk[i];
+			const auto active = std::min<u64>(Edwards25519::lanes, n - i);
+			std::array<Scalar, Edwards25519::lanes> scalars;
+			for (u64 lane = 0; lane != Edwards25519::lanes; ++lane)
+				scalars[lane] = secretKeys[i + std::min<u64>(lane, active - 1)];
 
-			RandomOracle ro(sizeof(block));
-			ro.Update(k);
-			ro.Update(i * 2 + choices[i]);
-			ro.Final(messages[i]);
+			const auto sharedEncoded =
+				makeReceiverSharedBatch(senderPoint, scalars);
+			for (u64 lane = 0; lane != active; ++lane)
+				deriveKey(
+					messages[i + lane],
+					sharedEncoded.data() + lane * Edwards25519::encodedSize,
+					i + lane,
+					static_cast<u8>(choices[i + lane]));
 		}
 
 		} MACORO_CATCH(eptr) {
@@ -97,62 +242,70 @@ namespace osuCrypto
 		}
 	}
 
-	task<> MasnyRindal::send(span<std::array<block, 2>> messages, PRNG& prng, Socket& chl)
+	task<> MasnyRindal::send(
+		span<std::array<block, 2>> messages,
+		PRNG& prng,
+		Socket& chl)
 	{
 		MACORO_TRY{
-		using namespace DefaultCurve;
-		Curve{}; // required to init relic
+		const auto n = static_cast<u64>(messages.size());
+		const auto secretKey = randomScalar(prng);
 
-
-		auto n = static_cast<u64>(messages.size());
-
-		auto buff = std::vector<u8>{};
-		buff.resize(Point::size);
-
-		auto sk = Number{};
-		sk.randomize(prng);
-
-		Point Mb = Point::mulGenerator(sk);
-		Mb.toBytes(buff.data());
-
+		auto buff = std::vector<u8>(Edwards25519::encodedSize);
+		Point::mulGenerator(secretKey).toBytes(buff.data());
 		co_await chl.send(std::move(buff));
 
-
-		for (u64 i = 0; i < n; )
+		const auto neutral = neutralBatchEncoding();
+		for (u64 i = 0; i < n;)
 		{
-			auto curStep = std::min<u64>(n - i, step);
-			buff.resize(Point::size * 2 * curStep);
-
+			const auto curStep = std::min<u64>(n - i, step);
+			buff.resize(Edwards25519::encodedSize * 2 * curStep);
 			co_await chl.recv(buff);
-			Curve{};// required to init relic (might be on new thread here)
 
-			for (u64 k = 0; k < curStep; ++k, ++i)
+			for (u64 batch = 0; batch < curStep; batch += Edwards25519::lanes)
 			{
-				for (u64 j = 0; j < 2; ++j)
+				const auto active = std::min<u64>(
+					Edwards25519::lanes, curStep - batch);
+				auto encoded0 = neutral;
+				auto encoded1 = neutral;
+				for (u64 lane = 0; lane != active; ++lane)
 				{
-					auto r = Point{};
-					r.fromBytes(&buff[Point::size * (2 * k + j)]);
+					const auto* pair = buff.data() +
+						2 * (batch + lane) * Edwards25519::encodedSize;
+					std::memcpy(
+						encoded0.data() + lane * Edwards25519::encodedSize,
+						pair, Edwards25519::encodedSize);
+					std::memcpy(
+						encoded1.data() + lane * Edwards25519::encodedSize,
+						pair + Edwards25519::encodedSize,
+						Edwards25519::encodedSize);
+				}
 
-					// TODO: Ought to do domain separation.
-					auto pHash = Point{};
-					pHash.fromHash(&buff[Point::size * (2 * k + (j ^ 1))], Point::size);
+				const auto shared =
+					makeSenderBatch(encoded0, encoded1, secretKey);
 
-					r += pHash;
-					r *= sk;
-
-					RandomOracle ro(sizeof(block));
-					ro.Update(r);
-					ro.Update(i * 2 + j);
-					ro.Final(messages[i][j]);
+				for (u64 lane = 0; lane != active; ++lane)
+				{
+					const auto ot = i + batch + lane;
+					deriveKey(
+						messages[ot][0],
+						shared.sharedEncoded0.data() + lane * Edwards25519::encodedSize,
+						ot, 0);
+					deriveKey(
+						messages[ot][1],
+						shared.sharedEncoded1.data() + lane * Edwards25519::encodedSize,
+						ot, 1);
 				}
 			}
+			i += curStep;
 		}
 
-		} MACORO_CATCH(eptr)
-		{
+		} MACORO_CATCH(eptr) {
 			co_await chl.close();
 			std::rethrow_exception(eptr);
 		}
 	}
 }
 #endif
+
+#undef LIBOTE_NOINLINE

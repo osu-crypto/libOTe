@@ -1,5 +1,3 @@
-enable_language(ASM)
-
 file(GLOB_RECURSE SRCS *.cpp *.c)
 
 if(NOT ENABLE_LOGVOLE)
