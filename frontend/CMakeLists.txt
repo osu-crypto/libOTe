@@ -13,12 +13,7 @@ target_compile_definitions(frontend_libOTe PRIVATE
     $<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:NDEBUG>
 )
 
-target_link_libraries(frontend_libOTe libOTe_Tests)
-
-if(ENABLE_CRYPTOTOOLS_TESTS)
-    target_link_libraries(frontend_libOTe tests_cryptoTools)
-    target_compile_definitions(frontend_libOTe PRIVATE ENABLE_CRYPTOTOOLS_TESTS)
-endif()
+target_link_libraries(frontend_libOTe libOTe_Tests tests_cryptoTools)
 
 
 if(MSVC)

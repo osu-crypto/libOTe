@@ -1,7 +1,5 @@
 #include <iostream>
-#ifdef ENABLE_CRYPTOTOOLS_TESTS
 #include "tests_cryptoTools/UnitTests.h"
-#endif
 #include "libOTe_Tests/UnitTests.h"
 #include <cryptoTools/Common/Defines.h>
 #include "cryptoTools/Crypto/RandomOracle.h"
@@ -123,12 +121,8 @@ int main(int argc, char** argv)
 	if (cmd.isSet(unitTestTag))
 	{
 		flagSet = true;
-#ifdef ENABLE_CRYPTOTOOLS_TESTS
 		auto tests = tests_cryptoTools::Tests;
 		tests += tests_libOTe::Tests;
-#else
-		auto tests = tests_libOTe::Tests;
-#endif
 
 		auto r = tests.runIf(cmd);
 		return r == TestCollection::Result::passed ? 0 : -1;

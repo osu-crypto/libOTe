@@ -84,8 +84,6 @@ endif()
 
 
 option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" FALSE)
-option(ENABLE_CRYPTOTOOLS_TESTS "Include cryptoTools tests in the libOTe frontend" ON)
-
 option(ENABLE_MOCK_OT        "Build the insecure mock base OT" OFF)
 
 option(ENABLE_SIMPLESTOT     "Build the SimplestOT base OT" OFF)
