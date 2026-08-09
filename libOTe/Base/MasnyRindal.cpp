@@ -42,22 +42,6 @@ namespace osuCrypto
 			return Scalar(bytes.data());
 		}
 
-		// Edwards25519 has cofactor 8. Clear it explicitly whenever a point
-		// enters through the protocol wire so torsion cannot affect the key.
-		Point clearCofactor(Point point) noexcept
-		{
-			point = point.doubled();
-			point = point.doubled();
-			return point.doubled();
-		}
-
-		Point8 clearCofactor(Point8 points) noexcept
-		{
-			points = points.doubled();
-			points = points.doubled();
-			return points.doubled();
-		}
-
 		void deriveKey(
 			block& output,
 			const u8 point[Edwards25519::Backend::encodedSize],
@@ -156,8 +140,8 @@ namespace osuCrypto
 			const auto hash1 = Point8::hashToCurveElligator2(
 				encoded0.data(), Edwards25519::Backend::encodedSize,
 				reinterpret_cast<const u8*>(hashDomain), sizeof(hashDomain) - 1);
-			const auto shared0 = clearCofactor(points0 + hash0).mul(secretKey);
-			const auto shared1 = clearCofactor(points1 + hash1).mul(secretKey);
+			const auto shared0 = (points0 + hash0).clearCofactor().mul(secretKey);
+			const auto shared1 = (points1 + hash1).clearCofactor().mul(secretKey);
 
 			SenderBatch output;
 			shared0.toBytes(output.sharedEncoded0.data());
@@ -223,7 +207,7 @@ namespace osuCrypto
 		Point senderPoint;
 		if (!senderPoint.fromBytes(buff.data()))
 			throw std::runtime_error("MasnyRindal received an invalid sender point");
-		senderPoint = clearCofactor(senderPoint);
+		senderPoint = senderPoint.clearCofactor();
 
 		for (u64 i = 0; i < n; i += Edwards25519::Backend::lanes)
 		{
