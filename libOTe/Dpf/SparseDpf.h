@@ -12,6 +12,8 @@
 #include "libOTe/Dpf/RegularDpf.h"
 #include <limits>
 
+#include <chrono>
+
 namespace osuCrypto
 {
 
@@ -39,6 +41,8 @@ namespace osuCrypto
 				mNumPoints = src.mNumPoints;
 				mDomain = src.mDomain;
 				mDenseDepth = src.mDenseDepth;
+				mLastProfile = src.mLastProfile;
+				mProfileEnabled = src.mProfileEnabled;
 				mRegDpf = std::move(src.mRegDpf);
 				mMultiplier = std::move(src.mMultiplier);
 				src.clear();
@@ -46,6 +50,28 @@ namespace osuCrypto
 			return *this;
 		}
 
+		struct Profile
+		{
+			double mAllocateMs = 0;
+			double mDenseProtocolMs = 0;
+			double mDenseInitializeMs = 0;
+			double mCorrectionPrepareMs = 0;
+			double mCorrectionProtocolMs = 0;
+			double mSparseExpandMs = 0;
+			double mLeafMs = 0;
+			double mOutputMs = 0;
+			u64 mExpandedNodes = 0;
+			u64 mBatchedNodes = 0;
+			u64 mTailNodes = 0;
+		};
+
+		Profile mLastProfile;
+		bool mProfileEnabled = false;
+
+		void enableProfile(bool enabled = true)
+		{
+			mProfileEnabled = enabled;
+		}
 		u64 mPartyIdx = 0;           // Party index p ∈ {0,1}
 		u64 mNumPoints = 0;    // Number of parallel sparse DPF instances
 		u64 mDomain = 0;             // Domain size 2^D
@@ -177,7 +203,7 @@ namespace osuCrypto
 			//{ }
 			// Returns the left right children ranges of this partition.
 			// i.e. in the paper: [l₁,l₂] || [r₁,r₂] = [β₁,β₂]
-			std::array<Range, 2>  children()
+			std::array<Range, 2> children() const
 			{
 				return { Range{mBegin, mMid}, Range{mMid, mEnd} };
 			}
@@ -214,21 +240,20 @@ namespace osuCrypto
 			if (points.size() == 1)
 				return { 0, Partition{points.begin(), points.end(), points.end()}};
 
-			// Step 2: Find max δ where bit δ splits the range into {0,1}
-			Partition par;
-			do {
-				if (upperBitsBegin == 0)
-					throw RTE_LOC;
-				--upperBitsBegin;
-				// Step 3: Split based on bit sδ values
-				par.mMid = std::upper_bound(
-					points.begin(), points.end(), 0,
-					[upperBitsBegin](auto, auto b) {return (b >> upperBitsBegin) & 1; });
-			} while (par.mMid == points.begin() || par.mMid == points.end());
+			// The first and last sorted points share exactly the prefix above the
+			// highest differing bit. That bit is the unique next trie branch.
+			const auto difference = *points.begin() ^ *(points.end() - 1);
+			if (difference == 0)
+				throw std::invalid_argument("Sparse DPF sets must not contain duplicates. " LOCATION);
+			const auto level = static_cast<u32>(std::bit_width(difference));
+			if (level > upperBitsBegin)
+				throw RTE_LOC;
 
-			par.mBegin = points.mBegin;
-			par.mEnd = points.mEnd;
-			return { upperBitsBegin + 1, par };
+			const auto highPrefix = (static_cast<u64>(*points.begin()) >> level) << level;
+			const auto splitValue = static_cast<u32>(highPrefix | (1ull << (level - 1)));
+			const auto mid = std::lower_bound(points.begin(), points.end(), splitValue);
+			assert(mid != points.begin() && mid != points.end());
+			return { level, Partition{points.mBegin, mid, points.mEnd} };
 		}
 
 		/// Tree structure implementing sparse DPF state management.
@@ -238,23 +263,32 @@ namespace osuCrypto
 			/// Node corresponding to tuple (j,ρ,b,[s],[t]) in protocol
 			struct Node
 			{
-				Partition mPartition; // the child partitions
 				block mSeed; // current seed
+				u32 mBegin; // offsets into the tree's sorted sparse point set
+				u32 mMid;
+				u32 mEnd;
 				u8 mTag; // current tag, 1 bit;
 				u8 mChild; // is this a left 0 or right 1 child?
 				u8 mParent; // the depth of the parent. This tells us which sigma to use. in [0,64)
+
+				Partition partition(u32* pointBase) const
+				{
+					return {
+						pointBase + mBegin,
+						pointBase + mMid,
+						pointBase + mEnd
+					};
+				}
 			};
+			static_assert(sizeof(Node) == 32);
 
 			/// Level d state: bucket u_d and running sums z_d
 			struct Level
 			{
-				// the nodes for each level of the tree.
-				//
-				// A compressed sparse tree only has O(|S|) live nodes, but the old
-				// representation reserved |S| nodes at every level. For large domains
-				// that turned the setup scratch into O(|S| log N) memory. Grow only the
-				// levels which actually receive nodes and release them once consumed.
-				std::vector<Node> mNodes_;
+				// Exact-capacity slice of the tree's contiguous node storage.
+				span<Node> mNodes_;
+				u32* mPointBase = nullptr;
+				u64 mNodeSize = 0;
 
 				// the left right sums for each level of the tree.
 				std::array<block, 2> mZ;
@@ -270,34 +304,114 @@ namespace osuCrypto
 
 				/// Add tuple (j,ρ,b',[s],[t]) to state bucket u_δ
 				void push_back(u8 child, u8 parentLevel, Partition& b, block seed, u8 tag) {
-					mNodes_.push_back(Node{ b, seed, tag, child, parentLevel });
+					const auto idx = mNodeSize;
+					if (idx >= mNodes_.size())
+						throw std::runtime_error("Sparse DPF node count mismatch. " LOCATION);
+					++mNodeSize;
+					const auto begin = static_cast<u64>(b.mBegin - mPointBase);
+					const auto mid = static_cast<u64>(b.mMid - mPointBase);
+					const auto end = static_cast<u64>(b.mEnd - mPointBase);
+					if (end > std::numeric_limits<u32>::max())
+						throw std::overflow_error("Sparse DPF set exceeds 32-bit node offsets. " LOCATION);
+					mNodes_[idx] = Node{
+						seed,
+						static_cast<u32>(begin),
+						static_cast<u32>(mid),
+						static_cast<u32>(end),
+						tag,
+						child,
+						parentLevel
+					};
 				}
 
-				u64 size() const { return mNodes_.size(); }
-
-				void releaseNodes()
-				{
-					std::vector<Node>{}.swap(mNodes_);
-				}
+				u64 size() const { return mNodeSize; }
 
 				Node& operator[](u64 i)
 				{
-					assert(i < mNodes_.size() && "index out of bounds");
+					assert(i < mNodeSize && "index out of bounds");
 					return mNodes_[i];
 				}
 			};
 
 			// State buckets u_0, u_1, ..., u_D
 			std::vector<Level> mLevels;
+			AlignedUnVector<Node> mNodeStorage;
+			u32* mPointBase = nullptr;
 
-			// the number of sparse levels and the dense depth.
-			void resize(u64 depth, u64 startingDepth, u64 setSize)
+			// Allocate exactly one contiguous slab for all sparse levels.
+			void resize(span<const u64> levelSizes, u32* pointBase)
 			{
-				mLevels.resize(depth);
+				mLevels.resize(levelSizes.size());
+				mPointBase = pointBase;
+				u64 totalSize = 0;
+				for (auto size : levelSizes)
+					totalSize += size;
+				mNodeStorage.resize(totalSize);
+
+				u64 offset = 0;
+				for (u64 level = 0; level < levelSizes.size(); ++level)
+				{
+					auto& dst = mLevels[level];
+					auto nodeData = totalSize ? mNodeStorage.data() + offset : nullptr;
+					dst.mNodes_ = span<Node>(nodeData, levelSizes[level]);
+					dst.mPointBase = pointBase;
+					dst.mNodeSize = 0;
+					offset += levelSizes[level];
+				}
 			}
 
 			Level& operator[](u64 i) { return mLevels[i]; }
 		};
+
+		template<typename SparseSet>
+		std::vector<u64> sparseNodeCounts(SparseSet&& sparsePoints, u64 depth)
+		{
+			std::vector<u64> levelSizes(depth + 1);
+			auto begin = sparsePoints.data();
+			auto end = begin + sparsePoints.size();
+			auto countBin = [&](u32* first, u32* last)
+			{
+				const auto size = static_cast<u64>(last - first);
+				if (size <= 1)
+					return;
+
+				// A compressed binary trie with k leaves has k - 1 internal
+				// nodes. Each internal node is represented by exactly one boundary
+				// between adjacent sorted leaves, at level bit_width(x[i-1]^x[i]).
+				// The bin root is not stored, so remove its unique maximum boundary.
+				levelSizes[0] += size;
+				u32 rootLevel = 0;
+				for (auto iter = first + 1; iter != last; ++iter)
+				{
+					const auto difference = *(iter - 1) ^ *iter;
+					if (difference == 0)
+						throw std::invalid_argument("Sparse DPF sets must not contain duplicates. " LOCATION);
+					const auto level = static_cast<u32>(std::bit_width(difference));
+					assert(level <= depth);
+					++levelSizes[level];
+					rootLevel = std::max(rootLevel, level);
+				}
+				assert(rootLevel);
+				--levelSizes[rootLevel];
+			};
+
+			if (mDenseDepth)
+			{
+				auto iter = begin;
+				while (iter != end)
+				{
+					const auto bin = *iter >> depth;
+					auto next = std::find_if(iter, end,
+						[bin, depth](auto point) { return (point >> depth) != bin; });
+					countBin(iter, next);
+					iter = next;
+				}
+			}
+			else
+				countBin(begin, end);
+
+			return levelSizes;
+		}
 
 		// Helper template to detect if a type has a `rows()` method
 		template <typename T, typename = void>
@@ -332,6 +446,20 @@ namespace osuCrypto
 			SparsePoints&& sparsePoints,
 			coproto::Socket& sock)
 		{
+			using ProfileClock = std::chrono::steady_clock;
+			auto profileNow = [&]()
+			{
+				return mProfileEnabled ? ProfileClock::now() : ProfileClock::time_point{};
+			};
+			auto addTime = [&](double& destination, ProfileClock::time_point begin)
+			{
+				if (mProfileEnabled)
+					destination += std::chrono::duration<double, std::milli>(
+						ProfileClock::now() - begin).count();
+			};
+			mLastProfile = {};
+			auto profileBegin = profileNow();
+
 			// make sure the output is callable with the expected signature
 			static_assert(std::is_invocable_v<Output, u64, u64, block, u8>);
 
@@ -369,31 +497,46 @@ namespace osuCrypto
 			// STEP 1: Book-keeping initialization
 			// Initialize state buckets u_d and running sums z_d for each level
 			for (u64 i = 0; i < mNumPoints; ++i)
-				trees[i].resize(depth + 1, mDenseDepth, sparsePoints[i].size());
+			{
+				auto levelSizes = sparseNodeCounts(sparsePoints[i], depth);
+				trees[i].resize(levelSizes, sparsePoints[i].data());
+			}
 
 			// Allocate memory for leaf outputs
+			struct DirectLeaf
+			{
+				u64 mTree;
+				u64 mIndex;
+				block mValue;
+				u8 mTag;
+			};
 			std::unique_ptr<u8[]> mem;
 			std::vector<std::span<block>> leafValues(mNumPoints);
 			std::vector<std::span<u8>> leafTags(mNumPoints);
+			std::vector<DirectLeaf> directLeaves;
 			u64 totalSize = 0;
 			for (u64 i = 0; i < mNumPoints; ++i)
 				totalSize += sparsePoints[i].size();
 
-			mem.reset(new u8[totalSize * (sizeof(block) + 1)]());
-			auto iter = mem.get();
-			for (u64 i = 0; i < mNumPoints; ++i)
+			if (values.size())
 			{
-				leafValues[i] = span<block>((block*)iter, sparsePoints[i].size());
-				iter += leafValues[i].size_bytes();
-			}
-			for (u64 i = 0; i < mNumPoints; ++i)
-			{
-				leafTags[i] = span<u8>(iter, sparsePoints[i].size());
-				iter += leafTags[i].size_bytes();
+				mem.reset(new u8[totalSize * (sizeof(block) + 1)]);
+				auto iter = mem.get();
+				for (u64 i = 0; i < mNumPoints; ++i)
+				{
+					leafValues[i] = span<block>((block*)iter, sparsePoints[i].size());
+					iter += leafValues[i].size_bytes();
+				}
+				for (u64 i = 0; i < mNumPoints; ++i)
+				{
+					leafTags[i] = span<u8>(iter, sparsePoints[i].size());
+					iter += leafTags[i].size_bytes();
+				}
 			}
 
 			// Initialize γ for updateLeaves protocol (step 8)
 			std::vector<block> gamma(values.begin(), values.end());
+			addTime(mLastProfile.mAllocateMs, profileBegin);
 
 
 			// DENSE OPTIMIZATION: Use regular DPF for top mDenseDepth levels
@@ -419,12 +562,15 @@ namespace osuCrypto
 				Matrix<u8> tags(points.size(), 1ull << mDenseDepth);
 
 				// Expand regular DPF to get seeds for sparse layers
+				profileBegin = profileNow();
 				co_await mRegDpf.expand(densePoints, std::vector<block>{}, prng, sock, [&](auto treeIdx, auto leafIdx, auto seed, block tag) {
 					seeds(treeIdx, leafIdx) = seed;
 					tags(treeIdx, leafIdx) = tag.get<u8>(0) & 1;
 					});
+				addTime(mLastProfile.mDenseProtocolMs, profileBegin);
 
 				// STEP 3,4: Partitioning the root (adapted for dense optimization)
+				profileBegin = profileNow();
 				for (u64 r = 0; r < points.size(); ++r)
 				{
 					auto& tree = trees[r];
@@ -444,11 +590,14 @@ namespace osuCrypto
 						{
 							// Single point: direct leaf assignment
 							auto idx = std::distance(sparsePoints[r].data(), points.begin());
-							leafValues[r][idx] = seed;
-							leafTags[r][idx] = tag;
-
 							if (gamma.size())
-								gamma[r] = gamma[r] ^ leafValues[r][idx];
+							{
+								leafValues[r][idx] = seed;
+								leafTags[r][idx] = tag;
+								gamma[r] ^= seed;
+							}
+							else
+								directLeaves.push_back({ r, static_cast<u64>(idx), seed, tag });
 						}
 						else if (points.size())
 						{
@@ -472,9 +621,11 @@ namespace osuCrypto
 						iter = e;
 					}
 				}
+				addTime(mLastProfile.mDenseInitializeMs, profileBegin);
 			}
 			else
 			{
+				profileBegin = profileNow();
 				// STEP 3,4: Partitioning the root (no dense optimization)
 				for (u64 r = 0; r < mNumPoints; ++r)
 				{
@@ -495,7 +646,7 @@ namespace osuCrypto
 					auto children = b.children();
 					for (u64 j = 0; j < 2; ++j)
 					{
-						// (δ',b') := PARTITION(b_j, S)  
+						// (δ',b') := PARTITION(b_j, S)
 						auto [delta2, b2] = partition(children[j], delta);
 						block seed = prng.get(); // [s] ← {0,1}^κ
 						// state_δ' := append(state_δ', (j,δ,b',[s],[1]))
@@ -504,12 +655,14 @@ namespace osuCrypto
 						tree[delta].mC = 1; // v_δ = 1
 					}
 				}
+				addTime(mLastProfile.mDenseInitializeMs, profileBegin);
 			}
 
 
 			// STEP 5,6: Top-down expansion (d ∈ {D, D-1, ..., 1})
 			for (u64 d = depth; d; --d)
 			{
+				profileBegin = profileNow();
 				// Collect correction data for all trees at level d
 				BitVector negAlpha(mNumPoints);
 				std::vector<std::array<u8, 2>> taus(mNumPoints);
@@ -537,9 +690,11 @@ namespace osuCrypto
 					negAlpha[r] = alphaD ^ mPartyIdx;
 					sigmas[r] = tree[d].mZ[0] ^ tree[d].mZ[1];
 				}
+				addTime(mLastProfile.mCorrectionPrepareMs, profileBegin);
 
 				if (used)
 				{
+					profileBegin = profileNow();
 					// 6b: Compute and reveal correction words
 					// σ := correctionWord(z_d, α_d)
 					co_await mMultiplier.multiply(negAlpha, sigmas, sigmas, sock);
@@ -553,66 +708,117 @@ namespace osuCrypto
 						trees[r][d].mSigma = sigmas[r];
 						trees[r][d].mTau = taus[r];
 					}
+					addTime(mLastProfile.mCorrectionProtocolMs, profileBegin);
 				}
 
 				auto dNext = d - 1;
 				if (dNext == 0) break;// Stop before leaf processing
 
 				// 6c: Updating the shares and computing children
+				profileBegin = profileNow();
 				for (u64 r = 0; r < mNumPoints; ++r)
 				{
 					auto& tree = trees[r];
 					auto size = tree[dNext].size();
+					auto z0 = tree[dNext].mZ[0];
+					auto z1 = tree[dNext].mZ[1];
+					u64 i = 0;
+					if (mProfileEnabled)
+					{
+						mLastProfile.mExpandedNodes += size;
+						mLastProfile.mBatchedNodes += size / 8 * 8;
+						mLastProfile.mTailNodes += size % 8;
+					}
 
-					// Process each tuple (j,ρ,b,[s],[t]) ∈ u_d
-					for (u64 i = 0; i < size; ++i)
+					// Expand eight independent active subtrees with one SIMD AES kernel.
+					for (; i + 8 <= size; i += 8)
+					{
+						AlignedArray<block, 8> cSeed0;
+						AlignedArray<block, 8> cSeed1;
+						std::array<u8, 8> cTag;
+
+						for (u64 lane = 0; lane < 8; ++lane)
+						{
+							auto& node = tree[dNext][i + lane];
+							const auto tag = node.mTag;
+							const auto child = node.mChild;
+							const auto parent = node.mParent;
+							const auto pTau = tree[parent].mTau[child];
+							const auto pSigma = tree[parent].mSigma;
+							const auto seed = node.mSeed ^
+								(pSigma & block::allSame<u8>(-tag));
+
+							cTag[lane] = lsb(node.mSeed) ^ tag * pTau;
+							cSeed0[lane] = seed ^ ZeroBlock;
+							cSeed1[lane] = seed ^ OneBlock;
+						}
+
+						mAesFixedKey.hashBlocks<8>(cSeed0.data(), cSeed0.data());
+						mAesFixedKey.hashBlocks<8>(cSeed1.data(), cSeed1.data());
+
+						for (u64 lane = 0; lane < 8; ++lane)
+						{
+							z0 ^= cSeed0[lane];
+							z1 ^= cSeed1[lane];
+							auto par = tree[dNext][i + lane].partition(tree.mPointBase);
+							auto children = par.children();
+
+							auto [leftLevel, leftPartition] = partition(children[0], dNext);
+							tree[leftLevel].push_back(
+								0, static_cast<u8>(dNext), leftPartition, cSeed0[lane], cTag[lane]);
+
+							auto [rightLevel, rightPartition] = partition(children[1], dNext);
+							tree[rightLevel].push_back(
+								1, static_cast<u8>(dNext), rightPartition, cSeed1[lane], cTag[lane]);
+						}
+					}
+
+					// Scalar tail for levels whose active-node count is not a multiple of eight.
+					for (; i < size; ++i)
 					{
 						auto& node = tree[dNext][i];
-						auto& seed = node.mSeed;
-						auto par = node.mPartition;
-						auto tag = node.mTag;
-						auto child = node.mChild;
-						auto parent = node.mParent;
+						auto par = node.partition(tree.mPointBase);
+						const auto tag = node.mTag;
+						const auto child = node.mChild;
+						const auto parent = node.mParent;
+						const auto pTau = tree[parent].mTau[child];
+						const auto pSigma = tree[parent].mSigma;
+						const auto cTag = lsb(node.mSeed) ^ tag * pTau;
+						const auto seed = node.mSeed ^
+							(pSigma & block::allSame<u8>(-tag));
 
-						// Get correction from parent level
-						auto pTau = tree[parent].mTau[child];
-						auto pSigma = tree[parent].mSigma;
-
-						// 6c: [s] := [s] ⊕ [t] · σ_{ρ,j}
-						auto cTag = lsb(seed) ^ tag * pTau;
-						seed = seed ^ (pSigma & block::allSame<u8>(-tag));
-
-						// 6d: Computing child values: s'_p := G(s_p)
 						std::array<block, 2> cSeed;
 						cSeed[0] = mAesFixedKey.hashBlock(seed ^ ZeroBlock);
 						cSeed[1] = mAesFixedKey.hashBlock(seed ^ OneBlock);
+						z0 ^= cSeed[0];
+						z1 ^= cSeed[1];
 
-						// Update running sums: z_{d-1} := z_{d-1} ⊕ s'
-						tree[dNext].mZ[0] = tree[dNext].mZ[0] ^ cSeed[0];
-						tree[dNext].mZ[1] = tree[dNext].mZ[1] ^ cSeed[1];
-						tree[dNext].mC = 1;
-
-						// 6e: Partitioning the children
 						auto children = par.children();
 						for (u64 j = 0; j < 2; ++j)
 						{
-							// (δ,b') := PARTITION(b_k, S)
 							auto [cd, cPar] = partition(children[j], dNext);
-							// state_δ := append(state_δ, (k,d-1,b',[s'_k],lsb([s])))
-							tree[cd].push_back(j, dNext, cPar, cSeed[j], cTag);
+							tree[cd].push_back(
+								static_cast<u8>(j), static_cast<u8>(dNext), cPar, cSeed[j], cTag);
 						}
 					}
-				}
 
-				// Nodes at dNext have now generated all of their descendants. The
-				// correction word stored in the level remains live, but its node list
-				// will never be read again.
-				for (auto& tree : trees)
-					tree[dNext].releaseNodes();
+					if (size)
+					{
+						tree[dNext].mZ[0] = z0;
+						tree[dNext].mZ[1] = z1;
+						tree[dNext].mC = 1;
+					}
+				}
+				addTime(mLastProfile.mSparseExpandMs, profileBegin);
 			}
 
 			// STEP 7: Leaf processing
 			// Process tuples in u_0 (leaf level)
+			profileBegin = profileNow();
+			if (gamma.empty())
+				for (const auto& leaf : directLeaves)
+					output(leaf.mTree, leaf.mIndex, leaf.mValue, leaf.mTag);
+
 			for (u64 r = 0; r < mNumPoints; ++r)
 			{
 				auto& tree = trees[r];
@@ -624,7 +830,6 @@ namespace osuCrypto
 					auto tag = tree[0][i].mTag;
 					auto j = tree[0][i].mChild;
 					auto parent = tree[0][i].mParent;
-					auto par = tree[0][i].mPartition;
 
 					// Apply final correction: [s] := [s] ⊕ [t] · σ_{ρ,j}
 					auto pTau = tree[parent].mTau[j];
@@ -633,19 +838,24 @@ namespace osuCrypto
 					// Convert to leaf values:
 					// [t_{b₁}] := lsb([s])
 					// [y_{b₁}] := (1-2p) · convert_G(msbs([s]))
-					auto b = std::distance(sparsePoints[r].data(), par.mBegin);
-					leafTags[r][b] = lsb(seed) ^ tag * pTau;
-					leafValues[r][b] = seed ^ (pSigma & block::allSame<u8>(-tag));
-
-					// Accumulate for updateLeaves protocol
+					auto b = tree[0][i].mBegin;
+					const auto leafTag = lsb(seed) ^ tag * pTau;
+					const auto leafValue = seed ^ (pSigma & block::allSame<u8>(-tag));
 					if (gamma.size())
-						gamma[r] = gamma[r] ^ leafValues[r][b];
+					{
+						leafTags[r][b] = leafTag;
+						leafValues[r][b] = leafValue;
+						gamma[r] ^= leafValue;
+					}
+					else
+						output(r, b, leafValue, leafTag);
 				}
-				tree[0].releaseNodes();
 			}
+			addTime(mLastProfile.mLeafMs, profileBegin);
 
 			// STEP 8: Derandomizing the leaves
 			// return updateLeaves_S([y], [t], [β])
+			profileBegin = profileNow();
 			if (gamma.size())
 			{
 				// Reveal γ and apply to convert random unit vector to desired values
@@ -664,16 +874,9 @@ namespace osuCrypto
 			}
 			else
 			{
-				// Punctured mode: output raw leaf values
-				for (u64 r = 0; r < mNumPoints; ++r)
-				{
-					auto size = sparsePoints[r].size();
-					for (u64 i = 0; i < size; ++i)
-					{
-						output(r, i, leafValues[r][i], leafTags[r][i]);
-					}
-				}
+				// Punctured mode emits finalized leaves directly in step 7.
 			}
+			addTime(mLastProfile.mOutputMs, profileBegin);
 
 
 			//u64 total = 0;
@@ -745,6 +948,8 @@ namespace osuCrypto
 			mNumPoints = 0;    // Number of parallel sparse DPF instances
 			mDomain = 0;             // Domain size 2^D
 			mDenseDepth = 0;         // Optimization: use regular DPF for dense levels
+			mLastProfile = {};
+			mProfileEnabled = false;
 			mRegDpf.clear();
 			mMultiplier.clear();
 
