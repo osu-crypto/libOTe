@@ -279,12 +279,13 @@ namespace tests_libOTe
             std::vector<std::array<block, 2>> sendMsg(1);
             MasnyRindal sender;
             auto honest = sender.send(sendMsg, prng1, sock[0]);
-            auto malformed = [&]() -> task<> {
+            auto malformedProtocol = [&]() -> task<> {
                 std::vector<u8> senderPoint(32);
                 co_await sock[1].recv(senderPoint);
                 std::vector<u8> invalidPair(64, 0xff);
                 co_await sock[1].send(std::move(invalidPair));
-            }();
+            };
+            auto malformed = malformedProtocol();
 
             bool rejected = false;
             try { eval(honest, malformed); }
@@ -298,10 +299,11 @@ namespace tests_libOTe
             BitVector choices;
             MasnyRindal receiver;
             auto honest = receiver.receive(choices, recvMsg, prng0, sock[1]);
-            auto malformed = [&]() -> task<> {
+            auto malformedProtocol = [&]() -> task<> {
                 std::vector<u8> invalidPoint(32, 0xff);
                 co_await sock[0].send(std::move(invalidPoint));
-            }();
+            };
+            auto malformed = malformedProtocol();
 
             bool rejected = false;
             try { eval(honest, malformed); }
