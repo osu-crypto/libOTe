@@ -50,13 +50,12 @@ namespace osuCrypto
 			}
 
 			inline BatchEncoding sharedPoints(
-				const Ristretto255::Backend::Point& point,
+				const Ristretto255::Backend::FixedPointTable& pointTable,
 				const std::array<Ristretto255::Backend::Scalar,
 					Ristretto255::Backend::lanes>& scalars)
 			{
 				BatchEncoding encoded;
-				Ristretto255::Backend::Point8::broadcast(point)
-					.mul(scalars).toBytes(encoded.data());
+				pointTable.mul(scalars).toBytes(encoded.data());
 				return encoded;
 			}
 
@@ -212,6 +211,7 @@ namespace osuCrypto
 			Ristretto255::Backend::init();
 			if (!A.fromBytes(buff.data()))
 				throw std::runtime_error("invalid McRosRoy sender point " LOCATION);
+			const Ristretto255::Backend::FixedPointTable pointTable(A);
 
 			for (u64 base = 0; base < n; base += Ristretto255::Backend::lanes)
 			{
@@ -221,7 +221,7 @@ namespace osuCrypto
 					scalars[lane] = sk[base];
 				for (u64 lane = 0; lane != count; ++lane)
 					scalars[lane] = sk[base + lane];
-				const auto encoded = mrr::sharedPoints(A, scalars);
+				const auto encoded = mrr::sharedPoints(pointTable, scalars);
 				for (u64 lane = 0; lane != count; ++lane)
 				{
 					RandomOracle ro(sizeof(block));

@@ -27,6 +27,7 @@ namespace osuCrypto
 		using Edwards25519::Backend::Point;
 		using Edwards25519::Backend::Point8;
 		using Edwards25519::Backend::Scalar;
+		using Edwards25519::Backend::FixedPointTable;
 
 		constexpr u64 step = 16;
 		constexpr char hashDomain[] = "libOTe-MasnyRindal-v1";
@@ -109,11 +110,11 @@ namespace osuCrypto
 		}
 
 		LIBOTE_NOINLINE BatchEncoding makeReceiverSharedBatch(
-			const Point& senderPoint,
+			const FixedPointTable& senderTable,
 			const std::array<Scalar, Edwards25519::Backend::lanes>& scalars)
 		{
 			BatchEncoding encoded;
-			Point8::broadcast(senderPoint).mul(scalars).toBytes(encoded.data());
+			senderTable.mul(scalars).toBytes(encoded.data());
 			return encoded;
 		}
 
@@ -208,6 +209,7 @@ namespace osuCrypto
 		if (!senderPoint.fromBytes(buff.data()))
 			throw std::runtime_error("MasnyRindal received an invalid sender point");
 		senderPoint = senderPoint.clearCofactor();
+		const FixedPointTable senderTable(senderPoint);
 
 		for (u64 i = 0; i < n; i += Edwards25519::Backend::lanes)
 		{
@@ -217,7 +219,7 @@ namespace osuCrypto
 				scalars[lane] = secretKeys[i + std::min<u64>(lane, active - 1)];
 
 			const auto sharedEncoded =
-				makeReceiverSharedBatch(senderPoint, scalars);
+				makeReceiverSharedBatch(senderTable, scalars);
 			for (u64 lane = 0; lane != active; ++lane)
 				deriveKey(
 					messages[i + lane],
