@@ -8,8 +8,12 @@
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Common/BitVector.h"
 #include "cryptoTools/Common/Matrix.h"
+#include "libOTe/Tools/CoeffCtx.h"
+
+#include <iterator>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 namespace osuCrypto
@@ -711,6 +715,128 @@ namespace osuCrypto
 				mX = {};
 			}
 
+			// The integer DMPF expansion is the dominant user of this session.
+			// Keep its online kernel concrete: one contiguous wire buffer, direct
+			// Z_2^64 arithmetic, and no temporary coefficient-context vectors.
+			template<bool ConditionalNegate>
+			macoro::task<> multiplyU64Impl(
+				auto&& yBegin,
+				auto&& yEnd,
+				auto&& xyBegin,
+				coproto::Socket& sock)
+			{
+				const u64 n = mX.size();
+				const u64 n8 = n / 8 * 8;
+				if (std::distance(yBegin, yEnd) != i64(n))
+					throw RTE_LOC;
+				if (n == 0)
+					co_return;
+				std::ignore = *(xyBegin + (n - 1));
+
+				AlignedUnVector<u64> msg(n);
+				AES hash(block(22523656326434, 4523453452346423 * mExpandIdx++));
+
+#define DPF_MULT_U64_SIMD8(VAR, STATEMENT) do { \
+	{ constexpr u64 VAR = 0; STATEMENT; } \
+	{ constexpr u64 VAR = 1; STATEMENT; } \
+	{ constexpr u64 VAR = 2; STATEMENT; } \
+	{ constexpr u64 VAR = 3; STATEMENT; } \
+	{ constexpr u64 VAR = 4; STATEMENT; } \
+	{ constexpr u64 VAR = 5; STATEMENT; } \
+	{ constexpr u64 VAR = 6; STATEMENT; } \
+	{ constexpr u64 VAR = 7; STATEMENT; } \
+} while (0)
+
+				for (u64 i = 0; i < n8; i += 8)
+				{
+					const u8 choices = mX.data()[i / 8];
+					u64 masks[8];
+					u64 inputs[8];
+					u64 multiplicands[8];
+					u64 t0[8];
+					DPF_MULT_U64_SIMD8(q,
+						masks[q] = 0ull - u64((choices >> q) & 1));
+					DPF_MULT_U64_SIMD8(q, inputs[q] = yBegin[i + q]);
+					DPF_MULT_U64_SIMD8(q,
+						multiplicands[q] = ConditionalNegate
+							? inputs[q] + inputs[q]
+							: inputs[q]);
+					DPF_MULT_U64_SIMD8(q,
+						t0[q] = hash.hashBlock(mSendOts.data()[i + q][0]).get<u64>(0)
+							- (multiplicands[q] & masks[q]));
+					DPF_MULT_U64_SIMD8(q,
+						msg[i + q] =
+							hash.hashBlock(mSendOts.data()[i + q][1]).get<u64>(0)
+							+ t0[q]
+							+ (multiplicands[q] & ~masks[q]));
+					if constexpr (ConditionalNegate)
+						DPF_MULT_U64_SIMD8(q, xyBegin[i + q] = inputs[q] + t0[q]);
+					else
+						DPF_MULT_U64_SIMD8(q, xyBegin[i + q] = 0ull - t0[q]);
+				}
+				for (u64 i = n8; i < n; ++i)
+				{
+					const u64 mask = 0ull - u64(mX[i]);
+					const u64 input = yBegin[i];
+					const u64 multiplicand = ConditionalNegate ? input + input : input;
+					const u64 t0 =
+						hash.hashBlock(mSendOts.data()[i][0]).get<u64>(0)
+						- (multiplicand & mask);
+					msg[i] = hash.hashBlock(mSendOts.data()[i][1]).get<u64>(0)
+						+ t0
+						+ (multiplicand & ~mask);
+					if constexpr (ConditionalNegate)
+						xyBegin[i] = input + t0;
+					else
+						xyBegin[i] = 0ull - t0;
+				}
+
+				co_await sock.send(std::move(msg));
+				msg.resize(n);
+				co_await sock.recv(msg);
+
+				for (u64 i = 0; i < n8; i += 8)
+				{
+					const u8 choices = mX.data()[i / 8];
+					u64 masks[8];
+					u64 mx[8];
+					DPF_MULT_U64_SIMD8(q,
+						masks[q] = 0ull - u64((choices >> q) & 1));
+					DPF_MULT_U64_SIMD8(q,
+						mx[q] = hash.hashBlock(mRecvOts.data()[i + q]).get<u64>(0));
+					if constexpr (ConditionalNegate)
+						DPF_MULT_U64_SIMD8(q,
+							xyBegin[i + q] -= mx[q]
+								+ ((msg[i + q] - mx[q] - mx[q]) & masks[q]));
+					else
+						DPF_MULT_U64_SIMD8(q,
+							xyBegin[i + q] += mx[q]
+								+ ((msg[i + q] - mx[q] - mx[q]) & masks[q]));
+				}
+				for (u64 i = n8; i < n; ++i)
+				{
+					const u64 mask = 0ull - u64(mX[i]);
+					const u64 mx = hash.hashBlock(mRecvOts.data()[i]).get<u64>(0);
+					const u64 w = mx + ((msg[i] - mx - mx) & mask);
+					if constexpr (ConditionalNegate)
+						xyBegin[i] -= w;
+					else
+						xyBegin[i] += w;
+				}
+
+#undef DPF_MULT_U64_SIMD8
+				co_return;
+			}
+
+			macoro::task<> conditionalNegateU64(
+				auto&& begin,
+				auto&& end,
+				coproto::Socket& sock)
+			{
+				co_await multiplyU64Impl<true>(begin, end, begin, sock);
+				co_return;
+			}
+
 			// Multiply a new vector y with the stored x
 			// Returns xy as secret shares
 			template<typename F, typename CoeffCtx>
@@ -721,6 +847,18 @@ namespace osuCrypto
 				coproto::Socket& sock,
 				CoeffCtx ctx = {})
 			{
+				if constexpr (
+					std::is_same_v<std::remove_cvref_t<F>, u64> &&
+					std::is_same_v<std::remove_cvref_t<CoeffCtx>, CoeffCtxInteger>)
+				{
+					co_await multiplyU64Impl<false>(
+						std::forward<decltype(yBegin)>(yBegin),
+						std::forward<decltype(yEnd)>(yEnd),
+						std::forward<decltype(xyBegin)>(xyBegin),
+						sock);
+					co_return;
+				}
+
 				// OT Setup:
 				// For each multiplication, we have:
 				// - mRecvOts0: A single block received from OT seed
@@ -817,12 +955,10 @@ namespace osuCrypto
 
 				AES hash(block(22523656326434, 4523453452346423 * mExpandIdx++));
 
-				block hashes[8];
 				for (u64 i = 0; i < n8; i+= 8)
 				{
-					SIMD8(q, hashes[q] = mSendOts.data()[i + q][0]);
-					hash.hashBlocks<8>(hashes, hashes);
-					SIMD8(q, ctx.fromBlock(t0[q], hashes[q]));
+					SIMD8(q, ctx.fromBlock(
+						t0[q], hash.hashBlock(mSendOts.data()[i + q][0])));
 				
 					// xi = mX[i]
 					block xi[8];
@@ -835,9 +971,8 @@ namespace osuCrypto
 					SIMD8(q, ctx.minus(t0[q], t0[q], yx[q]));      // t0 = t0 - yx 
 
 					// m1 = t0 + (x0 ⊕ 1) * y0
-					SIMD8(q, hashes[q] = mSendOts.data()[i + q][1]);
-					hash.hashBlocks<8>(hashes, hashes);
-					SIMD8(q, ctx.fromBlock(m1[q], hashes[q])); // mask the m1 message using the OT.
+					SIMD8(q, ctx.fromBlock(
+						m1[q], hash.hashBlock(mSendOts.data()[i + q][1]))); // mask the m1 message using the OT.
 					SIMD8(q, ctx.plus(m1[q], m1[q], t0[q]));
 					SIMD8(q, ctx.minus(ynx[q], yBegin[i + q], yx[q])); // if xi[q] == 0, then yBegin[i + q] is added to m1[q]
 					SIMD8(q, ctx.plus(m1[q], m1[q], ynx[q]));
@@ -885,9 +1020,8 @@ namespace osuCrypto
 					mIter += ctx.template byteSize<F>() * 8;
 
 
-					SIMD8(q, hashes[q] = mRecvOts.data()[i + q]);
-					hash.hashBlocks<8>(hashes, hashes);
-					SIMD8(q, ctx.fromBlock(mx[q], hashes[q]));
+					SIMD8(q, ctx.fromBlock(
+						mx[q], hash.hashBlock(mRecvOts.data()[i + q])));
 
 					//u8 xi = mX[i];
 					block xi[8];

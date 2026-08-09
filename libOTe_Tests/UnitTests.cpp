@@ -20,6 +20,7 @@
 #include "libOTe_Tests/Dpf_Tests.h"
 #include "libOTe_Tests/Foleage_Tests.h"
 #include "libOTe_Tests/RevCuckoo_Tests.h"
+#include "libOTe_Tests/Waterfall_Tests.h"
 #include "libOTe_Tests/Cmp_Tests.h"
 #include "libOTe_Tests/Equality_Tests.h"
 #include "libOTe_Tests/Permute_Tests.h"
@@ -125,6 +126,16 @@ namespace tests_libOTe
 			tc.add("RevCuckoo_singlePoint_Test              ", RevCuckoo_singlePoint_Test);
 			tc.add("RevCuckoo_robustness_Test               ", RevCuckoo_robustness_Test);
 			tc.add("RevCuckoo_failurePropagation_Test       ", RevCuckoo_failurePropagation_Test);
+			tc.add("Waterfall_config_Test                    ", Waterfall_config_Test);
+			tc.add("Waterfall_validation_Test                ", Waterfall_validation_Test);
+			tc.add("Waterfall_emptySparseColumn_Test           ", Waterfall_emptySparseColumn_Test);
+			tc.add("Waterfall_placement_Test                 ", Waterfall_placement_Test);
+			tc.add("Waterfall_hash_Test                      ", Waterfall_hash_Test);
+			tc.add("Waterfall_candidates_Test                ", Waterfall_candidates_Test);
+			tc.add("Waterfall_basicMpc_Test                  ", Waterfall_basicMpc_Test);
+			tc.add("Waterfall_reachabilityMpc_Test           ", Waterfall_reachabilityMpc_Test);
+			tc.add("Waterfall_scatterMpc_Test                ", Waterfall_scatterMpc_Test);
+			tc.add("Waterfall_dmpfEndToEnd_Test              ", Waterfall_dmpfEndToEnd_Test);
 			
 
 			tc.add("Dedup_orTree_test                       ", Dedup_orTree_test);

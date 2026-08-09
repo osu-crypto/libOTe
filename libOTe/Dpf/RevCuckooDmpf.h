@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cryptoTools/Common/Defines.h"
+#include "libOTe/Dpf/CachedDpfExpansion.h"
 #include "libOTe/Dpf/SparseDpf.h"
 #include "RevCuckoo/Dedup.h"
 #include "RevCuckoo/GoldreichHash.h"
@@ -940,16 +941,7 @@ namespace osuCrypto
 			co_await mWaksmanPermute.applyMany<T, VecT>(B, sock, ctx);
 			setTimePoint("perm done");
 
-			ctx.resize(mExpanded, f * mNumSets);
-			for (u64 j = 0; j < mExpanded.size(); ++j)
-			{
-				if (mExpanded[j].size() != mSparseSets[j].size())
-					ctx.resize(mExpanded[j], mSparseSets[j].size());
-			}
-			setTimePoint("expanded alloc done");
-
-			VecT leafSums(f * mNumSets);
-			ctx.zero(leafSums.begin(), leafSums.end());
+			VecT leafSums;
 
 			for (u64 s = 0; s < mNumSets; ++s)
 			{
@@ -958,6 +950,7 @@ namespace osuCrypto
 			}
 
 			// Step 15-16: Initialize and compute final output
+			ctx.resize(mExpanded, mSparseSets.size());
 			auto BB = ctx.template makeVec<T>(mExpanded.size());
 
 			auto BBIter = BB.begin();
@@ -968,61 +961,14 @@ namespace osuCrypto
 			}
 
 
-#define SIMD8(VAR, STATEMENT) do{\
-	{ constexpr u64 VAR = 0; STATEMENT; }\
-	{ constexpr u64 VAR = 1; STATEMENT; }\
-	{ constexpr u64 VAR = 2; STATEMENT; }\
-	{ constexpr u64 VAR = 3; STATEMENT; }\
-	{ constexpr u64 VAR = 4; STATEMENT; }\
-	{ constexpr u64 VAR = 5; STATEMENT; }\
-	{ constexpr u64 VAR = 6; STATEMENT; }\
-	{ constexpr u64 VAR = 7; STATEMENT; }\
-	}while(0)
-
-			auto zero = ctx.template make<T>();
-			ctx.zero(zero);
-			for (u64 j = 0; j < mExpanded.size(); ++j)
-			{
-				AES aes(mHashSeed);
-				mHashSeed = aes.hashBlock(block(35434523452345, 2345324523452345234));
-
-				auto n8 = mSparseSets[j].size() / 8 * 8;
-
-				auto sIter = mExpanded[j].begin();
-				auto lIter = mLeafShares[j].begin();
-				if (mPartyIdx)
-				{
-
-					for (u64 i = 0; i < n8; i+=8)
-					{
-						SIMD8(q, ctx.fromBlock(sIter[i+q], aes.hashBlock(lIter[i+q])));
-						SIMD8(q, ctx.minus(sIter[i+q], zero, sIter[i+q]));
-						SIMD8(q, ctx.plus(leafSums[j], leafSums[j], sIter[i+q]));
-					}
-
-					for (u64 i = n8; i < mSparseSets[j].size(); ++i)
-					{
-						ctx.fromBlock(sIter[i], aes.hashBlock(lIter[i]));
-						ctx.minus(sIter[i], zero, sIter[i]);
-						ctx.plus(leafSums[j], leafSums[j], sIter[i]);
-					}
-				}
-				else
-				{
-
-					for (u64 i = 0; i <n8; i+=8)
-					{
-						SIMD8(q, ctx.fromBlock(sIter[i+q], aes.hashBlock(lIter[i+q])));
-						SIMD8(q, ctx.plus(leafSums[j], leafSums[j], sIter[i+q]));
-					}
-					for (u64 i = n8; i < mSparseSets[j].size(); ++i)
-					{
-						ctx.fromBlock(sIter[i], aes.hashBlock(lIter[i]));
-						ctx.plus(leafSums[j], leafSums[j], sIter[i]);
-					}
-				}
-
-			}
+			details::expandCachedDpfLeaves<T>(
+				mPartyIdx,
+				mSparseSets,
+				mLeafShares,
+				mExpanded,
+				leafSums,
+				mHashSeed,
+				ctx);
 			setTimePoint("expandLeaves done");
 
 
@@ -1055,21 +1001,24 @@ namespace osuCrypto
 				//   = gamma - d * (gamma - (-gamma))
 				//   = (1-d) gamma + d * (-gamma)
 
-				auto diff = ctx.template makeVec<T>(mLeafTags.size());
-				for (u64 k = 0; k < mLeafTags.size(); ++k)
+				if constexpr (
+					std::is_same_v<std::remove_cvref_t<T>, u64> &&
+					std::is_same_v<std::remove_cvref_t<CoeffCtx>, CoeffCtxInteger>)
 				{
-					// diff[k] = gamma[k] - (-gamma[k]);
-					ctx.plus(diff[k], gamma[k], gamma[k]);
+					co_await mMultSession.conditionalNegateU64(
+						gamma.begin(), gamma.end(), sock);
 				}
-
-				co_await mMultSession.multiply<T>(diff.begin(), diff.end(), diff.begin(), sock, ctx);
-
-				// now we have d * diff
-				for (u64 k = 0; k < gamma.size(); ++k)
+				else
 				{
-					// leadSums[k] = gamma[k] - diff[k];
-					//             = (1-d) gamma[k] + d * (-gamma[k])
-					ctx.minus(gamma[k], gamma[k], diff[k]);
+					auto diff = ctx.template makeVec<T>(mLeafTags.size());
+					for (u64 k = 0; k < mLeafTags.size(); ++k)
+						ctx.plus(diff[k], gamma[k], gamma[k]);
+
+					co_await mMultSession.multiply<T>(
+						diff.begin(), diff.end(), diff.begin(), sock, ctx);
+
+					for (u64 k = 0; k < gamma.size(); ++k)
+						ctx.minus(gamma[k], gamma[k], diff[k]);
 				}
 			}
 
@@ -1079,72 +1028,18 @@ namespace osuCrypto
 
 			setTimePoint("gamma done");
 
-			auto temp = ctx.template makeVec<T>(8);
-			if (mTempOutput.size() != mDomain)
-				ctx.resize(mTempOutput, mDomain);
-
-			for (u64 s = 0, k = 0; s < mNumSets; ++s)
-			{
-				//if (s)
-				ctx.zero(mTempOutput.begin(), mTempOutput.end());
-				auto out = mTempOutput.begin();;
-
-				for (u64 j = 0; j < f; ++j, ++k)
-				{
-					auto n = mRealLeafCounts[k];
-					auto n8 = n / 8 * 8;
-					auto sIter = mExpanded[k].begin();
-					auto gammaK = gamma[k];
-					auto setK = mSparseSets[k].data();
-					auto tagK = mLeafTags[k].data();
-
-					if (mPartyIdx)
-					{
-						for (u64 i = 0; i < n8; i += 8)
-						{
-							SIMD8(q, ctx.mask(temp[q], gammaK, block::allSame<u8>(-tagK[i + q])));
-							SIMD8(q, ctx.minus(temp[q], sIter[i + q], temp[q]));
-							//ctx.plus(temp[q], shares[k][i + q], temp[q]);
-							u32 idx[8];
-							SIMD8(q, idx[q] = setK[i + q]);
-							SIMD8(q, ctx.plus(out[idx[q]], out[idx[q]], temp[q]));
-						}
-						for (u64 i = n8; i < n; ++i)
-						{
-							auto mask = block::allSame<u8>(-tagK[i]);
-							ctx.mask(temp[0], gammaK, mask);
-							ctx.minus(temp[0], sIter[i], temp[0]);
-							//ctx.plus(temp[0], shares[k][i], temp[0]);
-							auto idx = setK[i];
-							ctx.plus(out[idx], out[idx], temp[0]);
-						}
-					}
-					else
-					{
-						for (u64 i = 0; i < n8; i += 8)
-						{
-							SIMD8(q, ctx.mask(temp[q], gammaK, block::allSame<u8>(-tagK[i + q])));
-							SIMD8(q, ctx.plus(temp[q], sIter[i+q], temp[q]));
-							u32 idx[8];
-							SIMD8(q, idx[q] = setK[i + q]);
-							SIMD8(q, ctx.plus(out[idx[q]], out[idx[q]], temp[q]));
-						}
-						for (u64 i = n8; i < n; ++i)
-						{
-							auto mask = block::allSame<u8>(-tagK[i]);
-							ctx.mask(temp[0], gammaK, mask);
-							//ctx.minus(temp[0], shares[k][i], temp[0]);
-							ctx.plus(temp[0], sIter[i], temp[0]);
-							auto idx = setK[i];
-							ctx.plus(out[idx], out[idx], temp[0]);
-						}
-					}
-				}
-				for (u64 i = 0; i < mDomain; ++i)
-				{
-					output(s, i, out[i]);
-				}
-			}
+			details::applyCachedDpfUpdates<T>(
+				mPartyIdx,
+				mNumSets,
+				f,
+				mDomain,
+				mSparseSets,
+				mLeafTags,
+				mExpanded,
+				gamma,
+				mTempOutput,
+				output,
+				ctx);
 
 			setTimePoint("update done");
 			mExpandInProgress = false;
@@ -1310,15 +1205,29 @@ namespace osuCrypto
 
 		task<> reveal(auto&& gamma, Socket& sock, auto&& ctx)
 		{
-			auto other = ctx.template makeVec<T>(gamma.size());
-			std::vector<u8> buffer(gamma.size() * ctx.template byteSize<T>());
-			ctx.serialize(gamma.begin(), gamma.end(), buffer.begin());
-			co_await sock.send(std::move(buffer));
-			buffer.resize(gamma.size() * ctx.template byteSize<T>());
-			co_await sock.recv(buffer);
-			ctx.deserialize(buffer.begin(), buffer.end(), other.begin());
-			for (u64 k = 0; k < gamma.size(); ++k)
-				ctx.plus(gamma[k], gamma[k], other[k]);
+			if constexpr (
+				std::is_same_v<std::remove_cvref_t<T>, u64> &&
+				std::is_same_v<std::remove_cvref_t<CoeffCtx>, CoeffCtxInteger>)
+			{
+				std::vector<u64> wire(gamma.begin(), gamma.end());
+				co_await sock.send(std::move(wire));
+				wire.resize(gamma.size());
+				co_await sock.recv(wire);
+				for (u64 k = 0; k < gamma.size(); ++k)
+					gamma[k] += wire[k];
+			}
+			else
+			{
+				auto other = ctx.template makeVec<T>(gamma.size());
+				std::vector<u8> buffer(gamma.size() * ctx.template byteSize<T>());
+				ctx.serialize(gamma.begin(), gamma.end(), buffer.begin());
+				co_await sock.send(std::move(buffer));
+				buffer.resize(gamma.size() * ctx.template byteSize<T>());
+				co_await sock.recv(buffer);
+				ctx.deserialize(buffer.begin(), buffer.end(), other.begin());
+				for (u64 k = 0; k < gamma.size(); ++k)
+					ctx.plus(gamma[k], gamma[k], other[k]);
+			}
 		}
 
 
@@ -1657,4 +1566,3 @@ namespace osuCrypto
 	};
 
 }
-#undef SIMD8
