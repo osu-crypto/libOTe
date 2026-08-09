@@ -1,7 +1,112 @@
-file(GLOB_RECURSE SRCS *.cpp *.c)
+set(SRCS
+    Dpf/RevCuckoo/Simulator.cpp
+    Tools/EACode/EAChecker.cpp
+    Tools/ExConvCode/ExConvChecker.cpp
+    Tools/ExConvCode/ExConvCode.cpp
+    Tools/ExConvCodeOld/ExConvCodeInstantiations.cpp
+    Tools/ExConvCodeOld/ExConvCodeOld.cpp
+    Tools/LDPC/Mtx.cpp
+    Tools/LDPC/Util.cpp
+    Tools/LinearCode.cpp
+    Tools/Tools.cpp
+    Tools/TungstenCode/TungstenData.cpp
+    TwoChooseOne/ConfigureCode.cpp
+    TwoChooseOne/OTExtInterface.cpp
+)
 
-if(NOT ENABLE_LOGVOLE)
-    list(FILTER SRCS EXCLUDE REGEX ".*/Vole/LogVole/.*")
+if(ENABLE_SIMPLESTOT OR ENABLE_SIMPLESTOT_ASM)
+    list(APPEND SRCS Base/SimplestOT.cpp)
+endif()
+
+if(ENABLE_MR)
+    list(APPEND SRCS Base/MasnyRindal.cpp)
+endif()
+
+if(ENABLE_MR_KYBER)
+    list(APPEND SRCS Base/MasnyRindalKyber.cpp)
+endif()
+
+if(ENABLE_OOS OR ENABLE_KKRT)
+    list(APPEND SRCS NChooseOne/NcoOtExt.cpp)
+endif()
+
+if(ENABLE_OOS)
+    list(APPEND SRCS
+        NChooseOne/Oos/OosNcoOtReceiver.cpp
+        NChooseOne/Oos/OosNcoOtSender.cpp)
+endif()
+
+if(ENABLE_KKRT)
+    list(APPEND SRCS
+        NChooseOne/Kkrt/KkrtNcoOtReceiver.cpp
+        NChooseOne/Kkrt/KkrtNcoOtSender.cpp)
+endif()
+
+if(ENABLE_KOS)
+    list(APPEND SRCS
+        TwoChooseOne/Kos/KosOtExtReceiver.cpp
+        TwoChooseOne/Kos/KosOtExtSender.cpp)
+endif()
+
+if(ENABLE_DELTA_KOS)
+    list(APPEND SRCS
+        TwoChooseOne/KosDot/KosDotExtReceiver.cpp
+        TwoChooseOne/KosDot/KosDotExtSender.cpp)
+endif()
+
+if(ENABLE_SOFTSPOKEN_OT)
+    list(APPEND SRCS
+        TwoChooseOne/SoftSpokenOT/SoftSpokenMalOtExt.cpp
+        TwoChooseOne/SoftSpokenOT/SoftSpokenShOtExt.cpp
+        Vole/SoftSpokenOT/SmallFieldVole.cpp)
+endif()
+
+if(ENABLE_SILENTOT)
+    list(APPEND SRCS
+        Triple/SilentOtTriple/SilentOtTriple.cpp
+        TwoChooseOne/Silent/SilentOtExtReceiver.cpp
+        TwoChooseOne/Silent/SilentOtExtSender.cpp)
+endif()
+
+if(ENABLE_FOLEAGE)
+    list(APPEND SRCS Triple/Foleage/FoleageTriple.cpp)
+endif()
+
+if(ENABLE_RINGLPN)
+    list(APPEND SRCS Triple/RingLpn/RingLpnTriple.cpp)
+endif()
+
+if(ENABLE_REGULAR_DPF)
+    list(APPEND SRCS Dpf/SumDmpf.cpp)
+endif()
+
+if(ENABLE_SPARSE_DPF)
+    list(APPEND SRCS Dpf/RevCuckoo/BinarySolver.cpp)
+endif()
+
+if(ENABLE_PPRF)
+    list(APPEND SRCS Tools/Pprf/RegularPprf.cpp)
+endif()
+
+if(ENABLE_BITPOLYMUL)
+    list(APPEND SRCS Tools/bitpolymul.cpp)
+endif()
+
+if(ENABLE_CIRCUITS)
+    list(APPEND SRCS Tools/Gmw/Gmw.cpp)
+endif()
+
+if(ENABLE_LOGVOLE)
+    list(APPEND SRCS
+        Vole/LogVole/LogVole.cpp
+        Vole/LogVole/LogVoleCore.cpp
+        Vole/LogVole/LogVoleEncoding.cpp
+        Vole/LogVole/LogVoleLenc.cpp
+        Vole/LogVole/LogVoleLhe.cpp
+        Vole/LogVole/LogVoleRing.cpp
+        Vole/LogVole/LogVoleRingReceiver.cpp
+        Vole/LogVole/LogVoleRingSender.cpp
+        Vole/LogVole/LogVoleShrinkExpand.cpp)
 endif()
 
 set(SRCS "${SRCS}")

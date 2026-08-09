@@ -91,7 +91,9 @@ elseif((ENABLE_MR OR ENABLE_MRR OR (DEFINED ENABLE_ALL_OT AND ENABLE_ALL_OT)) AN
         "use the x86-64 Edwards25519 assembly backend")
 endif()
 
-set(ENABLE_CIRCUITS true)
+if(NOT DEFINED ENABLE_CIRCUITS)
+    set(ENABLE_CIRCUITS true)
+endif()
 add_subdirectory(cryptoTools)
 
 #############################################

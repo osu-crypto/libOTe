@@ -69,28 +69,35 @@ jobs:
 
       - name: Build Masny-Rindal and McRosRoy with sodium fallback
         run: >-
-          python3 build.py --par=4
+          python3 build.py --setup --par=4
           -DCMAKE_BUILD_TYPE=Release
-          -DENABLE_ALL_OT=ON
+          -DENABLE_MR=ON
+          -DENABLE_MRR=ON
+          -DENABLE_LOGVOLE=OFF
+          -DENABLE_CIRCUITS=OFF
           -DENABLE_EDWARDS25519_ASM=OFF
           -DENABLE_EDWARDS25519_IFMA=OFF
           -DENABLE_SIMPLESTOT_ASM=OFF
           -DENABLE_SODIUM=ON
           -DSODIUM_MONTGOMERY=OFF
 
+      - name: Build focused Curve25519 OT tests
+        run: cmake --build out/build/linux --target curve25519_ot_tests --parallel 4
+
       - name: Verify fallback configuration
         run: |
+          grep -q '^ENABLE_MR:BOOL=ON$' out/build/linux/CMakeCache.txt
+          grep -q '^ENABLE_MRR:BOOL=ON$' out/build/linux/CMakeCache.txt
+          grep -q '^ENABLE_LOGVOLE:BOOL=OFF$' out/build/linux/CMakeCache.txt
+          grep -q '^ENABLE_CIRCUITS:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_EDWARDS25519_ASM:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_EDWARDS25519_IFMA:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_SIMPLESTOT_ASM:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_SODIUM:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^SODIUM_MONTGOMERY:BOOL=OFF$' out/build/linux/CMakeCache.txt
 
-      - name: Test Masny-Rindal portable fallback
-        run: ./out/build/linux/frontend/frontend_libOTe -u Bot_MasnyRindal
-
-      - name: Test McRosRoy sodium fallback
-        run: ./out/build/linux/frontend/frontend_libOTe -u Bot_McQuoidRR_Ristrestto
+      - name: Test Curve25519 OT consumers
+        run: ./out/build/linux/libOTe_Tests/curve25519_ot_tests
 
   build-macos:
     needs: build-ubuntu
