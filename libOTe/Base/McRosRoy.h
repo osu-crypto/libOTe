@@ -23,6 +23,7 @@
 
 #include "libOTe/Tools/Popf/FeistelRistPopf.h"
 #include "libOTe/Tools/Popf/FeistelMulRistPopf.h"
+#include "libOTe/Tools/Popf/MrrTranscript.h"
 
 #include <cryptoTools/Crypto/Edwards25519/Curve25519Backend.h>
 
@@ -32,6 +33,9 @@ namespace osuCrypto
 	{
 		namespace mrr
 		{
+			constexpr char kdfDomain[] =
+				"libOTe-McRosRoy-Ristretto255-v1-KDF";
+
 			using BatchEncoding = std::array<u8,
 				Ristretto255::Backend::lanes * Ristretto255::Backend::Point::size>;
 			using UniformBatch = std::array<u8,
@@ -163,6 +167,9 @@ namespace osuCrypto
 			MACORO_TRY{
 
 			Ristretto255::Backend::init();
+			if (messages.size() != choices.size())
+				throw std::invalid_argument(
+					"McRosRoy receiver choices and messages have different sizes");
 			auto A = Point{};
 			auto sk = std::vector<Number>{};
 			auto buff = std::vector<u8>(Point::size);
@@ -185,7 +192,7 @@ namespace osuCrypto
 						continue;
 					sk[base + lane] = scalars[lane];
 					auto factory = popfFactory;
-					factory.Update(base + lane);
+					mrr::updateIndex(factory, base + lane);
 					auto popf = factory.construct();
 					auto& f = sendBuff[base + lane];
 					popf.batchProgramBegin(f, choices[base + lane], prng);
@@ -197,7 +204,7 @@ namespace osuCrypto
 				for (u64 lane = 0; lane != count; ++lane)
 				{
 					auto factory = popfFactory;
-					factory.Update(base + lane);
+					mrr::updateIndex(factory, base + lane);
 					auto popf = factory.construct();
 					auto& f = sendBuff[base + lane];
 					std::memcpy(f.t, encoded.data() + lane * Point::size, Point::size);
@@ -225,9 +232,10 @@ namespace osuCrypto
 				for (u64 lane = 0; lane != count; ++lane)
 				{
 					RandomOracle ro(sizeof(block));
+					mrr::updateDomain(ro, mrr::kdfDomain);
 					ro.Update(encoded.data() + lane * Point::size, Point::size);
-					ro.Update(base + lane);
-					ro.Update((bool)choices[base + lane]);
+					mrr::updateIndex(ro, base + lane);
+					mrr::updateBranch(ro, choices[base + lane]);
 					ro.Final(messages[base + lane]);
 				}
 			}
@@ -276,7 +284,7 @@ namespace osuCrypto
 					for (u64 lane = 0; lane != count; ++lane)
 					{
 						auto factory = popfFactory;
-						factory.Update(base + lane);
+						mrr::updateIndex(factory, base + lane);
 						auto popf = factory.construct();
 						auto f = recvBuff[base + lane];
 						popf.batchEvalBegin(f, branch != 0);
@@ -295,9 +303,10 @@ namespace osuCrypto
 					for (u64 lane = 0; lane != count; ++lane)
 					{
 						RandomOracle ro(sizeof(block));
+						mrr::updateDomain(ro, mrr::kdfDomain);
 						ro.Update(encoded.data() + lane * Point::size, Point::size);
-						ro.Update(base + lane);
-						ro.Update(branch != 0);
+						mrr::updateIndex(ro, base + lane);
+						mrr::updateBranch(ro, branch != 0);
 						ro.Final(msg[base + lane][branch]);
 					}
 				}

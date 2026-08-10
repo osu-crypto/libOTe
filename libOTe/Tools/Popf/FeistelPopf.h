@@ -12,6 +12,7 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
+#include "libOTe/Tools/Popf/MrrTranscript.h"
 
 namespace osuCrypto
 {
@@ -33,7 +34,7 @@ namespace osuCrypto
         PopfOut eval(PopfFunc f, PopfIn x) const
         {
             RandomOracle h = ro;
-            h.Update(x);
+            details::mrr::updateBranch(h, x);
 
             xorHPrime(f, h);
             xorH(f, h);
@@ -44,7 +45,7 @@ namespace osuCrypto
         PopfFunc program(PopfIn x, PopfOut y, PRNG& prng) const
         {
             RandomOracle h = ro;
-            h.Update(x);
+            details::mrr::updateBranch(h, x);
 
             PopfFunc f;
             f.t = y;
@@ -91,7 +92,12 @@ namespace osuCrypto
     public:
         typedef FeistelPopf ConstructedPopf;
         const static size_t hashLength = sizeof(block[3]);
-        DomainSepFeistelPopf() : RandomOracle(hashLength) {}
+        DomainSepFeistelPopf() : RandomOracle(hashLength)
+        {
+            constexpr char domain[] =
+                "libOTe-McRosRoy-Curve25519Twist-Feistel-v1-POPF";
+            details::mrr::updateDomain(*this, domain);
+        }
 
         ConstructedPopf construct()
         {

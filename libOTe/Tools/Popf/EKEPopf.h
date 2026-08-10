@@ -13,6 +13,7 @@
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/Rijndael256.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
+#include "libOTe/Tools/Popf/MrrTranscript.h"
 
 namespace osuCrypto
 {
@@ -48,7 +49,7 @@ namespace osuCrypto
         {
             Block256 key;
             RandomOracle roKey = ro;
-            roKey.Update(x);
+            details::mrr::updateBranch(roKey, x);
             roKey.Final(key);
 
             return key;
@@ -64,7 +65,12 @@ namespace osuCrypto
     public:
         typedef EKEPopf ConstructedPopf;
         const static size_t hashLength = sizeof(Block256);
-        DomainSepEKEPopf() : RandomOracle(hashLength) {}
+        DomainSepEKEPopf() : RandomOracle(hashLength)
+        {
+            constexpr char domain[] =
+                "libOTe-McRosRoy-Curve25519Twist-EKE-v1-POPF";
+            details::mrr::updateDomain(*this, domain);
+        }
 
         ConstructedPopf construct()
         {

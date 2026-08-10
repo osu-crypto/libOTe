@@ -15,6 +15,7 @@
 #include <stdexcept>
 
 #include <cryptoTools/Crypto/Edwards25519/Curve25519Backend.h>
+#include "libOTe/Tools/Popf/MrrTranscript.h"
 
 namespace osuCrypto
 {
@@ -70,7 +71,7 @@ namespace osuCrypto
                             unsigned char out[Point::fromHashLength]) const
         {
             RandomOracle h = ro;
-            h.Update(x);
+            details::mrr::updateBranch(h, x);
             h.Update(f.s, Point::size);
             h.Final(out);
         }
@@ -82,7 +83,7 @@ namespace osuCrypto
         void addH(Point& t, const unsigned char s[], PopfIn x, bool negate) const
         {
             RandomOracle h = ro;
-            h.Update(x);
+            details::mrr::updateBranch(h, x);
             h.Update(s, Point::size);
             Point v = Point::fromHash(h);
 
@@ -110,7 +111,12 @@ namespace osuCrypto
     public:
         typedef FeistelMulRistPopf ConstructedPopf;
         const static size_t hashLength = Ristretto255::Backend::Point::fromHashLength;
-        DomainSepFeistelMulRistPopf() : RandomOracle(hashLength) {}
+        DomainSepFeistelMulRistPopf() : RandomOracle(hashLength)
+        {
+            constexpr char domain[] =
+                "libOTe-McRosRoy-Ristretto255-FeistelMul-v1-POPF";
+            details::mrr::updateDomain(*this, domain);
+        }
 
         ConstructedPopf construct()
         {

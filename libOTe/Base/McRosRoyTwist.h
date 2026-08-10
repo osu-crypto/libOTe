@@ -10,6 +10,7 @@
 #include "libOTe/config.h"
 #ifdef ENABLE_MRR_TWIST
 
+#include <stdexcept>
 #include <type_traits>
 #include "libOTe/TwoChooseOne/OTExtInterface.h"
 #include <cryptoTools/Common/Defines.h>
@@ -23,12 +24,19 @@
 #include "libOTe/Tools/Popf/FeistelMulPopf.h"
 #include "libOTe/Tools/Popf/FeistelPopf.h"
 #include "libOTe/Tools/Popf/MRPopf.h"
+#include "libOTe/Tools/Popf/MrrTranscript.h"
 #include "libOTe/Tools/Coproto.h"
 
 namespace osuCrypto
 {
 	namespace details
 	{
+		namespace mrr
+		{
+			constexpr char twistKdfDomain[] =
+				"libOTe-McRosRoy-Curve25519Twist-v1-KDF";
+		}
+
 		// Popf classes should looks something like this:
 		/*
 		class Popf
@@ -135,6 +143,9 @@ namespace osuCrypto
 		{
 			MACORO_TRY{
 			Montgomery25519::Backend::init();
+			if (messages.size() != choices.size())
+				throw std::invalid_argument(
+					"McRosRoyTwist receiver choices and messages have different sizes");
 			auto n = choices.size();
 			if (n == 0)
 				co_return;
@@ -174,7 +185,7 @@ namespace osuCrypto
 				for (u64 lane = 0; lane != count; ++lane)
 				{
 					auto factory = popfFactory;
-					factory.Update(base + lane);
+					mrr::updateIndex(factory, base + lane);
 					auto popf = factory.construct();
 					sendBuff[base + lane] = popf.program(
 						choices[base + lane],
@@ -212,10 +223,11 @@ namespace osuCrypto
 				for (u64 lane = 0; lane != count; ++lane)
 				{
 					RandomOracle ro(sizeof(block));
+					mrr::updateDomain(ro, mrr::twistKdfDomain);
 					ro.Update(encoded.data() + lane * Monty25519::size,
 						Monty25519::size);
-					ro.Update(base + lane);
-					ro.Update((bool)choices[base + lane]);
+					mrr::updateIndex(ro, base + lane);
+					mrr::updateBranch(ro, choices[base + lane]);
 					ro.Final(messages[base + lane]);
 				}
 			}
@@ -266,7 +278,7 @@ namespace osuCrypto
 					for (u64 lane = 0; lane != count; ++lane)
 					{
 						auto factory = popfFactory;
-						factory.Update(base + lane);
+						mrr::updateIndex(factory, base + lane);
 						auto popf = factory.construct();
 						auto point = popf.eval(recvBuff[base + lane], branch != 0);
 						std::memcpy(encoded.data() + lane * Monty25519::size,
@@ -282,10 +294,11 @@ namespace osuCrypto
 					for (u64 lane = 0; lane != count; ++lane)
 					{
 						RandomOracle ro(sizeof(block));
+						mrr::updateDomain(ro, mrr::twistKdfDomain);
 						ro.Update(encoded.data() + lane * Monty25519::size,
 							Monty25519::size);
-						ro.Update(base + lane);
-						ro.Update(branch != 0);
+						mrr::updateIndex(ro, base + lane);
+						mrr::updateBranch(ro, branch != 0);
 						ro.Final(msg[base + lane][branch]);
 					}
 				}

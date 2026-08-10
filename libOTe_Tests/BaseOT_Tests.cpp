@@ -27,6 +27,7 @@
 #include <cryptoTools/Crypto/RandomOracle.h>
 
 #include "Common.h"
+#include <cstring>
 #include <thread>
 #include <vector>
 #include <cryptoTools/Common/TestCollection.h>
@@ -181,6 +182,24 @@ namespace tests_libOTe
         const char* test_domain = "Bot_PopfOT_Test()";
         popfFactory.Update(test_domain, std::strlen(test_domain));
 
+        // A mismatched output span used to write past the end in both MRR
+        // receiver implementations. It must fail before any protocol I/O.
+        {
+            auto mismatchSockets = cp::LocalAsyncSocket::makePair();
+            BitVector mismatchChoices(1);
+            std::vector<block> noOutputs;
+            PopfOT<DSPopf> receiver(popfFactory);
+            auto honest = receiver.receive(
+                mismatchChoices, noOutputs, prng0, mismatchSockets[1]);
+            auto idlePeer = []() -> task<> { co_return; }();
+            bool rejected = false;
+            try { eval(honest, idlePeer); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail(
+                    "McRosRoy receiver accepted mismatched choices/messages");
+        }
+
         setThreadName("receiver");
         PopfOT<DSPopf> baseOTs0(popfFactory);
         auto proto0 = baseOTs0.send(sendMsg, prng1, sockets[0]);
@@ -199,12 +218,132 @@ namespace tests_libOTe
                 throw UnitTestFail();
             }
         }
+    }
+
+    template<typename DSPopf>
+    static void Bot_McRosRoy_Ristretto_Adversarial_impl()
+    {
+        using Func = typename DSPopf::ConstructedPopf::PopfFunc;
+        constexpr auto pointSize = Ristretto255::Backend::Point::size;
+
+        // The sender must reject a POPF message containing a non-canonical
+        // Ristretto encoding before multiplying it by its secret scalar.
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG senderPrng(block(0x52495354, 1));
+            std::vector<std::array<block, 2>> outputs(1);
+            details::McRosRoy<DSPopf> sender;
+            auto honest = sender.send(outputs, senderPrng, sockets[0]);
+            auto malicious = [&]() -> task<> {
+                std::vector<u8> setup(pointSize);
+                co_await sockets[1].recv(setup);
+                std::vector<Func> functions(1);
+                std::memset(functions.data(), 0xff,
+                    functions.size() * sizeof(Func));
+                co_await sockets[1].send(std::move(functions));
+            }();
+
+            bool rejected = false;
+            try { eval(honest, malicious); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail(
+                    "McRosRoy sender accepted a malformed Ristretto point");
         }
+
+        // The receiver must reject a malformed sender setup point.
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG receiverPrng(block(0x52495354, 2));
+            BitVector choices(1);
+            std::vector<block> outputs(1);
+            details::McRosRoy<DSPopf> receiver;
+            auto honest = receiver.receive(
+                choices, outputs, receiverPrng, sockets[1]);
+            auto malicious = [&]() -> task<> {
+                std::vector<Func> functions(1);
+                co_await sockets[0].recv(functions);
+                std::vector<u8> invalid(pointSize, 0xff);
+                co_await sockets[0].send(std::move(invalid));
+            }();
+
+            bool rejected = false;
+            try { eval(honest, malicious); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail(
+                    "McRosRoy receiver accepted a malformed Ristretto point");
+        }
+    }
+
+    template<typename DSPopf>
+    static void Bot_McRosRoy_Twist_Adversarial_impl()
+    {
+        using Func = typename DSPopf::ConstructedPopf::PopfFunc;
+        using PopfOut = typename DSPopf::ConstructedPopf::PopfOut;
+        constexpr auto pointSize = Montgomery25519::Backend::Point::size;
+
+        // Program branch zero to the order-one Montgomery point. This is a
+        // valid POPF message, but the sender must reject it before secret-key
+        // multiplication.
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG senderPrng(block(0x54574953, 1));
+            PRNG maliciousPrng(block(0x54574953, 2));
+            std::vector<std::array<block, 2>> outputs(1);
+            DSPopf factory;
+            details::McRosRoyTwist<DSPopf> sender(factory);
+            auto honest = sender.send(outputs, senderPrng, sockets[0]);
+            auto malicious = [&]() -> task<> {
+                std::array<u8, 2 * pointSize> setup;
+                co_await sockets[1].recv(setup);
+                auto indexedFactory = factory;
+                details::mrr::updateIndex(indexedFactory, 0);
+                auto popf = indexedFactory.construct();
+                std::vector<Func> functions(1);
+                functions[0] = popf.program(false, PopfOut{}, maliciousPrng);
+                co_await sockets[1].send(std::move(functions));
+            }();
+
+            bool rejected = false;
+            try { eval(honest, malicious); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail(
+                    "McRosRoyTwist sender accepted a small-order point");
+        }
+
+        // Both advertised setup points are order one, so the receiver must
+        // reject regardless of its independently sampled curve choice.
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG receiverPrng(block(0x54574953, 3));
+            BitVector choices(1);
+            std::vector<block> outputs(1);
+            details::McRosRoyTwist<DSPopf> receiver;
+            auto honest = receiver.receive(
+                choices, outputs, receiverPrng, sockets[1]);
+            auto malicious = [&]() -> task<> {
+                std::vector<Func> functions(1);
+                co_await sockets[0].recv(functions);
+                std::array<u8, 2 * pointSize> invalid{};
+                co_await sockets[0].send(std::move(invalid));
+            }();
+
+            bool rejected = false;
+            try { eval(honest, malicious); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail(
+                    "McRosRoyTwist receiver accepted a small-order point");
+        }
+    }
 
 #if defined(ENABLE_MRR_TWIST) && defined(ENABLE_SSE)
     void Bot_McQuoidRR_Moeller_EKE_Test()
     {
         Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepEKEPopf>();
+        Bot_McRosRoy_Twist_Adversarial_impl<DomainSepEKEPopf>();
     }
 #else 
     void Bot_McQuoidRR_Moeller_EKE_Test()
@@ -218,16 +357,19 @@ namespace tests_libOTe
     void Bot_McQuoidRR_Moeller_MR_Test()
     {
         Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepMRPopf>();
+        Bot_McRosRoy_Twist_Adversarial_impl<DomainSepMRPopf>();
     }
 
     void Bot_McQuoidRR_Moeller_F_Test()
     {
         Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepFeistelPopf>();
+        Bot_McRosRoy_Twist_Adversarial_impl<DomainSepFeistelPopf>();
     }
 
     void Bot_McQuoidRR_Moeller_FM_Test()
     {
         Bot_PopfOT_Test_impl<details::McRosRoyTwist, DomainSepFeistelMulPopf>();
+        Bot_McRosRoy_Twist_Adversarial_impl<DomainSepFeistelMulPopf>();
     }
 #else 
     void Bot_McQuoidRR_Moeller_MR_Test()
@@ -250,11 +392,13 @@ namespace tests_libOTe
     void Bot_McQuoidRR_Ristrestto_F_Test()
     {
         Bot_PopfOT_Test_impl<details::McRosRoy, DomainSepFeistelRistPopf>();
+        Bot_McRosRoy_Ristretto_Adversarial_impl<DomainSepFeistelRistPopf>();
     }
 
     void Bot_McQuoidRR_Ristrestto_FM_Test()
     {
         Bot_PopfOT_Test_impl<details::McRosRoy, DomainSepFeistelMulRistPopf>();
+        Bot_McRosRoy_Ristretto_Adversarial_impl<DomainSepFeistelMulRistPopf>();
     }
 #else
 

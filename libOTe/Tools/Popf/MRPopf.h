@@ -14,6 +14,7 @@
 #include <cryptoTools/Crypto/PRNG.h>
 #include <cryptoTools/Crypto/Rijndael256.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
+#include "libOTe/Tools/Popf/MrrTranscript.h"
 
 namespace osuCrypto
 {
@@ -68,7 +69,12 @@ namespace osuCrypto
     public:
         typedef MRPopf ConstructedPopf;
         const static size_t hashLength = sizeof(Block256);
-        DomainSepMRPopf() : RandomOracle(hashLength) {}
+        DomainSepMRPopf() : RandomOracle(hashLength)
+        {
+            constexpr char domain[] =
+                "libOTe-McRosRoy-Curve25519Twist-MasnyRindal-v1-POPF";
+            details::mrr::updateDomain(*this, domain);
+        }
 
         ConstructedPopf construct()
         {

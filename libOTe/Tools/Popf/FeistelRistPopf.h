@@ -14,6 +14,7 @@
 #include <cryptoTools/Crypto/RandomOracle.h>
 #include <stdexcept>
 #include <cryptoTools/Crypto/Edwards25519/Curve25519Backend.h>
+#include "libOTe/Tools/Popf/MrrTranscript.h"
 
 namespace osuCrypto
 {
@@ -41,7 +42,7 @@ namespace osuCrypto
         PopfOut eval(PopfFunc f, PopfIn x) const
         {
             RandomOracle h = ro;
-            h.Update(x);
+            details::mrr::updateBranch(h, x);
             xorHPrime(f, h);
 
             Point t;
@@ -55,7 +56,7 @@ namespace osuCrypto
         PopfFunc program(PopfIn x, PopfOut y, PRNG& prng) const
         {
             RandomOracle h = ro;
-            h.Update(x);
+            details::mrr::updateBranch(h, x);
 
             PopfFunc f;
             prng.get(f.s, 3);
@@ -76,7 +77,7 @@ namespace osuCrypto
                             unsigned char out[Point::fromHashLength]) const
         {
             RandomOracle h = ro;
-            h.Update(x);
+            details::mrr::updateBranch(h, x);
             h.Update((unsigned char)0);
             h.Update(f.s, 3);
             h.Final(out);
@@ -85,7 +86,7 @@ namespace osuCrypto
         void batchProgramEnd(PopfFunc& f, PopfIn x) const
         {
             RandomOracle h = ro;
-            h.Update(x);
+            details::mrr::updateBranch(h, x);
             xorHPrime(f, h);
         }
 
@@ -132,7 +133,12 @@ namespace osuCrypto
     public:
         typedef FeistelRistPopf ConstructedPopf;
         const static size_t hashLength = FeistelRistPopf::hashLength;
-        DomainSepFeistelRistPopf() : RandomOracle(hashLength) {}
+        DomainSepFeistelRistPopf() : RandomOracle(hashLength)
+        {
+            constexpr char domain[] =
+                "libOTe-McRosRoy-Ristretto255-Feistel-v1-POPF";
+            details::mrr::updateDomain(*this, domain);
+        }
 
         ConstructedPopf construct()
         {
