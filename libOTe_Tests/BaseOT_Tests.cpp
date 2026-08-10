@@ -191,7 +191,8 @@ namespace tests_libOTe
             PopfOT<DSPopf> receiver(popfFactory);
             auto honest = receiver.receive(
                 mismatchChoices, noOutputs, prng0, mismatchSockets[1]);
-            auto idlePeer = []() -> task<> { co_return; }();
+            auto idlePeerProtocol = []() -> task<> { co_return; };
+            auto idlePeer = idlePeerProtocol();
             bool rejected = false;
             try { eval(honest, idlePeer); }
             catch (const std::runtime_error&) { rejected = true; }
@@ -234,14 +235,15 @@ namespace tests_libOTe
             std::vector<std::array<block, 2>> outputs(1);
             details::McRosRoy<DSPopf> sender;
             auto honest = sender.send(outputs, senderPrng, sockets[0]);
-            auto malicious = [&]() -> task<> {
+            auto maliciousProtocol = [&]() -> task<> {
                 std::vector<u8> setup(pointSize);
                 co_await sockets[1].recv(setup);
                 std::vector<Func> functions(1);
                 std::memset(functions.data(), 0xff,
                     functions.size() * sizeof(Func));
                 co_await sockets[1].send(std::move(functions));
-            }();
+            };
+            auto malicious = maliciousProtocol();
 
             bool rejected = false;
             try { eval(honest, malicious); }
@@ -260,12 +262,13 @@ namespace tests_libOTe
             details::McRosRoy<DSPopf> receiver;
             auto honest = receiver.receive(
                 choices, outputs, receiverPrng, sockets[1]);
-            auto malicious = [&]() -> task<> {
+            auto maliciousProtocol = [&]() -> task<> {
                 std::vector<Func> functions(1);
                 co_await sockets[0].recv(functions);
                 std::vector<u8> invalid(pointSize, 0xff);
                 co_await sockets[0].send(std::move(invalid));
-            }();
+            };
+            auto malicious = maliciousProtocol();
 
             bool rejected = false;
             try { eval(honest, malicious); }
@@ -294,7 +297,7 @@ namespace tests_libOTe
             DSPopf factory;
             details::McRosRoyTwist<DSPopf> sender(factory);
             auto honest = sender.send(outputs, senderPrng, sockets[0]);
-            auto malicious = [&]() -> task<> {
+            auto maliciousProtocol = [&]() -> task<> {
                 std::array<u8, 2 * pointSize> setup;
                 co_await sockets[1].recv(setup);
                 auto indexedFactory = factory;
@@ -303,7 +306,8 @@ namespace tests_libOTe
                 std::vector<Func> functions(1);
                 functions[0] = popf.program(false, PopfOut{}, maliciousPrng);
                 co_await sockets[1].send(std::move(functions));
-            }();
+            };
+            auto malicious = maliciousProtocol();
 
             bool rejected = false;
             try { eval(honest, malicious); }
@@ -323,12 +327,13 @@ namespace tests_libOTe
             details::McRosRoyTwist<DSPopf> receiver;
             auto honest = receiver.receive(
                 choices, outputs, receiverPrng, sockets[1]);
-            auto malicious = [&]() -> task<> {
+            auto maliciousProtocol = [&]() -> task<> {
                 std::vector<Func> functions(1);
                 co_await sockets[0].recv(functions);
                 std::array<u8, 2 * pointSize> invalid{};
                 co_await sockets[0].send(std::move(invalid));
-            }();
+            };
+            auto malicious = maliciousProtocol();
 
             bool rejected = false;
             try { eval(honest, malicious); }

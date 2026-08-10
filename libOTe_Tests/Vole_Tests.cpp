@@ -375,7 +375,7 @@ void Vole_Silent_Rounds_test(const oc::CLP& cmd)
 //#elif defined ENABLE_MR_KYBER
 
 #if defined ENABLE_SIMPLESTOT
-				u64 expRound = 5;
+				u64 expRound = 3;
 				baseName = "using DefaultBaseOT = SimplestOT;";
 #elif defined ENABLE_MRR_TWIST && defined ENABLE_SSE
 				u64 expRound = 3;
