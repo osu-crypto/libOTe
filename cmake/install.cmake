@@ -74,15 +74,6 @@ if(ENABLE_MR_KYBER)
         FILES_MATCHING PATTERN "*.h")
 endif()
 
-if(ENABLE_SIMPLESTOT_ASM)
-    set(exportLibs "${exportLibs}SimplestOT;")
-    # install headers
-    install(
-        DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../thirdparty/SimplestOT/ 
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/SimplestOT 
-        FILES_MATCHING PATTERN "*.h")
-endif()
-
 # install library
 install(
     TARGETS ${exportLibs}

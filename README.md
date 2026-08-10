@@ -61,10 +61,9 @@ See the [coproto](https://github.com/Visa-Research/coproto/blob/main/frontend/So
  
 The library is *cross platform* and has been tested on Windows, Mac and Linux. 
 There is one mandatory dependency on [coproto](https://github.com/Visa-Research/coproto) (networking),
-and three **optional dependencies** on [libsodium](https://doc.libsodium.org/),
-[Relic](https://github.com/relic-toolkit/relic), or
-[SimplestOT](https://github.com/osu-crypto/libOTe/tree/master/SimplestOT) (Unix only)
-for Base OTs. [Boost Asio](https://www.boost.org/doc/libs/1_84_0/doc/html/boost_asio.html) 
+and two **optional dependencies** on [libsodium](https://doc.libsodium.org/) or
+[Relic](https://github.com/relic-toolkit/relic) for some Base OTs.
+[Boost Asio](https://www.boost.org/doc/libs/1_84_0/doc/html/boost_asio.html)
 tcp networking and [OpenSSL](https://www.openssl.org/) support can optionally be enabled.
 CMake 3.15+ is required and the build script assumes python 3.
  
@@ -88,10 +87,9 @@ LibOTe can be built with various only the selected protocols enabled.
 on platform/dependencies. The `ON`/`OFF` options include
 
 **Malicious base OT:**
- * `ENABLE_SIMPLESTOT` the SimplestOT [[CO15]](https://eprint.iacr.org/2015/267.pdf) protocol (relic or sodium).
- * `ENABLE_SIMPLESTOT_ASM` the SimplestOT base OT protocol [[CO15]](https://eprint.iacr.org/2015/267.pdf) protocol (linux assembly).
+ * `ENABLE_SIMPLESTOT` the SimplestOT [[CO15]](https://eprint.iacr.org/2015/267.pdf) protocol using cryptoTools' batched Edwards25519 backend.
  * `ENABLE_MRR` the McQuoid Rosulek Roy [[MRR20]](https://eprint.iacr.org/2020/1043) protocol (relic or sodium).
- * `ENABLE_MRR_TWIST` the McQuoid Rosulek Roy [[MRR21]](https://eprint.iacr.org/2021/682) protocol  (sodium fork).
+ * `ENABLE_MRR_TWIST` the McQuoid Rosulek Roy [[MRR21]](https://eprint.iacr.org/2021/682) protocol over Curve25519 and its twist (cryptoTools Montgomery25519).
  * `ENABLE_MR` the Masny Rindal [[MR19]](https://eprint.iacr.org/2019/706.pdf) protocol (relic or sodium).
  * `ENABLE_MR_KYBER` the Masny Rindal [[MR19]](https://eprint.iacr.org/2019/706.pdf) protocol  (Kyber fork).
  * `ENABLE_NP` the Naor Pinkas [NP01] base OT (relic or sodium).
@@ -146,7 +144,7 @@ python build.py --sodium
 ```
 libsodium can be disabled by removing `--sodium` from the setup and setting `-D ENABLE_SODIUM=false`.  This will always download and build sodium. To only enable but not download relic, use `python build.py -D ENABLE_SODIUM=true`.
 
-The McQuoid Rosulek Roy 2021 Base OTs uses a twisted curve which additionally require the `noclamp` option for Montgomery curves and is currently only in a [fork](https://github.com/osu-crypto/libsodium) of libsodium. If you prefer the stable libsodium, then install it and add `-D SODIUM_MONTGOMERY=false` as a cmake argument to libOTe.
+The McQuoid Rosulek Roy 2021 base OT uses cryptoTools' Montgomery25519 facade and does not require libsodium. When available, the modified [osu-crypto/libsodium](https://github.com/osu-crypto/libsodium) `noclamp` implementation is used as the scalar reference backend; cryptoTools also provides native AVX-512 IFMA and portable implementations.
 
 
 **Enabling/Disabling [boost asio](https://www.boost.org/doc/libs/1_77_0/doc/html/boost_asio.html) (for TCP networking):**
@@ -212,7 +210,6 @@ find_package(libOTe REQUIRED
         no_pic
 
         simplestot
-        simplestot_asm
         mrr
         mrr_twist
         mr

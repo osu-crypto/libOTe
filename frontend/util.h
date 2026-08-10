@@ -36,8 +36,7 @@ namespace osuCrypto
         vole{ "vole" },
         akn{ "a", "akn" },
         np{ "np" },
-        simple{ "simplest" },
-        simpleasm{ "simplest-asm" };
+        simple{ "simplest" };
     enum class Role
     {
         Sender,
@@ -112,11 +111,6 @@ namespace osuCrypto
     const bool spEnabled = true;
 #else
     const bool spEnabled = false;
-#endif
-#ifdef ENABLE_SIMPLESTOT_ASM
-    const bool spaEnabled = true;
-#else
-    const bool spaEnabled = false;
 #endif
 #ifdef ENABLE_MRR
     const bool popfotRistrettoEnabled = true;

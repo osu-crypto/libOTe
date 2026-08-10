@@ -14,7 +14,7 @@ set(SRCS
     TwoChooseOne/OTExtInterface.cpp
 )
 
-if(ENABLE_SIMPLESTOT OR ENABLE_SIMPLESTOT_ASM)
+if(ENABLE_SIMPLESTOT)
     list(APPEND SRCS Base/SimplestOT.cpp)
 endif()
 
@@ -157,10 +157,6 @@ endif ()
 
 if(ENABLE_LOGVOLE)
 	target_link_libraries(libOTe SEAL::seal)
-endif()
-
-if(ENABLE_SIMPLESTOT_ASM)
-	target_link_libraries(libOTe SimplestOT)
 endif()
 
 if(ENABLE_MR_KYBER)

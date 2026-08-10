@@ -22,11 +22,10 @@ if(DEFINED COPROTO_ENABLE_OPENSSL)
     unset(COPROTO_ENABLE_OPENSSL)
 endif()
 
-if(DEFINED ENABLE_SIMPLESTOT_ASM)
-	set(LIBOTE_SIMPLESTOT_ASM_EXPLICIT ON)
-endif()
-
 if(DEFINED ENABLE_ALL_OT)
+
+	# uses cryptoTools Edwards25519 and has a portable fallback
+	set(ENABLE_SIMPLESTOT ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 
 	# requires sodium or relic
 	if(${ENABLE_SODIUM} OR ${ENABLE_RELIC})
@@ -34,7 +33,6 @@ if(DEFINED ENABLE_ALL_OT)
 	else()
 		set(oc_BB OFF)
 	endif()
-	set(ENABLE_SIMPLESTOT  ${oc_BB} CACHE BOOL "" FORCE)
 	set(ENABLE_NP          ${oc_BB} CACHE BOOL "" FORCE)
 
 	# uses cryptoTools Edwards25519 and has a portable fallback
@@ -43,13 +41,8 @@ if(DEFINED ENABLE_ALL_OT)
 	# uses cryptoTools Ristretto255 and has a portable fallback
 	set(ENABLE_MRR ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 
-	# requires sodium
-	if(${ENABLE_SODIUM} AND SODIUM_MONTGOMERY)
-		set(oc_BB ${ENABLE_ALL_OT})
-	else()
-		set(oc_BB OFF)
-	endif()
-	set(ENABLE_MRR_TWIST   ${oc_BB} CACHE BOOL "" FORCE)
+	# uses cryptoTools Montgomery25519 and has a portable fallback
+	set(ENABLE_MRR_TWIST ${ENABLE_ALL_OT} CACHE BOOL "" FORCE)
 
 
 	# requires linux
@@ -57,9 +50,6 @@ if(DEFINED ENABLE_ALL_OT)
 		set(oc_BB ${ENABLE_ALL_OT})
 	else()
 		set(oc_BB OFF)
-	endif()
-	if(NOT LIBOTE_SIMPLESTOT_ASM_EXPLICIT)
-		set(ENABLE_SIMPLESTOT_ASM ${oc_BB}					CACHE BOOL "" FORCE)
 	endif()
 	set(ENABLE_MR_KYBER       ${oc_BB}						CACHE BOOL "" FORCE)
 
@@ -86,8 +76,7 @@ endif()
 option(ENABLE_BITPOLYMUL     "Build with bit poly mul inegration" FALSE)
 option(ENABLE_MOCK_OT        "Build the insecure mock base OT" OFF)
 
-option(ENABLE_SIMPLESTOT     "Build the SimplestOT base OT" OFF)
-option(ENABLE_SIMPLESTOT_ASM "Build the assembly based SimplestOT library" OFF)
+option(ENABLE_SIMPLESTOT     "Build the Edwards25519 SimplestOT base OT" OFF)
 option(ENABLE_MRR            "Build the McQuoidRosulekRoy 20 PopfOT base OT using Ristretto KA" OFF)
 option(ENABLE_MRR_TWIST      "Build the McQuoidRosulekRoy 21 PopfOT base OT using Moeller KA" OFF)
 option(ENABLE_MR             "Build the Edwards25519 MasnyRindal base OT" OFF)
@@ -156,7 +145,6 @@ message(STATUS "Option: LIBOTE_STD_VER        = ${LIBOTE_STD_VER}")
 
 message(STATUS "Base OT protocols\n=======================================================")
 message(STATUS "Option: ENABLE_SIMPLESTOT     = ${ENABLE_SIMPLESTOT}")
-message(STATUS "Option: ENABLE_SIMPLESTOT_ASM = ${ENABLE_SIMPLESTOT_ASM}")
 message(STATUS "Option: ENABLE_MRR            = ${ENABLE_MRR}")
 message(STATUS "Option: ENABLE_MRR_TWIST      = ${ENABLE_MRR_TWIST}")
 message(STATUS "Option: ENABLE_MR             = ${ENABLE_MR}")
@@ -205,9 +193,6 @@ if(ENABLE_MOCK_OT)
 endif()
 
 if(NOT UNIX OR APPLE OR MSVC)
-	#if(ENABLE_SIMPLESTOT_ASM)
-	#	message(FATAL_ERROR "ENABLE_SIMPLESTOT_ASM only supported on Linux")
-	#endif()
 	if(ENABLE_MR_KYBER)
 		message(FATAL_ERROR "ENABLE_MR_KYBER only supported on Linux")
 	endif()
@@ -215,24 +200,11 @@ if(NOT UNIX OR APPLE OR MSVC)
 endif()
 
 if( NOT ENABLE_SIMPLESTOT AND
-	NOT ENABLE_SIMPLESTOT_ASM AND
 	NOT ENABLE_MRR AND
 	NOT ENABLE_MRR_TWIST AND
 	NOT ENABLE_MR AND
 	NOT ENABLE_MR_KYBER)
 	message(WARNING "NO Base OT enabled.")
-endif()
-
-if (ENABLE_MRR_TWIST AND NOT ENABLE_SODIUM)
-	message(FATAL_ERROR "ENABLE_MRR_TWIST requires ENABLE_SODIUM")
-endif()
-
-if (ENABLE_MRR_TWIST AND NOT SODIUM_MONTGOMERY)
-	message(FATAL_ERROR "ENABLE_MRR_TWIST requires libsodium to support Montgomery curve noclamp operations. get sodium from https://github.com/osu-crypto/libsodium to enable.")
-endif()
-
-if (ENABLE_SIMPLESTOT AND NOT (ENABLE_SODIUM OR ENABLE_RELIC))
-	message(FATAL_ERROR "ENABLE_SIMPLESTOT=${ENABLE_SIMPLESTOT} requires ENABLE_SODIUM=${ENABLE_SODIUM} or ENABLE_RELIC=${ENABLE_RELIC}")
 endif()
 
 if(ENABLE_IKNP AND NOT ENABLE_KOS)

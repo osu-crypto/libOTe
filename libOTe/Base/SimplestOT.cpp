@@ -1,456 +1,299 @@
 #include "SimplestOT.h"
 
-#include <tuple>
-#include <cryptoTools/Common/BitVector.h>
-#include <cryptoTools/Crypto/RandomOracle.h>
-
 #ifdef ENABLE_SIMPLESTOT
 
-#include "libOTe/Tools/DefaultCurve.h"
+#include "libOTe/Tools/Coproto.h"
+
+#include <cryptoTools/Common/BitVector.h>
+#include <cryptoTools/Crypto/Edwards25519/Curve25519Backend.h>
+#include <cryptoTools/Crypto/RandomOracle.h>
+
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <stdexcept>
+#include <vector>
+
+#ifdef _MSC_VER
+#define LIBOTE_NOINLINE __declspec(noinline)
+#else
+#define LIBOTE_NOINLINE __attribute__((noinline))
+#endif
 
 namespace osuCrypto
 {
+	namespace
+	{
+		using Edwards25519::Backend::FixedPointTable;
+		using Edwards25519::Backend::Point;
+		using Edwards25519::Backend::Point8;
+		using Edwards25519::Backend::Scalar;
+
+		constexpr u64 lanes = Edwards25519::Backend::lanes;
+		constexpr u64 pointSize = Edwards25519::Backend::encodedSize;
+		constexpr char kdfDomain[] = "libOTe-SimplestOT-v1";
+		using BatchEncoding = std::array<u8, lanes * pointSize>;
+
+		Scalar randomScalar(PRNG& prng)
+		{
+			std::array<u8, pointSize> bytes;
+			prng.get(bytes.data(), bytes.size());
+			return Scalar(bytes.data());
+		}
+
+		void deriveKey(
+			block& output,
+			const u8 senderPoint[pointSize],
+			const u8 receiverPoint[pointSize],
+			const u8 sharedPoint[pointSize],
+			u64 otIndex,
+			u8 branch,
+			const block* seed)
+		{
+			std::array<u8, sizeof(u64)> indexBytes;
+			for (u64 i = 0; i != indexBytes.size(); ++i)
+				indexBytes[i] = static_cast<u8>(otIndex >> (8 * i));
+
+			RandomOracle hash(sizeof(block));
+			hash.Update(kdfDomain, sizeof(kdfDomain) - 1);
+			hash.Update(senderPoint, pointSize);
+			hash.Update(receiverPoint, pointSize);
+			hash.Update(sharedPoint, pointSize);
+			hash.Update(indexBytes.data(), indexBytes.size());
+			hash.Update(&branch, 1);
+			if (seed)
+				hash.Update(*seed);
+			hash.Final(output);
+		}
+
+		struct ReceiverBatch
+		{
+			BatchEncoding selected;
+			BatchEncoding clearedSelected;
+			BatchEncoding shared;
+		};
+
+		// Point8 can be over-aligned. Keep it out of coroutine frames by doing
+		// each complete batch in a normal, non-inlined stack frame.
+		LIBOTE_NOINLINE ReceiverBatch makeReceiverBatch(
+			const Point& senderPoint,
+			const FixedPointTable& senderTable,
+			const std::array<u8, lanes>& choices,
+			PRNG& prng)
+		{
+			std::array<Scalar, lanes> scalars;
+			for (auto& scalar : scalars)
+				scalar = randomScalar(prng);
+
+			auto selected = Point8::mulGenerator(scalars);
+			const auto choiceOne =
+				Point8::broadcast(senderPoint) - selected;
+			selected.conditionalMove(choiceOne, choices);
+
+			ReceiverBatch output;
+			selected.toBytes(output.selected.data());
+			selected.clearCofactor().toBytes(output.clearedSelected.data());
+			senderTable.mul(scalars).toBytes(output.shared.data());
+			return output;
+		}
+
+		struct SenderBatch
+		{
+			BatchEncoding clearedResponse;
+			BatchEncoding shared0;
+			BatchEncoding shared1;
+		};
+
+		LIBOTE_NOINLINE SenderBatch makeSenderBatch(
+			const BatchEncoding& encoded,
+			const Scalar& secretKey,
+			const Point& correctionPoint)
+		{
+			Point8 points;
+			if (!points.fromBytes(encoded.data()))
+				throw std::runtime_error(
+					"SimplestOT received an invalid receiver point");
+
+			points = points.clearCofactor();
+			const auto shared0 = points.mul(secretKey);
+			const auto shared1 =
+				Point8::broadcast(correctionPoint) - shared0;
+			SenderBatch output;
+			points.toBytes(output.clearedResponse.data());
+			shared0.toBytes(output.shared0.data());
+			shared1.toBytes(output.shared1.data());
+			return output;
+		}
+
+		BatchEncoding neutralBatchEncoding()
+		{
+			std::array<u8, pointSize> neutral;
+			Point{}.toBytes(neutral.data());
+			BatchEncoding batch;
+			for (u64 lane = 0; lane != lanes; ++lane)
+				std::memcpy(batch.data() + lane * pointSize,
+					neutral.data(), pointSize);
+			return batch;
+		}
+	}
+
 	task<> SimplestOT::receive(
 		const BitVector& choices,
-		span<block> msg,
+		span<block> messages,
 		PRNG& prng,
 		Socket& chl)
 	{
 		MACORO_TRY{
+		Edwards25519::Backend::init();
+		if (messages.size() != choices.size())
+			throw std::invalid_argument(
+				"SimplestOT receiver choices and messages have different sizes");
+		const auto n = static_cast<u64>(messages.size());
+		if (n == 0)
+			co_return;
 
-		using namespace DefaultCurve;
-		Curve{};// init relic
-		auto buff = std::vector<u8>{};
-		auto comm = std::array<u8, RandomOracle::HashSize>{};
-		auto seed = block{};
-		auto b = std::vector<Number>{};
-		auto B = std::array<Point, 2>{};
-		auto A = Point{ };
+		auto setup = std::vector<u8>(
+			pointSize + RandomOracle::HashSize * mUniformOTs);
+		co_await chl.recv(setup);
 
-		auto n = msg.size();
+		Point senderPoint;
+		if (!senderPoint.fromBytes(setup.data()))
+			throw std::runtime_error(
+				"SimplestOT received an invalid sender point");
+		senderPoint = senderPoint.clearCofactor();
+		if (senderPoint.isNeutral())
+			throw std::runtime_error(
+				"SimplestOT received a small-order sender point");
+		std::array<u8, pointSize> senderPointEncoding;
+		senderPoint.toBytes(senderPointEncoding.data());
+		const FixedPointTable senderTable(senderPoint);
 
-		buff.resize(Point::size + RandomOracle::HashSize * mUniformOTs);
-		co_await chl.recv(buff);
-		Curve{}; // init relic on this thread.
-
-
-		A.fromBytes(buff.data());
-
+		std::array<u8, RandomOracle::HashSize> commitment;
 		if (mUniformOTs)
-			memcpy(&comm, buff.data() + Point::size, RandomOracle::HashSize);
+			std::memcpy(commitment.data(), setup.data() + pointSize,
+				commitment.size());
 
-		buff.resize(Point::size * n);
-
-		b.reserve(n);
-		for (u64 i = 0; i < n; ++i)
+		auto selected = std::vector<u8>(n * pointSize);
+		auto clearedSelected = std::vector<u8>(n * pointSize);
+		auto shared = std::vector<u8>(n * pointSize);
+		for (u64 base = 0; base < n; base += lanes)
 		{
-			b.emplace_back(prng);
-			B[0] = Point::mulGenerator(b[i]);
-			B[1] = A + B[0];
-
-			B[choices[i]].toBytes(&buff[Point::size * i]);
+			const auto active = std::min<u64>(lanes, n - base);
+			std::array<u8, lanes> batchChoices{};
+			for (u64 lane = 0; lane != active; ++lane)
+				batchChoices[lane] = choices[base + lane];
+			const auto batch = makeReceiverBatch(
+				senderPoint, senderTable, batchChoices, prng);
+			std::memcpy(selected.data() + base * pointSize,
+				batch.selected.data(), active * pointSize);
+			std::memcpy(clearedSelected.data() + base * pointSize,
+				batch.clearedSelected.data(), active * pointSize);
+			std::memcpy(shared.data() + base * pointSize,
+				batch.shared.data(), active * pointSize);
 		}
 
-		co_await chl.send(std::move(buff));
+		co_await chl.send(std::move(selected));
 
+		block seed;
+		const block* seedPtr = nullptr;
 		if (mUniformOTs)
 		{
 			co_await chl.recv(seed);
-
-			RandomOracle ro;
-			std::array<u8, RandomOracle::HashSize> comm2;
-			ro.Update(seed);
-			ro.Final(comm2);
-
-			if (comm != comm2)
-				throw std::runtime_error("bad decommitment " LOCATION);
+			RandomOracle hash;
+			std::array<u8, RandomOracle::HashSize> opening;
+			hash.Update(seed);
+			hash.Final(opening);
+			if (commitment != opening)
+				throw std::runtime_error(
+					"SimplestOT received a bad seed decommitment");
+			seedPtr = &seed;
 		}
 
-		Curve{};
-		for (u64 i = 0; i < n; ++i)
-		{
-			B[0] = A * b[i];
-			RandomOracle ro(sizeof(block));
-			ro.Update(B[0]);
-			ro.Update(i);
-			if (mUniformOTs) ro.Update(seed);
-			ro.Final(msg[i]);
-		}
+		for (u64 i = 0; i != n; ++i)
+			deriveKey(messages[i], senderPointEncoding.data(),
+				clearedSelected.data() + i * pointSize,
+				shared.data() + i * pointSize, i,
+				static_cast<u8>(choices[i]), seedPtr);
 
 		} MACORO_CATCH(eptr) {
-			co_await chl.close();
+			if (!chl.closed()) co_await chl.close();
 			std::rethrow_exception(eptr);
 		}
 	}
 
 	task<> SimplestOT::send(
-		span<std::array<block, 2>> msg,
+		span<std::array<block, 2>> messages,
 		PRNG& prng,
 		Socket& chl)
 	{
 		MACORO_TRY{
-		using namespace DefaultCurve;
-		Curve{}; // init relic
+		Edwards25519::Backend::init();
+		const auto n = static_cast<u64>(messages.size());
+		if (n == 0)
+			co_return;
 
+		const auto secretKey = randomScalar(prng);
+		const auto wireSenderPoint = Point::mulGenerator(secretKey);
+		auto setup = std::vector<u8>(
+			pointSize + RandomOracle::HashSize * mUniformOTs);
+		wireSenderPoint.toBytes(setup.data());
+		const auto senderPoint = wireSenderPoint.clearCofactor();
+		std::array<u8, pointSize> senderPointEncoding;
+		senderPoint.toBytes(senderPointEncoding.data());
 
-		auto buff = std::vector<u8>{};
-		auto seed = block{ };
-
-		auto n = msg.size();
-
-		auto a = Number{};
-		a.randomize(prng);
-		auto A = Point::mulGenerator(a);
-
-		buff.resize(Point::size + RandomOracle::HashSize * mUniformOTs);
-		A.toBytes(buff.data());
-
+		block seed;
+		const block* seedPtr = nullptr;
 		if (mUniformOTs)
 		{
-			// commit to the seed
 			seed = prng.get<block>();
-			std::array<u8, RandomOracle::HashSize> comm;
-			RandomOracle ro;
-			ro.Update(seed);
-			ro.Final(comm);
-			memcpy(buff.data() + Point::size, comm.data(), comm.size());
+			RandomOracle hash;
+			std::array<u8, RandomOracle::HashSize> commitment;
+			hash.Update(seed);
+			hash.Final(commitment);
+			std::memcpy(setup.data() + pointSize,
+				commitment.data(), commitment.size());
+			seedPtr = &seed;
 		}
 
+		const auto correctionPoint =
+			senderPoint.mul(secretKey).clearCofactor();
+		co_await chl.send(std::move(setup));
 
-		co_await chl.send(std::move(buff));
-
-		buff.resize(Point::size * n);
-		co_await chl.recv(buff);
-
+		auto received = std::vector<u8>(n * pointSize);
+		co_await chl.recv(received);
 		if (mUniformOTs)
+			co_await chl.send(seed);
+
+		const auto neutral = neutralBatchEncoding();
+		for (u64 base = 0; base < n; base += lanes)
 		{
-			// decommit to the seed now that we have their messages.
-			co_await chl.send(std::move(seed));
-		}
-
-		Curve{};
-		A *= a;
-		for (u64 i = 0; i < n; ++i)
-		{
-			auto B = Point{};
-			B.fromBytes(&buff[Point::size * i]);
-
-			B *= a;
-			RandomOracle ro(sizeof(block));
-			ro.Update(B);
-			ro.Update(i);
-			if (mUniformOTs) ro.Update(seed);
-			ro.Final(msg[i][0]);
-
-			B -= A;
-			ro.Reset();
-			ro.Update(B);
-			ro.Update(i);
-			if (mUniformOTs) ro.Update(seed);
-			ro.Final(msg[i][1]);
+			const auto active = std::min<u64>(lanes, n - base);
+			auto encoded = neutral;
+			std::memcpy(encoded.data(), received.data() + base * pointSize,
+				active * pointSize);
+			const auto batch = makeSenderBatch(
+				encoded, secretKey, correctionPoint);
+			for (u64 lane = 0; lane != active; ++lane)
+			{
+				const auto i = base + lane;
+				const auto* response =
+					batch.clearedResponse.data() + lane * pointSize;
+				deriveKey(messages[i][0], senderPointEncoding.data(),
+					response, batch.shared0.data() + lane * pointSize,
+					i, 0, seedPtr);
+				deriveKey(messages[i][1], senderPointEncoding.data(),
+					response, batch.shared1.data() + lane * pointSize,
+					i, 1, seedPtr);
+			}
 		}
 
 		} MACORO_CATCH(eptr) {
-			co_await chl.close();
+			if (!chl.closed()) co_await chl.close();
 			std::rethrow_exception(eptr);
 		}
 	}
 }
-#endif
 
-#ifdef ENABLE_SIMPLESTOT_ASM
-extern "C"
-{
-#include "SimplestOT/ot_sender.h"
-#include "SimplestOT/ot_receiver.h"
-#include "SimplestOT/ot_config.h"
-#include "SimplestOT/cpucycles.h"
-#include "SimplestOT/randombytes.h"
-}
-namespace osuCrypto
-{
+#undef LIBOTE_NOINLINE
 
-	namespace
-	{
-		rand_source makeRandSource(PRNG& prng)
-		{
-			rand_source rand;
-			rand.get = [](void* ctx, unsigned char* dest, unsigned long long length) {
-				PRNG& prng = *(PRNG*)ctx;
-				prng.get(dest, length);
-				};
-			rand.ctx = &prng;
-
-			return rand;
-		}
-
-		//std::string hexPrnt(span<u8> d)
-		//{
-		//	std::stringstream ss;
-		//	for (auto dd : d)
-		//	{
-		//		ss << std::setw(2) << std::setfill('0') << std::hex
-		//			<< int(dd);
-		//	}
-		//	return ss.str();
-		//}
-
-		//std::mutex _gmtx;
-
-		struct SendState
-		{
-			SENDER sender;
-
-			u8 S_pack[SIMPLEST_OT_PACK_BYTES];
-			u8 Rs_pack[4 * SIMPLEST_OT_PACK_BYTES];
-			u8 keys[2][4][SIMPLEST_OT_HASHBYTES];
-			rand_source rand;
-
-			SendState()
-			{
-
-				memset(&sender, 0, sizeof(sender));
-				memset(&S_pack, 0, sizeof(S_pack));
-				memset(&Rs_pack, 0, sizeof(Rs_pack));
-				memset(&keys, 0, sizeof(keys));
-			}
-
-			SendState(SendState&& o) = delete;
-
-			std::vector<u8> init(PRNG& prng)
-			{
-				//std::lock_guard<std::mutex>l(_gmtx);
-				//std::cout << "S0 " << hash() << std::endl;
-				rand = makeRandSource(prng);
-				//std::cout << "S1 " << hash() << std::endl;
-				sender_genS(&sender, S_pack, rand);
-				//std::cout << "S2 " << hash() << std::endl;
-				//_gMtx.unlock();
-				return { (u8*)S_pack, (u8*)S_pack + sizeof(S_pack) };
-			}
-
-			span<u8> recv4()
-			{
-				return { (u8*)Rs_pack, (u8*)Rs_pack + sizeof(Rs_pack) };
-			}
-
-
-			void gen4(u64 i, span<std::array<block, 2>> msg)
-			{
-
-				//std::lock_guard<std::mutex>l(_gmtx);
-				sender_keygen(&sender, Rs_pack, keys);
-
-				auto min = std::min<u32>(4, msg.size() - i);
-				for (u32 j = 0; j < min; j++)
-				{
-					memcpy(&msg[i + j][0], keys[0][j], sizeof(block));
-					memcpy(&msg[i + j][1], keys[1][j], sizeof(block));
-				}
-			}
-		};
-
-		struct RecvState
-		{
-			RECEIVER receiver;
-
-			u8 Rs_pack[4 * SIMPLEST_OT_PACK_BYTES];
-			u8 keys[4][SIMPLEST_OT_HASHBYTES];
-			u8 cs[4];
-			rand_source rand;
-
-			RecvState()
-			{
-				memset(&receiver, 0, sizeof(RECEIVER));
-				memset(&Rs_pack, 0, sizeof(Rs_pack));
-				memset(&keys, 0, sizeof(keys));
-				memset(&cs, 0, sizeof(cs));
-			}
-
-			RecvState(RecvState&& o) = delete;
-
-			block hash()
-			{
-				RandomOracle ro(sizeof(block));
-				ro.Update(receiver);
-				ro.Update(Rs_pack);
-				ro.Update(keys);
-				ro.Update(cs);
-
-				block ret;
-				ro.Final(ret);
-				return ret;
-			}
-
-			span<u8> recvData()
-			{
-				memset(&receiver, 0, sizeof(RECEIVER));
-				memset(&Rs_pack, 0, sizeof(Rs_pack));
-				memset(&keys, 0, sizeof(keys));
-				memset(&cs, 0, sizeof(cs));
-				return { receiver.S_pack, sizeof(receiver.S_pack) };
-			}
-
-			void init(PRNG& prng)
-			{
-				//std::lock_guard<std::mutex>l(_gmtx);
-				receiver_procS(&receiver);
-				receiver_maketable(&receiver);
-				rand = makeRandSource(prng);
-			}
-
-			std::vector<u8> send4(u64 i, const BitVector& choices)
-			{
-				//std::lock_guard<std::mutex>l(_gmtx);
-				auto min = std::min<u32>(4, choices.size() - i);
-
-				for (u32 j = 0; j < min; j++)
-					cs[j] = choices[i + j];
-
-				receiver_rsgen(&receiver, Rs_pack, cs, rand);
-
-				return { (u8*)Rs_pack, (u8*)Rs_pack + sizeof(Rs_pack) };
-			}
-
-			void gen4(u64 i, span<block> msg)
-			{
-				//std::lock_guard<std::mutex>l(_gmtx);
-				auto min = std::min<u32>(4, msg.size() - i);
-
-				receiver_keygen(&receiver, keys);
-
-				for (u32 j = 0; j < min; j++)
-					memcpy(&msg[i + j], keys[j], sizeof(block));
-			}
-		};
-
-		template<typename State>
-		struct AlginedState
-		{
-			State* ptr = nullptr;
-			AlginedState()
-			{
-				ptr = new (AlignedAllocator<char>{}.aligned_malloc(sizeof(State), 32)) State;
-			}
-			AlginedState(AlginedState&& o)
-				: ptr(std::exchange(o.ptr, nullptr))
-			{}
-
-			~AlginedState()
-			{
-				if (ptr)
-				{
-					ptr->~State();
-					AlignedAllocator<char>{}.aligned_free(ptr);
-				}
-			}
-
-			State* operator->()
-			{
-				return ptr;
-			}
-		};
-
-	}
-
-
-	void AsmSimplestOTTest()
-	{
-
-		for (u64 j = 0; j < 1; ++j)
-		{
-
-
-			u64 n = 16;
-
-			BitVector choices(n);
-			RecvState recv;
-			SendState send;
-			std::vector<std::array<block, 2>> sMsg(n);
-			std::vector<block> rMsg(n);
-
-			PRNG sprng(ZeroBlock);
-
-			auto sd = send.init(sprng);
-			//std::cout << "send 1 " << hexPrnt(sd) << std::endl;
-			auto rd = recv.recvData();
-
-			if (sd.size() != rd.size())
-				throw RTE_LOC;
-			memcpy(rd.data(), sd.data(), sd.size());
-
-			// recv
-			PRNG rprng(ZeroBlock);
-			recv.init(rprng);
-
-			for (auto i = 0ull; i < sMsg.size(); i += 4)
-			{
-				sd = recv.send4(i, choices);
-				rd = send.recv4();
-
-
-				if (sd.size() != rd.size())
-					throw RTE_LOC;
-				memcpy(rd.data(), sd.data(), sd.size());
-
-				//std::cout << "send 2 " << i << std::endl;
-				send.gen4(i, sMsg);
-
-				//co_await (chl.send(sd));
-				//std::cout << "recv 3 " << i << std::endl;
-				recv.gen4(i, rMsg);
-				//std::cout << "recv 4 " << i << std::endl;
-			}
-		}
-	}
-
-
-	task<> AsmSimplestOT::receive(
-		const BitVector& choices,
-		span<block> msg,
-		PRNG& prng,
-		Socket& chl)
-	{
-		MACORO_TRY{
-		auto rs = AlginedState<RecvState>();
-		auto rd = rs->recvData();
-		co_await chl.recv(rd);
-		rs->init(prng);
-
-		for (u64 i = 0; i < msg.size(); i += 4)
-		{
-			auto sd = rs->send4(i, choices);
-			co_await chl.send(sd);
-			rs->gen4(i, msg);
-		}
-
-		} MACORO_CATCH(eptr) {
-			co_await chl.close();
-			std::rethrow_exception(eptr);
-		}
-	}
-	task<> AsmSimplestOT::send(
-		span<std::array<block, 2>> msg,
-		PRNG& prng,
-		Socket& chl)
-	{ 
-		MACORO_TRY {
-		auto ss = AlginedState<SendState>();
-
-		auto sd = ss->init(prng);
-		co_await chl.send(sd);
-
-		for (u64 i = 0; i < msg.size(); i += 4)
-		{
-			auto rd = ss->recv4();
-			co_await chl.recv(rd);
-			ss->gen4(i, msg);
-		}
-
-		} MACORO_CATCH(eptr) {
-			co_await chl.close();
-			std::rethrow_exception(eptr);
-		}
-	}
-}
 #endif

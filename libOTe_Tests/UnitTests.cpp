@@ -152,7 +152,6 @@ namespace tests_libOTe
 			//tc.add("Ntt_nttNegWrapBatch_Test                ", Ntt_nttNegWrapBatch_Test);
 			
 			tc.add("Bot_Simplest_Test                       ", Bot_Simplest_Test);
-			tc.add("Bot_Simplest_asm_Test                   ", Bot_Simplest_asm_Test);
 
 			tc.add("Bot_McQuoidRR_Moeller_EKE_Test          ", Bot_McQuoidRR_Moeller_EKE_Test);
 			tc.add("Bot_McQuoidRR_Moeller_MR_Test           ", Bot_McQuoidRR_Moeller_MR_Test);
@@ -194,7 +193,6 @@ namespace tests_libOTe
 														   
 														   
 			tc.add("Bot_Simplest_Test                        ", Bot_Simplest_Test);
-			tc.add("Bot_Simplest_asm_Test                    ", Bot_Simplest_asm_Test);
 														   
 			tc.add("Bot_McQuoidRR_Moeller_EKE_Test           ", Bot_McQuoidRR_Moeller_EKE_Test);
 			tc.add("Bot_McQuoidRR_Moeller_MR_Test            ", Bot_McQuoidRR_Moeller_MR_Test);

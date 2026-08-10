@@ -78,15 +78,11 @@ endif()
 #############################################
 #    Build cryptoTools (common utilities)   #
 #############################################
-if(ENABLE_SIMPLESTOT_ASM OR
-   (DEFINED ENABLE_ALL_OT AND ENABLE_ALL_OT AND
-    UNIX AND NOT APPLE AND NOT MSVC AND
-    NOT DEFINED ENABLE_EDWARDS25519_ASM))
-    set(ENABLE_EDWARDS25519_ASM ON CACHE BOOL "" FORCE)
-elseif((ENABLE_MR OR ENABLE_MRR OR (DEFINED ENABLE_ALL_OT AND ENABLE_ALL_OT)) AND
+if((ENABLE_SIMPLESTOT OR ENABLE_MR OR ENABLE_MRR OR
+    (DEFINED ENABLE_ALL_OT AND ENABLE_ALL_OT)) AND
        NOT DEFINED ENABLE_EDWARDS25519_ASM)
-    # Masny--Rindal uses the batched Edwards25519 backend. Prefer assembly
-    # where cryptoTools supports it, while preserving an explicit OFF choice.
+    # These protocols use the batched Curve25519 backends. Prefer assembly
+    # where cryptoTools supports it while preserving an explicit OFF choice.
     set(ENABLE_EDWARDS25519_ASM ON CACHE BOOL
         "use the x86-64 Edwards25519 assembly backend")
 endif()
@@ -113,10 +109,6 @@ configure_file(libOTe/config.h.in libOTe/config.h)
 
 if(ENABLE_LOGVOLE)
 	enable_testing()
-endif()
-
-if(ENABLE_SIMPLESTOT_ASM AND (NOT MSVC))
-	add_subdirectory(thirdparty/SimplestOT)
 endif()
 
 if(ENABLE_MR_KYBER AND (NOT MSVC))

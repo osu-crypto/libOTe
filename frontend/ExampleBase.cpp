@@ -95,10 +95,6 @@ namespace osuCrypto
         flagSet |= runIf(baseOT_example<SimplestOT>, cmd, simple);
 #endif
 
-#ifdef ENABLE_SIMPLESTOT_ASM
-        flagSet |= runIf(baseOT_example<AsmSimplestOT>, cmd, simpleasm);
-#endif
-
 #ifdef ENABLE_MRR_TWIST
 #ifdef ENABLE_SSE
         flagSet |= runIf([&](Role role, int totalOTs, int numThreads, std::string ip, std::string tag, const CLP& clp) {

@@ -9,9 +9,6 @@
 // build the library with "simplest" Base OT enabled
 #cmakedefine ENABLE_SIMPLESTOT @ENABLE_SIMPLESTOT@
 
-// build the library with the ASM "simplest" Base OT enabled
-#cmakedefine ENABLE_SIMPLESTOT_ASM @ENABLE_SIMPLESTOT_ASM@
-
 // build the library with POPF Base OT using Ristretto KA enabled
 #cmakedefine ENABLE_MRR @ENABLE_MRR@
 
@@ -83,10 +80,6 @@
 // build the library with no KOS security warning
 #cmakedefine NO_KOS_WARNING @NO_KOS_WARNING@
 
-#if defined(ENABLE_SIMPLESTOT_ASM) && defined(_MSC_VER)
-    #undef ENABLE_SIMPLESTOT_ASM
-    #pragma message("ENABLE_SIMPLESTOT_ASM should not be defined on windows.")
-#endif
 #if defined(ENABLE_MR_KYBER) && defined(_MSC_VER)
     #undef ENABLE_MR_KYBER
     #pragma message("ENABLE_MR_KYBER should not be defined on windows.")

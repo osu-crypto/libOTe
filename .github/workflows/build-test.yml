@@ -67,17 +67,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libsodium-dev
 
-      - name: Build Masny-Rindal and McRosRoy with sodium fallback
+      - name: Build Curve25519 base OTs with fallback backends
         run: >-
           python3 build.py --setup --par=4
           -DCMAKE_BUILD_TYPE=Release
+          -DENABLE_SIMPLESTOT=ON
           -DENABLE_MR=ON
           -DENABLE_MRR=ON
+          -DENABLE_MRR_TWIST=ON
           -DENABLE_LOGVOLE=OFF
           -DENABLE_CIRCUITS=OFF
           -DENABLE_EDWARDS25519_ASM=OFF
           -DENABLE_EDWARDS25519_IFMA=OFF
-          -DENABLE_SIMPLESTOT_ASM=OFF
           -DENABLE_SODIUM=ON
           -DSODIUM_MONTGOMERY=OFF
 
@@ -86,13 +87,14 @@ jobs:
 
       - name: Verify fallback configuration
         run: |
+          grep -q '^ENABLE_SIMPLESTOT:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_MR:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_MRR:BOOL=ON$' out/build/linux/CMakeCache.txt
+          grep -q '^ENABLE_MRR_TWIST:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_LOGVOLE:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_CIRCUITS:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_EDWARDS25519_ASM:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_EDWARDS25519_IFMA:BOOL=OFF$' out/build/linux/CMakeCache.txt
-          grep -q '^ENABLE_SIMPLESTOT_ASM:BOOL=OFF$' out/build/linux/CMakeCache.txt
           grep -q '^ENABLE_SODIUM:BOOL=ON$' out/build/linux/CMakeCache.txt
           grep -q '^SODIUM_MONTGOMERY:BOOL=OFF$' out/build/linux/CMakeCache.txt
 

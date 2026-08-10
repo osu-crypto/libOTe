@@ -32,7 +32,7 @@ set(SRCS
 
 add_library(libOTe_Tests STATIC ${SRCS})
 
-if(ENABLE_MR AND ENABLE_MRR)
+if(ENABLE_SIMPLESTOT AND ENABLE_MR AND ENABLE_MRR AND ENABLE_MRR_TWIST)
     add_executable(curve25519_ot_tests EXCLUDE_FROM_ALL
         Curve25519OT_Tests.cpp
         BaseOT_Tests.cpp)

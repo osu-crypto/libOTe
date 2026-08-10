@@ -167,7 +167,6 @@ int main(int argc, char** argv)
 
         std::cout
             << "Example Protocols:\n"
-            << Color::Green << "  -simplest-asm   " << Color::Default << "  : to run the ASM-SimplestOT  active secure       1-out-of-2  base OT      " << Color::Red << (spaEnabled ? "" : "(disabled)")             << "\n"   << Color::Default
             << Color::Green << "  -simplest       " << Color::Default << "  : to run the SimplestOT      active secure       1-out-of-2  base OT      " << Color::Red << (spEnabled ? "" : "(disabled)")              << "\n"   << Color::Default
             << Color::Green << "  -moellerpopf    " << Color::Default << "  : to run the McRosRoyTwist   active secure       1-out-of-2  base OT      " << Color::Red << (popfotMoellerEnabled ? "" : "(disabled)")   << "\n"   << Color::Default
             << Color::Green << "  -ristrettopopf  " << Color::Default << "  : to run the McRosRoy        active secure       1-out-of-2  base OT      " << Color::Red << (popfotRistrettoEnabled ? "" : "(disabled)") << "\n"   << Color::Default

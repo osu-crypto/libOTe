@@ -15,7 +15,7 @@
 #include <cryptoTools/Common/Defines.h>
 #include <cryptoTools/Common/BitVector.h>
 #include <cryptoTools/Crypto/PRNG.h>
-#include <cryptoTools/Crypto/RCurve.h>
+#include <cryptoTools/Crypto/Montgomery25519/Montgomery25519.h>
 #include <cryptoTools/Crypto/Rijndael256.h>
 #include <cryptoTools/Crypto/RandomOracle.h>
 
@@ -24,13 +24,6 @@
 #include "libOTe/Tools/Popf/FeistelPopf.h"
 #include "libOTe/Tools/Popf/MRPopf.h"
 #include "libOTe/Tools/Coproto.h"
-#include <cryptoTools/Crypto/SodiumCurve.h>
-#ifndef ENABLE_SODIUM
-static_assert(0, "ENABLE_SODIUM must be defined to build McRosRoyTwist");
-#endif
-#ifndef SODIUM_MONTGOMERY
-static_assert(0, "SODIUM_MONTGOMERY must be defined to build McRosRoyTwist");
-#endif
 
 namespace osuCrypto
 {
@@ -97,8 +90,9 @@ namespace osuCrypto
 		private:
 			PopfFactory popfFactory;
 
-			using Monty25519 = Sodium::Monty25519;
-			using Scalar25519 = Sodium::Scalar25519;
+			using Monty25519 = Montgomery25519::Backend::Point;
+			using Monty25519x8 = Montgomery25519::Backend::Point8;
+			using Scalar25519 = Montgomery25519::Backend::Scalar;
 
 			Monty25519 blockToCurve(Block256 b);
 			Block256 curveToBlock(Monty25519 p, PRNG& prng);
@@ -140,44 +134,90 @@ namespace osuCrypto
 		inline task<> McRosRoyTwist<DSPopf>::receive(const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
 		{
 			MACORO_TRY{
+			Montgomery25519::Backend::init();
 			auto n = choices.size();
+			if (n == 0)
+				co_return;
 			auto sk = std::vector<Scalar25519>{};
 			auto curveChoice = std::vector<u8>{};
 			auto A = std::array<Monty25519, 2>{};
+			auto aBytes = std::array<u8, 2 * Monty25519::size>{};
 			auto sendBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
 
-			sk.reserve(n);
-			curveChoice.reserve(n);
+			sk.resize(n);
+			curveChoice.resize(n);
 			sendBuff.resize(n);
 
-			for (u64 i = 0; i < n; ++i)
+			for (u64 base = 0; base < n; base += Montgomery25519::Backend::lanes)
 			{
-				auto factory = popfFactory;
-				factory.Update(i);
-				auto popf = factory.construct();
-
-				curveChoice.emplace_back(prng.getBit());
-				sk.emplace_back(prng, false);
-				const Monty25519& g = (curveChoice[i] == 0) ?
-					Monty25519::wholeGroupGenerator : Monty25519::wholeTwistGroupGenerator;
-				Monty25519 B = g * sk[i];
-
-				sendBuff[i] = popf.program(choices[i], curveToBlock(B, prng), prng);
+				const auto count = std::min<u64>(
+					Montgomery25519::Backend::lanes, n - base);
+				std::array<Scalar25519, Montgomery25519::Backend::lanes> scalars;
+				std::array<Monty25519, Montgomery25519::Backend::lanes> generators;
+				for (u64 lane = 0; lane != count; ++lane)
+				{
+					curveChoice[base + lane] = prng.getBit();
+					scalars[lane].randomize(prng);
+					sk[base + lane] = scalars[lane];
+					generators[lane] = curveChoice[base + lane] == 0 ?
+						Monty25519::wholeGroupGenerator :
+						Monty25519::wholeTwistGroupGenerator;
+				}
+				for (u64 lane = count; lane != Montgomery25519::Backend::lanes; ++lane)
+				{
+					scalars[lane] = scalars[0];
+					generators[lane] = generators[0];
+				}
+				auto points = Monty25519x8::fromPoints(generators).mul(scalars);
+				std::array<u8, Montgomery25519::Backend::lanes * Monty25519::size> encoded;
+				points.toBytes(encoded.data());
+				for (u64 lane = 0; lane != count; ++lane)
+				{
+					auto factory = popfFactory;
+					factory.Update(base + lane);
+					auto popf = factory.construct();
+					sendBuff[base + lane] = popf.program(
+						choices[base + lane],
+						curveToBlock(Monty25519(
+							encoded.data() + lane * Monty25519::size), prng),
+						prng);
+				}
 			}
 
 			co_await chl.send(std::move(sendBuff));
 
-			co_await chl.recv(A);
+			co_await chl.recv(aBytes);
+			A[0].fromBytes(aBytes.data());
+			A[1].fromBytes(aBytes.data() + Monty25519::size);
 
-			for (u64 i = 0; i < n; ++i)
+			for (u64 base = 0; base < n; base += Montgomery25519::Backend::lanes)
 			{
-				Monty25519 B = A[curveChoice[i]] * sk[i];
-
-				RandomOracle ro(sizeof(block));
-				ro.Update(B);
-				ro.Update(i);
-				ro.Update((bool)choices[i]);
-				ro.Final(messages[i]);
+				const auto count = std::min<u64>(
+					Montgomery25519::Backend::lanes, n - base);
+				std::array<Scalar25519, Montgomery25519::Backend::lanes> scalars;
+				std::array<Monty25519, Montgomery25519::Backend::lanes> points;
+				for (u64 lane = 0; lane != count; ++lane)
+				{
+					scalars[lane] = sk[base + lane];
+					points[lane] = A[curveChoice[base + lane]];
+				}
+				for (u64 lane = count; lane != Montgomery25519::Backend::lanes; ++lane)
+				{
+					scalars[lane] = scalars[0];
+					points[lane] = points[0];
+				}
+				auto shared = Monty25519x8::fromPoints(points).mul(scalars);
+				std::array<u8, Montgomery25519::Backend::lanes * Monty25519::size> encoded;
+				shared.toBytes(encoded.data());
+				for (u64 lane = 0; lane != count; ++lane)
+				{
+					RandomOracle ro(sizeof(block));
+					ro.Update(encoded.data() + lane * Monty25519::size,
+						Monty25519::size);
+					ro.Update(base + lane);
+					ro.Update((bool)choices[base + lane]);
+					ro.Final(messages[base + lane]);
+				}
 			}
 
 			} MACORO_CATCH(eptr) {
@@ -189,16 +229,26 @@ namespace osuCrypto
 
 		template<typename DSPopf>
 		inline task<> McRosRoyTwist<DSPopf>::send(span<std::array<block, 2>> msg, PRNG& prng, Socket& chl)
-		{ 
+		{
 			MACORO_TRY{
 
+			Montgomery25519::Backend::init();
 			auto n = static_cast<u64>(msg.size());
+			if (n == 0)
+				co_return;
 			auto sk = Scalar25519(prng);
 			auto recvBuff = std::vector<typename PopfFactory::ConstructedPopf::PopfFunc>{};
 
-			auto A = std::vector<Monty25519>{
-				Monty25519::wholeGroupGenerator * sk,
-				Monty25519::wholeTwistGroupGenerator * sk };
+			std::array<Monty25519, Montgomery25519::Backend::lanes> generators;
+			generators.fill(Monty25519::wholeGroupGenerator);
+			generators[1] = Monty25519::wholeTwistGroupGenerator;
+			auto setup = Monty25519x8::fromPoints(generators).mul(sk);
+			std::array<u8, Montgomery25519::Backend::lanes * Monty25519::size> setupBytes;
+			setup.toBytes(setupBytes.data());
+			std::array<u8, 2 * Monty25519::size> A;
+			std::memcpy(A.data(), setupBytes.data(), Monty25519::size);
+			std::memcpy(A.data() + Monty25519::size,
+				setupBytes.data() + Monty25519::size, Monty25519::size);
 
 			co_await chl.send(std::move(A));
 
@@ -206,31 +256,39 @@ namespace osuCrypto
 			co_await chl.recv(recvBuff);
 
 
-			Monty25519 Bz, Bo;
-			for (u64 i = 0; i < n; ++i)
+			for (u64 base = 0; base < n; base += Montgomery25519::Backend::lanes)
 			{
-				auto factory = popfFactory;
-				factory.Update(i);
-				auto popf = factory.construct();
-
-				Bz = blockToCurve(popf.eval(recvBuff[i], 0));
-				Bo = blockToCurve(popf.eval(recvBuff[i], 1));
-
-				// We don't need to check which curve we're on since we use the same secret for both.
-				Bz *= sk;
-				Bo *= sk;
-
-				RandomOracle ro(sizeof(block));
-				ro.Update(Bz);
-				ro.Update(i);
-				ro.Update((bool)0);
-				ro.Final(msg[i][0]);
-
-				ro.Reset();
-				ro.Update(Bo);
-				ro.Update(i);
-				ro.Update((bool)1);
-				ro.Final(msg[i][1]);
+				const auto count = std::min<u64>(
+					Montgomery25519::Backend::lanes, n - base);
+				for (u8 branch = 0; branch != 2; ++branch)
+				{
+					std::array<u8, Montgomery25519::Backend::lanes * Monty25519::size> encoded;
+					for (u64 lane = 0; lane != count; ++lane)
+					{
+						auto factory = popfFactory;
+						factory.Update(base + lane);
+						auto popf = factory.construct();
+						auto point = popf.eval(recvBuff[base + lane], branch != 0);
+						std::memcpy(encoded.data() + lane * Monty25519::size,
+							point.data(), Monty25519::size);
+					}
+					for (u64 lane = count; lane != Montgomery25519::Backend::lanes; ++lane)
+						std::memcpy(encoded.data() + lane * Monty25519::size,
+							encoded.data(), Monty25519::size);
+					Monty25519x8 points;
+					points.fromBytes(encoded.data());
+					points = points.mul(sk);
+					points.toBytes(encoded.data());
+					for (u64 lane = 0; lane != count; ++lane)
+					{
+						RandomOracle ro(sizeof(block));
+						ro.Update(encoded.data() + lane * Monty25519::size,
+							Monty25519::size);
+						ro.Update(base + lane);
+						ro.Update(branch != 0);
+						ro.Final(msg[base + lane][branch]);
+					}
+				}
 			}
 
 			} MACORO_CATCH(eptr) {
@@ -248,10 +306,11 @@ namespace osuCrypto
 		template<typename DSPopf>
 		inline Block256 McRosRoyTwist<DSPopf>::curveToBlock(Monty25519 p, PRNG& prng)
 		{
-			p.data[Monty25519::size - 1] ^= prng.getBit() << 7;
-
+			Block256 result;
+			p.toBytes(result.data());
+			result.data()[Monty25519::size - 1] ^= prng.getBit() << 7;
 			static_assert(Monty25519::size == sizeof(Block256), "");
-			return Block256(p.data);
+			return result;
 		}
 	}
 

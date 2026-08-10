@@ -19,8 +19,8 @@
 namespace osuCrypto
 {
 #define LIBOTE_HAS_BASE_OT
-#ifdef ENABLE_SIMPLESTOT_ASM
-    using DefaultBaseOT = AsmSimplestOT;
+#ifdef ENABLE_SIMPLESTOT
+    using DefaultBaseOT = SimplestOT;
 #elif defined ENABLE_MRR_TWIST && defined ENABLE_SSE
     using DefaultBaseOT = McRosRoyTwist;
 #elif defined ENABLE_MR
@@ -29,8 +29,6 @@ namespace osuCrypto
     using DefaultBaseOT = McRosRoy;
 #elif defined ENABLE_MR_KYBER
     using DefaultBaseOT = MasnyRindalKyber;
-#elif defined ENABLE_SIMPLESTOT
-    using DefaultBaseOT = SimplestOT;
 #elif defined ENABLE_MOCK_OT
     using DefaultBaseOT = INSECURE_MOCK_OT;
 #else

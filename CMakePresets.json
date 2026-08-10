@@ -19,7 +19,6 @@
         "ENABLE_CIRCUITS": true,
         "ENABLE_SOFTSPOKEN_OT": true,
         "ENABLE_SIMPLESTOT": false,
-        "ENABLE_SIMPLESTOT_ASM": false,
         "ENABLE_MR_KYBER": false,
         "ENABLE_MRR": true,
         "ENABLE_MR": false,
