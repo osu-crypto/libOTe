@@ -78,6 +78,34 @@ void Vole_Noisy_test(const oc::CLP& cmd)
 
 namespace
 {
+	unsigned binaryRank(span<const block> values)
+	{
+		std::array<block, 128> basis{};
+		std::array<bool, 128> occupied{};
+		unsigned rank = 0;
+
+		for (block value : values)
+		{
+			for (int pivot = 127; pivot >= 0; --pivot)
+			{
+				const auto words = value.get<u64>();
+				if (((words[pivot / 64] >> (pivot % 64)) & 1) == 0)
+					continue;
+
+				if (occupied[pivot])
+					value ^= basis[pivot];
+				else
+				{
+					basis[pivot] = value;
+					occupied[pivot] = true;
+					++rank;
+					break;
+				}
+			}
+		}
+
+		return rank;
+	}
 
 	template<typename G, typename R, typename S, typename F, typename Ctx>
 	void fakeBase(
@@ -138,13 +166,20 @@ namespace
 
 
 template<typename F, typename G, typename Ctx>
-void Vole_Silent_test_impl(u64 n, MultType type, bool debug, bool doFakeBase, bool mal, SdNoiseDistribution noise)
+void Vole_Silent_test_impl(
+	u64 n,
+	MultType type,
+	bool debug,
+	bool doFakeBase,
+	bool mal,
+	SdNoiseDistribution noise,
+	bool requireFullBinaryRank = false,
+	block seed = CCBlock)
 {
 	using VecF = typename Ctx::template Vec<F>;
 	using VecG = typename Ctx::template Vec<G>;
 	Ctx ctx;
 
-	block seed = CCBlock;
 	PRNG prng(seed);
 
 	auto chls = cp::LocalAsyncSocket::makePair();
@@ -195,6 +230,22 @@ void Vole_Silent_test_impl(u64 n, MultType type, bool debug, bool doFakeBase, bo
 				throw RTE_LOC;
 			}
 		}
+
+		if (requireFullBinaryRank)
+		{
+			if constexpr (std::is_same_v<G, block>)
+			{
+				const auto rank = binaryRank(c);
+				if (rank != 128)
+					throw UnitTestFail(
+						"Silent VOLE default matrix output has binary rank " +
+						std::to_string(rank));
+			}
+			else
+			{
+				throw RTE_LOC;
+			}
+		}
 	}
 
 }
@@ -211,6 +262,21 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd)
 		Vole_Silent_test_impl<block, bool, CoeffCtxGF2>(n, DefaultMultType, debug, false, false, noise);
 		Vole_Silent_test_impl<std::array<u32, 8>, u32, CoeffCtxArray<u32, 8>>(n, DefaultMultType, debug, false, false, noise);
 	}
+}
+
+void Vole_Silent_defaultMatrixRank_test(const oc::CLP& cmd)
+{
+	// Test only the default encoder. Trial one of the original reproducer had
+	// rank 127 before extension-field component mixing was added.
+	Vole_Silent_test_impl<block, block, CoeffCtxGF128>(
+		45364,
+		DefaultMultType,
+		cmd.isSet("debug"),
+		true,
+		false,
+		SdNoiseDistribution::Regular,
+		true,
+		block(0x72616e6b2d706f63ULL, 1));
 }
 
 
@@ -462,6 +528,7 @@ void Vole_Silent_stationary_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Noisy_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_QuasiCyclic_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_paramSweep_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_defaultMatrixRank_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_baseOT_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_mal_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_Rounds_test(const oc::CLP& cmd) { throwDisabled(); }

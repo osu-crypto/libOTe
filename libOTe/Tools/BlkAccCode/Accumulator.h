@@ -32,6 +32,10 @@ namespace osuCrypto
 	 * This combined operation has good mixing properties and helps create codes with
 	 * high minimum distance. It's used as a building block in the BlkAccCode.
 	 *
+	 * For extension fields, mulConst mixes the field components after each
+	 * accumulator update. The binary distance proof does not cover this weighted
+	 * accumulator. Its desired minimum distance is conjectured, not formally proven.
+	 *
 	 * @tparam Perm The permutation type to use (e.g., Feistel2KPerm or FeistelPerm)
 	 */
 	template<typename Perm>
@@ -90,6 +94,7 @@ namespace osuCrypto
 				for (std::size_t i = 0; i < n; ++i)
 				{
 					ctx.plus(sum[0], sum[0], *inIter);
+					ctx.mulConst(sum[0], sum[0]);
 					ctx.copy(*permIter, sum[0]);
 					++permIter;
 					++inIter;
@@ -117,6 +122,7 @@ namespace osuCrypto
 						//sum ^= *inIter;
 						//chunk[j] = sum;
 						ctx.plus(sum, sum, *inIter);
+						ctx.mulConst(sum, sum);
 						ctx.copy(chunk[j], sum);
 						++inIter;
 					}

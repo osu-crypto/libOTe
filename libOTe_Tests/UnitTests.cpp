@@ -235,6 +235,7 @@ namespace tests_libOTe
 
 			tc.add("Vole_Noisy_test                         ", Vole_Noisy_test);
 			tc.add("Vole_Silent_paramSweep_test             ", Vole_Silent_paramSweep_test);
+			tc.add("Vole_Silent_defaultMatrixRank_test      ", Vole_Silent_defaultMatrixRank_test);
 			tc.add("Vole_Silent_stationary_test             ", Vole_Silent_stationary_test);
 			tc.add("Vole_Silent_Tungsten_test               ", Vole_Silent_Tungsten_test);
 			tc.add("Vole_Silent_QuasiCyclic_test            ", Vole_Silent_QuasiCyclic_test);
