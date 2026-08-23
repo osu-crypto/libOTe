@@ -49,7 +49,13 @@ namespace osuCrypto {
         {
             IknpOtExtSender r;
             static_cast<KosOtExtSender&>(r) = static_cast<KosOtExtSender&>(*this).splitBase();
+            r.mIsMalicious = false;
             return r;
+        }
+
+        std::unique_ptr<OtExtSender> split() override
+        {
+            return std::make_unique<IknpOtExtSender>(splitBase());
         }
 
 

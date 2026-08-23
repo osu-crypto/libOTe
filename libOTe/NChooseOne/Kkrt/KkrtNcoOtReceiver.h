@@ -41,10 +41,11 @@ namespace osuCrypto
         std::vector<u64> mGensBlkIdx;
         Matrix<block> mT0;
         std::shared_ptr<Matrix<block>> mT1;
-        
-        u64 mCorrectionIdx;
 
-        u64 mInputByteCount;
+        std::vector<u8> mEncodeFlags;
+        u64 mCorrectionIdx = 0;
+        u64 mInputByteCount = 0;
+        u64 mInputBitCount = 0;
 
         MultiKeyAES<4> mMultiKeyAES;
 
@@ -68,8 +69,10 @@ namespace osuCrypto
             mGensBlkIdx = std::move(v.mGensBlkIdx);
             mT0 = std::move(v.mT0);
             mT1 = std::move(v.mT1);
+            mEncodeFlags = std::move(v.mEncodeFlags);
             mCorrectionIdx = v.mCorrectionIdx;
             mInputByteCount = v.mInputByteCount;
+            mInputBitCount = v.mInputBitCount;
             mMultiKeyAES = std::move(v.mMultiKeyAES);
         }
 
@@ -87,6 +90,7 @@ namespace osuCrypto
         // Returns the number of base OTs that should be provided to setBaseOts(...).
         // congifure(...) should be called first.
         u64 getBaseOTCount() const override;
+        u64 getInputBitCount() const override { return mInputBitCount; }
 
         // Returns whether the base OTs have already been set
         bool hasBaseOts() const override

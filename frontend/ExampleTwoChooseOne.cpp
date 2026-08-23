@@ -229,8 +229,10 @@ namespace osuCrypto
 
 				for (u64 threadIndex = 0; threadIndex < (u64)numThreads; ++threadIndex)
 				{
-					u64 beginIndex = oc::roundUpTo(totalOTs * threadIndex / numThreads, 128);
-					u64 endIndex = oc::roundUpTo((totalOTs + 1) * threadIndex / numThreads, 128);
+					u64 beginIndex = std::min<u64>(totalOTs,
+						oc::roundUpTo(totalOTs * threadIndex / numThreads, 128));
+					u64 endIndex = std::min<u64>(totalOTs,
+						oc::roundUpTo(totalOTs * (threadIndex + 1) / numThreads, 128));
 
 					threadChoices[threadIndex].resize(endIndex - beginIndex);
 					threadChoices[threadIndex].randomize(prng);
@@ -269,8 +271,10 @@ namespace osuCrypto
 
 				for (u64 threadIndex = 0; threadIndex < (u64)numThreads; ++threadIndex)
 				{
-					u64 beginIndex = oc::roundUpTo(totalOTs * threadIndex / numThreads, 128);
-					u64 endIndex = oc::roundUpTo((totalOTs + 1) * threadIndex / numThreads, 128);
+					u64 beginIndex = std::min<u64>(totalOTs,
+						oc::roundUpTo(totalOTs * threadIndex / numThreads, 128));
+					u64 endIndex = std::min<u64>(totalOTs,
+						oc::roundUpTo(totalOTs * (threadIndex + 1) / numThreads, 128));
 
 					threadMsgs[threadIndex].resize(endIndex - beginIndex);
 

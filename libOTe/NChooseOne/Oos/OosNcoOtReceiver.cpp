@@ -97,12 +97,7 @@ namespace osuCrypto
 		mT0.resize(numOtExt, numCols / 128);
 		mT1->resize(numOtExt, numCols / 128);
 
-		// An extra debugging check that can be used. Each one
-		// gets marked as used, makes use we don't encode twice.
-#ifndef NDEBUG
-		mEncodeFlags = std::vector<u8>();
-		mEncodeFlags.resize(numOtExt, 0);
-#endif
+		mEncodeFlags.assign(numOtExt, 0);
 
 		// NOTE: We do not transpose a bit-matrix of size numCol * numCol.
 		//   Instead we break it down into smaller chunks. We do 128 columns
@@ -190,6 +185,7 @@ namespace osuCrypto
 		raw.mMalicious = mMalicious;
 		raw.mStatSecParam = mStatSecParam;
 		raw.mInputByteCount = mInputByteCount;
+		raw.mInputBitCount = mInputBitCount;
 		raw.mGens.resize(mGens.size());
 
 		std::vector<std::array<block, 2>> base(mGens.size());
@@ -218,18 +214,17 @@ namespace osuCrypto
 		void* dest,
 		u64 destSize)
 	{
-#ifndef NDEBUG
 		if (mInputByteCount == 0)
 			throw std::runtime_error("configure must be called first");
-
-		if (eq(mT0[otIdx][0], ZeroBlock))
-			throw std::runtime_error("uninitialized OT extension");
-
+		if (otIdx >= mT0.rows() || !mT1)
+			throw std::out_of_range("OOS receiver OT index is not initialized. " LOCATION);
 		if (mEncodeFlags[otIdx])
 			throw std::runtime_error("encode can only be called once per otIdx");
-
+		if (destSize == 0 || destSize > RandomOracle::HashSize)
+			throw std::invalid_argument("invalid OOS encoding size. " LOCATION);
+		if (input == nullptr || dest == nullptr)
+			throw std::invalid_argument("null OOS encoding buffer. " LOCATION);
 		mEncodeFlags[otIdx] = 1;
-#endif // !NDEBUG
 
 		block* t0Val = mT0.data() + mT0.stride() * otIdx;
 		block* t1Val = mT1->data() + mT0.stride() * otIdx;
@@ -291,13 +286,11 @@ namespace osuCrypto
 	void OosNcoOtReceiver::zeroEncode(u64 otIdx)
 	{
 		//std::cout << "encode[" << otIdx <<"] = * " << std::endl;
-
-#ifndef NDEBUG
-		if (eq(mT0[otIdx][0], ZeroBlock))
-			throw std::runtime_error("uninitialized OT extension");
-
+		if (otIdx >= mT0.rows() || !mT1)
+			throw std::out_of_range("OOS receiver OT index is not initialized. " LOCATION);
+		if (mEncodeFlags[otIdx])
+			throw std::runtime_error("encode can only be called once per otIdx");
 		mEncodeFlags[otIdx] = 1;
-#endif // !NDEBUG
 
 		block* t0Val = mT0.data() + mT0.stride() * otIdx;
 		block* t1Val = mT1->data() + mT0.stride() * otIdx;
@@ -347,6 +340,7 @@ namespace osuCrypto
 
 
 		mInputByteCount = (inputBitCount + 7) / 8;
+		mInputBitCount = inputBitCount;
 		mStatSecParam = statSecParam;
 		mMalicious = maliciousSecure;
 		mGens.resize(roundUpTo(mCode.codewordBitSize(), 128));
@@ -371,14 +365,13 @@ namespace osuCrypto
 	{
 		MACORO_TRY{
 		auto sub = T1Sub{};
-#ifndef NDEBUG
+		if (mCorrectionIdx > mT0.rows() || sendCount > mT0.rows() - mCorrectionIdx)
+			throw std::out_of_range("OOS correction range exceeds initialized OTs. " LOCATION);
 		for (u64 i = mCorrectionIdx; i < sendCount + mCorrectionIdx; ++i)
 		{
 			if (mEncodeFlags[i] == 0)
 				throw std::runtime_error("an item was not encoded. " LOCATION);
 		}
-
-#endif
 		// a shared pointer to T1 and a container to
 		// some sub region of T1. Used to send data.
 		sub.mMem = mT1;
@@ -386,9 +379,8 @@ namespace osuCrypto
 			mT1->data() + (mCorrectionIdx * mT0.stride()),
 			mT0.stride() * sendCount
 		);
-		mCorrectionIdx += sendCount;
-
 		co_await chl.send(std::move(sub));
+		mCorrectionIdx += sendCount;
 
 		} MACORO_CATCH(eptr) {
 			if (!chl.closed()) co_await chl.close();
@@ -415,8 +407,6 @@ namespace osuCrypto
 
 	task<> OosNcoOtReceiver::sendFinalization(Socket& chl, block seed)
 	{
-
-#ifndef NDEBUG
 		for (u64 i = 0; i < mCorrectionIdx; ++i)
 		{
 			if (mEncodeFlags[i] == 0)
@@ -424,7 +414,6 @@ namespace osuCrypto
 				throw std::runtime_error("All messages must be encoded before check is called. " LOCATION);
 			}
 		}
-#endif
 
 		PRNG prng(seed);
 

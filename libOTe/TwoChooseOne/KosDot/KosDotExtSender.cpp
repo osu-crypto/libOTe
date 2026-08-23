@@ -7,6 +7,7 @@
 #include <cryptoTools/Common/Log.h>
 #include <cryptoTools/Crypto/Commit.h>
 #include <cryptoTools/Network/Channel.h>
+#include "libOTe/TwoChooseOne/KosDot/KosDotExtCheck.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 
 
@@ -22,7 +23,10 @@ namespace osuCrypto
 		for (u64 i = 0; i < mGens.size(); ++i)
 			baseRecvOts[i] = mGens[i].get<block>();
 
-		return KosDotExtSender(baseRecvOts, mBaseChoiceBits);
+		auto child = KosDotExtSender(baseRecvOts, mBaseChoiceBits);
+		child.mDelta = mDelta;
+		child.mHasDelta = mHasDelta || neq(mDelta, ZeroBlock);
+		return child;
 	}
 
 	std::unique_ptr<OtExtSender> KosDotExtSender::split()
@@ -31,11 +35,17 @@ namespace osuCrypto
 		for (u64 i = 0; i < mGens.size(); ++i)
 			baseRecvOts[i] = mGens[i].get<block>();
 
-		return std::make_unique<KosDotExtSender>(baseRecvOts, mBaseChoiceBits);
+		auto child = std::make_unique<KosDotExtSender>(baseRecvOts, mBaseChoiceBits);
+		child->mDelta = mDelta;
+		child->mHasDelta = mHasDelta || neq(mDelta, ZeroBlock);
+		return child;
 	}
 
 	void KosDotExtSender::setBaseOts(span<block> baseRecvOts, const BitVector& choices)
 	{
+		if (baseRecvOts.size() != baseOtCount() || choices.size() != baseOtCount())
+			throw std::runtime_error("KosDot base OT count mismatch. " LOCATION);
+
 		mBaseChoiceBits = choices;
 		mGens.resize(choices.size());
 		mBaseChoiceBits.resize(roundUpTo(mBaseChoiceBits.size(), 8));
@@ -50,6 +60,7 @@ namespace osuCrypto
 	void KosDotExtSender::setDelta(const block& delta)
 	{
 		mDelta = delta;
+		mHasDelta = true;
 	}
 
 
@@ -79,8 +90,7 @@ namespace osuCrypto
 		auto offset = block{};
 		auto theirSeed = block{};
 		auto code = LinearCode{};
-		auto q = std::array<block, 4>{};
-		auto recv = std::array<block, 8>{};
+		auto recv = details::KosDotProof{};
 
 		if (hasBaseOts() == false)
 			co_await genBaseOts(prng, chl);
@@ -213,8 +223,13 @@ namespace osuCrypto
 			block curDelta;
 			code.encode((u8*)delta.data(), (u8*)&curDelta);
 
-			if (eq(mDelta, ZeroBlock))
+			if (!mHasDelta && neq(mDelta, ZeroBlock))
+				mHasDelta = true;
+			if (!mHasDelta)
+			{
 				mDelta = prng.get<block>();
+				mHasDelta = true;
+			}
 			offset = curDelta ^ mDelta;
 		}
 
@@ -227,98 +242,40 @@ namespace osuCrypto
 			throw std::runtime_error("bad commit " LOCATION);
 
 
-		{
-
-			PRNG commonPrng(seed ^ theirSeed);
-
-			block  qi1, qi2, qi3, qi4;
-			memset(q.data(), 0, 4 * sizeof(block));
-
-			u64 doneIdx = 0;
-
-			std::array<block, 128> challenges, challenges2;
-
-			setTimePoint("KosDot.send.checkStart");
-
-			u64 xx = 0;
-			u64 bb = (messages.size() + 127 + 128) / 128;
-			for (u64 blockIdx = 0; blockIdx < bb; ++blockIdx)
-			{
-				commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges.data());
-				commonPrng.mAes.ecbEncCounterMode(doneIdx, 128, challenges2.data());
-
-				u64 stop0 = std::min<u64>(messages.size(), doneIdx + 128);
-				u64 stop1 = std::min<u64>(messages.size() + 128, doneIdx + 128);
-
-				u64 i = 0, dd = doneIdx;
-				for (; dd < stop0; ++dd, ++i)
-				{
-					mul256(messages[dd][0], messages[dd][1], challenges[i], challenges2[i], qi1, qi2, qi3, qi4);
-
-					q[0] = q[0] ^ qi1;
-					q[1] = q[1] ^ qi2;
-					q[2] = q[2] ^ qi3;
-					q[3] = q[3] ^ qi4;
-
-					code.encode((u8*)messages[dd].data(), (u8*)&messages[dd][0]);
-					messages[dd][1] = messages[dd][0] ^ mDelta;
-				}
-
-				for (; dd < stop1; ++dd, ++i, ++xx)
-				{
-					mul256(extraBlocks[xx][0], extraBlocks[xx][1], challenges[i], challenges2[i], qi1, qi2, qi3, qi4);
-					q[0] = q[0] ^ qi1;
-					q[1] = q[1] ^ qi2;
-					q[2] = q[2] ^ qi3;
-					q[3] = q[3] ^ qi4;
-				}
-
-				doneIdx = stop1;
-			}
-		}
+		setTimePoint("KosDot.send.checkStart");
+		auto q = details::kosDotColumnCheck(
+			span<const details::KosDotCheckRow>(messages.data(), messages.size()),
+			span<const details::KosDotCheckRow>(extraBlocks.data(), extraBlocks.size()),
+			seed ^ theirSeed);
 
 		setTimePoint("KosDot.send.checkSummed");
 
 		co_await chl.recv(recv);
 
 		{
-			block t1, t2, t3, t4;
 			setTimePoint("KosDot.send.proofReceived");
 
-			auto& received_x = ((std::array<block, 4>*)recv.data())[0];
-			auto& received_t = ((std::array<block, 4>*)recv.data())[1];
-
-			// check t = x * Delta + q
-			mul256(received_x[0], received_x[1], delta[0], delta[1], t1, t2, t3, t4);
-			t1 = t1 ^ q[0];
-			t2 = t2 ^ q[1];
-			t3 = t3 ^ q[2];
-			t4 = t4 ^ q[3];
-
-			if (eq(t1, received_t[0]) && eq(t2, received_t[1]) &&
-				eq(t3, received_t[2]) && eq(t4, received_t[3]))
+			auto received_x = recv.back();
+			for (u64 i = 0; i < details::KosDotCheckColumns; ++i)
 			{
-				//std::cout << "\tCheck passed\n";
-			}
-			else
-			{
-				std::cout << "OT Ext Failed Correlation check failed" << std::endl;
-				std::cout << "rec t[0] = " << received_t[0] << std::endl;
-				std::cout << "rec t[1] = " << received_t[1] << std::endl;
-				std::cout << "rec t[2] = " << received_t[2] << std::endl;
-				std::cout << "rec t[3] = " << received_t[3] << std::endl << std::endl;
-				std::cout << "exp t[0] = " << t1 << std::endl;
-				std::cout << "exp t[1] = " << t2 << std::endl;
-				std::cout << "exp t[2] = " << t3 << std::endl;
-				std::cout << "exp t[3] = " << t4 << std::endl << std::endl;
-				std::cout << "q  = " << q[0] << std::endl;
-				throw std::runtime_error("Exit");;
+				auto expected = q[i] ^
+					(received_x & zeroAndAllOne[mBaseChoiceBits[i]]);
+				if (expected != recv[i])
+					throw std::runtime_error("KOS-Dot, bad malicious check. " LOCATION);
 			}
 
-			setTimePoint("KosDot.send.done");
-
-			static_assert(gOtExtBaseOtCount == 128, "expecting 128");
+			for (auto& row : messages)
+			{
+				block output;
+				code.encode(reinterpret_cast<u8*>(row.data()),
+					reinterpret_cast<u8*>(&output));
+				row[0] = output;
+				row[1] = output ^ mDelta;
+			}
 		}
+
+		setTimePoint("KosDot.send.done");
+		static_assert(gOtExtBaseOtCount == 128, "expecting 128");
 
 		} MACORO_CATCH(eptr) {
 			if (!chl.closed()) co_await chl.close();

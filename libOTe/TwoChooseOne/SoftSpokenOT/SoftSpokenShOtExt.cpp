@@ -182,6 +182,9 @@ namespace osuCrypto
 		const BitVector& choices, span<block> messages, PRNG& prng, Socket& chl)
 	{
 		MACORO_TRY{
+		if (choices.size() != messages.size())
+			throw std::runtime_error("choices and messages must have the same size. " LOCATION);
+
 #ifdef ENABLE_SSE
 		if ((u64)messages.data() % 32)
 			throw std::runtime_error("SoftSpokenShOtReceiver: messages must point to 32 byte aligned memory. " LOCATION);

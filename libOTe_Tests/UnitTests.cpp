@@ -216,6 +216,14 @@ namespace tests_libOTe
 			tc.add("OtExt_Kos_Test                          ", OtExt_Kos_Test);
 			tc.add("OtExt_Kos_fs_Test                       ", OtExt_Kos_fs_Test);
 			tc.add("OtExt_Kos_ro_Test                       ", OtExt_Kos_ro_Test);
+			tc.add("OtExt_Kos_Split_Test                    ", OtExt_Kos_Split_Test);
+			tc.add("OtExt_Kos_BlockBoundary_Test            ", OtExt_Kos_BlockBoundary_Test);
+			tc.add("OtExt_InputValidation_Test              ", OtExt_InputValidation_Test);
+			tc.add("DotExt_Kos_BaseValidation_Test          ", DotExt_Kos_BaseValidation_Test);
+			tc.add("OtExt_NoHashMultiBlock_Test             ", OtExt_NoHashMultiBlock_Test);
+			tc.add("OtExt_SplitConfig_Test                  ", OtExt_SplitConfig_Test);
+			tc.add("DotExt_Kos_Check_Test                   ", DotExt_Kos_Check_Test);
+			tc.add("DotExt_Kos_SplitDelta_Test              ", DotExt_Kos_SplitDelta_Test);
 			tc.add("OtExt_Silent_random_Test                ", OtExt_Silent_random_Test);
 			tc.add("OtExt_Silent_correlated_Test            ", OtExt_Silent_correlated_Test);
 			tc.add("OtExt_Silent_inplace_Test               ", OtExt_Silent_inplace_Test);
@@ -248,6 +256,10 @@ namespace tests_libOTe
 			tc.add("NcoOt_Kkrt_Test                         ", NcoOt_Kkrt_Test);
 			tc.add("NcoOt_Oos_Test                          ", NcoOt_Oos_Test);
 			tc.add("NcoOt_genBaseOts_Test                   ", NcoOt_genBaseOts_Test);
+			tc.add("NcoOt_chosen                            ", NcoOt_chosen);
+			tc.add("NcoOt_ChosenValidation_Test             ", NcoOt_ChosenValidation_Test);
+			tc.add("NcoOt_StateValidation_Test              ", NcoOt_StateValidation_Test);
+			tc.add("NcoOt_OosMove_Test                      ", NcoOt_OosMove_Test);
 
 
 			tc.add("foleage_tensor_test                     ", foleage_tensor_test);

@@ -49,7 +49,9 @@ namespace osuCrypto {
         BitVector mBaseChoiceBits;
         std::vector<block> mChoiceBlks;
         Matrix<block> mT, mCorrectionVals;
-        u64 mCorrectionIdx, mInputByteCount = 0;
+        u64 mCorrectionIdx = 0;
+        u64 mInputByteCount = 0;
+        u64 mInputBitCount = 0;
         block mChallengeSeed = ZeroBlock;
         std::vector<block> qSum;
 
@@ -70,6 +72,7 @@ namespace osuCrypto {
             mCorrectionVals = std::move(v.mCorrectionVals);
             mCorrectionIdx = v.mCorrectionIdx;
             mInputByteCount = v.mInputByteCount;
+            mInputBitCount = v.mInputBitCount;
             mChallengeSeed = v.mChallengeSeed;
             qSum = std::move(v.qSum);
         }
@@ -87,6 +90,7 @@ namespace osuCrypto {
         // Returns the number of base OTs that should be provided to setBaseOts(...).
         // congifure(...) should be called first.
         u64 getBaseOTCount() const override;
+        u64 getInputBitCount() const override { return mInputBitCount; }
 
         // Returns whether the base OTs have already been set
         bool hasBaseOts() const override

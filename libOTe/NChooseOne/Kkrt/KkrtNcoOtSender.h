@@ -48,7 +48,9 @@ namespace osuCrypto {
         BitVector mBaseChoiceBits;
         std::vector<block> mChoiceBlks;
         Matrix<block> mT, mCorrectionVals;
-        u64 mCorrectionIdx, mInputByteCount;
+        u64 mCorrectionIdx = 0;
+        u64 mInputByteCount = 0;
+        u64 mInputBitCount = 0;
         MultiKeyAES<4> mMultiKeyAES;
 
         KkrtNcoOtSender() = default;
@@ -65,6 +67,7 @@ namespace osuCrypto {
             mCorrectionVals = std::move(v.mCorrectionVals);
             mCorrectionIdx = std::move(v.mCorrectionIdx);
             mInputByteCount = std::move(v.mInputByteCount);
+            mInputBitCount = std::move(v.mInputBitCount);
             mMultiKeyAES = std::move(v.mMultiKeyAES);
         }
 
@@ -81,6 +84,7 @@ namespace osuCrypto {
         // Returns the number of base OTs that should be provided to setBaseOts(...).
         // congifure(...) should be called first.
         u64 getBaseOTCount() const override;
+        u64 getInputBitCount() const override { return mInputBitCount; }
 
         // Returns whether the base OTs have already been set
         bool hasBaseOts() const override

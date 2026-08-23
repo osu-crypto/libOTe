@@ -23,6 +23,7 @@ namespace osuCrypto {
     {
     public: 
         block mDelta = ZeroBlock;
+        bool mHasDelta = false;
         std::vector<PRNG> mGens;
         BitVector mBaseChoiceBits;
 
@@ -43,7 +44,9 @@ namespace osuCrypto {
             mGens = std::move(v.mGens);
             mBaseChoiceBits = std::move(v.mBaseChoiceBits);
             mDelta = v.mDelta;
+            mHasDelta = v.mHasDelta;
             v.mDelta = ZeroBlock;
+            v.mHasDelta = false;
         }
 
         // defaults to requiring 40 more base OTs. This gives 40 bits 

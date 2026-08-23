@@ -293,6 +293,9 @@ namespace osuCrypto
 	{
 		MACORO_TRY{
 
+		if (choices.size() != messages.size())
+			throw std::runtime_error("choices and messages must have the same size. " LOCATION);
+
 		if ((u64)messages.data() % 32)
 			throw std::runtime_error("soft spoken requires the messages to by 32 byte aligned. Consider using AlignedUnVector or AlignedVector." LOCATION);
 

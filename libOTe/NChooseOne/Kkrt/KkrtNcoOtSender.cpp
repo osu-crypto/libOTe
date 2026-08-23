@@ -42,6 +42,7 @@ namespace osuCrypto
 		KkrtNcoOtSender raw;
 		raw.mGens.resize(mGens.size());
 		raw.mInputByteCount = mInputByteCount;
+		raw.mInputBitCount = mInputBitCount;
 		raw.mMultiKeyAES = mMultiKeyAES;
 
 		if (hasBaseOts())
@@ -171,11 +172,12 @@ namespace osuCrypto
 
 	void KkrtNcoOtSender::encode(u64 otIdx, const void* input, void* dest, u64 destSize)
 	{
-
-#ifndef NDEBUG
-		if (eq(mCorrectionVals[otIdx][0], ZeroBlock))
-			throw std::invalid_argument("appears that we haven't received the receiver's choice yet. " LOCATION);
-#endif // !NDEBUG
+		if (otIdx >= mCorrectionIdx || otIdx >= mT.rows())
+			throw std::out_of_range("Kkrt sender OT index has no received correction. " LOCATION);
+		if (destSize == 0 || destSize > RandomOracle::HashSize)
+			throw std::invalid_argument("invalid Kkrt encoding size. " LOCATION);
+		if ((mInputByteCount && input == nullptr) || dest == nullptr)
+			throw std::invalid_argument("null Kkrt encoding buffer. " LOCATION);
 #define KKRT_WIDTH 4
 
 		block word = ZeroBlock;
@@ -252,6 +254,7 @@ namespace osuCrypto
 		if (inputBitCount > 128) throw std::runtime_error(LOCATION);
 
 		mInputByteCount = (inputBitCount + 7) / 8;
+		mInputBitCount = inputBitCount;
 		mGens.resize(128 * 4);
 	}
 
@@ -266,17 +269,16 @@ namespace osuCrypto
 	task<> KkrtNcoOtSender::recvCorrection(Socket& chl, u64 recvCount)
 	{
 		MACORO_TRY{
-#ifndef NDEBUG
-		if (recvCount > mCorrectionVals.bounds()[0] - mCorrectionIdx)
+		if (mCorrectionIdx > mCorrectionVals.rows() ||
+			recvCount > mCorrectionVals.rows() - mCorrectionIdx)
 			throw std::runtime_error("bad receiver, will overwrite the end of our buffer" LOCATION);
-#endif // !NDEBUG
 
 		// receive the next OT correction values. This will be several rows of the form u = T0 + T1 + C(w)
 		// there c(w) is a pseudo-random code.
-		auto dest = mCorrectionVals.begin() + (mCorrectionIdx * mCorrectionVals.stride());
+		auto dest = mCorrectionVals.data() + (mCorrectionIdx * mCorrectionVals.stride());
 		// update the index of there we should store the next set of correction values.
+		co_await chl.recv(span<block>(dest, recvCount * mCorrectionVals.stride()));
 		mCorrectionIdx += recvCount;
-		co_await chl.recv(span<block>(&*dest, recvCount * mCorrectionVals.stride()));
 
 		} MACORO_CATCH(eptr) {
 			if (!chl.closed()) co_await chl.close();

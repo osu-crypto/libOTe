@@ -52,6 +52,11 @@ namespace osuCrypto
             r.mIsMalicious = false;
             return r;
         }
+
+        std::unique_ptr<OtExtReceiver> split() override
+        {
+            return std::make_unique<IknpOtExtReceiver>(splitBase());
+        }
     };
 
 }

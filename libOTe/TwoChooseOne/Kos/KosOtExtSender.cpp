@@ -31,7 +31,11 @@ namespace osuCrypto
 			baseRecvOts[i] = mGens.mAESs[i].ecbEncBlock(block(mPrngIdx));
 
 		++mPrngIdx;
-		return KosOtExtSender(SetUniformOts{}, baseRecvOts, mBaseChoiceBits);
+		auto child = KosOtExtSender(SetUniformOts{}, baseRecvOts, mBaseChoiceBits);
+		child.mHashType = mHashType;
+		child.mFiatShamir = mFiatShamir;
+		child.mIsMalicious = mIsMalicious;
+		return child;
 	}
 
 	std::unique_ptr<OtExtSender> KosOtExtSender::split()
@@ -212,18 +216,21 @@ namespace osuCrypto
 
 			if (hashType == HashType::AesHash)
 			{
-				auto hh = span<block>(mIter->data(), size * 2);
+				if (size)
+				{
+					auto hh = span<block>(mIter->data(), size * 2);
+					if (mIsMalicious)
+					{
+						mAesFixedKey.TmmoHashBlocks(hh, hh, [mTweak = i * 256]() mutable {
+							return block(mTweak++ >> 1);
+							});
+					}
+					else
+					{
+						mAesFixedKey.hashBlocks(hh, hh);
+					}
+				}
 				mIter += size;
-				if (mIsMalicious)
-				{
-					mAesFixedKey.TmmoHashBlocks(hh, hh, [mTweak = i * 256]() mutable {
-						return block(mTweak++ >> 1);
-						});
-				}
-				else
-				{
-					mAesFixedKey.hashBlocks(hh, hh);
-				}
 			}
 			else if (hashType == HashType::RandomOracle)
 			{
@@ -245,6 +252,10 @@ namespace osuCrypto
 
 					++mIter;
 				}
+			}
+			else
+			{
+				mIter += size;
 			}
 
 			if (tIter > t.data() + t.size())

@@ -18,6 +18,7 @@
 
 #include "libOTe/TwoChooseOne/KosDot/KosDotExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosDot/KosDotExtSender.h"
+#include "libOTe/TwoChooseOne/KosDot/KosDotExtCheck.h"
 
 
 
@@ -877,4 +878,431 @@ namespace tests_libOTe
         throw UnitTestSkipped("ENABLE_IKNP is not defined.");
 #endif
 	}
+
+
+    void OtExt_Kos_Split_Test()
+    {
+#if defined(ENABLE_KOS)
+        auto runKos = [](bool iknp) {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG prng0(block(0x6b6f7353706c6974, iknp));
+            PRNG prng1(block(0x53656e6465724f54, iknp));
+
+            constexpr u64 numOTs = 257;
+            AlignedUnVector<block> recvMsg(numOTs), baseRecv(gOtExtBaseOtCount);
+            AlignedUnVector<std::array<block, 2>> sendMsg(numOTs), baseSend(gOtExtBaseOtCount);
+            BitVector choices(numOTs), baseChoice(gOtExtBaseOtCount);
+            choices.randomize(prng0);
+            baseChoice.randomize(prng0);
+
+            for (u64 i = 0; i < gOtExtBaseOtCount; ++i)
+            {
+                baseSend[i][0] = prng0.get<block>();
+                baseSend[i][1] = prng0.get<block>();
+                baseRecv[i] = baseSend[i][baseChoice[i]];
+            }
+
+            if (iknp)
+            {
+#ifdef ENABLE_IKNP
+                IknpOtExtSender sender;
+                IknpOtExtReceiver receiver;
+                receiver.setBaseOts(baseSend);
+                sender.setBaseOts(baseRecv, baseChoice);
+
+                auto splitReceiver = receiver.splitBase();
+                auto splitSender = sender.splitBase();
+                auto p0 = splitReceiver.receive(choices, recvMsg, prng0, sockets[0]);
+                auto p1 = splitSender.send(sendMsg, prng1, sockets[1]);
+                eval(p0, p1);
+#else
+                throw UnitTestSkipped("ENABLE_IKNP is not defined.");
+#endif
+            }
+            else
+            {
+                KosOtExtSender sender;
+                KosOtExtReceiver receiver;
+                receiver.setBaseOts(baseSend);
+                sender.setBaseOts(baseRecv, baseChoice);
+
+                auto splitReceiver = receiver.splitBase();
+                auto splitSender = sender.splitBase();
+                auto p0 = splitReceiver.receive(choices, recvMsg, prng0, sockets[0]);
+                auto p1 = splitSender.send(sendMsg, prng1, sockets[1]);
+                eval(p0, p1);
+            }
+
+            OT_100Receive_Test(choices, recvMsg, sendMsg);
+        };
+
+        runKos(false);
+#ifdef ENABLE_IKNP
+        runKos(true);
+#endif
+#else
+        throw UnitTestSkipped("ENABLE_KOS is not defined.");
+#endif
+    }
+
+
+    void OtExt_Kos_BlockBoundary_Test()
+    {
+#if defined(ENABLE_KOS)
+        for (auto numOTs : { 0ull, 128ull, 256ull })
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG prng0(block(0x426f756e64617279, numOTs));
+            PRNG prng1(block(0x4b4f53426c6f636b, numOTs));
+
+            AlignedUnVector<block> recvMsg(numOTs), baseRecv(gOtExtBaseOtCount);
+            AlignedUnVector<std::array<block, 2>> sendMsg(numOTs), baseSend(gOtExtBaseOtCount);
+            BitVector choices(numOTs), baseChoice(gOtExtBaseOtCount);
+            choices.randomize(prng0);
+            baseChoice.randomize(prng0);
+
+            for (u64 i = 0; i < gOtExtBaseOtCount; ++i)
+            {
+                baseSend[i][0] = prng0.get<block>();
+                baseSend[i][1] = prng0.get<block>();
+                baseRecv[i] = baseSend[i][baseChoice[i]];
+            }
+
+            KosOtExtSender sender;
+            KosOtExtReceiver receiver;
+            receiver.setBaseOts(baseSend);
+            sender.setBaseOts(baseRecv, baseChoice);
+
+            auto p0 = receiver.receive(choices, recvMsg, prng0, sockets[0]);
+            auto p1 = sender.send(sendMsg, prng1, sockets[1]);
+            eval(p0, p1);
+            OT_100Receive_Test(choices, recvMsg, sendMsg);
+        }
+#else
+        throw UnitTestSkipped("ENABLE_KOS is not defined.");
+#endif
+    }
+
+
+    void OtExt_InputValidation_Test()
+    {
+        auto expectThrow = [](auto&& fn) {
+            bool threw = false;
+            try
+            {
+                fn();
+            }
+            catch (const std::exception&)
+            {
+                threw = true;
+            }
+
+            if (!threw)
+                throw UnitTestFail(LOCATION);
+        };
+
+#if defined(ENABLE_KOS)
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG prng(ZeroBlock);
+            KosOtExtReceiver receiver;
+            BitVector choices(129);
+            AlignedUnVector<block> messages(128);
+
+            expectThrow([&] {
+                macoro::sync_wait(receiver.receive(choices, messages, prng, sockets[0]));
+            });
+        }
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG prng(ZeroBlock);
+            KosOtExtReceiver receiver;
+            BitVector choices(127);
+            AlignedUnVector<block> messages(128);
+
+            expectThrow([&] {
+                macoro::sync_wait(receiver.receiveChosen(choices, messages, prng, sockets[0]));
+            });
+        }
+#endif
+
+#if defined(ENABLE_DELTA_KOS)
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            PRNG prng(ZeroBlock);
+            KosDotExtReceiver receiver;
+            BitVector choices(129);
+            AlignedUnVector<block> messages(128);
+
+            expectThrow([&] {
+                macoro::sync_wait(receiver.receive(choices, messages, prng, sockets[0]));
+            });
+        }
+#endif
+    }
+
+
+    void DotExt_Kos_BaseValidation_Test()
+    {
+#if defined(ENABLE_DELTA_KOS)
+        auto expectThrow = [](auto&& fn) {
+            bool threw = false;
+            try
+            {
+                fn();
+            }
+            catch (const std::exception&)
+            {
+                threw = true;
+            }
+
+            if (!threw)
+                throw UnitTestFail(LOCATION);
+        };
+
+        for (auto count : { 0ull, 167ull, 169ull })
+        {
+            AlignedUnVector<block> baseRecv(count);
+            AlignedUnVector<std::array<block, 2>> baseSend(count);
+            BitVector baseChoice(count);
+
+            expectThrow([&] {
+                KosDotExtSender sender;
+                sender.setBaseOts(baseRecv, baseChoice);
+            });
+            expectThrow([&] {
+                KosDotExtReceiver receiver;
+                receiver.setBaseOts(baseSend);
+            });
+        }
+
+        {
+            AlignedUnVector<block> baseRecv(167);
+            BitVector baseChoice(168);
+            expectThrow([&] {
+                KosDotExtSender sender;
+                sender.setBaseOts(baseRecv, baseChoice);
+            });
+        }
+#else
+        throw UnitTestSkipped("ENABLE_DELTA_KOS is not defined.");
+#endif
+    }
+
+
+    void OtExt_NoHashMultiBlock_Test()
+    {
+#ifdef ENABLE_IKNP
+        auto sockets = cp::LocalAsyncSocket::makePair();
+        PRNG receiverPrng(block(0x4e6f486173685265, 1));
+        PRNG senderPrng(block(0x4e6f486173685365, 2));
+        constexpr u64 numOTs = 257;
+
+        AlignedUnVector<block> recvMsg(numOTs), baseRecv(gOtExtBaseOtCount);
+        AlignedUnVector<std::array<block, 2>> sendMsg(numOTs), baseSend(gOtExtBaseOtCount);
+        BitVector choices(numOTs), baseChoice(gOtExtBaseOtCount);
+        choices.randomize(receiverPrng);
+        baseChoice.randomize(receiverPrng);
+        for (u64 i = 0; i < gOtExtBaseOtCount; ++i)
+        {
+            baseSend[i][0] = receiverPrng.get<block>();
+            baseSend[i][1] = receiverPrng.get<block>();
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+        }
+
+        IknpOtExtSender sender;
+        IknpOtExtReceiver receiver;
+        sender.mHashType = HashType::NoHash;
+        receiver.mHashType = HashType::NoHash;
+        sender.setBaseOts(baseRecv, baseChoice);
+        receiver.setBaseOts(baseSend);
+
+        auto p0 = receiver.receive(choices, recvMsg, receiverPrng, sockets[0]);
+        auto p1 = sender.send(sendMsg, senderPrng, sockets[1]);
+        eval(p0, p1);
+        OT_100Receive_Test(choices, recvMsg, sendMsg);
+
+        auto delta = baseChoice.blocks()[0];
+        for (const auto& pair : sendMsg)
+            if ((pair[0] ^ pair[1]) != delta)
+                throw UnitTestFail(LOCATION);
+#else
+        throw UnitTestSkipped("ENABLE_IKNP is not defined.");
+#endif
+    }
+
+
+    void OtExt_SplitConfig_Test()
+    {
+#if defined(ENABLE_KOS)
+        PRNG prng(block(0x53706c6974436667, 1));
+        AlignedUnVector<block> baseRecv(gOtExtBaseOtCount);
+        AlignedUnVector<std::array<block, 2>> baseSend(gOtExtBaseOtCount);
+        BitVector baseChoice(gOtExtBaseOtCount);
+        baseChoice.randomize(prng);
+        for (u64 i = 0; i < gOtExtBaseOtCount; ++i)
+        {
+            baseSend[i][0] = prng.get<block>();
+            baseSend[i][1] = prng.get<block>();
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+        }
+
+        KosOtExtSender kosSender;
+        kosSender.mHashType = HashType::RandomOracle;
+        kosSender.mFiatShamir = true;
+        kosSender.mIsMalicious = false;
+        kosSender.setBaseOts(baseRecv, baseChoice);
+        auto kosSenderChild = kosSender.splitBase();
+        if (kosSenderChild.mHashType != HashType::RandomOracle ||
+            !kosSenderChild.mFiatShamir || kosSenderChild.mIsMalicious)
+            throw UnitTestFail(LOCATION);
+
+        KosOtExtReceiver kosReceiver;
+        kosReceiver.mHashType = HashType::RandomOracle;
+        kosReceiver.mFiatShamir = true;
+        kosReceiver.mIsMalicious = false;
+        kosReceiver.setBaseOts(baseSend);
+        auto kosReceiverChild = kosReceiver.splitBase();
+        if (kosReceiverChild.mHashType != HashType::RandomOracle ||
+            !kosReceiverChild.mFiatShamir || kosReceiverChild.mIsMalicious)
+            throw UnitTestFail(LOCATION);
+
+#ifdef ENABLE_IKNP
+        auto sockets = cp::LocalAsyncSocket::makePair();
+        constexpr u64 numOTs = 257;
+        AlignedUnVector<block> recvMsg(numOTs);
+        AlignedUnVector<std::array<block, 2>> sendMsg(numOTs);
+        BitVector choices(numOTs);
+        choices.randomize(prng);
+
+        IknpOtExtSender iknpSender;
+        IknpOtExtReceiver iknpReceiver;
+        iknpSender.mHashType = HashType::NoHash;
+        iknpReceiver.mHashType = HashType::NoHash;
+        iknpSender.setBaseOts(baseRecv, baseChoice);
+        iknpReceiver.setBaseOts(baseSend);
+
+        auto senderChild = iknpSender.split();
+        auto receiverChild = iknpReceiver.split();
+        auto typedSender = dynamic_cast<IknpOtExtSender*>(senderChild.get());
+        auto typedReceiver = dynamic_cast<IknpOtExtReceiver*>(receiverChild.get());
+        if (!typedSender || !typedReceiver ||
+            typedSender->mHashType != HashType::NoHash ||
+            typedReceiver->mHashType != HashType::NoHash)
+            throw UnitTestFail(LOCATION);
+
+        PRNG receiverPrng(block(0x53706c6974526563, 2));
+        PRNG senderPrng(block(0x53706c697453656e, 3));
+        auto p0 = receiverChild->receive(choices, recvMsg, receiverPrng, sockets[0]);
+        auto p1 = senderChild->send(sendMsg, senderPrng, sockets[1]);
+        eval(p0, p1);
+        OT_100Receive_Test(choices, recvMsg, sendMsg);
+#endif
+#else
+        throw UnitTestSkipped("ENABLE_KOS is not defined.");
+#endif
+    }
+
+
+    void DotExt_Kos_Check_Test()
+    {
+#if defined(ENABLE_DELTA_KOS)
+        PRNG prng(block(0x4b6f73446f744368, 1));
+        constexpr u64 numRows = 257;
+        std::vector<details::KosDotCheckRow> tRows(numRows), qRows(numRows);
+        std::array<details::KosDotCheckRow, 128> tExtra, qExtra;
+        BitVector choices(numRows), extraChoices(128), deltaBits(details::KosDotCheckColumns);
+        choices.randomize(prng);
+        extraChoices.randomize(prng);
+        deltaBits.randomize(prng);
+
+        std::array<block, 2> delta{ ZeroBlock, ZeroBlock };
+        std::memcpy(delta.data(), deltaBits.data(), deltaBits.sizeBytes());
+        for (u64 i = 0; i < numRows; ++i)
+        {
+            tRows[i] = { prng.get<block>(), prng.get<block>() };
+            auto mask = zeroAndAllOne[choices[i]];
+            qRows[i] = { tRows[i][0] ^ (delta[0] & mask),
+                tRows[i][1] ^ (delta[1] & mask) };
+        }
+        for (u64 i = 0; i < tExtra.size(); ++i)
+        {
+            tExtra[i] = { prng.get<block>(), prng.get<block>() };
+            auto mask = zeroAndAllOne[extraChoices[i]];
+            qExtra[i] = { tExtra[i][0] ^ (delta[0] & mask),
+                tExtra[i][1] ^ (delta[1] & mask) };
+        }
+
+        auto seed = prng.get<block>();
+        auto tCheck = details::kosDotColumnCheck(tRows, tExtra, seed);
+        auto qCheck = details::kosDotColumnCheck(qRows, qExtra, seed);
+        auto xCheck = details::kosDotChoiceCheck(
+            choices, extraChoices.blocks()[0], seed);
+        for (u64 i = 0; i < details::KosDotCheckColumns; ++i)
+        {
+            auto expected = qCheck[i] ^
+                (xCheck & zeroAndAllOne[deltaBits[i]]);
+            if (tCheck[i] != expected)
+                throw UnitTestFail(LOCATION);
+        }
+
+        qRows[128][0] ^= OneBlock;
+        auto tamperedQCheck = details::kosDotColumnCheck(qRows, qExtra, seed);
+        bool rejected = false;
+        for (u64 i = 0; i < details::KosDotCheckColumns; ++i)
+        {
+            auto expected = tamperedQCheck[i] ^
+                (xCheck & zeroAndAllOne[deltaBits[i]]);
+            rejected |= tCheck[i] != expected;
+        }
+        if (!rejected)
+            throw UnitTestFail(LOCATION);
+#else
+        throw UnitTestSkipped("ENABLE_DELTA_KOS is not defined.");
+#endif
+    }
+
+
+    void DotExt_Kos_SplitDelta_Test()
+    {
+#if defined(ENABLE_DELTA_KOS)
+        PRNG prng(block(0x4b6f73446f745370, 1));
+        constexpr u64 baseCount = gOtExtBaseOtCount + 40;
+        constexpr u64 numOTs = 129;
+        AlignedUnVector<block> baseRecv(baseCount), recvMsg(numOTs);
+        AlignedUnVector<std::array<block, 2>> baseSend(baseCount), sendMsg(numOTs);
+        BitVector baseChoice(baseCount), choices(numOTs);
+        baseChoice.randomize(prng);
+        choices.randomize(prng);
+        for (u64 i = 0; i < baseCount; ++i)
+        {
+            baseSend[i][0] = prng.get<block>();
+            baseSend[i][1] = prng.get<block>();
+            baseRecv[i] = baseSend[i][baseChoice[i]];
+        }
+
+        KosDotExtSender sender;
+        KosDotExtReceiver receiver;
+        sender.setDelta(ZeroBlock);
+        sender.setBaseOts(baseRecv, baseChoice);
+        receiver.setBaseOts(baseSend);
+        auto senderChild = sender.splitBase();
+        auto receiverChild = receiver.splitBase();
+        if (!senderChild.mHasDelta || senderChild.mDelta != ZeroBlock)
+            throw UnitTestFail(LOCATION);
+
+        auto sockets = cp::LocalAsyncSocket::makePair();
+        PRNG receiverPrng(block(0x4b6f73446f745265, 2));
+        PRNG senderPrng(block(0x4b6f73446f745365, 3));
+        auto p0 = receiverChild.receive(choices, recvMsg, receiverPrng, sockets[0]);
+        auto p1 = senderChild.send(sendMsg, senderPrng, sockets[1]);
+        eval(p0, p1);
+        for (u64 i = 0; i < numOTs; ++i)
+            if (recvMsg[i] != sendMsg[i][choices[i]] ||
+                sendMsg[i][0] != sendMsg[i][1])
+                throw UnitTestFail(LOCATION);
+#else
+        throw UnitTestSkipped("ENABLE_DELTA_KOS is not defined.");
+#endif
+    }
 }

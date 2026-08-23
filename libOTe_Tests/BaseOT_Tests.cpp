@@ -221,6 +221,7 @@ namespace tests_libOTe
         }
     }
 
+#ifdef ENABLE_MRR
     template<typename DSPopf>
     static void Bot_McRosRoy_Ristretto_Adversarial_impl()
     {
@@ -278,7 +279,9 @@ namespace tests_libOTe
                     "McRosRoy receiver accepted a malformed Ristretto point");
         }
     }
+#endif
 
+#ifdef ENABLE_MRR_TWIST
     template<typename DSPopf>
     static void Bot_McRosRoy_Twist_Adversarial_impl()
     {
@@ -343,6 +346,7 @@ namespace tests_libOTe
                     "McRosRoyTwist receiver accepted a small-order point");
         }
     }
+#endif
 
 #if defined(ENABLE_MRR_TWIST) && defined(ENABLE_SSE)
     void Bot_McQuoidRR_Moeller_EKE_Test()

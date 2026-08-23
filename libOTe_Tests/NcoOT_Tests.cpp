@@ -419,6 +419,186 @@ throw UnitTestSkipped("ENALBE_KKRT is not defined.");
     }
 
 
+    void NcoOt_ChosenValidation_Test()
+    {
+#ifdef ENABLE_OOS
+        auto expectThrow = [](auto&& taskFactory) {
+            bool threw = false;
+            try
+            {
+                macoro::sync_wait(taskFactory());
+            }
+            catch (const std::exception&)
+            {
+                threw = true;
+            }
+            if (!threw)
+                throw UnitTestFail(LOCATION);
+        };
+
+        PRNG prng(ZeroBlock);
+        OosNcoOtSender sender;
+        OosNcoOtReceiver receiver;
+        sender.configure(true, 40, 2);
+        receiver.configure(true, 40, 2);
+
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            Matrix<block> messages(1, 5);
+            expectThrow([&] { return sender.sendChosen(messages, prng, sockets[0]); });
+        }
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            std::vector<block> messages(2);
+            std::vector<u64> choices(1);
+            expectThrow([&] {
+                return receiver.receiveChosen(4, messages, choices, prng, sockets[0]);
+            });
+        }
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            std::vector<block> messages(1);
+            std::vector<u64> choices{ 4 };
+            expectThrow([&] {
+                return receiver.receiveChosen(4, messages, choices, prng, sockets[0]);
+            });
+        }
+        {
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            std::vector<block> messages(1);
+            std::vector<u64> choices{ 0 };
+            expectThrow([&] {
+                return receiver.receiveChosen(5, messages, choices, prng, sockets[0]);
+            });
+        }
+#else
+        throw UnitTestSkipped("ENABLE_OOS is not defined.");
+#endif
+    }
+
+
+    void NcoOt_StateValidation_Test()
+    {
+#if defined(ENABLE_KKRT) && defined(ENABLE_OOS)
+        auto expectThrow = [](auto&& fn) {
+            bool threw = false;
+            try
+            {
+                fn();
+            }
+            catch (const std::exception&)
+            {
+                threw = true;
+            }
+            if (!threw)
+                throw UnitTestFail(LOCATION);
+        };
+
+        block input = ZeroBlock;
+        block output = ZeroBlock;
+
+        {
+            KkrtNcoOtSender sender;
+            sender.mT.resize(1, 4);
+            sender.mCorrectionVals.resize(1, 4);
+            sender.mCorrectionIdx = 0;
+            expectThrow([&] { sender.encode(0, &input, &output, sizeof(block)); });
+
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(sender.recvCorrection(sockets[0], 2));
+            });
+        }
+        {
+            KkrtNcoOtReceiver receiver;
+            receiver.mT0.resize(1, 4);
+            receiver.mT1 = std::make_shared<Matrix<block>>(1, 4);
+            receiver.mEncodeFlags.assign(1, 0);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(receiver.sendCorrection(sockets[0], 1));
+            });
+            expectThrow([&] { receiver.zeroEncode(1); });
+            receiver.zeroEncode(0);
+            expectThrow([&] { receiver.zeroEncode(0); });
+        }
+        {
+            OosNcoOtSender sender;
+            sender.mT.resize(1, 4);
+            sender.mCorrectionVals.resize(1, 4);
+            sender.mCorrectionIdx = 0;
+            sender.mInputByteCount = 1;
+            sender.mInputBitCount = 8;
+            expectThrow([&] { sender.encode(0, &input, &output, sizeof(block)); });
+
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(sender.recvCorrection(sockets[0], 2));
+            });
+        }
+        {
+            OosNcoOtReceiver receiver;
+            receiver.mT0.resize(1, 4);
+            receiver.mT1 = std::make_shared<Matrix<block>>(1, 4);
+            receiver.mW.resize(1, 1);
+            receiver.mEncodeFlags.assign(1, 0);
+            auto sockets = cp::LocalAsyncSocket::makePair();
+            expectThrow([&] {
+                macoro::sync_wait(receiver.sendCorrection(sockets[0], 1));
+            });
+            expectThrow([&] { receiver.zeroEncode(1); });
+            receiver.zeroEncode(0);
+            expectThrow([&] { receiver.zeroEncode(0); });
+        }
+#else
+        throw UnitTestSkipped("ENABLE_KKRT and ENABLE_OOS are required.");
+#endif
+    }
+
+
+    void NcoOt_OosMove_Test()
+    {
+#ifdef ENABLE_OOS
+        OosNcoOtReceiver source;
+        source.mMalicious = true;
+        source.mHasBase = true;
+        source.mStatSecParam = 40;
+        source.mCorrectionIdx = 7;
+        source.mInputByteCount = 3;
+        source.mInputBitCount = 17;
+        source.mChallengeSeed = block(3, 4);
+        source.mGens.resize(1);
+        source.mT0.resize(2, 4);
+        source.mT1 = std::make_shared<Matrix<block>>(2, 4);
+        source.mW.resize(2, 1);
+        source.mEncodeFlags = { 1, 0 };
+        source.mWBuff = { OneBlock };
+        source.mTBuff = { AllOneBlock };
+
+        OosNcoOtReceiver destination(std::move(source));
+        if (!destination.mMalicious || !destination.mHasBase ||
+            destination.mStatSecParam != 40 || destination.mCorrectionIdx != 7 ||
+            destination.mInputByteCount != 3 || destination.mInputBitCount != 17 ||
+            destination.mChallengeSeed != block(3, 4) || destination.mGens.size() != 1 ||
+            destination.mT0.rows() != 2 || !destination.mT1 ||
+            destination.mW.rows() != 2 || destination.mEncodeFlags.size() != 2 ||
+            destination.mWBuff.size() != 1 || destination.mTBuff.size() != 1)
+            throw UnitTestFail(LOCATION);
+
+        if (source.mMalicious || source.mHasBase || source.mStatSecParam != 0 ||
+            source.mCorrectionIdx != 0 || source.mInputByteCount != 0 ||
+            source.mInputBitCount != 0 || source.mChallengeSeed != ZeroBlock ||
+            !source.mGens.empty() || source.mT0.size() != 0 || source.mT1 ||
+            source.mW.size() != 0 || source.mHasPendingSendFuture ||
+            source.mPendingSendFuture.valid() || !source.mEncodeFlags.empty() ||
+            !source.mWBuff.empty() || !source.mTBuff.empty())
+            throw UnitTestFail(LOCATION);
+#else
+        throw UnitTestSkipped("ENABLE_OOS is not defined.");
+#endif
+    }
+
+
 
     void NcoOt_genBaseOts_Test()
     {

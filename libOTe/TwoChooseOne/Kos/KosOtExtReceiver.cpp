@@ -56,14 +56,18 @@ namespace osuCrypto
 		if (!hasBaseOts())
 			throw std::runtime_error("base OTs have not been set. " LOCATION);
 
-		for (u64 i = 0; i < mGens.size(); ++i)
+		for (u64 i = 0; i < baseRecvOts.size(); ++i)
 		{
 			baseRecvOts[i][0] = mGens[0].mAESs[i].ecbEncBlock(block(mPrngIdx));
 			baseRecvOts[i][1] = mGens[1].mAESs[i].ecbEncBlock(block(mPrngIdx));
 		}
 		++mPrngIdx;
 
-		return KosOtExtReceiver(SetUniformOts{}, baseRecvOts);
+		auto child = KosOtExtReceiver(SetUniformOts{}, baseRecvOts);
+		child.mHashType = mHashType;
+		child.mFiatShamir = mFiatShamir;
+		child.mIsMalicious = mIsMalicious;
+		return child;
 	}
 
 	std::unique_ptr<OtExtReceiver> KosOtExtReceiver::split()
@@ -78,6 +82,9 @@ namespace osuCrypto
 		Socket& chl)
 	{
 		MACORO_TRY{
+
+		if (choices.size() != messages.size())
+			throw std::runtime_error("choices and messages must have the same size. " LOCATION);
 
 		if (mIsMalicious && mHashType == HashType::NoHash)
 			throw std::runtime_error("malicious no hash is not supported, use DotKos. " LOCATION);
