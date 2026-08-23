@@ -946,6 +946,15 @@ namespace osuCrypto
 		// overall polynomial.
 		mSparsePositions.resize(mNumPolys, mPolyWeight);
 
+		// TODO(Security): Rejection-sample the complete regular support against
+		// the smallest relevant 1-sparse factor before committing to it. For the
+		// current (mNumPolys, mPolyWeight) = (4, 16) parameter set, fold each
+		// absolute position blockIdx * mBlockSize + offset modulo 128, separately
+		// for each polynomial, and require at least 61 distinct folded positions
+		// in total. This accepts with probability about 0.502. Generalize the
+		// factor degree and minimum weight as Ring-LPN parameters rather than
+		// hard-coding them here. See AUD-001 in the repository audit tracker.
+
 		// select random positions for the sparse polynomial.
 		// The polyIdx'th is the noise position in the polyIdx'th block.
 		for (u64 i = 0; i < mSparsePositions.size(); ++i)
