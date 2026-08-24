@@ -643,6 +643,7 @@ namespace osuCrypto
 				mBaseRecvOts[i] = recvBaseOts[i];
 				mBaseChoice[i] = baseChoices[i];
 			}
+			mOtIdx = 0;
 		}
 
 

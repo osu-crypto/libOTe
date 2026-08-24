@@ -705,3 +705,189 @@ Verification:
 
 - `Vole_SoftSpokenSmall_Audit_Test` checks every affected span dimension and
   is run in the release test configuration.
+
+## AUD-022: External Silent OLE bases fixed the sender input share to zero
+
+Status: fixed
+
+Affected code:
+
+- The sender path in `SilentOtTriple::setBaseOts()` and the OLE overload of
+  `SilentOtTriple::expand()`.
+
+Concern:
+
+The external-base interface installed the Silent OT sender with correlation
+`delta = 0`. The OLE expansion reused that value. Both sender hash inputs were
+therefore equal, which made the sender's OLE input share identically zero.
+
+Impact:
+
+The generated values satisfied the tested OLE equation but were degenerate.
+They did not have the randomness required from an OLE generator.
+
+Resolution:
+
+Each OLE expansion now samples a fresh sender correlation from its supplied
+PRNG. This matches the existing triple path and works with generated or
+externally installed base OTs.
+
+Verification:
+
+- `SilentOtTriple_ole_test` uses external base OTs and rejects an all-zero
+  sender input share.
+
+## AUD-023: Foleage retained consumed DPF and tensor base OTs
+
+Status: fixed
+
+Affected code:
+
+- Base-OT installation and expansion in `FoleageTriple`.
+- Base-OT installation in `TernaryDpf`.
+
+Concern:
+
+One Foleage expansion consumed every DPF base OT, but `hasBaseOts()` continued
+to report available state. A second expansion indexed beyond the consumed DPF
+vectors. Installing replacement bases appended tensor OTs and did not reset
+the DPF index.
+
+Impact:
+
+Reusing an instance could read outside base-OT storage. It could also reuse
+tensor masks derived from old OT keys.
+
+Resolution:
+
+Foleage now tracks one complete unused base-OT set. An expansion reserves that
+set before protocol I/O and clears it on every exit path. Replacement tensor
+bases overwrite prior values, and Ternary DPF installation resets its OT
+index.
+
+Verification:
+
+- `foleage_F4ole_test` checks that a completed expansion clears every DPF and
+  tensor base-OT container.
+- `foleage_Audit_test` replaces an installed set and checks the tensor sizes
+  and both DPF indices.
+
+## AUD-024: Scalar Silent-triple SIMD fallbacks had different semantics
+
+Status: fixed
+
+Affected code:
+
+- The non-SSE shuffle, 16-bit shift, and byte-mask helpers in
+  `SilentOtTriple.cpp`.
+
+Concern:
+
+The scalar shuffle preserved most bytes that the SSE instruction zeroed. The
+scalar byte-mask helper repeatedly read byte zero instead of each input byte.
+The scalar shift also left-shifted signed 16-bit values.
+
+Impact:
+
+A build without SSE could generate incorrect OLEs and triples. The signed
+shift also had undefined behavior.
+
+Resolution:
+
+The scalar helpers now implement the SSE operations with unsigned arithmetic.
+The fixed-width compression structure is unchanged.
+
+Verification:
+
+- The existing Silent OLE and triple tests are run in a configuration with
+  `ENABLE_SSE=OFF`.
+
+## AUD-025: Foleage derived dimensions before validating its domain
+
+Status: fixed
+
+Affected code:
+
+- `FoleageTriple::init()`.
+- The `log3ceil()` and `ipow()` integer helpers.
+
+Concern:
+
+For a small domain, initialization subtracted a larger ternary depth from a
+smaller one before checking the block size. The unsigned result wrapped.
+Power-of-three calculations also lacked overflow checks.
+
+Impact:
+
+Invalid local parameters could produce wrapped dimensions, excessive work, or
+an unbounded power-of-three search.
+
+Resolution:
+
+Initialization now validates the party, domain, sparse dimensions, coefficient
+count, and `F3x32` capacity before constructing either DPF. The integer helpers
+reject unrepresentable powers.
+
+Verification:
+
+- `foleage_Audit_test` rejects zero and undersized domains, an invalid party,
+  and an input whose next power of three is not representable.
+
+## AUD-026: Public Foleage arithmetic accepted undersized spans
+
+Status: fixed
+
+Affected code:
+
+- The span overloads of `F4Multiply()`.
+- `foleageFft()`.
+- `FoleageTriple::tensor()`.
+
+Concern:
+
+The arithmetic helpers trusted explicit dimensions without comparing them to
+their spans. The tensor function also multiplied unchecked dimensions and
+accepted one fewer receiver choice than it accessed.
+
+Impact:
+
+Invalid local API inputs could cause out-of-bounds reads or writes.
+
+Resolution:
+
+The public helpers now validate their complete dimensions before entering the
+arithmetic loops. Tensor input is limited to its implemented range and requires
+the full base-OT count.
+
+Verification:
+
+- `foleage_Audit_test` rejects undersized multiplication and FFT spans.
+
+## AUD-027: Default Silent-triple state was indeterminate
+
+Status: fixed
+
+Affected code:
+
+- The `mN` member and public state checks in `SilentOtTriple`.
+
+Concern:
+
+A default-constructed object left `mN` uninitialized. Reading initialization
+state or deriving output dimensions before `init()` therefore read an
+indeterminate value.
+
+Impact:
+
+The default object had undefined state and could enter a dimension-dependent
+path without configuration.
+
+Resolution:
+
+The default object now has `mN = 0`. Public setup and expansion operations
+reject an uninitialized object, while readiness queries report inactive state.
+
+Verification:
+
+- `SilentOtTriple_Audit_test` checks the default initialization and base-OT
+  state.

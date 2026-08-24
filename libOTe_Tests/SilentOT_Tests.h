@@ -27,3 +27,4 @@ void Tools_quasiCyclic_test(const oc::CLP& cmd);
 
 void SilentOtTriple_ole_test(const oc::CLP& cmd);
 void SilentOtTriple_triple_test(const oc::CLP& cmd);
+void SilentOtTriple_Audit_test(const oc::CLP& cmd);

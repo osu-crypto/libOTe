@@ -39,13 +39,13 @@ namespace osuCrypto
 		block dst;
 		for (u64 i = 0; i < 16; ++i)
 		{
-			auto bi = b.get<i8>(i);
+			auto bi = b.get<u8>(i);
 
-			// 0 if bi < 0. otherwise 11111111
-			u8 mask = ~(-i8(bi >> 7));
+			// Zero the output when the control byte has its high bit set.
+			u8 mask = (bi >> 7) - 1;
 			u8 idx = bi & 15;
 
-			dst.set<i8>(i, a.get<i8>(idx) & mask);
+			dst.set<u8>(i, a.get<u8>(idx) & mask);
 		}
 		return dst;
 	}
@@ -54,23 +54,17 @@ namespace osuCrypto
 	OC_FORCEINLINE block slli_epi16(const block& v)
 	{
 		block r;
-		auto rr = (i16*)&r;
-		auto vv = (const i16*)&v;
 		for (u64 i = 0; i < 8; ++i)
-			rr[i] = vv[i] << s;
+			r.set<u16>(i, static_cast<u16>(v.get<u16>(i) << s));
 		return r;
 	}
 
 	OC_FORCEINLINE int movemask_epi8(const block v)
 	{
 		// extract all the of MSBs if each byte.
-		u64 mask = 1;
 		int r = 0;
-		for (i64 i = 0; i < 16; ++i)
-		{
-			r |= (v.get<u8>(0) >> i) & mask;
-			mask <<= 1;
-		}
+		for (u64 i = 0; i < 16; ++i)
+			r |= ((v.get<u8>(i) >> 7) & 1) << i;
 		return r;
 	}
 
@@ -486,6 +480,9 @@ namespace osuCrypto
 
 	SilentOtTriple::BaseCount SilentOtTriple::baseCount(PRNG& prng)
 	{
+		if (!isInitialized())
+			throw std::runtime_error("SilentOtTriple::init must be called first");
+
 		SilentOtTriple::BaseCount r;
 		if (mSendRecv.index())
 		{
@@ -505,6 +502,9 @@ namespace osuCrypto
 
 	void SilentOtTriple::setBaseOts(span<const std::array<block, 2>> baseSendOts, span<const block> recvBaseOts)
 	{
+		if (!isInitialized())
+			throw std::runtime_error("SilentOtTriple::init must be called first");
+
 		if (mSendRecv.index())
 		{
 			std::get<1>(mSendRecv).setBaseCors(recvBaseOts, mChoice, {}, {});
@@ -517,6 +517,9 @@ namespace osuCrypto
 
 	bool SilentOtTriple::hasBaseOts() const
 	{
+		if (!isInitialized())
+			return false;
+
 		if (mSendRecv.index())
 		{
 			return std::get<1>(mSendRecv).hasBaseOts();
@@ -529,6 +532,9 @@ namespace osuCrypto
 
 	macoro::task<> SilentOtTriple::genBaseOts(PRNG& prng, Socket& sock, SilentBaseType baseType)
 	{
+		if (!isInitialized())
+			throw std::runtime_error("SilentOtTriple::init must be called first");
+
 		if (mSendRecv.index())
 		{
 			return std::get<1>(mSendRecv).genBaseCors(prng, sock, baseType == SilentBaseType::BaseExtend);
@@ -542,6 +548,8 @@ namespace osuCrypto
 
 	macoro::task<> SilentOtTriple::expand(span<block> A, span<block> C, PRNG& prng, coproto::Socket& sock)
 	{
+		if (!isInitialized())
+			throw std::runtime_error("SilentOtTriple::init must be called first");
 
 		if (A.size() != divCeil(mN, 128))
 			throw RTE_LOC;
@@ -594,7 +602,7 @@ namespace osuCrypto
 			mSender.mLpnMultType = mLpnMultType;
 			//mSender.mGen.mEagerSend = false;
 
-			co_await mSender.silentSendInplace(mSender.mDelta, mSender.mRequestNumOts, prng, sock);
+			co_await mSender.silentSendInplace(prng.get(), mSender.mRequestNumOts, prng, sock);
 			compressSender(*mSender.mDelta, mSender.mB, C, A, {});
 
 			setTimePoint("compressSenderDone");
@@ -605,6 +613,9 @@ namespace osuCrypto
 		span<block> A, span<block> B, span<block> C,
 		PRNG& prng, coproto::Socket& sock)
 	{
+		if (!isInitialized())
+			throw std::runtime_error("SilentOtTriple::init must be called first");
+
 		if (A.size() != divCeil(mN, 256))
 			throw RTE_LOC;
 		if (B.size() != divCeil(mN, 256))

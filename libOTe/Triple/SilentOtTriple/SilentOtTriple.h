@@ -20,7 +20,7 @@ namespace osuCrypto
 		BitVector mChoice;
 
 		// the number of OTs/OLEs. Triples will be half this amount.
-		u64 mN;
+		u64 mN = 0;
 
 		MultType mLpnMultType = DefaultMultType;
 

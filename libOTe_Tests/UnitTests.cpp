@@ -272,9 +272,11 @@ namespace tests_libOTe
 			tc.add("foleage_Triple_test                     ", foleage_Triple_test);
 
 			tc.add("foleage_GenBase_test                    ", foleage_GenBase_test);
+			tc.add("foleage_Audit_test                      ", foleage_Audit_test);
 
 			tc.add("SilentOtTriple_ole_test                 ", SilentOtTriple_ole_test);
 			tc.add("SilentOtTriple_triple_test              ", SilentOtTriple_triple_test);
+			tc.add("SilentOtTriple_Audit_test               ", SilentOtTriple_Audit_test);
 
 			tc.add("RingLpn_tensor_test                     ", RingLpn_tensor_test);
 			tc.add("RingLpn_basic_test                      ", RingLpn_basic_test);

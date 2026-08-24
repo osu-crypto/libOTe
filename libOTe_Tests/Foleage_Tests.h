@@ -12,6 +12,7 @@ namespace osuCrypto
 	void foleage_Triple_test(const CLP& cmd);
 	void foleage_GenBase_test(const CLP& cmd);
 	void foleage_tensor_test(const CLP& cmd);
+	void foleage_Audit_test(const CLP& cmd);
 
 
 }

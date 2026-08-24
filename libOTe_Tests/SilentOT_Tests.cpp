@@ -318,6 +318,12 @@ void SilentOtTriple_ole_test(const oc::CLP& cmd)
     std::get<0>(r).result();
     std::get<1>(r).result();
 
+    bool senderInputIsNonzero = false;
+    for (const auto& value : B)
+        senderInputIsNonzero |= value != ZeroBlock;
+    if (!senderInputIsNonzero)
+        throw UnitTestFail("Silent OLE sender produced an all-zero input share");
+
     // Verify OLE correlation: C0 ⊕ C1 = A & B
     for (size_t i = 0; i < blocks; i++)
     {
@@ -352,6 +358,19 @@ void SilentOtTriple_ole_test(const oc::CLP& cmd)
 
     if (verbose)
         std::cout << "Time taken: \n" << timer << std::endl;
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
+#endif
+}
+
+void SilentOtTriple_Audit_test(const oc::CLP&)
+{
+#ifdef ENABLE_SILENTOT
+    SilentOtTriple triple;
+    if (triple.isInitialized())
+        throw UnitTestFail("Default SilentOtTriple reported initialized state");
+    if (triple.hasBaseOts())
+        throw UnitTestFail("Default SilentOtTriple reported available base OTs");
 #else
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif
