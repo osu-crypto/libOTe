@@ -54,12 +54,14 @@ namespace osuCrypto
 		SubspaceVoleSender(SubspaceVoleSender && o)
 			: Base(std::move(o))
 			, mVole(std::move(o.mVole))
+			, mMessages(std::move(o.mMessages))
 		{}
 
 		SubspaceVoleSender& operator=(SubspaceVoleSender&& o)
 		{
 			*(Base*)this = (std::move(o));
 			mVole = (std::move(o.mVole));
+			mMessages = (std::move(o.mMessages));
 			return *this;
 		}
 
@@ -115,13 +117,26 @@ namespace osuCrypto
 		{
 			// The extra added on is because some extra memory is used temporarily in generateRandom and
 			// generateChosen.
-			mMessages.reserve(blocks * code().length() + mVole.uPadded() - code().codimension());
+			u64 padding = mVole.uPadded() - code().codimension();
+			if (blocks > ~0ull - padding)
+				throw std::invalid_argument("Subspace VOLE message reservation overflow. " LOCATION);
+			mMessages.reserve(blocks + padding);
 		}
 
 		// Reserve room for the given numbers of random and chosen u subspace VOLEs.
 		void reserveMessages(u64 random, u64 chosen)
 		{
-			reserveMessages(code().codimension() * random + code().length() * chosen);
+			u64 randomWidth = code().codimension();
+			u64 chosenWidth = code().length();
+			if ((randomWidth && random > ~0ull / randomWidth) ||
+				(chosenWidth && chosen > ~0ull / chosenWidth))
+				throw std::invalid_argument("Subspace VOLE message reservation overflow. " LOCATION);
+
+			u64 randomBlocks = randomWidth * random;
+			u64 chosenBlocks = chosenWidth * chosen;
+			if (chosenBlocks > ~0ull - randomBlocks)
+				throw std::invalid_argument("Subspace VOLE message reservation overflow. " LOCATION);
+			reserveMessages(randomBlocks + chosenBlocks);
 		}
 
 		// Extend mMessages by blocks blocks, and return the span of added blocks.
@@ -259,10 +274,13 @@ namespace osuCrypto
 		{
 			// To avoid needing a queue, this assumes that all mMessages are used up before more are
 			// read.
-#ifndef NDEBUG
-			if (!mMessages.empty() && mMessages.size() != mReadIndex + uPadded() - uSize())
+			u64 padding = uPadded() - uSize();
+			if (!mMessages.empty() &&
+				(mReadIndex > mMessages.size() ||
+					mMessages.size() - mReadIndex != padding))
 				throw RTE_LOC;
-#endif
+			if (blocks > ~0ull - padding)
+				throw std::invalid_argument("Subspace VOLE receive size overflow. " LOCATION);
 			clear();
 
 			//u64 currentEnd = mMessages.size();
@@ -274,17 +292,26 @@ namespace osuCrypto
 		// await the result to perform the receive.
 		auto recv(Socket& socket, u64 random, u64 chosen)
 		{
-			return recv(socket, code().codimension() * random + code().length() * chosen);
+			u64 randomWidth = code().codimension();
+			u64 chosenWidth = code().length();
+			if ((randomWidth && random > ~0ull / randomWidth) ||
+				(chosenWidth && chosen > ~0ull / chosenWidth))
+				throw std::invalid_argument("Subspace VOLE receive size overflow. " LOCATION);
+
+			u64 randomBlocks = randomWidth * random;
+			u64 chosenBlocks = chosenWidth * chosen;
+			if (chosenBlocks > ~0ull - randomBlocks)
+				throw std::invalid_argument("Subspace VOLE receive size overflow. " LOCATION);
+			return recv(socket, randomBlocks + chosenBlocks);
 		}
 
 		// Get a message from the receive buffer that is blocks blocks long, with paddedLen extra blocks
 		// on the end that should be ignored.
 		span<block> getMessage(u64 blocks, u64 paddedLen)
 		{
-#ifndef NDEBUG
-			if (mReadIndex + paddedLen > mMessages.size())
+			if (blocks > paddedLen || mReadIndex > mMessages.size() ||
+				paddedLen > mMessages.size() - mReadIndex)
 				throw RTE_LOC;
-#endif
 
 			auto output = mMessages.subspan(mReadIndex, paddedLen);
 			mReadIndex += blocks;

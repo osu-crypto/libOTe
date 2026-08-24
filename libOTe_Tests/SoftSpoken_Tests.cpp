@@ -309,6 +309,122 @@ namespace tests_libOTe
 #endif
     }
 
+    void OtExt_SoftSpoken_BufferState_Audit_Test(const oc::CLP&)
+    {
+#ifdef ENABLE_SOFTSPOKEN_OT
+        const auto expectRejected = [](auto&& fn, const char* message) {
+            bool rejected = false;
+            try { fn(); }
+            catch (const std::exception&) { rejected = true; }
+            if (!rejected)
+                throw UnitTestFail(message);
+        };
+
+        using Sender = SubspaceVoleSender<RepetitionCode>;
+        using Receiver = SubspaceVoleReceiver<RepetitionCode>;
+        constexpr u64 fieldBits = 1;
+        const u64 numVoles = divCeil(gOtExtBaseOtCount, fieldBits);
+
+        Sender moveSource;
+        moveSource.init(fieldBits, numVoles);
+        moveSource.mMessages.resize(2);
+        moveSource.mMessages[0] = block::allSame(0x44);
+        moveSource.mMessages[1] = block::allSame(0x45);
+        Sender moveDestination(std::move(moveSource));
+        if (!moveSource.mMessages.empty() || moveDestination.mMessages.size() != 2 ||
+            moveDestination.mMessages[0] != block::allSame(0x44) ||
+            moveDestination.mMessages[1] != block::allSame(0x45))
+            throw UnitTestFail(
+                "Subspace VOLE move construction lost its send buffer");
+
+        Sender assignmentSource;
+        assignmentSource.init(fieldBits, numVoles);
+        assignmentSource.mMessages.resize(1);
+        assignmentSource.mMessages[0] = block::allSame(0x46);
+        Sender assignmentDestination;
+        assignmentDestination.init(fieldBits, numVoles);
+        assignmentDestination.mMessages.resize(1);
+        assignmentDestination.mMessages[0] = block::allSame(0x99);
+        assignmentDestination = std::move(assignmentSource);
+        if (!assignmentSource.mMessages.empty() ||
+            assignmentDestination.mMessages.size() != 1 ||
+            assignmentDestination.mMessages[0] != block::allSame(0x46))
+            throw UnitTestFail(
+                "Subspace VOLE move assignment retained a stale send buffer");
+
+        Sender reservationSender;
+        reservationSender.init(fieldBits, numVoles);
+        constexpr u64 chosen = 2;
+        const u64 reservationPadding = reservationSender.mVole.uPadded() -
+            reservationSender.code().codimension();
+        const u64 expectedCapacity = reservationSender.code().length() * chosen +
+            reservationPadding;
+        reservationSender.reserveMessages(0, chosen);
+        if (reservationSender.mMessages.capacity() != expectedCapacity)
+            throw UnitTestFail(
+                "Subspace VOLE multiplied its message reservation twice");
+        expectRejected([&] { reservationSender.reserveMessages(~0ull, 1); },
+            "Subspace VOLE accepted a wrapped message reservation");
+
+        Receiver receiver;
+        receiver.init(fieldBits, numVoles);
+        auto sockets = cp::LocalAsyncSocket::makePair();
+        receiver.mMessages.resize(1);
+        receiver.mReadIndex = 0;
+        expectRejected([&] { (void)receiver.recv(sockets[0], 1); },
+            "Subspace VOLE discarded an unread receive buffer");
+
+        receiver.mMessages.resize(2);
+        receiver.mReadIndex = 1;
+        expectRejected([&] { (void)receiver.getMessage(2, 2); },
+            "Subspace VOLE read beyond its receive buffer");
+        receiver.mReadIndex = 0;
+        expectRejected([&] { (void)receiver.getMessage(2, 1); },
+            "Subspace VOLE advanced beyond its padded message");
+        receiver.clear();
+        expectRejected([&] { (void)receiver.recv(sockets[0], ~0ull, 1); },
+            "Subspace VOLE accepted a wrapped receive size");
+
+        const block hashKey(0x4155442d303435ull, 0x525443522d4d4f56ull);
+        const block aesSeed(0x53544154452d4d4full, 0x56452d4145530000ull);
+        TwoOneRTCR<1> rtcrSource(hashKey, aesSeed);
+        const block movedKey = rtcrSource.useAES(1).getKey();
+        TwoOneRTCR<1> rtcrDestination(std::move(rtcrSource));
+        if (rtcrDestination.useAES(1).getKey() != movedKey)
+            throw UnitTestFail("TwoOneRTCR move construction lost its AES key");
+        expectRejected([&] { (void)rtcrSource.useAES(1); },
+            "TwoOneRTCR move construction left the source seeded");
+
+        TwoOneRTCR<1> rtcrAssignmentSource(hashKey, aesSeed);
+        const block assignedKey = rtcrAssignmentSource.useAES(1).getKey();
+        TwoOneRTCR<1> rtcrAssignmentDestination(
+            block::allSame(0x77), block::allSame(0x88));
+        (void)rtcrAssignmentDestination.useAES(1);
+        rtcrAssignmentDestination = std::move(rtcrAssignmentSource);
+        if (rtcrAssignmentDestination.useAES(1).getKey() != assignedKey)
+            throw UnitTestFail("TwoOneRTCR move assignment retained a stale AES key");
+        expectRejected([&] { (void)rtcrAssignmentSource.useAES(1); },
+            "TwoOneRTCR move assignment left the source seeded");
+
+        SoftSpokenMalOtReceiver emptyReceiver;
+        BitVector emptyChoices;
+        AlignedUnVector<block> emptyMessages;
+        PRNG prng(block::allSame(0x50));
+        auto emptySockets = cp::LocalAsyncSocket::makePair();
+        expectRejected([&] {
+            cp::sync_wait(emptyReceiver.receive(
+                emptyChoices, emptyMessages, prng, emptySockets[0]));
+        }, "SoftSpoken malicious receiver accepted an empty request");
+        if (emptyReceiver.hasBaseOts() ||
+            emptyReceiver.mBase.mSubVole.hasSeed() ||
+            emptyReceiver.mBase.mBlockIdx != 0)
+            throw UnitTestFail(
+                "SoftSpoken mutated receiver state for an empty request");
+#else
+        throw UnitTestSkipped("ENABLE_SOFTSPOKEN_OT is not defined.");
+#endif
+    }
+
     void OtExt_SoftSpokenSemiHonest_Test(const oc::CLP& cmd)
     {
 #ifdef ENABLE_SOFTSPOKEN_OT

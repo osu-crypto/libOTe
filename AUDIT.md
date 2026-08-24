@@ -1395,3 +1395,187 @@ Verification:
 - `OtExt_SoftSpoken_AesState_Audit_Test` checks the index-seven split against
   independently derived key eight and exercises the parent usage limit after
   a seeded split.
+
+## AUD-044: Moving a Subspace VOLE sender lost pending corrections
+
+Status: fixed
+
+Affected code:
+
+- Move construction and move assignment in `SubspaceVoleSender`.
+
+Concern:
+
+The move operations transferred the code and base VOLE state but omitted the
+pending message buffer. Move construction left the corrections in the source.
+Move assignment also retained any stale corrections in the destination.
+
+Impact:
+
+A caller that moved the public low-level sender after generating corrections
+could send an empty or cross-session transcript. The peer could then block,
+reject the transcript, or use corrections from the wrong protocol state.
+
+Resolution:
+
+Both move operations now transfer the pending message buffer. The buffer move
+also leaves the source container empty.
+
+Verification:
+
+- `OtExt_SoftSpoken_BufferState_Audit_Test` checks move construction and move
+  assignment with nonempty source and destination buffers.
+
+## AUD-045: TwoOneRTCR moves omitted their AES state
+
+Status: fixed
+
+Affected code:
+
+- Move construction and move assignment in `TwoOneRTCR`.
+
+Concern:
+
+The custom move operations transferred the hash key and tweak state but did not
+move the `AESRekeyManager` base. A move-constructed object therefore had no AES
+key. A move-assigned object retained the destination's previous AES key.
+
+Impact:
+
+Continuing the hash through a moved object could evaluate unseeded AES state or
+combine one session's tweak state with another session's AES key. The sender
+and receiver would then derive inconsistent random-OT outputs.
+
+Resolution:
+
+The move operations now transfer the `AESRekeyManager` base before transferring
+the hash and tweak state. The source manager becomes logically unseeded.
+
+Verification:
+
+- `OtExt_SoftSpoken_BufferState_Audit_Test` checks the AES key after move
+  construction and move assignment. It also checks that both sources reject
+  later AES use.
+
+## AUD-046: Subspace VOLE receive validation was debug-only
+
+Status: fixed
+
+Affected code:
+
+- Receive-buffer handling in `SubspaceVoleReceiver::recv()` and
+  `SubspaceVoleReceiver::getMessage()`.
+
+Concern:
+
+Release builds omitted the checks for unread corrections and receive-buffer
+bounds. The low-level interface could discard unread data or construct a span
+outside the active buffer. Its size calculations also allowed unsigned wrap.
+
+Impact:
+
+Incorrect low-level batch accounting could produce invalid VOLE correlations
+or an out-of-bounds span. The current high-level SoftSpoken loops provide
+balanced sizes, so this issue required direct low-level misuse or corrupted
+caller state.
+
+Resolution:
+
+The lifecycle and bounds checks now run in every build. Checked multiplication,
+addition, and subtraction reject unrepresentable receive sizes without clearing
+the active buffer.
+
+Verification:
+
+- `OtExt_SoftSpoken_BufferState_Audit_Test` rejects unread-buffer replacement,
+  over-read, invalid padding, and wrapped receive dimensions.
+
+## AUD-047: Empty malicious SoftSpoken calls desynchronized the parties
+
+Status: fixed
+
+Affected code:
+
+- Input validation in `SoftSpokenMalOtReceiver::receive()`.
+
+Concern:
+
+The malicious sender rejected an empty OT request before protocol setup. The
+receiver accepted the request and started base generation or expansion.
+
+Impact:
+
+An honest pair given empty inputs followed different protocol paths. The
+receiver could consume persistent state before the sender closed the channel.
+
+Resolution:
+
+The receiver now rejects an empty request before base generation, seed
+exchange, or counter advancement.
+
+Verification:
+
+- `OtExt_SoftSpoken_BufferState_Audit_Test` submits empty receiver inputs and
+  checks that the receiver retains its initial protocol state.
+
+## AUD-048: Subspace VOLE reservation multiplied by code length twice
+
+Status: fixed
+
+Affected code:
+
+- Both overloads of `SubspaceVoleSender::reserveMessages()`.
+
+Concern:
+
+The two-argument overload converted random and chosen VOLE counts into message
+blocks. The one-argument overload then multiplied that block count by the code
+length again.
+
+Impact:
+
+For field size two and 4,096 chosen chunks, the sender reserved about 1 GiB for
+an approximately 8 MiB correction buffer. Large, valid OT requests could cause
+avoidable allocation failure or memory pressure.
+
+Resolution:
+
+The one-argument overload now treats its input as a block count. Both overloads
+use checked arithmetic before reserving the exact block count plus temporary
+padding.
+
+Verification:
+
+- `OtExt_SoftSpoken_BufferState_Audit_Test` checks the exact capacity for a
+  chosen-VOLE reservation and rejects a wrapped reservation.
+
+## AUD-049: Malicious SoftSpoken batching left its chunk count at zero
+
+Status: fixed
+
+Affected code:
+
+- `SoftSpokenMalOtReceiver::runBatch()`.
+
+Concern:
+
+The receiver declared `numChunks` but never assigned the number of chunks. Its
+initial reservation was always empty. After a communication boundary,
+subtracting the processed count from zero wrapped to a large integer.
+
+Impact:
+
+The receiver repeatedly grew its first correction buffer. Later reservations
+requested a complete communication window even when fewer chunks remained.
+AUD-048 amplified the resulting memory cost.
+
+Resolution:
+
+The receiver now computes the chunk count from the input length before its
+first reservation. The calculation avoids addition-based ceiling overflow.
+
+Verification:
+
+- Existing malicious SoftSpoken tests exercise the corrected batching path.
+- The reservation checks in `OtExt_SoftSpoken_BufferState_Audit_Test` cover the
+  shared correction-buffer accounting.

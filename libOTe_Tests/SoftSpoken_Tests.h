@@ -15,6 +15,7 @@ namespace tests_libOTe
 	void OtExt_SoftSpokenSemiHonest_Test(const oc::CLP& cmd);
 	void OtExt_SoftSpokenSemiHonest_Split_Test(const oc::CLP& cmd);
 	void OtExt_SoftSpoken_AesState_Audit_Test(const oc::CLP& cmd);
+	void OtExt_SoftSpoken_BufferState_Audit_Test(const oc::CLP& cmd);
 	//void OtExt_SoftSpokenSemiHonest21_Test(const oc::CLP& cmd);
 	void DotExt_SoftSpokenMaliciousLeaky_Test(const oc::CLP& cmd);
 	void OtExt_SoftSpokenMalicious21_Test(const oc::CLP& cmd);
