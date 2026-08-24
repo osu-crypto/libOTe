@@ -27,11 +27,9 @@ namespace osuCrypto
         u64 n = a.size();
 		if (aHat.size() != n)
 			throw std::invalid_argument("matrix NTT input and output spans must have equal lengths. " LOCATION);
-        auto ln = log2ceil(n);
+        auto ln = checkedNttLogSize(n);
         auto qq = F::order(); qq = qq - 1;
 
-        if (n != 1ull << ln)
-            throw RTE_LOC;
         if (n > qq)
             throw RTE_LOC;
         if (qq % n != 0)
@@ -40,7 +38,12 @@ namespace osuCrypto
             throw RTE_LOC;
 
         if(isPrimRootOfUnity(2 * n, psi) == false)
-			throw RTE_LOC;
+			throw std::invalid_argument("Matrix NTT root must be primitive for the doubled transform order. " LOCATION);
+		if (n == 1)
+		{
+			aHat[0] = a[0];
+			return;
+		}
 
         using SF = std::remove_cvref_t<decltype(psi)>;
         std::vector<SF> powers(2 * n);
@@ -95,11 +98,9 @@ namespace osuCrypto
         auto n = a.size();
 		if (aHat_.size() != n)
 			throw std::invalid_argument("matrix inverse NTT input and output spans must have equal lengths. " LOCATION);
-        auto ln = log2ceil(n);
+        auto ln = checkedNttLogSize(n);
         auto qq = F::order(); qq = qq - 1;
 
-        if (n != 1ull << ln)
-            throw RTE_LOC;
         if (n > qq)
             throw RTE_LOC;
         if (qq % n != 0)
@@ -107,7 +108,12 @@ namespace osuCrypto
         if (psi.pow(2 * n) != 1)
             throw RTE_LOC;
         if (isPrimRootOfUnity(2 * n, psi) == false)
-            throw RTE_LOC;
+            throw std::invalid_argument("Matrix inverse NTT root must be primitive for the doubled transform order. " LOCATION);
+		if (n == 1)
+		{
+			a[0] = aHat_[0];
+			return;
+		}
 
         span<const F> aHat;
         std::vector<F> temp;

@@ -2426,3 +2426,238 @@ Verification:
 - `ExConvCode_Audit_Test` checks a strong pseudoprime, the largest 64-bit
   prime, `UINT64_MAX`, known next-prime output, and exhaustion at the domain
   boundary.
+
+## AUD-076: Dynamic sparse-matrix mutations broke adjacency invariants
+
+Status: fixed
+
+Affected code:
+
+- `DynSparseMtx` resizing, clearing, row operations, column selection, and
+  `VecSortSet` erasure.
+
+Concern:
+
+Resize used its growth condition for the shrink cleanup loops. Growth could
+remove reciprocal entries from existing columns, while shrink simply
+discarded rows or columns that were still referenced from the opposite side.
+The clear operations removed only the reciprocal entries and left the selected
+set populated. Missing-set erasure and invalid public indices were assert-only
+or unchecked.
+
+Impact:
+
+Direct mutation of a dynamic sparse matrix could silently corrupt its paired
+row/column representation. Later mutation or conversion could erase unrelated
+entries or access outside the row or column arrays.
+
+Resolution:
+
+Shrink now clears removed rows and columns in descending order, growth
+preserves existing edges, and clear operations empty both sides. Public
+mutation and selection indices are validated before mutation, self-row
+addition clears the row, validation checks index domains before dereferencing,
+and sorted-set erasure rejects a missing element.
+
+Verification:
+
+- `Mtx_Audit_Test` grows and shrinks a populated matrix, checks edge
+  preservation and removal, clears a row, validates both adjacency views, and
+  verifies transactional rejection of an invalid appended column.
+
+## AUD-077: Sparse-matrix APIs trusted Release-disabled boundary assertions
+
+Status: fixed
+
+Affected code:
+
+- `SparseMtx` initialization, vector multiplication, submatrices, column
+  selection, concatenation, multiplication, addition, and coordinate lookup.
+
+Concern:
+
+Several public operations used assertions as their only dimension checks.
+Short vectors, invalid column indices, or overflowing submatrix ranges could
+therefore be indexed out of bounds in Release. Initialization terminated the
+process with `abort()` for duplicate or out-of-range points.
+
+Impact:
+
+Malformed direct inputs, including dimensions derived from an external
+message by a caller, could cause out-of-bounds access or process termination.
+
+Resolution:
+
+Each public operation now validates its own vector lengths, matrix dimensions,
+indices, and subtraction-based submatrix ranges before entering its existing
+loop. Initialization validates all points and reports malformed input with an
+exception instead of aborting. Multiplication inner loops are unchanged.
+
+Verification:
+
+- `Mtx_Audit_Test` covers short multiplication input, invalid submatrices and
+  selected columns, duplicate and out-of-range points, and mismatched matrix
+  multiplication and addition.
+
+## AUD-078: Dense-matrix operations admitted unsafe dimensions
+
+Status: fixed
+
+Affected code:
+
+- `DenseMtx` resizing, selection, row swapping, multiplication, addition,
+  inversion, and submatrix extraction.
+
+Concern:
+
+Row padding and storage products could wrap. Other public operations used
+assertions or no checks for operand dimensions and requested ranges, permitting
+out-of-bounds access in Release.
+
+Impact:
+
+Invalid direct use of the matrix API could allocate the wrong storage size or
+read and write beyond an operand.
+
+Resolution:
+
+Resize individually checks row padding and the column-by-block-row product
+before changing live dimensions. All compound operations validate dimensions
+or indices once at their boundary. Dense bit-access and arithmetic inner loops
+remain unchanged.
+
+Verification:
+
+- `Mtx_Audit_Test` covers overflowing resize, invalid selection and
+  submatrices, nonsquare inversion, and mismatched addition and multiplication.
+
+## AUD-079: Primitive-root validation skipped prime factors
+
+Status: fixed
+
+Affected code:
+
+- `isPrimRootOfUnity()` and NTT root validation and precomputation.
+
+Concern:
+
+The primitivity loop omitted the first and last unique factors. In particular,
+a power-of-two order has one factor and received no proper-order check, so an
+order-two element could be accepted for a larger NTT. An empty factor list
+underflowed the loop bound. Root precomputation also checked a root for twice
+the actual output-span order; the incomplete validator had hidden that error.
+
+Impact:
+
+A caller-supplied nonprimitive root could produce a noninvertible or otherwise
+incorrect transform while passing validation.
+
+Resolution:
+
+Validation reconstructs the order with checked products, handles order one,
+and checks every unique prime factor. Recursive transforms validate
+primitivity once at their outer entry, and precomputation consistently requires
+a primitive root whose order equals the power-table span. Optimized
+precomputed-twiddle inner loops are unchanged.
+
+Verification:
+
+- `Field_Audit_Test` rejects an order-two element as a primitive eighth root
+  and accepts the primitive first root.
+- `Ntt_Audit_Test` rejects the order-two element in both forward and inverse
+  Release transforms; existing matrix, recursive, and batch NTT tests verify
+  the corrected precomputation contract.
+
+## AUD-080: Root generation could divide by zero or index past root tables
+
+Status: fixed
+
+Affected code:
+
+- Generic, Fp31, and Goldilocks `primRootOfUnity()` implementations.
+
+Concern:
+
+The generic implementation accepted zero and orders that did not divide the
+field multiplicative order. The specialized power-of-two implementations
+shifted before bounding the logarithm and did not check their table indices.
+
+Impact:
+
+Invalid direct orders could cause division by zero, undefined shifts, return a
+non-root, or read beyond a static root table.
+
+Resolution:
+
+The generic path requires a nonzero divisor of the multiplicative order. Fp31
+and Goldilocks require a representable power of two and separately bound the
+index by their respective root tables and field two-adicities.
+
+Verification:
+
+- `Field_Audit_Test` covers zero, a nondividing order, Fp31 order `2^28`, and
+  Goldilocks order `2^33`.
+
+## AUD-081: Fp exponent and zero-division semantics were incorrect
+
+Status: fixed
+
+Affected code:
+
+- `Fp::pow()`, `Fp::inverse()`, and the division operators.
+
+Concern:
+
+Exponentiation reduced large exponents modulo the field order instead of the
+multiplicative-group order, changing valid powers such as `a^(p+1)`. Inversion
+of zero aborted in Debug but returned zero in Release, so Release division by
+zero silently returned zero.
+
+Impact:
+
+Large-exponent field computations could return the wrong element, and division
+by zero had build-dependent behavior that could hide invalid algebraic state.
+
+Resolution:
+
+Exponentiation now processes the supplied nonnegative exponent without the
+incorrect reduction. `inverse(0)` consistently follows the vector-friendly
+zero convention already used by Goldilocks, while `/` and `/=` explicitly
+reject a zero divisor.
+
+Verification:
+
+- `Field_Audit_Test` checks `a^(p+1) = a^2`, the zero-inverse convention, and
+  division-by-zero rejection.
+
+## AUD-082: NTT size validation performed unsafe derived arithmetic
+
+Status: fixed
+
+Affected code:
+
+- Recursive, iterative, matrix, precomputation, and twiddle-extraction NTT
+  entry points.
+
+Concern:
+
+Zero lengths reached `log2ceil(0)`, a shift by 64, and `n - 1` allocation
+arithmetic. Other paths formed a doubled root order before establishing a safe
+size and did not consistently enforce the 32-bit bit-reversal index domain.
+
+Impact:
+
+Malformed direct calls could underflow allocations or invoke undefined shifts
+before the transform rejected the input.
+
+Resolution:
+
+A shared entry check now requires a nonzero power-of-two size in the supported
+32-bit index domain and bounds the doubled order before any derived arithmetic.
+Size-one transforms return without calling zero-bit reversal. Arithmetic and
+butterfly inner loops are unchanged.
+
+Verification:
+
+- `Ntt_Audit_Test` covers empty forward, inverse, matrix, precomputation, and
+  twiddle calls, plus an extreme size outside the supported domain.

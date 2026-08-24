@@ -17,7 +17,10 @@
 #include "cryptoTools/Crypto/RandomOracle.h"
 #include <cassert>
 #include <algorithm>
+#include <limits>
 #include <set>
+#include <stdexcept>
+#include <type_traits>
 
 #include <iostream>
 
@@ -182,7 +185,17 @@ namespace osuCrypto
             PointList pnts(mRows.size(), idx.size());
             for (u64 i = 0; i < idx.size(); ++i)
             {
-                for (auto r : mCols[idx[i]])
+                if constexpr (std::is_signed_v<IdxType>)
+                {
+                    if (idx[i] < 0)
+                        throw std::invalid_argument("Sparse matrix column index is out of range. " LOCATION);
+                }
+
+                auto colIdx = static_cast<u64>(idx[i]);
+                if (colIdx >= cols())
+                    throw std::invalid_argument("Sparse matrix column index is out of range. " LOCATION);
+
+                for (auto r : mCols[colIdx])
                 {
                     pnts.push_back({ r,i });
                 }
@@ -214,8 +227,10 @@ namespace osuCrypto
         template<typename ConstVec, typename Vec>
         void multAdd(const ConstVec& x, Vec& y) const
         {
-            assert(cols() == x.size());
-            assert(y.size() == rows());
+            if (cols() != x.size())
+                throw std::invalid_argument("Sparse matrix input vector has the wrong size. " LOCATION);
+            if (y.size() != rows())
+                throw std::invalid_argument("Sparse matrix output vector has the wrong size. " LOCATION);
             for (u64 i = 0; i < rows(); ++i)
             {
                 for (auto c : row(i))
@@ -231,8 +246,10 @@ namespace osuCrypto
         template<typename ConstVec, typename Vec>
         void leftMultAdd(const ConstVec& x, Vec& y) const
         {
-            assert(rows() == x.size());
-            assert(y.size() == cols());
+            if (rows() != x.size())
+                throw std::invalid_argument("Sparse matrix left input vector has the wrong size. " LOCATION);
+            if (y.size() != cols())
+                throw std::invalid_argument("Sparse matrix left output vector has the wrong size. " LOCATION);
             for (u64 i = 0; i < cols(); ++i)
             {
                 for (auto c : col(i))
@@ -554,6 +571,8 @@ namespace osuCrypto
 
         bool operator()(u64 r, u64 c) const
         {
+            if (r >= rows() || c >= cols())
+                throw std::invalid_argument("Dynamic sparse matrix index is out of range. " LOCATION);
             return mRows[r].find(c) != mRows[r].end();
         }
 
@@ -582,6 +601,7 @@ namespace osuCrypto
         void Mtx_add_test();
         void Mtx_mult_test();
         void Mtx_invert_test();
+        void Mtx_Audit_Test();
     }
 
 

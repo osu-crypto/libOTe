@@ -63,6 +63,7 @@ namespace tests_libOTe
 			tc.add("Mtx_add_test                            ", tests::Mtx_add_test);
 			tc.add("Mtx_mult_test                           ", tests::Mtx_mult_test);
 			tc.add("Mtx_invert_test                         ", tests::Mtx_invert_test);
+			tc.add("Mtx_Audit_Test                          ", tests::Mtx_Audit_Test);
 
 			tc.add("EACode_encode_basic_test                ", EACode_encode_basic_test);
 			tc.add("EACode_weight_test                      ", EACode_weight_test);
@@ -128,6 +129,7 @@ namespace tests_libOTe
 			tc.add("Field_F7681_Test                        ", Field_F7681_Test);
 			tc.add("Field_F12289_Test                       ", Field_F12289_Test);
 			tc.add("Field_Fp31_Test                         ", Field_Fp31_Test);
+			tc.add("Field_Audit_Test                        ", Field_Audit_Test);
 
 
 			tc.add("UInt_Basics_Test                        ", UInt_Basics_Test);

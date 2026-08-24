@@ -38,6 +38,20 @@ namespace tests_libOTe
 		expectInvalid([&] { inttNegWrapGs<F>(full, shortSpan, psi, NttOrder::BitReversedOrder); });
 		expectInvalid([&] { nttNegWrapMatrix<F>(shortSpan, full, psi, NttOrder::NormalOrder); });
 		expectInvalid([&] { inttNegWrapMatrix<F>(full, shortSpan, psi, NttOrder::NormalOrder); });
+
+		std::vector<F> empty;
+		expectInvalid([&] { nttNegWrapCt<F>(empty, empty, F::one(), NttOrder::NormalOrder); });
+		expectInvalid([&] { inttNegWrapGs<F>(empty, empty, F::one(), NttOrder::BitReversedOrder); });
+		expectInvalid([&] { nttNegWrapMatrix<F>(empty, empty, F::one(), NttOrder::NormalOrder); });
+		expectInvalid([&] { inttNegWrapMatrix<F>(empty, empty, F::one(), NttOrder::NormalOrder); });
+		expectInvalid([&] { nttPrecomputeRootsOfUnity<F>(F::one(), empty); });
+		expectInvalid([&] { (void)getNegWrapRoots<F>(empty, 0); });
+		expectInvalid([&] { (void)checkedNttLogSize(std::numeric_limits<u64>::max()); });
+
+		std::vector<F> orderTwoInput(4), orderTwoOutput(4);
+		F orderTwoRoot = F::order() - 1;
+		expectInvalid([&] { nttNegWrapCt<F>(orderTwoOutput, orderTwoInput, orderTwoRoot, NttOrder::NormalOrder); });
+		expectInvalid([&] { inttNegWrapGs<F>(orderTwoOutput, orderTwoInput, orderTwoRoot, NttOrder::BitReversedOrder); });
 	}
 
 	void Ntt_nttNegWrapMatrix_normal_Test()

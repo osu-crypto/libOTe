@@ -1,6 +1,8 @@
 #pragma once
 
 #include "cryptoTools/Common/Defines.h"
+#include <limits>
+#include <stdexcept>
 
 namespace osuCrypto
 {
@@ -9,6 +11,23 @@ namespace osuCrypto
 		NormalOrder, // NO order
 		BitReversedOrder, // BO order
 	};
+
+	// All current NTT index permutations use 32-bit indices and all negacyclic
+	// transforms form a doubled root order. Validate those domains before any
+	// shifts, n - 1 expressions, or 2 * n expressions are evaluated.
+	inline u64 checkedNttLogSize(u64 n)
+	{
+		if (n == 0)
+			throw std::invalid_argument("NTT size must be nonzero. " LOCATION);
+
+		auto logN = log2ceil(n);
+		if (logN > 32 || n != (u64{ 1 } << logN))
+			throw std::invalid_argument("NTT size must be a power of two within the 32-bit index domain. " LOCATION);
+		if (n > std::numeric_limits<u64>::max() / 2)
+			throw std::invalid_argument("Doubled NTT root order overflows. " LOCATION);
+
+		return logN;
+	}
 
 	static const unsigned char BitReverseTable256[] =
 	{
@@ -110,6 +129,8 @@ namespace osuCrypto
 	void bitReversePermute(std::span<F> a)
 	{
 		auto n = a.size();
+		if (n <= 1)
+			return;
 		const u64 bits = log2ceil(n);
 		for (u64 i = 0; i < n; ++i) {
 			u64 j = bitReversal(bits, i);

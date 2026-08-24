@@ -14,4 +14,5 @@ namespace tests_libOTe
     void Field_F12289_Test();
     void Field_Fp31_Test();
     void Field_GF128_Test();
+	void Field_Audit_Test();
 }

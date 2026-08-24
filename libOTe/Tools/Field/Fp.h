@@ -4,6 +4,8 @@
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include <ostream>
+#include <limits>
+#include <stdexcept>
 #include "libOTe/Tools/CoeffCtx.h"
 #include <array>
 
@@ -117,12 +119,16 @@ namespace osuCrypto
 		constexpr Fp operator/(const Fp& o) const
 		{
 			assert(mVal < mMod && o.mVal < mMod);
+			if (o.mVal == 0)
+				throw std::domain_error("Finite-field division by zero. " LOCATION);
 			return *this * o.inverse();
 		}
 
 		constexpr Fp& operator/=(const Fp& o)
 		{
 			assert(mVal < mMod && o.mVal < mMod);
+			if (o.mVal == 0)
+				throw std::domain_error("Finite-field division by zero. " LOCATION);
 			*this = *this * o.inverse();
 			return *this;
 		}
@@ -153,8 +159,6 @@ namespace osuCrypto
 				throw RTE_LOC;
 			if (v == 0)
 				return 1;
-			if (v > mMod)
-				v = v % mMod;
 
 			Fp y = 1;
 			Fp x = *this;
@@ -186,6 +190,11 @@ namespace osuCrypto
 
 		constexpr Fp inverse() const
 		{
+			// Match the vector-friendly convention used by Goldilocks. Division
+			// still rejects a zero divisor explicitly.
+			if (mVal == 0)
+				return zero();
+
 			// fermat's little theorem
 			auto p = pow(mMod - 2);
 			assert((*this * p).mVal == 1);
@@ -352,15 +361,21 @@ namespace osuCrypto
 		u64 n = 1;
 		for (auto fe : factors)
 		{
+			if (fe.mFactor < 2 || fe.mExp == 0)
+				throw std::invalid_argument("Root-of-unity factors must have positive exponents and factors of at least two. " LOCATION);
 			for (u64 i = 0; i < fe.mExp; ++i)
+			{
+				if (n > std::numeric_limits<u64>::max() / fe.mFactor)
+					throw std::invalid_argument("Root-of-unity order overflows. " LOCATION);
 				n *= fe.mFactor;
+			}
 		}
 
 		if ((p - 1) % n)
-			throw RTE_LOC;
+			throw std::invalid_argument("Root-of-unity order must divide the field multiplicative order. " LOCATION);
 
 		// make suer u is in Fp*
-		if (u == 0 || u.integer() % p == 0)
+		if (u == 0)
 			return false;
 
 		// make sure u is a root of unity.
@@ -368,7 +383,7 @@ namespace osuCrypto
 			return false;
 
 		// check that u is a primitive root of unity.
-		for (u64 i = 1; i < factors.size() - 1; ++i)
+		for (u64 i = 0; i < factors.size(); ++i)
 		{
 			if (u.pow(n / factors[i].mFactor) == 1)
 			{
@@ -391,7 +406,12 @@ namespace osuCrypto
 	inline F primRootOfUnity(u64 n, F generator)
 	{
 		auto p = F::order();
-		return generator.pow((p - 1) / n);
+		if (n == 0)
+			throw std::invalid_argument("Root-of-unity order must be nonzero. " LOCATION);
+		auto pMinusOne = p - 1;
+		if (pMinusOne % n)
+			throw std::invalid_argument("Root-of-unity order must divide the field multiplicative order. " LOCATION);
+		return generator.pow(static_cast<u64>(pMinusOne / n));
 	}
 
 	template<typename F>
@@ -523,7 +543,7 @@ namespace osuCrypto
 	using Fp31 = Fp<2013265921, u32, u64>;
 	static_assert(sizeof(Fp31) == 4, "expecting 32 bits");
 
-	// Table of primitive 2^k-th roots of unity for k=0..32, suitable for NTTs over F_p.
+	// Table of primitive 2^k-th roots of unity for k=0..27, suitable for NTTs over F_p.
 	// Entry i is a primitive 2^i-th root. Consumers should ensure sizes are powers of two.
 	static constexpr std::array<Fp31, 28> Fp31RootsOfUnity =
 	{
@@ -558,15 +578,19 @@ namespace osuCrypto
 	};
 
 
-	// Goldilocks specialization:
+	// Fp31 specialization:
 	// - n must be a power of two (n = 2^k).
 	// - Returns the precomputed primitive n-th root from the table above.
 	template<>
 	inline Fp31 primRootOfUnity<Fp31>(u64 n)
 	{
+		if (n == 0)
+			throw std::invalid_argument("Fp31 root-of-unity order must be nonzero. " LOCATION);
 		auto ln = log2ceil(n);
-		if (1ull << ln != n)
-			throw RTE_LOC;
+		if (ln >= 64 || (1ull << ln) != n)
+			throw std::invalid_argument("Fp31 root-of-unity order must be a power of two. " LOCATION);
+		if (ln >= Fp31RootsOfUnity.size())
+			throw std::invalid_argument("Fp31 root-of-unity order exceeds the field two-adicity. " LOCATION);
 		return Fp31RootsOfUnity[ln];
 	}
 }

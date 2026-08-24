@@ -4,6 +4,7 @@
 #include <array>
 #include <iostream>
 #include <assert.h>
+#include <stdexcept>
 #include <utility>
 #include "util.h"
 #include "UInt.h"
@@ -821,9 +822,13 @@ namespace osuCrypto
 	template<>
 	inline Goldilocks primRootOfUnity<Goldilocks>(u64 n)
 	{
+		if (n == 0)
+			throw std::invalid_argument("Goldilocks root-of-unity order must be nonzero. " LOCATION);
 		auto ln = log2ceil(n);
-		if (1ull << ln != n)
-			throw RTE_LOC;
+		if (ln >= 64 || (1ull << ln) != n)
+			throw std::invalid_argument("Goldilocks root-of-unity order must be a power of two. " LOCATION);
+		if (ln >= GoldilocksRootsOfUnity.size())
+			throw std::invalid_argument("Goldilocks root-of-unity order exceeds the field two-adicity. " LOCATION);
 		return GoldilocksRootsOfUnity[ln];
 	}
 

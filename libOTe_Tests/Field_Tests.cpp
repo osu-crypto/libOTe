@@ -3,6 +3,7 @@
 #include "libOTe/Tools/Field/Fp.h"
 #include "libOTe/Tools/Field/GF128.h"
 #include "libOTe/Tools/Field/FVec.h"
+#include "libOTe/Tools/Field/Goldilocks.h"
 
 #include "libOTe/Tools/Ntt/Poly.h"
 #include "Field_Tests.h"
@@ -173,6 +174,55 @@ namespace tests_libOTe
 	void Field_GF128_Test()
 	{
 		//GF128 g;
+	}
+
+	void Field_Audit_Test()
+	{
+		using F = F7681;
+
+		auto expectInvalid = [](auto&& fn)
+		{
+			bool rejected = false;
+			try
+			{
+				fn();
+			}
+			catch (const std::invalid_argument&)
+			{
+				rejected = true;
+			}
+			if (!rejected)
+				throw RTE_LOC;
+		};
+
+		F a = 3;
+		if (a.pow(F::order() + 1) != a * a)
+			throw RTE_LOC;
+		if (F::zero().inverse() != F::zero())
+			throw RTE_LOC;
+
+		bool divisionRejected = false;
+		try
+		{
+			(void)(a / F::zero());
+		}
+		catch (const std::domain_error&)
+		{
+			divisionRejected = true;
+		}
+		if (!divisionRejected)
+			throw RTE_LOC;
+
+		F minusOne = F::order() - 1;
+		if (isPrimRootOfUnity<F>(8, minusOne))
+			throw RTE_LOC;
+		if (!isPrimRootOfUnity<F>(1, F::one()))
+			throw RTE_LOC;
+
+		expectInvalid([&] { (void)primRootOfUnity<F>(0, F(2)); });
+		expectInvalid([&] { (void)primRootOfUnity<F>(7, F(2)); });
+		expectInvalid([&] { (void)primRootOfUnity<Fp31>(u64{ 1 } << 28); });
+		expectInvalid([&] { (void)primRootOfUnity<Goldilocks>(u64{ 1 } << 33); });
 	}
 
 }

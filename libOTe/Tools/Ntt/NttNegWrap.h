@@ -83,12 +83,10 @@ namespace osuCrypto
 		u64 n = a.size();
 		if (aHat.size() != n)
 			throw std::invalid_argument("NTT input and output spans must have equal lengths. " LOCATION);
-		auto ln = log2ceil(n);
+		auto ln = checkedNttLogSize(n);
 		auto qq = F::order() - 1;
 		auto q = static_cast<std::conditional_t<(sizeof(decltype(qq)) < sizeof(u64)), u64, decltype(qq)>>(qq);
 
-		if (n != 1ull << ln)
-			throw RTE_LOC;
 		if (n > q)
 			throw RTE_LOC;
 		if (q % n != 0)
@@ -96,16 +94,14 @@ namespace osuCrypto
 		if (psi.pow(2 * n) != 1)
 			throw RTE_LOC;
 
+		if (depth == 0 && isPrimRootOfUnity(2 * n, psi) == false)
+			throw std::invalid_argument("NTT root must be primitive for the doubled transform order. " LOCATION);
+
 		if (n == 1)
 		{
 			aHat[0] = a[0];
 			return;
 		}
-
-#ifndef NDEBUG
-		if (isPrimRootOfUnity(2 * n, psi) == false)
-			throw RTE_LOC;
-#endif
 
 		std::vector<F> A(n / 2), B(n / 2);
 		for (u64 i = 0; i < A.size(); ++i)
@@ -186,27 +182,22 @@ namespace osuCrypto
 	}
 
 
-	// Pre-compute powers of a primitive 2n-th root of unity.
+	// Pre-compute one full power table. psi must have order roots.size().
 	template<typename F>
 	void nttPrecomputeRootsOfUnity(const F& psi, span<F> roots)
 	{
 		auto n = roots.size();
-		auto ln = log2ceil(n);
+		checkedNttLogSize(n);
 		auto qq = F::order() - 1;
 		auto q = static_cast<std::conditional_t<(sizeof(decltype(qq)) < sizeof(u64)), u64, decltype(qq)>>(qq);
-		if (n != 1ull << ln)
-			throw RTE_LOC;
 		if (n > q)
 			throw RTE_LOC;
 		if (q % n != 0)
 			throw RTE_LOC;
-		if (psi.pow(2 * n) != 1)
+		if (psi.pow(n) != 1)
 			throw RTE_LOC;
-#ifndef NDEBUG
-		if (isPrimRootOfUnity(2 * n, psi) == false)
-			throw RTE_LOC;
-#endif
-
+		if (isPrimRootOfUnity(n, psi) == false)
+			throw std::invalid_argument("Precomputed NTT root must be primitive for the output span size. " LOCATION);
 		//auto logn = log2ceil(n);
 		F root = F(1);
 		for (u64 i = 0; i < n; ++i)
@@ -220,8 +211,7 @@ namespace osuCrypto
 	// w must be powers of ψ: w[k] = ψ^k, with size >= 2*n.
 	template<typename F>
 	void getNegWrapRoots(span<const F> w, span<F> T, uint64_t n) {
-		const uint64_t ln = log2ceil(n);
-		if ((1ull << ln) != n)           throw RTE_LOC;           // n must be power of two
+		const uint64_t ln = checkedNttLogSize(n);
 		if (w.size() < 2 * n)            throw RTE_LOC;           // need ψ^k for k∈[0,2n)
 
 		if (T.size() < n - 1)            throw RTE_LOC;           // need n-1 twiddles
@@ -247,6 +237,7 @@ namespace osuCrypto
 	template<typename F>
 	std::vector<F> getNegWrapRoots(span<const F> w, uint64_t n)
 	{
+		checkedNttLogSize(n);
 		std::vector<F> T(n - 1);
 		getNegWrapRoots<F>(w, T, n);
 		return T;
@@ -292,12 +283,12 @@ namespace osuCrypto
 		SF* __restrict wPtr = w.data();
 
 		u64 n = a.size();
-		auto ln = log2ceil(n);
-		if (n != 1ull << ln)
-			throw RTE_LOC;
+		checkedNttLogSize(n);
 		if (w.size() != n - 1)
 			throw std::runtime_error("expecting the n-1 roots that are specific to the negcyclic ntt. "
 				"obtain them by calling nttPrecomputeRootsOfUnity(...) and getNegWrapRoots(...)." LOCATION);
+		if (n == 1)
+			return;
 
 #ifndef NDEBUG
 		{
@@ -379,20 +370,19 @@ namespace osuCrypto
 	// aHat are the evaluations
 	// psi is the 2n-th root of unity where n is the length of a and aHat.
 	template<typename F>
-	void inttNegWrapGs(
+	void inttNegWrapGsImpl(
 		span<F> a,
 		span<const F> aHat,
 		const F& psi,
-		NttOrder inputOrder)
+		NttOrder inputOrder,
+		u64 depth)
 	{
 		auto n = a.size();
 		if (aHat.size() != n)
 			throw std::invalid_argument("inverse NTT input and output spans must have equal lengths. " LOCATION);
-		auto ln = log2ceil(n);
+		auto ln = checkedNttLogSize(n);
 		auto qq = F::order() - 1;
 
-		if (n != 1ull << ln)
-			throw RTE_LOC;
 		if (n > qq)
 			throw RTE_LOC;
 		if (qq % n != 0)
@@ -403,16 +393,14 @@ namespace osuCrypto
 		if (inputOrder != NttOrder::BitReversedOrder)
 			throw RTE_LOC;
 
+		if (depth == 0 && isPrimRootOfUnity(2 * n, psi) == false)
+			throw std::invalid_argument("Inverse NTT root must be primitive for the doubled transform order. " LOCATION);
+
 		if (n == 1)
 		{
 			a[0] = aHat[0];
 			return;
 		}
-
-#ifndef NDEBUG
-		if (isPrimRootOfUnity(2 * n, psi) == false)
-			throw RTE_LOC;
-#endif
 
 		span<const F>
 			AHat = aHat.subspan(0, n / 2),
@@ -420,8 +408,8 @@ namespace osuCrypto
 
 		std::vector<F> A(n / 2), B(n / 2);
 		auto psi2 = psi * psi;
-		inttNegWrapGs<F>(A, AHat, psi2, NttOrder::BitReversedOrder);
-		inttNegWrapGs<F>(B, BHat, psi2, NttOrder::BitReversedOrder);
+		inttNegWrapGsImpl<F>(A, AHat, psi2, NttOrder::BitReversedOrder, depth + 1);
+		inttNegWrapGsImpl<F>(B, BHat, psi2, NttOrder::BitReversedOrder, depth + 1);
 
 		// Pre‑compute descending powers psi^{2n‑2i}
 		F psiPow = psi.pow(2 * n - 2);        // when i=0
@@ -433,6 +421,16 @@ namespace osuCrypto
 			a[2 * i + 1] = (A[i] - B[i]) * psiPow; //  (A_i - B_i) * psi^{2n-2i}
 			psiPow *= psiStepInv;           // next power
 		}
+	}
+
+	template<typename F>
+	void inttNegWrapGs(
+		span<F> a,
+		span<const F> aHat,
+		const F& psi,
+		NttOrder inputOrder)
+	{
+		inttNegWrapGsImpl<F>(a, aHat, psi, inputOrder, 0);
 	}
 
 
