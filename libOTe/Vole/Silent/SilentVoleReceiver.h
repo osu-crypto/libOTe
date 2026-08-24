@@ -129,7 +129,7 @@ namespace osuCrypto
 		u64 mNumPartitions = 0;
 
 		// What type of Base OTs should be performed.
-		SilentBaseType mBaseType;
+		SilentBaseType mBaseType = SilentBaseType::BaseExtend;
 
 		// The matrix multiplication type which compresses the sparse vector
 		MultType mLpnMultType = DefaultMultType;
@@ -1120,6 +1120,15 @@ namespace osuCrypto
 		mBaseA = {};
 		mBaseC = {};
 		std::visit([](auto& gen) {gen.clear(); }, mGenVar);
+		mState = State::Default;
+		mRequestSize = 0;
+		mNoiseVecSize = 0;
+		mNumPartitions = 0;
+		mSizePer = 0;
+		mSecParam = 0;
+		mCodeSeed = ZeroBlock;
+		mMalCheckSeed.reset();
+		mDerandomizeMalCheck = false;
 	}
 
 }

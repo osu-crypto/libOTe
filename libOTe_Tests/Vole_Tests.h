@@ -17,4 +17,6 @@ void Vole_Silent_BlkAcc_test(const oc::CLP& cmd);
 void Vole_Silent_Tungsten_test(const oc::CLP& cmd);
 void Vole_Silent_baseOT_test(const oc::CLP& cmd);
 void Vole_Silent_mal_test(const oc::CLP& cmd);
+void Vole_Silent_malBase_test(const oc::CLP& cmd);
+void Vole_Silent_Clear_test(const oc::CLP& cmd);
 void Vole_Silent_Rounds_test(const oc::CLP& cmd);

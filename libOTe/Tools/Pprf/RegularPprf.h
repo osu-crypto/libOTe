@@ -606,19 +606,20 @@ namespace osuCrypto
 			if (choices.size() != baseOtCount())
 				throw RTE_LOC;
 
-			mBaseChoices.resize(mPntCount, mDepth);
+			// Validate every encoded point before changing the active paths.
 			for (u64 i = 0; i < mPntCount; ++i)
 			{
 				u64 idx = 0;
 				for (u64 j = 0; j < mDepth; ++j)
-				{
-					mBaseChoices(i, j) = choices[mDepth * i + j];
 					idx |= u64(choices[mDepth * i + j]) << j;
-				}
 
 				if (idx >= mDomain)
 					throw std::runtime_error("provided choice bits index outside of the domain." LOCATION);
 			}
+
+			mBaseChoices.resize(mPntCount, mDepth);
+			for (u64 i = 0; i < mBaseChoices.size(); ++i)
+				mBaseChoices(i) = choices[i];
 		}
 
 

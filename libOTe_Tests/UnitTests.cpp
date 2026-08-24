@@ -233,6 +233,7 @@ namespace tests_libOTe
 			tc.add("OtExt_Silent_stationary_Test            ", OtExt_Silent_stationary_Test);
 			tc.add("OtExt_Silent_baseOT_Test                ", OtExt_Silent_baseOT_Test);
 			tc.add("OtExt_Silent_mal_Test                   ", OtExt_Silent_mal_Test);
+			tc.add("OtExt_Silent_AuditState_Test            ", OtExt_Silent_AuditState_Test);
 
 			tc.add("OtExt_SoftSpokenSemiHonest_Test         ", OtExt_SoftSpokenSemiHonest_Test);
 			tc.add("OtExt_SoftSpokenSemiHonest_Split_Test   ", OtExt_SoftSpokenSemiHonest_Split_Test);
@@ -251,6 +252,8 @@ namespace tests_libOTe
 			
 			tc.add("Vole_Silent_baseOT_test                 ", Vole_Silent_baseOT_test);
 			tc.add("Vole_Silent_mal_test                    ", Vole_Silent_mal_test);
+			tc.add("Vole_Silent_malBase_test                ", Vole_Silent_malBase_test);
+			tc.add("Vole_Silent_Clear_test                  ", Vole_Silent_Clear_test);
 			tc.add("Vole_Silent_Rounds_test                 ", Vole_Silent_Rounds_test);
 
 			tc.add("NcoOt_Kkrt_Test                         ", NcoOt_Kkrt_Test);

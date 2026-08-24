@@ -69,11 +69,14 @@ namespace osuCrypto
 		if (isConfigured() == false)
 			throw std::runtime_error("configure(...) must be called first.");
 
-		// Validate input sizes
-		if (static_cast<u64>(recvBaseOts.size()) != baseCount().mBaseOtCount)
+		// Validate every input before installing any base state.
+		auto count = baseCount();
+		if (static_cast<u64>(recvBaseOts.size()) != count.mBaseOtCount)
 			throw std::runtime_error("wrong number of silent base OTs");
+		if (choices.size() != count.mBaseOtCount)
+			throw std::runtime_error("wrong number of silent base OT choices");
 
-		if (baseA.size() != baseCount().mBaseVoleCount || baseC.size() != baseCount().mBaseVoleCount)
+		if (baseA.size() != count.mBaseVoleCount || baseC.size() != count.mBaseVoleCount)
 			throw std::runtime_error("wrong number of silent base VOLEs");
 
 		// Split base OTs into PPRF OTs and malicious check OTs
@@ -123,6 +126,11 @@ namespace osuCrypto
 		if (!mOtExtRecver)
 			throw RTE_LOC;
 		ptr->mOtExtRecver = mOtExtRecver->splitBase();
+		ptr->mNumThreads = mNumThreads;
+		ptr->mLpnMultType = mLpnMultType;
+		ptr->mSecurityType = mSecurityType;
+		ptr->mNoiseDist = mNoiseDist;
+		ptr->mDebug = mDebug;
 		return ret;
 #else
 		throw std::runtime_error("softSpoken ot must be enabled. " LOCATION);
@@ -136,7 +144,16 @@ namespace osuCrypto
 	// Checks if the required base correlations are available
 	bool SilentOtExtReceiver::hasBaseCors() const
 	{
-		return gen().hasBaseOts() && mBaseA.size() == baseCount().mBaseVoleCount;
+		if (!isConfigured())
+			return false;
+
+		auto count = baseCount();
+		auto hasMalCheck = mSecurityType != SilentSecType::Malicious ||
+			(mMalCheckOts.size() == 128 && mMalCheckChoice.size() == 128);
+		return gen().hasBaseOts() &&
+			mBaseA.size() == count.mBaseVoleCount &&
+			mBaseC.size() == count.mBaseVoleCount &&
+			hasMalCheck;
 	}
 
 	// Samples the choice bits for base OTs
@@ -467,7 +484,7 @@ namespace osuCrypto
 		// Auto-configure if needed
 		if (isConfigured() == false)
 		{
-			configure(n, 2, mNumThreads, mSecurityType);
+			configure(n, 2, mNumThreads, mSecurityType, mNoiseDist, mLpnMultType);
 		}
 
 		if (n != mRequestNumOts)

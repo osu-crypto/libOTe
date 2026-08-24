@@ -647,7 +647,9 @@ namespace osuCrypto
 					//    = a - c * d
 					// a  = b + c * d
 					// 
-					mCtx.plus(mBaseB[mNumPartitions], mBaseB[mNumPartitions], diff[0]);
+					auto correction = mCtx.template make<F>();
+					mCtx.mul(correction, delta, diff[0]);
+					mCtx.plus(mBaseB[mNumPartitions], mBaseB[mNumPartitions], correction);
 				}
 				else throw RTE_LOC;
 			}
@@ -830,9 +832,18 @@ namespace osuCrypto
 	template<typename F, typename G, typename Ctx>
 	void SilentVoleSender<F, G, Ctx>::clear()
 	{
-		// Free all memory and reset the generator
+		// Free active protocol state and reset the generator.
 		mB = {};
+		mBaseB = {};
 		std::visit([](auto& gen) {gen.clear(); }, mGenVar);
+		mState = State::Default;
+		mRequestSize = 0;
+		mNoiseVecSize = 0;
+		mNumPartitions = 0;
+		mSizePer = 0;
+		mSecParam = 0;
+		mCodeSeed = ZeroBlock;
+		mDerandomizeMalCheck = false;
 	}
 
 }

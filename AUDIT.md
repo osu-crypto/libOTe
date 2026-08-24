@@ -463,3 +463,127 @@ Verification:
 - `NcoOt_OosMove_Test` checks the complete destination state.
 - The same test checks that the moved-from receiver has the default empty
   state.
+
+## AUD-014: Silent OT splits discarded the configured security policy
+
+Status: fixed
+
+Affected code:
+
+- `SilentOtExtSender::split()` and `SilentOtExtReceiver::split()`.
+- Automatic configuration in the Silent OT sender and receiver.
+
+Concern:
+
+A split child received only the base state of the underlying SoftSpoken
+extension. The child reverted to semi-honest security and the default noise,
+compression, thread, and debugging settings.
+
+Impact:
+
+Splitting a malicious Silent OT extender silently disabled its malicious
+consistency check. The child could also execute a different protocol variant
+from the parent.
+
+Resolution:
+
+Each split now preserves the parent's security and algorithm policy. The child
+remains unconfigured for an OT count. Automatic configuration uses the
+preserved noise and compression settings when the child first executes.
+
+Verification:
+
+- `OtExt_Silent_AuditState_Test` checks both sender and receiver children after
+  splitting malicious stationary instances with non-default settings.
+
+## AUD-015: Rejected Silent OT base choices could leave usable partial state
+
+Status: fixed
+
+Affected code:
+
+- `SilentOtExtReceiver::setBaseCors()` and `hasBaseCors()`.
+- `RegularPprfReceiver::setChoiceBits()`.
+
+Concern:
+
+The receiver did not validate the number of base-OT choices before installing
+PPRF state. A missing malicious-check suffix caused a later slice to fail after
+the PPRF base had been installed. The readiness check ignored the missing
+malicious and stationary components.
+
+Impact:
+
+A caller that caught the first exception could reuse an object that reported
+complete base state. The next malicious check could index an empty choice
+buffer.
+
+Resolution:
+
+The receiver validates every base-correlation dimension before mutation. Its
+readiness check now covers the PPRF, malicious check, and both stationary VOLE
+vectors. PPRF point encodings are also validated before active paths change.
+
+Verification:
+
+- `OtExt_Silent_AuditState_Test` supplies a malicious base-choice vector that
+  omits the 128 check choices. The call fails without making the receiver ready.
+
+## AUD-016: Silent VOLE checksum derandomization omitted the correlation
+
+Status: fixed
+
+Affected code:
+
+- The external-base derandomization path in `SilentVoleSender::silentSendInplace()`.
+
+Concern:
+
+Let the receiver's coefficient correction be `diff = c' - c`. The sender must
+adjust its base share by `diff * delta`. The implementation added `diff`
+without multiplying by the sender's correlation `delta`.
+
+Impact:
+
+Malicious Silent VOLE with externally supplied base correlations failed its
+consistency check except when the omitted multiplication had no effect.
+
+Resolution:
+
+The sender now multiplies the received coefficient correction by `delta`
+before updating the final base share.
+
+Verification:
+
+- `Vole_Silent_malBase_test` runs malicious Silent VOLE with externally
+  supplied base correlations for regular and stationary noise.
+
+## AUD-017: Silent VOLE clear operations retained active state
+
+Status: fixed
+
+Affected code:
+
+- `SilentVoleSender::clear()` and `SilentVoleReceiver::clear()`.
+
+Concern:
+
+Both clear operations reset their PPRF generators but retained a non-default
+protocol state and configured dimensions. The sender also retained its base
+VOLE share.
+
+Impact:
+
+A later execution observed `isConfigured() == true` and skipped configuration,
+although the generator no longer had matching dimensions or base state.
+
+Resolution:
+
+Both clear operations now reset the state tag, dimensions, base correlations,
+code seed, malicious-check state, and output buffers. The receiver's base type
+also has a defined initial value.
+
+Verification:
+
+- `Vole_Silent_Clear_test` populates active sender and receiver state, clears
+  both objects, and checks their complete inactive state.

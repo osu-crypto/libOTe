@@ -348,6 +348,55 @@ void Vole_Silent_mal_test(const oc::CLP& cmd)
 	}
 }
 
+void Vole_Silent_malBase_test(const oc::CLP& cmd)
+{
+	auto debug = cmd.isSet("debug");
+	for (auto noise : { SdNoiseDistribution::Regular, SdNoiseDistribution::Stationary })
+	{
+		Vole_Silent_test_impl<block, block, CoeffCtxGF128>(
+			4364, DefaultMultType, debug, true, true, noise);
+	}
+}
+
+void Vole_Silent_Clear_test(const oc::CLP&)
+{
+	using Sender = SilentVoleSender<block, block, CoeffCtxGF128>;
+	using Receiver = SilentVoleReceiver<block, block, CoeffCtxGF128>;
+
+	Sender sender;
+	Receiver receiver;
+	sender.configure(128, SilentSecType::Malicious, DefaultMultType,
+		SilentBaseType::BaseExtend, SdNoiseDistribution::Stationary);
+	receiver.configure(128, SilentSecType::Malicious, DefaultMultType,
+		SilentBaseType::BaseExtend, SdNoiseDistribution::Stationary);
+	sender.mB.resize(1);
+	sender.mBaseB.resize(1);
+	sender.mDerandomizeMalCheck = true;
+	receiver.mA.resize(1);
+	receiver.mC.resize(1);
+	receiver.mBaseA.resize(1);
+	receiver.mBaseC.resize(1);
+	receiver.mMalCheckSeed = OneBlock;
+	receiver.mDerandomizeMalCheck = true;
+
+	sender.clear();
+	receiver.clear();
+
+	if (sender.mState != Sender::State::Default || sender.isConfigured() ||
+		sender.mRequestSize || sender.mNoiseVecSize || sender.mNumPartitions ||
+		sender.mSizePer || sender.mSecParam || sender.mCodeSeed != ZeroBlock ||
+		!sender.mB.empty() || !sender.mBaseB.empty() || sender.mDerandomizeMalCheck)
+		throw RTE_LOC;
+
+	if (receiver.mState != Receiver::State::Default || receiver.isConfigured() ||
+		receiver.mRequestSize || receiver.mNoiseVecSize || receiver.mNumPartitions ||
+		receiver.mSizePer || receiver.mSecParam || receiver.mCodeSeed != ZeroBlock ||
+		!receiver.mA.empty() || !receiver.mC.empty() || !receiver.mBaseA.empty() ||
+		!receiver.mBaseC.empty() || receiver.mMalCheckSeed.has_value() ||
+		receiver.mDerandomizeMalCheck)
+		throw RTE_LOC;
+}
+
 
 inline u64 eval(
 	macoro::task<>& t1, macoro::task<>& t0,
@@ -531,6 +580,8 @@ void Vole_Silent_paramSweep_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_defaultMatrixRank_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_baseOT_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_mal_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_malBase_test(const oc::CLP& cmd) { throwDisabled(); }
+void Vole_Silent_Clear_test(const oc::CLP& cmd) { throwDisabled(); }
 void Vole_Silent_Rounds_test(const oc::CLP& cmd) { throwDisabled(); }
 
 

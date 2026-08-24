@@ -1112,3 +1112,64 @@ void OtExt_Silent_mal_Test(const oc::CLP& cmd)
     throw UnitTestSkipped("ENABLE_SILENTOT not defined.");
 #endif
 }
+
+void OtExt_Silent_AuditState_Test(const oc::CLP& cmd)
+{
+#if defined(ENABLE_SILENTOT) && defined(ENABLE_SOFTSPOKEN_OT)
+    PRNG prng(toBlock(cmd.getOr("seed", 0)));
+
+    SilentOtExtSender sender;
+    SilentOtExtReceiver receiver;
+    sender.configure(128, 2, 3, SilentSecType::Malicious,
+        SdNoiseDistribution::Stationary, MultType::ExConv21x24);
+    receiver.configure(128, 2, 3, SilentSecType::Malicious,
+        SdNoiseDistribution::Stationary, MultType::ExConv21x24);
+    sender.mDebug = true;
+    receiver.mDebug = true;
+
+    BitVector senderBaseChoices(sender.baseOtCount());
+    senderBaseChoices.randomize(prng);
+    std::vector<block> senderBase(senderBaseChoices.size());
+    prng.get(senderBase.data(), senderBase.size());
+    sender.setBaseOts(senderBase, senderBaseChoices);
+
+    std::vector<std::array<block, 2>> receiverBase(receiver.baseOtCount());
+    prng.get(receiverBase.data(), receiverBase.size());
+    receiver.setBaseOts(receiverBase);
+
+    auto senderChildBase = sender.split();
+    auto receiverChildBase = receiver.split();
+    auto senderChild = dynamic_cast<SilentOtExtSender*>(senderChildBase.get());
+    auto receiverChild = dynamic_cast<SilentOtExtReceiver*>(receiverChildBase.get());
+    if (!senderChild || !receiverChild ||
+        senderChild->mSecurityType != SilentSecType::Malicious ||
+        receiverChild->mSecurityType != SilentSecType::Malicious ||
+        senderChild->mNoiseDist != SdNoiseDistribution::Stationary ||
+        receiverChild->mNoiseDist != SdNoiseDistribution::Stationary ||
+        senderChild->mLpnMultType != MultType::ExConv21x24 ||
+        receiverChild->mLpnMultType != MultType::ExConv21x24 ||
+        senderChild->mNumThreads != 3 || receiverChild->mNumThreads != 3 ||
+        !senderChild->mDebug || !receiverChild->mDebug)
+        throw RTE_LOC;
+
+    SilentOtExtReceiver invalidReceiver;
+    invalidReceiver.configure(128, 2, 1, SilentSecType::Malicious);
+    auto count = invalidReceiver.baseCount();
+    auto shortChoices = invalidReceiver.sampleBaseChoiceBits(prng);
+    std::vector<block> baseOts(count.mBaseOtCount);
+    bool threw = false;
+    try
+    {
+        invalidReceiver.setBaseCors(baseOts, shortChoices, {}, {});
+    }
+    catch (const std::exception&)
+    {
+        threw = true;
+    }
+
+    if (!threw || invalidReceiver.hasBaseCors())
+        throw RTE_LOC;
+#else
+    throw UnitTestSkipped("ENABLE_SILENTOT and ENABLE_SOFTSPOKEN_OT are required.");
+#endif
+}

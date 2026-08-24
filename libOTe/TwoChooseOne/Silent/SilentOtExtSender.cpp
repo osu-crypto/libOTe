@@ -45,6 +45,11 @@ namespace osuCrypto
 		if (!mOtExtSender)
 			throw RTE_LOC;
 		ptr->mOtExtSender = mOtExtSender->splitBase();
+		ptr->mNumThreads = mNumThreads;
+		ptr->mLpnMultType = mLpnMultType;
+		ptr->mSecurityType = mSecurityType;
+		ptr->mNoiseDist = mNoiseDist;
+		ptr->mDebug = mDebug;
 		return ret;
 #else
 		throw std::runtime_error("softspoken must be enabled. " LOCATION);
@@ -471,7 +476,7 @@ namespace osuCrypto
 
 		// Auto-configure if needed
 		if (isConfigured() == false)
-			configure(n, 2, mNumThreads, mSecurityType);
+			configure(n, 2, mNumThreads, mSecurityType, mNoiseDist, mLpnMultType);
 
 		if (n != mRequestNumOts)
 			throw std::invalid_argument("n != mRequestNumOts " LOCATION);
