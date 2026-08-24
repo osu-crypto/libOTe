@@ -68,6 +68,7 @@ namespace tests_libOTe
 			tc.add("EACode_weight_test                      ", EACode_weight_test);
 
 			tc.add("ExConvCode_encode_basic_test            ", ExConvCode_encode_basic_test);
+			tc.add("ExConvCode_Audit_Test                   ", ExConvCode_Audit_Test);
 			tc.add("ExConvCode_weight_test                  ", ExConvCode_weight_test);
 
 			tc.add("TungstenCode_encode_test                ", TungstenCode_encode_test);

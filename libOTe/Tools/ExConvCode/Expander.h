@@ -10,6 +10,7 @@
 #include "cryptoTools/Common/Range.h"
 #include "libOTe/Tools/LDPC/Mtx.h"
 #include "libOTe/Tools/EACode/Util.h"
+#include <stdexcept>
 
 namespace osuCrypto
 {
@@ -28,6 +29,19 @@ namespace osuCrypto
             bool regularExpander = true,
             block seed = block(33333, 33333))
         {
+			if (messageSize == 0)
+				throw std::invalid_argument("Expander message size must be nonzero. " LOCATION);
+			if (codeSize == 0)
+				throw std::invalid_argument("Expander code size must be nonzero. " LOCATION);
+			if (expanderWeight == 0)
+				throw std::invalid_argument("Expander weight must be nonzero. " LOCATION);
+			if (regularExpander)
+			{
+				const auto regularWeight = expanderWeight - expanderWeight / 2;
+				if (regularWeight > codeSize)
+					throw std::invalid_argument("Expander regular weight exceeds its code size. " LOCATION);
+			}
+
             mMessageSize = messageSize;
             mCodeSize = codeSize;
             mExpanderWeight = expanderWeight;
@@ -213,31 +227,51 @@ namespace osuCrypto
         auto main = mMessageSize / 8 * 8;
         u64 i = 0;
 
-        u64 step = mRegular ? mCodeSize / mExpanderWeight : 0;
-        detail::ExpanderModd prng(mSeed, mRegular ? mCodeSize / mExpanderWeight : mCodeSize);
+		u64 reg = 0, uni = mExpanderWeight, step = 0;
+		detail::ExpanderModd uniGen(mSeed, mCodeSize), regGen;
+		if (mRegular)
+		{
+			uni = mExpanderWeight / 2;
+			reg = mExpanderWeight - uni;
+			step = mCodeSize / reg;
+			regGen.init(mSeed ^ block(342342134, 23421341), step);
+		}
 
         for (; i < main; i += 8)
         {
-            for (auto j = 0ull; j < mExpanderWeight; ++j)
+			for (auto j = 0ull; j < reg; ++j)
             {
-                ret(i + 0, j) = prng.get() + step * j;
-                ret(i + 1, j) = prng.get() + step * j;
-                ret(i + 2, j) = prng.get() + step * j;
-                ret(i + 3, j) = prng.get() + step * j;
-                ret(i + 4, j) = prng.get() + step * j;
-                ret(i + 5, j) = prng.get() + step * j;
-                ret(i + 6, j) = prng.get() + step * j;
-                ret(i + 7, j) = prng.get() + step * j;
-
+				ret(i + 0, j) = regGen.get() + step * j;
+				ret(i + 1, j) = regGen.get() + step * j;
+				ret(i + 2, j) = regGen.get() + step * j;
+				ret(i + 3, j) = regGen.get() + step * j;
+				ret(i + 4, j) = regGen.get() + step * j;
+				ret(i + 5, j) = regGen.get() + step * j;
+				ret(i + 6, j) = regGen.get() + step * j;
+				ret(i + 7, j) = regGen.get() + step * j;
             }
+
+			for (auto j = 0ull; j < uni; ++j)
+			{
+				ret(i + 0, reg + j) = uniGen.get();
+				ret(i + 1, reg + j) = uniGen.get();
+				ret(i + 2, reg + j) = uniGen.get();
+				ret(i + 3, reg + j) = uniGen.get();
+				ret(i + 4, reg + j) = uniGen.get();
+				ret(i + 5, reg + j) = uniGen.get();
+				ret(i + 6, reg + j) = uniGen.get();
+				ret(i + 7, reg + j) = uniGen.get();
+			}
         }
 
         for (; i < mMessageSize; ++i)
         {
-            for (auto j = 0ull; j < mExpanderWeight; ++j)
+			for (auto j = 0ull; j < reg; ++j)
             {
-                ret(i, j) = prng.get() + step * j;
+				ret(i, j) = regGen.get() + step * j;
             }
+			for (auto j = 0ull; j < uni; ++j)
+				ret(i, reg + j) = uniGen.get();
         }
 
         return ret;

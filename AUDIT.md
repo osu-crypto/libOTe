@@ -2231,3 +2231,198 @@ Verification:
 - `TungstenCode_Audit_Test` covers reversed and unsupported dimensions, an
   oversized chunk domain, and transactional preservation of a prior valid
   configuration.
+
+## AUD-070: ExConv dimensions could underflow accumulator indexing
+
+Status: fixed
+
+Affected code:
+
+- `ExConvCode::config()` and `ExConvCode::accumulateFixed()`.
+
+Concern:
+
+The default code-size calculation could overflow, a systematic code could
+subtract a larger message size, and an accumulator at least as large as its
+working region underflowed the unchecked-loop boundary. An accumulator wider
+than the fixed PRNG coefficient buffer also formed a pointer before that
+buffer.
+
+Impact:
+
+Invalid use of the public code API could produce out-of-bounds reads and
+writes. Protocol-selected ExConv7x24 and ExConv21x24 parameters were within the
+supported domain.
+
+Resolution:
+
+Configuration now separately validates the default-size multiplication,
+nonzero message size, systematic dimension ordering, accumulator working
+region, and the 32768-bit coefficient-buffer limit. It configures a temporary
+expander and commits state only after every check succeeds.
+
+Verification:
+
+- `ExConvCode_Audit_Test` covers every invalid dimension class and confirms
+  that a rejected reconfiguration preserves prior live state.
+
+## AUD-071: Expander configuration admitted zero moduli
+
+Status: fixed
+
+Affected code:
+
+- `ExpanderCode::config()` as used by ExConv and EACode.
+
+Concern:
+
+Zero message or code sizes underflowed iterator probes, zero weight divided by
+zero in regular mode, and a regular half-weight larger than the code size
+produced a zero region modulus.
+
+Impact:
+
+Invalid local configuration could cause undefined behavior or division by
+zero. Standard ExConv and EACode configurations use positive, supported
+parameters.
+
+Resolution:
+
+The expander now individually requires positive dimensions and weight. A
+regular expander additionally requires its regular half-weight to fit within
+the code size. Validation precedes all state mutation.
+
+Verification:
+
+- `ExConvCode_Audit_Test` covers zero dimensions, zero weight, an oversized
+  regular weight, and a valid tail-bearing regular expander.
+
+## AUD-072: The regular expander matrix described a different code
+
+Status: fixed
+
+Affected code:
+
+- `ExpanderCode::getMatrix()`.
+
+Concern:
+
+The encoder split its weight between separately seeded regular and uniform
+edges, while the matrix helper generated every edge as regular from one seed.
+
+Impact:
+
+Protocol output was unaffected, but verbose weight diagnostics and any caller
+using the helper as a code-analysis oracle observed the wrong matrix.
+
+Resolution:
+
+The helper now uses the encoder's exact regular/uniform split, seeds, region
+width, batching order, and tail order. The optimized eight-way encoding loop
+is unchanged.
+
+Verification:
+
+- `ExConvCode_Audit_Test` compares matrix-derived output with optimized integer
+  encoding across both a full eight-row batch and a scalar tail.
+
+## AUD-073: Quasi-cyclic configuration admitted unsafe dimensions
+
+Status: fixed
+
+Affected code:
+
+- `QuasiCyclicCode::init2()` and `QuasiCyclicCode::dualEncode()`.
+
+Concern:
+
+Reversed dimensions underflowed the parity length, equal dimensions reached
+FFT decoding without initializing the product polynomial, and polynomial or
+transpose dimension products could wrap.
+
+Impact:
+
+Invalid use of the public code API could request enormous allocations or
+reach undefined behavior. Silent protocol configuration uses an expanding
+code with valid dimensions.
+
+Resolution:
+
+Initialization now requires a positive message size and a strictly larger code
+size. It computes the prime and all polynomial dimensions in temporaries,
+checks each product against its consumer's range, and commits state only after
+validation succeeds.
+
+Verification:
+
+- The bitpolymul-enabled `ExConvCode_Audit_Test` rejects zero, equal, and
+  reversed dimensions and checks transactional state preservation.
+- Existing quasi-cyclic unit and Silent OT tests pass with bitpolymul enabled.
+
+## AUD-074: Quasi-cyclic bit utilities accepted unsafe domains
+
+Status: fixed
+
+Affected code:
+
+- `QuasiCyclicCode::bitShiftXor()` and `QuasiCyclicCode::modp()`.
+
+Concern:
+
+A shifted empty input underflowed `in.size() - 1` and could be read out of
+bounds. A zero polynomial modulus divided by zero, and ceiling and span-length
+arithmetic could wrap.
+
+Impact:
+
+Malformed direct calls to these public helpers could cause out-of-bounds reads
+or arithmetic faults. Internal quasi-cyclic encoding supplied valid inputs.
+
+Resolution:
+
+The helpers reject missing shifted input and a zero modulus. Ceiling divisions
+now use subtraction-based forms, input and output length products have explicit
+bounds, and loop endpoints are formed from a checked remaining length.
+
+Verification:
+
+- The bitpolymul-enabled `ExConvCode_Audit_Test` covers empty shifted input and
+  a zero modulus.
+- Existing bit-shift and polynomial-reduction differential tests pass.
+
+## AUD-075: Quasi-cyclic prime selection was randomized at 40-bit confidence
+
+Status: fixed
+
+Affected code:
+
+- `isPrime()` and `nextPrime()` in `Tools.cpp`.
+
+Concern:
+
+Prime selection used 20 randomized Miller--Rabin trials with independently
+seeded PRNGs. A composite could therefore be accepted with roughly 40-bit
+confidence, potentially selecting different moduli at the two parties. The
+modular products also wrapped above the 32-bit protocol range, and prime search
+could wrap at the end of the 64-bit domain.
+
+Impact:
+
+The low-probability acceptance of a composite could invalidate the
+quasi-cyclic algebraic assumptions or make the parties disagree. Direct
+64-bit callers received unreliable primality answers for large candidates.
+
+Resolution:
+
+Primality testing now uses the deterministic seven-witness Miller--Rabin test
+that is exact over the full 64-bit domain. Modular multiplication has an
+ordinary fast path when the product fits and an overflow-safe double-and-add
+path otherwise. Prime search advances over odd candidates and throws before
+the domain can wrap; the legacy PRNG and round-count parameters remain only
+for source compatibility.
+
+Verification:
+
+- `ExConvCode_Audit_Test` checks a strong pseudoprime, the largest 64-bit
+  prime, `UINT64_MAX`, known next-prime output, and exhaustion at the domain
+  boundary.

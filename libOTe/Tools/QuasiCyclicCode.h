@@ -21,6 +21,8 @@
 #include "LDPC/Mtx.h"
 #include "libOTe/TwoChooseOne/TcoOtDefines.h"
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 
 namespace osuCrypto
 {
@@ -51,8 +53,25 @@ namespace osuCrypto
 
         void init2(u64 messageSize, u64 codeSize, block seed = block(4321234327842623191,423723984231774321))
         {
+			if (messageSize == 0)
+				throw std::invalid_argument("Quasi-cyclic message size must be nonzero. " LOCATION);
+			if (codeSize <= messageSize)
+				throw std::invalid_argument("Quasi-cyclic code size must exceed its message size. " LOCATION);
+
+			const auto primeModulus = nextPrime(messageSize);
+			const auto paritySize = codeSize - messageSize;
+			const auto scalerMinusOne = 1 + (paritySize - 1) / primeModulus;
+			const auto polyBlockSize = 1 + (primeModulus - 1) / 128;
+			if (scalerMinusOne > std::numeric_limits<u64>::max() / polyBlockSize)
+				throw std::invalid_argument("Quasi-cyclic polynomial dimensions overflow. " LOCATION);
+			const auto multiPolyBlockSize = scalerMinusOne * polyBlockSize;
+			if (multiPolyBlockSize > std::numeric_limits<u64>::max() / 128)
+				throw std::invalid_argument("Quasi-cyclic transpose dimensions overflow. " LOCATION);
+			if (polyBlockSize > std::numeric_limits<i64>::max() / 2)
+				throw std::invalid_argument("Quasi-cyclic polynomial exceeds the FFT interface. " LOCATION);
+
             mMessageSize = messageSize;
-            mPrimeModulus = nextPrime(messageSize);
+			mPrimeModulus = primeModulus;
             mCodeSize = codeSize;
             mSeed = seed;
         }
@@ -63,6 +82,10 @@ namespace osuCrypto
                 throw RTE_LOC;
             if (u64(in.data()) % 16)
                 throw RTE_LOC;
+			if (dest.empty())
+				return;
+			if (in.empty())
+				throw std::invalid_argument("Shifted input must be nonempty. " LOCATION);
 
             if (bitShift >= 64)
             {
@@ -146,8 +169,15 @@ namespace osuCrypto
 
         static void modp(span<block> dest, span<block> in, u64 p)
         {
-            auto pBlocks = (p + 127) / 128;
-            auto pBytes = (p + 7) / 8;
+			if (p == 0)
+				throw std::invalid_argument("Polynomial modulus must be nonzero. " LOCATION);
+			if (in.size() > std::numeric_limits<u64>::max() / 128)
+				throw std::invalid_argument("Polynomial input bit length overflows. " LOCATION);
+			if (dest.size() > std::numeric_limits<u64>::max() / sizeof(block))
+				throw std::invalid_argument("Polynomial output byte length overflows. " LOCATION);
+
+			const auto pBlocks = 1 + (p - 1) / 128;
+			const auto pBytes = 1 + (p - 1) / 8;
 
             if (static_cast<u64>(dest.size()) < pBlocks)
                 throw RTE_LOC;
@@ -155,18 +185,19 @@ namespace osuCrypto
             if (static_cast<u64>(in.size()) < pBlocks)
                 throw RTE_LOC;
 
-            auto count = (in.size() * 128 + p - 1) / p;
+			const auto inputBits = in.size() * 128;
+			const auto count = 1 + (inputBits - 1) / p;
 
             memcpy(dest.data(), in.data(), pBytes);
 
             for (u64 i = 1; i < count; ++i)
             {
                 auto begin = i * p;
-                auto end = std::min<u64>(i * p + p, in.size() * 128);
+				auto end = begin + std::min<u64>(p, inputBits - begin);
 
                 auto shift = begin & 127;
                 auto beginBlock = in.data() + (begin / 128);
-                auto endBlock = in.data() + ((end + 127) / 128);
+				auto endBlock = in.data() + end / 128 + (end % 128 != 0);
 
                 if (endBlock > in.data() + in.size())
                     throw RTE_LOC;

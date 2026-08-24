@@ -72,6 +72,8 @@ namespace osuCrypto {
     //    c2 = _mm_xor_si128(c2, c5);
     //}
     class PRNG;
+	// Exact over the 64-bit domain. The PRNG and round count are retained for
+	// source compatibility with the former randomized implementation.
     bool isPrime(u64 n, PRNG& prng, u64 k = 20);
     bool isPrime(u64 n);
     u64 nextPrime(u64 n);

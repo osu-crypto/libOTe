@@ -17,15 +17,44 @@
 #include <cryptoTools/Common/Log.h>
 #include "libOTe/Tools/Tools.h"
 #include "cryptoTools/Common/Aligned.h"
+#include <limits>
+#include <stdexcept>
 using std::array;
 
 namespace osuCrypto {
 
+	namespace
+	{
+		u64 addMod(u64 x, u64 y, u64 modulus)
+		{
+			return x >= modulus - y ? x - (modulus - y) : x + y;
+		}
+
+		u64 mulMod(u64 x, u64 y, u64 modulus)
+		{
+			if (x == 0 || y <= std::numeric_limits<u64>::max() / x)
+				return (x * y) % modulus;
+
+			u64 result = 0;
+			while (y)
+			{
+				if (y & 1)
+					result = addMod(result, x, modulus);
+				y >>= 1;
+				if (y)
+					x = addMod(x, x, modulus);
+			}
+			return result;
+		}
+	}
 
 	// Utility function to do modular exponentiation.
 	// It returns (x^y) % p
 	u64 power(u64 x, u64 y, u64 p)
 	{
+		if (p == 0)
+			throw std::invalid_argument("Modular exponentiation requires a nonzero modulus. " LOCATION);
+
 		u64 res = 1;      // Initialize result
 		x = x % p;  // Update x if it is more than or
 		// equal to p
@@ -33,85 +62,92 @@ namespace osuCrypto {
 		{
 			// If y is odd, multiply x with result
 			if (y & 1)
-				res = (res * x) % p;
+				res = mulMod(res, x, p);
 
 			// y must be even now
 			y = y >> 1; // y = y/2
-			x = (x * x) % p;
+			x = mulMod(x, x, p);
 		}
 		return res;
 	}
 
-	// This function is called for all k trials. It returns
-	// false if n is composite and returns false if n is
-	// probably prime.
-	// d is an odd number such that  d*2<sup>r</sup> = n-1
-	// for some r >= 1
-	bool millerTest(u64 d, PRNG& prng, u64 n)
+	namespace
 	{
-		// Pick a random number in [2..n-2]
-		// Corner cases make sure that n > 4
-		u64 a = 2 + prng.get<u64>() % (n - 4);
-
-		// Compute a^d % n
-		u64 x = power(a, d, n);
-
-		if (x == 1 || x == n - 1)
-			return true;
-
-		// Keep squaring x while one of the following doesn't
-		// happen
-		// (i)   d does not reach n-1
-		// (ii)  (x^2) % n is not 1
-		// (iii) (x^2) % n is not n-1
-		while (d != n - 1)
+		bool isPrime64(u64 n)
 		{
-			x = (x * x) % n;
-			d *= 2;
-
-			if (x == 1)     return false;
-			if (x == n - 1) return true;
-		}
-
-		// Return composite
-		return false;
-	}
-
-	// It returns false if n is composite and returns true if n
-	// is probably prime.  k is an input parameter that determines
-	// accuracy level. Higher value of k indicates more accuracy.
-	bool isPrime(u64 n, PRNG& prng, u64 k)
-	{
-		// Corner cases
-		if (n <= 1 || n == 4)  return false;
-		if (n <= 3) return true;
-
-		// Find r such that n = 2^d * r + 1 for some r >= 1
-		u64 d = n - 1;
-		while (d % 2 == 0)
-			d /= 2;
-
-		// Iterate given nber of 'k' times
-		for (u64 i = 0; i < k; i++)
-			if (!millerTest(d, prng, n))
+			constexpr u64 smallPrimes[] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37 };
+			for (auto prime : smallPrimes)
+			{
+				if (n % prime == 0)
+					return n == prime;
+			}
+			if (n < 2)
 				return false;
 
-		return true;
+			u64 d = n - 1;
+			u64 shifts = 0;
+			while ((d & 1) == 0)
+			{
+				d >>= 1;
+				++shifts;
+			}
+
+			// This witness set is deterministic for every 64-bit integer.
+			constexpr u64 witnesses[] =
+				{ 2, 325, 9375, 28178, 450775, 9780504, 1795265022 };
+			for (auto witness : witnesses)
+			{
+				witness %= n;
+				if (witness == 0)
+					continue;
+
+				auto x = power(witness, d, n);
+				if (x == 1 || x == n - 1)
+					continue;
+
+				bool composite = true;
+				for (u64 r = 1; r < shifts; ++r)
+				{
+					x = mulMod(x, x, n);
+					if (x == n - 1)
+					{
+						composite = false;
+						break;
+					}
+				}
+				if (composite)
+					return false;
+			}
+			return true;
+		}
+	}
+
+	bool isPrime(u64 n, PRNG& prng, u64 k)
+	{
+		(void)prng;
+		(void)k;
+		return isPrime64(n);
 	}
 
 	bool isPrime(u64 n)
 	{
-		PRNG prng(oc::sysRandomSeed());
-		return isPrime(n, prng);
+		return isPrime64(n);
 	}
 
 
 	u64 nextPrime(u64 n)
 	{
-		PRNG prng(oc::sysRandomSeed());
-
-		while (isPrime(n, prng) == false)
+		if (n <= 2)
+			return 2;
+		if ((n & 1) == 0)
 			++n;
+
+		while (!isPrime64(n))
+		{
+			if (n > std::numeric_limits<u64>::max() - 2)
+				throw std::overflow_error("No 64-bit prime is at least the requested value. " LOCATION);
+			n += 2;
+		}
 		return n;
 	}
 
